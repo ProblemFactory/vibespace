@@ -34,7 +34,7 @@ const T0 = Date.now();
 process.setMaxListeners(64); // every world's stores register their own exit flush (≈ 1 per store × 18 worlds)
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -139,17 +139,17 @@ console.log('① the census');
   // CONTROLS: a planted writer per rule is caught
   const plant = (k, from, to) => { const T2 = TEXTS(); if (k.includes('/')) { T2.sessionFiles[k] = T2.sessionFiles[k].replace(from, to); } else T2[k] = T2[k].replace(from, to); return census(T2); };
   let c = plant('hosts', '\n  setLastRun(id, rec) {', '\n  sneak(id) {\n    this.get(id).exit = { use: { mode: \'nobody\' } };\n    this._save();\n  }\n  setLastRun(id, rec) {');
-  ok(c.some((x) => /hosts\.js sneak\(\)/.test(x)), 'CONTROL C1: a planted hosts.js method rewriting `exit` without _reachChanged is caught', c);
+  ok(verdictOf(c.some((x) => /hosts\.js sneak\(\)/.test(x))), 'CONTROL C1: a planted hosts.js method rewriting `exit` without _reachChanged is caught', c);
   c = plant('tasks', '\n  bind(id, sessionKey) {', '\n  sneakUnbind(id, key) {\n    const t = this.get(id);\n    t.sessions.splice(t.sessions.indexOf(key), 1);\n    this._save();\n  }\n  bind(id, sessionKey) {');
-  ok(c.some((x) => /task-groups\.js sneakUnbind\(\)/.test(x)), 'CONTROL C2: a planted Task Group unbind without _notify is caught', c);
+  ok(verdictOf(c.some((x) => /task-groups\.js sneakUnbind\(\)/.test(x))), 'CONTROL C2: a planted Task Group unbind without _notify is caught', c);
   c = plant('src/ws-handler.js', 'try { getExitProxy()?.onSessionEnd?.(session, data.sessionId); } catch { }', 'try { } catch { }');
-  ok(c.some((x) => /src\/ws-handler\.js:\d+ removes a session/.test(x)), 'CONTROL C3: the kill path without onSessionEnd is caught', c);
+  ok(verdictOf(c.some((x) => /src\/ws-handler\.js:\d+ removes a session/.test(x))), 'CONTROL C3: the kill path without onSessionEnd is caught', c);
   c = plant('src/server/stdout/acp-events.js', '              session.claudeSessionId = null;', '              session.claudeSessionId = null;\n' + '\n'.repeat(90) + '              session.backendSessionId = msg.sessionId + "x";');
-  ok(c.some((x) => /acp-events\.js:\d+ moves a live session's reach fact/.test(x)), 'CONTROL C4: a planted key write with no broadcast after it is caught', c);
+  ok(verdictOf(c.some((x) => /acp-events\.js:\d+ moves a live session's reach fact/.test(x))), 'CONTROL C4: a planted key write with no broadcast after it is caught', c);
   c = plant('server', "  try { exitProxy.rejudgeAll('sessions'); } catch { }", '  ;');
-  ok(c.some((x) => /broadcastActiveSessions does not call/.test(x)), 'CONTROL C4b: broadcastActiveSessions without the re-judge is caught', c);
+  ok(verdictOf(c.some((x) => /broadcastActiveSessions does not call/.test(x))), 'CONTROL C4b: broadcastActiveSessions without the re-judge is caught', c);
   c = plant('exit', "    await this.rejudgeAll('access-changed').done;", "    for (const k of [...this._asks.values()]) { if (k.hostId === hostId) this._settleAsk(k, 'denied', 'revoked'); }");
-  ok(c.some((x) => /setAccess\(\) does not end in this\.rejudgeAll/.test(x)) && c.some((x) => /setAccess\(\) runs a second ask re-judge loop/.test(x)), 'CONTROL C5: a setAccess with its own loop instead of THE ONE re-judge is caught', c);
+  ok(gateOf(c.some((x) => /setAccess\(\) does not end in this\.rejudgeAll/.test(x))) && verdictOf(c.some((x) => /setAccess\(\) runs a second ask re-judge loop/.test(x))), 'CONTROL C5: a setAccess with its own loop instead of THE ONE re-judge is caught', c);
 }
 
 // ════════════════════════════════ ② ONE RUNTIME LEG PER EVENT ════════════════════════════════
@@ -287,18 +287,18 @@ const EVENTS = [
 console.log('② one runtime leg per event (the REAL manager + stores, a live forward, a waiting ask)');
 for (const [name, spec] of EVENTS) {
   const r = await leg(name, spec);
-  ok(r.ok, `${name} ⇒ the open connection stops carrying bytes, ${spec.ask === false ? '' : `the ask settles ${spec.askCode || 'not_granted'} (item ${spec.resolvedBy || 'revoked'}), `}the row no longer lists it, its pair is refused`, r);
+  ok(verdictOf(r.ok), `${name} ⇒ the open connection stops carrying bytes, ${spec.ask === false ? '' : `the ask settles ${spec.askCode || 'not_granted'} (item ${spec.resolvedBy || 'revoked'}), `}the row no longer lists it, its pair is refused`, r);
 }
 // the events that must NOT withdraw
 {
   const r = await leg('a re-pair of the machine (a rotated dial token)', { expect: 'kept', ask: false,
     setup: (w, hid) => { w.sessions.set('w1', S('c1')); grantBoth(w, hid, [{ kind: 'session', id: 'claude:c1' }]); return 'w1'; },
     event: (w) => { const d = w.hosts.add({ name: 'Mac', transport: 'dial', deviceId: 'mac1' }); w.hosts.setDialToken('mac1', 'ab'.repeat(32)); w.hosts.setDialToken('mac1', 'cd'.repeat(32)); return d; } });
-  ok(r.ok, 'a RE-PAIR withdraws nothing: the machine keeps its lists (the device link is what a rotation cuts — B8-r2), the connection is kept', r);
+  ok(verdictOf(r.ok), 'a RE-PAIR withdraws nothing: the machine keeps its lists (the device link is what a rotation cuts — B8-r2), the connection is kept', r);
   const r2 = await leg('another holder\'s conversation ends', { expect: 'kept', ask: false,
     setup: (w, hid) => { w.sessions.set('w1', S('c1')); w.sessions.set('w9', S('c9')); grantBoth(w, hid, [{ kind: 'session', id: 'claude:c1' }, { kind: 'session', id: 'claude:c9' }]); return 'w1'; },
     event: (w) => w.kill('w9') });
-  ok(r2.ok, 'another conversation ending withdraws nothing from this one', r2);
+  ok(verdictOf(r2.ok), 'another conversation ending withdraws nothing from this one', r2);
 }
 // the grant's own expiry: there is none — a stored grant carries no clock (the reader drops it); the ASK's 60 s is the one clock
 {
@@ -313,7 +313,7 @@ for (const [name, spec] of EVENTS) {
   const a = await arm(w, hid, 'w1');
   for (const fn of [...timers.values()]) fn();
   const x = await Promise.race([a.p, sleep(1000).then(() => ({ waiting: true }))]);
-  ok(x.e && x.e.code === 'ask_expired' && w.todos.get(a.item.id).resolvedBy === 'ask-expired' && w.ex.view(hid).usedBy.run.length === 0, 'the ask\'s own 60 s expiry settles it (ask_expired, the item resolved ask-expired, the row lists no ask)', { code: x.e && x.e.code, by: w.todos.get(a.item.id).resolvedBy });
+  ok(gateOf(x.e) && x.e.code === 'ask_expired' && w.todos.get(a.item.id).resolvedBy === 'ask-expired' && w.ex.view(hid).usedBy.run.length === 0, 'the ask\'s own 60 s expiry settles it (ask_expired, the item resolved ask-expired, the row lists no ask)', { code: x.e && x.e.code, by: w.todos.get(a.item.id).resolvedBy });
   a.o.s.destroy(); for (const [k] of w.ex._live) await w.ex.stop(k); w.todos.stop();
 }
 // the ask answered by another client
@@ -327,7 +327,7 @@ for (const [name, spec] of EVENTS) {
   const first = w.ex.answerAsk(askId, { answer: 'allow', by: 'user' });
   let second; try { second = w.ex.answerAsk(askId, { answer: 'deny', by: 'user' }); } catch (e) { second = e.code; }
   const x = await a.p;
-  ok(first.state === 'allowed' && second === 'ask_settled' && x.v && runs === r0 + 1 && w.todos.get(a.item.id).resolvedBy === 'allowed', 'the ask answered by ANOTHER client: the first answer runs once, the second hears ask_settled, the item says allowed', { first, second, runs: runs - r0, by: w.todos.get(a.item.id).resolvedBy });
+  ok(first.state === 'allowed' && second === 'ask_settled' && gateOf(x.v) && runs === r0 + 1 && w.todos.get(a.item.id).resolvedBy === 'allowed', 'the ask answered by ANOTHER client: the first answer runs once, the second hears ask_settled, the item says allowed', { first, second, runs: runs - r0, by: w.todos.get(a.item.id).resolvedBy });
   a.o.s.destroy(); for (const [k] of w.ex._live) await w.ex.stop(k); w.todos.stop();
 }
 // a HUB RESTART: the process that lent the machine is gone — its forward, its pairs and its waiting asks with it; the
@@ -355,7 +355,7 @@ for (const [name, spec] of EVENTS) {
   const n = w2.ex.reconcileAsks();
   const it = w2.todos.get(a.item.id);
   const refused = await auth(a.port, a.cr); // the old port is closed (ECONNREFUSED) — or, were it reused, the pair is unknown
-  ok(cut && n === 1 && it.status === 'done' && it.resolvedBy === 'ask-expired' && w2.ex.listAsks().length === 0 && !w2.ex._live.size && refused !== 0 && w2.ex._credOk(hid, a.cr.user, a.cr.pass) === false,
+  ok(gateOf(cut) && n === 1 && it.status === 'done' && it.resolvedBy === 'ask-expired' && w2.ex.listAsks().length === 0 && !w2.ex._live.size && refused !== 0 && w2.ex._credOk(hid, a.cr.user, a.cr.pass) === false,
     'a HUB RESTART: the open connection died with the process, the dead ask\'s item resolves ask-expired at boot, nothing is lent, the old pair opens nothing', { cut, n, by: it && it.resolvedBy, refused });
   const r2 = await w2.ex.use(w2.sessions.get('w1'), 'w1', 'Box').catch((e) => ({ error: String((e && e.message) || e) }));   // a refusal is a named cross, never an unhandled crash
   ok(landed === true && !r2.error && credsOf(r2.url).pass !== a.cr.pass, '…a `use` after the restart mints a NEW pair (never the old one) — the machine on disk before its hub died', { landed, error: r2.error });
@@ -372,7 +372,7 @@ for (const [name, spec] of EVENTS) {
   const guard = await Promise.race([w.hosts.persisted().then(() => 'landed'), new Promise((r) => setTimeout(() => r('pending'), 50))]);   // its read: the GUARD pinned too — the wait the leg relies on is still pending while its write is queued
   const w2 = world(ExitProxyManager, dir); w2.sessions.set('w1', S('c1'));
   const r = await w2.ex.use(w2.sessions.get('w1'), 'w1', 'Box').then((x) => x, (e) => ({ error: String((e && e.message) || e) }));
-  ok(guard === 'pending' && !!r.error && /no machine matches/.test(r.error) && !w2.hosts.list().some((h) => h.name === 'Box'),
+  ok(guard === 'pending' && !!r.error && gateOf(/no machine matches/.test(r.error)) && !w2.hosts.list().some((h) => h.name === 'Box'),
     'RED (by state): the machine\'s write still queued when its hub dies — its wait still pending, the next life has no «Box» and the use is refused by name; the restart leg above waits for the landing', { guard, ...r });
   w.todos.stop(); w2.todos.stop();
 }
@@ -384,14 +384,14 @@ console.log('③ control (a patched copy)');
   const src = read('src/exit-proxy.js');
   const patched = editAnchor(editAnchor(src, "        for (const sid of new Set([...live.users, ...(live.bySession ? live.bySession.keys() : [])])) {", '        for (const sid of []) {', "src/exit-proxy.js"),
     "        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", '        const kwhy = null;', "src/exit-proxy.js");
-  ok(patched !== src && patched.split('for (const sid of [])').length === 2 && patched.includes('const kwhy = null;'), '(the control patch applies: a re-judge that judges nobody)');
+  ok(patched !== src && patched.split('for (const sid of [])').length === 2 && verdictOf(patched.includes('const kwhy = null;')), '(the control patch applies: a re-judge that judges nobody)');
   const { ExitProxyManager: Dead } = M.load('src/exit-proxy.js', patched, 'judgesnobody');
   const picks = EVENTS.filter(([n]) => /cwd moves|codex thread change|Import config narrowing|Task Group DELETE/.test(n));
   for (const [name, spec] of picks) {
     const r = await leg(name, { ...spec, Mgr: Dead, waitMs: 300 });
-    ok(!r.ok && r.x.bytes, `CONTROL: with a re-judge that judges nobody "${name}" leaves the open connection carrying bytes — the leg above goes red`, r);
+    ok(!r.ok && verdictOf(r.x.bytes), `CONTROL: with a re-judge that judges nobody "${name}" leaves the open connection carrying bytes — the leg above goes red`, r);
   }
 }
 
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

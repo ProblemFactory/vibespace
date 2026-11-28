@@ -40,27 +40,27 @@ const require = createRequire(import.meta.url);
 const G = require('../src/fixture-guard.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 400) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 400) : '')); } };
 
 console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
 
 // ── ① THE PURE RULE ────────────────────────────────────────────────────────
 {
   const enc = (p) => p.replace(/[/._]/g, '-');
-  ok(G.isFixtureProjectDir(enc('/tmp/vs-chatpage-test-4242')), 'a scratch() cwd encodes to a fixture project dir');
-  ok(G.isFixtureProjectDir(enc('/tmp/vs-chat-e2e-cwd-Q9oyO8')), '…including mkdtemp-style suffixes with UPPERCASE random chars');
-  ok(G.isFixtureProjectDir(enc('/var/tmp/vs-mmjump-test-9')), '…and a /var/tmp TMPDIR');
+  ok(verdictOf(G.isFixtureProjectDir(enc('/tmp/vs-chatpage-test-4242'))), 'a scratch() cwd encodes to a fixture project dir');
+  ok(verdictOf(G.isFixtureProjectDir(enc('/tmp/vs-chat-e2e-cwd-Q9oyO8'))), '…including mkdtemp-style suffixes with UPPERCASE random chars');
+  ok(verdictOf(G.isFixtureProjectDir(enc('/var/tmp/vs-mmjump-test-9'))), '…and a /var/tmp TMPDIR');
   ok(!G.isFixtureProjectDir(enc('/home/u/workspace/vibespace')), 'a real project dir is NOT a fixture');
   ok(!G.isFixtureProjectDir(enc('/tmp/vsv-probe')), "a /tmp dir that does not carry the 'vs-' prefix is not the convention (an older one-off name is out of scope, and this suite says so rather than widening silently)");
   ok(!G.isFixtureProjectDir('-tmp-vs-'), 'the bare prefix with no tail is not a fixture dir');
-  ok(G.isFixtureSid(fixtureSid('1')) && G.isFixtureSid('E2E00000-0000-4000-8000-00000000000A'),
+  ok(gateOf(G.isFixtureSid(fixtureSid('1'))) && verdictOf(G.isFixtureSid('E2E00000-0000-4000-8000-00000000000A')),
     'the synthetic sid family is recognised, case-insensitively');
   ok(!G.isFixtureSid('c136a0b4-1111-4222-8333-444444444444'), 'a real conversation UUID is not a fixture sid');
-  ok(G.isFixtureCwd('/tmp/vs-deskresume-cwd-7') && !G.isFixtureCwd('/home/u/work'),
+  ok(gateOf(G.isFixtureCwd('/tmp/vs-deskresume-cwd-7')) && !G.isFixtureCwd('/home/u/work'),
     'isFixtureCwd answers the same question about a stored row’s cwd field');
   // scratch() and the guard must agree BY CONSTRUCTION — that is the whole
   // point of the shared constant.
-  ok(G.isFixtureProjectDir(enc(scratch('sweep-selftest'))),
+  ok(verdictOf(G.isFixtureProjectDir(enc(scratch('sweep-selftest')))),
     'scratch() mints a path this rule recognises (the suites and the sweep read ONE constant)');
 }
 
@@ -75,11 +75,11 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     { name: '-tmp-vs-wire-probe-abc', mtimeMs: young },          // declared, in flight
     { name: '-tmp-vs-wire-probe-def', mtimeMs: old },            // declared, but STALE
   ], { now });
-  ok(r.offenders.some((o) => o.name === '-tmp-vs-chatpage-test-1'), 'an undeclared fixture dir is an offender');
+  ok(verdictOf(r.offenders.some((o) => o.name === '-tmp-vs-chatpage-test-1')), 'an undeclared fixture dir is an offender');
   ok(!r.offenders.some((o) => o.name === '-home-u-workspace-vibespace'), 'a real project dir is never an offender');
-  ok(r.spared.some((s) => s.name === '-tmp-vs-wire-probe-abc' && s.why),
+  ok(verdictOf(r.spared.some((s) => s.name === '-tmp-vs-wire-probe-abc' && s.why)),
     'a DECLARED real-home fixture in flight is SPARED, with the declared reason');
-  ok(r.offenders.some((o) => o.name === '-tmp-vs-wire-probe-def' && o.declared),
+  ok(verdictOf(r.offenders.some((o) => o.name === '-tmp-vs-wire-probe-def' && o.declared)),
     '…and the same declared prefix past the staleness threshold IS an offender (declared means "while running", not "for ever")');
   ok(typeof r.rule === 'string' && r.rule.length > 100, 'the decision carries the rule it applied');
 
@@ -98,7 +98,7 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     const rows = [{ name: '-tmp-vs-chat-e2e-cwd-paw5IT', mtimeMs: younger }];
     const swept = G.fixtureLitter(rows, { now: nowMs, graceMs: G.FIXTURE_STALE_MS });
     const sp = swept.spared.find((s) => s.name === '-tmp-vs-chat-e2e-cwd-paw5IT');
-    ok(swept.offenders.length === 0 && sp && sp.declared === false && /concurrent|running right now/i.test(sp.why),
+    ok(swept.offenders.length === 0 && gateOf(sp) && sp.declared === false && verdictOf(/concurrent|running right now/i.test(sp.why)),
       'GRACE: the whole-directory sweep SPARES an undeclared fixture dir younger than the threshold, and NAMES it (undeclared ⇒ declared:false, with a reason that says why nothing may remove it yet)',
       JSON.stringify(swept));
     // NEGATIVE CONTROL ①: the grace expires. A grace that never expires is the
@@ -325,7 +325,7 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   }
   {
     const t = src('test-stdout-registry.mjs');
-    ok(/vs-wire-probe-/.test(t) && /process\.on\('exit'/.test(t) && /finally\s*\{[^}]*rmCtl/.test(t),
+    ok(gateOf(/vs-wire-probe-/.test(t)) && gateOf(/process\.on\('exit'/.test(t)) && verdictOf(/finally\s*\{[^}]*rmCtl/.test(t)),
       '…and it is PAID FOR: test-stdout-registry.mjs plants only DECLARED-prefix names and removes them in a finally + an exit handler');
   }
   {
@@ -337,7 +337,7 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     //    whole file — a second real-home write anywhere else in this suite goes
     //    red even though the suite is on the list.
     const outside = realHomeWritersOutside(t, START, END);
-    ok(outside.ok && outside.hits.length === 0,
+    ok(gateOf(outside.ok) && outside.hits.length === 0,
       `…and it is PAID FOR ①: test-chat-e2e.mjs's exemption is scoped to its sentinel-marked sweep (${outside.region} chars); the REST of the file writes nothing under the real home`,
       JSON.stringify({ found: outside.ok, hits: outside.hits }));
     // ② THE GATES. The block may only delete this suite's own stale fixtures,
@@ -351,7 +351,7 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
       staleness: /FIXTURE_STALE_MS/.test(region),
       deleteOnly: WRITES.filter((w) => new RegExp(`\\.${w}\\(`).test(region)).join(',') === 'rmSync',
     };
-    ok(Object.values(gates).every(Boolean),
+    ok(verdictOf(Object.values(gates).every(Boolean)),
       '…and it is PAID FOR ②: that sweep only DELETES, and only what passes the declared convention + its own suite name + the shared staleness threshold',
       JSON.stringify(gates));
   }
@@ -527,10 +527,10 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     const selfSrc = src(CENSUS_SELF);
     const spawns = [...selfSrc.matchAll(/\b(?:execFileSync|execSync|spawnSync|spawn)\(\s*(?:'([^']*)'|"([^"]*)"|`([^`]*)`)/g)]
       .map((m) => m[1] ?? m[2] ?? m[3]);
-    ok(spawns.length > 0 && spawns.every((c) => c === 'git'),
+    ok(spawns.length > 0 && verdictOf(spawns.every((c) => c === 'git')),
       `the (b) exemption is PAID FOR: every child ${CENSUS_SELF} starts is git (${JSON.stringify(spawns)}) — it never runs server.js`);
   }
-  ok(spawnsServer(src(CENSUS_SELF)) && writesTranscript(src(CENSUS_SELF)),
+  ok(gateOf(spawnsServer(src(CENSUS_SELF))) && verdictOf(writesTranscript(src(CENSUS_SELF))),
     `the (b) exemption is LIVE: ${CENSUS_SELF} really carries the shape (in its CONTROL strings) — a dead exemption fails`);
   console.log(`  census (b): suites that spawn server.js AND write a transcript: ${serverWriters.join(', ') || '(none)'}`);
   ok(serverWriters.length >= 3, `the isolation census found the class (${serverWriters.length} suites)`, JSON.stringify(serverWriters));
@@ -542,23 +542,23 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   {
     const bad = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });";
     const good = bad.replace('PORT: String(PORT)', 'PORT: String(PORT), HOME: fakeHome');
-    ok(spawnsServer(bad) && writesTranscript(bad) && !namesHome(bad), 'CONTROL (b): the PRE-FIX shape (no HOME in the spawn env) IS caught');
-    ok(namesHome(good), 'CONTROL (b): adding HOME to that same spawn env is the whole fix');
+    ok(gateOf(spawnsServer(bad)) && gateOf(writesTranscript(bad)) && !namesHome(bad), 'CONTROL (b): the PRE-FIX shape (no HOME in the spawn env) IS caught');
+    ok(verdictOf(namesHome(good)), 'CONTROL (b): adding HOME to that same spawn env is the whole fix');
     const viaHelper = "import { mintRoot, startHub } from './hub-boot.mjs';\nfs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nfor (const f of ['src', 'server.js']) cp(f);\nconst hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), HOME: fakeHome } });";
-    ok(namesHome(viaHelper) && !namesHome(viaHelper.replace(', HOME: fakeHome', '')), 'CONTROL (b): a suite on the boot helper names its HOME in startHub\'s env — without it, it IS caught');
+    ok(gateOf(namesHome(viaHelper)) && !namesHome(viaHelper.replace(', HOME: fakeHome', '')), 'CONTROL (b): a suite on the boot helper names its HOME in startHub\'s env — without it, it IS caught');
     // a transcript written through the shared generator is a write too; the same lines with no write are not
     const viaGenerator = "const PROJ = path.join(fakeHome, '.claude', 'projects', d);\nawait writeHugeTranscript({ file: path.join(PROJ, 'x.jsonl'), sid, cwd });";
-    ok(writesTranscript(viaGenerator) && !writesTranscript(viaGenerator.replace('writeHugeTranscript(', 'readHugeTranscript(')),
+    ok(gateOf(writesTranscript(viaGenerator)) && !writesTranscript(viaGenerator.replace('writeHugeTranscript(', 'readHugeTranscript(')),
       'CONTROL (b): a transcript written through the shared generator (writeHugeTranscript) is a write — the same lines calling no writer are not');
     // the constant shape (the follow-up): the census follows the constant into the spawn — and a constant that only names the
     // file (a source read, test-ledger-boot-load's SERVER_SOURCE) is not a spawn
     const viaConst = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst SRV = path.join(wt, 'server.js');\nconst srv = spawn(process.execPath, [SRV], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });";
     const readOnly = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst SERVER_SOURCE = 'server.js';\nconst files = list.concat([SERVER_SOURCE]);";
-    ok(spawnsServer(viaConst) && writesTranscript(viaConst) && !namesHome(viaConst) && namesHome(viaConst.replace('PORT: String(PORT)', 'PORT: String(PORT), HOME: fakeHome')) && !spawnsServer(readOnly),
+    ok(gateOf(spawnsServer(viaConst)) && gateOf(writesTranscript(viaConst)) && !namesHome(viaConst) && gateOf(namesHome(viaConst.replace('PORT: String(PORT)', 'PORT: String(PORT), HOME: fakeHome'))) && !spawnsServer(readOnly),
       'CONTROL (b): a server spawn through a NAMED CONSTANT (`const SRV = path.join(wt, \'server.js\')`, `spawn(node, [SRV], …)`) is caught, HOME is its fix; a constant that only names the file is not a spawn');
     // a git argv listing server.js (a source census) is no server spawn — and a real spawn beside it is still caught
     const gitList = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst files = execFileSync('git', ['ls-files', 'src', 'server.js'], { cwd: REPO, encoding: 'utf8' });";
-    ok(!spawnsServer(gitList) && spawnsServer(gitList + "\nconst srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env } });"),
+    ok(!spawnsServer(gitList) && verdictOf(spawnsServer(gitList + "\nconst srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env } });")),
       'CONTROL (b): `git ls-files … server.js` names the file to git — not a server spawn (test-helper-ask); a real spawn beside it is still caught');
   }
   // THE STRONGEST CONTROL: the RETIRED BYTES, not a paraphrase of them. The two
@@ -585,7 +585,7 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     } catch (e) { skip = `cannot ask git: ${e.message}`; }
     if (skip) console.log(`  ⚠ SKIP: the retired-bytes control could not run — ${skip}`);
     else {
-      ok(caught.length === 2 && caught.every((c) => c.inScope && c.caught),
+      ok(caught.length === 2 && verdictOf(caught.every((c) => c.inScope && c.caught)),
         `RETIRED-BYTES CONTROL: the census catches BOTH offenders as they actually shipped at ${PRE_FIX_REF} (${JSON.stringify(caught)})`);
     }
   }
@@ -604,24 +604,24 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   // suite itself — test-jsonl-incremental) isolates ITS OWN process instead: HOME
   // and os.homedir are re-pointed at a scratchHome before the code loads.
   const inProcessHome = (t) => !spawnsServer(t) && /process\.env\.HOME\s*=/.test(t) && /os\.homedir\s*=/.test(t);
-  ok(carriers.every((f) => serverWriters.includes(f) || inProcessHome(src(f))),
+  ok(verdictOf(carriers.every((f) => serverWriters.includes(f) || inProcessHome(src(f)))),
     'every fixture carrier is in the isolation census too, or re-homes its OWN process (the two sets are about one class of suite)',
     JSON.stringify(carriers.filter((f) => !serverWriters.includes(f) && !inProcessHome(src(f)))));
   const SID_LITERAL = /['"`]e2e00000-0000-4000-8000-/i;
   for (const f of carriers) {
     const t = src(f);
-    ok((/scratchHome\(/.test(t) && (/HOME:\s*fakeHome/.test(t) || inProcessHome(t))) || helperHome(t),
+    ok((gateOf(/scratchHome\(/.test(t)) && (verdictOf(/HOME:\s*fakeHome/.test(t)) || verdictOf(inProcessHome(t)))) || verdictOf(helperHome(t)),
       `${f} runs its server under an ISOLATED home (scratchHome + HOME: fakeHome, its own process re-homed, or the boot helper's root)`);
     ok(!SID_LITERAL.test(t), `${f} MINTS its session id (fixtureSid), never a hand-spelled literal that could drift from the guard`);
-    ok((/for \(const sig of \[/.test(t) && /SIGTERM/.test(t) && /SIGINT/.test(t)) || onHelper(t),
+    ok((gateOf(/for \(const sig of \[/.test(t)) && gateOf(/SIGTERM/.test(t)) && verdictOf(/SIGINT/.test(t))) || verdictOf(onHelper(t)),
       `${f} cleans up on SIGNALS too ('exit' does not fire for a default-terminated SIGINT/SIGTERM — or the boot helper armed them)`);
-    ok(/fixtureLitter\(/.test(t),
+    ok(verdictOf(/fixtureLitter\(/.test(t)),
       `${f} asserts the real ~/.claude/projects gained no fixture entry (its own per-suite census)`);
   }
 
   // (d) scratch.mjs is the ONE minter, and it reads the ONE constant.
   const scratchSrc = src('scratch.mjs') || (() => { try { return fs.readFileSync(path.join(here, 'scratch.mjs'), 'utf-8'); } catch { return ''; } })();
-  ok(/fixture-guard\.js/.test(scratchSrc) && /FIXTURE_CWD_PREFIX/.test(scratchSrc),
+  ok(gateOf(/fixture-guard\.js/.test(scratchSrc)) && verdictOf(/FIXTURE_CWD_PREFIX/.test(scratchSrc)),
     'scratch.mjs mints paths from src/fixture-guard.js, never from its own literals');
   // Comments may SAY `/tmp/vs-<name>-<pid>` (that is the documentation); code
   // may not spell it. Whole-line comments blanked, like every census here.
@@ -631,13 +631,13 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   // (e) test-chat-e2e runs a REAL turn; it gets the same isolation + an
   //     unconditional cleanup (its old one sat past four early exits).
   const e2e = src('test-chat-e2e.mjs');
-  ok(((/scratchHome\(/.test(e2e) && /HOME:\s*fakeHome/.test(e2e)) || helperHome(e2e)) && /HOME:\s*fakeHome/.test(e2e),
+  ok(((gateOf(/scratchHome\(/.test(e2e)) && gateOf(/HOME:\s*fakeHome/.test(e2e))) || gateOf(helperHome(e2e))) && verdictOf(/HOME:\s*fakeHome/.test(e2e)),
     'test-chat-e2e runs its real haiku turn under an ISOLATED home (measured viable: the CLI serves a turn on the oat alone) — since the boot helper, a HOME in the root startHub checks');
-  ok((/process\.on\('exit', cleanup\)/.test(e2e) && /for \(const sig of \[/.test(e2e)) || onHelper(e2e),
+  ok((gateOf(/process\.on\('exit', cleanup\)/.test(e2e)) && verdictOf(/for \(const sig of \[/.test(e2e))) || verdictOf(onHelper(e2e)),
     'test-chat-e2e cleans up unconditionally (exit + signals), not at the end of the happy path — since the boot helper, its root ends at exit and at the signals the helper armed');
   {   // CONTROLS for the boot helper's road: an import with no call, or a call with no HOME, is no isolation
     const imp = "import { mintRoot, startHub } from './hub-boot.mjs';\n";
-    ok(!onHelper(imp + 'const x = 1;') && onHelper(imp + 'startHub({ root });') && !helperHome(imp + 'startHub({ root, env: { PATH } });') && helperHome(imp + 'startHub({ root, env: { PATH, HOME: fakeHome } });'),
+    ok(!onHelper(imp + 'const x = 1;') && gateOf(onHelper(imp + 'startHub({ root });')) && !helperHome(imp + 'startHub({ root, env: { PATH } });') && verdictOf(helperHome(imp + 'startHub({ root, env: { PATH, HOME: fakeHome } });')),
       'CONTROL (e): the boot helper counts only when startHub is CALLED, and as an isolated home only with a HOME in its env');
   }
 
@@ -645,14 +645,14 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   //     leftover no cleanup ever reached.
   for (const [rel, why] of [['../src/usage-walker.js', 'the usage walk'], ['../src/session-store.js', 'session discovery']]) {
     const t = (() => { try { return fs.readFileSync(path.join(here, rel), 'utf-8'); } catch { return ''; } })();
-    ok(/require\(['"]\.\/fixture-guard\.js['"]\)/.test(t) && /isFixtureProjectDir\(/.test(t) && /isFixtureSid\(/.test(t),
+    ok(gateOf(/require\(['"]\.\/fixture-guard\.js['"]\)/.test(t)) && gateOf(/isFixtureProjectDir\(/.test(t)) && verdictOf(/isFixtureSid\(/.test(t)),
       `${why} asks src/fixture-guard.js (a leftover can never become usage or a conversation)`);
   }
   // …and the shipped single-file scanner carries the INLINE copy (a
   // checkout-less ssh host cannot require src/), behaviourally pinned by
   // test-usage-walk-parity.
   const scan = (() => { try { return fs.readFileSync(path.join(here, '..', 'data', 'bin', 'vibespace-usage-scan'), 'utf-8'); } catch { return ''; } })();
-  ok(/isFixtureProjectDir/.test(scan) && /isFixtureSid/.test(scan) && /FIXTURE_SID_PREFIX/.test(scan),
+  ok(gateOf(/isFixtureProjectDir/.test(scan)) && gateOf(/isFixtureSid/.test(scan)) && verdictOf(/FIXTURE_SID_PREFIX/.test(scan)),
     'the shipped scanner carries the inline copy of the convention (parity-pinned by test-usage-walk-parity)');
 }
 
@@ -695,7 +695,7 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     const a = self.indexOf('// ── ④ THE REAL HOME');
     const b = self.indexOf('// ── ⑤ THE CENSUSES');
     const region = a >= 0 && b > a ? self.slice(a, b) : '';
-    ok(region.length > 200 && /fixtureLitter\([^;]{0,300}graceMs:\s*G\.FIXTURE_STALE_MS/.test(region),
+    ok(region.length > 200 && verdictOf(/fixtureLitter\([^;]{0,300}graceMs:\s*G\.FIXTURE_STALE_MS/.test(region)),
       '…and §4 (the whole-directory sweep) DOES pass it, at the shared FIXTURE_STALE_MS — the floor every sweeper in this tree already refuses to delete below',
       JSON.stringify({ region: region.length }));
   }
@@ -708,4 +708,4 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

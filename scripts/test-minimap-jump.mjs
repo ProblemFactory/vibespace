@@ -50,7 +50,7 @@ const PROJ = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-
 const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── 1. tool-heavy transcript BELOW the seek threshold (index mode) ──
@@ -164,7 +164,7 @@ const opened = await evaljs(`(async () => {
   window.__view = view;
   return { ok: true, total: view._total };
 })()`);
-check('view-only chat opened (index mode)', opened?.ok && opened.total > 100, JSON.stringify(opened));
+check('view-only chat opened (index mode)', gateOf(opened?.ok) && opened.total > 100, JSON.stringify(opened));
 
 // one landing check: jump to idx, wait past ALL settle timers (folds at
 // 180ms, cv resolution ~1s, re-centers through 750ms), then measure where
@@ -192,10 +192,10 @@ const seenTargets = [];
 for (const frac of [0.6, 0.25, 0.85]) {
   const r = await land(frac);
   const okLand = r && !r.err && r.visible && Math.abs(r.centerOff) < r.vh * 0.5;
-  check(`jump to ${Math.round(frac * 100)}% lands ON the clicked message after settle (off=${r?.centerOff}px, st=${r?.st}, ${r?.marker || r?.msgId})`, okLand, JSON.stringify(r));
+  check(`jump to ${Math.round(frac * 100)}% lands ON the clicked message after settle (off=${r?.centerOff}px, st=${r?.st}, ${r?.marker || r?.msgId})`, verdictOf(okLand), JSON.stringify(r));
   seenTargets.push(r?.msgId || r?.marker);
   // the incident's terminal state: view yanked to scrollTop 0 (window top)
-  check(`jump to ${Math.round(frac * 100)}% did not get yanked to the window top`, r && r.st > 0, `st=${r?.st}`);
+  check(`jump to ${Math.round(frac * 100)}% did not get yanked to the window top`, gateOf(r) && r.st > 0, `st=${r?.st}`);
 }
 
 check('the three jumps measured three DISTINCT targets', new Set(seenTargets).size === 3, JSON.stringify(seenTargets));
@@ -258,7 +258,7 @@ function holdKit() {
   const real = a >= 0 && b > a ? SEEKS.slice(a, b).trim().replace(/,$/, '') : '';
   const LETGO = /\n    const letGo = \(\) => [^\n]+\n/;
   const blind = real.replace(LETGO, '\n    const letGo = () => false;\n');
-  check('3c: the jump hold is read out of chat-view-seek.js and its stop found (the red control blinds exactly that line)', !!real && LETGO.test(real) && blind !== real && /setTimeout\(\(\) => \{ if \(!letGo\(\)\) center\(\);/.test(real), real.slice(0, 160));
+  check('3c: the jump hold is read out of chat-view-seek.js and its stop found (the red control blinds exactly that line)', !!real && gateOf(LETGO.test(real)) && blind !== real && verdictOf(/setTimeout\(\(\) => \{ if \(!letGo\(\)\) center\(\);/.test(real)), real.slice(0, 160));
   const kit = await evaljs(`(${holdKit.toString()})()`);
   const wheel = (x, y, deltaY) => cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(x), y: Math.round(y), deltaX: 0, deltaY });
   const gutterDrag = gutterDragger({ evalJs: evaljs, cdp, sleep });   // THE scrollbar's door (scripts/gutter-drag.mjs): it presses the list's own gutter and checks where the press landed
@@ -302,13 +302,13 @@ function holdKit() {
   ACTS.forEach(([act, , words], i) => {
     const r = green[i];
     check(`3c: ${words} inside the jump's hold (+${r?.g.age} ms) — the view stays where the person put it (the target ${r?.land.off}→${r?.done.off} px from the hold's aim at the act's end, ${r?.fin.off} px at 1.7 s)`,
-      !!r && r.inHold && r.reached && r.moved && r.stayed && r.notBack, JSON.stringify(r));
+      !!r && gateOf(r.inHold) && gateOf(r.reached) && gateOf(r.moved) && gateOf(r.stayed) && verdictOf(r.notBack), JSON.stringify(r));
   });
   check('3c RED: the hold with its stop blinded (the base\'s hold) installed on the view', blinded === true && red.length === ACTS.length, JSON.stringify({ kit, blinded }));
   ACTS.forEach(([act, , words], i) => {
     const r = red[i];
     check(`3c RED (r1175): ${words} inside the BLINDED hold (+${r?.g.age} ms) is undone — put back on the jump's target (${r?.fin.off} px from the hold's aim at 1.7 s)`,
-      !!r && r.inHold && r.reached && r.back, JSON.stringify(r));
+      !!r && gateOf(r.inHold) && gateOf(r.reached) && verdictOf(r.back), JSON.stringify(r));
   });
   check('3c: the view\'s own hold is back after the red (the blinded copy removed)', restored === true, String(restored));
 }
@@ -327,7 +327,7 @@ function holdKit() {
     }
     return window.__pr ? { ok: true, turns: userTurns(window.__pr) } : { ok: false, views: [...(window.app.sessions?.values() || [])].map(userTurns) };
   })()`);
-  check(`3b: the person-rows conversation opened (${PR.person + PR.other} user turns on the minimap)`, opened2?.ok, JSON.stringify(opened2));
+  check(`3b: the person-rows conversation opened (${PR.person + PR.other} user turns on the minimap)`, verdictOf(opened2?.ok), JSON.stringify(opened2));
   // the popover's state, read the way a person sees it (the rows' texts, the chip's words, the placeholder)
   const READ = `const pop = document.querySelector('.chat-minimap-toc');
     const rows = pop ? [...pop.querySelectorAll('.chat-minimap-toc-list .chat-minimap-toc-row')].filter((r) => r.querySelector('.chat-minimap-toc-text')) : [];
@@ -360,13 +360,13 @@ function holdKit() {
   const back = await step(`document.querySelector('.chat-minimap-toc-fold')?.click(); await sleep(120); ${READ} const strip = mm._minimap.querySelectorAll('.chat-minimap-marker').length; document.querySelectorAll('.chat-minimap-toc').forEach((p) => p.remove()); return { ...st, strip };`);
   const PERSON_WORDS = ['Please fix the login page', 'B — tonight is fine', '/compact', 'MARKER_PERSON_3', 'MARKER_PERSON_4', 'Thanks — now the signup page'];
   check(`3b: opened FOLDED — the list shows the person's ${PR.person} rows, nothing else (${folded?.rows?.length})`,
-    folded?.rows?.length === PR.person && PERSON_WORDS.every((w) => folded.rows.some((r) => r.includes(w))), JSON.stringify(folded?.rows));
-  check(`3b: ONE chip, the list's first row, counts the folded rows ("${folded?.chip}")`, !!folded?.chip && folded.chip.includes('×' + PR.other) && folded.chipFirstRow && folded.pressed === 'false', JSON.stringify(folded));
-  check(`3b: the placeholder counts what is listed ("${folded?.placeholder}")`, new RegExp('\\b' + PR.person + '\\b').test(folded?.placeholder || '') && !new RegExp('\\b' + (PR.person + PR.other) + '\\b').test(folded?.placeholder || ''), folded?.placeholder);
+    folded?.rows?.length === PR.person && verdictOf(PERSON_WORDS.every((w) => folded.rows.some((r) => r.includes(w)))), JSON.stringify(folded?.rows));
+  check(`3b: ONE chip, the list's first row, counts the folded rows ("${folded?.chip}")`, !!folded?.chip && gateOf(folded.chip.includes('×' + PR.other)) && gateOf(folded.chipFirstRow) && folded.pressed === 'false', JSON.stringify(folded));
+  check(`3b: the placeholder counts what is listed ("${folded?.placeholder}")`, gateOf(new RegExp('\\b' + PR.person + '\\b').test(folded?.placeholder || '')) && !new RegExp('\\b' + (PR.person + PR.other) + '\\b').test(folded?.placeholder || ''), folded?.placeholder);
   check('3b: folded, the filter searches the person\'s rows — a word of theirs is found, a folded row\'s word is not', findPerson?.length === 2 && findOther?.length === 0, JSON.stringify({ findPerson, findOther }));
   check(`3b: the chip lists all ${PR.person + PR.other} rows, the ${PR.other} folded ones dimmed, and says so (pressed, the placeholder counts ${PR.person + PR.other})`,
-    shown?.rows?.length === PR.person + PR.other && shown.dimmed === PR.other && shown.pressed === 'true' && new RegExp('\\b' + (PR.person + PR.other) + '\\b').test(shown.placeholder || ''), JSON.stringify(shown));
-  check('3b: with the chip on, the filter finds a folded row\'s word too (another session\'s message)', findOtherShown?.length === 1 && /merged/.test(findOtherShown[0]), JSON.stringify(findOtherShown));
+    shown?.rows?.length === PR.person + PR.other && shown.dimmed === PR.other && shown.pressed === 'true' && verdictOf(new RegExp('\\b' + (PR.person + PR.other) + '\\b').test(shown.placeholder || '')), JSON.stringify(shown));
+  check('3b: with the chip on, the filter finds a folded row\'s word too (another session\'s message)', findOtherShown?.length === 1 && verdictOf(/merged/.test(findOtherShown[0])), JSON.stringify(findOtherShown));
   check('3b: the choice is kept per device — reopened, the list is still all rows (localStorage)', kept?.rows?.length === PR.person + PR.other && kept.pressed === 'true' && kept.stored === '1', JSON.stringify({ rows: kept?.rows?.length, pressed: kept?.pressed, stored: kept?.stored }));
   check('3b: …and folding again lists the person\'s rows and remembers that', back?.rows?.length === PR.person && back.stored === '0', JSON.stringify({ rows: back?.rows?.length, stored: back?.stored }));
   check(`3b: the strip keeps a marker for every one of the ${PR.person + PR.other} turns (only the list folds)`, back?.strip === PR.person + PR.other, `markers=${back?.strip}`);
@@ -383,9 +383,9 @@ function holdKit() {
   check('…and this suite\'s OWN project dir is not among them (isolated home)',
     !after.some((d) => d.name === path.basename(PROJ)), path.basename(PROJ));
   check('the fixture really was written (the isolation did not just skip the work)',
-    fs.existsSync(path.join(PROJ, `${SID}.jsonl`)), path.join(PROJ, `${SID}.jsonl`));
+    verdictOf(fs.existsSync(path.join(PROJ, `${SID}.jsonl`))), path.join(PROJ, `${SID}.jsonl`));
 }
 
 ws.close();
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

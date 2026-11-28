@@ -22,7 +22,7 @@ const LIB = path.join(REPO, 'src/lib');
 const esbuild = (await import(pathToFileURL(path.join(REPO, 'node_modules/esbuild/lib/main.js')).href)).default;
 const M = await import(pathToFileURL(path.join(LIB, 'artifacts-list-model.js')).href);
 let pass = 0, fail = 0;
-const ok = (c, msg, why = '') => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (why ? ' — ' + why : '')); } };
+const ok = (c, msg, why = '') => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (why ? ' — ' + why : '')); } };
 
 // ── the mini element tree ──
 let DOC;
@@ -215,12 +215,12 @@ const mod = await load();
 STORE.clear(); kindView();
 const box = new N('div'); let opened = null, closed = 0, expanded = 0;
 const ctrl = mod.renderArtifactList(box, V, { onOpen: (b) => { opened = b; }, close: () => { closed++; }, app: APP, onExpand: () => { expanded++; } });
-ok(box.classList.contains('chat-artifacts-panel') && box._afList === ctrl && box.querySelector('.af-top') && box.querySelector('.af-list'), 'the panel carries .chat-artifacts-panel, a sticky .af-top and the scrolling .af-list; box._afList = the controller');
-ok(cssBounded(SRC.css), 'chat.css: the panel is a column with max-height min(viewport − taskbar − 24 px, the room above the chip); the list scrolls (overflow-y auto, min-height 0); the top is sticky');
+ok(gateOf(box.classList.contains('chat-artifacts-panel')) && box._afList === ctrl && gateOf(box.querySelector('.af-top')) && verdictOf(box.querySelector('.af-list')), 'the panel carries .chat-artifacts-panel, a sticky .af-top and the scrolling .af-list; box._afList = the controller');
+ok(verdictOf(cssBounded(SRC.css)), 'chat.css: the panel is a column with max-height min(viewport − taskbar − 24 px, the room above the chip); the list scrolls (overflow-y auto, min-height 0); the top is sticky');
 const heads = box.querySelectorAll('.chat-artifact-head').map((h) => h.dataset.group);
 ok(heads.join() === 'recent,k:page,k:doc,k:service,k:file,k:code', `heads: the 最近 band then the kinds in the owner's order (published pages · documents · services · files), code last (${heads.join(' ')})`);
 const codeHead = box.querySelectorAll('.chat-artifact-head').find((h) => h.dataset.group === 'k:code');
-ok(codeHead.dataset.fold === 'shut' && codeHead.textContent.includes('Code · 174') && rowsIn(box).filter((r) => r.dataset.kind === 'code').length === 3, `代码 collapsed by default ("${codeHead.textContent}"); only the band's newest code shows (${rowsIn(box).filter((r) => r.dataset.kind === 'code').length})`);
+ok(codeHead.dataset.fold === 'shut' && gateOf(codeHead.textContent.includes('Code · 174')) && rowsIn(box).filter((r) => r.dataset.kind === 'code').length === 3, `代码 collapsed by default ("${codeHead.textContent}"); only the band's newest code shows (${rowsIn(box).filter((r) => r.dataset.kind === 'code').length})`);
 ok(box.querySelector('.af-count').textContent === '43 artifacts · 174 code files', `the count line: "${box.querySelector('.af-count').textContent}"`);
 ok(!!box.querySelector('.af-expand'), 'the ⤢ "Open in a window" button is in the top bar');
 fire(box.querySelector('.af-expand'), 'click');
@@ -228,36 +228,36 @@ ok(expanded === 1 && closed === 1, 'the ⤢ closes the popover and opens the win
 
 console.log('② the KEYED IDENTITY census (no surviving row node replaced)');
 const id = await legIdentity(mod);
-ok(id.sameAfterFilter, `typing "doc_1": the ${id.survived} surviving rows are the SAME nodes`);
-ok(id.sameAfterClear, 'clearing the filter: every row is the node it was before');
-ok(id.patched, 'a live refresh (edits 0 → 9): the same node, its meta words patched');
+ok(verdictOf(id.sameAfterFilter), `typing "doc_1": the ${id.survived} surviving rows are the SAME nodes`);
+ok(verdictOf(id.sameAfterClear), 'clearing the filter: every row is the node it was before');
+ok(verdictOf(id.patched), 'a live refresh (edits 0 → 9): the same node, its meta words patched');
 
 console.log('③ the filter: band hides, a collapsed group with matches opens, the count line, zero matches, Esc');
 typeQ(ctrl, 'pkg3/');
-ok(!box.querySelector('.af-head-recent') && rowsIn(box).length > 0 && rowsIn(box).every((r) => r.dataset.kind === 'code') && box.querySelectorAll('.chat-artifact-head').find((h) => h.dataset.group === 'k:code').dataset.fold === 'open', `"pkg3/": the band hides, 代码 opens for the filter (${rowsIn(box).length} rows)`);
-ok(/^\d+ matches · \d+ code$/.test(box.querySelector('.af-count').textContent), `count while filtering: "${box.querySelector('.af-count').textContent}"`);
+ok(!box.querySelector('.af-head-recent') && rowsIn(box).length > 0 && gateOf(rowsIn(box).every((r) => r.dataset.kind === 'code')) && box.querySelectorAll('.chat-artifact-head').find((h) => h.dataset.group === 'k:code').dataset.fold === 'open', `"pkg3/": the band hides, 代码 opens for the filter (${rowsIn(box).length} rows)`);
+ok(verdictOf(/^\d+ matches · \d+ code$/.test(box.querySelector('.af-count').textContent)), `count while filtering: "${box.querySelector('.af-count').textContent}"`);
 typeQ(ctrl, 'sec10');
 const nm = rowsIn(box)[0].querySelector('.chat-artifact-name');
 ok(nm.childNodes.length === 3 && nm.childNodes[1].tagName === 'mark' && nm.childNodes[1].textContent === 'sec10' && !nm.innerHTML, 'the match is ONE <mark> between text nodes (never innerHTML)');
 typeQ(ctrl, 'zzzz');
 ok(!!box.querySelector('.af-empty') && rowsIn(box).length === 0, 'zero matches: one note "No matching artifacts"');
 const esc1 = fire(ctrl.input, 'keydown', { key: 'Escape' });
-ok(esc1.stopped && ctrl.input.value === '' && rowsIn(box).length > 0, 'Esc with text: clears the filter and stops (the popover stays)');
+ok(gateOf(esc1.stopped) && ctrl.input.value === '' && rowsIn(box).length > 0, 'Esc with text: clears the filter and stops (the popover stays)');
 const esc2 = fire(ctrl.input, 'keydown', { key: 'Escape' });
 ok(!esc2.stopped, 'Esc with an empty filter: passes on (app.js closes the [data-popover])');
-ok(M.viewFrom(JSON.parse(STORE.get('vs-artifacts-view') || 'null')).collapsed.kind.includes('k:code'), 'filtering never touched the remembered fold (代码 still collapsed)');
+ok(verdictOf(M.viewFrom(JSON.parse(STORE.get('vs-artifacts-view') || 'null')).collapsed.kind.includes('k:code')), 'filtering never touched the remembered fold (代码 still collapsed)');
 
 console.log('④ group / sort: the menus, the device-kept memory round trip');
 fire(box.querySelector('.af-group'), 'click');
 const gm = globalThis.__menu;
-ok(gm.length === 4 && gm.map((i) => i.label).join() === 'For you first,By kind,By helper,By day' && /chan-menu-check-on/.test(gm[1].labelHtml) && !/chan-menu-check-on/.test(gm[0].labelHtml) && !/chan-menu-check-on/.test(gm[2].labelHtml), 'group ▾: for you first (the default) · kind · helper · day, the current one (kind) checked');
+ok(gm.length === 4 && gm.map((i) => i.label).join() === 'For you first,By kind,By helper,By day' && gateOf(/chan-menu-check-on/.test(gm[1].labelHtml)) && !/chan-menu-check-on/.test(gm[0].labelHtml) && !/chan-menu-check-on/.test(gm[2].labelHtml), 'group ▾: for you first (the default) · kind · helper · day, the current one (kind) checked');
 gm[2].action();
 fire(box.querySelector('.af-sort'), 'click'); globalThis.__menu[2].action();
-ok(box.querySelectorAll('.chat-artifact-head').filter((h) => h.dataset.group !== 'recent').every((h) => h.dataset.group.startsWith('h:') || h.dataset.group.startsWith('f:h:')), 'by helper: every head is a helper group (or, past 8 rows, a folder head inside one)');
+ok(verdictOf(box.querySelectorAll('.chat-artifact-head').filter((h) => h.dataset.group !== 'recent').every((h) => h.dataset.group.startsWith('h:') || h.dataset.group.startsWith('f:h:'))), 'by helper: every head is a helper group (or, past 8 rows, a folder head inside one)');
 const box2 = new N('div'); mod.renderArtifactList(box2, V, { app: APP });
 ok(box2.querySelector('.af-group').textContent === 'By helper' && box2.querySelector('.af-sort').textContent === 'Times changed' && JSON.parse(STORE.get('vs-artifacts-view')).group === 'helper', 'a close + reopen keeps "By helper" / "Times changed" (vs-artifacts-view)');
 const mainHead = box2.querySelectorAll('.chat-artifact-head').filter((h) => !h.dataset.group.startsWith('f:')).at(-1); // lane artifacts-by-intent: its folder heads follow it
-ok(mainHead.dataset.group === 'h:' && mainHead.textContent.startsWith('Main conversation'), `the main conversation's group is last ("${mainHead.textContent}")`);
+ok(mainHead.dataset.group === 'h:' && verdictOf(mainHead.textContent.startsWith('Main conversation')), `the main conversation's group is last ("${mainHead.textContent}")`);
 fire(mainHead, 'click');
 const box3 = new N('div'); mod.renderArtifactList(box3, V, { app: APP });
 ok(box3.querySelectorAll('.chat-artifact-head').filter((h) => !h.dataset.group.startsWith('f:')).at(-1).dataset.fold === 'shut', 'a folded group is remembered per group kind');
@@ -272,7 +272,7 @@ const mHand = menuOf((r) => r.dataset.key && r.dataset.key.includes('handed.md')
 ok(labels(mHand) === "Open beside | Show in Files | Copy path | — | Open helper-A's conversation", `a hand-over: ${labels(mHand)}`);
 const mSvc = menuOf((r) => r.dataset.kind === 'service');
 ok(labels(mSvc) === 'Copy URL | Open in a new tab | Show in Ports | Copy the machine-local address | Show the job', `a service keeps its five: ${labels(mSvc)}`);
-ok([mDoc, mHand, mSvc].flat().every((i) => !i.disabled), 'no item is disabled');
+ok(verdictOf([mDoc, mHand, mSvc].flat().every((i) => !i.disabled)), 'no item is disabled');
 mDoc[2].action();
 ok(globalThis.__copied === ROWS.find((r) => r.name === 'sec10_tail.md').path, 'Copy path copies the whole path');
 
@@ -286,7 +286,7 @@ ok(DOC.activeElement === rowsIn(kb)[0], '↓ from the filter → the first row')
 fire(rowsIn(kb)[0], 'keydown', { key: 'ArrowDown' }); fire(rowsIn(kb)[1], 'keydown', { key: 'ArrowDown' }); fire(rowsIn(kb)[2], 'keydown', { key: 'ArrowUp' });
 ok(DOC.activeElement === rowsIn(kb)[1], '↓ ↓ ↑ → the second row');
 fire(rowsIn(kb)[1], 'keydown', { key: 'Enter' });
-ok(kopened && kopened.key === rowsIn(kb)[1].dataset.key, 'Enter opens that row (beside the chat)');
+ok(gateOf(kopened) && kopened.key === rowsIn(kb)[1].dataset.key, 'Enter opens that row (beside the chat)');
 
 console.log('⑦ the band rule · a long helper · LRM · the eviction note last');
 const small = viewOf(ROWS.filter((r) => r.kind === 'doc').slice(0, 7));
@@ -296,27 +296,27 @@ const longH = 'h'.repeat(120);
 const lv = viewOf([{ key: 'L', kind: 'doc', name: '<mark>x</mark>.md', path: '/w/\u202eevil/<mark>x</mark>.md', lastAt: T0, writes: 1, edits: 0, via: { kind: 'subagent', name: longH } }], { full: true });
 const lb = new N('div'); const lc = mod.renderArtifactList(lb, lv, {}); typeQ(lc, 'x');
 const lr = rowsIn(lb)[0];
-ok(lr.querySelector('.chat-artifact-meta').textContent.includes(longH) && lr.title.includes(longH), 'a 120-char helper is whole in the meta (CSS ellipsis) and in the title');
-ok(lr.title.startsWith('\u200e/w/'), 'the title\'s path starts with an LRM (the RTL-mark rule kept)');
+ok(gateOf(lr.querySelector('.chat-artifact-meta').textContent.includes(longH)) && verdictOf(lr.title.includes(longH)), 'a 120-char helper is whole in the meta (CSS ellipsis) and in the title');
+ok(verdictOf(lr.title.startsWith('\u200e/w/')), 'the title\'s path starts with an LRM (the RTL-mark rule kept)');
 ok(lr.querySelector('.chat-artifact-name').childNodes.map((n) => n.tagName).join() === '#text,mark,#text' && lr.querySelector('.chat-artifact-name').textContent === '<mark>x</mark>.md', 'a name containing "<mark>" is text (only OUR one mark element)');
-ok(lb.querySelector('.af-list').childNodes.at(-1).classList.contains('af-full'), 'the eviction note stays last');
+ok(verdictOf(lb.querySelector('.af-list').childNodes.at(-1).classList.contains('af-full')), 'the eviction note stays last');
 
 console.log('⑧ the WINDOW (B): rail, column sort, the same model, rows patched, live');
 const wv = await legWindowModel(mod);
-ok(wv.all && wv.n === 217, `all ${wv.n} rows in the model's order (the bands, newest first — no column clicked)`);
-ok(wv.code && wv.helperRail, 'a rail click = the group filter (代码 174; a helper) in the model\'s order');
-ok(wv.nameSort && wv.nameRev, 'a column head sorts (name ↑, again ↓) through sortRows');
-ok(wv.kept, 'a column sort moves row nodes, never rebuilds one');
-ok(wv.filter, 'the filter box: filterRows (a helper label matches)');
-ok(wv.live, 'the live relay: a refresh of the conversation lands a new row and the counts');
-ok(/^foryou For you · \d+ \| made Made here · \d+ \| touched Touched · \d+$/.test(wv.bands), `no column clicked: a thin head row per band, the rail's words — where «for you» ends (${wv.bands})`);
-ok(wv.pathSort, 'the Path column sorts by the folder it shows (sortRows path = pathWord); the band rows go while a column sorts');
-ok(wv.bandReset && wv.allReset, 'the rail\'s band or All after a column sort ⇒ the bands\' order again, band rows back (one gesture)');
-ok(wv.recent, 'the rail\'s «Recent» ⇒ recentOf\'s rows, NEWEST FIRST, no band heads (r4 — r3 sorted the five by band: the newest two last)');
+ok(gateOf(wv.all) && wv.n === 217, `all ${wv.n} rows in the model's order (the bands, newest first — no column clicked)`);
+ok(gateOf(wv.code) && verdictOf(wv.helperRail), 'a rail click = the group filter (代码 174; a helper) in the model\'s order');
+ok(gateOf(wv.nameSort) && verdictOf(wv.nameRev), 'a column head sorts (name ↑, again ↓) through sortRows');
+ok(verdictOf(wv.kept), 'a column sort moves row nodes, never rebuilds one');
+ok(verdictOf(wv.filter), 'the filter box: filterRows (a helper label matches)');
+ok(verdictOf(wv.live), 'the live relay: a refresh of the conversation lands a new row and the counts');
+ok(verdictOf(/^foryou For you · \d+ \| made Made here · \d+ \| touched Touched · \d+$/.test(wv.bands)), `no column clicked: a thin head row per band, the rail's words — where «for you» ends (${wv.bands})`);
+ok(verdictOf(wv.pathSort), 'the Path column sorts by the folder it shows (sortRows path = pathWord); the band rows go while a column sorts');
+ok(gateOf(wv.bandReset) && verdictOf(wv.allReset), 'the rail\'s band or All after a column sort ⇒ the bands\' order again, band rows back (one gesture)');
+ok(verdictOf(wv.recent), 'the rail\'s «Recent» ⇒ recentOf\'s rows, NEWEST FIRST, no band heads (r4 — r3 sorted the five by band: the newest two last)');
 console.log('  · rail: ' + wv.rail);
 const reg = (globalThis.__wt || []).find((r) => r.type === 'artifacts');
 let replayed = null; reg && reg.replay({ openArtifacts: (o) => { replayed = o; } }, { action: 'openArtifacts', sessionId: 's9', name: 'personal-life' }, { syncId: 'y' });
-ok(reg && reg.action === 'openArtifacts' && reg.icon && replayed && replayed.sessionId === 's9' && replayed.name === 'personal-life' && replayed.syncId === 'y', 'registered: type artifacts, action openArtifacts; the replay re-opens {sessionId, name}');
+ok(gateOf(reg) && reg.action === 'openArtifacts' && gateOf(reg.icon) && gateOf(replayed) && replayed.sessionId === 's9' && replayed.name === 'personal-life' && replayed.syncId === 'y', 'registered: type artifacts, action openArtifacts; the replay re-opens {sessionId, name}');
 
 console.log('⑧b lane artifacts-by-intent — the INTENT grouping (the person\'s choice; the KIND is the default since 2026-11-14): the bands, folder heads, the names a person tells apart, the phone ⋯ / ✕');
 STORE.clear();
@@ -334,26 +334,26 @@ const ic = mod.renderArtifactList(ib, V, { app: IAPP, onOpen() { }, close: () =>
 const iheads = ib.querySelectorAll('.chat-artifact-head');
 const ikeys = iheads.map((h) => h.dataset.group);
 const fi = ikeys.filter((k) => k.startsWith('f:'));
-ok(ikeys[0] === 'i:foryou' && ikeys[1] === 'i:made' && fi.length >= 2 && fi.every((k) => k.startsWith('f:i:made:')) && ikeys.at(-2) === 'recent' && ikeys.at(-1) === 'i:touched',
+ok(ikeys[0] === 'i:foryou' && ikeys[1] === 'i:made' && fi.length >= 2 && gateOf(fi.every((k) => k.startsWith('f:i:made:'))) && ikeys.at(-2) === 'recent' && ikeys.at(-1) === 'i:touched',
   `the intent CHOICE ⇒ the bands: for you · made here (its folder heads) · 最近 (only the folded code) · touched (${ikeys.join(' ')})`);
 const bh = (k) => iheads.find((h) => h.dataset.group === k);
-ok(bh('i:foryou').classList.contains('af-head-band') && bh('i:foryou').dataset.band === 'foryou' && bh('i:foryou').textContent === 'For you · 2', `the «for you» head is a band head with its count ("${bh('i:foryou').textContent}")`);
+ok(gateOf(bh('i:foryou').classList.contains('af-head-band')) && bh('i:foryou').dataset.band === 'foryou' && bh('i:foryou').textContent === 'For you · 2', `the «for you» head is a band head with its count ("${bh('i:foryou').textContent}")`);
 ok(bh('i:touched').dataset.fold === 'shut' && bh('i:touched').textContent === 'Touched 174 code files', `«touched» folded behind its count ("${bh('i:touched').textContent}")`);
 const frows = rowsIn(ib).filter((r) => r.classList.contains('af-in-folder'));
-ok(frows.length === 41 && rowsIn(ib).filter((r) => !r.classList.contains('af-in-folder')).length === 2 + 3 && fi.every((k) => bh(k).classList.contains('af-head-folder')), `the 41 made rows sit in their folders (indented), the 2 «for you» + the 3 最近 rows flat (${frows.length})`);
+ok(frows.length === 41 && rowsIn(ib).filter((r) => !r.classList.contains('af-in-folder')).length === 2 + 3 && verdictOf(fi.every((k) => bh(k).classList.contains('af-head-folder'))), `the 41 made rows sit in their folders (indented), the 2 «for you» + the 3 最近 rows flat (${frows.length})`);
 const fsum = fi.map((k) => Number(bh(k).textContent.split(' · ').pop())).reduce((a, b) => a + b, 0);
 ok(fsum === 41 && !ib.querySelector('.af-more'), `the folder heads count every made row once (${fi.map((k) => bh(k).textContent).join(' | ')}) — no «show more»`);
 const keep = new Map(rowsIn(ib).map((r) => [r.dataset.key, r])), keepN = keep.size;
 fire(bh(fi[0]), 'click');
 const afterFold = rowsIn(ib);
 const foldedDir = fi[0].slice('f:i:made:'.length);
-ok(afterFold.length > 0 && !afterFold.some((r) => r.classList.contains('af-in-folder') && M.whereOf(r._afRow, {}).key === foldedDir) && rowsIn(ib).length < keepN && M.viewFrom(JSON.parse(STORE.get('vs-artifacts-view'))).collapsed.intent.includes(fi[0]) && bh(fi[0]).dataset.fold === 'shut', `a folder head folds its rows (remembered on this device); its newest now surface in 最近 (${afterFold.filter((r) => !r.classList.contains('af-in-folder')).length - 2} there)`);
+ok(afterFold.length > 0 && !afterFold.some((r) => r.classList.contains('af-in-folder') && M.whereOf(r._afRow, {}).key === foldedDir) && rowsIn(ib).length < keepN && gateOf(M.viewFrom(JSON.parse(STORE.get('vs-artifacts-view'))).collapsed.intent.includes(fi[0])) && bh(fi[0]).dataset.fold === 'shut', `a folder head folds its rows (remembered on this device); its newest now surface in 最近 (${afterFold.filter((r) => !r.classList.contains('af-in-folder')).length - 2} there)`);
 fire(bh(fi[0]), 'click');
-ok(rowsIn(ib).every((r) => keep.get(r.dataset.key) === r), 'fold + unfold: every row is the node it was (keyed, never rebuilt)');
+ok(verdictOf(rowsIn(ib).every((r) => keep.get(r.dataset.key) === r)), 'fold + unfold: every row is the node it was (keyed, never rebuilt)');
 const iv = viewOf([{ key: 'ra', kind: 'doc', name: 'README.md', path: '/w/proj/traces/v3/README.md', lastAt: T0, writes: 1, edits: 0, intent: 'made' }, { key: 'rb', kind: 'doc', name: 'README.md', path: '/w/proj/referee3/README.md', lastAt: T0 - 1, writes: 1, edits: 2, intent: 'made', via: { kind: 'subagent', name: 'verify' } }], { cwd: '/w/proj' });
 const nb = new N('div'); mod.renderArtifactList(nb, iv, {});
 const nr = rowsIn(nb).map((r) => [r.querySelector('.chat-artifact-name').textContent, r.querySelector('.chat-artifact-meta').textContent, r.querySelector('.chat-artifact-name').classList.contains('af-name-path')]);
-ok(nr[0][0] === '\u200ev3/README.md' && nr[1][0] === '\u200ereferee3/README.md' && nr[0][2] && nr[1][2], `two README.md: each wears its distinguishing suffix, cut from its START (rtl + LRM — the file's name stays) (${nr.map((x) => x[0].slice(1)).join(' · ')})`);
+ok(nr[0][0] === '\u200ev3/README.md' && nr[1][0] === '\u200ereferee3/README.md' && gateOf(nr[0][2]) && verdictOf(nr[1][2]), `two README.md: each wears its distinguishing suffix, cut from its START (rtl + LRM — the file's name stays) (${nr.map((x) => x[0].slice(1)).join(' · ')})`);
 ok(nr[0][1] === 'traces/v3 · Document' && nr[1][1] === 'referee3 · Document · verify · Changed 2 times', `the meta line names the FOLDER first (${nr.map((x) => '"' + x[1] + '"').join(' · ')})`);
 typeQ(nb._afList, 'traces');
 console.log('  round 2: a row from elsewhere leads with WHO and WHERE; inside a folder head the bare name and no folder; the root by its name');
@@ -364,36 +364,36 @@ const rb = new N('div'); mod.renderArtifactList(rb, viewOf(R2, { cwd: '/w/proj' 
 const rrow = (k) => rowsIn(rb).find((r) => r.dataset.key === k), rnm = (r) => r.querySelector('.chat-artifact-name').textContent, rmt = (r) => r.querySelector('.chat-artifact-meta').textContent;
 ok(rmt(rrow('r2:ref')) === 'referee · …/out · Document' && rrow('r2:ref').title === '\u200e/var/tmp/vibespace-lanes/wt-referee/out/review.md\nreferee', `a hand-over from a helper's folder: «${rmt(rrow('r2:ref'))}» — the whole path on hover / long-press only`);
 const rd = rrow('r2:traces/v3/README.md'), rr = rrow('r2:referee3/README.md');
-ok(rd.classList.contains('af-in-folder') && rnm(rd) === 'README.md' && !rd.querySelector('.chat-artifact-name').classList.contains('af-name-path') && rmt(rd) === 'Document' && rmt(rr) === 'Document · verify', `inside a folder head: the BARE name, no folder on the meta line («${rnm(rd)}» «${rmt(rd)}» · «${rmt(rr)}»)`);
+ok(gateOf(rd.classList.contains('af-in-folder')) && rnm(rd) === 'README.md' && !rd.querySelector('.chat-artifact-name').classList.contains('af-name-path') && rmt(rd) === 'Document' && rmt(rr) === 'Document · verify', `inside a folder head: the BARE name, no folder on the meta line («${rnm(rd)}» «${rmt(rd)}» · «${rmt(rr)}»)`);
 const rootHead = rb.querySelectorAll('.chat-artifact-head').find((h) => h.dataset.group === 'f:i:made::/w/proj'); // r3: a head is keyed by its DIRECTORY
-ok(rootHead && rootHead.textContent === 'proj · 1', `the root folder's head says the cwd's own name («${rootHead && rootHead.textContent}»), never «./»`);
+ok(gateOf(rootHead) && rootHead.textContent === 'proj · 1', `the root folder's head says the cwd's own name («${rootHead && rootHead.textContent}»), never «./»`);
 typeQ(rb._afList, 'README');
-ok(rowsIn(rb).length === 2 && rowsIn(rb).every((r) => !r.classList.contains('af-in-folder') && rnm(r).startsWith('\u200e') && rnm(r).endsWith('/README.md')), `a filter result (flat, no head names the folder) keeps the distinguishing suffix (${rowsIn(rb).map((r) => rnm(r).slice(1)).join(' · ')})`);
+ok(rowsIn(rb).length === 2 && verdictOf(rowsIn(rb).every((r) => !r.classList.contains('af-in-folder') && rnm(r).startsWith('\u200e') && rnm(r).endsWith('/README.md'))), `a filter result (flat, no head names the folder) keeps the distinguishing suffix (${rowsIn(rb).map((r) => rnm(r).slice(1)).join(' · ')})`);
 ok(rowsIn(nb).length === 1 && rowsIn(nb)[0].dataset.key === 'ra', 'a folder name filters ("traces")');
 const mb = ib.querySelector('.af-menu');
 ok(!!mb && !!ib.querySelector('.af-close') && !!ib.querySelector('.af-auto'), 'the top bar carries the phone\'s ⋯ and ✕ (chat.css shows them on a finger device) beside the desktop\'s switch row');
 fire(mb, 'click');
 const im = globalThis.__menu;
-ok(im.length === 1 && im[0].label === 'Open new documents automatically' && /chan-menu-check-on/.test(im[0].labelHtml), 'the ⋯ holds the auto-open switch, checked while it is on');
+ok(im.length === 1 && im[0].label === 'Open new documents automatically' && verdictOf(/chan-menu-check-on/.test(im[0].labelHtml)), 'the ⋯ holds the auto-open switch, checked while it is on');
 im[0].action();
 ok(SET.get('artifacts.autoOpenDocs') === false && ib.querySelector('.af-auto-cb').checked === false, 'its item turns artifacts.autoOpenDocs off (the same synced setting; the row\'s checkbox follows)');
 fire(ib.querySelector('.af-close'), 'click');
 ok(iclosed === 1, 'the ✕ closes the sheet');
 const phone = (() => { const m = /@media \(max-width: 480px\), \(pointer: coarse\) and \(max-width: 1023px\) \{([\s\S]*?)\n\}/.exec(SRC.css); return m ? m[1] : ''; })();
 const rule = (sel) => { const m = new RegExp('\\n\\s*' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}').exec(phone); return m ? m[1] : ''; };
-ok(/top:\s*0 !important/.test(rule('.chat-status-dropdown.chat-artifacts-panel')) && /bottom:\s*0 !important/.test(rule('.chat-status-dropdown.chat-artifacts-panel')) && /max-height:\s*none/.test(rule('.chat-status-dropdown.chat-artifacts-panel')), 'chat.css: on a finger device (< 1024 px, or ≤ 480) the panel is a FULL-HEIGHT sheet (top 0, bottom 0, no max-height)');
-ok(/display:\s*none/.test(rule('.chat-artifacts-panel .af-auto')) && /display:\s*inline-flex/.test(rule('.chat-artifacts-panel .af-expand, .chat-artifacts-panel .af-menu, .chat-artifacts-panel .af-close')) && /width:\s*44px/.test(rule('.chat-artifacts-panel .af-expand, .chat-artifacts-panel .af-menu, .chat-artifacts-panel .af-close')), '…the switch row leaves the header for the ⋯; the ⤢ / ⋯ / ✕ are 44 px');
-ok(/font-size:\s*16px/.test(rule('.chat-artifacts-panel .af-filter')) && /font-size:\s*16px/.test(rule('.chat-artifacts-panel .chat-artifact-name')) && /min-height:\s*44px/.test(rule('.chat-artifacts-panel .chat-artifact-head')), '…the field and the names 16 px, the heads 44 px tall');
+ok(gateOf(/top:\s*0 !important/.test(rule('.chat-status-dropdown.chat-artifacts-panel'))) && gateOf(/bottom:\s*0 !important/.test(rule('.chat-status-dropdown.chat-artifacts-panel'))) && verdictOf(/max-height:\s*none/.test(rule('.chat-status-dropdown.chat-artifacts-panel'))), 'chat.css: on a finger device (< 1024 px, or ≤ 480) the panel is a FULL-HEIGHT sheet (top 0, bottom 0, no max-height)');
+ok(gateOf(/display:\s*none/.test(rule('.chat-artifacts-panel .af-auto'))) && gateOf(/display:\s*inline-flex/.test(rule('.chat-artifacts-panel .af-expand, .chat-artifacts-panel .af-menu, .chat-artifacts-panel .af-close'))) && verdictOf(/width:\s*44px/.test(rule('.chat-artifacts-panel .af-expand, .chat-artifacts-panel .af-menu, .chat-artifacts-panel .af-close'))), '…the switch row leaves the header for the ⋯; the ⤢ / ⋯ / ✕ are 44 px');
+ok(gateOf(/font-size:\s*16px/.test(rule('.chat-artifacts-panel .af-filter'))) && gateOf(/font-size:\s*16px/.test(rule('.chat-artifacts-panel .chat-artifact-name'))) && verdictOf(/min-height:\s*44px/.test(rule('.chat-artifacts-panel .chat-artifact-head'))), '…the field and the names 16 px, the heads 44 px tall');
 
 console.log('  round 3: a head tapped WHILE FILTERING is a peek — clearing the filter restores the saved folds');
 const pk = await legPeek(mod);
-ok(pk.typedShut && pk.peekOpen, 'q="cod" (a kind word\'s prefix — «touched» left folded): a tap opens it with its 174 rows, the stored view untouched', JSON.stringify(pk));
-ok(pk.peekShut, '…a second tap folds it again while filtering (a peek either way — r2 could not refold)');
-ok(pk.cleared && pk.fresh, 'clearing the filter ⇒ «touched» folded again (the saved folds); a NEW popover on the device too — never the 217-row list', JSON.stringify(pk));
-ok(pk.saved, 'with no filter typed a tap still saves the fold (the person\'s choice, remembered on the device)');
+ok(gateOf(pk.typedShut) && verdictOf(pk.peekOpen), 'q="cod" (a kind word\'s prefix — «touched» left folded): a tap opens it with its 174 rows, the stored view untouched', JSON.stringify(pk));
+ok(verdictOf(pk.peekShut), '…a second tap folds it again while filtering (a peek either way — r2 could not refold)');
+ok(gateOf(pk.cleared) && verdictOf(pk.fresh), 'clearing the filter ⇒ «touched» folded again (the saved folds); a NEW popover on the device too — never the 217-row list', JSON.stringify(pk));
+ok(verdictOf(pk.saved), 'with no filter typed a tap still saves the fold (the person\'s choice, remembered on the device)');
 console.log('  round 4: the device-kept folds list keeps the NEWEST 200 (one rule for every family)');
 const fc = await legFoldCap(mod);
-ok(fc.kept && fc.oldestGone && fc.seed, '200 folds stored (+ the seeded «touched» behind them), a 201st tap («Made here») ⇒ it survives the save / load round trip (first in the list, shut in a later popover); the OLDEST of the person\'s folds is the one gone — the seed stays and «touched» stays shut (r5)', JSON.stringify(fc));
+ok(gateOf(fc.kept) && gateOf(fc.oldestGone) && verdictOf(fc.seed), '200 folds stored (+ the seeded «touched» behind them), a 201st tap («Made here») ⇒ it survives the save / load round trip (first in the list, shut in a later popover); the OLDEST of the person\'s folds is the one gone — the seed stays and «touched» stays shut (r5)', JSON.stringify(fc));
 
 console.log('⑨ CONTROLS (patched copies — each must be RED)');
 const unbounded = SRC.css.replace(/max-height:\s*min\(calc\(100vh - var\(--taskbar-height, 0px\) - 24px\), var\(--af-room, 100vh\)\);/, '');
@@ -419,4 +419,4 @@ ok(savedPeek !== SRC.card && !(pkR.peekOpen && pkR.cleared && pkR.fresh), 'CONTR
 
 await BUILD.dispose();
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASSED'} (${pass} passed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

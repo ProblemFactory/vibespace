@@ -20,7 +20,7 @@ import { scratchDir, landingWriter } from './scratch.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : '')); } return !!c; };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : '')); } return !!c; };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const S = JSON.stringify;
 const { SyncStore } = require('../src/sync-store.js');
@@ -35,9 +35,9 @@ const utils = read('src/lib/utils.js');
 const c0 = utils.indexOf('class StateSync {'), c1 = utils.indexOf('\nlet _stateSync = null;');
 const CLASS = c0 > 0 && c1 > c0 ? utils.slice(c0, c1) : '';
 console.log('§0 the cuts');
-ok(/case 'state-set'/.test(CASES) && /case 'state-resync'/.test(CASES) && /store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES) && /const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASES), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim (the value is data.value off the drafts belt — lane stop-refills-composer)');
-ok(/init\(storeName\) \{/.test(CLASS) && /s\.loaded = \(async \(\) => \{/.test(CLASS) && /_applyOp\(storeName, op\)/.test(CLASS), 'src/lib/utils.js: the client StateSync class cut verbatim (init answers its one load)');
-ok(/saveDraft\('doc', draftId, /.test(read('src/lib/doc-window-ui.js')) && /export function saveDraft\(type, id, value\) \{\s*_stateSync\?\.set\('drafts', type \+ ':' \+ id, value\);/.test(utils), 'the Doc window writes through saveDraft(\'doc\', <host>\\u0001<path>) = the drafts store\'s doc:<host>\\u0001<path> key (the path below)');
+ok(gateOf(/case 'state-set'/.test(CASES)) && gateOf(/case 'state-resync'/.test(CASES)) && gateOf(/store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES)) && verdictOf(/const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASES)), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim (the value is data.value off the drafts belt — lane stop-refills-composer)');
+ok(gateOf(/init\(storeName\) \{/.test(CLASS)) && gateOf(/s\.loaded = \(async \(\) => \{/.test(CLASS)) && verdictOf(/_applyOp\(storeName, op\)/.test(CLASS)), 'src/lib/utils.js: the client StateSync class cut verbatim (init answers its one load)');
+ok(gateOf(/saveDraft\('doc', draftId, /.test(read('src/lib/doc-window-ui.js'))) && verdictOf(/export function saveDraft\(type, id, value\) \{\s*_stateSync\?\.set\('drafts', type \+ ':' \+ id, value\);/.test(utils)), 'the Doc window writes through saveDraft(\'doc\', <host>\\u0001<path>) = the drafts store\'s doc:<host>\\u0001<path> key (the path below)');
 
 function world(cases = CASES, { failRead = false, cls = CLASS } = {}) {
   const dir = scratchDir('dcsync');
@@ -130,13 +130,13 @@ console.log('§3 init() is one load');
 console.log('§5 control');
 {
   const from = "if (store && store.clientWrites !== false && data.key && typeof data.key === 'string') {"; // lane agent-feedback: the guard reads clientWrites (a server-owned mirror takes no client write)
-  ok(CASES.includes(from), 'control target present: the state-set key check');
+  ok(verdictOf(CASES.includes(from)), 'control target present: the state-set key check');
   const w = world(CASES.replace(from, "if (store && store.clientWrites !== false && data.key && typeof data.key === 'string' && data.key.startsWith('chat:')) {"));
   const { seenB, held } = await roundTrip(w);
   ok(held === undefined && seenB.length === 0, 'CONTROL: a state-set that keeps only chat: keys ⇒ the store holds nothing and B hears nothing (① would be red)', { held, seenB });
   w.done();
   const old = 'if (this.stores[storeName]) return this.stores[storeName].loaded;';
-  ok(CLASS.includes(old), 'control target present: init\'s second caller');
+  ok(verdictOf(CLASS.includes(old)), 'control target present: init\'s second caller');
   const w2 = world(CASES, { cls: CLASS.replace(old, 'if (this.stores[storeName]) return;') });
   const A = w2.client('A'); w2.stores.drafts.set(KEY, ROWS);
   const release = w2.hold(); A.sync.init('drafts');
@@ -146,4 +146,4 @@ console.log('§5 control');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

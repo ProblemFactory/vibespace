@@ -35,7 +35,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 try { execSync('command -v dtach', { stdio: 'ignore', shell: '/bin/bash' }); } catch { console.log('SKIP: dtach is not installed — a chat session cannot be created here'); process.exit(0); }
 let failed = 0, passed = 0, skipped = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
 const skip = (n) => { skipped++; console.log(`  ⊘ SKIP ${n}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -170,7 +170,7 @@ const cleanup = () => {
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-check('the worktree server answered', await waitServer());
+check('the worktree server answered', verdictOf(await waitServer()));
 
 // ── raw CDP ──
 const WebSocket = require('ws');
@@ -236,10 +236,10 @@ try {
   check('a live claude chat session through the real spawn path (stub CLI behind the real wrapper)', !!sid, frames.slice(-3));
   let env = null;
   for (let i = 0; i < 80 && !env; i++) { env = stubToken(); if (!env) await sleep(250); }
-  check('the stub has its session token and its browser pairs', !!env && /^vsst_/.test(env.VIBESPACE_SESSION_TOKEN) && /^vs-bk-/.test(env.AGENT_BROWSER_SESSION || ''), env && { tok: !!env.VIBESPACE_SESSION_TOKEN, sess: env.AGENT_BROWSER_SESSION });
+  check('the stub has its session token and its browser pairs', !!env && gateOf(/^vsst_/.test(env.VIBESPACE_SESSION_TOKEN)) && verdictOf(/^vs-bk-/.test(env.AGENT_BROWSER_SESSION || '')), env && { tok: !!env.VIBESPACE_SESSION_TOKEN, sess: env.AGENT_BROWSER_SESSION });
   const TOKEN = env && env.VIBESPACE_SESSION_TOKEN;
   for (let i = 0; i < 40; i++) { const r = await api('GET', '/api/active-sessions').catch(() => null); if (r?.body && JSON.stringify(r.body).includes(SID)) break; await sleep(250); }
-  check('the chat window attaches', await attach(sid));
+  check('the chat window attaches', verdictOf(await attach(sid)));
   await sleep(500);
 
   // ── ① + ② the turn: open the refusal page, file the claim ──
@@ -247,49 +247,49 @@ try {
   await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'sign in to the portal' }); true`);
   const gotCard = await waitFor(`!!document.querySelector('${CARD}') && [...document.querySelectorAll('.chat-msg')].some((m) => /I told you on the card in the chat/.test(m.textContent))`, 90000);
   const turns = () => (fs.existsSync(path.join(stubDir, 'turns.log')) ? fs.readFileSync(path.join(stubDir, 'turns.log'), 'utf8').slice(0, 3000) : null);
-  check('the turn ran: the CLI opened the page and filed the claim (its proposal offers nothing)', gotCard && /proposal bl-[0-9a-f]{8}: nothing can be offered here/.test(turns() || ''), turns());
+  check('the turn ran: the CLI opened the page and filed the claim (its proposal offers nothing)', gateOf(gotCard) && verdictOf(/proposal bl-[0-9a-f]{8}: nothing can be offered here/.test(turns() || '')), turns());
   if (realAb.ok) {
     const b0 = hits.find((h) => h.path === '/beacon' && h.host.startsWith(HOST));
     check('① the agent\'s own chromium browser reached the fixture page by its name (host-resolver-rules) and its script read navigator.webdriver = false — the AUTOMATION FLAG, in the production shape (rung D\'s spawn config)', !!b0 && b0.wd === 'false', hits.slice(0, 6));
   } else skip('① the automation flag on a real browser: ' + realAb.error);
   const c0 = await cardState();
   const order = await evalJs(`(() => { const all = [...document.querySelectorAll('.chat-msg')]; const card = all.findIndex((m) => m.matches('${CARD}')); const bash = all.findIndex((m) => m.matches('[data-tool-id="toolu_bp1"]') || !!m.querySelector('[data-tool-id="toolu_bp1"]')); const words = all.findIndex((m) => /I told you on the card in the chat/.test(m.textContent) && !m.matches('${CARD}')); return { card, bash, words, n: all.length }; })()`);
-  check('② ONE card, AT THE CLAIM\'S POSITION: after the agent\'s Bash card, before its closing words', c0 && c0.n === 1 && order.bash >= 0 && order.card > order.bash && (order.words < 0 || order.card < order.words), { c0, order });
+  check('② ONE card, AT THE CLAIM\'S POSITION: after the agent\'s Bash card, before its closing words', gateOf(c0) && c0.n === 1 && order.bash >= 0 && order.card > order.bash && (order.words < 0 || order.card < order.words), { c0, order });
   const prop0 = c0 ? ((await api('GET', `/api/browser/proposals/${c0.id}`)).body || {}).proposal : null;
   check('② the proposal (GET, the user\'s route): unavailable from birth — plan none, the site = signin.test', !!prop0 && prop0.state === 'unavailable' && prop0.plan.kind === 'none' && prop0.plan.why === 'unavailable' && prop0.site === HOST, prop0);
   const D5 = SW.NO_SWITCH_WORDS.unavailable;
-  check('② the card says who claims what, then D5\'s sentence (⚙ → Plugins → Install plugin…, Change build…) — no plan list, no Approve, no Reject', c0 && c0.state === 'unavailable' && /The agent says a site refused its browser/.test(c0.title) && /signin\.test refused to sign in this browser/.test(c0.claim) && c0.plan.length === 0 && c0.none === D5 && !c0.approve && !c0.reject, c0);
+  check('② the card says who claims what, then D5\'s sentence (⚙ → Plugins → Install plugin…, Change build…) — no plan list, no Approve, no Reject', gateOf(c0) && c0.state === 'unavailable' && gateOf(/The agent says a site refused its browser/.test(c0.title)) && gateOf(/signin\.test refused to sign in this browser/.test(c0.claim)) && c0.plan.length === 0 && c0.none === D5 && !c0.approve && !c0.reject, c0);
   await shot('proposal-card-desktop', CARD);
   const items = ((await api('GET', '/api/user-todos')).body || {}).todos;
   const mine = (items && items.open || []).filter((i) => i.origin === 'browser' && /signin\.test refused its browser/.test(i.text || ''));
-  check('② ONE For-you NOTICE (origin browser, no Approve) carrying the card\'s words', mine.length === 1 && mine[0].kind === 'notice' && !mine[0].action && String(mine[0].detail || '').includes(D5), items && items.open);
+  check('② ONE For-you NOTICE (origin browser, no Approve) carrying the card\'s words', mine.length === 1 && mine[0].kind === 'notice' && !mine[0].action && verdictOf(String(mine[0].detail || '').includes(D5)), items && items.open);
 
   // ── ③ the phone ──
   console.log('③ the phone (390 px): the card fits, its sentence wraps');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp('Page.reload', {}); await waitApp(); await sleep(800);
-  check('③ the chat attaches on the phone', await attach(sid));
+  check('③ the chat attaches on the phone', verdictOf(await attach(sid)));
   await waitFor(`!!document.querySelector('${CARD}')`, 20000);
   // ckpt61 hosted cure (bl-browser-a): the card's buttons read BY KIND — a decision (Approve / Reject, the actions row) or the
   // no-switch line's own doors (ui-needs-a-button pick 3, browser-profiles-19: «Install a browser plugin…», «Agent browser…»)
   const phoneProbe = () => evalJs(`(() => { const c = document.querySelector('${CARD}'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const vw = window.innerWidth; const r = c.getBoundingClientRect(); const over = [...c.querySelectorAll('*')].filter((e) => { const q = e.getBoundingClientRect(); return q.width > 0 && (q.right > vw + 0.5 || q.left < -0.5 || e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible'); }).map((e) => e.className || e.tagName); const none = c.querySelector('.chat-browser-proposal-none'); const rows = (() => { if (!none) return 0; const rg = document.createRange(); rg.selectNodeContents(none); return new Set([...rg.getClientRects()].filter((q) => q.width > 0.5).map((q) => Math.round(q.top))).size; })(); return { vw, card: { left: r.left, right: r.right, width: r.width }, over, rows, buttons: [...c.querySelectorAll('button')].filter((b) => b.offsetParent).length, decisions: [...c.querySelectorAll('.chat-browser-proposal-approve, .chat-browser-proposal-reject')].filter((b) => b.offsetParent).length, actionsShown: (() => { const a = c.querySelector('.chat-browser-proposal-actions'); return !!a && !!a.offsetParent && getComputedStyle(a).display !== 'none'; })(), shown: [...c.querySelectorAll('button')].filter((b) => b.offsetParent).map((b) => ({ door: b.dataset.door || null, label: b.textContent, inDoors: !!b.closest('.chat-browser-proposal-none-doors'), right: Math.round(b.getBoundingClientRect().right) })) }; })()`);
   const phone = await phoneProbe();
-  check('③ nothing of the card is wider than the 390 px screen, and nothing inside it scrolls sideways', phone && phone.vw <= 390 && phone.card.right <= phone.vw + 0.5 && phone.card.left >= -0.5 && phone.over.length === 0, phone);
+  check('③ nothing of the card is wider than the 390 px screen, and nothing inside it scrolls sideways', gateOf(phone) && phone.vw <= 390 && phone.card.right <= phone.vw + 0.5 && phone.card.left >= -0.5 && phone.over.length === 0, phone);
   // THE LAW (主开发 20:31Z, ckpt61's hosted red): the unavailable card shows NO decision button and its sentence wraps; the only
   // buttons are the no-switch line's own two doors, by name, inside its doors element, each fitting the card; a real press on
   // each opens its dialog (the old leg counted every button: 2 since 2aa089967 drew the doors — the product is right)
   const DOORS3 = [['browser-plugin', 'Install a browser plugin…', true], ['agent-browser', 'Agent browser…', true]];
-  check('③ its sentence wraps, and NO decision button shows (no Approve, no Reject, the actions row hidden)', phone && phone.rows > 1 && phone.decisions === 0 && phone.actionsShown === false, phone);
-  check('③ the only buttons are the no-switch line\'s own two doors, by name, inside its doors element, within the card', phone && JSON.stringify(phone.shown.map((b) => [b.door, b.label, b.inDoors])) === JSON.stringify(DOORS3) && phone.shown.every((b) => b.right <= phone.card.right + 0.5), phone && phone.shown);
+  check('③ its sentence wraps, and NO decision button shows (no Approve, no Reject, the actions row hidden)', gateOf(phone) && phone.rows > 1 && phone.decisions === 0 && phone.actionsShown === false, phone);
+  check('③ the only buttons are the no-switch line\'s own two doors, by name, inside its doors element, within the card', gateOf(phone) && JSON.stringify(phone.shown.map((b) => [b.door, b.label, b.inDoors])) === JSON.stringify(DOORS3) && verdictOf(phone.shown.every((b) => b.right <= phone.card.right + 0.5)), phone && phone.shown);
   const DOORS_SEL = `${CARD} .chat-browser-proposal-none-doors`;
   const pressPlugin = await realClick(`${DOORS_SEL} [data-door="browser-plugin"]`);
   const pluginOpen = pressPlugin && await waitFor("!!document.getElementById('plugin-install-dialog')", 10000);
-  check('③ a real press on «Install a browser plugin…» opens the plugin install dialog', pluginOpen, { pressPlugin, miss: lastMiss });
+  check('③ a real press on «Install a browser plugin…» opens the plugin install dialog', verdictOf(pluginOpen), { pressPlugin, miss: lastMiss });
   await evalJs("(() => { const d = document.getElementById('plugin-install-dialog'); if (d && d._shell) d._shell.door(); return true; })()");
   await waitFor("!document.getElementById('plugin-install-dialog')", 5000);
   const pressAgent = await realClick(`${DOORS_SEL} [data-door="agent-browser"]`);
   const agentOpen = pressAgent && await waitFor("[...window.app.wm.windows.values()].some((w) => w.type === 'browser-profiles')", 10000);
-  check('③ a real press on «Agent browser…» opens the Agent browser window', agentOpen, { pressAgent, miss: lastMiss });
+  check('③ a real press on «Agent browser…» opens the Agent browser window', verdictOf(agentOpen), { pressAgent, miss: lastMiss });
   await evalJs("(() => { for (const [id, w] of [...window.app.wm.windows]) if (w.type === 'browser-profiles') window.app.wm.closeWindow(id); return true; })()");
   // RED CONTROL: the same probe on this card with its decision row forced visible (the open state's Approve) reads it — the
   // decision count can fail; then the card is put back as it was
@@ -300,23 +300,23 @@ try {
   await shot('proposal-card-phone', CARD);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.reload', {}); await waitApp(); await sleep(800);
-  check('back on the desktop, the chat re-attaches with the card', await attach(sid) && await waitFor(`!!document.querySelector('${CARD}')`, 20000));
+  check('back on the desktop, the chat re-attaches with the card', gateOf(await attach(sid)) && verdictOf(await waitFor(`!!document.querySelector('${CARD}')`, 20000)));
 
   // ── ④ nobody approves what offers nothing ──
   console.log('④ owner-only, and nothing to approve');
   const ag = await api('POST', `/api/browser/proposals/${c0.id}/approve`, { shown: prop0 ? prop0.digest : 'pd-x' }, { Authorization: 'Bearer ' + TOKEN });
-  check('④ the agent\'s own bearer on Approve ⇒ 403 agent_forbidden', ag.status === 403 && ag.body && ag.body.code === 'agent_forbidden', ag);
+  check('④ the agent\'s own bearer on Approve ⇒ 403 agent_forbidden', ag.status === 403 && gateOf(ag.body) && ag.body.code === 'agent_forbidden', ag);
   const us = await api('POST', `/api/browser/proposals/${c0.id}/approve`, { shown: prop0 ? prop0.digest : 'pd-x' });
-  check('④ the user\'s Approve of it ⇒ 409 proposal_unavailable (the card offers none; nothing ran)', us.status === 409 && us.body && us.body.code === 'proposal_unavailable', us);
+  check('④ the user\'s Approve of it ⇒ 409 proposal_unavailable (the card offers none; nothing ran)', us.status === 409 && gateOf(us.body) && us.body.code === 'proposal_unavailable', us);
   const profs = ((await api('GET', '/api/browser/profiles')).body || {}).profiles || [];
   check('④ …and nothing moved: the card still unavailable, no profile made', (await cardState()).state === 'unavailable' && profs.length === 0, { card: await cardState(), profs: profs.map((p) => p.label) });
 
   // ── ⑤ the same words everywhere it shows ──
   console.log('⑤ a reload draws the same card; the For-you popup row says the sentence and offers no Approve');
   await cdp('Page.reload', {}); await waitApp(); await sleep(800);
-  check('⑤ the chat re-attaches', await attach(sid));
-  check('⑤ the reloaded card is the keeper\'s record: the same id, unavailable, still no buttons', await waitFor(`!!document.querySelector('${CARD}')`, 20000) && await (async () => { const c = await cardState(); return c && c.id === c0.id && c.state === 'unavailable' && c.none === D5 && !c.approve && !c.reject; })(), await cardState());
-  check('⑤ the For-you button opens the popup', await realClick('#taskbar-user-todos') && await waitFor(`[...document.querySelectorAll('#user-todos-popup:not(.hidden) [data-id]')].some((r) => /signin\\.test refused its browser/.test(r.textContent))`, 10000), lastMiss);
+  check('⑤ the chat re-attaches', verdictOf(await attach(sid)));
+  check('⑤ the reloaded card is the keeper\'s record: the same id, unavailable, still no buttons', gateOf(await waitFor(`!!document.querySelector('${CARD}')`, 20000)) && verdictOf(await (async () => { const c = await cardState(); return c && c.id === c0.id && c.state === 'unavailable' && c.none === D5 && !c.approve && !c.reject; })()), await cardState());
+  check('⑤ the For-you button opens the popup', gateOf(await realClick('#taskbar-user-todos')) && verdictOf(await waitFor(`[...document.querySelectorAll('#user-todos-popup:not(.hidden) [data-id]')].some((r) => /signin\\.test refused its browser/.test(r.textContent))`, 10000)), lastMiss);
   const row = await evalJs(`(() => { const r = [...document.querySelectorAll('#user-todos-popup [data-id]')].find((x) => /signin\\.test refused its browser/.test(x.textContent)); return r ? { text: r.textContent.slice(0, 600), approve: !!r.querySelector('.ut-proposal-approve') } : null; })()`);
   check('⑤ the popup row: the notice\'s words, no Approve', !!row && !row.approve, row);
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`); // close the popup
@@ -325,4 +325,4 @@ try {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));
 }
 console.log(`\n${failed ? 'FAILED' : 'ALL PASS'} (${passed} passed${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

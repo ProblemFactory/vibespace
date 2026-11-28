@@ -65,7 +65,7 @@ let pass = 0, fail = 0;
 // through to is never read as the product's verdict (the 2.369.414 mirror's red in test-browser-resume-ui §9 was one)
 const waits = { missed: [], judged: false };
 const missNote = () => waits.missed.length ? ` — THE STATE NEVER CAME: the wait before this judge timed out (${waits.missed.map((ms) => `${ms / 1000} s`).join(', ')}), so this red is that, not a verdict on the product` : '';
-const ok = (c, n, extra) => { const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -94,7 +94,7 @@ function jpegOf(w, h, tag = '') {
 
 { // r1100 CONTROL: the mark can be read — a wait that times out is named by the next red judge
   await until(() => false, 30, 10); const note = missNote(); waits.missed = []; waits.judged = false;
-  ok(/THE STATE NEVER CAME/.test(note) && note.includes('0.03 s'), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
+  ok(gateOf(/THE STATE NEVER CAME/.test(note)) && verdictOf(note.includes('0.03 s')), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
 }
 // ═══ ① PURE ═══════════════════════════════════════════════════════════════
 console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.1 shapes');
@@ -102,8 +102,8 @@ console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.
   // the measurement the rules stand on
   const fr = FIX.frames;
   ok(fr.default.frame[0] === 1280 && fr.default.frame[1] === 577 && fr.default.metadata[1] === 720, `measured: before any set the headless frame is ${fr.default.frame.join('×')} under a ${fr.default.metadata.join('×')} claim (lane J's fact, again)`);
-  ok(fr['set viewport 700 900'].frames.every((f) => f[0] === 700 && f[1] === 900) && fr['set viewport 700 900'].metadata.join() === '700,900', 'measured: `set viewport 700 900` ⇒ every frame 700×900 and the metadata 700×900 — the frame IS the page once a viewport is set');
-  ok(fr['set viewport 390 844 2'].page.dpr === 2 && fr['set viewport 390 844 2'].frames.every((f) => f[0] === 390 && f[1] === 844), 'measured: a device scale factor of 2 leaves the frame at the CSS size (390×844 under a page at DPR 2) — the fit asks for factor 1');
+  ok(gateOf(fr['set viewport 700 900'].frames.every((f) => f[0] === 700 && f[1] === 900)) && fr['set viewport 700 900'].metadata.join() === '700,900', 'measured: `set viewport 700 900` ⇒ every frame 700×900 and the metadata 700×900 — the frame IS the page once a viewport is set');
+  ok(fr['set viewport 390 844 2'].page.dpr === 2 && verdictOf(fr['set viewport 390 844 2'].frames.every((f) => f[0] === 390 && f[1] === 844)), 'measured: a device scale factor of 2 leaves the frame at the CSS size (390×844 under a page at DPR 2) — the fit asks for factor 1');
   ok(FIX.deviceScaleFactor['static page, set 700 900 2'].framesWithin4500ms === 0 && FIX.deviceScaleFactor['static page, set 700 900 1'].framesWithin4500ms === 1, 'measured: a factor change on a static page produced NO frame (the blank picture), a factor-1 change one');
   ok(FIX.headed['set viewport'].find((r) => r.set[0] === 390).frame.join() === '390,593' && FIX.headed['set viewport'].find((r) => r.set[0] === 500).frame.join() === '500,800', 'measured: headed, 390×760 comes back 390×593 (scaled) and 500×800 exact — the floor HEADED_MIN_W');
   ok(FIX.hashNav.upstreamFramesWithin3s === 0 && FIX.hashNav.records.length === 1 && FIX.hashNav.records[0].type === 'url', 'measured: a hash navigation sends ONE url record and no frame (the view could not tell "same pixels" from "no picture")');
@@ -113,7 +113,7 @@ console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.
   const pv = (w, h, o = {}) => FIT.paneViewport({ width: w, height: h, ...o });
   ok(pv(700, 900).width === 700 && pv(700, 900).height === 900 && pv(700, 900).drawScale === 1 && pv(700, 900).scale === 1, 'a 700×900 pane asks for a 700×900 page, drawn at net zoom 1, factor 1');
   ok(pv(390, 760, { dpr: 3 }).width === 390 && pv(390, 760, { dpr: 3 }).height === 760, 'DPR-aware = CSS px: a DPR-3 phone pane 390×760 asks for a 390-wide page (never 1170)');
-  { const a = pv(200, 150); ok(a.width === 240 && a.height === 180 && Math.abs(a.drawScale - 200 / 240) < 1e-9 && a.bounded, `a pane under the floor keeps its ASPECT (200×150 ⇒ ${a.width}×${a.height}, drawn ×${a.drawScale.toFixed(3)} — it fills the pane, never a band)`); }
+  { const a = pv(200, 150); ok(a.width === 240 && a.height === 180 && Math.abs(a.drawScale - 200 / 240) < 1e-9 && verdictOf(a.bounded), `a pane under the floor keeps its ASPECT (200×150 ⇒ ${a.width}×${a.height}, drawn ×${a.drawScale.toFixed(3)} — it fills the pane, never a band)`); }
   { const a = pv(390, 760, { floorW: 500 }); ok(a.width === 500 && a.height === Math.round(760 * 500 / 390) && Math.abs(a.drawScale * 500 - 390) < 1e-6, `the headed floor: 390×760 ⇒ ${a.width}×${a.height} (the pane's aspect, drawn ×${a.drawScale.toFixed(2)})`); }
   { const a = pv(5000, 3000); ok(a.width === 3840 && a.height === 2304, `a pane past the ceiling scales down with its aspect (5000×3000 ⇒ ${a.width}×${a.height})`); }
   ok(pv(0, 100) === null && pv(NaN, 5) === null, 'no size ⇒ no viewport');
@@ -146,18 +146,18 @@ console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.
   const [launchCmd, launchRes, vpCmd, vpRes] = m7;
   ok(launchCmd.action === 'launch' && vpCmd.action === 'viewport' && vpCmd.params.width === 700 && vpRes.id === vpCmd.id, 'the fixture\'s mirror: launch command/result, then the viewport command/result (same id)');
   const pend = { width: 700, height: 900, at: 1000, inFlight: true, id: null };
-  ok(FIT.ownViewportRecord(launchCmd, pend, 1100).own && FIT.ownViewportRecord(launchRes, pend, 1100).own, 'the launch pair that opens OUR call is ours (while it is in flight)');
+  ok(gateOf(FIT.ownViewportRecord(launchCmd, pend, 1100).own) && verdictOf(FIT.ownViewportRecord(launchRes, pend, 1100).own), 'the launch pair that opens OUR call is ours (while it is in flight)');
   const o = FIT.ownViewportRecord(vpCmd, pend, 1100);
-  ok(o.own && o.learnId === vpCmd.id, 'OUR viewport command is recognised by the size we asked for, and its id is learned');
+  ok(gateOf(o.own) && o.learnId === vpCmd.id, 'OUR viewport command is recognised by the size we asked for, and its id is learned');
   const pend2 = { ...pend, id: vpCmd.id };
-  ok(FIT.ownViewportRecord(vpRes, pend2, 1100).own && !FIT.ownViewportRecord(launchCmd, pend2, 1100).own, 'its result by the id; once the id is known, a later launch pair is somebody else\'s');
+  ok(gateOf(FIT.ownViewportRecord(vpRes, pend2, 1100).own) && !FIT.ownViewportRecord(launchCmd, pend2, 1100).own, 'its result by the id; once the id is known, a later launch pair is somebody else\'s');
   ok(!FIT.ownViewportRecord({ ...vpCmd, params: { ...vpCmd.params, width: 800 } }, pend, 1100).own && !FIT.ownViewportRecord(vpCmd, pend, 1000 + FIT.OWN_WINDOW_MS + 1).own && !FIT.ownViewportRecord(FIX.mirror['set viewport 390 844 2'][2], { width: 390, height: 844, at: 0, inFlight: true }, 10).own, 'another size, a stale ask, a factor-2 set are NOT ours');
   const ag = FIT.agentViewportOf(vpCmd);
-  ok(ag && ag.kind === 'viewport' && ag.width === 700 && ag.height === 900 && ag.scale === 1, 'an agent\'s `set viewport` is read off the command mirror');
+  ok(gateOf(ag) && ag.kind === 'viewport' && ag.width === 700 && ag.height === 900 && ag.scale === 1, 'an agent\'s `set viewport` is read off the command mirror');
   const dev = FIX.mirror['set device iPhone 12'];
   const agd = FIT.agentViewportOf(dev.find((r) => r.type === 'command' && r.action === 'device'));
   const dsz = FIT.deviceSizeOf(dev.find((r) => r.type === 'result' && r.action === 'device'));
-  ok(agd && agd.kind === 'device' && agd.device === 'iPhone 12' && dsz && dsz.width === 390 && dsz.height === 844 && dsz.scale === 3, 'an agent\'s `set device "iPhone 12"` is a flag too; its result names 390×844 @3 (measured)');
+  ok(gateOf(agd) && agd.kind === 'device' && agd.device === 'iPhone 12' && gateOf(dsz) && dsz.width === 390 && dsz.height === 844 && dsz.scale === 3, 'an agent\'s `set device "iPhone 12"` is a flag too; its result names 390×844 @3 (measured)');
   ok(FIT.agentViewportOf(launchCmd) === null && FIT.agentViewportOf({ type: 'command', action: 'click' }) === null && FIT.agentViewportOf(vpRes) === null, 'anything else is not a viewport choice');
 
   // 2.369.198: is a picture this fit's answer at all — an earlier fit's late frame / a frame before the daemon's mirror is not
@@ -183,7 +183,7 @@ console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.
   // the picture clocks
   const P = (o) => FIT.pictureState({ connected: true, now: 100000, ...o });
   ok(P({ frames: 0, openAt: 99000 }).state === 'ok' && P({ frames: 0, openAt: 97500 }).state === 'waiting' && P({ frames: 0, openAt: 89000 }).state === 'none', 'no frame since the stream opened: ok < 2 s, waiting, none ≥ 10 s');
-  ok(P({ frames: 3, lastFrameAt: 90000, navAt: 97000 }).state === 'waiting' && P({ frames: 3, lastFrameAt: 90000, navAt: 97000 }).stale && P({ frames: 3, lastFrameAt: 90000, navAt: 89000 }).state === 'ok' && P({ frames: 3, lastFrameAt: 80000, navAt: 85000 }).state === 'none', 'a navigation no frame followed: the picture is STALE — waiting at 2 s, none at 10 s; a frame after it ⇒ ok');
+  ok(P({ frames: 3, lastFrameAt: 90000, navAt: 97000 }).state === 'waiting' && gateOf(P({ frames: 3, lastFrameAt: 90000, navAt: 97000 }).stale) && P({ frames: 3, lastFrameAt: 90000, navAt: 89000 }).state === 'ok' && P({ frames: 3, lastFrameAt: 80000, navAt: 85000 }).state === 'none', 'a navigation no frame followed: the picture is STALE — waiting at 2 s, none at 10 s; a frame after it ⇒ ok');
   ok(FIT.pictureState({ connected: false, frames: 0, openAt: 1, now: 1e9 }).state === 'ok', 'disconnected ⇒ the clocks say nothing (the connection has its own words)');
 
   // the pinch
@@ -209,7 +209,7 @@ console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.
     }
   }
   ok(worst <= 1, `a tap maps THROUGH the pinch transform: the transformed rect into the one pointer conversion lands on the same page point at 1×/2×/pinched/1.7×/1.5×/3× (worst ${worst} px)`);
-  ok(FIT.transformCss(FIT.ZOOM_NONE) === '' && /^translate\(-100px, -200px\) scale\(2\)$/.test(FIT.transformCss(z1)), 'transformCss: nothing at 1×, translate+scale (origin top-left) when zoomed');
+  ok(FIT.transformCss(FIT.ZOOM_NONE) === '' && verdictOf(/^translate\(-100px, -200px\) scale\(2\)$/.test(FIT.transformCss(z1))), 'transformCss: nothing at 1×, translate+scale (origin top-left) when zoomed');
 
   // the trailing edge of the gate
   ok(S.frameGateWait({ maxFps: 15, lastFrameAt: 1000, bufferedAmount: 0 }, 1020) === 47 && S.frameGateWait({ maxFps: 15, lastFrameAt: 1000, bufferedAmount: 0 }, 1100) === 0 && S.frameGateWait({ maxFps: 15, lastFrameAt: 0, bufferedAmount: 5e6 }, 5) === null, 'frameGateWait: the ms until the gate opens (47 of a 66.7 ms gap), 0 when open, null while the buffer holds it');
@@ -220,11 +220,11 @@ console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.
 {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-fit.js'), 'utf8');
   const A1 = '  const W = Math.round(w * k), H = Math.round(h * k);\n';
-  ok(src.includes(A1), 'control setup: paneViewport\'s one rounding line is found');
+  ok(verdictOf(src.includes(A1)), 'control setup: paneViewport\'s one rounding line is found');
   const devPx = M.load('src/browser-fit.js', editAnchor(src, A1, '  const d = posNum(dpr) || 1; const W = Math.round(w * k * d), H = Math.round(h * k * d);\n', "src/browser-fit.js"), 'device-px');
   ok(devPx.paneViewport({ width: 390, height: 760, dpr: 3 }).width === 1170, 'NEGATIVE CONTROL: a pane measured in DEVICE px (the patched copy) asks a DPR-3 phone for a 1170-wide page — the desktop layout shrunk into the phone, the study\'s strip (the ① leg is red on it)');
   const A2 = "  if (mode === 'takeover' && holder !== null && holder !== undefined) {\n";
-  ok(src.includes(A2), 'control setup: the holder rule is found');
+  ok(verdictOf(src.includes(A2)), 'control setup: the holder rule is found');
   const noHolder = M.load('src/browser-fit.js', editAnchor(src, A2, "  if (false) {\n", "src/browser-fit.js"), 'no-holder');
   ok(noHolder.fitTarget({ fits: [{ viewerId: 1, width: 700, height: 900, visible: true }, { viewerId: 2, width: 1000, height: 700, visible: true }], mode: 'takeover', holder: 1 }).viewerId === 2, 'NEGATIVE CONTROL: without the holder rule the larger watcher resizes the page under the driver (the ① holder leg is red on it)');
 }
@@ -302,19 +302,19 @@ const tagOf = (fr) => { const b = Buffer.from(fr.data, 'base64'); const i = b.in
   const { k, calls } = stubKeeper(U);
   const B = await bridgeOn(BS, k);
   const A = viewer(B.P);
-  ok(await A.ready(), 'viewer A: hello + the first frame');
+  ok(verdictOf(await A.ready()), 'viewer A: hello + the first frame');
   A.send({ type: 'fit', width: 700, height: 900, dpr: 2, visible: true });
   await until(() => calls.set.some((c) => c[0] === 700 && c[1] === 900), 3000);
   await until(() => A.lastFit() && A.lastFit().state === 'fitted', 2000);
   ok(calls.set.length === 1 && calls.set[0].join() === '700,900', `A's pane 700×900 ⇒ the keeper sets the page to 700×900 (one set: ${JSON.stringify(calls.set)})`);
-  ok(A.lastFit() && A.lastFit().width === 700 && A.lastFit().viewerId === A.you && A.lastFit().rule === 'largest', 'every viewer is told: fitted 700×900 for A\'s pane', JSON.stringify(A.lastFit()));
+  ok(gateOf(A.lastFit()) && A.lastFit().width === 700 && A.lastFit().viewerId === A.you && A.lastFit().rule === 'largest', 'every viewer is told: fitted 700×900 for A\'s pane', JSON.stringify(A.lastFit()));
   await until(() => A.frames.some((f) => S.jpegSize(f.data).width === 700), 2000);
-  ok(A.frames.some((f) => { const z = S.jpegSize(f.data); return z.width === 700 && z.height === 900; }), 'the next picture A receives IS 700×900 (the pane)');
+  ok(verdictOf(A.frames.some((f) => { const z = S.jpegSize(f.data); return z.width === 700 && z.height === 900; })), 'the next picture A receives IS 700×900 (the pane)');
   ok(!A.msgs.some((m) => (m.type === 'command' || m.type === 'result') && (m.action === 'viewport' || m.action === 'launch')), 'OUR set\'s mirror (launch pair + viewport pair) never reaches a viewer (it would light "Running a command")');
   ok(B.bridge.stats()[0].own >= 4 && !A.fits().some((x) => x.state === 'agent'), `…and never flags the page agent-set (${B.bridge.stats()[0].own} own records dropped)`);
   // B: larger — the largest rules
   const Bv = viewer(B.P);
-  ok(await Bv.ready(), 'viewer B joins');
+  ok(verdictOf(await Bv.ready()), 'viewer B joins');
   ok(Bv.fits().length >= 1 && Bv.fits()[0].state === 'fitted' && Bv.fits()[0].width === 700, 'a LATE viewer is replayed the fit (whose pane, what size)');
   Bv.send({ type: 'fit', width: 1000, height: 700, dpr: 1, visible: true });
   await until(() => calls.set.at(-1).join() === '1000,700', 3000);
@@ -337,7 +337,7 @@ const tagOf = (fr) => { const b = Buffer.from(fr.data, 'base64'); const i = b.in
   U.mirrorSet(800, 600, { agent: true });
   await until(() => A.lastFit() && A.lastFit().state === 'agent', 2000);
   ok(A.lastFit().state === 'agent' && A.lastFit().width === 800 && Bv.lastFit().state === 'agent', 'the AGENT\'s `set viewport 800 600` (not ours) ⇒ every viewer is told the agent chose 800×600', JSON.stringify(A.lastFit()));
-  ok(A.msgs.some((m) => m.type === 'command' && m.action === 'viewport' && m.params.width === 800), '…and the agent\'s own command reaches the viewers (it is the agent\'s act)');
+  ok(verdictOf(A.msgs.some((m) => m.type === 'command' && m.action === 'viewport' && m.params.width === 800)), '…and the agent\'s own command reaches the viewers (it is the agent\'s act)');
   const n0 = calls.set.length;
   A.send({ type: 'fit', width: 720, height: 900, dpr: 2, visible: true });
   Bv.send({ type: 'fit', width: 1010, height: 700, dpr: 1, visible: true });
@@ -346,7 +346,7 @@ const tagOf = (fr) => { const b = Buffer.from(fr.data, 'base64'); const i = b.in
   Bv.send({ type: 'fit', width: 1010, height: 700, dpr: 1, visible: true, force: true });
   await until(() => calls.set.length > n0, 3000);
   await until(() => A.lastFit() && A.lastFit().state === 'fitted', 2000);
-  ok(calls.set.at(-1).join() === '1010,700' && A.lastFit().state === 'fitted' && B.logs.some((l) => /set aside/.test(l)), '`force` (the user\'s "Fit the page to the window") takes it back: set 1010×700, fitted, the journal says the agent\'s size was set aside', JSON.stringify({ calls: calls.set.slice(-2), fit: A.lastFit() }));
+  ok(calls.set.at(-1).join() === '1010,700' && A.lastFit().state === 'fitted' && verdictOf(B.logs.some((l) => /set aside/.test(l))), '`force` (the user\'s "Fit the page to the window") takes it back: set 1010×700, fitted, the journal says the agent\'s size was set aside', JSON.stringify({ calls: calls.set.slice(-2), fit: A.lastFit() }));
   // the restore — everybody leaves, then the grace; a return inside the grace cancels it
   await A.close(); await Bv.close();
   await sleep(1500);
@@ -361,7 +361,7 @@ const tagOf = (fr) => { const b = Buffer.from(fr.data, 'base64'); const i = b.in
   const tLeft = Date.now();
   await C.close();
   await until(() => calls.set.at(-1).join() === '1280,577' && B.logs.some((l) => /back to its own 1280×577/.test(l)), FIT.RESTORE_AFTER_MS + 3000, 50);
-  ok(calls.set.at(-1).join() === '1280,577' && Date.now() - tLeft >= FIT.RESTORE_AFTER_MS - 50 && B.logs.some((l) => /back to its own 1280×577/.test(l)), `nobody watches for ${FIT.RESTORE_AFTER_MS} ms ⇒ the page goes back to its own 1280×577 (the size before the first fit)`, JSON.stringify(calls.set.slice(-3)));
+  ok(calls.set.at(-1).join() === '1280,577' && Date.now() - tLeft >= FIT.RESTORE_AFTER_MS - 50 && verdictOf(B.logs.some((l) => /back to its own 1280×577/.test(l))), `nobody watches for ${FIT.RESTORE_AFTER_MS} ms ⇒ the page goes back to its own 1280×577 (the size before the first fit)`, JSON.stringify(calls.set.slice(-3)));
   await B.close(); await U.close();
 }
 // THE HEADED FLOOR — a window that cannot be that narrow comes back scaled; the bridge re-fits at 500
@@ -392,7 +392,7 @@ const tagOf = (fr) => { const b = Buffer.from(fr.data, 'base64'); const i = b.in
   const V = viewer(B.P); await V.ready();
   V.send({ type: 'fit', width: 700, height: 900, dpr: 1, visible: true });
   await until(() => V.lastFit() && V.lastFit().state === 'unavailable', 3000);
-  ok(V.lastFit() && V.lastFit().state === 'unavailable' && /unknown verb/.test(V.lastFit().error) && V.lastFit().width === 1280, `a set the keeper could not make is SAID to every viewer (unavailable, the page's own ${V.lastFit() && V.lastFit().width}×${V.lastFit() && V.lastFit().height}, the reason) — the view's chip speaks`, JSON.stringify(V.lastFit()));
+  ok(gateOf(V.lastFit()) && V.lastFit().state === 'unavailable' && gateOf(/unknown verb/.test(V.lastFit().error)) && V.lastFit().width === 1280, `a set the keeper could not make is SAID to every viewer (unavailable, the page's own ${V.lastFit() && V.lastFit().width}×${V.lastFit() && V.lastFit().height}, the reason) — the view's chip speaks`, JSON.stringify(V.lastFit()));
   V.send({ type: 'fit', width: 700, height: 900, dpr: 1, visible: false }); await sleep(100);
   V.send({ type: 'fit', width: 700, height: 900, dpr: 1, visible: true }); await sleep(700);
   ok(calls.set.length === 1, `the same size that just failed is not asked again (${calls.set.length} ask(s) — each is a CLI spawn)`);
@@ -402,7 +402,7 @@ const tagOf = (fr) => { const b = Buffer.from(fr.data, 'base64'); const i = b.in
   ok(calls.set.at(-1).join() === '720,900' && V.lastFit().state === 'fitted', 'a NEW size is asked (and fitted)');
   await V.close(); await B.close(); await U.close();
   const re = await restartLeg(BS);
-  ok(re.setAgain, 'a NEW relay whose first picture is not the size we set (the browser started again at its own size) ⇒ the same pane is SET again, never "kept"', JSON.stringify(re));
+  ok(verdictOf(re.setAgain), 'a NEW relay whose first picture is not the size we set (the browser started again at its own size) ⇒ the same pane is SET again, never "kept"', JSON.stringify(re));
 }
 /** The browser starts again at its own size: fitted, the relay ends, a new relay's first picture is 1280×577, the same pane reports. */
 async function restartLeg(BSmod) {
@@ -467,9 +467,9 @@ async function freshLeg(BSmod) {
   const t = await trailingLeg(BS);
   ok(t.last === 'painted', `THE TRAILING FRAME: two paints 18 ms apart then stillness — the viewer's last picture is the page's LAST paint ("${t.last}"; received ${t.got.join(', ')})`);
   const f = await freshLeg(BS);
-  ok(f.calls === 1 && f.fresh === 'navigation' && /^fresh1/.test(f.tag), `THE FRESH FRAME: a navigation no frame followed ⇒ after ${FIT.FRESH_FRAME_MS} ms the bridge asks the page for one and every viewer gets it (fresh:"${f.fresh}")`, JSON.stringify(f));
+  ok(f.calls === 1 && f.fresh === 'navigation' && verdictOf(/^fresh1/.test(f.tag)), `THE FRESH FRAME: a navigation no frame followed ⇒ after ${FIT.FRESH_FRAME_MS} ms the bridge asks the page for one and every viewer gets it (fresh:"${f.fresh}")`, JSON.stringify(f));
   ok(f.afterFramed === 1, 'a navigation the stream DID paint asks nothing');
-  ok(f.refreshesHandled && f.afterRefresh === 2, `a viewer's \`refresh\` is answered — twice in a row ⇒ ONE capture (at most one per ${FIT.REFRESH_EVERY_MS} ms)`, JSON.stringify(f));
+  ok(gateOf(f.refreshesHandled) && f.afterRefresh === 2, `a viewer's \`refresh\` is answered — twice in a row ⇒ ONE capture (at most one per ${FIT.REFRESH_EVERY_MS} ms)`, JSON.stringify(f));
 }
 
 // ═══ ⑤b BRIDGE CONTROLS (patched copies) ══════════════════════════════════
@@ -477,12 +477,12 @@ console.log('— ⑤ the bridge controls: each fix removed in a patched copy tur
 {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
   const T1 = '      else { v.dropped++; relay.stats.dropped++; armTrail(relay, v); }\n';
-  ok(src.includes(T1), 'control setup: the trailing arm is found');
+  ok(verdictOf(src.includes(T1)), 'control setup: the trailing arm is found');
   const noTrail = M.load('src/server/browser-stream.js', editAnchor(src, T1, '      else { v.dropped++; relay.stats.dropped++; }\n', "src/server/browser-stream.js"), 'no-trail');
   const t0 = await trailingLeg(noTrail);
-  ok(t0.last === 'white' && t0.got.includes('white'), `NEGATIVE CONTROL: without the trailing frame the viewer keeps the FIRST paint for good ("${t0.last}") — the study's blank-white picture under a URL that says loaded`);
+  ok(t0.last === 'white' && verdictOf(t0.got.includes('white')), `NEGATIVE CONTROL: without the trailing frame the viewer keeps the FIRST paint for good ("${t0.last}") — the study's blank-white picture under a URL that says loaded`);
   const T2 = '      const own = FIT.ownViewportRecord(msg, p, t);\n'; // verify r1 (continuation): the pending + prevOwn slots share the one recognition
-  ok(src.includes(T2), 'control setup: the own-mirror recognition is found');
+  ok(verdictOf(src.includes(T2)), 'control setup: the own-mirror recognition is found');
   const noOwn = M.load('src/server/browser-stream.js', editAnchor(src, T2, '      const own = { own: false };\n', "src/server/browser-stream.js"), 'no-own');
   // the control's own read, over a copy: the echo of the 700 waited for (its fact), then the 720 sent and its «never» clauses read only once
   // the PRODUCT could have acted on it — r4596: the bridge acts on a fit report after its own debounce (FIT.FIT_DEBOUNCE_MS) plus the set's
@@ -505,13 +505,13 @@ console.log('— ⑤ the bridge controls: each fix removed in a patched copy tur
   };
   {
     const o = await ownRead(noOwn);
-    ok(o.good, 'NEGATIVE CONTROL: without the own-mirror recognition our OWN set reaches the viewer and is read as the AGENT\'s — the next pane change is letterboxed and never fitted (verify r1: the mutant also "puts back" the size it took for the agent\'s, once)', JSON.stringify(o));
+    ok(verdictOf(o.good), 'NEGATIVE CONTROL: without the own-mirror recognition our OWN set reaches the viewer and is read as the AGENT\'s — the next pane change is letterboxed and never fitted (verify r1: the mutant also "puts back" the size it took for the agent\'s, once)', JSON.stringify(o));
     // ITS RED (r4596): a copy that loses the recognition AND still sets 720 at its debounce (its verdict reads no agent) — the same read sees
     // the 720 set inside the never-claim's window: the control goes red
     const VF = "    const v = FIT.fitVerdict({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, agent: fs.agent,";
     const noOwnSets = M.load('src/server/browser-stream.js', editAnchor(editAnchor(src, T2, '      const own = { own: false };\n', "src/server/browser-stream.js"), VF, VF.replace('agent: fs.agent,', 'agent: null,'), "src/server/browser-stream.js"), 'no-own-sets-720');
     const r = await ownRead(noOwnSets);
-    ok(!r.good && r.sets.some((c) => c[0] === 720), 'ITS RED (r4596): a copy without the recognition that still sets 720 at its debounce — the control\'s read sees the 720 set inside the never-claim\'s window, red', JSON.stringify(r));
+    ok(!r.good && verdictOf(r.sets.some((c) => c[0] === 720)), 'ITS RED (r4596): a copy without the recognition that still sets 720 at its debounce — the control\'s read sees the 720 set inside the never-claim\'s window, red', JSON.stringify(r));
   }
   // r4456 (law 3): THE RACE PLACED — the same copy with the fake upstream's echo of the bridge's set HELD (the late thing): the old fixed
   // 400 ms wait reads no «command viewport» at viewer A — the control red with nothing wrong, at will — and the wait on the fact reads it
@@ -529,16 +529,16 @@ console.log('— ⑤ the bridge controls: each fix removed in a patched copy tur
     const oldRead = echoed();   // the OLD wait, the echo held
     letGo();
     const newRead = await until(echoed, 15000);
-    ok(!oldRead && newRead, `PLACED (law 3): the fake upstream's echo of the bridge's set held — the old fixed 400 ms wait reads ${oldRead ? 'the echo (NOT placed)' : 'no «command viewport» (the control would go red with nothing wrong)'}; the wait on the fact reads it once the hold is let go`, JSON.stringify({ oldRead, newRead }));
+    ok(!oldRead && verdictOf(newRead), `PLACED (law 3): the fake upstream's echo of the bridge's set held — the old fixed 400 ms wait reads ${oldRead ? 'the echo (NOT placed)' : 'no «command viewport» (the control would go red with nothing wrong)'}; the wait on the fact reads it once the hold is let go`, JSON.stringify({ oldRead, newRead }));
     await A.close(); await B.close(); await U.close();
   }
   const T4 = "          if (f && f.applied && FIT.fitHonored({ fit: f.applied, picture: sz }) !== 'exact') { f.applied = null; f.failed = null; persistFit(f); }\n";
-  ok(src.includes(T4), 'control setup: the new relay\'s first-picture check is found');
+  ok(verdictOf(src.includes(T4)), 'control setup: the new relay\'s first-picture check is found');
   const noRecheck = M.load('src/server/browser-stream.js', editAnchor(src, T4, '', "src/server/browser-stream.js"), 'no-recheck');
   const r0 = await restartLeg(noRecheck);
   ok(!r0.setAgain, 'NEGATIVE CONTROL: without the first-picture check the bridge believes its old size still holds — the restarted browser stays at 1280×577 under a 720×900 pane (the band again)', JSON.stringify(r0));
   const T3 = "    relay.freshTimer = setTimeout(() => { relay.freshTimer = null; if (relay.lastUpFrameAt < relay.navAt) captureFresh(relay, 'navigation'); }, FIT.FRESH_FRAME_MS);\n";
-  ok(src.includes(T3), 'control setup: the fresh-frame timer is found');
+  ok(verdictOf(src.includes(T3)), 'control setup: the fresh-frame timer is found');
   const noFresh = M.load('src/server/browser-stream.js', editAnchor(src, T3, '    relay.freshTimer = setTimeout(() => { relay.freshTimer = null; }, FIT.FRESH_FRAME_MS);\n', "src/server/browser-stream.js"), 'no-fresh');
   const f0 = await freshLeg(noFresh);
   ok(f0.calls === 0 && f0.fresh === null, 'NEGATIVE CONTROL: without the fresh frame a hash navigation leaves the viewer with no picture of it (0 captures, no frame)', JSON.stringify(f0));
@@ -567,7 +567,7 @@ console.log('— ③ the keeper: setViewportFor never starts a browser; captureF
   ok(!r.ok && r.code === 'browser_stopped' && execs.length === 0, 'a conversation with no browser record and no daemon (`session info` inactive) ⇒ refused, NO CLI call (a `set` under its pairs would launch one)', JSON.stringify(r));
   infoActive = true;
   r = await keeper.setViewportFor(tgt, { width: 700, height: 900 });
-  ok(r.ok && execs.length === 1 && execs[0].ns === null && execs[0].argv.join(' ') === 'set viewport 700 900' && execs[0].opts.extraEnv.AGENT_BROWSER_SESSION === 'vs-' + KEY, 'a daemon that runs under the pairs (no record of ours) ⇒ `set viewport 700 900` under exactly those pairs', JSON.stringify(execs));
+  ok(gateOf(r.ok) && execs.length === 1 && execs[0].ns === null && execs[0].argv.join(' ') === 'set viewport 700 900' && execs[0].opts.extraEnv.AGENT_BROWSER_SESSION === 'vs-' + KEY, 'a daemon that runs under the pairs (no record of ours) ⇒ `set viewport 700 900` under exactly those pairs', JSON.stringify(execs));
   // a MANAGED ephemeral record: ready ⇒ set; stopped ⇒ refused with no call
   keeper.reshapeStore((reg) => {
     reg.profiles.push({ id: 'bp-0000e0e1', label: '(ephemeral) s', ephemeral: true, owner: { kind: 'conversation', id: KEY }, dir: path.join(D, 'eph'), createdAt: 1 });
@@ -575,7 +575,7 @@ console.log('— ③ the keeper: setViewportFor never starts a browser; captureF
   });
   infoActive = false;
   r = await keeper.setViewportFor(tgt, { width: 710, height: 900 });
-  ok(r.ok && execs.length === 2 && execs[1].argv.join(' ') === 'set viewport 710 900', 'a MANAGED ephemeral that is ready ⇒ set under its pairs (no extra `session info`)', JSON.stringify(execs.slice(-1)));
+  ok(gateOf(r.ok) && execs.length === 2 && execs[1].argv.join(' ') === 'set viewport 710 900', 'a MANAGED ephemeral that is ready ⇒ set under its pairs (no extra `session info`)', JSON.stringify(execs.slice(-1)));
   keeper.reshapeStore((reg) => { reg.browsers['bp-0000e0e1'].state = 'stopped'; });
   r = await keeper.setViewportFor(tgt, { width: 720, height: 900 });
   ok(!r.ok && r.code === 'browser_stopped' && execs.length === 2, 'a managed ephemeral that is STOPPED ⇒ refused with NO call (a view never starts a browser)');
@@ -595,7 +595,7 @@ console.log('— ③ the keeper: setViewportFor never starts a browser; captureF
   wss.on('connection', (ws, req) => { ws.on('message', (d) => { const m = JSON.parse(d); asked.push({ path: req.url, method: m.method, params: m.params }); if (m.method === 'Page.getLayoutMetrics') ws.send(JSON.stringify({ id: m.id, result: { cssLayoutViewport: { clientWidth: 700, clientHeight: 900 } } })); else if (m.method === 'Page.captureScreenshot') ws.send(JSON.stringify({ id: m.id, result: { data: JPG } })); else ws.send(JSON.stringify({ id: m.id, error: { message: 'nope' } })); }); });
   await new Promise((rr) => hsrv.listen(port, '127.0.0.1', rr)); cleanups.push(() => { wss.close(); hsrv.close(); });
   const c = await VP.captureFrame(`ws://127.0.0.1:${port}/devtools/browser/abc`, { activeUrl: 'https://x.test/page' });
-  ok(c.ok && c.data === JPG && c.clientWidth === 700 && c.clientHeight === 900 && c.targetId === 'P1' && asked.map((a) => a.method).join() === 'Page.getLayoutMetrics,Page.captureScreenshot' && asked.every((a) => a.path === '/devtools/page/P1') && asked[1].params.format === 'jpeg', 'captureFrame: the ACTIVE page\'s socket, its layout metrics then ONE jpeg captureScreenshot, over one socket', JSON.stringify({ c: { ...c, data: c.data && c.data.length }, asked }));
+  ok(gateOf(c.ok) && c.data === JPG && c.clientWidth === 700 && c.clientHeight === 900 && c.targetId === 'P1' && asked.map((a) => a.method).join() === 'Page.getLayoutMetrics,Page.captureScreenshot' && gateOf(asked.every((a) => a.path === '/devtools/page/P1')) && asked[1].params.format === 'jpeg', 'captureFrame: the ACTIVE page\'s socket, its layout metrics then ONE jpeg captureScreenshot, over one socket', JSON.stringify({ c: { ...c, data: c.data && c.data.length }, asked }));
   const dead = await VP.captureFrame(`ws://127.0.0.1:${await freePort()}/devtools/browser/x`, { timeoutMs: 800 });
   ok(!dead.ok && typeof dead.error === 'string', 'an endpoint that answers nothing ⇒ {ok:false}, bounded, never a throw');
   keeper.reshapeStore((reg) => {
@@ -603,7 +603,7 @@ console.log('— ③ the keeper: setViewportFor never starts a browser; captureF
     reg.browsers['bp-0000f00d'] = { state: 'ready', cdpUrl: `ws://127.0.0.1:${port}/devtools/browser/abc`, pid: 1, startedAt: 1 };
   });
   const kf = await keeper.freshFrameFor({ ok: true, kind: 'attachment', profileId: 'bp-0000f00d' }, { activeUrl: 'https://x.test/page' });
-  ok(kf.ok && kf.data === JPG, 'the keeper\'s freshFrameFor resolves an attachment\'s endpoint off its record and captures (the raw endpoint never leaves the server)', JSON.stringify({ ...kf, data: kf.data && kf.data.length }));
+  ok(gateOf(kf.ok) && kf.data === JPG, 'the keeper\'s freshFrameFor resolves an attachment\'s endpoint off its record and captures (the raw endpoint never leaves the server)', JSON.stringify({ ...kf, data: kf.data && kf.data.length }));
 }
 
 // ═══ ④ CLIENT WIRING PINS ════════════════════════════════════════════════
@@ -625,17 +625,17 @@ console.log('— ⑤ verify r1: the order-judged outcome of our own set, the def
     [{ ok: true, pending: { seq: 3 }, agent: { seq: 7 } }, 'agent-stands'], [{ ok: true, pending: { seq: 7 }, agent: { seq: 3 } }, 'agent-overridden'],
     [{ ok: true, pending: { seq: null }, agent: { seq: 3 } }, 'agent-overridden'], [{ ok: true, pending: null, agent: { seq: 3 } }, 'agent-overridden'], [{ ok: true, pending: { seq: 3 }, agent: { seq: null } }, 'agent-overridden'],
   ];
-  ok(outcomes.every(([i, w]) => FIT.ownSetOutcome(i) === w), 'ownSetOutcome: by ORDER — the agent\'s mirror after ours ⇒ stands; ours after (or ours not yet mirrored / unknown) ⇒ overridden (put back); no agent ⇒ fitted; refused ⇒ failed', JSON.stringify(outcomes.map(([i, w]) => [FIT.ownSetOutcome(i), w])));
-  ok(FIT.restoreDeferred('running') && FIT.restoreDeferred('waiting') && !FIT.restoreDeferred('idle') && !FIT.restoreDeferred(null) && !FIT.restoreDeferred(undefined), 'restoreDeferred: a KNOWN running / paused-on-the-user turn waits; idle or unknown restores on the clock');
+  ok(verdictOf(outcomes.every(([i, w]) => FIT.ownSetOutcome(i) === w)), 'ownSetOutcome: by ORDER — the agent\'s mirror after ours ⇒ stands; ours after (or ours not yet mirrored / unknown) ⇒ overridden (put back); no agent ⇒ fitted; refused ⇒ failed', JSON.stringify(outcomes.map(([i, w]) => [FIT.ownSetOutcome(i), w])));
+  ok(gateOf(FIT.restoreDeferred('running')) && gateOf(FIT.restoreDeferred('waiting')) && !FIT.restoreDeferred('idle') && !FIT.restoreDeferred(null) && !FIT.restoreDeferred(undefined), 'restoreDeferred: a KNOWN running / paused-on-the-user turn waits; idle or unknown restores on the clock');
   const note = FIT.fitNoteOf({ agent: { kind: 'viewport', width: 800, height: 600, scale: 1, id: 'r1', seq: 9, at: 5 }, applied: { width: 700, height: 900, viewerId: 3, rule: 'largest', at: 1 }, baseline: { width: 1280, height: 577 }, floorW: 500 });
   ok(JSON.stringify(note) === JSON.stringify({ agent: { kind: 'viewport', width: 800, height: 600, scale: 1, device: null, at: 5 }, applied: { width: 700, height: 900 }, baseline: { width: 1280, height: 577 }, floorW: 500, fixed: null, fixedBy: null }), 'fitNoteOf: the note carries the agent choice / applied / baseline / floor (+ lane launch-picture-size: the fixed size; + lane browser-viewport-answer: who pinned it) and nothing transient (no id, no seq, no viewer)', JSON.stringify(note));
   const back = FIT.fitStateFromNote(note);
-  ok(back.agent && back.agent.width === 800 && back.agent.seq === null && back.agent.id === null && back.applied.width === 700 && back.baseline.height === 577 && back.floorW === 500 && FIT.fitStateFromNote(null) === null && FIT.fitStateFromNote({ agent: { kind: 'device' } }).agent === null, 'fitStateFromNote: the state back (seq/id unknown), a nameless device is no choice, no note ⇒ null');
+  ok(gateOf(back.agent) && back.agent.width === 800 && back.agent.seq === null && back.agent.id === null && back.applied.width === 700 && back.baseline.height === 577 && back.floorW === 500 && FIT.fitStateFromNote(null) === null && FIT.fitStateFromNote({ agent: { kind: 'device' } }).agent === null, 'fitStateFromNote: the state back (seq/id unknown), a nameless device is no choice, no note ⇒ null');
   // our own mirror recognition now takes a factor and a device
   const pendD = { device: 'iPhone 12', at: 1000, inFlight: true, id: null };
-  ok(FIT.ownViewportRecord({ type: 'command', action: 'device', id: 'r9', params: { action: 'device', device: 'iPhone 12' } }, pendD, 1100).own && !FIT.ownViewportRecord({ type: 'command', action: 'device', id: 'r9', params: { action: 'device', device: 'Pixel 5' } }, pendD, 1100).own && !FIT.ownViewportRecord({ type: 'command', action: 'viewport', id: 'r9', params: { action: 'viewport', width: 390, height: 844 } }, pendD, 1100).own, 'a pending `set device NAME` (the agent\'s choice put back) is OUR mirror by the name, nothing else is');
+  ok(gateOf(FIT.ownViewportRecord({ type: 'command', action: 'device', id: 'r9', params: { action: 'device', device: 'iPhone 12' } }, pendD, 1100).own) && !FIT.ownViewportRecord({ type: 'command', action: 'device', id: 'r9', params: { action: 'device', device: 'Pixel 5' } }, pendD, 1100).own && !FIT.ownViewportRecord({ type: 'command', action: 'viewport', id: 'r9', params: { action: 'viewport', width: 390, height: 844 } }, pendD, 1100).own, 'a pending `set device NAME` (the agent\'s choice put back) is OUR mirror by the name, nothing else is');
   const pendS = { width: 390, height: 844, scale: 2, at: 1000, inFlight: true, id: null };
-  ok(FIT.ownViewportRecord(FIX.mirror['set viewport 390 844 2'][2], pendS, 1100).own && !FIT.ownViewportRecord(FIX.mirror['set viewport 390 844 2'][2], { ...pendS, scale: 1 }, 1100).own && !FIT.ownViewportRecord(FIX.mirror['set viewport 390 844 2'][2], { width: 390, height: 844, at: 1000, inFlight: true, id: null }, 1100).own, 'a pending set WITH a factor is ours only at that factor (the fixture\'s measured `set viewport 390 844 2` mirror)');
+  ok(gateOf(FIT.ownViewportRecord(FIX.mirror['set viewport 390 844 2'][2], pendS, 1100).own) && !FIT.ownViewportRecord(FIX.mirror['set viewport 390 844 2'][2], { ...pendS, scale: 1 }, 1100).own && !FIT.ownViewportRecord(FIX.mirror['set viewport 390 844 2'][2], { width: 390, height: 844, at: 1000, inFlight: true, id: null }, 1100).own, 'a pending set WITH a factor is ours only at that factor (the fixture\'s measured `set viewport 390 844 2` mirror)');
 
   // the bridge: the two orders of the race, judged by the daemon's order
   const raceLeg = async (BSmod, order) => {
@@ -682,7 +682,7 @@ console.log('— ⑤ verify r1: the order-judged outcome of our own set, the def
     return out;
   };
   const tl = await turnLeg(BS);
-  ok(tl.midTurn.length === 1 && tl.said, `nobody watching MID-TURN (a chat session, _isStreaming): the restore WAITS (sets ${JSON.stringify(tl.midTurn)}; the journal says so once)`, JSON.stringify(tl));
+  ok(tl.midTurn.length === 1 && verdictOf(tl.said), `nobody watching MID-TURN (a chat session, _isStreaming): the restore WAITS (sets ${JSON.stringify(tl.midTurn)}; the journal says so once)`, JSON.stringify(tl));
   ok(tl.after.length === 2 && tl.after[1].join() === '1280,577' && tl.last === 'restored', `…and the turn ending releases it: the page goes back (sets ${JSON.stringify(tl.after)})`, JSON.stringify(tl));
 
   // the persisted note: a NEW bridge (a server restart) over the same keeper still knows the agent chose the size and the baseline
@@ -716,10 +716,10 @@ console.log('— ⑤ verify r1: the order-judged outcome of our own set, the def
     return { noteFitted, noteAgent, afterRestart, stale };
   };
   const nl = await noteLeg(BS);
-  ok(nl.noteFitted && nl.noteFitted.applied && nl.noteFitted.applied.width === 700 && nl.noteFitted.baseline && nl.noteFitted.baseline.width === 1280 && nl.noteFitted.agent === null, 'the keeper\'s note after our fit: applied 700×900, baseline 1280×577, no agent choice', JSON.stringify(nl.noteFitted));
-  ok(nl.noteAgent && nl.noteAgent.agent && nl.noteAgent.agent.width === 800 && nl.noteAgent.applied === null, 'the note after the agent\'s `set viewport 800 600`: the agent choice, nothing of ours applied', JSON.stringify(nl.noteAgent));
-  ok(nl.afterRestart.sets.length === 1 && nl.afterRestart.last[0] === 'agent' && nl.afterRestart.last[1] === 800 && nl.afterRestart.agent && nl.afterRestart.agent.width === 800, `A NEW BRIDGE (a server restart) over the same keeper: the first viewer's pane is LETTERBOXED under "Agent's size 800×600", never fitted over it (sets ${nl.afterRestart.sets.length})`, JSON.stringify(nl.afterRestart));
-  ok(nl.stale.sets.length === 1 && nl.stale.sets[0].join() === '700,900' && nl.stale.last[0] === 'fitted' && nl.stale.note && nl.stale.note.agent === null, `a STALE note (the browser came back at its own 1280×577): the first picture forgets the agent's 800×600 and the pane is fitted (sets ${JSON.stringify(nl.stale.sets)}, note.agent ${JSON.stringify(nl.stale.note && nl.stale.note.agent)})`, JSON.stringify(nl.stale));
+  ok(gateOf(nl.noteFitted) && gateOf(nl.noteFitted.applied) && nl.noteFitted.applied.width === 700 && gateOf(nl.noteFitted.baseline) && nl.noteFitted.baseline.width === 1280 && nl.noteFitted.agent === null, 'the keeper\'s note after our fit: applied 700×900, baseline 1280×577, no agent choice', JSON.stringify(nl.noteFitted));
+  ok(gateOf(nl.noteAgent) && gateOf(nl.noteAgent.agent) && nl.noteAgent.agent.width === 800 && nl.noteAgent.applied === null, 'the note after the agent\'s `set viewport 800 600`: the agent choice, nothing of ours applied', JSON.stringify(nl.noteAgent));
+  ok(nl.afterRestart.sets.length === 1 && nl.afterRestart.last[0] === 'agent' && nl.afterRestart.last[1] === 800 && gateOf(nl.afterRestart.agent) && nl.afterRestart.agent.width === 800, `A NEW BRIDGE (a server restart) over the same keeper: the first viewer's pane is LETTERBOXED under "Agent's size 800×600", never fitted over it (sets ${nl.afterRestart.sets.length})`, JSON.stringify(nl.afterRestart));
+  ok(nl.stale.sets.length === 1 && nl.stale.sets[0].join() === '700,900' && nl.stale.last[0] === 'fitted' && gateOf(nl.stale.note) && nl.stale.note.agent === null, `a STALE note (the browser came back at its own 1280×577): the first picture forgets the agent's 800×600 and the pane is fitted (sets ${JSON.stringify(nl.stale.sets)}, note.agent ${JSON.stringify(nl.stale.note && nl.stale.note.agent)})`, JSON.stringify(nl.stale));
 
   // the real keeper's note lives on the browser record and is written without a roster notify
   {
@@ -738,12 +738,12 @@ console.log('— ⑤ verify r1: the order-judged outcome of our own set, the def
   // NEGATIVE CONTROLS (patched copies): no order judgement ⇒ the agent's explicit size is overridden and announced "fitted"; no deferral ⇒ the restore lands mid-turn
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
   const T5 = "    const outcome = FIT.ownSetOutcome({ ok: !!(r && r.ok), pending: fs.pending || fs.ownDone, agent: fs.agent });\n";
-  ok(src.includes(T5), 'control setup: the order-judged outcome is found');
+  ok(verdictOf(src.includes(T5)), 'control setup: the order-judged outcome is found');
   const noOutcome = M.load('src/server/browser-stream.js', editAnchor(src, T5, "    const outcome = r && r.ok ? 'fitted' : 'failed';\n", "src/server/browser-stream.js", 'first'), 'no-outcome');
   const c1 = await raceLeg(noOutcome, 'agent-first');
-  ok(c1.page.w === 700 && c1.sets.length === 1 && c1.applied && c1.applied[0] === 700, `NEGATIVE CONTROL: without the order judgement our fit that landed after the agent's \`set viewport 800 600\` OVERRIDES it for good — the page is ${c1.page.w}×${c1.page.h}, the bridge holds applied ${JSON.stringify(c1.applied)} beside agent ${JSON.stringify(c1.agent)}`, JSON.stringify(c1));
+  ok(c1.page.w === 700 && c1.sets.length === 1 && gateOf(c1.applied) && c1.applied[0] === 700, `NEGATIVE CONTROL: without the order judgement our fit that landed after the agent's \`set viewport 800 600\` OVERRIDES it for good — the page is ${c1.page.w}×${c1.page.h}, the bridge holds applied ${JSON.stringify(c1.applied)} beside agent ${JSON.stringify(c1.agent)}`, JSON.stringify(c1));
   const T6 = "      if (FIT.restoreDeferred(turn)) {";
-  ok(src.includes(T6), 'control setup: the deferred restore is found');
+  ok(verdictOf(src.includes(T6)), 'control setup: the deferred restore is found');
   const noDefer = M.load('src/server/browser-stream.js', editAnchor(src, T6, "      if (false) {", "src/server/browser-stream.js"), 'no-defer');
   const c2 = await turnLeg(noDefer);
   ok(c2.midTurn.length === 2 && c2.midTurn[1].join() === '1280,577', `NEGATIVE CONTROL: without the deferral the restore lands MID-TURN (sets ${JSON.stringify(c2.midTurn)}) — the page reflows under the agent's feet`, JSON.stringify(c2));
@@ -782,9 +782,9 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
   };
   const good = (o) => o.page.w === 800 && o.page.h === 600 && o.sets.length === 2 && o.sets[1].join() === '800,600' && o.agent && o.agent.join() === '800,600' && o.applied === null && o.last && o.last[0] === 'agent' && o.last[1] === 800;
   const l1 = await lateLeg(BS, 'late-both');
-  ok(good(l1), `LATE MIRRORS (both land after our call returned, the agent's first): judged when ours lands — the agent's put back (sets ${JSON.stringify(l1.sets)}, page ${l1.page.w}×${l1.page.h}, bridge agent ${JSON.stringify(l1.agent)}, last "${l1.last && l1.last.join('×')}")`, JSON.stringify(l1));
+  ok(verdictOf(good(l1)), `LATE MIRRORS (both land after our call returned, the agent's first): judged when ours lands — the agent's put back (sets ${JSON.stringify(l1.sets)}, page ${l1.page.w}×${l1.page.h}, bridge agent ${JSON.stringify(l1.agent)}, last "${l1.last && l1.last.join('×')}")`, JSON.stringify(l1));
   const l2 = await lateLeg(BS, 'late-ours');
-  ok(good(l2), `LATE MIRROR OF OURS (the agent's landed before the return, ours after the put-back began): ours is still OURS — never read as the agent's 700×900 (bridge agent ${JSON.stringify(l2.agent)}, page ${l2.page.w}×${l2.page.h})`, JSON.stringify(l2));
+  ok(verdictOf(good(l2)), `LATE MIRROR OF OURS (the agent's landed before the return, ours after the put-back began): ours is still OURS — never read as the agent's 700×900 (bridge agent ${JSON.stringify(l2.agent)}, page ${l2.page.w}×${l2.page.h})`, JSON.stringify(l2));
 
   // LOW 8: the set "succeeds" and is mirrored but the page keeps its own size ⇒ said once as unavailable, not re-asked
   const notTakenLeg = async (BSmod) => {
@@ -805,7 +805,7 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     return out;
   };
   const nt = await notTakenLeg(BS);
-  ok(nt.fits.includes('unavailable') && nt.fits.filter((x) => x === 'unavailable').length === 1 && nt.applied === null && nt.sets.length === 1 && nt.fits.at(-1) === 'unavailable' && /did not take/.test((nt.last && nt.last.error) || ''), `a size the page did NOT take (the picture stays 1280×577 after a "successful" 700×900): said ONCE as unavailable (${JSON.stringify(nt.last)}), the bridge stops believing it (applied ${JSON.stringify(nt.applied)}), not re-asked (${nt.sets.length} set)`, JSON.stringify(nt));
+  ok(gateOf(nt.fits.includes('unavailable')) && nt.fits.filter((x) => x === 'unavailable').length === 1 && nt.applied === null && nt.sets.length === 1 && nt.fits.at(-1) === 'unavailable' && verdictOf(/did not take/.test((nt.last && nt.last.error) || '')), `a size the page did NOT take (the picture stays 1280×577 after a "successful" 700×900): said ONCE as unavailable (${JSON.stringify(nt.last)}), the bridge stops believing it (applied ${JSON.stringify(nt.applied)}), not re-asked (${nt.sets.length} set)`, JSON.stringify(nt));
 
   // the headed floor: a note's agent choice narrower than 500 px comes back SCALED on the first picture — still the agent's
   const headedLeg = async (BSmod) => {
@@ -864,7 +864,7 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     return { stale: out.stale, staleAfter: out.staleAfter, unmirrored: out.unmirrored, unmirroredAfter: out.unmirroredAfter, logs: out.logs };
   };
   const hl = await headedLeg(BS);
-  ok(hl.sets.length === 0 && hl.agent && hl.agent.join() === '390,844' && hl.last === 'agent' && hl.noteAgent === 390, `a noted agent choice of 390×844 on a HEADED browser (the first picture 390×658, the floor's scaling): still the agent's — letterboxed, never fitted over (sets ${hl.sets.length})`, JSON.stringify(hl));
+  ok(hl.sets.length === 0 && gateOf(hl.agent) && hl.agent.join() === '390,844' && hl.last === 'agent' && hl.noteAgent === 390, `a noted agent choice of 390×844 on a HEADED browser (the first picture 390×658, the floor's scaling): still the agent's — letterboxed, never fitted over (sets ${hl.sets.length})`, JSON.stringify(hl));
 
   // the REAL keeper with a browser record: the note lands on the record (ephemeral by its browser key, an attachment by its
   // profile id), on disk, never broadcast — and a NEW keeper over the same data dir (a server restart) reads it back
@@ -886,8 +886,8 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     const disk = JSON.parse((landedU5b(), fs).readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8'));
     const k2 = mk(); // "the server restarts"
     const rE = k2.viewportNoteFor(tE), rA = k2.viewportNoteFor(tA);
-    ok(w1 && w2 && disk.browsers['bp-0000000b'].viewport && disk.browsers['bp-0000000b'].viewport.agent.width === 800 && disk.browsers['bp-0000000c'].viewport.applied.width === 700 && notifies === 0, `the real keeper writes the note ON the browser record (ephemeral by its browser key, an attachment by its profile id), to disk, with no roster broadcast (${notifies})`, JSON.stringify(disk.browsers));
-    ok(rE && rE.agent && rE.agent.width === 800 && rA && rA.applied && rA.applied.width === 700 && rA.floorW === 500 && JSON.stringify(FIT.fitStateFromNote(rE).agent && FIT.fitStateFromNote(rE).agent.width) === '800', 'a NEW keeper over the same data dir (a server restart) reads both notes back — the bridge seeds the agent choice and the floor from them', JSON.stringify({ rE, rA }));
+    ok(gateOf(w1) && gateOf(w2) && gateOf(disk.browsers['bp-0000000b'].viewport) && disk.browsers['bp-0000000b'].viewport.agent.width === 800 && disk.browsers['bp-0000000c'].viewport.applied.width === 700 && notifies === 0, `the real keeper writes the note ON the browser record (ephemeral by its browser key, an attachment by its profile id), to disk, with no roster broadcast (${notifies})`, JSON.stringify(disk.browsers));
+    ok(gateOf(rE) && gateOf(rE.agent) && rE.agent.width === 800 && gateOf(rA) && gateOf(rA.applied) && rA.applied.width === 700 && rA.floorW === 500 && JSON.stringify(FIT.fitStateFromNote(rE).agent && FIT.fitStateFromNote(rE).agent.width) === '800', 'a NEW keeper over the same data dir (a server restart) reads both notes back — the bridge seeds the agent choice and the floor from them', JSON.stringify({ rE, rA }));
   }
 
   // F6: OUR resize is in the action trace — the recorder's tap gets ONE `viewer-fit` pair (traced as kind 'viewport'),
@@ -917,8 +917,8 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     return out;
   };
   const tr = await traceLeg(BS);
-  ok(tr.agentPairTapped && tr.traced.length === 1 && tr.traced[0][0] === 'viewer-fit' && tr.traced[0][1].width === 700 && tr.traced[0][1].why === 'fit' && tr.ownRaw === 0 && tr.viewerSaw === 0 && tr.entry && tr.entry.kind === 'viewport' && tr.entry.ok === true && tr.entry.text === 'live view: set viewport 700 900 (fit)' && tr.entry.label === 'viewer-fit 700×900', `F6: the live view's resize is ONE traced row for the recorder ("${tr.entry && tr.entry.text}", kind ${tr.entry && tr.entry.kind}, label "${tr.entry && tr.entry.label}") — never our raw mirror, never a viewer's command; the agent's own \`viewport\` stays an untraced observation`, JSON.stringify(tr));
-  ok(T_.classifyAction('viewport') === null && T_.classifyAction('viewer-fit') === 'viewport' && T_.positionText(T_.positionOf({ kind: 'viewport', params: { device: 'iPhone 12', why: 'put-back' } })) === 'iPhone 12' && /set device iPhone 12 \(put-back\)/.test(T_.commandText('viewer-fit', { device: 'iPhone 12', why: 'put-back' })), 'the trace table: `viewer-fit` → kind viewport (a device put back names the device); the daemon\'s own `viewport` verb stays an observation');
+  ok(gateOf(tr.agentPairTapped) && tr.traced.length === 1 && tr.traced[0][0] === 'viewer-fit' && tr.traced[0][1].width === 700 && tr.traced[0][1].why === 'fit' && tr.ownRaw === 0 && tr.viewerSaw === 0 && gateOf(tr.entry) && tr.entry.kind === 'viewport' && tr.entry.ok === true && tr.entry.text === 'live view: set viewport 700 900 (fit)' && tr.entry.label === 'viewer-fit 700×900', `F6: the live view's resize is ONE traced row for the recorder ("${tr.entry && tr.entry.text}", kind ${tr.entry && tr.entry.kind}, label "${tr.entry && tr.entry.label}") — never our raw mirror, never a viewer's command; the agent's own \`viewport\` stays an untraced observation`, JSON.stringify(tr));
+  ok(T_.classifyAction('viewport') === null && T_.classifyAction('viewer-fit') === 'viewport' && T_.positionText(T_.positionOf({ kind: 'viewport', params: { device: 'iPhone 12', why: 'put-back' } })) === 'iPhone 12' && verdictOf(/set device iPhone 12 \(put-back\)/.test(T_.commandText('viewer-fit', { device: 'iPhone 12', why: 'put-back' }))), 'the trace table: `viewer-fit` → kind viewport (a device put back names the device); the daemon\'s own `viewport` verb stays an observation');
   // (⑥ the trace view's words — MOVED to the fast scripts/test-browser-fit-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
   // NEGATIVE CONTROLS (patched copies)
@@ -926,13 +926,13 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
   const T8 = "for (const slot of ['pending', 'prevOwn']) {";
   const T9 = "if (h === 'other' && fs && fs.applied && !fs.agent";
   const T10 = "FIT.fitHonored({ fit: f.agent, picture: sz }) === 'other') {";
-  ok([T7, T8, T9, T10].every((x) => src.split(x).length === 2), 'control setup: the late judgement, the prevOwn slot, the not-taken verdict and the headed-agent rule are each found once');
+  ok(verdictOf([T7, T8, T9, T10].every((x) => src.split(x).length === 2)), 'control setup: the late judgement, the prevOwn slot, the not-taken verdict and the headed-agent rule are each found once');
   const c7 = await lateLeg(M.load('src/server/browser-stream.js', editAnchor(src, T7, '', "src/server/browser-stream.js"), 'no-late-judge'), 'late-both');
-  ok(!good(c7) && c7.page.w === 700 && c7.agent && c7.agent.join() === '800,600', `NEGATIVE CONTROL: without the late judgement our fit that landed after the agent's overrides it for good — page ${c7.page.w}×${c7.page.h} while the bridge says agent ${JSON.stringify(c7.agent)}`, JSON.stringify(c7));
+  ok(!good(c7) && c7.page.w === 700 && gateOf(c7.agent) && c7.agent.join() === '800,600', `NEGATIVE CONTROL: without the late judgement our fit that landed after the agent's overrides it for good — page ${c7.page.w}×${c7.page.h} while the bridge says agent ${JSON.stringify(c7.agent)}`, JSON.stringify(c7));
   const c8 = await lateLeg(M.load('src/server/browser-stream.js', editAnchor(src, T8, "for (const slot of ['pending']) {", "src/server/browser-stream.js"), 'no-prev-own'), 'late-ours');
-  ok(!good(c8) && c8.agent && c8.agent.join() === '700,900', `NEGATIVE CONTROL: without prevOwn our own late 700×900 mirror is read as the AGENT's choice (bridge agent ${JSON.stringify(c8.agent)} over a ${c8.page.w}×${c8.page.h} page)`, JSON.stringify(c8));
+  ok(!good(c8) && gateOf(c8.agent) && c8.agent.join() === '700,900', `NEGATIVE CONTROL: without prevOwn our own late 700×900 mirror is read as the AGENT's choice (bridge agent ${JSON.stringify(c8.agent)} over a ${c8.page.w}×${c8.page.h} page)`, JSON.stringify(c8));
   const c9 = await notTakenLeg(M.load('src/server/browser-stream.js', editAnchor(src, T9, 'if (false && ' + T9.slice(4), "src/server/browser-stream.js"), 'no-not-taken'));
-  ok(!c9.fits.includes('unavailable') && c9.applied && c9.applied.width === 700, `NEGATIVE CONTROL: without the not-taken verdict the bridge keeps believing 700×900 over a 1280×577 page, silently (applied ${JSON.stringify(c9.applied && [c9.applied.width, c9.applied.height])}, fits ${JSON.stringify(c9.fits)})`, JSON.stringify(c9));
+  ok(!c9.fits.includes('unavailable') && gateOf(c9.applied) && c9.applied.width === 700, `NEGATIVE CONTROL: without the not-taken verdict the bridge keeps believing 700×900 over a 1280×577 page, silently (applied ${JSON.stringify(c9.applied && [c9.applied.width, c9.applied.height])}, fits ${JSON.stringify(c9.fits)})`, JSON.stringify(c9));
   const T11 = 'tapOwnSet(relay, p, msg); // F6';
   ok(src.split(T11).length === 2, 'control setup: the F6 tap of our own resize is found once');
   const c11 = await traceLeg(M.load('src/server/browser-stream.js', editAnchor(src, T11, '// F6', "src/server/browser-stream.js"), 'no-trace-row'));
@@ -943,12 +943,12 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
   ok(src.split(T12).length === 2 && src.split(T13).length === 2, 'control setup (2.369.198): the stale-own and the unmirrored fences are each found once');
   const lf = await lateFrameLeg(BS);
   const noFloor = (s) => Array.isArray(s) && !s.some((x) => /^500,/.test(x));
-  ok(noFloor(lf.stale.sets) && lf.staleAfter && lf.staleAfter.height === 737 && !lf.staleAfter.floor && noFloor(lf.unmirrored.sets) && lf.unmirroredAfter && lf.unmirroredAfter.height === 800 && !lf.unmirroredAfter.floor && lf.logs.length === 1,
+  ok(gateOf(noFloor(lf.stale.sets)) && gateOf(lf.staleAfter) && lf.staleAfter.height === 737 && !lf.staleAfter.floor && gateOf(noFloor(lf.unmirrored.sets)) && gateOf(lf.unmirroredAfter) && lf.unmirroredAfter.height === 800 && !lf.unmirroredAfter.floor && lf.logs.length === 1,
     `the earlier fit's 390×700 frame arriving after the 390×737 set, and a 390×620 frame read before the daemon echoed the 390×800 set, are not judged — no headed floor on a headless phone (sets ${JSON.stringify(lf.unmirrored.sets)}; the log says why once)`, JSON.stringify(lf));
   const c12 = await lateFrameLeg(M.load('src/server/browser-stream.js', editAnchor(src, T12, 'if (false) {', "src/server/browser-stream.js"), 'no-stale-own'));
-  ok(!noFloor(c12.stale.sets) && c12.stale.fit && c12.stale.fit.floor === 500, `NEGATIVE CONTROL: without the stale-own fence the earlier fit's late 390×700 frame reads as a headed floor — the phone's page re-fitted at ${(c12.stale.sets.find((x) => /^500,/.test(x)) || '?')} (the .197 heavy red)`, JSON.stringify(c12.stale));
+  ok(!noFloor(c12.stale.sets) && gateOf(c12.stale.fit) && c12.stale.fit.floor === 500, `NEGATIVE CONTROL: without the stale-own fence the earlier fit's late 390×700 frame reads as a headed floor — the phone's page re-fitted at ${(c12.stale.sets.find((x) => /^500,/.test(x)) || '?')} (the .197 heavy red)`, JSON.stringify(c12.stale));
   const c13 = await lateFrameLeg(M.load('src/server/browser-stream.js', editAnchor(src, T13, '', "src/server/browser-stream.js"), 'no-unmirrored'));
-  ok(!noFloor(c13.unmirrored.sets) && c13.unmirrored.fit && c13.unmirrored.fit.floor === 500, `NEGATIVE CONTROL: without the unmirrored fence a frame read before the daemon's echo of our set is judged against it — floored at 500 (sets ${JSON.stringify(c13.unmirrored.sets)})`, JSON.stringify(c13.unmirrored));
+  ok(!noFloor(c13.unmirrored.sets) && gateOf(c13.unmirrored.fit) && c13.unmirrored.fit.floor === 500, `NEGATIVE CONTROL: without the unmirrored fence a frame read before the daemon's echo of our set is judged against it — floored at 500 (sets ${JSON.stringify(c13.unmirrored.sets)})`, JSON.stringify(c13.unmirrored));
   const c10 = await headedLeg(M.load('src/server/browser-stream.js', editAnchor(src, T10,"FIT.fitHonored({ fit: f.agent, picture: sz }) !== 'exact') {", "src/server/browser-stream.js"), 'agent-exact-only'));
   ok(c10.sets.length >= 1 && c10.agent === null, `NEGATIVE CONTROL: forgetting any agent choice that is not EXACTLY on the first picture drops a headed 390×844 and fits over it (sets ${JSON.stringify(c10.sets)})`, JSON.stringify(c10));
 }
@@ -976,20 +976,20 @@ function fixedPure(F) {
 }
 {
   const r = fixedPure(FIT);
-  ok(r.beats, 'fitTarget: a FIXED size beats the holder (somebody drives), a claim ("Fit here") and the largest pane — and answers with nobody visible', JSON.stringify(r.t));
+  ok(verdictOf(r.beats), 'fitTarget: a FIXED size beats the holder (somebody drives), a claim ("Fit here") and the largest pane — and answers with nobody visible', JSON.stringify(r.t));
   ok(r.v.set.act === 'set' && r.v.set.width === 1920 && r.v.set.height === 1080 && r.v.set.rule === 'fixed' && r.v.set.scale === 1 && r.v.keep.act === 'keep' && r.v.keep.rule === 'fixed',
     'fitVerdict: the page is SET to the fixed size (factor 1, no pane bound), then kept', JSON.stringify(r.v));
   ok(r.v.nobody.act === 'keep' && r.v.nobody.rule === 'fixed', 'nobody visible ⇒ KEEP the fixed size, never the restore (the baseline never un-fixes it)', JSON.stringify(r.v.nobody));
   ok(r.v.force.act === 'keep' && r.v.force.rule === 'fixed' && r.v.agentForce.act === 'letterbox', '"Fit to this window" (force) takes nothing back from a fixed size (the bridge refuses it by name); the agent\'s own later `set viewport` still stands', JSON.stringify({ f: r.v.force, a: r.v.agentForce }));
   const rf = FIT.fixedRefusal({ w: 1920, h: 1080 });
-  ok(rf && rf.code === 'size_pinned' && rf.width === 1920 && rf.height === 1080 && /the picture size is pinned at 1920×1080 — change it from the window menu \(Pin size…\)/.test(rf.error) && FIT.fixedRefusal(null) === null,
+  ok(gateOf(rf) && rf.code === 'size_pinned' && rf.width === 1920 && rf.height === 1080 && gateOf(/the picture size is pinned at 1920×1080 — change it from the window menu \(Pin size…\)/.test(rf.error)) && FIT.fixedRefusal(null) === null,
     'fixedRefusal: size_pinned + the sentence naming where to change it (null when nothing is fixed)', JSON.stringify(rf));
   const n = FIT.fitNoteOf({ fixed: { w: 1280, h: 720 }, baseline: { width: 1280, height: 577 } });
   ok(JSON.stringify(n.fixed) === '{"w":1280,"h":720}' && JSON.stringify(FIT.fitStateFromNote(n).fixed) === '{"w":1280,"h":720}' && FIT.fitNoteOf({}).fixed === null && FIT.fixedOf({ w: 0, h: 5 }) === null,
     'the page-size NOTE keeps the fixed size (a server restart keeps it); nothing / a bad shape ⇒ null', JSON.stringify(n));
   const cs = FIT.fitChipState({ fit: { state: 'fixed', width: 1920, height: 1080 }, you: 1 });
   const cw = FIT.fitChipWords(cs);
-  ok(cs.show && cs.kind === 'fixed' && cs.act === 'menu' && /pinned at 1920×1080/.test(cw.title) && /Click to change it/.test(cw.title), 'the chip: kind fixed, a click opens Pin size… (the view writes pinChipText over its text)', JSON.stringify({ cs, cw }));
+  ok(gateOf(cs.show) && cs.kind === 'fixed' && cs.act === 'menu' && gateOf(/pinned at 1920×1080/.test(cw.title)) && verdictOf(/Click to change it/.test(cw.title)), 'the chip: kind fixed, a click opens Pin size… (the view writes pinChipText over its text)', JSON.stringify({ cs, cw }));
 }
 /** A stub keeper that also keeps the page-size NOTE (the restart leg reads it back). */
 function noteKeeper(U, notes) {
@@ -1008,9 +1008,9 @@ function noteKeeper(U, notes) {
   await until(() => calls.set.some((c) => c.join() === '700,900') && A.lastFit() && A.lastFit().state === 'fitted', 3000);
   const r1 = await B.bridge.setFixed({ sessionId: 's1', fixed: { w: 1920, h: 1080 } });
   await until(() => calls.set.at(-1).join() === '1920,1080' && A.lastFit() && A.lastFit().state === 'fixed', 3000);
-  ok(r1.ok && r1.applied === 'live' && calls.set.at(-1).join() === '1920,1080' && A.lastFit().state === 'fixed' && A.lastFit().width === 1920 && A.lastFit().rule === 'fixed',
+  ok(gateOf(r1.ok) && r1.applied === 'live' && calls.set.at(-1).join() === '1920,1080' && A.lastFit().state === 'fixed' && A.lastFit().width === 1920 && A.lastFit().rule === 'fixed',
     'setFixed on a WATCHED relay ⇒ the page is set to 1920×1080 at once; every viewer is told state \'fixed\' (the chip says the pin)', JSON.stringify({ r1, fit: A.lastFit(), sets: calls.set }));
-  ok(notes.last && JSON.stringify(notes.last.fixed) === '{"w":1920,"h":1080}', 'the fixed size is written into the page-size note', JSON.stringify(notes.last));
+  ok(gateOf(notes.last) && JSON.stringify(notes.last.fixed) === '{"w":1920,"h":1080}', 'the fixed size is written into the page-size note', JSON.stringify(notes.last));
   const Bv = viewer(B.P); await Bv.ready();
   ok(Bv.fits().length >= 1 && Bv.fits().at(-1).state === 'fixed', 'a late viewer is replayed the FIXED fit', JSON.stringify(Bv.fits()));
   const n0 = calls.set.length;
@@ -1020,7 +1020,7 @@ function noteKeeper(U, notes) {
   await until(() => A.msgs.some((m) => m.type === 'refused' && m.code === 'size_pinned'), 2000);
   await sleep(600);
   const rc = Bv.msgs.find((m) => m.type === 'refused' && m.code === 'size_pinned');
-  ok(rc && /the picture size is pinned at 1920×1080 — change it from the window menu/.test(rc.error) && rc.width === 1920 && A.msgs.some((m) => m.type === 'refused' && m.code === 'size_pinned') && calls.set.length === n0,
+  ok(gateOf(rc) && gateOf(/the picture size is pinned at 1920×1080 — change it from the window menu/.test(rc.error)) && rc.width === 1920 && gateOf(A.msgs.some((m) => m.type === 'refused' && m.code === 'size_pinned')) && calls.set.length === n0,
     'a viewer\'s "Fit here" (claim) and "Fit to this window" (force) are REFUSED by name with the sentence — no new set', JSON.stringify({ rc, sets: calls.set.slice(n0) }));
   A.send({ type: 'takeover' });
   await until(() => A.msgs.some((m) => m.type === 'mode' && m.mine), 2000);
@@ -1033,9 +1033,9 @@ function noteKeeper(U, notes) {
   ok(calls.set.length === n0 && !calls.set.some((c) => c.join() === '1280,577'), `nobody watches for ${FIT.RESTORE_AFTER_MS + 800} ms ⇒ NO restore: the baseline never un-fixes a fixed size`, JSON.stringify(calls.set));
   // nobody watching: auto puts the baseline back NOW; a size set again applies NOW (what the agent sees)
   const r2 = await B.bridge.setFixed({ sessionId: 's1', fixed: null });
-  ok(r2.ok && r2.fixed === null && r2.applied === 'now' && calls.set.at(-1).join() === '1280,577' && notes.last && notes.last.fixed === null, 'setFixed(null) with nobody watching ⇒ the page goes back to its own 1280×577 at once; the note forgets the size', JSON.stringify({ r2, sets: calls.set.slice(-2) }));
+  ok(gateOf(r2.ok) && r2.fixed === null && r2.applied === 'now' && calls.set.at(-1).join() === '1280,577' && gateOf(notes.last) && notes.last.fixed === null, 'setFixed(null) with nobody watching ⇒ the page goes back to its own 1280×577 at once; the note forgets the size', JSON.stringify({ r2, sets: calls.set.slice(-2) }));
   const r3 = await B.bridge.setFixed({ sessionId: 's1', fixed: { w: 1280, h: 720 } });
-  ok(r3.ok && r3.applied === 'now' && calls.set.at(-1).join() === '1280,720', 'setFixed with nobody watching ⇒ the page takes 1280×720 NOW (the agent\'s screenshots are that size)', JSON.stringify({ r3, sets: calls.set.slice(-1) }));
+  ok(gateOf(r3.ok) && r3.applied === 'now' && calls.set.at(-1).join() === '1280,720', 'setFixed with nobody watching ⇒ the page takes 1280×720 NOW (the agent\'s screenshots are that size)', JSON.stringify({ r3, sets: calls.set.slice(-1) }));
   const r4 = await B.bridge.setFixed({ sessionId: 'nope', fixed: { w: 1280, h: 720 } });
   ok(!r4.ok && r4.code === 'not-found', 'an unknown session ⇒ not-found by name', JSON.stringify(r4));
   await B.close();
@@ -1044,7 +1044,7 @@ function noteKeeper(U, notes) {
   const C = viewer(B2.P); await C.ready();
   C.send({ type: 'fit', width: 700, height: 900, dpr: 1, visible: true });
   await until(() => C.lastFit() && C.lastFit().state === 'fixed', 3000);
-  ok(C.lastFit() && C.lastFit().state === 'fixed' && C.lastFit().width === 1280 && C.lastFit().height === 720 && !calls.set.some((x, i) => i > calls.set.length - 3 && x.join() === '700,900'),
+  ok(gateOf(C.lastFit()) && C.lastFit().state === 'fixed' && C.lastFit().width === 1280 && C.lastFit().height === 720 && !calls.set.some((x, i) => i > calls.set.length - 3 && x.join() === '700,900'),
     'after a server restart (a new bridge read from the note) the size is still fixed: a 700×900 pane does not size the page', JSON.stringify({ fit: C.lastFit(), sets: calls.set.slice(-3) }));
   await C.close(); await B2.close(); await U.close();
 }
@@ -1055,6 +1055,6 @@ function noteKeeper(U, notes) {
   ok(!fixedPure(M.load('src/browser-fit.js', editAnchor(src, A, '', "src/browser-fit.js"), 'no-fixed')).beats, 'NEGATIVE CONTROL: without the fixed answer the holder / a claim / the largest pane size the page again ⇒ the beats leg goes RED');
 }
 
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 15, label: 'browser-fit controls: ' })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 15, label: 'browser-fit controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

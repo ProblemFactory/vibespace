@@ -23,7 +23,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -113,16 +113,16 @@ const chipText = (K, backend, auth) => {
   return r ? String(r.html).replace(/<[^>]*>/g, '') : '';
 };
 const local = chipText(ChatStatusBar, 'acme', { source: 'subscription' }), onHost = chipText(ChatStatusBar, 'acme', { source: 'subscription', hostName: 'box' });
-ok(local.includes('Acme login') && !local.includes('CLI login'), 'the billing chip names the fake harness\'s CLI login', local);
-ok(onHost.includes('Acme login @ box'), 'on a host it names the machine after the row\'s word', onHost);
-ok(chipText(ChatStatusBar, 'claude', { source: 'subscription' }).includes('CLI login') && chipText(ChatStatusBar, 'codex', { source: 'subscription' }).includes('ChatGPT login'), 'claude / codex keep their words (behaviour identical)');
+ok(gateOf(local.includes('Acme login')) && !local.includes('CLI login'), 'the billing chip names the fake harness\'s CLI login', local);
+ok(verdictOf(onHost.includes('Acme login @ box')), 'on a host it names the machine after the row\'s word', onHost);
+ok(gateOf(chipText(ChatStatusBar, 'claude', { source: 'subscription' }).includes('CLI login')) && verdictOf(chipText(ChatStatusBar, 'codex', { source: 'subscription' }).includes('ChatGPT login')), 'claude / codex keep their words (behaviour identical)');
 
 console.log('③ NEGATIVE CONTROL — the pre-lane id ternary restored');
 const sbSrc = read('src/lib/chat-status-bar.js'), line = 'const glogin = t(billingRow(this._backend).cliLogin);';
-ok(sbSrc.includes(line), 'the row read sits where the control expects it');
+ok(verdictOf(sbSrc.includes(line)), 'the row read sits where the control expects it');
 const { ChatStatusBar: Old } = await import(pathToFileURL(MUT.write('src/lib/chat-status-bar.js', editAnchor(sbSrc, line, "const glogin = this._backend === 'codex' ? t('ChatGPT login') : t('CLI login'); // CONTROL: the pre-lane id ternary", "src/lib/chat-status-bar.js"))).href);
 const oldText = chipText(Old, 'acme', { source: 'subscription' });
-ok(!oldText.includes('Acme login') && oldText.includes('CLI login'), 'the patched copy names the fake harness "CLI login" — ② is red on it', oldText);
+ok(!oldText.includes('Acme login') && verdictOf(oldText.includes('CLI login')), 'the patched copy names the fake harness "CLI login" — ② is red on it', oldText);
 
 console.log('④ the surface census (pre-lane spellings) + its control');
 const FILES = ['app', 'chat-status-bar', 'session-props', 'usage-meter', 'usage-window', 'manage-agents', 'session-card', 'chat-view', 'session-lifecycle', 'layout'].map((f) => `src/lib/${f}.js`);
@@ -137,7 +137,7 @@ const OLD = [
 const census = (text) => OLD.filter(([re]) => re.test(text)).map(([, why]) => why);
 for (const f of FILES) { const hits = census(read(f)); ok(hits.length === 0, `${f}: no pre-lane billing / label / view-id spelling`, hits); }
 const sp = read('src/lib/session-props.js'), want = 'const globalLabel = t(bill.globalLogin);';
-ok(sp.includes(want) && census(sp.replace(want, "const globalLabel = sbe === 'codex' ? t('ChatGPT login') : t('Subscription');")).length === 1, 'census control: session-props with the pre-lane ternary restored is caught');
+ok(gateOf(sp.includes(want)) && census(sp.replace(want, "const globalLabel = sbe === 'codex' ? t('ChatGPT login') : t('Subscription');")).length === 1, 'census control: session-props with the pre-lane ternary restored is caught');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

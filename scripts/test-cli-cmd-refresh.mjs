@@ -36,7 +36,7 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for 
 const require = createRequire(import.meta.url);
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(every); } return pred(); };
@@ -96,7 +96,7 @@ if (mod) {
     ok(r === '/new/claude', `a GONE path: the shell is asked and the path it names is spawned (${r})`);
     ok(calls.ask === 1, `the shell was asked exactly ONCE (${calls.ask})`);
     ok(calls.applied.join() === '/new/claude', 'the new path is handed to the adapter (later spawns are born right)');
-    ok(calls.logs.length === 1 && calls.logs[0].includes("'/old/claude'") && calls.logs[0].includes("'/new/claude'"), `ONE log line naming the old AND the new path (${calls.logs[0]})`);
+    ok(calls.logs.length === 1 && gateOf(calls.logs[0].includes("'/old/claude'")) && verdictOf(calls.logs[0].includes("'/new/claude'")), `ONE log line naming the old AND the new path (${calls.logs[0]})`);
     ok(c.current('claude') === '/new/claude', 'the registry now answers the new path');
     const r2 = await c.forSpawn('claude', '/new/claude');
     ok(r2 === '/new/claude' && calls.ask === 1 && calls.logs.length === 1, 'the next spawn with the new path costs nothing more');
@@ -106,11 +106,11 @@ if (mod) {
     const e = await refusedBy(c.forSpawn('claude', '/old/claude'));
     ok(!!e && e.code === 'cli-missing' && e.cli === 'claude' && e.shell === 'zsh' && e.answer === 'none', `found NOTHING ⇒ the create is REFUSED by name (CliMissing ${e && e.code}) — never «spawning it as before» (lane cli-shell-truth: this leg CHANGED MEANING)`);
     ok(!calls.applied.length, 'nothing is handed to the adapter');
-    ok(calls.logs.length === 1 && /refused \(cli-missing\)/.test(calls.logs[0]) && /not found as a program by your zsh/.test(calls.logs[0]), `and ONE line says so (${calls.logs[0]})`);
+    ok(calls.logs.length === 1 && gateOf(/refused \(cli-missing\)/.test(calls.logs[0])) && verdictOf(/not found as a program by your zsh/.test(calls.logs[0])), `and ONE line says so (${calls.logs[0]})`);
   }
   {
     const { c, calls } = mk(new Set(['/old/claude']), async () => { throw new Error('boom'); });
-    ok(await c.forSpawn('claude', '/old/claude') === '/old/claude' && calls.logs.length === 1 && /could not be asked/.test(calls.logs[0]), 'a throwing shell ask could not ANSWER: the provisional path that works is spawned, the degradation named in one line');
+    ok(await c.forSpawn('claude', '/old/claude') === '/old/claude' && calls.logs.length === 1 && verdictOf(/could not be asked/.test(calls.logs[0])), 'a throwing shell ask could not ANSWER: the provisional path that works is spawned, the degradation named in one line');
     const { c: c2 } = mk(new Set(), async () => { throw new Error('boom'); });
     const e = await refusedBy(c2.forSpawn('claude', '/old/claude'));
     ok(!!e && e.code === 'cli-missing' && e.answer === 'unanswered', '…and with the provisional path gone and the hub\'s walk empty too, refused (unanswered)');
@@ -131,7 +131,7 @@ if (mod) {
   {
     const { c, calls } = mk(new Set(['/new/claude']), async () => { await new Promise((r) => setTimeout(r, 20)); return '/new/claude'; });
     const rs = await Promise.all([1, 2, 3].map(() => c.forSpawn('claude', '/old/claude')));
-    ok(rs.every((r) => r === '/new/claude'), `three concurrent spawns in the stale window all get the fresh path (${rs.join(', ')})`);
+    ok(verdictOf(rs.every((r) => r === '/new/claude')), `three concurrent spawns in the stale window all get the fresh path (${rs.join(', ')})`);
     ok(calls.ask === 1 && calls.applied.length === 1 && calls.logs.length === 1,
       `…through ONE shared ask: asks=${calls.ask} applies=${calls.applied.length} journal lines=${calls.logs.length}`);
     const r4 = await c.forSpawn('claude', '/old/claude');
@@ -140,7 +140,7 @@ if (mod) {
   {
     const { c, calls } = mk(new Set(), async () => { await new Promise((r) => setTimeout(r, 20)); return 'none'; });
     const rs = await Promise.all([1, 2, 3].map(() => refusedBy(c.forSpawn('claude', '/old/claude'))));
-    ok(rs.every((e) => e && e.code === 'cli-missing') && calls.ask === 1,
+    ok(gateOf(rs.every((e) => e && e.code === 'cli-missing')) && calls.ask === 1,
       `a binary still missing: the concurrent creates share ONE ask and are each refused by name (asks=${calls.ask})`);
     await refusedBy(c.forSpawn('claude', '/old/claude'));
     ok(calls.ask === 2, 'and the NEXT create asks again (the shared lookup is released when it settles — never a cached "missing")');
@@ -154,7 +154,7 @@ if (mod) {
     // the async lookup is the boot lookup's twin
     const want = mod.resolveCmd('sh');
     const got = await mod.resolveCmdAsync('sh');
-    ok(want === got && got.startsWith('/'), `resolveCmdAsync answers what resolveCmd answers (sh → ${got})`);
+    ok(want === got && verdictOf(got.startsWith('/')), `resolveCmdAsync answers what resolveCmd answers (sh → ${got})`);
     const none = 'vs-no-such-cmd-' + process.pid;
     ok(mod.resolveCmd(none) === none && await mod.resolveCmdAsync(none) === none, 'both answer the bare name when nothing is found');
   }
@@ -206,8 +206,8 @@ else {
   srv.stdout.on('data', (d) => { journal += d; });
   srv.stderr.on('data', (d) => { journal += d; });
   const ready = await until(() => journal.includes('Ready.'), 40000, 50);
-  if (!ok(ready, 'the scratch server booted')) { console.error(journal.slice(-1500)); done(); }
-  ok(journal.includes(`claude: ${path.join(A, 'claude')}`), `boot resolved claude to dir A (${(journal.match(/claude: \S+/) || [''])[0]})`);
+  if (!ok(verdictOf(ready), 'the scratch server booted')) { console.error(journal.slice(-1500)); done(); }
+  ok(verdictOf(journal.includes(`claude: ${path.join(A, 'claude')}`)), `boot resolved claude to dir A (${(journal.match(/claude: \S+/) || [''])[0]})`);
   const { WebSocket } = await import('ws');
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
@@ -225,18 +225,18 @@ else {
     const r = await create();
     const ran = await until(() => marks().length > before, 8000);
     const last = marks()[marks().length - 1];
-    ok(r?.type === 'created' && ran && last === want, `${label}: the spawn ran ${want} (${r?.type}${r?.type === 'error' ? ' ' + String(r.message).slice(0, 80) : ''}; ran=${ran}${ran ? ' as ' + last : ''})`);
+    ok(r?.type === 'created' && gateOf(ran) && last === want, `${label}: the spawn ran ${want} (${r?.type}${r?.type === 'error' ? ' ' + String(r.message).slice(0, 80) : ''}; ran=${ran}${ran ? ' as ' + last : ''})`);
   };
 
   await spawnRuns(path.join(A, 'claude'), 'spawn 1, binary in A (the boot answer — the login shell, asked now, names the same path)');
   ok(cliLines().length === 0, 'a spawn whose path is present logs nothing and adopts nothing');
   let ranPath = ''; try { ranPath = fs.readFileSync(PATHMARK, 'utf8').trim(); } catch { }
-  ok(ranPath.split(':').includes(SHMARK), `the spawn's PATH is the login shell's own (its rc's marker dir rode it: ${ranPath.split(':').slice(0, 3).join(':')}…)`);
+  ok(verdictOf(ranPath.split(':').includes(SHMARK)), `the spawn's PATH is the login shell's own (its rc's marker dir rode it: ${ranPath.split(':').slice(0, 3).join(':')}…)`);
 
   fs.renameSync(path.join(A, 'claude'), path.join(B, 'claude'));
   await spawnRuns(path.join(B, 'claude'), 'spawn 2, binary MOVED to B — THE FINDING (pre-fix: the dead A path is spawned, nothing runs)');
   const l1 = cliLines()[0] || '';
-  ok(cliLines().length === 1 && l1.includes(`'${path.join(A, 'claude')}'`) && l1.includes(`'${path.join(B, 'claude')}'`), `ONE journal line naming the old and the new path (${l1.trim().slice(0, 200)})`);
+  ok(cliLines().length === 1 && gateOf(l1.includes(`'${path.join(A, 'claude')}'`)) && verdictOf(l1.includes(`'${path.join(B, 'claude')}'`)), `ONE journal line naming the old and the new path (${l1.trim().slice(0, 200)})`);
 
   fs.renameSync(path.join(B, 'claude'), path.join(A, 'claude'));
   await spawnRuns(path.join(A, 'claude'), 'spawn 3, binary moved BACK to A — no restart in between');
@@ -255,10 +255,10 @@ else {
   // lane cli-shell-truth: THIS LEG CHANGED MEANING — it used to pin «the spawn fails the way it always did» (a dead path
   // spawned, a wrapper dying ~30 s later, the UI silent: the owner's codex incident). Gone everywhere ⇒ REFUSED by name.
   ok(r5?.type === 'error' && r5.code === 'cli-missing' && r5.cli === 'claude' && r5.shell === 'login-shell' && r5.answer === 'none', `CONTROL: with the binary gone everywhere the create answers cli-missing by name (${r5?.type} ${r5?.code} — ${String(r5?.message || '').slice(0, 160)})`);
-  ok(Array.isArray(r5?.looked) && r5.looked.includes(A) && r5.looked.includes(B), `…naming where the hub looked too (${(r5?.looked || []).length} dirs)`);
+  ok(gateOf(Array.isArray(r5?.looked)) && gateOf(r5.looked.includes(A)) && verdictOf(r5.looked.includes(B)), `…naming where the hub looked too (${(r5?.looked || []).length} dirs)`);
   ok(marks().length === before && dNew.length === 0, `…and NOTHING was spawned: no CLI ran, no new dtach master (${dNew.length})`);
   const l3 = cliLines()[2] || '';
-  ok(cliLines().length === 3 && /refused \(cli-missing\)/.test(l3) && /not found as a program by your login-shell/.test(l3), `ONE journal line says the create is refused (${l3.trim().slice(0, 200)})`);
+  ok(cliLines().length === 3 && gateOf(/refused \(cli-missing\)/.test(l3)) && verdictOf(/not found as a program by your login-shell/.test(l3)), `ONE journal line says the create is refused (${l3.trim().slice(0, 200)})`);
   // ④ (lane antigravity-card-fixes, the owner's 「Antigravity CLI 未安装」 for an agy installed after the hub booted):
   // THE STATUS READ re-checks the CLI paths (src/server/cli-cmd.js `check`) — on THIS server, after its spawn legs (a
   // status read runs `claude --version`, which would add a mark; here the fake claude is already gone)
@@ -272,7 +272,7 @@ else {
     fs.writeFileSync(path.join(B, 'agy'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const s1 = await agyStatus('?recheck=1');
     ok(s1.installed === true && s1.cmdPath === path.join(B, 'agy'), `agy appears in dir B; Manage agents' forced read (Install / Re-check) says INSTALLED there — THE FINDING, no restart (pre-fix: still not installed) (${JSON.stringify(s1)})`);
-    ok(journal.includes(`[cli-cmd] antigravity: your login-shell (login shell) found 'agy' at '${path.join(B, 'agy')}'`), 'the adoption is one journal line naming who found it (later spawns are born with the path)');
+    ok(verdictOf(journal.includes(`[cli-cmd] antigravity: your login-shell (login shell) found 'agy' at '${path.join(B, 'agy')}'`)), 'the adoption is one journal line naming who found it (later spawns are born with the path)');
     fs.rmSync(path.join(B, 'agy'));
     const s2 = await agyStatus();
     ok(s2.installed === false && s2.cmdPath === null, `agy removed: the next plain read says not installed (${JSON.stringify(s2)})`);
@@ -289,20 +289,20 @@ else {
     fs.writeFileSync(LOGIN_SH, `#!/bin/sh\necho "scratch rc banner"\nPATH="${SHMARK}:$PATH"; export PATH\nwhile [ $# -gt 0 ]; do case "$1" in -c) shift; L="$1"; shift; exec /bin/sh -c ". '${RCFN}'; $L" "$@";; *) shift;; esac; done; exit 9\n`, { mode: 0o755 });
     try { await fetch(`http://127.0.0.1:${PORT}/api/backend-status?recheck=1`); } catch { }
     const st = await (async () => { try { return (await (await fetch(`http://127.0.0.1:${PORT}/api/backend-status`)).json())?.claude || {}; } catch (e) { return { error: e.message }; } })();
-    ok(st.via === 'program' && st.wrapper && st.wrapper.kind === 'function' && st.cmdPath === path.join(A, 'claude'), `a person's Re-check: the shell wraps claude in a FUNCTION — the census NAMES it and keeps the PATH program (${st.cmdPath}, via ${st.via})`);
+    ok(st.via === 'program' && gateOf(st.wrapper) && st.wrapper.kind === 'function' && st.cmdPath === path.join(A, 'claude'), `a person's Re-check: the shell wraps claude in a FUNCTION — the census NAMES it and keeps the PATH program (${st.cmdPath}, via ${st.via})`);
     const before = marks().length;
     const reqId = 'chat5';
     ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: WORK, reqId }));
     await until(() => msgs.some((m) => m.reqId === reqId && (m.type === 'created' || m.type === 'error')), 20000);
     const r6 = msgs.find((m) => m.reqId === reqId && (m.type === 'created' || m.type === 'error')) || null;
     const ran = await until(() => marks().length > before, 10000);
-    ok(r6?.type === 'created' && ran && marks()[marks().length - 1] === path.join(A, 'claude'), `the CHAT create spawns the PROGRAM directly (never the shell): ${path.join(A, 'claude')} ran (${r6?.type}; ran=${ran})`);
+    ok(r6?.type === 'created' && gateOf(ran) && marks()[marks().length - 1] === path.join(A, 'claude'), `the CHAT create spawns the PROGRAM directly (never the shell): ${path.join(A, 'claude')} ran (${r6?.type}; ran=${ran})`);
     const said = 'hello-through-the-chat-wrapper-' + process.pid;
     if (r6?.sessionId) ws.send(JSON.stringify({ type: 'chat-input', sessionId: r6.sessionId, text: said }));
     const heard = await until(() => { try { return fs.readFileSync(STDIN_MARK, 'utf8').includes(said); } catch { return false; } }, 15000, 200);
-    ok(heard, `…and the chat is NOT deaf: a message sent through the chat wrapper reached the CLI's stdin (${heard ? 'heard' : 'nothing heard'})`);
-    ok(journal.split('\n').some((l) => /\[cli-cmd\] claude: .*found 'claude' at .* it wraps the name in a function, which VibeSpace does not run/.test(l)), 'ONE journal line names the function the program runs without');
+    ok(verdictOf(heard), `…and the chat is NOT deaf: a message sent through the chat wrapper reached the CLI's stdin (${heard ? 'heard' : 'nothing heard'})`);
+    ok(verdictOf(journal.split('\n').some((l) => /\[cli-cmd\] claude: .*found 'claude' at .* it wraps the name in a function, which VibeSpace does not run/.test(l))), 'ONE journal line names the function the program runs without');
   }
   try { ws.close(); } catch { }
   done();
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

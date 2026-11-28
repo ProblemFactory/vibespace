@@ -19,7 +19,7 @@ const PORT = 3993, CDP_PORT = 9343;
 const wt = '/tmp/vs-est-smoke';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}`); } };
+const check = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}`); } };
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -88,7 +88,7 @@ const pop = await evalJs(`(() => { ${FIX}
 console.log('popup bars:', JSON.stringify(pop.bars));
 console.log('popup est stats:', JSON.stringify(pop.estStats));
 check('popup: every bar carries an est layer (5h/7d/Fable)', pop.bars.filter((b) => b.est).length >= 3);
-check('popup: est stats rendered with pct', pop.estStats.length >= 3 && pop.estStats.some((s) => /55%/.test(s)));
+check('popup: est stats rendered with pct', pop.estStats.length >= 3 && verdictOf(pop.estStats.some((s) => /55%/.test(s))));
 check('taskbar pies: est rings on both donuts', pop.donutEst === 2);
 fs.mkdirSync('/tmp/vs-est-shots', { recursive: true });
 await sleep(200);
@@ -138,7 +138,7 @@ check('agents: pooled row uses the POOL icon (not KEY)', poolRow?.icon === 'pool
 check('agents: pooled row shows its TARGET\'s usage donuts', (poolRow?.donuts || 0) >= 2);
 check('agents: sub-1 donuts carry est rings', (sub1Row?.estDonuts || 0) >= 2);
 check('agents: rolled sub-2 est ring present too', (sub2Row?.estDonuts || 0) >= 1);
-check('agents: est tooltip names the estimate', /est|预计|推定/.test(poolRow?.usageTip || sub1Row?.usageTip || ''));
+check('agents: est tooltip names the estimate', verdictOf(/est|预计|推定/.test(poolRow?.usageTip || sub1Row?.usageTip || '')));
 // pool ⋯ menu must NOT offer "Show key…"
 const menu = await evalJs(`(async () => {
   const row = [...document.querySelectorAll('.acct-key-row')].find((r) => r.dataset.id === 'pool-1');
@@ -150,11 +150,11 @@ const menu = await evalJs(`(async () => {
 })()`);
 console.log('pool menu:', JSON.stringify(menu));
 check('agents: pool ⋯ menu has NO "Show key…"', menu.length > 0 && !menu.some((i) => /Show key|查看.*key/i.test(i)));
-check('agents: pool ⋯ menu has pool actions', menu.some((i) => /Switch target|Members/.test(i)));
+check('agents: pool ⋯ menu has pool actions', verdictOf(menu.some((i) => /Switch target|Members/.test(i))));
 await sleep(200);
 shot = await cdp('Page.captureScreenshot', { clip: { x: 0, y: 0, width: 1200, height: 760, scale: 1.1 } });
 fs.writeFileSync('/tmp/vs-est-shots/agents.png', Buffer.from(shot.data, 'base64'));
 
 console.log(failed ? `${failed} FAILED` : 'ALL PASS');
 console.log('shots: /tmp/vs-est-shots/popup.png /tmp/vs-est-shots/agents.png');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

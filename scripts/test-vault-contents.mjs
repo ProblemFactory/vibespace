@@ -33,7 +33,7 @@ const { Auth } = require(path.join(REPO, 'src/auth.js'));
 const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
 const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 const ROOT = scratch('vault-contents');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const LOGS = [];
@@ -216,7 +216,7 @@ console.log('① ② ③ ④ ⑤ ⑥ the shipped doors');
   const red = await judge(H);
   ok(red.length === 0, 'people only (human_only ×4 doors × 3 agent forms, cross_site, 401); the list masked; the window THIS PAGE\'s (a second tab / another sign-in refused), fixed 5 min, ended by a lock and by reveal-end (only with its secret); ONE value per answer; 20 a minute; the account key + the mount config through the window; the audit without a value', red);
   const audit = fs.readFileSync(path.join(H.dataDir, VE.AUDIT_FILE), 'utf8');
-  ok(/"event":"vault-reveal-window"/.test(audit) && /"event":"vault-reveal-refused".*"code":"wrong_password"/.test(audit) && /"event":"vault-reveal-paced"/.test(audit), 'the audit also says: the window opened, the refused password, the pace');
+  ok(gateOf(/"event":"vault-reveal-window"/.test(audit)) && gateOf(/"event":"vault-reveal-refused".*"code":"wrong_password"/.test(audit)) && verdictOf(/"event":"vault-reveal-paced"/.test(audit)), 'the audit also says: the window opened, the refused password, the pace');
   console.log('⑤b the sensitive export');
   const EXP = (body, headers) => H.hit('/api/config/export', { headers: headers || H.page(), body: { sections: ['settings'], passphrase: 'abcd', ...body } });
   const plain = await EXP({});
@@ -228,13 +228,13 @@ console.log('① ② ③ ④ ⑤ ⑥ the shipped doors');
   const agentExp = await EXP({ includeSensitive: ['accounts'], secondPassword: PW }, { ...H.page(), authorization: 'Bearer ' + H.SESSION_TOKEN });
   ok(agentExp.status === 403 && agentExp.json.code === 'human_only', 'an agent token ⇒ 403 human_only (even with the right second password)', agentExp.json);
   const rightPw = await EXP({ includeSensitive: ['accounts'], secondPassword: PW });
-  ok(rightPw.status === 200 && rightPw.json.sensitive && JSON.stringify(rightPw.json.sensitive.manifest) === '["accounts"]' && !rightPw.raw.includes(PW), 'the right second password ⇒ the export, its shape unchanged (the manifest + the passphrase cipher)', Object.keys(rightPw.json));
-  ok(/"event":"vault-export-sensitive"/.test(fs.readFileSync(path.join(H.dataDir, VE.AUDIT_FILE), 'utf8')), 'audited vault-export-sensitive (who / ip — never a password)');
+  ok(rightPw.status === 200 && gateOf(rightPw.json.sensitive) && JSON.stringify(rightPw.json.sensitive.manifest) === '["accounts"]' && !rightPw.raw.includes(PW), 'the right second password ⇒ the export, its shape unchanged (the manifest + the passphrase cipher)', Object.keys(rightPw.json));
+  ok(verdictOf(/"event":"vault-export-sensitive"/.test(fs.readFileSync(path.join(H.dataDir, VE.AUDIT_FILE), 'utf8'))), 'audited vault-export-sensitive (who / ip — never a password)');
   await H.hit('/api/vault/lock');
   const lockedExp = await EXP({ includeSensitive: ['accounts'], secondPassword: PW });
   ok(lockedExp.status === 423 && lockedExp.json.code === 'vault_locked', 'a LOCKED vault ⇒ 423 vault_locked', lockedExp.json);
   const info = await H.hit('/api/config/export-info', { method: 'GET' });
-  ok(info.json.sensitive && info.json.sensitive.secondPassword === true, 'export-info tells the dialog to ask for the second password', info.json.sensitive);
+  ok(gateOf(info.json.sensitive) && info.json.sensitive.secondPassword === true, 'export-info tells the dialog to ask for the second password', info.json.sensitive);
   H.close();
 }
 
@@ -243,7 +243,7 @@ console.log('⑦ a hub with NO sign-in');
   const H = await hub('nosignin', { signIn: false });
   const owner = H.page('');
   const rs = await H.hit('/api/vault/reveal-session', { headers: owner, body: { password: PW } });
-  ok(rs.status === 200 && /^[0-9a-f]{32}$/.test(String(rs.json.page)), 'the owner\'s page opens its window (its page secret in the answer)', rs.json);
+  ok(rs.status === 200 && verdictOf(/^[0-9a-f]{32}$/.test(String(rs.json.page))), 'the owner\'s page opens its window (its page secret in the answer)', rs.json);
   const proc = { 'sec-fetch-site': 'same-origin' };   // a headerless local process forging the page's one header
   const p1 = await H.hit('/api/vault/reveal', { headers: proc, body: { id: ID('a') } });
   const p2 = await H.hit('/api/vault/reveal', { headers: proc, body: { id: ID('a'), page: crypto.randomBytes(16).toString('hex') } });
@@ -279,7 +279,7 @@ console.log('⑧ MUTANTS — each RED');
     const H = await hub('m-' + name.replace(/\W+/g, '-'), m);
     const red = await judge(H);
     H.close();
-    ok(applied && red.length > 0, `RED: ${name} (${applied ? red[0] || 'NOT CAUGHT' : 'the mutant did not apply'})`);
+    ok(gateOf(applied) && red.length > 0, `RED: ${name} (${applied ? red[0] || 'NOT CAUGHT' : 'the mutant did not apply'})`);
   }
 }
 
@@ -291,15 +291,15 @@ console.log('⑳ THE OWNER\'S DOWNLOAD (lane lg-vault-file, B-0830): a FILE is n
   const VCm = require(path.join(REPO, 'src/server/vault-contents.js'));
   const c = VCm.create({ vault: v, sources: { secrets: () => VCm.secretSource({ vault: v }) } });
   const BYTES = Buffer.concat([Buffer.from([0, 255, 0]), crypto.randomBytes(300)]);
-  ok((await v.filePut('keyfile:0a1b2c3d4e', BYTES, { filename: 'licence.lic', prov: 'uploaded', label: 'Licence' })).ok && (await v.agentFilePut('agent:conv-1/deploy-key', BYTES, { filename: 'id_ed25519', actor: 'Lane X' })).ok, 'two files: the owner\'s and an agent\'s');
+  ok(gateOf((await v.filePut('keyfile:0a1b2c3d4e', BYTES, { filename: 'licence.lic', prov: 'uploaded', label: 'Licence' })).ok) && verdictOf((await v.agentFilePut('agent:conv-1/deploy-key', BYTES, { filename: 'id_ed25519', actor: 'Lane X' })).ok), 'two files: the owner\'s and an agent\'s');
   const id = 'secrets:keyfile:0a1b2c3d4e#file';
   const before = await c.reveal('owner', null, id);
   ok(!before.ok && before.code === 'reveal_needs_password' && !('bytes' in before), 'without the window ⇒ reveal_needs_password, no byte');
   const w = await c.startReveal('owner', PW);
   const got = await c.reveal('owner', w.page, id);   // the U1a cure: a file's download answers a promise (read off the main loop)
-  ok(got.ok && typeof got.bytes === 'string' && Buffer.from(got.bytes, 'base64').equals(BYTES) && got.file.name === 'licence.lic' && !('value' in got), 'inside the window ⇒ { file: {name, size, kind}, bytes (base64) } — the file whole, ONCE; never `value`', { code: got.code });
+  ok(gateOf(got.ok) && typeof got.bytes === 'string' && gateOf(Buffer.from(got.bytes, 'base64').equals(BYTES)) && got.file.name === 'licence.lic' && !('value' in got), 'inside the window ⇒ { file: {name, size, kind}, bytes (base64) } — the file whole, ONCE; never `value`', { code: got.code });
   const ag = await c.reveal('owner', w.page, 'secrets:agent:conv-1/deploy-key#secret');
-  ok(ag.ok && Buffer.from(ag.bytes, 'base64').equals(BYTES) && ag.file.name === 'id_ed25519', 'an agent\'s file downloads the same way (the owner\'s door — an agent never reads it back)');
+  ok(gateOf(ag.ok) && gateOf(Buffer.from(ag.bytes, 'base64').equals(BYTES)) && ag.file.name === 'id_ed25519', 'an agent\'s file downloads the same way (the owner\'s door — an agent never reads it back)');
   const audit = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8');
   ok((audit.match(/"event":"vault-download"/g) || []).length === 2 && !audit.includes(BYTES.toString('base64').slice(0, 24)), 'each download is ONE audit line (vault-download: who, the entry, the size) — no byte');
   v.lock('door');
@@ -327,22 +327,22 @@ console.log('㉑ THE RUN FIT ON THE FILE ROW (主开发 r4378 (a)(b), B-0830 U1b
     const runLineOf = (row) => { const x = FR.fileExtras(row); return (x.box && x.box.children.find((c) => c.className === 'vw-file-run')) || null; };
     const big = rowOf(max + 4096, 470), small = rowOf(max, 400), noLines = rowOf(max + 1, null);
     const m = runLineOf(big), m0 = runLineOf(small), m2 = runLineOf(noLines);
-    ok(big.file.forRun && big.file.forRun.fits === false && small.file.forRun.fits === true, `the hub's facts say it (forRun: ${max + 4096} B does not fit, ${max} B fits)`, [big.file.forRun, small.file.forRun]);
-    ok(m && m.dataset.state === 'too-large-for-a-run' && /^Too large for a run \(470 lines, 28 KB\)/.test(m.textContent) && /up to 24 KB in all/.test(m.textContent) && /you can download it/.test(m.textContent) && /an agent can still ask you for it/.test(m.textContent),
+    ok(gateOf(big.file.forRun) && big.file.forRun.fits === false && small.file.forRun.fits === true, `the hub's facts say it (forRun: ${max + 4096} B does not fit, ${max} B fits)`, [big.file.forRun, small.file.forRun]);
+    ok(gateOf(m) && m.dataset.state === 'too-large-for-a-run' && gateOf(/^Too large for a run \(470 lines, 28 KB\)/.test(m.textContent)) && gateOf(/up to 24 KB in all/.test(m.textContent)) && gateOf(/you can download it/.test(m.textContent)) && verdictOf(/an agent can still ask you for it/.test(m.textContent)),
       'a file past the figure: its ROW says it at once — its lines, its size, the figure, and what still works (download; an agent\'s ask)', m && m.textContent);
     ok(m0 === null, 'CONTROL: a file AT the figure fits — its row says nothing of it (the mark follows the hub\'s fact, not the kind)', m0 && m0.textContent);
-    ok(m2 && /^Too large for a run \(24 KB\)/.test(m2.textContent), 'a file whose lines are not known says its size alone', m2 && m2.textContent);
+    ok(gateOf(m2) && verdictOf(/^Too large for a run \(24 KB\)/.test(m2.textContent)), 'a file whose lines are not known says its size alone', m2 && m2.textContent);
     const doors = FR.fileExtras(big).doors;
-    ok(doors.length === 1 && doors[0].disabled === false && /Download/.test(doors[0].textContent), 'a plain MARK: the row\'s Download stays a live door — nothing is greyed by it (r1423)', doors.map((d) => [d.textContent, d.disabled]));
+    ok(doors.length === 1 && doors[0].disabled === false && verdictOf(/Download/.test(doors[0].textContent)), 'a plain MARK: the row\'s Download stays a live door — nothing is greyed by it (r1423)', doors.map((d) => [d.textContent, d.disabled]));
   } finally {
     for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }
   }
   const FRS = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8');
-  ok(/onPick: \(p\) => \{ picked = p; sayRunFit\(p\);/.test(FRS) && /const over = !!p && p\.size > RUN_FILE_BYTES_MAX;/.test(FRS) && /body\.append\(help, field\(t\('File'\), pick\.el\), runNote, /.test(FRS),
+  ok(gateOf(/onPick: \(p\) => \{ picked = p; sayRunFit\(p\);/.test(FRS)) && gateOf(/const over = !!p && p\.size > RUN_FILE_BYTES_MAX;/.test(FRS)) && verdictOf(/body\.append\(help, field\(t\('File'\), pick\.el\), runNote, /.test(FRS)),
     'the upload door says it at the PICK (sayRunFit on every pick and clear, the note under the file box) — the save stays a save');
   const ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const words = ['Too large for a run ({lines} lines, {size})', 'Too large for a run ({size})', 'Larger than a run can carry ({max} in all)'];
-  ok(words.every((w) => ZH.includes(JSON.stringify(w).slice(0, -1)) && JA.includes(JSON.stringify(w).slice(0, -1))), 'its words in zh and ja beside the English (the row\'s two forms and the door\'s note)');
+  ok(verdictOf(words.every((w) => ZH.includes(JSON.stringify(w).slice(0, -1)) && JA.includes(JSON.stringify(w).slice(0, -1)))), 'its words in zh and ja beside the English (the row\'s two forms and the door\'s note)');
 }
 
 console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an octet-stream SAVE through a download link, a name with markup is drawn as text, a read error clears the pick — each with its red copy');
@@ -385,7 +385,7 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
     const pressDownload = async (M) => { made.length = 0; html.length = 0; clicks.length = 0; blobs.length = 0; toasts.length = 0; await M.downloadFile(row, null); const b = blobs[0]; const text = made.map((e) => e.textContent).join('\n') + toasts.join('\n'); return { type: b && b.type, size: b && b.size, click: clicks[0] || null, html: html.length, toasts: toasts.slice(), bytesShown: text.includes(BYTES.toString().slice(30, 50)) || text.includes(BYTES.toString('base64').slice(10, 40)) }; };
     const REAL = await rowOf(SRC);
     const d0 = await pressDownload(REAL);
-    ok(d0.type === 'application/octet-stream' && d0.size === BYTES.length && d0.click && d0.click.tag === 'A' && d0.click.download === MARK && /^blob:/.test(d0.click.href) && !d0.bytesShown,
+    ok(d0.type === 'application/octet-stream' && d0.size === BYTES.length && gateOf(d0.click) && d0.click.tag === 'A' && d0.click.download === MARK && gateOf(/^blob:/.test(d0.click.href)) && !d0.bytesShown,
       '(b) Download SAVES the bytes: a Blob of type application/octet-stream behind a link WITH the download attribute (the file\'s name), pressed once — no byte in any element\'s text or toast', d0);
     const asHtml = await pressDownload(await rowOf(cut(SRC, "new Blob([bytes], { type: 'application/octet-stream' })", "new Blob([bytes], { type: 'text/html' })", 'the file\'s own type')));
     ok(asHtml.type !== 'application/octet-stream', `red control: «the Blob typed text/html» is RED (type ${asHtml.type})`, asHtml);
@@ -394,9 +394,9 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
     // (c) a name with markup lands as TEXT on the row (and in the download's link and toast above); red: a copy that draws it as HTML
     const drawRow = (M) => { made.length = 0; html.length = 0; const x = M.fileExtras(row); const name = x.box && x.box.children.find((c) => c.className === 'vw-file-name'); return { text: name && name.textContent, html: html.slice() }; };
     const r0 = drawRow(REAL);
-    ok(r0.text === MARK && r0.html.length === 0 && d0.html === 0 && d0.toasts.join(' ').includes(MARK), '(c) a file name holding markup is drawn as TEXT on its row, in the download link and its toast — nothing is written as HTML', r0);
+    ok(r0.text === MARK && r0.html.length === 0 && d0.html === 0 && verdictOf(d0.toasts.join(' ').includes(MARK)), '(c) a file name holding markup is drawn as TEXT on its row, in the download link and its toast — nothing is written as HTML', r0);
     const asMarkup = drawRow(await rowOf(cut(SRC, "box.append(mk('span', 'vw-file-name', f.name), ", "box.append(Object.assign(mk('span', 'vw-file-name'), { innerHTML: f.name }), ", 'the name drawn as HTML')));
-    ok(asMarkup.html.includes(MARK), 'red control: «the name drawn as HTML» is RED (the markup reached innerHTML)', asMarkup);
+    ok(verdictOf(asMarkup.html.includes(MARK)), 'red control: «the name drawn as HTML» is RED (the markup reached innerHTML)', asMarkup);
     // (d) a READ ERROR of the picked file clears the pick and its label (as the too-large branch does); red: the old branch
     const readError = async (M) => {
       globalThis.FileReader = class { readAsArrayBuffer() { setTimeout(() => this.onerror && this.onerror(new Error('a read error')), 0); } };
@@ -407,7 +407,7 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
       return { lastPick: picks.length ? picks[picks.length - 1] : 'none', label: label.textContent, err: errs.filter(Boolean).pop() || null };
     };
     const e0 = await readError(REAL);
-    ok(e0.lastPick === null && e0.label === 'or drop it here' && /could not be read/.test(e0.err || ''), '(d) a read error clears the pick (onPick(null)) and its label, and says it — no old file is left to save', e0);
+    ok(e0.lastPick === null && e0.label === 'or drop it here' && verdictOf(/could not be read/.test(e0.err || '')), '(d) a read error clears the pick (onPick(null)) and its label, and says it — no old file is left to save', e0);
     const e1 = await readError(await rowOf(cut(SRC, "rd.onerror = () => { onPick(null); label.textContent = t('or drop it here'); onError(t('That file could not be read')); };", "rd.onerror = () => onError(t('That file could not be read'));", 'the old read-error branch')));
     ok(e1.lastPick !== null || e1.label !== 'or drop it here', 'red control: «the old read-error branch» keeps the old pick\'s label (a save would send the earlier file)', e1);
     // 主开发 r5048 — «Replace file…»: the OWNER's file row carries the door; its dialog passes the entry's name as TEXT (the shell draws its
@@ -433,14 +433,14 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
       return { door: !!rp, noDoor, title: opts && opts.title, html: html.slice(), help: help && help.textContent, post: posts[0] || null, nb: NB };
     };
     const rl = await replaceLeg(REAL);
-    ok(rl.door && rl.noDoor === 1 && rl.title === `Replace «${MARK}»` && rl.html.length === 0
+    ok(gateOf(rl.door) && rl.noDoor === 1 && rl.title === `Replace «${MARK}»` && rl.html.length === 0
       && rl.help === 'Runs and agents that may use this file get the new file from their next run on; its name, its description and who may use it stay as they are.'
-      && rl.post && rl.post.u === '/api/vault/files/0a0b0c0d0e/replace' && rl.post.body.filename === 'chain-2027.pem' && rl.post.body.size === rl.nb.length && Buffer.from(rl.post.body.bytes, 'base64').equals(rl.nb),
+      && gateOf(rl.post) && rl.post.u === '/api/vault/files/0a0b0c0d0e/replace' && rl.post.body.filename === 'chain-2027.pem' && rl.post.body.size === rl.nb.length && verdictOf(Buffer.from(rl.post.body.bytes, 'base64').equals(rl.nb)),
       '«Replace file…» (r5048): on the OWNER\'s file row only; its dialog takes the name with markup as TEXT (no HTML written), says the one sentence, and posts the picked file to the entry\'s own replace route', { door: rl.door, noDoor: rl.noDoor, title: rl.title, html: rl.html, post: rl.post && rl.post.u });
     const rlHtml = await replaceLeg(await rowOf(cut(SRC, "  if (raised) return null;\n  const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');\n  const runNote = mk('div', 'vault-file-run-note'); runNote.setAttribute('role', 'status'); runNote.hidden = true;\n  const sayFit",
       "  if (raised) return null;\n  dialog.innerHTML = name;\n  const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');\n  const runNote = mk('div', 'vault-file-run-note'); runNote.setAttribute('role', 'status'); runNote.hidden = true;\n  const sayFit", 'the replace dialog writing the name as HTML')));
-    ok(rlHtml.html.includes(MARK), 'red control: «the replace dialog writes the name as HTML» is RED', rlHtml.html);
-    ok(/h3\.textContent = title;/.test(fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8')), 'the shell draws a dialog\'s title as TEXT (utils buildShell: h3.textContent = title) — the name the replace dialog hands it is never HTML');
+    ok(verdictOf(rlHtml.html.includes(MARK)), 'red control: «the replace dialog writes the name as HTML» is RED', rlHtml.html);
+    ok(verdictOf(/h3\.textContent = title;/.test(fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8'))), 'the shell draws a dialog\'s title as TEXT (utils buildShell: h3.textContent = title) — the name the replace dialog hands it is never HTML');
     // U1c (主开发 r4774 B): «Remove them…» — 验证是你 FIRST when the page has no window, then a confirm that lists sizes and dates
     // ONLY and says once that it cannot be undone, then ONE POST with the page's window; nothing is sent when either is refused
     {
@@ -452,9 +452,9 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
       globalThis.__vfr.askPw = async () => { seen.askPw++; return true; };
       const r1 = await REAL.removeKeptFiles(kept, { refresh: () => seen.refreshed++ });
       const items = (seen.confirm && seen.confirm.items) || [];
-      ok(r1 === true && items.length === 2 && items.every((x) => /bytes|KB/.test(x) && /at 17/.test(x)) && /cannot be undone/.test((seen.confirm && seen.confirm.message) || '') && seen.posts.length === 1 && seen.posts[0].u === '/api/vault/files/kept/remove' && seen.posts[0].o.headers['X-Vault-Page'] === 'pg' && seen.refreshed === 1,
+      ok(r1 === true && items.length === 2 && gateOf(items.every((x) => /bytes|KB/.test(x) && /at 17/.test(x))) && gateOf(/cannot be undone/.test((seen.confirm && seen.confirm.message) || '')) && seen.posts.length === 1 && seen.posts[0].u === '/api/vault/files/kept/remove' && seen.posts[0].o.headers['X-Vault-Page'] === 'pg' && seen.refreshed === 1,
         'U1c: then a confirm that lists each file\'s size and date ONLY and says once that removal cannot be undone; ONE POST with the page\'s window; the window refreshed', { items, message: seen.confirm && seen.confirm.message, posts: seen.posts.map((p) => p.u) });
-      ok(REAL.keptLineWords(2).startsWith('2 sealed files are kept') && /Put the right vault record back to open them, or remove them\.$/.test(REAL.keptLineWords(2)) && /open it, or remove it\.$/.test(REAL.keptLineWords(1)),
+      ok(gateOf(REAL.keptLineWords(2).startsWith('2 sealed files are kept')) && gateOf(/Put the right vault record back to open them, or remove them\.$/.test(REAL.keptLineWords(2))) && verdictOf(/open it, or remove it\.$/.test(REAL.keptLineWords(1))),
         'U1c: the line names the gentler road FIRST — «Put the right vault record back to open them, or remove them»', REAL.keptLineWords(2));
       // 主开发 r5497 (6): the busy guard — two presses before the first resolves: the second is ignored at once, ONE POST
       let release = null; const held = new Promise((res) => { release = res; });
@@ -470,7 +470,7 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
       globalThis.__vfr = { toast: () => {}, leftMs: () => 1000, askPw: async () => true, confirm: async (o) => { seenItems = o.items; return false; }, headers: () => ({}), fetch: async () => ({ ok: true }) };
       await REAL.removeKeptFiles(many, {});
       const listRule = (fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8').match(/^\.dialog-list \{[^}]*\}/m) || [''])[0];
-      ok(Array.isArray(seenItems) && seenItems.length === 300 && !seenItems.some((x) => /more/i.test(x)) && /max-height:\s*[^;]+;/.test(listRule) && /overflow-y:\s*auto/.test(listRule),
+      ok(gateOf(Array.isArray(seenItems)) && seenItems.length === 300 && !seenItems.some((x) => /more/i.test(x)) && gateOf(/max-height:\s*[^;]+;/.test(listRule)) && verdictOf(/overflow-y:\s*auto/.test(listRule)),
         'U1c follow (r5497 (5)): a long kept list — all 300 files are rows of the confirm (no «show more»), and the confirm\'s list scrolls inside the dialog (.dialog-list: max-height, overflow-y auto)', JSON.stringify({ n: seenItems && seenItems.length, listRule }));
     }
   } finally {
@@ -479,7 +479,7 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
   }
   // (a) the Download door's words say the reveal's own rule; (e) a file's row says its kind once (the window's kind word is not added)
   const FRS = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8'), VWS = fs.readFileSync(path.join(REPO, 'src/lib/vault-window.js'), 'utf8');
-  ok(FRS.includes("asks for the second password unless this page verified it in the last 5 minutes") && /if \(!row\.file\) meta\.push\(kindWord\(row\.kind\)\);/.test(VWS),
+  ok(gateOf(FRS.includes("asks for the second password unless this page verified it in the last 5 minutes")) && verdictOf(/if \(!row\.file\) meta\.push\(kindWord\(row\.kind\)\);/.test(VWS)),
     '(a) the Download door says it asks for the second password unless this page verified it in the last 5 minutes; (e) a file row\'s kind is said once, on its file line');
 }
 
@@ -494,17 +494,17 @@ console.log('㉓ THE KEPT FILES\' DOOR (lane lg-vault-file, B-0830 U1c, 主开�
   const VCm = require(path.join(REPO, 'src/server/vault-contents.js'));
   const c = VCm.create({ vault: v, sources: { secrets: () => VCm.secretSource({ vault: v }) } });
   const l = c.list();
-  ok(l.kept && l.kept.count === 1 && l.kept.files.length === 1 && l.kept.files[0].size === 40 && l.kept.files[0].at > 0 && !JSON.stringify(l).includes('00000000c1'),
+  ok(gateOf(l.kept) && l.kept.count === 1 && l.kept.files.length === 1 && l.kept.files[0].size === 40 && l.kept.files[0].at > 0 && !JSON.stringify(l).includes('00000000c1'),
     'the contents list carries the kept files\' line — the count, the size, the date; never the id', l.kept);
   const no = await c.removeKept('owner', null);
-  ok(!no.ok && no.code === 'reveal_needs_password' && fs.existsSync(planted), 'the removal WITHOUT the window (验证是你) ⇒ reveal_needs_password — the file stays', no);
+  ok(!no.ok && no.code === 'reveal_needs_password' && verdictOf(fs.existsSync(planted)), 'the removal WITHOUT the window (验证是你) ⇒ reveal_needs_password — the file stays', no);
   const w = await c.startReveal('owner', PW);
   const yes = await c.removeKept('owner', w.page);
-  ok(yes.ok && yes.removed === 1 && yes.left === 0 && !fs.existsSync(planted) && !('kept' in c.list()), 'inside the window ⇒ the hub removes it and the line goes (the list carries no kept facts)', yes);
+  ok(gateOf(yes.ok) && yes.removed === 1 && yes.left === 0 && !fs.existsSync(planted) && !('kept' in c.list()), 'inside the window ⇒ the hub removes it and the line goes (the list carries no kept facts)', yes);
   v.close();
 }
 
 console.warn = warn0;
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

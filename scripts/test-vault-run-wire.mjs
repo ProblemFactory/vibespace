@@ -36,7 +36,7 @@ const have = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } 
 const PIN = '8.18';   // the box's curl (Protocols + the \@ / one-slash parse are this version's); a different curl SKIPs (as the gh census)
 
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); if (extra !== undefined) console.log('      ' + JSON.stringify(extra)); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); if (extra !== undefined) console.log('      ' + JSON.stringify(extra)); } };
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vug-wire-'));
 const VALFILE = path.join(TMP, 'val'); fs.writeFileSync(VALFILE, 'FAKE-VAULT-VALUE-wire');
@@ -147,7 +147,7 @@ async function main() {
     const argv = mk(P);
     const hit = await reached(L, () => run(tool, argv));
     const reader = readerDest([path.basename(tool), ...argv]);
-    ok(checkRow(kind, hit, reader, P), `${label}: ${MSG[kind] || kind}`, { reached: !!hit, readerHosts: reader.hosts, opaque: reader.opaque, noAlways: reader.noAlways });
+    ok(verdictOf(checkRow(kind, hit, reader, P)), `${label}: ${MSG[kind] || kind}`, { reached: !!hit, readerHosts: reader.hosts, opaque: reader.opaque, noAlways: reader.noAlways });
   }
 
   // round 7 (MINOR item 8): THE NO-SPAWN MUTANT — run the SHARED checkRow with the tool NEVER spawned (hit=null). Every
@@ -169,10 +169,10 @@ async function main() {
     const GENV = { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_HTTP_LOW_SPEED_LIMIT: '1', GIT_HTTP_LOW_SPEED_TIME: '3' };
     const gh = await reached(L, () => run(GIT, ["ls-remote", `http://127.0.0.1:${P}/r.git`], GENV));
     const gr = readerDest(['git', 'ls-remote', `http://127.0.0.1:${P}/r.git`]);
-    ok(!!gh && (readerNames(gr, P) || gr.opaque), 'REAL git ls-remote http://127.0.0.1:P/r.git: reached the listener AND the reader names it (a routine granted run)', { reached: !!gh, hosts: gr.hosts });
+    ok(!!gh && (verdictOf(readerNames(gr, P)) || verdictOf(gr.opaque)), 'REAL git ls-remote http://127.0.0.1:P/r.git: reached the listener AND the reader names it (a routine granted run)', { reached: !!gh, hosts: gr.hosts });
     const gb = await reached(L, () => run(GIT, ['ls-remote', `http://127.0.0.5:9\\@127.0.0.1:${P}/r.git`], GENV));
     const gbr = readerDest(['git', 'ls-remote', `http://127.0.0.5:9\\@127.0.0.1:${P}/r.git`]);
-    ok(!!gb && gbr.opaque, `REAL git ls-remote with a backslash authority: git REACHED 127.0.0.1:${P} AND the reader is OPAQUE — no silent by: grant (round 7: reach-gated, not a reader-only assert)`, { reached: !!gb, opaque: gbr.opaque });
+    ok(!!gb && verdictOf(gbr.opaque), `REAL git ls-remote with a backslash authority: git REACHED 127.0.0.1:${P} AND the reader is OPAQUE — no silent by: grant (round 7: reach-gated, not a reader-only assert)`, { reached: !!gb, opaque: gbr.opaque });
     // the ssh family: a fake GIT_SSH records the host git hands to ssh — for `ssh://router` git passes the bare alias `router`
     // (which the real ssh resolves through ~/.ssh/config), and the reader is OPAQUE for that single-label alias.
     const FS = path.join(TMP, 'fakessh'); const ARGS = path.join(TMP, 'ssh-args');
@@ -180,18 +180,18 @@ async function main() {
     await run(GIT, ['ls-remote', 'ssh://router/repo'], { GIT_SSH: FS, ...GENV });
     const sshArgs = fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8') : '';
     const sr = readerDest(['git', 'clone', 'ssh://router/repo']);
-    ok(/(^|\n)router(\n|$)/.test(sshArgs) && sr.opaque, 'REAL git over ssh://router: git hands the bare alias `router` to ssh (resolved via ~/.ssh/config) AND the reader is OPAQUE (round 5 BLOCKER)', { sshGot: sshArgs.split('\n').filter(Boolean), opaque: sr.opaque });
+    ok(gateOf(/(^|\n)router(\n|$)/.test(sshArgs)) && verdictOf(sr.opaque), 'REAL git over ssh://router: git hands the bare alias `router` to ssh (resolved via ~/.ssh/config) AND the reader is OPAQUE (round 5 BLOCKER)', { sshGot: sshArgs.split('\n').filter(Boolean), opaque: sr.opaque });
     // the counter-check (reader only): routine granted runs draw NO card (git-https names its host; scp names a dotted host)
     for (const argv of [['ls-remote', 'https://github.com/o/r'], ['clone', 'https://github.com/o/r'], ['push', 'https://github.com/o/r.git', 'HEAD:main']]) {
       const r = readerDest(['git', ...argv]);
-      ok(!r.opaque && r.hosts.includes('github.com'), `git ${argv.join(' ')}: reader names github.com, NOT opaque (routine granted runs draw no card)`, { hosts: r.hosts, opaque: r.opaque });
+      ok(!r.opaque && verdictOf(r.hosts.includes('github.com')), `git ${argv.join(' ')}: reader names github.com, NOT opaque (routine granted runs draw no card)`, { hosts: r.hosts, opaque: r.opaque });
     }
     const scp = readerDest(['scp', 'backup', 'root@192.168.1.1:/x']);
-    ok(!scp.opaque && scp.hosts.includes('192.168.1.1'), 'scp backup root@192.168.1.1:/x: reader names 192.168.1.1, NOT opaque (a local file is not a host, a dotted host is not an alias)', { hosts: scp.hosts, opaque: scp.opaque });
+    ok(!scp.opaque && verdictOf(scp.hosts.includes('192.168.1.1')), 'scp backup root@192.168.1.1:/x: reader names 192.168.1.1, NOT opaque (a local file is not a host, a dotted host is not an alias)', { hosts: scp.hosts, opaque: scp.opaque });
   }
 
   L.close();
   console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);
   process.exit(fail ? 1 : 0);
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => { console.error(e); process.exit(1); }); import { verdictOf, gateOf } from './lib/check.mjs';

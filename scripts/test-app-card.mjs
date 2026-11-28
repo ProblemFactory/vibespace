@@ -25,7 +25,7 @@ const zh = (await import('../src/lib/i18n-zh.js')).default;
 const ja = (await import('../src/lib/i18n-ja.js')).default;
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } };
 const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m));
 const tFor = (dict, seen) => (s, p) => { if (seen) seen.add(s); return fill(dict ? (dict[s] ?? s) : s, p); };
 const LANGS = { en: null, zh, ja };
@@ -47,7 +47,7 @@ console.log('§1 the VIEW — a stored proposal → the contract both install la
 {
   const v = AC.cardView(WECHAT);
   ok(v.kind === 'deb' && v.app.name === 'WeChat' && v.app.labels.zh === '微信' && v.by.name === '装应用 · 微信' && v.why === '你让我装微信', 'a .deb: its kind, its own name + localized labels, who asks and why', v);
-  ok(v.from && v.from.kind === 'download' && v.from.host === 'dldir1v6.qq.com' && v.from.recipe === 'Tencent' && v.bytes.download === 231359624 && v.keeps === 'replay', 'a download: the host and the recipe that vouches for it, the sizes, comes back after a rebuild', v);
+  ok(gateOf(v.from) && v.from.kind === 'download' && v.from.host === 'dldir1v6.qq.com' && v.from.recipe === 'Tencent' && v.bytes.download === 231359624 && v.keeps === 'replay', 'a download: the host and the recipe that vouches for it, the sizes, comes back after a rebuild', v);
   ok(v.details.sha256 === 'b1c9'.repeat(16) && v.details.scripts.join() === 'postinst,prerm,postrm' && v.details.count === 2 && v.details.packages.join() === 'wechat,libatomic1' && v.digest === 'd'.repeat(32), 'Details: the sha256, the install scripts, every package, the commands; the plan digest', v.details);
   const h = AC.cardView(HELLO);
   ok(h.kind === 'package' && h.from.kind === 'sources' && h.from.origin === 'Debian:12.15/oldstable' && h.app.name === 'hello' && !h.details.sha256, 'a package: from the machine\'s sources (apt\'s own origin words, worded by the client)', h);
@@ -85,15 +85,15 @@ const faces = []; // [lang, label, text]
   ok(missing.size === 0, 'every sentence a card says has its zh and ja entry', [...missing]);
   const tz = tFor(zh), tj = tFor(ja), te = tFor(null);
   const wz = M.cardWords(AC.cardView(WECHAT), tz, 'zh');
-  ok(wz.title === '安装 微信？' && wz.by === '「装应用 · 微信」想装它：你让我装微信' && /^来自 dldir1v6\.qq\.com（官方下载地址） · 下载 231 MB · 装好后占用约 760 MB$/.test(wz.from) && wz.gives === '装好后出现在「应用」里；这台机器重建后会自动装回。' && wz.go === '安装' && wz.later === '暂不', 'zh: the design\'s card, line for line (the app\'s own name 微信, not the agent\'s word)', wz);
+  ok(wz.title === '安装 微信？' && wz.by === '「装应用 · 微信」想装它：你让我装微信' && gateOf(/^来自 dldir1v6\.qq\.com（官方下载地址） · 下载 231 MB · 装好后占用约 760 MB$/.test(wz.from)) && wz.gives === '装好后出现在「应用」里；这台机器重建后会自动装回。' && wz.go === '安装' && wz.later === '暂不', 'zh: the design\'s card, line for line (the app\'s own name 微信, not the agent\'s word)', wz);
   ok(M.cardWords(AC.cardView(WECHAT), tj, 'ja').title === 'WeChat をインストールしますか？' && M.cardWords(AC.cardView(WECHAT), te, 'en').title === 'Install WeChat?', 'ja / en: the label of the reader\'s language, else the name');
   const unv = M.cardWords(AC.cardView({ ...WECHAT, fetch: { host: 'example.org' } }), tz, 'zh');
-  ok(unv.from.startsWith('来自 example.org · ') && unv.fromNote === '这是从网上下载的安装包，VibeSpace 无法确认发布者。', 'a download no recipe vouches for: the domain, and ONE plain sentence under it', unv);
+  ok(gateOf(unv.from.startsWith('来自 example.org · ')) && unv.fromNote === '这是从网上下载的安装包，VibeSpace 无法确认发布者。', 'a download no recipe vouches for: the domain, and ONE plain sentence under it', unv);
   ok(M.cardWords(AC.cardView(HELLO), tz, 'zh').from === '来自这台机器的软件源（Debian 12） · 下载 53 kB · 装好后占用约 284 kB', 'a package: "this machine\'s package sources (Debian 12)" — apt\'s origin worded', M.cardWords(AC.cardView(HELLO), tz, 'zh').from);
   ok(M.cardWords(AC.cardView({ ...HELLO, keeps: 'system', firstUse: true }), tz, 'zh').gives === '装好后出现在「应用」里，一直都在。' && M.cardWords(AC.cardView({ ...HELLO, firstUse: true }), tz, 'zh').firstUse === '第一次安装要先准备应用空间（约 1 分钟）。', 'Layer 1: "一直都在" on an app-system machine; the first install\'s line');
   ok(M.cardWords(AC.cardView({ ...HELLO, planChanged: true }), tz, 'zh').changed === '计划有变化，请再看一眼。', 'a changed plan says so on the card');
   const pz = (st) => M.progressWords(AC.cardView({ ...HELLO, ...st }), tz);
-  ok(pz({ state: 'installing' }).text === zh['Installing…'] && /安装/.test(pz({ state: 'installing' }).text) && pz({ state: 'done', result: { rows: [{ id: 'app.hello' }] } }).text === '已安装到本 VibeSpace 机器' && pz({ state: 'done', result: { rows: [{ id: 'app.hello' }] } }).actions.join() === 'open' && pz({ state: 'failed', result: { step: 'install' } }).actions.join() === 'retry' && pz({}) === null,
+  ok(pz({ state: 'installing' }).text === zh['Installing…'] && gateOf(/安装/.test(pz({ state: 'installing' }).text)) && pz({ state: 'done', result: { rows: [{ id: 'app.hello' }] } }).text === '已安装到本 VibeSpace 机器' && pz({ state: 'done', result: { rows: [{ id: 'app.hello' }] } }).actions.join() === 'open' && pz({ state: 'failed', result: { step: 'install' } }).actions.join() === 'retry' && pz({}) === null,
     'progress in the card: 正在安装… → 已安装 · [打开]; a failure → [再试一次]; nothing pressed → the two buttons');
   ok(M.openRowOf(AC.cardView({ ...HELLO, state: 'done', result: { rows: [{ id: 'app.hello', label: 'Hello' }] } })) === 'app.hello' && M.openRowOf(AC.cardView(HELLO)) === null, 'Open starts the row the install added');
   const d1 = M.detailLines(AC.cardView(HELLO), te).map((l) => l.text);
@@ -109,7 +109,7 @@ console.log('§3 THE WORD CENSUS — no card face says a package-system word, in
   ok(faces.length > 300 && hits.length === 0, `${faces.length} face lines (5 kinds × 12 states × 3 languages + the buttons) carry no deb / AppImage / apt / root / sudo / sha / dpkg / xpra`, hits.slice(0, 8));
   const det = [];
   for (const [lang, dict] of Object.entries(LANGS)) for (const v of [WECHAT, HELLO]) det.push(...M.detailLines(AC.cardView(v), tFor(dict)).map((l) => l.text));
-  ok(det.some((s) => /sha256 b1c9/.test(s)) && det.some((s) => /apt-get install/.test(s)) && det.some((s) => /postinst/.test(s)), 'Details DO carry the commands, the sha256 and the install scripts (the census is on the face only)');
+  ok(gateOf(det.some((s) => /sha256 b1c9/.test(s))) && gateOf(det.some((s) => /apt-get install/.test(s))) && verdictOf(det.some((s) => /postinst/.test(s))), 'Details DO carry the commands, the sha256 and the install scripts (the census is on the face only)');
   // CONTROL: one face line made to say "apt" — the census must catch it, in every language
   const planted = (s, p) => (s === 'It appears in Apps, and comes back by itself if this machine is rebuilt.' ? 'Installed with apt; it comes back after a rebuild.' : fill(s, p));
   const wp = M.cardWords(AC.cardView(HELLO), planted, 'en');
@@ -132,8 +132,8 @@ console.log('§4 THE DIGEST — what the card showed, and only that');
   const same = Object.entries(moved).filter(([, p]) => AC.shownDigest(AC.cardView(p)) === d0).map(([k]) => k);
   ok(same.length === 0, `the digest moves with each of ${Object.keys(moved).length} things a card shows`, same);
   const still = [{ state: 'installing' }, { state: 'failed', result: { step: 'install', error: 'x' } }, { planChanged: true }, { state: 'done', result: { rows: [{ id: 'app.wechat' }] } }];
-  ok(still.every((st) => AC.shownDigest(AC.cardView({ ...WECHAT, ...st })) === d0), 'and NOT with the state, the progress, the result or the changed-plan note (they move while the click runs)');
-  ok(M.shownDigest(base) === d0 && /^a1:[0-9a-f]{16}:\d+$/.test(d0), 'the browser computes the same digest as the engine (one PURE function)', d0);
+  ok(verdictOf(still.every((st) => AC.shownDigest(AC.cardView({ ...WECHAT, ...st })) === d0)), 'and NOT with the state, the progress, the result or the changed-plan note (they move while the click runs)');
+  ok(M.shownDigest(base) === d0 && verdictOf(/^a1:[0-9a-f]{16}:\d+$/.test(d0)), 'the browser computes the same digest as the engine (one PURE function)', d0);
   const { UserTodoManager } = (() => { const m = require('../src/user-todos.js'); return m.UserTodoManager ? m : { UserTodoManager: m }; })();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-app-card-'));
   try {
@@ -141,18 +141,18 @@ console.log('§4 THE DIGEST — what the card showed, and only that');
     const it = st.add('claude:x', { text: 'Install WeChat?', origin: 'apps', by: 'agent', action: { type: 'app-install', id: WECHAT.id, host: 'local', kind: 'deb' }, card: base });
     st.flush();
     const back = new UserTodoManager({ dataDir: dir, onChange: () => { }, expirySweepMs: 0 }).get(it.id);
-    ok(AC.shownDigest(st.get(it.id).card) === d0 && back && AC.shownDigest(back.card) === d0, 'the For-you store keeps a card EXACTLY — in memory and across a restart (its digest is the view\'s)');
+    ok(AC.shownDigest(st.get(it.id).card) === d0 && gateOf(back) && AC.shownDigest(back.card) === d0, 'the For-you store keeps a card EXACTLY — in memory and across a restart (its digest is the view\'s)');
     ok(st.setCard(it.id, AC.cardView({ ...WECHAT, state: 'installing' })) === true && st.get(it.id).card.state === 'installing' && st.setCard(it.id, AC.cardView({ ...WECHAT, state: 'installing' })) === false, 'setCard moves the card (and an unchanged card is no broadcast)');
     let threw = null; try { st.add('claude:x', { text: 'x', origin: 'apps', by: 'agent', card: { a: { b: { c: { d: { e: 1 } } } } } }); } catch (e) { threw = e.message; }
     let threw2 = null; try { st.add('claude:x', { text: 'y', origin: 'apps', by: 'agent', card: { html: 'x'.repeat(2001) } }); } catch (e) { threw2 = e.message; }
-    ok(/nested too deep/.test(threw || '') && /longer than 2000/.test(threw2 || ''), 'a card outside the bounds is refused by name (depth, string length)', [threw, threw2]);
+    ok(gateOf(/nested too deep/.test(threw || '')) && verdictOf(/longer than 2000/.test(threw2 || '')), 'a card outside the bounds is refused by name (depth, string length)', [threw, threw2]);
     st.setStatus(it.id, 'done', 'apps');
     const snap = st.snapshot().resolved.find((x) => x.id === it.id);
-    ok(snap && snap.card && snap.card.details === null && snap.card.app.name === 'WeChat' && st.get(it.id).card.details, 'a RESOLVED card rides the snapshot as its face only (its Details stay on the record)');
+    ok(gateOf(snap) && gateOf(snap.card) && snap.card.details === null && snap.card.app.name === 'WeChat' && verdictOf(st.get(it.id).card.details), 'a RESOLVED card rides the snapshot as its face only (its Details stay on the record)');
     const RC = require('../src/record-clear.js');
     const shapes = RC.SHAPES || (RC.fieldsOf && RC.fieldsOf('todo'));
     const todoShape = JSON.stringify(shapes && (shapes.todo || shapes));
-    ok(/"card","drop"/.test(todoShape) || /\['card', 'drop'\]/.test(fs.readFileSync(path.join(repo, 'src/record-clear.js'), 'utf8')), 'Clear content… drops a card too (an app\'s name, the agent\'s why)');
+    ok(verdictOf(/"card","drop"/.test(todoShape)) || verdictOf(/\['card', 'drop'\]/.test(fs.readFileSync(path.join(repo, 'src/record-clear.js'), 'utf8'))), 'Clear content… drops a card too (an app\'s name, the agent\'s why)');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -164,7 +164,7 @@ console.log('§5 the row renderer escapes every piece of a card');
   const holes = [...body.matchAll(/\$\{([^}]*(?:\}[^$`]*?)?)\}/g)].map((m) => m[1].trim());
   const SAFE = /^(escHtml\(|icon$|html$|acts$|cls$|pg\.kind$|a$|d\.mono \? |pg\.kind === 'busy'|w\.details\.map\(\(d\) => `<div class="ut-app-dline\$\{d\.mono \? ' ut-app-mono' : '')/; // the Details map: its text is escHtml(d.text), its class one of two literals
   const bad = holes.filter((h) => !SAFE.test(h));
-  ok(i > 0 && holes.length >= 8 && bad.length === 0 && body.includes('${escHtml(d.text)}'), `every \${…} in appCardHtml is escHtml(…) or one of our own closed values (${holes.length} holes)`, bad);
+  ok(i > 0 && holes.length >= 8 && bad.length === 0 && verdictOf(body.includes('${escHtml(d.text)}')), `every \${…} in appCardHtml is escHtml(…) or one of our own closed values (${holes.length} holes)`, bad);
 }
 
 console.log('§6 apps-joint r1 — a download\'s icon on the card (F1); an installed row in the reader\'s language (F2)');
@@ -172,13 +172,13 @@ console.log('§6 apps-joint r1 — a download\'s icon on the card (F1); an insta
   const R = await import('../src/lib/user-todos-row.js');
   const card = (icon) => AC.cardView({ ...WECHAT, app: { ...WECHAT.app, icon } });
   const html = (icon) => R.appCardHtml({ card: card(icon), action: { type: 'app-install', id: WECHAT.id } }, tFor(zh), { lang: 'zh' });
-  ok(/<img class="ut-app-icon" alt="" src="\/api\/apps\/proposals\/ap-7c1e00\/icon">/.test(html('/api/apps/proposals/ap-7c1e00/icon')), 'F1: the card draws the icon read out of a download (its proposal\'s icon route)');
+  ok(verdictOf(/<img class="ut-app-icon" alt="" src="\/api\/apps\/proposals\/ap-7c1e00\/icon">/.test(html('/api/apps/proposals/ap-7c1e00/icon'))), 'F1: the card draws the icon read out of a download (its proposal\'s icon route)');
   ok(!/<img/.test(html('https://evil.example/x.png')) && !/<img/.test(html('/api/apps/proposals/ap-7c1e00/icon?x=1')) && !/<img/.test(html('/api/apps/proposals/../icon')), 'F1 CONTROL: any other address draws no picture');
   const row = { id: 'app.wechat', label: 'wechat', labels: { zh: '微信' } };
   ok(M.rowName(row, 'zh') === '微信' && M.rowName(row, 'ja') === 'wechat' && M.rowName(row, 'en') === 'wechat' && M.rowName({ label: 'gimp' }, 'zh') === 'gimp', 'F2: an installed row reads 微信 in zh (its own Name[zh_CN]), its label elsewhere');
   const L = fs.readFileSync(path.join(repo, 'src/lib/desktop-app-launcher.js'), 'utf8');
-  ok(/desktop-launch-card-label">\$\{escHtml\(catalogLabel\(row\)\)\}/.test(L) && /export function catalogLabel\(row, lang = resolveLang\(\)\)/.test(L) && /row\.labels\[lang\]/.test(L), 'F2: the Apps card\'s name goes through ONE rule in the reader\'s language — catalogLabel, labels[lang] › label (int203: lane apps-interface\'s rule, the same answer as rowName; a card that reads row.label shows "wechat" in zh)');
+  ok(gateOf(/desktop-launch-card-label">\$\{escHtml\(catalogLabel\(row\)\)\}/.test(L)) && gateOf(/export function catalogLabel\(row, lang = resolveLang\(\)\)/.test(L)) && verdictOf(/row\.labels\[lang\]/.test(L)), 'F2: the Apps card\'s name goes through ONE rule in the reader\'s language — catalogLabel, labels[lang] › label (int203: lane apps-interface\'s rule, the same answer as rowName; a card that reads row.label shows "wechat" in zh)');
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

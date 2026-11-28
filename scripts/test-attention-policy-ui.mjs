@@ -34,7 +34,7 @@ const SHOTS = process.env.ATTENTION_POLICY_PNG_DIR || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + String(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + String(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const quiet = { log() { }, warn() { }, error() { } };
 const ENG = require(path.join(repo, 'src/server/channels-engine.js'));
@@ -218,9 +218,9 @@ const d = await page(1100, 900, 'w=100%25');
 await d.go();
 let rows = await until(d, (rs) => has(rs, 'im/c6', 'direct') && judgedKeys(rs) === 'im/c0,im/c4', 12000);
 const ayRow = await d.ev(`(() => { const r = document.querySelector('.chan-grow[data-grow="im/c3"]'); const g = r && r.querySelector('.chan-grow-tag'); const l = r && r.querySelector('.chan-grow-last'); return r ? { tag: g ? g.dataset.tag : null, text: g ? g.textContent : '', last: l ? l.textContent : '' } : null; })()`);
-ok(ayRow && ayRow.tag === 'at-you' && /@我 · 1 条/.test(ayRow.text) && ayRow.last === 'Dana: can you sign the March invoice today?', 'lane attention-rule-at-you: the @-ed group wears 「@我 · 1 条」 (it outranks its hand-over) and its preview quotes the mentioning message', ayRow);
+ok(gateOf(ayRow) && ayRow.tag === 'at-you' && gateOf(/@我 · 1 条/.test(ayRow.text)) && ayRow.last === 'Dana: can you sign the March invoice today?', 'lane attention-rule-at-you: the @-ed group wears 「@我 · 1 条」 (it outranks its hand-over) and its preview quotes the mentioning message', ayRow);
 await d.shot('row.png');
-ok(has(rows, 'im/c6', 'direct') && has(rows, 'im/c1', 'assigned') && judgedKeys(rows) === 'im/c0,im/c4', 'the first screen: the direct chat, the hand-overs and the two judged rows', { rows: rows.map((r) => r.key + ':' + r.tag), c6: ((eng.digest({ keys: ['im/c6'] }).conversations || [])[0] || {}) });
+ok(gateOf(has(rows, 'im/c6', 'direct')) && gateOf(has(rows, 'im/c1', 'assigned')) && judgedKeys(rows) === 'im/c0,im/c4', 'the first screen: the direct chat, the hand-overs and the two judged rows', { rows: rows.map((r) => r.key + ':' + r.tag), c6: ((eng.digest({ keys: ['im/c6'] }).conversations || [])[0] || {}) });
 await idle();
 await d.ev(`(${DOOR}.click(), true)`);
 let st = await waitFor(d, BLOCK, (s) => s && /今天：判断了 \d+ 条/.test(s.today));
@@ -231,13 +231,13 @@ let st = await waitFor(d, BLOCK, (s) => s && /今天：判断了 \d+ 条/.test(s
 const JUDGE_ANSWERED = `(() => { const i = document.querySelector('[data-settings-block="attention"] input[data-plugin-feature="llm.attention"]'); return !!i && !i.disabled; })()`;
 const judgeAnswered = (await waitFor(d, JUDGE_ANSWERED, (v) => v === true)) === true;
 st = await waitFor(d, BLOCK, (s) => s && /今天：判断了 \d+ 条/.test(s.today));
-ok(judgeAnswered && st && st.inPop && st.rows.length === 12 && st.head === '需关注 · 怎么判断' && st.radio === 'both' && st.rows.filter((r) => r.on === true).length === 9 && st.rows.some((r) => r.label === AT_YOU && r.on === true), 'the door: a popover holding 「需关注 · 怎么判断」 — 12 rows, the preset on 固定规则 + 判断模型, the 8 rules (+ 「有人 @ 了我、我还没读的」, lane attention-rule-at-you) and the judge on', { judgeAnswered, ...(st || {}) });
-ok(st && /今天：判断了 4 条 · 命中 2 条/.test(st.today), 'the readout under the judge\'s switch: 今天：判断了 4 条 · 命中 2 条 (four rows judged, two at 0.86)', st && st.today);
+ok(gateOf(judgeAnswered) && gateOf(st) && gateOf(st.inPop) && st.rows.length === 12 && st.head === '需关注 · 怎么判断' && st.radio === 'both' && st.rows.filter((r) => r.on === true).length === 9 && verdictOf(st.rows.some((r) => r.label === AT_YOU && r.on === true)), 'the door: a popover holding 「需关注 · 怎么判断」 — 12 rows, the preset on 固定规则 + 判断模型, the 8 rules (+ 「有人 @ 了我、我还没读的」, lane attention-rule-at-you) and the judge on', { judgeAnswered, ...(st || {}) });
+ok(gateOf(st) && verdictOf(/今天：判断了 4 条 · 命中 2 条/.test(st.today)), 'the readout under the judge\'s switch: 今天：判断了 4 条 · 命中 2 条 (four rows judged, two at 0.86)', st && st.today);
 // lane decision-spend-readout: the same line says what the judge COST today (the PURE decisionTodayLine's money half) —
 // four calls to the fake provider moved money, so it is never 「$0」 nor $0.00; the by-use breakdown is the hover
 st = await waitFor(d, BLOCK, (s) => s && /已花 /.test(s.today));
 const money = await d.ev(`(() => { const l = document.querySelector('[data-settings-block="attention"] [data-attention-today]'); return l ? { text: l.textContent, title: l.title } : null; })()`);
-ok(money && /^今天：判断了 4 条 · 命中 2 条 · 已花 (< \$0\.01|\$\d+\.\d\d)（上限 \$1\.00）$/.test(money.text) && !/已花 \$0（|\$0\.00/.test(money.text) && /^需关注 (< )?\$0?\.?\d/.test(money.title), 'the 需关注 block\'s judge line carries the money: 「…命中 2 条 · 已花 <money>（上限 $1.00）」, never $0 after 4 calls; 需关注 $… on hover', money);
+ok(gateOf(money) && gateOf(/^今天：判断了 4 条 · 命中 2 条 · 已花 (< \$0\.01|\$\d+\.\d\d)（上限 \$1\.00）$/.test(money.text)) && !/已花 \$0（|\$0\.00/.test(money.text) && verdictOf(/^需关注 (< )?\$0?\.?\d/.test(money.title)), 'the 需关注 block\'s judge line carries the money: 「…命中 2 条 · 已花 <money>（上限 $1.00）」, never $0 after 4 calls; 需关注 $… on hover', money);
 await settled(d);
 await d.shot('door-desk.png');
 
@@ -246,13 +246,13 @@ const n0 = await d.ev(HEADN);
 await flip(d, DIRECT);
 rows = await until(d, (rs) => rs.length && !has(rs, 'im/c6'));
 const n1 = await d.ev(HEADN);
-ok(!has(rows, 'im/c6') && has(rows, 'im/c1', 'assigned') && judgedKeys(rows) === 'im/c0,im/c4', 'flipped off: the direct chat is gone at once (no reload, no fetch) — the hand-overs and judged rows stay', rows.map((r) => r.key + ':' + r.tag));
+ok(!has(rows, 'im/c6') && gateOf(has(rows, 'im/c1', 'assigned')) && judgedKeys(rows) === 'im/c0,im/c4', 'flipped off: the direct chat is gone at once (no reload, no fetch) — the hand-overs and judged rows stay', rows.map((r) => r.key + ':' + r.tag));
 ok(n0 - n1 === 1, `the header's count drops by one (${n0} → ${n1})`);
 await sleep(200);
-ok(SV['channels.attention.rule.direct'] === false && (await d.ev(BLOCK) || {}).inPop, 'the switch is a setting like any other (saved), and the door stays open under the hand');
+ok(SV['channels.attention.rule.direct'] === false && verdictOf((await d.ev(BLOCK) || {}).inPop), 'the switch is a setting like any other (saved), and the door stays open under the hand');
 await d.ev(`(document.querySelector('.chan-view-btn[data-view="all"]').click(), true)`);
 rows = await until(d, (rs) => has(rs, 'im/c6'));
-ok(has(rows, 'im/c6'), 'under 全部 the direct chat is still there', rows.map((r) => r.key));
+ok(verdictOf(has(rows, 'im/c6')), 'under 全部 the direct chat is still there', rows.map((r) => r.key));
 await d.ev(`(document.querySelector('.chan-view-btn[data-view="focus"]').click(), true)`);
 // lane attention-policy-ui-red: the door's popover is still open here. A real outside press (pointerdown) would
 // close it on the view switch above, but a synthetic .click() fires no pointerdown, so onOutsidePress never saw one;
@@ -263,17 +263,17 @@ if (!((await d.ev(BLOCK)) || {}).inPop) await d.ev(`(${DOOR}.click(), true)`);
 await waitFor(d, BLOCK, (s) => s && s.rows.length === 12);
 await flip(d, DIRECT);
 rows = await until(d, (rs) => has(rs, 'im/c6', 'direct'));
-ok(has(rows, 'im/c6', 'direct') && (await d.ev(HEADN)) === n0, 'flipped back on: the direct chat returns and the count with it');
+ok(gateOf(has(rows, 'im/c6', 'direct')) && (await d.ev(HEADN)) === n0, 'flipped back on: the direct chat returns and the count with it');
 
 console.log('③ the preset 只用判断模型: every rule off, the judge on ⇒ only judged rows');
 await pick(d, 'judge');
 st = await waitFor(d, BLOCK, (s) => s && s.radio === 'judge' && s.rows.filter((r) => r.on === true).length === 1);
-ok(st && st.rows.filter((r) => r.on === true).map((r) => r.label).join() === JUDGE && plug.config.attention === true, 'the preset set the switches it claims: the 8 rules off, the judge\'s on', st && st.rows.filter((r) => r.on === true).map((r) => r.label));
+ok(gateOf(st) && st.rows.filter((r) => r.on === true).map((r) => r.label).join() === JUDGE && plug.config.attention === true, 'the preset set the switches it claims: the 8 rules off, the judge\'s on', st && st.rows.filter((r) => r.on === true).map((r) => r.label));
 rows = await until(d, (rs) => rs.length && rs.every((r) => r.tag === 'judged'));
-ok(rows.length && rows.every((r) => r.tag === 'judged') && has(rows, 'im/c0') && has(rows, 'im/c4') && !has(rows, 'im/c6'), 'only the judge: every listed row is a judged one', rows.map((r) => r.key + ':' + r.tag));
+ok(gateOf(rows.length) && gateOf(rows.every((r) => r.tag === 'judged')) && gateOf(has(rows, 'im/c0')) && gateOf(has(rows, 'im/c4')) && !has(rows, 'im/c6'), 'only the judge: every listed row is a judged one', rows.map((r) => r.key + ':' + r.tag));
 await pick(d, 'both');
 rows = await until(d, (rs) => has(rs, 'im/c6', 'direct') && has(rs, 'im/c1', 'assigned'));
-ok(has(rows, 'im/c6', 'direct') && has(rows, 'im/c1', 'assigned') && Object.keys(SV).filter((k) => k.startsWith('channels.attention.rule.')).every((k) => SV[k] === true), 'back to 固定规则 + 判断模型: every rule on, the facts listed again');
+ok(gateOf(has(rows, 'im/c6', 'direct')) && gateOf(has(rows, 'im/c1', 'assigned')) && verdictOf(Object.keys(SV).filter((k) => k.startsWith('channels.attention.rule.')).every((k) => SV[k] === true)), 'back to 固定规则 + 判断模型: every rule on, the facts listed again');
 
 console.log('④ the judge\'s switch = the plugin\'s own (one store)');
 await waitFor(d, JUDGE_READY, (v) => v === true);   // the preset re-filled the block: its judge's switch re-reads the plugin first
@@ -282,10 +282,10 @@ await flip(d, JUDGE);
 st = await waitFor(d, BLOCK, (s) => s && s.radio === 'rules');
 const vals = await d.ev('window.__vals');
 ok(plug.config.attention === false && PLUG_WRITES.length === w0 + 1 && PLUG_WRITES[w0].attention === false && !('channels.attention.judge' in vals) && !SET_KEYS.includes('channels.attention.judge') && !SET_KEYS.includes('channels.attention.preset'), 'off: ONE write to POST /api/plugins/llm/config {attention:false}; no settings key for the judge or the preset — ever', { writes: PLUG_WRITES.slice(w0), keys: [...new Set(SET_KEYS)] });
-ok(st && st.radio === 'rules', 'the preset reads back 只用固定规则');
+ok(gateOf(st) && st.radio === 'rules', 'the preset reads back 只用固定规则');
 await flip(d, JUDGE);
 st = await waitFor(d, BLOCK, (s) => s && s.radio === 'both');
-ok(plug.config.attention === true && st && st.radio === 'both', 'on again: the plugin\'s switch is on and the preset reads 固定规则 + 判断模型');
+ok(plug.config.attention === true && gateOf(st) && st.radio === 'both', 'on again: the plugin\'s switch is on and the preset reads 固定规则 + 判断模型');
 
 console.log('⑤ phone 390 px: the door is a sheet');
 const ph = await page(390, 844, 'w=100%25');
@@ -293,7 +293,7 @@ await ph.go();
 await until(ph, (rs) => has(rs, 'im/c1'));
 await ph.ev(`(${DOOR}.click(), true)`);
 st = await waitFor(ph, BLOCK, (s) => s && s.inSheet);
-ok(st && st.inSheet && st.rows.length === 12 && st.sw <= st.cw + 1 && st.right <= st.vw, 'the sheet: the same 12 rows, nothing wider than the 390 px screen', st && { sw: st.sw, cw: st.cw, right: st.right, vw: st.vw });
+ok(gateOf(st) && gateOf(st.inSheet) && st.rows.length === 12 && st.sw <= st.cw + 1 && st.right <= st.vw, 'the sheet: the same 12 rows, nothing wider than the 390 px screen', st && { sw: st.sw, cw: st.cw, right: st.right, vw: st.vw });
 await settled(ph);
 await ph.shot('door-phone.png');
 ph.close();
@@ -304,7 +304,7 @@ await sp.go();
 st = await waitFor(sp, BLOCK, (s) => s && s.rows.length);
 // int263 seam (b): in the Settings window the threshold + 我在乎什么 are the LLM plugin's rows (插件 › LLM, plugin-settings-p0);
 // the block draws its own NINE there — the Channels ⚙ door (legs above) draws all eleven (alsoBlock)
-ok(st && st.rows.length === 10 && st.head === '需关注 · 怎么判断', 'the window\'s own content renderer, its search 需关注: the block under its head, its own 10 rows', st && st.rows.map((r) => r.label));
+ok(gateOf(st) && st.rows.length === 10 && st.head === '需关注 · 怎么判断', 'the window\'s own content renderer, its search 需关注: the block under its head, its own 10 rows', st && st.rows.map((r) => r.label));
 await settled(sp);
 await sp.shot('settings.png');
 sp.close();
@@ -329,9 +329,9 @@ await flip(cp, DIRECT);
 const asStood = { listed: has(await cp.ev(ROWS), 'im/c6'), switchOff: directOff(await cp.ev(BLOCK)), saved: SV['channels.attention.rule.direct'] === false };
 const let_ = await cp.ev(`(() => { window.__flipHold = false; const t = window.__flipHeld; window.__flipHeld = null; if (t) t.click(); return !!t; })()`);
 const landed = await flipLanded(cp);
-ok(sv0 === true && asStood.listed && !asStood.switchOff && !asStood.saved && let_ && landed, `⑦ PLACED (r4456): the flip HELD, read as the leg stood the direct chat is listed (${asStood.listed}) while the switch is still on (off: ${asStood.switchOff}) and nothing saved (${asStood.saved}) — the control green with nothing proven; let go, the flip is saved and drawn off (${landed})`, asStood);
+ok(sv0 === true && gateOf(asStood.listed) && !asStood.switchOff && !asStood.saved && gateOf(let_) && verdictOf(landed), `⑦ PLACED (r4456): the flip HELD, read as the leg stood the direct chat is listed (${asStood.listed}) while the switch is still on (off: ${asStood.switchOff}) and nothing saved (${asStood.saved}) — the control green with nothing proven; let go, the flip is saved and drawn off (${landed})`, asStood);
 const cr = await cp.ev(ROWS);
-ok(landed && has(cr, 'im/c6'), 'CONTROL: the same flip — saved and drawn off — on a panel whose firstScreen is never handed the policy leaves the direct chat listed ⇒ leg ② is the policy\'s doing (RED without it)', cr.map((r) => r.key));
+ok(gateOf(landed) && verdictOf(has(cr, 'im/c6')), 'CONTROL: the same flip — saved and drawn off — on a panel whose firstScreen is never handed the policy leaves the direct chat listed ⇒ leg ② is the policy\'s doing (RED without it)', cr.map((r) => r.key));
 cp.close();
 d.close();
 
@@ -383,14 +383,14 @@ for (const sh of SHAPES) {
 }
 // the bar's other items: the view switch on its own row above, New group + Outbox before the door (the filter box takes the room)
 const r9 = measured['window-900'];
-ok(r9 && r9.focus && r9.all && r9.focus.y + r9.focus.h <= r9.find.y && r9.newGroup.x < r9.outbox.x, 'the view switch keeps its row above; New group, Outbox, then the door', r9 && { focus: r9.focus, find: r9.find });
+ok(gateOf(r9) && gateOf(r9.focus) && gateOf(r9.all) && r9.focus.y + r9.focus.h <= r9.find.y && r9.newGroup.x < r9.outbox.x, 'the view switch keeps its row above; New group, Outbox, then the door', r9 && { focus: r9.focus, find: r9.find });
 if (SHOTS) fs.writeFileSync(path.join(SHOTS, 'door-shapes.json'), JSON.stringify(measured, null, 1));
 const wp = await page(1100, 900, 'w=900px&b=words');
 await wp.go();
 await until(wp, (rs) => has(rs, 'im/c1'));
 await sleep(300);
 const wf = doorFaults(await wp.ev(BAR), 'zh');
-ok(wf.some((x) => /^words drawn/.test(x)) && wf.some((x) => /^content spills/.test(x)), 'CONTROL: a door that draws its words beside the cog again fails the same check (words drawn, content spills) ⇒ the legs above are the fix\'s doing', wf);
+ok(gateOf(wf.some((x) => /^words drawn/.test(x))) && verdictOf(wf.some((x) => /^content spills/.test(x))), 'CONTROL: a door that draws its words beside the cog again fails the same check (words drawn, content spills) ⇒ the legs above are the fix\'s doing', wf);
 wp.close();
 
 console.log('⑨ lane attention-predicate-shared (decision 4): 「需要我」 by band; a band switched off falls to band 5 and is SAID once; the 分带 block in the Settings window');
@@ -400,25 +400,25 @@ console.log('⑨ lane attention-predicate-shared (decision 4): 「需要我」 b
   await bp.go();
   await until(bp, (rs) => has(rs, 'im/c6', 'direct') && judgedKeys(rs) === 'im/c0,im/c4', 12000);
   const b0 = await waitFor(bp, NEEDS, (v) => v && v.bands.length);
-  ok(b0 && b0.bands[0] === '2:2' && !b0.off.length, `「需要我」 draws by band: the direct chat and the @ of me in 有人在等 (2:2) first — nothing switched off (${JSON.stringify(b0)})`);
+  ok(gateOf(b0) && b0.bands[0] === '2:2' && !b0.off.length, `「需要我」 draws by band: the direct chat and the @ of me in 有人在等 (2:2) first — nothing switched off (${JSON.stringify(b0)})`);
   await bp.ev(`(window.__settings.set('attention.band.waiting', false), true)`);
   const b1 = await waitFor(bp, NEEDS, (v) => v && v.off.length);
   const rs1 = await bp.ev(ROWS);
-  ok(b1 && !b1.bands.some((x) => x.startsWith('2:')) && b1.bands.some((x) => x.startsWith('5:')) && b1.off.length === 1 && b1.off[0] === 'waiting|「有人在等」已关闭——其中 2 条排在「其余的问」里' && has(rs1, 'im/c6') && has(rs1, 'im/c3'),
+  ok(gateOf(b1) && !b1.bands.some((x) => x.startsWith('2:')) && gateOf(b1.bands.some((x) => x.startsWith('5:'))) && b1.off.length === 1 && b1.off[0] === 'waiting|「有人在等」已关闭——其中 2 条排在「其余的问」里' && gateOf(has(rs1, 'im/c6')) && verdictOf(has(rs1, 'im/c3')),
     `attention.band.waiting OFF ⇒ live: 有人在等 is gone, its two rows sit in 其余的问, and the band says so ONCE under 其余的问 (${JSON.stringify(b1)})`);
   await bp.ev(`(window.__settings.set('attention.band.waiting', true), true)`);
   const b2 = await waitFor(bp, NEEDS, (v) => v && !v.off.length && v.bands[0] === '2:2');
-  ok(b2 && b2.bands[0] === '2:2' && !b2.off.length, '…back ON: 有人在等 returns, the sentence goes');
+  ok(gateOf(b2) && b2.bands[0] === '2:2' && !b2.off.length, '…back ON: 有人在等 returns, the sentence goes');
   bp.close();
   const sb = await page(900, 1000, 'w=100%25&b=panel&settings=' + encodeURIComponent('attention.'));
   await sb.go();
   const BANDS_BLOCK = `(() => { const b = document.querySelector('[data-settings-block="bands"]'); if (!b) return null; return { head: (b.querySelector('.settings-block-head, h3, h4') || {}).textContent || b.firstElementChild.textContent, rows: [...b.querySelectorAll('.settings-row')].map((x) => ({ label: x.querySelector('.settings-row-label')?.textContent || '', on: x.querySelector('.settings-toggle input') ? x.querySelector('.settings-toggle input').checked : null, num: x.querySelector('input[type=number]') ? x.querySelector('input[type=number]').value : null })) }; })()`;
   const sbx = await waitFor(sb, BANDS_BLOCK, (v) => v && v.rows.length);
-  ok(sbx && sbx.rows.length === 7 && JSON.stringify(sbx.rows.slice(0, 6).map((r) => r.label)) === JSON.stringify(['紧急', '有人在等', '有期限或钱', '要你决定', '其余的问', '搁置']) && sbx.rows.slice(0, 6).every((r) => r.on === true) && sbx.rows[6].num === '6' && /需要我 · 分带/.test(sbx.head),
+  ok(gateOf(sbx) && sbx.rows.length === 7 && JSON.stringify(sbx.rows.slice(0, 6).map((r) => r.label)) === JSON.stringify(['紧急', '有人在等', '有期限或钱', '要你决定', '其余的问', '搁置']) && gateOf(sbx.rows.slice(0, 6).every((r) => r.on === true)) && sbx.rows[6].num === '6' && verdictOf(/需要我 · 分带/.test(sbx.head)),
     'the Settings window draws the 「需要我 · 分带」 block: six band switches in the bands\' own words, all on, and the first screen\'s size (6)', JSON.stringify(sbx));
   await sb.shot('bands-block.png');
   sb.close();
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

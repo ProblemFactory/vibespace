@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import './scratch.mjs';   // FIRST local import (B-ba47): handed a home outside every temp root, this script runs on a temp home of its own
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 console.log('K2 / CW / r1 — the writer censuses (moved from test-pool-auto)');
       {
         // THE WRITER CENSUS: `_turnStartedAt` is assigned in turn-state.js alone, and each writer is called at exactly its sites
@@ -50,7 +50,7 @@ console.log('K2 / CW / r1 — the writer censuses (moved from test-pool-auto)');
     const routes = code('src/server/account-usage-routes.js');
     const fence = "if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });";
     const first = (head) => { const i = routes.indexOf(head); if (i < 0) return false; const body = routes.slice(i + head.length, i + head.length + 400); return body.indexOf(fence) >= 0 && !/accounts\.|engine\./.test(body.slice(0, body.indexOf(fence)).replace(/const id = req\.params\.id;/, '')); };
-    ck('r1 census: the members/priority PATCH, the gather and the pin refuse an agent\'s token BEFORE they read anything; the retired target route answers 410 to everyone', first("app.patch('/api/accounts/pool/:id', (req, res) => {") && first("app.post('/api/accounts/pool/:id/gather', (req, res) => {") && first("app.post('/api/accounts/:poolId/pin', (req, res) => {") && /app\.post\('\/api\/accounts\/pool\/:id\/target', \(req, res\) => \{\n\s*res\.status\(410\)/.test(routes));
+    ck('r1 census: the members/priority PATCH, the gather and the pin refuse an agent\'s token BEFORE they read anything; the retired target route answers 410 to everyone', gateOf(first("app.patch('/api/accounts/pool/:id', (req, res) => {")) && gateOf(first("app.post('/api/accounts/pool/:id/gather', (req, res) => {")) && gateOf(first("app.post('/api/accounts/:poolId/pin', (req, res) => {")) && verdictOf(/app\.post\('\/api\/accounts\/pool\/:id\/target', \(req, res\) => \{\n\s*res\.status\(410\)/.test(routes)));
   }
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

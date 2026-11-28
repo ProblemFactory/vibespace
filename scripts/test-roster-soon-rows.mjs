@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 const { markSoonRows } = await import(path.join(REPO, 'src/lib/manage-agents.js'));
 
@@ -45,7 +45,7 @@ console.log('— the incident shape');
   markSoonRows(mkList(rows), NOW);
   ok('the two soonest MEMBERS light up (L 2h4m, M 4h34m) — the pool row does not', JSON.stringify(soon(rows)) === '["memberL","memberM"]', JSON.stringify(soon(rows)));
   ok('the pool row keeps its countdown label and a plain tooltip (it is not a candidate, it is not unlabelled)', rows[0].lbl.title.length > 0 && !/closest to a reset/.test(rows[0].lbl.title), rows[0].lbl.title);
-  ok('a highlighted member\'s tooltip says why', /closest to a reset/.test(rows[1].lbl.title) && /closest to a reset/.test(rows[2].lbl.title));
+  ok('a highlighted member\'s tooltip says why', gateOf(/closest to a reset/.test(rows[1].lbl.title)) && verdictOf(/closest to a reset/.test(rows[2].lbl.title)));
   ok('a row with no countdown is never marked', !rows[5].classList.contains('usage-acct-soon'));
 }
 console.log('— NEGATIVE CONTROL: the pre-fix shape (no data-pooled flag) is exactly the bug');
@@ -71,8 +71,8 @@ console.log('— wiring pins');
 {
   const ma = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
   ok('BOTH roster row templates (claude, codex) stamp data-pooled on a pool row', (ma.match(/\$\{isPool \? ' data-pooled="1"' : ''\}>/g) || []).length === 2);
-  ok('markSoonRows reads the flag off the row and excludes it from the ranking', /pooled: row\.dataset\?\.pooled === '1'/.test(ma) && /r\.next\?\.text && !r\.pooled\)/.test(ma));
-  ok('ci.mjs runs this suite', /'test-roster-soon-rows'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')));
+  ok('markSoonRows reads the flag off the row and excludes it from the ranking', gateOf(/pooled: row\.dataset\?\.pooled === '1'/.test(ma)) && verdictOf(/r\.next\?\.text && !r\.pooled\)/.test(ma)));
+  ok('ci.mjs runs this suite', verdictOf(/'test-roster-soon-rows'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8'))));
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

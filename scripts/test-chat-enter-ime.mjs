@@ -27,7 +27,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -96,7 +96,7 @@ async function table(M, label = '') {
 
 const M = await import(pathToFileURL(SRC).href);
 console.log('§1 the table (PURE EnterGuard, fake clock)');
-for (const r of await table(M)) ok(r.n, r.ok, { got: r.got, want: r.want });
+for (const r of await table(M)) ok(r.n, verdictOf(r.ok), { got: r.got, want: r.want });
 ok('the window is the commit\'s event burst, 50 ms, and the hint lives 2 s', M.IME_COMMIT_BURST_MS === 50 && M.IME_HINT_MS === 2000);
 
 console.log('§2 the recorder\'s key words');
@@ -106,11 +106,11 @@ ok('a composing Enter ⇒ { key: "Enter", c: 1 }; a plain Enter ⇒ { key: "Ente
 ok('Shift+Enter ⇒ "S-Enter"; Ctrl+Alt+Shift+Enter ⇒ "C-A-S-Enter" (the C-/M-/A- order kept, S- last)', kw({ key: 'Enter', shiftKey: true }).key === 'S-Enter' && kw({ key: 'Enter', ctrlKey: true, altKey: true, shiftKey: true }).key === 'C-A-S-Enter');
 ok('keyCode 229 alone (Safari) also marks c:1', kw({ key: 'Enter', keyCode: 229 }).c === 1);
 ok('a plain character is null — the "typing" marker, never the text', kw({ key: 'a' }) === null && kw({ key: '0' }) === null && kw({ key: ' ' }) === null);
-ok('a character typed with Shift held ⇒ { key: "S-·" } — that one was typed, never which (A, ")", "？")', ['A', ')', '？'].every((k) => JSON.stringify(kw({ key: k, shiftKey: true })) === '{"key":"S-·"}') && M.SHIFTED_CHAR === 'S-·', kw({ key: 'A', shiftKey: true }));
+ok('a character typed with Shift held ⇒ { key: "S-·" } — that one was typed, never which (A, ")", "？")', gateOf(['A', ')', '？'].every((k) => JSON.stringify(kw({ key: k, shiftKey: true })) === '{"key":"S-·"}')) && M.SHIFTED_CHAR === 'S-·', kw({ key: 'A', shiftKey: true }));
 ok('…the IME owning it adds c:1 (a capital inside a composition)', JSON.stringify(kw({ key: 'H', shiftKey: true, isComposing: true, keyCode: 229 })) === '{"key":"S-·","c":1}');
 ok('Cmd+c / Ctrl+Shift+A / Alt+Shift+x keep naming the key as today ("M-c", "C-S-A", "A-S-x")', kw({ key: 'c', metaKey: true }).key === 'M-c' && kw({ key: 'A', ctrlKey: true, shiftKey: true }).key === 'C-S-A' && kw({ key: 'x', altKey: true, shiftKey: true }).key === 'A-S-x');
-ok('a modifier let go ⇒ { key, up: 1 }: Shift / Control / Alt / Meta', ['Shift', 'Control', 'Alt', 'Meta'].every((k) => JSON.stringify(M.actionKeyUpWords({ key: k })) === JSON.stringify({ key: k, up: 1 })));
-ok('…every other key up is null: a letter, a shifted letter, Enter, Escape', [{ key: 'a' }, { key: 'A', shiftKey: true }, { key: 'Enter' }, { key: 'Escape' }].every((e) => M.actionKeyUpWords(e) === null));
+ok('a modifier let go ⇒ { key, up: 1 }: Shift / Control / Alt / Meta', verdictOf(['Shift', 'Control', 'Alt', 'Meta'].every((k) => JSON.stringify(M.actionKeyUpWords({ key: k })) === JSON.stringify({ key: k, up: 1 }))));
+ok('…every other key up is null: a letter, a shifted letter, Enter, Escape', verdictOf([{ key: 'a' }, { key: 'A', shiftKey: true }, { key: 'Enter' }, { key: 'Escape' }].every((e) => M.actionKeyUpWords(e) === null)));
 // §2c lane vault-chip-zone-errors (inc-mvi50qdh-ygmh: the second password filled from the browser's saved passwords threw
 // twice — one per filled field): a keydown with no key is the fill word; its keyup (a bare Event too) stays null
 ok('§2c a keydown with NO key (a browser fill: a bare Event, no modifiers) ⇒ { key: "(fill)" }; null ⇒ the same; its bare keyup ⇒ null', JSON.stringify(M.actionKeyWords({ type: 'keydown' })) === '{"key":"(fill)"}' && JSON.stringify(M.actionKeyWords(null)) === '{"key":"(fill)"}' && M.FILL_KEY === '(fill)' && M.actionKeyUpWords({ type: 'keyup' }) === null);
@@ -161,31 +161,31 @@ console.log('§3 the send-mode hint, the setting');
 const { composerSendModes } = await import(pathToFileURL(path.join(REPO, 'src/lib/agent-meta.js')).href);
 const q = { queue: true, steer: true, queueOps: true };
 ok('default (chat.enterSends on): today\'s modes — a claude-like harness draws no hint', composerSendModes({ queue: true }).showHint === false && composerSendModes(q).sendSegment === false);
-ok('chat.enterSends off on a harness with no queue line: the hint is drawn with a SEND segment', (() => { const m = composerSendModes({ queue: true }, { enterSends: false }); return m.showHint && m.sendSegment && m.enterSends === false; })());
-ok('chat.enterSends off on a queueing harness: the queue segment names the key (no duplicate send segment)', (() => { const m = composerSendModes(q, { enterSends: false }); return m.showHint && m.queueSegment && !m.sendSegment && m.enterSends === false; })());
+ok('chat.enterSends off on a harness with no queue line: the hint is drawn with a SEND segment', verdictOf((() => { const m = composerSendModes({ queue: true }, { enterSends: false }); return m.showHint && m.sendSegment && m.enterSends === false; })()));
+ok('chat.enterSends off on a queueing harness: the queue segment names the key (no duplicate send segment)', verdictOf((() => { const m = composerSendModes(q, { enterSends: false }); return m.showHint && m.queueSegment && !m.sendSegment && m.enterSends === false; })()));
 ok('sendKeyName: Enter by default, Ctrl+Enter / ⌘+Enter when off', M.sendKeyName(true, false) === 'Enter' && M.sendKeyName(false, false) === 'Ctrl+Enter' && M.sendKeyName(false, true) === '⌘+Enter');
 const ci = read('src/lib/chat-input.js');
 // lane claude-steer-inject: the segments are drawn through one local `seg(…)` (Enter's door, then the second key's) —
 // and a Claude Enter that hands the message over names its key the same way ("{key} sends now")
-ok('sendHintHtml draws "{key} sends" / "{key} queues" when off, and keeps "Enter queues" by default', /modes\.sendSegment\) (?:parts\.push|seg)\([^\n]*t\('\{key\} sends', \{ key \}\)/.test(ci) && /modes\.enterSends === false \? t\('\{key\} queues', \{ key \}\) : t\('Enter queues'\)/.test(ci) && /modes\.enterSends === false \? t\('\{key\} sends now', \{ key \}\) : t\('Enter sends now'\)/.test(ci));
+ok('sendHintHtml draws "{key} sends" / "{key} queues" when off, and keeps "Enter queues" by default', gateOf(/modes\.sendSegment\) (?:parts\.push|seg)\([^\n]*t\('\{key\} sends', \{ key \}\)/.test(ci)) && gateOf(/modes\.enterSends === false \? t\('\{key\} queues', \{ key \}\) : t\('Enter queues'\)/.test(ci)) && verdictOf(/modes\.enterSends === false \? t\('\{key\} sends now', \{ key \}\) : t\('Enter sends now'\)/.test(ci)));
 const schema = read('src/lib/settings-schema.js');
 const row = (schema.match(/'chat\.enterSends': \{[\s\S]*?\n  \},/) || [''])[0];
-ok('schema row chat.enterSends: boolean, default true, category Chat, live', /type: 'boolean', default: true/.test(row) && /category: t\('Chat'\), liveApply: true/.test(row));
+ok('schema row chat.enterSends: boolean, default true, category Chat, live', gateOf(/type: 'boolean', default: true/.test(row)) && verdictOf(/category: t\('Chat'\), liveApply: true/.test(row)));
 const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-for (const k of ['Enter sends the message', 'Input method just ended — press Enter again to send', '{key} sends', '{key} queues']) ok(`zh + ja carry "${k}"`, zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'));
-ok('zh hint words are the brief\'s ("输入法刚结束 — 再按一次 Enter 发送")', zh.includes('"输入法刚结束 — 再按一次 Enter 发送"'));
-ok('docs/settings.md lists chat.enterSends (gen-settings-reference)', read('docs/settings.md').includes('| `chat.enterSends` | boolean | `true` |'));
+for (const k of ['Enter sends the message', 'Input method just ended — press Enter again to send', '{key} sends', '{key} queues']) ok(`zh + ja carry "${k}"`, gateOf(zh.includes(JSON.stringify(k) + ':')) && verdictOf(ja.includes(JSON.stringify(k) + ':')));
+ok('zh hint words are the brief\'s ("输入法刚结束 — 再按一次 Enter 发送")', verdictOf(zh.includes('"输入法刚结束 — 再按一次 Enter 发送"')));
+ok('docs/settings.md lists chat.enterSends (gen-settings-reference)', verdictOf(read('docs/settings.md').includes('| `chat.enterSends` | boolean | `true` |')));
 
 console.log('§4 wiring census');
 const kdBody = ci.slice(ci.indexOf("this._textarea.addEventListener('keydown', (e) => {"));
 ok('the keydown handler no longer feeds the guard (r2: the key that ended a composition no longer matters)', !ci.includes('_enterGuard.keydown('));
-ok('…the IME return, then the Enter decision through the guard (send ⇒ preventDefault + _send; ime-swallow ⇒ preventDefault + the hint)', kdBody.indexOf('if (imeOwnsKey(e)) return;') > 0 && kdBody.indexOf('if (imeOwnsKey(e)) return;') < kdBody.indexOf('this._enterGuard.enter(e,') && /if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}\n\s+else if \(act === 'ime-swallow'\) \{ e\.preventDefault\(\); this\._showImeHint\(\); \}/.test(kdBody));
-ok('compositionstart / compositionend on the textarea feed the guard', ci.includes("this._textarea.addEventListener('compositionstart', () => this._enterGuard.compositionstart());") && ci.includes("this._textarea.addEventListener('compositionend', () => this._enterGuard.compositionend());"));
-ok('the ime line is a role=status node under the composer, hidden by IME_HINT_MS', /this\._imeHint\.setAttribute\('role', 'status'\)/.test(ci) && /this\._sendHint, this\._imeHint\);/.test(ci) && /setTimeout\(\(\) => \{ this\._imeHint\.hidden = true; \}, IME_HINT_MS\)/.test(ci));
-ok('chat-view hands chat.enterSends to the composer (default on)', read('src/lib/chat-view.js').includes("getEnterSends: () => this.app?.settings?.get('chat.enterSends') !== false,"));
+ok('…the IME return, then the Enter decision through the guard (send ⇒ preventDefault + _send; ime-swallow ⇒ preventDefault + the hint)', kdBody.indexOf('if (imeOwnsKey(e)) return;') > 0 && kdBody.indexOf('if (imeOwnsKey(e)) return;') < kdBody.indexOf('this._enterGuard.enter(e,') && verdictOf(/if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}\n\s+else if \(act === 'ime-swallow'\) \{ e\.preventDefault\(\); this\._showImeHint\(\); \}/.test(kdBody)));
+ok('compositionstart / compositionend on the textarea feed the guard', gateOf(ci.includes("this._textarea.addEventListener('compositionstart', () => this._enterGuard.compositionstart());")) && verdictOf(ci.includes("this._textarea.addEventListener('compositionend', () => this._enterGuard.compositionend());")));
+ok('the ime line is a role=status node under the composer, hidden by IME_HINT_MS', gateOf(/this\._imeHint\.setAttribute\('role', 'status'\)/.test(ci)) && gateOf(/this\._sendHint, this\._imeHint\);/.test(ci)) && verdictOf(/setTimeout\(\(\) => \{ this\._imeHint\.hidden = true; \}, IME_HINT_MS\)/.test(ci)));
+ok('chat-view hands chat.enterSends to the composer (default on)', verdictOf(read('src/lib/chat-view.js').includes("getEnterSends: () => this.app?.settings?.get('chat.enterSends') !== false,")));
 const rec = read('src/lib/incident-recorder.js');
-ok('…and a capture + passive keyup listener writes actionKeyUpWords (a modifier let go) into the same ring', /document\.addEventListener\('keyup', \(e\) => \{\n\s+const w = actionKeyUpWords\(e\);[^\n]*\n\s+if \(w\) push\(rings\.action, CAP\.action, \{ t: Date\.now\(\), k: 'key', \.\.\.w, el: describeEl\(e\.target\) \}\);\n\s+\}, \{ capture: true, passive: true \}\);/.test(read('src/lib/incident-recorder.js')) && /import \{ actionKeyWords, actionKeyUpWords, imeMarker \} from '\.\/chat-enter-keys\.js';/.test(read('src/lib/incident-recorder.js')));
-ok('the recorder writes actionKeyWords + imeMarker into the action ring', /const w = actionKeyWords\(e\);/.test(rec) && /k: 'key', \.\.\.w, el:/.test(rec) && /const m = imeMarker\(type, e\.target, e\.data\);/.test(rec) && /'compositionstart', 'compositionend'/.test(rec));
+ok('…and a capture + passive keyup listener writes actionKeyUpWords (a modifier let go) into the same ring', gateOf(/document\.addEventListener\('keyup', \(e\) => \{\n\s+const w = actionKeyUpWords\(e\);[^\n]*\n\s+if \(w\) push\(rings\.action, CAP\.action, \{ t: Date\.now\(\), k: 'key', \.\.\.w, el: describeEl\(e\.target\) \}\);\n\s+\}, \{ capture: true, passive: true \}\);/.test(read('src/lib/incident-recorder.js'))) && verdictOf(/import \{ actionKeyWords, actionKeyUpWords, imeMarker \} from '\.\/chat-enter-keys\.js';/.test(read('src/lib/incident-recorder.js'))));
+ok('the recorder writes actionKeyWords + imeMarker into the action ring', gateOf(/const w = actionKeyWords\(e\);/.test(rec)) && gateOf(/k: 'key', \.\.\.w, el:/.test(rec)) && gateOf(/const m = imeMarker\(type, e\.target, e\.data\);/.test(rec)) && verdictOf(/'compositionstart', 'compositionend'/.test(rec)));
 
 console.log('§5 patched-copy controls');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cei-'));
@@ -199,11 +199,11 @@ const MUT = [
   ['r1\'s 600 ms back ⇒ the everyday Space → Enter send at 120 ms is swallowed', [/export const IME_COMMIT_BURST_MS = 50;/, 'export const IME_COMMIT_BURST_MS = 600;'], 6],
 ];
 for (const [n, [re, to], rowIdx] of MUT) {
-  ok(`control: the mutation site exists (${n.split(' ⇒')[0]})`, re.test(src));
+  ok(`control: the mutation site exists (${n.split(' ⇒')[0]})`, verdictOf(re.test(src)));
   const f = path.join(tmp, `m${MUT.findIndex((m) => m[0] === n)}.mjs`);
   fs.writeFileSync(f, src.replace(re, to));
   const r = (await table(await import(pathToFileURL(f).href)))[rowIdx];
-  ok('control: ' + n, r && !r.ok, r && r.got);
+  ok('control: ' + n, gateOf(r) && !r.ok, r && r.got);
 }
 const sR = fs.readFileSync(path.join(REPO, 'src/lib/chat-enter-keys.js'), 'utf8');
 const noS = path.join(tmp, 'nos.mjs'); fs.writeFileSync(noS, editAnchor(sR, "(e.shiftKey ? 'S-' : '') + ", '', "src/lib/chat-enter-keys.js"));
@@ -211,18 +211,18 @@ ok('control: the S- prefix removed ⇒ the Shift tap reads as a bare "Shift"', (
 // the two new words removed, one at a time and together (= the 2.369.267 recorder that wrote inc-mv7mdv6b-emxq)
 const SC = ["const char = e.key.length === 1 && !(e.ctrlKey || e.metaKey || e.altKey);\n  if (char && !e.shiftKey) return null;", "const char = false;\n  if (!(e.key.length > 1 || e.ctrlKey || e.metaKey || e.altKey)) return null;"];
 const UP = ['(MODIFIER_KEYS.has(e.key) ? { key: e.key, up: 1 } : null)', 'null'];
-ok('control: both mutation sites exist', sR.includes(SC[0]) && sR.includes(UP[0]));
+ok('control: both mutation sites exist', gateOf(sR.includes(SC[0])) && verdictOf(sR.includes(UP[0])));
 const mut = async (n, s) => { const f = path.join(tmp, n + '.mjs'); fs.writeFileSync(f, s); return import(pathToFileURL(f).href); };
 const mSC = await mut('nosc', sR.replace(SC[0], SC[1])), mUP = await mut('noup', sR.replace(UP[0], UP[1])), mOLD = await mut('old', sR.replace(SC[0], SC[1]).replace(UP[0], UP[1]));
 ok('control: S-· removed ⇒ the character and the tap read the same ("S-Shift Shift↑ Enter")', words(ring(mSC, CHAR)) === words(ring(mSC, TAP)), [words(ring(mSC, CHAR)), words(ring(mSC, TAP))]);
 ok('control: the keyup words removed ⇒ the tap\'s hold and its gap before the Enter are gone', shiftStory(ring(mUP, TAP)).heldMs === null && shiftStory(ring(mUP, TAP)).upToEnterMs === null, shiftStory(ring(mUP, TAP)));
-ok('control: both removed (the .267 recorder) ⇒ character, tap and early chord are all "S-Shift Enter" — the bundle\'s shape', [CHAR, TAP, EARLY].every((q) => words(ring(mOLD, q)) === 'S-Shift Enter'), [CHAR, TAP, EARLY].map((q) => words(ring(mOLD, q))));
+ok('control: both removed (the .267 recorder) ⇒ character, tap and early chord are all "S-Shift Enter" — the bundle\'s shape', verdictOf([CHAR, TAP, EARLY].every((q) => words(ring(mOLD, q)) === 'S-Shift Enter')), [CHAR, TAP, EARLY].map((q) => words(ring(mOLD, q))));
 
 // §6 (lane channel-enter-ime, inc-mv7mdv6b-emxq — the Outbox's reject-reason box sent the owner's rejection mid-word):
 // enterSubmits(e), the ONE rule for every plain text box — an Enter the input method does not own. Its callers are
 // found by scripts/test-enter-census.mjs; this is the rule itself.
 const ES = (e) => M.enterSubmits(e);
-ok('enterSubmits: a plain Enter (keyCode 13) submits; Shift/Ctrl+Enter are still Enter (the caller decides chords)', ES({ key: 'Enter', keyCode: 13 }) && ES({ key: 'Enter', keyCode: 13, shiftKey: true }) && ES({ key: 'Enter', keyCode: 13, ctrlKey: true }));
+ok('enterSubmits: a plain Enter (keyCode 13) submits; Shift/Ctrl+Enter are still Enter (the caller decides chords)', gateOf(ES({ key: 'Enter', keyCode: 13 })) && gateOf(ES({ key: 'Enter', keyCode: 13, shiftKey: true })) && verdictOf(ES({ key: 'Enter', keyCode: 13, ctrlKey: true })));
 ok('enterSubmits: the input method\'s Enter never submits — isComposing (Chrome/Firefox), keyCode 229 (Safari / the ring\'s [composing]), both, a chord while composing', !ES({ key: 'Enter', isComposing: true, keyCode: 13 }) && !ES({ key: 'Enter', keyCode: 229 }) && !ES({ key: 'Enter', isComposing: true, keyCode: 229 }) && !ES({ key: 'Enter', isComposing: true, metaKey: true }));
 ok('enterSubmits: not Enter / no event ⇒ false (Tab, Escape, a letter, null)', !ES({ key: 'Tab' }) && !ES({ key: 'Escape' }) && !ES({ key: 'a' }) && !ES(null) && !ES(undefined));
 const noG = path.join(tmp, 'nog.mjs'); fs.writeFileSync(noG, editAnchor(sR, "e.key === 'Enter' && !imeOwnsKey(e);", "e.key === 'Enter';", "src/lib/chat-enter-keys.js"));
@@ -235,4 +235,4 @@ ok('control: enterSubmits without imeOwnsKey ⇒ the ring\'s composing Enter SUB
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

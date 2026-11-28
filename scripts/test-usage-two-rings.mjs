@@ -36,7 +36,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -302,15 +302,15 @@ const twinLegs = (UM, MA, order = US.NO5H_RINGS || ['7d', 'cap']) => { // (the o
 const UM = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-meter.js')).href);
 const MA = await import(pathToFileURL(path.join(REPO, 'src/lib/manage-agents.js')).href);
 console.log('— the taskbar row, the popup and the phone chip (usage-meter `_renderUsage`)');
-for (const r of meterLegs(UM)) ok(r.name, r.pass, r.detail);
+for (const r of meterLegs(UM)) ok(r.name, verdictOf(r.pass), r.detail);
 console.log('— the Agents roster (manage-agents `_acctUsageHtml` + the host pill)');
-for (const r of rosterLegs(MA)) ok(r.name, r.pass, r.detail);
+for (const r of rosterLegs(MA)) ok(r.name, verdictOf(r.pass), r.detail);
 console.log('— an empty read proves nothing (the drift fixtures through the real parsers, every twin)');
-for (const r of driftLegs(UM, MA)) ok(r.name, r.pass, r.detail);
+for (const r of driftLegs(UM, MA)) ok(r.name, verdictOf(r.pass), r.detail);
 console.log('— the limit set\'s kind (the real Codex roster `_renderCodexAccounts` + the 8 s repaint)');
-for (const r of await codexLegs(MA)) ok(r.name, r.pass, r.detail);
+for (const r of await codexLegs(MA)) ok(r.name, verdictOf(r.pass), r.detail);
 console.log('— the twins (ONE order constant, ONE cap builder)');
-for (const r of twinLegs(UM, MA)) ok(r.name, r.pass, r.detail);
+for (const r of twinLegs(UM, MA)) ok(r.name, verdictOf(r.pass), r.detail);
 
 // ── THE CAPABILITY: a caps row, never a name ─────────────────────────────────────────────────────────────────────
 console.log('— the capability (backend-caps `scopedCapsOnDemand`, agent-meta `scopedCapsReadOnDemand`) and the Spark fixture');
@@ -322,17 +322,17 @@ console.log('— the capability (backend-caps `scopedCapsOnDemand`, agent-meta `
   try { BC.contributeCaps('vs-two-rings-x', { pool: false }); contributed = BC.capsOf('vs-two-rings-x').scopedCapsOnDemand; } finally { BC.contributeCaps?.('vs-two-rings-x', null); }
   const has = typeof AM.scopedCapsReadOnDemand === 'function', on = (b) => has && AM.scopedCapsReadOnDemand(b);
   ok('THE CAPABILITY IS A CAPS ROW: backend-caps `scopedCapsOnDemand` (r5: its model-scoped caps come ONLY from the ⟳ read — r4\'s `modelScopedCap` said Codex had none, and Spark is one) is declared (a boolean) on every shipped row and true for claude alone; an unknown or register()ed harness is false; agent-meta `scopedCapsReadOnDemand` reads the server row (absent = claude)',
-    ids.length >= 4 && ids.every((id) => typeof BC.BACKEND_CAPS[id].scopedCapsOnDemand === 'boolean' && !('modelScopedCap' in BC.BACKEND_CAPS[id])) && ids.filter((id) => BC.BACKEND_CAPS[id].scopedCapsOnDemand).join() === 'claude' && BC.capsOf('nope-x').scopedCapsOnDemand === false && contributed === false
-      && on('claude') && on(undefined) && !on('codex') && !on('antigravity') && !on('nope-x'),
+    ids.length >= 4 && gateOf(ids.every((id) => typeof BC.BACKEND_CAPS[id].scopedCapsOnDemand === 'boolean' && !('modelScopedCap' in BC.BACKEND_CAPS[id]))) && ids.filter((id) => BC.BACKEND_CAPS[id].scopedCapsOnDemand).join() === 'claude' && BC.capsOf('nope-x').scopedCapsOnDemand === false && contributed === false
+      && gateOf(on('claude')) && gateOf(on(undefined)) && !on('codex') && !on('antigravity') && !on('nope-x'),
     JSON.stringify(ids.map((id) => [id, BC.BACKEND_CAPS[id].scopedCapsOnDemand])));
   const UR = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
   ok('THE SPARK FIXTURE IS THE PRODUCT\'S READING: usage-routes summarizeCodexRateLimits keep() still builds a Codex reading with the four lines the fixture repeats over the real modules — and that reading CARRIES the cap (scopedWeekly [GPT-5.3-Codex-Spark 97 %], the 5h from the Spark 5h; the week-only pair has no 5h)',
-    KEEP_LINES.every((l) => UR.includes(l)) && CX_SPARK.scopedWeekly?.length === 1 && CX_SPARK.scopedWeekly[0].name === SPARK && Math.round(CX_SPARK.scopedWeekly[0].utilization * 100) === 97 && CX_SPARK.fiveHour?.usedPercent === 90 && CX_SPARK.sevenDay?.usedPercent === 33
+    gateOf(KEEP_LINES.every((l) => UR.includes(l))) && CX_SPARK.scopedWeekly?.length === 1 && CX_SPARK.scopedWeekly[0].name === SPARK && Math.round(CX_SPARK.scopedWeekly[0].utilization * 100) === 97 && CX_SPARK.fiveHour?.usedPercent === 90 && CX_SPARK.sevenDay?.usedPercent === 33
       && CX_SPARK_WEEK.fiveHour == null && CX_SPARK_WEEK.scopedWeekly?.[0]?.name === SPARK, JSON.stringify([KEEP_LINES.filter((l) => !UR.includes(l)), CX_SPARK.scopedWeekly, CX_SPARK_WEEK.fiveHour]));
   const src = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8'), a = src.indexOf('  _acctUsageHtml(u, est, probeNote = null'), body = a > 0 ? src.slice(a, src.indexOf('\n  },', a)) : '';
   ok('…the renderer never names a harness: `_acctUsageHtml` compares no backend id and asks `scopedCapsReadOnDemand(backend)` for capRing alone — every other harness\'s caps through `readingCaps`; the Codex roster\'s rows (named + global via usageHtml, the pool row) and the repaint hand their harness',
-    body.length > 2000 && !/[!=]==?\s*'(?:claude|codex|antigravity|opencode|shell)'|'(?:claude|codex|antigravity|opencode|shell)'\s*[!=]==?/.test(body) && body.includes('!scopedCapsReadOnDemand(backend) ? null : capRing(') && body.includes('acctCap ? acctCap.all : readingCaps(u, est);')
-      && src.includes("const usageHtml = (u) => this._acctUsageHtml(u, null, null, 'codex');") && src.includes("this._usageEstimates?.[a.current], null, 'codex')") && src.includes('probeNoteOfCell(cell.dataset), snap.backend);'));
+    body.length > 2000 && !/[!=]==?\s*'(?:claude|codex|antigravity|opencode|shell)'|'(?:claude|codex|antigravity|opencode|shell)'\s*[!=]==?/.test(body) && gateOf(body.includes('!scopedCapsReadOnDemand(backend) ? null : capRing(')) && gateOf(body.includes('acctCap ? acctCap.all : readingCaps(u, est);'))
+      && gateOf(src.includes("const usageHtml = (u) => this._acctUsageHtml(u, null, null, 'codex');")) && gateOf(src.includes("this._usageEstimates?.[a.current], null, 'codex')")) && verdictOf(src.includes('probeNoteOfCell(cell.dataset), snap.backend);')));
 }
 
 // ── capRing, the ONE builder (pure) ──────────────────────────────────────────────────────────────────────────────
@@ -344,9 +344,9 @@ console.log('— capRing (usage-source, PURE)');
   ok('NO5H_RINGS is ONE constant: [\'7d\', \'cap\'] — 7d first, as the owner listed it', JSON.stringify(US.NO5H_RINGS) === '["7d","cap"]');
   ok('capRing is usage-source\'s ONE cap-ring builder (exported, PURE)', typeof US.capRing === 'function');
   ok('readingCaps — A READING\'S OWN CAPS (u1): every cap the reading carries, in its order, as the base drew them — two letters, the cap\'s own name for the donut\'s tooltip, no pill words, no reading instant of its own (a malformed list ⇒ none); capRing builds on the same list (its caps = these, in capRing\'s words)',
-    typeof US.readingCaps === 'function' && typeof US.capRing === 'function' && (() => { const sp = US.readingCaps(CX_SPARK), m2 = US.readingCaps(FIX.multi), all = c(FIX.multi).all;
+    typeof US.readingCaps === 'function' && typeof US.capRing === 'function' && verdictOf((() => { const sp = US.readingCaps(CX_SPARK), m2 = US.readingCaps(FIX.multi), all = c(FIX.multi).all;
       return sp.length === 1 && sp[0].label === 'GP' && sp[0].tipName === SPARK && sp[0].words === null && sp[0].bucket === CX_SPARK.scopedWeekly[0] && !('readAt' in sp[0]) && m2.map((x) => x.label).join() === 'Fa,Op'
-        && all.map((x) => x.name).join() === m2.map((x) => x.name).join() && all.every((x) => x.words === x.tipName && / weekly limit$/.test(x.words)) && !US.readingCaps(null).length && !US.readingCaps({ scopedWeekly: 'x' }).length; })());
+        && all.map((x) => x.name).join() === m2.map((x) => x.name).join() && all.every((x) => x.words === x.tipName && / weekly limit$/.test(x.words)) && !US.readingCaps(null).length && !US.readingCaps({ scopedWeekly: 'x' }).length; })()));
   if (typeof US.capRing === 'function') {
   const r = c(FIX.scoped), m = c(FIX.multi);
   ok('read: the cap\'s own reading, aged by scopedFetchedAt (the popup\'s readAt), two letters + the popup\'s section title', r.state === 'read' && r.label === 'Fa' && r.tipName === 'Fable weekly limit' && r.pct === 42 && r.readAt === FIX.scoped.scopedFetchedAt && r.bucket === FABLE && !r.rest.length);
@@ -361,7 +361,7 @@ console.log('— capRing (usage-source, PURE)');
   const states = [FIX.scoped, FIX.unread, FIX.fetched, FIX.multi, FIX.read, FIX.fetchedFive, DRIFT.panel, DRIFT.oauth, null, { fetchedAt: at, sevenDay: WEEK }].map((u) => c(u).state);
   ok('TWO STATES — read and not read: a ⟳ read that named no cap is NOT READ, saying its fact «… the last ⟳ (<when>) returned no cap figure — press ⟳ to read again» (`lastReadAt` = scopedFetchedAt; an older estimate\'s name labels it; refresh off ⇒ the popup\'s sentence) — no reading, fixture or drift ever answers «none» or the absence words',
     c(FIX.fetched).state === 'unread' && c(FIX.fetched).tip === W.fetched && c(FIX.fetched).lastReadAt === READ_AT && c(FIX.fetched, EST_KNOWN).tip === W.knownFetched && c(FIX.fetched, null, { refreshOff: true }).tip === W.off
-      && states.every((s) => s === 'read' || s === 'unread') && !states.includes('none') && c(DRIFT.panel).tip === W.fetched && c(DRIFT.oauth).tip === W.fetched, JSON.stringify(states));
+      && gateOf(states.every((s) => s === 'read' || s === 'unread')) && !states.includes('none') && c(DRIFT.panel).tip === W.fetched && c(DRIFT.oauth).tip === W.fetched, JSON.stringify(states));
   }
 }
 
@@ -406,19 +406,19 @@ console.log('— THE CONTROL: the base\'s rule restored in a copy draws every 5h
     ok('CONTROL NO READING: [5h, 7d] «no data yet» byte-identical to the base rule\'s', z.bar === zb.bar && z.chip === zb.chip);
     const bs = meter(UB, FIX.scoped);
     ok('CONTROL: …the base rule really is the owner\'s screenshot — ONE ring for a Claude row without a 5h (the RED this lane turns green)', bs.donuts.length === 1 && bs.donuts[0].label === '7d', JSON.stringify(bs.donuts));
-    ok('CONTROL: the CODEX taskbar row and the phone chip are byte-identical to the base rule\'s in every Claude state, and for a Codex week-only push', ['scoped', 'unread', 'fetched', 'multi', 'read', 'fetchedFive', 'multiFive'].every((k) => { const a = meter(UM, FIX[k]), b = meter(UB, FIX[k]); return a.xRow === b.xRow && a.chip === b.chip; })
-      && (() => { const a = meter(UM, FIX.scoped, { cx: CX_WEEK }), b = meter(UB, FIX.scoped, { cx: CX_WEEK }); return a.xRow === b.xRow && a.xRow.length > 50 && !/model-scoped|Fable|press ⟳/.test(a.xRow); })());
-    ok('CONTROL: the 7d ring of every no-5h row is byte-identical to the base rule\'s 7d ring (the taskbar and the roster)', ['scoped', 'unread', 'fetched'].every((k) => {
+    ok('CONTROL: the CODEX taskbar row and the phone chip are byte-identical to the base rule\'s in every Claude state, and for a Codex week-only push', gateOf(['scoped', 'unread', 'fetched', 'multi', 'read', 'fetchedFive', 'multiFive'].every((k) => { const a = meter(UM, FIX[k]), b = meter(UB, FIX[k]); return a.xRow === b.xRow && a.chip === b.chip; }))
+      && verdictOf((() => { const a = meter(UM, FIX.scoped, { cx: CX_WEEK }), b = meter(UB, FIX.scoped, { cx: CX_WEEK }); return a.xRow === b.xRow && a.xRow.length > 50 && !/model-scoped|Fable|press ⟳/.test(a.xRow); })()));
+    ok('CONTROL: the 7d ring of every no-5h row is byte-identical to the base rule\'s 7d ring (the taskbar and the roster)', verdictOf(['scoped', 'unread', 'fetched'].every((k) => {
       const a = meter(UM, FIX[k]).donuts.find((d) => d.label === '7d'), b = meter(UB, FIX[k]).donuts[0], ra = roster(MA, FIX[k]).donuts.find((d) => d.label === '7d'), rb = roster(MB, FIX[k]).donuts[0];
       return !!a && JSON.stringify(a) === JSON.stringify(b) && !!ra && JSON.stringify(ra) === JSON.stringify(rb);
-    }));
+    })));
     const cw = await codexRoster(MA, CX_WEEK), cwb = await codexRoster(MB, CX_WEEK), c5 = await codexRoster(MA, CX), c5b = await codexRoster(MB, CX);
     ok('CONTROL CODEX: the real Codex roster (the global login, the named row, the pool row) is BYTE-IDENTICAL to the base rule\'s — for a week-only push and for a 5h + 7d one',
       !cw.err && cw.html.length > 1000 && cw.html === cwb.html && c5.html === c5b.html, `${cw.html.length}/${cwb.html.length} · ${c5.html.length}/${c5b.html.length}`);
     const sp = await codexRoster(MA, CX_SPARK), spb = await codexRoster(MB, CX_SPARK), sw = await codexRoster(MA, CX_SPARK_WEEK), swb = await codexRoster(MB, CX_SPARK_WEEK);
     const rp = repaint(MA, 'codex', 'cxs-a', { _codexAccountUsage: { 'cxs-a': CX_SPARK }, _usageEstimates: {} }), rpb = repaint(MB, 'codex', 'cxs-a', { _codexAccountUsage: { 'cxs-a': CX_SPARK }, _usageEstimates: {} });
     ok('CONTROL CODEX SPARK: a Codex reading that CARRIES the Spark limit draws the real Codex roster (global, named, pool) and the 8 s repaint BYTE-IDENTICAL to the base rule\'s — its three donuts, the pill, the countdown; week-only (7d + GP) too',
-      !sp.err && sp.html.length > 1000 && sp.html === spb.html && /data-bucket="GP" data-blocked="1"/.test(sp.html) && sw.html === swb.html && !rp.err && rp.html === rpb.html && rp.html.length > 500, `${sp.html.length}/${spb.html.length} · ${sw.html.length}/${swb.html.length} · ${rp.html.length}/${rpb.html.length}`);
+      !sp.err && sp.html.length > 1000 && sp.html === spb.html && gateOf(/data-bucket="GP" data-blocked="1"/.test(sp.html)) && sw.html === swb.html && !rp.err && rp.html === rpb.html && rp.html.length > 500, `${sp.html.length}/${spb.html.length} · ${sw.html.length}/${swb.html.length} · ${rp.html.length}/${rpb.html.length}`);
   }
 }
 
@@ -445,7 +445,7 @@ const zhLegs = (T) => {
 console.log('— the device\'s language (the twins in zh copies — the hole label through t())');
 {
   const Z = await zhTwins('zh');
-  if (Z) for (const r of zhLegs(Z)) ok(r.name, r.pass, r.detail); else ok('zh: the twins\' i18n import and the dictionary pin exist', false);
+  if (Z) for (const r of zhLegs(Z)) ok(r.name, verdictOf(r.pass), r.detail); else ok('zh: the twins\' i18n import and the dictionary pin exist', false);
 }
 
 // ── THE has5h CENSUS: every site in src/lib is a registered, DRIVEN twin (twin-sets are re-measured, never assumed) ──
@@ -488,9 +488,9 @@ console.log('— THE has5h CENSUS over src/lib');
   ok(`census: every has5h site in src/lib is registered (${c.sites.length} sites in ${Object.keys(SITES).length} files)`, !c.unregistered.length && c.sites.length >= 8, JSON.stringify(c.unregistered));
   ok('census: …no dead row (a registered site that no longer exists)', !c.dead.length, JSON.stringify(c.dead));
   const undriven = [...new Set(c.sites.map((s) => s.split(':')[0]))].filter((f) => !DRIVERS[f]);
-  ok('census: …every file with a site is DRIVEN, and each driver draws a no-5h reading as [7d, cap]', !undriven.length && DRIVERS['usage-meter.js'](UM) && DRIVERS['manage-agents.js'](MA), JSON.stringify(undriven));
+  ok('census: …every file with a site is DRIVEN, and each driver draws a no-5h reading as [7d, cap]', !undriven.length && gateOf(DRIVERS['usage-meter.js'](UM)) && verdictOf(DRIVERS['manage-agents.js'](MA)), JSON.stringify(undriven));
   const r1 = census({ ...TEXTS, 'usage-source.js': TEXTS['usage-source.js'] + '\nconst has5h = !!(x && x.fiveHour);\n' });
-  ok('census RED: a has5h in a THIRD file is named by file:line (a twin nobody drives)', r1.unregistered.length === 1 && /^usage-source\.js:\d+: const has5h/.test(r1.unregistered[0]), JSON.stringify(r1.unregistered));
+  ok('census RED: a has5h in a THIRD file is named by file:line (a twin nobody drives)', r1.unregistered.length === 1 && verdictOf(/^usage-source\.js:\d+: const has5h/.test(r1.unregistered[0])), JSON.stringify(r1.unregistered));
 }
 // ── THE CAP-RING CENSUS: ONE builder — `capRing` is called by the twins (and the host pill), and every other scopedWeekly
 // reader in src/lib is a registered NON-ring surface (a second copy of the cap ring would be a new, unregistered reader) ────
@@ -512,7 +512,7 @@ console.log('— THE CAP-RING CENSUS over src/lib (ONE builder, never a second c
   const calls = Object.entries(TEXTS).flatMap(([f, src]) => (src.match(/\bcapRing\(quotaModel,/g) || []).map(() => f)).sort().join();
   ok('cap census: capRing(quotaModel, …) is called by the two twins and the machine row\'s host pill (manage-agents ×2, usage-meter ×1) — never a second builder', calls === 'manage-agents.js,manage-agents.js,usage-meter.js', calls);
   const r2 = scopedCensus({ ...TEXTS, 'usage-meter.js': TEXTS['usage-meter.js'] + '\nconst fable = (rl?.scopedWeekly || [])[0];\n' });
-  ok('cap census RED: a second copy of the cap ring (a new scopedWeekly reader in a twin) is named by file:line', r2.unregistered.length === 1 && /^usage-meter\.js:\d+: const fable/.test(r2.unregistered[0]), JSON.stringify(r2.unregistered));
+  ok('cap census RED: a second copy of the cap ring (a new scopedWeekly reader in a twin) is named by file:line', r2.unregistered.length === 1 && verdictOf(/^usage-meter\.js:\d+: const fable/.test(r2.unregistered[0])), JSON.stringify(r2.unregistered));
 }
 
 // ── THE MUTANTS: each law's bypass in a patched copy reds its own leg BY NAME ─────────────────────────────────────
@@ -520,7 +520,7 @@ console.log('— mutants (each reds its own leg by name)');
 {
   const red = (tag, legs, needle) => {
     const failed = legs.filter((r) => !r.pass).map((r) => r.name);
-    ok(`mutant ${tag}: reds «${needle}» (${failed.length} red)`, failed.some((n) => n.startsWith(needle)), failed.join(' | ').slice(0, 240));
+    ok(`mutant ${tag}: reds «${needle}» (${failed.length} red)`, verdictOf(failed.some((n) => n.startsWith(needle))), failed.join(' | ').slice(0, 240));
   };
   // a usage-source copy reaches the twins through a twin copy whose import names it (the copies' relative imports point at the real tree)
   const viaSource = async (tag, swaps, { roster: withRoster = true } = {}) => {
@@ -580,8 +580,8 @@ console.log('— mutants (each reds its own leg by name)');
     if (Z) red('us-hole-english (the not-read hole the literal English «cap», no t())', zhLegs(Z), 'THE HOLE SPEAKS THE DEVICE\'S LANGUAGE'); else ok('mutant us-hole-english: the patched line exists', false); }
   // …and the ONE constant really is one: flipped in a copy, BOTH twins flip (never a mutant — the owner may ask for it)
   const U2 = await viaSource('us-flip', [["export const NO5H_RINGS = ['7d', 'cap'];", "export const NO5H_RINGS = ['cap', '7d'];"]]);
-  if (U2) for (const r of twinLegs(U2.um, U2.ma, ['cap', '7d'])) ok(`ONE CONSTANT: NO5H_RINGS flipped in a copy flips both twins — ${r.name}`, r.pass, r.detail); else ok('flip: the constant exists', false);
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 35 })) ok(r.name, r.pass, r.detail);
+  if (U2) for (const r of twinLegs(U2.um, U2.ma, ['cap', '7d'])) ok(`ONE CONSTANT: NO5H_RINGS flipped in a copy flips both twins — ${r.name}`, verdictOf(r.pass), r.detail); else ok('flip: the constant exists', false);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 35 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 // ── the words and the mark (text half) ─────────────────────────────────────────────────────────────────────────
@@ -589,18 +589,18 @@ console.log('— the words (zh + ja), no mark (r3\'s slash withdrawn), the wirin
 {
   const KEYS = ['model-scoped weekly cap (e.g. Fable)', 'no data yet — press ⟳', R5_KEY, '{name} weekly limit', 'resets in {dur}', 'cap'];
   const zh = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, ja = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
-  ok('the cap ring\'s words are in zh + ja (the last read\'s sentence with its {when})', KEYS.every((k) => typeof zh[k] === 'string' && typeof ja[k] === 'string') && zh[KEYS[2]].includes('{when}') && ja[KEYS[2]].includes('{when}'), KEYS.filter((k) => !zh[k] || !ja[k]).join(' | '));
+  ok('the cap ring\'s words are in zh + ja (the last read\'s sentence with its {when})', gateOf(KEYS.every((k) => typeof zh[k] === 'string' && typeof ja[k] === 'string')) && gateOf(zh[KEYS[2]].includes('{when}')) && verdictOf(ja[KEYS[2]].includes('{when}')), KEYS.filter((k) => !zh[k] || !ja[k]).join(' | '));
   ok('SAY THE READ, NOT THE CAP (u3): after an empty ⟳ read the not-read words are the READ\'s result — «… the last ⟳ (<when>) returned no cap figure — press ⟳ to read again» (zh / ja likewise, with {when}); r4\'s «… read no cap …» (it reads as «there is no cap») is gone from zh / ja and from the code',
-    typeof zh[R5_KEY] === 'string' && zh[R5_KEY].includes('{when}') && ja[R5_KEY]?.includes('{when}') && !(R4_KEY in zh) && !(R4_KEY in ja) && W.fetched.includes('returned no cap figure') && !/read no cap/.test(code(srcOf('src/lib/usage-source.js')) + code(srcOf('src/lib/usage-meter.js')) + code(srcOf('src/lib/manage-agents.js'))), JSON.stringify([zh[R5_KEY], ja[R5_KEY]]));
+    typeof zh[R5_KEY] === 'string' && gateOf(zh[R5_KEY].includes('{when}')) && gateOf(ja[R5_KEY]?.includes('{when}')) && !(R4_KEY in zh) && !(R4_KEY in ja) && gateOf(W.fetched.includes('returned no cap figure')) && !/read no cap/.test(code(srcOf('src/lib/usage-source.js')) + code(srcOf('src/lib/usage-meter.js')) + code(srcOf('src/lib/manage-agents.js'))), JSON.stringify([zh[R5_KEY], ja[R5_KEY]]));
   ok('r1\'s lifted-ring words are gone with the ring (nothing uses them)', !('no 5-hour limit on this account — lifted {when}' in zh) && !('no 5-hour limit on this account — lifted {when}' in ja) && !/absentWindowText|usage-donut-lifted|acct-donut-lifted/.test(srcOf('src/lib/usage-meter.js') + srcOf('src/lib/manage-agents.js') + srcOf('src/lib/usage-source.js') + srcOf('public/style.css')));
   ok('r3\'s «none» is WITHDRAWN: its words are gone from zh + ja and from the code of every twin and of capRing, its slash (.usage-donut-none / .acct-donut-none) from style.css — a ring never says «no cap» on a read that proves nothing',
     !(W.absent in zh) && !(W.absent in ja) && !/donut-none|no model-scoped cap on this account|state: 'none'|state === 'none'/.test(code(srcOf('src/lib/usage-meter.js')) + code(srcOf('src/lib/manage-agents.js')) + code(srcOf('src/lib/usage-source.js'))) && !/donut-none/.test(srcOf('public/style.css')));
-  ok('the phone chip line is the base\'s (a 5h counts only when present; every running cap counts in the popup\'s loop)', /if \(!noData\) chipWorst = Math\.max\(chipWorst, has5h \? \(p5\.estPct \?\? pct5h\) : -1, p7\.estPct \?\? pct7d\);/.test(srcOf('src/lib/usage-meter.js')) && /if \(!scNotStarted\) chipWorst = Math\.max\(chipWorst, pSc\.estPct \?\? pctSc\);/.test(srcOf('src/lib/usage-meter.js')));
+  ok('the phone chip line is the base\'s (a 5h counts only when present; every running cap counts in the popup\'s loop)', gateOf(/if \(!noData\) chipWorst = Math\.max\(chipWorst, has5h \? \(p5\.estPct \?\? pct5h\) : -1, p7\.estPct \?\? pct7d\);/.test(srcOf('src/lib/usage-meter.js'))) && verdictOf(/if \(!scNotStarted\) chipWorst = Math\.max\(chipWorst, pSc\.estPct \?\? pctSc\);/.test(srcOf('src/lib/usage-meter.js'))));
   ok('§ban-safety: the cap ring asks no vendor anything — usage-source imports nothing, and the twins gained no fetch', !/^import /m.test(srcOf('src/lib/usage-source.js')) && !/\bfetch(Json)?\(/.test(srcOf('src/lib/usage-source.js')));
-  ok('ci.mjs runs this suite', /'test-usage-two-rings'/.test(srcOf('scripts/ci.mjs')));
+  ok('ci.mjs runs this suite', verdictOf(/'test-usage-two-rings'/.test(srcOf('scripts/ci.mjs'))));
 }
 
 globalThis.Date = RealDate; // the REAL Date put back once the legs are done (the verdict's small)
 ok('the real Date is back after the legs (the held clock ends with them)', globalThis.Date === RealDate);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

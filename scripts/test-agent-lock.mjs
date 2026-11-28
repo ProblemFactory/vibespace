@@ -31,7 +31,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const AGENT = 'src/agentd/agentd.js';
 const MUT = mutantCopies('agent-lock', REPO);
@@ -99,13 +99,13 @@ const agentIn = (root, agentFile) => spawn(process.execPath, [agentFile], { env:
 
 console.log('§1 a lock that names THIS process is stale — the agent takes it and starts');
 const own = await ownPid(path.join(REPO, AGENT));
-ok(`the agent handed the pid its lock already names STARTS (it removes the lock and takes it) — ${JSON.stringify(own)}`, own.started && !own.refusedSaid, own);
+ok(`the agent handed the pid its lock already names STARTS (it removes the lock and takes it) — ${JSON.stringify(own)}`, gateOf(own.started) && !own.refusedSaid, own);
 const red = releaseAgent ? await ownPid(releaseAgent) : null;
-ok(`RED CONTROL (the release's agent, without the own-pid test): the same start REFUSES — «already running», exit 3 — ${JSON.stringify(red)}`, !!red && !red.started && red.exit === 3 && red.refusedSaid, red);
+ok(`RED CONTROL (the release's agent, without the own-pid test): the same start REFUSES — «already running», exit 3 — ${JSON.stringify(red)}`, !!red && !red.started && red.exit === 3 && verdictOf(red.refusedSaid), red);
 {   // r4263: the slow case PLACED — the release's agent stalled STALL_MS before its lock check, read by BOTH helpers at once
   const root = mkRoot(), child = stalledReleaseAgent ? ownPidChild(root, stalledReleaseAgent) : null, w = child ? watch(child) : null;
   const [guess, slow] = child ? await Promise.all([guessStarted(root, child, w), run(root, child, w)]) : [null, null];
-  ok(`the release's agent STALLED ${STALL_MS} ms before its lock check (placed): the helper waits for its own act and reads the REFUSAL — exit 3, «already running», never a start — ${JSON.stringify(slow)}`, !!slow && !slow.started && slow.exit === 3 && slow.refusedSaid, slow);
+  ok(`the release's agent STALLED ${STALL_MS} ms before its lock check (placed): the helper waits for its own act and reads the REFUSAL — exit 3, «already running», never a start — ${JSON.stringify(slow)}`, !!slow && !slow.started && slow.exit === 3 && verdictOf(slow.refusedSaid), slow);
   ok(`RED CONTROL (the release's helper — five looks of 50 ms): the SAME stalled refusal is read as a START (the hosted run's red, placed) — ${JSON.stringify({ guess })}`, guess === true, { guess, slow });
 }
 
@@ -115,7 +115,7 @@ console.log('§2 the other two answers stand');
   const gone = spawn('/bin/true'); const deadPid = gone.pid; await new Promise((r) => gone.on('exit', r));
   fs.writeFileSync(lockOf(root), String(deadPid) + '\n');   // planted as the shell's echo plants it (a newline): the agent's own write never ends in one
   const r = await run(root, agentIn(root, path.join(REPO, AGENT)));
-  ok(`a lock holding a DEAD pid (${deadPid}) — the agent takes it and starts`, r.started && !r.refusedSaid, r);
+  ok(`a lock holding a DEAD pid (${deadPid}) — the agent takes it and starts`, gateOf(r.started) && !r.refusedSaid, r);
 }
 {
   const root = mkRoot();
@@ -125,7 +125,7 @@ console.log('§2 the other two answers stand');
   fs.writeFileSync(lockOf(root), String(sib.pid) + '\n');   // planted as the shell's echo plants it (a newline): the agent's own write never ends in one
   const r = await run(root, agentIn(root, path.join(REPO, AGENT)));
   try { process.kill(sib.pid, 'SIGTERM'); } catch { }   // ours: we started it and hold its pid
-  ok(`a lock holding a LIVE sibling agent (pid ${sib.pid}) — the agent still refuses, «already running», exit 3`, !r.started && r.exit === 3 && r.refusedSaid, r);
+  ok(`a lock holding a LIVE sibling agent (pid ${sib.pid}) — the agent still refuses, «already running», exit 3`, !r.started && r.exit === 3 && verdictOf(r.refusedSaid), r);
 }
 console.log('§3 B-8475 a live pid blocks only when it is an agent of THIS root');
 const otherHolds = async (agentFile, envFor) => {
@@ -141,9 +141,9 @@ const otherRootEnv = (other) => ({ PATH: process.env.PATH, HOME: other, VIBESPAC
 const hubShapeEnv = (other) => ({ PATH: process.env.PATH, HOME: other });   // the hub's local agent: no root variable, ~/.vibespace/agentd
 {
   const a = await otherHolds(path.join(REPO, AGENT), otherRootEnv);
-  ok(`the lock holds a LIVE agent of ANOTHER root — the agent of this root takes the lock and STARTS — ${JSON.stringify(a)}`, a.started && !a.refusedSaid, a);
+  ok(`the lock holds a LIVE agent of ANOTHER root — the agent of this root takes the lock and STARTS — ${JSON.stringify(a)}`, gateOf(a.started) && !a.refusedSaid, a);
   const b = await otherHolds(path.join(REPO, AGENT), hubShapeEnv);
-  ok(`…the hub's own local agent's shape (no root variable: its default ~/.vibespace/agentd under its HOME) — STARTS — ${JSON.stringify(b)}`, b.started && !b.refusedSaid, b);
+  ok(`…the hub's own local agent's shape (no root variable: its default ~/.vibespace/agentd under its HOME) — STARTS — ${JSON.stringify(b)}`, gateOf(b.started) && !b.refusedSaid, b);
   const LH = require(path.join(REPO, 'src/agentd/lock-holder.js'));
   const env = (o) => Object.entries(o).map(([k, v]) => `${k}=${v}`).join('\0') + '\0';
   ok('rootOfEnviron reads the agent\'s own rule: DEVICE_ROOT, then AGENTD_ROOT, then <HOME>/.vibespace/agentd; none ⇒ null; a name given twice ⇒ its FIRST value (getenv\'s)',
@@ -162,7 +162,7 @@ const hubShapeEnv = (other) => ({ PATH: process.env.PATH, HOME: other });   // t
     const viaUtf8 = LH.holdsRoot(holder.pid, path.join(uni, 'agentd')), viaLatin1 = LH.holdsRoot(holder.pid, path.join(uni, 'agentd'), { read: (f) => fs.readFileSync(f, 'latin1') });
     const u = await run(uni, agentIn(uni, path.join(REPO, AGENT)));
     try { process.kill(holder.pid, 'SIGTERM'); } catch { }   // ours: we started it and hold its pid
-    ok(`a live agent of THIS root whose folder name is not ASCII (${path.basename(uni)}) BLOCKS — the second start refuses, «already running», exit 3 — ${JSON.stringify(u)}`, viaUtf8 === true && !u.started && u.exit === 3 && u.refusedSaid, { viaUtf8, u });
+    ok(`a live agent of THIS root whose folder name is not ASCII (${path.basename(uni)}) BLOCKS — the second start refuses, «already running», exit 3 — ${JSON.stringify(u)}`, viaUtf8 === true && !u.started && u.exit === 3 && verdictOf(u.refusedSaid), { viaUtf8, u });
     ok('RED CONTROL: the same block read as latin1 (the first tip) answers «another root» for that genuine agent — two agents of one root would run', viaLatin1 === false, viaLatin1);
     fs.rmSync(uni, { recursive: true, force: true });
   }
@@ -174,7 +174,7 @@ const hubShapeEnv = (other) => ({ PATH: process.env.PATH, HOME: other });   // t
     const viaCanon = LH.holdsRoot(holder.pid, path.join(real, 'agentd')), viaResolve = LH.holdsRoot(holder.pid, path.join(real, 'agentd'), { canon: path.resolve });
     const a2 = await run(real, agentIn(real, path.join(REPO, AGENT)));
     try { process.kill(holder.pid, 'SIGTERM'); } catch { }   // ours: we started it and hold its pid
-    ok(`a live agent of THIS root spelled through a symlink BLOCKS — the second start refuses, «already running» — ${JSON.stringify(a2)}`, viaCanon === true && !a2.started && a2.exit === 3 && a2.refusedSaid, { viaCanon, a2 });
+    ok(`a live agent of THIS root spelled through a symlink BLOCKS — the second start refuses, «already running» — ${JSON.stringify(a2)}`, viaCanon === true && !a2.started && a2.exit === 3 && verdictOf(a2.refusedSaid), { viaCanon, a2 });
     ok('RED CONTROL: the same roots compared as written (path.resolve, the first tips) answer «another root» — two agents of one root would run', viaResolve === false, viaResolve);
   }
   {   // a lock naming one of THIS agent's own threads (the pid space is shared) is stale
@@ -184,10 +184,10 @@ const hubShapeEnv = (other) => ({ PATH: process.env.PATH, HOME: other });   // t
     try { process.kill(other.pid, 'SIGTERM'); } catch { }   // ours: we started it and hold its pid
     const AD = fs.readFileSync(path.join(REPO, AGENT), 'utf8');
     ok(`isOwnThread: a thread of this process (${tids[0]}) ⇒ true; this process's own pid, another process, 0 ⇒ false — and the agent treats a lock naming one of its own threads as stale, right after its own pid`,
-      okT && AD.includes("        if (pid === process.pid) { fs.unlinkSync(LOCK); continue; }\n        if (LH.isOwnThread(pid)) { fs.unlinkSync(LOCK); continue; }"), { tids: tids.slice(0, 4) });
+      gateOf(okT) && verdictOf(AD.includes("        if (pid === process.pid) { fs.unlinkSync(LOCK); continue; }\n        if (LH.isOwnThread(pid)) { fs.unlinkSync(LOCK); continue; }")), { tids: tids.slice(0, 4) });
   }
   const red = rootlessAgent ? await otherHolds(rootlessAgent, otherRootEnv) : null;
-  ok(`RED CONTROL (the checkpoint's agent, no root test): the same start REFUSES — «already running», exit 3 — ${JSON.stringify(red)}`, !!red && !red.started && red.exit === 3 && red.refusedSaid, red);
+  ok(`RED CONTROL (the checkpoint's agent, no root test): the same start REFUSES — «already running», exit 3 — ${JSON.stringify(red)}`, !!red && !red.started && red.exit === 3 && verdictOf(red.refusedSaid), red);
 }
 
 console.log('§4 B-8475 the image\'s user boot hook: the installer registers the agent\'s start there');
@@ -200,12 +200,12 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
     i0 > 0 && i1 > i0 && SH.indexOf('# TAKE OVER from a daemon already running') > i1 && SH.indexOf('# PERSISTENCE (the dead-Mac lesson') > i1);
   const FNS = i0 > 0 && i1 > i0 ? SH.slice(i0, i1 + B1.length) : '';
   ok('the fallback registers a DIAL pairing\'s start only where the image runs the hook (hook_runs_here), once the agent is up; a supervised start and a retired install drop their block',
-    SH.includes('  HOOK_WANTED=; if hook_runs_here && [ -s "$ROOT/state/dial.json" ]; then HOOK_WANTED=1; fi\n')
-    && SH.includes('if daemon_up; then\n  if [ -n "${HOOK_WANTED:-}" ] && register_boot_hook; then started=')
-    && /\nelse\n  drop_hook_block "\$KEY" \|\| true/.test(SH) && /drop_hook_block "\$K" \|\| true/.test(SH));
+    gateOf(SH.includes('  HOOK_WANTED=; if hook_runs_here && [ -s "$ROOT/state/dial.json" ]; then HOOK_WANTED=1; fi\n'))
+    && gateOf(SH.includes('if daemon_up; then\n  if [ -n "${HOOK_WANTED:-}" ] && register_boot_hook; then started='))
+    && gateOf(/\nelse\n  drop_hook_block "\$KEY" \|\| true/.test(SH)) && verdictOf(/drop_hook_block "\$K" \|\| true/.test(SH)));
   ok('the take-over and the retire stop a lock\'s pid only when it is an agent of THAT root (root_of_pid before each kill)',
-    SH.includes('OLDROOT=$(root_of_pid "$OLDPID"); if [ -n "$OLDROOT" ] && ! same_root "$OLDROOT" "$ROOT"; then OLDCMD="(an agent of another root)"; fi\n    case "$OLDCMD" in')
-    && /SR=\$\(root_of_pid "\$SP"\)\n\s+if \[ -n "\$SR" \] && ! same_root "\$SR" "\$HOME\/\.vibespace\/\$N"; then\n[^\n]*not stopped"\n\s+else\n\s+kill "\$SP"/.test(SH));
+    gateOf(SH.includes('OLDROOT=$(root_of_pid "$OLDPID"); if [ -n "$OLDROOT" ] && ! same_root "$OLDROOT" "$ROOT"; then OLDCMD="(an agent of another root)"; fi\n    case "$OLDCMD" in'))
+    && verdictOf(/SR=\$\(root_of_pid "\$SP"\)\n\s+if \[ -n "\$SR" \] && ! same_root "\$SR" "\$HOME\/\.vibespace\/\$N"; then\n[^\n]*not stopped"\n\s+else\n\s+kill "\$SP"/.test(SH)));
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-boothook-')); roots.push(T);
   const H = path.join(T, 'home'); fs.mkdirSync(H, { recursive: true });
   const HOOK = path.join(H, '.vibespace-init.sh');
@@ -228,7 +228,7 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const text = fs.readFileSync(HOOK, 'utf8');
   const blocks = (k, t = text) => t.split(`# >>> vibespace-device ${k} >>>`).length - 1;
   ok(`registered once per root, right under the hook's #! line; the owner's lines and its final «exit 0» stay, last — ${[r1, r1b, r2, r3].map((r) => r.status).join(',')}`,
-    [r1, r1b, r2, r3].every((r) => r.status === 0) && blocks('device-a') === 1 && blocks('device-b') === 1 && text.startsWith('#!/bin/bash\n# >>> vibespace-device ') && text.trimEnd().endsWith('echo own-line\nexit 0'), text.slice(0, 400));
+    gateOf([r1, r1b, r2, r3].every((r) => r.status === 0)) && blocks('device-a') === 1 && blocks('device-b') === 1 && gateOf(text.startsWith('#!/bin/bash\n# >>> vibespace-device ')) && verdictOf(text.trimEnd().endsWith('echo own-line\nexit 0')), text.slice(0, 400));
   fs.rmSync(path.join(T, 'started'), { force: true });
   const tok = ['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_');   // a credential NAME, built at runtime (no secret-shaped fixture)
   const BOOT_ENV = { PATH: process.env.PATH, HOME: H, LANG: 'C.UTF-8', VIBESPACE_HUB_ONLY: 'leaked', VIBESPACE_INSTANCE_NAME: 'pod-1', HTTPS_PROXY: 'http://proxy.invalid:3128', NODE_EXTRA_CA_CERTS: '/etc/ssl/company-ca.pem', npm_config_cache: '/tmp/npm', PORT: '3456', NODE_OPTIONS: '--max-old-space-size=64', [tok]: 'x', AGENT_BROWSER_PROFILE: 'p' };
@@ -238,7 +238,7 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const tS = Date.now(); let started = ''; while (Date.now() - tS < 10000 && started.split('\n').filter(Boolean).length < 2) { await sleep(50); try { started = fs.readFileSync(path.join(T, 'started'), 'utf8'); } catch { } }
   const startedMs = Date.now() - tS;
   ok(`the hook run as the entrypoint runs it STARTS each registered agent from its own files (the stand-in node), and skips a root without them — ${JSON.stringify(started)} · own-line ${/own-line/.test(boot.stdout)} (its lines waited ${startedMs} ms)`,
-    boot.status === 0 && /own-line/.test(boot.stdout) && started.includes(`STARTED ${R1}`) && started.includes(`STARTED ${R2}`) && !started.includes(R3), { started, status: boot.status });
+    boot.status === 0 && gateOf(/own-line/.test(boot.stdout)) && gateOf(started.includes(`STARTED ${R1}`)) && gateOf(started.includes(`STARTED ${R2}`)) && !started.includes(R3), { started, status: boot.status });
   ok('…and a VIBESPACE_* name of the entrypoint\'s own (the hub\'s) never reaches the agent',
     started.split('\n').filter(Boolean).length === 2 && !started.includes('env=leaked') && (started.match(/env=clean/g) || []).length === 2, started);
   // ONE ENVIRONMENT RULE FOR THE AGENT'S START (主开发's B-8475 verdict, as if a must): the boot start carries what the product's
@@ -255,41 +255,41 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const envSettled = async (R) => { const t0 = Date.now(); let prev = null; while (Date.now() - t0 < 10000) { let txt = ''; try { txt = fs.readFileSync(path.join(R, 'state', 'agent.env'), 'utf8'); } catch { } if (txt && txt === prev && /^PATH=/m.test(txt) && /^HOME=/m.test(txt) && /^VIBESPACE_DEVICE_ROOT=/m.test(txt)) return { settled: true, ms: Date.now() - t0 }; prev = txt; await sleep(50); } return { settled: false, ms: Date.now() - t0 }; };
   const parity = (got) => { const want = AGE.daemonEnv(BOOT_ENV), off = []; for (const k of Object.keys(BOOT_ENV)) if ((k in got) !== (k in want)) off.push(`${k}: agent ${k in got ? 'has' : 'lacks'}, rule ${k in want ? 'keeps' : 'drops'}`); if (got.VIBESPACE_DEVICE_ROOT !== R1) off.push('root'); return off; };
   const e1 = await envSettled(R1), g1 = envOfAgent(R1), off1 = parity(g1);
-  ok(`the boot start carries what the device agent's own env rule keeps (daemonEnv), name for name: the proxy, the CA store, the locale kept; the hub's VIBESPACE_*, npm_*, AGENT_BROWSER_*, PORT, NODE_OPTIONS and the credential name dropped — ${off1.length ? off1.join(' · ') : 'all ' + Object.keys(BOOT_ENV).length + ' names agree'} (its environment waited ${e1.ms} ms${e1.settled ? '' : ', NEVER SETTLED'})`, e1.settled && Object.keys(g1).length > 0 && off1.length === 0 && g1.HTTPS_PROXY === BOOT_ENV.HTTPS_PROXY && g1.NODE_EXTRA_CA_CERTS === BOOT_ENV.NODE_EXTRA_CA_CERTS, off1);
+  ok(`the boot start carries what the device agent's own env rule keeps (daemonEnv), name for name: the proxy, the CA store, the locale kept; the hub's VIBESPACE_*, npm_*, AGENT_BROWSER_*, PORT, NODE_OPTIONS and the credential name dropped — ${off1.length ? off1.join(' · ') : 'all ' + Object.keys(BOOT_ENV).length + ' names agree'} (its environment waited ${e1.ms} ms${e1.settled ? '' : ', NEVER SETTLED'})`, gateOf(e1.settled) && Object.keys(g1).length > 0 && off1.length === 0 && g1.HTTPS_PROXY === BOOT_ENV.HTTPS_PROXY && g1.NODE_EXTRA_CA_CERTS === BOOT_ENV.NODE_EXTRA_CA_CERTS, off1);
   const caseLine = (re) => { const m = re.exec(FNS); return m ? m[1].split('|') : null; };
   const shKeep = caseLine(/\n\s+(VIBESPACE_API\|[A-Z_|]+)\) ;;\n/), shDrop = caseLine(/\n\s+VIBESPACE_\*\|npm_\*\|AGENT_BROWSER_\*\|([A-Z_|]+)\) unset /);
   const sameSet = (a, b) => !!a && a.length === b.length && b.every((x) => a.includes(x));
-  ok(`census: the boot block's kept names ARE DAEMON_ENV_KEEP (${shKeep ? shKeep.length : 0}) and its dropped names AGENT_ENV_DROP (${shDrop ? shDrop.length : 0}) — one rule, spelled from src/agent-env.js`, sameSet(shKeep, [...AGE.DAEMON_ENV_KEEP]) && sameSet(shDrop, [...AGE.AGENT_ENV_DROP]), { shKeep, shDrop });
+  ok(`census: the boot block's kept names ARE DAEMON_ENV_KEEP (${shKeep ? shKeep.length : 0}) and its dropped names AGENT_ENV_DROP (${shDrop ? shDrop.length : 0}) — one rule, spelled from src/agent-env.js`, gateOf(sameSet(shKeep, [...AGE.DAEMON_ENV_KEEP])) && verdictOf(sameSet(shDrop, [...AGE.AGENT_ENV_DROP])), { shKeep, shDrop });
   ok('CONTROL: a census that lost one kept name goes red', !sameSet(shKeep && shKeep.slice(1), [...AGE.DAEMON_ENV_KEEP]));
   // …and the PREFIX rules: every `k.startsWith('…')` drop in agentEnv's own source is a `<prefix>*` of the block's drop line
   const AES = fs.readFileSync(path.join(REPO, 'src/agent-env.js'), 'utf8'), a0 = AES.indexOf('function agentEnv('), a1 = AES.indexOf('\nfunction ', a0 + 10);
   const jsPre = a0 >= 0 ? [...AES.slice(a0, a1 > a0 ? a1 : undefined).matchAll(/k\.startsWith\('([A-Za-z_]+)'\)/g)].map((m) => m[1]) : [];
   const shPre = ((/\n\s+((?:[A-Za-z_]+\*\|)+)[A-Z_|]+\) unset /.exec(FNS) || [])[1] || '').split('|').filter(Boolean).map((x) => x.replace(/\*$/, ''));
-  ok(`census: the block's prefix drops ARE agentEnv's own prefix rules (${shPre.join(', ')} ≡ ${jsPre.join(', ')})`, jsPre.length >= 3 && sameSet(shPre, jsPre), { shPre, jsPre });
+  ok(`census: the block's prefix drops ARE agentEnv's own prefix rules (${shPre.join(', ')} ≡ ${jsPre.join(', ')})`, jsPre.length >= 3 && verdictOf(sameSet(shPre, jsPre)), { shPre, jsPre });
   ok('CONTROL: a prefix rule agentEnv gained (and the block did not) goes red', !sameSet(shPre, [...jsPre, 'NEWPREFIX_']));
   const before = fs.readFileSync(HOOK, 'utf8');
   const d1 = bashIn(F, 'drop_hook_block device-a'), dNone = bashIn(F, 'drop_hook_block device-zz');
   const after = fs.readFileSync(HOOK, 'utf8');
   ok('a retired root\'s block is dropped (the others and the owner\'s lines stay); dropping a key the hook does not hold changes nothing',
-    d1.status === 0 && dNone.status === 0 && !after.includes('vibespace-device device-a >>>') && after.includes('vibespace-device device-b >>>') && after.includes('echo own-line\nexit 0') && before !== after);
+    d1.status === 0 && dNone.status === 0 && !after.includes('vibespace-device device-a >>>') && gateOf(after.includes('vibespace-device device-b >>>')) && gateOf(after.includes('echo own-line\nexit 0')) && before !== after);
   const ino2 = fs.statSync(HOOK).ino; bashIn(F, 'drop_hook_block device-zz');
   ok('…a hook with nothing to drop keeps its very file (same inode)', fs.statSync(HOOK).ino === ino2);
   // THE HUB'S SSH UNPAIR: the installer's own functions up to their end marker on `bash -s` stdin, then drop_hook_block KEY
   const MPW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   ok('the ssh unpair ships the installer\'s functions (its own markers) on `bash -s` stdin and calls drop_hook_block with the key; its sshRun writes that stdin; no sed range on the hook',
-    MPW.includes(`inst.indexOf(${JSON.stringify(B0)}), h1 = inst.indexOf('${B1}')`) && MPW.includes("hookDrop = `${inst.slice(h0, h1)}\\ndrop_hook_block ${key} || true\\n`;")
-    && MPW.includes("const ran = hookDrop ? await sshRun('bash -s', 30000, hookDrop + teardown + '\\n') : null;\n        if (!ran || !String(ran.out || '').includes('VS_REMOVED')) await sshRun(teardown, 30000);")
-    && MPW.includes("const inst = await fs.promises.readFile(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');")
-    && MPW.includes('if (input != null && child.stdin) { child.stdin.on(\'error\', () => { }); child.stdin.end(input); }') && !/sed -i[^\n]*vibespace-device/.test(MPW));   // ckpt61 cure 2: the stdin guarded (none after a start that failed at once)
+    gateOf(MPW.includes(`inst.indexOf(${JSON.stringify(B0)}), h1 = inst.indexOf('${B1}')`)) && gateOf(MPW.includes("hookDrop = `${inst.slice(h0, h1)}\\ndrop_hook_block ${key} || true\\n`;"))
+    && gateOf(MPW.includes("const ran = hookDrop ? await sshRun('bash -s', 30000, hookDrop + teardown + '\\n') : null;\n        if (!ran || !String(ran.out || '').includes('VS_REMOVED')) await sshRun(teardown, 30000);"))
+    && gateOf(MPW.includes("const inst = await fs.promises.readFile(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');"))
+    && gateOf(MPW.includes('if (input != null && child.stdin) { child.stdin.on(\'error\', () => { }); child.stdin.end(input); }')) && !/sed -i[^\n]*vibespace-device/.test(MPW));   // ckpt61 cure 2: the stdin guarded (none after a start that failed at once)
   const un = spawnSync('bash', ['-s'], { input: `${SH.slice(i0, i1)}\ndrop_hook_block device-b || true\necho TEARDOWN-RAN\n`, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: H } });
   const afterUn = fs.readFileSync(HOOK, 'utf8');
-  ok(`…that very script, run by \`bash -s\`, removes the key's block, keeps the owner's lines and goes on to the teardown — ${un.status}`, un.status === 0 && blocks('device-b', afterUn) === 0 && afterUn.includes('echo own-line\nexit 0') && /TEARDOWN-RAN/.test(un.stdout), afterUn);
+  ok(`…that very script, run by \`bash -s\`, removes the key's block, keeps the owner's lines and goes on to the teardown — ${un.status}`, un.status === 0 && blocks('device-b', afterUn) === 0 && gateOf(afterUn.includes('echo own-line\nexit 0')) && verdictOf(/TEARDOWN-RAN/.test(un.stdout)), afterUn);
   // only a whole begin…end pair leaves: a begin whose end was deleted by hand is LEFT, and said
   const lone = '#!/bin/bash\n# >>> vibespace-device device-q >>> (written by its installer)\nR=/gone\necho mine-after\nexit 0\n';
   fs.writeFileSync(HOOK, lone);
   const dq = bashIn(F, 'drop_hook_block device-q');
   ok(`a begin without its end: the hook is left byte for byte, the drop says so and answers non-zero — ${dq.status} ${JSON.stringify(dq.stderr.trim().slice(0, 120))}`,
-    dq.status !== 0 && fs.readFileSync(HOOK, 'utf8') === lone && /but not its end/.test(dq.stderr));
+    dq.status !== 0 && fs.readFileSync(HOOK, 'utf8') === lone && verdictOf(/but not its end/.test(dq.stderr)));
   const AE = ANCHOR(FNS, 'skip && index($0, e) == 1 { skip = 0; next } !skip { print } END { if (skip) exit 3 }', 'drop to the end');
   const FE = AE ? fns(FNS.split(AE).join('index($0, e) == 1 { skip = 0; next } !skip { print }')) : null;
   fs.writeFileSync(HOOK, lone); if (FE) bashIn(FE, 'drop_hook_block device-q');
@@ -300,14 +300,14 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   fs.rmSync(HOOK, { force: true }); fs.symlinkSync(real, HOOK);
   const rs = reg(F, R1, 'device-a');
   ok(`a symlinked hook (a dotfiles repo) stays a link; its real file gets the block and keeps its mode 0700 — ${rs.status} ${(fs.statSync(real).mode & 0o777).toString(8)}`,
-    rs.status === 0 && fs.lstatSync(HOOK).isSymbolicLink() && blocks('device-a', fs.readFileSync(real, 'utf8')) === 1 && (fs.statSync(real).mode & 0o777) === 0o700);
+    rs.status === 0 && gateOf(fs.lstatSync(HOOK).isSymbolicLink()) && blocks('device-a', fs.readFileSync(real, 'utf8')) === 1 && (fs.statSync(real).mode & 0o777) === 0o700);
   fs.rmSync(HOOK, { force: true });
   const rn = reg(F, R1, 'device-a');
-  ok(`a hook that was not there is made 0600, a #! line first — ${rn.status} ${(fs.statSync(HOOK).mode & 0o777).toString(8)}`, rn.status === 0 && (fs.statSync(HOOK).mode & 0o777) === 0o600 && fs.readFileSync(HOOK, 'utf8').startsWith('#!/bin/bash\n# >>> vibespace-device device-a >>>') && fs.readFileSync(HOOK, 'utf8').includes('\n# ~/.vibespace-init.sh: run by'));
+  ok(`a hook that was not there is made 0600, a #! line first — ${rn.status} ${(fs.statSync(HOOK).mode & 0o777).toString(8)}`, rn.status === 0 && (fs.statSync(HOOK).mode & 0o777) === 0o600 && gateOf(fs.readFileSync(HOOK, 'utf8').startsWith('#!/bin/bash\n# >>> vibespace-device device-a >>>')) && verdictOf(fs.readFileSync(HOOK, 'utf8').includes('\n# ~/.vibespace-init.sh: run by')));
   fs.writeFileSync(HOOK, 'if true; then\n  echo first\nfi\n'); const rx = reg(F, R1, 'device-a'); const tx = fs.readFileSync(HOOK, 'utf8');
   fs.writeFileSync(HOOK, '#!/bin/bash'); const ry = reg(F, R1, 'device-a'); const ty = fs.readFileSync(HOOK, 'utf8');
   ok('a hook whose first line is not #! gets the block at its very top (never inside its first construct); a one-line #! hook with no newline keeps that line whole',
-    rx.status === 0 && tx.startsWith('# >>> vibespace-device device-a >>>') && tx.endsWith('if true; then\n  echo first\nfi\n') && ry.status === 0 && ty.startsWith('#!/bin/bash\n# >>> vibespace-device device-a >>>'), { tx: tx.slice(0, 120), ty: ty.slice(0, 120) });
+    rx.status === 0 && gateOf(tx.startsWith('# >>> vibespace-device device-a >>>')) && gateOf(tx.endsWith('if true; then\n  echo first\nfi\n')) && ry.status === 0 && verdictOf(ty.startsWith('#!/bin/bash\n# >>> vibespace-device device-a >>>')), { tx: tx.slice(0, 120), ty: ty.slice(0, 120) });
   // THE AGENT IS NEVER THE HOOK'S CHILD (its second reader's must): a person's hook that ends in `wait` returns while the
   // agent runs on — the block is a subshell that starts it and ends at once (setsid does not fork inside a non-interactive
   // shell's job). RED control: the block without its subshell — `wait` waits for the agent, the container never boots on.
@@ -321,11 +321,11 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   // clock, bounded 10 s and said (runningMs); never «the file exists» within twenty looks)
   const bootWait = async (f) => { fs.writeFileSync(HOOK, waitHook); fs.rmSync(stayPid, { force: true }); reg(f, R4, 'device-d'); const t0 = Date.now(); const b = spawnSync('bash', [HOOK], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: H }, timeout: 4000 }); const ms = Date.now() - t0; const tR = Date.now(); let started = false; while (!started && Date.now() - tR < 10000) { let pid = 0; try { pid = Number(fs.readFileSync(stayPid, 'utf8').trim()) || 0; } catch { } try { started = pid > 1 && fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim() === 'sleep'; } catch { } if (!started) await sleep(50); } return { status: b.status, signal: b.signal, timedOut: !!(b.error && b.error.code === 'ETIMEDOUT'), ms, said: /own-after-wait/.test(b.stdout || ''), started, runningMs: Date.now() - tR, stopped: stopStay() }; };
   const w1 = await bootWait(F);
-  ok(`a person's hook ending in \`wait\` RETURNS while the registered agent runs on (the block's subshell) — ${JSON.stringify(w1)}`, w1.status === 0 && !w1.timedOut && w1.said && w1.started && w1.stopped.comm === 'sleep', w1);   // returned by its status and no spawn timeout (an agent left holding the hook's stdout keeps the pipe open: status 0 with ETIMEDOUT) — no wall-clock bound (the ratchet is at 0)
+  ok(`a person's hook ending in \`wait\` RETURNS while the registered agent runs on (the block's subshell) — ${JSON.stringify(w1)}`, w1.status === 0 && !w1.timedOut && gateOf(w1.said) && gateOf(w1.started) && w1.stopped.comm === 'sleep', w1);   // returned by its status and no spawn timeout (an agent left holding the hook's stdout keeps the pipe open: status 0 with ETIMEDOUT) — no wall-clock bound (the ratchet is at 0)
   const AS1 = ANCHOR(FNS, '( R=$R\n', 'agent as the hook\'s child'), AS2 = ANCHOR(FNS, '  fi )\n# <<< vibespace-device $KEY <<<', 'agent as the hook\'s child');
   const FW = AS1 && AS2 ? fns(FNS.split(AS1).join('R=$R\n').split(AS2).join('  fi\n# <<< vibespace-device $KEY <<<')) : null;
   const w2 = FW ? await bootWait(FW) : null;
-  ok(`RED CONTROL: the block without its subshell (the first two tips) — \`wait\` waits for the agent: the hook does not return — ${JSON.stringify(w2)}`, !!w2 && w2.timedOut && w2.signal === 'SIGTERM' && w2.started && !w2.said, w2);
+  ok(`RED CONTROL: the block without its subshell (the first two tips) — \`wait\` waits for the agent: the hook does not return — ${JSON.stringify(w2)}`, !!w2 && gateOf(w2.timedOut) && w2.signal === 'SIGTERM' && gateOf(w2.started) && !w2.said, w2);
   fs.writeFileSync(HOOK, handWritten);
   // same_root: one folder whatever its spelling (a symlinked root is that root), else as written
   const sr = (a, b) => bashIn(F, `same_root ${JSON.stringify(a)} ${JSON.stringify(b)}`).status;
@@ -347,7 +347,7 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
     let wA = { settled: false, ms: 0 };
     if (FA) { reg(FA, R1, 'device-a'); spawnSync('bash', [HOOK], { env: BOOT_ENV }); wA = await envSettled(R1); }   // the FACT, never «the file exists»
     const gA = envOfAgent(R1);
-    ok(`RED CONTROL: the start with the short allow list (the tip before this) — the agent comes back WITHOUT the proxy and the CA store (${gA.HTTPS_PROXY ? 'has' : 'lacks'} HTTPS_PROXY; its environment waited ${wA.ms} ms${wA.settled ? '' : ', NEVER SETTLED'})`, !!FA && wA.settled && Object.keys(gA).length > 0 && !gA.HTTPS_PROXY && parity(gA).length > 0, parity(gA));
+    ok(`RED CONTROL: the start with the short allow list (the tip before this) — the agent comes back WITHOUT the proxy and the CA store (${gA.HTTPS_PROXY ? 'has' : 'lacks'} HTTPS_PROXY; its environment waited ${wA.ms} ms${wA.settled ? '' : ', NEVER SETTLED'})`, !!FA && gateOf(wA.settled) && Object.keys(gA).length > 0 && !gA.HTTPS_PROXY && parity(gA).length > 0, parity(gA));
   }
   // RED CONTROL: a registration that writes no block — the container start starts nothing
   const A = ANCHOR(FNS, 'hook_block > "$T.vs-blk.$$"', 'no block written');
@@ -362,4 +362,4 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
 }
 for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }); } catch { } }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

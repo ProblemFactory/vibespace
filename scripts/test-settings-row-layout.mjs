@@ -40,7 +40,7 @@ const SHOTS = process.env.SETTINGS_ROW_LAYOUT_PNG_DIR || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + String(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + String(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const express = require(path.join(repo, 'node_modules/express'));
 const esbuild = require(path.join(repo, 'node_modules/esbuild'));
@@ -49,20 +49,20 @@ const WebSocket = require(path.join(repo, 'node_modules/ws'));
 // ── the pre-fix page: the lane's style.css block and the renderer's stack line taken out (each must exist: a vacuous control proves nothing) ──
 const CSS = fs.readFileSync(path.join(repo, 'public/style.css'), 'utf8');
 const LANE_CSS = /\/\* SETTINGS ROWS NEVER SQUEEZE THEIR WORDS[\s\S]*?\/\* end: settings rows never squeeze their words \*\/\n?/;
-ok(LANE_CSS.test(CSS), 'style.css carries the lane\'s block (the stack + the rail) between its two markers');
+ok(verdictOf(LANE_CSS.test(CSS)), 'style.css carries the lane\'s block (the stack + the rail) between its two markers');
 const CSS_PRE = CSS.replace(LANE_CSS, '');
 const CAP_CSS = /\/\* A CONTROL NEVER OUTGROWS ITS ROW \(B-0406[\s\S]*?\/\* end: a control never outgrows its row \*\/\n?/;
-ok(CAP_CSS.test(CSS), 'style.css carries B-0406\'s block (a control capped at its row, a select that shrinks with it) between its two markers');
+ok(verdictOf(CAP_CSS.test(CSS)), 'style.css carries B-0406\'s block (a control capped at its row, a select that shrinks with it) between its two markers');
 const CSS_NOCAP = CSS.replace(CAP_CSS, '');
 // r1514 / r1693: the COMBOBOX line inside B-0406's block (Settings › Claude's effort box at 390); the page without just that line is the
 // control that proves the line is what holds the box
 const COMBO_LINE = '.settings-row-control > .settings-combobox { min-width: 0; max-width: 100%; }\n';
-ok((CAP_CSS.exec(CSS) || [''])[0].includes(COMBO_LINE) && CSS.indexOf(COMBO_LINE) === CSS.lastIndexOf(COMBO_LINE), 'B-0406\'s block holds the combobox line, once (a combobox shrinks with its control like a select)');
+ok(gateOf((CAP_CSS.exec(CSS) || [''])[0].includes(COMBO_LINE)) && CSS.indexOf(COMBO_LINE) === CSS.lastIndexOf(COMBO_LINE), 'B-0406\'s block holds the combobox line, once (a combobox shrinks with its control like a select)');
 const CSS_NOCOMBO = CSS.replace(COMBO_LINE, '');
 const UI = path.join(repo, 'src/lib/settings-ui.js');
 const UI_SRC = fs.readFileSync(UI, 'utf8');
 const STACK_LINE = "if (control.tagName === 'TEXTAREA' || control.querySelector('textarea')) row.classList.add('settings-row-stack');";
-ok(UI_SRC.includes(STACK_LINE), 'the renderer stamps settings-row-stack from the CONTROL it drew (a textarea, or one inside it)');
+ok(verdictOf(UI_SRC.includes(STACK_LINE)), 'the renderer stamps settings-row-stack from the CONTROL it drew (a textarea, or one inside it)');
 
 const root = scratch('settings-row-layout');
 const dir = path.join(root, 'web');
@@ -194,7 +194,7 @@ const ATT = 'decision.attentionBlock';
 /** ① the textarea rows of one page, judged */
 function judgeStacks(tag, rows, { w }) {
   const tas = rows.filter((r) => r.kind === 'textarea');
-  ok(tas.length >= 2 && tas.some((r) => r.key === ATT), `${tag}: the page draws its textarea rows (${tas.length}: ${tas.map((r) => r.key).join(', ')}), 我在乎什么 among them`);
+  ok(tas.length >= 2 && verdictOf(tas.some((r) => r.key === ATT)), `${tag}: the page draws its textarea rows (${tas.length}: ${tas.map((r) => r.key).join(', ')}), 我在乎什么 among them`);
   const bad = [];
   for (const r of tas) {
     const why = [];
@@ -234,7 +234,7 @@ function sameRows(tag, A, B) {
   const kinds = [...new Set(A.filter((r) => r.kind !== 'textarea').map((r) => r.kind))].sort();
   ok(!missing.length && B.length === A.length, `${tag}: the same ${A.length} rows drawn before and after`, { missing, before: B.length, after: A.length });
   ok(same >= 40 && !moved.length, `${tag}: ${same} other rows (${kinds.join(' / ')}) keep their own rects within 2 px`, moved);
-  ok(railed.every((r) => r.before < 0.4), `${tag}: the rail wrapped ${railed.length} row(s), each one whose words had < 40 % of it before${railed.length ? ' — ' + railed.map((r) => `${r.key} (${r.kind}) ${(100 * r.before).toFixed(1)} %`).join(', ') : ''}`, railed);
+  ok(verdictOf(railed.every((r) => r.before < 0.4)), `${tag}: the rail wrapped ${railed.length} row(s), each one whose words had < 40 % of it before${railed.length ? ' — ' + railed.map((r) => `${r.key} (${r.kind}) ${(100 * r.before).toFixed(1)} %`).join(', ') : ''}`, railed);
   return railed.map((r) => ({ ...r, before: Math.round(1000 * r.before) / 10 }));
 }
 
@@ -264,13 +264,13 @@ for (const w of [600, 1200]) {
   const B = (await pre.ev(MEASURE)).find((r) => r.key === 'plugin.layout-fixture.pick');
   const fmt = (r) => r && `words ${Math.round(r.info.w)} / ${Math.round(r.row.w)} px (${pct(r.info.w, r.row.w)} %), control ${Math.round(r.ctl.w)} px${wrapped(r) ? ' under the words' : ' beside them'}`;
   if (w === 600) {
-    ok(A && wrapped(A) && A.info.w >= 0.95 * A.row.w && Math.abs(A.ctl.x + A.ctl.w - (A.row.x + A.row.w)) <= 2, `600 px: the control wraps under the words, at the right; the words take the row — ${fmt(A)}`, A);
-    ok(B && !wrapped(B) && B.info.w < 0.4 * B.row.w, `CONTROL 600 px: pre-fix the same row squeezes its words — ${fmt(B)}`, B);
+    ok(gateOf(A) && gateOf(wrapped(A)) && A.info.w >= 0.95 * A.row.w && Math.abs(A.ctl.x + A.ctl.w - (A.row.x + A.row.w)) <= 2, `600 px: the control wraps under the words, at the right; the words take the row — ${fmt(A)}`, A);
+    ok(gateOf(B) && !wrapped(B) && B.info.w < 0.4 * B.row.w, `CONTROL 600 px: pre-fix the same row squeezes its words — ${fmt(B)}`, B);
     await pre.shot('rail-600-before.png', SECTION_OF('plugin.layout-fixture.pick'));
     await now.shot('rail-600-after.png', SECTION_OF('plugin.layout-fixture.pick'));
     RESULT.rail600 = { now: fmt(A), pre: fmt(B) };
   } else {
-    ok(A && !wrapped(A) && A.info.w >= 0.4 * A.row.w && B && Math.abs(A.info.w - B.info.w) <= 2, `1200 px: with room the control stays beside the words, as before — ${fmt(A)}`, { A, B });
+    ok(gateOf(A) && !wrapped(A) && A.info.w >= 0.4 * A.row.w && gateOf(B) && Math.abs(A.info.w - B.info.w) <= 2, `1200 px: with room the control stays beside the words, as before — ${fmt(A)}`, { A, B });
     RESULT.rail1200 = fmt(A);
   }
   now.close(); pre.close();
@@ -325,9 +325,9 @@ console.log('④b A CONTROL NEVER OUTGROWS ITS ROW (B-0406) — the phone, 390 p
   const fx = (f) => f ? `row ${f.row} px, control ${f.ctl} px, the closed select ${f.sel} px of its longest option's ${f.longest}` : 'no fixture row';
   console.log(`      now: ${fx(A.fixture)} · sideways ${A.sideways} px · ${A.bad.length} past · without the cap: ${fx(B.fixture)} · sideways ${B.sideways} px · ${B.bad.length} past${B.bad.length ? ' (' + B.bad.slice(0, 3).join('; ') + ')' : ''}`);
   ok(A.rows > 20 && !A.bad.length && A.sideways <= 1, `phone: every row, its control and every select inside the row and the window (${A.rows} rows, sideways ${A.sideways} px)`, A.bad);
-  ok(!!A.fixture && A.fixture.sel <= A.fixture.row + 0.5 && A.fixture.sel < A.fixture.longest && A.fixture.opts.includes(LONG_OPT),
+  ok(!!A.fixture && A.fixture.sel <= A.fixture.row + 0.5 && A.fixture.sel < A.fixture.longest && verdictOf(A.fixture.opts.includes(LONG_OPT)),
     `phone: the long option's CLOSED select is cut to its row (${fx(A.fixture)}); the list keeps the option whole («${LONG_OPT.slice(0, 24)}…»)`, A.fixture);
-  ok(!!B.fixture && B.bad.some((x) => x.startsWith('plugin.layout-fixture.pick')),
+  ok(!!B.fixture && verdictOf(B.bad.some((x) => x.startsWith('plugin.layout-fixture.pick'))),
     `CONTROL: without style.css's B-0406 block the same control runs past the window (${B.bad.filter((x) => x.startsWith('plugin.layout-fixture.pick')).join('; ') || 'NOT — the control is vacuous'})`, B);
   // r1514 / r1693 — THE CENSUS's ONE REAL RED: Claude's effort box with the hub's own list (its last row a sentence) inside its
   // row — read in en, where the sentence is widest (the census: 144 px past a 390 phone in en, 27 in zh; the zh page above holds every
@@ -343,7 +343,7 @@ console.log('④b A CONTROL NEVER OUTGROWS ITS ROW (B-0406) — the phone, 390 p
   ok(!!E.effort && E.effort.ownW > E.effort.row && E.effort.sel < E.effort.ownW,
     E.effort && !(E.effort.ownW > E.effort.row) ? `phone (en): THE PREMISE — the leg's own long entry is not wider than the row (${E.effort && E.effort.ownW} of ${E.effort && E.effort.row} px): it cannot judge a cut`
       : `phone (en): the box's closed face is cut — its select ${E.effort && E.effort.sel} px against the leg's own entry's ${E.effort && E.effort.ownW} px of words (the open list shows them whole)`, E.effort);
-  ok(!!D.effort && D.bad.some((x) => x.startsWith('claude.defaultEffort')),
+  ok(!!D.effort && verdictOf(D.bad.some((x) => x.startsWith('claude.defaultEffort'))),
     `CONTROL: without the combobox line the effort box runs past its row (${D.bad.filter((x) => x.startsWith('claude.defaultEffort')).join('; ') || 'NOT — the control is vacuous'})`, D);
   ne.close(); nc.close();
   await now.shot('cap-390-after.png', ROW_OF('plugin.layout-fixture.pick'));
@@ -374,10 +374,10 @@ console.log('⑤ CONTROL — the pre-fix page (the owner\'s shape)');
 {
   const pa = [600, 760, 1200].map((w) => RESULT[w].preAtt), ph = RESULT.phone.preAtt;
   const f = (r) => `${Math.round(r.info.w)} of ${Math.round(r.row.w)} px (${pct(r.info.w, r.row.w)} %), label ${r.lines} line(s)`;
-  ok(pa.every((r) => r && !r.stack && r.ta.y < r.info.y + r.info.h - 1 && Math.abs(r.ctl.w - pa[0].ctl.w) <= 2), `CONTROL: pre-fix the box sits BESIDE the words at its own ${Math.round(pa[0] ? pa[0].ctl.w : 0)} px at 600 / 760 / 1200 — the words get only what it leaves: ${pa.map((r, i) => [600, 760, 1200][i] + ' px ' + (r ? f(r) : '?')).join(' · ')}`, pa);
-  ok(pa[0] && pa[0].info.w < 0.4 * pa[0].row.w && ph && ph.info.w < 0.4 * ph.row.w && ph.lines > 2, `CONTROL: pre-fix the words are a sliver — 600 px ${pa[0] ? f(pa[0]) : '?'}; phone ${ph ? f(ph) : '?'} ⇒ leg ① is the lane's doing (RED without it)`, { p600: pa[0], phone: ph });
+  ok(verdictOf(pa.every((r) => r && !r.stack && r.ta.y < r.info.y + r.info.h - 1 && Math.abs(r.ctl.w - pa[0].ctl.w) <= 2)), `CONTROL: pre-fix the box sits BESIDE the words at its own ${Math.round(pa[0] ? pa[0].ctl.w : 0)} px at 600 / 760 / 1200 — the words get only what it leaves: ${pa.map((r, i) => [600, 760, 1200][i] + ' px ' + (r ? f(r) : '?')).join(' · ')}`, pa);
+  ok(gateOf(pa[0]) && pa[0].info.w < 0.4 * pa[0].row.w && gateOf(ph) && ph.info.w < 0.4 * ph.row.w && ph.lines > 2, `CONTROL: pre-fix the words are a sliver — 600 px ${pa[0] ? f(pa[0]) : '?'}; phone ${ph ? f(ph) : '?'} ⇒ leg ① is the lane's doing (RED without it)`, { p600: pa[0], phone: ph });
 }
 
 if (process.env.SETTINGS_ROW_LAYOUT_JSON) fs.writeFileSync(process.env.SETTINGS_ROW_LAYOUT_JSON, JSON.stringify(RESULT, null, 1));
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

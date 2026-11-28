@@ -22,7 +22,7 @@ const fakeHome = path.join(tmp, 'home'); fs.mkdirSync(fakeHome, { recursive: tru
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 
 const version = require('../package.json').version;
 const bundle = path.join(tmp, 'agentd.js');
@@ -35,7 +35,7 @@ process.env.HOME = fakeHome;
 const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => {} });
 dm.installLocal();
 const conn = await dm.connect();
-check('hello-ack advertises place-secret + quota-refresh', conn.info.capabilities.includes('place-secret') && conn.info.capabilities.includes('quota-refresh'));
+check('hello-ack advertises place-secret + quota-refresh', gateOf(conn.info.capabilities.includes('place-secret')) && verdictOf(conn.info.capabilities.includes('quota-refresh')));
 
 try {
   // ── place-secret ──
@@ -51,25 +51,25 @@ try {
   check('overwrite is atomic and keeps 0600', fs.readFileSync(dest, 'utf-8') === 'ROTATED' && (fs.statSync(dest).mode & 0o777) === 0o600);
   // confinement: outside $HOME refused
   let esc = null; try { await dm.placeSecret('/tmp/vs-escape.key', Buffer.from('x'), { by: 'system:test' }); } catch (e) { esc = e.message; }
-  check('a path outside $HOME is refused', /inside \$HOME/.test(esc || ''), esc);
+  check('a path outside $HOME is refused', verdictOf(/inside \$HOME/.test(esc || '')), esc);
   let trav = null; try { await dm.placeSecret(path.join(fakeHome, '..', 'escape.key'), Buffer.from('x'), { by: 'system:test' }); } catch (e) { trav = e.message; }
-  check('traversal out of $HOME is refused', /inside \$HOME/.test(trav || ''), trav);
+  check('traversal out of $HOME is refused', verdictOf(/inside \$HOME/.test(trav || '')), trav);
 
   // ── quota-refresh gates (never reaches the vendor in ANY of these) ──
   let g1 = null; try { await dm.quotaRefresh({ humanGated: false }); } catch (e) { g1 = e.message; }
-  check('humanGated:false is refused (a scheduler can never fire this op)', /humanGated/.test(g1 || ''), g1);
+  check('humanGated:false is refused (a scheduler can never fire this op)', verdictOf(/humanGated/.test(g1 || '')), g1);
   let g2 = null; try { await dm.quotaRefresh({ humanGated: true }); } catch (e) { g2 = e.message; }
-  check('no credentials on the machine → honest error, no call', /no credentials/.test(g2 || ''), g2);
+  check('no credentials on the machine → honest error, no call', verdictOf(/no credentials/.test(g2 || '')), g2);
   // expired token → honest error, NEVER refreshed
   fs.mkdirSync(path.join(fakeHome, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(fakeHome, '.claude', '.credentials.json'),
     JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat-EXPIRED', expiresAt: Date.now() - 1000 } }));
   let g3 = null; try { await dm.quotaRefresh({ humanGated: true }); } catch (e) { g3 = e.message; }
-  check('expired token → honest error (read-only peek, never refreshed)', /no valid token/.test(g3 || ''), g3);
+  check('expired token → honest error (read-only peek, never refreshed)', verdictOf(/no valid token/.test(g3 || '')), g3);
   // FAILED preconditions must not burn the throttle slot (2.271.0 lesson) —
   // a repeat still reports the real problem, not 'throttled'
   let g4 = null; try { await dm.quotaRefresh({ humanGated: true }); } catch (e) { g4 = e.message; }
-  check('failed precondition does NOT consume the throttle slot', /no valid token/.test(g4 || ''), g4);
+  check('failed precondition does NOT consume the throttle slot', verdictOf(/no valid token/.test(g4 || '')), g4);
   // B-5e0d small 2: the op's refusal carries its REASON by name — the hub answers the page from it, with no second look
   // through the shell — and a LONG-LIVED token (no refresh token beside it) makes no vendor request: the reply says so
   let g4c = null; try { await dm.quotaRefresh({ humanGated: true }); } catch (e) { g4c = e.code || ('no code: ' + e.message); }
@@ -88,11 +88,11 @@ try {
     && opBody.indexOf("_quotaAt.set(credsPath, Date.now())") < opBody.indexOf('api.anthropic.com'));
   // subDir variant sanitizes + reads the sub path
   let g5 = null; try { await dm.quotaRefresh({ humanGated: true, subDir: '../../etc' }); } catch (e) { g5 = e.message; }
-  check('subDir is sanitized (traversal chars stripped → missing-creds error, not a path escape)', /no credentials/.test(g5 || ''), g5);
+  check('subDir is sanitized (traversal chars stripped → missing-creds error, not a path escape)', verdictOf(/no credentials/.test(g5 || '')), g5);
 } finally {
   try { await dm.stop?.(); } catch { }
   try { execFileSync('sh', ['-c', `pkill -f "${bundle.replace(/[/.]/g, '.')}" 2>/dev/null || true`]); } catch { }
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 console.log(failed ? `FAIL (${failed})` : 'ALL PASS (15)');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

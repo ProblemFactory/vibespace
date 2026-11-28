@@ -30,7 +30,7 @@ const MW = require(path.join(repo, 'src/machine-window.js'));
 const MD = require(path.join(repo, 'src/machine-desktop-model.js'));
 const MUT = mutantCopies('mwin', repo);
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 700) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -57,7 +57,7 @@ const winLook = (rows, procs = PROCS) => [J(WIN_SCREEN), ...rows, ...procs, 'end
 console.log('§1 the Windows look → the rectangle (DWM bounds, the virtual screen, DPI)');
 {
   const [d] = MW.parseDumps(winLook([PM, EXPLORER, BLENDER, SPLASH, '{"t":"win", broken', 'garbage line']));
-  ok(d && d.wins.length === 4 && d.procs.get(9012).ppid === 9000 && d.at === 1791700001000, 'one dump: 4 rows (a malformed line skipped), the process table, the look\'s clock', d && { wins: d.wins.length, at: d.at });
+  ok(gateOf(d) && d.wins.length === 4 && d.procs.get(9012).ppid === 9000 && d.at === 1791700001000, 'one dump: 4 rows (a malformed line skipped), the process table, the look\'s clock', d && { wins: d.wins.length, at: d.at });
   const scr = MW.screenOf('win32', d.screen);
   ok(scr.x === -1920 && scr.w === 3840 && scr.scale === 1.5, 'the virtual screen (two monitors, the left one at x = -1920) at 150 % (dpi 144)', scr);
   const r = MW.rectOf('win32', JSON.parse(BLENDER), scr);
@@ -88,7 +88,7 @@ console.log('§2 a Mac\'s look = its screen helper\'s facts → points of the MA
   ok(J(side.rectOf('darwin', ds.wins[0], side.screenOf('darwin', ds.screen))) === J({ x: 1632, y: 60, w: 1200, h: 800 }), 'RED CONTROL: the first listed display (a side one at x = -1512) as the screen would put the crop 1512 points off');
   const a = MW.windowAnswer('darwin', d, row);
   ok(a.state === 'found' && a.windowId === 4188 && a.title === 'Blender' && a.pid === 8801 && a.bundle === 'com.example.blender' && J(a.screen) === J({ w: 1512, h: 982, scale: 2 }), 'no title in the facts ⇒ the answer names the app; it carries the bundle id (the pin\'s)', a);
-  ok(d.procs.get(8801).start === 1791700001000 && d.procs.get(8801).ppid === 0 && d.wins.every((w) => w.vis === 1), 'the starts become the process rows (no lineage on a Mac); on-screen windows are visible rows');
+  ok(d.procs.get(8801).start === 1791700001000 && d.procs.get(8801).ppid === 0 && verdictOf(d.wins.every((w) => w.vis === 1)), 'the starts become the process rows (no lineage on a Mac); on-screen windows are visible rows');
   const off = MW.macDumpOf(macFacts([{ ...MBLENDER, onScreen: false, minimized: true }]));
   ok(off.wins[0].vis === 0 && off.wins[0].min === 1 && MW.windowAnswer('darwin', off, off.wins[0]).minimized === true, 'a minimized window the helper names (Accessibility) is a minimized answer');
   const st = MW.psStarts('  512 Sun Oct 18 15:28:32 2026\n 8801 Sun Oct  5 09:08:07 2026\nPID STARTED\n 77 garbage\n');
@@ -123,7 +123,7 @@ console.log('§4 the answers');
   ok(J(a) === J({ state: 'found', hwnd: 131330, screen: { w: 3840, h: 1080, scale: 1.5 }, pid: 9012, title: 'Blender', rect: { x: 2020, y: 40, w: 1600, h: 1000 }, minimized: false }), 'found: { hwnd, screen: {w,h,scale}, pid, title, rect: {x,y,w,h}, minimized }', a);
   ok(MW.windowAnswer('win32', d, { hwnd: 131330, gone: 1 }).state === 'gone' && MW.windowAnswer('win32', d, null).state === 'none', 'gone (the window closed) and none (no window appeared)');
   ok(MW.STATES.join() === 'found,gone,none,error', 'the four states');
-  ok(MW.sameAnswer(a, { ...a }) && !MW.sameAnswer(a, { ...a, rect: { ...a.rect, x: 2021 } }) && !MW.sameAnswer(a, { ...a, title: 'Blender*' }) && !MW.sameAnswer(a, { ...a, minimized: true }), 'a watcher hears a move, a new title, a minimize — never the same answer twice');
+  ok(gateOf(MW.sameAnswer(a, { ...a })) && !MW.sameAnswer(a, { ...a, rect: { ...a.rect, x: 2021 } }) && !MW.sameAnswer(a, { ...a, title: 'Blender*' }) && !MW.sameAnswer(a, { ...a, minimized: true }), 'a watcher hears a move, a new title, a minimize — never the same answer twice');
   ok(MW.targetOf(a) === 131330 && MW.targetOf({ windowId: 4188 }) === 4188, 'the window an answer names (hwnd / window id)');
   ok(MW.trackRequest({ pid: 'x' }).code === 'bad-request' && MW.trackRequest({}).code === 'bad-request' && MW.trackRequest({ target: 5, findMs: 99999 }).waitMs === MW.TRACK_WAIT_MS, 'a request is judged: whole numbers, something to go by, the wait capped at 20 s');
 }
@@ -159,13 +159,13 @@ console.log('§6 the device runner (a fake spawn) and the pin');
   let ended = 0;
   const h = MW.runWindowTrack({ platform: 'win32', params: { pid: 9000, since: 1791700000000, watch: true }, spawn, env: {}, onAnswer: (a, first) => got.push({ a, first }), onEnd: () => { ended++; }, now: () => clock, setTimer, clearTimer });
   const decode = (c) => Buffer.from(c.args[c.args.length - 1], 'base64').toString('utf16le');
-  ok(spawned.length === 1 && spawned[0].cmd === 'powershell.exe' && /\$target = \[IntPtr\]\[Int64\]0/.test(decode(spawned[0])) && /Get-CimInstance Win32_Process/.test(decode(spawned[0])) && /-gt 20000\) \{ exit 0 \}/.test(decode(spawned[0])), 'ONE PowerShell finds (every window + the process table), bounded at 20 s by itself');
+  ok(spawned.length === 1 && spawned[0].cmd === 'powershell.exe' && gateOf(/\$target = \[IntPtr\]\[Int64\]0/.test(decode(spawned[0]))) && gateOf(/Get-CimInstance Win32_Process/.test(decode(spawned[0]))) && verdictOf(/-gt 20000\) \{ exit 0 \}/.test(decode(spawned[0]))), 'ONE PowerShell finds (every window + the process table), bounded at 20 s by itself');
   spawned[0].stdout.emit('data', winLook([PM, EXPLORER]));
   ok(got.length === 0, 'the first look has no app window: nothing answered yet');
   spawned[0].stdout.emit('data', winLook([PM, EXPLORER, BLENDER]).slice(0, 40));
   spawned[0].stdout.emit('data', winLook([PM, EXPLORER, BLENDER]).slice(40));
-  ok(got.length === 1 && got[0].first && got[0].a.state === 'found' && got[0].a.hwnd === 131330 && spawned[0].killed, 'the second look (split across reads) finds it: the first answer; the finding look is stopped', got[0]);
-  ok(spawned.length === 2 && /\$target = \[IntPtr\]\[Int64\]131330/.test(decode(spawned[1])) && !/Get-CimInstance/.test(decode(spawned[1])) && /Start-Sleep -Milliseconds 100/.test(decode(spawned[1])), 'then ONE lean look follows that window (no process table, every 100 ms)');
+  ok(got.length === 1 && gateOf(got[0].first) && got[0].a.state === 'found' && got[0].a.hwnd === 131330 && verdictOf(spawned[0].killed), 'the second look (split across reads) finds it: the first answer; the finding look is stopped', got[0]);
+  ok(spawned.length === 2 && gateOf(/\$target = \[IntPtr\]\[Int64\]131330/.test(decode(spawned[1]))) && !/Get-CimInstance/.test(decode(spawned[1])) && verdictOf(/Start-Sleep -Milliseconds 100/.test(decode(spawned[1]))), 'then ONE lean look follows that window (no process table, every 100 ms)');
   const W = spawned[1];
   const moved = (x) => winLook([winRow(131330, 9012, 'Blender', [x, 40, x + 1600, 1040], [x, 40, x + 1600, 1040])], []);
   W.stdout.emit('data', moved(100)); // the same rectangle
@@ -177,10 +177,10 @@ console.log('§6 the device runner (a fake spawn) and the pin');
   advance(60);
   ok(got.length === 3 && got[2].a.rect.x === 2420, 'then the LATEST of them arrives (never dropped, never both)');
   advance(200); W.stdout.emit('data', winLook([J({ t: 'win', hwnd: 131330, gone: 1 })], []));
-  ok(got.length === 4 && got[3].a.state === 'gone' && ended === 1 && W.killed && h.stopped, 'the window closed ⇒ gone, the watch ends (its look stopped)');
+  ok(got.length === 4 && got[3].a.state === 'gone' && ended === 1 && gateOf(W.killed) && verdictOf(h.stopped), 'the window closed ⇒ gone, the watch ends (its look stopped)');
   const none = []; spawned.length = 0;
   MW.runWindowTrack({ platform: 'win32', params: { since: 1791700000000, findMs: 3000 }, spawn, env: {}, onAnswer: (a) => none.push(a), now: () => clock, setTimer, clearTimer });
-  ok(/-gt 3000\) \{ exit 0 \}/.test(decode(spawned[0])), 'the finding look carries its bound (findMs) into the script');
+  ok(verdictOf(/-gt 3000\) \{ exit 0 \}/.test(decode(spawned[0]))), 'the finding look carries its bound (findMs) into the script');
   spawned[0].emit('close', 0);
   ok(none.length === 1 && none[0].state === 'none', 'the look ended at its wait without a window ⇒ none');
   const bad = []; MW.runWindowTrack({ platform: 'linux', params: { pid: 1 }, spawn, env: {}, onAnswer: (a) => bad.push(a) });
@@ -189,14 +189,14 @@ console.log('§6 the device runner (a fake spawn) and the pin');
   const execFile = (cmd, args, o, cb) => { ran.push([cmd, args]); cb(null, 'ok\n', ''); };
   const on = await MW.pinWindow({ platform: 'win32', hwnd: 131330, on: true, execFile, env: {} });
   const ps = Buffer.from(ran[0][1][ran[0][1].length - 1], 'base64').toString('utf16le');
-  ok(on.ok && on.pinned && /SetWindowPos\(\$h, \[IntPtr\]\(-1\), 0, 0, 0, 0, 0x0013\)/.test(ps) && /ShowWindow\(\$h, 9\)/.test(ps), 'Windows pin: HWND_TOPMOST after a restore when minimized (never moved, never activated)');
+  ok(gateOf(on.ok) && gateOf(on.pinned) && gateOf(/SetWindowPos\(\$h, \[IntPtr\]\(-1\), 0, 0, 0, 0, 0x0013\)/.test(ps)) && verdictOf(/ShowWindow\(\$h, 9\)/.test(ps)), 'Windows pin: HWND_TOPMOST after a restore when minimized (never moved, never activated)');
   await MW.pinWindow({ platform: 'win32', hwnd: 131330, on: false, execFile, env: {} });
   const ps2 = Buffer.from(ran[1][1][ran[1][1].length - 1], 'base64').toString('utf16le');
-  ok(/\[IntPtr\]\(-2\)/.test(ps2) && !/ShowWindow\(\$h/.test(ps2), 'unpin: HWND_NOTOPMOST (no restore)');
+  ok(gateOf(/\[IntPtr\]\(-2\)/.test(ps2)) && !/ShowWindow\(\$h/.test(ps2), 'unpin: HWND_NOTOPMOST (no restore)');
   const n0 = ran.length; const off = await MW.pinWindow({ platform: 'darwin', pid: 8801, on: false, execFile, env: {} });
-  ok(off.ok && ran.length === n0, 'a Mac has nothing to undo: no script runs');
+  ok(gateOf(off.ok) && ran.length === n0, 'a Mac has nothing to undo: no script runs');
   const gone = await MW.pinWindow({ platform: 'win32', hwnd: 5, on: true, execFile: (c, a, o, cb) => cb(Object.assign(new Error('x'), { code: 3 }), 'gone\n', ''), env: {} });
-  ok(gone.ok && gone.state === 'gone', 'pinning a window that closed says gone (nothing to keep on top)');
+  ok(gateOf(gone.ok) && gone.state === 'gone', 'pinning a window that closed says gone (nothing to keep on top)');
 }
 
 console.log('§6b a Mac: the look is ITS SCREEN HELPER\'s facts (lane mac-window-list-helper — nothing under node reads the screen)');
@@ -218,7 +218,7 @@ console.log('§6b a Mac: the look is ITS SCREEN HELPER\'s facts (lane mac-window
   const got = []; let ended = 0;
   const h = MW.runWindowTrack({ platform: 'darwin', params: { pid: 30001, since: 1791700000000, watch: true }, spawn, env: {}, mac: S.mac, onAnswer: (a, first) => got.push({ a, first }), onEnd: () => { ended++; }, now: () => clock, setTimer, clearTimer });
   await settle();
-  ok(got.length === 1 && got[0].first && got[0].a.state === 'found' && got[0].a.windowId === 4188 && got[0].a.bundle === 'com.example.blender' && J(S.starts) === J([[512, 8801]]) && spawned.length === 0, 'the FIRST look (one helper facts run, nothing spawned under node) finds the app by its owner\'s start — though its window was there at that look', { got, starts: S.starts });
+  ok(got.length === 1 && gateOf(got[0].first) && got[0].a.state === 'found' && got[0].a.windowId === 4188 && got[0].a.bundle === 'com.example.blender' && J(S.starts) === J([[512, 8801]]) && spawned.length === 0, 'the FIRST look (one helper facts run, nothing spawned under node) finds the app by its owner\'s start — though its window was there at that look', { got, starts: S.starts });
   ok(S.runs === 2, 'then the follow begins with one more facts run (the same answer is not pushed again)', S.runs);
   S.facts = macFacts([FINDER, { ...MBLENDER, x: 300 }]);
   await advance(MW.MAC_WATCH_POLL_MS - 1);
@@ -230,7 +230,7 @@ console.log('§6b a Mac: the look is ITS SCREEN HELPER\'s facts (lane mac-window
   ok(got.length === 3 && got[2].a.state === 'found' && got[2].a.minimized === true && got[2].a.rect.x === 300 && J(S.starts.at(-1)) === J([8801]), 'off the list while its app runs and Accessibility is off ⇒ OFF SCREEN (minimized, its last rectangle): the app\'s process asked, never assumed gone', got[2]);
   S.alive.delete(8801);
   await advance(MW.MAC_WATCH_POLL_MS);
-  ok(got.length === 4 && got[3].a.state === 'gone' && ended === 1 && h.stopped, 'its app ended ⇒ gone, the watch ends');
+  ok(got.length === 4 && got[3].a.state === 'gone' && ended === 1 && verdictOf(h.stopped), 'its app ended ⇒ gone, the watch ends');
   const n = S.runs; await advance(5000);
   ok(S.runs === n && timers.length === 0, 'an ended watch runs the helper no more (no timer left)');
 
@@ -252,7 +252,7 @@ console.log('§6b a Mac: the look is ITS SCREEN HELPER\'s facts (lane mac-window
   const off = { ok: false, code: 'screen_permission', error: 'Screen Recording is off for vibespace-screen — on the Mac: System Settings → …', settings: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' };
   MW.runWindowTrack({ platform: 'darwin', params: { since: 1791700000000, watch: true }, spawn, env: {}, mac: { facts: async () => off }, onAnswer: (a) => refused.push(a), now: () => clock, setTimer, clearTimer });
   await settle();
-  ok(refused.length === 1 && refused[0].state === 'error' && refused[0].code === 'screen_permission' && /vibespace-screen/.test(refused[0].error) && refused[0].settings === off.settings && spawned.length === 0, 'the helper without Screen Recording ⇒ refused BY NAME (vibespace-screen + its Settings pane) — never a look under node instead', refused);
+  ok(refused.length === 1 && refused[0].state === 'error' && refused[0].code === 'screen_permission' && gateOf(/vibespace-screen/.test(refused[0].error)) && refused[0].settings === off.settings && spawned.length === 0, 'the helper without Screen Recording ⇒ refused BY NAME (vibespace-screen + its Settings pane) — never a look under node instead', refused);
   const noMac = [];
   MW.runWindowTrack({ platform: 'darwin', params: { since: 1791700000000 }, spawn, env: {}, onAnswer: (a) => noMac.push(a), now: () => clock, setTimer, clearTimer });
   ok(noMac.length === 1 && noMac[0].code === 'no_helper' && spawned.length === 0, 'no helper handed in ⇒ no_helper (nothing spawned)', noMac);
@@ -261,10 +261,10 @@ console.log('§6b a Mac: the look is ITS SCREEN HELPER\'s facts (lane mac-window
   const ran = [];
   const exM = (up) => (cmd, args, o, cb) => { ran.push([cmd, args]); cb(null, cmd === '/bin/ps' ? (up ? ' 8801\n' : '') : '', ''); };
   const pin = await MW.pinWindow({ platform: 'darwin', pid: 8801, bundle: 'com.example.blender', on: true, execFile: exM(true), env: {} });
-  ok(pin.ok && !pin.pinned && pin.note === 'mac-activated' && J(ran) === J([['/bin/ps', ['-o', 'pid=', '-p', '8801']], ['/usr/bin/open', ['-b', 'com.example.blender']]]), 'a Mac pin: its app still runs (ps), then LaunchServices ACTIVATES it by bundle id (`open -b` — no osascript under node)', ran);
+  ok(gateOf(pin.ok) && !pin.pinned && pin.note === 'mac-activated' && J(ran) === J([['/bin/ps', ['-o', 'pid=', '-p', '8801']], ['/usr/bin/open', ['-b', 'com.example.blender']]]), 'a Mac pin: its app still runs (ps), then LaunchServices ACTIVATES it by bundle id (`open -b` — no osascript under node)', ran);
   ran.length = 0;
   const quit = await MW.pinWindow({ platform: 'darwin', pid: 8801, bundle: 'com.example.blender', on: true, execFile: exM(false), env: {} });
-  ok(quit.ok && quit.state === 'gone' && ran.length === 1 && ran[0][0] === '/bin/ps', 'its app quit ⇒ gone, and `open` never runs (it would LAUNCH the app again)', ran);
+  ok(gateOf(quit.ok) && quit.state === 'gone' && ran.length === 1 && ran[0][0] === '/bin/ps', 'its app quit ⇒ gone, and `open` never runs (it would LAUNCH the app again)', ran);
   ran.length = 0;
   const nob = await MW.pinWindow({ platform: 'darwin', pid: 8801, bundle: null, on: true, execFile: exM(true), env: {} });
   const inj = await MW.pinWindow({ platform: 'darwin', pid: 8801, bundle: '-a /Applications/Other.app', on: true, execFile: exM(true), env: {} });
@@ -278,9 +278,9 @@ console.log('§7 the capability gate: an old agent is never asked');
   const C = require(path.join(repo, 'src/agentd/client.js'));
   const old = make(C, ['desktop-serve']);
   let err = null; try { await old.dm.windowTrack({ pid: 1 }); } catch (e) { err = e; }
-  ok(err && err.code === 'host_needs_daemon' && old.sent.length === 0, 'an agent without window-track: host_needs_daemon, and NO request (an unknown op would hang it)', { code: err && err.code, sent: old.sent });
+  ok(gateOf(err) && err.code === 'host_needs_daemon' && old.sent.length === 0, 'an agent without window-track: host_needs_daemon, and NO request (an unknown op would hang it)', { code: err && err.code, sent: old.sent });
   let perr = null; try { await old.dm.windowPin('w1', true, { by: 'system:test' }); } catch (e) { perr = e; }
-  ok(perr && perr.code === 'host_needs_daemon' && old.sent.length === 0, 'the same for window-pin');
+  ok(gateOf(perr) && perr.code === 'host_needs_daemon' && old.sent.length === 0, 'the same for window-pin');
   const neu = make(C, ['window-track', 'window-pin']);
   const r = await neu.dm.windowTrack({ pid: 1 });
   ok(r.result.state === 'none' && neu.sent.join() === 'window-track', 'a current agent is asked');
@@ -289,7 +289,7 @@ console.log('§7 the capability gate: an old agent is never asked');
   await g.dm.windowTrack({ pid: 1 }).catch(() => { });
   ok(g.sent.join() === 'window-track', 'RED CONTROL: a client without the gate SENDS the op to the old agent (which would hang until its timeout)');
   const ad = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf8');
-  ok(/capabilities: \[[^\]]*'window-track', 'window-pin'/.test(ad) && /if \(msg\.op === 'window-track'\)/.test(ad) && /if \(msg\.op === 'window-pin'\)/.test(ad) && /m\.op === 'window-track-result' \|\| m\.op === 'window-untrack-result' \|\| m\.op === 'window-pin-result'/.test(clientSrc) && /if \(m\.op === 'window-rect'\) \{[^\n]*\}[^\n]*\n\s+if \(m\.op === 'pool-orders-executed'\)/.test(clientSrc), 'three touches: the handlers, the hello-ack capabilities, the reply ops in the id-keyed set + the push branch BEFORE prevControl');
+  ok(gateOf(/capabilities: \[[^\]]*'window-track', 'window-pin'/.test(ad)) && gateOf(/if \(msg\.op === 'window-track'\)/.test(ad)) && gateOf(/if \(msg\.op === 'window-pin'\)/.test(ad)) && gateOf(/m\.op === 'window-track-result' \|\| m\.op === 'window-untrack-result' \|\| m\.op === 'window-pin-result'/.test(clientSrc)) && verdictOf(/if \(m\.op === 'window-rect'\) \{[^\n]*\}[^\n]*\n\s+if \(m\.op === 'pool-orders-executed'\)/.test(clientSrc)), 'three touches: the handlers, the hello-ack capabilities, the reply ops in the id-keyed set + the push branch BEFORE prevControl');
 }
 
 console.log('§8 the hub: one pin per machine, closing ends the watch, a pin left behind is reported');
@@ -307,32 +307,32 @@ console.log('§8 the hub: one pin per machine, closing ends the watch, a pin lef
   const ma = MA.create({ access: { deviceOf: async (h) => devs[h] }, log: { log() { }, warn: (m) => warns.push(m) }, now: () => now, idleMs: 30000, sweepMs: 3600e3 });
   const a = await ma.track('w1', { pid: 10, since: 1791700000000 });
   const b = await ma.track('w1', { pid: 11, since: 1791700000000 });
-  ok(a.key && b.key && a.answer.state === 'found', 'two app windows of one machine are followed');
+  ok(gateOf(a.key) && gateOf(b.key) && a.answer.state === 'found', 'two app windows of one machine are followed');
   await ma.pin(a.key, true);
   const pb = await ma.pin(b.key, true);
   ok(J(calls.filter((c) => c[0] === 'pin')) === J([['pin', 'w1', true], ['pin', 'w1', false], ['pin', 'w2', true]]) && pb.pin.key === b.key, 'ONE screen: pinning the second unpins the first; every watch hears which window is on top', calls);
   const pa = await ma.poll(a.key, -1);
-  ok(pa.pin && pa.pin.key === b.key && pa.pin.title === 'App 2', 'the first window\'s poll says the other is on top (by title)');
+  ok(gateOf(pa.pin) && pa.pin.key === b.key && pa.pin.title === 'App 2', 'the first window\'s poll says the other is on top (by title)');
   ma.untrack(b.key); await new Promise((r) => setTimeout(r, 0));
-  ok(calls.some((c) => c[0] === 'untrack' && c[1] === 'w2') && (await ma.poll(a.key, -1)).pin === null, 'closing a window ends its watch (the device undoes its pin) and the other window hears nothing is on top');
+  ok(gateOf(calls.some((c) => c[0] === 'untrack' && c[1] === 'w2')) && (await ma.poll(a.key, -1)).pin === null, 'closing a window ends its watch (the device undoes its pin) and the other window hears nothing is on top');
   devs.w1.pushes.get('w1')({ state: 'gone', hwnd: 102 });
   ok((await ma.poll(a.key, -1)).ended === true, 'the app closed on the machine: its watch is gone');
   const c = await ma.track('w1', { pid: 12 });
   await ma.pin(c.key, true);
   untrackFails = true;
   now += 31000; ma.untrack(c.key); await new Promise((r) => setTimeout(r, 0));
-  ok(ma.pinsLeft('w1').length === 1 && ma.pinsLeft('w1')[0].title === c.answer.title && /may still be kept on top/.test(warns.join()), 'a pin the hub could not undo (the machine went away) is REPORTED — never forced', { left: ma.pinsLeft('w1'), warns });
+  ok(ma.pinsLeft('w1').length === 1 && ma.pinsLeft('w1')[0].title === c.answer.title && verdictOf(/may still be kept on top/.test(warns.join())), 'a pin the hub could not undo (the machine went away) is REPORTED — never forced', { left: ma.pinsLeft('w1'), warns });
   untrackFails = false;
   const d = await ma.track('w1', { pid: 13 });
   const ma2 = MA.create({ access: { deviceOf: async (h) => devs[h] }, log: { log() { }, warn() { } }, now: () => now, idleMs: 30000, sweepMs: 20 });
   const e = await ma2.track('w1', { pid: 14 });
   now += 31000; await new Promise((r) => setTimeout(r, 60));
-  ok(ma2.list().length === 0 && calls.some((x) => x[0] === 'untrack' && x[1] === 'w' + (calls.findIndex((y) => y[0] === 'track' && y[1] === 14) + 1)), 'a page that stopped polling (closed without a word) ⇒ its watch is ended after 30 s', ma2.list());
+  ok(ma2.list().length === 0 && verdictOf(calls.some((x) => x[0] === 'untrack' && x[1] === 'w' + (calls.findIndex((y) => y[0] === 'track' && y[1] === 14) + 1))), 'a page that stopped polling (closed without a word) ⇒ its watch is ended after 30 s', ma2.list());
   ma.shutdown(); ma2.shutdown(); void d; void e;
   let lin = null; try { await ma.track('l1', { pid: 1 }); } catch (x) { lin = x; }
-  ok(lin && lin.code === 'not_desktop_machine', 'a Linux machine is refused by name');
+  ok(gateOf(lin) && lin.code === 'not_desktop_machine', 'a Linux machine is refused by name');
   const wt = fs.readFileSync(path.join(repo, 'src/lib/machine-app.js'), 'utf8');
-  ok(/registerWindowType\(\{ type: 'machine-app', label: 'Machine app', persist: false,/.test(wt) && /winInfo\.onClose = \(\) => \{[\s\S]{0,200}machine-app\/untrack/.test(wt), 'the window type is NOT persisted, and closing it ends the watch (the device undoes the pin)');
+  ok(gateOf(/registerWindowType\(\{ type: 'machine-app', label: 'Machine app', persist: false,/.test(wt)) && verdictOf(/winInfo\.onClose = \(\) => \{[\s\S]{0,200}machine-app\/untrack/.test(wt)), 'the window type is NOT persisted, and closing it ends the watch (the device undoes the pin)');
 }
 
 console.log('§9 the run\'s launch report; "the line names a GUI app"');
@@ -344,10 +344,10 @@ console.log('§9 the run\'s launch report; "the line names a GUI app"');
   const mac = MD.desktopRunPlan('darwin', 'open -a Blender', { report: true });
   ok(mac.argv[2] === 'nohup /bin/sh -lc "$1" </dev/null >/dev/null 2>&1 & echo "vibespace-launched $! $(date +%s)000"' && mac.argv[4] === 'open -a Blender', 'darwin: the backgrounded pid ($!) + the machine\'s clock (the line stays the positional $1)');
   const win = Buffer.from(MD.desktopRunPlan('win32', 'start "" blender', { report: true }).argv.at(-1), 'base64').toString('utf16le');
-  ok(/\$at = \[DateTimeOffset\]::Now\.ToUnixTimeMilliseconds\(\); \$p = Start-Process -FilePath \$env:ComSpec/.test(win) && /-PassThru; \[Console\]::Out\.WriteLine\('vibespace-launched ' \+ \$p\.Id \+ ' ' \+ \$at\)/.test(win), 'win32: Start-Process -PassThru — cmd.exe\'s pid + the machine\'s clock');
+  ok(gateOf(/\$at = \[DateTimeOffset\]::Now\.ToUnixTimeMilliseconds\(\); \$p = Start-Process -FilePath \$env:ComSpec/.test(win)) && verdictOf(/-PassThru; \[Console\]::Out\.WriteLine\('vibespace-launched ' \+ \$p\.Id \+ ' ' \+ \$at\)/.test(win)), 'win32: Start-Process -PassThru — cmd.exe\'s pid + the machine\'s clock');
   ok(J(MW.parseLaunchReport('noise\nvibespace-launched 9000 1791700000000\n')) === J({ pid: 9000, at: 1791700000000 }) && MW.parseLaunchReport('vibespace-launched x 1') === null && MW.parseLaunchReport('') === null, 'the report is read back (anything else is no report)');
-  ok(MW.namesGuiApp('darwin', 'open -a Blender') && MW.namesGuiApp('darwin', ' open -na "JASP"') && MW.namesGuiApp('win32', 'start "" "C:\\Program Files\\JASP\\JASP.exe"') && !MW.namesGuiApp('win32', 'echo hi') && !MW.namesGuiApp('darwin', 'say hi') && !MW.namesGuiApp('linux', 'open -a X'), '"Run as its own window…" is the default for a line that starts a GUI app by name');
+  ok(gateOf(MW.namesGuiApp('darwin', 'open -a Blender')) && gateOf(MW.namesGuiApp('darwin', ' open -na "JASP"')) && gateOf(MW.namesGuiApp('win32', 'start "" "C:\\Program Files\\JASP\\JASP.exe"')) && !MW.namesGuiApp('win32', 'echo hi') && !MW.namesGuiApp('darwin', 'say hi') && !MW.namesGuiApp('linux', 'open -a X'), '"Run as its own window…" is the default for a line that starts a GUI app by name');
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? ', ' + fail + ' failed' : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

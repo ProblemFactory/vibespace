@@ -23,7 +23,7 @@ process.env.HOME = path.join(tmp, 'home'); fs.mkdirSync(process.env.HOME, { recu
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -50,13 +50,13 @@ const { DeviceManager } = require('../src/agentd/client.js');
 const mk = () => { const d = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => {} }); d.installLocal(); return d; };
 const dm1 = mk();
 const conn = await dm1.connect();
-check('hello-ack advertises pool-orders', conn.info.capabilities.includes('pool-orders'));
+check('hello-ack advertises pool-orders', verdictOf(conn.info.capabilities.includes('pool-orders')));
 
 const orders = { poolId: 'pool-x', linkPath: link, currentId: 'sub-a',
   ranked: [{ id: 'sub-a', dir: path.join(subs, 'sub-a'), creds: path.join(subs, 'sub-a', '.credentials.json') },
            { id: 'sub-b', dir: path.join(subs, 'sub-b'), creds: path.join(subs, 'sub-b', '.credentials.json') }] };
 await dm1.poolOrders(orders, undefined, { by: 'system:test' });
-check('orders accepted + persisted', fs.existsSync(path.join(ROOT, 'state', 'pool-orders.json')));
+check('orders accepted + persisted', verdictOf(fs.existsSync(path.join(ROOT, 'state', 'pool-orders.json'))));
 
 // a fake LIVE pipe session the tailer will scan
 const SESS = path.join(ROOT, 'state', 'sessions'); fs.mkdirSync(SESS, { recursive: true });
@@ -74,7 +74,7 @@ await sleep(3200); // let the tailer register the current size
 // ── CONNECTED server: banner must NOT trigger the reflex (single-brain) ──
 fs.appendFileSync(path.join(SESS, 'sess-t1.out'), JSON.stringify({ type: 'user', text: "You've reached your 5-hour limit" }) + '\n');
 await sleep(4000);
-check('with a server CONNECTED the reflex does NOT fire', fs.readlinkSync(link).endsWith('sub-a'));
+check('with a server CONNECTED the reflex does NOT fire', verdictOf(fs.readlinkSync(link).endsWith('sub-a')));
 
 // ── server goes away → the double condition is met ──
 await dm1.stop?.();
@@ -82,7 +82,7 @@ await sleep(2500);
 fs.appendFileSync(path.join(SESS, 'sess-t1.out'), JSON.stringify({ type: 'user', text: "You've hit your session limit · resets 3am" }) + '\n');
 let flipped = false;
 for (let i = 0; i < 24 && !flipped; i++) { await sleep(500); flipped = fs.readlinkSync(link).endsWith('sub-b'); }
-check('server down + banner ⇒ the device re-points the pool symlink to the ranked fallback', flipped);
+check('server down + banner ⇒ the device re-points the pool symlink to the ranked fallback', verdictOf(flipped));
 // a FOREIGN session's banner must NOT move the pool (adversarial review)
 {
   const before2 = fs.readlinkSync(link);
@@ -90,7 +90,7 @@ check('server down + banner ⇒ the device re-points the pool symlink to the ran
   await sleep(5000);
   check('a banner from a session that does NOT bill this pool is ignored', fs.readlinkSync(link) === before2);
 }
-check('execution logged for the reconnect report', fs.existsSync(path.join(ROOT, 'state', 'pool-orders-log.ndjson')));
+check('execution logged for the reconnect report', verdictOf(fs.existsSync(path.join(ROOT, 'state', 'pool-orders-log.ndjson'))));
 
 // ── reconnect: the executed report arrives + ack clears the log ──
 const dm2 = mk();
@@ -159,9 +159,9 @@ async function twoProvider(bundlePath, tag, { control = true } = {}) {
 }
 {
   const real = await twoProvider(bundle, 'two');
-  check('TWO-PROVIDER order, server down + a banner from the DeepSeek conversation ⇒ the device NEVER moves it onto a Claude member', real.qNow.endsWith('sub-q'), real.qNow);
-  check('…and its log says why (no fallback member of its own provider: pv-deepseek)', /no usable fallback member of its own provider \(no-same-provider: pv-deepseek\)/.test(real.logTail), real.logTail.slice(-600));
-  check('CONTROL: the Claude conversation\'s banner on the same daemon still falls back to the next Claude member (the reflex is armed)', !!real.pMoved && real.pMoved.endsWith('sub-c'), String(real.pMoved));
+  check('TWO-PROVIDER order, server down + a banner from the DeepSeek conversation ⇒ the device NEVER moves it onto a Claude member', verdictOf(real.qNow.endsWith('sub-q')), real.qNow);
+  check('…and its log says why (no fallback member of its own provider: pv-deepseek)', verdictOf(/no usable fallback member of its own provider \(no-same-provider: pv-deepseek\)/.test(real.logTail)), real.logTail.slice(-600));
+  check('CONTROL: the Claude conversation\'s banner on the same daemon still falls back to the next Claude member (the reflex is armed)', !!real.pMoved && verdictOf(real.pMoved.endsWith('sub-c')), String(real.pMoved));
   // MUTANT: the same daemon bundled with a src/sealed-orders.js whose provider filter is dropped (a copy outside the tree)
   const esbuild = require('esbuild');
   const soSrc = fs.readFileSync(path.join(repo, 'src/sealed-orders.js'), 'utf8');
@@ -173,11 +173,11 @@ async function twoProvider(bundlePath, tag, { control = true } = {}) {
   await esbuild.build({ entryPoints: [path.join(repo, 'src/agentd/agentd.js')], bundle: true, platform: 'node', outfile: mutBundle, logLevel: 'silent',
     plugins: [stampPlugin(version), { name: 'sealed-orders-mutant', setup(b) { b.onResolve({ filter: /sealed-orders\.js$/ }, () => ({ path: mutFile })); } }] });   // the same stamp as the real bundle (agentd-bundle.mjs)
   const mut = await twoProvider(mutBundle, 'mut', { control: false });
-  check('mutant RED: the filter dropped ⇒ the device moves the DeepSeek conversation onto the Claude member (the cross-provider reflex the order forbids)', mut.qNow.endsWith('sub-a'), mut.qNow);
+  check('mutant RED: the filter dropped ⇒ the device moves the DeepSeek conversation onto the Claude member (the cross-provider reflex the order forbids)', verdictOf(mut.qNow.endsWith('sub-a')), mut.qNow);
 }
 
 if (failed) { try { console.error('--- daemon log ---\n' + fs.readFileSync(path.join(ROOT, 'state', 'agentd.log'), 'utf8').slice(-1200)); } catch { } }
 try { await dm2.stop?.(); } catch { }
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(failed ? `FAIL (${failed})` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

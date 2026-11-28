@@ -30,7 +30,7 @@ const remote = require(path.join(REPO, 'src/opencode-remote.js'));
 const serve = require(path.join(REPO, 'src/opencode-serve.js'));
 
 let pass = 0; const fails = [];
-const ok = (name, cond, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fails.push(name); console.log(`  ✗ ${name}${detail ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fails.push(name); console.log(`  ✗ ${name}${detail ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -47,7 +47,7 @@ const SCRIPT = read('data/bin/vibespace-opencode-op');
 console.log('\n— THE OP TABLE IS ONE DEFINITION —');
 {
   const names = remote.OPENCODE_OP_NAMES;
-  ok('the table is non-empty and frozen', names.length >= 10 && Object.isFrozen(names), names);
+  ok('the table is non-empty and frozen', names.length >= 10 && verdictOf(Object.isFrozen(names)), names);
   // the shipped ssh script's own OPS object, parsed out of the source
   const opsBlock = SCRIPT.slice(SCRIPT.indexOf('const OPS = {'), SCRIPT.indexOf('\n};', SCRIPT.indexOf('const OPS = {')));
   // exactly-two-space indent = a top-level entry of the OPS object; anything
@@ -60,14 +60,14 @@ console.log('\n— THE OP TABLE IS ONE DEFINITION —');
 
   // required params must match, or a rung fails with a different error than the others
   const requiredIn = (op) => remote.OPENCODE_OPS[op].required;
-  ok("the local rung REFUSES a call missing a required param, naming the op and the key", (() => {
+  ok("the local rung REFUSES a call missing a required param, naming the op and the key", verdictOf((() => {
     try { remote.checkOpParams('revert', { id: 'ses_a1' }); return false; } catch (e) { return /revert/.test(e.message) && /messageID/.test(e.message); }
-  })());
-  ok('an UNKNOWN op is refused with the known list (never a silent 500)', (() => {
+  })()));
+  ok('an UNKNOWN op is refused with the known list (never a silent 500)', verdictOf((() => {
     try { remote.checkOpParams('teleport', {}); return false; } catch (e) { return /teleport/.test(e.message) && /revert/.test(e.message); }
-  })());
+  })()));
   // (the script's unknown-op refusal pin — MOVED to the fast scripts/test-opencode-remote-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-  ok('every required param the table names is READ by the shipped script', requiredIn('revert').every((k) => SCRIPT.includes(`p.${k}`)) && requiredIn('answer').every((k) => SCRIPT.includes(`p.${k}`)));
+  ok('every required param the table names is READ by the shipped script', gateOf(requiredIn('revert').every((k) => SCRIPT.includes(`p.${k}`))) && verdictOf(requiredIn('answer').every((k) => SCRIPT.includes(`p.${k}`))));
 }
 
 console.log('\n— RESULT SHAPES —');
@@ -80,8 +80,8 @@ console.log('\n— RESULT SHAPES —');
   for (const op of ['state', 'read', 'status']) { // discover / questions / todos left the table with their caller-less routes (lane dc-dead-sweep, 2026-10-05)
     local[op] = await remote.runOpencodeOp(facts, op, op === 'read' ? { id: 'ses_a1' } : {});
   }
-  ok('local `read` returns {session, records}', !!local.read.session && Array.isArray(local.read.records));
-  ok('local `state` reports the shape the panel reads', ['installed', 'ready', 'parked', 'version', 'liveLaneHealthy'].every((k) => k in local.state), local.state);
+  ok('local `read` returns {session, records}', !!local.read.session && verdictOf(Array.isArray(local.read.records)));
+  ok('local `state` reports the shape the panel reads', verdictOf(['installed', 'ready', 'parked', 'version', 'liveLaneHealthy'].every((k) => k in local.state)), local.state);
 
   // the SSH rung, for real: run the shipped script against the same mock serve
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-ssh-'));
@@ -97,10 +97,10 @@ console.log('\n— RESULT SHAPES —');
 
   const sshState = await runShipped('state');
   ok('the SSH rung reuses a RECORDED healthy serve instead of starting one', sshState.ok === true, sshState);
-  ok('…and `state` answers the same keys', ['installed', 'ready', 'parked', 'version', 'liveLaneHealthy'].every((k) => k in sshState.result), sshState.result);
+  ok('…and `state` answers the same keys', verdictOf(['installed', 'ready', 'parked', 'version', 'liveLaneHealthy'].every((k) => k in sshState.result)), sshState.result);
 
   const sshRead = await runShipped('read', { id: 'ses_a1' });
-  ok('…`read` ships the RAW v1 messages (a checkout-less host has no record synthesis)', Array.isArray(sshRead.result.messages) && sshRead.result.records === null);
+  ok('…`read` ships the RAW v1 messages (a checkout-less host has no record synthesis)', gateOf(Array.isArray(sshRead.result.messages)) && sshRead.result.records === null);
   // …and the ACCESS layer turns them into the SAME records the local rung returns
   const accessMod = require(path.join(REPO, 'src/server/opencode-access.js'));
   const layer = accessMod.create({ facts, hosts: { opencodeOp: async (_h, op, p) => (await runShipped(op, p)).result } });
@@ -113,12 +113,12 @@ console.log('\n— RESULT SHAPES —');
   await runShipped('unrevert', { id: 'ses_a1' });
 
   const sshBad = await runShipped('revert', { id: 'ses_a1' });
-  ok('a missing required param FAILS on the ssh rung too (never a half-done action)', sshBad.ok === false && /messageID|400|required/i.test(sshBad.error), sshBad);
+  ok('a missing required param FAILS on the ssh rung too (never a half-done action)', sshBad.ok === false && verdictOf(/messageID|400|required/i.test(sshBad.error)), sshBad);
   const sshPty = await runShipped('pty-open', {});
-  ok('the ssh rung REFUSES the pty ops and says why (the serve ws is loopback-only on that host)', sshPty.ok === false && /loopback|websocket/i.test(sshPty.error), sshPty.error);
-  ok('…and the ACCESS layer refuses them for ANY remote machine before the transport is even used', await (async () => {
+  ok('the ssh rung REFUSES the pty ops and says why (the serve ws is loopback-only on that host)', sshPty.ok === false && verdictOf(/loopback|websocket/i.test(sshPty.error)), sshPty.error);
+  ok('…and the ACCESS layer refuses them for ANY remote machine before the transport is even used', verdictOf(await (async () => {
     try { await layer.call('h1', 'pty-open', {}); return false; } catch (e) { return /only works on this machine/.test(e.message); }
-  })());
+  })()));
 
   fs.rmSync(home, { recursive: true, force: true });
   await mock.close();
@@ -127,12 +127,12 @@ console.log('\n— RESULT SHAPES —');
 console.log('\n— THE DEVICE RUNG (three-touch rule) —');
 {
   // (the device rung's three-touch pins — MOVED to the fast scripts/test-opencode-remote-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-  ok('the daemon bundle actually carries the shared module + table', (() => {
+  ok('the daemon bundle actually carries the shared module + table', verdictOf((() => {
     const b = path.join(REPO, 'data/bin/vibespace-agentd.js');
     if (!fs.existsSync(b)) return false;
     const t = fs.readFileSync(b, 'utf-8');
     return t.includes('runOpencodeOp') && t.includes('OpencodeServeClient');
-  })(), 'run npm run build:agentd');
+  })()), 'run npm run build:agentd');
 
   // (the shared serve record + the access layer's routing pins — MOVED to the fast scripts/test-opencode-remote-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -206,7 +206,7 @@ console.log('\n— THE RECORDED-SERVE SETTLEMENT IS ONE DECISION ON EVERY MACHIN
     ssh: scriptClassify ? scriptClassify(REC, { ...self, ...o }).verdict : null,
   }));
   ok('PARITY: every input reaches the SAME verdict on the local rung and the shipped script — and it is the verdict the table names',
-    rows.every((r) => r.local === r.want && r.ssh === r.want), rows.filter((r) => r.local !== r.want || r.ssh !== r.want));
+    verdictOf(rows.every((r) => r.local === r.want && r.ssh === r.want)), rows.filter((r) => r.local !== r.want || r.ssh !== r.want));
   // …and a one-sided edit is what this catches, so prove the comparison BITES
   ok('(the control) the comparison is not vacuous: a deliberately wrong expectation is rejected by both rungs',
     !!scriptClassify && serve.classifyRecordedPid(REC, { ...self, pid: 321, argv: ['python3'], uid: 1000 }).verdict !== 'ours'
@@ -217,7 +217,7 @@ console.log('\n— THE RECORDED-SERVE SETTLEMENT IS ONE DECISION ON EVERY MACHIN
     && num('RECORD_KILL_POLL_MS') === serve.RECORD_KILL_POLL_MS,
     { ssh: ['RECORD_CONFIRM_TIMEOUT_MS', 'RECORD_KILL_WAIT_MS', 'RECORD_KILL_POLL_MS'].map(num), local: [serve.RECORD_CONFIRM_TIMEOUT_MS, serve.RECORD_KILL_WAIT_MS, serve.RECORD_KILL_POLL_MS] });
   ok('…and the script names the two ways out in its refusal, exactly like the local park does (stop that process, or delete the record)',
-    /Refusing to start a second serve over it: stop that process, or delete/.test(SCRIPT));
+    verdictOf(/Refusing to start a second serve over it: stop that process, or delete/.test(SCRIPT)));
 
   // ── THE HOST-READABLE PROBE IS THE SAME RULE ON BOTH RUNGS (residual (b)) ──
   // `hostCanIdentify()` decides whether a silent pid means "hidepid / it just
@@ -362,8 +362,8 @@ http.createServer((q,s)=>{s.setHeader('content-type','application/json');s.end(J
     ok('…the record still names the OLD serve (the next op can still find it; nothing was orphaned)',
       !!rec && rec.port === sock.port && rec.pid === h.pid, rec);
     ok('…the refusal names the pid, the port, the record file and both ways out',
-      /did not exit within/.test(r.error || '') && (r.error || '').includes(String(h.pid)) && (r.error || '').includes(String(sock.port))
-      && /opencode-serve\.json/.test(r.error || '') && /stop that process, or delete/.test(r.error || ''), r.error);
+      gateOf(/did not exit within/.test(r.error || '')) && gateOf((r.error || '').includes(String(h.pid))) && gateOf((r.error || '').includes(String(sock.port)))
+      && gateOf(/opencode-serve\.json/.test(r.error || '')) && verdictOf(/stop that process, or delete/.test(r.error || '')), r.error);
     ok('…and it DID try to stop it first (a refusal is the last rung, not the first)', h.signalled() === true && alive(h.pid) === true);
     if (!preFix) skip('NEGATIVE CONTROL: the pre-fix script orphans that serve', 'no pre-fix copy');
     else {
@@ -425,4 +425,4 @@ http.createServer((q,s)=>{s.setHeader('content-type','application/json');s.end(J
 }
 
 console.log(`\n${fails.length ? fails.length + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
-if (fails.length) { for (const f of fails) console.log('  - ' + f); process.exit(1); }
+if (fails.length) { for (const f of fails) console.log('  - ' + f); process.exit(1); };import { verdictOf, gateOf } from './lib/check.mjs';

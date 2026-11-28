@@ -40,7 +40,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -96,11 +96,11 @@ const BASE_354_HANDLER = HANDLER.replace(LAND_RE, `    this._landDraft = (value,
 const BASE_354_TIMER = "() => saveDraft('chat', this._sessionId, this._textarea.value)";
 
 console.log('§0 the cuts');
-ok(/case 'state-set'/.test(CASES) && /putbackBelt\(belt, data\.value, data\.basedOn\)/.test(CASES) && /store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES), 'src/ws-handler.js: the state-set case cut verbatim — the belt judges the value before the store writes it');
-ok(CLASS.includes('this._notify(s, op.key, op.op === \'delete\' ? \'\' : op.value, op);') && /_notify\(s, key, value, op\)/.test(CLASS), 'src/lib/utils.js: the client StateSync cut verbatim — its listeners get (value, key, op)');
-ok(/landDraft\(\{ focused, dirty: this\._draftTimer !== null,/.test(HANDLER) && /if \(v\.save\) saveDraft\('chat', this\._sessionId, v\.value\);/.test(HANDLER) && /this\._landDraft\(value \|\| '', op\);/.test(HANDLER) && !/dispatchEvent/.test(HANDLER), 'src/lib/chat-input.js: the composer\'s landing block cut verbatim — ONE verdict (landDraft) for every arrival, the prefix saved once, NO synthetic input');
-ok(/this\._draftTimer = null; saveDraft\('chat', this\._sessionId, this\._textarea\.value\); this\._judgeHeldDraft\(\);/.test(TIMER), 'src/lib/chat-input.js: the autosave callback cut verbatim — it nulls its timer, saves, judges a held draft again', TIMER);
-ok(PRE_FIX_HANDLER !== HANDLER && BASE_354_HANDLER !== HANDLER && !/landDraft\(\{|op\.prepended/.test(PRE_FIX_HANDLER) && /this\._textarea\.value = value \|\| '';/.test(PRE_FIX_HANDLER) && /landDraftPrepend\(/.test(BASE_354_HANDLER), 'control targets present: the landing (the pre-.353 composer overwrites; the .354 one prepends a put-back, overwrites the rest)');
+ok(gateOf(/case 'state-set'/.test(CASES)) && gateOf(/putbackBelt\(belt, data\.value, data\.basedOn\)/.test(CASES)) && verdictOf(/store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES)), 'src/ws-handler.js: the state-set case cut verbatim — the belt judges the value before the store writes it');
+ok(gateOf(CLASS.includes('this._notify(s, op.key, op.op === \'delete\' ? \'\' : op.value, op);')) && verdictOf(/_notify\(s, key, value, op\)/.test(CLASS)), 'src/lib/utils.js: the client StateSync cut verbatim — its listeners get (value, key, op)');
+ok(gateOf(/landDraft\(\{ focused, dirty: this\._draftTimer !== null,/.test(HANDLER)) && gateOf(/if \(v\.save\) saveDraft\('chat', this\._sessionId, v\.value\);/.test(HANDLER)) && gateOf(/this\._landDraft\(value \|\| '', op\);/.test(HANDLER)) && !/dispatchEvent/.test(HANDLER), 'src/lib/chat-input.js: the composer\'s landing block cut verbatim — ONE verdict (landDraft) for every arrival, the prefix saved once, NO synthetic input');
+ok(verdictOf(/this\._draftTimer = null; saveDraft\('chat', this\._sessionId, this\._textarea\.value\); this\._judgeHeldDraft\(\);/.test(TIMER)), 'src/lib/chat-input.js: the autosave callback cut verbatim — it nulls its timer, saves, judges a held draft again', TIMER);
+ok(PRE_FIX_HANDLER !== HANDLER && BASE_354_HANDLER !== HANDLER && !/landDraft\(\{|op\.prepended/.test(PRE_FIX_HANDLER) && gateOf(/this\._textarea\.value = value \|\| '';/.test(PRE_FIX_HANDLER)) && verdictOf(/landDraftPrepend\(/.test(BASE_354_HANDLER)), 'control targets present: the landing (the pre-.353 composer overwrites; the .354 one prepends a put-back, overwrites the rest)');
 
 // ── §1 THE PURE RULES ──
 console.log('§1 the PURE rules');
@@ -114,12 +114,12 @@ const DROP = { dropId: '4242-1', by: 'stop', turnId: 'p1-4242', omitted: 0, item
   const bare = { type: 'queue_dropped', ...DROP };
   for (const [name, rec] of [['acp / agy {type:acp, kind:queue_dropped}', acp], ['codex {type:event_msg, payload:{type:queue_dropped}}', codex], ['the bare payload / a top-level line {type:queue_dropped}', bare]]) {
     const d = queueDroppedOf(rec);
-    ok(d && d.dropId === '4242-1' && d.items.length === 2 && d.items[0].text === 'first queued' && d.items[1].attachments[0].type === 'image' && d.turnId === 'p1-4242', `queueDroppedOf: ${name} ⇒ the payload, validated`, d);
+    ok(gateOf(d) && d.dropId === '4242-1' && d.items.length === 2 && d.items[0].text === 'first queued' && d.items[1].attachments[0].type === 'image' && d.turnId === 'p1-4242', `queueDroppedOf: ${name} ⇒ the payload, validated`, d);
   }
   const junk = [null, 'x', 42, {}, { type: 'acp', kind: 'queue_changed', items: [] }, { type: 'event_msg', payload: { type: 'queue_changed' } }, { type: 'queue_dropped' }, { type: 'queue_dropped', dropId: '' }, { kind: 'queue_dropped', dropId: 7 }, { type: 'acp', dropId: 'x', items: [] }];
-  ok(junk.every((r) => queueDroppedOf(r) === null), 'queueDroppedOf: junk, another kind, no / empty / non-string dropId, and a `type:acp` record without the kind ⇒ null');
+  ok(verdictOf(junk.every((r) => queueDroppedOf(r) === null)), 'queueDroppedOf: junk, another kind, no / empty / non-string dropId, and a `type:acp` record without the kind ⇒ null');
   const mal = queueDroppedOf({ type: 'queue_dropped', dropId: 'm-1', omitted: -3, items: [null, 'x', { text: 5 }, { text: '' }, { id: 1, text: 'kept', attachments: [null, { type: '' }, { type: 'image', mime: 9 }, 'y'] }, { text: '', attachments: [{ type: 'image' }] }] });
-  ok(mal && mal.items.length === 2 && mal.items[0].text === 'kept' && mal.items[0].id === '' && S(mal.items[0].attachments) === S([{ type: 'image', mime: null, name: null }]) && mal.items[1].text === '' && mal.omitted === 0, 'queueDroppedOf: malformed rows dropped (non-objects, no text and no attachment), fields coerced, never a throw', mal);
+  ok(gateOf(mal) && mal.items.length === 2 && mal.items[0].text === 'kept' && mal.items[0].id === '' && S(mal.items[0].attachments) === S([{ type: 'image', mime: null, name: null }]) && mal.items[1].text === '' && mal.omitted === 0, 'queueDroppedOf: malformed rows dropped (non-objects, no text and no attachment), fields coerced, never a throw', mal);
   const src = read('src/queue-putback.js');
   ok(!/=== 'acp'|'acp' ===|=== "acp"/.test(src) && !/require\(/.test(src.replace(/\/\/.*$/gm, '')), 'src/queue-putback.js recognises the envelopes by kind / type, never by the harness id \'acp\', and requires nothing (PURE)');
 
@@ -128,13 +128,13 @@ const DROP = { dropId: '4242-1', by: 'stop', turnId: 'p1-4242', omitted: 0, item
   const six = droppedRecordFor(Array.from({ length: 6 }, (_, i) => ({ id: 'q' + i, msgId: 'm' + i, ts: i, text: String(i).repeat(PUTBACK_ITEM_MAX_CHARS) })), { dropId: '1-2', turnId: 't' });
   ok(six.items.length === 5 && six.omitted === 1 && six.items.map((x) => x.id).join() === 'q0,q1,q2,q3,q4' && six.items.reduce((n, x) => n + x.text.length, 0) === PUTBACK_TOTAL_MAX_CHARS, `droppedRecordFor: 6 × ${PUTBACK_ITEM_MAX_CHARS} ⇒ five carried (${PUTBACK_TOTAL_MAX_CHARS} chars), omitted 1, oldest first`);
   const sur = droppedRecordFor([{ text: 'a'.repeat(PUTBACK_ITEM_MAX_CHARS - 1) + '😀' }], { dropId: '1-3' });
-  ok(sur.items[0].text.length === PUTBACK_ITEM_MAX_CHARS - 1 && sur.items[0].cut, 'droppedRecordFor: a cut never splits a surrogate pair');
+  ok(sur.items[0].text.length === PUTBACK_ITEM_MAX_CHARS - 1 && verdictOf(sur.items[0].cut), 'droppedRecordFor: a cut never splits a surrogate pair');
   const att = droppedRecordFor([null, 'x', { id: 'q', text: '', attachments: [{ type: 'localImage', name: 'shot.png', mime: null, path: '/Users/me/shot.png', url: 'data:image/png;base64,AAAA' }, { nope: 1 }] }], { dropId: '1-4' });
   ok(att.items.length === 1 && S(att.items[0].attachments) === S([{ type: 'localImage', mime: null, name: 'shot.png' }]), 'droppedRecordFor: attachments are DESCRIPTORS (type / mime / name) — never bytes, a data URL or a path; non-object rows skipped');
 
   const m = mergeDraft('my draft', DROP.items);
   ok(m.text === 'first queued' + PUTBACK_SEP + 'second, with a picture' + PUTBACK_SEP + 'my draft' && m.count === 2 && m.prepended === m.text.length - 'my draft'.length, 'mergeDraft: oldest first, blank-line separated, IN FRONT of the draft, `prepended` = the prefix incl. its trailing separator', m);
-  ok(mergeDraft(undefined, DROP.items).text.endsWith(PUTBACK_SEP) && mergeDraft({ x: 1 }, DROP.items).text === mergeDraft('', DROP.items).text, 'mergeDraft: the trailing separator is always there (unsaved typing lands on its own line); a non-string draft counts as empty');
+  ok(gateOf(mergeDraft(undefined, DROP.items).text.endsWith(PUTBACK_SEP)) && mergeDraft({ x: 1 }, DROP.items).text === mergeDraft('', DROP.items).text, 'mergeDraft: the trailing separator is always there (unsaved typing lands on its own line); a non-string draft counts as empty');
   const none = mergeDraft('kept', [{ text: '' , attachments: [{ type: 'image' }] }, { text: '   ' }]);
   ok(none.count === 0 && none.prepended === 0 && none.text === 'kept', 'mergeDraft: attachment-only / blank rows contribute nothing ⇒ count 0 (the door writes nothing)');
 
@@ -163,11 +163,11 @@ const DROP = { dropId: '4242-1', by: 'stop', turnId: 'p1-4242', omitted: 0, item
   for (const w of ['data/bin/acp-wrapper.js', 'data/bin/agy-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/chat-wrapper.js']) {
     const twin = cutFn(read(w));
     let got = null; try { got = S(new Function(twin + '\nreturn droppedRecordFor;')()(fixture, { dropId: '9-9', turnId: 'turn-1' })); } catch (e) { got = 'threw ' + e.message; }
-    ok(twin && twin === pure && got === want, `${w}: the inline droppedRecordFor twin is byte-identical to src/queue-putback.js and answers the same fixture (${twin.length} chars)`, { same: twin === pure, got: got && got.slice(0, 200) });
+    ok(gateOf(twin) && twin === pure && got === want, `${w}: the inline droppedRecordFor twin is byte-identical to src/queue-putback.js and answers the same fixture (${twin.length} chars)`, { same: twin === pure, got: got && got.slice(0, 200) });
   }
-  ok(/"started":true/.test(want) && (want.match(/"started"/g) || []).length === 1, 'the twins\' fixture carries ONE started row (`started: true` only — a non-boolean is no claim)', want.slice(0, 300));
+  ok(gateOf(/"started":true/.test(want)) && (want.match(/"started"/g) || []).length === 1, 'the twins\' fixture carries ONE started row (`started: true` only — a non-boolean is no claim)', want.slice(0, 300));
   ok(arrivalVerdict({ remote: { version: 7, prepended: 12 }, own: { pending: true, ackedVersion: 3 } }) === 'apply' && arrivalVerdict({ remote: { version: 7, prepended: 12 }, own: { ackedVersion: 9 } }) === 'apply' && arrivalVerdict({ remote: { version: 7, prepended: 0 }, own: { pending: true } }) === 'queue', 'the arrival rule\'s delta row: an op carrying prepended > 0 is applied over a pending own set AND under a higher acked one; prepended 0 is no delta');
-  ok(ARRIVAL_TABLE.length === 6 && ARRIVAL_TABLE[1].verdict === 'apply' && /prepended/.test(ARRIVAL_TABLE[1].when), 'the arrival table names the delta row (six rows)');
+  ok(ARRIVAL_TABLE.length === 6 && ARRIVAL_TABLE[1].verdict === 'apply' && verdictOf(/prepended/.test(ARRIVAL_TABLE[1].when)), 'the arrival table names the delta row (six rows)');
 }
 
 // ── a discrete-event clock + one server store + N clients (the test-sync-arrival world, on the drafts store) ──
@@ -272,7 +272,7 @@ console.log('§2 the door — the ONE writer over the real drafts store');
   const n2 = w.log.length;
   w.feed(w.record('77-2', [row('i1', '', { attachments: [{ type: 'image', mime: 'image/png', name: null }] })]));
   w.feed(w.record('77-3', [], { omitted: 0 }));
-  ok(w.log.length === n2 && w.lines.some((l) => /Stop put 0 queued message/.test(l)), '② nothing textful (an attachment-only row) ⇒ no write, one journal line; an empty record ⇒ nothing at all');
+  ok(w.log.length === n2 && verdictOf(w.lines.some((l) => /Stop put 0 queued message/.test(l))), '② nothing textful (an attachment-only row) ⇒ no write, one journal line; an empty record ⇒ nothing at all');
   for (let i = 0; i < 40; i++) w.feed(w.record('seen-' + i, [row('s' + i, 'x' + i)]));
   ok(w.session._putbackSeen.length === DOOR.SEEN_MAX && w.session._putbackBelt.length === PUTBACK_BELT_MAX, `② the per-session memories are bounded (dropIds ${DOOR.SEEN_MAX}, belt ${PUTBACK_BELT_MAX})`);
   // the CONTROL for the _draftEditAt fence: the PERSON's door (the ws state-set) stamps it
@@ -281,7 +281,7 @@ console.log('§2 the door — the ONE writer over the real drafts store');
   ok(typeof w2.session._draftEditAt === 'number', '② CONTROL: the ws state-set path (a person composing) DOES stamp _draftEditAt — the door\'s absence above is real');
   const w3 = world({ storeUp: false });
   let threw = null; try { w3.feed(w3.record('99-1', [row('q', 'lost?')])); } catch (e) { threw = e; }
-  ok(!threw && w3.lines.length === 1 && /drafts store not up — 1 message\(s\) NOT put back \(dropId 99-1\)/.test(w3.lines[0]), '② no drafts store yet (boot) ⇒ ONE journal line naming the count and dropId, no throw', w3.lines);
+  ok(!threw && w3.lines.length === 1 && verdictOf(/drafts store not up — 1 message\(s\) NOT put back \(dropId 99-1\)/.test(w3.lines[0])), '② no drafts store yet (boot) ⇒ ONE journal line naming the count and dropId, no throw', w3.lines);
   let threw2 = null; try { w3.door.onLiveRecord(null, SID, null); w3.door.onLiveRecord({}, SID, { kind: 'queue_dropped', dropId: 'q', items: 'nope' }); w3.door.onLiveRecord({ _putbackSeen: 'corrupt' }, SID, { type: 'queue_dropped', dropId: 'z', items: [row('a', 'b')] }); } catch (e) { threw2 = e; }
   ok(!threw2, '② a malformed record / a missing session / a corrupt memory never throws into the gate');
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -306,15 +306,15 @@ async function race(opts = {}) {
   const want = 'queued one\n\nhello world';
   ok(r.A.ta.value === want && r.srv === want && r.B.ta.value === want, `③ THE RACE: an autosave in flight when the put-back lands — A, B and the server all hold «${want.replace(/\n/g, '⏎')}» (the prefix kept, every typed word kept)`, { A: r.A.ta.value, B: r.B.ta.value, srv: r.srv });
   const beltOp = r.w.log.find((o) => o.from && o.basedOn === 0);
-  ok(beltOp && beltOp.value === 'queued one\n\nhello', '③ …the server BELT: A\'s stale set (basedOn 0 < the put-back\'s version) was stored as prefix + value', beltOp);
+  ok(gateOf(beltOp) && beltOp.value === 'queued one\n\nhello', '③ …the server BELT: A\'s stale set (basedOn 0 < the put-back\'s version) was stored as prefix + value', beltOp);
   ok(r.A.sets().length === 2 && r.A.sets()[1].d.value === want && r.B.sets().length === 0, '③ …the delta row landed the op on A at once (not held behind its pending set), and A saved ONCE — its box held unsaved words; B, idle, saved nothing', r.A.sets().map((e) => e.d.value));
   // CONTROLS: take away each fix and the put-back is lost
   const pre = await race({ arrival: PRE_FIX_ARRIVAL, belt: NO_BELT, handlerSrc: PRE_FIX_HANDLER });
   ok(!pre.A.ta.value.includes('queued one') && !pre.srv.includes('queued one'), `③ CONTROL: the pre-fix client + store (no delta row, no belt, an overwriting composer) LOSE the put-back — A «${pre.A.ta.value}», server «${pre.srv}»`, { A: pre.A.ta.value, srv: pre.srv });
   const noBelt = await race({ belt: NO_BELT });
-  ok(noBelt.srv.includes('queued one') && noBelt.A.ta.value.includes('queued one'), `③ the client half alone converges here (A re-saves the landed prefix) — server «${noBelt.srv.replace(/\n/g, '⏎')}»`, { srv: noBelt.srv });
+  ok(gateOf(noBelt.srv.includes('queued one')) && verdictOf(noBelt.A.ta.value.includes('queued one')), `③ the client half alone converges here (A re-saves the landed prefix) — server «${noBelt.srv.replace(/\n/g, '⏎')}»`, { srv: noBelt.srv });
   const noRow = await race({ arrival: PRE_FIX_ARRIVAL });
-  ok(noRow.srv.includes('queued one') && !noRow.A.ta.value.includes('queued one'), `③ CONTROL: without the delta row A's held op is DROPPED at its ack — the belt keeps it on the server («${noRow.srv.replace(/\n/g, '⏎')}») but A's box never shows it («${noRow.A.ta.value}»): both halves are needed`, { A: noRow.A.ta.value, srv: noRow.srv });
+  ok(gateOf(noRow.srv.includes('queued one')) && !noRow.A.ta.value.includes('queued one'), `③ CONTROL: without the delta row A's held op is DROPPED at its ack — the belt keeps it on the server («${noRow.srv.replace(/\n/g, '⏎')}») but A's box never shows it («${noRow.A.ta.value}»): both halves are needed`, { A: noRow.A.ta.value, srv: noRow.srv });
 }
 {
   // THE BELT ON ITS OWN: the typing client's tab closes right after its autosave left — it can never land or re-save
@@ -356,7 +356,7 @@ async function race(opts = {}) {
   // while an edit is open the put-back lands on the STASH (the whole merged value), never the live box
   A.composer._editingQueueId = 'q7'; A.ta.value = 'the queued text being edited';
   w.feed(w.record('6-2', [row('q7', 'the queued text')])); w.clock.run();
-  ok(A.ta.value === 'the queued text being edited' && A.composer._editDraftBefore === w.store.get(KEY) && w.store.get(KEY).startsWith('the queued text\n\n'), '③ while a queue edit is open the put-back lands on the edit\'s stash (restored when the edit ends), never over the rewrite');
+  ok(A.ta.value === 'the queued text being edited' && A.composer._editDraftBefore === w.store.get(KEY) && verdictOf(w.store.get(KEY).startsWith('the queued text\n\n')), '③ while a queue edit is open the put-back lands on the edit\'s stash (restored when the edit ends), never over the rewrite');
 }
 {
   // a reconnecting client gets the op from the ring with `prepended` intact and prepends onto its own value
@@ -365,7 +365,7 @@ async function race(opts = {}) {
   await A.init();
   w.store.set(KEY, 'v0'); w.clock.run();
   const ringOp = (() => { w.feed(w.record('7-1', [row('q', 'ring')])); return w.store.getOpsSince(1).ops.find((o) => o.prepended); })();
-  ok(ringOp && ringOp.prepended === 'ring\n\n'.length && ringOp.value === 'ring\n\nv0', '③ the op rides the store\'s ring whole — a state-resync replays it with `prepended` intact', ringOp);
+  ok(gateOf(ringOp) && ringOp.prepended === 'ring\n\n'.length && ringOp.value === 'ring\n\nv0', '③ the op rides the store\'s ring whole — a state-resync replays it with `prepended` intact', ringOp);
 }
 
 // ── §4 THE NORMALIZERS ──
@@ -385,7 +385,7 @@ console.log('§4 the normalizers — ONE base method, the three envelopes');
   const chipBefore = bubble && bubble.queueState;
   a.processLive({ ts: 'x', type: 'acp', kind: 'queue_dropped', dropId: '1-1', by: 'stop', turnId: 'p1', items: [{ id: 'p1', msgId: 'm-p1', ts: null, text: 'claimed, never dispatched', cut: false, attachments: [{ type: 'image', mime: 'image/png', name: null }] }], omitted: 0 });
   const m1 = metaOps(ops);
-  ok(chipBefore === null && bubble.queueState === 'removed' && ops.some((o) => o.op === 'edit' && o.id === bubble.id && o.fields && o.fields.queueState === 'removed'), 'acp: the undispatched prompt\'s chip had CLEARED (= "it ran"); the record stamps it removed');
+  ok(chipBefore === null && bubble.queueState === 'removed' && verdictOf(ops.some((o) => o.op === 'edit' && o.id === bubble.id && o.fields && o.fields.queueState === 'removed')), 'acp: the undispatched prompt\'s chip had CLEARED (= "it ran"); the record stamps it removed');
   ok(m1.length === 1 && S({ ...m1[0], op: undefined, subtype: undefined }) === S({ dropId: '1-1', n: 1, images: 1, others: 0, cut: 0, omitted: 0, started: 0 }) && unknown(a) === 0, 'acp: ONE `queue-putback` meta op {dropId, n, images, others, cut, omitted, started}, zero unknown-record cards', m1);
   const c = createMessageManager('codex', 'putback-codex');
   const cops = []; c.onOp((o) => cops.push(o));
@@ -404,8 +404,8 @@ console.log('§4 the normalizers — ONE base method, the three envelopes');
   await h.convertHistoryAsync([{ type: 'acp', kind: 'user', msgId: 'mh', content: [{ type: 'text', text: 'old' }] }, { type: 'acp', kind: 'queue_dropped', dropId: '3-1', items: [{ id: 'q', msgId: 'mh', text: 'old', attachments: [] }] }]);
   ok(hops.length === 0 && h.messages.find((m) => m.role === 'user').queueState === 'removed', 'a history convert emits NO op (the toast is live-only) and the rebuilt bubble still reads removed');
   const base = read('src/message-window.js');
-  ok(/_stampQueueChip\(\) \{ return false; \}/.test(base) && /_processQueueDropped\(record, emit\) \{\n    const d = queueDroppedOf\(record\);/.test(base), 'src/message-window.js: ONE base method validating through the ONE extractor, and a base _stampQueueChip (acp/codex override)');
-  ok(/case 'queue_dropped': return this\._processQueueDropped\(record, emit\);/.test(read('src/acp-message-manager.js')) && /if \(type === 'queue_dropped'\) return this\._processQueueDropped\(event, emit\);/.test(read('src/codex-message-manager.js')), 'acp and codex route the raw envelope to the base method (no second reader)');
+  ok(gateOf(/_stampQueueChip\(\) \{ return false; \}/.test(base)) && verdictOf(/_processQueueDropped\(record, emit\) \{\n    const d = queueDroppedOf\(record\);/.test(base)), 'src/message-window.js: ONE base method validating through the ONE extractor, and a base _stampQueueChip (acp/codex override)');
+  ok(gateOf(/case 'queue_dropped': return this\._processQueueDropped\(record, emit\);/.test(read('src/acp-message-manager.js'))) && verdictOf(/if \(type === 'queue_dropped'\) return this\._processQueueDropped\(event, emit\);/.test(read('src/codex-message-manager.js'))), 'acp and codex route the raw envelope to the base method (no second reader)');
   // claude (2.369.354): the wrapper's TOP-LEVEL records on the claude stream — the bubble the server fed live (the
   // adapter's userMsg) carries its msgId, the held row chips it, Stop's per-item result says removed, ONE toast
   const { ClaudeCodeAdapter } = require('../src/adapters/claude-code.js');
@@ -420,40 +420,40 @@ console.log('§4 the normalizers — ONE base method, the three envelopes');
   cl.processLive({ type: 'queue_op_result', op: 'remove', id: 'q1-9', ok: true, msg_id: 'm-cl1', reason: 'stopped' });
   cl.processLive({ type: 'queue_dropped', dropId: '9-1', by: 'stop', turnId: null, items: [{ id: 'q1-9', msgId: 'm-cl1', ts: 1, text: 'held while a turn runs', cut: false, attachments: [] }], omitted: 0 });
   cl.processLive({ type: 'queue_changed', items: [], turn_id: null, verbs: VERBS });
-  ok(clb && clb.webuiMsgId === 'm-cl1' && queuedChip === 'queued' && clb.queueState === 'removed' && metaOps(clops).length === 1 && metaOps(clops)[0].n === 1 && unknown(cl) === 0 && cl.queueState().length === 0 && S(cl.queueVerbsPublished()) === S(VERBS),
+  ok(gateOf(clb) && clb.webuiMsgId === 'm-cl1' && queuedChip === 'queued' && clb.queueState === 'removed' && metaOps(clops).length === 1 && metaOps(clops)[0].n === 1 && unknown(cl) === 0 && cl.queueState().length === 0 && S(cl.queueVerbsPublished()) === S(VERBS),
     'claude: the live bubble carries its msgId, the held row chips it queued, Stop\'s result marks it removed (the emptied republish leaves that alone), ONE meta op, zero unknown-record cards', { chip: queuedChip, now: clb && clb.queueState, metas: metaOps(clops), cards: cl.messages.map((m) => m.noticeKind) });
-  ok(/case 'queue_dropped': return this\._processQueueDropped\(raw, emit\);/.test(read('src/message-manager.js')), 'claude routes the raw top-level record to the base method too (no second reader)');
+  ok(verdictOf(/case 'queue_dropped': return this\._processQueueDropped\(raw, emit\);/.test(read('src/message-manager.js'))), 'claude routes the raw top-level record to the base method too (no second reader)');
 }
 
 // ── §5 WIRING PINS ──
 console.log('§5 wiring pins');
 {
   const ss = read('src/server/session-stdout.js');
-  ok(/getSyncStore = \(\) => null \}\) \{/.test(ss) && /const putback = require\('\.\/queue-putback\.js'\)\.create\(\{ getSyncStore \}\);/.test(ss) && /const helpersFor = \(id\) => \(\{ \.\.\.stdoutHelpers, feedLive: \(s, m\) => \{ putback\.onLiveRecord\(s, id, m\); stdoutHelpers\.feedLive\(s, m\); \} \}\);/.test(ss) && /consumer\.attach\(session, id, ptyProcess, helpersFor\(id\)\);/.test(ss), 'session-stdout: the door is built once (getSyncStore defaults to null for every other create() caller) and rides the ONE gate per attach, BEFORE the normalizer');
-  ok(/getSyncStore: \(name\) => \{ try \{ return getSyncStore\(name\); \} catch \{ return null; \} \}/.test(read('server.js')), 'server.js hands session-stdout a LAZY drafts-store getter (the store is built later in boot)');
+  ok(gateOf(/getSyncStore = \(\) => null \}\) \{/.test(ss)) && gateOf(/const putback = require\('\.\/queue-putback\.js'\)\.create\(\{ getSyncStore \}\);/.test(ss)) && gateOf(/const helpersFor = \(id\) => \(\{ \.\.\.stdoutHelpers, feedLive: \(s, m\) => \{ putback\.onLiveRecord\(s, id, m\); stdoutHelpers\.feedLive\(s, m\); \} \}\);/.test(ss)) && verdictOf(/consumer\.attach\(session, id, ptyProcess, helpersFor\(id\)\);/.test(ss)), 'session-stdout: the door is built once (getSyncStore defaults to null for every other create() caller) and rides the ONE gate per attach, BEFORE the normalizer');
+  ok(verdictOf(/getSyncStore: \(name\) => \{ try \{ return getSyncStore\(name\); \} catch \{ return null; \} \}/.test(read('server.js'))), 'server.js hands session-stdout a LAZY drafts-store getter (the store is built later in boot)');
   const consumers = ['claude-stream-json', 'codex-events', 'acp-events'].map((f) => read(`src/server/stdout/${f}.js`));
-  ok(consumers.every((s) => !/queue_dropped/.test(s)), 'no stdout consumer spells queue_dropped — the door sits at the gate, never in a parse block');
+  ok(verdictOf(consumers.every((s) => !/queue_dropped/.test(s))), 'no stdout consumer spells queue_dropped — the door sits at the gate, never in a parse block');
   const acp = read('data/bin/acp-wrapper.js'), agy = read('data/bin/agy-wrapper.js'), cx = read('data/bin/codex-chat-wrapper.js');
   const order = (s, results, dropped, republish) => { const i = s.search(results), j = s.search(dropped), k = s.search(republish); return i > 0 && j > i && k > j; };
-  ok(order(acp, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove'[^\n]*reason: 'stopped' \}\);/, /record\('queue_dropped', droppedRecordFor\(/, /\n      if \(dropped\.length\) publishQueue\(\);\n      if \(activePrompt\) \{\n        activePrompt\.cancelled = true;/), 'acp-wrapper: per-item stopped results → ONE queue_dropped → the emptied republish (the order law)');
-  ok(order(agy, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove'[^\n]*reason: 'stopped' \}\);/, /record\('queue_dropped', droppedRecordFor\(/, /\n      if \(dropped\.length\) publishQueue\(\);\n      for \(const q of dropped\) \{ peerBack\(q, /), 'agy-wrapper: the same order (the republish, then the dropped peers back through peerBack — lane agy-peer-wake)');
-  ok(order(cx, /emitTaskEvent\('queue_op_result', \{ op: 'remove', id, ok: true, msg_id: known\?\.msgId \|\| '', reason: 'stopped' \}\);/, /if \(putBack\.length\) emitTaskEvent\('queue_dropped', droppedRecordFor\(putBack,/, /await refreshQueue\(\{ timeoutMs: rpcBudget\(\) \}\);/), 'codex-chat-wrapper: every result → ONE queue_dropped (after the latch) → the republish');
-  ok(/const theirs = \(q\) => !q\.opts\?\.peer && !q\.opts\?\.nudge && !q\.opts\?\.retry && !q\.opts\?\.silentQueue;/.test(acp) && /activePrompt && !activePrompt\.dispatched && activePrompt\.blocks && theirs\(activePrompt\) \? \[activePrompt\] : \[\]/.test(acp) && /dispatched: false, blocks, opts \}/.test(acp), 'acp-wrapper: the person\'s rows only, and the UNDISPATCHED active prompt first (the claim carries its blocks + opts)');
-  ok(/const theirs = \(q\) => !q\.opts\?\.peer && !q\.opts\?\.nudge && !q\.opts\?\.retry && !q\.opts\?\.silentQueue;/.test(agy) && /activePrompt && !activePrompt\.dispatched && typeof activePrompt\.text === 'string' && theirs\(activePrompt\)/.test(agy) && /dispatched: false, opts, text \}/.test(agy), 'agy-wrapper: the same filter, the undispatched prompt first (the claim carries its text)');
-  ok(/if \(known \? known\.kind !== 'peer' : !\/\^\(peer\|notif\)-\\d\+-\\d\+\$\/\.test\(cid\)\) \{\n\s+putBack\.push\(/.test(cx), 'codex-chat-wrapper: only deleted:true rows of the person — an INHERITED peer-/notif- row is judged by the wrapper\'s own cid convention');
+  ok(verdictOf(order(acp, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove'[^\n]*reason: 'stopped' \}\);/, /record\('queue_dropped', droppedRecordFor\(/, /\n      if \(dropped\.length\) publishQueue\(\);\n      if \(activePrompt\) \{\n        activePrompt\.cancelled = true;/)), 'acp-wrapper: per-item stopped results → ONE queue_dropped → the emptied republish (the order law)');
+  ok(verdictOf(order(agy, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove'[^\n]*reason: 'stopped' \}\);/, /record\('queue_dropped', droppedRecordFor\(/, /\n      if \(dropped\.length\) publishQueue\(\);\n      for \(const q of dropped\) \{ peerBack\(q, /)), 'agy-wrapper: the same order (the republish, then the dropped peers back through peerBack — lane agy-peer-wake)');
+  ok(verdictOf(order(cx, /emitTaskEvent\('queue_op_result', \{ op: 'remove', id, ok: true, msg_id: known\?\.msgId \|\| '', reason: 'stopped' \}\);/, /if \(putBack\.length\) emitTaskEvent\('queue_dropped', droppedRecordFor\(putBack,/, /await refreshQueue\(\{ timeoutMs: rpcBudget\(\) \}\);/)), 'codex-chat-wrapper: every result → ONE queue_dropped (after the latch) → the republish');
+  ok(gateOf(/const theirs = \(q\) => !q\.opts\?\.peer && !q\.opts\?\.nudge && !q\.opts\?\.retry && !q\.opts\?\.silentQueue;/.test(acp)) && gateOf(/activePrompt && !activePrompt\.dispatched && activePrompt\.blocks && theirs\(activePrompt\) \? \[activePrompt\] : \[\]/.test(acp)) && verdictOf(/dispatched: false, blocks, opts \}/.test(acp)), 'acp-wrapper: the person\'s rows only, and the UNDISPATCHED active prompt first (the claim carries its blocks + opts)');
+  ok(gateOf(/const theirs = \(q\) => !q\.opts\?\.peer && !q\.opts\?\.nudge && !q\.opts\?\.retry && !q\.opts\?\.silentQueue;/.test(agy)) && gateOf(/activePrompt && !activePrompt\.dispatched && typeof activePrompt\.text === 'string' && theirs\(activePrompt\)/.test(agy)) && verdictOf(/dispatched: false, opts, text \}/.test(agy)), 'agy-wrapper: the same filter, the undispatched prompt first (the claim carries its text)');
+  ok(verdictOf(/if \(known \? known\.kind !== 'peer' : !\/\^\(peer\|notif\)-\\d\+-\\d\+\$\/\.test\(cid\)\) \{\n\s+putBack\.push\(/.test(cx)), 'codex-chat-wrapper: only deleted:true rows of the person — an INHERITED peer-/notif- row is judged by the wrapper\'s own cid convention');
   const cw = read('data/bin/chat-wrapper.js');
-  ok(order(cw, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove', id: q\.id, ok: true, msg_id: q\.msgId, reason: 'stopped' \}\);/, /if \(putBack\.length \|\| keptIds\.length \|\| landedIds\.length\) \{\n\s+record\('queue_dropped', \{\n\s+\.\.\.droppedRecordFor\(/, /\n  if \(dropped\.length\) publishQueue\(\);\n  const dropWords = `interrupt: dropped/)
-    && /if \(parsed\.type === 'control_request' && parsed\.request && parsed\.request\.subtype === 'interrupt'\) \{\n\s+handedAfterStop = true;\n\s+try \{ dropHeldForStop\(\); \} finally \{ handedAfterStop = false; \}\n\s+sendChild\(line\);/.test(cw)   /* r5172: the drop (memory) first, then the interrupt to the CLI */, 'chat-wrapper (2.369.354): per-item stopped results → ONE queue_dropped (since 2.369.361 it also says what became of each frame handed to the stopped turn — `keptIds` / `landedIds`, lane claude-steer-inject r2) → the emptied republish, all BEFORE the interrupt line goes on to the CLI');
-  ok(/const putBack = dropped\.filter\(\(q\) => !q\.origin\);/.test(cw), 'chat-wrapper: only the person\'s rows come back — a frame VibeSpace typed (webui_origin: auto-resume / dispatch) is dropped, never put into the composer');
+  ok(gateOf(order(cw, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove', id: q\.id, ok: true, msg_id: q\.msgId, reason: 'stopped' \}\);/, /if \(putBack\.length \|\| keptIds\.length \|\| landedIds\.length\) \{\n\s+record\('queue_dropped', \{\n\s+\.\.\.droppedRecordFor\(/, /\n  if \(dropped\.length\) publishQueue\(\);\n  const dropWords = `interrupt: dropped/))
+    && verdictOf(/if \(parsed\.type === 'control_request' && parsed\.request && parsed\.request\.subtype === 'interrupt'\) \{\n\s+handedAfterStop = true;\n\s+try \{ dropHeldForStop\(\); \} finally \{ handedAfterStop = false; \}\n\s+sendChild\(line\);/.test(cw))   /* r5172: the drop (memory) first, then the interrupt to the CLI */, 'chat-wrapper (2.369.354): per-item stopped results → ONE queue_dropped (since 2.369.361 it also says what became of each frame handed to the stopped turn — `keptIds` / `landedIds`, lane claude-steer-inject r2) → the emptied republish, all BEFORE the interrupt line goes on to the CLI');
+  ok(verdictOf(/const putBack = dropped\.filter\(\(q\) => !q\.origin\);/.test(cw)), 'chat-wrapper: only the person\'s rows come back — a frame VibeSpace typed (webui_origin: auto-resume / dispatch) is dropped, never put into the composer');
   ok(!/'queue-cleared'/.test(acp) && !/send \$\{userDropped/.test(acp), 'acp-wrapper: the «send them again» queue-cleared notice is retired (the toast is the ONE notice on every harness)');
   const ws = read('src/ws-handler.js');
-  ok(/const \{ beltValue: putbackBelt \} = require\('\.\/queue-putback\.js'\);/.test(ws) && /data\.store === 'drafts' && data\.key\.startsWith\('chat:'\) \? activeSessions\.get\(data\.key\.slice\(5\)\)\?\._putbackBelt : null;/.test(ws), 'ws-handler: the belt reads the session\'s put-back memory on a drafts chat:<id> set only');
-  ok(/'codex:rollout:event\/queue_dropped': sh\(\['type', 'dropId', 'by', 'turnId', 'items', 'omitted'\]\)/.test(read('src/record-shape.js')), 'record-shape: the codex queue_dropped row (no field-drift card on the routed event)');
+  ok(gateOf(/const \{ beltValue: putbackBelt \} = require\('\.\/queue-putback\.js'\);/.test(ws)) && verdictOf(/data\.store === 'drafts' && data\.key\.startsWith\('chat:'\) \? activeSessions\.get\(data\.key\.slice\(5\)\)\?\._putbackBelt : null;/.test(ws)), 'ws-handler: the belt reads the session\'s put-back memory on a drafts chat:<id> set only');
+  ok(verdictOf(/'codex:rollout:event\/queue_dropped': sh\(\['type', 'dropId', 'by', 'turnId', 'items', 'omitted'\]\)/.test(read('src/record-shape.js'))), 'record-shape: the codex queue_dropped row (no field-drift card on the routed event)');
   const view = read('src/lib/chat-view.js');
-  ok(/op\.subtype === 'queue-putback'/.test(view) && /showToast\(parts\.join\(' · '\), \{ duration: 6000 \}\)/.test(view) && /setQueueOpResult\(op\.id, op\.ok !== false, op\.text \|\| '', op\.queueOp \|\| null\)/.test(view), 'chat-view: the ONE toast for queue-putback; the queue result names its verb to the composer');
+  ok(gateOf(/op\.subtype === 'queue-putback'/.test(view)) && gateOf(/showToast\(parts\.join\(' · '\), \{ duration: 6000 \}\)/.test(view)) && verdictOf(/setQueueOpResult\(op\.id, op\.ok !== false, op\.text \|\| '', op\.queueOp \|\| null\)/.test(view)), 'chat-view: the ONE toast for queue-putback; the queue result names its verb to the composer');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['Stop put {n} queued message(s) back into the input box', '{k} attached image(s) were not put back — attach them again', '{k} other attachment(s) were not put back — attach them again', '{m} message(s) came back shortened', '{k} more queued message(s) were too long to put back'];
-  ok(keys.every((k) => view.includes(`t('${k}'`) && zh.includes(`"${k}":`) && ja.includes(`"${k}":`)), 'the toast\'s five strings go through t() with zh AND ja entries');
+  ok(verdictOf(keys.every((k) => view.includes(`t('${k}'`) && zh.includes(`"${k}":`) && ja.includes(`"${k}":`))), 'the toast\'s five strings go through t() with zh AND ja entries');
 }
 
 // ── §6 CLAUDE, LIVE ──
@@ -497,7 +497,7 @@ console.log('§6 claude, live — the REAL chat-wrapper over a stand-in CLI, its
   const r = await runOne(path.join(REPO, 'data/bin/chat-wrapper.js'), 'lane');
   const kinds = r.after.map((x) => x.type + (x.reason ? ':' + x.reason : ''));
   const iRes = kinds.indexOf('queue_op_result:stopped'), iDrop = kinds.indexOf('queue_dropped'), iEmpty = r.after.findIndex((x) => x.type === 'queue_changed' && !(x.items || []).length), iCtl = kinds.indexOf('control_response');
-  ok(r.heldBeforeStop, '§6 a frame typed while a turn runs is HELD by the wrapper — the CLI never got it');
+  ok(verdictOf(r.heldBeforeStop), '§6 a frame typed while a turn runs is HELD by the wrapper — the CLI never got it');
   ok(iRes >= 0 && iDrop > iRes && iEmpty > iDrop && iCtl > iEmpty, `§6 Stop: the stopped result → ONE queue_dropped → the emptied queue_changed, then the CLI answers the interrupt (${kinds.join(' · ')})`);
   ok(!r.bRan && r.turnsAfterStop === 0, '§6 NOTHING RUNS after Stop (the 2026-09-07 law) — the held frame never reached the CLI, no turn started', { bRan: r.bRan, turns: r.turnsAfterStop });
   // the wrapper's stdout through the REAL door into a REAL drafts store
@@ -507,7 +507,7 @@ console.log('§6 claude, live — the REAL chat-wrapper over a stand-in CLI, its
   for (const rec of r.recs) door.onLiveRecord(session, 'claude-live', rec);
   ok(store.get('chat:claude-live') === 'B typed while A runs\n\n', '§6 …and the words come back: the REAL door writes the held text into the session\'s draft', store.get('chat:claude-live'));
   const drop = r.recs.find((x) => x.type === 'queue_dropped');
-  ok(drop && drop.items.length === 1 && drop.items[0].msgId === 'm-b' && drop.items[0].text === 'B typed while A runs', '§6 the record names the bubble (msgId from the frame\'s webui_msg_id) and the full text', drop);
+  ok(gateOf(drop) && drop.items.length === 1 && drop.items[0].msgId === 'm-b' && drop.items[0].text === 'B typed while A runs', '§6 the record names the bubble (msgId from the frame\'s webui_msg_id) and the full text', drop);
   // CONTROL — the same flow with the frame forwarded to the CLI mid-turn (the pre-.354 wrapper: no hold): it RUNS
   // after the interrupt, exactly what the 2.1.308 measurement saw. A copy of the wrapper with its hold switched off.
   const ctlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-claude-ctl-'));
@@ -517,7 +517,7 @@ console.log('§6 claude, live — the REAL chat-wrapper over a stand-in CLI, its
   fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
   fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), ctlSrc);
   const c = await runOne(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), 'control');
-  ok(ctlSrc !== cwSrc && !c.heldBeforeStop && c.bRan && c.turnsAfterStop === 1, '§6 CONTROL: forwarded mid-turn (no hold), the frame RUNS right after the interrupt — the leg above can say no', { mutated: ctlSrc !== cwSrc, held: c.heldBeforeStop, ran: c.bRan, turns: c.turnsAfterStop });
+  ok(ctlSrc !== cwSrc && !c.heldBeforeStop && gateOf(c.bRan) && c.turnsAfterStop === 1, '§6 CONTROL: forwarded mid-turn (no hold), the frame RUNS right after the interrupt — the leg above can say no', { mutated: ctlSrc !== cwSrc, held: c.heldBeforeStop, ran: c.bRan, turns: c.turnsAfterStop });
   fs.rmSync(ctlDir, { recursive: true, force: true });
   // AN INIT SAID OUTSIDE A TURN opens nothing: a CLI (or a stand-in) that says `system/init` before its first input must
   // not wedge the gate — the first frame still reaches it. The turn start an init marks is only one said while the CLI's
@@ -535,7 +535,7 @@ console.log('§6 claude, live — the REAL chat-wrapper over a stand-in CLI, its
     fs.rmSync(dir, { recursive: true, force: true });
     return reached;
   };
-  ok(await bootOne(path.join(REPO, 'data/bin/chat-wrapper.js')), '§6 an init said BEFORE any input (no turn behind it) opens nothing — the first message reaches the CLI');
+  ok(verdictOf(await bootOne(path.join(REPO, 'data/bin/chat-wrapper.js'))), '§6 an init said BEFORE any input (no turn behind it) opens nothing — the first message reaches the CLI');
   const anyInitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-claude-anyinit-'));
   const anyInitSrc = editAnchor(cwSrc, "msg.subtype === 'init' && busyWord;", "msg.subtype === 'init';", "data/bin/chat-wrapper.js");
   fs.mkdirSync(path.join(anyInitDir, 'data', 'bin'), { recursive: true });
@@ -605,9 +605,9 @@ console.log('§6b claude, live — a held message, its edit, removal and hand-ov
     return { said, at50, edited, editFacts, removed, handed };
   };
   const L = await lifeOf(path.join(REPO, 'data/bin/chat-wrapper.js'));
-  ok(L.said.copy && L.said.queueRecord, '§6b the moment the HOLD is said (queued_input on stdout), the wrapper\'s FILE already holds the held copy AND the queue record naming it — the next life reads both', L.said);
-  ok(L.at50.bubbles.some((b) => /HELD-F/.test(b.text) && b.chip === 'queued') && L.at50.queue.includes('m-f'), '§6b THE MADE RESTART at +50 ms after the hold: the restore\'s own rebuild of the file draws the held message ONCE, «Queued», and its strip row', L.at50);
-  ok(L.edited && L.removed && L.handed, '§6b …and its EDIT (the copy\'s new words), a REMOVAL (the removal result and the queue without it) and its HAND-OVER (input_handover handed) are each in the file before they are said', { edited: L.edited, editFacts: L.editFacts, removed: L.removed, handed: L.handed });
+  ok(gateOf(L.said.copy) && verdictOf(L.said.queueRecord), '§6b the moment the HOLD is said (queued_input on stdout), the wrapper\'s FILE already holds the held copy AND the queue record naming it — the next life reads both', L.said);
+  ok(gateOf(L.at50.bubbles.some((b) => /HELD-F/.test(b.text) && b.chip === 'queued')) && verdictOf(L.at50.queue.includes('m-f')), '§6b THE MADE RESTART at +50 ms after the hold: the restore\'s own rebuild of the file draws the held message ONCE, «Queued», and its strip row', L.at50);
+  ok(gateOf(L.edited) && gateOf(L.removed) && verdictOf(L.handed), '§6b …and its EDIT (the copy\'s new words), a REMOVAL (the removal result and the queue without it) and its HAND-OVER (input_handover handed) are each in the file before they are said', { edited: L.edited, editFacts: L.editFacts, removed: L.removed, handed: L.handed });
   // RED CONTROL — its plant proven first: the one write-through set, spelled once; a wrapper whose queue records wait for the 2 s
   // timer (the base) says the hold with NOTHING of it in the file — the leg above can say no
   const cwSrc6b = read('data/bin/chat-wrapper.js');
@@ -645,7 +645,7 @@ console.log('§6b claude, live — a held message, its edit, removal and hand-ov
     return said;
   };
   const T1 = await turnOf(path.join(REPO, 'data/bin/chat-wrapper.js'));
-  ok(T1.some((s) => s.kind === 'init') && T1.some((s) => s.kind === 'state:running') && T1.some((s) => s.kind === 'result') && T1.every((s) => s.inFile),
+  ok(gateOf(T1.some((s) => s.kind === 'init')) && gateOf(T1.some((s) => s.kind === 'state:running')) && gateOf(T1.some((s) => s.kind === 'result')) && verdictOf(T1.every((s) => s.inFile)),
     '§6b a turn\'s START (its init, its «running» state word) and its END (its result) are each in the wrapper\'s file the moment they are said (since B-cd4b\'s said journal every said line is: test-wrapper-said-journal)', T1);
   const cwT = read('data/bin/chat-wrapper.js');
   const TEE = "  if (msg && (msg.type === 'result' || (msg.type === 'system' && (msg.subtype === 'init' || msg.subtype === 'session_state_changed' || msg.subtype === 'compact_boundary')))) durable();\n";
@@ -657,7 +657,7 @@ console.log('§6b claude, live — a held message, its edit, removal and hand-ov
     const JOURNALT = "const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => persistNow(), say: log }) : null;";   // B-cd4b: the timer ALONE
     fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), anchored(anchored(anchored(cwT, TEE, '', 'a turn\'s start and end wait for the 2 s timer'), PLANT, 'const DURABLE_RECORDS = new Set();', 'the queue records wait for the 2 s timer'), JOURNALT, 'const JOURNAL = null;', 'the said journal cut'));
     const T0 = await turnOf(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'));
-    ok(T0.some((s) => s.kind === 'result' && !s.inFile), 'MUTANT RED (the timer alone): the turn\'s result is said with nothing of it in the file — a hub restarting then draws a turn with no end, the page «still working»', T0);
+    ok(verdictOf(T0.some((s) => s.kind === 'result' && !s.inFile)), 'MUTANT RED (the timer alone): the turn\'s result is said with nothing of it in the file — a hub restarting then draws a turn with no end, the page «still working»', T0);
     fs.rmSync(ctlDir, { recursive: true, force: true });
   }
 }
@@ -669,7 +669,7 @@ console.log('§7 the started row (codex: drained, then cut off by Stop)');
   const rec = droppedRecordFor([{ id: 'qa', msgId: 'ma', text: 'queued', attachments: [] }, { id: 'qb', msgId: 'mb', text: 'it had started', started: true, attachments: [] }, { id: 'qc', msgId: 'mc', text: 'claim', started: 1 }], { dropId: '5-1', turnId: 'turn-3' });
   ok(rec.items.length === 3 && !('started' in rec.items[0]) && rec.items[1].started === true && !('started' in rec.items[2]), 'droppedRecordFor: `started: true` rides on its row only (absent elsewhere — the older shape unchanged; 1 is no boolean)', rec.items);
   const ex = queueDroppedOf({ type: 'event_msg', payload: { type: 'queue_dropped', ...rec } });
-  ok(ex && ex.items[1].started === true && !('started' in ex.items[0]) && !('started' in ex.items[2]), 'queueDroppedOf: carries `started` through (true only)', ex && ex.items);
+  ok(gateOf(ex) && ex.items[1].started === true && !('started' in ex.items[0]) && !('started' in ex.items[2]), 'queueDroppedOf: carries `started` through (true only)', ex && ex.items);
   // counted, merged
   const N = putbackNotice(rec);
   ok(N.n === 3 && N.started === 1, 'putbackNotice: the started row is one of the n that came back, and counted as started', N);
@@ -692,12 +692,12 @@ console.log('§7 the started row (codex: drained, then cut off by Stop)');
   // the codex wrapper's twin: byte-identical, and the sweep reads the witness, judges after the loop, inside the latch
   const cx = read('data/bin/codex-chat-wrapper.js');
   const twin = cutRule(cx);
-  ok(twin && twin === pureRule, `data/bin/codex-chat-wrapper.js: the inline drainedWasStopped twin is byte-identical to src/queue-putback.js (${twin.length} chars)`);
-  ok(/if \(item\.type === 'userMessage'\) noteCidTurn\(item\.clientId \|\| item\.client_id, itemCtx\.turnId\);/.test(cx), 'codex-chat-wrapper: the witness — every userMessage item names the turn its submission entered');
+  ok(gateOf(twin) && twin === pureRule, `data/bin/codex-chat-wrapper.js: the inline drainedWasStopped twin is byte-identical to src/queue-putback.js (${twin.length} chars)`);
+  ok(verdictOf(/if \(item\.type === 'userMessage'\) noteCidTurn\(item\.clientId \|\| item\.client_id, itemCtx\.turnId\);/.test(cx)), 'codex-chat-wrapper: the witness — every userMessage item names the turn its submission entered');
   const sweep = cx.slice(cx.indexOf('async function _clearQueueForStop()'), cx.indexOf('function interruptTurn('));
   const iDrain = sweep.indexOf('drained.push({ id, cid'), iJudge = sweep.indexOf('drainedWasStopped({ turnId: cidTurns.get(d.cid) || null, stopTurnId: stopTurn, ended: completedTurns.has(cidTurns.get(d.cid)) })'), iLatch = sweep.indexOf('} finally { queueSweepActive = false; }'), iRec = sweep.indexOf("if (putBack.length) emitTaskEvent('queue_dropped', droppedRecordFor(putBack,");
   ok(iDrain > 0 && iJudge > iDrain && iLatch > iJudge && iRec > iLatch, `codex-chat-wrapper: a drained row is held, judged by its turn AFTER the loop and INSIDE the latch, then the ONE record (${iDrain} < ${iJudge} < ${iLatch} < ${iRec})`);
-  ok(/reason: 'gone', started: true, detail: 'it had started and was stopped — put back', msg_id: d\.msgId/.test(sweep) && /putBack\.splice\(drained\[k\]\.at, 0, \{ \.\.\.drained\[k\]\.row, started: true \}\)/.test(sweep) && /row: \(known \? known\.kind !== 'peer' : !\/\^\(peer\|notif\)-\\d\+-\\d\+\$\/\.test\(cid\)\) \?/.test(sweep), 'codex-chat-wrapper: its result stays honest (gone + started + the detail), its row joins in queue order, and only the person\'s row ever does (a drained peer stays gone)');
+  ok(gateOf(/reason: 'gone', started: true, detail: 'it had started and was stopped — put back', msg_id: d\.msgId/.test(sweep)) && gateOf(/putBack\.splice\(drained\[k\]\.at, 0, \{ \.\.\.drained\[k\]\.row, started: true \}\)/.test(sweep)) && verdictOf(/row: \(known \? known\.kind !== 'peer' : !\/\^\(peer\|notif\)-\\d\+-\\d\+\$\/\.test\(cid\)\) \?/.test(sweep)), 'codex-chat-wrapper: its result stays honest (gone + started + the detail), its row joins in queue order, and only the person\'s row ever does (a drained peer stays gone)');
   // the normalizers: the chip names it, the card says it, the toast counts it — and nothing reads as an unknown field
   const { createMessageManager } = require('../src/normalizers.js');
   const c = createMessageManager('codex', 'putback-started');
@@ -709,20 +709,20 @@ console.log('§7 the started row (codex: drained, then cut off by Stop)');
   const meta = ops.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback');
   const res = ops.find((o) => o.op === 'meta' && o.subtype === 'queue-result');
   const cards = c.messages.filter((x) => x.role === 'system').map((x) => x.content?.[0]?.text || '');
-  ok(bubble && bubble.queueState === 'stopped' && ops.some((o) => o.op === 'edit' && o.fields && o.fields.queueState === 'stopped'), "codex: the started row's bubble reads 'stopped' (it reached the agent — 'Removed' would be false)", bubble && bubble.queueState);
+  ok(gateOf(bubble) && bubble.queueState === 'stopped' && verdictOf(ops.some((o) => o.op === 'edit' && o.fields && o.fields.queueState === 'stopped')), "codex: the started row's bubble reads 'stopped' (it reached the agent — 'Removed' would be false)", bubble && bubble.queueState);
   ok(meta.length === 1 && meta[0].n === 3 && meta[0].started === 1, 'codex: ONE queue-putback meta op, started counted', meta);
-  ok(res && res.reason === 'gone' && /had already started — Stop stopped it and put it back into the input box/.test(res.text || '') && cards.some((x) => /had already started/.test(x)) && !cards.some((x) => /it already ran/.test(x)), 'codex: the result and its card say it started and came back — never «it already ran»', { res, cards });
+  ok(gateOf(res) && res.reason === 'gone' && gateOf(/had already started — Stop stopped it and put it back into the input box/.test(res.text || '')) && gateOf(cards.some((x) => /had already started/.test(x))) && !cards.some((x) => /it already ran/.test(x)), 'codex: the result and its card say it started and came back — never «it already ran»', { res, cards });
   ok(!c.messages.some((x) => /unknown/.test(String(x.noticeKind || ''))), 'codex: `started` (on the result, inside the record\'s items) raises no unknown-record / unknown-fields card (record-shape judges top-level keys)', c.messages.map((x) => x.noticeKind));
   const plain = createMessageManager('codex', 'putback-gone');
   plain.processLive({ timestamp: 'x', type: 'event_msg', payload: { type: 'queue_op_result', op: 'remove', id: 'qz', ok: false, reason: 'gone', msg_id: '' } });
-  ok(plain.messages.some((x) => x.role === 'system' && /no longer queued — it already ran/.test(x.content?.[0]?.text || '')), 'codex: a plain gone (it RAN) keeps its words');
+  ok(verdictOf(plain.messages.some((x) => x.role === 'system' && /no longer queued — it already ran/.test(x.content?.[0]?.text || ''))), 'codex: a plain gone (it RAN) keeps its words');
   // the client: the toast clause + the chip words, through t() with zh and ja
   const view = read('src/lib/chat-view.js'), rend = read('src/lib/chat-renderers.js');
-  ok(/\(op\.started > 0 \? t\(', \{n\} had already started and was stopped — put back too', \{ n: op\.started \}\) : ''\)/.test(view), 'chat-view: the toast adds the started clause only when started > 0');
-  ok(/state !== 'removed' && state !== 'stopped'(?: && state !== '[a-z]+')*\) return null;/.test(rend) && /state === 'stopped' \? t\('Started, then stopped'\)/.test(rend), "chat-renderers: the chip has a 'stopped' state with its own words");
+  ok(verdictOf(/\(op\.started > 0 \? t\(', \{n\} had already started and was stopped — put back too', \{ n: op\.started \}\) : ''\)/.test(view)), 'chat-view: the toast adds the started clause only when started > 0');
+  ok(gateOf(/state !== 'removed' && state !== 'stopped'(?: && state !== '[a-z]+')*\) return null;/.test(rend)) && verdictOf(/state === 'stopped' \? t\('Started, then stopped'\)/.test(rend)), "chat-renderers: the chip has a 'stopped' state with its own words");
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = [', {n} had already started and was stopped — put back too', 'Started, then stopped', 'It had already started when Stop cut it off — its words are back in the input box'];
-  ok(keys.every((k) => (view + rend).includes(`t('${k}'`) && zh.includes(`"${k}":`) && ja.includes(`"${k}":`)), 'the three new strings go through t() with zh AND ja entries');
+  ok(verdictOf(keys.every((k) => (view + rend).includes(`t('${k}'`) && zh.includes(`"${k}":`) && ja.includes(`"${k}":`))), 'the three new strings go through t() with zh AND ja entries');
 }
 
 // ── §8 THE DRAFT LANDING (lane draft-focus-guard) ──
@@ -767,7 +767,7 @@ const keeps = (whole, part) => { let i = 0; for (const ch of whole) if (i < part
       if (v.act !== 'replace' && 'value' in v) bad.push(['a hold / drop carries a value', v]);
     }
   ok(bad.length === 0, `landDraft over ${n} combinations: a focused or typing box is never replaced, a put-back is prefix + the live box, a replace is the value, a held value never deletes words typed here`, bad.slice(0, 3));
-  ok(S(whys.slice().sort()) === S(DRAFT_LANDING_TABLE.map((r) => r.why).sort()) && DRAFT_LANDING_TABLE.length === 7 && DRAFT_LANDING_TABLE.every((r) => ['replace', 'hold', 'drop'].includes(r.act) && r.when && r.then), 'DRAFT_LANDING_TABLE: its seven rows are exactly the verdicts the grid reaches (replace / hold / drop, each with when + then)', whys);
+  ok(S(whys.slice().sort()) === S(DRAFT_LANDING_TABLE.map((r) => r.why).sort()) && DRAFT_LANDING_TABLE.length === 7 && verdictOf(DRAFT_LANDING_TABLE.every((r) => ['replace', 'hold', 'drop'].includes(r.act) && r.when && r.then)), 'DRAFT_LANDING_TABLE: its seven rows are exactly the verdicts the grid reaches (replace / hold / drop, each with when + then)', whys);
   ok(BASE_354_LAND(ROWS[0][1]).act === 'replace' && BASE_354_LAND(ROWS[1][1]).act === 'replace', 'RED CONTROL (PURE): the 2.369.354 rule replaces the report\'s focused, typing box and the verifier\'s');
 }
 // two composers on one conversation over the §3 world: the real StateSync + ws cases + the landing block + the autosave callback
@@ -791,7 +791,7 @@ async function verifierRun(opts = {}) {
   ok(r.A.ta.value === 'hel' && r.A.composer._heldDraft === 'x' && r.A.sentValues().length === 1, '⑧ …A blurs: «hel» was typed here and «x» does not keep it ⇒ still held, nothing sent (typed words are never deleted by a held draft)', { A: r.A.ta.value, held: r.A.composer._heldDraft });
   ok(S(frameTypes(r.A, r.B)) === S(['sent:state-set', 'state-ack', 'state-sync']), '⑧ …no new frame: holding, re-judging and superseding use the store\'s own set / sync / ack', frameTypes(r.A, r.B));
   const base = await verifierRun({ handlerSrc: BASE_354_HANDLER, timerSrc: BASE_354_TIMER });
-  ok(base.B.ta.value === 'hel' && base.B.sentValues().includes('hel') && base.srv === 'hel' && !base.A.ta.value.includes('x') && !base.B.ta.value.includes('x'), `⑧ RED CONTROL (the 2.369.354 composer): B's focused box became «${base.B.ta.value}», its own pending autosave then SAVED «hel» — «x» lost on both sides (server «${base.srv}»)`, { A: base.A.ta.value, B: base.B.ta.value, Bsent: base.B.sentValues(), srv: base.srv });
+  ok(base.B.ta.value === 'hel' && gateOf(base.B.sentValues().includes('hel')) && base.srv === 'hel' && !base.A.ta.value.includes('x') && !base.B.ta.value.includes('x'), `⑧ RED CONTROL (the 2.369.354 composer): B's focused box became «${base.B.ta.value}», its own pending autosave then SAVED «hel» — «x» lost on both sides (server «${base.srv}»)`, { A: base.A.ta.value, B: base.B.ta.value, Bsent: base.B.sentValues(), srv: base.srv });
 }
 async function interleave(gap, opts = {}) {
   const w = world(opts);
@@ -806,7 +806,7 @@ async function interleave(gap, opts = {}) {
 }
 for (const gap of [120, 200]) {
   const r = await interleave(gap), base = await interleave(gap, { handlerSrc: BASE_354_HANDLER, timerSrc: BASE_354_TIMER });
-  ok(r.A.ta.value === 'aaaaaaaa' && r.B.ta.value === 'bbbbbbbb' && r.lost === 0 && r.ownOnly, `⑧ a×8 / b×8 interleaved every ${gap} ms, both boxes focused (${r.saves} autosaves): 0 of 16 characters lost — each box holds exactly its own typing, each client saved only what it typed`, { A: r.A.ta.value, B: r.B.ta.value, sent: [r.A.sentValues(), r.B.sentValues()] });
+  ok(r.A.ta.value === 'aaaaaaaa' && r.B.ta.value === 'bbbbbbbb' && r.lost === 0 && verdictOf(r.ownOnly), `⑧ a×8 / b×8 interleaved every ${gap} ms, both boxes focused (${r.saves} autosaves): 0 of 16 characters lost — each box holds exactly its own typing, each client saved only what it typed`, { A: r.A.ta.value, B: r.B.ta.value, sent: [r.A.sentValues(), r.B.sentValues()] });
   ok(base.lost > 0 && !base.ownOnly, `⑧ RED CONTROL (2.369.354) at ${gap} ms: ${base.lost} of 16 characters lost (A «${base.A.ta.value}», B «${base.B.ta.value}»), a client saved the other's characters`, { A: base.A.ta.value, B: base.B.ta.value, sent: [base.A.sentValues(), base.B.sentValues()] });
 }
 {
@@ -819,7 +819,7 @@ for (const gap of [120, 200]) {
   w.clock.run();
   const heldWhileFocused = A.ta.value === '' && A.composer._heldDraft === 'draft typed on B';
   A.blur(); w.clock.run();
-  ok(heldWhileFocused && A.ta.value === 'draft typed on B' && A.composer._heldDraft === null && A.sets().length === 0, '⑧ A focused with an EMPTY box holds B\'s draft; A blurs ⇒ it lands — and the landing sends nothing (the store already has it)', { A: A.ta.value, held: A.composer._heldDraft, sets: A.sets().length });
+  ok(gateOf(heldWhileFocused) && A.ta.value === 'draft typed on B' && A.composer._heldDraft === null && A.sets().length === 0, '⑧ A focused with an EMPTY box holds B\'s draft; A blurs ⇒ it lands — and the landing sends nothing (the store already has it)', { A: A.ta.value, held: A.composer._heldDraft, sets: A.sets().length });
 }
 {
   // a blur over words typed here: held (typed-here) until A's own next save supersedes it; CONTROL: without that row they go
@@ -865,15 +865,15 @@ for (const gap of [120, 200]) {
   w.clock.at(w.clock.now + 10, () => B.sync.set('drafts', KEY, '')); w.clock.run();   // B sent it: its deferred clear
   const heldClear = A.composer._heldDraft === '' && A.ta.value === 'shared draft';
   A.blur(); w.clock.run();
-  ok(took === 'shared draft' && heldClear && A.ta.value === '', '⑧ an unfocused clean box takes a draft at arrival (as before); focused, it holds B\'s clear; at the blur the box only showed what it took from the store ⇒ the clear lands', { took, heldClear, A: A.ta.value });
+  ok(took === 'shared draft' && gateOf(heldClear) && A.ta.value === '', '⑧ an unfocused clean box takes a draft at arrival (as before); focused, it holds B\'s clear; at the blur the box only showed what it took from the store ⇒ the clear lands', { took, heldClear, A: A.ta.value });
 }
 {
   // the chat-input wiring the legs above cannot see (the page-level press wait, the send, dispose)
   const at = (re) => re.test(ci);
-  ok(at(/function afterPress\(fn\) \{\n  if \(!pressDown\) \{ setTimeout\(fn, 0\); return; \}/) && at(/window\.addEventListener\('pointerdown', \(\) => \{ pressDown = true; \}, true\);/) && at(/this\._textarea\.addEventListener\('blur', \(\) => \{ if \(this\._heldDraft !== null\) afterPress\(\(\) => this\._judgeHeldDraft\(\)\); \}\);/), 'chat-input: the blur judges a held draft only after the press that moved the focus has ended (afterPress — a press on Send sends what the box held)');
-  ok(at(/const storeBefore = this\._heldDraft !== null \? null : loadDraft\('chat', this\._sessionId\);/) && at(/this\._pendingSend = \{ text, storeBefore \};\n    this\._judgeHeldDraft\(\);/) && at(/    clearTimeout\(this\._draftTimer\);\n    this\._draftTimer = null;\n    \/\/ WHAT THIS SEND DISPLACED/), 'chat-input: a send nulls the autosave timer, never lets the pinless clear take a HELD draft, and judges it again in the emptied box');
-  ok(at(/this\._heldDraft = null;   \/\/ a blur judge still pending finds nothing/) && (ci.match(/this\._textarea\.value = value \|\| '';/g) || []).length === 0, 'chat-input: dispose forgets the held draft; no overwrite of the box outside landDraft is left');
+  ok(gateOf(at(/function afterPress\(fn\) \{\n  if \(!pressDown\) \{ setTimeout\(fn, 0\); return; \}/)) && gateOf(at(/window\.addEventListener\('pointerdown', \(\) => \{ pressDown = true; \}, true\);/)) && verdictOf(at(/this\._textarea\.addEventListener\('blur', \(\) => \{ if \(this\._heldDraft !== null\) afterPress\(\(\) => this\._judgeHeldDraft\(\)\); \}\);/)), 'chat-input: the blur judges a held draft only after the press that moved the focus has ended (afterPress — a press on Send sends what the box held)');
+  ok(gateOf(at(/const storeBefore = this\._heldDraft !== null \? null : loadDraft\('chat', this\._sessionId\);/)) && gateOf(at(/this\._pendingSend = \{ text, storeBefore \};\n    this\._judgeHeldDraft\(\);/)) && verdictOf(at(/    clearTimeout\(this\._draftTimer\);\n    this\._draftTimer = null;\n    \/\/ WHAT THIS SEND DISPLACED/)), 'chat-input: a send nulls the autosave timer, never lets the pinless clear take a HELD draft, and judges it again in the emptied box');
+  ok(gateOf(at(/this\._heldDraft = null;   \/\/ a blur judge still pending finds nothing/)) && (ci.match(/this\._textarea\.value = value \|\| '';/g) || []).length === 0, 'chat-input: dispose forgets the held draft; no overwrite of the box outside landDraft is left');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -30,7 +30,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const wt = scratch('agentsov-test'), fakeHome = scratch('agentsov-home'), chromeDir = scratch('agentsov-chrome');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
 // the stop is installed BEFORE the worktree add: a signal during the add, the copy or the build no longer kills the suite outright — Node
 // holds it and the stop runs at the first await after them (or at exit, when the signal reached the build's child too); a SIGKILL first still wins
 let srv = null, chrome = null, cleaned = false;
@@ -76,15 +76,15 @@ for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/h
 
 // ── server-side asserts ──
 const usage = await (await fetch(`http://127.0.0.1:${PORT}/api/usage`)).json();
-check('/api/usage has hostAccounts', usage && typeof usage.hostAccounts === 'object');
+check('/api/usage has hostAccounts', gateOf(usage) && typeof usage.hostAccounts === 'object');
 check('boot loader keyed the held snapshot host:acct', !!usage.hostAccounts?.['host-deadbeef:sub-abcdefabcdef']);
 check('held file NOT mis-loaded as a plain host', !usage.hosts?.['host-deadbeef-sub-abcdefabcdef']);
 const acc = await (await fetch(`http://127.0.0.1:${PORT}/api/accounts`)).json();
-check('/api/accounts still returns verdicts', acc && typeof acc.verdicts === 'object');
+check('/api/accounts still returns verdicts', gateOf(acc) && typeof acc.verdicts === 'object');
 let r = await (await fetch(`http://127.0.0.1:${PORT}/api/usage/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'host-x', account: 'BAD id!' }) })).json();
-check('refresh {host,account}: bad account id rejected', /bad account id/.test(r?.error || ''));
+check('refresh {host,account}: bad account id rejected', verdictOf(/bad account id/.test(r?.error || '')));
 r = await (await fetch(`http://127.0.0.1:${PORT}/api/usage/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'host-x', account: 'sub-abcdefabcdef' }) })).json();
-check('refresh {host,account}: unknown host rejected', /unknown host/.test(r?.error || ''));
+check('refresh {host,account}: unknown host rejected', verdictOf(/unknown host/.test(r?.error || '')));
 // Dead host record → a second machine section that must render honestly.
 r = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'DeadHost', user: 'nobody', host: '127.0.0.1', port: 1 }) })).json();
 check('dead host record added', !!r?.success);
@@ -129,10 +129,10 @@ const st1 = await evalJs(`(() => ({
 // 2.262.0 tabs: default = Accounts (the LOCAL roster only); hosts moved to
 // the Machines tab's accordion (asserted after the tab switch below).
 check('accounts tab renders exactly the local section', st1.secs === 1 && !st1.hostSec);
-check('local section has the CLI-login row', st1.localGlobalRow);
-check('⟳ Refresh-all button present', st1.refreshAll);
+check('local section has the CLI-login row', verdictOf(st1.localGlobalRow));
+check('⟳ Refresh-all button present', verdictOf(st1.refreshAll));
 check('host selector is gone', !st1.oldSelector);
-check('tab bar renders', await evalJs(`document.querySelectorAll('.agents-tab').length === 3`));
+check('tab bar renders', verdictOf(await evalJs(`document.querySelectorAll('.agents-tab').length === 3`)));
 // ── donut-column alignment (2.245.2 regression guard, real pixels) ──
 // Inject the inline refresh-error DOM shape into one row (same markup the
 // real fan-out failure path appends), then sweep panel widths.
@@ -176,9 +176,9 @@ for (const [sbw, panel, mode] of [[504, 460, 'donut'], [384, 340, 'pill'], [304,
     const sizes = rows.flatMap((x) => x.donuts).flatMap((d) => [d.w, d.h]);
     const sspread = sizes.length ? Math.max(...sizes) - Math.min(...sizes) : 999;
     check(`panel ~${panel}px: donut sizes equal across rows (spread ${sspread.toFixed(1)}px)`, sizes.length >= 8 && sspread <= 0.5);
-    check(`panel ~${panel}px: pill hidden in donut mode`, rows.every((x) => x.miniR == null));
+    check(`panel ~${panel}px: pill hidden in donut mode`, verdictOf(rows.every((x) => x.miniR == null)));
   } else {
-    check(`panel ~${panel}px: donuts hidden in pill mode (swap intact)`, rows.every((x) => x.clusterR == null));
+    check(`panel ~${panel}px: donuts hidden in pill mode (swap intact)`, verdictOf(rows.every((x) => x.clusterR == null)));
   }
 }
 await evalJs(`(() => { app.sidebar.el.style.width=''; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
@@ -186,27 +186,27 @@ await evalJs(`(() => { app.sidebar.el.style.width=''; app.sidebar._applySidebarL
 // auto-expands its accordion card).
 await evalJs(`(() => { [...document.querySelectorAll('.agents-tab')].find((b) => /Machines|机器/.test(b.textContent))?.click(); return 1; })()`);
 await sleep(800);
-check('machines tab shows the accordion card', await evalJs(`!!document.querySelector('.agents-mach-acc[data-host]')`));
+check('machines tab shows the accordion card', verdictOf(await evalJs(`!!document.querySelector('.agents-mach-acc[data-host]')`)));
 // Wait out the dead host's probe failures, then check honest state.
 for (let i = 0; i < 20; i++) { if (await evalJs(`!document.querySelector('.agents-machine-sec:not([data-host=""]) .ob-loading')`)) break; await sleep(1000); }
 const st2 = await evalJs(`(() => {
   const sec = document.querySelector('.agents-machine-sec:not([data-host=""])');
   return { filled: !sec.querySelector('.ob-loading'), globalRow: !!sec.querySelector('.acct-key-row[data-id="__global__"]') };
 })()`);
-check('dead host section filled (probe failure did not wedge it)', st2.filled);
-check('dead host section has its CLI-login row', st2.globalRow);
+check('dead host section filled (probe failure did not wedge it)', verdictOf(st2.filled));
+check('dead host section has its CLI-login row', verdictOf(st2.globalRow));
 // Refresh-all: clickable; every target holds an EXPIRED token (or a dead
 // host), so each must FAIL INLINE on its row — and never contact Anthropic.
 await evalJs(`(() => { const b = document.querySelector('.agents-refresh-all'); b.click(); return 1; })()`);
 for (let i = 0; i < 25; i++) { if (await evalJs(`!!document.querySelector('.agents-machine-sec:not([data-host=""]) .acct-refresh-err')`)) break; await sleep(1000); }
-check('failed refresh target rendered an inline per-row error (dead host)', await evalJs(`!!document.querySelector('.agents-machine-sec:not([data-host=""]) .acct-refresh-err')`));
+check('failed refresh target rendered an inline per-row error (dead host)', verdictOf(await evalJs(`!!document.querySelector('.agents-machine-sec:not([data-host=""]) .acct-refresh-err')`)));
 // LOCAL rows live on the Accounts tab now — switch, re-click (throttled
 // replies also render inline, which is the honest surface here).
 await evalJs(`(() => { [...document.querySelectorAll('.agents-tab')].find((b) => /Accounts|账号/.test(b.textContent))?.click(); return 1; })()`);
 await sleep(1200);
 await evalJs(`(() => { const b = document.querySelector('.agents-refresh-all'); b.click(); return 1; })()`);
 for (let i = 0; i < 25; i++) { if (await evalJs(`document.querySelectorAll('.agents-machine-sec[data-host=""] .acct-refresh-err').length >= 2`)) break; await sleep(1000); }
-check('failed LOCAL targets rendered inline errors too', await evalJs(`document.querySelectorAll('.agents-machine-sec[data-host=""] .acct-refresh-err').length >= 2`));
+check('failed LOCAL targets rendered inline errors too', verdictOf(await evalJs(`document.querySelectorAll('.agents-machine-sec[data-host=""] .acct-refresh-err').length >= 2`)));
 // ── billing switcher: labelHtml quota preview (2.245.2) ──
 await evalJs(`(() => { app.showBillingSwitcher({ backend: 'claude', backendSessionId: null, name: 'T' }, { x: 300, y: 200 }); return 1; })()`);
 await sleep(400);
@@ -221,10 +221,10 @@ const sw = await evalJs(`(() => {
     injected: !!m.querySelector('il, img'),
   };
 })()`);
-check('billing switcher menu opens', sw.menu);
+check('billing switcher menu opens', verdictOf(sw.menu));
 check('switcher rows carry water-level-colored percentages', sw.coloredPcts >= 4);
-check('scoped bucket (Fa) appears in the preview', sw.hasScoped);
-check('hostile account name renders as literal text (escHtml)', sw.evilLiteral && !sw.injected);
+check('scoped bucket (Fa) appears in the preview', verdictOf(sw.hasScoped));
+check('hostile account name renders as literal text (escHtml)', gateOf(sw.evilLiteral) && !sw.injected);
 await evalJs(`(() => { document.querySelector('.context-menu')?.remove(); return 1; })()`);
 // Usage popup: Remote-hosts section gone, Full-overview door present.
 await evalJs(`(() => { document.getElementById('taskbar-usage').click(); return 1; })()`);
@@ -234,17 +234,17 @@ const st3 = await evalJs(`(() => { const p = document.getElementById('usage-popu
   hostRefresh: !!p.querySelector('.usage-host-refresh'),
   overview: !!p.querySelector('.usage-overview-link'),
 }; })()`);
-check('usage popup opens', st3.open);
+check('usage popup opens', verdictOf(st3.open));
 check('popup Remote-hosts section removed', !st3.hostRefresh);
-check('popup has the Full-overview door', st3.overview);
+check('popup has the Full-overview door', verdictOf(st3.overview));
 await evalJs(`(() => { document.querySelector('#usage-popup .usage-overview-link').click(); return 1; })()`);
 await sleep(800);
 const st4 = await evalJs(`(() => ({
   popupHidden: document.getElementById('usage-popup').classList.contains('hidden'),
   agentsActive: !!document.querySelector('.rail-item[data-rail="agents"].active'),
 }))()`);
-check('overview door closes the popup', st4.popupHidden);
-check('overview door lands on the Agents rail panel', st4.agentsActive);
+check('overview door closes the popup', verdictOf(st4.popupHidden));
+check('overview door lands on the Agents rail panel', verdictOf(st4.agentsActive));
 // ── Add-subscription flow opens the login terminal (inc-mslfbdjv regression:
 // a dialog-scope `refresh()` called from the standalone method threw a
 // ReferenceError BEFORE openShellTerminal — the click was a silent no-op).
@@ -277,7 +277,7 @@ const addRes = await evalJs(`(() => ({
   wins: app.wm.windows.size,
   hasTerminal: [...app.wm.windows.values()].some((w) => w.type === 'terminal'),
 }))()`);
-check(`login terminal opened (windows ${winsBefore} → ${addRes.wins})`, addRes.wins > winsBefore && addRes.hasTerminal);
+check(`login terminal opened (windows ${winsBefore} → ${addRes.wins})`, addRes.wins > winsBefore && verdictOf(addRes.hasTerminal));
 
 const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resource/.test(e));
 check('no JS errors', realErrors.length === 0);
@@ -287,4 +287,4 @@ const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, 
 // LEFTOVERS named it)
 if (process.env.AO_SHOT) fs.writeFileSync(path.resolve(process.env.AO_SHOT), Buffer.from(shot.data, 'base64'));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

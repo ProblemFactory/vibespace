@@ -19,7 +19,7 @@ const PORT = 3995, CDP_PORT = 9345;
 const wt = '/tmp/vs-bsw-smoke';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}`); } };
+const check = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}`); } };
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -81,10 +81,10 @@ const info = await evalJs(`(() => {
 console.log('menu width:', info.w);
 for (const r of info.rows) console.log('  row:', JSON.stringify(r));
 check('menu has a stable width ≥340', info.w >= 340 && info.w <= 490);
-check('every row is single-line', info.rows.every((r) => r.oneLine));
-check('usage clusters right-align to one column', info.rows.filter((r) => r.usageRight != null).every((r) => r.usageRight));
+check('every row is single-line', verdictOf(info.rows.every((r) => r.oneLine)));
+check('usage clusters right-align to one column', verdictOf(info.rows.filter((r) => r.usageRight != null).every((r) => r.usageRight)));
 fs.mkdirSync('/tmp/vs-uiscale-shots', { recursive: true });
 const shot = await cdp('Page.captureScreenshot', { clip: { x: 280, y: 60, width: 560, height: 360, scale: 1.5 } });
 fs.writeFileSync('/tmp/vs-uiscale-shots/billing-menu.png', Buffer.from(shot.data, 'base64'));
 console.log(failed ? `${failed} FAILED` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

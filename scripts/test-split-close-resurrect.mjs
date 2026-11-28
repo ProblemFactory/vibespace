@@ -35,7 +35,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 50) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -73,7 +73,7 @@ else await (async () => {
   let journal = '';
   const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000, 100)), 'the worktree server booted', journal.slice(-800))) return;
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
   const create = async (reqId, name) => { ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: ROOT, cols: 80, rows: 24, reqId, name })); await until(() => msgs.some((m) => m.type === 'created' && m.reqId === reqId), 15000); return msgs.find((m) => m.type === 'created' && m.reqId === reqId)?.sessionId; };
@@ -84,7 +84,7 @@ else await (async () => {
   };
   let chrome = null, P1 = null;
   try {
-    if (!ok(sidA && sidB, 'two chat sessions (Alpha, Bravo) were created on the fake claude', journal.slice(-600))) return;
+    if (!ok(gateOf(sidA) && verdictOf(sidB), 'two chat sessions (Alpha, Bravo) were created on the fake claude', journal.slice(-600))) return;
     await sleep(1200);
     chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1600,1000', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
     procs.add(chrome);
@@ -113,13 +113,13 @@ else await (async () => {
     await P1.send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47
     await P1.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
     await P1.send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-    if (!ok(await bootOk(P1), 'the app booted in headless chrome (desktop, 1600×1000)')) return;
+    if (!ok(verdictOf(await bootOk(P1)), 'the app booted in headless chrome (desktop, 1600×1000)')) return;
     await sleep(1500);
     const ev = P1.ev;
 
     // ── two desktops (One = the boot desktop, Two made here) ──
     const desks = await ev(`if (!dm) return null; if (dm.desktops.length < 2) dm.createDesktop('Two'); await new Promise((r) => setTimeout(r, 300)); return dm.desktops.map((d) => ({ id: d.id, name: d.name }));`);
-    if (!ok(desks && desks.length === 2, 'two virtual desktops exist', S(desks))) return;
+    if (!ok(gateOf(desks) && desks.length === 2, 'two virtual desktops exist', S(desks))) return;
     const ONE = desks[0].id, TWO = desks[1].id;
     await ev(`if (dm.activeDesktopId !== ${S(ONE)}) await dm.switchTo(${S(ONE)}); return true;`);
     await until(() => ev('return dm._restoring === false;'), 5000);
@@ -164,21 +164,21 @@ else await (async () => {
     /** The owner's cycle with the bundle's timings: open beside, Two, back (0.9 s — the drain), ✕, Two, back. */
     const ownerCycle = async (X, label) => {
       const c = await ctrlClickPath(X, NOTES);
-      if (!ok(c.ok, `${label} the path link in Alpha's chat is hit by the pointer`, S(c))) return null;
+      if (!ok(verdictOf(c.ok), `${label} the path link in Alpha's chat is hit by the pointer`, S(c))) return null;
       const born = await until(() => X.ev(`const e = editors()[0]; return !!(e && e._tabChain && e._tabChain === bySid(${S(sidA)})._tabChain);`), 8000);
       const edId = await X.ev('const e = editors()[0]; return e ? e.id : null;');
       const b = await X.ev(`const e = wm.windows.get(${S(edId)}); const ch = e && e._tabChain; return ch ? { layout: ch.layout, n: ch.tabs.length, shown: ch.split && ch.split.pair.includes(e.id) } : null;`);
-      ok(born && b && b.layout === 'split' && b.n === 3 && b.shown, `${label} the Ctrl+click opened the editor BESIDE Alpha, in its split group (shown)`, S(b));
+      ok(gateOf(born) && gateOf(b) && b.layout === 'split' && b.n === 3 && verdictOf(b.shown), `${label} the Ctrl+click opened the editor BESIDE Alpha, in its split group (shown)`, S(b));
       await sleep(1100);
-      ok(await switchBy(X, TWO), `${label} a real click on desktop Two's preview`);
+      ok(verdictOf(await switchBy(X, TWO)), `${label} a real click on desktop Two's preview`);
       await sleep(900);
       await switchBy(X, ONE); // lands inside the 1 s switch gate ⇒ QUEUED, drained at its end (the bundle's twin desktop event)
       await until(() => X.ev(`return dm.activeDesktopId === ${S(ONE)} && dm._restoring === false;`), 4000);
       await sleep(700);
       const back1 = await edState(X, edId);
-      ok(back1.live && back1.shown && !back1.free && back1.active === ONE, `${label} back on One: the editor is still beside Alpha`, S(back1));
+      ok(gateOf(back1.live) && gateOf(back1.shown) && !back1.free && back1.active === ONE, `${label} back on One: the editor is still beside Alpha`, S(back1));
       const cl = await closeTabOf(X, edId);
-      ok(cl && cl.inHalf, `${label} a real click on the editor tab's ✕ inside its strip half`, S(cl));
+      ok(gateOf(cl) && verdictOf(cl.inHalf), `${label} a real click on the editor tab's ✕ inside its strip half`, S(cl));
       await sleep(250);
       const closed = await edState(X, edId);
       ok(!closed.live && closed.editors === 0, `${label} the ✕ closed the editor`, S(closed));
@@ -194,7 +194,7 @@ else await (async () => {
     // ── 1 · the owner's sequence, twice ──
     console.log('— 1 · the owner\'s sequence (Ctrl+click beside → Two → One → ✕ → Two → One), twice');
     const s1 = await scene();
-    ok(s1.split && s1.layout === 'split', 'Alpha and Bravo form a split group on desktop One', S(s1));
+    ok(gateOf(s1.split) && s1.layout === 'split', 'Alpha and Bravo form a split group on desktop One', S(s1));
     for (const n of [1, 2]) {
       const r = await ownerCycle(P1, `1.${n}`);
       if (!r) continue;
@@ -220,7 +220,7 @@ else await (async () => {
       await P1.ev(`wm.__rftc = wm.removeFromTabChain; wm.removeFromTabChain = function (chain, winId) { const win = this.windows.get(winId); if (!win) return; win._listenerCtl?.abort(); this._detachFromChain(chain, winId); if (win.onClose) win.onClose(); win.element.remove(); this.windows.delete(winId); this._notify(); this._scheduleOverlapUpdate(); if (this.activeWindowId === winId) { this.activeWindowId = null; const next = chain.tabs[chain.active] ?? chain.tabs[0]; if (next && this.windows.has(next)) this.focusWindow(next); } }; return true;`);
       const r = await ownerCycle(P1, '1c');
       await P1.ev(`wm.removeFromTabChain = wm.__rftc; delete wm.__rftc; return true;`);
-      ok(r && r.after.live && r.after.free && r.after.desk === ONE, '1c CONTROL: with the pre-fix ✕ the closed editor comes back on One as a FREE window with its old id — the incident, reproduced by this leg', S(r && r.after));
+      ok(gateOf(r) && gateOf(r.after.live) && gateOf(r.after.free) && r.after.desk === ONE, '1c CONTROL: with the pre-fix ✕ the closed editor comes back on One as a FREE window with its old id — the incident, reproduced by this leg', S(r && r.after));
       await P1.ev(`for (const e of editors()) wm.closeWindow(e.id); return true;`);
     }
 
@@ -230,7 +230,7 @@ else await (async () => {
       await scene();
       await sleep(1200); // the scene's own saves settle
       const c = await ctrlClickPath(P1, NOTES);
-      if (!ok(c.ok, `${label} Ctrl+click hit the link`, S(c))) return null;
+      if (!ok(verdictOf(c.ok), `${label} Ctrl+click hit the link`, S(c))) return null;
       await until(() => ev(`const e = editors()[0]; return !!(e && e._tabChain);`), 8000);
       await sleep(1500);
       const edId = await ev('return editors()[0]?.id || null;');
@@ -250,7 +250,7 @@ else await (async () => {
       return { edId, st, disk: diskHasEditor(), pre: { answers, heard } };
     };
     // the leg's PRECONDITION (r8 — r7b: leg 2 passed VACUOUSLY on b3d0ab09e, the hub refused its echo before the page saw it)
-    const echoReached = (label, r) => ok(!!r && S(r.pre.answers) === S(['ack']) && r.pre.heard, `${label} PRECONDITION: the hub ACKED the echo (no layout-sync-refused) and the page received it — One's record listing the editor`, S(r && r.pre));
+    const echoReached = (label, r) => ok(!!r && S(r.pre.answers) === S(['ack']) && verdictOf(r.pre.heard), `${label} PRECONDITION: the hub ACKED the echo (no layout-sync-refused) and the page received it — One's record listing the editor`, S(r && r.pre));
     {
       const r = await echoLeg('2', false);
       if (r && echoReached('2', r)) {
@@ -260,7 +260,7 @@ else await (async () => {
       }
       const c2 = await echoLeg('2c', true);
       echoReached('2c', c2);
-      ok(c2 && c2.st.live, '2c CONTROL: with the held-close ledger neutered the same echo re-creates the closed editor', S(c2 && c2.st));
+      ok(gateOf(c2) && verdictOf(c2.st.live), '2c CONTROL: with the held-close ledger neutered the same echo re-creates the closed editor', S(c2 && c2.st));
       await ev(`for (const e of editors()) wm.closeWindow(e.id); return true;`);
     }
 
@@ -275,7 +275,7 @@ else await (async () => {
       await scene();
       await sleep(800);
       const c = await ctrlClickPath(P1, NOTES);
-      if (!ok(c.ok, `${label} Ctrl+click hit the link`, S(c))) return null;
+      if (!ok(verdictOf(c.ok), `${label} Ctrl+click hit the link`, S(c))) return null;
       await until(() => ev(`const e = editors()[0]; return !!(e && e._tabChain);`), 8000);
       const edId = await ev('return editors()[0]?.id || null;');
       await ev(`const lm = app.layoutManager; lm._userDirty = true; lm._lastUserInputAt = Date.now(); lm._lastSentJson = null; await lm._doAutoSave(); return true;`);
@@ -286,10 +286,10 @@ else await (async () => {
       await Q.send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47
       await Q.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
       await Q.send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-      ok(await bootOk(Q), `${label} the second page booted`);
+      ok(verdictOf(await bootOk(Q)), `${label} the second page booted`);
       await Q.ev(`if (dm.activeDesktopId !== ${S(ONE)}) await dm.switchTo(${S(ONE)}); return true;`);
       const seen = await until(() => Q.ev(`const e = wm.windows.get(${S(edId)}); return !!(e && e._tabChain);`), 15000, 200);
-      ok(seen, `${label} the second page shows the editor in the group on One`);
+      ok(verdictOf(seen), `${label} the second page shows the editor in the group on One`);
       await until(() => Q.ev('return app.layoutManager._restoring === false && dm._restoring === false;'), 8000);
       await sleep(1100);
       await Q.ev(`await dm.switchTo(${S(TWO)}); return true;`); // parked on Two, its DOM still holds One's editor (hidden)
@@ -323,7 +323,7 @@ else await (async () => {
         ok(!r.p.live && r.disk === false, '3 …and its next ordinary save wrote nothing back: the first page and the disk stay without the editor', S({ p: r.p, disk: r.disk }));
       }
       const c3 = await parkedLeg('3c', true);
-      ok(c3 && c3.q.live && (c3.p.live || c3.disk === true), '3c CONTROL: with no wire base (the pre-fix cache) the parked page shows the closed editor again and its next save writes it back to the first page / the disk', S(c3));
+      ok(gateOf(c3) && gateOf(c3.q.live) && (verdictOf(c3.p.live) || c3.disk === true), '3c CONTROL: with no wire base (the pre-fix cache) the parked page shows the closed editor again and its next save writes it back to the first page / the disk', S(c3));
       await ev(`for (const e of editors()) wm.closeWindow(e.id); return true;`);
     }
   } finally {
@@ -336,4 +336,4 @@ else await (async () => {
 })().catch((e) => ok(false, 'the chrome leg threw', e && (e.stack || e.message)));
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

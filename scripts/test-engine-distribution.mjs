@@ -123,7 +123,7 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e === undefined ? '' : ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700))); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e === undefined ? '' : ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700))); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -271,10 +271,10 @@ const P = await pod('main', { boot: { relayUrl: '', browserEngine: engineAt(shaA
 const b1 = await P.ED.bootFleet();
 ok(typeof BM.fleetPluginWords === 'function', 'the words model has the cluster\'s plugin words (fleetPluginWords: the row\'s fact, the panel\'s line)');
 const fact1 = fpw(P.row(), P.ED.fleetView(), tW).fact;
-ok(b1.ok && b1.outcome === 'installed' && P.row().trustedBy === 'fleet' && P.row().enabled && P.row().install.sha === shaA && P.receiptSha() === KSHA.k1 && hits.filter((h) => h === '/k1.tar.zst').length === 1,
+ok(gateOf(b1.ok) && b1.outcome === 'installed' && P.row().trustedBy === 'fleet' && gateOf(P.row().enabled) && P.row().install.sha === shaA && P.receiptSha() === KSHA.k1 && hits.filter((h) => h === '/k1.tar.zst').length === 1,
   'boot: the plugin at the cluster\'s full sha is installed and trusted by the cluster; preinstall ⇒ its kernel downloaded once (the receipt\'s sha256 = the fleet\'s)', { b1, row: P.row() && P.row().install, receipt: P.receiptSha() });
 ok(fact1 === `Installed and trusted by the cluster · ${short(shaA)}`, `the row reads «${fact1}»`);
-ok(P.journal.some((l) => l.includes(`fleet plugin: cluster pins ${short(shaA)} — installing ${EID}`)) && P.journal.some((l) => /fleet plugin: vibespace\.custom-browser's kernel 150\.0\.1\.1-fx \(1 MB\) — downloading/.test(l)),
+ok(gateOf(P.journal.some((l) => l.includes(`fleet plugin: cluster pins ${short(shaA)} — installing ${EID}`))) && verdictOf(P.journal.some((l) => /fleet plugin: vibespace\.custom-browser's kernel 150\.0\.1\.1-fx \(1 MB\) — downloading/.test(l))),
   'every step journaled by name: «fleet plugin: cluster pins <sha> — installing …», «… kernel <version> (<size>) — downloading»', P.journal.filter((l) => /fleet plugin/.test(l)));
 
 console.log('— ② the admin pins shaB in fleet.json ⇒ the WATCH runs the job: ONE update, trusted at shaB, no restart');
@@ -283,7 +283,7 @@ const release2 = P.holdGit();
 P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaB) });
 const held = await until(() => P.gate.inflight === 1);
 const oldUntrusted = !!held && P.row().install.sha === shaA && P.row().trusted === false && P.row().trustedBy === null;
-ok(oldUntrusted, 'the moment the cluster\'s pin moved (the update held at its git step), the installed package at the OLD sha is no longer trusted by the cluster', { held, row: P.row() && { sha: P.row().install.sha, trusted: P.row().trusted } });
+ok(verdictOf(oldUntrusted), 'the moment the cluster\'s pin moved (the update held at its git step), the installed package at the OLD sha is no longer trusted by the cluster', { held, row: P.row() && { sha: P.row().install.sha, trusted: P.row().trusted } });
 release2();
 const up = await until(() => P.ED.fleetView().outcome === 'updated' && P.ED.fleetView().to === shaB && !P.gate.inflight);
 await settled(P); // the outcome is set before the run's kernel step — the step's words are read once the run ended
@@ -291,9 +291,9 @@ const fact2 = fpw(P.row(), P.ED.fleetView(), tW, () => 'WHEN').fact;
 ok(!!up && P.gate.refs.length === refs0 + 1 && fetches().length === f0 + 1 && fetches().at(-1).argv.at(-1) === shaB && P.row().version === '0.1.2' && P.row().trustedBy === 'fleet' && P.regFile().trust[EID].sha === shaB && P.row().install.prevSha === shaA,
   'the presets watch ran the job: ONE git fetch of the new sha, the package at shaB installed and trusted by the cluster at shaB (no bootFleet, no restart)', { view: P.ED.fleetView(), refs: P.gate.refs.slice(refs0) });
 ok(fact2 === `Updated by the cluster · ${short(shaA)} → ${short(shaB)} · WHEN`, `the row reads «${fact2}»`);
-ok(P.ED.fleetView().kernel && P.ED.fleetView().kernel?.state === 'due' && P.ED.fleetView().kernel?.version === VER.k2 && !hits.includes('/k2.tar.zst') && P.receiptSha() === KSHA.k1,
+ok(gateOf(P.ED.fleetView().kernel) && P.ED.fleetView().kernel?.state === 'due' && P.ED.fleetView().kernel?.version === VER.k2 && !hits.includes('/k2.tar.zst') && P.receiptSha() === KSHA.k1,
   'shaB\'s kernel.json names K2 and preinstall is off ⇒ the kernel is DUE (the next browser start downloads it) — nothing fetched, K1 stays in its place', P.ED.fleetView().kernel);
-ok(P.journal.some((l) => /\[presets\] changed .*browser engine changed/.test(l)) && P.journal.some((l) => l.includes(`fleet plugin: cluster pins ${short(shaB)} — updating ${EID} from ${short(shaA)}`)) && P.journal.some((l) => l.includes(`trusted by the cluster at ${short(shaB)}`)),
+ok(gateOf(P.journal.some((l) => /\[presets\] changed .*browser engine changed/.test(l))) && gateOf(P.journal.some((l) => l.includes(`fleet plugin: cluster pins ${short(shaB)} — updating ${EID} from ${short(shaA)}`))) && verdictOf(P.journal.some((l) => l.includes(`trusted by the cluster at ${short(shaB)}`))),
   'journaled: «[presets] changed …: browser engine changed», «fleet plugin: cluster pins <new> — updating … from <old>», «… trusted by the cluster at <new>»');
 await settled(P);
 const f2 = fetches().length;
@@ -321,11 +321,11 @@ const f4 = fetches().length, t4 = P.todos.length;
 P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaA) });
 const failed = await until(() => P.ED.fleetView().outcome === 'failed');
 await settled(P); await sleep(150); // a loop would ask git again within milliseconds — the settle (the failed run and any run it queued ended), THEN the 150 ms window to see NOTHING: a retry on a short timer or a backoff shows inside it (r5406: a wait to see nothing stays)
-ok(!!failed && fetches().length === f4 + 1 && P.todos.length === t4 + 1 && /the cluster's plugin could not be installed/.test(P.todos.at(-1).text) && /cluster's next change of the plugin \(or the next restart\)/.test(P.todos.at(-1).detail) && P.row().install.sha === shaB
-  && P.journal.some((l) => l.includes(`fleet plugin: ${EID} could not be updated [`) && l.includes("tried again at the cluster's next change or the next restart")),
+ok(!!failed && fetches().length === f4 + 1 && P.todos.length === t4 + 1 && gateOf(/the cluster's plugin could not be installed/.test(P.todos.at(-1).text)) && gateOf(/cluster's next change of the plugin \(or the next restart\)/.test(P.todos.at(-1).detail)) && P.row().install.sha === shaB
+  && verdictOf(P.journal.some((l) => l.includes(`fleet plugin: ${EID} could not be updated [`) && l.includes("tried again at the cluster's next change or the next restart"))),
   'git refused ⇒ the run says it by name (journal + ONE For-you notice), the installed package stays; NO retry by itself (one fetch in 0.15 s)', { view: P.ED.fleetView(), fetches: fetches().length - f4 });
 const failLine = fpw(null, P.ED.fleetView(), tW).line;
-ok(/^The cluster's plugin vibespace\.custom-browser could not be installed: .*\[plugin_git_/.test(failLine || ''), `the panel line reads «${String(failLine).slice(0, 120)}…»`);
+ok(verdictOf(/^The cluster's plugin vibespace\.custom-browser could not be installed: .*\[plugin_git_/.test(failLine || '')), `the panel line reads «${String(failLine).slice(0, 120)}…»`);
 FX.setMode(null);
 P.writeFleet({ relayUrl: 'https://relay2.fleet.test/relay/', browserEngine: engineAt(shaA) });
 const retried = await until(() => P.ED.fleetView().outcome === 'updated' && P.row().install.sha === shaA);
@@ -339,18 +339,18 @@ ok(P.receiptSha() === KSHA.k1 && P.row().trustedBy === 'fleet', 'before: K1 in i
 P.writeFleet({ relayUrl: '', browserEngine: engineAt('v0.1.2', { preinstall: true }) });
 await until(() => P.ED.fleetView().outcome === 'unpinned' && P.ED.fleetView().kernel); await settled(P);
 const tagLine = fpw(null, P.ED.fleetView(), tW).line, tagFact = fpw(P.row(), P.ED.fleetView(), tW).fact;
-ok(P.ED.fleetView().outcome === 'unpinned' && P.ED.fleetView().code === 'fleet_ref_not_sha' && !P.row().trusted && P.row().consentRequired && P.row().install.ref === 'v0.1.2'
-  && P.journal.some((l) => l.includes('cluster pins «v0.1.2» — not a commit sha, so never trusted by the cluster')),
+ok(P.ED.fleetView().outcome === 'unpinned' && P.ED.fleetView().code === 'fleet_ref_not_sha' && !P.row().trusted && gateOf(P.row().consentRequired) && P.row().install.ref === 'v0.1.2'
+  && verdictOf(P.journal.some((l) => l.includes('cluster pins «v0.1.2» — not a commit sha, so never trusted by the cluster'))),
   'a tag pinned by the cluster ⇒ the package is installed but never trusted (the owner is asked), journaled by name', P.ED.fleetView());
 const j5s = P.journal.slice(j5);
 ok(k2hits() === h5 && P.receiptSha() === KSHA.k1 && P.ED.kernelFact(EID).sha256 === KSHA.k1 && JSON.stringify(P.ED._record().engines[EID].measured) === m5 && !j5s.some((l) => /kernel says|— downloading|is installed \(sha256/.test(l))
-  && j5s.some((l) => l.includes(`fleet plugin: ${EID} is waiting for your consent — its kernel is not fetched`)) && P.ED.fleetView().kernel?.state === 'untrusted',
+  && gateOf(j5s.some((l) => l.includes(`fleet plugin: ${EID} is waiting for your consent — its kernel is not fetched`))) && P.ED.fleetView().kernel?.state === 'untrusted',
   'preinstall on + the untrusted package\'s kernel.json naming K2 ⇒ fetched nothing (/k2 not asked), K1 stays in its place and in the record, no binary run (the measure untouched) — journaled «… is waiting for your consent — its kernel is not fetched»', { fetched: k2hits() - h5, receipt: P.receiptSha() === KSHA.k1 ? 'K1' : P.receiptSha(), lines: j5s.filter((l) => /kernel|consent/.test(l)) });
 ok(tagLine === 'The cluster names vibespace.custom-browser at «v0.1.2» — not a full commit sha, so the cluster does not trust it; review it, then turn vibespace.custom-browser on in this list · waiting for your consent — its kernel is not fetched', `the panel line reads «${tagLine}» (r3: the door by name)`);
 ok(tagFact === 'waiting for your consent — its kernel is not fetched; turning it on fetches it', `the row reads «${tagFact}» (r3: the door — lane ui-needs-a-button pick 5: the row's own switch, no menu path)`);
 const due5 = await P.ED.kernelDue?.(EID);
 let refused5 = null; try { await P.ED.installKernel(EID, { by: 'user' }); } catch (e) { refused5 = e; }
-ok(due5?.due === false && due5?.untrusted === true && refused5 && refused5.code === 'engine_untrusted' && /waiting for your consent/.test(refused5.message) && k2hits() === h5 && P.receiptSha() === KSHA.k1,
+ok(due5?.due === false && due5?.untrusted === true && gateOf(refused5) && refused5.code === 'engine_untrusted' && gateOf(/waiting for your consent/.test(refused5.message)) && k2hits() === h5 && P.receiptSha() === KSHA.k1,
   'every other door too: the kernel step\'s due check reads no plan for it, a «Download kernel» is refused by name (engine_untrusted) — nothing fetched', { due5, refused: refused5 && refused5.code });
 const snapA = snapshot(P, 'tag'); // M5's fixture: the tag installed, K1 in its place
 P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaB) });
@@ -364,7 +364,7 @@ ok(pol.value === `plugin:${EID}` && pol.source === 'fleet' && polOwn.value === '
 const h6 = hits.length;
 await until(() => P.ED.fleetView().kernel && P.ED.fleetView().kernel?.state === 'due');
 const dueLine = fpw(null, P.ED.fleetView(), tW).line;
-ok(P.ED.fleetView().kernel?.state === 'due' && P.ED.fleetView().kernel?.version === VER.k2 && hits.length === h6 && P.receiptSha() === KSHA.k1 && P.journal.some((l) => l.includes(`kernel ${VER.k2} (1 MB) is named — downloaded at the next browser start`)),
+ok(P.ED.fleetView().kernel?.state === 'due' && P.ED.fleetView().kernel?.version === VER.k2 && hits.length === h6 && P.receiptSha() === KSHA.k1 && verdictOf(P.journal.some((l) => l.includes(`kernel ${VER.k2} (1 MB) is named — downloaded at the next browser start`))),
   'a new kernel with preinstall false ⇒ DUE: nothing fetched now, the place keeps K1 (the next browser start downloads it)', P.ED.fleetView().kernel);
 ok(dueLine === `The cluster's plugin ${EID}: new kernel ${VER.k2} — downloaded at the next browser start, which still runs the current one`, `the panel line reads «${dueLine}»`);
 P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaB, { default: true, preinstall: true }) });
@@ -379,8 +379,8 @@ await until(() => P.ED.kernelFact(EID).next); await settled(P);
 const kf7 = P.ED.kernelFact(EID), nextDir = P.plan().nextDir;
 const stagedLine = fpw(null, P.ED.fleetView(), tW).line;
 const card = BM.engineNote({ id: EID, label: 'Fixture Browser Engine', installed: true, executable: true, measuredVersion: VER.k2, kernel: kf7 }, tW);
-ok(kf7.state === 'installed' && kf7.sha256 === KSHA.k2 && kf7.next && kf7.next.sha256 === KSHA.k3 && P.receiptSha() === KSHA.k2 && fs.existsSync(path.join(nextDir, 'chrome')) && P.ED.fleetView().kernel?.state === 'staged'
-  && P.journal.some((l) => l.includes('a browser runs the current kernel, so the new one waits beside it and serves the next browser start')),
+ok(kf7.state === 'installed' && kf7.sha256 === KSHA.k2 && gateOf(kf7.next) && kf7.next.sha256 === KSHA.k3 && P.receiptSha() === KSHA.k2 && gateOf(fs.existsSync(path.join(nextDir, 'chrome'))) && P.ED.fleetView().kernel?.state === 'staged'
+  && verdictOf(P.journal.some((l) => l.includes('a browser runs the current kernel, so the new one waits beside it and serves the next browser start'))),
   'downloaded while a browser runs K2 ⇒ the place is untouched (its receipt still K2), K3 waits at .next-<tag> (the record\'s `next`)', { kf7, next: fs.existsSync(nextDir) });
 ok(stagedLine === `The cluster's plugin ${EID}: new kernel ${VER.k3} downloaded — a browser running the current kernel keeps it; the next browser start uses the new one`, `the panel line reads «${stagedLine}»`);
 ok(card === `Fixture Browser Engine · measured ${VER.k2} · new kernel ${VER.k3} downloaded — it serves the next browser start`, `the engine card reads «${card}»`);
@@ -403,13 +403,13 @@ P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaC, { default: true, prei
 await until(() => P.gate.inflight === 1);
 P.use.now = false;
 const early8 = await P.ED.landNext?.(EID); // a browser start while the cluster's pin back is being installed
-ok(early8 === false && P.receiptSha() === KSHA.k3 && P.ED.kernelFact(EID).next && P.ED.kernelFact(EID).next?.sha256 === KSHA.k2,
+ok(early8 === false && P.receiptSha() === KSHA.k3 && gateOf(P.ED.kernelFact(EID).next) && P.ED.kernelFact(EID).next?.sha256 === KSHA.k2,
   'a start while the cluster\'s pin moved back (the package at shaB no longer trusted, shaC not yet installed) ⇒ the withdrawn K2 does NOT land');
 rel8();
 await until(() => P.ED.fleetView().to === shaC && !P.ED.kernelFact(EID).next); await settled(P);
 const later8 = await P.ED.landNext?.(EID);
 ok(!P.ED.kernelFact(EID).next && !fs.existsSync(P.plan().nextDir) && later8 === false && P.receiptSha() === KSHA.k3 && P.ED.kernelFact(EID).sha256 === KSHA.k3 && k2hits() === h8 + 1 && hits.filter((h) => h === '/k3.tar.zst').length === 1
-  && P.journal.some((l) => l.includes(`waiting kernel ${VER.k2} is no longer the cluster's — discarded`)) && !fpw(null, P.ED.fleetView(), tW).line,
+  && gateOf(P.journal.some((l) => l.includes(`waiting kernel ${VER.k2} is no longer the cluster's — discarded`))) && !fpw(null, P.ED.fleetView(), tW).line,
   'the run at shaC ⇒ the waiting K2 is discarded (the record cleared, .next-<tag> removed, «… is no longer the cluster\'s — discarded»); the next start lands nothing, K3 stays, nothing downloaded again, the panel says nothing', { kf: P.ED.kernelFact(EID), lines: P.journal.filter((l) => /waiting kernel/.test(l)) });
 
 console.log('— ⑫ (r3 N1) the install road is judged AT ITS LANDING — the real fleet road: a pin, then a rollback while its kernel downloads');
@@ -458,17 +458,17 @@ const untrust = (L) => { L.row.trusted = false; L.row.trustedBy = null; }; // th
 const replan = (L) => fs.writeFileSync(path.join(L.R, 'plugins', EID, 'kernel.json'), JSON.stringify(kernelJson('k3'))); // the plan moved to K3, trust kept
 await leg('⑫ trust withdrawn mid-download', async () => {
   const x = await inFlight(undefined, untrust);
-  ok(x.held && x.dueMid?.untrusted === true && x.r.discarded === 'untrusted' && x.place === 'K3' && x.kernel === VER.k3 && x.measured === 'untouched' && !x.next && !x.nextDir && !x.partials
-    && x.lines.length === 1 && x.lines[0].includes(`kernel ${VER.k2} was downloaded for a package no longer trusted — discarded, never landed`),
+  ok(gateOf(x.held) && x.dueMid?.untrusted === true && x.r.discarded === 'untrusted' && x.place === 'K3' && x.kernel === VER.k3 && x.measured === 'untouched' && !x.next && !x.nextDir && !x.partials
+    && x.lines.length === 1 && verdictOf(x.lines[0].includes(`kernel ${VER.k2} was downloaded for a package no longer trusted — discarded, never landed`)),
     'the package\'s trust withdrawn while K2 downloads ⇒ K2 is discarded at its landing: K3 stays in its place and in the record, nothing measured (no binary run), nothing staged, the partials gone — «… downloaded for a package no longer trusted — discarded, never landed»', x);
 });
 await leg('⑫ the plan moved mid-download', async () => {
   const x = await inFlight(undefined, replan);
-  ok(x.held && x.r.discarded === 'stale' && x.place === 'K3' && x.kernel === VER.k3 && x.measured === 'untouched' && !x.next && !x.nextDir && !x.partials
-    && x.lines.length === 1 && x.lines[0].includes(`kernel ${VER.k2} was downloaded for a plan the cluster has moved away from (the kernel planned now is ${VER.k3}) — discarded, never landed`),
+  ok(gateOf(x.held) && x.r.discarded === 'stale' && x.place === 'K3' && x.kernel === VER.k3 && x.measured === 'untouched' && !x.next && !x.nextDir && !x.partials
+    && x.lines.length === 1 && verdictOf(x.lines[0].includes(`kernel ${VER.k2} was downloaded for a plan the cluster has moved away from (the kernel planned now is ${VER.k3}) — discarded, never landed`)),
     'the plan moved while K2 downloads (the package still trusted) ⇒ K2 is discarded at its landing — never landed, never measured: «… downloaded for a plan the cluster has moved away from (the kernel planned now is …) — discarded, never landed»', x);
   const y = await inFlight(undefined, replan, { inUse: () => true });
-  ok(y.held && y.r.discarded === 'stale' && !y.r.staged && y.place === 'K3' && !y.next && !y.nextDir && !y.partials && y.lines.length === 1,
+  ok(gateOf(y.held) && y.r.discarded === 'stale' && !y.r.staged && y.place === 'K3' && !y.next && !y.nextDir && !y.partials && y.lines.length === 1,
     'the same with a browser running K3 ⇒ the stale K2 is never STAGED either (no .next-<tag>, no record of it) — the one judge runs before the landing AND the staging', y);
 });
 
@@ -497,23 +497,23 @@ const replanTo = (k) => (L) => fs.writeFileSync(path.join(L.R, 'plugins', EID, '
 const neverRan = (x) => x.measured === 'untouched' && !x.lines.some((l) => /kernel says|took its place|is installed \(sha256/.test(l));
 await leg('⑫ r4 install road: inside the scan', async () => {
   const a = await inSection(undefined, 'install', untrust), b = await inSection(undefined, 'install', replanTo('k3'));
-  ok(a.fired && a.r.discarded === 'untrusted' && a.place === 'K3' && a.kernel === VER.k3 && neverRan(a) && !a.next && !a.partials && !a.aside && a.lines.length === 1 && a.lines[0].includes(`kernel ${VER.k2} was downloaded for a package no longer trusted — discarded, never landed`),
+  ok(gateOf(a.fired) && a.r.discarded === 'untrusted' && a.place === 'K3' && a.kernel === VER.k3 && gateOf(neverRan(a)) && !a.next && !a.partials && !a.aside && a.lines.length === 1 && verdictOf(a.lines[0].includes(`kernel ${VER.k2} was downloaded for a package no longer trusted — discarded, never landed`)),
     'THE ACCEPTANCE\'S PROBE, the install road: the trust withdrawn INSIDE the in-use scan (after the judge before it) ⇒ K2 is NOT landed and NOT run (the judge asked again last, inside the section) — K3 stays, discarded, one line', a);
-  ok(b.fired && b.r.discarded === 'stale' && b.place === 'K3' && neverRan(b) && !b.next && !b.partials && b.lines.length === 1 && b.lines[0].includes(`(the kernel planned now is ${VER.k3}) — discarded, never landed`),
+  ok(gateOf(b.fired) && b.r.discarded === 'stale' && b.place === 'K3' && gateOf(neverRan(b)) && !b.next && !b.partials && b.lines.length === 1 && verdictOf(b.lines[0].includes(`(the kernel planned now is ${VER.k3}) — discarded, never landed`)),
     'the plan moved INSIDE the scan (kernel.json now names K3) ⇒ the same: not landed, not run, discarded, one line', b);
 });
 await leg('⑫ r4 waiting road: inside the scan', async () => {
   const a = await inSection(undefined, 'wait', untrust), b = await inSection(undefined, 'wait', replanTo('k1'));
-  ok(a.fired && a.r.landed === false && a.place === 'K2' && a.kernel === VER.k2 && neverRan(a) && a.next === VER.k3 && a.nextDir && a.lines.length === 1 && a.lines[0].includes(`waiting kernel ${VER.k3} did not take its place — its package is no longer trusted; nothing ran, it waits`),
+  ok(gateOf(a.fired) && a.r.landed === false && a.place === 'K2' && a.kernel === VER.k2 && gateOf(neverRan(a)) && a.next === VER.k3 && gateOf(a.nextDir) && a.lines.length === 1 && verdictOf(a.lines[0].includes(`waiting kernel ${VER.k3} did not take its place — its package is no longer trusted; nothing ran, it waits`)),
     'THE ACCEPTANCE\'S PROBE, the waiting road (a start\'s beforeStart, the trust withdrawn during the 2nd in-use call — onPlace\'s): K3 is NOT landed and NOT run, K2 stays; the verified K3 keeps waiting (r2: a lapsed trust deletes nothing — a trusted run judges it), one line', a);
-  ok(b.fired && b.r.landed === false && b.place === 'K2' && neverRan(b) && !b.next && !b.nextDir && b.lines.length === 1 && b.lines[0].includes(`waiting kernel ${VER.k3} is no longer the cluster's — discarded (the kernel planned now is ${VER.k1}; never landed)`),
+  ok(gateOf(b.fired) && b.r.landed === false && b.place === 'K2' && gateOf(neverRan(b)) && !b.next && !b.nextDir && b.lines.length === 1 && verdictOf(b.lines[0].includes(`waiting kernel ${VER.k3} is no longer the cluster's — discarded (the kernel planned now is ${VER.k1}; never landed)`)),
     'the plan moved INSIDE the scan (kernel.json now names K1) ⇒ not landed, not run, the waiting K3 discarded with its folder, one line', b);
 });
 await leg('⑫ r4 at the first rename', async () => {
   const a = await inSection(undefined, 'install', untrust, { at: 'rename' }), b = await inSection(undefined, 'install', replanTo('k3'), { at: 'rename' });
-  ok(a.fired && a.r.discarded === 'untrusted' && a.place === 'K3' && a.kernel === VER.k3 && !a.aside && neverRan(a) && !a.partials && a.lines.length === 1,
+  ok(gateOf(a.fired) && a.r.discarded === 'untrusted' && a.place === 'K3' && a.kernel === VER.k3 && !a.aside && gateOf(neverRan(a)) && !a.partials && a.lines.length === 1,
     'the trust withdrawn AT THE FIRST RENAME (K3 already moved aside) ⇒ the judge asked LAST — between the renames, its sync half in the rename\'s own turn — refuses: K3 goes back in its place, K2 never lands, nothing runs, one line', a);
-  ok(b.fired && b.r.discarded === 'stale' && b.place === 'K3' && !b.aside && neverRan(b) && b.lines.length === 1, 'the plan moved at the first rename ⇒ the same (K3 back, K2 discarded, one line)', b);
+  ok(gateOf(b.fired) && b.r.discarded === 'stale' && b.place === 'K3' && !b.aside && gateOf(neverRan(b)) && b.lines.length === 1, 'the plan moved at the first rename ⇒ the same (K3 back, K2 discarded, one line)', b);
 });
 async function measureUntrusted(EDM) {
   const L = light(snapC, { EDM });
@@ -559,7 +559,7 @@ await leg('⑨ a start meeting a landing', async () => { // a start meeting a la
   const B = (async () => { const st = await startOf(L.ED); const r = L.receipt(); st.release(); return { l: st.landed, r, ms: Date.now() - t0, since: Date.now() - slow.at }; })();
   const C = L.ED.measure(EID);
   const [a, b, c] = await Promise.all([A, B, C]);
-  ok(a === true && b.l === false && b.r === KSHA.k3 && b.since >= slow.ms / 2 && L.receipt() === KSHA.k3 && c.ok && c.version === VER.k3 && !L.rec().aside && !L.todos.length && !L.journal.some((l) => /set aside|could not be put back/.test(l)),
+  ok(a === true && b.l === false && b.r === KSHA.k3 && b.since >= slow.ms / 2 && L.receipt() === KSHA.k3 && gateOf(c.ok) && c.version === VER.k3 && !L.rec().aside && !L.todos.length && !L.journal.some((l) => /set aside|could not be put back/.test(l)),
     'a second start during the landing WAITS for it (no false at once) and its place holds K3; a measure in the same window puts nothing back (no false «set aside» notice) and measures K3', { b, c: c && c.version, aside: L.rec().aside, todos: L.todos.length });
 });
 await leg('⑨ a start holding the place', async () => { // a start between its in-use check and its spawn HOLDS the place: no landing meanwhile; it spawned ⇒ the new kernel keeps waiting
@@ -571,12 +571,12 @@ await leg('⑨ a start holding the place', async () => { // a start between its 
   const during = L.receipt();
   used = true; rel(); // the start spawned — a browser runs K2 now
   const l = await land;
-  ok(during === KSHA.k2 && l === false && L.receipt() === KSHA.k2 && L.rec().next && L.rec().next.sha256 === KSHA.k3, 'a landing never starts while a start holds the place; once it spawned on K2 the landing sees it and K3 keeps waiting', { during, l });
+  ok(during === KSHA.k2 && l === false && L.receipt() === KSHA.k2 && gateOf(L.rec().next) && L.rec().next.sha256 === KSHA.k3, 'a landing never starts while a start holds the place; once it spawned on K2 the landing sees it and K3 keeps waiting', { during, l });
   // r3 (N2): a landing never WAITS for a start — a held place (a browser starting ⇒ its kernel in use) ⇒ «not now» at once, no line
   const L2 = light(snapC, { opts: { holdWaitMs: LAND_WAIT_MS / 30 } }); // holdWaitMs: the r2 tree's own bound (it waited for holds), short so its RED run ends
   await L2.ED.holdPlace(EID, { leaseMs: 0 }); // a start that never reports its spawn
   const l2 = await Promise.race([L2.ED.landNext(EID), sleep(LAND_WAIT_MS / 60).then(() => 'still waiting for the start')]);
-  ok(l2 === false && L2.receipt() === KSHA.k2 && L2.rec().next && !L2.journal.length,
+  ok(l2 === false && L2.receipt() === KSHA.k2 && gateOf(L2.rec().next) && !L2.journal.length,
     'a landing never WAITS for a start: a place a start holds ⇒ the waiting kernel does not land, answered at once, no journal line (it lands at a start with no browser on the old kernel)', { l2, lines: L2.journal });
 });
 
@@ -653,8 +653,8 @@ async function orphanScenes(EDM) {
     bLeft: ['.next-linux-x64', '.unpack-linux-x64', 'linux-x64.part'].filter((n) => fs.existsSync(path.join(B.plan.root, n))), bLines: B.journal.filter((l) => l.includes('leftover kernel files the record does not name were removed')), bPlace: B.receipt() };
 }
 const o11 = await orphanScenes().catch((e) => ({ threw: String(e && e.message) }));
-ok(o11.la === false && !o11.aNext && !o11.aDir && o11.aLine, 'a waiting kernel whose folder\'s receipt is not the recorded one ⇒ discarded: the record cleared AND .next-<tag> removed (whoever clears rec.next removes the dir)', o11);
-ok(o11.bLeft && !o11.bLeft.length && o11.bLines.length === 1 && o11.bLines[0].includes('.next-linux-x64') && o11.bLines[0].includes('.unpack-linux-x64') && o11.bLines[0].includes('linux-x64.part') && o11.bPlace === KSHA.k2,
+ok(o11.la === false && !o11.aNext && !o11.aDir && verdictOf(o11.aLine), 'a waiting kernel whose folder\'s receipt is not the recorded one ⇒ discarded: the record cleared AND .next-<tag> removed (whoever clears rec.next removes the dir)', o11);
+ok(gateOf(o11.bLeft) && !o11.bLeft.length && o11.bLines.length === 1 && gateOf(o11.bLines[0].includes('.next-linux-x64')) && gateOf(o11.bLines[0].includes('.unpack-linux-x64')) && gateOf(o11.bLines[0].includes('linux-x64.part')) && o11.bPlace === KSHA.k2,
   'a .next-<tag> the record does not name (a stop between stageNext\'s rename and its save) + a cut install\'s .unpack-<tag> and .part ⇒ swept at boot, ONE journal line; the kernel in its place untouched', o11);
 
 console.log('— ⑬ (r3 N2) a start never waits for a landing that cannot happen');
@@ -669,7 +669,7 @@ async function startsBeside(EDM) {
 }
 await leg('⑬ starts beside a running browser', async () => {
   const x = await startsBeside(undefined);
-  ok(x.b.landed === false && x.c.landed === false && x.b.ms < LAND_WAIT_MS / 60 && x.c.ms < LAND_WAIT_MS / 60 && !x.lines.length && x.place === 'K2' && x.next,
+  ok(x.b.landed === false && x.c.landed === false && x.b.ms < LAND_WAIT_MS / 60 && x.c.ms < LAND_WAIT_MS / 60 && !x.lines.length && x.place === 'K2' && verdictOf(x.next),
     `starts B and C beside a waiting kernel while a browser runs the old one and start A holds the place ⇒ each answered at once (${x.b.ms} / ${x.c.ms} ms — the bound is ${LAND_WAIT_MS / 1000} s), no journal line, nothing lands (K2 in its place, K3 waiting)`, x);
 });
 const slowNext = () => { const slow = { ms: 0, at: 0 }; return { slow, io: { rename: async (a, b) => { if (slow.ms && a.endsWith('/.next-linux-x64')) { slow.at = Date.now(); await sleep(slow.ms); } return fs.promises.rename(a, b); } } }; };
@@ -700,7 +700,7 @@ async function landingScene(KM = KM0) {
 }
 await leg('⑬ a start during a landing', async () => {
   const x = await landingScene();
-  ok(x.a === true && x.B.landed === false && x.B.since >= x.slowMs / 2 && x.B.ms < LAND_WAIT_MS && x.place === 'K3' && x.waiting && x.during && x.during.waitS === 30 && x.said === 1 && !x.after
+  ok(x.a === true && x.B.landed === false && x.B.since >= x.slowMs / 2 && x.B.ms < LAND_WAIT_MS && x.place === 'K3' && gateOf(x.waiting) && gateOf(x.during) && x.during.waitS === 30 && x.said === 1 && !x.after
     && x.card === `Fixture Browser Engine · measured ${VER.k2} · waiting for the new kernel to land (≤ 30 s)`,
     `a start during a landing in progress WAITS for it (${x.B.ms} ms) and runs what landed (K3), SAID: «… a browser start waits for the new kernel to land (≤ 30 s)» once — r4 (N2): the engine card read THROUGH THE KEEPER's engines view (GET /api/browser/engines, Change build…, New profile…) says «${x.card}» meanwhile`, x);
 });
@@ -727,7 +727,7 @@ await leg('⑬ one bound for the whole ask', async () => {
   const B = await startOf(L.ED).then((x) => { x.release(); return { ...x, ms: Date.now() - t0 }; }, (e) => ({ threw: e && e.code, msg: String(e && e.message), ms: Date.now() - t0, empty: !fs.existsSync(L.plan.targetDir) }));
   later.push(A); // the slowed landing ends in the background (awaited before the suite ends)
   const late = L.journal.filter((l) => l.includes('still taking its place after 0.2 s')), said = L.journal.filter((l) => l.includes('a browser start waits for the new kernel to land (≤ 0.2 s)'));
-  ok(B.threw === 'engine_kernel_landing' && B.msg.startsWith('the kernel is being replaced — try again in a moment') && B.empty && B.ms >= BOUND / 2 && B.ms < 2 * BOUND && late.length === 1 && said.length === 1,
+  ok(B.threw === 'engine_kernel_landing' && gateOf(B.msg.startsWith('the kernel is being replaced — try again in a moment')) && gateOf(B.empty) && B.ms >= BOUND / 2 && B.ms < 2 * BOUND && late.length === 1 && said.length === 1,
     `ONE bound for a start's whole ask (its landing's queue AND its hold — never per stage): a landing slowed past it ⇒ the start ends after ${B.ms} ms (the bound is ${BOUND} ms), said once («… still taking its place after 0.2 s») — r4: REFUSED BY NAME («${String(B.msg).slice(0, 60)}…»), never going on beside the half-landed place`, { B, lines: L.journal });
 });
 
@@ -745,7 +745,7 @@ async function unreadable(EDM) {
 }
 await leg('⑭ an unreadable receipt', async () => {
   const x = await unreadable(undefined);
-  ok(x.l1 === false && x.l1b === false && x.next && x.dir && x.said === 1 && !x.gone && x.l2 === true && x.place === 'K3',
+  ok(x.l1 === false && x.l1b === false && gateOf(x.next) && gateOf(x.dir) && x.said === 1 && !x.gone && x.l2 === true && x.place === 'K3',
     'a waiting kernel whose receipt answers EACCES (standing for EIO / ESTALE / EMFILE on a PVC) is KEPT — its record and its folder — said ONCE over two starts; once it reads again it lands (no download again)', x);
 });
 
@@ -764,7 +764,7 @@ await leg('⑮ another plugin id', async () => {
   const x = await otherScene(undefined);
   ok(x.outcome === 'other-id' && x.got === OTHER && !x.kernel && x.fetched === 0 && x.place === 'K2' && x.line === OTHER_WORDS && x.fact === OTHER_WORDS && x.factOther === OTHER_WORDS
     && x.boot === `[plugins] the fleet's engine plugin ${EID}: other-id · kernel none — the cluster's repository holds another plugin («${OTHER}»), not ${EID}; there is nothing to consent to`
-    && x.said.length === 1 && x.said[0].includes(`the cluster's repository holds another plugin («${OTHER}»), not ${EID}`) && ![x.line, x.fact, x.boot, ...x.said].some((w) => /waiting for your consent|waits for your consent/.test(String(w))),
+    && x.said.length === 1 && gateOf(x.said[0].includes(`the cluster's repository holds another plugin («${OTHER}»), not ${EID}`)) && ![x.line, x.fact, x.boot, ...x.said].some((w) => /waiting for your consent|waits for your consent/.test(String(w))),
     `the cluster's repository holds «${OTHER}», not ${EID} ⇒ the panel, both rows, the boot line and the journal say THAT — «${OTHER_WORDS}» — never «waiting for your consent» (nothing of ${EID} to consent to); nothing fetched`, x);
 });
 
@@ -801,7 +801,7 @@ async function unreadPlan(EDM) {
 }
 await leg('⑰ an unreadable plan at the landing', async () => {
   const x = await unreadPlan(undefined);
-  ok(x.denied && x.kept === 1 && x.discarded === 0 && x.landed === 1 && x.place === 'K2' && x.kernel === VER.k2 && !x.next && !x.nextDir && x.fetched === 1,
+  ok(gateOf(x.denied) && x.kept === 1 && x.discarded === 0 && x.landed === 1 && x.place === 'K2' && x.kernel === VER.k2 && !x.next && !x.nextDir && x.fetched === 1,
     'kernel.json answering EIO at the landing (a transient — only ENOENT is a fact) KEEPS the verified K2 beside the place, said ONCE («… KEPT beside its place, never landed»); the fleet\'s ONE queued re-run judges it again and lands it — downloaded once', x);
 });
 
@@ -813,10 +813,10 @@ async function discardTrace(EDM) {
 }
 await leg('⑱ a discard leaves a trace', async () => {
   const x = await discardTrace(undefined), f = x.fleet, u = x.user;
-  ok(f.rec && f.rec.why === 'untrusted' && f.rec.version === VER.k2 && f.fact && f.fact.why === 'untrusted' && f.todos.length === 1 && f.todos[0].endsWith(': its new browser kernel was discarded')
+  ok(gateOf(f.rec) && f.rec.why === 'untrusted' && f.rec.version === VER.k2 && gateOf(f.fact) && f.fact.why === 'untrusted' && f.todos.length === 1 && gateOf(f.todos[0].endsWith(': its new browser kernel was discarded'))
     && f.card === `Fixture Browser Engine · measured ${VER.k3} · its new kernel ${VER.k2} was discarded — its package was no longer trusted when it arrived`,
     `the cluster's download discarded (nobody watched) ⇒ the record keeps the outcome, the engine card (through the keeper) says «${f.card}», ONE For-you notice («${f.todos[0]}»)`, f);
-  ok(u.rec && u.rec.why === 'stale' && u.rec.by === 'user' && !u.todos.length && u.card === `Fixture Browser Engine · measured ${VER.k3} · its new kernel ${VER.k2} was discarded — the cluster moved its pin while it downloaded`,
+  ok(gateOf(u.rec) && u.rec.why === 'stale' && u.rec.by === 'user' && !u.todos.length && u.card === `Fixture Browser Engine · measured ${VER.k3} · its new kernel ${VER.k2} was discarded — the cluster moved its pin while it downloaded`,
     `a person's own «Download kernel» discarded (the cluster moved its pin) ⇒ the card says why («${u.card}»); no For-you notice (they watched)`, u);
 });
 
@@ -834,7 +834,7 @@ const bootWords = (EDM) => SHAPES.map(([k]) => (typeof EDM.bootLine === 'functio
 await leg('⑲ the boot line\'s words', async () => {
   const got = bootWords(require('../src/server/engine-distribution.js'));
   const bad = SHAPES.map(([, w], i) => (got[i] === `[plugins] the fleet's engine plugin ${EID}: same · ${w}` ? null : got[i])).filter((g) => g !== null);
-  ok(!bad.length && got.slice(0, 4).every((l) => !/kernel ready/.test(l)),
+  ok(!bad.length && verdictOf(got.slice(0, 4).every((l) => !/kernel ready/.test(l))),
     'the boot line: due ⇒ «kernel download due», waiting ⇒ «new kernel waiting beside the place», discarded ⇒ «kernel discarded (why)», trusted by the owner only ⇒ «kernel follows your consent» — «kernel ready» ONLY for a kernel in its place', bad);
 });
 
@@ -864,8 +864,8 @@ async function halfLanded(EDM) {
 }
 await leg('⑳ a half-landed place', async () => {
   const x = await halfLanded(undefined);
-  ok(x.B.threw === 'engine_kernel_landing' && x.B.msg.startsWith('the kernel is being replaced — try again in a moment') && x.B.msg.includes('taking its place for more than 0.2 s') && x.B.empty
-    && x.a === false && x.asideLeft && x.putBack === 1 && x.landed && x.place === 'K3' && !x.aside,
+  ok(x.B.threw === 'engine_kernel_landing' && gateOf(x.B.msg.startsWith('the kernel is being replaced — try again in a moment')) && gateOf(x.B.msg.includes('taking its place for more than 0.2 s')) && gateOf(x.B.empty)
+    && x.a === false && gateOf(x.asideLeft) && x.putBack === 1 && gateOf(x.landed) && x.place === 'K3' && !x.aside,
     `a start whose bound passes while the landing hangs between its renames (the place EMPTY) is REFUSED BY NAME («${String(x.B.msg).slice(0, 70)}…», ${x.B.ms} ms) — never spawned beside it; the landing failed with K2 set aside; the NEXT RUN put K2 back (one line) and landed K3`, x);
 });
 
@@ -887,9 +887,9 @@ async function movingPlan(EDM, road) {
 }
 await leg('㉑ judgeNow: moved', async () => {
   const a = await movingPlan(undefined, 'install'), b = await movingPlan(undefined, 'wait');
-  ok(a.r.discarded === 'moved' && a.place === 'K3' && a.measured === 'untouched' && a.lines.length === 1 && a.lines[0].includes(`kernel ${VER.k2} was downloaded for a plan that changed as it landed — discarded, never landed`),
+  ok(a.r.discarded === 'moved' && a.place === 'K3' && a.measured === 'untouched' && a.lines.length === 1 && verdictOf(a.lines[0].includes(`kernel ${VER.k2} was downloaded for a plan that changed as it landed — discarded, never landed`)),
     'the install road: a plan whose inputs moved at every read ⇒ judgeNow answers \'moved\' in the rename\'s own turn — K2 never lands (judged afresh beside the place, moved again ⇒ discarded), nothing runs, one line', a);
-  ok(b.r.landed === false && b.place === 'K2' && b.next === VER.k3 && b.measured === 'untouched' && b.lines.length === 1 && b.lines[0].includes(`waiting kernel ${VER.k3} did not take its place — its plan changed as it landed; nothing ran, it waits`),
+  ok(b.r.landed === false && b.place === 'K2' && b.next === VER.k3 && b.measured === 'untouched' && b.lines.length === 1 && verdictOf(b.lines[0].includes(`waiting kernel ${VER.k3} did not take its place — its plan changed as it landed; nothing ran, it waits`)),
     'the waiting road: the same ⇒ K3 does not land, nothing runs, it keeps waiting, one line', b);
 });
 
@@ -916,9 +916,9 @@ async function refusedStaging(EDM, at = 'scan') {
 const KEPT_CARD = `Fixture Browser Engine · measured ${VER.k2} · new kernel ${VER.k3} downloaded — it serves the next browser start · a second download of it was discarded — its package was no longer trusted when it arrived`; // r6 (n4): one version, one sentence
 await leg('㉒ a refused staging keeps what waits', async () => {
   const a = await refusedStaging(undefined, 'scan'), b = await refusedStaging(undefined, 'aside');
-  ok(a.fired && a.r.discarded === 'untrusted' && a.n0 === VER.k3 && a.next === VER.k3 && a.kept && a.place === 'K2' && !a.prev && !a.partials && a.trace && a.trace.why === 'untrusted' && a.trace.by === 'user' && !a.todos && a.card === KEPT_CARD,
+  ok(gateOf(a.fired) && a.r.discarded === 'untrusted' && a.n0 === VER.k3 && a.next === VER.k3 && gateOf(a.kept) && a.place === 'K2' && !a.prev && !a.partials && gateOf(a.trace) && a.trace.why === 'untrusted' && a.trace.by === 'user' && !a.todos && a.card === KEPT_CARD,
     `the trust withdrawn INSIDE the in-use scan (a browser on K2 — the download can only wait beside it) ⇒ the judge, asked FIRST, refuses before anything beside the place is touched: the K3 already waiting stays byte for byte with its record (r2: a lapsed trust deletes nothing), only the new download is discarded — the card says both, naming the version once (r6 n4): «${a.card}»`, a);
-  ok(b.fired && b.r.discarded === 'untrusted' && b.next === VER.k3 && b.kept && b.place === 'K2' && !b.prev && !b.partials && b.trace && b.trace.why === 'untrusted' && b.card === KEPT_CARD,
+  ok(gateOf(b.fired) && b.r.discarded === 'untrusted' && b.next === VER.k3 && gateOf(b.kept) && b.place === 'K2' && !b.prev && !b.partials && gateOf(b.trace) && b.trace.why === 'untrusted' && b.card === KEPT_CARD,
     'the trust withdrawn AS the waiting K3 is moved aside (between the staging\'s two asks) ⇒ the last ask refuses in the rename\'s own turn and K3 comes BACK beside the place, byte for byte, its record kept; nothing left aside', b);
 });
 
@@ -953,9 +953,9 @@ async function heldScene(EDM) {
 }
 await leg('㉓ the place not whole', async () => {
   const x = await cleanupScene(undefined), y = await heldScene(undefined);
-  ok(x.inCleanup && x.B.proceeded && x.B.at === 'K3' && x.B.ms >= x.bound / 2 && x.a === true && x.place === 'K3' && !x.removing && !x.refused,
+  ok(gateOf(x.inCleanup) && gateOf(x.B.proceeded) && x.B.at === 'K3' && x.B.ms >= x.bound / 2 && x.a === true && x.place === 'K3' && !x.removing && !x.refused,
     `a start whose bound (${x.bound} ms) passes while the landing DELETES the previous kernel (K3 already whole in its place) goes on — on K3 (${x.B.ms} ms), never «being replaced»; the clean-up ends after it`, x);
-  ok(y.held && y.B.proceeded && y.B.at === 'K2' && y.a === false && y.under === 'K2' && y.next === VER.k3 && y.nextDir && !y.aside,
+  ok(gateOf(y.held) && gateOf(y.B.proceeded) && y.B.at === 'K2' && y.a === false && y.under === 'K2' && y.next === VER.k3 && gateOf(y.nextDir) && !y.aside,
     'a start whose bound passes BEFORE the landing moved anything goes on, holding K2 whole; the landing — asked in the turn that would move the place — moves nothing a start holds: K2 stays under it, K3 keeps waiting (a landing never moves a held place)', y);
 });
 
@@ -979,7 +979,7 @@ async function cloneScene(EDM) {
 }
 await leg('㉔ never behind a git clone', async () => {
   const x = await cloneScene(undefined);
-  ok(x.scanned && x.l === false && x.ms < x.bound && !x.card && x.during === 'K2' && !x.said.length,
+  ok(gateOf(x.scanned) && x.l === false && x.ms < x.bound && !x.card && x.during === 'K2' && !x.said.length,
     `the cluster's install of the package (a git clone) begins DURING a start's in-use scan ⇒ the start is «not now» at once (${x.ms} ms — its bound is ${x.bound} ms): no wait in the writer queue, no «waiting for the new kernel to land» on the card, no journal line; nothing lands under the plan write`, x);
 });
 
@@ -1016,11 +1016,11 @@ async function stepsAside(EDM, only = null) {
 }
 await leg('㉕ every step-aside', async () => {
   const x = await stepsAside(undefined);
-  ok(x.torn && x.stillTorn && x.m.ok === false && x.m.code === 'engine_kernel_landing' && !x.m.threw && x.ran === 0 && x.measured === 'untouched',
+  ok(gateOf(x.torn) && gateOf(x.stillTorn) && x.m.ok === false && x.m.code === 'engine_kernel_landing' && !x.m.threw && x.ran === 0 && x.measured === 'untouched',
     'a forced MEASURE past its bound beside the half-landed place is ANSWERED (engine_kernel_landing, ok false) — never thrown, nothing run, the record untouched', x);
-  ok(x.torn && !x.b.threw && !x.b.hung && Array.isArray(x.b.out) && x.b.out.includes(`${SECOND}:restored`) && !x.b.out.some((o) => o.startsWith(EID)) && x.second,
+  ok(gateOf(x.torn) && !x.b.threw && !x.b.hung && gateOf(Array.isArray(x.b.out)) && gateOf(x.b.out.includes(`${SECOND}:restored`)) && !x.b.out.some((o) => o.startsWith(EID)) && verdictOf(x.second),
     `the BOOT's restore past its bound beside it SKIPS that engine (asked again at the next run) and GOES ON — the next engine's aside kernel is put back (${JSON.stringify(x.b.out)})`, x.b);
-  ok(x.torn && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine && x.a === true && x.place === 'K3',
+  ok(gateOf(x.torn) && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine && x.a === true && x.place === 'K3',
     'a DOWNLOAD asked beside it (the fleet\'s) is refused by name and records NO failure — no failure on the card, no For-you notice, no «download failed» line; the landing then ends with K3 in its place', { i: x.i, failure: x.failure, todos: x.todos, failedLine: x.failedLine, a: x.a, place: x.place });
 });
 
@@ -1058,13 +1058,13 @@ async function busyWords(EDM, how) {
 }
 await leg('㉖ the whole question before the first rename', async () => {
   const x = await droppedScene(undefined, 'after'), y = await droppedScene(undefined, 'scan');
-  ok(x.held && x.B && x.B.proceeded && x.startAt === 'K2' && x.a === false && x.place === 'K2' && x.next === VER.k3 && x.nextDir && !x.aside && !x.landedLine,
+  ok(gateOf(x.held) && gateOf(x.B) && gateOf(x.B.proceeded) && x.startAt === 'K2' && x.a === false && x.place === 'K2' && x.next === VER.k3 && gateOf(x.nextDir) && !x.aside && !x.landedLine,
     'a start past its bound before anything moved SPAWNS from K2 and drops its hold before the landing\'s last await ends (the acceptance\'s probe) ⇒ the landing, asking onPlace\'s whole question in the turn it would move, sees the running browser: held — K2 stays in its place under it, K3 keeps waiting, no «took its place» line', x);
-  ok(y.held && y.B && y.B.proceeded && y.startAt === 'K2' && y.a === false && y.place === 'K2' && y.next === VER.k3 && y.nextDir && !y.aside && !y.landedLine,
+  ok(gateOf(y.held) && gateOf(y.B) && gateOf(y.B.proceeded) && y.startAt === 'K2' && y.a === false && y.place === 'K2' && y.next === VER.k3 && gateOf(y.nextDir) && !y.aside && !y.landedLine,
     'a start that spawns and drops its hold DURING the landing\'s own in-use scan (a scan that listed /proc before the spawn) ⇒ the hold TAKEN meanwhile counts: held — K2 stays, K3 keeps waiting', y);
   const h = await busyWords(undefined, 'start'), r = await busyWords(undefined, 'running');
-  ok(h.staged && h.place === 'K2' && String(h.line).includes('— a browser start holds the current kernel, so the new one waits beside it') && !String(h.line).includes('a browser runs')
-    && r.staged && r.place === 'K2' && String(r.line).includes('— a browser runs the current kernel, so the new one waits beside it'),
+  ok(gateOf(h.staged) && h.place === 'K2' && gateOf(String(h.line).includes('— a browser start holds the current kernel, so the new one waits beside it')) && !String(h.line).includes('a browser runs')
+    && gateOf(r.staged) && r.place === 'K2' && verdictOf(String(r.line).includes('— a browser runs the current kernel, so the new one waits beside it')),
     `(n5) the staging's line says WHICH: a start's hold «${String(h.line).replace(/^.*— /, '')}» — a running browser «${String(r.line).replace(/^.*— /, '')}»`, { h, r });
 });
 
@@ -1109,13 +1109,13 @@ async function putBackScene(EDM, only = null, { hold = 'rename' } = {}) {
 }
 await leg('㉗ the put-back is a rename of the place', async () => {
   const x = await putBackScene(undefined);
-  ok(x.inPutBack && x.stillEmpty && x.s && x.s.threw === 'engine_kernel_landing' && x.s.msg.startsWith('the kernel is being replaced') && x.s.ms >= 50,
+  ok(gateOf(x.inPutBack) && gateOf(x.stillEmpty) && gateOf(x.s) && x.s.threw === 'engine_kernel_landing' && gateOf(x.s.msg.startsWith('the kernel is being replaced')) && x.s.ms >= 50,
     `a START past its bound (0.1 s) while the landing puts K2 back into the EMPTY place is refused by name (${x.s && x.s.ms} ms) — never beside the empty place`, x.s);
-  ok(x.inPutBack && x.m && x.m.ok === false && x.m.code === 'engine_kernel_landing' && !x.m.hung && x.ran === 0 && x.measured === 'untouched',
+  ok(gateOf(x.inPutBack) && gateOf(x.m) && x.m.ok === false && x.m.code === 'engine_kernel_landing' && !x.m.hung && x.ran === 0 && x.measured === 'untouched',
     'a forced MEASURE beside the put-back is ANSWERED (engine_kernel_landing) — never left waiting on the put-back, nothing run', x.m);
-  ok(x.inPutBack && !x.b.threw && !x.b.hung && Array.isArray(x.b.out) && x.b.out.includes(`${SECOND}:restored`) && !x.b.out.some((o) => o.startsWith(EID)) && x.second,
+  ok(gateOf(x.inPutBack) && !x.b.threw && !x.b.hung && gateOf(Array.isArray(x.b.out)) && gateOf(x.b.out.includes(`${SECOND}:restored`)) && !x.b.out.some((o) => o.startsWith(EID)) && verdictOf(x.second),
     `the BOOT skips that engine and GOES ON — the next engine's aside kernel is put back (${JSON.stringify(x.b.out)})`, x.b);
-  ok(x.inPutBack && x.i && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine && x.a === true && x.place === 'K3',
+  ok(gateOf(x.inPutBack) && gateOf(x.i) && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine && x.a === true && x.place === 'K3',
     'a DOWNLOAD by the fleet beside it is refused by name and records NO failure; once the put-back ends the landing lands K3', { i: x.i, failure: x.failure, todos: x.todos, a: x.a, place: x.place });
 });
 
@@ -1153,13 +1153,13 @@ await leg('㉘ the only copy is never swept', async () => {
   const waits = `new kernel ${VER.k3} downloaded — it serves the next browser start`;
   for (const at of ['aside', 'back', 'new']) {
     const x = await crashScene(undefined, at);
-    ok(x.halted && !x.left.next && x.left.prev && x.next === VER.k3 && x.kept && !x.prev && x.place === 'K2' && x.due.staged && !x.discarded
-      && x.lines.some((l) => l.includes(`waiting kernel ${VER.k3} was put back beside its place`)) && String(x.card).endsWith(waits),
+    ok(gateOf(x.halted) && !x.left.next && gateOf(x.left.prev) && x.next === VER.k3 && gateOf(x.kept) && !x.prev && x.place === 'K2' && gateOf(x.due.staged) && !x.discarded
+      && gateOf(x.lines.some((l) => l.includes(`waiting kernel ${VER.k3} was put back beside its place`))) && verdictOf(String(x.card).endsWith(waits)),
       `VibeSpace stops at «${at}» (K3 only as .next-<tag>.prev, the record still naming it) ⇒ the next boot puts K3 BACK at .next-<tag> byte for byte — never swept as a leftover; the record, kernelDue (staged) and the card agree: it waits`, x);
   }
   const y = await crashScene(undefined, 'aside', { failBack: true });
-  ok(y.halted && y.next === null && !y.kept && !y.prev && y.discarded === 'lost' && y.due.due === true && y.due.sha === 'K3' && y.place === 'K2' && y.todos === (y.by === 'user' ? 0 : 1)
-    && y.lines.some((l) => l.includes(`waiting kernel ${VER.k3} was lost`)) && !String(y.card).includes('serves the next browser start') && String(y.card).endsWith(`its new kernel ${VER.k3} was discarded — VibeSpace stopped while setting it beside its place`),
+  ok(gateOf(y.halted) && y.next === null && !y.kept && !y.prev && y.discarded === 'lost' && y.due.due === true && y.due.sha === 'K3' && y.place === 'K2' && y.todos === (y.by === 'user' ? 0 : 1)
+    && gateOf(y.lines.some((l) => l.includes(`waiting kernel ${VER.k3} was lost`))) && !String(y.card).includes('serves the next browser start') && verdictOf(String(y.card).endsWith(`its new kernel ${VER.k3} was discarded — VibeSpace stopped while setting it beside its place`)),
     `…and when that put-back FAILS the record stops naming it in the same run — rec.next cleared, the discard recorded (the card: «${String(y.card).replace(/^.* · its/, 'its')}»), kernelDue due again — never a record naming a folder that is gone`, y);
 });
 
@@ -1211,11 +1211,11 @@ await leg('㉚ unreadable is a third answer', async () => {
   U = await Promise.all(['sweep', 'land', 'stage-fleet', 'stage'].map((road) => unreadAside(undefined, road)));
   const [a, b, c] = U;
   const still = (x) => x.halted && x.eios >= 1 && x.prev === 'byte for byte' && x.next === `${VER.k3}:K3` && !x.discarded && !x.failure && !x.todos && x.place === 'K2' && x.said === 1 && !x.acted.length;
-  ok(still(a) && a.due.staged && !a.r.some((o) => o.includes('.next-linux-x64.prev')) && a.healed,
+  ok(gateOf(still(a)) && gateOf(a.due.staged) && !a.r.some((o) => o.includes('.next-linux-x64.prev')) && verdictOf(a.healed),
     `the BOOT's sweep beside a .next-<tag>.prev whose receipt answers EIO keeps it byte for byte (swept only ${JSON.stringify(a.r)}) — rec.next untouched, kernelDue staged, ONE line; the next boot that reads it puts K3 back`, a);
-  ok(still(b) && b.r === false && b.due.staged && b.healed,
+  ok(gateOf(still(b)) && b.r === false && gateOf(b.due.staged) && verdictOf(b.healed),
     'a START\'s landNext (no browser runs) meeting it lands nothing and drops nothing — rec.next untouched (never «not beside its place any more»), kernelDue staged, ONE line; the start goes on with K2; the next boot puts K3 back', b);
-  ok(still(c) && c.due.staged && c.r && c.r.staged === false && c.r.kept === 'EIO' && !c.r.discarded && c.unpack && !c.nextDir,
+  ok(gateOf(still(c)) && gateOf(c.due.staged) && gateOf(c.r) && c.r.staged === false && c.r.kept === 'EIO' && !c.r.discarded && gateOf(c.unpack) && !c.nextDir,
     'the CLUSTER\'s DOWNLOAD of K3 again beside the running browser stages nothing over it — the .prev never removed, the new download left where it is (.unpack-<tag>), nothing moved aside, nothing discarded or recorded, ONE line (r8: a person\'s download is ㉞\'s)', c);
 });
 
@@ -1223,10 +1223,10 @@ console.log('— ㉛ (r7 p2) the not-whole window opens when the put-back is ASK
 await leg('㉛ the put-back\'s stats are inside the window', async () => {
   const xs = await Promise.all(['removing', 'place'].map((hold) => putBackScene(undefined, null, { hold })));
   for (const x of xs) {
-    ok(x.inPutBack && x.stillEmpty && x.s && x.s.threw === 'engine_kernel_landing' && x.s.msg.startsWith('the kernel is being replaced')
-      && x.m && x.m.ok === false && x.m.code === 'engine_kernel_landing' && x.ran === 0 && x.measured === 'untouched'
-      && !x.b.threw && !x.b.hung && Array.isArray(x.b.out) && x.b.out.includes(`${SECOND}:restored`) && !x.b.out.some((o) => o.startsWith(EID)) && x.second
-      && x.i && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine && x.a === true && x.place === 'K3',
+    ok(gateOf(x.inPutBack) && gateOf(x.stillEmpty) && gateOf(x.s) && x.s.threw === 'engine_kernel_landing' && gateOf(x.s.msg.startsWith('the kernel is being replaced'))
+      && gateOf(x.m) && x.m.ok === false && x.m.code === 'engine_kernel_landing' && x.ran === 0 && x.measured === 'untouched'
+      && !x.b.threw && !x.b.hung && gateOf(Array.isArray(x.b.out)) && gateOf(x.b.out.includes(`${SECOND}:restored`)) && !x.b.out.some((o) => o.startsWith(EID)) && gateOf(x.second)
+      && gateOf(x.i) && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine && x.a === true && x.place === 'K3',
       `the landing's put-back HANGS at its ${x.hold === 'removing' ? 'first stat (.removing-<tag>)' : 'second stat (the EMPTY place)'} ⇒ a start past its bound is refused by name (${x.s && x.s.ms} ms), the measure answers engine_kernel_landing (nothing run), the boot skips the id and puts the second engine back (${JSON.stringify(x.b.out)}), the fleet's download is refused with no failure recorded; once it answers K3 lands`, x);
   }
 });
@@ -1261,8 +1261,8 @@ async function unreadPlace(EDM, how, { eios = 1 } = {}) {
 await leg('㉜ the put-back\'s three answers on the landing road', async () => {
   const xs = await Promise.all([['eio', 2], ['untrust', 1], ['stale', 1]].map(([how, eios]) => unreadPlace(undefined, how, { eios })));
   for (const x of xs) {
-    ok(x.stats === x.eios && x.r.every((v) => v === false) && x.aside === 'byte for byte' && x.place === null && x.rec.kernel === null && x.rec.aside === 'K2' && x.rec.next === VER.k3 && x.said === 1 && !x.acted.length
-      && x.then.place === 'K2' && x.then.kernel === 'K2' && !x.then.aside && !x.then.removing && x.then.back,
+    ok(x.stats === x.eios && gateOf(x.r.every((v) => v === false)) && x.aside === 'byte for byte' && x.place === null && x.rec.kernel === null && x.rec.aside === 'K2' && x.rec.next === VER.k3 && x.said === 1 && !x.acted.length
+      && x.then.place === 'K2' && x.then.kernel === 'K2' && !x.then.aside && !x.then.removing && verdictOf(x.then.back),
       `the landing's put-back cannot read the EMPTY place (EIO${x.eios > 1 ? ` at ${x.eios} starts` : ''}${x.how === 'untrust' ? ', the trust withdrawn in that stat' : x.how === 'stale' ? ', the plan moved to K2 in that stat' : ''}) ⇒ NOTHING lands, moves or is deleted — .removing-<tag> byte for byte, rec.aside K2, rec.next ${VER.k3}, ONE line; the next readable run (a measure) puts K2 back`, x);
   }
 });
@@ -1281,9 +1281,9 @@ async function dupAside(EDM, { eio = false } = {}) {
 }
 await leg('㉝ the sweep\'s keep-list is healAside\'s answer', async () => {
   const [a, b] = await Promise.all([dupAside(undefined), dupAside(undefined, { eio: true })]);
-  ok(a.swept.length === 1 && a.swept[0] === '.next-linux-x64.prev' && a.prev === 'gone' && a.next === 'whole' && a.rec === VER.k3 && a.place === 'K2' && a.lines.length === 1 && a.lines[0].includes('leftover kernel files the record does not name were removed (.next-linux-x64.prev)'),
+  ok(a.swept.length === 1 && a.swept[0] === '.next-linux-x64.prev' && a.prev === 'gone' && a.next === 'whole' && a.rec === VER.k3 && a.place === 'K2' && a.lines.length === 1 && verdictOf(a.lines[0].includes('leftover kernel files the record does not name were removed (.next-linux-x64.prev)')),
     'a copy left as .next-<tag>.prev beside the named K3 WHOLE at .next-<tag> (its receipt read) is a duplicate ⇒ the boot\'s sweep removes it, ONE line — K3 and the record untouched', a);
-  ok(!b.swept.length && b.prev === 'kept' && b.next === 'whole' && b.rec === VER.k3 && b.lines.length === 1 && b.lines[0].includes(`waiting kernel ${VER.k3} could not be read beside its place now (EIO)`),
+  ok(!b.swept.length && b.prev === 'kept' && b.next === 'whole' && b.rec === VER.k3 && b.lines.length === 1 && verdictOf(b.lines[0].includes(`waiting kernel ${VER.k3} could not be read beside its place now (EIO)`)),
     '…the same with .next-<tag>\'s receipt answering EIO ⇒ healAside cannot tell — BOTH names kept, ONE line', b);
 });
 
@@ -1291,13 +1291,13 @@ console.log('— ㉞ (r8 s3) an unknown is said where the person looks — the c
 await leg('㉞ the card says it; the person\'s download fetches it again', async () => {
   const [a, b, c, d] = U;
   const unreadWords = `the waiting kernel ${VER.k3} could not be read (EIO) — it is kept beside its place and asked again at the next start`;
-  ok([a, b, c].every((x) => x.unread === 'EIO' && String(x.card).endsWith(` · ${unreadWords}`) && !String(x.card).includes('serves the next browser start')),
+  ok(verdictOf([a, b, c].every((x) => x.unread === 'EIO' && String(x.card).endsWith(` · ${unreadWords}`) && !String(x.card).includes('serves the next browser start'))),
     `under ㉚'s unknown (the boot's sweep · a start · the cluster's download) the engine card read through the keeper says «${unreadWords}» — never «it serves the next browser start» while every start runs K2`, [a, b, c].map((x) => ({ road: x.road, unread: x.unread, card: x.card })));
   const fl = a.fleet || {};
-  ok(fl.run === 'same' && fl.view && fl.view.state === 'staged' && fl.view.unread === 'EIO' && fl.said === 1 && fl.line === `The cluster's plugin ${EID}: its waiting kernel ${VER.k3} could not be read (EIO) — it is kept beside its place and asked again at the next start`,
+  ok(fl.run === 'same' && gateOf(fl.view) && fl.view.state === 'staged' && fl.view.unread === 'EIO' && fl.said === 1 && fl.line === `The cluster's plugin ${EID}: its waiting kernel ${VER.k3} could not be read (EIO) — it is kept beside its place and asked again at the next start`,
     'the cluster\'s run over the same unknown (its own sweep asks again — still ONE line): the Plugins panel\'s fleet line (fleetView → fleetPluginWords) says the same of the cluster\'s waiting kernel', fl);
-  ok(d.halted && d.said === 1 && d.r && d.r.staged === true && !d.r.kept && d.prev === 'byte for byte' && d.nextDir && d.nextSha === 'K3' && !d.unpack && d.next === `${VER.k3}:K3` && d.by === 'user'
-    && !d.discarded && !d.failure && d.due.staged && !d.unread && String(d.card).endsWith(`new kernel ${VER.k3} downloaded — it serves the next browser start`)
+  ok(gateOf(d.halted) && d.said === 1 && gateOf(d.r) && d.r.staged === true && !d.r.kept && d.prev === 'byte for byte' && gateOf(d.nextDir) && d.nextSha === 'K3' && !d.unpack && d.next === `${VER.k3}:K3` && d.by === 'user'
+    && !d.discarded && !d.failure && gateOf(d.due.staged) && !d.unread && gateOf(String(d.card).endsWith(`new kernel ${VER.k3} downloaded — it serves the next browser start`))
     && d.after.swept.length === 1 && d.after.swept[0] === '.next-linux-x64.prev' && !d.after.prev && d.after.nextSha === 'K3' && d.after.next === VER.k3 && d.after.lines.length === 2,
     'a PERSON\'s «Download kernel» under that unknown is set in the free slot — the unread .prev untouched (byte for byte), rec.next the new K3, the card says it waits again; the next sweep, the .prev STILL unreadable, removes it as a duplicate of K3 whole at .next-<tag>', d);
 });
@@ -1309,7 +1309,7 @@ await leg('㉙ the refusal\'s words', async () => {
   const tOf = (d) => (s, p) => tW(d && Object.prototype.hasOwnProperty.call(d, s) ? d[s] : s, p);
   const want = { en: 'The browser kernel is being replaced — try again in a moment.', zh: '浏览器内核正在替换——请稍后再试。', ja: 'ブラウザのカーネルを置き換え中です。しばらくしてからもう一度お試しください。' };
   const got = Object.fromEntries(Object.keys(want).map((l) => [l, { human: HB.humanRefusalText('engine_kernel_landing', {}, tOf(dict[l])), build: BM.buildRefusalWords({ code: 'engine_kernel_landing' }, tOf(dict[l])) }]));
-  ok(Object.keys(want).every((l) => got[l].human === want[l] && got[l].build === want[l]),
+  ok(verdictOf(Object.keys(want).every((l) => got[l].human === want[l] && got[l].build === want[l])),
     'engine_kernel_landing worded on the client by code — humanRefusalText (Browse yourself) and buildRefusalWords (Change build…, New profile…) — in en / zh / ja', got);
 });
 
@@ -1331,7 +1331,7 @@ await leg('M1', async () => { // M1 — the trust kept at the old sha
   await until(() => Q.gate.inflight === 1);
   const kept = Q.row().install.sha === shaA && Q.row().trusted === true;
   rel(); await settled(Q); Q.close();
-  ok(kept, 'control M1: a loader whose D2 forgets the sha keeps the OLD package trusted after the cluster\'s pin moved — exactly what ② refuses (RED)');
+  ok(verdictOf(kept), 'control M1: a loader whose D2 forgets the sha keeps the OLD package trusted after the cluster\'s pin moved — exactly what ② refuses (RED)');
 });
 await leg('M2', async () => { // M2 — no listener: the base's shape (a new pin waits for a restart)
   const EDM = MC.load('src/server/engine-distribution.js', swap(EDsrc, 'const off = presets.onChange(() => { fleetChanged().catch(() => {}); });', 'const off = () => {};', 'listener'), 'no-listener');
@@ -1362,7 +1362,7 @@ await leg('M4', async () => { // M4 — a kernel swapped under a running browser
   const EDM = MC.load('src/server/engine-distribution.js', swap(EDsrc, "    if (await inUse(sid, plan)) return 'a browser runs the current kernel';\n", '', 'in use'), 'swap-running'); // r6: placeBusy — onPlace's and landDir's one question
   const run = async (M) => { const L = light(snapC, { EDM: M, inUse: () => true, prep: noNext }); const r = await L.ED.installKernel(EID, { by: 'fleet', wait: true }); return { staged: !!(r && r.staged), place: L.receipt() === KSHA.k2 ? 'K2' : L.receipt() === KSHA.k3 ? 'K3' : L.receipt() }; };
   const good = await run(undefined), bad = await run(EDM);
-  ok(good.staged && good.place === 'K2' && !bad.staged && bad.place === 'K3', 'control M4: without the in-use check the new kernel replaces the one a browser is running — ⑦ RED; the real one waits beside it', { good, bad });
+  ok(gateOf(good.staged) && good.place === 'K2' && !bad.staged && bad.place === 'K3', 'control M4: without the in-use check the new kernel replaces the one a browser is running — ⑦ RED; the real one waits beside it', { good, bad });
 });
 await leg('M5', async () => { // M5 — the tip's kernel step for an untrusted package (no cluster-trust gate, no trust check in kernelDue / installKernel)
   let s = swap(EDsrc, 'if (!clusterTrusts(id)) {', 'if (false) {', 'fleet gate');
@@ -1408,14 +1408,14 @@ if (SLEEP) await leg('M8', async () => { // M8 — the tip's in-use check: the p
   const lb = await b.L.ED.landNext(EID); await ended(b.k);
   const c = await procScene(undefined, { link: false }); c.deny.exe = c.k.pid;
   const lc = await c.L.ED.landNext(EID); await ended(c.k);
-  ok(la === true && alive && a.L.receipt() === KSHA.k3 && lb === true && b.L.receipt() === KSHA.k3 && lc === false && c.L.receipt() === KSHA.k2,
+  ok(la === true && gateOf(alive) && a.L.receipt() === KSHA.k3 && lb === true && b.L.receipt() === KSHA.k3 && lc === false && c.L.receipt() === KSHA.k2,
     'control M8: (a) the place compared un-realpath\'d ⇒ K3 lands under the program run through the symlinked data/; (b) EACCES read as «not in use» ⇒ K3 lands under it — ⑩ RED; the real check keeps it waiting', { la, lb, lc });
 });
 await leg('M9', async () => { // M9 — a discard that keeps the folder (the tip's) and no sweep
   let s = swap(EDsrc, "    await fsp.rm(plan.nextDir, { recursive: true, force: true }).catch((e) => log.warn?.(`[browser] the waiting kernel at ${plan.nextDir} could not be deleted", "    if (false) await fsp.rm(plan.nextDir, { recursive: true, force: true }).catch((e) => log.warn?.(`[browser] the waiting kernel at ${plan.nextDir} could not be deleted", 'discard rm');
   s = swap(s, '      try { const gone = await sweepLeftovers(id, plan);', '      try { const gone = []; if (false) await sweepLeftovers(id, plan);', 'sweep');
   const o = await orphanScenes(MC.load('src/server/engine-distribution.js', s, 'orphans'));
-  ok(o.aDir && o.bLeft && o.bLeft.length === 3, 'control M9: a discard that keeps .next-<tag> and a boot with no sweep leave every orphan on the disk (a whole kernel each in production) — ⑪ RED', o);
+  ok(gateOf(o.aDir) && gateOf(o.bLeft) && o.bLeft.length === 3, 'control M9: a discard that keeps .next-<tag> and a boot with no sweep leave every orphan on the disk (a whole kernel each in production) — ⑪ RED', o);
 });
 await leg('M10', async () => { // M10 — the r2 install landing: no judge on the install road
   let s = swap(EDsrc, "      const lv = await landingVerdict(sid, sha);\n      if (!lv.ok && lv.why !== 'unread') return discardDownload(sid, plan, kfact, lv);\n", '      const lv = { ok: true };\n', 'install judge');
@@ -1433,7 +1433,7 @@ await leg('M11', async () => { // M11 — the r2 onPlace order: a landing waits 
 });
 await leg('M12', async () => { // M12 — a read error taken for «gone» (r2: readJson's null / undefined)
   const bad = await unreadable(MC.load('src/server/engine-distribution.js', swap(EDsrc, '        if (rv.error) {', '        if (false) {', 'transient'), 'read-error-gone'));
-  ok(!bad.next && !bad.dir && bad.gone && bad.place === 'K2',
+  ok(!bad.next && !bad.dir && gateOf(bad.gone) && bad.place === 'K2',
     'control M12: a read error taken for «gone» deletes the verified waiting kernel and its record (a whole download again) — ⑭ RED', bad);
 });
 const BMsrc = read('src/lib/browser-build-model.js');
@@ -1443,7 +1443,7 @@ await leg('M13', async () => { // M13 — the r2 other-id: the kernel step's con
   let b = swap(BMsrc, '    else if (other) line = other;\n', '', 'other line');
   b = swap(b, '  } else if (p && other && (p.id === f.plugin || p.id === f.got)) fact = other;\n  else if (p && consent', '  } else if (p && consent', 'other fact');
   const bad = await otherScene(EDM, await bmMutant(b, 'other-id-words'));
-  ok(/waiting for your consent/.test(String(bad.line)) && /waiting for your consent/.test(String(bad.fact)) && /waits for your consent/.test(String(bad.boot)),
+  ok(gateOf(/waiting for your consent/.test(String(bad.line))) && gateOf(/waiting for your consent/.test(String(bad.fact))) && verdictOf(/waits for your consent/.test(String(bad.boot))),
     'control M13: the r2 other-id says «waiting for your consent — its kernel is not fetched» on the panel, the row and the boot line for a package that is not even installed — ⑮ RED', bad);
 });
 await leg('M14', async () => { // M14 — the r2 tag line: blind to trust
@@ -1472,7 +1472,7 @@ const Ksrc = read('src/server/browser-keeper.js');
 await leg('M18', async () => { // M18 — the r3 keeper: a hand-copied kernel fact
   const KM = MC.load('src/server/browser-keeper.js', swap(Ksrc, 'kernel: { ...k } };', 'kernel: { state: k.state, step: k.step, bytes: k.bytes, total: k.total, code: k.code, error: k.error, node: k.node, need: k.need, credential: k.credential || null, next: k.next || null } };', 'whole fact'), 'hand-copied');
   const a = await landingScene(KM), b = await wholeFact(KM);
-  ok(a.waiting && !a.during && !/waiting for the new kernel to land/.test(String(a.card)) && b.missing.includes('landing') && b.missing.includes('discarded'),
+  ok(gateOf(a.waiting) && !a.during && !/waiting for the new kernel to land/.test(String(a.card)) && gateOf(b.missing.includes('landing')) && verdictOf(b.missing.includes('discarded')),
     'control M18: the r3 keeper\'s hand-copied kernel fact drops `landing` (and r4\'s `discarded`) — the card never says «waiting for the new kernel to land» on any surface while a start waits — ⑬ RED', { card: a.card, missing: b.missing });
 });
 await leg('M19', async () => { // M19 — 'unread' discarded on the install road (r3)
@@ -1492,7 +1492,7 @@ await leg('M21', async () => { // M21 — the r3 boot line
   if (a0 < 0 || a1 < 0) throw new Error('control anchor missing (bootLine)');
   const R3 = "function bootLine(r) {\n  if (!r || !r.plugin) return null;\n  const k = r.kernel;\n  const kw = !k ? '' : k.ok === false ? `not downloaded [${k.code}]` : k.otherId ? `none — the cluster's repository holds another plugin («${k.otherId}»), not ${r.plugin}; there is nothing to consent to` : k.untrusted ? 'not fetched — it waits for your consent' : 'ready';\n  return `[plugins] the fleet's engine plugin ${r.plugin}: ${r.outcome}${kw ? ` · kernel ${kw}` : ''}`;\n}\n";
   const got = bootWords(MC.load('src/server/engine-distribution.js', EDsrc.slice(0, a0) + R3 + EDsrc.slice(a1), 'boot-ready'));
-  ok(got.slice(0, 4).every((l) => /· kernel ready$/.test(l)), 'control M21: the r3 boot line says «kernel ready» for a kernel only due, waiting beside the place, discarded, or trusted by the owner only — ⑲ RED', got.slice(0, 4));
+  ok(verdictOf(got.slice(0, 4).every((l) => /· kernel ready$/.test(l))), 'control M21: the r3 boot line says «kernel ready» for a kernel only due, waiting beside the place, discarded, or trusted by the owner only — ⑲ RED', got.slice(0, 4));
 });
 await leg('M22', async () => { // M22 — the judge without its sha comparison (the acceptance's r3 (d): no control isolated it)
   const bad = await inFlight(MC.load('src/server/engine-distribution.js', swap(EDsrc, "      if (!p || p.sha256 !== sha256) return { ok: false, why: 'stale', p };\n", '', 'judge sha'), 'judge-no-sha'), replan);
@@ -1524,11 +1524,11 @@ await leg('M26', async () => { // M26 — the refusal keyed on the whole landing
 });
 await leg('M27', async () => { // M27 — a landing that moves a held place
   const bad = await heldScene(MC.load('src/server/engine-distribution.js', swap(EDsrc, "    const busy = await placeBusy(sid, plan);\n    if (busy) return { ok: false, why: 'held', by: busy };\n", '', 'held'), 'moves-held')); // r6: the check re-anchored (placeBusy)
-  ok(bad.B.proceeded && bad.under === 'K3', 'control M27: a landing that does not ask for a hold before its first rename moves K2 out from under a start that holds it (K3 lands under the hold) — ㉓ RED', bad);
+  ok(gateOf(bad.B.proceeded) && bad.under === 'K3', 'control M27: a landing that does not ask for a hold before its first rename moves K2 out from under a start that holds it (K3 lands under the hold) — ㉓ RED', bad);
 });
 await leg('M28', async () => { // M28 — a start's ask that waits behind a plan write (the amend's)
   const bad = await cloneScene(MC.load('src/server/engine-distribution.js', swap(EDsrc, '      else if (g.planning) { mine = false; prev.then(done); return LATE; }\n', '', 'plan write'), 'waits-behind-clone'));
-  ok(bad.l === false && !!bad.card && bad.card.waitS === bad.bound / 1000 && bad.said.some((l) => l.includes('waits for the new kernel to land')) && bad.said.some((l) => l.includes('waits no longer')) && bad.ms >= bad.bound / 2,
+  ok(bad.l === false && !!bad.card && bad.card.waitS === bad.bound / 1000 && gateOf(bad.said.some((l) => l.includes('waits for the new kernel to land'))) && gateOf(bad.said.some((l) => l.includes('waits no longer'))) && bad.ms >= bad.bound / 2,
     `control M28: a start's ask with no plan-write check WAITS in the writer queue behind the git clone — said («waits for the new kernel to land», then «waits no longer»), the card's «waiting for the new kernel to land (≤ ${bad.bound / 1000} s)» — and gives up at its bound (${bad.ms} ms) while nothing lands — ㉔ RED`, bad);
 });
 // B-4d35: a PUT-BACK started OUTSIDE a landing hangs — K2 aside (an earlier landing stopped between its renames), the place EMPTY,
@@ -1590,23 +1590,23 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
     putBackOutsideScene(load(cut(bootAnchor, '      try { const back = await restoreAside(id, plan);', 'the boot\'s own put-back bounded'), 'b4d35-boot-unbounded'), { first: 'boot', afterFirst: true }), // stale-pins: kept — the release's own line, planted back as this control's mutant (the boot's put-back unbounded)
     putBackOutsideScene(load(cut(instAnchor, '      let back0 = null; try { back0 = await restoreAside(sid, plan); } finally { rel0(); }', 'the download\'s own put-back bounded'), 'b4d35-install-unbounded'), { first: 'install', afterFirst: true }), // stale-pins: kept — the release's own line, planted back as this control's mutant (the download's put-back unbounded)
   ]);
-  ok(x.inPutBack && x.stillEmpty && x.s && x.s.threw === 'engine_kernel_landing' && x.s.msg.startsWith('the kernel is being put back in its place') && x.s.ms >= 50,
+  ok(gateOf(x.inPutBack) && gateOf(x.stillEmpty) && gateOf(x.s) && x.s.threw === 'engine_kernel_landing' && gateOf(x.s.msg.startsWith('the kernel is being put back in its place')) && x.s.ms >= 50,
     'B-4d35: a START beside a put-back outside a landing is refused BY NAME within its bound («the kernel is being put back in its place — try again in a moment») — never spawned beside the emptied place', x.s);
-  ok(x.m && x.m.ok === false && x.m.code === 'engine_kernel_landing' && !x.m.hung, 'B-4d35: a second forced MEASURE is ANSWERED by name within its bound — never left waiting on the shared rename', x.m);
-  ok(x.b && !x.b.hung && !x.b.threw && Array.isArray(x.b.out) && !x.b.out.some((o) => o.startsWith(EID)), 'B-4d35: the BOOT goes on past this engine within its bound (the engine waits for the next run — no failure, nothing swept beside the rename)', x.b);
-  ok(x.i && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine, 'B-4d35: a DOWNLOAD by the fleet is refused by name — never recorded as a failure, no For-you item, no «download failed» line', { i: x.i, failure: x.failure, todos: x.todos, failedLine: x.failedLine });
-  ok(x.a && x.a.ok === false && x.a.code === 'engine_kernel_landing' && x.a.ms >= 50 && !x.a.hung, 'B-4d35: the FIRST asker (the measure whose put-back hangs) steps aside within ITS bound too — the rename runs on', x.a);
-  ok(x.said >= 1 && x.back && x.place === 'K2', `B-4d35: said in the journal (${x.said} ask(s) waited for the put-back), and once the rename ends the kernel is back in its place, the record following it`, { said: x.said, back: x.back, place: x.place });
-  ok(n.a && n.a.code === 'engine_kernel_landing' && n.s && n.s.threw === 'engine_kernel_landing' && !n.s.hung && n.i && n.i.threw === 'engine_kernel_landing' && !n.failure && n.back && n.place === 'K2',
+  ok(gateOf(x.m) && x.m.ok === false && x.m.code === 'engine_kernel_landing' && !x.m.hung, 'B-4d35: a second forced MEASURE is ANSWERED by name within its bound — never left waiting on the shared rename', x.m);
+  ok(gateOf(x.b) && !x.b.hung && !x.b.threw && gateOf(Array.isArray(x.b.out)) && !x.b.out.some((o) => o.startsWith(EID)), 'B-4d35: the BOOT goes on past this engine within its bound (the engine waits for the next run — no failure, nothing swept beside the rename)', x.b);
+  ok(gateOf(x.i) && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine, 'B-4d35: a DOWNLOAD by the fleet is refused by name — never recorded as a failure, no For-you item, no «download failed» line', { i: x.i, failure: x.failure, todos: x.todos, failedLine: x.failedLine });
+  ok(gateOf(x.a) && x.a.ok === false && x.a.code === 'engine_kernel_landing' && x.a.ms >= 50 && !x.a.hung, 'B-4d35: the FIRST asker (the measure whose put-back hangs) steps aside within ITS bound too — the rename runs on', x.a);
+  ok(x.said >= 1 && gateOf(x.back) && x.place === 'K2', `B-4d35: said in the journal (${x.said} ask(s) waited for the put-back), and once the rename ends the kernel is back in its place, the record following it`, { said: x.said, back: x.back, place: x.place });
+  ok(gateOf(n.a) && n.a.code === 'engine_kernel_landing' && gateOf(n.s) && n.s.threw === 'engine_kernel_landing' && !n.s.hung && gateOf(n.i) && n.i.threw === 'engine_kernel_landing' && !n.failure && gateOf(n.back) && n.place === 'K2',
     'B-4d35 (with a WAITING kernel, asked after the first asker stepped aside): the start\'s landNext never lands beside the put-back — the start is refused by name within its bound, nothing lands, the kernel comes back', { s: n.s, i: n.i, place: n.place });
-  ok(bt.a && !bt.a.hung && !bt.a.threw && Array.isArray(bt.a.out) && !bt.a.out.some((o) => o.startsWith(EID)) && !bt.failure && bt.back && bt.place === 'K2',
+  ok(gateOf(bt.a) && !bt.a.hung && !bt.a.threw && gateOf(Array.isArray(bt.a.out)) && !bt.a.out.some((o) => o.startsWith(EID)) && !bt.failure && gateOf(bt.back) && bt.place === 'K2',
     'B-4d35 (the BOOT asks the put-back first): it steps aside within its bound — the engine left for the next run, nothing swept beside the rename (the kernel comes back whole)', { a: bt.a, failure: bt.failure, place: bt.place });
-  ok(it.a && it.a.threw === 'engine_kernel_landing' && !it.a.hung && !it.failure && !it.todos && !it.failedLine && it.back && it.place === 'K2',
+  ok(gateOf(it.a) && it.a.threw === 'engine_kernel_landing' && !it.a.hung && !it.failure && !it.todos && !it.failedLine && gateOf(it.back) && it.place === 'K2',
     'B-4d35 (a fleet DOWNLOAD asks the put-back first): refused by name within its bound — never a failure, no For-you item; the kernel comes back', { a: it.a, failure: it.failure, todos: it.todos });
-  ok(noHold.s && noHold.s.proceeded === true && noHold.s.empty === true, 'CONTROL (B-4d35, holdPlace without the put-back wait — the release): the start goes on beside the EMPTIED place', noHold.s);
-  ok(noOwn.a && noOwn.a.hung === true, 'CONTROL (B-4d35, the first asker\'s own await unbounded): the measure that asked the put-back HANGS on its rename', noOwn.a);
-  ok(bootOpen.a && bootOpen.a.hung === true, 'CONTROL (B-4d35, the boot\'s own put-back unbounded): the boot HANGS on its rename', bootOpen.a);
-  ok(instOpen.a && instOpen.a.hung === true, 'CONTROL (B-4d35, the download\'s own put-back unbounded): the download HANGS on its rename', instOpen.a);
+  ok(gateOf(noHold.s) && noHold.s.proceeded === true && noHold.s.empty === true, 'CONTROL (B-4d35, holdPlace without the put-back wait — the release): the start goes on beside the EMPTIED place', noHold.s);
+  ok(gateOf(noOwn.a) && noOwn.a.hung === true, 'CONTROL (B-4d35, the first asker\'s own await unbounded): the measure that asked the put-back HANGS on its rename', noOwn.a);
+  ok(gateOf(bootOpen.a) && bootOpen.a.hung === true, 'CONTROL (B-4d35, the boot\'s own put-back unbounded): the boot HANGS on its rename', bootOpen.a);
+  ok(gateOf(instOpen.a) && instOpen.a.hung === true, 'CONTROL (B-4d35, the download\'s own put-back unbounded): the download HANGS on its rename', instOpen.a);
   // round 3 (the second adversarial read): an ask whose ONE bound is spent — a forced measure that waited out ㉓'s landing while it only
   // DELETES the previous kernel (r5: it goes on) — only LOOKS at its put-back: there is a kernel in its place, so the put-back ends at
   // once and the measure measures; never «being put back», never a second bound
@@ -1632,9 +1632,9 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
   const [lm, lmBad] = await Promise.all([lateMeasure(undefined), lateMeasure(load(lateSrc, 'b4d35-late-refused'))]);
   // (the restack onto 2.369.410: «never a second bound» is judged by the journal — a bound waited out says «is still being put back
   // after» — and by the answer, never by a literal wall-clock bound: the release's ratchet of those is at 0)
-  ok(lm.inCleanup && lm.m && lm.m.ok === true && !lm.m.code && !lm.said && lm.a === true,
+  ok(gateOf(lm.inCleanup) && gateOf(lm.m) && lm.m.ok === true && !lm.m.code && !lm.said && lm.a === true,
     'B-4d35 round 3: a forced measure whose ONE bound passed while the landing only deleted the previous kernel goes on and MEASURES — its put-back only looked (a kernel in its place) — never «being put back», never a second bound', lm);
-  ok(lmBad.m && lmBad.m.code === 'engine_kernel_landing', 'CONTROL (B-4d35 round 3, a late ask refused at once): that measure is answered «being put back» though nothing was aside', lmBad.m);
+  ok(gateOf(lmBad.m) && lmBad.m.code === 'engine_kernel_landing', 'CONTROL (B-4d35 round 3, a late ask refused at once): that measure is answered «being put back» though nothing was aside', lmBad.m);
   // B-3dbd (主开发 r3305; bl-tests-a's finding — on a loaded machine the PRODUCT lost, not the leg): the same late forced measure, while
   // the put-back's own LOOK is held by a PLACED stall (its stats of the copy beside the place and of the place answer 150 ms late —
   // past the release's 50 ms look) and nothing is to be put back (a kernel in its place): the measure waits for that look and
@@ -1657,12 +1657,12 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
   };
   const raceSrc = cut("    if (ask.late) {\n      const fact = putBackFacts.get(sid);\n", "    if (ask.late) return within(p, 50); // the release: 50 ms of wall clock raced against the look's reads\n    if (false) {\n      const fact = putBackFacts.get(sid);\n", 'the late look raced against a clock');
   const [sl, slBad] = await Promise.all([lateMeasureSlowLook(undefined), lateMeasureSlowLook(load(raceSrc, 'b3dbd-late-look-race'))]);
-  ok(sl.inCleanup && sl.stalled >= 1 && sl.m && sl.m.ok === true && !sl.m.code && !sl.said && sl.a === true,
+  ok(gateOf(sl.inCleanup) && sl.stalled >= 1 && gateOf(sl.m) && sl.m.ok === true && !sl.m.code && !sl.said && sl.a === true,
     'B-3dbd: the late forced measure whose put-back\'s LOOK is held past 50 ms (a placed stall in its stats) with a kernel in its place waits for the look and MEASURES — judged by the put-back\'s own fact, never «being put back», nothing said', sl);
-  ok(slBad.inCleanup && slBad.stalled >= 1 && slBad.m && slBad.m.code === 'engine_kernel_landing', 'RED CONTROL (B-3dbd, the release\'s race): the same measure is refused «being put back» while nothing is aside — the false refusal a person met on a busy machine', slBad.m);
+  ok(gateOf(slBad.inCleanup) && slBad.stalled >= 1 && gateOf(slBad.m) && slBad.m.code === 'engine_kernel_landing', 'RED CONTROL (B-3dbd, the release\'s race): the same measure is refused «being put back» while nothing is aside — the false refusal a person met on a busy machine', slBad.m);
   // the keeper's first-use road reads the step-aside by its name (never «kernel missing» + a For-you item)
   const ksrc = read('src/server/browser-keeper.js');
-  ok(ksrc.includes("if (refused && refused.code === 'engine_kernel_landing') throw namedError('engine_kernel_landing',") && read('src/routes/browser.js').includes('engine_kernel_landing: 409'),
+  ok(gateOf(ksrc.includes("if (refused && refused.code === 'engine_kernel_landing') throw namedError('engine_kernel_landing',")) && verdictOf(read('src/routes/browser.js').includes('engine_kernel_landing: 409')),
     'B-4d35: the keeper\'s first use refuses a start by the step-aside\'s own name (before the verdict that would file «kernel missing»), and the route answers it 409 (never a 500)');
 });
 // r7: the scene controls M29–M37 run AT ONCE (each its own data dir, its own copy) — the suite stays in the fast tier
@@ -1681,32 +1681,32 @@ ctl.push(leg('M31', async () => { // M31 — a download refused beside a landing
 }));
 ctl.push(leg('M32', async () => { // M32 — the r5 check before the first rename: the holds only
   const bad = await droppedScene(MC.load('src/server/engine-distribution.js', swap(EDsrc, "    const busy = await placeBusy(sid, plan);\n    if (busy) return { ok: false, why: 'held', by: busy };\n", "    if (g.holds > 0) return { ok: false, why: 'held', by: 'a browser start holds the current kernel' };\n", 'whole question'), 'holds-only'), 'after');
-  ok(bad.B && bad.B.proceeded && bad.a === true && bad.place === 'K3' && bad.landedLine,
+  ok(gateOf(bad.B) && gateOf(bad.B.proceeded) && bad.a === true && bad.place === 'K3' && verdictOf(bad.landedLine),
     'control M32: the r5 check (the holds only) lands K3 under the browser a start spawned from K2 and stopped holding — the journal says it «waited for no browser» — ㉖ RED', bad);
 }));
 ctl.push(leg('M33', async () => { // M33 — a hold taken during the scan not counted
   const bad = await droppedScene(MC.load('src/server/engine-distribution.js', swap(EDsrc, " : g.taken !== t0 ? `${g.lastAsker || 'a browser start'} took the current kernel while it was checked` : null;", ' : null;', 'taken'), 'taken-blind'), 'scan');
-  ok(bad.B && bad.B.proceeded && bad.a === true && bad.place === 'K3',
+  ok(gateOf(bad.B) && gateOf(bad.B.proceeded) && bad.a === true && bad.place === 'K3',
     'control M33: a hold taken and dropped DURING the landing\'s in-use scan not counted — the scan listed /proc before the spawn, K3 lands under the new browser — ㉖ RED', bad);
 }));
 ctl.push(leg('M34', async () => { // M34 — the landing's put-back outside the torn window (the r5 tip)
   const bad = await putBackScene(MC.load('src/server/engine-distribution.js', swap(EDsrc, '    const w = notWhole(sid); // r7 (p2)', '    const w = { end: () => {} };', 'put-back torn'), 'put-back-whole'), 'start'); // r7: re-anchored (restoreAside's count)
-  ok(bad.s && bad.s.proceeded === true && bad.s.empty === true,
+  ok(gateOf(bad.s) && bad.s.proceeded === true && bad.s.empty === true,
     'control M34: the landing\'s put-back outside the torn window lets a start past its bound take its hold and SPAWN beside the EMPTY place — ㉗ RED', bad.s);
 }));
 ctl.push(leg('M35', async () => { // M35 — the r5 sweep: the aside copy of the waiting kernel removed as a leftover
   const EDM = MC.load('src/server/engine-distribution.js', swap(swap(EDsrc, '    if (!rec || !rec.next) return known({ gone: true });', '    if (true) return known({ gone: true });', 'heal'), KEEPU, KEEP1, 'keep'), 'sweeps-only-copy'); // r7: re-anchored (healAside's answer; the sweep's two names)
   const bad = [];
   for (const at of ['aside', 'back', 'new']) bad.push(await crashScene(EDM, at));
-  ok(bad.every((x) => x.halted && x.next === VER.k3 && !x.kept && !x.prev && x.due.staged && String(x.card).includes('serves the next browser start') && x.lines.some((l) => l.includes('.next-linux-x64.prev'))),
+  ok(verdictOf(bad.every((x) => x.halted && x.next === VER.k3 && !x.kept && !x.prev && x.due.staged && String(x.card).includes('serves the next browser start') && x.lines.some((l) => l.includes('.next-linux-x64.prev')))),
     'control M35: the r5 sweep removes the ONLY copy of K3 at all three stops («leftover kernel files the record does not name») while the record, kernelDue (staged) and the card still say it waits — ㉘ RED', bad.map((x) => ({ at: x.at, next: x.next, kept: x.kept, due: x.due, lines: x.lines })));
 }));
 ctl.push(leg('M36', async () => { // M36 — the r6 tip: healAside's «unreadable» taken as gone by its callers (the sweep keeps one name)
   const EDM = MC.load('src/server/engine-distribution.js', swap(swap(EDsrc, '      return { unknown: code };\n', '      return { gone: true };\n', 'unknown'), KEEPU, KEEP1, 'keep'), 'unread-is-gone');
   const [a, b, c] = await Promise.all(['sweep', 'land', 'stage-fleet'].map((road) => unreadAside(EDM, road)));
-  ok(a.prev === 'gone' && a.next === `${VER.k3}:K3` && a.due.staged && a.r.some((o) => o.includes('.next-linux-x64.prev')),
+  ok(a.prev === 'gone' && a.next === `${VER.k3}:K3` && gateOf(a.due.staged) && verdictOf(a.r.some((o) => o.includes('.next-linux-x64.prev'))),
     'control M36 (the sweep): the r6 tip\'s sweep deletes the ONLY copy of K3 after ONE unread receipt while the record and kernelDue (staged) still say it waits — ㉚ RED', a);
-  ok(b.next === null && !b.discarded && b.acted.some((l) => l.includes('not beside its place any more')),
+  ok(b.next === null && !b.discarded && verdictOf(b.acted.some((l) => l.includes('not beside its place any more'))),
     'control M36 (landNext): the r6 tip\'s start drops the waiting K3 as «gone» on an unread receipt — no discard recorded — ㉚ RED', b);
   ok(c.prev === 'gone' && !c.nextDir && c.next === `${VER.k3}:K3`,
     'control M36 (stageNext): the r6 tip\'s staging removes the unread aside copy, then the refusal at the last ask leaves rec.next naming a folder that is gone — ㉚ RED', c);
@@ -1716,7 +1716,7 @@ ctl.push(leg('M37', async () => { // M37 — the r6 tip: the not-whole count tak
   src = swap(src, '    const rec = recOf(sid);\n    try { await io.rename(plan.removingDir, plan.targetDir); }', '    { const late = notWhole(sid); w.end = late.end; } // counted only once the place answered ENOENT\n    const rec = recOf(sid);\n    try { await io.rename(plan.removingDir, plan.targetDir); }', 'late');
   const EDM = MC.load('src/server/engine-distribution.js', src, 'torn-after-stats');
   const xs = await Promise.all(['removing', 'place'].map((hold) => putBackScene(EDM, 'start', { hold })));
-  ok(xs.every((x) => x.s && x.s.proceeded === true && x.s.empty === true),
+  ok(verdictOf(xs.every((x) => x.s && x.s.proceeded === true && x.s.empty === true)),
     'control M37: the r6 tip\'s count taken only once the place answered ENOENT lets a start past its bound take its hold and SPAWN beside the EMPTY place while either stat hangs — ㉛ RED', xs.map((x) => ({ hold: x.hold, s: x.s })));
 }));
 ctl.push(leg('M38', async () => { // M38 — the r7 tip's landing: the aside copy deleted after an unknown put-back
@@ -1731,12 +1731,12 @@ ctl.push(leg('M39', async () => { // M39 — the r7 sweep: the .prev kept whatev
 }));
 ctl.push(leg('M40', async () => { // M40 — the r7 person's download: nothing set beside an unread copy
   const bad = await unreadAside(MC.load('src/server/engine-distribution.js', swap(EDsrc, "    const beside = !!(h.unknown && h.free && kfact.by === 'user'); // r8 (s3)", '    const beside = false;', 'beside'), 'no-door'), 'stage');
-  ok(bad.r && bad.r.staged === false && bad.r.kept === 'EIO' && bad.unread === 'EIO' && bad.after.prev,
+  ok(gateOf(bad.r) && bad.r.staged === false && bad.r.kept === 'EIO' && bad.unread === 'EIO' && verdictOf(bad.after.prev),
     'control M40: the r7 tip\'s person\'s download under an unknown sets nothing beside it (staged:false, kept) — the card keeps saying it could not be read and nothing the person does changes it — ㉞ RED', { r: bad.r, unread: bad.unread, after: bad.after });
 }));
 ctl.push(leg('M41', async () => { // M41 — the r7 card: kernelFact with no unread state
   const bad = await unreadAside(MC.load('src/server/engine-distribution.js', swap(EDsrc, 'stagedAt: r.next.stagedAt || null, unread: unreadNext(sid) } : null,', 'stagedAt: r.next.stagedAt || null } : null,', 'card'), 'card-blind'), 'sweep');
-  ok(bad.said === 1 && String(bad.card).endsWith(`new kernel ${VER.k3} downloaded — it serves the next browser start`),
+  ok(bad.said === 1 && verdictOf(String(bad.card).endsWith(`new kernel ${VER.k3} downloaded — it serves the next browser start`)),
     'control M41: the r7 card says «… downloaded — it serves the next browser start» while its copy cannot be read and every start runs K2 (the journal alone says it) — ㉞ RED', { card: bad.card, said: bad.said });
 }));
 await Promise.all(ctl);
@@ -1769,12 +1769,12 @@ await Promise.all(later);
   // record's own temp, or the record's write through the window); a plant never read is a NAMED SKIP, not judged
   const skip3 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
   const E1 = await recScene(EDR, 'eio', 'EIO');
-  if (!E1.events.includes('sync')) skip3('3/8 EIO', 'no sync was asked of the record\'s temp'); else ok(E1.landed === false && E1.old && !E1.tmpLeft && E1.events === 'open,sync' && E1.said.some((l) => l.includes('the engine record could not be written (EIO')),
+  if (!E1.events.includes('sync')) skip3('3/8 EIO', 'no sync was asked of the record\'s temp'); else ok(E1.landed === false && gateOf(E1.old) && !E1.tmpLeft && E1.events === 'open,sync' && verdictOf(E1.said.some((l) => l.includes('the engine record could not be written (EIO'))),
     'B-574d browser-stores 3/8: the engines\' record\'s sync refused (EIO) is a FAILED write — the old record standing, no temp left, said (kept in memory: the next save writes it again)', E1);
   const E2 = await recScene(EDR, 'einval', 'EINVAL');
-  if (!E2.events.includes('sync')) skip3('3/8 EINVAL', 'no sync was asked of the record\'s temp'); else ok(E2.landed === true && E2.made && E2.said.filter((l) => l.includes('does not do a sync (EINVAL)')).length === 1, '…a file system with NO sync (EINVAL): it lands, said once', E2);
+  if (!E2.events.includes('sync')) skip3('3/8 EINVAL', 'no sync was asked of the record\'s temp'); else ok(E2.landed === true && gateOf(E2.made) && E2.said.filter((l) => l.includes('does not do a sync (EINVAL)')).length === 1, '…a file system with NO sync (EINVAL): it lands, said once', E2);
   const E3 = await recScene(EDR, 'real', null);
-  ok(E3.landed === true && E3.made && E3.events === 'open,sync,rename', '…the real sync: the temp synced before its rename', E3);
+  ok(E3.landed === true && gateOf(E3.made) && E3.events === 'open,sync,rename', '…the real sync: the temp synced before its rename', E3);
   const EDw = MC.load('src/server/engine-distribution.js', swap(EDsrc, 'writeRecordSynced(JSON.stringify(record, null, 1))', '(async () => { const tmp = `${recordFile}.${process.pid}.tmp`; await fsp.mkdir(path.dirname(recordFile), { recursive: true }); await fsp.writeFile(tmp, JSON.stringify(record, null, 1), { mode: 0o600 }); await fsp.rename(tmp, recordFile); })()', 'the record\'s synced replace'), 'bs3-plain-write');
   const E1x = await recScene(EDw, 'red', 'EIO');
   if (!E1x.events.includes('rename')) skip3('3/8 RED', 'the copy\'s write of the record never ran through the window'); else ok(E1x.landed === true && !E1x.events.includes('sync'), 'RED (anchored copy: the release\'s plain write + rename): no sync is asked, the refused scene lands — 3/8 goes red', E1x);
@@ -1804,15 +1804,15 @@ console.log('— B-574d browser-stores 4/8: a record that cannot be read holds t
   const H4 = await holdScenes().catch((e) => ({ threw: String(e && e.stack || e) }));
   const skip4 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
   const read4 = (H) => !!(H && H.torn && H.torn.read > 0), refused4 = (H) => !!(H && H.unread && H.unread.refused > 0);
-  if (H4.torn && !(read4(H4) && refused4(H4))) skip4('4/8', 'the torn record or the refused read was never asked for'); else ok(!!H4.torn && H4.torn.saved === false && H4.torn.next && H4.torn.bytes && H4.torn.said === 1 && !H4.torn.swept && H4.unread.next && H4.unread.said === 1 && !H4.unread.swept,
+  if (H4.torn && !(read4(H4) && refused4(H4))) skip4('4/8', 'the torn record or the refused read was never asked for'); else ok(!!H4.torn && H4.torn.saved === false && gateOf(H4.torn.next) && gateOf(H4.torn.bytes) && H4.torn.said === 1 && !H4.torn.swept && gateOf(H4.unread.next) && H4.unread.said === 1 && !H4.unread.swept,
     'B-574d browser-stores 4/8: an engines record TORN, or whose read is refused (EIO), HOLDS the boot sweep — the waiting kernel\'s .next-<tag> stays, nothing is written over the record, said once', H4);
   const HOLDS = '    if (recordHeld) { sayRecordHeld(); return []; }   // 4/8: a record HELD removes nothing it might name\n';
   const H4x = await holdScenes(MC.load('src/server/engine-distribution.js', swap(EDsrc, HOLDS, '', 'the held record holds the sweep'), 'bs4-sweep-unheld')).catch((e) => ({ threw: String(e && e.message) }));
-  if (H4x.torn && !read4(H4x)) skip4('4/8 RED (the sweep)', 'the copy never asked for the torn record'); else ok(!!H4x.torn && (!H4x.torn.next || H4x.torn.swept), 'RED (anchored copy: today\'s sweep over the empty record): the waiting kernel downloaded is REMOVED because its record was torn — 4/8 goes red', H4x);
+  if (H4x.torn && !read4(H4x)) skip4('4/8 RED (the sweep)', 'the copy never asked for the torn record'); else ok(!!H4x.torn && (!H4x.torn.next || verdictOf(H4x.torn.swept)), 'RED (anchored copy: today\'s sweep over the empty record): the waiting kernel downloaded is REMOVED because its record was torn — 4/8 goes red', H4x);
   const SAVEH = '  const save = () => (recordHeld ? (sayRecordHeld(), Promise.resolve(false)) : saving = ';
   const H4y = await holdScenes(MC.load('src/server/engine-distribution.js', swap(EDsrc, SAVEH, '  const save = () => (false ? null : saving = ', 'nothing written over a held record'), 'bs4-save-unheld')).catch((e) => ({ threw: String(e && e.message) }));
   if (H4y.torn && !read4(H4y)) skip4('4/8 RED (the save)', 'the copy never asked for the torn record'); else ok(!!H4y.torn && !H4y.torn.bytes, 'RED (anchored copy: a save over the held record): the torn record is written over (its facts gone for the next start\'s sweep) — 4/8 goes red', H4y);
 }
 host.close();
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

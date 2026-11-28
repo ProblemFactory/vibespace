@@ -23,7 +23,7 @@ const { WebSocket } = require('ws');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const ROOT = path.join(os.tmpdir(), `vs-mnote-${process.pid}`);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 700) : '')); } return c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 700) : '')); } return c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
@@ -91,7 +91,7 @@ export const mkEl2 = mkEl;`);
   for (const [k, mod, run, mk, bound, tag = 'r4 (M4)'] of LEGS) {
     const v = judgeInChild({ module: mod, run, mk: `(n) => n === 0 ? '' : (${mk})(n)`, n: 4096, kind: 'linear', backtracks: true, opts: { factor: 4 } }, { timeout: 300000 });
     const per = v.w1 / 4096;
-    ok(v.ok && per <= bound, `${tag} ${k}: ${v.err ? 'the child failed: ' + v.err.slice(0, 200) : `${v.w1} → ${v.w2} steps, ×${v.r && v.r.toFixed(2)} (bound ×${v.bound}), ${per.toFixed(1)} steps a character (≤ ${bound})`} at ×4 input`);
+    ok(gateOf(v.ok) && per <= bound, `${tag} ${k}: ${v.err ? 'the child failed: ' + v.err.slice(0, 200) : `${v.w1} → ${v.w2} steps, ×${v.r && v.r.toFixed(2)} (bound ×${v.bound}), ${per.toFixed(1)} steps a character (≤ ${bound})`} at ×4 input`);
   }
 }
 
@@ -125,7 +125,7 @@ const pageNow = await buildPage('now', cssNow);
 const R4_ROW = '.sp-now-value:has(.masked-link-note) { flex-wrap: wrap; white-space: normal; overflow: visible; min-width: 0; }';
 const R4_SPANS = '.sp-now-value:has(.masked-link-note) > span, .sp-now-value:has(.masked-link-note) .sp-status-detail > div { min-width: 0; overflow-wrap: anywhere; }';
 const once = (src, a) => src.split(a).length === 2;
-ok(once(cssNow[0], R4_ROW) && once(cssNow[0], R4_SPANS), 'the control\'s two stylesheet patches each find their rule once');
+ok(gateOf(once(cssNow[0], R4_ROW)) && verdictOf(once(cssNow[0], R4_SPANS)), 'the control\'s two stylesheet patches each find their rule once');
 const pagePre = once(cssNow[0], R4_ROW) && once(cssNow[0], R4_SPANS)
   ? await buildPage('pre', [cssNow[0].replace(R4_ROW, R4_ROW.replace(' min-width: 0;', '')).replace(R4_SPANS, ''), cssNow[1]]) : null;
 
@@ -202,8 +202,8 @@ for (const [label, url, want] of [['THIS TREE', pageNow, true], ['CONTROL (r3\'s
       const sessOk = !!o && o.session.notes.length === 2 && o.session.notes.every((v) => v >= 0.999) && o.session.button;
       const restOk = !!o && ['task-log', 'stash', 'IM'].every((k) => o[k] >= 0.999);
       if (want) {
-        ok(sessOk, `${lang} @${w}px: session properties «Now» — both notes 100 % visible, «Change…» inside the pane (${o && JSON.stringify(o.session)})`);
-        ok(restOk, `${lang} @${w}px: the progress note, the stash line, the IM message — each note 100 % visible (${o && ['task-log', 'stash', 'IM'].map((k) => k + ' ' + o[k]).join(', ')})`);
+        ok(verdictOf(sessOk), `${lang} @${w}px: session properties «Now» — both notes 100 % visible, «Change…» inside the pane (${o && JSON.stringify(o.session)})`);
+        ok(verdictOf(restOk), `${lang} @${w}px: the progress note, the stash line, the IM message — each note 100 % visible (${o && ['task-log', 'stash', 'IM'].map((k) => k + ' ' + o[k]).join(', ')})`);
       } else if (w !== 900) ok(!sessOk, `CONTROL ${lang} @${w}px: r3's rules cut the session-props note or push «Change…» out (${o && JSON.stringify(o.session)})`);
     }
   }
@@ -232,9 +232,9 @@ for (const [label, url, want] of [['THIS TREE', pageNow, true], ['CONTROL (r3\'s
     const pn = prose.querySelector('.masked-link-note');
     return { pre: pre.textContent, noteInPre: !!pre.querySelector('.masked-link-note'), masked: !!pre.querySelector('.fy-masked'), next: nx ? { cls: nx.className, tag: nx.tagName, text: nx.textContent } : null, prose: pn ? { inline: pn.parentElement === prose, text: pn.textContent } : null };
   })()`);
-  ok(!!m7 && m7.pre === CMD && !m7.noteInPre && m7.masked && !!m7.next && m7.next.cls === 'masked-link-note' && m7.next.text === NOTE, 'r6 (m7) the For-you window (the REAL linkifyInto, Chrome): pre.textContent === the command exactly, the masked run its words, THE note the pre\'s next sibling', JSON.stringify(m7));
-  ok(!!m7 && !!m7.prose && m7.prose.inline && m7.prose.text === NOTE, 'r6 (m7) the For-you window: a masked run in PROSE (main-ask\'s words outside a pre) keeps its note INLINE (r5)', JSON.stringify(m7 && m7.prose));
+  ok(!!m7 && m7.pre === CMD && !m7.noteInPre && gateOf(m7.masked) && !!m7.next && m7.next.cls === 'masked-link-note' && m7.next.text === NOTE, 'r6 (m7) the For-you window (the REAL linkifyInto, Chrome): pre.textContent === the command exactly, the masked run its words, THE note the pre\'s next sibling', JSON.stringify(m7));
+  ok(!!m7 && !!m7.prose && gateOf(m7.prose.inline) && m7.prose.text === NOTE, 'r6 (m7) the For-you window: a masked run in PROSE (main-ask\'s words outside a pre) keeps its note INLINE (r5)', JSON.stringify(m7 && m7.prose));
 }
 cdp.close(); await done();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

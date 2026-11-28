@@ -24,7 +24,7 @@ process.env.VIBESPACE_NODE_MODULES = path.join(repo, 'node_modules');
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const version = require('../package.json').version;
@@ -99,20 +99,20 @@ try {
   });
 
   const respIp = await socksHttpGet('127.0.0.1', ORIGIN_PORT, '/hi', false);
-  check('IPv4 CONNECT egresses to the origin through the device', respIp.includes('EGRESS_OK:/hi'), JSON.stringify(respIp.slice(0, 80)));
+  check('IPv4 CONNECT egresses to the origin through the device', verdictOf(respIp.includes('EGRESS_OK:/hi')), JSON.stringify(respIp.slice(0, 80)));
 
   const respDom = await socksHttpGet('localhost', ORIGIN_PORT, '/dom', true);
-  check('domain CONNECT (socks5h — DNS resolves on the device) works', respDom.includes('EGRESS_OK:/dom'), JSON.stringify(respDom.slice(0, 80)));
+  check('domain CONNECT (socks5h — DNS resolves on the device) works', verdictOf(respDom.includes('EGRESS_OK:/dom')), JSON.stringify(respDom.slice(0, 80)));
 
   // 4) a CONNECT to a dead port must get a SOCKS failure reply, not a hang
   const deadPort = await new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', function () { const p = this.address().port; s.close(() => r(p)); }); });
   let refused = '';
   try { await socksHttpGet('127.0.0.1', deadPort, '/x', false); } catch (e) { refused = e.message; }
-  check('CONNECT to a dead port returns a SOCKS failure (no hang)', /reply code/.test(refused), refused);
+  check('CONNECT to a dead port returns a SOCKS failure (no hang)', verdictOf(/reply code/.test(refused)), refused);
 
   // 5) unserve-socks stops the device server
   const un = await dm.unserveSocks(devSocksPort);
-  check('unserve-socks closes the device SOCKS server', un && un.closed === true, JSON.stringify(un));
+  check('unserve-socks closes the device SOCKS server', gateOf(un) && un.closed === true, JSON.stringify(un));
 
   // 6) tcp-connect HONORS an explicit target host (2.186.3 LAN-forward / jump
   //    host): the daemon must connect to targetHost:port on ITS network, not a
@@ -131,7 +131,7 @@ try {
         setTimeout(() => { try { h.close(); } catch {} resolve(got); }, 1500);
       });
     };
-    check('tcp-connect with host=127.0.0.2 reaches the LAN target', (await roundtrip('127.0.0.2')).includes('LANDEV:hi'));
+    check('tcp-connect with host=127.0.0.2 reaches the LAN target', verdictOf((await roundtrip('127.0.0.2')).includes('LANDEV:hi')));
     check('tcp-connect with NO host stays on loopback (does NOT reach 127.0.0.2-only)', !(await roundtrip(undefined)).includes('LANDEV:hi'));
   }
   try { lanEcho.close(); } catch {}
@@ -148,4 +148,4 @@ try {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
 console.log(failed ? `\n${failed} FAILED` : '\nagentd SOCKS egress test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

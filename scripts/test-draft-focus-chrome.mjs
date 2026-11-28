@@ -40,7 +40,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -240,17 +240,17 @@ try {
 
   console.log('① A focused and typing while B saves a draft: A\'s box keeps A\'s text, and A\'s text is what is sent');
   const sid = await openChat('draft-focus');
-  check('one Antigravity chat open on BOTH pages (two windows, both focus-emulated), the fake agy started behind the real wrapper', !!sid && agyStarted(sid) && !!(await B.evalJs(`!!(${V(sid)})?._chatInput`)), { sid });
+  check('one Antigravity chat open on BOTH pages (two windows, both focus-emulated), the fake agy started behind the real wrapper', !!sid && gateOf(agyStarted(sid)) && !!(await B.evalJs(`!!(${V(sid)})?._chatInput`)), { sid });
   // r350: the bound's cause print is READ here once, in a healthy moment — it must come back from BOTH pages with their windows, the
   // conversation's view, the layout guards and the wire (a print that cannot read is no placement when the red comes)
   { const c0 = await causeOf(sid).catch((e) => ({ error: String(e && e.message) }));
     check('r350: the cause the bound prints reads both pages — each page\'s windows and the conversation\'s view, its closes / views gone / records applied, the layout guards, the frames off the wire',
-      !!c0.A && !!c0.B && c0.A.view === true && c0.B.view === true && Array.isArray(c0.A.windows) && c0.A.windows.some((w) => w.srv === sid) && !!c0.B.guards && 'lastRemoteSeq' in c0.B.guards && Array.isArray(c0.B.received) && Array.isArray(c0.A.gone),
+      !!c0.A && !!c0.B && c0.A.view === true && c0.B.view === true && gateOf(Array.isArray(c0.A.windows)) && gateOf(c0.A.windows.some((w) => w.srv === sid)) && !!c0.B.guards && 'lastRemoteSeq' in c0.B.guards && gateOf(Array.isArray(c0.B.received)) && verdictOf(Array.isArray(c0.A.gone)),
       c0.error ? c0 : { A: { windows: c0.A.windows.length, guards: c0.A.guards }, B: { windows: c0.B.windows.length, guards: c0.B.guards, received: c0.B.received.length } }); }
   const r1 = await legTyping(sid, 'draft-focus');
-  check(`A's box holds exactly what A typed (B's «oko» then «k» both saved while A typed: B sent ${JSON.stringify(r1.bSaves)})`, r1.focusedBoth && r1.a === A_TEXT && r1.b === 'okok' && Array.isArray(r1.bSaves) && r1.bSaves.includes('oko') && r1.bSaves.includes('okok'), r1);
-  check('…and every drafts set A sent is a prefix of what A typed (A never saved B\'s characters)', r1.aSent.length > 0 && r1.aSent.every((v) => v === '' || A_TEXT.startsWith(v)), r1.aSent);
-  check(`Enter on A ⇒ the agent READ exactly «${A_TEXT}»`, r1.read === A_TEXT && r1.cleared, { read: r1.read, cleared: r1.cleared, reads: agyRead(sid) });
+  check(`A's box holds exactly what A typed (B's «oko» then «k» both saved while A typed: B sent ${JSON.stringify(r1.bSaves)})`, gateOf(r1.focusedBoth) && r1.a === A_TEXT && r1.b === 'okok' && gateOf(Array.isArray(r1.bSaves)) && gateOf(r1.bSaves.includes('oko')) && verdictOf(r1.bSaves.includes('okok')), r1);
+  check('…and every drafts set A sent is a prefix of what A typed (A never saved B\'s characters)', r1.aSent.length > 0 && verdictOf(r1.aSent.every((v) => v === '' || A_TEXT.startsWith(v))), r1.aSent);
+  check(`Enter on A ⇒ the agent READ exactly «${A_TEXT}»`, r1.read === A_TEXT && verdictOf(r1.cleared), { read: r1.read, cleared: r1.cleared, reads: agyRead(sid) });
   await replied(A, sid, 1);
 
   console.log('② A focused with an EMPTY box while B saves a draft: it waits; A blurs ⇒ it lands');
@@ -263,7 +263,7 @@ try {
   await blurBox(A, sid);
   await sleep(400);
   r2.afterBlur = await box(A, sid); r2.heldAfter = await held(A, sid); r2.aSent = sentFor(A, sid, aSent0);
-  check('A focused, empty box: B\'s draft is HELD (the box stays empty)', r2.aFocused && r2.aBox === '' && r2.aHeld === 'draft typed on B', r2);
+  check('A focused, empty box: B\'s draft is HELD (the box stays empty)', gateOf(r2.aFocused) && r2.aBox === '' && r2.aHeld === 'draft typed on B', r2);
   check('A blurs ⇒ B\'s draft lands in A\'s box, and A sends nothing for it (the store already has it)', r2.afterBlur === 'draft typed on B' && r2.heldAfter === null && r2.aSent.length === 0, r2);
 
   console.log('③ a REAL mouse press on A\'s Send while a held draft continues A\'s words: what A typed is sent');
@@ -296,7 +296,7 @@ try {
     return { before, duringPress, press, read, after: await box(A, s), heldAfter: await held(A, s) };
   }
   const r3 = await legPress(sid, 'draft-focus');
-  check('A typed «hello» (saved, still focused); B continued it to «hello world» ⇒ HELD in A\'s box', r3.before.a === 'hello' && r3.before.held === 'hello world' && r3.before.focused && r3.before.bTook === 'hello', r3.before);
+  check('A typed «hello» (saved, still focused); B continued it to «hello world» ⇒ HELD in A\'s box', r3.before.a === 'hello' && r3.before.held === 'hello world' && gateOf(r3.before.focused) && r3.before.bTook === 'hello', r3.before);
   check(`a real press on Send (the press ON Send: ${r3.press.down}) blurs A's box, the held draft does NOT land during the press, and the click SENDS «hello» — what A typed`, r3.press.down === 'SEND' && r3.duringPress === 'hello' && r3.read === 'hello', r3);
   check('…the send\'s own save superseded the held draft (nothing lands in the emptied box afterwards)', r3.heldAfter === null && r3.after === '', r3);
   await replied(A, sid, 3);
@@ -319,7 +319,7 @@ try {
   }
   for (const gap of [120, 200]) {
     const r4 = await legInterleave(sid, 'draft-focus', gap);
-    check(`interleaved every ${gap} ms: 0 of 16 characters lost — A «${r4.a}», B «${r4.b}»; each page saved only its own characters (A ${JSON.stringify(r4.aSent)}, B ${JSON.stringify(r4.bSent)})`, r4.a === 'aaaaaaaa' && r4.b === 'bbbbbbbb' && r4.ownOnly, r4);
+    check(`interleaved every ${gap} ms: 0 of 16 characters lost — A «${r4.a}», B «${r4.b}»; each page saved only its own characters (A ${JSON.stringify(r4.aSent)}, B ${JSON.stringify(r4.bSent)})`, r4.a === 'aaaaaaaa' && r4.b === 'bbbbbbbb' && verdictOf(r4.ownOnly), r4);
   }
 
   console.log('⑤ B-1d87: one conversation opened on both devices in the same seconds — B\'s window stands and takes A\'s id while B types');
@@ -365,14 +365,14 @@ try {
   }
   const r5 = await legStands('draft-focus-stands', [sid]);
   check(`B opened the conversation before A's record reached it; the record applied WHILE B typed: B's window STANDS — the same element, now under A's id (${r5.before.id} → ${r5.after.id}), one window of it on B`,
-    r5.premise && r5.carried && r5.before.id !== r5.a1 && r5.after.n === 1 && r5.after.id === r5.a1 && r5.after.mark === '1', r5);
+    gateOf(r5.premise) && gateOf(r5.carried) && r5.before.id !== r5.a1 && r5.after.n === 1 && r5.after.id === r5.a1 && r5.after.mark === '1', r5);
   check(`…nothing was lost under B's hands: the composition «退» was in the box when the record applied (${JSON.stringify(r5.preApply)} → ${JSON.stringify(r5.midApply)}); the box holds «${r5.value}» (every character, the composition committed), focused, the caret at its end`,
     r5.applied === true && r5.preApply === 'ab退' && r5.midApply === 'ab退' && r5.value === 'ab退款cd' && r5.focused === true && r5.caret === 'ab退款cd'.length, r5);
 
   console.log('RED CONTROLS — the 2.369.354 landing (the box overwritten) in a second conversation; a judge at the blur in a third');
   const sid2 = await openChat('draft-focus-base', [sid]);
   const c1 = await legTyping(sid2, 'draft-focus-base', { base: [A] });
-  check(`RED CONTROL ①: the overwriting composer — A's focused box became «${c1.a}» and the agent READ «${c1.read}», not «${A_TEXT}»`, c1.a !== A_TEXT && c1.read !== A_TEXT && /o/.test(c1.read || ''), c1);
+  check(`RED CONTROL ①: the overwriting composer — A's focused box became «${c1.a}» and the agent READ «${c1.read}», not «${A_TEXT}»`, c1.a !== A_TEXT && c1.read !== A_TEXT && verdictOf(/o/.test(c1.read || '')), c1);
   await replied(A, sid2, 1);
   for (const gap of [120, 200]) {
     const c4 = await legInterleave(sid2, 'draft-focus-base', gap, { base: [A, B] });
@@ -382,10 +382,10 @@ try {
   const c3 = await legPress(sid3, 'draft-focus-blur', { judgeAtBlur: true });
   check(`RED CONTROL ③: judged AT the blur (the press ON Send: ${c3.press.down}; released on ${c3.press.up}; Send took the click: ${c3.press.clicked}), the held «hello world» lands during the press («${c3.duringPress}») and the click sends «${c3.read}» — not what A typed`, c3.press.down === 'SEND' && c3.before.held === 'hello world' && c3.read === 'hello world', c3);
   const c5 = await legStands('draft-focus-stands-base', [sid, sid2, sid3, r5.s], { release: true });
-  check(`RED CONTROL ⑤ (B-1d87): B's page with the release's apply (nothing taken) — its premise formed (B's own window ${c5.before.id}, not A's ${c5.a1}: ${c5.premise}), and the record CLOSED B's window of the conversation and nothing opened it (${c5.after.n} window of it on B)`, c5.premise && c5.carried && c5.applied === true && c5.after.n === 0, c5);
+  check(`RED CONTROL ⑤ (B-1d87): B's page with the release's apply (nothing taken) — its premise formed (B's own window ${c5.before.id}, not A's ${c5.a1}: ${c5.premise}), and the record CLOSED B's window of the conversation and nothing opened it (${c5.after.n} window of it on B)`, gateOf(c5.premise) && gateOf(c5.carried) && c5.applied === true && c5.after.n === 0, c5);
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));
 }
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

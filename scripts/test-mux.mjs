@@ -10,7 +10,7 @@ const { Mux, INITIAL_WINDOW } = require('../src/agentd/mux.js');
 import { PassThrough } from 'node:stream';
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };

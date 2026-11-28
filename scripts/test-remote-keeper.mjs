@@ -19,7 +19,7 @@ const SID = 'testsess-1';
 const STUB = `process.stdin.setEncoding("utf8");let b="";process.stdin.on("data",d=>{b+=d;let i;while((i=b.indexOf("\\n"))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(l==="quit")process.exit(7);console.log("echo:"+l);}});setInterval(()=>{},1e3);`;
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -49,9 +49,9 @@ const a1 = attach(0);
 await sleep(2500); // daemon start + socket wait
 a1.stdin.write('hello\n');
 await sleep(800);
-check('echoed through socket→stdin, buffer→stdout', a1.out.toString().includes('echo:hello'), JSON.stringify(a1.out.toString()));
+check('echoed through socket→stdin, buffer→stdout', verdictOf(a1.out.toString().includes('echo:hello')), JSON.stringify(a1.out.toString()));
 const m1 = meta();
-check('meta carries keeper+child pids', m1 && m1.keeperPid > 0 && m1.childPid > 0, JSON.stringify(m1));
+check('meta carries keeper+child pids', gateOf(m1) && m1.keeperPid > 0 && m1.childPid > 0, JSON.stringify(m1));
 
 console.log('— pipe death (ssh drop): daemon survives —');
 const offset1 = a1.out.length; // wrapper-style byte accounting
@@ -59,10 +59,10 @@ a1.kill('SIGKILL');
 await sleep(400);
 let daemonAlive = true;
 try { process.kill(m1.keeperPid, 0); } catch { daemonAlive = false; }
-check('daemon survives attach death', daemonAlive, '');
+check('daemon survives attach death', verdictOf(daemonAlive), '');
 let stubAlive = true;
 try { process.kill(m1.childPid, 0); } catch { stubAlive = false; }
-check('child (claude stand-in) survives attach death', stubAlive, '');
+check('child (claude stand-in) survives attach death', verdictOf(stubAlive), '');
 
 console.log('— reattach with offset: no replay, input still works —');
 const a2 = attach(offset1);
@@ -76,13 +76,13 @@ console.log('— remote exit: sentinel + no restart —');
 a2.stdin.write('quit\n');
 await sleep(1200);
 const tail = a2.out.toString();
-check('sentinel _remote_exit with the real exit code', tail.includes('"_remote_exit"') && tail.includes('"code":7'), JSON.stringify(tail));
+check('sentinel _remote_exit with the real exit code', gateOf(tail.includes('"_remote_exit"')) && verdictOf(tail.includes('"code":7')), JSON.stringify(tail));
 const m2 = meta();
-check('meta records exited', m2 && m2.exited === 7, JSON.stringify(m2));
+check('meta records exited', gateOf(m2) && m2.exited === 7, JSON.stringify(m2));
 await sleep(600);
 const a3 = attach(0);
 await sleep(1500);
-check('run after exit only drains (never restarts the session)', a3.out.toString().includes('"_remote_exit"') && !fs.existsSync(path.join(tmp, SID + '.sock')), JSON.stringify(a3.out.toString().slice(0, 120)));
+check('run after exit only drains (never restarts the session)', gateOf(a3.out.toString().includes('"_remote_exit"')) && !fs.existsSync(path.join(tmp, SID + '.sock')), JSON.stringify(a3.out.toString().slice(0, 120)));
 check('exit code 3 = ended', a3.exitCode === 3, String(a3.exitCode)); // already exited by now — read the property, the event has fired
 
 console.log('— stop mode kills a live daemon —');
@@ -95,7 +95,7 @@ await new Promise((r) => stop.on('exit', r));
 await sleep(500);
 let stopped = true;
 try { process.kill(mb.childPid, 0); stopped = false; } catch { }
-check('stop kills the child', stopped, '');
+check('stop kills the child', verdictOf(stopped), '');
 b1.kill('SIGKILL');
 
 console.log('— 2.138.0: daemon SIGKILL → claude survives (fifo mode) → takeover —');
@@ -107,22 +107,22 @@ c1.stdin.write('one\n');
 await sleep(800);
 const mc = JSON.parse(fs.readFileSync(path.join(tmp, SID3 + '.json'), 'utf8'));
 check('fifo mode active', mc.mode === 'fifo', JSON.stringify(mc));
-check('meta records FULL argv', Array.isArray(mc.cmd) && mc.cmd.length >= 3, JSON.stringify(mc.cmd));
+check('meta records FULL argv', gateOf(Array.isArray(mc.cmd)) && mc.cmd.length >= 3, JSON.stringify(mc.cmd));
 process.kill(mc.keeperPid, 'SIGKILL'); // the B-0343 scenario
 c1.kill('SIGKILL');
 await sleep(600);
 let stubAlive3 = true; try { process.kill(mc.childPid, 0); } catch { stubAlive3 = false; }
-check('claude SURVIVES daemon SIGKILL (setsid + direct fds)', stubAlive3, '');
+check('claude SURVIVES daemon SIGKILL (setsid + direct fds)', verdictOf(stubAlive3), '');
 const c2 = attachSid(SID3, Buffer.byteLength('echo:one\n'));
 await sleep(3000); // takeover daemon start
 c2.stdin.write('two\n');
 await sleep(1000);
-check('takeover: input flows to the adopted claude', c2.out.toString().includes('echo:two'), JSON.stringify(c2.out.toString()));
+check('takeover: input flows to the adopted claude', verdictOf(c2.out.toString().includes('echo:two')), JSON.stringify(c2.out.toString()));
 const mc2 = JSON.parse(fs.readFileSync(path.join(tmp, SID3 + '.json'), 'utf8'));
 check('takeover meta: new keeperPid + takenOverAt', mc2.keeperPid !== mc.keeperPid && mc2.takenOverAt > 0, JSON.stringify(mc2));
 c2.stdin.write('quit\n');
 await sleep(2200);
-check('adopted claude exit → sentinel via liveness poll', c2.out.toString().includes('"_remote_exit"'), JSON.stringify(c2.out.toString().slice(-160)));
+check('adopted claude exit → sentinel via liveness poll', verdictOf(c2.out.toString().includes('"_remote_exit"')), JSON.stringify(c2.out.toString().slice(-160)));
 c2.kill('SIGKILL');
 
 console.log('— 2.138.0: both dead + no sentinel → synthetic crash (never a blank restart) —');
@@ -137,7 +137,7 @@ await sleep(500);
 const d2 = spawn(process.execPath, [KEEPER, 'run', SID4, '0', '--', process.execPath, '-e', STUB], { env, stdio: ['pipe', 'pipe', 'pipe'] });
 d2.out = Buffer.alloc(0); d2.stdout.on('data', (x) => { d2.out = Buffer.concat([d2.out, x]); });
 await sleep(1500);
-check('synthetic crash sentinel drained (code 143 crashed)', d2.out.toString().includes('"crashed":true'), JSON.stringify(d2.out.toString()));
+check('synthetic crash sentinel drained (code 143 crashed)', verdictOf(d2.out.toString().includes('"crashed":true')), JSON.stringify(d2.out.toString()));
 const md2 = JSON.parse(fs.readFileSync(path.join(tmp, SID4 + '.json'), 'utf8'));
 check('meta exited=143 — NO fresh claude spawned', md2.exited === 143 && md2.childPid === md.childPid, JSON.stringify(md2));
 
@@ -145,7 +145,7 @@ console.log('— 2.138.0: attach-only with nothing → stdout sentinel, no retry
 const e1 = spawn(process.execPath, [KEEPER, 'run', 'testsess-none', '0'], { env, stdio: ['pipe', 'pipe', 'pipe'] });
 e1.out = Buffer.alloc(0); e1.stdout.on('data', (x) => { e1.out = Buffer.concat([e1.out, x]); });
 await new Promise((r) => e1.on('exit', r));
-check('missing session → synthetic sentinel on stdout', e1.out.toString().includes('"missing":true'), JSON.stringify(e1.out.toString()));
+check('missing session → synthetic sentinel on stdout', verdictOf(e1.out.toString().includes('"missing":true')), JSON.stringify(e1.out.toString()));
 
 console.log('— 2.138.0: pid reuse defense —');
 const SID5 = 'testsess-5';
@@ -159,4 +159,4 @@ check('recycled pids not trusted (cmdline mismatch → not alive, not our child)
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall remote-keeper tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf-8');
 const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 
@@ -70,7 +70,7 @@ const wt = await import('../src/lib/window-types.js');
 ok(typeof wt.registerWindowType === 'function' && typeof wt.registerOpenAction === 'function'
   && typeof wt.getWindowType === 'function' && typeof wt.windowTypeIcon === 'function'
   && typeof wt.replayOpenSpec === 'function' && typeof wt.isTransientWindowType === 'function'
-  && wt.TYPE_ICONS && typeof wt.TYPE_ICONS === 'object', 'module exports the registry API + the TYPE_ICONS view');
+  && gateOf(wt.TYPE_ICONS) && typeof wt.TYPE_ICONS === 'object', 'module exports the registry API + the TYPE_ICONS view');
 ok(wt.listWindowTypes().length === 0 && wt.listOpenActions().length === 0, 'a bare import registers nothing (core kinds register in their owning modules, not here)');
 
 // register a fake kind + dispatch
@@ -80,8 +80,8 @@ const rec = wt.registerWindowType({
   type: 'fake-kind', icon: '<svg data-fake="1"/>', label: 'Fake kind',
   action: 'openFakeKind', replay: (app, spec, opts) => { calls.push({ app, spec, opts }); return fakeWin; },
 });
-ok(rec && rec.type === 'fake-kind' && rec.icon === '<svg data-fake="1"/>' && rec.label === 'Fake kind'
-  && rec.persist === true && rec.singleton === false && same(rec.actions, ['openFakeKind']),
+ok(gateOf(rec) && rec.type === 'fake-kind' && rec.icon === '<svg data-fake="1"/>' && rec.label === 'Fake kind'
+  && rec.persist === true && rec.singleton === false && verdictOf(same(rec.actions, ['openFakeKind'])),
   'registerWindowType returns the record (persist defaults true, singleton false, actions derived)');
 ok(wt.windowTypeIcon('fake-kind') === '<svg data-fake="1"/>' && wt.TYPE_ICONS['fake-kind'] === '<svg data-fake="1"/>',
   'windowTypeIcon + TYPE_ICONS view both read the registered icon');
@@ -99,11 +99,11 @@ ok(wt.getOpenAction('openFakeKind')?.type === 'fake-kind', 'getOpenAction resolv
 // undefined-returning replay → null (never `undefined`, so callers can `?? `/`===null` uniformly)
 wt.registerWindowType({ type: 'fake-void', icon: '', action: 'openFakeVoid', replay: () => {} });
 ok(wt.replayOpenSpec(app, { action: 'openFakeVoid' }) === null, 'a replay returning undefined → null');
-ok(wt.windowTypeIcon('fake-void') === '' && Object.keys(wt.TYPE_ICONS).includes('fake-void'), "icon '' is a legal registration (usage/jobs kinds have no icon today) and still keys the view");
+ok(wt.windowTypeIcon('fake-void') === '' && verdictOf(Object.keys(wt.TYPE_ICONS).includes('fake-void')), "icon '' is a legal registration (usage/jobs kinds have no icon today) and still keys the view");
 
 // a second module adds an action onto a kind it does not own (task-log/session-props → 'task')
 wt.registerOpenAction({ action: 'openFakeSecond', type: 'fake-kind', replay: () => ({ id: 'w2' }) });
-ok(same(wt.getWindowType('fake-kind').actions, ['openFakeKind', 'openFakeSecond']), 'registerOpenAction attaches a further action to an existing kind');
+ok(verdictOf(same(wt.getWindowType('fake-kind').actions, ['openFakeKind', 'openFakeSecond'])), 'registerOpenAction attaches a further action to an existing kind');
 ok(wt.replayOpenSpec(app, { action: 'openFakeSecond' })?.id === 'w2', 'dispatch reaches the standalone action');
 
 // multi-action form + persist/singleton flags
@@ -116,7 +116,7 @@ ok(wt.getWindowType('fake-multi').singleton === true, 'singleton flag is recorde
 ok(wt.getWindowType('nope') === null && wt.getOpenAction('nope') === null, 'lookups of unknown kind/action return null');
 
 // TYPE_ICONS keys == registry keys (live view)
-ok(same(Object.keys(wt.TYPE_ICONS), wt.listWindowTypes()), 'TYPE_ICONS keys == registered kinds (live view, not a snapshot)');
+ok(verdictOf(same(Object.keys(wt.TYPE_ICONS), wt.listWindowTypes())), 'TYPE_ICONS keys == registered kinds (live view, not a snapshot)');
 
 // LOUD unknown action: console.warn + return null (no throw — a poisoned
 // layout record must not abort the whole restore loop)
@@ -130,24 +130,24 @@ const noActionResult = wt.replayOpenSpec(app, { path: '/x' });
 console.warn = origWarn;
 ok(!threw && unknownResult === null, 'unknown action → null, no throw');
 ok(warns.length === 3, `every unregistered/missing action warns (${warns.length}/3)`);
-ok(/openSomethingNobodyRegistered/.test(warns[0]) && /window not replayed/.test(warns[0]) && /openFakeKind/.test(warns[0]),
+ok(gateOf(/openSomethingNobodyRegistered/.test(warns[0])) && gateOf(/window not replayed/.test(warns[0])) && verdictOf(/openFakeKind/.test(warns[0])),
   'the warning names the action, says the window was not replayed, and lists what IS registered');
-ok(nullResult === null && noActionResult === null && /\(missing\)/.test(warns[1]) && /\(missing\)/.test(warns[2]), 'null spec / spec without action → null + "(missing)" warning');
+ok(nullResult === null && noActionResult === null && gateOf(/\(missing\)/.test(warns[1])) && verdictOf(/\(missing\)/.test(warns[2])), 'null spec / spec without action → null + "(missing)" warning');
 
 // duplicates + malformed registrations throw at registration time (module load), never later
 const throws = (fn) => { try { fn(); return false; } catch (e) { return String(e.message || e); } };
-ok(/duplicate window type 'fake-kind'/.test(throws(() => wt.registerWindowType({ type: 'fake-kind', icon: '' }))), 'duplicate kind throws');
-ok(/duplicate openSpec action 'openFakeKind'/.test(throws(() => wt.registerOpenAction({ action: 'openFakeKind', type: 'fake-kind', replay: () => {} }))), 'duplicate action throws');
-ok(/type/.test(throws(() => wt.registerWindowType({ icon: '' }))), 'missing type throws');
-ok(/icon/.test(throws(() => wt.registerWindowType({ type: 'fake-bad-icon', icon: 42 }))), 'non-string icon throws');
-ok(/replay/.test(throws(() => wt.registerWindowType({ type: 'fake-bad-replay', action: 'openBad' }))), 'action without replay throws');
-ok(/action/.test(throws(() => wt.registerWindowType({ type: 'fake-bad-action', replay: () => {} }))), 'replay without action throws');
+ok(verdictOf(/duplicate window type 'fake-kind'/.test(throws(() => wt.registerWindowType({ type: 'fake-kind', icon: '' })))), 'duplicate kind throws');
+ok(verdictOf(/duplicate openSpec action 'openFakeKind'/.test(throws(() => wt.registerOpenAction({ action: 'openFakeKind', type: 'fake-kind', replay: () => {} })))), 'duplicate action throws');
+ok(verdictOf(/type/.test(throws(() => wt.registerWindowType({ icon: '' })))), 'missing type throws');
+ok(verdictOf(/icon/.test(throws(() => wt.registerWindowType({ type: 'fake-bad-icon', icon: 42 })))), 'non-string icon throws');
+ok(verdictOf(/replay/.test(throws(() => wt.registerWindowType({ type: 'fake-bad-replay', action: 'openBad' })))), 'action without replay throws');
+ok(verdictOf(/action/.test(throws(() => wt.registerWindowType({ type: 'fake-bad-action', replay: () => {} })))), 'replay without action throws');
 ok(!wt.listWindowTypes().includes('fake-bad-replay') && !wt.listWindowTypes().includes('fake-bad-action'), 'a rejected registration leaves no half-registered kind');
-ok(/replay/.test(throws(() => wt.registerOpenAction({ action: 'openBad2', type: 'fake-kind', replay: 'nope' }))), 'registerOpenAction with a non-function replay throws');
+ok(verdictOf(/replay/.test(throws(() => wt.registerOpenAction({ action: 'openBad2', type: 'fake-kind', replay: 'nope' })))), 'registerOpenAction with a non-function replay throws');
 {
   const before = wt.listWindowTypes().length;
   const msg = throws(() => wt.registerWindowType({ type: 'fake-atomic', icon: '', actions: { openFakeKind: () => {} } }));
-  ok(/duplicate openSpec action/.test(msg) && wt.listWindowTypes().length === before && !wt.getWindowType('fake-atomic'),
+  ok(gateOf(/duplicate openSpec action/.test(msg)) && wt.listWindowTypes().length === before && !wt.getWindowType('fake-atomic'),
     'a kind whose action list collides is rolled back atomically (no kind, no partial action)');
 }
 
@@ -195,15 +195,15 @@ for (const [file, s] of Object.entries(src)) {
 const typeRegs = regs.filter((r) => r.fn === 'registerWindowType');
 const regTypes = typeRegs.map((r) => r.type);
 const regActions = regs.flatMap((r) => r.actions);
-ok(same(regTypes, CORE_TYPES), `core registers exactly the declared window kinds (${regTypes.length}: ${regTypes.sort().join(' ')})`,
+ok(verdictOf(same(regTypes, CORE_TYPES)), `core registers exactly the declared window kinds (${regTypes.length}: ${regTypes.sort().join(' ')})`,
   'missing: ' + CORE_TYPES.filter((t) => !regTypes.includes(t)).join(',') + ' extra: ' + regTypes.filter((t) => !CORE_TYPES.includes(t)).join(','));
 ok(new Set(regTypes).size === regTypes.length, 'each kind is registered exactly once');
-ok(same(regActions, CORE_ACTIONS), `core registers exactly the declared openSpec actions (${regActions.length})`,
+ok(verdictOf(same(regActions, CORE_ACTIONS)), `core registers exactly the declared openSpec actions (${regActions.length})`,
   'missing: ' + CORE_ACTIONS.filter((a) => !regActions.includes(a)).join(',') + ' extra: ' + regActions.filter((a) => !CORE_ACTIONS.includes(a)).join(','));
 ok(new Set(regActions).size === regActions.length, 'each action is registered exactly once');
-ok(regs.every((r) => r.type && regTypes.includes(r.type)), 'every action registration names a registered kind (registerOpenAction type ∈ kinds)');
-ok(same(typeRegs.filter((r) => r.persistFalse).map((r) => r.type), CORE_TRANSIENT), "persist:false set == layout.js's former TRANSIENT_WINDOW_TYPES {chat, terminal, stage-placeholder} + machine-app (lane machine-app-crop) — machine-desktop restored by its openSpec since lane desktop-display-modes");
-ok(same(typeRegs.filter((r) => r.singleton).map((r) => r.type), CORE_SINGLETONS), 'singleton set == the kinds whose opener focuses an existing window {desktop, integrations, jobs, settings, usage}');
+ok(verdictOf(regs.every((r) => r.type && regTypes.includes(r.type))), 'every action registration names a registered kind (registerOpenAction type ∈ kinds)');
+ok(verdictOf(same(typeRegs.filter((r) => r.persistFalse).map((r) => r.type), CORE_TRANSIENT)), "persist:false set == layout.js's former TRANSIENT_WINDOW_TYPES {chat, terminal, stage-placeholder} + machine-app (lane machine-app-crop) — machine-desktop restored by its openSpec since lane desktop-display-modes");
+ok(verdictOf(same(typeRegs.filter((r) => r.singleton).map((r) => r.type), CORE_SINGLETONS)), 'singleton set == the kinds whose opener focuses an existing window {desktop, integrations, jobs, settings, usage}');
 
 // A REPLAY MUST PRODUCE THE WINDOW IT NAMES (2.369.125 r2, verifier finding on
 // docs/design-mobile-gaps.md #2/#9): four openers run a rail-first ladder for
@@ -217,12 +217,12 @@ const RAIL_LADDER_OPENERS = ['openRailPanel(', 'app.openChannels(', 'app.openJob
 const replaysViaLadder = (r) => RAIL_LADDER_OPENERS.some((o) => r.replay.includes(o));
 const replayForcesWindow = (r) => /\bforceWindow:\s*true\b/.test(r.replay);
 const ladderReplays = typeRegs.filter(replaysViaLadder);
-ok(same(ladderReplays.map((r) => r.type), ['channels', 'job-interact', 'jobs', 'ports', 'system']), `the rail-ladder replays are exactly {channels, job-interact, jobs, ports, system} (${ladderReplays.map((r) => r.type).sort().join(' ')})`);
-ok(ladderReplays.every(replayForcesWindow), 'every replay that routes through a rail-first ladder passes forceWindow: true (a replay produces the window it names)',
+ok(verdictOf(same(ladderReplays.map((r) => r.type), ['channels', 'job-interact', 'jobs', 'ports', 'system'])), `the rail-ladder replays are exactly {channels, job-interact, jobs, ports, system} (${ladderReplays.map((r) => r.type).sort().join(' ')})`);
+ok(verdictOf(ladderReplays.every(replayForcesWindow)), 'every replay that routes through a rail-first ladder passes forceWindow: true (a replay produces the window it names)',
   ladderReplays.filter((r) => !replayForcesWindow(r)).map((r) => `${r.type}: ${r.replay}`).join('; '));
-ok(ladderReplays.every((r) => r.replay.trim().length > 0), 'the replay text was actually captured (an empty capture would pass the predicate vacuously)');
+ok(verdictOf(ladderReplays.every((r) => r.replay.trim().length > 0)), 'the replay text was actually captured (an empty capture would pass the predicate vacuously)');
 // negative control: the r1 closure text (no forceWindow) fails the same predicate
-ok(!replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId }) });" }) && replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId, forceWindow: true }) });" }), 'negative control: the pre-fix closure text fails the predicate, the fixed one passes');
+ok(!replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId }) });" }) && verdictOf(replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId, forceWindow: true }) });" })), 'negative control: the pre-fix closure text fails the predicate, the fixed one passes');
 
 // THE THREE BROWSER FACES (docs/design-browser-faces.zh.md direction B, owner
 // 2026-09-24 "那就选B吧"): the window kinds keep their ids (layout replay reads
@@ -235,10 +235,10 @@ ok(!replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId }) });" 
   ok(lab.browser === 'Web view' && lab['browser-live'] === 'Agent browser (live)' && lab['browser-profiles'] === 'Agent browser',
     `the browser faces' kind labels: browser → 'Web view', browser-live → 'Agent browser (live)', browser-profiles → 'Agent browser' (${JSON.stringify([lab.browser, lab['browser-live'], lab['browser-profiles']])})`);
   const ic = Object.fromEntries(typeRegs.map((r) => [r.type, r.iconExpr]));
-  ok(/^UI_ICONS\.browserLive\b/.test(ic['browser-live'] || ''), `the live view's kind icon IS UI_ICONS.browserLive, not a local copy of the path (${ic['browser-live']})`);
-  ok(/svgIcon16\('<circle cx="8" cy="8" r="6"\/>/.test(ic.browser || ''), 'the web view keeps the globe (the one meaning the globe has left)');
-  ok(/import \{[^}]*\bUI_ICONS\b[^}]*\} from '\.\/icons\.js'/.test(src['browser-live-window.js']), 'browser-live-window.js imports UI_ICONS (the icon comes from the one definition)');
-  ok(lab['browser-replay'] === 'Browser replay' && /^UI_ICONS\.browserReplay\b/.test(ic['browser-replay'] || ''), `the replay window's kind: labelled 'Browser replay', its icon UI_ICONS.browserReplay from icons.js (${ic['browser-replay']})`);
+  ok(verdictOf(/^UI_ICONS\.browserLive\b/.test(ic['browser-live'] || '')), `the live view's kind icon IS UI_ICONS.browserLive, not a local copy of the path (${ic['browser-live']})`);
+  ok(verdictOf(/svgIcon16\('<circle cx="8" cy="8" r="6"\/>/.test(ic.browser || '')), 'the web view keeps the globe (the one meaning the globe has left)');
+  ok(verdictOf(/import \{[^}]*\bUI_ICONS\b[^}]*\} from '\.\/icons\.js'/.test(src['browser-live-window.js'])), 'browser-live-window.js imports UI_ICONS (the icon comes from the one definition)');
+  ok(lab['browser-replay'] === 'Browser replay' && verdictOf(/^UI_ICONS\.browserReplay\b/.test(ic['browser-replay'] || '')), `the replay window's kind: labelled 'Browser replay', its icon UI_ICONS.browserReplay from icons.js (${ic['browser-replay']})`);
 }
 
 // ownership: each kind registered in the module that opens it
@@ -251,12 +251,12 @@ const EXPECTED_OWNER = { chat: 'session-lifecycle.js', terminal: 'session-lifecy
   task: 'task-detail.js', jobs: 'jobs-panel.js', 'job-interact': 'jobs-panel.js', usage: 'usage-window.js',
   settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js', integrations: 'integrations-window.js',
   channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js', inbox: 'inbox-window.js', 'browser-replay': 'browser-replay-window.js', design: 'design-window.js', doc: 'doc-window.js', artifacts: 'artifacts-window.js' };
-ok(Object.entries(EXPECTED_OWNER).every(([t, f]) => owner[t] === f), 'each kind registers in its owning module',
+ok(verdictOf(Object.entries(EXPECTED_OWNER).every(([t, f]) => owner[t] === f)), 'each kind registers in its owning module',
   Object.entries(EXPECTED_OWNER).filter(([t, f]) => owner[t] !== f).map(([t, f]) => `${t}: ${owner[t]} (expected ${f})`).join('; '));
-ok(regs.some((r) => r.file === 'task-log.js' && r.fn === 'registerOpenAction' && r.actions.includes('openTaskLog') && r.type === 'task')
-  && regs.some((r) => r.file === 'session-props.js' && r.fn === 'registerOpenAction' && r.actions.includes('openSessionProps') && r.type === 'task'),
+ok(gateOf(regs.some((r) => r.file === 'task-log.js' && r.fn === 'registerOpenAction' && r.actions.includes('openTaskLog') && r.type === 'task'))
+  && verdictOf(regs.some((r) => r.file === 'session-props.js' && r.fn === 'registerOpenAction' && r.actions.includes('openSessionProps') && r.type === 'task')),
   "task-log / session-props attach their actions to the shared 'task' kind via registerOpenAction");
-ok([...new Set(regs.map((r) => r.file))].every((f) => /from '\.\/window-types\.js'/.test(src[f])), 'every registering module imports window-types.js (a bare call is the 2.330.1 free-variable class)');
+ok(verdictOf([...new Set(regs.map((r) => r.file))].every((f) => /from '\.\/window-types\.js'/.test(src[f]))), 'every registering module imports window-types.js (a bare call is the 2.330.1 free-variable class)');
 
 // THE DESIGN WINDOW WITH NO FOLDER IS THE HOME (lane design-systems-home, design 003 §2 S6): the same kind and the
 // same action — no new window kind — so layout restore, cross-client sync and the phone replay a home like any
@@ -264,12 +264,12 @@ ok([...new Set(regs.map((r) => r.file))].every((f) => /from '\.\/window-types\.j
 {
   const dw = src['design-window.js'], dh = src['design-home.js'] || '';
   const HOME_PIN = /if \(!d\) return openDesignHome\(app, \{ syncId \}\);/;
-  ok(HOME_PIN.test(dw) && !/No design folder was named/.test(dw), 'openDesign with no folder opens the home (the old "no folder" refusal toast is gone)');
-  ok(/import \{ openDesignHome \} from '\.\/design-home\.js'/.test(dw), 'design-window.js takes the home from its own module (design-home.js)');
+  ok(gateOf(HOME_PIN.test(dw)) && !/No design folder was named/.test(dw), 'openDesign with no folder opens the home (the old "no folder" refusal toast is gone)');
+  ok(verdictOf(/import \{ openDesignHome \} from '\.\/design-home\.js'/.test(dw)), 'design-window.js takes the home from its own module (design-home.js)');
   const reg = typeRegs.find((r) => r.type === 'design');
-  ok(!!reg && /dir: spec\.dir\b/.test(reg.replay), `the design replay passes spec.dir through as is ('' = the home): ${reg && reg.replay}`);
-  ok(/createWindow\(\{[^}]*type: 'design'[^}]*openSpec[^}]*\}\)/.test(dh) && /const openSpec = \{ action: 'openDesign', host: '', dir: '', sessionId: '' \};/.test(dh), "the home is a 'design' window whose openSpec is openDesign with dir '' (no new kind, no new action)");
-  ok(/w\._designHome\)/.test(dh) && /revealWindow\(existing\.id, \{ replay: !!syncId \}\)/.test(dh), 'one home per client: an open one is revealed (a replay only raises)');
+  ok(!!reg && verdictOf(/dir: spec\.dir\b/.test(reg.replay)), `the design replay passes spec.dir through as is ('' = the home): ${reg && reg.replay}`);
+  ok(gateOf(/createWindow\(\{[^}]*type: 'design'[^}]*openSpec[^}]*\}\)/.test(dh)) && verdictOf(/const openSpec = \{ action: 'openDesign', host: '', dir: '', sessionId: '' \};/.test(dh)), "the home is a 'design' window whose openSpec is openDesign with dir '' (no new kind, no new action)");
+  ok(gateOf(/w\._designHome\)/.test(dh)) && verdictOf(/revealWindow\(existing\.id, \{ replay: !!syncId \}\)/.test(dh)), 'one home per client: an open one is revealed (a replay only raises)');
   ok(!HOME_PIN.test("  if (!d) { showToast(t('No design folder was named'), { type: 'error' }); return null; }"), 'negative control: the pre-lane no-folder line fails the home pin');
 }
 
@@ -278,11 +278,11 @@ ok([...new Set(regs.map((r) => r.file))].every((f) => /from '\.\/window-types\.j
 {
   const dd = src['doc-window.js'] || '', ap = src['app.js'] || '';
   const ROUTE = /if \(\/\\\.\(md\|markdown\)\$\/i\.test\(fileName \|\| filePath\) && !opts\.line && !opts\.hex && !opts\._tempFile && !opts\.via\) \{/;
-  ok(ROUTE.test(ap) && /return this\.openDoc\(\{ host: opts\.host \|\| '', path: filePath, from:/.test(ap), 'openFile routes .md / .markdown to the Doc window (a :line link / hex / a temp file keep the editor)');
+  ok(gateOf(ROUTE.test(ap)) && verdictOf(/return this\.openDoc\(\{ host: opts\.host \|\| '', path: filePath, from:/.test(ap)), 'openFile routes .md / .markdown to the Doc window (a :line link / hex / a temp file keep the editor)');
   const reg = typeRegs.find((r) => r.type === 'doc');
-  ok(!!reg && /path: spec\.path\b/.test(reg.replay) && /from: spec\.from/.test(reg.replay) && /host: spec\.host/.test(reg.replay), `the doc replay carries host, path and from: ${reg && reg.replay}`);
-  ok(/const openSpec = \{ action: 'openDoc', host: h, path: p, from: from \|\| '' \};/.test(dd) && /w\._filePath !== p \|\| \(w\._docHost \|\| ''\) !== h/.test(dd) && /app\.wm\.revealWindow\(w\.id, \{ replay: !!syncId \}\)/.test(dd), 'one Doc window per (host, path): an open one is revealed (a replay only raises)');
-  ok(/import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(dd) && !/from 'prosemirror/.test(dd), 'the editor is the LAZY public/doc-editor.js — the door imports no prosemirror module');
+  ok(!!reg && gateOf(/path: spec\.path\b/.test(reg.replay)) && gateOf(/from: spec\.from/.test(reg.replay)) && verdictOf(/host: spec\.host/.test(reg.replay)), `the doc replay carries host, path and from: ${reg && reg.replay}`);
+  ok(gateOf(/const openSpec = \{ action: 'openDoc', host: h, path: p, from: from \|\| '' \};/.test(dd)) && gateOf(/w\._filePath !== p \|\| \(w\._docHost \|\| ''\) !== h/.test(dd)) && verdictOf(/app\.wm\.revealWindow\(w\.id, \{ replay: !!syncId \}\)/.test(dd)), 'one Doc window per (host, path): an open one is revealed (a replay only raises)');
+  ok(gateOf(/import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(dd)) && !/from 'prosemirror/.test(dd), 'the editor is the LAZY public/doc-editor.js — the door imports no prosemirror module');
   ok(!ROUTE.test("    if (/\\.(md|markdown)$/i.test(fileName || filePath)) {"), 'negative control: a route without the :line / hex / temp-file exits fails the pin');
 }
 
@@ -301,7 +301,7 @@ for (const [file, s] of Object.entries(src)) {
     void file;
   }
 }
-ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type literal is a registered kind (${[...censusTypes].sort().join(' ')})`,
+ok(verdictOf([...censusTypes].every((t) => regTypes.includes(t))), `every createWindow type literal is a registered kind (${[...censusTypes].sort().join(' ')})`,
   'unregistered: ' + [...censusTypes].filter((t) => !regTypes.includes(t)).join(','));
 // lane ui-plain-words M2b — THE KIND'S WORDS: a window kind is named to a person by its registered label through t()
 // (window-types.js windowKindWords / windowWords), never by its raw `type` («machine-app» under a remote app's title,
@@ -333,8 +333,8 @@ ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type
   const tb = src['taskbar.js'], wj = src['window.js'], mn = src['mobile-nav.js'];
   // closure 2: a LIST shows the full title («name — folder», two same-named conversations read apart, as the release did) through
   // windowTitle; the taskbar's title line and the tile keep the first part (windowWords); only a title-less window takes the kind's words
-  ok(/title\.textContent = starPrefix \+ windowWords\(win\)/.test(tb) && /subtitle\.textContent = parts\[1\] \|\| \(kindWords !== windowWords\(win\) \? kindWords : ''\)/.test(tb) && /label: windowTitle\(w\)/.test(tb) && /const nameOfWin = \(w\) => windowWords\(w\)/.test(tb)
-    && /\{ window: windowTitle\(win\), desktop: desk \}/.test(wj) && /label\.textContent = windowTitle\(win\)/.test(mn) && /label\.textContent = windowTitle\(w\)/.test(wj) && /const nameOf = \(id\) => windowTitle\(this\.windows\.get\(id\)\)/.test(src['tab-group.js']),
+  ok(gateOf(/title\.textContent = starPrefix \+ windowWords\(win\)/.test(tb)) && gateOf(/subtitle\.textContent = parts\[1\] \|\| \(kindWords !== windowWords\(win\) \? kindWords : ''\)/.test(tb)) && gateOf(/label: windowTitle\(w\)/.test(tb)) && gateOf(/const nameOfWin = \(w\) => windowWords\(w\)/.test(tb))
+    && gateOf(/\{ window: windowTitle\(win\), desktop: desk \}/.test(wj)) && gateOf(/label\.textContent = windowTitle\(win\)/.test(mn)) && gateOf(/label\.textContent = windowTitle\(w\)/.test(wj)) && verdictOf(/const nameOf = \(id\) => windowTitle\(this\.windows\.get\(id\)\)/.test(src['tab-group.js'])),
     'the readers: the title line by windowWords; every list, the «is on» toast, the phone list and the split toasts by windowTitle (the folder kept)');
   // closure 2 (主开发's re-run: the leg named five of nine sites): the SITES are grep-derived — every file of src/ that imports from
   // window-types.js, every call of windowWords( / windowTitle( in it, counted per file. A site swapped to the short name changes two
@@ -369,24 +369,24 @@ ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type
 // census: every openSpec literal's action is a registered action
 const specActions = new Set();
 for (const s of Object.values(src)) for (const m of s.matchAll(/\{\s*action:\s*'([A-Za-z]+)'/g)) specActions.add(m[1]);
-ok(specActions.size >= 15 && [...specActions].every((a) => regActions.includes(a)), `every openSpec literal's action is registered (${specActions.size} literals)`,
+ok(specActions.size >= 15 && verdictOf([...specActions].every((a) => regActions.includes(a))), `every openSpec literal's action is registered (${specActions.size} literals)`,
   'unregistered: ' + [...specActions].filter((a) => !regActions.includes(a)).join(','));
 
 // the three former literal homes are gone; the readers go through the registry
 const sl = src['session-lifecycle.js'];
 ok(!/switch\s*\(\s*spec\.action\s*\)/.test(sl), 'session-lifecycle: no `switch (spec.action)` left');
 ok(!CORE_ACTIONS.some((a) => new RegExp(`case '${a}'`).test(sl)), 'session-lifecycle: no former `case` string survives');
-ok(/replayOpenSpec\(spec, syncId\) \{\s*return replayOpenSpecViaRegistry\(this, spec, \{ syncId \}\);/.test(sl), 'app.replayOpenSpec delegates to the registry (callers keep their entry point)');
+ok(verdictOf(/replayOpenSpec\(spec, syncId\) \{\s*return replayOpenSpecViaRegistry\(this, spec, \{ syncId \}\);/.test(sl)), 'app.replayOpenSpec delegates to the registry (callers keep their entry point)');
 const tg = src['tab-group.js'];
-ok(!/export const TYPE_ICONS\s*=/.test(tg) && /export \{ TYPE_ICONS \} from '\.\/window-types\.js'/.test(tg), 'tab-group: TYPE_ICONS literal gone, re-exported as the registry view');
+ok(!/export const TYPE_ICONS\s*=/.test(tg) && verdictOf(/export \{ TYPE_ICONS \} from '\.\/window-types\.js'/.test(tg)), 'tab-group: TYPE_ICONS literal gone, re-exported as the registry view');
 ok(!/TYPE_ICONS\[/.test(src['window.js']) && (src['window.js'].match(/windowTypeIcon\(type\)/g) || []).length === 2, 'window.js reads icons through windowTypeIcon() (title-bar span + _typeIcon)');
 const lay = src['layout.js'];
-ok(!/TRANSIENT_WINDOW_TYPES/.test(lay.replace(/\/\/[^\n]*/g, '')) && /!isTransientWindowType\(win\.type\)/.test(lay), 'layout.js: TRANSIENT_WINDOW_TYPES set gone, breadcrumb exemption reads the registry');
+ok(!/TRANSIENT_WINDOW_TYPES/.test(lay.replace(/\/\/[^\n]*/g, '')) && verdictOf(/!isTransientWindowType\(win\.type\)/.test(lay)), 'layout.js: TRANSIENT_WINDOW_TYPES set gone, breadcrumb exemption reads the registry');
 const wtSrc = src['window-types.js'];
-ok(/track\('event', 'openspec-unknown', what\)/.test(wtSrc) && /console\.warn\(/.test(wtSrc), "unknown action is LOUD: console.warn + telemetry 'openspec-unknown'");
+ok(gateOf(/track\('event', 'openspec-unknown', what\)/.test(wtSrc)) && verdictOf(/console\.warn\(/.test(wtSrc)), "unknown action is LOUD: console.warn + telemetry 'openspec-unknown'");
 const wtImports = [...wtSrc.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
-ok(same(wtImports, ['./telemetry-client.js', './i18n.js']), `window-types.js imports only telemetry-client and i18n (both DOM-free at import; i18n for the kind's words, lane ui-plain-words) — got ${wtImports.join(',')}`);
-ok(/'test-window-types'/.test(read('scripts/ci.mjs')), 'ci.mjs SUITES carries this suite');
+ok(verdictOf(same(wtImports, ['./telemetry-client.js', './i18n.js'])), `window-types.js imports only telemetry-client and i18n (both DOM-free at import; i18n for the kind's words, lane ui-plain-words) — got ${wtImports.join(',')}`);
+ok(verdictOf(/'test-window-types'/.test(read('scripts/ci.mjs'))), 'ci.mjs SUITES carries this suite');
 
 // ── THE MANAGER OWNS TITLES (channels r3) ──
 // `winInfo` is a plain literal (window.js) with NO `setTitle` member, so
@@ -398,15 +398,15 @@ ok(/'test-window-types'/.test(read('scripts/ci.mjs')), 'ci.mjs SUITES carries th
 {
   const w = src['window.js'];
   const literal = /const winInfo = \{[\s\S]*?_listenerCtl: new AbortController\(\) \};/.exec(w)?.[0] || '';
-  ok(literal && !/\bsetTitle\b/.test(literal) && !/winInfo\.setTitle\s*=/.test(w) && /^\s*setTitle\(id, t\) \{/m.test(w),
+  ok(gateOf(literal) && !/\bsetTitle\b/.test(literal) && !/winInfo\.setTitle\s*=/.test(w) && verdictOf(/^\s*setTitle\(id, t\) \{/m.test(w)),
     'window.js: the winInfo literal has no setTitle member and none is ever assigned — titles belong to WindowManager.setTitle(id, t)');
   const NOOP = /\bwinInfo\.setTitle\s*\??\.?\(/;
   const blank = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const strays = Object.entries(src).filter(([, s]) => NOOP.test(blank(s))).map(([f]) => f);
   ok(!strays.length, 'no module in src/lib calls the no-op `winInfo.setTitle?.(…)` — a title set that way is never drawn', strays.join(', '));
-  ok(NOOP.test("    winInfo.setTitle?.(c.title || convId);") && NOOP.test("winInfo.setTitle(x)"), 'POSITIVE CONTROL: the census matches the retired spelling (both forms)');
+  ok(gateOf(NOOP.test("    winInfo.setTitle?.(c.title || convId);")) && verdictOf(NOOP.test("winInfo.setTitle(x)")), 'POSITIVE CONTROL: the census matches the retired spelling (both forms)');
   ok(!NOOP.test("    app.wm.setTitle(winInfo.id, c.title || convId);"), 'NEGATIVE CONTROL: …and not the manager call that replaced it');
-  ok(/app\.wm\.setTitle\(winInfo\.id, /.test(src['channel-window.js']) && /app\.wm\.setTitle\(winInfo\.id, /.test(src['jobs-panel.js']),
+  ok(gateOf(/app\.wm\.setTitle\(winInfo\.id, /.test(src['channel-window.js'])) && verdictOf(/app\.wm\.setTitle\(winInfo\.id, /.test(src['jobs-panel.js'])),
     'channel-window.js and jobs-panel.js set their titles through the manager');
 }
 
@@ -444,27 +444,27 @@ console.log('the harness mark in every pick list (lane phone-take-photo)');
     };
   };
   const jm = judgeMarks(src);
-  ok(jm.builder, 'agent-meta windowListMark: a chat / terminal = the mode mark, another window with a harness = the plain one, else the type glyph; a listed mark carries its window id');
-  ok(jm.titleBar, "window.js: the title bar's slot is drawn by the SAME call (listed: false) — no second builder call in window.js");
-  ok(jm.follows, '_applyTitleMeta → followListMarks: an open list re-draws a mark whose harness became known');
-  for (const [k, v] of Object.entries(jm.listed)) ok(v, `${k} draws its rows' marks through windowListMark (no raw type glyph)`);
-  ok(jm.warmth, 'the warmth rows carry what their mark is drawn from — a built row its window\'s facts, a held row its record\'s harness');
-  ok(jm.raw.length === 3 && jm.raw.every((r) => r.guarded), `a raw type glyph is drawn only behind a harness check (the tile, the tab stack, the tab bar): ${jm.raw.map((r) => r.f + (r.guarded ? '' : ' UNGUARDED')).join(', ')}`);
+  ok(verdictOf(jm.builder), 'agent-meta windowListMark: a chat / terminal = the mode mark, another window with a harness = the plain one, else the type glyph; a listed mark carries its window id');
+  ok(verdictOf(jm.titleBar), "window.js: the title bar's slot is drawn by the SAME call (listed: false) — no second builder call in window.js");
+  ok(verdictOf(jm.follows), '_applyTitleMeta → followListMarks: an open list re-draws a mark whose harness became known');
+  for (const [k, v] of Object.entries(jm.listed)) ok(verdictOf(v), `${k} draws its rows' marks through windowListMark (no raw type glyph)`);
+  ok(verdictOf(jm.warmth), 'the warmth rows carry what their mark is drawn from — a built row its window\'s facts, a held row its record\'s harness');
+  ok(jm.raw.length === 3 && verdictOf(jm.raw.every((r) => r.guarded)), `a raw type glyph is drawn only behind a harness check (the tile, the tab stack, the tab bar): ${jm.raw.map((r) => r.f + (r.guarded ? '' : ' UNGUARDED')).join(', ')}`);
   // RED controls (planted copies): each list site and each half of the law, reverted alone
   const plant = (f, from, to) => { const c = { ...src }; if (!c[f].includes(from)) return null; c[f] = c[f].replace(from, to); return judgeMarks(c); };
   const pPhone = plant('mobile-nav.js', 'icon.appendChild(windowListMark(win));', "icon.innerHTML = win._typeIcon || '';");
-  ok(pPhone && !pPhone.listed['mobile-nav.js _buildWindowItem (the phone list)'] && !(pPhone.raw.length === 3 && pPhone.raw.every((r) => r.guarded)), 'RED: the phone list back on the type glyph');
+  ok(gateOf(pPhone) && !pPhone.listed['mobile-nav.js _buildWindowItem (the phone list)'] && !(pPhone.raw.length === 3 && pPhone.raw.every((r) => r.guarded)), 'RED: the phone list back on the type glyph');
   const pList = plant('taskbar.js', "export function showWindowList(app, anchor, opts = {}) {", "export function showWindowList(app, anchor, opts = {}) { const _r = (w) => w._typeIcon;");
-  ok(pList && !pList.listed['taskbar.js showWindowList (the ⧉ list)'], 'RED: the ⧉ list reading the type glyph');
+  ok(gateOf(pList) && !pList.listed['taskbar.js showWindowList (the ⧉ list)'], 'RED: the ⧉ list reading the type glyph');
   const pFollow = plant('window.js', '    followListMarks(win); // a list open', '    // a list open');
-  ok(pFollow && !pFollow.follows, 'RED: a late harness not followed in an open list');
+  ok(gateOf(pFollow) && !pFollow.follows, 'RED: a late harness not followed in an open list');
   const pTitle = plant('window.js', "windowListMark(win, { className: 'window-backend-icon', listed: false })", "createModeBackendIcon(backend, win.type, { className: 'window-backend-icon' })");
-  ok(pTitle && !pTitle.titleBar, 'RED: the title bar drawing its own mark (a second builder call)');
+  ok(gateOf(pTitle) && !pTitle.titleBar, 'RED: the title bar drawing its own mark (a second builder call)');
   const pSecond = plant('mobile-nav.js', 'icon.appendChild(windowListMark(win));', "icon.appendChild(windowListMark(win)); icon.appendChild(createBackendIcon('claude'));");
-  ok(pSecond && !pSecond.listed['mobile-nav.js _buildWindowItem (the phone list)'], 'RED: a listed site calling a SECOND builder beside windowListMark (the acceptance)');
+  ok(gateOf(pSecond) && !pSecond.listed['mobile-nav.js _buildWindowItem (the phone list)'], 'RED: a listed site calling a SECOND builder beside windowListMark (the acceptance)');
   const pHeld = plant('warmth-chrome.js', "type: ws.type, backend: ws.backend || (ws.openSpec && ws.openSpec.backend) || null });", 'type: ws.type });');
-  ok(pHeld && !pHeld.warmth, 'RED: a held warmth row that forgets its record\'s harness');
-  ok(jm.ownKey, 'windowListMark looks the harness up by OWN key; anything else draws the generic mark (the acceptance)');
+  ok(gateOf(pHeld) && !pHeld.warmth, 'RED: a held warmth row that forgets its record\'s harness');
+  ok(verdictOf(jm.ownKey), 'windowListMark looks the harness up by OWN key; anything else draws the generic mark (the acceptance)');
   // BEHAVIOUR over the ids that broke the old lookup: the real module in Node over a minimal DOM (createElement only)
   {
     const fakeEl = () => { const e = { className: '', dataset: {}, title: '', textContent: '', innerHTML: '', children: [], attrs: {}, style: { setProperty() {} },
@@ -476,16 +476,16 @@ console.log('the harness mark in every pick list (lane phone-take-photo)');
       const AM = await import(new URL('../src/lib/agent-meta.js', import.meta.url).href);
       const odd = ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 5, { x: 1 }, ['claude'], true];
       const drawn = odd.map((id) => { try { const el = AM.windowListMark({ id: 'w-odd', type: 'chat', titleMeta: { backend: id } }); return { id: String(id), cls: el.className, text: el.textContent, kids: el.children.length }; } catch (e) { return { id: String(id), threw: e.message }; } });
-      ok(drawn.every((d) => !d.threw && /\bbackend-icon-generic\b/.test(d.cls) && !/undefined/.test(d.cls) && (d.text || d.kids)), `an inherited name or a non-string harness id draws the GENERIC mark — no throw, no empty box (${drawn.map((d) => d.id + ':' + (d.threw ? 'THREW' : d.cls.includes('generic') ? 'generic' : d.cls)).join(' ')})`, JSON.stringify(drawn));
+      ok(verdictOf(drawn.every((d) => !d.threw && /\bbackend-icon-generic\b/.test(d.cls) && !/undefined/.test(d.cls) && (d.text || d.kids))), `an inherited name or a non-string harness id draws the GENERIC mark — no throw, no empty box (${drawn.map((d) => d.id + ':' + (d.threw ? 'THREW' : d.cls.includes('generic') ? 'generic' : d.cls)).join(' ')})`, JSON.stringify(drawn));
       const real = AM.windowListMark({ id: 'w-c', type: 'chat', titleMeta: { backend: 'claude' } }), plain = AM.windowListMark({ id: 'w-m', type: 'chat', titleMeta: { backend: 'mystery-cli' } });
-      ok(/\bbackend-icon-claude\b/.test(real.className) && /\bmode-backend-icon\b/.test(real.className) && /\bbackend-icon-generic\b/.test(plain.className) && plain.title === 'mystery-cli Chat', 'a registered harness keeps its own mark; a plain unknown name keeps its label on the generic mark', [real.className, plain.className, plain.title]);
+      ok(gateOf(/\bbackend-icon-claude\b/.test(real.className)) && gateOf(/\bmode-backend-icon\b/.test(real.className)) && gateOf(/\bbackend-icon-generic\b/.test(plain.className)) && plain.title === 'mystery-cli Chat', 'a registered harness keeps its own mark; a plain unknown name keeps its label on the generic mark', [real.className, plain.className, plain.title]);
       // RED control: the unguarded road (getBackendMeta straight) on the same ids — an empty box and a throw
       let threw = false; try { AM.getBackendMeta(5); } catch { threw = true; }
-      ok(AM.getBackendMeta('constructor').iconClass === undefined && threw, 'RED control: getBackendMeta straight draws «backend-icon undefined» for an inherited name and THROWS on a number — what the own-key lookup keeps out of every list');
+      ok(AM.getBackendMeta('constructor').iconClass === undefined && verdictOf(threw), 'RED control: getBackendMeta straight draws «backend-icon undefined» for an inherited name and THROWS on a number — what the own-key lookup keeps out of every list');
     } finally { globalThis.document = had.document; globalThis.requestAnimationFrame = had.raf; }
   }
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
 // telemetry-client armed a 15s flush timer on the unknown-action event — exit explicitly
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

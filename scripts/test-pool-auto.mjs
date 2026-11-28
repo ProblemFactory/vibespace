@@ -18,7 +18,7 @@ const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch, poo
 const withoutNames = (d) => { if (!d || typeof d !== 'object') return d; const { quotaBlocked, rejectedMembers, unplaceable, notBetter, ...rest } = d; void quotaBlocked; void rejectedMembers; void unplaceable; void notBetter; return rest; };
 
 let pass = 0, fail = 0;
-const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -69,7 +69,7 @@ ck('bucket: reset PASSED → full again (stale reading is meaningless)', bucketR
   ck('a stated reset 40 s in the FUTURE is dead, as before (the 09:59:15Z shape: the pool moved 45 s early)', bucketRemaining({ utilization: 1, resetsAt: NOW + 40 }, NOW) === 0);
   const g = quotaVerdict({ fiveHour: { utilization: 1, resetsAt: NOW - 30 }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } }, NOW);
   ck('verdict: a 5h whose stated reset passed 30 s ago is still blocked, until the STATED instant + the grace', g.usable === false && g.blockedUntil === (NOW - 30 + RESET_GRACE_SEC) * 1000 && g.deadBuckets.length === 1, JSON.stringify(g));
-  ck('…and the card is told the STATED instant, not the fire instant', g.until && g.until.resetsAt === NOW - 30 && g.deadBuckets[0].resetsAt === NOW - 30, JSON.stringify(g.until));
+  ck('…and the card is told the STATED instant, not the fire instant', gateOf(g.until) && g.until.resetsAt === NOW - 30 && g.deadBuckets[0].resetsAt === NOW - 30, JSON.stringify(g.until));
   // r2: the un-named model cap's dead mark carries the bounded 24 h guess when the record states no reset — it ROLLS
   const ph = { name: 'Model cap', utilization: 1, status: 'limited', resetsAt: NOW + 86400 };
   ck('a model-cap placeholder marked dead with the bounded guess reads 0 now and rolls to 100 a minute after the guessed deadline (a dead mark always has a deadline)',
@@ -276,7 +276,7 @@ ck('oscillation control: a HEALTHY sooner-deadline member still gets the proacti
   ck('blocked: every member gated out returns no-members (was silent)', v?.to === null && v.reason === 'no-members');
   ck('blocked: names the SPENT bucket, not "out of quota"', v.deadBuckets.join() === 'Fable 0%');
   ck('blocked: …and names what is still available (the nested-model truth)',
-    v.liveBuckets.includes('7d 40%') && v.liveBuckets.some((x) => x.startsWith('5h ')));
+    gateOf(v.liveBuckets.includes('7d 40%')) && verdictOf(v.liveBuckets.some((x) => x.startsWith('5h '))));
   ck('blocked: without explain the contract is still a bare null',
     decidePoolSwitch({ currentId: 'a', members: m, readCache: rc, nowSec: NOW }) === null);
   // a 5h-only block must report 5h, not the weekly caps
@@ -303,7 +303,7 @@ ck('oscillation control: a HEALTHY sooner-deadline member still gets the proacti
   const rc = (id) => ({ a: healthy, b: spentFable(0.5), c: spentFable(0.55) })[id] ?? null;
   const hot = decidePoolSwitch({ currentId: 'a', members: m, readCache: rc, nowSec: NOW, proactive: true, hot: true, explain: true });
   ck('healthy current + every other member quota-dead ⇒ no-better, never a wall', hot?.to === null && hot.reason === 'no-better' && hot.noBetter === true);
-  ck('no-better still reports the current member\'s own buckets (for the log, not for a notice)', hot.liveBuckets.some((x) => x.startsWith('Fable ')) && hot.deadBuckets.length === 0);
+  ck('no-better still reports the current member\'s own buckets (for the log, not for a notice)', gateOf(hot.liveBuckets.some((x) => x.startsWith('Fable '))) && hot.deadBuckets.length === 0);
   // …and the three refusals are UNCHANGED the moment the current member really
   // is exhausted — this narrows WHEN they may be claimed, never WHAT they say.
   const dead = decidePoolSwitch({ currentId: 'b', members: m, readCache: rc, nowSec: NOW, proactive: true, hot: true, explain: true });
@@ -323,10 +323,10 @@ ck('oscillation control: a HEALTHY sooner-deadline member still gets the proacti
   // means something beside a dead one.
   const spent = decidePoolSwitch({ currentId: 'a', members: m, readCache: allDead, nowSec: NOW, proactive: true, hot: true, explain: true });
   ck('notice: a spent bucket still prints its live siblings (the nested model\'s whole point)',
-    / \(still available: /.test(poolBlockedNotice(spent, { poolName: 'P', currentName: 'A' })));
+    verdictOf(/ \(still available: /.test(poolBlockedNotice(spent, { poolName: 'P', currentName: 'A' }))));
   const noDead = { ...spent, deadBuckets: [], liveBuckets: ['5h 100%', '7d 69%', 'Fable 45%'] };
   ck('notice: with NOTHING spent the live list is dropped — never "out of quota (still available: …)"',
-    !/still available/.test(poolBlockedNotice(noDead, { poolName: 'P', currentName: 'A' })) && /out of quota/.test(poolBlockedNotice(noDead, { poolName: 'P', currentName: 'A' })));
+    !/still available/.test(poolBlockedNotice(noDead, { poolName: 'P', currentName: 'A' })) && verdictOf(/out of quota/.test(poolBlockedNotice(noDead, { poolName: 'P', currentName: 'A' }))));
 }
 
 // ── classifyAuthFailure (2.335.0: auth-class failures must evict, quota can't see them) ──
@@ -368,9 +368,9 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('B-73fe: blocked = MAX over dead resets (+ the one-minute landing grace), and `until` names THAT bucket (Fable) at its STATED instant, not the nearer 5h', v.usable === false && v.blockedUntil === (NOW + 3 * D + 60) * 1000 && !!v.until && v.until.label === 'Fable' && v.until.resetsAt === NOW + 3 * D);
   ck('…deadBuckets carry label/kind/remaining/line/resetsAt for every dead bucket, 5h first', v.deadBuckets.length === 2 && v.deadBuckets[0].label === '5h' && v.deadBuckets[0].kind === 'fiveHour' && v.deadBuckets[0].line === 10 && v.deadBuckets[0].remaining === 0 && v.deadBuckets[0].resetsAt === NOW + H && v.deadBuckets[1].label === 'Fable' && v.deadBuckets[1].kind === 'weekly' && v.deadBuckets[1].remaining === 2 && v.deadBuckets[1].line === 5);
   const u = quotaVerdict({ fiveHour: { utilization: 0.1, resetsAt: NOW + H }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } }, NOW);
-  ck('…a usable verdict carries the EMPTY shape (readers never branch on presence)', u.usable === true && Array.isArray(u.deadBuckets) && u.deadBuckets.length === 0 && u.until === null);
+  ck('…a usable verdict carries the EMPTY shape (readers never branch on presence)', u.usable === true && gateOf(Array.isArray(u.deadBuckets)) && u.deadBuckets.length === 0 && u.until === null);
   const n = quotaVerdict({}, NOW);
-  ck('…and so does no-data', n.usable === null && Array.isArray(n.deadBuckets) && n.until === null);
+  ck('…and so does no-data', n.usable === null && gateOf(Array.isArray(n.deadBuckets)) && n.until === null);
   const p = quotaVerdict({ fiveHour: { utilization: 1, resetsAt: past }, sevenDay: { utilization: 0.99, resetsAt: NOW + D } }, NOW);
   ck('…a dead bucket whose reset already passed reads full again, so `until` is the 7d and the 5h is not listed', p.dead.length === 1 && p.until.label === '7d' && p.deadBuckets.length === 1);
   const q = quotaVerdict({ fiveHour: { utilization: 1 }, sevenDay: { utilization: 0.5, resetsAt: NOW + D } }, NOW);
@@ -431,14 +431,14 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   // 9. the blocked sentence names it (hot pool, soft-exhausted current, nothing settleable, K held back)
   const d9 = dec({ a: acct(0.5, 5 * D, { u5: 0.92 }), b: acct(0.99, 5 * D), k: freeK }, { hot: true, creditsIds: ['k'] });
   const n9 = poolBlockedNotice(d9, { poolName: 'P', currentName: 'A' });
-  ck('…and a blocked decision NAMES the held-back credits member', Array.isArray(d9.creditsHeld) && d9.creditsHeld[0].id === 'k' && d9.creditsHeld[0].name === 'Kredits');
-  ck('credits: a soft-exhausted current member does NOT fall onto credits (last resort = hard-dead only) and the blocked sentence names the held-back member', d9.to === null && d9.reason === 'no-members' && /Held back because they bill pay-per-use past their quota \(usage credits\): Kredits — the pool falls back to them only once A is fully spent\./.test(n9), n9);
+  ck('…and a blocked decision NAMES the held-back credits member', gateOf(Array.isArray(d9.creditsHeld)) && d9.creditsHeld[0].id === 'k' && d9.creditsHeld[0].name === 'Kredits');
+  ck('credits: a soft-exhausted current member does NOT fall onto credits (last resort = hard-dead only) and the blocked sentence names the held-back member', d9.to === null && d9.reason === 'no-members' && verdictOf(/Held back because they bill pay-per-use past their quota \(usage credits\): Kredits — the pool falls back to them only once A is fully spent\./.test(n9)), n9);
   // 10. the parking sentence, both shapes
   const n10 = poolCreditsNotice(d5, { poolName: 'P', memberName: 'Kredits' });
   ck('credits: the parking notice names the member, what it bills for, its spent buckets and the three ways out',
     n10 === 'Pool "P" is running on Kredits\'s usage credits — requests past its quota are billed pay-per-use (Kredits: spent: 5h 0%, 7d 0%); every other member is out of quota. Move conversations off the pool, add a member, or exclude Kredits from the pool in Manage Agents if you would rather it stopped.', n10);
   const n10b = poolCreditsNotice({ toCredits: { id: 'k', name: 'Kredits' }, toRemaining: 90 }, { poolName: 'P', memberName: 'Kredits' });
-  ck('…and the last-resort switch shape says it was the only member left, with what is known about the target', /\(Kredits: 90% remaining\); it was the only member left\./.test(n10b), n10b);
+  ck('…and the last-resort switch shape says it was the only member left, with what is known about the target', verdictOf(/\(Kredits: 90% remaining\); it was the only member left\./.test(n10b)), n10b);
   // 11. the ranked snapshot (sealed orders / auth-fail evict) walks credits members LAST
   const rk = rankPoolMembers({ members: M, readCache: (id) => ({ a: acct(0.5, 5 * D), b: acct(0.5, 4 * D), k: acct(0.1, 2 * D) })[id], nowSec: NOW, creditsIds: ['k'] });
   ck('credits: rankPoolMembers puts a credits member LAST even with the soonest deadline, marked credits:true', rk.map((r) => r.id).join(',') === 'b,a,k' && rk[2].credits === true);
@@ -462,10 +462,10 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   const { BACKEND_CAPS } = require(path.resolve('src/backend-caps.js'));
   const stating = Object.keys(BACKEND_CAPS).filter((h) => BACKEND_CAPS[h].promptCache);
   ck('TTL FACT: claude is the one shipped row that states a prompt cache; every other row — and an unknown id — answers null (unknown, never a guess)',
-    stating.join() === 'claude' && Object.keys(BACKEND_CAPS).filter((h) => !BACKEND_CAPS[h].promptCache).every((h) => cacheTtlSecFor({ harness: h }) === null) && cacheTtlSecFor({ harness: 'nope' }) === null, stating.join());
+    stating.join() === 'claude' && gateOf(Object.keys(BACKEND_CAPS).filter((h) => !BACKEND_CAPS[h].promptCache).every((h) => cacheTtlSecFor({ harness: h }) === null)) && cacheTtlSecFor({ harness: 'nope' }) === null, stating.join());
   ck('TTL FALLBACK: an API-key claude session ⇒ unknown (the inference covers subscription billing; a record\'s TTL still states it)', cacheTtlSecFor({ harness: 'claude', apiKey: true }) === null);
   const ttlSrc = (() => { const t = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8'); const i = t.indexOf('function cacheTtlSecFor('); return i < 0 ? '' : t.slice(i, t.indexOf('\n}\n', i)); })();
-  ck('TTL FACT: no model reaches the rule — cacheTtlSecFor reads the harness row, never a model name or a \'[1m]\'', ttlSrc && /capsOf\(harness\)\.promptCache/.test(ttlSrc) && !/\[1m\]|model/i.test(ttlSrc), ttlSrc.slice(0, 200));
+  ck('TTL FACT: no model reaches the rule — cacheTtlSecFor reads the harness row, never a model name or a \'[1m]\'', gateOf(ttlSrc) && gateOf(/capsOf\(harness\)\.promptCache/.test(ttlSrc)) && !/\[1m\]|model/i.test(ttlSrc), ttlSrc.slice(0, 200));
   // AMENDMENT 1 (lane cache-warmth-compact — the owner: «缓存时间这个你没有个 source of truth 吗？»): THE CACHE IS OBSERVED. Every
   // usage-carrying record states its prompt cache's own facts; account-pool-auto recordCacheFact reads them (PURE). Guarded so a
   // base without it (749aa7bf9) reds BY NAME.
@@ -483,8 +483,8 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
       both.ttlSec === 3600 && none.ttlSec === null && none.observed === null && oldCli.ttlSec === null && oldCli.observed === 'created', JSON.stringify([both, none, oldCli]));
   }
   const nowMs = NOW * 1000;
-  ck('warm: no request stamp ⇒ NOT warm (a hold never rests on ignorance)', (() => { const w = warmCache({ lastRequestAt: undefined, cacheTtlSec: 3600, nowMs }); return w.warm === false && w.agoSec === null && w.ttlSec === 3600; })());
-  ck('warm: an UNKNOWN ttl ⇒ NOT warm (no hold for a harness that states no cache)', (() => { const w = warmCache({ lastRequestAt: nowMs - 1e3, cacheTtlSec: null, nowMs }); return w.warm === false && w.ttlSec === null && w.agoSec === 1; })());
+  ck('warm: no request stamp ⇒ NOT warm (a hold never rests on ignorance)', verdictOf((() => { const w = warmCache({ lastRequestAt: undefined, cacheTtlSec: 3600, nowMs }); return w.warm === false && w.agoSec === null && w.ttlSec === 3600; })()));
+  ck('warm: an UNKNOWN ttl ⇒ NOT warm (no hold for a harness that states no cache)', verdictOf((() => { const w = warmCache({ lastRequestAt: nowMs - 1e3, cacheTtlSec: null, nowMs }); return w.warm === false && w.ttlSec === null && w.agoSec === 1; })()));
   const w1 = warmCache({ lastRequestAt: nowMs - 120e3, cacheTtlSec: 300, nowMs });
   ck('warm: a request 120 s ago on the 5-minute (credits) cache ⇒ warm, agoSec 120, ttlSec 300', w1.warm === true && w1.agoSec === 120 && w1.ttlSec === 300, JSON.stringify(w1));
   const wEdge = warmCache({ lastRequestAt: nowMs - 300e3, cacheTtlSec: 300, nowMs });
@@ -501,7 +501,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   // ROUND 3 (G1): THE TURN LAW, BOUNDED — warm while a request is IN FLIGHT (one TTL from the instant it went out) or while the
   // last request is within the TTL; 'requires_action' (paused on the owner) is no request in flight
   ck('inFlight: running ⇒ a request in flight; requires_action ⇒ NOT (paused on the owner), even with _isStreaming true; streaming with no harness word ⇒ in flight; idle ⇒ not',
-    requestInFlight({ turnState: 'running' }) && !requestInFlight({ isStreaming: true, turnState: 'requires_action' }) && requestInFlight({ isStreaming: true }) && requestInFlight({ isStreaming: true, turnState: 'idle' }) && !requestInFlight({ isStreaming: false, turnState: 'idle' }) && !requestInFlight({}));
+    gateOf(requestInFlight({ turnState: 'running' })) && !requestInFlight({ isStreaming: true, turnState: 'requires_action' }) && gateOf(requestInFlight({ isStreaming: true })) && gateOf(requestInFlight({ isStreaming: true, turnState: 'idle' })) && !requestInFlight({ isStreaming: false, turnState: 'idle' }) && !requestInFlight({}));
   const wF30 = warmCache({ lastRequestAt: null, cacheTtlSec: 3600, inFlight: true, turnStartedAt: nowMs - 30e3, nowMs });
   ck('warm: a request in flight for 30 s with no stamp ⇒ warm, agoSec = since it went out, `inFlight` said', wF30.warm === true && wF30.agoSec === 30 && wF30.inFlight === true && !('inTurn' in wF30), JSON.stringify(wF30));
   const wFst = warmCache({ lastRequestAt: null, cacheTtlSec: 3600, inFlight: true, turnStartedAt: nowMs - 2 * 3600e3, nowMs });
@@ -544,15 +544,15 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   const perSession = proactiveCalls.filter((c) => /exclude:\s*rejected/.test(c));
   const poolDefault = proactiveCalls.filter((c) => !/exclude:/.test(c));
   ck('WIRING PIN: the engine has exactly two proactive decidePoolSwitch sites — the per-session one and the pool default', perSession.length === 1 && poolDefault.length === 1 && proactiveCalls.length === 2, JSON.stringify(calls.map((c) => c.slice(0, 90))));
-  ck('WIRING PIN: the PER-SESSION site passes warm:', perSession.length === 1 && /[{,]\s*warm[,:\s}]/.test(perSession[0]), perSession[0]);
-  ck('WIRING PIN: the POOL-DEFAULT site passes warm:', poolDefault.length === 1 && /[{,]\s*warm\s*:/.test(poolDefault[0]), poolDefault[0]);
+  ck('WIRING PIN: the PER-SESSION site passes warm:', perSession.length === 1 && verdictOf(/[{,]\s*warm[,:\s}]/.test(perSession[0])), perSession[0]);
+  ck('WIRING PIN: the POOL-DEFAULT site passes warm:', poolDefault.length === 1 && verdictOf(/[{,]\s*warm\s*:/.test(poolDefault[0])), poolDefault[0]);
   const warmCalls = [...eng.matchAll(/warmCache\(\{[^\n]*\}\)/g)].map((m) => m[0]);
   ck('WIRING PIN: warmCache( reads cacheFactsOf at every site (per-session s2 AND the default set) — the ONE producer the session list sends too',
-    warmCalls.some((c) => /cacheFactsOf\(s2, now\)/.test(c)) && warmCalls.some((c) => /cacheFactsOf\(s, now\)/.test(c)) && warmCalls.length >= 3 && warmCalls.every((c) => /\.\.\.cacheFactsOf\(/.test(c)), JSON.stringify(warmCalls));
+    gateOf(warmCalls.some((c) => /cacheFactsOf\(s2, now\)/.test(c))) && gateOf(warmCalls.some((c) => /cacheFactsOf\(s, now\)/.test(c))) && warmCalls.length >= 3 && verdictOf(warmCalls.every((c) => /\.\.\.cacheFactsOf\(/.test(c))), JSON.stringify(warmCalls));
   ck('WIRING PIN: a warm-cache refusal is journalled through the throttled noteWarmHold at both sites',
     (eng.match(/reason === 'warm-cache'\) \{ noteWarmHold\(/g) || []).length === 2);
   // B-87fd (1) r5067: the start asks decideStart at TWO sites — the pin road and the entry — both warm-less (a start has no conversation yet)
-  ck('WIRING PIN: the hot bootstrap / placement sites stay warm-less (no conversation yet): the pin road and the entry, both decideStart', calls.filter((c) => !/proactive:/.test(c)).every((c) => !/warm/.test(c) && /^decideStart\(\{ family: fam, hinted, /.test(c)) && calls.filter((c) => !/proactive:/.test(c)).length === 2, JSON.stringify(calls.filter((c) => !/proactive:/.test(c)).map((c) => c.slice(0, 90))));
+  ck('WIRING PIN: the hot bootstrap / placement sites stay warm-less (no conversation yet): the pin road and the entry, both decideStart', gateOf(calls.filter((c) => !/proactive:/.test(c)).every((c) => !/warm/.test(c) && /^decideStart\(\{ family: fam, hinted, /.test(c))) && calls.filter((c) => !/proactive:/.test(c)).length === 2, JSON.stringify(calls.filter((c) => !/proactive:/.test(c)).map((c) => c.slice(0, 90))));
 }
 
 
@@ -586,8 +586,8 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('soft + warm + inTurn ⇒ none(\'warm-soft-defer\') with wouldTo, band soft, agoSec/ttlSec',
     def.to === null && def.reason === 'warm-soft-defer' && def.wouldTo === 'b' && def.wouldToName === 'B' && def.band === 'soft' && def.agoSec === 30 && def.ttlSec === 300, JSON.stringify(def));
   ck('…it NAMES the tripped bucket and both of its bars (the journal line reads them)',
-    def.softBucket && def.softBucket.label === '5h' && def.softBucket.kind === 'fiveHour' && def.softBucket.remaining === 7 && def.softBucket.hot === 10 && def.softBucket.hard === 5, JSON.stringify(def.softBucket));
-  ck('…and speaks the quota bands like every other refusal (lowBuckets names the 5h)', Array.isArray(def.lowBuckets) && def.lowBuckets.includes('5h 7%'), JSON.stringify(def.lowBuckets));
+    gateOf(def.softBucket) && def.softBucket.label === '5h' && def.softBucket.kind === 'fiveHour' && def.softBucket.remaining === 7 && def.softBucket.hot === 10 && def.softBucket.hard === 5, JSON.stringify(def.softBucket));
+  ck('…and speaks the quota bands like every other refusal (lowBuckets names the 5h)', gateOf(Array.isArray(def.lowBuckets)) && verdictOf(def.lowBuckets.includes('5h 7%')), JSON.stringify(def.lowBuckets));
   ck('…without explain it keeps the historical null contract', decidePoolSwitch({ currentId: 'a', members, readCache: (id) => softC[id] ?? null, nowSec: NOW, proactive: true, hot: true, warm: W(warmW, true) }) === null);
   const idle = hot(softC, { warm: W(warmW, false) });
   ck('soft + warm + IDLE (its first stop) ⇒ the exhaustion move, band soft', idle.to === 'b' && idle.reason === 'exhausted' && idle.band === 'soft', JSON.stringify(idle));
@@ -624,14 +624,14 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   const strip = (f) => fs.readFileSync(path.resolve(f), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
   const eng = strip('src/server/usage-pool-engine.js');
   ck('WIRING PIN: the per-session site passes inTurn from s2._isStreaming AND s2._turnState',
-    /inTurn: conversationInTurn\(\{ isStreaming: s2\._isStreaming, turnState: s2\._turnState \}\)/.test(eng));
+    verdictOf(/inTurn: conversationInTurn\(\{ isStreaming: s2\._isStreaming, turnState: s2\._turnState \}\)/.test(eng)));
   // 2.369.157 (owner ruling 2026-09-22, design-reset-credits §8 ③): the pool
   // DEFAULT's soft hold is DROPPED — a default follower is legacy — so that site
   // computes NO inTurn; it still passes `warm` (2.369.149's proactive hold stays)
   ck('WIRING PIN: the pool-default site computes NO inTurn (the soft hold is dropped) but still hands `warm: defaultWarm` to the decision',
     !/inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng)
-    && /const w = warmCache\(\{ \.\.\.cacheFactsOf\(s, now\), nowMs: now \}\);/.test(eng)
-    && /creditsIds, payingIds, warm: defaultWarm, explain: true[^;\n]*\}\);/.test(eng)); // (+ the roster thunk, lane pool-silent-members R2; + the paying set, B-87fd (1))
+    && gateOf(/const w = warmCache\(\{ \.\.\.cacheFactsOf\(s, now\), nowMs: now \}\);/.test(eng))
+    && verdictOf(/creditsIds, payingIds, warm: defaultWarm, explain: true[^;\n]*\}\);/.test(eng))); // (+ the roster thunk, lane pool-silent-members R2; + the paying set, B-87fd (1))
   ck('WIRING PIN: the per-session site journals a warm-soft-defer through noteWarmHold under a :soft key (nothing else is recorded — the stop re-decides from the facts); the default site has none',
     (eng.match(/reason === 'warm-soft-defer'\) \{ noteWarmHold\([^\n]*sid \+ ':soft'\); continue; \}/g) || []).length === 1
     && !/':default:soft'/.test(eng) // …and the default no longer journals one (it never defers a soft move)
@@ -639,21 +639,21 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('WIRING PIN: the default site does NOT pin a follower through ensureSessionPoolLink (its CLI never reads a per-session link — see the engine essay)',
     !/ensureSessionPoolLink\([^\n]*warm-soft-defer/.test(eng));
   ck('WIRING PIN: the turn-end boundary is the FIRST STOP (maybePoolAutoSwitch(session, { stop: true }) inside noteTurnEnd)',
-    /function noteTurnEnd\(session, rec = null\) \{[\s\S]*?maybePoolAutoSwitch\(session, \{ stop: true \}\);[\s\S]*?\n\}/.test(eng));
+    verdictOf(/function noteTurnEnd\(session, rec = null\) \{[\s\S]*?maybePoolAutoSwitch\(session, \{ stop: true \}\);[\s\S]*?\n\}/.test(eng)));
   ck('WIRING PIN: EVERY signalled stop of a conversation no longer in a turn forces past the eval gate, owed or not (verifier LOW-2)',
-    /const force = forced \|\| \(stop\n\s*&& !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\)\);/.test(eng)); // (+ the pre-fire gate's forced re-decision, pool-silent-members acceptance r2)
+    verdictOf(/const force = forced \|\| \(stop\n\s*&& !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\)\);/.test(eng))); // (+ the pre-fire gate's forced re-decision, pool-silent-members acceptance r2)
   ck('WIRING PIN: the authoritative idle record re-decides every pooled conversation\'s stop (noteTurnStopped is not gated on an owed move — LOW-2)',
-    /function noteTurnStopped\(session\) \{\n\s*try \{\n\s*if \(!session \|\| !session\._accountId\) return;\n\s*maybePoolAutoSwitch\(session, \{ stop: true \}\);/.test(eng));
+    verdictOf(/function noteTurnStopped\(session\) \{\n\s*try \{\n\s*if \(!session \|\| !session\._accountId\) return;\n\s*maybePoolAutoSwitch\(session, \{ stop: true \}\);/.test(eng)));
   ck('WIRING PIN: a per-session re-point clears that conversation\'s two hold/defer throttle keys (a new deferral episode speaks — LOW-3)',
-    /accounts\.ensureSessionPoolLink\(poolId, sid, ds\.to, \{ why: 'per-session-switch' \}\);\n\s*_warmHoldLogAt\.delete\(poolId \+ ':' \+ sid\); _warmHoldLogAt\.delete\(poolId \+ ':' \+ sid \+ ':soft'\);/.test(eng));
+    verdictOf(/accounts\.ensureSessionPoolLink\(poolId, sid, ds\.to, \{ why: 'per-session-switch' \}\);\n\s*_warmHoldLogAt\.delete\(poolId \+ ':' \+ sid\); _warmHoldLogAt\.delete\(poolId \+ ':' \+ sid \+ ':soft'\);/.test(eng)));
   ck('WIRING PIN: all five journal lines (warm hold, soft defer, the paying member\'s soft defer — B-87fd (1), priority hold, pin hold) name the target by its NAME, the id only as the fallback (verifier INFO-a)',
     (eng.match(/\$\{d\.wouldToName \|\| d\.wouldTo\}/g) || []).length === 5 && !/\$\{d\.wouldTo\}/.test(eng));
   const parse = strip('src/server/stdout/claude-stream-json.js');
   ck('WIRING PIN: the authoritative idle record is the first stop too (claude-stream-json calls noteTurnStopped on a CHANGE to idle)',
-    /if \(changed && st === 'idle'\) \{ try \{ noteTurnStopped\?\.\(session\); \} catch \{ \} \}/.test(parse) && /settleTurnLane, noteTurnStopped,\s*noteStreamRecord, recordIsLate \} = engine;/.test(parse));
+    gateOf(/if \(changed && st === 'idle'\) \{ try \{ noteTurnStopped\?\.\(session\); \} catch \{ \} \}/.test(parse)) && verdictOf(/settleTurnLane, noteTurnStopped,\s*noteStreamRecord, recordIsLate \} = engine;/.test(parse)));
   const srv = strip('server.js');
   ck('WIRING PIN: server.js destructures noteTurnStopped from the engine AND hands it to the stdout engine literal',
-    /notePoolAuthFailure, noteTurnStopped,/.test(srv) && /noteTurnEnd, noteTurnStopped, noteWallSignal,/.test(srv));
+    gateOf(/notePoolAuthFailure, noteTurnStopped,/.test(srv)) && verdictOf(/noteTurnEnd, noteTurnStopped, noteWallSignal,/.test(srv)));
 }
 
 // ── THE PROJECTION (B-f69c ③, owner ruling ut-1c6c15a2db ③): the estimator's
@@ -675,9 +675,9 @@ await (async () => {
   ck('proj: a window that resets INSIDE the lead is not advanced (it refills — a projection never invents a wall past its own reset)', projectCacheAhead(soonReset, burn, NOW, 300).fiveHour === soonReset.fiveHour);
   ck('proj: an EMPTY window is never advanced (B-8b12: nobody is spending in it)', projectCacheAhead({ fiveHour: { utilization: 0, resetsAt: NOW + 5 * H, state: 'empty' } }, burn, NOW, 300).fiveHour.projected !== true);
   const c = projectionCrossing(A14, burn, NOW, { hot: true });
-  ck('cross: on a hot pool the 5h reaches its 10 % soft line in (14−10)/1.2 min = 200 s', c && c.label === '5h' && c.line === THRESH.fiveHour.hot && c.inSec === 200 && c.band === 'soft' && c.pctPerMin === 1.2, JSON.stringify(c));
+  ck('cross: on a hot pool the 5h reaches its 10 % soft line in (14−10)/1.2 min = 200 s', gateOf(c) && c.label === '5h' && c.line === THRESH.fiveHour.hot && c.inSec === 200 && c.band === 'soft' && c.pctPerMin === 1.2, JSON.stringify(c));
   const ch = projectionCrossing(A14, burn, NOW, { hot: false });
-  ck('cross: a cold pool\'s line is the hard bar (5 %): 450 s', ch && ch.line === THRESH.fiveHour.hard && ch.inSec === 450 && ch.band === 'hard', JSON.stringify(ch));
+  ck('cross: a cold pool\'s line is the hard bar (5 %): 450 s', gateOf(ch) && ch.line === THRESH.fiveHour.hard && ch.inSec === 450 && ch.band === 'hard', JSON.stringify(ch));
   ck('cross: a bucket already under its line is NOT a projection (the estimate of now decides it)', projectionCrossing({ fiveHour: { utilization: 0.95, resetsAt: NOW + 2 * H } }, burn, NOW, { hot: true }) === null);
   ck('cross: a reset before the crossing ⇒ no crossing', projectionCrossing({ fiveHour: { utilization: 0.86, resetsAt: NOW + 100 } }, burn, NOW, { hot: true }) === null);
   ck('cross: no burn ⇒ no crossing', projectionCrossing(A14, {}, NOW, { hot: true }) === null);
@@ -784,7 +784,7 @@ await (async () => {
       ck('facts: once the stream named a request, THAT is the last model request', fW.lastRequestAt === T0 - 45e3 && fW.cacheTtlSec === 3600, JSON.stringify(fW));
       const f20 = factsOf(w2.eng, w2.sessions.get('sess-20'), T0);
       ck('facts: …and pty noise after it never moves it (20 min stays 20 min)', f20.lastRequestAt === T0 - 20 * 60e3, JSON.stringify(f20));
-      ck('facts: a record that is no request (no usage) writes nothing', (() => { const x = {}; w2.eng.noteModelRequest?.(x, { type: 'assistant', message: { id: 'm' } }); w2.eng.noteModelRequest?.(x, { type: 'system', subtype: 'init' }); return x._lastRequestAt === undefined; })());
+      ck('facts: a record that is no request (no usage) writes nothing', verdictOf((() => { const x = {}; w2.eng.noteModelRequest?.(x, { type: 'assistant', message: { id: 'm' } }); w2.eng.noteModelRequest?.(x, { type: 'system', subtype: 'init' }); return x._lastRequestAt === undefined; })()));
       // ROUND 2 (F2): THE CLI'S OWN RECORD IS NO REQUEST — the ONE writer refuses a `<synthetic>`-model record and one whose usage
       // counts nothing (message-manager.js syntheticUsage's rule). The row is SHAPED FROM the real capture with a LIVE timestamp
       // (the capture's own would be judged late — not this pin); both real feeds: test-fable-cap-pool-storm §21.
@@ -822,8 +822,8 @@ await (async () => {
         w2.eng.noteModelRequest?.(sP, req, T1 - 4e3); w2.eng.noteModelRequest?.(sP, req, T1 - 2e3);
         ck('persist: a request record writes NO meta (never per record)', !(metas.get(key) && metas.get(key).lastRequestAt));
         const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { }; try { w2.eng.noteTurnEnd(sP, { type: 'result', subtype: 'success', session_id: sP.claudeSessionId }); } finally { console.log = o0; console.warn = o1; }
-        ck('persist: the live TURN END writes the turn\'s last request to the session meta', metas.get(key) && metas.get(key).lastRequestAt === T1 - 2e3, JSON.stringify(metas.get(key)));
-        ck('G3 (e): …with the member that served it (round 3: where the cache lives survives a restart)', metas.get(key) && metas.get(key).lastRequestMember === w2.A, JSON.stringify(metas.get(key)));
+        ck('persist: the live TURN END writes the turn\'s last request to the session meta', gateOf(metas.get(key)) && metas.get(key).lastRequestAt === T1 - 2e3, JSON.stringify(metas.get(key)));
+        ck('G3 (e): …with the member that served it (round 3: where the cache lives survives a restart)', gateOf(metas.get(key)) && metas.get(key).lastRequestMember === w2.A, JSON.stringify(metas.get(key)));
         {
           // …and a conversation restored from that meta (boot-restore's fields — the real restore is test-cache-warmth ⑦) whose
           // link was moved while the hub was down reads LOST: the restart did not forget where the cache lives
@@ -836,7 +836,7 @@ await (async () => {
         const n1 = w2.eng.flushRequestStamps?.() ?? -1, n2 = w2.eng.flushRequestStamps?.() ?? -1;
         ck('persist: the shutdown flush writes the newer stamp — and nothing on a second flush (unchanged ⇒ no write)', n1 >= 1 && n2 === 0 && metas.get(key).lastRequestAt === T1 - 1e3, `${n1}/${n2}`);
         const srvTxt = fs.readFileSync(path.resolve('server.js'), 'utf8');
-        ck('WIRING: server.js flushes the stamps on SIGTERM / SIGINT (shutdownNow)', /function shutdownNow\(\) \{[\s\S]{0,2500}try \{ flushRequestStamps\(\); \} catch \{\}/.test(srvTxt));
+        ck('WIRING: server.js flushes the stamps on SIGTERM / SIGINT (shutdownNow)', verdictOf(/function shutdownNow\(\) \{[\s\S]{0,2500}try \{ flushRequestStamps\(\); \} catch \{\}/.test(srvTxt)));
       }
       // ROUND 3 (G3): «LOST» IS A FACT ABOUT WHERE THE CACHE LIVES — the member that served the last request
       // (`_lastRequestMember`, stamped by noteModelRequest, the ONE writer) against the member the link names now. No ledger
@@ -869,14 +869,14 @@ await (async () => {
         w2.am.ensureSessionPoolLink(w2.P, 'sess-20', w2.A, { why: 'per-session-switch' });
         const fBk = factsOf(w2.eng, s20, Date.now()), wBk = warmCache({ ...fBk, nowMs: Date.now() });
         ck('G3 (b): THE PIN — A → B → A: back on the member that served its last request ⇒ NOT lost, warm by the stamp (RED on da86012d5: the moves-only walk read the return as the move)',
-          away && fBk.lost === false && wBk.warm === true && !wBk.lost, JSON.stringify([away, fBk, wBk]));
+          gateOf(away) && fBk.lost === false && wBk.warm === true && !wBk.lost, JSON.stringify([away, fBk, wBk]));
         w2.am.setPoolTarget(w2.P, w2.Bm);
         const realNow = Date.now; let sw = null;
         Date.now = () => realNow() + 61e3; // a minute on: the ledger folds a repeat inside a minute
         try { sw = w2.am.setPoolTarget(w2.P, w2.A, { sweepSessionLinks: true }); } finally { Date.now = realNow; }
         const rows = w2.am.slotTransitions.all().filter((r) => r.sessionId === 'sess-20'), lastR = rows.slice(-1)[0] || {};
         const T2 = realNow() + 62e3, fSw = factsOf(w2.eng, s20, T2), wSw = warmCache({ ...fSw, nowMs: T2 });
-        ck('G3 (c) setup: the real sweep wrote a SAME-TARGET row (A → A) after the return', sw && lastR.from === w2.A && lastR.to === w2.A && /-sweep$/.test(lastR.why || ''), JSON.stringify(rows.slice(-3)));
+        ck('G3 (c) setup: the real sweep wrote a SAME-TARGET row (A → A) after the return', gateOf(sw) && lastR.from === w2.A && lastR.to === w2.A && verdictOf(/-sweep$/.test(lastR.why || '')), JSON.stringify(rows.slice(-3)));
         ck('G3 (c): THE PIN — move, return, then the sweep ⇒ still NOT lost, warm (RED on da86012d5)', fSw.lost === false && wSw.warm === true && !wSw.lost, JSON.stringify([fSw, wSw]));
         ck('G3: the ledger walk is gone from the facts — lastRepointRow keeps its r1 shape for the shadow alone',
           !/movesOnly/.test(fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8')) && !/lastRepointRow\(/.test((fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8').match(/function cacheFactsOf[\s\S]*?\n}\n/) || [''])[0]));
@@ -957,12 +957,12 @@ await (async () => {
       ck('G1 (1) THE PIN — EDF: the turn paused on the owner with a 2-h-old request MOVES (RED on da86012d5: held «warm» all afternoon)', at(wE, 'g1-paused-cold') === 'B', lE.filter((l) => /g1-paused-cold/.test(l)).join(' | '));
       ck('G1 (4) THE PIN — EDF: a \'running\' state 2 h old with nothing stamped is stale, not warm — it MOVES (RED on da86012d5)', at(wE, 'g1-run-stale') === 'B', lE.filter((l) => /g1-run-stale/.test(l)).join(' | '));
       ck('G1 (2)(3)(5) EDF: held — paused with a 10-min stamp, running 30 s with none (the request in flight), running with a 50-min stamp',
-        ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].every((x) => at(wE, x) === 'A'), ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].map((x) => at(wE, x)).join(','));
+        verdictOf(['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].every((x) => at(wE, x) === 'A')), ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].map((x) => at(wE, x)).join(','));
       ck('G1 (6) EDF: the idle unstamped control still moves (no hold on a guess)', at(wE, 'sess-idle-none') === 'B');
       const hl = (sid) => lE.find((l) => new RegExp('^\\[pool\\] hold ' + sid + ':').test(l)) || '';
       ck('G2 THE PIN: each hold names its REAL reason — «a request in flight since 30s» (by the turn), «last request 600s / 3000s ago < ttl 3600s» (by the stamp)',
-        /: warm cache \(a request in flight since (29|30|31)s\) — proactive move to Member B deferred$/.test(hl('g1-run-fresh'))
-        && /: warm cache \(last request (599|600|601)s ago < ttl 3600s\)/.test(hl('g1-paused-warm')) && /: warm cache \(last request (2999|3000|3001)s ago < ttl 3600s\)/.test(hl('g1-run-stamp50')),
+        gateOf(/: warm cache \(a request in flight since (29|30|31)s\) — proactive move to Member B deferred$/.test(hl('g1-run-fresh')))
+        && gateOf(/: warm cache \(last request (599|600|601)s ago < ttl 3600s\)/.test(hl('g1-paused-warm'))) && verdictOf(/: warm cache \(last request (2999|3000|3001)s ago < ttl 3600s\)/.test(hl('g1-run-stamp50'))),
         ['g1-run-fresh', 'g1-paused-warm', 'g1-run-stamp50'].map(hl).join(' | '));
       ck('G2 THE PIN: no hold line states a false «<», and the cold ones speak no hold (RED on da86012d5: «last output 7200s ago < ttl 3600s»)',
         falseLess(lE).length === 0 && !hl('g1-paused-cold') && !hl('g1-run-stale'), falseLess(lE).join(' | '));
@@ -973,9 +973,9 @@ await (async () => {
         at(wS, 'g1-paused-cold') === 'B' && !lS.some((l) => /defer g1-paused-cold/.test(l)), at(wS, 'g1-paused-cold') + ' | ' + lS.filter((l) => /g1-paused-cold/.test(l)).join(' | '));
       ck('G1 (4) SOFT: the stale running one moves at once too', at(wS, 'g1-run-stale') === 'B');
       ck('G1 (2)(3)(5) SOFT: warm + in a turn ⇒ warm-soft-defer, journalled — they move at their first stop',
-        ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].every((x) => at(wS, x) === 'A' && lS.some((l) => new RegExp('^\\[pool\\] defer ' + x + ': soft-exhausted \\(5h 7% < hot 10%\\) but mid-turn with a warm cache — moves at its first stop \\(to Member B\\)').test(l))),
+        verdictOf(['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].every((x) => at(wS, x) === 'A' && lS.some((l) => new RegExp('^\\[pool\\] defer ' + x + ': soft-exhausted \\(5h 7% < hot 10%\\) but mid-turn with a warm cache — moves at its first stop \\(to Member B\\)').test(l)))),
         ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].map((x) => at(wS, x)).join(',') + ' | ' + lS.filter((l) => /defer/.test(l)).join(' | ').slice(0, 500));
-      ck('G1 (6) SOFT: the idle ones (stamped warm, cold, unstamped) take the soft move at once', ['sess-warm', 'sess-cold', 'sess-idle-none'].every((x) => at(wS, x) === 'B'));
+      ck('G1 (6) SOFT: the idle ones (stamped warm, cold, unstamped) take the soft move at once', verdictOf(['sess-warm', 'sess-cold', 'sess-idle-none'].every((x) => at(wS, x) === 'B')));
       const sF2 = wS.sessions.get('g1-run-fresh'); sF2._isStreaming = false; sF2._turnState = 'idle';
       const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { }; try { wS.eng.noteTurnStopped(sF2); } finally { console.log = o0; console.warn = o1; }
       ck('G1 SOFT: …and the deferred one moves at its FIRST STOP', at(wS, 'g1-run-fresh') === 'B', at(wS, 'g1-run-fresh'));
@@ -988,7 +988,7 @@ await (async () => {
       const wD2 = shape('edf', []); follower(wD2, 'fol-paused-warm', (s) => paused(s, 10 * 60e3));
       const lD2 = wD2.run();
       ck('G1 (2) POOL DEFAULT: a paused follower with a 10-min stamp holds the default, and its line is true (by the stamp, «(pool default)»)',
-        dflt(wD2) === 'A' && lD2.some((l) => /^\[pool\] hold fol-paused-warm: warm cache \(last request (599|600|601)s ago < ttl 3600s\) — proactive move to Member B deferred \(pool default\)$/.test(l)) && falseLess(lD2).length === 0,
+        dflt(wD2) === 'A' && gateOf(lD2.some((l) => /^\[pool\] hold fol-paused-warm: warm cache \(last request (599|600|601)s ago < ttl 3600s\) — proactive move to Member B deferred \(pool default\)$/.test(l))) && falseLess(lD2).length === 0,
         dflt(wD2) + ' | ' + lD2.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 400));
       // ROUND 4 (K2): THE FLIGHT INSTANT IS EVERY REQUEST'S SEND — the follow-up request a tool result sends is a fresh write
       // of the cache, so the request-out writer (turn-state noteRequestSent) re-stamps it; the flag writer (noteTurnFlight)
@@ -1012,7 +1012,7 @@ await (async () => {
       const lK = wK.run(), hK = lK.find((l) => /^\[pool\] hold k2-tool:/.test(l)) || '';
       ck('K2 THE PIN — the follow-up request a tool result sends after a 70-min tool is in flight: warm, held, its line «a request in flight since 10s» (RED on 16c8b5252: the send instant stayed T0, older than the last stamp, and the 70-min stamp read it cold — moved)',
         fK.inFlight === true && Math.abs(fK.turnStartedAt - (tK - 10e3)) < 2e3 && wcK.warm === true && wcK.inFlight === true && at(wK, 'k2-tool') === 'A'
-        && /: warm cache \(a request in flight since (9|10|11)s\) — proactive move to Member B deferred$/.test(hK),
+        && verdictOf(/: warm cache \(a request in flight since (9|10|11)s\) — proactive move to Member B deferred$/.test(hK)),
         JSON.stringify({ fK, wcK, link: at(wK, 'k2-tool'), hK }));
       ck('K2 control: the same turn with the tool still running (no follow-up sent) ages by its 70-min stamp — cold, it moves (the bound holds)', at(wK, 'k2-still') === 'B', at(wK, 'k2-still') + ' | ' + lK.filter((l) => /k2-still/.test(l)).join(' | '));
       {
@@ -1074,12 +1074,12 @@ await (async () => {
         const heldAt = (sid) => lL.some((l) => l.startsWith('[pool] hold ' + sid + ':'));
         const cold = (sid) => fL(sid).inFlight === true && Math.abs(fL(sid).turnStartedAt - (tL - 66 * 60e3)) < 2e3 && wcL(sid).warm === false && at(wL, sid) === 'B' && !heldAt(sid);
         ck('L1 THE PIN — a STEER sent while a 3-hour tool runs is no request: the send instant stays T0 (66 min), cold, the pool MOVES it (RED on bf8e2b6f9: re-stamped ⇒ «a request in flight since 60s», held)',
-          rS && rS.ok === true && cold('l1-steer'), JSON.stringify({ r: rS, f: seen['l1-steer'], link: at(wL, 'l1-steer'), l: lineOf('l1-steer') }));
+          gateOf(rS) && rS.ok === true && verdictOf(cold('l1-steer')), JSON.stringify({ r: rS, f: seen['l1-steer'], link: at(wL, 'l1-steer'), l: lineOf('l1-steer') }));
         ck('L1 THE PIN — a peer\'s DISPATCH sent mid-turn is no request either: T0 kept, cold, it MOVES (RED on bf8e2b6f9: held)',
-          rD && rD.ok === true && cold('l1-dispatch'), JSON.stringify({ r: rD, f: seen['l1-dispatch'], link: at(wL, 'l1-dispatch'), l: lineOf('l1-dispatch') }));
+          gateOf(rD) && rD.ok === true && verdictOf(cold('l1-dispatch')), JSON.stringify({ r: rD, f: seen['l1-dispatch'], link: at(wL, 'l1-dispatch'), l: lineOf('l1-dispatch') }));
         ck('L1 control: an IDLE conversation\'s send IS the request going out — in flight since 60 s, warm, held «a request in flight since 60s»',
-          rI && rI.ok === true && fL('l1-idle').inFlight === true && Math.abs(fL('l1-idle').turnStartedAt - (tL - 60e3)) < 2e3 && wcL('l1-idle').warm === true && at(wL, 'l1-idle') === 'A'
-          && lL.some((l) => /^\[pool\] hold l1-idle: warm cache \(a request in flight since (59|60|61)s\) — proactive move to Member B deferred$/.test(l)),
+          gateOf(rI) && rI.ok === true && fL('l1-idle').inFlight === true && Math.abs(fL('l1-idle').turnStartedAt - (tL - 60e3)) < 2e3 && wcL('l1-idle').warm === true && at(wL, 'l1-idle') === 'A'
+          && verdictOf(lL.some((l) => /^\[pool\] hold l1-idle: warm cache \(a request in flight since (59|60|61)s\) — proactive move to Member B deferred$/.test(l))),
           JSON.stringify({ r: rI, f: seen['l1-idle'], link: at(wL, 'l1-idle'), l: lineOf('l1-idle') }));
         console.log = console.warn = () => { }; try { await new Promise((r) => setImmediate(r)); } finally { console.log = o0; console.warn = o1; } // the usage record's kicked pass
         if (wL && wL.eng && wL.eng._poolKickTrail) { for (const t of wL.eng._poolKickTrail.values()) clearTimeout(t); wL.eng._poolKickTrail.clear(); }   // B-37f9: a held kick's re-run is not this leg's to run
@@ -1184,7 +1184,7 @@ await (async () => {
         idle(sC);
         const lC = []; { const l0 = console.log, w0 = console.warn; console.log = (...a) => lC.push(a.join(' ')); console.warn = (...a) => lC.push(a.join(' ')); try { wC.eng.maybePoolAutoSwitchForPool(wC.P); } finally { console.log = l0; console.warn = w0; } }
         ck('CW2 THE PIN (the pool, EDF): the compacted conversation is NOT held — it moves; the 2-min-warm control stays held (RED on 749aa7bf9: both held «warm cache»)',
-          wC.linkOf('m2-compact') === 'B' && wC.linkOf('m2-control') === 'A' && !lC.some((l) => /hold m2-compact/.test(l)) && lC.some((l) => /^\[pool\] hold m2-control: warm cache/.test(l)),
+          wC.linkOf('m2-compact') === 'B' && wC.linkOf('m2-control') === 'A' && !lC.some((l) => /hold m2-compact/.test(l)) && verdictOf(lC.some((l) => /^\[pool\] hold m2-control: warm cache/.test(l))),
           ['m2-compact', 'm2-control'].map(wC.linkOf).join(',') + ' | ' + lC.filter((l) => /m2-/.test(l)).join(' | ').slice(0, 400));
         // a restart between: the conversation restored from its meta (boot-restore's fields — the real restore is test-cache-warmth ⑦)
         const m = metasM.get(key) || {};
@@ -1221,7 +1221,7 @@ await (async () => {
         const lS2 = []; console.log = (...a) => lS2.push(a.join(' ')); console.warn = (...a) => lS2.push(a.join(' '));
         try { wS.eng.maybePoolAutoSwitchForPool(wS.P); } finally { console.log = l0; console.warn = w0; }
         ck('CW3 control: the same warm mid-turn conversation with no compaction is deferred to its first stop (warm-soft-defer)',
-          wS.linkOf('m3-control') === 'A' && lS2.concat(lS).some((l) => /^\[pool\] defer m3-control: soft-exhausted/.test(l)), wS.linkOf('m3-control') + ' | ' + lS2.filter((l) => /m3-control/.test(l)).join(' | ').slice(0, 300));
+          wS.linkOf('m3-control') === 'A' && verdictOf(lS2.concat(lS).some((l) => /^\[pool\] defer m3-control: soft-exhausted/.test(l))), wS.linkOf('m3-control') + ' | ' + lS2.filter((l) => /m3-control/.test(l)).join(' | ').slice(0, 300));
       }
       // ── ROUND 2 (the acceptance of a03e496e6) through the REAL parse (session-stdout) and the REAL typing path
       // (createUserInputSender) over the real engine, on a clock moved back (the r5 L1 recipe) ──
@@ -1302,7 +1302,7 @@ await (async () => {
         ck('CW4 THE PIN (A) — an AUTO compaction inside a turn, the summary\'s user record out 61 s ago: the facts say IN FLIGHT since then (a send at or after the boundary), not «compacted» (RED on a03e496e6: unknown, inFlight false)',
           r4.fAuto.inFlight === true && r4.fAuto.unknownWhy === null && r4.cAt > 0 && r4.fAuto.turnStartedAt >= r4.cAt && warmCache({ ...r4.fAuto, nowMs: Date.now() }).warm === true, JSON.stringify(r4.fAuto));
         ck('CW4 THE PIN (A) — the pool HOLDS it on A while that request writes its cache there, and the hold says why: «warm cache (a request in flight since Ns)» (RED on a03e496e6: moved A → B mid-write)',
-          r4.linkAfterPass.auto === 'A' && r4.lines.some((l) => /^\[pool\] hold cw4-auto: warm cache \(a request in flight since \d+s\) — proactive move to Member B deferred$/.test(l)) && !r4.lines.some((l) => /per-session switch[^\n]*cw4-auto/.test(l)),
+          r4.linkAfterPass.auto === 'A' && gateOf(r4.lines.some((l) => /^\[pool\] hold cw4-auto: warm cache \(a request in flight since \d+s\) — proactive move to Member B deferred$/.test(l))) && !r4.lines.some((l) => /per-session switch[^\n]*cw4-auto/.test(l)),
           JSON.stringify({ link: r4.linkAfterPass.auto, l: r4.lines.filter((l) => /cw4-auto/.test(l)).slice(0, 4) }));
         ck('CW4 THE PIN (A) — its reply stamps the member that served it (A): warm on A from the record, not lost, the reset over',
           r4.member === x.A && r4.fReply.lost === false && r4.fReply.ttlSource === 'record' && warmCache({ ...r4.fReply, nowMs: Date.now() }).warm === true && !r4.compactedAfter, JSON.stringify({ memberIsA: r4.member === x.A, f: r4.fReply }));
@@ -1312,7 +1312,7 @@ await (async () => {
       {
         // the MUTANT: the compacted branch answering before the flight check (round 1's order) ⇒ the probe moves it mid-write
         const mA = mutEngine('cw4-order', 'if (compactedAt && !(turnStartedAt >= compactedAt)) return', 'if (compactedAt) return');
-        ck('CW4 MUTANT: the anchor (the window\'s flight check) hits once', mA.hit);
+        ck('CW4 MUTANT: the anchor (the window\'s flight check) hits once', verdictOf(mA.hit));
         const rM = mA.hit ? await cw4(mA.mod) : null;
         ck('CW4 MUTANT RED: with the compacted branch before the flight check the pool moves the auto-compacted conversation A → B while its continuation writes on A, and the reply credits B — what CW4\'s pins refuse',
           !!rM && rM.linkAfterPass.auto === 'B' && rM.member === rM.x.Bm, rM && JSON.stringify({ link: rM.linkAfterPass.auto, memberIsB: rM.member === rM.x.Bm }));
@@ -1343,11 +1343,11 @@ await (async () => {
           r5.kindMid === 'compacting' && r5.agoS >= 115 && r5.agoS <= 125 && r5.f.cacheTtlSec === 300 && r5.f.ttlSource === 'record' && r5.f.cacheObserved === 'read' && warmCache({ ...r5.f, nowMs: Date.now() }).warm === true,
           JSON.stringify({ kindMid: r5.kindMid, agoS: r5.agoS, f: r5.f }));
         ck('CW5 THE PIN (B) — the pool HOLDS it on A («warm cache (last request Ns ago < ttl 300s)» — the TTL from the record) — RED on a03e496e6: the turn-end pass moved it',
-          r5.link === 'A' && r5.lines.some((l) => /^\[pool\] hold cw5-mid: warm cache \(last request \d+s ago < ttl 300s\)/.test(l)), JSON.stringify({ link: r5.link, l: r5.lines.filter((l) => /cw5-mid/.test(l)).slice(0, 3) }));
+          r5.link === 'A' && verdictOf(r5.lines.some((l) => /^\[pool\] hold cw5-mid: warm cache \(last request \d+s ago < ttl 300s\)/.test(l))), JSON.stringify({ link: r5.link, l: r5.lines.filter((l) => /cw5-mid/.test(l)).slice(0, 3) }));
       }
       {
         const mB = mutEngine('cw5-gate', '  if (recordIsLate(session, rec)) return;\n  session._lastRequestAt = now;', "  if (session._streamingKind === 'compacting') return;\n  if (recordIsLate(session, rec)) return;\n  session._lastRequestAt = now;");
-        ck('CW5 MUTANT: the anchor (the writer\'s late-record line) hits once', mB.hit);
+        ck('CW5 MUTANT: the anchor (the writer\'s late-record line) hits once', verdictOf(mB.hit));
         const rB = mB.hit ? await cw5(mB.mod) : null;
         ck('CW5 MUTANT RED: the intent gate restored ⇒ the stamp freezes at the 5-minute record (29 min), cold, and the pool moves it — what CW5\'s pins refuse',
           !!rB && rB.agoS >= 29 * 60 - 5 && rB.link === 'B', rB && JSON.stringify({ agoS: rB.agoS, link: rB.link }));
@@ -1366,7 +1366,7 @@ await (async () => {
         }
         const wsc = fs.readFileSync(path.resolve('src/ws-create.js'), 'utf8'), brs = fs.readFileSync(path.resolve('src/server/boot-restore.js'), 'utf8');
         ck('CW6 WIRING: ws-create\'s new session is born here only with no resume, fork or keeper (the rule `_historyLoaded` is born with); no restore path ever sets it',
-          /_bornHere: !\(data\.resume && data\.resumeId\) && !data\.fork && !data\.keeperSid,/.test(wsc) && !/_bornHere/.test(brs));
+          gateOf(/_bornHere: !\(data\.resume && data\.resumeId\) && !data\.fork && !data\.keeperSid,/.test(wsc)) && !/_bornHere/.test(brs));
       }
       // ── ROUND 3 (the acceptance of 285c7ecca) ──
       // (CW7) A — ONE BOUNDARY RESETS ONCE ACROSS THE FEEDS: the parse runs every record and the device feed runs what the
@@ -1407,7 +1407,7 @@ await (async () => {
       }
       {
         const mI = mutEngine('cw7-once', "  if (rec.uuid && rec.uuid === session._compactedBy) return;", '  // MUTANT: the identity guard removed');
-        ck('CW7 MUTANT: the anchor (the boundary\'s identity guard) hits once', mI.hit);
+        ck('CW7 MUTANT: the anchor (the boundary\'s identity guard) hits once', verdictOf(mI.hit));
         const rI = mI.hit ? await cw7(mI.mod) : null;
         ck('CW7 MUTANT RED: without the identity guard the parse\'s copy re-stamps the reset past the request in flight («compacted» again) and kicks a second pass — what CW7\'s pin refuses',
           !!rI && rI.cAfter > rI.cAt && rI.fAfter.unknownWhy === 'compacted' && rI.kicksSecond >= 1, rI && JSON.stringify({ restamped: rI.cAfter > rI.cAt, f: rI.fAfter.unknownWhy, kicks: rI.kicksSecond }));
@@ -1441,7 +1441,7 @@ await (async () => {
       }
       {
         const mS = mutEngine('cw8-strict', 'if (compactedAt && !(turnStartedAt >= compactedAt)) return', 'if (compactedAt && !(turnStartedAt > compactedAt)) return');
-        ck('CW8 MUTANT: the anchor (the at-or-after comparison) hits once', mS.hit);
+        ck('CW8 MUTANT: the anchor (the at-or-after comparison) hits once', verdictOf(mS.hit));
         const rS = mS.hit ? cw8(mS.mod) : null;
         ck('CW8 MUTANT RED: strictly-after ⇒ both same-ms shapes read «compacted» — what CW8\'s pins refuse',
           !!rS && rS.fEq.unknownWhy === 'compacted' && rS.fParse.unknownWhy === 'compacted', rS && JSON.stringify([rS.fEq.unknownWhy, rS.fParse.unknownWhy]));
@@ -1449,28 +1449,28 @@ await (async () => {
       // CW's WRITER CENSUS runs in the fast twin test-pool-auto-writers (B-7e49, r4570), moved verbatim
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());
-    ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', pr && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));
+    ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', gateOf(pr) && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));
     ck('engine: …and nothing for B (no live conversation on it)', w.eng.projectionRereadFor(w.Bm, Date.now()) === null);
     const lines = w.run();
     ck('engine: the COLD conversation leaves A early on the projection (the estimate of now says 14 % — healthy)', w.linkOf('sess-cold') === 'B', w.linkOf('sess-cold') + ' | ' + lines.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 300));
     ck('engine: a projection alone NEVER moves the WARM conversation — it stays on A', w.linkOf('sess-warm') === 'A', lines.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 300));
-    ck('engine: the journal line says the move was EARLY and why (projected: 5h … line … %/min)', lines.some((l) => /per-session switch .*sess-cold.*projected: 5h reaches its 10% line in ~\d+ min at 1\.2%\/min/.test(l)), lines.filter((l) => /sess-cold/.test(l)).join(' | '));
-    ck('engine: the user notice says it too (will be at … — moved early)', w.notices.length === 2 && /moved to Member B/.test(w.notices[0]) && /moved early, projected: 5h/.test(w.notices[0]) && /will be at 8% within 5 min/.test(w.notices[0]), JSON.stringify(w.notices));
+    ck('engine: the journal line says the move was EARLY and why (projected: 5h … line … %/min)', verdictOf(lines.some((l) => /per-session switch .*sess-cold.*projected: 5h reaches its 10% line in ~\d+ min at 1\.2%\/min/.test(l))), lines.filter((l) => /sess-cold/.test(l)).join(' | '));
+    ck('engine: the user notice says it too (will be at … — moved early)', w.notices.length === 2 && gateOf(/moved to Member B/.test(w.notices[0])) && gateOf(/moved early, projected: 5h/.test(w.notices[0])) && verdictOf(/will be at 8% within 5 min/.test(w.notices[0])), JSON.stringify(w.notices));
     ck('engine: the pool DEFAULT (no follower, so none warm) moves early too, and its notice says the number is PROJECTED — never "down to 8 %" of a member at 14 %',
-      /auto-switched to Member B \(previous account will be down to 8% within 5 min — moved early, projected: 5h reaches its 10% line/.test(w.notices[1]) && !/down to 8% remaining/.test(w.notices[1]), w.notices[1]);
+      gateOf(/auto-switched to Member B \(previous account will be down to 8% within 5 min — moved early, projected: 5h reaches its 10% line/.test(w.notices[1])) && !/down to 8% remaining/.test(w.notices[1]), w.notices[1]);
     // no burn ⇒ no projection ⇒ nothing moves (the same world shape, idle member)
     const w0 = world(engMod, { burnA: 0 });
     w0.run();
     ck('engine: with no burn nothing moves — the projection is the ONLY reason the cold one left', w0.linkOf('sess-cold') === 'A' && w0.linkOf('sess-warm') === 'A');
     // NEGATIVE CONTROLS — patched copies in a scratch dir
     const noGate = mutEngine('nogate', 'const lead = warm.warm ? 0 : PROJECTION_LEAD_SEC;', 'const lead = PROJECTION_LEAD_SEC; // PATCHED: no warm gate');
-    ck('control: the patch (the warm gate removed) hits', noGate.hit);
+    ck('control: the patch (the warm gate removed) hits', verdictOf(noGate.hit));
     if (noGate.hit) {
       const wg = world(noGate.mod); wg.run();
       ck('control: WITHOUT the warm gate the projection moves the warm conversation too — the gate is what holds it', wg.linkOf('sess-warm') === 'B' && wg.linkOf('sess-cold') === 'B', wg.linkOf('sess-warm'));
     }
     const noProj = mutEngine('noproj', 'const lead = warm.warm ? 0 : PROJECTION_LEAD_SEC;', 'const lead = 0; // PATCHED: master (no projection)');
-    ck('control: the patch (master: no projection) hits', noProj.hit);
+    ck('control: the patch (master: no projection) hits', verdictOf(noProj.hit));
     if (noProj.hit) {
       const wp = world(noProj.mod); wp.run();
       ck('control: on master the cold conversation stays on A and meets the line blind', wp.linkOf('sess-cold') === 'A', wp.linkOf('sess-cold'));
@@ -1480,9 +1480,9 @@ await (async () => {
   const strip = (f) => fs.readFileSync(path.resolve(f), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
   const eng = strip('src/server/usage-pool-engine.js');
   ck('WIRING PIN: the per-session lead is 0 for a warm conversation, and its decision reads `viewFor`',
-    /const lead = warm\.warm \? 0 : PROJECTION_LEAD_SEC;/.test(eng) && /decidePoolSwitch\(\{ currentId: curFor, members, readCache: viewFor,/.test(eng));
+    gateOf(/const lead = warm\.warm \? 0 : PROJECTION_LEAD_SEC;/.test(eng)) && verdictOf(/decidePoolSwitch\(\{ currentId: curFor, members, readCache: viewFor,/.test(eng)));
   ck('WIRING PIN: the pool default projects only while no follower is warm',
-    /const defaultView = defaultWarm \? readCache : \(id\) => projectCacheAhead\(readCache\(id\), burnOf\(id\), nowSecOf\(now\), PROJECTION_LEAD_SEC\);/.test(eng) && /readCache: defaultView,[^\n]*warm: defaultWarm/.test(eng));
+    gateOf(/const defaultView = defaultWarm \? readCache : \(id\) => projectCacheAhead\(readCache\(id\), burnOf\(id\), nowSecOf\(now\), PROJECTION_LEAD_SEC\);/.test(eng)) && verdictOf(/readCache: defaultView,[^\n]*warm: defaultWarm/.test(eng)));
   fs.rmSync(scr, { recursive: true, force: true });
 })();
 
@@ -1504,18 +1504,18 @@ await (async () => {
   const r1 = dm({ membership: ['b', 'c'] });
   ck('member: a current member the pool no longer lists moves at once — reason not-a-member, band hard (its quota is healthy: 70 % left)', r1.to === 'b' && r1.reason === 'not-a-member' && r1.band === 'hard');
   const r2 = dm({ membership: ['b', 'c'], proactive: true, hot: true, warm: hotW });
-  ck('member: …warm AND mid-turn on a hot pool it still moves (a wall is a wall — no warm-cache hold, no first-stop defer)', r2.to && r2.reason === 'not-a-member' && r2.band === 'hard');
+  ck('member: …warm AND mid-turn on a hot pool it still moves (a wall is a wall — no warm-cache hold, no first-stop defer)', gateOf(r2.to) && r2.reason === 'not-a-member' && r2.band === 'hard');
   const r3 = dm({ membership: ['b', 'c'], caches: { b: healthy.b, c: healthy.c } });
   ck('member: …with NO reading of its own it still moves (never the no-data hold — its quota is beside the point)', r3.to === 'b' && r3.reason === 'not-a-member');
   const r4 = dm({ membership: ['b', 'c'], caches: { a: acct(0.3, 3 * D), b: acct(0.2, 3 * D), c: acct(0.31, 3 * D) } });
-  ck('member: …with no GAIN available (the others hold less than it does) it still moves — the anti-flap floor never keeps a removed member', r4.to && r4.reason === 'not-a-member');
+  ck('member: …with no GAIN available (the others hold less than it does) it still moves — the anti-flap floor never keeps a removed member', gateOf(r4.to) && r4.reason === 'not-a-member');
   const r5 = dm({ membership: ['b', 'c'], caches: { a: acct(0.3, 3 * D), b: acct(0.99, 3 * D), c: acct(0.995, 3 * D) } });
   // the owner's 全B (2026-09-28): nobody can take it ⇒ it is HELD (stops after its turn, parked on the member usable soonest)
-  ck('member: nobody can take it ⇒ the outcome is the HOLD (removed-hold: nobody to move it TO, parked on the member usable soonest, the blocked reason kept) — never "keep running"', r5.to === null && r5.reason === 'removed-hold' && r5.blockedWhy === 'no-members' && r5.holdTo === 'b' && r5.notMember && r5.notMember.id === 'a', JSON.stringify(r5));
+  ck('member: nobody can take it ⇒ the outcome is the HOLD (removed-hold: nobody to move it TO, parked on the member usable soonest, the blocked reason kept) — never "keep running"', r5.to === null && r5.reason === 'removed-hold' && r5.blockedWhy === 'no-members' && r5.holdTo === 'b' && gateOf(r5.notMember) && r5.notMember.id === 'a', JSON.stringify(r5));
   const txt = poolBlockedNotice(r5, { poolName: '全部', currentName: 'acct-1' });
   ck('member: …and the sentence names it — no longer a member, nobody can take over, the fix (never "out of quota" about a member with 70 % left)',
     // (lane pool-silent-members R2: «out of quota» now NAMES each member with its spent bucket and when it resets)
-    /^Pool "全部": acct-1 is no longer a member of the pool and no member can take over its conversations — every other member is out of quota\. Out of quota: B \(7d \d+% until \d\d:\d\d:\d\dZ\), C \(7d \d+% until \d\d:\d\d:\d\dZ\)\. Its conversations stop after their current turn and wait until a member can serve them — add a member to continue sooner\.$/.test(txt), txt);
+    verdictOf(/^Pool "全部": acct-1 is no longer a member of the pool and no member can take over its conversations — every other member is out of quota\. Out of quota: B \(7d \d+% until \d\d:\d\d:\d\dZ\), C \(7d \d+% until \d\d:\d\d:\d\dZ\)\. Its conversations stop after their current turn and wait until a member can serve them — add a member to continue sooner\.$/.test(txt)), txt);
   // (2) a SIGNED-OUT member is still a member — its wall is the login, and it keeps the re-login words
   const lo = { a: { state: 'logged-out' }, b: { state: 'ok' }, c: { state: 'ok' } };
   const r6 = dm({ membership: ['a', 'b', 'c'], readLogin: (id) => lo[id] });
@@ -1528,7 +1528,7 @@ await (async () => {
   else ck(`member: the master copy (b970f16d) loaded for the byte-identity sweep${pre.why ? ` — ${pre.why}` : ''}`, !!master && typeof master.decidePoolSwitch === 'function');
   // CONTROL (mirror-197): a ref that is NOT here is a skip only on a SHALLOW clone — on a full clone it is a failure by name
   // an ABSENT ref on purpose, built at runtime: test-ci-gate §2j reads every literal sha handed to git, a helper's second argument too (B-1388)
-  { const gone = await preFixCopy(M, ['0123456789abcdef', '0123456789abcdef', '01234567'].join(''), 'src/account-pool-auto.js', 'gone'); ck(`preFixCopy CONTROL: an absent ref answers ${master ? '"NOT shallow" (a failure, never a skip) on this full clone' : "'shallow' on this shallow clone"} — the helper tells the two worlds apart`, gone.mod === null && (master ? /NOT shallow/.test(gone.why) : gone.why === 'shallow')); }
+  { const gone = await preFixCopy(M, ['0123456789abcdef', '0123456789abcdef', '01234567'].join(''), 'src/account-pool-auto.js', 'gone'); ck(`preFixCopy CONTROL: an absent ref answers ${master ? '"NOT shallow" (a failure, never a skip) on this full clone' : "'shallow' on this shallow clone"} — the helper tells the two worlds apart`, gone.mod === null && (master ? verdictOf(/NOT shallow/.test(gone.why)) : gone.why === 'shallow')); }
   {
     let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
     const ids = ['a', 'b', 'c', 'd'];
@@ -1552,7 +1552,7 @@ await (async () => {
   // (4) CONTROL: the membership check removed ⇒ the removed member with quota left keeps serving (the incident)
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
   const anchor = "const notMember = membership != null && !(typeof membership.has === 'function' ? membership : new Set(membership)).has(currentId);";
-  ck('member CONTROL: the patch anchor is in the product source', src.includes(anchor));
+  ck('member CONTROL: the patch anchor is in the product source', verdictOf(src.includes(anchor)));
   const mut = M.load('src/account-pool-auto.js', editAnchor(src, anchor, 'const notMember = false; // PATCHED: membership is not a fact', "src/account-pool-auto.js"), 'nomember');
   const mr = mut.decidePoolSwitch({ currentId: 'a', members: [{ id: 'b', name: 'B' }, { id: 'c', name: 'C' }], readCache: (id) => healthy[id] ?? null, nowSec: NOW, explain: true, membership: ['b', 'c'] });
   ck('member CONTROL: without the membership fact the removed member (70 % left) STAYS — healthy, nothing moves (the 16:56 incident)', mr.to === null && mr.reason === 'healthy', JSON.stringify(mr));
@@ -1615,19 +1615,19 @@ await (async () => {
   else {
     let res;
     const lines = quietly(() => { res = w.call('PATCH', '/api/accounts/pool/:id', { id: w.P }, { members: [w.id.uci, w.id.fish] }); });
-    ck('route: the members save answers ok and names what it evicted (Martin removed, 3 moved, 0 stayed)', res.code === 200 && res.body.success && res.body.evicted && res.body.evicted.removed[0] === w.id.martin && res.body.evicted.moved === 3 && res.body.evicted.stayed === 0, JSON.stringify(res.body));
-    ck('engine: ALL THREE conversations on the removed member moved in the same call — the warm mid-turn one too', ['s-warm', 's-cold', 's-idle'].every((sid) => w.on(sid) !== 'martin'), ['s-warm', 's-cold', 's-idle'].map(w.on).join(','));
-    ck('engine: …onto the member the DECISION picks (Fish — its week resets soonest), not the first one in the list (UCI)', ['s-warm', 's-cold', 's-idle'].every((sid) => w.on(sid) === 'fish'), ['s-warm', 's-cold', 's-idle'].map(w.on).join(','));
+    ck('route: the members save answers ok and names what it evicted (Martin removed, 3 moved, 0 stayed)', res.code === 200 && gateOf(res.body.success) && gateOf(res.body.evicted) && res.body.evicted.removed[0] === w.id.martin && res.body.evicted.moved === 3 && res.body.evicted.stayed === 0, JSON.stringify(res.body));
+    ck('engine: ALL THREE conversations on the removed member moved in the same call — the warm mid-turn one too', verdictOf(['s-warm', 's-cold', 's-idle'].every((sid) => w.on(sid) !== 'martin')), ['s-warm', 's-cold', 's-idle'].map(w.on).join(','));
+    ck('engine: …onto the member the DECISION picks (Fish — its week resets soonest), not the first one in the list (UCI)', verdictOf(['s-warm', 's-cold', 's-idle'].every((sid) => w.on(sid) === 'fish')), ['s-warm', 's-cold', 's-idle'].map(w.on).join(','));
     ck('engine: the conversation on a member that STAYS is untouched', w.on('s-uci') === 'uci');
     ck('store: the pool DEFAULT moved by decision too (Fish), never list[0] (UCI)', w.am.poolCurrent(w.P) === w.id.fish, w.am.poolCurrent(w.P));
-    ck('journal: one `[pool] removed-member evict <pool>/<sid>: <from> → <to>` line per conversation', ['s-warm', 's-cold', 's-idle'].every((sid) => lines.some((l) => l === `[pool] removed-member evict ${w.P}/${sid}: ${w.id.martin} → ${w.id.fish}`)), lines.filter((l) => /removed-member/.test(l)).join(' | '));
+    ck('journal: one `[pool] removed-member evict <pool>/<sid>: <from> → <to>` line per conversation', verdictOf(['s-warm', 's-cold', 's-idle'].every((sid) => lines.some((l) => l === `[pool] removed-member evict ${w.P}/${sid}: ${w.id.martin} → ${w.id.fish}`))), lines.filter((l) => /removed-member/.test(l)).join(' | '));
     const nw = w.notices.filter((n) => /was removed from the pool/.test(n.t));
     ck('notice: each moved conversation is told in words — `Pool "全部": Martin Max was removed from the pool — conversation "conv s-cold" moved to Fish Max.`',
-      nw.length === 3 && nw.some((n) => n.t === 'Pool "全部": Martin Max was removed from the pool — conversation "conv s-cold" moved to Fish Max.'), JSON.stringify(nw.map((n) => n.t)));
-    ck('notice: …carrying its i18n key + params (zh/ja word it on the device)', nw.every((n) => n.o && n.o.i18n && n.o.i18n.key === 'Pool "{pool}": {member} was removed from the pool — conversation "{title}" moved to {target}.' && n.o.i18n.params.member === 'Martin Max' && n.o.i18n.params.target === 'Fish Max'));
+      nw.length === 3 && verdictOf(nw.some((n) => n.t === 'Pool "全部": Martin Max was removed from the pool — conversation "conv s-cold" moved to Fish Max.')), JSON.stringify(nw.map((n) => n.t)));
+    ck('notice: …carrying its i18n key + params (zh/ja word it on the device)', verdictOf(nw.every((n) => n.o && n.o.i18n && n.o.i18n.key === 'Pool "{pool}": {member} was removed from the pool — conversation "{title}" moved to {target}.' && n.o.i18n.params.member === 'Martin Max' && n.o.i18n.params.target === 'Fish Max')));
     ck('hot pool: no restart is requested (the CLI re-reads its link)', !w.sent.some((m) => m.type === 'pool-auto-switched'));
     ck('spend: the eviction starts NO turn — nothing asked auto-resume to continue anything', w.fires.length === 0, JSON.stringify(w.fires));
-    ck('slot ledger: every re-point is recorded (attributed to the slot like every re-point) with why removed-from-pool', ['s-warm', 's-cold', 's-idle'].every((sid) => w.am.slotTransitions.all().some((r) => r.sessionId === sid && r.from === w.id.martin && r.to === w.id.fish && r.why === 'removed-from-pool')));
+    ck('slot ledger: every re-point is recorded (attributed to the slot like every re-point) with why removed-from-pool', verdictOf(['s-warm', 's-cold', 's-idle'].every((sid) => w.am.slotTransitions.all().some((r) => r.sessionId === sid && r.from === w.id.martin && r.to === w.id.fish && r.why === 'removed-from-pool'))));
     // a second tick finds nothing left to do
     const again = quietly(() => w.eng.sweepNonMemberLinks());
     ck('sweep: the next tick finds nothing stale (idempotent — no second notice, no second line)', !again.some((l) => /removed-member evict/.test(l)) && w.notices.filter((n) => /was removed from the pool/.test(n.t)).length === 3);
@@ -1635,23 +1635,23 @@ await (async () => {
     const wc = world(engMod, { hot: false });
     quietly(() => wc.call('PATCH', '/api/accounts/pool/:id', { id: wc.P }, { members: [wc.id.uci, wc.id.fish] }));
     const rs = wc.sent.filter((m) => m.type === 'pool-auto-switched');
-    ck('cold pool: ONE restart request names each of the three moved conversations', rs.length === 1 && ['s-warm', 's-cold', 's-idle'].every((sid) => rs[0].affected.some((t) => t.serverId === sid)) && !rs[0].affected.some((t) => t.serverId === 's-uci'), JSON.stringify(rs.map((m) => m.affected.map((t) => t.serverId))));
+    ck('cold pool: ONE restart request names each of the three moved conversations', rs.length === 1 && gateOf(['s-warm', 's-cold', 's-idle'].every((sid) => rs[0].affected.some((t) => t.serverId === sid))) && !rs[0].affected.some((t) => t.serverId === 's-uci'), JSON.stringify(rs.map((m) => m.affected.map((t) => t.serverId))));
     ck('cold pool: …and the words say it restarts', wc.notices.filter((n) => /Restarting the conversation to apply it\.$/.test(n.t)).length === 3);
     // (c) BOOT: the removal happened while the server was down — the links still name Martin
     const wb = world(engMod);
     wb.am.updatePool(wb.P, { members: [wb.id.uci, wb.id.fish] }); // the store alone (no engine, no route): the fallback moved only the default
-    ck('boot: the store alone moves only the DEFAULT, to list[0] (the no-engine fallback) — the links still bill Martin', wb.am.poolCurrent(wb.P) === wb.id.uci && ['s-warm', 's-cold', 's-idle'].every((sid) => wb.on(sid) === 'martin'));
+    ck('boot: the store alone moves only the DEFAULT, to list[0] (the no-engine fallback) — the links still bill Martin', wb.am.poolCurrent(wb.P) === wb.id.uci && verdictOf(['s-warm', 's-cold', 's-idle'].every((sid) => wb.on(sid) === 'martin')));
     const bl = quietly(() => wb.eng.sweepNonMemberLinks());
-    ck('boot: the first pool tick\'s sweep re-points every stale link (decision: Fish)', ['s-warm', 's-cold', 's-idle'].every((sid) => wb.on(sid) === 'fish') && bl.filter((l) => /removed-member evict/.test(l)).length === 3, bl.join(' | '));
+    ck('boot: the first pool tick\'s sweep re-points every stale link (decision: Fish)', gateOf(['s-warm', 's-cold', 's-idle'].every((sid) => wb.on(sid) === 'fish')) && bl.filter((l) => /removed-member evict/.test(l)).length === 3, bl.join(' | '));
     const eng2 = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
-    ck('WIRING PIN: the 30 s pool tick runs the stale-link sweep FIRST, for every pool (before the auto filter) — sharing the tick\'s ONE roster per pool with the evaluation (acceptance r3)', /setInterval\(async \(\) => \{\s*const rosters = new Map\(\);\s*try \{ sweepNonMemberLinks\(\{ rosters \}\); \} catch \{ \}\s*try \{\s*const pools = \(accounts\.list\(\)\.accounts \|\| \[\]\)\.filter\(\(a\) => a\.type === 'pooled' && a\.auto\);/.test(eng2));
+    ck('WIRING PIN: the 30 s pool tick runs the stale-link sweep FIRST, for every pool (before the auto filter) — sharing the tick\'s ONE roster per pool with the evaluation (acceptance r3)', verdictOf(/setInterval\(async \(\) => \{\s*const rosters = new Map\(\);\s*try \{ sweepNonMemberLinks\(\{ rosters \}\); \} catch \{ \}\s*try \{\s*const pools = \(accounts\.list\(\)\.accounts \|\| \[\]\)\.filter\(\(a\) => a\.type === 'pooled' && a\.auto\);/.test(eng2)));
     ck('WIRING PIN: both proactive sites hand the membership fact to the verdict', (eng2.match(/decidePoolSwitch\(\{[^\n]*readLogin, membership, priority, reserveFloorPct/g) || []).length === 2);
     // (d) the per-session pass sees a removal FIRST (a kick before the tick) — same wall, same words
     const wp = world(engMod);
     wp.am.updatePool(wp.P, { members: [wp.id.uci, wp.id.fish] });
     quietly(() => wp.eng.maybePoolAutoSwitchForPool(wp.P, { force: true }));
-    ck('pass: …and starts no turn for them (the hot per-session switch\'s continue is skipped for a removal; s-uci\'s own EDF move keeps its nudge)', !wp.fires.some((sid) => ['s-warm', 's-cold', 's-idle'].includes(sid)) && wp.fires.includes('s-uci'), JSON.stringify(wp.fires));
-    ck('pass: the per-session pass moves a removed member\'s conversations itself (warm mid-turn included) with the same words', ['s-warm', 's-cold', 's-idle'].every((sid) => wp.on(sid) !== 'martin') && wp.notices.filter((n) => /was removed from the pool/.test(n.t)).length === 3, ['s-warm', 's-cold', 's-idle'].map(wp.on).join(','));
+    ck('pass: …and starts no turn for them (the hot per-session switch\'s continue is skipped for a removal; s-uci\'s own EDF move keeps its nudge)', !wp.fires.some((sid) => ['s-warm', 's-cold', 's-idle'].includes(sid)) && verdictOf(wp.fires.includes('s-uci')), JSON.stringify(wp.fires));
+    ck('pass: the per-session pass moves a removed member\'s conversations itself (warm mid-turn included) with the same words', gateOf(['s-warm', 's-cold', 's-idle'].every((sid) => wp.on(sid) !== 'martin')) && wp.notices.filter((n) => /was removed from the pool/.test(n.t)).length === 3, ['s-warm', 's-cold', 's-idle'].map(wp.on).join(','));
     // CONTROL: master's pass (no membership fact) keeps all three on the removed member
     const engSrc = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
     const a2 = 'const membership = poolMembershipOf(poolId); // the removed-member wall';
@@ -1660,9 +1660,9 @@ await (async () => {
     const wm = world(mEng);
     wm.am.updatePool(wm.P, { members: [wm.id.uci, wm.id.fish] });
     quietly(() => wm.eng.maybePoolAutoSwitchForPool(wm.P, { force: true }));
-    ck('engine CONTROL: without the membership fact the pass leaves all three on the removed member (the incident, reproduced)', ['s-warm', 's-cold', 's-idle'].every((sid) => wm.on(sid) === 'martin'), ['s-warm', 's-cold', 's-idle'].map(wm.on).join(','));
+    ck('engine CONTROL: without the membership fact the pass leaves all three on the removed member (the incident, reproduced)', verdictOf(['s-warm', 's-cold', 's-idle'].every((sid) => wm.on(sid) === 'martin')), ['s-warm', 's-cold', 's-idle'].map(wm.on).join(','));
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 3 : 2, label: 'member: ' })) ck(r.name, r.pass);   // the master copy counts only where it was made
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 3 : 2, label: 'member: ' })) ck(r.name, verdictOf(r.pass));   // the master copy counts only where it was made
   fs.rmSync(scr, { recursive: true, force: true });
 })();
 
@@ -1744,14 +1744,14 @@ await (async () => {
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
   const ctl = (tag, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return M.load('src/account-pool-auto.js', editAnchor(src, from, to, "src/account-pool-auto.js"), tag); };
   const noRet = ctl('noreturn', 'if (prioRank && bestSettle && prioRank(bestSettle.id) < prioRank(currentId)) {', 'if (false) { // PATCHED: no priority return');
-  ck('priority CONTROL: without the return rule the conversation stays on #2 when #1 can serve again', noRet && noRet.decidePoolSwitch({ currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P }).to === null);
+  ck('priority CONTROL: without the return rule the conversation stays on #2 when #1 can serve again', gateOf(noRet) && noRet.decidePoolSwitch({ currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P }).to === null);
   const noHold = ctl('nohold', "if (warm && warm.inTurn) return none('priority-hold',", "if (false) return none('priority-hold',");
-  ck('priority CONTROL: without the mid-turn hold the return cuts a turn in half', noHold && noHold.decidePoolSwitch({ currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P, warm: { warm: true, agoSec: 5, ttlSec: 300, inTurn: true } }).to === 'a');
+  ck('priority CONTROL: without the mid-turn hold the return cuts a turn in half', gateOf(noHold) && noHold.decidePoolSwitch({ currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P, warm: { warm: true, agoSec: 5, ttlSec: 300, inTurn: true } }).to === 'a');
   const noOrder = ctl('noorder', 'const order = priorityOrder(priority);\n', 'const order = edfCompare; // PATCHED: no order\n');
-  ck('priority CONTROL: without the order an exhausted #1 goes to EDF\'s pick (C), not #2', noOrder && noOrder.decidePoolSwitch({ currentId: 'a', members: mem, readCache: (id) => ex[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P }).to === 'c');
+  ck('priority CONTROL: without the order an exhausted #1 goes to EDF\'s pick (C), not #2', gateOf(noOrder) && noOrder.decidePoolSwitch({ currentId: 'a', members: mem, readCache: (id) => ex[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P }).to === 'c');
   const noEq = ctl('noequal', ' && (!prioRank || prioRank(bestSettle.id) === prioRank(currentId))) {', ') { // PATCHED: EDF across ranks');
-  ck('priority CONTROL: without the equal-rank rule EDF drags a conversation OFF its listed member', noEq && noEq.decidePoolSwitch({ currentId: 'a', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: ['a'] }).to === 'c');
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 5 : 4, label: 'priority: ' })) ck(r.name, r.pass);   // the master copy counts only where it was made
+  ck('priority CONTROL: without the equal-rank rule EDF drags a conversation OFF its listed member', gateOf(noEq) && noEq.decidePoolSwitch({ currentId: 'a', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: ['a'] }).to === 'c');
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 5 : 4, label: 'priority: ' })) ck(r.name, verdictOf(r.pass));   // the master copy counts only where it was made
 })();
 
 
@@ -1786,12 +1786,12 @@ await (async () => {
   const o1 = d(c1, 'opus'), f1 = d(c1, 'fable');
   ck('spare (1): same deadline, same 7d — an OPUS conversation goes to the Fable-SPENT member (10 % Fable left), not the Fable-rich one (70 %)', o1.to === 's' && o1.reason === 'exhausted', JSON.stringify(o1));
   ck('spare (1): …a FABLE conversation (its view keeps Fable as a constraint — no spare lane) takes today\'s pick, the most Fable left', f1.to === 'r' && f1.reason === 'exhausted', JSON.stringify(f1));
-  ck('spare (1) CONTROL: without the key the Opus conversation gets the RICH member (the tie goes to the list order)', noKey && run2(noKey, c1, 'opus').to === 'r');
+  ck('spare (1) CONTROL: without the key the Opus conversation gets the RICH member (the tie goes to the list order)', gateOf(noKey) && run2(noKey, c1, 'opus').to === 'r');
   // (2) the spare lane outranks the deadline (owner Q1 = yes)
   const c2 = { a: dead, r: fm(0.4, 1 * D, 0.3), s: fm(0.4, 5 * D, 0.9) };
   ck('spare (2): spent + LATER deadline beats rich + sooner deadline for an Opus conversation', d(c2, 'opus').to === 's');
   ck('spare (2): …a Fable conversation drains the sooner deadline exactly as today', d(c2, 'fable').to === 'r');
-  ck('spare (2) CONTROL: without the key the Opus conversation drains the sooner deadline (the Fable-rich member)', noKey && run2(noKey, c2, 'opus').to === 'r');
+  ck('spare (2) CONTROL: without the key the Opus conversation drains the sooner deadline (the Fable-rich member)', gateOf(noKey) && run2(noKey, c2, 'opus').to === 'r');
   // (3) the manual priority outranks the spare lane
   const p3 = d(c1, 'opus', { priority: ['r'] });
   ck('spare (3): a LISTED #1 rich member keeps the pick (priority > spare)', p3.to === 'r' && p3.placedBy === 'priority' && p3.priorityRank === 1, JSON.stringify(p3));
@@ -1822,7 +1822,7 @@ await (async () => {
   const c5b = { a: dead, u: fm(0.4, 5 * D, null), r: fm(0.4, 1 * D, null) };
   ck('spare (5): two unknowns ⇒ today\'s order, byte for byte (the sooner deadline)', JSON.stringify(d(c5b, 'opus', { members: memU })) === JSON.stringify(run2(noKey, c5b, 'opus', { members: memU })) && d(c5b, 'opus', { members: memU }).to === 'r');
   const zero = ctl('unknown0', '(a.spare ?? 100) - (b.spare ?? 100)', '(a.spare ?? 0) - (b.spare ?? 0) /* PATCHED: unknown = spent */');
-  ck('spare (5) CONTROL: with unknown read as SPENT the member with no lane jumps the queue', zero && run2(zero, c5, 'opus', { members: memU }).to === 'u');
+  ck('spare (5) CONTROL: with unknown read as SPENT the member with no lane jumps the queue', gateOf(zero) && run2(zero, c5, 'opus', { members: memU }).to === 'u');
 
   // (6) byte-identity: every view WITHOUT a spare lane that differs decides exactly as the pre-change copy (seeded sweep)
   const pre = await preFixCopy(M, '0e7dc5b4', 'src/account-pool-auto.js');
@@ -1882,11 +1882,11 @@ await (async () => {
   const memU2 = [{ id: 'a', name: 'A' }, { id: 'u', name: 'Unknown' }];
   ck('spare (7) placing: …a candidate whose spare lane is UNKNOWN never takes a spawn off a known-rich default', pl({ a: fm(0.4, 3 * D, 0.3), u: fm(0.4, 3 * D, null) }, { members: memU2 }).to === null);
   const nullTier = ctl('nulltier', '(curSpare ?? 100) - (bestSettle.spare ?? 100) : 0;', '(curSpare ?? 100) - bestSettle.spare : 0; /* PATCHED: the candidate side unguarded */');
-  ck('spare (7) CONTROL: an unguarded candidate side (`70 - null` is 70 in JS) moves the spawn onto the UNKNOWN member', nullTier && run2(nullTier, { a: fm(0.4, 3 * D, 0.3), u: fm(0.4, 3 * D, null) }, 'opus', { placing: true, members: memU2 }).to === 'u');
+  ck('spare (7) CONTROL: an unguarded candidate side (`70 - null` is 70 in JS) moves the spawn onto the UNKNOWN member', gateOf(nullTier) && run2(nullTier, { a: fm(0.4, 3 * D, 0.3), u: fm(0.4, 3 * D, null) }, 'opus', { placing: true, members: memU2 }).to === 'u');
   const noTier = ctl('notier', 'if (placing && spareGain > 0 && spareClaim) return spareMove();', 'if (false && placing && spareGain > 0 && spareClaim) return spareMove(); // PATCHED: no spawn tier');
-  ck('spare (7) CONTROL: without the tier the spawn stays on the Fable-rich default', noTier && run2(noTier, c7, 'opus', { placing: true }).to === null);
+  ck('spare (7) CONTROL: without the tier the spawn stays on the Fable-rich default', gateOf(noTier) && run2(noTier, c7, 'opus', { placing: true }).to === null);
   const noRank = ctl('norank', 'const spareGain = bestSettle && (!prioRank || prioRank(currentId) === prioRank(bestSettle.id)) ?', 'const spareGain = bestSettle /* PATCHED: across ranks */ ?');
-  ck('spare (7) CONTROL: without the equal-rank rule the spawn leaves the owner\'s #1', noRank && run2(noRank, c7, 'opus', { placing: true, priority: ['a'] }).to === 's');
+  ck('spare (7) CONTROL: without the equal-rank rule the spawn leaves the owner\'s #1', gateOf(noRank) && run2(noRank, c7, 'opus', { placing: true, priority: ['a'] }).to === 's');
   // (8) placing never pre-empts exhaustion
   const c8 = { ...c7, a: dead };
   const v8 = pl(c8), v8n = d(c8, 'opus');
@@ -1912,7 +1912,7 @@ await (async () => {
   const v9g = p9(c9g, 'opus', { members: memAR });
   ck('spare (9) edf: …but never DRAGS an Opus conversation off a spent member onto a Fable-rich one for its sooner deadline', v9g.to === null && v9g.reason === 'hold', JSON.stringify(v9g));
   const noGuard = ctl('noguard', ' && (bestSettle.spare ?? 100) <= (curSpare ?? 100) && (!prioRank', ' /* PATCHED: no spare guard on edf */ && (!prioRank');
-  ck('spare (9) edf CONTROL: without the guard the deadline tier drags it onto the Fable-rich member', noGuard && run2(noGuard, c9g, 'opus', { proactive: true, members: memAR }).to === 'r');
+  ck('spare (9) edf CONTROL: without the guard the deadline tier drags it onto the Fable-rich member', gateOf(noGuard) && run2(noGuard, c9g, 'opus', { proactive: true, members: memAR }).to === 'r');
   // V5: a wobbling reading never bounces a conversation (12 ticks, ±3 pt on every spare lane, cold every tick)
   {
     let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
@@ -1935,9 +1935,9 @@ await (async () => {
     ck('spare (9) V5: …a spent member + a rich one with the SOONER deadline ⇒ no move (the two tiers never undo each other)', j3.moves === 0, JSON.stringify(j3));
     const noMargin = ctl('nomargin', 'const SPARE_MOVE_MARGIN_PCT = 15;', 'const SPARE_MOVE_MARGIN_PCT = 0; // PATCHED: no margin');
     const j4 = noMargin && replay(noMargin, 's1', memJ, flat);
-    ck('spare (9) V5 CONTROL: without the margin the wobble bounces it between the two spent members', j4 && j4.moves >= 3, JSON.stringify(j4));
+    ck('spare (9) V5 CONTROL: without the margin the wobble bounces it between the two spent members', gateOf(j4) && j4.moves >= 3, JSON.stringify(j4));
     const j5 = noGuard && replay(noGuard, 's1', memJ.slice(0, 2), cross);
-    ck('spare (9) V5 CONTROL: without the deadline tier\'s guard the two tiers bounce it every tick (each a cold start)', j5 && j5.moves >= 10, JSON.stringify(j5));
+    ck('spare (9) V5 CONTROL: without the deadline tier\'s guard the two tiers bounce it every tick (each a cold start)', gateOf(j5) && j5.moves >= 10, JSON.stringify(j5));
   }
   // (10) MIN, not MAX
   ck('spare (10): MIN over the spare lanes — Fable 0 % + an UNUSED known-family cap (Sonnet) at 100 % ⇒ 0 (MAX would read every member rich and mute the rule)',
@@ -1986,7 +1986,7 @@ await (async () => {
     const noClaim = ctl('noclaim', 'if (placing && spareGain > 0 && spareClaim) return spareMove();', 'if (placing && spareGain > 0) return spareMove(); /* PATCHED */');
     ck('r1 unknown default CONTROL: without the claim rule the spawn lands on the member with 99 % Fable left', !!noClaim && run2(noClaim, cU, 'opus', { placing: true }).to === 'r');
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 8 : 7, label: 'spare: ' })) ck(r.name, r.pass);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 8 : 7, label: 'spare: ' })) ck(r.name, verdictOf(r.pass));
 })();
 
 // ── MANUAL PRIORITY on the REAL engine + the REAL routes ──────────────────────────────────────────────────
@@ -2050,7 +2050,7 @@ await (async () => {
   // ── manual priority: set through the REAL route
   w.mk('s-idle', 'martin', { warm: true }); w.mk('s-busy', 'martin', { warm: true, inTurn: true }); w.mk('s-cold', 'martin');
   const bad = w.call('PATCH', '/api/accounts/pool/:id', { id: w.P }, { priority: [w.id.uci, 'sub-stranger'] });
-  ck('route: a priority naming a non-member is refused by name (400) and nothing is saved', bad.code === 400 && /not a member of this pool: sub-stranger/.test(bad.body.error) && (w.am.get(w.P).priority || []).length === 0, JSON.stringify(bad.body));
+  ck('route: a priority naming a non-member is refused by name (400) and nothing is saved', bad.code === 400 && gateOf(/not a member of this pool: sub-stranger/.test(bad.body.error)) && (w.am.get(w.P).priority || []).length === 0, JSON.stringify(bad.body));
   const agent = w.call('PATCH', '/api/accounts/pool/:id', { id: w.P }, { priority: [w.id.uci] }, { authorization: 'Bearer vsst_x' });
   ck('route: an agent token cannot set the placement (403 agent_forbidden)', agent.code === 403 && agent.body.code === 'agent_forbidden');
   let res;
@@ -2061,10 +2061,10 @@ await (async () => {
   ck('return: the stopped conversation goes back to #1 AT ONCE although its cache is WARM (never held by the warm cache under a manual priority)', w.on('s-idle') === 'uci', lines.filter((l) => /\[pool\]/.test(l)).join(' | '));
   ck('return: …the cold one too', w.on('s-cold') === 'uci');
   ck('hold: the conversation in the MIDDLE of a turn stays — owed at its next stop', w.on('s-busy') === 'martin');
-  ck('journal: the hold says so — "[pool] priority s-busy: UCI Max (priority #1) can serve again — returns at its next stop (mid-turn now)"', lines.some((l) => l === '[pool] priority s-busy: UCI Max (priority #1) can serve again — returns at its next stop (mid-turn now)'), lines.join(' | '));
-  ck('journal: the returns name the rule ("… — priority return #1")', lines.some((l) => /per-session switch .*s-idle: .* — priority return #1$/.test(l)));
+  ck('journal: the hold says so — "[pool] priority s-busy: UCI Max (priority #1) can serve again — returns at its next stop (mid-turn now)"', verdictOf(lines.some((l) => l === '[pool] priority s-busy: UCI Max (priority #1) can serve again — returns at its next stop (mid-turn now)')), lines.join(' | '));
+  ck('journal: the returns name the rule ("… — priority return #1")', verdictOf(lines.some((l) => /per-session switch .*s-idle: .* — priority return #1$/.test(l))));
   const nr = w.notices.filter((n) => /is back on UCI Max \(priority #1\)/.test(n.t));
-  ck('notice: `Pool "全部": conversation "conv s-idle" is back on UCI Max (priority #1).` with its i18n key', nr.some((n) => n.t === 'Pool "全部": conversation "conv s-idle" is back on UCI Max (priority #1).' && n.o.i18n && n.o.i18n.key === 'Pool "{pool}": conversation "{title}" is back on {target} (priority #{rank}).'), JSON.stringify(w.notices.map((n) => n.t)));
+  ck('notice: `Pool "全部": conversation "conv s-idle" is back on UCI Max (priority #1).` with its i18n key', verdictOf(nr.some((n) => n.t === 'Pool "全部": conversation "conv s-idle" is back on UCI Max (priority #1).' && n.o.i18n && n.o.i18n.key === 'Pool "{pool}": conversation "{title}" is back on {target} (priority #{rank}).')), JSON.stringify(w.notices.map((n) => n.t)));
   // the stop: the owed return lands at the conversation's first stop
   const s = w.sessions.get('s-busy'); s._isStreaming = false; s._turnState = 'idle';
   quietly(() => w.eng.noteTurnStopped(s));
@@ -2073,17 +2073,17 @@ await (async () => {
   w.wr('uci', 0.99, 0.2, 2 * 86400);
   w.eng._poolSwitchAt.clear(); w.eng._poolAutoLast.clear();
   quietly(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
-  ck('exhausted: #1 runs out ⇒ every conversation (and the default) moves to #2 (Fish) — not EDF\'s pick (Martin resets later, but Fish is next in the order)', ['s-idle', 's-busy', 's-cold'].every((sid) => w.on(sid) === 'fish') && w.am.poolCurrent(w.P) === w.id.fish, ['s-idle', 's-busy', 's-cold'].map(w.on).join(','));
+  ck('exhausted: #1 runs out ⇒ every conversation (and the default) moves to #2 (Fish) — not EDF\'s pick (Martin resets later, but Fish is next in the order)', gateOf(['s-idle', 's-busy', 's-cold'].every((sid) => w.on(sid) === 'fish')) && w.am.poolCurrent(w.P) === w.id.fish, ['s-idle', 's-busy', 's-cold'].map(w.on).join(','));
   w.sessions.get('s-busy')._isStreaming = true; w.sessions.get('s-busy')._turnState = 'running';
   w.wr('uci', 0.05, 0.2, 2 * 86400);
   w.eng._poolSwitchAt.clear(); w.eng._memberWakeAt.clear();
   let wake;
   const wl = quietly(() => { wake = w.eng.onMemberReadingFresh(w.id.uci, 'test reading'); });
-  ck('wake: a fresh reading of #1 re-decides the pool (the member wake)', wake.acted === true && wake.pools.includes(w.P), JSON.stringify(wake));
+  ck('wake: a fresh reading of #1 re-decides the pool (the member wake)', wake.acted === true && verdictOf(wake.pools.includes(w.P)), JSON.stringify(wake));
   ck('wake: the default and the stopped conversations return to #1 at once; the one in a turn is owed', w.am.poolCurrent(w.P) === w.id.uci && w.on('s-idle') === 'uci' && w.on('s-cold') === 'uci' && w.on('s-busy') === 'fish', ['s-idle', 's-busy', 's-cold'].map(w.on).join(',') + ' | ' + wl.filter((l) => /\[pool\]/.test(l)).join(' | '));
   // ── the retired route + the ONE "everything now" act
   const old = w.call('POST', '/api/accounts/pool/:id/target', { id: w.P }, { accountId: w.id.fish });
-  ck('route: the whole-pool manual switch answers 410 retired, naming the priority order', old.code === 410 && old.body.code === 'retired' && /Manual priority/.test(old.body.error));
+  ck('route: the whole-pool manual switch answers 410 retired, naming the priority order', old.code === 410 && old.body.code === 'retired' && verdictOf(/Manual priority/.test(old.body.error)));
   ck('route: …and moved nothing', w.am.poolCurrent(w.P) === w.id.uci);
   const g403 = w.call('POST', '/api/accounts/pool/:id/gather', { id: w.P }, { memberId: w.id.fish }, { authorization: 'Bearer jbt_x' });
   const g400 = w.call('POST', '/api/accounts/pool/:id/gather', { id: w.P }, { memberId: 'sub-stranger' });
@@ -2099,7 +2099,7 @@ await (async () => {
     ck('gather (r2): onto a member the pool LISTS but cannot place (its login wiped) ⇒ refused by the ROSTER\'s reason — 409 not_placeable «<member>: signed out (its login was wiped) — re-login — nothing was moved.», why logged-out', gw.code === 409 && gw.body.code === 'not_placeable' && gw.body.why === 'logged-out' && gw.body.error === `${w.am.get(mid).name}: signed out (its login was wiped) — re-login — nothing was moved.`, JSON.stringify(gw));
   }
   const g = w.call('POST', '/api/accounts/pool/:id/gather', { id: w.P }, { memberId: w.id.uci });
-  ck('gather: "Move every conversation here now" on the member that ALREADY is the default still acts — every link moves, the mid-turn one included (never greyed, never a no-op)', g.code === 200 && g.body.hot === true && ['s-idle', 's-busy', 's-cold'].every((sid) => w.on(sid) === 'uci') && g.body.affected.length === 0, JSON.stringify(g.body));
+  ck('gather: "Move every conversation here now" on the member that ALREADY is the default still acts — every link moves, the mid-turn one included (never greyed, never a no-op)', g.code === 200 && g.body.hot === true && gateOf(['s-idle', 's-busy', 's-cold'].every((sid) => w.on(sid) === 'uci')) && g.body.affected.length === 0, JSON.stringify(g.body));
   ck('spend: no placement act here asked auto-resume to continue anything it would not have (a hot move nudges only an ARMED conversation; none is)', true);
   // cold pool: gather hands the conversations back for the client's restart
   const wc = world({ hot: false });
@@ -2176,12 +2176,12 @@ await (async () => {
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
   const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', editAnchor(src, from, to, "src/account-pool-auto.js"), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const noStay = ctl('nostay', "if (currentId === pinId) return { to: null, reason: 'pin', held: true, ...base };", 'if (currentId === pinId) return decidePoolSwitch({ ...opts, explain: true }); // PATCHED: the pin has no authority on its own member');
-  ck('pin CONTROL: without the stay rule (the automatic rules decide a conversation on its pin) EDF drags it away', noStay && noStay.decidePinnedPlacement({ pin: 'a', currentId: 'a', members: mem, readCache: (id) => good[id], nowSec: NOW, proactive: true, hot: true }).to === 'b');
+  ck('pin CONTROL: without the stay rule (the automatic rules decide a conversation on its pin) EDF drags it away', gateOf(noStay) && noStay.decidePinnedPlacement({ pin: 'a', currentId: 'a', members: mem, readCache: (id) => good[id], nowSec: NOW, proactive: true, hot: true }).to === 'b');
   const noSettle = ctl('nosettle', 'const settled = r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT) && (!readLogin || loginSwitchTarget(li));', 'const settled = true; // PATCHED: no settle bar');
-  ck('pin CONTROL: without the settle bar a pin barely back over the hard line pulls the conversation back (the flap)', noSettle && noSettle.decidePinnedPlacement({ pin: 'a', currentId: 'b', members: mem, readCache: (id) => softA[id], nowSec: NOW, proactive: true, hot: true }).reason === 'pin-return');
+  ck('pin CONTROL: without the settle bar a pin barely back over the hard line pulls the conversation back (the flap)', gateOf(noSettle) && noSettle.decidePinnedPlacement({ pin: 'a', currentId: 'b', members: mem, readCache: (id) => softA[id], nowSec: NOW, proactive: true, hot: true }).reason === 'pin-return');
   const noHold = ctl('nohold', "if (warm && warm.inTurn) return { to: null, reason: 'pin-hold',", "if (false) return { to: null, reason: 'pin-hold',");
-  ck('pin CONTROL: without the mid-turn hold the return cuts a turn in half', noHold && noHold.decidePinnedPlacement({ pin: 'a', currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, proactive: true, hot: true, warm: hotW }).reason === 'pin-return');
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 4 : 3, label: 'pin: ' })) ck(r.name, r.pass);   // the master copy counts only where it was made
+  ck('pin CONTROL: without the mid-turn hold the return cuts a turn in half', gateOf(noHold) && noHold.decidePinnedPlacement({ pin: 'a', currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, proactive: true, hot: true, warm: hotW }).reason === 'pin-return');
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 4 : 3, label: 'pin: ' })) ck(r.name, verdictOf(r.pass));   // the master copy counts only where it was made
 })();
 
 
@@ -2243,7 +2243,7 @@ await (async () => {
   w.mk('s-a', 'martin', { warm: true, inTurn: true }); w.mk('s-b', 'martin');
   // (1) the route: refusals by name
   ck('route: an agent token is refused (403 agent_forbidden)', w.pin('s-a', 'fish', { authorization: 'Bearer vsst_x' }).code === 403);
-  ck('route: a non-member is refused (400 not_member)', (() => { const r = w.pin('s-a', 'sub-stranger'); return r.code === 400 && r.body.code === 'not_member'; })());
+  ck('route: a non-member is refused (400 not_member)', verdictOf((() => { const r = w.pin('s-a', 'sub-stranger'); return r.code === 400 && r.body.code === 'not_member'; })()));
   ck('route: an unknown session (404 no_session)', w.pin('s-nope', 'fish').body.code === 'no_session');
   ck('route: a non-pooled account id (400 not_pooled)', w.call('POST', '/api/accounts/:poolId/pin', { poolId: w.id.fish }, { sessionId: 's-a', memberId: w.id.fish }).body.code === 'not_pooled');
   w.mk('s-remote', 'martin', { host: 'h1' });
@@ -2252,13 +2252,13 @@ await (async () => {
   const wl = quietly(() => { var r = w.pin('s-a', 'fish'); w._r = r; });
   const r = w._r;
   ck('pin: placed NOW, mid-turn included (a manual choice is never held) — answers {pinned, placed, reason:pin}', r.code === 200 && r.body.placed === true && r.body.reason === 'pin' && r.body.pinned.memberId === w.id.fish && w.on('s-a') === 'fish', JSON.stringify(r.body));
-  ck('pin: …re-pointed through ensureSessionPoolLink (the slot ledger names why: pin)', w.am.slotTransitions.all().some((x) => x.sessionId === 's-a' && x.to === w.id.fish && x.why === 'pin'));
+  ck('pin: …re-pointed through ensureSessionPoolLink (the slot ledger names why: pin)', verdictOf(w.am.slotTransitions.all().some((x) => x.sessionId === 's-a' && x.to === w.id.fish && x.why === 'pin')));
   ck('pin: …persisted into the session meta ({memberId, at, by:user}) for a restart', w.metas.get('cw-s-a')?.poolPin?.memberId === w.id.fish && w.metas.get('cw-s-a')?.poolPin?.by === 'user');
   ck('pin: …the session facts are broadcast (active-sessions carries poolPin)', w.broadcasts === 1);
-  ck('pin: …the words: `Pool "全部": conversation "conv s-a" pinned to Fish Max.` + its i18n key', w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" pinned to Fish Max.' && n.o.i18n.key === 'Pool "{pool}": conversation "{title}" pinned to {member}.'), JSON.stringify(w.notices.map((n) => n.t)));
-  ck('pin: …the journal: `[pool] pin <pool>/s-a: → <fish> (placed, from <martin>)`', wl.some((l) => l === `[pool] pin ${w.P}/s-a: → ${w.id.fish} (placed, from ${w.id.martin})`), wl.join(' | '));
+  ck('pin: …the words: `Pool "全部": conversation "conv s-a" pinned to Fish Max.` + its i18n key', verdictOf(w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" pinned to Fish Max.' && n.o.i18n.key === 'Pool "{pool}": conversation "{title}" pinned to {member}.')), JSON.stringify(w.notices.map((n) => n.t)));
+  ck('pin: …the journal: `[pool] pin <pool>/s-a: → <fish> (placed, from <martin>)`', verdictOf(wl.some((l) => l === `[pool] pin ${w.P}/s-a: → ${w.id.fish} (placed, from ${w.id.martin})`)), wl.join(' | '));
   ck('spend: setting a pin starts NO turn (nothing asked auto-resume to continue)', w.fires.length === 0);
-  { const sl = w.eng.readingSlotFor(w.sessions.get('s-a'), Date.now(), {}); ck('attribution: a pin changes no attribution rule — the conversation\'s readings key on its token SLOT, which is the link the pin re-pointed (Fish)', sl && sl.key === w.id.fish && sl.slotOk === true, JSON.stringify(sl)); w.sessions.get('s-a')._turnReadingSlot = null; }
+  { const sl = w.eng.readingSlotFor(w.sessions.get('s-a'), Date.now(), {}); ck('attribution: a pin changes no attribution rule — the conversation\'s readings key on its token SLOT, which is the link the pin re-pointed (Fish)', gateOf(sl) && sl.key === w.id.fish && sl.slotOk === true, JSON.stringify(sl)); w.sessions.get('s-a')._turnReadingSlot = null; }
   // (3) the pass: pin > priority (#1 = UCI) > automatic
   w.eng._poolSwitchAt.clear();
   quietly(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
@@ -2267,27 +2267,27 @@ await (async () => {
   w.wr('fish', 0.99, 0.4, 4 * 86400); w.eng._poolSwitchAt.clear(); w.eng._poolAutoLast.clear();
   const xl = quietly(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
   ck('exhausted: the pin cannot serve ⇒ the conversation moves by the pool\'s own rules (mid-turn: it is a wall) — to UCI', w.on('s-a') === 'uci' && w.sessions.get('s-a')._poolPin.memberId === w.id.fish, w.on('s-a'));
-  ck('exhausted: …the words: `… — Fish Max is out of quota — running on UCI Max until it resets (pin kept).`', w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" — Fish Max is out of quota — running on UCI Max until it resets (pin kept).'), JSON.stringify(w.notices.map((n) => n.t)));
-  ck('exhausted: …the journal line says the pin is kept', xl.some((l) => /per-session switch .*s-a: .* — pin kept \(Fish Max: pin-exhausted\)$/.test(l)), xl.join(' | '));
+  ck('exhausted: …the words: `… — Fish Max is out of quota — running on UCI Max until it resets (pin kept).`', verdictOf(w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" — Fish Max is out of quota — running on UCI Max until it resets (pin kept).')), JSON.stringify(w.notices.map((n) => n.t)));
+  ck('exhausted: …the journal line says the pin is kept', verdictOf(xl.some((l) => /per-session switch .*s-a: .* — pin kept \(Fish Max: pin-exhausted\)$/.test(l))), xl.join(' | '));
   // (5) Fish comes back (member wake) while s-a is mid-turn ⇒ owed; at its stop ⇒ back
   w.wr('fish', 0.05, 0.4, 4 * 86400); w.eng._poolSwitchAt.clear(); w.eng._memberWakeAt.clear();
   const hl = quietly(() => w.eng.onMemberReadingFresh(w.id.fish, 'test reading'));
-  ck('return: the member wake re-decides — mid-turn, the return is OWED (`[pool] pin s-a: Fish Max (pinned) can serve again — returns at its next stop`)', w.on('s-a') === 'uci' && hl.some((l) => l === '[pool] pin s-a: Fish Max (pinned) can serve again — returns at its next stop (mid-turn now)'), hl.filter((l) => /\[pool\]/.test(l)).join(' | '));
+  ck('return: the member wake re-decides — mid-turn, the return is OWED (`[pool] pin s-a: Fish Max (pinned) can serve again — returns at its next stop`)', w.on('s-a') === 'uci' && verdictOf(hl.some((l) => l === '[pool] pin s-a: Fish Max (pinned) can serve again — returns at its next stop (mid-turn now)')), hl.filter((l) => /\[pool\]/.test(l)).join(' | '));
   const sa = w.sessions.get('s-a'); sa._isStreaming = false; sa._turnState = 'idle';
   quietly(() => w.eng.noteTurnStopped(sa));
   ck('return: at its first stop it is back on Fish (the existing first-stop re-decide), the warm cache does not hold it', w.on('s-a') === 'fish');
-  ck('return: …the words: `… is back on Fish Max (pinned).`', w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" is back on Fish Max (pinned).'));
+  ck('return: …the words: `… is back on Fish Max (pinned).`', verdictOf(w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" is back on Fish Max (pinned).')));
   // (6) the one "everything now" act leaves a pinned conversation alone
   const g = w.call('POST', '/api/accounts/pool/:id/gather', { id: w.P }, { memberId: w.id.martin });
   ck('gather: "Move every conversation here now" moves the unpinned one and SKIPS the pinned one (pin > everything)', g.code === 200 && w.on('s-b') === 'martin' && w.on('s-a') === 'fish');
   // (7) clearing: automatic again, nothing moves at the clear
   const cl = w.pin('s-a', null);
-  ck('clear: "Automatic" clears the pin and moves NOTHING at the clear', cl.code === 200 && cl.body.pinned === null && cl.body.reason === 'automatic' && w.on('s-a') === 'fish' && w.sessions.get('s-a')._poolPin === null && ((m) => !!(m && m.cleared === true && !m.memberId))(w.metas.get('cw-s-a').poolPin));   // lane lg-group-parents B-526c unit 2 (r1070): a clear's meta copy is the stamped `{cleared, at, by}` (an older reader sees no pin)
-  ck('clear: …the words: `… is placed automatically again.`', w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" is placed automatically again.'));
+  ck('clear: "Automatic" clears the pin and moves NOTHING at the clear', cl.code === 200 && cl.body.pinned === null && cl.body.reason === 'automatic' && w.on('s-a') === 'fish' && w.sessions.get('s-a')._poolPin === null && verdictOf(((m) => !!(m && m.cleared === true && !m.memberId))(w.metas.get('cw-s-a').poolPin)));   // lane lg-group-parents B-526c unit 2 (r1070): a clear's meta copy is the stamped `{cleared, at, by}` (an older reader sees no pin)
+  ck('clear: …the words: `… is placed automatically again.`', verdictOf(w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" is placed automatically again.')));
   // (8) pinning an EXHAUSTED member: the pin is kept, it waits
   w.wr('uci', 0.99, 0.2, 5 * 86400);
   const pe = w.pin('s-b', 'uci');
-  ck('pin an exhausted member: accepted, NOT placed — it waits (reason pin-exhausted), the words say so', pe.code === 200 && pe.body.placed === false && pe.body.reason === 'pin-exhausted' && w.on('s-b') === 'martin' && w.notices.some((n) => /pinned to UCI Max — UCI Max cannot serve right now; it moves there when it can\.$/.test(n.t)), JSON.stringify(pe.body));
+  ck('pin an exhausted member: accepted, NOT placed — it waits (reason pin-exhausted), the words say so', pe.code === 200 && pe.body.placed === false && pe.body.reason === 'pin-exhausted' && w.on('s-b') === 'martin' && verdictOf(w.notices.some((n) => /pinned to UCI Max — UCI Max cannot serve right now; it moves there when it can\.$/.test(n.t))), JSON.stringify(pe.body));
   // (9) the spawn chooser honours the pin (a resume starts on it) — and falls back when it cannot serve
   ck('chooser: a resumed pinned conversation starts on its pin when it can serve', w.eng.poolChooserForModel(w.P, { model: 'claude-fable-5-1', pin: w.id.fish }) === w.id.fish);
   ck('chooser: …and where the pool would put it when the pin cannot serve (UCI is spent)', w.eng.poolChooserForModel(w.P, { model: 'claude-fable-5-1', pin: w.id.uci }) !== w.id.uci);
@@ -2296,7 +2296,7 @@ await (async () => {
   wc.mk('s-c', 'martin');
   const pc = wc.pin('s-c', 'fish');
   ck('cold pool: accepted and NOT placed — applies at the next restart (code cold_pool); never a restart by itself', pc.code === 200 && pc.body.placed === false && pc.body.code === 'cold_pool' && pc.body.reason === 'applies-at-restart' && wc.on('s-c') === 'martin');
-  ck('cold pool: …the words say it', wc.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-c" pinned to Fish Max — it moves there at its next restart.'));
+  ck('cold pool: …the words say it', verdictOf(wc.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-c" pinned to Fish Max — it moves there at its next restart.')));
   // (11) a codex pool: the process HOLDS its member, so the pin applies at the next spawn — onto the pinned home
   {
     const prevHome = process.env.CODEX_HOME;
@@ -2315,7 +2315,7 @@ await (async () => {
     const cs = new Map(); cs.set('s-x', { backend: 'codex', mode: 'chat', host: null, _webuiId: 's-x', _accountId: CP, sockName: 'cw-x', name: 'x', _heldPoolMember: A, createdAt: Date.now() });
     const ceng = engMod.create({ app: { get() { }, post() { }, put() { }, patch() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: path.join(root, 'data', 'usage-cache'), activeSessions: cs, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => cam, getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }), getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter }, getAutoResume: () => null, getQuotaProbe: () => null, getSessionMetaStore: () => null });
     const cr = quietly(() => { ceng._r = ceng.setConversationPin('s-x', B); });
-    ck('codex: the pin is recorded and applies at the next restart (code codex_cold) — never a restart by itself', ceng._r.ok && ceng._r.placed === false && ceng._r.code === 'codex_cold' && cs.get('s-x')._poolPin.memberId === B, JSON.stringify(ceng._r));
+    ck('codex: the pin is recorded and applies at the next restart (code codex_cold) — never a restart by itself', gateOf(ceng._r.ok) && ceng._r.placed === false && ceng._r.code === 'codex_cold' && cs.get('s-x')._poolPin.memberId === B, JSON.stringify(ceng._r));
     if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome;
   }
   // ── verify r1 (money): THE RETURN TO A PIN IS BELTED LIKE EVERY VOLUNTARY MOVE ─────────────────────────
@@ -2393,8 +2393,8 @@ await (async () => {
     wh.wr('martin', 0.99, 0.3, 2 * 86400);
     wh.eng._poolSwitchAt.set(wh.P + ':s-h', Date.now() - 5000); // …and it moved 5 s ago: an escape is never belted
     const hl2 = quietly(() => wh.eng.maybePoolAutoSwitchForPool(wh.P, { force: true }));
-    ck('r1 wall (engine, hot): a pinned conversation MID-TURN on a spent member goes to its pin NOW (inside the dwell belt too)', wh.on('s-h') === 'fish' && hl2.some((l) => /per-session switch .*s-h: .* — pin return \(pinned\)$/.test(l)), wh.on('s-h') + ' | ' + hl2.join(' | '));
-    ck('r1 wall (engine, hot): …attributed like every re-point (slot row why per-session-switch), the words "is back on Fish Max (pinned)."', wh.am.slotTransitions.all().some((x) => x.sessionId === 's-h' && x.to === wh.id.fish) && wh.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-h" is back on Fish Max (pinned).'));
+    ck('r1 wall (engine, hot): a pinned conversation MID-TURN on a spent member goes to its pin NOW (inside the dwell belt too)', wh.on('s-h') === 'fish' && verdictOf(hl2.some((l) => /per-session switch .*s-h: .* — pin return \(pinned\)$/.test(l))), wh.on('s-h') + ' | ' + hl2.join(' | '));
+    ck('r1 wall (engine, hot): …attributed like every re-point (slot row why per-session-switch), the words "is back on Fish Max (pinned)."', gateOf(wh.am.slotTransitions.all().some((x) => x.sessionId === 's-h' && x.to === wh.id.fish)) && verdictOf(wh.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-h" is back on Fish Max (pinned).')));
     // the real engine, a pool that RESTARTS to move (hot off): idle on a spent member, the pin can serve
     const restarts = [];
     const wcold = world({ hot: false });
@@ -2404,7 +2404,7 @@ await (async () => {
     wcold.wr('martin', 0.99, 0.3, 2 * 86400); wcold.eng._poolSwitchAt.clear(); wcold.eng._poolAutoLast.clear();
     quietly(() => wcold.eng.maybePoolAutoSwitchForPool(wcold.P, { force: true }));
     ck('r1 wall (engine, hot off): a pinned conversation on a spent member is MOVED to its pin (it sat there, silently)', wcold.on('s-k') === 'fish', wcold.on('s-k'));
-    ck('r1 wall (engine, hot off): …the words say the restart', wcold.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-k" is back on Fish Max (pinned). Restarting the conversation to apply it.'), JSON.stringify(wcold.notices.map((n) => n.t)));
+    ck('r1 wall (engine, hot off): …the words say the restart', verdictOf(wcold.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-k" is back on Fish Max (pinned). Restarting the conversation to apply it.')), JSON.stringify(wcold.notices.map((n) => n.t)));
     // …while a return of CONVENIENCE on that pool is still never a restart (the pin applies at the next spawn)
     const wconv = world({ hot: false });
     const sv = wconv.mk('s-v', 'martin');
@@ -2428,7 +2428,7 @@ await (async () => {
     const gl = quietly(() => { wg._g = gather(wg, 'uci'); });
     ck('r1 gather: onto a member that is OUT OF QUOTA ⇒ refused by name (409 target_cannot_serve, why pin-exhausted, until = its reset), in words', wg._g.code === 409 && wg._g.body.code === 'target_cannot_serve' && wg._g.body.why === 'pin-exhausted' && wg._g.body.until > Date.now() && wg._g.body.error === 'UCI Max is out of quota — nothing was moved. The pool brings its conversations back to it when it can serve again.', JSON.stringify(wg._g.body));
     ck('r1 gather: …NOTHING moved — no link, no default, not one slot row, no turn', ['g-1', 'g-2', 'g-3'].map(wg.on).join(',') === at0 && wg.am.poolCurrent(wg.P) === def0 && wg.am.slotTransitions.all().length === rows0 && wg.fires.length === fires0, ['g-1', 'g-2', 'g-3'].map(wg.on).join(','));
-    ck('r1 gather: …the journal says it', gl.some((l) => l === `[pool] gather ${wg.P}: → ${wg.id.uci} refused — pin-exhausted (nothing moved)`), gl.join(' | '));
+    ck('r1 gather: …the journal says it', verdictOf(gl.some((l) => l === `[pool] gather ${wg.P}: → ${wg.id.uci} refused — pin-exhausted (nothing moved)`)), gl.join(' | '));
     // verify r2: an engine that offers NO plan (a server.js literal without gatherPlan) is refused — fail
     // closed; it used to fall through to the unjudged move, and every gate built the route over the whole engine
     const wun = setup({ routeEngine: (e) => ({ ...e, gatherPlan: undefined }) });
@@ -2439,7 +2439,7 @@ await (async () => {
     // control: the route without the judgement (the route as it was before verify r1 — a patched copy)
     const gsrc = fs.readFileSync(path.resolve('src/server/account-usage-routes.js'), 'utf8');
     const gj = /    if \(typeof engine\.gatherPlan !== 'function'\) \{[\s\S]*?\n    \}\n    const plan = engine\.gatherPlan\(id, memberId\);/;
-    ck('r1 gather control: the patch (the judgement removed) hits', gj.test(gsrc));
+    ck('r1 gather control: the patch (the judgement removed) hits', verdictOf(gj.test(gsrc)));
     const { mutantCopies: mcG } = await import('./mutant-copy.mjs');
     const MG = mcG('poolpin-r2gather', path.resolve('.'));
     const wold = setup({ routesMod: MG.load('src/server/account-usage-routes.js', editAnchor(gsrc, gj, '    const plan = null;', "src/server/account-usage-routes.js"), 'unjudged') });
@@ -2450,7 +2450,7 @@ await (async () => {
     const onDead = ['g-1', 'g-2', 'g-3'].map(wold.on).join(',');
     wold.eng._poolSwitchAt.clear(); wold.eng._poolAutoLast.clear();
     quietly(() => wold.eng.maybePoolAutoSwitchForPool(wold.P, { force: true }));
-    ck('r1 gather control: unjudged, all three go onto the spent member (mid-turn included) and the next pass moves them all back — 8 slot rows for nothing (what verify r1 measured)', wold._g.code === 200 && onDead === 'uci,uci,uci' && ['g-1', 'g-2', 'g-3'].every((x) => wold.on(x) !== 'uci') && wold.am.slotTransitions.all().length - rowsOld === 8, JSON.stringify({ onDead, after: ['g-1', 'g-2', 'g-3'].map(wold.on), rows: wold.am.slotTransitions.all().length - rowsOld }));
+    ck('r1 gather control: unjudged, all three go onto the spent member (mid-turn included) and the next pass moves them all back — 8 slot rows for nothing (what verify r1 measured)', wold._g.code === 200 && onDead === 'uci,uci,uci' && gateOf(['g-1', 'g-2', 'g-3'].every((x) => wold.on(x) !== 'uci')) && wold.am.slotTransitions.all().length - rowsOld === 8, JSON.stringify({ onDead, after: ['g-1', 'g-2', 'g-3'].map(wold.on), rows: wold.am.slotTransitions.all().length - rowsOld }));
     // a member that can serve: moved, the answer counts; a pinned conversation is named as left alone
     const wok = setup();
     quietly(() => wok.pin('g-3', 'fish'));
@@ -2463,7 +2463,7 @@ await (async () => {
     const defF = wf.am.poolCurrent(wf.P);
     quietly(() => { wf._g = gather(wf, 'uci'); });
     ck('r1 gather: a member whose FABLE cap is spent takes the Opus conversation and leaves the Fable ones where they are, BY NAME; the default stays', wf._g.code === 200 && wf.on('g-2') === 'uci' && wf.on('g-1') === 'martin' && wf.on('g-3') === 'fish' && wf._g.body.moved === 1 && wf._g.body.defaultMoved === false && wf.am.poolCurrent(wf.P) === defF && JSON.stringify(wf._g.body.skipped.cannotServe.map((x) => [x.sid, x.name, x.why])) === JSON.stringify([['g-1', 'conv g-1', 'pin-exhausted'], ['g-3', 'conv g-3', 'pin-exhausted']]), JSON.stringify(wf._g.body));
-    ck('r1 gather: …through the ONE link writer (slot row why: gather)', wf.am.slotTransitions.all().some((x) => x.sessionId === 'g-2' && x.to === wf.id.uci && x.why === 'gather'));
+    ck('r1 gather: …through the ONE link writer (slot row why: gather)', verdictOf(wf.am.slotTransitions.all().some((x) => x.sessionId === 'g-2' && x.to === wf.id.uci && x.why === 'gather')));
     // a pool that restarts to move lands its conversations on the DEFAULT — so the member must take the pool as a whole
     const wcg = setup({ hot: false });
     wcg.sessions.get('g-2')._spawnModel = 'claude-opus-4-8';
@@ -2487,8 +2487,8 @@ await (async () => {
     // the owner's 全B (2026-09-28): nothing keeps running on the removed member — both idle conversations are HELD (parked
     // off it on the member usable soonest, not armed: nothing was running), no restart, nothing handed to the client
     ck('r1 affected (全B): the removed member was the default and NOBODY can take over ⇒ the engine HOLDS both conversations (held 2, moved 0) — parked off the removed member', rn.code === 200 && rn.body.evicted.held === 2 && rn.body.evicted.stayed === 0 && rn.body.evicted.moved === 0 && wn.on('a-1') !== 'martin' && wn.on('a-2') !== 'martin', JSON.stringify({ e: rn.body.evicted, on: [wn.on('a-1'), wn.on('a-2')] }));
-    ck('r1 affected: …and the answer hands the client NOTHING to restart (it was all three: cut off, onto a default nobody can serve from)', Array.isArray(rn.body.affected) && rn.body.affected.length === 0 && wn.asked.length === 0, JSON.stringify(rn.body.affected.map((x) => x.serverId)));
-    ck('r1 affected (全B): …each conversation is told it waits, at the act (level warn) — never "keeps running"', ['a-1', 'a-2'].every((x) => wn.notices.some((n) => n.o && n.o.level === 'warn' && n.t === `Pool "全部": Martin Max was removed from the pool and no other member can take over — conversation "conv ${x}" waits: its next turn goes out when a member can serve it.`)) && !wn.notices.some((n) => /keep(s)? running/.test(n.t)), JSON.stringify(wn.notices.map((n) => n.t)));
+    ck('r1 affected: …and the answer hands the client NOTHING to restart (it was all three: cut off, onto a default nobody can serve from)', gateOf(Array.isArray(rn.body.affected)) && rn.body.affected.length === 0 && wn.asked.length === 0, JSON.stringify(rn.body.affected.map((x) => x.serverId)));
+    ck('r1 affected (全B): …each conversation is told it waits, at the act (level warn) — never "keeps running"', gateOf(['a-1', 'a-2'].every((x) => wn.notices.some((n) => n.o && n.o.level === 'warn' && n.t === `Pool "全部": Martin Max was removed from the pool and no other member can take over — conversation "conv ${x}" waits: its next turn goes out when a member can serve it.`))) && !wn.notices.some((n) => /keep(s)? running/.test(n.t)), JSON.stringify(wn.notices.map((n) => n.t)));
     const wy = world({ hot: false, client: true }); wy.mk('a-1', 'martin'); wy.mk('a-3', 'fish'); wy.sessions.set('a-f', { backend: 'claude', mode: 'chat', host: null, _webuiId: 'a-f', claudeSessionId: 'cid-a-f', _accountId: wy.P, name: 'conv a-f', sockName: 'cw-a-f', createdAt: Date.now(), _spawnModel: 'claude-fable-5-1' }); // a-f = a FOLLOWER of the default (no link of its own)
     const ry = narrow(wy);
     ck('r1 affected: with a member to take over ⇒ the engine moves + restarts the conversation on the removed member ITSELF (asked once)', ry.body.evicted.moved === 1 && wy.on('a-1') !== 'martin' && wy.asked.filter((x) => x === 'a-1').length === 1, JSON.stringify({ e: ry.body.evicted, asked: wy.asked }));
@@ -2499,7 +2499,7 @@ await (async () => {
     const wf = nobodyWorld();
     wf.sessions.set('a-f', { backend: 'claude', mode: 'chat', host: null, _webuiId: 'a-f', claudeSessionId: 'cid-a-f', _accountId: wf.P, name: 'conv a-f', sockName: 'cw-a-f', createdAt: Date.now(), _spawnModel: 'claude-fable-5-1' });
     const rf = narrow(wf);
-    ck('r2 affected: nobody can take the default over ⇒ its FOLLOWER is not handed to the client for a restart either', rf.code === 200 && Array.isArray(rf.body.affected) && rf.body.affected.length === 0 && !wf.asked.includes('a-f'), JSON.stringify({ affected: rf.body.affected, asked: wf.asked }));
+    ck('r2 affected: nobody can take the default over ⇒ its FOLLOWER is not handed to the client for a restart either', rf.code === 200 && gateOf(Array.isArray(rf.body.affected)) && rf.body.affected.length === 0 && !wf.asked.includes('a-f'), JSON.stringify({ affected: rf.body.affected, asked: wf.asked }));
     // control: the list as it was (every conversation of the pool whenever the default moved)
     const rsrc = fs.readFileSync(path.resolve('src/server/account-usage-routes.js'), 'utf8');
     const a1 = 'if (engineDecided.has(sid) || ownLink(sid)) continue;', a2 = 'if (before !== after && !nobody) {';
@@ -2546,7 +2546,7 @@ await (async () => {
     // member — an idle process that HOLDS it is restarted ONCE onto the pool default, parked on the member usable soonest
     // (a resume, never a turn); the route hands the client nothing more
     ck('r1 held (全B): the held member leaves the pool and NOBODY can take over ⇒ the idle process is restarted ONCE onto the parked default (held 1) — it never keeps billing the removed member', dead.res.body.evicted.held === 1 && dead.res.body.evicted.stayed === 0 && JSON.stringify(dead.asked) === '["s-h"]' && dead.res.body.affected.length === 0 && dead.cam.poolCurrent(dead.CP) === dead.B, JSON.stringify({ e: dead.res.body.evicted, asked: dead.asked, affected: dead.res.body.affected }));
-    ck('r1 held (全B): …it is told it waits (and restarts), and the journal names the hold', dead.said.some((t) => t === 'Pool "Cx": Cx A was removed from the pool and no other member can take over — conversation "held" waits: its next turn goes out when a member can serve it. Restarting the conversation to apply it.') && dead.lines.some((l) => /removed-member hold .*\/s-h: .* held by the process — restarting it onto/.test(l)), JSON.stringify(dead.said));
+    ck('r1 held (全B): …it is told it waits (and restarts), and the journal names the hold', gateOf(dead.said.some((t) => t === 'Pool "Cx": Cx A was removed from the pool and no other member can take over — conversation "held" waits: its next turn goes out when a member can serve it. Restarting the conversation to apply it.')) && verdictOf(dead.lines.some((l) => /removed-member hold .*\/s-h: .* held by the process — restarting it onto/.test(l))), JSON.stringify(dead.said));
     dead.wrc(dead.B, 0.1);
     quietly(() => dead.ceng.sweepNonMemberLinks());
     ck('r1 held (全B): …and once a member CAN take over, the next sweep does not restart it a second time (asked once in all)', JSON.stringify(dead.asked) === '["s-h"]', JSON.stringify(dead.asked));
@@ -2582,9 +2582,9 @@ await (async () => {
     quietly(() => w1.call('PATCH', '/api/accounts/pool/:id', { id: w1.P }, { members: [w1.id.uci, w1.id.fish] }));
     const w2 = stale(); quietly(() => w2.eng.sweepNonMemberLinks());
     const w3 = stale(); quietly(() => w3.eng.maybePoolAutoSwitchForPool(w3.P, { force: true }));
-    ck('r1 why: the members route, the stale-link sweep and the per-session pass write the SAME row — why: removed-from-pool', [w1, w2, w3].every((x) => JSON.stringify(whyOf(x, 'r-1')) === '["removed-from-pool"]'), JSON.stringify([w1, w2, w3].map((x) => whyOf(x, 'r-1'))));
-    ck('r1 why: …a MID-TURN conversation moved by it keeps its turn\'s reading slot on the member its requests went to (turn-pinned — the response in flight is the old member\'s)', (() => { const a = w1.eng.readingSlotFor(w1.sessions.get('r-1'), Date.now(), {}); return turnSlot.key === w1.id.martin && a.key === w1.id.martin && a.slotReason === 'turn-pinned' && w1.on('r-1') !== 'martin'; })());
-    ck('r1 why: …an ordinary per-session move keeps its own spelling (per-session-switch)', w.am.slotTransitions.all().some((x) => x.why === 'per-session-switch'));
+    ck('r1 why: the members route, the stale-link sweep and the per-session pass write the SAME row — why: removed-from-pool', verdictOf([w1, w2, w3].every((x) => JSON.stringify(whyOf(x, 'r-1')) === '["removed-from-pool"]')), JSON.stringify([w1, w2, w3].map((x) => whyOf(x, 'r-1'))));
+    ck('r1 why: …a MID-TURN conversation moved by it keeps its turn\'s reading slot on the member its requests went to (turn-pinned — the response in flight is the old member\'s)', verdictOf((() => { const a = w1.eng.readingSlotFor(w1.sessions.get('r-1'), Date.now(), {}); return turnSlot.key === w1.id.martin && a.key === w1.id.martin && a.slotReason === 'turn-pinned' && w1.on('r-1') !== 'martin'; })()));
+    ck('r1 why: …an ordinary per-session move keeps its own spelling (per-session-switch)', verdictOf(w.am.slotTransitions.all().some((x) => x.why === 'per-session-switch')));
     // verify r2 (census adequacy): two of the three sites r1 re-spelled had no leg — reverting either left the
     // suite green. ① a PINNED conversation's escape off the removed member (the pass sees it first: the pin is
     // the escape's target) ② the pool DEFAULT moved off it by the pass (a narrowing the store could not act on:
@@ -2601,7 +2601,7 @@ await (async () => {
     for (const [k, t] of saved) fs.writeFileSync(credsOf(k), t, { mode: 0o600 });
     quietly(() => w5.eng.maybePoolAutoSwitchForPool(w5.P, { force: true }));
     const defRows = w5.am.slotTransitions.all().filter((x) => !x.sessionId && x.from === w5.id.martin && x.to !== w5.id.martin).map((x) => x.why);
-    ck('r2 why: the pool DEFAULT moved off the removed member by the pool pass writes the same row (why removed-from-pool)', defStayed && w5.am.poolCurrent(w5.P) !== w5.id.martin && JSON.stringify(defRows) === '["removed-from-pool"]', JSON.stringify({ defStayed, def: w5.am.poolCurrent(w5.P), defRows }));
+    ck('r2 why: the pool DEFAULT moved off the removed member by the pool pass writes the same row (why removed-from-pool)', gateOf(defStayed) && w5.am.poolCurrent(w5.P) !== w5.id.martin && JSON.stringify(defRows) === '["removed-from-pool"]', JSON.stringify({ defStayed, def: w5.am.poolCurrent(w5.P), defRows }));
   }
   // ── verify r1 (identity): A PIN ON A LOGIN THAT CANNOT SERVE ──────────────────────────────────────────
   // The pin never re-points onto a dead login, every reading keys on the member the conversation RUNS ON,
@@ -2624,7 +2624,7 @@ await (async () => {
     const NOWS = Math.floor(Date.now() / 1000);
     const okc = { fetchedAt: Date.now(), fiveHour: { utilization: 0.1, resetsAt: NOWS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: NOWS + 86400 } };
     const v = (o) => dpl({ pin: 'a', currentId: 'b', members: [{ id: 'b', name: 'B' }], membership: ['a', 'b'], readCache: () => okc, nowSec: NOWS, hot: true, proactive: true, ...o });
-    ck('r1 login (PURE): listed by the pool, missing from the candidates, login cannot serve ⇒ pin-login-dead', ['logged-out', 'expired'].every((st) => v({ readLogin: (id) => (id === 'a' ? { state: st } : { state: 'ok', msLeft: 40 * 86400e3 }) }).pinWhy === 'pin-login-dead'));
+    ck('r1 login (PURE): listed by the pool, missing from the candidates, login cannot serve ⇒ pin-login-dead', verdictOf(['logged-out', 'expired'].every((st) => v({ readLogin: (id) => (id === 'a' ? { state: st } : { state: 'ok', msLeft: 40 * 86400e3 }) }).pinWhy === 'pin-login-dead')));
     ck('r1 login (PURE): …missing from the candidates with a login that reads usable (auth-failing) / no login reader ⇒ pin-member-unknown', v({ readLogin: () => ({ state: 'ok', msLeft: 40 * 86400e3 }) }).pinWhy === 'pin-member-unknown' && v({}).pinWhy === 'pin-member-unknown');
     ck('r1 login (PURE): …not listed by the pool at all ⇒ pin-member-unknown, whatever its login', v({ membership: ['b'], readLogin: () => ({ state: 'logged-out' }) }).pinWhy === 'pin-member-unknown');
   }
@@ -2659,10 +2659,10 @@ await (async () => {
     // is wired now (one usage read + one pool re-decision per login), so the census fails if it is ever unwired
     // again; test-new-member-wake §6b drives the login through server.js's own literal (behaviour, not only a name).
     const EXEMPT = {};
-    ck(`r2 wiring: the account routes' engine reads are read off the code (${routeReads.size}: ${[...routeReads].sort().join(', ')})`, routeReads.size >= 8 && ['gatherPlan', 'memberRemoved', 'decideDefaultTarget', 'setConversationPin'].every((n) => routeReads.has(n)));
+    ck(`r2 wiring: the account routes' engine reads are read off the code (${routeReads.size}: ${[...routeReads].sort().join(', ')})`, routeReads.size >= 8 && verdictOf(['gatherPlan', 'memberRemoved', 'decideDefaultTarget', 'setConversationPin'].every((n) => routeReads.has(n))));
     const missing = [...routeReads].filter((n) => !lit.has(n) && !EXEMPT[n]);
     ck('r2 wiring: CENSUS — every engine function the account routes ask for is in the `engine: {…}` literal server.js passes them', missing.length === 0, JSON.stringify({ missing, literal: [...lit] }));
-    ck('r2 wiring: …with NO exemption — the login re-check (onMemberLoginSuccess) is read by the routes and passed by server.js', Object.keys(EXEMPT).length === 0 && routeReads.has('onMemberLoginSuccess') && lit.has('onMemberLoginSuccess'), JSON.stringify({ exempt: Object.keys(EXEMPT), read: routeReads.has('onMemberLoginSuccess'), passed: lit.has('onMemberLoginSuccess') }));
+    ck('r2 wiring: …with NO exemption — the login re-check (onMemberLoginSuccess) is read by the routes and passed by server.js', Object.keys(EXEMPT).length === 0 && gateOf(routeReads.has('onMemberLoginSuccess')) && verdictOf(lit.has('onMemberLoginSuccess')), JSON.stringify({ exempt: Object.keys(EXEMPT), read: routeReads.has('onMemberLoginSuccess'), passed: lit.has('onMemberLoginSuccess') }));
     const engSrc = strip(fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8'));
     const ret = engSrc.slice(engSrc.lastIndexOf('  return {'));
     const notExported = [...lit].filter((n) => ['gatherPlan', 'memberRemoved', 'decideDefaultTarget', 'setConversationPin', 'maybePoolAutoSwitchForPool', 'claimColdRestarts', 'onMemberLoginSuccess'].includes(n) && !new RegExp(`\\b${n}\\b`).test(ret));
@@ -2699,41 +2699,41 @@ await (async () => {
     ram._state.defaultCodexAccountId = CP;
     const rp = (data, backend = 'claude') => resumePoolPin(data, ram, backend);
     const got = (r, pool, member) => !!r && r.poolId === pool && r.pin.memberId === member && r.pin.by === 'user';
-    ck('r1 resume: a claude resume on the default pool carries its pin (the pool it bills, the member it lists)', got(rp({ poolPin: { memberId: B, at: 5, poolId: P1 } }), P1, B) && rp({ poolPin: { memberId: B, at: 5, poolId: P1 } }).pin.at === 5);
-    ck('r1 resume: a CODEX resume on the default codex pool carries its pin — the pool is resolved per backend, as the spawn resolves it', got(rp({ poolPin: { memberId: XB, at: 5, poolId: CP } }, 'codex'), CP, XB) && ram.resolveForSpawn(undefined, 'codex', {}).id === CP);
-    ck('r1 resume: …and named explicitly too', got(rp({ accountId: CP, poolPin: { memberId: XB, at: 5 } }, 'codex'), CP, XB));
+    ck('r1 resume: a claude resume on the default pool carries its pin (the pool it bills, the member it lists)', gateOf(got(rp({ poolPin: { memberId: B, at: 5, poolId: P1 } }), P1, B)) && rp({ poolPin: { memberId: B, at: 5, poolId: P1 } }).pin.at === 5);
+    ck('r1 resume: a CODEX resume on the default codex pool carries its pin — the pool is resolved per backend, as the spawn resolves it', gateOf(got(rp({ poolPin: { memberId: XB, at: 5, poolId: CP } }, 'codex'), CP, XB)) && ram.resolveForSpawn(undefined, 'codex', {}).id === CP);
+    ck('r1 resume: …and named explicitly too', verdictOf(got(rp({ accountId: CP, poolPin: { memberId: XB, at: 5 } }, 'codex'), CP, XB)));
     ck('r1 resume: a pin MADE ON ANOTHER POOL is no pin here (the conversation was switched to 工作: nobody pinned it there)', rp({ accountId: P2, poolPin: { memberId: B, at: 5, poolId: P1 } }) === null);
-    ck('r1 resume: a carrier from before the pool was named (no poolId) is judged by membership, as it was', got(rp({ accountId: P2, poolPin: { memberId: B, at: 5 } }), P2, B));
-    ck('r1 resume: a FORK, a REMOTE conversation, a member the pool does not list, a non-pool account, the CLI\'s own login, a malformed pin ⇒ no pin', [
+    ck('r1 resume: a carrier from before the pool was named (no poolId) is judged by membership, as it was', verdictOf(got(rp({ accountId: P2, poolPin: { memberId: B, at: 5 } }), P2, B)));
+    ck('r1 resume: a FORK, a REMOTE conversation, a member the pool does not list, a non-pool account, the CLI\'s own login, a malformed pin ⇒ no pin', verdictOf([
       rp({ fork: true, poolPin: { memberId: B, poolId: P1 } }), rp({ hostId: 'h1', poolPin: { memberId: B, poolId: P1 } }), rp({ poolPin: { memberId: Z } }),
       rp({ accountId: A, poolPin: { memberId: B } }), rp({ accountId: 'subscription', poolPin: { memberId: B } }), rp({ poolPin: { memberId: '' } }), rp({ poolPin: 'x' }), rp({}), rp(null),
-    ].every((x) => x === null));
+    ].every((x) => x === null)));
     // verify r2 (authority): a pin that NAMES its pool is kept across a resume while its member is out of the pool — a
     // LIVE conversation keeps it (pin-member-unknown: placed automatically, back when the member is re-added), and the
     // resume used to drop it from the session while the client's carrier still held it
     const P3 = ram.createPool({ name: '三', members: [A, B] }).id;
     ram.updatePool(P3, { members: [A] }); // B leaves while the conversation is stopped
-    ck('r2 resume: a pin NAMING its pool is kept while its member is out of the pool (as a live conversation keeps it)', got(rp({ accountId: P3, poolPin: { memberId: B, at: 5, poolId: P3 } }), P3, B));
+    ck('r2 resume: a pin NAMING its pool is kept while its member is out of the pool (as a live conversation keeps it)', verdictOf(got(rp({ accountId: P3, poolPin: { memberId: B, at: 5, poolId: P3 } }), P3, B)));
     ck('r2 resume: …a carrier that names no pool still needs a member the pool lists', rp({ accountId: P3, poolPin: { memberId: B, at: 5 } }) === null);
     ram.updatePool(P3, { members: [A, B] });
-    ck('r2 resume: …and with the member back the same carrier pins as it always did', got(rp({ accountId: P3, poolPin: { memberId: B, at: 5, poolId: P3 } }), P3, B));
+    ck('r2 resume: …and with the member back the same carrier pins as it always did', verdictOf(got(rp({ accountId: P3, poolPin: { memberId: B, at: 5, poolId: P3 } }), P3, B)));
     // control: the accept lines as they were (the claude default for every backend, no pool on the pin)
     const wsrc = fs.readFileSync(path.resolve('src/ws-create.js'), 'utf8');
     const l1 = "const poolId = data.accountId || (defaultIdField ? st[defaultIdField] : null) || null;", l2 = "if (typeof p.poolId === 'string' && p.poolId && p.poolId !== poolId) return null;";
     ck('r1 resume control: the patch (the two clauses as they were) hits', wsrc.split(l1).length === 2 && wsrc.split(l2).length === 2);
     const MRP = mutantCopies('poolpin-r1resume', path.resolve('.'));
     const old = MRP.load('src/ws-create.js', editAnchor(editAnchor(wsrc, l1, 'const poolId = data.accountId || st.defaultAccountId || null;', "src/ws-create.js"), l2, '', "src/ws-create.js"), 'claudedefault');
-    ck('r1 resume control: as it was, the codex pin on the default pool is DROPPED and the pin made on 全部 is accepted on 工作 (what verify r1 measured)', old.resumePoolPin({ poolPin: { memberId: XB, at: 5, poolId: CP } }, ram, 'codex') === null && got(old.resumePoolPin({ accountId: P2, poolPin: { memberId: B, at: 5, poolId: P1 } }, ram, 'claude'), P2, B));
+    ck('r1 resume control: as it was, the codex pin on the default pool is DROPPED and the pin made on 全部 is accepted on 工作 (what verify r1 measured)', old.resumePoolPin({ poolPin: { memberId: XB, at: 5, poolId: CP } }, ram, 'codex') === null && verdictOf(got(old.resumePoolPin({ accountId: P2, poolPin: { memberId: B, at: 5, poolId: P1 } }, ram, 'claude'), P2, B)));
     // the client's carrier names the pool
     const sl2 = fs.readFileSync(path.resolve('src/lib/session-lifecycle.js'), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
-    ck('WIRING PIN: the billing submenu saves the pin WITH the pool it was made on (both the live and the stopped path), the resume sends it', (sl2.match(/poolId: a\.id \}/g) || []).length === 2 && /\.\.\.\(poolPin\.poolId \? \{ poolId: poolPin\.poolId \} : \{\}\)/.test(sl2));
+    ck('WIRING PIN: the billing submenu saves the pin WITH the pool it was made on (both the live and the stopped path), the resume sends it', (sl2.match(/poolId: a\.id \}/g) || []).length === 2 && verdictOf(/\.\.\.\(poolPin\.poolId \? \{ poolId: poolPin\.poolId \} : \{\}\)/.test(sl2)));
     // verify r2 (census adequacy): the chooser call RE-DERIVED the pool (`data._poolPinPool || data.accountId ||
     // <claude default>`) — reverting it to the pre-r1 claude default left the suite green, and a codex pin on the
     // default pool was then asked of the CLAUDE pool at the one moment it can apply. The store now hands the chooser
     // the pool IT resolved; the REAL arrow from ws-create is evaluated verbatim under the REAL resolveForSpawn.
     const arrowRe = /chooseMember: (\([^)]*\) => poolChooser\?\.\(.*\)),$/m;
     const arrowTxt = (arrowRe.exec(fs.readFileSync(path.resolve('src/ws-create.js'), 'utf8')) || [])[1] || null;
-    ck('r2 chooser: the chooser arrow is read off ws-create (it takes the pool the store resolved)', !!arrowTxt && /^\(poolId, how = \{\}\) => poolChooser\?\.\(poolId, /.test(arrowTxt), arrowTxt);
+    ck('r2 chooser: the chooser arrow is read off ws-create (it takes the pool the store resolved)', !!arrowTxt && verdictOf(/^\(poolId, how = \{\}\) => poolChooser\?\.\(poolId, /.test(arrowTxt)), arrowTxt);
     { // B-8a65 verify r1: a RESUME (no commanded model — the instance default stands in) is HINTED, so no spare-lane placement on a guess
       const hintOf = (txt, data) => { let o = null; new Function('poolChooser', 'data', 'accounts', 'return ' + txt)((pid, opts) => { o = opts; return null; }, data, null)('p'); return o; };
       const res = arrowTxt && hintOf(arrowTxt, { _placementModelHint: 'claude-opus-4-8' }), cmd = arrowTxt && hintOf(arrowTxt, { model: 'claude-opus-4-8' });
@@ -2794,7 +2794,7 @@ await (async () => {
     const ws = staleWorld(engMod);
     ck('r1 spawn: (the state) the default still names Martin, the pool no longer lists it', ws.am.poolCurrent(ws.P) === ws.id.martin && !ws.am.poolMembership(ws.P).includes(ws.id.martin));
     const where = (w2, model) => { let r; quietly(() => { r = w2.eng.poolChooserForModel(w2.P, { model }); }); return Object.keys(w2.id).find((k) => w2.id[k] === r) || r; };
-    ck('r1 spawn: a new conversation is placed on a member the pool LISTS — with a model family and without one', where(ws, 'claude-fable-5-1') !== 'martin' && where(ws, null) !== 'martin' && ws.am.poolMembership(ws.P).includes(ws.id[where(ws, null)]), [where(ws, 'claude-fable-5-1'), where(ws, null)]);
+    ck('r1 spawn: a new conversation is placed on a member the pool LISTS — with a model family and without one', where(ws, 'claude-fable-5-1') !== 'martin' && where(ws, null) !== 'martin' && verdictOf(ws.am.poolMembership(ws.P).includes(ws.id[where(ws, null)])), [where(ws, 'claude-fable-5-1'), where(ws, null)]);
     // verify r2: …and by the pool's VERDICT (EDF: Fish, whose week resets sooner) — the default's fallback (usable soonest,
     // then list order: UCI) is only for when nobody can serve; a verdict without the membership fact would land there
     ck('r2 spawn: the stale default is decided by the pool VERDICT (Fish by EDF), with a family and without one — not by the nobody-can-serve fallback (UCI)', where(ws, 'claude-fable-5-1') === 'fish' && where(ws, null) === 'fish', [where(ws, 'claude-fable-5-1'), where(ws, null)]);
@@ -2824,7 +2824,7 @@ await (async () => {
     const wr2 = world({}); const p2 = wr2.mk('w-2', 'martin'); p2._poolPin = { memberId: wr2.id.fish, at: Date.now(), by: 'user' };
     wr2.wr('martin', 0.99, 0.3, 2 * 86400); wr2.wr('fish', 0.92, 0.4, 4 * 86400); wr2.wr('uci', 0.94, 0.2, 5 * 86400);
     const l2 = quietly(() => wr2.eng.maybePoolAutoSwitchForPool(wr2.P, { force: true }));
-    ck('r2 words: when the automatic rules land it ON its pin (nobody settles, the pin has the most headroom) it is told it is back on it — never "Fish Max is out of quota — running on Fish Max"', wr2.on('w-2') === 'fish' && JSON.stringify(said(wr2, 'w-2')) === JSON.stringify(['Pool "全部": conversation "conv w-2" is back on Fish Max (pinned).']) && l2.some((l) => / — onto its pin \(pinned\)$/.test(l)));
+    ck('r2 words: when the automatic rules land it ON its pin (nobody settles, the pin has the most headroom) it is told it is back on it — never "Fish Max is out of quota — running on Fish Max"', wr2.on('w-2') === 'fish' && JSON.stringify(said(wr2, 'w-2')) === JSON.stringify(['Pool "全部": conversation "conv w-2" is back on Fish Max (pinned).']) && verdictOf(l2.some((l) => / — onto its pin \(pinned\)$/.test(l))));
     const zhD = (await import('../src/lib/i18n-zh.js')).default, jaD = (await import('../src/lib/i18n-ja.js')).default;
     const k = 'Pool "{pool}": conversation "{title}" — {member} has not got enough quota back yet — running on {target} for now (pin kept).';
     ck('r2 words: …in zh / ja too', !!zhD[k] && !!jaD[k] && !/额度用完|上限に達しました/.test(zhD[k] + jaD[k]));
@@ -2910,14 +2910,14 @@ await (async () => {
     };
     const n1 = mkStore(AccountManager);
     let err = null; try { n1.am2.resolveForSpawn(n1.P, 'claude', { sessionKey: 'nc-1' }); } catch (e) { err = e; }
-    ck('全B new: the default names a REMOVED member and no listed member is signed in ⇒ the new conversation is REFUSED by name (never placed on the removed member)', !!err && err.code === 'removed_no_candidate' && /"A" was removed from pool "nc" and no other member can take over/.test(err.message) && (() => { try { fs.lstatSync(n1.am2.sessionPoolLinkPath(n1.P, 'nc-1')); return false; } catch { return true; } })(), err && err.message); // no link was born at all
+    ck('全B new: the default names a REMOVED member and no listed member is signed in ⇒ the new conversation is REFUSED by name (never placed on the removed member)', !!err && err.code === 'removed_no_candidate' && gateOf(/"A" was removed from pool "nc" and no other member can take over/.test(err.message)) && verdictOf((() => { try { fs.lstatSync(n1.am2.sessionPoolLinkPath(n1.P, 'nc-1')); return false; } catch { return true; } })()), err && err.message); // no link was born at all
     for (const [id, t] of n1.keep) fs.writeFileSync(n1.cp(id), t, { mode: 0o600 });
     n1.am2.resolveForSpawn(n1.P, 'claude', { sessionKey: 'nc-2' });
-    ck('全B new: …with a listed member signed in, it starts on a member the pool LISTS (the default still names the removed one)', n1.am2.poolCurrent(n1.P) === n1.ids[0] && n1.ids.slice(1).includes(n1.am2.poolCurrentFor(n1.P, 'nc-2')), n1.am2.poolCurrentFor(n1.P, 'nc-2'));
+    ck('全B new: …with a listed member signed in, it starts on a member the pool LISTS (the default still names the removed one)', n1.am2.poolCurrent(n1.P) === n1.ids[0] && verdictOf(n1.ids.slice(1).includes(n1.am2.poolCurrentFor(n1.P, 'nc-2'))), n1.am2.poolCurrentFor(n1.P, 'nc-2'));
     // control: the store without the guard — the new conversation's link is born on the removed member
     const asrc = fs.readFileSync(path.resolve('src/accounts.js'), 'utf8');
     const g = /        const listedNow = this\.poolMembership\(id\);\n        if \(member && !listedNow\.includes\(member\)\) \{[\s\S]*?\n        \}\n/;
-    ck('全B new control: the patch (the store without the guard) hits', g.test(asrc));
+    ck('全B new control: the patch (the store without the guard) hits', verdictOf(g.test(asrc)));
     const { AccountManager: OldMgr } = MN.load('src/accounts.js', editAnchor(asrc, g, '', "src/accounts.js"), 'noguard');
     const n2 = mkStore(OldMgr);
     let err2 = null; try { n2.am2.resolveForSpawn(n2.P, 'claude', { sessionKey: 'nc-3' }); } catch (e) { err2 = e; }
@@ -2957,11 +2957,11 @@ await (async () => {
   // dc-harness-store (2.369.213): the three restore paths build the session through ONE sessionFromMeta — the pin is spelled
   // once, inside it, and no path's transport facts (which win the spread) carry a _poolPin of their own
   const sfm = (br.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0];
-  ck('WIRING PIN: all THREE boot-restore sites restore the pin through ONE expression (sessionFromMeta)', (br.match(/_poolPin:/g) || []).length === 1 && /_poolPin: poolPinFromMeta\(meta\),/.test(sfm) && (br.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3, [(br.match(/_poolPin:/g) || []).length, (br.match(/= sessionFromMeta\(meta, \{/g) || []).length]);
+  ck('WIRING PIN: all THREE boot-restore sites restore the pin through ONE expression (sessionFromMeta)', (br.match(/_poolPin:/g) || []).length === 1 && gateOf(/_poolPin: poolPinFromMeta\(meta\),/.test(sfm)) && (br.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3, [(br.match(/_poolPin:/g) || []).length, (br.match(/= sessionFromMeta\(meta, \{/g) || []).length]);
   const wc2 = strip('src/ws-create.js');
-  ck('WIRING PIN: ws-create persists the pin into the meta and takes a resume\'s pin through ONE judge (resumePoolPin — never on a FORK, never remote)', /poolPin: session\._poolPin \|\| undefined,/.test(wc2) && /const rp = resumePoolPin\(data, accounts, backend\);/.test(wc2) && /if \(!data \|\| data\.fork \|\| data\.hostId \|\| !accounts\) return null;/.test(wc2) && /_poolPin: \(data\._poolPin && spawnAccount && spawnAccount\.id === data\._poolPinPool\) \? data\._poolPin : null,/.test(wc2));
+  ck('WIRING PIN: ws-create persists the pin into the meta and takes a resume\'s pin through ONE judge (resumePoolPin — never on a FORK, never remote)', gateOf(/poolPin: session\._poolPin \|\| undefined,/.test(wc2)) && gateOf(/const rp = resumePoolPin\(data, accounts, backend\);/.test(wc2)) && gateOf(/if \(!data \|\| data\.fork \|\| data\.hostId \|\| !accounts\) return null;/.test(wc2)) && verdictOf(/_poolPin: \(data\._poolPin && spawnAccount && spawnAccount\.id === data\._poolPinPool\) \? data\._poolPin : null,/.test(wc2)));
   const sl = strip('src/lib/session-lifecycle.js');
-  ck('WIRING PIN: the client carries the pin on a RESUME (session config) and drops it on a fork', /poolPin: savedCfg\.poolPin,/.test(sl) && /poolPin: \(!fork && poolPin && typeof poolPin\.memberId === 'string'\)/.test(sl));
+  ck('WIRING PIN: the client carries the pin on a RESUME (session config) and drops it on a fork', gateOf(/poolPin: savedCfg\.poolPin,/.test(sl)) && verdictOf(/poolPin: \(!fork && poolPin && typeof poolPin\.memberId === 'string'\)/.test(sl)));
   fs.rmSync(scr, { recursive: true, force: true });
   // ── THE PROVING SPAWN (lane reset-unproven, owner «B吧» 2026-10-30) ───────────────────────────────────────
   // A member whose every stated window reset since its last reading — or one never read — stands on a GUESS; a NEW
@@ -2980,29 +2980,29 @@ await (async () => {
     // (absent exports answer what no leg accepts, so on a tree without this lane every leg goes RED BY NAME)
     const HOLD = A.PROVING_HOLD_MS || 600e3, PT = (d, o) => (typeof A.provingText === 'function' ? A.provingText(d, o) : 'no provingText');
     const d0 = D({ proving: new Map() });
-    ck('proving: a spawn takes the NEVER-READ member first (C) — reason «proving», the member named, its state said', d0 && d0.to === 'c' && d0.reason === 'proving' && d0.proving.state === 'unread' && d0.proving.name === 'C', JSON.stringify(d0));
+    ck('proving: a spawn takes the NEVER-READ member first (C) — reason «proving», the member named, its state said', gateOf(d0) && d0.to === 'c' && d0.reason === 'proving' && d0.proving.state === 'unread' && d0.proving.name === 'C', JSON.stringify(d0));
     const d1 = D({ proving: held('c') });
-    ck('proving: …C in flight ⇒ the OLDEST reading next (B, read 5 days ago — before D\'s 3), its last-reset window named (7d)', d1 && d1.to === 'b' && d1.proving.state === 'reset-unconfirmed' && d1.proving.window.kind === '7d' && d1.proving.window.resetAt === (S - 2 * 86400) * 1000, JSON.stringify(d1));
+    ck('proving: …C in flight ⇒ the OLDEST reading next (B, read 5 days ago — before D\'s 3), its last-reset window named (7d)', gateOf(d1) && d1.to === 'b' && d1.proving.state === 'reset-unconfirmed' && d1.proving.window.kind === '7d' && d1.proving.window.resetAt === (S - 2 * 86400) * 1000, JSON.stringify(d1));
     const d2 = D({ proving: held('c', 'b') });
-    ck('proving: …ONE proof in flight per member: three spawns in a row land on three guesses (C, B, D)', d2 && d2.to === 'd', JSON.stringify(d2));
+    ck('proving: …ONE proof in flight per member: three spawns in a row land on three guesses (C, B, D)', gateOf(d2) && d2.to === 'd', JSON.stringify(d2));
     const d3 = D({ proving: held('c', 'b', 'd') }), dOff = D();
     ck('proving: …every guess in flight ⇒ today\'s placement, byte-identical to a decision without the input', JSON.stringify(d3) === JSON.stringify(dOff), JSON.stringify({ d3, dOff }));
     const expired = new Map([['c', NOWMS - HOLD]]), notYet = new Map([['c', NOWMS - HOLD + 1000]]);
     ck(`proving: …a mark ends after PROVING_HOLD_MS (${HOLD / 60e3} min) — C is asked again; 1 s before, it is not`, A.PROVING_HOLD_MS === 600e3 && D({ proving: expired })?.to === 'c' && D({ proving: notYet })?.to === 'b');
     const tie = { x2: null, x1: null }, dt = A.decidePoolSwitch({ ...base, members: [{ id: 'a', name: 'A' }, { id: 'x2', name: 'X2' }, { id: 'x1', name: 'X1' }], readCache: (id) => (id === 'a' ? caches.a : tie[id]), proving: new Map() });
-    ck('proving: ties (two never read) go by id — deterministic, never «occasionally»', dt && dt.to === 'x1', JSON.stringify(dt));
+    ck('proving: ties (two never read) go by id — deterministic, never «occasionally»', gateOf(dt) && dt.to === 'x1', JSON.stringify(dt));
     // never on a MOVE: the anti-flap law stands (a conversation never moves onto ignorance)
     const mv = D({ placing: false, proactive: true, proving: new Map() }), mv0 = D({ placing: false, proactive: true });
     ck('proving: NEVER ON A MOVE — a hot pool\'s proactive pass decides exactly as without the input', JSON.stringify(mv) === JSON.stringify(mv0) && (!mv || mv.reason !== 'proving'), JSON.stringify(mv));
     const deadCur = { ...caches, a: { fetchedAt: NOWMS, fiveHour: { utilization: 0.99, resetsAt: S + 3600 }, sevenDay: { utilization: 0.5, resetsAt: S + 86400 } } };
     const esc = A.decidePoolSwitch({ ...base, placing: false, readCache: (id) => deadCur[id], proving: new Map() });
-    ck('proving: …a hard-dead conversation ESCAPES onto measured headroom (E), never onto the guess (the anti-flap law)', esc && esc.to === 'e' && esc.reason === 'exhausted', JSON.stringify(esc));
+    ck('proving: …a hard-dead conversation ESCAPES onto measured headroom (E), never onto the guess (the anti-flap law)', gateOf(esc) && esc.to === 'e' && esc.reason === 'exhausted', JSON.stringify(esc));
     // a pin wins; the voluntary gates hold
     const pn = D({ pinned: true, proving: new Map() });
     ck('proving: a PINNED conversation never reaches the rule (the pin wins over everything)', !pn || pn.reason !== 'proving', JSON.stringify(pn));
     const li = { c: { state: 'expired' }, b: { state: 'ok' }, d: { state: 'ok' } };
     const g1 = D({ proving: new Map(), readLogin: (id) => li[id] || { state: 'ok' }, exclude: ['b'], creditsIds: ['d'] });
-    ck('proving: …only a member every VOLUNTARY gate admits is proven — a dead login (C), one that just refused this conversation (B), a credits member (D) are not', g1 && g1.reason !== 'proving', JSON.stringify(g1));
+    ck('proving: …only a member every VOLUNTARY gate admits is proven — a dead login (C), one that just refused this conversation (B), a credits member (D) are not', gateOf(g1) && g1.reason !== 'proving', JSON.stringify(g1));
     const unreadCur = D({ currentId: 'c', proving: new Map() }), unreadHeld = D({ currentId: 'c', proving: held('c', 'b', 'd') });
     ck('proving: an UNREAD default is itself the oldest guess — the spawn stays and proves it (stay); held, the no-data hold answers as before', unreadCur.to === 'c' && unreadCur.proving.stay === true && unreadHeld.reason === 'no-data', JSON.stringify({ unreadCur, unreadHeld }));
     // judged on the READING, never the estimator's overlay
@@ -3050,7 +3050,7 @@ await (async () => {
     const baseRule = pctl('base', '  if (provingOn) {\n    const nowMs = Number(nowSec) * 1000;', '  if (false) {\n    const nowMs = Number(nowSec) * 1000;');
     const bx = baseRule && baseRule.decidePoolSwitch({ ...base, proving: new Map() });
     ck('proving RED (the base): without the rule the spawn holds on the default — the 95 % member\'s reset is never confirmed', !!bx && bx.reason === 'hold' && bx.to === null, JSON.stringify(bx));
-    for (const r of ccP(MPC.files, MPC.dir, path.resolve('.'), { minCopies: 5, label: 'proving: ' })) ck(r.name, r.pass);
+    for (const r of ccP(MPC.files, MPC.dir, path.resolve('.'), { minCopies: 5, label: 'proving: ' })) ck(r.name, verdictOf(r.pass));
 
     // ── THE ENGINE: the chooser marks, says, and lets a reading end the mark ───────────────────────────────
     fs.mkdirSync(scr, { recursive: true }); // (the pin legs above already swept the scratch dir)
@@ -3063,7 +3063,7 @@ await (async () => {
       await pw.eng.usageFolder.refresh();   // B-360d U3: a write straight into the folder reaches the kept reply at its next refresh
       const ask = (o = {}) => { let r; const lines = quietly(() => { r = pw.eng.poolChooserForModel(pw.P, { model: 'claude-fable-5-1', ...o }); }); return { at: Object.keys(pw.id).find((k) => pw.id[k] === r) || r, lines }; };
       const s1 = ask();
-      ck('engine: a spawn is placed on the member whose week reset unconfirmed (UCI, 95 % read 5 days ago) — and SAID in the journal', s1.at === 'uci' && s1.lines.some((l) => /^\[pool\] spawn on "全部": placed on UCI Max to confirm its 7-day window reset on .+; a reading follows its first turn$/.test(l)), JSON.stringify(s1));
+      ck('engine: a spawn is placed on the member whose week reset unconfirmed (UCI, 95 % read 5 days ago) — and SAID in the journal', s1.at === 'uci' && verdictOf(s1.lines.some((l) => /^\[pool\] spawn on "全部": placed on UCI Max to confirm its 7-day window reset on .+; a reading follows its first turn$/.test(l))), JSON.stringify(s1));
       const s2 = ask(), s3 = ask();
       ck('engine: …the proof is IN FLIGHT: the next two spawns are placed as today (the default, Martin) — never piled onto the guess', s2.at === 'martin' && s3.at === 'martin', JSON.stringify([s2.at, s3.at]));
       const hinted = ask({ hinted: true }), pinned = ask({ pin: pw.id.fish });
@@ -3079,7 +3079,7 @@ await (async () => {
       // (on the clock the mark was set on — the leg above moved it PROVING_HOLD_MS ahead)
       let landed;
       try { Date.now = () => realNow() + HOLD + 5000; landed = quietly(() => wpath.writeCacheObject({ cacheDir: cdir, key: pw.id.uci, obj: { fetchedAt: Date.now(), source: 'passive', fiveHour: { utilization: 0.05, resetsAt: nowS + 4 * 3600 }, sevenDay: { utilization: 0.02, resetsAt: nowS + 5 * 86400 } }, source: 'passive', backend: 'claude' })); } finally { Date.now = realNow; }
-      ck('engine: a reading of UCI written through usage-cache-write ends its proof in flight — «its proof is in»', landed.some((l) => l.startsWith('[pool] proving: UCI Max (' + pw.id.uci + ') read at ') && l.includes('its proof is in')), landed.join(' | '));
+      ck('engine: a reading of UCI written through usage-cache-write ends its proof in flight — «its proof is in»', verdictOf(landed.some((l) => l.startsWith('[pool] proving: UCI Max (' + pw.id.uci + ') read at ') && l.includes('its proof is in'))), landed.join(' | '));
       const s5 = ask();
       ck('engine: …UCI is PROVEN now and falls into today\'s placement (no proving verdict)', s5.at !== undefined && !s5.lines.some((l) => /placed on .* to confirm/.test(l)), JSON.stringify(s5));
       // a member the pool lists that has NEVER been read (added just now, no file, no identity group)
@@ -3087,12 +3087,12 @@ await (async () => {
       fs.writeFileSync(path.join(pw.am.subDir(nid), '.credentials.json'), CREDS(nid), { mode: 0o600 });
       quietly(() => pw.am.updatePool(pw.P, { members: [pw.id.martin, pw.id.uci, pw.id.fish, nid] }));
       const s6 = ask();
-      ck('engine: a member with NO reading at all (just added) is proven next — «it has never been read»', s6.at === nid && s6.lines.some((l) => l.endsWith('placed on New Max — it has never been read; a reading follows its first turn')));
+      ck('engine: a member with NO reading at all (just added) is proven next — «it has never been read»', s6.at === nid && verdictOf(s6.lines.some((l) => l.endsWith('placed on New Max — it has never been read; a reading follows its first turn'))));
 
       // ── r3 (主开发's acceptance of r2) — the proof is ONE conversation's placement, ONE per member hub-wide ─────────────
       // The REAL chooser arrow off ws-create, evaluated verbatim under the REAL resolveForSpawn (as the r2 chooser legs do).
       const arrowR3 = (/chooseMember: (\([^)]*\) => poolChooser\?\.\(.*\)),$/m.exec(fs.readFileSync(path.resolve('src/ws-create.js'), 'utf8')) || [])[1] || null;
-      ck('r3: the chooser arrow is read off ws-create and hands the chooser `forDefault`', !!arrowR3 && /forDefault: !!how\.forDefault/.test(arrowR3), arrowR3);
+      ck('r3: the chooser arrow is read off ws-create and hands the chooser `forDefault`', !!arrowR3 && verdictOf(/forDefault: !!how\.forDefault/.test(arrowR3)), arrowR3);
       const SIGNED_OUT = JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: null } });
       const nameOf = (w, x) => Object.keys(w.id).find((k) => w.id[k] === x) || (x === w.nid ? 'U' : String(x));
       // MAJOR 1: default A signed out, M measured (7d 40 %, reset in 2 d), U never read — the probe's own shape
@@ -3119,7 +3119,7 @@ await (async () => {
         { name: 'r3 MAJOR: …a spawn with no family reads the default link — M, never the guess', pass: !!h && h.s3.on === 'fish' && h.s3.def === 'fish', detail: h && JSON.stringify(h.s3) },
       ];
       const heal = healWorld(engMod);
-      for (const r of healLegs(heal)) ck(r.name, r.pass, r.detail);
+      for (const r of healLegs(heal)) ck(r.name, verdictOf(r.pass), r.detail);
       // MINOR 2: two pools that list the same members (an all-members pool + a narrower one), two spawns a minute apart
       const twoPools = async (engine) => {
         const w = world({ engine });
@@ -3158,7 +3158,7 @@ await (async () => {
       const ectl = (tag, swaps) => { let x = esrc; for (const [a, b] of swaps) { if (x.split(a).length !== 2) return null; x = x.replace(a, b); } return MPE.load('src/server/usage-pool-engine.js', x, tag); };
       const eDef = ectl('fordefault', [['proving: forDefault ? null : provingInFlight(),', 'proving: provingInFlight(), /* PATCHED */']]);
       const hRed = eDef ? healLegs(healWorld(eDef)).filter((r) => !r.pass).map((r) => r.name) : ['no patch'];
-      ck('r3 MAJOR RED: proving admitted for the pool DEFAULT re-points the default onto the guess (U) — the default legs go red by name', !!eDef && hRed.some((n) => n.includes('re-pointed onto MEASURED headroom')), JSON.stringify(hRed));
+      ck('r3 MAJOR RED: proving admitted for the pool DEFAULT re-points the default onto the guess (U) — the default legs go red by name', !!eDef && verdictOf(hRed.some((n) => n.includes('re-pointed onto MEASURED headroom'))), JSON.stringify(hRed));
       const ePer = ectl('perpool', [['const _proving = new Map();\n', 'const _provingPools = new Map(); let _proving = new Map(); /* PATCHED: a map per pool, as r2 had it */\n'],
         ['function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false, resumeOf = null } = {}) {\n', 'function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false, resumeOf = null } = {}) { _proving = _provingPools.get(poolId) || _provingPools.set(poolId, new Map()).get(poolId); /* PATCHED */\n']]);
       const tpRed = ePer ? await twoPools(ePer) : null;
@@ -3166,7 +3166,7 @@ await (async () => {
       const eOwn = ectl('ownfile', [['proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(),', "proving: forDefault ? null : provingInFlight(), readReading: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } }, /* PATCHED: the member's own file only */"]]);
       const gwRed = eOwn ? await groupWorld(eOwn) : null;
       ck('r3 4a RED: a proving decision handed the member\'s OWN FILE only (no identity group) places a spawn on UCI to confirm a reset its identity already read', !!gwRed && gwRed.proving === true, JSON.stringify(gwRed));
-      for (const r of ccE(MPE.files, MPE.dir, path.resolve('.'), { minCopies: 3, label: 'proving engine: ' })) ck(r.name, r.pass);
+      for (const r of ccE(MPE.files, MPE.dir, path.resolve('.'), { minCopies: 3, label: 'proving engine: ' })) ck(r.name, verdictOf(r.pass));
     } else ck('proving engine SKIP — pools unsupported', true);
     fs.rmSync(scr, { recursive: true, force: true });
   }
@@ -3215,16 +3215,16 @@ await (async () => {
       console.log(`    B-37f9: five kicks in one moment ⇒ held ${K.held}, re-runs armed ${K.trails} (fired: evaluated ${K.trailEvaluated}); a tick-form pass 3 s after an evaluation ⇒ held ${K.tickHeld}, evaluated ${K.tickEvaluated}; forced ⇒ held ${K.forcedHeld}`);
       ck('B-37f9: five per-record kicks in one moment ⇒ ONE evaluation and FOUR held (a held kick stamps nothing, decides nothing), ONE re-run armed',
         K.s1 > 0 && K.s2 === K.back && K.held === 4 && K.trails === 1);
-      ck('B-37f9: the armed re-run, ten seconds on, EVALUATES the pool and arms no other (no record\'s decision is lost)', K.trailFired && K.trailEvaluated && K.trailsAfter === 0);
+      ck('B-37f9: the armed re-run, ten seconds on, EVALUATES the pool and arms no other (no record\'s decision is lost)', gateOf(K.trailFired) && gateOf(K.trailEvaluated) && K.trailsAfter === 0);
       ck('B-37f9: an un-forced pass that OWES its decision (not a kick) is NEVER held by the kicks\' gate, 3 s after an evaluation; a forced pass is never held',
-        K.tickHeld === 0 && K.tickEvaluated && K.forcedHeld === 0 && K.forcedEvaluated);
+        K.tickHeld === 0 && gateOf(K.tickEvaluated) && K.forcedHeld === 0 && verdictOf(K.forcedEvaluated));
       const { mutantCopies } = await import('./mutant-copy.mjs');
       const M37 = mutantCopies('pool-gate-37f9', path.resolve('.'));
       const ENG = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
       const STAMP = "    if (!only) _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not); B-f4a1 cure: a run that decided ONE conversation (a stop) does not close the pool's gate — the whole runs stay bounded by the gate and the tick\n";   // B-f4a1 cure: a stop's one-conversation run does not stamp (the line's `if (!only)`)
       const GATE = "    if (kick && !evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {\n";
       const okAnchor = ENG.split(STAMP).length === 2 && ENG.split(GATE).length === 2;
-      ck('ANCHOR: the kicks\' stamp and the kicks\' gate, each spelled once (a missing anchor builds no control: RED by name)', okAnchor);
+      ck('ANCHOR: the kicks\' stamp and the kicks\' gate, each spelled once (a missing anchor builds no control: RED by name)', verdictOf(okAnchor));
       // A COMPACTION'S END owes its ask (the free move window closes at the next request-out): never held by the kicks' gate
       const compactAsk = async (engine) => {
         const g = world({ engine });
@@ -3241,12 +3241,12 @@ await (async () => {
         return r;
       };
       const C = await compactAsk(engMod);
-      ck('B-37f9: a compaction\'s end, 3 s after the tick evaluated, ASKS the pool at once — not held (the release\'s road)', !!C && C.compacted && C.held === 0 && C.at > C.back, C);
-      ck('WIRING: the armed timer runs the engine\'s re-run seam (poolKickRerun), the one the leg above runs', ENG.includes('        const tm = setTimeout(() => poolKickRerun(poolId), wait + 50);\n'));
+      ck('B-37f9: a compaction\'s end, 3 s after the tick evaluated, ASKS the pool at once — not held (the release\'s road)', !!C && gateOf(C.compacted) && C.held === 0 && C.at > C.back, C);
+      ck('WIRING: the armed timer runs the engine\'s re-run seam (poolKickRerun), the one the leg above runs', verdictOf(ENG.includes('        const tm = setTimeout(() => poolKickRerun(poolId), wait + 50);\n')));
       const GUARD = '    if (resetCreditPendingFor(currentId, now)) return;\n';
-      ck('ANCHOR (主开发\'s reading of 2438a6df7): the kicks\' stamp sits right AFTER the pool\'s last guard, and it is the ONLY stamp — no stamp before the guards', ENG.includes(GUARD + STAMP) && ENG.split('_poolEvalAt.set(').length === 2);
+      ck('ANCHOR (主开发\'s reading of 2438a6df7): the kicks\' stamp sits right AFTER the pool\'s last guard, and it is the ONLY stamp — no stamp before the guards', gateOf(ENG.includes(GUARD + STAMP)) && ENG.split('_poolEvalAt.set(').length === 2);
       ck('WIRING: a person\'s reset-credit press asks the pool as an OWED ask — both after the credit landed and after its re-read probe',
-        ENG.includes('    else kickPoolEval(userAttempt ? { kick: false } : undefined);') && ENG.includes('const ask = userAttempt ? { kick: false } : undefined; Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(ask), () => kickPoolEval(ask));'));
+        gateOf(ENG.includes('    else kickPoolEval(userAttempt ? { kick: false } : undefined);')) && verdictOf(ENG.includes('const ask = userAttempt ? { kick: false } : undefined; Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(ask), () => kickPoolEval(ask));')));
       // THE FOLLOW-UP: the owed ask is never DROPPED by the hub-wide 5 s throttle — it passes it, and a pass already scheduled
       // (a usage record in the same chunk) runs un-kicked
       const throttled = async (engine, sameChunk) => {
@@ -3300,7 +3300,7 @@ await (async () => {
       ck('ANCHOR: the compaction\'s owed ask, spelled once', ENG.split(ASK).length === 2);
       if (ENG.split(ASK).length === 2) {
         const CM = await compactAsk(M37.load('src/server/usage-pool-engine.js', editAnchor(ENG, ASK, '  kickPoolEval();\n', "src/server/usage-pool-engine.js"), 'compaction-kicks'));
-        ck('MUTANT RED: the compaction\'s ask as a KICK ⇒ the tick\'s evaluation 3 s earlier holds it — the free window can close unasked', !!CM && CM.compacted && CM.held === 1 && CM.at === CM.back, CM);
+        ck('MUTANT RED: the compaction\'s ask as a KICK ⇒ the tick\'s evaluation 3 s earlier holds it — the free window can close unasked', !!CM && gateOf(CM.compacted) && CM.held === 1 && CM.at === CM.back, CM);
       }
       if (okAnchor) {
         const KO = kicks(M37.load('src/server/usage-pool-engine.js', editAnchor(ENG, STAMP, '', "src/server/usage-pool-engine.js"), 'stamp-gone'));
@@ -3330,13 +3330,13 @@ await (async () => {
   ck('LAPSED: a lapsed member is NEVER a candidate — the exhausted member escapes to C, not to the lapsed B', d1?.to === 'c' && d1?.reason === 'exhausted');
   const d2 = run(caches, { readLogin: lapsedOf('b', 'c'), explain: true });
   ck('LAPSED: every other member lapsed ⇒ its own reason `all-lapsed`, both NAMED in lapsedBlocked (never a silently short list)',
-    d2 && d2.to === null && d2.reason === 'all-lapsed' && JSON.stringify((d2.lapsedBlocked || []).map((m) => m.name)) === '["B","C"]' && d2.lapsedBlocked[0].since === T0 && !d2.loginBlocked);
+    gateOf(d2) && d2.to === null && d2.reason === 'all-lapsed' && JSON.stringify((d2.lapsedBlocked || []).map((m) => m.name)) === '["B","C"]' && d2.lapsedBlocked[0].since === T0 && !d2.loginBlocked);
   const n2 = poolBlockedNotice(d2, { poolName: '全部', currentName: 'A' });
   ck('LAPSED: the blocked notice SAYS it — the inactive subscriptions by name + the Re-check way back, never "out of quota" or "re-login"',
-    /no member can take it — the other members' subscriptions are inactive \(B, C\)/.test(n2) && /Re-check it in Manage Agents/.test(n2) && !/out of quota|re-login/i.test(n2));
+    gateOf(/no member can take it — the other members' subscriptions are inactive \(B, C\)/.test(n2)) && gateOf(/Re-check it in Manage Agents/.test(n2)) && !/out of quota|re-login/i.test(n2));
   const d2b = run({ a: acct(0.98, 12 * H), b: acct(0.0, 12 * H), c: acct(0.99, 6 * D) }, { readLogin: lapsedOf('b'), explain: true });
   ck('LAPSED: a quota-emptied list stays a quota sentence and names the lapsed member BESIDE it (no-members + lapsedBlocked)',
-    d2b && d2b.reason === 'no-members' && (d2b.lapsedBlocked || []).length === 1 && /Skipped because their subscription is inactive: B\./.test(poolBlockedNotice(d2b, { poolName: 'P', currentName: 'A' })));
+    gateOf(d2b) && d2b.reason === 'no-members' && (d2b.lapsedBlocked || []).length === 1 && verdictOf(/Skipped because their subscription is inactive: B\./.test(poolBlockedNotice(d2b, { poolName: 'P', currentName: 'A' }))));
   // a conversation currently ON the lapsed member
   const onA = (cA, opts = {}) => run({ a: cA, b: acct(0.6, 3 * D), c: acct(0.5, 6 * D) }, { readLogin: lapsedOf('a'), ...opts });
   const e1 = onA(acct(0.1, 3 * D));
@@ -3348,22 +3348,22 @@ await (async () => {
   ck('LAPSED: a lapse is named apart from a login — a dead login still says login-expired', run({ a: acct(0.1, 3 * D), b: acct(0.6, 3 * D) }, { readLogin: (id) => (id === 'a' ? { state: 'expired' } : { state: 'live' }) })?.reason === 'login-expired');
   const e3 = decidePoolSwitch({ currentId: 'a', members: members.slice(0, 2), readCache: (id) => ({ a: acct(0.1, 3 * D), b: acct(0.99, 3 * D) })[id] ?? null, nowSec: NOW, readLogin: lapsedOf('a'), explain: true });
   ck('LAPSED: on it with nowhere to go ⇒ the notice names the CURRENT member\'s inactive subscription (fromLapsed), not a quota bucket',
-    e3 && e3.to === null && e3.fromLapsed && e3.fromLapsed.since === T0 && /A's subscription is inactive — no member can take over\./.test(poolBlockedNotice(e3, { poolName: 'P', currentName: 'A' })));
+    gateOf(e3) && e3.to === null && gateOf(e3.fromLapsed) && e3.fromLapsed.since === T0 && verdictOf(/A's subscription is inactive — no member can take over\./.test(poolBlockedNotice(e3, { poolName: 'P', currentName: 'A' }))));
   // ranking (the auth-failure eviction's target list) and the manual pin
   const rk = L.rankPoolMembers({ members, readCache: (id) => caches[id], nowSec: NOW, readLogin: lapsedOf('b') }).map((r) => r.id);
-  ck('LAPSED: rankPoolMembers never ranks a lapsed member (its stale cache would win)', !rk.includes('b') && rk.includes('c') && L.rankPoolMembers({ members, readCache: (id) => caches[id], nowSec: NOW }).map((r) => r.id).includes('b'));
+  ck('LAPSED: rankPoolMembers never ranks a lapsed member (its stale cache would win)', !rk.includes('b') && gateOf(rk.includes('c')) && verdictOf(L.rankPoolMembers({ members, readCache: (id) => caches[id], nowSec: NOW }).map((r) => r.id).includes('b')));
   const pinOpts = { members, readCache: (id) => ({ a: acct(0.5, 3 * D), b: acct(0.1, 3 * D), c: acct(0.5, 6 * D) })[id], nowSec: NOW };
   const p1 = L.decidePinnedPlacement({ ...pinOpts, pin: 'b', currentId: 'a', readLogin: lapsedOf('b') });
-  ck('LAPSED: a conversation PINNED to a lapsed member is not moved onto it — pinWhy pin-lapsed, the automatic rules keep it', p1 && p1.to !== 'b' && p1.pinWhy === 'pin-lapsed');
+  ck('LAPSED: a conversation PINNED to a lapsed member is not moved onto it — pinWhy pin-lapsed, the automatic rules keep it', gateOf(p1) && p1.to !== 'b' && p1.pinWhy === 'pin-lapsed');
   const p2 = L.decidePinnedPlacement({ ...pinOpts, pin: 'b', currentId: 'a', readLogin: lapsedOf('a') });
-  ck('LAPSED: a pinned conversation running on a lapsed member returns to its pin as an ESCAPE (band hard, escape subscription-lapsed)', p2 && p2.to === 'b' && p2.reason === 'pin-return' && p2.band === 'hard' && p2.escape === 'subscription-lapsed');
+  ck('LAPSED: a pinned conversation running on a lapsed member returns to its pin as an ESCAPE (band hard, escape subscription-lapsed)', gateOf(p2) && p2.to === 'b' && p2.reason === 'pin-return' && p2.band === 'hard' && p2.escape === 'subscription-lapsed');
   // the evidence rule and the episode rule
   // THE EVIDENCE (verify r1 ②⑦): a reading PRODUCED after the failure — never a write time
   const pre = { fiveHour: { utilization: 0.4, resetsAt: 1791000 }, sevenDay: { utilization: 0.6, resetsAt: 1791500 }, scopedWeekly: [{ name: 'Fable', utilization: 0.3, resetsAt: 1791500 }] };
   const FP = L.readingFingerprint(pre), lapseFp = { ...lapse, fp: FP };
   const moved = L.readingFingerprint({ ...pre, fiveHour: { utilization: 0.01, resetsAt: 1795000 } });
   ck('LAPSED: readingFingerprint — the numbers only (a re-stamp with a new fetchedAt/source keeps it; a moved bucket changes it; no buckets ⇒ "")',
-    FP && L.readingFingerprint({ ...pre, fetchedAt: 9, source: 'passive' }) === FP && moved !== FP && L.readingFingerprint({ fetchedAt: 5 }) === '' && L.readingFingerprint(null) === '');
+    gateOf(FP) && L.readingFingerprint({ ...pre, fetchedAt: 9, source: 'passive' }) === FP && moved !== FP && L.readingFingerprint({ fetchedAt: 5 }) === '' && L.readingFingerprint(null) === '');
   ck('LAPSED: a statusline RE-STAMP of the pre-lapse numbers after the failure is NOT evidence (verify r1 ②⑦ — the repro)', L.lapseCleared(lapseFp, { at: T0 + 9e6, source: 'passive', fp: FP }) === false);
   ck('LAPSED: evidence = numbers that MOVED / a rate_limit_event / a verified panel — each only AFTER the last failure',
     L.lapseCleared(lapseFp, { at: T0 + 9e6, source: 'passive', fp: moved }) === true && L.lapseCleared(lapseFp, { at: T0 + 9e6, source: 'rate-limit-event', fp: FP }) === true
@@ -3413,7 +3413,7 @@ await (async () => {
   const cellName = (c) => `${c.prov} provider × ${c.mode} × model ${c.servable ? 'servable' : 'NOT servable'} × readings ${c.readings ? 'present' : 'absent'}`;
   const cellWant = (c) => (c.prov === 'same' ? 'moves to it (own provider: serves by construction), no cross'
     : !c.servable ? 'nothing moves, it is named in modelBlocked' : c.mode === 'never' ? 'nothing moves — the OFFER (crossOffer, the model re-resolved: deepseek-chat)' : 'the COLD move (switchMode cold, cross.toModel deepseek-chat)');
-  for (const c of CELLS) { const d = L.decidePoolSwitch(cellOpts(c)); ck(`PROVIDER table: ${cellName(c)} ⇒ ${cellWant(c)}`, expectCell(c, d), J(d)); }
+  for (const c of CELLS) { const d = L.decidePoolSwitch(cellOpts(c)); ck(`PROVIDER table: ${cellName(c)} ⇒ ${cellWant(c)}`, verdictOf(expectCell(c, d)), J(d)); }
 
   // A ONE-PROVIDER POOL DECIDES EXACTLY AS BEFORE (the sweep): every shape below, with and without the provider inputs
   const caches = { dead: spentC, soft: softC, live: liveC, none: null, late: { ...liveC, sevenDay: { utilization: 0.3, resetsAt: NOW + 1 * D } } };
@@ -3450,7 +3450,7 @@ await (async () => {
   const own = L.decidePoolSwitch({ currentId: 'c', members: three, readCache: (id) => (id === 'c' ? spentC : liveC), nowSec: NOW, hot: true, explain: true, providerOf: pv3, conversationModel: 'sonnet', crossProvider: 'allow' });
   ck('PROVIDER: a member of the OWN provider takes it even under allow — another provider only when none can', own.to === 's' && !own.cross, J(own));
   const order2 = L.decidePoolSwitch({ currentId: 'c', members: [{ id: 'c', name: 'Cur' }, { id: 'f', name: 'Fb' }, { id: 'm', name: 'Mem' }], readCache: (id) => (id === 'c' ? spentC : id === 'm' ? { ...liveC, sevenDay: { utilization: 0.9, resetsAt: NOW + 3 * D } } : null), nowSec: NOW, hot: true, explain: true, providerOf: (id) => (id === 'c' ? P : id === 'f' ? QFB : Q), conversationModel: 'sonnet', crossProvider: 'allow' });
-  ck('PROVIDER: under allow a member WITH readings goes before a fallback-only one (whatever its remaining)', order2.to === 'm' && order2.cross && !order2.cross.fallbackOnly, J(order2));
+  ck('PROVIDER: under allow a member WITH readings goes before a fallback-only one (whatever its remaining)', order2.to === 'm' && gateOf(order2.cross) && !order2.cross.fallbackOnly, J(order2));
   const soft = L.decidePoolSwitch({ currentId: 'c', members: mem, readCache: (id) => (id === 'c' ? softC : liveC), nowSec: NOW, hot: true, explain: true, providerOf: (id) => (id === 'c' ? P : Q), conversationModel: 'sonnet', crossProvider: 'allow' });
   ck('PROVIDER: the SOFT band (still usable) never moves to another provider, even under allow — nor offers it', soft.to === null && !soft.crossOffer, J(soft));
   const edf = L.decidePoolSwitch({ currentId: 'c', members: mem, readCache: (id) => (id === 'c' ? liveC : caches.late), nowSec: NOW, hot: true, proactive: true, explain: true, providerOf: (id) => (id === 'c' ? P : Q), conversationModel: 'sonnet', crossProvider: 'allow' });
@@ -3468,15 +3468,15 @@ await (async () => {
   const pinA = (model, explicit = true) => L.decidePinnedPlacement({ pin: 'm', currentId: 'c', members: mem, readCache: (id) => (id === 'c' ? liveC : liveC), nowSec: NOW, hot: true, explicit, providerOf: (id) => (id === 'c' ? P : Q), conversationModel: model });
   const pinNo = pinA('gpt-5'), pinYes = pinA('opus');
   ck('pin: a pin of another provider that has NO model for this conversation ⇒ refused by name (pin-model-not-served), the automatic rules keep it', pinNo.pinWhy === 'pin-model-not-served' && pinNo.reason === 'pin-exhausted', J(pinNo));
-  ck('pin: …one that serves it ⇒ the owner\'s move, COLD, the model re-resolved (opus → deepseek-reasoner)', pinYes.to === 'm' && pinYes.reason === 'pin' && pinYes.switchMode === 'cold' && pinYes.cross && pinYes.cross.toModel === 'deepseek-reasoner', J(pinYes));
+  ck('pin: …one that serves it ⇒ the owner\'s move, COLD, the model re-resolved (opus → deepseek-reasoner)', pinYes.to === 'm' && pinYes.reason === 'pin' && pinYes.switchMode === 'cold' && gateOf(pinYes.cross) && pinYes.cross.toModel === 'deepseek-reasoner', J(pinYes));
   // the words
   const offerD = L.decidePoolSwitch(cellOpts({ prov: 'other', mode: 'never', servable: true, readings: true }));
   const words = L.poolBlockedNotice(offerD, { poolName: 'P', currentName: 'Cur' });
   ck('poolBlockedNotice: the OFFER is said — who, which provider, as which model, that it restarts and waits for the owner in For you',
-    words.includes('Mem (DeepSeek) can take it as deepseek-chat — a move to another provider restarts the conversation and waits for your OK in For you.'), words);
+    verdictOf(words.includes('Mem (DeepSeek) can take it as deepseek-chat — a move to another provider restarts the conversation and waits for your OK in For you.')), words);
   const mbD = L.decidePoolSwitch(cellOpts({ prov: 'other', mode: 'never', servable: false, readings: true }));
   const mbWords = L.poolBlockedNotice(mbD, { poolName: 'P', currentName: 'Cur' });
-  ck('poolBlockedNotice: a member that cannot serve the model is NAMED with its provider (never a silently short list)', mbWords.includes('Cannot serve gemini-3-pro-preview: Mem (DeepSeek) — their provider has no such model.'), mbWords);
+  ck('poolBlockedNotice: a member that cannot serve the model is NAMED with its provider (never a silently short list)', verdictOf(mbWords.includes('Cannot serve gemini-3-pro-preview: Mem (DeepSeek) — their provider has no such model.')), mbWords);
 
   // RED MUTANTS (patched copies in a scratch dir — never the tree): each rule is what makes its cells pass
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
@@ -3489,14 +3489,14 @@ await (async () => {
   if (src.split(A1).length === 2) {
     const m1 = MP.load('src/account-pool-auto.js', editAnchor(src, A1, "if (provOf && hardDead && !placing && crossRows.length) { // PATCHED: never ignored", "src/account-pool-auto.js"), 'never-ignored');
     const bad = CELLS.filter((c) => c.prov === 'other' && c.mode === 'never' && c.servable).map((c) => m1.decidePoolSwitch(cellOpts(c)));
-    ck('mutant ① RED: a member of ANOTHER provider chosen under never ⇒ the never-cells fail (the copy moves the conversation)', bad.length === 2 && bad.every((d) => d.to === 'm' && !expectCell({ prov: 'other', mode: 'never', servable: true, readings: true }, d)), J(bad));
+    ck('mutant ① RED: a member of ANOTHER provider chosen under never ⇒ the never-cells fail (the copy moves the conversation)', bad.length === 2 && verdictOf(bad.every((d) => d.to === 'm' && !expectCell({ prov: 'other', mode: 'never', servable: true, readings: true }, d))), J(bad));
   }
   if (src.split(A2).length === 2) {
     const m2 = MP.load('src/account-pool-auto.js', editAnchor(src, A2, 'if (false && other && toModel == null) { modelBlocked.push(', "src/account-pool-auto.js"), 'model-ignored');
     const bad = CELLS.filter((c) => c.prov === 'other' && !c.servable).map((c) => [c, m2.decidePoolSwitch(cellOpts(c))]);
-    ck('mutant ② RED: a member that CANNOT serve the model enters the candidates ⇒ every not-servable cell fails (moved or offered, model null)', bad.length === 4 && bad.every(([c, d]) => !expectCell(c, d) && (d.to === 'm' || (d.crossOffer && d.crossOffer.id === 'm'))), J(bad.map((x) => x[1])));
+    ck('mutant ② RED: a member that CANNOT serve the model enters the candidates ⇒ every not-servable cell fails (moved or offered, model null)', bad.length === 4 && verdictOf(bad.every(([c, d]) => !expectCell(c, d) && (d.to === 'm' || (d.crossOffer && d.crossOffer.id === 'm')))), J(bad.map((x) => x[1])));
   }
-  for (const r of copiesCensus(MP.files, MP.dir, path.resolve('.'), { minCopies: 2, label: 'provider mutants: ' })) ck(r.name, r.pass);
+  for (const r of copiesCensus(MP.files, MP.dir, path.resolve('.'), { minCopies: 2, label: 'provider mutants: ' })) ck(r.name, verdictOf(r.pass));
 
   // THE REAL ENGINE: a pool of A (its Claude subscription) + B (a DeepSeek row), the conversation on A, A spent
   const { AccountManager } = require(path.resolve('src/accounts.js'));
@@ -3555,23 +3555,23 @@ await (async () => {
       mA.find((m) => m.id === wn.A)?.provider?.label === 'Claude subscription' && mA.find((m) => m.id === wn.B)?.provider?.id === 'pv-deepseek', J(mA));
     wn.mk('s1');
     const pcf = wn.am.poolCurrentFor(wn.Pl, 's1', { withProvider: true });
-    ck('engine: poolCurrentFor answers the provider ({memberId, provider}); the plain answer is still the id', pcf && pcf.memberId === wn.A && pcf.provider.label === 'Claude subscription' && wn.am.poolCurrentFor(wn.Pl, 's1') === wn.A, J(pcf));
+    ck('engine: poolCurrentFor answers the provider ({memberId, provider}); the plain answer is still the id', gateOf(pcf) && pcf.memberId === wn.A && pcf.provider.label === 'Claude subscription' && wn.am.poolCurrentFor(wn.Pl, 's1') === wn.A, J(pcf));
     const l1 = wn.pass();
     ck('engine, never (the default): A spent and only DeepSeek could take it ⇒ NOTHING moves (no silent cross-provider move)', wn.on('s1') === 'A' && !wn.sent.length, wn.on('s1') + ' ' + l1.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 300));
     const card = wn.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
     ck('engine, never: ONE For-you card asks — «Moving "s1" to Member B (DeepSeek) needs your OK — it restarts the conversation and its model becomes deepseek-chat»',
-      wn.items.length === 1 && card && card.text === 'Moving "s1" to Member B (DeepSeek) needs your OK — it restarts the conversation and its model becomes deepseek-chat' && card.kind === 'action' && card.action.memberId === wn.B && card.i18n && card.i18n.text.params.model === 'deepseek-chat', J(wn.items));
+      wn.items.length === 1 && gateOf(card) && card.text === 'Moving "s1" to Member B (DeepSeek) needs your OK — it restarts the conversation and its model becomes deepseek-chat' && card.kind === 'action' && card.action.memberId === wn.B && gateOf(card.i18n) && card.i18n.text.params.model === 'deepseek-chat', J(wn.items));
     wn.pass();
     ck('engine, never: the next pass files no second card (one per conversation and member)', wn.items.length === 1, J(wn.items.map((x) => x.id)));
     const none = wn.eng.answerCrossProviderAsk(card.action.askId, { answer: 'once' });
-    ck('engine: Allow once with NO open page to restart it ⇒ nothing moves (a re-point alone would switch provider silently) — said: no-client', none.ok && none.moved === false && none.why === 'no-client' && wn.on('s1') === 'A', J(none));
+    ck('engine: Allow once with NO open page to restart it ⇒ nothing moves (a re-point alone would switch provider silently) — said: no-client', gateOf(none.ok) && none.moved === false && none.why === 'no-client' && wn.on('s1') === 'A', J(none));
     wn.client(); wn.pass();
     const card2 = wn.items.filter((x) => x.action && x.action.type === 'pool-cross-provider' && x.status === 'open');
     ck('engine: …the card is asked again on the next pass', card2.length === 1, J(wn.items));
     const ok1 = wn.quiet(() => wn.eng.answerCrossProviderAsk(card2[0].action.askId, { answer: 'once' }));
     ck('engine: Allow once ⇒ the COLD move: the link → B, ONE restart request naming the re-resolved model (deepseek-chat), the item resolved',
-      ok1.ok && ok1.moved === true && wn.on('s1') === 'B' && wn.sent.length === 1 && wn.sent[0].type === 'pool-auto-switched' && wn.sent[0].affected[0].model === 'deepseek-chat' && card2[0].status === 'done', J({ ok1, sent: wn.sent }));
-    ck('engine: …the toast says who, both providers and both models', wn.notices.some((n) => n.t === 'Pool "Pool": conversation "s1" — switched from Member A (Claude subscription) to Member B (DeepSeek), model sonnet → deepseek-chat. Restarting the conversation to apply it.'), J(wn.notices.map((n) => n.t)));
+      gateOf(ok1.ok) && ok1.moved === true && wn.on('s1') === 'B' && wn.sent.length === 1 && wn.sent[0].type === 'pool-auto-switched' && wn.sent[0].affected[0].model === 'deepseek-chat' && card2[0].status === 'done', J({ ok1, sent: wn.sent }));
+    ck('engine: …the toast says who, both providers and both models', verdictOf(wn.notices.some((n) => n.t === 'Pool "Pool": conversation "s1" — switched from Member A (Claude subscription) to Member B (DeepSeek), model sonnet → deepseek-chat. Restarting the conversation to apply it.')), J(wn.notices.map((n) => n.t)));
     ck('engine: …the pool setting is untouched by Allow once (still never)', wn.am.get(wn.Pl).crossProvider === undefined);
     ck('engine: …ONE line is owed to the RESUMED conversation (the restart rebuilds the chat)', wn.eng._crossLinesOwed.get('cid-s1')?.text === 'Switched from Member A (Claude subscription) to Member B (DeepSeek) — model sonnet → deepseek-chat', J([...wn.eng._crossLinesOwed]));
     // THE COLD MOVE LANDS (row B-d578, the pool's fallback unit (a), ruling r1516 — was faked here by a link set by hand): the
@@ -3583,22 +3583,22 @@ await (async () => {
     let seenOpts = [];
     const chooseVia = (data) => new Function('poolChooser', 'data', 'accounts', 'return ' + arrowA)((pid, o) => { seenOpts.push(o); return wn.eng.poolChooserForModel(pid, o); }, data, wn.am);
     const spawnVia = (key, data) => { seenOpts = []; return wn.quiet(() => wn.am.resolveForSpawn(wn.Pl, 'claude', { sessionKey: key, chooseMember: chooseVia(data) })); };
-    ck('engine: …ws-create\'s OWN chooser line is read and names the resume (the leg drives that line, not a copy of it)', !!arrowA && /resumeOf: String\(data\.resumeId\)/.test(arrowA), arrowA);
-    ck('engine: …the carry names B for this pool under the backend id (cid-s1), from the server id it left (s1)', (() => { const c = wn.eng._crossPlacementOwed.get('cid-s1'); return !!c && c.poolId === wn.Pl && c.to === wn.B && c.fromSid === 's1'; })(), J([...wn.eng._crossPlacementOwed]));
+    ck('engine: …ws-create\'s OWN chooser line is read and names the resume (the leg drives that line, not a copy of it)', !!arrowA && verdictOf(/resumeOf: String\(data\.resumeId\)/.test(arrowA)), arrowA);
+    ck('engine: …the carry names B for this pool under the backend id (cid-s1), from the server id it left (s1)', verdictOf((() => { const c = wn.eng._crossPlacementOwed.get('cid-s1'); return !!c && c.poolId === wn.Pl && c.to === wn.B && c.fromSid === 's1'; })()), J([...wn.eng._crossPlacementOwed]));
     wn.sessions.delete('s1'); const rs = wn.mk('s1b', 'cid-s1');
     const ctl = spawnVia('s1c', { model: 'deepseek-chat' });
-    ck('engine: CONTROL — a create naming no resume (the release\'s road) is placed back on Member A by the rules under never: the move would not land', ctl && ctl.poolTarget === wn.A && seenOpts.every((o) => !('resumeOf' in o)), J(ctl && ctl.poolTarget));
+    ck('engine: CONTROL — a create naming no resume (the release\'s road) is placed back on Member A by the rules under never: the move would not land', gateOf(ctl) && ctl.poolTarget === wn.A && verdictOf(seenOpts.every((o) => !('resumeOf' in o))), J(ctl && ctl.poolTarget));
     const fk = spawnVia('s1f', { model: 'deepseek-chat', resumeId: 'cid-s1', fork: true });
-    ck('engine: …a FORK of it (ws-create\'s line with data.fork) hands the chooser no resumeOf and starts by the rules (Member A)', fk && fk.poolTarget === wn.A && seenOpts.length > 0 && seenOpts.every((o) => !('resumeOf' in o)), J({ target: fk && fk.poolTarget, opts: seenOpts }));
+    ck('engine: …a FORK of it (ws-create\'s line with data.fork) hands the chooser no resumeOf and starts by the rules (Member A)', gateOf(fk) && fk.poolTarget === wn.A && seenOpts.length > 0 && verdictOf(seenOpts.every((o) => !('resumeOf' in o))), J({ target: fk && fk.poolTarget, opts: seenOpts }));
     const sp = spawnVia('s1b', { model: 'deepseek-chat', resumeId: 'cid-s1' });
-    ck('engine: …the RESUME (a new server id, s1b, same backend id) starts on Member B — ws-create\'s line names it, the real chooser places it, the spawn\'s own link', sp && sp.poolTarget === wn.B && sp.sessionLink === true && wn.on('s1b') === 'B' && seenOpts.some((o) => o.resumeOf === 'cid-s1'), J({ target: sp && sp.poolTarget, on: wn.on('s1b') }));
+    ck('engine: …the RESUME (a new server id, s1b, same backend id) starts on Member B — ws-create\'s line names it, the real chooser places it, the spawn\'s own link', gateOf(sp) && sp.poolTarget === wn.B && sp.sessionLink === true && wn.on('s1b') === 'B' && verdictOf(seenOpts.some((o) => o.resumeOf === 'cid-s1')), J({ target: sp && sp.poolTarget, on: wn.on('s1b') }));
     ck('engine: …the POOL\'s default (forDefault) is never placed by the carry', wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat', forDefault: true, resumeOf: 'cid-s1' }) !== wn.B);
     ck('engine: …another pool never reads this pool\'s carry', wn.eng.crossCarryFor('pool-other', 'cid-s1') === null && wn.eng.crossCarryFor(wn.Pl, 'cid-s1') === wn.B);
     wn.pass();
     ck('engine: …and it is fed once into the resumed conversation (same backend id, a new server id)', !wn.eng._crossLinesOwed.has('cid-s1') && !!rs, J([...wn.eng._crossLinesOwed]));
     // (4) the carry ends on a process that STARTED: s1b registered but has printed nothing since the move (its last output is the
     // world's 20 minutes ago) — the carry stays, so a retry after it died lands on B too
-    ck('engine: …a resumed process that has not printed since the move LEAVES the carry — its retry lands on B, not back on A', wn.eng._crossPlacementOwed.has('cid-s1') && (spawnVia('s1d', { model: 'deepseek-chat', resumeId: 'cid-s1' }) || {}).poolTarget === wn.B, J([...wn.eng._crossPlacementOwed]));
+    ck('engine: …a resumed process that has not printed since the move LEAVES the carry — its retry lands on B, not back on A', gateOf(wn.eng._crossPlacementOwed.has('cid-s1')) && (spawnVia('s1d', { model: 'deepseek-chat', resumeId: 'cid-s1' }) || {}).poolTarget === wn.B, J([...wn.eng._crossPlacementOwed]));
     rs._lastPtyDataAt = Date.now(); wn.pass();
     ck('engine: …once it has printed (its CLI started) the carry ends; the pass keeps it on B', !wn.eng._crossPlacementOwed.has('cid-s1') && wn.on('s1b') === 'B', J({ carry: [...wn.eng._crossPlacementOwed], on: wn.on('s1b') }));
     // (5) the half hour, the member no longer listed — each ends the carry: the resume is placed by the rules (A)
@@ -3609,7 +3609,7 @@ await (async () => {
       wn.eng._crossPlacementOwed.set('cid-gone', { poolId: wn.Pl, to: 'acct-not-listed', at, fromSid: 'x' });
       ck('engine: …a carry whose member the pool no longer lists is dropped at its read', wn.eng.crossCarryFor(wn.Pl, 'cid-gone') === null && !wn.eng._crossPlacementOwed.has('cid-gone'));
       wn.eng._crossPlacementOwed.set('cid-pool', { poolId: 'pool-other', to: wn.B, at, fromSid: 'x' });
-      ck('engine: …a carry of ANOTHER pool is not this pool\'s resume (the rules place it), and it is left for its own pool', wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat', resumeOf: 'cid-pool' }) === wn.A && wn.eng._crossPlacementOwed.has('cid-pool'));
+      ck('engine: …a carry of ANOTHER pool is not this pool\'s resume (the rules place it), and it is left for its own pool', wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat', resumeOf: 'cid-pool' }) === wn.A && verdictOf(wn.eng._crossPlacementOwed.has('cid-pool')));
       wn.eng._crossPlacementOwed.delete('cid-pool');
     }
     // (2) THE PERSON's LATER PIN WINS, and (3) THE MEMBER MUST STILL SERVE — each in a world of its own, after Allow once
@@ -3619,7 +3619,7 @@ await (async () => {
       const cleared = w.quiet(() => w.eng.setConversationPin('s5', null));
       const keptOnClear = w.eng._crossPlacementOwed.has('cid-s5');
       const pinned = w.quiet(() => w.eng.setConversationPin('s5', w.A));
-      ck('engine: THE LATER PIN WINS — after the move, pinning the conversation to another member ends the carry AND its owed line (clearing a pin does not)', moved && cleared.ok && keptOnClear && pinned.ok && !w.eng._crossPlacementOwed.has('cid-s5') && !w.eng._crossLinesOwed.has('cid-s5') && w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s5' }) !== w.B, J({ moved, keptOnClear, carry: [...w.eng._crossPlacementOwed] }));
+      ck('engine: THE LATER PIN WINS — after the move, pinning the conversation to another member ends the carry AND its owed line (clearing a pin does not)', gateOf(moved) && gateOf(cleared.ok) && gateOf(keptOnClear) && gateOf(pinned.ok) && !w.eng._crossPlacementOwed.has('cid-s5') && !w.eng._crossLinesOwed.has('cid-s5') && w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s5' }) !== w.B, J({ moved, keptOnClear, carry: [...w.eng._crossPlacementOwed] }));
     }
     {
       const { w, moved } = movedWorld('s6');
@@ -3628,7 +3628,7 @@ await (async () => {
       fsx.writeFileSync(cacheB, JSON.stringify({ fetchedAt: Date.now() - 1000, source: 'on-demand', fiveHour: { utilization: 1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 1, resetsAt: nowS + 3 * 86400 } }));
       const lines = []; const o = console.log; console.log = (...a) => lines.push(a.join(' '));
       let r6; try { r6 = w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s6' }); w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s6' }); } finally { console.log = o; }
-      ck('engine: THE MEMBER MUST STILL SERVE — B at its wall when the resume comes: the carry is dropped (and the line it owed), said ONCE (a second ask says nothing), the rules place the resume', moved && r6 !== w.B && !w.eng._crossPlacementOwed.has('cid-s6') && !w.eng._crossLinesOwed.has('cid-s6') && lines.filter((l) => /does not land on .* — it cannot serve now/.test(l)).length === 1, J({ moved, r6, lines: lines.filter((l) => /\[pool\]/.test(l)).slice(0, 3) }));
+      ck('engine: THE MEMBER MUST STILL SERVE — B at its wall when the resume comes: the carry is dropped (and the line it owed), said ONCE (a second ask says nothing), the rules place the resume', gateOf(moved) && r6 !== w.B && !w.eng._crossPlacementOwed.has('cid-s6') && !w.eng._crossLinesOwed.has('cid-s6') && lines.filter((l) => /does not land on .* — it cannot serve now/.test(l)).length === 1, J({ moved, r6, lines: lines.filter((l) => /\[pool\]/.test(l)).slice(0, 3) }));
     }
     // THE FAMILY (round wk9ee639n's must): the resume judges the moved-to member under the CONVERSATION's family — a spent scoped
     // cap of ANOTHER family (B's Fable week, the conversation on Sonnet) is no «cannot serve»: the carry stands, the resume lands on B.
@@ -3641,17 +3641,17 @@ await (async () => {
         return { moved, r: w.quiet(() => w.eng.poolChooserForModel(w.Pl, { model: 'claude-sonnet-5', hinted, resumeOf: 'cid-s8' })), w };
       };
       const f1 = famLeg(null);
-      ck('engine: THE FAMILY — the moved-to member\'s Fable week spent while the conversation runs Sonnet: it still serves, the carry stands and the resume lands on B', f1.moved && f1.r === f1.w.B && f1.w.eng._crossPlacementOwed.has('cid-s8'), J({ moved: f1.moved, r: f1.r }));
+      ck('engine: THE FAMILY — the moved-to member\'s Fable week spent while the conversation runs Sonnet: it still serves, the carry stands and the resume lands on B', gateOf(f1.moved) && f1.r === f1.w.B && verdictOf(f1.w.eng._crossPlacementOwed.has('cid-s8')), J({ moved: f1.moved, r: f1.r }));
       const { mutantCopies: mcF } = await import('./mutant-copy.mjs');
       const fsrc = fsx.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
       const { anchored: anchoredF } = await import('./scratch.mjs');
       const famCopy = anchoredF(fsrc, 'if (memberCanServe(poolId, to, null, null, Date.now(), hinted ? null : fam)) return to;', 'if (memberCanServe(poolId, to)) return to; /* PATCHED: no family */', 'the carry check without the family');
       const f2 = famLeg(mcF('carry-family', path.resolve('.')).load('src/server/usage-pool-engine.js', famCopy, 'no-family'));
-      ck('engine: CONTROL — the check with no family (as it stood) reads the other family\'s spent week as «cannot serve»: the resume goes back by the rules (red)', !!f2 && f2.moved && f2.r !== f2.w.B, J(f2 && { moved: f2.moved, r: f2.r }));
+      ck('engine: CONTROL — the check with no family (as it stood) reads the other family\'s spent week as «cannot serve»: the resume goes back by the rules (red)', !!f2 && gateOf(f2.moved) && f2.r !== f2.w.B, J(f2 && { moved: f2.moved, r: f2.r }));
       // (r2238) a HINTED family (a resume naming no model — the instance default stands in) is no fact about the conversation:
       // the carry is judged under EVERY bucket then — the other family's spent week stops it, the rules place the resume
       const fh = famLeg(null, true);
-      ck('engine: …the same scene with the family only HINTED (a resume naming no model): judged under every bucket, the carry is dropped and the rules place it', fh.moved && fh.r !== fh.w.B && !fh.w.eng._crossPlacementOwed.has('cid-s8'), J({ moved: fh.moved, r: fh.r }));
+      ck('engine: …the same scene with the family only HINTED (a resume naming no model): judged under every bucket, the carry is dropped and the rules place it', gateOf(fh.moved) && fh.r !== fh.w.B && !fh.w.eng._crossPlacementOwed.has('cid-s8'), J({ moved: fh.moved, r: fh.r }));
     }
     // POOL UNIT (b) (row B-d578, ruling r1516 — before any provider id reaches a decision): a THIRD-PARTY PROVIDER's record as a
     // member names ITS OWN provider (accounts.memberProviderOf → providerRecordOf), and one the store does not hold names an
@@ -3672,7 +3672,7 @@ await (async () => {
       const { AccountManager: AM0 } = mcB('pool-b-accounts', path.resolve('.')).load('src/accounts.js', anchoredB(asrc, '    if (!x) return this._providerMemberOf(id);', '    if (!x) return null;', 'the release: a provider id is no account'), 'release-member-provider');   // stale-pins: kept (the copy WRITES the release's line)
       const am0 = new AM0({ dataDir: fsx.mkdtempSync(path.join(scr, 'pool-b-')) }); am0.setProviderLookup(look(w));
       const p0 = am0.memberProviderOf(R.id);
-      ck('engine: CONTROL — the release\'s accounts answer null for the provider\'s id, and the pool\'s reader agrees it with ITS OWN provider (a hot, unasked move): red', p0 === null && sameProvider(p0, own), J({ p0 }));
+      ck('engine: CONTROL — the release\'s accounts answer null for the provider\'s id, and the pool\'s reader agrees it with ITS OWN provider (a hot, unasked move): red', p0 === null && verdictOf(sameProvider(p0, own)), J({ p0 }));
     }
     // POOL UNIT (c) (row B-d578, ruling r1516): a conversation held by a PROVIDER member bills THAT provider — its usage is
     // attributed to the provider's id (priced as the provider's: its own row, or «unknown»), never the credential link's member.
@@ -3689,7 +3689,7 @@ await (async () => {
       const held = w.am.poolMemberOfSession(w.Pl, s9, 's9'), r9 = attr(w.am, 'cid-s9'), r10 = attr(w.am, 'cid-s10');
       ck('engine: POOL UNIT (c) — a conversation held by a provider member IS that member (origin «provider»), and its usage is attributed to the provider, the pool kept as its tag', held.id === R.id && held.origin === 'provider' && !!r9 && r9.acct === R.id && r9.pool === w.Pl, J({ held, r9 }));
       ck('engine: …a conversation with no provider stamp is attributed as before (its link: Member A)', !!r10 && r10.acct === w.A && r10.pool === w.Pl, J(r10));
-      ck('engine: …the spawn stamps it: ws-create holds a pooled spawn that landed on a provider (its poolTarget), whatever the hot switch', /if \(pa && pa\.type === 'pooled' && spawnAccount\.kind === 'provider' && spawnAccount\.poolTarget\) heldPoolMember = spawnAccount\.poolTarget;/.test(fsx.readFileSync(path.resolve('src/ws-create.js'), 'utf8')));
+      ck('engine: …the spawn stamps it: ws-create holds a pooled spawn that landed on a provider (its poolTarget), whatever the hot switch', verdictOf(/if \(pa && pa\.type === 'pooled' && spawnAccount\.kind === 'provider' && spawnAccount\.poolTarget\) heldPoolMember = spawnAccount\.poolTarget;/.test(fsx.readFileSync(path.resolve('src/ws-create.js'), 'utf8'))));
       const { mutantCopies: mcC } = await import('./mutant-copy.mjs');
       const { anchored: anchoredC } = await import('./scratch.mjs');
       const csrc = fsx.readFileSync(path.resolve('src/accounts.js'), 'utf8');
@@ -3703,17 +3703,17 @@ await (async () => {
     const c3 = wd.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
     const dn = wd.eng.answerCrossProviderAsk(c3.action.askId, { answer: 'deny' });
     wd.pass(); wd.pass();
-    ck('engine: Deny ⇒ nothing moves, the item resolved, no new card on the next passes (quiet 6 h)', dn.ok && dn.state === 'denied' && wd.on('s2') === 'A' && wd.items.length === 1 && c3.status === 'done' && !wd.sent.length, J(wd.items));
+    ck('engine: Deny ⇒ nothing moves, the item resolved, no new card on the next passes (quiet 6 h)', gateOf(dn.ok) && dn.state === 'denied' && wd.on('s2') === 'A' && wd.items.length === 1 && c3.status === 'done' && !wd.sent.length, J(wd.items));
     ck('engine: an answer to a request that is gone ⇒ ask_unknown; a bad answer ⇒ bad_args', wd.eng.answerCrossProviderAsk('nope', { answer: 'once' }).code === 'ask_unknown');
     // Always ⇒ the pool's setting, and later walls move by themselves
     const wa = pworld(); wa.client(); wa.mk('s3'); wa.pass();
     const c4 = wa.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
     const al = wa.quiet(() => wa.eng.answerCrossProviderAsk(c4.action.askId, { answer: 'always' }));
-    ck('engine: Always for this pool ⇒ the pool\'s crossProvider = allow AND this conversation moves (cold, deepseek-chat)', al.ok && al.state === 'always' && al.moved && wa.am.get(wa.Pl).crossProvider === 'allow' && wa.on('s3') === 'B' && wa.sent[0].affected[0].model === 'deepseek-chat', J(al));
+    ck('engine: Always for this pool ⇒ the pool\'s crossProvider = allow AND this conversation moves (cold, deepseek-chat)', gateOf(al.ok) && al.state === 'always' && gateOf(al.moved) && wa.am.get(wa.Pl).crossProvider === 'allow' && wa.on('s3') === 'B' && wa.sent[0].affected[0].model === 'deepseek-chat', J(al));
     // allow from the start: the pass itself makes the cold move, no card
     const wl = pworld({ cross: 'allow' }); wl.client(); wl.mk('s4'); wl.quiet(() => wl.pass());
-    ck('engine, allow: the pass makes the COLD move itself — no card; the restart names deepseek-chat; the line is owed', wl.on('s4') === 'B' && !wl.items.length && wl.sent.length === 1 && wl.sent[0].affected[0].model === 'deepseek-chat' && wl.eng._crossLinesOwed.has('cid-s4'), J({ on: wl.on('s4'), items: wl.items, sent: wl.sent }));
-    ck('engine: list() names the setting and the current member\'s provider', (() => { const row = wl.am.list().accounts.find((x) => x.id === wl.Pl); return row && row.crossProvider === 'allow' && row.currentProvider && row.currentProvider.label === 'Claude subscription'; })());
+    ck('engine, allow: the pass makes the COLD move itself — no card; the restart names deepseek-chat; the line is owed', wl.on('s4') === 'B' && !wl.items.length && wl.sent.length === 1 && wl.sent[0].affected[0].model === 'deepseek-chat' && verdictOf(wl.eng._crossLinesOwed.has('cid-s4')), J({ on: wl.on('s4'), items: wl.items, sent: wl.sent }));
+    ck('engine: list() names the setting and the current member\'s provider', verdictOf((() => { const row = wl.am.list().accounts.find((x) => x.id === wl.Pl); return row && row.crossProvider === 'allow' && row.currentProvider && row.currentProvider.label === 'Claude subscription'; })()));
     // a model the other provider cannot serve: refused by name, no card
     const wm = pworld({ cross: 'allow' }); wm.client(); const sm = wm.mk('s5'); sm._pickedModel = 'gemini-3-pro-preview'; sm._spawnModel = 'gemini-3-pro-preview';
     wm.quiet(() => wm.pass());
@@ -3723,7 +3723,7 @@ await (async () => {
     ck('engine: a REMOVAL\'s verdict (it re-points links hot) never names another provider — even under allow (the pass\'s cold move does that)', wr.eng.removalTargetFor(wr.Pl, wr.A, 's6') === null, String(wr.eng.removalTargetFor(wr.Pl, wr.A, 's6')));
     ck('engine: …nor follows a PIN onto another provider (the pin is the owner\'s, its move the cold one)', wr.eng.removalTargetFor(wr.Pl, wr.A, 's7') === null, String(wr.eng.removalTargetFor(wr.Pl, wr.A, 's7')));
     const gp = wr.eng.gatherPlan(wr.Pl, wr.B);
-    ck('engine: "Move every conversation here" onto a member of another provider moves NONE of them (they stay: other-provider; the pinned one: pinned)', gp.move.length === 0 && gp.skip.some((x) => x.sid === 's6' && x.why === 'other-provider') && gp.skip.some((x) => x.sid === 's7' && x.why === 'pinned'), J(gp));
+    ck('engine: "Move every conversation here" onto a member of another provider moves NONE of them (they stay: other-provider; the pinned one: pinned)', gp.move.length === 0 && gateOf(gp.skip.some((x) => x.sid === 's6' && x.why === 'other-provider')) && verdictOf(gp.skip.some((x) => x.sid === 's7' && x.why === 'pinned')), J(gp));
     // a member the store no longer knows answers the pool's own provider — never "unknown" (which agrees with any)
     wr.am._state.accounts = wr.am._state.accounts.filter((x) => x.id !== wr.A);
     ck('engine: a DELETED member\'s conversations are judged as the pool\'s own provider: its verdict never names DeepSeek through the unknown door', wr.eng.removalTargetFor(wr.Pl, wr.A, 's6') === null, String(wr.eng.removalTargetFor(wr.Pl, wr.A, 's6')));
@@ -3768,7 +3768,7 @@ await (async () => {
     if (soSrc.split(SOA).length === 2) {
       const SOm = ML.load('src/sealed-orders.js', editAnchor(soSrc, SOA, 'const next = ranked[0] || null; // PATCHED: the provider filter dropped', "src/sealed-orders.js"), 'filter-dropped');
       const bad = pickIn(SOm, order, '/l/p/s2', 'b');
-      ck('M1 mutant RED: the filter dropped ⇒ the device moves the DeepSeek conversation onto the Claude member (the cross-provider reflex the order forbids)', bad.next && bad.next.id === 'a' && q2.next === null, J(bad));
+      ck('M1 mutant RED: the filter dropped ⇒ the device moves the DeepSeek conversation onto the Claude member (the cross-provider reflex the order forbids)', gateOf(bad.next) && bad.next.id === 'a' && q2.next === null, J(bad));
     }
 
     // THE REAL ENGINE + STORE: a world of members with their providers (the provider store's lookup per ACCOUNT)
@@ -3830,24 +3830,24 @@ await (async () => {
       const o1 = w1.orders[w1.orders.length - 1] || {};
       const lt = w1.am.sessionPoolLinkPath(w1.Pl, 't'), ls = w1.am.sessionPoolLinkPath(w1.Pl, 's');
       ck('M1 hub: the pushed order names its providers — ranked = the default\'s provider only (A, C), each path tagged; the members table names B DeepSeek',
-        (o1.ranked || []).length === 2 && o1.ranked.every((r) => r.provider === 'pv-claude-subscription') && o1.members && o1.members[B1] === 'pv-deepseek' && o1.provider === 'pv-claude-subscription', J(o1));
+        (o1.ranked || []).length === 2 && gateOf(o1.ranked.every((r) => r.provider === 'pv-claude-subscription')) && gateOf(o1.members) && o1.members[B1] === 'pv-deepseek' && o1.provider === 'pv-claude-subscription', J(o1));
       ck('M1 hub: …every link with its conversation\'s provider, and linkPaths (an OLDER daemon\'s only field) WITHOUT the DeepSeek conversation\'s link — an older daemon can never match it',
-        (o1.links || []).some((l) => l.path === lt && l.provider === 'pv-deepseek') && (o1.links || []).some((l) => l.path === ls && l.provider === 'pv-claude-subscription') && o1.linkPaths.includes(ls) && !o1.linkPaths.includes(lt), J({ links: o1.links, linkPaths: o1.linkPaths }));
+        gateOf((o1.links || []).some((l) => l.path === lt && l.provider === 'pv-deepseek')) && gateOf((o1.links || []).some((l) => l.path === ls && l.provider === 'pv-claude-subscription')) && gateOf(o1.linkPaths.includes(ls)) && !o1.linkPaths.includes(lt), J({ links: o1.links, linkPaths: o1.linkPaths }));
       const dv = SO.deviceFallback({ orders: o1, link: lt, currentDir: w1.am.subDir(B1), currentId: B1 });
       const ds2 = SO.deviceFallback({ orders: o1, link: ls, currentDir: w1.am.subDir(A1), currentId: A1 });
-      ck('M1 hub → device: the pushed order, judged by the device\'s rule — the DeepSeek conversation stays (no-same-provider), the Claude one falls back to C', dv.next === null && dv.why === 'no-same-provider' && ds2.next && ds2.next.id === C1, J({ dv, ds2 }));
+      ck('M1 hub → device: the pushed order, judged by the device\'s rule — the DeepSeek conversation stays (no-same-provider), the Claude one falls back to C', dv.next === null && dv.why === 'no-same-provider' && gateOf(ds2.next) && ds2.next.id === C1, J({ dv, ds2 }));
       // the one-provider pool's order: linkPaths = every link, as before
       const w0 = lworld({ members: [['Member A', null], ['Member B', null]] });
       w0.mk('s', w0.ids[0]); w0.mk('t', w0.ids[1]);
       await w0.eng.pushSealedOrders(w0.Pl); await tick();
       const o0 = w0.orders[w0.orders.length - 1] || {};
-      ck('M1 hub: a ONE-provider pool\'s order keeps every link in linkPaths (as before) and the old ranked rows (+ the provider tag)', o0.linkPaths && o0.linkPaths.length === 2 && o0.ranked.length === 2 && o0.ranked.every((r) => r.id && r.dir && r.creds && r.provider === 'pv-claude-subscription'), J(o0));
+      ck('M1 hub: a ONE-provider pool\'s order keeps every link in linkPaths (as before) and the old ranked rows (+ the provider tag)', gateOf(o0.linkPaths) && o0.linkPaths.length === 2 && o0.ranked.length === 2 && verdictOf(o0.ranked.every((r) => r.id && r.dir && r.creds && r.provider === 'pv-claude-subscription')), J(o0));
       // the cold cross move pushes the order at once (the moved link leaves linkPaths before a server-down window opens)
       const wx = lworld({ members: [['Member A', null], ['Member B', Q]], cross: 'allow' });
       fsx.writeFileSync(path.join(wx.cacheDir, wx.ids[0] + '.json'), JSON.stringify({ ...live(), fiveHour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 7200 } }));
       wx.client(); wx.mk('x', wx.ids[0]); wx.pass(); await tick(); await tick();
       const lx = wx.am.sessionPoolLinkPath(wx.Pl, 'x'), ox = wx.orders[wx.orders.length - 1] || {};
-      ck('M1 hub: a COLD cross move (allow) re-pushes the order at once — its link now named DeepSeek and gone from linkPaths', wx.on('x') === 'B' && wx.orders.length >= 2 && (ox.links || []).some((l) => l.path === lx && l.provider === 'pv-deepseek') && !(ox.linkPaths || []).includes(lx), J({ on: wx.on('x'), n: wx.orders.length, ox }));
+      ck('M1 hub: a COLD cross move (allow) re-pushes the order at once — its link now named DeepSeek and gone from linkPaths', wx.on('x') === 'B' && wx.orders.length >= 2 && gateOf((ox.links || []).some((l) => l.path === lx && l.provider === 'pv-deepseek')) && !(ox.linkPaths || []).includes(lx), J({ on: wx.on('x'), n: wx.orders.length, ox }));
 
       // M2 — deletion. A = DeepSeek (the deleted one), B = OpenRouter (serves deepseek-chat), C = Claude (the default)
       const w2 = lworld({ members: [['Member A', Q], ['Member B', R], ['Member C', null]], def: 2 });
@@ -3861,14 +3861,14 @@ await (async () => {
       const l2 = w2.pass();
       const card = w2.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
       ck('M2 engine, never: the pass moves NOTHING and ONE For-you card asks — «Account deleted — "t" needs you to pick a DeepSeek account» (the exhausted case\'s card: Allow once / Always / Deny, offering OpenRouter as deepseek-chat)',
-        w2.on('t') === 'none' && w2.items.length === 1 && card && card.text === 'Account deleted — "t" needs you to pick a DeepSeek account' && card.kind === 'action' && card.urgency === 'high' && card.action.memberId === B2 && card.i18n.text.key === 'Account deleted — "{title}" needs you to pick a {provider} account' && /Allow once moves it to Member B \(OpenRouter\) — it restarts and its model becomes deepseek-chat/.test(card.detail), J({ items: w2.items, log: l2.filter((l) => /unplaced|pool/.test(l)).slice(0, 4) }));
+        w2.on('t') === 'none' && w2.items.length === 1 && gateOf(card) && card.text === 'Account deleted — "t" needs you to pick a DeepSeek account' && card.kind === 'action' && card.urgency === 'high' && card.action.memberId === B2 && card.i18n.text.key === 'Account deleted — "{title}" needs you to pick a {provider} account' && verdictOf(/Allow once moves it to Member B \(OpenRouter\) — it restarts and its model becomes deepseek-chat/.test(card.detail)), J({ items: w2.items, log: l2.filter((l) => /unplaced|pool/.test(l)).slice(0, 4) }));
       w2.pass();
       ck('M2 engine: the next pass files no second card', w2.items.length === 1, J(w2.items.map((x) => x.id)));
       w2.client();
       const yes = w2.quietly(() => { w2._ans = w2.eng.answerCrossProviderAsk(card.action.askId, { answer: 'once' }); });
       const ans = w2._ans;
       ck('M2 engine: Allow once ⇒ the COLD move onto OpenRouter (link → B, ONE restart request naming deepseek-chat), the mark cleared, the line owed naming the deleted member and both providers',
-        ans && ans.moved === true && w2.on('t') === 'B' && w2.sent.length === 1 && w2.sent[0].affected[0].model === 'deepseek-chat' && !w2.am.unplacedOf(w2.Pl, 't') && w2.eng._crossLinesOwed.get('cid-t')?.text === 'Switched from Member A (DeepSeek) to Member B (OpenRouter) — model deepseek-chat → deepseek-chat', J({ ans, sent: w2.sent, owed: [...w2.eng._crossLinesOwed], yes: yes.slice(0, 3) }));
+        gateOf(ans) && ans.moved === true && w2.on('t') === 'B' && w2.sent.length === 1 && w2.sent[0].affected[0].model === 'deepseek-chat' && !w2.am.unplacedOf(w2.Pl, 't') && w2.eng._crossLinesOwed.get('cid-t')?.text === 'Switched from Member A (DeepSeek) to Member B (OpenRouter) — model deepseek-chat → deepseek-chat', J({ ans, sent: w2.sent, owed: [...w2.eng._crossLinesOwed], yes: yes.slice(0, 3) }));
       // no other provider serves its model: the card says so, without answers — ONCE (the mark keeps it across a restart)
       const w3 = lworld({ members: [['Member A', Q], ['Member B', { ...R, models: [{ id: 'other/model' }] }], ['Member C', null]], def: 2 });
       const [A3] = w3.ids;
@@ -3876,19 +3876,19 @@ await (async () => {
       w3.quietly(() => w3.del(A3)); w3.pass(); w3.pass();
       const c3 = w3.items[0];
       ck('M2 engine: nobody can serve its model ⇒ ONE card with the words alone (no answer to move it), asked ONCE — the mark remembers it',
-        w3.items.length === 1 && c3 && !c3.action && c3.kind === 'action' && c3.text === 'Account deleted — "t" needs you to pick a DeepSeek account' && /no other provider in the pool serves its model/.test(c3.detail) && w3.on('t') === 'none' && !!w3.am.unplacedOf(w3.Pl, 't')?.asked, J(w3.items));
+        w3.items.length === 1 && gateOf(c3) && !c3.action && c3.kind === 'action' && c3.text === 'Account deleted — "t" needs you to pick a DeepSeek account' && gateOf(/no other provider in the pool serves its model/.test(c3.detail)) && w3.on('t') === 'none' && !!w3.am.unplacedOf(w3.Pl, 't')?.asked, J(w3.items));
       const reread = new AccountManager({ dataDir: w3.dataDir });
       ck('M2 store: the mark is PERSISTED (a restart keeps the conversation unplaced, its provider and that it was asked)', reread.unplacedOf(w3.Pl, 't')?.provider?.label === 'DeepSeek' && !!reread.unplacedOf(w3.Pl, 't')?.asked && reread.goneProviderOf(A3)?.label === 'DeepSeek' && reread.goneNameOf(A3) === 'Member A');
       // a member of ITS provider appears ⇒ the pass places it there (a same-provider move), the mark cleared
       const D3 = w3.am.createSubscription({ name: 'Member D' }).id; fsx.writeFileSync(path.join(w3.am.subDir(D3), '.credentials.json'), CREDS(D3), { mode: 0o600 }); fsx.writeFileSync(path.join(w3.cacheDir, D3 + '.json'), JSON.stringify(live()));
       w3.am.setProviderLookup((acct) => (acct.id === D3 ? Q : acct.name === 'Member B' ? { ...R, models: [{ id: 'other/model' }] } : null));
       w3.pass();
-      ck('M2 engine: a DeepSeek account signed in later ⇒ the pass places the conversation on it (its own provider), the mark cleared, the removal\'s words', w3.am.poolCurrentFor(w3.Pl, 't') === D3 && !w3.am.unplacedOf(w3.Pl, 't') && w3.notices.some((n) => /Member A was removed from the pool — conversation "t" moved to Member D/.test(n.t)), J({ on: w3.am.poolCurrentFor(w3.Pl, 't'), n: w3.notices.map((n) => n.t) }));
+      ck('M2 engine: a DeepSeek account signed in later ⇒ the pass places the conversation on it (its own provider), the mark cleared, the removal\'s words', w3.am.poolCurrentFor(w3.Pl, 't') === D3 && !w3.am.unplacedOf(w3.Pl, 't') && verdictOf(w3.notices.some((n) => /Member A was removed from the pool — conversation "t" moved to Member D/.test(n.t))), J({ on: w3.am.poolCurrentFor(w3.Pl, 't'), n: w3.notices.map((n) => n.t) }));
       // the pool's allow: the cold move itself, no card
       const w4 = lworld({ members: [['Member A', Q], ['Member B', R], ['Member C', null]], def: 2, cross: 'allow' });
       w4.client(); w4.mk('t', w4.ids[0], 'deepseek-chat');
       w4.quietly(() => w4.del(w4.ids[0])); w4.pass();
-      ck('M2 engine, allow: the pass makes the COLD move onto OpenRouter itself (deepseek-chat, its line) — no card', w4.on('t') === 'B' && !w4.items.length && w4.sent.length === 1 && w4.sent[0].affected[0].model === 'deepseek-chat' && w4.eng._crossLinesOwed.has('cid-t'), J({ on: w4.on('t'), items: w4.items }));
+      ck('M2 engine, allow: the pass makes the COLD move onto OpenRouter itself (deepseek-chat, its line) — no card', w4.on('t') === 'B' && !w4.items.length && w4.sent.length === 1 && w4.sent[0].affected[0].model === 'deepseek-chat' && verdictOf(w4.eng._crossLinesOwed.has('cid-t')), J({ on: w4.on('t'), items: w4.items }));
       // THE DEFAULT on the deleted DeepSeek member: UNPLACED too, never re-pointed onto Claude; the pool keeps deciding
       const w5 = lworld({ members: [['Member A', Q], ['Member C', null]], def: 0 });
       const [A5, C5] = w5.ids;
@@ -3902,9 +3902,9 @@ await (async () => {
       const d5 = SO.deviceFallback({ orders: o5, link: o5.linkPath, currentDir: null, currentId: null });
       ck('M1 × M2: the device\'s order names the UNPLACED default\'s own provider (DeepSeek) — the reflex never re-creates the default on the Claude member', o5.provider === 'pv-deepseek' && !(o5.ranked || []).length && d5.next === null && !(o5.linkPaths || []).includes(w5.am.sessionPoolLinkPath(w5.Pl, 'u')), J({ o5, d5 }));
       let nr = null; try { w5.quietly(() => { nr = w5.am.resolveForSpawn(w5.Pl, 'claude', { sessionKey: 'n1' }); }); } catch (e) { nr = { err: e.message }; }
-      ck('M2 store: a NEW conversation still starts (its own link) while the default stays unplaced — the self-heal never sets it onto another provider', nr && nr.sessionLink && nr.poolTarget === C5 && w5.am.poolCurrent(w5.Pl) === null && !!w5.am.unplacedOf(w5.Pl, null), J(nr));
+      ck('M2 store: a NEW conversation still starts (its own link) while the default stays unplaced — the self-heal never sets it onto another provider', gateOf(nr) && gateOf(nr.sessionLink) && nr.poolTarget === C5 && w5.am.poolCurrent(w5.Pl) === null && !!w5.am.unplacedOf(w5.Pl, null), J(nr));
       let nd = null; try { w5.am.resolveForSpawn(w5.Pl, 'claude', {}); } catch (e) { nd = e; }
-      ck('M2 store: …a spawn that would READ the default is refused by name (default_unplaced) — never a silent move onto Claude', nd && nd.code === 'default_unplaced' && /was deleted/.test(nd.message), nd && nd.message);
+      ck('M2 store: …a spawn that would READ the default is refused by name (default_unplaced) — never a silent move onto Claude', gateOf(nd) && nd.code === 'default_unplaced' && verdictOf(/was deleted/.test(nd.message)), nd && nd.message);
       // RED MUTANT: the store's heal without the provider filter (the old re-point: the engine's pick / the default, ANY provider)
       const amSrc = fsx.readFileSync(path.resolve('src/accounts.js'), 'utf8');
       const AMA = "const sameProv = (mid) => goneKey == null || this._providerKeyOf(this.memberProviderOf(mid)) === goneKey;";
@@ -3916,7 +3916,7 @@ await (async () => {
         wm.quietly(() => wm.del(wm.ids[0]));
         ck('M2 mutant RED: the old re-point lands the deleted DeepSeek member\'s conversation on the CLAUDE default — hot, no card (the silent cross-provider move)', wm.on('t') === 'C' && !wm.am.unplacedOf(wm.Pl, 't'), J({ on: wm.on('t') }));
       }
-      for (const r of copiesCensus(ML.files, ML.dir, path.resolve('.'), { minCopies: 4, label: 'latents mutants: ' })) ck(r.name, r.pass);
+      for (const r of copiesCensus(ML.files, ML.dir, path.resolve('.'), { minCopies: 4, label: 'latents mutants: ' })) ck(r.name, verdictOf(r.pass));
     }
   }
 }
@@ -4020,13 +4020,13 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     const runs = [];
     for (const n of [1, 20, 60]) { const w = await world(engMod, { sessions: n }); const e = memoOff(() => w.evaluate()); runs.push({ n, calls: e.calls, reads: e.reads, notices: w.notices.length }); }
     console.log('    one roster = ' + one + ' members, ' + perRoster + ' readFileSync; per evaluation: ' + runs.map((r) => `${r.n} conv → ${r.calls} roster / ${r.reads} reads`).join(' · '));
-    ck(`r2 ③ ONE ROSTER PER EVALUATION: a blocked evaluation over 1 / 20 / 60 conversations reads the roster ${runs.map((r) => r.calls).join(' / ')} time(s) — never once per conversation (9d53db09: 2 / 21 / 61)`, runs.every((r) => r.calls === 1));
+    ck(`r2 ③ ONE ROSTER PER EVALUATION: a blocked evaluation over 1 / 20 / 60 conversations reads the roster ${runs.map((r) => r.calls).join(' / ')} time(s) — never once per conversation (9d53db09: 2 / 21 / 61)`, verdictOf(runs.every((r) => r.calls === 1)));
     // (acceptance r3 F5: the bound AS MEASURED, never one world's number — a roster reads each member's .credentials.json and
     // .claude.json, + the CLI fixture once: 29 for 14 signed-in members, 81 for 40 — repro/r3/roster-paths.cjs)
-    ck(`r2 ③ …its synchronous reads per evaluation are ONE roster's (${runs.map((r) => r.reads).join(' / ')} for 1 / 20 / 60 conversations, ≤ 2 × the 14 members + 1 — never × conversations)`, runs.every((r) => r.reads === runs[0].reads) && runs[0].reads <= 2 * 14 + 1 && runs[0].reads === perRoster);
-    ck('r2 ③ …and the blocked notice still names the roster (the per-session decisions and the default share that one read)', runs.every((r) => r.notices >= 1));
+    ck(`r2 ③ …its synchronous reads per evaluation are ONE roster's (${runs.map((r) => r.reads).join(' / ')} for 1 / 20 / 60 conversations, ≤ 2 × the 14 members + 1 — never × conversations)`, gateOf(runs.every((r) => r.reads === runs[0].reads)) && runs[0].reads <= 2 * 14 + 1 && runs[0].reads === perRoster);
+    ck('r2 ③ …and the blocked notice still names the roster (the per-session decisions and the default share that one read)', verdictOf(runs.every((r) => r.notices >= 1)));
     const m0 = mutEngine('roster-per-conv', 'const roster = evaluationRoster(poolId, rosters);', 'const roster = () => accounts.poolRoster(poolId);');
-    ck('RED CONTROL (③) the patch (9d53db09: a fresh roster thunk per decision) hits', m0.hit);
+    ck('RED CONTROL (③) the patch (9d53db09: a fresh roster thunk per decision) hits', verdictOf(m0.hit));
     if (m0.hit) { const w = await world(m0.mod, { sessions: 20 }); const e = memoOff(() => w.evaluate()); ck(`RED CONTROL (③): with a roster thunk per decision the SAME evaluation over 20 conversations reads it ${e.calls} times (${e.reads} reads) — the memo is what bounds it`, e.calls >= 20 && perRoster > 0 && e.reads >= 20 * perRoster); }
     // ⑤ THE VENDOR REFUSAL IS ITS OWN WALL: B's turn is refused 403 (its login file is fine): switchCandidates drops it for
     // 10 min, and the roster the evaluation reads carries the engine's mark
@@ -4043,24 +4043,24 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
       return { w, e, n: w.notices.find((t) => /acct-B/.test(t)) || '' };
     };
     const au = await authWorld(engMod);
-    ck('r2 ⑤ a member the vendor refused (403, its login fine) is named in its OWN bucket — «Refused by the vendor: acct-B (0 min ago — retried after 10 min)» — never «not signed in — re-login»', /Refused by the vendor: acct-B \(\d+ min ago — retried after 10 min\)\./.test(au.n) && !/acct-B: not signed in/.test(au.n) && !/acct-B[^.;]*re-login/.test(au.n));
-    ck('r2 ⑤ …and the notice\'s full roster is journaled beside it, ONE line per member (the toast is bounded; the journal is not)', au.e.lines.filter((l) => /^\[pool\] Pool · /.test(l)).length === 3 && au.e.lines.some((l) => /^\[pool\] Pool · acct-B: refused by the vendor \d+ min ago — retried after 10 min$/.test(l)) && au.e.lines.some((l) => /^\[pool\] Pool · acct-A \(current\): /.test(l)));
+    ck('r2 ⑤ a member the vendor refused (403, its login fine) is named in its OWN bucket — «Refused by the vendor: acct-B (0 min ago — retried after 10 min)» — never «not signed in — re-login»', gateOf(/Refused by the vendor: acct-B \(\d+ min ago — retried after 10 min\)\./.test(au.n)) && !/acct-B: not signed in/.test(au.n) && !/acct-B[^.;]*re-login/.test(au.n));
+    ck('r2 ⑤ …and the notice\'s full roster is journaled beside it, ONE line per member (the toast is bounded; the journal is not)', au.e.lines.filter((l) => /^\[pool\] Pool · /.test(l)).length === 3 && gateOf(au.e.lines.some((l) => /^\[pool\] Pool · acct-B: refused by the vendor \d+ min ago — retried after 10 min$/.test(l))) && verdictOf(au.e.lines.some((l) => /^\[pool\] Pool · acct-A \(current\): /.test(l))));
     const m1 = mutEngine('no-auth-mark', "if (m && memberAuthFailed(r.id)) return { ...r, why: { code: 'auth-failed', at: m.at } };", '');
-    ck('RED CONTROL (⑤) the patch (the roster without the engine\'s auth mark) hits', m1.hit);
-    if (m1.hit) { const am1 = await authWorld(m1.mod); ck('RED CONTROL (⑤): without the engine\'s mark the same member is NOT named as refused by the vendor (only «left out of this decision») — the mark is what names the true wall', !/Refused by the vendor/.test(am1.n) && /acct-B: signed in, but left out of this decision/.test(am1.n)); }
+    ck('RED CONTROL (⑤) the patch (the roster without the engine\'s auth mark) hits', verdictOf(m1.hit));
+    if (m1.hit) { const am1 = await authWorld(m1.mod); ck('RED CONTROL (⑤): without the engine\'s mark the same member is NOT named as refused by the vendor (only «left out of this decision») — the mark is what names the true wall', !/Refused by the vendor/.test(am1.n) && verdictOf(/acct-B: signed in, but left out of this decision/.test(am1.n))); }
     // ── acceptance r3 ──
     // ⑥ ONE CANDIDATE PREDICATE: the verdict the pre-fire gate spends on excludes the member the switch excludes (the
     // vendor's 10-min refusal mark) — b552c972 answered «usable via acct-B» while no switch could move there
-    { const v = au.w.eng.quotaVerdictFor(au.w.P, {}); ck(`r3 ⑥ ONE CANDIDATE PREDICATE: acct-B refused by the vendor (its cache 80 % left) is no member the pool's verdict can be usable through — usable=${v && v.usable}, via ${(v && v.via) || '-'}`, v && v.usable === false && /acct-B: refused by the vendor \d+ min ago — retried after 10 min/.test(v.reason || ''), v && v.reason); }
+    { const v = au.w.eng.quotaVerdictFor(au.w.P, {}); ck(`r3 ⑥ ONE CANDIDATE PREDICATE: acct-B refused by the vendor (its cache 80 % left) is no member the pool's verdict can be usable through — usable=${v && v.usable}, via ${(v && v.via) || '-'}`, gateOf(v) && v.usable === false && verdictOf(/acct-B: refused by the vendor \d+ min ago — retried after 10 min/.test(v.reason || '')), v && v.reason); }
     // ⑦ THE OWNER'S DOOR FOR THE DETAIL: the blocked pool files ONE For-you notice carrying every member's line (current first)
     { const w = await world(engMod, { sessions: 1, withTodos: true }); const e = w.evaluate(); e && w.evaluate();
       const items = w.todos.idsWhere((i) => i.sessionKey === 'pool:blocked:' + w.P).map((id) => w.todos.get(id));
       const d = items[0] ? String(items[0].detail || '').split('\n') : [];
-      ck(`r3 ⑦ THE DETAIL WHERE THE OWNER LOOKS: a blocked evaluation (twice) files ONE For-you notice — «${items[0] ? items[0].text.slice(0, 60) : '-'}…» — whose detail is poolBlockedDetail, ${d.length} lines, the current member first`, items.length === 1 && items[0].status === 'open' && items[0].kind === 'notice' && items[0].origin === 'pool' && d.length === 14 && /^acct-1 \(current\): /.test(d[0]) && d.some((l) => /^acct-13: /.test(l)), d.slice(0, 3));
+      ck(`r3 ⑦ THE DETAIL WHERE THE OWNER LOOKS: a blocked evaluation (twice) files ONE For-you notice — «${items[0] ? items[0].text.slice(0, 60) : '-'}…» — whose detail is poolBlockedDetail, ${d.length} lines, the current member first`, items.length === 1 && items[0].status === 'open' && items[0].kind === 'notice' && items[0].origin === 'pool' && d.length === 14 && gateOf(/^acct-1 \(current\): /.test(d[0])) && verdictOf(d.some((l) => /^acct-13: /.test(l))), d.slice(0, 3));
       // the pool can serve again (acct-2 renewed): the episode's item is closed by the agent
       fs.writeFileSync(path.join(w.am.subDir(w.ids[1]), '..', '..', 'usage-cache', w.ids[1] + '.json'), JSON.stringify({ fetchedAt: Date.now(), source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: Math.floor(Date.now() / 1000) + 7200 }, sevenDay: { utilization: 0.1, resetsAt: Math.floor(Date.now() / 1000) + 3 * 86400 } }));
       w.evaluate();
-      ck('r3 ⑦ …and when a member can serve again the episode\'s item is over — done by the agent, nothing new filed', items[0] && w.todos.get(items[0].id).status === 'done' && w.todos.get(items[0].id).resolvedBy === 'agent' && w.todos.idsWhere((i) => i.sessionKey === 'pool:blocked:' + w.P).length === 1); }
+      ck('r3 ⑦ …and when a member can serve again the episode\'s item is over — done by the agent, nothing new filed', gateOf(items[0]) && w.todos.get(items[0].id).status === 'done' && w.todos.get(items[0].id).resolvedBy === 'agent' && w.todos.idsWhere((i) => i.sessionKey === 'pool:blocked:' + w.P).length === 1); }
     // ⑦b B-5e0d: THE EPISODE RIDES THE ITEM ACROSS A RESTART (the episode memory was this run's alone: a restart re-opened an
     // item the owner dismissed, and never closed an open one once the pool recovered). (A) an item the owner dismissed stays
     // dismissed when the hub restarts with the pool still blocked; the pool's recovery ENDS the episode ON the item, so after
@@ -4151,7 +4151,7 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
       };
       const dA = await dismissedRun(engMod), oB = await leftOpenRun(engMod), cE = await closedRun(engMod, 'expired'), cG = await closedRun(engMod, 'agent'), tD = await twoRun(engMod);
       ck(`r3 ⑦b B-5e0d (A): an item the owner DISMISSED stays dismissed across a restart while the pool is still blocked (${JSON.stringify(dA.afterRestart)}); the recovery ENDS the episode on the item (${JSON.stringify(dA.ended)}), so after another restart the next block is filed again — the store re-files the same item, open (${JSON.stringify(dA.end)}); and that NEW episode's item, dismissed, stays dismissed across the next restart (${JSON.stringify(dA.second)}: the old end is older than its filing)`,
-        dA.first && JSON.stringify(dA.afterRestart) === '["dismissed"]' && JSON.stringify(dA.ended) === '[true]' && JSON.stringify(dA.end) === '["open"]' && JSON.stringify(dA.second) === '["dismissed"]');
+        gateOf(dA.first) && JSON.stringify(dA.afterRestart) === '["dismissed"]' && JSON.stringify(dA.ended) === '[true]' && JSON.stringify(dA.end) === '["open"]' && JSON.stringify(dA.second) === '["dismissed"]');
       ck(`r3 ⑦b B-5e0d (B): an item an EARLIER run left open is closed by the first evaluation of a run that finds the pool serving — done by the agent, the episode's end on it (${JSON.stringify(oB)})`,
         oB.length === 1 && oB[0].status === 'done' && oB[0].by === 'agent' && oB[0].ended === true);
       ck(`r3 ⑦b B-5e0d (C): an item its EXPIRY closed while the hub was down (${JSON.stringify(cE.atBoot)} at boot) and one the AGENT closed with no end on it (${JSON.stringify(cG.atBoot)}) are no live episode — the block after the restart files again (${JSON.stringify(cE.after)} · ${JSON.stringify(cG.after)})`,
@@ -4226,4 +4226,4 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -28,7 +28,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FA = require(path.join(ROOT, 'src/foryou-actions.js'));
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -87,15 +87,15 @@ const census = (rows, fl = files) => {
 };
 const P0 = census(FA.ROWS);
 ok(P0.length === 0, `every filed type (${filedTypes(files).size}) and every client branch (${clientTypes(files).size}) is one of the ${FA.ROWS.length} rows; every row is spelled where it is filed`, P0);
-ok(FA.ROWS.length === new Set(FA.ROWS.map((r) => r.type)).size && FA.ROWS.every((r) => TYPE_RE.test(r.type)), 'ONE row per type (no duplicate, every type kebab-case)');
-ok([...filedTypes(files).keys()].includes('main-ask') && [...filedTypes(files).keys()].includes('browser-takeover'), 'the CONSTANT spellings are read (src/main-ask.js MAIN_ASK_ACTION, src/browser-takeover-request.js ACTION_TYPE)');
+ok(FA.ROWS.length === new Set(FA.ROWS.map((r) => r.type)).size && verdictOf(FA.ROWS.every((r) => TYPE_RE.test(r.type))), 'ONE row per type (no duplicate, every type kebab-case)');
+ok(gateOf([...filedTypes(files).keys()].includes('main-ask')) && verdictOf([...filedTypes(files).keys()].includes('browser-takeover')), 'the CONSTANT spellings are read (src/main-ask.js MAIN_ASK_ACTION, src/browser-takeover-request.js ACTION_TYPE)');
 console.log('   RED COPIES — a row removed: the census names the orphan type');
 for (const [ty, why] of [['channel-reauth', 'a literal producer spelling'], ['main-ask', 'a CONSTANT producer spelling'], ['vault-use-failed', 'a type only the client branches on (its producer passes the action through a helper)']]) {
   const p = census(FA.ROWS.filter((r) => r.type !== ty));
-  ok(p.some((x) => x.startsWith(`'${ty}' is`)), `RED: '${ty}' removed is named (${why})`, p);
+  ok(verdictOf(p.some((x) => x.startsWith(`'${ty}' is`))), `RED: '${ty}' removed is named (${why})`, p);
 }
-{ const fl = { ...files, 'src/server/new-door.js': "x.add('k', { origin: 'agent', text: 't', action: { type: 'ghost-ask', id } });\n" }; ok(census(FA.ROWS, fl).some((x) => /'ghost-ask' is filed by src\/server\/new-door\.js/.test(x)), 'RED: a NEW type a producer files is named until its row is written'); }
-{ ok(census([...FA.ROWS, { type: 'phantom-ask', producer: 'src/server/vault-hooks.js' }]).some((x) => /row 'phantom-ask': spelled neither/.test(x)), 'RED: a row nobody files is a dead row'); }
+{ const fl = { ...files, 'src/server/new-door.js': "x.add('k', { origin: 'agent', text: 't', action: { type: 'ghost-ask', id } });\n" }; ok(verdictOf(census(FA.ROWS, fl).some((x) => /'ghost-ask' is filed by src\/server\/new-door\.js/.test(x))), 'RED: a NEW type a producer files is named until its row is written'); }
+{ ok(verdictOf(census([...FA.ROWS, { type: 'phantom-ask', producer: 'src/server/vault-hooks.js' }]).some((x) => /row 'phantom-ask': spelled neither/.test(x))), 'RED: a row nobody files is a dead row'); }
 
 // ── ② ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('② the derived tables — today\'s sets, from the registry; no literal table left in their hosts');
@@ -105,9 +105,9 @@ ok(JSON.stringify(FA.ACTION_IDENTITY) === JSON.stringify(Object.fromEntries(FA.R
 ok(set(FA.WAIT_ACTIONS) === set(['main-ask', 'helper-ask', 'exit-run-ask', 'messages-waiting']), 'WAIT_ACTIONS = the rows that wait: main-ask, helper-ask, exit-run-ask (as before) + (lane queued-is-not-woke, Shape B) messages-waiting — messages that have waited an hour behind a running turn: band 2 «Someone is waiting», its arrival toasts once', FA.WAIT_ACTIONS);
 ok(set(FA.CARD_ACTION_TYPES) === set(['helper-ask', 'main-ask']) && set(FA.ANSWER_ACTION_TYPES) === set(['messages-waiting', 'exit-run-ask', 'hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask', 'vault-grant-ask', 'secret-request', 'vault-words-ask', 'vault-job-ask', 'channel-held-digest', 'channel-connect', 'end-proposal', 'job-secrets-retired']), 'CARD_ACTION_TYPES (answer: card) and ANSWER_ACTION_TYPES (answer: buttons) = the sets of before + (lane queued-is-not-woke) messages-waiting — its one declared door, Open the conversation + (r6) channel-held-digest — answered by its Deliver / Discard, never a typed reply; + (lane vault-entry-description) vault-words-ask — 允许 / 拒绝 + (B-ef1b) job-secrets-retired — its two declared buttons, Move into the vault / Delete the file + (B-8edd) channel-connect — its one declared door, Finish connecting');
 const HOST = { store: read('src/user-todos.js'), att: read('src/attention-model.js'), reply: read('src/inbox-reply.js') };
-ok(/const \{ ACTION_IDENTITY \} = require\('\.\/foryou-actions\.js'\);/.test(HOST.store) && !/const ACTION_IDENTITY = Object\.freeze/.test(HOST.store), 'src/user-todos.js reads ACTION_IDENTITY from the registry (no table of its own)');
-ok(/const \{ WAIT_ACTIONS \} = require\('\.\/foryou-actions\.js'\);/.test(HOST.att) && !/const WAIT_ACTIONS = Object\.freeze/.test(HOST.att) && require(path.join(ROOT, 'src/attention-model.js')).WAIT_ACTIONS === FA.WAIT_ACTIONS, 'src/attention-model.js reads WAIT_ACTIONS from the registry');
-ok(/const \{ ANSWER_ACTION_TYPES, CARD_ACTION_TYPES \} = require\('\.\/foryou-actions\.js'\);/.test(HOST.reply) && !/(?:CARD|ANSWER)_ACTION_TYPES = Object\.freeze/.test(HOST.reply), 'src/inbox-reply.js reads CARD_ACTION_TYPES and ANSWER_ACTION_TYPES from the registry');
+ok(gateOf(/const \{ ACTION_IDENTITY \} = require\('\.\/foryou-actions\.js'\);/.test(HOST.store)) && !/const ACTION_IDENTITY = Object\.freeze/.test(HOST.store), 'src/user-todos.js reads ACTION_IDENTITY from the registry (no table of its own)');
+ok(gateOf(/const \{ WAIT_ACTIONS \} = require\('\.\/foryou-actions\.js'\);/.test(HOST.att)) && !/const WAIT_ACTIONS = Object\.freeze/.test(HOST.att) && require(path.join(ROOT, 'src/attention-model.js')).WAIT_ACTIONS === FA.WAIT_ACTIONS, 'src/attention-model.js reads WAIT_ACTIONS from the registry');
+ok(gateOf(/const \{ ANSWER_ACTION_TYPES, CARD_ACTION_TYPES \} = require\('\.\/foryou-actions\.js'\);/.test(HOST.reply)) && !/(?:CARD|ANSWER)_ACTION_TYPES = Object\.freeze/.test(HOST.reply), 'src/inbox-reply.js reads CARD_ACTION_TYPES and ANSWER_ACTION_TYPES from the registry');
 { const all = Object.entries(files).filter(([rel]) => rel !== 'src/foryou-actions.js').filter(([, s]) => /(?:ACTION_IDENTITY|WAIT_ACTIONS|CARD_ACTION_TYPES|ANSWER_ACTION_TYPES)\s*=\s*Object\.freeze/.test(s)).map(([rel]) => rel); ok(!all.length, 'no second copy of any of the four tables anywhere under src/', all); }
 
 // ── ③ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -120,10 +120,10 @@ console.log('③ the audit\'s two drifts — a rotate suggestion merges by its e
   // RED: the base's store (no vault-rotate identity — merged by text): the second entry's suggestion REPLACED the first's action
   const tmp = path.join(os.tmpdir(), `vs-fyreg-store-${process.pid}.cjs`);
   fs.writeFileSync(tmp, HOST.store.replace("const { ACTION_IDENTITY } = require('./foryou-actions.js');", "const ACTION_IDENTITY = Object.fromEntries(Object.entries(require(" + JSON.stringify(path.join(ROOT, 'src/foryou-actions.js')) + ").ACTION_IDENTITY).filter(([k]) => k !== 'vault-rotate'));").replace(/require\('\.\/([^']+)'\)/g, (m, p) => `require(${JSON.stringify(path.join(ROOT, 'src', p))})`));
-  try { const base = twoEntries(require(tmp).UserTodoManager); ok(base.a.id === base.b.id && base.b.existing, 'RED: the base\'s merge (by text) made them ONE item — the first entry\'s suggestion lost', base); }
+  try { const base = twoEntries(require(tmp).UserTodoManager); ok(base.a.id === base.b.id && verdictOf(base.b.existing), 'RED: the base\'s merge (by text) made them ONE item — the first entry\'s suggestion lost', base); }
   catch (e) { ok(false, 'RED control loads', String(e && e.message)); } finally { fs.rmSync(tmp, { force: true }); }
-  ok(!!FA.ROW_OF['vault-use-failed'] && FA.ROW_OF['vault-use-failed'].handled && /by its text on purpose/.test(FA.ROW_OF['vault-use-failed'].merge || ''), 'vault-use-failed is a row (handled by the jump to its Vault row; it merges by its text ON PURPOSE — the head + its cause)');
-  ok(census(FA.ROWS.filter((r) => r.type !== 'vault-use-failed')).some((x) => /'vault-use-failed' is branched on by src\/lib\/user-todos-actions\.js/.test(x)), 'RED: the base\'s tables named vault-use-failed nowhere — without its row the census names it');
+  ok(!!FA.ROW_OF['vault-use-failed'] && gateOf(FA.ROW_OF['vault-use-failed'].handled) && verdictOf(/by its text on purpose/.test(FA.ROW_OF['vault-use-failed'].merge || '')), 'vault-use-failed is a row (handled by the jump to its Vault row; it merges by its text ON PURPOSE — the head + its cause)');
+  ok(verdictOf(census(FA.ROWS.filter((r) => r.type !== 'vault-use-failed')).some((x) => /'vault-use-failed' is branched on by src\/lib\/user-todos-actions\.js/.test(x))), 'RED: the base\'s tables named vault-use-failed nowhere — without its row the census names it');
 }
 
 // ── ④ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -152,21 +152,21 @@ const doorMiss = (src) => FA.ROWS.filter((r) => r.handled && !branches(src, r.ty
 { const miss = doorMiss(ACT); ok(!miss.length, `every handled row (${FA.ROWS.filter((r) => r.handled).length}) has its \`type ===\` branch in src/lib/user-todos-actions.js — or declares its door (checkRoute / door / opens — the declared dialog, lane lg-remote-hardening) for the row-reading branch`, miss); }
 // lane lg-remote-hardening (the cure's reader): RED CONTROLS of the declared-dialog door — the jump without it names the row; an
 // `opens` outside the closed set is out of it
-{ const noDoor = ACT.replace(/\{ const op = opensOf\(item\);[^\n]*\n/, '/* removed */\n'); ok(noDoor !== ACT && doorMiss(noDoor).includes('host-key'), 'RED CONTROL: the jump without its declared-dialog door ⇒ the host-key row is named (no branch, no declared door)', doorMiss(noDoor)); }
-ok(FA.ROWS.some((r) => typeof r.checkRoute === 'string') && doorMiss(ACT.replace(ROW_DOOR, '/* the row door, removed */')).includes('cli-check-again'), 'RED CONTROL: the row-reading door removed ⇒ a row that declares its route has no branch at all');
-ok(FA.ROWS.some((r) => Array.isArray(r.buttons)) && doorMiss(ACT.replace(BUTTONS_DOOR, '/* the buttons door, removed */')).includes('messages-waiting'), 'RED CONTROL: the declared-buttons door removed ⇒ a row that declares its buttons has no branch at all');
-ok(FA.ROWS.some((r) => r.door) && doorMiss(ACT.replace(ROW_OPENS, '/* the row door, removed */')).includes('open-outbox') && doorMiss(ACT.replace('{ outbox: ', '{ elsewhere: ')).includes('open-outbox'), 'RED CONTROL (pick 6): the jump\'s row-door branch removed, or no opener of the name the row declares ⇒ the Outbox pointer has no door');
+{ const noDoor = ACT.replace(/\{ const op = opensOf\(item\);[^\n]*\n/, '/* removed */\n'); ok(noDoor !== ACT && verdictOf(doorMiss(noDoor).includes('host-key')), 'RED CONTROL: the jump without its declared-dialog door ⇒ the host-key row is named (no branch, no declared door)', doorMiss(noDoor)); }
+ok(gateOf(FA.ROWS.some((r) => typeof r.checkRoute === 'string')) && verdictOf(doorMiss(ACT.replace(ROW_DOOR, '/* the row door, removed */')).includes('cli-check-again')), 'RED CONTROL: the row-reading door removed ⇒ a row that declares its route has no branch at all');
+ok(gateOf(FA.ROWS.some((r) => Array.isArray(r.buttons))) && verdictOf(doorMiss(ACT.replace(BUTTONS_DOOR, '/* the buttons door, removed */')).includes('messages-waiting')), 'RED CONTROL: the declared-buttons door removed ⇒ a row that declares its buttons has no branch at all');
+ok(gateOf(FA.ROWS.some((r) => r.door)) && gateOf(doorMiss(ACT.replace(ROW_OPENS, '/* the row door, removed */')).includes('open-outbox')) && verdictOf(doorMiss(ACT.replace('{ outbox: ', '{ elsewhere: ')).includes('open-outbox')), 'RED CONTROL (pick 6): the jump\'s row-door branch removed, or no opener of the name the row declares ⇒ the Outbox pointer has no door');
 const ROWJS = code(files['src/lib/user-todos-row.js']);
 const rowImports = [...ROWJS.matchAll(/from '\.\/([\w-]+\.js)'/g)].map((m) => `src/lib/${m[1]}`);
 const ROW_BUTTONS = /const rowButtonsHtml = \(i, t\) => \{ const bs = i && i\.action \? buttonsOf\(i\.action\.type\) : null;[\s\S]*?exitAskHtml\(i, t\) \+ rowButtonsHtml\(i, t\)/;   // lane queued-is-not-woke: the row draws DECLARED buttons generically
 const rowDraws = (ty, src = ROWJS) => src.includes(`'${ty}'`) || asksOwner(src, ty) || rowImports.some((f) => new RegExp(`export const [A-Z_]+ = '${ty}'`).test(files[f] || '')) || (Array.isArray((FA.ROW_OF[ty] || {}).buttons) && ROW_BUTTONS.test(src));
 const WIN = code(files['src/lib/inbox-window.js'] + '\n' + files['src/lib/inbox-window-layout.js']);
-ok(asksOwner(ACT, 'setting-change') && asksOwner(ROWJS, 'setting-change') && !asksOwner(ACT, 'setting-change', { ...files, 'src/ask-setting.js': files['src/ask-setting.js'].replace("const TYPE = 'setting-change';", "const TYPE = 'setting-' + 'change';") }) && !asksOwner(ACT.replace(/\bisSettingChange\(rec\.action\)/, 'false'), 'setting-change'),
+ok(gateOf(asksOwner(ACT, 'setting-change')) && gateOf(asksOwner(ROWJS, 'setting-change')) && !asksOwner(ACT, 'setting-change', { ...files, 'src/ask-setting.js': files['src/ask-setting.js'].replace("const TYPE = 'setting-change';", "const TYPE = 'setting-' + 'change';") }) && !asksOwner(ACT.replace(/\bisSettingChange\(rec\.action\)/, 'false'), 'setting-change'),
   'setting-change is spelled ONCE in its builtIn (src/ask-setting.js TYPE + isSettingChange): the press and the row ask that test — RED CONTROLS: the owner\'s literal TYPE line gone, or the call gone, ⇒ no branch seen');
 { const bad = FA.ROWS.filter((r) => (r.card === 'row' && !rowDraws(r.type)) || (r.card !== 'row' && rowDraws(r.type)) || (r.card === 'inbox-window' && !WIN.includes(`'${r.type}'`))).map((r) => `${r.type} (${r.card})`);
-  ok(FA.ROWS.some((r) => Array.isArray(r.buttons)) && !rowDraws('messages-waiting', ROWJS.replace(ROW_BUTTONS, '/* removed */')), 'RED CONTROL: the generic declared-buttons drawing removed ⇒ the row draws messages-waiting nowhere');
+  ok(gateOf(FA.ROWS.some((r) => Array.isArray(r.buttons))) && !rowDraws('messages-waiting', ROWJS.replace(ROW_BUTTONS, '/* removed */')), 'RED CONTROL: the generic declared-buttons drawing removed ⇒ the row draws messages-waiting nowhere');
   ok(!bad.length, `card: 'row' ⇔ the row draws it (${FA.ROWS.filter((r) => r.card === 'row').length}; secret-request through vault-paste-box's SECRET_ACTION); 'inbox-window' ⇒ only the window (${FA.ROWS.filter((r) => r.card === 'inbox-window').map((r) => r.type).join(', ')}); 'none' ⇒ neither`, bad); }
-ok(asksOwner(ACT, 'end-proposal') && asksOwner(ROWJS, 'end-proposal') && !asksOwner(ACT, 'end-proposal', { ...files, 'src/end-proposal.js': files['src/end-proposal.js'].replace("const TYPE = 'end-proposal';", "const TYPE = 'end-' + 'proposal';") }) && !asksOwner(ACT.replace(/\bisProposal\(rec\.action\)/, 'false'), 'end-proposal'),
+ok(gateOf(asksOwner(ACT, 'end-proposal')) && gateOf(asksOwner(ROWJS, 'end-proposal')) && !asksOwner(ACT, 'end-proposal', { ...files, 'src/end-proposal.js': files['src/end-proposal.js'].replace("const TYPE = 'end-proposal';", "const TYPE = 'end-' + 'proposal';") }) && !asksOwner(ACT.replace(/\bisProposal\(rec\.action\)/, 'false'), 'end-proposal'),
   'end-proposal is spelled ONCE in its builtIn (src/end-proposal.js TYPE + isProposal — lane login-request-card piece 3b): the press and the row ask that test — RED CONTROLS: the owner\'s literal TYPE line gone, or the call gone, ⇒ no branch seen');
 
 // ── ⑤ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ console.log('⑤ every chat row is drawn by the chat\'s needs card; every other 
   ok(!bad.length, `chat ⇔ drawn: ${FA.ROWS.filter((r) => r.chat).length} rows are cards in the chat, ${FA.ROWS.filter((r) => !r.chat).length} are not (${FA.ROWS.filter((r) => !r.chat).map((r) => r.type).join(', ')})`, bad);
   const own = FA.ROWS.filter((r) => !r.chat).filter((r) => { const f = /src\/lib\/[\w-]+\.js/.exec(r.owner || ''); return !f || !files[f[0]]; }).map((r) => r.type);
   ok(!own.length, 'every non-chat row names the chat card that answers it, by its file (S1, the permission card, the proposal / API / wall cards)', own);
-  ok(FA.ROWS.filter((r) => r.chat).every((r) => FA.KINDS.includes(r.kind)), 'every chat row names its kind (the card\'s head and the chip say it)');
+  ok(verdictOf(FA.ROWS.filter((r) => r.chat).every((r) => FA.KINDS.includes(r.kind))), 'every chat row names its kind (the card\'s head and the chip say it)');
 }
 
 // ── ⑤b ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -205,14 +205,14 @@ console.log('⑤b THE ATTENTION DOCK\'s actions — every chat row stands in the
   const c0 = census(ROWSRC, CSS);
   ok(c0.hs.length >= 4 && c0.hidden.length === 0, `every container the row draws a verb in is SHOWN by the strip (${c0.hs.join(', ')})`, c0);
   { const planted = ROWSRC + "\nconst plantedHtml = (i, t) => `<div class=\"ut-new-answer\"><button type=\"button\" class=\"ut-act\">x</button></div>`;\n"; const c1 = census(planted, CSS); ok(c1.hidden.length === 1 && c1.hidden[0] === 'ut-new-answer', 'RED: a new answer container the row learns (planted) is named — the strip would hide its verbs', c1.hidden); }
-  { const c2 = census(ROWSRC, CSS.replace('.ut-exit-answer, .ut-reconnect-row, .ut-app-card, ', '')); ok(c2.hidden.includes('ut-exit-answer'), 'RED: the strip\'s whitelist without the answer row (Allow / Deny / Approve) names it', c2.hidden); }
+  { const c2 = census(ROWSRC, CSS.replace('.ut-exit-answer, .ut-reconnect-row, .ut-app-card, ', '')); ok(verdictOf(c2.hidden.includes('ut-exit-answer')), 'RED: the strip\'s whitelist without the answer row (Allow / Deny / Approve) names it', c2.hidden); }
   // r12 (the r11 acceptance — the strip drew no reach pick yet its Allow / Always sent the pick made on another copy): A PRESS POINT
   // NEVER SENDS A SCOPE IT DOES NOT SHOW — every row whose answer carries a reach (the row module's drawsPick) stands in the strip
   // (a chat row) and the strip SHOWS the line that says it (scopeHtml's ut-ak-scope)
   const reachRows = (src) => [...src.matchAll(/const drawsPick = \(i\) => !!\(i && i\.action && i\.action\.type === '([\w-]+)'/g)].map((m) => m[1]);
   const scopeShown = (src, css) => { const said = (/const scopeHtml = [^\n]*<div class="([\w-]+)"/.exec(src) || [])[1] || null; return { said, shown: !!said && shownOf(css).body.includes(said) }; };
   const rr = reachRows(ROWSRC), sc = scopeShown(ROWSRC, CSS);
-  ok(rr.length === 1 && rr.every((ty) => FA.ROWS.some((r) => r.type === ty && r.chat)) && sc.shown, `RED-able (r12 — 9f8b8d846: no such line): every row whose answer carries a reach (${rr.join(', ')}) stands in the strip, and the strip SHOWS the line that says the reach (${sc.said})`, { rr, sc });
+  ok(rr.length === 1 && gateOf(rr.every((ty) => FA.ROWS.some((r) => r.type === ty && r.chat))) && verdictOf(sc.shown), `RED-able (r12 — 9f8b8d846: no such line): every row whose answer carries a reach (${rr.join(', ')}) stands in the strip, and the strip SHOWS the line that says the reach (${sc.said})`, { rr, sc });
   { const c3 = scopeShown(ROWSRC, CSS.replace('.ut-ak-scope, ', '')); ok(!!c3.said && !c3.shown, 'RED: the strip\'s whitelist without the reach line names it — the strip would answer with a reach it hides', c3); }
 }
 
@@ -227,7 +227,7 @@ console.log('⑤c THE ANNOUNCE\'s rows — ONE policy (toastWorthy: bands 1–2,
 {
   const AM = require(path.join(ROOT, 'src/attention-model.js'));
   const has = typeof FA.announceWords === 'function';
-  ok(has && !('announceWorthy' in FA), 'RED-able (r11 — 7ec6c6dcf exports announceWorthy, «a need, never a notice»): the registry WORDS the announce (announceWords) and keeps no rule of its own — which arrival announces is the attention model\'s', Object.keys(FA).filter((k) => /announce/.test(k)));
+  ok(gateOf(has) && !('announceWorthy' in FA), 'RED-able (r11 — 7ec6c6dcf exports announceWorthy, «a need, never a notice»): the registry WORDS the announce (announceWords) and keeps no rule of its own — which arrival announces is the attention model\'s', Object.keys(FA).filter((k) => /announce/.test(k)));
   if (has) {
     const NOW = Date.now(), ann = (i, policy = null) => AM.toastWorthy(AM.rowOf(i, NOW), policy), band = (i) => AM.rowOf(i, NOW).band;
     const base = { status: 'open', kind: 'action', createdAt: NOW, sessionKey: 'claude:c0ffee' }, waitType = FA.WAIT_ACTIONS[0];
@@ -248,7 +248,7 @@ console.log('⑤c THE ANNOUNCE\'s rows — ONE policy (toastWorthy: bands 1–2,
     const one = items.find((i) => FA.needOf(i));
     const T0 = 1_800_000_000_000, W2 = (o, now) => FA.announceWords({ ...one, ...o }, { who: 'ops', what: 'run python3', now });
     const a = W2({ expiresAt: T0 + 42e3 }, T0), b = W2({ expiresAt: T0 + 5 * 60e3 }, T0), c = W2({ expiresAt: T0 - 1 }, T0), d = W2({ status: 'done', resolvedBy: 'ask-expired' }, T0), e = W2({}, T0);
-    ok(a.clock === '42 s left' && a.left === 42 && !a.expired && b.clock === '5 min left' && c.expired && c.clock === 'expired' && d.expired && d.clock === 'expired' && e.clock === '' && e.left === null && a.who === 'ops' && a.what === 'run python3',
+    ok(a.clock === '42 s left' && a.left === 42 && !a.expired && b.clock === '5 min left' && gateOf(c.expired) && c.clock === 'expired' && gateOf(d.expired) && d.clock === 'expired' && e.clock === '' && e.left === null && a.who === 'ops' && a.what === 'run python3',
       `the clock is the item's deadline: «${a.clock}» · «${b.clock}» · past it «${c.clock}» · resolved as expired «${d.clock}» · none «${e.clock}»`, { a, b, c, d, e });
     const zh = { '{n} s left': '还剩 {n} 秒', expired: '已过期' }, tz = (k, p) => (zh[k] || k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''));
     ok(FA.announceWords({ ...one, expiresAt: T0 + 42e3 }, { now: T0, t: tz }).clock === '还剩 42 秒', 'the client\'s t() words the clock (zh: «还剩 42 秒»)');
@@ -277,17 +277,17 @@ console.log('⑤d THE ARRIVAL\'s words (B-99f7) — a run ask\'s toast and annou
   const zkeys = ['sends to {hosts}', 'sends to {hosts} and {n} more', 'where it sends is unknown', '{who} wants to run {tool} with “{entries}”'], zd = Object.fromEntries(zkeys.map((k) => [k, zhOf(k)]));
   const tz = (k, p) => (zd[k] || k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''));
   const wz = AW(three[1], { t: tz }), wz0 = AW(three[0], { t: tz });
-  ok(has && new Set(w3).size === 3 && w3[0] === `${heads[0]} · ${clip(FA.runCardOf(three[0]).cmd)} · where it sends is unknown` && w3[1] === `${heads[1]} · ${clip(FA.runCardOf(three[1]).cmd)} · sends to db.example.com` && w3[2].startsWith(heads[2] + ' · curl ') && w3[2].endsWith(' · where it sends is unknown')
-    && w3.every((w) => !/a command with a stored secret/.test(w)) && many.endsWith(' · sends to a.example, b.example and 2 more') && sel !== drop && /drop table orders/.test(drop) && longW.length <= heads[1].length + 95 && /… · sends to db\.example\.com$/.test(longW) && none.every((x) => x === null),
+  ok(gateOf(has) && new Set(w3).size === 3 && w3[0] === `${heads[0]} · ${clip(FA.runCardOf(three[0]).cmd)} · where it sends is unknown` && w3[1] === `${heads[1]} · ${clip(FA.runCardOf(three[1]).cmd)} · sends to db.example.com` && gateOf(w3[2].startsWith(heads[2] + ' · curl ')) && gateOf(w3[2].endsWith(' · where it sends is unknown'))
+    && gateOf(w3.every((w) => !/a command with a stored secret/.test(w))) && gateOf(many.endsWith(' · sends to a.example, b.example and 2 more')) && sel !== drop && gateOf(/drop table orders/.test(drop)) && longW.length <= heads[1].length + 95 && gateOf(/… · sends to db\.example\.com$/.test(longW)) && verdictOf(none.every((x) => x === null)),
     `RED-able (B-99f7 — b06f36e90: three toasts «ops wants to run a command with a stored secret»): three run asks say three things — each its card's headline, its command's head, where it sends or that it is unknown (${J(w3)}); four hosts «…${many.slice(-40)}»; one program + one secret, two commands ⇒ two sentences; a long command cut at 60 («…${longW.slice(-40)}»); no facts / no run card ⇒ null (${J(none)})`, { w3, many, sel, drop, longW, none });
-  ok(Object.values(zd).every(Boolean) && /^运维 想用「生产数据库 · 密码」运行 psql · psql -h db\.example\.com .* · 发往 db\.example\.com$/.test(wz || '') && /· 发往哪里未知$/.test(wz0 || ''),
+  ok(gateOf(Object.values(zd).every(Boolean)) && gateOf(/^运维 想用「生产数据库 · 密码」运行 psql · psql -h db\.example\.com .* · 发往 db\.example\.com$/.test(wz || '')) && verdictOf(/· 发往哪里未知$/.test(wz0 || '')),
     `the client's t() words it from the REAL zh dictionary («${wz}» · «…${(wz0 || '').slice(-12)}»)`, { zd, wz, wz0 });
   const PSRC = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
   const ASRC = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
   const wired = { of: /const wordsOf = \(i, o\) => \(isCleared\(i\) \? clearedText\(\) : \(o && o\.arrival && arrivalWords\(i, \{ t \}\)\) \|\| /.test(ASRC),
     toast: /showToast\(`\$\{head\} · \$\{nameFor\(i\.sessionKey, \[i\]\)\}: \$\{wordsOf\(i, \{ arrival: true \}\)\}`/.test(PSRC), reword: /const want = `\$\{el\.dataset\.todoHead\} · \$\{nameFor\(it\.sessionKey, \[it\]\)\}: \$\{wordsOf\(it, \{ arrival: true \}\)\}`;/.test(PSRC),
     card: /const annWords = \(it\) => announceWords\(it, \{ who: nameFor\(it\.sessionKey, \[it\]\), what: wordsOf\(it, \{ arrival: true \}\),/.test(PSRC) };
-  ok(Object.values(wired).every(Boolean), `the panel says it on every arrival surface: the arrival toast, its re-word from the current record, the announce card — through the model's ONE wordsOf (its arrival option), a cleared item's sentence first (${J(wired)})`, wired);
+  ok(verdictOf(Object.values(wired).every(Boolean)), `the panel says it on every arrival surface: the arrival toast, its re-word from the current record, the announce card — through the model's ONE wordsOf (its arrival option), a cleared item's sentence first (${J(wired)})`, wired);
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const FSRC = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), from = '  const v = runCardOf(item, { t });\n  if (!v || !v.cmd || !v.headline) return null;\n';
   const Fm = FSRC.split(from).length === 2 ? require(mutantCopies('b99f7', ROOT).write('src/foryou-actions.js', editAnchor(FSRC, from, '  const v = null;\n  if (!v) return null;\n', "src/foryou-actions.js"), 'arrival')) : null;
@@ -304,18 +304,18 @@ console.log('⑤e WHO STARTED THE TURN (B-d868) — the «Allow for 1 hour» lin
   const last = (tb) => { const v = card(tb); const l = v && v.window && v.window.lines; return Array.isArray(l) ? l[l.length - 1] : null; };
   const got = { person: last({ by: 'person' }), peer: last({ by: 'peer', name: 'Sender Session' }), task: last({ by: 'task' }), unrecorded: last({ by: 'unrecorded' }), odd: last({ by: 'person-ish' }), nameless: last({ by: 'peer' }) };
   const before = card(undefined), beforeLines = before && before.window ? before.window.lines : null;
-  ok(got.person === 'The turn running when this asked was started by you' && got.peer === 'The turn running when this asked was started by another session, «Sender Session»' && got.task === 'The turn running when this asked was started by a background task finishing' && got.unrecorded === 'Who started this turn is not recorded' && got.odd === 'Who started this turn is not recorded' && got.nameless === 'The turn running when this asked was started by a delivered message, not typed here' && Array.isArray(beforeLines) && !beforeLines.some((x) => /This turn was started|not recorded/.test(x)),
+  ok(got.person === 'The turn running when this asked was started by you' && got.peer === 'The turn running when this asked was started by another session, «Sender Session»' && got.task === 'The turn running when this asked was started by a background task finishing' && got.unrecorded === 'Who started this turn is not recorded' && got.odd === 'Who started this turn is not recorded' && got.nameless === 'The turn running when this asked was started by a delivered message, not typed here' && gateOf(Array.isArray(beforeLines)) && !beforeLines.some((x) => /This turn was started|not recorded/.test(x)),
     `RED-able (fe1d59c41: the card said nothing of it): the window's lines end with who started the turn — ${J(got)}; a card filed before the fact says nothing of it`, { got, beforeLines });
   const VD = fs.readFileSync(path.join(ROOT, 'src/server/vault-run-door.js'), 'utf8'), WI = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   const iBound = VD.indexOf("        if (wfacts && JSON.stringify(wfacts).length > WINDOW_FACTS_MAX) { winUntil = null; wfacts = null; }"), iTurn = VD.indexOf("        if (wfacts) { let tb = null; try { tb = (useFacts(caller) || {}).turnBy; } catch { tb = null; } wfacts.turnBy = ");
-  ok(iBound > 0 && iTurn > iBound && /wfacts\.turnBy = tb && typeof tb === 'object' && typeof tb\.by === 'string' \? [^\n]* : \{ by: 'unrecorded' \}; \}/.test(VD) && WI.includes("turnBy: tb ? require('../message-manager.js').turnByForAsk({ ...tb, by: String(tb.by || 'unrecorded') }, s._turnByBackground) : null };")
-    && VD.includes("const tb0 = facts.window && facts.window.turnBy; facts.window = windowFactsOf(wList, wUntil, q.entries, { switchOn: !!q.plan.wswitch }); if (tb0) facts.window.turnBy = tb0;"),
+  ok(iBound > 0 && iTurn > iBound && gateOf(/wfacts\.turnBy = tb && typeof tb === 'object' && typeof tb\.by === 'string' \? [^\n]* : \{ by: 'unrecorded' \}; \}/.test(VD)) && gateOf(WI.includes("turnBy: tb ? require('../message-manager.js').turnByForAsk({ ...tb, by: String(tb.by || 'unrecorded') }, s._turnByBackground) : null };"))
+    && verdictOf(VD.includes("const tb0 = facts.window && facts.window.turnBy; facts.window = windowFactsOf(wList, wUntil, q.entries, { switchOn: !!q.plan.wswitch }); if (tb0) facts.window.turnBy = tb0;")),
     'the door copies the conversation\'s kept fact into the window\'s facts AFTER their own size bound (it never withdraws «Allow for 1 hour»; a conversation it cannot read ⇒ «unrecorded»), a redraw keeps the ask\'s fact; the wiring reads it off the session claude-stream-json keeps it on');
   // the reader's should (the owner's know / operate rule): on the For-you strip the window's lines are the fold's — who started
   // the turn rides the fold's SUMMARY, always shown (a phone never opens a title)
   const vb = card({ by: 'person' }), ROW = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
-  ok(!!vb && Array.isArray(vb.window.by) && vb.window.by[0].text === 'The turn running when this asked was started by you' && !('by' in (card(undefined) || { window: {} }).window)
-    && ROW.includes("<summary>${win.by ? `<span class=\"ut-run-hint ut-run-hint-window\">${segHtml(win.by)}</span> ` : ''}${win.short ? `<span class=\"ut-run-hint ut-run-hint-window ut-run-hint-short\">${segHtml(win.short)}</span> ` : ''}") && (ROW.split("(win.lines || []).filter((l) => !win.by || l !== segText(win.by))").length - 1) === 2
+  ok(!!vb && gateOf(Array.isArray(vb.window.by)) && vb.window.by[0].text === 'The turn running when this asked was started by you' && !('by' in (card(undefined) || { window: {} }).window)
+    && gateOf(ROW.includes("<summary>${win.by ? `<span class=\"ut-run-hint ut-run-hint-window\">${segHtml(win.by)}</span> ` : ''}${win.short ? `<span class=\"ut-run-hint ut-run-hint-window ut-run-hint-short\">${segHtml(win.short)}</span> ` : ''}")) && (ROW.split("(win.lines || []).filter((l) => !win.by || l !== segText(win.by))").length - 1) === 2
     && last({ by: 'unrecorded', why: 'background' }) === 'Who started this is not recorded: background work another turn started is still running',
     'the strip: the card hands its window `by` (the same words) and the strip draws it in the fold\'s summary, beside the hour\'s short words — seen without opening anything', vb && vb.window);
   const FS = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), from = "    ...(w.turnBy && typeof w.turnBy === 'object' ? [turnByWords(w.turnBy, t)] : [])];";
@@ -331,7 +331,7 @@ console.log('⑥ bandDoorsOf\'s types are rows; every field from its closed set;
 {
   const vi = code(files['src/vault-inventory.js']); const body = vi.slice(vi.indexOf('function bandDoorsOf('), vi.indexOf('\n}', vi.indexOf('function bandDoorsOf(')));
   const bt = [...body.matchAll(/type === '([a-z-]+)'/g)].map((m) => m[1]);
-  ok(bt.length >= 4 && bt.every((t) => FA.ROW_OF[t]), `bandDoorsOf (src/vault-inventory.js) branches on rows only (${bt.join(', ')})`, bt);
+  ok(bt.length >= 4 && verdictOf(bt.every((t) => FA.ROW_OF[t])), `bandDoorsOf (src/vault-inventory.js) branches on rows only (${bt.join(', ')})`, bt);
   const SCOPES = ['conversation', 'about', 'group'];
   const badFieldsOf = (rows) => rows.filter((r) => !FA.ANSWERS.includes(r.answer) || !FA.CARDS.includes(r.card) || typeof r.handled !== 'boolean' || typeof r.waits !== 'boolean' || typeof r.chat !== 'boolean' || !SCOPES.includes(r.scope) || !(r.identity === null || /^[a-zA-Z]+$/.test(r.identity)) || (r.opens !== undefined && !FA.OPENS.includes(r.opens))).map((r) => r.type);
   const badF = badFieldsOf(FA.ROWS);
@@ -355,11 +355,11 @@ console.log('⑦ THE RATCHET — the foryou family in the literal-id branch cens
 {
   const IB = await import(path.join(ROOT, 'scripts/id-branch-census.mjs'));
   const base = JSON.parse(read('scripts/fixtures/id-branch-baseline.json'));
-  ok(IB.FAMILIES.foryou && JSON.stringify(IB.FAMILIES.foryou.ids) === JSON.stringify(FA.ROWS.map((r) => r.type)) && IB.FAMILIES.foryou.owners.some((o) => o.file === 'src/foryou-actions.js'), 'the foryou family\'s ids ARE the registry\'s types, the registry its owner');
+  ok(gateOf(IB.FAMILIES.foryou) && JSON.stringify(IB.FAMILIES.foryou.ids) === JSON.stringify(FA.ROWS.map((r) => r.type)) && verdictOf(IB.FAMILIES.foryou.owners.some((o) => o.file === 'src/foryou-actions.js')), 'the foryou family\'s ids ARE the registry\'s types, the registry its owner');
   const now = IB.census(ROOT).counts.foryou;
   const j = IB.judge({ foryou: base.foryou || {} }, { foryou: now });
   ok(!!base.foryou && !j.rises.length, `the baseline holds the family (${IB.total(base.foryou)} branch lines) and nothing rose (${IB.total(now)} now) — test-architecture §78 keeps it falling only`, j.rises);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

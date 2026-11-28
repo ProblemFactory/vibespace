@@ -42,7 +42,7 @@ const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '
 const RUNTIME = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-toast-pass-rt-'));
 fs.chmodSync(RUNTIME, 0o700);
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -127,7 +127,7 @@ const boot = async (p, { patchCss = false } = {}) => {
   await cdp('Emulation.setUserAgentOverride', { userAgent: p.touch ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' : '' });
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await sleep(500);
-  check(`[${p.name}] the app boots (its splash gone — it covers everything until app.ready)`, await waitFor(`!!window.app && document.readyState === 'complete' && !document.getElementById('loading-screen') && !!document.querySelector(${STYLE_LINK})`));
+  check(`[${p.name}] the app boots (its splash gone — it covers everything until app.ready)`, verdictOf(await waitFor(`!!window.app && document.readyState === 'complete' && !document.getElementById('loading-screen') && !!document.querySelector(${STYLE_LINK})`)));
   if (patchCss) {
     // the PATCHED COPY: style.css with the pre-fix rule — the whole toast a hit target again
     const n = await evalJs(`(async () => {
@@ -145,26 +145,26 @@ const boot = async (p, { patchCss = false } = {}) => {
 };
 
 const legs = async (p) => {
-  check(`[${p.name}] the real showToast is in the page`, await boot(p));
+  check(`[${p.name}] the real showToast is in the page`, verdictOf(await boot(p)));
   // (a) body tap ⇒ the pane
   await evalJs(`window.__t = window.__toastProbe.showToast('Copied to your clipboard', { duration: 4000 }); true`);
   await sleep(300);
   const shown = await evalJs(`(() => { const el = window.__t, r = el.getBoundingClientRect(), cs = getComputedStyle(el), b = el.querySelector('.global-toast-body');
     return { inView: r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight, opacity: +cs.opacity, vis: cs.visibility, sel: getComputedStyle(b).userSelect, pe: cs.pointerEvents, x: getComputedStyle(el.querySelector('.global-toast-x')).pointerEvents }; })()`);
-  check(`[${p.name}] (a) the toast SHOWS as before: in the viewport, opaque, visible, its words unselectable; the box passes the pointer, the ✕ keeps it`, shown.inView && shown.opacity === 1 && shown.vis === 'visible' && shown.sel === 'none' && shown.pe === 'none' && shown.x === 'auto', shown);
+  check(`[${p.name}] (a) the toast SHOWS as before: in the viewport, opaque, visible, its words unselectable; the box passes the pointer, the ✕ keeps it`, gateOf(shown.inView) && shown.opacity === 1 && shown.vis === 'visible' && shown.sel === 'none' && shown.pe === 'none' && shown.x === 'auto', shown);
   const body = await evalJs(atPoint('#global-toasts .global-toast-body'));
   const before = await pane();
   check(`[${p.name}] (a) under the toast's body the hit target is the pane`, (await evalJs(hitIs(body))) === 'pane', await evalJs(hitIs(body)));
   await tap(body);
   const a = { click: (await pane()) - before, down: await evalJs('window.__pane.down'), alive: await evalJs('window.__t.isConnected') };
-  check(`[${p.name}] (a) a tap on the toast's body reaches the pane once; the toast stays`, a.click === 1 && a.down >= 1 && a.alive, a);
+  check(`[${p.name}] (a) a tap on the toast's body reaches the pane once; the toast stays`, a.click === 1 && a.down >= 1 && verdictOf(a.alive), a);
   if (p.name === 'phone') await shot('phone-after.png');
   // (e) desktop hover on ✕
   const x = await evalJs(atPoint('#global-toasts .global-toast-x'));
   if (!touch) {
     await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x.x, y: x.y });
     await sleep(100);
-    check(`[${p.name}] (e) the ✕ still takes the hover`, await evalJs(`document.querySelector('#global-toasts .global-toast-x').matches(':hover')`));
+    check(`[${p.name}] (e) the ✕ still takes the hover`, verdictOf(await evalJs(`document.querySelector('#global-toasts .global-toast-x').matches(':hover')`)));
   }
   // (b) ✕ closes, the pane hears nothing
   const b0 = await pane();
@@ -206,7 +206,7 @@ try {
   for (const p of PROFILES) await legs(p);
   // CONTROL: the pre-fix rule restored ⇒ the body tap is swallowed
   const p = PROFILES[1];
-  check(`[${p.name}] CONTROL: the real showToast is in the page`, await boot(p, { patchCss: true }));
+  check(`[${p.name}] CONTROL: the real showToast is in the page`, verdictOf(await boot(p, { patchCss: true })));
   await evalJs(`window.__t = window.__toastProbe.showToast('Copied to your clipboard', { duration: 4000 }); true`);
   await sleep(300);
   const body = await evalJs(atPoint('#global-toasts .global-toast-body'));
@@ -218,4 +218,4 @@ try {
 } catch (e) { failed++; console.error('✗ threw:', e && e.stack || e); }
 try { sock.close(); } catch {}
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

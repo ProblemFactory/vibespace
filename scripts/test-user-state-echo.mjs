@@ -27,7 +27,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 const UO = require(path.join(REPO, 'src/user-state-ops.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -85,7 +85,7 @@ console.log('§1 the ops (src/user-state-ops.js): per item, per member, per fiel
   const emptied = UO.applyOps({ sessionConfigs: { c: { model: 'm' } } }, [{ key: 'sessionConfigs', item: 'c', field: 'model', value: null }]);
   ok(!('c' in emptied.sessionConfigs), 'a config whose last field goes is removed (as setSessionConfig did)');
   const probs = [{ key: 'nope', item: 'x', value: true }, { key: 'archivedSessions', item: '', value: true }, { key: 'archivedSessions', item: 'x', value: 'yes' }, { key: 'sessionConfigs', item: 'x', value: 1 }, { key: 'sessionGroups', item: 'g', member: 'm' }, 5].map(UO.opProblem);
-  ok(probs.every(Boolean) && UO.opProblem({ key: 'sessionModes', item: 'x', value: null }) === null, 'opProblem refuses by name: an unknown key, an empty item, a non-boolean set value, a config op without its field, a member op without true/false, a non-object', probs);
+  ok(gateOf(probs.every(Boolean)) && UO.opProblem({ key: 'sessionModes', item: 'x', value: null }) === null, 'opProblem refuses by name: an unknown key, an empty item, a non-boolean set value, a config op without its field, a member op without true/false, a non-object', probs);
   ok(JSON.stringify(UO.parseBatch('pgabc123:7')) === '{"page":"pgabc123","seq":7}' && UO.parseBatch('x:1') === null && UO.parseBatch('pgabc123:0') === null, 'a batch id is <page>:<seq> (seq ≥ 1)');
   ok(!('stateRev' in UO.personKeys({ stateRev: 9, archivedSessions: [] })) && UO.revOf({ stateRev: '12' }) === 12 && UO.revOf({}) === 0, 'stateRev is the server\'s: personKeys drops it, revOf reads it');
 }
@@ -386,8 +386,8 @@ console.log('§2 the route (src/routes/persistence.js): the server\'s counter, o
   ].map((body) => w.call(w.H.ops || w.H.patch, body));
   // round 6, MUST 3: the whole-key door takes no ops at all (a page of this release never sends it any)
   const oldDoor = w.call(w.H.patch, { batches: [{ batch: 'pgtest09:1', ops: [{ key: 'archivedSessions', item: a, value: false }] }], born: 1, seq: 1 });
-  ok(bad.status === 200 && JSON.stringify(bad.body.applied) === JSON.stringify(['pgtest01:5']) && bad.body.refused.length === 2 && bad.body.refused[0].batch === 'pgtest01:4' && /^op 1: a field key names its field/.test(bad.body.refused[0].error) && /non-empty list of ops/.test(bad.body.refused[1].error)
-    && (badAgain.body.refused || []).length === 1 && badAgain.body.refused[0].batch === 'pgtest01:4' && shapes.every((r) => r.status === 400) && /'<page>:<seq>'/.test(shapes[0].body.error) && /oldest first/.test(shapes[1].body.error) && /ONE page/.test(shapes[2].body.error) && /non-empty list/.test(shapes[3].body.error) && /whole top-level keys beside batches \(ops, batch\)/.test(shapes[4].body.error) && /whole top-level keys beside batches/.test(shapes[5].body.error) && oldDoor.status === 400 && /ops go to PATCH \/api\/user-state\/batches/.test(oldDoor.body.error)
+  ok(bad.status === 200 && JSON.stringify(bad.body.applied) === JSON.stringify(['pgtest01:5']) && bad.body.refused.length === 2 && bad.body.refused[0].batch === 'pgtest01:4' && gateOf(/^op 1: a field key names its field/.test(bad.body.refused[0].error)) && gateOf(/non-empty list of ops/.test(bad.body.refused[1].error))
+    && (badAgain.body.refused || []).length === 1 && badAgain.body.refused[0].batch === 'pgtest01:4' && gateOf(shapes.every((r) => r.status === 400)) && gateOf(/'<page>:<seq>'/.test(shapes[0].body.error)) && gateOf(/oldest first/.test(shapes[1].body.error)) && gateOf(/ONE page/.test(shapes[2].body.error)) && gateOf(/non-empty list/.test(shapes[3].body.error)) && gateOf(/whole top-level keys beside batches \(ops, batch\)/.test(shapes[4].body.error)) && gateOf(/whole top-level keys beside batches/.test(shapes[5].body.error)) && oldDoor.status === 400 && gateOf(/ops go to PATCH \/api\/user-state\/batches/.test(oldDoor.body.error))
     && UO.revOf(w.call(w.H.get).body) === 4 && JSON.stringify(w.call(w.H.get).body.archivedSessions) === JSON.stringify([a, b]),
     'a refusal names its batch and its op — refused ON ITS OWN (the good batch beside it applies; sent again, it is refused again, by name); a malformed body is refused whole, by name (a bad id, not oldest first, two pages, none, the round-4 {ops} body, whole keys beside batches); the whole-key door takes no ops', [bad.body, badAgain.body, shapes.map((r) => r.body.error), oldDoor.body]);
   const cfg = w.call(w.H.ops || w.H.patch, { batches: [{ batch: 'pgtest02:1', ops: [{ key: 'sessionConfigs', item: a, field: 'model', value: 'opus' }] }] });
@@ -402,7 +402,7 @@ console.log('§2 the route (src/routes/persistence.js): the server\'s counter, o
   let exported = null;
   await new Promise((resolve) => { handlerOf(P2.router, 'post', '/api/config/export')({ body: { sections: ['userState'] }, query: {}, params: {}, headers: {}, app: { locals: {} } }, { status() { return this; }, json(o) { exported = o; resolve(); }, setHeader() { }, send(o) { exported = typeof o === 'string' ? JSON.parse(o) : o; resolve(); }, end() { resolve(); } }, () => resolve()); setTimeout(resolve, 2000); });
   const us = exported && (exported.sections ? exported.sections.userState : (exported.file && exported.file.sections && exported.file.sections.userState));
-  ok(!!us && Array.isArray(us.archivedSessions) && !('stateRev' in us), 'the config export carries the person\'s keys and never stateRev', us ? Object.keys(us) : exported);
+  ok(!!us && gateOf(Array.isArray(us.archivedSessions)) && !('stateRev' in us), 'the config export carries the person\'s keys and never stateRev', us ? Object.keys(us) : exported);
 }
 
 // ════════ §3 THE OWNER'S SCENE ════════
@@ -440,12 +440,12 @@ console.log('§3 THE OWNER\'S SCENE: 120 archive clicks at 2–5 a second, the h
 {
   const r = await ownerScene(STATE_SRC);
   ok(!r.rolledBack, 'at NO moment does the page show a conversation the person archived as unarchived again (checked after every request, answer and echo)', r.rolledBack);
-  ok(r.server.archivedSessions.length === 120 && r.page._archivedIds.size === 120 && r.archived.size === 120 && r.server.archivedSessions.every((k) => r.page._archivedIds.has(k)), 'at rest the server and the page hold all 120 archives', { server: r.server.archivedSessions.length, page: r.page._archivedIds.size });
-  ok(r.patches >= 120 && r.patches <= 130 && !r.twice && pendingOf(r.page) === 0 && [...r.archived].every((k) => r.server.archivedSessions.includes(k)) && r.notSaved === 0 && r.saved === 0 && !r.page.__toasts.length,
+  ok(r.server.archivedSessions.length === 120 && r.page._archivedIds.size === 120 && r.archived.size === 120 && verdictOf(r.server.archivedSessions.every((k) => r.page._archivedIds.has(k))), 'at rest the server and the page hold all 120 archives', { server: r.server.archivedSessions.length, page: r.page._archivedIds.size });
+  ok(r.patches >= 120 && r.patches <= 130 && !r.twice && pendingOf(r.page) === 0 && gateOf([...r.archived].every((k) => r.server.archivedSessions.includes(k))) && r.notSaved === 0 && r.saved === 0 && !r.page.__toasts.length,
     `every act on the wire at the act: ${r.patches} PATCHes for 120 clicks — the base's count (one request a click), each body ONE op instead of the whole list; the late ones re-sent one at a time (a paced probe), never a second copy of each; each applied once; NOTHING said (round 9: no word about waiting, none about arriving — ${r.page.__toasts.length} words); the server ends with exactly the person's 120 acts`, { patches: r.patches, twice: r.twice, notSaved: r.notSaved, saved: r.saved });
   const v = await ownerScene(STATE_SRC, { seed: 901, clicks: 300, stall: 90000, gap: [125, 375], reverses: true, phone: true });
   const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
-  ok(!v.rolledBack && same(v.server.archivedSessions, v.archived) && same(v.page._archivedIds, v.archived) && same(v.other._archivedIds, v.archived) && !v.twice && pendingOf(v.page) === 0 && v.patches >= v.acts && v.patches <= v.acts + 15 && v.notSaved === 0 && v.saved === 0 && !v.page.__toasts.length,
+  ok(!v.rolledBack && gateOf(same(v.server.archivedSessions, v.archived)) && gateOf(same(v.page._archivedIds, v.archived)) && gateOf(same(v.other._archivedIds, v.archived)) && !v.twice && pendingOf(v.page) === 0 && v.patches >= v.acts && v.patches <= v.acts + 15 && v.notSaved === 0 && v.saved === 0 && !v.page.__toasts.length,
     `THE VERIFIER'S SCENE — 300 clicks at 2–8 a second, 30 of them reversed inside the burst, the hub's first answer 90 s late: no rollback; ${v.patches} PATCHes for ${v.acts} acts (${v.patches >= v.acts ? `one per act, as on the base, + ${v.patches - v.acts} paced re-sends — at most one per 15 s bound while the hub is behind` : `${v.acts - v.patches} acts never got a request of their own`}), each body one op instead of the whole list; each applied once; nothing said (${v.page.__toasts.length} words); the server, the page and the phone end with exactly the person's ${v.archived.size} archives`, { rolledBack: v.rolledBack, patches: v.patches, acts: v.acts, twice: v.twice, notSaved: v.notSaved, saved: v.saved, server: v.server.archivedSessions.length, want: v.archived.size });
 }
 
@@ -719,7 +719,7 @@ console.log('§5 the Manage-mode batch (sidebar-workbench.js _applyManageMarks: 
   let shownAll = true;
   await w.run(Infinity, () => { if (w.sessions.slice(0, 8).some((s) => !p._archivedIds.has(s.sessionKey))) shownAll = false; });
   const st = w.serverState();
-  ok(w.requests - r0 === 1 && w.writes.length === 1 && !!w.writes[0].ops && w.writes[0].ops.length === 8 && st.archivedSessions.length === 8 && shownAll, 'eight marks = ONE request carrying eight ops; shown archived throughout, all eight on the server', { requests: w.requests - r0, ops: w.writes[0] && w.writes[0].ops && w.writes[0].ops.length });
+  ok(w.requests - r0 === 1 && w.writes.length === 1 && !!w.writes[0].ops && w.writes[0].ops.length === 8 && st.archivedSessions.length === 8 && verdictOf(shownAll), 'eight marks = ONE request carrying eight ops; shown archived throughout, all eight on the server', { requests: w.requests - r0, ops: w.writes[0] && w.writes[0].ops && w.writes[0].ops.length });
 }
 
 // ════════ §6 A RELOAD BEFORE THE ANSWER — ROUND 4: EVERY ACT IS ON THE WIRE AT THE ACT ════════
@@ -742,7 +742,7 @@ for (const variant of ['never reached before the reload', 'applied, answer lost'
   const want = variant.startsWith('two acts') ? [s, s2] : [s];
   const appliedTimes = want.map((x) => w.writes.filter((wr) => wr.kind === 'ops' && wr.ops.some((o) => o.item === x.sessionKey)).length);
   const ownWrites = w.writes.filter((wr) => wr.batch && wr.batch.startsWith(pageIdOf(p1) + ':'));
-  ok(want.every((x) => st.archivedSessions.includes(x.sessionKey) && p2._archivedIds.has(x.sessionKey)) && appliedTimes.every((n) => n === 1) && ownWrites.length === want.length && pageIdOf(p2) !== pageIdOf(p1),
+  ok(gateOf(want.every((x) => st.archivedSessions.includes(x.sessionKey) && p2._archivedIds.has(x.sessionKey))) && gateOf(appliedTimes.every((n) => n === 1)) && ownWrites.length === want.length && pageIdOf(p2) !== pageIdOf(p1),
     `act, reload before the answer (${variant}): each act's OWN request was on the wire at the act — it lands ONCE after the page is gone; the new page (a new id) shows it`, { appliedTimes, server: st.archivedSessions, dup: w.dup });
 }
 {
@@ -798,7 +798,7 @@ console.log('§7 nothing is said done that is not: a failing write stays shown, 
   failing = false;
   await w.run(Infinity);
   const st = w.serverState();
-  ok(shownWhileFailing && toastsWhileFailing === 0 && st.archivedSessions.includes(s.sessionKey) && !p.__toasts.length && pendingOf(p) === 0,
+  ok(gateOf(shownWhileFailing) && toastsWhileFailing === 0 && gateOf(st.archivedSessions.includes(s.sessionKey)) && !p.__toasts.length && pendingOf(p) === 0,
     'a failing write (503 three times): shown throughout, re-sent on 2 / 5 / 15 s, it lands — NOTHING said (round 9: the page speaks only when it takes something back)', p.__toasts);
   // a refusal is said in the person's words, from the CODE the route sends (never the route's English)
   w.H[door] = (req, res) => res.status(400).json({ error: 'op 0: planted refusal (the route\'s English)', code: 'bad-value' });
@@ -815,7 +815,7 @@ console.log('§7 nothing is said done that is not: a failing write stays shown, 
   const words = ['The server refused a change ({reason}), so it was undone here', 'The server refused a change, so it was undone here.', 'a kind of change it does not keep', 'a name it does not keep', 'a value it does not take', 'a change it could not read', 'an empty change', 'too many changes at once', 'too large to take at once', 'a value nested too deep', 'the id of an earlier change', "A change made more than 7 days ago was not kept — this page now shows the server's", "{n} changes made more than 7 days ago were not kept — this page now shows the server's"];
   const gone = ['Not saved yet — the server did not answer; it is sent again while this page stays open', 'Saved — the changes that were waiting reached the server', 'Not saved — sign in again; this page sends it once you are signed in'];
   const st8 = read('src/lib/sidebar-state.js');
-  ok(words.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')) && gone.every((k) => !zh.includes(JSON.stringify(k)) && !ja.includes(JSON.stringify(k)) && !st8.includes(k)),
+  ok(gateOf(words.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))) && verdictOf(gone.every((k) => !zh.includes(JSON.stringify(k)) && !ja.includes(JSON.stringify(k)) && !st8.includes(k))),
     'every sentence the page can say has its zh / ja words — a refusal (its template and the nine reasons), the 7-day rule (one and plural); the waiting / arriving / sign-in sentences are GONE from the page and both languages (round 9)', words.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':')));
 }
 
@@ -847,7 +847,7 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
   await w.run(w.now() + 600000);
   const st = w.serverState();
   const want = [1, 2, 3, 4].every((i) => st.archivedSessions.includes(w.sessions[i].sessionKey)) && st.starredSessions.includes(w.sessions[5].sessionKey) && st.starredSessions.includes(w.sessions[6].sessionKey);
-  ok(want && ownOnly(w, [A, B]) && opsApplied(w, (o) => o.key === 'archivedSessions') === 4 && converged(w, [A, B]),
+  ok(gateOf(want) && gateOf(ownOnly(w, [A, B])) && opsApplied(w, (o) => o.key === 'archivedSessions') === 4 && verdictOf(converged(w, [A, B])),
     'd1 — a tab throttled 40 s with a hung write and an OPEN batch: nothing of A\'s is sent but by A; every act once (4 archive ops for 4 acts), nothing lost; both tabs converge', { server: [st.archivedSessions.length, st.starredSessions.length], dup: w.dup });
 }
 {
@@ -869,7 +869,7 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
   A.toggleStar(w.sessions[3]);
   await w.run(w.now() + 600000);
   const st = w.serverState();
-  ok(pageIdOf(A) !== pageIdOf(D) && !twiceOf(w).length && st.archivedSessions.includes(w.sessions[1].sessionKey) && st.archivedSessions.includes(w.sessions[2].sessionKey) && st.starredSessions.includes(w.sessions[1].sessionKey) && st.starredSessions.includes(w.sessions[3].sessionKey) && ownOnly(w, [A, D]) && converged(w, [A, D]),
+  ok(pageIdOf(A) !== pageIdOf(D) && !twiceOf(w).length && gateOf(st.archivedSessions.includes(w.sessions[1].sessionKey)) && gateOf(st.archivedSessions.includes(w.sessions[2].sessionKey)) && gateOf(st.starredSessions.includes(w.sessions[1].sessionKey)) && gateOf(st.starredSessions.includes(w.sessions[3].sessionKey)) && gateOf(ownOnly(w, [A, D])) && verdictOf(converged(w, [A, D])),
     'd2 — a duplicate of a throttled tab is simply another page: its own id (made at its load), no batch id minted twice, every act of both once, both converge', { a: pageIdOf(A), d: pageIdOf(D), twice: twiceOf(w) });
 }
 {
@@ -897,7 +897,7 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
   await w.run(w.now() + 600000);
   const st = w.serverState();
   const newBatch = after.filter((id) => !openBefore.includes(id));
-  ok(newBatch.length >= 1 && pageIdOf(P1) !== pageIdOf(P2) && [1, 2].every((i) => st.archivedSessions.includes(w.sessions[i].sessionKey)) && [1, 3].every((i) => st.starredSessions.includes(w.sessions[i].sessionKey)) && opsApplied(w, (o) => o.key === 'archivedSessions') === 2 && converged(w, [P1]),
+  ok(newBatch.length >= 1 && pageIdOf(P1) !== pageIdOf(P2) && gateOf([1, 2].every((i) => st.archivedSessions.includes(w.sessions[i].sessionKey))) && gateOf([1, 3].every((i) => st.starredSessions.includes(w.sessions[i].sessionKey))) && opsApplied(w, (o) => o.key === 'archivedSessions') === 2 && verdictOf(converged(w, [P1])),
     'd5 — hidden → another page in the same tab → back from the cache: P1\'s next act is a NEW batch; the two pages never share an id; every act once; P1 converges', { openBefore, after, server: [st.archivedSessions.length, st.starredSessions.length] });
 }
 {
@@ -988,7 +988,7 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
     'a store under another name': plantIn('src/lib/sidebar.js', "const st = window.sessionStorage; st.setItem('x', '1');"),
   };
   const moreRed = Object.fromEntries(Object.entries(more).map(([k, v]) => [k, censusOf(v).length]));
-  ok(censusOf(planted).length >= 1 && censusOf(plantedOps).length >= 1 && censusOf(plantedWrap).length >= 1 && Object.values(moreRed).every((n) => n >= 1),
+  ok(censusOf(planted).length >= 1 && censusOf(plantedOps).length >= 1 && censusOf(plantedWrap).length >= 1 && verdictOf(Object.values(moreRed).every((n) => n >= 1)),
     'CONTROL: a planted record of acts in sidebar-state.js, round 2\'s variable-key wrapper, a BroadcastChannel in the ops module, a bracket write, an IndexedDB put, a cookie, a second cookie beside the launch ground\'s, a sessionStorage seq in another file, a counter spelled vsSeq in a NEW file and a store under another name are each RED by name', moreRed);
 }
 
@@ -1008,7 +1008,7 @@ console.log('§10 round 2 law 2: a send that never settles is a failed send — 
   await w.run(w.now() + 60000);
   const st = w.serverState();
   const all = [1, 2].every((i) => st.archivedSessions.includes(w.sessions[i].sessionKey)) && st.starredSessions.includes(w.sessions[3].sessionKey);
-  ok(all && [1, 2].every((i) => phone._archivedIds.has(w.sessions[i].sessionKey)) && phone._starredIds.has(w.sessions[3].sessionKey) && w.dup >= 1 && !twiceOf(w).length && pendingOf(A) === 0 && !A.__toasts.some((x) => /Not saved yet/.test(x.text)),
+  ok(gateOf(all) && gateOf([1, 2].every((i) => phone._archivedIds.has(w.sessions[i].sessionKey))) && gateOf(phone._starredIds.has(w.sessions[3].sessionKey)) && w.dup >= 1 && !twiceOf(w).length && pendingOf(A) === 0 && !A.__toasts.some((x) => /Not saved yet/.test(x.text)),
     'HANG with a later act (round 5): the next act\'s request CARRIES the act whose request never answered — it lands with it (a duplicate where it had landed — applied once); no act is late, so nothing is said; the server and the phone hold all three', { dup: w.dup, twice: twiceOf(w), toasts: A.__toasts.map((x) => x.text), server: [st.archivedSessions.length, st.starredSessions.length] });
 }
 {
@@ -1025,7 +1025,7 @@ console.log('§10 round 2 law 2: a send that never settles is a failed send — 
   await w.run(w.now() + 2000);   // past the 15 s bound
   const saidAt = A.__toasts.filter((x) => /Not saved yet/.test(x.text)).length;
   await w.run(w.now() + 60000);
-  ok(saidBefore === 0 && saidAt === 0 && w.serverState().archivedSessions.includes(w.sessions[1].sessionKey) && w.dup === 1 && !twiceOf(w).length && pendingOf(A) === 0 && !A.__toasts.length,
+  ok(saidBefore === 0 && saidAt === 0 && gateOf(w.serverState().archivedSessions.includes(w.sessions[1].sessionKey)) && w.dup === 1 && !twiceOf(w).length && pendingOf(A) === 0 && !A.__toasts.length,
     'HANG with no later act: the paced re-send carries it again under ITS id after the 15 s bound (answered as a duplicate — applied once); nothing said at any point (round 9)', { saidBefore, saidAt, dup: w.dup, toasts: A.__toasts.map((x) => x.text) });
 }
 {
@@ -1040,7 +1040,7 @@ console.log('§10 round 2 law 2: a send that never settles is a failed send — 
   w.disconnect(A); w.connect(A); A._fetchUserState();   // the socket comes back after 3 s — before the bound
   await w.run(w.now() + 2000);
   const st = w.serverState();
-  ok(st.archivedSessions.includes(w.sessions[1].sessionKey) && pendingOf(A) <= 1, 'HANG: a reconnect re-sends what is IN FLIGHT too (its request lost on the way) — the act lands at the reconnect, not at the 15 s bound', { server: st.archivedSessions });
+  ok(gateOf(st.archivedSessions.includes(w.sessions[1].sessionKey)) && pendingOf(A) <= 1, 'HANG: a reconnect re-sends what is IN FLIGHT too (its request lost on the way) — the act lands at the reconnect, not at the 15 s bound', { server: st.archivedSessions });
 }
 
 // ════════ §11 ROUND 2, LAW 3 — A COUNTER THAT GOES BACK IS A NEW EPOCH, NOT AN OLD ECHO ════════
@@ -1090,7 +1090,7 @@ for (const kind of ['restore (a LOWER counter)', 'restart (the SAME file)']) {
   const st = w.serverState();
   const want = kind.startsWith('restore') ? { arch: 2 } : { arch: 5 };
   const conv = [A, B].every((p) => slotDiff(slotsOf(viewOfPage(p)), slotsOf(st)).length === 0);
-  ok(st.archivedSessions.length === want.arch && st.starredSessions.includes(w.sessions[7].sessionKey) && conv && pendingOf(A) === 0 && pendingOf(B) === 0 && (kind.startsWith('restore') ? UO.revOf(st) < live : UO.revOf(st) > live),
+  ok(st.archivedSessions.length === want.arch && gateOf(st.starredSessions.includes(w.sessions[7].sessionKey)) && gateOf(conv) && pendingOf(A) === 0 && pendingOf(B) === 0 && (kind.startsWith('restore') ? UO.revOf(st) < live : UO.revOf(st) > live),
     `EPOCH — ${kind}: every page takes the server's new life (rev ${live} → ${UO.revOf(st)}), nothing ignored, nothing stuck; B's unanswered act replayed over it; both pages converge on it`, { arch: st.archivedSessions.length, starred: st.starredSessions.length, conv, pending: [pendingOf(A), pendingOf(B)], writes: w.writes.length - writes0 });
 }
 
@@ -1113,7 +1113,7 @@ console.log('§12 round 2, smaller: an older server, a sign-in, the migration, t
   await w.run(w.now() + 600000);   // ten virtual minutes: a page that retried for ever is RED here, not a hang
   oldState = { ...oldState, starredSessions: [w.sessions[2].sessionKey] }; oldBroadcast();   // another (old) page stars #2
   await w.run(w.now() + 600000);   // ten virtual minutes: a page that retried for ever is RED here, not a hang
-  ok(bodies.length === 0 && !oldState.archivedSessions.includes(w.sessions[1].sessionKey) && A._archivedIds.has(w.sessions[1].sessionKey) && pendingOf(A) >= 1 && A.__toasts.length === 1 && /^These changes are not saved yet — the server does not take them/.test(A.__toasts[0].text) && !/reload/i.test(A.__toasts[0].text) && A._starredIds.has(w.sessions[2].sessionKey) && Object.keys(oldState).every((k) => !['batches', 'born', 'seq'].includes(k)),
+  ok(bodies.length === 0 && !oldState.archivedSessions.includes(w.sessions[1].sessionKey) && gateOf(A._archivedIds.has(w.sessions[1].sessionKey)) && pendingOf(A) >= 1 && A.__toasts.length === 1 && gateOf(/^These changes are not saved yet — the server does not take them/.test(A.__toasts[0].text)) && !/reload/i.test(A.__toasts[0].text) && gateOf(A._starredIds.has(w.sessions[2].sessionKey)) && verdictOf(Object.keys(oldState).every((k) => !['batches', 'born', 'seq'].includes(k))),
     'OLDER SERVER (round 7, C1): a page of this release NEVER speaks whole keys — its refused ops door is a failure like any other: the act kept on the page and retried within the bounds, its 404 streak said ONCE in twenty minutes, past 3 min and never «reload» (round 14 follow-up), nothing written to the old file (no whole keys, no junk key), no «older VibeSpace» sentence; the other page\'s change is shown', { bodies, toasts: A.__toasts.map((x) => x.text), pending: pendingOf(A) });
 }
 {
@@ -1132,13 +1132,13 @@ console.log('§12 round 2, smaller: an older server, a sign-in, the migration, t
   out = false;
   A._fetchUserState();
   await w.run(w.now() + 600000);   // ten virtual minutes: a page that retried for ever is RED here, not a hang
-  ok(tries === 1 && !A.__toasts.length && w.serverState().archivedSessions.includes(w.sessions[1].sessionKey),
+  ok(tries === 1 && !A.__toasts.length && verdictOf(w.serverState().archivedSessions.includes(w.sessions[1].sessionKey)),
     'SIGN-IN: a 401 is NOT retried on a timer (1 request in 60 s) and the page says nothing — signing in is the app\'s, as on master (round 9); the next good GET sends it', { tries, toasts: A.__toasts });
 }
 {
   // (3) the render-time key migration runs on the first SERVER state, never on the display copy (sidebar.js's gate)
   const sbJs = read('src/lib/sidebar.js');
-  ok(/if \(this\._userStateFetched && this\._migrateUserStateKeys\(this\._allSessions\)\) \{/.test(sbJs), 'MIGRATION (smaller 3): sidebar.js migrates keys only once a SERVER state was applied (`_userStateFetched && _migrateUserStateKeys(…)`) — never the stale display copy before the first GET');
+  ok(verdictOf(/if \(this\._userStateFetched && this\._migrateUserStateKeys\(this\._allSessions\)\) \{/.test(sbJs)), 'MIGRATION (smaller 3): sidebar.js migrates keys only once a SERVER state was applied (`_userStateFetched && _migrateUserStateKeys(…)`) — never the stale display copy before the first GET');
 }
 {
   // (4) the bounds, refused by name; applyOps LINEAR (a relative bound, measured in this run); prototype names refused
@@ -1154,9 +1154,9 @@ console.log('§12 round 2, smaller: an older server, a sign-in, the migration, t
     mk: "(n) => ({ st: { archivedSessions: Array.from({ length: n }, (_, i) => 'k' + i), customNames: {} }, ops: [...Array.from({ length: n }, (_, i) => ({ key: 'archivedSessions', item: 'k' + i, value: false })), ...Array.from({ length: n }, (_, i) => ({ key: 'sessionGroups', item: 'g', member: 'm' + i, value: true }))] })",
     run: '(M, x) => M.applyOps(x.st, x.ops)' });
   const refusedOf = (r) => (r.body.refused || [])[0] || {};
-  ok(tooMany.status === 200 && /5001 ops in one batch — the bound is 5000/.test(refusedOf(tooMany).error) && proto.status === 200 && /"__proto__" is not a name this store keeps/.test(refusedOf(proto).error),
+  ok(tooMany.status === 200 && gateOf(/5001 ops in one batch — the bound is 5000/.test(refusedOf(tooMany).error)) && proto.status === 200 && verdictOf(/"__proto__" is not a name this store keeps/.test(refusedOf(proto).error)),
     `BOUNDS (smaller 4): 5 000 ops a batch (5 001 refused on its own, by name); a prototype name refused on its own`, [tooMany.body, proto.body]);
-  ok(lin.ok, `applyOps is LINEAR in WORK: n un-archive ops over n archived + n group members, ${lin.n} → ${2 * lin.n} (×${(lin.r || 0).toFixed(2)} ≤ ${LINEAR_BOUND}: ${lin.w1} → ${lin.w2} ops; a list re-scan per op reads ×4)`, lin.err || lin);
+  ok(verdictOf(lin.ok), `applyOps is LINEAR in WORK: n un-archive ops over n archived + n group members, ${lin.n} → ${2 * lin.n} (×${(lin.r || 0).toFixed(2)} ≤ ${LINEAR_BOUND}: ${lin.w1} → ${lin.w2} ops; a list re-scan per op reads ×4)`, lin.err || lin);
   const Sb = await loadPage(STATE_SRC);
   const w2 = createWorld({ seed: 125, sessions: mkSessions(2) });
   const A = await addPage(w2, Sb, 'page');
@@ -1165,7 +1165,7 @@ console.log('§12 round 2, smaller: an older server, a sign-in, the migration, t
   A._userSync().record(huge);
   await w2.run(w2.now() + 600000);
   const batches = w2.writes.filter((wr) => wr.kind === 'ops').flatMap((wr) => wr.parts || []);
-  ok(batches.length >= 2 && batches.every((b) => b.n <= UO.MAX_OPS_PER_BATCH && b.bytes <= UO.MAX_BATCH_BYTES) && batches.reduce((a, b) => a + b.n, 0) === 25000 && w2.serverState().archivedSessions.length === 25000,
+  ok(batches.length >= 2 && gateOf(batches.every((b) => b.n <= UO.MAX_OPS_PER_BATCH && b.bytes <= UO.MAX_BATCH_BYTES)) && batches.reduce((a, b) => a + b.n, 0) === 25000 && w2.serverState().archivedSessions.length === 25000,
     `the page SPLITS a 25 000-op act into batches under both bounds (≤ ${UO.MAX_OPS_PER_BATCH} ops, ≤ ${UO.MAX_BATCH_BYTES} B each: ${batches.map((b) => b.n).join(' + ')}), all applied`, batches);
 }
 {
@@ -1216,7 +1216,7 @@ console.log('§12 round 2, smaller: an older server, a sign-in, the migration, t
     return { patchesBefore: patchesBefore.length, sends, archived: w.serverState().archivedSessions.includes(w.sessions[1].sessionKey) };
   };
   const real = await run(STATE_SRC);
-  ok(real.patchesBefore === 1 && real.sends === 1 && real.archived,
+  ok(real.patchesBefore === 1 && real.sends === 1 && verdictOf(real.archived),
     'ROUND 6 smaller 1: an act made before the first GET is ON THE WIRE AT THE ACT (the ops door — an op needs no base on a server that takes ops; an older one says so by its 404) and lands ONCE; the GET that answers later is laid under it', real);
 }
 {
@@ -1230,7 +1230,7 @@ console.log('§12 round 2, smaller: an older server, a sign-in, the migration, t
   await w.run(w.now() + 600000);
   const parts = w.writes.filter((wr) => wr.kind === 'ops').flatMap((wr) => wr.parts || []), sizes = parts.map((x) => x.bytes);
   const reqBytes = w.writes.filter((wr) => wr.kind === 'ops').map((wr) => wr.requestBytes);
-  ok(sizes.length >= 3 && sizes.every((n) => n <= UO.MAX_BATCH_BYTES) && reqBytes.every((n) => n <= UO.MAX_BODY_BYTES) && Object.keys(w.serverState().customNames).length === 1500 && !A.__toasts.some((x) => /refused/.test(x.text)),
+  ok(sizes.length >= 3 && gateOf(sizes.every((n) => n <= UO.MAX_BATCH_BYTES)) && gateOf(reqBytes.every((n) => n <= UO.MAX_BODY_BYTES)) && Object.keys(w.serverState().customNames).length === 1500 && !A.__toasts.some((x) => /refused/.test(x.text)),
     `ROUND 3 smaller 4: a 1.5 MB act goes as ${sizes.length} parts of ≤ ${UO.MAX_BATCH_BYTES} B of ops and ≤ 512 KiB of values, in requests of ≤ ${UO.MAX_BODY_BYTES} B (${reqBytes.join(' + ')} B) — none refused, all 1 500 applied`, { sizes, reqBytes });
 }
 // MASTER'S page code for the two functions this lane changed, frozen here (05082bbd0's src/lib/sidebar-state.js, verbatim): the
@@ -1329,7 +1329,7 @@ const noFalseSaved = (p) => (p.__said || []).every((x) => !/^Saved/.test(x.text)
     if (!leave) { w.disconnect(p); w.connect(p); p._fetchUserState(); await w.run(w.now() + 60000); }
     cells.push({ outage, leave, onDisk: held(), falseSaved: !noFalseSaved(p), saved: (p.__said || []).filter((x) => /^Saved/.test(x.text)).length, answer: r503 && r503.status, named: r503 && /ENOSPC/.test(String(r503.body && r503.body.error)) });
   }
-  ok(cells.every((c) => !c.falseSaved && (c.leave || c.onDisk) && c.answer === 503 && c.named),
+  ok(verdictOf(cells.every((c) => !c.falseSaved && (c.leave || c.onDisk) && c.answer === 503 && c.named)),
     `MUST 1(a) THE DISK REFUSES for 0.1 / 5 / 40 s after an archive, the page staying or closed: «Saved» never said for what is not on disk (${cells.map((c) => `${c.outage / 1000} s ${c.leave ? 'closed' : 'stays'}: ${c.onDisk ? 'on disk' : 'not on disk'}, «Saved» ${c.saved}×`).join('; ')}); a write that fails moves neither the state nor the floor, and is answered 503 by name («ENOSPC»)`, cells);
 }
 {
@@ -1362,7 +1362,7 @@ const noFalseSaved = (p) => (p.__said || []).every((x) => !/^Saved/.test(x.text)
   // MUST 3 THE INCIDENT WITH A SOCKET DROP: 120 clicks, the hub silent 44 s, the socket dropped and re-made at 20 s with its GET
   // waiting in the stall too ⇒ no whole-key request ever reaches a server that takes ops; 0 lost; no rollback
   const r = await ownerScene(STATE_SRC, { drop: 20000 });
-  ok(!r.rolledBack && r.whole === 0 && r.server.archivedSessions.length === 120 && [...r.archived].every((k) => r.server.archivedSessions.includes(k)),
+  ok(!r.rolledBack && r.whole === 0 && r.server.archivedSessions.length === 120 && verdictOf([...r.archived].every((k) => r.server.archivedSessions.includes(k))),
     `MUST 3 — THE INCIDENT WITH A SOCKET DROP (120 clicks, the hub silent 44 s, the socket dropped and re-made at 20 s, its GET in the stall): ${r.whole} whole-key requests reached the server that takes ops, 0 lost, no rollback (${r.patches} PATCHes)`, { whole: r.whole, rolledBack: r.rolledBack, server: r.server.archivedSessions.length });
 }
 {
@@ -1372,7 +1372,7 @@ const noFalseSaved = (p) => (p.__said || []).every((x) => !/^Saved/.test(x.text)
   restartWorld(w, junk);
   const got = w.serverState();
   const disk = onDisk(w);
-  ok(!('batches' in got) && !('born' in got) && !('seq' in got) && !('batches' in disk) && !('seq' in disk) && got.archivedSessions.includes(w.sessions[1].sessionKey),
+  ok(!('batches' in got) && !('born' in got) && !('seq' in got) && !('batches' in disk) && !('seq' in disk) && verdictOf(got.archivedSessions.includes(w.sessions[1].sessionKey)),
     'MUST 3: the junk a .392 hub stored (top-level batches / born / seq) is gone after ONE load — not in the GET, not on disk (the load rewrites a normalized file); the person\'s keys stay', { got: Object.keys(got), disk: Object.keys(disk) });
 }
 {
@@ -1438,7 +1438,7 @@ const noFalseSaved = (p) => (p.__said || []).every((x) => !/^Saved/.test(x.text)
   p.toggleArchive(w.sessions[1]);
   await w.run(w.now() + 3000);
   const t = p.__toasts.map((x) => x.text);
-  ok(t.some((x) => x === 'The server refused a change, so it was undone here.') && !t.some((x) => /: $/.test(x) || /:\s*$/.test(x)),
+  ok(gateOf(t.some((x) => x === 'The server refused a change, so it was undone here.')) && !t.some((x) => /: $/.test(x) || /:\s*$/.test(x)),
     'SMALLER 4 — a refusal with no reason is said as a whole sentence («… undone here.»), never one ending in «: »', t);
 }
 
@@ -1499,7 +1499,7 @@ const r7page = async (w, Sb, name, { skew = 0 } = {}) => { const p = await addPa
   };
   const t2 = await scene(STATE_SRC, 2), b2 = await scene(BASE_SRC, 2), t8 = await scene(STATE_SRC, 8);
   const Qn = 'Q, a second later';
-  ok(t2.name === Qn && t2.shown === Qn && t2.y && !t2.said.length && b2.name === 'P, before the sleep' && t8.name === Qn && t8.shown === Qn && t8.y && t8.old === 1 && t8.said.length === 1,
+  ok(t2.name === Qn && t2.shown === Qn && gateOf(t2.y) && !t2.said.length && b2.name === 'P, before the sleep' && t8.name === Qn && t8.shown === Qn && gateOf(t8.y) && t8.old === 1 && t8.said.length === 1,
     `THE SLEEPER: P renames X, its lid shut at the act; Q renames X a second later; P wakes 2 days on and archives Y at once ⇒ HERE Q's later name stands («${t2.name}», shown on P too, nothing said) and the archive lands; ON MASTER the sleeper's stale whole customNames land over it («${b2.name}» — RED, the control). Asleep 8 days: the rename is older than a week — not applied, said once («more than 7 days ago»), undone; the archive lands`, { t2, b2, t8 });
 }
 /** a scene on ONE clock: the hub's Date.now is the world's (round 6's route aged its page memory by Date.now — the forgetting the
@@ -1560,7 +1560,7 @@ const DAY_MS = 86400000;
     return { lands: w.serverState().archivedSessions.includes(w.sessions[3].sessionKey), shown: I._archivedIds.has(w.sessions[3].sessionKey), said: I.__toasts.filter((x) => !/^Archived/.test(x.text)).map((x) => x.text) };
   });
   const tip = await scene(STATE_SRC);
-  ok(tip.lands && tip.shown && !tip.said.length,
+  ok(gateOf(tip.lands) && gateOf(tip.shown) && !tip.said.length,
     `HOLE 2 — A TAB THAT WAS NEVER AWAY (connected 8 days, its last act 8 days ago, another device's write since): its next act lands (${tip.lands}), shown, ${tip.said.length} words said`, tip);
 }
 {
@@ -1627,7 +1627,7 @@ const DAY_MS = 86400000;
     const after = JSON.parse(fs.readFileSync(file, 'utf8'));
     rows.push({ how, served: (served.archivedSessions || []).length, afterWrite: (after.archivedSessions || []).length, junk: 'batches' in after });
   }
-  ok(rows.every((r) => r.served === 340 && r.afterWrite === 340 && !r.junk),
+  ok(verdictOf(rows.every((r) => r.served === 340 && r.afterWrite === 340 && !r.junk)),
     `C2 — A HUB BOOTING ON A FULL DISK / A READ-ONLY DATA DIR, its file one the normalizer would rewrite: ${rows.map((r) => `${r.how}: ${r.served} of 340 served, ${r.afterWrite} on disk after the next write`).join('; ')} — the read is the state served (the rewrite fails alone, said once), the junk dropped by the first write that lands`, rows);
 }
 {
@@ -1669,9 +1669,9 @@ const DAY_MS = 86400000;
   me._fetchUserState();
   await w.run(w.now() + 60000);
   const relay = { whole: w.wholeRequests, older: me.__toasts.some((x) => /saved|server|older|reload/i.test(x.text)), landed: w.serverState().archivedSessions.includes(w.sessions[1].sessionKey) };
-  ok(rows.every((r) => r.whole === 0 && !r.junk.length && r.notSaved === 0 && !r.older && r.kept >= 1),
+  ok(verdictOf(rows.every((r) => r.whole === 0 && !r.junk.length && r.notSaved === 0 && !r.older && r.kept >= 1)),
     `C1 — THE OLDER-SERVER ROAD IS GONE: the rollback cells A / B / C (an act after the old hub is up / while it is down / both) keep the acts on the page, nothing said (round 9) (${rows.map((r) => `${r.cell} ${r.kept} kept`).join(', ')}), 0 whole-key requests, the old file gains no key`, rows);
-  ok(relay.whole === 0 && !relay.older && relay.landed,
+  ok(relay.whole === 0 && !relay.older && verdictOf(relay.landed),
     `C1 — A RELAY'S 404 WHILE THE HUB RESTARTS: 0 whole-key requests (${relay.whole}), no false sentence, the act lands when the hub is back (${relay.landed})`, relay);
 }
 {
@@ -1703,7 +1703,7 @@ const DAY_MS = 86400000;
   const opsText = read('src/user-state-ops.js'), stateText = read('src/lib/sidebar-state.js');
   const syncBlock = stateText.slice(stateText.indexOf('proto._userSync = function'), stateText.indexOf('onView: (v) => this._showUserStateView(v)'));
   const wallClock = /now = \(\) => Date\.now\(\)/.test(opsText) && /Math\.max\(t - b\.at, tm - b\.atM\)/.test(opsText) && syncBlock.length > 0 && !/\b(now|mono)\s*:/.test(syncBlock);   // (round 8: max(wall, monotonic) — the wall for a sleeper, the monotonic one where the wall went back)
-  ok(r1.verdicts[0].verdict === 'applied' && r2.verdicts[0].verdict === 'old' && kept0 === 2 && 'n\tfresh' in out && !('n\tstale' in out) && !threw && sentAges.every((x) => x === 0) && sentAges.length === 3 && routeAge === 0 && wallClock,
+  ok(r1.verdicts[0].verdict === 'applied' && r2.verdicts[0].verdict === 'old' && kept0 === 2 && 'n\tfresh' in out && !('n\tstale' in out) && !threw && gateOf(sentAges.every((x) => x === 0)) && sentAges.length === 3 && routeAge === 0 && verdictOf(wallClock),
     'THE AGE, HONEST: the age is the device\'s WALL clock (the engine\'s clock door is Date.now; the page passes none — never a timer that stops while a laptop sleeps); a page whose clock goes back between an act and its send sends age 0 and the route reads a negative age as 0; a fact ahead of the server\'s now is read as now (the act applies — never a lock-out); an act older than 7 days is not applied; a fact older than 7 days is dropped when the facts are WRITTEN; a damaged facts store loads and never throws', { r1: r1.verdicts, r2: r2.verdicts, out: Object.keys(out), threw, sentAges, routeAge, wallClock });
 }
 {
@@ -1739,7 +1739,7 @@ const DAY_MS = 86400000;
   await w.run(w.now() + 30000);
   const st = w.serverState();
   const name = st.customNames[X.sessionKey], heldCopies = w.superseded;
-  ok(name === 'from the desktop, a second later' && st.starredSessions.includes(Y.sessionKey) && P._customNames[X.sessionKey] === name && !P.__toasts.length && w.superseded >= 1,
+  ok(name === 'from the desktop, a second later' && gateOf(st.starredSessions.includes(Y.sessionKey)) && P._customNames[X.sessionKey] === name && !P.__toasts.length && w.superseded >= 1,
     `THE SLOW PHONE PATH: the phone's rename applied with its answer lost, the desktop's a second later, then the phone's next request 3 s on the way carrying the rename (its age short by the transit) ⇒ superseded by the fact's prev (${heldCopies} superseded — not on disk), the desktop's later name stands («${name}»), the star lands; nothing said (round 9 — the beaten rename takes nothing back the page showed as the person's: the screen follows the server)`, { name, starred: st.starredSessions, shown: P._customNames[X.sessionKey], toasts: P.__toasts.map((x) => x.text) });
 }
 {
@@ -1899,7 +1899,7 @@ const DAY_MS = 86400000;
     mut('a fact stamped when it LANDED', 'stamp = Math.floor(Math.min(madeAt, now));', 'stamp = now;'),
     mut('«old» before «held»', "      if (b.ops.some((op) => judgeOp(factAt(facts, slotOf(op)), page, b.seq, 0, now) === 'held') || b.ops.every(holds)) {", '      if (false) {'),
   ];
-  ok(real.red === 0 && muts.every((m) => m.hit && m.red > 0),
+  ok(real.red === 0 && verdictOf(muts.every((m) => m.hit && m.red > 0)),
     `THE PURE VERDICT, SEEDED over 3000 worlds (two pages, 4–10 acts on 1–3 items, prefixes in every arrival order, held loops, fresh re-sends, the same body twice, a laptop 8 days asleep, week-old acts, whole-key writers): 0 red — no act applied twice, none over another writer's LATER change, none dropped without one, «not applied» never said of an applied act, the state = the replay. RED by name: ${muts.map((m) => `${m.name} ${m.red}/400`).join(', ')}`, { real, muts: muts.map((m) => ({ name: m.name, hit: m.hit, red: m.red, first: m.first })) });
 }
 
@@ -1918,7 +1918,7 @@ console.log('§21 round 12: an old act after an import is superseded; a group de
   const ri = w.call(imp, { file: { app: 'vibespace-config', sections: { userState: { stateVersion: 2, starredSessions: [], archivedSessions: [], archivedFolders: [], customNames: { [X]: 'imported' }, sessionModes: {}, sessionConfigs: {}, sessionGroups: {}, groupFolders: {} } } }, sections: ['userState'] });
   await w.run(w.now() + D + 60000);
   const again = w.call(w.H.ops, { batches: [{ ...act, age: 7 * D + 60000 }] }).body;
-  ok((first.applied || []).length === 1 && ri.status === 200 && (again.superseded || []).includes(act.batch) && !(again.held || []).includes(act.batch) && w.serverState().customNames[X] === 'imported',
+  ok((first.applied || []).length === 1 && ri.status === 200 && gateOf((again.superseded || []).includes(act.batch)) && !(again.held || []).includes(act.batch) && w.serverState().customNames[X] === 'imported',
     `ROUND 12 — AN OLD ACT AFTER AN IMPORT: a rename that landed, an import 6 days later, its re-send at 7 days ⇒ ${(again.superseded || []).length ? 'superseded' : (again.held || []).length ? 'HELD' : JSON.stringify(again)}, the row «${w.serverState().customNames[X]}» (the import's)`, again);
 }
 {
@@ -2000,7 +2000,7 @@ console.log('§22 round 13: what the page refuses it refuses before any road; it
   await w.run(w.now() + 2000);
   delete globalThis.__UEO_CAPS; delete globalThis.__UEO_DIALOG;
   const onDisk = w.serverState().customNames[X.sessionKey];
-  ok(longReqs === 0 && longWs === 0 && longName === nameBefore && longToasts.length === 1 && /^This page did not keep a change \(a value larger than any setting\)/.test(longToasts[0]) && ws.join() === 'a short name' && onDisk === 'a short name',
+  ok(longReqs === 0 && longWs === 0 && longName === nameBefore && longToasts.length === 1 && gateOf(/^This page did not keep a change \(a value larger than any setting\)/.test(longToasts[0])) && ws.join() === 'a short name' && onDisk === 'a short name',
     `ROUND 13 — A RENAME THIS PAGE WILL NOT SEND IS REFUSED BEFORE ANY ROAD: a codex rename of 16 383 characters ⇒ ${longReqs} requests, ${longWs} ws renames, the row «${String(longName).slice(0, 12)}», «${(longToasts[0] || '').slice(0, 70)}»; a short one ⇒ ws «${ws.join()}», on disk «${onDisk}»`, { longReqs, longWs, longToasts, ws, onDisk });
 }
 {
@@ -2105,7 +2105,7 @@ console.log('§24 B-0248 (c): the writes land later than their calls — a burst
   const R24 = await run24(null);
   const { w, pages, st, disk, arch, star, ws } = R24;
   const onDisk = arch.every((k) => disk.archivedSessions.includes(k)) && star.every((k) => disk.starredSessions.includes(k));
-  ok(onDisk && slotDiff(slotsOf(st), slotsOf(disk)).length === 0 && converged(w, pages) && opsApplied(w, (o) => o.key === 'archivedSessions') === 5 && opsApplied(w, (o) => o.key === 'starredSessions') === 4 && ws && ws.versions.some((n) => n > 1) && R24.ahead.length === 0,
+  ok(gateOf(onDisk) && slotDiff(slotsOf(st), slotsOf(disk)).length === 0 && gateOf(converged(w, pages)) && opsApplied(w, (o) => o.key === 'archivedSessions') === 5 && opsApplied(w, (o) => o.key === 'starredSessions') === 4 && gateOf(ws) && gateOf(ws.versions.some((n) => n > 1)) && R24.ahead.length === 0,
     `§24 nine acts on three pages, each write landing 150 ms after it starts: every act on disk once (5 archive ops, 4 star ops), the hub's answer = the file, all three pages converge, NO answer ahead of the disk — ${ws ? ws.landings : 0} landings for ${ws ? ws.versions.reduce((a, n) => a + n, 0) : 0} writes (a burst landed as one: ${ws ? ws.versions.filter((n) => n > 1).length : 0})`,
     { landings: ws && ws.landings, versions: ws && ws.versions, archived: st.archivedSessions.length, starred: st.starredSessions.length, dup: w.dup, ahead: R24.ahead });
   const X24 = await run24(() => MC.load(PREL, anchored(PSRC, NOW_A, "    const answer = (extra = {}) => { const rev = UO.revOf(_userStateCache || readUserState()); res.json({ success: true, rev, epoch: userStateEpoch(), ...extra }); };   // MUTANT: answered at once\n", 'echo-ops-answer-now')));
@@ -2142,10 +2142,10 @@ console.log('§T the heavy twin holds the moved worlds');
   const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const MOVED = ['§13 round 4: page loss', '§14 round 5: every request', '§18 rounds 8–9', '§19 round 9: the clock mark', '§20 round 10: the rendered rows', '§23 round 14: the fork-title road', 'async function pageLoss(', 'const watchRows = (p, read) =>'];
   const holds = (t) => MOVED.every((h) => t.includes(h));
-  ok(holds(twin) && MOVED.every((h) => here.split(h).length === 2), '§T the heavy twin holds §13, §14, §18, §19, §20 and §23 — their headings, page loss, the rendered rows — and this file runs none of them');
-  ok(/\{ name: 'test-user-state-echo-rounds', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8')), '§T the twin is a HEAVY row of the tier');
+  ok(gateOf(holds(twin)) && verdictOf(MOVED.every((h) => here.split(h).length === 2)), '§T the heavy twin holds §13, §14, §18, §19, §20 and §23 — their headings, page loss, the rendered rows — and this file runs none of them');
+  ok(verdictOf(/\{ name: 'test-user-state-echo-rounds', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8'))), '§T the twin is a HEAVY row of the tier');
   ok(!holds(twin.replace(MOVED[4], '§20 (gone)')), 'RED CONTROL — a twin whose §20 heading is gone is no longer the moved worlds: §T goes red');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

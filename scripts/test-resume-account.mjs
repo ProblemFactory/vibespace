@@ -31,7 +31,7 @@ const ZH = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).hr
 const JA = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
 
 let pass = 0, fail = 0;
-const ok = (name, cond, extra) => { if (cond) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 900) : '')); } };
+const ok = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -110,14 +110,14 @@ for (const [label, id, o, want] of TABLE) {
   ok(`${label}: ${want.why} · ${want.name ? '"' + want.name + '"' : '(no name: removed)'}${want.since !== undefined && want.since !== null ? ' · since ' + new Date(want.since).toISOString().slice(0, 10) : ''}`,
     !v.ok && v.why === want.why && (v.account?.name ?? null) === want.name && (want.since === undefined || v.since === want.since), v);
 }
-ok('oat expired: since = the token\'s own end (mint + 365 days)', (() => { const v = verdict(T); return typeof v.since === 'number' && Math.abs(v.since - (NOW - 35 * DAY)) < DAY; })(), verdict(T));
+ok('oat expired: since = the token\'s own end (mint + 365 days)', verdictOf((() => { const v = verdict(T); return typeof v.since === 'number' && Math.abs(v.since - (NOW - 35 * DAY)) < DAY; })()), verdict(T));
 const OKS = [['healthy subscription', C], ['API key', K], ['a live long-lived token, no login', O], ['a pool that can serve', P],
   ['the machine\'s own login', 'subscription'], ['the default account (pin empty → K)', ''], ['a host whose verdict says usable', C, { host: HOST, hostVerdicts: { [C]: { usable: true, how: 'host-held' } } }],
   ['a host not answered yet: no claim', C, { host: HOST, hostVerdicts: null }]];
 for (const [label, id, o] of OKS) { const v = verdict(id, o || {}); ok(`ok: ${label}`, v.ok === true, v); }
-ok('a stale default id (the pin empty): refused as missing — the create throws unknown account too', (() => { const v = verdict('', { defaultAccountId: GONE }); return !v.ok && v.why === 'missing-account' && v.viaDefault === true; })(), verdict('', { defaultAccountId: GONE }));
-ok('the pin empty + a dead DEFAULT: refused, said as the default (viaDefault)', (() => { const v = verdict('', { defaultAccountId: B }); return !v.ok && v.why === 'wiped' && v.viaDefault === true; })());
-ok('every why in the table is a declared why', TABLE.every(([, , , w]) => RA.RESUME_ACCOUNT_WHYS.includes(w.why)) && new Set(TABLE.map((r) => r[3].why)).size === RA.RESUME_ACCOUNT_WHYS.length);
+ok('a stale default id (the pin empty): refused as missing — the create throws unknown account too', verdictOf((() => { const v = verdict('', { defaultAccountId: GONE }); return !v.ok && v.why === 'missing-account' && v.viaDefault === true; })()), verdict('', { defaultAccountId: GONE }));
+ok('the pin empty + a dead DEFAULT: refused, said as the default (viaDefault)', verdictOf((() => { const v = verdict('', { defaultAccountId: B }); return !v.ok && v.why === 'wiped' && v.viaDefault === true; })()));
+ok('every why in the table is a declared why', gateOf(TABLE.every(([, , , w]) => RA.RESUME_ACCOUNT_WHYS.includes(w.why))) && new Set(TABLE.map((r) => r[3].why)).size === RA.RESUME_ACCOUNT_WHYS.length);
 
 console.log('── ② the doors ──');
 {
@@ -135,7 +135,7 @@ console.log('── ② the doors ──');
   ok('missing account: no relogin door (nothing to log in), the switch door alone', gone.doors.length === 1 && gone.doors[0].kind === 'switch' && gone.doors[0].to.length > 0, gone.doors);
   ok('a pool refusal: relogin opens Manage agents on the pool (via manage)', verdict(Q).doors[0].via === 'manage');
   const lonely = RA.resumeAccountVerdict({ pinned: { account: B }, accounts: L.accounts.filter((a) => a.id === B), loginStates: LOGINS, defaults: {} });
-  ok('nothing else can serve: the switch door is empty and the words say so', lonely.doors[1].to.length === 0 && /No other account/.test(RA.resumeAccountWords(lonely).none || ''), lonely);
+  ok('nothing else can serve: the switch door is empty and the words say so', lonely.doors[1].to.length === 0 && verdictOf(/No other account/.test(RA.resumeAccountWords(lonely).none || '')), lonely);
 }
 
 console.log('── ③ the verdict agrees with the create (resolveForSpawn) ──');
@@ -145,9 +145,9 @@ for (const [label, id] of [['wiped', B], ['never logged in', N], ['oat expired',
   ok(`refused ${label} ⇒ the create would throw too ("${(s.threw || '').slice(0, 60)}")`, !!s.threw, s);
 }
 ok('the incident\'s exact sentence: subscription not logged in: Account B', spawn(B).threw === 'subscription not logged in: Account B', spawn(B));
-{ const was = accounts._state.defaultAccountId; accounts._state.defaultAccountId = GONE; const st = spawn(''); accounts._state.defaultAccountId = was; ok('a stale default id ⇒ the create throws too (unknown account)', /unknown account/.test(st.threw || ''), st); }
+{ const was = accounts._state.defaultAccountId; accounts._state.defaultAccountId = GONE; const st = spawn(''); accounts._state.defaultAccountId = was; ok('a stale default id ⇒ the create throws too (unknown account)', verdictOf(/unknown account/.test(st.threw || '')), st); }
 ok('expired: the create lets it through (it parses loggedIn) — the verdict refuses it before the CLI\'s first refresh fails', spawn(E).threw === null && !verdict(E).ok);
-for (const [label, id] of [['healthy', C], ['API key', K], ['live oat', O], ['pool', P]]) ok(`ok ${label} ⇒ the create spawns`, spawn(id).threw === null && verdict(id).ok, spawn(id));
+for (const [label, id] of [['healthy', C], ['API key', K], ['live oat', O], ['pool', P]]) ok(`ok ${label} ⇒ the create spawns`, spawn(id).threw === null && verdictOf(verdict(id).ok), spawn(id));
 
 console.log('── ④ the sentences, in three languages ──');
 const tOf = (dict) => (s, p) => { let x = (dict && dict[s]) || s; if (p) x = x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)); return x; };
@@ -159,14 +159,14 @@ for (const [label, id, o] of TABLE) {
   const nm = v.account?.name;
   const good = rows.every(([, w]) => w && w.sentence && !/\{\w+\}/.test(w.sentence) && (!nm || w.sentence.includes(nm)) && (!v.since || w.sentence.includes(DATE(v.since))) && w.switch && !/\{\w+\}/.test(w.relogin || ''));
   const translated = rows[1][1].sentence !== rows[0][1].sentence && rows[2][1].sentence !== rows[0][1].sentence && rows[1][1].switch === '改用别的账号';
-  ok(`${v.why}: en / zh / ja name the account${v.since ? ' and the date' : ''} — zh: ${rows[1][1].sentence}`, good && translated, rows);
+  ok(`${v.why}: en / zh / ja name the account${v.since ? ' and the date' : ''} — zh: ${rows[1][1].sentence}`, gateOf(good) && verdictOf(translated), rows);
 }
 {
   const w = RA.resumeAccountWords(verdict(B), { t: tOf(ZH), date: DATE });
   ok('zh doors: 「重新登录 Account B」 · 「改用别的账号」', w.relogin === '重新登录 Account B' && w.switch === '改用别的账号', w);
   const wj = RA.resumeAccountWords(verdict(B), { t: tOf(JA), date: DATE });
   ok('ja doors: 「Account B に再ログイン」 · 「別のアカウントを使う」', wj.relogin === 'Account B に再ログイン' && wj.switch === '別のアカウントを使う', wj);
-  ok('a remote refusal names the host', RA.resumeAccountWords(verdict(C, { host: HOST, hostVerdicts: { [C]: { usable: false, reason: 'dial-no-ship' } } }), { hostName: 'Box H' }).sentence.includes('Box H'));
+  ok('a remote refusal names the host', verdictOf(RA.resumeAccountWords(verdict(C, { host: HOST, hostVerdicts: { [C]: { usable: false, reason: 'dial-no-ship' } } }), { hostName: 'Box H' }).sentence.includes('Box H')));
   const c = verdict(B).doors[1].to;
   ok('the picker\'s labels: the pool and the default said, the machine login in the billing row\'s word (zh)',
     J(c.map((x) => RA.candidateLabel(x, { t: tOf(ZH), machine: 'Subscription' }))) === J(['Pool P（池）', 'Account K（默认账号）', 'Account C', 'Account O', ZH.Subscription || 'Subscription']), c.map((x) => RA.candidateLabel(x, { t: tOf(ZH), machine: 'Subscription' })));
@@ -185,7 +185,7 @@ console.log('── ⑤ RED control: the old path (no verdict) ⇒ the toast sha
   ok(`RED: the old toast for the incident names no door — "${oldText}"`, oldText === 'Account error: subscription not logged in: Account B' && !/Manage agents|Session Properties/.test(oldText));
   const wsCreate = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
   const line = wsCreate.split('\n').find((l) => l.includes("message: 'Account error: ' + e.message")) || '';
-  ok('the last-resort toast (ws-create) now names both doors: Manage agents + Session Properties', /log it in again in Manage agents/.test(line) && /another account in Session Properties/.test(line), line.trim().slice(0, 200));
+  ok('the last-resort toast (ws-create) now names both doors: Manage agents + Session Properties', gateOf(/log it in again in Manage agents/.test(line)) && verdictOf(/another account in Session Properties/.test(line)), line.trim().slice(0, 200));
   // the press census: chat-view's _resumeAndClose asks resumeAccountCheck BEFORE it calls resumeSession
   const pressAsks = (src) => {
     const i = src.indexOf('  _resumeAndClose(');
@@ -194,11 +194,11 @@ console.log('── ⑤ RED control: the old path (no verdict) ⇒ the toast sha
     return ask > 0 && go > ask && /_showAccountRefusalBar\(v, q\)/.test(body);
   };
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
-  ok('census: the Resume press asks the verdict before the create, and a refusal draws the bar', pressAsks(cv));
+  ok('census: the Resume press asks the verdict before the create, and a refusal draws the bar', verdictOf(pressAsks(cv)));
   const planted = cv.replace('this.app.resumeAccountCheck(q)', 'Promise.resolve({ ok: true })');
   ok('census control: a planted press that does not ask is RED', planted !== cv && !pressAsks(planted));
   const sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
-  ok('the picker and the billing switcher persist through ONE door (_persistAccountOnCreate)', (sl.match(/this\._persistAccountOnCreate\(/g) || []).length === 1 && /this\.app\._persistAccountOnCreate\?\.\(/.test(cv) && !/const persistOnSuccess = \(ok2, createdMsg\) =>/.test(sl));
+  ok('the picker and the billing switcher persist through ONE door (_persistAccountOnCreate)', (sl.match(/this\._persistAccountOnCreate\(/g) || []).length === 1 && gateOf(/this\.app\._persistAccountOnCreate\?\.\(/.test(cv)) && !/const persistOnSuccess = \(ok2, createdMsg\) =>/.test(sl));
 }
 
 console.log('── ⑥ planted mutants: the table bites ──');
@@ -212,12 +212,12 @@ console.log('── ⑥ planted mutants: the table bites ──');
   ];
   var mut;
   for (const [label, from, to, red] of M) {
-    ok(`mutant anchor found: ${label}`, src.includes(from));
+    ok(`mutant anchor found: ${label}`, verdictOf(src.includes(from)));
     mut = load(editAnchor(src, from, to, "src/resume-account.js"));
-    ok(`RED mutant: ${label}`, red());
+    ok(`RED mutant: ${label}`, verdictOf(red()));
   }
 }
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

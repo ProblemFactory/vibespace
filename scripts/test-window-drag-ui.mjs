@@ -64,7 +64,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 150) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = await pred(); if (v) return v; } catch { } await sleep(every); } try { return await pred(); } catch { return null; } };
@@ -187,7 +187,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   let journal = '';
   srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', LANG: 'C.UTF-8' }, stdio: ['ignore', 'pipe', 'pipe'] });
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 200), 'the worktree server booted (own data/ under ' + ROOT + ')', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 200)), 'the worktree server booted (own data/ under ' + ROOT + ')', journal.slice(-800))) return;
   const api = async (p, o) => (await fetch(`http://127.0.0.1:${PORT}${p}`, o)).json();
   await api('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ 'browser.autoBindLiveView': false }) });
 
@@ -370,7 +370,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     if (!pr) { ok(false, `${tag} ${row.kind}: the pane element is there`); return null; }
     const underPress = await ev(`window.__drj.under(${tp.x}, ${tp.y})`);
     const dr = await dragTo(tp.x, tp.y, pr.x, pr.y + 60, { releaseAt: { x: pr.x, y: pr.y }, clearOf: viewer, beforeRelease: async () => { facts0.underRelease = await ev(`window.__drj.under(${pr.x}, ${pr.y})`); } });
-    ok(dr.clear, `${tag} ${row.kind}: the premise — the viewer drawn where the last move put it, the release point in the pane (not on the viewer)`, { underRelease: facts0.underRelease });
+    ok(verdictOf(dr.clear), `${tag} ${row.kind}: the premise — the viewer drawn where the last move put it, the release point in the pane (not on the viewer)`, { underRelease: facts0.underRelease });
     await sleep(450);
     const s1 = await state(viewer);
     const underRelease = facts0.underRelease;
@@ -381,7 +381,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const ended = !s1.dragging && s1.highlight === 0 && s1.snapInd === 'none' && !s1.shield && !armed;
     const fit = fits(s1.box, cell) && s1.box.z > paneZ;
     const facts = { dragging: s1.dragging, highlight: s1.highlight, snapInd: s1.snapInd, shield: s1.shield, armed, box: s1.box, cell, paneZ, underPress, underRelease };
-    if (expectFixed === true) ok(ended && fit, `${tag} ${row.kind}: the drop ENDED (no .dragging, no highlight, shield off, a button-less move moves nothing) and the viewer FITS the pane's cell above it`, facts);
+    if (expectFixed === true) ok(gateOf(ended) && verdictOf(fit), `${tag} ${row.kind}: the drop ENDED (no .dragging, no highlight, shield off, a button-less move moves nothing) and the viewer FITS the pane's cell above it`, facts);
     else if (expectFixed === false) ok(!ended, `${tag} ${row.kind}: CONTROL reproduces the incident — the drag stays armed (${J({ dragging: s1.dragging, highlight: s1.highlight, armed })})`, facts);
     else console.log(`    ${tag} ${row.kind}: not a swallower (the pre-fix tree handled it) — ended=${ended}`);
     console.log(`    ${tag} ${row.kind} drop: ended=${ended} fits=${fits(s1.box, cell)} armed=${armed} highlight=${s1.highlight} under-press=${underPress} under-release=${underRelease}`);
@@ -409,7 +409,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const grew = s1.box.width > b0.width + 20;
     const ended = !s1.resizeOp && !s1.shield && !armed;
     const facts = { resizeOp: s1.resizeOp, shield: s1.shield, armed, before: b0, after: s1.box, underPress, underRelease };
-    if (expectFixed === true) ok(grew && ended, `${tag} ${row.kind}: the resize released over the pane ENDED (_resizeOp null, shield off, a button-less move resizes nothing)`, facts);
+    if (expectFixed === true) ok(gateOf(grew) && verdictOf(ended), `${tag} ${row.kind}: the resize released over the pane ENDED (_resizeOp null, shield off, a button-less move resizes nothing)`, facts);
     else if (expectFixed === false) ok(!ended || !grew, `${tag} ${row.kind}: CONTROL reproduces the incident — the resize stays armed or loses its moves (${J({ resizeOp: s1.resizeOp, grew, armed })})`, facts);
     else console.log(`    ${tag} ${row.kind}: not a swallower — grew=${grew} ended=${ended}`);
     console.log(`    ${tag} ${row.kind} resize: grew=${grew} ended=${ended} armed=${armed} under-press=${underPress} under-release=${underRelease}`);
@@ -442,7 +442,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const ended = !s1.resizeOp && !s1.shield && !armed;
     const atFloor = s1.box.width === 320 && s1.box.height === 180 && s1.box.left === b0.left && s1.box.top === b0.top;
     const facts = { scale, before: b0, after: s1.box, resizeOp: s1.resizeOp, shield: s1.shield, armed, underPress, underRelease: facts0.underRelease, end: await ev(`app.wm.windows.get(${J(id)})._lastResizeEnd || null`) };
-    if (expectFixed) ok(ended && atFloor, `${tag} pdf: the inward resize over its own page SHRANK the viewer to the floor 320×180 (left/top kept) and ENDED at the release`, facts);
+    if (expectFixed) ok(gateOf(ended) && verdictOf(atFloor), `${tag} pdf: the inward resize over its own page SHRANK the viewer to the floor 320×180 (left/top kept) and ENDED at the release`, facts);
     else ok(!(ended && atFloor), `${tag} pdf: CONTROL reproduces the incident — the viewer did not shrink to the floor or the resize stayed armed (${J({ after: s1.box, resizeOp: s1.resizeOp, armed })})`, facts);
     console.log(`    ${tag} pdf resize-inward: ended=${ended} atFloor=${atFloor} after=${s1.box.width}x${s1.box.height} armed=${armed} under-press=${underPress} under-release=${facts0.underRelease}`);
     if (!ended) { await mouse('mouseReleased', f.x, f.y); await sleep(200); }
@@ -462,7 +462,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const B = await openViewerB();
     if (!ok(!!B, `${tag} ${row.kind} tab: viewer B opened`)) return null;
     const merged = await ev(`window.__drj.merge(${J(viewer)}, ${J(B)})`); await sleep(300);
-    if (!ok(merged, `${tag} ${row.kind} tab: B is a guest tab of the viewer's group`)) { await closeB(B); return null; }
+    if (!ok(verdictOf(merged), `${tag} ${row.kind} tab: B is a guest tab of the viewer's group`)) { await closeB(B); return null; }
     // B-1542: the press lands ON B's tab — the merged strip laid out and hit-testable at the tab's centre (a fixed 300 ms
     // read the tab at 0,0 under load: the press missed it, no drag began, and the control read "ended")
     const tp = await premise(() => ev(`window.__drj.tabHit(${J(viewer)}, ${J(B)})`));
@@ -484,7 +484,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const ended = !!s1 && !s1.dragging && s1.highlight === 0 && !s1.shield && !armed;
     const fit = !!s1 && fits(s1.box, cell);
     const facts = { s1, armed, cell, underRelease };
-    if (expectFixed === true) ok(ended && fit, `${tag} ${row.kind} tab: the torn-off tab released over the pane ENDED (no .dragging, no highlight, shield off, not armed) and FITS the pane's cell`, facts);
+    if (expectFixed === true) ok(gateOf(ended) && verdictOf(fit), `${tag} ${row.kind} tab: the torn-off tab released over the pane ENDED (no .dragging, no highlight, shield off, not armed) and FITS the pane's cell`, facts);
     else if (expectFixed === false) ok(!ended, `${tag} ${row.kind} tab: CONTROL reproduces the incident — the torn-off tab stays armed (${J({ dragging: s1 && s1.dragging, highlight: s1 && s1.highlight, armed })})`, facts);
     else console.log(`    ${tag} ${row.kind} tab: not a swallower — ended=${ended}`);
     console.log(`    ${tag} ${row.kind} tab tear-off: ended=${ended} fits=${fit} armed=${armed} highlight=${s1 && s1.highlight} end=${s1 && s1.tabEnd} under-release=${underRelease}`);
@@ -512,7 +512,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const stuck = !s1 || s1.visibility === 'hidden' || s1.ghosts > 0;
     const facts = { mid: mid && { visibility: mid.visibility, ghosts: mid.ghosts, shield: mid.shield }, after: s1 && { visibility: s1.visibility, ghosts: s1.ghosts, shield: s1.shield, end: s1.iconEnd }, underRelease };
     if (expectFixed === true) ok(!!mid && mid.visibility === 'hidden' && mid.ghosts === 1 && !stuck && !s1.shield, `${tag} ${row.kind} icon: the icon drag released over the pane ENDED — the window visible again, the ghost gone, the shield off`, facts);
-    else if (expectFixed === false) ok(stuck, `${tag} ${row.kind} icon: CONTROL reproduces the incident — the source window stays INVISIBLE with its ghost (${J(facts.after)})`, facts);
+    else if (expectFixed === false) ok(verdictOf(stuck), `${tag} ${row.kind} icon: CONTROL reproduces the incident — the source window stays INVISIBLE with its ghost (${J(facts.after)})`, facts);
     else console.log(`    ${tag} ${row.kind} icon: not a swallower — stuck=${stuck}`);
     console.log(`    ${tag} ${row.kind} icon-drag: mid=${J(facts.mid)} after=${J(facts.after)} under-before=${underBefore} under-release=${underRelease} gone=${!(await ev(`app.wm.windows.has(${J(B)})`))}`);
     const f = await freePt(); await mouse('mouseReleased', f.x, f.y); await sleep(300);
@@ -522,7 +522,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   };
 
   try {
-    if (!ok(await boot(), 'the page booted')) return;
+    if (!ok(verdictOf(await boot()), 'the page booted')) return;
     const scene = await openScene();
     if (!scene) return;
     const { viewer, rows } = scene;
@@ -544,7 +544,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
 
     // ── P: D5 — the PDF viewer that could grow but not shrink ──
     console.log('— P: D5 — a PDF viewer at uiScale 90 % × DPR 2.2, its SE corner dragged inward over its own page');
-    if (want('P')) { if (ok(await bootAt({ scale: 90, dpr: 2.2 }), 'the page rebooted at uiScale 90 % × DPR 2.2')) await pdfLeg(true, 'P'); }
+    if (want('P')) { if (ok(verdictOf(await bootAt({ scale: 90, dpr: 2.2 })), 'the page rebooted at uiScale 90 % × DPR 2.2')) await pdfLeg(true, 'P'); }
 
     // ── C: THE CONTROL — the pre-fix feed, served in place of the bundle ──
     console.log('— C: CONTROL — the pre-fix feed (document mouse listeners, no capture, no shield) in a patched overlay of drag-feed.js / window.js / tab-group.js');
@@ -585,7 +585,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
         ok(ctlBundle.length > 1000, 'the CONTROL bundle built (drag-feed.js / window.js / tab-group.js overlaid with the pre-fix feed)');
         await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/bundle.js*', requestStage: 'Request' }] });
         onPaused = (p) => { cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: ctlBundle }).catch(() => { }); };
-        if (ok(await bootAt({ scale: 100, dpr: 1 }), 'the page rebooted on the CONTROL bundle')) {
+        if (ok(verdictOf(await bootAt({ scale: 100, dpr: 1 })), 'the page rebooted on the CONTROL bundle')) {
           const scene2 = await openScene();
           if (scene2) {
             const res = {};
@@ -593,7 +593,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
             for (const row of scene2.rows) { const exp = (row.kind === 'web' || row.kind === 'desktop') ? false : null; res[row.kind].tab = await tabLeg(scene2.viewer, row, exp, 'C'); res[row.kind].icon = await iconLeg(scene2.viewer, row, exp, 'C'); }
             console.log('  control table: ' + J(res));
           }
-          if (ok(await bootAt({ scale: 90, dpr: 2.2 }), 'the CONTROL page rebooted at uiScale 90 % × DPR 2.2')) console.log('  control pdf: ' + J(await pdfLeg(false, 'C')));
+          if (ok(verdictOf(await bootAt({ scale: 90, dpr: 2.2 })), 'the CONTROL page rebooted at uiScale 90 % × DPR 2.2')) console.log('  control pdf: ' + J(await pdfLeg(false, 'C')));
         }
         onPaused = null; await cdp('Fetch.disable').catch(() => { });
       }
@@ -604,7 +604,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       console.log('— C2: CONTROL — the tab drag capturing on the tab element (rebuilt by the detach) instead of the title bar');
       const tgFixed = fs.readFileSync(path.join(repo, 'src/lib/tab-group.js'), 'utf8');
       const CAP_LINE = "const capEl = (typeof tabEl.closest === 'function' && tabEl.closest('.window-titlebar')) || tabEl;";
-      if (!ok(tgFixed.includes(CAP_LINE), 'the C2 control found the capture-element line it reverts')) { /* nothing to judge */ }
+      if (!ok(verdictOf(tgFixed.includes(CAP_LINE)), 'the C2 control found the capture-element line it reverts')) { /* nothing to judge */ }
       else {
         const tgOnTab = tgFixed.replace(CAP_LINE, 'const capEl = tabEl; /* control: the tab element */');
         const built = await buildClientBundleApi({ repo, entry: path.join(wt, 'src/client.js'),
@@ -612,7 +612,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
         const c2Bundle = built.buf.toString('base64');
         await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/bundle.js*', requestStage: 'Request' }] });
         onPaused = (p) => { cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: c2Bundle }).catch(() => { }); };
-        if (ok(await bootAt({ scale: 100, dpr: 1 }), 'the page rebooted on the C2 bundle (capture on the tab element)')) {
+        if (ok(verdictOf(await bootAt({ scale: 100, dpr: 1 })), 'the page rebooted on the C2 bundle (capture on the tab element)')) {
           await ev('app.wm.setGrid(2, 3); true');
           await ev(`app.openFile(${J(pngPath)}, 'drj.png'); true`);
           const v2 = await until(() => ev(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'viewer'); return w ? w.id : null; })()`), 10000);
@@ -622,7 +622,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
             await until(() => ev(`(() => { const f = app.wm.windows.get(${J(web2)}).content.querySelector('iframe'); return !!(f && f.contentWindow); })()`), 10000);
             const r = await tabLeg(v2, { kind: 'web', id: web2, cell: 1, sel: 'iframe' }, null, 'C2');
             const endSeen = await ev(`(() => { const ws = [...app.wm.windows.values()]; return ws.map((w) => w._lastTabDragEnd).filter(Boolean); })()`);
-            ok(!!r && !r.fit && (endSeen.includes('capture-lost') || !r.ended), `C2 CONTROL: capturing on the tab element the tear-off LOSES the drag (ends: ${J(endSeen)}; fit=${r && r.fit}) — the title bar is the element a tear-off keeps`, { r, endSeen });
+            ok(!!r && !r.fit && (verdictOf(endSeen.includes('capture-lost')) || !r.ended), `C2 CONTROL: capturing on the tab element the tear-off LOSES the drag (ends: ${J(endSeen)}; fit=${r && r.fit}) — the title bar is the element a tear-off keeps`, { r, endSeen });
           } else ok(false, 'C2: the viewer and the Web view opened');
         }
         onPaused = null; await cdp('Fetch.disable').catch(() => { });
@@ -634,4 +634,4 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
 })();
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed, ${skipped} skipped)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -19,7 +19,7 @@ const require = createRequire(import.meta.url);
 const SRC = new URL('../src/browser-passkey-store.js', import.meta.url).pathname;
 const PS = require(SRC);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 600) : '')); } return !!c; };
 
 const C = PS.cipherOf(crypto, crypto.randomBytes(32));
 const PKCS8 = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
@@ -29,7 +29,7 @@ const row0 = { credentialId: CID, rpId: 'github.com', userHandle: crypto.randomB
 console.log('① a row / the file in and out');
 {
   const r = PS.normalizeRow(row0);
-  ok(r && JSON.stringify(PS.normalizeRow(r)) === JSON.stringify(r), 'a row round-trips (in = out)');
+  ok(gateOf(r) && JSON.stringify(PS.normalizeRow(r)) === JSON.stringify(r), 'a row round-trips (in = out)');
   ok(PS.normalizeRow({ ...row0, keySealed: PKCS8 }) === null, 'a PLAINTEXT key is never a row (the PURE side sees ciphertext only)');
   ok(PS.normalizeRow({ ...row0, credentialId: 'a b' }) === null && PS.normalizeRow({ ...row0, rpId: 'x/y' }) === null, 'a bad credential id / rpId is not a row');
   ok(PS.normalizeRow({ ...row0, policy: 'maybe' }).policy === PS.NEW_KEY_POLICY && PS.NEW_KEY_POLICY === 'ask', 'an unknown policy reads as the new-key default (ask — owner default ①)');
@@ -60,7 +60,7 @@ const leaks = (mod) => {
   const src = fs.readFileSync(SRC, 'utf8');
   const needle = "return { id: str(r.credentialId).slice(0, ID_SHOWN),";
   fs.writeFileSync(path.join(dir, 'leak.js'), src.replace(needle, "return { ...r, id: str(r.credentialId).slice(0, ID_SHOWN),"));
-  ok(src.includes(needle) && leaks(require(path.join(dir, 'leak.js'))).includes('the sealed key'), 'CONTROL: a copy whose publicRow spreads the row is RED (it leaks the sealed key)');
+  ok(gateOf(src.includes(needle)) && verdictOf(leaks(require(path.join(dir, 'leak.js'))).includes('the sealed key')), 'CONTROL: a copy whose publicRow spreads the row is RED (it leaks the sealed key)');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -72,7 +72,7 @@ console.log('③ seal / open');
   const flip = s1.slice(0, -3) + (s1.slice(-3, -2) === 'A' ? 'B' : 'A') + s1.slice(-2);
   ok(other.open(s1) === null && C.open(flip) === null && C.open('v1.junk') === null, 'another key / a flipped byte / junk ⇒ null (never a wrong key)');
   let threw = false; try { PS.cipherOf(crypto, Buffer.alloc(16)); } catch { threw = true; }
-  ok(threw, 'a key that is not 32 bytes is refused');
+  ok(verdictOf(threw), 'a key that is not 32 bytes is refused');
 }
 
 console.log('④ the sign count');
@@ -89,8 +89,8 @@ console.log('⑤ rpMatches');
 {
   const yes = [['https://github.com', 'github.com'], ['https://www.github.com/login', 'github.com'], ['http://localhost', 'localhost'], ['https://a.b.example.co.uk', 'example.co.uk'], ['https://login.example.com:8443/x', 'login.example.com']];
   const no = [['https://evilgithub.com', 'github.com'], ['http://github.com', 'github.com'], ['https://github.com', 'com'], ['https://x.github.io', 'github.io'], ['https://127.0.0.1', '127.0.0.1'], ['https://github.com.evil.io', 'github.com'], ['https://github.com', 'www.github.com'], ['javascript:alert(1)', 'github.com'], ['https://foo.co.uk', 'co.uk'], ['', 'github.com']];
-  ok(yes.every(([o, rp]) => PS.rpMatches(o, rp)), 'positives: the host, a subdomain, http://localhost, a registrable domain under a 2-label suffix');
-  ok(no.every(([o, rp]) => !PS.rpMatches(o, rp)), 'negatives: a look-alike, http, a single label, a public suffix, an IP, a suffix trick, a parent asking for a child, non-http', no.filter(([o, rp]) => PS.rpMatches(o, rp)));
+  ok(verdictOf(yes.every(([o, rp]) => PS.rpMatches(o, rp))), 'positives: the host, a subdomain, http://localhost, a registrable domain under a 2-label suffix');
+  ok(verdictOf(no.every(([o, rp]) => !PS.rpMatches(o, rp))), 'negatives: a look-alike, http, a single label, a public suffix, an IP, a suffix trick, a parent asking for a child, non-http', no.filter(([o, rp]) => PS.rpMatches(o, rp)));
 }
 
 console.log('⑥ the table and the card');
@@ -105,9 +105,9 @@ console.log('⑥ the table and the card');
   ok(d.removed === 2 && !d.store.profiles['bp-1'], 'a removed profile takes its keys with it');
   const card = PS.proposalCard({ id: 'pk-0000abcd', kind: 'register', profileId: 'bp-1', profileLabel: 'Work', rpId: 'github.com', user: { name: 'alice', displayName: 'Alice' }, expiresAt: 9 });
   const item = PS.proposalItem(card);
-  ok(card.type === 'passkey' && card.kind === 'register' && card.choices.join() === 'once,no' && /^[0-9a-f]{8}$/.test(card.shown) && PS.proposalCard({ id: 'pk-0000abcd', kind: 'register', profileId: 'bp-1', profileLabel: 'Work', rpId: 'github.com', user: { name: 'alice', displayName: 'Alice' }, expiresAt: 9 }).shown === card.shown, 'the register card: choices once | no, a stable `shown` digest', card);
+  ok(card.type === 'passkey' && card.kind === 'register' && card.choices.join() === 'once,no' && gateOf(/^[0-9a-f]{8}$/.test(card.shown)) && PS.proposalCard({ id: 'pk-0000abcd', kind: 'register', profileId: 'bp-1', profileLabel: 'Work', rpId: 'github.com', user: { name: 'alice', displayName: 'Alice' }, expiresAt: 9 }).shown === card.shown, 'the register card: choices once | no, a stable `shown` digest', card);
   ok(PS.proposalCard({ id: 'pk-1', kind: 'sign-in', rpId: 'github.com' }).choices.join() === 'once,always,no,never', 'the sign-in card: once | always | no | never');
-  ok(item.kind === 'action' && item.action.type === 'browser-proposal' && item.action.id === 'pk-0000abcd' && item.action.shown === card.shown && /Work wants to register a passkey on github\.com for alice/.test(item.text), 'its For-you item is the existing browser-proposal action (Approve = allow once)', item);
+  ok(item.kind === 'action' && item.action.type === 'browser-proposal' && item.action.id === 'pk-0000abcd' && item.action.shown === card.shown && verdictOf(/Work wants to register a passkey on github\.com for alice/.test(item.text)), 'its For-you item is the existing browser-proposal action (Approve = allow once)', item);
 }
 console.log('⑦ lane passkey-sink: a kernel with `webauthn` — the row VibeSpace makes, the UV rule, the row a sign-in signs with, the reasons');
 {
@@ -116,7 +116,7 @@ console.log('⑦ lane passkey-sink: a kernel with `webauthn` — the row VibeSpa
   const m = WA.makeCredential({ crypto, rpId: 'github.com', user: { id: Buffer.from('user-7') }, flags: { up: true, uv: true } });
   const made = { credentialId: m.credentialId.toString('base64url'), rpId: 'github.com', userHandle: m.userHandle.toString('base64url'), userName: 'alice', displayName: 'Alice', keySealed: PS.seal(C, m.privateKeyPkcs8.toString('base64')), signCount: 0, createdBy: 'agent', bySession: 'bk-12345678', createdAt: 5, policy: PS.NEW_KEY_POLICY };
   const nr = PS.normalizeRow(made);
-  ok(nr && nr.credentialId.length === 43 && nr.userHandle === Buffer.from('user-7').toString('base64url') && nr.signCount === 0 && nr.policy === 'ask' && nr.createdBy === 'agent' && nr.uses === 0 && JSON.stringify(PS.normalizeRow(nr)) === JSON.stringify(nr),
+  ok(gateOf(nr) && nr.credentialId.length === 43 && nr.userHandle === Buffer.from('user-7').toString('base64url') && nr.signCount === 0 && nr.policy === 'ask' && nr.createdBy === 'agent' && nr.uses === 0 && JSON.stringify(PS.normalizeRow(nr)) === JSON.stringify(nr),
     'the row VibeSpace makes on the kernel is a store row like any other (32-byte id → 43 b64url characters, userHandle = user.id, signCount 0, NEW_KEY_POLICY) — it round-trips', nr);
   ok(PS.open(C, nr) === m.privateKeyPkcs8.toString('base64') && crypto.createPrivateKey({ key: Buffer.from(PS.open(C, nr), 'base64'), format: 'der', type: 'pkcs8' }).asymmetricKeyDetails.namedCurve === 'prime256v1' && !JSON.stringify(PS.publicRow(nr)).includes(nr.keySealed),
     'its key opens to the PKCS#8 P-256 the signer made (the shape the virtual authenticator handed — one row type for both roads); publicRow never carries it');
@@ -137,7 +137,7 @@ console.log('⑦ lane passkey-sink: a kernel with `webauthn` — the row VibeSpa
   const rows = [R('a', 5, 1), R('b', 9, 2), R('c', 0, 3)];
   ok(PS.signOrder(rows, ['a', 'b', 'c']).map((r) => r.credentialId).join() === 'b,a,c' && PS.signOrder(rows, ['a', 'c'], ['c', 'a']).map((r) => r.credentialId).join() === 'c,a' && PS.signOrder(rows, ['a']).map((r) => r.credentialId).join() === 'a',
     'signOrder: only the released rows; the page\'s allow list in its order, else the most recently used first');
-  ok(['webauthn_alg_unsupported', 'webauthn_rp_mismatch', 'webauthn_key_locked'].every((w) => PS.REASONS.includes(w)) && ['no-grant', 'policy-no', 'declined', 'expired', 'profile-switch', 'rp-mismatch', 'none', 'withdrawn'].every((w) => PS.REASONS.includes(w)), 'REASONS: every existing one kept + the three kernel refusals by name');
+  ok(gateOf(['webauthn_alg_unsupported', 'webauthn_rp_mismatch', 'webauthn_key_locked'].every((w) => PS.REASONS.includes(w))) && verdictOf(['no-grant', 'policy-no', 'declined', 'expired', 'profile-switch', 'rp-mismatch', 'none', 'withdrawn'].every((w) => PS.REASONS.includes(w))), 'REASONS: every existing one kept + the three kernel refusals by name');
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -118,7 +118,7 @@ const beforeTurn = async (p) => { const imm = new Promise((r) => setImmediate(r)
 const EARLY_MS = 100;
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 300) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 300) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -160,7 +160,7 @@ const machine = (extra = {}) => DS.install({ dataDir: path.join(root, `m${++seq}
 console.log('§1 the census');
 const OPS = DS.DESKTOP_SERVE_OPS;
 const AS = require('../src/app-serve.js');
-ok(Array.isArray(OPS) && Object.isFrozen(OPS) && JSON.stringify(OPS) === JSON.stringify(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin' /* lane e2b: a paired machine's window pinned */, 'relaunch', 'close-asked' /* int267 seam: the person's ✕ asked the app — never a quick exit */, ...AS.APP_OPS]) && JSON.stringify(AS.APP_OPS) === JSON.stringify(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage', 'app-forget']), `the closed op set is the design's nine + lane e2b's pin + int267's close-asked + Layer 0's nine app ops (design 009: app-fetch, app-unstage; design 019: app-forget) (${OPS.join(' ')})`);
+ok(gateOf(Array.isArray(OPS)) && gateOf(Object.isFrozen(OPS)) && JSON.stringify(OPS) === JSON.stringify(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin' /* lane e2b: a paired machine's window pinned */, 'relaunch', 'close-asked' /* int267 seam: the person's ✕ asked the app — never a quick exit */, ...AS.APP_OPS]) && JSON.stringify(AS.APP_OPS) === JSON.stringify(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage', 'app-forget']), `the closed op set is the design's nine + lane e2b's pin + int267's close-asked + Layer 0's nine app ops (design 009: app-fetch, app-unstage; design 019: app-forget) (${OPS.join(' ')})`);
 const serveSrc = read('src/desktop-serve.js');
 // (§1's by-name census of the runner (serveSrc stays: the controls below read it) MOVED to the fast scripts/test-desktop-serve-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 // every op answers something other than "unknown op" on a real machine keeper
@@ -168,9 +168,9 @@ const serveSrc = read('src/desktop-serve.js');
   const m = machine();
   const answers = {};
   for (const op of OPS) { const r = await DS.runDesktopServeOp(m, op, {}); answers[op] = r.ok ? 'ok' : r.code; }
-  ok(Object.values(answers).every((a) => a === 'ok' || a === 'bad-request') && answers.facts === 'ok' && answers.list === 'ok' && answers.status === 'ok' && !Object.entries(answers).some(([op, a]) => a === 'bad-request' && ['facts', 'list', 'status'].includes(op)), `each op is DISPATCHED (facts/list/status answer ok, the id-bound ones ask for their id): ${JSON.stringify(answers)}`);
+  ok(gateOf(Object.values(answers).every((a) => a === 'ok' || a === 'bad-request')) && answers.facts === 'ok' && answers.list === 'ok' && answers.status === 'ok' && !Object.entries(answers).some(([op, a]) => a === 'bad-request' && ['facts', 'list', 'status'].includes(op)), `each op is DISPATCHED (facts/list/status answer ok, the id-bound ones ask for their id): ${JSON.stringify(answers)}`);
   const unk = await DS.runDesktopServeOp(m, 'shell', {});
-  ok(unk.ok === false && unk.code === 'bad-request' && /unknown desktop-serve op "shell"/.test(unk.error), 'an op outside the table is refused BY NAME', unk);
+  ok(unk.ok === false && unk.code === 'bad-request' && verdictOf(/unknown desktop-serve op "shell"/.test(unk.error)), 'an op outside the table is refused BY NAME', unk);
   m.shutdown();
 }
 // CONTROL: a runner copy that lost the `fit` branch answers `fit` with the relaunch fall-through — the by-name census above catches that copy
@@ -195,16 +195,16 @@ console.log('§2 every failure is {ok:false, code, error} — nothing throws acr
   for (const [what, op, params, code] of cases) {
     let r, threw = null;
     try { r = await DS.runDesktopServeOp(m, op, params); } catch (e) { threw = e; }
-    ok(!threw && r && r.ok === false && typeof r.code === 'string' && r.code && typeof r.error === 'string' && r.error && (!code || r.code === code), `${what} ⇒ {ok:false, code: ${r && r.code}}${code ? '' : ' (the model\'s own code)'}`, threw ? String(threw) : r);
+    ok(!threw && gateOf(r) && r.ok === false && typeof r.code === 'string' && gateOf(r.code) && typeof r.error === 'string' && gateOf(r.error) && (!code || r.code === code), `${what} ⇒ {ok:false, code: ${r && r.code}}${code ? '' : ' (the model\'s own code)'}`, threw ? String(threw) : r);
   }
   // a record this machine DOES hold — fit's size is validated, a real status answers
   m._store().apps['da-held'] = { id: 'da-held', label: 'held', state: 'exited', backend: 'xpra', pids: {}, starts: {}, startedAt: 1, hostId: 'local' };
   const f1 = await DS.runDesktopServeOp(m, 'fit', { id: 'da-held', w: -3, h: 'x' });
   ok(f1.ok === false && f1.code === 'bad-request', 'fit with a bad w×h ⇒ bad-request', f1);
   const s1 = await DS.runDesktopServeOp(m, 'status', { id: 'da-held' });
-  ok(s1.ok === true && s1.app && s1.app.id === 'da-held' && s1.sample === null, 'status of a held record answers its machine view (+ no sample yet)', s1);
+  ok(s1.ok === true && gateOf(s1.app) && s1.app.id === 'da-held' && s1.sample === null, 'status of a held record answers its machine view (+ no sample yet)', s1);
   const w1 = await DS.runDesktopServeOp(m, 'windows', { id: 'da-held' });
-  ok(w1.ok === false && w1.code === 'no_windows' && Array.isArray(w1.windows), 'windows of an ended record ⇒ {ok:false, code: no_windows}', w1);
+  ok(w1.ok === false && w1.code === 'no_windows' && verdictOf(Array.isArray(w1.windows)), 'windows of an ended record ⇒ {ok:false, code: no_windows}', w1);
   m.shutdown();
   // a method that THROWS (a future bug) is still an object on the wire
   const boom = { launch: () => { throw new Error('kaboom'); }, get: () => null };
@@ -227,17 +227,17 @@ console.log('§4 the local rung is the hub keeper\'s own machine; desktop-access
   const dataDir = path.join(root, 'hub'); fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'desktop-apps.json'), JSON.stringify({ apps: { 'da-old': { id: 'da-old', label: 'old', state: 'exited', backend: 'xpra', pids: {}, starts: {}, startedAt: 1 } } }));
   const k = K.create({ dataDir, env: () => ({ PATH: '/usr/bin:/bin', HOME: root }), broadcast: () => { }, display: fakeDisplay, log: quiet });
-  ok(k.machine && typeof k.machine.launch === 'function' && k._store() === k.machine._store(), 'the hub keeper holds device #0\'s machine keeper and ONE store with it');
+  ok(gateOf(k.machine) && typeof k.machine.launch === 'function' && k._store() === k.machine._store(), 'the hub keeper holds device #0\'s machine keeper and ONE store with it');
   const acc = ACC.create({ hosts: null, local: () => k.machine, install: false, log: quiet });
   const st = await acc.call(null, 'status', { id: 'da-old' });
-  ok(st.ok && st.app.id === 'da-old', 'access.call(null, …) runs the SAME object in-process (the record the keeper loaded)');
+  ok(gateOf(st.ok) && st.app.id === 'da-old', 'access.call(null, …) runs the SAME object in-process (the record the keeper loaded)');
   ok((await acc.call('local', 'list', {})).apps.length === 1, '\'local\' is the local rung too');
   const e0 = await acc.call(null, 'stop', { id: 'da-nope' }).then(() => null, (e) => e);
-  ok(e0 && e0.code === 'not-found' && /no desktop app da-nope/.test(e0.message), 'an op\'s own {ok:false} is THROWN hub-side with its code (one shape for every caller)', e0 && e0.code);
+  ok(gateOf(e0) && e0.code === 'not-found' && verdictOf(/no desktop app da-nope/.test(e0.message)), 'an op\'s own {ok:false} is THROWN hub-side with its code (one shape for every caller)', e0 && e0.code);
   const eOp = await acc.call(null, 'exec', {}).then(() => null, (e) => e);
-  ok(eOp && eOp.code === 'bad-request', 'an op outside the table is refused before any transport is chosen');
+  ok(gateOf(eOp) && eOp.code === 'bad-request', 'an op outside the table is refused before any transport is chosen');
   const eUnwired = await ACC.create({ install: false, log: quiet }).call(null, 'facts', {}).then(() => null, (e) => e);
-  ok(eUnwired && eUnwired.code === 'host_unavailable', 'no local machine wired ⇒ host_unavailable (never a second keeper minted on the side)');
+  ok(gateOf(eUnwired) && eUnwired.code === 'host_unavailable', 'no local machine wired ⇒ host_unavailable (never a second keeper minted on the side)');
   k.shutdown();
   // a paired device (a fake DeviceManager) + a handle with no desktopServe (stand-in) + an unknown host
   const asked = [];
@@ -251,16 +251,16 @@ console.log('§4 the local rung is the hub keeper\'s own machine; desktop-access
   const hosts = { get: (h) => (['dev', 'ssh'].includes(h) ? { id: h } : null), isLocal: () => false, deviceBounded: async (h) => (h === 'dev' ? fakeDm : {}) };
   const acc2 = ACC.create({ hosts, local: () => null, install: false, log: quiet });
   const r1 = await acc2.call('dev', 'facts', { fresh: true });
-  ok(r1.ok && asked.length === 1 && asked[0][0] === 'facts' && asked[0][1].fresh === true, 'a paired device is reached through dm.desktopServe(op, params) — the op and its params verbatim');
+  ok(gateOf(r1.ok) && asked.length === 1 && asked[0][0] === 'facts' && asked[0][1].fresh === true, 'a paired device is reached through dm.desktopServe(op, params) — the op and its params verbatim');
   const r2 = await acc2.call('dev', 'stop', { id: 'da-x' }).then(() => null, (e) => e);
-  ok(r2 && r2.code === 'not-found', 'the device\'s {ok:false, code} is thrown with ITS code', r2 && r2.code);
+  ok(gateOf(r2) && r2.code === 'not-found', 'the device\'s {ok:false, code} is thrown with ITS code', r2 && r2.code);
   const { value: r3, turned: r3Turned } = await beforeTurn(acc2.call('ssh', 'launch', { body: {} }).then(() => null, (e) => e));
-  ok(r3 && r3.code === 'host_needs_daemon' && !r3Turned && asked.length === 2, 'a machine handle that cannot run desktop-serve (stand-in: no desktopServe method) ⇒ host_needs_daemon BY NAME before the event loop turned once (no connect deadline, no timer, no I/O waited on) — nothing asked, nothing run locally', r3 && { message: r3.message, turned: r3Turned });
+  ok(gateOf(r3) && r3.code === 'host_needs_daemon' && !r3Turned && asked.length === 2, 'a machine handle that cannot run desktop-serve (stand-in: no desktopServe method) ⇒ host_needs_daemon BY NAME before the event loop turned once (no connect deadline, no timer, no I/O waited on) — nothing asked, nothing run locally', r3 && { message: r3.message, turned: r3Turned });
   const r4 = await acc2.call('elsewhere', 'facts', {}).then(() => null, (e) => e);
-  ok(r4 && r4.code === 'unsupported-host', 'an unknown host ⇒ unsupported-host');
+  ok(gateOf(r4) && r4.code === 'unsupported-host', 'an unknown host ⇒ unsupported-host');
   const dmOld = { desktopServe: async () => { const e = new Error('daemon lacks desktop-serve (capabilities gate)'); e.code = 'host_needs_daemon'; throw e; } };
   const r5 = await ACC.create({ hosts: { ...hosts, deviceBounded: async () => dmOld }, install: false, log: quiet }).call('dev', 'facts', {}).then(() => null, (e) => e);
-  ok(r5 && r5.code === 'host_needs_daemon', 'the client\'s capability refusal keeps its name through the access layer (never re-labelled host_unavailable)');
+  ok(gateOf(r5) && r5.code === 'host_needs_daemon', 'the client\'s capability refusal keeps its name through the access layer (never re-labelled host_unavailable)');
   // the picture forward: bytes both ways over the fake data plane, ref-counted
   const f1 = await acc2.forwardPort('dev', devPort);
   const f2 = await acc2.forwardPort('dev', devPort);
@@ -272,7 +272,7 @@ console.log('§4 the local rung is the hub keeper\'s own machine; desktop-access
   const lf = await acc2.forwardPort(null, 4242);
   ok(lf.local === true && lf.localPort === 4242 && acc2.forwards().length === 0, 'THIS machine\'s port is not forwarded (it is already ours)');
   const fb = await acc2.forwardPort('dev', 70000).then(() => null, (e) => e);
-  ok(fb && fb.code === 'bad-request', 'a bad port is refused by name');
+  ok(gateOf(fb) && fb.code === 'bad-request', 'a bad port is refused by name');
   acc2.shutdown(); echo.close();
 }
 
@@ -290,7 +290,7 @@ console.log('\n§5 the ssh rung over the REAL HostManager (no stand-in)');
   let ensureA = 0;
   const hmA = hmFor(async () => { ensureA++; throw new Error('remote node not found (install node on the host)'); });
   const { value: ea, turned: eaTurned } = await beforeTurn(ACC.create({ hosts: hmA, local: localSpy, install: false, log: quiet }).call('ssh-box', 'facts', {}).then(() => null, (e) => e));
-  ok(ea && ea.code === 'host_unavailable' && /remote node not found/.test(ea.message) && !/not responding/.test(ea.message) && ensureA === 1 && !eaTurned && localTouched === 0, `an ssh host whose daemon bootstrap FAILS ⇒ host_unavailable naming the reason (${ea && ea.message}) — the bootstrap asked once, the answer before the event loop turned (never the connect deadline's words, never a retry), the local keeper never touched`, ea && { code: ea.code, message: ea.message, ensureA, turned: eaTurned });
+  ok(gateOf(ea) && ea.code === 'host_unavailable' && gateOf(/remote node not found/.test(ea.message)) && !/not responding/.test(ea.message) && ensureA === 1 && !eaTurned && localTouched === 0, `an ssh host whose daemon bootstrap FAILS ⇒ host_unavailable naming the reason (${ea && ea.message}) — the bootstrap asked once, the answer before the event loop turned (never the connect deadline's words, never a retry), the local keeper never touched`, ea && { code: ea.code, message: ea.message, ensureA, turned: eaTurned });
   // (b) the bootstrap never answers ⇒ host_unavailable at the connect deadline, never a hang
   const hmB = hmFor(() => new Promise(() => { }));
   const connectB = 300;
@@ -299,35 +299,35 @@ console.log('\n§5 the ssh rung over the REAL HostManager (no stand-in)');
   const msB = Date.now() - t1;
   // never a hang = the answer is THE DEADLINE's (only its timer says "not responding within <connectMs>s") and never
   // before it; no upper wall-clock bound (slowness is not a hang)
-  ok(eb && eb.code === 'host_unavailable' && eb.message.includes(`not responding within ${Math.round(connectB / 1000)}s`) && msB >= connectB - EARLY_MS && localTouched === 0, `an ssh host whose bootstrap never answers ⇒ host_unavailable at the connect deadline it was given (${msB} ms for connectMs ${connectB} — the deadline's own words), never a hang, never local`, eb && { code: eb.code, message: eb.message, msB });
+  ok(gateOf(eb) && eb.code === 'host_unavailable' && gateOf(eb.message.includes(`not responding within ${Math.round(connectB / 1000)}s`)) && msB >= connectB - EARLY_MS && localTouched === 0, `an ssh host whose bootstrap never answers ⇒ host_unavailable at the connect deadline it was given (${msB} ms for connectMs ${connectB} — the deadline's own words), never a hang, never local`, eb && { code: eb.code, message: eb.message, msB });
   const fb = await ACC.create({ hosts: hmA, local: localSpy, install: false, log: quiet }).forwardPort('ssh-box', 1234).then(() => null, (e) => e);
-  ok(fb && fb.code === 'host_unavailable', 'forwardPort to that host fails the same way, loud, before any listener', fb && fb.code);
+  ok(gateOf(fb) && fb.code === 'host_unavailable', 'forwardPort to that host fails the same way, loud, before any listener', fb && fb.code);
   // (c) the real DeviceManager always HAS desktopServe (so desktop-access's "no desktopServe" arm is a belt for
   // stand-ins); host_needs_daemon on a real handle is the client's own capability gate, asserted in §3 and on a
   // real old daemon in test-desktop-remote §6
   ok(typeof DeviceManager.prototype.desktopServe === 'function' && typeof DeviceManager.prototype.browserServe === 'function', 'the real DeviceManager defines desktopServe (and browserServe) — host_needs_daemon on a real handle comes only from the capability gate');
   // (d) the precedent (browser-access) behaves identically on the real HostManager — documented, pinned
   const ec = await BA.create({ hosts: hmA, install: false, log: quiet }).call('ssh-box', 'version', {}).then(() => null, (e) => e);
-  ok(ec && ec.code === 'host_unavailable' && /remote node not found/.test(ec.message), `browser-access (the precedent) on the same failing ssh bootstrap ⇒ host_unavailable too (${ec && ec.code})`, ec && { code: ec.code, message: ec.message });
+  ok(gateOf(ec) && ec.code === 'host_unavailable' && verdictOf(/remote node not found/.test(ec.message)), `browser-access (the precedent) on the same failing ssh bootstrap ⇒ host_unavailable too (${ec && ec.code})`, ec && { code: ec.code, message: ec.message });
 }
 
 console.log('§6 lane C2 — the install rung\'s PURE plan, the picker verdict, the facts op');
 {
   const base = { platform: 'linux', apt: '/usr/bin/apt-get', distro: 'ubuntu', like: ['debian'], codename: 'noble', sudo: true, root: false };
   const pOld = M.xpraInstallPlan({ ...base, aptXpra: '3.1.5+dfsg-1ubuntu1' });
-  ok(pOld.ok && pOld.source === 'xpra.org' && pOld.canRun && /Suites: noble/.test(pOld.script) && /Pin: version 6\.\*/.test(pOld.script) && /xpra\.org\/xpra\.asc/.test(pOld.script), 'apt offers xpra 3.1 (< 5) ⇒ the plan adds xpra.org\'s repository for the codename + its key, pinned 6.x (D6)', pOld);
+  ok(gateOf(pOld.ok) && pOld.source === 'xpra.org' && gateOf(pOld.canRun) && gateOf(/Suites: noble/.test(pOld.script)) && gateOf(/Pin: version 6\.\*/.test(pOld.script)) && verdictOf(/xpra\.org\/xpra\.asc/.test(pOld.script)), 'apt offers xpra 3.1 (< 5) ⇒ the plan adds xpra.org\'s repository for the codename + its key, pinned 6.x (D6)', pOld);
   ok(JSON.stringify(pOld.packages) === JSON.stringify(['xpra', 'xterm', 'xdotool', 'xauth', 'xvfb', 'xpra-x11', 'xpra-html5']), 'xpra.org\'s split recommends (xpra-x11 = the X11 server half, xpra-html5 = the hosted client) are named explicitly', pOld.packages);
-  ok(pOld.commands.length === 10 && pOld.commands.every((c) => c === 'xpra --version' || c.startsWith('sudo ')) && !pOld.commands.some((c) => /^sudo [{(]/.test(c)), 'the commands to copy are the same ten steps (the pinned key\'s fetch, check and sync among them — B-bcb8 unit A: the checked key on disk before its move), each through sudo and none a shell word handed to sudo (the check stays unprivileged; test-desktop-apps §copied-lines pastes each)', pOld.commands);
+  ok(pOld.commands.length === 10 && gateOf(pOld.commands.every((c) => c === 'xpra --version' || c.startsWith('sudo '))) && !pOld.commands.some((c) => /^sudo [{(]/.test(c)), 'the commands to copy are the same ten steps (the pinned key\'s fetch, check and sync among them — B-bcb8 unit A: the checked key on disk before its move), each through sudo and none a shell word handed to sudo (the check stays unprivileged; test-desktop-apps §copied-lines pastes each)', pOld.commands);
   const pNew = M.xpraInstallPlan({ ...base, aptXpra: '6.2.5+dfsg-1' });
-  ok(pNew.ok && pNew.source === 'apt' && !/xpra\.org/.test(pNew.script) && JSON.stringify(pNew.packages) === JSON.stringify(['xpra', 'xterm', 'xdotool', 'xauth', 'xvfb']), 'apt offers xpra ≥ 5 ⇒ the machine\'s own sources, no repository added', pNew);
+  ok(gateOf(pNew.ok) && pNew.source === 'apt' && !/xpra\.org/.test(pNew.script) && JSON.stringify(pNew.packages) === JSON.stringify(['xpra', 'xterm', 'xdotool', 'xauth', 'xvfb']), 'apt offers xpra ≥ 5 ⇒ the machine\'s own sources, no repository added', pNew);
   const pHave = M.xpraInstallPlan({ ...base, aptXpra: '3.1.5', xpra: '6.5.3' });
-  ok(pHave.ok && pHave.already && pHave.source === 'apt' && !pHave.packages.includes('xpra'), 'xpra ≥ 5 already installed ⇒ only the helpers (never a second xpra)', pHave.packages);
+  ok(gateOf(pHave.ok) && gateOf(pHave.already) && pHave.source === 'apt' && !pHave.packages.includes('xpra'), 'xpra ≥ 5 already installed ⇒ only the helpers (never a second xpra)', pHave.packages);
   ok(M.xpraInstallPlan({ platform: 'darwin' }).code === 'no_x11' && M.xpraInstallPlan({ platform: 'win32' }).code === 'no_x11', 'macOS / Windows ⇒ no_x11 BY NAME (no X11 server; nothing to install)');
   ok(M.xpraInstallPlan({ ...base, apt: null }).code === 'no_apt', 'Linux without apt-get ⇒ no_apt');
   ok(M.xpraInstallPlan({ ...base, aptXpra: '3.1', codename: 'no;ble' }).code === 'no_repo' && M.xpraInstallPlan({ ...base, aptXpra: null, distro: 'fedora', like: [] }).code === 'no_repo', 'a codename that does not match the codename shape (it is interpolated into a root shell line) or a non-Debian family ⇒ no_repo, never a script');
   ok(M.xpraInstallPlan(null).code === 'no_facts', 'no facts (an agent that predates them) ⇒ no_facts');
   const pNo = M.xpraInstallPlan({ ...base, aptXpra: '3.1', sudo: false });
-  ok(pNo.ok && !pNo.canRun && pNo.code === 'no_sudo' && pNo.commands.length > 0, 'no passwordless sudo ⇒ the plan is still SHOWN (the commands to copy) and refused to run by name (no_sudo)', pNo.code);
+  ok(gateOf(pNo.ok) && !pNo.canRun && pNo.code === 'no_sudo' && pNo.commands.length > 0, 'no passwordless sudo ⇒ the plan is still SHOWN (the commands to copy) and refused to run by name (no_sudo)', pNo.code);
   ok(JSON.stringify(M.installArgv(pOld).slice(0, 3)) === JSON.stringify(['sudo', '-n', 'sh']) && M.installArgv({ ...pOld, root: true })[0] === 'sh', 'the run argv: sudo -n sh -c <script> (never a password prompt), sh -c when already root');
   const R = (h) => M.machinePickRow(h);
   ok(R({ hostId: 'local' }).code === 'ready' && R({ hostId: 'a', connected: true, capabilities: ['desktop-serve'], platform: 'linux' }).code === 'ready'
@@ -340,9 +340,9 @@ console.log('§6 lane C2 — the install rung\'s PURE plan, the picker verdict, 
   const m6 = machine({ display: fd });
   const f0 = await DS.runDesktopServeOp(m6, 'facts', {});
   const f1 = await DS.runDesktopServeOp(m6, 'facts', { install: true });
-  ok(f0.ok && !('install' in f0) && f1.ok && f1.install && f1.install.codename === 'bookworm', 'facts {install:true} carries the install facts; a plain facts does not (the probe spawns — asked only by the install step)', f1);
+  ok(gateOf(f0.ok) && !('install' in f0) && gateOf(f1.ok) && gateOf(f1.install) && f1.install.codename === 'bookworm', 'facts {install:true} carries the install facts; a plain facts does not (the probe spawns — asked only by the install step)', f1);
   const realF = await D.installFacts({ osRelease: path.join(root, 'no-such-os-release') });
-  ok(realF && realF.platform === process.platform && realF.distro === null && typeof realF.sudo === 'boolean', 'installFacts on this machine answers every field (an unreadable os-release is null, never a guess)', realF);
+  ok(gateOf(realF) && realF.platform === process.platform && realF.distro === null && typeof realF.sudo === 'boolean', 'installFacts on this machine answers every field (an unreadable os-release is null, never a guess)', realF);
   // THE sudo PROBE ITSELF (C2 verify finding 5): installFacts asks `sudo -n true` — a fake sudo on a scratch PATH
   // answers it (exit 0 ⇒ true, exit 1 ⇒ false, none on PATH ⇒ false); each fake stamps its argv, so the answer is
   // PROVEN to come from the probe and not from a constant. CONTROL: a copy that sets sudo:true without probing.
@@ -405,26 +405,26 @@ console.log('§7 lane C2 — the hub REGISTRY of a paired machine\'s apps (a stu
     access: () => ({ call: (...a) => dev.call(...a) }), hostLabel: (h) => (h === 'dev-a' ? 'Lab box' : h), remoteHosts: () => ['dev-a'], ...over });
   const k = mkKeeper();
   const before = k.listApps();
-  ok(Array.isArray(before) && before.length === 0 && !fs.existsSync(path.join(kdir, K.REMOTE_FILE)), 'no paired machine asked yet ⇒ the registry is this machine\'s alone (no remote file written)');
+  ok(gateOf(Array.isArray(before)) && before.length === 0 && !fs.existsSync(path.join(kdir, K.REMOTE_FILE)), 'no paired machine asked yet ⇒ the registry is this machine\'s alone (no remote file written)');
   const L = await k.launch({ exec: 'xterm' }, { host: 'dev-a' });
   const lc = dev.calls.find((c) => c.op === 'launch');
-  ok(L && L.hostId === 'dev-a' && L.hostLabel === 'Lab box' && L.state === 'launching' && lc && lc.hostId === 'dev-a' && lc.p.settings && 'desktop.idleTimeoutMin' in lc.p.settings && !('host' in lc.p.body), 'a launch with host runs THERE (the op, the hub\'s settings carried, `host` never in the app\'s body) and answers the record re-labelled with the hub\'s host id + label', L);
-  ok(k.get(L.id) && k.get(L.id).hostId === 'dev-a' && k.listApps().some((a) => a.id === L.id) && bc.some((m) => m.type === 'desktop-apps-updated' && m.apps.some((a) => a.id === L.id && a.hostLabel === 'Lab box')), 'get / listApps / the broadcast carry the paired machine\'s record');
+  ok(gateOf(L) && L.hostId === 'dev-a' && L.hostLabel === 'Lab box' && L.state === 'launching' && gateOf(lc) && lc.hostId === 'dev-a' && gateOf(lc.p.settings) && 'desktop.idleTimeoutMin' in lc.p.settings && !('host' in lc.p.body), 'a launch with host runs THERE (the op, the hub\'s settings carried, `host` never in the app\'s body) and answers the record re-labelled with the hub\'s host id + label', L);
+  ok(gateOf(k.get(L.id)) && k.get(L.id).hostId === 'dev-a' && gateOf(k.listApps().some((a) => a.id === L.id)) && verdictOf(bc.some((m) => m.type === 'desktop-apps-updated' && m.apps.some((a) => a.id === L.id && a.hostLabel === 'Lab box'))), 'get / listApps / the broadcast carry the paired machine\'s record');
   ok(k.streamTarget(L.id) === null, 'no stream target while it is launching');
   dev.apps[L.id].state = 'ready'; dev.apps[L.id].port = 14500;
   await k.syncHost('dev-a');
   const st = k.streamTarget(L.id);
-  ok(st && st.kind === 'xpra' && st.port === 14500 && st.hostId === 'dev-a', 'ready on the device ⇒ the stream target names the DEVICE\'s port and its host (the bridge forwards it)', st);
+  ok(gateOf(st) && st.kind === 'xpra' && st.port === 14500 && st.hostId === 'dev-a', 'ready on the device ⇒ the stream target names the DEVICE\'s port and its host (the bridge forwards it)', st);
   await k.whenRemoteWritten();   // B-0248 unit 3: the file is the store writer's (off the loop) — on disk once its owed write lands
   const onDisk = JSON.parse(fs.readFileSync(path.join(kdir, K.REMOTE_FILE), 'utf8'));
-  ok(onDisk.hosts['dev-a'] && onDisk.hosts['dev-a'].apps[L.id] && onDisk.hosts['dev-a'].apps[L.id].hostId === 'local' && !(fs.existsSync(path.join(kdir, DS.STORE_FILE)) && fs.readFileSync(path.join(kdir, DS.STORE_FILE), 'utf8').includes(L.id)), `the hub keeps what it saw in ${K.REMOTE_FILE} (the device's own view, hostId 'local' = D8) — never in this machine's store (it would be judged by this machine's pids)`);
+  ok(gateOf(onDisk.hosts['dev-a']) && gateOf(onDisk.hosts['dev-a'].apps[L.id]) && onDisk.hosts['dev-a'].apps[L.id].hostId === 'local' && !(fs.existsSync(path.join(kdir, DS.STORE_FILE)) && fs.readFileSync(path.join(kdir, DS.STORE_FILE), 'utf8').includes(L.id)), `the hub keeps what it saw in ${K.REMOTE_FILE} (the device's own view, hostId 'local' = D8) — never in this machine's store (it would be judged by this machine's pids)`);
   // windows / fit / keep-alive / noteInput through the op
   const w = await k.windows(L.id);
-  ok(w.ok && w.windows[0].title === 'remote term', 'windows(id) of a paired machine\'s app answers through the op');
+  ok(gateOf(w.ok) && w.windows[0].title === 'remote term', 'windows(id) of a paired machine\'s app answers through the op');
   k.noteDesktopSize(L.id, 800, 600); await new Promise((r) => setTimeout(r, 10));
-  ok(dev.calls.some((c) => c.op === 'fit' && c.p.id === L.id && c.p.w === 800 && c.p.h === 600), 'a client\'s desktop size reaches the device as the fit op');
+  ok(verdictOf(dev.calls.some((c) => c.op === 'fit' && c.p.id === L.id && c.p.w === 800 && c.p.h === 600)), 'a client\'s desktop size reaches the device as the fit op');
   const ka = await k.keepAlive(L.id);
-  ok(ka && ka.idleTimeoutMs === 0 && ka.hostId === 'dev-a', 'keep-alive through the op');
+  ok(gateOf(ka) && ka.idleTimeoutMs === 0 && ka.hostId === 'dev-a', 'keep-alive through the op');
   // the IDLE verdict is the hub's: a device never sees the input
   settings['desktop.idleTimeoutMin'] = 1;
   const L2 = await k.launch({ exec: 'xclock' }, { host: 'dev-a' });
@@ -439,23 +439,23 @@ console.log('§7 lane C2 — the hub REGISTRY of a paired machine\'s apps (a stu
   dev.apps[L2.id].lastInputAt = Date.now() - 120000;
   await k2.syncHost('dev-a');
   await new Promise((r) => setTimeout(r, 20));
-  ok(dev.calls.some((c) => c.op === 'stop' && c.p.id === L2.id && c.p.why === 'idle'), 'no input past the timeout ⇒ the hub stops it THROUGH the op, why idle (the verdict is the hub\'s, the act the device\'s)');
+  ok(verdictOf(dev.calls.some((c) => c.op === 'stop' && c.p.id === L2.id && c.p.why === 'idle')), 'no input past the timeout ⇒ the hub stops it THROUGH the op, why idle (the verdict is the hub\'s, the act the device\'s)');
   settings['desktop.idleTimeoutMin'] = 0;
   // the resource REPORT judges the device's own sample (report only)
   const big = { memBytes: 64 * 1024 ** 3, memMetric: 'pss', cpuTicks: 0, pids: 3 };
   dev.setSample(L.id, { at: Date.now(), pids: 3, sample: big });
   await k.syncHost('dev-a');
   const lv = k.get(L.id).live;
-  ok(lv && lv.over && notices.length === 1 && !dev.calls.some((c) => c.op === 'stop' && c.p.id === L.id), `the device's sample is judged by the hub's ONE verdict (${lv && lv.over}) — reported (one notice), never stopped`, { lv, notices: notices.length });
+  ok(gateOf(lv) && gateOf(lv.over) && notices.length === 1 && !dev.calls.some((c) => c.op === 'stop' && c.p.id === L.id), `the device's sample is judged by the hub's ONE verdict (${lv && lv.over}) — reported (one notice), never stopped`, { lv, notices: notices.length });
   await k.syncHost('dev-a');
   ok(notices.length === 1, 'the same sample is judged once (its instant), never re-reported per tick');
   // the machine stops answering ⇒ the records are KEPT, shown as unknown-host-offline
   dev.online = false;
   await k.syncHost('dev-a');
   const off = k.get(L.id);
-  ok(off && off.state === 'unknown-host-offline' && off.lastKnownState === 'ready' && /not responding/.test(off.hostError || '') && k.streamTarget(L.id) === null, 'the machine stops answering ⇒ its live record is KEPT and shown as unknown-host-offline (never exited — the app may run on), no stream target', off && { state: off.state, lastKnownState: off.lastKnownState });
+  ok(gateOf(off) && off.state === 'unknown-host-offline' && off.lastKnownState === 'ready' && gateOf(/not responding/.test(off.hostError || '')) && k.streamTarget(L.id) === null, 'the machine stops answering ⇒ its live record is KEPT and shown as unknown-host-offline (never exited — the app may run on), no stream target', off && { state: off.state, lastKnownState: off.lastKnownState });
   const restarted = mkKeeper();
-  ok(restarted.get(L.id) && restarted.get(L.id).hostId === 'dev-a', 'a hub restart keeps the registry (the remote file) — the record is there before the machine is asked');
+  ok(gateOf(restarted.get(L.id)) && restarted.get(L.id).hostId === 'dev-a', 'a hub restart keeps the registry (the remote file) — the record is there before the machine is asked');
   await restarted.adoptRemote();
   ok(restarted.get(L.id).state === 'unknown-host-offline', 'boot adoption: a machine that does not answer keeps its records, offline');
   dev.online = true;
@@ -463,10 +463,10 @@ console.log('§7 lane C2 — the hub REGISTRY of a paired machine\'s apps (a stu
   ok(restarted.get(L.id).state === 'ready' && restarted.streamTarget(L.id).port === 14500, 'the machine answers again ⇒ `list` adopts its records by host + id: ready, the stream target back');
   // relaunch through the op carries the successor
   const rl = await k.relaunch(L.id, { scale: 2 });
-  ok(rl.app && rl.app.hostId === 'dev-a' && rl.replaced && rl.replaced.state === 'exited' && rl.replaced.replacedBy === rl.app.id, 'relaunch of a paired machine\'s app = the device\'s ONE relaunch (the op); the successor and the replaced record both re-labelled', rl && { app: rl.app && rl.app.id, replaced: rl.replaced && rl.replaced.state });
+  ok(gateOf(rl.app) && rl.app.hostId === 'dev-a' && gateOf(rl.replaced) && rl.replaced.state === 'exited' && rl.replaced.replacedBy === rl.app.id, 'relaunch of a paired machine\'s app = the device\'s ONE relaunch (the op); the successor and the replaced record both re-labelled', rl && { app: rl.app && rl.app.id, replaced: rl.replaced && rl.replaced.state });
   // stop through the op
   const sp = await k.stop(rl.app.id, { why: 'user' });
-  ok(sp && sp.state === 'exited' && sp.hostId === 'dev-a', 'stop through the op answers the device\'s verdict');
+  ok(gateOf(sp) && sp.state === 'exited' && sp.hostId === 'dev-a', 'stop through the op answers the device\'s verdict');
   // the machine was removed from the instance ⇒ its records go
   const kg = mkKeeper();
   await kg.launch({ exec: 'xterm' }, { host: 'dev-a' }).then(() => { });
@@ -474,7 +474,7 @@ console.log('§7 lane C2 — the hub REGISTRY of a paired machine\'s apps (a stu
   await kg.syncHost('gone');
   ok(!kg.get('da-ghost') && !kg._remote().hosts.gone, 'a machine no longer on this instance (unsupported-host) ⇒ its records are dropped (nothing to re-ask)');
   // the window-targets engine's world is this machine's
-  ok(k.local && k.local.get(L.id) === null && !k.local.listApps().some((a) => a.id === L.id) && typeof k.local.launch === 'function', 'keeper.local (the window-targets engine\'s view) never answers a paired machine\'s record');
+  ok(gateOf(k.local) && k.local.get(L.id) === null && !k.local.listApps().some((a) => a.id === L.id) && typeof k.local.launch === 'function', 'keeper.local (the window-targets engine\'s view) never answers a paired machine\'s record');
   // host id collision is refused by name
   const clash = mkKeeper({ access: () => ({ call: async (h, op) => (op === 'list' ? { ok: true, apps: [{ id: L.id, state: 'ready', startedAt: 2, pids: {}, starts: {} }], availability: null } : { ok: true, apps: [] }) }), remoteHosts: () => ['dev-b'] });
   await clash.adoptRemote();
@@ -484,7 +484,7 @@ console.log('§7 lane C2 — the hub REGISTRY of a paired machine\'s apps (a stu
   const lm = await lonely.machine.list(); const lk = await lonely.list();
   ok(JSON.stringify(lm) === JSON.stringify(lk) && lonely.listApps === lonely.listApps && JSON.stringify(lonely.listApps()) === JSON.stringify(lonely.machine.listApps()), 'with no paired machine\'s record the hub\'s list IS the machine\'s own answer (local behaviour byte-identical)');
   const el = await K.create({ dataDir: path.join(root, 'noacc'), env: () => ({}), broadcast: () => { }, display: fakeDisplay, log: quiet }).launch({ exec: 'xterm' }, { host: 'dev-a' }).then(() => null, (e) => e);
-  ok(el && el.code === 'host_unavailable', 'a keeper with no access layer refuses a remote launch by name (host_unavailable), never a local run');
+  ok(gateOf(el) && el.code === 'host_unavailable', 'a keeper with no access layer refuses a remote launch by name (host_unavailable), never a local run');
   for (const x of [k, k2, restarted, kg, clash, lonely]) x.shutdown();
 }
 
@@ -494,14 +494,14 @@ console.log('§8 lane C2 — the bridge\'s ONE change: streamEndpointFor');
   const asked = [];
   const bridge = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => null, forwardPort: async (h, p) => { asked.push([h, p]); return { localPort: 40001, close: () => asked.push(['closed', h, p]) }; }, log: quiet });
   const loc = bridge.streamEndpointFor({ kind: 'xpra', port: 5000 });
-  ok(loc && loc.local === true && loc.port === 5000 && typeof loc.then !== 'function' && asked.length === 0, 'this machine\'s target ⇒ 127.0.0.1:<its port>, synchronously, no forward (the pre-C2 path)');
+  ok(gateOf(loc) && loc.local === true && loc.port === 5000 && typeof loc.then !== 'function' && asked.length === 0, 'this machine\'s target ⇒ 127.0.0.1:<its port>, synchronously, no forward (the pre-C2 path)');
   const rem = await bridge.streamEndpointFor({ kind: 'xpra', port: 5000, hostId: 'dev-a' });
-  ok(rem && rem.port === 40001 && !rem.local && JSON.stringify(asked[0]) === JSON.stringify(['dev-a', 5000]), 'a paired machine\'s target ⇒ the hub forward\'s port (forwardPort(hostId, port))');
+  ok(gateOf(rem) && rem.port === 40001 && !rem.local && JSON.stringify(asked[0]) === JSON.stringify(['dev-a', 5000]), 'a paired machine\'s target ⇒ the hub forward\'s port (forwardPort(hostId, port))');
   rem.release(); rem.release();
   ok(asked.filter((a) => a[0] === 'closed').length === 1, 'the socket\'s reference is released exactly once');
   const none = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => null, log: quiet });
   const e = await none.streamEndpointFor({ kind: 'rfb', port: 1, hostId: 'dev-a' }).then(() => null, (x) => x);
-  ok(e && e.code === 'host_unavailable', 'no forward wired ⇒ a remote target is refused by name (the upgrade answers 502), never a local connect to its port');
+  ok(gateOf(e) && e.code === 'host_unavailable', 'no forward wired ⇒ a remote target is refused by name (the upgrade answers 502), never a local connect to its port');
   // A VIEWER THAT GOES AWAY WHILE THE FORWARD RESOLVES (C2 verify finding 2): a half-close leaves the socket not yet
   // destroyed, and ws then drops the handshake WITHOUT its callback — the reference must still be released, once.
   // A real http server's upgrade + a raw TCP client (the tab closed during the 4–600 ms forward setup).
@@ -542,7 +542,7 @@ console.log('§8 lane C2 — the bridge\'s ONE change: streamEndpointFor');
   ok(sSrc.split(fixP).length === 2 && sSrc.split(fixQ).length === 2, 'CONTROL setup (F1): the parked socket\'s error listener is attached once and handed to ws once');
   const Srst = MUT.load('src/server/desktop-stream.js', editAnchor(editAnchor(sSrc, fixP, '\n', "src/server/desktop-stream.js"), fixQ, '\n', "src/server/desktop-stream.js"), 'parkedrst');
   const mRst = await racing(Srst, 'rst');
-  ok(mRst.uncaught.some((x) => /ECONNRESET/.test(x)), `CONTROL: the pre-fix bridge (no listener while parked) lets the reset escape as an uncaught ${JSON.stringify(mRst.uncaught)} — the hub's exit`, mRst);
+  ok(verdictOf(mRst.uncaught.some((x) => /ECONNRESET/.test(x))), `CONTROL: the pre-fix bridge (no listener while parked) lets the reset escape as an uncaught ${JSON.stringify(mRst.uncaught)} — the hub's exit`, mRst);
   // (§8's relay pins: MOVED to the fast scripts/test-desktop-serve-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
@@ -570,7 +570,7 @@ console.log('§9 lane C2 — the routes: host, the machine picker, the install r
   ok(bad.status === 400 && JSON.parse(bad.body).code === 'bad-request', 'a host that does not look like a host id ⇒ 400 bad-request');
   await j('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exec: 'xterm', host: 'dev-a' }) });
   const ln = seen.find((x) => x[0] === 'launch');
-  ok(ln && !('host' in ln[1]) && ln[2] && ln[2].host === 'dev-a', 'POST with host ⇒ launch(body without host, {host})', ln);
+  ok(gateOf(ln) && !('host' in ln[1]) && gateOf(ln[2]) && ln[2].host === 'dev-a', 'POST with host ⇒ launch(body without host, {host})', ln);
   const mc = await j('/api/desktop/machines');
   ok(mc.status === 200 && JSON.parse(mc.body).machines.length === 2, 'GET /api/desktop/machines answers the picker rows');
   const pl = await j('/api/desktop/install-plan?host=dev-a');
@@ -580,7 +580,7 @@ console.log('§9 lane C2 — the routes: host, the machine picker, the install r
   ok(ins.status === 200 && lines[0].log === '+ apt-get update' && lines[1].log === 'Hit:1 x' && lines[2].log === 'partial' && lines[3].done === true && lines[3].installed === '6.5.3', 'POST /api/desktop/install-xpra streams the log line by line (NDJSON), a partial tail flushed, then ONE done', lines);
   const ns = await j('/api/desktop/install-xpra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'nosudo' }) });
   const nl = ns.body.trim().split('\n').map((l) => JSON.parse(l));
-  ok(nl.length === 1 && nl[0].code === 'no_sudo' && nl[0].plan && nl[0].plan.commands.length === 1, 'no passwordless sudo ⇒ ONE error line by name, carrying the plan (the commands to copy)', nl);
+  ok(nl.length === 1 && nl[0].code === 'no_sudo' && gateOf(nl[0].plan) && nl[0].plan.commands.length === 1, 'no passwordless sudo ⇒ ONE error line by name, carrying the plan (the commands to copy)', nl);
   // (verify r2 F3/F4) a live install on the machine is RE-ATTACHED: the dialog is told first, then its log
   const realInstall = accStub.installXpra;
   accStub.installXpra = async (h, o) => { if (h !== 'dev-re') return realInstall(h, o); o.onReattach({ pid: 4242, since: 7 }); o.onData(Buffer.from('+ apt-get install -y xpra\nSetting up xpra\n')); return { ok: true, hostId: h, plan, after: { xpra: '6.5.3' }, reattached: true }; };
@@ -618,7 +618,7 @@ console.log('§9 lane C2 — the routes: host, the machine picker, the install r
   // lives in src/routes/vault.js since B-ee0a's take (one copy, not two); desktop-apps asks it
   const routesSrc = read('src/routes/vault.js');
   const guardLine = routesSrc.split('\n').find((l) => l.includes('const isAnyBearer =')) || '';
-  ok(/req\.query\.vsst != null/.test(guardLine) && /req\.query\.token != null/.test(guardLine) && read('src/routes/desktop-apps.js').includes("const { isAnyBearer } = require('./vault.js');"), 'CONTROL: isAnyBearer names BOTH ?token= and ?vsst= (the stream guard bearerOf names both; the routes must match) — the one rule, which desktop-apps asks', guardLine.trim().slice(0, 160));
+  ok(gateOf(/req\.query\.vsst != null/.test(guardLine)) && gateOf(/req\.query\.token != null/.test(guardLine)) && verdictOf(read('src/routes/desktop-apps.js').includes("const { isAnyBearer } = require('./vault.js');")), 'CONTROL: isAnyBearer names BOTH ?token= and ?vsst= (the stream guard bearerOf names both; the routes must match) — the one rule, which desktop-apps asks', guardLine.trim().slice(0, 160));
   srv.close();
 }
 
@@ -645,22 +645,22 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const got = [];
   const r = await a2.installXpra('dial-on', { onData: (d) => got.push(String(d)) });
   const run = connects.find((c) => c[0] === 'run');
-  ok(r.ok && r.after.xpra === '6.5.3' && run && run[1] === 'sh' && run[2][0] === '-c' && run[2].includes('sudo') && run[2].includes('-n') && run[2].some((x) => /Suites: noble/.test(x)) && got.join('').includes('ran'), 'installXpra on a paired machine: facts → plan → `sudo -n sh -c <plan>` through run-stream (stderr folded in), the log streamed, the facts re-read', { run: run && run.slice(0, 2), after: r.after });
+  ok(gateOf(r.ok) && r.after.xpra === '6.5.3' && gateOf(run) && run[1] === 'sh' && run[2][0] === '-c' && gateOf(run[2].includes('sudo')) && gateOf(run[2].includes('-n')) && gateOf(run[2].some((x) => /Suites: noble/.test(x))) && verdictOf(got.join('').includes('ran')), 'installXpra on a paired machine: facts → plan → `sudo -n sh -c <plan>` through run-stream (stderr folded in), the log streamed, the facts re-read', { run: run && run.slice(0, 2), after: r.after });
   const noSudoHosts = { ...hostsStub, deviceBounded: async () => ({ ...mkDm(['desktop-serve']), desktopServe: async () => ({ ok: true, facts: {}, install: { platform: 'linux', apt: '/usr/bin/apt-get', aptXpra: '3.1', distro: 'ubuntu', codename: 'noble', sudo: false } }) }) };
   connects.length = 0;
   const e1 = await ACC.create({ hosts: noSudoHosts, local: () => null, install: false, log: quiet }).installXpra('dial-on').then(() => null, (e) => e);
-  ok(e1 && e1.code === 'no_sudo' && e1.plan && e1.plan.commands.length > 0 && !connects.some((c) => c[0] === 'run'), 'no passwordless sudo ⇒ refused BY NAME before anything runs, the plan (commands to copy) on the error', e1 && e1.code);
+  ok(gateOf(e1) && e1.code === 'no_sudo' && gateOf(e1.plan) && e1.plan.commands.length > 0 && !connects.some((c) => c[0] === 'run'), 'no passwordless sudo ⇒ refused BY NAME before anything runs, the plan (commands to copy) on the error', e1 && e1.code);
   const macHosts = { ...hostsStub, deviceBounded: async () => ({ ...mkDm(['desktop-serve'], 'darwin'), desktopServe: async () => ({ ok: true, facts: {}, install: { platform: 'darwin' } }) }) };
   const e2 = await ACC.create({ hosts: macHosts, local: () => null, install: false, log: quiet }).installXpra('mac').then(() => null, (e) => e);
-  ok(e2 && e2.code === 'no_x11', 'a macOS machine ⇒ no_x11 by name');
-  ok(run && run[2][1] === M.INSTALL_LAUNCHER && run[2][2] === 'vs-install' && run[2][3] === M.INSTALL_RUNNER && run[2][5] === 'start', 'the argv that runs is the DETACHED launcher (its runner, the machine\'s state dir, mode start) wrapping the plan — the same on both transports (verify r2 F3/F4)', run && run[2].slice(2, 6).map((x) => String(x).slice(0, 20)));
+  ok(gateOf(e2) && e2.code === 'no_x11', 'a macOS machine ⇒ no_x11 by name');
+  ok(gateOf(run) && run[2][1] === M.INSTALL_LAUNCHER && run[2][2] === 'vs-install' && run[2][3] === M.INSTALL_RUNNER && run[2][5] === 'start', 'the argv that runs is the DETACHED launcher (its runner, the machine\'s state dir, mode start) wrapping the plan — the same on both transports (verify r2 F3/F4)', run && run[2].slice(2, 6).map((x) => String(x).slice(0, 20)));
   // this machine: the same launcher, an in-process child (the follower); the install's own output lands in the log
   const stLoc = path.join(root, 'st-loc');
   const loc = await ACC.create({ hosts: null, local: () => null, install: false, log: quiet }).runArgv('local', ['sh', '-c', 'echo out; echo err 1>&2; exit 3'], { onData: (d) => got.push('L:' + d), stateDir: stLoc });
   const gotL = got.filter((x) => x.startsWith('L:')).map((x) => x.slice(2)).join('');
-  ok(loc.code === 3 && /^out\nerr\n$/.test(gotL), 'runArgv on this machine = the launcher as an in-process child: stdout AND stderr streamed (followed from the log), the install\'s RECORDED exit code answered', loc);
+  ok(loc.code === 3 && verdictOf(/^out\nerr\n$/.test(gotL)), 'runArgv on this machine = the launcher as an in-process child: stdout AND stderr streamed (followed from the log), the install\'s RECORDED exit code answered', loc);
   const stL = await D.installState(stLoc);
-  ok(fs.readFileSync(path.join(stLoc, M.INSTALL_FILES.log), 'utf8') === 'out\nerr\n' && stL.installing === null && stL.lastInstall && stL.lastInstall.code === 3 && !fs.existsSync(path.join(stLoc, M.INSTALL_FILES.pid)) && stL.lastInstall.lock && !stL.lastInstall.lock.startsWith(stLoc), 'the machine keeps the install\'s log and its recorded exit in its state dir; the pidfile is gone once it ended (installState: installing null, lastInstall exit 3, the lock it held named — outside the state dir)', stL);
+  ok(fs.readFileSync(path.join(stLoc, M.INSTALL_FILES.log), 'utf8') === 'out\nerr\n' && stL.installing === null && gateOf(stL.lastInstall) && stL.lastInstall.code === 3 && !fs.existsSync(path.join(stLoc, M.INSTALL_FILES.pid)) && gateOf(stL.lastInstall.lock) && !stL.lastInstall.lock.startsWith(stLoc), 'the machine keeps the install\'s log and its recorded exit in its state dir; the pidfile is gone once it ended (installState: installing null, lastInstall exit 3, the lock it held named — outside the state dir)', stL);
 
   // the facts op's probe-free variant (what a held slot polls): the slot alone, from the machine keeper's own data dir
   const mS = machine();
@@ -668,7 +668,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   fs.mkdirSync(path.dirname(mS.storeFile), { recursive: true });
   fs.writeFileSync(path.join(path.dirname(mS.storeFile), M.INSTALL_FILES.exit), '5 1700000000123456789\n'); // the exit file's instant is nanoseconds (verify r5 L1)
   const isB = await DS.runDesktopServeOp(mS, 'facts', { installState: true });
-  ok(isA.ok && isA.installState && isA.installState.stateDir === path.dirname(mS.storeFile) && isA.installState.installing === null && !('facts' in isA) && isB.installState.lastInstall && isB.installState.lastInstall.code === 5 && isB.installState.lastInstall.at === 1700000000123, 'facts {installState:true} answers the machine\'s install SLOT alone (its data dir, installing, lastInstall) — nothing probed, no host facts', { isA, isB: isB.installState });
+  ok(gateOf(isA.ok) && gateOf(isA.installState) && isA.installState.stateDir === path.dirname(mS.storeFile) && isA.installState.installing === null && !('facts' in isA) && gateOf(isB.installState.lastInstall) && isB.installState.lastInstall.code === 5 && isB.installState.lastInstall.at === 1700000000123, 'facts {installState:true} answers the machine\'s install SLOT alone (its data dir, installing, lastInstall) — nothing probed, no host facts', { isA, isB: isB.installState });
   mS.shutdown?.();
   // PAST THE DEADLINE: named install_timeout — never "exited 1" — and the install (apt as root: never killed) runs ON,
   // detached; the machine's state dir says so (installing) until it ends, then records its exit
@@ -680,11 +680,11 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const eT = await aT.runArgv('local', ['sh', '-c', `echo $$ > '${pidf}'; exec sleep 1`], { stateDir: stT }).then(() => null, (e) => e);
   const msT = Date.now() - t0;
   const cpid = Number(fs.readFileSync(pidf, 'utf8'));
-  ok(eT && eT.code === 'install_timeout' && msT >= installT - EARLY_MS && !/exited/.test(eT.message) && eT.message.includes(path.join(stT, M.INSTALL_FILES.log)), `a local run past installMs ⇒ install_timeout in ${msT} ms (at its ${installT} ms deadline, never before; the code itself is the evidence — only the deadline names it, an exit would be its code), naming where its log is`, eT && { code: eT.code, message: eT.message });
+  ok(gateOf(eT) && eT.code === 'install_timeout' && msT >= installT - EARLY_MS && !/exited/.test(eT.message) && verdictOf(eT.message.includes(path.join(stT, M.INSTALL_FILES.log))), `a local run past installMs ⇒ install_timeout in ${msT} ms (at its ${installT} ms deadline, never before; the code itself is the evidence — only the deadline names it, an exit would be its code), naming where its log is`, eT && { code: eT.code, message: eT.message });
   const stT1 = await D.installState(stT);
-  ok(D.pidAlive(cpid) && stT1.installing && stT1.installing.pid > 0 && stT1.installing.pid !== cpid && D.procStart(stT1.installing.pid) > 0, `the child is NOT killed; the machine's slot is its pidfile — installing {pid ${stT1.installing && stT1.installing.pid}} (the detached runner, pid + starttime), the install ${cpid} under it`, stT1);
+  ok(gateOf(D.pidAlive(cpid)) && gateOf(stT1.installing) && stT1.installing.pid > 0 && stT1.installing.pid !== cpid && D.procStart(stT1.installing.pid) > 0, `the child is NOT killed; the machine's slot is its pidfile — installing {pid ${stT1.installing && stT1.installing.pid}} (the detached runner, pid + starttime), the install ${cpid} under it`, stT1);
   const endT = await until(async () => { const x = await D.installState(stT); return !D.pidAlive(cpid) && x.installing === null && x.lastInstall ? x : null; }, 4000);
-  ok(endT && endT.lastInstall.code === 0, 'it ends on its own: the pidfile gone, its exit recorded (0)', endT);
+  ok(gateOf(endT) && endT.lastInstall.code === 0, 'it ends on its own: the pidfile gone, its exit recorded (0)', endT);
 
   // (verify r2 F4) THE INSTALL OUTLIVES THE PROCESS THAT STARTED IT: a helper "hub" process starts it, the helper is
   // SIGKILLed at 0.7 s (a hub restart / OOM / the daemon's re-exec) — the install's end marker still lands
@@ -702,13 +702,13 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   };
   const accPath = path.join(REPO, 'src/server/desktop-access.js');
   const f4a = await f4(accPath, 'fix');
-  ok(f4a.sawStep1 && f4a.landed && /step1\nstep2\n/.test(f4a.log || ''), 'the process that started the install is SIGKILLed mid-run ⇒ the install runs to its end (its marker lands, its log whole) — it never lived on that process\'s pipe', f4a);
+  ok(gateOf(f4a.sawStep1) && gateOf(f4a.landed) && verdictOf(/step1\nstep2\n/.test(f4a.log || '')), 'the process that started the install is SIGKILLed mid-run ⇒ the install runs to its end (its marker lands, its log whole) — it never lived on that process\'s pipe', f4a);
   const accSrc = read('src/server/desktop-access.js');
   const launchLine = '    const launch = SLOT.installLauncherArgv(argv, { stateDir, mode });\n';
   ok(accSrc.split(launchLine).length === 2, 'CONTROL setup: the launcher wrap is spelled once');
   const accPre = MUT.write('src/server/desktop-access.js', editAnchor(accSrc, launchLine, '    const launch = argv;\n', "src/server/desktop-access.js"), 'nolauncher');
   const f4b = await f4(accPre, 'pre');
-  ok(f4b.sawStep1 && !f4b.landed, 'CONTROL: the pre-fix rung (the install a direct child on the starter\'s pipe) dies with its starter — SIGPIPE at its next line, the marker never lands', f4b);
+  ok(gateOf(f4b.sawStep1) && !f4b.landed, 'CONTROL: the pre-fix rung (the install a direct child on the starter\'s pipe) dies with its starter — SIGPIPE at its next line, the marker never lands', f4b);
 
   // (verify r2 F4) THE SLOT SURVIVES AN ACCESS-LAYER RE-CREATE (a hub restart): the machine's pidfile says an install
   // runs, so a second Install RE-ATTACHES (follows its log) instead of starting a second apt beside it. The real local
@@ -734,9 +734,9 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     return { eA: eA && eA.code, busyA, rB, re, logB: logB.join(''), n, busyAfter: A.installBusy('local'), lines };
   };
   const rl = await reLayer(ACC, 'fix');
-  ok(rl.eA === 'install_timeout' && rl.busyA && rl.busyA.running, 'layer A: the install passes its deadline (install_timeout), A holds the slot', { eA: rl.eA, busyA: rl.busyA });
-  ok(rl.rB && rl.rB.ok && rl.rB.reattached === true && rl.re.length === 1 && rl.re[0].pid > 0 && rl.n === 1 && /fake apt done/.test(rl.logB), `a RE-CREATED layer (the hub restarted) asked to install RE-ATTACHES: onReattach({pid ${rl.re[0] && rl.re[0].pid}}), the running install's log followed to its end — ONE install started, never a second (${rl.n})`, { rB: rl.rB && (rl.rB.code || rl.rB.reattached), n: rl.n, re: rl.re });
-  ok(rl.busyAfter === null && rl.lines.some((l) => /the install slot on this machine is free again — the timed-out install ended — this machine reports the install process gone, exit 0/.test(l)), 'layer A\'s held slot frees when the MACHINE reports the install gone — the line names that evidence', rl.lines.filter((l) => /slot/.test(l)));
+  ok(rl.eA === 'install_timeout' && gateOf(rl.busyA) && verdictOf(rl.busyA.running), 'layer A: the install passes its deadline (install_timeout), A holds the slot', { eA: rl.eA, busyA: rl.busyA });
+  ok(gateOf(rl.rB) && gateOf(rl.rB.ok) && rl.rB.reattached === true && rl.re.length === 1 && rl.re[0].pid > 0 && rl.n === 1 && verdictOf(/fake apt done/.test(rl.logB)), `a RE-CREATED layer (the hub restarted) asked to install RE-ATTACHES: onReattach({pid ${rl.re[0] && rl.re[0].pid}}), the running install's log followed to its end — ONE install started, never a second (${rl.n})`, { rB: rl.rB && (rl.rB.code || rl.rB.reattached), n: rl.n, re: rl.re });
+  ok(rl.busyAfter === null && verdictOf(rl.lines.some((l) => /the install slot on this machine is free again — the timed-out install ended — this machine reports the install process gone, exit 0/.test(l))), 'layer A\'s held slot frees when the MACHINE reports the install gone — the line names that evidence', rl.lines.filter((l) => /slot/.test(l)));
   const runningLine = "      const running = facts && facts.installing && facts.installing.pid ? facts.installing : null;\n";
   ok(accSrc.split(runningLine).length === 2, 'CONTROL setup: the re-attach verdict is spelled once');
   const AccPre = MUT.load('src/server/desktop-access.js', editAnchor(editAnchor(accSrc, runningLine, '      const running = null;\n', "src/server/desktop-access.js"), launchLine, '    const launch = argv;\n', "src/server/desktop-access.js"), 'noslot');
@@ -785,7 +785,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // out (`polls`, counted by a PATH `sleep`) — the claim itself; the bound only says "not the cap".
   const waitOf = (re, what) => {
     const m = M.INSTALL_LAUNCHER.match(re);
-    ok(m && M.INSTALL_LAUNCHER.split(m[0]).length === 2, `CONTROL setup: the launcher's ${what} is spelled once — its poll and its cap read from the module (${m ? `${m[1]} polls × ${m[2]} s` : 'NOT FOUND'})`);
+    ok(gateOf(m) && M.INSTALL_LAUNCHER.split(m[0]).length === 2, `CONTROL setup: the launcher's ${what} is spelled once — its poll and its cap read from the module (${m ? `${m[1]} polls × ${m[2]} s` : 'NOT FOUND'})`);
     return m ? { cap: Number(m[1]), pollMs: Math.round(Number(m[2]) * 1000), capMs: Number(m[1]) * Math.round(Number(m[2]) * 1000) } : { cap: NaN, pollMs: NaN, capMs: NaN };
   };
   const PID_WAIT = waitOf(/\[ \$n -lt (\d+) \] && \[ -e "\/proc\/\$b" \]; do sleep ([0-9.]+); n=\$\(\(n\+1\)\); done/, 'pidfile wait (bounded by the runner\'s life, r5 L4)');
@@ -832,9 +832,9 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const t5 = Date.now();
   const l5 = await ACC.create({ hosts: null, local: () => null, install: false, log: quiet, env: () => l5p.env }).runArgv('local', ['sh', '-c', 'echo never'], { stateDir: path.join(root, 'st-l5'), onData: (d) => got.push('L5:' + d) });
   const l5ms = Date.now() - t5, l5out = got.filter((x) => x.startsWith('L5:')).join(''), l5polls = l5p.polls();
-  ok(l5.code === 125 && l5polls === 0 && l5ms < AT_ONCE_MS && /setsid \(util-linux\) is missing/.test(l5out) && !fs.existsSync(path.join(root, 'st-l5')), `(r3 L5) a machine without setsid ⇒ exit 125 in ${l5ms} ms naming setsid, nothing created — refused before any wait (${l5polls} polls)`, { l5, l5ms, l5out, l5polls });
+  ok(l5.code === 125 && l5polls === 0 && l5ms < AT_ONCE_MS && gateOf(/setsid \(util-linux\) is missing/.test(l5out)) && !fs.existsSync(path.join(root, 'st-l5')), `(r3 L5) a machine without setsid ⇒ exit 125 in ${l5ms} ms naming setsid, nothing created — refused before any wait (${l5polls} polls)`, { l5, l5ms, l5out, l5polls });
   const lf = await launch(M, ['sh', '-c', 'echo never'], path.join(root, 'st-noflock'), 'start', { env: envNoFlock, killAfter: 3000, polls: true });
-  ok(lf.code === 125 && lf.polls === 0 && lf.ms < AT_ONCE_MS && /flock \(util-linux\) is missing on this machine/.test(lf.out) && !/never/.test(lf.out) && !fs.existsSync(path.join(root, 'st-noflock')), `(r4) a machine without flock ⇒ exit 125 in ${lf.ms} ms naming util-linux, nothing run, nothing created — refused before any wait (${lf.polls} polls)`, lf);
+  ok(lf.code === 125 && lf.polls === 0 && lf.ms < AT_ONCE_MS && gateOf(/flock \(util-linux\) is missing on this machine/.test(lf.out)) && !/never/.test(lf.out) && !fs.existsSync(path.join(root, 'st-noflock')), `(r4) a machine without flock ⇒ exit 125 in ${lf.ms} ms naming util-linux, nothing run, nothing created — refused before any wait (${lf.polls} polls)`, lf);
   // (L8) a starttime that cannot be read (no /proc): nothing is ever recorded as "<pid> " — the RUNNER refuses before it
   // runs (the pidfile's identity needs it; the launcher needs no identity of its own since r4 — the lock is the
   // kernel's). A `cut` that prints nothing stands in for an unreadable /proc/<pid>/stat.
@@ -844,7 +844,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const stL8 = path.join(root, 'st-l8-launch');
   const l8l = await launch(M, ['sh', '-c', 'echo never'], stL8, 'start', { env: envNoProc, killAfter: 3000, polls: true });
   l8l.exitRec = (() => { try { return fs.readFileSync(path.join(stL8, M.INSTALL_FILES.exit), 'utf8').trim().split(/\s+/)[0]; } catch { return null; } })();
-  ok(l8l.code === 125 && l8l.exitRec === '125' && l8l.polls < PID_WAIT.cap && l8l.ms < AT_ONCE_MS && /cannot read \/proc\/\d+\/stat/.test(l8l.out) && !/never/.test(l8l.out) && lockFree(lockOf(stL8)), `(r3 L8) no readable starttime ⇒ the install is refused before it runs: exit 125 in ${l8l.ms} ms naming /proc, nothing run, the lock released — the pidfile wait left by the runner's recorded exit (125) after ${l8l.polls} of its ${PID_WAIT.cap} polls`, l8l);
+  ok(l8l.code === 125 && l8l.exitRec === '125' && l8l.polls < PID_WAIT.cap && l8l.ms < AT_ONCE_MS && gateOf(/cannot read \/proc\/\d+\/stat/.test(l8l.out)) && !/never/.test(l8l.out) && verdictOf(lockFree(lockOf(stL8))), `(r3 L8) no readable starttime ⇒ the install is refused before it runs: exit 125 in ${l8l.ms} ms naming /proc, nothing run, the lock released — the pidfile wait left by the runner's recorded exit (125) after ${l8l.polls} of its ${PID_WAIT.cap} polls`, l8l);
   /** The RUNNER run directly, fd 9 = `fd9` (an open descriptor on the lock file; the launcher hands its own). */
   const runner = (Mod, tag, { env = envNoProc, holdOther = false, seed = false } = {}) => new Promise((resolve) => {
     const st = path.join(root, `st-r-${tag}`); fs.mkdirSync(st, { recursive: true });
@@ -864,23 +864,23 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     if (holder) { const t = Date.now(); const w = setInterval(() => { if (!lockFree(K8) || Date.now() - t > 3000) { clearInterval(w); go(); } }, 20); } else go();
   });
   const l8r = await runner(M, 'l8');
-  ok(l8r.code === 125 && !l8r.ran && l8r.seen === null && l8r.exit === '125' && /cannot read \/proc\/\d+\/stat/.test(l8r.log) && !l8r.pidLeft, '(r3 L8) the RUNNER cannot read its starttime ⇒ it refuses: the install never runs, no pidfile ever written, its exit recorded 125 with the cause in the log', l8r);
+  ok(l8r.code === 125 && !l8r.ran && l8r.seen === null && l8r.exit === '125' && gateOf(/cannot read \/proc\/\d+\/stat/.test(l8r.log)) && !l8r.pidLeft, '(r3 L8) the RUNNER cannot read its starttime ⇒ it refuses: the install never runs, no pidfile ever written, its exit recorded 125 with the cause in the log', l8r);
   // (r4) the runner RE-ASSERTS the lock on the descriptor it was handed: one that does not hold it (another process
   // holds the lock) refuses — never runs, and never touches the slot's files (they are the other install's)
   const guard = await runner(M, 'guard', { env: { ...process.env }, holdOther: true, seed: true });
-  ok(guard.code === 125 && !guard.ran && guard.pidfile === 'another install\n' && guard.exitfile === 'another exit\n' && /does not hold the install lock/.test(guard.log), '(r4) a runner whose descriptor does not hold the install lock (another holds it) refuses: never runs, the pidfile and exit file untouched, the cause in the log', guard);
+  ok(guard.code === 125 && !guard.ran && guard.pidfile === 'another install\n' && guard.exitfile === 'another exit\n' && verdictOf(/does not hold the install lock/.test(guard.log)), '(r4) a runner whose descriptor does not hold the install lock (another holds it) refuses: never runs, the pidfile and exit file untouched, the cause in the log', guard);
   // the controls' patched copies (scripts/mutant-copy.mjs), each edit spelled once
   const m1Reset = lineOf("'  pid=; s=', // M1"), m1Verify = lineOf('! gone "$pid" "$s" || pid=');
-  ok(m1Reset && m1Verify && appsSrc.split(m1Reset).length === 2 && appsSrc.split(m1Verify).length === 2, 'CONTROL setup: the winner\'s pid reset and the pre-tail verification are spelled once each');
+  ok(gateOf(m1Reset) && gateOf(m1Verify) && appsSrc.split(m1Reset).length === 2 && appsSrc.split(m1Verify).length === 2, 'CONTROL setup: the winner\'s pid reset and the pre-tail verification are spelled once each');
   const appsPreM1 = MUT.write('src/install-slot.js', editAnchor(editAnchor(appsSrc, m1Reset, '\n', "src/install-slot.js"), m1Verify, "  '  r=$pid;',\n", "src/install-slot.js"), 'm1pre');
   ok(accSrc.split("const SLOT = require('../install-slot.js');").length === 2, 'CONTROL setup: the access layer requires the package slot once (the closed world re-binds it)');
   const AccPreM1 = MUT.load('src/server/desktop-access.js', editAnchor(accSrc, "const SLOT = require('../install-slot.js');", `const SLOT = require(${JSON.stringify(appsPreM1)});`, "src/server/desktop-access.js"), 'accm1pre');
   const flockTake = lineOf("'    if flock -n 9; then'"), flockGuard = lineOf("'flock -n 9 2>/dev/null ||");
-  ok(flockTake && flockGuard && appsSrc.split(flockTake).length === 2 && appsSrc.split(flockGuard).length === 2, 'CONTROL setup: the launcher\'s lock and the runner\'s re-assertion are spelled once each');
+  ok(gateOf(flockTake) && gateOf(flockGuard) && appsSrc.split(flockTake).length === 2 && appsSrc.split(flockGuard).length === 2, 'CONTROL setup: the launcher\'s lock and the runner\'s re-assertion are spelled once each');
   const AppsNoFlock = MUT.load('src/install-slot.js', editAnchor(editAnchor(appsSrc, flockTake, flockTake.replace('if flock -n 9; then', 'if true; then'), "src/install-slot.js"), flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||'), "src/install-slot.js"), 'noflock');
   const AppsNoGuard = MUT.load('src/install-slot.js', editAnchor(appsSrc, flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||'), "src/install-slot.js"), 'noguard');
   const setsidLine = lineOf('command -v setsid'), flockCheck = lineOf('command -v flock');
-  ok(setsidLine && flockCheck && appsSrc.split(setsidLine).length === 2 && appsSrc.split(flockCheck).length === 2, 'CONTROL setup: the setsid and flock checks are spelled once each');
+  ok(gateOf(setsidLine) && gateOf(flockCheck) && appsSrc.split(setsidLine).length === 2 && appsSrc.split(flockCheck).length === 2, 'CONTROL setup: the setsid and flock checks are spelled once each');
   const AppsNoSetsidCheck = MUT.load('src/install-slot.js', editAnchor(appsSrc, setsidLine, '\n', "src/install-slot.js"), 'nosetsidcheck');
   const AppsNoFlockCheck = MUT.load('src/install-slot.js', editAnchor(appsSrc, flockCheck, '\n', "src/install-slot.js"), 'noflockcheck');
   // a state dir that exists but cannot be written: refused by name at once
@@ -888,13 +888,13 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
   if (!asRoot) {
     const ro = await launch(M, ['sh', '-c', 'echo never'], stRo, 'start', { killAfter: 3000, polls: true });
-    ok(ro.code === 125 && ro.polls === 0 && ro.ms < AT_ONCE_MS && /is not writable on this machine/.test(ro.out) && !/never/.test(ro.out), `a state dir that cannot be written ⇒ exit 125 in ${ro.ms} ms naming it — refused before any wait (${ro.polls} polls)`, ro);
+    ok(ro.code === 125 && ro.polls === 0 && ro.ms < AT_ONCE_MS && gateOf(/is not writable on this machine/.test(ro.out)) && !/never/.test(ro.out), `a state dir that cannot be written ⇒ exit 125 in ${ro.ms} ms naming it — refused before any wait (${ro.polls} polls)`, ro);
   } else console.log('  - SKIP the read-only state dir row: running as root (a mode bit does not stop root)');
   const roLine = lineOf('[ -w "$D" ] ||');
-  ok(roLine && appsSrc.split(roLine).length === 2, 'CONTROL setup: the writable check is spelled once');
+  ok(gateOf(roLine) && appsSrc.split(roLine).length === 2, 'CONTROL setup: the writable check is spelled once');
   const AppsNoRoCheck = MUT.load('src/install-slot.js', editAnchor(appsSrc, roLine, '\n', "src/install-slot.js"), 'norocheck');
   const refuseLine = lineOf('[ -n "$s" ] || { echo "+ [vibespace] cannot read /proc/$$/stat');
-  ok(refuseLine && appsSrc.split(refuseLine).length === 2, 'CONTROL setup: the runner\'s refusal is spelled once');
+  ok(gateOf(refuseLine) && appsSrc.split(refuseLine).length === 2, 'CONTROL setup: the runner\'s refusal is spelled once');
   const AppsNoRefuse = MUT.load('src/install-slot.js', editAnchor(appsSrc, refuseLine, '\n', "src/install-slot.js"), 'norefuse');
   // (M4) FIVE hubs START at the same moment on one machine: exactly ONE runner; the other four follow it and answer ITS
   // code. A ~2 % race is never gated by one trial: 40 trials at their natural speed (batches of 8 at once), then 20 with
@@ -990,7 +990,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     return { st, out, locks: [...new Set(out.map((x) => x.lock))], stateLock: (await D.installState(st)).lastInstall };
   };
   const t3Line = lineOf("'  T=/run/user/$u;"), t3Check = lineOf('is not a directory this user owns');
-  ok(t3Line && t3Check && appsSrc.split(t3Line).length === 2 && appsSrc.split(t3Check).length === 2, 'CONTROL setup: the uid-named directory and its ownership check are spelled once each');
+  ok(gateOf(t3Line) && gateOf(t3Check) && appsSrc.split(t3Line).length === 2 && appsSrc.split(t3Check).length === 2, 'CONTROL setup: the uid-named directory and its ownership check are spelled once each');
   const AppsEnvRoot = MUT.load('src/install-slot.js', editAnchor(editAnchor(appsSrc, t3Line, "  '  T=${XDG_RUNTIME_DIR:-/tmp}; [ -d \"$T\" ] && [ -w \"$T\" ] || T=/tmp',\n", "src/install-slot.js"), t3Check, '\n', "src/install-slot.js"), 'envroot');
   const AppsNoOwnCheck = MUT.load('src/install-slot.js', editAnchor(appsSrc, t3Check, '\n', "src/install-slot.js"), 'noowncheck');
   // a fake uid (an `id` that answers -u with it): /run/user/<n> does not exist ⇒ the per-uid /tmp dir, created 0700
@@ -1033,7 +1033,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // runner's pidfile is gone. Aligned to one second by construction, re-tried (≤ 3) only when the box was too slow to
   // keep it there — the alignment is evidence in the result either way.
   const exitLine1 = lineOf('fin() { echo "$1 $(date +%s%N) $K"'), t0Line1 = lineOf("'  t0=$(date +%s%N);"), cmpLine1 = lineOf('-gt "$t0" ]');
-  ok(exitLine1 && t0Line1 && cmpLine1 && [exitLine1, t0Line1, cmpLine1].every((l) => appsSrc.split(l).length === 2), 'CONTROL setup: the exit instant, the start instant and their comparison are spelled once each');
+  ok(gateOf(exitLine1) && gateOf(t0Line1) && gateOf(cmpLine1) && verdictOf([exitLine1, t0Line1, cmpLine1].every((l) => appsSrc.split(l).length === 2)), 'CONTROL setup: the exit instant, the start instant and their comparison are spelled once each');
   const AppsWholeSec = MUT.load('src/install-slot.js', editAnchor(editAnchor(editAnchor(appsSrc, exitLine1, exitLine1.replace('$(date +%s%N)', '$(date +%s)'), "src/install-slot.js"), t0Line1, t0Line1.replace('$(date +%s%N)', '$(date +%s)'), "src/install-slot.js"), cmpLine1, cmpLine1.replace('-gt "$t0" ]', '-ge "$t0" ]'), "src/install-slot.js"), 'wholesec');
   const sameSecond = async (Mod, tag, unit) => {
     let last = null;
@@ -1069,7 +1069,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   fs.writeFileSync(path.join(noFd9, 'setsid'), `#!/bin/sh\nexec 9>&-\nexec ${realBin('setsid')} "$@"\n`, { mode: 0o755 });
   const envNoFd9 = { ...process.env, PATH: `${noFd9}:${process.env.PATH}` };
   const waitLine4 = lineOf('[ -e "/proc/$b" ]; do sleep 0.05');
-  ok(waitLine4 && appsSrc.split(waitLine4).length === 2, 'CONTROL setup: the pidfile wait bounded by the runner\'s life is spelled once');
+  ok(gateOf(waitLine4) && appsSrc.split(waitLine4).length === 2, 'CONTROL setup: the pidfile wait bounded by the runner\'s life is spelled once');
   const AppsUnbounded = MUT.load('src/install-slot.js', editAnchor(appsSrc, waitLine4, waitLine4.replace(' && [ -e "/proc/$b" ]', ''), "src/install-slot.js"), 'unbounded');
   const l4Leg = (async () => {
     const stF = path.join(root, 'st-l4'), stC = path.join(root, 'st-l4-pre'); fs.mkdirSync(stF, { recursive: true }); fs.mkdirSync(stC, { recursive: true });
@@ -1094,7 +1094,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     runner(AppsNoGuard, 'guardpre', { env: { ...process.env }, holdOther: true, seed: true }),
     asRoot ? Promise.resolve(null) : launch(AppsNoRoCheck, ['sh', '-c', 'echo never'], stRo, 'start', { killAfter: 3000 }),
   ]);
-  ok(nat.length === 40 && oneEach(nat), `(r3 M4 / r4) five concurrent starts on an empty state dir, 40 trials (8 at a time, beside every other leg) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(nat))}); the other four follow it (${nat.reduce((a, r) => a + r.followed, 0)} follows of 160 — each install runs until all four follow) and all answer its exit 3; the lock free after each (${nat.ms} ms)`, nat.filter((r) => !oneEach([r])).slice(0, 3));
+  ok(nat.length === 40 && verdictOf(oneEach(nat)), `(r3 M4 / r4) five concurrent starts on an empty state dir, 40 trials (8 at a time, beside every other leg) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(nat))}); the other four follow it (${nat.reduce((a, r) => a + r.followed, 0)} follows of 160 — each install runs until all four follow) and all answer its exit 3; the lock free after each (${nat.ms} ms)`, nat.filter((r) => !oneEach([r])).slice(0, 3));
   // (M1, re-planted for B-6c46: the follow now ends on the exit file, so a stale pid can no longer be followed until a
   // deadline) a stale pidfile naming a LIVE unrelated pid (this process, a wrong starttime) + a runner that REFUSES (its lock
   // fd closed: envNoFd9): the fix answers 125 «did not start»; the pre-M1 copy keeps the stale pid, ends its follow on `gone`
@@ -1108,38 +1108,38 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     return { ...r, refused: /does not hold the install lock/.test(log) };
   };
   const m1rFix = await m1Refuse(M, 'fix'), m1rPre = await m1Refuse(AppsPreM1, 'pre');
-  ok(m1rFix.refused && m1rFix.code === 125 && /did not start/.test(m1rFix.out) && !/never/.test(m1rFix.out), '(r3 M1, B-6c46) a stale pidfile naming a LIVE unrelated pid + a runner that refused ⇒ 125 «did not start» — the stale pid never followed', m1rFix);
-  ok(m1rPre.refused && m1rPre.code === 199 && /without recording its exit/.test(m1rPre.out), 'CONTROL: the pre-M1 launcher (no pid reset, no verify) — its plant held (the runner refused) — follows the stale pid and answers 199 «ended without recording its exit» (red)', m1rPre);
-  ok(wide.length === 20 && oneEach(wide), `(r4) the same over 20 trials with the windows WIDENED (setsid +0.3 s, flock +0–60 ms) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(wide))}), all answer exit 3`, wide.filter((r) => !oneEach([r])).slice(0, 3));
-  ok(killed5.length === 10 && oneEach(killed5) && killed5.every((r) => r.held && r.freed && r.firstRunMs !== null && r.firstRunMs < LOCK_WAIT.capMs / 2), `(r4) a previous install SIGKILLed mid-run, 10 trials (its runner held the lock — fd 9 → the lock file — until the kill: ${killed5.filter((r) => r.held).length}/10; released by the kernel at the kill: ${killed5.filter((r) => r.freed).length}/10) ⇒ five starts ⇒ ONE runner, started at once (first run ${Math.min(...killed5.map((r) => r.firstRunMs))}–${Math.max(...killed5.map((r) => r.firstRunMs))} ms after the starts, < ½ × the ${LOCK_WAIT.capMs} ms lock wait a start sits out when the lock stays held — the kernel released the dead holder's lock; nothing waited)`, killed5.filter((r) => !oneEach([r]) || !(r.firstRunMs < LOCK_WAIT.capMs / 2)).slice(0, 3));
+  ok(gateOf(m1rFix.refused) && m1rFix.code === 125 && gateOf(/did not start/.test(m1rFix.out)) && !/never/.test(m1rFix.out), '(r3 M1, B-6c46) a stale pidfile naming a LIVE unrelated pid + a runner that refused ⇒ 125 «did not start» — the stale pid never followed', m1rFix);
+  ok(gateOf(m1rPre.refused) && m1rPre.code === 199 && verdictOf(/without recording its exit/.test(m1rPre.out)), 'CONTROL: the pre-M1 launcher (no pid reset, no verify) — its plant held (the runner refused) — follows the stale pid and answers 199 «ended without recording its exit» (red)', m1rPre);
+  ok(wide.length === 20 && verdictOf(oneEach(wide)), `(r4) the same over 20 trials with the windows WIDENED (setsid +0.3 s, flock +0–60 ms) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(wide))}), all answer exit 3`, wide.filter((r) => !oneEach([r])).slice(0, 3));
+  ok(killed5.length === 10 && gateOf(oneEach(killed5)) && verdictOf(killed5.every((r) => r.held && r.freed && r.firstRunMs !== null && r.firstRunMs < LOCK_WAIT.capMs / 2)), `(r4) a previous install SIGKILLed mid-run, 10 trials (its runner held the lock — fd 9 → the lock file — until the kill: ${killed5.filter((r) => r.held).length}/10; released by the kernel at the kill: ${killed5.filter((r) => r.freed).length}/10) ⇒ five starts ⇒ ONE runner, started at once (first run ${Math.min(...killed5.map((r) => r.firstRunMs))}–${Math.max(...killed5.map((r) => r.firstRunMs))} ms after the starts, < ½ × the ${LOCK_WAIT.capMs} ms lock wait a start sits out when the lock stays held — the kernel released the dead holder's lock; nothing waited)`, killed5.filter((r) => !oneEach([r]) || !(r.firstRunMs < LOCK_WAIT.capMs / 2)).slice(0, 3));
   // B-6c46: on a machine that never reaps orphans the runner stays a ZOMBIE; the second start's follow now ends on the recorded
   // exit, and the zombie counts as gone (the cure: no wait on it), so its bound firing there is a hang — red, never the old SKIP
   ok(!(kl.b.killed && kl.runnerState && kl.runnerState.state === 'Z'), '(B-6c46) the second start never hangs behind a zombie runner: a recorded exit ends its follow', { killed: kl.b.killed, runnerState: kl.runnerState });
-  ok(kl.launcherFd9 === null && kl.runnerAlive && kl.runnerFd9 === kl.K && kl.held && kl.b.followsIt && kl.b.code === 4 && kl.runs.length === 1 && /^run-/.test(kl.runs[0]) && kl.freeAfter, `(r4) the LAUNCHER SIGKILLed mid-install: its runner lives on HOLDING the lock (/proc/${kl.runnerPid}/fd/9 → the lock file; the launcher had closed its own copy) and a concurrent start follows it (answered its exit 4 in ${kl.b.ms} ms) — never a second runner; the lock free once it ended`, kl);
-  ok(hw.code === 3 && hw.runners === 1 && hw.ranAfterHolder, `(r4) a lock held by a process that is no recorded install ⇒ a start WAITS (never runs beside it) and runs only once the holder has exited (${hw.gap} ms after the holder's own end stamp, written before it released; answered in ${hw.waitedMs} ms)`, hw);
-  ok(l3.same.out.every((x) => x.code === 0) && l3.same.locks.length === 1 && l3.same.locks[0] === lockOf(l3.same.st) && path.dirname(l3.same.locks[0]) === LOCKROOT && l3.same.stateLock && l3.same.stateLock.lock === l3.same.locks[0] && !l3.same.locks[0].startsWith(root + '/'), `(r5 L3) the lock is named by the UID, never the environment: $XDG_RUNTIME_DIR a scratch dir, unset, or naming a gone dir ⇒ ONE lock path on one state dir (${l3.same.locks[0]}; the exit file and installState record it) — local storage, never inside a state dir`, l3.same);
+  ok(kl.launcherFd9 === null && gateOf(kl.runnerAlive) && kl.runnerFd9 === kl.K && gateOf(kl.held) && gateOf(kl.b.followsIt) && kl.b.code === 4 && kl.runs.length === 1 && gateOf(/^run-/.test(kl.runs[0])) && verdictOf(kl.freeAfter), `(r4) the LAUNCHER SIGKILLed mid-install: its runner lives on HOLDING the lock (/proc/${kl.runnerPid}/fd/9 → the lock file; the launcher had closed its own copy) and a concurrent start follows it (answered its exit 4 in ${kl.b.ms} ms) — never a second runner; the lock free once it ended`, kl);
+  ok(hw.code === 3 && hw.runners === 1 && verdictOf(hw.ranAfterHolder), `(r4) a lock held by a process that is no recorded install ⇒ a start WAITS (never runs beside it) and runs only once the holder has exited (${hw.gap} ms after the holder's own end stamp, written before it released; answered in ${hw.waitedMs} ms)`, hw);
+  ok(gateOf(l3.same.out.every((x) => x.code === 0)) && l3.same.locks.length === 1 && l3.same.locks[0] === lockOf(l3.same.st) && path.dirname(l3.same.locks[0]) === LOCKROOT && gateOf(l3.same.stateLock) && l3.same.stateLock.lock === l3.same.locks[0] && !l3.same.locks[0].startsWith(root + '/'), `(r5 L3) the lock is named by the UID, never the environment: $XDG_RUNTIME_DIR a scratch dir, unset, or naming a gone dir ⇒ ONE lock path on one state dir (${l3.same.locks[0]}; the exit file and installState record it) — local storage, never inside a state dir`, l3.same);
   ok(l3.ctl.locks.length > 1, `CONTROL: the r4 line (T=\${XDG_RUNTIME_DIR:-/tmp}) names ${l3.ctl.locks.length} different locks for ONE state dir across the three environments (${l3.ctl.locks.join(' | ')})`, l3.ctl);
-  ok(l3.fallback.runUserGone && l3.fallback.code === 0 && l3.fallback.lock === l3.fallback.want && l3.fallback.modeA === '700' && l3.fallback.ownA, `(r5 L3) a uid with no /run/user dir ⇒ the lock in /tmp/vibespace-<uid>, created 0700 and owned by this user (mode ${l3.fallback.modeA})`, l3.fallback);
-  ok(l3.file.code === 125 && l3.file.polls === 0 && l3.file.ms < AT_ONCE_MS && l3.file.out.includes(`${l3.file.dir} is not a directory this user owns`) && !/never/.test(l3.file.out), `(r5 L3) something that is not a directory this user owns where /tmp/vibespace-<uid> goes (a regular file — what a squatter can make without root) ⇒ exit 125 in ${l3.file.ms} ms naming it, nothing run — refused before any wait (${l3.file.polls} polls)`, l3.file);
-  ok(l3.fileCtl.code === 125 && !/is not a directory this user owns/.test(l3.fileCtl.out) && /cannot be opened/.test(l3.fileCtl.out), 'CONTROL: without the ownership check the same squat is refused only by the generic open failure — the directory never named', l3.fileCtl);
-  if (l3.foreign) ok(l3.foreign.code === 125 && l3.foreign.out.includes(`${l3.foreign.dir} is not a directory this user owns`) && !/never/.test(l3.foreign.out), '(r5 L3) a /tmp/vibespace-<uid> DIRECTORY owned by another uid ⇒ refused by name, nothing run', l3.foreign);
+  ok(gateOf(l3.fallback.runUserGone) && l3.fallback.code === 0 && l3.fallback.lock === l3.fallback.want && l3.fallback.modeA === '700' && verdictOf(l3.fallback.ownA), `(r5 L3) a uid with no /run/user dir ⇒ the lock in /tmp/vibespace-<uid>, created 0700 and owned by this user (mode ${l3.fallback.modeA})`, l3.fallback);
+  ok(l3.file.code === 125 && l3.file.polls === 0 && l3.file.ms < AT_ONCE_MS && gateOf(l3.file.out.includes(`${l3.file.dir} is not a directory this user owns`)) && !/never/.test(l3.file.out), `(r5 L3) something that is not a directory this user owns where /tmp/vibespace-<uid> goes (a regular file — what a squatter can make without root) ⇒ exit 125 in ${l3.file.ms} ms naming it, nothing run — refused before any wait (${l3.file.polls} polls)`, l3.file);
+  ok(l3.fileCtl.code === 125 && !/is not a directory this user owns/.test(l3.fileCtl.out) && verdictOf(/cannot be opened/.test(l3.fileCtl.out)), 'CONTROL: without the ownership check the same squat is refused only by the generic open failure — the directory never named', l3.fileCtl);
+  if (l3.foreign) ok(l3.foreign.code === 125 && gateOf(l3.foreign.out.includes(`${l3.foreign.dir} is not a directory this user owns`)) && !/never/.test(l3.foreign.out), '(r5 L3) a /tmp/vibespace-<uid> DIRECTORY owned by another uid ⇒ refused by name, nothing run', l3.foreign);
   else console.log(`  - SKIP (r5 L3) a /tmp/vibespace-<uid> directory owned by ANOTHER uid: this suite runs as uid ${UID}, and only root can make a directory another uid owns — the regular-file row above goes through the same check (\`[ -d ] && [ -O ]\`)`);
-  ok(l3.noid.code === 125 && /this user id cannot be read \(id -u\)/.test(l3.noid.out) && !/never/.test(l3.noid.out), '(r5 L3) an `id -u` that answers no number ⇒ refused by name, nothing run', l3.noid);
-  ok(l1.fix.aligned && l1.fix.heldByChild && l1.fix.a === 100 && l1.fix.b === 7 && l1.fix.runs === 1, `(r5 L1) an install exits 100 at second ${l1.fix.aSec} leaving a child on the lock; a start in the SAME second (${l1.fix.bMsIn} ms into it, the lock held by that child) waits for the lock and RUNS its own install (exit 7 in ${l1.fix.bMs} ms, 1 run) — never the stale 100 (attempt ${l1.fix.attempt})`, l1.fix);
-  ok(l1.ctl.aligned && l1.ctl.heldByChild && l1.ctl.a === 100 && l1.ctl.b === 100 && l1.ctl.runs === 0, `CONTROL: the whole-second launcher (\`date +%s\`, \`-ge\`) answers the earlier install's stale exit ${l1.ctl.b} in the same second and never runs its own (${l1.ctl.runs} runs)`, l1.ctl);
-  ok(l4.fx.code === 125 && l4.fx.out.includes(`does not hold the install lock (${l4.fx.lock})`) && /the install did not start/.test(l4.fx.out) && !/never/.test(l4.fx.out) && l4.fx.free
+  ok(l3.noid.code === 125 && gateOf(/this user id cannot be read \(id -u\)/.test(l3.noid.out)) && !/never/.test(l3.noid.out), '(r5 L3) an `id -u` that answers no number ⇒ refused by name, nothing run', l3.noid);
+  ok(gateOf(l1.fix.aligned) && gateOf(l1.fix.heldByChild) && l1.fix.a === 100 && l1.fix.b === 7 && l1.fix.runs === 1, `(r5 L1) an install exits 100 at second ${l1.fix.aSec} leaving a child on the lock; a start in the SAME second (${l1.fix.bMsIn} ms into it, the lock held by that child) waits for the lock and RUNS its own install (exit 7 in ${l1.fix.bMs} ms, 1 run) — never the stale 100 (attempt ${l1.fix.attempt})`, l1.fix);
+  ok(gateOf(l1.ctl.aligned) && gateOf(l1.ctl.heldByChild) && l1.ctl.a === 100 && l1.ctl.b === 100 && l1.ctl.runs === 0, `CONTROL: the whole-second launcher (\`date +%s\`, \`-ge\`) answers the earlier install's stale exit ${l1.ctl.b} in the same second and never runs its own (${l1.ctl.runs} runs)`, l1.ctl);
+  ok(l4.fx.code === 125 && gateOf(l4.fx.out.includes(`does not hold the install lock (${l4.fx.lock})`)) && gateOf(/the install did not start/.test(l4.fx.out)) && !/never/.test(l4.fx.out) && gateOf(l4.fx.free)
     && !l4.fx.pidfile && !l4.fx.exitfile && l4.fx.polls >= 1 && l4.fx.polls < PID_WAIT.cap && l4.fx.ms < AT_ONCE_MS,
   `(r5 L4) a runner exec'd without fd 9 refuses and the launcher answers 125 with the runner's line naming the lock, nothing run, the lock free — the pidfile wait ENDED WITH THE RUNNER'S LIFE: no pidfile, no exit file, ${l4.fx.polls} of its ${PID_WAIT.cap} polls (${PID_WAIT.pollMs} ms each) ⇒ /proc/$b gone, its only other exit; answered in ${l4.fx.ms} ms (< ${AT_ONCE_MS} ms = ½ × the ${PID_WAIT.capMs} ms cap the pre-fix sits out)`,
   { code: l4.fx.code, ms: l4.fx.ms, polls: l4.fx.polls, pidfile: l4.fx.pidfile, exitfile: l4.fx.exitfile, out: l4.fx.out.slice(-300) });
-  ok(l4.pre.killed && l4.pre.ms >= AT_ONCE_MS - EARLY_MS && !/the install did not start/.test(l4.pre.out) && /does not hold the install lock/.test(l4.pre.runnerLog) && !l4.pre.pidfile && !l4.pre.exitfile && l4.pre.polls > l4.fx.polls,
+  ok(gateOf(l4.pre.killed) && l4.pre.ms >= AT_ONCE_MS - EARLY_MS && !/the install did not start/.test(l4.pre.out) && gateOf(/does not hold the install lock/.test(l4.pre.runnerLog)) && !l4.pre.pidfile && !l4.pre.exitfile && l4.pre.polls > l4.fx.polls,
   `CONTROL: the pidfile wait without the runner's life as its bound is still polling at the ${AT_ONCE_MS} ms bound (${l4.pre.polls} polls, killed at ${l4.pre.ms} ms — its answer cannot come before the ${PID_WAIT.capMs} ms cap) for a runner whose refusal is long in its log`,
   { killed: l4.pre.killed, ms: l4.pre.ms, polls: l4.pre.polls, fxPolls: l4.fx.polls, runnerLog: l4.pre.runnerLog.slice(-200), out: l4.pre.out.slice(-200) });
-  ok(f5ctl.length === 3 && f5ctl.every((r) => r.runners > 1), `CONTROL: the launcher (and the runner's re-assertion) with \`flock -n 9\` replaced by \`true\` ⇒ ${f5ctl.map((r) => r.runners).join(', ')} runners per five starts — apt-gets beside each other`, f5ctl);
-  ok(grd.ran, 'CONTROL: a runner without the re-assertion runs while another process holds the lock', { ran: grd.ran, code: grd.code });
-  ok(l5pre.code === 125 && !/setsid \(util-linux\)/.test(l5pre.out) && /setsid: (command )?not found/.test(l5pre.out), `CONTROL: without the setsid check the refusal is the shell's bare "setsid: not found" (${l5pre.ms} ms — since r5 L4 the pidfile wait ends with the runner's life; before, 10 s), never the package to install`, l5pre);
-  ok(!/util-linux/.test(lfpre.out) && /flock exit 127/.test(lfpre.out), 'CONTROL: without the flock check the refusal is a bare exit code (flock exit 127), never the package to install', lfpre);
+  ok(f5ctl.length === 3 && verdictOf(f5ctl.every((r) => r.runners > 1)), `CONTROL: the launcher (and the runner's re-assertion) with \`flock -n 9\` replaced by \`true\` ⇒ ${f5ctl.map((r) => r.runners).join(', ')} runners per five starts — apt-gets beside each other`, f5ctl);
+  ok(verdictOf(grd.ran), 'CONTROL: a runner without the re-assertion runs while another process holds the lock', { ran: grd.ran, code: grd.code });
+  ok(l5pre.code === 125 && !/setsid \(util-linux\)/.test(l5pre.out) && verdictOf(/setsid: (command )?not found/.test(l5pre.out)), `CONTROL: without the setsid check the refusal is the shell's bare "setsid: not found" (${l5pre.ms} ms — since r5 L4 the pidfile wait ends with the runner's life; before, 10 s), never the package to install`, l5pre);
+  ok(!/util-linux/.test(lfpre.out) && verdictOf(/flock exit 127/.test(lfpre.out)), 'CONTROL: without the flock check the refusal is a bare exit code (flock exit 127), never the package to install', lfpre);
   if (ropre) ok(!/is not writable/.test(ropre.out), 'CONTROL: without the check the state dir is never named — the refusal comes later, from the log it cannot write', ropre);
-  ok(l8pre.ran && l8pre.seen && /^\d+ {2}\S/.test(l8pre.seen.pidfile) && l8pre.seen.installing === null, `CONTROL: without the refusal the install RUNS under a pidfile nothing can verify (${JSON.stringify(l8pre.seen && l8pre.seen.pidfile)}) — the machine reports no install while it runs`, l8pre);
+  ok(gateOf(l8pre.ran) && gateOf(l8pre.seen) && gateOf(/^\d+ {2}\S/.test(l8pre.seen.pidfile)) && l8pre.seen.installing === null, `CONTROL: without the refusal the install RUNS under a pidfile nothing can verify (${JSON.stringify(l8pre.seen && l8pre.seen.pidfile)}) — the machine reports no install while it runs`, l8pre);
 
   // the SLOT on a paired machine: a run-stream that never ends until we say so, facts that report the pidfile
   const loopHold = setInterval(() => { }, 1000); // the access layer's timers are unref'd (a server holds the loop; this stub world does not)
@@ -1152,10 +1152,10 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const slotLines = [];
   const aS = ACC.create({ hosts: slowHosts, local: () => null, install: false, log: { log: (l) => slotLines.push(String(l)), warn() { } }, installMs: 300, holdMs: 20000, pollMs: 50 });
   const eS = await aS.installXpra('dial-on').then(() => null, (e) => e);
-  ok(eS && eS.code === 'install_timeout' && eS.plan && runOpts[0] && runOpts[0].timeoutMs >= 300 + 20000, `installXpra past its deadline on a paired machine ⇒ install_timeout by name, the plan kept; the run-stream's own belt is installMs + holdMs (${runOpts[0] && runOpts[0].timeoutMs} ms), never the 120 s default`, eS && eS.code);
+  ok(gateOf(eS) && eS.code === 'install_timeout' && gateOf(eS.plan) && gateOf(runOpts[0]) && runOpts[0].timeoutMs >= 300 + 20000, `installXpra past its deadline on a paired machine ⇒ install_timeout by name, the plan kept; the run-stream's own belt is installMs + holdMs (${runOpts[0] && runOpts[0].timeoutMs} ms), never the 120 s default`, eS && eS.code);
   const busy1 = aS.installBusy('dial-on');
   const eB = await aS.installXpra('dial-on').then(() => null, (e) => e);
-  ok(busy1 && busy1.running && eB && eB.code === 'busy' && runOpts.length === 1, 'the machine\'s install slot is HELD while the machine reports its install running: a second install on THIS hub ⇒ busy, nothing started', { busy1, code: eB && eB.code });
+  ok(gateOf(busy1) && gateOf(busy1.running) && gateOf(eB) && eB.code === 'busy' && runOpts.length === 1, 'the machine\'s install slot is HELD while the machine reports its install running: a second install on THIS hub ⇒ busy, nothing started', { busy1, code: eB && eB.code });
   ok(aS.installBusy('local') === null, 'the slot is per machine (this machine is free)');
   // (verify r2 F3) the timed-out install then LOSES ITS LINK: the stream settles on the link's death — the slot is still
   // held (the old one freed it here saying "ended"), through the outage, until the machine, reached again, says gone
@@ -1167,7 +1167,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   phase.v = 'gone';
   await until(() => aS.installBusy('dial-on') === null, 1000, 20);
   const freed = slotLines.filter((l) => /slot on dial-on is free again/.test(l));
-  ok(aS.installBusy('dial-on') === null && freed.length === 1 && /the timed-out install ended — dial-on reports the install process gone, exit 0 \(the link dropped meanwhile; seen after it came back\)/.test(freed[0]), 'the machine reports it gone ⇒ the slot frees, and the line names the EVIDENCE (never "ended" on a lost link alone)', freed);
+  ok(aS.installBusy('dial-on') === null && freed.length === 1 && verdictOf(/the timed-out install ended — dial-on reports the install process gone, exit 0 \(the link dropped meanwhile; seen after it came back\)/.test(freed[0])), 'the machine reports it gone ⇒ the slot frees, and the line names the EVIDENCE (never "ended" on a lost link alone)', freed);
   // (verify r2 F3) install_link_lost itself: held until the reconnected machine says gone, never freed at the drop
   const lostRun = async (Acc) => {
     const lines = [];
@@ -1186,10 +1186,10 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   factsAsked.length = 0;
   const ll = await lostRun(ACC);
   const polls = factsAsked.slice(1);
-  ok(factsAsked[0] && factsAsked[0].install === true && polls.length >= 3 && polls.every((q) => q.installState === true && !q.install), `the held slot polls the probe-free installState (${polls.length} polls, never the full install facts — no \`sudo -n\` every poll)`, factsAsked.slice(0, 4));
-  ok(ll.code === 'install_link_lost' && /runs on there, detached/.test(ll.message), 'a link that drops mid-install ⇒ install_link_lost, saying the install runs on there', ll.message);
-  ok(ll.busyAtDrop && ll.busyDown && ll.busyRunning, 'the slot is HELD at the drop, through the outage (facts unreachable) and while the reconnected machine reports it running — a second click is busy, never a second apt', { at: !!ll.busyAtDrop, down: !!ll.busyDown, running: !!ll.busyRunning });
-  ok(ll.busyEnd === null && ll.freed.length === 1 && /the link was lost during the install; dial-on, reached again, reports the install process gone, exit 0/.test(ll.freed[0]), 'the reconnected machine reports it gone ⇒ freed, the line naming the cause', ll.freed);
+  ok(gateOf(factsAsked[0]) && factsAsked[0].install === true && polls.length >= 3 && verdictOf(polls.every((q) => q.installState === true && !q.install)), `the held slot polls the probe-free installState (${polls.length} polls, never the full install facts — no \`sudo -n\` every poll)`, factsAsked.slice(0, 4));
+  ok(ll.code === 'install_link_lost' && verdictOf(/runs on there, detached/.test(ll.message)), 'a link that drops mid-install ⇒ install_link_lost, saying the install runs on there', ll.message);
+  ok(gateOf(ll.busyAtDrop) && gateOf(ll.busyDown) && verdictOf(ll.busyRunning), 'the slot is HELD at the drop, through the outage (facts unreachable) and while the reconnected machine reports it running — a second click is busy, never a second apt', { at: !!ll.busyAtDrop, down: !!ll.busyDown, running: !!ll.busyRunning });
+  ok(ll.busyEnd === null && ll.freed.length === 1 && verdictOf(/the link was lost during the install; dial-on, reached again, reports the install process gone, exit 0/.test(ll.freed[0])), 'the reconnected machine reports it gone ⇒ freed, the line naming the cause', ll.freed);
   const holdLine = "      catch (e) { if (e && (e.code === 'install_timeout' || e.code === 'install_link_lost')) held = e.code; if (e && !e.plan) e.plan = plan; throw e; }\n";
   ok(accSrc.split(holdLine).length === 2, 'CONTROL setup: the hold verdict is spelled once');
   const AccNoHold = MUT.load('src/server/desktop-access.js', editAnchor(accSrc, holdLine, "      catch (e) { if (e && e.code === 'install_timeout') held = e.code; if (e && !e.plan) e.plan = plan; throw e; }\n", "src/server/desktop-access.js"), 'nolinkhold');
@@ -1201,16 +1201,16 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const aH = ACC.create({ hosts: hH, local: () => null, install: false, log: { log: (l) => hl.push(String(l)), warn() { } }, installMs: 5000, holdMs: 400, pollMs: 50 });
   await aH.installXpra('dial-on').then(() => null, () => null);
   await until(() => aH.installBusy('dial-on') === null, 2000, 20);
-  ok(aH.installBusy('dial-on') === null && hl.some((l) => /the link was lost during the install and it was not seen to end within 400 ms \(dial-on did not answer\)/.test(l)), 'a machine that never answers again ⇒ held for holdMs, then freed saying the install was NOT seen to end', hl.filter((l) => /slot/.test(l)));
+  ok(aH.installBusy('dial-on') === null && verdictOf(hl.some((l) => /the link was lost during the install and it was not seen to end within 400 ms \(dial-on did not answer\)/.test(l))), 'a machine that never answers again ⇒ held for holdMs, then freed saying the install was NOT seen to end', hl.filter((l) => /slot/.test(l)));
   // the stream's own endings are named, never a made-up exit 1
   phase.v = 'plan';
   const endAs = async (ret) => { const h = { ...slowHosts, deviceBounded: async () => ({ ...(await slowHosts.deviceBounded()), runStream: async () => ret }) }; phase.v = 'plan'; return ACC.create({ hosts: h, local: () => null, install: false, log: quiet, pollMs: 60000 }).installXpra('dial-on').then(() => null, (e) => e); };
   const eBelt = await endAs({ error: 'run-stream timed out', timedOut: true });
-  ok(eBelt && eBelt.code === 'install_timeout' && !/exited/.test(eBelt.message), 'a run-stream that settles on its belt ⇒ install_timeout (the pre-fix answer was `the install exited 1`)', eBelt && eBelt.message);
+  ok(gateOf(eBelt) && eBelt.code === 'install_timeout' && !/exited/.test(eBelt.message), 'a run-stream that settles on its belt ⇒ install_timeout (the pre-fix answer was `the install exited 1`)', eBelt && eBelt.message);
   const eReal = await endAs({ code: 100, sent: 0 });
-  ok(eReal && eReal.code === 'install_failed' && /exited 100/.test(eReal.message), 'a REAL non-zero exit is still install_failed with its code');
+  ok(gateOf(eReal) && eReal.code === 'install_failed' && verdictOf(/exited 100/.test(eReal.message)), 'a REAL non-zero exit is still install_failed with its code');
   const eUnrec = await endAs({ code: M.INSTALL_UNRECORDED_EXIT, sent: 0 });
-  ok(eUnrec && eUnrec.code === 'install_unrecorded', 'an install that ended without recording its exit (killed / a reboot) ⇒ install_unrecorded by name, never a made-up code');
+  ok(gateOf(eUnrec) && eUnrec.code === 'install_unrecorded', 'an install that ended without recording its exit (killed / a reboot) ⇒ install_unrecorded by name, never a made-up code');
   clearInterval(loopHold);
 }
 
@@ -1223,13 +1223,13 @@ console.log('§11 Layer 0 apps on the GENERALISED package slot (docs/design-app-
   fs.writeFileSync(path.join(fakeBin, 'sudo'), `#!/bin/sh\n[ "$1" = -n ] && shift\necho started >> '${starts}'\nexec "$@"\n`, { mode: 0o755 });
   const st = path.join(root, 'st-app'); fs.mkdirSync(st, { recursive: true });
   const mk = DS.install({ dataDir: st, env: () => ({ PATH: '/usr/bin:/bin', HOME: root }), display: fakeDisplay, log: quiet });
-  ok(mk.apps && typeof mk.apps.plan === 'function' && mk.apps.appsDir === path.join(root, '.vibespace/apps'), 'every machine keeper carries the apps machine half (its apps dir under the machine user\'s HOME, its slot = the keeper\'s state dir)');
+  ok(gateOf(mk.apps) && typeof mk.apps.plan === 'function' && mk.apps.appsDir === path.join(root, '.vibespace/apps'), 'every machine keeper carries the apps machine half (its apps dir under the machine user\'s HOME, its slot = the keeper\'s state dir)');
   const sa = await DS.runDesktopServeOp(mk, 'app-status', {});
-  ok(sa.ok && sa.status && sa.status.replay.decision.why === 'no-entries' && Array.isArray(sa.status.rows), 'app-status answers on a machine with no apps (nothing to put back)', sa.status && sa.status.replay);
+  ok(gateOf(sa.ok) && gateOf(sa.status) && sa.status.replay.decision.why === 'no-entries' && verdictOf(Array.isArray(sa.status.rows)), 'app-status answers on a machine with no apps (nothing to put back)', sa.status && sa.status.replay);
   const sb = await DS.runDesktopServeOp(mk, 'app-install', { entryId: 'x' });
-  ok(!sb.ok && sb.code === 'bad-request' && /nonce/.test(sb.error), 'a record op without its run\'s nonce is refused by name');
+  ok(!sb.ok && sb.code === 'bad-request' && verdictOf(/nonce/.test(sb.error)), 'a record op without its run\'s nonce is refused by name');
   const sc = await DS.runDesktopServeOp(mk, 'app-plan', { kind: 'format-disk' });
-  ok(!sc.ok && sc.code === 'bad-request' && /unknown plan kind/.test(sc.error), 'an unknown plan kind is refused by name (never a throw across the wire)');
+  ok(!sc.ok && sc.code === 'bad-request' && verdictOf(/unknown plan kind/.test(sc.error)), 'an unknown plan kind is refused by name (never a throw across the wire)');
   const appPlan = (nonce, body, closureKey = 'hello=2.10-3') => ({ ok: true, canRun: true, code: null, kind: 'apt', mode: 'install', entryId: 'hello', source: 'apt', packages: ['hello'], closureKey, nonce, label: 'hello', commands: ['sudo apt-get install -y hello'], argv: ['sudo', '-n', 'sh', '-c', body, 'vs-app', nonce] });
   const layer = (installMs = 8000) => ACC.create({ hosts: null, local: () => mk, install: false, env: () => ({ PATH: `${fakeBin}:/usr/bin:/bin`, HOME: root, XDG_RUNTIME_DIR: XDG }), log: quiet, installMs, holdMs: 20000, pollMs: 100 });
   const planner = (body, ck) => async (hostId, what, opts) => ({ plan: appPlan(opts.nonce || 'abcdefgh1', body, ck), install: { stateDir: st, ...(await D.installState(st)) } });
@@ -1246,8 +1246,8 @@ console.log('§11 Layer 0 apps on the GENERALISED package slot (docs/design-app-
   const rB = await B1.installPackage('local', { what: 'app:apt:other', planOpts: { nonce: 'bbbbbbbb2' }, onReattach: (o) => re.push(o), onData: (d) => gotB.push(String(d)) }).then((x) => x, (e) => e);
   const rA = await pA.then((x) => x, (e) => e);
   const n = (() => { try { return fs.readFileSync(starts, 'utf8').trim().split('\n').length; } catch { return 0; } })();
-  ok(rA && rA.ok && rA.plan.nonce === 'abcdefgh1' && rA.after === null && /= run hello abcdefgh1 install[\s\S]*= ok/.test(got.join('')), 'an app plan RUNS its own argv through the slot (the nonce a position, the `= …` lines in the followed log) and answers WITHOUT re-reading the xpra facts (the app\'s own record op reads the result)', rA && (rA.code || rA.ok));
-  ok(rB && rB.ok && rB.reattached === true && re.length === 1 && n === 1 && !/SECOND/.test(gotB.join('')) && /= run hello abcdefgh1/.test(gotB.join('')), `a SECOND layer asked for ANOTHER app while it runs FOLLOWS the running install (reattached, its log) — ONE start, never a second apt (${n})`, { rB: rB && (rB.code || rB.reattached), n });
+  ok(gateOf(rA) && gateOf(rA.ok) && rA.plan.nonce === 'abcdefgh1' && rA.after === null && verdictOf(/= run hello abcdefgh1 install[\s\S]*= ok/.test(got.join(''))), 'an app plan RUNS its own argv through the slot (the nonce a position, the `= …` lines in the followed log) and answers WITHOUT re-reading the xpra facts (the app\'s own record op reads the result)', rA && (rA.code || rA.ok));
+  ok(gateOf(rB) && gateOf(rB.ok) && rB.reattached === true && re.length === 1 && n === 1 && !/SECOND/.test(gotB.join('')) && verdictOf(/= run hello abcdefgh1/.test(gotB.join(''))), `a SECOND layer asked for ANOTHER app while it runs FOLLOWS the running install (reattached, its log) — ONE start, never a second apt (${n})`, { rB: rB && (rB.code || rB.reattached), n });
   // the digest binds an app plan's CLOSURE; an xpra plan's digest is the pre-Layer-0 formula, byte for byte
   const L = layer();
   const d1 = L.planDigest(appPlan('n1n1n1n1a', 'x', 'hello=2.10-3')), d2 = L.planDigest(appPlan('n2n2n2n2b', 'y', 'hello=2.10-3')), d3 = L.planDigest(appPlan('n1n1n1n1a', 'x', 'hello=2.10-4'));
@@ -1257,7 +1257,7 @@ console.log('§11 Layer 0 apps on the GENERALISED package slot (docs/design-app-
   ok(L.planDigest(xp) === crypto0.createHash('sha256').update(JSON.stringify({ commands: xp.commands, source: xp.source, packages: xp.packages })).digest('hex').slice(0, 32), 'an xpra plan\'s digest is unchanged by Layer 0 (no closureKey ⇒ the r6 formula exactly)');
   const L2 = layer(); L2.setAppPlanner(planner('echo never', 'hello=9'));
   const changed = await L2.installPackage('local', { what: 'app:apt:hello', planOpts: { nonce: 'cccccccc3' }, expectDigest: d1 }).then(() => null, (e) => e);
-  ok(changed && changed.code === 'plan_changed', 'an app plan whose closure moved since it was shown ⇒ plan_changed, nothing run');
+  ok(gateOf(changed) && changed.code === 'plan_changed', 'an app plan whose closure moved since it was shown ⇒ plan_changed, nothing run');
   ok(await ACC.create({ hosts: null, local: () => mk, install: false, log: quiet }).installPackage('local', { what: 'app:apt:hello' }).then(() => null, (e) => e && e.code) === 'host_unavailable', 'no planner wired ⇒ host_unavailable by name (never a silent xpra install)');
   mk.shutdown?.();
 }
@@ -1288,7 +1288,7 @@ console.log('\n§adopt-office (verify r1, B-04da ④) a restart never signals a 
     return v;
   };
   const head = await run(DS, 'head');
-  ok(head.state === 'ready' && head.appAlive && head.xAlive && JSON.stringify(head.asks) === '[".uno:Quit"]' && /kept: LibreOffice may hold unsaved edits/.test(head.lastError || ''), 'a surviving LibreOffice whose picture server is silent at boot is ASKED once (.uno:Quit) and, still asking, KEPT ready — its app and display alive', head);
+  ok(head.state === 'ready' && gateOf(head.appAlive) && gateOf(head.xAlive) && JSON.stringify(head.asks) === '[".uno:Quit"]' && verdictOf(/kept: LibreOffice may hold unsaved edits/.test(head.lastError || '')), 'a surviving LibreOffice whose picture server is silent at boot is ASKED once (.uno:Quit) and, still asking, KEPT ready — its app and display alive', head);
   const fixLine = "        if (verdict.state === 'failed' && alive.x && alive.app && M.askCloseVerdict(rec).ask) {";
   ok(serveSrc.split(fixLine).length === 2, 'CONTROL setup: the boot ask is spelled once');
   const pre = await run(MUT.load('src/desktop-serve.js', editAnchor(serveSrc, fixLine, '        if (false) {', "src/desktop-serve.js"), 'noadoptask'), 'pre');
@@ -1312,12 +1312,12 @@ console.log('\n§bdisp a browser\'s display-only session (lane one-browser-b1)')
   const dsB = machine({ display: bdisp(XPRA_BINS) });
   const v = await dsB.launchDisplay({ forBrowser: 'bp-0000000a', label: 'Work' });
   const rec = dsB.get(v.id);
-  ok(v.state === 'ready' && rec.kind === M.DISPLAY_FOR_BROWSER && M.isDisplayForBrowser(rec) && rec.forBrowser === 'bp-0000000a' && rec.recipe === 'xpra-seamless' && rec.backend === 'xpra' && rec.label === 'Browser display · Work', '§bdisp launchDisplay: a ready record of the display-only kind, for THAT browser, on the xpra-seamless recipe', { state: v.state, kind: rec.kind, label: rec.label, lastError: rec.lastError });
-  ok(Number.isInteger(rec.pids.x) && aliveB(rec.pids.x) && rec.starts.x != null && rec.display === ':977' && rec.port === 1 && rec.pids.app == null && appStarts.length === 0, '§bdisp its record carries FACTS only — the display, the X part\'s pid + starttime, the port — and NO app was started', { pids: rec.pids, starts: rec.starts, appStarts: appStarts.length });
-  ok(dsB.liveRecords().some((r) => r.id === v.id) && dsB.listApps().some((r) => r.id === v.id), '§bdisp it is a live record like any display (the Desktop apps list, the window rows)');
+  ok(v.state === 'ready' && rec.kind === M.DISPLAY_FOR_BROWSER && gateOf(M.isDisplayForBrowser(rec)) && rec.forBrowser === 'bp-0000000a' && rec.recipe === 'xpra-seamless' && rec.backend === 'xpra' && rec.label === 'Browser display · Work', '§bdisp launchDisplay: a ready record of the display-only kind, for THAT browser, on the xpra-seamless recipe', { state: v.state, kind: rec.kind, label: rec.label, lastError: rec.lastError });
+  ok(gateOf(Number.isInteger(rec.pids.x)) && gateOf(aliveB(rec.pids.x)) && rec.starts.x != null && rec.display === ':977' && rec.port === 1 && rec.pids.app == null && appStarts.length === 0, '§bdisp its record carries FACTS only — the display, the X part\'s pid + starttime, the port — and NO app was started', { pids: rec.pids, starts: rec.starts, appStarts: appStarts.length });
+  ok(gateOf(dsB.liveRecords().some((r) => r.id === v.id)) && verdictOf(dsB.listApps().some((r) => r.id === v.id)), '§bdisp it is a live record like any display (the Desktop apps list, the window rows)');
   ok(rec.idleTimeoutMs === 0 && !M.idleState(rec, Date.now() + 7 * 24 * 3600e3, rec.idleTimeoutMs).expired, '§bdisp NO idle stop: idleTimeoutMs 0 — a week without input is not idle (its lifetime is the browser record\'s)');
   const x11 = dsB.x11EnvFor(v.id);
-  ok(x11 && x11.DISPLAY === ':977' && x11.XAUTHORITY === path.join(dsB.logRoot, v.id, 'Xauthority') && fs.existsSync(x11.XAUTHORITY), '§bdisp x11EnvFor answers the display + its own cookie file (what the browser keeper spawns Chrome with)', x11);
+  ok(gateOf(x11) && x11.DISPLAY === ':977' && x11.XAUTHORITY === path.join(dsB.logRoot, v.id, 'Xauthority') && verdictOf(fs.existsSync(x11.XAUTHORITY)), '§bdisp x11EnvFor answers the display + its own cookie file (what the browser keeper spawns Chrome with)', x11);
   { const full = Array.from({ length: M.LIMITS.CONCURRENT_CAP }, (_, i) => ({ id: 'da-b' + i, kind: M.DISPLAY_FOR_BROWSER, label: 'Browser display · ' + i }));
     ok(M.capVerdict(full, M.LIMITS) === null && M.capVerdict([...full.slice(1), { id: 'da-app', label: 'xterm' }], M.LIMITS) === null && M.capVerdict(full.map((r) => ({ ...r, kind: undefined })), M.LIMITS).code === 'cap', '§bdisp never counted against the app ceiling (the browser keeper\'s own ceiling counted the browser) — the same records as apps are', { cap: M.LIMITS.CONCURRENT_CAP }); }
   // the boot: a display-only record whose X part lives is ADOPTED (it has no app to be alive)
@@ -1326,7 +1326,7 @@ console.log('\n§bdisp a browser\'s display-only session (lane one-browser-b1)')
   fs.writeFileSync(path.join(dir2, DS.STORE_FILE), JSON.stringify({ apps: { [v.id]: { ...stored.apps[v.id] } } }));
   const ds2 = DS.install({ dataDir: dir2, env: () => ({ PATH: '/usr/bin:/bin', HOME: root }), display: bdisp(XPRA_BINS), log: quiet });
   await ds2.adoptAll();
-  ok(ds2.get(v.id).state === 'ready' && ds2.get(v.id).adoptedAt, '§bdisp boot: the record is ADOPTED by its X part (no app part to judge)', { state: ds2.get(v.id).state, err: ds2.get(v.id).lastError });
+  ok(ds2.get(v.id).state === 'ready' && verdictOf(ds2.get(v.id).adoptedAt), '§bdisp boot: the record is ADOPTED by its X part (no app part to judge)', { state: ds2.get(v.id).state, err: ds2.get(v.id).lastError });
   const preAdopt = M.adoptVerdict(rec, { x: true, server: true, app: false }, true);
   const mutM = MUT.load('src/desktop-apps.js', read('src/desktop-apps.js').replace("if (!alive.app && !isDisplayForBrowser(rec)) return", 'if (!alive.app) return'), 'bdispadopt');
   ok(preAdopt.state === 'ready' && mutM.adoptVerdict(rec, { x: true, server: true, app: false }, true).state === 'exited', '§bdisp CONTROL: without the display-only clause the same record is reaped at boot ("application exited")');
@@ -1338,14 +1338,14 @@ console.log('\n§bdisp a browser\'s display-only session (lane one-browser-b1)')
   // absent without xpra: refused by name, no record
   const dsN = machine({ display: bdisp({ xauth: '/usr/bin/xauth' }) });
   let e = null; try { await dsN.launchDisplay({ forBrowser: 'bp-0000000a', label: 'Work' }); } catch (x) { e = x; }
-  ok(e && e.code === 'no-xpra' && /a browser's display session needs xpra/.test(e.message) && dsN.listApps().length === 0, '§bdisp no xpra ⇒ refused `no-xpra`, nothing recorded (the browser keeper takes the driver road)', e && { code: e.code, m: e.message });
+  ok(gateOf(e) && e.code === 'no-xpra' && gateOf(/a browser's display session needs xpra/.test(e.message)) && dsN.listApps().length === 0, '§bdisp no xpra ⇒ refused `no-xpra`, nothing recorded (the browser keeper takes the driver road)', e && { code: e.code, m: e.message });
   let e2 = null; try { await dsB.launchDisplay({ forBrowser: '../x', label: 'W' }); } catch (x) { e2 = x; }
-  ok(e2 && e2.code === 'bad-request', '§bdisp a forBrowser that is not a profile id is refused');
+  ok(gateOf(e2) && e2.code === 'bad-request', '§bdisp a forBrowser that is not a profile id is refused');
   // (§bdisp's keeper pin: MOVED to the fast scripts/test-desktop-serve-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   for (const c of spawned) { try { process.kill(c.pid, 'SIGKILL'); } catch { } }
 }
 
 console.log('\n§tree the patched copies never touch the tree');
-for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3 })) ok(verdictOf(r.pass), '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

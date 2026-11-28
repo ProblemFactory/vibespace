@@ -13,7 +13,7 @@ const REPO = new URL('..', import.meta.url).pathname;
 const SW = require('../src/browser-switch.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -27,7 +27,7 @@ function editAnchor(text, from, to, file, mode = 'one') {
 // ═══ step 2: the sign-in refusal hint ═════════════════════════════════════════
 console.log('— the sign-in refusal HINT (PURE table, navigate result url + title)');
 {
-  ok(SW.SIGNIN_REFUSAL_ROWS.length >= 1 && SW.SIGNIN_REFUSAL_ROWS.every((r) => r.id && r.vendor && r.host && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.source && r.paths.length && r.titles.length), 'every row is dated and names its source, its host, its path markers and its titles');
+  ok(SW.SIGNIN_REFUSAL_ROWS.length >= 1 && verdictOf(SW.SIGNIN_REFUSAL_ROWS.every((r) => r.id && r.vendor && r.host && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.source && r.paths.length && r.titles.length)), 'every row is dated and names its source, its host, its path markers and its titles');
   ok(!SW.SIGNIN_REFUSAL_ROWS.some((r) => /microsoftonline|login\.live/.test(r.host)), 'Microsoft\'s "We couldn\'t sign you in" is NOT a refusal of the browser — no row for it');
   // the real page shapes (invented ids)
   const G = [
@@ -40,8 +40,8 @@ console.log('— the sign-in refusal HINT (PURE table, navigate result url + tit
   ];
   for (const [url, title, what] of G) {
     const h = SW.navHint({ url, title });
-    ok(h && h.tier === 2 && h.why === 'sign-in-refused' && h.source === 'sign-in-page' && h.hint === 'may-need-anti-bot' && h.row === 'google-rejected' && h.host === 'accounts.google.com'
-      && /not a detection/.test(h.text) && /record it \(vibespace-browser blocked --url <the sign-in page> --why sign-in-refused --tier 2\)/.test(h.text) && /this version offers no one-click switch/.test(h.text) && !/CloakBrowser/.test(h.text) && !/detected/.test(h.text),
+    ok(gateOf(h) && h.tier === 2 && h.why === 'sign-in-refused' && h.source === 'sign-in-page' && h.hint === 'may-need-anti-bot' && h.row === 'google-rejected' && h.host === 'accounts.google.com'
+      && gateOf(/not a detection/.test(h.text)) && gateOf(/record it \(vibespace-browser blocked --url <the sign-in page> --why sign-in-refused --tier 2\)/.test(h.text)) && gateOf(/this version offers no one-click switch/.test(h.text)) && !/CloakBrowser/.test(h.text) && !/detected/.test(h.text),
     `Google: ${what} ⇒ the typed hint (tier 2, sign-in-refused, a hint from the page — never "detected"; the claim it asks for named)`, h);
   }
   const NOT = [
@@ -78,9 +78,9 @@ console.log('— the shipped CLI reads the final url + title off the browser CLI
   ok(JSON.stringify(navFacts('✓ \n  http://127.0.0.1:1234/x\n')) === JSON.stringify({ title: '', url: 'http://127.0.0.1:1234/x' }), 'an empty title (the measured refused-navigation shape)');
   ok(JSON.stringify(navFacts('noise\n{"success":true,"data":{"url":"https://a.example/","title":"T"}}\n')) === JSON.stringify({ url: 'https://a.example/', title: 'T' }), 'the --json form');
   ok(navFacts('✗ navigation failed') === null, 'a failed navigation reads nothing');
-  ok(/\.\.\.\(nav \? \{ nav \} : \{\}\)/.test(cli) && /au\.hint && au\.hint\.text\) console\.error\(`hint: \$\{au\.hint\.hint \|\| 'may-need-anti-bot'\} — \$\{au\.hint\.text\}`\)/.test(cli), 'WIRING: the audit call carries `nav` and the server\'s hint is printed like the 403/429 one');
+  ok(gateOf(/\.\.\.\(nav \? \{ nav \} : \{\}\)/.test(cli)) && verdictOf(/au\.hint && au\.hint\.text\) console\.error\(`hint: \$\{au\.hint\.hint \|\| 'may-need-anti-bot'\} — \$\{au\.hint\.text\}`\)/.test(cli)), 'WIRING: the audit call carries `nav` and the server\'s hint is printed like the 403/429 one');
   const routes = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-  ok(/require\('\.\.\/browser-switch\.js'\)\.navHint\(\{ url: typeof nav\.url === 'string'/.test(routes) && /\.\.\.\(hint \? \{ hint \} : \{\}\)/.test(routes), 'WIRING: the audit route answers `hint` from the PURE table');
+  ok(gateOf(/require\('\.\.\/browser-switch\.js'\)\.navHint\(\{ url: typeof nav\.url === 'string'/.test(routes)) && verdictOf(/\.\.\.\(hint \? \{ hint \} : \{\}\)/.test(routes)), 'WIRING: the audit route answers `hint` from the PURE table');
 }
 
 // ═══ step 3: the proposal — record, plan, transitions ═══════════
@@ -102,41 +102,41 @@ console.log('— step 3: the PROPOSAL (PURE): the plan table (lane engine-spi-eg
   // THE RECORD + its digest over the FROZEN fields
   const claim = { id: 'bl-0000aaaa', host: 'accounts.google.com', url: 'https://accounts.google.com/v3/signin/identifier', why: 'sign-in-refused', tier: 2, browserKey: 'bk-0000aaaa', at: 5 };
   const pu0 = SW.proposalFor({ claim, plan: P({ target: { kind: 'ephemeral' } }), at: 5 });
-  ok(pu0.state === 'unavailable' && pu0.backend === null && pu0.site === 'accounts.google.com' && !('install' in pu0) && !('alsoSites' in pu0) && /^pd-[0-9a-f]{8}$/.test(pu0.digest) && pu0.digest === SW.proposalDigest(pu0), 'the record: UNAVAILABLE from birth (nothing to approve), the site = the claim\'s host, no install half, a digest over the frozen fields', pu0);
+  ok(pu0.state === 'unavailable' && pu0.backend === null && pu0.site === 'accounts.google.com' && !('install' in pu0) && !('alsoSites' in pu0) && gateOf(/^pd-[0-9a-f]{8}$/.test(pu0.digest)) && pu0.digest === SW.proposalDigest(pu0), 'the record: UNAVAILABLE from birth (nothing to approve), the site = the claim\'s host, no install half, a digest over the frozen fields', pu0);
   // the transitions are kind-free: an OPEN record (one decided before the update re-judged by its migration, or the next lane's kinds)
   const p0 = { ...pu0, state: 'open' };
   const flip = [['url', { ...p0, url: p0.url + 'x' }], ['site', { ...p0, site: 'other.example' }], ['plan why', { ...p0, plan: { ...p0.plan, why: 'remote' } }], ['plan label', { ...p0, plan: { ...p0.plan, label: 'x' } }]];
-  ok(flip.every(([, q]) => SW.proposalDigest(q) !== p0.digest) && SW.proposalDigest({ ...p0, state: 'done', progress: { step: 'x' }, outcome: {} }) === p0.digest, 'the digest moves with EVERY frozen field (url, site, plan why / label) and never with the state');
+  ok(gateOf(flip.every(([, q]) => SW.proposalDigest(q) !== p0.digest)) && SW.proposalDigest({ ...p0, state: 'done', progress: { step: 'x' }, outcome: {} }) === p0.digest, 'the digest moves with EVERY frozen field (url, site, plan why / label) and never with the state');
   // a second claim
   const V = SW.claimVerdict;
   ok(V({ existing: { proposal: { ...p0, state: 'failed', outcome: { code: 'proposal_stale' } } } }) === 'new' && V({ existing: { proposal: { ...p0, state: 'failed', outcome: { code: 'install_failed' } } } }) === 'same', 'verify r1 V2: a run refused because the world no longer matched the card (proposal_stale) is not the card to keep — the next claim is new; any other failure keeps the same card (Approve again)');
-  ok(V({ existing: null }) === 'new' && V({ existing: { proposal: p0 }, tier: 3 }) === 'claim-only' && ['open', 'approved', 'failed', 'unavailable'].every((s) => V({ existing: { proposal: { ...p0, state: s } } }) === 'same') && V({ existing: { proposal: { ...p0, state: 'rejected', told: false } } }) === 'rejected' && V({ existing: { proposal: { ...p0, state: 'rejected', told: true } } }) === 'new' && V({ existing: { proposal: { ...p0, state: 'done' } } }) === 'new',
+  ok(V({ existing: null }) === 'new' && V({ existing: { proposal: p0 }, tier: 3 }) === 'claim-only' && gateOf(['open', 'approved', 'failed', 'unavailable'].every((s) => V({ existing: { proposal: { ...p0, state: s } } }) === 'same')) && V({ existing: { proposal: { ...p0, state: 'rejected', told: false } } }) === 'rejected' && V({ existing: { proposal: { ...p0, state: 'rejected', told: true } } }) === 'new' && V({ existing: { proposal: { ...p0, state: 'done' } } }) === 'new',
     'a second claim: the SAME card while one stands (open / approved / failed / unavailable); an untold rejection is told instead; a told one or a finished switch opens a new one; only tier 2 files one');
   // THE TRANSITIONS
   const S = SW.proposalStep;
   ok(S(p0, { event: 'approve', by: 'agent', shown: p0.digest }).code === 'agent_forbidden' && S(p0, { event: 'reject', by: 'agent' }).code === 'agent_forbidden', 'an agent never approves or rejects (agent_forbidden)');
   ok(S(p0, { event: 'approve', by: 'user', shown: 'pd-00000000' }).code === 'proposal_changed', 'an Approve naming another digest ⇒ proposal_changed (nothing runs)');
   const a1 = S(p0, { event: 'approve', by: 'user', shown: p0.digest, at: 9 });
-  ok(a1.ok && a1.next.state === 'approved' && a1.next.decided.action === 'approve' && a1.next.decided.at === 9 && a1.next.progress.step === 'starting', 'open --approve(user, the digest)--> approved');
+  ok(gateOf(a1.ok) && a1.next.state === 'approved' && a1.next.decided.action === 'approve' && a1.next.decided.at === 9 && a1.next.progress.step === 'starting', 'open --approve(user, the digest)--> approved');
   ok(S(a1.next, { event: 'approve', by: 'user', shown: p0.digest }).code === 'proposal_state' && S(a1.next, { event: 'reject', by: 'user' }).code === 'proposal_state', 'an approved proposal is not approved or rejected again');
   const pr1 = S(a1.next, { event: 'progress', progress: { step: 'install', percent: 34.4 } });
-  ok(pr1.ok && pr1.next.progress.percent === 34 && pr1.next.state === 'approved', 'progress while approved (the percent rounded, bounded)');
+  ok(gateOf(pr1.ok) && pr1.next.progress.percent === 34 && pr1.next.state === 'approved', 'progress while approved (the percent rounded, bounded)');
   const prS = S(a1.next, { event: 'progress', progress: { step: 'install', percent: 34, stalledSec: 61.4 } });
-  ok(prS.ok && prS.next.progress.stalledSec === 61 && !('stalledSec' in pr1.next.progress) && SW.proposalCardBlock({ id: 'bl-0000aaaa', proposal: prS.next }).progress.stalledSec === 61 && SW.proposalCardBlock({ id: 'bl-0000aaaa', proposal: pr1.next }).progress.stalledSec === null, 'verify r1 V3: a stalled download carries stalledSec onto the card block; a moving one none');
+  ok(gateOf(prS.ok) && prS.next.progress.stalledSec === 61 && !('stalledSec' in pr1.next.progress) && SW.proposalCardBlock({ id: 'bl-0000aaaa', proposal: prS.next }).progress.stalledSec === 61 && SW.proposalCardBlock({ id: 'bl-0000aaaa', proposal: pr1.next }).progress.stalledSec === null, 'verify r1 V3: a stalled download carries stalledSec onto the card block; a moving one none');
   const f1 = S(pr1.next, { event: 'fail', outcome: { code: 'install_failed', step: 'install', error: 'x' }, at: 11 });
-  ok(f1.ok && f1.next.state === 'failed' && f1.next.outcome.step === 'install' && f1.next.progress === null, 'approved --fail--> failed (the step and the error kept)');
+  ok(gateOf(f1.ok) && f1.next.state === 'failed' && f1.next.outcome.step === 'install' && f1.next.progress === null, 'approved --fail--> failed (the step and the error kept)');
   const a2 = S(f1.next, { event: 'approve', by: 'user', shown: p0.digest });
-  ok(a2.ok && a2.next.state === 'approved' && a2.next.outcome === null, 'failed --approve again--> approved (the same frozen fields)');
+  ok(gateOf(a2.ok) && a2.next.state === 'approved' && a2.next.outcome === null, 'failed --approve again--> approved (the same frozen fields)');
   const d1 = S(a2.next, { event: 'done', outcome: { code: 'switched' } });
-  ok(d1.ok && d1.next.state === 'done' && S(d1.next, { event: 'approve', by: 'user', shown: p0.digest }).code === 'proposal_state', 'approved --done--> done (terminal)');
+  ok(gateOf(d1.ok) && d1.next.state === 'done' && S(d1.next, { event: 'approve', by: 'user', shown: p0.digest }).code === 'proposal_state', 'approved --done--> done (terminal)');
   const rj = S(p0, { event: 'reject', by: 'user', at: 3 });
-  ok(rj.ok && rj.next.state === 'rejected' && rj.next.told === false && S(rj.next, { event: 'told' }).next.told === true && S(p0, { event: 'told' }).code === 'proposal_state', 'open --reject(user)--> rejected (untold) --told--> told; told on anything else refused');
+  ok(gateOf(rj.ok) && rj.next.state === 'rejected' && rj.next.told === false && S(rj.next, { event: 'told' }).next.told === true && S(p0, { event: 'told' }).code === 'proposal_state', 'open --reject(user)--> rejected (untold) --told--> told; told on anything else refused');
   ok(S({ ...p0, state: 'unavailable' }, { event: 'approve', by: 'user', shown: p0.digest }).code === 'proposal_unavailable' && S(p0, { event: 'bogus' }).code === 'bad-request' && S(null, {}).code === 'not-found', 'unavailable ⇒ proposal_unavailable; an unknown event and a missing proposal refused by name');
   const er = SW.egressRefusedText(['ssl.gstatic.com', 'SSL.gstatic.com', 'x.example', ...Array.from({ length: 12 }, (_, i) => `h${i}.example`)], { id: 'vibespace.fixture-engine', label: 'Fixture Engine' });
-  ok(/^Fixture Engine's site list refused ssl\.gstatic\.com, x\.example, h0\.example/.test(er) && !/h6\.example/.test(er) && /⚙ → Plugins → Fixture Engine → its settings/.test(er) && !/vibespace-browser blocked/.test(er) && SW.egressRefusedText([]) === '' && /^this browser's site list refused x\.example/.test(SW.egressRefusedText(['x.example'])) && !/CloakBrowser/.test(SW.egressRefusedText(['x.example'])),
+  ok(gateOf(/^Fixture Engine's site list refused ssl\.gstatic\.com, x\.example, h0\.example/.test(er)) && !/h6\.example/.test(er) && gateOf(/⚙ → Plugins → Fixture Engine → its settings/.test(er)) && !/vibespace-browser blocked/.test(er) && SW.egressRefusedText([]) === '' && gateOf(/^this browser's site list refused x\.example/.test(SW.egressRefusedText(['x.example']))) && !/CloakBrowser/.test(SW.egressRefusedText(['x.example'])),
     'egressRefusedText: the refused sites by name (deduplicated, at most 8) and the engine\'s own list to add them to; nothing refused ⇒ nothing said; no engine named ⇒ "this browser", never a removed one', er);
   const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8'), rsSrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-  ok(/if \(au && !au\._failed && au\.egressRefused && au\.egressRefused\.text\) console\.error\(`note: \$\{au\.egressRefused\.text\} \[egress_refused\]`\)/.test(cliSrc) && /k\.leasesFor\(f\.browserKey\)\.some\(\(l\) => l\.profileId === profileId\)\) \{\s*try \{ const hosts = k\.egressRefusals\(profileId, since\)/.test(rsSrc) && /\.\.\.\(egressRefused \? \{ egressRefused \} : \{\}\)/.test(rsSrc),
+  ok(gateOf(/if \(au && !au\._failed && au\.egressRefused && au\.egressRefused\.text\) console\.error\(`note: \$\{au\.egressRefused\.text\} \[egress_refused\]`\)/.test(cliSrc)) && gateOf(/k\.leasesFor\(f\.browserKey\)\.some\(\(l\) => l\.profileId === profileId\)\) \{\s*try \{ const hosts = k\.egressRefusals\(profileId, since\)/.test(rsSrc)) && verdictOf(/\.\.\.\(egressRefused \? \{ egressRefused \} : \{\}\)/.test(rsSrc)),
     'WIRING: the audit answer carries `egressRefused` (its own profile\'s proxy, a lease this conversation holds, since the verb began) and the CLI prints it on every page verb [egress_refused]');
   // verify r1: THE CLAIM STORE'S BOUND drops the entries nobody waits on first
   const E = (id, state, extra = {}) => ({ id, ...(state ? { proposal: { state, ...extra } } : {}) });
@@ -149,15 +149,15 @@ console.log('— step 3: the PROPOSAL (PURE): the plan table (lane engine-spi-eg
   const b = SW.proposalCardBlock(entry);
   const L = SW.proposalLines(b);
   const item = SW.proposalInboxItem(entry);
-  ok(b.type === 'browser_proposal' && b.digest === pu0.digest && !JSON.stringify(b).includes('<') && !('backend' in b) && !('install' in b) && L.plan.length === 0 && L.none && item.kind === 'notice' && !item.action && item.i18n.detail.map((l) => l.key).join('|') === [L.claim, L.none].map((l) => l.key).join('|'),
+  ok(b.type === 'browser_proposal' && b.digest === pu0.digest && !JSON.stringify(b).includes('<') && !('backend' in b) && !('install' in b) && L.plan.length === 0 && gateOf(L.none) && item.kind === 'notice' && !item.action && item.i18n.detail.map((l) => l.key).join('|') === [L.claim, L.none].map((l) => l.key).join('|'),
     'the card block is structure; the For-you item is a notice carrying the card\'s claim + why-none words line for line, with no Approve', { L, item });
   const noneW = (why) => SW.proposalLines(SW.proposalCardBlock({ ...claim, proposal: SW.proposalFor({ claim, plan: { kind: 'none', why, profileLabel: 'Work' } }) })).none.key;
   const D5 = 'No switch can be offered: this version of VibeSpace cannot switch the agent’s browser yet. A browser plugin can be installed, then chosen for this profile with Change build….'; // lane ui-needs-a-button (browser-profiles-19): its two ways are the card's doors, no menu path
-  ok(/another machine/.test(noneW('remote')) && /paired machine/.test(noneW('other-machine')) && noneW('unavailable') === D5 && noneW('zz-old-why') === D5 && SW.NO_SWITCH_WORDS.unavailable === D5,
+  ok(gateOf(/another machine/.test(noneW('remote'))) && gateOf(/paired machine/.test(noneW('other-machine'))) && noneW('unavailable') === D5 && noneW('zz-old-why') === D5 && SW.NO_SWITCH_WORDS.unavailable === D5,
     'why none, in words: another machine / a paired machine / else the ONE sentence true with or without a browser plugin installed (主开发\'s D5) — an older record\'s why says it too');
   const all = JSON.stringify([L, item, SW.proposalLines(SW.proposalCardBlock({ ...claim, why: 'egress-refused', proposal: pu0 }))]);
-  ok(!/CloakBrowser|install(?:ed|ing)? (?:it|the)/.test(all) && /its browser's site list refused/.test(all), 'no word of a removed browser, nothing offered to install (an egress-refused claim names its own browser\'s list)', all.slice(0, 300));
-  ok(/^Approved: accounts\.google\.com — re-open https:\/\/accounts\.google\.com\/v3\/signin\/identifier/.test(SW.approvedText(p0)) && /do not work around the refusal/.test(SW.rejectionText(p0)) && !/CloakBrowser/.test(SW.approvedText(p0) + SW.rejectionText(p0)), 'the agent\'s words for a decided record (one before the update) name no removed browser');
+  ok(!/CloakBrowser|install(?:ed|ing)? (?:it|the)/.test(all) && verdictOf(/its browser's site list refused/.test(all)), 'no word of a removed browser, nothing offered to install (an egress-refused claim names its own browser\'s list)', all.slice(0, 300));
+  ok(gateOf(/^Approved: accounts\.google\.com — re-open https:\/\/accounts\.google\.com\/v3\/signin\/identifier/.test(SW.approvedText(p0))) && gateOf(/do not work around the refusal/.test(SW.rejectionText(p0))) && !/CloakBrowser/.test(SW.approvedText(p0) + SW.rejectionText(p0)), 'the agent\'s words for a decided record (one before the update) name no removed browser');
 
 }
 
@@ -167,7 +167,7 @@ const M = mutantCopies('bprop-switch', REPO);
 {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
   const cut = '    if (host !== row.host) continue;\n';
-  ok(src.includes(cut), 'the exact-host rule is where the control cuts it');
+  ok(verdictOf(src.includes(cut)), 'the exact-host rule is where the control cuts it');
   const m = M.load('src/browser-switch.js', editAnchor(src, cut, '', "src/browser-switch.js"), 'any-host');
   ok(m.navHint({ url: 'https://example.com/signin/rejected', title: '' }) !== null, 'CONTROL: a table that ignores the host hints on ANY site with the path — the look-alike rows above would be red');
 }
@@ -189,35 +189,35 @@ console.log('— lane dc-browser-providers: a FAKE provider (fakebrowser — hea
   const swPath = M.write('src/browser-switch.js', swSrc.split(PROF).join(`require(${JSON.stringify(pPath)})`), 'fake', { name: 'switch-fake' });
   const bbPath = M.write('src/browser-builds.js', rd('src/browser-builds.js').split(PROF).join(`require(${JSON.stringify(pPath)})`).split("require('./browser-switch.js')").join(`require(${JSON.stringify(swPath)})`), 'fake', { name: 'builds-fake' });
   const P = require(pPath), S = require(swPath), BB = require(bbPath);
-  ok(P.providerIds().includes('fakebrowser') && P.providerControl('fakebrowser').ok === true && P.capabilityRefusal('fakebrowser', 'headed').code === 'provider_lacks_capability' && P.capabilityRefusal('fakebrowser', 'start') === null, 'the row is a provider: listed, usable here, refused a window by its own `headed: false` cell');
+  ok(gateOf(P.providerIds().includes('fakebrowser')) && P.providerControl('fakebrowser').ok === true && P.capabilityRefusal('fakebrowser', 'headed').code === 'provider_lacks_capability' && P.capabilityRefusal('fakebrowser', 'start') === null, 'the row is a provider: listed, usable here, refused a window by its own `headed: false` cell');
   const env = S.launchEnvFor('fakebrowser', { executablePath: '/opt/fake/chrome' });
   ok(JSON.stringify(env) === '{}' && JSON.stringify(S.launchEnvFor('chromium', { executablePath: '/opt/b/chrome' })) === JSON.stringify({ AGENT_BROWSER_EXECUTABLE_PATH: '/opt/b/chrome' }) && S.integrationIdFor('fakebrowser') === null, 'THE LAUNCH ENV from the row: a row without a build choice gets none (lane engine-spi-egress L3: the other-binary road left with the anti-bot backend); a build-choice row its executable; no key row', env);
   const profile = { id: 'bp-0000fa4e', label: 'fake', provider: 'chromium', dir: '/tmp/x' };
   const rows = S.switcherRows({ profile, providerIds: P.providerIds(), rowOf: P.providerRow, controlOf: P.providerControl, capabilityRefusalOf: P.capabilityRefusal, now: 1 });
   const fr = rows.find((r) => r.id === 'fakebrowser');
-  ok(fr && fr.switchKind === 'in-place' && fr.integrationId === null && !('binary' in fr.facts) && S.switchChoices({ profile, providerIds: P.providerIds(), rowOf: P.providerRow, controlOf: P.providerControl }).includes('fakebrowser'), 'THE SWITCH VERDICT: chromium → fakebrowser is an in-place target and one of the profile\'s choices', fr && { state: fr.state, code: fr.code, reason: fr.reason });
+  ok(gateOf(fr) && fr.switchKind === 'in-place' && fr.integrationId === null && !('binary' in fr.facts) && verdictOf(S.switchChoices({ profile, providerIds: P.providerIds(), rowOf: P.providerRow, controlOf: P.providerControl }).includes('fakebrowser')), 'THE SWITCH VERDICT: chromium → fakebrowser is an in-place target and one of the profile\'s choices', fr && { state: fr.state, code: fr.code, reason: fr.reason });
   const build = { kind: 'build', version: '151.0.7922.34' };
   ok(BB.browserChoiceVerdict({ choice: build, provider: 'fakebrowser' }).code === 'browser_choice_provider' && BB.browserChoiceVerdict({ choice: build, provider: 'chromium', builds: { ok: true, builds: [] } }).code !== 'browser_choice_provider', 'no build choice: a Chrome build for the fake profile is refused by its `buildChoice` cell (chromium is not)');
   // the client models, fed the rows the routes carry (GET /api/browser/providers = providerRows; the profile view stamps buildChoice)
   const NP = await import('../src/lib/browser-new-profile-model.js'), SWM = await import('../src/lib/browser-switcher-model.js'), BM = await import('../src/lib/browser-build-model.js'), PM = await import('../src/lib/browser-panel-model.js');
   const t = (k, p) => String(k).replace(/\{(\w+)\}/g, (_, n) => (p && p[n] != null ? String(p[n]) : ''));
   const ch = NP.providerChoices({ providers: P.providerRows(), t }).find((c) => c.id === 'fakebrowser');
-  ok(ch && ch.state === 'ready' && ch.pickable === true, 'New profile…: the fake row is a pickable choice off the /providers rows', ch);
+  ok(gateOf(ch) && ch.state === 'ready' && ch.pickable === true, 'New profile…: the fake row is a pickable choice off the /providers rows', ch);
   // lane dc-browser-backends (F5): its WORDS are its file's — the New profile… row, the switch dialog's name, the pill and
   // the blurb read them off the rows (no ladder over ids learns its name)
   ok(ch.name === 'FakeBrowser' && ch.blurb === 'A browser that only exists in this test.' && SWM.backendName('fakebrowser', t) === 'FakeBrowser' && SWM.chipWords({ id: 'fakebrowser' }, t) === 'Fake', 'its words are its own file\'s: New profile… names it, the switch dialog / pill / blurb say it', { ch, chip: SWM.chipWords({ id: 'fakebrowser' }, t) });
   // CONTROL (F5): the old id ladder restored in backendName ⇒ the fake backend is "an unknown browser" — the words row above would be red
   const smSrc = rd('src/lib/browser-switcher-model.js'), nameBody = "  return said(wordsOf(id), 'name', t) || t(i18nKey('an unknown browser'));\n";
-  ok(smSrc.includes(nameBody), 'the control cuts backendName where it reads the row');
+  ok(verdictOf(smSrc.includes(nameBody)), 'the control cuts backendName where it reads the row');
   const SWL = await import(M.write('src/lib/browser-switcher-model.js', smSrc.replace(nameBody, "  const s = String(id || '');\n  if (s === 'chromium') return 'Chromium';\n  if (s === 'cloak') return 'CloakBrowser';\n  return t(i18nKey('an unknown browser'));\n"), 'ladder', { esm: true }));
   SWL.learnBackendRows(P.providerRows());
   ok(SWL.backendName('fakebrowser', t) === 'an unknown browser' && SWL.backendName('cloak', t) === 'CloakBrowser', 'CONTROL: with the id ladder restored the fake backend has no name ("an unknown browser") — its words row above would be red');
   const m = SWM.switcherModel({ profile, rows }, { t });
-  ok(m.targets.some((x) => x.id === 'fakebrowser'), 'the switch dialog\'s model draws a card for it', m.targets.map((x) => x.id));
+  ok(verdictOf(m.targets.some((x) => x.id === 'fakebrowser')), 'the switch dialog\'s model draws a card for it', m.targets.map((x) => x.id));
   const fv = { id: 'bp-0000fa4e', provider: 'fakebrowser', buildChoice: !!P.providerRow('fakebrowser').buildChoice, live: false };
-  ok(BM.cardBuildLine({ buildChoice: fv.buildChoice, choice: build }, t) === null && !PM.rowMenu(fv, { t }).some((x) => x.id === 'build') && PM.rowMenu({ ...fv, provider: 'chromium', buildChoice: true }, { t }).some((x) => x.id === 'build'), 'the panel: no build line, no Change build… for it — the cell says so, not the id');
+  ok(BM.cardBuildLine({ buildChoice: fv.buildChoice, choice: build }, t) === null && !PM.rowMenu(fv, { t }).some((x) => x.id === 'build') && verdictOf(PM.rowMenu({ ...fv, provider: 'chromium', buildChoice: true }, { t }).some((x) => x.id === 'build')), 'the panel: no build line, no Change build… for it — the cell says so, not the id');
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(verdictOf(c.pass), c.name, c.detail);
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? ` passed, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

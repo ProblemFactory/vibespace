@@ -35,7 +35,7 @@ const spellingsOf = (v) => {
   ];
 };
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -61,17 +61,17 @@ const PLAIN = 'the quick brown fox ' + crypto.randomBytes(3).toString('hex');   
 console.log('§1 redactSecrets — the shared masker’s contract (R1–R8 exhaustively: test-exit-run)');
 {
   const pat = redactSecrets(PAT);
-  ok(!pat.text.includes(MAT) && pat.text.includes(REDACTED) && pat.redacted >= 1, 'a known prefix: the material goes, the prefix stays');
-  ok(redactSecrets(BEAR).text.includes(REDACTED) && !redactSecrets(BEAR).text.includes(BEAR.split(' ').pop()), 'an HTTP Bearer credential is redacted');
+  ok(!pat.text.includes(MAT) && gateOf(pat.text.includes(REDACTED)) && pat.redacted >= 1, 'a known prefix: the material goes, the prefix stays');
+  ok(gateOf(redactSecrets(BEAR).text.includes(REDACTED)) && !redactSecrets(BEAR).text.includes(BEAR.split(' ').pop()), 'an HTTP Bearer credential is redacted');
   const kv = redactSecrets(KV);
-  ok(!kv.text.includes(KVV) && kv.text.includes('api_token'), 'a secret-named KV: the value goes, the name stays');
+  ok(!kv.text.includes(KVV) && verdictOf(kv.text.includes('api_token')), 'a secret-named KV: the value goes, the name stays');
   ok(redactSecrets(PLAIN).text === PLAIN && redactSecrets(PLAIN).redacted === 0, 'a non-secret line is returned unchanged (a false hide costs, so the rule is narrow)');
   ok(redactSecrets(redactSecrets(PAT).text).text === redactSecrets(PAT).text, 'idempotent: a redacted text redacts to itself');
   // lane job-notify-user r6: a letters-and-digits family ends where its letters end — a `-` / `_` after it is the text's (a job named
   // «<token> deploy» is STORED `<token>-deploy`; the old common tail `(?![A-Za-z0-9_\-])` left it whole: the ONE name accessor showed it)
   const tail = [PAT + '-deploy', 'deploy-' + PAT + '-2', PAT + '_backup'].map((t) => redactSecrets(t).text);
   const OLD_TAIL = new RegExp('\\bgh[pousr]_[A-Za-z0-9]{20,255}(?![A-Za-z0-9_\\-])');
-  ok(tail.every((t) => !t.includes(MAT) && t.includes(REDACTED)) && tail[0] === 'ghp_' + REDACTED + '-deploy' && OLD_TAIL.test(PAT) && !OLD_TAIL.test(PAT + '-deploy') && redactSecrets('sk-' + MAT + '-x').text === 'sk-' + REDACTED,
+  ok(gateOf(tail.every((t) => !t.includes(MAT) && t.includes(REDACTED))) && tail[0] === 'ghp_' + REDACTED + '-deploy' && gateOf(OLD_TAIL.test(PAT)) && !OLD_TAIL.test(PAT + '-deploy') && redactSecrets('sk-' + MAT + '-x').text === 'sk-' + REDACTED,
     'a known prefix followed by `-` / `_` (a job name `<token>-deploy`, a suffix `-2`) is redacted — the prefix and the words after stay; a family whose material holds `-` still takes its whole run', tail);
   // lane job-notify-user r7 (accept-r6 confirmed 0): EVERY family its own tail — the material's own class decides where it ends
   // (a run at the first character outside ITS class, a fixed-length family after its length); r6 moved five families and AIza /
@@ -105,7 +105,7 @@ console.log('§1 redactSecrets — the shared masker’s contract (R1–R8 exhau
   }
   ok(!famBad.length, `EVERY family its own tail: ${FAM.length} families × {-, _, a word character, the end} and after \`_\` / \`-\` / a blank — the material hidden, a tail its class does not hold kept in clear; the name rule (r9, as typed and stored) the same text${famBad.length ? ' — ' + famBad.join(' | ') : ''}`);
   const FP = ['my-deploy', 'gh-pages', 'npm-run-all', 'npm_config_cache', 'sk-learn', 'hf_hub_download', 'xoxo-gossip', 'AKIA-docs', 'ASIAN_FOOD', 'glpat-x', 'jbt_x', 'deploy-2'];
-  ok(FP.every((t) => redactSecrets('run ' + t + ' now').text === 'run ' + t + ' now'), 'the false-positive controls stay in clear (my-deploy, gh-pages, npm-run-all, npm_config_cache, sk-learn, …)', FP.map((t) => redactSecrets(t).text));
+  ok(verdictOf(FP.every((t) => redactSecrets('run ' + t + ' now').text === 'run ' + t + ' now')), 'the false-positive controls stay in clear (my-deploy, gh-pages, npm-run-all, npm_config_cache, sk-learn, …)', FP.map((t) => redactSecrets(t).text));
   const shp = redactSecrets('x');
   ok(typeof shp.text === 'string' && typeof shp.redacted === 'number', 'returns { text, redacted }');
   ok(redactSecrets('').text === '' && redactSecrets(null).text === '', 'empty / null is handled');
@@ -157,14 +157,14 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
     'tail /var/log/VibeSpace/Server-2026.log', 'build C:\\Users\\Dev\\Project2026\\out', 'mirror https://Example.com/Repo2026/archive', 'notify John.Doe2026@Example.com weekly', 'GitHub CI on macOS 15 and iOS 18 for PR 42',
     'bisect-' + H40, 'deploy ' + H40.slice(0, 32), 'rerun TestHandlerReturnsNotFound', 'nightly-db-backup-2026-10-29', 'deploy ' + AN(12) + '9'];
   const nBad = NEVER.filter((t) => T(t) !== t);
-  ok(!nBad.length && NEVER.slice(0, 9).every((t) => t.split(' ').some((w) => w.length >= 20 && [/[a-z]/, /[A-Z]/, /[0-9]/, /[!-,\/:-@\[-^`{-~]/].filter((re) => re.test(w)).length >= 3)),
+  ok(!nBad.length && verdictOf(NEVER.slice(0, 9).every((t) => t.split(' ').some((w) => w.length >= 20 && [/[a-z]/, /[A-Z]/, /[0-9]/, /[!-,\/:-@\[-^`{-~]/].filter((re) => re.test(w)).length >= 3))),
     `(a) the six a person reads are NEVER hidden by the run row — a date, a time, a version, a uuid, a path, a URL, an email (each a 20+ run of three classes); short words, a sha joined by \`-\`, an md5, a run of two classes, a run under 20${nBad.length ? ' — ' + nBad.map((t) => `«${t}» → ${T(t)}`).join(' | ') : ''}`);
   // the run row NEVER on a stored slug (labelOf, a scheduled run's record): an older record of short words reads whole; a family still goes
   const SLUGS = ['GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac', 'deploy-EU-west2-canary', 'deploy-' + RUN3(36)];
-  ok(SLUGS.every((t) => S(t) === t) && T('deploy-EU-west2-canary') === 'deploy-EU-west2-canary' && T(['Q7w8E9', 'r0T1y2', 'U3i4O5', 'p6A7s8'].join('-')) === R && S('deploy-' + FAMV) === 'deploy-ghp_' + R && randomRun('A1b2C3d4E5f6G7h8I9j0') && !randomRun('A1b2C3d4E5f6G7h8I9j') && !randomRun('550e8400-e29b-41d4-a716-446655440000'),
+  ok(gateOf(SLUGS.every((t) => S(t) === t)) && T('deploy-EU-west2-canary') === 'deploy-EU-west2-canary' && T(['Q7w8E9', 'r0T1y2', 'U3i4O5', 'p6A7s8'].join('-')) === R && S('deploy-' + FAMV) === 'deploy-ghp_' + R && gateOf(randomRun('A1b2C3d4E5f6G7h8I9j0')) && !randomRun('A1b2C3d4E5f6G7h8I9j') && !randomRun('550e8400-e29b-41d4-a716-446655440000'),
     '(a) the run row never runs on a STORED name — a slug reads whole (a name of short words, a kebab name, even a run), a family is still hidden; typed, a kebab name with a plain word between its joiners is a label (r253: the output belt\'s own run test), one with none is one 20+ run (hidden)', SLUGS.map(S));
   // idempotent and bounded (its linearity is counted, never clocked: test-exit-run's r9 name-rule legs, by the work meter)
-  ok([...KEEP, ...HIDE.map(([t]) => t), ...SHAPE.map(([t]) => t), ...NEVER].every((t) => T(T(t)) === T(t) && S(S(t)) === S(t)) && T('a'.repeat(INPUT_MAX + 99)).length <= INPUT_MAX,
+  ok(gateOf([...KEEP, ...HIDE.map(([t]) => t), ...SHAPE.map(([t]) => t), ...NEVER].every((t) => T(T(t)) === T(t) && S(S(t)) === S(t))) && T('a'.repeat(INPUT_MAX + 99)).length <= INPUT_MAX,
     'the name rule is idempotent (a hidden name hides to itself), as typed and stored, and bounded at INPUT_MAX');
   // (e) ONE SOURCE for the shape rows: the name rule calls the very rows redactSecrets calls, and every row of redactSecrets is answered
   const ssrc = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
@@ -174,7 +174,7 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
   // (`redactPem(text, say)`, `if (say) say(…)`, the message mode), so an exact call no longer reads the same in both bodies
   const SHAPE_ROWS = [/\bredactPem\(text\b/, /\bredactJwt\(text\)/, /text\.replace\(PREFIX_RE, \(m\) => \{ n\+\+; const h = PREFIX_HEAD\.exec\(m\);/];
   const once = (re) => (ssrc.match(re) || []).length === 1;
-  ok(SHAPE_ROWS.every((re) => re.test(bS) && re.test(bV)) && once(/\nconst PREFIX_RE = /g) && once(/\nfunction redactJwt\(/g) && once(/\nfunction redactPem\(/g) && once(/\nconst PREFIX_HEAD = /g),
+  ok(gateOf(SHAPE_ROWS.every((re) => re.test(bS) && re.test(bV))) && gateOf(once(/\nconst PREFIX_RE = /g)) && gateOf(once(/\nfunction redactJwt\(/g)) && gateOf(once(/\nfunction redactPem\(/g)) && verdictOf(once(/\nconst PREFIX_HEAD = /g)),
     '(e) the SHAPE rows are ONE source — R1, the JWT scan and R4 (with its head) are the very calls redactSecrets makes, each spelled once in the file');
   const ANSWER = { JOINER_IN_WORD_RE: bV, redactPem: bV, redactJwt: bV, PREFIX_RE: bV, redactKv: bK.includes('KV_HEAD') && bV.includes('nameKv(text)') ? bV : '', redactContinuations: bK.includes('blanksEnd(text, s)') && bK.includes('BLOCK_VAL') ? bV : '',
     REG_RE: bV, REG_NAME_RE: bV, RUN_RE: bV.includes('NAME_RUN_RE') ? bV : '',
@@ -200,20 +200,20 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
   // r253: an ASSIGNMENT hides any value (anyValue) — the word test this mutant loosens is the PROSE forms' only; the assignment forms stay hidden under it
   const aRed = ['rotate password: ' + PW.join('-'), 'login password ' + PW.join('_'), 'passphrase ' + PW.join('.')].filter((t) => MA.redactByValue(t, { typed: true }).text !== T(t));
   const aHeld = ['set DB_PASSWORD=' + PW.join('.'), 'api_key=' + UPW].every((t) => MA.redactByValue(t, { typed: true }).text === T(t) && T(t).includes(R));
-  ok(mutA !== ssrc && aRed.length === 3 && MA.redactByValue(aRed[0], { typed: true }).text === aRed[0] && aHeld, `MUTANT — r8's plain-words exemption: a Capitalized passphrase in PROSE kept, RED by name — ${aRed.map((t) => `«${t}» → ${MA.redactByValue(t, { typed: true }).text}`).join(', ')}; the assignments stay hidden under it (r253)`);
+  ok(mutA !== ssrc && aRed.length === 3 && MA.redactByValue(aRed[0], { typed: true }).text === aRed[0] && verdictOf(aHeld), `MUTANT — r8's plain-words exemption: a Capitalized passphrase in PROSE kept, RED by name — ${aRed.map((t) => `«${t}» → ${MA.redactByValue(t, { typed: true }).text}`).join(', ')}; the assignments stay hidden under it (r253)`);
   const mdir2 = scratch('ss-name-mut2'); fs.mkdirSync(mdir2, { recursive: true }); fs.copyFileSync(path.join(REPO, 'src/credential-words.js'), path.join(mdir2, 'credential-words.js'));
   const mutB = anchored(ssrc, '    if (typed) text = text.replace(NAME_RUN_RE,', '    if (true) text = text.replace(NAME_RUN_RE,', 'the run row on a stored slug');
   fs.writeFileSync(path.join(mdir2, 'secret-shapes.js'), mutB); const MB = require(path.join(mdir2, 'secret-shapes.js'));
   const bRed = SLUGS.filter((t) => MB.redactByValue(t).text !== t);
   ok(mutB !== ssrc && bRed.length >= 3, `MUTANT — the run row on a stored slug (r8's labelOf): RED by name — ${bRed.map((t) => `«${t.slice(0, 30)}» → ${MB.redactByValue(t).text}`).join(', ')}`);
-  ok(belt.maskForSink('password reset', { byValue: true }) === 'password reset' && belt.maskForSink('password reset', {}) === 'password ' + REDACTED && belt.maskForSink('ship ' + PAT, { byValue: true }).includes(REDACTED)
+  ok(belt.maskForSink('password reset', { byValue: true }) === 'password reset' && belt.maskForSink('password reset', {}) === 'password ' + REDACTED && gateOf(belt.maskForSink('ship ' + PAT, { byValue: true }).includes(REDACTED))
     && belt.maskForSink('deploy ' + RUN3(36), { byValue: true, typed: true }) === 'deploy ' + REDACTED && belt.maskForSink('GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', { byValue: true }) === 'GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42',
     'the output belt carries the name rule (`maskForSink(t, { byValue, typed })` — typed: the run row; a stored name: never; a sink text keeps the narrow table\'s hide-more rule)');
 }
 
 console.log('§2 THE OUTPUT BELT’S LEG — maskForSink applies the shape rule (and never throws)');
 {
-  ok(belt.maskForSink('ship it: ' + PAT, {}).includes(REDACTED), 'the belt redacts a secret shape in a sink text');
+  ok(verdictOf(belt.maskForSink('ship it: ' + PAT, {}).includes(REDACTED)), 'the belt redacts a secret shape in a sink text');
   ok(belt.maskForSink(PLAIN, {}) === PLAIN, 'the belt leaves a non-secret line untouched');
   ok(belt.maskForSink(null, {}) === '' && belt.maskForSink(12345, {}) === '12345', 'the belt coerces odd input, never throws');
   ok(typeof belt.maskForSink('x'.repeat(INPUT_MAX + 1000), {}) === 'string', 'the belt handles an over-long text');
@@ -230,13 +230,13 @@ console.log('§3 THE BELT’S MASKABLE-ENTRY ENUMERATION — host: / file: are n
     secretGet: (n) => ({ ok: true, value: Buffer.from(VAL + ':' + n, 'utf8') }),
   });
   const labels = belt.maskableSecrets(SB.vaultForDir(dir)).map((x) => x.label);
-  ok(labels.includes('apikey:k'), 'an apikey: entry is maskable');
+  ok(verdictOf(labels.includes('apikey:k')), 'an apikey: entry is maskable');
   ok(!labels.includes('host:h') && !labels.includes('file:f'), 'host: and file: entries are never maskable (the vault never shows them to an agent)');
 
   // THE LIVE-VALUE LEG (vault-run.js is sibling P0-e; existsSync-guarded until the rebase)
   if (fs.existsSync(path.join(REPO, 'src/vault-run.js'))) {
     const masked = belt.maskForSink('value is ' + VAL + ':apikey:k here', { dataDir: dir });
-    ok(!masked.includes(VAL + ':apikey:k') && masked.includes('[vault:apikey:k]'), 'the live-value leg replaces an apikey: value with its [vault:<entry>] placeholder');
+    ok(!masked.includes(VAL + ':apikey:k') && verdictOf(masked.includes('[vault:apikey:k]')), 'the live-value leg replaces an apikey: value with its [vault:<entry>] placeholder');
     // lane vault-scrub-forms: the belt masks with vault-run.js's ONE table — every new spelling of the value goes whole
     const SP = spellingsOf(VAL + ':apikey:k'), bad = SP.filter(([, s]) => belt.maskForSink('<' + s + '>', { dataDir: dir }) !== '<[vault:apikey:k]>').map(([n]) => n);
     ok(!bad.length, `the belt masks the value in ${SP.length} more spellings a real tool prints (UTF-16, base32, quoted-printable, escapes, entities, colours, wrapped base64) — each text is exactly «<[vault:apikey:k]>»${bad.length ? ' — NOT: ' + bad.join(', ') : ''}`);
@@ -352,9 +352,9 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   const leaksOf = (S, scrub) => { const out = {}; for (const [k, mk] of Object.entries(CLASSES)) { let leak = 0, n = 0; for (let i = 0; i < 160; i++) { const v = mk(), text = SHAPES[i % SHAPES.length](v); const o = scrub ? scrub(text) : S.redactSecrets(text).text; n++; if (o.includes(v) || o.includes(encodeURIComponent(v))) leak++; } out[k] = { leak, n }; } return out; };
   const regLine = (res) => Object.entries(res).map(([k, v]) => `${k} ${(100 * v.leak / v.n).toFixed(2)} %`).join(' · ');
   const regA = leaksOf(SS);
-  ok(Object.values(regA).every((v) => v.leak === 0), `CENSUS (A) REGRESSION — ${Object.keys(CLASSES).length} value classes × ${SHAPES.length} holder shapes (${Object.values(regA).reduce((a, v) => a + v.n, 0)} texts) leak 0: ${regLine(regA)}`);
+  ok(verdictOf(Object.values(regA).every((v) => v.leak === 0)), `CENSUS (A) REGRESSION — ${Object.keys(CLASSES).length} value classes × ${SHAPES.length} holder shapes (${Object.values(regA).reduce((a, v) => a + v.n, 0)} texts) leak 0: ${regLine(regA)}`);
   const regDM = leaksOf(SS, (text) => DM.scrub(text, 2000));
-  ok(Object.values(regDM).every((v) => v.leak === 0), `CENSUS (A) through decision-model's ONE SCRUB (redactSecrets runs:true, the vendor-bound text): leak 0 of ${Object.values(regDM).reduce((a, v) => a + v.n, 0)}`);
+  ok(verdictOf(Object.values(regDM).every((v) => v.leak === 0)), `CENSUS (A) through decision-model's ONE SCRUB (redactSecrets runs:true, the vendor-bound text): leak 0 of ${Object.values(regDM).reduce((a, v) => a + v.n, 0)}`);
   // RED CONTROL: a mutant that re-adds a value floor (keeps a lowercase word under a holder name) — census (A) goes red by name
   const floorMut = M.load('src/secret-shapes.js', editAnchor(editAnchor(SRC, '    n++;\n    out += text.slice(last, headEnd)', '    if (/^[a-z]{4,12}$/.test(inner)) { KV_HEAD.lastIndex = valEnd; continue; }\n    n++;\n    out += text.slice(last, headEnd)', "src/secret-shapes.js"), '    const keep = queryTail(text, vs, ve, at(text, m.index));', '    if (/^[a-z]{4,12}$/.test(text.slice(vs, ve))) { QUERY_HEAD_RE.lastIndex = ve; continue; }\n    const keep = queryTail(text, vs, ve, at(text, m.index));', "src/secret-shapes.js"), 'valuefloor');
   const regMut = leaksOf(floorMut);
@@ -369,7 +369,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
       const m = new UT.UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
       const it = m.add('claude:mvs', { text: 'Open this link and paste the code back', detail: '链接（gcloud --no-launch-browser 流程）： ' + OWNER + ' — 我拿到码后写入', origin: 'agent' });
       const u = new URL(it.detail.split(' ').find((w) => w.startsWith('https://')));
-      ok(it.detail.includes(OWNER) && u.searchParams.get('token_usage') === 'remote' && u.searchParams.get('access_type') === 'offline' && u.searchParams.get('code_challenge_method') === 'S256' && [...u.searchParams.keys()].length === 10,
+      ok(gateOf(it.detail.includes(OWNER)) && u.searchParams.get('token_usage') === 'remote' && u.searchParams.get('access_type') === 'offline' && u.searchParams.get('code_challenge_method') === 'S256' && [...u.searchParams.keys()].length === 10,
         'CENSUS (B): through the For-you writer (user-todos.add, origin agent — THE card\'s store) the stored detail holds the URL whole: all ten parameters, token_usage=remote', it.detail.slice(-160));
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
@@ -388,7 +388,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
     'a vault-mark smuggle (?token=[vault:<40 hex>])': ['https://x.example/a?token=[vault:' + runOf(HEX, 40) + ']', 'vault:'],
     'r4 (α) token_uri in a pasted client JSON (the base\'s verdict: a false hide costs nothing)': ['{"token_uri": "https://oauth2.googleapis.com/token"}', 'oauth2.googleapis.com'],
   };
-  for (const [n, [t, frag]] of Object.entries(MASKED)) { const o = SS.redactSecrets(t).text; ok(!o.includes(frag) && o.includes(REDACTED) && !o.endsWith(']') && SS.redactSecrets(o).text === o, `CENSUS (B) still masked — ${n} (idempotent)`); }
+  for (const [n, [t, frag]] of Object.entries(MASKED)) { const o = SS.redactSecrets(t).text; ok(!o.includes(frag) && gateOf(o.includes(REDACTED)) && !o.endsWith(']') && SS.redactSecrets(o).text === o, `CENSUS (B) still masked — ${n} (idempotent)`); }
 
   // r3 (B): a url / uri / endpoint head is public ONLY without a userinfo — a credential-named CONNECTION STRING is masked whole
   const pw = ['pw', 'Q7x', 'kL2'].join('');
@@ -397,15 +397,15 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   ok(connLeak.length === 0, `r3 (B): ${CONN.length} credential-named connection strings with a userinfo masked (the belt and the vendor scrub)${connLeak.length ? ' — leaked: ' + connLeak.join(' · ') : ''}`);
   // r3 (C): a PUBLIC name's value is walked on — a holder nested inside it is masked, the public name stays
   const nest = SS.redactSecrets('https://x.example/a?next=https://app.example/reset?token=' + tok).text;
-  ok(nest === 'https://x.example/a?next=https://app.example/reset?token=«redacted»' && SS.redactSecrets('https://x.example/a?continue=https://app.example/cb?code=1&token=' + tok).text.endsWith('&token=«redacted»') && belt.maskForSink(OWNER) === OWNER, 'r3 (C): a holder nested RAW in a public value is masked in place (next / continue stay), the owner\'s URL unchanged', nest);
+  ok(nest === 'https://x.example/a?next=https://app.example/reset?token=«redacted»' && gateOf(SS.redactSecrets('https://x.example/a?continue=https://app.example/cb?code=1&token=' + tok).text.endsWith('&token=«redacted»')) && belt.maskForSink(OWNER) === OWNER, 'r3 (C): a holder nested RAW in a public value is masked in place (next / continue stay), the owner\'s URL unchanged', nest);
   // r4 (M1 + M2, law α): a credential-named ADDRESS holds — a capability URL, an encoded nested holder, a connection string all hide behind it
   const CAP = { 'a Slack webhook (SECRET_WEBHOOK_URL)': 'SECRET_WEBHOOK_URL=https://hooks.slack.com/services/T0/B0/' + tok, 'a private calendar (PRIVATE_ICAL_URL)': 'PRIVATE_ICAL_URL=https://cal.example/ical/x/private-' + runOf(HEX, 24) + '/basic.ics', 'a bot token in a path (TOKEN_URL)': 'TOKEN_URL=https://api.telegram.org/bot123456:' + tok + '/getMe', 'a query key (AUTH_ENDPOINT)': 'AUTH_ENDPOINT=https://x.example/cb?k=' + tok,
     'an encoded nested token (?password_reset_url=…%3Ftoken%3D…)': 'https://x.example/a?password_reset_url=https%3A%2F%2Fapp.example%2Freset%3Ftoken%3D' + tok, 'an encoded nested access_token (?auth_url=…%26access_token%3D…)': 'https://x.example/a?auth_url=https%3A%2F%2Fapp%2Fcb%3Fcode%3D1%26access_token%3D' + tok, 'an encoded nested sid (?token_url=…%3Bsid%3D…)': 'https://x.example/a?token_url=https%3A%2F%2Fapp%2Fx%3Bsid%3D' + tok };
-  for (const [n, t] of Object.entries(CAP)) { const o = SS.redactSecrets(t).text, d = DM.scrub(t, 2000); ok(!o.includes(tok) && !o.includes('private-') && !d.includes(tok) && o.includes(REDACTED), `r4 (M1/M2, α) ${n}: masked through the belt and the vendor scrub`); }
+  for (const [n, t] of Object.entries(CAP)) { const o = SS.redactSecrets(t).text, d = DM.scrub(t, 2000); ok(!o.includes(tok) && !o.includes('private-') && !d.includes(tok) && verdictOf(o.includes(REDACTED)), `r4 (M1/M2, α) ${n}: masked through the belt and the vendor scrub`); }
   // r4: a PUBLIC query value is judged DECODED ONCE — an encoded nested holder or a userinfo masks it whole (fail closed); a plain one stays
   const pub = (t) => SS.redactSecrets(t).text;
   ok(pub('https://x.example/a?next=https%3A%2F%2Fapp.example%2Freset%3Ftoken%3D' + tok) === 'https://x.example/a?next=«redacted»' && pub('https://x.example/a?next=https%3A%2F%2Fu%3A' + tok + '%40db%2F') === 'https://x.example/a?next=«redacted»' && pub('https://x.example/a?next=https://u:' + tok + '@db/x') === 'https://x.example/a?next=«redacted»'
-    && pub('https://x.example/a?redirect_uri=https%3A%2F%2Fapp.example%2Fcb&state=abc') === 'https://x.example/a?redirect_uri=https%3A%2F%2Fapp.example%2Fcb&state=abc' && pub('https://x.example/a?next=%E0%A4%A&t=%3Ftoken%3D' + tok).endsWith('&t=«redacted»'),
+    && pub('https://x.example/a?redirect_uri=https%3A%2F%2Fapp.example%2Fcb&state=abc') === 'https://x.example/a?redirect_uri=https%3A%2F%2Fapp.example%2Fcb&state=abc' && verdictOf(pub('https://x.example/a?next=%E0%A4%A&t=%3Ftoken%3D' + tok).endsWith('&t=«redacted»')),
     'r4: a public query value decoded once — an encoded nested token, an encoded / raw userinfo ⇒ masked whole; a plain encoded redirect_uri kept; a malformed escape never hides a nested token');
   // r5 (M2): a userinfo holds a secret only WITH A PASSWORD — a bare username is an identity (the owner's complaint class: a public URL
   // masked whole and drawn as an unopenable link); an EMPTY password (`user:@` — HTTP Basic's API-key form, curl's `-u key:`) still holds
@@ -414,13 +414,13 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
     const moved = KEEP.filter((u) => SS.redactSecrets(u).text !== u || belt.maskForSink(u) !== u || DM.scrub(u, 2000) !== u || (typeof FY.maskedNoteOf === 'function' ? FY.maskedNoteOf(belt.maskForSink(u)) : '') !== '');   // a tree without the export reds BY NAME (the belt legs), never a crash
     ok(!moved.length, `r5 (M2): ${KEEP.length} public URLs carrying a bare USERNAME (ssh://git@…, https://alice@…, encoded git%40) byte-identical through the belt, maskForSink and the vendor scrub — drawn as links, no note`, moved);
     const EMPTY = ['https://a.example/x?next=https://user:@api.example/v1', 'https://a.example/x?next=https%3A%2F%2Fuser%3A%40api.example%2Fv1'];
-    ok(EMPTY.every((u) => SS.redactSecrets(u).text === 'https://a.example/x?next=«redacted»'), 'r5 (M2): an EMPTY password (`user:@`, raw and encoded) still holds — masked whole', EMPTY.map((u) => SS.redactSecrets(u).text));
-    ok(!/USERINFO_RE/.test(SRC) && /function passwordUserinfo\(d\)/.test(SRC), 'r5 (M2): r4\'s USERINFO_RE (any `user@`) is gone — passwordUserinfo judges the userinfo');
+    ok(verdictOf(EMPTY.every((u) => SS.redactSecrets(u).text === 'https://a.example/x?next=«redacted»')), 'r5 (M2): an EMPTY password (`user:@`, raw and encoded) still holds — masked whole', EMPTY.map((u) => SS.redactSecrets(u).text));
+    ok(!/USERINFO_RE/.test(SRC) && verdictOf(/function passwordUserinfo\(d\)/.test(SRC)), 'r5 (M2): r4\'s USERINFO_RE (any `user@`) is gone — passwordUserinfo judges the userinfo');
   }
   // r5 (M3): the decoded-once judgement reads the WHOLE value — a password-carrying userinfo one redirect deeper (raw, encoded, mixed) masks it
   {
     const DEEP = { 'encoded, one redirect deeper (?next=https://a/b%3Fr%3Dhttps%3A%2F%2Fu%3Apw%40h)': 'https://a.example/cb?next=https://a.example/b%3Fr%3Dhttps%3A%2F%2Fu%3A' + pw + '%40h', 'a path redirect, encoded (?redirect=/b?r=https%3A%2F%2Fu%3Apw%40h)': 'https://a.example/cb?redirect=/b?r=https%3A%2F%2Fu%3A' + pw + '%40h', 'raw, one redirect deeper (?next=https://a/b?r=https://u:pw@h)': 'https://a.example/cb?next=https://a.example/b?r=https://u:' + pw + '@h', 'raw, an empty user (…?r=redis://:pw@h)': 'https://a.example/cb?next=https://a.example/b?r=redis://:' + pw + '@h' };
-    for (const [n, u] of Object.entries(DEEP)) { const o = SS.redactSecrets(u).text, d = DM.scrub(u, 2000), b = belt.maskForSink(u); ok(!o.includes(pw) && !d.includes(pw) && !b.includes(pw) && /\?(?:next|redirect)=«redacted»$/.test(o), `r5 (M3) ${n}: the whole public value masked (the belt, maskForSink, the vendor scrub)`, o); }
+    for (const [n, u] of Object.entries(DEEP)) { const o = SS.redactSecrets(u).text, d = DM.scrub(u, 2000), b = belt.maskForSink(u); ok(!o.includes(pw) && !d.includes(pw) && !b.includes(pw) && verdictOf(/\?(?:next|redirect)=«redacted»$/.test(o)), `r5 (M3) ${n}: the whole public value masked (the belt, maskForSink, the vendor scrub)`, o); }
   }
   // r4 (M4): the belt reads each value ONCE — never a decode per HEAD (r3 peeked 640 characters and decoded at every `&token_url=` / `AUTH_URL=`
   // head: 13× the base on a 64 KiB storm; a count of steps cannot see it — a builtin is one step — so the decodes are COUNTED)
@@ -446,7 +446,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   // r3 (A): a long closer run is LINEAR — pinned by the count in test-exit-run (§2b's R7 shapes: closers then a letter, closers at the end,
   // a public-name storm; and closers-then-a-letter ≤ ×2 the steps of closers-at-the-end), never by a clock here (test-ci-gate's ratchet)
   // r3 (J): the container heads are CONSULTED (a container head holds — the grammar reads the table, not only its fail-closed default)
-  ok(/SECRET_WORDS\.has\(head\) \|\| CONTAINER_HEADS\.has\(head\)/.test(SRC) && ['session_id', 'token_value', 'key_id', 'client-key-data'].every((n) => holder(n) === true), 'r3 (J): CONTAINER_HEADS is consulted by holderName (session_id, token_value, key_id, client-key-data hold)');
+  ok(gateOf(/SECRET_WORDS\.has\(head\) \|\| CONTAINER_HEADS\.has\(head\)/.test(SRC)) && verdictOf(['session_id', 'token_value', 'key_id', 'client-key-data'].every((n) => holder(n) === true)), 'r3 (J): CONTAINER_HEADS is consulted by holderName (session_id, token_value, key_id, client-key-data hold)');
   // r3 (D, E): a masked token is EXACTLY its URL / path token (CJK punctuation bounds it); a bare vault mark is words
   const CJK = { en: 'Wrote /home/u/proj/config/app.env, where API_KEY=«redacted», see.', zh: '已写入 /home/u/proj/config/app.env，其中API_KEY=«redacted»，请查看。', ja: '/home/u/proj/config/app.env に書き込み、API_KEY=«redacted»、確認してください。' };
   for (const [lg, t] of Object.entries(CJK)) { const sg = FY.segmentText(t); ok(sg.filter((x) => x.t === 'link' && x.kind === 'path' && x.ref === '/home/u/proj/config/app.env').length === 1 && !sg.some((x) => x.t === 'masked'), `r3 (D) ${lg}: the path is ONE link to /home/u/proj/config/app.env, the rest words — no masked span`); }
@@ -457,7 +457,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   // r4 (M3): a clean URL then a masked one in ONE blank-free run (CJK prose — the owner's own shape): two tokens, each judged on its own
   const M3S = { en: 'first open https://app.example.com/a, then https://x.example/cb?token=«redacted» to sign in', zh: '先打开https://app.example.com/a，再用https://x.example/cb?token=«redacted»登录', ja: 'まずhttps://app.example.com/a、次にhttps://x.example/cb?token=«redacted»でログイン' };
   for (const [lg, t] of Object.entries(M3S)) { const sg = FY.segmentText(t), links = sg.filter((x) => x.t === 'link'), mk = sg.filter((x) => x.t === 'masked');
-    ok(links.length === 1 && links[0].ref === 'https://app.example.com/a' && mk.length === 1 && mk[0].s.startsWith('https://x.example/cb?token=«redacted»') && !links.some((x) => x.ref.includes('redacted')), `r4 (M3) ${lg}: the clean URL is ONE link to https://app.example.com/a, the masked one words — no link holds the mark`, sg); }
+    ok(links.length === 1 && links[0].ref === 'https://app.example.com/a' && mk.length === 1 && gateOf(mk[0].s.startsWith('https://x.example/cb?token=«redacted»')) && !links.some((x) => x.ref.includes('redacted')), `r4 (M3) ${lg}: the clean URL is ONE link to https://app.example.com/a, the masked one words — no link holds the mark`, sg); }
   // r5 (M1): a BALANCED full-width pair inside a URL token stays part of it (a CJK page title) — an unpaired CJK mark ends the token
   const M1S = { '…/wiki/東京（都） — a balanced pair: ONE whole link': ['see https://ja.example/wiki/東京（都） ok', 'https://ja.example/wiki/東京（都）'], '…/wiki/「東京」 — a corner-bracket pair': ['见https://ja.example/wiki/「東京」 ok', 'https://ja.example/wiki/「東京」'], '…/x，然后点 — the comma ends it': ['look https://a.example/x，然后点', 'https://a.example/x'], '…/x。 — the stop ends it': ['看https://a.example/x。', 'https://a.example/x'], '…/東京（都），再说 — the pair kept, the comma ends it': ['先看https://ja.example/wiki/東京（都），再说', 'https://ja.example/wiki/東京（都）'], '（…/a）吧 — the prose\'s own pair is not the token\'s': ['（https://x.example/a）吧', 'https://x.example/a'], '…/a（b — an unpaired opener ends it': ['https://x.example/a（b ok', 'https://x.example/a'] };
   for (const [n, [t, want]] of Object.entries(M1S)) { const got = FY.segmentText(t).filter((x) => x.t === 'link').map((x) => x.ref).join('|'); ok(got === want, `r5 (M1) For you (segmentText): ${n}`, got); }
@@ -477,7 +477,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   {
     const segs = (t) => FY.segmentText(t).filter((x) => x.t !== 'text');
     ok(!segs('see `a«redacted».txt` now').length && !segs('see `x[vault:k].md` now').length, 'r5 (m4): a code span holding a mark with no `/` before it (`a«redacted».txt`, `x[vault:k].md`) is words — no link', [segs('see `a«redacted».txt` now'), segs('see `x[vault:k].md` now')]);
-    ok(segs('see `a.txt` now').some((x) => x.t === 'link' && x.kind === 'rel' && x.ref === 'a.txt') && segs('see `docs/«redacted».md` now').some((x) => x.t === 'masked') && !segs('see `docs/«redacted».md` now').some((x) => x.t === 'link'), 'r5 (m4): a plain code-span filename stays a rel link; a masked path in one is words + the note');
+    ok(gateOf(segs('see `a.txt` now').some((x) => x.t === 'link' && x.kind === 'rel' && x.ref === 'a.txt')) && gateOf(segs('see `docs/«redacted».md` now').some((x) => x.t === 'masked')) && !segs('see `docs/«redacted».md` now').some((x) => x.t === 'link'), 'r5 (m4): a plain code-span filename stays a rel link; a masked path in one is words + the note');
   }
   // F2 — R7 judges the NAME alone and its run stops before the closer that ends it: three wrappers
   const WRAP = { '[Sign in](…)': (u) => '[Sign in](' + u + ')', '(…)': (u) => 'open it (' + u + ') then', 'a sentence\'s end': (u) => 'open ' + u + '.' };
@@ -511,7 +511,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   };
   for (const [n, [u, frags, keep]] of Object.entries(SECRET)) {
     const o = belt.maskForSink('open ' + u + ' then paste the code'), segs = FY.segmentText(o), html = FY.linkedHtml(o);
-    ok(frags.every((f) => !o.includes(f)) && keep.every((k) => o.includes(k)) && segs.filter((g) => g.t === 'masked').length === 1 && !segs.some((g) => g.t === 'link') && /class="fy-masked"/.test(html) && /class="masked-link-note">Part of this link was masked, so it will not open — ask the agent to send the link without the secret\.</.test(html) && !/data-ref="https/.test(html),
+    ok(gateOf(frags.every((f) => !o.includes(f))) && gateOf(keep.every((k) => o.includes(k))) && segs.filter((g) => g.t === 'masked').length === 1 && !segs.some((g) => g.t === 'link') && gateOf(/class="fy-masked"/.test(html)) && gateOf(/class="masked-link-note">Part of this link was masked, so it will not open — ask the agent to send the link without the secret\.</.test(html)) && !/data-ref="https/.test(html),
       `LAW 2 + 3 corpus — ${n}: masked (the plain parameters kept), drawn as WORDS with the note, no link`);
   }
   // LAW 2 — the marks: raw, percent-encoded with either colon (marked leaves it raw), a 440-character entry; a «redacted» the agent
@@ -524,7 +524,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   ok(pseg.filter((g) => g.t === 'masked').length === 3 && !pseg.some((g) => g.t === 'link') && pseg.map((g) => g.s).join('') === 'The report: /home/u/out/[vault:secret:run]/report.md and out/[vault:secret:run]/r.md and /home/u/' + REDACTED + '/x.txt.' && FY.segmentText('plain /home/u/x/report.md').filter((g) => g.t === 'link').length === 1,
     'LAW 2 (m4): an absolute path, a relative path and a path holding «redacted» are each ONE masked segment (no link, the words whole); a plain path stays a link');
   const vtext = belt.maskForSink('the file https://files.example.com/[vault:secret:0123456789]/report.pdf now'), vhtml = FY.linkedHtml(vtext);
-  ok(/class="fy-masked">https:\/\/files\.example\.com\/\[vault:secret:0123456789\]\/report\.pdf<\/span>/.test(vhtml) && /it holds the vault entry secret:0123456789: reveal it in Vault/.test(vhtml) && !/fy-link/.test(vhtml), 'LAW 2: a link whose path holds a vault mark (no holder name, so the belt keeps the mark) names its road — the entry, revealed in Vault', vhtml);
+  ok(gateOf(/class="fy-masked">https:\/\/files\.example\.com\/\[vault:secret:0123456789\]\/report\.pdf<\/span>/.test(vhtml)) && gateOf(/it holds the vault entry secret:0123456789: reveal it in Vault/.test(vhtml)) && !/fy-link/.test(vhtml), 'LAW 2: a link whose path holds a vault mark (no holder name, so the belt keeps the mark) names its road — the entry, revealed in Vault', vhtml);
   ok(fnOf(FY.maskedNoteOf)('progress: ' + SS.redactSecrets('https://app.example.com/login?token=' + tok).text) !== '' && fnOf(FY.maskedNoteOf)('progress: ' + OWNER) === '', 'maskedNoteOf: a text drawn as words says its masked link; a whole link says nothing');
   // LAW 2 — THE SURFACE CENSUS: every surface that draws a belted store's words asks the ONE masked-link rule
   const SURFACES = {
@@ -543,13 +543,13 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
 
   // RED CONTROLS (patched copies, each run through the SAME legs)
   const baseRule = M.load('src/secret-shapes.js', editAnchor(editAnchor(SRC, '    if (!holderName(m[4])) continue;', '    if (!secretName(m[4])) continue;', "src/secret-shapes.js"), 'let hold = holderName(m[2]), ve = -1;', 'let hold = secretName(m[2]), ve = -1;', "src/secret-shapes.js"), 'baserule');
-  ok(baseRule.redactSecrets(OWNER).text.includes('token_usage=' + REDACTED) && beltOver(M.files[M.files.length - 1]).maskForSink(OWNER) !== OWNER && baseRule.redactSecrets('TOKEN_TTL=3600').text !== 'TOKEN_TTL=3600',
+  ok(gateOf(baseRule.redactSecrets(OWNER).text.includes('token_usage=' + REDACTED)) && beltOver(M.files[M.files.length - 1]).maskForSink(OWNER) !== OWNER && baseRule.redactSecrets('TOKEN_TTL=3600').text !== 'TOKEN_TTL=3600',
     'RED CONTROL (the base\'s word test in place of the grammar): token_usage=«redacted» through the belt — census (B) goes red');
   const fySrc = fs.readFileSync(path.join(REPO, 'src/lib/foryou-links.js'), 'utf8');
-  ok(fySrc.includes('const mask = marked ? maskedLink(ref) : null;') && fySrc.includes('const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;'), 'the base-card control\'s two patches each find their line');
+  ok(gateOf(fySrc.includes('const mask = marked ? maskedLink(ref) : null;')) && verdictOf(fySrc.includes('const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;')), 'the base-card control\'s two patches each find their line');
   const FY0 = await import(M.write('src/lib/foryou-links.js', editAnchor(editAnchor(fySrc, 'const mask = marked ? maskedLink(ref) : null;', 'const mask = null;', "src/lib/foryou-links.js"), 'const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;', 'const mk = null;', "src/lib/foryou-links.js"), 'nomask', { esm: true }));
   const s0 = FY0.segmentText(belt.maskForSink(SECRET['a magic sign-in link'][0] + ' and /home/u/out/[vault:secret:run]/report.md'));
-  ok(s0.some((g) => g.t === 'link' && g.ref.includes(REDACTED)) && s0.some((g) => g.t === 'link' && g.kind === 'path') && !s0.some((g) => g.t === 'masked'), 'RED CONTROL (the base\'s card): a masked URL and a masked path are whole-looking LINKS — the LAW 2 legs go red');
+  ok(gateOf(s0.some((g) => g.t === 'link' && g.ref.includes(REDACTED))) && gateOf(s0.some((g) => g.t === 'link' && g.kind === 'path')) && !s0.some((g) => g.t === 'masked'), 'RED CONTROL (the base\'s card): a masked URL and a masked path are whole-looking LINKS — the LAW 2 legs go red');
 }
 
 console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A THING HOLDS NOTHING (the found table) — its price, every real shape still taken');
@@ -619,28 +619,28 @@ console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A
   ok(!flagBad(SS), 'B-4f7f (c) --password-store still holds ON PURPOSE: a known value (basic) is kept, any other value is hidden (KNOWN_FLAG_VALUES; «store» stays off the table)');
   { const v = val(), K = b64(), T = SS.redactSecrets('secret-scan: ' + PAT + '\ntoken-door.js:\n-----BEGIN PRIVATE KEY-----\n' + K + '\n-----END PRIVATE KEY-----\nend').text;
     const q = SS.redactSecrets('https://ci.example.com/cb?secret_scan=clean&scan_secret=' + v).text;
-    ok(!T.includes(PAT) && !T.includes(K.slice(8, 40)) && T.startsWith('secret-scan: ') && T.includes('token-door.js:'), `B-4f7f (c) A REAL SHAPE AFTER A FREED HEAD is still taken by its own rule: a known-prefix token after secret-scan, a PEM block after token-door.js — the heads stay, the secrets go (${J(T.slice(0, 80))}…)`);
-    ok(q.includes('secret_scan=clean') && !q.includes(v), `B-4f7f THE QUERY ROAD reads the same grammar: ?secret_scan=clean stays, ?scan_secret=<value> is hidden (${J(q)})`); }
+    ok(!T.includes(PAT) && !T.includes(K.slice(8, 40)) && gateOf(T.startsWith('secret-scan: ')) && verdictOf(T.includes('token-door.js:')), `B-4f7f (c) A REAL SHAPE AFTER A FREED HEAD is still taken by its own rule: a known-prefix token after secret-scan, a PEM block after token-door.js — the heads stay, the secrets go (${J(T.slice(0, 80))}…)`);
+    ok(gateOf(q.includes('secret_scan=clean')) && !q.includes(v), `B-4f7f THE QUERY ROAD reads the same grammar: ?secret_scan=clean stays, ?scan_secret=<value> is hidden (${J(q)})`); }
   ok(tableOf(SS).size > 0 && overlapBad(SS).length === 0, `B-4f7f (3) THE TABLE meets no credential, container or descriptor word and none of the ${OFF.length} left off${overlapBad(SS).length ? ' — met: ' + J(overlapBad(SS)) : ''}`);
   ok(tableOf(SS).size > 0 && kindsBad(SS).length === 0, `B-4f7f (4) EVERY WORD ON THE TABLE HAS A LEG OF ITS KIND AND ITS PRICE LINE (a head ending in it; a word added without both is red)${kindsBad(SS).length ? ' — without: ' + J(kindsBad(SS)) : ''}`);
   // RED CONTROLS (patched copies of the module, each through the SAME legs)
   const LAST = '  return !DESCRIPTOR_HEADS.has(head) && !NOT_CREDENTIAL_HEADS.has(head);';
   const TODAY = M.load('src/secret-shapes.js', editAnchor(SRC, LAST, '  return !DESCRIPTOR_HEADS.has(head);', 'src/secret-shapes.js'), 'b4f7f-today');   // stale-pins: kept (the base's verdict line is this red copy's REPLACEMENT, never an anchor)
-  ok(publicBad(TODAY).length >= 10 && priceOf(TODAY).every((x) => !x[3]), `RED CONTROL (the verdict that does not read the table, d458fc27d's): ${publicBad(TODAY).length} heads still hold and every price line is hidden — legs (1) and (a) go red`);
+  ok(publicBad(TODAY).length >= 10 && verdictOf(priceOf(TODAY).every((x) => !x[3])), `RED CONTROL (the verdict that does not read the table, d458fc27d's): ${publicBad(TODAY).length} heads still hold and every price line is hidden — legs (1) and (a) go red`);
   const OPEN = M.load('src/secret-shapes.js', editAnchor(SRC, LAST, '  return false;', 'src/secret-shapes.js'), 'b4f7f-open');
   const openExpect = STILL.filter((n) => !SS.SECRET_WORDS.has(lastOf(n)) && !SS.CONTAINER_HEADS.has(lastOf(n))).length;   // the STILL names whose last word is no credential's or container's
   const plainL = OFF_LINES().filter((x) => !x[3]).length;   // B-829f: the escaped line's inner pair is judged by the escaped reader too, whatever its head
-  ok(openExpect > 0 && stillBad(OPEN).length >= openExpect && offBad(OPEN).length === plainL && flagBad(OPEN), `RED CONTROL (FAIL OPEN: every last word that is no credential's name is public): ${stillBad(OPEN).length} names go public and all ${offBad(OPEN).length} made-up values show — legs (b) and (c) go red`);
+  ok(openExpect > 0 && stillBad(OPEN).length >= openExpect && offBad(OPEN).length === plainL && verdictOf(flagBad(OPEN)), `RED CONTROL (FAIL OPEN: every last word that is no credential's name is public): ${stillBad(OPEN).length} names go public and all ${offBad(OPEN).length} made-up values show — legs (b) and (c) go red`);
   const ANY = M.load('src/secret-shapes.js', editAnchor(SRC, '  if (SECRET_WORDS.has(head) || CONTAINER_HEADS.has(head)) return true;', '  if (words.some((w) => NOT_CREDENTIAL_HEADS.has(w))) return false;\n  if (SECRET_WORDS.has(head) || CONTAINER_HEADS.has(head)) return true;', 'src/secret-shapes.js'), 'b4f7f-any');
   ok(stillBad(ANY).filter((n) => TWINS.includes(n) || n === 'scan_secret').length >= 20, `RED CONTROL (the table read on ANY word, not the last): ${stillBad(ANY).length} names go public (scan_secret, the twins) — leg (c) goes red`);
   const TBL = 'const NOT_CREDENTIAL_HEADS = new Set([';
   const OFFON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + OFF.map((w) => J(w)).join(', ') + ', ', 'src/secret-shapes.js'), 'b4f7f-off-on');
   { const lines = OFF_LINES().filter((x) => !x[3]), shownL = lines.filter(([, line, secret]) => [MSG(OFFON, line), LINE(OFFON, line)].every((o) => shows(o, secret))), hiddenL = lines.filter((x) => !shownL.includes(x));   // r3083 (2): keyed by LINE, both modes
-    ok(shownL.length === lines.length && OFF.every((w) => shownL.some(([x]) => x === w)) && overlapBad(OFFON).length === OFF.length && kindsBad(OFFON).length === OFF.length, `RED CONTROL (the ${OFF.length} words left off put ON the table): EVERY ONE of the ${lines.length} lines shows its value in both modes — the base64 entries too, so each is hidden by its head and by nothing else — and the table legs (3) and (4) name the words${hiddenL.length ? ' — still hidden by another rule: ' + J(hiddenL.map(([w, l]) => w + ' ' + l.split(/[:=]/)[0].trim())) : ''}`); }
+    ok(shownL.length === lines.length && gateOf(OFF.every((w) => shownL.some(([x]) => x === w))) && overlapBad(OFFON).length === OFF.length && kindsBad(OFFON).length === OFF.length, `RED CONTROL (the ${OFF.length} words left off put ON the table): EVERY ONE of the ${lines.length} lines shows its value in both modes — the base64 entries too, so each is hidden by its head and by nothing else — and the table legs (3) and (4) name the words${hiddenL.length ? ' — still hidden by another rule: ' + J(hiddenL.map(([w, l]) => w + ' ' + l.split(/[:=]/)[0].trim())) : ''}`); }
   { const esc = OFF_LINES().filter((x) => x[3]);   // B-829f (主开发 r3116): an escaped-JSON value is judged as plain JSON is — by the escaped reader, whatever its outer head
-    ok(esc.length > 0 && esc.every(([, line, secret]) => [OFFON, OPEN].every((S) => [MSG(S, line), LINE(S, line)].every((o) => !shows(o, secret)))), `B-829f: the escaped-JSON line (${esc.map(([w, l]) => l.split('=')[0]).join(', ')}) stays HIDDEN even with its word on the table or the verdict failing open — its inner client_secret is judged by the escaped reader`); }
+    ok(esc.length > 0 && verdictOf(esc.every(([, line, secret]) => [OFFON, OPEN].every((S) => [MSG(S, line), LINE(S, line)].every((o) => !shows(o, secret))))), `B-829f: the escaped-JSON line (${esc.map(([w, l]) => l.split('=')[0]).join(', ')}) stays HIDDEN even with its word on the table or the verdict failing open — its inner client_secret is judged by the escaped reader`); }
   const CREDON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + "'token', ", 'src/secret-shapes.js'), 'b4f7f-cred');
-  ok(overlapBad(CREDON).includes('token') && kindsBad(CREDON).includes('token'), 'RED CONTROL (a credential word on the table): leg (3) names «token», leg (4) finds it without a leg of its kind — red');
+  ok(gateOf(overlapBad(CREDON).includes('token')) && verdictOf(kindsBad(CREDON).includes('token')), 'RED CONTROL (a credential word on the table): leg (3) names «token», leg (4) finds it without a leg of its kind — red');
 }
 
 console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (one token), a known flag, the sender is told');
@@ -670,54 +670,54 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
   const msg = run(SS, { message: true });
   const bad = msg.filter((x) => x.o.text.includes(x.V) || !x.o.text.includes(TAIL) || !x.o.text.includes(x.name) || !x.o.text.includes(REDACTED));
   ok(bad.length === 0, `MESSAGE MODE: all ${msg.length} sightings keep the REST of the message, hide the value, keep the name${bad.length ? ' — off: ' + bad.map((x) => x.n + ' → ' + J(x.o.text)).join(' · ') : ''}`);
-  ok(msg.every((x) => x.said.includes(x.name)), `MESSAGE MODE: \`said\` names each trigger as written (${msg.map((x) => x.said.join('+')).join(' · ')})`);
+  ok(verdictOf(msg.every((x) => x.said.includes(x.name))), `MESSAGE MODE: \`said\` names each trigger as written (${msg.map((x) => x.said.join('+')).join(' · ')})`);
   { const [t6] = S1[FREED], s6 = [], whole = (S) => S.redactSecrets(t6, { message: true, said: s6 }).text === t6 && S.redactSecrets(t6, {}).text === t6;
-    ok(whole(SS) && s6.length === 0, 'B-4f7f: the 6th sighting arrives WHOLE in both modes and names no trigger — its value stays because its head is a SUITE\'s name (test-session-schema), no credential\'s; the found table reads that suite name as public');
+    ok(gateOf(whole(SS)) && s6.length === 0, 'B-4f7f: the 6th sighting arrives WHOLE in both modes and names no trigger — its value stays because its head is a SUITE\'s name (test-session-schema), no credential\'s; the found table reads that suite name as public');
     const T6 = M.load('src/secret-shapes.js', editAnchor(SRC, '  return !DESCRIPTOR_HEADS.has(head) && !NOT_CREDENTIAL_HEADS.has(head);', '  return !DESCRIPTOR_HEADS.has(head);', 'src/secret-shapes.js'), 'b4f7f-6th');   // stale-pins: kept (the base's verdict line is this red copy's REPLACEMENT)
     ok(!whole(T6), 'RED CONTROL (the verdict that does not read the table): the 6th sighting loses its value again — its WHOLE leg goes red'); }
-  ok(msg.every((x) => SS.redactSecrets(x.o.text, { message: true }).text === x.o.text), 'MESSAGE MODE is idempotent: a masked message masks to itself (the group log\'s second belt pass finds nothing)');
+  ok(verdictOf(msg.every((x) => SS.redactSecrets(x.o.text, { message: true }).text === x.o.text)), 'MESSAGE MODE is idempotent: a masked message masks to itself (the group log\'s second belt pass finds nothing)');
   { const X = S1['1st: the session word glued to its token'][1], a = SS.redactSecrets(`(token=${X}). more`, { message: true }).text, b = SS.redactSecrets(`session:\u00A0${'z'.repeat(9)}7 rest`, { message: true }).text;
-    ok(!a.includes(X) && a.endsWith(' more') && !b.includes('zzzz') && b.endsWith(' rest'), 'MESSAGE MODE: a value glued to a closer is hidden with it, the plain rest stays; a no-break blank after the head is no escape', J([a, b])); }
+    ok(!a.includes(X) && gateOf(a.endsWith(' more')) && !b.includes('zzzz') && verdictOf(b.endsWith(' rest')), 'MESSAGE MODE: a value glued to a closer is hidden with it, the plain rest stays; a no-break blank after the head is no escape', J([a, b])); }
   // a STORED head keeps the line-end extent (exit output, a job log: hides more, never less)
   const line = run(SS, {});
-  ok(line.every((x) => !x.o.text.includes(x.V) && !x.o.text.includes(TAIL)), 'the LINE MODE (no option — exit output, a job log) still hides to the line end: the stored head is unchanged');
+  ok(verdictOf(line.every((x) => !x.o.text.includes(x.V) && !x.o.text.includes(TAIL))), 'the LINE MODE (no option — exit output, a job log) still hides to the line end: the stored head is unchanged');
   // a header is never prose: the scheme word alone would leave the credential after it
   const BT = v() + v(), DG = v() + v();
   // r2 (the adversarial read F1–F4): a header of ANY scheme, a cookie list, a key block flattened onto one line, a credential word before its token
   const hdr = [`Authorization: Bearer ${BT} ${TAIL}`, `Authorization: Digest username="u", response="${DG}" ${TAIL}`, `the token: basic ${BT}`, `Authorization: Bot ${BT}.x ${TAIL}`,
     `Cookie: theme=dark; PHPSESSID=${DG}; JSESSIONID=${BT}`, `PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY----- MII${BT} -----END RSA PRIVATE KEY-----`, `auth: password ${BT} then`, `secret: key ${BT}${DG} tail`, `token: Bearer ${BT} ok`].map((t) => SS.redactSecrets(t, { message: true }).text);
-  ok(hdr.every((t) => !t.includes(BT) && !t.includes(DG)), `MESSAGE MODE: a header (any scheme), a cookie list, a one-line key block and a credential word with its token are hidden (${hdr.map(J).join(' · ')})`);
+  ok(verdictOf(hdr.every((t) => !t.includes(BT) && !t.includes(DG))), `MESSAGE MODE: a header (any scheme), a cookie list, a one-line key block and a credential word with its token are hidden (${hdr.map(J).join(' · ')})`);
   // r2 (F6 / F7): a scheme or credential word in PROSE takes one more word, never the rest; a mention is never a value
   const prose2 = [[`auth: token rotation is broken, ${TAIL}`, TAIL], [`Session: basic checks pass, ${TAIL}`, TAIL]].map(([t, k]) => SS.redactSecrets(t, { message: true }).text.includes(k));
   const at = [`key: @beta please ${TAIL}`].map((t) => SS.redactSecrets(t, { message: true, mentions: ['beta'] }).text === t && SS.redactSecrets(t, { message: true }).text !== t);   // a MEMBER's @ only (the caller's names); a sink with none spares no @
   const atV = [`DB_PASSWORD=@${BT}x then`, `key=@beta then`, `secret: @${BT}#x rest`].map((t) => !SS.redactSecrets(t, { message: true }).text.includes(t.split(/[=:] ?/)[1].split(' ')[0]));
-  ok(prose2.every(Boolean) && at.every(Boolean) && atV.every(Boolean), 'MESSAGE MODE: «auth: token rotation…» keeps its rest; a MENTION in its own shape under a `:` head stays (the @-scan wakes it); an @ value under `=`, or one naming no member, is masked (the cure of batch 6)');
+  ok(gateOf(prose2.every(Boolean)) && gateOf(at.every(Boolean)) && verdictOf(atV.every(Boolean)), 'MESSAGE MODE: «auth: token rotation…» keeps its rest; a MENTION in its own shape under a `:` head stays (the @-scan wakes it); an @ value under `=`, or one naming no member, is masked (the cure of batch 6)');
   // multi-line shapes keep their own rules in a message: a YAML continuation, a JSON object, a quoted value with blanks
   const PW = v();
   const multi = [`notes\npassword:\n  ${PW}\nback`, `{"password": "${PW} x", "user": "u"}`, `password: "${PW} two words"`, `-----BEGIN PRIVATE KEY-----\n${PW}\n-----END PRIVATE KEY-----`].map((t) => SS.redactSecrets(t, { message: true }).text);
-  ok(multi.every((t) => !t.includes(PW)), 'MESSAGE MODE: a YAML continuation, a JSON value, a quoted value with blanks and a PEM block are hidden whole');
+  ok(verdictOf(multi.every((t) => !t.includes(PW))), 'MESSAGE MODE: a YAML continuation, a JSON value, a quoted value with blanks and a PEM block are hidden whole');
   // a KNOWN FLAG with a value from its closed public list is no credential — in both modes; any other value of it is masked
   const KF = fnOf2(SS.KNOWN_FLAG_VALUES);
   const fl = ['', 'message'].map((mode) => { const o = mode ? { message: true } : {}; const K = v();
     return { keep: SS.redactSecrets(`chrome --password-store=basic --api-key=${K} ${TAIL}`, o).text, K, odd: SS.redactSecrets(`chrome --password-store=${PW} ${TAIL}`, o).text, q: SS.redactSecrets(`--password-store="kwallet5" x`, o).text, dot: SS.redactSecrets(`--password-store=basic.${PW} x`, o).text, end: SS.redactSecrets('use --password-store=basic.', o).text }; });
-  ok(KF && fl.every((f) => f.keep.includes('--password-store=basic') && !f.keep.includes(f.K) && !f.odd.includes(PW) && f.q === '--password-store="kwallet5" x' && !f.dot.includes(PW) && f.end === 'use --password-store=basic.'),
+  ok(gateOf(KF) && verdictOf(fl.every((f) => f.keep.includes('--password-store=basic') && !f.keep.includes(f.K) && !f.odd.includes(PW) && f.q === '--password-store="kwallet5" x' && !f.dot.includes(PW) && f.end === 'use --password-store=basic.')),
     `A KNOWN FLAG: --password-store=basic stays in both modes and the scan walks on past it (the next --api-key is masked); --password-store=<other> is masked (${fl.map((f) => J(f.keep)).join(' · ')})`);
   // RED CONTROLS (patched copies through the SAME legs)
-  const cut = (src, from, to, name) => { ok(src.includes(from), `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', editAnchor(src, from, to, "src/secret-shapes.js"), name); };
+  const cut = (src, from, to, name) => { ok(verdictOf(src.includes(from)), `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', editAnchor(src, from, to, "src/secret-shapes.js"), name); };
   const MSG_LINE = 'if (message && !q && !LINE_HEADS.has(String(m[4]).toLowerCase())) {';
   const noMsg = cut(SRC, MSG_LINE, 'if (false) {', 'no-message-mode');
-  ok(run(noMsg, { message: true }).every((x) => !x.o.text.includes(TAIL)), 'RED CONTROL (the message mode removed): every sighting loses its rest again — the MESSAGE MODE leg goes red');
+  ok(verdictOf(run(noMsg, { message: true }).every((x) => !x.o.text.includes(TAIL))), 'RED CONTROL (the message mode removed): every sighting loses its rest again — the MESSAGE MODE leg goes red');
   ok(!SS.redactSecrets('Authorization: Bot hunter x', { message: true }).text.includes('hunter'), 'MESSAGE MODE: a header keeps the line rule whole — a plain-looking credential after an unlisted scheme is hidden too');
   const noHeads = cut(SRC, MSG_LINE, 'if (message && !q) {', 'no-line-heads');
-  ok(noHeads.redactSecrets('Authorization: Bot hunter x', { message: true }).text.includes('hunter'), 'RED CONTROL (the header list removed): a plain-looking credential after an unlisted scheme is left in clear — the header leg goes red');
+  ok(verdictOf(noHeads.redactSecrets('Authorization: Bot hunter x', { message: true }).text.includes('hunter')), 'RED CONTROL (the header list removed): a plain-looking credential after an unlisted scheme is left in clear — the header leg goes red');
   const noTwo = cut(SRC, 'takeNext = !keep && (AUTH_SCHEMES.has(w) || SECRET_WORDS.has(w));', 'takeNext = false;', 'no-two-token');
   ok(!SS.redactSecrets('auth: password hunter then', { message: true }).text.includes('hunter') && !SS.redactSecrets('token: Bearer abc ok', { message: true }).text.includes('abc'), 'MESSAGE MODE: a credential / scheme word takes its next token even when that one looks plain');
-  ok(noTwo.redactSecrets('auth: password hunter then', { message: true }).text.includes('hunter') && noTwo.redactSecrets('token: Bearer abc ok', { message: true }).text.includes('abc'), 'RED CONTROL (the credential word takes no token): «auth: password …» and «token: Bearer …» leave the secret in clear — the header leg goes red');
+  ok(gateOf(noTwo.redactSecrets('auth: password hunter then', { message: true }).text.includes('hunter')) && verdictOf(noTwo.redactSecrets('token: Bearer abc ok', { message: true }).text.includes('abc')), 'RED CONTROL (the credential word takes no token): «auth: password …» and «token: Bearer …» leave the secret in clear — the header leg goes red');
   const noFlag = cut(SRC, 'if (flagEnd >= 0) {', 'if (false) {', 'no-flag');
   ok(!noFlag.redactSecrets('chrome --password-store=basic x', { message: true }).text.includes('--password-store=basic'), 'RED CONTROL (the known-flag check removed): --password-store=basic is masked again — the flag leg goes red');
   // the belt carries the mode + the collector to the shapes (the group log and the stash ask it)
   const said = []; const bo = belt.maskForSink(S1['1st: the session word glued to its token'][0], { message: true, said });
-  ok(bo.includes(TAIL) && !bo.includes(S1['1st: the session word glued to its token'][1]) && said.includes('session:') && !belt.maskForSink(S1['1st: the session word glued to its token'][0]).includes(TAIL),
+  ok(gateOf(bo.includes(TAIL)) && !bo.includes(S1['1st: the session word glued to its token'][1]) && gateOf(said.includes('session:')) && !belt.maskForSink(S1['1st: the session word glued to its token'][0]).includes(TAIL),
     'THE BELT: maskForSink(text, { message: true, said }) keeps the rest and says what it masked; without it the line mode stays');
 }
 function fnOf2(x) { return x && typeof x.get === 'function' ? x : null; }
@@ -857,11 +857,11 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     const lo = SS.redactSecrets(L).text, mo = SS.redactSecrets(L, { message: true }).text;
     const oldJudge = (t) => !lo.includes(t) && chunks(mo).some((c) => c.includes(t) && !headPiece(c));
     const facts = { L, lo, mo, fixedWords: FIXED_WORDS.length, leaked: leakedIn(lo, mo, must), previousJudgeSaw: must.filter(oldJudge) };
-    ok(!facts.leaked && mo.includes('password') && facts.previousJudgeSaw.join() === 'sswo', 'r632 THE VERY CASE: a group inside the second head\'s own word «password» is no leak — the message mode hid every part of the value (the previous judge counted «sswo»)', J(facts));
+    ok(!facts.leaked && gateOf(mo.includes('password')) && facts.previousJudgeSaw.join() === 'sswo', 'r632 THE VERY CASE: a group inside the second head\'s own word «password» is no leak — the message mode hid every part of the value (the previous judge counted «sswo»)', J(facts));
     if (!facts.leaked) console.log('      ' + J(facts));
     const real = mo + ' sswo', contains = mo + ' zzpasswordqq';
     const c1 = leakedIn(lo, real, must), c2 = leakedIn(lo, contains, ['zzpasswordqq']);
-    ok(c1 && c2, 'r632 CONTROLS: a real piece of the value standing in the output is a leak, and so is a value that merely CONTAINS a fixed word — the judge can still go red', J({ realPiece: c1, containsFixedWord: c2 }));
+    ok(gateOf(c1) && verdictOf(c2), 'r632 CONTROLS: a real piece of the value standing in the output is a leak, and so is a value that merely CONTAINS a fixed word — the judge can still go red', J({ realPiece: c1, containsFixedWord: c2 }));
     console.log('      ' + J({ realPiece: c1, containsFixedWord: c2 }));
   }
   // r5 (the read's F1): a message mode that FAILS is the line rule — never the partial text a throw left (a control throws on purpose)
@@ -870,7 +870,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     ok(a === b0 && !a.includes('A'.repeat(36)), 'a message mode that throws gives the LINE result whole (the token after it hidden, not skipped)', J(a)); }
   // cure 2 (主开发 08:42Z): a mask made by the GAP FILTER is named in the sender's answer — the head whose region it filtered
   { const X = 'Q9' + rnd(10, MIX), L = `session: @beta password: "${rnd(8, LET)}" then ${X}`, said = [], o = SS.redactSecrets(L, { message: true, mentions: ['beta'], said }).text;
-    ok(!o.includes(X) && o.includes('@beta') && said.includes('session:') && said.includes('password:'), 'a mask made by the gap filter is named in the answer (the region\'s head «session:»), beside the inner head\'s own', J({ o, said }));
+    ok(!o.includes(X) && gateOf(o.includes('@beta')) && gateOf(said.includes('session:')) && verdictOf(said.includes('password:')), 'a mask made by the gap filter is named in the answer (the region\'s head «session:»), beside the inner head\'s own', J({ o, said }));
     const GAP = 'if (say && filterHead) say(filterHead); }';
     ok(SRC.split(GAP).length === 2, 'the control «the gap names nothing» finds its line');
     const s2 = []; M.load('src/secret-shapes.js', editAnchor(SRC, GAP, '}', "src/secret-shapes.js"), 'gap-unnamed').redactSecrets(L, { message: true, mentions: ['beta'], said: s2 });
@@ -879,11 +879,11 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
   const W1 = 'if (MESSAGE_STOPS.has(text.charCodeAt(j))) { if (first) return null;', W1B = '      if (ce < 0) return null;', W2 = 'else if (sepColon && isMention(chunk, mentions)) keep = true;';
   ok(SRC.split(W1).length === 2 && SRC.split(W1B).length === 2 && SRC.split(W2).length === 2, 'the three controls find their lines');
   const r1 = judge(M.load('src/secret-shapes.js', editAnchor(SRC, W1, 'if (MESSAGE_STOPS.has(text.charCodeAt(j))) { if (first) { out += text.slice(i, e); return { out, end: e }; }', "src/secret-shapes.js"), 'must1'), { stopAtFirst: true, rev: true });
-  ok(r1.leaks.length > 0 && '，、。：；！？'.includes(r1.leaks[0].op), `RED CONTROL (must 1 — a value that opens on a CJK stop stays in clear): the corpus finds it on a stop opener, e.g. ${J(r1.leaks[0] ? r1.leaks[0].L : '')}`);
+  ok(r1.leaks.length > 0 && verdictOf('，、。：；！？'.includes(r1.leaks[0].op)), `RED CONTROL (must 1 — a value that opens on a CJK stop stays in clear): the corpus finds it on a stop opener, e.g. ${J(r1.leaks[0] ? r1.leaks[0].L : '')}`);
   const r1b = judge(M.load('src/secret-shapes.js', editAnchor(SRC, W1B, '      if (ce < 0) { out += text.slice(i, e); return { out, end: e }; }', "src/secret-shapes.js"), 'must1b'), { stopAtFirst: true, rev: true });
-  ok(r1b.leaks.length > 0 && PAIRS[r1b.leaks[0].op.trim()], `RED CONTROL (must 1, its bracket half — an open pair stays in clear): the corpus finds it on a pair opener, e.g. ${J(r1b.leaks[0] ? r1b.leaks[0].L : '')}`);
+  ok(r1b.leaks.length > 0 && verdictOf(PAIRS[r1b.leaks[0].op.trim()]), `RED CONTROL (must 1, its bracket half — an open pair stays in clear): the corpus finds it on a pair opener, e.g. ${J(r1b.leaks[0] ? r1b.leaks[0].L : '')}`);
   const r2 = judge(M.load('src/secret-shapes.js', editAnchor(SRC, W2, 'else if (chunk.charCodeAt(0) === 64) keep = true;', "src/secret-shapes.js"), 'must2'), { stopAtFirst: true });
-  ok(r2.leaks.length > 0 && /(?:^|[:=] ?)@/.test(r2.leaks[0].L), `RED CONTROL (must 2 — any @ value is a mention): the corpus finds it on an @ value, e.g. ${J(r2.leaks[0] ? r2.leaks[0].L : '')}`);
+  ok(r2.leaks.length > 0 && verdictOf(/(?:^|[:=] ?)@/.test(r2.leaks[0].L)), `RED CONTROL (must 2 — any @ value is a mention): the corpus finds it on an @ value, e.g. ${J(r2.leaks[0] ? r2.leaks[0].L : '')}`);
   // cure 2's RED CONTROLS: each of its rules compiled back out — the corpus finds a leak OF ITS OWN SCENE (a control whose line is gone
   // fails by name, RULES 06:25Z)
   const c2 = (from, to, name) => { ok(SRC.split(from).length === 2, `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', editAnchor(SRC, from, to, "src/secret-shapes.js"), name); };
@@ -924,7 +924,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
       c7c: ['(7) …an app code with a comma INSIDE — all four groups hidden (the comma no longer resets the group)', `password: ${ap.join(' ').replace(ap[1] + ' ', ap[1] + ', ')}`, (o) => ap.every((x) => !o.includes(x))],
       c7d: ['(7) …and the measured shape after a strong head: «failed,» is the group\'s there (only a session word keeps it)', 'password: fixed1 failed, retry now', (o) => !o.includes('failed') && o.endsWith(' retry now')],
     };
-    for (const [, [name, L, pass]] of Object.entries(CASES)) { const o = MSG(SS, L); ok(pass(o, L), `B-34c8 ${name}`, J({ L, o })); }
+    for (const [, [name, L, pass]] of Object.entries(CASES)) { const o = MSG(SS, L); ok(verdictOf(pass(o, L)), `B-34c8 ${name}`, J({ L, o })); }
     // THE OVER-MASK ORACLE: ordinary chunks (a path with a line number, a URL with a query, a base64 run) in four places — no head; after
     // an ASCII value; after a value of other scripts, a blank or a CJK stop between; after ONE short group-shaped value (cure 2's
     // groupAt case). The group rule's own cost is outside it: a same-length word with NO mark right after a 4–8 value is the group's
@@ -960,7 +960,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
   const ST = M.load('src/secret-shapes.js', editAnchor(SRC, '/*msg-step*/', 'globalThis.__msgSteps = (globalThis.__msgSteps || 0) + 1;', "src/secret-shapes.js", 'join'), 'steps');
   const HOSTILE = ['password: ' + 'a'.repeat(100000), 'token: x ' + '"\''.repeat(50000), 'token: x ' + 'token: ('.repeat(8000), 'key: ' + 'x9 '.repeat(20000), 'secret: x' + '「'.repeat(60000), 'token: a9 ' + '.'.repeat(60000) + 'x', 'token: x @' + '!'.repeat(60000) + 'x', 'token: (' + 'a'.repeat(60000), 'token: x ' + '{"a":'.repeat(12000)];
   const steps = HOSTILE.map((t) => { globalThis.__msgSteps = 0; ST.redactSecrets(t, { message: true, mentions: ['beta'] }); return { len: Math.min(t.length, INPUT_MAX), n: globalThis.__msgSteps }; });
-  ok(steps.every((x) => x.n <= 6 * x.len) && steps.every((x) => x.n > 1000), `LINEAR BY COUNT: ${steps.map((x) => `${x.n} steps / ${x.len} chars`).join(' · ')} — each ≤ 6 × its length, each loop seen`);
+  ok(gateOf(steps.every((x) => x.n <= 6 * x.len)) && verdictOf(steps.every((x) => x.n > 1000)), `LINEAR BY COUNT: ${steps.map((x) => `${x.n} steps / ${x.len} chars`).join(' · ')} — each ≤ 6 × its length, each loop seen`);
 }
 
 console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the head before it no longer eats its opener');
@@ -989,7 +989,7 @@ console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the
   ok(SS.redactSecrets(SS.redactSecrets(PROSE[0]).text).text === SS.redactSecrets(PROSE[0]).text, 'idempotent');
   ok(SS.redactSecrets('set `DB_PASSWORD=' + N + '` then', { message: true }).text === 'set `DB_PASSWORD=' + REDACTED + '` then' && SS.redactSecrets(`**API_KEY=${V}** x`, { message: true }).text === `**API_KEY=${REDACTED}** x`, 'MESSAGE MODE: the wrapper\'s closing twin stays the prose\'s (a backtick, the bold marks)');
   const noOpen = mutantCopies('blmbe3', REPO).load('src/secret-shapes.js', editAnchor(SRC, "/(^|[\\s,;{(\\[:/=`\"'*<])(-{0,2})", "/(^|[\\s,;{(\\[:/])(-{0,2})", "src/secret-shapes.js"), 'no-new-openers');
-  ok(SRC.includes("/(^|[\\s,;{(\\[:/=`\"'*<])(-{0,2})") && leaks(judge(noOpen, {})).length >= 5, `RED CONTROL (the base's openers): the wrapped forms and the flag's assignment leak again (${leaks(judge(noOpen, {})).length}/${PROSE.length})`);
+  ok(gateOf(SRC.includes("/(^|[\\s,;{(\\[:/=`\"'*<])(-{0,2})")) && leaks(judge(noOpen, {})).length >= 5, `RED CONTROL (the base's openers): the wrapped forms and the flag's assignment leak again (${leaks(judge(noOpen, {})).length}/${PROSE.length})`);
   // RED CONTROL: the give-back removed — the row's two sentences leak again in both modes
   const GIVE = "    KV_HEAD.lastIndex = headEnd - (bl || (m[5].endsWith('=') ? 1 : 0));   // r2: a bare `=` is given back (an opener now) — never a `:`\n";
   ok(SRC.split(GIVE).length === 2, 'the control finds its line (the give-back)');
@@ -1084,12 +1084,12 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   // the sender is told what was masked (the head as written), each mask counted once; a query value is still R7's (masked whole, once)
   const said = []; SS.redactSecrets(GO[0][1], { message: true, said });
   const PART = 'git push https://ci:abc-ghp_' + 'A1b2'.repeat(9) + '@github.com/o/r', WHOLE = 'git push https://ci:ghp_' + 'A1b2'.repeat(9) + '@github.com/o/r', VMARK = 'curl https://u:[vault:ci-token]@h.example/x';
-  ok(said.includes('https://deploy:') && SS.redactSecrets(GO[0][1]).redacted === 1 && SS.redactSecrets(GO[5][1]).redacted === 2 && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').text === 'https://x.example/a?next=' + REDACTED && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').redacted === 2
+  ok(gateOf(said.includes('https://deploy:')) && SS.redactSecrets(GO[0][1]).redacted === 1 && SS.redactSecrets(GO[5][1]).redacted === 2 && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').text === 'https://x.example/a?next=' + REDACTED && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').redacted === 2
     && SS.redactSecrets(PART).text === 'git push https://ci:' + REDACTED + '@github.com/o/r' && SS.redactSecrets(WHOLE).text === 'git push https://ci:' + REDACTED + '@github.com/o/r' && SS.redactByValue(PART, { typed: true }).text === 'git push https://ci:' + REDACTED + '@github.com/o/r'
     && SS.redactSecrets(VMARK).text === VMARK && SS.redactSecrets(VMARK, { message: true }).text === VMARK,
     'R9: the sender is told «https://deploy:» (what was masked); one mask per password; inside a query value R9 hides the pass-phrase FIRST and R7 then masks the whole value, as r5 had it (two masks, the text R7\'s); a password a row masked IN PART is masked whole (nothing of «abc-» kept, round wiagjybli); a password that IS a vault mark stays (its entry\'s name)', said);
   // a masked URL is drawn as WORDS with a note in the For-you card (lane mask-value-shape law 2 — never a link that looks whole)
-  ok(FY.maskedNoteOf(belt.maskForSink(GO[0][1], { message: true })) !== '' && SS.maskedLink(GO[0][2]) && SS.maskedLink(GO[0][2]).shape === true, 'R9: a URL whose password was masked is a MASKED LINK — the For-you card draws it as words with its note');
+  ok(FY.maskedNoteOf(belt.maskForSink(GO[0][1], { message: true })) !== '' && gateOf(SS.maskedLink(GO[0][2])) && SS.maskedLink(GO[0][2]).shape === true, 'R9: a URL whose password was masked is a MASKED LINK — the For-you card draws it as words with its note');
   // bounded and linear BY COUNT: the authority walk's steps, counted in an instrumented copy (never clocked)
   const STEP_AT = "    const c = d.charCodeAt(j);\n    if (c === 47 || c === 63 || c === 35 || isBlankCode(c)) break;                 // `/ ? #` or a blank: the stretch ended\n";
   const MS = mutantCopies('da2d-steps', REPO).load('src/secret-shapes.js', anchored(SRC, STEP_AT, '    globalThis.__r9Steps++;\n' + STEP_AT, 'R9 the walk counted'), 'steps');
@@ -1097,7 +1097,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   const HOSTILE = ['x://' + 'a:@'.repeat(21000), 'a://b'.repeat(13000) + '@', ('h://u:p@' + 'x'.repeat(1100) + ' ').repeat(55), 'h://' + ':'.repeat(30000) + '@'.repeat(30000), ('a://' + 'b'.repeat(1020) + '/').repeat(60) + '@', ('see https://u:' + pw + '@h.example/x ').repeat(1800)];
   const ROADS = [['the output belt', (t) => MS.redactSecrets(t)], ['the message mode', (t) => MS.redactSecrets(t, { message: true })], ['the name rule', (t) => MS.redactByValue(t, { typed: true })]];
   const steps = HOSTILE.flatMap((t) => ROADS.map(([road, f]) => { globalThis.__r9Steps = 0; f(t); return { road, len: Math.min(t.length, INPUT_MAX), n: globalThis.__r9Steps }; }));
-  ok(steps.every((x) => x.n <= x.len) && steps.every((x) => x.n > 1000), `R9 LINEAR BY COUNT (${HOSTILE.length} storms × ${ROADS.length} roads): ${steps.filter((x, i) => i % ROADS.length === 0).map((x) => `${x.n} steps / ${x.len} chars`).join(' · ')} — every road's walk ≤ the text's length, each walk seen`);
+  ok(gateOf(steps.every((x) => x.n <= x.len)) && verdictOf(steps.every((x) => x.n > 1000)), `R9 LINEAR BY COUNT (${HOSTILE.length} storms × ${ROADS.length} roads): ${steps.filter((x, i) => i % ROADS.length === 0).map((x) => `${x.n} steps / ${x.len} chars`).join(' · ')} — every road's walk ≤ the text's length, each walk seen`);
   // the walk's bound (r4's, ≤ 1 024 characters of authority): a 1 000-character password is masked whole
   const LONG = 'https://u:' + pw.repeat(111) + '@h.example/x';
   ok(SS.redactSecrets(LONG).text === 'https://u:' + REDACTED + '@h.example/x' && SS.redactByValue(LONG, { typed: true }).text === 'https://u:' + REDACTED + '@h.example/x', 'R9: a password of ' + pw.length * 111 + ' characters (inside the walk\'s 1 024 bound) is masked whole on both roads');
@@ -1107,12 +1107,12 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   const REL = mutantCopies('da2d-release', REPO).load('src/secret-shapes.js', anchored(anchored(SRC, R9S, '', 'R9 in the output belt'), R9V, '', 'R9 in the name rule'), 'release');
   const relLeak = GO.filter(([, t, , frags]) => { const o = roads(REL, t); return frags.some((f) => o.head.includes(f) && o.message.includes(f) && o.name.includes(f)); });
   const relName = M.resolveName(NAME, new Set(), { mask: (t) => REL.redactByValue(t, { typed: true }).text }).name;
-  ok(relLeak.length === GO.length && relName.includes(pw), `RED CONTROL — THE RELEASE'S ROWS (no R9): all ${relLeak.length}/${GO.length} passwords kept in plain on every road; the job's name stored as ${relName.replace(pw, '<the password>')} — the legs above go red`);
+  ok(relLeak.length === GO.length && verdictOf(relName.includes(pw)), `RED CONTROL — THE RELEASE'S ROWS (no R9): all ${relLeak.length}/${GO.length} passwords kept in plain on every road; the job's name stored as ${relName.replace(pw, '<the password>')} — the legs above go red`);
   const NOQ = mutantCopies('da2d-noquote', REPO).load('src/secret-shapes.js', anchored(SRC, '    const a = userinfoAt(text, from, true);', '    const a = userinfoAt(text, from, false);', 'R9 no quote ends'), 'noquote');
   const jsonKeep = KEEP.find(([w]) => w.startsWith('a JSON'))[1];
   ok(NOQ.redactSecrets(jsonKeep).text !== jsonKeep, 'RED CONTROL — NO QUOTE ENDS THE AUTHORITY: the compact JSON\'s mail address is over-masked (' + J(NOQ.redactSecrets(jsonKeep).text) + ') — the KEPT leg goes red');
   const FIRST = mutantCopies('da2d-firstat', REPO).load('src/secret-shapes.js', anchored(SRC, '    if (c === 64) at = j; else', '    if (c === 64) { if (at < 0) at = j; } else', 'R9 the first @'), 'firstat');
-  ok(FIRST.redactSecrets(GO[4][1]).text.includes('ssW0rd'), 'RED CONTROL — THE FIRST @ ENDS THE USERINFO: the tail of a password holding a raw @ is kept (' + J(FIRST.redactSecrets(GO[4][1]).text) + ') — the six go red');
+  ok(verdictOf(FIRST.redactSecrets(GO[4][1]).text.includes('ssW0rd')), 'RED CONTROL — THE FIRST @ ENDS THE USERINFO: the tail of a password holding a raw @ is kept (' + J(FIRST.redactSecrets(GO[4][1]).text) + ') — the six go red');
   // ── round wiagjybli (the readers' must, the coordinator's law): IN FREE TEXT A HOST ENDS WHERE A HOST CAN END
   // every stop of a message — the module's ONE list, MESSAGE_STOPS, read from the module — ends the walk: a port, the stop, a mention after
   const msm = /\nconst MESSAGE_STOPS = new Set\(\[\.\.\.'([^']+)'\]/.exec(SRC), STOPS = msm ? [...msm[1]] : [];
@@ -1123,7 +1123,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   const MENTIONS = [...KEEP.filter(([w]) => w.startsWith('lens')).map(([, t]) => t), '见https://ci:' + pw + '@h.example，请@lead验收'];
   const placeOf = (mask, g) => { const ps = g.lastIndexOf('@'), m = /^@[a-z]+/.exec(g.slice(ps))[0], body = mask(g), d = mask(g.slice(0, ps)).length - ps; return body.slice(ps + d, ps + d + m.length) === m && !body.includes(pw); };
   const sinkMask = (t) => belt.maskForSink(t, { message: true });
-  ok(MENTIONS.every((g) => placeOf(sinkMask, g)), `CJK: an at-mention's place is unmoved — the picker's place moved by its prefix's mask lands on the mention (${MENTIONS.length} sentences: the readers' three, and a real password before a mention, masked)`);
+  ok(verdictOf(MENTIONS.every((g) => placeOf(sinkMask, g))), `CJK: an at-mention's place is unmoved — the picker's place moved by its prefix's mask lands on the mention (${MENTIONS.length} sentences: the readers' three, and a real password before a mention, masked)`);
   // the mask's own mark is read WHOLE inside the walk: a user masked before never lets its password through
   const MUSER = 'git push https://ghp_' + 'A1b2'.repeat(9) + ':' + pw + '@github.com/o/r';
   ok(SS.redactSecrets(MUSER).text === 'git push https://ghp_' + REDACTED + ':' + REDACTED + '@github.com/o/r' && SS.redactSecrets(MUSER, { message: true }).text === 'git push https://ghp_' + REDACTED + ':' + REDACTED + '@github.com/o/r', 'CJK: the belts\' own mark «redacted» is read whole inside a free text\'s authority — a user R4 masked first keeps its password masked too');
@@ -1344,15 +1344,15 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
     const nl = judge(SS), nlr = judge(NO_R9), nle = judge(TIPE06, 800), ek = byKind(nle);
     const MUST_KINDS = ['accented', 'startsOutside', 'guillemetName', 'encodedNested'];
     for (const s of nl.shown.slice(0, 3)) console.log(`      ✗ ${s.kind} on road ${s.road}: ${J(s.x)} shows ${J(s.s)}`);
-    ok(R9_CALLS.length === 2 && nl.draws >= 2000 && nl.secrets > 1000 && R7_KINDS.every((k) => nl.kinds[k] > 30) && nl.shown.length === 0 && nl.odd.length === 0
-      && nl.exc.backtick > 0 && nl.exc.guillemet > 0 && nl.exc.turnToCjk > 0 && nlr.shown.length > 10 && MUST_KINDS.every((k) => ek[k] > 0),
+    ok(R9_CALLS.length === 2 && nl.draws >= 2000 && nl.secrets > 1000 && gateOf(R7_KINDS.every((k) => nl.kinds[k] > 30)) && nl.shown.length === 0 && nl.odd.length === 0
+      && nl.exc.backtick > 0 && nl.exc.guillemet > 0 && nl.exc.turnToCjk > 0 && nlr.shown.length > 10 && verdictOf(MUST_KINDS.every((k) => ek[k] > 0)),
       `NOTHING THE R7 FOLLOW LETS THROUGH THAT LINE 246 HIDES, judged by a PARTIAL show (any four characters in a row): ${nl.draws} draws (the R7 kinds ${J(nl.kinds)}), ${nl.secrets} secrets × 3 roads — ${nl.shown.length} shown here that line 246 hides; the named exceptions, counted on the two free-text roads: (e) a backtick ${nl.exc.backtick}, a « not the mark ${nl.exc.guillemet}, (f) ASCII turning to CJK ${nl.exc.turnToCjk}${nl.odd.length ? ' — ' + nl.odd.length + ' not as named' : ''}; RED the round's tip e06c2a0e9: ${J(ek)}; RED no R9: ${nlr.shown.length} shown`);
   }
   const R7FIRST = mutantCopies('da2d-r7first', REPO).load('src/secret-shapes.js', anchored(R7ORDER, VAL_NOW, "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;", 'the release value class beside the old order'), 'r7first');   // stale-pins: kept (the red control plants the release's value class back)
   const ORDER_ONLY = mutantCopies('da2d-order-only', REPO).load('src/secret-shapes.js', R7ORDER, 'order-only');
   ok(!ORDER_ONLY.redactSecrets(LEAKS[0][1]).text.includes('U).8-3'), 'R7 before R9 under R7\'s value-end law (r1554): the later pass-phrase stays hidden whole (the value ends at the prose, R9 then reads the address)');
   const tailOut = R7FIRST.redactSecrets(LEAKS[0][1]).text;
-  ok(tailOut.includes('U).8-3') && !SS.redactSecrets(LEAKS[0][1]).text.includes('U).8-3'), 'RED CONTROL — R7 BEFORE R9 (the order of 4e85efb11 and before): the later pass-phrase\'s tail after the «;» is left in plain (' + J(tailOut.slice(tailOut.indexOf('?'))) + ')');
+  ok(gateOf(tailOut.includes('U).8-3')) && !SS.redactSecrets(LEAKS[0][1]).text.includes('U).8-3'), 'RED CONTROL — R7 BEFORE R9 (the order of 4e85efb11 and before): the later pass-phrase\'s tail after the «;» is left in plain (' + J(tailOut.slice(tailOut.indexOf('?'))) + ')');
   // r1655 (1) with lens 3: the GENERATOR ITSELF is red under that control (class D now compares the hidden-whole form, so a tail is caught)
   const GR = genDraws(R7FIRST, { draws: 1000 }), grD = GR.bad.filter((b) => b.t.includes('?replicaSet='));
   for (const b of grD.slice(0, 2)) console.log(`      under R7 first: ${b.road}: ${J(b.out.slice(b.out.indexOf('?')))} (want ${J(b.want.slice(b.want.indexOf('?')))})`);
@@ -1361,9 +1361,9 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   const NQ = "    row(nameQuery(text));   // r10 (B-a3fe, on 2.369.413): R7 at a name — the release's linear walk and its name grammar\n";
   const R7NAME = mutantCopies('da2d-r7name', REPO).load('src/secret-shapes.js', anchored(SRC, R9V + NQ, NQ + R9V, 'R7 before R9 at a name'), 'r7name');
   const nameTail = R7NAME.redactByValue(LEAKS[0][1]).text;
-  ok(nameTail.includes('U).8-3') && !SS.redactByValue(LEAKS[0][1]).text.includes('U).8-3'), 'RED CONTROL — R7 BEFORE R9 AT A NAME: the later pass-phrase\'s tail after the «;» is left in plain in a job\'s name (' + J(nameTail.slice(nameTail.indexOf('?'))) + ')');
+  ok(gateOf(nameTail.includes('U).8-3')) && !SS.redactByValue(LEAKS[0][1]).text.includes('U).8-3'), 'RED CONTROL — R7 BEFORE R9 AT A NAME: the later pass-phrase\'s tail after the «;» is left in plain in a job\'s name (' + J(nameTail.slice(nameTail.indexOf('?'))) + ')');
   const NOMARK = mutantCopies('da2d-nomark', REPO).load('src/secret-shapes.js', anchored(SRC, "      if (c === 0xAB && d.startsWith(REDACTED, j)) { j += REDACTED.length - 1; continue; }   // the belts' own mark, read WHOLE\n", '', 'the mark not read whole'), 'nomark');
-  ok(NOMARK.redactSecrets(MUSER).text.includes(pw), 'RED CONTROL — THE MARK ENDS THE WALK (« outside the alphabet): a user masked before lets its password through (' + J(NOMARK.redactSecrets(MUSER).text.replace(pw, '<the password>')) + ')');
+  ok(verdictOf(NOMARK.redactSecrets(MUSER).text.includes(pw)), 'RED CONTROL — THE MARK ENDS THE WALK (« outside the alphabet): a user masked before lets its password through (' + J(NOMARK.redactSecrets(MUSER).text.replace(pw, '<the password>')) + ')');
 }
 
 console.log('r1554 → r2209 (主开发\'s law, restated; beside line 246\'s stretch law): a query value on a FREE TEXT is read as line 246 read it with ONE new stop — after an ASCII first character, a character of the CJK kind ends it');
@@ -1420,19 +1420,19 @@ console.log('r1554 → r2209 (主开发\'s law, restated; beside line 246\'s str
     ['(f) a pass-phrase turning from ASCII to CJK', 'run ?password=QW12ER34密码ZX9 now', 'QW12ER34', '密码ZX9'],
   ];
   const namedOk = NAMED.every(([, t, h, s]) => outs(SS, t, 'free').every((o) => o.includes(REDACTED + s) && !grams(h).some((g) => o.includes(g))) && outs(SS, t, 'name').every((o) => !grams(h + s).some((g) => o.includes(g))));
-  ok(namedOk, `r2209 (e) / (f), NAMED: on a free text a backtick and a « that is not the mark end an ASCII-led value (shown from it on — no credential carries either raw), and a pass-phrase turning from ASCII to CJK is hidden up to the turn (THE ONE LIMIT); at a name all three are hidden whole — ${J(NAMED.map(([, t]) => SS.redactSecrets(t).text))}`);
+  ok(verdictOf(namedOk), `r2209 (e) / (f), NAMED: on a free text a backtick and a « that is not the mark end an ASCII-led value (shown from it on — no credential carries either raw), and a pass-phrase turning from ASCII to CJK is hidden up to the turn (THE ONE LIMIT); at a name all three are hidden whole — ${J(NAMED.map(([, t]) => SS.redactSecrets(t).text))}`);
   // (a): every MESSAGE_STOPS member is of the CJK kind — it ends an ASCII-led value
   const STOPS = [...((SRC.match(/const MESSAGE_STOPS = new Set\(\[\.\.\.'([^']+)'\]/) || [])[1] || '')];
   const stopBad = STOPS.filter((ch) => SS.redactSecrets('x ?token=QW12ER34' + ch + '之后').text !== 'x ?token=' + REDACTED + ch + '之后');
   ok(STOPS.length >= 10 && !stopBad.length, `(a) every MESSAGE_STOPS member (${STOPS.length}) ends an ASCII-led value${stopBad.length ? ' — not: ' + stopBad.join(' ') : ''}`);
-  ok(ROWS.every(([, t, , w]) => w === 'name' || SS.redactSecrets(SS.redactSecrets(t).text).text === SS.redactSecrets(t).text), 'idempotent on the rows');
+  ok(verdictOf(ROWS.every(([, t, , w]) => w === 'name' || SS.redactSecrets(SS.redactSecrets(t).text).text === SS.redactSecrets(t).text)), 'idempotent on the rows');
   // r2280 (1): at a NAME the belts' own mark is NEVER an opening quote — a public value that is the mark with an encoded address glued
   // after it is read whole (line 246's run) and hidden when that address holds a holder. RED: 058237eb2's guillemet branch (the mark read
   // as a quote: only the mark judged, the encoded pass-phrase shown)
   const PWN = 'Pw' + crypto.randomBytes(5).toString('hex'), MARKED = 'job?next=' + REDACTED + 'https%3A%2F%2Fh.example%2Fcb%3Fpassword%3D' + PWN + ' now';
   const N0582 = mutantCopies('r2280-name-0582', REPO).load('src/secret-shapes.js', anchored(SRC, lineOf(SRC, 'const NAME_QUERY_VALUE_RE = '), R7_0582_NAME, 'r2280 the mark read as a quote'), 'name-0582');
   const mk = SS.redactByValue(MARKED).text, mkRed = N0582.redactByValue(MARKED).text;
-  ok(!mk.includes(PWN) && mk.startsWith('job?next=' + REDACTED) && mkRed.includes(PWN), `r2280 (1): at a name the mark is never an opening quote — the mark with an encoded holder glued after it is hidden whole: ${J(mk)}; RED (058237eb2's guillemet branch): ${J(mkRed)}`);
+  ok(!mk.includes(PWN) && gateOf(mk.startsWith('job?next=' + REDACTED)) && verdictOf(mkRed.includes(PWN)), `r2280 (1): at a name the mark is never an opening quote — the mark with an encoded holder glued after it is hidden whole: ${J(mk)}; RED (058237eb2's guillemet branch): ${J(mkRed)}`);
   // r2280 (3), by law (d): at a name a value in guillemets with a tail glued after its » — only the quoted part hidden, the tail shown
   ok(SS.redactByValue('nightly?password=«Summer1!»tail').text === 'nightly?password=' + REDACTED + 'tail', `r2280 (3): at a name «…» is the value and a glued tail is not (law (d)) — ${J(SS.redactByValue('nightly?password=«Summer1!»tail').text)}`);
   // r2280 (5): the kept copy of line 246's R7 expressions IS fa0a6c1a5's text, read from git when this clone has it (the comparison stays
@@ -1479,31 +1479,31 @@ console.log('lane mask-value-shape B-829f: A VALUE THAT IS ITSELF ESCAPED JSON i
     ['a structured log line carrying an escaped request body', J({ body: J({ user: 'ann', password: v2 }) }), v2, 'password', 'ann']];
   for (const [what, t, v, name, keep] of SCENES) {
     const res = MODES.map(([m, f]) => { const said = []; const o = f(SS, t, said); return [m, o, said]; });
-    ok(res.every(([, o]) => !o.includes(v) && o.includes(REDACTED) && (!keep || o.includes(keep))) && res.filter(([m]) => m !== 'a job name').every(([, , said]) => said.includes(name)),
+    ok(gateOf(res.every(([, o]) => !o.includes(v) && o.includes(REDACTED) && (!keep || o.includes(keep)))) && verdictOf(res.filter(([m]) => m !== 'a job name').every(([, , said]) => said.includes(name))),
       `B-829f (a) THE HOLE CLOSED — ${what}: the inner value is hidden in the message mode, the line mode and a job name, «${name}» is said, the rest kept (${J(res[0][1])})`);
-    ok(MODES.every(([, f]) => f(TODAY, t).includes(v)), `RED CONTROL (the reader removed, 7b4cd5120's belt): ${what} — the inner value shows in every mode`);
+    ok(verdictOf(MODES.every(([, f]) => f(TODAY, t).includes(v))), `RED CONTROL (the reader removed, 7b4cd5120's belt): ${what} — the inner value shows in every mode`);
   }
   // (i) an escaped quote INSIDE the value does not end it (a backslash run of 3 is a quote of the value; a run of 1 closes)
   { const a = val(), b = val(), t = 'log: "{' + '\\"password\\":\\"' + a + '\\\\\\"' + b + '\\"}"';
-    ok(MODES.every(([, f]) => { const o = f(SS, t); return !o.includes(a) && !o.includes(b); }), `B-829f an escaped quote inside the value does not end it: both pieces hidden (${J(MODES[1][1](SS, t))})`);
+    ok(verdictOf(MODES.every(([, f]) => { const o = f(SS, t); return !o.includes(a) && !o.includes(b); })), `B-829f an escaped quote inside the value does not end it: both pieces hidden (${J(MODES[1][1](SS, t))})`);
     const FIRST = M.load('src/secret-shapes.js', editAnchor(SRC, '      if ((r - b + 1) % 4 === 1) { ve = r; break; }', '      { ve = r; break; }', 'src/secret-shapes.js'), 'b829f-first');
-    ok(MODES.some(([, f]) => f(FIRST, t).includes(b)), 'RED CONTROL (the value ended at the first escaped quote): the piece after the inner quote shows'); }
+    ok(verdictOf(MODES.some(([, f]) => f(FIRST, t).includes(b))), 'RED CONTROL (the value ended at the first escaped quote): the piece after the inner quote shows'); }
   // (e) THE PRICE: what plain JSON already masks that is no credential is masked inside escaped JSON too — one leg a kind
   { const fx = "the leg sends '{" + '\\"password\\":\\"x\\"' + "}' and expects a 401", fxPlain = "the leg sends '{\"password\":\"x\"}' and expects a 401";
-    ok(MODES.slice(0, 2).every(([, f]) => !f(SS, fx).includes('\\"x\\"') && !f(SS, fxPlain).includes('"x"')), `B-829f (e) THE PRICE — a fixture value quoted in prose about code is masked inside escaped JSON, as plain JSON's is today (${J(MODES[0][1](SS, fx))})`);
+    ok(verdictOf(MODES.slice(0, 2).every(([, f]) => !f(SS, fx).includes('\\"x\\"') && !f(SS, fxPlain).includes('"x"'))), `B-829f (e) THE PRICE — a fixture value quoted in prose about code is masked inside escaped JSON, as plain JSON's is today (${J(MODES[0][1](SS, fx))})`);
     const se = 'cfg: "{' + '\\"session\\":\\"main\\"' + '}"', sePlain = 'cfg: {"session":"main"}';
-    ok(MODES.slice(0, 2).every(([, f]) => !f(SS, se).includes('main') && !f(SS, sePlain).includes('main')), `B-829f (e) THE PRICE — a plain session name is masked inside escaped JSON, as plain JSON's is today (the grammar holds «session»): ${J(MODES[0][1](SS, se))}`);
+    ok(verdictOf(MODES.slice(0, 2).every(([, f]) => !f(SS, se).includes('main') && !f(SS, sePlain).includes('main'))), `B-829f (e) THE PRICE — a plain session name is masked inside escaped JSON, as plain JSON's is today (the grammar holds «session»): ${J(MODES[0][1](SS, se))}`);
     const prose = ['the note says \\"hello\\" and \\"bye\\"', 'the flag \\"--fast\\" stays', 'a \\"name\\" field and a \\"type\\" field'];
-    ok(prose.every((t) => MODES.every(([, f]) => f(SS, t) === t)), 'B-829f (e) prose that merely QUOTES with escaped quotes is untouched (no colon after the quoted word, no string value)'); }
+    ok(verdictOf(prose.every((t) => MODES.every(([, f]) => f(SS, t) === t))), 'B-829f (e) prose that merely QUOTES with escaped quotes is untouched (no colon after the quoted word, no string value)'); }
   // (g) a descriptor stays, and a number, a boolean or null after the colon is no string: left alone
   { const t = 'out: "{' + '\\"token_type\\":\\"Bearer\\",\\"expires_in\\":3600,\\"token\\":3600,\\"auth\\":true,\\"key\\":null' + '}"';
-    ok(MODES.every(([, f]) => f(SS, t) === t), `B-829f a descriptor (token_type) stays, and a number, a boolean and null under a holder are left alone (${J(t)})`); }
+    ok(verdictOf(MODES.every(([, f]) => f(SS, t) === t)), `B-829f a descriptor (token_type) stays, and a number, a boolean and null under a holder are left alone (${J(t)})`); }
   // (c) BOUNDED: one level; a value escaped TWICE is left as today; a value past ESC_VALUE_MAX and a name past ESC_NAME_MAX are left to the
   // older rules; and the belt never throws on a torn or odd escape
   { const v = val(), twice = 'cfg: "' + JSON.stringify(JSON.stringify(JSON.stringify({ password: v }))).slice(1, -1) + '"';
-    ok(MODES.every(([, f]) => f(SS, twice) === f(TODAY, twice)), `B-829f (c) a value escaped TWICE (\\\\\\"name\\\\\\":) is LEFT AS TODAY: the reader reads one level, so its inner pair is judged by no rule, as before this row (${J(MODES[1][1](SS, twice).slice(0, 60))}…)`);
+    ok(verdictOf(MODES.every(([, f]) => f(SS, twice) === f(TODAY, twice))), `B-829f (c) a value escaped TWICE (\\\\\\"name\\\\\\":) is LEFT AS TODAY: the reader reads one level, so its inner pair is judged by no rule, as before this row (${J(MODES[1][1](SS, twice).slice(0, 60))}…)`);
     const big = 'log: "{' + '\\"password\\":\\"' + 'a'.repeat((SS.ESC_VALUE_MAX || 8192) + 10) + '\\"}"', longName = 'log: "{' + '\\"' + 'n'.repeat((SS.ESC_NAME_MAX || 80) + 1) + '_password\\":\\"' + v + '\\"}"';
-    ok(SS.ESC_VALUE_MAX > 0 && SS.ESC_NAME_MAX > 0 && MODES.every(([, f]) => f(SS, big) === f(TODAY, big) && f(SS, longName) === f(TODAY, longName)), `B-829f (c) a value longer than ESC_VALUE_MAX (${SS.ESC_VALUE_MAX}) and a name longer than ESC_NAME_MAX (${SS.ESC_NAME_MAX}) are left to the older rules, as today`);
+    ok(SS.ESC_VALUE_MAX > 0 && SS.ESC_NAME_MAX > 0 && verdictOf(MODES.every(([, f]) => f(SS, big) === f(TODAY, big) && f(SS, longName) === f(TODAY, longName))), `B-829f (c) a value longer than ESC_VALUE_MAX (${SS.ESC_VALUE_MAX}) and a name longer than ESC_NAME_MAX (${SS.ESC_NAME_MAX}) are left to the older rules, as today`);
     const TORN = ['\\"', '\\"\\"', '\\"a\\":', '\\"a\\":\\"', '\\"password\\":\\"abc', 'x\\', '\\\\\\"', '\\"password\\" : \\"' + v + '\\"', '\\"\uD800\\":\\"v\\"', '\\"password\\":\\"' + '\\\\\\"'.repeat(3000), '\\"pw\\":\\"\n\\"', '\\'.repeat(5000) + '"'];
     const seeded = (seed) => () => { seed = (seed + 0x6D2B79F5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
     const rnd = seeded(829), AL = ['\\', '"', ':', ' ', 'a', 'password', 'token_type', '\n', '{', '}', ',', 'x', '«redacted»'];
@@ -1513,7 +1513,7 @@ console.log('lane mask-value-shape B-829f: A VALUE THAT IS ITSELF ESCAPED JSON i
     ok(threw === 0, `B-829f (c) the belt NEVER THROWS on ${TORN.length} torn or odd escapes and ${FUZZ.length} generated ones, in every mode${threw ? ' — threw ' + threw : ''}`);
     ok(lost === 0, `B-829f (1) IT ONLY ADDS MASKS: on the same ${TORN.length + FUZZ.length + SCENES.length} texts, every character 7b4cd5120's belt masked is still masked, in both modes${lost ? ' — unmasked on ' + lost : ''}`);
     const idem = [...SCENES.map((x) => x[1]), ...FUZZ.slice(0, 300)].every((t) => MODES.slice(0, 2).every(([m, f]) => { const o = f(SS, t); return f(SS, o) === o; }));
-    ok(idem, 'B-829f a second pass over the belt\'s own output changes nothing (both modes; the scenes and 300 generated texts)'); }
+    ok(verdictOf(idem), 'B-829f a second pass over the belt\'s own output changes nothing (both modes; the scenes and 300 generated texts)'); }
   // (d) THE TIME BOUND, by a STEP COUNT (no clock in this suite: a slow machine is never red, a regression of ten times is): the reader's
   // steps on five made-up 64 KiB worst shapes stay under 4 per character
   // r3200: the line-end lookup is counted too (the characters it scans), so a lookup per value start would show
@@ -1524,11 +1524,11 @@ console.log('lane mask-value-shape B-829f: A VALUE THAT IS ITSELF ESCAPED JSON i
       ['backslash runs before every quote', fill('\\\\\\"')], ['an unclosed value on one long line', '\\"token\\":\\"' + fill('\\\\\\"x').slice(20)],
       ['value starts back to back on ONE long line, its end at the text\'s end (r3200: the end looked up once a line)', fill('\\"token\\":\\"v\\",').slice(0, N - 1) + '\n']];
     const steps = W.map(([w, t]) => { globalThis.__escSteps = 0; ST.redactSecrets(t); return [w, globalThis.__escSteps, t.length]; });
-    ok(steps.length === 6 && steps.every(([, s, n]) => s <= 4 * n), `B-829f (d) THE BOUND: the reader is linear, its line-end lookups counted — ${steps.map(([w, s, n]) => `${w} ${s} steps / ${n} characters`).join(' · ')} (the ceiling: 4 a character)`);
+    ok(steps.length === 6 && verdictOf(steps.every(([, s, n]) => s <= 4 * n)), `B-829f (d) THE BOUND: the reader is linear, its line-end lookups counted — ${steps.map(([w, s, n]) => `${w} ${s} steps / ${n} characters`).join(' · ')} (the ceiling: 4 a character)`);
     const EVERY = M.load('src/secret-shapes.js', COUNTED(editAnchor(SRC, '    if (vs > lineEnd) {', '    if (true) {', 'src/secret-shapes.js')), 'b829f-every');
     const [w6, t6] = W[5]; globalThis.__escSteps = 0; EVERY.redactSecrets(t6); const s6 = globalThis.__escSteps;
     ok(s6 > 4 * t6.length, `RED CONTROL (the line's end looked up again for every value start, c2e4437e8's form): «${w6}» takes ${s6} steps for ${t6.length} characters — the bound leg goes red`); }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

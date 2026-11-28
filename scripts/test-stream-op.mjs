@@ -68,7 +68,7 @@ import { writeFakeFfmpeg, factsLine, calibrationFrame, rgbAt } from './fixtures/
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(50); } return false; };
 const SM = require(path.join(REPO, 'src/stream-model.js'));
@@ -115,20 +115,20 @@ function pictures(rtp) {
 const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const CAP_LIST = /capabilities: \[([^\]]*)\]/;
 const capsOf = (txt) => { const m = CAP_LIST.exec(txt); return m ? m[1].split(',').map((x) => x.trim()).filter(Boolean) : null; };
-ok(capsOf(bundleText).includes('"stream-offer"') && capsOf(bundleText).includes('"input-events"') && /stream-offer-result/.test(bundleText) && /function createStreamHost\(/.test(bundleText) && /function createInjector\(/.test(bundleText) && /RTCPeerConnection = class extends/.test(bundleText), 'data/bin/vibespace-agentd.js names both capabilities, answers stream-offer-result and bundles the stream host, THE injector and werift (run `npm run build:agentd` after a change)');
+ok(gateOf(capsOf(bundleText).includes('"stream-offer"')) && gateOf(capsOf(bundleText).includes('"input-events"')) && gateOf(/stream-offer-result/.test(bundleText)) && gateOf(/function createStreamHost\(/.test(bundleText)) && gateOf(/function createInjector\(/.test(bundleText)) && verdictOf(/RTCPeerConnection = class extends/.test(bundleText)), 'data/bin/vibespace-agentd.js names both capabilities, answers stream-offer-result and bundles the stream host, THE injector and werift (run `npm run build:agentd` after a change)');
 
 console.log('§1 the real daemon streams THE fixture');
 const stub = path.join(home, 'input-stub.jsonl');
 const dm = deviceOn(home, BUNDLE, { VIBESPACE_INPUT_STUB_FILE: stub });
 const conn = await dm.connect();
 delete process.env.VIBESPACE_INPUT_STUB_FILE;
-ok(conn.info.capabilities.includes('stream-offer') && conn.info.capabilities.includes('input-events'), 'the hello-ack names stream-offer and input-events');
+ok(gateOf(conn.info.capabilities.includes('stream-offer')) && verdictOf(conn.info.capabilities.includes('input-events')), 'the hello-ack names stream-offer and input-events');
 const pushes = [];
 const b1 = standIn();
 const off = await dm.streamOffer({ sourceKind: 'fake', sourceId: FIXTURE }, { onPush: (m) => { pushes.push(m); if (m.op === 'stream-ice' && m.candidate) b1.pc.addIceCandidate(m.candidate).catch(() => { }); } });
 const sdp = (off.offer && off.offer.sdp) || '';
 const candLines = sdp.split(/\r?\n/).filter((l) => l.startsWith('a=candidate:'));
-ok(off.ok && /^s[a-z0-9]+$/.test(off.sid) && off.source.kind === 'fake' && /a=ice-lite/.test(sdp) && candLines.length > 0 && candLines.every((l) => / typ host /.test(l)) && /a=group:BUNDLE 0 1/.test(sdp) && /profile-level-id=42e01f/.test(sdp) && /packetization-mode=1/.test(sdp), `the offer: ICE-lite, BUNDLE, H.264 42e01f mode 1, ${candLines.length} host candidates and NOTHING server-reflexive (no STUN server asked)`, { code: off.code, cands: candLines.slice(0, 3) });
+ok(gateOf(off.ok) && gateOf(/^s[a-z0-9]+$/.test(off.sid)) && off.source.kind === 'fake' && gateOf(/a=ice-lite/.test(sdp)) && candLines.length > 0 && gateOf(candLines.every((l) => / typ host /.test(l))) && gateOf(/a=group:BUNDLE 0 1/.test(sdp)) && gateOf(/profile-level-id=42e01f/.test(sdp)) && verdictOf(/packetization-mode=1/.test(sdp)), `the offer: ICE-lite, BUNDLE, H.264 42e01f mode 1, ${candLines.length} host candidates and NOTHING server-reflexive (no STUN server asked)`, { code: off.code, cands: candLines.slice(0, 3) });
 await b1.pc.setRemoteDescription(off.offer);
 await b1.pc.setLocalDescription(await b1.pc.createAnswer());
 const ans = await dm.streamAnswer(off.sid, { answer: { type: 'answer', sdp: b1.pc.localDescription.sdp } });
@@ -137,9 +137,9 @@ const flowing = await until(() => pictures(b1.got.rtp).length >= 45, 10000);
 const pics = pictures(b1.got.rtp);
 const firstMs = b1.got.rtp.length ? b1.got.rtp[0].at - t0 : null;
 const matches = pics.slice(0, 45).filter((p, i) => p.length === AUS[i].nalus.length && p.every((n, k) => Buffer.compare(n, AUS[i].nalus[k]) === 0)).length;
-ok(ans.ok && flowing && matches === 45, `the answer applied; the first packet ${firstMs} ms later; the first 45 pictures are THE fixture's access units 0–44 byte for byte (key frame first)`, { ans, n: pics.length, matches });
+ok(gateOf(ans.ok) && gateOf(flowing) && matches === 45, `the answer applied; the first packet ${firstMs} ms later; the first 45 pictures are THE fixture's access units 0–44 byte for byte (key frame first)`, { ans, n: pics.length, matches });
 const ice = pushes.filter((m) => m.op === 'stream-ice');
-ok(ice.length >= 2 && ice[ice.length - 1].candidate === null && ice.slice(0, -1).every((m) => / typ host /.test(m.candidate.candidate)), `the candidates reached the watcher as ${ice.length} stream-ice pushes, the last null (the client's push branch)`, ice.map((m) => m.candidate && m.candidate.candidate).slice(0, 4));
+ok(ice.length >= 2 && ice[ice.length - 1].candidate === null && verdictOf(ice.slice(0, -1).every((m) => / typ host /.test(m.candidate.candidate))), `the candidates reached the watcher as ${ice.length} stream-ice pushes, the last null (the client's push branch)`, ice.map((m) => m.candidate && m.candidate.candidate).slice(0, 4));
 
 console.log('§2 input through the data channel and the op');
 {
@@ -152,25 +152,25 @@ console.log('§2 input through the data channel and the op');
   await until(() => cmds().length >= 8, 5000);
   ok(JSON.stringify(cmds().slice(0, 8)) === JSON.stringify(['K 30 0 0', 'K 30 0 1', 'M 640 360', 'D 0', 'M 640 360', 'U 0', 'C aADpAA==', 'M 1 2']), 'the data channel\'s key, press and clipboard reached THE injector in order (the Linux stub\'s record: scan codes, absolute moves, base64 UTF-16LE text)', cmds());
   const st = await dm.streamStats(off.sid);
-  ok(st.ok && st.stats.input.n >= 6 && st.stats.input.refused && st.stats.input.refused.code === 'unmapped_key', 'the session counts the events and names the last refusal (unmapped_key — the garbage before it was not_json)', st.stats.input);
+  ok(gateOf(st.ok) && st.stats.input.n >= 6 && gateOf(st.stats.input.refused) && st.stats.input.refused.code === 'unmapped_key', 'the session counts the events and names the last refusal (unmapped_key — the garbage before it was not_json)', st.stats.input);
   const op = await dm.inputEvents([{ t: 'kd', c: 'KeyB' }, { t: 'zz' }, { t: 'mv', x: 99999, y: 0 }], { by: 'system:test' });
-  ok(op.kind === 'stub' && op.n === 1 && JSON.stringify(op.refused.map((r) => [r.i, r.code])) === '[[1,"unknown_kind"],[2,"bad_x"]]' && cmds().includes('K 48 0 0'), 'the input-events op feeds the SAME injector (KeyB 0x30 recorded) and refuses the rest by index + name', op);
+  ok(op.kind === 'stub' && op.n === 1 && JSON.stringify(op.refused.map((r) => [r.i, r.code])) === '[[1,"unknown_kind"],[2,"bad_x"]]' && verdictOf(cmds().includes('K 48 0 0')), 'the input-events op feeds the SAME injector (KeyB 0x30 recorded) and refuses the rest by index + name', op);
 }
 
 console.log('§2b the hand-over\'s ops: desktop-input into the SAME sink, desktop-grab');
 {
   const cmds = () => (fs.existsSync(stub) ? fs.readFileSync(stub, 'utf8').trim().split('\n').map((l) => JSON.parse(l).cmd) : []);
-  ok(conn.info.capabilities.includes('desktop-grab') && conn.info.capabilities.includes('desktop-input'), 'the hello-ack names desktop-grab and desktop-input');
+  ok(gateOf(conn.info.capabilities.includes('desktop-grab')) && verdictOf(conn.info.capabilities.includes('desktop-input')), 'the hello-ack names desktop-grab and desktop-input');
   const before = cmds().length;
   const recs = [{ t: 'kd', c: 'KeyA' }, { t: 'ku', c: 'KeyA' }, { t: 'md', x: 640, y: 360, b: 0 }, { t: 'mu', x: 640, y: 360, b: 0 }, { t: 'clip', text: 'hé' }, { t: 'wh', x: 1, y: 2, dx: 0, dy: -120 }];
   const r = await dm.desktopInput(off.sid, recs, { by: 'system:test' });
   await until(() => cmds().length >= before + 8, 5000);
-  ok(r.ok && r.n === 6 && JSON.stringify(cmds().slice(before, before + 8)) === JSON.stringify(cmds().slice(0, 8)), 'desktop-input with the records §2\'s data channel sent ⇒ THE injector recorded the SAME 8 command lines (one sink: the session\'s onInput)', { r, op: cmds().slice(before, before + 8) });
+  ok(gateOf(r.ok) && r.n === 6 && JSON.stringify(cmds().slice(before, before + 8)) === JSON.stringify(cmds().slice(0, 8)), 'desktop-input with the records §2\'s data channel sent ⇒ THE injector recorded the SAME 8 command lines (one sink: the session\'s onInput)', { r, op: cmds().slice(before, before + 8) });
   const bad = await dm.desktopInput(off.sid, [{ t: 'ack', f: 1 }, { t: 'kd', c: 'Pause' }, { t: 'kd', c: 'KeyC' }], { by: 'system:test' });
   ok(!bad.ok && JSON.stringify(bad.refused) === JSON.stringify([{ i: 0, code: 'not_an_act' }, { i: 1, code: 'unmapped_key' }]) && bad.n === 1, 'refused records by index + name (an ack is the page\'s; a key the table lacks), the rest lands', bad);
   const g = await dm.desktopGrab(off.sid, { by: 'system:test' });
   const png = Buffer.from(g.png64 || '', 'base64');
-  ok(g.ok && g.w === 1280 && g.h === 720 && png.slice(1, 4).toString() === 'PNG' && png.readUInt32BE(16) === 1280 && png.readUInt32BE(20) === 720 && g.road === 'fake', 'desktop-grab ⇒ the session\'s still: a 1280×720 PNG (its IHDR) over the device link', { ok: g.ok, w: g.w, h: g.h, bytes: png.length });
+  ok(gateOf(g.ok) && g.w === 1280 && g.h === 720 && png.slice(1, 4).toString() === 'PNG' && png.readUInt32BE(16) === 1280 && png.readUInt32BE(20) === 720 && g.road === 'fake', 'desktop-grab ⇒ the session\'s still: a 1280×720 PNG (its IHDR) over the device link', { ok: g.ok, w: g.w, h: g.h, bytes: png.length });
   ok((await dm.desktopGrab('snope', { by: 'system:test' })).code === 'not_found' && (await dm.desktopInput('snope', [], { by: 'system:test' })).code === 'not_found', 'an unknown session ⇒ not_found');
 }
 
@@ -180,7 +180,7 @@ console.log('§3 the numbers');
   const before = pushes.filter((m) => m.op === 'stream-stats').length;
   await sleep(2300);
   const after = pushes.filter((m) => m.op === 'stream-stats');
-  ok(st.ok && st.state === 'connected' && st.stats.frames > 30 && st.stats.source === 'fake' && st.stats.encodeMs === null, 'stream-stats answers: connected, the frames sent, the source; encode ms null (a pre-encoded source spends none — part B reports it)', st);
+  ok(gateOf(st.ok) && st.state === 'connected' && st.stats.frames > 30 && st.stats.source === 'fake' && st.stats.encodeMs === null, 'stream-stats answers: connected, the frames sent, the source; encode ms null (a pre-encoded source spends none — part B reports it)', st);
   ok(after.length - before >= 2 && after[after.length - 1].stats.fps >= 20 && after[after.length - 1].stats.kbps > 0, `the once-a-second push: ${after.length - before} in 2.3 s, ${after[after.length - 1].stats.fps} fps, ${after[after.length - 1].stats.kbps} kbps`);
 }
 
@@ -195,10 +195,10 @@ console.log('§4 a link blip: the media keeps flowing, the session is re-armed')
   await dm.connect();
   const rearmed = await until(() => pushes.slice(n0).some((m) => m.rearmed), 5000);
   const resumed = await until(() => pushes.slice(n0).filter((m) => m.op === 'stream-stats' && !m.rearmed).length >= 1, 3000);
-  ok(rearmed && resumed, 'the reconnect re-armed it (stream-stats watch → this link owns its pushes) and the once-a-second pushes resumed', pushes.slice(n0).map((m) => m.op + (m.rearmed ? ':rearmed' : '')));
+  ok(gateOf(rearmed) && verdictOf(resumed), 'the reconnect re-armed it (stream-stats watch → this link owns its pushes) and the once-a-second pushes resumed', pushes.slice(n0).map((m) => m.op + (m.rearmed ? ':rearmed' : '')));
   const stop = await dm.streamStop(off.sid);
   const again = await dm.streamStats(off.sid);
-  ok(stop.stopped && again.ok === false && again.code === 'not_found', 'stream-stop ends it; the session is gone (not_found)');
+  ok(gateOf(stop.stopped) && again.ok === false && again.code === 'not_found', 'stream-stop ends it; the session is gone (not_found)');
   b1.pc.close();
   dm.stop(); endDaemonsOf(rootOf(home));
 }
@@ -233,11 +233,11 @@ await dmw.streamAnswer(offW.sid, { answer: { type: 'answer', sdp: b2.pc.localDes
   const args = fs.existsSync(psArgs) ? JSON.parse(fs.readFileSync(psArgs, 'utf8')) : [];
   const I = require(path.join(REPO, 'src/input-inject.js'));
   ok(cw.info.platform === 'win32' && JSON.stringify(lines().slice(0, 2)) === JSON.stringify(['K 72 1 0', 'M 5 6']) && Buffer.from(args[args.length - 1] || '', 'base64').toString('utf16le') === I.INPUT_PS, 'the key reached THE resident script\'s stdin as its scan-code line (ArrowUp = 0x48, extended), then the move — the script it runs is INPUT_PS verbatim', { lines: lines(), argc: args.length });
-  ok(cw.info && cw.info.elevated === false, 'the hello-ack carries the daemon\'s OWN token elevation (false here — this is not an elevated Windows daemon); an old daemon omits the field and the hub reads it as not-elevated (never asked to type into an admin window)', { elevated: cw.info && cw.info.elevated });
+  ok(gateOf(cw.info) && cw.info.elevated === false, 'the hello-ack carries the daemon\'s OWN token elevation (false here — this is not an elevated Windows daemon); an old daemon omits the field and the hub reads it as not-elevated (never asked to type into an admin window)', { elevated: cw.info && cw.info.elevated });
   fs.writeFileSync(elevated, '1');
   b2.got.dc.send(JSON.stringify({ t: 'md', x: 5, y: 6, b: 0 }));
   const named = await until(() => pushW.some((m) => m.op === 'stream-stats' && m.stats && m.stats.input && m.stats.input.refused && m.stats.input.refused.code === 'uipi_blocked'), 5000);
-  ok(named && lines().includes('D 0'), 'an elevated window in front: the script answers `uipi` ⇒ uipi_blocked reaches the session\'s pushed numbers at once (the page names it)');
+  ok(gateOf(named) && verdictOf(lines().includes('D 0')), 'an elevated window in front: the script answers `uipi` ⇒ uipi_blocked reaches the session\'s pushed numbers at once (the page names it)');
   fs.rmSync(elevated);
   await dmw.streamStop(offW.sid);
   b2.pc.close();
@@ -256,7 +256,7 @@ console.log('§6 the relay: the hub\'s UDP port ⇄ the device link ⇄ the daem
   await wr.answer(s.key, b3.pc.localDescription.sdp);
   const up = await until(() => pictures(b3.got.rtp).length >= 20, 10000);
   const p = await wr.poll(s.key, 0, -1, 0);
-  ok(s.take && !/ typ host /.test(s.offer.sdp) && up && p.relay && p.relay.up > 0 && p.relay.down > 20 && p.relay.dropped === 0, `relay-only: the offer holds only the hub's candidate; 20 pictures arrived through it (${p.relay && p.relay.up} datagrams up, ${p.relay && p.relay.down} down, none dropped)`, { take: s.take, code: s.code, relay: p.relay });
+  ok(gateOf(s.take) && !/ typ host /.test(s.offer.sdp) && gateOf(up) && gateOf(p.relay) && p.relay.up > 0 && p.relay.down > 20 && p.relay.dropped === 0, `relay-only: the offer holds only the hub's candidate; 20 pictures arrived through it (${p.relay && p.relay.up} datagrams up, ${p.relay && p.relay.down} down, none dropped)`, { take: s.take, code: s.code, relay: p.relay });
   await wr.stop(s.key);
   wr.shutdown();
   b3.pc.close();
@@ -267,7 +267,7 @@ console.log('§7 the capability gate');
 {
   const OLD_OUT = ['"stream-offer"', '"input-events"', '"desktop-grab"', '"desktop-input"']; // + lane desktop-handover's two ops
   const oldText = bundleText.replace(CAP_LIST, (all, inner) => `capabilities: [${inner.split(',').map((x) => x.trim()).filter((x) => x && !OLD_OUT.includes(x)).join(', ')}]`).replace('if (msg.op === "stream-offer") {', 'if (false) {');
-  ok(capsOf(oldText).length === capsOf(bundleText).length - 4 && oldText.includes('if (false) {'), 'the old copy lacks the four capabilities (by content) and its handler');
+  ok(capsOf(oldText).length === capsOf(bundleText).length - 4 && verdictOf(oldText.includes('if (false) {')), 'the old copy lacks the four capabilities (by content) and its handler');
   const oldBundle = path.join(copyDir, 'old', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(oldBundle), { recursive: true }); fs.writeFileSync(oldBundle, oldText);
   const dmo = deviceOn(homeOld, oldBundle);
   const co = await dmo.connect();
@@ -278,9 +278,9 @@ console.log('§7 the capability gate');
   const e2 = await dmo.inputEvents([{ t: 'kd', c: 'KeyA' }], { by: 'system:test' }).then(() => null, (x) => x);
   const e3 = await dmo.desktopGrab('s1', { by: 'system:test' }).then(() => null, (x) => x);
   const e4 = await dmo.desktopInput('s1', [{ t: 'kd', c: 'KeyA' }], { by: 'system:test' }).then(() => null, (x) => x);
-  ok(e1 && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && e2 && e2.code === 'host_needs_daemon' && e3 && e3.code === 'host_needs_daemon' && e4 && e4.code === 'host_needs_daemon' && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) — stream-offer, input-events, desktop-grab, desktop-input — and NO request went to it');
+  ok(gateOf(e1) && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && gateOf(e2) && e2.code === 'host_needs_daemon' && gateOf(e3) && e3.code === 'host_needs_daemon' && gateOf(e4) && e4.code === 'host_needs_daemon' && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) — stream-offer, input-events, desktop-grab, desktop-input — and NO request went to it');
   const raw = await send0({ op: 'stream-offer', sid: 'sraw', sourceKind: 'fake', sourceId: FIXTURE, timeoutMs: 1500 }).then((r) => ({ answered: r }), (x) => ({ error: String(x && x.message) }));
-  ok(!raw.answered && /time(?:d)? ?out/i.test(raw.error || ''), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);
+  ok(!raw.answered && verdictOf(/time(?:d)? ?out/i.test(raw.error || '')), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);
   dmo.stop(); endDaemonsOf(rootOf(homeOld));
 }
 
@@ -289,7 +289,7 @@ const homeScr = scratchHome('sop-scr', fs, ['.vibespace', '.local/bin']); homes.
 const binS = path.join(homeScr, '.local/bin');
 const SCR = /(createScreen\(\{\s*)platform: process\.platform,/;
 const scrText = winText.replace(SCR, '$1platform: "win32",');
-ok(scrText !== winText && (scrText.match(/platform: "win32"/g) || []).length === 3 && /mapperServant\(wt\.parentPort\)/.test(scrText) && /stream-facts-result/.test(scrText), 'the copy says win32 three times: the hello-ack, THE injector, THE screen source (found by content); the bundle carries the mapper\'s worker branch and the facts op');
+ok(scrText !== winText && (scrText.match(/platform: "win32"/g) || []).length === 3 && gateOf(/mapperServant\(wt\.parentPort\)/.test(scrText)) && verdictOf(/stream-facts-result/.test(scrText)), 'the copy says win32 three times: the hello-ack, THE injector, THE screen source (found by content); the bundle carries the mapper\'s worker branch and the facts op');
 const scrBundle = path.join(copyDir, 'scr', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(scrBundle), { recursive: true }); fs.writeFileSync(scrBundle, scrText);
 const D1 = { id: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 1280, h: 720, primary: true, hdr: true, white: SP.CALIBRATION.white, adapter: 0, output: 0 };
 const D2 = { id: '\\\\.\\DISPLAY2', x: 1280, y: 0, w: 1280, h: 720, primary: false, hdr: false, white: 1000, adapter: 0, output: 1 };
@@ -331,33 +331,33 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
 {
   const f = await dms.streamFacts();
   const psA = fs.existsSync(psArgsS) ? JSON.parse(fs.readFileSync(psArgsS, 'utf8')) : [];
-  ok(f.ok && f.platform === 'win32' && f.ffmpeg && f.ffmpeg.where === 'PATH' && f.ffmpeg.major === 7 && f.ffmpeg.ddagrab && JSON.stringify(f.ffmpeg.encoders) === '["h264_nvenc","libx264"]' && f.displays.length === 2 && f.displays[0].white === 2500 && f.displays[1].output === 1, 'stream-facts: the ffmpeg found on PATH (7.1, ddagrab, NVENC + x264) and both displays (HDR + SDR white 2500; DXGI output 1)', f);
-  ok(f.primary && f.primary.mode === 'mapped' && f.primary.encoder === 'NVENC' && f.primary.white === 2500 && Buffer.from(psA[psA.length - 1] || '', 'base64').toString('utf16le') === SP.STREAM_FACTS_PS, 'the primary\'s plan rides the facts (mapped, NVENC, white 2500); the script the agent ran is STREAM_FACTS_PS verbatim', f.primary);
+  ok(gateOf(f.ok) && f.platform === 'win32' && gateOf(f.ffmpeg) && f.ffmpeg.where === 'PATH' && f.ffmpeg.major === 7 && gateOf(f.ffmpeg.ddagrab) && JSON.stringify(f.ffmpeg.encoders) === '["h264_nvenc","libx264"]' && f.displays.length === 2 && f.displays[0].white === 2500 && f.displays[1].output === 1, 'stream-facts: the ffmpeg found on PATH (7.1, ddagrab, NVENC + x264) and both displays (HDR + SDR white 2500; DXGI output 1)', f);
+  ok(gateOf(f.primary) && f.primary.mode === 'mapped' && f.primary.encoder === 'NVENC' && f.primary.white === 2500 && Buffer.from(psA[psA.length - 1] || '', 'base64').toString('utf16le') === SP.STREAM_FACTS_PS, 'the primary\'s plan rides the facts (mapped, NVENC, white 2500); the script the agent ran is STREAM_FACTS_PS verbatim', f.primary);
 }
 {
   const pushS = [];
   const { off, b } = await screenSession(pushS);
-  ok(off.ok && off.source.kind === 'screen' && off.source.encoder === 'NVENC' && off.source.mode === 'mapped' && JSON.stringify(off.source.origin) === '{"x":0,"y":0}' && off.source.fps === 30, 'a screen offer: the source is the HDR primary on the mapped road, NVENC, its origin', off.source || off);
+  ok(gateOf(off.ok) && off.source.kind === 'screen' && off.source.encoder === 'NVENC' && off.source.mode === 'mapped' && JSON.stringify(off.source.origin) === '{"x":0,"y":0}' && off.source.fps === 30, 'a screen offer: the source is the HDR primary on the mapped road, NVENC, its origin', off.source || off);
   const flowing = await until(() => pictures(b.got.rtp).length >= 40, 12000);
   const pics = pictures(b.got.rtp);
   const k0 = AUS.findIndex((a) => a.key);
   const matches = pics.slice(0, 40).filter((p, i) => { const a = AUS[k0 + i]; return p.length === a.nalus.length && p.every((n, k) => Buffer.compare(n, a.nalus[k]) === 0); }).length;
-  ok(flowing && matches === 40, 'the encoder\'s pictures reach the browser byte for byte: THE fixture\'s access units from its first key frame (FLV → access units → RTP, SPS/PPS before the key)', { n: pics.length, matches });
+  ok(gateOf(flowing) && matches === 40, 'the encoder\'s pictures reach the browser byte for byte: THE fixture\'s access units from its first key frame (FLV → access units → RTP, SPS/PPS before the key)', { n: pics.length, matches });
   const nv = fs.existsSync(nv12File) ? fs.readFileSync(nv12File) : null;
   const bad = nv ? cal.patches.map((p) => ({ label: p.label, want: p.srgb, got: rgbAt(nv, 1280, 720, p.x, p.y) })).filter((r) => r.got.some((v, i) => Math.abs(v - r.want[i]) > 1)) : ['no frame'];
-  ok(nv && nv.length === 1280 * 720 * 1.5 && bad.length === 0, 'THE COLOUR GATE through the real daemon: the owner\'s FP16 calibration frame → the agent\'s worker mapping → the NV12 its encoder got: all 17 patches within ±1 of what the window drew, the 10× white patch white', bad);
+  ok(gateOf(nv) && nv.length === 1280 * 720 * 1.5 && bad.length === 0, 'THE COLOUR GATE through the real daemon: the owner\'s FP16 calibration frame → the agent\'s worker mapping → the NV12 its encoder got: all 17 patches within ±1 of what the window drew, the 10× white patch white', bad);
   const runs = ffRuns(), capRun = runs.find((a) => a.some((x) => /^ddagrab=/.test(x))), encRun = runs.find((a) => a.includes('pipe:0'));
   const plan = SP.planScreen({ platform: 'win32', ffmpeg: { path: 'x', major: 7, ddagrab: true, encoders: ['h264_nvenc'] }, displays: [D1] });
   ok(JSON.stringify(capRun) === JSON.stringify(SP.captureArgv(plan)) && JSON.stringify(encRun) === JSON.stringify(SP.encodeArgv(plan)), 'the two ffmpegs ran EXACTLY the plan\'s argvs (FP16 capture → raw bits; NV12 → NVENC → FLV)', { capRun, encRun });
   const st = await dms.streamStats(off.sid);
   const sc = st.stats && st.stats.screen;
-  ok(st.ok && sc && sc.mode === 'mapped' && sc.encoder === 'NVENC' && sc.mapper === 'worker' && sc.white === 2500 && typeof sc.encodeMs === 'number' && sc.encodeMs >= 0 && st.stats.encodeMs === sc.encodeMs && sc.captured >= 40 && typeof sc.mapMs === 'number' && sc.keyWaitMs != null, `the numbers: mapped by the worker in ${sc && sc.mapMs} ms, encodeMs ${sc && sc.encodeMs} (capture → access unit), the first key ${sc && sc.keyWaitMs} ms after the ask`, sc);
+  ok(gateOf(st.ok) && gateOf(sc) && sc.mode === 'mapped' && sc.encoder === 'NVENC' && sc.mapper === 'worker' && sc.white === 2500 && typeof sc.encodeMs === 'number' && sc.encodeMs >= 0 && st.stats.encodeMs === sc.encodeMs && sc.captured >= 40 && typeof sc.mapMs === 'number' && sc.keyWaitMs != null, `the numbers: mapped by the worker in ${sc && sc.mapMs} ms, encodeMs ${sc && sc.encodeMs} (capture → access unit), the first key ${sc && sc.keyWaitMs} ms after the ask`, sc);
   // a keyframe request (the browser's PLI) is answered by the next key frame — the GOP bounds it (ffmpeg's CLI cannot force one)
   const before = st.stats.keyRequests, answered = sc.keysAnswered;
   await b.pc.getTransceivers()[0].receiver.sendRtcpPLI(b.got.ssrc);
   const asked = await until(async () => { const s2 = await dms.streamStats(off.sid); return s2.stats.keyRequests > before && s2.stats.screen.keysAnswered > answered; }, 4000);
   const s3 = await dms.streamStats(off.sid);
-  ok(answered === 1 && asked && s3.stats.screen.keyWaitMs <= 2500, `a PLI from the browser: counted, and answered by the next key frame ${s3.stats.screen.keyWaitMs} ms later (≤ the 2 s GOP — ffmpeg's CLI cannot force one)`, s3.stats.screen);
+  ok(answered === 1 && gateOf(asked) && s3.stats.screen.keyWaitMs <= 2500, `a PLI from the browser: counted, and answered by the next key frame ${s3.stats.screen.keyWaitMs} ms later (≤ the 2 s GOP — ffmpeg's CLI cannot force one)`, s3.stats.screen);
   // GONE MEANS GONE (lane stream-fallback-never-silent): the capture dies ONCE mid-stream, its display still listed ⇒ the same
   // session captures again in place and plays on
   const ff0 = ffRuns().length;
@@ -366,18 +366,18 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const atOnce = pictures(b.got.rtp).length;
   const goesOn = await until(() => pictures(b.got.rtp).length >= atOnce + 10, 6000);
   const so = (await dms.streamStats(off.sid)).stats.screen;
-  ok(once && goesOn && !endedOf(pushS) && fs.readFileSync(dieN, 'utf8') === '0' && ffRuns().slice(ff0).filter((x) => x.some((a) => /^ddagrab=/.test(a))).length === 1 && so.captureRestarts === 1, 'GONE MEANS GONE: the capture ffmpeg dies once mid-stream (DXGI_ERROR_ACCESS_LOST) while the facts still list its display ⇒ ONE new capture in the SAME session (the encoder and the mapper stay) — the pictures go on, nothing ends', { once, goesOn, ended: endedOf(pushS), restarts: so.captureRestarts });
+  ok(gateOf(once) && gateOf(goesOn) && !endedOf(pushS) && fs.readFileSync(dieN, 'utf8') === '0' && ffRuns().slice(ff0).filter((x) => x.some((a) => /^ddagrab=/.test(a))).length === 1 && so.captureRestarts === 1, 'GONE MEANS GONE: the capture ffmpeg dies once mid-stream (DXGI_ERROR_ACCESS_LOST) while the facts still list its display ⇒ ONE new capture in the SAME session (the encoder and the mapper stay) — the pictures go on, nothing ends', { once, goesOn, ended: endedOf(pushS), restarts: so.captureRestarts });
   // … a failed facts read is no proof: the capture dies, the forced read fails ⇒ never display_gone (in place again)
   const ps0 = psRuns();
   fs.writeFileSync(psFailS, '1'); fs.writeFileSync(dieN, '1');
   const twice = await until(async () => ((await dms.streamStats(off.sid)).stats || {}).screen?.captureRestarts === 2, 6000);
   const atTwice = pictures(b.got.rtp).length;
-  ok(twice && (await until(() => pictures(b.got.rtp).length >= atTwice + 10, 6000)) && !endedOf(pushS) && fs.readFileSync(psFailS, 'utf8') === '0' && psRuns() - ps0 === 1, 'a facts read that FAILED is no proof: the capture dies, the forced read fails (no displays listed) ⇒ never display_gone — captured again in place, the pictures go on', { twice, ended: endedOf(pushS), psRuns: psRuns() - ps0 });
+  ok(gateOf(twice) && (gateOf(await until(() => pictures(b.got.rtp).length >= atTwice + 10, 6000))) && !endedOf(pushS) && fs.readFileSync(psFailS, 'utf8') === '0' && psRuns() - ps0 === 1, 'a facts read that FAILED is no proof: the capture dies, the forced read fails (no displays listed) ⇒ never display_gone — captured again in place, the pictures go on', { twice, ended: endedOf(pushS), psRuns: psRuns() - ps0 });
   // ffmpeg keeps dying ⇒ after two restarts within a minute the session ends BY NAME: capture_interrupted (the page: retry, then the person's choice)
   fs.writeFileSync(dieCap, '1');
   const ended = await until(() => endedOf(pushS), 6000);
   fs.rmSync(dieCap);
-  ok(ended && endedOf(pushS) === 'capture_interrupted' && (await dms.streamStats(off.sid)).code === 'not_found', 'the capture ffmpeg keeps dying (DXGI_ERROR_ACCESS_LOST) with its display still listed ⇒ twice a minute in place, then the session ends as capture_interrupted, pushed to the watcher; the session is gone', endedOf(pushS));
+  ok(gateOf(ended) && endedOf(pushS) === 'capture_interrupted' && (await dms.streamStats(off.sid)).code === 'not_found', 'the capture ffmpeg keeps dying (DXGI_ERROR_ACCESS_LOST) with its display still listed ⇒ twice a minute in place, then the session ends as capture_interrupted, pushed to the watcher; the session is gone', endedOf(pushS));
   b.pc.close();
 }
 {
@@ -387,7 +387,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   fs.writeFileSync(dieEnc, '1');
   await until(() => endedOf(pushS), 6000);
   fs.rmSync(dieEnc);
-  ok(off.ok && endedOf(pushS) === 'encoder_exited', 'the encoder ffmpeg dies ⇒ encoder_exited', endedOf(pushS));
+  ok(gateOf(off.ok) && endedOf(pushS) === 'encoder_exited', 'the encoder ffmpeg dies ⇒ encoder_exited', endedOf(pushS));
   b.pc.close();
 }
 {
@@ -400,7 +400,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   await until(() => endedOf(pushS), 8000);
   const took = Date.now() - t0;
   fs.rmSync(dieCap);
-  ok(off.ok && endedOf(pushS) === 'display_gone' && psRuns() - ps0 === 2 && took >= 1000, `the display is unplugged under the capture ⇒ the facts are read again — TWICE, ≥ 1 s apart (${took} ms) — and both say so: display_gone`, { ended: endedOf(pushS), reads: psRuns() - ps0, took });
+  ok(gateOf(off.ok) && endedOf(pushS) === 'display_gone' && psRuns() - ps0 === 2 && took >= 1000, `the display is unplugged under the capture ⇒ the facts are read again — TWICE, ≥ 1 s apart (${took} ms) — and both say so: display_gone`, { ended: endedOf(pushS), reads: psRuns() - ps0, took });
   b.pc.close();
 }
 {
@@ -411,7 +411,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const up = await until(() => pictures(b.got.rtp).length >= 20, 10000);
   const st = await dms.streamStats(off.sid);
   const runs = ffRuns().slice(n0).filter((a) => a.some((x) => /^ddagrab=/.test(x) || x === 'pipe:0'));
-  ok(off.ok && off.source.mode === 'direct' && up && st.stats.screen.mode === 'direct' && st.stats.screen.timing === 'in-ffmpeg' && st.stats.screen.encodeMs === null && runs.length === 1 && runs[0].includes('ddagrab=output_idx=1:draw_mouse=0:framerate=30') && !runs[0].join(' ').includes('16bit'), 'an SDR primary: the direct road — ONE ffmpeg (8-bit DDA of output 1, no pointer painted — lane stream-cursor → NVENC), the pictures play, encodeMs null (timed inside ffmpeg)', { src: off.source, runs: runs.map((r) => r.join(' ')) });
+  ok(gateOf(off.ok) && off.source.mode === 'direct' && gateOf(up) && st.stats.screen.mode === 'direct' && st.stats.screen.timing === 'in-ffmpeg' && st.stats.screen.encodeMs === null && runs.length === 1 && gateOf(runs[0].includes('ddagrab=output_idx=1:draw_mouse=0:framerate=30')) && !runs[0].join(' ').includes('16bit'), 'an SDR primary: the direct road — ONE ffmpeg (8-bit DDA of output 1, no pointer painted — lane stream-cursor → NVENC), the pictures play, encodeMs null (timed inside ffmpeg)', { src: off.source, runs: runs.map((r) => r.join(' ')) });
   await dms.streamStop(off.sid);
   b.pc.close();
 }
@@ -422,13 +422,13 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   await dms.streamFacts({ force: true });
   const pushS = [];
   const { off, b } = await screenSession(pushS);
-  ok(off.ok && off.source.encoder === 'x264' && (await dms.streamStats(off.sid)).stats.screen.note === 'no_hw_encoder', 'only x264 in the ffmpeg: the software rung is taken and SAID (no_hw_encoder)', off.source);
+  ok(gateOf(off.ok) && off.source.encoder === 'x264' && (await dms.streamStats(off.sid)).stats.screen.note === 'no_hw_encoder', 'only x264 in the ffmpeg: the software rung is taken and SAID (no_hw_encoder)', off.source);
   await dms.streamStop(off.sid); b.pc.close();
   fs.renameSync(FF.exe, FF.exe + '.away');
   await dms.streamFacts({ force: true });
   const r = await dms.streamOffer({ sourceKind: 'screen' });
   fs.renameSync(FF.exe + '.away', FF.exe);
-  ok(r.ok === false && r.code === 'no_ffmpeg' && /PATH/.test(r.error) && /LOCALAPPDATA/.test(r.error) && /vs-probe/.test(r.error), 'no ffmpeg on the machine ⇒ the offer is refused as no_ffmpeg, naming where it looked (the page shows the VNC picture)', r);
+  ok(r.ok === false && r.code === 'no_ffmpeg' && gateOf(/PATH/.test(r.error)) && gateOf(/LOCALAPPDATA/.test(r.error)) && verdictOf(/vs-probe/.test(r.error)), 'no ffmpeg on the machine ⇒ the offer is refused as no_ffmpeg, naming where it looked (the page shows the VNC picture)', r);
 }
 {
   // lane desktop-display-modes: THE SWITCHER's rows on Windows + THE PER-MACHINE CAP (two displays ⇒ a stream each + one = 3)
@@ -438,13 +438,13 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const a = await dms.streamOffer({ sourceKind: 'screen' }), b2 = await dms.streamOffer({ sourceKind: 'screen', sourceId: D2.id });
   const rowsOf = (o) => (o.source && o.source.displays ? o.source.displays.map((d) => [d.id, d.name, d.primary, d.hdr, d.x, d.w, d.capturable]) : null);
   const want = [[D1.id, 'Desk 27', true, true, 0, 1280, true], [D2.id, 'Side 32', false, false, 1280, 1280, true]];
-  ok(a.ok && a.source.display === D1.id && JSON.stringify(rowsOf(a)) === JSON.stringify(want), 'a Windows screen offer names the display streamed (the primary) and the machine\'s displays — their own names, primary, HDR, geometry, capturable (the strip\'s switcher on Windows too)', a.source || a);
-  ok(b2.ok && b2.source.display === D2.id && b2.source.mode === 'direct' && JSON.stringify(rowsOf(b2)) === JSON.stringify(want), 'a display picked = THAT display\'s offer (the SDR one: the direct road), the same rows', b2.source || b2);
+  ok(gateOf(a.ok) && a.source.display === D1.id && JSON.stringify(rowsOf(a)) === JSON.stringify(want), 'a Windows screen offer names the display streamed (the primary) and the machine\'s displays — their own names, primary, HDR, geometry, capturable (the strip\'s switcher on Windows too)', a.source || a);
+  ok(gateOf(b2.ok) && b2.source.display === D2.id && b2.source.mode === 'direct' && JSON.stringify(rowsOf(b2)) === JSON.stringify(want), 'a display picked = THAT display\'s offer (the SDR one: the direct road), the same rows', b2.source || b2);
   const c3 = await dms.streamOffer({ sourceKind: 'screen' }), d4 = await dms.streamOffer({ sourceKind: 'screen', sourceId: D2.id });
-  ok(c3.ok && d4.ok === false && d4.code === 'too_many_streams' && d4.live === 3 && d4.cap === 3 && d4.displays === 2 && /at most 3 — a stream per display \+ one, for its 2 displays/.test(d4.error), 'THE PER-MACHINE CAP: two displays ⇒ three live streams (a window per display + a phone); the fourth is refused too_many_streams, its count named (live 3 · cap 3 · 2 displays)', { c3: c3.ok, d4 });
+  ok(gateOf(c3.ok) && d4.ok === false && d4.code === 'too_many_streams' && d4.live === 3 && d4.cap === 3 && d4.displays === 2 && verdictOf(/at most 3 — a stream per display \+ one, for its 2 displays/.test(d4.error)), 'THE PER-MACHINE CAP: two displays ⇒ three live streams (a window per display + a phone); the fourth is refused too_many_streams, its count named (live 3 · cap 3 · 2 displays)', { c3: c3.ok, d4 });
   for (const o of [a, b2, c3]) if (o.ok) await dms.streamStop(o.sid);
   const again = await dms.streamOffer({ sourceKind: 'screen' });
-  ok(again.ok, 'a stream stopped frees its place: the next start is taken', again.code || again.ok);
+  ok(verdictOf(again.ok), 'a stream stopped frees its place: the next start is taken', again.code || again.ok);
   if (again.ok) await dms.streamStop(again.sid);
 }
 {
@@ -457,14 +457,14 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const a = await screenSession(pushA);
   const plays = await until(() => pictures(a.b.got.rtp).length >= 10, 15000);
   const sa = a.off.ok ? await dms.streamStats(a.off.sid) : {};
-  ok(a.off.ok && plays && sa.stats && sa.stats.screen.captureRetries === 1 && fs.readFileSync(FAIL, 'utf8') === '0' && !endedOf(pushA), 'a capture that could not start (8007000e) is asked again once and the stream plays (captureRetries 1)', sa.stats && sa.stats.screen);
+  ok(gateOf(a.off.ok) && gateOf(plays) && gateOf(sa.stats) && sa.stats.screen.captureRetries === 1 && fs.readFileSync(FAIL, 'utf8') === '0' && !endedOf(pushA), 'a capture that could not start (8007000e) is asked again once and the stream plays (captureRetries 1)', sa.stats && sa.stats.screen);
   if (a.off.ok) await dms.streamStop(a.off.sid);
   a.b.pc.close();
   fs.writeFileSync(FAIL, '3');
   const pushB = [];
   const r = await screenSession(pushB);
   const ended = await until(() => endedOf(pushB), 12000);
-  ok(r.off.ok && ended && endedOf(pushB) === 'capture_exited' && fs.readFileSync(FAIL, 'utf8') === '0', 'one that never starts: asked again twice, then the session ends capture_exited by name (the page shows why)', { ended: endedOf(pushB), left: fs.readFileSync(FAIL, 'utf8') });
+  ok(gateOf(r.off.ok) && gateOf(ended) && endedOf(pushB) === 'capture_exited' && fs.readFileSync(FAIL, 'utf8') === '0', 'one that never starts: asked again twice, then the session ends capture_exited by name (the page shows why)', { ended: endedOf(pushB), left: fs.readFileSync(FAIL, 'utf8') });
   r.b.pc.close();
   FF.set({ failCapture: null });
 }
@@ -481,11 +481,11 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const flows = await until(() => pictures(b.got.rtp).length >= 10, 15000);
   const st = off.ok ? await dms.streamStats(off.sid) : {};
   const runs = ffRuns().slice(n0), enc = runs.find((a) => a.includes('pipe:0')) || [], cap = runs.find((a) => a.some((x) => /^ddagrab=/.test(x))) || [];
-  ok(off.ok && JSON.stringify(off.source.scaled) === JSON.stringify({ share: 2, step: 2, w: 1280, h: 720, from: { w: 2560, h: 1440 } }) && flows && enc[enc.indexOf('-video_size') + 1] === '1280x720' && cap.includes('hwdownload,format=rgbaf16le') && st.stats && st.stats.screen.step === 2 && st.stats.screen.w === 1280, 'shared by 2: the whole FP16 frame captured, mapped at every 2nd pixel — the encoder gets 1280×720, the offer says scaled {share 2, step 2, 1280×720 of 2560×1440}, the pictures flow', { scaled: off.source && off.source.scaled, video: enc[enc.indexOf('-video_size') + 1], step: st.stats && st.stats.screen.step });
+  ok(gateOf(off.ok) && JSON.stringify(off.source.scaled) === JSON.stringify({ share: 2, step: 2, w: 1280, h: 720, from: { w: 2560, h: 1440 } }) && gateOf(flows) && enc[enc.indexOf('-video_size') + 1] === '1280x720' && gateOf(cap.includes('hwdownload,format=rgbaf16le')) && gateOf(st.stats) && st.stats.screen.step === 2 && st.stats.screen.w === 1280, 'shared by 2: the whole FP16 frame captured, mapped at every 2nd pixel — the encoder gets 1280×720, the offer says scaled {share 2, step 2, 1280×720 of 2560×1440}, the pictures flow', { scaled: off.source && off.source.scaled, video: enc[enc.indexOf('-video_size') + 1], step: st.stats && st.stats.screen.step });
   if (off.ok) await dms.streamStop(off.sid);
   b.pc.close();
   const whole = await dms.streamOffer({ sourceKind: 'screen' });
-  ok(whole.ok && !whole.source.scaled, 'alone (no share): the whole picture, no `scaled`', whole.source || whole);
+  ok(gateOf(whole.ok) && !whole.source.scaled, 'alone (no share): the whole picture, no `scaled`', whole.source || whole);
   if (whole.ok) await dms.streamStop(whole.sid);
   FF.set({ raw: rawFile }); setDisplays([D1, D2]); // the later sections read the same facts file
 }
@@ -495,11 +495,11 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const TUS = AV1.ivfReader().push(fs.readFileSync(AV1_FIX)).filter((e) => e.type === 'tu');
   FF.set({ encoders: ['h264_nvenc', 'av1_nvenc', 'libx264'], av1: AV1_FIX, p010: p010File }); setDisplays([D1, D2]);
   const fsAll = await dms.streamFacts({ force: true });
-  ok(fsAll.ok && JSON.stringify(fsAll.ffmpeg.encoders) === '["h264_nvenc","av1_nvenc","libx264"]', 'stream-facts keep av1_nvenc (the HDR rung) in the machine\'s encoders', fsAll.ffmpeg);
+  ok(gateOf(fsAll.ok) && JSON.stringify(fsAll.ffmpeg.encoders) === '["h264_nvenc","av1_nvenc","libx264"]', 'stream-facts keep av1_nvenc (the HDR rung) in the machine\'s encoders', fsAll.ffmpeg);
   const rtpmaps = (sdp) => [...String(sdp).matchAll(/a=rtpmap:\d+ ([A-Za-z0-9]+)\/90000/g)].map((m) => m[1]);
   // hdr NOT asked: the offer as before — H.264 alone
   const plain = await dms.streamOffer({ sourceKind: 'screen' });
-  ok(plain.ok && JSON.stringify(rtpmaps(plain.offer.sdp)) === '["H264"]' && plain.source.mode === 'mapped' && JSON.stringify(plain.source.hdr) === '{"can":true,"on":false,"why":null}' && !plain.codecs, 'hdr not asked: the offer lists H.264 alone (the SDR road\'s offer unchanged); the source says the machine CAN (the page may show 「HDR 直通」)', { maps: rtpmaps(plain.offer.sdp), hdr: plain.source.hdr });
+  ok(gateOf(plain.ok) && JSON.stringify(rtpmaps(plain.offer.sdp)) === '["H264"]' && plain.source.mode === 'mapped' && JSON.stringify(plain.source.hdr) === '{"can":true,"on":false,"why":null}' && !plain.codecs, 'hdr not asked: the offer lists H.264 alone (the SDR road\'s offer unchanged); the source says the machine CAN (the page may show 「HDR 直通」)', { maps: rtpmaps(plain.offer.sdp), hdr: plain.source.hdr });
   if (plain.ok) await dms.streamStop(plain.sid);
   const hdrSession = async (codecs) => {
     const b = standIn(codecs), push = [];
@@ -511,30 +511,30 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   // A: a browser that takes AV1 (its answer lists it first)
   const n0 = ffRuns().length, q0 = qosRows().length;
   const A = await hdrSession([SM.STREAM_CODEC_AV1, SM.STREAM_CODEC]);
-  ok(A.off.ok && JSON.stringify(rtpmaps(A.off.offer.sdp)) === '["AV1","H264"]' && /a=fmtp:\d+ level-idx=5;profile=0;tier=0/.test(A.off.offer.sdp) && A.off.source.mode === 'hdr' && A.off.source.encoder === 'NVENC AV1' && JSON.stringify(A.off.source.hdr) === '{"can":true,"on":true,"why":null}' && JSON.stringify(A.off.codecs) === '["video/AV1","video/H264"]',
+  ok(gateOf(A.off.ok) && JSON.stringify(rtpmaps(A.off.offer.sdp)) === '["AV1","H264"]' && gateOf(/a=fmtp:\d+ level-idx=5;profile=0;tier=0/.test(A.off.offer.sdp)) && A.off.source.mode === 'hdr' && A.off.source.encoder === 'NVENC AV1' && JSON.stringify(A.off.source.hdr) === '{"can":true,"on":true,"why":null}' && JSON.stringify(A.off.codecs) === '["video/AV1","video/H264"]',
     'hdr asked of the HDR display with av1_nvenc: the offer lists AV1 FIRST (profile 0, the probe\'s fmtp) then H.264; the source says hdr, NVENC AV1', { maps: A.off.ok && rtpmaps(A.off.offer.sdp), src: A.off.source });
   const flowsA = await until(() => units(A.b.got.rtp).length >= 40, 15000);
   const gotA = units(A.b.got.rtp), k0 = TUS.findIndex((t) => t.key);
   const same40 = gotA.slice(0, 40).filter((obus, i) => { const want = AV1.obusOf(TUS[(k0 + i) % TUS.length].tu).filter((o) => o.type !== AV1.OBU.td); return obus && obus.length === want.length && obus.every((o, j) => o.type === want[j].type && Buffer.compare(Buffer.from(o.body), Buffer.from(want[j].body)) === 0); }).length;
-  ok(flowsA && same40 === 40, 'the browser that took AV1 gets THE AV1 fixture\'s temporal units from its first key frame, OBU for OBU (IVF → the aggregated-TU RTP payloads → depacketized)', { n: gotA.length, same40 });
+  ok(gateOf(flowsA) && same40 === 40, 'the browser that took AV1 gets THE AV1 fixture\'s temporal units from its first key frame, OBU for OBU (IVF → the aggregated-TU RTP payloads → depacketized)', { n: gotA.length, same40 });
   const runsA = ffRuns().slice(n0), capA = runsA.find((a) => a.some((x) => /^ddagrab=/.test(x))), encA = runsA.find((a) => a.includes('pipe:0'));
   const planA = SP.planScreen({ platform: 'win32', ffmpeg: { path: 'x', major: 7, ddagrab: true, encoders: ['h264_nvenc', 'av1_nvenc'] }, displays: [D1] }, { hdr: true });
   ok(JSON.stringify(capA) === JSON.stringify(SP.captureArgv(planA)) && JSON.stringify(encA) === JSON.stringify(SP.hdrEncodeArgv(planA)), 'the two ffmpegs ran EXACTLY the hdr plan\'s argvs (the FP16 capture; P010 → av1_nvenc → IVF, the frames tagged bt2020 / PQ)', { capA, encA });
   const p010 = fs.existsSync(p010File) ? fs.readFileSync(p010File) : null;
   const wantP = new Uint16Array(SP.p010Bytes(1280, 720) / 2); SP.p010FromHalf(new Uint16Array(cal.buf.buffer, cal.buf.byteOffset, cal.buf.length / 2), 1280, 720, SP.buildPqTables(), wantP);
-  ok(p010 && p010.length === 1280 * 720 * 3 && Buffer.compare(p010, Buffer.from(wantP.buffer)) === 0, 'THE PQ GATE through the real daemon: the P010 its encoder got IS p010FromHalf of the owner\'s FP16 calibration frame, sample for sample (the worker\'s own tables = the function)', p010 && p010.length);
+  ok(gateOf(p010) && p010.length === 1280 * 720 * 3 && Buffer.compare(p010, Buffer.from(wantP.buffer)) === 0, 'THE PQ GATE through the real daemon: the P010 its encoder got IS p010FromHalf of the owner\'s FP16 calibration frame, sample for sample (the worker\'s own tables = the function)', p010 && p010.length);
   const stA = A.off.ok ? await dms.streamStats(A.off.sid) : {};
   const qos = await until(() => qosRows().length > q0, 4000);
   const qLines = qosRows().slice(q0), qPids = qLines[0] ? qLines[0].pids : [];
   const stA2 = A.off.ok ? await dms.streamStats(A.off.sid) : {};
-  ok(stA.ok && stA.stats.codec === 'AV1' && stA.stats.screen.mode === 'hdr' && JSON.stringify(stA.stats.screen.hdr) === '{"codec":"AV1","bits":10,"transfer":"pq","primaries":"bt2020"}' && stA.stats.screen.mapper === 'worker' && stA.stats.screen.captured >= 40,
+  ok(gateOf(stA.ok) && stA.stats.codec === 'AV1' && stA.stats.screen.mode === 'hdr' && JSON.stringify(stA.stats.screen.hdr) === '{"codec":"AV1","bits":10,"transfer":"pq","primaries":"bt2020"}' && stA.stats.screen.mapper === 'worker' && stA.stats.screen.captured >= 40,
     'the numbers: the codec sent is AV1, the road hdr (PQ 10-bit BT.2020 — the details\' 「HDR」 row), mapped by the worker', stA.stats && { codec: stA.stats.codec, screen: stA.stats.screen });
-  ok(qos && qLines.length === 1 && qLines[0].mode === 'off' && qPids.length === 3 && qPids.every((p) => Number.isInteger(p) && p > 0) && new Set(qPids).size === 3 && qPids.includes(agentPidS()) && stA2.stats.screen.unthrottle && stA2.stats.screen.unthrottle.asked === 3 && stA2.stats.screen.unthrottle.ok === 3,
+  ok(gateOf(qos) && qLines.length === 1 && qLines[0].mode === 'off' && qPids.length === 3 && gateOf(qPids.every((p) => Number.isInteger(p) && p > 0)) && new Set(qPids).size === 3 && gateOf(qPids.includes(agentPidS())) && gateOf(stA2.stats.screen.unthrottle) && stA2.stats.screen.unthrottle.asked === 3 && stA2.stats.screen.unthrottle.ok === 3,
     'Windows POWER THROTTLING: ONE opt-out script for the agent and its two ffmpegs (three pids — the start batched, the agent\'s own among them), all three ok in the numbers', { qLines, agent: agentPidS(), un: stA2.stats && stA2.stats.screen.unthrottle });
   if (A.off.ok) await dms.streamStop(A.off.sid);
   A.b.pc.close();
   const backA = await until(() => qosRows().length > q0 + 1, 4000);
-  ok(backA && JSON.stringify(qosRows().slice(q0 + 1)) === JSON.stringify([{ mode: 'restore', pids: [agentPidS()] }]), 'stopped ⇒ the agent\'s opt-out is given back (lane stream-sdr-ecoqos: the HDR road\'s too — it used to stay opted out until the agent restarted)', qosRows().slice(q0));
+  ok(gateOf(backA) && JSON.stringify(qosRows().slice(q0 + 1)) === JSON.stringify([{ mode: 'restore', pids: [agentPidS()] }]), 'stopped ⇒ the agent\'s opt-out is given back (lane stream-sdr-ecoqos: the HDR road\'s too — it used to stay opted out until the agent restarted)', qosRows().slice(q0));
   // B: a browser WITHOUT AV1 — the same hdr offer, answered H.264 ⇒ the mapped road (today's picture), no opt-out
   const n1 = ffRuns().length, q1 = qosRows().length;
   const B = await hdrSession([SM.STREAM_CODEC]);
@@ -544,11 +544,11 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const stB = B.off.ok ? await dms.streamStats(B.off.sid) : {};
   const runsB = ffRuns().slice(n1), encB = runsB.find((a) => a.includes('pipe:0'));
   const planB = SP.planScreen({ platform: 'win32', ffmpeg: { path: 'x', major: 7, ddagrab: true, encoders: ['h264_nvenc', 'av1_nvenc'] }, displays: [D1] });
-  ok(B.off.ok && JSON.stringify(rtpmaps(B.off.offer.sdp)) === '["AV1","H264"]' && flowsB && sameB === 20 && stB.stats.codec === 'H264' && stB.stats.screen.mode === 'mapped' && stB.stats.screen.hdr === null && JSON.stringify(encB) === JSON.stringify(SP.encodeArgv(planB)),
+  ok(gateOf(B.off.ok) && JSON.stringify(rtpmaps(B.off.offer.sdp)) === '["AV1","H264"]' && gateOf(flowsB) && sameB === 20 && stB.stats.codec === 'H264' && stB.stats.screen.mode === 'mapped' && stB.stats.screen.hdr === null && JSON.stringify(encB) === JSON.stringify(SP.encodeArgv(planB)),
     'a browser WITHOUT AV1 answers the same offer with H.264 ⇒ the agent runs today\'s mapped road (NV12 → NVENC H.264, the plan\'s argv byte for byte) and the H.264 fixture plays byte for byte', { sameB, codec: stB.stats && stB.stats.codec, mode: stB.stats && stB.stats.screen.mode, encB });
   await sleep(600);
   const qB = qosRows().slice(q1), unB = ((await dms.streamStats(B.off.sid)).stats || {}).screen;
-  ok(qB.length === 1 && qB[0].mode === 'off' && qB[0].pids.length === 3 && qB[0].pids.includes(agentPidS()) && unB && unB.unthrottle && unB.unthrottle.ok === 3 && unB.ecoqos === 'off', 'lane stream-sdr-ecoqos: the SDR (mapped) road this browser got opts the agent and both ffmpegs out too — ONE script, ecoqos off (before: nothing opted out)', { qB, un: unB && unB.unthrottle, ecoqos: unB && unB.ecoqos });
+  ok(qB.length === 1 && qB[0].mode === 'off' && qB[0].pids.length === 3 && gateOf(qB[0].pids.includes(agentPidS())) && gateOf(unB) && gateOf(unB.unthrottle) && unB.unthrottle.ok === 3 && unB.ecoqos === 'off', 'lane stream-sdr-ecoqos: the SDR (mapped) road this browser got opts the agent and both ffmpegs out too — ONE script, ecoqos off (before: nothing opted out)', { qB, un: unB && unB.unthrottle, ecoqos: unB && unB.ecoqos });
   if (B.off.ok) await dms.streamStop(B.off.sid);
   B.b.pc.close();
   FF.set({ av1: null, p010: null, encoders: ['h264_nvenc', 'libx264'] }); await dms.streamFacts({ force: true });
@@ -574,7 +574,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const a = await dms.streamAnswer(off.sid, { answer: { type: 'answer', sdp: trickled(b.pc.localDescription.sdp) } });
   const answerMs = Date.now() - t0;
   const plays = await until(() => pictures(b.got.rtp).length >= 5, 8000);
-  ok(off.ok && c.ok && a.ok && answerMs < MDNS_TIMEOUT_MS / 5 && plays, `a browser's mDNS candidate (<uuid>.local) BEFORE its answer: the agent never hands it to werift — the answer took ${answerMs} ms and the picture plays`, { c, a, answerMs });
+  ok(gateOf(off.ok) && gateOf(c.ok) && gateOf(a.ok) && answerMs < MDNS_TIMEOUT_MS / 5 && verdictOf(plays), `a browser's mDNS candidate (<uuid>.local) BEFORE its answer: the agent never hands it to werift — the answer took ${answerMs} ms and the picture plays`, { c, a, answerMs });
   if (off.ok) await dms.streamStop(off.sid);
   b.pc.close();
   // RED CONTROL: werift as the agent uses it (ICE-lite, the offerer), handed the same candidate before the answer
@@ -616,7 +616,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const offM = await rowsFrom(q, 1);
   await until(async () => (await screenOf(M.off.sid))?.ecoqos === 'off', 4000);
   const stM = await screenOf(M.off.sid);
-  ok(M.off.ok && M.off.source.mode === 'mapped' && me > 0 && offOnce(offM, 3) && fs.readFileSync(qosLast + 'off', 'utf8') === SP.unthrottlePs(offM[0].pids) && stM && stM.ecoqos === 'off' && stM.unthrottle && stM.unthrottle.ok === 3,
+  ok(gateOf(M.off.ok) && M.off.source.mode === 'mapped' && me > 0 && gateOf(offOnce(offM, 3)) && fs.readFileSync(qosLast + 'off', 'utf8') === SP.unthrottlePs(offM[0].pids) && gateOf(stM) && stM.ecoqos === 'off' && gateOf(stM.unthrottle) && stM.unthrottle.ok === 3,
     'the SDR MAPPED road (an HDR display, H.264): the agent and both ffmpegs opted out ONCE at the start, in one script (the HDR lane\'s unthrottlePs byte for byte), the agent\'s own pid among the three; the numbers say ecoqos off', { offM, me, ecoqos: stM && stM.ecoqos, un: stM && stM.unthrottle });
   q = qosRows().length;
   await dms.streamStop(M.off.sid); M.b.pc.close();
@@ -630,7 +630,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   q = qosRows().length;
   await dms.streamStop(Dr.off.sid); Dr.b.pc.close();
   const backD = await rowsFrom(q, 1);
-  ok(Dr.off.ok && Dr.off.source.mode === 'direct' && offOnce(offD, 2) && stD && stD.ecoqos === 'off' && JSON.stringify(backD) === GIVE_BACK, 'the SDR DIRECT road (the SDR display): the agent and its one ffmpeg opted out once at the start (ecoqos off); stopped ⇒ the agent given back', { offD, ecoqos: stD && stD.ecoqos, backD });
+  ok(gateOf(Dr.off.ok) && Dr.off.source.mode === 'direct' && gateOf(offOnce(offD, 2)) && gateOf(stD) && stD.ecoqos === 'off' && JSON.stringify(backD) === GIVE_BACK, 'the SDR DIRECT road (the SDR display): the agent and its one ffmpeg opted out once at the start (ecoqos off); stopped ⇒ the agent given back', { offD, ecoqos: stD && stD.ecoqos, backD });
   // ③ an ffmpeg CRASHES: the encoder dies ⇒ the session ends encoder_exited — and the agent is given back with no stop asked
   q = qosRows().length;
   const C = await session();
@@ -640,7 +640,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   await until(() => endedOf(C.push), 6000);
   fs.rmSync(dieEnc, { force: true });
   const backC = await rowsFrom(q, 1);
-  ok(offOnce(offC, 3) && endedOf(C.push) === 'encoder_exited' && JSON.stringify(backC) === GIVE_BACK, 'an ffmpeg CRASH (the encoder dies ⇒ encoder_exited, nobody asked a stop): the agent is given back in the end\'s finally — never left opted out', { offC, ended: endedOf(C.push), backC });
+  ok(gateOf(offOnce(offC, 3)) && endedOf(C.push) === 'encoder_exited' && JSON.stringify(backC) === GIVE_BACK, 'an ffmpeg CRASH (the encoder dies ⇒ encoder_exited, nobody asked a stop): the agent is given back in the end\'s finally — never left opted out', { offC, ended: endedOf(C.push), backC });
   C.b.pc.close();
   // ④ TWO streams at once share the agent's: the first opts it out, the second only its own ffmpeg; the first stopped gives nothing
   // back (the second still runs at full speed), the last one does
@@ -657,11 +657,11 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const afterFirst = qosRows().slice(q), stY2 = await screenOf(Y.off.sid);
   await dms.streamStop(Y.off.sid); Y.b.pc.close();
   const afterLast = await rowsFrom(q, 1);
-  ok(offOnce(offX, 3) && offOnce(offY, 1, false) && stY && stY.ecoqos === 'off' && afterFirst.length === 0 && stY2 && stY2.ecoqos === 'off' && JSON.stringify(afterLast) === GIVE_BACK,
+  ok(gateOf(offOnce(offX, 3)) && gateOf(offOnce(offY, 1, false)) && gateOf(stY) && stY.ecoqos === 'off' && afterFirst.length === 0 && gateOf(stY2) && stY2.ecoqos === 'off' && JSON.stringify(afterLast) === GIVE_BACK,
     'TWO streams at once: the agent opted out ONCE (the second start asks only its own ffmpeg); the first stopped gives nothing back (the other still says ecoqos off); the last one stopped gives the agent back', { offX, offY, afterFirst, afterLast, ecoqos: [stY && stY.ecoqos, stY2 && stY2.ecoqos] });
   // ⑤ display settings are never touched: every script the agent ran in these streams is the facts read or the opt-out
   const kinds = psAt().slice(ps0);
-  ok(kinds.length > 0 && kinds.every((k) => k === 'facts' || k === 'qos') && !kinds.some((k) => /display/.test(k)) && !DISPLAY_SET.test(SP.unthrottlePs([1])) && !DISPLAY_SET.test(SP.unthrottlePs([1], { restore: true })) && !DISPLAY_SET.test(SP.STREAM_FACTS_PS),
+  ok(kinds.length > 0 && gateOf(kinds.every((k) => k === 'facts' || k === 'qos')) && !kinds.some((k) => /display/.test(k)) && !DISPLAY_SET.test(SP.unthrottlePs([1])) && !DISPLAY_SET.test(SP.unthrottlePs([1], { restore: true })) && !DISPLAY_SET.test(SP.STREAM_FACTS_PS),
     'NEVER A DISPLAY SETTING: every PowerShell the agent ran around these streams was the facts read or the opt-out / give-back — none calls ChangeDisplaySettings / SetDisplayConfig / DisplayConfigSetDeviceInfo / SetDeviceGammaRamp', { kinds: [...new Set(kinds)], n: kinds.length });
 }
 dms.stop(); endDaemonsOf(rootOf(homeScr));
@@ -746,7 +746,7 @@ console.log('§9b THE OPT-OUT\'S LIFETIME in-process (lane stream-sdr-ecoqos): n
   }
   const offOk = (x) => x.off && x.off.length === 1 && x.off[0].mode === 'off' && x.off[0].pids.length === 3 && x.off[0].pids.includes(process.pid) && x.eco === 'off';
   const real = await lifetime(SS);
-  ok(offOk(real.stop) && real.stop.back && offOk(real.crash) && real.crash.ended === 'encoder_exited' && real.crash.back, 'THE MODULE: one opt-out at each start (this process + both ffmpegs, ecoqos off); given back at the stop AND after the encoder crashed (encoder_exited, no stop asked)', real);
+  ok(gateOf(offOk(real.stop)) && gateOf(real.stop.back) && gateOf(offOk(real.crash)) && real.crash.ended === 'encoder_exited' && verdictOf(real.crash.back), 'THE MODULE: one opt-out at each start (this process + both ffmpegs, ecoqos off); given back at the stop AND after the encoder crashed (encoder_exited, no stop asked)', real);
   // MUTANTS: a copy of the module with one line changed, required from the scratch dir. EVERY relative require of the copy is
   // resolved by ONE rule against the module's own folder (src/agentd), never a list of names, so the next sibling the module
   // requires cannot break the copy (主开发 r593: B-3d06's `../agent-env.js` was not on the old list of four ⇒ the copy could not
@@ -761,8 +761,8 @@ console.log('§9b THE OPT-OUT\'S LIFETIME in-process (lane stream-sdr-ecoqos): n
     .replace("require('../ffmpeg-install.js')", 'require("/t/ffmpeg-install.js")').replace("require('./stream-mac.js')", 'require("/t/stream-mac.js")');
   const relsHere = relReqs(ssText);
   const plantedSib = ssText.replace("const path = require('path');\n", "const path = require('path');\nconst SIB = require('./watch-guard.js');\n");
-  ok(relsHere.length >= 5 && relReqs(pointAtTree(ssText)).length === 0 && relsHere.every((r) => fs.existsSync(path.resolve(SS_DIR, r)))
-    && plantedSib !== ssText && relReqs(pointAtTree(plantedSib)).length === 0 && relReqs(byNames(plantedSib)).includes('./watch-guard.js'),
+  ok(relsHere.length >= 5 && relReqs(pointAtTree(ssText)).length === 0 && gateOf(relsHere.every((r) => fs.existsSync(path.resolve(SS_DIR, r))))
+    && plantedSib !== ssText && relReqs(pointAtTree(plantedSib)).length === 0 && verdictOf(relReqs(byNames(plantedSib)).includes('./watch-guard.js')),
     `the mutant copy's requires: all ${relsHere.length} relative ones resolved against src/agentd by ONE rule (each a file of the tree), none left; RED control: a NEW sibling require planted in the text is resolved by the rule, while the release's name list leaves it (${JSON.stringify(relReqs(byNames(plantedSib)))})`, { relsHere });
   // a mutant that is not made is a NAMED red row of its own leg (why() below), never a crash: (B-0d3e) a moved or doubled anchor
   // THROWS with the anchor it wanted and the file (as does a copy that cannot be written), and a copy that cannot load says so
@@ -780,10 +780,10 @@ console.log('§9b THE OPT-OUT\'S LIFETIME in-process (lane stream-sdr-ecoqos): n
   const why = (name, m) => (m ? '' : ` — ${notMade[name]}`);
   const m1 = mutant('no-give-back', '    qosScript([process.pid], true);\n', '\n');
   const r1 = m1 && await lifetime(m1);
-  ok(r1 && offOk(r1.stop) && !r1.stop.back && !r1.crash.back, 'MUTANT — the keeper forgets the give-back: this process stays opted out after the stop and after the crash ⇒ both lifetime rows are RED' + why('no-give-back', m1), r1 && { stop: r1.stop.after, crash: r1.crash.after });
+  ok(gateOf(r1) && gateOf(offOk(r1.stop)) && !r1.stop.back && !r1.crash.back, 'MUTANT — the keeper forgets the give-back: this process stays opted out after the stop and after the crash ⇒ both lifetime rows are RED' + why('no-give-back', m1), r1 && { stop: r1.stop.after, crash: r1.crash.after });
   const m2 = mutant('crash-keeps-it', '      stopped = true;\n      close(false);\n', '      stopped = true;\n      for (const c of procs) end(c); teardownMapper();\n');
   const r2 = m2 && await lifetime(m2);
-  ok(r2 && r2.stop.back && r2.crash.ended === 'encoder_exited' && !r2.crash.back, 'MUTANT — an ending by name skips the give-back (only a stop gives it back): the crash row is RED — an encoder crash would leave the agent opted out for ever' + why('crash-keeps-it', m2), r2 && { stop: r2.stop.after, crash: r2.crash.after });
+  ok(gateOf(r2) && gateOf(r2.stop.back) && r2.crash.ended === 'encoder_exited' && !r2.crash.back, 'MUTANT — an ending by name skips the give-back (only a stop gives it back): the crash row is RED — an encoder crash would leave the agent opted out for ever' + why('crash-keeps-it', m2), r2 && { stop: r2.stop.after, crash: r2.crash.after });
 }
 
 console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — the picture past a slow device link');
@@ -838,7 +838,7 @@ console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — 
   const dmL = new DeviceManager({ dataDir: path.join(homeLeg, 'hub-data'), bundlePath: BUNDLE, version, nodeModules: path.join(REPO, 'node_modules'), log: () => { }, transport: { kind: 'stream', hostToken: HT, getStream: () => linkStream } });
   devices.push(dmL);
   const cl = await dmL.connect();
-  ok(cl.info.platform === 'win32' && cl.info.capabilities.includes('stream-offer'), `a real daemon DIALED this hub through a ${CAP} kbps link stand-in (Windows-shaped hello)`);
+  ok(cl.info.platform === 'win32' && verdictOf(cl.info.capabilities.includes('stream-offer')), `a real daemon DIALED this hub through a ${CAP} kbps link stand-in (Windows-shaped hello)`);
   const hostsL = { get: (h) => ({ id: h, name: 'WIN' }), isLocal: () => false, deviceBounded: async () => dmL, connectedDevice: () => dmL };
   const accessOf = (src) => ACC.create({ hosts: hostsL, install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: src }), log: { log() { }, warn() { } } });
   /** One relayed session: relay-only hub, a stand-in browser; the pictures, RTP gaps and the picture's lag over `secs`. */
@@ -881,7 +881,7 @@ console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — 
   } });
   ok(A.fps >= 29 && A.gaps === 0 && A.lag !== null && A.lag < 300, `THE UDP LEG: 30 fps of the 8 Mbps fixture for 10 s past a ${CAP} kbps device link — ${A.fps} fps, ${A.gaps} RTP gaps, the picture's lag moved ${A.lag} ms`, { fps: A.fps, gaps: A.gaps, lag: A.lag });
   ok(A.relay.via === 'udp' && A.relay.leg.down >= 0.99 * A.relay.down && A.agent.relay.via === 'udp' && A.agent.relay.leg.state === 'up', `the record: the hub forwards via the daemon's udp leg (${A.relay.leg.down} of ${A.relay.down} datagrams to the browser came over it), the daemon says via udp, its leg up`, { relay: A.relay, agentRelay: A.agent.relay });
-  ok(A.relay.leg.forged >= 1 && A.relay.leg.stray >= 1 && addrBefore && A.relay.leg.addr === addrBefore && A.gaps === 0, 'a forged PING (another key) and a stray DATA mid-run: dropped and counted; the leg\'s address unchanged, not one RTP gap', A.relay.leg);
+  ok(A.relay.leg.forged >= 1 && A.relay.leg.stray >= 1 && gateOf(addrBefore) && A.relay.leg.addr === addrBefore && A.gaps === 0, 'a forged PING (another key) and a stray DATA mid-run: dropped and counted; the leg\'s address unchanged, not one RTP gap', A.relay.leg);
   ok(A.agent.relay.leg.pings >= 5 && A.agent.relay.leg.pongs >= A.agent.relay.leg.pings - 1, `the keepalive: the daemon PINGed ${A.agent.relay.leg.pings}× in the session (every 2 s while it carries the picture), ${A.agent.relay.leg.pongs} answered`, A.agent.relay.leg);
   // RUN B: RED CONTROL — the device-link path alone through the same link
   const Bc = await relayedRun({ udpLeg: false });
@@ -897,7 +897,7 @@ console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — 
   const back = await until(async () => (await C.wr.poll(C.s.key, 0, -1, 0)).relay.via === 'udp', 7000);
   const nBack = C.marks.length; await sleep(1000);
   const stUp = (await dmL.streamStats(C.s.sid)).stats;
-  ok(back && stUp.relay.leg.state === 'up' && C.marks.length - nBack >= 25, `answered again: the next re-ask (≤ 5 s) brings the leg UP and it carries the picture (${C.marks.length - nBack} pictures in the next second)`, stUp.relay.leg);
+  ok(gateOf(back) && stUp.relay.leg.state === 'up' && C.marks.length - nBack >= 25, `answered again: the next re-ask (≤ 5 s) brings the leg UP and it carries the picture (${C.marks.length - nBack} pictures in the next second)`, stUp.relay.leg);
   mute = true;
   const tMute = Date.now();
   const fell = await until(async () => (await dmL.streamStats(C.s.sid)).stats.relay.via === 'link', 11000);
@@ -905,7 +905,7 @@ console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — 
   const hubFell = await until(async () => (await C.wr.poll(C.s.key, 0, -1, 0)).relay.via === 'link', 9000);
   const hubMs = Date.now() - tFell;
   const nFell = C.marks.length; await sleep(1500);
-  ok(fell && fellMs <= 9000 && hubFell && hubMs <= SM.STREAM_LIMITS.legDeadMs + 1500 && C.marks.length - nFell >= 40, `silenced mid-run: three PINGs in a row unanswered — the daemon takes the device link ${fellMs} ms after (≤ 2 s + 3 × 2 s), the hub ${hubMs} ms later (its 6 s silence bound), and the pictures keep coming (${C.marks.length - nFell} in 1.5 s)`);
+  ok(gateOf(fell) && fellMs <= 9000 && gateOf(hubFell) && hubMs <= SM.STREAM_LIMITS.legDeadMs + 1500 && C.marks.length - nFell >= 40, `silenced mid-run: three PINGs in a row unanswered — the daemon takes the device link ${fellMs} ms after (≤ 2 s + 3 × 2 s), the hub ${hubMs} ms later (its 6 s silence bound), and the pictures keep coming (${C.marks.length - nFell} in 1.5 s)`);
   await C.wr.stop(C.s.key); C.wr.shutdown(); C.b.pc.close();
 
   console.log('§11 THE LEG THAT CARRIES NOTHING, end to end (lane stream-udp-leg-fallback): the leg through a middlebox that drops by rule');
@@ -961,13 +961,13 @@ console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — 
   const R1 = await legRun(dataDead, {}, { holdMs: 10000 });
   const fellAt = (R1.lines.find((l) => /carried nothing for 7 s/.test(l)) || '').match(/^(-?\d+) ms/), fallMs = fellAt ? Number(fellAt[1]) : null;
   const after = fallMs === null ? 0 : R1.marks.filter((t) => t > fallMs).length;
-  ok(R1.firstMs !== null && R1.firstMs < 3000 && fallMs !== null && fallMs >= SM.STREAM_LIMITS.legFirstMs - 1000 && after >= 10 && R1.restarts === 0 && new RegExp(`leg up — the hub's ${SM.legProbeBytes()}-byte probe made the round trip`).test(R1.lines[0] || ''),
+  ok(R1.firstMs !== null && R1.firstMs < 3000 && fallMs !== null && fallMs >= SM.STREAM_LIMITS.legFirstMs - 1000 && after >= 10 && R1.restarts === 0 && verdictOf(new RegExp(`leg up — the hub's ${SM.legProbeBytes()}-byte probe made the round trip`).test(R1.lines[0] || '')),
     `the probe crosses, no DATA does: taken ON TRIAL — the first picture ${R1.firstMs} ms after the answer over the device link (make before break), «the leg carried nothing for 7 s» at ${fallMs} ms, and the picture never stopped (${after} pictures after the fall, no restart)`, { firstMs: R1.firstMs, lines: R1.lines, restarts: R1.restarts, states: R1.states, after });
   ok(R1.maxData > 0 && R1.maxData <= SM.legProbeBytes(), `r2: the largest DATA the REAL daemon put on the leg (its DTLS flights, SCTP and sealed RTP — this fixture's pictures never fill a payload; test-desktop-webrtc §14e seals a full one) is ${R1.maxData} bytes — the hub's probe is ${SM.legProbeBytes()}: never smaller than what the leg carried`, { maxData: R1.maxData });
   const RB = await legRun(controlOnly, { legProbe: false, elect: BASE_ELECT }, { waitMs: 20000 });
-  ok(RB.n === 0 && RB.relay.via === 'udp' && RB.lines.length === 1 && /\(leg up\)$/.test(RB.lines[0]), `RED CONTROL — the .358 hub in the incident's shape: «(leg up)» and not one picture in 20 s, still on the leg (the owner's black pane)`, { n: RB.n, via: RB.relay.via, lines: RB.lines });
+  ok(RB.n === 0 && RB.relay.via === 'udp' && RB.lines.length === 1 && verdictOf(/\(leg up\)$/.test(RB.lines[0])), `RED CONTROL — the .358 hub in the incident's shape: «(leg up)» and not one picture in 20 s, still on the leg (the owner's black pane)`, { n: RB.n, via: RB.relay.via, lines: RB.lines });
   dmL.stop(); endDaemonsOf(rootL); capped.close(); hubHttp.close();
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

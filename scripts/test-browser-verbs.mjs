@@ -68,7 +68,7 @@ const require = createRequire(import.meta.url);
 const V = require('../src/browser-verbs.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -84,7 +84,7 @@ const FIX = path.join(REPO, 'scripts/fixtures/browser-verbs');
 // ═══ ① the PURE router ═══
 console.log('① the PURE router');
 {
-  ok(V.OURS.length === 16 && ['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart', 'size', 'ask-human'].every((w) => V.OURS.includes(w)), 'OURS is exactly the 16 VibeSpace words (lane browser-resume B: + `resume`; lane launch-picture-size: + `size`; lane browser-takeover-queue: + `ask-human`)');
+  ok(V.OURS.length === 16 && verdictOf(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart', 'size', 'ask-human'].every((w) => V.OURS.includes(w))), 'OURS is exactly the 16 VibeSpace words (lane browser-resume B: + `resume`; lane launch-picture-size: + `size`; lane browser-takeover-queue: + `ask-human`)');
   for (const w of V.OURS) ok(V.classify([w, 'x']).kind === 'ours', `\`${w}\` is ours`);
   ok(V.classify([]).kind === 'ours' && V.classify([]).verb === 'help' && V.classify(['--help']).verb === 'help', 'no args / --help ⇒ help');
 
@@ -110,37 +110,37 @@ console.log('① the PURE router');
   const extra = JSON.parse(fs.readFileSync(path.join(FIX, `core-full-extra-${TV}.json`), 'utf8')).verbs;
   const census = [...new Set([...words, ...extra])].sort();
   ok(census.length >= 65, `the census is non-vacuous (${census.length} top-level words)`, census.join(' '));
-  ok(['open', 'snapshot', 'get', 'network', 'batch', 'profiles', 'connect', 'mcp', 'window', 'state'].every((w) => census.includes(w)), 'the census reads both listings (core, header-spelled families, the extras)');
+  ok(verdictOf(['open', 'snapshot', 'get', 'network', 'batch', 'profiles', 'connect', 'mcp', 'window', 'state'].every((w) => census.includes(w))), 'the census reads both listings (core, header-spelled families, the extras)');
   ok(JSON.stringify(V.collisions(census)) === JSON.stringify(['profiles']), `the collision set COMPUTED from the census is exactly {profiles} (${V.collisions(census).join(',')})`);
   const unknown = census.filter((w) => !V.known(w));
   ok(unknown.length === 0, `every census word is classified by the table — page or refused by name (${unknown.join(', ') || 'none left over'})`);
   ok(V.classify(['--', 'profiles']).kind === 'page', 'the collided word is reachable as `-- profiles` (the browser CLI\'s, harmless)');
   // lane browser-ui-prompts-r2: `permission` is VibeSpace's own CDP act (no help fixture names it — none needed); `pdf` is the binary's
   { const pm = V.classify(['permission', 'geolocation', 'allow']), pd = V.classify(['pdf', 'out.pdf']);
-    ok(!census.includes('permission') && V.OURS_PAGE.includes('permission') && pm.kind === 'page' && pm.ours === true && pm.verb === 'permission', '`permission` (decide a page permission) is OURS: the resolve road, never the binary — 0.38.1 has no such verb', JSON.stringify(pm));
-    ok(census.includes('pdf') && pd.kind === 'page' && !pd.ours && pd.writeFiles.length === 1, '`pdf <path>` (the print sentence\'s way out) is the binary\'s own page verb, its path a WRITE verdict', JSON.stringify(pd)); }
+    ok(!census.includes('permission') && gateOf(V.OURS_PAGE.includes('permission')) && pm.kind === 'page' && pm.ours === true && pm.verb === 'permission', '`permission` (decide a page permission) is OURS: the resolve road, never the binary — 0.38.1 has no such verb', JSON.stringify(pm));
+    ok(gateOf(census.includes('pdf')) && pd.kind === 'page' && !pd.ours && pd.writeFiles.length === 1, '`pdf <path>` (the print sentence\'s way out) is the binary\'s own page verb, its path a WRITE verdict', JSON.stringify(pd)); }
   // lane vault-login r22: `login` is retired by name (`login_retired`), `fill --vault` is parsed + refused inside `batch` (`vault_fill_in_batch`), and `parseSnapshotRefs` extracts role+name+nth
   { const lg = V.classify(['login']), vf = V.classify(['fill', '@e2', '--vault', 'shop.example.test/password']), vfg = V.classify(['fill', '#npw', '--vault', 'new:shop.example.test/password', '--generate', '--user', 'bob']), vfb = V.classify(['batch', 'fill @e2 --vault shop.example.test/password']);
     const p1 = V.parseFillVaultArgs(vf.argv), p2 = V.parseFillVaultArgs(vfg.argv);
     const refs = V.parseSnapshotRefs('- textbox "Email" [ref=e1]\n- textbox "Email" [ref=e2]\n- textbox "Password" [ref=e3]');
-    ok(lg.kind === 'refused' && lg.code === 'login_retired' && /snapshot -i/.test(lg.remedy) && /fill @ref --vault/.test(lg.remedy), '`login` is retired (`login_retired`) and teaches `snapshot -i` + `fill @ref --vault <entry>/<field>`', JSON.stringify(lg));
-    ok(vf.kind === 'page' && V.hasVaultFillFlag(vf.argv) && p1.ok && p1.target === '@e2' && p1.spec === 'shop.example.test/password' && !p1.generate, '`fill @ref --vault <entry>/<field>` classifies + parses cleanly', JSON.stringify(p1));
-    ok(vfg.kind === 'page' && p2.ok && p2.target === '#npw' && p2.spec === 'new:shop.example.test/password' && p2.generate === true && p2.user === 'bob', '`fill <sel> --vault new:<site>/password --generate --user <name>` parses cleanly', JSON.stringify(p2));
+    ok(lg.kind === 'refused' && lg.code === 'login_retired' && gateOf(/snapshot -i/.test(lg.remedy)) && verdictOf(/fill @ref --vault/.test(lg.remedy)), '`login` is retired (`login_retired`) and teaches `snapshot -i` + `fill @ref --vault <entry>/<field>`', JSON.stringify(lg));
+    ok(vf.kind === 'page' && gateOf(V.hasVaultFillFlag(vf.argv)) && gateOf(p1.ok) && p1.target === '@e2' && p1.spec === 'shop.example.test/password' && !p1.generate, '`fill @ref --vault <entry>/<field>` classifies + parses cleanly', JSON.stringify(p1));
+    ok(vfg.kind === 'page' && gateOf(p2.ok) && p2.target === '#npw' && p2.spec === 'new:shop.example.test/password' && p2.generate === true && p2.user === 'bob', '`fill <sel> --vault new:<site>/password --generate --user <name>` parses cleanly', JSON.stringify(p2));
     ok(vfb.kind === 'refused' && vfb.code === 'batch_line_refused' && vfb.lineCode === 'vault_fill_in_batch', '`batch` carrying `fill --vault` is refused locally (`vault_fill_in_batch`)', JSON.stringify(vfb));
     ok(refs.length === 3 && refs[0].ref === '@e1' && refs[0].nth === 0 && refs[1].ref === '@e2' && refs[1].nth === 1 && refs[2].ref === '@e3' && refs[2].name === 'Password', '`parseSnapshotRefs` preserves duplicate role+name `nth` indices', JSON.stringify(refs)); }
   // lane H (2026-09-25): the 0.38.1 re-measure's NEW surface, each decided by name
   {
-    ok(census.includes('a11y') && census.includes('webmcp'), '0.38.1: the census carries its two new top-level words (a11y from `skills get core --full`, webmcp from the help)', census.join(' '));
+    ok(gateOf(census.includes('a11y')) && verdictOf(census.includes('webmcp')), '0.38.1: the census carries its two new top-level words (a11y from `skills get core --full`, webmcp from the help)', census.join(' '));
     const a = V.classify(['a11y']), au = V.classify(['a11y', 'https://example.com', '--tags', 'wcag2a']), af = V.classify(['a11y', 'file:///etc/passwd']), ac = V.classify(['a11y', 'chrome://version']);
-    ok(a.kind === 'page' && au.kind === 'page' && af.code === 'local_scheme_refused' && ac.code === 'local_scheme_refused' && V.NAV_VERBS.includes('a11y'), '0.38.1: `a11y [url]` is a page verb that NAVIGATES — a web url passes, a file:/chrome: one is refused like `open`\'s', JSON.stringify([a.kind, au.kind, af.code, ac.code]));
+    ok(a.kind === 'page' && au.kind === 'page' && af.code === 'local_scheme_refused' && ac.code === 'local_scheme_refused' && verdictOf(V.NAV_VERBS.includes('a11y')), '0.38.1: `a11y [url]` is a page verb that NAVIGATES — a web url passes, a file:/chrome: one is refused like `open`\'s', JSON.stringify([a.kind, au.kind, af.code, ac.code]));
     // verify S2 r3 (r2 F2): a paused refusal of a verb that would MOVE THE USER'S VIEW is said by name (every page verb is refused by /resolve while they drive — the note is the why)
     { const n = (v, sub) => V.pausedSwitchNote(v, sub);
-      ok(/`tab t2` would switch what the user is looking at to another tab/.test(n('tab', 't2')) && /never queued/.test(n('tab', 't2')) && /re-orient there/.test(n('tab', 'new')) && /another window/.test(n('window', 'new')) && /`open` would move the page the user is looking at/.test(n('open', 'https://x')) && n('back', null) && n('reload', null) && n('goto', 'https://x') && n('pushstate', '/x'), 'r3: `tab <n>` / `tab new` / `window new` / `open` / `goto` / `back` / `reload` / `pushstate` carry the switching note (what it would move, never queued, re-orient at the handback)');
-      ok(n('tab', 'list') === null && n('tab', null) === null && n('window', 'list') === null && n('click', '@e1') === null && n('type', 'x') === null && n('snapshot', null) === null && n('', null) === null && V.SWITCH_VERBS.every((v) => V.PAGE_VERBS.includes(v) || v === 'goto' || v === 'navigate' || v === 'nav'), 'r3: a read (`tab list`), a page act (`click`, `type`, `snapshot`) and no verb carry none; every switching verb is a page verb or an alias of `open`'); }
+      ok(gateOf(/`tab t2` would switch what the user is looking at to another tab/.test(n('tab', 't2'))) && gateOf(/never queued/.test(n('tab', 't2'))) && gateOf(/re-orient there/.test(n('tab', 'new'))) && gateOf(/another window/.test(n('window', 'new'))) && gateOf(/`open` would move the page the user is looking at/.test(n('open', 'https://x'))) && gateOf(n('back', null)) && gateOf(n('reload', null)) && gateOf(n('goto', 'https://x')) && verdictOf(n('pushstate', '/x')), 'r3: `tab <n>` / `tab new` / `window new` / `open` / `goto` / `back` / `reload` / `pushstate` carry the switching note (what it would move, never queued, re-orient at the handback)');
+      ok(n('tab', 'list') === null && n('tab', null) === null && n('window', 'list') === null && n('click', '@e1') === null && n('type', 'x') === null && n('snapshot', null) === null && n('', null) === null && verdictOf(V.SWITCH_VERBS.every((v) => V.PAGE_VERBS.includes(v) || v === 'goto' || v === 'navigate' || v === 'nav')), 'r3: a read (`tab list`), a page act (`click`, `type`, `snapshot`) and no verb carry none; every switching verb is a page verb or an alias of `open`'); }
     const w = V.classify(['webmcp', 'invoke', 'x']);
-    ok(w.kind === 'refused' && w.code === 'verb_not_offered' && /action trace/.test(w.error) && /snapshot/.test(w.remedy), '0.38.1: `webmcp` (page-declared tools, experimental) is refused BY NAME — neither mediated nor traced — with the page-UI way out', JSON.stringify(w));
+    ok(w.kind === 'refused' && w.code === 'verb_not_offered' && gateOf(/action trace/.test(w.error)) && verdictOf(/snapshot/.test(w.remedy)), '0.38.1: `webmcp` (page-declared tools, experimental) is refused BY NAME — neither mediated nor traced — with the page-UI way out', JSON.stringify(w));
     ok(V.classify(['snapshot', '--no-pin-tab']).code === 'identity_flag_refused' && V.classify(['open', 'https://x', '--pin-tab']).kind === 'page', '0.38.1: `--no-pin-tab` (drops the sticky tab binding) is the lease\'s decision — refused; `--pin-tab` only tightens it and passes');
-    ok(['--ca-cert', '--no-ca-cert', '--no-webmcp'].every((f) => V.classify(['snapshot', f, ...(f === '--ca-cert' ? ['/tmp/x.pem'] : [])]).code === 'launch_flag_refused'), '0.38.1: `--ca-cert` / `--no-ca-cert` (which CAs the browser TRUSTS) and `--no-webmcp` are launch decisions — refused');
+    ok(verdictOf(['--ca-cert', '--no-ca-cert', '--no-webmcp'].every((f) => V.classify(['snapshot', f, ...(f === '--ca-cert' ? ['/tmp/x.pem'] : [])]).code === 'launch_flag_refused')), '0.38.1: `--ca-cert` / `--no-ca-cert` (which CAs the browser TRUSTS) and `--no-webmcp` are launch decisions — refused');
     ok(V.classify(['click', '@e1', '--input-mode', 'human']).kind === 'page' && V.classify(['get', '--input-mode', 'human', 'cdp-url']).code === 'raw_cdp_refused' && V.classify(['get', '--ca-cert', 'x', 'text']).code === 'launch_flag_refused', '0.38.1: the new VALUE flags skip their value (`--input-mode human` never becomes the noun)');
   }
 
@@ -155,7 +155,7 @@ console.log('① the PURE router');
   const REFUSED = { connect: 'raw_cdp_refused', session: 'verb_not_offered', stream: 'verb_not_offered', confirm: 'confirmation_is_human', deny: 'confirmation_is_human', inspect: 'verb_not_offered', auth: 'verb_not_offered', plugin: 'verb_not_offered', install: 'verb_not_offered', upgrade: 'verb_not_offered', doctor: 'verb_not_offered', mcp: 'verb_not_offered', dashboard: 'verb_not_offered', chat: 'verb_not_offered', skills: 'verb_not_offered' };
   for (const [w, code] of Object.entries(REFUSED)) {
     const c = V.classify([w, 'x']);
-    ok(c.kind === 'refused' && c.code === code && c.remedy && c.remedy.length > 10 && c.error, `\`${w}\` ⇒ ${code} with a remedy`);
+    ok(c.kind === 'refused' && c.code === code && gateOf(c.remedy) && c.remedy.length > 10 && verdictOf(c.error), `\`${w}\` ⇒ ${code} with a remedy`);
   }
   const cdp = V.classify(['get', 'cdp-url']);
   ok(cdp.kind === 'refused' && cdp.code === 'raw_cdp_refused', '`get cdp-url` ⇒ raw_cdp_refused (the sub-word decides)');
@@ -202,7 +202,7 @@ console.log('① the PURE router');
     }
     const VF = new Set(V.VALUE_FLAGS);
     const refusedFlag = (f) => V.IDENTITY_FLAGS.includes(f) || V.LAUNCH_FLAGS.includes(f) || V.RAW_CDP_FLAGS.includes(f);
-    ok(valueFlags.length >= 30 && boolFlags.length >= 12 && valueFlags.includes('--max-output') && boolFlags.includes('--json'), `r2: the global-option census is non-vacuous (${valueFlags.length} value flags, ${boolFlags.length} boolean)`, JSON.stringify({ valueFlags, boolFlags }));
+    ok(valueFlags.length >= 30 && boolFlags.length >= 12 && gateOf(valueFlags.includes('--max-output')) && verdictOf(boolFlags.includes('--json')), `r2: the global-option census is non-vacuous (${valueFlags.length} value flags, ${boolFlags.length} boolean)`, JSON.stringify({ valueFlags, boolFlags }));
     const missing = valueFlags.filter((f) => !VF.has(f) && !refusedFlag(f));
     ok(missing.length === 0, `r2: every global VALUE flag is in VALUE_FLAGS or refused (missing: ${missing.join(', ') || 'none'})`);
     const swallow = boolFlags.filter((f) => VF.has(f));
@@ -232,22 +232,22 @@ console.log('① the PURE router');
     const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
     ok(GF.version === TV && GF.candidates >= 500 && GF.value.length >= 30 && GF.bool.length >= 15 && GF.localCount >= 500, `r3: the measured census is non-vacuous (${GF.candidates} flag-shaped strings probed: ${GF.value.length} value, ${GF.bool.length} boolean, ${GF.localCount} non-global)`);
     const cfgOther = (GF.other || []).find((o) => o.flag === '--config');
-    ok(same(V.VALUE_FLAGS, [...GF.value, ...(cfgOther && /config file not found: zzq9/.test(cfgOther.said) ? ['--config'] : [])]), 'r3: VALUE_FLAGS IS the measured value set (+ `--config`, which checks its file before anything — `config file not found: zzq9` is the value swallowed)', JSON.stringify({ missing: GF.value.filter((f) => !V.VALUE_FLAGS.includes(f)), extra: V.VALUE_FLAGS.filter((f) => !GF.value.includes(f) && f !== '--config') }));
-    ok(same(V.BOOL_FLAGS, GF.bool), 'r3: BOOL_FLAGS IS the measured boolean set', JSON.stringify({ missing: GF.bool.filter((f) => !V.BOOL_FLAGS.includes(f)), extra: V.BOOL_FLAGS.filter((f) => !GF.bool.includes(f)) }));
-    ok(GF0.value.includes('--idle-timeout') && GF.value.includes('--idle-timeout') && !/--idle-timeout/.test((help0.split('\nOptions:')[1] || '').split('\nConfiguration:')[0]) && /AGENT_BROWSER_IDLE_TIMEOUT_MS/.test(help0), 'r3: the finding\'s flag is a measured VALUE flag the 0.32.0 help listed only as an environment variable — why a census of the help\'s option sections was blind to it (still measured a value flag on the table\'s version)');
-    ok(V.LAUNCH_FLAGS.includes('--idle-timeout') && !V.ENV_PASS.includes('AGENT_BROWSER_IDLE_TIMEOUT_MS'), 'r3: `--idle-timeout` is also REFUSED (launch_flag_refused): how long the browser lives is the keeper\'s decision, like its env twin (dropped)');
+    ok(verdictOf(same(V.VALUE_FLAGS, [...GF.value, ...(cfgOther && /config file not found: zzq9/.test(cfgOther.said) ? ['--config'] : [])])), 'r3: VALUE_FLAGS IS the measured value set (+ `--config`, which checks its file before anything — `config file not found: zzq9` is the value swallowed)', JSON.stringify({ missing: GF.value.filter((f) => !V.VALUE_FLAGS.includes(f)), extra: V.VALUE_FLAGS.filter((f) => !GF.value.includes(f) && f !== '--config') }));
+    ok(verdictOf(same(V.BOOL_FLAGS, GF.bool)), 'r3: BOOL_FLAGS IS the measured boolean set', JSON.stringify({ missing: GF.bool.filter((f) => !V.BOOL_FLAGS.includes(f)), extra: V.BOOL_FLAGS.filter((f) => !GF.bool.includes(f)) }));
+    ok(gateOf(GF0.value.includes('--idle-timeout')) && gateOf(GF.value.includes('--idle-timeout')) && !/--idle-timeout/.test((help0.split('\nOptions:')[1] || '').split('\nConfiguration:')[0]) && verdictOf(/AGENT_BROWSER_IDLE_TIMEOUT_MS/.test(help0)), 'r3: the finding\'s flag is a measured VALUE flag the 0.32.0 help listed only as an environment variable — why a census of the help\'s option sections was blind to it (still measured a value flag on the table\'s version)');
+    ok(gateOf(V.LAUNCH_FLAGS.includes('--idle-timeout')) && !V.ENV_PASS.includes('AGENT_BROWSER_IDLE_TIMEOUT_MS'), 'r3: `--idle-timeout` is also REFUSED (launch_flag_refused): how long the browser lives is the keeper\'s decision, like its env twin (dropped)');
     // the closed `get` noun set IS the help's `Get Info` row minus the endpoint
     const row = (/\nGet Info:[^\n]*\n\s+([^\n]+)/.exec(help) || [])[1] || '';
     const helpNouns = row.split(',').map((x) => x.trim().split(/\s+/)[0]).filter(Boolean);
-    ok(helpNouns.includes('cdp-url') && same(V.GET_NOUNS, helpNouns.filter((x) => x !== 'cdp-url')), `r3: GET_NOUNS is the help's \`Get Info\` row minus cdp-url (${helpNouns.join(' ')})`);
+    ok(gateOf(helpNouns.includes('cdp-url')) && verdictOf(same(V.GET_NOUNS, helpNouns.filter((x) => x !== 'cdp-url'))), `r3: GET_NOUNS is the help's \`Get Info\` row minus cdp-url (${helpNouns.join(' ')})`);
     for (const argv of [['get', '--idle-timeout', '5m', 'cdp-url'], ['get', '--idle-timeout=5m', 'cdp-url'], ['--idle-timeout', '5m', 'get', 'cdp-url'], ['get', '--headers', '{}', 'cdp-url'], ['get', '--model', 'x', 'cdp-url'], ['get', '--device', 'x', 'cdp-url'], ['get', '--screenshot-format', 'png', 'cdp-url'], ['get', '--fix', 'cdp-url'], ['get', '--offline', 'true', 'cdp-url'], ['get', '--quick', 'cdp-url']]) {
       const c = V.classify(argv);
-      ok(c.kind === 'refused' && ['raw_cdp_refused', 'launch_flag_refused'].includes(c.code), `r3: \`${argv.join(' ')}\` is refused (${c.code}) — a measured flag's value is never the noun`, JSON.stringify([c.kind, c.code, c.sub]));
+      ok(c.kind === 'refused' && verdictOf(['raw_cdp_refused', 'launch_flag_refused'].includes(c.code)), `r3: \`${argv.join(' ')}\` is refused (${c.code}) — a measured flag's value is never the noun`, JSON.stringify([c.kind, c.code, c.sub]));
     }
     // unknown arity ⇒ both readings: a value-reading that reaches the endpoint (or a refused verb) refuses
     for (const argv of [['get', '--newglobal', 'text', 'cdp-url'], ['get', '--newglobal', '5m', 'cdp-url'], ['--newglobal', 'open', 'get', 'cdp-url'], ['--newglobal', 'open', 'connect', '9222'], ['--newglobal', 'open', 'session', 'list'], ['--newglobal', 'open', 'batch', 'get cdp-url']]) {
       const c = V.classify(argv);
-      ok(c.kind === 'refused' && c.code !== 'unknown_verb' && /read as taking a value/.test(c.error), `r3: \`${argv.join(' ')}\` — a flag of unknown arity read as taking a value reaches ${c.code}; refused and SAID`, JSON.stringify([c.kind, c.code, c.error]));
+      ok(c.kind === 'refused' && c.code !== 'unknown_verb' && verdictOf(/read as taking a value/.test(c.error)), `r3: \`${argv.join(' ')}\` — a flag of unknown arity read as taking a value reaches ${c.code}; refused and SAID`, JSON.stringify([c.kind, c.code, c.error]));
     }
     ok(V.classify(['batch', 'open https://x', 'get --newglobal text cdp-url']).lineCode === 'raw_cdp_refused', 'r3: …inside a batch line too');
     for (const argv of [['get', 'attr', '@e1', 'cdp-url'], ['get', 'text', 'cdp-url'], ['get', '--json', 'title'], ['snapshot', '-i', '-c', '-d', '3'], ['wait', '--url', 'https://x/**'], ['network', 'route', 'https://x', '--abort'], ['get', 'text', '@e1', '--newglobal'], ['--newglobal', 'open', 'https://x'], ['click', '@e3', '--new-tab'], ['open', 'https://x', '--enable', 'react-devtools']]) {
@@ -256,7 +256,7 @@ console.log('① the PURE router');
     }
     for (const argv of [['get', 'ws-url'], ['get', 'devtools-url'], ['get'], ['--', 'get', 'cdp_url'], ['batch', 'get endpoint']]) {
       const c = V.classify(argv);
-      ok(c.kind === 'refused' && (c.code === 'unknown_verb' || c.lineCode === 'unknown_verb') && /is not a read this VibeSpace knows/.test(c.error + (c.code === 'batch_line_refused' ? '' : '')) || (c.code === 'batch_line_refused' && c.lineCode === 'unknown_verb'), `r3: \`${argv.join(' ')}\` — a noun \`get\` does not READ is refused (the allow-list; after \`--\` too)`, JSON.stringify([c.kind, c.code, c.lineCode, c.error]));
+      ok(c.kind === 'refused' && (c.code === 'unknown_verb' || c.lineCode === 'unknown_verb') && verdictOf(/is not a read this VibeSpace knows/.test(c.error + (c.code === 'batch_line_refused' ? '' : ''))) || (c.code === 'batch_line_refused' && c.lineCode === 'unknown_verb'), `r3: \`${argv.join(' ')}\` — a noun \`get\` does not READ is refused (the allow-list; after \`--\` too)`, JSON.stringify([c.kind, c.code, c.lineCode, c.error]));
     }
     // NEGATIVE CONTROLS on patched copies: each r3 piece is load-bearing
     const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
@@ -269,7 +269,7 @@ console.log('① the PURE router');
     ok(noReadings !== src && load(noReadings).classify(['get', '--newglobal', 'text', 'cdp-url']).kind === 'page' && load(noReadings).classify(['--newglobal', 'open', 'connect', '9222']).kind === 'page', 'r3 NEGATIVE CONTROL: without every-reading judgement a flag of unknown arity smuggles the endpoint noun (and a refused verb) past');
   }
   const unk = V.classify(['frobnicate']);
-  ok(unk.kind === 'refused' && unk.code === 'unknown_verb' && /vibespace-browser -- <verb>/.test(unk.remedy), 'an unknown verb ⇒ unknown_verb pointing at the `--` valve');
+  ok(unk.kind === 'refused' && unk.code === 'unknown_verb' && verdictOf(/vibespace-browser -- <verb>/.test(unk.remedy)), 'an unknown verb ⇒ unknown_verb pointing at the `--` valve');
   const esc = V.classify(['--', 'frobnicate', 'x']);
   ok(esc.kind === 'escape' && esc.verb === 'frobnicate', '…and after `--` it passes as escape');
   ok(V.classify(['--', 'connect', '9222']).code === 'raw_cdp_refused' && V.classify(['--', 'frobnicate', '--session', 'x']).code === 'identity_flag_refused', 'the SAME rules after `--` (a refused verb, a refused flag on an escape)');
@@ -278,11 +278,11 @@ console.log('① the PURE router');
   for (const f of V.RAW_CDP_FLAGS) ok(V.classify([f, '9222', 'snapshot']).code === 'raw_cdp_refused', `${f} ⇒ raw_cdp_refused`);
   for (const f of V.LAUNCH_FLAGS) {
     const c = V.classify(['snapshot', f, 'x']);
-    ok(c.kind === 'refused' && c.code === 'launch_flag_refused' && /Settings → Agent browser/.test(c.remedy), `${f} beside a page verb ⇒ launch_flag_refused`);
+    ok(c.kind === 'refused' && c.code === 'launch_flag_refused' && verdictOf(/Settings → Agent browser/.test(c.remedy)), `${f} beside a page verb ⇒ launch_flag_refused`);
   }
   ok(V.classify(['open', 'https://x', '--enable', 'react-devtools']).kind === 'page' && V.classify(['--init-script', './a.js', 'open', 'https://x']).kind === 'page', '--enable / --init-script PASS beside `open` (per-page, D12)');
   ok(V.classify(['snapshot', '--enable', 'react-devtools']).code === 'launch_flag_refused', '…and only beside `open`');
-  ok(['--json', '--annotate', '-i', '-c', '--full', '--max-output'].every((f) => V.classify(['snapshot', f, ...(f === '--max-output' ? ['400'] : [])]).kind === 'page'), 'output flags pass through');
+  ok(verdictOf(['--json', '--annotate', '-i', '-c', '--full', '--max-output'].every((f) => V.classify(['snapshot', f, ...(f === '--max-output' ? ['400'] : [])]).kind === 'page')), 'output flags pass through');
   const pr = V.classify(['--profile', 'work', 'click', '@e1']), pr2 = V.classify(['click', '@e1', '--profile=work']), pr3 = V.classify(['--', 'click', '--profile', 'work', '@e1']);
   ok(pr.profile === 'work' && pr2.profile === 'work' && pr3.profile === 'work' && !pr.argv.includes('--profile') && !pr3.argv.includes('--profile') && pr3.kind === 'page', '`--profile <h>` is OURS anywhere (before, after, past `--`) and never reaches the page argv');
   ok(V.classify(['--profile', 'work', 'detach']).kind === 'ours', '…and an OURS verb behind it is still ours');
@@ -290,7 +290,7 @@ console.log('① the PURE router');
   const b1 = V.classify(['batch', 'open https://x', 'snapshot -i', 'click @e3']);
   ok(b1.kind === 'page' && b1.verb === 'batch' && b1.lines === 3, 'a clean batch is a page verb');
   const b2 = V.classify(['batch', '--bail', 'open https://x', 'get cdp-url', 'click @e1']);
-  ok(b2.kind === 'refused' && b2.code === 'batch_line_refused' && b2.line === 2 && b2.lineCode === 'raw_cdp_refused' && /batch line 2/.test(b2.error) && /nothing in the batch ran/.test(b2.error), 'ONE refused line refuses the whole batch and names it (line 2, raw_cdp_refused)');
+  ok(b2.kind === 'refused' && b2.code === 'batch_line_refused' && b2.line === 2 && b2.lineCode === 'raw_cdp_refused' && gateOf(/batch line 2/.test(b2.error)) && verdictOf(/nothing in the batch ran/.test(b2.error)), 'ONE refused line refuses the whole batch and names it (line 2, raw_cdp_refused)');
   ok(V.classify(['batch', 'open "https://x"', 'snapshot --session other']).lineCode === 'identity_flag_refused', 'a line\'s flags are judged too');
   ok(V.classify(['batch', 'open x', 'fill @e1 "a b" --profile /tmp/p']).lineCode === 'identity_flag_refused', 'inside a batch `--profile` is the browser CLI\'s directory flag ⇒ refused');
   ok(V.classify(['batch', 'status']).lineCode === 'unknown_verb' && V.classify(['batch', 'batch "x"']).code === 'batch_line_refused', 'an OURS word or a nested batch in a line is refused');
@@ -306,7 +306,7 @@ console.log('① the PURE router');
     const shell = { PATH: '/usr/bin', HOME: '/h', AGENT_BROWSER_SOCKET_DIR: '/tmp/mine', XDG_RUNTIME_DIR: '/tmp/mine' };
     const own = ['AGENT_BROWSER_SESSION=vs-x', 'AGENT_BROWSER_NAMESPACE=vs-x'];
     const e1 = V.childEnv(shell, { spawnEnv: own, env: own, socketDir: '/run/user/7/agent-browser', runtimeDir: '/run/user/7' });
-    ok(e1.env.AGENT_BROWSER_SOCKET_DIR === '/run/user/7/agent-browser' && e1.env.XDG_RUNTIME_DIR === '/run/user/7' && e1.dropped.includes('AGENT_BROWSER_SOCKET_DIR') && e1.dropped.includes('XDG_RUNTIME_DIR'), 'r2 PURE: the answer\'s socketDir / runtimeDir replace the shell\'s, and both replacements are reported', JSON.stringify(e1));
+    ok(e1.env.AGENT_BROWSER_SOCKET_DIR === '/run/user/7/agent-browser' && e1.env.XDG_RUNTIME_DIR === '/run/user/7' && gateOf(e1.dropped.includes('AGENT_BROWSER_SOCKET_DIR')) && verdictOf(e1.dropped.includes('XDG_RUNTIME_DIR')), 'r2 PURE: the answer\'s socketDir / runtimeDir replace the shell\'s, and both replacements are reported', JSON.stringify(e1));
     const e2 = V.childEnv(shell, { spawnEnv: own, env: own, unset: ['AGENT_BROWSER_SOCKET_DIR'], socketDir: '/k/ab', runtimeDir: null });
     ok(e2.env.AGENT_BROWSER_SOCKET_DIR === '/k/ab' && !('XDG_RUNTIME_DIR' in e2.env), 'r2 PURE: applied LAST (an `unset` cannot remove it); runtimeDir null removes XDG_RUNTIME_DIR', JSON.stringify(e2.env));
     const e3 = V.childEnv(shell, { spawnEnv: own, env: own });
@@ -322,11 +322,11 @@ console.log('① the PURE router');
       const ruleOf = (Vx) => ({ pinned: Vx.DRIVER_FINGERPRINT.version === Vx.AGENT_BROWSER_CLI.table, fields: Vx.DRIVER_FINGERPRINT.fields.length, passed: Object.keys(Vx.DRIVER_FINGERPRINT.names).filter((k) => Vx.ENV_PASS.includes(k)),
         flagsLoose: Object.keys(Vx.DRIVER_FINGERPRINT.flags).filter((f) => !Vx.LAUNCH_FLAGS.includes(f) && !Vx.SESSION_FLAGS.includes(f)), debugFlag: Vx.classify(['snapshot', '--debug']).code || Vx.classify(['snapshot', '--debug']).kind });
       const r0 = ruleOf(V);
-      ok(r0.pinned, `B-e946 PURE: the session fingerprint beside the pass list is quoted at the driver version the tree pins (${V.DRIVER_FINGERPRINT.version}) — ${r0.pinned ? 'it is' : `the pinned driver is ${V.AGENT_BROWSER_CLI.table} now: read daemon_config_fingerprint (cli/src/connection.rs) and the env names and flags (cli/src/flags.rs, cli/src/main.rs's daemon options) again at that tag, then move DRIVER_FINGERPRINT`}`, r0);
-      ok(r0.fields === 6 && J(r0.passed) === J([]) && J(r0.flagsLoose) === J([]) && r0.debugFlag === 'session_flag_refused' && Object.values(V.DRIVER_FINGERPRINT.names).every((f) => V.DRIVER_FINGERPRINT.fields.includes(f)) && Object.values(V.DRIVER_FINGERPRINT.flags).every((f) => V.DRIVER_FINGERPRINT.fields.includes(f)),
+      ok(verdictOf(r0.pinned), `B-e946 PURE: the session fingerprint beside the pass list is quoted at the driver version the tree pins (${V.DRIVER_FINGERPRINT.version}) — ${r0.pinned ? 'it is' : `the pinned driver is ${V.AGENT_BROWSER_CLI.table} now: read daemon_config_fingerprint (cli/src/connection.rs) and the env names and flags (cli/src/flags.rs, cli/src/main.rs's daemon options) again at that tag, then move DRIVER_FINGERPRINT`}`, r0);
+      ok(r0.fields === 6 && J(r0.passed) === J([]) && J(r0.flagsLoose) === J([]) && r0.debugFlag === 'session_flag_refused' && gateOf(Object.values(V.DRIVER_FINGERPRINT.names).every((f) => V.DRIVER_FINGERPRINT.fields.includes(f))) && verdictOf(Object.values(V.DRIVER_FINGERPRINT.flags).every((f) => V.DRIVER_FINGERPRINT.fields.includes(f))),
         'B-e946 PURE: no name the session fingerprint reads is in ENV_PASS, and every flag that sets one of its six fields is refused (a launch flag, or --debug: session_flag_refused)', r0);
       const ce = V.childEnv({ AGENT_BROWSER_DEFAULT_TIMEOUT: '60000', AGENT_BROWSER_DEBUG: '1', AGENT_BROWSER_JSON: '1' }, { spawnEnv: [] });
-      ok(!('AGENT_BROWSER_DEFAULT_TIMEOUT' in ce.env) && !('AGENT_BROWSER_DEBUG' in ce.env) && ce.env.AGENT_BROWSER_JSON === '1' && ce.dropped.includes('AGENT_BROWSER_DEBUG') && ce.dropped.includes('AGENT_BROWSER_DEFAULT_TIMEOUT') && J(V.SESSION_ENV_DROPPED) === J(['AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_DEFAULT_TIMEOUT']),
+      ok(!('AGENT_BROWSER_DEFAULT_TIMEOUT' in ce.env) && !('AGENT_BROWSER_DEBUG' in ce.env) && ce.env.AGENT_BROWSER_JSON === '1' && gateOf(ce.dropped.includes('AGENT_BROWSER_DEBUG')) && gateOf(ce.dropped.includes('AGENT_BROWSER_DEFAULT_TIMEOUT')) && J(V.SESSION_ENV_DROPPED) === J(['AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_DEFAULT_TIMEOUT']),
         'B-e946 PURE: the agent\'s DEFAULT_TIMEOUT and DEBUG are dropped (named among the dropped), an output key still passes', ce);
       const { mutantCopies } = await import('./mutant-copy.mjs');
       const Me = mutantCopies('browser-verbs-e946', REPO);
@@ -339,7 +339,7 @@ console.log('① the PURE router');
       ok(J(rf.flagsLoose) === J(['--debug']) && rf.debugFlag !== 'session_flag_refused', 'CONTROL (the flag as it stood): --debug reaches the driver — RED on the rule', rf);
       ok(rm.pinned === false, 'CONTROL (the pinned driver moved to 0.39.0, the fingerprint not read again): the pin goes RED by name', rm);
     }
-    ok(V.hostSocketDirPath('/tmp', 1000) === B.socketDirDecision({ browserKey: 'bk-0000000a', home: '/h', uid: 1000, base: '/tmp' }).dir && B.remoteBrowserPrelude({ browserKey: 'bk-0000000a', socketDirBase: '/tmp' }).includes('vs_ab_s="/tmp/vs-ab-$(id -u)"'), 'r2 PURE: the rung-H shape `<base>/vs-ab-<uid>` is spelled the same as browser-profiles\' decision and the prelude\'s shell text');
+    ok(V.hostSocketDirPath('/tmp', 1000) === B.socketDirDecision({ browserKey: 'bk-0000000a', home: '/h', uid: 1000, base: '/tmp' }).dir && verdictOf(B.remoteBrowserPrelude({ browserKey: 'bk-0000000a', socketDirBase: '/tmp' }).includes('vs_ab_s="/tmp/vs-ab-$(id -u)"')), 'r2 PURE: the rung-H shape `<base>/vs-ab-<uid>` is spelled the same as browser-profiles\' decision and the prelude\'s shell text');
     // PURE values, never touched on disk — a base outside /tmp so no literal here reads as a machine-global fixture (test-ci-gate §6)
     const e4 = V.childEnv({ ...shell, AGENT_BROWSER_SOCKET_DIR: '/var/tmp/vs-ab-7' }, { spawnEnv: own, env: [], hostSocketBase: '/var/tmp' }, { uid: 7 });
     const e5 = V.childEnv({ ...shell, AGENT_BROWSER_SOCKET_DIR: '/var/tmp/vs-ab-7' }, { spawnEnv: own, env: [], hostSocketBase: '/var/tmp' }, { uid: 8 });
@@ -365,7 +365,7 @@ console.log('① the PURE router');
     const own = ['AGENT_BROWSER_SESSION=vs-x', 'AGENT_BROWSER_NAMESPACE=vs-x', 'AGENT_BROWSER_CONFIG=/data/gen.json'];
     const shell = { PATH: '/usr/bin', HOME: '/h', AGENT_BROWSER_CONFIG: '/tmp/mine.json' };
     const c1 = V.childEnv(shell, { spawnEnv: own, env: own, config: '/data/machine.json', unset: ['AGENT_BROWSER_CONFIG'] });
-    ok(c1.env.AGENT_BROWSER_CONFIG === '/data/machine.json' && c1.needsConfig === false && c1.dropped.includes('AGENT_BROWSER_CONFIG'), 'r3 PURE: the answer\'s `config` is set LAST (over the pairs, over an `unset`), and the shell\'s own is reported replaced', JSON.stringify(c1));
+    ok(c1.env.AGENT_BROWSER_CONFIG === '/data/machine.json' && c1.needsConfig === false && verdictOf(c1.dropped.includes('AGENT_BROWSER_CONFIG')), 'r3 PURE: the answer\'s `config` is set LAST (over the pairs, over an `unset`), and the shell\'s own is reported replaced', JSON.stringify(c1));
     const c2 = V.childEnv(shell, { spawnEnv: own, env: own });
     ok(c2.env.AGENT_BROWSER_CONFIG === '/data/gen.json' && c2.needsConfig === false, 'r3 PURE: no `config` named ⇒ the server\'s own pair (a rung-D generated config) stands');
     const c3 = V.childEnv(shell, { spawnEnv: [], env: [] });
@@ -385,7 +385,7 @@ console.log('① the PURE router');
       ['record', 'start', 'o.webm', 'file:///x'], ['--', 'goto', 'file:///x'], ['--', 'navigate', 'chrome://version'], ['--', 'open', 'file:///x'], ['--', 'frobnicate', 'chrome://version']];
     for (const argv of LOCAL) {
       const c = V.classify(argv);
-      ok(c.kind === 'refused' && c.code === 'local_scheme_refused' && /not a page of the web/.test(c.error) && /http\(s\)/.test(c.remedy), `r4: \`${argv.join(' ').replace(/\s/g, (m) => (m === ' ' ? ' ' : JSON.stringify(m).slice(1, -1)))}\` ⇒ local_scheme_refused`, JSON.stringify([c.kind, c.code, c.error]));
+      ok(c.kind === 'refused' && c.code === 'local_scheme_refused' && gateOf(/not a page of the web/.test(c.error)) && verdictOf(/http\(s\)/.test(c.remedy)), `r4: \`${argv.join(' ').replace(/\s/g, (m) => (m === ' ' ? ' ' : JSON.stringify(m).slice(1, -1)))}\` ⇒ local_scheme_refused`, JSON.stringify([c.kind, c.code, c.error]));
     }
     ok(V.classify(['batch', 'open https://x', 'open file:///x']).lineCode === 'local_scheme_refused' && V.classify(['batch'], { stdin: '[["open","https://x"],["open","chrome://version"]]' }).lineCode === 'local_scheme_refused', 'r4: …and a batch line / a stdin batch element that does it refuses the batch');
     const WEB = [['open', 'https://example.com'], ['open', 'http://127.0.0.1:3000/app'], ['open', 'localhost:3000'], ['open', 'example.com/path'], ['open', 'HTTPS://x'], ['open', 'about:blank'], ['open', 'about:blank#x'], ['open', 'about:blank?q'], ['open', 'about:blank/'],
@@ -401,7 +401,7 @@ console.log('① the PURE router');
     const sl = V.classify(['state', 'load', './s.json']);
     ok(sl.kind === 'page' && JSON.stringify(sl.stateFiles) === '["./s.json"]' && JSON.stringify(V.classify(['batch', 'open https://x', 'state load a.json', 'state load --json b.json']).stateFiles) === '["a.json","b.json"]', 'r4: `state load <file>` names the file(s) it loads — in a batch too', JSON.stringify(sl));
     const sv = V.stateFileVerdict({ cookies: [], origins: [{ origin: 'https://ok.example', localStorage: [] }, { origin: 'chrome://version', localStorage: [{ name: 'a', value: 'b' }] }] });
-    ok(sv && sv.code === 'local_scheme_refused' && V.stateFileVerdict({ cookies: [{ name: 'a', domain: 'x' }], origins: [{ origin: 'https://ok.example' }] }) === null && V.stateFileVerdict({ sessionStorage: [{ origin: 'FILE:///etc' }] }).code === 'local_scheme_refused', 'r4 PURE: stateFileVerdict refuses a state file naming a local origin anywhere (an `origin` key at any depth), passes the web');
+    ok(gateOf(sv) && sv.code === 'local_scheme_refused' && V.stateFileVerdict({ cookies: [{ name: 'a', domain: 'x' }], origins: [{ origin: 'https://ok.example' }] }) === null && V.stateFileVerdict({ sessionStorage: [{ origin: 'FILE:///etc' }] }).code === 'local_scheme_refused', 'r4 PURE: stateFileVerdict refuses a state file naming a local origin anywhere (an `origin` key at any depth), passes the web');
     // NEGATIVE CONTROL: the r3 router (no ⑦) passes the finding's spellings
     const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
     const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
@@ -418,11 +418,11 @@ console.log('① the PURE router');
     const bl = V.classify(['batch'], { stdin: 'open "https://x/a b"\r\n# c\n\nsnapshot -i\n' });
     ok(bl.kind === 'page' && bl.stdinJson === JSON.stringify([['open', 'https://x/a b'], ['snapshot', '-i']]), 'r4: plain stdin lines are split like a shell and handed over as the JSON of EXACTLY the words judged (CRLF, blank and # lines dropped)', JSON.stringify(bl));
     const be = V.classify(['batch'], { stdin: '[["open","https://x"],["get","cdp-url"]]' });
-    ok(be.kind === 'refused' && be.code === 'batch_line_refused' && be.line === 2 && be.lineCode === 'raw_cdp_refused' && /batch command 2/.test(be.error), 'r4: ONE refused element refuses the batch and names its index', JSON.stringify(be));
+    ok(be.kind === 'refused' && be.code === 'batch_line_refused' && be.line === 2 && be.lineCode === 'raw_cdp_refused' && verdictOf(/batch command 2/.test(be.error)), 'r4: ONE refused element refuses the batch and names its index', JSON.stringify(be));
     ok(V.classify(['batch'], { stdin: '[["get url"]]' }).lineCode === 'unknown_verb', 'r4: an element is ONE word (`["get url"]` is the binary\'s unknown command too — never split)');
     for (const [txt, why] of [['[1]', 'not an array of string arrays'], ['[["open",1]]', 'not an array of string arrays'], ['[["open"', 'does not parse'], ['', 'is empty'], ['\n# only a note\n', 'is empty']]) {
       const c = V.classify(['batch'], { stdin: txt });
-      ok(c.kind === 'refused' && c.code === 'batch_stdin_refused' && c.error.includes(why) && /JSON array of string arrays/.test(c.remedy), `r4: stdin ${JSON.stringify(txt)} ⇒ batch_stdin_refused (${why})`, JSON.stringify(c));
+      ok(c.kind === 'refused' && c.code === 'batch_stdin_refused' && gateOf(c.error.includes(why)) && verdictOf(/JSON array of string arrays/.test(c.remedy)), `r4: stdin ${JSON.stringify(txt)} ⇒ batch_stdin_refused (${why})`, JSON.stringify(c));
     }
   }
   // r4 (takeover finding 6): the flag table is a measurement of ONE version — another build ⇒ every flag read
@@ -432,7 +432,7 @@ console.log('① the PURE router');
     ok(V.TABLE_VERSION === GF.version, `r4: TABLE_VERSION is the measured fixture's version (${V.TABLE_VERSION})`);
     ok(V.versionDrift(`agent-browser ${V.TABLE_VERSION}\n`) === null && V.versionDrift('agent-browser 0.33.1') === '0.33.1' && V.versionDrift('') === 'unknown' && V.versionDrift(null) === 'unknown', 'r4 PURE: versionDrift — the table\'s version ⇒ none; another ⇒ it; unreadable ⇒ "unknown" (never trusted)');
     const d = V.classify(['get', '--json', 'text', 'cdp-url'], { drift: '0.33.0' });
-    ok(V.classify(['get', '--json', 'text', 'cdp-url']).kind === 'page' && d.kind === 'refused' && d.code === 'raw_cdp_refused' && /0\.33\.0/.test(d.error) && d.error.includes('measured on ' + V.TABLE_VERSION), 'r4: `get --json text cdp-url` is a read on the measured table (a <cdp-url> element\'s text) — under a drift `--json` may take a value, the other reading is the endpoint: refused and SAID', JSON.stringify(d));
+    ok(V.classify(['get', '--json', 'text', 'cdp-url']).kind === 'page' && d.kind === 'refused' && d.code === 'raw_cdp_refused' && gateOf(/0\.33\.0/.test(d.error)) && verdictOf(d.error.includes('measured on ' + V.TABLE_VERSION)), 'r4: `get --json text cdp-url` is a read on the measured table (a <cdp-url> element\'s text) — under a drift `--json` may take a value, the other reading is the endpoint: refused and SAID', JSON.stringify(d));
     ok(V.classify(['batch', 'get --json text cdp-url'], { drift: '0.33.0' }).lineCode === 'raw_cdp_refused', 'r4: …inside a batch line too');
     for (const argv of [['get', '--json', 'text', '@e1'], ['snapshot', '-i', '-c'], ['--max-output', '400', 'snapshot'], ['open', 'https://x'], ['click', '@e3']]) {
       const c = V.classify(argv, { drift: '0.33.0' });
@@ -443,12 +443,12 @@ console.log('① the PURE router');
   // pairs nor a config composes one
   {
     const lg = V.childEnv({ AGENT_BROWSER_CONFIG: '/tmp/mine.json', AGENT_BROWSER_SESSION: 'vs-x' }, { ok: true, kind: 'none', env: [] });
-    ok(!('AGENT_BROWSER_CONFIG' in lg.env) && lg.needsConfig === true && lg.dropped.includes('AGENT_BROWSER_CONFIG') && lg.env.AGENT_BROWSER_SESSION === 'vs-x' && !V.ENV_LEGACY_KEEP.includes('AGENT_BROWSER_CONFIG'), 'r4: an answer with no spawnEnv and no config drops the shell\'s AGENT_BROWSER_CONFIG, says so, and asks for a composed one (SESSION still kept, as before)', JSON.stringify(lg));
+    ok(!('AGENT_BROWSER_CONFIG' in lg.env) && lg.needsConfig === true && gateOf(lg.dropped.includes('AGENT_BROWSER_CONFIG')) && lg.env.AGENT_BROWSER_SESSION === 'vs-x' && !V.ENV_LEGACY_KEEP.includes('AGENT_BROWSER_CONFIG'), 'r4: an answer with no spawnEnv and no config drops the shell\'s AGENT_BROWSER_CONFIG, says so, and asks for a composed one (SESSION still kept, as before)', JSON.stringify(lg));
     const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
     const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
     const r3 = editAnchor(src, "const ENV_LEGACY_KEEP = Object.freeze(['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_PROFILE',", "const ENV_LEGACY_KEEP = Object.freeze(['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_PROFILE',", "src/browser-verbs.js");
     const lc = r3 !== src && load(r3).childEnv({ AGENT_BROWSER_CONFIG: '/tmp/mine.json' }, { ok: true, kind: 'none', env: [] });
-    ok(lc && lc.env.AGENT_BROWSER_CONFIG === '/tmp/mine.json' && lc.needsConfig === false, 'r4 NEGATIVE CONTROL: the r3 legacy keep (patched copy) hands the binary the agent\'s decoy file and composes nothing', JSON.stringify(lc));
+    ok(gateOf(lc) && lc.env.AGENT_BROWSER_CONFIG === '/tmp/mine.json' && lc.needsConfig === false, 'r4 NEGATIVE CONTROL: the r3 legacy keep (patched copy) hands the binary the agent\'s decoy file and composes nothing', JSON.stringify(lc));
   }
   // lane L r2: an upload NAMES its files, and a credential store is refused by name
   {
@@ -459,8 +459,8 @@ console.log('① the PURE router');
     const roots = V.secretUploadRoots({ homes: ['/home/u', '/home/u/'], dataDir: '/srv/vs/data' });
     ok(JSON.stringify(roots.map((r) => r.dir)) === JSON.stringify(['/home/u/.claude', '/home/u/.ssh', '/home/u/.vibespace', '/home/u/.codex', '/srv/vs/data/subs', '/srv/vs/data/codex-subs']), 'lane L r2 PURE: the roots — ~/.claude ~/.ssh ~/.vibespace ~/.codex per home (deduped) + the data dir\'s account stores', JSON.stringify(roots));
     const v = V.uploadPathVerdict([{ file: '~/.ssh/id_rsa', paths: ['/home/u/.ssh/id_rsa'] }], roots);
-    ok(v && v.code === 'upload_secret_refused' && /under ~\/\.ssh/.test(v.error) && /nothing ran/.test(v.error) && v.remedy, 'lane L r2 PURE: an upload of ~/.ssh/id_rsa ⇒ refused BY NAME (upload_secret_refused, the store named, a remedy)', JSON.stringify(v));
-    ok(V.uploadPathVerdict([{ file: 'x.txt', paths: ['/tmp/x.txt', '/home/u/.claude/.credentials.json'] }], roots)?.code === 'upload_secret_refused' && /<VibeSpace data>\/subs/.test(V.uploadPathVerdict([{ file: 'c', paths: ['/srv/vs/data/subs/a/.credentials.json'] }], roots)?.error || ''), 'lane L r2 PURE: a realpath into a store is the store; the account stores are named');
+    ok(gateOf(v) && v.code === 'upload_secret_refused' && gateOf(/under ~\/\.ssh/.test(v.error)) && gateOf(/nothing ran/.test(v.error)) && verdictOf(v.remedy), 'lane L r2 PURE: an upload of ~/.ssh/id_rsa ⇒ refused BY NAME (upload_secret_refused, the store named, a remedy)', JSON.stringify(v));
+    ok(V.uploadPathVerdict([{ file: 'x.txt', paths: ['/tmp/x.txt', '/home/u/.claude/.credentials.json'] }], roots)?.code === 'upload_secret_refused' && verdictOf(/<VibeSpace data>\/subs/.test(V.uploadPathVerdict([{ file: 'c', paths: ['/srv/vs/data/subs/a/.credentials.json'] }], roots)?.error || '')), 'lane L r2 PURE: a realpath into a store is the store; the account stores are named');
     ok(V.uploadPathVerdict([{ file: 'report.pdf', paths: ['/home/u/work/report.pdf'] }, { file: '@e1', paths: ['/home/u/work/@e1'] }], roots) === null && V.uploadPathVerdict([{ file: 'x', paths: ['/home/u/.sshx/k', '/home/u/.claude-notes/a', '/srv/vs/data/subsidies.txt'] }], roots) === null, 'lane L r2 CONTROL: a normal path passes; a sibling that only SHARES a prefix (~/.sshx, ~/.claude-notes, data/subsidies.txt) is not a store');
   }
   // lane L r4 (the verifier's WRITE finding): a WRITE names its output path, and a path outside the project /
@@ -484,7 +484,7 @@ console.log('① the PURE router');
     const registered = new Set(Object.keys(V.WRITE_VERBS));
     const missing = [...helpWriters].filter((w) => !registered.has(w));
     ok(helpWriters.size >= 5 && missing.length === 0, `lane L r4 CENSUS: every top-level help <path> writer is in WRITE_VERBS (${[...helpWriters].sort().join(' ')}; missing: ${missing.join(', ') || 'none'})`, JSON.stringify([...helpWriters]));
-    ok(['download', 'pdf', 'screenshot', 'record', 'trace', 'profiler'].every((w) => registered.has(w)) && ['state', 'network'].every((w) => registered.has(w)), 'lane L r4 CENSUS: the positional writers, the sub writers (state save) and the har writer (network) are all registered');
+    ok(gateOf(['download', 'pdf', 'screenshot', 'record', 'trace', 'profiler'].every((w) => registered.has(w))) && verdictOf(['state', 'network'].every((w) => registered.has(w))), 'lane L r4 CENSUS: the positional writers, the sub writers (state save) and the har writer (network) are all registered');
     // a FAKE new writer NOT in WRITE_VERBS names no target — the census (above) is what must list it
     ok(!('exfil' in V.WRITE_VERBS) && V.classify(['exfil', '@e1', '/etc/x']).writeFiles === undefined && !V.known('exfil'), 'lane L r4 CENSUS: an UNregistered verb names no write target — a new writer only becomes classified by being added to WRITE_VERBS (and the census reddens if the help lists it and the table does not)');
     // ── writeTargetsAt through classify: every writer names its path; a reader / non-writer names nothing
@@ -504,10 +504,10 @@ console.log('① the PURE router');
     ok(pv(['/home/u/proj/out.pdf']) === null && pv(['/tmp/x.pdf']) === null && pv(['/home/u/Downloads/x.pdf']) === null, 'lane L r4 PURE: the project cwd, /tmp and ~/Downloads are ALLOWED');
     for (const [p, why] of [[['/home/u/.ssh/authorized_keys'], '~/.ssh'], [['/home/u/.claude/settings.json'], '~/.claude'], [['/home/u/.bashrc'], '~/.bashrc'], [['/home/u/.config/foo'], '~/.config'], [['/root/.ssh/k'], '~/.ssh'], [['/srv/vs/data/subs/a'], '<VibeSpace data>/subs'], [['/srv/vs/data/codex-subs/a'], '<VibeSpace data>/codex-subs']]) {
       const v = pv(p);
-      ok(v && v.code === 'write_path_refused' && v.error.includes(`under ${why}`) && /nothing ran/.test(v.error) && v.remedy, `lane L r4 PURE: a write to ${p[0]} ⇒ write_path_refused (under ${why})`, JSON.stringify(v));
+      ok(gateOf(v) && v.code === 'write_path_refused' && gateOf(v.error.includes(`under ${why}`)) && gateOf(/nothing ran/.test(v.error)) && verdictOf(v.remedy), `lane L r4 PURE: a write to ${p[0]} ⇒ write_path_refused (under ${why})`, JSON.stringify(v));
     }
-    ok(pv(['/etc/passwd'])?.code === 'write_path_refused' && /outside the places/.test(pv(['/etc/passwd']).error), 'lane L r4 PURE: a path in no allowed root (/etc) ⇒ write_path_refused with the containment sentence');
-    ok(pv(['/home/u/proj/link', '/home/u/.ssh/k'])?.code === 'write_path_refused' && pv(['/home/u/proj/link', '/home/u/.ssh/k']).error.includes('~/.ssh'), 'lane L r4 PURE: a symlink from the project into ~/.ssh (abs in the project, realpath in the store) is refused BY THE STORE — the RESOLVED path is judged');
+    ok(pv(['/etc/passwd'])?.code === 'write_path_refused' && verdictOf(/outside the places/.test(pv(['/etc/passwd']).error)), 'lane L r4 PURE: a path in no allowed root (/etc) ⇒ write_path_refused with the containment sentence');
+    ok(pv(['/home/u/proj/link', '/home/u/.ssh/k'])?.code === 'write_path_refused' && verdictOf(pv(['/home/u/proj/link', '/home/u/.ssh/k']).error.includes('~/.ssh')), 'lane L r4 PURE: a symlink from the project into ~/.ssh (abs in the project, realpath in the store) is refused BY THE STORE — the RESOLVED path is judged');
     // project cwd IS $HOME: containment would allow ~/.ssh, the store deny still refuses it
     const opth = { allow: ['/home/u', '/tmp'], homes: ['/home/u'], dataDir: '/srv/vs/data' };
     ok(V.writePathVerdict([{ file: 'k', paths: ['/home/u/.ssh/authorized_keys'] }], opth)?.code === 'write_path_refused' && V.writePathVerdict([{ file: 'n', paths: ['/home/u/notes.txt'] }], opth) === null, 'lane L r4 PURE: with the project cwd = $HOME, ~/.ssh is still refused (the store deny is unconditional) while ~/notes.txt is allowed');
@@ -520,9 +520,9 @@ console.log('① the PURE router');
     ok(sl(['download', '#k', './d1', './d2']) === 'write:./d1 write:./d2', 'lane L r5 PURE: `download <sel> <path> [more]` — every word after the selector is a slot (measured: `download #k d1 d2` SAVED d1 — "the last positional" would have left d1 relative); the selector never', sl(['download', '#k', './d1', './d2']));
     ok(sl(['screenshot', '@e1', 'o.png']) === 'write:o.png' && sl(['screenshot', '#b', 'c1.png', 'c2.png']) === 'write:c1.png write:c2.png', 'lane L r5 PURE: `screenshot <sel> <path>` — two words ⇒ the second (measured: `#b c1.png c2.png` saved c1.png) and any after it');
     const lone = ['noext', '.btn', 'a.b', 'x.gif', 'x.pdf', '@e1', '#b', '~'];
-    ok(lone.every((w) => sl(['screenshot', w]) === ''), `lane L r5 PURE: ONE screenshot word that the binary reads as a SELECTOR is never rewritten (measured "Element not found" for ${lone.join(' ')})`);
+    ok(verdictOf(lone.every((w) => sl(['screenshot', w]) === '')), `lane L r5 PURE: ONE screenshot word that the binary reads as a SELECTOR is never rewritten (measured "Element not found" for ${lone.join(' ')})`);
     const paths = ['x.png', 'x.jpg', 'x.jpeg', 'x.webp', './noext', 'sub/noext', '/abs/noext', '~x.png', 'X.PNG'];
-    ok(paths.every((w) => sl(['screenshot', w]) === `write:${w}`), `lane L r5 PURE: ONE screenshot word is a path when it holds a \`/\` or ends .png/.jpg/.jpeg/.webp (measured on 0.38.1; X.PNG case-insensitively — a superset) (${paths.join(' ')})`);
+    ok(verdictOf(paths.every((w) => sl(['screenshot', w]) === `write:${w}`)), `lane L r5 PURE: ONE screenshot word is a path when it holds a \`/\` or ends .png/.jpg/.jpeg/.webp (measured on 0.38.1; X.PNG case-insensitively — a superset) (${paths.join(' ')})`);
     ok(sl(['screenshot', '--threshold', '0.2', '@e1', 'o.png']) === 'write:o.png' && sl(['screenshot', '--full', 'z.png']) === 'write:z.png' && sl(['screenshot', 'o.png', '--threshold', '0.2']) === 'write:o.png', 'lane L r5 PURE: a verb\'s own value flag (`--threshold <n>`) takes its value, never a slot; a boolean (`--full`) takes nothing');
     ok(sl(['record', 'start', './v.webm', 'https://x', '--fps', '30']) === 'write:./v.webm' && sl(['record', 'restart', 'v.mp4']) === 'write:v.mp4' && sl(['record', 'stop']) === '', 'lane L r5 PURE: `record start|restart <path> [url]` — the FIRST word after the sub only (a URL is never rewritten)');
     ok(sl(['pdf', './p.pdf']) === 'write:./p.pdf' && sl(['state', 'save', './s.json']) === 'write:./s.json' && sl(['state', 'load', 's.json']) === 'read:s.json' && sl(['state', 'list']) === '' && sl(['trace', 'stop', './t.json']) === 'write:./t.json' && sl(['profiler', 'stop', 'p.json']) === 'write:p.json' && sl(['trace', 'start']) === '' && sl(['network', 'har', 'stop', 'h.har']) === 'write:h.har' && sl(['network', 'har', 'start']) === '', 'lane L r5 PURE: pdf / state save / trace·profiler stop / network har stop are write slots; `state load` a READ slot');
@@ -542,25 +542,25 @@ console.log('① the PURE router');
     ok(pp('l/../.ssh/authorized_keys').path === '/h/.ssh/authorized_keys' && path.posix.resolve('/p', 'l/../.ssh/authorized_keys') === '/p/.ssh/authorized_keys', 'lane L r5 F2 PURE: `l/../.ssh/authorized_keys` with l -> ~/.ssh is ~/.ssh/authorized_keys — the `..` steps up from where l POINTS (the lexical r4 rule said <cwd>/.ssh/authorized_keys)', JSON.stringify(pp('l/../.ssh/authorized_keys')));
     ok(pp('e/../etc/cron.d/x').path === '/etc/cron.d/x' && pp('r/.ssh/k').path === '/h/.ssh/k', 'lane L r5 F2 PURE: the verifier\'s `e -> /etc` spelling, and a RELATIVE link target resolved from the link\'s own directory');
     ok(pp('dang').path === '/h/.ssh/newkey', 'lane L r5 F2 PURE: a DANGLING final link is followed (a write through it creates its target — open(O_CREAT) follows it)');
-    ok(pp('loop/x').ok === false && /symbolic links/.test(pp('loop/x').error) && pp('a\0b').ok === false, 'lane L r5 F2 PURE: a link loop and a NUL are errors, never a path');
+    ok(pp('loop/x').ok === false && gateOf(/symbolic links/.test(pp('loop/x').error)) && pp('a\0b').ok === false, 'lane L r5 F2 PURE: a link loop and a NUL are errors, never a path');
     ok(pp('~/x').path === '/h/x' && pp('~').path === '/h' && pp('~root/x').path === '/p/~root/x' && pp('/abs/../etc/./x').path === '/etc/x' && pp('sub/../x').path === '/p/x' && pp('nope/../sub/y').path === '/p/sub/y', 'lane L r5 PURE: `~` / `~/…` are the home (the binary never expands them — F4), `~user` literal (the binary\'s reading too), `.`/`..` without a link are plain');
     // writePathVerdict: F3 the fence is the SESSION's, F6 a root inside a dot-dir wins, the named stores anywhere
     const H = '/home/u';
     const wv = (q, root) => V.writePathVerdict([{ file: q, paths: [q] }], { allow: ['/tmp', `${H}/Downloads`], homes: [H], dataDir: '/srv/vs/data', sessionRoot: root });
-    ok(wv(`${H}/proj/x.pdf`, null)?.code === 'write_path_refused' && /no session directory is known/.test(wv(`${H}/proj/x.pdf`, null).error) && wv('/tmp/x.pdf', null) === null && wv(`${H}/Downloads/x.pdf`, null) === null, 'lane L r5 F3 PURE: no session root ⇒ only /tmp and ~/Downloads — never "wherever the shell stands"');
-    ok(wv(`${H}/proj/x.pdf`, `${H}/proj`) === null && /the project directory \(\/home\/u\/proj\)/.test(wv('/etc/cron.d/x', `${H}/proj`)?.error || '') && /no session directory/.test(wv('/x.pdf', '/')?.error || ''), 'lane L r5 F3 PURE: with the root the project writes; a path beside it is refused naming it; a root of `/` is no root');
+    ok(wv(`${H}/proj/x.pdf`, null)?.code === 'write_path_refused' && gateOf(/no session directory is known/.test(wv(`${H}/proj/x.pdf`, null).error)) && wv('/tmp/x.pdf', null) === null && wv(`${H}/Downloads/x.pdf`, null) === null, 'lane L r5 F3 PURE: no session root ⇒ only /tmp and ~/Downloads — never "wherever the shell stands"');
+    ok(wv(`${H}/proj/x.pdf`, `${H}/proj`) === null && gateOf(/the project directory \(\/home\/u\/proj\)/.test(wv('/etc/cron.d/x', `${H}/proj`)?.error || '')) && verdictOf(/no session directory/.test(wv('/x.pdf', '/')?.error || '')), 'lane L r5 F3 PURE: with the root the project writes; a path beside it is refused naming it; a root of `/` is no root');
     ok(wv(`${H}/.config/nvim/init.lua`, `${H}/.config/nvim`) === null && wv(`${H}/.local/share/proj/x`, `${H}/.local/share/proj`) === null, 'lane L r5 F6 PURE: a project under a dot-directory (~/.config/nvim, ~/.local/share/proj) writes under its own root');
-    ok(/~\/\.config/.test(wv(`${H}/.config/autostart/x.desktop`, `${H}/.config/nvim`)?.error || '') && /~\/\.bashrc/.test(wv(`${H}/.bashrc`, H)?.error || ''), 'lane L r5 F6 PURE: …never beside it (~/.config/autostart), and a root of $HOME never opens ~/.bashrc');
+    ok(gateOf(/~\/\.config/.test(wv(`${H}/.config/autostart/x.desktop`, `${H}/.config/nvim`)?.error || '')) && verdictOf(/~\/\.bashrc/.test(wv(`${H}/.bashrc`, H)?.error || '')), 'lane L r5 F6 PURE: …never beside it (~/.config/autostart), and a root of $HOME never opens ~/.bashrc');
     const inRoot = [`${H}/.config/nvim/.ssh/k`, `${H}/.config/nvim/.git/hooks/pre-commit`, `${H}/.config/nvim/.claude/settings.json`, `${H}/.config/nvim/.codex/auth.json`, `${H}/.config/nvim/.vibespace/x`];
-    ok(inRoot.every((q) => wv(q, `${H}/.config/nvim`)?.code === 'write_path_refused') && wv(`${H}/.ssh/k`, `${H}/.ssh`)?.code === 'write_path_refused', 'lane L r5 F6 PURE: the named stores stay refused INSIDE a winning root (and a root that IS ~/.ssh opens nothing)');
-    ok(/a \.git directory/.test(wv(`${H}/proj/.git/hooks/pre-commit`, `${H}/proj`)?.error || '') && /a \.claude directory/.test(wv(`${H}/proj/.claude/settings.json`, `${H}/proj`)?.error || ''), 'lane L r5 PURE: a project\'s .git (hooks git runs) and .claude (settings whose hooks run commands) are stores wherever they stand');
-    ok(/<VibeSpace data>/.test(wv('/srv/vs/data/bin/vibespace-hook.mjs', '/srv/vs')?.error || '') && /<VibeSpace data>/.test(wv('/srv/vs/data/auth.json', '/srv/vs')?.error || '') && wv('/srv/vs/src/x.js', '/srv/vs') === null, 'lane L r5 PURE: VibeSpace\'s whole data dir is refused even when the project IS the checkout (data/bin/vibespace-hook.mjs runs in every session); the checkout\'s source is the project\'s');
+    ok(gateOf(inRoot.every((q) => wv(q, `${H}/.config/nvim`)?.code === 'write_path_refused')) && wv(`${H}/.ssh/k`, `${H}/.ssh`)?.code === 'write_path_refused', 'lane L r5 F6 PURE: the named stores stay refused INSIDE a winning root (and a root that IS ~/.ssh opens nothing)');
+    ok(gateOf(/a \.git directory/.test(wv(`${H}/proj/.git/hooks/pre-commit`, `${H}/proj`)?.error || '')) && verdictOf(/a \.claude directory/.test(wv(`${H}/proj/.claude/settings.json`, `${H}/proj`)?.error || '')), 'lane L r5 PURE: a project\'s .git (hooks git runs) and .claude (settings whose hooks run commands) are stores wherever they stand');
+    ok(gateOf(/<VibeSpace data>/.test(wv('/srv/vs/data/bin/vibespace-hook.mjs', '/srv/vs')?.error || '')) && gateOf(/<VibeSpace data>/.test(wv('/srv/vs/data/auth.json', '/srv/vs')?.error || '')) && wv('/srv/vs/src/x.js', '/srv/vs') === null, 'lane L r5 PURE: VibeSpace\'s whole data dir is refused even when the project IS the checkout (data/bin/vibespace-hook.mjs runs in every session); the checkout\'s source is the project\'s');
     ok(wv(`${H}/proj/.gitignore`, `${H}/proj`) === null && wv(`${H}/proj/x.git/y`, `${H}/proj`) === null && wv('/srv/vs/database/x', '/srv/vs') === null && wv(`${H}/proj/.btn`, `${H}/proj`) === null, 'lane L r5 CONTROL: a name that only SHARES a prefix (.gitignore, x.git, database) or another dot name (.btn — a class selector a screenshot names) is not a store');
     ok(V.writePathVerdict([{ file: 'x', paths: [`${H}/.config/nvim/x`] }], { allow: ['/tmp', `${H}/.config/nvim`], homes: [H] })?.code === 'write_path_refused', 'lane L r5 F6 CONTROL: the same write with the root only on the allow list (the r4 shape — no `sessionRoot`) is refused by the dot rule: the exemption is what admits it');
     // daemonCwdVerdict: a daemon never runs in the checkout
     const dv = (d) => V.daemonCwdVerdict(d, { checkout: '/srv/vs', serverCwd: '/srv/run' });
-    ok(['/srv/vs', '/srv/vs/data', '/srv', '/', '/srv/run', 'rel'].every((d) => dv(d)?.code === 'daemon_cwd_refused') && dv('/tmp/vibespace-browser-cwd-1000') === null && /inside the VibeSpace checkout/.test(dv('/srv/vs/data').error) && /ancestor/.test(dv('/srv').error), 'lane L r5 F1(b) PURE: a daemon cwd that is the checkout, inside it, an ancestor of it, `/`, the server\'s cwd or relative is refused; a private tmp dir passes');
-    ok(!V.ENV_PASS.includes('AGENT_BROWSER_SCREENSHOT_DIR') && V.childEnv({ AGENT_BROWSER_SCREENSHOT_DIR: '/etc' }, { spawnEnv: [] }).dropped.includes('AGENT_BROWSER_SCREENSHOT_DIR'), 'lane L r5 F5 PURE: AGENT_BROWSER_SCREENSHOT_DIR is a write target, not output shape — not passed, and said by name');
+    ok(gateOf(['/srv/vs', '/srv/vs/data', '/srv', '/', '/srv/run', 'rel'].every((d) => dv(d)?.code === 'daemon_cwd_refused')) && dv('/tmp/vibespace-browser-cwd-1000') === null && gateOf(/inside the VibeSpace checkout/.test(dv('/srv/vs/data').error)) && verdictOf(/ancestor/.test(dv('/srv').error)), 'lane L r5 F1(b) PURE: a daemon cwd that is the checkout, inside it, an ancestor of it, `/`, the server\'s cwd or relative is refused; a private tmp dir passes');
+    ok(!V.ENV_PASS.includes('AGENT_BROWSER_SCREENSHOT_DIR') && verdictOf(V.childEnv({ AGENT_BROWSER_SCREENSHOT_DIR: '/etc' }, { spawnEnv: [] }).dropped.includes('AGENT_BROWSER_SCREENSHOT_DIR')), 'lane L r5 F5 PURE: AGENT_BROWSER_SCREENSHOT_DIR is a write target, not output shape — not passed, and said by name');
   }
   {
     // lane L r6 (verify r4 F-A, MAJOR): THE OPTION CENSUS. `wait --download [path]` ("Wait for a download to complete
@@ -631,20 +631,20 @@ console.log('① the PURE router');
     };
     {
       const verbFiles = fs.readdirSync(AB).filter((n) => n.endsWith('.txt') && n !== '_top.txt').map((n) => n.slice(0, -4));
-      ok(AB_INDEX.version === '0.38.1' && verbFiles.length >= 45 && fs.readFileSync(path.join(AB, 'wait.txt'), 'utf8').includes('--download [path]'), `lane L r6 CENSUS: the 0.38.1 help fixtures are non-vacuous (${verbFiles.length} verb helps + the top-level help; wait's documents \`--download [path]\`)`);
+      ok(AB_INDEX.version === '0.38.1' && verbFiles.length >= 45 && verdictOf(fs.readFileSync(path.join(AB, 'wait.txt'), 'utf8').includes('--download [path]')), `lane L r6 CENSUS: the 0.38.1 help fixtures are non-vacuous (${verbFiles.length} verb helps + the top-level help; wait's documents \`--download [path]\`)`);
       const noHelp = V.PAGE_VERBS.filter((v) => !verbFiles.includes(v) && !AB_INDEX.generic.includes(v));
-      ok(noHelp.length === 0 && AB_INDEX.generic.every((v) => !verbFiles.includes(v)), `lane L r6 CENSUS: every page verb has its own help fixture or is named in index.json's \`generic\` (read from the top-level rows) — missing: ${noHelp.join(', ') || 'none'}`);
+      ok(noHelp.length === 0 && verdictOf(AB_INDEX.generic.every((v) => !verbFiles.includes(v))), `lane L r6 CENSUS: every page verb has its own help fixture or is named in index.json's \`generic\` (read from the top-level rows) — missing: ${noHelp.join(', ') || 'none'}`);
       const pathy = optionRows.filter((x) => x.pathy);
-      ok(pathy.length >= 60 && ['wait --download', 'diff -o', 'diff --baseline', 'open --init-script', 'cookies --curl', 'screenshot --screenshot-dir', '* --ca-cert', 'webmcp --params'].every((s) => { const [v, f] = s.split(' '); return pathy.some((x) => x.verb === v && x.names.includes(f)); }), `lane L r6 CENSUS: the option census is non-vacuous (${optionRows.length} options read, ${pathy.length} path-shaped — option lines, the top-level rows' inline flags and its option sections all counted)`);
+      ok(pathy.length >= 60 && verdictOf(['wait --download', 'diff -o', 'diff --baseline', 'open --init-script', 'cookies --curl', 'screenshot --screenshot-dir', '* --ca-cert', 'webmcp --params'].every((s) => { const [v, f] = s.split(' '); return pathy.some((x) => x.verb === v && x.names.includes(f)); })), `lane L r6 CENSUS: the option census is non-vacuous (${optionRows.length} options read, ${pathy.length} path-shaped — option lines, the top-level rows' inline flags and its option sections all counted)`);
       const cz = optionCensus(V);
       ok(cz.missing.length === 0, `lane L r6 CENSUS: every path-shaped OPTION of the 0.38.1 help is a write slot, a read slot, refused wholesale, or on PATH_OPTION_ALLOW with a reason (missing: ${cz.missing.join('; ') || 'none'})`, cz.missing.join('\n    '));
-      ok(cz.dead.length === 0 && Object.values(V.PATH_OPTION_ALLOW || {}).every((why) => typeof why === 'string' && why.length >= 20), `lane L r6 CENSUS: every PATH_OPTION_ALLOW row names a reason and is an option the help really documents (dead rows: ${cz.dead.join(', ') || 'none'})`);
+      ok(cz.dead.length === 0 && verdictOf(Object.values(V.PATH_OPTION_ALLOW || {}).every((why) => typeof why === 'string' && why.length >= 20)), `lane L r6 CENSUS: every PATH_OPTION_ALLOW row names a reason and is an option the help really documents (dead rows: ${cz.dead.join(', ') || 'none'})`);
       // the pins (the verifier's): judged, and one exact write slot handed absolute
       const sl = (a) => V.pathSlots(a).map((x) => `${x.kind}:${x.prefix}${x.word}`).join(' ');
-      ok(V.writeTargetsAt(['wait', '--download', '/etc/x'], 0).includes('/etc/x') && JSON.stringify(V.classify(['wait', '--download', '/etc/cron.d/x']).writeFiles) === '["/etc/cron.d/x"]', 'lane L r6 F-A PURE: `wait --download /etc/x` NAMES its path for judging (writeTargetsAt + classify.writeFiles)', JSON.stringify(V.classify(['wait', '--download', '/etc/cron.d/x'])));
+      ok(gateOf(V.writeTargetsAt(['wait', '--download', '/etc/x'], 0).includes('/etc/x')) && JSON.stringify(V.classify(['wait', '--download', '/etc/cron.d/x']).writeFiles) === '["/etc/cron.d/x"]', 'lane L r6 F-A PURE: `wait --download /etc/x` NAMES its path for judging (writeTargetsAt + classify.writeFiles)', JSON.stringify(V.classify(['wait', '--download', '/etc/cron.d/x'])));
       ok(sl(['wait', '--download', './w']) === 'write:./w' && sl(['wait', '--download=./w']) === 'write:--download=./w' && sl(['wait', '--download', './f.pdf', '--timeout', '5000']) === 'write:./f.pdf', 'lane L r6 F-A PURE: `wait --download <path>` is ONE write slot (the `=` form keeps its prefix; `--timeout <ms>` is not a slot)', sl(['wait', '--download', './f.pdf', '--timeout', '5000']));
       ok(sl(['wait', '--download']) === '' && sl(['wait', '--download', '--timeout', '30000']) === '' && sl(['wait', '#spinner']) === '' && sl(['wait', '--text', 'a/b']) === '' && sl(['wait', '--url', '**/dashboard']) === '' && V.classify(['wait', '--download']).writeFiles === undefined, 'lane L r6 F-A PURE: `wait --download` with no path (an optional value) names nothing and is no slot; a selector / text / URL pattern never is');
-      ok(['constructor', 'toString', '__proto__', 'hasOwnProperty'].every((w) => { try { return V.pathSlots([w, 'x', '--output', 'o']).length === 1 && V.writeTargetsAt([w, 'x'], 0).length === 0; } catch { return false; } }), 'lane L r6 PURE: a verb word that names an inherited property (`constructor`, `toString`, …) is looked up as an OWN key — no throw, no phantom slot');
+      ok(verdictOf(['constructor', 'toString', '__proto__', 'hasOwnProperty'].every((w) => { try { return V.pathSlots([w, 'x', '--output', 'o']).length === 1 && V.writeTargetsAt([w, 'x'], 0).length === 0; } catch { return false; } })), 'lane L r6 PURE: a verb word that names an inherited property (`constructor`, `toString`, …) is looked up as an OWN key — no throw, no phantom slot');
       ok(JSON.stringify(V.classify(['batch', 'open https://x', 'wait --download /etc/x']).writeFiles) === '["/etc/x"]', 'lane L r6 F-A PURE: a batch line `wait --download /etc/x` names its path like every other writer');
       // NEGATIVE CONTROL: the table WITHOUT `wait` (a patched copy) — the census reddens naming the option, and the pins go red
       const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
@@ -652,14 +652,14 @@ console.log('① the PURE router');
       const noWaitSrc = editAnchor(src, /\n\s*wait: \{ flags: \['--download'\] \},/, '', "src/browser-verbs.js");
       const NW = noWaitSrc !== src ? load(noWaitSrc) : null;
       const czc = NW ? optionCensus(NW) : null;
-      ok(NW && JSON.stringify(czc.missing) === '["wait --download [path]"]', 'lane L r6 NEGATIVE CONTROL: the table without `wait` (patched copy) — the option census names exactly `wait --download [path]` missing', JSON.stringify(czc && czc.missing));
-      ok(NW && NW.classify(['wait', '--download', '/etc/x']).writeFiles === undefined && NW.pathSlots(['wait', '--download', './w']).length === 0, 'lane L r6 NEGATIVE CONTROL: …and names nothing for judging, rewrites nothing — the pins above can go red');
+      ok(gateOf(NW) && JSON.stringify(czc.missing) === '["wait --download [path]"]', 'lane L r6 NEGATIVE CONTROL: the table without `wait` (patched copy) — the option census names exactly `wait --download [path]` missing', JSON.stringify(czc && czc.missing));
+      ok(gateOf(NW) && NW.classify(['wait', '--download', '/etc/x']).writeFiles === undefined && NW.pathSlots(['wait', '--download', './w']).length === 0, 'lane L r6 NEGATIVE CONTROL: …and names nothing for judging, rewrites nothing — the pins above can go red');
       // ── F-B (MINOR): a lone screenshot word starting with `#`, `@` or `.` (not `./` / `../`) and without an image
       // extension is a SELECTOR on the binary even with a `/` inside (measured on 0.38.1 by the verifier) — never rewritten
       const sel = ['.x[href="/login"]', '.x/y', '@e1/x', '#d/y', '.nope/zz'];
-      ok(sel.every((w) => sl(['screenshot', w]) === ''), `lane L r6 F-B PURE: a lone selector with a \`/\` inside is never rewritten (${sel.join('  ')})`, JSON.stringify(sel.map((w) => sl(['screenshot', w]))));
+      ok(verdictOf(sel.every((w) => sl(['screenshot', w]) === '')), `lane L r6 F-B PURE: a lone selector with a \`/\` inside is never rewritten (${sel.join('  ')})`, JSON.stringify(sel.map((w) => sl(['screenshot', w]))));
       const pth = ['[href="/login"]', 'a[href="/login"]', './c.png', 'shots/a.png', '../up/x', '.shots/a.png', 'sub/noext'];
-      ok(pth.every((w) => sl(['screenshot', w]) === `write:${w}`), `lane L r6 F-B PURE: a lone path is still a slot, handed absolute (${pth.join('  ')} — \`.shots/a.png\` too: an image name, which the binary would read as a selector and silently save to its temp dir; handed absolute it lands where the agent named it)`, JSON.stringify(pth.map((w) => sl(['screenshot', w]))));
+      ok(verdictOf(pth.every((w) => sl(['screenshot', w]) === `write:${w}`)), `lane L r6 F-B PURE: a lone path is still a slot, handed absolute (${pth.join('  ')} — \`.shots/a.png\` too: an image name, which the binary would read as a selector and silently save to its temp dir; handed absolute it lands where the agent named it)`, JSON.stringify(pth.map((w) => sl(['screenshot', w]))));
       ok(sl(['screenshot', '.x[href="/login"]', './out.png']) === 'write:./out.png', 'lane L r6 F-B PURE: the two-word form is unchanged — the selector is positional 0, the path the slot');
       const oldHeur = editAnchor(src, /if \(pos\.length >= 2\) all\(1, 'write'\); else if \(pos\.length === 1 && [^\n]*\n/, "if (pos.length >= 2) all(1, 'write'); else if (pos.length === 1 && (w(0).includes('/') || IMAGE_PATH_RE.test(w(0)))) add(pos[0], 'write'); }\n", "src/browser-verbs.js");
       ok(oldHeur !== src && load(oldHeur).pathSlots(['screenshot', '.x[href="/login"]']).length === 1, 'lane L r6 F-B NEGATIVE CONTROL: the r5 heuristic (patched copy: "holds a `/` or an image extension") rewrites `.x[href="/login"]` — the leg above can go red');
@@ -670,21 +670,21 @@ console.log('① the PURE router');
   const exists = (p) => files.has(p);
   const isShim = (p) => p === '/prod/data/bin/agent-browser';
   let r = V.resolveRealBinary({ PATH: '/shim:/home/u/.vibespace/bin/:/prod/data/bin:/nvm/bin:/usr/bin', shimDirs: ['/shim', '/home/u/.vibespace/bin'], exists, isShim });
-  ok(r.ok && r.path === '/nvm/bin/agent-browser', 'resolveRealBinary skips the shim dirs (trailing slash normalised) and a shim recognised by CONTENT', JSON.stringify(r));
+  ok(gateOf(r.ok) && r.path === '/nvm/bin/agent-browser', 'resolveRealBinary skips the shim dirs (trailing slash normalised) and a shim recognised by CONTENT', JSON.stringify(r));
   r = V.resolveRealBinary({ PATH: ':relative:/shim', shimDirs: ['/shim'], exists: () => true });
-  ok(!r.ok && r.code === 'binary_absent' && r.remedy && !new RegExp(V.REAL_BINARY).test(r.error + r.remedy), 'empty/relative PATH entries are never a binary; absent ⇒ binary_absent (its words never name the binary)');
+  ok(!r.ok && r.code === 'binary_absent' && gateOf(r.remedy) && !new RegExp(V.REAL_BINARY).test(r.error + r.remedy), 'empty/relative PATH entries are never a binary; absent ⇒ binary_absent (its words never name the binary)');
   r = V.resolveRealBinary({ PATH: '/shim:/nvm/bin', shimDirs: [], exists });
-  ok(r.ok && r.path === '/shim/agent-browser', 'CONTROL: without the shim dirs the first hit wins (the skip is what the leg above measured)');
+  ok(gateOf(r.ok) && r.path === '/shim/agent-browser', 'CONTROL: without the shim dirs the first hit wins (the skip is what the leg above measured)');
   // lane browser-admin 2b: THE PINNED RUNG comes FIRST — the CLI VibeSpace installed (Settings browser.cli) beats PATH; a pin
   // that is missing / a shim / relative is skipped and PATH answers exactly as before
   const pfiles = new Set([...files, '/data/browser-tools/agent-browser-0.38.1/node_modules/agent-browser/bin/agent-browser-linux-x64']);
   r = V.resolveRealBinary({ PATH: '/shim:/nvm/bin', shimDirs: ['/shim'], exists: (p) => pfiles.has(p), isShim, pinned: '/data/browser-tools/agent-browser-0.38.1/node_modules/agent-browser/bin/agent-browser-linux-x64' });
-  ok(r.ok && r.pinned === true && /browser-tools/.test(r.path), 'the pinned install is the FIRST rung (before PATH)', JSON.stringify(r));
+  ok(gateOf(r.ok) && r.pinned === true && verdictOf(/browser-tools/.test(r.path)), 'the pinned install is the FIRST rung (before PATH)', JSON.stringify(r));
   r = V.resolveRealBinary({ PATH: '/shim:/nvm/bin', shimDirs: ['/shim'], exists, isShim, pinned: '/data/browser-tools/gone' });
-  ok(r.ok && !r.pinned && r.path === '/nvm/bin/agent-browser', 'a pin whose program is gone is skipped: PATH answers', JSON.stringify(r));
+  ok(gateOf(r.ok) && !r.pinned && r.path === '/nvm/bin/agent-browser', 'a pin whose program is gone is skipped: PATH answers', JSON.stringify(r));
   r = V.resolveRealBinary({ PATH: '/shim:/nvm/bin', shimDirs: ['/shim'], exists, isShim, pinned: '/prod/data/bin/agent-browser' });
-  ok(r.ok && r.path === '/nvm/bin/agent-browser', 'a pin that IS the shim is never run', JSON.stringify(r));
-  ok(V.LAUNCH_FLAGS.includes('--executable-path') && V.REFUSED_VERBS.install && V.REFUSED_VERBS.upgrade, 'the refused flags / verbs are unchanged by the pin: --executable-path stays a refused launch flag, install / upgrade not offered');
+  ok(gateOf(r.ok) && r.path === '/nvm/bin/agent-browser', 'a pin that IS the shim is never run', JSON.stringify(r));
+  ok(gateOf(V.LAUNCH_FLAGS.includes('--executable-path')) && gateOf(V.REFUSED_VERBS.install) && verdictOf(V.REFUSED_VERBS.upgrade), 'the refused flags / verbs are unchanged by the pin: --executable-path stays a refused launch flag, install / upgrade not offered');
 }
 
 // ═══ ② the SHIM ═══
@@ -708,9 +708,9 @@ const shimLeg = async (file, label) => {
   // (the shim's source checks (exists, executable, the marker, no env / network / spawn): MOVED to the fast scripts/test-browser-verbs-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   const src = fs.existsSync(SHIM) ? fs.readFileSync(SHIM, 'utf8') : '';   // the legs below read it
   const s = await shimLeg(SHIM, 'shim');
-  ok(s.good1, 'the shim exits 2 with exactly one stderr line naming `vibespace-browser open https://x`', JSON.stringify([s.a.status, s.a.stderr]));
-  ok(s.good2, 'no args ⇒ the same sentence + `vibespace-browser help`', JSON.stringify([s.b.status, s.b.stderr]));
-  ok(s.good3, 'arguments are shell-quoted so the line can be copied and run', s.c.stderr);
+  ok(verdictOf(s.good1), 'the shim exits 2 with exactly one stderr line naming `vibespace-browser open https://x`', JSON.stringify([s.a.status, s.a.stderr]));
+  ok(verdictOf(s.good2), 'no args ⇒ the same sentence + `vibespace-browser help`', JSON.stringify([s.b.status, s.b.stderr]));
+  ok(verdictOf(s.good3), 'arguments are shell-quoted so the line can be copied and run', s.c.stderr);
   // CONTROL: a copy that forwards (exits 0) must be caught by the same leg
   const ctlDir = scratch('browser-verbs-shimctl'); fs.rmSync(ctlDir, { recursive: true, force: true }); fs.mkdirSync(ctlDir, { recursive: true });
   const ctl = path.join(ctlDir, 'agent-browser');
@@ -805,44 +805,44 @@ try {
   let c = await cli(['click', '@e1']);
   let rc = realCalls();
   ok(c.status === 0 && rc.length === 1 && JSON.stringify(rc[0].argv) === JSON.stringify(['click', '@e1']), '`vibespace-browser click @e1` runs the REAL binary found on PATH behind a shim (the shim dir comes first)', JSON.stringify([c, rc]));
-  ok(/^profile: \(ephemeral\)/.test(c.stderr.split('\n')[0]), 'the first stderr line names the browser it acted on (ephemeral)', c.stderr);
+  ok(verdictOf(/^profile: \(ephemeral\)/.test(c.stderr.split('\n')[0])), 'the first stderr line names the browser it acted on (ephemeral)', c.stderr);
   const bodyA = JSON.stringify(resolves()[0] && resolves()[0].body);
   c = await cli(['--', 'click', '@e1']);
   rc = realCalls();
   const bodyB = JSON.stringify(resolves()[1] && resolves()[1].body);
   ok(c.status === 0 && resolves().length === 2 && bodyA === bodyB && JSON.stringify(rc[1].argv) === JSON.stringify(['click', '@e1']), '`-- click @e1` posts the IDENTICAL /resolve body and runs the same argv', bodyA + ' vs ' + bodyB);
-  ok(calls.filter((x) => x.path === '/api/agent/browser/audit').length === 2 && calls.filter((x) => x.path === '/api/agent/browser/audit').every((x) => x.body && x.body.verb === 'click' && x.body.profile == null), 'every page verb is audited — the ephemeral browser too (verb only)');
+  ok(calls.filter((x) => x.path === '/api/agent/browser/audit').length === 2 && verdictOf(calls.filter((x) => x.path === '/api/agent/browser/audit').every((x) => x.body && x.body.verb === 'click' && x.body.profile == null)), 'every page verb is audited — the ephemeral browser too (verb only)');
 
   const before = calls.length;
   for (const [argv, r2] of await atOnce([['connect', '9222'], ['get', 'cdp-url'], ['--cdp', '1', 'snapshot'], ['--session', 'x', 'snapshot'], ['snapshot', '--proxy', 'http://p'], ['auth', 'save', 'x', '--password', 'hunter2'], ['batch', 'open https://x', 'get cdp-url']], (a) => cli(a))) {
     const code = { connect: 'raw_cdp_refused', get: 'raw_cdp_refused', '--cdp': 'raw_cdp_refused', '--session': 'identity_flag_refused', snapshot: 'launch_flag_refused', auth: 'verb_not_offered', batch: 'batch_line_refused' }[argv[0]];
-    ok(r2.status === 1 && r2.stderr.includes(`[${code}]`) && /remedy: /.test(r2.stderr) && !/hunter2/.test(r2.stderr), `\`${argv.join(' ')}\` is refused LOCALLY [${code}] with a remedy`, r2.stderr);
+    ok(r2.status === 1 && gateOf(r2.stderr.includes(`[${code}]`)) && gateOf(/remedy: /.test(r2.stderr)) && !/hunter2/.test(r2.stderr), `\`${argv.join(' ')}\` is refused LOCALLY [${code}] with a remedy`, r2.stderr);
   }
   // r1 (finding 1): the flag-ordered spellings of `get cdp-url` — refused by the shipped CLI too
   for (const [argv, r2] of await atOnce([['get', '--json', 'cdp-url'], ['get', '-c', 'cdp-url'], ['get', 'cdp-url', '--json'], ['--', 'get', '--json', 'cdp-url'], ['batch', 'get --json cdp-url']], (a) => cli(a))) {
     const code = argv[0] === 'batch' ? 'batch_line_refused' : 'raw_cdp_refused';
-    ok(r2.status === 1 && r2.stderr.includes(`[${code}]`) && /remedy: /.test(r2.stderr) && !/cdpUrl|ws:\/\//.test(r2.stdout), `\`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY [${code}]`, JSON.stringify(r2));
+    ok(r2.status === 1 && gateOf(r2.stderr.includes(`[${code}]`)) && gateOf(/remedy: /.test(r2.stderr)) && !/cdpUrl|ws:\/\//.test(r2.stdout), `\`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY [${code}]`, JSON.stringify(r2));
   }
   // r3 (finding 1): the verifier's spelling through the shipped CLI, and a flag of unknown arity
   for (const [[argv, code], r2] of await atOnce([[['get', '--idle-timeout', '5m', 'cdp-url'], 'launch_flag_refused'], [['get', '--newglobal', 'text', 'cdp-url'], 'raw_cdp_refused'], [['get', 'ws-url'], 'unknown_verb']], ([a]) => cli(a))) {
-    ok(r2.status === (code === 'unknown_verb' ? 2 : 1) && r2.stderr.includes(`[${code}]`) && !/ws:\/\//.test(r2.stdout), `r3: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY [${code}]`, JSON.stringify(r2));
+    ok(r2.status === (code === 'unknown_verb' ? 2 : 1) && gateOf(r2.stderr.includes(`[${code}]`)) && !/ws:\/\//.test(r2.stdout), `r3: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY [${code}]`, JSON.stringify(r2));
   }
   ok(calls.length === before && realCalls().length === 2, '…with ZERO server calls and nothing run');
   c = await cli(['frobnicate']);
-  ok(c.status === 2 && /\[unknown_verb\]/.test(c.stderr) && calls.length === before, 'an unknown verb exits 2 (usage) with no server call');
+  ok(c.status === 2 && gateOf(/\[unknown_verb\]/.test(c.stderr)) && calls.length === before, 'an unknown verb exits 2 (usage) with no server call');
   // THE OWNER'S RULING (2026-09-27, "告知agent发生了打断"): the audit answers whether a takeover caught the command in flight — the
   // CLI prints the refusal BY NAME and exits 1 like every refusal, whatever the binary said
   {
     const SENT = 'The user took over your window of this browser — your operation was interrupted. Wait for the handback, then run it again.';
     const auditBodies = () => calls.filter((x) => x.path === '/api/agent/browser/audit').map((x) => x.body);
-    ok(auditBodies().every((b) => !('since' in b)), 'interrupt: an answer with no server instant (an older server) ⇒ the audit sends no `since` (nothing to compare)');
+    ok(verdictOf(auditBodies().every((b) => !('since' in b))), 'interrupt: an answer with no server instant (an older server) ⇒ the audit sends no `since` (nothing to compare)');
     resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false, at: 1790000000123 };
     auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true } };
     let ci = await cli(['click', '@e1']);
-    ok(ci.status === 1 && ci.stderr.includes(`${SENT} [browser_interrupted]`) && /taken over at: 2026-/.test(ci.stderr) && /the user still drives — wait for the handback \(it names what to re-run\)/.test(ci.stderr) && /cut short/.test(ci.stderr) && auditBodies().at(-1).since === 1790000000123, 'interrupt: the audit answers `interrupted` (cut on a mediated browser) ⇒ THE sentence [browser_interrupted], when, that the user still drives, that it was cut — exit 1; the audit carried the /resolve instant as `since` (the server\'s clock)', JSON.stringify(ci));
+    ok(ci.status === 1 && gateOf(ci.stderr.includes(`${SENT} [browser_interrupted]`)) && gateOf(/taken over at: 2026-/.test(ci.stderr)) && gateOf(/the user still drives — wait for the handback \(it names what to re-run\)/.test(ci.stderr)) && gateOf(/cut short/.test(ci.stderr)) && auditBodies().at(-1).since === 1790000000123, 'interrupt: the audit answers `interrupted` (cut on a mediated browser) ⇒ THE sentence [browser_interrupted], when, that the user still drives, that it was cut — exit 1; the audit carried the /resolve instant as `since` (the server\'s clock)', JSON.stringify(ci));
     auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'agent', handedBackAt: 1790000009000, aborted: false } };
     ci = await cli(['click', '@e1']);
-    ok(ci.status === 1 && ci.stderr.includes(`${SENT} [browser_interrupted]`) && /control is back with you: re-read the page, then run it again/.test(ci.stderr) && /nothing stood between your command and the page: it ran to its end/.test(ci.stderr) && !/cut short/.test(ci.stderr), 'interrupt: not cut (an unmediated browser — the binary exited 0) and already handed back ⇒ the refusal still stands (exit 1), it says the command ran to its end and that control is back', JSON.stringify(ci));
+    ok(ci.status === 1 && gateOf(ci.stderr.includes(`${SENT} [browser_interrupted]`)) && gateOf(/control is back with you: re-read the page, then run it again/.test(ci.stderr)) && gateOf(/nothing stood between your command and the page: it ran to its end/.test(ci.stderr)) && !/cut short/.test(ci.stderr), 'interrupt: not cut (an unmediated browser — the binary exited 0) and already handed back ⇒ the refusal still stands (exit 1), it says the command ran to its end and that control is back', JSON.stringify(ci));
     resolveAnswer = { ok: true, kind: 'child', handle: 'bk-0000000a.2', env: [], unset: [], handles: [], pinTab: false, at: 1790000000999 };
     auditAnswer = { ok: true };
     ci = await cli(['click', '@e1']);
@@ -852,41 +852,41 @@ try {
     resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false, at: 1790000000123 };
     auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true, mediated: true, landed: 1 } };
     ci = await cli(['fill', '#f', 'x']);
-    ok(ci.status === 1 && /cut short/.test(ci.stderr) && /but one of its calls had already reached the page and took effect \(a fill's text may be in the field, a click may have landed\): check the page before running it again/.test(ci.stderr), 'r6 (measured on 0.38.1 + Chrome 153: a fill caught on its insertText holds all 4000 chars): a cut whose call LANDED says so — "cut short … but one of its calls had already reached the page and took effect: check the page"', ci.stderr.slice(0, 600));
+    ok(ci.status === 1 && gateOf(/cut short/.test(ci.stderr)) && verdictOf(/but one of its calls had already reached the page and took effect \(a fill's text may be in the field, a click may have landed\): check the page before running it again/.test(ci.stderr)), 'r6 (measured on 0.38.1 + Chrome 153: a fill caught on its insertText holds all 4000 chars): a cut whose call LANDED says so — "cut short … but one of its calls had already reached the page and took effect: check the page"', ci.stderr.slice(0, 600));
     auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true, mediated: true, landed: 3 } };
     ci = await cli(['type', '#f', 'xyz']);
-    ok(ci.status === 1 && /but 3 of its calls had already reached the page and took effect/.test(ci.stderr), 'r6: …several landed calls are counted');
+    ok(ci.status === 1 && verdictOf(/but 3 of its calls had already reached the page and took effect/.test(ci.stderr)), 'r6: …several landed calls are counted');
     // verify r7: a call the browser had NOT answered when the audit's bounded wait ran out is said as UNKNOWN — never a definite "cut" (measured: the reply landed 200 ms later)
     auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true, mediated: true, landed: 0, unsettled: 1 } };
     ci = await cli(['click', '@e1']);
-    ok(ci.status === 1 && /cut short/.test(ci.stderr) && /and one of its calls had not been answered by the page when this was written, so whether it took effect is unknown: check the page before running it again/.test(ci.stderr) && !/had already reached the page/.test(ci.stderr), 'r7: a cut whose call was still UNANSWERED says so — "…had not been answered by the page when this was written, so whether it took effect is unknown: check the page"', ci.stderr.slice(0, 700));
+    ok(ci.status === 1 && gateOf(/cut short/.test(ci.stderr)) && gateOf(/and one of its calls had not been answered by the page when this was written, so whether it took effect is unknown: check the page before running it again/.test(ci.stderr)) && !/had already reached the page/.test(ci.stderr), 'r7: a cut whose call was still UNANSWERED says so — "…had not been answered by the page when this was written, so whether it took effect is unknown: check the page"', ci.stderr.slice(0, 700));
     auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true, mediated: true, landed: 1, unsettled: 2 } };
     ci = await cli(['type', '#f', 'xyz']);
-    ok(ci.status === 1 && /but one of its calls had already reached the page and took effect/.test(ci.stderr) && /and 2 of its calls had not been answered by the page/.test(ci.stderr), 'r7: landed AND unanswered calls are both said, counted');
+    ok(ci.status === 1 && gateOf(/but one of its calls had already reached the page and took effect/.test(ci.stderr)) && verdictOf(/and 2 of its calls had not been answered by the page/.test(ci.stderr)), 'r7: landed AND unanswered calls are both said, counted');
     // (b) a mediated command whose binary exited 1 with NOTHING aborted: the takeover came between its calls (refused at the next one)
     auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: false, mediated: true, landed: 0 } };
     ci = await cli(['click', '@e1'], { ...baseEnv, FAKE_AB_EXIT: '1' });
-    ok(ci.status === 1 && /the takeover came between its calls: what it had done before it stands, its calls after it were refused \(nothing more reached the page\)/.test(ci.stderr) && !/cut short/.test(ci.stderr) && !/ran to its end/.test(ci.stderr) && !/not shared instance-wide/.test(ci.stderr), 'r6: a mediated command refused at its next call (binary exit 1, nothing aborted) says the takeover came between its calls — never "cut short", never "ran to its end"', ci.stderr.slice(0, 600));
+    ok(ci.status === 1 && gateOf(/the takeover came between its calls: what it had done before it stands, its calls after it were refused \(nothing more reached the page\)/.test(ci.stderr)) && !/cut short/.test(ci.stderr) && !/ran to its end/.test(ci.stderr) && !/not shared instance-wide/.test(ci.stderr), 'r6: a mediated command refused at its next call (binary exit 1, nothing aborted) says the takeover came between its calls — never "cut short", never "ran to its end"', ci.stderr.slice(0, 600));
     // (c) the same answer with the binary exiting 0 (r5): it ran to its end — check the page
     ci = await cli(['click', '@e1']);
-    ok(ci.status === 1 && /found none of this command's calls in flight \(its last one had answered\): it ran to its end — check the page before re-running it/.test(ci.stderr) && !/came between its calls/.test(ci.stderr), 'r5/r6: a mediated command that ran to its end (binary exit 0, nothing aborted) says so — check the page');
+    ok(ci.status === 1 && gateOf(/found none of this command's calls in flight \(its last one had answered\): it ran to its end — check the page before re-running it/.test(ci.stderr)) && !/came between its calls/.test(ci.stderr), 'r5/r6: a mediated command that ran to its end (binary exit 0, nothing aborted) says so — check the page');
     auditAnswer = { ok: true };
     resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false };
   }
 
   c = await cli(['use', 'Work', '--print']);
-  ok(c.status === 1 && /\[not_offered\]/.test(c.stderr) && !calls.some((x) => x.path === '/api/agent/browser/use'), '`use --print` ⇒ not_offered (nothing to export), no attach made');
+  ok(c.status === 1 && gateOf(/\[not_offered\]/.test(c.stderr)) && !calls.some((x) => x.path === '/api/agent/browser/use'), '`use --print` ⇒ not_offered (nothing to export), no attach made');
   c = await cli(['use', 'Work']);
-  ok(c.status === 0 && calls.some((x) => x.path === '/api/agent/browser/use') && /profile: Work \(bp-00000001\)/.test(c.stdout) && !/export /.test(c.stdout) && /vibespace-browser <verb>/.test(c.stdout), '`use` only attaches (no subshell, no env) and says how to go on');
+  ok(c.status === 0 && gateOf(calls.some((x) => x.path === '/api/agent/browser/use')) && gateOf(/profile: Work \(bp-00000001\)/.test(c.stdout)) && !/export /.test(c.stdout) && verdictOf(/vibespace-browser <verb>/.test(c.stdout)), '`use` only attaches (no subshell, no env) and says how to go on');
 
   c = await cli(['new-child']);
   const out = c.stdout.split('\n').filter(Boolean);
-  ok(c.status === 0 && out.length === 1 && /^export VIBESPACE_BROWSER='?bk-0000000a\.1'?$/.test(out[0]), '`new-child` prints ONLY `export VIBESPACE_BROWSER=<child>` on stdout', JSON.stringify(c.stdout));
+  ok(c.status === 0 && out.length === 1 && verdictOf(/^export VIBESPACE_BROWSER='?bk-0000000a\.1'?$/.test(out[0])), '`new-child` prints ONLY `export VIBESPACE_BROWSER=<child>` on stdout', JSON.stringify(c.stdout));
 
   // stdin batch: a refused line refuses before the server hears anything
   const n0 = calls.length;
   c = await cli(['batch'], baseEnv, 'open https://x\nsnapshot\nstream enable\n');
-  ok(c.status === 1 && /\[batch_line_refused\]/.test(c.stderr) && /batch line 3/.test(c.stderr) && calls.length === n0, 'a stdin batch is judged line by line before anything runs');
+  ok(c.status === 1 && gateOf(/\[batch_line_refused\]/.test(c.stderr)) && gateOf(/batch line 3/.test(c.stderr)) && calls.length === n0, 'a stdin batch is judged line by line before anything runs');
   c = await cli(['batch'], baseEnv, 'open https://x\nsnapshot -i\n');
   rc = realCalls();
   ok(c.status === 0 && rc[rc.length - 1].argv[0] === 'batch' && rc[rc.length - 1].input === '[["open","https://x"],["snapshot","-i"]]', 'r4: a clean plain-line stdin batch reaches the real binary as the JSON array of string arrays it reads (exactly the words judged)', JSON.stringify(rc[rc.length - 1]));
@@ -898,9 +898,9 @@ try {
     ok(c.status === 0 && rc[rc.length - 1].input === J && JSON.stringify(rc[rc.length - 1].batchJson) === '[["open","https://x"],["get","title"]]' && JSON.stringify(rc[rc.length - 1].argv) === '["batch","--bail"]', 'r4: a JSON stdin batch runs (r3 refused it as `batch line 1 ("[[…]]") … unknown_verb`) — the binary gets the JSON verbatim', JSON.stringify([c.status, c.stderr, rc[rc.length - 1]]));
     const nb = calls.length; const nr = realCalls().length;
     c = await cli(['batch'], baseEnv, '[["open","https://x"],["get","cdp-url"]]');
-    ok(c.status === 1 && /\[batch_line_refused\]/.test(c.stderr) && /batch command 2/.test(c.stderr) && calls.length === nb && realCalls().length === nr, 'r4: …a refused ELEMENT refuses the batch locally and names its index — no server call, nothing run', c.stderr);
+    ok(c.status === 1 && gateOf(/\[batch_line_refused\]/.test(c.stderr)) && gateOf(/batch command 2/.test(c.stderr)) && calls.length === nb && realCalls().length === nr, 'r4: …a refused ELEMENT refuses the batch locally and names its index — no server call, nothing run', c.stderr);
     c = await cli(['batch'], baseEnv, '[["open", 1]]');
-    ok(c.status === 1 && /\[batch_stdin_refused\]/.test(c.stderr) && calls.length === nb && realCalls().length === nr, 'r4: …a stdin that is not the binary\'s form is refused by name before anything runs', c.stderr);
+    ok(c.status === 1 && gateOf(/\[batch_stdin_refused\]/.test(c.stderr)) && calls.length === nb && realCalls().length === nr, 'r4: …a stdin that is not the binary\'s form is refused by name before anything runs', c.stderr);
     // NEGATIVE CONTROL: the r3 CLI's hand-over (the raw stdin) in a patched copy — the fake, like the real binary, cannot read plain lines
     const src = fs.readFileSync(CLI, 'utf8');
     const r3 = editAnchor(src, 'if (stdinJson != null) child.stdin.end(stdinJson);', 'if (stdinJson != null) child.stdin.end(stdinBuf);', "data/bin/vibespace-browser");
@@ -908,16 +908,16 @@ try {
     fs.writeFileSync(path.join(D5, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D5, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D5, 'cli-call.js'));
     c = await nodeCli(path.join(D5, 'vibespace-browser'), ['batch'], { env: baseEnv, input: 'open https://x\nsnapshot -i\n' });
     rc = realCalls();
-    ok(r3 !== src && c.status === 1 && rc[rc.length - 1].invalidStdin === true && /Invalid JSON input/.test(c.stderr), 'r4 NEGATIVE CONTROL: the r3 hand-over (patched copy: the raw lines) is the binary\'s `Invalid JSON input` — the fake reads stdin as the real binary does', JSON.stringify([c.status, c.stderr.slice(0, 200)]));
+    ok(r3 !== src && c.status === 1 && rc[rc.length - 1].invalidStdin === true && verdictOf(/Invalid JSON input/.test(c.stderr)), 'r4 NEGATIVE CONTROL: the r3 hand-over (patched copy: the raw lines) is the binary\'s `Invalid JSON input` — the fake reads stdin as the real binary does', JSON.stringify([c.status, c.stderr.slice(0, 200)]));
   }
 
   // the shared rung: the server refuses close --all by name
   resolveAnswer = { error: 'this session shares the machine\'s browser — `close --all` would close every agent\'s browser', code: 'shared_browser', _status: 409 };
   c = await cli(['close', '--all']);
-  ok(c.status === 1 && /\[shared_browser\]/.test(c.stderr), 'on the shared rung the server\'s `shared_browser` refusal is printed by name');
+  ok(c.status === 1 && verdictOf(/\[shared_browser\]/.test(c.stderr)), 'on the shared rung the server\'s `shared_browser` refusal is printed by name');
   resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], handles: [], pinTab: false };
   c = await cli(['snapshot']);
-  ok(c.status === 0 && /^profile: \(shared\)/.test(c.stderr), '…and a shared-rung page verb says it acted on the SHARED browser');
+  ok(c.status === 0 && verdictOf(/^profile: \(shared\)/.test(c.stderr)), '…and a shared-rung page verb says it acted on the SHARED browser');
 
   // r1 (finding 2): the ENV TWINS of every refused launch / identity / CDP flag never reach the real
   // binary — the child env is process.env minus every AGENT_BROWSER_* key, then the output keys the
@@ -936,16 +936,16 @@ try {
     resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], ...KEEPER, handles: [], pinTab: false };
     let r3 = await cli(['snapshot'], twinEnv);
     let lc = last();
-    ok(r3.status === 0 && lc && leaked(lc.env).length === 0, `shared rung: no twin reaches the real binary (leaked: ${leaked(lc && lc.env).join(', ') || 'none'})`, JSON.stringify(lc && lc.env));
-    ok(lc && OUT.AGENT_BROWSER_JSON === lc.env.AGENT_BROWSER_JSON && lc.env.AGENT_BROWSER_MAX_OUTPUT === '400', '…while the output keys (JSON / MAX_OUTPUT) pass through', JSON.stringify(lc && lc.env));
+    ok(r3.status === 0 && gateOf(lc) && leaked(lc.env).length === 0, `shared rung: no twin reaches the real binary (leaked: ${leaked(lc && lc.env).join(', ') || 'none'})`, JSON.stringify(lc && lc.env));
+    ok(gateOf(lc) && OUT.AGENT_BROWSER_JSON === lc.env.AGENT_BROWSER_JSON && lc.env.AGENT_BROWSER_MAX_OUTPUT === '400', '…while the output keys (JSON / MAX_OUTPUT) pass through', JSON.stringify(lc && lc.env));
     // r2 (browser finding 2): the SOCKET ROOT is identity — the answer's (the keeper's) wins over the shell's
-    ok(lc && lc.env.AGENT_BROWSER_SOCKET_DIR === KEEPER.socketDir && lc.xdg === KEEPER.runtimeDir, 'r2: the socket root is the ANSWER\'s (the keeper\'s SOCKET_DIR + its XDG_RUNTIME_DIR) — never the decoy the agent exported', JSON.stringify(lc && { sd: lc.env.AGENT_BROWSER_SOCKET_DIR, xdg: lc.xdg }));
-    ok(/\[env_twin_dropped\]/.test(r3.stderr) && /AGENT_BROWSER_SOCKET_DIR/.test(r3.stderr) && /XDG_RUNTIME_DIR/.test(r3.stderr) && !r3.stderr.includes(DECOY.AGENT_BROWSER_SOCKET_DIR), 'r2: …and the replaced socket root is SAID by name (never its value)', r3.stderr);
+    ok(gateOf(lc) && lc.env.AGENT_BROWSER_SOCKET_DIR === KEEPER.socketDir && lc.xdg === KEEPER.runtimeDir, 'r2: the socket root is the ANSWER\'s (the keeper\'s SOCKET_DIR + its XDG_RUNTIME_DIR) — never the decoy the agent exported', JSON.stringify(lc && { sd: lc.env.AGENT_BROWSER_SOCKET_DIR, xdg: lc.xdg }));
+    ok(gateOf(/\[env_twin_dropped\]/.test(r3.stderr)) && gateOf(/AGENT_BROWSER_SOCKET_DIR/.test(r3.stderr)) && gateOf(/XDG_RUNTIME_DIR/.test(r3.stderr)) && !r3.stderr.includes(DECOY.AGENT_BROWSER_SOCKET_DIR), 'r2: …and the replaced socket root is SAID by name (never its value)', r3.stderr);
     resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], socketDir: KEEPER.socketDir, runtimeDir: null, handles: [], pinTab: false };
     await cli(['snapshot'], twinEnv);
     lc = last();
     ok(lc.env.AGENT_BROWSER_SOCKET_DIR === KEEPER.socketDir && lc.xdg === null, 'r2: a keeper with NO XDG_RUNTIME_DIR ⇒ the child has none either (the shell\'s is removed, not kept)', JSON.stringify({ sd: lc.env.AGENT_BROWSER_SOCKET_DIR, xdg: lc.xdg }));
-    ok(/\[env_twin_dropped\]/.test(r3.stderr) && /AGENT_BROWSER_CDP/.test(r3.stderr) && /AGENT_BROWSER_PROXY/.test(r3.stderr) && !/\bk\b|evil-chrome/.test(r3.stderr.replace(/AGENT_BROWSER_\w+/g, '')), '…and the drop is SAID (the key names, never their values) — no silent change', r3.stderr);
+    ok(gateOf(/\[env_twin_dropped\]/.test(r3.stderr)) && gateOf(/AGENT_BROWSER_CDP/.test(r3.stderr)) && gateOf(/AGENT_BROWSER_PROXY/.test(r3.stderr)) && !/\bk\b|evil-chrome/.test(r3.stderr.replace(/AGENT_BROWSER_\w+/g, '')), '…and the drop is SAID (the key names, never their values) — no silent change', r3.stderr);
     // row B-e946 (主开发 r4206 / r4242): the two names the driver's session fingerprint reads — never passed, SAID on this same road with
     // THEIR reason and, for the timeout, the driver's own verb that waits (wait <ms>, bounded by the number given). A LEG JUDGES WHAT IT
     // CONTROLS: each child gets an environment THE LEG BUILT — the suite's base WITHOUT any AGENT_BROWSER_* name (baseEnv carries the
@@ -961,17 +961,17 @@ try {
       const sl = linesOf(rs, 'env_session_config_dropped'), tl = linesOf(rs, 'env_twin_dropped');
       ok(rs.status === 0 && !!ls && !('AGENT_BROWSER_DEFAULT_TIMEOUT' in ls.env) && !('AGENT_BROWSER_DEBUG' in ls.env) && ls.env.AGENT_BROWSER_JSON === '1',
         'B-e946: the agent\'s AGENT_BROWSER_DEFAULT_TIMEOUT and AGENT_BROWSER_DEBUG never reach the driver; the output keys still pass; the command runs', JSON.stringify(ls && ls.env));
-      ok(sl.length === 1 && sl[0].includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT') && sl[0].includes('VibeSpace drives this same browser session') && sl[0].includes('lose every ref') && sl[0].includes('`vibespace-browser wait <ms>`') && !sl[0].includes('60000')
-        && tl.every((l) => !l.includes('AGENT_BROWSER_DEBUG') && !l.includes('AGENT_BROWSER_DEFAULT_TIMEOUT')) && !String(rs.stdout).includes('[env_session_config_dropped]'),
+      ok(sl.length === 1 && gateOf(sl[0].includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT')) && gateOf(sl[0].includes('VibeSpace drives this same browser session')) && gateOf(sl[0].includes('lose every ref')) && gateOf(sl[0].includes('`vibespace-browser wait <ms>`')) && !sl[0].includes('60000')
+        && gateOf(tl.every((l) => !l.includes('AGENT_BROWSER_DEBUG') && !l.includes('AGENT_BROWSER_DEFAULT_TIMEOUT'))) && !String(rs.stdout).includes('[env_session_config_dropped]'),
         'B-e946: the two names are SAID ONCE, in their own note on the CLI\'s road (stderr: stdout stays the driver\'s), names only: why (this same session; another value starts its driver again and loses every ref) and the verb that waits instead — and a twins\' note, if one is printed, names neither of them', rs.stderr);
       // (2) the debug name alone: its reason only
       const rd = await cli(['snapshot'], { ...bare, AGENT_BROWSER_DEBUG: '1' });
       const dl = linesOf(rd, 'env_session_config_dropped');
-      ok(dl.length === 1 && dl[0].includes('AGENT_BROWSER_DEBUG') && !dl[0].includes('vibespace-browser wait'), 'B-e946: the debug name alone — its reason only (no wait is offered for it)', rd.stderr);
+      ok(dl.length === 1 && gateOf(dl[0].includes('AGENT_BROWSER_DEBUG')) && !dl[0].includes('vibespace-browser wait'), 'B-e946: the debug name alone — its reason only (no wait is offered for it)', rd.stderr);
       // (3) both kinds dropped at once (the product does it): BOTH notes, each with its own names
       const rb = await cli(['snapshot'], { ...bare, ...SESS, AGENT_BROWSER_PROXY: 'http://127.0.0.1:1' });
       const bs = linesOf(rb, 'env_session_config_dropped'), bt = linesOf(rb, 'env_twin_dropped');
-      ok(rb.status === 0 && bs.length === 1 && bt.length === 1 && bs[0].includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT') && !bs[0].includes('AGENT_BROWSER_PROXY') && bt[0].includes('AGENT_BROWSER_PROXY') && !bt[0].includes('AGENT_BROWSER_DEBUG') && !bt[0].includes('AGENT_BROWSER_DEFAULT_TIMEOUT') && !String(rb.stderr).includes('127.0.0.1:1'),
+      ok(rb.status === 0 && bs.length === 1 && bt.length === 1 && gateOf(bs[0].includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT')) && !bs[0].includes('AGENT_BROWSER_PROXY') && gateOf(bt[0].includes('AGENT_BROWSER_PROXY')) && !bt[0].includes('AGENT_BROWSER_DEBUG') && !bt[0].includes('AGENT_BROWSER_DEFAULT_TIMEOUT') && !String(rb.stderr).includes('127.0.0.1:1'),
         'B-e946: a launch twin and the two names dropped at once — BOTH notes, each naming only its own names (never a value)', rb.stderr);
     }
     // the unmanaged rung of a session with its OWN pairs (a remote session): the server names them
@@ -1047,7 +1047,7 @@ try {
       fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D2, 'cli-call.js'));
       resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], ...KEEPER, handles: [], pinTab: false };
       const rc2 = await nodeCli(path.join(D2, 'vibespace-browser'), ['snapshot'], { env: twinEnv });
-      ok(r1v !== vsrc && r1v.includes('if (false) {') && rc2.status === 0 && last().env.AGENT_BROWSER_SOCKET_DIR === DECOY.AGENT_BROWSER_SOCKET_DIR && last().xdg === DECOY.XDG_RUNTIME_DIR, 'r2 CONTROL: the r1 table in a patched copy hands the agent\'s decoy root to the binary', JSON.stringify({ sd: last().env.AGENT_BROWSER_SOCKET_DIR, xdg: last().xdg, st: rc2.status, err: rc2.stderr.slice(0, 200) }));
+      ok(r1v !== vsrc && gateOf(r1v.includes('if (false) {')) && rc2.status === 0 && last().env.AGENT_BROWSER_SOCKET_DIR === DECOY.AGENT_BROWSER_SOCKET_DIR && last().xdg === DECOY.XDG_RUNTIME_DIR, 'r2 CONTROL: the r1 table in a patched copy hands the agent\'s decoy root to the binary', JSON.stringify({ sd: last().env.AGENT_BROWSER_SOCKET_DIR, xdg: last().xdg, st: rc2.status, err: rc2.stderr.slice(0, 200) }));
     }
     // CONTROL: a CLI copy with the pre-fix env line (`{ ...process.env }`) lets them through — the leg can go red
     const src = fs.readFileSync(CLI, 'utf8');
@@ -1075,12 +1075,12 @@ try {
     let lc = last();
     const cfgPath = lc && lc.env.AGENT_BROWSER_CONFIG;
     const cfgDir = path.join(HOME, '.vibespace', 'browser-config');
-    ok(r4.status === 0 && realCalls().length === n0c + 1 && typeof cfgPath === 'string' && path.dirname(cfgPath) === cfgDir && /^[0-9a-f]{16}\.json$/.test(path.basename(cfgPath)), 'r3: no config named ⇒ the CLI composes one and NAMES it (~/.vibespace/browser-config/<content hash>.json) — never the shell\'s, never a search', JSON.stringify({ st: r4.status, cfgPath, err: r4.stderr.slice(0, 300) }));
+    ok(r4.status === 0 && realCalls().length === n0c + 1 && typeof cfgPath === 'string' && path.dirname(cfgPath) === cfgDir && verdictOf(/^[0-9a-f]{16}\.json$/.test(path.basename(cfgPath))), 'r3: no config named ⇒ the CLI composes one and NAMES it (~/.vibespace/browser-config/<content hash>.json) — never the shell\'s, never a search', JSON.stringify({ st: r4.status, cfgPath, err: r4.stderr.slice(0, 300) }));
     const cc = cfgPath && fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : {};
     ok(cc.args === '--no-sandbox' && cc.proxy === 'http://127.0.0.1:3128' && JSON.stringify(cc.allowedDomains) === '["example.com"]' && !('cdp' in cc) && !('executablePath' in cc) && !('userAgent' in cc) && (fs.statSync(cfgPath).mode & 0o777) === 0o600 && (fs.statSync(cfgDir).mode & 0o777) === 0o700,
       'r3: its content is the one rule — the user\'s args (raw port gone) and proxy, the directory\'s FENCE; the directory\'s executable / user agent / raw port and the user\'s `cdp` gone; 0600 in a 0700 dir', JSON.stringify(cc));
-    ok(/\[config_keys_dropped\]/.test(r4.stderr) && /args, executablePath, userAgent/.test(r4.stderr) && /--remote-debugging-port=41999/.test(r4.stderr) && /\bcdp\b/.test(r4.stderr), 'r3: …and what did not apply is SAID (the directory\'s keys, the user file\'s raw switch and `cdp`)', r4.stderr);
-    ok(/AGENT_BROWSER_CONFIG/.test((/.*\[env_twin_dropped\].*/.exec(r4.stderr) || [''])[0]), 'r3: the agent\'s own exported AGENT_BROWSER_CONFIG is reported as not passed', r4.stderr);
+    ok(gateOf(/\[config_keys_dropped\]/.test(r4.stderr)) && gateOf(/args, executablePath, userAgent/.test(r4.stderr)) && gateOf(/--remote-debugging-port=41999/.test(r4.stderr)) && verdictOf(/\bcdp\b/.test(r4.stderr)), 'r3: …and what did not apply is SAID (the directory\'s keys, the user file\'s raw switch and `cdp`)', r4.stderr);
+    ok(verdictOf(/AGENT_BROWSER_CONFIG/.test((/.*\[env_twin_dropped\].*/.exec(r4.stderr) || [''])[0])), 'r3: the agent\'s own exported AGENT_BROWSER_CONFIG is reported as not passed', r4.stderr);
     await nodeCli(CLI, ['snapshot'], { env: baseEnv, cwd: DIRTY });
     const before2 = fs.readdirSync(cfgDir).length;
     await nodeCli(CLI, ['snapshot'], { env: baseEnv, cwd: DIRTY });
@@ -1095,7 +1095,7 @@ try {
     const BAD = path.join(ROOT, 'bad'); fs.mkdirSync(BAD, { recursive: true }); fs.writeFileSync(path.join(BAD, 'agent-browser.json'), '{ torn');
     const n2c = realCalls().length;
     r4 = await nodeCli(CLI, ['snapshot'], { env: baseEnv, cwd: BAD });
-    ok(r4.status === 1 && /\[config_unavailable\]/.test(r4.stderr) && r4.stderr.includes(path.join(BAD, 'agent-browser.json')) && realCalls().length === n2c, 'r3: an agent-browser.json that does not parse ⇒ config_unavailable naming it, nothing run', r4.stderr);
+    ok(r4.status === 1 && gateOf(/\[config_unavailable\]/.test(r4.stderr)) && gateOf(r4.stderr.includes(path.join(BAD, 'agent-browser.json'))) && realCalls().length === n2c, 'r3: an agent-browser.json that does not parse ⇒ config_unavailable naming it, nothing run', r4.stderr);
     // NEGATIVE CONTROL: the r2 CLI (no compose) in a patched copy hands the binary NO config — it would search the directory
     const csrc = fs.readFileSync(CLI, 'utf8');
     const cpre = csrc.replace(/  if \((?:built && )?built\.needsConfig\) \{/, '  if (false) {');
@@ -1111,15 +1111,15 @@ try {
     resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], handles: [], pinTab: false };
     const nb = calls.length; const nr = realCalls().length;
     for (const [argv, r5] of await atOnce([['open', 'chrome://version'], ['open', 'file:///tmp/agent-browser-chrome-x/DevToolsActivePort'], ['tab', 'new', 'FILE:/etc/hostname'], ['--', 'goto', 'about:version'], ['batch', 'open https://x', 'open chrome://version']], (a) => cli(a))) {
-      ok(r5.status === 1 && /\[(local_scheme_refused|batch_line_refused)\]/.test(r5.stderr) && /not a page of the web/.test(r5.stderr) && /remedy: /.test(r5.stderr), `r4: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY`, r5.stderr);
+      ok(r5.status === 1 && gateOf(/\[(local_scheme_refused|batch_line_refused)\]/.test(r5.stderr)) && gateOf(/not a page of the web/.test(r5.stderr)) && verdictOf(/remedy: /.test(r5.stderr)), `r4: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY`, r5.stderr);
     }
     const SD = path.join(ROOT, 'state-cwd'); fs.mkdirSync(SD, { recursive: true });
     fs.writeFileSync(path.join(SD, 'evil.json'), JSON.stringify({ cookies: [], origins: [{ origin: 'chrome://version', localStorage: [{ name: 'a', value: 'b' }] }] }));
     fs.writeFileSync(path.join(SD, 'good.json'), JSON.stringify({ cookies: [], origins: [{ origin: 'https://ok.example', localStorage: [{ name: 'a', value: 'b' }] }] }));
     let r5 = await nodeCli(CLI, ['state', 'load', 'evil.json'], { env: baseEnv, cwd: SD });
-    ok(r5.status === 1 && /\[local_scheme_refused\]/.test(r5.stderr) && /chrome:\/\/version/.test(r5.stderr), 'r4: `state load evil.json` (an origin of chrome://version, read relative to the cwd as the binary does) is refused locally', r5.stderr);
+    ok(r5.status === 1 && gateOf(/\[local_scheme_refused\]/.test(r5.stderr)) && verdictOf(/chrome:\/\/version/.test(r5.stderr)), 'r4: `state load evil.json` (an origin of chrome://version, read relative to the cwd as the binary does) is refused locally', r5.stderr);
     r5 = await nodeCli(CLI, ['batch', 'state load evil.json'], { env: baseEnv, cwd: SD });
-    ok(r5.status === 1 && /\[local_scheme_refused\]/.test(r5.stderr), 'r4: …inside a batch too', r5.stderr);
+    ok(r5.status === 1 && verdictOf(/\[local_scheme_refused\]/.test(r5.stderr)), 'r4: …inside a batch too', r5.stderr);
     ok(calls.length === nb && realCalls().length === nr, 'r4: …every one with ZERO server calls and nothing run');
     r5 = await nodeCli(CLI, ['state', 'load', 'good.json'], { env: baseEnv, cwd: SD });
     ok(r5.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['state', 'load', path.join(SD, 'good.json')]), 'r4 CONTROL: a state file of web origins loads (the fake binary ran it) — lane L r5: handed as the ABSOLUTE path that was read', r5.stderr);
@@ -1145,7 +1145,7 @@ try {
       [['batch', 'open https://x', `upload @e1 ${path.join(HOME, '.vibespace', 'x')}`], '~/.vibespace'],
       [['--', 'upload', '@e1', path.join(HOME, '.codex', 'auth.json')], '~/.codex'],
     ], ([a]) => nodeCli(CLI, a, { env: baseEnv, cwd: UD }))) {
-      ok(r6.status === 1 && /\[upload_secret_refused\]/.test(r6.stderr) && r6.stderr.includes(`is under ${shown}`) && /remedy: /.test(r6.stderr), `lane L r2: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY by name (${shown})`, r6.stderr);
+      ok(r6.status === 1 && gateOf(/\[upload_secret_refused\]/.test(r6.stderr)) && gateOf(r6.stderr.includes(`is under ${shown}`)) && verdictOf(/remedy: /.test(r6.stderr)), `lane L r2: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY by name (${shown})`, r6.stderr);
     }
     ok(calls.length === nb && realCalls().length === nr, 'lane L r2: …every one with ZERO server calls and nothing run');
     let r6 = await nodeCli(CLI, ['upload', '@e1', 'report.pdf'], { env: baseEnv, cwd: UD });
@@ -1189,11 +1189,11 @@ try {
       [['batch', 'open https://x', `pdf ${path.join(HOME, '.codex', 'z.pdf')}`], '~/.codex'],  // a batch line
       [['pdf', path.join(REPO, 'data', 'subs', 'a', 'x.pdf')], '<VibeSpace data>/subs'],       // an account store
     ], ([a]) => nodeCli(CLI, a, { env: wenv, cwd: WD }))) {
-      ok(r7.status === 1 && /\[write_path_refused\]/.test(r7.stderr) && r7.stderr.includes(`is under ${shown}`) && /remedy: /.test(r7.stderr), `lane L r4: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY by name (${shown})`, r7.stderr);
+      ok(r7.status === 1 && gateOf(/\[write_path_refused\]/.test(r7.stderr)) && gateOf(r7.stderr.includes(`is under ${shown}`)) && verdictOf(/remedy: /.test(r7.stderr)), `lane L r4: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY by name (${shown})`, r7.stderr);
     }
     // a path in no allowed root (not a store either) — the containment sentence
     let r7 = await nodeCli(CLI, ['pdf', '/etc/x.pdf'], { env: wenv, cwd: WD });
-    ok(r7.status === 1 && /\[write_path_refused\]/.test(r7.stderr) && /outside the places a browser command may write/.test(r7.stderr), 'lane L r4: `pdf /etc/x.pdf` (in no allowed root) is refused with the containment sentence', r7.stderr);
+    ok(r7.status === 1 && gateOf(/\[write_path_refused\]/.test(r7.stderr)) && verdictOf(/outside the places a browser command may write/.test(r7.stderr)), 'lane L r4: `pdf /etc/x.pdf` (in no allowed root) is refused with the containment sentence', r7.stderr);
     ok(calls.length === nb && realCalls().length === nr, 'lane L r4: …every one with ZERO server calls and nothing run (not even `--version`)');
     // CONTROL: the project cwd, /tmp and ~/Downloads all WRITE (the fake binary ran)
     r7 = await nodeCli(CLI, ['pdf', 'report.pdf'], { env: wenv, cwd: WD });
@@ -1218,12 +1218,12 @@ try {
       const named = (r) => r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes(`${ALT_REAL} or ~/Downloads; nothing ran`) && r.stderr.includes(`remedy: save under the project, ${ALT_REAL} or ~/Downloads`) && !releaseRefusal(r.stderr);   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
       const ra = await nodeCli(CLI, ['pdf', '/etc/x.pdf'], { env: aenv, cwd: WD });
       const rh = await nodeCli(CLI, ['help'], { env: aenv, cwd: WD });
-      ok(named(ra) && rh.stdout.includes(`(files are written under the project, ${ALT_REAL} or ~/Downloads only)`) && rh.stdout.includes(`to a path outside the project, ${ALT_REAL}`) && !releaseHelp(rh.stdout),   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
+      ok(gateOf(named(ra)) && gateOf(rh.stdout.includes(`(files are written under the project, ${ALT_REAL} or ~/Downloads only)`)) && gateOf(rh.stdout.includes(`to a path outside the project, ${ALT_REAL}`)) && !releaseHelp(rh.stdout),   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
         'THE TEMP FOLDER NAMED (r2886): with TMPDIR elsewhere the refusal, its remedy and the help name THAT folder by its real path — never «/tmp»', { stderr: ra.stderr.slice(-400), help: (rh.stdout.match(/files are written under[^\n]*/) || [''])[0] });
       {   // r3637 CONTROL — the placing of the hosted run's red (45405143191): the same help and refusal with the folder at a hosted runner's
           // place (/tmp/vs-hosted-…/alt-tmp, its path text only — nothing is written there)
         const HOSTED = '/tmp/vs-hosted-madeup/alt-tmp', hh = rh.stdout.split(ALT_REAL).join(HOSTED), hr = ra.stderr.split(ALT_REAL).join(HOSTED);
-        ok(/the project, \/tmp/.test(hh) && !releaseHelp(hh) && !releaseRefusal(hr) && hh.includes(`to a path outside the project, ${HOSTED}`), 'r3637 CONTROL: a temp folder whose path begins with /tmp/ (the hosted runner\'s scratch) — the old prefix check reads the RIGHT words as the release\'s (its red there); the exact checks hold', { help: (hh.match(/to a path outside the project[^\n]*/) || [''])[0] });
+        ok(gateOf(/the project, \/tmp/.test(hh)) && !releaseHelp(hh) && !releaseRefusal(hr) && verdictOf(hh.includes(`to a path outside the project, ${HOSTED}`)), 'r3637 CONTROL: a temp folder whose path begins with /tmp/ (the hosted runner\'s scratch) — the old prefix check reads the RIGHT words as the release\'s (its red there); the exact checks hold', { help: (hh.match(/to a path outside the project[^\n]*/) || [''])[0] });
       }
       const rs = await nodeCli(CLI, ['pdf', path.join(ALT, 'alt.pdf')], { env: aenv, cwd: WD });
       ok(rs.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['pdf', path.join(ALT_REAL, 'alt.pdf')]), '…and a save in THAT folder passes the fence (the fake binary ran it, handed its real path)', rs.stderr);
@@ -1231,7 +1231,7 @@ try {
       const DT = path.join(ROOT, 'ctl', 'r2886-words', 'bin'); fs.mkdirSync(DT, { recursive: true });
       fs.copyFileSync(CLI, path.join(DT, 'vibespace-browser')); fs.writeFileSync(path.join(DT, 'vibespace-browser-verbs.js'), today); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(DT, 'cli-call.js'));
       const rt = await nodeCli(path.join(DT, 'vibespace-browser'), ['pdf', '/etc/x.pdf'], { env: aenv, cwd: WD });
-      ok(today !== vsrc && rt.status === 1 && /\[write_path_refused\]/.test(rt.stderr) && /\/tmp or ~\/Downloads/.test(rt.stderr) && !named(rt),   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
+      ok(today !== vsrc && rt.status === 1 && gateOf(/\[write_path_refused\]/.test(rt.stderr)) && gateOf(/\/tmp or ~\/Downloads/.test(rt.stderr)) && !named(rt),   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
         'RED CONTROL: the release\'s words (a verb table whose sentences say «/tmp», beside a copy of the CLI) tell an agent with TMPDIR elsewhere to save under «/tmp» — a folder its fence then refuses', rt.stderr.slice(-300));
     }
     // NEGATIVE CONTROL: the pre-r4 CLI (no write check) in a patched copy hands the store path to the binary
@@ -1258,7 +1258,7 @@ try {
     const DC = V.ensureDaemonCwd({ fs, tmpdirs: [TMPD, '/tmp'], uid: process.getuid(), checkout: REPO });   // what the CLI (TMPDIR = TMPD) must run the binary in
     const ctlCopy = (name, cliSrc, verbsSrc) => { const d = path.join(ROOT, 'ctl', name, 'bin'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'vibespace-browser'), cliSrc); fs.writeFileSync(path.join(d, 'vibespace-browser-verbs.js'), verbsSrc || fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(d, 'cli-call.js')); return path.join(d, 'vibespace-browser'); };
     const src = fs.readFileSync(CLI, 'utf8');
-    ok(DC.ok && DC.dir === path.join(fs.realpathSync(TMPD), `vibespace-browser-cwd-${process.getuid()}`) && (fs.statSync(DC.dir).mode & 0o777) === 0o700, `lane L r5 F1(b): the private daemon directory is <TMPDIR>/vibespace-browser-cwd-<uid>, 0700 (${DC.dir})`, JSON.stringify(DC));
+    ok(gateOf(DC.ok) && DC.dir === path.join(fs.realpathSync(TMPD), `vibespace-browser-cwd-${process.getuid()}`) && (fs.statSync(DC.dir).mode & 0o777) === 0o700, `lane L r5 F1(b): the private daemon directory is <TMPDIR>/vibespace-browser-cwd-<uid>, 0700 (${DC.dir})`, JSON.stringify(DC));
     // ── F1 (CRITICAL): the binary is handed the ABSOLUTE path that was judged, and runs in the private directory
     let r = await nodeCli(CLI, ['pdf', './out.pdf'], { env: penv, cwd: P });
     let lc = last();
@@ -1266,7 +1266,7 @@ try {
     ok(lc.cwd === DC.dir && lc.cwd !== P && !lc.cwd.startsWith(REPO), `lane L r5 F1(b): the binary (and any daemon it starts) runs in the private directory, never the agent's (${lc.cwd})`);
     r = await nodeCli(CLI, ['pdf', 'x.pdf'], { env: penv, cwd: path.join(P, 'sub') }); lc = last();
     ok(r.status === 0 && lc.argv[1] === path.join(P, 'sub', 'x.pdf'), 'lane L r5 F1: a relative word means "from where the agent stands" (P/sub/x.pdf), then is fenced to the session\'s root');
-    const handed = async (argv, want, what) => { const rr = await nodeCli(CLI, argv, { env: penv, cwd: P }); const l2 = last(); ok(rr.status === 0 && l2 && JSON.stringify(l2.argv) === JSON.stringify(want), `lane L r5 F1: ${what}`, JSON.stringify([rr.status, rr.stderr.slice(0, 300), l2 && l2.argv])); };
+    const handed = async (argv, want, what) => { const rr = await nodeCli(CLI, argv, { env: penv, cwd: P }); const l2 = last(); ok(rr.status === 0 && gateOf(l2) && JSON.stringify(l2.argv) === JSON.stringify(want), `lane L r5 F1: ${what}`, JSON.stringify([rr.status, rr.stderr.slice(0, 300), l2 && l2.argv])); };
     await handed(['download', '#k', './d1', 'd2'], ['download', '#k', path.join(P, 'd1'), path.join(P, 'd2')], '`download #k ./d1 d2` — every word after the selector absolute (the binary saves the FIRST: measured), the selector untouched');
     await handed(['screenshot', '.btn'], ['screenshot', '.btn'], 'a lone selector (`screenshot .btn`) is handed as typed — it is not a path');
     await handed(['screenshot', 'o.png'], ['screenshot', path.join(P, 'o.png')], 'a lone path-like word (`screenshot o.png`) is handed absolute');
@@ -1292,9 +1292,9 @@ try {
     {
       const n0 = calls.length; const n1 = realCalls().length;
       r = await nodeCli(CLI, ['wait', '--download', '/etc/cron.d/x'], { env: penv, cwd: P });
-      ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && /outside the places/.test(r.stderr) && calls.length === n0 && realCalls().length === n1, 'lane L r6 F-A: `wait --download /etc/cron.d/x` ⇒ write_path_refused — zero server calls, nothing run', r.stderr);
+      ok(r.status === 1 && gateOf(/\[write_path_refused\]/.test(r.stderr)) && gateOf(/outside the places/.test(r.stderr)) && calls.length === n0 && realCalls().length === n1, 'lane L r6 F-A: `wait --download /etc/cron.d/x` ⇒ write_path_refused — zero server calls, nothing run', r.stderr);
       r = await nodeCli(CLI, ['wait', '--download', path.join(HOME, '.ssh', 'zz'), '--timeout', '5000'], { env: penv, cwd: P });
-      ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes('is under ~/.ssh'), 'lane L r6 F-A: `wait --download ~/.ssh/zz --timeout 5000` ⇒ refused (under ~/.ssh)', r.stderr);
+      ok(r.status === 1 && gateOf(/\[write_path_refused\]/.test(r.stderr)) && verdictOf(r.stderr.includes('is under ~/.ssh')), 'lane L r6 F-A: `wait --download ~/.ssh/zz --timeout 5000` ⇒ refused (under ~/.ssh)', r.stderr);
       r = await nodeCli(CLI, ['wait', '--download', './f.pdf', '--timeout', '30000'], { env: penv, cwd: P }); lc = last();
       ok(r.status === 0 && JSON.stringify(lc.argv) === JSON.stringify(['wait', '--download', path.join(P, 'f.pdf'), '--timeout', '30000']), 'lane L r6 F-A: `wait --download ./f.pdf --timeout 30000` reaches the binary with the path ABSOLUTE under the session root (the timeout untouched)', JSON.stringify([r.status, r.stderr.slice(0, 300), lc && lc.argv]));
       r = await nodeCli(CLI, ['wait', '--download'], { env: penv, cwd: P }); lc = last();
@@ -1324,11 +1324,11 @@ try {
     fs.symlinkSync(ELSE, path.join(P, 'e'));
     const nb = calls.length; const nr = realCalls().length;
     r = await nodeCli(CLI, ['pdf', 'l/../.ssh/authorized_keys'], { env: penv, cwd: P });
-    ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes('is under ~/.ssh'), 'lane L r5 F2: with l -> ~/.ssh, `pdf l/../.ssh/authorized_keys` is refused (under ~/.ssh — the kernel follows l before the `..`)', r.stderr);
+    ok(r.status === 1 && gateOf(/\[write_path_refused\]/.test(r.stderr)) && verdictOf(r.stderr.includes('is under ~/.ssh')), 'lane L r5 F2: with l -> ~/.ssh, `pdf l/../.ssh/authorized_keys` is refused (under ~/.ssh — the kernel follows l before the `..`)', r.stderr);
     r = await nodeCli(CLI, ['upload', '#f', 'l/../.ssh/id_rsa'], { env: penv, cwd: P });
-    ok(r.status === 1 && /\[upload_secret_refused\]/.test(r.stderr) && r.stderr.includes('is under ~/.ssh'), 'lane L r5 F2: …the upload guard\'s twin: `upload #f l/../.ssh/id_rsa` is refused', r.stderr);
+    ok(r.status === 1 && gateOf(/\[upload_secret_refused\]/.test(r.stderr)) && verdictOf(r.stderr.includes('is under ~/.ssh')), 'lane L r5 F2: …the upload guard\'s twin: `upload #f l/../.ssh/id_rsa` is refused', r.stderr);
     r = await nodeCli(CLI, ['pdf', 'e/../r5-elsewhere/x.pdf'], { env: penv, cwd: P });
-    ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && /outside the places/.test(r.stderr), 'lane L r5 F2: with e -> a directory outside the project, `pdf e/../r5-elsewhere/x.pdf` is refused (it names <scratch>/r5-elsewhere/x.pdf, not P/r5-elsewhere/x.pdf)', r.stderr);
+    ok(r.status === 1 && gateOf(/\[write_path_refused\]/.test(r.stderr)) && verdictOf(/outside the places/.test(r.stderr)), 'lane L r5 F2: with e -> a directory outside the project, `pdf e/../r5-elsewhere/x.pdf` is refused (it names <scratch>/r5-elsewhere/x.pdf, not P/r5-elsewhere/x.pdf)', r.stderr);
     ok(calls.length === nb && realCalls().length === nr, 'lane L r5 F2: …each with ZERO server calls and nothing run');
     // NEGATIVE CONTROL: the r4 LEXICAL rule (patched copy: path.resolve, then the realpath of the deepest existing ancestor)
     const lex = "const r = (() => { const exp = s === '~' ? HOMES.home : (s.startsWith('~/') ? path.join(HOMES.home, s.slice(2)) : s); const abs = path.resolve(base || '/', exp); let anc = abs; const rem = []; for (;;) { try { const rp = fs.realpathSync(anc); return { ok: true, path: rem.length ? path.join(rp, ...rem) : rp }; } catch { } const par = path.dirname(anc); if (par === anc) return { ok: true, path: abs }; rem.unshift(path.basename(anc)); anc = par; } })();";
@@ -1337,22 +1337,22 @@ try {
     ok(fs.readFileSync(c1, 'utf8') !== src && r.status === 0 && lc.argv[1] === path.join(P, 'r5-elsewhere', 'x.pdf'), 'lane L r5 F2 NEGATIVE CONTROL: the r4 lexical rule (patched copy) passes `e/../r5-elsewhere/x.pdf` as P/r5-elsewhere/x.pdf — the leg above can go red', JSON.stringify([r.status, r.stderr.slice(0, 200), lc && lc.argv]));
     // ── F3 (MAJOR): the fence is the SESSION's directory — VIBESPACE_SESSION_CWD — never the shell's
     r = await nodeCli(CLI, ['pdf', './x.pdf'], { env: benv, cwd: P });
-    ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && /no session directory is known/.test(r.stderr), 'lane L r5 F3: VIBESPACE_SESSION_CWD unset ⇒ `pdf ./x.pdf` is refused (no session directory) — the shell\'s cwd is not a fence', r.stderr);
+    ok(r.status === 1 && gateOf(/\[write_path_refused\]/.test(r.stderr)) && verdictOf(/no session directory is known/.test(r.stderr)), 'lane L r5 F3: VIBESPACE_SESSION_CWD unset ⇒ `pdf ./x.pdf` is refused (no session directory) — the shell\'s cwd is not a fence', r.stderr);
     r = await nodeCli(CLI, ['pdf', path.join(TMPD, 'x.pdf')], { env: benv, cwd: P });
     ok(r.status === 0 && last().argv[1] === path.join(TMPD, 'x.pdf'), 'lane L r5 F3: …unset, the OS temp dir still writes', r.stderr);
     r = await nodeCli(CLI, ['pdf', './x.pdf'], { env: penv, cwd: ELSE });
-    ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes(`the project directory (${fs.realpathSync(P)}`), 'lane L r5 F3: set ⇒ a `./x.pdf` typed from a directory outside it (the verifier\'s `cd /etc`) is refused, naming the project', r.stderr);
+    ok(r.status === 1 && gateOf(/\[write_path_refused\]/.test(r.stderr)) && verdictOf(r.stderr.includes(`the project directory (${fs.realpathSync(P)}`)), 'lane L r5 F3: set ⇒ a `./x.pdf` typed from a directory outside it (the verifier\'s `cd /etc`) is refused, naming the project', r.stderr);
     r = await nodeCli(CLI, ['pdf', path.join(P, 'y.pdf')], { env: penv, cwd: ELSE });
     ok(r.status === 0 && last().argv[1] === path.join(P, 'y.pdf'), 'lane L r5 F3: set ⇒ a path under it writes, wherever the shell stands');
     r = await nodeCli(CLI, ['pdf', './x.pdf'], { env: { ...benv, VIBESPACE_SESSION_CWD: 'r5-proj' }, cwd: ROOT });
-    ok(r.status === 1 && /no session directory is known/.test(r.stderr), 'lane L r5 F3: a RELATIVE VIBESPACE_SESSION_CWD is no root', r.stderr);
+    ok(r.status === 1 && verdictOf(/no session directory is known/.test(r.stderr)), 'lane L r5 F3: a RELATIVE VIBESPACE_SESSION_CWD is no root', r.stderr);
     // the 2.369.204 integration: accept-fixes-jobs F6 made the fence line job-aware — the control patches its SESSION arm
     c1 = ctlCopy('r5-fencectl', src.replace('  const v = IN_JOB ? process.env.VIBESPACE_JOB_CWD : process.env.VIBESPACE_SESSION_CWD;\n', '  const v = IN_JOB ? process.env.VIBESPACE_JOB_CWD : (process.env.VIBESPACE_SESSION_CWD || process.cwd());\n'));
     r = await nodeCli(c1, ['pdf', './x.pdf'], { env: benv, cwd: ELSE });
     ok(fs.readFileSync(c1, 'utf8') !== src && r.status === 0, 'lane L r5 F3 NEGATIVE CONTROL: the r4 fence (patched copy: the shell\'s cwd when nothing is exported) writes from anywhere the shell stands', r.stderr);
     // ── F5 (LOW): AGENT_BROWSER_SCREENSHOT_DIR never reaches the binary
     r = await nodeCli(CLI, ['snapshot'], { env: { ...penv, AGENT_BROWSER_SCREENSHOT_DIR: '/etc' }, cwd: P }); lc = last();
-    ok(r.status === 0 && !('AGENT_BROWSER_SCREENSHOT_DIR' in lc.env) && /AGENT_BROWSER_SCREENSHOT_DIR/.test((/.*\[env_twin_dropped\].*/.exec(r.stderr) || [''])[0]), 'lane L r5 F5: AGENT_BROWSER_SCREENSHOT_DIR in the shell is not passed to the binary, and the drop is said by name', JSON.stringify([lc && lc.env, r.stderr.slice(0, 300)]));
+    ok(r.status === 0 && !('AGENT_BROWSER_SCREENSHOT_DIR' in lc.env) && verdictOf(/AGENT_BROWSER_SCREENSHOT_DIR/.test((/.*\[env_twin_dropped\].*/.exec(r.stderr) || [''])[0])), 'lane L r5 F5: AGENT_BROWSER_SCREENSHOT_DIR in the shell is not passed to the binary, and the drop is said by name', JSON.stringify([lc && lc.env, r.stderr.slice(0, 300)]));
     c1 = ctlCopy('r5-envctl', src, fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8').replace("'AGENT_BROWSER_CONTENT_BOUNDARIES', 'AGENT_BROWSER_SCREENSHOT_FORMAT'", "'AGENT_BROWSER_CONTENT_BOUNDARIES', 'AGENT_BROWSER_SCREENSHOT_DIR', 'AGENT_BROWSER_SCREENSHOT_FORMAT'"));
     r = await nodeCli(c1, ['snapshot'], { env: { ...penv, AGENT_BROWSER_SCREENSHOT_DIR: '/etc' }, cwd: P }); lc = last();
     ok(r.status === 0 && lc.env.AGENT_BROWSER_SCREENSHOT_DIR === '/etc', 'lane L r5 F5 NEGATIVE CONTROL: the r4 table (a verbs copy with it in ENV_PASS) hands the binary an unjudged write directory', JSON.stringify(lc && lc.env));
@@ -1363,7 +1363,7 @@ try {
     ok(r.status === 0 && last().argv[1] === path.join(DOT, 'x.pdf'), 'lane L r5 F6: a session in ~/.config/<proj> writes `./x.pdf` there', r.stderr);
     for (const [argv, shown] of [[['pdf', '../autostart/x.desktop'], '~/.config'], [['pdf', './.git/hooks/pre-commit'], 'a .git directory'], [['pdf', './.claude/settings.json'], 'a .claude directory'], [['pdf', '~/.ssh/k'], '~/.ssh']]) {
       r = await nodeCli(CLI, argv, { env: denv, cwd: DOT });
-      ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes(`is under ${shown}`), `lane L r5 F6: …but \`${argv.join(' ')}\` is refused (under ${shown})`, r.stderr);
+      ok(r.status === 1 && gateOf(/\[write_path_refused\]/.test(r.stderr)) && verdictOf(r.stderr.includes(`is under ${shown}`)), `lane L r5 F6: …but \`${argv.join(' ')}\` is refused (under ${shown})`, r.stderr);
     }
     // ── F1 (b): the keeper's RUNTIME (src/browser-facts.js) runs every call in the private directory, never the checkout
     const F = require('../src/browser-facts.js');
@@ -1375,7 +1375,7 @@ try {
     const rt = F.createBrowserRuntime({ env: { PATH: process.env.PATH }, execFileImpl: viaFake });
     const lr = await rt.launch(null, { extraEnv: {} });
     const rc0 = rtCalls().pop();
-    ok(lr.ok && rc0 && JSON.stringify(rc0.argv) === '["open","about:blank"]' && rc0.cwd === F.runDir().dir && /\/vibespace-browser-cwd-\d+$/.test(rc0.cwd) && !rc0.cwd.startsWith(REPO) && rc0.cwd !== process.cwd() && F.CHECKOUT === REPO.replace(/\/$/, ''), `lane L r5 F1(b): the keeper's runtime launches the daemon in ${rc0 && rc0.cwd} — not the checkout (${F.CHECKOUT}), not this process's cwd`, JSON.stringify([lr, rc0]));
+    ok(gateOf(lr.ok) && gateOf(rc0) && JSON.stringify(rc0.argv) === '["open","about:blank"]' && rc0.cwd === F.runDir().dir && gateOf(/\/vibespace-browser-cwd-\d+$/.test(rc0.cwd)) && !rc0.cwd.startsWith(REPO) && rc0.cwd !== process.cwd() && F.CHECKOUT === REPO.replace(/\/$/, ''), `lane L r5 F1(b): the keeper's runtime launches the daemon in ${rc0 && rc0.cwd} — not the checkout (${F.CHECKOUT}), not this process's cwd`, JSON.stringify([lr, rc0]));
     const nrt = rtCalls().length;
     for (const bad of [REPO, path.join(REPO, 'data'), path.dirname(REPO.replace(/\/$/, ''))]) {
       const rtBad = F.createBrowserRuntime({ env: { PATH: process.env.PATH }, execFileImpl: viaFake, daemonCwd: () => ({ ok: true, dir: bad }) });
@@ -1392,7 +1392,7 @@ try {
     const here = process.cwd(); process.chdir(REPO);
     try { await Fpre.createBrowserRuntime({ env: { PATH: process.env.PATH }, execFileImpl: viaFake }).launch(null, {}); } finally { process.chdir(here); }
     const rc1 = rtCalls().pop();
-    ok(fpre !== fsrc && rc1 && rc1.cwd === fs.realpathSync(REPO), 'lane L r5 F1(b) NEGATIVE CONTROL: the pre-r5 runtime (patched copy, no cwd) starts the daemon in the launcher\'s cwd — here the checkout, exactly the keeper\'s frame', JSON.stringify(rc1));
+    ok(fpre !== fsrc && gateOf(rc1) && rc1.cwd === fs.realpathSync(REPO), 'lane L r5 F1(b) NEGATIVE CONTROL: the pre-r5 runtime (patched copy, no cwd) starts the daemon in the launcher\'s cwd — here the checkout, exactly the keeper\'s frame', JSON.stringify(rc1));
   }
   // r4 (takeover finding 2): the configuration is the ACCOUNT's — its passwd home, never $HOME
   {
@@ -1401,14 +1401,14 @@ try {
     fs.writeFileSync(path.join(FAKEHOME, '.agent-browser', 'config.json'), JSON.stringify({ executablePath: path.join(ROOT, 'dumpH.sh'), args: '--hometrick' }));
     const nr = realCalls().length;
     let r6 = await cli(['open', 'about:blank'], { ...baseEnv, HOME: FAKEHOME });
-    ok(r6.status === 1 && /\[config_unavailable\]/.test(r6.stderr) && r6.stderr.includes(FAKEHOME) && r6.stderr.includes(HOME) && realCalls().length === nr && !fs.existsSync(path.join(FAKEHOME, '.vibespace')), 'r4: $HOME ≠ the account\'s passwd home ⇒ config_unavailable naming BOTH — nothing composed from the agent\'s file, nothing run', r6.stderr);
+    ok(r6.status === 1 && gateOf(/\[config_unavailable\]/.test(r6.stderr)) && gateOf(r6.stderr.includes(FAKEHOME)) && gateOf(r6.stderr.includes(HOME)) && realCalls().length === nr && !fs.existsSync(path.join(FAKEHOME, '.vibespace')), 'r4: $HOME ≠ the account\'s passwd home ⇒ config_unavailable naming BOTH — nothing composed from the agent\'s file, nothing run', r6.stderr);
     // the verifier's shape with NO injection: the real passwd entry (read-only; refused before any file is read or written)
     const r7 = await run(process.execPath, [CLI, 'open', 'about:blank'], { env: { ...baseEnv, HOME: FAKEHOME } });
-    ok(r7.status === 1 && /\[config_unavailable\]/.test(r7.stderr) && r7.stderr.includes(FAKEHOME) && realCalls().length === nr, 'r4: …and with the REAL passwd entry (no preload) the same refusal', r7.stderr);
+    ok(r7.status === 1 && gateOf(/\[config_unavailable\]/.test(r7.stderr)) && gateOf(r7.stderr.includes(FAKEHOME)) && realCalls().length === nr, 'r4: …and with the REAL passwd entry (no preload) the same refusal', r7.stderr);
     // CONTROL: $HOME = the account's home ⇒ composed from THAT home's file (the r3 legs above ran this way)
     r6 = await cli(['open', 'about:blank']);
     const lc = realCalls().pop();
-    ok(r6.status === 0 && lc && typeof lc.env.AGENT_BROWSER_CONFIG === 'string' && lc.env.AGENT_BROWSER_CONFIG.startsWith(path.join(HOME, '.vibespace', 'browser-config') + '/') && !JSON.stringify(JSON.parse(fs.readFileSync(lc.env.AGENT_BROWSER_CONFIG, 'utf8'))).includes('hometrick'), 'r4 CONTROL: $HOME equal to the passwd home composes from the account\'s own file', JSON.stringify({ st: r6.status, err: r6.stderr.slice(0, 300), cfg: lc && lc.env.AGENT_BROWSER_CONFIG }));
+    ok(r6.status === 0 && gateOf(lc) && typeof lc.env.AGENT_BROWSER_CONFIG === 'string' && gateOf(lc.env.AGENT_BROWSER_CONFIG.startsWith(path.join(HOME, '.vibespace', 'browser-config') + '/')) && !JSON.stringify(JSON.parse(fs.readFileSync(lc.env.AGENT_BROWSER_CONFIG, 'utf8'))).includes('hometrick'), 'r4 CONTROL: $HOME equal to the passwd home composes from the account\'s own file', JSON.stringify({ st: r6.status, err: r6.stderr.slice(0, 300), cfg: lc && lc.env.AGENT_BROWSER_CONFIG }));
     // NEGATIVE CONTROL: the r3 home (os.homedir(), i.e. $HOME) in a patched copy composes the agent's file
     const src = fs.readFileSync(CLI, 'utf8');
     const r3 = editAnchor(src, '  if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };', '  pw = null;\n  if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };', "data/bin/vibespace-browser");
@@ -1417,7 +1417,7 @@ try {
     r6 = await nodeCli(path.join(D6, 'vibespace-browser'), ['open', 'about:blank'], { env: { ...baseEnv, HOME: FAKEHOME } });
     const lc2 = realCalls().pop();
     const composed = lc2 && lc2.env.AGENT_BROWSER_CONFIG && fs.existsSync(lc2.env.AGENT_BROWSER_CONFIG) ? fs.readFileSync(lc2.env.AGENT_BROWSER_CONFIG, 'utf8') : '';
-    ok(r3 !== src && r6.status === 0 && /hometrick/.test(composed) && /dumpH\.sh/.test(composed), 'r4 NEGATIVE CONTROL: the r3 home rule (patched copy) composes the agent-written file — its executablePath and args ride the sanctioned road', JSON.stringify({ st: r6.status, composed, err: r6.stderr.slice(0, 200) }));
+    ok(r3 !== src && r6.status === 0 && gateOf(/hometrick/.test(composed)) && verdictOf(/dumpH\.sh/.test(composed)), 'r4 NEGATIVE CONTROL: the r3 home rule (patched copy) composes the agent-written file — its executablePath and args ride the sanctioned road', JSON.stringify({ st: r6.status, composed, err: r6.stderr.slice(0, 200) }));
     fs.rmSync(FAKEHOME, { recursive: true, force: true });
   }
   // hotfix 2.369.405 (lane vault-login): A VERB THAT STARTS NO BROWSER PROGRAM IS THE HUB'S OWN ACT. The conversation's HOME
@@ -1435,7 +1435,7 @@ try {
     const n0 = calls.length;
     const vf = await cli(['fill', '#npw', '--vault', 'shop.example.test/password'], movedEnv);
     const vfCalls = calls.slice(n0).filter((x) => x.path === '/api/agent/browser/fill-vault');
-    ok(vf.status === 0 && /filled from the vault/.test(vf.stdout) && !/config_unavailable/.test(vf.stderr) && vfCalls.length === 2 && vfCalls[0].body.prepare === true && !vfCalls[1].body.prepare && vfCalls[1].body.spec === 'shop.example.test/password' && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
+    ok(vf.status === 0 && gateOf(/filled from the vault/.test(vf.stdout)) && !/config_unavailable/.test(vf.stderr) && vfCalls.length === 2 && vfCalls[0].body.prepare === true && !vfCalls[1].body.prepare && vfCalls[1].body.spec === 'shop.example.test/password' && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
       'hotfix .405: HOME moved by the product (an Antigravity account root), no config from the server — `fill --vault` is answered by the HUB (its prepare, then the fill), no browser program run, nothing composed or refused', JSON.stringify({ status: vf.status, out: vf.stdout.slice(-200), err: vf.stderr.slice(-400), fills: vfCalls.length }));
     // the JOB road (routes/browser.js resolveForJob leaves the environment basis out the same way): a job's token, the job's answer
     const jobEnv = { ...movedEnv, VIBESPACE_JOB_TOKEN: 'vsjt_fake' }; delete jobEnv.VIBESPACE_SESSION_TOKEN;
@@ -1443,15 +1443,15 @@ try {
     const nj = calls.length;
     const vj = await cli(['fill', '#npw', '--vault', 'shop.example.test/password'], jobEnv);
     const vjCalls = calls.slice(nj).filter((x) => x.path === '/api/agent/browser/fill-vault');
-    ok(vj.status === 0 && /filled from the vault/.test(vj.stdout) && !/config_unavailable/.test(vj.stderr) && vjCalls.length === 2 && calls.slice(nj).every((x) => x.auth === 'Bearer vsjt_fake') && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
+    ok(vj.status === 0 && gateOf(/filled from the vault/.test(vj.stdout)) && !/config_unavailable/.test(vj.stderr) && vjCalls.length === 2 && gateOf(calls.slice(nj).every((x) => x.auth === 'Bearer vsjt_fake')) && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
       'hotfix .405: …and on the JOB road (a job\'s token, the job resolve\'s answer): the vault fill is answered by the hub, nothing composed or refused', JSON.stringify({ status: vj.status, out: vj.stdout.slice(-200), err: vj.stderr.slice(-400), auth: [...new Set(calls.slice(nj).map((x) => x.auth))] }));
     resolveAnswer = { ...resolveAnswer, job: undefined, isDefault: undefined };
     const n1 = calls.length;
     const sr = await cli(['site-reset', 'shop.example.test'], movedEnv);
-    ok(sr.status === 0 && /cleared shop\.example\.test/.test(sr.stdout) && !/config_unavailable/.test(sr.stderr) && calls.slice(n1).some((x) => x.path === '/api/agent/browser/site-reset' && x.body && x.body.host === 'shop.example.test') && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
+    ok(sr.status === 0 && gateOf(/cleared shop\.example\.test/.test(sr.stdout)) && !/config_unavailable/.test(sr.stderr) && gateOf(calls.slice(n1).some((x) => x.path === '/api/agent/browser/site-reset' && x.body && x.body.host === 'shop.example.test')) && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
       'hotfix .405: …the same for a verb of our own (`site-reset`): answered by the hub, nothing of the browser program built, checked or refused', JSON.stringify({ status: sr.status, out: sr.stdout.slice(-200), err: sr.stderr.slice(-400) }));
     const op = await cli(['open', 'about:blank'], movedEnv);
-    ok(op.status === 1 && /\[config_unavailable\]/.test(op.stderr) && op.stderr.includes(ACCT) && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
+    ok(op.status === 1 && gateOf(/\[config_unavailable\]/.test(op.stderr)) && gateOf(op.stderr.includes(ACCT)) && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
       'hotfix .405 CONTROL: the same moved HOME and the same answer — `open` (a verb that STARTS the browser program) is still refused config_unavailable by the HOME fence, nothing run', op.stderr);
     fs.rmSync(ACCT, { recursive: true, force: true });
   }
@@ -1462,7 +1462,7 @@ try {
     const DECOY_CFG = path.join(ROOT, 'agent-decoy.json');   // a name the shell exports; never created
     const r8 = await cli(['snapshot'], { ...baseEnv, AGENT_BROWSER_CONFIG: DECOY_CFG });
     const lc = realCalls().pop();
-    ok(r8.status === 0 && lc.env.AGENT_BROWSER_CONFIG !== DECOY_CFG && String(lc.env.AGENT_BROWSER_CONFIG).startsWith(path.join(HOME, '.vibespace', 'browser-config') + '/') && /AGENT_BROWSER_CONFIG/.test((/.*\[env_twin_dropped\].*/.exec(r8.stderr) || [''])[0]), 'r4: an older server\'s answer runs the binary on a COMPOSED config, never the shell\'s decoy — and says the decoy was not passed', JSON.stringify({ env: lc.env, err: r8.stderr.slice(0, 300) }));
+    ok(r8.status === 0 && lc.env.AGENT_BROWSER_CONFIG !== DECOY_CFG && gateOf(String(lc.env.AGENT_BROWSER_CONFIG).startsWith(path.join(HOME, '.vibespace', 'browser-config') + '/')) && verdictOf(/AGENT_BROWSER_CONFIG/.test((/.*\[env_twin_dropped\].*/.exec(r8.stderr) || [''])[0])), 'r4: an older server\'s answer runs the binary on a COMPOSED config, never the shell\'s decoy — and says the decoy was not passed', JSON.stringify({ env: lc.env, err: r8.stderr.slice(0, 300) }));
   }
   // r4 (takeover finding 6): the version gate, end to end — the CLI reads the version off the binary it runs
   {
@@ -1470,9 +1470,9 @@ try {
     fs.writeFileSync(FAKE_VERSION, '0.33.0');
     const nb = resolves().length; const nr = realCalls().length;
     let r9 = await cli(['get', '--json', 'text', 'cdp-url']);
-    ok(r9.status === 1 && /\[raw_cdp_refused\]/.test(r9.stderr) && /\[flag_table_drift\]/.test(r9.stderr) && /0\.33\.0/.test(r9.stderr) && resolves().length === nb && realCalls().length === nr, 'r4: the binary answers 0.33.0 ⇒ the drift is SAID and `get --json text cdp-url` (a read on 0.32.0) is refused — before /resolve, nothing run', r9.stderr);
+    ok(r9.status === 1 && gateOf(/\[raw_cdp_refused\]/.test(r9.stderr)) && gateOf(/\[flag_table_drift\]/.test(r9.stderr)) && gateOf(/0\.33\.0/.test(r9.stderr)) && resolves().length === nb && realCalls().length === nr, 'r4: the binary answers 0.33.0 ⇒ the drift is SAID and `get --json text cdp-url` (a read on 0.32.0) is refused — before /resolve, nothing run', r9.stderr);
     r9 = await cli(['get', '--json', 'text', '@e1']);
-    ok(r9.status === 0 && /\[flag_table_drift\]/.test(r9.stderr) && (r9.stderr.match(/flag_table_drift/g) || []).length === 1 && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","@e1"]', 'r4: …a read no reading turns into anything else still runs, the drift said ONCE', r9.stderr);
+    ok(r9.status === 0 && gateOf(/\[flag_table_drift\]/.test(r9.stderr)) && (r9.stderr.match(/flag_table_drift/g) || []).length === 1 && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","@e1"]', 'r4: …a read no reading turns into anything else still runs, the drift said ONCE', r9.stderr);
     fs.writeFileSync(FAKE_VERSION, V.TABLE_VERSION);
     r9 = await cli(['get', '--json', 'text', 'cdp-url']);
     ok(r9.status === 0 && !/flag_table_drift/.test(r9.stderr) && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","cdp-url"]', 'r4 CONTROL: on the measured version the same read runs (the <cdp-url> element\'s text) and nothing is said', r9.stderr);
@@ -1497,21 +1497,21 @@ try {
     const parse = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
     const a = await run(process.execPath, [CENSUS, fake], { env: cenv, cwd: CD });
     const ja = parse(a);
-    ok(a.status === 0 && ja && ja.version === '9.9.9' && JSON.stringify(ja.value) === '["--alpha"]' && JSON.stringify(ja.bool) === '["--beta"]', 'r4: `node scripts/browser-flag-census.mjs <binary>` (no --write) measures THAT binary', JSON.stringify([a.status, a.stderr.slice(0, 300), ja && { v: ja.version, value: ja.value, bool: ja.bool }]));
+    ok(a.status === 0 && gateOf(ja) && ja.version === '9.9.9' && JSON.stringify(ja.value) === '["--alpha"]' && JSON.stringify(ja.bool) === '["--beta"]', 'r4: `node scripts/browser-flag-census.mjs <binary>` (no --write) measures THAT binary', JSON.stringify([a.status, a.stderr.slice(0, 300), ja && { v: ja.version, value: ja.value, bool: ja.bool }]));
     const out = path.join(CD, 'o.json');
     const b = await run(process.execPath, [CENSUS, '--write', out, fake], { env: cenv, cwd: CD });
     const c2 = await run(process.execPath, [CENSUS, fake, '--write', out + '2'], { env: cenv, cwd: CD });
     ok(b.status === 0 && c2.status === 0 && JSON.parse(fs.readFileSync(out, 'utf8')).version === '9.9.9' && JSON.parse(fs.readFileSync(out + '2', 'utf8')).version === '9.9.9', 'r4: …`--write <f> <binary>` and `<binary> --write <f>` both write the fixture');
     const d = await run(process.execPath, [CENSUS], { env: cenv, cwd: CD });
     const jd = parse(d);
-    ok(d.status === 0 && jd && jd.version === '9.9.9', 'r4: …no binary named ⇒ the bare name through PATH, the shim dir ahead of it skipped', JSON.stringify([d.status, d.stderr.slice(0, 300)]));
+    ok(d.status === 0 && gateOf(jd) && jd.version === '9.9.9', 'r4: …no binary named ⇒ the bare name through PATH, the shim dir ahead of it skipped', JSON.stringify([d.status, d.stderr.slice(0, 300)]));
     const e = await run(process.execPath, [CENSUS], { env: { ...cenv, PATH: `${SHIMDIR}:${NODE_DIR}:/usr/bin:/bin`.split(':').filter((x) => x === SHIMDIR || !fs.existsSync(path.join(x, 'agent-browser'))).join(':') }, cwd: CD });
-    ok(e.status === 2 && /on PATH/.test(e.stderr), 'r4: …and with only the shim on PATH it says so (exit 2), never an ENOENT stack', e.stderr);
+    ok(e.status === 2 && verdictOf(/on PATH/.test(e.stderr)), 'r4: …and with only the shim on PATH it says so (exit 2), never an ENOENT stack', e.stderr);
   }
   // the binary absent: refused before any server call
   const n1 = calls.length;
   c = await cli(['snapshot'], { ...baseEnv, PATH: `${SHIMDIR}:${NODE_DIR}:/usr/bin:/bin`.split(':').filter((d) => !fs.existsSync(path.join(d, 'agent-browser')) || d === SHIMDIR).join(':') });
-  ok(c.status === 1 && /\[binary_absent\]/.test(c.stderr) && calls.length === n1, 'with only the shim on PATH ⇒ binary_absent, no server call (the shim is never "the binary")', c.stderr);
+  ok(c.status === 1 && gateOf(/\[binary_absent\]/.test(c.stderr)) && calls.length === n1, 'with only the shim on PATH ⇒ binary_absent, no server call (the shim is never "the binary")', c.stderr);
 
   // ═══ lane browser-resume C (§3.9, the owner's ruling 3): on a SHARED profile's browser the `tab` verbs are the SERVER's ═══
   {
@@ -1525,39 +1525,39 @@ try {
     tabAnswer = { ok: true, act: 'list', view: { tabs: [{ id: 't3', targetId: 'A'.repeat(32), title: 'Mine', url: 'https://a.example/', current: true }], others: 2 }, lines: ['t3  Mine — https://a.example/  [current]', '2 other tabs in this browser are not yours (another conversation\'s, or the user\'s) — never listed, switched to or closed from here'] };
     const r0 = realCalls().length, t0 = tabCalls().length;
     let c2 = await cli(['tab', 'list']);
-    ok(c2.status === 0 && realCalls().length === r0 && tabCalls().length === t0 + 1 && JSON.stringify(tabCalls().at(-1).body.argv) === JSON.stringify(['tab', 'list']) && /^t3  Mine — https:\/\/a\.example\/  \[current\]$/m.test(c2.stdout) && /2 other tabs/.test(c2.stdout) && calls.at(-1).path === '/api/agent/browser/audit' && calls.at(-1).body.verb === 'tab',
+    ok(c2.status === 0 && realCalls().length === r0 && tabCalls().length === t0 + 1 && JSON.stringify(tabCalls().at(-1).body.argv) === JSON.stringify(['tab', 'list']) && gateOf(/^t3  Mine — https:\/\/a\.example\/  \[current\]$/m.test(c2.stdout)) && gateOf(/2 other tabs/.test(c2.stdout)) && calls.at(-1).path === '/api/agent/browser/audit' && calls.at(-1).body.verb === 'tab',
       'a `tab` verb on a shared profile\'s browser NEVER spawns the binary: ONE /tab call (the words as typed), its own tabs printed, the audit names `tab`', JSON.stringify([c2.status, c2.stdout, c2.stderr.slice(0, 300)]));
     c2 = await cli(['tab', 'list', '--json']);
     let jj = null; try { jj = JSON.parse(c2.stdout); } catch { jj = null; }
-    ok(c2.status === 0 && jj && jj.success === true && jj.data.tabs.length === 1 && jj.data.others === 2, '`--json`: ONE object — its own tabs + the count', c2.stdout);
+    ok(c2.status === 0 && gateOf(jj) && jj.success === true && jj.data.tabs.length === 1 && jj.data.others === 2, '`--json`: ONE object — its own tabs + the count', c2.stdout);
     tabAnswer = { _status: 403, error: 'that tab is not yours — it belongs to another holder of this browser', code: 'not_your_tab' };
     c2 = await cli(['tab', 'close', 't1']);
-    ok(c2.status === 1 && /\[not_your_tab\]/.test(c2.stderr) && realCalls().length === r0, 'a refusal is printed by name and exits 1 — nothing ran', c2.stderr);
+    ok(c2.status === 1 && gateOf(/\[not_your_tab\]/.test(c2.stderr)) && realCalls().length === r0, 'a refusal is printed by name and exits 1 — nothing ran', c2.stderr);
     tabAnswer = { ok: true, passthrough: true };
     c2 = await cli(['tab', 'list']);
     ok(c2.status === 0 && realCalls().length === r0 + 1 && JSON.stringify(realCalls().at(-1).argv) === JSON.stringify(['--pin-tab', 'tab', 'list']), '`passthrough` (a browser that holds only this conversation\'s tabs) ⇒ the binary runs as before', JSON.stringify(realCalls().at(-1)));
     const t1 = tabCalls().length, r1 = realCalls().length;
     c2 = await cli(['batch', 'open https://a.example/', 'tab t1']);
-    ok(c2.status === 1 && /\[tab_in_batch\]/.test(c2.stderr) && realCalls().length === r1 && tabCalls().length === t1, 'a batch carrying a `tab` line on a shared profile\'s browser is refused LOCALLY [tab_in_batch] — nothing ran', c2.stderr);
+    ok(c2.status === 1 && gateOf(/\[tab_in_batch\]/.test(c2.stderr)) && realCalls().length === r1 && tabCalls().length === t1, 'a batch carrying a `tab` line on a shared profile\'s browser is refused LOCALLY [tab_in_batch] — nothing ran', c2.stderr);
     c2 = await cli(['batch'], baseEnv, JSON.stringify([['open', 'https://a.example/'], ['--pin-tab', 'tab', 'close', 't1']]));
-    ok(c2.status === 1 && /\[tab_in_batch\]/.test(c2.stderr) && realCalls().length === r1, '…a stdin batch too (JSON form, a flag before the verb)', c2.stderr);
+    ok(c2.status === 1 && gateOf(/\[tab_in_batch\]/.test(c2.stderr)) && realCalls().length === r1, '…a stdin batch too (JSON form, a flag before the verb)', c2.stderr);
     resolveAnswer = att({ mediated: true });
     c2 = await cli(['tab', 'close', 't1']);
     ok(c2.status === 0 && tabCalls().length === t1 && JSON.stringify(realCalls().at(-1).argv) === JSON.stringify(['--pin-tab', 'tab', 'close', 't1']), 'a MEDIATED ("separate tabs") browser: the binary runs as before — its proxy lists and reaches only this conversation\'s tabs', JSON.stringify(realCalls().at(-1)));
     resolveAnswer = att();
     c2 = await cli(['snapshot'], { ...baseEnv, FAKE_AB_OUT: '✗ tab_gone: bound tab is gone (target ' + 'B'.repeat(32) + '). Run `agent-browser tab new <url>` to bind a new tab', FAKE_AB_EXIT: '1' });
-    ok(c2.status === 1 && /\[tab_gone\]/.test(c2.stderr) && /vibespace-browser tab list/.test(c2.stderr), 'a verb on a CLOSED tab: the binary\'s tab_gone, and this tool\'s way out BY NAME (`vibespace-browser tab list` / `tab <id>` / `tab new <url>`)', c2.stderr);
+    ok(c2.status === 1 && gateOf(/\[tab_gone\]/.test(c2.stderr)) && verdictOf(/vibespace-browser tab list/.test(c2.stderr)), 'a verb on a CLOSED tab: the binary\'s tab_gone, and this tool\'s way out BY NAME (`vibespace-browser tab list` / `tab <id>` / `tab new <url>`)', c2.stderr);
     resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false };
   }
   // not in a session
   c = await cli(['snapshot'], { HOME, PATH: baseEnv.PATH });
-  ok(c.status === 2 && /not inside a VibeSpace session/.test(c.stderr), 'outside a session ⇒ exit 2');
+  ok(c.status === 2 && verdictOf(/not inside a VibeSpace session/.test(c.stderr)), 'outside a session ⇒ exit 2');
   c = await cli(['help'], { HOME, PATH: baseEnv.PATH });
-  ok(c.status === 0 && /vibespace-browser/.test(c.stdout) && !new RegExp('(?<![.\\w/-])' + V.REAL_BINARY + '(?!\\.json|[\\w-])').test(c.stdout), '`help` works anywhere and never names the hidden binary');
+  ok(c.status === 0 && gateOf(/vibespace-browser/.test(c.stdout)) && !new RegExp('(?<![.\\w/-])' + V.REAL_BINARY + '(?!\\.json|[\\w-])').test(c.stdout), '`help` works anywhere and never names the hidden binary');
 } finally {
   server.close();
   fs.rmSync(ROOT, { recursive: true, force: true });
 }
 
 console.log(fail ? `FAIL (${fail} failed, ${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

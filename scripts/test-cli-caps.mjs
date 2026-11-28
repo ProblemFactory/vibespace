@@ -42,7 +42,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skip = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -63,8 +63,8 @@ console.log('① the lists');
 const SIX = ['oat-file', 'oat-env', 'oat-file-401', 'oat-file-near', 'oat-file-switch', 'oat-file-scopes'];
 ok('OAT_VARIANTS = the six, in the measurement order', JSON.stringify(C.OAT_VARIANTS) === JSON.stringify(SIX), JSON.stringify(C.OAT_VARIANTS));
 ok('OAT_IN_FILE_GATE = oat-file, oat-file-401, oat-file-switch (design §5 gate 5)', JSON.stringify(C.OAT_IN_FILE_GATE) === JSON.stringify(['oat-file', 'oat-file-401', 'oat-file-switch']), JSON.stringify(C.OAT_IN_FILE_GATE));
-ok('the gate reads only variants the measurement runs', C.OAT_IN_FILE_GATE.every((v) => C.OAT_VARIANTS.includes(v)));
-ok('both lists are frozen', Object.isFrozen(C.OAT_VARIANTS) && Object.isFrozen(C.OAT_IN_FILE_GATE));
+ok('the gate reads only variants the measurement runs', verdictOf(C.OAT_IN_FILE_GATE.every((v) => C.OAT_VARIANTS.includes(v))));
+ok('both lists are frozen', gateOf(Object.isFrozen(C.OAT_VARIANTS)) && verdictOf(Object.isFrozen(C.OAT_IN_FILE_GATE)));
 
 // ── ② the truth table ──
 console.log('② oatInFile(version, fixture)');
@@ -143,13 +143,13 @@ const writerLegs = (W) => {
   return r;
 };
 const wr = writerLegs(C.withMeasured);
-ok('no file yet ⇒ a map of the one version measured', wr.first);
-ok('the one-version file of 2026-10-14 (a bare record) ⇒ its record becomes the map\'s first entry, as it was, and 2.1.306 is added beside it', wr.fromBare);
-ok('ADD, NEVER DROP: every entry the file holds is kept as it was (one that is no full record, another top-level key too), the new version added', wr.addNeverDrop);
-ok('the map is written oldest first (numeric: 1.0.0, 2.1.296, 2.1.306, 2.1.310), whatever order the file held', wr.order);
-ok('a new object: the fixture handed in is not touched', wr.untouched);
-ok('re-measuring a version replaces THAT version\'s record only (2.1.306 now FAIL ⇒ false; 2.1.296 kept, true)', wr.remeasure);
-ok('it REFUSES (throws) a record naming no exact version (none / --version words / not a record) and a fixture that is neither shape (array, text, versions not a map, a record of no version)', wr.refuses);
+ok('no file yet ⇒ a map of the one version measured', verdictOf(wr.first));
+ok('the one-version file of 2026-10-14 (a bare record) ⇒ its record becomes the map\'s first entry, as it was, and 2.1.306 is added beside it', verdictOf(wr.fromBare));
+ok('ADD, NEVER DROP: every entry the file holds is kept as it was (one that is no full record, another top-level key too), the new version added', verdictOf(wr.addNeverDrop));
+ok('the map is written oldest first (numeric: 1.0.0, 2.1.296, 2.1.306, 2.1.310), whatever order the file held', verdictOf(wr.order));
+ok('a new object: the fixture handed in is not touched', verdictOf(wr.untouched));
+ok('re-measuring a version replaces THAT version\'s record only (2.1.306 now FAIL ⇒ false; 2.1.296 kept, true)', verdictOf(wr.remeasure));
+ok('it REFUSES (throws) a record naming no exact version (none / --version words / not a record) and a fixture that is neither shape (array, text, versions not a map, a record of no version)', verdictOf(wr.refuses));
 ok('measuredVersions: the map\'s versions oldest first; a bare record its one; nothing for no fixture / no map / an entry that names another version', J(C.measuredVersions(two())) === J(['2.1.296', '2.1.306']) && J(C.measuredVersions({ versions: { '2.1.306': rec('2.1.306'), '2.1.296': rec('2.1.296') } })) === J(['2.1.296', '2.1.306']) && J(C.measuredVersions(fx())) === J(['2.1.296']) && J(C.measuredVersions(null)) === '[]' && J(C.measuredVersions({ versions: null })) === '[]' && J(C.measuredVersions({ versions: { '2.1.306': fx() } })) === '[]', J([C.measuredVersions(two()), C.measuredVersions(fx())]));
 {
   // RED CONTROL: the writer before this lane wrote THIS run's record alone (the file became one version) — the add-never-drop leg goes RED
@@ -157,7 +157,7 @@ ok('measuredVersions: the map\'s versions oldest first; a bare record its one; n
   if (S0.includes(A)) {
     const f = path.join(tmp, 'cli-caps-writer-drops.js'); fs.writeFileSync(f, S0.replace(A, 'const all = { [v]: record };'));
     const m = writerLegs(require(f).withMeasured);
-    ok('RED CONTROL: a writer that keeps only the new record (the base\'s --write-fixture) drops 2.1.296 ⇒ the add-never-drop + from-the-bare-file legs go RED', !m.addNeverDrop && !m.fromBare && m.first);
+    ok('RED CONTROL: a writer that keeps only the new record (the base\'s --write-fixture) drops 2.1.296 ⇒ the add-never-drop + from-the-bare-file legs go RED', !m.addNeverDrop && !m.fromBare && verdictOf(m.first));
   } else ok('②b anchor present in src/cli-caps.js', false, A);
 }
 
@@ -172,20 +172,20 @@ const patched = (label, from, to) => {
 };
 const flips = (res, leg) => { const i = TABLE.findIndex(([n]) => n === leg); return !!res && res[i] !== TABLE[i][3]; };
 const m1 = patched('no version check', 'if (!rec || cliVersionOf(rec.cliVersion) !== v) return false;', 'if (!rec) return false;');
-ok('a reader without the version check ⇒ the RED CONTROL leg (2.1.297) goes RED', flips(m1, 'RED CONTROL: a newer version the fixture does not name (2.1.297)'));
-ok('…and the map\'s key-vs-record leg goes RED with it', flips(m1, 'the map: a key whose record names another version'));
+ok('a reader without the version check ⇒ the RED CONTROL leg (2.1.297) goes RED', verdictOf(flips(m1, 'RED CONTROL: a newer version the fixture does not name (2.1.297)')));
+ok('…and the map\'s key-vs-record leg goes RED with it', verdictOf(flips(m1, 'the map: a key whose record names another version')));
 const m2 = patched('no verdict check', "&& vs[name].verdict === 'PASS'", '');
-ok('a reader that ignores verdicts ⇒ the oat-file-401 FAIL leg goes RED', flips(m2, 'oat-file-401 FAIL (the CLI rewrote the file)'));
+ok('a reader that ignores verdicts ⇒ the oat-file-401 FAIL leg goes RED', verdictOf(flips(m2, 'oat-file-401 FAIL (the CLI rewrote the file)')));
 const m3 = patched('in not own', 'Object.prototype.hasOwnProperty.call(vs, name)', 'name in vs');
-ok('a reader that counts inherited verdicts ⇒ the inherited leg goes RED', flips(m3, 'inherited verdicts do not count'));
+ok('a reader that counts inherited verdicts ⇒ the inherited leg goes RED', verdictOf(flips(m3, 'inherited verdicts do not count')));
 const m4 = patched('loose version', '(?=\\s|$)', '');
-ok('a looser version parse ⇒ the 2.1.296.1 leg goes RED', flips(m4, 'a four-part one (2.1.296.1)'));
+ok('a looser version parse ⇒ the 2.1.296.1 leg goes RED', verdictOf(flips(m4, 'a four-part one (2.1.296.1)')));
 const m5 = patched('the r1 parse', '(\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.+-]+)?)(?=\\s|$)', '(\\d+\\.\\d+\\.\\d+)(?![\\d.])');
-ok('RED CONTROL (F9): the r1 parse (a build suffix dropped) opens the gate for 2.1.296-dev.1', flips(m5, 'a build of it (2.1.296-dev.1 — verify r1 F9)'));
+ok('RED CONTROL (F9): the r1 parse (a build suffix dropped) opens the gate for 2.1.296-dev.1', verdictOf(flips(m5, 'a build of it (2.1.296-dev.1 — verify r1 F9)')));
 const m6 = patched('the one-version reader', 'const rec = recordOf(fixture, v);', 'const rec = fixture;');
-ok('RED CONTROL (the base): a reader of the one-version shape only ⇒ the two-version file grants 2.1.306 nothing (the map legs go RED)', flips(m6, 'the map: 2.1.306 in the CLI\'s words ⇒ its record') && flips(m6, 'the map: 2.1.296 ⇒ its record'));
+ok('RED CONTROL (the base): a reader of the one-version shape only ⇒ the two-version file grants 2.1.306 nothing (the map legs go RED)', gateOf(flips(m6, 'the map: 2.1.306 in the CLI\'s words ⇒ its record')) && verdictOf(flips(m6, 'the map: 2.1.296 ⇒ its record')));
 const m7 = patched('map entry not own', 'isRecord(vs) && own(vs, v) && isRecord(vs[v])', 'isRecord(vs) && v in vs && isRecord(vs[v])');
-ok('a reader that counts an inherited map entry ⇒ its leg goes RED', flips(m7, 'the map: an inherited entry does not count'));
+ok('a reader that counts an inherited map entry ⇒ its leg goes RED', verdictOf(flips(m7, 'the map: an inherited entry does not count')));
 
 // ── ④ census ──
 console.log('④ census');
@@ -193,12 +193,12 @@ const S = fs.readFileSync(SCRIPT, 'utf8');
 // lane cli-self-measure: the measurement's core moved into src/claude-oat-probe.js (the script and the hub both call it) — the
 // census reads the module for what measures and the script for what writes the fixture
 const PS = fs.readFileSync(path.join(REPO, 'src/claude-oat-probe.js'), 'utf8');
-ok('the measurement takes OAT_VARIANTS from src/cli-caps.js (one spelling of the six)', /\bOAT_VARIANTS\b[^\n]*=\s*createRequire\([^\n]*'src', 'cli-caps\.js'/.test(S));
+ok('the measurement takes OAT_VARIANTS from src/cli-caps.js (one spelling of the six)', verdictOf(/\bOAT_VARIANTS\b[^\n]*=\s*createRequire\([^\n]*'src', 'cli-caps\.js'/.test(S)));
 ok('…and never spells the list itself', !/\[\s*'oat-file',\s*'oat-env'/.test(S));
-ok('every variant name has its branch in the measurement (the module)', SIX.filter((v) => v !== 'oat-file').every((v) => PS.includes(`'${v}'`)), SIX.filter((v) => !PS.includes(`'${v}'`)).join(', '));
-ok('--write-fixture writes scripts/fixtures/oat-in-file.json by default', /'fixtures', 'oat-in-file\.json'/.test(S) && S.includes("flag('write-fixture')"));
-ok('…ADDING its record through cli-caps withMeasured over the file as it is when written (never this run\'s record alone)', S.includes('const next = withMeasured(fixtureNow(), fx);') && S.includes('fs.writeFileSync(FIXTURE, JSON.stringify(next, null, 1)') && !/JSON\.stringify\(fx,/.test(S));
-ok('…and refusing BEFORE the run a file it could not add to, and AGAIN at write time over the file as it is then (the version is the run\'s own answer)', S.includes("if (flag('write-fixture')) { try { withMeasured(fixtureNow(), { cliVersion: '0.0.0', variants: {} }); } catch (e) { console.error(`REFUSED: --write-fixture") && S.indexOf("withMeasured(fixtureNow(), { cliVersion: '0.0.0'") < S.indexOf('PROBE.measure(') && S.includes("try { withMeasured(fixtureNow(), fx); } catch (e) { console.error(`REFUSED: --write-fixture") && S.indexOf('try { withMeasured(fixtureNow(), fx); }') < S.indexOf('const next = withMeasured(fixtureNow(), fx);'));
+ok('every variant name has its branch in the measurement (the module)', verdictOf(SIX.filter((v) => v !== 'oat-file').every((v) => PS.includes(`'${v}'`))), SIX.filter((v) => !PS.includes(`'${v}'`)).join(', '));
+ok('--write-fixture writes scripts/fixtures/oat-in-file.json by default', gateOf(/'fixtures', 'oat-in-file\.json'/.test(S)) && verdictOf(S.includes("flag('write-fixture')")));
+ok('…ADDING its record through cli-caps withMeasured over the file as it is when written (never this run\'s record alone)', gateOf(S.includes('const next = withMeasured(fixtureNow(), fx);')) && gateOf(S.includes('fs.writeFileSync(FIXTURE, JSON.stringify(next, null, 1)')) && !/JSON\.stringify\(fx,/.test(S));
+ok('…and refusing BEFORE the run a file it could not add to, and AGAIN at write time over the file as it is then (the version is the run\'s own answer)', gateOf(S.includes("if (flag('write-fixture')) { try { withMeasured(fixtureNow(), { cliVersion: '0.0.0', variants: {} }); } catch (e) { console.error(`REFUSED: --write-fixture")) && S.indexOf("withMeasured(fixtureNow(), { cliVersion: '0.0.0'") < S.indexOf('PROBE.measure(') && gateOf(S.includes("try { withMeasured(fixtureNow(), fx); } catch (e) { console.error(`REFUSED: --write-fixture")) && S.indexOf('try { withMeasured(fixtureNow(), fx); }') < S.indexOf('const next = withMeasured(fixtureNow(), fx);'));
 ok('no token-shaped literal in the module either (built at runtime)', !/sk-ant-(oat|ort|api)\d/.test(PS));
 ok('no token-shaped literal in the measurement (built at runtime)', !/sk-ant-(oat|ort|api)\d/.test(S));
 ok('src/cli-caps.js imports nothing (PURE)', !/\brequire\s*\(|^\s*import\s/m.test(SRC));
@@ -209,28 +209,28 @@ const measure = (args) => spawnSync(process.execPath, [SCRIPT, '--no-netns', '--
 {
   // refused BEFORE it runs: an ELF (node's own binary stands in: the real CLI is never touched here)…
   const r = measure(['--claude', process.execPath, '--variant', 'oat-file']);
-  ok('--no-netns refuses a binary (an ELF) before running it', r.status === 2 && /REFUSED: --no-netns runs a FAKE claude/.test(r.stderr), `exit ${r.status}: ${String(r.stderr).slice(-300)}`);
+  ok('--no-netns refuses a binary (an ELF) before running it', r.status === 2 && verdictOf(/REFUSED: --no-netns runs a FAKE claude/.test(r.stderr)), `exit ${r.status}: ${String(r.stderr).slice(-300)}`);
   // …and a script that sits where the vendor installs the real one (…/claude/versions/<v>)
   const vdir = path.join(tmp, 'claude', 'versions'); fs.mkdirSync(vdir, { recursive: true });
   const asReal = path.join(vdir, '9.9.9'); fs.writeFileSync(asReal, '#!/bin/sh\necho 9.9.9\n', { mode: 0o755 });
   const rv = measure(['--claude', asReal, '--variant', 'oat-file']);
-  ok('--no-netns refuses anything under …/claude/versions/ (the vendor install path)', rv.status === 2 && /REFUSED: --no-netns runs a FAKE claude/.test(rv.stderr), `exit ${rv.status}: ${String(rv.stderr).slice(-300)}`);
+  ok('--no-netns refuses anything under …/claude/versions/ (the vendor install path)', rv.status === 2 && verdictOf(/REFUSED: --no-netns runs a FAKE claude/.test(rv.stderr)), `exit ${rv.status}: ${String(rv.stderr).slice(-300)}`);
   const r2 = measure(['--variant', 'oat-file']);
-  ok('--no-netns without --claude refuses (never the one on PATH)', r2.status === 2 && /REFUSED: --no-netns needs --claude/.test(r2.stderr), `exit ${r2.status}: ${String(r2.stderr).slice(-300)}`);
+  ok('--no-netns without --claude refuses (never the one on PATH)', r2.status === 2 && verdictOf(/REFUSED: --no-netns needs --claude/.test(r2.stderr)), `exit ${r2.status}: ${String(r2.stderr).slice(-300)}`);
   // THE LOOPBACK-REAL RUNG IS TRACKED (lane pool-silent-members acceptance r2: the 2.1.312 record named this script, whose
   // --no-netns refused the real binary — it came from an untracked lane copy). Named on purpose only (never the one on
   // PATH), the three fences in the script itself: every base and the PROXY on the loopback mock, the strace belt, the CLI's
   // optional traffic off; the record says the rung and the proxy. (Here it is only REFUSED: no binary is ever run.)
   const r3 = measure(['--loopback-real', '--variant', 'oat-file']);
-  ok('--no-netns --loopback-real without --claude refuses before anything runs (never the one on PATH)', r3.status === 2 && /REFUSED: --loopback-real needs --claude <the real claude>/.test(r3.stderr), `exit ${r3.status}: ${String(r3.stderr).slice(-300)}`);
+  ok('--no-netns --loopback-real without --claude refuses before anything runs (never the one on PATH)', r3.status === 2 && verdictOf(/REFUSED: --loopback-real needs --claude <the real claude>/.test(r3.stderr)), `exit ${r3.status}: ${String(r3.stderr).slice(-300)}`);
   const MS = fs.readFileSync(SCRIPT, 'utf8');
   ok('…the rung lives in the TRACKED script: the real binary only with --no-netns --loopback-real, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 (on every rung since lane cli-self-measure r2 — assertEnv requires it), HTTPS_PROXY = the mock, the record\'s rung + proxy (the belt on both rungs is test-oat-measure-fake\'s, a heavy)',
-    /const LOOPBACK_REAL = flag\('loopback-real'\) && !NETNS;/.test(MS) && /const RUNG = NETNS \? 'netns' : LOOPBACK_REAL \? 'loopback-real' : 'fake';/.test(MS) && /const CLAUDE = resolveClaude\(RUNG, o\.claude\);/.test(PS)
-    && /CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', \/\/ the CLI's optional traffic off — on EVERY rung \(assertEnv requires it\)/.test(PS) && /const PROXY_ENV = \{ HTTPS_PROXY: BASE, HTTP_PROXY: BASE,/.test(PS)
-    && /\.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', variants: \{\} \};/.test(MS));
+    gateOf(/const LOOPBACK_REAL = flag\('loopback-real'\) && !NETNS;/.test(MS)) && gateOf(/const RUNG = NETNS \? 'netns' : LOOPBACK_REAL \? 'loopback-real' : 'fake';/.test(MS)) && gateOf(/const CLAUDE = resolveClaude\(RUNG, o\.claude\);/.test(PS))
+    && gateOf(/CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', \/\/ the CLI's optional traffic off — on EVERY rung \(assertEnv requires it\)/.test(PS)) && gateOf(/const PROXY_ENV = \{ HTTPS_PROXY: BASE, HTTP_PROXY: BASE,/.test(PS))
+    && verdictOf(/\.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', variants: \{\} \};/.test(MS)));
   // (acceptance r3: never a claim wider than the code — the --out record names its rung and its proxy too, not only the fixture's)
-  ok('…and the --out record says them as well — every record the script writes names its proxy (the mock), the loopback-real one its rung', /const record = \{\s*measuredAt: [^\n]*, netns: NETNS, \.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', resolver: RESOLVER,/.test(PS));
-  ok('…and its --no-netns line says the truth for each rung («the REAL claude, no namespace …» / «a FAKE claude on the loopback mock»)', /LOOPBACK_REAL \? ' \(--no-netns --loopback-real: the REAL claude, no namespace/.test(PS) && /: ' \(--no-netns: a FAKE claude on the loopback mock\)'/.test(PS));
+  ok('…and the --out record says them as well — every record the script writes names its proxy (the mock), the loopback-real one its rung', verdictOf(/const record = \{\s*measuredAt: [^\n]*, netns: NETNS, \.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', resolver: RESOLVER,/.test(PS)));
+  ok('…and its --no-netns line says the truth for each rung («the REAL claude, no namespace …» / «a FAKE claude on the loopback mock»)', gateOf(/LOOPBACK_REAL \? ' \(--no-netns --loopback-real: the REAL claude, no namespace/.test(PS)) && verdictOf(/: ' \(--no-netns: a FAKE claude on the loopback mock\)'/.test(PS)));
 }
 
 // ── ⑥ the committed fixture (主开发's namespace rung writes it) ──
@@ -242,30 +242,30 @@ if (!fs.existsSync(COMMITTED)) {
   let F = null; try { F = JSON.parse(fs.readFileSync(COMMITTED, 'utf8')); } catch { }
   const recs = F && F.versions && typeof F.versions === 'object' ? Object.entries(F.versions) : [];
   ok(`scripts/fixtures/oat-in-file.json parses: one record per measured version, keyed by its exact version — the builds RECORD_SHA256 pins (${Object.keys(RECORD_SHA256).join(', ')}), oldest first`, !!F && JSON.stringify(Object.keys(F)) === '["versions"]' && JSON.stringify(recs.map(([k]) => k)) === JSON.stringify(Object.keys(RECORD_SHA256)) && JSON.stringify(C.measuredVersions(F)) === JSON.stringify(Object.keys(RECORD_SHA256)), JSON.stringify(F).slice(0, 300));
-  ok('…each record has the six verdicts and names the measurement', recs.length > 0 && recs.every(([k, r]) => r.cliVersion === k && /^\d{4}-\d\d-\d\d$/.test(r.measuredAt) && r.script === 'scripts/measure-claude-cred-read.mjs' && SIX.every((n) => r.variants?.[n] && /^(PASS|FAIL|INCOMPLETE)$/.test(r.variants[n].verdict) && typeof r.variants[n].note === 'string')), JSON.stringify(recs.map(([k, r]) => [k, r.cliVersion, r.measuredAt])));
+  ok('…each record has the six verdicts and names the measurement', recs.length > 0 && verdictOf(recs.every(([k, r]) => r.cliVersion === k && /^\d{4}-\d\d-\d\d$/.test(r.measuredAt) && r.script === 'scripts/measure-claude-cred-read.mjs' && SIX.every((n) => r.variants?.[n] && /^(PASS|FAIL|INCOMPLETE)$/.test(r.variants[n].verdict) && typeof r.variants[n].note === 'string'))), JSON.stringify(recs.map(([k, r]) => [k, r.cliVersion, r.measuredAt])));
   // 2.1.312 (lane pool-silent-members R1, 2026-10-28): the brief ruled the claude-steer recipe — the REAL binary on the
   // loopback mock with a fake long-lived token, NO namespace — and the record SAYS so (`netns: false`, `rung:
   // 'loopback-real'`): the mock answered every API/OAuth/OTel call, HTTPS_PROXY = the mock refused each CONNECT
   // (16 to api.anthropic.com, all refused), the strace belt saw no off-loopback connect. Every older record is the namespace rung's.
   // 2.1.314 (lane oat-in-file-2-1-314, 2026-10-30): the same rung — a lane creates no namespace — and the record says it the same way.
   const LOOPBACK_RECS = Object.keys(RECORD_SHA256).filter((k) => byVersion(k, '2.1.312') >= 0); // B-5e52: every build from 2.1.312 on is measured on the loopback rung (a lane creates no namespace) — derived, so a new build adds no entry here
-  ok('…each measured with the real CLI (not a fake): 2.1.296–2.1.308 in the namespace, 2.1.312, 2.1.314, 2.1.319 and 2.1.321 on the loopback rung and SAYING so', recs.length > 0 && recs.every(([k, r]) => k !== '9.9.9' && (LOOPBACK_RECS.includes(k) ? r.netns === false && r.rung === 'loopback-real' && r.proxy === 'loopback-mock' : r.netns === true && !('rung' in r))), JSON.stringify(recs.map(([k, r]) => [k, r.netns, r.rung || null])));
+  ok('…each measured with the real CLI (not a fake): 2.1.296–2.1.308 in the namespace, 2.1.312, 2.1.314, 2.1.319 and 2.1.321 on the loopback rung and SAYING so', recs.length > 0 && verdictOf(recs.every(([k, r]) => k !== '9.9.9' && (LOOPBACK_RECS.includes(k) ? r.netns === false && r.rung === 'loopback-real' && r.proxy === 'loopback-mock' : r.netns === true && !('rung' in r)))), JSON.stringify(recs.map(([k, r]) => [k, r.netns, r.rung || null])));
   const verdicts = (v) => SIX.map((n) => F?.versions?.[v]?.variants?.[n]?.verdict).join(' ');
   ok('2.1.306 (主开发\'s namespace rung, 2026-10-21): the SAME six verdicts as 2.1.296 — oat-file PASS, oat-env FAIL, oat-file-401 PASS, oat-file-near PASS, oat-file-switch PASS, oat-file-scopes FAIL', F?.versions?.['2.1.306']?.measuredAt === '2026-10-21' && verdicts('2.1.306') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.306') === verdicts('2.1.296'), `${verdicts('2.1.296')} | ${verdicts('2.1.306')}`);
-  ok('2.1.307 (主开发\'s namespace rung, 2026-10-22 — the hub\'s claude auto-updated 2026-10-21): the SAME six verdicts as 2.1.306 and 2.1.296, each note word for word 2.1.306\'s', F?.versions?.['2.1.307']?.measuredAt === '2026-10-22' && verdicts('2.1.307') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.307') === verdicts('2.1.306') && SIX.every((n) => F.versions['2.1.307'].variants[n].note === F.versions['2.1.306'].variants[n].note), `${verdicts('2.1.306')} | ${verdicts('2.1.307')}`);
-  ok('2.1.308 (主开发\'s namespace rung, 2026-10-22 07:09Z — the hub\'s claude auto-updated again 2026-10-21 22:48 PT): the SAME six verdicts as 2.1.307, 2.1.306 and 2.1.296, each note word for word 2.1.307\'s', F?.versions?.['2.1.308']?.measuredAt === '2026-10-22' && verdicts('2.1.308') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.308') === verdicts('2.1.307') && SIX.every((n) => F.versions['2.1.308'].variants[n].note === F.versions['2.1.307'].variants[n].note), `${verdicts('2.1.307')} | ${verdicts('2.1.308')}`);
-  ok('2.1.312 (lane pool-silent-members, 2026-10-28 — the hub\'s claude auto-updated 2026-10-27 19:16 PT and the pool lost six members): the SAME six verdicts as 2.1.308; the scopes refusal is word for word «Not logged in · Please run /login»', F?.versions?.['2.1.312']?.measuredAt === '2026-10-28' && verdicts('2.1.312') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.312') === verdicts('2.1.308') && /Not logged in · Please run \/login/.test(F.versions['2.1.312'].variants['oat-file-scopes'].note) && /bearer = the file's oat/.test(F.versions['2.1.312'].variants['oat-file'].note), `${verdicts('2.1.308')} | ${verdicts('2.1.312')}`);
+  ok('2.1.307 (主开发\'s namespace rung, 2026-10-22 — the hub\'s claude auto-updated 2026-10-21): the SAME six verdicts as 2.1.306 and 2.1.296, each note word for word 2.1.306\'s', F?.versions?.['2.1.307']?.measuredAt === '2026-10-22' && verdicts('2.1.307') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.307') === verdicts('2.1.306') && verdictOf(SIX.every((n) => F.versions['2.1.307'].variants[n].note === F.versions['2.1.306'].variants[n].note)), `${verdicts('2.1.306')} | ${verdicts('2.1.307')}`);
+  ok('2.1.308 (主开发\'s namespace rung, 2026-10-22 07:09Z — the hub\'s claude auto-updated again 2026-10-21 22:48 PT): the SAME six verdicts as 2.1.307, 2.1.306 and 2.1.296, each note word for word 2.1.307\'s', F?.versions?.['2.1.308']?.measuredAt === '2026-10-22' && verdicts('2.1.308') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.308') === verdicts('2.1.307') && verdictOf(SIX.every((n) => F.versions['2.1.308'].variants[n].note === F.versions['2.1.307'].variants[n].note)), `${verdicts('2.1.307')} | ${verdicts('2.1.308')}`);
+  ok('2.1.312 (lane pool-silent-members, 2026-10-28 — the hub\'s claude auto-updated 2026-10-27 19:16 PT and the pool lost six members): the SAME six verdicts as 2.1.308; the scopes refusal is word for word «Not logged in · Please run /login»', F?.versions?.['2.1.312']?.measuredAt === '2026-10-28' && verdicts('2.1.312') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.312') === verdicts('2.1.308') && gateOf(/Not logged in · Please run \/login/.test(F.versions['2.1.312'].variants['oat-file-scopes'].note)) && verdictOf(/bearer = the file's oat/.test(F.versions['2.1.312'].variants['oat-file'].note)), `${verdicts('2.1.308')} | ${verdicts('2.1.312')}`);
   // 2.1.314 (lane oat-in-file-2-1-314, 2026-10-30): the box's claude auto-updated from 2.1.312 that day and every long-lived-token
   // member read «claude 2.1.314 is not measured with it in the account's folder». `usagePanel` on oat-file is the owner's hand
   // measurement the same day: `claude -p /usage` with a long-lived-token login prints the header line only, no quota lines.
   const r314 = F?.versions?.['2.1.314'];
-  ok('2.1.314 (lane oat-in-file-2-1-314, 2026-10-30 — the hub\'s claude auto-updated from 2.1.312 that day): the SAME six verdicts as 2.1.312; the scopes refusal is word for word «Not logged in · Please run /login»', r314?.measuredAt === '2026-10-30' && verdicts('2.1.314') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.314') === verdicts('2.1.312') && /Not logged in · Please run \/login/.test(r314.variants['oat-file-scopes'].note) && /bearer = the file's oat/.test(r314.variants['oat-file'].note), `${verdicts('2.1.312')} | ${verdicts('2.1.314')}`);
-  ok('…and its oat-file variant names the /usage panel: header only, measured by the owner — the probe stays skipped for this login shape', typeof r314?.variants?.['oat-file']?.usagePanel === 'string' && /no quota lines \(header only\)/.test(r314.variants['oat-file'].usagePanel) && /measured by the owner/.test(r314.variants['oat-file'].usagePanel) && /the probe stays skipped for this login shape/.test(r314.variants['oat-file'].usagePanel), r314?.variants?.['oat-file']);
+  ok('2.1.314 (lane oat-in-file-2-1-314, 2026-10-30 — the hub\'s claude auto-updated from 2.1.312 that day): the SAME six verdicts as 2.1.312; the scopes refusal is word for word «Not logged in · Please run /login»', r314?.measuredAt === '2026-10-30' && verdicts('2.1.314') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.314') === verdicts('2.1.312') && gateOf(/Not logged in · Please run \/login/.test(r314.variants['oat-file-scopes'].note)) && verdictOf(/bearer = the file's oat/.test(r314.variants['oat-file'].note)), `${verdicts('2.1.312')} | ${verdicts('2.1.314')}`);
+  ok('…and its oat-file variant names the /usage panel: header only, measured by the owner — the probe stays skipped for this login shape', typeof r314?.variants?.['oat-file']?.usagePanel === 'string' && gateOf(/no quota lines \(header only\)/.test(r314.variants['oat-file'].usagePanel)) && gateOf(/measured by the owner/.test(r314.variants['oat-file'].usagePanel)) && verdictOf(/the probe stays skipped for this login shape/.test(r314.variants['oat-file'].usagePanel)), r314?.variants?.['oat-file']);
   // 2.1.319 (lane cli-2-1-319-records, 2026-11-07): the box's claude self-updated 2026-11-06 16:27 PT and the hub's journal said «11 pool member(s) cannot be
   // placed» — the third CLI update to shrink the pool (.312, .314). It ADDS its record; no /usage panel note: §ban-safety — never `claude -p /usage` against a
   // real login, so nobody re-measured it (nothing reads the note: a folder-token row reads oat-folder-no-panel on every version).
   const r319 = F?.versions?.['2.1.319'];
-  ok('2.1.319 (lane cli-2-1-319-records, 2026-11-07 — the hub\'s claude self-updated from 2.1.314 on 11-06): the SAME six verdicts as 2.1.314, each note word for word 2.1.314\'s; the scopes refusal «Not logged in · Please run /login»; the three the gate reads PASS', r319?.measuredAt === '2026-11-07' && r319?.cliVersion === '2.1.319' && verdicts('2.1.319') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.319') === verdicts('2.1.314') && SIX.every((n) => r319.variants[n].note === F.versions['2.1.314'].variants[n].note) && /Not logged in · Please run \/login/.test(r319.variants['oat-file-scopes'].note), `${verdicts('2.1.314')} | ${verdicts('2.1.319')}`);
+  ok('2.1.319 (lane cli-2-1-319-records, 2026-11-07 — the hub\'s claude self-updated from 2.1.314 on 11-06): the SAME six verdicts as 2.1.314, each note word for word 2.1.314\'s; the scopes refusal «Not logged in · Please run /login»; the three the gate reads PASS', r319?.measuredAt === '2026-11-07' && r319?.cliVersion === '2.1.319' && verdicts('2.1.319') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.319') === verdicts('2.1.314') && gateOf(SIX.every((n) => r319.variants[n].note === F.versions['2.1.314'].variants[n].note)) && verdictOf(/Not logged in · Please run \/login/.test(r319.variants['oat-file-scopes'].note)), `${verdicts('2.1.314')} | ${verdicts('2.1.319')}`);
   ok('…with no /usage panel note: nobody ran `claude -p /usage` against a real login for it (§ban-safety), and nothing reads the note', !!r319 && !('usagePanel' in r319.variants['oat-file']));
   ok('oatInFile over it: 2.1.296 true, 2.1.306 true, 2.1.307 true, 2.1.308 true, 2.1.312 true, 2.1.314 true, 2.1.319 true; an unmeasured 2.1.300 / 2.1.309 / 2.1.313 / 2.1.315 / 2.1.318 / 2.1.320 false, as today', C.oatInFile('2.1.296', F) === true && C.oatInFile('2.1.306 (Claude Code)', F) === true && C.oatInFile('2.1.307 (Claude Code)', F) === true && C.oatInFile('2.1.308 (Claude Code)', F) === true && C.oatInFile('2.1.312 (Claude Code)', F) === true && C.oatInFile('2.1.314 (Claude Code)', F) === true && C.oatInFile('2.1.319 (Claude Code)', F) === true && C.oatInFile('2.1.318', F) === false && C.oatInFile('2.1.320', F) === false && C.oatInFile('2.1.300', F) === false && C.oatInFile('2.1.309', F) === false && C.oatInFile('2.1.313', F) === false && C.oatInFile('2.1.315', F) === false);
   const r319o = (F?.versions || {})['2.1.319'], base383 = versionsBefore((F?.versions || {}), '2.1.319'); // B-5e52: the fixture before 2.1.319 was measured
@@ -273,7 +273,7 @@ if (!fs.existsSync(COMMITTED)) {
   // 2.1.321 (lane fable-52-cli-321, 2026-11-09): npm published it that day (Fable 5.2 ships with it); measured at 20:28Z, and the owner installed it on the box at 20:54Z
   // (.386 then held every long-lived-token member as cli-unmeasured) — measured BEFORE the pool met it — the npm package's binary in a lane prefix, on the same loopback rung. It ADDS its record.
   const r321 = F?.versions?.['2.1.321'];
-  ok('2.1.321 (lane fable-52-cli-321, 2026-11-09 — npm\'s newest, measured before the owner\'s install): the SAME six verdicts as 2.1.319, each note word for word 2.1.319\'s; the three the gate reads PASS; no /usage panel note (§ban-safety)', r321?.measuredAt === '2026-11-09' && r321?.cliVersion === '2.1.321' && verdicts('2.1.321') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.321') === verdicts('2.1.319') && SIX.every((n) => r321.variants[n].note === F.versions['2.1.319'].variants[n].note) && !('usagePanel' in r321.variants['oat-file']), `${verdicts('2.1.319')} | ${verdicts('2.1.321')}`);
+  ok('2.1.321 (lane fable-52-cli-321, 2026-11-09 — npm\'s newest, measured before the owner\'s install): the SAME six verdicts as 2.1.319, each note word for word 2.1.319\'s; the three the gate reads PASS; no /usage panel note (§ban-safety)', r321?.measuredAt === '2026-11-09' && r321?.cliVersion === '2.1.321' && verdicts('2.1.321') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.321') === verdicts('2.1.319') && gateOf(SIX.every((n) => r321.variants[n].note === F.versions['2.1.319'].variants[n].note)) && !('usagePanel' in r321.variants['oat-file']), `${verdicts('2.1.319')} | ${verdicts('2.1.321')}`);
   const NEXT_UNMEASURED = (() => { const v = Object.keys(RECORD_SHA256).at(-1).split('.').map(Number); v[2] += 1; return v.join('.'); })(); // B-5e52: one past the newest pinned record — derived, so measuring that build edits no leg here
   ok(`oatInFile(2.1.321) true; an unmeasured 2.1.320 / ${NEXT_UNMEASURED} (one past the newest record) false`, C.oatInFile('2.1.321 (Claude Code)', F) === true && C.oatInFile('2.1.320', F) === false && C.oatInFile(NEXT_UNMEASURED, F) === false);
   const r321o = (F?.versions || {})['2.1.321'], base386 = versionsBefore((F?.versions || {}), '2.1.321'); // B-5e52: the fixture before 2.1.321 was measured
@@ -303,7 +303,7 @@ if (!fs.existsSync(COMMITTED)) {
   const codeOf = (t) => t.split('\n').filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).join('\n');   // a comment may spell the old shape (oat-fixture.mjs's head does)
   const spelled = [...scriptsOf('scripts'), ...scriptsOf('scripts/lib')].filter((f) => f !== 'scripts/test-cli-caps.mjs' && SPELLED_BUILDS_RE.test(codeOf(fs.readFileSync(path.join(REPO, f), 'utf8'))));
   ok('no suite spells the later builds by hand (`const { \'2.1.x\': … } = …versions`) — versionsBefore is the one call', spelled.length === 0, spelled);
-  ok('NEG: the census sees that shape — const / let / var, either quote, a build key after another key', SPELLED_BUILDS_RE.test("  const { '2.1.312': _r312, ...upTo308 } = FX.versions;") && SPELLED_BUILDS_RE.test('  let { "2.1.312": a, ...b } = F.versions;') && SPELLED_BUILDS_RE.test("  var { x, '2.1.312': a, ...b } = F.versions;") && !SPELLED_BUILDS_RE.test("  const upTo308 = versionsBefore(FX.versions, '2.1.312');"));
+  ok('NEG: the census sees that shape — const / let / var, either quote, a build key after another key', gateOf(SPELLED_BUILDS_RE.test("  const { '2.1.312': _r312, ...upTo308 } = FX.versions;")) && gateOf(SPELLED_BUILDS_RE.test('  let { "2.1.312": a, ...b } = F.versions;')) && gateOf(SPELLED_BUILDS_RE.test("  var { x, '2.1.312': a, ...b } = F.versions;")) && !SPELLED_BUILDS_RE.test("  const upTo308 = versionsBefore(FX.versions, '2.1.312');"));
   ok('the fixture names no path, machine or person (the notes are the measurement\'s own words)', !!F && !/\/(var|home|tmp|opt|root|Users|run)\/|@|\.local\b|\.lan\b/.test(JSON.stringify(F)));
 }
 
@@ -361,7 +361,7 @@ console.log('⑧ B-ec25: machine-probes starts no agent CLI it found by itself u
     ok('under VS_NO_REAL_CLI=1 with no CLAUDE_CMD, cliVersion starts nothing and answers null (no answer: the gate keeps the last known version)', v0 === null && runs().length === 0, JSON.stringify([v0, runs()]));
     ok('…said by name, once', said.filter((l) => l === '[cli-probe] claude --version not run: VS_NO_REAL_CLI=1 and no CLAUDE_CMD names a stand-in').length === 1, JSON.stringify(said));
     const f0 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: null, CODEX_CMD: null, HOME: tmp }, () => P.cliFacts({ claudeCmd: CL, codexCmd: CX }));
-    ok('cliFacts under the flag: both CLIs found, neither started — installed, no version, the words why', runs().length === 0 && f0.claude.installed === true && f0.claude.version === null && /^not run: VS_NO_REAL_CLI=1 and no CLAUDE_CMD/.test(f0.claude.notRun || '') && f0.codex.installed === true && f0.codex.version === null && /^not run: VS_NO_REAL_CLI=1 and no CODEX_CMD/.test(f0.codex.notRun || ''), JSON.stringify([runs(), f0.claude, f0.codex]));
+    ok('cliFacts under the flag: both CLIs found, neither started — installed, no version, the words why', runs().length === 0 && f0.claude.installed === true && f0.claude.version === null && gateOf(/^not run: VS_NO_REAL_CLI=1 and no CLAUDE_CMD/.test(f0.claude.notRun || '')) && f0.codex.installed === true && f0.codex.version === null && verdictOf(/^not run: VS_NO_REAL_CLI=1 and no CODEX_CMD/.test(f0.codex.notRun || '')), JSON.stringify([runs(), f0.claude, f0.codex]));
     const v1 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: CL }, () => P.cliVersion(CL));
     ok('THE stand-in the env names still runs under the flag', v1 === '2.1.300 (Claude Code)' && runs().join('|') === 'ec25-claude --version', JSON.stringify([v1, runs()]));
     fresh();
@@ -414,18 +414,18 @@ console.log('⑨ ckptVerdict — the switch changes nothing the CLI sends, or th
   ];
   for (const [n, r, want, stop] of legs(K.ckptVerdict)) ok(`${n}${r.findings.length ? ` — ${r.findings[0]}` : ''}`, r.verdict === want && !!r.stop === stop, JSON.stringify(r).slice(0, 300));
   const named = K.ckptVerdict(OFF, run({ files: 1, h2: { headers: { 'x-new': '1' } } }));
-  ok('a DIFFERENT names the request (its kind and place) and the header', named.findings.length === 1 && /^request \/v1\/messages\?beta=true stream \["Edit","Read"\] #2 header only with the switch: x-new$/.test(named.findings[0]), JSON.stringify(named.findings));
+  ok('a DIFFERENT names the request (its kind and place) and the header', named.findings.length === 1 && verdictOf(/^request \/v1\/messages\?beta=true stream \["Edit","Read"\] #2 header only with the switch: x-new$/.test(named.findings[0])), JSON.stringify(named.findings));
   const secret = K.ckptVerdict(run({ h1: { headers: { cookie: 'sid=AAAA-raw' } } }), run({ files: 1, h1: { headers: { cookie: 'sid=BBBB-raw' } } }));
-  ok('a header the mock keeps raw (cookie) is compared — and its value is NEVER shown', secret.verdict === 'DIFFERENT' && secret.findings.some((x) => /header cookie differs \(its value is not shown\)$/.test(x)) && !/AAAA|BBBB/.test(JSON.stringify(secret)), JSON.stringify(secret.findings));
+  ok('a header the mock keeps raw (cookie) is compared — and its value is NEVER shown', secret.verdict === 'DIFFERENT' && gateOf(secret.findings.some((x) => /header cookie differs \(its value is not shown\)$/.test(x))) && !/AAAA|BBBB/.test(JSON.stringify(secret)), JSON.stringify(secret.findings));
   ok('ckptSwitchOf: the version\'s measured verdict; null for one not measured, a null fixture, a bare record, a record under the key naming another version',
     K.ckptSwitchOf('9.9.9 (Claude Code)', { versions: { '9.9.9': { cliVersion: '9.9.9', verdict: 'SAME' } } }) === 'SAME' && K.ckptSwitchOf('9.9.8', { versions: { '9.9.9': { cliVersion: '9.9.9', verdict: 'SAME' } } }) === null
     && K.ckptSwitchOf('9.9.9', null) === null && K.ckptSwitchOf('9.9.9', { verdict: 'SAME' }) === null && K.ckptSwitchOf('9.9.9', { versions: { '9.9.9': { cliVersion: '9.9.8', verdict: 'SAME' } } }) === null);
-  ok('the switch, its pair and the lists are one spelling, frozen', K.CKPT_SWITCH === 'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING' && JSON.stringify(K.CKPT_VARIANTS) === '["ckpt-off","ckpt-on"]' && [K.CKPT_VARIANTS, K.CKPT_VOLATILE, K.CKPT_SECRET, K.CKPT_BODY_KINDS, K.CKPT_NORMALISED].every(Object.isFrozen));
+  ok('the switch, its pair and the lists are one spelling, frozen', K.CKPT_SWITCH === 'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING' && JSON.stringify(K.CKPT_VARIANTS) === '["ckpt-off","ckpt-on"]' && verdictOf([K.CKPT_VARIANTS, K.CKPT_VOLATILE, K.CKPT_SECRET, K.CKPT_BODY_KINDS, K.CKPT_NORMALISED].every(Object.isFrozen)));
   // THE CLOSED NORMALISED SET (主开发 r1107): pinned word for word — a name added to it turns this red (it needs 主开发's word)
   ok('the normalised set is CLOSED: exactly the session id and the request id by name, the session masked inside the user id, a cch value masked in the first system block',
     JSON.stringify(K.CKPT_NORMALISED) === JSON.stringify(['header x-claude-code-session-id: by name only (one per process)', 'header x-client-request-id: by name only (one per request)', 'metadata.user_id: the run\'s own session id masked as <session> (the account and the device compared — the device made equal)', 'system[0]: a `cch=<…>` value masked as cch=<masked> (a digest of the request\'s bytes on recent builds, unverified)'])
     && JSON.stringify(K.CKPT_VOLATILE) === '["x-claude-code-session-id","x-client-request-id"]', JSON.stringify(K.CKPT_NORMALISED));
-  ok('the made-up device id both homes carry: 64 hex, made up', /^[0-9a-f]{64}$/.test(K.CKPT_DEVICE) && K.CKPT_DEVICE === 'feedface'.repeat(8));
+  ok('the made-up device id both homes carry: 64 hex, made up', gateOf(/^[0-9a-f]{64}$/.test(K.CKPT_DEVICE)) && K.CKPT_DEVICE === 'feedface'.repeat(8));
   const sh1 = K.systemHeadOf({ type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.322.abc; cc_entrypoint=sdk-cli; cch=9f3a1;' }), sh2 = K.systemHeadOf('You are Claude Code.'), sh3 = K.systemHeadOf({ type: 'text', text: 'y'.repeat(400) });
   ok('the first system block is kept as TEXT (a stop can be read), its cch value masked; a string block too; ≤ 300 characters; none ⇒ null',
     sh1 === 'x-anthropic-billing-header: cc_version=2.1.322.abc; cc_entrypoint=sdk-cli; cch=<masked>;' && sh2 === 'You are Claude Code.' && sh3.length === 300 && K.systemHeadOf(null) === null, JSON.stringify([sh1, sh2]));
@@ -508,4 +508,4 @@ console.log('⑩ the version order: one kept collator (B-360d)');
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed${skip ? `, ${skip} skipped` : ''})` : `ALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

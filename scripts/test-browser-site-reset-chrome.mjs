@@ -36,7 +36,7 @@ const D = require('../src/server/browser-dialogs.js');
 const ST = require('../src/browser-stuck.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -165,48 +165,48 @@ try {
     // ① the loop, named at once
     r = await w.cli(['open', U('/pd/login')]);
     const ev = w.events.find((e) => e.kind === 'loop');
-    ok(r.code === 1 && r.out.startsWith(LOOP_HEAD) && /\[navigation_loop\]/.test(r.err) && r.ms < 5000, `① \`open\` of the looping sign-in page ⇒ [navigation_loop] in ${r.ms} ms (the pre-lane shape: the browser CLI's own 25 s timeout)`, r);
-    ok(/"http:\/\/127\.0\.0\.1:\d+\/pd\/(login|app)" and "http:\/\/127\.0\.0\.1:\d+\/pd\/(login|app)"/.test(r.out) && !/state=|#s/.test(r.out), '① …the sentence names the cycle — both addresses, the query and the fragment dropped (a sign-in `state` changes every hop)', r.out);
-    ok(/site-reset 127\.0\.0\.1/.test(r.out) && /vibespace-browser stop/.test(r.out) && /vibespace-browser tab close/.test(r.out), '① …and the ways out: `site-reset <host>`, `stop`, `tab close`', r.out);
-    ok(ev && ev.loop && ev.loop.hops >= ST.LOOP_MIN_HOPS && ev.loop.urls.length === 2, '① the watch emitted the loop (hops ≥ 6, two addresses) — what the chip and the live view read', ev);
+    ok(r.code === 1 && gateOf(r.out.startsWith(LOOP_HEAD)) && gateOf(/\[navigation_loop\]/.test(r.err)) && r.ms < 5000, `① \`open\` of the looping sign-in page ⇒ [navigation_loop] in ${r.ms} ms (the pre-lane shape: the browser CLI's own 25 s timeout)`, r);
+    ok(gateOf(/"http:\/\/127\.0\.0\.1:\d+\/pd\/(login|app)" and "http:\/\/127\.0\.0\.1:\d+\/pd\/(login|app)"/.test(r.out)) && !/state=|#s/.test(r.out), '① …the sentence names the cycle — both addresses, the query and the fragment dropped (a sign-in `state` changes every hop)', r.out);
+    ok(gateOf(/site-reset 127\.0\.0\.1/.test(r.out)) && gateOf(/vibespace-browser stop/.test(r.out)) && verdictOf(/vibespace-browser tab close/.test(r.out)), '① …and the ways out: `site-reset <host>`, `stop`, `tab close`', r.out);
+    ok(gateOf(ev) && gateOf(ev.loop) && ev.loop.hops >= ST.LOOP_MIN_HOPS && ev.loop.urls.length === 2, '① the watch emitted the loop (hops ≥ 6, two addresses) — what the chip and the live view read', ev);
     // ② the next page-waiting verb repeats it at once; the fact carries it
     r = await w.cli(['snapshot']);
-    ok(r.code === 1 && r.out.startsWith(LOOP_HEAD) && r.ms < 3000, `② \`snapshot\` while it loops ⇒ the loop at once (${r.ms} ms), never "(empty page)" seconds later`, r);
+    ok(r.code === 1 && gateOf(r.out.startsWith(LOOP_HEAD)) && r.ms < 3000, `② \`snapshot\` while it loops ⇒ the loop at once (${r.ms} ms), never "(empty page)" seconds later`, r);
     const fact = w.kk.factFor({ browserKey: w.KEY, sessionId: 'sess-eph', variant: 'D', remote: false, active: null });
-    ok(fact && fact.stuck && fact.stuck.state === 'loop' && fact.stuck.loop && fact.stuck.loop.urls.length === 2, '② the conversation\'s browser fact carries the loop with its cycle (the status-bar chip, the live view\'s banner)', fact && fact.stuck);
+    ok(gateOf(fact) && gateOf(fact.stuck) && fact.stuck.state === 'loop' && gateOf(fact.stuck.loop) && fact.stuck.loop.urls.length === 2, '② the conversation\'s browser fact carries the loop with its cycle (the status-bar chip, the live view\'s banner)', fact && fact.stuck);
     const words = ST.stuckWords(fact && fact.stuck, null);
-    ok(words && words.chip === 'page keeps reloading' && / ↔ /.test(words.line), '② …in words: "page keeps reloading" and the two addresses', words);
+    ok(gateOf(words) && words.chip === 'page keeps reloading' && verdictOf(/ ↔ /.test(words.line)), '② …in words: "page keeps reloading" and the two addresses', words);
     // ③ the ways out never wait for the page (the owner's addendum): a screenshot while it loops, `stop`, a snapshot after it,
     // and — the loop started again — `tab close`
     r = await w.cli(['screenshot', path.join(w.W, 'loop.png')]);
-    ok(r.ms < 5000 && (r.code === 0 ? fs.existsSync(path.join(w.W, 'loop.png')) : /\[no_picture\]/.test(r.err) && /no picture: the page never drew a frame/.test(r.out)), `③ \`screenshot\` of the looping tab answers in ${r.ms} ms (< 5 s) — a picture, or [no_picture] said by name`, r);
-    ok(!r.out.startsWith(LOOP_HEAD) && /\[navigation_loop\]/.test(r.err), '③ …it RAN (a way out, never refused by the loop) and was told the loop beside its result', r);
+    ok(r.ms < 5000 && (r.code === 0 ? verdictOf(fs.existsSync(path.join(w.W, 'loop.png'))) : gateOf(/\[no_picture\]/.test(r.err)) && verdictOf(/no picture: the page never drew a frame/.test(r.out))), `③ \`screenshot\` of the looping tab answers in ${r.ms} ms (< 5 s) — a picture, or [no_picture] said by name`, r);
+    ok(!r.out.startsWith(LOOP_HEAD) && verdictOf(/\[navigation_loop\]/.test(r.err)), '③ …it RAN (a way out, never refused by the loop) and was told the loop beside its result', r);
     r = await w.cli(['stop']);
-    ok(r.code === 0 && r.ms < 2000 && /^stopped the page \(it was in a navigation loop\)/.test(r.out) && /site-reset 127\.0\.0\.1/.test(r.out), `③ \`stop\` answers in ${r.ms} ms (< 2 s) — "stopped the page (it was in a navigation loop)" with the way on`, r);
-    ok(/still finishing the command the loop cut short \(about \d+ s more\)/.test(r.out), '③ …and says the session still finishes the cut `open` (measured: 0.38.1 keeps waiting until its own 25 s timeout — a stop does not shorten it)', r.out);
+    ok(r.code === 0 && r.ms < 2000 && gateOf(/^stopped the page \(it was in a navigation loop\)/.test(r.out)) && verdictOf(/site-reset 127\.0\.0\.1/.test(r.out)), `③ \`stop\` answers in ${r.ms} ms (< 2 s) — "stopped the page (it was in a navigation loop)" with the way on`, r);
+    ok(verdictOf(/still finishing the command the loop cut short \(about \d+ s more\)/.test(r.out)), '③ …and says the session still finishes the cut `open` (measured: 0.38.1 keeps waiting until its own 25 s timeout — a stop does not shorten it)', r.out);
     await sleep(1500);
     r = await w.cli(['snapshot'], { timeoutMs: 40000 });
     ok(r.code === 0 && r.ms < ST.CLI_ACTION_TIMEOUT_MS + 5000 && !r.out.startsWith(LOOP_HEAD), `③ a \`snapshot\` AFTER \`stop\` answers (${r.ms} ms — behind the cut \`open\`'s own wait, never the loop again)`, r);
     const f3 = w.kk.factFor({ browserKey: w.KEY, sessionId: 'sess-eph', variant: 'D', remote: false, active: null });
     ok(!(f3 && f3.stuck && f3.stuck.state === 'loop'), '③ …and the fact no longer says it loops', f3 && f3.stuck);
     r = await w.cli(['open', U('/pd/login')]);
-    ok(r.code === 1 && r.out.startsWith(LOOP_HEAD), '③ opening it again loops again (the stale login is still stored)', r);
+    ok(r.code === 1 && verdictOf(r.out.startsWith(LOOP_HEAD)), '③ opening it again loops again (the stale login is still stored)', r);
     r = await w.cli(['tab', 'close']);
     ok(r.code === 0 && r.ms < 2000, `③ \`tab close\` of the looping tab answers in ${r.ms} ms (< 2 s)`, r);
     r = await w.cli(['tab', 'new', U('/other-after-close')]);
     const r3 = await w.cli(['get', 'title']);
-    ok(r.code === 0 && r3.code === 0 && /Other \/other-after-close/.test(r3.out), '③ …and the browser works on (a new tab answers)', { r, r3 });
+    ok(r.code === 0 && r3.code === 0 && verdictOf(/Other \/other-after-close/.test(r3.out)), '③ …and the browser works on (a new tab answers)', { r, r3 });
     // ④ clear the stale login (the conversation's own browser) — the next `open` settles
     r = await w.cli(['site-reset', 'other.test']);
-    ok(r.code === 1 && /\[host_not_current\]/.test(r.err) && /site-reset --host other\.test/.test(r.err), '④ `site-reset` of a host none of its tabs is on ⇒ host_not_current, the explicit form named (nothing cleared)', r);
+    ok(r.code === 1 && gateOf(/\[host_not_current\]/.test(r.err)) && verdictOf(/site-reset --host other\.test/.test(r.err)), '④ `site-reset` of a host none of its tabs is on ⇒ host_not_current, the explicit form named (nothing cleared)', r);
     r = await w.cli(['site-reset', '127.0.0.1'], { timeoutMs: 40000 });
-    ok(r.code === 0 && /^cleared 127\.0\.0\.1's stored login: 1 cookie \(127\.0\.0\.1: 1\)/.test(r.out) && /http:\/\/127\.0\.0\.1:\d+/.test(r.out) && /HTTP cache is shared by every site and was left/.test(r.out), '④ `site-reset 127.0.0.1` clears the fixture\'s cookie (named, counted) and its origin\'s storage — the HTTP cache said to be left', r);
+    ok(r.code === 0 && gateOf(/^cleared 127\.0\.0\.1's stored login: 1 cookie \(127\.0\.0\.1: 1\)/.test(r.out)) && gateOf(/http:\/\/127\.0\.0\.1:\d+/.test(r.out)) && verdictOf(/HTTP cache is shared by every site and was left/.test(r.out)), '④ `site-reset 127.0.0.1` clears the fixture\'s cookie (named, counted) and its origin\'s storage — the HTTP cache said to be left', r);
     r = await w.cli(['open', U('/pd/login')], { timeoutMs: 40000 });
     const t4 = await w.cli(['get', 'title']);
-    ok(r.code === 0 && !r.out.startsWith(LOOP_HEAD) && /Log In \| Fixture Bank/.test(t4.out), `④ …and the next \`open\` SETTLES on the sign-in form (${r.ms} ms) — the loop is gone with the stale login`, { r, t4 });
+    ok(r.code === 0 && !r.out.startsWith(LOOP_HEAD) && verdictOf(/Log In \| Fixture Bank/.test(t4.out)), `④ …and the next \`open\` SETTLES on the sign-in form (${r.ms} ms) — the loop is gone with the stale login`, { r, t4 });
     r = await w.cli(['open', U('/probe')]);
     const p4 = await w.cli(['get', 'text', '#c']);
-    ok(/cookie=- ls=-/.test(p4.out), '④ the page sees neither the cookie nor the stale token in local storage any more', p4);
+    ok(verdictOf(/cookie=- ls=-/.test(p4.out)), '④ the page sees neither the cookie nor the stale token in local storage any more', p4);
     // ⑫ verify r4 #4 (reproduced here before the fix): a READABLE page that refreshes itself every second (<meta refresh>) — judged
     // a loop (right: it never settles) and then every reading verb was refused with the loop sentence, no content (the page
     // answers in ms between reloads). Now `snapshot` / `get` answer with the loop beside them, the chip says the period, an
@@ -215,19 +215,19 @@ try {
     r = await w.cli(['open', U('/dash?s=1')], { timeoutMs: 40000 });
     ok(r.code === 0, `⑫ \`open\` of the self-refreshing dashboard settles (${r.ms} ms)`, r);
     const judged = await until(() => { const f = w.kk.factFor({ browserKey: w.KEY, sessionId: 'sess-eph', variant: 'D', remote: false, active: null }); return f && f.stuck && f.stuck.state === 'loop' ? f.stuck : null; }, 15000, 200);
-    ok(judged && judged.loop && judged.loop.readable === true && judged.loop.period === 1000, '⑫ after six reloads it is judged a loop — READABLE, period 1 s (every hop loaded: measured)', judged && judged.loop);
+    ok(gateOf(judged) && gateOf(judged.loop) && judged.loop.readable === true && judged.loop.period === 1000, '⑫ after six reloads it is judged a loop — READABLE, period 1 s (every hop loaded: measured)', judged && judged.loop);
     const words12 = ST.stuckWords(judged, null);
-    ok(words12 && words12.chip === 'page refreshes itself every 1 s', '⑫ the chip says "page refreshes itself every 1 s" (before: "page keeps reloading" with a stale-login line)', words12);
+    ok(gateOf(words12) && words12.chip === 'page refreshes itself every 1 s', '⑫ the chip says "page refreshes itself every 1 s" (before: "page keeps reloading" with a stale-login line)', words12);
     r = await w.cli(['snapshot']);
-    ok(r.code === 0 && /Ops dashboard/.test(r.out) && /render \d+/.test(r.out) && /\[navigation_loop\]/.test(r.err) && /reloads itself every 1 s/.test(r.err), `⑫ \`snapshot\` ANSWERS the page (${r.ms} ms) with the loop told beside it (before: refused with the loop sentence, no content)`, r);
+    ok(r.code === 0 && gateOf(/Ops dashboard/.test(r.out)) && gateOf(/render \d+/.test(r.out)) && gateOf(/\[navigation_loop\]/.test(r.err)) && verdictOf(/reloads itself every 1 s/.test(r.err)), `⑫ \`snapshot\` ANSWERS the page (${r.ms} ms) with the loop told beside it (before: refused with the loop sentence, no content)`, r);
     r = await w.cli(['get', 'title']);
-    ok(r.code === 0 && /^Ops dashboard/.test(r.out.trim()) && /\[navigation_loop\]/.test(r.err), `⑫ \`get title\` answers too (${r.ms} ms)`, r);
+    ok(r.code === 0 && gateOf(/^Ops dashboard/.test(r.out.trim())) && verdictOf(/\[navigation_loop\]/.test(r.err)), `⑫ \`get title\` answers too (${r.ms} ms)`, r);
     r = await w.cli(['click', '#h']);
-    ok(r.code === 1 && /reloads itself every 1 s/.test(r.out) && /\[navigation_loop\]/.test(r.err), '⑫ an acting verb is still answered with the fact at once (it would wait for a page that never settles)', r);
+    ok(r.code === 1 && gateOf(/reloads itself every 1 s/.test(r.out)) && verdictOf(/\[navigation_loop\]/.test(r.err)), '⑫ an acting verb is still answered with the fact at once (it would wait for a page that never settles)', r);
     r = await w.cli(['stop']);
-    ok(r.code === 0 && /^stopped the page \(it was in a navigation loop\)/.test(r.out), '⑫ `stop` ends the refresh', r);
+    ok(r.code === 0 && verdictOf(/^stopped the page \(it was in a navigation loop\)/.test(r.out)), '⑫ `stop` ends the refresh', r);
     r = await w.cli(['snapshot']);
-    ok(r.code === 0 && /Ops dashboard/.test(r.out) && !/\[navigation_loop\]/.test(r.err), '⑫ …and the next `snapshot` reads it with no loop note', r);
+    ok(r.code === 0 && gateOf(/Ops dashboard/.test(r.out)) && !/\[navigation_loop\]/.test(r.err), '⑫ …and the next `snapshot` reads it with no loop note', r);
     await w.close();
   }
   // ⑤ A SHARED named profile (two conversations use it): the same verb files ONE proposal; nothing is cleared until the
@@ -238,34 +238,34 @@ try {
     let r = await s2.cli(['open', U('/set-stale')]);
     r = await s2.cli(['open', U('/probe')]);
     const p0 = await s2.cli(['get', 'text', '#c']);
-    ok(/cookie=fx_sess=stale/.test(p0.out), 'setup: the shared profile holds the stale cookie', p0);
+    ok(verdictOf(/cookie=fx_sess=stale/.test(p0.out)), 'setup: the shared profile holds the stale cookie', p0);
     // verify r2 (supersedes r1's row here): on the real 0.38.1 a cooperative session gets a page of its OWN on attach and `tab new`
     // opens more — each appears while that conversation's verb is in flight, so the watch's CREATION WITNESS attributes them
     // (verify r1 had the bare form refused `host_not_current`: nothing of A's was attributable then — its own tab was nobody's)
     r = await s2.cli(['site-reset', 'other.test']);
-    ok(r.code === 1 && /\[host_not_current\]/.test(r.err) && !/could not read your current tab's address/.test(r.err) && /site-reset --host other\.test/.test(r.err), '⑤ verify r2: the bare `site-reset <host>` on the shared browser READS this conversation\'s own tab (witnessed at its creation) — a host it is not on is refused by name, the --host way named', r);
+    ok(r.code === 1 && gateOf(/\[host_not_current\]/.test(r.err)) && !/could not read your current tab's address/.test(r.err) && verdictOf(/site-reset --host other\.test/.test(r.err)), '⑤ verify r2: the bare `site-reset <host>` on the shared browser READS this conversation\'s own tab (witnessed at its creation) — a host it is not on is refused by name, the --host way named', r);
     r = await s2.cli(['site-reset', '127.0.0.1']);
     const pid5 = (/\(proposal (sr-[0-9a-f]{8})\)/.exec(r.out) || [])[1];
-    ok(r.code === 0 && pid5 && /is shared \(2 conversations use it\)/.test(r.out) && /Tell the user in ONE sentence that the card waits/.test(r.out), '⑤ verify r2: …the bare form for the site its own tab is on files ONE proposal (2 conversations named — the shared profile is still the user\'s to clear) and tells the agent to say so and stop', r);
+    ok(r.code === 0 && gateOf(pid5) && gateOf(/is shared \(2 conversations use it\)/.test(r.out)) && verdictOf(/Tell the user in ONE sentence that the card waits/.test(r.out)), '⑤ verify r2: …the bare form for the site its own tab is on files ONE proposal (2 conversations named — the shared profile is still the user\'s to clear) and tells the agent to say so and stop', r);
     const card = s2.cards.find((c) => c.id === pid5);
-    ok(card && card.kind === 'site-reset' && card.state === 'open' && card.holders === 2 && card.profileLabel === 'Bank shared', '⑤ …its card block: kind site-reset, open, the profile\'s name and the holders it will sign out', card);
+    ok(gateOf(card) && card.kind === 'site-reset' && card.state === 'open' && card.holders === 2 && card.profileLabel === 'Bank shared', '⑤ …its card block: kind site-reset, open, the profile\'s name and the holders it will sign out', card);
     const again = await s2.cli(['site-reset', '--host', '127.0.0.1']);
-    ok(again.code === 0 && new RegExp(`the same card still waits for the user \\(proposal ${pid5}`).test(again.out), '⑤ asking again (the --host form) while it stands is the SAME card (no second one)', again);
+    ok(again.code === 0 && verdictOf(new RegExp(`the same card still waits for the user \\(proposal ${pid5}`).test(again.out)), '⑤ asking again (the --host form) while it stands is the SAME card (no second one)', again);
     const p1 = await s2.cli(['get', 'text', '#c']);
     r = await s2.cli(['reload']);
     const p1b = await s2.cli(['get', 'text', '#c']);
-    ok(/cookie=fx_sess=stale/.test(p1b.out), '⑤ nothing was cleared by the ask (the cookie is still there)', { p1, p1b });
+    ok(verdictOf(/cookie=fx_sess=stale/.test(p1b.out)), '⑤ nothing was cleared by the ask (the cookie is still there)', { p1, p1b });
     const wrong = await s2.post(`/api/browser/proposals/${pid5}/approve`, { shown: 'pd-00000000' });
-    ok(wrong.status === 409 && wrong.body && wrong.body.code === 'proposal_changed', '⑤ an Approve naming another card\'s digest runs nothing (409 proposal_changed)', wrong);
+    ok(wrong.status === 409 && gateOf(wrong.body) && wrong.body.code === 'proposal_changed', '⑤ an Approve naming another card\'s digest runs nothing (409 proposal_changed)', wrong);
     const ap = await s2.post(`/api/browser/proposals/${pid5}/approve`, { shown: card.digest });
-    ok(ap.status === 200 && ap.body && ap.body.ok, '⑤ the user\'s Approve (the card\'s own digest) starts the run', ap);
+    ok(ap.status === 200 && gateOf(ap.body) && verdictOf(ap.body.ok), '⑤ the user\'s Approve (the card\'s own digest) starts the run', ap);
     const done = await until(() => { const e = s2.kk.proposalEntry(pid5); return e && ['done', 'failed'].includes(e.proposal.state) ? e : null; }, 15000, 100);
-    ok(done && done.proposal.state === 'done' && done.proposal.outcome.cookies === 1 && done.proposal.outcome.told === 'stashed', '⑤ …it ran exactly the frozen pair: done, 1 cookie cleared, the agent told', done && done.proposal);
+    ok(gateOf(done) && done.proposal.state === 'done' && done.proposal.outcome.cookies === 1 && done.proposal.outcome.told === 'stashed', '⑤ …it ran exactly the frozen pair: done, 1 cookie cleared, the agent told', done && done.proposal);
     r = await s2.cli(['reload']);
     const p2 = await s2.cli(['get', 'text', '#c']);
-    ok(/cookie=- ls=-/.test(p2.out), '⑤ the page sees neither the cookie nor the stale token any more', p2);
-    ok(s2.told.length === 1 && /^Approved: 127\.0\.0\.1's stored login was cleared in the profile "Bank shared" \(1 cookie/.test(s2.told[0].text), '⑤ the agent is told what was cleared (free — the handback\'s ladder site)', s2.told);
-    ok(s2.bcasts.some((m) => m.type === 'browser-site-reset' && m.profileId === s2.prof.id && m.host === '127.0.0.1'), '⑤ the holders\' live views get ONE notice (browser-site-reset for this profile)', s2.bcasts.map((m) => m.type));
+    ok(verdictOf(/cookie=- ls=-/.test(p2.out)), '⑤ the page sees neither the cookie nor the stale token any more', p2);
+    ok(s2.told.length === 1 && verdictOf(/^Approved: 127\.0\.0\.1's stored login was cleared in the profile "Bank shared" \(1 cookie/.test(s2.told[0].text)), '⑤ the agent is told what was cleared (free — the handback\'s ladder site)', s2.told);
+    ok(verdictOf(s2.bcasts.some((m) => m.type === 'browser-site-reset' && m.profileId === s2.prof.id && m.host === '127.0.0.1')), '⑤ the holders\' live views get ONE notice (browser-site-reset for this profile)', s2.bcasts.map((m) => m.type));
     // ⑥ verify r2 (reproduced here before the fix): on the SHARED profile the conversation's own `tab new` of the looping page —
     // its `open` sat the binary's 25 s timeout, `snapshot` answered "(empty page)" with no loop word, `stop` was refused
     // `not_watched`. With the creation witness its own tab is its own: the loop cuts its verb, `stop` / `tab close` land on it,
@@ -277,15 +277,15 @@ try {
     r = await s2.cli(['tab', 'new', U('/pd/login')]);
     ok(r.code === 0 && r.ms < 5000, `⑥ A\'s \`tab new\` of the looping sign-in page answers (${r.ms} ms; 0.38.1 waits for nothing there)`, r);
     r = await s2.cli(['open', U('/pd/login')], { timeoutMs: 40000 });
-    ok(r.code === 1 && r.out.startsWith(LOOP_HEAD) && /\[navigation_loop\]/.test(r.err) && r.ms < 5000, `⑥ A\'s \`open\` in its own tab ⇒ [navigation_loop] in ${r.ms} ms (before: the 25 s timeout — its tab was nobody\'s on the shared browser)`, r);
+    ok(r.code === 1 && gateOf(r.out.startsWith(LOOP_HEAD)) && gateOf(/\[navigation_loop\]/.test(r.err)) && r.ms < 5000, `⑥ A\'s \`open\` in its own tab ⇒ [navigation_loop] in ${r.ms} ms (before: the 25 s timeout — its tab was nobody\'s on the shared browser)`, r);
     r = await s2.cli(['stop']);
-    ok(r.code === 0 && r.ms < 2000 && /^stopped the page \(it was in a navigation loop\)/.test(r.out), `⑥ A\'s \`stop\` lands on its own tab in ${r.ms} ms (before: refused not_watched / unattributed)`, r);
+    ok(r.code === 0 && r.ms < 2000 && verdictOf(/^stopped the page \(it was in a navigation loop\)/.test(r.out)), `⑥ A\'s \`stop\` lands on its own tab in ${r.ms} ms (before: refused not_watched / unattributed)`, r);
     r = await s2.cli(['open', U('/pd/login')], { timeoutMs: 40000 });
-    ok(r.code === 1 && r.out.startsWith(LOOP_HEAD), '⑥ opening it again loops again', r);
+    ok(r.code === 1 && verdictOf(r.out.startsWith(LOOP_HEAD)), '⑥ opening it again loops again', r);
     r = await s2.cli(['tab', 'close']);
-    ok(r.code === 0 && r.ms < 2000 && /^closed the looping tab/.test(r.out), `⑥ A\'s \`tab close\` closes its own looping tab in ${r.ms} ms`, r);
+    ok(r.code === 0 && r.ms < 2000 && verdictOf(/^closed the looping tab/.test(r.out)), `⑥ A\'s \`tab close\` closes its own looping tab in ${r.ms} ms`, r);
     const ub = await s2.cliB(['get', 'url'], { timeoutMs: 40000 });
-    ok(ub.code === 0 && /\/other-b/.test(ub.out), '⑥ conversation B\'s own tab is untouched (its url still answers)', ub);
+    ok(ub.code === 0 && verdictOf(/\/other-b/.test(ub.out)), '⑥ conversation B\'s own tab is untouched (its url still answers)', ub);
     // ⑦ verify r3 #1 (reproduced here before the fix): a STRANGER's page (B's) opens a popup to the looping sign-in page while A's
     // verb is in flight — the r2 witness ("born during my verb") made it A's: A's `open` was cut with B's popup's addresses and
     // A's `stop` stopped B's page. The popup's targetCreated carries B's tab as `openerId` (measured, even under `noopener`):
@@ -301,9 +301,9 @@ try {
     const fB7 = s2.dialogs.factFor({ profileId: s2.prof.id, browserKey: s2.KEY_B, sessionId: 'sess-shared-b', ephemeral: false, consume: false });
     ok(!fA7.loop && !fA7.loopAny && !!fB7.loopAny && fB7.loopAny.urls.length === 2, '⑦ the popup\'s loop is B\'s fact (its opener is B\'s page) and none of A\'s — not even loopAny', { a: fA7.loopAny, b: fB7.loopAny });
     r = await s2.cli(['stop']);
-    ok(r.code === 0 && /^nothing of yours was loading/.test(r.out), '⑦ A\'s \`stop\` stops NOTHING (no page of A\'s loads) — the stranger\'s popup is not A\'s to stop', r);
+    ok(r.code === 0 && verdictOf(/^nothing of yours was loading/.test(r.out)), '⑦ A\'s \`stop\` stops NOTHING (no page of A\'s loads) — the stranger\'s popup is not A\'s to stop', r);
     r = await s2.cliB(['stop']);
-    ok(r.code === 0 && /^stopped the page \(it was in a navigation loop\)/.test(r.out), '⑦ …B\'s own \`stop\` lands on its popup', r);
+    ok(r.code === 0 && verdictOf(/^stopped the page \(it was in a navigation loop\)/.test(r.out)), '⑦ …B\'s own \`stop\` lands on its popup', r);
     // ⑧ verify r3 #2 (reproduced here before the fix): a VibeSpace RESTART mid-loop (the user restarts on every Update) forgot the
     // witness — A's own looping tab was nobody's again: its loop read `loopShared`, its `stop` was refused `unattributed`. The
     // witness is on the lease record now (the registry on disk): the keeper + watch + routes rebuilt from it attribute the tab
@@ -311,15 +311,15 @@ try {
     console.log('— ⑧ verify r3: a VibeSpace restart mid-loop');
     r = await s2.cli(['tab', 'new', U('/pd/login')]);
     const lease8 = s2.kk.list().leases.find((l) => l.browserKey === s2.KEY);
-    ok(r.code === 0 && lease8 && Array.isArray(lease8.tabs) && lease8.tabs.length >= 1, '⑧ A opened the looping sign-in page in a tab of its own — the witness is WRITTEN on its lease record', { code: r.code, tabs: lease8 && lease8.tabs });
+    ok(r.code === 0 && gateOf(lease8) && gateOf(Array.isArray(lease8.tabs)) && lease8.tabs.length >= 1, '⑧ A opened the looping sign-in page in a tab of its own — the witness is WRITTEN on its lease record', { code: r.code, tabs: lease8 && lease8.tabs });
     await sleep(2500);
     const armed8 = await s2.restart();
     await sleep(3000);
     const f8 = s2.dialogs.factFor({ profileId: s2.prof.id, browserKey: s2.KEY, sessionId: 'sess-shared', ephemeral: false, consume: false });
     const w8 = s2.dialogs._watches.get(s2.prof.id); const named8 = new Set([s2.KEY, s2.KEY_B].flatMap((bk) => s2.kk.holderTabs(s2.prof.id, bk)));
-    ok(armed8.ok && f8.watched && !!f8.loop && f8.unattributed === false && f8.loopShared === false, '⑧ after the restart (keeper + watch + routes rebuilt from disk; Chrome kept looping) A\'s looping tab is still A\'s — its own loop fact, never loopShared / unattributed (before: nobody\'s again)', { armed: armed8, loop: !!f8.loop, unattributed: f8.unattributed, loopShared: f8.loopShared, orphans: s2.dialogs.orphansOf(s2.prof.id), loading: f8.loading, targets: w8 ? [...w8.targets.values()].map((e) => ({ tid: e.targetId.slice(0, 8), url: e.url.slice(0, 60), owner: e.owner, named: named8.has(e.targetId), navSince: e.navSince || 0, loop: !!e.loop, open: w8.open.has(e.targetId) })) : null });
+    ok(gateOf(armed8.ok) && gateOf(f8.watched) && !!f8.loop && f8.unattributed === false && f8.loopShared === false, '⑧ after the restart (keeper + watch + routes rebuilt from disk; Chrome kept looping) A\'s looping tab is still A\'s — its own loop fact, never loopShared / unattributed (before: nobody\'s again)', { armed: armed8, loop: !!f8.loop, unattributed: f8.unattributed, loopShared: f8.loopShared, orphans: s2.dialogs.orphansOf(s2.prof.id), loading: f8.loading, targets: w8 ? [...w8.targets.values()].map((e) => ({ tid: e.targetId.slice(0, 8), url: e.url.slice(0, 60), owner: e.owner, named: named8.has(e.targetId), navSince: e.navSince || 0, loop: !!e.loop, open: w8.open.has(e.targetId) })) : null });
     r = await s2.cli(['stop']);
-    ok(r.code === 0 && r.ms < 2000 && /^stopped the page \(it was in a navigation loop\)/.test(r.out), `⑧ A's \`stop\` lands after the restart in ${r.ms} ms (before: refused not_watched / unattributed)`, r);
+    ok(r.code === 0 && r.ms < 2000 && verdictOf(/^stopped the page \(it was in a navigation loop\)/.test(r.out)), `⑧ A's \`stop\` lands after the restart in ${r.ms} ms (before: refused not_watched / unattributed)`, r);
     // ⑨ verify r4 #1 (reproduced here before the fix): B's `tab new` of the looping page WHILE A's slow `open` is in flight — two
     // verbs in flight ⇒ nobody's (the event is judged before B's verb ends: measured 37 ms), and B, holding other witnessed tabs,
     // was told nothing: its `open` there sat the 25 s timeout with no loop word, its `stop` said "nothing of yours". THE ACK
@@ -342,9 +342,9 @@ try {
     const rA9 = await pA9;
     ok(rA9.code === 0 && !rA9.out.startsWith(LOOP_HEAD), `⑨ A's slow \`open\` settles on its own page (${rA9.ms} ms) — never cut by B's loop`, rA9);
     r = await s2.cliB(['stop']);
-    ok(r.code === 0 && r.ms < 2000 && /^stopped the page \(it was in a navigation loop\)/.test(r.out), `⑨ B's \`stop\` lands on its own tab in ${r.ms} ms (before: "nothing of yours was loading")`, r);
+    ok(r.code === 0 && r.ms < 2000 && verdictOf(/^stopped the page \(it was in a navigation loop\)/.test(r.out)), `⑨ B's \`stop\` lands on its own tab in ${r.ms} ms (before: "nothing of yours was loading")`, r);
     r = await s2.cli(['stop']);
-    ok(r.code === 0 && /^nothing of yours was loading/.test(r.out), '⑨ A\'s `stop` stops nothing (B\'s tab is not A\'s)', r);
+    ok(r.code === 0 && verdictOf(/^nothing of yours was loading/.test(r.out)), '⑨ A\'s `stop` stops nothing (B\'s tab is not A\'s)', r);
     // ⑩ verify r4 #2 (reproduced here before the fix): a loop in an ORPHAN tab — the browser's own first tab (`t1`, born before
     // any conversation's command: named to nobody). B switches its session to it and opens the looping page there: the loop is
     // nobody's, so B — holding tabs of its own — heard NOTHING: its `open` sat the 25 s timeout with no loop word, its `stop`
@@ -356,17 +356,17 @@ try {
     // restored first tab does (driven here over CDP — no conversation's command); the rule under test stands: B, holding tabs of
     // its own, hears of it as a KIND when its own verb fails, and its `stop` is refused by name
     r = await s2.cliB(['tab', 't1']);
-    ok(r.code === 1 && /\[not_your_tab\]/.test(r.err), '⑩ B\'s `tab t1` (the browser\'s first tab — nobody\'s: each holder\'s session is in a window of its own) is refused BY NAME — an agent never drives a tab named to nobody', r);
+    ok(r.code === 1 && verdictOf(/\[not_your_tab\]/.test(r.err)), '⑩ B\'s `tab t1` (the browser\'s first tab — nobody\'s: each holder\'s session is in a window of its own) is refused BY NAME — an agent never drives a tab named to nobody', r);
     const w10 = s2.dialogs._watches.get(s2.prof.id);
     const sc10 = [[s2.KEY, 'sess-shared'], [s2.KEY_B, 'sess-shared-b']].map(([bk, sid]) => s2.dialogs.scopeFor({ profileId: s2.prof.id, browserKey: bk, sessionId: sid, ephemeral: false }));
     const orphan10 = w10 ? [...w10.targets.keys()].find((id) => sc10.every((sc) => !(sc instanceof Set && sc.has(id)))) : null;
     const nav10 = orphan10 ? await require('../src/server/browser-viewport.js').navigateTarget(s2.kk._reg().browsers[s2.prof.id].cdpUrl, orphan10, U('/pd/login')) : null;
     let f10 = null; for (let i = 0; i < 40; i++) { f10 = s2.dialogs.factFor({ profileId: s2.prof.id, browserKey: s2.KEY_B, sessionId: 'sess-shared-b', ephemeral: false, consume: false }); if (f10 && f10.loopShared) break; await sleep(200); }
-    ok(!!orphan10 && nav10 && nav10.ok && f10 && f10.loopShared === true && !f10.loopAny, 'setup: the orphan tab (named to no holder) loops — for B a loop on a tab it cannot tell is its, never its own', { orphan10, nav10, loopShared: f10 && f10.loopShared, loopAny: !!(f10 && f10.loopAny) });
+    ok(!!orphan10 && gateOf(nav10) && gateOf(nav10.ok) && gateOf(f10) && f10.loopShared === true && !f10.loopAny, 'setup: the orphan tab (named to no holder) loops — for B a loop on a tab it cannot tell is its, never its own', { orphan10, nav10, loopShared: f10 && f10.loopShared, loopAny: !!(f10 && f10.loopAny) });
     r = await s2.cliB(['open', `http://127.0.0.1:${await freePort()}/refused`], { timeoutMs: 40000 });
-    ok(r.code !== 0 && /\[navigation_loop_shared\]/.test(r.err) && /named to no conversation/.test(r.err) && !/pd\/(login|app)/.test(r.err.replace(/profile:.*\n/, '')), `⑩ B's own verb fails (${r.ms} ms) and B is told that a tab named to no conversation loops — a kind, never the page's address (before r4: the bare failure line)`, r);
+    ok(r.code !== 0 && gateOf(/\[navigation_loop_shared\]/.test(r.err)) && gateOf(/named to no conversation/.test(r.err)) && !/pd\/(login|app)/.test(r.err.replace(/profile:.*\n/, '')), `⑩ B's own verb fails (${r.ms} ms) and B is told that a tab named to no conversation loops — a kind, never the page's address (before r4: the bare failure line)`, r);
     r = await s2.cliB(['stop']);
-    ok(r.code === 1 && /\[not_watched\]/.test(r.err) && /named to no conversation/.test(r.err), '⑩ B\'s `stop` is refused BY NAME with the way out (before: "nothing of yours was loading")', r);
+    ok(r.code === 1 && gateOf(/\[not_watched\]/.test(r.err)) && verdictOf(/named to no conversation/.test(r.err)), '⑩ B\'s `stop` is refused BY NAME with the way out (before: "nothing of yours was loading")', r);
     if (orphan10) { try { await require('../src/server/browser-viewport.js').closeTarget(s2.kk._reg().browsers[s2.prof.id].cdpUrl, orphan10); } catch { } }
     // ⑪ verify r4 #3 (reproduced here before the fix): the browser HEALED (its Chrome killed; the keeper relaunches it in the same
     // daemon on the next command — new target ids): the dead ids stayed on every lease's `tabs` (no lease event on a relaunch,
@@ -376,7 +376,7 @@ try {
     r = await s2.cli(['tab', 'new', U('/a-eleven')], { timeoutMs: 40000 });
     const lease11 = s2.kk.list().leases.find((l) => l.browserKey === s2.KEY);
     const pid11 = (s2.kk.list().browsers[s2.prof.id] || {}).browser?.pid;
-    ok(r.code === 0 && lease11 && Array.isArray(lease11.tabs) && lease11.tabs.length >= 1 && Number.isInteger(pid11), 'setup: A holds witnessed tabs on its lease; the keeper knows its Chrome\'s pid', { tabs: lease11 && lease11.tabs, pid11 });
+    ok(r.code === 0 && gateOf(lease11) && gateOf(Array.isArray(lease11.tabs)) && lease11.tabs.length >= 1 && verdictOf(Number.isInteger(pid11)), 'setup: A holds witnessed tabs on its lease; the keeper knows its Chrome\'s pid', { tabs: lease11 && lease11.tabs, pid11 });
     try { process.kill(pid11, 'SIGKILL'); } catch { }
     await sleep(1500);
     // the keeper's OWN join heals the record (a verb's start path) — no watch arms here, so what the leases hold right after is the
@@ -384,7 +384,7 @@ try {
     let healed11 = null; try { healed11 = await s2.kk.start(s2.prof.id, { why: 'verify r4 Q7', browserKey: s2.KEY }); } catch (e) { healed11 = { error: String(e && e.message) }; }
     const lease11h = s2.kk.list().leases.find((l) => l.browserKey === s2.KEY);
     const pid11h = (s2.kk.list().browsers[s2.prof.id] || {}).browser?.pid;
-    ok(Number.isInteger(pid11h) && pid11h !== pid11 && !(lease11h && Array.isArray(lease11h.tabs) && lease11h.tabs.length) && ![...s2.dialogs._watches.values()].some((w) => w.state === 'open'), `⑪ the keeper's replacement-time drop alone (healed in its own join, pid ${pid11} → ${pid11h}; no watch connected yet): A's lease holds no dead id`, { pid11, pid11h, tabs: lease11h && lease11h.tabs, healed: healed11 && (healed11.error || healed11.state || 'ok') });
+    ok(gateOf(Number.isInteger(pid11h)) && pid11h !== pid11 && !(lease11h && Array.isArray(lease11h.tabs) && lease11h.tabs.length) && ![...s2.dialogs._watches.values()].some((w) => w.state === 'open'), `⑪ the keeper's replacement-time drop alone (healed in its own join, pid ${pid11} → ${pid11h}; no watch connected yet): A's lease holds no dead id`, { pid11, pid11h, tabs: lease11h && lease11h.tabs, healed: healed11 && (healed11.error || healed11.state || 'ok') });
     r = await s2.cli(['get', 'url'], { timeoutMs: 40000 });
     const pid11b = (s2.kk.list().browsers[s2.prof.id] || {}).browser?.pid;
     const lease11b = s2.kk.list().leases.find((l) => l.browserKey === s2.KEY);
@@ -392,27 +392,27 @@ try {
     // ([tab_rebound]) instead of the binary's tab_gone; either way no DEAD id survives on A's lease (the rebound tab is new)
     const idOf11 = (t) => (typeof t === 'string' ? t : t && (t.id || t.targetId));
     const dead11 = new Set(((lease11 && lease11.tabs) || []).map(idOf11));
-    ok(Number.isInteger(pid11b) && pid11b !== pid11 && (/tab_gone/.test(r.out + r.err) || /\[tab_rebound\]/.test(r.out + r.err)) && !(lease11b && Array.isArray(lease11b.tabs) && lease11b.tabs.some((t) => dead11.has(idOf11(t)))), `⑪ the keeper healed the browser (pid ${pid11} → ${pid11b}; the binary's own tab_gone names \`tab new\`, or profile-lock-roll's [tab_rebound]) and the dead ids are GONE from A's lease (before: kept — a ghost-only scope)`, { pid11, pid11b, tabs: lease11b && lease11b.tabs, r: r.code });
+    ok(gateOf(Number.isInteger(pid11b)) && pid11b !== pid11 && (gateOf(/tab_gone/.test(r.out + r.err)) || gateOf(/\[tab_rebound\]/.test(r.out + r.err))) && !(lease11b && Array.isArray(lease11b.tabs) && lease11b.tabs.some((t) => dead11.has(idOf11(t)))), `⑪ the keeper healed the browser (pid ${pid11} → ${pid11b}; the binary's own tab_gone names \`tab new\`, or profile-lock-roll's [tab_rebound]) and the dead ids are GONE from A's lease (before: kept — a ghost-only scope)`, { pid11, pid11b, tabs: lease11b && lease11b.tabs, r: r.code });
     r = await s2.cli(['tab', 'new', U('/pd/login')], { timeoutMs: 40000 });
     await sleep(3000);
     const f11 = s2.dialogs.factFor({ profileId: s2.prof.id, browserKey: s2.KEY, sessionId: 'sess-shared', ephemeral: false, consume: false });
     ok(r.code === 0 && !!f11.loop && f11.unattributed === false, '⑪ A\'s next `tab new` on the healed browser is its own (bound by its ack): the loop there is A\'s own fact', { code: r.code, loop: !!f11.loop, un: f11.unattributed });
     r = await s2.cli(['stop']);
-    ok(r.code === 0 && /^stopped the page \(it was in a navigation loop\)/.test(r.out), '⑪ …and A\'s `stop` lands on it', r);
+    ok(r.code === 0 && verdictOf(/^stopped the page \(it was in a navigation loop\)/.test(r.out)), '⑪ …and A\'s `stop` lands on it', r);
     await s2.close();
   }
   // CONTROL: the pre-lane watch (it judges no loop) — the same `open` sits out the browser CLI's own 25 s timeout
   console.log('— CONTROL: a watch that judges no loop (the pre-lane shape)');
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const nd = 'const v = ST.navigationLoopVerdict(e.hops, { now: t, commands: w.commands, quietMs });';
-  if (!ok(dsrc.includes(nd), 'control setup: the loop judgement is found in src/server/browser-dialogs.js')) { /* the leg below needs it */ }
+  if (!ok(verdictOf(dsrc.includes(nd)), 'control setup: the loop judgement is found in src/server/browser-dialogs.js')) { /* the leg below needs it */ }
   else {
     const Dm = MUT.load('src/server/browser-dialogs.js', editAnchor(dsrc, nd, 'const v = null;', "src/server/browser-dialogs.js"), 'no-loop');
     let c = null; try { c = await world('ctl', { Dmod: Dm }); } catch (e) { skip(`control: the keeper could not start a browser: ${e && e.message}`); }
     if (c) {
       await c.cli(['open', U('/set-stale')]);
       const r = await c.cli(['open', U('/pd/login')], { timeoutMs: 60000 });
-      ok(r.code !== 0 && r.ms >= 20000 && /Operation timed out/.test(r.out + r.err) && !/navigation_loop/.test(r.out + r.err), `CONTROL: without the judgement the \`open\` sits out the browser CLI's own timeout (${r.ms} ms, "Operation timed out") — userW's every-verb-times-out; the ① leg reddens on it`, { code: r.code, ms: r.ms, out: r.out.slice(0, 300), err: r.err.slice(0, 300) });
+      ok(r.code !== 0 && r.ms >= 20000 && gateOf(/Operation timed out/.test(r.out + r.err)) && !/navigation_loop/.test(r.out + r.err), `CONTROL: without the judgement the \`open\` sits out the browser CLI's own timeout (${r.ms} ms, "Operation timed out") — userW's every-verb-times-out; the ① leg reddens on it`, { code: r.code, ms: r.ms, out: r.out.slice(0, 300), err: r.err.slice(0, 300) });
       await c.close();
     }
   }
@@ -420,4 +420,4 @@ try {
 if (fail) { console.log(`\nFAILED (${pass} passed, ${fail} failed, ${skipped} skipped)`); process.exit(1); }
 if (skipped) { console.error(`\nSKIPPED (${skipped} skipped, ${pass} passed — a skip is never green)`); process.exit(2); }
 console.log(`\nALL PASS (${pass})`);
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

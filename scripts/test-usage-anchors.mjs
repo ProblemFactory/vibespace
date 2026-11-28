@@ -5,7 +5,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { UsageAnchors, identityKeyFor, costBetween } = require('../src/usage-anchors.js');
-let pass=0,fail=0; const ck=(n,c)=>{if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n)}};
+let pass=0,fail=0; const ck=(n,c)=>{ if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n)}};
 
 ck('identity: orgUuid wins', identityKeyFor({accountId:'sub-1', cache:{orgUuid:'ABC'}, email:'x@y.z'})==='org:abc');
 ck('identity: email fallback (lowercased)', identityKeyFor({accountId:'sub-1', cache:{}, email:'Me@Ex.COM'})==='email:me@ex.com');

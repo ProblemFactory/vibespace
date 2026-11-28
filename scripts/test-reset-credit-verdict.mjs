@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const MOD = path.join(REPO, 'src/reset-credit.js');
 const RC = require(MOD);
 
@@ -74,9 +74,9 @@ const runTable = (mod) => TABLE.map(([name, f, want]) => {
 });
 
 console.log('\n§1–§4 the verdict tables (both vendors, both warmths, every precondition)');
-for (const r of runTable(RC)) ok(r.name, r.good, `got ${r.got}, want ${r.want}`);
-ok('every reason the table produced is in the closed REASONS set', TABLE.every(([, f]) => RC.REASONS.includes(RC.resetCreditVerdict(f).reason)));
-ok('every refusal names a reason and has words for it', RC.REASONS.every((r) => typeof RC.reasonText(r) === 'string' && RC.reasonText(r) !== r));
+for (const r of runTable(RC)) ok(r.name, verdictOf(r.good), `got ${r.got}, want ${r.want}`);
+ok('every reason the table produced is in the closed REASONS set', verdictOf(TABLE.every(([, f]) => RC.REASONS.includes(RC.resetCreditVerdict(f).reason))));
+ok('every refusal names a reason and has words for it', verdictOf(RC.REASONS.every((r) => typeof RC.reasonText(r) === 'string' && RC.reasonText(r) !== r)));
 ok('CREDIT_FLOOR is the documented tenth of a window', RC.CREDIT_FLOOR === 0.1);
 
 console.log('\n§2/§3 the numbers the verdict reports');
@@ -100,16 +100,16 @@ console.log('\n§5 the sentences, the offer, the pace');
     o.text === 'Starts a new 5h window now, running until T18000. Without it the limit resets at T7200. Saves a wait of 2h. 2 reset credits left after this one.', o.text);
   ok('…as i18n lines (key + params) the client words with t()', o.lines.length === 4 && o.lines[0].key === 'Starts a new {period} window now, running until {until}.' && o.lines[0].params.until === 'T18000');
   const o1 = RC.describeUse('openai', v, { nowSec: NOW, resetsAtSec: NOW + 2 * H, periodSec: 5 * H, creditsLeft: 2, fmtTime: fmt });
-  ok('…one credit left after this one is singular', /1 reset credit left after this one\.$/.test(o1.text), o1.text);
+  ok('…one credit left after this one is singular', verdictOf(/1 reset credit left after this one\.$/.test(o1.text)), o1.text);
   const va = RC.resetCreditVerdict(base({ vendor: 'anthropic', weekQuota: 1, burnRate: 1 / D }));
   const a = RC.describeUse('anthropic', va, { nowSec: NOW, resetsAtSec: NOW + 3 * D, creditsLeft: 1, fmtTime: fmt });
   ok('anthropic: refills until R, the period unchanged; the LAST credit says so',
     a.text === 'Refills the limit now; it still resets at T259200 (the period does not change). Saves a wait of 3d. This is the last stored reset credit.', a.text);
   ok('…an unknown count says nothing about credits', !/credit/.test(RC.describeUse('anthropic', va, { nowSec: NOW, resetsAtSec: NOW + 3 * D, creditsLeft: null, fmtTime: fmt }).text));
-  ok('the default time format is an ISO minute in UTC', /^Starts a new 7d window now, running until \d{4}-\d\d-\d\d \d\d:\d\d UTC\./.test(RC.describeUse('openai', RC.resetCreditVerdict(base()), { nowSec: NOW, resetsAtSec: NOW + 3 * D, periodSec: WEEK }).text));
+  ok('the default time format is an ISO minute in UTC', verdictOf(/^Starts a new 7d window now, running until \d{4}-\d\d-\d\d \d\d:\d\d UTC\./.test(RC.describeUse('openai', RC.resetCreditVerdict(base()), { nowSec: NOW, resetsAtSec: NOW + 3 * D, periodSec: WEEK }).text)));
   ok('fmtWait', RC.fmtWait(30) === '<1m' && RC.fmtWait(12 * 60) === '12m' && RC.fmtWait(2 * H + 5 * 60) === '2h 5m' && RC.fmtWait(3 * D + 4 * H) === '3d 4h' && RC.fmtWait(WEEK) === '7d');
   ok('offerOf accepts {available>0 integer, known mode}', JSON.stringify(RC.offerOf({ available: 2, mode: 'ask', junk: '<b>' })) === '{"available":2,"mode":"ask"}');
-  ok('offerOf refuses zero / fractional / unknown mode / non-objects', [{ available: 0, mode: 'off' }, { available: 1.5, mode: 'off' }, { available: 1, mode: 'always' }, null, 'x'].every((x) => RC.offerOf(x) === null));
+  ok('offerOf refuses zero / fractional / unknown mode / non-objects', verdictOf([{ available: 0, mode: 'off' }, { available: 1.5, mode: 'off' }, { available: 1, mode: 'always' }, null, 'x'].every((x) => RC.offerOf(x) === null)));
   // pace: half the window spent in its first 3.5 days ⇒ at 3.5 days left the refill is worth exactly half
   const rate = RC.windowPaceRate({ usedFraction: 0.5, resetsAtSec: NOW + 3.5 * D, periodSec: WEEK, nowSec: NOW });
   ok('windowPaceRate = used / time since the window opened', Math.abs(rate - 0.5 / (3.5 * D)) < 1e-12, String(rate));
@@ -144,7 +144,7 @@ console.log('\n§6 NEGATIVE CONTROLS — patched copies of the module');
     const p = patched(what.replace(/\W+/g, '-'), from, to, what);
     if (!p.hit) continue;
     const red = runTable(p.mod).filter((r) => !r.good).map((r) => r.name);
-    ok(`NEGATIVE CONTROL (${what}): the table goes red on "${row}"`, red.includes(row), red.join(' | ') || 'all green');
+    ok(`NEGATIVE CONTROL (${what}): the table goes red on "${row}"`, verdictOf(red.includes(row)), red.join(' | ') || 'all green');
   }
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -153,38 +153,38 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
 {
   const strip = (f) => fs.readFileSync(path.join(REPO, f), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).filter((l) => !/^\s*\*/.test(l)).join('\n');
   const eng = strip('src/server/usage-pool-engine.js');
-  ok('the engine requires the PURE verdict', /const resetCredit = require\('\.\.\/reset-credit\.js'\);/.test(eng));
+  ok('the engine requires the PURE verdict', verdictOf(/const resetCredit = require\('\.\.\/reset-credit\.js'\);/.test(eng)));
   ok('the rung CALLS resetCreditVerdict with the warmth facts (inTurn + warm) and the pool alternative',
-    /const warmth = conversationWarmth\(session, now\);/.test(eng) && /const poolAlternative = poolAlternativeFor\(session, now\);/.test(eng)
-    && /resetCredit\.resetCreditVerdict\(\{[\s\S]{0,400}inTurn: warmth\.inTurn, warm: warmth\.warm, poolAlternative, ladderPosition: ladderPosition === 'after-switch' \? 'after-switch' : 'wall',/.test(eng));
-  ok('…the vendor comes from the harness quota source, never a harness id', /const vendor = quotaSourceFor\(session\.backend\)\.resetCreditVendor \|\| null;/.test(eng));
+    gateOf(/const warmth = conversationWarmth\(session, now\);/.test(eng)) && gateOf(/const poolAlternative = poolAlternativeFor\(session, now\);/.test(eng))
+    && verdictOf(/resetCredit\.resetCreditVerdict\(\{[\s\S]{0,400}inTurn: warmth\.inTurn, warm: warmth\.warm, poolAlternative, ladderPosition: ladderPosition === 'after-switch' \? 'after-switch' : 'wall',/.test(eng)));
+  ok('…the vendor comes from the harness quota source, never a harness id', verdictOf(/const vendor = quotaSourceFor\(session\.backend\)\.resetCreditVendor \|\| null;/.test(eng)));
   ok('…the mode is read through the SESSION\'s harness and gated on capsOf(…).resetCredit',
-    /capsOf\(session\.backend\)\.resetCredit !== true\) return null;[\s\S]{0,200}harnessSetting\(session\.backend, 'limitResetCredit'\)/.test(eng));
+    verdictOf(/capsOf\(session\.backend\)\.resetCredit !== true\) return null;[\s\S]{0,200}harnessSetting\(session\.backend, 'limitResetCredit'\)/.test(eng)));
   // r2: …and a cold conversation's switch that moved NOTHING asks the rung again
   // at the verdict's `after-switch` position (the 2.355.0 unwired class: the
   // PURE verdict accepted it, no call site passed it)
   const SITE = (args) => new RegExp(`const rcArgs = \\{ resetsAtSec: ${args},[^\\n]*\\n\\s*const rung = resetCreditRung\\(session, rcArgs\\);\\s*\\n\\s*if \\(rung === 'consumed'\\) return;\\s*\\n\\s*const poolBefore = poolDefaultOf\\(session\\);\\s*\\n\\s*maybePoolAutoSwitch\\(session\\);\\s*\\n\\s*if \\(rung === 'switch-first' && poolDefaultOf\\(session\\) === poolBefore && resetCreditRung\\(session, \\{ \\.\\.\\.rcArgs, ladderPosition: 'after-switch' \\}\\) === 'consumed'\\) return;`);
   ok('BOTH exhaustion sites run the rung BEFORE the switch rung, only a consumed credit stops the ladder, and a switch that moved nothing re-asks at after-switch',
-    SITE('tripped\\?\\.resetsAt').test(eng) && SITE('resets').test(eng), 'site shape changed');
+    gateOf(SITE('tripped\\?\\.resetsAt').test(eng)) && verdictOf(SITE('resets').test(eng)), 'site shape changed');
   ok('…NEGATIVE CONTROL: the pre-r2 site (no after-switch re-ask) does not satisfy the pin', !SITE('resets').test("        if (resetCreditRung(session, { resetsAtSec: resets, lane: x }) === 'consumed') return;\n        maybePoolAutoSwitch(session);\n"));
   ok('the old opt-in closure is gone (one rung, one verdict)', !/tryResetCredit/.test(eng));
   // lane reset-path: the CHARGE moved from the write to the SEND — the authorizer's hold rides the
   // attempt record (openResetCreditTry) and is converted by noteResetCreditSent, given back when it never went out
   // (the reset-credit hotfix's follow, bl-windows r2973: the open's answer is asked first — a save that did not land sends nothing)
   ok('AUTO consumes through the spend ceiling, and charges the slot it authorized — when the request WENT OUT',
-    /spendGuard\.authorize\(\{ reason: 'codex-reset-credit'[^\n]*identity: key \? \{ key, name: nameOf\(key\) \|\| key \} : null \}\)[\s\S]{0,3000}if \(key && !openResetCreditTry\(\{[^\n]*\bav\b[^\n]*\}\)\) \{[\s\S]{0,700}?\n    return r;\n  \}\n[\s\S]{0,700}?session\.pty\.write\(JSON\.stringify\(\{ type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/.test(eng)
-    && /function noteResetCreditSent\(t, now = Date\.now\(\), \{ proof = 'record' \} = \{\}\) \{[\s\S]{0,1100}spendGuard\.note\(\{ reason: 'codex-reset-credit', session: [^\n]*identity: t\.identity, hold: t\.hold \}\)/.test(eng) // (verify r10: the guessed-send rule sits between the head and the charge)
-    && /identity: \(av && av\.identity\) \|\| null/.test(eng) && /spendGuard\.release\(\{ hold: t\.hold \}\)/.test(eng));
+    gateOf(/spendGuard\.authorize\(\{ reason: 'codex-reset-credit'[^\n]*identity: key \? \{ key, name: nameOf\(key\) \|\| key \} : null \}\)[\s\S]{0,3000}if \(key && !openResetCreditTry\(\{[^\n]*\bav\b[^\n]*\}\)\) \{[\s\S]{0,700}?\n    return r;\n  \}\n[\s\S]{0,700}?session\.pty\.write\(JSON\.stringify\(\{ type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/.test(eng))
+    && gateOf(/function noteResetCreditSent\(t, now = Date\.now\(\), \{ proof = 'record' \} = \{\}\) \{[\s\S]{0,1100}spendGuard\.note\(\{ reason: 'codex-reset-credit', session: [^\n]*identity: t\.identity, hold: t\.hold \}\)/.test(eng)) // (verify r10: the guessed-send rule sits between the head and the charge)
+    && gateOf(/identity: \(av && av\.identity\) \|\| null/.test(eng)) && verdictOf(/spendGuard\.release\(\{ hold: t\.hold \}\)/.test(eng)));
   ok('ASK files ONE For-you action item with an i18n structure and a reset-credit action payload',
-    /if \(mode === 'ask'\) \{[\s\S]{0,300}if \(session\._resetCreditAsked === eventKey\) return 'skipped';\s*\n\s*session\._resetCreditAsked = eventKey;[\s\S]{0,900}todos\.add\(sessionKey, \{[\s\S]{0,600}kind: 'action'[\s\S]{0,300}i18n: \{ text: \{ key: i18nKey\('Use a stored reset credit on \{account\}\?'\)[\s\S]{0,200}action: \{ type: 'reset-credit', sessionId: session\._webuiId/.test(eng));
-  ok('the pool alternative never counts a pay-per-use (usage credits) member, nor a member billing paid overage (B-87fd (1), 主开发 r4903)', /return !!\(d && d\.to && !d\.toCredits && !d\.toPaying\);/.test(eng));
+    verdictOf(/if \(mode === 'ask'\) \{[\s\S]{0,300}if \(session\._resetCreditAsked === eventKey\) return 'skipped';\s*\n\s*session\._resetCreditAsked = eventKey;[\s\S]{0,900}todos\.add\(sessionKey, \{[\s\S]{0,600}kind: 'action'[\s\S]{0,300}i18n: \{ text: \{ key: i18nKey\('Use a stored reset credit on \{account\}\?'\)[\s\S]{0,200}action: \{ type: 'reset-credit', sessionId: session\._webuiId/.test(eng)));
+  ok('the pool alternative never counts a pay-per-use (usage credits) member, nor a member billing paid overage (B-87fd (1), 主开发 r4903)', verdictOf(/return !!\(d && d\.to && !d\.toCredits && !d\.toPaying\);/.test(eng)));
   ok('the pool DEFAULT keeps the proactive warm hold but computes NO inTurn (the soft hold is dropped, §8 ③)',
-    /const w = warmCache\(\{ \.\.\.cacheFactsOf\(s, now\), nowMs: now \}\);\s*\n\s*if \(!w\.warm\) continue;/.test(eng) // lane cache-warmth-tiles: the facts' ONE producer
+    gateOf(/const w = warmCache\(\{ \.\.\.cacheFactsOf\(s, now\), nowMs: now \}\);\s*\n\s*if \(!w\.warm\) continue;/.test(eng)) // lane cache-warmth-tiles: the facts' ONE producer
     && !/inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng)
-    && !/':default:soft'/.test(eng) && /':default'\); return; \}/.test(eng));
+    && !/':default:soft'/.test(eng) && verdictOf(/':default'\); return; \}/.test(eng)));
   for (const f of ['src/message-manager.js', 'src/codex-message-manager.js']) {
     const m = strip(f);
-    ok(`${f}: injectPeerCard carries a sanitized resetCredit offer (offerOf)`, /injectPeerCard\(\{[^}]*resetCredit = null(?:, kind = null)?(?:, group = null)?(?:, exitRun = null)?(?:, channel = null)?(?:, belongsTo = null)? \}\)/.test(m) && /const rc = offerOf\(resetCredit\);\s*\n\s*if \(rc\) \{ msg\.resetCredit = rc;/.test(m));
+    ok(`${f}: injectPeerCard carries a sanitized resetCredit offer (offerOf)`, gateOf(/injectPeerCard\(\{[^}]*resetCredit = null(?:, kind = null)?(?:, group = null)?(?:, exitRun = null)?(?:, channel = null)?(?:, belongsTo = null)? \}\)/.test(m)) && verdictOf(/const rc = offerOf\(resetCredit\);\s*\n\s*if \(rc\) \{ msg\.resetCredit = rc;/.test(m)));
   }
   const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
   for (const be of ['claude', 'codex']) {
@@ -199,7 +199,7 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
   const { UserTodoManager, normalizeAction } = require(path.join(REPO, 'src/user-todos.js'));
   ok('normalizeAction keeps {type, flat facts}', JSON.stringify(normalizeAction({ type: 'reset-credit', sessionId: 'cx1', creditsLeft: 3, resetsAtSec: null })) === '{"type":"reset-credit","sessionId":"cx1","creditsLeft":3,"resetsAtSec":null}');
   const refuses = (x) => { try { normalizeAction(x); return false; } catch { return true; } };
-  ok('…refuses a nested object, a non-kebab type, a non-finite number, an array', refuses({ type: 'reset-credit', nested: { a: 1 } }) && refuses({ type: 'Reset Credit' }) && refuses({ type: 'x', n: Infinity }) && refuses([]));
+  ok('…refuses a nested object, a non-kebab type, a non-finite number, an array', gateOf(refuses({ type: 'reset-credit', nested: { a: 1 } })) && gateOf(refuses({ type: 'Reset Credit' })) && gateOf(refuses({ type: 'x', n: Infinity })) && verdictOf(refuses([])));
   {
     const tdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rcverdict-todos-'));
     const um = new UserTodoManager({ dataDir: tdir, expirySweepMs: 0 });
@@ -209,14 +209,14 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
     um.stop(); um.flush(); fs.rmSync(tdir, { recursive: true, force: true });
   }
   const ar = strip('src/server/auto-resume.js');
-  ok('auto-resume: the ARM card asks resetCreditOffer and hands the offer to notify', /offer = resetCreditOffer \? resetCreditOffer\(id, s2\) : null;[\s\S]{0,200}notify\(id, s2, armNoticeFor\(reason, resets, Date\.now\(\), a\.cause\), offer \? \{ resetCredit: offer \} : undefined\)/.test(ar));
+  ok('auto-resume: the ARM card asks resetCreditOffer and hands the offer to notify', verdictOf(/offer = resetCreditOffer \? resetCreditOffer\(id, s2\) : null;[\s\S]{0,200}notify\(id, s2, armNoticeFor\(reason, resets, Date\.now\(\), a\.cause\), offer \? \{ resetCredit: offer \} : undefined\)/.test(ar)));
   const srv = strip('server.js');
   ok('server.js: notify passes extra.resetCredit to the peer card, and resetCreditOffer is the engine\'s',
-    /notify: \(id, s, text, extra\) => \{ try \{ feedPeerCard\(s, \{ fromName: 'VibeSpace', (?:kind: 'notification', )?text, \.\.\.\(extra && extra\.resetCredit \? \{ resetCredit: extra\.resetCredit \} : \{\}\) \}\); \} catch \{ \} \}, resetCreditOffer: \(id, s\) => \{ try \{ return resetCreditOffer\(s\); \}/.test(srv)
-    && /usageCacheKeyFor, resetCreditOffer,/.test(srv));
+    gateOf(/notify: \(id, s, text, extra\) => \{ try \{ feedPeerCard\(s, \{ fromName: 'VibeSpace', (?:kind: 'notification', )?text, \.\.\.\(extra && extra\.resetCredit \? \{ resetCredit: extra\.resetCredit \} : \{\}\) \}\); \} catch \{ \} \}, resetCreditOffer: \(id, s\) => \{ try \{ return resetCreditOffer\(s\); \}/.test(srv))
+    && verdictOf(/usageCacheKeyFor, resetCreditOffer,/.test(srv)));
   const cq = require(path.join(REPO, 'src/harnesses/codex-quota.js'));
   const clq = require(path.join(REPO, 'src/harnesses/claude-quota.js'));
-  ok('the harness quota sources declare the credit semantics (codex re-opens = openai; claude refills = anthropic)', cq.resetCreditVendor === 'openai' && clq.resetCreditVendor === 'anthropic' && RC.VENDORS.includes(cq.resetCreditVendor));
+  ok('the harness quota sources declare the credit semantics (codex re-opens = openai; claude refills = anthropic)', cq.resetCreditVendor === 'openai' && clq.resetCreditVendor === 'anthropic' && verdictOf(RC.VENDORS.includes(cq.resetCreditVendor)));
   const { capsOf } = require(path.join(REPO, 'src/backend-caps.js'));
   ok('…while only codex has the capability to spend one (claude: interactive /limit-reset only)', capsOf('codex').resetCredit === true && capsOf('claude').resetCredit === false);
 }
@@ -328,9 +328,9 @@ const ATTEMPT_TABLE = (M) => {
 };
 {
   const rows = ATTEMPT_TABLE(RC);
-  for (const r of rows) ok(r.name, r.good);
+  for (const r of rows) ok(r.name, verdictOf(r.good));
   ok('the ack window fits inside a spend hold (3 min) and outlasts the 2.369.199 wrapper\'s worst answer (30 + 30 + 20 s)', RC.RESET_CREDIT_ACK_MS >= 80e3 && RC.RESET_CREDIT_ACK_MS < 3 * 60e3 && RC.RESET_CREDIT_FLOOR_MS === 10 * 60e3);
-  ok('the refusal set names `in_flight` with its own words', RC.REFUSAL_CODES.includes('in_flight') && RC.refusalLine('in_flight').key !== RC.refusalLine('zzz').key);
+  ok('the refusal set names `in_flight` with its own words', gateOf(RC.REFUSAL_CODES.includes('in_flight')) && RC.refusalLine('in_flight').key !== RC.refusalLine('zzz').key);
   // NEGATIVE CONTROLS: the pre-fix rule (armed at the WRITE, whatever happened), a classifier that reads the
   // stale refusal as an answered error, a rung without the one-try-per-event bound
   const src = fs.readFileSync(MOD, 'utf8');
@@ -374,14 +374,14 @@ const ATTEMPT_TABLE = (M) => {
     const m = patched(what.replace(/\W+/g, '-'), from, to, what);
     if (!m) continue;
     const red = ATTEMPT_TABLE(m).filter((r) => !r.good).map((r) => r.name);
-    ok(`§8 NEGATIVE CONTROL (${what}): the table goes red on "${rowName}"`, red.includes(rowName), red.join(' | ') || 'all green');
+    ok(`§8 NEGATIVE CONTROL (${what}): the table goes red on "${rowName}"`, verdictOf(red.includes(rowName)), red.join(' | ') || 'all green');
   }
   fs.rmSync(dir, { recursive: true, force: true });
   // WIRING: the engine reads the PURE rule — the preview, the rung, the answer
   const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
   ok('§8 WIRING: the preview\'s floor is the PURE attemptBlock (in_flight / cooldown), the rung\'s is rungBlockUntil, the answer is creditAnswerOf',
-    /function resetCreditBlock\(key, now = Date\.now\(\)\) \{ return resetCredit\.attemptBlock\(resetCreditTryFor\(key\)/.test(eng) && /const block = resetCreditBlock\(key, now\);/.test(eng)
-    && /if \(block\.code === 'in_flight'\) return \{ \.\.\.out, code: 'in_flight'/.test(eng) && /const blockUntil = resetCredit\.rungBlockUntil\(t, /.test(eng) && /const ans = resetCredit\.creditAnswerOf\(payload\);/.test(eng)
+    gateOf(/function resetCreditBlock\(key, now = Date\.now\(\)\) \{ return resetCredit\.attemptBlock\(resetCreditTryFor\(key\)/.test(eng)) && gateOf(/const block = resetCreditBlock\(key, now\);/.test(eng))
+    && gateOf(/if \(block\.code === 'in_flight'\) return \{ \.\.\.out, code: 'in_flight'/.test(eng)) && gateOf(/const blockUntil = resetCredit\.rungBlockUntil\(t, /.test(eng)) && gateOf(/const ans = resetCredit\.creditAnswerOf\(payload\);/.test(eng))
     && !/resetCreditTriedAt/.test(eng));
 }
 
@@ -506,7 +506,7 @@ const LIFECYCLE = (M, { seedRuns = 40 } = {}) => {
 {
   const L = LIFECYCLE(RC);
   ok(`§9 the quotient closes: ${L.states} canonical states × every event = ${L.cells} cells, ${L.walked} seeded steps`, L.states >= 40 && L.cells >= 1000 && L.walked >= 5000 && L.cells >= L.states * 25 && L.cells <= L.states * 29, JSON.stringify([L.states, L.cells, L.walked]));
-  ok('§9 every phase of the closed set is reached (none · open · sent · landed · unspent · not-sent · unanswered · unsettled · lapsed · settled)', RC.ATTEMPT_PHASES.every((p) => L.phases.has(p)) && [...L.phases].every((p) => RC.ATTEMPT_PHASES.includes(p)), [...L.phases].join(','));
+  ok('§9 every phase of the closed set is reached (none · open · sent · landed · unspent · not-sent · unanswered · unsettled · lapsed · settled)', gateOf(RC.ATTEMPT_PHASES.every((p) => L.phases.has(p))) && verdictOf([...L.phases].every((p) => RC.ATTEMPT_PHASES.includes(p))), [...L.phases].join(','));
   ok('§9 the invariants hold on every cell and every seeded step (I1 one charge per attempt · I2 never undone · I3 never a send over an attempt that may have gone out · I4 one settle · I5 went out ⇒ charged · I6 the file is the state · I7 the chain is bounded)', L.viol.length === 0, L.viol.slice(0, 5).map((v) => JSON.stringify(v)).join(' | '));
   ok('§9 the chain stays short through the walk (a superseded lapsed prior is dropped at the send; the carried tail is capped at MAX_PRIOR_TAIL)', L.maxChain <= 6, String(L.maxChain));
   // THE MATRIX, spelled: the press verdict per phase, the send per phase, the boot per phase
@@ -523,29 +523,29 @@ const LIFECYCLE = (M, { seedRuns = 40 } = {}) => {
     lapsed: { at: NOWMS - 11 * 60e3, sentAt: NOWMS - 11 * 60e3, outcome: 'unanswered', outcomeAt: NOWMS - 10 * 60e3, charged: true, creditsAt: 3, resetsAtSec: Math.floor(NOWMS / 1000) - 120, idempotencyKey: 'p' },
     settled: { at: NOWMS - 11 * 60e3, sentAt: NOWMS - 11 * 60e3, outcome: 'unanswered', outcomeAt: NOWMS - 10 * 60e3, charged: true, settled: { how: 'not-landed', at: NOWMS - 1000 }, idempotencyKey: 'z' },
   };
-  ok('§9 the fixtures are the phases they name', Object.entries(FIX).every(([p, t]) => RC.phaseOf(t, o) === p) && RC.phaseOf(null, o) === 'none', Object.entries(FIX).map(([p, t]) => p + '=' + RC.phaseOf(t, o)).join(' '));
+  ok('§9 the fixtures are the phases they name', gateOf(Object.entries(FIX).every(([p, t]) => RC.phaseOf(t, o) === p)) && RC.phaseOf(null, o) === 'none', Object.entries(FIX).map(([p, t]) => p + '=' + RC.phaseOf(t, o)).join(' '));
   const PRESS = { none: 'minted', open: 'in_flight', sent: 'cooldown', landed: 'minted', unspent: 'minted', 'not-sent': 'minted', unanswered: 'cooldown', unsettled: 'unsettled', lapsed: 'minted', settled: 'minted' };
   const pressOn = (t) => { const r = RC.attemptStep(t, { type: 'press', origin: 'user', creditsAt: 3, now: NOWMS }, o); return r.effects.minted ? 'minted' : r.effects.refused; };
-  ok('§9 THE PRESS ROW (session): minted over none / landed (past the floor) / unspent / not-sent / lapsed / settled; refused in_flight over open, cooldown over sent and unanswered, unsettled over unsettled', Object.entries(PRESS).every(([p, want]) => pressOn(p === 'none' ? null : FIX[p]) === want), Object.keys(PRESS).map((p) => p + '→' + pressOn(p === 'none' ? null : FIX[p])).join(' '));
+  ok('§9 THE PRESS ROW (session): minted over none / landed (past the floor) / unspent / not-sent / lapsed / settled; refused in_flight over open, cooldown over sent and unanswered, unsettled over unsettled', verdictOf(Object.entries(PRESS).every(([p, want]) => pressOn(p === 'none' ? null : FIX[p]) === want)), Object.keys(PRESS).map((p) => p + '→' + pressOn(p === 'none' ? null : FIX[p])).join(' '));
   const hp = RC.attemptStep(FIX.unsettled, { type: 'press', via: 'helper', origin: 'user', creditsAt: 3, now: NOWMS }, o);
   const hs = RC.attemptStep(hp.t, { type: 'sent', now: NOWMS }, o);
   const hr = RC.attemptStep(hp.t, { type: 'reading', r: { fetchedAt: NOWMS, creditsLeft: 3 }, now: NOWMS }, o);
   const hs2 = RC.attemptStep(hr.t, { type: 'sent', now: NOWMS }, o);
-  ok('§9 THE PRESS ROW (helper): admitted over an UNSETTLED chain with that attempt as its prior (the read-first\'s witness); the SEND is refused while the prior is unsettled, and goes out once a reading settled it (the prior then superseded)', hp.effects.minted && hp.t.prior && hp.t.prior.idempotencyKey === 'v' && hs.effects.refused === 'unsettled-prior' && !hs.t.sentAt && hr.effects.settle === 'not-landed' && hs2.t.sentAt === NOWMS && hs2.effects.charge && hs2.t.prior && hs2.t.prior.supersededAt === NOWMS, JSON.stringify([hp.effects, hs.effects.refused, hr.effects.settle, hs2.t.sentAt, hs2.t.prior && hs2.t.prior.supersededAt]));
+  ok('§9 THE PRESS ROW (helper): admitted over an UNSETTLED chain with that attempt as its prior (the read-first\'s witness); the SEND is refused while the prior is unsettled, and goes out once a reading settled it (the prior then superseded)', gateOf(hp.effects.minted) && gateOf(hp.t.prior) && hp.t.prior.idempotencyKey === 'v' && hs.effects.refused === 'unsettled-prior' && !hs.t.sentAt && hr.effects.settle === 'not-landed' && hs2.t.sentAt === NOWMS && gateOf(hs2.effects.charge) && gateOf(hs2.t.prior) && hs2.t.prior.supersededAt === NOWMS, JSON.stringify([hp.effects, hs.effects.refused, hr.effects.settle, hs2.t.sentAt, hs2.t.prior && hs2.t.prior.supersededAt]));
   const hk = RC.attemptStep(hp.t, { type: 'skipped', now: NOWMS }, o);
-  ok('§9 …the helper\'s read-first saying no ends it `skipped` (unspent, the hold given back, nothing sent); skipped on a session record or a sent one changes nothing', RC.phaseOf(hk.t, o) === 'unspent' && hk.effects.release && !hk.t.sentAt && RC.phaseOf(RC.attemptStep(FIX.open, { type: 'skipped', now: NOWMS }, o).t, o) === 'open' && RC.phaseOf(RC.attemptStep(FIX.sent, { type: 'skipped', now: NOWMS }, o).t, o) === 'sent');
+  ok('§9 …the helper\'s read-first saying no ends it `skipped` (unspent, the hold given back, nothing sent); skipped on a session record or a sent one changes nothing', RC.phaseOf(hk.t, o) === 'unspent' && gateOf(hk.effects.release) && !hk.t.sentAt && RC.phaseOf(RC.attemptStep(FIX.open, { type: 'skipped', now: NOWMS }, o).t, o) === 'open' && RC.phaseOf(RC.attemptStep(FIX.sent, { type: 'skipped', now: NOWMS }, o).t, o) === 'sent');
   ok('§9 a free newest record with an unsettled prior (the helper that never started) is UNSETTLED to the block; a lapsed head never hides a live unsettled one behind it', RC.attemptBlock({ ...FIX.unspent, prior: FIX.unsettled }, o).code === 'unsettled' && RC.attemptBlock({ ...FIX.lapsed, prior: { ...FIX.unsettled, idempotencyKey: 'deep' } }, o).code === 'unsettled' && RC.attemptBlock({ ...FIX.lapsed, prior: { ...FIX.lapsed, idempotencyKey: 'deep' } }, o).code === null);
   ok('§9 …a press over a lapsed attempt carries it as the prior (the read-first\'s witness); over a settled one carries nothing', (RC.attemptStep(FIX.lapsed, { type: 'press', origin: 'user', now: NOWMS }, o).t.prior || {}).idempotencyKey === 'p' && RC.attemptStep(FIX.settled, { type: 'press', origin: 'user', now: NOWMS }, o).t.prior === null);
   const sentOn = (t) => { const r = RC.attemptStep(t, { type: 'sent', now: NOWMS }, o); return `${RC.phaseOf(r.t, o)}${r.effects.charge ? '+charge' : ''}`; };
-  ok('§9 THE SEND ROW: open ⇒ sent + charged (the hold converted); not-sent ⇒ re-opened as sent + charged (it went out after all); every other phase unchanged, nothing charged twice', sentOn(FIX.open) === 'sent+charge' && sentOn(FIX['not-sent']) === 'sent+charge' && ['sent', 'landed', 'unspent', 'unanswered', 'unsettled', 'lapsed', 'settled'].every((p) => sentOn(FIX[p]) === p), ['open', 'not-sent', 'sent', 'landed', 'unspent'].map((p) => p + '→' + sentOn(FIX[p])).join(' '));
+  ok('§9 THE SEND ROW: open ⇒ sent + charged (the hold converted); not-sent ⇒ re-opened as sent + charged (it went out after all); every other phase unchanged, nothing charged twice', sentOn(FIX.open) === 'sent+charge' && sentOn(FIX['not-sent']) === 'sent+charge' && verdictOf(['sent', 'landed', 'unspent', 'unanswered', 'unsettled', 'lapsed', 'settled'].every((p) => sentOn(FIX[p]) === p)), ['open', 'not-sent', 'sent', 'landed', 'unspent'].map((p) => p + '→' + sentOn(FIX[p])).join(' '));
   const bootOn = (t) => { const r = RC.attemptStep(t, { type: 'boot', now: NOWMS }, o); return `${RC.phaseOf(r.t, o)}${r.effects.charge ? '+charge' : ''}`; };
-  ok('§9 THE BOOT ROW: open ⇒ unanswered (unknown — it may have gone out) + charged by its identity; sent ⇒ unanswered (charged already); every settled / answered phase unchanged', bootOn(FIX.open) === 'unanswered+charge' && bootOn(FIX.sent) === 'unanswered' && ['landed', 'unspent', 'not-sent', 'unanswered', 'unsettled', 'lapsed', 'settled'].every((p) => bootOn(FIX[p]) === p), ['open', 'sent'].map((p) => p + '→' + bootOn(FIX[p])).join(' '));
+  ok('§9 THE BOOT ROW: open ⇒ unanswered (unknown — it may have gone out) + charged by its identity; sent ⇒ unanswered (charged already); every settled / answered phase unchanged', bootOn(FIX.open) === 'unanswered+charge' && bootOn(FIX.sent) === 'unanswered' && verdictOf(['landed', 'unspent', 'not-sent', 'unanswered', 'unsettled', 'lapsed', 'settled'].every((p) => bootOn(FIX[p]) === p)), ['open', 'sent'].map((p) => p + '→' + bootOn(FIX[p])).join(' '));
   const readOn = (t, r) => { const x = RC.attemptStep(t, { type: 'reading', r, now: NOWMS }, o); return `${RC.phaseOf(x.t, o)}:${x.effects.settle || '-'}`; };
-  ok('§9 THE READING ROW: unsettled + count fell ⇒ landed; same count ⇒ settled (not-landed); a lagging reading (older than the send) settles nothing; a reading at or after a newer send never CREDITS a landing (a fallen count ⇒ untold, verify r4) but the same count still proves not-landed; a settled / landed / unspent record ignores every reading', readOn(FIX.unsettled, { fetchedAt: NOWMS, creditsLeft: 2 }) === 'landed:landed' && readOn(FIX.unsettled, { fetchedAt: NOWMS, creditsLeft: 3 }) === 'settled:not-landed' && readOn(FIX.unsettled, { fetchedAt: FIX.unsettled.sentAt - 1, creditsLeft: 2 }) === 'unsettled:-' && readOn({ ...FIX.unsettled, supersededAt: NOWMS - 1 }, { fetchedAt: NOWMS, creditsLeft: 2 }) === 'settled:untold' && readOn({ ...FIX.unsettled, supersededAt: NOWMS - 1 }, { fetchedAt: NOWMS, creditsLeft: 3 }) === 'settled:not-landed' && readOn({ ...FIX.unsettled, supersededAt: NOWMS - 1, creditsAt: null }, { fetchedAt: NOWMS, resetsAtSec: R + 500, periodSec: 604800 }) === 'settled:untold' && ['settled', 'landed', 'unspent'].every((p) => readOn(FIX[p], { fetchedAt: NOWMS, creditsLeft: 1 }) === p + ':-'));
-  ok('§9 THE ACK / FLOOR ROWS: ack-expired on an open reporting carrier ⇒ not-sent (the hold released); on one that cannot report ⇒ unanswered (unknown) + charged; floor-expired on sent ⇒ no-answer — unsettled the instant the floor is full; neither touches another phase', (() => { const a = RC.attemptStep(FIX.open, { type: 'ack-expired', now: FIX.open.at + ACK }, o); const b = RC.attemptStep({ ...FIX.open, reportsSent: false }, { type: 'ack-expired', now: FIX.open.at + ACK }, o); const c = RC.attemptStep(FIX.sent, { type: 'floor-expired', now: FIX.sent.sentAt + FLOOR }, o); return RC.phaseOf(a.t, { ...o, now: FIX.open.at + ACK }) === 'not-sent' && a.effects.release && RC.phaseOf(b.t, { ...o, now: FIX.open.at + ACK }) === 'unanswered' && b.effects.charge && c.t.outcome === 'no-answer' && RC.phaseOf(c.t, { ...o, now: FIX.sent.sentAt + FLOOR }) === 'unsettled' && RC.phaseOf(c.t, { ...o, now: FIX.sent.sentAt + FLOOR - 1 }) === 'unanswered' && ['landed', 'unspent', 'settled'].every((p) => RC.phaseOf(RC.attemptStep(FIX[p], { type: 'floor-expired', now: NOWMS }, o).t, o) === p); })());
-  ok('§9 pool-move and Clear content… change no attempt; a torn file is none + a notice; an unknown event throws (the set is closed)', RC.phaseOf(RC.attemptStep(FIX.unsettled, { type: 'pool-move', now: NOWMS }, o).t, o) === 'unsettled' && RC.phaseOf(RC.attemptStep(FIX.sent, { type: 'clear', now: NOWMS }, o).t, o) === 'sent' && RC.attemptStep(FIX.sent, { type: 'torn', now: NOWMS }, o).t === null && RC.attemptStep(FIX.sent, { type: 'torn', now: NOWMS }, o).effects.notice === 'attempts-unreadable' && (() => { try { RC.attemptStep(null, { type: 'nap' }, o); return false; } catch { return true; } })());
-  ok('§9 THE ANSWER ROW BY KEY (verify r4): a keyed answer settles the record that holds its key wherever it sits in the chain; one whose key no record holds is LATE — it changes no record (a late reset is said by the engine)', (() => { const c = { ...FIX.sent, idempotencyKey: 'new', prior: { ...FIX.unsettled, idempotencyKey: 'old' } }; const a = RC.attemptStep(c, { type: 'answer', payload: { outcome: 'reset', idempotencyKey: 'old', attempts: 2 }, now: NOWMS }, o); const b = RC.attemptStep(c, { type: 'answer', payload: { outcome: 'reset', idempotencyKey: 'gone', attempts: 2 }, now: NOWMS }, o); return a.t.outcome === null && a.t.prior.outcome === 'reset' && a.effects.settle === 'reset' && !a.effects.late && b.effects.late && b.t.outcome === null && b.t.prior.outcome === 'unanswered' && b.effects.settle === 'late-reset'; })());
-  ok('§9 attemptStep never writes its input (the engine\'s record is the engine\'s)', (() => { const t = JSON.parse(JSON.stringify(FIX.open)); const before = JSON.stringify(t); RC.attemptStep(t, { type: 'sent', now: NOWMS }, o); RC.attemptStep(t, { type: 'boot', now: NOWMS }, o); return JSON.stringify(t) === before; })());
+  ok('§9 THE READING ROW: unsettled + count fell ⇒ landed; same count ⇒ settled (not-landed); a lagging reading (older than the send) settles nothing; a reading at or after a newer send never CREDITS a landing (a fallen count ⇒ untold, verify r4) but the same count still proves not-landed; a settled / landed / unspent record ignores every reading', readOn(FIX.unsettled, { fetchedAt: NOWMS, creditsLeft: 2 }) === 'landed:landed' && readOn(FIX.unsettled, { fetchedAt: NOWMS, creditsLeft: 3 }) === 'settled:not-landed' && readOn(FIX.unsettled, { fetchedAt: FIX.unsettled.sentAt - 1, creditsLeft: 2 }) === 'unsettled:-' && readOn({ ...FIX.unsettled, supersededAt: NOWMS - 1 }, { fetchedAt: NOWMS, creditsLeft: 2 }) === 'settled:untold' && readOn({ ...FIX.unsettled, supersededAt: NOWMS - 1 }, { fetchedAt: NOWMS, creditsLeft: 3 }) === 'settled:not-landed' && readOn({ ...FIX.unsettled, supersededAt: NOWMS - 1, creditsAt: null }, { fetchedAt: NOWMS, resetsAtSec: R + 500, periodSec: 604800 }) === 'settled:untold' && verdictOf(['settled', 'landed', 'unspent'].every((p) => readOn(FIX[p], { fetchedAt: NOWMS, creditsLeft: 1 }) === p + ':-')));
+  ok('§9 THE ACK / FLOOR ROWS: ack-expired on an open reporting carrier ⇒ not-sent (the hold released); on one that cannot report ⇒ unanswered (unknown) + charged; floor-expired on sent ⇒ no-answer — unsettled the instant the floor is full; neither touches another phase', verdictOf((() => { const a = RC.attemptStep(FIX.open, { type: 'ack-expired', now: FIX.open.at + ACK }, o); const b = RC.attemptStep({ ...FIX.open, reportsSent: false }, { type: 'ack-expired', now: FIX.open.at + ACK }, o); const c = RC.attemptStep(FIX.sent, { type: 'floor-expired', now: FIX.sent.sentAt + FLOOR }, o); return RC.phaseOf(a.t, { ...o, now: FIX.open.at + ACK }) === 'not-sent' && a.effects.release && RC.phaseOf(b.t, { ...o, now: FIX.open.at + ACK }) === 'unanswered' && b.effects.charge && c.t.outcome === 'no-answer' && RC.phaseOf(c.t, { ...o, now: FIX.sent.sentAt + FLOOR }) === 'unsettled' && RC.phaseOf(c.t, { ...o, now: FIX.sent.sentAt + FLOOR - 1 }) === 'unanswered' && ['landed', 'unspent', 'settled'].every((p) => RC.phaseOf(RC.attemptStep(FIX[p], { type: 'floor-expired', now: NOWMS }, o).t, o) === p); })()));
+  ok('§9 pool-move and Clear content… change no attempt; a torn file is none + a notice; an unknown event throws (the set is closed)', RC.phaseOf(RC.attemptStep(FIX.unsettled, { type: 'pool-move', now: NOWMS }, o).t, o) === 'unsettled' && RC.phaseOf(RC.attemptStep(FIX.sent, { type: 'clear', now: NOWMS }, o).t, o) === 'sent' && RC.attemptStep(FIX.sent, { type: 'torn', now: NOWMS }, o).t === null && RC.attemptStep(FIX.sent, { type: 'torn', now: NOWMS }, o).effects.notice === 'attempts-unreadable' && verdictOf((() => { try { RC.attemptStep(null, { type: 'nap' }, o); return false; } catch { return true; } })()));
+  ok('§9 THE ANSWER ROW BY KEY (verify r4): a keyed answer settles the record that holds its key wherever it sits in the chain; one whose key no record holds is LATE — it changes no record (a late reset is said by the engine)', verdictOf((() => { const c = { ...FIX.sent, idempotencyKey: 'new', prior: { ...FIX.unsettled, idempotencyKey: 'old' } }; const a = RC.attemptStep(c, { type: 'answer', payload: { outcome: 'reset', idempotencyKey: 'old', attempts: 2 }, now: NOWMS }, o); const b = RC.attemptStep(c, { type: 'answer', payload: { outcome: 'reset', idempotencyKey: 'gone', attempts: 2 }, now: NOWMS }, o); return a.t.outcome === null && a.t.prior.outcome === 'reset' && a.effects.settle === 'reset' && !a.effects.late && b.effects.late && b.t.outcome === null && b.t.prior.outcome === 'unanswered' && b.effects.settle === 'late-reset'; })()));
+  ok('§9 attemptStep never writes its input (the engine\'s record is the engine\'s)', verdictOf((() => { const t = JSON.parse(JSON.stringify(FIX.open)); const before = JSON.stringify(t); RC.attemptStep(t, { type: 'sent', now: NOWMS }, o); RC.attemptStep(t, { type: 'boot', now: NOWMS }, o); return JSON.stringify(t) === before; })()));
   // NEGATIVE CONTROLS — a patched table goes red on the walk's invariants (the oracle is the suite's, never the module's)
   const src9 = fs.readFileSync(MOD, 'utf8');
   const dir9 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rcverdict9-'));
@@ -566,7 +566,7 @@ const LIFECYCLE = (M, { seedRuns = 40 } = {}) => {
     ok(`§9 NEGATIVE CONTROL (${what}): the patch hit the product source`, !!m);
     if (!m) continue;
     const L2 = LIFECYCLE(m, { seedRuns: 20 });
-    ok(`§9 NEGATIVE CONTROL (${what}): the walk goes RED on ${String(re).replace(/\W/g, '')}`, L2.viol.some((v) => re.test(String(v[0]))), L2.viol.slice(0, 3).map((v) => String(v[0])).join(' | ') || 'all green');
+    ok(`§9 NEGATIVE CONTROL (${what}): the walk goes RED on ${String(re).replace(/\W/g, '')}`, verdictOf(L2.viol.some((v) => re.test(String(v[0])))), L2.viol.slice(0, 3).map((v) => String(v[0])).join(' | ') || 'all green');
   }
   // verify r10 ② (reproduced on the real engine, money): WHICH half the boot guesses. A press OPEN at the boot has its SEND guessed
   // (`sentGuessed`) and its wrapper's later `beforeReset` push re-opens it; a press SENT before the boot keeps its send as a fact and
@@ -580,7 +580,7 @@ const LIFECYCLE = (M, { seedRuns = 40 } = {}) => {
       const fx = ev({ type: 'reading', beforeReset: true, idemKey: t.idempotencyKey, now: NOW + 6000, r: { fetchedAt: NOW + 6000, creditsLeft: 3, resetsAtSec: R, periodSec: 604800, windowStartSec: R - 604800 } });
       return { t, fx }; };
     const open = run(RC, false), sent = run(RC, true);
-    ok('§9 r10 ②: a press OPEN at the boot (its send guessed) is re-opened by its wrapper\'s later push (sentAt 0, outcome null, the guess kept until a real send); a press SENT before the boot (its send a fact) is NOT — the reading settles it not-landed, it stays sent, unknown and charged', open.fx.reopened === true && open.t.outcome === null && open.t.sentAt === 0 && open.t.sentGuessed === true && sent.fx.reopened === false && sent.t.outcome === 'unknown' && sent.t.sentAt === NOW + 1000 && sent.t.sentGuessed === false && sent.t.settled && sent.t.settled.how === 'not-landed' && sent.t.charged === true, JSON.stringify([open.fx, open.t.sentAt, sent.fx, sent.t.settled]));
+    ok('§9 r10 ②: a press OPEN at the boot (its send guessed) is re-opened by its wrapper\'s later push (sentAt 0, outcome null, the guess kept until a real send); a press SENT before the boot (its send a fact) is NOT — the reading settles it not-landed, it stays sent, unknown and charged', open.fx.reopened === true && open.t.outcome === null && open.t.sentAt === 0 && open.t.sentGuessed === true && sent.fx.reopened === false && sent.t.outcome === 'unknown' && sent.t.sentAt === NOW + 1000 && sent.t.sentGuessed === false && gateOf(sent.t.settled) && sent.t.settled.how === 'not-landed' && sent.t.charged === true, JSON.stringify([open.fx, open.t.sentAt, sent.fx, sent.t.settled]));
     const m10 = patched9('r10-guess-every-send', [["      for (let x = t; x; x = x.prior) { x.hold = false; if (!x.outcome) { x.sentGuessed = !x.sentAt; x.sentAt = x.sentAt || x.at;", "      for (let x = t; x; x = x.prior) { x.hold = false; if (!x.outcome) { x.sentGuessed = true; x.sentAt = x.sentAt || x.at;"]]);
     ok('§9 r10 ② NEGATIVE CONTROL (a boot that guesses EVERY revived send — the r9 shape): the SENT press is re-opened by the replayed push (sentAt 0 over a consume that went out) — the pin above sees the rule', !!m10 && run(m10, true).fx.reopened === true && run(m10, true).t.sentAt === 0);
     { let t = null; const ev = (e) => { const r = RC.attemptStep(t, e, o10); t = r.t; return r.effects; };
@@ -591,9 +591,9 @@ const LIFECYCLE = (M, { seedRuns = 40 } = {}) => {
   // WIRING: the engine's handlers are the table's events (the step is pinned to the code that runs)
   const eng9 = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
   ok('§9 WIRING: press = openResetCreditTry (prior = priorForPress) · sent = noteResetCreditSent (charge + supersede) · ack-expired = onResetCreditNotSent / onResetCreditUnknown · reading = settleResetCreditByReading (settleByReading with the clock) · boot = loadResetCreditTries (unknown + charged + supersede)',
-    /prior: resetCredit\.priorForPress\(prev, clockOpts\(now\)\) \}/.test(eng9) && /function noteResetCreditSent\(t, now = Date\.now\(\), \{ proof = 'record' \} = \{\}\) \{[\s\S]{0,1100}t\.prior = resetCredit\.supersede\(t\.prior, now, clockOpts\(now\)\);/.test(eng9) // (verify r10: the guessed-send rule + its essay sit between the head and the supersede; `proof` = record | answer)
-    && /if \(!t\.reportsSent\) return onResetCreditUnknown\(t\);/.test(eng9) && /const r = resetCredit\.settleByReading\(x, \{[^\n]*\}, co\);/.test(eng9)
-    && /if \(Number\(t\.sentAt\) > 0\) t\.prior = resetCredit\.supersede\(t\.prior, Number\(t\.sentAt\), clockOpts\(Number\(t\.sentAt\)\)\);/.test(eng9) && /t\.outcome = 'unknown'; t\.outcomeAt = Date\.now\(\); t\.settled = null;/.test(eng9));
+    gateOf(/prior: resetCredit\.priorForPress\(prev, clockOpts\(now\)\) \}/.test(eng9)) && gateOf(/function noteResetCreditSent\(t, now = Date\.now\(\), \{ proof = 'record' \} = \{\}\) \{[\s\S]{0,1100}t\.prior = resetCredit\.supersede\(t\.prior, now, clockOpts\(now\)\);/.test(eng9)) // (verify r10: the guessed-send rule + its essay sit between the head and the supersede; `proof` = record | answer)
+    && gateOf(/if \(!t\.reportsSent\) return onResetCreditUnknown\(t\);/.test(eng9)) && gateOf(/const r = resetCredit\.settleByReading\(x, \{[^\n]*\}, co\);/.test(eng9))
+    && gateOf(/if \(Number\(t\.sentAt\) > 0\) t\.prior = resetCredit\.supersede\(t\.prior, Number\(t\.sentAt\), clockOpts\(Number\(t\.sentAt\)\)\);/.test(eng9)) && verdictOf(/t\.outcome = 'unknown'; t\.outcomeAt = Date\.now\(\); t\.settled = null;/.test(eng9)));
 }
 
 console.log('\n§10 THE READ BEFORE A PRESS (verify r8 T0 — the owner\'s yes on ut-cdaa01aff0, 2026-10-02): ONE table for both carriers');
@@ -631,23 +631,23 @@ console.log('\n§10 THE READ BEFORE A PRESS (verify r8 T0 — the owner\'s yes o
       ['every why is in PRE_CONSUME_WHY', ['window-moved', 'prior-unsettled', 'prior-landed', 'prior-expired', 'prior-untold', 'read-failed', 'no-credits'].every((w) => mod.PRE_CONSUME_WHY.includes(w))],
     ];
   };
-  for (const [name, good] of rows10(RC)) ok(`§10 ${name}`, good);
+  for (const [name, good] of rows10(RC)) ok(`§10 ${name}`, verdictOf(good));
   // the attempt table learns readFirst: the press carries it, the open head takes the reading's count, `skipped` ends it
   { const press = RC.attemptStep(null, { type: 'press', origin: 'user', creditsAt: 3, resetsAtSec: R0, window: { resetsAtSec: R0, periodSec: 604800 }, readFirst: true, now: NOW }, o);
     const plain = RC.attemptStep(null, { type: 'press', origin: 'user', creditsAt: 3, resetsAtSec: R0, now: NOW }, o);
     const helper = RC.attemptStep(null, { type: 'press', via: 'helper', origin: 'user', creditsAt: 3, resetsAtSec: R0, now: NOW }, o);
-    ok('§10 THE PRESS ROW: a session press with readFirst mints a record that says so; a plain session press does not; a helper press always reads first', press.effects.minted && press.t.readFirst === true && plain.t.readFirst === false && helper.t.readFirst === true, JSON.stringify([press.t.readFirst, plain.t.readFirst, helper.t.readFirst]));
+    ok('§10 THE PRESS ROW: a session press with readFirst mints a record that says so; a plain session press does not; a helper press always reads first', gateOf(press.effects.minted) && press.t.readFirst === true && plain.t.readFirst === false && helper.t.readFirst === true, JSON.stringify([press.t.readFirst, plain.t.readFirst, helper.t.readFirst]));
     const rd = RC.attemptStep(press.t, { type: 'reading', r: { fetchedAt: NOW + 10, creditsLeft: 2, resetsAtSec: R0, periodSec: 604800 }, now: NOW + 10 }, o);
     const rdPlain = RC.attemptStep(plain.t, { type: 'reading', r: { fetchedAt: NOW + 10, creditsLeft: 2, resetsAtSec: R0, periodSec: 604800 }, now: NOW + 10 }, o);
     ok('§10 THE READING ROW: the read before the consume refreshes the OPEN read-first head\'s count (3 → 2 = the count at the send); a plain session head keeps the count it carried', rd.t.creditsAt === 2 && rdPlain.t.creditsAt === 3, JSON.stringify([rd.t.creditsAt, rdPlain.t.creditsAt]));
     const sk = RC.attemptStep(rd.t, { type: 'skipped', now: NOW + 20 }, o), skPlain = RC.attemptStep(plain.t, { type: 'skipped', now: NOW + 20 }, o);
-    ok('§10 THE SKIPPED ROW: a read-first session head ends `skipped` (unspent, the hold given back, nothing sent); a plain session head ignores it', sk.t.outcome === 'skipped' && sk.effects.release && !sk.t.sentAt && RC.phaseOf(sk.t, { ...o, now: NOW + 20 }) === 'unspent' && skPlain.t.outcome === null, JSON.stringify([sk.t.outcome, sk.effects.release, skPlain.t.outcome]));
+    ok('§10 THE SKIPPED ROW: a read-first session head ends `skipped` (unspent, the hold given back, nothing sent); a plain session head ignores it', sk.t.outcome === 'skipped' && gateOf(sk.effects.release) && !sk.t.sentAt && RC.phaseOf(sk.t, { ...o, now: NOW + 20 }) === 'unspent' && skPlain.t.outcome === null, JSON.stringify([sk.t.outcome, sk.effects.release, skPlain.t.outcome]));
     const go = RC.attemptStep(rd.t, { type: 'sent', now: NOW + 20 }, o);
-    ok('§10 THE SENT ROW after a go: sent + charged, the count at the send the read\'s', go.t.sentAt === NOW + 20 && go.effects.charge && go.t.creditsAt === 2, JSON.stringify([go.t.sentAt, go.effects.charge, go.t.creditsAt]));
+    ok('§10 THE SENT ROW after a go: sent + charged, the count at the send the read\'s', go.t.sentAt === NOW + 20 && gateOf(go.effects.charge) && go.t.creditsAt === 2, JSON.stringify([go.t.sentAt, go.effects.charge, go.t.creditsAt]));
     const ans = RC.creditAnswerOf({ skipped: true, why: 'window-moved', idempotencyKey: 'k', attempts: 0, sent: false });
     const ansNV = RC.creditAnswerOf({ skipped: true, why: 'no-verdict', error: 'no verdict on the read before the consume within 25000ms — nothing sent', idempotencyKey: 'k', attempts: 0, sent: false });
     ok('§10 THE ANSWER: the wrapper\'s `skipped` result is read as skipped (not sent, answered), its why carried — the no-verdict shape too, whatever its error text says', ans.outcome === 'skipped' && ans.sent === false && ans.why === 'window-moved' && ansNV.outcome === 'skipped' && ansNV.why === 'no-verdict', JSON.stringify([ans, ansNV]));
-    ok('§10 …and a skipped record ends the chain unspent (SPENT_NOTHING), never arming the floor', RC.ATTEMPT_OUTCOMES.includes('skipped') && !RC.outcomeArmsFloor('skipped'));
+    ok('§10 …and a skipped record ends the chain unspent (SPENT_NOTHING), never arming the floor', gateOf(RC.ATTEMPT_OUTCOMES.includes('skipped')) && !RC.outcomeArmsFloor('skipped'));
   }
   // NEGATIVE CONTROLS — a patched copy per rule
   { const src = fs.readFileSync(MOD, 'utf8');
@@ -661,12 +661,12 @@ console.log('\n§10 THE READ BEFORE A PRESS (verify r8 T0 — the owner\'s yes o
     ];
     for (const [what, from, to, row] of controls) {
       const hit = src.includes(from);
-      ok(`§10 NEGATIVE CONTROL (${what}): the patch hits the product source`, hit);
+      ok(`§10 NEGATIVE CONTROL (${what}): the patch hits the product source`, verdictOf(hit));
       if (!hit) continue;
       const f = path.join(dir, `reset-credit.${what.replace(/\W+/g, '-')}.js`); fs.writeFileSync(f, src.replace(from, to));
       let red = [];
       try { red = rows10(require(f)).filter(([, good]) => !good).map(([n]) => n); } catch (e) { red = ['threw: ' + e.message]; }
-      ok(`§10 NEGATIVE CONTROL (${what}): the table goes red on "${row}"`, red.includes(row), red.join(' | ') || 'all green');
+      ok(`§10 NEGATIVE CONTROL (${what}): the table goes red on "${row}"`, verdictOf(red.includes(row)), red.join(' | ') || 'all green');
     }
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -674,11 +674,11 @@ console.log('\n§10 THE READ BEFORE A PRESS (verify r8 T0 — the owner\'s yes o
   { const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
     const helperBody = eng.slice(eng.indexOf('function writeResetCreditViaHelper('), eng.indexOf('function judgeReadFirst('));
     const sessionBody = eng.slice(eng.indexOf('function answerReadBeforePress('), eng.indexOf('function onResetCreditHelperDone('));
-    ok('§10 WIRING: readBeforePress() is TRUE (the owner\'s yes), the helper\'s read-first and the wrapper\'s (answerReadBeforePress) both judge through resetCredit.preConsumeVerdict → judgeReadFirst, and only a USER origin asks the wrapper to read first', /function readBeforePress\(\) \{ return true; \}/.test(eng) && (helperBody.match(/resetCredit\.preConsumeVerdict\(/g) || []).length === 2 && (sessionBody.match(/resetCredit\.preConsumeVerdict\(/g) || []).length === 1 && /judgeReadFirst\(t, resetCredit\.preConsumeVerdict\(/.test(helperBody) && /const go = judgeReadFirst\(t, v,/.test(sessionBody) && /const rf = readFirst === true && origin === 'user' && readBeforePress\(\) && wrapperReadsFirst\(session\);/.test(eng) && !/function resetCreditRung\([\s\S]{0,6000}readFirst: true/.test(eng));
+    ok('§10 WIRING: readBeforePress() is TRUE (the owner\'s yes), the helper\'s read-first and the wrapper\'s (answerReadBeforePress) both judge through resetCredit.preConsumeVerdict → judgeReadFirst, and only a USER origin asks the wrapper to read first', gateOf(/function readBeforePress\(\) \{ return true; \}/.test(eng)) && (helperBody.match(/resetCredit\.preConsumeVerdict\(/g) || []).length === 2 && (sessionBody.match(/resetCredit\.preConsumeVerdict\(/g) || []).length === 1 && gateOf(/judgeReadFirst\(t, resetCredit\.preConsumeVerdict\(/.test(helperBody)) && gateOf(/const go = judgeReadFirst\(t, v,/.test(sessionBody)) && gateOf(/const rf = readFirst === true && origin === 'user' && readBeforePress\(\) && wrapperReadsFirst\(session\);/.test(eng)) && !/function resetCreditRung\([\s\S]{0,6000}readFirst: true/.test(eng));
     const wrapper = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
-    ok('§10 WIRING: the wrapper advertises resetCreditReadFirst, reads before the consume only on the verb\'s readFirst, pushes it `beforeReset` with the key, waits for codex-reset-credit-go and never consumes on go:false or no verdict', /resetCreditReadFirst: true/.test(wrapper) && /if \(msg\.readFirst === true\) \{/.test(wrapper) && /beforeReset: true, idempotencyKey \}\)/.test(wrapper) && /msg\.type === 'codex-reset-credit-go'/.test(wrapper) && /if \(!verdict\.go\) \{[\s\S]{0,600}emitTaskEvent\('reset_credit_result', \{ skipped: true/.test(wrapper) && /why: 'no-verdict'/.test(wrapper));
+    ok('§10 WIRING: the wrapper advertises resetCreditReadFirst, reads before the consume only on the verb\'s readFirst, pushes it `beforeReset` with the key, waits for codex-reset-credit-go and never consumes on go:false or no verdict', gateOf(/resetCreditReadFirst: true/.test(wrapper)) && gateOf(/if \(msg\.readFirst === true\) \{/.test(wrapper)) && gateOf(/beforeReset: true, idempotencyKey \}\)/.test(wrapper)) && gateOf(/msg\.type === 'codex-reset-credit-go'/.test(wrapper)) && gateOf(/if \(!verdict\.go\) \{[\s\S]{0,600}emitTaskEvent\('reset_credit_result', \{ skipped: true/.test(wrapper)) && verdictOf(/why: 'no-verdict'/.test(wrapper)));
   }
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

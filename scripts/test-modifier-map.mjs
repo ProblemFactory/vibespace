@@ -26,7 +26,7 @@ const T = require('../src/browser-takeover.js');
 const M = mutantCopies('modifier-map', REPO);
 
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -58,16 +58,16 @@ const judge = (mod) => {
 console.log('§1 the table: viewer × host, each row with its reason');
 {
   const R = MM.PRIMARY_MODIFIER_ROWS;
-  ok(R.length === 16 && P4.every((v) => P4.every((h) => R.filter((r) => r.viewer === v && r.host === h).length === 1)), `16 rows, each (viewer, host) of ${P4.join(' / ')} exactly once (${R.length})`);
+  ok(R.length === 16 && verdictOf(P4.every((v) => P4.every((h) => R.filter((r) => r.viewer === v && r.host === h).length === 1))), `16 rows, each (viewer, host) of ${P4.join(' / ')} exactly once (${R.length})`);
   for (const r of R) {
     const moves = Object.entries(r.moves).map(([a, b]) => `${a} → ${b}`).join(', ') || 'identity';
-    ok(same(MM.primaryModifierMap({ viewer: r.viewer, host: r.host }), spec(r.viewer, r.host)) && typeof r.why === 'string' && r.why.length > 10, `${r.viewer} viewer · ${r.host} host ⇒ ${moves} — ${r.why}`, MM.primaryModifierMap({ viewer: r.viewer, host: r.host }));
+    ok(gateOf(same(MM.primaryModifierMap({ viewer: r.viewer, host: r.host }), spec(r.viewer, r.host))) && typeof r.why === 'string' && r.why.length > 10, `${r.viewer} viewer · ${r.host} host ⇒ ${moves} — ${r.why}`, MM.primaryModifierMap({ viewer: r.viewer, host: r.host }));
   }
   ok(judge(MM).length === 0, 'the judge finds no row of the shipped table off the rule', judge(MM));
-  ok(R.every((r) => Object.entries(r.moves).every(([a, b]) => MM.MODIFIERS.includes(a) && MM.MODIFIERS.includes(b) && a !== b)) && R.every((r) => !('alt' in r.moves) && !('shift' in r.moves)), 'a row moves only between modifier names, never alt (Option is NOT AltGr) or shift');
+  ok(gateOf(R.every((r) => Object.entries(r.moves).every(([a, b]) => MM.MODIFIERS.includes(a) && MM.MODIFIERS.includes(b) && a !== b))) && verdictOf(R.every((r) => !('alt' in r.moves) && !('shift' in r.moves))), 'a row moves only between modifier names, never alt (Option is NOT AltGr) or shift');
   const m = MM.primaryModifierMap({ viewer: 'mac', host: 'linux' });
-  ok(Object.isFrozen(m) && Object.isFrozen(MM.PRIMARY_MODIFIER_ROWS) && MM.PRIMARY_MODIFIER_ROWS.every((r) => Object.isFrozen(r) && Object.isFrozen(r.moves)), 'the table and every map it answers are frozen (no caller edits the one table)');
-  ok(same(MM.primaryModifierMap(), ID) && same(MM.primaryModifierMap({ viewer: 'mac' }), spec('mac', 'unknown')) && same(MM.primaryModifierMap({ viewer: 'MacIntel', host: null }), spec('mac', 'linux')), 'no viewer = identity; a Mac viewer with no host named = the Linux row (every xpra display is Linux today); raw platform strings are read through platformOf');
+  ok(gateOf(Object.isFrozen(m)) && gateOf(Object.isFrozen(MM.PRIMARY_MODIFIER_ROWS)) && verdictOf(MM.PRIMARY_MODIFIER_ROWS.every((r) => Object.isFrozen(r) && Object.isFrozen(r.moves))), 'the table and every map it answers are frozen (no caller edits the one table)');
+  ok(gateOf(same(MM.primaryModifierMap(), ID)) && gateOf(same(MM.primaryModifierMap({ viewer: 'mac' }), spec('mac', 'unknown'))) && verdictOf(same(MM.primaryModifierMap({ viewer: 'MacIntel', host: null }), spec('mac', 'linux'))), 'no viewer = identity; a Mac viewer with no host named = the Linux row (every xpra display is Linux today); raw platform strings are read through platformOf');
 }
 
 console.log('§2 platformOf: what a browser or node says → mac / windows / linux / unknown');
@@ -89,13 +89,13 @@ console.log('§3 applyModifierMap — the only transform — on the key and the 
   const mac = MM.primaryModifierMap({ viewer: 'mac', host: 'linux' }), pc2mac = MM.primaryModifierMap({ viewer: 'linux', host: 'mac' }), id = MM.primaryModifierMap({ viewer: 'linux', host: 'linux' });
   const key = Object.freeze({ shift: false, control: false, alt: false, meta: true, altGraph: false, capsLock: true, numLock: false });
   const k1 = MM.applyModifierMap(key, mac);
-  ok(same(k1, { shift: false, control: true, alt: false, meta: false, altGraph: false, capsLock: true, numLock: false }) && k1 !== key && key.meta === true, 'the key shape: ⌘ held ⇒ control held, meta not; capsLock / altGraph / numLock pass as they are; the input untouched', k1);
-  ok(same(MM.applyModifierMap({ ...key, control: true }, mac), k1), '⌘ AND Ctrl held on a Mac ⇒ control once (two that land on one name hold it once)');
-  ok(same(MM.applyModifierMap({ shift: true, control: false, alt: true, meta: true }, mac), { shift: true, control: true, alt: true, meta: false }), '⌘⇧⌥ ⇒ Ctrl+Shift+Alt — shift and alt (Option) stay as pressed');
+  ok(gateOf(same(k1, { shift: false, control: true, alt: false, meta: false, altGraph: false, capsLock: true, numLock: false })) && k1 !== key && key.meta === true, 'the key shape: ⌘ held ⇒ control held, meta not; capsLock / altGraph / numLock pass as they are; the input untouched', k1);
+  ok(verdictOf(same(MM.applyModifierMap({ ...key, control: true }, mac), k1)), '⌘ AND Ctrl held on a Mac ⇒ control once (two that land on one name hold it once)');
+  ok(verdictOf(same(MM.applyModifierMap({ shift: true, control: false, alt: true, meta: true }, mac), { shift: true, control: true, alt: true, meta: false })), '⌘⇧⌥ ⇒ Ctrl+Shift+Alt — shift and alt (Option) stay as pressed');
   const ptr = { shift: false, control: false, alt: false, meta: true };
-  ok(same(MM.applyModifierMap(ptr, mac), { shift: false, control: true, alt: false, meta: false }), 'the pointer shape: ⌘+click on a Mac viewer is Ctrl+click on the host');
-  ok(same(MM.applyModifierMap({ shift: false, control: true, alt: false, meta: false }, pc2mac), { shift: false, control: false, alt: false, meta: true }), 'a Linux viewer\'s Ctrl+click on a Mac host is ⌘+click');
-  ok(same(MM.applyModifierMap(key, id), key) && same(MM.applyModifierMap({}, mac), {}) && same(MM.applyModifierMap(null, mac), {}) && same(MM.applyModifierMap({ meta: true }, null), { meta: true }), 'identity map ⇒ the same state; no mods ⇒ none; no map ⇒ unchanged');
+  ok(verdictOf(same(MM.applyModifierMap(ptr, mac), { shift: false, control: true, alt: false, meta: false })), 'the pointer shape: ⌘+click on a Mac viewer is Ctrl+click on the host');
+  ok(verdictOf(same(MM.applyModifierMap({ shift: false, control: true, alt: false, meta: false }, pc2mac), { shift: false, control: false, alt: false, meta: true })), 'a Linux viewer\'s Ctrl+click on a Mac host is ⌘+click');
+  ok(gateOf(same(MM.applyModifierMap(key, id), key)) && gateOf(same(MM.applyModifierMap({}, mac), {})) && gateOf(same(MM.applyModifierMap(null, mac), {})) && verdictOf(same(MM.applyModifierMap({ meta: true }, null), { meta: true })), 'identity map ⇒ the same state; no mods ⇒ none; no map ⇒ unchanged');
   const K = [
     [{ key: 'Meta', code: 'MetaLeft', keyCode: 91 }, mac, { key: 'Control', code: 'ControlLeft', keyCode: 17 }, '⌘ (left) on a Mac viewer, Linux host ⇒ Control, left'],
     [{ key: 'Meta', code: 'MetaRight', keyCode: 93 }, mac, { key: 'Control', code: 'ControlRight', keyCode: 17 }, '⌘ (right) ⇒ Control, right — the side is kept'],
@@ -108,7 +108,7 @@ console.log('§3 applyModifierMap — the only transform — on the key and the 
     [{ key: 'a', code: 'KeyA', keyCode: 65 }, mac, null, 'a letter is no modifier key'],
     [{ key: 'AltGraph', code: 'AltRight', keyCode: 225 }, mac, null, 'AltGraph rides AltRight: alt, not moved'],
   ];
-  for (const [k, map, want, name] of K) ok(same(MM.modifierKeyOf(k, map), want), `modifierKeyOf: ${name}`, MM.modifierKeyOf(k, map));
+  for (const [k, map, want, name] of K) ok(verdictOf(same(MM.modifierKeyOf(k, map), want)), `modifierKeyOf: ${name}`, MM.modifierKeyOf(k, map));
 }
 
 console.log('§4 RED controls — copies of the table the judge must refuse');
@@ -118,25 +118,25 @@ console.log('§4 RED controls — copies of the table the judge must refuse');
   ok(src.split(ROW).length === 2 && src.split(SAME).length === 2, 'control anchors: the mac→linux row and the linux→windows row are one line each');
   const leaves = M.load('src/lib/modifier-map.js', editAnchor(src, ROW, "  row('mac', 'linux', {},", "src/lib/modifier-map.js"), 'leaves-meta');
   const bad1 = judge(leaves);
-  ok(bad1.length === 1 && /^mac>linux/.test(bad1[0]), `RED: a mac→linux row that leaves meta is refused (${bad1.join('; ')})`, bad1);
+  ok(bad1.length === 1 && verdictOf(/^mac>linux/.test(bad1[0])), `RED: a mac→linux row that leaves meta is refused (${bad1.join('; ')})`, bad1);
   const moves = M.load('src/lib/modifier-map.js', editAnchor(src, SAME, "  row('linux', 'windows', { control: 'meta' },", "src/lib/modifier-map.js"), 'same-family');
   const bad2 = judge(moves);
-  ok(bad2.length === 1 && /^linux>windows/.test(bad2[0]), `RED: a same-family row that moves anything is refused (${bad2.join('; ')})`, bad2);
+  ok(bad2.length === 1 && verdictOf(/^linux>windows/.test(bad2[0])), `RED: a same-family row that moves anything is refused (${bad2.join('; ')})`, bad2);
 }
 
 console.log('§5 the doors: both import the one table and call it; macChord reads it; no second modifier table under src/');
 {
   const view = read('src/lib/xpra-view.js'), take = read('src/browser-takeover.js'), win = read('src/lib/desktop-app-window.js');
-  ok(/^import \{[^}]*\bprimaryModifierMap\b[^}]*\} from '\.\/modifier-map\.js';/m.test(view) && /primaryModifierMap\(\{ viewer: viewerPlatform\(\), host:/.test(view) && (view.match(/applyModifierMap\(/g) || []).length >= 2 && /modifierKeyOf\(e, map\)/.test(view), 'door A: src/lib/xpra-view.js imports modifier-map.js, asks the table per event and applies it to the key AND the pointer (and the modifier key itself)');
-  ok(/hostPlatform: \(\) => \(rec && rec\.platform\) \|\| null/.test(win), 'door A\'s host: the desktop-app window hands the view the record\'s platform (null — every xpra display today — reads as Linux)');
+  ok(gateOf(/^import \{[^}]*\bprimaryModifierMap\b[^}]*\} from '\.\/modifier-map\.js';/m.test(view)) && gateOf(/primaryModifierMap\(\{ viewer: viewerPlatform\(\), host:/.test(view)) && (view.match(/applyModifierMap\(/g) || []).length >= 2 && verdictOf(/modifierKeyOf\(e, map\)/.test(view)), 'door A: src/lib/xpra-view.js imports modifier-map.js, asks the table per event and applies it to the key AND the pointer (and the modifier key itself)');
+  ok(verdictOf(/hostPlatform: \(\) => \(rec && rec\.platform\) \|\| null/.test(win)), 'door A\'s host: the desktop-app window hands the view the record\'s platform (null — every xpra display today — reads as Linux)');
   const body = take.slice(take.indexOf('function macChord('), take.indexOf('function copyChordOf('));
-  ok(/^const MM = require\('\.\/lib\/modifier-map\.js'\);/m.test(take) && /MM\.primaryModifierMap\(/.test(body) && /MM\.applyModifierMap\(/.test(body) && /MM\.modifierKeyOf\(/.test(body), 'door B: src/browser-takeover.js requires modifier-map.js and macChord asks the table (primaryModifierMap / applyModifierMap / modifierKeyOf)');
+  ok(gateOf(/^const MM = require\('\.\/lib\/modifier-map\.js'\);/m.test(take)) && gateOf(/MM\.primaryModifierMap\(/.test(body)) && gateOf(/MM\.applyModifierMap\(/.test(body)) && verdictOf(/MM\.modifierKeyOf\(/.test(body)), 'door B: src/browser-takeover.js requires modifier-map.js and macChord asks the table (primaryModifierMap / applyModifierMap / modifierKeyOf)');
   // macChord through the table — the live view's behaviour as before
   const k = T.macChord({ key: 'a', code: 'KeyA', keyCode: 65, metaKey: true }, { viewerMac: true, remoteMac: false });
   ok(k.ctrlKey === true && k.metaKey === false && k.dropText === true && k.rule === 'command', 'macChord: a Mac viewer\'s ⌘A on a Linux browser is Ctrl+A with no text (the command row)', k);
   const mk = T.macChord({ key: 'Meta', code: 'MetaRight', keyCode: 93, metaKey: true }, { viewerMac: true, remoteMac: false });
   ok(mk.key === 'Control' && mk.code === 'ControlRight' && mk.keyCode === 17 && mk.ctrlKey === true && mk.metaKey === false && mk.rule === 'meta-key', 'macChord: the ⌘ key itself is Control (side kept) — the table\'s modifierKeyOf', mk);
-  ok(same(T.macChord({ key: 'a', code: 'KeyA', keyCode: 65, metaKey: true }, { viewerMac: true, remoteMac: true }).rule, null) && T.macChord({ key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true }, { viewerMac: false, remoteMac: false }).rule === null, 'macChord: Mac on Mac, and a non-Mac viewer, stay as pressed (identity rows)');
+  ok(gateOf(same(T.macChord({ key: 'a', code: 'KeyA', keyCode: 65, metaKey: true }, { viewerMac: true, remoteMac: true }).rule, null)) && T.macChord({ key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true }, { viewerMac: false, remoteMac: false }).rule === null, 'macChord: Mac on Mac, and a non-Mac viewer, stay as pressed (identity rows)');
   // CONTROL: the same macChord over a table whose mac→unknown row (the one it asks: it knows only "not a Mac") leaves meta ⇒
   // ⌘A stays Meta+A — macChord IS a caller of the table
   const ROW = "  row('mac', 'unknown', { meta: 'control' },", REQ = "require('./lib/modifier-map.js')";
@@ -157,7 +157,7 @@ console.log('§5 the doors: both import the one table and call it; macChord read
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(path.join(d, e.name))) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []);
   const files = walk(path.join(REPO, 'src')).map((f) => path.relative(REPO, f));
   const hits = files.filter((f) => f !== 'src/lib/modifier-map.js').flatMap((f) => tables(read(f)).map((h) => `${f}: ${h}`));
-  ok(files.length > 300 && files.includes('src/lib/xpra-view.js') && files.includes('src/browser-takeover.js') && !hits.length, `no second modifier table anywhere under src/ (${files.length} .js files scanned; ${hits.join(' ; ') || 'none'})`, hits);
+  ok(files.length > 300 && gateOf(files.includes('src/lib/xpra-view.js')) && gateOf(files.includes('src/browser-takeover.js')) && !hits.length, `no second modifier table anywhere under src/ (${files.length} .js files scanned; ${hits.join(' ; ') || 'none'})`, hits);
   const planted = [
     ["const META_CODES = Object.freeze({ MetaLeft: 'ControlLeft', MetaRight: 'ControlRight' });", 2, 'the pre-lane macChord\'s own code table'],
     ["const SWAP = { meta: 'control', control: 'meta' };", 2, 'a name map'],
@@ -169,6 +169,6 @@ console.log('§5 the doors: both import the one table and call it; macChord read
   ok(tables(read('src/lib/modifier-map.js')).length >= 5, `census control: pointed at modifier-map.js itself it finds the table's own rows (${tables(read('src/lib/modifier-map.js')).length}) — the shape it looks for is the shape the table has`);
 }
 
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: 'modifier-map controls: ' })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: 'modifier-map controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

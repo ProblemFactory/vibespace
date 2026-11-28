@@ -4,7 +4,7 @@ import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(new URL('../server.js', import.meta.url));
-let failed = 0; const check=(n,c,e)=>{ if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
+let failed = 0; const check=(n,c,e)=>{ if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
 
 // 1. The dispatch contract: a tool_progress record carries parent_tool_use_id
 //    (the SAME field subagent messages use) — the branch order in server.js
@@ -18,13 +18,13 @@ const iProgress = src.indexOf("msg.type === 'tool_progress'");
 const iSub = src.indexOf("} else if ((msg.parent_tool_use_id || msg.isSidechain) && !CONTROL_RECORD_TYPES.has(msg.type)) {");
 check('server checks tool_progress BEFORE the subagent branch', iProgress > 0 && iSub > iProgress, `${iProgress}/${iSub}`);
 check('subagent branch is an else-if (cannot also fire)', iSub > 0);
-check('tool_progress is broadcast on its own channel', /type: 'tool-progress'/.test(src));
-check('elapsed seconds are forwarded', /elapsedSeconds: msg\.elapsed_time_seconds/.test(src));
+check('tool_progress is broadcast on its own channel', verdictOf(/type: 'tool-progress'/.test(src)));
+check('elapsed seconds are forwarded', verdictOf(/elapsedSeconds: msg\.elapsed_time_seconds/.test(src)));
 
 // 2. The client must not paint the agent status line for it.
 const cv = fs.readFileSync('src/lib/chat-view.js', 'utf8');
-check('client has a dedicated _onToolProgress', /_onToolProgress\(/.test(cv));
-check('tool-progress routes away from _onSubagentMessage', /'tool-progress'[\s\S]{0,80}_onToolProgress/.test(cv));
-check('progress line yields to a real agent status line', /chat-agent-live-status'\)\) return;/.test(cv));
+check('client has a dedicated _onToolProgress', verdictOf(/_onToolProgress\(/.test(cv)));
+check('tool-progress routes away from _onSubagentMessage', verdictOf(/'tool-progress'[\s\S]{0,80}_onToolProgress/.test(cv)));
+check('progress line yields to a real agent status line', verdictOf(/chat-agent-live-status'\)\) return;/.test(cv)));
 check('progress line has no View Log / message count', !/_onToolProgress[\s\S]{0,1200}chat-agent-view-btn/.test(cv));
-console.log(failed===0?'ALL PASS':`${failed} FAILED`); process.exit(failed?1:0);
+console.log(failed===0?'ALL PASS':`${failed} FAILED`); process.exit(failed?1:0); import { verdictOf } from './lib/check.mjs';

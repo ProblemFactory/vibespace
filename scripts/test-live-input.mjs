@@ -50,7 +50,7 @@ const RT = require('../src/server/browser-trace.js');
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -99,11 +99,11 @@ console.log('§1 the chunker: ≤ 3 UTF-16 units a chunk, the measured control-c
     ['a\r\nb', ['a', '\nb']],
     ['x\u0000y', ['xy']],
   ];
-  for (const [text, want] of TABLE) { const c = S.textChunks(text); ok(c.ok && JSON.stringify(c.chunks) === JSON.stringify(want), `textChunks(${JSON.stringify(text)}) = ${JSON.stringify(want)}`, JSON.stringify(c)); }
+  for (const [text, want] of TABLE) { const c = S.textChunks(text); ok(gateOf(c.ok) && JSON.stringify(c.chunks) === JSON.stringify(want), `textChunks(${JSON.stringify(text)}) = ${JSON.stringify(want)}`, JSON.stringify(c)); }
   const d1 = S.textChunks('x\t\n'), d2 = S.textChunks('\n');
-  ok(d1.ok && d1.dropped === 1 && d1.chunks.join('') === 'x\t', 'a final line break after a tab cannot be typed alone — DROPPED and counted (the receipt says so)');
+  ok(gateOf(d1.ok) && d1.dropped === 1 && d1.chunks.join('') === 'x\t', 'a final line break after a tab cannot be typed alone — DROPPED and counted (the receipt says so)');
   ok(!d2.ok && d2.code === 'empty' && d2.dropped === 1, 'a text that IS one line break is refused by name (press Enter instead)');
-  ok(S.textChunks('').code === 'empty' && S.textChunks('x'.repeat(S.TEXT_MAX + 1)).code === 'too_long' && S.textChunks('x'.repeat(S.TEXT_MAX)).ok, 'empty refused; past TEXT_MAX (20 000 code points) refused whole, never trimmed');
+  ok(S.textChunks('').code === 'empty' && S.textChunks('x'.repeat(S.TEXT_MAX + 1)).code === 'too_long' && verdictOf(S.textChunks('x'.repeat(S.TEXT_MAX)).ok), 'empty refused; past TEXT_MAX (20 000 code points) refused whole, never trimmed');
   // the seeded walk: 3 000 texts over the characters a paste / IME carries, applied to the measured model
   const ALPH = ['a', 'b', 'Z', ' ', '-', '1', '\n', '\n', '\t', '你', '好', '界', '😀', '👩‍👩‍👧', 'é', '́', '\r\n', '€'];
   let seed = 20260927; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -124,7 +124,7 @@ console.log('§1 the chunker: ≤ 3 UTF-16 units a chunk, the measured control-c
   ok(src.split(PRE).length === 2 && src.split(TAB).length === 2, 'control setup: the chunk cut and the tab rule are each found once');
   const Spre = M.load('src/browser-stream.js', editAnchor(src, PRE, "    if (Array.from(cur).length >= 200) flush();", "src/browser-stream.js"), 'pre-fix-200');
   const pre = Spre.textRecords('hello world'); const preTyped = typeAll(pre.records);
-  ok(pre.ok && pre.records.length === 1 && preTyped.refused === 1 && preTyped.value === '', `NEGATIVE CONTROL: the pre-fix chunk (${pre.records[0] && pre.records[0].text.length} units in ONE record) is refused by the measured browser — "hello world" lands as ${JSON.stringify(preTyped.value)} (the owner's report)`);
+  ok(gateOf(pre.ok) && pre.records.length === 1 && preTyped.refused === 1 && preTyped.value === '', `NEGATIVE CONTROL: the pre-fix chunk (${pre.records[0] && pre.records[0].text.length} units in ONE record) is refused by the measured browser — "hello world" lands as ${JSON.stringify(preTyped.value)} (the owner's report)`);
   const Stab = M.load('src/browser-stream.js', editAnchor(src, TAB, '', "src/browser-stream.js"), 'no-tab-rule');
   const tb = typeAll(Stab.textRecords('abc\tdef\tghi').records);
   ok(tb.value !== 'abc\tdef\tghi' && typeAll(S.textRecords('abc\tdef\tghi').records).value === 'abc\tdef\tghi', `NEGATIVE CONTROL: without the tab rule "abc\\tdef\\tghi" types as ${JSON.stringify(tb.value)} (a chunk that starts with a tab drops the rest)`);
@@ -134,7 +134,7 @@ console.log('§1 the chunker: ≤ 3 UTF-16 units a chunk, the measured control-c
 console.log('§2 the viewer\'s verdicts: input_text is the holder\'s; a key text past the cap is refused by name');
 {
   const V = (msg, o) => S.viewerMessageVerdict(msg, { holder: 1, viewerId: 1, mode: 'takeover', ...o });
-  ok(S.VIEWER_INPUT_TYPES.includes('input_text'), 'input_text is a viewer INPUT type (holder-only, like every input)');
+  ok(verdictOf(S.VIEWER_INPUT_TYPES.includes('input_text')), 'input_text is a viewer INPUT type (holder-only, like every input)');
   ok(V({ type: 'input_text', text: 'hello world' }).forward === true && V({ type: 'input_text', text: 'hello world' }).text === true, 'the holder\'s input_text is taken (the bridge cuts it)');
   ok(V({ type: 'input_text', text: 'x' }, { viewerId: 2 }).refusal.code === 'watch-mode' && V({ type: 'input_text', text: 'x' }, { mode: 'watch' }).refusal.code === 'watch-mode', 'another viewer\'s / a watcher\'s input_text is refused watch-mode');
   ok(V({ type: 'input_text', text: '' }).refusal.code === 'empty' && V({ type: 'input_text', text: 'y'.repeat(S.TEXT_MAX + 1) }).refusal.code === 'too_long' && V({ type: 'input_text' }).refusal.code === 'empty', 'an empty / too long / missing text is refused by name');
@@ -150,7 +150,7 @@ console.log('§2 the viewer\'s verdicts: input_text is the holder\'s; a key text
   const b = S.receiptBook(); S.noteInputSent(b, 0, { ms: 5000 });
   ok(S.sweepInputReceipts(b, 2000) === 0 && S.sweepInputReceipts(b, 5100) === 1 && b.failing.code === 'no_answer', 'the book honours a record\'s own wait (a long paste is not "no answer" at 1.5 s)');
   const b2 = S.receiptBook(); const rid = S.noteInputSent(b2, 0); S.noteInputReceipt(b2, { rid, ok: false, code: 'browser_refused', landed: 120 });
-  ok(b2.failing && b2.failing.landed === 120, 'a failed text receipt keeps how many characters landed first (the echo says it)');
+  ok(gateOf(b2.failing) && b2.failing.landed === 120, 'a failed text receipt keeps how many characters landed first (the echo says it)');
 }
 
 // ═══ §3 THE MAC CHORD TABLE ═══════════════════════════════════════════════════
@@ -175,9 +175,9 @@ console.log('§3 a Mac viewer\'s ⌘ chords on a non-Mac browser; the copy chord
   for (const [k, want, name] of ROWS) { const r = rec(k); const bad = Object.entries(want).filter(([f, v]) => (v === undefined ? f in r : r[f] !== v)); ok(bad.length === 0, name, JSON.stringify(r)); }
   const id = { key: 'a', code: 'KeyA', keyCode: 65, metaKey: true };
   ok(T.macChord(id, { viewerMac: false, remoteMac: false }).metaKey === true && T.macChord(id, { viewerMac: true, remoteMac: true }).metaKey === true && T.macChord(id, { viewerMac: true, remoteMac: true }).rule === null, 'identity for a non-Mac viewer, and for a Mac browser (⌘ means ⌘ there)');
-  ok(T.MAC_CHORD_ROWS.length >= 8 && T.MAC_CHORD_ROWS.every((r) => r.id && r.from && r.to && r.why), `the table is data: ${T.MAC_CHORD_ROWS.length} rows, each with from / to / why`);
+  ok(T.MAC_CHORD_ROWS.length >= 8 && verdictOf(T.MAC_CHORD_ROWS.every((r) => r.id && r.from && r.to && r.why)), `the table is data: ${T.MAC_CHORD_ROWS.length} rows, each with from / to / why`);
   ok(T.keyRoute({ key: '\\', ctrlKey: true }).to === 'app' && T.keyRoute({ key: 'v', metaKey: true }).to === 'paste' && T.keyRoute({ key: 'a', metaKey: true }).to === 'page', 'reserved chords keep their route (keyRoute runs first): Ctrl+\\ is the app\'s, ⌘V the paste route, ⌘A the page\'s (then translated)');
-  ok(T.isMacPlatform('MacIntel') && T.isMacPlatform('macOS') && T.isMacPlatform('darwin') && T.isMacPlatform('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)') && !T.isMacPlatform('Linux x86_64') && !T.isMacPlatform('Win32') && !T.isMacPlatform(''), 'isMacPlatform: navigator.platform / userAgentData / node / a UA');
+  ok(gateOf(T.isMacPlatform('MacIntel')) && gateOf(T.isMacPlatform('macOS')) && gateOf(T.isMacPlatform('darwin')) && gateOf(T.isMacPlatform('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')) && !T.isMacPlatform('Linux x86_64') && !T.isMacPlatform('Win32') && !T.isMacPlatform(''), 'isMacPlatform: navigator.platform / userAgentData / node / a UA');
   ok(T.copyChordOf({ key: 'c', ctrlKey: true }) === 'copy' && T.copyChordOf({ key: 'c', metaKey: true }) === 'copy' && T.copyChordOf({ key: 'x', metaKey: true }) === 'cut' && T.copyChordOf({ key: 'Insert', ctrlKey: true }) === 'copy' && T.copyChordOf({ key: 'Delete', shiftKey: true }) === 'cut' && T.copyChordOf({ key: 'c' }) === null && T.copyChordOf({ key: 'c', ctrlKey: true, altKey: true }) === null, 'the copy-out chords: Ctrl/⌘+C, Ctrl+Insert copy; Ctrl/⌘+X, Shift+Delete cut; nothing else');
   // ── THE COPY-OUT DOOR (verify 2026-09-27, CONFIRMED on the real stack: a page's synthetic copy on a timer — or one the
   // agent planted with `eval` before the takeover — wrote the driving user's clipboard with nothing pressed on a secure
@@ -230,17 +230,17 @@ console.log('§3b the live view\'s key record carries the typed character: Shift
   ];
   for (const mac of [false, true]) for (const [name, k, text, mods] of ROWS) {
     const r = viewerRec(k, mac);
-    ok(r && r.eventType === 'keyDown' && r.text === text && r.key === k.key && r.modifiers === mods, `${mac ? 'a Mac' : 'a Linux'} viewer — ${name}: keyDown text ${JSON.stringify(r && r.text)} (the character typed), modifiers ${r && r.modifiers}`, JSON.stringify(r));
+    ok(gateOf(r) && r.eventType === 'keyDown' && r.text === text && r.key === k.key && r.modifiers === mods, `${mac ? 'a Mac' : 'a Linux'} viewer — ${name}: keyDown text ${JSON.stringify(r && r.text)} (the character typed), modifiers ${r && r.modifiers}`, JSON.stringify(r));
   }
   // the Shift key itself: a held modifier, its own keyDown / keyUp — never translated, never a tap (the ⌘ rows are ⌘'s only)
   for (const mac of [false, true]) {
     const down = viewerRec(K('Shift', 'ShiftLeft', 16, { shift: true }), mac);
     const m = T.macChord(K('Shift', 'ShiftLeft', 16, { shift: true }), { viewerMac: mac, remoteMac: false });
-    ok(down && down.key === 'Shift' && down.modifiers === 8 && !('text' in down) && m.rule === null && m.dropText === false, `${mac ? 'a Mac' : 'a Linux'} viewer: the Shift key goes as itself (keyDown Shift, modifiers 8, no text; no chord rule touches it)`, JSON.stringify({ down, rule: m.rule }));
+    ok(gateOf(down) && down.key === 'Shift' && down.modifiers === 8 && !('text' in down) && m.rule === null && m.dropText === false, `${mac ? 'a Mac' : 'a Linux'} viewer: the Shift key goes as itself (keyDown Shift, modifiers 8, no text; no chord rule touches it)`, JSON.stringify({ down, rule: m.rule }));
   }
   // the CapsLock key goes as a key with no text (the page's own Caps Lock indicator); the letters after it carry their case
   const caps = viewerRec(K('CapsLock', 'CapsLock', 20), true);
-  ok(caps && caps.key === 'CapsLock' && !('text' in caps) && caps.windowsVirtualKeyCode === 20, 'the CapsLock key itself: a keyDown with no text (it never types)', JSON.stringify(caps));
+  ok(gateOf(caps) && caps.key === 'CapsLock' && !('text' in caps) && caps.windowsVirtualKeyCode === 20, 'the CapsLock key itself: a keyDown with no text (it never types)', JSON.stringify(caps));
   // RED CONTROL: a record that rebuilds the text from the physical key (`code`) — the brief's hypothesis (a) — loses the case
   const ssrc = read('src/browser-stream.js');
   const TXT = "(printable ? k : undefined)) : undefined;";
@@ -266,12 +266,12 @@ console.log('§4 the fit chip: a claim rules the page; the words say where the s
   ok(chip(fit(null)).how === 'smaller' && chip(fit(null), { width: 2800, height: 1800 }).how === 'larger' && chip(fit(null), { width: 1400, height: 900 }).how === null && chip(fit(null)).act === 'claim', 'HOW: smaller / larger than here (from this view\'s own window); the act is `claim`');
   const W = (c) => FIT.fitChipWords(c);
   const other = W(chip(fit({ page: 'pOther1', device: 'dDev001' })));
-  ok(other.text === 'Sized for your other tab · Fit here' && /1400×900/.test(other.title) && /another tab or window of yours on this device/.test(other.title) && /shown smaller/.test(other.title) && /Click to make the page fit this window instead/.test(other.title), `the words (en): "${other.text}" — "${other.title}"`);
+  ok(other.text === 'Sized for your other tab · Fit here' && gateOf(/1400×900/.test(other.title)) && gateOf(/another tab or window of yours on this device/.test(other.title)) && gateOf(/shown smaller/.test(other.title)) && verdictOf(/Click to make the page fit this window instead/.test(other.title)), `the words (en): "${other.text}" — "${other.title}"`);
   const drv = W(chip(fit({ page: 'pOther1', device: 'dOther1' }, { rule: 'holder' })));
-  ok(/whoever is driving it/.test(drv.title) && /once that window hands back/.test(drv.title) && drv.text === 'Sized for another device · Fit here', 'while somebody else drives, the words say the page follows the driver and the claim applies at the handback');
+  ok(gateOf(/whoever is driving it/.test(drv.title)) && gateOf(/once that window hands back/.test(drv.title)) && drv.text === 'Sized for another device · Fit here', 'while somebody else drives, the words say the page follows the driver and the claim applies at the handback');
   const kinds = [chip(fit({ page: 'pMine01' })), chip(fit({ page: 'x1234', device: 'dDev001' })), chip(fit({ device: 'dElse01', page: 'p0000001' })), chip(fit(null)), FIT.fitChipState({ fit: { state: 'agent', width: 800, height: 600 } }), FIT.fitChipState({ fit: { state: 'agent', width: 390, height: 844, device: 'iPhone 12' } }), FIT.fitChipState({ fit: { state: 'fitted', width: 500, height: 974, viewerId: 1, floor: 500, drawScale: 0.78 }, you: 1 }), FIT.fitChipState({ fit: { state: 'unavailable', width: 1280, height: 577, error: 'the page did not take the size' } })];
   const all = kinds.map(W);
-  ok(all.every((w) => w.text && w.title) && all.every((w) => !/\b(viewport|pane|lease|rule)\b/i.test(w.text + ' ' + w.title)), `every kind has words, none of them jargon (no viewport / pane / lease / rule) — ${all.length} kinds`);
+  ok(gateOf(all.every((w) => w.text && w.title)) && verdictOf(all.every((w) => !/\b(viewport|pane|lease|rule)\b/i.test(w.text + ' ' + w.title))), `every kind has words, none of them jargon (no viewport / pane / lease / rule) — ${all.length} kinds`);
   // every literal key the words use has zh + ja entries
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const keysOf = (rel, fn) => { const s = read(rel); const body = s.slice(s.indexOf(fn)); return [...body.slice(0, body.indexOf('\n}\n')).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => new Function(`return '${m[1]}'`)()); };
@@ -283,23 +283,23 @@ console.log('§4 the fit chip: a claim rules the page; the words say where the s
   const tr = (dict) => (s, p) => { let x = dict[s] || s; if (p) x = x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)); return x; };
   const Z = (c) => FIT.fitChipWords(c, { t: tr(zh) }), J = (c) => FIT.fitChipWords(c, { t: tr(ja) });
   const agentDev = FIT.fitChipState({ fit: { state: 'agent', width: 390, height: 844, device: 'iPhone 15' } });
-  ok(W(agentDev).title.startsWith('The agent set this page to the iPhone 15 size (390×844). This window') && !/ a iPhone/.test(W(agentDev).title), `en: "${W(agentDev).title.slice(0, 70)}…" (never "the size of a iPhone 15")`);
-  ok(/（390×844）。这个窗口/.test(Z(agentDev).title) && /にしました。この/.test(J(agentDev).title) && !/\. /.test(Z(agentDev).title + J(agentDev).title), `zh / ja: the full stop is inside the sentence, no ASCII ". " — "${Z(agentDev).title}"`);
+  ok(gateOf(W(agentDev).title.startsWith('The agent set this page to the iPhone 15 size (390×844). This window')) && !/ a iPhone/.test(W(agentDev).title), `en: "${W(agentDev).title.slice(0, 70)}…" (never "the size of a iPhone 15")`);
+  ok(gateOf(/（390×844）。这个窗口/.test(Z(agentDev).title)) && gateOf(/にしました。この/.test(J(agentDev).title)) && !/\. /.test(Z(agentDev).title + J(agentDev).title), `zh / ja: the full stop is inside the sentence, no ASCII ". " — "${Z(agentDev).title}"`);
   const holderZ = Z(chip(fit({ page: 'pOther1', device: 'dDev001' }, { rule: 'holder' })));
   const holderJ = J(chip(fit({ page: 'pOther1', device: 'dDev001' }, { rule: 'holder' })));
-  ok(/照着正在操作它的那个窗口/.test(holderZ.title) && !/排的/.test(holderZ.title) && /等那个窗口交还控制/.test(holderZ.title) && !/对方/.test(holderZ.title), `zh: "照着…调的", "等那个窗口交还控制" (never 排的 / 对方 — the driver is usually your own other tab): "${holderZ.title}"`);
-  ok(/そのウィンドウが操作を戻したあと/.test(holderJ.title) && !/相手/.test(holderJ.title), `ja: "そのウィンドウが操作を戻したあと" (never 相手): "${holderJ.title}"`);
+  ok(gateOf(/照着正在操作它的那个窗口/.test(holderZ.title)) && !/排的/.test(holderZ.title) && gateOf(/等那个窗口交还控制/.test(holderZ.title)) && !/对方/.test(holderZ.title), `zh: "照着…调的", "等那个窗口交还控制" (never 排的 / 对方 — the driver is usually your own other tab): "${holderZ.title}"`);
+  ok(gateOf(/そのウィンドウが操作を戻したあと/.test(holderJ.title)) && !/相手/.test(holderJ.title), `ja: "そのウィンドウが操作を戻したあと" (never 相手): "${holderJ.title}"`);
   const zhTitles = kinds.map((c) => Z(c).title).concat([holderZ.title]);
-  ok(zhTitles.every((x) => !/[。？！] /.test(x)) && kinds.map((c) => J(c).title).every((x) => !/[。？！] /.test(x)), 'zh / ja: no space after a full stop in any chip sentence (joined by the translated "{first} {then}")');
+  ok(gateOf(zhTitles.every((x) => !/[。？！] /.test(x))) && verdictOf(kinds.map((c) => J(c).title).every((x) => !/[。？！] /.test(x))), 'zh / ja: no space after a full stop in any chip sentence (joined by the translated "{first} {then}")');
   const raw = 'CDP error (Emulation.setDeviceMetricsOverride): browser_interrupted: The user took over your window of this browser — your operation was interrupted';
   const un = FIT.fitChipState({ fit: { state: 'unavailable', width: 698, height: 435, error: raw, code: 'viewport_failed' } });
   ok(!/CDP|Emulation|browser_interrupted|Details/.test(W(un).title) && Z(un).title === '网页没法按这个窗口调整大小，所以按比例缩放显示。', `unavailable: never the raw error in the tooltip — zh "${Z(un).title}"`);
   const heldMine = FIT.fitChipState({ fit: { state: 'unavailable', width: 1398, height: 835, error: raw, code: 'held_while_driving' }, mine: true });
   const heldOther = FIT.fitChipState({ fit: { state: 'unavailable', width: 1398, height: 835, error: raw, code: 'held_while_driving' }, mine: false });
-  ok(Z(heldMine).text === '网页 1398×835 · 交还控制后再调整大小' && /^你在操作这个共享浏览器/.test(Z(heldMine).title) && /^有人在操作这个共享浏览器/.test(Z(heldOther).title) && !/CDP|Emulation|interrupted/.test(W(heldMine).title + W(heldOther).title), `a shared browser held while somebody drives: "${Z(heldMine).text}" — "${Z(heldMine).title}" / the watcher: "${Z(heldOther).title}"`);
+  ok(Z(heldMine).text === '网页 1398×835 · 交还控制后再调整大小' && gateOf(/^你在操作这个共享浏览器/.test(Z(heldMine).title)) && gateOf(/^有人在操作这个共享浏览器/.test(Z(heldOther).title)) && !/CDP|Emulation|interrupted/.test(W(heldMine).title + W(heldOther).title), `a shared browser held while somebody drives: "${Z(heldMine).text}" — "${Z(heldMine).title}" / the watcher: "${Z(heldOther).title}"`);
   ok(zh['Copied in the page — click to copy'] === '已在网页里复制 — 点这里放进剪贴板' && zh['Video off'] === '未开录像', 'zh: the copy chip "已在网页里复制 — 点这里放进剪贴板", the recording chip "未开录像"');
   const recZ = TR.recordingChipWords({ refused: { code: 'record_failed', error: 'Error: recording already in progress' } }, { t: tr(zh) });
-  ok(/再打开。详情：Error/.test(recZ.title), `the recording chip's detail joins without a space too ("${recZ.title}")`);
+  ok(verdictOf(/再打开。详情：Error/.test(recZ.title)), `the recording chip's detail joins without a space too ("${recZ.title}")`);
   // NEGATIVE CONTROLS: the pre-fix join ("who + '. ' + …" / spaces between zh sentences) and the raw error in the tooltip
   const fsrc = read('src/browser-fit.js');
   const CJ = "  const join = (...parts) => parts.filter(Boolean).reduce((a, b) => t('{first} {then}', { first: a, then: b }));";
@@ -308,7 +308,7 @@ console.log('§4 the fit chip: a claim rules the page; the words say where the s
   const Fj = M.load('src/browser-fit.js', editAnchor(editAnchor(fsrc, CJ, "  const join = (...parts) => parts.filter(Boolean).join(' ');", "src/browser-fit.js"), CU, "    return { text: t('Page {w}×{h} · could not resize', size), title: t('The page could not be resized to this window, so it is shown scaled.') + (c.error ? ' ' + t('Details: {why}', { why: String(c.error).slice(0, 200) }) : '') };", "src/browser-fit.js"), 'pre-words');
   const zj = Fj.fitChipWords(Fj.fitChipState({ fit: { state: 'agent', width: 390, height: 844, device: 'iPhone 15' } }), { t: tr(zh) }).title;
   const zu = Fj.fitChipWords(Fj.fitChipState({ fit: { state: 'unavailable', width: 698, height: 435, error: raw } }), { t: tr(zh) }).title;
-  ok(/。 这个窗口/.test(zj) && /CDP error/.test(zu), `NEGATIVE CONTROL: the pre-fix words put a space after 。 ("${zj}") and the agent's CDP refusal in the tooltip`);
+  ok(gateOf(/。 这个窗口/.test(zj)) && verdictOf(/CDP error/.test(zu)), `NEGATIVE CONTROL: the pre-fix words put a space after 。 ("${zj}") and the agent's CDP refusal in the tooltip`);
   const src = read('src/browser-fit.js');
   const C = "  if (claim !== null && claim !== undefined) { // lane live-input: the pane a viewer asked for by its own click (\"Fit here\")";
   ok(src.split(C).length === 2, 'control setup: the claim rule is found once');
@@ -322,11 +322,11 @@ console.log('§5 the recording chip: three states a person can act on; a failed 
   const raw = 'Command failed: agent-browser record start /home/u/vibespace/data/browser-recordings/bp-1/sess-1-179.webm\nError: A recording is already in progress for /tmp/x/y.webm';
   ok(TR.cleanRecordError(raw) === 'Error: A recording is already in progress for …', `cleanRecordError keeps the CLI's own sentence, not its command line or paths ("${TR.cleanRecordError(raw)}")`);
   const W = (o) => TR.recordingChipWords(o);
-  ok(W({ recording: { file: 'x' }, since: '17:25' }).state === 'on' && /since 17:25/.test(W({ recording: { file: 'x' }, since: '17:25' }).title) && !/\.webm|bp-/.test(W({ recording: { file: 'bp-1/s-1.webm' }, since: 't' }).title), 'on: "Recording video" + since when — never a file path');
-  ok(W({}).state === 'off' && W({}).text === 'Video off' && /Actions/.test(W({}).title) && W({ hasProfile: false }).state === 'none', 'off: "Video off" + what a click does (the action list is kept either way); a temporary browser says it has no profile to record under');
+  ok(W({ recording: { file: 'x' }, since: '17:25' }).state === 'on' && gateOf(/since 17:25/.test(W({ recording: { file: 'x' }, since: '17:25' }).title)) && !/\.webm|bp-/.test(W({ recording: { file: 'bp-1/s-1.webm' }, since: 't' }).title), 'on: "Recording video" + since when — never a file path');
+  ok(W({}).state === 'off' && W({}).text === 'Video off' && gateOf(/Actions/.test(W({}).title)) && W({ hasProfile: false }).state === 'none', 'off: "Video off" + what a click does (the action list is kept either way); a temporary browser says it has no profile to record under');
   const ref = W({ refused: { code: 'record_failed', error: raw } });
-  ok(ref.state === 'refused' && ref.text === 'Video did not start' && /Turn video off and on again/.test(ref.title) && /already in progress/.test(ref.title) && !/Command failed|\/home\//.test(ref.title), `refused: a sentence with its remedy, the detail after it ("${ref.title}")`);
-  ok(/Update it/.test(W({ refused: { code: 'recording_floor', error: 'x' } }).title) && !/Details/.test(W({ refused: { code: 'recording_floor', error: 'x' } }).title), 'a known refusal is said by its code alone');
+  ok(ref.state === 'refused' && ref.text === 'Video did not start' && gateOf(/Turn video off and on again/.test(ref.title)) && gateOf(/already in progress/.test(ref.title)) && !/Command failed|\/home\//.test(ref.title), `refused: a sentence with its remedy, the detail after it ("${ref.title}")`);
+  ok(gateOf(/Update it/.test(W({ refused: { code: 'recording_floor', error: 'x' } }).title)) && !/Details/.test(W({ refused: { code: 'recording_floor', error: 'x' } }).title), 'a known refusal is said by its code alone');
 }
 
 // ═══ §6 THE REAL BRIDGE over a fake stream server that answers like Chromium 151 ═══
@@ -400,11 +400,11 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
 }
 {
   const a = await pasteLeg(BS, { text: 'hello world' });
-  ok(a.hello && a.hello.platform === 'linux', 'the hello names the browser\'s OS (a Mac viewer translates its ⌘ chords for it)');
-  ok(a.value === 'xhello worldy' && a.refused === 0 && a.got.every((t) => t.length <= 3), `a paste of 11 characters between two keys lands WHOLE and IN ORDER (${JSON.stringify(a.value)}; records ${JSON.stringify(a.got)})`);
+  ok(gateOf(a.hello) && a.hello.platform === 'linux', 'the hello names the browser\'s OS (a Mac viewer translates its ⌘ chords for it)');
+  ok(a.value === 'xhello worldy' && a.refused === 0 && verdictOf(a.got.every((t) => t.length <= 3)), `a paste of 11 characters between two keys lands WHOLE and IN ORDER (${JSON.stringify(a.value)}; records ${JSON.stringify(a.got)})`);
   const r2 = a.receipts.find((r) => r.rid === 2);
-  ok(a.receipts.length === 3 && r2 && r2.ok && r2.via === 'stream' && a.receipts.every((r) => r.ok), 'ONE receipt for the whole paste (via stream on a direct lease), one per key');
-  ok(a.stats.textActs === 1 && a.stats.textChunks === 4 && a.stats.input && a.stats.input.queued === 0, `the bridge counts the act and its chunks (${a.stats.textActs} act, ${a.stats.textChunks} chunks, queue empty)`);
+  ok(a.receipts.length === 3 && gateOf(r2) && gateOf(r2.ok) && r2.via === 'stream' && verdictOf(a.receipts.every((r) => r.ok)), 'ONE receipt for the whole paste (via stream on a direct lease), one per key');
+  ok(a.stats.textActs === 1 && a.stats.textChunks === 4 && gateOf(a.stats.input) && a.stats.input.queued === 0, `the bridge counts the act and its chunks (${a.stats.textActs} act, ${a.stats.textChunks} chunks, queue empty)`);
   const cjk = await pasteLeg(BS, { text: '我想买这个东西然后付款吧😀\n第二行\t完' });
   ok(cjk.value === 'x我想买这个东西然后付款吧😀\n第二行\t完y' && cjk.refused === 0, 'CJK + emoji + a line break + a tab land exactly (the IME\'s 12-character commit that died before)');
   const big = 'The quick brown fox 狐狸 😀 jumps.\n'.repeat(60);
@@ -413,8 +413,8 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   ok(med.maxOut <= BS.INPUT_WINDOW && med.maxOut >= 2, `…never more than INPUT_WINDOW (${BS.INPUT_WINDOW}) credits waiting at once (max ${med.maxOut}; the mediator keeps 256 for 1.2 s)`);
   const hole = await pasteLeg(BS, { mediated: true, text: 'abcdefghijklmnopqrstuvwxyz', failAt: 4 }); // credit #4 = the 4th chunk of the paste ("jkl")
   const hr = hole.receipts.find((r) => r.rid === 2);
-  ok(hr && !hr.ok && hr.code === 'browser_refused' && hr.landed === 9, `a chunk the browser refused stops the act: the receipt says browser_refused and that 9 characters landed first (${JSON.stringify(hr)})`);
-  ok(hole.receipts.find((r) => r.rid === 3) && hole.receipts.find((r) => r.rid === 3).ok && hole.value.endsWith('y'), 'the key typed after it still goes (the act\'s tail is not typed around the hole)');
+  ok(gateOf(hr) && !hr.ok && hr.code === 'browser_refused' && hr.landed === 9, `a chunk the browser refused stops the act: the receipt says browser_refused and that 9 characters landed first (${JSON.stringify(hr)})`);
+  ok(gateOf(hole.receipts.find((r) => r.rid === 3)) && gateOf(hole.receipts.find((r) => r.rid === 3).ok) && verdictOf(hole.value.endsWith('y')), 'the key typed after it still goes (the act\'s tail is not typed around the hole)');
   // NEGATIVE CONTROLS
   const src = read('src/server/browser-stream.js');
   const C1 = '    const r = S.textRecords(text);';
@@ -422,7 +422,7 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   ok(src.split(C1).length === 2 && src.split(C2).length === 2, 'control setup: the chunking call and the window are each found once');
   const pre = await pasteLeg(M.load('src/server/browser-stream.js', editAnchor(src, C1, '    const r = S.textRecords(text, { units: 400 });', "src/server/browser-stream.js"), 'pre-fix-chunks'), { text: 'hello world' });
   const preR = pre.receipts.find((r) => r.rid === 2);
-  ok(pre.value === 'xy' && pre.refused === 1 && preR && preR.ok && preR.via === 'stream', `NEGATIVE CONTROL: the pre-fix record (the whole text in one \`char\`) is refused by the browser — the page holds ${JSON.stringify(pre.value)} while the receipt says ok via stream (the owner's silent loss)`);
+  ok(pre.value === 'xy' && pre.refused === 1 && gateOf(preR) && gateOf(preR.ok) && preR.via === 'stream', `NEGATIVE CONTROL: the pre-fix record (the whole text in one \`char\`) is refused by the browser — the page holds ${JSON.stringify(pre.value)} while the receipt says ok via stream (the owner's silent loss)`);
   const nowin = await pasteLeg(M.load('src/server/browser-stream.js', editAnchor(src, C2, '', "src/server/browser-stream.js"), 'no-window'), { mediated: true, text: big });
   ok(nowin.maxOut > BS.INPUT_WINDOW, `NEGATIVE CONTROL: without the window ${nowin.maxOut} credits wait at once (the mediator's 256 / 1.2 s would evict the paste's first chunks)`);
 }
@@ -458,7 +458,7 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   w.K.watches[0].onCopy({ kind: 'copy', text: 'Order #A-1234 可选', length: 16 });
   await until(() => clips().length === 1, 2000); await sleep(40);
   const ca = clips()[0];
-  ok(ca && ca.text === 'Order #A-1234 可选' && ca.kind === 'copy' && ca.gesture === 'chord' && !w.W.msgs.some((m) => m.type === 'clipboard'), 'the page\'s copy after the holder\'s Ctrl+C reaches the HOLDER, named `gesture: chord` — the other viewer gets nothing');
+  ok(gateOf(ca) && ca.text === 'Order #A-1234 可选' && ca.kind === 'copy' && ca.gesture === 'chord' && !w.W.msgs.some((m) => m.type === 'clipboard'), 'the page\'s copy after the holder\'s Ctrl+C reaches the HOLDER, named `gesture: chord` — the other viewer gets nothing');
   ok(!w.B.logs.some((l) => /A-1234/.test(l)), 'the copied text is never a journal line');
   w.K.watches[0].onCopy({ kind: 'copy', text: 'Order #A-1234 可选', length: 16 }); await sleep(40);
   ok(clips().length === 1, 'the same copy reported twice within the dedup span is one copy');
@@ -477,9 +477,9 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   ok(clips().length === 2 && w.B.bridge.stats()[0].copiesDropped === 3, `a copy ${T.COPY_GESTURE_MS} ms after the chord is stale — dropped`);
   w.U.emit({ type: 'tabs', tabs: [{ tabId: 't2', active: true, url: 'https://b.test/', title: 'b', targetId: 'TGT2' }] });
   await until(() => w.K.watches.length === 2, 2000);
-  ok(w.K.watches[0].closed && w.K.watches[1].targetId === 'TGT2', 'the watch follows the tab on show (the old one closed)');
+  ok(gateOf(w.K.watches[0].closed) && w.K.watches[1].targetId === 'TGT2', 'the watch follows the tab on show (the old one closed)');
   w.A.send({ type: 'handback' }); await until(() => w.A.msgs.some((m) => m.type === 'mode' && m.mode === 'watch'), 2000); await sleep(30);
-  ok(w.K.watches[1].closed, 'the handback ends the watch');
+  ok(verdictOf(w.K.watches[1].closed), 'the handback ends the watch');
   const before = w.A.msgs.filter((m) => m.type === 'clipboard').length; w.K.watches[1].onCopy({ kind: 'copy', text: 'late', length: 4 }); await sleep(40);
   ok(w.A.msgs.filter((m) => m.type === 'clipboard').length === before, 'a copy after the handback is nobody\'s');
   // the claim
@@ -512,7 +512,7 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   await takeover(ng.A); await until(() => ng.K.watches.length === 1, 2000);
   ng.K.watches[0].onCopy({ kind: 'copy', text: 'HIJACK-3', length: 8 });
   await until(() => ng.A.msgs.some((m) => m.type === 'clipboard'), 2000);
-  ok(ng.A.msgs.some((m) => m.type === 'clipboard' && m.text === 'HIJACK-3'), 'NEGATIVE CONTROL: without the door a copy the page fired on its own reaches the holder (the pre-verify bridge — the real-stack hijack)');
+  ok(verdictOf(ng.A.msgs.some((m) => m.type === 'clipboard' && m.text === 'HIJACK-3')), 'NEGATIVE CONTROL: without the door a copy the page fired on its own reaches the holder (the pre-verify bridge — the real-stack hijack)');
   await ng.close();
 }
 {
@@ -529,7 +529,7 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   Wv.send({ type: 'fit', width: 700, height: 450, dpr: 1, visible: true, place: { page: 'pWWWWWW', device: 'dSame01' } });
   await until(() => Wv.msgs.some((m) => m.type === 'fit' && m.state === 'fitted' && m.viewerId === A.you), 6000);
   const f1 = Wv.msgs.filter((m) => m.type === 'fit').at(-1);
-  ok(f1 && f1.viewerId === A.you && f1.place && f1.place.page === 'pAAAAAA' && FIT.fitChipState({ fit: f1, you: Wv.you, place: { page: 'pWWWWWW', device: 'dSame01' }, pane: { width: 700, height: 450 } }).where === 'this-device', 'the fit record names the ruling window\'s place ⇒ the smaller view\'s chip says "your other tab"', JSON.stringify(f1));
+  ok(gateOf(f1) && f1.viewerId === A.you && gateOf(f1.place) && f1.place.page === 'pAAAAAA' && FIT.fitChipState({ fit: f1, you: Wv.you, place: { page: 'pWWWWWW', device: 'dSame01' }, pane: { width: 700, height: 450 } }).where === 'this-device', 'the fit record names the ruling window\'s place ⇒ the smaller view\'s chip says "your other tab"', JSON.stringify(f1));
   Wv.send({ type: 'fit', width: 700, height: 450, dpr: 1, visible: true, claim: true, place: { page: 'pWWWWWW', device: 'dSame01' } });
   await until(() => sets.some((s) => s.join() === '700,450'), 4000);
   await until(() => A.msgs.some((m) => m.type === 'fit' && m.state === 'fitted' && m.viewerId === Wv.you), 3000);
@@ -629,16 +629,16 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
     pressLeg(BS),
     pressLeg(M.load('src/server/browser-stream.js', editAnchor(editAnchor(src, CB1, '    if (false) {', "src/server/browser-stream.js"), CB2, "    if (relay.fits.size) scheduleFit(relay, 'mode');", "src/server/browser-stream.js"), 'no-button-hold')),
   ]);
-  ok(a1.sets >= 1 && !a1.agent && !a1.states.includes('agent') && a1.last && a1.last.state === 'unavailable', `A1: a failed set whose command mirror lands AFTER the CLI returned is still OURS — never "the agent's size" (states ${JSON.stringify(a1.states)})`);
-  ok(a1pre.agent && a1pre.states.includes('agent'), `NEGATIVE CONTROL: the pre-fix failure path (pending dropped) reads our own late mirror as the agent's (states ${JSON.stringify(a1pre.states)} — the verifier's "Agent's size 1398×835")`);
-  ok(a2.during && a2.during.state === 'unavailable' && a2.during.code === 'held_while_driving', `A2: while somebody drives a shared browser the fit record says \`held_while_driving\` (${JSON.stringify(a2.during && { state: a2.during.state, code: a2.during.code })})`);
-  ok(a2.retried && a2.after && a2.after.state === 'fitted' && a2.after.width === 1000, `A2: the handback re-fits AT ONCE — a held size is no failure to remember (after: ${JSON.stringify(a2.after && { state: a2.after.state, w: a2.after.width })})`);
+  ok(a1.sets >= 1 && !a1.agent && !a1.states.includes('agent') && gateOf(a1.last) && a1.last.state === 'unavailable', `A1: a failed set whose command mirror lands AFTER the CLI returned is still OURS — never "the agent's size" (states ${JSON.stringify(a1.states)})`);
+  ok(gateOf(a1pre.agent) && verdictOf(a1pre.states.includes('agent')), `NEGATIVE CONTROL: the pre-fix failure path (pending dropped) reads our own late mirror as the agent's (states ${JSON.stringify(a1pre.states)} — the verifier's "Agent's size 1398×835")`);
+  ok(gateOf(a2.during) && a2.during.state === 'unavailable' && a2.during.code === 'held_while_driving', `A2: while somebody drives a shared browser the fit record says \`held_while_driving\` (${JSON.stringify(a2.during && { state: a2.during.state, code: a2.during.code })})`);
+  ok(gateOf(a2.retried) && gateOf(a2.after) && a2.after.state === 'fitted' && a2.after.width === 1000, `A2: the handback re-fits AT ONCE — a held size is no failure to remember (after: ${JSON.stringify(a2.after && { state: a2.after.state, w: a2.after.width })})`);
   ok(a2.logs.filter((l) => /keeps its size while the user drives/.test(l)).length === 1 && !a2.logs.some((l) => /could not be sized/.test(l)), 'A2: the journal says it once per takeover, never as a warning');
-  ok(!a2pre.retried && a2pre.after && a2pre.after.state === 'unavailable', 'NEGATIVE CONTROL: a held size remembered as a failure keeps the page "could not resize" after the handback (FIT_RETRY_MS — the verifier\'s stuck chip)');
+  ok(!a2pre.retried && gateOf(a2pre.after) && a2pre.after.state === 'unavailable', 'NEGATIVE CONTROL: a held size remembered as a failure keeps the page "could not resize" after the handback (FIT_RETRY_MS — the verifier\'s stuck chip)');
   ok(b.takeMs < FIT.FIT_DEBOUNCE_MS, `B: a takeover fits the driver's window AT ONCE (${b.takeMs} ms — never the ${FIT.FIT_DEBOUNCE_MS} ms debounce that put the resize under the first press)`);
-  ok(!b.duringDrag && b.stillHeld, 'B: the driver\'s window changing size while a button is held does NOT resize the page mid-drag');
+  ok(!b.duringDrag && verdictOf(b.stillHeld), 'B: the driver\'s window changing size while a button is held does NOT resize the page mid-drag');
   ok(b.upMs < FIT.FIT_DEBOUNCE_MS, `B: …the held resize runs at the release (${b.upMs} ms after it — never the ${FIT.FIT_DEBOUNCE_MS} ms debounce; the mechanism's constant, not a literal: lane mirror-flake-hardening)`);
-  ok(b.heldAgain && b.freed, 'B: a release that happened outside the picture (never forwarded) ends the hold at the next buttonless move');
+  ok(gateOf(b.heldAgain) && verdictOf(b.freed), 'B: a release that happened outside the picture (never forwarded) ends the hold at the next buttonless move');
   // the train's close (b342f2628, UTC zone): this control read 249 ms against its own 250 ms debounce. ITS LAW: without the hold
   // the fit WAITS FOR THE DEBOUNCE (it is not at once). The debounce is a Node timer, armed on libuv's loop clock — monotonic, in
   // WHOLE milliseconds, read when the loop's turn began — so it can fire up to that clock's one-millisecond grain before a
@@ -646,14 +646,14 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   // the monotonic clock (performance.now) against the debounce less the timer clock's grain — never «at once» (the legs above
   // measure that: a few ms)
   const TIMER_GRAIN_MS = 1;
-  ok(bpre.duringDrag && bpre.takeMono >= FIT.FIT_DEBOUNCE_MS - TIMER_GRAIN_MS, `NEGATIVE CONTROL: without the hold the page is resized MID-DRAG, and the takeover's fit waits ${bpre.takeMono.toFixed(1)} ms (monotonic; ≥ the ${FIT.FIT_DEBOUNCE_MS} ms debounce less the timer clock's ${TIMER_GRAIN_MS} ms grain) (the verifier's y=232 → y=361 jump)`);
+  ok(gateOf(bpre.duringDrag) && bpre.takeMono >= FIT.FIT_DEBOUNCE_MS - TIMER_GRAIN_MS, `NEGATIVE CONTROL: without the hold the page is resized MID-DRAG, and the takeover's fit waits ${bpre.takeMono.toFixed(1)} ms (monotonic; ≥ the ${FIT.FIT_DEBOUNCE_MS} ms debounce less the timer clock's ${TIMER_GRAIN_MS} ms grain) (the verifier's y=232 → y=361 jump)`);
   // PURE: the button table
   const st = (recs) => recs.reduce((d, r) => FIT.buttonStep(d, r) || d, new Set());
   ok([...st([{ type: 'input_mouse', eventType: 'mousePressed', button: 'left' }])].join() === 'mouse:left'
     && st([{ type: 'input_mouse', eventType: 'mousePressed', button: 'left' }, { type: 'input_mouse', eventType: 'mouseReleased', button: 'left' }]).size === 0
     && st([{ type: 'input_mouse', eventType: 'mousePressed', button: 'left' }, { type: 'input_mouse', eventType: 'mouseMoved', button: 'left', buttons: 1 }]).size === 1
     && st([{ type: 'input_mouse', eventType: 'mousePressed', button: 'left' }, { type: 'input_mouse', eventType: 'mouseMoved', button: 'none' }]).size === 0
-    && st([{ type: 'input_touch', eventType: 'touchStart' }]).has('touch') && st([{ type: 'input_touch', eventType: 'touchStart' }, { type: 'input_touch', eventType: 'touchEnd' }]).size === 0
+    && gateOf(st([{ type: 'input_touch', eventType: 'touchStart' }]).has('touch')) && st([{ type: 'input_touch', eventType: 'touchStart' }, { type: 'input_touch', eventType: 'touchEnd' }]).size === 0
     && FIT.buttonStep(new Set(), { type: 'input_keyboard', eventType: 'keyDown' }) === null
     && FIT.buttonStep(new Set(), { type: 'input_mouse', eventType: 'mouseWheel' }) === null, 'PURE buttonStep: press / release / a held move / a buttonless move / touch / keys and wheels say nothing');
   ok(FIT.fitHoldVerdict({ down: 1, downAt: 0, now: 100, maxMs: 15000 }) === 'hold' && FIT.fitHoldVerdict({ down: 1, downAt: 0, now: 15000, maxMs: 15000 }) === 'go' && FIT.fitHoldVerdict({ down: 0 }) === 'go', 'PURE fitHoldVerdict: hold while a button is down, never past FIT_HOLD_MAX_MS (a release that never came)');
@@ -670,12 +670,12 @@ console.log('§7 the copy watch: an isolated world + a per-arm binding over one 
   await new Promise((r) => srv.listen(port, '127.0.0.1', r));
   const got = [];
   const w = await VP.watchCopies(`ws://127.0.0.1:${port}/devtools/browser/x`, { targetId: 'TGT1', onCopy: (c) => got.push(c), nonce: 'abc123' });
-  ok(w.ok && w.targetId === 'TGT1' && path0 === '/devtools/page/TGT1', 'the watch opens the stream\'s ACTIVE tab by its targetId (not the first page)');
+  ok(gateOf(w.ok) && w.targetId === 'TGT1' && path0 === '/devtools/page/TGT1', 'the watch opens the stream\'s ACTIVE tab by its targetId (not the first page)');
   const m = (name) => calls.filter((c) => c.method === name);
   ok(m('Runtime.addBinding').length === 1 && m('Runtime.addBinding')[0].params.name === '__vsCopy_abc123' && m('Runtime.addBinding')[0].params.executionContextName === 'vs-copy-abc123', 'one binding, per arm, exposed ONLY to the isolated world (the page never sees it)');
   const add = m('Page.addScriptToEvaluateOnNewDocument')[0];
-  ok(add && add.params.worldName === 'vs-copy-abc123' && add.params.runImmediately === true && /'copy', 'cut'/.test(add.params.source) && /password/.test(add.params.source), 'the script runs in that world on every new document: copy + cut listeners, never a password field');
-  ok(m('Page.createIsolatedWorld').length === 2 && m('Runtime.evaluate').every((c) => c.params.contextId >= 70), 'the frames already there get the world too (the main frame and a same-origin one)');
+  ok(gateOf(add) && add.params.worldName === 'vs-copy-abc123' && add.params.runImmediately === true && gateOf(/'copy', 'cut'/.test(add.params.source)) && verdictOf(/password/.test(add.params.source)), 'the script runs in that world on every new document: copy + cut listeners, never a password field');
+  ok(m('Page.createIsolatedWorld').length === 2 && verdictOf(m('Runtime.evaluate').every((c) => c.params.contextId >= 70)), 'the frames already there get the world too (the main frame and a same-origin one)');
   sock.send(JSON.stringify({ method: 'Runtime.bindingCalled', params: { name: '__vsCopy_abc123', payload: JSON.stringify({ kind: 'copy', text: '订单号 123', length: 6 }) } }));
   sock.send(JSON.stringify({ method: 'Runtime.bindingCalled', params: { name: '__vsCopy_zzz', payload: JSON.stringify({ kind: 'copy', text: 'forged', length: 6 }) } }));
   sock.send(JSON.stringify({ method: 'Runtime.bindingCalled', params: { name: '__vsCopy_abc123', payload: 'not json' } }));
@@ -712,15 +712,15 @@ async function recLeg(Rmod) {
 }
 {
   const r = await recLeg(RT);
-  ok(r.execs === 1 && r.recording && !r.refused, `the attach, the record-on fan-out and a third ask at once ⇒ ONE \`record start\` (${r.execs}), recording, NO refusal`, JSON.stringify(r));
-  ok(r.again && r.again.ok && r.again.already === true, 'a second ask while the first is starting answers with THAT start (already: true)');
+  ok(r.execs === 1 && gateOf(r.recording) && !r.refused, `the attach, the record-on fan-out and a third ask at once ⇒ ONE \`record start\` (${r.execs}), recording, NO refusal`, JSON.stringify(r));
+  ok(gateOf(r.again) && gateOf(r.again.ok) && r.again.already === true, 'a second ask while the first is starting answers with THAT start (already: true)');
   const src = read('src/server/browser-trace.js');
   const C = '    if (recStarting.has(key)) return recStarting.get(key).then((x) => (x && x.ok ? { ...x, already: true } : x));';
   ok(src.split(C).length === 2, 'control setup: the single flight is found once');
   const G = '      if (!recordings.has(key)) { recordingRefusals.set(profileId, { code, error, at: now() });';
   ok(src.split(G).length === 2, 'control setup: the real-refusal guard is found once');
   const c = await recLeg(M.load('src/server/browser-trace.js', editAnchor(editAnchor(src, C, '', "src/server/browser-trace.js"), G, '      if (true) { recordingRefusals.set(profileId, { code, error, at: now() });', "src/server/browser-trace.js"), 'pre-fix-recording'));
-  ok(c.execs >= 2 && c.recording && c.refused && c.refused.code === 'record_failed', `NEGATIVE CONTROL: the pre-fix start (no single flight, a loser's failure always written) — ${c.execs} starts race and the digest carries a refusal BESIDE the live recording (the owner's journal: "record start failed" 106 ms after "recording …")`, JSON.stringify(c));
+  ok(c.execs >= 2 && gateOf(c.recording) && gateOf(c.refused) && c.refused.code === 'record_failed', `NEGATIVE CONTROL: the pre-fix start (no single flight, a loser's failure always written) — ${c.execs} starts race and the digest carries a refusal BESIDE the live recording (the owner's journal: "record start failed" 106 ms after "recording …")`, JSON.stringify(c));
 }
 
 // ═══ §9 WIRING PINS ═══════════════════════════════════════════════════════════
@@ -749,24 +749,24 @@ console.log('§9 wiring pins: the client and the keeper\'s journal');
     [/renderMode\(\); renderFit\(\); \/\/ builder r2/, 'a mode change re-words the fit chip'],
     [/echo\(true, t\('copied in the page — use the button on the bar to put it on your clipboard'\)/, 'the copy echo points at the button, never a half-quote of it'],
   ];
-  for (const [re, name] of pins) ok(re.test(lw), name);
+  for (const [re, name] of pins) ok(verdictOf(re.test(lw)), name);
   ok(!/textRecords\(/.test(lw) && !/FIT_WORDS/.test(lw), 'the pre-fix paths are gone (the client never cuts text into char records; the old chip words)');
   ok(!/gestureAt/.test(lw) && !/clipboardDelivery/.test(lw), 'verify: a press stamps NO copy gesture on the client (the pre-verify `gestureAt` / clipboardDelivery path is gone — any click had opened a 5 s window for a page\'s copy)');
   // the negative control: the pre-lane client's paste path (a patched copy of the text) fails the first pin
   const pre = lw.replace('const r = inputTextRecord(text);', 'const r = textRecords(text);');
   ok(!/const r = inputTextRecord\(text\);/.test(pre), 'NEGATIVE CONTROL: the pre-fix paste path (textRecords in the client) is caught by the pin');
   const kp = read('src/server/browser-keeper.js');
-  ok(/if \(d\.created \|\| d\.resumed\) log\.log\?\.\(`\[browser\] \$\{browserKey\}/.test(kp) && !/'already holds'/.test(kp), 'the journal says a lease only when the holder CHANGES (never "already holds" on every agent command)');
-  ok(/\$\{d\.state\.url \? ' at ' \+ T\.urlForLog\(d\.state\.url\) : ''\}/.test(kp), 'the handback line prints the page\'s origin + path (urlForLog), never its query');
+  ok(gateOf(/if \(d\.created \|\| d\.resumed\) log\.log\?\.\(`\[browser\] \$\{browserKey\}/.test(kp)) && !/'already holds'/.test(kp), 'the journal says a lease only when the holder CHANGES (never "already holds" on every agent command)');
+  ok(verdictOf(/\$\{d\.state\.url \? ' at ' \+ T\.urlForLog\(d\.state\.url\) : ''\}/.test(kp)), 'the handback line prints the page\'s origin + path (urlForLog), never its query');
   ok(!/'Fit the page to this window'/.test(lw), 'the folded fit row\'s old words are gone');
-  ok(/\.browser-live-bar > \.file-tool-btn\.browser-live-copy \{ color: var\(--accent\); border-color:/.test(read('public/style.css')), 'the copy chip is drawn as a button to press (the accent border of an actionable fit chip)');
+  ok(verdictOf(/\.browser-live-bar > \.file-tool-btn\.browser-live-copy \{ color: var\(--accent\); border-color:/.test(read('public/style.css'))), 'the copy chip is drawn as a button to press (the accent border of an actionable fit chip)');
   const vh = kp.indexOf("const held = { ok: false, code: 'held_while_driving'"), vx = kp.indexOf('r = await rt.exec(M.mediatedNamespace(p.id, bk), argv');
-  ok(vh > 0 && vx > vh && /if \(inputStateFor\(bk, p\.id\)\.input === 'user'\) return held;/.test(kp.slice(vh, vx)), 'the keeper answers `held_while_driving` for a SHARED browser somebody drives BEFORE spawning a CLI the fence would refuse');
-  ok(/\.includes\(M\.INTERRUPTED_CODE\)\) return held;/.test(kp), '…and a set the takeover interrupted in flight gets the same verdict');
+  ok(vh > 0 && vx > vh && verdictOf(/if \(inputStateFor\(bk, p\.id\)\.input === 'user'\) return held;/.test(kp.slice(vh, vx))), 'the keeper answers `held_while_driving` for a SHARED browser somebody drives BEFORE spawning a CLI the fence would refuse');
+  ok(verdictOf(/\.includes\(M\.INTERRUPTED_CODE\)\) return held;/.test(kp)), '…and a set the takeover interrupted in flight gets the same verdict');
 }
 
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 10, label: 'live-input controls: ' })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 10, label: 'live-input controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 for (const fn of cleanups) { try { await fn(); } catch { } }
 console.log(`\n(${Date.now() - t0} ms)`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

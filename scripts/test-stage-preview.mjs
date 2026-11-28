@@ -27,7 +27,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
 const wt = scratch('stage-smoke'), home = scratch('stage-smoke-home'), chromeDir = scratch('stage-smoke-chrome');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // B-ddc5 (test-window-menu's shape): the stop is installed BEFORE the worktree add — a signal during the add, the copy or the build no
@@ -100,7 +100,7 @@ try {
   // enable the stage + settle
   await evalJs(`app.settings.set('desktop.dynamicEnabled', true)`);
   await sleep(600);
-  check('stage enabled', await evalJs('!!(app.stage && app.stage.enabled)'));
+  check('stage enabled', verdictOf(await evalJs('!!(app.stage && app.stage.enabled)')));
 
   // one shell terminal window on the home desktop at a KNOWN position
   await evalJs(`app.openShellTerminal(${JSON.stringify(wt)})`);
@@ -131,7 +131,7 @@ try {
     if (await evalJs(`!!app.wm.windows.get(${JSON.stringify(winId)})?._onStage`)) break;
     await sleep(250);
   }
-  check('hero materialized on the stage', await evalJs(`!!app.wm.windows.get(${JSON.stringify(winId)})?._onStage`));
+  check('hero materialized on the stage', verdictOf(await evalJs(`!!app.wm.windows.get(${JSON.stringify(winId)})?._onStage`)));
   const slotLeft = await evalJs('app.stage.slotBounds().left');
   await evalJs('app.desktopManager.refreshSwitcher()');
   await sleep(300);
@@ -151,8 +151,8 @@ try {
   check('BLANK FIX: active desktop preview has window rects right after leave()', rightAfter >= 1, `rects=${rightAfter}`);
   const backHome = await rectOf(winId);
   check('hero back at home bounds in preview after leave', !!backHome && backHome.left === '10%', JSON.stringify(backHome));
-  check('hero window visible again', await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(winId)});
-    return !!w && !w._hiddenByDesktop && !w._hiddenByStage && w.element.style.visibility !== 'hidden'; })()`));
+  check('hero window visible again', verdictOf(await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(winId)});
+    return !!w && !w._hiddenByDesktop && !w._hiddenByStage && w.element.style.visibility !== 'hidden'; })()`)));
 } catch (e) {
   failed++; console.error('  ✗ harness threw:', e.message);
 } finally {
@@ -161,4 +161,4 @@ try {
 
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nstage preview smoke passed — no ghost at slot position, no blank preview after leave');
-process.exit(0);
+process.exit(0); import { verdictOf } from './lib/check.mjs';

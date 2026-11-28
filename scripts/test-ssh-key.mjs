@@ -19,7 +19,7 @@ const { prepareImportedKey } = require('../src/ssh-key');
 const { HostManager } = require('../src/hosts');
 
 let pass = 0, fail = 0;
-const ok = (name, cond, extra = '') => {
+const ok = (name, cond, extra = '') => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ok   ${name}`); }
   else { fail++; console.log(`  FAIL ${name}${extra ? ' — ' + extra : ''}`); }
 };
@@ -48,7 +48,7 @@ try {
   // ── 1. classifier ───────────────────────────────────────────────────────
   console.log('\n[1] classifyPrivateKey — real keys');
   const encInfo = classifyPrivateKey(read('ed_enc'));
-  ok('encrypted openssh-v1 detected (armor says nothing!)', encInfo.encrypted && encInfo.format === 'openssh-v1' && encInfo.usable);
+  ok('encrypted openssh-v1 detected (armor says nothing!)', gateOf(encInfo.encrypted) && encInfo.format === 'openssh-v1' && verdictOf(encInfo.usable));
   ok('…and the word ENCRYPTED really is absent from it', !/ENCRYPTED/.test(read('ed_enc')));
   ok('…so the OLD first-3-lines /ENCRYPTED/ check would have missed it',
     !/ENCRYPTED/.test(read('ed_enc').split('\n').slice(0, 3).join('\n')));
@@ -56,9 +56,9 @@ try {
   ok('plain openssh-v1', classifyPrivateKey(read('ed_plain')).encrypted === false);
   ok('rsa openssh-v1 encrypted', classifyPrivateKey(read('rsa_enc')).encrypted === true);
   const pem = classifyPrivateKey(read('rsa_pem'));
-  ok('classic PEM encrypted', pem.format === 'pem' && pem.encrypted && pem.usable, JSON.stringify(pem));
-  ok('pkcs8 encrypted', (() => { const i = classifyPrivateKey(read('pkcs8_enc.pem')); return i.format === 'pkcs8' && i.encrypted; })());
-  ok('pkcs8 plain', (() => { const i = classifyPrivateKey(read('pkcs8_plain.pem')); return i.format === 'pkcs8' && !i.encrypted; })());
+  ok('classic PEM encrypted', pem.format === 'pem' && gateOf(pem.encrypted) && verdictOf(pem.usable), JSON.stringify(pem));
+  ok('pkcs8 encrypted', verdictOf((() => { const i = classifyPrivateKey(read('pkcs8_enc.pem')); return i.format === 'pkcs8' && i.encrypted; })()));
+  ok('pkcs8 plain', verdictOf((() => { const i = classifyPrivateKey(read('pkcs8_plain.pem')); return i.format === 'pkcs8' && !i.encrypted; })()));
 
   console.log('\n[1b] classifyPrivateKey — hostile input (must never throw)');
   const enc = read('ed_enc');
@@ -82,7 +82,7 @@ try {
   for (const [name, [input, check]] of Object.entries(hostile)) {
     let r, threw = null;
     try { r = classifyPrivateKey(input); } catch (e) { threw = e; }
-    ok(`hostile:${name}`, !threw && check(r), threw ? 'THREW ' + threw.message : JSON.stringify(r));
+    ok(`hostile:${name}`, !threw && verdictOf(check(r)), threw ? 'THREW ' + threw.message : JSON.stringify(r));
   }
 
   // ── 2. unlock with the CORRECT passphrase ───────────────────────────────
@@ -122,9 +122,9 @@ try {
   // ── 6. other encrypted formats ──────────────────────────────────────────
   console.log('\n[6] prepareImportedKey — PEM / PKCS#8');
   const r6 = await prepareImportedKey(read('rsa_pem'), 'pempass');
-  ok('classic PEM unlocks (re-serialized to openssh-v1)', r6.wasEncrypted && classifyPrivateKey(r6.body).format === 'openssh-v1');
+  ok('classic PEM unlocks (re-serialized to openssh-v1)', gateOf(r6.wasEncrypted) && classifyPrivateKey(r6.body).format === 'openssh-v1');
   const r7 = await prepareImportedKey(read('pkcs8_enc.pem'), 'pk8pass');
-  ok('PKCS#8 unlocks', r7.wasEncrypted && classifyPrivateKey(r7.body).encrypted === false);
+  ok('PKCS#8 unlocks', gateOf(r7.wasEncrypted) && classifyPrivateKey(r7.body).encrypted === false);
   const r8 = await prepareImportedKey(read('rsa_enc'), 'rsapass');
   eq('rsa openssh-v1 type', r8.type, 'RSA');
 
@@ -159,22 +159,22 @@ try {
 
   const id = hm.add({ name: 'good', user: 'u', host: 'h', privateKey: r1.body });
   const rec = hm.get(id);
-  ok('unlocked key stored', !!rec.keyPath && fs.existsSync(rec.keyPath));
+  ok('unlocked key stored', !!rec.keyPath && verdictOf(fs.existsSync(rec.keyPath)));
   eq('mode 0600', (fs.statSync(rec.keyPath).mode & 0o777).toString(8), '600');
   eq('keySource', rec.keySource, 'imported');
-  ok('stored key is usable without prompting', (() => {
+  ok('stored key is usable without prompting', verdictOf((() => {
     try {
       const outPub = execFileSync('ssh-keygen', ['-y', '-f', rec.keyPath],
         { env: { PATH: process.env.PATH, HOME: DATA, SSH_ASKPASS: '/nonexistent', SSH_ASKPASS_REQUIRE: 'force', DISPLAY: '' }, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
       return outPub.startsWith('ssh-ed25519');
     } catch { return false; }
-  })());
+  })()));
 
   // name collision must not orphan a key file (old order wrote-then-threw)
   const filesBefore = fs.readdirSync(sshDir).length;
   let e4 = null;
   try { hm.add({ name: 'good', user: 'u', host: 'h2', privateKey: r5.body }); } catch (e) { e4 = e; }
-  ok('duplicate name rejected', !!e4 && /exists/.test(e4.message));
+  ok('duplicate name rejected', !!e4 && verdictOf(/exists/.test(e4.message)));
   eq('…with no orphaned key file', fs.readdirSync(sshDir).length, filesBefore);
 
   // ── 10. the passphrase is nowhere on disk ───────────────────────────────
@@ -230,7 +230,7 @@ try {
       keys: { 'host-aaa': read('ed_enc') },
     });
     ok('a warning is returned', !!res.warnings && res.warnings.length === 1, JSON.stringify(res));
-    ok('warning names the host', /boxA/.test(res.warnings[0]), res.warnings[0]);
+    ok('warning names the host', verdictOf(/boxA/.test(res.warnings[0])), res.warnings[0]);
     ok('no encrypted key written', !fs.existsSync(path.join(DATA2, 'ssh', 'host-aaa.key')));
     eq('keySource downgraded', hm2.get('host-aaa').keySource, 'default');
     eq('keyPath cleared', hm2.get('host-aaa').keyPath, null);
@@ -238,11 +238,11 @@ try {
       hosts: [{ id: 'host-bbb', name: 'boxB', user: 'u', host: 'h', port: 22, keyPath: path.join(DATA2, 'ssh', 'host-bbb.key'), keySource: 'imported' }],
       keys: { 'host-bbb': plain },
     });
-    ok('plain key still imports with no warning', res2.warnings.length === 0 && fs.existsSync(path.join(DATA2, 'ssh', 'host-bbb.key')));
+    ok('plain key still imports with no warning', res2.warnings.length === 0 && verdictOf(fs.existsSync(path.join(DATA2, 'ssh', 'host-bbb.key'))));
   } finally { fs.rmSync(DATA2, { recursive: true, force: true }); }
 } finally {
   cleanup();
 }
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+process.exit(fail === 0 ? 0 : 1); import { verdictOf, gateOf } from './lib/check.mjs';

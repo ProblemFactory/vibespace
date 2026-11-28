@@ -43,7 +43,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1800) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1800) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -220,7 +220,7 @@ else await (async () => {
   const srv = spawn(process.execPath, ['server.js'], { cwd: WT, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: HOME_DIR, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 200), 'the scratch server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 200)), 'the scratch server booted', journal.slice(-800))) return;
   const api = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? J(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   const made = await api('POST', '/api/browser/profiles', { label: 'shopping' });
   const REAL = made.json && made.json.profile && made.json.profile.id;
@@ -328,7 +328,7 @@ else await (async () => {
         for (const v of VIEWS) {
           const leg = `${v.name}-${lang}-${vp.tag}`;
           await listDriver(!!v.listDriver);
-          if (!ok(await openDialog(v.pid, v.preselect || null), `${leg}: the dialog opened on its view`)) continue;
+          if (!ok(verdictOf(await openDialog(v.pid, v.preselect || null)), `${leg}: the dialog opened on its view`)) continue;
           // the face, proven once per run on the dialog's own h3
           if (!fontProof && lang === 'en') {
             await send('DOM.enable'); await send('CSS.enable');
@@ -338,7 +338,7 @@ else await (async () => {
             const n = await send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: '.window[data-form="browser-switcher-dialog"] .window-title, #browser-switcher-dialog .dialog-header h3' });
             const f = n.result && n.result.nodeId ? await send('CSS.getPlatformFontsForNode', { nodeId: n.result.nodeId }) : null;
             fontProof = ((f && f.result && f.result.fonts) || []).map((x) => x.familyName).join(' + ');
-            ok(/DejaVu Sans/.test(fontProof), `the dialog is drawn in DejaVu Sans (the platform font of its title: ${fontProof})`);
+            ok(verdictOf(/DejaVu Sans/.test(fontProof)), `the dialog is drawn in DejaVu Sans (the platform font of its title: ${fontProof})`);
           }
           const title = await q('#browser-switcher-dialog .dialog-header h3');
           const want = tr(lang, 'Browser for “{label}”', P);
@@ -394,7 +394,7 @@ else await (async () => {
             await record(`${leg}-details`, lang, vp);
             await evaluate(`document.querySelector('#browser-switcher-dialog .brsw-claim .brsw-actions button').click()`);
             const closed = await evaluate(`(() => { const d = document.querySelector(${J(det)}); const b = document.querySelector('#browser-switcher-dialog .brsw-claim .brsw-actions button'); return { hidden: !d || d.hidden, label: b ? b.textContent : null }; })()`);
-            ok(first === tr(lang, 'Details') && !opened.hidden && opened.text === FX.CLAIM.evidence && opened.label === tr(lang, 'Hide details') && kept && closed.hidden && closed.label === tr(lang, 'Details'),
+            ok(first === tr(lang, 'Details') && !opened.hidden && opened.text === FX.CLAIM.evidence && opened.label === tr(lang, 'Hide details') && gateOf(kept) && gateOf(closed.hidden) && closed.label === tr(lang, 'Details'),
               `${leg}: Details opens the agent's evidence, a forced refresh keeps it open, Hide details closes it`, J({ first, opened, kept, closed }));
             await clearToasts();
             await evaluate(`window.__brsw.answers.dismiss.push({ status: 200, body: { removed: false } })`);
@@ -414,7 +414,7 @@ else await (async () => {
             const back = await until(() => evaluate(`(() => { const e = document.querySelector('#browser-switcher-dialog .brsw-target'); return e && e.dataset.state === 'ready'; })()`), 4000);
             ok(mid === tr(lang, 'Switching to {name}… You can close this window; the switch goes on.', P) && posted.length === 1 && posted[0].provider === FX.FIXTURE_ID && posted[0].profile === 'fx-ready' && !('makeDefault' in posted[0]),
               `${leg}: the click shows the switching line and NO card before the POST answers (one POST, no makeDefault)`, J({ mid, posted }));
-            ok(t1 === tr(lang, "{to} didn't start. “{label}” is back on {from}.", { to: 'Fixture Browser', from: 'Chromium', label: 'shopping' }) && back, `${leg}: launch_failed + restored ⇒ "is back on" ("${t1}"), and the card is back in ready`);
+            ok(t1 === tr(lang, "{to} didn't start. “{label}” is back on {from}.", { to: 'Fixture Browser', from: 'Chromium', label: 'shopping' }) && verdictOf(back), `${leg}: launch_failed + restored ⇒ "is back on" ("${t1}"), and the card is back in ready`);
             await clearToasts();
             await evaluate(`(() => { window.__brsw.answers.switch.push({ status: 409, body: { error: 'fixture-browser needs a key and none is configured for cloud:browserbase', code: 'backend_no_key', restored: false, from: 'chromium', to: 'fixture-browser' } }); return true; })()`);
             await click('#browser-switcher-dialog .brsw-target .brsw-actions button');
@@ -427,12 +427,12 @@ else await (async () => {
             await click('#browser-switcher-dialog .brsw-target .brsw-actions button');
             const cf = await until(() => evaluate(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].find((x) => x.id !== 'browser-switcher-dialog'); if (!o) return null; return { title: o.querySelector('h3').textContent, ok: o.querySelector('.dialog-footer button:last-child').textContent, danger: o.querySelector('.dialog-footer button:last-child').classList.contains('danger') }; })()`), 3000, 40);
             if (cf) { await evaluate(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].find((x) => x.id !== 'browser-switcher-dialog'); o.id = 'vs-brsw-confirm'; return true; })()`); await record(`${leg}-confirm`, lang, vp, { sel: '#vs-brsw-confirm .dialog', dialogBox: false }); await click('#vs-brsw-confirm .btn-cancel'); }
-            ok(cf && cf.title === tr(lang, 'Switch to {name}?', P) && cf.ok === tr(lang, 'Switch anyway') && cf.danger && (await calls('switch')) === n0, `${leg}: the click asks ONE question in the house confirm ("${cf && cf.ok}"), nothing posted on Cancel`, J(cf));
+            ok(gateOf(cf) && cf.title === tr(lang, 'Switch to {name}?', P) && cf.ok === tr(lang, 'Switch anyway') && gateOf(cf.danger) && (await calls('switch')) === n0, `${leg}: the click asks ONE question in the house confirm ("${cf && cf.ok}"), nothing posted on Cancel`, J(cf));
           }
           if (v.name === 'all-in-use-own') {
             await click('#browser-switcher-dialog .brsw-target .brsw-actions button');
             const pn = await until(() => evaluate(`(() => ({ panel: !!document.querySelector('.bprof'), dialog: !!document.getElementById('browser-switcher-dialog') }))()`).then((x) => (x.panel ? x : null)), 5000);
-            ok(pn && pn.panel && !pn.dialog, `${leg}: "Open Agent browser…" closes the dialog and opens the Agent browser panel`, J(pn));
+            ok(gateOf(pn) && gateOf(pn.panel) && !pn.dialog, `${leg}: "Open Agent browser…" closes the dialog and opens the Agent browser panel`, J(pn));
             await evaluate(`(() => { for (const id of [...window.app.wm.windows.keys()]) { try { window.app.wm.closeWindow(id); } catch {} } return true; })()`);
           }
           if (v.name === 'driven') ok((await evaluate(`document.querySelectorAll('#browser-switcher-dialog .brsw-target .brsw-actions button').length`)) === 0, `${leg}: driven by hand with no listed session holding the driver ⇒ the sentence and NO button`);
@@ -452,7 +452,7 @@ else await (async () => {
             const t1 = await toastText('info');
             const hb = await evaluate(`window.__brsw.calls.filter((c) => c.kind === 'handback').map((c) => c.body)`);
             const still = await until(async () => ((await calls('view')) > v0 ? await evaluate(`!!document.getElementById('browser-switcher-dialog')`) : null), 3000, 40);
-            ok(sentence === tr(lang, "You're driving this browser by hand in the live view. Once you hand it back to your agent, you can switch.") && hb.length >= 1 && hb[hb.length - 1].sessionId === 'w-drv' && hb[hb.length - 1].profile === 'fx-driven' && t1 === tr(lang, 'Control handed back to the agent') && still,
+            ok(sentence === tr(lang, "You're driving this browser by hand in the live view. Once you hand it back to your agent, you can switch.") && hb.length >= 1 && hb[hb.length - 1].sessionId === 'w-drv' && hb[hb.length - 1].profile === 'fx-driven' && t1 === tr(lang, 'Control handed back to the agent') && verdictOf(still),
               `${leg}: "Hand it back to your agent" hands it back from the dialog (POST {sessionId, profile}), says so, and the dialog stays open and re-reads its view`, J({ sentence, hb, t1, still }));
             await clearToasts();
             await evaluate(`window.__brsw.answers.handback.push({ status: 409, body: { error: 'this session is not attached to "fx-driven"', code: 'not_attached' } })`);
@@ -484,18 +484,18 @@ else await (async () => {
     if (ok(mutated !== msrc, 'CONTROL (2): the mutation applied to its copy (the anchor exists)')) {
       await buildBundle(MUT.write('src/lib/browser-switcher-model.js', mutated, 'echo', { esm: true }));
       await load('en', VPS[0]);
-      if (ok(await openDialog('fx-needs-key'), 'CONTROL (2): the patched bundle opened the needs-key view')) {
+      if (ok(verdictOf(await openDialog('fx-needs-key')), 'CONTROL (2): the patched bundle opened the needs-key view')) {
         const c2 = await record('control-2-patched-model-needs-key-en-w1280', 'en', VPS[0]);
         tally.legs--;
-        ok(c2.probs.some((p) => /developer word/.test(p)), `CONTROL (2): the server's own sentence on the card ⇒ the developer-word census goes red (${c2.probs.filter((p) => /developer word/.test(p)).slice(0, 1).join('')})`, c2.probs.slice(0, 3).join('; '));
+        ok(verdictOf(c2.probs.some((p) => /developer word/.test(p))), `CONTROL (2): the server's own sentence on the card ⇒ the developer-word census goes red (${c2.probs.filter((p) => /developer word/.test(p)).slice(0, 1).join('')})`, c2.probs.slice(0, 3).join('; '));
       }
     }
   } catch (e) {
     ok(false, 'the suite ran to its end', (e && (e.stack || e.message)) + '\n' + journal.slice(-1200));
   }
-  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
   console.log(`  artifacts: ${fs.readdirSync(SHOTS).filter((f) => f.endsWith('.png')).length} PNG + JSON in ${SHOTS}`);
 })();
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

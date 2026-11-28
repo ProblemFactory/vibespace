@@ -13,7 +13,7 @@ import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
@@ -43,11 +43,11 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 // ── 2. the wire: the server must TELL the client (boot + live) ──
 {
-  ok('server exposes the effective instance URL on app.locals', read('server.js').includes("Object.defineProperty(app.locals, 'instancePublicUrl'"));
-  ok('/api/home carries it to the client', read('src/routes/files.js').includes('instancePublicUrl: req.app.locals.instancePublicUrl'));
+  ok('server exposes the effective instance URL on app.locals', verdictOf(read('server.js').includes("Object.defineProperty(app.locals, 'instancePublicUrl'")));
+  ok('/api/home carries it to the client', verdictOf(read('src/routes/files.js').includes('instancePublicUrl: req.app.locals.instancePublicUrl')));
   const app = read('src/lib/app.js');
-  ok('the client stores it at boot', app.includes('setInstanceUrl(d.instancePublicUrl'));
-  ok('and follows the LIVE broadcast (mapping can flip with the tab open)', /msg\.type === 'instance-url'.*setInstanceUrl\(msg\.status\?\.effectiveUrl/.test(app));
+  ok('the client stores it at boot', verdictOf(app.includes('setInstanceUrl(d.instancePublicUrl')));
+  ok('and follows the LIVE broadcast (mapping can flip with the tab open)', verdictOf(/msg\.type === 'instance-url'.*setInstanceUrl\(msg\.status\?\.effectiveUrl/.test(app)));
 }
 
 // ── 3. every surface that hands a link to a human goes through it ──
@@ -60,7 +60,7 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   };
   for (const [f, what] of Object.entries(surfaces)) {
     const src = read(f);
-    ok(`${what}: uses the shared helper`, /absUrl|absUrlShared/.test(src), f);
+    ok(`${what}: uses the shared helper`, verdictOf(/absUrl|absUrlShared/.test(src)), f);
     ok(`${what}: NEGATIVE — no hand-rolled location.origin join left`, !/location\.origin\s*\+/.test(src) && !/\$\{location\.origin\}\$\{/.test(src), f);
   }
   // sibling sweep (the standing rule): device pairing hands an installer
@@ -71,13 +71,13 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   // instance URL / relay among them, GET /api/device/dial-addresses) and the command is built from the address the
   // user picked (`r.httpBase`), never from the browser's origin behind their back
   const fill = sm.slice(sm.indexOf('_fillPairCommandBody(body, close, r'), sm.indexOf('async _showDevicePairDialog('));
-  ok('device-pair installer is built from the CHOSEN address (r.httpBase), never location.origin', /const httpBase = String\(r\.httpBase \|\| ''\)/.test(fill) && !/location\.origin/.test(fill));
+  ok('device-pair installer is built from the CHOSEN address (r.httpBase), never location.origin', gateOf(/const httpBase = String\(r\.httpBase \|\| ''\)/.test(fill)) && !/location\.origin/.test(fill));
   const mpw = read('src/server/mounts-plugins-wiring.js');
-  ok('…and the relay / instance URL is one of the offered addresses (the instance-url resolver\'s effective URL)', /app\.get\('\/api\/device\/dial-addresses'[\s\S]{0,900}instanceUrl\?\.status\?\.\(\)[\s\S]{0,200}effectiveUrl/.test(mpw));
+  ok('…and the relay / instance URL is one of the offered addresses (the instance-url resolver\'s effective URL)', verdictOf(/app\.get\('\/api\/device\/dial-addresses'[\s\S]{0,900}instanceUrl\?\.status\?\.\(\)[\s\S]{0,200}effectiveUrl/.test(mpw)));
   // the design row must prefer the server's absolute url over re-joining a path
   const sb = read('src/lib/chat-status-bar.js');
-  ok('design row prefers the SERVER-resolved url (it was preferring the relative path)', /const abs = \(p\) => absUrl\(p\.url \|\| p\.path\)/.test(sb), 'abs() shape changed');
+  ok('design row prefers the SERVER-resolved url (it was preferring the relative path)', verdictOf(/const abs = \(p\) => absUrl\(p\.url \|\| p\.path\)/.test(sb)), 'abs() shape changed');
   ok('and no call site passes a bare path any more', !sb.includes('abs(p.path || p.url)'));
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

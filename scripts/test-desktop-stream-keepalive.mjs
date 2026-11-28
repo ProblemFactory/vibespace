@@ -28,7 +28,7 @@ const MUTK = mutantCopies('dka', repo);
 const WebSocket = require(path.join(repo, 'node_modules/ws'));
 const DS = { ...require(path.join(repo, 'src/server/desktop-stream.js')), ...require(path.join(repo, 'src/server/stream-relay-rfb.js')), ...require(path.join(repo, 'src/server/stream-relay-xpra.js')) } /* F-B4: the relays' classifiers live in their own modules */;
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -118,10 +118,10 @@ console.log('§1 a browser that answers pings stays connected; the bridge logs t
   ws.on('message', (m) => { if (String(m).startsWith('RFB')) gotRfb = true; });
   await new Promise((r) => ws.on('open', r));
   await sleep(PING * 4 + 30);
-  ok('the bridge relays the server greeting to the browser', gotRfb);
+  ok('the bridge relays the server greeting to the browser', verdictOf(gotRfb));
   ok(`the bridge pinged ≥ 3 times in 4 rounds (${pings})`, pings >= 3);
   ok('an answering client is still open after 4 rounds', ws.readyState === 1);
-  ok('the open was logged with the target', logs.some((l) => /desktop-singleton: bridge opened → 127\.0\.0\.1:\d+/.test(l)), logs);
+  ok('the open was logged with the target', verdictOf(logs.some((l) => /desktop-singleton: bridge opened → 127\.0\.0\.1:\d+/.test(l))), logs);
   ws.close(1000, 'bye');
   await sleep(80);
   const closeLine = logs.find((l) => /desktop-singleton: closed \(the browser closed, code 1000 bye\) after \d+s, \d+ B to the browser, \d+ B to the server/.test(l));
@@ -152,7 +152,7 @@ console.log('§3 the VNC server dropping its socket closes the browser side and 
   held[held.length - 1].destroy();
   await sleep(120);
   ok('the browser socket closed', closed != null, closed);
-  ok('…and the log names the VNC server side', logs.slice(before).some((l) => /closed \(the VNC server closed its socket\)/.test(l)), logs.slice(before));
+  ok('…and the log names the VNC server side', verdictOf(logs.slice(before).some((l) => /closed \(the VNC server closed its socket\)/.test(l))), logs.slice(before));
 }
 
 // (§4 the client's reconnect opt-in pin — MOVED to the fast scripts/test-desktop-stream-keepalive-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -162,7 +162,7 @@ console.log('§6 lane desktop-keepalive (userW inc-muoshmqn-dect, "no pong for 4
   const RATE = 512 * 1024;
   const r = await slowReaderLeg(DS);
   ok(`a live browser reading at ${RATE / 1024} KiB/s behind a full queue (it asks for the next update as noVNC does) is NOT cut after 12 rounds (read ${Math.round(r.live.got / 1024)} KiB, ${r.live.pings} pings seen — they wait in the queue)`, !r.live.cut, r.live);
-  ok(`a path that acknowledges nothing (no pong, no bytes from the browser, no progress) is cut and NAMED within ${DS.SILENT_ROUNDS_TO_CUT} + 1 rounds`, r.dead.named && r.dead.inTime, r.dead);
+  ok(`a path that acknowledges nothing (no pong, no bytes from the browser, no progress) is cut and NAMED within ${DS.SILENT_ROUNDS_TO_CUT} + 1 rounds`, gateOf(r.dead.named) && verdictOf(r.dead.inTime), r.dead);
   // CONTROL: the pre-lane rule (a pong or nothing) on the same path cuts the live reader — the bug, reproduced
   // the rule lives in src/ws-keepalive.js since the 2.369.202 integration (THE ONE keepalive both bridges arm, lane
   // stream-ping): the control patches IT and loads a bridge copy that requires the patched copy
@@ -171,11 +171,11 @@ console.log('§6 lane desktop-keepalive (userW inc-muoshmqn-dect, "no pong for 4
   const src = fsm.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
   const needle = "  if (pong || Number(inbound) > 0) return 'alive';\n  if (Number(queuedBefore) > 0 && Number(wroteNow) > Number(wroteBefore)) return 'draining';";
   const kaReq = "require('../ws-keepalive.js')";
-  ok('control: the liveness rule\'s needle is in the shipped source (src/ws-keepalive.js), and the bridge requires it once', kaSrc.includes(needle) && src.split(kaReq).length === 2);
+  ok('control: the liveness rule\'s needle is in the shipped source (src/ws-keepalive.js), and the bridge requires it once', gateOf(kaSrc.includes(needle)) && src.split(kaReq).length === 2);
   const kaOld = MUTK.write('src/ws-keepalive.js', editAnchor(kaSrc, needle, "  if (pong) return 'alive';", "src/ws-keepalive.js"), 'pong-only-ka');
   const OLD = MUTK.load('src/server/desktop-stream.js', editAnchor(src, kaReq, `require(${JSON.stringify(kaOld)})`, "src/server/desktop-stream.js"), 'pong-only');
   const rc = await slowReaderLeg(OLD);
-  ok('CONTROL: the pong-only rule (2.369.118\'s) CUTS the same live reader — the 40 s cuts of the incident, reproduced', rc.live.cut, rc.live);
+  ok('CONTROL: the pong-only rule (2.369.118\'s) CUTS the same live reader — the 40 s cuts of the incident, reproduced', verdictOf(rc.live.cut), rc.live);
   // the rule as a table
   const V = DS.livenessVerdict;
   ok('livenessVerdict: a pong ⇒ alive; bytes from the browser ⇒ alive; kernel progress through a backlog ⇒ draining; progress with NO backlog (our own small write) ⇒ silent; nothing ⇒ silent',
@@ -234,29 +234,29 @@ console.log('§5 the HELD-BYTES CAP (2026-09-22, hole A of the r6 verify): a vie
   const m1 = await mem();
   const dAb = (m1.ab - m0.ab) / MiB, dRss = (m1.rss - m0.rss) / MiB;
   ok(`the viewer declaring 2 GiB is closed ${DS.OVERSIZE_CLOSE} ${DS.OVERSIZE_REASON} (it got ${sent} chunk(s) out before the close reached it)`, A.st.code === 1009 && A.st.reason === 'packet-too-large' && sent < 96, A.st);
-  ok('judged in its FIRST chunk: the warn line names the 2 GiB declared and only that chunk held (1 MiB + the header)', R.blog.some((l) => /^W \[desktop-stream\] xp: viewer v-a sent an oversized xpra message \(packet header declared 2147483648 B, 1048584 B held, the cap is 16777216 B\) — closed 1009 packet-too-large; the xpra server and the other viewers are untouched/.test(l)), R.blog.filter((l) => /^W /.test(l)));
+  ok('judged in its FIRST chunk: the warn line names the 2 GiB declared and only that chunk held (1 MiB + the header)', verdictOf(R.blog.some((l) => /^W \[desktop-stream\] xp: viewer v-a sent an oversized xpra message \(packet header declared 2147483648 B, 1048584 B held, the cap is 16777216 B\) — closed 1009 packet-too-large; the xpra server and the other viewers are untouched/.test(l))), R.blog.filter((l) => /^W /.test(l)));
   ok(`memory stays bounded while it streams: arrayBuffers ${dAb >= 0 ? '+' : ''}${dAb.toFixed(1)} MiB, rss ${dRss >= 0 ? '+' : ''}${dRss.toFixed(1)} MiB (< 64 MB each)`, dAb < 64 && dRss < 64, { m0, m1 });
   ok('stats().oversize counts it; nothing of it reached the xpra server', R.br.stats().oversize === 1 && upA.got.length === 0, { stats: R.br.stats(), upA: upA.got.length });
   await sleep(100);
-  ok('the close line names it', R.blog.some((l) => /xp: closed \(packet-too-large: packet header declared 2147483648 B/.test(l)), R.blog.filter((l) => /closed/.test(l)));
-  ok('its OWN upstream connection closed with it (as any viewer\'s close does); the other viewer\'s is open', upA.closed && !upB.closed);
+  ok('the close line names it', verdictOf(R.blog.some((l) => /xp: closed \(packet-too-large: packet header declared 2147483648 B/.test(l))), R.blog.filter((l) => /closed/.test(l)));
+  ok('its OWN upstream connection closed with it (as any viewer\'s close does); the other viewer\'s is open', gateOf(upA.closed) && !upB.closed);
   B.ws.send(pkt('ping_echo'));
   upB.c.send(pkt('draw'));
   await sleep(150);
-  ok('the other viewer keeps its picture: its ping_echo reaches xpra and xpra\'s draw reaches it', upB.got.some((g) => g.equals(pkt('ping_echo'))) && B.st.back.some((g) => g.equals(pkt('draw'))) && B.ws.readyState === 1);
+  ok('the other viewer keeps its picture: its ping_echo reaches xpra and xpra\'s draw reaches it', gateOf(upB.got.some((g) => g.equals(pkt('ping_echo')))) && gateOf(B.st.back.some((g) => g.equals(pkt('draw')))) && B.ws.readyState === 1);
   // one WebSocket MESSAGE over the cap: the ws library's own limit (the default 100 MiB would all be buffered first)
   const C = await viewer(R.port, '/api/desktop/xp/stream', 'v-c');
   await sleep(50);
   const cBig = Buffer.alloc(DS.WS_MAX_MESSAGE_BYTES + 1);
   C.ws.send(cBig);
   const tC = Date.now(); while (C.st.code === null && Date.now() - tC < 5000) await sleep(20);
-  ok(`one WebSocket message of ${cBig.length} B (over ${DS.WS_MAX_MESSAGE_BYTES}) is closed 1009 by the ws layer, named and counted`, C.st.code === 1009 && R.br.stats().oversize === 2 && R.blog.some((l) => /^W .*xp: viewer v-c sent one WebSocket message over 16777224 B \(xpra\) — closed 1009 packet-too-large/.test(l)), { code: C.st.code, stats: R.br.stats() });
+  ok(`one WebSocket message of ${cBig.length} B (over ${DS.WS_MAX_MESSAGE_BYTES}) is closed 1009 by the ws layer, named and counted`, C.st.code === 1009 && R.br.stats().oversize === 2 && verdictOf(R.blog.some((l) => /^W .*xp: viewer v-c sent one WebSocket message over 16777224 B \(xpra\) — closed 1009 packet-too-large/.test(l))), { code: C.st.code, stats: R.br.stats() });
   // the rfb bridge: ClientCutText is the one message whose length the client declares
   const D2 = await viewer(R.port, '/api/vnc', 'v-d');
   const cut = Buffer.alloc(8); cut[0] = 6; cut.writeInt32BE(2 ** 31 - 1, 4);
   const sentD = await stream(D2.ws, Buffer.concat([Buffer.from('RFB 003.008\n'), Buffer.from([1, 1]), cut, Buffer.alloc(MiB, 0x61)]), 32);
   const tD = Date.now(); while (D2.st.code === null && Date.now() - tD < 5000) await sleep(20);
-  ok(`rfb: a ClientCutText DECLARING 2 GiB closes that viewer 1009 packet-too-large (${sentD} chunk(s) out), named`, D2.st.code === 1009 && D2.st.reason === 'packet-too-large' && R.br.stats().oversize === 3 && R.blog.some((l) => /desktop-singleton: viewer v-d sent an oversized rfb message \(ClientCutText declared 2147483647 B, the cap is 16777216 B\)/.test(l)), { code: D2.st.code, stats: R.br.stats(), w: R.blog.filter((l) => /^W /.test(l)) });
+  ok(`rfb: a ClientCutText DECLARING 2 GiB closes that viewer 1009 packet-too-large (${sentD} chunk(s) out), named`, D2.st.code === 1009 && D2.st.reason === 'packet-too-large' && R.br.stats().oversize === 3 && verdictOf(R.blog.some((l) => /desktop-singleton: viewer v-d sent an oversized rfb message \(ClientCutText declared 2147483647 B, the cap is 16777216 B\)/.test(l))), { code: D2.st.code, stats: R.br.stats(), w: R.blog.filter((l) => /^W /.test(l)) });
   ok('…and the xpra viewer beside it is still open', B.ws.readyState === 1);
   B.ws.close(); await sleep(50); await R.close();
 
@@ -384,19 +384,19 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
   // the PROBE (the launcher's question) — through tcpForward, never a new op
   const rows = await accW.machines();
   const winRow = rows.find((r) => r.hostId === 'win-a'), linRow = rows.find((r) => r.hostId === 'lin-a');
-  ok('the launcher\'s rows: the Windows box probed ⇒ desktop_ready (VNC password); the Linux row carries no probe and keeps its verdict', winRow && winRow.code === 'desktop_ready' && winRow.auth === 'password' && winRow.vnc && winRow.vnc.server === '003.008' && linRow && !('vnc' in linRow) && linRow.code === 'ready', { winRow, linRow });
+  ok('the launcher\'s rows: the Windows box probed ⇒ desktop_ready (VNC password); the Linux row carries no probe and keeps its verdict', gateOf(winRow) && winRow.code === 'desktop_ready' && winRow.auth === 'password' && gateOf(winRow.vnc) && winRow.vnc.server === '003.008' && gateOf(linRow) && !('vnc' in linRow) && linRow.code === 'ready', { winRow, linRow });
   const macOpen = await accM.openMachineDesktop('mac-a');
-  ok('a Mac whose Screen Sharing offers ARD only ⇒ open answers auth ard (the Mac user\'s name + password)', macOpen.ok && macOpen.auth === 'ard' && macOpen.type === 30 && macOpen.id === 'machine-desktop.mac-a', macOpen);
+  ok('a Mac whose Screen Sharing offers ARD only ⇒ open answers auth ard (the Mac user\'s name + password)', gateOf(macOpen.ok) && macOpen.auth === 'ard' && macOpen.type === 30 && macOpen.id === 'machine-desktop.mac-a', macOpen);
   let linErr = null; try { await accW.openMachineDesktop('lin-a'); } catch (e) { linErr = e; }
-  ok('a Linux machine is refused not_desktop_machine (its apps keep their own windows)', linErr && linErr.code === 'not_desktop_machine', linErr && linErr.message);
+  ok('a Linux machine is refused not_desktop_machine (its apps keep their own windows)', gateOf(linErr) && linErr.code === 'not_desktop_machine', linErr && linErr.message);
   const deadVnc = ACC.create({ hosts: hosts({ 'win-b': fakeDevice('win32') }), install: false, log: aLog, vncPort: 1, probeMs: 800 });
   let noVnc = null; try { await deadVnc.openMachineDesktop('win-b'); } catch (e) { noVnc = e; }
-  ok('nothing listening on the machine\'s 5900 ⇒ no_vnc by name with the probe (no_listener)', noVnc && noVnc.code === 'no_vnc' && noVnc.vnc && noVnc.vnc.code === 'no_listener', noVnc && { code: noVnc.code, vnc: noVnc.vnc });
+  ok('nothing listening on the machine\'s 5900 ⇒ no_vnc by name with the probe (no_listener)', gateOf(noVnc) && noVnc.code === 'no_vnc' && gateOf(noVnc.vnc) && noVnc.vnc.code === 'no_listener', noVnc && { code: noVnc.code, vnc: noVnc.vnc });
 
   // RELAYED: the VNC-auth handshake end to end, through the bridge and the forward
   await accW.openMachineDesktop('win-a');
   const c1 = client('machine-desktop.win-a');
-  ok('VNC auth: the whole handshake is relayed — the greeting, the types [2], the challenge, OK, ServerInit with the desktop\'s name', await until(() => c1.got().length >= 34 + SERVER_INIT.length) && c1.got().subarray(34).equals(SERVER_INIT));
+  ok('VNC auth: the whole handshake is relayed — the greeting, the types [2], the challenge, OK, ServerInit with the desktop\'s name', gateOf(await until(() => c1.got().length >= 34 + SERVER_INIT.length)) && verdictOf(c1.got().subarray(34).equals(SERVER_INIT)));
   // TWO WINDOWS, ONE FORWARD
   const c2 = client('machine-desktop.win-a');
   await until(() => c2.got().length >= 34 + SERVER_INIT.length);
@@ -411,7 +411,7 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
   // ARD relayed
   await accM.openMachineDesktop('mac-a');
   const c3 = client('machine-desktop.mac-a', { kind: 'ard' });
-  ok('ARD auth (Apple 3.889, type 30): the DH parameters and the 144-byte answer are relayed, then OK and ServerInit', await until(() => c3.got().length >= 54 + SERVER_INIT.length) && c3.got().subarray(54).equals(SERVER_INIT) && ardSrv.seen.fromClient.reduce((a, b) => a + b.length, 0) >= 12 + 1 + 144 + 1);
+  ok('ARD auth (Apple 3.889, type 30): the DH parameters and the 144-byte answer are relayed, then OK and ServerInit', gateOf(await until(() => c3.got().length >= 54 + SERVER_INIT.length)) && gateOf(c3.got().subarray(54).equals(SERVER_INIT)) && ardSrv.seen.fromClient.reduce((a, b) => a + b.length, 0) >= 12 + 1 + 144 + 1);
   // THE PASSWORD NEVER IN A LOG, A RECORD OR AN AUDIT LINE: the sign-in happens in the page; the hub relays bytes
   const answerHex = crypto.createHash('sha256').update(PASSWORD).digest().subarray(0, 16).toString('hex');
   const everything = JSON.stringify({ accLogs, bLogs, fw: accW.forwards(), close: bridge.lastCloseOf('machine-desktop.win-a'), stats: bridge.stats() });
@@ -420,7 +420,7 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
   // AN AGENT TOKEN IS REFUSED BY NAME — a cookie-only request (the control) passes
   const bearer = client('machine-desktop.win-a', { headers: { Authorization: 'Bearer vsst_abc123' } });
   const bc = await bearer.closed;
-  ok('an agent token on the upgrade ⇒ 403 human_only, nothing relayed, the refusal named in the log', /^403 .*human_only/.test(bearer.status() || '') && bearer.got().length === 0 && bLogs.some((l) => /machine-desktop\.win-a: an agent token asked for a machine's whole desktop — refused \(human_only\)/.test(l)), { status: bearer.status(), bc });
+  ok('an agent token on the upgrade ⇒ 403 human_only, nothing relayed, the refusal named in the log', gateOf(/^403 .*human_only/.test(bearer.status() || '')) && bearer.got().length === 0 && verdictOf(bLogs.some((l) => /machine-desktop\.win-a: an agent token asked for a machine's whole desktop — refused \(human_only\)/.test(l))), { status: bearer.status(), bc });
   const tokUrl = new WebSocket(`ws://127.0.0.1:${hport}/api/desktop/machine-desktop.win-a/stream?token=vsst_x`); let tokStatus = null;
   tokUrl.on('unexpected-response', (q, r) => { tokStatus = r.statusCode; try { q.destroy(); } catch { } tokUrl.terminate(); }); tokUrl.on('error', () => { });
   await new Promise((r) => tokUrl.on('close', r));
@@ -432,7 +432,7 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
   cur = mkBridge(noHuman);
   const nLeak = vncSrv.seen.sockets.length;   // the leak's OWN machine-side socket is the next one (the census r2: its own fact, never a global count)
   const leak = client('machine-desktop.win-a', { headers: { Authorization: 'Bearer vsst_abc123' } });
-  ok('CONTROL: a bridge copy without the human_only line relays the agent\'s socket (the rule above is what refuses it)', !!humanLine && await until(() => leak.got().length >= 12));
+  ok('CONTROL: a bridge copy without the human_only line relays the agent\'s socket (the rule above is what refuses it)', !!humanLine && verdictOf(await until(() => leak.got().length >= 12)));
   leak.ws.close(); cur = bridge;
   // the control's own connection on the machine closes FIRST (counted below otherwise) — waited on as ITS OWN socket's close, never a sleep
   await waitFact(() => sockClosed(vncSrv.seen.sockets[nLeak]), 20000, 'the leak control\'s machine-side connection never closed');
@@ -440,7 +440,7 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
   // CLOSES, EITHER SIDE: the browser leaves ⇒ the server side closes; the server closes ⇒ the browser is told
   const closedBefore = vncSrv.seen.closed;
   c2.ws.close(1000, 'bye');
-  ok('the browser closing one window closes its own connection on the machine (the other window stays)', await until(() => vncSrv.seen.closed === closedBefore + 1, CLOSE_MS) && c1.ws.readyState === 1, { closedBefore, now: vncSrv.seen.closed });
+  ok('the browser closing one window closes its own connection on the machine (the other window stays)', gateOf(await until(() => vncSrv.seen.closed === closedBefore + 1, CLOSE_MS)) && c1.ws.readyState === 1, { closedBefore, now: vncSrv.seen.closed });
   await until(() => (accW.forwards().find((f) => f.hostId === 'win-a') || {}).refs === 1);
   {
     // CONTROL: an access-layer copy without the `end` line keeps the machine-side connection of a closed window open
@@ -487,14 +487,14 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
   vncSrv.seen.sockets[vncSrv.seen.sockets.length - 1].destroy();
   const c4c = await c4.closed;
   await sleep(30);
-  ok('the machine\'s server closing ⇒ the browser side closes, named "the VNC server closed its socket" (server-closed)', c4c && (bridge.lastCloseOf('machine-desktop.win-a') || {}).code === 'server-closed', bridge.lastCloseOf('machine-desktop.win-a'));
+  ok('the machine\'s server closing ⇒ the browser side closes, named "the VNC server closed its socket" (server-closed)', gateOf(c4c) && (bridge.lastCloseOf('machine-desktop.win-a') || {}).code === 'server-closed', bridge.lastCloseOf('machine-desktop.win-a'));
 
   // OFFLINE MID-VIEW: the machine's link drops ⇒ the window closes NAMING it
   const c1c = c1.closed;
   win.drop();
   await c1c; await sleep(30);
   const lc = bridge.lastCloseOf('machine-desktop.win-a');
-  ok('the machine going offline mid-view closes the window BY NAME: "win-a went offline" (machine-offline)', lc && lc.why === 'win-a went offline' && lc.code === 'machine-offline' && bLogs.some((l) => /machine-desktop\.win-a: closed \(win-a went offline\)/.test(l)), lc);
+  ok('the machine going offline mid-view closes the window BY NAME: "win-a went offline" (machine-offline)', gateOf(lc) && lc.why === 'win-a went offline' && lc.code === 'machine-offline' && verdictOf(bLogs.some((l) => /machine-desktop\.win-a: closed \(win-a went offline\)/.test(l))), lc);
   ok('…and the target is gone while it is offline (a reconnect is refused 404, never a stale socket)', accW.machineDesktopTarget('machine-desktop.win-a') === null);
   // CONTROL: the same drop through a bridge without `upstreamWhy` says only "server closed"
   win.up = true;
@@ -520,7 +520,7 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok('tree: ' + r.name, r.pass, r.detail);
+for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok('tree: ' + r.name, verdictOf(r.pass), r.detail);
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

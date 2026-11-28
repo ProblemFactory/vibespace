@@ -38,7 +38,7 @@ const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1200) : '')); } return !!c; };
 const skip = (name, why) => { skipped++; console.log(`  ○ SKIP ${name} — ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 10000, step = 40) => { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch { } await sleep(step); } try { return !!(await fn()); } catch { return false; } };
@@ -180,10 +180,10 @@ if (fenced.act === 'red') {
   };
   const s1 = await realRun('stop', LANE, 15000, stopScript);
   ok(!s1.bRan && !s1.bInTranscript, '① Stop: the frame typed mid-turn NEVER reached the CLI — no request at the mock, nothing of it in the transcript', s1);
-  ok(s1.drop && s1.drop.items.length === 1 && s1.drop.items[0].text === 'MARK-B typed while A runs' && s1.drop.items[0].msgId === 'm-b', '① …the wrapper said queue_dropped with its words and its bubble (they go back into the composer)', s1.drop);
+  ok(gateOf(s1.drop) && s1.drop.items.length === 1 && s1.drop.items[0].text === 'MARK-B typed while A runs' && s1.drop.items[0].msgId === 'm-b', '① …the wrapper said queue_dropped with its words and its bubble (they go back into the composer)', s1.drop);
   ok(!s1.kinds.some((k) => k === 'system/init'), '① …and NOTHING ran after the interrupt: no new turn started — no init (a frame the CLI queued itself starts with an init and NO state change)', s1.kinds);
   const s2 = await realRun('stop-ctl', path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), 15000, stopScript);
-  ok(s2.bRan && s2.bAfterStopMs !== null && s2.bAfterStopMs < 3000 && !s2.drop, `② CONTROL (the hold off): the CLI RUNS the frame it queued itself ${s2.bAfterStopMs} ms after the interrupt — what the hold exists for (if this goes red the CLI changed: measure again)`, s2);
+  ok(gateOf(s2.bRan) && s2.bAfterStopMs !== null && s2.bAfterStopMs < 3000 && !s2.drop, `② CONTROL (the hold off): the CLI RUNS the frame it queued itself ${s2.bAfterStopMs} ms after the interrupt — what the hold exists for (if this goes red the CLI changed: measure again)`, s2);
   const s3 = await realRun('drain', LANE, 4000, async ({ send, recs, reqFor, idleAt, transcript }) => {
     const aAt = send(frame('LONG-A a long running turn', 'm-a'));
     await until(() => reqFor('LONG-A').length > 0, 30000);
@@ -199,8 +199,8 @@ if (fenced.act === 'red') {
     const enq = tr.filter((r) => r.type === 'queue-operation' && r.operation === 'enqueue').map((r) => Date.parse(r.timestamp));
     return { heldDuringA, aIdle, bAfterIdleMs: b && aIdle ? b.t - aIdle : null, bUserRecord: tr.some((r) => r.type === 'user' && S(r.message || {}).includes('MARK-B')), lastEnqueueAfterIdle: aIdle ? enq.some((t) => t >= aIdle - 50) : false, keyInTranscript: tr.some((r) => S(r).includes('webui_msg_id') || S(r).includes('m-b')) , qc: recs.filter((r) => r.type === 'queue_changed').map((r) => r.items.length) };
   });
-  ok(s3.heldDuringA, '③ while A runs the held frame is nowhere in the CLI — no request, no transcript row (the CLI\'s own enqueue never happened)', s3);
-  ok(s3.bAfterIdleMs !== null && s3.bAfterIdleMs >= 0 && s3.bAfterIdleMs < 5000 && s3.bUserRecord && s3.lastEnqueueAfterIdle, `③ …A's turn end releases it: ONE frame, at the mock ${s3.bAfterIdleMs} ms after A's idle, run as a turn of its own (a plain user record, enqueued only at the drain)`, s3);
+  ok(verdictOf(s3.heldDuringA), '③ while A runs the held frame is nowhere in the CLI — no request, no transcript row (the CLI\'s own enqueue never happened)', s3);
+  ok(s3.bAfterIdleMs !== null && s3.bAfterIdleMs >= 0 && s3.bAfterIdleMs < 5000 && gateOf(s3.bUserRecord) && verdictOf(s3.lastEnqueueAfterIdle), `③ …A's turn end releases it: ONE frame, at the mock ${s3.bAfterIdleMs} ms after A's idle, run as a turn of its own (a plain user record, enqueued only at the drain)`, s3);
   // (acceptance r2, lane claude-steer-inject: the CLI's first state word republishes the empty queue with the steer pair
   // named — the hand-over door is advertised only from there)
   ok(S(s3.qc) === S([0, 0, 1, 0]), '③ …and the strip saw it come and go: the baseline [], the proof\'s republication [], one row, [] at the drain', s3.qc);
@@ -232,10 +232,10 @@ if (fenced.act === 'red') {
     return { idleBefore, bAfterSendMs: b ? b.t - tB : null, bBeforeIdle: !!(b && (!idleAfter || b.t < idleAfter.__t)), held: recs.some((r) => r.type === 'queued_input' && r.__t >= tB) };
   };
   const s5 = await realRun('bg-agent', LANE, 9000, bgScript, ['--permission-mode', 'bypassPermissions']);
-  ok(idleSrc.split("else if (idle && !awaitingStart) {").length === 2 && !s5.idleBefore && s5.bAfterSendMs !== null && s5.bAfterSendMs < 3000 && s5.bBeforeIdle && !s5.held, `⑥ a background agent keeps the session running past the turn's result (no idle), and a message typed then reaches the CLI ${s5.bAfterSendMs} ms later, while the agent still works — never held behind it`, s5);
+  ok(idleSrc.split("else if (idle && !awaitingStart) {").length === 2 && !s5.idleBefore && s5.bAfterSendMs !== null && s5.bAfterSendMs < 3000 && gateOf(s5.bBeforeIdle) && !s5.held, `⑥ a background agent keeps the session running past the turn's result (no idle), and a message typed then reaches the CLI ${s5.bAfterSendMs} ms later, while the agent still works — never held behind it`, s5);
   const s6 = await realRun('bg-agent-ctl', path.join(idleDir, 'data', 'bin', 'chat-wrapper.js'), 9000, bgScript, ['--permission-mode', 'bypassPermissions']);
-  ok(s6.held && s6.bAfterSendMs !== null && s6.bAfterSendMs > 4000, `⑥ CONTROL: a gate that waits for idle HOLDS that message until the background agent is done (${s6.bAfterSendMs} ms) — the leg above can say no`, s6);
-  ok(s4.heldAt !== null && s4.firstCliAt !== null && s4.heldAt <= s4.firstCliAt && s4.order, `④ a frame written in the same tick as the turn's first one is HELD (published at +${s4.heldAt} ms, before the CLI's first record at +${s4.firstCliAt} ms) and runs after it — the wrapper opens the gate itself, there is no echo to race`, s4);
+  ok(gateOf(s6.held) && s6.bAfterSendMs !== null && s6.bAfterSendMs > 4000, `⑥ CONTROL: a gate that waits for idle HOLDS that message until the background agent is done (${s6.bAfterSendMs} ms) — the leg above can say no`, s6);
+  ok(s4.heldAt !== null && s4.firstCliAt !== null && s4.heldAt <= s4.firstCliAt && verdictOf(s4.order), `④ a frame written in the same tick as the turn's first one is HELD (published at +${s4.heldAt} ms, before the CLI's first record at +${s4.firstCliAt} ms) and runs after it — the wrapper opens the gate itself, there is no echo to race`, s4);
 }
 
 // ── §B THE CHAT WINDOW IN A REAL BROWSER ──
@@ -277,7 +277,7 @@ else {
   const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,950', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
   procs.add(chrome);
   const up = await until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 250);
-  ok(up, '§B the scratch server answered', journal.slice(-1200));
+  ok(verdictOf(up), '§B the scratch server answered', journal.slice(-1200));
   // ONE live claude chat session through the real create path (the stand-in behind the real wrapper)
   const ctl = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const frames = []; ctl.on('message', (d) => { if (d.length > 65536) return; try { frames.push(JSON.parse(String(d))); } catch { } });
@@ -308,7 +308,7 @@ else {
     window.__v = v;
     return { ok: !!(v && v._chatInput), ro: v ? !!v._readOnly : null };
   })()`);
-  ok(opened && opened.ok && !opened.ro, '§B the chat window opened live with a composer', opened);
+  ok(gateOf(opened) && gateOf(opened.ok) && !opened.ro, '§B the chat window opened live with a composer', opened);
   // `alt` = Alt+Enter — since 2.369.361 (lane claude-steer-inject) plain Enter HANDS a mid-turn message to the running
   // turn and Alt+Enter is the door that HOLDS it (this section's subject: the held queue and Stop's put-back)
   const typeAndSend = async (text, { alt = false } = {}) => {
@@ -322,7 +322,7 @@ else {
     await typeAndSend('LONG-1 a turn that runs for a while');
     const streaming = await until(() => ev("!!document.querySelector('.chat-interrupt-btn')"), 10000, 100);
     const tButton = Date.now();
-    ok(streaming, '§B the first message started a turn: the Stop button is up');
+    ok(verdictOf(streaming), '§B the first message started a turn: the Stop button is up');
     // (主开发 2026-11-20, 2.369.413's hosted run 44681506506: the capture was read ONCE right after the button and was empty —
     // the hub raises the button when it ACCEPTS the send, before it writes the frame toward the CLI, src/server/user-input.js;
     // a later leg counted that very frame) — what the CLI received is WAITED for with a bound of its own, and the time from the
@@ -331,15 +331,15 @@ else {
     const CAP_BOUND_MS = 10000, CAP_SLOW_MS = 2000;
     const gotFirst = await until(() => capTexts().some((t) => t.includes('LONG-1')), CAP_BOUND_MS, 25);
     const capMs = Date.now() - tButton;
-    ok(gotFirst, `§B …and the CLI got it: the stand-in's capture holds the frame ${gotFirst ? capMs + ' ms after the button' : 'NOT within ' + CAP_BOUND_MS + ' ms of the button'}${gotFirst && capMs > CAP_SLOW_MS ? ' — SLOW (over ' + CAP_SLOW_MS + ' ms)' : ''}`, { capture: capTexts(), capMs });
+    ok(verdictOf(gotFirst), `§B …and the CLI got it: the stand-in's capture holds the frame ${gotFirst ? capMs + ' ms after the button' : 'NOT within ' + CAP_BOUND_MS + ' ms of the button'}${gotFirst && capMs > CAP_SLOW_MS ? ' — SLOW (over ' + CAP_SLOW_MS + ' ms)' : ''}`, { capture: capTexts(), capMs });
     await typeAndSend('these words are held mid-turn', { alt: true });
     const STRIP = `(() => { const s = document.querySelector('.chat-queue-strip'); const rows = s ? [...s.querySelectorAll('[data-queue-id]')].map((b) => b.dataset.queueId) : []; return { visible: !!(s && !s.classList.contains('hidden') && s.getBoundingClientRect().height > 0), text: s ? s.textContent : '', edits: s ? s.querySelectorAll('[data-queue-op="edit"]').length : 0, removes: s ? s.querySelectorAll('[data-queue-op="remove"]').length : 0, steers: s ? s.querySelectorAll('[data-queue-op="steer"],[data-queue-op="steer-all"],[data-queue-op="run-now"],[data-queue-op="run-all"]').length : 0, ids: [...new Set(rows)] }; })()`;
     await until(async () => (await ev(STRIP)).visible, 8000, 100);
     const strip = await ev(STRIP);
     const chip = () => ev(`(() => { const m = (window.__v._messages || []).filter((x) => x.role === 'user').pop(); const el = m && document.querySelector('[data-msg-id="' + m.id + '"]'); return { state: m ? m.queueState || null : null, chipShown: !!(el && el.querySelector('[data-queue-state]')), text: m ? JSON.stringify(m.content).slice(0, 80) : '' }; })()`);
     const c1 = await chip();
-    ok(strip.visible && /these words are held mid-turn/.test(strip.text) && strip.edits === 1 && strip.removes === 1 && strip.steers === 1, '§B HELD mid-turn (Alt+Enter, the hold door since 2.369.361) ⇒ the queue strip shows the row with ✎ edit, ✕ remove and ⚡ (steer — hand it to the running turn, lane claude-steer-inject; no run-now)', strip);
-    ok(c1.state === 'queued' && c1.chipShown, '§B …and the bubble wears the queued chip', c1);
+    ok(gateOf(strip.visible) && gateOf(/these words are held mid-turn/.test(strip.text)) && strip.edits === 1 && strip.removes === 1 && strip.steers === 1, '§B HELD mid-turn (Alt+Enter, the hold door since 2.369.361) ⇒ the queue strip shows the row with ✎ edit, ✕ remove and ⚡ (steer — hand it to the running turn, lane claude-steer-inject; no run-now)', strip);
+    ok(c1.state === 'queued' && verdictOf(c1.chipShown), '§B …and the bubble wears the queued chip', c1);
     ok(!capTexts().some((t) => t.includes('these words are held')), '§B …and the CLI never got it (the wrapper holds it)', capTexts());
     // STOP — a trusted click on the composer's Stop button
     const r = await ev(`(() => { const b = document.querySelector('.chat-interrupt-btn'); const x = b.getBoundingClientRect(); return { x: x.x + x.width / 2, y: x.y + x.height / 2 }; })()`);
@@ -351,7 +351,7 @@ else {
     const strip2 = await ev(STRIP);
     const c2 = await chip();
     ok(!strip2.visible && strip2.ids.length === 0, '§B Stop ⇒ the strip empties', strip2);
-    ok(after.value.startsWith('these words are held mid-turn'), '§B …the words are back in the composer (the .353 put-back, now real on claude)', after.value);
+    ok(verdictOf(after.value.startsWith('these words are held mid-turn')), '§B …the words are back in the composer (the .353 put-back, now real on claude)', after.value);
     ok(after.toasts.filter((t) => /back into the input box/.test(t)).length === 1, '§B …ONE toast says so', after.toasts);
     ok(c2.state === 'removed', '§B …and the bubble\'s chip says removed (it never ran)', c2);
     await sleep(1500);
@@ -363,4 +363,4 @@ else {
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skipped} skipped${skips.length ? ` — ${skips.join('; ')}` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped — ${skips.join('; ') || 'by name above'}` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

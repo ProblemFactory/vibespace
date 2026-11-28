@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (d ? '\n      ' + d : '')); } };
+const ok = (n, c, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (d ? '\n      ' + d : '')); } };
 const tmp = [];
 const mkd = (p) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), p)); tmp.push(d); return d; };
 process.on('exit', () => { for (const d of tmp) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
@@ -30,11 +30,11 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
 
 // ── §1 the PURE ring ─────────────────────────────────────────────────────────
 {
-  ok('clip: short strings pass through, long ones are cut with a visible marker', L.clip('abc', 5) === 'abc' && /^aaaaa\n…\[\+5 chars clipped\]$/.test(L.clip('a'.repeat(10), 5)) && L.clip(null, 5) === '');
+  ok('clip: short strings pass through, long ones are cut with a visible marker', L.clip('abc', 5) === 'abc' && gateOf(/^aaaaa\n…\[\+5 chars clipped\]$/.test(L.clip('a'.repeat(10), 5))) && L.clip(null, 5) === '');
   const dir = mkd('vs-probelog-');
   for (let i = 0; i < 5; i++) ok(`append #${i + 1} returns true`, L.appendProbeLog(dir, { rung: 'panel', key: 'sub-a', i }) === true);
   const rows = L.readProbeLog(dir);
-  ok('readProbeLog returns them oldest-first with `at` stamped', rows.length === 5 && rows.every((r, i) => r.i === i && typeof r.at === 'number'), JSON.stringify(rows.map((r) => r.i)));
+  ok('readProbeLog returns them oldest-first with `at` stamped', rows.length === 5 && verdictOf(rows.every((r, i) => r.i === i && typeof r.at === 'number')), JSON.stringify(rows.map((r) => r.i)));
   ok('…limit keeps the NEWEST n', JSON.stringify(L.readProbeLog(dir, { limit: 2 }).map((r) => r.i)) === '[3,4]');
   L.appendProbeLog(dir, { rung: 'control', key: 'sub-b', i: 9 });
   ok('…key and rung filter', L.readProbeLog(dir, { key: 'sub-b' }).length === 1 && L.readProbeLog(dir, { rung: 'panel' }).length === 5 && L.readProbeLog(dir, { key: 'sub-a', rung: 'control' }).length === 0);
@@ -42,16 +42,16 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const d2 = mkd('vs-probelog-rot-');
   for (let i = 0; i < 6; i++) L.appendProbeLog(d2, { rung: 'panel', key: 'k', i, rawStdout: 'x'.repeat(200) }, { maxBytes: 600 });
   const files = fs.readdirSync(d2).sort();
-  ok('rotation: the live file rolled to .1 at maxBytes (two files, never more)', files.length === 2 && files.includes(L.FILE) && files.includes(L.FILE + '.1'), JSON.stringify(files));
+  ok('rotation: the live file rolled to .1 at maxBytes (two files, never more)', files.length === 2 && gateOf(files.includes(L.FILE)) && verdictOf(files.includes(L.FILE + '.1')), JSON.stringify(files));
   const all = L.readProbeLog(d2, { limit: 100 });
-  ok('…and the reader stitches .1 + live in order (nothing lost inside the ring)', all.length >= 4 && all.every((r, j) => j === 0 || r.i > all[j - 1].i) && all[all.length - 1].i === 5, JSON.stringify(all.map((r) => r.i)));
-  ok('rawStdout/rawStderr are clipped at the caps on the way in', (() => { const d3 = mkd('vs-probelog-cap-'); L.appendProbeLog(d3, { rung: 'panel', key: 'k', rawStdout: 'y'.repeat(L.RAW_CAP + 10), rawStderr: 'z'.repeat(L.ERR_CAP + 10) }); const r = L.readProbeLog(d3)[0]; return r.rawStdout.length < L.RAW_CAP + 40 && /clipped/.test(r.rawStdout) && r.rawStderr.length < L.ERR_CAP + 40; })());
+  ok('…and the reader stitches .1 + live in order (nothing lost inside the ring)', all.length >= 4 && gateOf(all.every((r, j) => j === 0 || r.i > all[j - 1].i)) && all[all.length - 1].i === 5, JSON.stringify(all.map((r) => r.i)));
+  ok('rawStdout/rawStderr are clipped at the caps on the way in', verdictOf((() => { const d3 = mkd('vs-probelog-cap-'); L.appendProbeLog(d3, { rung: 'panel', key: 'k', rawStdout: 'y'.repeat(L.RAW_CAP + 10), rawStderr: 'z'.repeat(L.ERR_CAP + 10) }); const r = L.readProbeLog(d3)[0]; return r.rawStdout.length < L.RAW_CAP + 40 && /clipped/.test(r.rawStdout) && r.rawStderr.length < L.ERR_CAP + 40; })()));
   ok('appendProbeLog never throws: no dataDir ⇒ false', L.appendProbeLog(null, { rung: 'panel' }) === false && L.readProbeLog(mkd('vs-probelog-empty-')).length === 0);
   const home = mkd('vs-probelog-home-');
   ok('machineOauthAccount: no ~/.claude.json ⇒ null', L.machineOauthAccount(home) === null);
   fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'userA@example.com', organizationUuid: '11111111-2222-4333-8444-555555555555', organizationName: 'Org A' }, projects: {} }));
   const m = L.machineOauthAccount(home);
-  ok('…present ⇒ {email, orgUuid, orgName} and nothing else (no tokens ever)', m && m.email === 'userA@example.com' && m.orgUuid === '11111111-2222-4333-8444-555555555555' && m.orgName === 'Org A' && Object.keys(m).length === 3, JSON.stringify(m));
+  ok('…present ⇒ {email, orgUuid, orgName} and nothing else (no tokens ever)', gateOf(m) && m.email === 'userA@example.com' && m.orgUuid === '11111111-2222-4333-8444-555555555555' && m.orgName === 'Org A' && Object.keys(m).length === 3, JSON.stringify(m));
 }
 
 // ── §2 the PANEL rung through the REAL setupUsage with a fake `claude` ───────
@@ -89,28 +89,28 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   let rows = w.log();
   const r = rows[0];
   ok('a written panel leaves ONE record: rung panel, the account key + name, outcome written', ok1 === true && rows.length === 1 && r.rung === 'panel' && r.key === w.id && r.name === 'Panel Acct' && r.outcome === 'written', JSON.stringify(r));
-  ok('…what was SENT: argv[0] is the binary, the creds dir is the account\'s own, the machine-wide oauthAccount was read before and after', r && Array.isArray(r.argv) && r.argv[0] === w.bin && r.argv[1] === '-p' && r.argv[2] === '/usage' && r.credsDir === w.am.subDir(w.id) && 'machineOrgBefore' in r && 'machineOrgAfter' in r, JSON.stringify(r && { argv: r.argv, credsDir: r.credsDir }));
+  ok('…what was SENT: argv[0] is the binary, the creds dir is the account\'s own, the machine-wide oauthAccount was read before and after', gateOf(r) && gateOf(Array.isArray(r.argv)) && r.argv[0] === w.bin && r.argv[1] === '-p' && r.argv[2] === '/usage' && r.credsDir === w.am.subDir(w.id) && 'machineOrgBefore' in r && 'machineOrgAfter' in r, JSON.stringify(r && { argv: r.argv, credsDir: r.credsDir }));
   // B-9b40: what the BINARY received — claude 2.1.288 print mode loads the account's claude.ai connectors
   // (one mcp-proxy connect each) unless the MCP config is strict; the probe loads none
   const got = (() => { try { return fs.readFileSync(argvFile, 'utf-8').split('\n').filter(Boolean); } catch { return null; } })();
   ok('B-9b40: the spawned CLI got -p /usage --strict-mcp-config (no MCP server loaded, no --mcp-config) and the log names that same argv',
-    JSON.stringify(got) === JSON.stringify(['-p', '/usage', '--strict-mcp-config']) && r && JSON.stringify(r.argv.slice(1)) === JSON.stringify(got), JSON.stringify({ got, logged: r && r.argv }));
-  ok('…what came BACK verbatim: the panel text, exit 0, a duration', r && r.rawStdout === panelText && r.exitCode === 0 && typeof r.ms === 'number' && r.rawStderr === '', JSON.stringify(r && { raw: r.rawStdout, exit: r.exitCode }));
-  ok('…what the parser MADE of it: 5h 20 %, 7d 40 %, Fable 10 %', r && r.parsed && Math.round(r.parsed.fiveHour.utilization * 100) === 20 && Math.round(r.parsed.sevenDay.utilization * 100) === 40 && r.parsed.scopedWeekly.some((s) => /fable/i.test(s.name) && Math.round(s.utilization * 100) === 10), JSON.stringify(r && r.parsed));
-  ok('…what the write DID: the window it filed the reading under (7d reset = the parse\'s)', r && r.window && r.window.sevenDay === r.parsed.sevenDay.resetsAt && r.why === null, JSON.stringify(r && r.window));
+    JSON.stringify(got) === JSON.stringify(['-p', '/usage', '--strict-mcp-config']) && gateOf(r) && JSON.stringify(r.argv.slice(1)) === JSON.stringify(got), JSON.stringify({ got, logged: r && r.argv }));
+  ok('…what came BACK verbatim: the panel text, exit 0, a duration', gateOf(r) && r.rawStdout === panelText && r.exitCode === 0 && typeof r.ms === 'number' && r.rawStderr === '', JSON.stringify(r && { raw: r.rawStdout, exit: r.exitCode }));
+  ok('…what the parser MADE of it: 5h 20 %, 7d 40 %, Fable 10 %', gateOf(r) && gateOf(r.parsed) && Math.round(r.parsed.fiveHour.utilization * 100) === 20 && Math.round(r.parsed.sevenDay.utilization * 100) === 40 && verdictOf(r.parsed.scopedWeekly.some((s) => /fable/i.test(s.name) && Math.round(s.utilization * 100) === 10)), JSON.stringify(r && r.parsed));
+  ok('…what the write DID: the window it filed the reading under (7d reset = the parse\'s)', gateOf(r) && gateOf(r.window) && r.window.sevenDay === r.parsed.sevenDay.resetsAt && r.why === null, JSON.stringify(r && r.window));
   // a failing binary: exit code + stderr are kept, outcome spawn-failed, nothing written
   w.say('#!/bin/sh\necho "boom: not logged in" >&2\nexit 1\n');
   const ok2 = await w.u.refreshViaCliPanel(w.id);
   rows = w.log();
   const r2 = rows[rows.length - 1];
-  ok('a failing probe: returns false, records exitCode 1 + the stderr verbatim + outcome spawn-failed', ok2 === false && rows.length === 2 && r2.outcome === 'spawn-failed' && r2.exitCode === 1 && /boom: not logged in/.test(r2.rawStderr) && r2.parsed === null, JSON.stringify(r2 && { outcome: r2.outcome, exit: r2.exitCode, err: r2.rawStderr }));
+  ok('a failing probe: returns false, records exitCode 1 + the stderr verbatim + outcome spawn-failed', ok2 === false && rows.length === 2 && r2.outcome === 'spawn-failed' && r2.exitCode === 1 && gateOf(/boom: not logged in/.test(r2.rawStderr)) && r2.parsed === null, JSON.stringify(r2 && { outcome: r2.outcome, exit: r2.exitCode, err: r2.rawStderr }));
   // garbage stdout: exit 0 but no buckets ⇒ no-buckets-parsed, raw kept for the debugger
   w.say('#!/bin/sh\necho "Usage unavailable right now"\n');
   const ok3 = await w.u.refreshViaCliPanel(w.id);
   rows = w.log();
   const r3 = rows[rows.length - 1];
-  ok('an unparseable panel: returns false, outcome no-buckets-parsed, the raw text is what the debugger reads', ok3 === false && rows.length === 3 && r3.outcome === 'no-buckets-parsed' && r3.exitCode === 0 && /Usage unavailable/.test(r3.rawStdout), JSON.stringify(r3 && { outcome: r3.outcome, raw: r3.rawStdout }));
-  ok('the ring lives beside usage-cache/ in data/ (data/usage-probe-log.ndjson)', fs.existsSync(path.join(w.dataDir, L.FILE)));
+  ok('an unparseable panel: returns false, outcome no-buckets-parsed, the raw text is what the debugger reads', ok3 === false && rows.length === 3 && r3.outcome === 'no-buckets-parsed' && r3.exitCode === 0 && verdictOf(/Usage unavailable/.test(r3.rawStdout)), JSON.stringify(r3 && { outcome: r3.outcome, raw: r3.rawStdout }));
+  ok('the ring lives beside usage-cache/ in data/ (data/usage-probe-log.ndjson)', verdictOf(fs.existsSync(path.join(w.dataDir, L.FILE))));
 }
 
 // ── §3 the CONTROL rung through the REAL engine ──────────────────────────────
@@ -146,8 +146,8 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const parsed = await eng.probeUsageForAccountKey('sub-1');
   const rows = L.readProbeLog(path.join(dir, 'data'));
   const r = rows[0];
-  ok('a control probe leaves ONE record: rung control, the asked key, the answering session, the VERBATIM payload and its parse', parsed && rows.length === 1 && r.rung === 'control' && r.key === 'sub-1' && r.sessionId === 'sess-ctl' && JSON.stringify(r.raw) === JSON.stringify(payload) && Math.round(r.parsed.sevenDay.utilization * 100) === 52, JSON.stringify(r));
-  ok('…and the write verdict: written for the asked key with the window it was filed under', r && r.outcome === 'written' && r.target === 'sub-1' && r.window && r.window.sevenDay === nowSec + 3 * 86400, JSON.stringify(r && { outcome: r.outcome, target: r.target, window: r.window }));
+  ok('a control probe leaves ONE record: rung control, the asked key, the answering session, the VERBATIM payload and its parse', gateOf(parsed) && rows.length === 1 && r.rung === 'control' && r.key === 'sub-1' && r.sessionId === 'sess-ctl' && JSON.stringify(r.raw) === JSON.stringify(payload) && Math.round(r.parsed.sevenDay.utilization * 100) === 52, JSON.stringify(r));
+  ok('…and the write verdict: written for the asked key with the window it was filed under', gateOf(r) && r.outcome === 'written' && r.target === 'sub-1' && gateOf(r.window) && r.window.sevenDay === nowSec + 3 * 86400, JSON.stringify(r && { outcome: r.outcome, target: r.target, window: r.window }));
   // a session that never answers ⇒ timeout, recorded with the timeout it waited
   const mute = { backend: 'claude', mode: 'chat', host: null, _webuiId: 'sess-mute', _accountId: 'sub-1', pty: { write() { } } };
   const t = await eng.probeUsageViaSession(mute, 40);
@@ -162,7 +162,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const j = await eng.probeUsageViaSession(junk, 500);
   const rows3 = L.readProbeLog(path.join(dir, 'data'));
   const r3 = rows3[rows3.length - 1];
-  ok('an unparseable reply ⇒ null + an unparsed record carrying the raw reply', j === null && rows3.length === 3 && r3.outcome === 'unparsed' && r3.raw && r3.raw.error === 'nope', JSON.stringify(r3));
+  ok('an unparseable reply ⇒ null + an unparsed record carrying the raw reply', j === null && rows3.length === 3 && r3.outcome === 'unparsed' && gateOf(r3.raw) && r3.raw.error === 'nope', JSON.stringify(r3));
 }
 
 // ── §4 wiring pins (a pure module nobody calls is the 2.355.0 class) ─────────
@@ -170,10 +170,10 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const ur = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
   const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
   const con = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
-  ok('usage-routes: the panel rung appends through the ONE module, beside usage-cache/, at the written/refused site', /probeLog\.appendProbeLog\(path\.dirname\(USAGE_CACHE_DIR\)/.test(ur) && /logProbe\(wrote\.ok \? 'written' : 'write-refused'/.test(ur) && /logProbe\(probeRec\.exitCode === 0 \? 'no-buckets-parsed' : 'spawn-failed'\)/.test(ur));
-  ok('usage-routes: the reader route exists', /app\.get\('\/api\/usage\/probe-log'/.test(ur));
-  ok('engine: the control rung logs with the raw reply looked up from the parse', /logControlProbe\(s, key, parsed, _vsuRawOf\.get\(parsed\) \|\| null, target \? 'written' : 'refused-by-window-guard'/.test(eng) && /'timeout', \{ timeoutMs \}/.test(eng));
-  ok('stdout consumer: the verbatim control reply is stashed on the pending entry BEFORE it resolves', /pend\.raw = msg\.response\.response;[\s\S]{0,80}pend\.resolve\(parsed\)/.test(con));
+  ok('usage-routes: the panel rung appends through the ONE module, beside usage-cache/, at the written/refused site', gateOf(/probeLog\.appendProbeLog\(path\.dirname\(USAGE_CACHE_DIR\)/.test(ur)) && gateOf(/logProbe\(wrote\.ok \? 'written' : 'write-refused'/.test(ur)) && verdictOf(/logProbe\(probeRec\.exitCode === 0 \? 'no-buckets-parsed' : 'spawn-failed'\)/.test(ur)));
+  ok('usage-routes: the reader route exists', verdictOf(/app\.get\('\/api\/usage\/probe-log'/.test(ur)));
+  ok('engine: the control rung logs with the raw reply looked up from the parse', gateOf(/logControlProbe\(s, key, parsed, _vsuRawOf\.get\(parsed\) \|\| null, target \? 'written' : 'refused-by-window-guard'/.test(eng)) && verdictOf(/'timeout', \{ timeoutMs \}/.test(eng)));
+  ok('stdout consumer: the verbatim control reply is stashed on the pending entry BEFORE it resolves', verdictOf(/pend\.raw = msg\.response\.response;[\s\S]{0,80}pend\.resolve\(parsed\)/.test(con)));
   ok('§ban-safety: the log module makes no vendor call (no http/https/fetch/child_process)', !/require\(['"](https?|child_process|net)['"]\)|fetch\(/.test(fs.readFileSync(path.join(REPO, 'src/server/usage-probe-log.js'), 'utf8')));
 }
 
@@ -219,12 +219,12 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const r1 = await u.refreshViaCliPanel(id);
   const pv1 = u.panelVerdictFor(id), rec1 = rowOf().probe;
   ok('§5 ① a failing CLI: false, the door\'s verdict names the class (exit) and the CLI\'s first line — the Warning skipped, the token «redacted»',
-    r1 === false && pv1 && pv1.code === 'exit' && pv1.outcome === 'spawn-failed' && pv1.at >= t1 && pv1.why === 'exit 1: Error: token sk-«redacted» was rejected', JSON.stringify(pv1));
-  ok('§5 ① …the account RECORD keeps it: probe {at, ok: false, why} on the roster row', rec1 && rec1.ok === false && rec1.at === pv1.at && rec1.why === pv1.why && Object.keys(rec1).join() === 'at,ok,why', JSON.stringify(rec1));
+    r1 === false && gateOf(pv1) && pv1.code === 'exit' && pv1.outcome === 'spawn-failed' && pv1.at >= t1 && pv1.why === 'exit 1: Error: token sk-«redacted» was rejected', JSON.stringify(pv1));
+  ok('§5 ① …the account RECORD keeps it: probe {at, ok: false, why} on the roster row', gateOf(rec1) && rec1.ok === false && rec1.at === pv1.at && rec1.why === pv1.why && Object.keys(rec1).join() === 'at,ok,why', JSON.stringify(rec1));
   const disk = fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf8');
   ok('§5 ① …written through accounts.json (the one atomic writer), and the planted token is in NEITHER the verdict, the row nor the file',
     JSON.parse(disk).accounts.find((a) => a.id === id).probe.why === pv1.why && !disk.includes(OAT.slice(14)) && !JSON.stringify(pv1).includes(OAT.slice(14)) && !JSON.stringify(rowOf()).includes(OAT.slice(14)));
-  ok('§5 ① …while the raw probe ring keeps the CLI\'s bytes verbatim (2.369.109: the owner\'s debugger log, data/ only — never a row, a line or a broadcast)', L.readProbeLog(dataDir).slice(-1)[0].rawStderr.includes('was rejected'));
+  ok('§5 ① …while the raw probe ring keeps the CLI\'s bytes verbatim (2.369.109: the owner\'s debugger log, data/ only — never a row, a line or a broadcast)', verdictOf(L.readProbeLog(dataDir).slice(-1)[0].rawStderr.includes('was rejected')));
   // ② an answer with no quota line (the measured 152-row shape)
   say(`printf 'You are currently using your subscription to power your Claude Code usage\\n'\n`);
   const r2 = await u.refreshViaCliPanel(id);
@@ -258,7 +258,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
     const before = runs();
     const r = await u.refreshViaCliPanel(id), pv = u.panelVerdictFor(id);
     ok(`§5 ${label}: refused by name (code unprobeable, «${el}»), NO spawn, NO failure on its record; the row says ${el}`,
-      r === false && runs() === before && pv.code === 'unprobeable' && pv.el === el && pv.why.includes(el) && re.test(pv.why) && rowOf().probe === undefined && rowOf().probeEligibility === el, JSON.stringify({ runs: runs() - before, why: pv.why, el: rowOf().probeEligibility }));
+      r === false && runs() === before && pv.code === 'unprobeable' && pv.el === el && gateOf(pv.why.includes(el)) && gateOf(re.test(pv.why)) && rowOf().probe === undefined && rowOf().probeEligibility === el, JSON.stringify({ runs: runs() - before, why: pv.why, el: rowOf().probeEligibility }));
   }
   withFacts(am, PROBEABLE_FACTS);
   const b4 = runs();
@@ -267,7 +267,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   // in the owner's log since 10-26 (on 2.1.308 too) answered the subscription header with no quota line. The panel serves
   // live logins only; such a row is read passively (a session on it) or by the owner's own session.
   ok('§5 ④c R3: an oat-only row whose token (user:profile, a measured CLI) IS written in its folder is NOT probed — the panel prints no quota line for a folder-token login — refused by name (unprobeable:oat-folder-no-panel), NO spawn, no failure on its record',
-    r4 === false && runs() === b4 && pv4.code === 'unprobeable' && pv4.outcome === 'not-probed' && !/re-login/.test(pv4.why) && pv4.why.includes('unprobeable:oat-folder-no-panel') && /prints no quota lines for a folder-token login/.test(pv4.why) && rowOf().probeEligibility === 'unprobeable:oat-folder-no-panel' && rowOf().probe === undefined, JSON.stringify({ r4, runs: runs() - b4, why: pv4.why, el: rowOf().probeEligibility }));
+    r4 === false && runs() === b4 && pv4.code === 'unprobeable' && pv4.outcome === 'not-probed' && !/re-login/.test(pv4.why) && gateOf(pv4.why.includes('unprobeable:oat-folder-no-panel')) && gateOf(/prints no quota lines for a folder-token login/.test(pv4.why)) && rowOf().probeEligibility === 'unprobeable:oat-folder-no-panel' && rowOf().probe === undefined, JSON.stringify({ r4, runs: runs() - b4, why: pv4.why, el: rowOf().probeEligibility }));
   am.list = realList;
   // ④d THE ⟳ DOOR AT 12:58:18 PT (R3): a row the loop calls `unprobeable:no-login` (its folder EMPTY — the take-back's shape)
   // is refused by the SAME predicate — 90c995a3 refused only oat-only rows, spawned it, and booked the CLI's non-subscriber
@@ -279,7 +279,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const b5 = runs();
   const r5 = await u.refreshViaCliPanel(id), pv5 = u.panelVerdictFor(id);
   ok('§5 ④d R3: the ⟳ door refuses a no-login row by the loop\'s own predicate (unprobeable:no-login) — NO spawn, no parse failure booked on its record',
-    r5 === false && runs() === b5 && pv5.code === 'unprobeable' && pv5.why.includes('unprobeable:no-login') && /not logged in/.test(pv5.why) && rowOf().probe === undefined, JSON.stringify({ r5, runs: runs() - b5, why: pv5.why }));
+    r5 === false && runs() === b5 && pv5.code === 'unprobeable' && gateOf(pv5.why.includes('unprobeable:no-login')) && gateOf(/not logged in/.test(pv5.why)) && rowOf().probe === undefined, JSON.stringify({ r5, runs: runs() - b5, why: pv5.why }));
   am.list = realList;
   // ④e THE ROUTE'S LADDER FIRST (acceptance r2): the door's refusal skips only the panel's spawn — the ⟳ route tries its
   // same-account fallback (2.181.0: the machine's own login is the same Anthropic account) BEFORE it refuses by name, as
@@ -322,7 +322,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const b = runs(); const j1 = await call(idF);
       am.list = realL0;
       ok('§5 ④e (acceptance r2): ⟳ on a folder-token member that is the SAME account as the machine\'s login is REFRESHED through the route\'s same-account fallback — the ladder first, no panel spawn, the machine login\'s token (a stubbed fetch, in-process)',
-        j1 && j1.success === true && runs() === b && calls.length >= 1 && calls[0].bearer === GTOK && /\/api\/oauth\/usage$/.test(calls[0].url), JSON.stringify({ j1, calls: calls.length, spawns: runs() - b }));
+        gateOf(j1) && j1.success === true && runs() === b && calls.length >= 1 && calls[0].bearer === GTOK && verdictOf(/\/api\/oauth\/usage$/.test(calls[0].url)), JSON.stringify({ j1, calls: calls.length, spawns: runs() - b }));
       // nothing serves it: refused BY NAME, the row's own remedy — a folder-token row is never told to re-login
       const id2 = am.createSubscription({ name: 'Fold Two' }).id, id3 = am.createSubscription({ name: 'Bare Three' }).id;
       globalLogin(false);
@@ -334,9 +334,9 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const n0 = calls.length, b2 = runs();
       const j2 = await call(id2), j3 = await call(id3);
       ok('§5 ④e: …with no fallback token, the folder-token row is refused BY NAME — «not refreshed — not probed (unprobeable:oat-folder-no-panel …)», never «re-login», no loginNeeded',
-        j2 && !j2.success && /^not refreshed — not probed \(unprobeable:oat-folder-no-panel: /.test(j2.error) && !/re-login/.test(j2.error) && !j2.loginNeeded, JSON.stringify(j2));
+        gateOf(j2) && !j2.success && gateOf(/^not refreshed — not probed \(unprobeable:oat-folder-no-panel: /.test(j2.error)) && !/re-login/.test(j2.error) && !j2.loginNeeded, JSON.stringify(j2));
       ok('§5 ④e: …and the empty folder (no login) is refused by name with loginNeeded — «needs re-login to refresh usage — not probed (unprobeable:no-login …)»; neither spawned the panel nor made a fetch',
-        j3 && j3.loginNeeded === true && /^needs re-login to refresh usage — not probed \(unprobeable:no-login: /.test(j3.error) && runs() === b2 && calls.length === n0, JSON.stringify({ j3, fetches: calls.length - n0 }));
+        gateOf(j3) && j3.loginNeeded === true && gateOf(/^needs re-login to refresh usage — not probed \(unprobeable:no-login: /.test(j3.error)) && runs() === b2 && calls.length === n0, JSON.stringify({ j3, fetches: calls.length - n0 }));
       // ── acceptance r3 ──
       // ④f THE ⟳ DOOR IS HUMAN-GATED (§ban-safety, claim 1 F1): an agent's session / job bearer is refused 403 human_only
       // BEFORE anything is read — b552c972 (and master) answered 200 and made the ladder's vendor requests
@@ -353,7 +353,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const j2l = await call(id2), j3l = await call(id3);
       LOC.memberServeLapsed = undefined;
       ok('§5 ④g (acceptance r3): ⟳ on a LAPSED row the door refused ⇒ the refusal by name with its remedy (the empty folder: «needs re-login …», loginNeeded; the folder token: «not refreshed — not probed …») — never «the subscription still does not answer» (b552c972: that, with no loginNeeded, 0 panels)',
-        j3l.loginNeeded === true && /^needs re-login to refresh usage — not probed \(unprobeable:no-login: /.test(j3l.error) && !j3l.lapsed && /^not refreshed — not probed \(unprobeable:oat-folder-no-panel: /.test(j2l.error) && !j2l.lapsed && !j2l.loginNeeded, JSON.stringify({ j2l, j3l }));
+        j3l.loginNeeded === true && gateOf(/^needs re-login to refresh usage — not probed \(unprobeable:no-login: /.test(j3l.error)) && !j3l.lapsed && gateOf(/^not refreshed — not probed \(unprobeable:oat-folder-no-panel: /.test(j2l.error)) && !j2l.lapsed && !j2l.loginNeeded, JSON.stringify({ j2l, j3l }));
       // ④h ONE FACT, ONE SENTENCE (F2): a token the LOCKED vault keeps is told as the roster and the gather tell it
       const id4 = am.createSubscription({ name: 'Locked Four' }).id;
       const realL4 = am.list.bind(am);
@@ -364,7 +364,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const j4 = await call(id4);
       am.list = realL4; am.placeWallOf = realW4;
       ok('§5 ④h (acceptance r3): ⟳ on a member whose token the LOCKED vault keeps ⇒ «not refreshed — the vault is locked — … (Unlock… …; For you names what is waiting on it)», no loginNeeded, never «re-login» — the roster\'s own sentence (b552c972: «needs re-login …»)',
-        /^not refreshed — the vault is locked — /.test(j4.error) && /Unlock…/.test(j4.error) && !/re-login/.test(j4.error) && !j4.loginNeeded, JSON.stringify(j4));
+        gateOf(/^not refreshed — the vault is locked — /.test(j4.error)) && gateOf(/Unlock…/.test(j4.error)) && !/re-login/.test(j4.error) && !j4.loginNeeded, JSON.stringify(j4));
       // ④i THE USAGE BEARER LAW (F4): an oat-shaped token planted in a member's folder WITHOUT our mark is never a Bearer —
       // refused by name, 0 vendor requests (b552c972 sent it to /api/oauth/usage and /roles)
       const id5 = am.createSubscription({ name: 'Planted Five' }).id;
@@ -373,7 +373,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const n5 = calls.length;
       const j5 = await call(id5);
       ok('§5 ④i (acceptance r3): an oat-shaped token in the folder without our mark ⇒ never sent as a usage bearer — «not refreshed — the account\'s folder holds a long-lived token …», 0 vendor requests, usageToken() null',
-        /^not refreshed — the account's folder holds a long-lived token, and a long-lived token is never sent as a usage bearer/.test(j5.error) && calls.length === n5 && !calls.some((c) => c.bearer === PLANTED) && am.usageToken(id5) === null && am.usageTokenRefusal(id5) === 'long-lived', JSON.stringify({ j5, fetches: calls.length - n5 }));
+        gateOf(/^not refreshed — the account's folder holds a long-lived token, and a long-lived token is never sent as a usage bearer/.test(j5.error)) && calls.length === n5 && !calls.some((c) => c.bearer === PLANTED) && am.usageToken(id5) === null && am.usageTokenRefusal(id5) === 'long-lived', JSON.stringify({ j5, fetches: calls.length - n5 }));
     } finally { https.request = realReq; process.env.HOME = realHome; am.list = realList; }
   }
   // ④j B-5e0d: THE HOST RUNGS FOLLOW THE USAGE BEARER LAW (kb-design-lessons §9) — ⟳ for a paired machine's own login and for an
@@ -423,19 +423,19 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const n0 = calls.length;
       const jm = await w.call({ host: 'box-one' }), jh = await w.call({ host: 'box-one', account: held });
       ok('§5 ④j B-5e0d: ⟳ on a paired machine whose login file (the machine\'s own, and the account it holds) carries a LONG-LIVED token ⇒ refused BY NAME — «not refreshed — … holds a long-lived token, never sent as a usage bearer …» — 0 vendor requests (the token peek handed it to the usage read)',
-        /^not refreshed — the host's login holds a long-lived token, never sent as a usage bearer/.test(String(jm.error)) && /^not refreshed — the account's folder on the host holds a long-lived token/.test(String(jh.error)) && calls.length === n0, JSON.stringify({ jm, jh, sent: calls.length - n0 }));
+        gateOf(/^not refreshed — the host's login holds a long-lived token, never sent as a usage bearer/.test(String(jm.error))) && gateOf(/^not refreshed — the account's folder on the host holds a long-lived token/.test(String(jh.error))) && calls.length === n0, JSON.stringify({ jm, jh, sent: calls.length - n0 }));
       const w2 = world(HMreal, 'two');
       w2.setFile(credsOf({ accessToken: LOGIN, refreshToken: LOGIN_REF }));
       const n1 = calls.length;
       const jg = await w2.call({ host: 'box-two', account: held });
       ok('§5 ④j B-5e0d: …the CLI\'s own login (a refresh token beside it) is read as before — the one Bearer, the refresh token never sent',
-        jg && jg.success === true && calls.length > n1 && calls.slice(n1).every((c) => c.bearer === LOGIN), JSON.stringify({ jg, bearers: calls.slice(n1).map((c) => c.bearer.slice(0, 12)) }));
+        gateOf(jg) && jg.success === true && calls.length > n1 && verdictOf(calls.slice(n1).every((c) => c.bearer === LOGIN)), JSON.stringify({ jg, bearers: calls.slice(n1).map((c) => c.bearer.slice(0, 12)) }));
       const blind = M.load('src/hosts.js', anchored(HSRC, "  if (!usageBearerOk(o)) throw usageBearerRefusal(whose);", "  if (false) throw usageBearerRefusal(whose);", 'B-5e0d: the host rungs without the bearer law'), 'hosts-blind');
       const w3 = world(blind, 'three');
       w3.setFile(credsOf({ accessToken: LONG }));
       const n2 = calls.length;
       await w3.call({ host: 'box-three' });
-      ok('RED control: the host rung without the law hands the long-lived token to the usage read — it is the Bearer of a vendor request (the parent)', calls.slice(n2).some((c) => c.bearer === LONG), JSON.stringify({ sent: calls.length - n2 }));
+      ok('RED control: the host rung without the law hands the long-lived token to the usage read — it is the Bearer of a vendor request (the parent)', verdictOf(calls.slice(n2).some((c) => c.bearer === LONG)), JSON.stringify({ sent: calls.length - n2 }));
       // the device leg (the first rung): an agent OLDER than the law (its hello lacks 'quota-refresh-bearer-law') would send the
       // long-lived token itself — the REAL agent client (src/agentd/client.js DeviceManager.quotaRefresh over a stand-in
       // connection) runs the route's lawFirst (the hub's own peek) before asking it: refused by name, the agent never asked; an
@@ -451,7 +451,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const CLreal = require(path.join(REPO, 'src/agentd/client.js'));
       const older = await viaAgent(CLreal, ['quota-refresh'], 'older'), lawful = await viaAgent(CLreal, ['quota-refresh', 'quota-refresh-bearer-law'], 'lawful');
       ok('§5 ④j B-5e0d: an agent OLDER than the law is never asked — the hub\'s own peek refuses the long-lived token by name first; an agent WITH the law is asked (it makes no vendor request itself); 0 requests either way',
-        older.asked === 0 && /^not refreshed — the host's login holds a long-lived token/.test(older.error) && older.sent === 0 && lawful.asked === 1 && /long-lived token/.test(lawful.error) && lawful.sent === 0, JSON.stringify({ older, lawful }));
+        older.asked === 0 && gateOf(/^not refreshed — the host's login holds a long-lived token/.test(older.error)) && older.sent === 0 && lawful.asked === 1 && gateOf(/long-lived token/.test(lawful.error)) && lawful.sent === 0, JSON.stringify({ older, lawful }));
       const blindAgent = M.load('src/agentd/client.js', anchored(CSRC, "    if (!conn.info.capabilities.includes('quota-refresh-bearer-law') && typeof lawFirst === 'function') await lawFirst();\n", '', 'B-5e0d: an older agent asked without the law'), 'client-blind');
       const olderR = await viaAgent(blindAgent, ['quota-refresh'], 'older-red');
       ok('RED control: without the client\'s gate an older agent IS asked — it would send the long-lived token as the Bearer itself', olderR.asked === 1, JSON.stringify(olderR));
@@ -467,12 +467,12 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
         w.setFile(credsOf({ accessToken: LONG, expiresAt: Date.now() - 1000 }));   // expired AND no refresh token beside it
         const n = calls.length, jg = await w.call({ host: 'box-k3' }), jh = await w.call({ host: 'box-k3', account: held });
         ok('§5 ④k B-5e0d small 3: a login both EXPIRED and without its refresh token says «no valid login» (the machine\'s own, and the account it holds) — never «long-lived»; 0 vendor requests',
-          NOVALID_G.test(String(jg.error)) && NOVALID_H.test(String(jh.error)) && calls.length === n, JSON.stringify({ jg, jh, sent: calls.length - n }));
+          gateOf(NOVALID_G.test(String(jg.error))) && gateOf(NOVALID_H.test(String(jh.error))) && calls.length === n, JSON.stringify({ jg, jh, sent: calls.length - n }));
         const order = M.load('src/hosts.js', anchored(HSRC, "  if (o.expiresAt && o.expiresAt <= Date.now() + 60000) return null;\n  if (!usageBearerOk(o)) throw usageBearerRefusal(whose);\n  return o.accessToken;\n", "  if (!usageBearerOk(o)) throw usageBearerRefusal(whose);\n  return !o.expiresAt || o.expiresAt > Date.now() + 60000 ? o.accessToken : null;\n", 'B-5e0d small 3: the law asked before the expiry (the recorded order)'), 'hosts-order');
         const wr = world(order, 'k3r');
         wr.setFile(credsOf({ accessToken: LONG, expiresAt: Date.now() - 1000 }));
         const jr = await wr.call({ host: 'box-k3r' });
-        ok('RED control: the law asked before the expiry (the recorded order) names the expired login «long-lived»', /long-lived token/.test(String(jr.error)), JSON.stringify(jr));
+        ok('RED control: the law asked before the expiry (the recorded order) names the expired login «long-lived»', verdictOf(/long-lived token/.test(String(jr.error))), JSON.stringify(jr));
       }
       // the agent's answer as the REAL client takes it: an error reply REJECTS through the client's own replyError (`_request`)
       const agentSays = (CL, caps, reply, asked) => { const dm = Object.create(CL.DeviceManager.prototype); dm.connect = async () => ({ info: { capabilities: caps } }); dm._request = async (m) => { asked.push(m.op); const a = JSON.parse(JSON.stringify(reply)); if (a.error) throw CL.replyError(a); return a; }; return dm; };
@@ -487,7 +487,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
         const LONGR = { usage: null, roles: null, passive: {}, refused: 'long-lived' }, NOVR = { error: 'no valid token (expired tokens are never refreshed here)', refused: 'no-valid-login' };
         const a = await reasoned(CLreal, LONGR, 'k2a'), b = await reasoned(CLreal, LONGR, 'k2b', held), c = await reasoned(CLreal, NOVR, 'k2c'), d = await reasoned(CLreal, NOVR, 'k2d', held);
         ok('§5 ④k B-5e0d small 2: an agent WITH the law answers by its OWN reason — «long-lived» (its reply\'s `refused`) and «no valid login» (its error\'s) are the page\'s words for the machine\'s login and the account it holds, with NO look through the shell; 0 vendor requests',
-          [a, b, c, d].every((x) => x.asked === 1 && x.looks === 0 && x.sent === 0) && /^not refreshed — the host's login holds a long-lived token/.test(a.error) && /^not refreshed — the account's folder on the host holds a long-lived token/.test(b.error) && NOVALID_G.test(c.error) && NOVALID_H.test(d.error), JSON.stringify({ a, b, c, d }));
+          gateOf([a, b, c, d].every((x) => x.asked === 1 && x.looks === 0 && x.sent === 0)) && gateOf(/^not refreshed — the host's login holds a long-lived token/.test(a.error)) && gateOf(/^not refreshed — the account's folder on the host holds a long-lived token/.test(b.error)) && gateOf(NOVALID_G.test(c.error)) && verdictOf(NOVALID_H.test(d.error)), JSON.stringify({ a, b, c, d }));
         const deaf = M.load('src/agentd/client.js', anchored(CSRC, "const quotaReasonOf = (x) => (x && (x.refused === 'long-lived' || x.refused === 'no-valid-login') ? x.refused : null);", 'const quotaReasonOf = () => null;', 'B-5e0d small 2: the reason left behind'), 'client-deaf');
         const cr = await reasoned(deaf, NOVR, 'k2r'), crl = await reasoned(deaf, LONGR, 'k2rl');
         ok('RED control: the client that leaves the agent\'s reason behind sends the page to a look through the shell (the no-login error and the long-lived reply alike)', cr.looks >= 1 && crl.looks >= 1, JSON.stringify({ cr, crl }));
@@ -497,7 +497,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
         // the stand-in above rejects through the client's replyError: the REAL `_request` must too (the real op + client run in the
         // heavy test-device-secret-quota) — its one rejection line, pinned; RED: the inline builder before this commit
         const rejectsThrough = (src) => src.includes('        return m.error ? reject(replyError(m)) : resolve(m);');
-        ok('§5 ④k B-5e0d small 2: the client\'s `_request` rejects an error reply through replyError (the reason kept)', rejectsThrough(CSRC));
+        ok('§5 ④k B-5e0d small 2: the client\'s `_request` rejects an error reply through replyError (the reason kept)', verdictOf(rejectsThrough(CSRC)));
         ok('RED control: the inline rejection (566b9aab8\'s line, no reason kept) is red', !rejectsThrough(anchored(CSRC, '        return m.error ? reject(replyError(m)) : resolve(m);', "        return m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {})) : resolve(m);", 'B-5e0d: the inline rejection')));
       }
       {
@@ -514,7 +514,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
         };
         const g = await once(usageMod, 'k4g'), h = await once(usageMod, 'k4h', held);
         ok('§5 ④k B-5e0d: a first look of the hub\'s own that THREW (the host unreachable, an older agent) is never made twice — ONE look at the login file, «isn\'t responding», the agent never asked (the machine\'s login and the account it holds)',
-          [g, h].every((x) => x.asked === 0 && x.credLooks === 1 && /isn’t responding/.test(x.error)), JSON.stringify({ g, h }));
+          verdictOf([g, h].every((x) => x.asked === 0 && x.credLooks === 1 && /isn’t responding/.test(x.error))), JSON.stringify({ g, h }));
         const twice = M.load('src/usage-routes.js', anchored(USRC0, "  if (e && (e.code === 'long-lived' || e.firstLook)) return Promise.reject(e);", "  if (e && e.code === 'long-lived') return Promise.reject(e);", 'B-5e0d: the first look made twice'), 'routes-twice');
         const gr = await once(twice, 'k4r');
         ok('RED control: without the first-look rule the unreachable host is looked at twice (two 10 s waits)', gr.credLooks === 2, JSON.stringify(gr));
@@ -540,7 +540,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
         };
         const o = await olderPassive(usageMod, 'k1');
         ok('§5 ④k B-5e0d small 1: an agent OLDER than the law, refused by the hub\'s first look (never asked), keeps the person\'s PASSIVE reading — the cache read through the shell (one peek, file reads only) is merged as the agent\'s reply is (the machine\'s own bucket, «remote-statusline») and the ⟳ popup shows it at once, the refusal still by name, ONE look at the login file, 0 vendor requests',
-          o.asked === 0 && o.sent === 0 && /^not refreshed — the host's login holds a long-lived token/.test(o.error) && !o.had && !!o.got && o.got.source === 'remote-statusline' && o.got.fiveHour && o.got.fiveHour.utilization === 0.27 && o.popup && o.peeks === 1 && o.credLooks === 1, JSON.stringify({ ...o, got: o.got && { source: o.got.source, fiveHour: o.got.fiveHour } }));
+          o.asked === 0 && o.sent === 0 && gateOf(/^not refreshed — the host's login holds a long-lived token/.test(o.error)) && !o.had && !!o.got && o.got.source === 'remote-statusline' && gateOf(o.got.fiveHour) && o.got.fiveHour.utilization === 0.27 && gateOf(o.popup) && o.peeks === 1 && o.credLooks === 1, JSON.stringify({ ...o, got: o.got && { source: o.got.source, fiveHour: o.got.fiveHour } }));
         const lost = M.load('src/usage-routes.js', anchored(USRC, "return { passive: await hosts.readRemotePassiveUsage(hid).catch(() => null), refused: 'long-lived' };", "return { passive: null, refused: 'long-lived' };", 'B-5e0d small 1: the older agent\'s reading lost'), 'routes-lost');
         const or = await olderPassive(lost, 'k1r');
         ok('RED control: without the shell\'s passive read the older agent\'s refusal leaves the person no reading (the recorded line)', or.asked === 0 && !or.got && or.peeks === 0, JSON.stringify({ ...or, got: !!or.got }));
@@ -588,7 +588,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       am.noteCliVersion('2.1.312 (Claude Code)');
       await um.refreshViaCliPanel(id);
       const pvF = um.panelVerdictFor(id);
-      ok('§5 R3: …the folder-token row\'s header-only answer is classed by name — «the CLI prints no quota lines for a folder-token login on 2.1.312» (code folder-token), never a parse failure', pvF.code === 'folder-token' && /^the CLI prints no quota lines for a folder-token login on 2\.1\.312: You are currently using your subscription/.test(pvF.why) && L.readProbeLog(dataDir).slice(-1)[0].why === pvF.why, JSON.stringify(pvF));
+      ok('§5 R3: …the folder-token row\'s header-only answer is classed by name — «the CLI prints no quota lines for a folder-token login on 2.1.312» (code folder-token), never a parse failure', pvF.code === 'folder-token' && gateOf(/^the CLI prints no quota lines for a folder-token login on 2\.1\.312: You are currently using your subscription/.test(pvF.why)) && L.readProbeLog(dataDir).slice(-1)[0].why === pvF.why, JSON.stringify(pvF));
       am.list = realList;
     }
     // RED CONTROL for ④d: the 90c995a3 door (it refused ONLY an oat-only row) spawns the no-login row — and even then the
@@ -632,9 +632,9 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
     delete a.oatEnc; delete a.oatMintedAt; delete a.oatShape;
     ok('§5 ⑤ …the token gone, the expired login is a login again (probeable; its own probe says why it fails)', rowOf().probeEligibility === 'probeable' && rowOf().oatScopes === undefined);
   }
-  ok('§5 accounts.noteProbe refuses a fact with no instant or no reason, and an unknown account', (() => { try { am.noteProbe(id, { at: 0, why: 'x' }); return false; } catch { } try { am.noteProbe(id, { at: 1, why: '' }); return false; } catch { } try { am.noteProbe('nope', null); return false; } catch { return true; } })());
-  ok('§5 the export bundle never carries the probe fact (a reason is this hub\'s, not the account\'s)', (() => { am.noteProbe(id, { at: Date.now(), why: 'exit 1: x' }); const b = am.exportBundle(); return !JSON.stringify(b.accounts.find((a) => a.id === id)).includes('"probe"'); })());
+  ok('§5 accounts.noteProbe refuses a fact with no instant or no reason, and an unknown account', verdictOf((() => { try { am.noteProbe(id, { at: 0, why: 'x' }); return false; } catch { } try { am.noteProbe(id, { at: 1, why: '' }); return false; } catch { } try { am.noteProbe('nope', null); return false; } catch { return true; } })()));
+  ok('§5 the export bundle never carries the probe fact (a reason is this hub\'s, not the account\'s)', verdictOf((() => { am.noteProbe(id, { at: Date.now(), why: 'exit 1: x' }); const b = am.exportBundle(); return !JSON.stringify(b.accounts.find((a) => a.id === id)).includes('"probe"'); })()));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

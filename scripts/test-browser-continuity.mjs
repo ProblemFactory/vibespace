@@ -46,7 +46,7 @@ const require = createRequire(import.meta.url);
 const { fixtureLitter } = require('../src/fixture-guard.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const done = () => {
   console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);
@@ -147,12 +147,12 @@ console.log('\n① the D1 degrade notice reaches the first client to connect aft
   // client set. Wait for its journal line FIRST — that is the control that the
   // shape under test is the headless one (the server said it to nobody).
   const said = await until(() => noticeLines() >= 1, 15000);
-  ok(said, `the server journalled the too-old notice with NO client connected (${noticeLines()} line(s), ${Math.round(Date.now() - readyAt)} ms after Ready)`);
+  ok(verdictOf(said), `the server journalled the too-old notice with NO client connected (${noticeLines()} line(s), ${Math.round(Date.now() - readyAt)} ms after Ready)`);
   const a = await connect();
   const got = await until(() => a.msgs.some((m) => m.type === 'server-notice' && m.key === 'agent-browser-floor'), 4000);
   const frame = a.msgs.find((m) => m.type === 'server-notice' && m.key === 'agent-browser-floor');
-  ok(got, `THE FINDING: a client connecting ${Math.round(Date.now() - readyAt)} ms after Ready receives the notice (${frame ? JSON.stringify(frame.text).slice(0, 90) + '…' : 'ZERO server-notice frames — the latch was set before anyone was there'})`);
-  ok(!!frame && /too old for shared profiles/.test(frame.text) && /isolation is on and working/.test(frame.text), 'and it is the honest sentence (names the floor, says what still works)');
+  ok(verdictOf(got), `THE FINDING: a client connecting ${Math.round(Date.now() - readyAt)} ms after Ready receives the notice (${frame ? JSON.stringify(frame.text).slice(0, 90) + '…' : 'ZERO server-notice frames — the latch was set before anyone was there'})`);
+  ok(!!frame && gateOf(/too old for shared profiles/.test(frame.text)) && verdictOf(/isolation is on and working/.test(frame.text)), 'and it is the honest sentence (names the floor, says what still works)');
   // NEGATIVE CONTROL: the retry is not a nag loop — once DELIVERED, a later
   // client is not told again (serverNotice burns the key, and the resolver's
   // latch is now the delivery itself).
@@ -204,7 +204,7 @@ console.log('\n② Terminate → Resume of one conversation keeps ONE browser ke
     await until(() => !!metaFor(sid)?.meta?.browserKey, 5000);
     const m1 = metaFor(sid);
     const k1 = m1?.meta?.browserKey || '';
-    ok(/^bk-[0-9a-f]{8}$/.test(k1), `session-meta ${m1?.file} records browserKey ${k1} for the conversation`);
+    ok(verdictOf(/^bk-[0-9a-f]{8}$/.test(k1)), `session-meta ${m1?.file} records browserKey ${k1} for the conversation`);
     // POSITIVE CONTROL for the journal line: the FIRST resume of a conversation
     // nobody has seen before IS a resume-unknown, and the server says so. Its
     // absence on the second create below is therefore a measurement.
@@ -216,16 +216,16 @@ console.log('\n② Terminate → Resume of one conversation keeps ONE browser ke
     // planted there must be there again after the product's Terminate → Resume
     const keptDir1 = path.join(wt, 'data', 'browser-profiles', k1);
     let cfg1 = null; try { cfg1 = JSON.parse(fs.readFileSync(e1?.AGENT_BROWSER_CONFIG || '', 'utf8')); } catch { }
-    ok(!!cfg1 && cfg1.profile === keptDir1 && fs.statSync(keptDir1).isDirectory(), `lane browser-resume: its generated config names its OWN kept directory data/browser-profiles/${k1} (${cfg1 && cfg1.profile})`);
+    ok(!!cfg1 && cfg1.profile === keptDir1 && verdictOf(fs.statSync(keptDir1).isDirectory()), `lane browser-resume: its generated config names its OWN kept directory data/browser-profiles/${k1} (${cfg1 && cfg1.profile})`);
     try { fs.mkdirSync(path.join(keptDir1, 'Default'), { recursive: true }); fs.writeFileSync(path.join(keptDir1, 'Default', 'Cookies'), 'a login of this conversation'); } catch { }
 
     // Terminate — the product's own kill path, which UNLINKS the meta file.
     ws.send(JSON.stringify({ type: 'kill', sessionId: s1 }));
     const killed = await until(() => msgs.some((m) => m.type === 'killed' && m.sessionId === s1), 10000);
     const kf = msgs.find((m) => m.type === 'killed' && m.sessionId === s1);
-    ok(killed && kf?.ok === true, `session 1 killed through the ws kill path (${JSON.stringify(kf)})`);
+    ok(gateOf(killed) && kf?.ok === true, `session 1 killed through the ws kill path (${JSON.stringify(kf)})`);
     const gone = await until(() => !metaFor(sid), 5000);
-    ok(gone, 'the kill path really unlinked the session-meta file (the shape the finding named: nothing under data/session-meta names this conversation now)');
+    ok(verdictOf(gone), 'the kill path really unlinked the session-meta file (the shape the finding named: nothing under data/session-meta names this conversation now)');
     await until(() => !envOf(s1), 5000);
 
     // Resume the SAME conversation.
@@ -278,7 +278,7 @@ console.log('\n② Terminate → Resume of one conversation keeps ONE browser ke
         await until(() => !!metaFor(sid)?.meta?.browserKey, 5000);
         const mf = metaFor(sid);
         const kf = mf?.meta?.browserKey || '';
-        ok(/^bk-[0-9a-f]{8}$/.test(kf) && kf !== k1, `the fork minted its OWN key ${kf} ≠ ${k1} (D15) while its meta still names the parent's conversation id — the shape that bound the parent to it`);
+        ok(gateOf(/^bk-[0-9a-f]{8}$/.test(kf)) && kf !== k1, `the fork minted its OWN key ${kf} ≠ ${k1} (D15) while its meta still names the parent's conversation id — the shape that bound the parent to it`);
         ok(mf?.meta?.forkSourceId === sid, `and the record SAYS which conversation it was forked from (forkSourceId=${String(mf?.meta?.forkSourceId).slice(0, 8)}) — the fact the choke point asks`);
         await until(() => !!envOf(sf)?.AGENT_BROWSER_SESSION, 5000);
         const ef = envOf(sf);
@@ -303,7 +303,7 @@ console.log('\n② Terminate → Resume of one conversation keeps ONE browser ke
           ok(e3?.AGENT_BROWSER_SESSION === 'vs-' + k1, `and its process carries AGENT_BROWSER_SESSION=vs-${k1} (${e3?.AGENT_BROWSER_SESSION || 'none'}) — not the fork's namespace`);
           ok(unknownLines() === 1, `still exactly one \`resume-unknown\` line for the conversation (${unknownLines()}) — the fork neither re-minted the parent nor made its resume look unknown`);
           const seen = new Set([e1?.AGENT_BROWSER_SESSION, e2?.AGENT_BROWSER_SESSION, e3?.AGENT_BROWSER_SESSION]);
-          ok(seen.size === 1 && seen.has('vs-' + k1), `across all three carriers of the parent conversation exactly ONE namespace was ever spawned (${[...seen].join(', ')}) — no third namespace for a daemon to be orphaned under`);
+          ok(seen.size === 1 && verdictOf(seen.has('vs-' + k1)), `across all three carriers of the parent conversation exactly ONE namespace was ever spawned (${[...seen].join(', ')}) — no third namespace for a daemon to be orphaned under`);
           ws.send(JSON.stringify({ type: 'kill', sessionId: s3 }));
           await until(() => msgs.some((m) => m.type === 'killed' && m.sessionId === s3), 10000);
           await until(() => !metaFor(sid), 5000);
@@ -361,7 +361,7 @@ console.log('\n③ a resume whose CLI announces a DIFFERENT conversation id (the
     ws.send(JSON.stringify({ type: 'kill', sessionId: webuiId }));
     await until(() => msgs.some((m) => m.type === 'killed' && m.sessionId === webuiId), 10000);
     const gone = await until(() => !metaOf(conv, webuiId), 8000);
-    ok(gone, `${webuiId} killed and its session-meta unlinked`);
+    ok(verdictOf(gone), `${webuiId} killed and its session-meta unlinked`);
     await until(() => !envOf(webuiId), 5000);
   };
   const unknownLines = (conv) => (journal.match(new RegExp(`\\[browser\\] sess-\\d+-\\d+: resuming ${conv.slice(0, 8)} but no previous browser key was recorded`, 'g')) || []).length;
@@ -374,11 +374,11 @@ console.log('\n③ a resume whose CLI announces a DIFFERENT conversation id (the
     // write then re-names the record. Either record carries the key.
     await until(() => !!(metaFor(X) || metaFor(Y))?.meta?.browserKey, 8000);
     const kX = (metaFor(X) || metaFor(Y))?.meta?.browserKey || '';
-    ok(/^bk-[0-9a-f]{8}$/.test(kX), `the resume of a never-seen conversation minted ${kX} for ${X.slice(0, 8)}… (resume-unknown lines for it: ${unknownLines(X)})`);
+    ok(verdictOf(/^bk-[0-9a-f]{8}$/.test(kX)), `the resume of a never-seen conversation minted ${kX} for ${X.slice(0, 8)}… (resume-unknown lines for it: ${unknownLines(X)})`);
     const adopted = await until(() => !!metaOf(Y, sA), 8000);
     const mY = metaOf(Y, sA);
-    ok(adopted && !!mY, `the consumer ADOPTED the announced id: a session-meta now names ${Y.slice(0, 8)}… (${mY?.file || 'none'}) — the implicit-fork shape, reproduced through the real stream consumer`);
-    ok(Array.isArray(mY?.meta?.forkedFrom) && mY.meta.forkedFrom.includes(X) && !mY.meta.forkSourceId, `and its record says forkedFrom=[${X.slice(0, 8)}…] with NO forkSourceId (this was a resume, not a fork — r6's rule cannot see it)`);
+    ok(gateOf(adopted) && !!mY, `the consumer ADOPTED the announced id: a session-meta now names ${Y.slice(0, 8)}… (${mY?.file || 'none'}) — the implicit-fork shape, reproduced through the real stream consumer`);
+    ok(gateOf(Array.isArray(mY?.meta?.forkedFrom)) && gateOf(mY.meta.forkedFrom.includes(X)) && !mY.meta.forkSourceId, `and its record says forkedFrom=[${X.slice(0, 8)}…] with NO forkSourceId (this was a resume, not a fork — r6's rule cannot see it)`);
     ok(mY?.meta?.browserKey === kX && mY?.meta?.browserKeyFor === X, `the adopted record still carries key ${kX} AND states browserKeyFor=${String(mY?.meta?.browserKeyFor).slice(0, 8)}… — the conversation the key was DECIDED for (r7's fact, spread forward by the adoption write)`);
     await sleep(800); // the pre-fix bind landed on the adoption write, within the same second
     ok(bindingOf(X) === kX, `bindings.json binds the RESUMED conversation ${X.slice(0, 8)}… → ${kX}`);
@@ -398,10 +398,10 @@ console.log('\n③ a resume whose CLI announces a DIFFERENT conversation id (the
       const sB = c2.created.sessionId;
       await until(() => !!metaOf(Y, sB)?.meta?.browserKey, 8000);
       const kY = metaOf(Y, sB)?.meta?.browserKey || '';
-      ok(/^bk-[0-9a-f]{8}$/.test(kY) && kY !== kX, `THE FINDING, the other side: ${Y.slice(0, 8)}… minted its OWN key ${kY} ≠ ${kX} — it never inherited ${X.slice(0, 8)}…'s cookies`);
+      ok(gateOf(/^bk-[0-9a-f]{8}$/.test(kY)) && kY !== kX, `THE FINDING, the other side: ${Y.slice(0, 8)}… minted its OWN key ${kY} ≠ ${kX} — it never inherited ${X.slice(0, 8)}…'s cookies`);
       ok(unknownLines(Y) === 1, `and said \`resume-unknown\` once for it (${unknownLines(Y)}) — the honest line, not a silent inheritance`);
       ok(metaOf(Y, sB)?.meta?.browserKeyFor === Y, 'its record states browserKeyFor = itself');
-      ok(await until(() => metaOf(Y, sB)?.meta?.sawFirstId === true, 8000), `session B's consumer saw its first id line (sawFirstId persisted: ${metaOf(Y, sB)?.meta?.sawFirstId})`);
+      ok(verdictOf(await until(() => metaOf(Y, sB)?.meta?.sawFirstId === true, 8000)), `session B's consumer saw its first id line (sawFirstId persisted: ${metaOf(Y, sB)?.meta?.sawFirstId})`);
       await until(() => !!envOf(sB)?.AGENT_BROWSER_SESSION, 5000);
       ok(envOf(sB)?.AGENT_BROWSER_SESSION === 'vs-' + kY, `and its process carries AGENT_BROWSER_SESSION=vs-${kY}`);
       await sleep(500);
@@ -414,7 +414,7 @@ console.log('\n③ a resume whose CLI announces a DIFFERENT conversation id (the
       const c3 = await create('i3', X);
       if (ok(!c3.err && !!c3.created, `session C created as a second resume of ${X.slice(0, 8)}… (${c3.err ? 'error: ' + JSON.stringify(c3.err).slice(0, 160) : c3.created?.sessionId})`)) {
         const sC = c3.created.sessionId;
-        if (!ok(await until(() => !!metaOf(Y, sC), 8000), `session C adopted the announced id too (${metaOf(Y, sC)?.file || 'no meta names it'})`)) {
+        if (!ok(verdictOf(await until(() => !!metaOf(Y, sC), 8000)), `session C adopted the announced id too (${metaOf(Y, sC)?.file || 'no meta names it'})`)) {
           // Diagnostics for a red: what the server said, what the meta dir holds, what the fake printed.
           console.log('    journal tail:\n' + journal.split('\n').slice(-40).map((l) => '      ' + l.slice(0, 220)).join('\n'));
           for (const f of (fs.existsSync(metaDir) ? fs.readdirSync(metaDir) : [])) { try { const m = JSON.parse(fs.readFileSync(path.join(metaDir, f), 'utf8')); console.log(`    meta ${f}: webui=${m.webuiSessionId} claude=${String(m.claudeSessionId).slice(0, 8)} key=${m.browserKey} for=${String(m.browserKeyFor).slice(0, 8)} sawFirstId=${m.sawFirstId} resumeSpawn=${m.resumeSpawn}`); } catch { } }
@@ -495,33 +495,33 @@ console.log('\n⑤ a session with no browser key gets one on its first browser u
   const bindF = path.join(wt, 'data', 'browser-env', 'bindings.json');
   const bindingOf = (conv) => { try { return JSON.parse(fs.readFileSync(bindF, 'utf8')).byConversation?.[conv]?.key || ''; } catch { return ''; } };
   const mintLines = () => (journal.match(new RegExp(`had no browser key \\(it started before per-session browsers, or while they were off\\) — minted bk-[0-9a-f]{8} for conversation ${Z.slice(0, 8)}`, 'g')) || []).length;
-  ok(await setIso(false), 'setup: per-session browsers switched OFF (the pre-feature spawn shape)');
+  ok(verdictOf(await setIso(false)), 'setup: per-session browsers switched OFF (the pre-feature spawn shape)');
   const s1 = await create('l1');
   if (ok(!!s1, `a session spawned as a resume of ${Z.slice(0, 8)}… while they were off (${s1})`)) {
     await until(() => metaOf(s1)?.claudeSessionId === Z, 8000);
     await until(() => !!envOf(s1)?.VIBESPACE_SESSION_TOKEN, 8000);
     const e1 = envOf(s1);
     const tok = e1?.VIBESPACE_SESSION_TOKEN || '';
-    ok(metaOf(s1) && !metaOf(s1).browserKey && e1 && !e1.AGENT_BROWSER_SESSION && tok.startsWith('vsst_'), 'it has NO browser key: its record names none, its process carries no browser pairs (what the owner\'s 2026-09-17 chat had)');
+    ok(gateOf(metaOf(s1)) && !metaOf(s1).browserKey && gateOf(e1) && !e1.AGENT_BROWSER_SESSION && verdictOf(tok.startsWith('vsst_')), 'it has NO browser key: its record names none, its process carries no browser pairs (what the owner\'s 2026-09-17 chat had)');
     // verify r2: a keyless spawn WITNESSES its pin ladder's pick at the start (no default is configured here ⇒ the empty
     // witness, dated at the start, with the group cap in force) — the late key restores exactly this, never the default
     // the user has by then (a default reaches a conversation only at its start)
-    { const w = metaOf(s1)?.browserPinAtStart; ok(w && typeof w === 'object' && w.origin === 'harness' && w.profileId === '' && Number.isFinite(w.at) && Math.abs(w.at - metaOf(s1).createdAt) < 5000 && 'cap' in w, `the keyless spawn's record carries its pin WITNESS (browserPinAtStart: ${JSON.stringify(w)}) — what its ladder picked at the start`); }
+    { const w = metaOf(s1)?.browserPinAtStart; ok(gateOf(w) && typeof w === 'object' && w.origin === 'harness' && w.profileId === '' && gateOf(Number.isFinite(w.at)) && Math.abs(w.at - metaOf(s1).createdAt) < 5000 && 'cap' in w, `the keyless spawn's record carries its pin WITNESS (browserPinAtStart: ${JSON.stringify(w)}) — what its ladder picked at the start`); }
     let r = await agent(tok, 'GET', '/api/agent/browser/status');
     const live0 = await liveKeyOf(s1);   // item 7 (store-writer follow-up): «nothing minted» read off the live record, after the answer
-    ok(r.status === 409 && r.json?.code === 'no_browser_key' && r.json?.why === 'isolation_off' && /Give each session its own agent browser/.test(r.json?.error || '') && live0.seen && !live0.key && !metaOf(s1).browserKey, `while they are still off its browser command is refused BY NAME — isolation_off, naming the setting (${r.status} ${r.json?.code}/${r.json?.why}); nothing minted (the server's live record: ${live0.seen ? live0.key || 'no key' : live0.why})`);
-    ok(await setIso(true), 'per-session browsers switched back ON');
+    ok(r.status === 409 && r.json?.code === 'no_browser_key' && r.json?.why === 'isolation_off' && gateOf(/Give each session its own agent browser/.test(r.json?.error || '')) && gateOf(live0.seen) && !live0.key && !metaOf(s1).browserKey, `while they are still off its browser command is refused BY NAME — isolation_off, naming the setting (${r.status} ${r.json?.code}/${r.json?.why}); nothing minted (the server's live record: ${live0.seen ? live0.key || 'no key' : live0.why})`);
+    ok(verdictOf(await setIso(true)), 'per-session browsers switched back ON');
     r = await agent(tok, 'GET', '/api/agent/browser/status');
     await until(() => !!metaOf(s1)?.browserKey, 5000);
     const m1 = metaOf(s1);
     const kL = m1?.browserKey || '';
-    ok(r.status === 200 && /^bk-[0-9a-f]{8}$/.test(kL) && m1.browserKeyFor === Z && m1.browserVariant === 'D' && fs.existsSync(path.join(wt, 'data', 'browser-env', kL + '.json')),
+    ok(r.status === 200 && gateOf(/^bk-[0-9a-f]{8}$/.test(kL)) && m1.browserKeyFor === Z && m1.browserVariant === 'D' && verdictOf(fs.existsSync(path.join(wt, 'data', 'browser-env', kL + '.json'))),
       `THE FIX: its FIRST browser route after that mints ${kL} through the real wiring — the record (the SAME file, kept whole: webui ${m1?.webuiSessionId}) now carries it with browserKeyFor=${String(m1?.browserKeyFor).slice(0, 8)}…, rung D's config is on disk (${r.status})`);
     await sleep(300);
     ok(bindingOf(Z) === kL && mintLines() === 1, `bindings.json binds ${Z.slice(0, 8)}… → ${bindingOf(Z)} (THE choke point wrote it), and the server said so once (${mintLines()} line)`);
     r = await agent(tok, 'GET', '/api/agent/browser/status');
     const live2 = await liveKeyOf(s1);   // item 7 (store-writer follow-up): a second mint is in the live record at once; its file lands paced
-    ok(r.status === 200 && live2.seen && live2.key === kL && metaOf(s1)?.browserKey === kL && mintLines() === 1, `a second route mints nothing — the same key (the server's live record: ${live2.seen ? live2.key || 'no key' : live2.why}), still one line`);
+    ok(r.status === 200 && gateOf(live2.seen) && live2.key === kL && metaOf(s1)?.browserKey === kL && mintLines() === 1, `a second route mints nothing — the same key (the server's live record: ${live2.seen ? live2.key || 'no key' : live2.why}), still one line`);
     ok(!envOf(s1)?.AGENT_BROWSER_SESSION, 'HONEST BOUNDARY: the running process\'s environment is unchanged (immutable) — the CLI builds its child env from /resolve\'s answer, which is why no restart is needed');
     ws.send(JSON.stringify({ type: 'kill', sessionId: s1 }));
     await until(() => msgs.some((m) => m.type === 'killed' && m.sessionId === s1), 10000);
@@ -545,7 +545,7 @@ console.log('\n④ hygiene: the server and its sessions ran under the fixture HO
   let srvHome = null;
   try { srvHome = (fs.readFileSync(`/proc/${srv.pid}/environ`, 'utf8').split('\0').find((kv) => kv.startsWith('HOME=')) || '').slice(5); } catch { }
   ok(srvHome === fakeHome, `the server process's HOME is the scratch one (${srvHome}) — a spawned server discovers only what lives under its own home, so nothing here can reach the developer's ~/.claude`);
-  ok(String(fakeHome).startsWith(scratch('browser-cont-home')), 'and it is a vs- fixture path every production reader refuses by name');
+  ok(verdictOf(String(fakeHome).startsWith(scratch('browser-cont-home'))), 'and it is a vs- fixture path every production reader refuses by name');
   // The per-suite census over the REAL home, through the sweeper's own rule
   // (no grace: these entries are diffed against the pre-run listing).
   const after = (() => { try { return fs.readdirSync(REAL_PROJECTS, { withFileTypes: true }); } catch { return []; } })();
@@ -555,4 +555,4 @@ console.log('\n④ hygiene: the server and its sessions ran under the fixture HO
   ok(lit.offenders.length === 0, `the REAL ~/.claude/projects gained no fixture entry during this run (${added.length} new entries, ${lit.offenders.length} offenders)`);
 }
 
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

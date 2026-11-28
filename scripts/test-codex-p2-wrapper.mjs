@@ -28,7 +28,7 @@ import { stopWrapper } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -221,97 +221,97 @@ const bufRecords = () => events();
 const waitFor = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(100); } return pred(); };
 const sendLine = (o) => w.stdin.write(JSON.stringify(o) + '\n');
 
-ok(await waitFor(() => readMeta()?.threadId === 'th-p2'), 'wrapper handshake against the stub app-server');
+ok(verdictOf(await waitFor(() => readMeta()?.threadId === 'th-p2')), 'wrapper handshake against the stub app-server');
 const wm = bufRecords().find((r) => r.type === 'wrapper_meta');
-ok(Array.isArray(wm?.payload?.slashCommands) && ['compact', 'review', 'model', 'effort'].every((c) => wm.payload.slashCommands.includes(c)), 'wrapper_meta adverts the wrapper-served slash commands');
+ok(gateOf(Array.isArray(wm?.payload?.slashCommands)) && verdictOf(['compact', 'review', 'model', 'effort'].every((c) => wm.payload.slashCommands.includes(c))), 'wrapper_meta adverts the wrapper-served slash commands');
 
 // ① first input → turn/start; the stub keeps it active and pushes MCP/web/image items
 sendLine({ type: 'chat-input', text: 'first', msgId: 'm1' });
-ok(await waitFor(() => rpc().some((m) => m.method === 'turn/start') && readMeta()?.activeTurnId === 'turn-1'), 'first chat-input starts a turn and the wrapper adopts it as active');
-ok(await waitFor(() => bufRecords().some((r) => r.type === 'response_item' && r.payload?.type === 'function_call' && r.payload.name === 'mcp__github__list_issues')), 'a LIVE mcpToolCall item is recorded as a function_call (mcp__<server>__<tool>)');
-ok(await waitFor(() => bufRecords().some((r) => r.payload?.type === 'function_call_output' && r.payload.call_id === 'mcp-1' && /3 issues/.test(r.payload.output))), 'its completion lands as function_call_output with the MCP result');
-ok(await waitFor(() => bufRecords().some((r) => r.payload?.type === 'function_call' && r.payload.name === 'web_search' && r.payload.call_id === 'ws-1')), 'a webSearch item is a visible web_search call from item/started (the pending card)');
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'turn/start') && readMeta()?.activeTurnId === 'turn-1')), 'first chat-input starts a turn and the wrapper adopts it as active');
+ok(verdictOf(await waitFor(() => bufRecords().some((r) => r.type === 'response_item' && r.payload?.type === 'function_call' && r.payload.name === 'mcp__github__list_issues'))), 'a LIVE mcpToolCall item is recorded as a function_call (mcp__<server>__<tool>)');
+ok(verdictOf(await waitFor(() => bufRecords().some((r) => r.payload?.type === 'function_call_output' && r.payload.call_id === 'mcp-1' && /3 issues/.test(r.payload.output)))), 'its completion lands as function_call_output with the MCP result');
+ok(verdictOf(await waitFor(() => bufRecords().some((r) => r.payload?.type === 'function_call' && r.payload.name === 'web_search' && r.payload.call_id === 'ws-1'))), 'a webSearch item is a visible web_search call from item/started (the pending card)');
 // 2.369.43: the completion is codex's OWN rollout shape (event_msg web_search_end) carrying the FINAL query/action/results — not a function_call_output of raw JSON
-ok(await waitFor(() => bufRecords().some((r) => r.type === 'event_msg' && r.payload?.type === 'web_search_end' && r.payload.call_id === 'ws-1' && r.payload.query === 'vibespace acp' && r.payload.action?.type === 'search' && Array.isArray(r.payload.results) && r.payload.results[0]?.url === 'https://example.org/acp')), 'item/completed lands as event_msg web_search_end {call_id, query, action, results} (the rollout twin shape)');
-{ const wse = bufRecords().find((r) => r.type === 'event_msg' && r.payload?.type === 'web_search_end'); ok(wse && Object.keys(wse.payload).join(',') === 'type,call_id,query,action,results', `web_search_end key order mirrors codex-rs (fingerprint dedup with the rollout copy): ${wse && Object.keys(wse.payload).join(',')}`); }
+ok(verdictOf(await waitFor(() => bufRecords().some((r) => r.type === 'event_msg' && r.payload?.type === 'web_search_end' && r.payload.call_id === 'ws-1' && r.payload.query === 'vibespace acp' && r.payload.action?.type === 'search' && Array.isArray(r.payload.results) && r.payload.results[0]?.url === 'https://example.org/acp'))), 'item/completed lands as event_msg web_search_end {call_id, query, action, results} (the rollout twin shape)');
+{ const wse = bufRecords().find((r) => r.type === 'event_msg' && r.payload?.type === 'web_search_end'); ok(gateOf(wse) && Object.keys(wse.payload).join(',') === 'type,call_id,query,action,results', `web_search_end key order mirrors codex-rs (fingerprint dedup with the rollout copy): ${wse && Object.keys(wse.payload).join(',')}`); }
 ok(!bufRecords().some((r) => r.payload?.type === 'function_call_output' && r.payload.call_id === 'ws-1'), 'no function_call_output twin for the search (one completion record, one edit)');
-ok(await waitFor(() => bufRecords().some((r) => r.payload?.type === 'function_call' && r.payload.name === 'view_image' && /shot\.png/.test(r.payload.arguments))), 'an imageView item is a visible view_image call');
+ok(verdictOf(await waitFor(() => bufRecords().some((r) => r.payload?.type === 'function_call' && r.payload.name === 'view_image' && /shot\.png/.test(r.payload.arguments)))), 'an imageView item is a visible view_image call');
 // live and rebuilt must render the SAME card: the rollout's ImageView item is routed with file:// stripped,
 // so the live copy strips it too — otherwise the one card (same item id) rewrote its own text on re-attach
 { const fc = bufRecords().find((r) => r.payload?.type === 'function_call' && r.payload.name === 'view_image');
   await waitFor(() => bufRecords().some((r) => r.payload?.type === 'function_call_output' && r.payload.call_id === fc?.payload.call_id));
   const fo = bufRecords().find((r) => r.payload?.type === 'function_call_output' && r.payload.call_id === fc?.payload.call_id)?.payload;
-  ok(fc && JSON.parse(fc.payload.arguments).path === '/tmp/shot.png' && fo?.output === 'viewed /tmp/shot.png', `the live view_image card carries the file://-stripped path, byte-identical to the rollout copy (${JSON.stringify([fc && JSON.parse(fc.payload.arguments).path, fo?.output])})`); }
+  ok(gateOf(fc) && JSON.parse(fc.payload.arguments).path === '/tmp/shot.png' && fo?.output === 'viewed /tmp/shot.png', `the live view_image card carries the file://-stripped path, byte-identical to the rollout copy (${JSON.stringify([fc && JSON.parse(fc.payload.arguments).path, fo?.output])})`); }
 
 // ② second input while the turn is active → queued, never a second turn/start
 sendLine({ type: 'chat-input', text: 'second', msgId: 'm2' });
-ok(await waitFor(() => rpc().some((m) => m.method === 'thread/queue/add')), 'a chat-input during an ACTIVE turn goes to thread/queue/add');
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'thread/queue/add'))), 'a chat-input during an ACTIVE turn goes to thread/queue/add');
 const qa = rpc().find((m) => m.method === 'thread/queue/add');
-ok(qa && qa.params.threadId === 'th-p2' && JSON.stringify(qa.params.input).includes('second') && qa.params.clientUserMessageId === 'm2', 'queue/add carries the thread, the encoded input and the client message id');
+ok(gateOf(qa) && qa.params.threadId === 'th-p2' && gateOf(JSON.stringify(qa.params.input).includes('second')) && qa.params.clientUserMessageId === 'm2', 'queue/add carries the thread, the encoded input and the client message id');
 ok(rpc().filter((m) => m.method === 'turn/start').length === 1, 'no second turn/start (the old path steered/rejected)');
-ok(await waitFor(() => events().some((e) => e.type === 'event_msg' && e.payload?.type === 'queued_input' && e.payload.msg_id === 'm2')), 'a queued_input event tells the client the message is queued');
-{ const users = bufRecords().filter((r) => r.type === 'response_item' && r.payload?.role === 'user').map((r) => JSON.stringify(r.payload.content)); ok(users.some((u) => /first/.test(u)) && users.some((u) => /second/.test(u)), 'both user messages are recorded (the bubble renders either way)'); }
+ok(verdictOf(await waitFor(() => events().some((e) => e.type === 'event_msg' && e.payload?.type === 'queued_input' && e.payload.msg_id === 'm2'))), 'a queued_input event tells the client the message is queued');
+{ const users = bufRecords().filter((r) => r.type === 'response_item' && r.payload?.role === 'user').map((r) => JSON.stringify(r.payload.content)); ok(gateOf(users.some((u) => /first/.test(u))) && verdictOf(users.some((u) => /second/.test(u))), 'both user messages are recorded (the bubble renders either way)'); }
 
 // ②b QUEUE + STEER (owner ask 2026-09-06: codex has two send modes)
 const qEvents = () => events().filter((e) => e.type === 'event_msg' && e.payload?.type === 'queue_changed').map((e) => e.payload);
 const lastQueue = () => (qEvents().slice(-1)[0]?.items) || [];
 const opResults = () => events().filter((e) => e.type === 'event_msg' && e.payload?.type === 'queue_op_result').map((e) => e.payload);
-ok(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm2'), `queue_changed publishes the WHOLE queue on every change (${JSON.stringify(lastQueue())})`);
+ok(verdictOf(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm2')), `queue_changed publishes the WHOLE queue on every change (${JSON.stringify(lastQueue())})`);
 ok(lastQueue()[0].preview === 'second' && lastQueue()[0].kind === 'user' && !!lastQueue()[0].id, 'each item carries {id, msgId, preview, ts, kind} — the preview is what will actually be sent', JSON.stringify(lastQueue()[0]));
 sendLine({ type: 'chat-input', text: 'third', msgId: 'm7' });
-ok(await waitFor(() => lastQueue().length === 2 && lastQueue().map((i) => i.msgId).join(',') === 'm2,m7'), `two queued, in order (${lastQueue().map((i) => i.msgId).join(',')})`);
+ok(verdictOf(await waitFor(() => lastQueue().length === 2 && lastQueue().map((i) => i.msgId).join(',') === 'm2,m7')), `two queued, in order (${lastQueue().map((i) => i.msgId).join(',')})`);
 // steer the SECOND one: only IT is injected, #1 keeps its place
 const second = lastQueue()[1];
 sendLine({ type: 'queue-op', op: 'steer', id: second.id });
-ok(await waitFor(() => rpc().some((m) => m.method === 'turn/steer')), 'a steer sends turn/steer');
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'turn/steer'))), 'a steer sends turn/steer');
 {
   const st = rpc().filter((m) => m.method === 'turn/steer');
-  ok(st.length === 1 && st[0].params.expectedTurnId === 'turn-1' && JSON.stringify(st[0].params.input).includes('third') && !JSON.stringify(st[0].params.input).includes('second') && st[0].params.clientUserMessageId === 'm7',
+  ok(st.length === 1 && st[0].params.expectedTurnId === 'turn-1' && gateOf(JSON.stringify(st[0].params.input).includes('third')) && !JSON.stringify(st[0].params.input).includes('second') && st[0].params.clientUserMessageId === 'm7',
     `…with the ACTIVE turn id as the precondition and ONLY that item's input (${JSON.stringify(st[0]?.params)})`);
 }
-ok(await waitFor(() => rpc().some((m) => m.method === 'thread/queue/delete' && m.params.queuedSubmissionId === second.id)), 'a steered item is DELETED from the queue (a steer does not dequeue — measured) so it never runs twice');
-ok(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm2'), `…and the other item keeps its place in the queue (${JSON.stringify(lastQueue())})`);
-ok(opResults().some((r) => r.op === 'steer' && r.ok === true && r.msg_id === 'm7'), 'queue_op_result names the bubble that was steered', JSON.stringify(opResults().slice(-1)));
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'thread/queue/delete' && m.params.queuedSubmissionId === second.id))), 'a steered item is DELETED from the queue (a steer does not dequeue — measured) so it never runs twice');
+ok(verdictOf(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm2')), `…and the other item keeps its place in the queue (${JSON.stringify(lastQueue())})`);
+ok(verdictOf(opResults().some((r) => r.op === 'steer' && r.ok === true && r.msg_id === 'm7')), 'queue_op_result names the bubble that was steered', JSON.stringify(opResults().slice(-1)));
 // remove
 const first = lastQueue()[0];
 sendLine({ type: 'queue-op', op: 'remove', id: first.id });
-ok(await waitFor(() => lastQueue().length === 0), 'remove empties the queue');
-ok(opResults().some((r) => r.op === 'remove' && r.ok === true && r.msg_id === 'm2'), 'queue_op_result names the removed bubble');
+ok(verdictOf(await waitFor(() => lastQueue().length === 0)), 'remove empties the queue');
+ok(verdictOf(opResults().some((r) => r.op === 'remove' && r.ok === true && r.msg_id === 'm2')), 'queue_op_result names the removed bubble');
 // steer-all: sequential steers IN ORDER (measured: several steers per turn are accepted)
 sendLine({ type: 'chat-input', text: 'alpha', msgId: 'm8' });
 sendLine({ type: 'chat-input', text: 'beta', msgId: 'm9' });
-ok(await waitFor(() => lastQueue().length === 2), 'two more queued for steer-all');
+ok(verdictOf(await waitFor(() => lastQueue().length === 2)), 'two more queued for steer-all');
 const steersBefore = rpc().filter((m) => m.method === 'turn/steer').length;
 sendLine({ type: 'queue-op', op: 'steer-all' });
-ok(await waitFor(() => rpc().filter((m) => m.method === 'turn/steer').length === steersBefore + 2), 'steer-all is one turn/steer PER ITEM (the app-server accepts several per turn), not one concatenated blob');
+ok(verdictOf(await waitFor(() => rpc().filter((m) => m.method === 'turn/steer').length === steersBefore + 2)), 'steer-all is one turn/steer PER ITEM (the app-server accepts several per turn), not one concatenated blob');
 {
   const st = rpc().filter((m) => m.method === 'turn/steer').slice(steersBefore);
-  ok(JSON.stringify(st[0].params.input).includes('alpha') && JSON.stringify(st[1].params.input).includes('beta'), 'steer-all preserves queue ORDER', st.map((m) => JSON.stringify(m.params.input)).join(' | '));
+  ok(gateOf(JSON.stringify(st[0].params.input).includes('alpha')) && verdictOf(JSON.stringify(st[1].params.input).includes('beta')), 'steer-all preserves queue ORDER', st.map((m) => JSON.stringify(m.params.input)).join(' | '));
 }
-ok(await waitFor(() => lastQueue().length === 0), 'steer-all empties the queue');
-ok(opResults().some((r) => r.op === 'steer-all' && r.ok === true && r.done === 2), 'steer-all reports how many landed', JSON.stringify(opResults().slice(-1)));
+ok(verdictOf(await waitFor(() => lastQueue().length === 0)), 'steer-all empties the queue');
+ok(verdictOf(opResults().some((r) => r.op === 'steer-all' && r.ok === true && r.done === 2)), 'steer-all reports how many landed', JSON.stringify(opResults().slice(-1)));
 // a queued PEER message is listed + labelled, and REMOVING it hands the text
 // back to the delivery ladder (it was already reported delivered — a silent
 // loss here is a promised message gone)
 sendLine({ type: 'peer-message', text: 'ping from B', fromName: 'session B' });
-ok(await waitFor(() => lastQueue().some((i) => i.kind === 'peer')), 'an agent-to-agent message queued on the same lane is LISTED and labelled', JSON.stringify(lastQueue()));
+ok(verdictOf(await waitFor(() => lastQueue().some((i) => i.kind === 'peer'))), 'an agent-to-agent message queued on the same lane is LISTED and labelled', JSON.stringify(lastQueue()));
 {
   const peer = lastQueue().find((i) => i.kind === 'peer');
   ok(peer.from === 'session B' && peer.preview === 'ping from B', 'the peer row carries its sender + preview', JSON.stringify(peer));
   sendLine({ type: 'queue-op', op: 'remove', id: peer.id });
-  ok(await waitFor(() => events().some((e) => e.payload?.type === 'peer_message_result' && e.payload.ok === false && e.payload.text === 'ping from B' && e.payload.fromName === 'session B')),
+  ok(verdictOf(await waitFor(() => events().some((e) => e.payload?.type === 'peer_message_result' && e.payload.ok === false && e.payload.text === 'ping from B' && e.payload.fromName === 'session B'))),
     'removing it re-reports peer_message_result ok:false with the text + label (the consumer re-stashes for next-turn injection)', JSON.stringify(events().filter((e) => e.payload?.type === 'peer_message_result').map((e) => e.payload)));
-  ok(await waitFor(() => !lastQueue().some((i) => i.kind === 'peer')), 'and it leaves the queue');
+  ok(verdictOf(await waitFor(() => !lastQueue().some((i) => i.kind === 'peer'))), 'and it leaves the queue');
 }
 
 // a turn that CANNOT be steered (review/compact → ActiveTurnNotSteerable): the
 // item STAYS queued and the client is told why
 sendLine({ type: 'review-start', target: { type: 'uncommittedChanges' } });
-ok(await waitFor(() => rpc().some((m) => m.method === 'review/start')), 'a review turn is running');
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'review/start'))), 'a review turn is running');
 sendLine({ type: 'chat-input', text: 'during review', msgId: 'm10' });
-ok(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm10'), 'a message sent during the review turn queues');
+ok(verdictOf(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm10')), 'a message sent during the review turn queues');
 sendLine({ type: 'queue-op', op: 'steer', id: lastQueue()[0].id });
-ok(await waitFor(() => opResults().some((r) => r.op === 'steer' && r.ok === false && r.reason === 'not-steerable' && r.kind === 'review')), `a review turn refuses the steer, CLASSIFIED (${JSON.stringify(opResults().slice(-1))})`);
+ok(verdictOf(await waitFor(() => opResults().some((r) => r.op === 'steer' && r.ok === false && r.reason === 'not-steerable' && r.kind === 'review'))), `a review turn refuses the steer, CLASSIFIED (${JSON.stringify(opResults().slice(-1))})`);
 ok(lastQueue().length === 1 && lastQueue()[0].msgId === 'm10', 'the refused item STAYS queued (it still runs when the turn ends)', JSON.stringify(lastQueue()));
 // A REFUSED steer-all must speak ONCE. It used to emit the per-item failure
 // AND a `{op:'steer-all', ok:false, reason}` summary — two cards from one
@@ -319,10 +319,10 @@ ok(lastQueue().length === 1 && lastQueue()[0].msgId === 'm10', 'the refused item
 // defaulted to "review" and named a compact turn wrong (round-1 review).
 {
   sendLine({ type: 'chat-input', text: 'also during review', msgId: 'm11' });
-  ok(await waitFor(() => lastQueue().length === 2), 'two queued behind the un-steerable review turn');
+  ok(verdictOf(await waitFor(() => lastQueue().length === 2)), 'two queued behind the un-steerable review turn');
   const before = opResults().length;
   sendLine({ type: 'queue-op', op: 'steer-all' });
-  ok(await waitFor(() => opResults().length > before), 'steer-all answers');
+  ok(verdictOf(await waitFor(() => opResults().length > before)), 'steer-all answers');
   const after = opResults().slice(before);
   ok(after.filter((r) => r.ok === false).length === 1, `a refused steer-all reports the failure ONCE — the per-item result, not a second batch card (${JSON.stringify(after)})`);
   ok(after[0].op === 'steer' && after[0].reason === 'not-steerable' && after[0].kind === 'review' && after[0].batch === 'steer-all', '…and THAT result carries the real reason, the real turn kind and its batch provenance', JSON.stringify(after[0]));
@@ -331,29 +331,29 @@ ok(lastQueue().length === 1 && lastQueue()[0].msgId === 'm10', 'the refused item
   // put the queue back to ONE item: the stub app-server drains a single entry
   // per turn end, and the next assertions are about that drain.
   sendLine({ type: 'queue-op', op: 'remove', id: lastQueue()[1].id });
-  ok(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm10'), 'the extra probe message is removed again', JSON.stringify(lastQueue()));
+  ok(verdictOf(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm10')), 'the extra probe message is removed again', JSON.stringify(lastQueue()));
 }
 // a turn that ends ON ITS OWN → the APP-SERVER drains the queue itself and the
 // wrapper republishes; the drained bubble's chip clears because it RAN.
 fs.writeFileSync(endTurnFile, '1');
-ok(await waitFor(() => lastQueue().length === 0), 'when the turn ends on its own the queued message runs (the app-server drains) and the published queue empties');
-ok(await waitFor(() => readMeta()?.activeTurnId === 'turn-2'), 'the drained item is running as the app-server\'s own turn (no turn/start from us)', JSON.stringify(readMeta()?.activeTurnId));
+ok(verdictOf(await waitFor(() => lastQueue().length === 0)), 'when the turn ends on its own the queued message runs (the app-server drains) and the published queue empties');
+ok(verdictOf(await waitFor(() => readMeta()?.activeTurnId === 'turn-2')), 'the drained item is running as the app-server\'s own turn (no turn/start from us)', JSON.stringify(readMeta()?.activeTurnId));
 
 // ②c STOP CLEARS THE QUEUE (owner decision 2026-09-07 — codex now matches ACP).
 // The app-server drains its queue when the turn ends INCLUDING a turn ended by
 // Stop, so the messages queued behind it used to run the instant Stop landed.
 {
   sendLine({ type: 'chat-input', text: 'stop me', msgId: 'm12' });
-  ok(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm12'), 'a typed message queues behind the running turn', JSON.stringify(lastQueue()));
+  ok(verdictOf(await waitFor(() => lastQueue().length === 1 && lastQueue()[0].msgId === 'm12')), 'a typed message queues behind the running turn', JSON.stringify(lastQueue()));
   sendLine({ type: 'peer-message', text: 'ping from C', fromName: 'session C' });
-  ok(await waitFor(() => lastQueue().length === 2 && lastQueue().some((i) => i.kind === 'peer')), 'and an agent-to-agent message queues on the same lane', JSON.stringify(lastQueue()));
+  ok(verdictOf(await waitFor(() => lastQueue().length === 2 && lastQueue().some((i) => i.kind === 'peer'))), 'and an agent-to-agent message queues on the same lane', JSON.stringify(lastQueue()));
   const queuedIds = lastQueue().map((i) => i.id);
   const rpcBefore = rpc().length;
   const startsBefore = rpc().filter((m) => m.method === 'turn/start').length;
   const opsBefore = opResults().length;
   const peersBefore = events().filter((e) => e.payload?.type === 'peer_message_result').length;
   sendLine({ type: 'interrupt' });
-  ok(await waitFor(() => lastQueue().length === 0), 'Stop empties the queue (the strip clears)', JSON.stringify(lastQueue()));
+  ok(verdictOf(await waitFor(() => lastQueue().length === 0)), 'Stop empties the queue (the strip clears)', JSON.stringify(lastQueue()));
   const win = rpc().slice(rpcBefore);
   const dels = win.filter((m) => m.method === 'thread/queue/delete');
   ok(dels.length === 2 && dels.map((m) => m.params.queuedSubmissionId).sort().join(',') === queuedIds.slice().sort().join(','), `exactly one thread/queue/delete per queued item (${JSON.stringify(dels.map((m) => m.params?.queuedSubmissionId))})`);
@@ -362,8 +362,8 @@ ok(await waitFor(() => readMeta()?.activeTurnId === 'turn-2'), 'the drained item
   // app-server's own drain (the stub still drains on interrupt, deliberately).
   ok(win.findIndex((m) => m.method === 'turn/interrupt') > win.map((m) => m.method).lastIndexOf('thread/queue/delete'), 'every delete goes out BEFORE turn/interrupt — the app-server drains what is left when the turn ends', JSON.stringify(win.map((m) => m.method)));
   const rms = opResults().slice(opsBefore).filter((r) => r.op === 'remove');
-  ok(rms.length === 2 && rms.every((r) => r.ok === true && r.reason === 'stopped'), `each dropped item is reported as a removal with reason 'stopped' (${JSON.stringify(rms)})`);
-  ok(rms.some((r) => r.msg_id === 'm12'), 'the typed message\'s removal names its bubble', JSON.stringify(rms));
+  ok(rms.length === 2 && verdictOf(rms.every((r) => r.ok === true && r.reason === 'stopped')), `each dropped item is reported as a removal with reason 'stopped' (${JSON.stringify(rms)})`);
+  ok(verdictOf(rms.some((r) => r.msg_id === 'm12')), 'the typed message\'s removal names its bubble', JSON.stringify(rms));
   // the chips must be stamped BEFORE the emptied republish: a bubble that
   // leaves the queue with no result reads as "it RAN" (the ACP round-1 lesson)
   const evAll = events().filter((e) => e.type === 'event_msg');
@@ -374,10 +374,10 @@ ok(await waitFor(() => readMeta()?.activeTurnId === 'turn-2'), 'the drained item
   // sweep deleted, its text the app-server's stored input — the peer row goes back to its ladder, never the composer
   const dropIdx = evAll.findIndex((e) => e.payload?.type === 'queue_dropped');
   const drop = dropIdx >= 0 ? evAll[dropIdx].payload : null;
-  ok(drop && evAll.filter((e) => e.payload?.type === 'queue_dropped').length === 1 && drop.items.length === 1 && drop.items[0].text === 'stop me' && drop.items[0].msgId === 'm12' && /^\d+-\d+$/.test(drop.dropId) && drop.by === 'stop' && drop.omitted === 0, `Stop puts the person's queued text back: ONE queue_dropped, items = [m12 'stop me'] (the peer row absent) — ${JSON.stringify(drop)}`);
+  ok(gateOf(drop) && evAll.filter((e) => e.payload?.type === 'queue_dropped').length === 1 && drop.items.length === 1 && drop.items[0].text === 'stop me' && drop.items[0].msgId === 'm12' && gateOf(/^\d+-\d+$/.test(drop.dropId)) && drop.by === 'stop' && drop.omitted === 0, `Stop puts the person's queued text back: ONE queue_dropped, items = [m12 'stop me'] (the peer row absent) — ${JSON.stringify(drop)}`);
   ok(lastRemoveIdx >= 0 && dropIdx > lastRemoveIdx && emptyIdx > dropIdx, `…in ORDER: the last 'stopped' result (${lastRemoveIdx}) < queue_dropped (${dropIdx}) < the emptied republish (${emptyIdx})`);
   const peers = events().filter((e) => e.payload?.type === 'peer_message_result').slice(peersBefore).map((e) => e.payload);
-  ok(peers.some((r) => r.ok === false && r.text === 'ping from C' && r.fromName === 'session C'), 'the queued agent-to-agent message goes back to the delivery ladder (ok:false with its text + label ⇒ the consumer re-stashes it)', JSON.stringify(peers));
+  ok(verdictOf(peers.some((r) => r.ok === false && r.text === 'ping from C' && r.fromName === 'session C')), 'the queued agent-to-agent message goes back to the delivery ladder (ok:false with its text + label ⇒ the consumer re-stashes it)', JSON.stringify(peers));
   // NOTHING RUNS AFTER THE TURN: the queue was empty when the turn ended, so
   // the app-server had nothing to drain and started no turn of its own.
   await sleep(400);
@@ -388,37 +388,37 @@ ok(await waitFor(() => readMeta()?.activeTurnId === 'turn-2'), 'the drained item
 
 // ③ slash commands
 sendLine({ type: 'chat-input', text: '/compact', msgId: 'm3' });
-ok(await waitFor(() => rpc().some((m) => m.method === 'thread/compact/start' && m.params.threadId === 'th-p2')), '/compact runs a REAL thread/compact/start');
-ok(await waitFor(() => events().some((e) => e.payload?.type === 'compact_started')) && await waitFor(() => events().some((e) => e.payload?.type === 'context_compacted' && e.payload.source === 'item')), 'compact_started + context_compacted (from the contextCompaction item) are emitted');
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'thread/compact/start' && m.params.threadId === 'th-p2'))), '/compact runs a REAL thread/compact/start');
+ok(gateOf(await waitFor(() => events().some((e) => e.payload?.type === 'compact_started'))) && verdictOf(await waitFor(() => events().some((e) => e.payload?.type === 'context_compacted' && e.payload.source === 'item'))), 'compact_started + context_compacted (from the contextCompaction item) are emitted');
 ok(rpc().filter((m) => m.method === 'turn/start').length === 1 && !rpc().some((m) => m.method === 'thread/queue/add' && JSON.stringify(m.params.input).includes('/compact')), '/compact is consumed — no model turn, not queued');
 sendLine({ type: 'chat-input', text: '/model gpt-6-astra', msgId: 'm4' });
-ok(await waitFor(() => readMeta()?.model === 'gpt-6-astra'), '/model sets the next-turn model through the set-model verb');
-ok(await waitFor(() => events().some((e) => e.payload?.type === 'command_applied' && e.payload.command === 'model' && e.payload.value === 'gpt-6-astra')), '…and reports command_applied');
+ok(verdictOf(await waitFor(() => readMeta()?.model === 'gpt-6-astra')), '/model sets the next-turn model through the set-model verb');
+ok(verdictOf(await waitFor(() => events().some((e) => e.payload?.type === 'command_applied' && e.payload.command === 'model' && e.payload.value === 'gpt-6-astra'))), '…and reports command_applied');
 sendLine({ type: 'chat-input', text: '/effort high', msgId: 'm5' });
-ok(await waitFor(() => readMeta()?.effortOverride === 'high'), '/effort sets the next-turn effort');
+ok(verdictOf(await waitFor(() => readMeta()?.effortOverride === 'high')), '/effort sets the next-turn effort');
 sendLine({ type: 'chat-input', text: '/review', msgId: 'm6' });
-ok(await waitFor(() => rpc().some((m) => m.method === 'review/start' && m.params.target?.type === 'uncommittedChanges')), '/review starts a review of the uncommitted changes');
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'review/start' && m.params.target?.type === 'uncommittedChanges'))), '/review starts a review of the uncommitted changes');
 
 // ④ THREAD GATE (B-7473) — a sub-agent's message is never a root assistant bubble
 const isAM = (r) => r.type === 'response_item' && r.payload?.type === 'agent_message';
-ok(await waitFor(() => bufRecords().filter(isAM).length >= 2), 'the child-thread and envelope messages are recorded as agent_message records');
+ok(verdictOf(await waitFor(() => bufRecords().filter(isAM).length >= 2)), 'the child-thread and envelope messages are recorded as agent_message records');
 const ams = bufRecords().filter(isAM);
 const childAm = ams.find((r) => r.payload.id === 'msg-child');
-ok(childAm && childAm.payload.thread_id === 'th-child' && childAm.payload.author === '/root/water_research' && childAm.payload.recipient === '/root' && /child FINAL_ANSWER body/.test(JSON.stringify(childAm.payload.content)), '(i) a CHILD thread\'s agentMessage is an attributed agent_message (author from the subAgentActivity map, its thread, its item id)', JSON.stringify(childAm?.payload));
+ok(gateOf(childAm) && childAm.payload.thread_id === 'th-child' && childAm.payload.author === '/root/water_research' && childAm.payload.recipient === '/root' && verdictOf(/child FINAL_ANSWER body/.test(JSON.stringify(childAm.payload.content))), '(i) a CHILD thread\'s agentMessage is an attributed agent_message (author from the subAgentActivity map, its thread, its item id)', JSON.stringify(childAm?.payload));
 const envAm = ams.find((r) => r.payload.id === 'msg-env');
-ok(envAm && envAm.payload.author === '/root/usecases_v4' && envAm.payload.msg_type === 'FINAL_ANSWER' && envAm.payload.thread_id === 'th-p2', '(ii) an OWN-thread message carrying the inter-agent envelope is attributed to its Sender, never a root reply', JSON.stringify(envAm?.payload));
+ok(gateOf(envAm) && envAm.payload.author === '/root/usecases_v4' && envAm.payload.msg_type === 'FINAL_ANSWER' && envAm.payload.thread_id === 'th-p2', '(ii) an OWN-thread message carrying the inter-agent envelope is attributed to its Sender, never a root reply', JSON.stringify(envAm?.payload));
 const rootAsst = bufRecords().filter((r) => r.type === 'response_item' && r.payload?.type === 'message' && r.payload.role === 'assistant');
 // (iv) the root's OWN messages — the plain reply AND the delivery:'async'
 // question (B-7473 integration 2026-09-06: 'async' is not an inter-agent signal, the ENVELOPE is;
 // treating it as one dropped the question from the transcript entirely).
-ok(rootAsst.length === 2 && rootAsst.map((r) => r.payload.item_id).sort().join(',') === 'msg-async,msg-root' && /Which layout do you prefer/.test(JSON.stringify(rootAsst.map((r) => r.payload.content))), "(iv) the root's OWN messages are recorded as assistant messages — including a delivery:'async' question", rootAsst.map((r) => r.payload.item_id).join(','));
+ok(rootAsst.length === 2 && rootAsst.map((r) => r.payload.item_id).sort().join(',') === 'msg-async,msg-root' && verdictOf(/Which layout do you prefer/.test(JSON.stringify(rootAsst.map((r) => r.payload.content)))), "(iv) the root's OWN messages are recorded as assistant messages — including a delivery:'async' question", rootAsst.map((r) => r.payload.item_id).join(','));
 // (vi) a CHILD's error notification never becomes the ROOT's task_failed
 const evs = bufRecords().filter((r) => r.type === 'event_msg');
 ok(!evs.some((r) => r.payload?.type === 'task_failed'), "(vi) a foreign thread's `error` notification is NOT the root's task_failed", JSON.stringify(evs.filter((r) => r.payload?.type === 'task_failed').map((r) => r.payload)));
 const errAct = evs.find((r) => r.payload?.type === 'sub_agent_activity' && r.payload.kind === 'errored');
-ok(errAct && errAct.payload.agent_thread_id === 'th-child' && /ran out of context/.test(errAct.payload.detail || ''), '…it is recorded as the CHILD\'s activity (kind errored, message on the row)', JSON.stringify(errAct?.payload));
+ok(gateOf(errAct) && errAct.payload.agent_thread_id === 'th-child' && verdictOf(/ran out of context/.test(errAct.payload.detail || '')), '…it is recorded as the CHILD\'s activity (kind errored, message on the row)', JSON.stringify(errAct?.payload));
 const saRec = bufRecords().find((r) => r.type === 'event_msg' && r.payload?.type === 'sub_agent_activity');
-ok(saRec && saRec.payload.agent_thread_id === 'th-child' && saRec.payload.agent_path === '/root/water_research' && saRec.payload.kind === 'started', '(iii) a subAgentActivity item becomes the live sub_agent_activity event', JSON.stringify(saRec?.payload));
+ok(gateOf(saRec) && saRec.payload.agent_thread_id === 'th-child' && saRec.payload.agent_path === '/root/water_research' && saRec.payload.kind === 'started', '(iii) a subAgentActivity item becomes the live sub_agent_activity event', JSON.stringify(saRec?.payload));
 ok(readMeta()?.subagents?.['/root/water_research'] === 'th-child', '…and fills the agentPath → threadId map in the sidecar', JSON.stringify(readMeta()?.subagents));
 ok(readMeta()?.foreignDrops?.threads?.['th-child']?.agentMessages === 1 && readMeta().foreignDrops.threads['th-child'].dropped >= 1, 'other child-thread kinds are DROPPED and counted per thread (the commandExecution never became a root card)', JSON.stringify(readMeta()?.foreignDrops));
 ok(!bufRecords().some((r) => r.payload?.call_id === 'exec-child'), '…no exec_command record from the child thread');
@@ -433,13 +433,13 @@ const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manag
 const mm = new CodexMessageManager('p2');
 mm.convertHistory([...bufRecords(), ...events().filter((e) => e.type === 'event_msg')]);
 const tools = mm.messages.filter((m) => m.role === 'tool');
-ok(tools.some((m) => m.toolName && /list_issues/.test(m.toolName) && m.collapseKind === 'mcp' && m.toolStatus === 'ok'), `the MCP call renders as a tool card in the mcp fold kind, completed (${tools.map((m) => m.toolName + ':' + m.collapseKind + ':' + m.toolStatus).join(', ')})`);
-ok(tools.some((m) => (m.collapseKind === 'image' && /view_image|View Image/i.test(m.toolName)) || (m.collapseKind === 'search' && /web_search|Web Search/i.test(m.toolName))), 'view_image folds as image, web search / image view cards never fold (visible work)');
+ok(verdictOf(tools.some((m) => m.toolName && /list_issues/.test(m.toolName) && m.collapseKind === 'mcp' && m.toolStatus === 'ok')), `the MCP call renders as a tool card in the mcp fold kind, completed (${tools.map((m) => m.toolName + ':' + m.collapseKind + ':' + m.toolStatus).join(', ')})`);
+ok(verdictOf(tools.some((m) => (m.collapseKind === 'image' && /view_image|View Image/i.test(m.toolName)) || (m.collapseKind === 'search' && /web_search|Web Search/i.test(m.toolName)))), 'view_image folds as image, web search / image view cards never fold (visible work)');
 { // 2.369.43: ONE complete search card whose input carries the FINAL query/action and whose output is the rendered result list
   const searches = tools.filter((m) => m.collapseKind === 'search');
   const b = searches[0]?.content?.[0];
   ok(searches.length === 2 && searches[0].status === 'complete' && b?.input?.query === 'vibespace acp' && b?.input?.action?.queries?.length === 2, `the webSearch item is ONE complete card with the final query/action (${searches.length} cards; input ${JSON.stringify(b?.input)})`);
-  ok(b && b.output === 'ACP <b>spec</b> — https://example.org/acp\nAgent Client Protocol overview', `…and a human result list, not raw JSON: ${JSON.stringify(b?.output)}`);
+  ok(gateOf(b) && b.output === 'ACP <b>spec</b> — https://example.org/acp\nAgent Client Protocol overview', `…and a human result list, not raw JSON: ${JSON.stringify(b?.output)}`);
   // the v2 camelCase page action (0.153.4 schema) renders its head live — and the exec-… id is the rollout Extension item's id
   const o = searches[1]?.content?.[0];
   ok(searches[1]?.status === 'complete' && o?.toolCallId === 'exec-a73a6d39-77ea-472b-b77d-c97a8f5a02e7' && o?.output === 'opened https://www.example9.org/shop\n\nShop Infinity Showers — https://www.example9.org/shop\nTotal lines: 217', `a live v2 openPage item is ONE complete card with the 'opened <url>' head (${JSON.stringify(o?.output)})`);
@@ -452,16 +452,16 @@ ok(tools.some((m) => (m.collapseKind === 'image' && /view_image|View Image/i.tes
 }
 const collabRows = mm.messages.flatMap((m) => m.collab?.rows || []);
 const asstTexts = mm.messages.filter((m) => m.role === 'assistant' && m.content?.[0]?.type === 'text').map((m) => m.content[0].text);
-ok(asstTexts.length === 2 && asstTexts.includes('root reply to the user') && asstTexts.includes('Which layout do you prefer'), 'normalizer view: the root\'s OWN messages are the only assistant bubbles — the sub-agent traffic is elsewhere', asstTexts);
+ok(asstTexts.length === 2 && gateOf(asstTexts.includes('root reply to the user')) && verdictOf(asstTexts.includes('Which layout do you prefer')), 'normalizer view: the root\'s OWN messages are the only assistant bubbles — the sub-agent traffic is elsewhere', asstTexts);
 // (3) an own-thread agentMessage marked delivery:'async' is the ROOT talking to
 // the USER (a question) — the ENVELOPE is the only inter-agent signal
-ok(asstTexts.includes('Which layout do you prefer') && !mm.messages.some((m) => m.collab && JSON.stringify(m.collab).includes('Which layout')), "an own-thread delivery:'async' message stays in the transcript (it is not inter-agent)", asstTexts);
+ok(gateOf(asstTexts.includes('Which layout do you prefer')) && !mm.messages.some((m) => m.collab && JSON.stringify(m.collab).includes('Which layout')), "an own-thread delivery:'async' message stays in the transcript (it is not inter-agent)", asstTexts);
 // (2) a CHILD's error is the CHILD's: a collab activity row, never the root's failure
 const errRow = mm.messages.flatMap((m) => m.collab?.rows || []).find((r) => r.kind === 'errored');
-ok(errRow && errRow.threadId === 'th-child' && /ran out of context/.test(errRow.detail || ''), "a FOREIGN thread's error notification becomes a collab activity row with the message on hover", errRow);
+ok(gateOf(errRow) && errRow.threadId === 'th-child' && verdictOf(/ran out of context/.test(errRow.detail || '')), "a FOREIGN thread's error notification becomes a collab activity row with the message on hover", errRow);
 ok(!mm.messages.some((m) => m.role === 'system' && /error|failed/i.test(m.content?.[0]?.text || '')), "…and never the ROOT's task_failed / error system card", mm.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text));
-ok(mm.messages.some((m) => m.collab?.report && m.collab.agentName === 'water_research') && mm.messages.some((m) => m.collab?.report && m.collab.agentName === 'usecases_v4'), 'both attributed messages render as sub-agent REPORTS with their author', mm.messages.filter((m) => m.collab?.report).map((m) => m.collab.agentName));
-ok(collabRows.some((r) => r.dir === 'activity' && r.threadId === 'th-child'), 'the lifecycle row carries the child thread id', collabRows.filter((r) => r.dir === 'activity'));
+ok(gateOf(mm.messages.some((m) => m.collab?.report && m.collab.agentName === 'water_research')) && verdictOf(mm.messages.some((m) => m.collab?.report && m.collab.agentName === 'usecases_v4')), 'both attributed messages render as sub-agent REPORTS with their author', mm.messages.filter((m) => m.collab?.report).map((m) => m.collab.agentName));
+ok(verdictOf(collabRows.some((r) => r.dir === 'activity' && r.threadId === 'th-child')), 'the lifecycle row carries the child thread id', collabRows.filter((r) => r.dir === 'activity'));
 const sys = mm.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text || '');
 // The queue state lives ON the bubble (a chip) + in the strip above the input —
 // the old "Queued — runs after the current turn" SYSTEM CARD said the same
@@ -483,38 +483,38 @@ ok(userMsg('stop me')?.queueState === 'removed', `a message Stop dropped from th
     const m = inc.messages.find((x) => x.role === 'user' && JSON.stringify(x.content).includes('during review'));
     if (m) seen.push(m.queueState || 'none');
   }
-  ok(seen.includes('queued') && seen[seen.length - 1] === 'none', `a waiting message wears 'queued', and the chip clears when it RUNS (${[...new Set(seen)].join('→')})`);
+  ok(gateOf(seen.includes('queued')) && seen[seen.length - 1] === 'none', `a waiting message wears 'queued', and the chip clears when it RUNS (${[...new Set(seen)].join('→')})`);
 }
-ok(sys.some((t) => /Cannot steer during a review turn/.test(t)), 'the refused steer is a VISIBLE notice naming the reason', sys.join(' | '));
+ok(verdictOf(sys.some((t) => /Cannot steer during a review turn/.test(t))), 'the refused steer is a VISIBLE notice naming the reason', sys.join(' | '));
 { // the meta op is SESSION STATE, never a transcript message
   const liveQ = new CodexMessageManager('p2-q'); const qops = [];
   liveQ.onOp((o) => qops.push(o));
   for (const r of bufRecords()) liveQ.processLive(r);
   const metaOps = qops.filter((o) => o.op === 'meta' && o.subtype === 'queue');
-  ok(metaOps.length >= 4 && Array.isArray(metaOps[0].items), `queue_changed becomes a {op:'meta', subtype:'queue'} op (${metaOps.length} of them)`);
+  ok(metaOps.length >= 4 && verdictOf(Array.isArray(metaOps[0].items)), `queue_changed becomes a {op:'meta', subtype:'queue'} op (${metaOps.length} of them)`);
   ok(liveQ.queueState().length === 0 && !liveQ.messages.some((m) => JSON.stringify(m.content || '').includes('queue_changed')), 'queueState() is the attach payload; no queue message ever enters the transcript');
-  ok(qops.some((o) => o.op === 'edit' && o.fields?.queueState === 'queued') && qops.some((o) => o.op === 'edit' && o.fields?.queueState === 'steered'), 'chips ride the normal edit op (live windows update in place)');
+  ok(gateOf(qops.some((o) => o.op === 'edit' && o.fields?.queueState === 'queued')) && verdictOf(qops.some((o) => o.op === 'edit' && o.fields?.queueState === 'steered')), 'chips ride the normal edit op (live windows update in place)');
 }
-ok(sys.some((t) => /Compacting context/.test(t)) && sys.some((t) => /Context compacted/.test(t)), 'compaction start + compacted render as system cards');
-ok(mm.turnMap().some((t) => t.isCompact), 'turnMap marks the compaction (minimap red marker parity with claude)');
-ok(sys.some((t) => /\/model → gpt-6-astra/.test(t)), 'command_applied renders what was set');
+ok(gateOf(sys.some((t) => /Compacting context/.test(t))) && verdictOf(sys.some((t) => /Context compacted/.test(t))), 'compaction start + compacted render as system cards');
+ok(verdictOf(mm.turnMap().some((t) => t.isCompact)), 'turnMap marks the compaction (minimap red marker parity with claude)');
+ok(verdictOf(sys.some((t) => /\/model → gpt-6-astra/.test(t))), 'command_applied renders what was set');
 // the init card is a LIVE artefact (processLive): boot wrapper_meta creates it, the
 // thread wrapper_meta patches the commands in (edit op) — assert both
 const live = new CodexMessageManager('p2-live'); const ops = []; live.onOp((o) => ops.push(o));
 for (const r of bufRecords()) live.processLive(r);
 const init = live.messages.find((m) => m.content?.[0]?.initData);
-ok(init && init.content[0].initData.slashCommands.includes('compact'), 'the live init record carries the wrapper-served slash commands (chat-input autocomplete source)');
-ok(ops.some((o) => o.op === 'edit' && o.id === init?.id && JSON.stringify(o.fields).includes('compact')) || (bufRecords().find((r) => r.type === 'wrapper_meta')?.payload?.slashCommands?.length > 0), 'clients learn the commands: either the first wrapper_meta already carries them or a later one patches the init card (edit op)');
+ok(gateOf(init) && verdictOf(init.content[0].initData.slashCommands.includes('compact')), 'the live init record carries the wrapper-served slash commands (chat-input autocomplete source)');
+ok(verdictOf(ops.some((o) => o.op === 'edit' && o.id === init?.id && JSON.stringify(o.fields).includes('compact'))) || (bufRecords().find((r) => r.type === 'wrapper_meta')?.payload?.slashCommands?.length > 0), 'clients learn the commands: either the first wrapper_meta already carries them or a later one patches the init card (edit op)');
 // per-message META on the LIVE chain (wrapper → token_count → normalizer):
 // the stub's thread/tokenUsage/updated became a token_count record; the tool
 // cards of that response carry the ledger key `cx:<thread>:<cumulative>`
 // (wrapper_meta.threadId + total.totalTokens) and the same 'edit' op claude
 // uses delivered it to the (would-be) open window.
 const tc = bufRecords().find((r) => r.type === 'event_msg' && r.payload?.type === 'token_count');
-ok(tc && tc.payload.info?.total_token_usage?.totalTokens === 5150, 'the wrapper relays thread/tokenUsage/updated as a token_count (v2 camelCase inside the snake_case envelope)');
+ok(gateOf(tc) && tc.payload.info?.total_token_usage?.totalTokens === 5150, 'the wrapper relays thread/tokenUsage/updated as a token_count (v2 camelCase inside the snake_case envelope)');
 const mcpCard = live.messages.find((m) => m.role === 'tool' && /list_issues/.test(m.toolName || ''));
 ok(mcpCard?.meta?.requestId === 'cx:th-p2:5150' && mcpCard.meta.requestIdKind === 'ledger' && mcpCard.meta.usage.input_tokens === 1000 && mcpCard.meta.usage.cache_read_input_tokens === 4000 && mcpCard.meta.usage.output_tokens === 150 && mcpCard.meta.usage.reasoning_output_tokens === 40 && mcpCard.meta.msgId === null, `live tool cards carry the response meta with the LEDGER rid (${JSON.stringify(mcpCard?.meta)})`);
-ok(ops.some((o) => o.op === 'edit' && o.id === mcpCard?.id && o.fields?.meta?.requestId === 'cx:th-p2:5150'), "…delivered live through the 'edit' op (open-window popup refresh)");
+ok(verdictOf(ops.some((o) => o.op === 'edit' && o.id === mcpCard?.id && o.fields?.meta?.requestId === 'cx:th-p2:5150')), "…delivered live through the 'edit' op (open-window popup refresh)");
 
 // (the wrapper and normalizer pins: MOVED to the fast scripts/test-codex-p2-wrapper-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 
@@ -598,36 +598,36 @@ process.stdin.on('data', (d) => {
 `;
 {
   const A = spawnStub('race', STUB_RACE);
-  ok(await waitFor(() => A.meta()?.threadId === 'th-race'), 'race stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => A.meta()?.threadId === 'th-race')), 'race stub: the wrapper has a thread');
   A.send({ type: 'chat-input', text: 'go', msgId: 'a0' });
-  ok(await waitFor(() => A.meta()?.activeTurnId === 'turn-1'), 'race stub: a turn is running');
+  ok(verdictOf(await waitFor(() => A.meta()?.activeTurnId === 'turn-1')), 'race stub: a turn is running');
   A.send({ type: 'chat-input', text: '[ran] runaway', msgId: 'a1' });
   A.send({ type: 'peer-message', text: '[ran] ping from D', fromName: 'session D' });
   A.send({ type: 'chat-input', text: 'really stopped', msgId: 'a3' });
-  ok(await waitFor(() => A.lastQueue().length === 3), `race stub: three items queued behind it (${JSON.stringify(A.lastQueue().map((i) => i.preview))})`);
+  ok(verdictOf(await waitFor(() => A.lastQueue().length === 3)), `race stub: three items queued behind it (${JSON.stringify(A.lastQueue().map((i) => i.preview))})`);
   const qItems = A.lastQueue();
   const byPreview = (needle) => qItems.find((i) => i.preview.includes(needle));
   const runaway = byPreview('runaway'), peerItem = byPreview('ping from D'), stopped = byPreview('really stopped');
   const sweptIds = qItems.map((i) => i.id);
   const peersBeforeA = A.msgs().filter((m) => m.type === 'peer_message_result').length;
   A.send({ type: 'interrupt' });
-  ok(await waitFor(() => A.ops().filter((r) => r.op === 'remove').length >= 3), `race stub: Stop reports every listed item (${JSON.stringify(A.ops())})`);
+  ok(verdictOf(await waitFor(() => A.ops().filter((r) => r.op === 'remove').length >= 3)), `race stub: Stop reports every listed item (${JSON.stringify(A.ops())})`);
   // (1) a delete the app-server REFUSED is not a removal. The item left the
   // queue on its own = it RAN, and the chip must not read `Removed`.
   const rRun = A.ops().find((r) => r.id === runaway.id);
-  ok(rRun && rRun.ok === false && rRun.reason === 'gone' && rRun.msg_id === 'a1', `a {deleted:false} reply is reported ok:false reason 'gone' — never a fake 'stopped' removal (${JSON.stringify(rRun)})`);
+  ok(gateOf(rRun) && rRun.ok === false && rRun.reason === 'gone' && rRun.msg_id === 'a1', `a {deleted:false} reply is reported ok:false reason 'gone' — never a fake 'stopped' removal (${JSON.stringify(rRun)})`);
   // lane codex-interrupted-putback: …and since its turn (turn-2) is the one this Stop interrupts, it was cut off before it
   // answered — the result says so (the witness came 300 ms AFTER the delete's reply: the sweep waited for the turn's name)
-  ok(rRun && rRun.started === true && /started and was stopped/.test(rRun.detail || ''), `…its turn is the one Stop interrupts, so the result says it STARTED and was stopped (${JSON.stringify(rRun)})`);
+  ok(gateOf(rRun) && rRun.started === true && verdictOf(/started and was stopped/.test(rRun.detail || '')), `…its turn is the one Stop interrupts, so the result says it STARTED and was stopped (${JSON.stringify(rRun)})`);
   const rPeer = A.ops().find((r) => r.id === peerItem.id);
-  ok(rPeer && rPeer.ok === false && rPeer.reason === 'gone' && rPeer.started !== true, `…the same verdict for a peer item the app-server drained — never 'started' (a peer row is not the person's to put back) (${JSON.stringify(rPeer)})`, JSON.stringify(A.ops()));
+  ok(gateOf(rPeer) && rPeer.ok === false && rPeer.reason === 'gone' && rPeer.started !== true, `…the same verdict for a peer item the app-server drained — never 'started' (a peer row is not the person's to put back) (${JSON.stringify(rPeer)})`, JSON.stringify(A.ops()));
   // …and a peer message that really RAN must NOT go back to the delivery
   // ladder: it was delivered, re-stashing it would deliver it a second time.
   const peersA = A.msgs().filter((m) => m.type === 'peer_message_result').slice(peersBeforeA);
   ok(!peersA.some((r) => r.ok === false && String(r.text || '').includes('ping from D')), `an agent-to-agent message that RAN is not re-stashed (a second delivery) — ${JSON.stringify(peersA)}`);
   // the item that really was deleted still reports the Stop removal
   const rStop = A.ops().find((r) => r.id === stopped.id);
-  ok(rStop && rStop.ok === true && rStop.reason === 'stopped' && rStop.msg_id === 'a3', `the item Stop really did drop is still reported ok:true reason 'stopped' (${JSON.stringify(rStop)})`);
+  ok(gateOf(rStop) && rStop.ok === true && rStop.reason === 'stopped' && rStop.msg_id === 'a3', `the item Stop really did drop is still reported ok:true reason 'stopped' (${JSON.stringify(rStop)})`);
   // (2) the turn/started that landed MID-SWEEP must not republish the wrapper's
   // CACHED item list: those bubbles have already been told they are gone.
   const evA = A.events().filter((e) => e.type === 'event_msg');
@@ -636,23 +636,23 @@ process.stdin.on('data', (d) => {
   ok(startedIdx >= 0 && startedIdx < lastOpIdx, `the drained item's turn/started really arrived WHILE the sweep was running (task_started@${startedIdx} < last removal result@${lastOpIdx})`);
   const resurrected = evA.slice(startedIdx + 1).filter((e) => e.payload?.type === 'queue_changed' && (e.payload.items || []).some((it) => sweptIds.includes(it.id)));
   ok(resurrected.length === 0, `no publish after the mid-sweep turn/started resurrects a swept item (the republish rides the CACHED list and carries the real msgIds) — ${JSON.stringify(resurrected.map((e) => e.payload.items))}`);
-  ok(await waitFor(() => A.lastQueue().length === 0), `the sweep's own closing refresh is the one truthful publish, and it is empty (${JSON.stringify(A.lastQueue())})`);
+  ok(verdictOf(await waitFor(() => A.lastQueue().length === 0)), `the sweep's own closing refresh is the one truthful publish, and it is empty (${JSON.stringify(A.lastQueue())})`);
   // through the REAL normalizer: the runaway bubble must not wear `Removed`
   const mmA = new CodexMessageManager('p2-race');
   mmA.convertHistory(A.events());
   const userA = (needle) => mmA.messages.find((m) => m.role === 'user' && JSON.stringify(m.content).includes(needle));
-  ok(userA('runaway') && userA('runaway').queueState !== 'removed', `the bubble of a message that RAN never reads 'Removed' (${userA('runaway')?.queueState || 'no chip'})`);
+  ok(gateOf(userA('runaway')) && userA('runaway').queueState !== 'removed', `the bubble of a message that RAN never reads 'Removed' (${userA('runaway')?.queueState || 'no chip'})`);
   ok(userA('runaway')?.queueState === 'stopped', `…it reads 'stopped': it reached the agent, and Stop cut its turn off (${userA('runaway')?.queueState || 'no chip'})`);
   ok(userA('really stopped')?.queueState === 'removed', `…while the one Stop really dropped does (${userA('really stopped')?.queueState})`);
   const sysA = mmA.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text || '');
-  ok(sysA.some((t) => /no longer queued — it already ran/.test(t)), 'and the user is TOLD that one already ran (the drained peer — nothing silent)', sysA.join(' | '));
-  ok(sysA.some((t) => /had already started — Stop stopped it and put it back into the input box/.test(t)), '…and that a1 had started, was stopped and came back', sysA.join(' | '));
+  ok(verdictOf(sysA.some((t) => /no longer queued — it already ran/.test(t))), 'and the user is TOLD that one already ran (the drained peer — nothing silent)', sysA.join(' | '));
+  ok(verdictOf(sysA.some((t) => /had already started — Stop stopped it and put it back into the input box/.test(t))), '…and that a1 had started, was stopped and came back', sysA.join(' | '));
   // lane stop-refills-composer + codex-interrupted-putback: a row the sweep REALLY deleted comes back, and so does the
   // drained a1 whose turn this Stop interrupts (`started: true`, in queue order); the drained peer never does
   const dropsA = A.msgs().filter((m) => m.type === 'queue_dropped');
   ok(dropsA.length === 1 && dropsA[0].items.length === 2 && dropsA[0].items[0].msgId === 'a1' && dropsA[0].items[0].text === '[ran] runaway' && dropsA[0].items[0].started === true && dropsA[0].items[1].msgId === 'a3' && dropsA[0].items[1].text === 'really stopped' && !('started' in dropsA[0].items[1]) && dropsA[0].turnId === 'turn-2', `the put-back carries a1 (started: true) then a3, naming turn-2 — the drained peer is absent (${JSON.stringify(dropsA)})`);
   ok(A.rpc().filter((m) => m.method === 'turn/interrupt').map((m) => m.params.turnId).join() === 'turn-2', `…and turn-2 is the turn Stop interrupted (${JSON.stringify(A.rpc().filter((m) => m.method === 'turn/interrupt'))})`);
-  ok(/interrupt: \S+ had started turn turn-2, which this Stop interrupts — its words go back into the composer/.test(A.journal()), 'the wrapper journal says which turn it judged by');
+  ok(verdictOf(/interrupt: \S+ had started turn turn-2, which this Stop interrupts — its words go back into the composer/.test(A.journal())), 'the wrapper journal says which turn it judged by');
   await A.stop();
 }
 
@@ -700,24 +700,24 @@ process.stdin.on('data', (d) => {
 `;
 {
   const D = spawnStub('drain-done', STUB_DRAIN_DONE);
-  ok(await waitFor(() => D.meta()?.threadId === 'th-done'), 'drain-done stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => D.meta()?.threadId === 'th-done')), 'drain-done stub: the wrapper has a thread');
   D.send({ type: 'chat-input', text: 'go', msgId: 'd0' });
-  ok(await waitFor(() => D.meta()?.activeTurnId === 'turn-1'), 'drain-done stub: a turn is running');
+  ok(verdictOf(await waitFor(() => D.meta()?.activeTurnId === 'turn-1')), 'drain-done stub: a turn is running');
   D.send({ type: 'chat-input', text: 'a quick one', msgId: 'd1' });
   D.send({ type: 'chat-input', text: 'cut off mid-turn', msgId: 'd2' });
   D.send({ type: 'chat-input', text: 'never started', msgId: 'd3' });
-  ok(await waitFor(() => D.lastQueue().length === 3), `drain-done stub: three messages queued (${JSON.stringify(D.lastQueue().map((i) => i.preview))})`);
+  ok(verdictOf(await waitFor(() => D.lastQueue().length === 3)), `drain-done stub: three messages queued (${JSON.stringify(D.lastQueue().map((i) => i.preview))})`);
   const ids = Object.fromEntries(D.lastQueue().map((i) => [i.msgId, i.id]));
   D.send({ type: 'interrupt' });
-  ok(await waitFor(() => D.ops().filter((r) => r.op === 'remove').length >= 3 && D.msgs().some((m) => m.type === 'queue_dropped')), `drain-done stub: Stop reports all three and puts back (${JSON.stringify(D.ops())})`);
+  ok(verdictOf(await waitFor(() => D.ops().filter((r) => r.op === 'remove').length >= 3 && D.msgs().some((m) => m.type === 'queue_dropped'))), `drain-done stub: Stop reports all three and puts back (${JSON.stringify(D.ops())})`);
   const r = (msgId) => D.ops().find((x) => x.id === ids[msgId]);
   ok(r('d1')?.ok === false && r('d1').reason === 'gone' && r('d1').started !== true, `d1's turn (turn-2) COMPLETED before Stop — it RAN: plain gone, not started (${JSON.stringify(r('d1'))})`);
   ok(r('d2')?.ok === false && r('d2').reason === 'gone' && r('d2').started === true, `d2's turn (turn-3) is the one Stop interrupts — gone + started (${JSON.stringify(r('d2'))})`);
   ok(r('d3')?.ok === true && r('d3').reason === 'stopped', `d3 was really deleted — stopped (${JSON.stringify(r('d3'))})`);
   const drops = D.msgs().filter((m) => m.type === 'queue_dropped');
   ok(drops.length === 1 && drops[0].items.map((x) => `${x.msgId}:${x.started === true}`).join() === 'd2:true,d3:false' && drops[0].turnId === 'turn-3', `ONE record: d2 (started) then d3 — d1, which ran to the end, is NOT put back (${JSON.stringify(drops)})`);
-  ok(await waitFor(() => D.rpc().some((m) => m.method === 'turn/interrupt')) && D.rpc().filter((m) => m.method === 'turn/interrupt').map((m) => m.params.turnId).join() === 'turn-3', `Stop interrupted turn-3 — the turn the record names (${JSON.stringify(D.rpc().filter((m) => m.method === 'turn/interrupt'))})`);
-  ok(await waitFor(() => !D.meta()?.activeTurnId), 'and nothing runs after Stop', JSON.stringify(D.meta()?.activeTurnId));
+  ok(gateOf(await waitFor(() => D.rpc().some((m) => m.method === 'turn/interrupt'))) && D.rpc().filter((m) => m.method === 'turn/interrupt').map((m) => m.params.turnId).join() === 'turn-3', `Stop interrupted turn-3 — the turn the record names (${JSON.stringify(D.rpc().filter((m) => m.method === 'turn/interrupt'))})`);
+  ok(verdictOf(await waitFor(() => !D.meta()?.activeTurnId)), 'and nothing runs after Stop', JSON.stringify(D.meta()?.activeTurnId));
   const mm = new CodexMessageManager('p2-drain-done');
   mm.convertHistory(D.events());
   const chip = (needle) => mm.messages.find((m) => m.role === 'user' && JSON.stringify(m.content).includes(needle))?.queueState || null;
@@ -757,16 +757,16 @@ process.stdin.on('data', (d) => {
 `;
 {
   const I = spawnStub('putback-inherit', STUB_PUTBACK_INHERIT);
-  ok(await waitFor(() => I.meta()?.threadId === 'th-inh'), 'inherited-queue stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => I.meta()?.threadId === 'th-inh')), 'inherited-queue stub: the wrapper has a thread');
   I.send({ type: 'chat-input', text: 'go', msgId: 'i0' });
-  ok(await waitFor(() => I.meta()?.activeTurnId === 'turn-1'), 'inherited-queue stub: a turn is running');
+  ok(verdictOf(await waitFor(() => I.meta()?.activeTurnId === 'turn-1')), 'inherited-queue stub: a turn is running');
   I.send({ type: 'queue-resync' });
-  ok(await waitFor(() => I.lastQueue().length === 3), `inherited-queue stub: the three inherited rows are listed (${JSON.stringify(I.lastQueue().map((r) => [r.msgId, r.kind]))})`);
+  ok(verdictOf(await waitFor(() => I.lastQueue().length === 3)), `inherited-queue stub: the three inherited rows are listed (${JSON.stringify(I.lastQueue().map((r) => [r.msgId, r.kind]))})`);
   I.send({ type: 'interrupt' });
-  ok(await waitFor(() => I.ops().filter((r) => r.op === 'remove' && r.reason === 'stopped').length === 3 && I.lastQueue().length === 0), `inherited-queue stub: Stop deletes all three (${JSON.stringify(I.ops())})`);
+  ok(verdictOf(await waitFor(() => I.ops().filter((r) => r.op === 'remove' && r.reason === 'stopped').length === 3 && I.lastQueue().length === 0)), `inherited-queue stub: Stop deletes all three (${JSON.stringify(I.ops())})`);
   const dropsI = I.msgs().filter((m) => m.type === 'queue_dropped');
   ok(dropsI.length === 1 && dropsI[0].items.length === 1 && dropsI[0].items[0].msgId === 'm-old' && dropsI[0].items[0].text === 'an old typed row', `an inherited peer-1-1 / notif-2-3 row is NEVER put into the owner's composer; the inherited row of the person's is (${JSON.stringify(dropsI.map((d) => d.items.map((x) => x.msgId)))})`);
-  ok(dropsI[0] && JSON.stringify(dropsI[0].items[0].attachments) === JSON.stringify([{ type: 'image', mime: 'image/png', name: null }]) && !JSON.stringify(dropsI[0]).includes('base64'), `…its picture rides as a DESCRIPTOR (type + mime), never the data URL (${JSON.stringify(dropsI[0] && dropsI[0].items[0].attachments)})`);
+  ok(gateOf(dropsI[0]) && JSON.stringify(dropsI[0].items[0].attachments) === JSON.stringify([{ type: 'image', mime: 'image/png', name: null }]) && !JSON.stringify(dropsI[0]).includes('base64'), `…its picture rides as a DESCRIPTOR (type + mime), never the data URL (${JSON.stringify(dropsI[0] && dropsI[0].items[0].attachments)})`);
   await I.stop();
 }
 
@@ -800,17 +800,17 @@ process.stdin.on('data', (d) => {
   // (3a) the LIST never answers: nothing can be enumerated, so nothing may be
   // claimed cleared — and the interrupt still goes out on the sweep's budget.
   const B = spawnStub('wedge-list', STUB_WEDGE.replace(/__STALL__/g, "'thread/queue/list'"));
-  ok(await waitFor(() => B.meta()?.threadId === 'th-wedge'), 'wedged-list stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => B.meta()?.threadId === 'th-wedge')), 'wedged-list stub: the wrapper has a thread');
   B.send({ type: 'chat-input', text: 'go', msgId: 'b0' });
-  ok(await waitFor(() => B.meta()?.activeTurnId === 'turn-1'), 'wedged-list stub: a turn is running');
+  ok(verdictOf(await waitFor(() => B.meta()?.activeTurnId === 'turn-1')), 'wedged-list stub: a turn is running');
   B.send({ type: 'chat-input', text: 'queued behind it', msgId: 'b1' });
-  ok(await waitFor(() => B.rpc().some((m) => m.method === 'thread/queue/add')), 'wedged-list stub: a message is queued');
+  ok(verdictOf(await waitFor(() => B.rpc().some((m) => m.method === 'thread/queue/add'))), 'wedged-list stub: a message is queued');
   const t0 = Date.now();
   B.send({ type: 'interrupt' });
   const gotB = await waitFor(() => B.rpc().some((m) => m.method === 'turn/interrupt'), 20000);
   const elapsedB = Date.now() - t0;
-  ok(gotB && elapsedB < 10000, `Stop reaches turn/interrupt on the sweep's budget even when thread/queue/list never answers (${elapsedB}ms; the 15s-per-RPC cut took 15s+ before sending it)`);
-  ok(B.ops().some((r) => r.op === 'remove' && r.ok === false), `…and it SPEAKS: the queue was NOT cleared (${JSON.stringify(B.ops())})`);
+  ok(gateOf(gotB) && elapsedB < 10000, `Stop reaches turn/interrupt on the sweep's budget even when thread/queue/list never answers (${elapsedB}ms; the 15s-per-RPC cut took 15s+ before sending it)`);
+  ok(verdictOf(B.ops().some((r) => r.op === 'remove' && r.ok === false)), `…and it SPEAKS: the queue was NOT cleared (${JSON.stringify(B.ops())})`);
   ok(!B.ops().some((r) => r.ok === true), 'nothing is reported removed when nothing could be read', JSON.stringify(B.ops()));
   ok(!B.msgs().some((m) => m.type === 'queue_dropped'), 'nothing is put back either (no queue_dropped — the message is still queued and will run)');
   await B.stop();
@@ -820,20 +820,20 @@ process.stdin.on('data', (d) => {
   // never reached must be reported (they stay queued and WILL run), and the
   // interrupt must go out anyway.
   const C = spawnStub('wedge-del', STUB_WEDGE.replace(/__STALL__/g, "'thread/queue/delete'"));
-  ok(await waitFor(() => C.meta()?.threadId === 'th-wedge'), 'wedged-delete stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => C.meta()?.threadId === 'th-wedge')), 'wedged-delete stub: the wrapper has a thread');
   C.send({ type: 'chat-input', text: 'go', msgId: 'c0' });
-  ok(await waitFor(() => C.meta()?.activeTurnId === 'turn-1'), 'wedged-delete stub: a turn is running');
+  ok(verdictOf(await waitFor(() => C.meta()?.activeTurnId === 'turn-1')), 'wedged-delete stub: a turn is running');
   for (const n of [1, 2, 3, 4]) C.send({ type: 'chat-input', text: `queued ${n}`, msgId: `c${n}` });
-  ok(await waitFor(() => C.lastQueue().length === 4), `wedged-delete stub: four messages queued (${C.lastQueue().length})`);
+  ok(verdictOf(await waitFor(() => C.lastQueue().length === 4)), `wedged-delete stub: four messages queued (${C.lastQueue().length})`);
   const queuedIds = C.lastQueue().map((i) => i.id);
   const t0 = Date.now();
   C.send({ type: 'interrupt' });
   const gotC = await waitFor(() => C.rpc().some((m) => m.method === 'turn/interrupt'), 25000);
   const elapsedC = Date.now() - t0;
-  ok(gotC && elapsedC < 10000, `Stop reaches turn/interrupt within the overall cap when every thread/queue/delete hangs (${elapsedC}ms for 4 items; 15s each before)`);
+  ok(gateOf(gotC) && elapsedC < 10000, `Stop reaches turn/interrupt within the overall cap when every thread/queue/delete hangs (${elapsedC}ms for 4 items; 15s each before)`);
   const rms = C.ops().filter((r) => r.op === 'remove');
-  ok(rms.length === 4 && rms.every((r) => r.ok === false) && queuedIds.every((id) => rms.some((r) => r.id === id)), `every item Stop could NOT clear is reported ok:false, by id (${JSON.stringify(rms.map((r) => [r.id, r.ok, r.reason]))})`);
-  ok(rms.some((r) => r.reason === 'timeout' && /did not answer/.test(r.detail || '')), 'the items the expired cap never even reached are reported as timeouts — reporting what was NOT cleared is the point', JSON.stringify(rms.map((r) => r.reason)));
+  ok(rms.length === 4 && gateOf(rms.every((r) => r.ok === false)) && verdictOf(queuedIds.every((id) => rms.some((r) => r.id === id))), `every item Stop could NOT clear is reported ok:false, by id (${JSON.stringify(rms.map((r) => [r.id, r.ok, r.reason]))})`);
+  ok(verdictOf(rms.some((r) => r.reason === 'timeout' && /did not answer/.test(r.detail || ''))), 'the items the expired cap never even reached are reported as timeouts — reporting what was NOT cleared is the point', JSON.stringify(rms.map((r) => r.reason)));
   ok(C.lastQueue().length === 4, `…and the strip still lists them: they are still queued and will run (${C.lastQueue().length})`);
   ok(!C.msgs().some((m) => m.type === 'queue_dropped'), 'rows the sweep could not clear are never put back (no queue_dropped: they are still queued and will run)', JSON.stringify(C.msgs().filter((m) => m.type === 'queue_dropped')));
   await C.stop();
@@ -896,12 +896,12 @@ process.stdin.on('data', (d) => {
 `;
 {
   const D = spawnStub('slow', STUB_SLOW);
-  ok(await waitFor(() => D.meta()?.threadId === 'th-slow'), 'slow stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => D.meta()?.threadId === 'th-slow')), 'slow stub: the wrapper has a thread');
   D.send({ type: 'chat-input', text: 'go', msgId: 'd0' });
-  ok(await waitFor(() => D.meta()?.activeTurnId === 'turn-1'), 'slow stub: a turn is running');
+  ok(verdictOf(await waitFor(() => D.meta()?.activeTurnId === 'turn-1')), 'slow stub: a turn is running');
   D.send({ type: 'chat-input', text: 'queued one', msgId: 'd1' });
   D.send({ type: 'peer-message', text: 'ping from E', fromName: 'session E' });
-  ok(await waitFor(() => D.lastQueue().length === 2), `slow stub: two messages queued behind the turn (${JSON.stringify(D.lastQueue().map((i) => i.preview))})`);
+  ok(verdictOf(await waitFor(() => D.lastQueue().length === 2)), `slow stub: two messages queued behind the turn (${JSON.stringify(D.lastQueue().map((i) => i.preview))})`);
   const queuedIds = D.lastQueue().map((i) => i.id);
   // Let the adds' own queue/changed refreshes finish answering (D=250ms) —
   // a list REQUESTED before the mark answers after it, and its enumeration is
@@ -916,24 +916,24 @@ process.stdin.on('data', (d) => {
   D.send({ type: 'interrupt' });
   await sleep(50);
   D.send({ type: 'interrupt' });
-  ok(await waitFor(() => after().some((m) => m.method === 'turn/interrupt'), 15000), 'the Stop reaches turn/interrupt');
+  ok(verdictOf(await waitFor(() => after().some((m) => m.method === 'turn/interrupt'), 15000)), 'the Stop reaches turn/interrupt');
   await sleep(900);   // let a SECOND sweep, if there were one, finish and speak
   const enumerations = after().filter((m) => m.method === '__list_result__' && m.n > 0);
   ok(enumerations.length === 1, `exactly ONE enumeration saw the queue — the second Stop rode the running sweep instead of listing it again (${enumerations.length})`, JSON.stringify(after().filter((m) => m.method === '__list_result__')));
   const deletes = after().filter((m) => m.method === 'thread/queue/delete').map((m) => m.params.queuedSubmissionId);
-  ok(deletes.length === 2 && new Set(deletes).size === 2 && queuedIds.every((id) => deletes.includes(id)), `ONE thread/queue/delete per queued item, no duplicates (${JSON.stringify(deletes)})`);
+  ok(deletes.length === 2 && new Set(deletes).size === 2 && verdictOf(queuedIds.every((id) => deletes.includes(id))), `ONE thread/queue/delete per queued item, no duplicates (${JSON.stringify(deletes)})`);
   const interrupts = after().filter((m) => m.method === 'turn/interrupt');
   ok(interrupts.length === 1, `exactly ONE turn/interrupt for the two frames — the duplicate is coalesced on the turn it names (${interrupts.length})`, JSON.stringify(interrupts.map((m) => m.params)));
   const rms = D.ops().filter((r) => r.op === 'remove');
-  ok(rms.length === 2 && rms.every((r) => r.ok === true && r.reason === 'stopped'), `every Stop-removed item is reported ONCE and as 'stopped' (${JSON.stringify(rms.map((r) => [r.id, r.ok, r.reason]))})`);
+  ok(rms.length === 2 && verdictOf(rms.every((r) => r.ok === true && r.reason === 'stopped')), `every Stop-removed item is reported ONCE and as 'stopped' (${JSON.stringify(rms.map((r) => [r.id, r.ok, r.reason]))})`);
   ok(!rms.some((r) => r.reason === 'gone'), "…and NOTHING is reported 'gone' — no item Stop removed may be described as having already run", JSON.stringify(rms.map((r) => r.reason)));
   ok(!after().some((m) => m.method === '__delete_result__' && m.deleted === false), 'the app-server never had to refuse a delete: no item was deleted twice', JSON.stringify(after().filter((m) => m.method === '__delete_result__')));
   ok(after().findIndex((m) => m.method === 'turn/interrupt') > after().map((m) => m.method).lastIndexOf('thread/queue/delete'), 'the ordering still holds under the double Stop: every delete precedes the interrupt', JSON.stringify(after().map((m) => m.method)));
-  ok(/already in flight — this Stop rides it/.test(D.journal()), 'the wrapper journal RECORDS the coalescing decision (a silent no-op would be indistinguishable from a lost frame)', D.journal().split('\n').filter((l) => /interrupt/.test(l)).slice(-3).join(' | '));
+  ok(verdictOf(/already in flight — this Stop rides it/.test(D.journal())), 'the wrapper journal RECORDS the coalescing decision (a silent no-op would be indistinguishable from a lost frame)', D.journal().split('\n').filter((l) => /interrupt/.test(l)).slice(-3).join(' | '));
   ok(D.lastQueue().length === 0, `the queue really is empty afterwards (${JSON.stringify(D.lastQueue())})`);
   // the peer entry Stop dropped goes back to the delivery ladder EXACTLY once
   const back = D.msgs().filter((p) => p.type === 'peer_message_result' && p.ok === false);
-  ok(back.length === 1 && /ping from E/.test(back[0].text || ''), `the dropped peer message is handed back to the ladder once, not twice (${JSON.stringify(back.map((b) => b.reason))})`);
+  ok(back.length === 1 && verdictOf(/ping from E/.test(back[0].text || '')), `the dropped peer message is handed back to the ladder once, not twice (${JSON.stringify(back.map((b) => b.reason))})`);
   await D.stop();
 }
 
@@ -945,16 +945,16 @@ process.stdin.on('data', (d) => {
 console.log('— ②f the steer whose queued copy could not be removed');
 {
   const E = spawnStub('steer-drained', STUB_RACE);
-  ok(await waitFor(() => E.meta()?.threadId === 'th-race'), 'drained-steer stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => E.meta()?.threadId === 'th-race')), 'drained-steer stub: the wrapper has a thread');
   E.send({ type: 'chat-input', text: 'go', msgId: 'e0' });
-  ok(await waitFor(() => E.meta()?.activeTurnId === 'turn-1'), 'drained-steer stub: a turn is running');
+  ok(verdictOf(await waitFor(() => E.meta()?.activeTurnId === 'turn-1')), 'drained-steer stub: a turn is running');
   E.send({ type: 'chat-input', text: '[ran] steer me', msgId: 'e1' });
-  ok(await waitFor(() => E.lastQueue().length === 1), `drained-steer stub: one message queued (${E.lastQueue().length})`);
+  ok(verdictOf(await waitFor(() => E.lastQueue().length === 1)), `drained-steer stub: one message queued (${E.lastQueue().length})`);
   const qid = E.lastQueue()[0].id;
   E.send({ type: 'queue-op', op: 'steer', id: qid });
-  ok(await waitFor(() => E.ops().some((r) => r.op === 'steer')), 'the steer answers');
+  ok(verdictOf(await waitFor(() => E.ops().some((r) => r.op === 'steer'))), 'the steer answers');
   const r = E.ops().find((x) => x.op === 'steer');
-  ok(r?.ok === true && r.reason === 'steered-not-dequeued' && /already left the queue/.test(r.detail || ''), `a landed steer whose delete is REFUSED warns about the second run (${JSON.stringify(r)})`);
+  ok(r?.ok === true && r.reason === 'steered-not-dequeued' && verdictOf(/already left the queue/.test(r.detail || '')), `a landed steer whose delete is REFUSED warns about the second run (${JSON.stringify(r)})`);
   ok(r?.msg_id === 'e1', 'the warning is joined to the bubble it is about', JSON.stringify(r));
   // through the REAL normalizer: the chip still flips to 'steered' (it WAS
   // steered) and the possible double run is a visible notice, never silence
@@ -966,7 +966,7 @@ console.log('— ②f the steer whose queued copy could not be removed');
     const bubble = nm.messages.find((m) => m.role === 'user');
     const notice = nm.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text || '');
     ok(bubble?.queueState === 'steered', `the bubble reads 'steered' — it was (${bubble?.queueState})`);
-    ok(notice.some((t) => /may run a second time/.test(t)), 'and the possible double run is SAID', notice.join(' | '));
+    ok(verdictOf(notice.some((t) => /may run a second time/.test(t))), 'and the possible double run is SAID', notice.join(' | '));
   }
   await E.stop();
 }
@@ -1070,34 +1070,34 @@ setInterval(() => {
 {
   const I = spawnStub('inherit', STUB_INHERIT);
   const userRecs = () => I.events().filter((e) => e.type === 'response_item' && e.payload?.type === 'message' && e.payload.role === 'user');
-  ok(await waitFor(() => I.meta()?.threadId === 'th-inh'), 'inherit stub: the wrapper has a thread');
-  ok(await waitFor(() => I.lastQueue().length === 12), `the resumed thread's queue arrives at boot, all twelve items (${I.lastQueue().length})`);
-  ok(I.lastQueue().every((it, i) => it.msgId === `1788731${200000 + (i + 1) * 137}-inh${i + 1}`),
+  ok(verdictOf(await waitFor(() => I.meta()?.threadId === 'th-inh')), 'inherit stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => I.lastQueue().length === 12)), `the resumed thread's queue arrives at boot, all twelve items (${I.lastQueue().length})`);
+  ok(verdictOf(I.lastQueue().every((it, i) => it.msgId === `1788731${200000 + (i + 1) * 137}-inh${i + 1}`)),
     'an INHERITED row advertises the app-server\'s own clientUserMessageId as its msgId — the id the bubble will carry, so the strip row and the chip join', JSON.stringify(I.lastQueue().slice(0, 2)));
   ok(userRecs().length === 0, 'nothing has been recorded for them yet: a queued message is not in the turn', JSON.stringify(userRecs().map((r) => r.payload.content)));
 
   // a turn has to be running before anything can be steered into it
   I.send({ type: 'chat-input', text: 'typed here', msgId: 'own-1' });
-  ok(await waitFor(() => I.meta()?.activeTurnId === 'turn-1'), 'a turn is running');
-  ok(await waitFor(() => userRecs().length === 1), 'our own send has its bubble, written by handleInput as always');
+  ok(verdictOf(await waitFor(() => I.meta()?.activeTurnId === 'turn-1')), 'a turn is running');
+  ok(verdictOf(await waitFor(() => userRecs().length === 1)), 'our own send has its bubble, written by handleInput as always');
 
   // r4456: the commit twins HELD (placed) while the steers' bubbles are judged, then released and waited for by their own fact
   const committedI = () => { try { return fs.readFileSync(path.join(I.dir, 'committed'), 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
   const markI = () => I.events().some((e) => JSON.stringify(e).includes('marker after the twelve twins'));
   fs.writeFileSync(path.join(I.dir, 'hold-twins'), ''); fs.writeFileSync(path.join(I.dir, 'mark-after-twins'), '');
   I.send({ type: 'queue-op', op: 'steer-all' });
-  ok(await waitFor(() => I.ops().filter((r) => r.op === 'steer' && r.ok).length === 12, 15000), `all twelve steer (${I.ops().filter((r) => r.op === 'steer').length})`);
+  ok(verdictOf(await waitFor(() => I.ops().filter((r) => r.op === 'steer' && r.ok).length === 12, 15000)), `all twelve steer (${I.ops().filter((r) => r.op === 'steer').length})`);
   ok(committedI() === 0, 'the hold placed: no commit twin has reached the wrapper while the steers\' bubbles are judged', { committed: committedI() });
   const inherited = () => userRecs().filter((r) => r.payload.webui_queue_id);
   ok(inherited().length === 12, `THE FIX: twelve steered messages, twelve bubbles — written AT THE STEER, not at the app-server's much later commit (${inherited().length})`, JSON.stringify(inherited().map((r) => r.payload.content[0].text)));
-  ok(inherited().every((r, i) => r.payload.content[0].text === `inherited message ${i + 1}`), 'in queue order', JSON.stringify(inherited().map((r) => r.payload.content[0].text)));
-  ok(inherited().every((r, i) => r.payload.webui_queue_id === `1788731${200000 + (i + 1) * 137}-inh${i + 1}`), 'each stamped with the submission id its queue row advertised');
-  ok(I.ops().filter((r) => r.op === 'steer' && r.ok).every((r) => /-inh\d+$/.test(r.msg_id || '')), 'every steer result names the same id, so the chip can flip', JSON.stringify(I.ops().filter((r) => r.op === 'steer').slice(0, 2)));
+  ok(verdictOf(inherited().every((r, i) => r.payload.content[0].text === `inherited message ${i + 1}`)), 'in queue order', JSON.stringify(inherited().map((r) => r.payload.content[0].text)));
+  ok(verdictOf(inherited().every((r, i) => r.payload.webui_queue_id === `1788731${200000 + (i + 1) * 137}-inh${i + 1}`)), 'each stamped with the submission id its queue row advertised');
+  ok(verdictOf(I.ops().filter((r) => r.op === 'steer' && r.ok).every((r) => /-inh\d+$/.test(r.msg_id || ''))), 'every steer result names the same id, so the chip can flip', JSON.stringify(I.ops().filter((r) => r.op === 'steer').slice(0, 2)));
   // THE COMMIT TWINS land later: they must add NOTHING (this is the dedupe that
   // keeps one message one bubble when both producers speak). r4456: released
   // now, and the count read only once all twelve AND the marker after them are in
   fs.unlinkSync(path.join(I.dir, 'hold-twins'));
-  ok(await waitFor(() => committedI() === 12 && markI(), 30000), 'harness: the twelve commit twins and the marker after them reached the wrapper (a 30 s bound — its expiry fails the dedupe leg here, never a silent count)', { committed: committedI(), mark: markI() });
+  ok(verdictOf(await waitFor(() => committedI() === 12 && markI(), 30000)), 'harness: the twelve commit twins and the marker after them reached the wrapper (a 30 s bound — its expiry fails the dedupe leg here, never a silent count)', { committed: committedI(), mark: markI() });
   ok(inherited().length === 12, `the app-server's own item/completed twins add no second copy (${inherited().length})`, JSON.stringify(inherited().map((r) => r.payload.webui_queue_id)));
   ok(userRecs().length === 13, `thirteen user records for thirteen messages, no duplicates (${userRecs().length})`);
   ok(!userRecs().some((r) => r.payload.webui_queue_id && r.payload.webui_msg_id), 'a record carries ONE identity — the queue id or the webui msgId, never both');
@@ -1114,7 +1114,7 @@ setInterval(() => {
     ok(users.length === 13, `LIVE: the wrapper's own frames render 13 user bubbles (${users.length})`, JSON.stringify(users.map((m) => (m.content || []).map((c) => c.text).join('').slice(0, 24))));
     const texts = users.map((m) => (m.content || []).map((c) => c.text || '').join(''));
     ok(new Set(texts).size === 13, 'each exactly once', JSON.stringify(texts));
-    ok(texts.slice(1).every((t, i) => t === `inherited message ${i + 1}`), 'in queue order, after the message typed here', JSON.stringify(texts));
+    ok(verdictOf(texts.slice(1).every((t, i) => t === `inherited message ${i + 1}`)), 'in queue order, after the message typed here', JSON.stringify(texts));
     const chipped = users.filter((m) => m.queueState === 'steered');
     ok(chipped.length === 12, `and every steered bubble wears the Steered chip — the join the inherited msgId exists for (${chipped.length})`, JSON.stringify(users.map((m) => m.queueState || null)));
   }
@@ -1124,9 +1124,9 @@ setInterval(() => {
   {
     const before = inherited().length;
     fs.writeFileSync(path.join(I.dir, 'drain'), '1');
-    ok(await waitFor(() => inherited().length === before + 1), `a DRAINED inherited item gets its bubble from the commit twin alone (${inherited().length - before})`);
+    ok(verdictOf(await waitFor(() => inherited().length === before + 1)), `a DRAINED inherited item gets its bubble from the commit twin alone (${inherited().length - before})`);
     const last = inherited().slice(-1)[0];
-    ok(/inherited message/.test(last.payload.content[0].text) && /-inh\d+$/.test(last.payload.webui_queue_id), 'with the same shape and the same id', JSON.stringify(last.payload));
+    ok(gateOf(/inherited message/.test(last.payload.content[0].text)) && verdictOf(/-inh\d+$/.test(last.payload.webui_queue_id)), 'with the same shape and the same id', JSON.stringify(last.payload));
   }
 
 
@@ -1139,12 +1139,12 @@ setInterval(() => {
     const steeredRecs = inherited().filter((r) => r.payload.webui_queue_via === 'steered');
     const drainedRecs = inherited().filter((r) => r.payload.webui_queue_via === 'drained');
     ok(steeredRecs.length === 12 && drainedRecs.length === 1, `every inherited record names its producer: 12 steered + 1 drained (${steeredRecs.length}/${drainedRecs.length})`, JSON.stringify(inherited().map((r) => r.payload.webui_queue_via)));
-    ok(inherited().every((r) => Object.keys(r.payload).join(',') === (r.payload.webui_queue_via === 'drained' ? 'type,role,content,webui_queue_id,webui_queue_via,webui_after_commit' : 'type,role,content,webui_queue_id,webui_queue_via')),
+    ok(verdictOf(inherited().every((r) => Object.keys(r.payload).join(',') === (r.payload.webui_queue_via === 'drained' ? 'type,role,content,webui_queue_id,webui_queue_via,webui_after_commit' : 'type,role,content,webui_queue_id,webui_queue_via'))),
       'and the markers ride LAST, so the stable payload stays {type, role, content}', JSON.stringify(inherited().map((r) => Object.keys(r.payload).join(','))));
     // The reader's contract is the commit-order fact, not the producer label:
     // the drained twin is the one the app-server had already persisted when we
     // wrote it, and it is the ONLY inherited record that says so.
-    ok(drainedRecs.every((r) => r.payload.webui_after_commit === true) && steeredRecs.every((r) => r.payload.webui_after_commit === undefined),
+    ok(gateOf(drainedRecs.every((r) => r.payload.webui_after_commit === true)) && verdictOf(steeredRecs.every((r) => r.payload.webui_after_commit === undefined)),
       'only the record written AFTER the app-server committed the message declares it', JSON.stringify(inherited().map((r) => [r.payload.webui_queue_via, r.payload.webui_after_commit || false])));
 
     // THE REBUILD: codex writes its own copy of every one of these messages into
@@ -1163,12 +1163,12 @@ setInterval(() => {
     const rb = nm2.messages.filter((m) => m.role === 'user').map((m) => (m.content || []).map((c) => c.text || '').join(''));
     ok(rb.length === ourRecs.length, `REBUILD: ${ourRecs.length} messages × 2 producers → ${rb.length} bubbles (${ourRecs.length} expected)`, JSON.stringify(rb.map((t) => t.slice(0, 24))));
     ok(new Set(rb).size === rb.length, 'each exactly once — nothing doubled and nothing deleted', JSON.stringify(rb.map((t) => t.slice(0, 24))));
-    ok(rb.filter((t) => /inherited message/.test(t)).every((t, i) => t === `inherited message ${i + 1}`), 'and still in queue order after the merge', JSON.stringify(rb.map((t) => t.slice(0, 24))));
+    ok(verdictOf(rb.filter((t) => /inherited message/.test(t)).every((t, i) => t === `inherited message ${i + 1}`)), 'and still in queue order after the merge', JSON.stringify(rb.map((t) => t.slice(0, 24))));
   }
 
   // NO SILENT DROPS: the unrouted kind is named, the deliberate no-op is not.
-  ok(await waitFor(() => !!I.meta()?.unhandledItems?.holoDeck), `an item/completed kind nothing routes is COUNTED in the sidecar (${JSON.stringify(I.meta()?.unhandledItems)})`);
-  ok(/unhandled item kind "holoDeck"/.test(I.journal()), 'and logged once, verbatim, in the wrapper journal');
+  ok(verdictOf(await waitFor(() => !!I.meta()?.unhandledItems?.holoDeck)), `an item/completed kind nothing routes is COUNTED in the sidecar (${JSON.stringify(I.meta()?.unhandledItems)})`);
+  ok(verdictOf(/unhandled item kind "holoDeck"/.test(I.journal())), 'and logged once, verbatim, in the wrapper journal');
   ok(!I.meta()?.unhandledItems?.hookPrompt && !I.meta()?.unhandledItems?.userMessage, 'a NAMED no-op (hookPrompt) and the now-routed userMessage are not "unhandled"', JSON.stringify(I.meta()?.unhandledItems));
   await I.stop();
 
@@ -1215,7 +1215,7 @@ setInterval(() => {
       ok(ops2().filter((r) => r.op === 'steer' && r.ok).length === 12, 'PRE-FIX CONTROL: the shipped wrapper steers all twelve too — the messages DID enter the turn');
       ok(committedOf() === 0 && users2().length === 1, 'PRE-FIX CONTROL, THE HOLD PLACED: no commit twin has reached the wrapper yet — a count read now (the old fixed sleep) would see one bubble whether the twins are dropped or not', { committed: committedOf(), users: users2().length });
       fs.unlinkSync(path.join(cd, 'hold-twins'));
-      ok(await waitFor(() => committedOf() === 12 && markSeen(), 30000), 'harness: the twelve commit twins and the marker after them reached the wrapper (a 30 s bound — its expiry fails the pre-fix control here, never a silent count)', { committed: committedOf(), mark: markSeen() });
+      ok(verdictOf(await waitFor(() => committedOf() === 12 && markSeen(), 30000)), 'harness: the twelve commit twins and the marker after them reached the wrapper (a 30 s bound — its expiry fails the pre-fix control here, never a silent count)', { committed: committedOf(), mark: markSeen() });
       ok(users2().length === 1, `PRE-FIX CONTROL: …and renders ONE bubble, the message typed here — exactly the owner's report ("我只能看到我最后插入的一条消息") (${users2().length})`, JSON.stringify(users2().map((r) => r.payload.content?.[0]?.text)));
       ok(!/unhandled item kind/.test((() => { try { return fs.readFileSync(path.join(cd, 'codex-chat-wrapper.log'), 'utf8'); } catch { return ''; } })()),
         '…and said nothing about the twelve item kinds it dropped — the silence this fix also closes');
@@ -1321,14 +1321,14 @@ process.stdin.on('data', (d) => {
   const inject = (items) => fs.writeFileSync(injectFile, JSON.stringify(items));
   const lastOp = (op) => V.ops().filter((r) => r.op === op).slice(-1)[0] || null;
   const rpcOf = (method) => V.rpc().filter((m) => m.method === method);
-  ok(await waitFor(() => V.meta()?.threadId === 'th-verbs'), 'verb stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => V.meta()?.threadId === 'th-verbs')), 'verb stub: the wrapper has a thread');
 
   // A turn, then FIVE queued messages = three pages of two.
   V.send({ type: 'chat-input', text: 'go', msgId: 'v0' });
-  ok(await waitFor(() => V.meta()?.activeTurnId === 'turn-1'), 'verb stub: a turn is running');
+  ok(verdictOf(await waitFor(() => V.meta()?.activeTurnId === 'turn-1')), 'verb stub: a turn is running');
   for (let i = 1; i <= 5; i++) V.send({ type: 'chat-input', text: 'msg ' + i, msgId: 'v' + i });
-  ok(await waitFor(() => V.lastQueue().length === 5), `THE PAGING FIX: a queue longer than one page is published WHOLE (${V.lastQueue().length} items; the pre-verb-table refreshQueue dropped nextCursor and published the first page only)`, JSON.stringify(V.lastQueue().map((i) => i.msgId)));
-  ok(rpcOf('thread/queue/list').some((m) => m.params.cursor), 'the wrapper really follows `cursor` (not just a bigger single request)', JSON.stringify(rpcOf('thread/queue/list').slice(-3).map((m) => m.params)));
+  ok(verdictOf(await waitFor(() => V.lastQueue().length === 5)), `THE PAGING FIX: a queue longer than one page is published WHOLE (${V.lastQueue().length} items; the pre-verb-table refreshQueue dropped nextCursor and published the first page only)`, JSON.stringify(V.lastQueue().map((i) => i.msgId)));
+  ok(verdictOf(rpcOf('thread/queue/list').some((m) => m.params.cursor)), 'the wrapper really follows `cursor` (not just a bigger single request)', JSON.stringify(rpcOf('thread/queue/list').slice(-3).map((m) => m.params)));
 
   // REORDER, with an item the client never saw injected in between.
   {
@@ -1339,20 +1339,20 @@ process.stdin.on('data', (d) => {
     // move the FIRST item behind the THIRD — a relative frame, exactly what the
     // client's drag sends.
     V.send({ type: 'queue-op', op: 'reorder', id: known[0], afterId: known[2] });
-    ok(await waitFor(() => rpcOf('thread/queue/reorder').length > before), 'a relative reorder frame becomes a thread/queue/reorder RPC');
+    ok(verdictOf(await waitFor(() => rpcOf('thread/queue/reorder').length > before)), 'a relative reorder frame becomes a thread/queue/reorder RPC');
     const sent = rpcOf('thread/queue/reorder').slice(-1)[0].params.queuedSubmissionIds;
-    ok(sent.length === 6 && sent.includes('peer-x'), `THE MERGE: the order is computed from a FRESH list, so an id queued between the render and the drop is IN it (${JSON.stringify(sent)})`);
+    ok(sent.length === 6 && verdictOf(sent.includes('peer-x')), `THE MERGE: the order is computed from a FRESH list, so an id queued between the render and the drop is IN it (${JSON.stringify(sent)})`);
     ok(sent.indexOf('peer-x') === 5, '…at the place the SERVER has it, not appended by guesswork', JSON.stringify(sent));
     ok(sent.indexOf(known[0]) === sent.indexOf(known[2]) + 1, '…and the moved item sits directly behind its anchor', JSON.stringify(sent));
-    ok(await waitFor(() => lastOp('reorder')?.ok === true), 'the reorder is reported ok', JSON.stringify(lastOp('reorder')));
-    ok(await waitFor(() => JSON.stringify(V.lastQueue().map((i) => i.id)) === JSON.stringify(sent)), 'and the CLOSING PUBLISH is the truth (the strip renders the order the server now has)', JSON.stringify(V.lastQueue().map((i) => i.id)));
+    ok(verdictOf(await waitFor(() => lastOp('reorder')?.ok === true)), 'the reorder is reported ok', JSON.stringify(lastOp('reorder')));
+    ok(verdictOf(await waitFor(() => JSON.stringify(V.lastQueue().map((i) => i.id)) === JSON.stringify(sent))), 'and the CLOSING PUBLISH is the truth (the strip renders the order the server now has)', JSON.stringify(V.lastQueue().map((i) => i.id)));
   }
   // AN ANCHOR THAT LEFT: nothing is moved, and the user is told why.
   {
     const ids = V.lastQueue().map((i) => i.id);
     const before = rpcOf('thread/queue/reorder').length;
     V.send({ type: 'queue-op', op: 'reorder', id: ids[0], afterId: 'no-such-id' });
-    ok(await waitFor(() => lastOp('reorder')?.reason === 'anchor-gone'), `an anchor that is no longer queued answers 'anchor-gone' with what happened (${JSON.stringify(lastOp('reorder'))})`);
+    ok(verdictOf(await waitFor(() => lastOp('reorder')?.reason === 'anchor-gone')), `an anchor that is no longer queued answers 'anchor-gone' with what happened (${JSON.stringify(lastOp('reorder'))})`);
     ok(rpcOf('thread/queue/reorder').length === before, 'and NO reorder RPC goes out — a guessed position is worse than a refusal');
   }
   // EDIT: every UserInput variant that is not the replaced text survives.
@@ -1371,17 +1371,17 @@ process.stdin.on('data', (d) => {
     await sleep(250);
     const before = rpcOf('thread/queue/update').length;
     V.send({ type: 'queue-op', op: 'edit', id: 'mixed-1', text: 'rewritten' });
-    ok(await waitFor(() => rpcOf('thread/queue/update').length > before), 'an edit frame becomes a thread/queue/update RPC');
+    ok(verdictOf(await waitFor(() => rpcOf('thread/queue/update').length > before)), 'an edit frame becomes a thread/queue/update RPC');
     const p = rpcOf('thread/queue/update').slice(-1)[0].params;
-    ok(p.threadId === 'th-verbs' && p.queuedSubmissionId === 'mixed-1' && Array.isArray(p.input), 'update carries {threadId, queuedSubmissionId, input} — the WHOLE input array', JSON.stringify(p).slice(0, 200));
+    ok(p.threadId === 'th-verbs' && p.queuedSubmissionId === 'mixed-1' && verdictOf(Array.isArray(p.input)), 'update carries {threadId, queuedSubmissionId, input} — the WHOLE input array', JSON.stringify(p).slice(0, 200));
     ok(p.input[0].type === 'text' && p.input[0].text === 'rewritten', 'the first text element carries the new words');
-    ok(Array.isArray(p.input[0].text_elements) && p.input[0].text_elements.length === 0, 'THE STALE SPANS ARE CLEARED: text_elements index the OLD buffer, so keeping them would describe a string that no longer exists', JSON.stringify(p.input[0]));
+    ok(gateOf(Array.isArray(p.input[0].text_elements)) && p.input[0].text_elements.length === 0, 'THE STALE SPANS ARE CLEARED: text_elements index the OLD buffer, so keeping them would describe a string that no longer exists', JSON.stringify(p.input[0]));
     const kept = p.input.slice(1).map((x) => x.type);
     ok(JSON.stringify(kept) === JSON.stringify(['image', 'localImage', 'audio', 'localAudio', 'skill', 'mention']), `PRESERVED BY EXCLUSION, in place: every non-text variant survives — including audio/localAudio, which a whitelist would have deleted (${JSON.stringify(kept)})`);
     ok(JSON.stringify(p.input[1]) === JSON.stringify(SEVEN[1]) && JSON.stringify(p.input[6]) === JSON.stringify(SEVEN[6]), '…byte for byte, not re-encoded', JSON.stringify([p.input[1], p.input[6]]));
     ok(!p.input.some((x, i) => i > 0 && x.type === 'text'), 'the trailing text element is gone (its words are what the user just rewrote)', JSON.stringify(p.input.map((x) => x.type)));
-    ok(await waitFor(() => lastOp('edit')?.ok === true), 'the edit is reported ok', JSON.stringify(lastOp('edit')));
-    ok(await waitFor(() => (V.lastQueue().find((i) => i.id === 'mixed-1')?.preview || '').startsWith('rewritten')), 'and the republished strip shows the NEW words (the visible confirmation of an edit)', JSON.stringify(V.lastQueue().find((i) => i.id === 'mixed-1')));
+    ok(verdictOf(await waitFor(() => lastOp('edit')?.ok === true)), 'the edit is reported ok', JSON.stringify(lastOp('edit')));
+    ok(verdictOf(await waitFor(() => (V.lastQueue().find((i) => i.id === 'mixed-1')?.preview || '').startsWith('rewritten'))), 'and the republished strip shows the NEW words (the visible confirmation of an edit)', JSON.stringify(V.lastQueue().find((i) => i.id === 'mixed-1')));
     ok((V.lastQueue().find((i) => i.id === 'mixed-1')?.text || '') === 'rewritten', '…and the FULL text rides the item, so a second edit opens the real message and not a 120-char preview', JSON.stringify(V.lastQueue().find((i) => i.id === 'mixed-1')?.text));
   }
   // ⑦r THE EDIT'S RETRACTION (merge review, 2026-09-07). The `edit` verb is the
@@ -1402,24 +1402,24 @@ process.stdin.on('data', (d) => {
     ok(!retractions().some((r) => r.msg_id === 'mixed-1'), 'an INHERITED row\'s edit retracts nothing — the wrapper never wrote a record for it', JSON.stringify(retractions()));
     // (b) OUR OWN queued message, rewritten: the claim is withdrawn, by id.
     V.send({ type: 'chat-input', text: 'ping', msgId: 'v-edit' });
-    ok(await waitFor(() => V.lastQueue().some((i) => i.msgId === 'v-edit')), 'a typed message is queued while the turn runs (the bubble is already written)');
+    ok(verdictOf(await waitFor(() => V.lastQueue().some((i) => i.msgId === 'v-edit'))), 'a typed message is queued while the turn runs (the bubble is already written)');
     const mine = V.lastQueue().find((i) => i.msgId === 'v-edit');
     const beforeEdit = rpcOf('thread/queue/update').length;
     V.send({ type: 'queue-op', op: 'edit', id: mine.id, text: 'ping harder' });
-    ok(await waitFor(() => lastOp('edit')?.ok === true && rpcOf('thread/queue/update').length > beforeEdit), 'the rewrite lands');
-    ok(await waitFor(() => retractions().some((r) => r.msg_id === 'v-edit' && r.reason === 'edited before it ran')),
+    ok(verdictOf(await waitFor(() => lastOp('edit')?.ok === true && rpcOf('thread/queue/update').length > beforeEdit)), 'the rewrite lands');
+    ok(verdictOf(await waitFor(() => retractions().some((r) => r.msg_id === 'v-edit' && r.reason === 'edited before it ran'))),
       'THE FIX: rewriting a queued message of OURS withdraws its claim — the words that will run are not the words the bubble claims', JSON.stringify(retractions()));
     // …and the bubble STAYS: a retraction is a fact about the CLAIM, never
     // about the message (the client's law for this verb is that edit leaves
     // the bubble's meaning untouched).
-    ok(V.events().some((e) => e.type === 'response_item' && e.payload?.webui_msg_id === 'v-edit'),
+    ok(verdictOf(V.events().some((e) => e.type === 'response_item' && e.payload?.webui_msg_id === 'v-edit')),
       '…and the pre-edit bubble is still in the buffer (only the claim goes)');
     // (c) NEGATIVE CONTROL, IN THE PRODUCT: a save that rewrites NOTHING (open
     // the pencil, press Enter — the client has no no-op guard) still commits
     // the submission as written, so its claim is still good and withdrawing it
     // would manufacture a duplicate for nothing.
     V.send({ type: 'chat-input', text: 'pong', msgId: 'v-noop' });
-    ok(await waitFor(() => V.lastQueue().some((i) => i.msgId === 'v-noop')), 'a second typed message is queued');
+    ok(verdictOf(await waitFor(() => V.lastQueue().some((i) => i.msgId === 'v-noop'))), 'a second typed message is queued');
     const same = V.lastQueue().find((i) => i.msgId === 'v-noop');
     const beforeNoop = rpcOf('thread/queue/update').length;
     // r4456: the no-op edit's own result is what the verdict waits for — the wrapper records any retraction BEFORE that result
@@ -1429,10 +1429,10 @@ process.stdin.on('data', (d) => {
     const ownOp = () => V.ops().find((r) => r.op === 'edit' && r.id === same.id) || null;
     fs.writeFileSync(holdUpdate, '');
     V.send({ type: 'queue-op', op: 'edit', id: same.id, text: 'pong' });
-    ok(await waitFor(() => rpcOf('thread/queue/update').length > beforeNoop && lastOp('edit')?.ok === true), 'a no-op save still goes out as an update RPC (the verb is honoured either way)');
+    ok(verdictOf(await waitFor(() => rpcOf('thread/queue/update').length > beforeNoop && lastOp('edit')?.ok === true)), 'a no-op save still goes out as an update RPC (the verb is honoured either way)');
     ok(ownOp() === null, 'THE HOLD PLACED: the update RPC is out and the last edit result reads ok (v-edit\'s, earlier) — while the no-op edit itself has not answered yet', V.ops().filter((r) => r.op === 'edit'));
     fs.unlinkSync(holdUpdate);
-    ok(await waitFor(() => ownOp() !== null, 30000), 'harness: the no-op edit\'s own op result came (a 30 s bound — its expiry fails the negative control here, never a silent read)', V.ops().filter((r) => r.op === 'edit'));
+    ok(verdictOf(await waitFor(() => ownOp() !== null, 30000)), 'harness: the no-op edit\'s own op result came (a 30 s bound — its expiry fails the negative control here, never a silent read)', V.ops().filter((r) => r.op === 'edit'));
     ok(ownOp().ok === true && !retractions().some((r) => r.msg_id === 'v-noop'), 'NEGATIVE CONTROL: an edit that changes NOTHING keeps the claim — the twin still collapses (judged after the edit\'s own result)', JSON.stringify({ op: ownOp(), retractions: retractions() }));
     // (d) THE REBUILD, from the wrapper's REAL records: the server preview
     // (built by the REAL adapter from the same frame ws-handler saw) + the
@@ -1467,60 +1467,60 @@ process.stdin.on('data', (d) => {
   // MEANS it.
   {
     V.send({ type: 'peer-message', text: 'ping from F', fromName: 'session F' });
-    ok(await waitFor(() => V.lastQueue().some((i) => i.kind === 'peer')), 'a peer message is queued on the same lane');
+    ok(verdictOf(await waitFor(() => V.lastQueue().some((i) => i.kind === 'peer'))), 'a peer message is queued on the same lane');
     const peer = V.lastQueue().find((i) => i.kind === 'peer');
     ok(!('text' in peer), 'a peer row carries NO full text (nothing to open an editor on)', JSON.stringify(peer));
     const before = rpcOf('thread/queue/update').length;
     V.send({ type: 'queue-op', op: 'edit', id: peer.id, text: 'words I put in its mouth' });
-    ok(await waitFor(() => lastOp('edit')?.reason === 'not-editable'), `editing a peer item is REFUSED with the reason (${JSON.stringify(lastOp('edit'))})`);
+    ok(verdictOf(await waitFor(() => lastOp('edit')?.reason === 'not-editable')), `editing a peer item is REFUSED with the reason (${JSON.stringify(lastOp('edit'))})`);
     ok(rpcOf('thread/queue/update').length === before, '…and no update RPC is sent at all');
     V.send({ type: 'queue-op', op: 'remove', id: peer.id });
-    ok(await waitFor(() => !V.lastQueue().some((i) => i.kind === 'peer')), '…while removing it still works (you can drop it, you just cannot rewrite it)');
+    ok(verdictOf(await waitFor(() => !V.lastQueue().some((i) => i.kind === 'peer'))), '…while removing it still works (you can drop it, you just cannot rewrite it)');
   }
   // RUN NOW / RUN ALL — refused while a turn runs, honoured when idle.
   {
     const beforeStart = rpcOf('thread/queue/start').length;
     const target = V.lastQueue()[0].id;
     V.send({ type: 'queue-op', op: 'run-now', id: target });
-    ok(await waitFor(() => lastOp('run-now')?.reason === 'busy'), `run-now during a turn is REFUSED with 'busy' and what is true instead (${JSON.stringify(lastOp('run-now'))})`);
-    ok(/runs as soon as it ends/.test(lastOp('run-now')?.detail || ''), '…the refusal says the message runs when the turn ends (never accept-and-ignore)', lastOp('run-now')?.detail);
+    ok(verdictOf(await waitFor(() => lastOp('run-now')?.reason === 'busy')), `run-now during a turn is REFUSED with 'busy' and what is true instead (${JSON.stringify(lastOp('run-now'))})`);
+    ok(verdictOf(/runs as soon as it ends/.test(lastOp('run-now')?.detail || '')), '…the refusal says the message runs when the turn ends (never accept-and-ignore)', lastOp('run-now')?.detail);
     V.send({ type: 'queue-op', op: 'run-all', id: null });
-    ok(await waitFor(() => lastOp('run-all')?.reason === 'busy'), 'run-all during a turn is refused the same way', JSON.stringify(lastOp('run-all')));
+    ok(verdictOf(await waitFor(() => lastOp('run-all')?.reason === 'busy')), 'run-all during a turn is refused the same way', JSON.stringify(lastOp('run-all')));
     ok(rpcOf('thread/queue/start').length === beforeStart, 'NO thread/queue/start goes out while a turn is running', JSON.stringify(rpcOf('thread/queue/start').map((m) => m.params)));
 
     // …now the turn ends WITHOUT draining (the resumed-thread shape).
     fs.writeFileSync(endFile, '1');
-    ok(await waitFor(() => !V.meta()?.activeTurnId), 'the turn ends, leaving an IDLE thread with a non-empty queue (a resumed thread looks exactly like this)');
+    ok(verdictOf(await waitFor(() => !V.meta()?.activeTurnId)), 'the turn ends, leaving an IDLE thread with a non-empty queue (a resumed thread looks exactly like this)');
     const queuedNow = V.lastQueue().map((i) => i.id);
     V.send({ type: 'queue-op', op: 'run-now', id: queuedNow[1] });
-    ok(await waitFor(() => rpcOf('thread/queue/start').length === beforeStart + 1), 'run-now on an idle thread sends thread/queue/start');
+    ok(verdictOf(await waitFor(() => rpcOf('thread/queue/start').length === beforeStart + 1)), 'run-now on an idle thread sends thread/queue/start');
     const p1 = rpcOf('thread/queue/start').slice(-1)[0].params;
     ok(p1.threadId === 'th-verbs' && p1.queuedSubmissionId === queuedNow[1], 'RUN-NOW NAMES ITS ITEM (an id-less start would drain the whole queue)', JSON.stringify(p1));
-    ok(await waitFor(() => lastOp('run-now')?.ok === true), 'and it is reported ok', JSON.stringify(lastOp('run-now')));
+    ok(verdictOf(await waitFor(() => lastOp('run-now')?.ok === true)), 'and it is reported ok', JSON.stringify(lastOp('run-now')));
 
     // and run-all: the SAME RPC with NO id at all. Wait for the wrapper to
     // REGISTER the turn run-now started before ending it — the sidecar lags
     // the in-memory state by a debounce, so "not busy on disk" is not "not
     // busy", and racing it here would test the wrong refusal.
-    ok(await waitFor(() => !!V.meta()?.activeTurnId), 'the started item is running as a turn');
+    ok(verdictOf(await waitFor(() => !!V.meta()?.activeTurnId)), 'the started item is running as a turn');
     fs.writeFileSync(endFile, '1');
-    ok(await waitFor(() => !V.meta()?.activeTurnId), 'and that turn ends, idle again');
+    ok(verdictOf(await waitFor(() => !V.meta()?.activeTurnId)), 'and that turn ends, idle again');
     const before2 = rpcOf('thread/queue/start').length;
     V.send({ type: 'queue-op', op: 'run-all', id: null });
-    ok(await waitFor(() => rpcOf('thread/queue/start').length === before2 + 1), 'run-all on an idle thread sends thread/queue/start too');
+    ok(verdictOf(await waitFor(() => rpcOf('thread/queue/start').length === before2 + 1)), 'run-all on an idle thread sends thread/queue/start too');
     const p2 = rpcOf('thread/queue/start').slice(-1)[0].params;
     ok(p2.threadId === 'th-verbs' && !('queuedSubmissionId' in p2), 'RUN-ALL OMITS the id entirely — a DIFFERENT request, not run-now with a lost argument', JSON.stringify(p2));
-    ok(await waitFor(() => V.lastQueue().length === 0), 'the queue drains and the closing publish says so', JSON.stringify(V.lastQueue()));
-    ok(await waitFor(() => !!V.meta()?.activeTurnId), 'the drain is running as a turn');
+    ok(verdictOf(await waitFor(() => V.lastQueue().length === 0)), 'the queue drains and the closing publish says so', JSON.stringify(V.lastQueue()));
+    ok(verdictOf(await waitFor(() => !!V.meta()?.activeTurnId)), 'the drain is running as a turn');
     fs.writeFileSync(endFile, '1');
-    ok(await waitFor(() => !V.meta()?.activeTurnId), 'which ends, idle with an empty queue');
+    ok(verdictOf(await waitFor(() => !V.meta()?.activeTurnId)), 'which ends, idle with an empty queue');
     V.send({ type: 'queue-op', op: 'run-all', id: null });
-    ok(await waitFor(() => lastOp('run-all')?.reason === 'empty'), 'run-all with nothing queued says so instead of firing an empty start', JSON.stringify(lastOp('run-all')));
+    ok(verdictOf(await waitFor(() => lastOp('run-all')?.reason === 'empty')), 'run-all with nothing queued says so instead of firing an empty start', JSON.stringify(lastOp('run-all')));
   }
   // The wrapper ADVERTS the verbs it serves, in the sidecar AND in-band (a
   // remote wrapper's sidecar is on the other machine).
   ok(JSON.stringify(V.meta()?.caps?.queueVerbs) === JSON.stringify(['remove', 'steer', 'steer-all', 'reorder', 'edit', 'run-now', 'run-all']), 'the sidecar adverts the verb list this build serves', JSON.stringify(V.meta()?.caps));
-  ok(V.queues().every((q) => Array.isArray(q.verbs) && q.verbs.includes('reorder')), 'EVERY queue_changed carries the same list in-band (the only advert a remote session ever sees)', JSON.stringify(V.queues().slice(-1)[0]?.verbs));
+  ok(verdictOf(V.queues().every((q) => Array.isArray(q.verbs) && q.verbs.includes('reorder'))), 'EVERY queue_changed carries the same list in-band (the only advert a remote session ever sees)', JSON.stringify(V.queues().slice(-1)[0]?.verbs));
   await V.stop();
   try { fs.unlinkSync(injectFile); } catch { }
   try { fs.unlinkSync(endFile); } catch { }
@@ -1597,13 +1597,13 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
 {
   const N = spawnStub('notif', STUB_NOTIF.replace(/__STEERMODE__/g, "'ok'"));
   const peerResults = () => N.msgs().filter((m) => m.type === 'peer_message_result');
-  ok(await waitFor(() => N.meta()?.threadId === 'th-notif'), 'notif stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => N.meta()?.threadId === 'th-notif')), 'notif stub: the wrapper has a thread');
   N.send({ type: 'chat-input', text: 'long running work', msgId: 'n0' });
-  ok(await waitFor(() => N.meta()?.activeTurnId === 'turn-1'), 'notif stub: a turn is running');
+  ok(verdictOf(await waitFor(() => N.meta()?.activeTurnId === 'turn-1')), 'notif stub: a turn is running');
 
   // (1) EMPTY QUEUE — one steer, nothing queued
   N.send({ type: 'peer-message', text: NOTIF_TEXT, fromName: 'Background Work · nightly', kind: 'notification' });
-  ok(await waitFor(() => peerResults().length === 1), 'the notification is answered', JSON.stringify(peerResults()));
+  ok(verdictOf(await waitFor(() => peerResults().length === 1)), 'the notification is answered', JSON.stringify(peerResults()));
   ok(peerResults()[0].ok === true && peerResults()[0].mode === 'steered', `…with mode 'steered' (${JSON.stringify(peerResults()[0])})`);
   {
     const st = N.rpc().filter((m) => m.method === 'turn/steer');
@@ -1616,14 +1616,14 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
   // (2) THREE QUEUED ITEMS — the steer must not touch them (negative control
   // for the "carry the queue with it" variant: that one deletes what it sends)
   for (const n of [1, 2, 3]) N.send({ type: 'chat-input', text: `queued ${n}`, msgId: `n${n}` });
-  ok(await waitFor(() => N.lastQueue().length === 3), `three messages queued behind the turn (${JSON.stringify(N.lastQueue().map((i) => i.preview))})`);
+  ok(verdictOf(await waitFor(() => N.lastQueue().length === 3)), `three messages queued behind the turn (${JSON.stringify(N.lastQueue().map((i) => i.preview))})`);
   const idsBefore = N.lastQueue().map((i) => i.id).join(',');
   const previewsBefore = N.lastQueue().map((i) => i.preview).join('|');
   const steersBefore = N.rpc().filter((m) => m.method === 'turn/steer').length;
   const delsBefore = N.rpc().filter((m) => m.method === 'thread/queue/delete').length;
   const addsBefore = N.rpc().filter((m) => m.method === 'thread/queue/add').length;
   N.send({ type: 'peer-message', text: '[VibeSpace Background Work] task "hourly" (job-2): failed.', fromName: 'Background Work · hourly', kind: 'notification' });
-  ok(await waitFor(() => peerResults().length === 2), 'the second notification is answered');
+  ok(verdictOf(await waitFor(() => peerResults().length === 2)), 'the second notification is answered');
   ok(peerResults()[1].mode === 'steered', `…also steered, with a non-empty queue (${JSON.stringify(peerResults()[1])})`);
   ok(N.rpc().filter((m) => m.method === 'turn/steer').length === steersBefore + 1, 'exactly ONE more turn/steer (never one per queued item)');
   ok(N.rpc().filter((m) => m.method === 'thread/queue/delete').length === delsBefore, 'ZERO thread/queue/delete — the steer carried only itself, so nothing had to be dequeued', String(N.rpc().filter((m) => m.method === 'thread/queue/delete').length - delsBefore));
@@ -1638,11 +1638,11 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
   // (3) A HUMAN PEER MESSAGE queues, exactly as before — including an UNTYPED
   // frame (an older server that does not send `kind` at all).
   N.send({ type: 'peer-message', text: 'Message from session "B" (via vibespace-msg): can you look at X?', fromName: 'session B', kind: 'peer' });
-  ok(await waitFor(() => N.lastQueue().length === 4), `a human peer message QUEUES (${JSON.stringify(N.lastQueue().map((i) => i.kind))})`);
+  ok(verdictOf(await waitFor(() => N.lastQueue().length === 4)), `a human peer message QUEUES (${JSON.stringify(N.lastQueue().map((i) => i.kind))})`);
   ok(peerResults().slice(-1)[0].mode === 'queued', `…and reports mode 'queued' (${JSON.stringify(peerResults().slice(-1)[0])})`);
   ok(N.rpc().filter((m) => m.method === 'turn/steer').length === steersBefore + 1, "no steer for a human message — a person's message is its own turn");
   N.send({ type: 'peer-message', text: 'Message from session "C" (via vibespace-msg): untyped frame', fromName: 'session C' });
-  ok(await waitFor(() => N.lastQueue().length === 5), 'an UNTYPED frame (older server) queues too — unknown origin takes the conservative lane');
+  ok(verdictOf(await waitFor(() => N.lastQueue().length === 5)), 'an UNTYPED frame (older server) queues too — unknown origin takes the conservative lane');
   ok(peerResults().slice(-1)[0].mode === 'queued', `…reported as queued (${JSON.stringify(peerResults().slice(-1)[0])})`);
 
   // (4) THE NORMALIZER: the steered notification is a LABELLED peer card, live
@@ -1654,7 +1654,7 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
     const card = live.messages.filter((m) => m.originKind === 'peer-message' && JSON.stringify(m.content).includes('nightly'));
     ok(card.length === 1 && card[0].role === 'user' && card[0].peerFrom === 'Background Work · nightly',
       `LIVE: the steered notification renders as ONE labelled peer card (${JSON.stringify(card.map((m) => [m.originKind, m.peerFrom]))})`);
-    ok(liveOps.some((o) => o.op === 'create' && o.message?.id === card[0]?.id), '…delivered to open windows through the normal create op');
+    ok(verdictOf(liveOps.some((o) => o.op === 'create' && o.message?.id === card[0]?.id)), '…delivered to open windows through the normal create op');
     const rebuilt = new CodexMessageManager('p2-notif-rebuild');
     rebuilt.convertHistory(N.events());
     const rcard = rebuilt.messages.filter((m) => m.originKind === 'peer-message' && JSON.stringify(m.content).includes('nightly'));
@@ -1689,11 +1689,11 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
   {
     const evil = '<img src=x onerror="alert(1)">';
     N.send({ type: 'peer-message', text: `[VibeSpace Background Work] task "${evil}" (job-3): done.`, fromName: `Background Work · ${evil}`, kind: 'notification' });
-    ok(await waitFor(() => N.events().some((e) => e.type === 'response_item' && JSON.stringify(e.payload?.webui_peer || {}).includes('onerror'))), 'the hostile label reaches the record verbatim (the wrapper builds no HTML)');
+    ok(verdictOf(await waitFor(() => N.events().some((e) => e.type === 'response_item' && JSON.stringify(e.payload?.webui_peer || {}).includes('onerror')))), 'the hostile label reaches the record verbatim (the wrapper builds no HTML)');
     const mmx = new CodexMessageManager('p2-notif-xss');
     mmx.convertHistory(N.events());
     const bad = mmx.messages.find((m) => m.originKind === 'peer-message' && String(m.peerFrom || '').includes('onerror'));
-    ok(bad && bad.peerFrom === `Background Work · ${evil}` && bad.content[0].text.includes(evil) && !JSON.stringify(bad).includes('<span'),
+    ok(gateOf(bad) && bad.peerFrom === `Background Work · ${evil}` && gateOf(bad.content[0].text.includes(evil)) && !JSON.stringify(bad).includes('<span'),
       'the normalizer carries text and label as DATA — no markup is ever built here', JSON.stringify(bad && [bad.peerFrom, bad.content[0].text]).slice(0, 200));
     // (the peer card's renderer pins: MOVED to the fast scripts/test-codex-p2-wrapper-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
@@ -1705,16 +1705,16 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
   //       its own turn (the idle lane), never lost.
   const E = spawnStub('notif-ended', STUB_NOTIF.replace(/__STEERMODE__/g, "'ended'"));
   const eRes = () => E.msgs().filter((m) => m.type === 'peer_message_result');
-  ok(await waitFor(() => E.meta()?.threadId === 'th-notif'), 'ended-race stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => E.meta()?.threadId === 'th-notif')), 'ended-race stub: the wrapper has a thread');
   E.send({ type: 'chat-input', text: 'work', msgId: 'e0' });
-  ok(await waitFor(() => E.meta()?.activeTurnId === 'turn-1'), 'ended-race stub: a turn is running');
+  ok(verdictOf(await waitFor(() => E.meta()?.activeTurnId === 'turn-1')), 'ended-race stub: a turn is running');
   const startsBeforeE = E.rpc().filter((m) => m.method === 'turn/start').length;
   E.send({ type: 'peer-message', text: NOTIF_TEXT, fromName: 'Background Work · nightly', kind: 'notification' });
-  ok(await waitFor(() => eRes().length === 1), 'the notification is answered even though the steer was refused', JSON.stringify(eRes()));
+  ok(verdictOf(await waitFor(() => eRes().length === 1)), 'the notification is answered even though the steer was refused', JSON.stringify(eRes()));
   ok(eRes()[0].ok === true && eRes()[0].mode === 'turn' && eRes()[0].steerFailed === 'no-active-turn',
     `…the turn ended mid-flight ⇒ it runs as its OWN turn and the result NAMES the refused steer (${JSON.stringify(eRes()[0])})`);
   ok(E.rpc().filter((m) => m.method === 'turn/start').length === startsBeforeE + 1, 'exactly one turn/start for the fallen-back notification');
-  ok(E.events().some((e) => e.type === 'response_item' && JSON.stringify(e.payload?.webui_peer || {}).includes('nightly')), 'the message is recorded on the fallback path too (the card still renders)');
+  ok(verdictOf(E.events().some((e) => e.type === 'response_item' && JSON.stringify(e.payload?.webui_peer || {}).includes('nightly'))), 'the message is recorded on the fallback path too (the card still renders)');
   await E.stop();
 }
 {
@@ -1723,14 +1723,14 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
   //       queue decision.
   const R = spawnStub('notif-review', STUB_NOTIF.replace(/__STEERMODE__/g, "'review'"));
   const rRes = () => R.msgs().filter((m) => m.type === 'peer_message_result');
-  ok(await waitFor(() => R.meta()?.threadId === 'th-notif'), 'unsteerable stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => R.meta()?.threadId === 'th-notif')), 'unsteerable stub: the wrapper has a thread');
   R.send({ type: 'chat-input', text: 'work', msgId: 'r0' });
-  ok(await waitFor(() => R.meta()?.activeTurnId === 'turn-1'), 'unsteerable stub: a turn is running');
+  ok(verdictOf(await waitFor(() => R.meta()?.activeTurnId === 'turn-1')), 'unsteerable stub: a turn is running');
   R.send({ type: 'peer-message', text: NOTIF_TEXT, fromName: 'Background Work · nightly', kind: 'notification' });
-  ok(await waitFor(() => rRes().length === 1), 'the notification is answered');
-  ok(rRes()[0].ok === true && rRes()[0].mode === 'queued' && rRes()[0].steerFailed === 'not-steerable' && /review/.test(rRes()[0].steerDetail || ''),
+  ok(verdictOf(await waitFor(() => rRes().length === 1)), 'the notification is answered');
+  ok(rRes()[0].ok === true && rRes()[0].mode === 'queued' && rRes()[0].steerFailed === 'not-steerable' && verdictOf(/review/.test(rRes()[0].steerDetail || '')),
     `an unsteerable turn ⇒ QUEUED, with the refusal named and the server's own words kept (${JSON.stringify(rRes()[0])})`);
-  ok(await waitFor(() => R.lastQueue().some((i) => i.kind === 'peer')), 'and the message really is in the queue (nothing was lost)', JSON.stringify(R.lastQueue()));
+  ok(verdictOf(await waitFor(() => R.lastQueue().some((i) => i.kind === 'peer'))), 'and the message really is in the queue (nothing was lost)', JSON.stringify(R.lastQueue()));
   ok(R.rpc().filter((m) => m.method === 'turn/steer').length === 1, 'the refused steer is tried ONCE, never retried in a loop');
   await R.stop();
 }
@@ -1796,21 +1796,21 @@ process.stdin.on('data', (d) => {
   const recOf = (id) => userRecs().find((r) => r.payload.webui_msg_id === id || r.payload.webui_queue_id === id) || null;
   const retractions = () => R.events().filter((e) => e.type === 'event_msg' && e.payload?.type === 'webui_user_retracted').map((e) => e.payload);
   const rpcOf = (method) => R.rpc().filter((m) => m.method === method);
-  ok(await waitFor(() => R.meta()?.threadId === 'th-r3'), 'r3 stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => R.meta()?.threadId === 'th-r3')), 'r3 stub: the wrapper has a thread');
 
   // (b1) A SEND THE APP-SERVER REFUSES, while idle → turn/start throws.
   R.send({ type: 'chat-input', text: 'boom now', msgId: 'b-1' });
-  ok(await waitFor(() => !!recOf('b-1')), 'a refused send still gets its bubble — the user did type it');
-  ok(await waitFor(() => retractions().some((r) => r.msg_id === 'b-1')), 'and the wrapper RETRACTS it: turn/start threw, so the app-server has no copy to twin with', JSON.stringify(retractions()));
-  ok(/turn\/start failed/.test(retractions().find((r) => r.msg_id === 'b-1')?.reason || ''), 'the retraction says which RPC refused it', JSON.stringify(retractions()));
-  ok(await waitFor(() => R.msgs().some((m) => m.type === 'task_failed')), 'and the failure is still REPORTED (a retraction is about the merge, never a way to go quiet)');
+  ok(verdictOf(await waitFor(() => !!recOf('b-1'))), 'a refused send still gets its bubble — the user did type it');
+  ok(verdictOf(await waitFor(() => retractions().some((r) => r.msg_id === 'b-1'))), 'and the wrapper RETRACTS it: turn/start threw, so the app-server has no copy to twin with', JSON.stringify(retractions()));
+  ok(verdictOf(/turn\/start failed/.test(retractions().find((r) => r.msg_id === 'b-1')?.reason || '')), 'the retraction says which RPC refused it', JSON.stringify(retractions()));
+  ok(verdictOf(await waitFor(() => R.msgs().some((m) => m.type === 'task_failed'))), 'and the failure is still REPORTED (a retraction is about the merge, never a way to go quiet)');
   ok(!R.meta()?.activeTurnId, 'no turn is running after a refused turn/start');
 
   // (a) THE IMAGE MESSAGE: our copy must be the exact inverse of what we SENT.
   const IMG = 'data:image/png;base64,iVBORw0KGgo=';
   R.send({ type: 'chat-input', text: 'look at this', msgId: 'img-1', attachments: [{ type: 'input_image', image_url: IMG }] });
-  ok(await waitFor(() => !!recOf('img-1')), 'the image message has its bubble');
-  ok(await waitFor(() => rpcOf('turn/start').some((m) => JSON.stringify(m.params.input || []).includes('look at this')), 5000), 'and it reached the app-server');
+  ok(verdictOf(await waitFor(() => !!recOf('img-1'))), 'the image message has its bubble');
+  ok(verdictOf(await waitFor(() => rpcOf('turn/start').some((m) => JSON.stringify(m.params.input || []).includes('look at this')), 5000)), 'and it reached the app-server');
   const sent = rpcOf('turn/start').find((m) => JSON.stringify(m.params.input || []).includes('look at this'))?.params?.input || [];
   ok(JSON.stringify(sent) === JSON.stringify([{ type: 'text', text: 'look at this' }, { type: 'image', url: IMG }]),
     'what we SEND is text first, then the attachment (encodeUserInput)', JSON.stringify(sent));
@@ -1831,7 +1831,7 @@ process.stdin.on('data', (d) => {
     const { CodexAdapter } = require(path.join(REPO, 'src/adapters/codex.js'));
     const frame = JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'twin check' }, { type: 'image', source: { media_type: 'image/png', data: 'iVBORw0KGgo=' } }] } });
     R.send({ type: 'chat-input', text: frame, msgId: 'img-2' });
-    ok(await waitFor(() => !!recOf('img-2')), 'the same frame, sent as the client really sends it (a JSON user envelope), reaches the wrapper');
+    ok(verdictOf(await waitFor(() => !!recOf('img-2'))), 'the same frame, sent as the client really sends it (a JSON user envelope), reaches the wrapper');
     const server = CodexAdapter._buildUserPreview(frame, 'img-2');
     ok(JSON.stringify(server.payload.content) === JSON.stringify(recOf('img-2').payload.content),
       'PARITY: the server\'s preview record and the wrapper\'s own record spell one message identically — same order, same blocks',
@@ -1865,8 +1865,8 @@ process.stdin.on('data', (d) => {
   // reads never carried the marker. The retraction names the ID, which both
   // copies carry; the rebuild below proves it on the production scaffold.
   R.send({ type: 'chat-input', text: '/compact', msgId: 'sl-1' });
-  ok(await waitFor(() => !!recOf('sl-1')), '/compact renders as the user bubble it is');
-  ok(await waitFor(() => retractions().some((r) => r.msg_id === 'sl-1' && /slash command/.test(r.reason || ''))),
+  ok(verdictOf(await waitFor(() => !!recOf('sl-1'))), '/compact renders as the user bubble it is');
+  ok(verdictOf(await waitFor(() => retractions().some((r) => r.msg_id === 'sl-1' && /slash command/.test(r.reason || '')))),
     'and its twin claim is RETRACTED — the text never becomes a user message on the app-server', JSON.stringify(retractions()));
   ok(recOf('sl-1').payload.webui_no_commit === undefined && !Object.keys(recOf('sl-1').payload).some((k) => /no_?[Cc]ommit/.test(k)),
     '…and the record itself declares NOTHING (a marker only one of the two copies carries is unreachable)', JSON.stringify(recOf('sl-1').payload));
@@ -1880,34 +1880,34 @@ process.stdin.on('data', (d) => {
     ok(atRetract >= 0 && atCompact >= 0 && atRetract < atCompact,
       '…and it is written BEFORE the command starts running, not after it finishes', `retract@${atRetract} compact_started@${atCompact}`);
   }
-  ok(await waitFor(() => rpcOf('thread/compact/start').length === 1), '…because the wrapper answered it itself (thread/compact/start, no queue add)');
+  ok(verdictOf(await waitFor(() => rpcOf('thread/compact/start').length === 1)), '…because the wrapper answered it itself (thread/compact/start, no queue add)');
   ok(!rpcOf('thread/queue/add').some((m) => JSON.stringify(m.params.input || []).includes('/compact')), 'the text was never queued either');
 
   // (b3) A QUEUED SEND THE APP-SERVER REFUSES.
   R.send({ type: 'chat-input', text: 'qboom please', msgId: 'q-1' });
-  ok(await waitFor(() => !!recOf('q-1')), 'a queued send that throws still has its bubble');
-  ok(await waitFor(() => retractions().some((r) => r.msg_id === 'q-1' && /queue\/add failed/.test(r.reason || ''))), '…and is retracted, naming thread/queue/add', JSON.stringify(retractions()));
+  ok(verdictOf(await waitFor(() => !!recOf('q-1'))), 'a queued send that throws still has its bubble');
+  ok(verdictOf(await waitFor(() => retractions().some((r) => r.msg_id === 'q-1' && /queue\/add failed/.test(r.reason || '')))), '…and is retracted, naming thread/queue/add', JSON.stringify(retractions()));
 
   // (b4) A QUEUED ITEM THE USER REMOVES before it runs.
   R.send({ type: 'chat-input', text: 'to be removed', msgId: 'rm-1' });
-  ok(await waitFor(() => R.lastQueue().some((it) => it.msgId === 'rm-1')), 'the removable message is queued');
-  ok(recOf('rm-1') && recOf('rm-1').payload.webui_no_commit === undefined, 'a NORMAL send declares nothing — it is expected to commit', JSON.stringify(recOf('rm-1')?.payload));
+  ok(verdictOf(await waitFor(() => R.lastQueue().some((it) => it.msgId === 'rm-1'))), 'the removable message is queued');
+  ok(gateOf(recOf('rm-1')) && recOf('rm-1').payload.webui_no_commit === undefined, 'a NORMAL send declares nothing — it is expected to commit', JSON.stringify(recOf('rm-1')?.payload));
   const rmRow = R.lastQueue().find((it) => it.msgId === 'rm-1');
   R.send({ type: 'queue-op', op: 'remove', id: rmRow.id });
-  ok(await waitFor(() => R.ops().some((o) => o.op === 'remove' && o.id === rmRow.id && o.ok)), 'the remove lands');
-  ok(await waitFor(() => retractions().some((r) => r.msg_id === 'rm-1' && /removed from the queue/.test(r.reason || ''))), '…and the bubble it wrote is retracted: it left the queue without running', JSON.stringify(retractions()));
+  ok(verdictOf(await waitFor(() => R.ops().some((o) => o.op === 'remove' && o.id === rmRow.id && o.ok))), 'the remove lands');
+  ok(verdictOf(await waitFor(() => retractions().some((r) => r.msg_id === 'rm-1' && /removed from the queue/.test(r.reason || '')))), '…and the bubble it wrote is retracted: it left the queue without running', JSON.stringify(retractions()));
 
   // (b5) STOP: the sweep drops what is queued, so the same rule applies there.
   R.send({ type: 'chat-input', text: 'stop me', msgId: 'st-1' });
-  ok(await waitFor(() => R.lastQueue().some((it) => it.msgId === 'st-1')), 'one more message is queued');
+  ok(verdictOf(await waitFor(() => R.lastQueue().some((it) => it.msgId === 'st-1'))), 'one more message is queued');
   R.send({ type: 'interrupt' });
-  ok(await waitFor(() => retractions().some((r) => r.msg_id === 'st-1' && /Stop/.test(r.reason || ''))), 'Stop clears the queue → that bubble is retracted too', JSON.stringify(retractions()));
+  ok(verdictOf(await waitFor(() => retractions().some((r) => r.msg_id === 'st-1' && /Stop/.test(r.reason || '')))), 'Stop clears the queue → that bubble is retracted too', JSON.stringify(retractions()));
   // SIX, not five: the parity frame in (a2) was queued behind the running
   // turn, so Stop swept it too — the same rule, arrived at from a leg that was
   // not written to test it — and round 4 added the slash command to this list
   // (its write-time declaration was unreachable in production).
   ok(retractions().length === 6 && new Set(retractions().map((r) => r.msg_id)).size === 6
-    && ['b-1', 'sl-1', 'q-1', 'rm-1', 'img-2', 'st-1'].every((id) => retractions().some((r) => r.msg_id === id)),
+    && verdictOf(['b-1', 'sl-1', 'q-1', 'rm-1', 'img-2', 'st-1'].every((id) => retractions().some((r) => r.msg_id === id))),
     `exactly one retraction per submission that never landed, six of them (${retractions().length})`, JSON.stringify(retractions().map((r) => r.msg_id)));
   ok(!retractions().some((r) => r.msg_id === 'img-1'),
     'and NONE for the message that did land', JSON.stringify(retractions().map((r) => r.msg_id)));
@@ -1937,7 +1937,7 @@ process.stdin.on('data', (d) => {
       const p = CodexAdapter._buildUserPreview(text, id);
       return { ...p, timestamp: new Date(Date.parse(rec.timestamp) - 20).toISOString() };
     });
-    ok(previews.length === 6 && previews.every((p) => p && p.payload.webui_msg_id && p.payload.content.length),
+    ok(previews.length === 6 && verdictOf(previews.every((p) => p && p.payload.webui_msg_id && p.payload.content.length)),
       'the server preview producer is in the scaffold: one per chat-input, built by the real adapter from the real frame', JSON.stringify(previews.map((p) => p.payload.webui_msg_id)));
     const ours = [...previews, ...wrapperRecs];
     const base = Date.parse(userRecs()[0].timestamp);
@@ -2038,10 +2038,10 @@ process.stdin.on('data', (d) => {
 `;
 {
   const C = spawnStub('config', STUB_CONFIG);
-  ok(await waitFor(() => C.meta()?.threadId === 'th-cfg'), 'config stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => C.meta()?.threadId === 'th-cfg')), 'config stub: the wrapper has a thread');
   ok(C.meta()?.caps?.permissionRules === true, 'the wrapper ADVERTS caps.permissionRules in its sidecar (the per-process skew gate the server reads)');
   C.send({ type: 'read-permission-rules', requestId: 'rq-1' });
-  ok(await waitFor(() => C.msgs().some((p) => p.type === 'permission_rules')), 'the verb produces a `permission_rules` event');
+  ok(verdictOf(await waitFor(() => C.msgs().some((p) => p.type === 'permission_rules'))), 'the verb produces a `permission_rules` event');
   const ans = C.msgs().filter((p) => p.type === 'permission_rules').slice(-1)[0];
   ok(ans.ok === true && ans.requestId === 'rq-1', 'the answer carries the caller\'s requestId (correlated, never "the next record wins")', JSON.stringify(ans).slice(0, 140));
   const rd = C.rpc().filter((m) => m.method === 'config/read');
@@ -2050,11 +2050,11 @@ process.stdin.on('data', (d) => {
   ok(!C.rpc().some((m) => /^config\/(value\/write|batchWrite)$/.test(m.method)),
     'READ-ONLY: no config WRITE verb is ever constructed (§4.5 — expectedVersion turns a careless write into data loss)');
   const keys = Object.keys(ans.config || {});
-  ok(keys.includes('approval_policy') && keys.includes('sandbox_mode') && !keys.includes('model') && !keys.includes('plugins'),
+  ok(gateOf(keys.includes('approval_policy')) && gateOf(keys.includes('sandbox_mode')) && !keys.includes('model') && !keys.includes('plugins'),
     'ONLY the permission-bearing keys travel — the user\'s model/provider/plugin world stays out of an agent-visible journal', JSON.stringify(keys));
-  ok(ans.config.projects && Object.keys(ans.config.projects).length === 1 && ans.config.projects[C.dir],
+  ok(gateOf(ans.config.projects) && Object.keys(ans.config.projects).length === 1 && verdictOf(ans.config.projects[C.dir]),
     'only THIS session\'s directory trust level travels (a real store had 378 origin keys, hundreds of them other people\'s projects)', JSON.stringify(Object.keys(ans.config.projects || {})));
-  ok(Object.keys(ans.origins || {}).every((k) => !/^projects\./.test(k) || k.includes(C.dir)),
+  ok(verdictOf(Object.keys(ans.origins || {}).every((k) => !/^projects\./.test(k) || k.includes(C.dir))),
     'and the same for `origins` — no other project\'s path leaks through the origin map', JSON.stringify(Object.keys(ans.origins || {})));
   // THE ROUND-4 FINDING, on the wrapper's half. codex keys `origins` by LEAF
   // path for a table-valued key (measured on a real 0.153.4: the top-level key
@@ -2071,12 +2071,12 @@ process.stdin.on('data', (d) => {
     const PRmod = require(path.join(REPO, 'src/permission-rules.js'));
     const rec = PRmod.codexRulesRecord({ config: ans.config, origins: ans.origins, layers: ans.layers }, { cwd: C.dir, scope: 'session' });
     const sf = rec.layers.find((l) => l.id === 'sessionFlags');
-    ok(sf && sf.rules.some((r) => r.key === 'sandbox_workspace_write.network_access' && r.value === 'true')
+    ok(gateOf(sf) && gateOf(sf.rules.some((r) => r.key === 'sandbox_workspace_write.network_access' && r.value === 'true'))
       && !rec.layers.flatMap((l) => l.rules).some((r) => r.key.startsWith('sandbox_workspace_write') && r.note === PRmod.CODEX_DEFAULT_NOTE),
       'END TO END: the answer this wrapper emits makes the SESSION layer own the flag it set — never "not set in any layer — the packaged default"',
       JSON.stringify(rec.layers.map((l) => [l.id, l.rules.map((r) => r.key)])));
   }
-  ok((ans.layers || []).length === 2 && (ans.layers || []).every((l) => !('config' in l)) && ans.layers.some((l) => l.name?.type === 'sessionFlags'),
+  ok((ans.layers || []).length === 2 && gateOf((ans.layers || []).every((l) => !('config' in l))) && verdictOf(ans.layers.some((l) => l.name?.type === 'sessionFlags')),
     'layers travel WITHOUT their config blobs (identity + file + version only — never a second copy of the config)', JSON.stringify(ans.layers));
   // (⑧'s PARITY leg — the wrapper's permission keys vs the PURE module — MOVED to the fast scripts/test-codex-p2-wrapper-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   await C.stop();
@@ -2131,9 +2131,9 @@ process.stdin.on('data', (d) => {
   const PRmod = require(path.join(REPO, 'src/permission-rules.js'));
   // RUNG 2 — the drop fits: the answer goes out, and it SAYS the origin map is gone.
   const B = spawnStub('cfgbig', STUB_BIG.replace(/__NROOTS__/g, '250'));
-  ok(await waitFor(() => B.meta()?.threadId === 'th-big'), 'big-config stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => B.meta()?.threadId === 'th-big')), 'big-config stub: the wrapper has a thread');
   B.send({ type: 'read-permission-rules', requestId: 'rq-big' });
-  ok(await waitFor(() => B.msgs().some((p) => p.type === 'permission_rules')), 'the verb answers');
+  ok(verdictOf(await waitFor(() => B.msgs().some((p) => p.type === 'permission_rules'))), 'the verb answers');
   const a2 = B.msgs().filter((p) => p.type === 'permission_rules').slice(-1)[0];
   ok(a2.ok === true && a2.truncated === true && a2.originsDropped === true && Object.keys(a2.origins || {}).length === 0,
     'RUNG 2: over the cap, the wrapper drops `origins` and SAYS SO (`originsDropped`) — a lost fact is reported, never silently re-asserted',
@@ -2143,29 +2143,29 @@ process.stdin.on('data', (d) => {
   {
     const rec = PRmod.codexRulesRecord({ config: a2.config, origins: a2.origins, layers: a2.layers, originsDropped: a2.originsDropped === true }, { cwd: B.dir, scope: 'session' });
     const rules = rec.layers.flatMap((l) => l.rules.map((r) => ({ ...r, layer: l.id })));
-    ok(rules.length > 0 && rules.every((r) => r.layer === 'originUnknown' && r.note === PRmod.CODEX_CAPPED_NOTE),
+    ok(rules.length > 0 && verdictOf(rules.every((r) => r.layer === 'originUnknown' && r.note === PRmod.CODEX_CAPPED_NOTE)),
       'END TO END: the capped answer renders as "origin unknown — the answer was capped", NOT as "the packaged default" (the finding, measured on the consequence)',
       JSON.stringify(rules.map((r) => [r.layer, r.note])));
     // NEGATIVE CONTROL: the pre-fix payload — the SAME bytes minus the flag —
     // is exactly what produced the false claim.
     const pre = PRmod.codexRulesRecord({ config: a2.config, origins: {}, layers: a2.layers }, { cwd: B.dir, scope: 'session' });
-    ok(pre.layers.flatMap((l) => l.rules).every((r) => r.note === PRmod.CODEX_DEFAULT_NOTE),
+    ok(verdictOf(pre.layers.flatMap((l) => l.rules).every((r) => r.note === PRmod.CODEX_DEFAULT_NOTE)),
       'NEGATIVE CONTROL: the pre-fix payload (same bytes, no `originsDropped`) still yields the false "packaged default" attribution — so the flag is what fixed it');
   }
   await B.stop();
 
   // RUNG 3 — the drop is NOT enough: refuse, with the byte count. A cap is a cap.
   const G = spawnStub('cfghuge', STUB_BIG.replace(/__NROOTS__/g, '700'));
-  ok(await waitFor(() => G.meta()?.threadId === 'th-big'), 'huge-config stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => G.meta()?.threadId === 'th-big')), 'huge-config stub: the wrapper has a thread');
   G.send({ type: 'read-permission-rules', requestId: 'rq-huge' });
-  ok(await waitFor(() => G.msgs().some((p) => p.type === 'permission_rules')), 'the verb answers');
+  ok(verdictOf(await waitFor(() => G.msgs().some((p) => p.type === 'permission_rules'))), 'the verb answers');
   const a3 = G.msgs().filter((p) => p.type === 'permission_rules').slice(-1)[0];
-  ok(a3.ok === false && a3.reason === 'read-failed' && /over the 32768-byte answer cap/.test(a3.detail || '') && /\d{5}/.test(a3.detail || ''),
+  ok(a3.ok === false && a3.reason === 'read-failed' && gateOf(/over the 32768-byte answer cap/.test(a3.detail || '')) && verdictOf(/\d{5}/.test(a3.detail || '')),
     'RUNG 3: still over the cap after the drop ⇒ an HONEST typed refusal carrying the byte count — never an oversized line into the agent-visible journal',
     JSON.stringify(a3).slice(0, 200));
-  ok(a3.requestId === 'rq-huge' && PRmod.UNAVAILABLE_REASONS.includes(a3.reason),
+  ok(a3.requestId === 'rq-huge' && verdictOf(PRmod.UNAVAILABLE_REASONS.includes(a3.reason)),
     '…correlated to the caller and speaking a DECLARED reason code (the reader branches on the code, not the sentence)');
-  ok(G.events().every((e) => Buffer.byteLength(JSON.stringify(e), 'utf8') <= CAP),
+  ok(verdictOf(G.events().every((e) => Buffer.byteLength(JSON.stringify(e), 'utf8') <= CAP)),
     'MEASURED: no line the wrapper emitted for this read is over the cap (the old ladder emitted the oversized payload anyway)',
     String(Math.max(...G.events().map((e) => Buffer.byteLength(JSON.stringify(e), 'utf8')))));
   await G.stop();
@@ -2183,19 +2183,19 @@ process.stdin.on('data', (d) => {
 {
   const before = events().filter((e) => e.payload?.type === 'task_failed').length;
   sendLine({ type: 'chat-input', text: 'a turn that will hit the wall', msgId: 'm-wall' });
-  ok(await waitFor(() => !!readMeta()?.activeTurnId), 'a turn is running to be walled', JSON.stringify(readMeta()?.activeTurnId));
+  ok(verdictOf(await waitFor(() => !!readMeta()?.activeTurnId)), 'a turn is running to be walled', JSON.stringify(readMeta()?.activeTurnId));
   const walledTurn = readMeta().activeTurnId;
   fs.writeFileSync(failTurnFile, '1');
-  ok(await waitFor(() => events().filter((e) => e.payload?.type === 'task_failed').length > before), 'a failed turn/completed becomes a task_failed record');
+  ok(verdictOf(await waitFor(() => events().filter((e) => e.payload?.type === 'task_failed').length > before)), 'a failed turn/completed becomes a task_failed record');
   const tf = events().filter((e) => e.payload?.type === 'task_failed').slice(-1)[0].payload;
-  ok(/hit your usage limit/.test(tf.error || ''), 'it carries the CLI\'s own sentence (the record used to say nothing at all)', JSON.stringify(tf));
+  ok(verdictOf(/hit your usage limit/.test(tf.error || '')), 'it carries the CLI\'s own sentence (the record used to say nothing at all)', JSON.stringify(tf));
   ok(tf.codexErrorInfo === 'usageLimitExceeded', '…and the TYPED enum off params.turn.error — the whole point, since the classifier keys on it', JSON.stringify(tf));
   // …and the harness's classifier, unchanged, now calls it what it is. This is
   // the seam every producer goes through, so proving it here proves the arm.
   {
     const cq = require(path.join(REPO, 'src/harnesses/codex-quota.js'));
     const sig = cq.signalFromStream({ type: 'event_msg', payload: tf });
-    ok(sig && sig.kind === 'exhausted', 'the codex QuotaSignalSource classifies THIS record as exhaustion (it is what arms auto-resume)', JSON.stringify(sig).slice(0, 160));
+    ok(gateOf(sig) && sig.kind === 'exhausted', 'the codex QuotaSignalSource classifies THIS record as exhaustion (it is what arms auto-resume)', JSON.stringify(sig).slice(0, 160));
     // read the report only after checking it EXISTS: a classifier that refused
     // deserves a red line, not a TypeError that kills the rest of the file
     ok(sig?.resetsAtSec > Math.floor(Date.now() / 1000), '…with a reset read out of the CLI\'s prose, because the record states none', sig ? new Date(sig.resetsAtSec * 1000).toISOString() : 'no signal');
@@ -2261,23 +2261,23 @@ process.stdin.on('data', (d) => {
   try { fs.unlinkSync(pingFile); } catch { }
   const R = spawnStub('resync', STUB_RESYNC.replace(/__PING__/g, JSON.stringify(pingFile)));
   const ping = () => fs.writeFileSync(pingFile, '1');
-  ok(await waitFor(() => R.meta()?.threadId === 'th-resync'), 'resync stub: the wrapper has a thread');
+  ok(verdictOf(await waitFor(() => R.meta()?.threadId === 'th-resync')), 'resync stub: the wrapper has a thread');
 
   // THE ADVERT, from the file the wrapper itself writes. The server gates the
   // ask on this — an older codex wrapper drops an unknown stdin verb silently
   // and an older ACP wrapper answers it with a VISIBLE error card, so a
   // process that cannot answer must never be asked (2.361.1/2.364.1).
-  ok(await waitFor(() => R.meta()?.caps?.queueResync === true),
+  ok(verdictOf(await waitFor(() => R.meta()?.caps?.queueResync === true)),
     'the RUNNING wrapper adverts caps.queueResync in its own sidecar (the per-PROCESS gate the server reads)', JSON.stringify(R.meta()?.caps));
 
   // A turn, one queued message, then remove it — the incident's own shape.
   R.send({ type: 'chat-input', text: 'go', msgId: 'r0' });
-  ok(await waitFor(() => R.meta()?.activeTurnId === 'turn-1'), 'resync stub: a turn is running');
+  ok(verdictOf(await waitFor(() => R.meta()?.activeTurnId === 'turn-1')), 'resync stub: a turn is running');
   R.send({ type: 'chat-input', text: 'the message that will be removed', msgId: 'r1' });
-  ok(await waitFor(() => R.lastQueue().length === 1), 'one message is queued and published', JSON.stringify(R.lastQueue()));
+  ok(verdictOf(await waitFor(() => R.lastQueue().length === 1)), 'one message is queued and published', JSON.stringify(R.lastQueue()));
   const qid = R.lastQueue()[0].id;
   R.send({ type: 'queue-op', op: 'remove', id: qid });
-  ok(await waitFor(() => R.lastQueue().length === 0), 'it is removed and the EMPTY queue is published once', JSON.stringify(R.queues().map((q) => q.items.length)));
+  ok(verdictOf(await waitFor(() => R.lastQueue().length === 0)), 'it is removed and the EMPTY queue is published once', JSON.stringify(R.queues().map((q) => q.items.length)));
 
   // THE MECHANISM, as a control: the app-server's own "queue changed" signal
   // over an UNCHANGED queue publishes NOTHING. This is why a restarted server
@@ -2291,13 +2291,13 @@ process.stdin.on('data', (d) => {
 
   // …and the verb DOES.
   R.send({ type: 'queue-resync' });
-  ok(await waitFor(() => R.queues().length > beforePing),
+  ok(verdictOf(await waitFor(() => R.queues().length > beforePing)),
     'THE FIX: `queue-resync` re-states the queue even though nothing changed', `${R.queues().length} vs ${beforePing}`);
   {
     const last = R.queues().slice(-1)[0];
-    ok(Array.isArray(last.items) && last.items.length === 0,
+    ok(gateOf(Array.isArray(last.items)) && last.items.length === 0,
       'and the answer is the EMPTY queue — the whole point (an empty answer is what a rebuilt normalizer cannot produce for itself)', JSON.stringify(last));
-    ok(Array.isArray(last.verbs) && last.verbs.includes('steer'),
+    ok(gateOf(Array.isArray(last.verbs)) && verdictOf(last.verbs.includes('steer')),
       'it is an ORDINARY publication: `verbs` rides it like every other, so the client re-learns the controls in the same frame', JSON.stringify(last.verbs));
   }
   // NO RPC: the answer is what this wrapper already believes (every app-server
@@ -2314,10 +2314,10 @@ process.stdin.on('data', (d) => {
   // pending and the client is showing nothing until this lands.
   {
     R.send({ type: 'chat-input', text: 'still queued', msgId: 'r2' });
-    ok(await waitFor(() => R.lastQueue().length === 1), 'a second message is queued');
+    ok(verdictOf(await waitFor(() => R.lastQueue().length === 1)), 'a second message is queued');
     const n = R.queues().length;
     R.send({ type: 'queue-resync' });
-    ok(await waitFor(() => R.queues().length > n), 'a resync over a NON-empty queue publishes as well');
+    ok(verdictOf(await waitFor(() => R.queues().length > n)), 'a resync over a NON-empty queue publishes as well');
     ok((R.queues().slice(-1)[0].items || []).length === 1, '…and it carries the pending item, so the strip comes back', JSON.stringify(R.queues().slice(-1)[0].items));
   }
   await R.stop();
@@ -2329,7 +2329,7 @@ process.stdin.on('data', (d) => {
   {
     const src = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
     const BRANCH = "  if (msg.type === 'queue-resync') {\n    resyncQueue();\n    return;\n  }\n";
-    ok(src.includes(BRANCH), 'the pre-fix control patches the REAL branch (its text is present in the product source)');
+    ok(verdictOf(src.includes(BRANCH)), 'the pre-fix control patches the REAL branch (its text is present in the product source)');
     const pd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxp2-resync-pre-'));
     const pre = path.join(pd, 'codex-chat-wrapper.prefix.js');
     fs.writeFileSync(pre, editAnchor(src, BRANCH, '', "data/bin/codex-chat-wrapper.js"));
@@ -2341,7 +2341,7 @@ process.stdin.on('data', (d) => {
     const pq = () => po.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } })
       .filter((e) => e && e.type === 'event_msg' && e.payload?.type === 'queue_changed');
     const pmeta = () => { try { return JSON.parse(fs.readFileSync(pm, 'utf8')); } catch { return null; } };
-    ok(await waitFor(() => pmeta()?.threadId === 'th-resync'), 'PRE-FIX control: the patched wrapper boots');
+    ok(verdictOf(await waitFor(() => pmeta()?.threadId === 'th-resync')), 'PRE-FIX control: the patched wrapper boots');
     const n0 = pq().length;
     pp.stdin.write(JSON.stringify({ type: 'queue-resync' }) + '\n');
     await sleep(800);
@@ -2353,4 +2353,4 @@ process.stdin.on('data', (d) => {
 
 await stopWrapper(w, { dir });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

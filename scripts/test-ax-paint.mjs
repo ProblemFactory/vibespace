@@ -43,7 +43,7 @@ import { FILE_ICONS, UI_ICONS } from '../src/lib/icons.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf-8');
 const lib = path.join(repo, 'src', 'lib');
 const libFiles = fs.readdirSync(lib).filter((f) => f.endsWith('.js')).sort();
@@ -51,7 +51,7 @@ const libFiles = fs.readdirSync(lib).filter((f) => f.endsWith('.js')).sort();
 // ── ① icons.js ──
 {
   const src = read('src/lib/icons.js');
-  ok(/const _s = \(d, opts = \{\}\) => \{[\s\S]*?return `<svg aria-hidden="true" focusable="false" style=/.test(src),
+  ok(verdictOf(/const _s = \(d, opts = \{\}\) => \{[\s\S]*?return `<svg aria-hidden="true" focusable="false" style=/.test(src)),
     '① icons.js `_s()` emits aria-hidden="true" focusable="false" on the <svg>');
   const all = [...Object.entries(FILE_ICONS).map(([k, v]) => ['FILE_ICONS.' + k, v]), ...Object.entries(UI_ICONS).map(([k, v]) => ['UI_ICONS.' + k, v])];
   const bad = all.filter(([, v]) => !(typeof v === 'string' && /^<svg [^>]*aria-hidden="true"[^>]*focusable="false"/.test(v)));
@@ -166,13 +166,13 @@ function census(dir) {
   const unmarked = sites.filter((s) => !s.marked);
   console.log(`  spinner sites: ${sites.map((s) => `${s.f}:${s.line}`).join(', ')}`);
   ok(sites.length >= 7 && unmarked.length === 0, `③ every spinner creation site is aria-hidden (${sites.length} sites, ${unmarked.length} unmarked)`, unmarked.map((s) => `${s.f}:${s.line}`).join(', '));
-  ok(/for \(const dir of \['n','s','e','w','ne','nw','se','sw'\]\) \{\n\s*const h = document\.createElement\('div'\); h\.className = `resize-handle resize-\$\{dir\}`; h\.dataset\.dir = dir; h\.setAttribute\('aria-hidden', 'true'\); el\.appendChild\(h\);/.test(win),
+  ok(verdictOf(/for \(const dir of \['n','s','e','w','ne','nw','se','sw'\]\) \{\n\s*const h = document\.createElement\('div'\); h\.className = `resize-handle resize-\$\{dir\}`; h\.dataset\.dir = dir; h\.setAttribute\('aria-hidden', 'true'\); el\.appendChild\(h\);/.test(win)),
     '③ window.js marks each of the 8 resize handles aria-hidden as it creates it');
-  ok(/this\._minimap\.className = 'chat-minimap hidden';[\s\S]{0,600}?this\._minimap\.setAttribute\('aria-hidden', 'true'\);\s*container\.appendChild\(this\._minimap\);/.test(mm),
+  ok(verdictOf(/this\._minimap\.className = 'chat-minimap hidden';[\s\S]{0,600}?this\._minimap\.setAttribute\('aria-hidden', 'true'\);\s*container\.appendChild\(this\._minimap\);/.test(mm)),
     '③ chat-minimap.js marks the strip aria-hidden before it is appended');
-  ok(/const glyph = document\.createElement\('span'\);\s*glyph\.className = 'tab-split-glyph';\s*glyph\.setAttribute\('aria-hidden', 'true'\);\s*tabBar\.appendChild\(glyph\);/.test(tg),
+  ok(verdictOf(/const glyph = document\.createElement\('span'\);\s*glyph\.className = 'tab-split-glyph';\s*glyph\.setAttribute\('aria-hidden', 'true'\);\s*tabBar\.appendChild\(glyph\);/.test(tg)),
     '③ tab-group.js marks the split glyph (the divider\'s mirror between the pane tabs) aria-hidden before it is appended');
-  ok(/container\.appendChild\(this\._tocBtn\);/.test(mm) && !/this\._minimap\.appendChild\(this\._tocBtn\)/.test(mm) && /this\._tocBtn\.title = t\('Your messages \(outline\)'\);/.test(mm),
+  ok(gateOf(/container\.appendChild\(this\._tocBtn\);/.test(mm)) && !/this\._minimap\.appendChild\(this\._tocBtn\)/.test(mm) && verdictOf(/this\._tocBtn\.title = t\('Your messages \(outline\)'\);/.test(mm)),
     '③ the TOC button is a SIBLING of the strip (appended to the container, never inside the hidden subtree) and keeps its title');
 }
 
@@ -203,8 +203,8 @@ function census(dir) {
   // '†' left it in 2.369.346 (lane task-group-context): the Task Group window's own Activity list (its `.task-detail-progress-exp`
   // summary's generated ` †`) was deleted — the window's 活动记录 tab is the log viewer, whose † is a `.task-log-dagger` element
   const known = ['\\25B8', '\\25BE', '\\25B4', '\\00B7', '\\200e', '\\25C2', '\\1F464', '\\2699', '▸', '▾'];
-  ok(known.every((k) => glyphRules.some((g) => g.lit.includes(k))), `④ the census reaches every glyph family the design named (${known.join(' ')})`);
-  ok(isGlyph("'\\25B8  '") && isGlyph("'▸ '") && isGlyph("'\\200e'") && !isGlyph("'Collapse'") && !isGlyph("'Extra row — drag elements here'") && !isGlyph("''"),
+  ok(verdictOf(known.every((k) => glyphRules.some((g) => g.lit.includes(k)))), `④ the census reaches every glyph family the design named (${known.join(' ')})`);
+  ok(gateOf(isGlyph("'\\25B8  '")) && gateOf(isGlyph("'▸ '")) && gateOf(isGlyph("'\\200e'")) && !isGlyph("'Collapse'") && !isGlyph("'Extra row — drag elements here'") && !isGlyph("''"),
     '④ NEGATIVE CONTROL: the glyph classifier takes escapes / symbols / the LRM and refuses words, a sentence with a dash, and the empty string');
 }
 
@@ -218,18 +218,18 @@ function census(dir) {
 {
   const rail = read('src/lib/sidebar-rail.js');
   const helper = /const item = \(id, label, onClick\) => \{([\s\S]*?)return b;\s*\};/.exec(rail)?.[1] || '';
-  ok(/b\.innerHTML = RAIL_ICONS\[id\]/.test(helper) && /b\.setAttribute\('aria-label', label\)/.test(helper) && !/b\.title\s*=/.test(helper),
+  ok(gateOf(/b\.innerHTML = RAIL_ICONS\[id\]/.test(helper)) && gateOf(/b\.setAttribute\('aria-label', label\)/.test(helper)) && !/b\.title\s*=/.test(helper),
     '⑥ the rail item helper names every icon-only rail button: aria-label = its label (the custom data-tip stays the only visible tip)', helper.trim().slice(0, 240));
-  ok(/item\('browser', tr\('Agent browser'\), /.test(rail) && !/item\('browser', tr\('Browser profiles'\)/.test(rail), "⑥ the rail's browser item is named 'Agent browser' (the agent's face), never 'Browser profiles'");
+  ok(gateOf(/item\('browser', tr\('Agent browser'\), /.test(rail)) && !/item\('browser', tr\('Browser profiles'\)/.test(rail), "⑥ the rail's browser item is named 'Agent browser' (the agent's face), never 'Browser profiles'");
   const html = read('public/index.html');
   const btn = /<button id="btn-browser"[^>]*>([\s\S]*?)<\/button>/.exec(html)?.[1] || '';
-  ok(/<span data-i18n>Web view<\/span>/.test(btn) && /<circle cx="8" cy="8" r="6"\/>/.test(btn), "⑥ the toolbar globe is named by its visible text 'Web view' (and keeps the globe — the web view's alone)", btn.slice(-80));
+  ok(gateOf(/<span data-i18n>Web view<\/span>/.test(btn)) && verdictOf(/<circle cx="8" cy="8" r="6"\/>/.test(btn)), "⑥ the toolbar globe is named by its visible text 'Web view' (and keeps the globe — the web view's alone)", btn.slice(-80));
   const ops = read('src/lib/browser-live-window.js');
-  ok(/openBtn\.title = t\('Open this URL in a web view'\)/.test(ops), "⑥ the live view's icon-only hand-off button is titled 'Open this URL in a web view'");
+  ok(verdictOf(/openBtn\.title = t\('Open this URL in a web view'\)/.test(ops)), "⑥ the live view's icon-only hand-off button is titled 'Open this URL in a web view'");
 }
 
 // ── ⑤ ci.mjs ──
-ok(/\{ name: 'test-ax-paint', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs')), '⑤ ci.mjs carries test-ax-paint in the fast tier');
+ok(verdictOf(/\{ name: 'test-ax-paint', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs'))), '⑤ ci.mjs carries test-ax-paint in the fast tier');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

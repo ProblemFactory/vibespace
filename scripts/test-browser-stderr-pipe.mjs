@@ -16,7 +16,7 @@ const BS = require('../src/browser-stuck.js');
 const VERBS = require('../src/browser-verbs.js');
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const S = scratch('bsp'); fs.mkdirSync(S, { recursive: true });
 
@@ -75,7 +75,7 @@ const noisy = path.join(S, 'noisy.sh');
 fs.writeFileSync(noisy, '#!/bin/sh\ni=0\nwhile [ $i -lt 2000 ]; do echo "[1:1:1010/000000.000000:ERROR:noisy.cc(1)] a log line of about a hundred bytes ........................." >&2; i=$((i+1)); done\n'); fs.chmodSync(noisy, 0o755);
 const runNoisy = (read) => new Promise((resolve) => { const c = spawn(noisy, [], { stdio: ['ignore', 'ignore', 'pipe'] }); let n = 0, done = false; if (read) c.stderr.on('data', (d) => { n += d.length; }); c.on('exit', (code) => { done = true; resolve({ done: true, code, n, c }); }); setTimeout(() => { if (!done) resolve({ done: false, n, c }); }, 3000); });
 const withReader = await runNoisy(true);
-ok(withReader.done && withReader.code === 0 && withReader.n > 150000, `the rule in miniature: a child writing ~200 KB to a stderr pipe WITH a reader ends (${withReader.n} bytes read — what 0.38.2's drain thread does)`);
+ok(gateOf(withReader.done) && withReader.code === 0 && withReader.n > 150000, `the rule in miniature: a child writing ~200 KB to a stderr pipe WITH a reader ends (${withReader.n} bytes read — what 0.38.2's drain thread does)`);
 const unreadPipe = await runNoisy(false);
 ok(!unreadPipe.done, 'CONTROL: the SAME child on an UNREAD stderr pipe is still blocked after 3 s (64 KB, then every write waits — 0.38.1\'s Chrome in miniature)');
 try { unreadPipe.c.kill('SIGKILL'); } catch { }
@@ -93,14 +93,14 @@ const fake = { readlinkSync: (p) => (p === '/proc/77/fd/2' ? 'pipe:[9]' : (() =>
 const pf = await BE.probeStderrPipe(77, { fsImpl: fake, sleep: async () => { } });
 ok(pf.fd2 === 'pipe:[9]' && pf.wchans.length === 2 && BE.stderrPipeVerdict(pf) === 'stderr-pipe-full', 'the /proc probe reads fd 2 + two wchan samples', pf);
 ok(BE.stderrPipeVerdict(await BE.probeStderrPipe(process.pid, { gapMs: 10 })) === null, 'this process (fd 2 not a full pipe) ⇒ null on the real /proc');
-ok(/stderr-pipe-full — Chrome pid 77 is blocked writing its log into pipe:\[9\] that nothing reads \(its daemon runs the browser driver 0\.38\.1; 0\.38\.2 drains it\) — Restart runs it on 0\.38\.2/.test(BE.stderrPipeLine({ id: 'bp-1', label: 'w', pid: 77, fd2: 'pipe:[9]' })), 'the journal line names the pid, the pipe and the cause');
+ok(verdictOf(/stderr-pipe-full — Chrome pid 77 is blocked writing its log into pipe:\[9\] that nothing reads \(its daemon runs the browser driver 0\.38\.1; 0\.38\.2 drains it\) — Restart runs it on 0\.38\.2/.test(BE.stderrPipeLine({ id: 'bp-1', label: 'w', pid: 77, fd2: 'pipe:[9]' }))), 'the journal line names the pid, the pipe and the cause');
 
 // ═══ ④ THE PIN + THE KEEPER WIRING + THE WORDS ═══
 console.log('— ④ the pin, the keeper wiring, the panel\'s words');
 const cmpV = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 ok(BE.FIXED_IN === '0.38.2' && cmpV(VERBS.AGENT_BROWSER_CLI.table, BE.FIXED_IN) >= 0, `the pinned driver (${VERBS.AGENT_BROWSER_CLI.table}) is at least the version that drains Chrome's stderr (${BE.FIXED_IN})`);
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-ok(JSON.stringify(pkg).includes(`agent-browser@${VERBS.AGENT_BROWSER_CLI.table}`) && fs.readFileSync(path.join(ROOT, 'deploy/docker/Dockerfile'), 'utf8').includes(`agent-browser@${VERBS.AGENT_BROWSER_CLI.table}`), 'package.json\'s install line and the Dockerfile name the same pin');
+ok(gateOf(JSON.stringify(pkg).includes(`agent-browser@${VERBS.AGENT_BROWSER_CLI.table}`)) && verdictOf(fs.readFileSync(path.join(ROOT, 'deploy/docker/Dockerfile'), 'utf8').includes(`agent-browser@${VERBS.AGENT_BROWSER_CLI.table}`)), 'package.json\'s install line and the Dockerfile name the same pin');
 const KS = textOf(path.join(ROOT, 'src/server/browser-keeper.js'));
 // B-1789 cure (主开发 11:12Z — «THE SWITCHES LIVE WHERE EVERY LAUNCH ROAD PASSES, AND A CENSUS DERIVES THE ROADS»): a LAUNCH ROAD is
 // any src code that marks a launch (withKeeperMark / keeperMarkArg — every VibeSpace launch carries its mark, lane H verify r4),
@@ -146,7 +146,7 @@ function launchRoads(files) {
 const srcTexts = srcFiles.map((f) => ({ rel: path.relative(ROOT, f), text: textOf(f) }));
 const LR = launchRoads(srcTexts);
 const roadFiles = [...new Set(LR.roads.map((r) => r.where.split(':')[0]))].sort();
-ok(LR.bad.length === 0 && LR.roads.length >= 10 && ['src/browser-profiles.js', 'src/server/browser-env.js', 'src/server/browser-keeper.js'].every((f) => roadFiles.includes(f)) && LR.roads.some((r) => /^argv road/.test(r.call)),
+ok(LR.bad.length === 0 && LR.roads.length >= 10 && gateOf(['src/browser-profiles.js', 'src/server/browser-env.js', 'src/server/browser-keeper.js'].every((f) => roadFiles.includes(f))) && verdictOf(LR.roads.some((r) => /^argv road/.test(r.call))),
   `B-1789 cure, THE CENSUS OF LAUNCH ROADS (derived from ${srcTexts.length} src files: ${LR.roads.length} roads in ${roadFiles.join(', ')}): every one passes THE LAUNCH TAIL — the mark and the switches are composed in launchTail alone, the argv road carries QUIET_LOG_ARGS, a switch turned off names its stamp`, LR.bad.length ? LR.bad : LR.roads.map((r) => `${r.where} ${r.call}`));
 // its RED controls: three planted roads (a new src file), each named by file:line
 const plant = (code) => launchRoads([{ rel: 'src/server/browser-planted.js', text: `'use strict';\n${code}\n` }]).bad; // judged as a file beside the real ones (a road's verdict reads its own file only)
@@ -155,22 +155,22 @@ ok(plant("  const argv = [dir, B.keeperMarkArg(id), url];").length === 1, 'CONTR
 ok(plant("  cfg.args = B.launchTail(cfg.args, key, { quiet: false });").length === 1 && plant("  log.warn(`it carries ${B.keeperMarkArg(id)}`); cfg.args = B.launchTail(cfg.args, key, { quiet: quietLogFor(kind, key) });").length === 0,
   'CONTROL: a planted road that turns the switches off without its stamp is named — RED (a sentence naming the mark and a stamped opt-out are not)');
 { const BP = textOf(path.join(ROOT, 'src/browser-profiles.js')); const i = BP.indexOf('\nfunction launchTail(');
-  ok(launchRoads([{ rel: 'src/browser-profiles.js', text: i < 0 ? BP : BP.slice(0, i) + '\nfunction launchTailRenamed(' + BP.slice(i + '\nfunction launchTail('.length) }]).bad.some((b) => /not in the composer/.test(b.why)), 'CONTROL: the composer\'s tail gone (renamed) ⇒ the census fails BY NAME, never vacuously green'); }
+  ok(verdictOf(launchRoads([{ rel: 'src/browser-profiles.js', text: i < 0 ? BP : BP.slice(0, i) + '\nfunction launchTailRenamed(' + BP.slice(i + '\nfunction launchTail('.length) }]).bad.some((b) => /not in the composer/.test(b.why))), 'CONTROL: the composer\'s tail gone (renamed) ⇒ the census fails BY NAME, never vacuously green'); }
 // THE TAIL itself (PURE): the switches, then the mark — last
 const BP0 = require('../src/browser-profiles.js');
 ok(BP0.launchTail('--no-sandbox', 'bk-0000beef') === '--no-sandbox,--disable-logging,--log-level=3,--vibespace-keeper=bk-0000beef' && JSON.stringify(BP0.launchTail(['--a'], 'bk-1')) === JSON.stringify(['--a', '--disable-logging', '--log-level=3', '--vibespace-keeper=bk-1'])
   && BP0.launchTail('--v=1,--vibespace-keeper=bk-evil', 'bk-1') === '--v=1,--vibespace-keeper=bk-1' && BP0.launchTail('--a', 'bk-1', { quiet: false }) === '--a,--vibespace-keeper=bk-1' && BP0.launchTail('--a', null) === '--a,--disable-logging,--log-level=3',
   'launchTail: the switches then the mark (a list stays a list); a user\'s own logging switch wins and a forged mark is replaced; quiet:false (a stamp) = the mark alone; no mark = the switches alone');
-ok(/const quietLog = !p\.host && !!prow\.starts && !argvPrefix\.length;/.test(KS) && /\n\s*quietLog \}; \/\/ lane browser-stderr-pipe/.test(KS) && /\n\s*rec\.quietLog = true;\n/.test(KS) && /\n\s*if \(prev && prev\.quietLog\) rec\.quietLog = true;/.test(KS),
+ok(gateOf(/const quietLog = !p\.host && !!prow\.starts && !argvPrefix\.length;/.test(KS)) && gateOf(/\n\s*quietLog \}; \/\/ lane browser-stderr-pipe/.test(KS)) && gateOf(/\n\s*rec\.quietLog = true;\n/.test(KS)) && verdictOf(/\n\s*if \(prev && prev\.quietLog\) rec\.quietLog = true;/.test(KS)),
   'the stamps: a profile launch that starts a Chrome here (not a host, not a cloud -p provider) is stamped quietLog; an ephemeral\'s fresh launch is stamped (B-1789 cure) and an ADOPTED one carries its previous record\'s stamp (a server restart keeps the view it launched with); the keeper\'s files read the stamp (the census, rule c)');
-ok(/hangCause\(rec, p, pid, fact\.since\); \}/.test(KS) && /if \(was && was\.since === fact\.since && was\.cause\) fact\.cause = was\.cause;/.test(KS), 'the hung verdict asks /proc for the cause once per run; the cause rides later asks');
+ok(gateOf(/hangCause\(rec, p, pid, fact\.since\); \}/.test(KS)) && verdictOf(/if \(was && was\.since === fact\.since && was\.cause\) fact\.cause = was\.cause;/.test(KS)), 'the hung verdict asks /proc for the cause once per run; the cause rides later asks');
 const fullK = 'The browser froze because its log pipe filled and nothing read it (a fault of the browser driver 0.38.1, fixed in 0.38.2) — Restart starts it again on the updated driver; logins stay in the profile, its tabs are re-opened and every conversation using it is told';
 const uw = BS.unresponsiveWords({ since: Date.UTC(2026, 9, 10, 18, 32), label: 'jarvis-work', clock: '18:32', cause: 'stderr-pipe-full' });
 ok(uw.tooltip === fullK && uw.state === 'Not answering since 18:32', 'the panel row\'s words name the log pipe (state word unchanged)', uw);
-ok(/hung, not busy/.test(BS.unresponsiveWords({ since: 1, clock: '00:00' }).tooltip), 'no cause ⇒ the words as before');
-for (const lang of ['zh', 'ja']) { const tr = fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8'); ok(tr.includes(JSON.stringify(fullK) + ':'), `the ${lang} catalogue carries the new words`); }
-ok(/cause: r\.unresponsive\.cause \|\| null/.test(textOf(path.join(ROOT, 'src/lib/browser-trace-view.js'))), 'the Browser panel\'s row passes the keeper\'s cause to the words');
+ok(verdictOf(/hung, not busy/.test(BS.unresponsiveWords({ since: 1, clock: '00:00' }).tooltip)), 'no cause ⇒ the words as before');
+for (const lang of ['zh', 'ja']) { const tr = fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8'); ok(verdictOf(tr.includes(JSON.stringify(fullK) + ':')), `the ${lang} catalogue carries the new words`); }
+ok(verdictOf(/cause: r\.unresponsive\.cause \|\| null/.test(textOf(path.join(ROOT, 'src/lib/browser-trace-view.js')))), 'the Browser panel\'s row passes the keeper\'s cause to the words');
 
 fs.rmSync(S, { recursive: true, force: true });
 console.log(`\n${fail ? '✗' : '✓'} test-browser-stderr-pipe: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

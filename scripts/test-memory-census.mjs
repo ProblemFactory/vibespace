@@ -29,7 +29,7 @@ const { SafeFs } = require('../src/safe-fs.js');
 const MB = 1048576;
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -46,7 +46,7 @@ console.log('§1 memoryCensus arithmetic');
 const SMAPS = ['55d0c0a00000-7ffd3b9fe000 ---p 00000000 00:00 0                          [rollup]', 'Rss:             1835008 kB', 'Pss:             1820000 kB',
   'Pss_Anon:        1700000 kB', 'Shared_Clean:      15000 kB', 'Private_Dirty:   1700000 kB', 'Anonymous:       1740800 kB', 'Swap:                  0 kB'].join('\n');
 const sm = C.parseSmapsRollup(SMAPS);
-ok(sm && sm.rss === 1835008 * 1024 && sm.anonymous === 1740800 * 1024 && sm.pss === 1820000 * 1024 && sm.sharedClean === 15000 * 1024,
+ok(gateOf(sm) && sm.rss === 1835008 * 1024 && sm.anonymous === 1740800 * 1024 && sm.pss === 1820000 * 1024 && sm.sharedClean === 15000 * 1024,
   'parseSmapsRollup reads Rss / Pss / Anonymous / Shared_Clean in bytes (kB × 1024)');
 ok(C.parseSmapsRollup('') === null && C.parseSmapsRollup(null) === null && C.parseSmapsRollup('garbage\nmore') === null, 'no smaps text (macOS, unreadable) ⇒ null, never a throw');
 const main = { rss: 1835008 * 1024, heapTotal: 1000 * MB, heapUsed: 900 * MB, external: 40 * MB, arrayBuffers: 30 * MB, malloced: 2 * MB };
@@ -77,21 +77,21 @@ ok(junk.native === 0 && junk.workersUnknown === 2 && junk.main.heapTotal === 0, 
 // ── §2 TELEMETRY ROWS ──
 console.log('§2 the telemetry rows, the event bound, the boot line');
 const rows = C.censusMetrics(c);
-ok(rows.map((r) => r.name).join() === 'srv-worker-heap-mb,srv-external-mb,srv-native-mb' && rows.every((r) => Number.isInteger(r.value)) && rows[0].detail === 'unknown=1',
+ok(rows.map((r) => r.name).join() === 'srv-worker-heap-mb,srv-external-mb,srv-native-mb' && gateOf(rows.every((r) => Number.isInteger(r.value))) && rows[0].detail === 'unknown=1',
   `3 metric rows, integer MB, the unknown count on the worker row (${JSON.stringify(rows)})`);
 ok(!('detail' in C.censusMetrics(C.memoryCensus({ main, workers: workers.filter((w) => w.mem), smaps: sm }))[0]), 'no unknown worker ⇒ no detail (no bytes spent)');
 const PROD = ['safe-fs#0', 'safe-fs#1', 'safe-fs#2', 'safe-fs#3', 'transcript#0', 'transcript#1', 'fs-canary#0', 'search-index', 'usage-index'];
 const prod = C.memoryCensus({ main, smaps: sm, workers: PROD.map((name) => ({ name, mem: { heapTotal: 12 * MB, heapUsed: 7 * MB, external: MB } })) });
 const ev = C.censusEvent(prod);
 const line = (e) => JSON.stringify({ ts: 1791496427338, ...e, version: '2.369.241' }) + '\n';
-ok(ev.kind === 'event' && ev.name === 'srv-mem-census' && ev.value === 1792 && /^anon 1700 · main 900\/1000\/1000 · ext 49 · native \d+ · safe-fs#0 7\/12\/12 /.test(ev.detail) && ev.detail.includes('usage-index 7/12/12'),
+ok(ev.kind === 'event' && ev.name === 'srv-mem-census' && ev.value === 1792 && gateOf(/^anon 1700 · main 900\/1000\/1000 · ext 49 · native \d+ · safe-fs#0 7\/12\/12 /.test(ev.detail)) && verdictOf(ev.detail.includes('usage-index 7/12/12')),
   `ONE event: value = RSS MB, detail = the parts + name used/resident/total per worker (${ev.detail})`);
 const tenMin = 2 * C.censusMetrics(prod).reduce((n, r) => n + line({ kind: 'metric', ...r }).length, 0) + line(ev).length;
 ok(tenMin <= 1024, `the ndjson grows ${tenMin} B per 10 min with 9 workers (2 × 3 metric rows + 1 event; ≤ 1 KB)`);
 const many = C.memoryCensus({ main, smaps: sm, workers: Array.from({ length: 300 }, (_, i) => ({ name: 'pool-with-a-long-name#' + i, mem: i % 7 ? { heapTotal: MB, heapUsed: MB } : null })) });
 const evMany = C.censusEvent(many);
-ok(evMany.detail.length <= C.EVENT_DETAIL_MAX && /\+\d+ more$/.test(evMany.detail) && line(evMany).length <= 1024, `300 workers: the detail stops at ${evMany.detail.length} chars ending "${evMany.detail.slice(-9)}", the row ${line(evMany).length} B ≤ 1 KB`);
-ok(/^\[memory\] boot census: main heap 1000 MB, 3 workers 70 MB \(1 unknown\), external 50 MB, native \d+ MB, RSS 1792 MB \(anonymous 1700 MB = the parts\)$/.test(C.bootLine(c)),
+ok(evMany.detail.length <= C.EVENT_DETAIL_MAX && gateOf(/\+\d+ more$/.test(evMany.detail)) && line(evMany).length <= 1024, `300 workers: the detail stops at ${evMany.detail.length} chars ending "${evMany.detail.slice(-9)}", the row ${line(evMany).length} B ≤ 1 KB`);
+ok(verdictOf(/^\[memory\] boot census: main heap 1000 MB, 3 workers 70 MB \(1 unknown\), external 50 MB, native \d+ MB, RSS 1792 MB \(anonymous 1700 MB = the parts\)$/.test(C.bootLine(c))),
   `the boot line: ${C.bootLine(c)}`);
 
 // ── §3 FAKE WORKERS, FAKE TIMERS ──
@@ -117,7 +117,7 @@ function fakeWorker(answer) {
   T.advance(1999); await new Promise((r) => setImmediate(r));
   ok(settled === null, 'at 1.999 s the silent worker is still asked');
   T.advance(1); await new Promise((r) => setImmediate(r));
-  ok(Array.isArray(settled) && settled[0].mem.heapTotal === 9 * MB && settled[1].mem === null && settled[2].mem === null,
+  ok(gateOf(Array.isArray(settled)) && settled[0].mem.heapTotal === 9 * MB && settled[1].mem === null && settled[2].mem === null,
     'at 2 s: the answered row, the silent worker UNKNOWN, a worker that cannot be posted to UNKNOWN at once — never waited on');
   ok(good.listeners() === 0 && silent.listeners() === 0, 'each ask removes its own listener (answered or timed out)');
 }
@@ -138,7 +138,7 @@ function fakeWorker(answer) {
   const first = await again;
   ok(first.workers[0].state === 'unknown' && first.workersUnknown === 1 && first.basis === 'anon', 'a worker that never answers ⇒ unknown within the 2 s bound (fake timers, no real wait)');
   await new Promise((r) => setImmediate(r));
-  ok(logs.length === 1 && /^\[memory\] boot census: main heap 100 MB, 1 workers 0 MB \(1 unknown\)/.test(logs[0]), `ONE boot line at start (${logs[0]})`);
+  ok(logs.length === 1 && verdictOf(/^\[memory\] boot census: main heap 100 MB, 1 workers 0 MB \(1 unknown\)/.test(logs[0])), `ONE boot line at start (${logs[0]})`);
   ok(s.latest() === first, 'latest() is the newest census (GET /api/sysinfo serverMemory)');
   for (let i = 1; i < 10; i++) { const p = s.sample(); await new Promise((r) => setImmediate(r)); T.advance(2000); await p; }
   const metrics = recs.filter((r) => r.kind === 'metric'), events = recs.filter((r) => r.kind === 'event');
@@ -156,9 +156,9 @@ console.log('§3b the hourly census line + the heap-high line');
     readSmapsText: () => null, ask: () => [] });
   for (let i = 0; i < 13; i++) { await s.sample(); T.advance(60000); if (i === 3) heapUsed = 1000 * MB; }
   const hours = logs.filter((l) => l.startsWith('[memory] census, up'));
-  ok(hours.length === 2 && /^\[memory\] census, up 1\.3 h: main heap 1100 MB, 0 workers 0 MB, external 5 MB, native \d+ MB, RSS 2048 MB \(no smaps: the parts add up to RSS\); the census held the loop 3 ms$/.test(hours[0]),
+  ok(hours.length === 2 && verdictOf(/^\[memory\] census, up 1\.3 h: main heap 1100 MB, 0 workers 0 MB, external 5 MB, native \d+ MB, RSS 2048 MB \(no smaps: the parts add up to RSS\); the census held the loop 3 ms$/.test(hours[0])),
     `the census line every hourEvery samples (an hour), the boot census's parts + what the census held the loop (its synchronous part, measured): ${hours[0]}`);
-  ok(warns.length === 1 && /^\[memory\] the heap is at 1\.0 of 1\.2 GB — collections get long/.test(warns[0]), `heap past 80 % of its limit: ONE line, not one per sample (${warns.length}: ${warns[0]})`);
+  ok(warns.length === 1 && verdictOf(/^\[memory\] the heap is at 1\.0 of 1\.2 GB — collections get long/.test(warns[0])), `heap past 80 % of its limit: ONE line, not one per sample (${warns.length}: ${warns[0]})`);
   T.advance(3600000); await s.sample();
   ok(warns.length === 2, 'an hour later, still high: said once more');
 }
@@ -174,9 +174,9 @@ console.log('§4 real worker threads answer by name');
   const got = await WM.askMemory(undefined, { timeoutMs: 5000 });
   const names = got.map((g) => g.name).sort().join();
   ok(names === 'fs-canary#0,safe-fs#0,safe-fs#1,transcript#0', `every live worker is tracked by name (${names})`);
-  ok(got.every((g) => g.mem && g.mem.heapTotal > MB && g.mem.physical > MB && g.mem.heapUsed > 0 && g.mem.heapUsed <= g.mem.heapTotal), `each answers its OWN isolate's heap (${got.map((g) => g.name + ' ' + (g.mem.heapTotal / MB).toFixed(1)).join(', ')} MB)`);
+  ok(verdictOf(got.every((g) => g.mem && g.mem.heapTotal > MB && g.mem.physical > MB && g.mem.heapUsed > 0 && g.mem.heapUsed <= g.mem.heapTotal)), `each answers its OWN isolate's heap (${got.map((g) => g.name + ' ' + (g.mem.heapTotal / MB).toFixed(1)).join(', ')} MB)`);
   const st = await pools[0].call('stat', { path: REPO });
-  ok(st && pools[0].stats().restarts === 0 && pools[0].stats().inflight === 0, 'the pool\'s own calls are untouched by the answers (no restart, nothing in flight)');
+  ok(gateOf(st) && pools[0].stats().restarts === 0 && pools[0].stats().inflight === 0, 'the pool\'s own calls are untouched by the answers (no restart, nothing in flight)');
   const M = mutantCopies('memcensus', REPO);
   const src = read('src/safe-fs-worker.js');
   const cut = editAnchor(src, /\n\s*if \(answerMemory\(msg, parentPort\)\) return;[^\n]*/, '', "src/safe-fs-worker.js");
@@ -184,7 +184,7 @@ console.log('§4 real worker threads answer by name');
   const bad = new SafeFs({ workerPath: copy, poolSize: 1, name: 'control' });
   await bad.call('stat', { path: REPO }).catch(() => null);
   const ctl = (await WM.askMemory(WM.trackedWorkers().filter((e) => e.name === 'control#0'), { timeoutMs: 400 }))[0];
-  ok(cut !== src && ctl && ctl.mem === null, 'CONTROL: a safe-fs-worker copy without the handler never answers ⇒ unknown (the handler is what answers)');
+  ok(cut !== src && gateOf(ctl) && ctl.mem === null, 'CONTROL: a safe-fs-worker copy without the handler never answers ⇒ unknown (the handler is what answers)');
   for (const p of [...pools, bad]) p.close();
   clearInterval(keep);
 }
@@ -236,14 +236,14 @@ ok(!wc.bad.length, `each site tracks + skips the answer, each script answers fir
 {
   const noHandler = { ...TEXTS, 'src/search-index-worker.js': TEXTS['src/search-index-worker.js'].replace(/\n\s*if \(answerMemory\(msg, parentPort\)\) return;[^\n]*/, '') };   // B-360d unit 1: the retired usage index worker's control moved to the search worker
   const r1 = workerCensus(noHandler);
-  ok(r1.bad.length === 1 && /search-index-worker\.js does not answer/.test(r1.bad[0]), `CONTROL: a worker script without the handler ⇒ red by name (${r1.bad[0]})`);
+  ok(r1.bad.length === 1 && verdictOf(/search-index-worker\.js does not answer/.test(r1.bad[0])), `CONTROL: a worker script without the handler ⇒ red by name (${r1.bad[0]})`);
   const planted = { ...TEXTS, 'src/server/new-pool.js': "const { Worker } = require('worker_threads');\nconst w = new Worker(require('path').join(__dirname, 'new-pool-worker.js'));\nw.on('message', (m) => m);\n",
     'src/server/new-pool-worker.js': "require('worker_threads').parentPort.on('message', (msg) => { void msg; });\n" };
   const r2 = workerCensus(planted);
-  ok(r2.bad.some((b) => /new-pool\.js starts a worker it never tracks/.test(b)) && r2.bad.some((b) => /new-pool-worker\.js does not answer/.test(b)) && r2.bad.some((b) => /new-pool\.js's own message handler/.test(b)),
+  ok(gateOf(r2.bad.some((b) => /new-pool\.js starts a worker it never tracks/.test(b))) && gateOf(r2.bad.some((b) => /new-pool-worker\.js does not answer/.test(b))) && verdictOf(r2.bad.some((b) => /new-pool\.js's own message handler/.test(b))),
     `CONTROL: a planted pool ⇒ red three ways (${r2.bad.length})`);
   const untracked = { ...TEXTS, 'src/safe-fs.js': TEXTS['src/safe-fs.js'].replace("trackWorker(this.name + '#' + rec.slot, w)", 'w') };
-  ok(untracked['src/safe-fs.js'] !== TEXTS['src/safe-fs.js'] && workerCensus(untracked).bad.some((b) => /safe-fs\.js starts a worker it never tracks/.test(b)), 'CONTROL: SafeFs spawning without trackWorker ⇒ red');
+  ok(untracked['src/safe-fs.js'] !== TEXTS['src/safe-fs.js'] && verdictOf(workerCensus(untracked).bad.some((b) => /safe-fs\.js starts a worker it never tracks/.test(b))), 'CONTROL: SafeFs spawning without trackWorker ⇒ red');
 }
 
 // ── §6 THE SYSTEM WINDOW ROWS + SOURCE PINS ──
@@ -257,22 +257,22 @@ const ZH = dict('src/lib/i18n-zh.js'), JA = dict('src/lib/i18n-ja.js');
 const words = Object.values(C.WORDS);
 const miss = words.filter((w) => !ZH.has(w) || !JA.has(w));
 ok(!miss.length, `every row word has zh + ja (${words.length} words${miss.length ? ' — MISSING: ' + miss.join(' | ') : ''})`);
-ok(words.every((w) => (w.match(/\{\w+\}/g) || []).sort().join() === (ZH.get(w).match(/\{\w+\}/g) || []).sort().join() && (w.match(/\{\w+\}/g) || []).sort().join() === (JA.get(w).match(/\{\w+\}/g) || []).sort().join()),
+ok(verdictOf(words.every((w) => (w.match(/\{\w+\}/g) || []).sort().join() === (ZH.get(w).match(/\{\w+\}/g) || []).sort().join() && (w.match(/\{\w+\}/g) || []).sort().join() === (JA.get(w).match(/\{\w+\}/g) || []).sort().join())),
   'each translation keeps the same {placeholders}');
 ok(ZH.get(C.WORDS.main) === '主堆' && JA.get(C.WORDS.workers) === 'ワーカー（{n}）', `zh "${ZH.get(C.WORDS.title)} · ${ZH.get(C.WORDS.main)}", ja "${JA.get(C.WORDS.title)} · ${JA.get(C.WORDS.native)}"`);
 const rail = read('src/lib/sidebar-rail.js');
-ok(/import \{ censusRows, WORDS as MEMORY_WORDS \} from '\.\.\/memory-census\.js'/.test(rail) && /if \(!hostId && d\.serverMemory\) parts\.push\(this\._serverMemoryHtml\(d\.serverMemory, fmt\)\)/.test(rail),
+ok(gateOf(/import \{ censusRows, WORDS as MEMORY_WORDS \} from '\.\.\/memory-census\.js'/.test(rail)) && verdictOf(/if \(!hostId && d\.serverMemory\) parts\.push\(this\._serverMemoryHtml\(d\.serverMemory, fmt\)\)/.test(rail)),
   'the System window draws the census for THIS instance only (a remote machine has no server census)');
 const smp = read('src/server/memory-sampler.js');
-ok(!/\b(readFileSync|readdirSync|statSync|existsSync|execSync|spawnSync)\b/.test(smp) && /fsp\.readFile\('\/proc\/self\/smaps_rollup'/.test(smp), 'the sampler does no sync fs: the one /proc read is async (fs.promises)');
+ok(!/\b(readFileSync|readdirSync|statSync|existsSync|execSync|spawnSync)\b/.test(smp) && verdictOf(/fsp\.readFile\('\/proc\/self\/smaps_rollup'/.test(smp)), 'the sampler does no sync fs: the one /proc read is async (fs.promises)');
 // B-360d (A) r1374: THE TICK DROPS, NEVER READS — the enforce file the sampler calls every minute holds no fs, no child, no read
 const enf = read('src/server/memory-enforce.js');
 const ENF_READS = /\b(?:readFileSync|readdirSync|statSync|existsSync|execSync|spawnSync|readFile|readdir|createReadStream)\b|require\('(?:node:)?(?:fs|child_process)'\)/;
-ok(!ENF_READS.test(enf) && /jsonlCacheTrim\(now\)/.test(enf), 'the census tick (src/server/memory-enforce.js) drops, never reads: no fs, no child, no read in it');
-ok(ENF_READS.test(enf.replace('const tails = ss.jsonlCacheTrim(now);', 'const tails = ss.jsonlCacheTrim(now); const fs = require(\'fs\');')) && ENF_READS.test(enf.replace('const tails = ss.jsonlCacheTrim(now);', 'const tails = ss.jsonlCacheTrim(now); ss.x.readFile(\'/x\');')), 'CONTROLS: an fs require and a read planted in the tick are each caught by the same pin');
+ok(!ENF_READS.test(enf) && verdictOf(/jsonlCacheTrim\(now\)/.test(enf)), 'the census tick (src/server/memory-enforce.js) drops, never reads: no fs, no child, no read in it');
+ok(gateOf(ENF_READS.test(enf.replace('const tails = ss.jsonlCacheTrim(now);', 'const tails = ss.jsonlCacheTrim(now); const fs = require(\'fs\');'))) && verdictOf(ENF_READS.test(enf.replace('const tails = ss.jsonlCacheTrim(now);', 'const tails = ss.jsonlCacheTrim(now); ss.x.readFile(\'/x\');'))), 'CONTROLS: an fs require and a read planted in the tick are each caught by the same pin');
 ok(!/require\(/.test(read('src/memory-census.js')), 'src/memory-census.js imports nothing (PURE)');
 const srv = read('server.js');
-ok(/serverMemory: memSampler\.latest\(\) \|\| undefined/.test(srv) && /memSampler\.start\(\);/.test(srv), 'server.js: GET /api/sysinfo carries serverMemory; the sampler starts at listen');
+ok(gateOf(/serverMemory: memSampler\.latest\(\) \|\| undefined/.test(srv)) && verdictOf(/memSampler\.start\(\);/.test(srv)), 'server.js: GET /api/sysinfo carries serverMemory; the sampler starts at listen');
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -31,7 +31,7 @@ for (const d of [fakeHome, stubDir, chromeHome]) fs.mkdirSync(d, { recursive: tr
 const CWD = path.join(fakeHome, 'project'); fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
 const PAGE_ERRORS = [];
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); if (PAGE_ERRORS.length) console.error('    page errors: ' + PAGE_ERRORS.slice(-3).join(' | ')); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); if (PAGE_ERRORS.length) console.error('    page errors: ' + PAGE_ERRORS.slice(-3).join(' | ')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // two ENDED conversations the hub discovers from their transcripts (src/fixture-guard.js hides /tmp/vs-* project dirs and the e2e ids:
 // a path that never exists under /opt, a non-fixture id, in the scratch HOME only — the test-record-clear-ui precedent)
@@ -234,10 +234,10 @@ try {
   const drawn = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(linkSel(B.sid))}); const u = document.querySelector('.vs-link-unknown'); const d = document.querySelector('.chat-vs-link[data-vs-kind=desktop]');
     return { bIcon: !!(b && b.querySelector('.vs-link-icon svg')), bName: b && b.querySelector('.vs-link-name') ? b.querySelector('.vs-link-name').textContent : null, dName: d && d.querySelector('.vs-link-name') ? d.querySelector('.vs-link-name').textContent : null,
       chip: u ? u.querySelector('.vs-link-chip').textContent : null, chipPressable: !!(u && (u.closest('.chat-link') || u.dataset.vsRef)) }; })()`);
-  check('B\'s link: an SVG icon, its real name «Links B» after the label that lacks it; the desktop\'s «Desktop 2»', drawn.bIcon && drawn.bName === 'Links B' && drawn.dName === 'Desktop 2', drawn);
+  check('B\'s link: an SVG icon, its real name «Links B» after the label that lacks it; the desktop\'s «Desktop 2»', gateOf(drawn.bIcon) && drawn.bName === 'Links B' && drawn.dName === 'Desktop 2', drawn);
   check('the key no row has: the chip «未知对话», nothing to press', drawn.chip === '未知对话' && drawn.chipPressable === false, drawn);
   const bare = await evalJs(`(() => { const c = document.querySelector(${JSON.stringify(linkSel(C.sid))}); return { c: c ? c.textContent.trim() : null, cIcon: !!(c && c.querySelector('.vs-link-icon svg')), addresses: [...document.querySelectorAll('.chat-vs-link')].filter((e) => /vibespace:/.test(e.textContent)).length }; })()`);
-  check('a BARE link (C, written as its address) reads as its real name «Links C» with its icon — no drawn link shows an address (主开发\'s look)', bare.c === 'Links C' && bare.cIcon && bare.addresses === 0, bare);
+  check('a BARE link (C, written as its address) reads as its real name «Links C» with its icon — no drawn link shows an address (主开发\'s look)', bare.c === 'Links C' && gateOf(bare.cIcon) && bare.addresses === 0, bare);
 
   console.log('③ the presses — each only navigates');
   const runs0 = stubRuns().length;
@@ -260,13 +260,13 @@ try {
   if (plant0 && plant0.armed) {
     const oldPress = await pressLinkOnce(linkSel(SID_D));
     const cover = await evalJs(COVERED_BY(linkSel(SID_D)));
-    check(`RED CONTROL: C's window raised late — the BASE's press shape (A raised once, never again) on D's link is covered and fails (${oldPress}), and what covers it is C's window (${cover && cover.win ? `${cover.win} «${cover.title}»` : JSON.stringify(cover)})`, oldPress === false && !!cover && cover.win === plant0.cWin && /Links C/.test(cover.title || ''), { plant0, oldPress, cover });
+    check(`RED CONTROL: C's window raised late — the BASE's press shape (A raised once, never again) on D's link is covered and fails (${oldPress}), and what covers it is C's window (${cover && cover.win ? `${cover.win} «${cover.title}»` : JSON.stringify(cover)})`, oldPress === false && !!cover && cover.win === plant0.cWin && verdictOf(/Links C/.test(cover.title || '')), { plant0, oldPress, cover });
   }
   await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
   const plant1 = await armLateRaise(C.sid, C.srv);
   check(`the late raise of C is planted again for the D leg below (the new press must meet it): ${plantSaid(plant1)}`, !!(plant1 && plant1.armed), plant1);
   const pressedD = (await pressLink(linkSel(SID_D))) === true, menuD = pressedD ? await menuWhenUp(30) : null;
-  check('D (ended, no window): the press opens «在这里恢复» · «查看历史记录» at the link — nothing started' + never(menuD), pressedD && JSON.stringify(menuD) === JSON.stringify(['在这里恢复', '查看历史记录']) && stubRuns().length === runs0,
+  check('D (ended, no window): the press opens «在这里恢复» · «查看历史记录» at the link — nothing started' + never(menuD), gateOf(pressedD) && JSON.stringify(menuD) === JSON.stringify(['在这里恢复', '查看历史记录']) && stubRuns().length === runs0,
     { menu: await menuLabels(), runs: stubRuns().length - runs0 });
   await shot('zh-press-ended-menu');
   const menuUp = (await menuLabels()).length > 0;
@@ -302,4 +302,4 @@ try {
   check('the page threw nothing', PAGE_ERRORS.length === 0, PAGE_ERRORS.slice(-3));
 } catch (e) { failed++; console.error('  ✗ threw:', e && e.stack || e); }
 console.log(failed ? `✗ test-internal-links-chrome: ${passed} passed, ${failed} failed` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

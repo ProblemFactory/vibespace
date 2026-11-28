@@ -28,7 +28,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -90,7 +90,7 @@ function judgeVerdict(BBm) {
   mkBuild('151.0.7922.34'); mkBuild('146.0.7680.153'); mkBuild('139.0.1.1', { exec: false }); mkBuild('120.0.1.1', { chrome: false });
   fs.mkdirSync(path.join(BROWSERS, 'not-a-build'), { recursive: true }); fs.writeFileSync(path.join(BROWSERS, 'chrome-junk'), 'x');
   const L = BB.listBuilds({ homeDir: HOME });
-  ok(L.ok && L.builds.map((b) => b.version).join(' ') === '151.0.7922.34 146.0.7680.153 139.0.1.1 120.0.1.1' && L.builds[0].usable && L.builds[1].usable && !L.builds[2].usable && L.builds[2].why === 'not-executable' && !L.builds[3].usable && L.builds[3].why === 'missing',
+  ok(gateOf(L.ok) && L.builds.map((b) => b.version).join(' ') === '151.0.7922.34 146.0.7680.153 139.0.1.1 120.0.1.1' && gateOf(L.builds[0].usable) && gateOf(L.builds[1].usable) && !L.builds[2].usable && L.builds[2].why === 'not-executable' && !L.builds[3].usable && L.builds[3].why === 'missing',
     'the listing: every chrome-<version> folder, newest first; a chrome that cannot run / is missing is LISTED with why (never hidden); junk ignored', L.builds);
   ok(L.builds[0].path === path.join(BROWSERS, 'chrome-151.0.7922.34', 'chrome') && L.root === BROWSERS, 'each build names its executable — the `chrome` at the top of its folder (Chrome for Testing\'s linux layout)');
   const H2 = path.join(ROOT, 'home-file'); fs.mkdirSync(path.join(H2, '.agent-browser'), { recursive: true }); fs.writeFileSync(path.join(H2, '.agent-browser', 'browsers'), 'not a folder');
@@ -103,11 +103,11 @@ function judgeVerdict(BBm) {
   ok(judgeVerdict(BB).length === 0, 'THE verdict, in its order: invalid · the user\'s · chromium · listed · runnable · the version ladder (only when the directory was ever written, and only where the caller asks for it)', judgeVerdict(BB));
   ok(BB.runningBuildOf('Chrome/151.0.7922.34') === '151.0.7922.34' && BB.runningBuildOf('HeadlessChrome/146.0.7680.153') === '146.0.7680.153' && BB.runningBuildOf('') === null && BB.runningBuildOf('Firefox/1') === null,
     'the running build is read off the browser\'s own /json/version (the fact — headless or not)');
-  ok(BB.sameChoice(null, { kind: 'default' }) && !BB.sameChoice({ kind: 'build', version: '151.0.7922.34' }, { kind: 'build', version: '146.0.7680.153' }) && BB.sameChoice({ kind: 'path', path: '/a//b' }, { kind: 'path', path: '/a/b' }), 'sameChoice (Change build… to the same build is a no-op)');
+  ok(gateOf(BB.sameChoice(null, { kind: 'default' })) && !BB.sameChoice({ kind: 'build', version: '151.0.7922.34' }, { kind: 'build', version: '146.0.7680.153' }) && verdictOf(BB.sameChoice({ kind: 'path', path: '/a//b' }, { kind: 'path', path: '/a/b' })), 'sameChoice (Change build… to the same build is a no-op)');
   ok(JSON.stringify(SW.launchEnvFor('chromium', { executablePath: '/x/chrome' })) === JSON.stringify({ AGENT_BROWSER_EXECUTABLE_PATH: '/x/chrome' }) && JSON.stringify(SW.launchEnvFor('chromium', {})) === '{}',
     'the launch env of a pinned chromium build is the executable alone (agent-browser\'s own env name) — nothing for the default');
   const n = BB.missingNotice({ label: 'Work', choice: { kind: 'build', version: '151.0.7922.34' } });
-  ok(/Work/.test(n.text) && /151\.0\.7922\.34/.test(n.text) && /Change build…/.test(n.detail) && /never switches it to another build/.test(n.detail), 'the For-you notice names the profile, the build, and the way out (Change build…) — and says nothing falls back by itself');
+  ok(gateOf(/Work/.test(n.text)) && gateOf(/151\.0\.7922\.34/.test(n.text)) && gateOf(/Change build…/.test(n.detail)) && verdictOf(/never switches it to another build/.test(n.detail)), 'the For-you notice names the profile, the build, and the way out (Change build…) — and says nothing falls back by itself');
 }
 
 // ═══ ③ the browser-serve op + the capability gate ════════════════════════════
@@ -127,14 +127,14 @@ const S = require('../src/browser-serve.js');
   };
   const bs = { facts: { probeVersion: async () => '0.38.1' }, runtime: rt, homeDir: H3, cmd: 'fake-cli', displayProbe: async () => ({ ok: true, x11: [], wayland: [], why: [] }) };
   const L = await S.runBrowserServeOp(bs, 'builds', {});
-  ok(L.ok && L.listing.ok && L.listing.builds.length === 1 && L.listing.builds[0].version === '148.0.1.1' && !('path' in L.listing.builds[0]), 'the `builds` op lists THAT machine\'s builds (plain JSON — no path crosses the wire; the machine resolves a build by version itself)', L);
+  ok(gateOf(L.ok) && gateOf(L.listing.ok) && L.listing.builds.length === 1 && L.listing.builds[0].version === '148.0.1.1' && !('path' in L.listing.builds[0]), 'the `builds` op lists THAT machine\'s builds (plain JSON — no path crosses the wire; the machine resolves a build by version itself)', L);
   const PID = 'bp-0000c0de';
   const st = await S.runBrowserServeOp(bs, 'start', { profileId: PID, browser: { kind: 'build', version: '148.0.1.1' } });
   const exe = path.join(H3, '.agent-browser', 'browsers', 'chrome-148.0.1.1', 'chrome');
-  ok(st.ok && seen.find((x) => x.op === 'launch').env.AGENT_BROWSER_EXECUTABLE_PATH === exe && seen.find((x) => x.op === 'cdp-url').env.AGENT_BROWSER_EXECUTABLE_PATH === exe, 'a start with a build: its executable on the launch AND on the start\'s own cdp-url', seen);
+  ok(gateOf(st.ok) && seen.find((x) => x.op === 'launch').env.AGENT_BROWSER_EXECUTABLE_PATH === exe && seen.find((x) => x.op === 'cdp-url').env.AGENT_BROWSER_EXECUTABLE_PATH === exe, 'a start with a build: its executable on the launch AND on the start\'s own cdp-url', seen);
   seen.length = 0;
   await S.runBrowserServeOp(bs, 'cdp-url', { profileId: PID }); await S.runBrowserServeOp(bs, 'stop', { profileId: PID });
-  ok(seen.length === 2 && seen.every((x) => x.env.AGENT_BROWSER_EXECUTABLE_PATH === exe) && fs.existsSync(S.buildFileOf(bs, B_ns(PID))), '…and on EVERY later op of that profile (cdp-url, stop) through the machine\'s own view file', seen);
+  ok(seen.length === 2 && gateOf(seen.every((x) => x.env.AGENT_BROWSER_EXECUTABLE_PATH === exe)) && verdictOf(fs.existsSync(S.buildFileOf(bs, B_ns(PID)))), '…and on EVERY later op of that profile (cdp-url, stop) through the machine\'s own view file', seen);
   const bad = await S.runBrowserServeOp(bs, 'start', { profileId: PID, browser: { kind: 'build', version: '149.0.1.1' } });
   ok(bad.ok === false && bad.code === 'browser_build_missing', 'a build that machine does not have ⇒ refused THERE, by name (never its default build)', bad);
   seen.length = 0;
@@ -147,14 +147,14 @@ const S = require('../src/browser-serve.js');
   const e1 = await thr(() => old.browserServe('builds', {}, { by: 'system:test' }));
   const e2 = await thr(() => old.browserServe('start', { profileId: PID, browser: { kind: 'build', version: '148.0.1.1' } }, { by: 'system:test' }));
   const okStart = await old.browserServe('start', { profileId: PID }, { by: 'system:test' });
-  ok(e1 && e1.code === 'builds_unsupported' && e2 && e2.code === 'builds_unsupported' && old.asked === 1 && okStart.ok, 'an agent WITHOUT `browser-builds`: the list and a start with a build are refused builds_unsupported with ZERO requests; a default start still goes', { asked: old.asked });
+  ok(gateOf(e1) && e1.code === 'builds_unsupported' && gateOf(e2) && e2.code === 'builds_unsupported' && old.asked === 1 && verdictOf(okStart.ok), 'an agent WITHOUT `browser-builds`: the list and a start with a build are refused builds_unsupported with ZERO requests; a default start still goes', { asked: old.asked });
   const cur = mk(['browser-serve', 'browser-builds']);
   const ok1 = await cur.browserServe('builds', {}, { by: 'system:test' });
-  ok(ok1.ok && cur.asked === 1, 'an agent WITH it is asked');
+  ok(gateOf(ok1.ok) && cur.asked === 1, 'an agent WITH it is asked');
   const ad = read('src/agentd/agentd.js');
-  ok(/capabilities: \[[^\]]*'browser-serve', 'browser-builds'/.test(ad) && /require\('\.\/\.\.\/browser-serve\.js'\)/.test(ad), 'the daemon advertises `browser-builds` beside `browser-serve` and runs the SAME op table (the daemon bundles src/browser-serve.js → src/browser-builds.js)');
+  ok(gateOf(/capabilities: \[[^\]]*'browser-serve', 'browser-builds'/.test(ad)) && verdictOf(/require\('\.\/\.\.\/browser-serve\.js'\)/.test(ad)), 'the daemon advertises `browser-builds` beside `browser-serve` and runs the SAME op table (the daemon bundles src/browser-serve.js → src/browser-builds.js)');
   const ac = read('src/server/browser-access.js');
-  ok(/e\.code === 'builds_unsupported'( \|\| e\.code === 'remove_unsupported')?( \|\| e\.code === 'stop_facts_unsupported')?\) \? e\.code/.test(ac), 'the access layer keeps the code by name (never folded into host_unavailable)'); // lane remote-profile-start: + remove_unsupported beside it; B-e799: + stop_facts_unsupported
+  ok(verdictOf(/e\.code === 'builds_unsupported'( \|\| e\.code === 'remove_unsupported')?( \|\| e\.code === 'stop_facts_unsupported')?\) \? e\.code/.test(ac)), 'the access layer keeps the code by name (never folded into host_unavailable)'); // lane remote-profile-start: + remove_unsupported beside it; B-e799: + stop_facts_unsupported
 }
 function B_ns(pid) { return require('../src/browser-profiles.js').sessionNameFor(pid); }
 
@@ -171,19 +171,19 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   'the profile card: "Chrome 151.0.7922.34 (pinned)" / the CLI\'s default build / a path; the build its browser RUNS while live; a missing one amber; nothing for CloakBrowser');
   const rows = W.buildRows({ ok: true, builds: [{ version: '152.0.1.2', usable: true }, { version: '146.0.7680.153', usable: true }, { version: '139.0.1.1', usable: false, why: 'not-executable' }] }, { choice: { kind: 'build', version: '151.0.7922.34' }, lastChromiumMajor: 151, local: true, t });
   const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
-  ok(rows[0].key === 'default' && byKey['v:152.0.1.2'].pickable && !byKey['v:146.0.7680.153'].pickable && /Older/.test(byKey['v:146.0.7680.153'].note) && !byKey['v:139.0.1.1'].pickable && byKey['v:151.0.7922.34'].current && !byKey['v:151.0.7922.34'].pickable && byKey.path,
+  ok(rows[0].key === 'default' && gateOf(byKey['v:152.0.1.2'].pickable) && !byKey['v:146.0.7680.153'].pickable && gateOf(/Older/.test(byKey['v:146.0.7680.153'].note)) && !byKey['v:139.0.1.1'].pickable && gateOf(byKey['v:151.0.7922.34'].current) && !byKey['v:151.0.7922.34'].pickable && verdictOf(byKey.path),
     'Change build… rows: the default first; every build a row; an older one / one that cannot run greyed WITH why; a chosen build gone from the list still shown (what it was set to); a path row on this computer', rows.map((r) => [r.key, r.pickable, r.note]));
   const unsup = W.buildRows({ ok: false, code: 'builds_unsupported' }, { machine: 'mac', local: false, t });
-  ok(unsup.length === 2 && unsup[0].pickable && /can't list Chrome builds/.test(unsup[1].label) && !unsup.some((r) => r.key === 'path'), 'a machine whose agent cannot list builds: the default stays, one sentence says why (no path row off this computer)');
+  ok(unsup.length === 2 && gateOf(unsup[0].pickable) && gateOf(/can't list Chrome builds/.test(unsup[1].label)) && !unsup.some((r) => r.key === 'path'), 'a machine whose agent cannot list builds: the default stays, one sentence says why (no path row off this computer)');
   // lane mirror-green-ui (2.369.205): a list ASKED and not yet answered is said as waiting — never "could not be read"
   const pend = W.buildRows({ pending: true }, { t });
-  ok(pend[0].key === 'default' && pend.some((r) => r.kind === 'note' && /^Reading the list of Chrome builds/.test(r.label)) && !pend.some((r) => /could not be read/.test(r.label || '')) && !pend.some((r) => r.kind === 'build') && pend.some((r) => r.key === 'path'),
+  ok(pend[0].key === 'default' && gateOf(pend.some((r) => r.kind === 'note' && /^Reading the list of Chrome builds/.test(r.label))) && !pend.some((r) => /could not be read/.test(r.label || '')) && !pend.some((r) => r.kind === 'build') && verdictOf(pend.some((r) => r.key === 'path')),
     'a list asked and not yet answered: the default, ONE "Reading the list…" note (never "could not be read"), no build rows yet', pend.map((r) => [r.key, r.label]));
   ok(JSON.stringify(W.choiceOfRow(byKey['v:152.0.1.2'])) === JSON.stringify({ kind: 'build', version: '152.0.1.2' }) && W.choiceOfRow(byKey.path, 'rel') === null && W.choiceOfRow(byKey.path, ' /opt/c/chrome ').path === '/opt/c/chrome' && W.choiceOfRow(byKey['v:146.0.7680.153']) === null, 'a picked row → the choice sent (an unpickable row / a relative path send nothing)');
-  ok(/2 conversation\(s\)/.test(W.changeSentences({ live: true, holders: 2 }, t)[0].text) && /next start/.test(W.changeSentences({ live: false }, t)[0].text), 'the sentence above the button: a running browser restarts and N conversations are told; a stopped one changes at its next start');
-  ok(/agent-browser install/.test(W.installHint({ command: 'agent-browser install', local: false }, t)) && W.installHint({ command: '' }, t) === null, 'how to add a build: the command, where to run it (installing is the user\'s act, held for a later lane)');
+  ok(gateOf(/2 conversation\(s\)/.test(W.changeSentences({ live: true, holders: 2 }, t)[0].text)) && verdictOf(/next start/.test(W.changeSentences({ live: false }, t)[0].text)), 'the sentence above the button: a running browser restarts and N conversations are told; a stopped one changes at its next start');
+  ok(gateOf(/agent-browser install/.test(W.installHint({ command: 'agent-browser install', local: false }, t))) && W.installHint({ command: '' }, t) === null, 'how to add a build: the command, where to run it (installing is the user\'s act, held for a later lane)');
   const CODES = ['browser_build_missing', 'browser_build_not_executable', 'browser_path_missing', 'browser_path_not_executable', 'browser_choice_invalid', 'browser_choice_provider', 'browser_choice_user_only', 'builds_unsupported', 'builds_unreadable', 'downgrade_refused', 'downgrade_unknown', 'build_noop', 'browsing_yourself', 'browser_restarting'];
-  ok(CODES.every((c) => W.buildRefusalWords({ code: c }, t)) && W.buildRefusalWords({ code: 'x' }, t) === null && CODES.every((c) => BB.BUILD_CODES.includes(c) || ['build_noop', 'browsing_yourself', 'browser_restarting'].includes(c)), 'every refusal code has its sentence (an unknown one is null — the caller adds the server\'s)');
+  ok(gateOf(CODES.every((c) => W.buildRefusalWords({ code: c }, t))) && W.buildRefusalWords({ code: 'x' }, t) === null && verdictOf(CODES.every((c) => BB.BUILD_CODES.includes(c) || ['build_noop', 'browsing_yourself', 'browser_restarting'].includes(c))), 'every refusal code has its sentence (an unknown one is null — the caller adds the server\'s)');
   const said = new Set(); const rec = (k) => { said.add(k); return k; };
   for (const o of [{ choice: { kind: 'build', version: '1.2.3.4' } }, { choice: null }, { choice: { kind: 'path', path: '/a' } }, { choice: null, live: true, running: '1.2.3' }, { choice: { kind: 'build', version: '1.2.3.4' }, missing: {} }]) W.cardBuildLine(o, rec);
   W.buildRows({ ok: true, builds: [{ version: '152.0.1.2', usable: true }, { version: '146.0.1.1', usable: true }, { version: '139.0.1.1', usable: false, why: 'not-executable' }, { version: '138.0.1.1', usable: false, why: 'missing' }] }, { choice: { kind: 'build', version: '151.0.1.1' }, lastChromiumMajor: 151, t: rec });
@@ -195,16 +195,16 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   const noZh = [...said].filter((k) => !(k in zh)), noJa = [...said].filter((k) => !(k in ja));
   ok(said.size > 25 && !noZh.length && !noJa.length, `every sentence the build model says (${said.size}) has a zh and a ja entry`, { noZh, noJa });
   const tv = read('src/lib/browser-trace-view.js');
-  ok(/cardBuildLine\(\{ buildChoice: r\.buildChoice, choice: r\.browser, running: runningBuildOf\(r\.id\), missing: r\.buildMissing, live: !!r\.live, kernelLive: r\.kernelLive \|\| null \}, t\)/.test(tv)
-    && /r\.kernelLive = p && p\.kernelLive \? \{ engine: p\.kernelLive\.engine, version: p\.kernelLive\.version, why: p\.kernelLive\.why, probe: p\.kernelLive\.probe, live: p\.kernelLive\.live \} : null;/.test(read('src/routes/browser-trace.js')) /* B-cf42: the panel's rows carry the mark (the pictures found it missing) */ && /build: \(r\) => openBuildDialog\(app, r\.id,/.test(tv) && /id: 'build', label: t\('Change build…'\)/.test(read('src/lib/browser-panel-model.js')) /* design 015: the ⋯ menu's act */ && /runningBuildOf\(r\.id\)\]\); \};/.test(tv),
+  ok(gateOf(/cardBuildLine\(\{ buildChoice: r\.buildChoice, choice: r\.browser, running: runningBuildOf\(r\.id\), missing: r\.buildMissing, live: !!r\.live, kernelLive: r\.kernelLive \|\| null \}, t\)/.test(tv))
+    && gateOf(/r\.kernelLive = p && p\.kernelLive \? \{ engine: p\.kernelLive\.engine, version: p\.kernelLive\.version, why: p\.kernelLive\.why, probe: p\.kernelLive\.probe, live: p\.kernelLive\.live \} : null;/.test(read('src/routes/browser-trace.js'))) /* B-cf42: the panel's rows carry the mark (the pictures found it missing) */ && gateOf(/build: \(r\) => openBuildDialog\(app, r\.id,/.test(tv)) && gateOf(/id: 'build', label: t\('Change build…'\)/.test(read('src/lib/browser-panel-model.js'))) /* design 015: the ⋯ menu's act */ && verdictOf(/runningBuildOf\(r\.id\)\]\); \};/.test(tv)),
     'the Agent browser panel row: the build line (its fact in the row\'s signature) + Change build… opening THE dialog');
   const sw = read('src/lib/browser-switcher.js');
-  ok(/st\.view\.build \? cardBuildLine\(/.test(sw) && /a\.kind === 'build'\) \{ close\(\); openBuildDialog\(app, profileId,/.test(sw), 'the switch dialog gains the build row and its ONE act');
+  ok(gateOf(/st\.view\.build \? cardBuildLine\(/.test(sw)) && verdictOf(/a\.kind === 'build'\) \{ close\(\); openBuildDialog\(app, profileId,/.test(sw)), 'the switch dialog gains the build row and its ONE act');
   const rb = read('src/routes/browser.js');
-  ok(/router\.post\('\/api\/browser\/profiles\/:id\/build', async \(req, res\) => \{\s*if \(refuseHost\(req, res\)\) return;\s*if \(refuseAgentBearer\(req, res, BUILD_IS_USERS\)\) return;/.test(rb) && /if \(req\.body && req\.body\.browser != null\) return res\.status\(403\)\.json\(\{ error: BUILD_IS_USERS, code: 'browser_choice_user_only' \}\);/.test(rb)
-    && /createdBy: f\.browserKey, by: 'agent' \}/.test(rb), 'the routes: Change build… is cookie-only (an agent token refused by name); the agent\'s `new` refuses a build and creates `by: agent`');
+  ok(gateOf(/router\.post\('\/api\/browser\/profiles\/:id\/build', async \(req, res\) => \{\s*if \(refuseHost\(req, res\)\) return;\s*if \(refuseAgentBearer\(req, res, BUILD_IS_USERS\)\) return;/.test(rb)) && gateOf(/if \(req\.body && req\.body\.browser != null\) return res\.status\(403\)\.json\(\{ error: BUILD_IS_USERS, code: 'browser_choice_user_only' \}\);/.test(rb))
+    && verdictOf(/createdBy: f\.browserKey, by: 'agent' \}/.test(rb)), 'the routes: Change build… is cookie-only (an agent token refused by name); the agent\'s `new` refuses a build and creates `by: agent`');
   const hb = read('src/server/browser-handback.js');
-  ok(/keeper\.onRelaunch\(\(ev\) => \{ try \{ announceRelaunch\(ev\);/.test(hb) && !/announceRelaunch[\s\S]{0,2500}deliverToConversation/.test(hb.slice(hb.indexOf('function announceRelaunch'), hb.indexOf('function announceRelaunch') + 2500)), 'the announcer tells a relaunch through the CARD path + a zero-spend notice (never a delivery — nobody typed it)');
+  ok(gateOf(/keeper\.onRelaunch\(\(ev\) => \{ try \{ announceRelaunch\(ev\);/.test(hb)) && !/announceRelaunch[\s\S]{0,2500}deliverToConversation/.test(hb.slice(hb.indexOf('function announceRelaunch'), hb.indexOf('function announceRelaunch') + 2500)), 'the announcer tells a relaunch through the CARD path + a zero-spend notice (never a delivery — nobody typed it)');
 }
 
 // ═══ ⑥ lane chrome-builds-download (design 004): the PURE half + the picker's words ═══════════════════════════════
@@ -214,44 +214,44 @@ console.log('— ⑥ Download another build…: the two list parsers, THE compat
   const FIX = path.join(REPO, 'scripts/fixtures/chrome-for-testing');
   const lkg = JSON.parse(fs.readFileSync(path.join(FIX, 'last-known-good-versions-with-downloads.json'), 'utf8'));
   const kg = JSON.parse(fs.readFileSync(path.join(FIX, 'known-good-versions-with-downloads.trimmed.json'), 'utf8'));
-  ok(R.listHost === 'googlechromelabs.github.io' && R.fileHost === 'storage.googleapis.com' && R.platform === 'linux64' && R.layout === 'chrome-linux64/' && R.measured.stable === '154.0.8037.92' && R.measured.bytes === 196202491 && Object.isFrozen(R),
+  ok(R.listHost === 'googlechromelabs.github.io' && R.fileHost === 'storage.googleapis.com' && R.platform === 'linux64' && R.layout === 'chrome-linux64/' && R.measured.stable === '154.0.8037.92' && R.measured.bytes === 196202491 && verdictOf(Object.isFrozen(R)),
     'CHROME_BUILDS_RECORD: the two measured hosts (the ONE place they are spelled), the platform, the layout, the measurement');
   const p1 = BB.parseLastKnownGood(lkg, { fileHost: R.fileHost });
-  ok(p1.ok && p1.rows.map((r) => r.channel).join() === 'Stable,Beta,Dev,Canary' && p1.rows[0].version === '154.0.8037.92' && p1.rows.every((r) => r.url === `https://${R.fileHost}/chrome-for-testing-public/${r.version}/linux64/chrome-linux64.zip`) && !p1.refused.length, 'the 10 KB channel list (measured): four rows, each the linux64 zip on the file host', p1.rows);
+  ok(gateOf(p1.ok) && p1.rows.map((r) => r.channel).join() === 'Stable,Beta,Dev,Canary' && p1.rows[0].version === '154.0.8037.92' && gateOf(p1.rows.every((r) => r.url === `https://${R.fileHost}/chrome-for-testing-public/${r.version}/linux64/chrome-linux64.zip`)) && !p1.refused.length, 'the 10 KB channel list (measured): four rows, each the linux64 zip on the file host', p1.rows);
   const planted = JSON.parse(JSON.stringify(lkg));
   planted.channels.Beta.downloads.chrome.find((d) => d.platform === 'linux64').url = 'https://evil.example.com/chrome-linux64.zip';
   planted.channels.Dev.downloads.chrome.find((d) => d.platform === 'linux64').url = `http://${R.fileHost}/x.zip`;
   planted.channels.Canary.downloads.chrome.find((d) => d.platform === 'linux64').url = `https://u:p@${R.fileHost}/x.zip`;
   const p2 = BB.parseLastKnownGood(planted, { fileHost: R.fileHost });
-  ok(p2.ok && p2.rows.map((r) => r.channel).join() === 'Stable' && p2.refused.length === 3 && p2.refused.every((x) => x.code === 'build_url_offhost') && /evil\.example\.com/.test(p2.refused[0].error), 'an off-host url, a plain-http one, one with credentials: each row refused BY NAME, never offered', p2.refused);
+  ok(gateOf(p2.ok) && p2.rows.map((r) => r.channel).join() === 'Stable' && p2.refused.length === 3 && gateOf(p2.refused.every((x) => x.code === 'build_url_offhost')) && verdictOf(/evil\.example\.com/.test(p2.refused[0].error)), 'an off-host url, a plain-http one, one with credentials: each row refused BY NAME, never offered', p2.refused);
   ok(BB.parseLastKnownGood({ nope: 1 }, { fileHost: R.fileHost }).code === 'build_list_invalid' && BB.parseKnownGood({ versions: 'x' }, { fileHost: R.fileHost }).code === 'build_list_invalid', 'a document of another shape: refused whole (`build_list_invalid`), never a crash');
   const p3 = BB.parseKnownGood(kg, { fileHost: R.fileHost });
-  ok(p3.ok && p3.versions.length === 23 && p3.versions[0].version === '157.0.8083.0' && p3.versions.at(-1).version === '113.0.5672.0' && BB.majorsOf(p3.versions).map((m) => m.major).join() === '157,154,153,151,146,113' && BB.majorsOf(p3.versions).find((m) => m.major === 151).count === 4,
+  ok(gateOf(p3.ok) && p3.versions.length === 23 && p3.versions[0].version === '157.0.8083.0' && p3.versions.at(-1).version === '113.0.5672.0' && BB.majorsOf(p3.versions).map((m) => m.major).join() === '157,154,153,151,146,113' && BB.majorsOf(p3.versions).find((m) => m.major === 151).count === 4,
     'the known-good list (trimmed to 6 majors): every linux64 version newest first; one row per major with its newest and its count');
   const C = (o) => BB.buildCompatVerdict({ version: '155.0.1.2', platform: 'linux', arch: 'x64', ...o });
   const chip = (v, k) => v.chips.find((x) => x.kind === k);
   const mac = C({ platform: 'darwin', arch: 'arm64', command: '/x/agent-browser install' });
-  ok(!mac.ok && mac.code === 'build_platform_unsupported' && /Linux x64.*darwin-arm64 install by hand: \/x\/agent-browser install/.test(mac.error), 'HARD machine: off Linux x64 the download is refused, the hand command said', mac.error);
+  ok(!mac.ok && mac.code === 'build_platform_unsupported' && verdictOf(/Linux x64.*darwin-arm64 install by hand: \/x\/agent-browser install/.test(mac.error)), 'HARD machine: off Linux x64 the download is refused, the hand command said', mac.error);
   const d1 = C({ zipBytes: 100e6, freeBytes: 299e6, freePath: '/home' }), d2 = C({ zipBytes: 100e6, freeBytes: 300e6 }), d3 = C({ freeBytes: 1 });
-  ok(!d1.ok && d1.code === 'disk' && d1.hard[0].need === 300e6 && /needs about 300 MB free, 299 MB left on \/home/.test(d1.error) && d2.ok && d3.ok && !d3.hard.length, 'HARD disk: free bytes against the zip\'s length × 3, with the numbers; no length yet ⇒ no disk row');
-  ok(C({ present: true }).ok && C({ present: true }).offer === false && chip(C({ present: true }), 'present'), 'present: a chip ("Already on this computer"), the row offers nothing — not a refusal');
+  ok(!d1.ok && d1.code === 'disk' && d1.hard[0].need === 300e6 && gateOf(/needs about 300 MB free, 299 MB left on \/home/.test(d1.error)) && gateOf(d2.ok) && gateOf(d3.ok) && !d3.hard.length, 'HARD disk: free bytes against the zip\'s length × 3, with the numbers; no length yet ⇒ no disk row');
+  ok(gateOf(C({ present: true }).ok) && C({ present: true }).offer === false && verdictOf(chip(C({ present: true }), 'present')), 'present: a chip ("Already on this computer"), the row offers nothing — not a refusal');
   ok(chip(C({ census: 'newer', censusChrome: '154.0.8037.57' }), 'census').census === '154.0.8037.57' && chip(C({ census: 'between' }), 'census').relation === 'older' && chip(C({ census: 'censused' }), 'census').relation === 'censused', 'the census chip: the relation chromeRelation gave (between reads as older)');
   ok(chip(C({ profile: { label: 'Work', lastChromiumMajor: 156 } }), 'profile').wrote === 156 && !chip(C({ profile: { label: 'Work', lastChromiumMajor: 155 } }), 'profile') && !chip(C({ profile: { lastChromiumMajor: null } }), 'profile'), 'this profile: a chip only for a build OLDER than the major that last opened it');
   ok(!['146.0.1.1', '151.0.1.1', '152.0.1.1'].some((v) => chip(BB.buildCompatVerdict({ version: v, platform: 'linux', arch: 'x64' }), 'cloak')), 'no chip about switching to the anti-bot backend later (lane engine-spi-egress L3: it left the core)');
   const pl = BB.downloadPlan({ version: '154.0.8037.92', buildsRoot: '/h/.agent-browser/browsers' });
-  ok(pl.ok && pl.part === '/h/.agent-browser/browsers/chrome-154.0.8037.92.part' && pl.unpackDir === '/h/.agent-browser/browsers/.unpack-154.0.8037.92' && pl.targetDir === '/h/.agent-browser/browsers/chrome-154.0.8037.92' && pl.removingDir === '/h/.agent-browser/browsers/.removing-154.0.8037.92'
-    && ['../x', '154.0.8037.92/../../x', '154.0.8037.92/x', ''].every((v) => BB.downloadPlan({ version: v, buildsRoot: '/h' }).code === 'build_version_invalid') && !BB.parseBuildDir('chrome-154.0.8037.92.part') && !BB.parseBuildDir('.unpack-154.0.8037.92'),
+  ok(gateOf(pl.ok) && pl.part === '/h/.agent-browser/browsers/chrome-154.0.8037.92.part' && pl.unpackDir === '/h/.agent-browser/browsers/.unpack-154.0.8037.92' && pl.targetDir === '/h/.agent-browser/browsers/chrome-154.0.8037.92' && pl.removingDir === '/h/.agent-browser/browsers/.removing-154.0.8037.92'
+    && gateOf(['../x', '154.0.8037.92/../../x', '154.0.8037.92/x', ''].every((v) => BB.downloadPlan({ version: v, buildsRoot: '/h' }).code === 'build_version_invalid')) && !BB.parseBuildDir('chrome-154.0.8037.92.part') && !BB.parseBuildDir('.unpack-154.0.8037.92'),
     'the plan: every path inside the builds folder; a version that is a path is refused; .part / .unpack- / .removing- are never listed as builds');
   const okZip = ['chrome-linux64/', 'chrome-linux64/chrome', 'chrome-linux64/locales/', 'chrome-linux64/locales/en-US.pak'];
   const Z = (extra, base = okZip) => BB.zipShapeVerdict([...base, ...extra]);
-  ok(Z([]).ok && Z([]).files === 2, 'the zip: the measured layout passes');
+  ok(gateOf(Z([]).ok) && Z([]).files === 2, 'the zip: the measured layout passes');
   const zbad = [[['chrome-linux64/../x'], '..'], [['/etc/passwd'], 'absolute'], [[{ name: 'chrome-linux64/lnk', kind: 'link' }], 'link'], [['other/x'], 'outside'], [['chrome-linux64/chrome'], 'twice'], [['chrome-linux64/a\\b'], 'backslash'], [['chrome-linux64/./x'], '"."'], [[{ name: 'chrome-linux64/fifo', kind: 'other' }], 'special']];
-  ok(zbad.every(([e]) => Z(e).code === 'build_zip_shape') && BB.zipShapeVerdict(['chrome-linux64/', 'chrome-linux64/x']).code === 'build_zip_shape' && BB.zipShapeVerdict([]).code === 'build_zip_shape', 'the zip refused by name: "..", absolute, a link, outside the layout, a duplicate, a backslash, ".", a special entry, no chrome, empty', zbad.map(([e, w]) => [w, Z(e).error]));
+  ok(gateOf(zbad.every(([e]) => Z(e).code === 'build_zip_shape')) && BB.zipShapeVerdict(['chrome-linux64/', 'chrome-linux64/x']).code === 'build_zip_shape' && BB.zipShapeVerdict([]).code === 'build_zip_shape', 'the zip refused by name: "..", absolute, a link, outside the layout, a duplicate, a backslash, ".", a special entry, no chrome, empty', zbad.map(([e, w]) => [w, Z(e).error]));
   const zl = BB.parseZipListing('chrome-linux64/\nchrome-linux64/chrome\nchrome-linux64/l\n', 'Archive:  x.zip\nZip file size: 9 bytes, number of entries: 3\ndrwxr-xr-x  3.0 unx        0 bx stor 26-Oct-02 21:49 chrome-linux64/\n-rwxr-xr-x  3.0 unx       51 tx stor 26-Oct-02 21:49 chrome-linux64/chrome\nlrwxrwxrwx  3.0 unx       11 bx stor 26-Oct-02 21:49 chrome-linux64/l\n3 files, 62 bytes uncompressed\n');
-  ok(zl.ok && zl.entries.map((e) => e.kind).join() === 'dir,file,link' && BB.zipShapeVerdict(zl.entries).code === 'build_zip_shape' && BB.parseZipListing('a\nb\n', '-rw-r--r--  3.0 unx 1 tx stor 26-Oct-02 21:49 a\n').code === 'build_zip_shape',
+  ok(gateOf(zl.ok) && zl.entries.map((e) => e.kind).join() === 'dir,file,link' && BB.zipShapeVerdict(zl.entries).code === 'build_zip_shape' && BB.parseZipListing('a\nb\n', '-rw-r--r--  3.0 unx 1 tx stor 26-Oct-02 21:49 a\n').code === 'build_zip_shape',
     'unzip\'s two listings paired: names from -Z1, kinds from -Zs (a link is seen); listings that do not pair are refused');
-  ok(BB.versionSays('Google Chrome for Testing 154.0.8037.92 \n', '154.0.8037.92').ok && BB.versionSays('Google Chrome for Testing 154.0.8037.93', '154.0.8037.92').says === '154.0.8037.93' && !BB.versionSays('', '1.2.3.4').ok, '`chrome --version` must name exactly the version');
-  ok(['build_platform_unsupported', 'disk', 'build_zip_shape', 'build_url_offhost', 'build_in_use', 'build_not_downloaded', 'unzip_unavailable', 'install_running', 'build_stalled'].every((c) => BB.BUILD_CODES.includes(c)) && BB.BUILD_CODES.every((c) => /'?[a-z_]+'?: \d{3}/.test(c) || read('src/routes/browser.js').includes(`${c}: `) || read('src/routes/browser.js').includes(`'${c}': `)),
+  ok(gateOf(BB.versionSays('Google Chrome for Testing 154.0.8037.92 \n', '154.0.8037.92').ok) && BB.versionSays('Google Chrome for Testing 154.0.8037.93', '154.0.8037.92').says === '154.0.8037.93' && !BB.versionSays('', '1.2.3.4').ok, '`chrome --version` must name exactly the version');
+  ok(gateOf(['build_platform_unsupported', 'disk', 'build_zip_shape', 'build_url_offhost', 'build_in_use', 'build_not_downloaded', 'unzip_unavailable', 'install_running', 'build_stalled'].every((c) => BB.BUILD_CODES.includes(c))) && verdictOf(BB.BUILD_CODES.every((c) => /'?[a-z_]+'?: \d{3}/.test(c) || read('src/routes/browser.js').includes(`${c}: `) || read('src/routes/browser.js').includes(`'${c}': `))),
     'every refusal code is in BUILD_CODES and the routes\' STATUS table');
   const W = await import('../src/lib/browser-build-model.js');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
@@ -260,16 +260,16 @@ console.log('— ⑥ Download another build…: the two list parsers, THE compat
   const rowsDl = W.buildRows({ ok: true, builds: [] }, { local: true, t, download: { offered: true } });
   ok(rowsDl.at(-1).kind === 'download' && rowsDl.at(-1).label === 'Download another build…' && !W.buildRows({ ok: true, builds: [] }, { local: false, t, download: { offered: false } }).some((r) => r.kind === 'download') && W.choiceOfRow(rowsDl.at(-1)) === null,
     'Change build… / New profile…: the LAST row "Download another build…" on this computer (Linux x64) — an act, never a choice; none on a paired machine');
-  ok(W.installHint({ command: 'ab install', local: true, download: { offered: true } }, t) === null && /Linux x64.*darwin-arm64.*ab install/.test(W.installHint({ command: 'ab install', local: true, download: { offered: false, machine: 'darwin-arm64' } }, t)) && /paired machine aren't offered yet.*ab install/.test(W.installHint({ command: 'ab install', local: false, download: { offered: false } }, t)),
+  ok(W.installHint({ command: 'ab install', local: true, download: { offered: true } }, t) === null && gateOf(/Linux x64.*darwin-arm64.*ab install/.test(W.installHint({ command: 'ab install', local: true, download: { offered: false, machine: 'darwin-arm64' } }, t))) && verdictOf(/paired machine aren't offered yet.*ab install/.test(W.installHint({ command: 'ab install', local: false, download: { offered: false } }, t))),
     'the hand command: gone where the row is; elsewhere said WITH the reason (another machine kind, a paired machine)');
   const lines = W.verdictLines(BB.buildCompatVerdict({ version: '155.0.1.2', platform: 'linux', arch: 'x64', census: 'newer', censusChrome: '154.0.8037.57', profile: { label: 'Work', lastChromiumMajor: 156 }, cli: '0.38.1', zipBytes: 100e6, freeBytes: 1e6, freePath: '/h' }), t).map((x) => x.text);
-  ok(/Needs about 300 MB free, 1 MB left on \/h/.test(lines[0]) && lines.includes('Driven by agent-browser 0.38.1') && lines.some((x) => /Newer than the census \(154\.0\.8037\.57\)/.test(x)) && lines.some((x) => /last opened Work \(156\)/.test(x)) && !lines.some((x) => /CloakBrowser/.test(x)), 'a row\'s lines: the HARD refusal first with its numbers, then every chip in words', lines);
+  ok(gateOf(/Needs about 300 MB free, 1 MB left on \/h/.test(lines[0])) && gateOf(lines.includes('Driven by agent-browser 0.38.1')) && gateOf(lines.some((x) => /Newer than the census \(154\.0\.8037\.57\)/.test(x))) && gateOf(lines.some((x) => /last opened Work \(156\)/.test(x))) && !lines.some((x) => /CloakBrowser/.test(x)), 'a row\'s lines: the HARD refusal first with its numbers, then every chip in words', lines);
   const cf = W.downloadConfirmWords({ version: '154.0.8037.92', host: 'storage.googleapis.com', bytes: 196202491, root: '/h/.agent-browser/browsers' }, t);
-  ok(cf.title === 'Download Chrome 154.0.8037.92?' && /About 196 MB comes from storage\.googleapis\.com and unpacks to about 392 MB in \/h\/\.agent-browser\/browsers/.test(cf.message) && /Google publishes no separate one/.test(cf.message) && /Nothing restarts/.test(cf.message) && /never auto-updates/.test(cf.message) && cf.confirmText === 'Download',
+  ok(cf.title === 'Download Chrome 154.0.8037.92?' && gateOf(/About 196 MB comes from storage\.googleapis\.com and unpacks to about 392 MB in \/h\/\.agent-browser\/browsers/.test(cf.message)) && gateOf(/Google publishes no separate one/.test(cf.message)) && gateOf(/Nothing restarts/.test(cf.message)) && gateOf(/never auto-updates/.test(cf.message)) && cf.confirmText === 'Download',
     'THE CONFIRM: the version, the host, the size, where it lands, how it is checked (and that Google publishes no checksum), nothing restarts, no auto-update; one button');
-  ok(W.downloadProgressWords({ running: true, step: 'fetch', version: '1.2.3.4', bytes: 42e6, total: 196e6 }, t).text === 'Downloading Chrome 1.2.3.4… 42 MB of 196 MB' && /^Unpacking/.test(W.downloadProgressWords({ running: true, step: 'unpack', version: 'x' }, t).text) && W.downloadProgressWords({ done: '1.2.3.4' }, t).done && /didn't finish in 15 minutes/.test(W.downloadProgressWords({ failed: true, version: 'x', code: 'build_stalled' }, t).text),
+  ok(W.downloadProgressWords({ running: true, step: 'fetch', version: '1.2.3.4', bytes: 42e6, total: 196e6 }, t).text === 'Downloading Chrome 1.2.3.4… 42 MB of 196 MB' && gateOf(/^Unpacking/.test(W.downloadProgressWords({ running: true, step: 'unpack', version: 'x' }, t).text)) && gateOf(W.downloadProgressWords({ done: '1.2.3.4' }, t).done) && verdictOf(/didn't finish in 15 minutes/.test(W.downloadProgressWords({ failed: true, version: 'x', code: 'build_stalled' }, t).text)),
     'the progress line: "downloading… 42 MB of 196 MB" → unpacking… → ready; a failure says why (the 15-minute clock by name)');
-  ok(W.installedWords({ bytes: 389e6, downloaded: true }, t).remove && !W.installedWords({ bytes: 389e6 }, t).remove && /in use by Work/.test(W.installedWords({ bytes: 1, downloaded: true, profiles: ['Work'] }, t).text) && /in use — Work, Live/.test(W.downloadRefusalWords({ code: 'build_in_use', build: { profiles: ['Work'], running: ['Live'] } }, t)),
+  ok(gateOf(W.installedWords({ bytes: 389e6, downloaded: true }, t).remove) && !W.installedWords({ bytes: 389e6 }, t).remove && gateOf(/in use by Work/.test(W.installedWords({ bytes: 1, downloaded: true, profiles: ['Work'] }, t).text)) && verdictOf(/in use — Work, Live/.test(W.downloadRefusalWords({ code: 'build_in_use', build: { profiles: ['Work'], running: ['Live'] } }, t))),
     'installed builds: Remove only on a build VibeSpace downloaded that nobody uses; in use names who');
   for (const [lang, d] of [['zh', zh], ['ja', ja]]) {
     const tt = mkT(d); const said = new Set(); const rec = (k, pp) => { said.add(k); return tt(k, pp); };
@@ -284,7 +284,7 @@ console.log('— ⑥ Download another build…: the two list parsers, THE compat
     ok(said.size > 45 && !miss.length, `${lang}: every sentence of the picker (${said.size}) has its entry`, miss);
   }
   const dg = read('src/lib/browser-build-dialog.js'), np = read('src/lib/browser-new-profile.js');
-  ok(/if \(r\.kind === 'download'\) \{ list\.appendChild\(downloadRow\(r, \(\) => openPicker\(\)\)\); continue; \}/.test(dg) && /const was = shell\.active\(\) \? 'person' : 'system'; shell\.close\(\); openBuildDialog\(app, id, \{ label, onDone, pick: v, opener: was \}\)/.test(dg) && /if \(r\.kind === 'download'\) \{ order\.push\(row \|\| downloadRow\(r, openBuildPicker\)\); continue; \}/.test(np) && /st\.buildDownload = r && !r\.error \? r\.download \|\| null : null;/.test(np),
+  ok(gateOf(/if \(r\.kind === 'download'\) \{ list\.appendChild\(downloadRow\(r, \(\) => openPicker\(\)\)\); continue; \}/.test(dg)) && gateOf(/const was = shell\.active\(\) \? 'person' : 'system'; shell\.close\(\); openBuildDialog\(app, id, \{ label, onDone, pick: v, opener: was \}\)/.test(dg)) && gateOf(/if \(r\.kind === 'download'\) \{ order\.push\(row \|\| downloadRow\(r, openBuildPicker\)\); continue; \}/.test(np)) && verdictOf(/st\.buildDownload = r && !r\.error \? r\.download \|\| null : null;/.test(np)),
     'wiring: Change build… opens the picker in the dialog and comes back with the new build picked (the finished download re-opens it where the old form stood — in front only if it was the active window, else behind with its tile pulsing; lane dialog-yield r5); New profile…\'s build section opens it in place');
 }
 
@@ -309,7 +309,7 @@ console.log('— verify r1: the default chip · the zip\'s declared unpacked siz
     && !d(cv('153.0.8010.47', { defaultBuild: '154.0.8037.92' })) && !d(cv('154.0.8037.92', { defaultBuild: '154.0.8037.92' })) && !d(cv('157.0.8083.0', { defaultBuild: '154.0.8037.92', present: true })) && !d(cv('157.0.8083.0', {})),
     'the default chip: only a version newer than every build here (or with none) says it, naming the default-choice profiles; never an older / equal / present one, nor when not asked');
   const zl = BB.parseZipListing('chrome-linux64/\nchrome-linux64/chrome\nchrome-linux64/blob\n', 'drwxr-xr-x  3.0 unx        0 b- stor 80-000-00 00:00 chrome-linux64/\n-rwxr-xr-x  3.0 unx       51 b- stor 80-000-00 00:00 chrome-linux64/chrome\n-rw-r--r--  3.0 unx 67108864 b- defN 80-000-00 00:00 chrome-linux64/blob\n');
-  ok(zl.ok && BB.zipShapeVerdict(zl.entries).unpacked === 67108915, 'the zip\'s declared unpacked size is summed over its files (the keeper weighs it against the free space before `unzip -q`)', zl);
+  ok(gateOf(zl.ok) && BB.zipShapeVerdict(zl.entries).unpacked === 67108915, 'the zip\'s declared unpacked size is summed over its files (the keeper weighs it against the free space before `unzip -q`)', zl);
 }
 
 
@@ -336,17 +336,17 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   ] };
   const WANT = [{ id: 'eng-missing', label: 'Missing', busy: false }, { id: 'eng-failed', label: 'Failed', busy: false }, { id: 'eng-busy', label: 'Busy', busy: true }, { id: 'eng-unread', label: 'Unread', busy: false }];
   const judgeDoors = (M) => JSON.stringify(M.kernelDoors(R0)) === JSON.stringify(WANT) && M.kernelDoors(null).length === 0 && M.kernelDoors({ error: 'unreachable' }).length === 0;
-  ok(judgeDoors(BMk), 'B-0bc7 kernelDoors: a door for a kernel not here (none yet, a failed download), one BUSY while it downloads, one for a waiting kernel that could not be read — none for an installed kernel, the owner\'s own program, an engine that does not answer, a package waiting for consent, a Node that cannot unpack it; none when the engines could not be read', BMk.kernelDoors(R0));
+  ok(verdictOf(judgeDoors(BMk)), 'B-0bc7 kernelDoors: a door for a kernel not here (none yet, a failed download), one BUSY while it downloads, one for a waiting kernel that could not be read — none for an installed kernel, the owner\'s own program, an engine that does not answer, a package waiting for consent, a Node that cannot unpack it; none when the engines could not be read', BMk.kernelDoors(R0));
   const DOOR = ' · press «Download kernel» to fetch it again';
   const unreadSet = BMk.engineNote(R0.engines[3], tE, { door: true }), unreadCard = BMk.engineNote(R0.engines[3], tE);
-  ok(unreadSet.endsWith('the waiting kernel 2.0 could not be read (EIO) — it is kept beside its place and asked again at the next start' + DOOR) && !unreadCard.includes('Download kernel') && BMk.engineFactText(R0, tE).includes(DOOR),
+  ok(gateOf(unreadSet.endsWith('the waiting kernel 2.0 could not be read (EIO) — it is kept beside its place and asked again at the next start' + DOOR)) && !unreadCard.includes('Download kernel') && verdictOf(BMk.engineFactText(R0, tE).includes(DOOR)),
     'B-0bc7: the unread waiting kernel\'s words name the door in the Settings row (engineFactText) — and NOT on the Change build… / New profile… cards, which have none (the adversarial read)', { unreadSet, unreadCard });
   ok(BMk.kernelPollDue(R0) === true && BMk.kernelPollDue({ ...R0, engines: R0.engines.filter((e) => e.id !== 'eng-busy') }) === false && BMk.kernelPollDue(null) === false && BMk.kernelPollDue({ error: 'unreachable' }) === false,
     'B-0bc7 kernelPollDue: the row asks again while ANY kernel downloads (the press\'s POST answers at the start) and stops when none does');
   // the second adversarial read: a read that FAILED in the middle of a download never ends its progress
   const judgeStep = (M) => { const a = M.kernelPollStep(R0, false), b = M.kernelPollStep(null, true), c = M.kernelPollStep({ error: 'unreachable' }, true), d = M.kernelPollStep(null, false), e = M.kernelPollStep({ ...R0, engines: R0.engines.filter((x) => x.id !== 'eng-busy') }, true);
     return a.polling && a.tick && a.redraw && b.polling && b.tick && !b.redraw && c.tick && !c.redraw && !d.tick && !d.polling && !e.polling && !e.tick && e.redraw; };
-  ok(judgeStep(BMk), 'B-0bc7 kernelPollStep: a good read with a download ⇒ polling, ask again; a FAILED read while a download ran ⇒ the doors stay as drawn and the row asks again; a failed read with none running ⇒ nothing; a good read with none ⇒ the poll ends');
+  ok(verdictOf(judgeStep(BMk)), 'B-0bc7 kernelPollStep: a good read with a download ⇒ polling, ask again; a FAILED read while a download ran ⇒ the doors stay as drawn and the row asks again; a failed read with none running ⇒ nothing; a good read with none ⇒ the poll ends');
   const ANS = [[{ ok: true, started: true, id: 'eng-missing' }, ''], [{ ok: false, code: 'install_running', error: 'x' }, 'its kernel is already downloading'],
     [{ ok: false, code: 'disk', error: 'x' }, 'the kernel could not be downloaded: not enough free disk space'],
     [{ ok: false, code: 'build_platform_unsupported', error: 'x' }, 'the kernel could not be downloaded: the engine offers no kernel for this computer'],
@@ -358,17 +358,17 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   const ph = (k) => (k.match(/\{\w+\}/g) || []);
   const missing = KEYS.flatMap((k) => [['zh', zhK], ['ja', jaK]].filter(([, d]) => !(typeof d[k] === 'string' && d[k] !== k && ph(k).every((x) => d[k].includes(x)))).map(([l]) => `${l}: ${k}`));
   ok(missing.length === 0, `B-0bc7: every new word (${KEYS.length}) in zh AND ja, its placeholders kept`, missing);
-  ok(BMk.engineNote(R0.engines[3], tOf(zhK), { door: true }).endsWith('按「下载内核」重新获取') && BMk.engineNote(R0.engines[3], tOf(jaK), { door: true }).endsWith('「カーネルをダウンロード」を押すと取得し直します') && BMk.kernelDownloadWords({ ok: false, code: 'install_running' }, tOf(zhK)) === '它的内核正在下载',
+  ok(gateOf(BMk.engineNote(R0.engines[3], tOf(zhK), { door: true }).endsWith('按「下载内核」重新获取')) && gateOf(BMk.engineNote(R0.engines[3], tOf(jaK), { door: true }).endsWith('「カーネルをダウンロード」を押すと取得し直します')) && BMk.kernelDownloadWords({ ok: false, code: 'install_running' }, tOf(zhK)) === '它的内核正在下载',
     'B-0bc7: …said in zh / ja through the real dictionaries');
   // the Settings row's wiring (DOM-free here; the drawn row is the integrator's heavy read): the doors drawn with EVERY answer of the
   // engines, the person's POST, the row asked again while a kernel downloads (by the LINE's own tick), each door's answer beside it
   const ui = read('src/lib/settings-ui.js'), css = read('public/style.css');
-  ok(/line\.textContent = engineFactText\(r, t\);\n[^\n]*\n[^\n]*\n\s+if \(d\) line\.append\(' ', needDoorButton\(d\)\);\n\s+this\._paintKernelDoors\(line, r, \(\) => this\._loadEngines\(row, path, line\)\);/.test(ui)   // the restack -moved2: the line's words, its need door (lane ui-needs-a-button pick 5), then the kernel doors
-    && /fetchJson\(`\/api\/browser\/engines\/\$\{encodeURIComponent\(id\)\}\/kernel`, \{ method: 'POST' \}\)/.test(ui)
-    && ui.includes('const tick = () => { if (!line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); };')
-    && ui.includes('    const step = kernelPollStep(r, line._kernelPolling);\n    line._kernelPolling = step.polling;\n    if (!step.redraw) { if (step.tick) tick(); return; }') && ui.includes('    if (step.tick) tick();\n')
-    && !/setInterval\(again/.test(ui) && /const words = kernelDownloadWords\(ans, t\);\n\s+if \(words\) this\._kernelSaid\.set\(id, words\);/.test(ui) && /b\.classList\.toggle\('is-busy', busy\);/.test(ui) && /if \(d\.busy \|\| this\._kernelAsks\.has\(d\.id\)\) \{ this\._kernelSaid\.set\(d\.id, t\('its kernel is already downloading'\)\); again\(\); return; \}/.test(ui) && !/\.disabled = /.test(ui.slice(ui.indexOf('  _paintKernelDoors('), ui.indexOf('\n  }\n', ui.indexOf('  async _downloadKernel(')))) /* the doors' own code (another row's button, e.g. hooks-create's Apply, is not these doors) */
-    && /, \.settings-engine-download \{ flex: none;/.test(css) && /\.settings-engine-doors \{/.test(css),
+  ok(gateOf(/line\.textContent = engineFactText\(r, t\);\n[^\n]*\n[^\n]*\n\s+if \(d\) line\.append\(' ', needDoorButton\(d\)\);\n\s+this\._paintKernelDoors\(line, r, \(\) => this\._loadEngines\(row, path, line\)\);/.test(ui))   // the restack -moved2: the line's words, its need door (lane ui-needs-a-button pick 5), then the kernel doors
+    && gateOf(/fetchJson\(`\/api\/browser\/engines\/\$\{encodeURIComponent\(id\)\}\/kernel`, \{ method: 'POST' \}\)/.test(ui))
+    && gateOf(ui.includes('const tick = () => { if (!line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); };'))
+    && gateOf(ui.includes('    const step = kernelPollStep(r, line._kernelPolling);\n    line._kernelPolling = step.polling;\n    if (!step.redraw) { if (step.tick) tick(); return; }')) && gateOf(ui.includes('    if (step.tick) tick();\n'))
+    && !/setInterval\(again/.test(ui) && gateOf(/const words = kernelDownloadWords\(ans, t\);\n\s+if \(words\) this\._kernelSaid\.set\(id, words\);/.test(ui)) && gateOf(/b\.classList\.toggle\('is-busy', busy\);/.test(ui)) && gateOf(/if \(d\.busy \|\| this\._kernelAsks\.has\(d\.id\)\) \{ this\._kernelSaid\.set\(d\.id, t\('its kernel is already downloading'\)\); again\(\); return; \}/.test(ui)) && !/\.disabled = /.test(ui.slice(ui.indexOf('  _paintKernelDoors('), ui.indexOf('\n  }\n', ui.indexOf('  async _downloadKernel(')))) /* the doors' own code (another row's button, e.g. hooks-create's Apply, is not these doors) */
+    && gateOf(/, \.settings-engine-download \{ flex: none;/.test(css)) && verdictOf(/\.settings-engine-doors \{/.test(css)),
     'B-0bc7 wiring: the Settings engine row draws the doors with every engines answer, POSTs a press, asks the row again by the line\'s own tick while a kernel downloads (never a timer tied to the POST), keeps a busy door LIVE and has it say why, says each door\'s answer beside it (the old answer ends only when a download STARTS), redraws only when the doors moved and gives the focus back to its door — the row\'s own button rule (theme variables)');
   // CONTROL: a model copy whose doors skip a FAILED download (only «none yet») — the engine whose download failed would have no door
   const MUTK = mutantCopies('b0bc7-doors', REPO);
@@ -399,7 +399,7 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
     return { drawn: s2.said.get('eng-x') === BUSY, endsAtEnd: !s3.said.has('eng-x'), standsWhileSame: s4.said.has('eng-x'), endsAtStart: !s5.said.has('eng-x') };
   };
   const js = judgeSaid(BMk);
-  ok(js.drawn && js.endsAtEnd && js.standsWhileSame && js.endsAtStart, `B-0bc7 (its verdict's must + cure 2): a press on a busy door, then a read that still says downloading — its words are DRAWN (${js.drawn}); the download then FAILS — «already downloading» is gone (${js.endsAtEnd}, never beside a fact line that says it failed); a refusal stands while nothing changes (${js.standsWhileSame}); a download that STARTS ends it (${js.endsAtStart})`, js);
+  ok(gateOf(js.drawn) && gateOf(js.endsAtEnd) && gateOf(js.standsWhileSame) && verdictOf(js.endsAtStart), `B-0bc7 (its verdict's must + cure 2): a press on a busy door, then a read that still says downloading — its words are DRAWN (${js.drawn}); the download then FAILS — «already downloading» is gone (${js.endsAtEnd}, never beside a fact line that says it failed); a refusal stands while nothing changes (${js.standsWhileSame}); a download that STARTS ends it (${js.endsAtStart})`, js);
   const saidNeedle = "    if (st.has(id) ? st.get(id) !== now : now === 'downloading') s.delete(id);";
   ok(msrc.split(saidNeedle).length === 2, 'B-0bc7 control setup: the «ends at the start» rule is found once in src/lib/browser-build-model.js');
   const fCopy3 = MUTK.write('src/lib/browser-build-model.js', editAnchor(msrc, saidNeedle, "    if (now === 'downloading') s.delete(id);", "src/lib/browser-build-model.js"), 'said-every-read', { esm: true }); // stale-pins: kept — the batch's first rule, planted back
@@ -407,9 +407,9 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   ok(!judgeSaid(BMz).drawn, 'CONTROL (B-0bc7, its verdict\'s must): the batch\'s own rule — a downloading read ends the answer (settings-ui\'s old line) — erases the busy press\'s words before they are drawn ⇒ RED', judgeSaid(BMz));
   const fCopy4 = MUTK.write('src/lib/browser-build-model.js', editAnchor(msrc, saidNeedle, "    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);", "src/lib/browser-build-model.js"), 'said-only-at-start', { esm: true }); // stale-pins: kept — the first cure's rule, planted back as this control's mutant
   const BMw = await import('file://' + fCopy4);
-  ok(!judgeSaid(BMw).endsAtEnd && judgeSaid(BMw).drawn, 'CONTROL (B-0bc7 cure 2): the first cure\'s rule — the answer ends only when a download STARTS — keeps «its kernel is already downloading» beside a download that FAILED ⇒ RED', judgeSaid(BMw));
+  ok(!judgeSaid(BMw).endsAtEnd && verdictOf(judgeSaid(BMw).drawn), 'CONTROL (B-0bc7 cure 2): the first cure\'s rule — the answer ends only when a download STARTS — keeps «its kernel is already downloading» beside a download that FAILED ⇒ RED', judgeSaid(BMw));
   const ui2 = read('src/lib/settings-ui.js');
-  ok(ui2.includes('kernelSaidStep({ said: this._kernelSaid, states: this._kernelStates || new Map(), engines: r.engines })') && !ui2.includes("if (e && e.kernel && e.kernel.state === 'downloading') this._kernelSaid.delete(String(e.id));") && ui2.includes('if (box._doorsSig === sig) { if (step.tick) tick(); return; }') && /if \(focused\) \{ const fb = \[\.\.\.box\.querySelectorAll\('button\.settings-engine-download'\)\]\.find\(\(x\) => x\.dataset\.engine === focused\); if \(fb\) fb\.focus\(\); \}/.test(ui2), // stale-pins: kept — a deliberate absence check: the old delete-on-every-read line is gone
+  ok(gateOf(ui2.includes('kernelSaidStep({ said: this._kernelSaid, states: this._kernelStates || new Map(), engines: r.engines })')) && !ui2.includes("if (e && e.kernel && e.kernel.state === 'downloading') this._kernelSaid.delete(String(e.id));") && gateOf(ui2.includes('if (box._doorsSig === sig) { if (step.tick) tick(); return; }')) && verdictOf(/if \(focused\) \{ const fb = \[\.\.\.box\.querySelectorAll\('button\.settings-engine-download'\)\]\.find\(\(x\) => x\.dataset\.engine === focused\); if \(fb\) fb\.focus\(\); \}/.test(ui2)), // stale-pins: kept — a deliberate absence check: the old delete-on-every-read line is gone
     'B-0bc7 wiring (its verdict): the Settings row asks the PURE step for its answers (the old delete-on-every-downloading-read line gone — stale-pins: kept), redraws only when the doors moved, and gives the focus back to its door');
 }
 
@@ -421,14 +421,14 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const MOVED = ["console.log('— ② the keeper over the fake binary", "console.log('— ③b the agent", "console.log('— ⑤ controls: patched copies", "console.log('— ⑦ lane engine-plugin",
     "console.log('— ⑦e B-9584 U2a", "console.log('— ⑦f B-9584 U2b", "console.log('— ⑦g B-9584 U2c", "console.log('— ⑧ lane engine-distribution", "console.log('— ⑧c lane kernel-asset-credential"];
-  ok(MOVED.every((h) => twin.split(h).length === 2) && MOVED.every((h) => here.split(h).length === 2) && !/require\('\.\.\/src\/server\/browser-keeper\.js'\)|writeFakeAgentBrowser\(/.test(here),
+  ok(gateOf(MOVED.every((h) => twin.split(h).length === 2)) && gateOf(MOVED.every((h) => here.split(h).length === 2)) && !/require\('\.\.\/src\/server\/browser-keeper\.js'\)|writeFakeAgentBrowser\(/.test(here),
     `§T the heavy twin holds the ${MOVED.length} sections that drive the real keeper over the fake binary (② … ⑧c), and this file runs none of them (no keeper, no fake binary)`);
   const lineOf = (t, start) => (t.split('\n').find((l) => l.trim().startsWith(start)) || '').trim();
   const SETUP = ["mkBuild('151.", "fs.mkdirSync(path.join(BROWSERS, 'not-a-build')"];
-  ok(SETUP.every((s) => lineOf(here, s) !== '' && lineOf(here, s) === lineOf(twin, s)), '§T the twin lays down the builds ① lays down here before its ② — the two setup lines, byte for byte');
+  ok(verdictOf(SETUP.every((s) => lineOf(here, s) !== '' && lineOf(here, s) === lineOf(twin, s))), '§T the twin lays down the builds ① lays down here before its ② — the two setup lines, byte for byte');
   const ci = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
-  ok(/\{ name: 'test-browser-builds-keeper', tier: 'heavy',/.test(ci), '§T the twin is a HEAVY row of the tier');
+  ok(verdictOf(/\{ name: 'test-browser-builds-keeper', tier: 'heavy',/.test(ci)), '§T the twin is a HEAVY row of the tier');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

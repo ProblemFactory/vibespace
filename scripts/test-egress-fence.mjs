@@ -12,17 +12,17 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const EF = require('../src/egress-fence.js');
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + JSON.stringify(d).slice(0, 500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + JSON.stringify(d).slice(0, 500) : '')); } };
 
 console.log('§1 the address verdict — every class');
 const PUBLIC = ['8.8.8.8', '1.1.1.1', '93.184.216.34', '2606:4700:4700::1111', '2a00:1450:4001::1'];
 const PRIVATE = ['0.0.0.0', '10.1.2.3', '100.64.0.1', '127.0.0.1', '169.254.169.254', '172.16.5.4', '192.0.0.8', '192.0.2.1', '192.168.1.1', '198.18.0.1', '198.51.100.7', '203.0.113.9', '224.0.0.1', '240.0.0.1', '255.255.255.255',
   '::', '::1', 'fc00::1', 'fd12::3', 'fe80::1', 'ff02::1', '2001:db8::1', '::ffff:127.0.0.1', '::ffff:10.0.0.1', '64:ff9b::a9fe:a9fe', '64:ff9b::7f00:1'];
-ok(PUBLIC.every((a) => EF.addressVerdict(a) === null), 'a public IPv4 / IPv6 address passes (control)', PUBLIC.filter((a) => EF.addressVerdict(a) !== null));
-ok(PRIVATE.every((a) => typeof EF.addressVerdict(a) === 'string'), `every private / loopback / link-local (the metadata 169.254.169.254) / shared / documentation / multicast / reserved address is refused — IPv4-mapped and NAT64 judged as their IPv4 (${PRIVATE.length})`, PRIVATE.filter((a) => EF.addressVerdict(a) === null));
+ok(verdictOf(PUBLIC.every((a) => EF.addressVerdict(a) === null)), 'a public IPv4 / IPv6 address passes (control)', PUBLIC.filter((a) => EF.addressVerdict(a) !== null));
+ok(verdictOf(PRIVATE.every((a) => typeof EF.addressVerdict(a) === 'string')), `every private / loopback / link-local (the metadata 169.254.169.254) / shared / documentation / multicast / reserved address is refused — IPv4-mapped and NAT64 judged as their IPv4 (${PRIVATE.length})`, PRIVATE.filter((a) => EF.addressVerdict(a) === null));
 ok(EF.addressVerdict('not-an-ip') !== null, 'a name is not an address (refused)');
 console.log('§2 the URL');
-ok(EF.urlVerdict('http://example.com/x').code === 'bad-url' && EF.urlVerdict('http://example.com/x', { allowPrivate: true }).ok && EF.urlVerdict('https://example.com/x').ok, 'https only — http only beside the private-address switch');
+ok(EF.urlVerdict('http://example.com/x').code === 'bad-url' && gateOf(EF.urlVerdict('http://example.com/x', { allowPrivate: true }).ok) && verdictOf(EF.urlVerdict('https://example.com/x').ok), 'https only — http only beside the private-address switch');
 ok(EF.urlVerdict('https://u:p@example.com/').code === 'bad-url' && EF.urlVerdict('ftp://example.com/').code === 'bad-url' && EF.urlVerdict('file:///etc/passwd').code === 'bad-url' && EF.urlVerdict('/relative').code === 'bad-url', 'no credentials in the address; no ftp / file / relative address');
 
 console.log('§3 the fetch (loopback stubs, allowPrivate where they need it)');
@@ -39,7 +39,7 @@ try {
   let asked = 0;
   const rebind = (name, o) => { asked++; return Promise.resolve(asked === 1 ? [{ address: '127.0.0.1', family: 4 }] : [{ address: '10.255.255.1', family: 4 }]); };
   const r1 = await EF.fenceFetch(`http://rebind.test:${P(okSrv)}/a`, { allowPrivate: true, lookup: rebind, body: '{}' });
-  ok(r1.ok && r1.body === 'fine' && r1.address === '127.0.0.1' && asked === 1, `a REBINDING resolver is asked ONCE and the socket connects to the address judged (${asked} lookup, ${r1.address})`, r1);
+  ok(gateOf(r1.ok) && r1.body === 'fine' && r1.address === '127.0.0.1' && asked === 1, `a REBINDING resolver is asked ONCE and the socket connects to the address judged (${asked} lookup, ${r1.address})`, r1);
   let asked2 = 0;
   const mixed = () => { asked2++; return Promise.resolve([{ address: '93.184.216.34', family: 4 }, { address: '169.254.169.254', family: 4 }]); };
   const before = hits.length;
@@ -54,12 +54,12 @@ try {
   const r5 = await EF.fenceFetch(`http://127.0.0.1:${P(silent)}/`, { allowPrivate: true, timeoutMs: 400, body: 'x' });
   // the 400 ms handed ended it (lane wall-clock-ratchet-down: `< 3000 ms` judged the machine): the timer's own sentence
   // rounds the bound it was given — `within 0 s`, where the 10 s default says `within 10 s`; the ms are information
-  ok(!r5.ok && r5.code === 'lost' && r5.sent === true && /no answer within 0 s/.test(r5.error || ''), `a request that LEFT and got no answer is \`lost\` (sent: true — the receiver may have acted: the outbox says unknown) — ended by the timer handed (${Date.now() - t0} ms)`, r5);
+  ok(!r5.ok && r5.code === 'lost' && r5.sent === true && verdictOf(/no answer within 0 s/.test(r5.error || '')), `a request that LEFT and got no answer is \`lost\` (sent: true — the receiver may have acted: the outbox says unknown) — ended by the timer handed (${Date.now() - t0} ms)`, r5);
   const dead = http.createServer(); await new Promise((r) => dead.listen(0, '127.0.0.1', r)); const dp = P(dead); await new Promise((r) => dead.close(r));
   const r6 = await EF.fenceFetch(`http://127.0.0.1:${dp}/`, { allowPrivate: true, body: 'x' });
   ok(!r6.ok && r6.code === 'refused' && r6.sent === false, 'a connection refused is `refused` (sent: false — nothing left: the outbox says failed)', r6);
   const r7 = await EF.fenceFetch(`http://127.0.0.1:${P(huge)}/`, { allowPrivate: true });
-  ok(r7.ok && r7.cut === true && Buffer.byteLength(r7.body) === EF.FENCE_MAX_BYTES, 'the response is read to 64 KiB and no further (cut: true)', { cut: r7.cut, len: r7.body && r7.body.length });
+  ok(gateOf(r7.ok) && r7.cut === true && Buffer.byteLength(r7.body) === EF.FENCE_MAX_BYTES, 'the response is read to 64 KiB and no further (cut: true)', { cut: r7.cut, len: r7.body && r7.body.length });
   const r8 = await EF.fenceFetch(`http://127.0.0.1:${P(notFound)}/`, { allowPrivate: true });
   ok(!r8.ok && r8.status === 404 && r8.sent === true, 'a 4xx is an answer, not ok (the reply is `failed`)');
   ok(EF.FENCE_TIMEOUT_MS === 10000, 'one deadline: 10 s');
@@ -68,4 +68,4 @@ try {
 } catch (e) { fail++; console.error('  ✗ threw:', e.stack || e.message); }
 finally { for (const s of [okSrv, second, redir, silent, huge, notFound]) { try { s.closeAllConnections && s.closeAllConnections(); s.close(); } catch { } } }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

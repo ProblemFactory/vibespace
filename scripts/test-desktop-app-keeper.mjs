@@ -50,7 +50,7 @@ const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -250,37 +250,37 @@ console.log('§1 launch → listening → handshake → record → stop clean');
   ok(rec.state === 'launching' && rec.backend === 'vnc-display' && rec.via === 'Xvfb+x11vnc' && rec.fallbackWhy === XPRA_WHY, `launch answers a launching record on vnc-display via Xvfb+x11vnc with fallbackWhy "${XPRA_WHY}" (this box)`, rec);
   let atReady;   // the file AT THE MOMENT «ready» is seen — read in the same turn as the look, no wait between (list line 133's law)
   const ready = await until(() => { const r = k.get(rec.id); if (r.state === 'ready') { atReady = diskRecOf(k, rec.id); return r; } return r.state === 'failed' ? r : null; });
-  ok(ready && ready.state === 'ready', `ready in ${Date.now() - t0} ms`, ready && ready.lastError);
-  ok(/^:\d+$/.test(ready.display) && ready.port > 0 && ready.pids.x > 0 && ready.pids.server > 0 && ready.pids.app > 0 && ready.starts.x > 0 && ready.starts.server > 0 && ready.starts.app > 0, 'the record carries display, port, three pids AND three starttimes (facts only)', ready);
+  ok(gateOf(ready) && ready.state === 'ready', `ready in ${Date.now() - t0} ms`, ready && ready.lastError);
+  ok(gateOf(/^:\d+$/.test(ready.display)) && ready.port > 0 && ready.pids.x > 0 && ready.pids.server > 0 && ready.pids.app > 0 && ready.starts.x > 0 && ready.starts.server > 0 && ready.starts.app > 0, 'the record carries display, port, three pids AND three starttimes (facts only)', ready);
   ok(ready.pids.x !== ready.pids.server && ready.pids.server !== ready.pids.app, 'X, picture server and app are three processes');
   const hs = await rfbHandshake(ready.port);
-  ok(hs.banner === 'RFB 003.008\n' && Array.isArray(hs.security) && hs.security.includes(1), `a real RFB client completes the version handshake and is offered security type None (${JSON.stringify(hs)})`);
+  ok(hs.banner === 'RFB 003.008\n' && gateOf(Array.isArray(hs.security)) && verdictOf(hs.security.includes(1)), `a real RFB client completes the version handshake and is offered security type None (${JSON.stringify(hs)})`);
   // THE RECORD ON DISK, two halves (主开发 05:38Z): (a) AT THE MOMENT «ready» is seen the file ALREADY holds what the next life adopts —
   // the same three pids and start times, the display and the port (read at once above, NO wait: a hub killed right after «ready»
   // adopts it); (b) the state «ready» itself is written right after it, off the loop: it lands within a bound, waited on the file
-  ok(!!ready && !!atReady && M.isLiveState(atReady.state) && ['x', 'server', 'app'].every((p) => atReady.pids && atReady.pids[p] === ready.pids[p] && atReady.starts && atReady.starts[p] === ready.starts[p]) && atReady.display === ready.display && atReady.port === ready.port, 'AT THE MOMENT «ready» is seen the record is ALREADY on disk: the same three pids and start times, the display and the port (read at once, no wait)', atReady && { state: atReady.state, pids: atReady.pids, starts: atReady.starts, display: atReady.display, port: atReady.port, unread: atReady.unread });
+  ok(!!ready && !!atReady && gateOf(M.isLiveState(atReady.state)) && gateOf(['x', 'server', 'app'].every((p) => atReady.pids && atReady.pids[p] === ready.pids[p] && atReady.starts && atReady.starts[p] === ready.starts[p])) && atReady.display === ready.display && atReady.port === ready.port, 'AT THE MOMENT «ready» is seen the record is ALREADY on disk: the same three pids and start times, the display and the port (read at once, no wait)', atReady && { state: atReady.state, pids: atReady.pids, starts: atReady.starts, display: atReady.display, port: atReady.port, unread: atReady.unread });
   let found = null;
   const landed = await until(() => { found = diskRecOf(k, rec.id); return found && found.state === 'ready' ? found : null; }, 10000, 50);
   ok(!!landed && landed.pids.app === ready.pids.app && landed.readyAt === ready.readyAt, `the state «ready» lands on disk within 10 s (the file says: ${landed ? 'ready' : found ? (found.state || `unread, ${found.unread}`) : 'no record'})`, found && { state: found.state, readyAt: found.readyAt, unread: found.unread });
-  ok(fs.existsSync(path.join(k.logRoot, rec.id, 'app.log')) && fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority')), 'per-app dir holds app.log + the Xauthority cookie file');
+  ok(gateOf(fs.existsSync(path.join(k.logRoot, rec.id, 'app.log'))) && verdictOf(fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority'))), 'per-app dir holds app.log + the Xauthority cookie file');
   ok((fs.statSync(path.join(k.logRoot, rec.id, 'Xauthority')).mode & 0o777) === 0o600, 'the cookie file is 0600');
   const casts = k._events.filter((e) => e.type !== 'desktop-apps-witness'); // lane apps-dialog-fast: a witness listing that lands has its own broadcast
   const states = casts.map((e) => (e.apps.find((a) => a.id === rec.id) || {}).state);
-  ok(casts.every((e) => e.type === 'desktop-apps-updated') && states.includes('launching') && states.includes('ready'), 'every change was broadcast as desktop-apps-updated (launching → ready)', states);
-  ok(k.streamTarget(rec.id) && k.streamTarget(rec.id).kind === 'rfb' && k.streamTarget(rec.id).port === ready.port, 'streamTarget names the rfb port for the bridge');
+  ok(gateOf(casts.every((e) => e.type === 'desktop-apps-updated')) && gateOf(states.includes('launching')) && verdictOf(states.includes('ready')), 'every change was broadcast as desktop-apps-updated (launching → ready)', states);
+  ok(gateOf(k.streamTarget(rec.id)) && k.streamTarget(rec.id).kind === 'rfb' && k.streamTarget(rec.id).port === ready.port, 'streamTarget names the rfb port for the bridge');
   const enumd = await D.enumerateWindows({ display: ready.display, authFile: path.join(k.logRoot, rec.id, 'Xauthority'), env: baseEnv() });
-  ok(enumd.ok && enumd.windows.some((w) => w.mapped !== false && w.w > 0), `the app's window is really on the private display (${enumd.windows.length} window(s))`, enumd);
+  ok(gateOf(enumd.ok) && verdictOf(enumd.windows.some((w) => w.mapped !== false && w.w > 0)), `the app's window is really on the private display (${enumd.windows.length} window(s))`, enumd);
   const during = procCensus(k.logRoot);
   ok(during.length >= 2, `census while running: ${during.length} process(es) name this keeper's dir (X + x11vnc at least)`);
   const pids = [ready.pids.x, ready.pids.server, ready.pids.app];
   const stopped = await k.stop(rec.id);
   ok(stopped.state === 'exited' && stopped.stoppedBy === 'user' && stopped.lastError === null, 'stop ⇒ exited, by user, no error', stopped);
-  ok(pids.every((p) => !alive(p)), 'every recorded pid is gone after stop (app → server → X, each verified)');
+  ok(verdictOf(pids.every((p) => !alive(p))), 'every recorded pid is gone after stop (app → server → X, each verified)');
   const after = procCensus(k.logRoot);
   ok(after.length === before.length, `/proc census equal before (${before.length}) and after (${after.length}) — no orphan X server or picture server`);
   ok(k.streamTarget(rec.id) === null, 'no stream target after stop');
   const l = await k.list();
-  ok(l.cap.used === 0 && l.availability.backend === 'vnc-display' && Array.isArray(l.availability.ladder) && l.availability.ladder.length === 3 && l.registry.some((r) => r.id === 'xterm'), 'list(): cap back to 0, the ladder with all three rungs, the presence-checked registry');
+  ok(l.cap.used === 0 && l.availability.backend === 'vnc-display' && gateOf(Array.isArray(l.availability.ladder)) && l.availability.ladder.length === 3 && verdictOf(l.registry.some((r) => r.id === 'xterm')), 'list(): cap back to 0, the ladder with all three rungs, the presence-checked registry');
   k.shutdown();
 }
 
@@ -316,7 +316,7 @@ console.log('§2 the ONE ws bridge');
   });
   const good = await tryWs(`/api/desktop/${rec.id}/stream`);
   ok(good.status === 'open' && Buffer.concat(good.chunks).slice(0, 12).toString('latin1') === 'RFB 003.008\n', 'an authed client on /api/desktop/<id>/stream receives the RFB banner through the bridge');
-  ok(inputs.includes(rec.id), 'the handshake then a PointerEvent ⇒ INPUT reported to the keeper (the idle clock)');
+  ok(verdictOf(inputs.includes(rec.id)), 'the handshake then a PointerEvent ⇒ INPUT reported to the keeper (the idle clock)');
   {
     // r2: a client that only ever asks for framebuffer updates is nobody at the keyboard
     const n0 = inputs.length;
@@ -351,23 +351,23 @@ console.log('§2 the ONE ws bridge');
     ok(wsx.protocol === 'binary', `the browser's 'binary' subprotocol is answered on the bridge (${wsx.protocol})`);
     wsx.send(rpkt('ping')); wsx.send(rpkt('key-action'));
     await until(() => (upA.st.got.length >= 2 ? true : null), 3000);
-    ok(upA.st.conns === 1 && upA.st.protocols[0] === 'binary' && upA.st.got.length === 2 && upA.st.got.every((g) => g.isBinary) && upA.st.got[1].bytes.equals(rpkt('key-action')), 'the fake xpra received ONE connection speaking binary, both packets byte-identical, binary frames', { conns: upA.st.conns, n: upA.st.got.length });
+    ok(upA.st.conns === 1 && upA.st.protocols[0] === 'binary' && upA.st.got.length === 2 && gateOf(upA.st.got.every((g) => g.isBinary)) && verdictOf(upA.st.got[1].bytes.equals(rpkt('key-action'))), 'the fake xpra received ONE connection speaking binary, both packets byte-identical, binary frames', { conns: upA.st.conns, n: upA.st.got.length });
     await until(() => (gotBack.length >= 2 ? true : null), 3000);
-    ok(gotBack.length === 2 && gotBack[1].equals(Buffer.concat([Buffer.from('echo:'), rpkt('key-action')])), 'the upstream\'s answers reach the browser as binary messages, framing preserved');
+    ok(gotBack.length === 2 && verdictOf(gotBack[1].equals(Buffer.concat([Buffer.from('echo:'), rpkt('key-action')]))), 'the upstream\'s answers reach the browser as binary messages, framing preserved');
     ok(inputs.length === n0 + 1 && inputs[inputs.length - 1] === 'xpra-one', `ping is not input, key-action is: exactly ONE input reported for xpra-one (${inputs.length - n0})`);
     ok(upB.st.conns === 0, 'the second fake upstream saw NOTHING — an id reaches only its own port');
-    ok(stream.viewerAlive('xpra-one', 'v-x1') && stream.viewersOf('xpra-one').join() === 'v-x1', 'the viewer id is registered on an xpra stream too');
+    ok(gateOf(stream.viewerAlive('xpra-one', 'v-x1')) && stream.viewersOf('xpra-one').join() === 'v-x1', 'the viewer id is registered on an xpra stream too');
     ok(stream.connections('xpra-one') === 1 && stream.connections('xpra-two') === 0, 'connections(id) counts the OPEN bridge sockets of an id (the keeper\'s "somebody watches" fact)');
     const wsy = new WebSocket(`ws://127.0.0.1:${port}/api/desktop/xpra-two/stream`, ['binary']);
     await new Promise((r) => wsy.on('open', r));
     wsy.send(rpkt('pointer-position'));
     await until(() => (upB.st.got.length >= 1 ? true : null), 3000);
-    ok(upB.st.conns === 1 && upA.st.conns === 1 && upB.st.got[0].bytes.equals(rpkt('pointer-position')), 'xpra-two reaches ITS port and only it (A still 1 connection, B 1)');
+    ok(upB.st.conns === 1 && upA.st.conns === 1 && verdictOf(upB.st.got[0].bytes.equals(rpkt('pointer-position'))), 'xpra-two reaches ITS port and only it (A still 1 connection, B 1)');
     wsx.close(); wsy.close();
     await until(() => (upA.st.closed === 1 && upB.st.closed === 1 ? true : null), 3000);
     ok(upA.st.closed === 1 && upB.st.closed === 1, 'closing the browser side closes the upstream socket (close on either side)');
     ok(stream.connections('xpra-one') === 0 && stream.connections('xpra-two') === 0, 'connections(id) is back to 0 once the sockets closed');
-    ok(streamLog.some((l) => /xpra-one: bridge opened → ws:\/\/127\.0\.0\.1:\d+\/ \(xpra\) \(viewer v-x1\)/.test(l)) && streamLog.some((l) => /xpra-one: closed \(the browser closed, code \d+\) after \d+s, \d+ B to the browser, \d+ B to the server \(xpra\), viewer v-x1/.test(l)), 'the xpra bridge logs the open and ONE named close line', streamLog.filter((l) => /xpra-one/.test(l)));
+    ok(gateOf(streamLog.some((l) => /xpra-one: bridge opened → ws:\/\/127\.0\.0\.1:\d+\/ \(xpra\) \(viewer v-x1\)/.test(l))) && verdictOf(streamLog.some((l) => /xpra-one: closed \(the browser closed, code \d+\) after \d+s, \d+ B to the browser, \d+ B to the server \(xpra\), viewer v-x1/.test(l))), 'the xpra bridge logs the open and ONE named close line', streamLog.filter((l) => /xpra-one/.test(l)));
     ok(!xerr, `no browser-side socket error (${xerr && xerr.message})`);
     ok(!stream.viewerAlive('xpra-one', 'v-x1'), 'the viewer is gone after its socket closed');
     // the upstream hanging up NAMES itself: a fake that sends a `disconnect` packet then closes
@@ -383,7 +383,7 @@ console.log('§2 the ONE ws bridge');
     wsc.on('message', (m) => gotC.push(Buffer.from(m)));
     await new Promise((r) => wsc.on('open', r));
     await until(() => (streamLog.some((l) => /xpra-c: closed/.test(l)) ? true : null), 4000);
-    ok(gotC.length === 1 && gotC[0].equals(Buffer.concat([h, dis])), 'the disconnect packet itself still reached the browser (the bridge names, it never eats)');
+    ok(gotC.length === 1 && verdictOf(gotC[0].equals(Buffer.concat([h, dis]))), 'the disconnect packet itself still reached the browser (the bridge names, it never eats)');
     await upC.close();
     const upE = await fakeUp({ onConnect: (c) => { c.send(Buffer.from('disconnect invalid packet encoding: no decoder')); setTimeout(() => { try { c.close(1000, 'bye'); } catch {} }, 100); } });
     const streamE = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => ({ kind: 'xpra', port: upE.port }), log: { warn() {}, log: (l) => streamLog.push(String(l)) } });
@@ -393,11 +393,11 @@ console.log('§2 the ONE ws bridge');
     const wse = new WebSocket(`ws://127.0.0.1:${portE}/api/desktop/xpra-e/stream`, ['binary']);
     await new Promise((r) => wse.on('open', r));
     await until(() => (streamLog.some((l) => /xpra-e: closed/.test(l)) ? true : null), 4000);
-    ok(/closed \(the xpra server disconnected: invalid packet encoding: no decoder\)/.test(streamLog.find((l) => /xpra-e: closed/.test(l)) || ''), 'the BARE TEXT `disconnect <reason>` shape (what 6.5.3 sends a client it cannot decode) is named in the close line too', streamLog.filter((l) => /xpra-e/.test(l)));
+    ok(verdictOf(/closed \(the xpra server disconnected: invalid packet encoding: no decoder\)/.test(streamLog.find((l) => /xpra-e: closed/.test(l)) || '')), 'the BARE TEXT `disconnect <reason>` shape (what 6.5.3 sends a client it cannot decode) is named in the close line too', streamLog.filter((l) => /xpra-e/.test(l)));
     try { wse.close(); } catch {}
     await new Promise((r) => srvE.close(r)); await upE.close();
     const closeLine = streamLog.find((l) => /xpra-c: closed/.test(l)) || '';
-    ok(/closed \(the xpra server disconnected: server error \/ bad luck\)/.test(closeLine), 'a `disconnect` packet from the xpra side puts ITS reason in the close line (the close names who closed and why)', closeLine);
+    ok(verdictOf(/closed \(the xpra server disconnected: server error \/ bad luck\)/.test(closeLine)), 'a `disconnect` packet from the xpra side puts ITS reason in the close line (the close names who closed and why)', closeLine);
     try { wsc.close(); } catch {}
     await new Promise((r) => srvC.close(r));
     // NETEM (dev-only): with the gate ON and ?netem=rtt:120 an echo round trip takes ≥ 120 ms; with the gate OFF the same url is plain
@@ -434,7 +434,7 @@ console.log('§2 the ONE ws bridge');
       const t1 = Date.now();
       const rtH = await new Promise((resolve) => { wsh.once('message', () => resolve(Date.now() - t1)); wsh.send(rpkt('ping')); });
       const oldOk = gate ? rtH >= 115 && rtH < 1000 : rtH < 100, nowOk = gate ? rtH >= 115 : streamH.stats().netem === 0 && streamH.netemOf('xpra-h') === null;
-      ok(upH.st.conns === 1 && !oldOk && nowOk, `PLACED netem gate ${gate ? 'ON' : 'OFF'}: the upstream holding its echo ${hold} ms — the round trip took ${rtH} ms: the OLD verdict reads RED with nothing shaped wrongly, today's verdict holds`);
+      ok(upH.st.conns === 1 && !oldOk && verdictOf(nowOk), `PLACED netem gate ${gate ? 'ON' : 'OFF'}: the upstream holding its echo ${hold} ms — the round trip took ${rtH} ms: the OLD verdict reads RED with nothing shaped wrongly, today's verdict holds`);
       wsh.close(); await new Promise((r) => srvH.close(r)); await upH.close();
     }
     await upD.close();
@@ -459,8 +459,8 @@ console.log('§2 the ONE ws bridge');
       await until(() => (upP.st.got.length >= talk.length ? true : null), 3000);
       await sleep(150);
       const typesUp = upP.st.got.map((g) => S.xpraPacketType(g.bytes.subarray(8)));
-      ok(JSON.stringify(typesUp) === JSON.stringify(talk) && upP.st.got.every((g, i) => g.bytes.equals(rpkt(talk[i]))), `a REFUSED viewer's hello / ping_echo / damage-sequence / map-window / buffer-refresh reach xpra byte-identical, in order — and nothing else, its keyboard-config (the keymap fence) and configure-window (x5, the geometry fence) included (${typesUp.join(', ')})`);
-      ok(backP.length === talk.length && backP[0].equals(Buffer.concat([Buffer.from('echo:'), rpkt('hello')])), `…so the upstream's answers (its hello first) reach the refused viewer: ${backP.length} message(s) back — the picture flows in Watch mode`);
+      ok(JSON.stringify(typesUp) === JSON.stringify(talk) && verdictOf(upP.st.got.every((g, i) => g.bytes.equals(rpkt(talk[i])))), `a REFUSED viewer's hello / ping_echo / damage-sequence / map-window / buffer-refresh reach xpra byte-identical, in order — and nothing else, its keyboard-config (the keymap fence) and configure-window (x5, the geometry fence) included (${typesUp.join(', ')})`);
+      ok(backP.length === talk.length && verdictOf(backP[0].equals(Buffer.concat([Buffer.from('echo:'), rpkt('hello')]))), `…so the upstream's answers (its hello first) reach the refused viewer: ${backP.length} message(s) back — the picture flows in Watch mode`);
       const stP = streamP.stats();
       ok(stP.dropped === human.length + 2 && stP.relayed === talk.length, `stats: dropped counts the ${human.length} input packets + the fenced keyboard-config + configure-window (${stP.dropped}), relayed the ${talk.length} messages that went through (${stP.relayed})`, stP);
       ok(pInputs.length === 0, 'a refused input is nobody at the keyboard: no input reported to the idle clock');
@@ -468,7 +468,7 @@ console.log('§2 the ONE ws bridge');
       const n0 = upP.st.got.length;
       wsp.send(Buffer.concat([rpkt('damage-sequence'), rpkt('key-action'), rpkt('ping_echo')]));
       await until(() => (upP.st.got.length > n0 ? true : null), 3000);
-      ok(upP.st.got.length === n0 + 1 && upP.st.got[n0].bytes.equals(Buffer.concat([rpkt('damage-sequence'), rpkt('ping_echo')])), 'ONE message carrying damage-sequence + key-action + ping_echo ⇒ the key-action cut out, the other two relayed together');
+      ok(upP.st.got.length === n0 + 1 && verdictOf(upP.st.got[n0].bytes.equals(Buffer.concat([rpkt('damage-sequence'), rpkt('ping_echo')]))), 'ONE message carrying damage-sequence + key-action + ping_echo ⇒ the key-action cut out, the other two relayed together');
       // the takeover flips the verdict: the same viewer's input now goes through and counts
       // round 2 of the verify: a refused viewer's CONTROL packets (not input) never reach xpra — the allowlist; a relayed
       // `shutdown-server` from a Watch viewer ended the real session. `control` / `info-request` are the same class.
@@ -476,20 +476,20 @@ console.log('§2 the ONE ws bridge');
       wsp.send(Buffer.concat([rpkt('shutdown-server'), rpkt('exit-server'), rpkt('control'), rpkt('info-request'), rpkt('ping_echo')]));
       await until(() => (upP.st.got.length > n1 ? true : null), 3000);
       await sleep(150);
-      ok(upP.st.got.length === n1 + 1 && upP.st.got[n1].bytes.equals(rpkt('ping_echo')) && streamP.stats().lifecycle === 2, 'a REFUSED viewer\'s shutdown-server / exit-server / control / info-request are cut out, its ping_echo relayed alone (stats.lifecycle names the two)', streamP.stats());
+      ok(upP.st.got.length === n1 + 1 && gateOf(upP.st.got[n1].bytes.equals(rpkt('ping_echo'))) && streamP.stats().lifecycle === 2, 'a REFUSED viewer\'s shutdown-server / exit-server / control / info-request are cut out, its ping_echo relayed alone (stats.lifecycle names the two)', streamP.stats());
       relay = true;
       const n2 = upP.st.got.length;
       wsp.send(rpkt('key-action'));
       await until(() => (upP.st.got.length > n2 ? true : null), 3000);
-      ok(upP.st.got.length === n2 + 1 && upP.st.got[n2].bytes.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('configure-window'), rpkt('key-action')])) && pInputs.length === 1 && streamLog.some((l) => /xpra-p: viewer v-watch may type now — the keymap and the window geometry it sent while refused reach xpra first/.test(l)), 'the policy relaying again (a takeover) ⇒ the keyboard-config and (x5) the configure-window it sent while refused reach xpra FIRST, then the next key-action, in one write; the key-action IS input (reported once), the replay is named');
+      ok(upP.st.got.length === n2 + 1 && gateOf(upP.st.got[n2].bytes.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('configure-window'), rpkt('key-action')]))) && pInputs.length === 1 && verdictOf(streamLog.some((l) => /xpra-p: viewer v-watch may type now — the keymap and the window geometry it sent while refused reach xpra first/.test(l))), 'the policy relaying again (a takeover) ⇒ the keyboard-config and (x5) the configure-window it sent while refused reach xpra FIRST, then the next key-action, in one write; the key-action IS input (reported once), the replay is named');
       const n3 = upP.st.got.length;
       wsp.send(Buffer.concat([rpkt('shutdown-server'), rpkt('control')]));
       await until(() => (upP.st.got.length > n3 ? true : null), 3000);
       await sleep(150);
-      ok(upP.st.got.length === n3 + 1 && upP.st.got[n3].bytes.equals(rpkt('control')) && streamP.stats().lifecycle === 3 && streamLog.some((l) => /xpra-p: 1 server-lifecycle packet\(s\).*viewer v-watch dropped — the keeper owns/.test(l)), 'an ALLOWED viewer\'s shutdown-server is cut too (the keeper owns the server\'s lifecycle, a warn line names it); its control packet passes', streamP.stats());
+      ok(upP.st.got.length === n3 + 1 && gateOf(upP.st.got[n3].bytes.equals(rpkt('control'))) && streamP.stats().lifecycle === 3 && verdictOf(streamLog.some((l) => /xpra-p: 1 server-lifecycle packet\(s\).*viewer v-watch dropped — the keeper owns/.test(l))), 'an ALLOWED viewer\'s shutdown-server is cut too (the keeper owns the server\'s lifecycle, a warn line names it); its control packet passes', streamP.stats());
       wsp.close();
       await until(() => (streamLog.some((l) => /xpra-p: closed/.test(l)) ? true : null), 3000);
-      ok(/xpra-p: closed .*, viewer v-watch, 13 packet\(s\) refused \(server lifecycle\)/.test(streamLog.find((l) => /xpra-p: closed/.test(l)) || ''), 'the close line counts every refused packet (6 input + 1 keymap + 1 geometry (x5) + 4 control + 1 lifecycle) and names the last verdict', streamLog.filter((l) => /xpra-p/.test(l)));
+      ok(verdictOf(/xpra-p: closed .*, viewer v-watch, 13 packet\(s\) refused \(server lifecycle\)/.test(streamLog.find((l) => /xpra-p: closed/.test(l)) || '')), 'the close line counts every refused packet (6 input + 1 keymap + 1 geometry (x5) + 4 control + 1 lifecycle) and names the last verdict', streamLog.filter((l) => /xpra-p/.test(l)));
       await new Promise((r) => srvP.close(r)); await upP.close();
     }
     await upA.close(); await upB.close();
@@ -522,16 +522,16 @@ setInterval(() => {}, 1000); // stay alive until SIGKILLed — the apps must out
   children.push(proc);
   let out = '';
   const first = await new Promise((resolve) => { proc.stdout.on('data', (b) => { out += b; const line = out.split('\n').find((l) => l.startsWith('{')); if (line) resolve(JSON.parse(line)); }); setTimeout(() => resolve(null), 20000); });
-  ok(first && first.state === 'ready', 'the child keeper launched and reached ready', first && first.lastError);
+  ok(gateOf(first) && first.state === 'ready', 'the child keeper launched and reached ready', first && first.lastError);
   proc.kill('SIGKILL');
   await sleep(500);
   ok(!alive(proc.pid), 'the keeper process is dead (SIGKILL — no cleanup ran)');
-  ok(first && alive(first.pids.x) && alive(first.pids.server) && alive(first.pids.app), 'X, picture server and app SURVIVED their keeper (detached, setsid)');
+  ok(gateOf(first) && gateOf(alive(first.pids.x)) && gateOf(alive(first.pids.server)) && verdictOf(alive(first.pids.app)), 'X, picture server and app SURVIVED their keeper (detached, setsid)');
   const k = mk('k3');
   await k.adoptAll();
   const adopted = k.get(first.id);
-  ok(adopted && adopted.state === 'ready' && adopted.adoptedAt > 0 && adopted.pids.app === first.pids.app && adopted.starts.app === first.starts.app, 'the new keeper ADOPTS it: ready, same pids, same starttimes, adoptedAt stamped', adopted);
-  ok(k.streamTarget(first.id) && k.streamTarget(first.id).port === first.port && (await D.rfbBanner(first.port, 3000)), 'the adopted session still streams (banner on the recorded port)');
+  ok(gateOf(adopted) && adopted.state === 'ready' && adopted.adoptedAt > 0 && adopted.pids.app === first.pids.app && adopted.starts.app === first.starts.app, 'the new keeper ADOPTS it: ready, same pids, same starttimes, adoptedAt stamped', adopted);
+  ok(gateOf(k.streamTarget(first.id)) && k.streamTarget(first.id).port === first.port && (verdictOf(await D.rfbBanner(first.port, 3000))), 'the adopted session still streams (banner on the recorded port)');
   k.start();
   // a record whose pids are recycled/dead is exited-with-reason, never adopted. The file is read for the ghosts once the adoption's
   // OWN record landed (written off the loop — read at once, the file could still hold the child's record, and the adoption's
@@ -550,14 +550,14 @@ setInterval(() => {}, 1000); // stay alive until SIGKILLed — the apps must out
   const k4 = mk('k3');
   await k4.adoptAll();
   const ghost = k4.get('da-ghost'), recycled = k4.get('da-recycled');
-  ok(ghost && ghost.state === 'exited' && /X display gone/.test(ghost.lastError), 'a record whose X pid is dead ⇒ exited, lastError says the display is gone', ghost);
-  ok(recycled && recycled.state === 'exited' && recycled.lastError === 'kept-from-before', 'a dead record\'s earlier lastError is KEPT through adoption', recycled);
-  ok(alive(recycledProc.pid) && !D.sameProcess(recycledProc.pid, 12345) && M.adoptVerdict({ state: 'ready' }, { x: true, server: true, app: D.sameProcess(recycledProc.pid, 12345) }, true).state === 'exited', 'a RECYCLED app pid (alive, starttime differs — a throwaway sleep) is not "alive" to the adoption verdict, and the reap never signalled it (it is still running)');
+  ok(gateOf(ghost) && ghost.state === 'exited' && verdictOf(/X display gone/.test(ghost.lastError)), 'a record whose X pid is dead ⇒ exited, lastError says the display is gone', ghost);
+  ok(gateOf(recycled) && recycled.state === 'exited' && recycled.lastError === 'kept-from-before', 'a dead record\'s earlier lastError is KEPT through adoption', recycled);
+  ok(gateOf(alive(recycledProc.pid)) && !D.sameProcess(recycledProc.pid, 12345) && M.adoptVerdict({ state: 'ready' }, { x: true, server: true, app: D.sameProcess(recycledProc.pid, 12345) }, true).state === 'exited', 'a RECYCLED app pid (alive, starttime differs — a throwaway sleep) is not "alive" to the adoption verdict, and the reap never signalled it (it is still running)');
   // (judged on the document the suite WROTE — the recycled pid on a «ready» record, the case the rule exists for — and on the file as
   // it stands, whichever of the two the adoption's off-loop write has reached)
-  ok([store.apps, JSON.parse(fs.readFileSync(k.storeFile, 'utf8')).apps].every((apps) => !sweepTargets(apps).includes(recycledProc.pid)), 'the exit sweep\'s rule does not target the recycled pid either (pid+starttime, never a bare pid)');
+  ok(verdictOf([store.apps, JSON.parse(fs.readFileSync(k.storeFile, 'utf8')).apps].every((apps) => !sweepTargets(apps).includes(recycledProc.pid))), 'the exit sweep\'s rule does not target the recycled pid either (pid+starttime, never a bare pid)');
   recycledProc.kill('SIGKILL');
-  ok(alive(first.pids.app) && alive(first.pids.x), 'reaping the ghost/recycled records did NOT touch the real survivor (pid+starttime identity, never a bare pid)');
+  ok(gateOf(alive(first.pids.app)) && verdictOf(alive(first.pids.x)), 'reaping the ghost/recycled records did NOT touch the real survivor (pid+starttime identity, never a bare pid)');
   ok(k4.get(first.id).state === 'ready', 'the real survivor is adopted again by the second keeper');
   const s2 = await k4.stop(first.id);
   ok(s2.state === 'exited' && !alive(first.pids.x) && !alive(first.pids.server) && !alive(first.pids.app), 'stop on an ADOPTED session (no child handles) kills all three, verified');
@@ -572,7 +572,7 @@ console.log('§4 idle timeout, keep-alive, input, the cap');
   await until(() => k.get(a.id).state !== 'launching');
   ok(k.get(a.id).state === 'ready' && k.get(a.id).idleTimeoutMs === 1200, 'launched with the setting\'s idle timeout (0.02 min = 1200 ms)');
   const idleStop = await until(() => (k.get(a.id).state === 'exited' ? k.get(a.id) : null), 6000);
-  ok(idleStop && idleStop.stoppedBy === 'idle' && /idle timeout/.test(idleStop.lastError) && !alive(idleStop.pids.app), 'no input ⇒ stopped by the idle timeout, lastError says so, processes gone', idleStop);
+  ok(gateOf(idleStop) && idleStop.stoppedBy === 'idle' && gateOf(/idle timeout/.test(idleStop.lastError)) && !alive(idleStop.pids.app), 'no input ⇒ stopped by the idle timeout, lastError says so, processes gone', idleStop);
   const b = await k.launch({ exec: appBin, args: appArgs, label: 'kept-by-input' });
   await until(() => k.get(b.id).state !== 'launching');
   for (let i = 0; i < 20; i++) { k.noteInput(b.id); await sleep(100); }
@@ -580,20 +580,20 @@ console.log('§4 idle timeout, keep-alive, input, the cap');
   const kept = k.keepAlive(b.id);
   ok(kept.idleTimeoutMs === 0, 'keepAlive sets the timeout to 0 (never)');
   await sleep(2000);
-  ok(k.get(b.id).state === 'ready' && k.get(b.id).idle && k.get(b.id).idle.remainingMs === null, 'a kept-alive app survives silence; the idle view says "never"');
+  ok(k.get(b.id).state === 'ready' && gateOf(k.get(b.id).idle) && k.get(b.id).idle.remainingMs === null, 'a kept-alive app survives silence; the idle view says "never"');
   const k5 = mk('k5', { limits: { ...M.LIMITS, CONCURRENT_CAP: 1 } });
   await k5.adoptAll(); k5.start();
   const c = await k5.launch({ exec: appBin, args: appArgs, label: 'holder' });
   await until(() => k5.get(c.id).state !== 'launching');
   let refused = null;
   try { await k5.launch({ exec: appBin, args: appArgs, label: 'second' }); } catch (e) { refused = e; }
-  ok(refused && refused.code === 'cap' && /holder \(/.test(refused.message) && /stop one first/.test(refused.message), 'at the cap a launch is REFUSED naming the holder (loud, never an OOM)', refused && refused.message);
+  ok(gateOf(refused) && refused.code === 'cap' && gateOf(/holder \(/.test(refused.message)) && verdictOf(/stop one first/.test(refused.message)), 'at the cap a launch is REFUSED naming the holder (loud, never an OOM)', refused && refused.message);
   let badExec = null;
   try { await k.launch({ exec: 'no-such-binary-vs', args: [] }); } catch (e) { badExec = e; }
-  ok(badExec && badExec.code === 'exec-not-found', 'an exec that is not on PATH is refused by code', badExec && badExec.message);
+  ok(gateOf(badExec) && badExec.code === 'exec-not-found', 'an exec that is not on PATH is refused by code', badExec && badExec.message);
   let badCwd = null;
   try { await k.launch({ exec: appBin, cwd: path.join(root, 'nope') }); } catch (e) { badCwd = e; }
-  ok(badCwd && badCwd.code === 'cwd-missing', 'a missing cwd is refused by code');
+  ok(gateOf(badCwd) && badCwd.code === 'cwd-missing', 'a missing cwd is refused by code');
   await k5.stop(c.id); await k.stop(b.id);
   k.shutdown(); k5.shutdown();
 }
@@ -611,14 +611,14 @@ console.log('§5 the resource REPORT (shared limits shrunk): an app a person use
   const rep1 = await reportedOver(k, r.id);
   await sleep(1500); // several more samples while over
   const now1 = k.get(r.id);
-  ok(rep1 && /^\d+% CPU sustained for \d+ min \(limit 50%\)$/.test(rep1.live.over) && now1.state === 'ready' && alive(now1.pids.app) && alive(now1.pids.x) && !now1.stoppedBy && !now1.lastError, 'NO KILL: sustained CPU over the (shrunk) limit is REPORTED on the live row — the app and its display keep running, nothing on the record', { over: rep1 && rep1.live.over, state: now1.state, lastError: now1.lastError });
+  ok(gateOf(rep1) && gateOf(/^\d+% CPU sustained for \d+ min \(limit 50%\)$/.test(rep1.live.over)) && now1.state === 'ready' && gateOf(alive(now1.pids.app)) && gateOf(alive(now1.pids.x)) && !now1.stoppedBy && !now1.lastError, 'NO KILL: sustained CPU over the (shrunk) limit is REPORTED on the live row — the app and its display keep running, nothing on the record', { over: rep1 && rep1.live.over, state: now1.state, lastError: now1.lastError });
   const mine = notices.filter((n) => n.key.startsWith(`desktop-app-resource:${r.id}:`));
-  ok(mine.length === 1 && /^CPU burner has been using \d+% CPU for \d+ min — Stop it from the Desktop panel if that is not what you expect$/.test(mine[0].text) && mine[0].o && mine[0].o.level === 'warn', 'ONE notice for the crossing (not one per sample), naming the app and the user\'s own lever', mine);
-  ok(telemetry.some((e) => e.name === 'desktop-app-resource') && !telemetry.some((e) => e.name === 'desktop-app-runaway'), 'telemetry desktop-app-resource (the fleet still sees a hot app)');
+  ok(mine.length === 1 && gateOf(/^CPU burner has been using \d+% CPU for \d+ min — Stop it from the Desktop panel if that is not what you expect$/.test(mine[0].text)) && gateOf(mine[0].o) && mine[0].o.level === 'warn', 'ONE notice for the crossing (not one per sample), naming the app and the user\'s own lever', mine);
+  ok(gateOf(telemetry.some((e) => e.name === 'desktop-app-resource')) && !telemetry.some((e) => e.name === 'desktop-app-runaway'), 'telemetry desktop-app-resource (the fleet still sees a hot app)');
   const reg = (await k.list()).registry.find((x) => x.id === 'burner');
-  ok(reg && reg.available && !reg.reason && !('parkedUntil' in reg), 'the registry row is NOT parked (no reason, no until)', reg);
+  ok(gateOf(reg) && gateOf(reg.available) && !reg.reason && !('parkedUntil' in reg), 'the registry row is NOT parked (no reason, no until)', reg);
   const second = await k.launch({ appId: 'burner' });
-  ok(second && second.id !== r.id && second.state === 'launching', 'a second launch of the same row is served — a past sample never refuses a launch');
+  ok(gateOf(second) && second.id !== r.id && second.state === 'launching', 'a second launch of the same row is served — a past sample never refuses a launch');
   const disk = JSON.parse(fs.readFileSync(k.storeFile, 'utf8'));
   ok(!('runawayParkedUntil' in disk), 'nothing parked on disk');
   const st = await k.stop(r.id); await k.stop(second.id);
@@ -636,7 +636,7 @@ console.log('§5 the resource REPORT (shared limits shrunk): an app a person use
   await sleep(1000);
   const cur2 = k2.get(m.id);
   const noKill = !!rep2 && cur2.state === 'ready' && alive(cur2.pids.app);
-  ok(noKill && /^memory \(PSS\) 6\.2 GB \(limit 2\.0 GB\)$/.test(rep2.live.over) && cur2.live.memBytes === 6.2 * 2 ** 30 && cur2.live.memMetric === 'pss', 'NO KILL: a 6.2 GB (PSS) footprint is reported (memBytes + memMetric on the view), the app keeps running', cur2.live);
+  ok(gateOf(noKill) && gateOf(/^memory \(PSS\) 6\.2 GB \(limit 2\.0 GB\)$/.test(rep2.live.over)) && cur2.live.memBytes === 6.2 * 2 ** 30 && cur2.live.memMetric === 'pss', 'NO KILL: a 6.2 GB (PSS) footprint is reported (memBytes + memMetric on the view), the app keeps running', cur2.live);
   ok(n2.filter((x) => x.key.startsWith(`desktop-app-resource:${m.id}:`)).length === 1 && n2[0].text === 'Google Chrome is using 6.2 GB (PSS) — Stop it from the Desktop panel if that is not what you expect', 'the notice: "Google Chrome is using 6.2 GB (PSS) — Stop it from the Desktop panel if that is not what you expect"', n2);
   await k2.stop(m.id); k2.shutdown();
   // r2 (the oscillation review, reproduced on this REAL keeper before the fix: a sampler alternating 6.2 GB / 0.9 GB
@@ -687,12 +687,12 @@ console.log('§6 the routes (express) — host without an access layer, launch, 
   const srv = await new Promise((r) => { const s = app.listen(port, '127.0.0.1', () => r(s)); });
   const j = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return { status: res.status, body: await res.json() }; };
   const list = await j('GET', '/api/desktop/apps');
-  ok(list.status === 200 && list.body.availability.backend === 'vnc-display' && Array.isArray(list.body.registry) && list.body.cap.cap === M.LIMITS.CONCURRENT_CAP, 'GET /api/desktop/apps: registry + availability ladder + cap');
+  ok(list.status === 200 && list.body.availability.backend === 'vnc-display' && gateOf(Array.isArray(list.body.registry)) && list.body.cap.cap === M.LIMITS.CONCURRENT_CAP, 'GET /api/desktop/apps: registry + availability ladder + cap');
   const remote = await j('GET', '/api/desktop/apps?host=box-2');
   // lane C2 (design-desktop-apps-seamless §3.5): `host` is no longer refused — it names the machine the keeper asks
   // through src/server/desktop-access.js; THIS keeper has no access layer wired, so a non-local host is refused by name
   // (host_unavailable, 503), never served locally (the paired-machine legs are test-desktop-serve §7 / test-desktop-remote §7)
-  ok(remote.status === 503 && remote.body.code === 'host_unavailable' && /not wired/.test(remote.body.error) && !remote.body.registry, 'a non-local host with no access layer is refused BY NAME (503 host_unavailable) — never a local answer');
+  ok(remote.status === 503 && remote.body.code === 'host_unavailable' && gateOf(/not wired/.test(remote.body.error)) && !remote.body.registry, 'a non-local host with no access layer is refused BY NAME (503 host_unavailable) — never a local answer');
   const remotePost = await j('POST', '/api/desktop/apps', { host: 'box-2', exec: appBin });
   ok(remotePost.status === 503 && remotePost.body.code === 'host_unavailable' && k.listApps().length === 0, 'POST with a host is refused the same way, nothing launched here');
   const bad = await j('POST', '/api/desktop/apps', { exec: '' });
@@ -700,7 +700,7 @@ console.log('§6 the routes (express) — host without an access layer, launch, 
   const missing = await j('POST', '/api/desktop/apps', { exec: 'no-such-binary-vs' });
   ok(missing.status === 400 && missing.body.code === 'exec-not-found', 'an exec not on PATH is 400 exec-not-found');
   const launched = await j('POST', '/api/desktop/apps', { exec: appBin, args: appArgs, label: 'via-route' });
-  ok(launched.status === 200 && launched.body.id && launched.body.state === 'launching', 'POST launches and answers the record');
+  ok(launched.status === 200 && gateOf(launched.body.id) && launched.body.state === 'launching', 'POST launches and answers the record');
   await until(() => k.get(launched.body.id).state !== 'launching');
   const one = await j('GET', `/api/desktop/apps/${launched.body.id}`);
   ok(one.status === 200 && one.body.state === 'ready', 'GET /api/desktop/apps/:id answers the live record');
@@ -713,7 +713,7 @@ console.log('§6 the routes (express) — host without an access layer, launch, 
   const vs = await j('GET', '/api/vnc/status');
   ok(vs.status === 200 && vs.body.available === false, 'GET /api/vnc/status still answers through the desktop routes (moved from server.js, same shape)');
   const vst = await j('POST', '/api/vnc/start');
-  ok(vst.status === 500 && /no VNC server installed/.test(vst.body.error), 'POST /api/vnc/start still surfaces the server\'s own error text');
+  ok(vst.status === 500 && verdictOf(/no VNC server installed/.test(vst.body.error)), 'POST /api/vnc/start still surfaces the server\'s own error text');
   await new Promise((r) => srv.close(r));
   k.shutdown();
 }
@@ -763,21 +763,21 @@ setInterval(() => {}, 1000);
   const rec = await k.launch({ exec: appBin, args: appArgs, label: 'xvnc-spelling' });
   ok(rec.via === 'Xvnc' && rec.backend === 'vnc-display' && rec.fallbackWhy === XPRA_WHY, 'launch records via Xvnc with the same fallbackWhy', rec);
   const ready = await until(() => { const r = k.get(rec.id); return r.state === 'ready' ? r : r.state === 'failed' ? r : null; });
-  ok(ready && ready.state === 'ready', 'ready through the Xvnc recipe', ready && ready.lastError);
+  ok(gateOf(ready) && ready.state === 'ready', 'ready through the Xvnc recipe', ready && ready.lastError);
   ok(ready.pids.x > 0 && ready.pids.x === ready.pids.server && ready.starts.x === ready.starts.server && ready.pids.app !== ready.pids.x, 'the record says X and the picture server are ONE process (pid AND starttime), the app another', ready);
   let argv = [];
   try { argv = fs.readFileSync(`/proc/${ready.pids.x}/cmdline`, 'utf8').split('\0').filter(Boolean); } catch {}
   const has = (f, v) => { const i = argv.indexOf(f); return i >= 0 && (v === undefined || argv[i + 1] === v); };
-  ok(has('-displayfd', '3') && has('-localhost') && has('-SecurityTypes', 'None') && has('-UseBlacklist', '0') && has('-rfbport', String(ready.port)) && has('-auth', path.join(k.logRoot, rec.id, 'Xauthority')) && has('-nolisten', 'tcp'), 'the Xvnc argv is the recipe src/vnc.js learned: -displayfd, -localhost, SecurityTypes None, UseBlacklist 0 (our own probes must not lock localhost out), the rfbport, the cookie file', argv);
+  ok(gateOf(has('-displayfd', '3')) && gateOf(has('-localhost')) && gateOf(has('-SecurityTypes', 'None')) && gateOf(has('-UseBlacklist', '0')) && gateOf(has('-rfbport', String(ready.port))) && gateOf(has('-auth', path.join(k.logRoot, rec.id, 'Xauthority'))) && verdictOf(has('-nolisten', 'tcp')), 'the Xvnc argv is the recipe src/vnc.js learned: -displayfd, -localhost, SecurityTypes None, UseBlacklist 0 (our own probes must not lock localhost out), the rfbport, the cookie file', argv);
   const hs = await rfbHandshake(ready.port);
-  ok(hs.banner === 'RFB 003.008\n' && Array.isArray(hs.security) && hs.security.includes(1), 'a real RFB client handshakes on the recorded port', hs);
+  ok(hs.banner === 'RFB 003.008\n' && gateOf(Array.isArray(hs.security)) && verdictOf(hs.security.includes(1)), 'a real RFB client handshakes on the recorded port', hs);
   const during = procCensus(k.logRoot);
   ok(during.length >= 3, `census while running: ${during.length} process(es) name this keeper's dir (the shim + its X + its picture server)`);
   // ADOPTION of a one-pid record: a second keeper on the same store
   const k2 = mk('k7', { env: envWithShim, backends: M.DISPLAY_BACKENDS });
   await k2.adoptAll();
   const adopted = k2.get(rec.id);
-  ok(adopted && adopted.state === 'ready' && adopted.adoptedAt > 0 && adopted.pids.x === ready.pids.x && adopted.pids.server === ready.pids.x, 'a second keeper ADOPTS the one-pid record (the server === x branch of adoptAll)', adopted);
+  ok(gateOf(adopted) && adopted.state === 'ready' && adopted.adoptedAt > 0 && adopted.pids.x === ready.pids.x && adopted.pids.server === ready.pids.x, 'a second keeper ADOPTS the one-pid record (the server === x branch of adoptAll)', adopted);
   const stopped = await k2.stop(rec.id);
   ok(stopped.state === 'exited' && stopped.lastError === null, 'stop through the adopting keeper ⇒ exited, clean (the server === x branch of teardown signals the one pid once)', stopped);
   await sleep(400);
@@ -804,16 +804,16 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   await sleep(200);
   process.off('uncaughtException', onU);
   ok(uncaught === null, 'the keeper PROCESS survived the spawn failure (no uncaught ENOENT — round 1 died here)', uncaught && uncaught.message);
-  ok(done && done.state === 'failed' && /x11vnc/.test(done.lastError) && /exec-vanished/.test(done.lastError), 'the record is `failed` and names the vanished binary by name (exec-vanished)', done && done.lastError);
+  ok(gateOf(done) && done.state === 'failed' && gateOf(/x11vnc/.test(done.lastError)) && verdictOf(/exec-vanished/.test(done.lastError)), 'the record is `failed` and names the vanished binary by name (exec-vanished)', done && done.lastError);
   const seen = k._events.filter((e) => e.type === 'desktop-apps-updated').map((e) => (e.apps || []).find((a) => a.id === rec.id)).filter(Boolean);
-  ok(seen.some((a) => a.state === 'launching' && a.pids.x > 0 && a.pids.server === null), 'the X server\'s pid was COMMITTED (broadcast) while still launching — before the picture server was even tried');
+  ok(verdictOf(seen.some((a) => a.state === 'launching' && a.pids.x > 0 && a.pids.server === null)), 'the X server\'s pid was COMMITTED (broadcast) while still launching — before the picture server was even tried');
   ok(done.pids.x > 0 && !alive(done.pids.x), 'the X server it had started is RECORDED and REAPED (round 1 left it alive and unrecorded)');
   ok(procCensus(k.logRoot).length === 0, 'nothing names this keeper\'s dir any more');
   ok(D.binOnPath('x11vnc', { env: { PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` } }) === facts.bins.x11vnc, 'the refuted memo was FORGOTTEN: the next probe finds the real x11vnc again');
   D.resetBinMemo(); k.shutdown();
   // CONTROL — Node semantics, the round-1 shape: a spawn with only an `exit` listener kills the process on a missing binary
   const ctl = spawnSync(process.execPath, ['-e', `const c=require('child_process').spawn(${JSON.stringify(path.join(fakeBin, 'x11vnc'))},[],{stdio:'ignore'}); c.once('exit',()=>{}); setTimeout(()=>process.exit(0),500);`], { encoding: 'utf8' });
-  ok(ctl.status !== 0 && /ENOENT/.test(ctl.stderr), `CONTROL: a bare spawn of a missing binary with only an 'exit' listener kills node (status ${ctl.status}, ENOENT on stderr)`);
+  ok(ctl.status !== 0 && verdictOf(/ENOENT/.test(ctl.stderr)), `CONTROL: a bare spawn of a missing binary with only an 'exit' listener kills node (status ${ctl.status}, ENOENT on stderr)`);
 }
 { // (b) stop takes the application's CHILDREN with it — a session, not three pids
   const k = mk('r2b'); await k.adoptAll(); k.start();
@@ -824,10 +824,10 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   ident.resetProcTables();
   const sid = ident.readSid(r.pids.app);
   const before = ident.sessionMembers(sid);
-  ok(sid === r.pids.app && before.length >= 2 && before.includes(r.pids.app), `the app is a session leader (sid == pid) and its session holds ${before.length} processes (the wrapper + the child it forked)`, before);
+  ok(sid === r.pids.app && before.length >= 2 && verdictOf(before.includes(r.pids.app)), `the app is a session leader (sid == pid) and its session holds ${before.length} processes (the wrapper + the child it forked)`, before);
   const child = before.find((p) => p !== r.pids.app);
-  ok(child && !Object.values(r.pids).includes(child), 'the forked child is NOT a recorded pid — a teardown that signals only recorded pids cannot see it');
-  ok(D.environHas(child, `${K.SESSION_ENV}=${rec.id}`), 'the child INHERITED the session marker VIBESPACE_DESKTOP_APP=<id> — the identity a straggler is recognised by');
+  ok(gateOf(child) && !Object.values(r.pids).includes(child), 'the forked child is NOT a recorded pid — a teardown that signals only recorded pids cannot see it');
+  ok(verdictOf(D.environHas(child, `${K.SESSION_ENV}=${rec.id}`)), 'the child INHERITED the session marker VIBESPACE_DESKTOP_APP=<id> — the identity a straggler is recognised by');
   const s = await k.stop(rec.id);
   await sleep(300); ident.resetProcTables();
   ok(s.state === 'exited' && s.lastError === null, 'stop ⇒ exited, clean');
@@ -849,7 +849,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const child1 = ident.sessionMembers(k1.get(rec1.id).pids.app).find((p) => p !== k1.get(rec1.id).pids.app);
   const s1 = await k1.stop(rec1.id);
   await sleep(300);
-  ok(s1.state === 'exited' && s1.lastError === null && alive(child1), `CONTROL: the pre-fix teardown reports "exited, clean" while the forked child ${child1} is STILL RUNNING (the round-1 orphan)`);
+  ok(s1.state === 'exited' && s1.lastError === null && verdictOf(alive(child1)), `CONTROL: the pre-fix teardown reports "exited, clean" while the forked child ${child1} is STILL RUNNING (the round-1 orphan)`);
   try { process.kill(child1, 'SIGKILL'); } catch {}
   k1.shutdown();
 }
@@ -859,7 +859,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const k = mk('r2c', { display: { ...NO_XVNC, freePort: async () => port } }); await k.adoptAll(); k.start();
   const rec = await k.launch({ exec: appBin, args: appArgs, label: 'impostor' });
   const done = await until(() => { const r = k.get(rec.id); return r.state !== 'launching' ? r : null; }, 20000);
-  ok(done && done.state === 'failed' && /not held by the picture server/.test(done.lastError) && /taken by another process/.test(done.lastError), 'the record FAILS naming the port and the pid instead of turning ready on a stranger\'s display', done && done.lastError);
+  ok(gateOf(done) && done.state === 'failed' && gateOf(/not held by the picture server/.test(done.lastError)) && verdictOf(/taken by another process/.test(done.lastError)), 'the record FAILS naming the port and the pid instead of turning ready on a stranger\'s display', done && done.lastError);
   await until(() => !alive(done.pids.server) && !alive(done.pids.x), 8000);
   ok(done.pids.server > 0 && !alive(done.pids.server) && !alive(done.pids.x), 'the x11vnc that had bound [::1] on the same number, and its X, are reaped');
   ok(!!(await D.rfbBanner(port, 1000)), 'the stranger still answers: the keeper signalled only its own sessions');
@@ -868,7 +868,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const k2 = mk('r2c2'); await k2.adoptAll(); k2.start();
   const rec2 = await k2.launch({ exec: appBin, args: appArgs, label: 'own-port' });
   const r2 = await until(() => { const r = k2.get(rec2.id); return r.state !== 'launching' ? r : null; });
-  ok(r2 && r2.state === 'ready' && D.listenerHeldBy(r2.port, D.sessionCensus([r2.pids.server])) === r2.pids.server, 'CONTROL: on a free port the record is ready and the 127.0.0.1 listener is held by the recorded x11vnc pid');
+  ok(gateOf(r2) && r2.state === 'ready' && D.listenerHeldBy(r2.port, D.sessionCensus([r2.pids.server])) === r2.pids.server, 'CONTROL: on a free port the record is ready and the 127.0.0.1 listener is held by the recorded x11vnc pid');
   // NEGATIVE CONTROL: the round-1 keeper (banner only) turns READY on the impostor's port
   const impostor2 = net.createServer((sock) => { sock.write('RFB 003.008\n'); }); await new Promise((r) => impostor2.listen(0, '127.0.0.1', r));
   const { mod: K1 } = mutant('c', [["        const holder = display.listenerHeldBy(up.port, display.sessionCensus([serverPid], { fresh: true }));", "        const holder = serverPid; // pre-fix: the banner was the whole proof"]]);
@@ -877,7 +877,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   await k3.adoptAll(); k3.start();
   const rec3 = await k3.launch({ exec: appBin, args: appArgs, label: 'impostor-ctl' });
   const r3 = await until(() => { const r = k3.get(rec3.id); return r.state !== 'launching' ? r : null; }, 20000);
-  ok(r3 && r3.state === 'ready' && r3.port === impostor2.address().port && D.listenerHeldBy(r3.port, [r3.pids.server]) === null, `CONTROL: the pre-fix keeper records READY on port ${r3 && r3.port} whose 127.0.0.1 listener is NOT its x11vnc (the bridge would relay the stranger)`);
+  ok(gateOf(r3) && r3.state === 'ready' && r3.port === impostor2.address().port && D.listenerHeldBy(r3.port, [r3.pids.server]) === null, `CONTROL: the pre-fix keeper records READY on port ${r3 && r3.port} whose 127.0.0.1 listener is NOT its x11vnc (the bridge would relay the stranger)`);
   await k3.stop(rec3.id); await new Promise((r) => impostor2.close(r)); k3.shutdown();
   await k2.stop(rec2.id); k2.shutdown();
 }
@@ -903,11 +903,11 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const a0 = D.procSample(r.pids.app), s0 = await D.sessionSample(pids);
   const s1 = await waitFact(async () => { const sNow = await D.sessionSample(pids); return sNow && s0 && sNow.cpuTicks - s0.cpuTicks >= 50 ? sNow : null; }, 30000, 'CONTROL: the session never burned 50 ticks', 200);
   const a1 = D.procSample(r.pids.app);
-  ok(a0 && a1 && s0 && s1 && (a1.cpuTicks - a0.cpuTicks) * 4 < s1.cpuTicks - s0.cpuTicks, `CONTROL: while its session burned its 50 ticks the recorded pid burned ${a1 && a0 ? a1.cpuTicks - a0.cpuTicks : '?'} ticks (the round-1 sample — blind) while its session (${pids.length} pids) burned ${s1 && s0 ? s1.cpuTicks - s0.cpuTicks : '?'}`);
+  ok(gateOf(a0) && gateOf(a1) && gateOf(s0) && gateOf(s1) && (a1.cpuTicks - a0.cpuTicks) * 4 < s1.cpuTicks - s0.cpuTicks, `CONTROL: while its session burned its 50 ticks the recorded pid burned ${a1 && a0 ? a1.cpuTicks - a0.cpuTicks : '?'} ticks (the round-1 sample — blind) while its session (${pids.length} pids) burned ${s1 && s0 ? s1.cpuTicks - s0.cpuTicks : '?'}`);
   const liveNow = await until(() => { const l = k.get(rec.id).live; return l && l.cpuPct > 50 ? l : null; }, 5000);
-  ok(liveNow && liveNow.pids >= 2 && liveNow.cpuPct > 50 && liveNow.memMetric === 'pss' && liveNow.memBytes > 0, `the broadcast live sample counts the session's pids, their CPU and their footprint (${liveNow && liveNow.pids} pids, ${liveNow && Math.round(liveNow.cpuPct)} %, ${liveNow && Math.round(liveNow.memBytes / 2 ** 20)} MB PSS)`, liveNow);
+  ok(gateOf(liveNow) && liveNow.pids >= 2 && liveNow.cpuPct > 50 && liveNow.memMetric === 'pss' && liveNow.memBytes > 0, `the broadcast live sample counts the session's pids, their CPU and their footprint (${liveNow && liveNow.pids} pids, ${liveNow && Math.round(liveNow.cpuPct)} %, ${liveNow && Math.round(liveNow.memBytes / 2 ** 20)} MB PSS)`, liveNow);
   const tripped = await reportedOver(k, rec.id);
-  ok(tripped && /^\d+% CPU sustained/.test(tripped.live.over) && k.get(rec.id).state === 'ready', 'a burner in a CHILD is REPORTED (the whole session is sampled) — and left running', tripped && tripped.live);
+  ok(gateOf(tripped) && gateOf(/^\d+% CPU sustained/.test(tripped.live.over)) && k.get(rec.id).state === 'ready', 'a burner in a CHILD is REPORTED (the whole session is sampled) — and left running', tripped && tripped.live);
   await k.stop(rec.id);
   await waitFact(() => { ident.resetProcTables(); return k.sessionPids(k.get(rec.id)).length === 0 ? true : null; }, 20000, 'the user\'s stop never emptied the session');
   ok(k.sessionPids(k.get(rec.id)).length === 0, 'and the user\'s stop empties every session (the `yes` child too)');
@@ -930,8 +930,8 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const k = mk('r2e', { singleton });
   await k.adoptAll();
   const r = k.get('da-shared');
-  ok(refreshes >= 1 && r.state === 'ready' && r.adoptedAt > 0 && alive(app.pid), `adoptAll REFRESHED the singleton fact (${refreshes}×) and ADOPTED the app that lives on the shared desktop`, r && { state: r.state, lastError: r.lastError });
-  ok(k.streamTarget('da-shared') && k.streamTarget('da-shared').port === rfb.address().port, 'and it streams (the refreshed `running` reaches streamTarget too)');
+  ok(refreshes >= 1 && r.state === 'ready' && r.adoptedAt > 0 && verdictOf(alive(app.pid)), `adoptAll REFRESHED the singleton fact (${refreshes}×) and ADOPTED the app that lives on the shared desktop`, r && { state: r.state, lastError: r.lastError });
+  ok(gateOf(k.streamTarget('da-shared')) && k.streamTarget('da-shared').port === rfb.address().port, 'and it streams (the refreshed `running` reaches streamTarget too)');
   const s = await k.stop('da-shared');
   ok(s.state === 'exited' && !alive(app.pid), 'stop on a shared-desktop record kills the app only (its own session), verified');
   k.shutdown();
@@ -947,7 +947,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const k1 = K1.create({ ...PINNED, dataDir: dataDir2, env: baseEnv, broadcast: () => {}, singleton: () => ({ ...facts2, refresh: async () => { facts2.running = true; return { available: true, running: true, port: rfb.address().port }; } }), log: { log() {}, warn() {}, error() {} } }); keepers.push(k1);
   await k1.adoptAll();
   const r1 = k1.get('da-shared2');
-  ok(r1.state === 'exited' && /X display gone/.test(r1.lastError) && !alive(app2.pid), 'CONTROL: judged by the cached `running:false`, the pre-fix adoption REAPS a live app on the shared desktop at every boot');
+  ok(r1.state === 'exited' && gateOf(/X display gone/.test(r1.lastError)) && !alive(app2.pid), 'CONTROL: judged by the cached `running:false`, the pre-fix adoption REAPS a live app on the shared desktop at every boot');
   k1.shutdown();
   // 2.369.198 — HELD WITH THE EVIDENCE: the .197 gate's first run of this suite ended HERE (44.7 s) with node's
   // "unsettled top-level await" (exit 13): `rfb.close(cb)` never called back and nothing else kept the loop alive — a
@@ -960,7 +960,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   {
     const closed = await Promise.race([new Promise((r) => rfb.close(() => r(true))), new Promise((r) => setTimeout(() => r(false), 3000))]);
     const left = [...rfbSocks].map((s) => `${s.remoteAddress}:${s.remotePort} readable=${s.readable} writable=${s.writable} pending=${s.pending} reading=${!!(s._handle && s._handle.reading)}`);
-    ok(closed, closed ? `the fake picture server closed with no connection left behind (${rfbSocks.size} open at the close; the keeper's probes hung up)` : `the fake picture server's close did not answer in 3 s — ${rfb._connections} connection(s) still counted: ${left.join(' | ') || 'none tracked'} (the .197 gate's exit-13 shape, now named)`, left.join(' | '));
+    ok(verdictOf(closed), closed ? `the fake picture server closed with no connection left behind (${rfbSocks.size} open at the close; the keeper's probes hung up)` : `the fake picture server's close did not answer in 3 s — ${rfb._connections} connection(s) still counted: ${left.join(' | ') || 'none tracked'} (the .197 gate's exit-13 shape, now named)`, left.join(' | '));
     if (!closed) for (const s of rfbSocks) s.destroy();
   }
 }
@@ -974,7 +974,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   ok(l.availability.backend === 'fake-rung' && l.availability.recipe === 'x-then-server-copy' && l.availability.ladder.length === 4, 'the ladder resolves to the fourth rung and names ITS recipe');
   const rec = await k.launch({ exec: appBin, args: appArgs, label: 'fourth-rung', dpr: 2 });
   const r = await until(() => { const x = k.get(rec.id); return x.state !== 'launching' ? x : null; });
-  ok(r && r.state === 'ready' && r.backend === 'fake-rung' && r.recipe === 'x-then-server-copy' && r.pids.x > 0 && r.pids.server > 0, 'a session comes up through a recipe name the keeper has never heard of — the record says the rung and the recipe', r && { state: r.state, lastError: r.lastError });
+  ok(gateOf(r) && r.state === 'ready' && r.backend === 'fake-rung' && r.recipe === 'x-then-server-copy' && r.pids.x > 0 && r.pids.server > 0, 'a session comes up through a recipe name the keeper has never heard of — the record says the rung and the recipe', r && { state: r.state, lastError: r.lastError });
   const hs = await rfbHandshake(r.port);
   ok(hs.banner === 'RFB 003.008\n', 'and it streams');
   // THE CELLS DRIVE IT (no rung id, no stream kind): `scales` ⇒ the launch took the screen's scale and the app runs with its
@@ -982,20 +982,20 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   let envOfApp = '';
   try { envOfApp = fs.readFileSync(`/proc/${r.pids.app}/environ`, 'utf8'); } catch { /* the app gone: the env check fails below */ }
   const st = k.streamTarget(rec.id);
-  ok(r.caps && r.caps.scales === true && r.caps.perWindow === false && r.scale === 2 && r.gdkScale === 2 && envOfApp.split('\0').includes('GDK_SCALE=2') && st && st.kind === 'rfb', 'dc-desktop-caps PROOF: the fake rung\'s cells drive the keeper — served on the view, the scale taken (2×, GDK_SCALE=2 in the app), the bridge target its rfb', { caps: r.caps, scale: r.scale, gdk: r.gdkScale, gdkEnv: envOfApp.split('\0').filter((l) => l.startsWith('GDK_')), st });
+  ok(gateOf(r.caps) && r.caps.scales === true && r.caps.perWindow === false && r.scale === 2 && r.gdkScale === 2 && gateOf(envOfApp.split('\0').includes('GDK_SCALE=2')) && gateOf(st) && st.kind === 'rfb', 'dc-desktop-caps PROOF: the fake rung\'s cells drive the keeper — served on the view, the scale taken (2×, GDK_SCALE=2 in the app), the bridge target its rfb', { caps: r.caps, scale: r.scale, gdk: r.gdkScale, gdkEnv: envOfApp.split('\0').filter((l) => l.startsWith('GDK_')), st });
   await k.stop(rec.id); k.shutdown();
   // a pair the table cannot name is refused BY NAME at launch, nothing spawned
   const broken = Object.freeze({ ...M.backendById('vnc-display'), recipes: Object.freeze({}) });
   const k2 = mk('r2f2', { backends: [broken] }); await k2.adoptAll();
   let refused = null;
   try { await k2.launch({ exec: appBin, args: appArgs, label: 'no-recipe' }); } catch (e) { refused = e; }
-  ok(refused && refused.code === 'no-recipe' && /names no bring-up recipe/.test(refused.message) && k2.listApps().length === 0, 'a rung whose via names no recipe is refused by code (no-recipe) before anything is spawned', refused && refused.message);
+  ok(gateOf(refused) && refused.code === 'no-recipe' && gateOf(/names no bring-up recipe/.test(refused.message)) && k2.listApps().length === 0, 'a rung whose via names no recipe is refused by code (no-recipe) before anything is spawned', refused && refused.message);
   k2.shutdown();
 }
 { // (g) this suite's own exit sweep — the rule, pinned
   const bogus = { apps: { 'da-me': { pids: { app: process.pid, x: null, server: null, wm: null }, starts: { app: 12345, x: null, server: null, wm: null } }, 'da-me2': { pids: { app: process.pid }, starts: { app: D.procStart(process.pid) } } } };
   ok(sweepTargets(bogus.apps).length === 0, 'a fixture naming THIS process — wrong starttime or even the right one — is never a sweep target');
-  ok(alive(process.pid), 'CONTROL: the round-1 predicate (`alive(p)`) would have selected it — this process is alive');
+  ok(verdictOf(alive(process.pid)), 'CONTROL: the round-1 predicate (`alive(p)`) would have selected it — this process is alive');
   // (the patched copies' placement: no longer a gitignored path in src/ — §tree measures they never touch the tree)
 }
 
@@ -1034,7 +1034,7 @@ function markerPids(id) {
   const later = k.get(rec.id);
   const census = markerPids(rec.id);
   ok(census.length === 0, `5 s later NOTHING carries VIBESPACE_DESKTOP_APP=${rec.id} (the verifier measured 2: an Xvfb and a -nopw x11vnc under an exited record)`, census);
-  ok(later.state === 'exited' && Object.values(later.pids).filter(Boolean).every((p) => !alive(p)), 'the record is still exited and every recorded pid is dead', later.pids);
+  ok(later.state === 'exited' && verdictOf(Object.values(later.pids).filter(Boolean).every((p) => !alive(p))), 'the record is still exited and every recorded pid is dead', later.pids);
   ok(procCensus(k.logRoot).length === 0, 'nothing names this keeper\'s dir any more');
   // a stop landing INSIDE the RFB wait (every part recorded, the port not yet answering) is the other window
   const rec2 = await k.launch({ exec: '/bin/sleep', args: ['3600'], label: 'stop-in-wait' });
@@ -1059,14 +1059,14 @@ function markerPids(id) {
   await sleep(5000);
   const leftover = markerPids(c.id);
   const lc = k2.get(c.id);
-  ok(sc.state === 'exited' && Object.values(sc.pids).every((p) => !p) && lc.state === 'exited' && leftover.length >= 2, `CONTROL: the pre-fix keeper answers exited with NO pids, then ${leftover.length} process(es) carry the marker under that exited record 5 s later (the orphans)`, { sc: sc.pids, later: lc.pids, leftover });
+  ok(sc.state === 'exited' && gateOf(Object.values(sc.pids).every((p) => !p)) && lc.state === 'exited' && leftover.length >= 2, `CONTROL: the pre-fix keeper answers exited with NO pids, then ${leftover.length} process(es) carry the marker under that exited record 5 s later (the orphans)`, { sc: sc.pids, later: lc.pids, leftover });
   // the pre-fix leftovers are exactly what the BOOT BELT reaps: a fresh keeper on the same store finds them by marker
   const warned = [];
   const k3b = K.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn: (m) => warned.push(m), error() {} } }); keepers.push(k3b);
   await k3b.adoptAll();
   await sleep(300);
-  ok(markerPids(c.id).length === 0 && leftover.every((p) => !alive(p)), `the next BOOT's marker census reaped the ${leftover.length} leftover(s) of the exited record (${leftover.join(', ')})`);
-  ok(warned.some((m) => new RegExp(`${c.id} \\(exited\\) still has ${leftover.length} process\\(es\\) carrying its marker or its per-app XAUTHORITY at boot`).test(m)), 'and said so, naming the record, its state and the pids', warned);
+  ok(markerPids(c.id).length === 0 && verdictOf(leftover.every((p) => !alive(p))), `the next BOOT's marker census reaped the ${leftover.length} leftover(s) of the exited record (${leftover.join(', ')})`);
+  ok(verdictOf(warned.some((m) => new RegExp(`${c.id} \\(exited\\) still has ${leftover.length} process\\(es\\) carrying its marker or its per-app XAUTHORITY at boot`).test(m))), 'and said so, naming the record, its state and the pids', warned);
   k2.shutdown(); k3b.shutdown();
 }
 { // (a2) r2566 (主开发): THE OTHER ORDER, on purpose — a stop that lands BEFORE the recipe's first spawn. The bring-up's first wait
@@ -1108,10 +1108,10 @@ function markerPids(id) {
   const h1 = heldStart();
   const ke = mk('r3a2', { display: h1.display });
   const e = await play(ke, h1, 'stop-before-spawn', { again: true });
-  ok(!!e.atWait && e.atWait.state === 'launching' && none(e.atWait.pids) && e.atWait.entered === 0, 'THE OTHER ORDER\'s PREMISE, held by a state: a stop 0 ms after the launch finds the bring-up at its first step (the start environment) — the record launching, no part recorded, the recipe not entered', e.atWait);
-  ok(e.s.state === 'exited' && e.s.stoppedBy === 'user' && none(e.s.pids), 'a stop BEFORE the recipe\'s first spawn answers exited/user and names NO pid — nothing was started (a lawful outcome: nothing to name)', e.s);
-  ok(e.entered === 0 && e.later.state === 'exited' && none(e.later.pids) && e.census.length === 0 && e.dir.length === 0, `once its held step is let go the bring-up adds NOTHING: the recipe was entered ${e.entered} time(s), the record still names no pid, nothing carries the marker, nothing names the app's folder`, { entered: e.entered, later: e.later.pids, census: e.census, dir: e.dir });
-  ok(Array.isArray(e.files) && e.files.includes('app.log') && !e.files.includes('Xauthority'), `the app's folder keeps no display cookie (the bring-up never got that far) — it holds: [${Array.isArray(e.files) ? e.files.join(', ') : JSON.stringify(e.files)}]`, e.files);
+  ok(!!e.atWait && e.atWait.state === 'launching' && gateOf(none(e.atWait.pids)) && e.atWait.entered === 0, 'THE OTHER ORDER\'s PREMISE, held by a state: a stop 0 ms after the launch finds the bring-up at its first step (the start environment) — the record launching, no part recorded, the recipe not entered', e.atWait);
+  ok(e.s.state === 'exited' && e.s.stoppedBy === 'user' && verdictOf(none(e.s.pids)), 'a stop BEFORE the recipe\'s first spawn answers exited/user and names NO pid — nothing was started (a lawful outcome: nothing to name)', e.s);
+  ok(e.entered === 0 && e.later.state === 'exited' && gateOf(none(e.later.pids)) && e.census.length === 0 && e.dir.length === 0, `once its held step is let go the bring-up adds NOTHING: the recipe was entered ${e.entered} time(s), the record still names no pid, nothing carries the marker, nothing names the app's folder`, { entered: e.entered, later: e.later.pids, census: e.census, dir: e.dir });
+  ok(gateOf(Array.isArray(e.files)) && gateOf(e.files.includes('app.log')) && !e.files.includes('Xauthority'), `the app's folder keeps no display cookie (the bring-up never got that far) — it holds: [${Array.isArray(e.files) ? e.files.join(', ') : JSON.stringify(e.files)}]`, e.files);
   ok(!!e.again && e.again.state === 'ready' && e.again.stopped === 'exited' && e.again.census.length === 0, 'and a LATER launch on the same keeper comes up ready and stops clean (nothing of the early stop tripped it)', e.again);
   ke.shutdown();
   // CONTROL (RED): a bring-up that never asks after its first wait runs the recipe under the stop — the stop still waits for it and
@@ -1121,7 +1121,7 @@ function markerPids(id) {
   const dataDir = path.join(root, 'r3a2-ctl'); fs.mkdirSync(dataDir, { recursive: true });
   const kc = K3.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, display: h2.display, log: { log() {}, warn() {}, error() {} } }); keepers.push(kc);
   const c = await play(kc, h2, 'stop-before-spawn-ctl');
-  ok(!!c.atWait && none(c.atWait.pids) && c.s.state === 'exited' && c.entered >= 1 && !none(c.s.pids) && Array.isArray(c.files) && c.files.includes('Xauthority'), `CONTROL (RED): a bring-up that does not ask after its first wait ENTERS the recipe under the stop (${c.entered} time(s)) — the answer names the parts it minted and its folder holds a display cookie, so «nothing started» fails`, { atWait: c.atWait, entered: c.entered, answer: c.s.pids, files: c.files, census: c.census });
+  ok(!!c.atWait && gateOf(none(c.atWait.pids)) && c.s.state === 'exited' && c.entered >= 1 && !none(c.s.pids) && gateOf(Array.isArray(c.files)) && verdictOf(c.files.includes('Xauthority')), `CONTROL (RED): a bring-up that does not ask after its first wait ENTERS the recipe under the stop (${c.entered} time(s)) — the answer names the parts it minted and its folder holds a display cookie, so «nothing started» fails`, { atWait: c.atWait, entered: c.entered, answer: c.s.pids, files: c.files, census: c.census });
   kc.shutdown();
 }
 { // (b) the boot belt is scoped to OUR store: a marker for an id we do not hold is never signalled
@@ -1138,8 +1138,8 @@ function markerPids(id) {
   await k.adoptAll();
   await sleep(300);
   ok(!alive(ours.pid), 'a process carrying a TERMINAL record\'s marker (no pid recorded at all — the SIGKILL-mid-stop shape) is reaped at boot');
-  ok(alive(foreign.pid), 'a process carrying a marker for an id NOT in this store (another instance under this uid) is left alone');
-  ok(alive(liveRec.pid) && k.get('da-r3b-live').state === 'ready', 'a process carrying a LIVE record\'s marker is adopted, never reaped by the belt');
+  ok(verdictOf(alive(foreign.pid)), 'a process carrying a marker for an id NOT in this store (another instance under this uid) is left alone');
+  ok(gateOf(alive(liveRec.pid)) && k.get('da-r3b-live').state === 'ready', 'a process carrying a LIVE record\'s marker is adopted, never reaped by the belt');
   ok(k.get('da-r3b-ours').state === 'exited', 'the terminal record stays terminal (the belt reaps, it does not re-judge)');
   await k.stop('da-r3b-live'); k.shutdown(); await new Promise((r) => rfb.close(r));
   try { process.kill(foreign.pid, 'SIGKILL'); } catch {}
@@ -1154,8 +1154,8 @@ function markerPids(id) {
   const k = K.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k);
   await k.adoptAll(); await sleep(300);
   const r = k.get('da-r3c');
-  ok(r.state === 'exited' && /X display gone/.test(r.lastError), 'a record whose starttimes are null is not adopted — nothing about it is proven — and is recorded as ended', r && { state: r.state, lastError: r.lastError });
-  ok(strangers.every((c) => alive(c.pid)), `the three strangers whose pids the record names are ALL still running (verifier measured [false,false,false]: SIGKILLed via the leader branch)`, strangers.map((c) => alive(c.pid)));
+  ok(r.state === 'exited' && verdictOf(/X display gone/.test(r.lastError)), 'a record whose starttimes are null is not adopted — nothing about it is proven — and is recorded as ended', r && { state: r.state, lastError: r.lastError });
+  ok(verdictOf(strangers.every((c) => alive(c.pid))), `the three strangers whose pids the record names are ALL still running (verifier measured [false,false,false]: SIGKILLed via the leader branch)`, strangers.map((c) => alive(c.pid)));
   ok(D.sameProcess(strangers[0].pid, null) === false && D.sameProcess(strangers[0].pid, D.procStart(strangers[0].pid)) === true, 'sameProcess(pid, null) is false for a LIVE pid; with its real starttime it is true (the rule, not liveness)');
   k.shutdown();
   // NEGATIVE CONTROL: the round-2 identity rule (no starttime ⇒ liveness) injected into the FIXED keeper still kills the strangers
@@ -1167,7 +1167,7 @@ function markerPids(id) {
   fs.writeFileSync(path.join(dataDir2, 'desktop-apps.json'), JSON.stringify({ apps: { 'da-r3c2': rec2 }, runawayParkedUntil: {} }));
   const k2 = K.create({ ...PINNED, dataDir: dataDir2, env: baseEnv, broadcast: () => {}, display: { ...D, sameProcess: preFixSame }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
   await k2.adoptAll(); await sleep(300);
-  ok(victims.every((c) => !alive(c.pid)), 'CONTROL: with the pre-fix sameProcess (null starttime ⇒ liveness) the same adoption SIGKILLs all three strangers', victims.map((c) => alive(c.pid)));
+  ok(verdictOf(victims.every((c) => !alive(c.pid))), 'CONTROL: with the pre-fix sameProcess (null starttime ⇒ liveness) the same adoption SIGKILLs all three strangers', victims.map((c) => alive(c.pid)));
   for (const c of [...strangers, ...victims]) { try { process.kill(c.pid, 'SIGKILL'); } catch {} }
 }
 { // (d) the runaway guard counts the work of children the application has already REAPED
@@ -1178,7 +1178,7 @@ function markerPids(id) {
   await until(() => k.get(rec.id).state !== 'launching');
   const t0 = Date.now();
   const tripped = await reportedOver(k, rec.id);
-  ok(tripped && /^\d+% CPU sustained/.test(tripped.live.over), `a burner whose work runs in short-lived children (yes | head, ~30 MB each) is REPORTED over in ${Date.now() - t0} ms (the verifier measured 20 s of 'ready' at 0 %)`, tripped && tripped.live);
+  ok(gateOf(tripped) && verdictOf(/^\d+% CPU sustained/.test(tripped.live.over)), `a burner whose work runs in short-lived children (yes | head, ~30 MB each) is REPORTED over in ${Date.now() - t0} ms (the verifier measured 20 s of 'ready' at 0 %)`, tripped && tripped.live);
   await k.stop(rec.id); await sleep(300); ident.resetProcTables();
   ok(k.sessionPids(k.get(rec.id)).length === 0, 'and the user\'s stop empties the session');
   k.shutdown();
@@ -1201,7 +1201,7 @@ function markerPids(id) {
   const loop = spawn('sh', ['-c', `while :; do sh -c 'yes >/dev/null & echo $! > "${pidFile}"; kill -9 $$'; sleep 0.7; kill -9 "$(cat "${pidFile}")" 2>/dev/null; done`], { detached: true, stdio: 'ignore' }); loop.unref(); children.push(loop);
   await sleep(2500);
   const parent = D.procSample(loop.pid);
-  ok(parent && parent.reapedTicks < 20 && parent.cpuTicks < 5, `BOUNDARY: after 2.5 s of orphaned-burner churn (~3 × 70 ticks burned) the loop's own reaped ticks are ${parent && parent.reapedTicks} (init reaped every yes — its parent was dead first; a per-session cgroup odometer is the only reader that would see it — deferred, named in the kb)`, parent);
+  ok(gateOf(parent) && parent.reapedTicks < 20 && parent.cpuTicks < 5, `BOUNDARY: after 2.5 s of orphaned-burner churn (~3 × 70 ticks burned) the loop's own reaped ticks are ${parent && parent.reapedTicks} (init reaped every yes — its parent was dead first; a per-session cgroup odometer is the only reader that would see it — deferred, named in the kb)`, parent);
   try { process.kill(-loop.pid, 'SIGKILL'); } catch {}
   try { const op = Number(fs.readFileSync(pidFile, 'utf8').trim()); if (op > 1) process.kill(op, 'SIGKILL'); } catch {}
 }
@@ -1254,21 +1254,21 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
 }
 { // (a) rule 9 — a stop that lands BETWEEN parts settles on the bring-up it CAPTURED, so the part recorded meanwhile is torn down
   const a = await stopBetweenParts(K, path.join(root, 'r4a-startApp'), 'startApp', 'stop-at-app-spawn');
-  ok(a.s && a.s.state === 'exited' && a.s.stoppedBy === 'user', 'a stop injected at the app\'s spawn (X + picture server recorded, the app in flight) answers exited/user', a.s && { state: a.s.state, err: a.s.err });
-  ok(a.s && a.s.pids.x > 0 && a.s.pids.server > 0 && a.s.pids.app > 0, 'the answer names all three pids — the app that was recorded DURING the first teardown included', a.s && a.s.pids);
+  ok(gateOf(a.s) && a.s.state === 'exited' && a.s.stoppedBy === 'user', 'a stop injected at the app\'s spawn (X + picture server recorded, the app in flight) answers exited/user', a.s && { state: a.s.state, err: a.s.err });
+  ok(gateOf(a.s) && a.s.pids.x > 0 && a.s.pids.server > 0 && a.s.pids.app > 0, 'the answer names all three pids — the app that was recorded DURING the first teardown included', a.s && a.s.pids);
   ok(a.census.length === 0, `5 s later NOTHING carries VIBESPACE_DESKTOP_APP=${a.id} (the verifier measured /bin/sleep 3600 alive under the exited record at 1.5 s and 5.5 s)`, a.census);
-  ok(a.later.state === 'exited' && Object.values(a.later.pids).filter(Boolean).every((p) => !alive(p)), 'the record is still exited and every recorded pid — the app too — is dead', a.later.pids);
+  ok(a.later.state === 'exited' && verdictOf(Object.values(a.later.pids).filter(Boolean).every((p) => !alive(p))), 'the record is still exited and every recorded pid — the app too — is dead', a.later.pids);
   const b = await stopBetweenParts(K, path.join(root, 'r4a-freePort'), 'freePort', 'stop-at-free-port');
-  ok(b.s && b.s.state === 'exited' && b.s.pids.x > 0 && b.s.pids.server > 0 && b.census.length === 0, 'the other window (X recorded, the x11vnc spawn ahead): exited, the listener recorded, nothing carries the marker 5 s later', b.s && { pids: b.s.pids, census: b.census });
+  ok(gateOf(b.s) && b.s.state === 'exited' && b.s.pids.x > 0 && b.s.pids.server > 0 && b.census.length === 0, 'the other window (X recorded, the x11vnc spawn ahead): exited, the listener recorded, nothing carries the marker 5 s later', b.s && { pids: b.s.pids, census: b.census });
   // THE CAPTURE HOLDS ALONE: with the marker belt REMOVED the same injection is still clean — the order is a mechanism,
   // not the belt's timing accident (on this box the app spawns within ms, so teardown #1's census would also have found it)
   const { mod: Kb } = mutant('r4a-belt-off', NO_BELT);
   const c = await stopBetweenParts(Kb, path.join(root, 'r4a-belt-off'), 'startApp', 'stop-at-app-spawn-no-belt');
-  ok(c.s && c.s.state === 'exited' && c.s.pids.app > 0 && c.census.length === 0 && !c.warned.some((m) => /still carry its marker after the session teardown/.test(m)), 'with the marker belt removed the captured bring-up ALONE still leaves nothing (no belt line was printed — the second teardown reaped the app)', { pids: c.s && c.s.pids, census: c.census, belt: c.warned.filter((m) => /marker/.test(m)) });
+  ok(gateOf(c.s) && c.s.state === 'exited' && c.s.pids.app > 0 && c.census.length === 0 && !c.warned.some((m) => /still carry its marker after the session teardown/.test(m)), 'with the marker belt removed the captured bring-up ALONE still leaves nothing (no belt line was printed — the second teardown reaped the app)', { pids: c.s && c.s.pids, census: c.census, belt: c.warned.filter((m) => /marker/.test(m)) });
   // NEGATIVE CONTROL: the round-3 keeper (nothing captured, no belt) — the app survives under `exited`
   const { mod: K3 } = mutant('r4a-r3', [...NO_CAPTURE, ...NO_BELT]);
   const d = await stopBetweenParts(K3, path.join(root, 'r4a-ctl'), 'startApp', 'stop-at-app-spawn-ctl');
-  ok(d.s && d.s.state === 'exited' && d.s.pids.app > 0 && d.census.length === 1 && d.census[0] === d.s.pids.app && alive(d.s.pids.app), `CONTROL: the round-3 keeper answers exited with pids.app set and that very pid still carries the marker 5 s later (${d.census.join(', ')})`, { pids: d.s && d.s.pids, census: d.census });
+  ok(gateOf(d.s) && d.s.state === 'exited' && d.s.pids.app > 0 && d.census.length === 1 && d.census[0] === d.s.pids.app && verdictOf(alive(d.s.pids.app)), `CONTROL: the round-3 keeper answers exited with pids.app set and that very pid still carries the marker 5 s later (${d.census.join(', ')})`, { pids: d.s && d.s.pids, census: d.census });
   ok(!d.warned.some((m) => /reaping|still running|leftover/.test(m)), 'CONTROL: and it printed no reap / still-running line — nothing knew', d.warned);
   for (const p of d.census) { try { process.kill(p, 'SIGKILL'); } catch {} }
 }
@@ -1285,13 +1285,13 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   const s = await k.stop(rec.id);
   await sleep(1500);
   const after = markerPids(rec.id);
-  ok(s.state === 'exited' && s.lastError == null && after.length === 0 && escaped.every((p) => !alive(p)), 'stop() ⇒ exited, lastError null, and 1.5 s later NOTHING carries the marker — the setsid\'d worker included (the verifier measured it alive)', { state: s.state, lastError: s.lastError, after });
-  ok(warned.some((m) => new RegExp(`${rec.id}: 1 process\\(es\\) still carry its marker after the session teardown .*${escaped[0]} — reaping`).test(m)), 'and the teardown SAID so, naming the pid it found outside every session', warned.filter((m) => /marker/.test(m)));
+  ok(s.state === 'exited' && s.lastError == null && after.length === 0 && verdictOf(escaped.every((p) => !alive(p))), 'stop() ⇒ exited, lastError null, and 1.5 s later NOTHING carries the marker — the setsid\'d worker included (the verifier measured it alive)', { state: s.state, lastError: s.lastError, after });
+  ok(verdictOf(warned.some((m) => new RegExp(`${rec.id}: 1 process\\(es\\) still carry its marker after the session teardown .*${escaped[0]} — reaping`).test(m))), 'and the teardown SAID so, naming the pid it found outside every session', warned.filter((m) => /marker/.test(m)));
   // the SAME class through a terminal path that is NOT stop(): the app exits after daemonising a worker
   const rec2 = await k.launch({ exec: 'sh', args: ['-c', 'setsid sleep 3600 </dev/null >/dev/null 2>&1 & sleep 1; exit 0'], label: 'exit-after-daemonising' });
   const ended = await until(() => (!M.isLiveState(k.get(rec2.id).state) ? k.get(rec2.id) : null), 25000);
   await sleep(1500);
-  ok(ended && ended.state === 'exited' && /application exited \(code 0\)/.test(ended.lastError) && markerPids(rec2.id).length === 0, 'an app that EXITS after daemonising a worker: the app-exit teardown reaps the worker too (record exited, nothing carries the marker)', ended && { state: ended.state, lastError: ended.lastError, census: markerPids(rec2.id) });
+  ok(gateOf(ended) && ended.state === 'exited' && gateOf(/application exited \(code 0\)/.test(ended.lastError)) && markerPids(rec2.id).length === 0, 'an app that EXITS after daemonising a worker: the app-exit teardown reaps the worker too (record exited, nothing carries the marker)', ended && { state: ended.state, lastError: ended.lastError, census: markerPids(rec2.id) });
   k.shutdown();
   // NEGATIVE CONTROL: the belt removed — the round-3 teardown (sid table only) leaves the worker under `exited`, and the BOOT belt is what reaps it
   const { mod: Kb } = mutant('r4b-belt-off', NO_BELT);
@@ -1303,11 +1303,11 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   const sc = await kb.stop(c.id);
   await sleep(1500);
   const leftover = markerPids(c.id);
-  ok(sc.state === 'exited' && sc.lastError == null && leftover.length === 1 && alive(leftover[0]), `CONTROL: with the marker belt removed the same stop answers exited/lastError null and the setsid'd worker (${leftover.join(', ')}) still carries the marker 1.5 s later`, { state: sc.state, leftover });
+  ok(sc.state === 'exited' && sc.lastError == null && leftover.length === 1 && verdictOf(alive(leftover[0])), `CONTROL: with the marker belt removed the same stop answers exited/lastError null and the setsid'd worker (${leftover.join(', ')}) still carries the marker 1.5 s later`, { state: sc.state, leftover });
   kb.shutdown();
   const k3 = K.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k3);
   await k3.adoptAll(); await sleep(300);
-  ok(markerPids(c.id).length === 0 && leftover.every((p) => !alive(p)), 'the next boot\'s census reaps it (the layer the verifier measured — a restart was the only thing that ever found it)');
+  ok(markerPids(c.id).length === 0 && verdictOf(leftover.every((p) => !alive(p))), 'the next boot\'s census reaps it (the layer the verifier measured — a restart was the only thing that ever found it)');
   k3.shutdown();
 }
 { // (c) rule 10 for the runaway guard — a burner that setsid()'d out of every leader's session is still counted
@@ -1318,7 +1318,7 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   await until(() => (k.get(rec.id).state !== 'launching' ? true : null), 20000);
   const t0 = Date.now();
   const tripped = await reportedOver(k, rec.id);
-  ok(tripped && /^\d+% CPU sustained/.test(tripped.live.over) && k.get(rec.id).state === 'ready', `a burner in a setsid'd child is REPORTED over in ${Date.now() - t0} ms (the verifier measured 0 % for 20 s while ready) — and left running`, tripped && tripped.live);
+  ok(gateOf(tripped) && gateOf(/^\d+% CPU sustained/.test(tripped.live.over)) && k.get(rec.id).state === 'ready', `a burner in a setsid'd child is REPORTED over in ${Date.now() - t0} ms (the verifier measured 0 % for 20 s while ready) — and left running`, tripped && tripped.live);
   await k.stop(rec.id); await sleep(500); ident.resetProcTables();
   ok(markerPids(rec.id).length === 0, 'and the user\'s stop empties the session, escaped burner included');
   k.shutdown();
@@ -1331,7 +1331,7 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   await until(() => (k2.get(rec2.id).state !== 'launching' ? true : null), 20000);
   const trippedCtl = await reportedOver(k2, rec2.id, 6000);
   const liveCtl = k2.get(rec2.id).live;
-  ok(!trippedCtl && k2.get(rec2.id).state === 'ready' && liveCtl && liveCtl.cpuPct < 25, `CONTROL: sampling the sid table alone, the same burner is never reported over in 6 s at cpuPct ${liveCtl && Math.round(liveCtl.cpuPct)} % over ${liveCtl && liveCtl.pids} pids`);
+  ok(!trippedCtl && k2.get(rec2.id).state === 'ready' && gateOf(liveCtl) && liveCtl.cpuPct < 25, `CONTROL: sampling the sid table alone, the same burner is never reported over in 6 s at cpuPct ${liveCtl && Math.round(liveCtl.cpuPct)} % over ${liveCtl && liveCtl.pids} pids`);
   await k2.stop(rec2.id); k2.shutdown();
   await sleep(300);
   ok(markerPids(rec2.id).length === 0, 'CONTROL cleanup: the fixed stop of the mutant keeper (its belt intact) reaped the escaped burner');
@@ -1347,18 +1347,18 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     const k = mk('k12', { settings: { 'desktop.backendPrefs': '' } });
     await k.adoptAll(); k.start();
     const l0 = await k.list();
-    ok(l0.availability.backend === 'xpra' && l0.availability.via === 'xpra' && l0.availability.recipe === 'xpra-seamless' && l0.availability.stream === 'xpra' && l0.availability.fallbackWhy === null && Array.isArray(l0.availability.prefs) && l0.availability.prefs.length === 0, 'list(): with no preference the ladder picks xpra (DA1), stream xpra, nothing fell, prefs empty', l0.availability);
+    ok(l0.availability.backend === 'xpra' && l0.availability.via === 'xpra' && l0.availability.recipe === 'xpra-seamless' && l0.availability.stream === 'xpra' && l0.availability.fallbackWhy === null && gateOf(Array.isArray(l0.availability.prefs)) && l0.availability.prefs.length === 0, 'list(): with no preference the ladder picks xpra (DA1), stream xpra, nothing fell, prefs empty', l0.availability);
     const t0 = Date.now();
     const rec = await k.launch({ exec: appBin, args: appArgs, label: 'seamless' });
     ok(rec.state === 'launching' && rec.backend === 'xpra' && rec.via === 'xpra' && rec.recipe === 'xpra-seamless' && rec.stream === 'xpra' && rec.fallbackWhy === null, 'launch answers a launching record on xpra via xpra-seamless, stream xpra', rec);
     await until(() => (k.get(rec.id).state !== 'launching' ? true : null), 30000);
     const r1 = k.get(rec.id);
     const readyMs = Date.now() - t0;
-    ok(r1.state === 'ready' && r1.probe === 'http' && /^:\d+$/.test(r1.display) && r1.port > 0, `ready in ${readyMs} ms on ${r1.display} port ${r1.port} (probe http) — lastError ${r1.lastError}`, r1);
+    ok(r1.state === 'ready' && r1.probe === 'http' && gateOf(/^:\d+$/.test(r1.display)) && r1.port > 0, `ready in ${readyMs} ms on ${r1.display} port ${r1.port} (probe http) — lastError ${r1.lastError}`, r1);
     ok(r1.pids.x > 0 && r1.pids.server === r1.pids.x && r1.starts.server === r1.starts.x && r1.pids.app > 0 && r1.pids.app !== r1.pids.x && r1.pids.wm === null, 'ONE xpra pid is recorded as x AND server (one process owns the Xvfb and the picture socket), the app is its own pid, no WM of ours (xpra is the WM)', r1.pids);
     ok(D.listenerHeldBy(r1.port, D.sessionCensus([r1.pids.x], { fresh: true })) === r1.pids.x, 'the 127.0.0.1 listener is held by the xpra pid itself (rule 3 on this rung)');
     const members = D.sessionMembers(r1.pids.x, { fresh: true });
-    ok(members.length >= 2 && members.includes(r1.pids.x), `xpra's session holds its Xvfb too (${members.length} members) — the sid identity that survives xpra's environ rewrite`);
+    ok(members.length >= 2 && verdictOf(members.includes(r1.pids.x)), `xpra's session holds its Xvfb too (${members.length} members) — the sid identity that survives xpra's environ rewrite`);
     // B-2a93: red on the box and the first test machine since 11-17 with no word of which half — the detail now says both
     const xHas = D.environHas(r1.pids.x, `${K.SESSION_ENV}=${rec.id}`), appHas = D.environHas(r1.pids.app, `${K.SESSION_ENV}=${rec.id}`);
     let xArgv = null; try { xArgv = fs.readFileSync(`/proc/${r1.pids.x}/cmdline`, 'utf8').split('\0').filter(Boolean).slice(0, 3).join(' ').slice(0, 120); } catch (e) { xArgv = 'unread: ' + e.code; }
@@ -1367,10 +1367,10 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     // it on the first test machine (59594edc9-…-box). The belt (src/desktop-serve.js needlesOf: the marker OR the per-app XAUTHORITY) reads
     // it as EVIDENCE either way and never leaned on its absence. So the leg SAYS which it met and JUDGES THE BELT's OWN OUTCOME on both.
     console.log(`  the display server's environ here: the marker ${xHas ? 'KEPT' : 'NOT kept'} on the xpra pid; the app carries it: ${appHas} — ${JSON.stringify({ xpraPid: r1.pids.x, xpraEnvironBytes: environBytes(r1.pids.x), xpraArgv: xArgv, appPid: r1.pids.app, appEnvironBytes: environBytes(r1.pids.app) })}`);
-    ok(appHas, 'the app the keeper spawned carries the session marker (the belt\'s first needle, on every machine)', { appPid: r1.pids.app, appEnvironHasMarker: appHas });
+    ok(verdictOf(appHas), 'the app the keeper spawned carries the session marker (the belt\'s first needle, on every machine)', { appPid: r1.pids.app, appEnvironHasMarker: appHas });
     {
       const DSsrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
-      ok(DSsrc.includes("const needlesOf = (rec) => (!M.capsOf(rec, backends).ownsDisplay ? [sessionMarker(rec.id)] : [sessionMarker(rec.id), `XAUTHORITY=${path.join(logRoot, rec.id, 'Xauthority')}`]);"), 'the product\'s needles are the session marker and the per-app XAUTHORITY (the census below asks exactly these two)');
+      ok(verdictOf(DSsrc.includes("const needlesOf = (rec) => (!M.capsOf(rec, backends).ownsDisplay ? [sessionMarker(rec.id)] : [sessionMarker(rec.id), `XAUTHORITY=${path.join(logRoot, rec.id, 'Xauthority')}`]);")), 'the product\'s needles are the session marker and the per-app XAUTHORITY (the census below asks exactly these two)');
       const needles = (id) => [`${K.SESSION_ENV}=${id}`, `XAUTHORITY=${path.join(k.logRoot, id, 'Xauthority')}`];
       const censusOf = (pairs) => D.environCensus(new Map(pairs.flatMap(([id, as]) => needles(as).map((n) => [n, id]))));
       // a SECOND application on its own xpra beside the first: its processes must never be in the first record's census, nor the reverse
@@ -1383,19 +1383,19 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
         return { holds: own1.has(r1.pids.x) && !!xvfb1 && own1.has(xvfb1), apart: ![...(cen.get(r1.id) || [])].some((p) => own2.has(p)) && ![...(cen.get(r2.id) || [])].some((p) => own1.has(p)), n1: (cen.get(r1.id) || []).length, n2: (cen.get(r2.id) || []).length };
       };
       const real = r2 && r2.state === 'ready' ? judge(censusOf([[r1.id, r1.id], [r2.id, r2.id]])) : null;
-      ok(!!real && real.holds && real.apart, `THE BELT's OWN OUTCOME (marker ${xHas ? 'kept' : 'not kept'} on the display server): the record's evidence with its session holds its own xpra and X server, and NO process of the second application's record — nor the reverse (${real ? `${real.n1} / ${real.n2} carrying either needle` : 'the second app did not come up'})`, { real, r2: r2 && { state: r2.state, lastError: r2.lastError } });
+      ok(!!real && gateOf(real.holds) && verdictOf(real.apart), `THE BELT's OWN OUTCOME (marker ${xHas ? 'kept' : 'not kept'} on the display server): the record's evidence with its session holds its own xpra and X server, and NO process of the second application's record — nor the reverse (${real ? `${real.n1} / ${real.n2} carrying either needle` : 'the second app did not come up'})`, { real, r2: r2 && { state: r2.state, lastError: r2.lastError } });
       const swapped = r2 && r2.state === 'ready' ? judge(censusOf([[r1.id, r2.id], [r2.id, r1.id]])) : null;
       ok(!!swapped && !swapped.apart, 'CONTROL (RED): a census that takes ANOTHER record\'s processes (each record asked with the other\'s needles) fails the judgement', swapped);
       try { await k.stop(rec2.id); } catch { /* the leg below says what is left */ }
       const after = await until(() => { const c = censusOf([[rec2.id, rec2.id]]); return (c.get(rec2.id) || []).length === 0 ? true : null; }, 15000, 300);
       ok(!!after, 'after the second application\'s stop NOTHING carrying either of its needles is left (its marker, its per-app XAUTHORITY)', (censusOf([[rec2.id, rec2.id]]).get(rec2.id) || []));
     }
-    ok(fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority')) && fs.statSync(path.join(k.logRoot, rec.id, 'Xauthority')).size > 0 && fs.existsSync(path.join(k.logRoot, rec.id, 'xpra')), 'the per-app dir holds the Xauthority xpra wrote into (pinned, never ~/.Xauthority) and xpra\'s own socket/session dir');
-    ok(k.streamTarget(rec.id) && k.streamTarget(rec.id).kind === 'xpra' && k.streamTarget(rec.id).port === r1.port, 'streamTarget: kind xpra on the recorded port');
+    ok(gateOf(fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority'))) && fs.statSync(path.join(k.logRoot, rec.id, 'Xauthority')).size > 0 && verdictOf(fs.existsSync(path.join(k.logRoot, rec.id, 'xpra'))), 'the per-app dir holds the Xauthority xpra wrote into (pinned, never ~/.Xauthority) and xpra\'s own socket/session dir');
+    ok(gateOf(k.streamTarget(rec.id)) && k.streamTarget(rec.id).kind === 'xpra' && k.streamTarget(rec.id).port === r1.port, 'streamTarget: kind xpra on the recorded port');
     // (b) per-window facts: the app's window, no xpra wrapper rows
     const w = await until(async () => { const r = await k.windows(rec.id); return r.ok && r.windows.length ? r : null; }, 10000, 300);
-    ok(w && w.windows.length === 1 && w.windows.every((x) => !/^Xpra/.test(x.title || '')) && (w.windows[0].cls || w.windows[0].instance), `windows(): exactly the app's own window (${w && JSON.stringify(w.windows.map((x) => [x.title, x.cls, x.w, x.h]))}) — xpra's Corral wrappers and 1x1 leaders filtered`, w);
-    ok(await k.windows('no-such').then(() => false, (e) => e.code === 'not-found'), 'windows() of an unknown id is a named not-found');
+    ok(gateOf(w) && w.windows.length === 1 && gateOf(w.windows.every((x) => !/^Xpra/.test(x.title || ''))) && (verdictOf(w.windows[0].cls) || verdictOf(w.windows[0].instance)), `windows(): exactly the app's own window (${w && JSON.stringify(w.windows.map((x) => [x.title, x.cls, x.w, x.h]))}) — xpra's Corral wrappers and 1x1 leaders filtered`, w);
+    ok(verdictOf(await k.windows('no-such').then(() => false, (e) => e.code === 'not-found')), 'windows() of an unknown id is a named not-found');
     // (c) the REAL bridge to the REAL xpra: bytes both ways — a bencode hello is answered by xpra's own `disconnect` naming the reason
     const stream = S.create({ auth: { requestAuthed: () => true }, resolveTarget: (id) => k.streamTarget(id), onInput: (id) => k.noteInput(id), log: { warn() {}, log: (l) => xlog.push(String(l)) } });
     const xlog = [];
@@ -1416,10 +1416,10 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     const first = back[0] ? back[0].toString('latin1') : '';
     const bare = /^disconnect /.test(first);
     const packet = back[0] && back[0][0] === 0x50 && S.xpraStrings(back[0].subarray(8))[0] === 'disconnect';
-    ok(back.length >= 1 && (bare || packet), `the real xpra answered through the bridge: ${back.length} message(s), the first a disconnect (${bare ? 'bare text' : packet ? 'packet' : 'neither'}: ${JSON.stringify(first.replace(/[^\x20-\x7e]/g, '.').slice(0, 90))})`, back.map((b) => b.length));
+    ok(back.length >= 1 && (verdictOf(bare) || verdictOf(packet)), `the real xpra answered through the bridge: ${back.length} message(s), the first a disconnect (${bare ? 'bare text' : packet ? 'packet' : 'neither'}: ${JSON.stringify(first.replace(/[^\x20-\x7e]/g, '.').slice(0, 90))})`, back.map((b) => b.length));
     await until(() => (xlog.some((l) => new RegExp(`${rec.id}: closed`).test(l)) ? true : null), 5000);
     const cl = xlog.find((l) => new RegExp(`${rec.id}: closed`).test(l)) || '';
-    ok(/closed \(the xpra server disconnected: (invalid packet encoding|protocol error)/.test(cl), 'the close line names xpra\'s own reason (the bare-text shape read by the bridge)', cl);
+    ok(verdictOf(/closed \(the xpra server disconnected: (invalid packet encoding|protocol error)/.test(cl)), 'the close line names xpra\'s own reason (the bare-text shape read by the bridge)', cl);
     try { wsx.close(); } catch {}
     await new Promise((r) => srv.close(r));
     // the SAME hello from a viewer the window-live policy REFUSES (Watch mode on an agent-held window) still reaches the
@@ -1434,7 +1434,7 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     await new Promise((r) => wsw.on('open', r));
     wsw.send(Buffer.concat([hh, hello]));
     await until(() => (backW.length ? true : null), 5000);
-    ok(backW.length >= 1 && /^disconnect /.test(backW[0].toString('latin1')) && streamW.stats().dropped === 0 && streamW.stats().relayed === 1, `a REFUSED (watch-mode) viewer's hello reaches the REAL xpra and is answered (${backW.length} message(s) back; dropped ${streamW.stats().dropped})`, streamW.stats());
+    ok(backW.length >= 1 && gateOf(/^disconnect /.test(backW[0].toString('latin1'))) && streamW.stats().dropped === 0 && streamW.stats().relayed === 1, `a REFUSED (watch-mode) viewer's hello reaches the REAL xpra and is answered (${backW.length} message(s) back; dropped ${streamW.stats().dropped})`, streamW.stats());
     try { wsw.close(); } catch {}
     await new Promise((r) => srvW.close(r));
     // (d) ADOPTION keeps the backend a record was BORN with: a vnc-display record (pinned keeper) + the xpra record survive a rebuild under the DEFAULT order
@@ -1456,7 +1456,7 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     const stopped = await k2.stop(rec.id, { why: 'user' });
     ok(stopped.state === 'exited' && stopped.stoppedBy === 'user' && stopped.lastError === null, `stop ⇒ exited, clean (${stopped.lastError})`);
     await sleep(300);
-    ok(!D.pidAlive(r1.pids.x) && !D.pidAlive(r1.pids.app) && members.every((p) => !D.pidAlive(p)) && markerPids(rec.id).length === 0, 'the xpra pid, its Xvfb and the app are gone; nothing carries the marker');
+    ok(!D.pidAlive(r1.pids.x) && !D.pidAlive(r1.pids.app) && gateOf(members.every((p) => !D.pidAlive(p))) && markerPids(rec.id).length === 0, 'the xpra pid, its Xvfb and the app are gone; nothing carries the marker');
     await kv2.stop(vrec.id); kv2.shutdown(); k2.shutdown();
     // (f) THE BOOT BELT BY IDENTITY: a TERMINAL record whose recorded x pid+starttime is still alive is reaped by that identity (xpra's environ carries no marker)
     const kb = mk('k12-belt', { settings: { 'desktop.backendPrefs': '' } });
@@ -1473,7 +1473,7 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     await kb.adoptAll();
     await sleep(200);
     ok(!D.pidAlive(stray.pid), 'a terminal record\'s recorded x (pid AND starttime match) is reaped at boot by IDENTITY — the marker was never needed');
-    ok(D.pidAlive(stray2.pid), 'CONTROL: the same shape with a WRONG starttime (a recycled pid) is never signalled');
+    ok(verdictOf(D.pidAlive(stray2.pid)), 'CONTROL: the same shape with a WRONG starttime (a recycled pid) is never signalled');
     try { process.kill(stray2.pid, 'SIGKILL'); } catch {}
     kb.shutdown();
     // (g) A CRASHED xpra LEAKS NOTHING (2026-09-22, the verifier's xvfb-leak repro): xpra's own Xvfb inherits a
@@ -1487,11 +1487,11 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     const g1 = await launchReady(kg, 'crash-live');
     const xv1 = xvfbOf(g1.pids.x);
     const authG1 = `XAUTHORITY=${path.join(kg.logRoot, g1.id, 'Xauthority')}`;
-    ok(g1.state === 'ready' && g1.backend === 'xpra' && xv1.length === 1 && !D.environHas(xv1[0], `${K.SESSION_ENV}=${g1.id}`) && D.environHas(xv1[0], authG1) && D.sessionMembers(g1.pids.x, { fresh: true }).includes(xv1[0]), `MEASURED: xpra's Xvfb (pid ${xv1[0]}, in xpra's session) carries NO session marker, and DOES carry the per-app XAUTHORITY`);
+    ok(g1.state === 'ready' && g1.backend === 'xpra' && xv1.length === 1 && !D.environHas(xv1[0], `${K.SESSION_ENV}=${g1.id}`) && gateOf(D.environHas(xv1[0], authG1)) && verdictOf(D.sessionMembers(g1.pids.x, { fresh: true }).includes(xv1[0])), `MEASURED: xpra's Xvfb (pid ${xv1[0]}, in xpra's session) carries NO session marker, and DOES carry the per-app XAUTHORITY`);
     process.kill(g1.pids.x, 'SIGKILL');
     await until(() => (kg.get(g1.id).state === 'failed' ? true : null), 15000);
     await until(() => (xv1.every((p) => !D.pidAlive(p)) ? true : null), 8000);
-    ok(kg.get(g1.id).state === 'failed' && /X display :\d+ exited/.test(kg.get(g1.id).lastError || '') && xv1.every((p) => !D.pidAlive(p)) && !D.pidAlive(g1.pids.app), `SIGKILL of a ready session's xpra ⇒ failed (${kg.get(g1.id).lastError}), the app reaped AND Xvfb-for-Xpra-S${g1.pids.x} reaped by the teardown`);
+    ok(kg.get(g1.id).state === 'failed' && gateOf(/X display :\d+ exited/.test(kg.get(g1.id).lastError || '')) && gateOf(xv1.every((p) => !D.pidAlive(p))) && !D.pidAlive(g1.pids.app), `SIGKILL of a ready session's xpra ⇒ failed (${kg.get(g1.id).lastError}), the app reaped AND Xvfb-for-Xpra-S${g1.pids.x} reaped by the teardown`);
     kg.shutdown();
     // the keeper PROCESS DOWN when xpra dies (§3's shape: a child keeper SIGKILLed — the suite's own keepers still hold
     // live child handles, so they would see the exit): the next boot's adoption reaps the Xvfb
@@ -1516,11 +1516,11 @@ setInterval(() => {}, 1000);
     await sleep(300);
     if (g2 && g2.pids.x) process.kill(g2.pids.x, 'SIGKILL');
     await sleep(400);
-    ok(g2 && g2.state === 'ready' && g2.backend === 'xpra' && !alive(downProc.pid) && xv2.length === 1 && D.pidAlive(xv2[0]) && !D.pidAlive(g2.pids.x), `keeper process SIGKILLed, then its xpra: the Xvfb outlives both (pid ${xv2[0]} alive — nothing has looked yet)`, g2 && g2.lastError);
+    ok(gateOf(g2) && g2.state === 'ready' && g2.backend === 'xpra' && !alive(downProc.pid) && xv2.length === 1 && gateOf(D.pidAlive(xv2[0])) && !D.pidAlive(g2.pids.x), `keeper process SIGKILLed, then its xpra: the Xvfb outlives both (pid ${xv2[0]} alive — nothing has looked yet)`, g2 && g2.lastError);
     const kg2 = mk('k12-crash-down', { settings: { 'desktop.backendPrefs': '' } });
     await kg2.adoptAll();
     await until(() => (xv2.every((p) => !D.pidAlive(p)) ? true : null), 8000);
-    ok(!M.isLiveState(kg2.get(g2.id).state) && xv2.every((p) => !D.pidAlive(p)) && !D.pidAlive(g2.pids.app), `after a reboot, adoptAll judges the record ${kg2.get(g2.id).state} and its Xvfb is reaped too (proven by its XAUTHORITY, its leader long dead)`);
+    ok(!M.isLiveState(kg2.get(g2.id).state) && gateOf(xv2.every((p) => !D.pidAlive(p))) && !D.pidAlive(g2.pids.app), `after a reboot, adoptAll judges the record ${kg2.get(g2.id).state} and its Xvfb is reaped too (proven by its XAUTHORITY, its leader long dead)`);
     // the boot belt: a TERMINAL record's leftover proven ONLY by its XAUTHORITY (no marker, in no recorded session) is reaped; a foreign path is not
     const strayA = spawn('sleep', ['3600'], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, XAUTHORITY: path.join(kg2.logRoot, g2.id, 'Xauthority') } }); strayA.unref(); children.push(strayA);
     const strayB = spawn('sleep', ['3600'], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, XAUTHORITY: path.join(kg2.logRoot, 'da-not-ours', 'Xauthority') } }); strayB.unref(); children.push(strayB);
@@ -1530,7 +1530,7 @@ setInterval(() => {}, 1000);
     await kg3.adoptAll();
     await until(() => (!D.pidAlive(strayA.pid) ? true : null), 6000);
     ok(!D.pidAlive(strayA.pid), 'the boot belt reaps a terminal record\'s leftover that carries only its XAUTHORITY (the Xvfb shape: sanitised env, own session)');
-    ok(D.pidAlive(strayB.pid), 'CONTROL: the same shape naming ANOTHER id\'s Xauthority path is never signalled');
+    ok(verdictOf(D.pidAlive(strayB.pid)), 'CONTROL: the same shape naming ANOTHER id\'s Xauthority path is never signalled');
     try { process.kill(strayB.pid, 'SIGKILL'); } catch {}
     kg3.shutdown();
     // CONTROL: the pre-fix keeper (the marker was the only evidence) leaks the Xvfb on the same crash
@@ -1543,7 +1543,7 @@ setInterval(() => {}, 1000);
     process.kill(gc.pids.x, 'SIGKILL');
     await until(() => (kc.get(gc.id).state === 'failed' ? true : null), 15000);
     await sleep(1500);
-    ok(gc.backend === 'xpra' && xvc.length === 1 && D.pidAlive(xvc[0]), `CONTROL: the pre-fix keeper (marker-only evidence) leaves Xvfb-for-Xpra-S${gc.pids.x} alive after the same crash (${xvc.join(', ')})`);
+    ok(gc.backend === 'xpra' && xvc.length === 1 && verdictOf(D.pidAlive(xvc[0])), `CONTROL: the pre-fix keeper (marker-only evidence) leaves Xvfb-for-Xpra-S${gc.pids.x} alive after the same crash (${xvc.join(', ')})`);
     for (const p of xvc) { try { process.kill(p, 'SIGKILL'); } catch {} }
     kc.shutdown();
   }
@@ -1579,14 +1579,14 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
     const rec = await k.launch({ exec: appBin, args: appArgs, label: 'fit' });
     ok(rec.backend === 'vnc-display' && rec.via === 'Xvnc' && rec.fitMode === 'follows' && rec.fitBy === 'keeper' && rec.fb === null && rec.fit === null, 'the launching record: vnc-display via Xvnc, fitMode follows (by the keeper), no fb/fit fact yet', { via: rec.via, fitMode: rec.fitMode });
     const ready = await until(() => (k.get(rec.id).state === 'ready' ? k.get(rec.id) : null), 20000);
-    ok(ready && ready.state === 'ready', `ready in ${Date.now() - t0} ms (${ready && ready.lastError})`);
+    ok(gateOf(ready) && ready.state === 'ready', `ready in ${Date.now() - t0} ms (${ready && ready.lastError})`);
     const fitted = await until(() => { const r = k.get(rec.id); return r.fit && r.fit.ok ? r : null; }, 15000, 100);
     const fitMs = Date.now() - t0;
-    ok(!!fitted && fitted.fb && fitted.fb.w === 1280 && fitted.fb.h === 800 && fitted.fit.w === 1280 && fitted.fit.h === 800 && fitted.fit.why === 'ready', `fitted ${fitMs} ms after launch: fb 1280x800 measured, fit {wid, 1280x800, why:'ready'} recorded as facts`, fitted && { fb: fitted.fb, fit: fitted.fit });
+    ok(!!fitted && gateOf(fitted.fb) && fitted.fb.w === 1280 && fitted.fb.h === 800 && fitted.fit.w === 1280 && fitted.fit.h === 800 && fitted.fit.why === 'ready', `fitted ${fitMs} ms after launch: fb 1280x800 measured, fit {wid, 1280x800, why:'ready'} recorded as facts`, fitted && { fb: fitted.fb, fit: fitted.fit });
     const w1 = fitted && await top(k, rec.id, fitted.fit.wid);
     ok(!!w1 && w1.w === 1280 && w1.h === 800 && w1.x === 0 && w1.y === 0, `the app's top-level IS the framebuffer: ${w1 && `${w1.w}x${w1.h}+${w1.x}+${w1.y}`} (windows(id) carries depth; the picture is the app, no black root)`);
     ok(!!fitted && !!w1 && typeof fitted.appTitle === 'string' && fitted.appTitle.length > 0 && fitted.appTitle === w1.title, `the record carries the fitted window's OWN title as a fact: appTitle ${JSON.stringify(fitted && fitted.appTitle)} = X's name for it (the window shows it instead of the label ${JSON.stringify(rec.label)})`, fitted && { appTitle: fitted.appTitle, x: w1 && w1.title });
-    ok(klog.some((l) => /fitted fit's window 0x[0-9a-f]+ \d+x\d+\+\d+\+\d+ → 1280x800\+0\+0 \(ready, \d+ ms\)/.test(l)), 'the keeper logged the act once, with the before/after geometry and its cost');
+    ok(verdictOf(klog.some((l) => /fitted fit's window 0x[0-9a-f]+ \d+x\d+\+\d+\+\d+ → 1280x800\+0\+0 \(ready, \d+ ms\)/.test(l))), 'the keeper logged the act once, with the before/after geometry and its cost');
     // (b) the follow: a real client's SetDesktopSize through the real bridge ⇒ the sieve reports ⇒ noteDesktopSize ⇒ the fb + the fit follow within 2 s
     const reports = [];
     const stream = S.create({ auth: { requestAuthed: () => true }, resolveTarget: (id) => k.streamTarget(id), onInput: (id) => k.noteInput(id), onDesktopSize: (id, w, h, viewer) => { reports.push([id, w, h, viewer]); k.noteDesktopSize(id, w, h); }, log: { warn() {}, log() {} } });
@@ -1602,10 +1602,10 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
       const ms = Date.now() - t1;
       const wv = r && await top(k, rec.id, r.fit.wid);
       followed.push({ W, H, ms, win: wv && `${wv.w}x${wv.h}+${wv.x}+${wv.y}` });
-      ok(!!r && ms < 2000 && wv && wv.w === W && wv.h === H && wv.x === 0 && wv.y === 0, `SetDesktopSize ${W}x${H} ⇒ fb ${W}x${H} and the app's window ${wv && `${wv.w}x${wv.h}+${wv.x}+${wv.y}`} in ${ms} ms (< 2 s; the fit's why "${r && r.fit.why}")`);
+      ok(!!r && ms < 2000 && gateOf(wv) && wv.w === W && wv.h === H && wv.x === 0 && wv.y === 0, `SetDesktopSize ${W}x${H} ⇒ fb ${W}x${H} and the app's window ${wv && `${wv.w}x${wv.h}+${wv.x}+${wv.y}`} in ${ms} ms (< 2 s; the fit's why "${r && r.fit.why}")`);
       ok(k.get(rec.id).lastInputAt === inputsBefore, 'a SetDesktopSize moved the idle clock by NOTHING (it is not input)');
     }
-    ok(reports.length === 2 && reports.every((x) => x[0] === rec.id && x[3] === 'v13') && reports[0][1] === 900 && reports[1][1] === 1024, `the bridge reported both asks with the viewer (${reports.map((x) => `${x[1]}x${x[2]}`).join(', ')})`);
+    ok(reports.length === 2 && gateOf(reports.every((x) => x[0] === rec.id && x[3] === 'v13')) && reports[0][1] === 900 && reports[1][1] === 1024, `the bridge reported both asks with the viewer (${reports.map((x) => `${x[1]}x${x[2]}`).join(', ')})`);
     console.log(`    measured: ${followed.map((f) => `${f.W}x${f.H} in ${f.ms} ms → ${f.win}`).join('; ')}`);
     // (b2) r8 (2026-09-22, the twin of the xpra display-size fence, §16): a REFUSED viewer's SetDesktopSize never resizes the
     // holder's shared Xvnc display and is never reported; the x4 strip as a patched copy is the control (it resizes)
@@ -1667,7 +1667,7 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
     for (const b of WRAPPED) D.forgetBin(b); // binOnPath memoises a YES by NAME: the wrappers must be the answer for this keeper
     const ks = mk('k13-spawns', { backends: M.DISPLAY_BACKENDS, tickMs: 3600000, fitSlowBeltMs: 4000, env: () => ({ ...baseEnv(), PATH: `${wrapDir}:${process.env.PATH}` }) });
     const wrappedFacts = await ks.facts({ fresh: true });
-    ok(WRAPPED.every((b) => wrappedFacts.bins[b] === path.join(wrapDir, b)), 'the keeper resolved the COUNTING wrappers (else every count below would be a vacuous 0)', wrappedFacts.bins);
+    ok(verdictOf(WRAPPED.every((b) => wrappedFacts.bins[b] === path.join(wrapDir, b))), 'the keeper resolved the COUNTING wrappers (else every count below would be a vacuous 0)', wrappedFacts.bins);
     await ks.adoptAll(); // no start(): the tick is driven by hand
     const rsp = await ks.launch({ exec: appBin, args: appArgs, label: 'spawns' });
     await until(() => { const r = ks.get(rsp.id); return r.state === 'ready' && r.fit && r.fit.ok ? true : null; }, 20000, 100);
@@ -1685,7 +1685,7 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
     ks.setWatchProbe((id) => id === rsp.id); fs.writeFileSync(spawnLog, '');
     await ticks(3);
     const watchedRun = spawned();
-    ok(watchedRun.length === 3 && watchedRun.every((b) => b === 'xwininfo'), `a WATCHED session (a viewer connected — setWatchProbe, the bridge's open sockets) is checked every tick with ONE fork (${watchedRun.join(', ')}) — a window that appears without input is seen within a tick`);
+    ok(watchedRun.length === 3 && verdictOf(watchedRun.every((b) => b === 'xwininfo')), `a WATCHED session (a viewer connected — setWatchProbe, the bridge's open sockets) is checked every tick with ONE fork (${watchedRun.join(', ')}) — a window that appears without input is seen within a tick`);
     ks.setWatchProbe(() => false); fs.writeFileSync(spawnLog, '');
     await ticks(3);
     ok(spawned().length === 0, 'CONTROL: the same ticks with nobody watching and no input fork nothing');
@@ -1694,14 +1694,14 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
     ks.noteInput(rsp.id);
     await ticks(3);
     const active = spawned();
-    ok(active.length === 3 && active.every((b) => b === 'xwininfo'), `input within ${K.FIT_ACTIVE_MS / 1000} s ⇒ the belt runs every tick with ONE fork (xwininfo; the tree unchanged ⇒ no visibility read, no plan): ${active.join(', ')}`);
+    ok(active.length === 3 && verdictOf(active.every((b) => b === 'xwininfo')), `input within ${K.FIT_ACTIVE_MS / 1000} s ⇒ the belt runs every tick with ONE fork (xwininfo; the tree unchanged ⇒ no visibility read, no plan): ${active.join(', ')}`);
     const swid = ks.get(rsp.id).fit.wid;
     execFileSync(XDO, ['windowsize', '--sync', String(swid), '300', '200'], { env: ks.x11EnvFor(rsp.id) });
     fs.writeFileSync(spawnLog, '');
     await ticks(1);
     const moved = spawned();
     const sw = await top(ks, rsp.id, swid);
-    ok(moved.join() === 'xwininfo,xdotool,xdotool' && sw && sw.w === 1280 && sw.h === 800 && ks.get(rsp.id).fit.why === 'tick', `the app resized itself while somebody acts ⇒ ONE tick: the tree changed ⇒ the visibility read + the act (${moved.join(', ')}), re-fitted to ${sw && `${sw.w}x${sw.h}`}`);
+    ok(moved.join() === 'xwininfo,xdotool,xdotool' && gateOf(sw) && sw.w === 1280 && sw.h === 800 && ks.get(rsp.id).fit.why === 'tick', `the app resized itself while somebody acts ⇒ ONE tick: the tree changed ⇒ the visibility read + the act (${moved.join(', ')}), re-fitted to ${sw && `${sw.w}x${sw.h}`}`);
     ok(K.FIT_SLOW_BELT_MS === 60000 && K.FIT_ACTIVE_MS === 30000 && K.FIT_SETTLE_RUNS === 2, 'the shipped cadence: settling reads 2, input keeps the belt on for 30 s, the settled belt every 60 s');
     await ks.stop(rsp.id); ks.shutdown();
     for (const b of WRAPPED) D.forgetBin(b);
@@ -1712,7 +1712,7 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
     ok(rf.via === 'Xvfb+x11vnc' && rf.fitMode === 'fixed' && rf.fitBy === 'keeper', 'via Xvfb+x11vnc ⇒ fitMode FIXED, still the keeper\'s to fit');
     const ff = await until(() => { const r = kf.get(rf.id); return r.state === 'ready' && r.fit && r.fit.ok ? r : null; }, 20000, 100);
     const wf = ff && await top(kf, rf.id, ff.fit.wid);
-    ok(!!ff && ff.fb.w === 1280 && ff.fb.h === 800 && wf && wf.w === 1280 && wf.h === 800 && wf.x === 0 && wf.y === 0, `the fixed display's app is fitted to its 1280x800 (window ${wf && `${wf.w}x${wf.h}+${wf.x}+${wf.y}`}) — the browser scales, the chip names the limit`);
+    ok(!!ff && ff.fb.w === 1280 && ff.fb.h === 800 && gateOf(wf) && wf.w === 1280 && wf.h === 800 && wf.x === 0 && wf.y === 0, `the fixed display's app is fitted to its 1280x800 (window ${wf && `${wf.w}x${wf.h}+${wf.x}+${wf.y}`}) — the browser scales, the chip names the limit`);
     kf.noteDesktopSize(rf.id, 900, 600); await sleep(600);
     ok(kf.get(rf.id).fb.w === 1280 && kf.get(rf.id).fit.w === 1280, 'a SetDesktopSize ask on the fixed spelling changes nothing: the fit reads the TRUTH (xdpyinfo), never the ask');
     await kf.stop(rf.id); kf.shutdown();
@@ -1724,7 +1724,7 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
     const rr = await kr.launch({ exec: appBin, args: appArgs, label: 'refused' });
     const refused = await until(() => { const r = kr.get(rr.id); return r.state === 'ready' && r.fit && r.fit.ok === false ? r : null; }, 20000, 100);
     await sleep(1600);
-    ok(!!refused && /xdotool not on PATH/.test(refused.fit.why) && refused.fb && refused.fb.w === 1280 && kr.get(rr.id).state === 'ready', `without xdotool the fit is REFUSED BY NAME (${refused && refused.fit.why}), the fb still measured, the record still ready`);
+    ok(!!refused && gateOf(/xdotool not on PATH/.test(refused.fit.why)) && gateOf(refused.fb) && refused.fb.w === 1280 && kr.get(rr.id).state === 'ready', `without xdotool the fit is REFUSED BY NAME (${refused && refused.fit.why}), the fb still measured, the record still ready`);
     ok(warned.filter((l) => /cannot fit refused's window/.test(l)).length === 1, 'the refusal is said ONCE (not once per tick)');
     await kr.stop(rr.id); kr.shutdown();
     // (g) THE FLEET SHAPE — a reparenting WINDOW MANAGER on the display (the fleet image has xfwm4 and the recipe starts
@@ -1798,22 +1798,22 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
     const b = await bridgeOn(S);
     const r1 = await launch('k14-a');
     const w1 = await viewer(b, r1.id, 'v-watch');
-    ok(r1.state === 'ready' && r1.backend === 'xpra' && w1.saw('hello') && w1.saw('new-window'), `the Watch viewer still gets its hello and the app's new-window through the allowlist (${r1.backend}, ${r1.state})`);
+    ok(r1.state === 'ready' && r1.backend === 'xpra' && gateOf(w1.saw('hello')) && verdictOf(w1.saw('new-window')), `the Watch viewer still gets its hello and the app's new-window through the allowlist (${r1.backend}, ${r1.state})`);
     { // …and PIXELS: its map-window is a watch type, so xpra starts drawing the window for it
       const nwMsg = w1.first('new-window'); const nw = nwMsg ? globalThis.rdecode(new Uint8Array(nwMsg.subarray(8))) : null;
       if (nw) w1.send(P.mapWindow(nw[1], { x: 0, y: 0, w: nw[4], h: nw[5] }));
       await until(() => (w1.saw('draw') ? true : null), 10000, 100);
-      ok(!!nw && w1.saw('draw'), `a draw reaches the Watch viewer after ITS map-window (wid ${nw && nw[1]}) — the allowlist keeps the picture flowing`);
+      ok(!!nw && verdictOf(w1.saw('draw')), `a draw reaches the Watch viewer after ITS map-window (wid ${nw && nw[1]}) — the allowlist keeps the picture flowing`);
     }
     const d0 = b.br.stats().dropped;
     w1.send(['shutdown-server']);
-    ok(await outlives(r1.pids.x) && k.get(r1.id).state === 'ready', `a Watch viewer's shutdown-server never reaches xpra: pid ${r1.pids.x} alive, record ${k.get(r1.id).state}`);
+    ok(gateOf(await outlives(r1.pids.x)) && k.get(r1.id).state === 'ready', `a Watch viewer's shutdown-server never reaches xpra: pid ${r1.pids.x} alive, record ${k.get(r1.id).state}`);
     w1.send(['exit-server', 'k14 says so']);
-    ok(await outlives(r1.pids.x) && k.get(r1.id).state === 'ready', `a Watch viewer's exit-server never reaches xpra either: pid ${r1.pids.x} alive, record ${k.get(r1.id).state}`);
-    ok(b.br.stats().dropped - d0 === 2 && b.br.stats().lifecycle === 2 && b.blog.some((l) => /^W .*server-lifecycle packet\(s\).*viewer v-watch dropped/.test(l)), `both counted as refused (dropped +${b.br.stats().dropped - d0}, lifecycle ${b.br.stats().lifecycle}) and named in a warn line`, b.blog.filter((l) => /^W /.test(l)));
+    ok(gateOf(await outlives(r1.pids.x)) && k.get(r1.id).state === 'ready', `a Watch viewer's exit-server never reaches xpra either: pid ${r1.pids.x} alive, record ${k.get(r1.id).state}`);
+    ok(b.br.stats().dropped - d0 === 2 && b.br.stats().lifecycle === 2 && verdictOf(b.blog.some((l) => /^W .*server-lifecycle packet\(s\).*viewer v-watch dropped/.test(l))), `both counted as refused (dropped +${b.br.stats().dropped - d0}, lifecycle ${b.br.stats().lifecycle}) and named in a warn line`, b.blog.filter((l) => /^W /.test(l)));
     const o1 = await viewer(b, r1.id, 'v-own');
     o1.send(['exit-server', 'k14 allowed']);
-    ok(await outlives(r1.pids.x) && k.get(r1.id).state === 'ready' && o1.saw('new-window'), `an input-ALLOWED viewer's exit-server is cut too — the keeper owns the server's lifecycle (pid alive, record ${k.get(r1.id).state})`);
+    ok(gateOf(await outlives(r1.pids.x)) && k.get(r1.id).state === 'ready' && verdictOf(o1.saw('new-window')), `an input-ALLOWED viewer's exit-server is cut too — the keeper owns the server's lifecycle (pid alive, record ${k.get(r1.id).state})`);
     w1.close(); o1.close();
     await k.stop(r1.id);
     // CONTROL: the r5 bridge (a denylist of input — every non-input packet relayed) on the same Watch viewer. exit-server is the
@@ -1828,7 +1828,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
     const w2 = await viewer(bc, r2.id, 'v-watch');
     w2.send(['exit-server', 'k14 control']);
     const died = await until(() => (!D.pidAlive(r2.pids.x) ? true : null), 6000, 100);
-    ok(w2.saw('hello') && !!died && k.get(r2.id).state !== 'ready', `CONTROL: through the r5 bridge the same Watch viewer's exit-server ENDS the session (xpra ${r2.pids.x} alive=${D.pidAlive(r2.pids.x)}, record ${k.get(r2.id).state})`);
+    ok(gateOf(w2.saw('hello')) && !!died && k.get(r2.id).state !== 'ready', `CONTROL: through the r5 bridge the same Watch viewer's exit-server ENDS the session (xpra ${r2.pids.x} alive=${D.pidAlive(r2.pids.x)}, record ${k.get(r2.id).state})`);
     w2.close();
     try { await k.stop(r2.id); } catch {}
     await b.close(); await bc.close();
@@ -1849,7 +1849,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       const nw3m = w3.first('new-window'); const nw3 = nw3m ? globalThis.rdecode(new Uint8Array(nw3m.subarray(8))) : null;
       if (nw3) w3.send(P.mapWindow(nw3[1], { x: 0, y: 0, w: nw3[4], h: nw3[5] }));
       const tDraw = Date.now(); await until(() => (w3.saw('draw') ? true : null), 10000, 50);
-      ok(w3.saw('hello') && w3.saw('new-window') && w3.saw('draw'), `MEASURED: the Watch viewer's picture needs no keymap packet — hello, new-window, then a draw ${Date.now() - tDraw} ms after its map-window, with no keyboard-config / keymap-changed sent at all`);
+      ok(gateOf(w3.saw('hello')) && gateOf(w3.saw('new-window')) && verdictOf(w3.saw('draw')), `MEASURED: the Watch viewer's picture needs no keymap packet — hello, new-window, then a draw ${Date.now() - tDraw} ms after its map-window, with no keyboard-config / keymap-changed sent at all`);
       const d0 = b15.br.stats().dropped;
       w3.send(P.keyboardConfigPacket([], { layout: 'us', extra: [['thorn', 249]] })); // the legacy keymap-changed spelling
       w3.send(P.keyboardConfigPacket(['keyboard-config'], { layout: 'us', extra: [['ydiaeresis', 250]] }));
@@ -1861,7 +1861,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       takeover = true; // the same socket, the same viewer id — the user took the window over
       w3.send(P.pingEcho(2));
       const replayed = await until(() => (hasSym(r3.id, 'ydiaeresis') ? true : null), 5000, 200);
-      ok(!!replayed && b15.blog.some((l) => /viewer v-watch may type now — the keymap it sent while refused reaches xpra first/.test(l)), 'THE TAKEOVER: its held keyboard-config reaches xpra first — X carries ydiaeresis (the holder\'s keymap, as if it had connected holding the window), the replay named in the log');
+      ok(!!replayed && verdictOf(b15.blog.some((l) => /viewer v-watch may type now — the keymap it sent while refused reaches xpra first/.test(l))), 'THE TAKEOVER: its held keyboard-config reaches xpra first — X carries ydiaeresis (the holder\'s keymap, as if it had connected holding the window), the replay named in the log');
       w3.close();
       await k.stop(r3.id);
       // TYPING after a takeover (the reason the fence HOLDS instead of dropping): the shipped client sends its keymap once,
@@ -1956,7 +1956,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       own16 = true;
       w7.send(P.pingEcho(3));
       const took = await settle(r6.id, '700x500');
-      ok(!!took && b16.blog.some((l) => /viewer v-watch may type now — the display size it sent while refused reaches xpra first/.test(l)), `THE TAKEOVER: its held display-configure reaches xpra first — the display is ${sizeOf(r6.id)}, the pane's own size, the replay named in the log`, b16.blog.filter((l) => /may type now/.test(l)));
+      ok(!!took && verdictOf(b16.blog.some((l) => /viewer v-watch may type now — the display size it sent while refused reaches xpra first/.test(l))), `THE TAKEOVER: its held display-configure reaches xpra first — the display is ${sizeOf(r6.id)}, the pane's own size, the replay named in the log`, b16.blog.filter((l) => /may type now/.test(l)));
       w7.close(); o6.close();
       await k.stop(r6.id);
       // PLACES OF THE SAME SHAPE LEFT (the flake census r2, r4707 / r5037 — a «never» read after a fixed sleep), each with its guard:
@@ -2040,7 +2040,7 @@ console.log('§17 the exit sweep\'s Xvfb-for-Xpra rule — by EVIDENCE (dead own
   await sleep(300);
   fs.rmSync(goneDir, { recursive: true, force: true }); // the crashed run's scratch dir is GONE (its cwd now reads "(deleted)")
   const hit = xvfbOrphans();
-  ok(hit.includes(gone.pid), `an Xvfb-for-Xpra-S<dead owner> whose cwd was a DELETED scratch dir of this suite's family (run pid dead) is an orphan by evidence (${gone.pid})`, hit);
+  ok(verdictOf(hit.includes(gone.pid)), `an Xvfb-for-Xpra-S<dead owner> whose cwd was a DELETED scratch dir of this suite's family (run pid dead) is an orphan by evidence (${gone.pid})`, hit);
   ok(!hit.includes(live.pid), 'CONTROL: the same name and a dead owner, but its scratch dir still EXISTS (a live run\'s) — not touched', hit);
   ok(!hit.includes(ownerAlive.pid), 'CONTROL: a gone scratch dir, but its named xpra owner is ALIVE — not touched', hit);
   for (const c of [gone, live, ownerAlive]) { try { process.kill(c.pid, 'SIGKILL'); } catch {} }
@@ -2068,34 +2068,34 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
   await k.adoptAll(); k.start();
   const l = await k.list();
   const served = l.registry.find((r) => r.id === 'vs-browser'), snapRow = l.registry.find((r) => r.id === 'vs-snap-browser');
-  ok(served && served.available && served.exec === FAKE && served.path === path.join(fakeBin, FAKE), 'the catalog serves the browser row with the family member found on PATH', served);
-  ok(snapRow && snapRow.available === false && /is a snap: it can only open a profile inside your home folder/.test(snapRow.reason), 'a SNAP browser whose profile could not live under this keeper\'s /tmp root is DIMMED with the verdict\'s own sentence (never hidden)', snapRow);
+  ok(gateOf(served) && gateOf(served.available) && served.exec === FAKE && served.path === path.join(fakeBin, FAKE), 'the catalog serves the browser row with the family member found on PATH', served);
+  ok(gateOf(snapRow) && snapRow.available === false && verdictOf(/is a snap: it can only open a profile inside your home folder/.test(snapRow.reason)), 'a SNAP browser whose profile could not live under this keeper\'s /tmp root is DIMMED with the verdict\'s own sentence (never hidden)', snapRow);
   // (a) launch with a URL: the profile is the session's own, 0700, named by the argv, the URL after the profile flags
   const a = await k.launch({ appId: 'vs-browser', url: 'https://example.com/vs-bfe6' });
   const prof = path.join(k.logRoot, a.id, 'profile');
   ok(a.browser === 'chromium' && a.profileDir === prof && a.keepProfile === false && a.url === 'https://example.com/vs-bfe6', 'the record names the family, its OWN profile dir (data/desktop-apps/<id>/profile), the URL and keepProfile false', a);
-  ok(fs.existsSync(prof) && (fs.statSync(prof).mode & 0o777) === 0o700, 'the profile dir exists before the app starts, mode 0700');
+  ok(gateOf(fs.existsSync(prof)) && (fs.statSync(prof).mode & 0o777) === 0o700, 'the profile dir exists before the app starts, mode 0700');
   ok(!prof.startsWith(fakeHome + path.sep) && !prof.startsWith(process.env.HOME + path.sep), `the profile is NOT under $HOME (the apps' HOME ${fakeHome}, nor the real one) — it lives in the keeper's data dir`);
-  ok(same(a.args, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector', 'https://example.com/vs-bfe6']), /* B-2a93: + the app Chrome's own outdated-build notice off */ 'the record\'s argv: the profile flags (+ desktop lane E\'s accessibility switch), THEN the URL', a.args);
+  ok(verdictOf(same(a.args, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector', 'https://example.com/vs-bfe6'])), /* B-2a93: + the app Chrome's own outdated-build notice off */ 'the record\'s argv: the profile flags (+ desktop lane E\'s accessibility switch), THEN the URL', a.args);
   const ready = await until(() => { const r = k.get(a.id); return r.state === 'ready' || r.state === 'failed' ? r : null; });
-  ok(ready && ready.state === 'ready', 'the browser session reaches ready on the private display', ready && ready.lastError);
+  ok(gateOf(ready) && ready.state === 'ready', 'the browser session reaches ready on the private display', ready && ready.lastError);
   const argvFile = await until(() => { try { return fs.readFileSync(path.join(prof, 'argv.txt'), 'utf8'); } catch { return null; } }, 8000);
   ok(!!argvFile && argvFile.split('\n').filter(Boolean).join(' ') === a.args.join(' '), 'the browser PROCESS got exactly that argv and wrote into the profile it was handed', argvFile);
   const stopped = await k.stop(a.id);
   ok(stopped.state === 'exited' && !fs.existsSync(prof) && stopped.profileRemovedAt > 0 && !stopped.profileKept, 'stop ⇒ the session is verified gone, THEN its profile is removed (profileRemovedAt on the record)', { state: stopped.state, exists: fs.existsSync(prof), removed: stopped.profileRemovedAt });
-  ok(fs.existsSync(path.join(k.logRoot, a.id, 'app.log')), 'the session\'s app.log stays (only the profile goes)');
+  ok(verdictOf(fs.existsSync(path.join(k.logRoot, a.id, 'app.log'))), 'the session\'s app.log stays (only the profile goes)');
   // (b) keep profile
   const b = await k.launch({ appId: 'vs-browser', keepProfile: true });
   const profB = path.join(k.logRoot, b.id, 'profile');
   await until(() => k.get(b.id).state !== 'launching');
   await until(() => fs.existsSync(path.join(profB, 'Cookies')), 8000);
   const sb = await k.stop(b.id);
-  ok(sb.keepProfile === true && sb.profileKept === true && !sb.profileRemovedAt && fs.existsSync(path.join(profB, 'Cookies')), '"keep profile" ⇒ the profile (and what the browser wrote) STAYS after stop, and the record says so', { kept: sb.profileKept, exists: fs.existsSync(profB) });
+  ok(sb.keepProfile === true && sb.profileKept === true && !sb.profileRemovedAt && verdictOf(fs.existsSync(path.join(profB, 'Cookies'))), '"keep profile" ⇒ the profile (and what the browser wrote) STAYS after stop, and the record says so', { kept: sb.profileKept, exists: fs.existsSync(profB) });
   // (c) the browser exits by itself (not a stop): the app-exit terminal path retires the profile too
   const c = await k.launch({ appId: 'vs-browser', url: 'https://example.com/?exit=1' });
   const profC = path.join(k.logRoot, c.id, 'profile');
   const endedC = await until(() => { const r = k.get(c.id); return r.state === 'exited' && r.profileRemovedAt ? r : null; }, 15000);
-  ok(!!endedC && /application exited/.test(endedC.lastError || '') && !fs.existsSync(profC), 'a browser that EXITS by itself: the session ends (app-exit) and its profile is removed on that path too', k.get(c.id));
+  ok(!!endedC && gateOf(/application exited/.test(endedC.lastError || '')) && !fs.existsSync(profC), 'a browser that EXITS by itself: the session ends (app-exit) and its profile is removed on that path too', k.get(c.id));
   // (c2) 2026-09-25 (the owner's ruling; F): an IDLE-OUT is the keeper's decision, not a person's — the session stops as
   // before, but its profile is KEPT and the record says why (a profile goes only by a person's ending)
   {
@@ -2107,11 +2107,11 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
     const profD = path.join(ki.logRoot, d.id, 'profile');
     await until(() => fs.existsSync(path.join(profD, 'Cookies')), 8000);
     const idled = await until(() => { const r = ki.get(d.id); return r.state === 'exited' ? r : null; }, 10000);
-    ok(!!idled && idled.stoppedBy === 'idle' && fs.existsSync(path.join(profD, 'Cookies')) && !idled.profileRemovedAt && idled.profileKept === true && /by the keeper \(idle\), not by a person/.test(idled.profileKeptWhy || ''), 'an IDLE-OUT stops the session but KEEPS its profile (what the browser wrote is still there) and the record says why', idled && { state: idled.state, kept: idled.profileKept, why: idled.profileKeptWhy });
+    ok(!!idled && idled.stoppedBy === 'idle' && gateOf(fs.existsSync(path.join(profD, 'Cookies'))) && !idled.profileRemovedAt && idled.profileKept === true && verdictOf(/by the keeper \(idle\), not by a person/.test(idled.profileKeptWhy || '')), 'an IDLE-OUT stops the session but KEEPS its profile (what the browser wrote is still there) and the record says why', idled && { state: idled.state, kept: idled.profileKept, why: idled.profileKeptWhy });
     ki.shutdown();
     const ki2 = K.create({ dataDir: dataDirI, env: benv, broadcast: () => {}, serverSetting: (key) => settingsI[key], backends: XVFB_TABLE, registryRows: rows, log: { log() {}, warn() {}, error() {} } }); keepers.push(ki2);
     await ki2.adoptAll();
-    ok(fs.existsSync(path.join(profD, 'Cookies')) && !ki2.get(d.id).profileRemovedAt, '…and the next BOOT\'s retirement pass keeps it too (the same person-only verdict decides)');
+    ok(gateOf(fs.existsSync(path.join(profD, 'Cookies'))) && !ki2.get(d.id).profileRemovedAt, '…and the next BOOT\'s retirement pass keeps it too (the same person-only verdict decides)');
     ki2.shutdown();
   }
   // (d) refusals by name — nothing recorded, nothing created
@@ -2121,9 +2121,9 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
   const e2 = await refusal({ appId: 'vs-browser', url: 'file:///etc/passwd' });
   const e3 = await refusal({ exec: appBin, url: 'https://example.com' });
   const e4 = await refusal({ appId: 'vs-snap-browser' });
-  ok(e1 && e1.code === 'bad-url' && e2 && e2.code === 'bad-url' && /http:\/\/ or https:\/\//.test(e1.message), 'a bad URL is refused by name (`bad-url`)', [e1 && e1.message, e2 && e2.message]);
-  ok(e3 && e3.code === 'not-a-browser', 'a URL on a typed command is refused by name (`not-a-browser`)', e3 && e3.message);
-  ok(e4 && e4.code === 'snap-profile-unreachable', 'the snap browser is refused by name at launch (`snap-profile-unreachable`)', e4 && e4.message);
+  ok(gateOf(e1) && e1.code === 'bad-url' && gateOf(e2) && e2.code === 'bad-url' && verdictOf(/http:\/\/ or https:\/\//.test(e1.message)), 'a bad URL is refused by name (`bad-url`)', [e1 && e1.message, e2 && e2.message]);
+  ok(gateOf(e3) && e3.code === 'not-a-browser', 'a URL on a typed command is refused by name (`not-a-browser`)', e3 && e3.message);
+  ok(gateOf(e4) && e4.code === 'snap-profile-unreachable', 'the snap browser is refused by name at launch (`snap-profile-unreachable`)', e4 && e4.message);
   ok(Object.keys(k._store().apps).length === before, 'a refused launch records nothing');
   // (e) the routes speak the codes (400 / 409)
   {
@@ -2150,7 +2150,7 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
     const kb = mkB('k18b');
     await kb.adoptAll();
     ok(!fs.existsSync(p1) && kb.get('da-boot1').profileRemovedAt > 0, 'boot belt: an exited record\'s leftover profile is removed at adoption');
-    ok(fs.existsSync(p2) && !kb.get('da-boot2').profileRemovedAt, 'boot belt: a KEPT profile is never removed');
+    ok(gateOf(fs.existsSync(p2)) && !kb.get('da-boot2').profileRemovedAt, 'boot belt: a KEPT profile is never removed');
     kb.shutdown();
   }
   // (g) CONTROL — a keeper copy whose stop never retires the profile: the same stop leaves it behind (the leg above is the fix)
@@ -2162,7 +2162,7 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
     const profX = path.join(kc.logRoot, x.id, 'profile');
     await until(() => kc.get(x.id).state !== 'launching');
     const sx = await kc.stop(x.id);
-    ok(sx.state === 'exited' && fs.existsSync(profX), 'CONTROL: without the retire at stop, the stopped session\'s profile is LEFT on disk — the leg above proves the removal, not a coincidence');
+    ok(sx.state === 'exited' && verdictOf(fs.existsSync(profX)), 'CONTROL: without the retire at stop, the stopped session\'s profile is LEFT on disk — the leg above proves the removal, not a coincidence');
     kc.shutdown();
   }
   // (c3) 2.369.176 (the owner: "你不让我在这里调我怎么调？") — a Scale ▸ relaunch of a BROWSER keeps its profile:
@@ -2195,10 +2195,10 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
       return out;
     };
     const c3 = await runCarry(K, 'carry');
-    ok(!c3.failed && !c3.error && c3.scale === 2 && c3.origin === 'chosen' && c3.profileDir && c3.ready === 'ready', `§18 (c3): a browser relaunches at 2× (chosen) through the xpra rung and reaches ready — ${c3.error || c3.failed || c3.next}`, c3);
-    ok(c3.carried && c3.cookies && c3.oldGone && c3.carriedTo === c3.next && !c3.oldRemovedAt, '§18 (c3): the profile is CARRIED — the file the old browser wrote is in the successor\'s profile dir, the old dir is gone (moved, not removed: no profileRemovedAt, profileCarriedTo names the successor)', c3);
-    ok(c3.argvNamesNew, '§18 (c3): the successor browser PROCESS was started on the carried profile (its argv names the new path)', c3);
-    ok(c3.successorThen, '§18 (c3): the old record names its successor before its stop broadcasts, and the successor is already recorded in that same broadcast (a client following it never meets not-found)', { firstExited: c3.firstExited, successorThen: c3.successorThen });
+    ok(!c3.failed && !c3.error && c3.scale === 2 && c3.origin === 'chosen' && gateOf(c3.profileDir) && c3.ready === 'ready', `§18 (c3): a browser relaunches at 2× (chosen) through the xpra rung and reaches ready — ${c3.error || c3.failed || c3.next}`, c3);
+    ok(gateOf(c3.carried) && gateOf(c3.cookies) && gateOf(c3.oldGone) && c3.carriedTo === c3.next && !c3.oldRemovedAt, '§18 (c3): the profile is CARRIED — the file the old browser wrote is in the successor\'s profile dir, the old dir is gone (moved, not removed: no profileRemovedAt, profileCarriedTo names the successor)', c3);
+    ok(verdictOf(c3.argvNamesNew), '§18 (c3): the successor browser PROCESS was started on the carried profile (its argv names the new path)', c3);
+    ok(verdictOf(c3.successorThen), '§18 (c3): the old record names its successor before its stop broadcasts, and the successor is already recorded in that same broadcast (a client following it never meets not-found)', { firstExited: c3.firstExited, successorThen: c3.successorThen });
     // CONTROL: a keeper that forgets to carry (the pre-2.369.176 stop) removes the old profile — the successor starts empty
     const { mod: Kno } = mutant('no-carry', [["      rec.profileCarryTo = nextId;", "      // (pre-2.369.176: nothing carried)"]]);
     const c3c = await runCarry(Kno, 'nocarry');
@@ -2292,7 +2292,7 @@ console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the s
     const xtermWin = async (kk, id, title) => { const w = await until(async () => { const r = await kk.windows(id).catch(() => null); return ((r && r.windows) || []).find((x) => x.title === title && x.w > 16) || null; }, 10000).catch(() => null); return w ? { w: w.w, h: w.h } : null; };
     const aWin = await xtermWin(k, a0.id, 'vs-a3-scale');
     console.log(`  §20 (a): record scale ${a1.scale} dpi ${a1.dpi} origin ${a1.scaleOrigin} from ${JSON.stringify(a1.scaleFrom)}; inside the display: GDK_SCALE=${aEnv.GDK_SCALE}, Xft.dpi ${aDpi}`);
-    ok(a1.state === 'ready' && a1.backend === 'xpra' && a1.scale === 2.5 && a1.dpi === 96 && a1.gdkScale === 3 && a1.pictureScale === 0.8333 && a1.scaleOrigin === 'auto' && a1.scaleFrom && a1.scaleFrom.dpr === 2 && a1.scaleFrom.uiScale === 1.25, '§20 (a): dpr 2 × uiScale 1.25 under auto ⇒ the record says 2.5× — drawn at GDK_SCALE 3, 96 dpi, shown at 0.8333 (lane D (a)) — origin auto, and the numbers it came from', { state: a1.state, scale: a1.scale, dpi: a1.dpi, origin: a1.scaleOrigin, from: a1.scaleFrom, lastError: a1.lastError });
+    ok(a1.state === 'ready' && a1.backend === 'xpra' && a1.scale === 2.5 && a1.dpi === 96 && a1.gdkScale === 3 && a1.pictureScale === 0.8333 && a1.scaleOrigin === 'auto' && gateOf(a1.scaleFrom) && a1.scaleFrom.dpr === 2 && a1.scaleFrom.uiScale === 1.25, '§20 (a): dpr 2 × uiScale 1.25 under auto ⇒ the record says 2.5× — drawn at GDK_SCALE 3, 96 dpi, shown at 0.8333 (lane D (a)) — origin auto, and the numbers it came from', { state: a1.state, scale: a1.scale, dpi: a1.dpi, origin: a1.scaleOrigin, from: a1.scaleFrom, lastError: a1.lastError });
     ok(aEnv.GDK_SCALE === '3' && aDpi === 96, `§20 (a): MEASURED inside the app's display — GDK_SCALE=${aEnv.GDK_SCALE} in the app's environ, Xft.dpi ${aDpi} in its resource database`, { GDK_SCALE: aEnv.GDK_SCALE, xft: aDpi });
     // (b) the per-window relaunch at 1.5×: the successor first, the old one names it BEFORE its stop broadcasts, then stops
     const castsBefore = k._events.length;
@@ -2317,7 +2317,7 @@ console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the s
     console.log(`  §20 (b): relaunched ${a0.id} → ${rl.app.id} in ${readyMs} ms to ready; record scale ${b1.scale} dpi ${b1.dpi} origin ${b1.scaleOrigin}; GDK_SCALE=${bEnv.GDK_SCALE}, Xft.dpi ${bDpi}; old: ${rl.replaced.state} stoppedBy ${rl.replaced.stoppedBy} replacedBy ${rl.replaced.replacedBy}; broadcasts of the old record: named at #${firstNamed}, exited at #${firstExited}`);
     ok(rl.app.id !== a0.id && b1.state === 'ready' && b1.scale === 1.5 && b1.dpi === 96 && b1.gdkScale === 2 && b1.pictureScale === 0.75 && b1.scaleOrigin === 'chosen' && b1.exec === a1.exec && JSON.stringify(b1.args) === JSON.stringify(a1.args) && b1.label === a1.label, '§20 (b): the successor is the SAME command at the CHOSEN 1.5× (drawn at GDK_SCALE 2, 96 dpi, shown at 0.75; origin chosen)', { scale: b1.scale, dpi: b1.dpi, origin: b1.scaleOrigin, state: b1.state });
     ok(bEnv.GDK_SCALE === '2' && bDpi === 96, `§20 (b): MEASURED — lane D (a): 1.5× is a REAL scale (widgets AND text), drawn at GDK_SCALE=${bEnv.GDK_SCALE}, Xft.dpi ${bDpi}, shown at 0.75`);
-    ok(rl.replaced.state === 'exited' && rl.replaced.stoppedBy === 'relaunch' && rl.replaced.replacedBy === rl.app.id && [a1.pids.x, a1.pids.app].every((p) => !alive(p)) && markerPids(a0.id).length === 0, '§20 (b): the old session is stopped (stoppedBy relaunch, replacedBy the successor) and nothing of it is left', { state: rl.replaced.state, stoppedBy: rl.replaced.stoppedBy, replacedBy: rl.replaced.replacedBy, left: markerPids(a0.id) });
+    ok(rl.replaced.state === 'exited' && rl.replaced.stoppedBy === 'relaunch' && rl.replaced.replacedBy === rl.app.id && gateOf([a1.pids.x, a1.pids.app].every((p) => !alive(p))) && markerPids(a0.id).length === 0, '§20 (b): the old session is stopped (stoppedBy relaunch, replacedBy the successor) and nothing of it is left', { state: rl.replaced.state, stoppedBy: rl.replaced.stoppedBy, replacedBy: rl.replaced.replacedBy, left: markerPids(a0.id) });
     ok(firstNamed >= 0 && firstExited >= 0 && firstNamed <= firstExited && M.exitCloseVerdict(olds[firstExited]).why === 'relaunched', `§20 (b): every client learns the successor no later than the stop (named at broadcast #${firstNamed}, exited at #${firstExited}) — the window follows it instead of closing (${JSON.stringify(M.exitCloseVerdict(olds[firstExited] || null))})`);
     // (c) refusals by name: an ended record, an unknown scale, an unknown id
     const r1 = await k.relaunch(a0.id, { scale: 2 }).then(() => null, (e) => e.code);
@@ -2331,7 +2331,7 @@ console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the s
     await readyOf(kc, c0.id);
     const blocked = await kc.launch({ exec: XT, args: [], label: 'a3-cap2' }).then(() => null, (e) => e.code);
     const cr = await kc.relaunch(c0.id, { scale: 2 }).then((r) => r, (e) => ({ error: e.code }));
-    ok(blocked === 'cap' && cr.app && cr.app.scale === 2 && cr.app.scaleOrigin === 'chosen', `§20 (d): at a ceiling of 1 a second launch is refused (${blocked}) yet the relaunch goes through (${cr.app ? cr.app.scale + '×' : cr.error})`);
+    ok(blocked === 'cap' && gateOf(cr.app) && cr.app.scale === 2 && cr.app.scaleOrigin === 'chosen', `§20 (d): at a ceiling of 1 a second launch is refused (${blocked}) yet the relaunch goes through (${cr.app ? cr.app.scale + '×' : cr.error})`);
     if (cr.app) await readyOf(kc, cr.app.id);
     kc.shutdown();
     // (e) the vnc-display rung has no scale: its record says 1× with no origin whatever the client, and a relaunch is refused by name
@@ -2382,10 +2382,10 @@ console.log('§portal — lane app-display-portal: the real keeper starts an app
   const pr = await until(() => { const g = pk.get(p0.id); return g && g.state === 'ready' && g; }, 20000);
   const penv = pr && pr.pids.app ? fs.readFileSync(`/proc/${pr.pids.app}/environ`, 'utf8').split('\0') : [];
   const bus = penv.find((e) => e.startsWith('DBUS_SESSION_BUS_ADDRESS=')) || '';
-  ok(pr && pr.portal === 'on' && pr.portalWhy === 'all' && alive(pr.pids.portal), `desktop.appPortal = all ⇒ the record says portal 'on' (why ${pr && pr.portalWhy}), its part \`portal\` (pid ${pr && pr.pids.portal}) alive`, pr && { portal: pr.portal, pids: pr.pids });
-  ok(/^DBUS_SESSION_BUS_ADDRESS=unix:path=.*\/portal\/bus$/.test(bus) && penv.includes(`DISPLAY=${pr && pr.display}`), `the app runs ON that bus (${bus.slice(25)}), on its own display ${pr && pr.display}`);
+  ok(gateOf(pr) && pr.portal === 'on' && pr.portalWhy === 'all' && verdictOf(alive(pr.pids.portal)), `desktop.appPortal = all ⇒ the record says portal 'on' (why ${pr && pr.portalWhy}), its part \`portal\` (pid ${pr && pr.pids.portal}) alive`, pr && { portal: pr.portal, pids: pr.pids });
+  ok(gateOf(/^DBUS_SESSION_BUS_ADDRESS=unix:path=.*\/portal\/bus$/.test(bus)) && verdictOf(penv.includes(`DISPLAY=${pr && pr.display}`)), `the app runs ON that bus (${bus.slice(25)}), on its own display ${pr && pr.display}`);
   const pp = pk.sessionPids ? pk.sessionPids(pr) : null;
-  ok(!pp || pp.includes(pr.pids.portal), 'sessionPids holds the companion (the tree\'s pid set names its chooser)');
+  ok(!pp || verdictOf(pp.includes(pr.pids.portal)), 'sessionPids holds the companion (the tree\'s pid set names its chooser)');
   await pk.stop(p0.id);
   await sleep(500);
   ok(!alive(pr.pids.portal) && markerPids(p0.id).length === 0, 'stopped: the companion bus is gone with the app; nothing carries the marker', markerPids(p0.id));
@@ -2394,7 +2394,7 @@ console.log('§portal — lane app-display-portal: the real keeper starts an app
   await nk.adoptAll(); nk.start();
   const n0 = await nk.launch({ exec: '/bin/sleep', args: ['3600'], label: 'portal-none' });
   const nr = await until(() => { const g = nk.get(n0.id); return g && g.state === 'ready' && g; }, 20000);
-  ok(nr && /^unavailable: dbus-daemon, xdg-desktop-portal, xdg-desktop-portal-gtk not found/.test(nr.portal || '') && !nr.pids.portal, `no portal binaries ⇒ the app is READY anyway, the record says "${nr && nr.portal}"`);
+  ok(gateOf(nr) && gateOf(/^unavailable: dbus-daemon, xdg-desktop-portal, xdg-desktop-portal-gtk not found/.test(nr.portal || '')) && !nr.pids.portal, `no portal binaries ⇒ the app is READY anyway, the record says "${nr && nr.portal}"`);
   await nk.stop(n0.id); nk.shutdown();
 }
 
@@ -2416,7 +2416,7 @@ console.log('§holders — lane browser-display-holders: a browser\'s display re
   const asked = [];
   hk.setBrowserHolders((profileId, displayId) => { asked.push([profileId, displayId]); return answer; });
   const v1 = hk.get('da-held1'), a1 = hk.get('da-calc1');
-  ok(v1.holders === 2 && v1.profileId === 'bp-11111111' && v1.userStopped === undefined && asked.some(([p, d]) => p === 'bp-11111111' && d === 'da-held1'), 'a browser\'s display record reads its profile\'s holders from the browser keeper: holders 2, profileId bp-11111111', { holders: v1.holders, profileId: v1.profileId });
+  ok(v1.holders === 2 && v1.profileId === 'bp-11111111' && v1.userStopped === undefined && verdictOf(asked.some(([p, d]) => p === 'bp-11111111' && d === 'da-held1')), 'a browser\'s display record reads its profile\'s holders from the browser keeper: holders 2, profileId bp-11111111', { holders: v1.holders, profileId: v1.profileId });
   ok(Object.keys(a1).join() === appKeys0 && !asked.some(([, d]) => d === 'da-calc1'), 'an app\'s record is untouched (same keys, never asked)');
   const n0 = hev.length;
   const m1 = hk.browserHoldersMoved(), m2 = hk.browserHoldersMoved();
@@ -2427,7 +2427,7 @@ console.log('§holders — lane browser-display-holders: a browser\'s display re
   answer = { holders: 1, userStopped: { at: 1234, by: 'user', displayId: 'da-held1' } };
   const m4 = hk.browserHoldersMoved();
   const last = hev.filter((e) => e.type === 'desktop-apps-updated').pop().apps.find((x) => x.id === 'da-held1');
-  ok(m3 && m4 && last.holders === 1 && last.userStopped && last.userStopped.at === 1234 && last.userStopped.by === 'user' && !('displayId' in last.userStopped), 'a conversation detaching (2 → 1) and the person\'s stop each broadcast once — the record says userStopped {at, by: user}', last);
+  ok(gateOf(m3) && gateOf(m4) && last.holders === 1 && gateOf(last.userStopped) && last.userStopped.at === 1234 && last.userStopped.by === 'user' && !('displayId' in last.userStopped), 'a conversation detaching (2 → 1) and the person\'s stop each broadcast once — the record says userStopped {at, by: user}', last);
   // the PERSON's stop (the route's why: 'user') of a live browser display is told BEFORE the machine tears it down
   const told = [];
   hk.onBrowserDisplayStop((ev) => told.push({ ...ev, stateThen: hk.get(ev.displayId).state }));
@@ -2447,7 +2447,7 @@ console.log('§holders — lane browser-display-holders: a browser\'s display re
   hk.shutdown(); hk2.shutdown();
 }
 
-for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok(verdictOf(r.pass), '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

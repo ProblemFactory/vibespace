@@ -158,7 +158,7 @@ let pass = 0, fail = 0;
 const ROOT_DIR_DCHS = new URL('..', import.meta.url).pathname;
 // (a worker callback's check while the worker is INSIDE another section is counted there, in that section's lines, unmarked — never
 // lost; only one made while the worker is between sections is marked LATE)
-const ok = (c, n, d) => { if (!SEC_OWN) { if (!isMainThread && SEC_ALS.getStore() !== undefined) parentPort.postMessage({ late: [[c ? 1 : 2, `  ${c ? '✓' : '✗'} ${n} (LATE: after its section ended, on the worker)`]], pass: c ? 1 : 0, fail: c ? 0 : 1 }); return; } if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; let x = ''; try { x = d === undefined ? '' : ' — ' + (typeof d === 'string' ? d : JSON.stringify(d)); } catch { x = ' — ' + String(d); } console.error('  ✗ ' + n + x.slice(0, 4000)); } };   // a failure names its detail (lane job-secrets-retire r3, review N1: §96 named no offender)
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!SEC_OWN) { if (!isMainThread && SEC_ALS.getStore() !== undefined) parentPort.postMessage({ late: [[c ? 1 : 2, `  ${c ? '✓' : '✗'} ${n} (LATE: after its section ended, on the worker)`]], pass: c ? 1 : 0, fail: c ? 0 : 1 }); return; } if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; let x = ''; try { x = d === undefined ? '' : ' — ' + (typeof d === 'string' ? d : JSON.stringify(d)); } catch { x = ' — ' + String(d); } console.error('  ✗ ' + n + x.slice(0, 4000)); } };   // a failure names its detail (lane job-secrets-retire r3, review N1: §96 named no offender)
 // §78's dead-code censuses take ~4 s (a raw scan of ~20 MB per unused-key candidate + two esbuild metafiles): they run as
 // a CHILD from here, alongside every other section, and §78 awaits the file it writes (no pipe: a busy parent never stalls it)
 const DEAD78 = !isMainThread ? null : (() => {   // this thread's alone: §78 runs here ('main')
@@ -710,7 +710,7 @@ const headerOf = (src) => { const m = /^\s*\/\*[\s\S]*?\*\//.exec(src); return m
 const saysNothingButImports = (src) => { const h = headerOf(src); return /imports nothing/.test(h) && /\brequire\(\s*['"`]|^\s*import\s[^(]/m.test(src.slice(h.length)); };
 const saysNothing = [...new Set([...PURE, ...SHARED, ...libFiles])].filter((f) => saysNothingButImports(read(f)));
 ok(!saysNothing.length, `a header that says «imports nothing» imports nothing (${saysNothing.join(', ') || 'clean'})`);
-ok(saysNothingButImports("/**\n * THE SAME-ORIGIN RULE — PURE, imports nothing.\n */\nconst { AsyncLocalStorage } = require('node:async_hooks');\n") && saysNothingButImports("/** x — PURE (imports nothing, DOM-free) */\nimport { a } from '../b.js';\n") && !saysNothingButImports("/** x — PURE, imports nothing */\nconst a = 1;\n"),
+ok(gateOf(saysNothingButImports("/**\n * THE SAME-ORIGIN RULE — PURE, imports nothing.\n */\nconst { AsyncLocalStorage } = require('node:async_hooks');\n")) && gateOf(saysNothingButImports("/** x — PURE (imports nothing, DOM-free) */\nimport { a } from '../b.js';\n")) && !saysNothingButImports("/** x — PURE, imports nothing */\nconst a = 1;\n"),
   'CONTROL: 40ec6038\'s write-origin.js header over its require, and a header over an import, read as said-but-not-so (a header over no import does not)');
 
 // 5) the daemon BUNDLE self-containment: build output must exist and must not
@@ -753,7 +753,7 @@ await section(async () => {
     // negative control: the exact 2.369.134 shape trips the census
     const ctl = 'x: 1, // note getTelemetry: () => { try { return t; } catch { return null; } }, activeSessions,';
     const cc = ctl.indexOf('//'); const ct = ctl.slice(cc + 2);
-    ok(/\b[a-zA-Z_]\w*: \((\w+(, \w+)*)?\) =>/.test(ct) && /, activeSessions,\s*$/.test(ct), '§48 control: the shipped line shape is caught');
+    ok(gateOf(/\b[a-zA-Z_]\w*: \((\w+(, \w+)*)?\) =>/.test(ct)) && verdictOf(/, activeSessions,\s*$/.test(ct)), '§48 control: the shipped line shape is caught');
   }
   // §48b ("Clear content…" verify r1, the fourth strike of the mid-line-comment class): a STATEMENT appended
   // after a mid-line `//` is a comment — `reasonInp.value = …; // a cleared reason is not offered back for
@@ -776,7 +776,7 @@ await section(async () => {
     const bad = [];
     for (const f of files) { let src; try { src = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { continue; } src.split('\n').forEach((l, i) => { if (judge(l)) bad.push(`${f}:${i + 1}`); }); }
     ok(bad.length === 0, `§48b no assignment statement rides at the end of a mid-line // comment in the product files (${files.length} files)`, bad);
-    ok(judge("    reasonInp.type = 'text'; reasonInp.value = cur.clearedAt ? '' : (cur.reason || ''); // a cleared reason is not offered back for editing reasonInp.placeholder = tr('optional');"), '§48b control: the shipped sidebar-tasks line is caught');
+    ok(verdictOf(judge("    reasonInp.type = 'text'; reasonInp.value = cur.clearedAt ? '' : (cur.reason || ''); // a cleared reason is not offered back for editing reasonInp.placeholder = tr('optional');")), '§48b control: the shipped sidebar-tasks line is caught');
     ok(!judge("      if (h.location && /^\\//.test(h.location) && !h.location.startsWith('/svc/')) h.location = `/svc/${p.name}${h.location}`;") && !judge("  const u = 'https://x.y/z'; // see x.y = 1; in the docs") , '§48b control: a regex `/^\\//` and a `//` inside a string are not comments');
   }
   const mods = fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => f.endsWith('.js'));
@@ -788,7 +788,7 @@ await section(async () => {
 for (const [edge] of EXCEPTIONS) {
   const [from, to] = edge.split('->');
   const live = requiresOf(from).map((r) => resolveRel(from, r)).includes(to);
-  ok(live, `exception still in use: ${edge} (remove dead allowlist entries)`);
+  ok(verdictOf(live), `exception still in use: ${edge} (remove dead allowlist entries)`);
 }
 
 // 8) every RELATIVE require/import must RESOLVE to an existing file (2.341.1,
@@ -872,7 +872,7 @@ await section(async () => {
 //     read SETTINGS_SCHEMA, never re-declare a schema row's numbers inline.
 await section(async () => {
   const ma = read('src/lib/manage-agents.js');
-  ok(!/stopNudge\w*Minutes'\s*:\s*\[/.test(ma) && ma.includes('SETTINGS_SCHEMA[key]'),
+  ok(!/stopNudge\w*Minutes'\s*:\s*\[/.test(ma) && verdictOf(ma.includes('SETTINGS_SCHEMA[key]')),
     'manage-agents reads stop-nudge bounds from SETTINGS_SCHEMA (no hardcoded twin)');
   ok(!/Number\(inp\.value\)\s*\|\|/.test(ma),
     'no falsy-default coalescing on number inputs (explicit 0 is a valid value)');
@@ -1140,7 +1140,7 @@ await section(async () => {
     // installer every new checkout runs.
     const seen = new Set(c42.files);
     const pins = ['src/codex-session-store.js', 'scripts/test-architecture.mjs', 'data/bin/vibespace-task', 'server.js', 'install.sh'];
-    ok(pins.every((f) => seen.has(f)),
+    ok(verdictOf(pins.every((f) => seen.has(f))),
       `census scope really is the WHOLE index — src + scripts + data/bin AND the root files outside them (a vacuous listing cannot pass; ${c42.files.length} files; missing: ${JSON.stringify(pins.filter((f) => !seen.has(f)))})`);
   }
 
@@ -1180,7 +1180,7 @@ await section(async () => {
     plantFixture(tmp42);
 
     const noMeta = census(tmp42);
-    ok(!!noMeta.skip && /rev-parse/.test(noMeta.skip),
+    ok(!!noMeta.skip && verdictOf(/rev-parse/.test(noMeta.skip)),
       `CONTROL: a tree with no git metadata SKIPS, and the skip QUOTES git instead of guessing a cause (${JSON.stringify(String(noMeta.skip).slice(0, 110))})`);
 
     const init = initRepo(tmp42);
@@ -1189,7 +1189,7 @@ await section(async () => {
       ok(true, `CONTROLS SKIPPED: git init/add unavailable here (${gitWhy(add && add.status !== 0 ? add : init)})`);
     } else {
       const found = census(tmp42);
-      ok(!found.skip && found.offenders.length === 1 && found.offenders[0].startsWith('src/dirty.js (byte 12, line 1)'),
+      ok(!found.skip && found.offenders.length === 1 && verdictOf(found.offenders[0].startsWith('src/dirty.js (byte 12, line 1)')),
         `CONTROL: a TRACKED NUL is found, while the \\u0000 escape and a binary fixture are not (${JSON.stringify(found.offenders || found.skip)})`);
       ok(!found.skip && !found.files.some((f) => f === 'data/bin/rclone' || f === 'src/untracked.js'),
         `CONTROL: files the product installs/generates at runtime are OUT OF SCOPE — untracked never reaches the census, however big or binary (${JSON.stringify(found.files || found.skip)})`);
@@ -1252,7 +1252,7 @@ await section(async () => {
       } else {
         const hostile = hostileFor(guarded);
         const cleaned = gitEnvFrom(hostile);
-        ok(GIT_REDIRECTORS.every((k) => !(k in cleaned)) && !('GIT_CONFIG_KEY_0' in cleaned) && !('GIT_CONFIG_VALUE_0' in cleaned)
+        ok(gateOf(GIT_REDIRECTORS.every((k) => !(k in cleaned))) && !('GIT_CONFIG_KEY_0' in cleaned) && !('GIT_CONFIG_VALUE_0' in cleaned)
           && cleaned.PATH === hostile.PATH && cleaned.GIT_CONFIG_NOSYSTEM === '1',
           `CONTROL: the sanitizer drops every repo/index/object/config REDIRECTOR incl. the numbered GIT_CONFIG_KEY_n/VALUE_n pairs, and keeps PATH + the strictly-more-isolating GIT_CONFIG_NOSYSTEM (${GIT_REDIRECTORS.length} names audited)`);
 
@@ -1268,7 +1268,7 @@ await section(async () => {
         const gc = census(under, gitEnvFrom(hostile));
         ok(repoStamp(guarded) === beforeG,
           'CONTROL (the round-6 finding itself): with the sanitized environment, a hostile GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* leaves the OTHER repo byte-identical — every file under .git content-hashed, objects included (round 7)');
-        ok(!!preSkip.skip && gi.status === 0 && ga.status === 0 && !gc.skip && gc.offenders.length === 1 && gc.offenders[0].startsWith('src/dirty.js'),
+        ok(!!preSkip.skip && gi.status === 0 && ga.status === 0 && !gc.skip && gc.offenders.length === 1 && verdictOf(gc.offenders[0].startsWith('src/dirty.js')),
           `CONTROL: ...and the controls still did their real work in the throwaway repo, so the assert above is not vacuous (${JSON.stringify(gc.offenders || gc.skip)})`);
 
         // (b) RAW: the fixture repo really exists (created sanitized), and only
@@ -1342,7 +1342,7 @@ await section(async () => {
           leakWhy = gitWhy(la);
         }
         const PREFIX_EXPECTED = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY'];
-        ok(leakMoved && JSON.stringify(preFixCarries) === JSON.stringify(PREFIX_EXPECTED),
+        ok(gateOf(leakMoved) && JSON.stringify(preFixCarries) === JSON.stringify(PREFIX_EXPECTED),
           `NEGATIVE CONTROL (the round-7 finding itself): the PRE-FIX base — sanitized, PLUS exactly the object-channel names this leg demonstrates (${JSON.stringify(preFixCarries)}) — carries the very same write into a THIRD repository named on no command line, because 3 pinned names cannot protect the object channel (${leakWhy})`);
       }
     }
@@ -1359,7 +1359,7 @@ await section(async () => {
       const stillHostile = process.env.GIT_OBJECT_DIRECTORY === path.join(ambientThird, '.git', 'objects')
         && process.env.GIT_COMMON_DIR === path.join(ambientThird, '.git');
       const after = repoStamp(ambientThird);
-      ok(stillHostile && after === ambientBefore,
+      ok(gateOf(stillHostile) && after === ambientBefore,
         `CONTROL (the round-7 finding itself): with GIT_OBJECT_DIRECTORY + GIT_COMMON_DIR exported at a third repository for the WHOLE census block, that repository is byte-identical afterwards — every .git file hashed, objects included (hostile env still set: ${stillHostile})`);
     }
   } finally {
@@ -1405,7 +1405,7 @@ await section(async () => {
   const nc = ci.censusFindings([...disk, 'test-not-in-any-tier'],
     [{ name: 'test-ghost-suite', tier: 'heavy', why: 'chrome' }, { name: 'test-ghost-suite', tier: 'fast' }, ...ci.SUITES],
     ci.EXCLUDED);
-  ok(nc.unclassified.includes('test-not-in-any-tier') && nc.ghosts.includes('test-ghost-suite') && nc.duplicated.includes('test-ghost-suite'),
+  ok(gateOf(nc.unclassified.includes('test-not-in-any-tier')) && gateOf(nc.ghosts.includes('test-ghost-suite')) && verdictOf(nc.duplicated.includes('test-ghost-suite')),
     'NEGATIVE CONTROL: the census reports an unclassified suite, a ghost entry and a duplicate (it can go red)');
   // THE WIRING PINS (hook ⇄ workflow ⇄ package.json) LIVE IN
   // scripts/test-ci-gate.mjs, NOT HERE, and that is a rule with a scar: this
@@ -1486,22 +1486,22 @@ await section(async () => {
     const missing = want.filter((k) => !SETTINGS_SCHEMA[k]);
     ok(block.length > 200 && read.length >= 8 && hide.length >= 8, `44b scope is non-vacuous (${read.length} keys read by applyChromeSettings, ${hide.length} customize hideKeys)`);
     ok(missing.length === 0, `every chrome/customize settings key is DECLARED in the schema${missing.length ? ' — missing: ' + missing.join(', ') : ''}`);
-    ok(want.includes('toolbar.showDesktopButton') && SETTINGS_SCHEMA['toolbar.showDesktopButton']?.default === true, 'the incident\'s own key is read, declared and defaults to shown');
-    ok(['toolbar.showZzzNope'].every((k) => !SETTINGS_SCHEMA[k]), 'NEG: an undeclared key is what this census reports (the schema does not silently accept unknowns)');
+    ok(gateOf(want.includes('toolbar.showDesktopButton')) && SETTINGS_SCHEMA['toolbar.showDesktopButton']?.default === true, 'the incident\'s own key is read, declared and defaults to shown');
+    ok(verdictOf(['toolbar.showZzzNope'].every((k) => !SETTINGS_SCHEMA[k])), 'NEG: an undeclared key is what this census reports (the schema does not silently accept unknowns)');
   }
   // 44c (2.369.132): the nav is a TREE — groups only ORDER and FOLD the census set.
   {
     const { orderedCategories, settingsGroupOf, settingsGroups, SETTINGS_GROUPS } = schemaMod;
     const ordered = orderedCategories();
     const sameSet = ordered.length === SETTINGS_CATEGORIES.length && new Set(ordered).size === ordered.length && SETTINGS_CATEGORIES.every((c) => ordered.includes(c));
-    ok(sameSet, `orderedCategories() is a PERMUTATION of SETTINGS_CATEGORIES (${ordered.length} categories, none dropped, none twice)`, { ordered, cats: SETTINGS_CATEGORIES });
+    ok(verdictOf(sameSet), `orderedCategories() is a PERMUTATION of SETTINGS_CATEGORIES (${ordered.length} categories, none dropped, none twice)`, { ordered, cats: SETTINGS_CATEGORIES });
     const ids = settingsGroups().map((g) => g.id);
     const orphan = SETTINGS_CATEGORIES.filter((c) => !ids.includes(settingsGroupOf(c)));
     ok(orphan.length === 0, 'every category maps to a group that exists (a category no static group names still lands in plugins/other by rule)', orphan);
     const unknown = SETTINGS_GROUPS.flatMap((g) => g.categories).filter((c) => !SETTINGS_CATEGORIES.includes(c));
     ok(unknown.length === 0, 'no group names a category that is not in the census (a typo in a group would silently move nothing)', unknown);
-    ok(/for \(const cat of orderedCategories\(\)\)/.test(ui) && /settingsGroupOf\(cat\)/.test(ui) && /settings-nav-group-head/.test(ui), 'the UI walks orderedCategories() for the sections and hangs each nav item under its group head');
-    ok(/data-apply-kind|dataset\.applyKind/.test(ui) && /'cli-config'/.test(ui) && /'spawn'/.test(ui) && /'server'/.test(ui), 'a harness section renders three sub-blocks by apply kind (global cli-config / per-session spawn / VibeSpace server)');
+    ok(gateOf(/for \(const cat of orderedCategories\(\)\)/.test(ui)) && gateOf(/settingsGroupOf\(cat\)/.test(ui)) && verdictOf(/settings-nav-group-head/.test(ui)), 'the UI walks orderedCategories() for the sections and hangs each nav item under its group head');
+    ok(gateOf(/data-apply-kind|dataset\.applyKind/.test(ui)) && gateOf(/'cli-config'/.test(ui)) && gateOf(/'spawn'/.test(ui)) && verdictOf(/'server'/.test(ui)), 'a harness section renders three sub-blocks by apply kind (global cli-config / per-session spawn / VibeSpace server)');
   }
   // 44e (B-df40 part 2, 2026-10-03): the two VIEW fields are a closed vocabulary, checked where the build runs.
   // `when` decides whether a row is drawn and `tier` whether it waits for "Show advanced settings"
@@ -1539,14 +1539,14 @@ await section(async () => {
     };
     const withWhen = Object.values(SETTINGS_SCHEMA).filter((r) => r.when).length;
     const advanced = Object.values(SETTINGS_SCHEMA).filter((r) => r.tier === 'advanced').length;
-    ok(withWhen >= 30 && advanced >= 60 && WHEN_FACTS.every((f) => built.includes(f)), `44e scope is non-vacuous (${withWhen} rows carry a when, ${advanced} are advanced; the facts the window builds: ${built.join(', ')})`);
+    ok(withWhen >= 30 && advanced >= 60 && verdictOf(WHEN_FACTS.every((f) => built.includes(f))), `44e scope is non-vacuous (${withWhen} rows carry a when, ${advanced} are advanced; the facts the window builds: ${built.join(', ')})`);
     const errs = whenCensus(SETTINGS_SCHEMA);
     ok(errs.length === 0, `44e every \`when\` clause is one closed tag over a real row / built fact / declared harness, every tier ∈ {${TIERS.join(',')}}${errs.length ? ' — ' + errs.slice(0, 4).join('; ') : ''}`);
     const planted = { ...SETTINGS_SCHEMA,
       'zz.a': { category: 'Chat', when: { weather: 'rain' } }, 'zz.b': { category: 'Chat', when: { setting: 'chat.nope', is: true } },
       'zz.c': { category: 'Chat', when: { fact: 'gpu' } }, 'zz.d': { category: 'Chat', tier: 'expert' }, 'zz.e': { category: 'Chat', when: [{ harness: 'zed' }] } };
     ok(whenCensus(planted).length === 5, 'NEGATIVE CONTROL: an unknown tag, a dangling setting key, an unbuilt fact, an unknown tier and an undeclared harness are each reported (this census can go red)');
-    ok(/settingsViewModel\(SETTINGS_SCHEMA, \{ categories: SETTINGS_CATEGORIES/.test(ui), '44e the window draws the view model over the census list (the coupling the hiding rides on)');
+    ok(verdictOf(/settingsViewModel\(SETTINGS_SCHEMA, \{ categories: SETTINGS_CATEGORIES/.test(ui)), '44e the window draws the view model over the census list (the coupling the hiding rides on)');
     // B-df40 part 3: the per-VENDOR rows DERIVED from src/channel-settings.js carry their view fields — advanced, and
     // `when: { channel: <its vendor> }` — and `channel` on the entry names a vendor some table declares
     const CSM = await import('../src/channel-settings.js');
@@ -1570,7 +1570,7 @@ await section(async () => {
     const plantedCh = { ...SETTINGS_SCHEMA, 'channels.budgetLarkPerMin': { ...lk, tier: undefined }, 'channels.gmailUnitsPerSec': { ...gm, when: { channel: 'lark' } }, 'channels.zz': { category: 'Channels', channel: 'teams' } };
     ok(channelCensus(plantedCh, CST.CHANNEL_SETTINGS).length === 3, 'NEGATIVE CONTROL: a derived row without its tier, one whose `when` names another vendor, and a row claiming an undeclared vendor are each reported');
   }
-  ok(/for \(const cat of SETTINGS_CATEGORIES\)/.test(ui) && /grouped\[cat\]/.test(ui),
+  ok(gateOf(/for \(const cat of SETTINGS_CATEGORIES\)/.test(ui)) && verdictOf(/grouped\[cat\]/.test(ui)),
     'SettingsUI still RENDERS by iterating SETTINGS_CATEGORIES (the coupling this census stands for)');
 
   const rendered = renderedPaths(SETTINGS_SCHEMA, SETTINGS_CATEGORIES);
@@ -1582,7 +1582,7 @@ await section(async () => {
   // THE HELD ROWS (lane cache-warmth-tiles r1a′): a row may EXIST without being drawn while its feature's surface has not
   // landed (src/lib/settings-view.js `held`) — never silently: each one is named here with its why, and the why is words.
   const heldRows = all.filter((p) => SETTINGS_SCHEMA[p].held !== undefined);
-  ok(heldRows.every((p) => typeof SETTINGS_SCHEMA[p].held === 'string' && SETTINGS_SCHEMA[p].held.length >= 20),
+  ok(verdictOf(heldRows.every((p) => typeof SETTINGS_SCHEMA[p].held === 'string' && SETTINGS_SCHEMA[p].held.length >= 20)),
     `44 held rows exist but are not drawn, each with its why (${heldRows.map((p) => p + ' — ' + SETTINGS_SCHEMA[p].held).join(' · ') || 'none'})`);
   // A listed category with no rows is a nav entry that can never appear — the
   // dead-allowlist-row rule, applied to the other direction of the same list.
@@ -1595,7 +1595,7 @@ await section(async () => {
   const ncRendered = renderedPaths(ncSchema, SETTINGS_CATEGORIES);
   ok(!ncRendered.includes('zz.synthetic') && ncRendered.length === rendered.length,
     'NEGATIVE CONTROL: a row in an unlisted category is silently dropped by the render loop (this census can go red)');
-  ok(renderedPaths(ncSchema, [...SETTINGS_CATEGORIES, 'Nobody Listed This']).includes('zz.synthetic'),
+  ok(verdictOf(renderedPaths(ncSchema, [...SETTINGS_CATEGORIES, 'Nobody Listed This']).includes('zz.synthetic')),
     'POSITIVE CONTROL: listing that category is the whole fix (one array entry)');
 });
 
@@ -1625,13 +1625,13 @@ await section(async () => {
   const lineOf = (k) => (doc.match(new RegExp('^\\| `' + k.replace(/\./g, '\\.') + '` \\|.*$', 'm')) || [''])[0];
   const victim = lineOf('chat.compactMode') || lineOf(keys[0]);
   const planted = doc.replace(victim, victim.replace(/\| \*\*/, '| **(stale) '));
-  ok(victim && planted !== doc && gen.renderReference(SETTINGS_SCHEMA, planted) !== planted, 'NEGATIVE CONTROL: a hand-edited table line is what 44d reports (the gate can go red)');
+  ok(gateOf(victim) && planted !== doc && gen.renderReference(SETTINGS_SCHEMA, planted) !== planted, 'NEGATIVE CONTROL: a hand-edited table line is what 44d reports (the gate can go red)');
   const grown = { ...SETTINGS_SCHEMA, 'zz.synthetic': { type: 'boolean', default: false, label: 'Synthetic', description: 'x', category: SETTINGS_SCHEMA[keys[0]].category } };
-  ok(gen.renderReference(grown, doc) !== doc && gen.renderReference(grown, doc).includes('| `zz.synthetic` |'), 'NEGATIVE CONTROL: a new schema row the tables lack reads as stale, and the generator adds its line');
+  ok(gen.renderReference(grown, doc) !== doc && verdictOf(gen.renderReference(grown, doc).includes('| `zz.synthetic` |')), 'NEGATIVE CONTROL: a new schema row the tables lack reads as stale, and the generator adds its line');
   ok(gen.renderReference(SETTINGS_SCHEMA, regenerated || doc) === (regenerated || doc), 'the generator is idempotent (a second run changes nothing)');
 
   // (ii) the retired-key census
-  ok(Array.isArray(RETIRED_SETTING_KEYS) && RETIRED_SETTING_KEYS.length >= 7 && RETIRED_SETTING_KEYS.includes('agents.vibespaceChannel'), `44d the schema re-exports RETIRED_SETTING_KEYS (${(RETIRED_SETTING_KEYS || []).length} keys)`);
+  ok(gateOf(Array.isArray(RETIRED_SETTING_KEYS)) && RETIRED_SETTING_KEYS.length >= 7 && verdictOf(RETIRED_SETTING_KEYS.includes('agents.vibespaceChannel')), `44d the schema re-exports RETIRED_SETTING_KEYS (${(RETIRED_SETTING_KEYS || []).length} keys)`);
   const asRow = (schema) => (RETIRED_SETTING_KEYS || []).filter((k) => Object.prototype.hasOwnProperty.call(schema, k));
   ok(asRow(SETTINGS_SCHEMA).length === 0, `44d no retired key is a schema row${asRow(SETTINGS_SCHEMA).length ? ' — back: ' + asRow(SETTINGS_SCHEMA).join(', ') : ''}`);
   // lane engine-spi-egress L3: a key a LATER retirement carries is named by the ONE migration that carries it — inside that
@@ -1845,7 +1845,7 @@ await section(async () => {
     // SCOPE SELF-PROOF: an assert that cannot name the files it exists for is
     // a census of nothing. These four are the incident's own modules.
     for (const must of ['server.js', 'src/session-store.js', 'src/cli-identity.js', 'src/server/boot-restore.js']) {
-      ok(tracked.includes(must), `(a) scope really covers ${must}`);
+      ok(verdictOf(tracked.includes(must)), `(a) scope really covers ${must}`);
     }
     ok(!pidStray.length, `(a) every process-table spawn is allowlisted WITH a reason (${pidStray.slice(0, 4).join(' | ') || 'clean'})`);
     const pidDead = PID_ALLOWED.filter((a) => !pidHit.has(a.needle)).map((a) => `${a.file}:${a.needle}`);
@@ -1854,7 +1854,7 @@ await section(async () => {
     const srv = read('server.js');
     const srvCode = srv.split('\n').filter((l) => !isSpawnComment(l)).join('\n');
     ok(!/pgrep/.test(srvCode), '(a) no `pgrep` survives in server.js code (refreshWebuiPids was the last one)');
-    ok(/readChildPids\(meta\.childPid\)/.test(srvCode) && /require\('\.\/src\/cli-identity'\)/.test(srvCode),
+    ok(gateOf(/readChildPids\(meta\.childPid\)/.test(srvCode)) && verdictOf(/require\('\.\/src\/cli-identity'\)/.test(srvCode)),
       '(a) refreshWebuiPids asks THE process reader for the wrapper\'s children');
     // …and `scripts/` really is out of the product's path, which is the only
     // thing that makes excluding it from the scope honest.
@@ -1911,7 +1911,7 @@ await section(async () => {
   console.log(`  · (b) sweep-module census walked ${[...sweepFiles].sort().join(', ')} — ${swWalked.length} sites: ${swWalked.join(', ')}`);
   ok(sweepFiles.size >= 4 && swWalked.length >= SWEEP_ALLOWED.length,
     `(b) scope is non-vacuous (${sweepFiles.size} modules, ${swWalked.length} spawn sites)`);
-  ok(sweepFiles.has('server.js'),
+  ok(verdictOf(sweepFiles.has('server.js')),
     '(b) server.js is IN SCOPE because it defines refreshWebuiPids — the reader round 1 could not see');
   ok(!swStray.length, `(b) every spawn in a sweep module is allowlisted WITH a reason (${swStray.slice(0, 4).join(' | ') || 'clean'})`);
   const swDead = SWEEP_ALLOWED.filter((a) => !swHit.has(a.needle)).map((a) => `${a.file}:${a.needle}`);
@@ -1939,7 +1939,7 @@ await section(async () => {
   // this control's subject and would say the wrong thing about why.
   const ANCHOR45 = 'for (const p of readChildPids(meta.childPid)) webuiPids.add(p);';
   const srvText = read('server.js');
-  ok(srvText.includes(ANCHOR45), 'NEGATIVE CONTROL setup: the splice anchor exists in server.js (a control that cannot be built proves nothing)');
+  ok(verdictOf(srvText.includes(ANCHOR45)), 'NEGATIVE CONTROL setup: the splice anchor exists in server.js (a control that cannot be built proves nothing)');
   const strayCount = (text, pidOnly, allow) => spawnSites(text, { pidOnly })
     .filter((s) => !allow.some((x) => x.file === 'server.js' && s.line.includes(x.needle))).length;
   const splice = (line) => srvText.replace(ANCHOR45, `${ANCHOR45}\n        ${line}`);
@@ -1953,7 +1953,7 @@ await section(async () => {
   const gB = strayCount(gitMut, false, SWEEP_ALLOWED) - strayCount(srvText, false, SWEEP_ALLOWED);
   ok(gA === 0 && gB === 1,
     `NEGATIVE CONTROL ③: a per-session \`git\` spawn is invisible to (a) (+${gA}) and a stray in (b) (+${gB}) — the reason both halves exist`);
-  ok(retired.every((l) => isSpawnComment('  // ' + l.trim())),
+  ok(verdictOf(retired.every((l) => isSpawnComment('  // ' + l.trim()))),
     'NEGATIVE CONTROL ④: the same lines behind a `//` are prose, not offenders');
   // ⑤ THE ROUND-3 SHAPE: the retired per-session `pgrep -P`, spelled through a
   //    PROMISIFIED ALIAS. Round 2's census matched callee NAMES, so this line
@@ -1967,7 +1967,7 @@ await section(async () => {
     'NEGATIVE CONTROL ⑤: the retired per-session `pgrep -P` spelled through a promisified ALIAS is a site (round 3: it was invisible, and that is how it re-entered the kill path)');
   const WS_ANCHOR = 'refreshWebuiPids();';
   const wsText = read('src/ws-handler.js');
-  ok(wsText.includes(WS_ANCHOR),
+  ok(verdictOf(wsText.includes(WS_ANCHOR)),
     'NEGATIVE CONTROL ⑤ setup: the splice anchor exists in src/ws-handler.js\'s kill case (a control that cannot be built proves nothing)');
   const wsStray = (text) => spawnSites(text, { pidOnly: true })
     .filter((s) => !PID_ALLOWED.some((x) => x.file === 'src/ws-handler.js' && s.line.includes(x.needle))).length;
@@ -1977,8 +1977,8 @@ await section(async () => {
     `NEGATIVE CONTROL ⑤: spliced into ws-handler's real kill case it is a stray in (a) (+${wA}) — the exact mutation round 2's census answered ALL PASS on`);
   // …and the FIX itself, asserted where it was made: the kill path asks THE
   // process reader, so ws-handler carries no process-table spawn of its own.
-  ok(!wsStray(wsText) && /pidsMatchingCmdline\(session\.socketPath\)/.test(wsText)
-    && /require\('\.\/cli-identity'\)/.test(wsText),
+  ok(!wsStray(wsText) && gateOf(/pidsMatchingCmdline\(session\.socketPath\)/.test(wsText))
+    && verdictOf(/require\('\.\/cli-identity'\)/.test(wsText)),
     '(a) the kill path asks THE process reader (`pidsMatchingCmdline`) and ws-handler starts no process-table child of its own');
 });
 
@@ -2004,14 +2004,14 @@ await section(async () => {
     const s = read(f);
     for (const re of [KEY_LITERAL, ARG_LITERAL]) for (const m of s.matchAll(re)) hits.push(`${f}: ${m[0]}`);
   }
-  ok(files.length > 80 && files.includes('src/server/usage-pool-engine.js') && files.includes('src/ws-create.js') && files.includes('src/server/auto-resume.js'),
+  ok(files.length > 80 && gateOf(files.includes('src/server/usage-pool-engine.js')) && gateOf(files.includes('src/ws-create.js')) && verdictOf(files.includes('src/server/auto-resume.js')),
     `46 scope is non-vacuous and covers the deciding files (${files.length} server-tier files)`);
   ok(hits.length === 0, `no server-tier file spells a harness id into a settings read (serverSetting('<id>.…') / harnessSetting('<id>', …))${hits.length ? ' — ' + hits.slice(0, 5).join(' ; ') : ''}`);
   const nc1 = "  brief: (() => { try { return serverSetting('claude.brief') === true; } catch { return false; } })(),";
   const nc2 = "  if (harnessSetting('codex', 'limitResetCredit') !== 'auto') return false;";
   ok([...nc1.matchAll(KEY_LITERAL)].length === 1 && [...nc2.matchAll(ARG_LITERAL)].length === 1,
     'NEGATIVE CONTROL: the old key-literal shape AND the argument-literal shape are both offenders (this census can go red)');
-  ok([...`serverSetting(GENERIC_LEGACY_KEYS.autoResumeOnLimit)`.matchAll(KEY_LITERAL)].length === 0 && /GENERIC_LEGACY_KEYS\.autoResumeOnLimit/.test(read('src/server/auto-resume.js')),
+  ok([...`serverSetting(GENERIC_LEGACY_KEYS.autoResumeOnLimit)`.matchAll(KEY_LITERAL)].length === 0 && verdictOf(/GENERIC_LEGACY_KEYS\.autoResumeOnLimit/.test(read('src/server/auto-resume.js'))),
     'the generic auto-resume default is read by NAME (GENERIC_LEGACY_KEYS), which the census does not count');
   // 46e. THE POOL / QUOTA / CREDS CENSUS (lane dc-pool-quota, rv-harnesses H2 / H3 / M11). The pool engine
   //      reaches a harness's live quota read through its QuotaSignalSource (quota.readLive / settleLive — codex:
@@ -2030,7 +2030,7 @@ await section(async () => {
       "if (this._acctBackend(a) !== 'claude' || this._acctType(a) !== 'subscription') throw new Error('long-lived", "if (be !== 'claude') a.backend = be;"];
     const engHits = branchLines(eng);
     ok(eng.length > 200000 && engHits.length === 0, `46e src/server/usage-pool-engine.js branches on no harness id (was 12) — the live read is quota.readLive, the gates are caps / creds rows${engHits.length ? ' — ' + engHits.slice(0, 3).join(' ; ') : ''}`);
-    ok(GONE.every((g) => !acc.includes(g)) && !/req\.body\?\.backend === 'codex'/.test(aur),
+    ok(gateOf(GONE.every((g) => !acc.includes(g))) && !/req\.body\?\.backend === 'codex'/.test(aur),
       '46e accounts.js dispatches spawn form / pool platform / oat / record import on the creds row; the pool-create route takes any poolable registered harness (never coerced to claude)');
     ok(branchLines("  if (rung === 'x' && s.backend === 'codex') {").length === 1 && branchLines('  if (liveReadSource(backend)) {').length === 0,
       '46e NEGATIVE CONTROL: a planted id branch is an offender, the descriptor dispatch is not');
@@ -2073,9 +2073,9 @@ await section(async () => {
     const wcHits = branchLines(wc).filter((l) => !handedLines(wc).some((h) => l.trim().startsWith(h) || l.includes(h)));
     ok(wc.length > 50000 && wcHits.length === 0 && branchLines(wc).length <= HANDED.length, `46d src/ws-create.js + src/spawn/ branch on no harness id outside dc-harness-store's ${handedLines(wc).length} handed sites — every per-harness spawn fact is a descriptor row (was 26)${wcHits.length ? ' — ' + wcHits.slice(0, 3).map((l) => l.trim().slice(0, 90)).join(' ; ') : ''}`);
     const a0 = srv.indexOf('function sessionAuth(s) {'), authBody = a0 >= 0 ? srv.slice(a0, srv.indexOf('\n}\n', a0)) : '';
-    ok(authBody.length > 300 && branchLines(authBody).length === 0 && /h\.billingIdentity\(s, \{ accounts, withHost, poolAuth \}\)/.test(authBody),
+    ok(authBody.length > 300 && branchLines(authBody).length === 0 && verdictOf(/h\.billingIdentity\(s, \{ accounts, withHost, poolAuth \}\)/.test(authBody)),
       '46d server.js sessionAuth asks the harness (descriptor billingIdentity) — no claude/codex rungs inline');
-    ok(!/refreshCodexModels|AVAILABLE_MODELS\.codex|models_cache\.json/.test(srv) && /h\.models\(\{ dataDir: /.test(srv),
+    ok(!/refreshCodexModels|AVAILABLE_MODELS\.codex|models_cache\.json/.test(srv) && verdictOf(/h\.models\(\{ dataDir: /.test(srv)),
       '46d server.js refreshes the model lists through every descriptor\'s models() (codex: src/harnesses/codex-models.js)');
     const { createRequire } = await import('node:module');
     const { SPAWN_ROWS } = createRequire(import.meta.url)('../src/harnesses/index.js');
@@ -2127,7 +2127,7 @@ await section(async () => {
   const bad = scope.map((f) => [f, judge(asRead(fs.readFileSync(f, 'utf8')))]).filter(([, why]) => why);
   ok(scope.length >= 30, `§47 census scope is non-vacuous (${scope.length} chrome suites navigate a page)`);
   const part47 = fs.readFileSync('scripts/test-desktop-xpra-window-seamless.mjs', 'utf8'), boot47 = fs.readFileSync('scripts/xpra-window-boot.mjs', 'utf8');
-  ok(part47.includes("'Page.navigate'") && judge(part47) !== null && judge(asRead(part47)) === null
+  ok(gateOf(part47.includes("'Page.navigate'")) && judge(part47) !== null && judge(asRead(part47)) === null
     && judge([boot47.replace(/addScriptToEvaluateOnNewDocument'/g, 'addScriptNowhere\''), part47].join('\n')) !== null,
     '§47 the xpra window part navigates and passes ONLY through the module it boots in (alone it is red; a boot module that never adds the script is red)');
   ok(bad.length === 0, `every chrome suite pre-sets 'vs-onboarded' through ONBOARDED_SOURCE before every Page.navigate${bad.length ? ' — ' + bad.map(([f, w]) => f + ': ' + w).join('; ') : ''}`);
@@ -2135,7 +2135,7 @@ await section(async () => {
   const LP = "import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nimport { loadPage } from './cdp-page-load.mjs';\n";
   ok(judge(LP + "await loadPage(cdp, U);\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });") !== null && judge(LP + "await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await loadPage(cdp, U);") === null
     && !importsLoad("const loadPage = async (t) => t;\nawait loadPage('x');") && !scope.includes('scripts/test-user-state-echo.mjs') && !scope.includes('scripts/test-user-state-echo-rounds.mjs')
-    && bootMods("import { loadPage } from './cdp-page-load.mjs';").length === 0 && scope.some((f) => importsLoad(fs.readFileSync(f, 'utf8')) && !fs.readFileSync(f, 'utf8').includes("'Page.navigate'")),
+    && bootMods("import { loadPage } from './cdp-page-load.mjs';").length === 0 && verdictOf(scope.some((f) => importsLoad(fs.readFileSync(f, 'utf8')) && !fs.readFileSync(f, 'utf8').includes("'Page.navigate'"))),
     'NEGATIVE CONTROL (B-1217 (13)): an imported loadPage( before the addScript is caught and after it passes; a suite\'s own helper merely named loadPage is no navigate (test-user-state-echo and its heavy twin test-user-state-echo-rounds each keep one: out of scope); the one page load is no boot module; a suite whose only navigates are loadPage( calls is in scope');
 });
 
@@ -2153,10 +2153,10 @@ await section(async () => {
   ok(c.files >= 200 && c.launches >= 200, `§47b census scope is non-vacuous (${c.launches} Chrome launches in ${c.files} files)`);
   ok(c.bad.length === 0 && c.unread.length === 0 && c.unparsed.length === 0, `every Chrome a suite launches carries CHROME_STORE (no keyring is ever asked)${c.bad.length || c.unread.length || c.unparsed.length ? ' — ' + [...c.bad.map((b) => `${b.file}:${b.line}`), ...c.unread.map((u) => `${u.file}:${u.line} (argv unread)`), ...c.unparsed.map((f) => `${f} (not parsed)`)].join('; ') : ''}`);
   ok(c.uncovered.length === 0 && c.stale.length === 0 && c.rows >= 12, `§47b A MISS IS NEVER SILENT: every file of the scope whose text holds a Chrome marker is covered (its launches carry it) or a NAMED row with its reason (${c.rows} rows); no row is stale${c.uncovered.length || c.stale.length ? ' — uncovered: ' + c.uncovered.join(', ') + ' · stale: ' + c.stale.join(', ') : ''}`);
-  ok(c.exempt.length === 1 && c.exempt[0].file === 'scripts/test-app-display-secrets-chrome.mjs' && c.exempt[0].pinned && Object.keys(CS.EXEMPT).length === 1, '§47b ONE exempt row — the suite that starts its OWN Secret Service on the plan\'s private bus, pinned to that private address (never the session bus a lane inherits)', c.exempt);
+  ok(c.exempt.length === 1 && c.exempt[0].file === 'scripts/test-app-display-secrets-chrome.mjs' && gateOf(c.exempt[0].pinned) && Object.keys(CS.EXEMPT).length === 1, '§47b ONE exempt row — the suite that starts its OWN Secret Service on the plan\'s private bus, pinned to that private address (never the session bus a lane inherits)', c.exempt);
   const arr = (s, re) => { const m = re.exec(s); return m ? m[1].replace(/\s/g, '') : null; };
   const prof = arr(fs.readFileSync('src/browser-attach.js', 'utf8'), /const PROFILE_STORE = Object\.freeze\((\[[^\]]*\])\)/), store = arr(fs.readFileSync('scripts/scratch.mjs', 'utf8'), /^export const CHROME_STORE = Object\.freeze\((\[[^\]]*\])\)/m);
-  ok(!!store && store === prof && /'--password-store=basic'/.test(store), `§47b scripts/scratch.mjs CHROME_STORE is the product's src/browser-attach.js PROFILE_STORE (${store})`);
+  ok(!!store && store === prof && verdictOf(/'--password-store=basic'/.test(store)), `§47b scripts/scratch.mjs CHROME_STORE is the product's src/browser-attach.js PROFILE_STORE (${store})`);
   // 47c. B-9dd0 unit 2 (主开发 2026-11-20 r198): every Chrome a suite launches starts with its BACKGROUND NETWORK ROADS OFF —
   //     scripts/scratch.mjs CHROME_QUIET (no component / variations / safe-browsing updates, no sync, no default apps, no pings, no
   //     domain-reliability or metrics uploads), read by the SAME census (its `loud` list): a suite's Chrome reaches only the
@@ -2164,7 +2164,7 @@ await section(async () => {
   {
     ok(c.loud.length === 0, `§47c every Chrome a suite launches carries CHROME_QUIET — its background network roads off (${c.launches} launches)${c.loud.length ? ' — loud: ' + c.loud.map((l) => `${l.file}:${l.line}`).join(', ') : ''}`);
     const quiet = (/^export const CHROME_QUIET = Object\.freeze\((\[[^\]]*\])\)/m.exec(fs.readFileSync('scripts/scratch.mjs', 'utf8')) || [])[1] || '';
-    ok(/'--disable-background-networking'/.test(quiet) && /'--disable-component-update'/.test(quiet) && /'--disable-sync'/.test(quiet) && !/--disable-features/.test(quiet),
+    ok(gateOf(/'--disable-background-networking'/.test(quiet)) && gateOf(/'--disable-component-update'/.test(quiet)) && gateOf(/'--disable-sync'/.test(quiet)) && !/--disable-features/.test(quiet),
       `§47c scripts/scratch.mjs CHROME_QUIET turns the background roads off, and names no --disable-features (a suite's own list would lose to it) — ${quiet}`);
     const Lq = (src) => CS.launchesOf(src, { acorn }).launches[0] || {};
     const loudP = Lq("const c = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=0']);\n");
@@ -2176,12 +2176,12 @@ await section(async () => {
     const wrapLoud = Lq("const c = spawn('/bin/sh', [...CHROME_QUIET, '-c', 'ulimit -d 4194304 && exec \"$0\" \"$@\"', CHROME, '--headless=new', '--remote-debugging-port=0']);\n");
     const wrapQuiet = Lq("const c = spawn('/bin/sh', ['-c', 'ulimit -d 4194304 && exec \"$0\" \"$@\"', CHROME, ...CHROME_QUIET, '--headless=new', '--remote-debugging-port=0']);\n");
     console.log(`  · §47c the wrapped launches of the tree (${c.wrapped.length}): ${c.wrapped.map((w) => `${w.file}:${w.line} — Chrome at element ${w.at}, the spread at ${w.quietAt} (${w.quiet ? 'after: quiet' : 'NOT after: loud'})`).join('; ') || 'none'}`);
-    ok(wrapLoud.wrapped && wrapLoud.wrapped.at === 3 && wrapLoud.quiet === false && wrapQuiet.wrapped && wrapQuiet.quiet === true && c.wrapped.every((w) => w.quiet && w.quietAt > w.at),
+    ok(gateOf(wrapLoud.wrapped) && wrapLoud.wrapped.at === 3 && wrapLoud.quiet === false && gateOf(wrapQuiet.wrapped) && wrapQuiet.quiet === true && verdictOf(c.wrapped.every((w) => w.quiet && w.quietAt > w.at)),
       '§47c r528 CONTROL: a launch through /bin/sh with the spread BEFORE Chrome\'s element reads LOUD, after it quiet; every wrapped launch of the tree has its spread after Chrome', JSON.stringify({ loud: wrapLoud.wrapped && wrapLoud.quiet, quiet: wrapQuiet.quiet, tree: c.wrapped }));
     // r528 MUST 2: the EXEMPT row is the store's only — its file is still read for the quiet switches (planted without its spread: loud)
     const EXF = Object.keys(CS.EXEMPT)[0], exSrc = fs.readFileSync(EXF, 'utf8');
     const exLoud = CS.census(process.cwd(), { acorn, patch: { [EXF]: exSrc.replace('spawn(CHROME, [...CHROME_QUIET, ', 'spawn(CHROME, [') } });
-    ok(exSrc.includes('spawn(CHROME, [...CHROME_QUIET, ') && exLoud.loud.some((l) => l.file === EXF) && !c.loud.some((l) => l.file === EXF),
+    ok(gateOf(exSrc.includes('spawn(CHROME, [...CHROME_QUIET, ')) && gateOf(exLoud.loud.some((l) => l.file === EXF)) && !c.loud.some((l) => l.file === EXF),
       `§47c r528 CONTROL: the EXEMPT file (${EXF}) is read for the quiet switches too — without its spread it reads LOUD; at the tip it carries it`, JSON.stringify(exLoud.loud.filter((l) => l.file === EXF)));
   }
   // 47d. B-9dd0 (主开发 r3727, after the measure 55394096f: every suite Chrome reached Google's background services in spite of 47c's
@@ -2192,7 +2192,7 @@ await section(async () => {
     ok(c.unnamed.length === 0, `§47d every Chrome a suite launches spreads CHROME_QUIET, so it carries the names rule (${c.launches} launches)${c.unnamed.length ? ' — without it: ' + c.unnamed.map((l) => `${l.file}:${l.line}`).join(', ') : ''}`);
     ok(c.named.length === 0 && c.namesText.length === 0 && c.namesStale.length === 0, `§47d the names switch has ONE place: no launch names it, and every file of the scope that names it is a NAMES row with its reason (${Object.keys(CS.NAMES_ROWS).length} rows); no row is stale${c.named.length || c.namesText.length || c.namesStale.length ? ' — ' + JSON.stringify({ named: c.named, text: c.namesText, stale: c.namesStale }) : ''}`);
     const scr = fs.readFileSync('scripts/scratch.mjs', 'utf8'), quietSrc = (/^export const CHROME_QUIET = Object\.freeze\((\[[^\]]*\])\)/m.exec(scr) || [])[1] || '';
-    ok(/, chromeNames\(\)\]$/.test(quietSrc) && /'MAP \* \^NOTFOUND', 'EXCLUDE 127\.0\.0\.1', 'EXCLUDE \[::1\]', 'EXCLUDE localhost'/.test(scr) && /chromeNames\(\{ own: list \}\)/.test(scr),
+    ok(gateOf(/, chromeNames\(\)\]$/.test(quietSrc)) && gateOf(/'MAP \* \^NOTFOUND', 'EXCLUDE 127\.0\.0\.1', 'EXCLUDE \[::1\]', 'EXCLUDE localhost'/.test(scr)) && verdictOf(/chromeNames\(\{ own: list \}\)/.test(scr)),
       '§47d scripts/scratch.mjs: CHROME_QUIET ends with chromeNames() — every name mapped to «^NOTFOUND» (the vendor\'s literal) but the loopback\'s — and chromeBelt takes its rule from the same builder', quietSrc.slice(-60));
     // r3968: THE BUILDER, run from its own text (a PURE function, no import of the harness): its order and its refusals
     const nbAt = scr.indexOf('export const chromeNames = '), nbEnd = scr.indexOf('\n};\n', nbAt);
@@ -2202,9 +2202,9 @@ await section(async () => {
     const ordered = (f) => { const r = f ? f({ map: { 'hub.test': '127.0.0.1' } }) : ''; const m = r.indexOf('MAP hub.test 127.0.0.1'), c = r.indexOf('MAP * ^NOTFOUND'); return m >= 0 && c > m; };
     const BAD = [{ own: ['a b'] }, { own: ['x,y'] }, { own: ['*'] }, { own: ['*.example.com'] }, { own: ['box?'] }, { map: { 'a,b.test': '127.0.0.1' } }, { map: { 'a.test': '127.0.0.1, MAP * 1.2.3.4' } }, { own: [''] }];
     const NBswap = nbOf(nbSrc.replace("[...maps, 'MAP * ^NOTFOUND',", "['MAP * ^NOTFOUND', ...maps,")), NBloose = nbOf(nbSrc.replace("if (!v || /[\\s,]/.test(v) || (what === 'own' && /[*?]/.test(v))) throw", 'if (false) throw'));
-    ok(!!NB && ordered(NB) && BAD.every((x) => throwsOf(NB, x)) && !throwsOf(NB, { map: { 'hub.test': '127.0.0.1' }, own: ['192.168.1.9', 'box-name'] }),
+    ok(!!NB && gateOf(ordered(NB)) && gateOf(BAD.every((x) => throwsOf(NB, x))) && !throwsOf(NB, { map: { 'hub.test': '127.0.0.1' }, own: ['192.168.1.9', 'box-name'] }),
       '§47d r3968 THE BUILDER: a suite\'s own map stands AHEAD of the catch-all (the vendor takes the FIRST matching MAP), and a name that would split the rule (a space, a comma) or open it (a star in own, an empty name) is refused by name — a plain address and a plain name are taken', JSON.stringify({ built: !!NB, ordered: ordered(NB), refused: NB ? BAD.map((x) => throwsOf(NB, x)) : null }));
-    ok(!!NBswap && !ordered(NBswap) && !!NBloose && BAD.some((x) => !throwsOf(NBloose, x)),
+    ok(!!NBswap && !ordered(NBswap) && !!NBloose && verdictOf(BAD.some((x) => !throwsOf(NBloose, x))),
       '§47d r3968 RED CONTROLS: the catch-all written FIRST reads out of order; the refusal cut lets a splitting name through — the legs above can fail', JSON.stringify({ swapOrdered: NBswap ? ordered(NBswap) : null, looseLets: NBloose ? BAD.filter((x) => !throwsOf(NBloose, x)).length : null }));
     // r4009 (3): the refusal's WORD is the true one — an empty name or a wildcard would OPEN the rule, a space or a comma SPLIT it
     const wordOf = (x) => { try { NB(x); return null; } catch (e) { return / would (split|open) /.exec(String(e && e.message))?.[1] || '?'; } };
@@ -2217,7 +2217,7 @@ await section(async () => {
     const beltAt = scr.indexOf('export const chromeBelt = '), beltEnd = scr.indexOf('\n};\n', beltAt);
     const beltOf = (nb) => { try { return new Function('chromeNames', `return (${scr.slice(beltAt + 'export const chromeBelt = '.length, beltEnd + 2)});`)(nb); } catch { return null; } };
     const BELT = NB ? beltOf(NB) : null, guardedNone = (v) => [...(v ? [NB({ own: [v] })] : [])];
-    ok(OWN4.every(([f, v]) => guardedIn(fs.readFileSync(f, 'utf8'), v)) && !!BELT && !throwsOf(BELT, undefined) && !throwsOf(BELT, []) && !throwsOf(BELT, [null, '']) && [null, undefined, ''].every((v) => guardedNone(v).length === 0),
+    ok(gateOf(OWN4.every(([f, v]) => guardedIn(fs.readFileSync(f, 'utf8'), v))) && !!BELT && !throwsOf(BELT, undefined) && !throwsOf(BELT, []) && !throwsOf(BELT, [null, '']) && verdictOf([null, undefined, ''].every((v) => guardedNone(v).length === 0)),
       '§47d r4009 A MACHINE WITH ONLY THE LOOPBACK: each of the four launches hands its address to the builder only when it has one (no address ⇒ nothing handed, nothing thrown), and the belt handed no own name (none, [], an empty one) builds its rule', JSON.stringify(OWN4.map(([f, v]) => [f, guardedIn(fs.readFileSync(f, 'utf8'), v)])));
     // r4009 (4b): THE VALUE HANDED TO THE BUILDER IS THE VALUE THE PAGE IS OPENED AT — by text: each file hands `own: [X]` and opens
     // `http://${X}` (the xpra boot's X is opened by the suites that import it from the boot)
@@ -2225,7 +2225,7 @@ await section(async () => {
     const xpraUsers = fs.readdirSync('scripts').filter((n) => /^test-.*\.mjs$/.test(n)).map((n) => 'scripts/' + n).filter((n) => { const t = fs.readFileSync(n, 'utf8'); return t.includes("from './xpra-window-boot.mjs'") && opensAt(t, 'HOSTNAME'); });
     const sameValue = (f, v, src, users = []) => src.includes(`chromeNames({ own: [${v}] })`) && (opensAt(src, v) || users.length > 0);
     const planted = "chrome = spawn(CHROME, [...CHROME_QUIET, ...(IP ? [chromeNames({ own: [IP] })] : [])]);\nawait page(`http://${OTHER}:${PORT}`);\n";
-    ok(OWN4.every(([f, v]) => sameValue(f, v, fs.readFileSync(f, 'utf8'), f.endsWith('xpra-window-boot.mjs') ? xpraUsers : [])) && xpraUsers.length >= 2 && !sameValue('planted', 'IP', planted),
+    ok(gateOf(OWN4.every(([f, v]) => sameValue(f, v, fs.readFileSync(f, 'utf8'), f.endsWith('xpra-window-boot.mjs') ? xpraUsers : []))) && xpraUsers.length >= 2 && !sameValue('planted', 'IP', planted),
       `§47d r4009 THE VALUE THE BUILDER GETS IS THE VALUE THE PAGE IS OPENED AT (by text): each of the four hands own: [X] and opens http://\${X}; the xpra boot's HOSTNAME is opened by ${xpraUsers.length} suites that import it; RED: a planted launch that opens another value reads false`, JSON.stringify({ xpraUsers }));
     const Ln = (src) => CS.launchesOf(src, { acorn }).launches[0] || {};
     const litOnly = Ln("const c = spawn(CHROME, ['--disable-background-networking', '--password-store=basic', '--headless=new', '--remote-debugging-port=0']);\n");
@@ -2234,7 +2234,7 @@ await section(async () => {
     const txt = CS.census(process.cwd(), { acorn, extra: { 'scripts/test-planted-names.mjs': "const RULE = '--host-resolver-rules=MAP * 127.0.0.1';\nexport const X = RULE;\n" } });
     const gone = CS.census(process.cwd(), { acorn, names: { ...CS.NAMES_ROWS, 'scripts/test-planted-nonames.mjs': 'a row whose file no longer names the switch' }, extra: { 'scripts/test-planted-nonames.mjs': 'export const X = 1;\n' } });
     ok(litOnly.quiet === true && litOnly.spread === false && own.spread === true && own.named === true && viaB.spread === true && viaB.named === false
-      && txt.namesText.includes('scripts/test-planted-names.mjs') && gone.namesStale.includes('scripts/test-planted-nonames.mjs'),
+      && gateOf(txt.namesText.includes('scripts/test-planted-names.mjs')) && verdictOf(gone.namesStale.includes('scripts/test-planted-nonames.mjs')),
       '§47d CONTROL: a launch quiet by the literal switch alone brings no names rule (red); a launch that names the switch itself is red by name, through the builder it is not; a planted file that names the switch in a const is red by its text; a NAMES row whose file no longer names it is stale',
       JSON.stringify({ litOnly: [litOnly.quiet, litOnly.spread], own: [own.spread, own.named], viaB: [viaB.spread, viaB.named], text: txt.namesText, stale: gone.namesStale }));
   }
@@ -2258,7 +2258,7 @@ await section(async () => {
     const line = build && QUIET ? build(...QUIET) : '', pieces = V.driverArgsList(line);
     ok(NAMES === '--host-resolver-rules=MAP * 127.0.0.1' && JSON.stringify(V.driverArgsList(NAMES)) === JSON.stringify([NAMES]) && !!QUIET
       && pieces[pieces.length - 1] === NAMES && pieces.filter((p) => /^--host-resolver-rules/.test(p)).length === 1 && !pieces.some((p) => /^EXCLUDE|\^NOTFOUND/.test(p))
-      && QUIET.filter((s) => s !== NB()).every((s) => pieces.includes(s)) && throws(build, '--host-resolver-rules=MAP a.test 127.0.0.1') && throws(build, '--a=1,2') && throws(build, ' --a'),
+      && gateOf(QUIET.filter((s) => s !== NB()).every((s) => pieces.includes(s))) && gateOf(throws(build, '--host-resolver-rules=MAP a.test 127.0.0.1')) && gateOf(throws(build, '--a=1,2')) && verdictOf(throws(build, ' --a')),
       '§47e THE BUILDER: DRIVER_NAMES is ONE rule that the driver reads back whole; driverArgs(...CHROME_QUIET) gives the driver every quiet switch, CHROME_QUIET\'s own names rule swapped for DRIVER_NAMES, DRIVER_NAMES last and alone; another resolver rule, a switch holding a comma, and a switch with a blank at its end are refused by name',
       JSON.stringify({ names: NAMES, last: pieces[pieces.length - 1], rules: pieces.filter((p) => /^--host-resolver-rules/.test(p)) }));
     // RED CONTROLS: the 2.369.419 shape read as the driver reads it; a planted driver line not built; a row whose count moved; a
@@ -2273,10 +2273,10 @@ await section(async () => {
     // runs no real driver is not judged (the door's marker assembled from pieces: this file is no door)
     const WR = 'fs.write' + 'FileSync(cfg, JSON.stringify({ args: ', DOOR = 'DRIVER' + '.skip';
     const cfgRoad = CS.driverCensus(process.cwd(), { extra: { 'scripts/test-planted-door.mjs': `skip(\`\${${DOOR}} none\`);\n${WR}'--no-sandbox' }));\n`, 'scripts/test-planted-nodoor.mjs': `${WR}'--no-sandbox' }));\n` } });
-    ok(cut.includes('--host-resolver-rules=MAP * ^NOTFOUND') && cut.some((p) => /^EXCLUDE /.test(p))
-      && planted.unbuilt.some((u) => u.file === 'scripts/test-planted-driver.mjs' && u.line === 1) && planted.joined.some((u) => u.file === 'scripts/test-planted-driver.mjs')
-      && movedRow.moved.some((m) => m.file === 'scripts/test-browser-pin.mjs') && lostPin.unpinned.includes('scripts/test-browser-display-chrome.mjs') && staleRow.stale.includes('scripts/test-planted-gone.mjs')
-      && cfgRoad.unbuilt.some((u) => u.file === 'scripts/test-planted-door.mjs' && u.line === 2) && !cfgRoad.unbuilt.some((u) => u.file === 'scripts/test-planted-nodoor.mjs'),
+    ok(gateOf(cut.includes('--host-resolver-rules=MAP * ^NOTFOUND')) && gateOf(cut.some((p) => /^EXCLUDE /.test(p)))
+      && gateOf(planted.unbuilt.some((u) => u.file === 'scripts/test-planted-driver.mjs' && u.line === 1)) && gateOf(planted.joined.some((u) => u.file === 'scripts/test-planted-driver.mjs'))
+      && gateOf(movedRow.moved.some((m) => m.file === 'scripts/test-browser-pin.mjs')) && gateOf(lostPin.unpinned.includes('scripts/test-browser-display-chrome.mjs')) && gateOf(staleRow.stale.includes('scripts/test-planted-gone.mjs'))
+      && gateOf(cfgRoad.unbuilt.some((u) => u.file === 'scripts/test-planted-door.mjs' && u.line === 2)) && !cfgRoad.unbuilt.some((u) => u.file === 'scripts/test-planted-nodoor.mjs'),
       '§47e RED CONTROLS: the quiet list joined by a comma reaches the driver as the catch-all ALONE (it takes 127.0.0.1 too) plus stray EXCLUDE words; a planted driver config not built by driverArgs is red, and so is the joined list; a row whose count moved, a pin that no longer holds and a stale row are each red',
       JSON.stringify({ cut: cut.filter((p) => /resolver|EXCLUDE/.test(p)), planted: planted.unbuilt.filter((u) => /planted/.test(u.file)), moved: movedRow.moved, unpinned: lostPin.unpinned, stale: staleRow.stale }));
   }
@@ -2293,8 +2293,8 @@ await section(async () => {
     const ASSERT47f = 'ok(rec.launch' + " === 'attach', 'started');\n", hubWorld = CS.attachCensus(process.cwd(), { extra: { 'scripts/test-planted-hub-attach.mjs': ASSERT47f } });
     const staleRow47f = CS.attachCensus(process.cwd(), { rows: { ...CS.ATTACH_ROWS, 'scripts/test-planted-no-world.mjs': 'a planted row' }, extra: { 'scripts/test-planted-no-world.mjs': 'export const X = 1;\n' } });
     const want47f = ['scripts/test-browser-live.mjs', 'scripts/test-browser-x-picture.mjs', 'scripts/test-browser-human-ui.mjs', 'scripts/test-desktop-xpra-window-close.mjs'];
-    ok(want47f.every((f) => a.worlds.includes(f)) && a.unprogrammed.length === 0 && a.stale.length === 0 && unprog.unprogrammed.includes('scripts/test-browser-live.mjs')
-      && hubWorld.unprogrammed.includes('scripts/test-planted-hub-attach.mjs') && staleRow47f.stale.includes('scripts/test-planted-no-world.mjs'),
+    ok(gateOf(want47f.every((f) => a.worlds.includes(f))) && a.unprogrammed.length === 0 && a.stale.length === 0 && gateOf(unprog.unprogrammed.includes('scripts/test-browser-live.mjs'))
+      && gateOf(hubWorld.unprogrammed.includes('scripts/test-planted-hub-attach.mjs')) && verdictOf(staleRow47f.stale.includes('scripts/test-planted-no-world.mjs')),
       `§47f every world on the attach road — a keeper with a REAL display keeper in the suite's own process, or a scratch hub the suite asserts the attach road of — hands that keeper the harness's Chrome program, itself or through its boot module (${a.worlds.length} world(s): ${a.worlds.join(', ')}; ${a.rowed.length} counted rows start no real Chrome); RED: the same in-process world without it, a planted scratch-hub world without it, and a stale row are each named`, JSON.stringify({ worlds: a.worlds, unprogrammed: a.unprogrammed, rowed: a.rowed, stale: a.stale, control: unprog.unprogrammed, hub: hubWorld.unprogrammed, staleRow: staleRow47f.stale }));
     const scr47f = fs.readFileSync('scripts/scratch.mjs', 'utf8'), bodyOf = (name) => { const at = scr47f.indexOf(`export const ${name} = `), end = scr47f.indexOf('\n};\n', at); return at >= 0 && end > at ? scr47f.slice(at + `export const ${name} = `.length, end + 2) : ''; };
     const MARK47f = (/^export const NAMES_PROGRAM_MARK = '([^']*)';$/m.exec(scr47f) || [])[1] || null;
@@ -2310,10 +2310,10 @@ await section(async () => {
     const ATL47f = req47f('../src/server/browser-attach-launch.js');
     const withProg = ATL47f.chromeExecutable({ PATH: `${progDir}:${realDir}` }), without = ATL47f.chromeExecutable({ PATH: realDir }), after = ATL47f.chromeExecutable({ PATH: `${realDir}:${progDir}` });
     fs.rmSync(D47f, { recursive: true, force: true });
-    ok(!!TXT && MARK47f === 'VIBESPACE-CHROME-NAMES-PROGRAM' && /^--host-resolver-rules=MAP \* \^NOTFOUND, EXCLUDE 127\.0\.0\.1/.test(rule) && JSON.stringify(ran) === JSON.stringify([rule, '--user-data-dir=/x', '--a=1, 2', '--b']) && withProg === prog && without === realChrome,
+    ok(!!TXT && MARK47f === 'VIBESPACE-CHROME-NAMES-PROGRAM' && gateOf(/^--host-resolver-rules=MAP \* \^NOTFOUND, EXCLUDE 127\.0\.0\.1/.test(rule)) && JSON.stringify(ran) === JSON.stringify([rule, '--user-data-dir=/x', '--a=1, 2', '--b']) && withProg === prog && without === realChrome,
       '§47f THE PROGRAM: it execs the real Chrome with the names rule FIRST (chromeNames() whole, one argv word) and every argument after it unchanged (a comma inside one kept whole); the product\'s own lookup finds the program when it stands first on the keeper env\'s PATH, and the real Chrome exactly as at the release when it is not there',
       JSON.stringify({ ran, withProg, without, mark: MARK47f }));
-    ok(after === realChrome && throwsOf47f(() => TXT('chrome', rule)),
+    ok(after === realChrome && verdictOf(throwsOf47f(() => TXT('chrome', rule))),
       '§47f CONTROLS: the program put AFTER the real Chrome on the PATH is not the one found (the seam is the order); a real Chrome named by no absolute path is refused', JSON.stringify({ after }));
     // §47g B-8695's follow (主开发 r4974 (1)): A REAL-DRIVER RUN's HOME HOLDS THE DRIVER's LINE. Every home a real-driver suite hands
     // (an object's HOME: / homeDir:, or an assignment of one) resolves, in its own scope, to a home whose .agent-browser/config.json
@@ -2342,8 +2342,8 @@ await section(async () => {
     const swap47g = CS.homeCensus(process.cwd(), { acorn, rows: { ...CS.HOME_ROWS, 'scripts/test-planted-swap.mjs': { why: 'a planted row', sites: ['const a = { HOME: H1 };'] } }, extra: { 'scripts/test-planted-swap.mjs': SWAP47g } });
     const swapM47g = swap47g.moved.find((m) => m.file === 'scripts/test-planted-swap.mjs');
     ok(h47g.open.length === 0 && h47g.moved.length === 0 && h47g.unpinned.length === 0 && h47g.stale.length === 0 && h47g.unparsed.length === 0 && LIVE47g.split(F2_47g).length === 2
-      && rel47g.open.some((o) => o.file === 'scripts/test-browser-live.mjs' && o.key === 'HOME' && o.what === "path.join(D, 'home')") && JSON.stringify(plOpen47g) === '[4,7,8]'
-      && stale47g.stale.includes('scripts/test-planted-gone.mjs') && moved47g.moved.length === 1 && moved47g.moved[0].file === row47g
+      && gateOf(rel47g.open.some((o) => o.file === 'scripts/test-browser-live.mjs' && o.key === 'HOME' && o.what === "path.join(D, 'home')")) && JSON.stringify(plOpen47g) === '[4,7,8]'
+      && gateOf(stale47g.stale.includes('scripts/test-planted-gone.mjs')) && moved47g.moved.length === 1 && moved47g.moved[0].file === row47g
       && !!swapM47g && swapM47g.n === 1 && swapM47g.want === 1 && JSON.stringify(swapM47g.extra) === JSON.stringify(['const b = { HOME: H2 };']) && JSON.stringify(swapM47g.missing) === JSON.stringify(['const a = { HOME: H1 };']),
       `§47g every home a real-driver suite hands its driver or keeper holds the driver's line from its first launch (${h47g.sites} homes in ${h47g.files} files: ${h47g.configured} configured; apart, no driver launch: ${h47g.versionReads} version reads, ${h47g.chromeSpawns} Chromes the suites spawn, ${h47g.attaches} attaches; the rest HOME_ROWS, ${Object.keys(CS.HOME_ROWS).length} files, each read); RED: test-browser-live ④'s F2 home as at the release is open; PLANTED: the same name in another function with no config, an assignment of a bare home and the process's own home are open, a written config, an explicit one, an alias and a field are not; a stale row, a site dropped from a row, and ONE home swapped for another with the count kept are red (a row lists its sites by their text)`,
       JSON.stringify({ open: h47g.open.slice(0, 12), moved: h47g.moved, unpinned: h47g.unpinned, stale: h47g.stale, unparsed: h47g.unparsed, rel: rel47g.open.filter((o) => o.file === 'scripts/test-browser-live.mjs').slice(0, 3), plOpen47g }));
@@ -2357,7 +2357,7 @@ await section(async () => {
   const prom = L("import { execFile } from 'node:child_process';\nimport { promisify } from 'node:util';\nconst run = promisify(execFile);\nawait run(CHROME, ['--headless', '--dump-dom', 'file:///x']);\n");
   const markerOnly = CS.census(process.cwd(), { acorn, extra: { 'scripts/test-planted-marker.mjs': "// it names --remote-debugging-port=0 and launches nothing of its own\nexport const X = 1;\n" } });
   const staleRow = CS.census(process.cwd(), { acorn, rows: { ...CS.ROWS, 'scripts/test-planted-nomark.mjs': 'a row whose file holds no marker' }, extra: { 'scripts/test-planted-nomark.mjs': 'export const X = 1;\n' } });
-  ok(alias.launches.length === 1 && !alias.launches[0].carried && prom.launches.length === 1 && !prom.launches[0].carried && markerOnly.uncovered.includes('scripts/test-planted-marker.mjs') && staleRow.stale.includes('scripts/test-planted-nomark.mjs'),
+  ok(alias.launches.length === 1 && !alias.launches[0].carried && prom.launches.length === 1 && !prom.launches[0].carried && gateOf(markerOnly.uncovered.includes('scripts/test-planted-marker.mjs')) && verdictOf(staleRow.stale.includes('scripts/test-planted-nomark.mjs')),
     '§47b CONTROLS (the check\'s): a spawn imported under another name is a launch, RED without the store; a promisified execFile of Chrome is a launch, RED; a file whose text names a marker with no launch and no row is UNCOVERED, red; a row whose file holds no marker is STALE, red');
   // 主开发's verdict (12:21Z): the census put the store flags in front of NODE's own options (three fake-Chrome holders) and into a LibreOffice
   // conversion — a spawn of the runtime itself is never a Chrome launch; an office conversion's bare --headless is not one either
@@ -2368,7 +2368,7 @@ await section(async () => {
   ok(nodeHolder.launches.length === 0 && nodeHolder.unread.length === 0 && nodeLit.launches.length === 0 && office.launches.length === 0 && officeCdp.launches.length === 1,
     '§47b CONTROLS (主开发 12:21Z): a node holder with a headless / debugging-port flag is NOT a launch (the runtime itself); an office conversion\'s bare --headless is NOT a launch — while an office-named program with a debugging port still is (the census stays eyes-open)');
   const one = 'scripts/test-chat-hygiene-ui.mjs', pc = CS.census(process.cwd(), { acorn, patch: { [one]: fs.readFileSync(one, 'utf8').replace('...CHROME_STORE, ', '') } });
-  ok(planted.launches.length === 1 && !planted.launches[0].carried && carried.launches[0].carried && viaVar.launches.length === 1 && !viaVar.launches[0].carried && unread.unread.length === 1 && pc.bad.some((b) => b.file === one),
+  ok(planted.launches.length === 1 && !planted.launches[0].carried && gateOf(carried.launches[0].carried) && viaVar.launches.length === 1 && !viaVar.launches[0].carried && unread.unread.length === 1 && verdictOf(pc.bad.some((b) => b.file === one)),
     '§47b CONTROLS: a planted launch without the store is RED, with it green; an argv named by a variable is read; a Chrome program whose argv cannot be read is UNREAD (red); a real suite with its spread removed is red by file');
 }
 
@@ -2397,7 +2397,7 @@ await section(async () => {
   // (the file's refuseAgentBearer asks pressBearer — any bearer; each wake-capable block calls it before it touches an engine)
   const anyBearer = /function refuseAgentBearer\([^)]*\) \{\s*if \(!isAgentBearer\(req\) && !pressBearer\(req\.headers\)\) return false;/.test(src);
   const noBearer = (text) => blocks(text).filter((b) => WAKES.test(b)).filter((b) => { const w = b.search(WAKES); const r = b.search(/\n\s*if \(refuseAgentBearer\(req, res(?:, [A-Z_]+)?\)\) return;/); return r < 0 || r > w; }).map((b) => b.split('\n')[0].slice(0, 90));
-  ok(anyBearer && noBearer(src).length === 0, `§49 …and every one refuses EVERY bearer (refuseAgentBearer, which asks pressBearer) before it wakes — they are attended doors${noBearer(src).length ? ' — ' + noBearer(src).join('; ') : ''}`);
+  ok(gateOf(anyBearer) && noBearer(src).length === 0, `§49 …and every one refuses EVERY bearer (refuseAgentBearer, which asks pressBearer) before it wakes — they are attended doors${noBearer(src).length ? ' — ' + noBearer(src).join('; ') : ''}`);
   ok(noBearer(src.replace("router.post('/api/channel-groups', async (req, res) => {\n  try {\n    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;\n", "router.post('/api/channel-groups', async (req, res) => {\n  try {\n")).length === 1, '§49 CONTROL: the group create route without its bearer refusal is flagged');
   ok(judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }));\n});") .length === 1 && judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }, wakeGuards(b)));\n});").length === 0, '§49 NEGATIVE CONTROL: a planted side door with no guards is caught; the guarded spelling passes');
 });
@@ -2438,11 +2438,11 @@ await section(async () => {
   '§50 NEGATIVE CONTROL: a bare real-codex spawn is caught, the shared strip passes (scratch.mjs withoutVendorKeys or hub-boot.mjs strippedEnv, called), a reasoned declaration passes, a reason-less one does not, an imported strippedEnv never called does not');
   const { VENDOR_KEY_ENV, withoutVendorKeys } = await import(path.resolve('scripts/scratch.mjs'));
   const planted = withoutVendorKeys({ PATH: '/bin', OPENAI_API_KEY: 'a', CODEX_API_KEY: 'b', ANTHROPIC_API_KEY: 'c', ANTHROPIC_AUTH_TOKEN: 'd' });
-  ok(['OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].every((k) => VENDOR_KEY_ENV.includes(k) && !(k in planted)) && planted.PATH === '/bin',
+  ok(gateOf(['OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].every((k) => VENDOR_KEY_ENV.includes(k) && !(k in planted))) && planted.PATH === '/bin',
     '§50 withoutVendorKeys strips all four ambient credentials and keeps everything else');
   const { strippedEnv, DAEMON_ROOT_ENV: HB_DAEMON } = await import(path.resolve('scripts/hub-boot.mjs'));
   const planted2 = strippedEnv({ PATH: '/bin', OPENAI_API_KEY: 'a', CODEX_API_KEY: 'b', ANTHROPIC_API_KEY: 'c', ANTHROPIC_AUTH_TOKEN: 'd', VIBESPACE_DEVICE_ROOT: '/x', VIBESPACE_AGENTD_ROOT: '/y' });
-  ok(VENDOR_KEY_ENV.every((k) => !(k in planted2)) && HB_DAEMON.every((k) => !(k in planted2)) && planted2.PATH === '/bin',
+  ok(gateOf(VENDOR_KEY_ENV.every((k) => !(k in planted2))) && gateOf(HB_DAEMON.every((k) => !(k in planted2))) && planted2.PATH === '/bin',
     '§50 hub-boot.mjs strippedEnv strips every vendor key withoutVendorKeys strips AND both daemon roots, and keeps everything else');
 });
 
@@ -2489,17 +2489,17 @@ await section(async () => {
   };
   const files = fs.readdirSync('scripts').filter((f) => /^(test|probe|measure)-.*\.mjs$/.test(f) && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
   const sites = files.flatMap((f) => sitesIn(fs.readFileSync(f, 'utf8')).map((x) => ({ file: f, ...x })));
-  ok(sites.length >= 3 && sites.some((x) => x.file === 'scripts/test-queue-steer.mjs'), `§50b census scope is non-vacuous (${sites.length} real app-server spawn sites: ${sites.map((x) => x.file.replace('scripts/', '') + ':' + x.line).join(', ')})`);
+  ok(sites.length >= 3 && verdictOf(sites.some((x) => x.file === 'scripts/test-queue-steer.mjs')), `§50b census scope is non-vacuous (${sites.length} real app-server spawn sites: ${sites.map((x) => x.file.replace('scripts/', '') + ':' + x.line).join(', ')})`);
   const bad = sites.filter((x) => !x.pinned);
   ok(bad.length === 0, `§50b every real codex app-server child runs on a pinned CODEX_HOME (never the owner's ~/.codex)${bad.length ? ' — ' + bad.map((x) => `${x.file}:${x.line} ${x.text}`).join('; ') : ''}`);
   const leg6 = sitesIn(fs.readFileSync('scripts/test-queue-steer.mjs', 'utf8')).find((x) => /codex-chat-wrapper\.js'\), buf, sidecar/.test(x.text));
-  ok(leg6 && leg6.pinned, 'test-queue-steer ⑥ (the 676-trust-entries writer) is a site and pins CODEX_HOME');
+  ok(gateOf(leg6) && verdictOf(leg6.pinned), 'test-queue-steer ⑥ (the 676-trust-entries writer) is a site and pins CODEX_HOME');
   { // THE RETIRED BYTES: the census catches leg ⑥ exactly as it shipped (lane base b924041f)
     const r = spawnSync('git', ['show', 'b924041f:scripts/test-queue-steer.mjs'], { encoding: 'utf8', env: gitEnvFrom(process.env), maxBuffer: 64 * 1024 * 1024 });
     if (r.status !== 0) console.log(`  SKIP (LOUD): §50b retired-bytes control — git cannot read b924041f here (${(r.stderr || '').trim().slice(0, 80)})`);
     else {
       const old = sitesIn(r.stdout).find((x) => /codex-chat-wrapper\.js'\), buf, sidecar/.test(x.text));
-      ok(old && old.pinned === false, '§50b RETIRED-BYTES CONTROL: leg ⑥ as it shipped (b924041f, ambient CODEX_HOME) is caught by this census');
+      ok(gateOf(old) && old.pinned === false, '§50b RETIRED-BYTES CONTROL: leg ⑥ as it shipped (b924041f, ambient CODEX_HOME) is caught by this census');
     }
   }
   const ctl = (src) => sitesIn(src).map((x) => x.pinned);
@@ -2643,11 +2643,11 @@ await section(async () => {
     && judge(HDR + "await agentdBundle({ version, outfile: bundle });").length === 0
     // the round's three blind shapes (主开发 r641), each red by name: the running node's own path; an options object with a nested
     // object or a spread before its cwd; a package manager running a build script in the checkout (npm / execSync alike)
-    && /node -e .*cwd = the checkout/.test(judge(HDR + "execFileSync(process.execPath, ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'x')`], { cwd: REPO });").join(' '))
+    && gateOf(/node -e .*cwd = the checkout/.test(judge(HDR + "execFileSync(process.execPath, ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'x')`], { cwd: REPO });").join(' ')))
     && judge(HDR + "execFileSync('node', ['-e', `require('fs').writeFileSync('src/a.js', 'x')`], { env: { ...process.env, A: '1' }, cwd: REPO });").length === 1
     && judge(HDR + "execFileSync('node', ['-e', `require('fs').writeFileSync('src/a.js', 'x')`], { ...base, cwd: REPO });").length === 1
-    && /a build script, cwd = the checkout/.test(judge(HDR + "execFileSync('npm', ['run', 'build:agentd'], { cwd: REPO, stdio: 'ignore' });").join(' '))
-    && /a build script, cwd = the checkout/.test(judge(HDR + "execSync('npm run build', { cwd: REPO, stdio: 'ignore' });").join(' '))
+    && gateOf(/a build script, cwd = the checkout/.test(judge(HDR + "execFileSync('npm', ['run', 'build:agentd'], { cwd: REPO, stdio: 'ignore' });").join(' ')))
+    && gateOf(/a build script, cwd = the checkout/.test(judge(HDR + "execSync('npm run build', { cwd: REPO, stdio: 'ignore' });").join(' ')))
     && judge(HDR + "execFileSync('npm', ['run', 'build:agentd'], { cwd: COPY });\nexecFileSync('npm', ['test'], { cwd: REPO });\nexecFileSync(process.execPath, ['-e', 'console.log(1)'], { cwd: REPO });").length === 0,
   '§51 NEGATIVE CONTROL: the sibling shapes (dirname(rel), an in-tree dir variable, a direct join) are caught; a mutant-copy write, a scratch-root `src`, and the build-version stand-in are not; copyFileSync is judged by its DESTINATION (a copy out of src/ passes, a copy into src/ is caught)');
   // B-ba47's class (主开发 r561): THE BUNDLE A SUITE TESTS IS THE BUNDLE THAT SHIPS but for the stamp — scripts/agentd-bundle.mjs reads
@@ -2663,9 +2663,9 @@ await section(async () => {
   const why51 = (f) => { try { f(); return ''; } catch (e) { return String(e.message); } };
   const real51 = String(scripts51['build:agentd'] || '');
   const dropped51 = (() => { try { return AB51.buildPlan({ 'build:agentd': real51.replace('--external:xlsx ', '') }, 'src/agentd/agentd.js').options.external.join(','); } catch (e) { return 'threw: ' + e.message; } })();
-  ok(/esbuild flag --minify \(the step for src\/agentd\/agentd\.js\) has no mapping/.test(why51(() => AB51.buildPlan({ 'build:agentd': real51.replace('--preserve-symlinks', '--preserve-symlinks --minify') }, 'src/agentd/agentd.js')))
-    && /no esbuild step for src\/agentd\/nope\.js/.test(why51(() => AB51.buildPlan(scripts51, 'src/agentd/nope.js')))
-    && real51.includes('--external:xlsx ') && dropped51 === 'node-pty',
+  ok(gateOf(/esbuild flag --minify \(the step for src\/agentd\/agentd\.js\) has no mapping/.test(why51(() => AB51.buildPlan({ 'build:agentd': real51.replace('--preserve-symlinks', '--preserve-symlinks --minify') }, 'src/agentd/agentd.js'))))
+    && gateOf(/no esbuild step for src\/agentd\/nope\.js/.test(why51(() => AB51.buildPlan(scripts51, 'src/agentd/nope.js'))))
+    && gateOf(real51.includes('--external:xlsx ')) && dropped51 === 'node-pty',
     `§51 CONTROLS: a flag drifted into build:agentd (--minify) is red by name; an entry the build does not bundle is refused by name; an external dropped from the build drops from the plan (${dropped51}: read, never retyped)`);
   const gi = fs.readFileSync('.gitignore', 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   const hides = gi.filter((l) => /\*/.test(l) && /\.js$/.test(l) && (l.startsWith('src/') || !l.includes('/')));
@@ -2681,7 +2681,7 @@ await section(async () => {
     '§51 mutant-copy: a CJS copy of a module with relative requires loads, keeps every line number, and is written outside the checkout');
   const esm = M.write('src/lib/chat-view.js', fs.readFileSync('src/lib/chat-view.js', 'utf8'), 'as-is', { same: true });
   const eb = fs.readFileSync(esm, 'utf8');
-  ok(esm.endsWith('.mjs') && !/from\s*['"]\.\.?\//.test(eb) && /from "file:\/\//.test(eb),
+  ok(gateOf(esm.endsWith('.mjs')) && !/from\s*['"]\.\.?\//.test(eb) && verdictOf(/from "file:\/\//.test(eb)),
     '§51 mutant-copy: an ESM copy has every relative specifier rewritten to the real file\'s URL');
 });
 
@@ -2713,13 +2713,13 @@ await section(async () => {
   const tracked = new Map(ls.map((l) => { const m = /^(\d+) \S+ \d+\t(.+)$/.exec(l); return [path.basename(m[2]), m[1]]; }));
   const onDisk = fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => (/^vibespace-/.test(n) || n === 'vibespace' || n === 'agent-browser') && tracked.has(n));   // lane human-cli: `vibespace` = the person's CLI
   const execs = onDisk.filter((n) => (fs.statSync(path.join(REPO, 'data/bin', n)).mode & 0o111) !== 0);
-  ok(execs.length >= 15 && execs.includes('vibespace-browser'), `§52a census scope is non-vacuous (${execs.length} executable tracked tools)`);
+  ok(execs.length >= 15 && verdictOf(execs.includes('vibespace-browser')), `§52a census scope is non-vacuous (${execs.length} executable tracked tools)`);
   const missingFrom = (list) => execs.filter((n) => !list.includes(n) && !EXEMPT[n]);
   const missing = missingFrom(HostManager.AGENT_TOOLS);
   ok(missing.length === 0, `§52a every executable static tool ships to remote hosts (AGENT_TOOLS) — missing: ${missing.join(', ') || 'none'}`);
-  ok(HostManager.AGENT_TOOLS.includes('agent-browser') && fs.existsSync(path.join(REPO, 'data/bin/agent-browser')), '§52a the agent-browser SHIM is a shipped tool');
-  ok(HostManager.AGENT_TOOLS.includes('vibespace-browser-verbs.js'), '§52a the verb table the shipped vibespace-browser runs ships beside it');
-  ok(HostManager.AGENT_TOOLS.includes('agent-cli-text.js'), '§52a the ONE-text rule the four free-text CLIs require ships beside them (lane cli-one-text-arg)');
+  ok(gateOf(HostManager.AGENT_TOOLS.includes('agent-browser')) && verdictOf(fs.existsSync(path.join(REPO, 'data/bin/agent-browser'))), '§52a the agent-browser SHIM is a shipped tool');
+  ok(verdictOf(HostManager.AGENT_TOOLS.includes('vibespace-browser-verbs.js')), '§52a the verb table the shipped vibespace-browser runs ships beside it');
+  ok(verdictOf(HostManager.AGENT_TOOLS.includes('agent-cli-text.js')), '§52a the ONE-text rule the four free-text CLIs require ships beside them (lane cli-one-text-arg)');
   ok(JSON.stringify(missingFrom(HostManager.AGENT_TOOLS.filter((n) => n !== 'vibespace-browser'))) === '["vibespace-browser"]', '§52a NEGATIVE CONTROL: the list without vibespace-browser is reported missing exactly that tool');
 
   const acorn = require('acorn');
@@ -2739,17 +2739,17 @@ await section(async () => {
   const set2 = { attachments: [{ alias: 'work', isDefault: true, profileId: 'bp-00000001' }, { alias: 'personal', isDefault: false, profileId: 'bp-00000002' }] };
   const teaching = [ar.browserIntroLine('D'), ar.browserIntroLine('none'), ar.browserSetLine(set1), ar.browserSetLine(set2),
     ar.sessionToolsIntro(T, { browserVariant: 'D' }), ar.sessionToolsIntro(T, { browserVariant: 'none' })];
-  ok(teaching.every((t) => t.length > 50) && /vibespace-browser/.test(teaching[0]), '§52b the teaching scope is non-vacuous (both variants, the set line, the whole intro)');
+  ok(gateOf(teaching.every((t) => t.length > 50)) && verdictOf(/vibespace-browser/.test(teaching[0])), '§52b the teaching scope is non-vacuous (both variants, the set line, the whole intro)');
   const teachHits = teaching.reduce((n, t) => n + count(t), 0);
   ok(teachHits === 0, `§52b the teaching lines never name the hidden CLI (${teachHits} occurrence(s))`);
   const docs = fs.readdirSync(path.join(REPO, 'docs/agent')).filter((f) => f.endsWith('.md'));
-  ok(docs.length >= 10 && docs.includes('browser-manual.md') && docs.includes('web-access-skill.md'), `§52b the manual scope is non-vacuous (${docs.length} docs/agent/*.md, the browser manual and the skill text among them)`);
+  ok(docs.length >= 10 && gateOf(docs.includes('browser-manual.md')) && verdictOf(docs.includes('web-access-skill.md')), `§52b the manual scope is non-vacuous (${docs.length} docs/agent/*.md, the browser manual and the skill text among them)`);
   const docHits = docs.map((f) => [f, count(fs.readFileSync(path.join(REPO, 'docs/agent', f), 'utf8'))]).filter(([, n]) => n);
   ok(docHits.length === 0, `§52b docs/agent/*.md never name the hidden CLI (${docHits.map(([f, n]) => f + ':' + n).join(', ') || 'none'})`);
   // r2 (finding 4): EVERY tracked agent CLI (data/bin/vibespace-*, the index's own list — the design's I5
   // names them all), not a hand-picked two; the two browser CLIs keep their non-vacuity floor
   const cliFiles = onDisk.filter((n) => /^vibespace-/.test(n)).map((n) => 'data/bin/' + n);
-  ok(cliFiles.length >= 15 && cliFiles.includes('data/bin/vibespace-browser') && cliFiles.includes('data/bin/vibespace-window'), `§52b r2 the agent-CLI scope is the tracked census (${cliFiles.length} data/bin/vibespace-* files)`);
+  ok(cliFiles.length >= 15 && gateOf(cliFiles.includes('data/bin/vibespace-browser')) && verdictOf(cliFiles.includes('data/bin/vibespace-window')), `§52b r2 the agent-CLI scope is the tracked census (${cliFiles.length} data/bin/vibespace-* files)`);
   for (const f of cliFiles) {
     const src = fs.readFileSync(path.join(REPO, f), 'utf8');
     const lits = f.endsWith('.mjs') ? literalsOfModule(src) : literalsOf(src);
@@ -2780,7 +2780,7 @@ await section(async () => {
     ...ROUTE_PURE,
   ].sort();
   const ROUTE_FILES = routeScope(fs.readdirSync(path.join(REPO, 'src/routes')), fs.readdirSync(path.join(REPO, 'src/server')));
-  ok(['src/routes/browser.js', 'src/routes/window-targets.js', 'src/routes/browser-trace.js', 'src/server/browser-keeper.js', 'src/server/window-targets-engine.js', 'src/server/browser-trace.js', 'src/server/browser-stream.js', 'src/server/browser-env.js'].every((f) => ROUTE_FILES.includes(f)) && ROUTE_FILES.length >= 20,
+  ok(gateOf(['src/routes/browser.js', 'src/routes/window-targets.js', 'src/routes/browser-trace.js', 'src/server/browser-keeper.js', 'src/server/window-targets-engine.js', 'src/server/browser-trace.js', 'src/server/browser-stream.js', 'src/server/browser-env.js'].every((f) => ROUTE_FILES.includes(f))) && ROUTE_FILES.length >= 20,
     `§52b r3 the route/engine scope is the glob (every src/routes/*.js + src/server/{browser,window}-*.js + ${ROUTE_PURE.length} PURE modules: ${ROUTE_FILES.length} files), r2's nine included`);
   ok(routeScope(['browser.js', 'zzz-r3probe.js'], ['browser-zzz.js', 'window-zzz.js', 'other.js']).join() === ['src/browser-profiles.js', 'src/browser-serve.js', 'src/browser-switch.js', 'src/routes/browser.js', 'src/routes/zzz-r3probe.js', 'src/server/browser-zzz.js', 'src/server/window-zzz.js'].join(),
     '§52b r3 NEGATIVE CONTROL: a NEW route module and a NEW browser/window engine module enter the scope by existing (the verifier\'s zzz-r3probe.js shape)');
@@ -2819,7 +2819,7 @@ await section(async () => {
     const hits = routeHitsOf(f, src);
     ok(hits.length === 0, `§52b r1 ${f}'s string literals (route errors, remedies, ways out, labels) never name the hidden CLI (${hits.map((h) => JSON.stringify(h.slice(0, 70))).join(', ') || 'none'})`);
   }
-  ok(routeLits > 400 && Object.entries(USER_ONLY_FNS).every(([f, fns]) => fnSpans(read(f), fns).length === fns.length), `§52b r1 the route-string scope is non-vacuous (${routeLits} literals) and every user-only exception still exists (as a function the parser finds)`);
+  ok(routeLits > 400 && verdictOf(Object.entries(USER_ONLY_FNS).every(([f, fns]) => fnSpans(read(f), fns).length === fns.length)), `§52b r1 the route-string scope is non-vacuous (${routeLits} literals) and every user-only exception still exists (as a function the parser finds)`);
   {
     // r3: the exception is the FUNCTION, not the file — the same sentence outside `journal` is caught
     const esrc = read('src/server/browser-env.js');
@@ -2879,14 +2879,14 @@ await section(async () => {
   const occ = (needle) => occIn(texts, needle);
   const o16 = occ(BL16), o24 = occ(BL24);
   ok(libs.length > 100 && o16.length === 1 && o16[0][0] === 'icons.js' && o16[0][1] === 1, `§53 the 16-grid browser-live glyph is defined ONCE, in icons.js (${JSON.stringify(o16)})`);
-  ok(/^\s*browserLive:\s*_s\('/m.test(read('src/lib/icons.js')), '§53 …as UI_ICONS.browserLive through `_s()` (aria-hidden + focusable=false like every icon)');
-  ok(o24.length === 1 && o24[0][0] === 'sidebar-rail.js' && o24[0][1] === 1 && /^\s*browser: R\('<rect x="3" y="5"/m.test(read('src/lib/sidebar-rail.js')), `§53 the 24-grid rail variant is RAIL_ICONS.browser, once (${JSON.stringify(o24)})`);
+  ok(verdictOf(/^\s*browserLive:\s*_s\('/m.test(read('src/lib/icons.js'))), '§53 …as UI_ICONS.browserLive through `_s()` (aria-hidden + focusable=false like every icon)');
+  ok(o24.length === 1 && o24[0][0] === 'sidebar-rail.js' && o24[0][1] === 1 && verdictOf(/^\s*browser: R\('<rect x="3" y="5"/m.test(read('src/lib/sidebar-rail.js'))), `§53 the 24-grid rail variant is RAIL_ICONS.browser, once (${JSON.stringify(o24)})`);
   const users = libs.filter((f) => /UI_ICONS\.browserLive\b/.test(fs.readFileSync(path.join(libDir, f), 'utf8'))).sort();
   // (the session card's menu renders text rows only — showContextMenu draws no `icon` — so the card menu carries the NAME, not the glyph)
-  ok(['browser-live-window.js', 'browser-trace-view.js', 'chat-status-bar.js', 'mobile-nav.js'].every((f) => users.includes(f)), `§53 its consumers read the one definition (${users.join(' ')})`);
+  ok(verdictOf(['browser-live-window.js', 'browser-trace-view.js', 'chat-status-bar.js', 'mobile-nav.js'].every((f) => users.includes(f))), `§53 its consumers read the one definition (${users.join(' ')})`);
   // NEGATIVE CONTROL: a planted second copy in a scratch listing is counted
   const planted = occIn({ ...texts, 'browser-live-window.js': texts['browser-live-window.js'] + `\nconst COPY = svgIcon16('${BL16}');` }, BL16);
-  ok(planted.length === 2 && planted.some(([f]) => f === 'browser-live-window.js'), `§53 NEGATIVE CONTROL: the pre-rename shape (a local svgIcon16 copy in browser-live-window.js) planted into a patched listing is caught (${JSON.stringify(planted)})`);
+  ok(planted.length === 2 && verdictOf(planted.some(([f]) => f === 'browser-live-window.js')), `§53 NEGATIVE CONTROL: the pre-rename shape (a local svgIcon16 copy in browser-live-window.js) planted into a patched listing is caught (${JSON.stringify(planted)})`);
 });
 
 // §54 (2026-09-25, the Chrome desktop-app incident + the owner's ruling "这个keeper到底是干啥的，没必要别乱加会影响
@@ -2981,7 +2981,7 @@ await section(async () => {
     return out;
   };
   ok(Object.keys(offenders(code)).length === 0, `§54b no report-only keeper stops, retires, parks or writes a store for a resource — structurally (${JSON.stringify(offenders(code))})`);
-  ok(['src/server/desktop-app-keeper.js', 'src/server/browser-keeper.js'].every((f) => { const b = sampledBlock(code[f]); return b && b.text.length > 400 && /\bRG\.reportTransition\(/.test(b.text) && /\bserverNotice\?\.\(/.test(b.text); }), '§54b CONTROL setup: both sampled blocks are found and carry the report level + the notice');
+  ok(verdictOf(['src/server/desktop-app-keeper.js', 'src/server/browser-keeper.js'].every((f) => { const b = sampledBlock(code[f]); return b && b.text.length > 400 && /\bRG\.reportTransition\(/.test(b.text) && /\bserverNotice\?\.\(/.test(b.text); })), '§54b CONTROL setup: both sampled blocks are found and carry the report level + the notice');
   const PLANTS = [
     ['lvl.fire stop with why: v.over', 'if (lvl.fire) stop(rec.id, { why: v.over }).catch(() => { });'],
     ["why: 'over-limit'", "if (v.over) stop(rec.id, { why: 'over-limit' }).catch(() => { });"],
@@ -2994,19 +2994,19 @@ await section(async () => {
   ];
   const plantIn = (f, stmt) => { const t = code[f], b = sampledBlock(t); return { ...code, [f]: t.slice(0, b.end) + stmt + '\n        ' + t.slice(b.end) }; };
   const caughtIn = PLANTS.map(([n, stmt]) => [n, ['src/server/desktop-app-keeper.js', 'src/server/browser-keeper.js'].every((f) => Object.keys(offenders(plantIn(f, stmt))).includes(f))]);
-  ok(caughtIn.every(([, c]) => c), `§54b NEGATIVE CONTROL: all ${PLANTS.length} planted spellings INSIDE the sampled block are caught in both keepers (${JSON.stringify(caughtIn.filter(([, c]) => !c))})`);
+  ok(verdictOf(caughtIn.every(([, c]) => c)), `§54b NEGATIVE CONTROL: all ${PLANTS.length} planted spellings INSIDE the sampled block are caught in both keepers (${JSON.stringify(caughtIn.filter(([, c]) => !c))})`);
   const plantEnd = (f, stmt) => ({ ...code, [f]: code[f] + '\n' + stmt });
   const caughtEnd = PLANTS.slice(0, 5).map(([n, stmt]) => [n, Object.keys(offenders(plantEnd('src/server/desktop-app-keeper.js', stmt))).includes('src/server/desktop-app-keeper.js')]);
-  ok(caughtEnd.every(([, c]) => c), `§54b NEGATIVE CONTROL: the stop / park spellings OUTSIDE the block (a later reader of the verdict, an unlisted why, a bare stop) are caught too (${JSON.stringify(caughtEnd.filter(([, c]) => !c))})`);
+  ok(verdictOf(caughtEnd.every(([, c]) => c)), `§54b NEGATIVE CONTROL: the stop / park spellings OUTSIDE the block (a later reader of the verdict, an unlisted why, a bare stop) are caught too (${JSON.stringify(caughtEnd.filter(([, c]) => !c))})`);
   const plantStored = plantEnd('src/server/browser-keeper.js', "function sweepHot() { for (const [id, l] of live) if (l.over) stop(id, { why: 'idle' }); }");
-  ok(Object.keys(offenders(plantStored)).includes('src/server/browser-keeper.js'), '§54b NEGATIVE CONTROL: a later sweep that stops on the STORED live row\'s `over` (with an allow-listed why) is caught');
-  ok(/if \(why\) parkRunaway\(why\)/.test(code['src/opencode-serve.js']) && /const why = v\.over;/.test(code['src/opencode-serve.js']), '§54b the headless serve alone stops + parks, on the verdict\'s `over`');
+  ok(verdictOf(Object.keys(offenders(plantStored)).includes('src/server/browser-keeper.js')), '§54b NEGATIVE CONTROL: a later sweep that stops on the STORED live row\'s `over` (with an allow-listed why) is caught');
+  ok(gateOf(/if \(why\) parkRunaway\(why\)/.test(code['src/opencode-serve.js'])) && verdictOf(/const why = v\.over;/.test(code['src/opencode-serve.js'])), '§54b the headless serve alone stops + parks, on the verdict\'s `over`');
   const parkReaders = files.filter((f) => /\brunawayParkedUntil\b/.test(code[f])).sort();
   ok(JSON.stringify(parkReaders) === JSON.stringify(['src/server/migrations.js']), `§54b the park map lives on only in the migration that voids it (${JSON.stringify(parkReaders)})`);
-  ok(/\bRG\.reportTransition\(/.test(code['src/server/desktop-app-keeper.js']) && /\bRG\.reportTransition\(/.test(code['src/server/browser-keeper.js']), '§54b both report-only keepers route `over` through the report level (a notice when a crossing begins — hysteresis + floor + delivery in runaway-guard.reportTransition)');
+  ok(gateOf(/\bRG\.reportTransition\(/.test(code['src/server/desktop-app-keeper.js'])) && verdictOf(/\bRG\.reportTransition\(/.test(code['src/server/browser-keeper.js'])), '§54b both report-only keepers route `over` through the report level (a notice when a crossing begins — hysteresis + floor + delivery in runaway-guard.reportTransition)');
   const plantStop = { ...code, 'src/server/desktop-app-keeper.js': code['src/server/desktop-app-keeper.js'] + "\nstop(rec.id, { why: 'runaway' });" };
   const PARK = /\brunaway(?:Parked)?Until\b|\bparkRunaway\b|\bParkedUntil\b/;
-  ok(Object.keys(offenders(plantStop)).includes('src/server/desktop-app-keeper.js') && !PARK.test(code['src/server/browser-keeper.js']) && !PARK.test(code['src/server/desktop-app-keeper.js']), '§54b NEGATIVE CONTROL: the pre-fix spelling (why: \'runaway\') is caught, and the old park names are spoken by neither report-only keeper');
+  ok(gateOf(Object.keys(offenders(plantStop)).includes('src/server/desktop-app-keeper.js')) && !PARK.test(code['src/server/browser-keeper.js']) && !PARK.test(code['src/server/desktop-app-keeper.js']), '§54b NEGATIVE CONTROL: the pre-fix spelling (why: \'runaway\') is caught, and the old park names are spoken by neither report-only keeper');
 });
 
 // §55 A SUITE THAT KILLS A WRAPPER WAITS FOR ITS EXIT BEFORE REMOVING ITS DIR
@@ -3082,7 +3082,7 @@ await section(async () => {
     `R({ hostId: 'a', connected: true, capabilities: ['desktop-serve'], platform: 'linux' })`,
     `argv: ['opencode', 'serve']`,
   ];
-  ok(planted.every((l) => TAIL.test(l)) && !clean.some((l) => TAIL.test(l)), `§56 NEGATIVE CONTROL: the four tail spellings (regex both quotes, esbuild's string, a template) are caught; the by-content regex, a stub capability array and a plain argv are not (${JSON.stringify(planted.filter((l) => !TAIL.test(l)).concat(clean.filter((l) => TAIL.test(l))))})`);
+  ok(gateOf(planted.every((l) => TAIL.test(l))) && !clean.some((l) => TAIL.test(l)), `§56 NEGATIVE CONTROL: the four tail spellings (regex both quotes, esbuild's string, a template) are caught; the by-content regex, a stub capability array and a plain argv are not (${JSON.stringify(planted.filter((l) => !TAIL.test(l)).concat(clean.filter((l) => TAIL.test(l))))})`);
 });
 
 // §57 NO SCRATCH SERVER CLAIMS THE SINGLETON DESKTOP'S :7 / 5901 (2026-09-25 — the heavy RED on 69720f2b:
@@ -3137,7 +3137,7 @@ await section(async () => {
   const suites = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f)).sort();
   const scope = [], bad = [];
   for (const f of suites) { const r = judge(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')); if (!r.spawns) continue; scope.push(f); for (const x of r.findings) bad.push(`${f} ${x}`); }
-  ok(scope.length >= 50 && scope.includes('test-desktop-app-window.mjs'), `§57 census scope is non-vacuous (${scope.length} suites spawn server.js, the incident's suite among them)`);
+  ok(scope.length >= 50 && verdictOf(scope.includes('test-desktop-app-window.mjs')), `§57 census scope is non-vacuous (${scope.length} suites spawn server.js, the incident's suite among them)`);
   ok(bad.length === 0, `§57 every server.js spawn carries the per-run singleton-Desktop names${bad.length ? ' — ' + bad.join(' | ') : ''}`);
   // §57b B-442c (2026-10-02, the 16:23 OOM that stopped the production service): A SUITE THAT BOOTS A SCRATCH SERVER ENDS WHAT
   // THAT SERVER STARTED — scratch.mjs endRootedProcesses (cwd / HOME / the daemon's own VIBESPACE_*_ROOT / argv), called by the
@@ -3169,13 +3169,13 @@ await section(async () => {
   const endsVia = (t) => endsIn(t) || harnesses.some((h) => new RegExp(`from\\s+['"]\\./${h.replace('.', '\\.')}['"]`).test(t));
   const noEnd = scope.filter((f) => !endsVia(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')));
   const fresh = noEnd.filter((f) => !ENDS_DEBT.has(f)), stale = [...ENDS_DEBT].filter((f) => !noEnd.includes(f));
-  ok(harnesses.includes('pairing-ui-harness.mjs') && scope.includes('test-restore-liveness.mjs') && !noEnd.includes('test-restore-liveness.mjs'),
+  ok(gateOf(harnesses.includes('pairing-ui-harness.mjs')) && gateOf(scope.includes('test-restore-liveness.mjs')) && !noEnd.includes('test-restore-liveness.mjs'),
     `§57b the census reads harnesses (${harnesses.length}: ${harnesses.join(', ')}) and the incident's suite (test-restore-liveness) ends what its servers started`);
   ok(fresh.length === 0, `§57b every server-booting suite ends what its server started (scratch.mjs endRootedProcesses)${fresh.length ? ' — NEW without it: ' + fresh.join(' ') : ''} (${noEnd.length} named debt)`);
   ok(stale.length === 0, `§57b the debt list only shrinks${stale.length ? ' — complies now or gone, REMOVE from ENDS_DEBT: ' + stale.join(' ') : ''}`);
   // NEGATIVE CONTROLS: a spawn with vncEnv and no end is named; an end spelled only in a comment or a string still is; a harness import is not
   const fake = (body) => `import { vncEnv } from './scratch.mjs';\nconst c = spawn(process.execPath, ['server.js'], { env: { ...(await vncEnv()) } });\n${body}\n`;
-  ok(!endsVia(fake('')) && !endsVia(fake('// endRootedProcesses(ROOT)')) && !endsVia(fake("const s = 'endRootedProcesses(ROOT)';")) && endsVia(fake('endRootedProcesses(ROOT);')) && endsVia(fake("import { h } from './pairing-ui-harness.mjs';")),
+  ok(!endsVia(fake('')) && !endsVia(fake('// endRootedProcesses(ROOT)')) && !endsVia(fake("const s = 'endRootedProcesses(ROOT)';")) && gateOf(endsVia(fake('endRootedProcesses(ROOT);'))) && verdictOf(endsVia(fake("import { h } from './pairing-ui-harness.mjs';"))),
     '§57b NEGATIVE CONTROLS: no end / an end in a comment / in a string are named; a real call or a harness import passes');
   // §57b end
   // NEGATIVE CONTROLS: the incident's own pre-fix shape (a named env, no names), an inline env, a spawn with NO env,
@@ -3275,7 +3275,7 @@ await section(async () => {
   // suites (test-deliveries-resume-hub, test-resume-pages-follow-chrome) through startHub: a new name needs the coordinator's word
   const BOOTS_NAMED = Object.freeze({});
   const nBoots = Object.entries(bootsIn).filter(([f]) => !BOOTS_NAMED[f]).reduce((a, [, n]) => a + n, 0);
-  ok(Object.keys(BOOTS_NAMED).every((f) => bootsIn[f] === 1), `§57c a suite carried by name still boots once outside the helper — a re-pointed one leaves BOOTS_NAMED in the same commit (${Object.keys(BOOTS_NAMED).map((f) => `${f}: ${bootsIn[f] || 0}`).join(', ')})`);
+  ok(verdictOf(Object.keys(BOOTS_NAMED).every((f) => bootsIn[f] === 1)), `§57c a suite carried by name still boots once outside the helper — a re-pointed one leaves BOOTS_NAMED in the same commit (${Object.keys(BOOTS_NAMED).map((f) => `${f}: ${bootsIn[f] || 0}`).join(', ')})`);
   console.log(`    §57c hub boots outside the helper: ${nBoots} sites in ${Object.keys(bootsIn).length} files (${Object.keys(bootsIn).filter((f) => !/^test-/.test(f)).join(', ')} among them)`);
   ok(nBoots <= BOOTS_OUTSIDE_HELPER, `§57c no NEW hub boot outside scripts/hub-boot.mjs (${nBoots} sites, the ratchet ${BOOTS_OUTSIDE_HELPER})${nBoots > BOOTS_OUTSIDE_HELPER ? ' — boot the hub through hub-boot.mjs startHub' : ''}`);
   ok(nBoots >= BOOTS_OUTSIDE_HELPER, `§57c the ratchet only falls and is lowered with the fall (${nBoots} sites, the ratchet ${BOOTS_OUTSIDE_HELPER})${nBoots < BOOTS_OUTSIDE_HELPER ? ` — lower BOOTS_OUTSIDE_HELPER to ${nBoots} in the same commit` : ''}`);
@@ -3290,7 +3290,7 @@ await section(async () => {
     direct: "spawn(process.execPath, ['server.js'], {})", preload: "spawn('node', ['-r', pre, 'server.js'])", joined: "fork(process.execPath, [path.join(wt, 'server.js')])", launcher: "spawn(DBUS, ['--', process.execPath, 'server.js'], {})", patched: "spawn(process.execPath, [MC.write('server.js', src, 'x')], {})" };
   const notBoots = { comment: "// spawn(process.execPath, ['server.js'])", string: "const ctl = \"spawn('node', ['server.js'])\";", fixture: "const FIX = `const srv = spawnSync(process.execPath, [SRV]);\nconst SRV = path.join(wt, 'server.js');`;",
     otherProgram: "const SRV = path.join(wt, 'server.js');\nexecFileSync('git', ['log', SRV]);", otherNode: "const HUB = path.join(sdir, 'hub.cjs');\nspawn(process.execPath, [HUB, jobsJs]);", method: "child.spawn(process.execPath, ['server.js']);", otherApi: "import pty from 'node-pty';\npty.spawn(process.execPath, ['server.js']);", copy: "for (const f of ['src', 'server.js']) cp(f);", git: "execFileSync('git', ['ls-files', 'server.js'])" };
-  ok(Object.values(forms).every((v) => bootsOf(v) === 1) && Object.values(notBoots).every((v) => bootsOf(v) === 0) && judge(forms.patched).spawns === 0,
+  ok(gateOf(Object.values(forms).every((v) => bootsOf(v) === 1)) && gateOf(Object.values(notBoots).every((v) => bootsOf(v) === 0)) && judge(forms.patched).spawns === 0,
     `§57c the rule reads every boot form (${Object.keys(forms).join(', ')} — a constant naming the server file, a launcher, the sync forms, a command string, the patched copy) and no comment, fixture string, copy list, git argument, other node script or another API's spawn`);
   // §57d RULE NINE (主开发 2026-11-17 10:04Z): a suite on the boot helper calls NO rooted end of its own — the helper IS the rooted
   // end (it ends a process by the HOME / daemon root it handed out, by start time, never reading one in an uninterruptible wait);
@@ -3307,10 +3307,10 @@ await section(async () => {
   const onHelperN = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && onHelperSrc(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))).length;
   ok(onHelperN >= 54 && bothEnds.length === 0, `§57d no suite on the boot helper (${onHelperN}; the floor 54 = test-chat-e2e, test-hub-boot, batch 1's twenty, batch 2's thirty-one and test-ui-fit-chrome — on the helper since 2.369.410, under rule nine since restack-411) calls or imports an old rooted end (endRootedProcesses / endDaemonsOf / endDaemonsAndWait) — the helper IS the rooted end${bothEnds.length ? ' — ' + bothEnds.join(', ') : ''}`);
   const hbImp = "import { mintRoot, startHub } from './hub-boot.mjs';\n";
-  ok(callsOldEnd(hbImp + 'try { endRootedProcesses(chromeDir); } catch {}') && callsOldEnd(hbImp + 'endDaemonsOf(dev);') && callsOldEnd(hbImp + 'await endDaemonsAndWait(dev);')
-    && callsOldEnd(hbImp + "import { freePorts, endRootedProcesses as endAllOf } from './scratch.mjs';\nendAllOf(dir);")
+  ok(gateOf(callsOldEnd(hbImp + 'try { endRootedProcesses(chromeDir); } catch {}')) && gateOf(callsOldEnd(hbImp + 'endDaemonsOf(dev);')) && gateOf(callsOldEnd(hbImp + 'await endDaemonsAndWait(dev);'))
+    && gateOf(callsOldEnd(hbImp + "import { freePorts, endRootedProcesses as endAllOf } from './scratch.mjs';\nendAllOf(dir);"))
     && !callsOldEnd(hbImp + '// endRootedProcesses(chromeDir)') && !callsOldEnd(hbImp + "const s = 'endRootedProcesses(x)';") && !callsOldEnd(hbImp + "import { freePorts, vncEnv } from './scratch.mjs';")
-    && onHelperSrc(hbImp) && !onHelperSrc("const FIX = `import { mintRoot } from './hub-boot.mjs';`;") && !onHelperSrc("import { endRootedProcesses } from './scratch.mjs';"),
+    && gateOf(onHelperSrc(hbImp)) && !onHelperSrc("const FIX = `import { mintRoot } from './hub-boot.mjs';`;") && !onHelperSrc("import { endRootedProcesses } from './scratch.mjs';"),
     '§57d CONTROLS: a call of any of the three old ends is caught, and so is an IMPORT of one under an alias (the planted `endRootedProcesses as endAllOf`); one in a comment or a string is not, a scratch import of other names is not, and a fixture string naming the helper is no suite on it');
 });
 
@@ -3340,7 +3340,7 @@ await section(async () => {
   const bad = misses(texts);
   ok(bad.length === 0, `§58 every icon reference resolves${bad.length ? ' — ' + bad.join(' | ') : ''}`);
   const planted = misses({ ...texts, 'src/lib/browser-live-window.js': texts['src/lib/browser-live-window.js'] + "\nopenBtn.innerHTML = UI_ICONS.web;\nx.innerHTML = UI_ICONS['nope'];" });
-  ok(planted.length === 2 && planted.every((p) => p.startsWith('src/lib/browser-live-window.js:')), `§58 NEGATIVE CONTROL: the shipped miss (UI_ICONS.web) and a bracket miss planted into a patched listing are both caught (${planted.join(' | ')})`);
+  ok(planted.length === 2 && verdictOf(planted.every((p) => p.startsWith('src/lib/browser-live-window.js:'))), `§58 NEGATIVE CONTROL: the shipped miss (UI_ICONS.web) and a bracket miss planted into a patched listing are both caught (${planted.join(' | ')})`);
 });
 
 // §59 ONE OUTSIDE-PRESS CLOSER (lane M, inc-muhms5kt-0ejl — the owner: "vibespace中的悬浮菜单，不相应在app画面里的点击
@@ -3398,13 +3398,13 @@ await section(async () => {
   const U = code['src/lib/utils.js'];
   const h0 = U.indexOf('export function onOutsidePress('), h1 = U.indexOf('export function attachPopoverClose(');
   const helper = h0 >= 0 && h1 > h0 ? U.slice(h0, h1) : '';
-  ok(!!helper && /const o = \{ capture: true, passive: true, signal: ctl\.signal \};/.test(helper) && /document\.addEventListener\('pointerdown', \(e\) => \{/.test(helper), '§59c onOutsidePress arms document pointerdown with { capture: true, passive: true, signal } (the `o` the (b) rule admits)');
+  ok(!!helper && gateOf(/const o = \{ capture: true, passive: true, signal: ctl\.signal \};/.test(helper)) && verdictOf(/document\.addEventListener\('pointerdown', \(e\) => \{/.test(helper)), '§59c onOutsidePress arms document pointerdown with { capture: true, passive: true, signal } (the `o` the (b) rule admits)');
   ok(!!helper && !/preventDefault|stopPropagation|stopImmediatePropagation/.test(helper), '§59c …and its body calls neither preventDefault nor stopPropagation (the press still reaches the app)');
   const apc = (() => { const a = U.indexOf('export function attachPopoverClose('); const b = a >= 0 ? U.indexOf('\n}\n', a) : -1; return a >= 0 && b > a ? U.slice(a, b) : ''; })();
-  ok(/export function attachPopoverClose\(popover, \.\.\.excludeEls\) \{/.test(apc) && /const dispose = onOutsidePress\(popover, \(\) => popover\.remove\(\), \{ exclude: excludeEls \}\);/.test(apc) && /return dispose;/.test(apc) && !/addEventListener|setTimeout/.test(apc), '§59c attachPopoverClose (createPopover / showContextMenu / the hand-built menus) is the helper, not a second closer (it only stamps lane K\'s ownership fields — `_closeExclude` the live list the helper reads, `_closeCtl` the disposer)');
+  ok(gateOf(/export function attachPopoverClose\(popover, \.\.\.excludeEls\) \{/.test(apc)) && gateOf(/const dispose = onOutsidePress\(popover, \(\) => popover\.remove\(\), \{ exclude: excludeEls \}\);/.test(apc)) && gateOf(/return dispose;/.test(apc)) && !/addEventListener|setTimeout/.test(apc), '§59c attachPopoverClose (createPopover / showContextMenu / the hand-built menus) is the helper, not a second closer (it only stamps lane K\'s ownership fields — `_closeExclude` the live list the helper reads, `_closeCtl` the disposer)');
   const users = files.filter((f) => f !== 'src/lib/utils.js' && /\bonOutsidePress\(/.test(code[f])).sort();
   const WANT = ['src/lib/chat-input.js', 'src/lib/chat-renderers.js', 'src/lib/chat-status-bar.js', 'src/lib/chat-view.js', 'src/lib/customize-mode.js', 'src/lib/mobile-nav.js', 'src/lib/usage-meter.js', 'src/lib/user-todos-panel.js'];
-  ok(WANT.every((f) => users.includes(f)), `§59 the eight hand-built closers route through it (${users.map((f) => f.replace('src/lib/', '')).join(' ')})`);
+  ok(verdictOf(WANT.every((f) => users.includes(f))), `§59 the eight hand-built closers route through it (${users.map((f) => f.replace('src/lib/', '')).join(' ')})`);
   // NEGATIVE CONTROLS over a patched listing (nothing written): the pre-lane closer shapes are caught
   const plant = (f, add) => census({ ...code, [f]: code[f] + '\n' + add });
   const c1 = plant('src/lib/chat-status-bar.js', "setTimeout(() => document.addEventListener('mousedown', close), 0);");
@@ -3438,19 +3438,19 @@ await section(async () => {
   const wc = read('src/ws-create.js');
   const r6Block = (src) => { const a = src.indexOf('const r6Pairs = ['); const b = a < 0 ? -1 : src.indexOf('...spawnEnvPairs,', a); return a >= 0 && b > a ? src.slice(a, b) : ''; };
   const judgeLocal = (src) => /`VIBESPACE_SESSION_CWD=\$\{spawnCwd\}`/.test(r6Block(src)) && /sessionSpawnLine\(\{[^}]*pairs: r6Pairs/.test(src) && /openPipeSession\(\{[^}]*args: r6Argv\.slice\(1\)/.test(src) && /pty\.spawn\(DTACH_CMD, \[[^\]]*\.\.\.r6Argv\]/.test(src);
-  ok(judgeLocal(wc), '§60a the LOCAL line (r6Pairs → sessionSpawnLine — run by the dtach spawn AND the R6 daemon pipe) exports VIBESPACE_SESSION_CWD=${spawnCwd} in its env');
+  ok(verdictOf(judgeLocal(wc)), '§60a the LOCAL line (r6Pairs → sessionSpawnLine — run by the dtach spawn AND the R6 daemon pipe) exports VIBESPACE_SESSION_CWD=${spawnCwd} in its env');
   ok(!judgeLocal(wc.replace('`VIBESPACE_SESSION_CWD=${spawnCwd}`', '`VIBESPACE_SESSION_CWDX=${spawnCwd}`')) && !judgeLocal(wc.replace('args: r6Argv.slice(1)', 'args: otherArgv.slice(1)')), '§60a NEGATIVE CONTROL: a local argv without the pair, or an R6 pipe that stops running r6Argv, is caught');
   const RS = req('../src/remote-shell.js');
   const shq = (x) => `'${String(x).replace(/'/g, `'"'"'`)}'`;
   const exported = (line) => line.includes(`VIBESPACE_SESSION_CWD=${shq('/w x')}; export VIBESPACE_SESSION_CWD; `) && line.indexOf('VIBESPACE_SESSION_CWD=') < line.indexOf('exec env ');
   const line = RS.buildRemoteExec({ cwd: '/w x', shq, parts: ['a'] });
-  ok(exported(line) && exported(RS.buildRemoteExec({ cwd: '/w x', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' })), '§60a buildRemoteExec (every remote builder) exports the session cwd before the exec — the tail (keeper) form too');
+  ok(gateOf(exported(line)) && verdictOf(exported(RS.buildRemoteExec({ cwd: '/w x', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' }))), '§60a buildRemoteExec (every remote builder) exports the session cwd before the exec — the tail (keeper) form too');
   ok(!exported(line.replace(RS.sessionCwdExport('/w x', shq), '')), '§60a NEGATIVE CONTROL: the pre-r5 remote line (no export) is caught');
   ok((readCreatePath().match(/buildRemoteExec\(\{/g) || []).length === 5 && (readCreatePath().match(/VIBESPACE_SESSION_CWD=/g) || []).length === 1, `§60a all five remote builders compose buildRemoteExec and the create path (ws-create + src/spawn/) spells the variable once — the local pair (${(readCreatePath().match(/buildRemoteExec\(\{/g) || []).length} builders, ${(readCreatePath().match(/VIBESPACE_SESSION_CWD=/g) || []).length} spelling)`);
   const cli = read('data/bin/vibespace-browser');
   const fnBody = (src, name) => { const a = src.indexOf(`function ${name}(`); if (a < 0) return ''; let d = 0; for (let i = src.indexOf('{', a); i >= 0 && i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) return src.slice(a, i + 1); } return ''; };
   const judgeCli = (src) => { const sr = fnBody(src, 'sessionRoot'); return sr.includes('process.env.VIBESPACE_SESSION_CWD') && sr.includes('process.env.VIBESPACE_JOB_CWD') && !/process\.cwd\(\)/.test(sr) && /spawn\(bin\.path, argv, \{[^}]*\bcwd: runCwd\.dir/.test(src) && /const argv = closeAllScoped \? framed\.argv\.filter\(\(x\) => x !== '--all'\) : \[\.\.\.framed\.argv\];/.test(src) && /writeRefusal\(framed\.writes\)/.test(src); };
-  ok(judgeCli(cli), '§60b the CLI fences writes to VIBESPACE_SESSION_CWD (a job: VIBESPACE_JOB_CWD — accept-fixes-jobs F6) only (never process.cwd()), re-judges and hands the IN-FRAME argv, and spawns the binary in the private cwd');
+  ok(verdictOf(judgeCli(cli)), '§60b the CLI fences writes to VIBESPACE_SESSION_CWD (a job: VIBESPACE_JOB_CWD — accept-fixes-jobs F6) only (never process.cwd()), re-judges and hands the IN-FRAME argv, and spawns the binary in the private cwd');
   ok(!judgeCli(cli.replace('const v = IN_JOB ? process.env.VIBESPACE_JOB_CWD : process.env.VIBESPACE_SESSION_CWD;', 'const v = (IN_JOB ? process.env.VIBESPACE_JOB_CWD : process.env.VIBESPACE_SESSION_CWD) || process.cwd();')) && !judgeCli(cli.replace('{ stdio, env, cwd: runCwd.dir }', '{ stdio, env }')) && !judgeCli(cli.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];")), '§60b NEGATIVE CONTROL: the r4 fence (the shell\'s cwd), a spawn with no cwd, and the r4 hand-over (words as typed — lane H\'s close --all filter over `rest`) are each caught');
   const bf = read('src/browser-facts.js');
   const judgeRt = (src) => /execFileImpl\(bin, args, \{[^}]*\bcwd: dc\.dir \}/.test(src) && /const dc = runDir\(daemonCwd\);/.test(src);
@@ -3458,12 +3458,12 @@ await section(async () => {
   const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walk(r); else if (/\.js$/.test(e.name)) srcJs.push(r); } };
   walk('src');
   const runtimes = srcJs.filter((f) => /\bcreateBrowserRuntime\s*\(/.test(read(f)) && f !== 'src/browser-facts.js');
-  ok(judgeRt(bf) && runtimes.length >= 2 && runtimes.every((f) => /\bF\.createBrowserRuntime\(/.test(read(f))), `§60c every browser-CLI launch from the server tree is browser-facts' runtime (${runtimes.join(' ')}), and its execFile names the cwd runDir() chose`);
+  ok(gateOf(judgeRt(bf)) && runtimes.length >= 2 && verdictOf(runtimes.every((f) => /\bF\.createBrowserRuntime\(/.test(read(f)))), `§60c every browser-CLI launch from the server tree is browser-facts' runtime (${runtimes.join(' ')}), and its execFile names the cwd runDir() chose`);
   ok(!judgeRt(bf.replace('maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }', 'maxBuffer: 4 * 1024 * 1024 }')), '§60c NEGATIVE CONTROL: the pre-r5 runtime (an execFile with no cwd — the SERVER\'s, the checkout) is caught');
   const F = req('../src/browser-facts.js');
   const refusedCheckout = F.runDir(() => ({ ok: true, dir: REPO }));
   const chosen = F.runDir();
-  ok(refusedCheckout.ok === false && refusedCheckout.code === 'daemon_cwd_refused' && chosen.ok && chosen.dir !== REPO && !chosen.dir.startsWith(REPO + '/') && !REPO.startsWith(chosen.dir + '/'), `§60c runDir refuses the checkout even when injected, and chooses ${chosen.dir} (outside it)`);
+  ok(refusedCheckout.ok === false && refusedCheckout.code === 'daemon_cwd_refused' && gateOf(chosen.ok) && chosen.dir !== REPO && !chosen.dir.startsWith(REPO + '/') && !REPO.startsWith(chosen.dir + '/'), `§60c runDir refuses the checkout even when injected, and chooses ${chosen.dir} (outside it)`);
 });
 
 // §61 A RELEASE VERDICT NEEDS A KNOWN TURN (lane P verify r2 F1, 2026-09-26). The
@@ -3571,23 +3571,23 @@ await section(async () => {
   const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js')).map((n) => 'src/lib/' + n);
   const srcs = Object.fromEntries(libFiles.map((f) => [f, read(f)]));
   const listed = [...new Set([...Object.keys(RAISE_ONLY), ...Object.keys(DOORS)])];
-  ok(libFiles.length >= 100 && listed.every((f) => srcs[f]), `§62 census scope: every src/lib/*.js (${libFiles.length} files); every listed file exists`);
+  ok(libFiles.length >= 100 && verdictOf(listed.every((f) => srcs[f])), `§62 census scope: every src/lib/*.js (${libFiles.length} files); every listed file exists`);
   const bad = judge(srcs);
   ok(bad.length === 0, `§62 every .focusWindow( / wm.restore( in src/lib is a listed RAISE-ONLY site and every door is counted (${Object.values(DOORS).reduce((a, [n]) => a + n, 0)} doors in ${Object.keys(DOORS).length} files)${bad.length ? ' — ' + bad.join('; ') : ''}`);
   // the door's own shape: the PURE verdict, the ONE persisted tab path; the pointer keeps the tab
   const wj = read('src/lib/window.js');
   const body = (src, name) => { const i = src.indexOf('\n  ' + name + '('); if (i < 0) return ''; const j = src.indexOf('\n  }\n', i); return src.slice(i, j); };
   const rw = body(wj, 'revealWindow'), fp = body(wj, '_focusFromPointer');
-  ok(/const i = revealTab\(ch, id\);/.test(rw) && /if \(i >= 0\) this\.switchTab\(ch, i\);/.test(rw) && !/\.active\s*=/.test(rw) && /if \(replay\) \{ if \(!\(win\._hiddenByDesktop && !this\._app\?\.stage\?\.isActive\)\) this\.focusWindow\(id\); return true; \}/.test(rw),
+  ok(gateOf(/const i = revealTab\(ch, id\);/.test(rw)) && gateOf(/if \(i >= 0\) this\.switchTab\(ch, i\);/.test(rw)) && !/\.active\s*=/.test(rw) && verdictOf(/if \(replay\) \{ if \(!\(win\._hiddenByDesktop && !this\._app\?\.stage\?\.isActive\)\) this\.focusWindow\(id\); return true; \}/.test(rw)),
     '§62 revealWindow = PURE revealTab → switchTab (the tab click\'s own persisted, synced path — never a hand-written `active`); a replay only raises');
-  ok(/this\._refocusShown\(\);/.test(body(read('src/lib/desktop-manager.js'), 'async switchTo')) && /dm\._refocusShown\?\.\(\);/.test(read('src/lib/stage-manager.js')) && /const off = replay && !!this\.wm\.windows\.get\(winId\)\?\._hiddenByDesktop && !this\.stage\?\.isActive;/.test(body(read('src/lib/session-lifecycle.js'), '_focusExistingSession')),
+  ok(gateOf(/this\._refocusShown\(\);/.test(body(read('src/lib/desktop-manager.js'), 'async switchTo'))) && gateOf(/dm\._refocusShown\?\.\(\);/.test(read('src/lib/stage-manager.js'))) && verdictOf(/const off = replay && !!this\.wm\.windows\.get\(winId\)\?\._hiddenByDesktop && !this\.stage\?\.isActive;/.test(body(read('src/lib/session-lifecycle.js'), '_focusExistingSession'))),
     '§62 B-2dbe: a replay raises only what is on show (revealWindow\'s replay branch above, _focusExistingSession\'s restore and keyboard focus), and every road that may hide the active window hands the focus to the desktop shown (switchTo, the Stage leaving → _refocusShown)');
   const pointerPin = (b) => b.length > 40 && /pressTab\(ch, /.test(b) && !/revealWindow|revealTab/.test(b);
-  ok(pointerPin(fp), '§62 _focusFromPointer (a PRESS) asks PURE pressTab and never the door — a press keeps the tab on show');
+  ok(verdictOf(pointerPin(fp)), '§62 _focusFromPointer (a PRESS) asks PURE pressTab and never the door — a press keeps the tab on show');
   const pin = (f, name, re) => { const b = body(read(f), name); return b.length > 40 && re.test(b) && !/\.focusWindow\(/.test(strip(b)); };
-  ok(pin('src/lib/mobile-nav.js', '_openRow', /wm\.revealWindow\(win\.id\)/) && pin('src/lib/session-lifecycle.js', '_focusExistingSession', /this\.wm\.revealWindow\(winId, \{ replay \}\)/) && pin('src/lib/app.js', 'goToWinId', /this\.wm\.revealWindow\(win\.id\)/),
+  ok(gateOf(pin('src/lib/mobile-nav.js', '_openRow', /wm\.revealWindow\(win\.id\)/)) && gateOf(pin('src/lib/session-lifecycle.js', '_focusExistingSession', /this\.wm\.revealWindow\(winId, \{ replay \}\)/)) && verdictOf(pin('src/lib/app.js', 'goToWinId', /this\.wm\.revealWindow\(win\.id\)/)),
     '§62 the incident\'s doors spell it: the phone switcher row, _focusExistingSession (sidebar card / palette), goToWinId — no bare focusWindow in their bodies');
-  ok(/export function activateWindow\(app, id\) \{[^}]*app\.wm\.revealWindow\(id\);/.test(read('src/lib/taskbar.js')), '§62 activateWindow (every taskbar button) is the door');
+  ok(verdictOf(/export function activateWindow\(app, id\) \{[^}]*app\.wm\.revealWindow\(id\);/.test(read('src/lib/taskbar.js'))), '§62 activateWindow (every taskbar button) is the door');
   // NEGATIVE CONTROLS (string copies, nothing written): the pre-fix switcher row, a new bare focus in an unlisted file,
   // a door silently turned back into a raise, a pointer path that switches tabs
   const mn = srcs['src/lib/mobile-nav.js'];
@@ -3614,13 +3614,13 @@ await section(async () => {
   const judgeS = (srcs) => singletonFiles(srcs).filter((f) => !/\.revealWindow\(/.test(strip(srcs[f])) || /\.focusWindow\(/.test(strip(srcs[f])));
   const srcs = Object.fromEntries(srcFiles.map((f) => [f, read(f)]));
   const sf = singletonFiles(srcs);
-  ok(sf.length >= 10 && ['src/lib/channel-outbox.js', 'src/lib/inbox-window.js', 'src/lib/channels-panel.js', 'src/lib/settings-ui.js', 'src/lib/usage-window.js'].every((f) => sf.includes(f)),
+  ok(sf.length >= 10 && verdictOf(['src/lib/channel-outbox.js', 'src/lib/inbox-window.js', 'src/lib/channels-panel.js', 'src/lib/settings-ui.js', 'src/lib/usage-window.js'].every((f) => sf.includes(f))),
     `§62c census scope: ${sf.length} files register a singleton window (Outbox, For you, Channels, Settings, Usage …)`);
   const bad = judgeS(srcs);
   ok(bad.length === 0, `§62c every singleton's file re-opens through .revealWindow( and never a bare .focusWindow(${bad.length ? ' — ' + bad.join(', ') : ''}`);
   const wj = read('src/lib/window.js'); const i = wj.indexOf('\n  revealWindow('), rw = wj.slice(i, wj.indexOf('\n  }\n', i));
   const doorPin = (b) => /const go = dm \? revealDesktop\(\{ raise,/.test(b) && /if \(go\.act === 'switch'\) \{[^\n]*\n\s*Promise\.resolve\(go\.to === STAGE_ID \? stage\.enter\(\) : dm\.switchTo\(go\.to\)\)/.test(b) && b.indexOf('revealDesktop(') < b.indexOf('const i = revealTab(ch, id);') && /if \(go\.act === 'tell'\) \{[\s\S]*?showToast\(/.test(b);
-  ok(doorPin(rw), '§62c revealWindow asks PURE revealDesktop FIRST and goes through dm.switchTo (the Stage through stage.enter); a reveal that cannot land toasts where the window is');
+  ok(verdictOf(doorPin(rw)), '§62c revealWindow asks PURE revealDesktop FIRST and goes through dm.switchTo (the Stage through stage.enter); a reveal that cannot land toasts where the window is');
   // NEGATIVE CONTROLS (string copies): a singleton re-open turned back into a raise; the door's switch removed
   const raised = { ...srcs, 'src/lib/channel-outbox.js': srcs['src/lib/channel-outbox.js'].replace("app.wm.revealWindow(id, { replay: !!opts.syncId });", 'app.wm.focusWindow(id);') };
   const noSwitch = rw.replace(/\n    if \(go\.act === 'switch'\) \{[\s\S]*?\n    \}\n/, '\n');
@@ -3674,14 +3674,14 @@ await section(async () => {
   ok(j.bad.length === 0, `§63 every /api/agent/channels/ handler records its touch or is exempt with a reason (${Object.keys(EXEMPT).length} exempt)${j.bad.length ? ' — ' + j.bad.join('; ') : ''}`);
   const rc = read('src/routes/channels.js');
   const route = (p) => { const i = rc.indexOf(`router.get('${p}'`); return i < 0 ? '' : rc.slice(i, rc.indexOf('\n});', i)); };
-  ok(['/api/channel-touches', '/api/channels/:adapterId/:convId/touches'].every((p) => /if \(isAgentBearer\(req\)\) return res\.status\(403\)/.test(route(p))),
+  ok(verdictOf(['/api/channel-touches', '/api/channels/:adapterId/:convId/touches'].every((p) => /if \(isAgentBearer\(req\)\) return res\.status\(403\)/.test(route(p)))),
     '§63 the owner\'s two witness reads (the session ring, the conversation\'s touchers) refuse an agent\'s bearer 403 first');
   // NEGATIVE CONTROLS: the read handler without its record, a new verb planted without one, a call that is only a comment
   const noRead = ar.replace("  if (r && r.ok) touchChannel(id, [{ op: 'read',", "  if (r && r.ok) void (id, [{ op: 'read',");
   const planted = ar + "\napp.get('/api/agent/channels/peek', (req, res) => {\n  res.json({ ok: true });\n});\n";
   const commented = ar + "\napp.get('/api/agent/channels/peek', (req, res) => {\n  // touchChannel(id, [])\n  res.json({ ok: true });\n});\n";
   const jr = judge(noRead), jp = judge(planted), jc = judge(commented);
-  ok(noRead !== ar && jr.bad.length === 1 && /GET \/api\/agent\/channels\/read/.test(jr.bad[0]) && jp.bad.length === 1 && /peek/.test(jp.bad[0]) && jc.bad.length === 1,
+  ok(noRead !== ar && jr.bad.length === 1 && gateOf(/GET \/api\/agent\/channels\/read/.test(jr.bad[0])) && jp.bad.length === 1 && gateOf(/peek/.test(jp.bad[0])) && jc.bad.length === 1,
     `§63 NEGATIVE CONTROL: the read handler without its record (${jr.bad.length}), a planted verb (${jp.bad.length}) and a verb whose only call is a comment (${jc.bad.length}) are each caught`);
 });
 
@@ -3728,7 +3728,7 @@ await section(async () => {
   const badA = allowReaders(files);
   ok(scope.length > 300 && badA.length === 0, `§66a allowExit has no reader outside exitAccessOf / the migration (${scope.length} files)${badA.length ? ' — ' + badA.join(' ') : ''}`);
   const plantedA = allowReaders([...files, ['src/lib/sidebar-mounts.js', read('src/lib/sidebar-mounts.js') + "\nconst on = h.allowExit ? 'accent' : '';\n"]]);
-  ok(plantedA.some((x) => x.startsWith('src/lib/sidebar-mounts.js')), '§66a NEGATIVE CONTROL: the pre-lane toggle\'s `h.allowExit ?` read planted into sidebar-mounts is caught');
+  ok(verdictOf(plantedA.some((x) => x.startsWith('src/lib/sidebar-mounts.js'))), '§66a NEGATIVE CONTROL: the pre-lane toggle\'s `h.allowExit ?` read planted into sidebar-mounts is caught');
   // (b)
   const mintSites = (fs2) => {
     const out = [];
@@ -3758,7 +3758,7 @@ await section(async () => {
     const beforePair = c.src.slice(open, pairAt);
     return open >= 0 && pairAt > open && c.i < end && !/dial-pair/.test(beforePair) && /go\.onclick = pair;/.test(body) && /\{ if \(enterSubmits\(e\)\) pair\(\); \}/.test(body) && (body.match(/\bpair\(\)/g) || []).length === 1;
   };
-  ok(cp.length === 1 && pairOk(cp[0]), `§66b the client POSTs /api/device/dial-pair from ONE site — the pairing dialog's button handler (Create pairing / Generate a new command), never its open path (${cp.map((c) => c.f).join(', ')})`);
+  ok(cp.length === 1 && verdictOf(pairOk(cp[0])), `§66b the client POSTs /api/device/dial-pair from ONE site — the pairing dialog's button handler (Create pairing / Generate a new command), never its open path (${cp.map((c) => c.f).join(', ')})`);
   const sm = read('src/lib/sidebar-mounts.js');
   const openMint = sm.replace("      let picker = null;\n      try {\n        const a = await api(`/api/device/dial-addresses", "      api('/api/device/dial-pair', { method: 'POST', body: '{}' });\n      let picker = null;\n      try {\n        const a = await api(`/api/device/dial-addresses");
   const cpOpen = clientPosts(files.map(([f, src]) => [f, f === 'src/lib/sidebar-mounts.js' ? openMint : src]));
@@ -3767,15 +3767,15 @@ await section(async () => {
   const E = (await import(path.join(REPO, 'src/exit-reach.js'))).default;
   const cap = (read('src/agentd/agentd.js').match(/timeout: Math\.min\(Number\(msg\.timeoutMs\) \|\| 10000, (\d+)\)/) || [])[1];
   ok(Number(cap) === E.EXIT_RUN_TIMEOUT_MS && E.EXIT_RUN_TIMEOUT_MS === 30000, `§66c the daemon's run-cmd cap (${cap}) is EXIT_RUN_TIMEOUT_MS (${E.EXIT_RUN_TIMEOUT_MS}) — one number: daemon, CLI help, card`);
-  ok(!/120000/.test(strip(read('src/server/exit-routes.js'))) && !/120000/.test(strip(read('src/exit-proxy.js'))) && /up to 30 s/.test(read('data/bin/vibespace-exit')), '§66c no 120 000 promise is left on the exit path; the CLI says 30 s');
+  ok(!/120000/.test(strip(read('src/server/exit-routes.js'))) && !/120000/.test(strip(read('src/exit-proxy.js'))) && verdictOf(/up to 30 s/.test(read('data/bin/vibespace-exit'))), '§66c no 120 000 promise is left on the exit path; the CLI says 30 s');
   const capOf = (src) => Number((src.match(/timeout: Math\.min\(Number\(msg\.timeoutMs\) \|\| 10000, (\d+)\)/) || [])[1]);
   ok(capOf(read('src/agentd/agentd.js').replace('|| 10000, 30000)', '|| 10000, 120000)')) !== E.EXIT_RUN_TIMEOUT_MS, '§66c NEGATIVE CONTROL: the daemon cap raised to 120 000 without the constant is caught');
   // (d)
   const hostRow = (src) => { const i = src.indexOf('    _buildHostRow(h) {'); const e = src.indexOf('\n    },\n', i); return i < 0 ? null : strip(src.slice(i, e)); };
   const card = (src) => { const i = src.indexOf('for (const h of hostsList) {'); const e = src.indexOf('body.appendChild(det);', i); return i < 0 ? null : strip(src.slice(i, e)); };
   const hr = hostRow(sm), mc = card(read('src/lib/manage-agents.js'));
-  ok(hr && mc && !/\bh\.online\b/.test(hr) && !/\bh\.online\b/.test(mc) && /dialRowState\(h\)/.test(hr) && /dialRowState\(h\)/.test(mc), '§66d the machine row and the Machines card read the dial words from dialRowState, never `online` alone');
-  ok(/\bh\.online\b/.test(hostRow(sm.replace("const dot = isDial ? (rs.state === 'connected'", "const dot = isDial ? (h.online"))), '§66d NEGATIVE CONTROL: the pre-lane `h.online ?` words planted back into the row are caught');
+  ok(gateOf(hr) && gateOf(mc) && !/\bh\.online\b/.test(hr) && !/\bh\.online\b/.test(mc) && gateOf(/dialRowState\(h\)/.test(hr)) && verdictOf(/dialRowState\(h\)/.test(mc)), '§66d the machine row and the Machines card read the dial words from dialRowState, never `online` alone');
+  ok(verdictOf(/\bh\.online\b/.test(hostRow(sm.replace("const dot = isDial ? (rs.state === 'connected'", "const dot = isDial ? (h.online")))), '§66d NEGATIVE CONTROL: the pre-lane `h.online ?` words planted back into the row are caught');
 });
 
 // §64 REACTIONS NEVER WAKE (lane channel-threads, spec §5.4 / §6.2 — the brief's recommendation adopted as a rule
@@ -3825,14 +3825,14 @@ await section(async () => {
   };
   const esrc = engineSource(REPO);
   const c = census(esrc);
-  ok(c.seeds.length >= 2 && c.seeds.includes('appendSides') && c.reached.includes('flushSide') && c.reached.includes('reactionDigest'), `§64 census scope is non-vacuous (seeds: ${c.seeds.join(', ')}; ${c.reached.length} functions reached, incl. the side broadcast and the digest)`);
+  ok(c.seeds.length >= 2 && gateOf(c.seeds.includes('appendSides')) && gateOf(c.reached.includes('flushSide')) && verdictOf(c.reached.includes('reactionDigest')), `§64 census scope is non-vacuous (seeds: ${c.seeds.join(', ')}; ${c.reached.length} functions reached, incl. the side broadcast and the digest)`);
   ok(c.bad.length === 0, `§64 no path from a side record reaches a wake site (billedWake / onFresh / deliverToConversation / wake)${c.bad.length ? ' — ' + c.bad.join('; ') : ''}`);
   ok(c.deadBoundary.length === 0, `§64 every declared boundary is reached (${Object.keys(BOUNDARY).length}, each with its reason)${c.deadBoundary.length ? ' — dead: ' + c.deadBoundary.join(', ') : ''}`);
-  ok(/deliver\.stashFor\(cid, \{ source: 'channel', kind: 'notification', fromName: RX_DIGEST_FROM/.test(esrc) && !/function reactionDigest[\s\S]{0,4000}?deliverToConversation/.test(strip(esrc).slice(strip(esrc).indexOf('function reactionDigest'), strip(esrc).indexOf('function reactionDigest') + 4000)), '§64 the digest is written to the FREE stash (`stashFor`) — the one way a reaction reaches an agent');
+  ok(gateOf(/deliver\.stashFor\(cid, \{ source: 'channel', kind: 'notification', fromName: RX_DIGEST_FROM/.test(esrc)) && !/function reactionDigest[\s\S]{0,4000}?deliverToConversation/.test(strip(esrc).slice(strip(esrc).indexOf('function reactionDigest'), strip(esrc).indexOf('function reactionDigest') + 4000)), '§64 the digest is written to the FREE stash (`stashFor`) — the one way a reaction reaches an agent');
   // the adapters: an eventToSide result leaves as a `kind: 'side'` event; nothing outside the engine / store writes a side record
   const lark = read('src/channels/live/lark.js');
   const e2s = [...strip(lark).matchAll(/eventToSide\(/g)].length;
-  ok(e2s >= 2 && /kind: 'side'/.test(lark) && !/kind: 'record'[^\n]*eventToSide|eventToSide[^\n]*kind: 'record'/.test(lark), `§64 the Lark lane's eventToSide results (${e2s} sites) leave as kind 'side' events — never as a record the funnel would judge`);
+  ok(e2s >= 2 && gateOf(/kind: 'side'/.test(lark)) && !/kind: 'record'[^\n]*eventToSide|eventToSide[^\n]*kind: 'record'/.test(lark), `§64 the Lark lane's eventToSide results (${e2s} sites) leave as kind 'side' events — never as a record the funnel would judge`);
   const walkJs = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const f = `${d}/${e.name}`; if (e.isDirectory()) walkJs(f, out); else if (/\.js$/.test(e.name)) out.push(f); } return out; };
   const writers = walkJs('src').filter((f) => !['src/channel-store.js', ENGP, ...Object.values(ENGINE_FAMILIES)].includes(f) && /\.appendSide\(/.test(strip(read(f))));
   ok(writers.length === 0, `§64 only the engine writes a side record (store.appendSide callers outside it: ${writers.length ? writers.join(', ') : 'none'})`);
@@ -3841,17 +3841,17 @@ await section(async () => {
   const viaFunnel = esrc.replace("      if (w.appended) notifySide(rec.id, sideConv, w.msgs);\n", "      if (w.appended) { notifySide(rec.id, sideConv, w.msgs); track(onFresh(rec, sideConv, [], { lane })); }\n");
   const viaHelper = esrc.replace('      try { reactionDigest(rec, convId, ids, folded); }', '      try { reactionDigest(rec, convId, ids, folded); nudgeOnReaction(rec, convId); }').replace('  function reactionDigest(', '  function nudgeOnReaction(rec, convId) { return billedWake({ conv: convId }, () => null); }\n  function reactionDigest(');
   const [cl, cf, ch] = [viaLadder, viaFunnel, viaHelper].map(census);
-  ok(viaLadder !== esrc && viaFunnel !== esrc && viaHelper !== esrc && cl.bad.length >= 1 && /reactionDigest calls deliverToConversation/.test(cl.bad.join()) && cf.bad.length >= 1 && /<push side branch> calls onFresh/.test(cf.bad.join()) && ch.bad.some((x) => /nudgeOnReaction calls billedWake/.test(x)),
+  ok(viaLadder !== esrc && viaFunnel !== esrc && viaHelper !== esrc && cl.bad.length >= 1 && gateOf(/reactionDigest calls deliverToConversation/.test(cl.bad.join())) && cf.bad.length >= 1 && gateOf(/<push side branch> calls onFresh/.test(cf.bad.join())) && verdictOf(ch.bad.some((x) => /nudgeOnReaction calls billedWake/.test(x))),
     `§64 NEGATIVE CONTROL: the digest through the ladder (${cl.bad.length}), the side branch through the funnel (${cf.bad.length}) and a new helper the broadcast calls that wakes (${ch.bad.length}) are each caught`, JSON.stringify([cl.bad, cf.bad, ch.bad]));
   // §49's twin: the owner's reaction routes add / remove a reaction as the user — never a propose / approve (a wake door)
   const rsrc = read('src/routes/channels.js');
   const rxBlocks = rsrc.split(/\n(?=router\.(?:post|put|get|delete)\()/).filter((b) => /^router\.(post|delete)\('[^']*\/reactions/.test(b));
-  ok(rxBlocks.length >= 3 && rxBlocks.every((b) => !/engine\(\)\.(propose|approve)\(|billedWake|deliverToConversation/.test(b)) && rxBlocks.some((b) => /engine\(\)\.react\(/.test(b)) && rxBlocks.some((b) => /engine\(\)\.unreact\(/.test(b)),
+  ok(rxBlocks.length >= 3 && gateOf(rxBlocks.every((b) => !/engine\(\)\.(propose|approve)\(|billedWake|deliverToConversation/.test(b))) && gateOf(rxBlocks.some((b) => /engine\(\)\.react\(/.test(b))) && verdictOf(rxBlocks.some((b) => /engine\(\)\.unreact\(/.test(b))),
     `§49/§64 the owner's reaction routes (${rxBlocks.length}: add, remove, the trickle) call react / unreact / the list read — never a propose / approve, so §49's wake-door census rightly does not name them (a reaction can never start a turn: sendStartsTurn is a MESSAGE fact)`);
   // …and the agent's react verb is recorded by the witness under its own op
   const ar = strip(read('src/agent-routes.js'));
   const reactH = ar.slice(ar.indexOf("app.post('/api/agent/channels/react'"), ar.indexOf('\n});', ar.indexOf("app.post('/api/agent/channels/react'")));
-  ok(/touchChannel\(id, \[\{ op: 'react'/.test(reactH) && /eng\.proposeReaction\(/.test(reactH) && !/eng\.react\(|eng\.unreact\(/.test(reactH), '§63/§64 the agent\'s react handler PROPOSES (proposeReaction — never the direct act) and records its touch as op `react`');
+  ok(gateOf(/touchChannel\(id, \[\{ op: 'react'/.test(reactH)) && gateOf(/eng\.proposeReaction\(/.test(reactH)) && !/eng\.react\(|eng\.unreact\(/.test(reactH), '§63/§64 the agent\'s react handler PROPOSES (proposeReaction — never the direct act) and records its touch as op `react`');
 });
 
 // §65 THE ACCESS GATE CENSUS (lane channel-threads verify r2, IDENTITY — the r1 digest and the r2 await / proposal holes
@@ -3953,12 +3953,12 @@ await section(async () => {
   const c = census(esrc, asrc, cli);
   const xcli = read('data/bin/vibespace-exit');
   const xpaths = exitCliPaths(xcli);
-  ok(xpaths.length >= 4 && xpaths.some((p) => p === '/api/agent/exit/runs') && exitCliBad(xcli).length === 0, `§65 (D) vibespace-exit names agent routes only (${xpaths.length} paths incl. /api/agent/exit/runs) — never the owner's /api/hosts/:id/exit-runs`, exitCliBad(xcli));
+  ok(xpaths.length >= 4 && gateOf(xpaths.some((p) => p === '/api/agent/exit/runs')) && exitCliBad(xcli).length === 0, `§65 (D) vibespace-exit names agent routes only (${xpaths.length} paths incl. /api/agent/exit/runs) — never the owner's /api/hosts/:id/exit-runs`, exitCliBad(xcli));
   const xctl = exitCliBad(xcli.replace("'/api/agent/exit/runs?'", "'/api/hosts/' + machine + '/exit-runs?'"));
-  ok(xctl.length === 1 && /vibespace-exit calls \/api\/hosts\//.test(xctl[0]), '§65 (D) NEGATIVE CONTROL: the exit CLI pointed at the owner\'s command list (/api/hosts/…/exit-runs) is caught by name', xctl);
-  ok(/isAnyBearer\(req\)\) return res\.status\(403\)\.json\(\{ error: 'the machine\\'s command history is the user\\'s/.test(read('src/server/exit-routes.js')), '§65 (C) the owner\'s command list refuses any bearer 403 human_only (exit-routes.js)');
+  ok(xctl.length === 1 && verdictOf(/vibespace-exit calls \/api\/hosts\//.test(xctl[0])), '§65 (D) NEGATIVE CONTROL: the exit CLI pointed at the owner\'s command list (/api/hosts/…/exit-runs) is caught by name', xctl);
+  ok(verdictOf(/isAnyBearer\(req\)\) return res\.status\(403\)\.json\(\{ error: 'the machine\\'s command history is the user\\'s/.test(read('src/server/exit-routes.js'))), '§65 (C) the owner\'s command list refuses any bearer 403 human_only (exit-routes.js)');
   const want = ['listFor', 'readFor', 'readThreadFor', 'agentRefresh', 'agentThreadRefresh', 'propose', 'proposeReaction', 'compose', 'replaceProposal', 'withdrawProposal', 'withdrawNow', 'searchFor', 'statusFor', 'accessFor', 'request', 'attachment', 'agentAttachmentAnswer'];
-  ok(want.every((n) => c.roster.includes(n)) && c.ladder.length >= 4 && c.paths.length >= 10, `§65 census scope is non-vacuous (${c.roster.length} agent answers, ${c.ladder.length} ladder producers: ${c.ladder.join(', ')}, ${c.owners.length} owner surfaces, ${c.paths.length} CLI paths)`, JSON.stringify(c.roster));
+  ok(gateOf(want.every((n) => c.roster.includes(n))) && c.ladder.length >= 4 && c.paths.length >= 10, `§65 census scope is non-vacuous (${c.roster.length} agent answers, ${c.ladder.length} ladder producers: ${c.ladder.join(', ')}, ${c.owners.length} owner surfaces, ${c.paths.length} CLI paths)`, JSON.stringify(c.roster));
   ok(c.bad.length === 0, `§65 every agent answer asks reach first and again after an await, every stash/ladder producer carries a gate, every owner surface is named, the CLI names agent routes only${c.bad.length ? ' — ' + c.bad.join('; ') : ''}`);
   // NEGATIVE CONTROLS (string copies): one gate removed from one producer each
   const cut = (src, a, b) => { if (src.split(a).length !== 2) return null; return src.replace(a, b); };
@@ -3979,7 +3979,7 @@ await section(async () => {
   const cp = census(plantedEng, planted, cli);
   const cliBad = census(esrc, asrc, cli.replace("'/api/agent/channels/list'", "'/api/channels/list'"));
   const results = controls.map(([name, src, re]) => { const r = src ? census(src, asrc, cli) : { bad: ['(setup) the control\'s anchor was not found once'] }; return { name, ok: !!src && r.bad.some((x) => re.test(x)), bad: r.bad }; });
-  ok(results.every((r) => r.ok) && cp.bad.some((x) => /\(A1\) peekFor never asks reach/.test(x)) && cliBad.bad.some((x) => /\(D\) the CLI calls \/api\/channels\/list/.test(x)),
+  ok(gateOf(results.every((r) => r.ok)) && gateOf(cp.bad.some((x) => /\(A1\) peekFor never asks reach/.test(x))) && verdictOf(cliBad.bad.some((x) => /\(D\) the CLI calls \/api\/channels\/list/.test(x))),
     `§65 NEGATIVE CONTROLS: ${results.map((r) => `${r.name} (${r.ok ? 'RED' : 'missed'})`).join(', ')}, a planted agent route over an ungated read (RED), the CLI pointed at an owner route (RED)`, JSON.stringify(results.filter((r) => !r.ok)));
 });
 
@@ -4030,7 +4030,7 @@ await section(async () => {
   const planted = asrc.replace("app.get('/api/agent/channels/api/creds',", "app.get('/api/agent/channels/api/peek', (req, res) => { res.json(api.peekAll()); });\napp.get('/api/agent/channels/api/creds',");
   const plantedO = osrc.replace('  function creds(ctx) {', '  function peekAll() { return { ok: true, all: allCreds() }; }\n  function creds(ctx) {');
   const pr = judge65c(plantedO, planted).bad.some((x) => /peekAll never asks the tier/.test(x));
-  ok(res.every((r) => r.red) && pr, `§65c NEGATIVE CONTROLS: ${res.map((r) => `${r.name} (${r.red ? 'RED' : 'missed'})`).join(', ')}, a planted agent verb with no tier (${pr ? 'RED' : 'missed'})`);
+  ok(gateOf(res.every((r) => r.red)) && verdictOf(pr), `§65c NEGATIVE CONTROLS: ${res.map((r) => `${r.name} (${r.red ? 'RED' : 'missed'})`).join(', ')}, a planted agent verb with no tier (${pr ? 'RED' : 'missed'})`);
 });
 // §65b lane lark-threads (B3): THE OWNER'S NAME FOR AN AUTHOR is an OWNER surface — its one route (PATCH
 // /api/channels/:adapterId/authors/:id) refuses an agent bearer BY NAME before it reaches the engine, no agent route
@@ -4054,7 +4054,7 @@ await section(async () => {
   };
   const rsrc = read('src/routes/channels.js'), asrc = read('src/agent-routes.js'), cli = read('data/bin/vibespace-channels'), esrc = engineSource(REPO);
   const j = judge(rsrc, asrc, cli, esrc);
-  ok(j.route && j.agentFree && j.ownerOnly, '§65b the alias route refuses an agent bearer before the engine; no agent route / CLI path names it; the setter answers the owner\'s broadcast only', JSON.stringify(j));
+  ok(gateOf(j.route) && gateOf(j.agentFree) && verdictOf(j.ownerOnly), '§65b the alias route refuses an agent bearer before the engine; no agent route / CLI path names it; the setter answers the owner\'s broadcast only', JSON.stringify(j));
   const noRefuse = rsrc.replace("    if (refuseAgentBearer(req, res, 'a name for an author is the owner\\'s — an agent token may not set one')) return;\n", '');
   const plantedAgent = asrc + "\napp.patch('/api/agent/channels/authors/:id', (req, res) => res.json(eng.setAlias('a', req.params.id, req.body.alias)));\n";
   ok(noRefuse !== rsrc && !judge(noRefuse, asrc, cli, esrc).route && !judge(rsrc, plantedAgent, cli, esrc).agentFree, '§65b NEGATIVE CONTROLS: the route without its agent refusal (RED), a planted agent route over the setter (RED)');
@@ -4074,7 +4074,7 @@ await section(async () => {
   // one literal predates the lane and is the same glyph in every language (a lone ellipsis — the "…" menu button)
   const SAME_IN_EVERY_LANGUAGE = new Set(['…']);
   const missing = [...keys].filter((k) => !SAME_IN_EVERY_LANGUAGE.has(k) && (!zh.has(k) || !ja.has(k)));
-  ok(LANE.every((k) => keys.has(k)) && keys.size >= 100, `§64b the census reads the lane's surfaces (${keys.size} literals, the ${LANE.length} spec §4.6 / §9 strings among them)`, LANE.filter((k) => !keys.has(k)).join(' | '));
+  ok(gateOf(LANE.every((k) => keys.has(k))) && keys.size >= 100, `§64b the census reads the lane's surfaces (${keys.size} literals, the ${LANE.length} spec §4.6 / §9 strings among them)`, LANE.filter((k) => !keys.has(k)).join(' | '));
   ok(missing.length === 0, `§64b every literal has zh + ja${missing.length ? ' — missing: ' + missing.slice(0, 8).join(' | ') : ''}`);
 });
 
@@ -4107,7 +4107,7 @@ await section(async () => {
   const bad = verdictProblems(caps.BACKEND_CAPS);
   ok(bad.length === 0 && caps.capsOf('claude').hotSwitch === 'verified', `§67 every 'verified' row carries a record that shows the link followed${bad.length ? ' — ' + bad.join(' | ') : ''}`);
   const ciSrc = read('scripts/ci.mjs');
-  ok(/\{ name: 'test-claude-hot-switch', tier: 'heavy'/.test(ciSrc), '§67 the re-measuring gate is in the HEAVY tier (a real binary)');
+  ok(verdictOf(/\{ name: 'test-claude-hot-switch', tier: 'heavy'/.test(ciSrc)), '§67 the re-measuring gate is in the HEAVY tier (a real binary)');
   ok(caps.setVerifiedCap('claude', 'hotSwitch', 'impossible') === false && caps.setVerifiedCap('claude', 'hotSwitchEvidence', null) === false && caps.capsOf('claude').hotSwitch === 'verified',
     '§67 no runtime prober can flip the switching verdict (setVerifiedCap refuses it)');
   // nothing but the caps rows (and the ACP harness's own row) STATES a verdict
@@ -4126,7 +4126,7 @@ await section(async () => {
   fs.writeFileSync(heldRec, JSON.stringify({ cli: '9.9.9', variants: { symlink: { requests: { msg2: ['A:200'] } } } }));
   let ctl2;
   try { ctl2 = verdictProblems({ y: { hotSwitch: 'verified', hotSwitchEvidence: { cli: '9.9.9', measuredAt: 'x', mechanism: 'x', record: path.relative(REPO, heldRec), gate: 'scripts/test-claude-hot-switch.mjs' } } }); } finally { try { fs.unlinkSync(heldRec); } catch { } }
-  ok(ctl1.some((x) => /without a complete hotSwitchEvidence/.test(x)) && ctl2.some((x) => /does not show the link followed/.test(x)),
+  ok(gateOf(ctl1.some((x) => /without a complete hotSwitchEvidence/.test(x))) && verdictOf(ctl2.some((x) => /does not show the link followed/.test(x))),
     '§67 NEGATIVE CONTROLS: a bare \'verified\' and a record showing the process held its first member are both caught', JSON.stringify({ ctl1, ctl2 }));
 });
 
@@ -4157,7 +4157,7 @@ await section(async () => {
   const allowed = (f, h) => !!SCRIPT_ALLOW[f] && h.length === SCRIPT_ALLOW[f][1] && h.every((x) => x.includes('userInfo().homedir')) && SCRIPT_ALLOW[f][0].test(fs.readFileSync(f, 'utf8'));
   const scope = fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs') && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
   const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([f, h]) => h.length && !allowed(f, h));
-  ok(Object.keys(SCRIPT_ALLOW).every((f) => { const h = judge(fs.readFileSync(f, 'utf8')); return h.length === SCRIPT_ALLOW[f][1] && allowed(f, h); }), `§68 each reasoned scripts site is alive — ${Object.entries(SCRIPT_ALLOW).map(([f, [, n]]) => `exactly ${n} passwd read in ${f}`).join(', ')}, each with its reason (a second read, or the reason gone, is red)`);
+  ok(verdictOf(Object.keys(SCRIPT_ALLOW).every((f) => { const h = judge(fs.readFileSync(f, 'utf8')); return h.length === SCRIPT_ALLOW[f][1] && allowed(f, h); })), `§68 each reasoned scripts site is alive — ${Object.entries(SCRIPT_ALLOW).map(([f, [, n]]) => `exactly ${n} passwd read in ${f}`).join(', ')}, each with its reason (a second read, or the reason gone, is red)`);
   ok(scope.length >= 100, `§68 census scope is non-vacuous (${scope.length} scripts; ${locals.size} local accounts under /home)`);
   ok(bad.length === 0, `§68 no suite reads the passwd home or names a real account's /home/<name>${bad.length ? ' — ' + bad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
   ok(judge("const h = '/home/" + "runner/work/_temp';").length === 1, '§68 CONTROL: a literal /home/runner is red on THIS box too — the hosted runner\'s account is judged as real everywhere');
@@ -4178,7 +4178,7 @@ await section(async () => {
   const srcHits = srcScope.map((f) => [f, judge(fs.readFileSync(f, 'utf8')).filter((h) => h.includes('userInfo().homedir'))]).filter(([, h]) => h.length);
   const srcBad = srcHits.filter(([f, h]) => !(SRC_ALLOW[f] && h.length === SRC_ALLOW[f][1] && SRC_ALLOW[f][0].test(fs.readFileSync(f, 'utf8'))));
   ok(srcScope.length >= 300, `§68 src census scope is non-vacuous (${srcScope.length} files)`);
-  ok(srcBad.length === 0 && Object.keys(SRC_ALLOW).every((f) => srcHits.some(([g]) => g === f)), `§68 src/ + server.js read no passwd home (the product reaches a home through $HOME / os.homedir() only) — but for its reasoned sites (${Object.keys(SRC_ALLOW).join(', ')}: exactly ${Object.values(SRC_ALLOW).map((a) => a[1]).join(', ')} read, its reason in the file)${srcBad.length ? ' — ' + srcBad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
+  ok(srcBad.length === 0 && verdictOf(Object.keys(SRC_ALLOW).every((f) => srcHits.some(([g]) => g === f))), `§68 src/ + server.js read no passwd home (the product reaches a home through $HOME / os.homedir() only) — but for its reasoned sites (${Object.keys(SRC_ALLOW).join(', ')}: exactly ${Object.values(SRC_ALLOW).map((a) => a[1]).join(', ')} read, its reason in the file)${srcBad.length ? ' — ' + srcBad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
   const BIN_ALLOW = { 'data/bin/vibespace-browser': /THE ACCOUNT'S HOME, never \$HOME/, 'data/bin/vibespace-window': /SHOT_HOMES/ };
   const binFiles = fs.readdirSync('data/bin').filter((f) => { try { return fs.statSync(path.join('data/bin', f)).isFile(); } catch { return false; } }).map((f) => 'data/bin/' + f);
   const binHits = binFiles.map((f) => { const src = fs.readFileSync(f, 'utf8'); return [f, judge(src).filter((h) => h.includes('userInfo().homedir')), src]; }).filter(([, h]) => h.length);
@@ -4231,11 +4231,11 @@ await section(async () => {
   const c = census(files);
   ok(Object.keys(files).length > 150 && c.argvBuilders.length >= 2, `§69 census scope: the server tree (${Object.keys(files).length} files)`);
   const undeclared = c.pkgLines.filter((x) => !DECLARED[x.split(':')[0]]);
-  ok(undeclared.length === 0 && c.pkgLines.some((x) => x.startsWith('src/hosts.js:')), `§69a a package manager under \`sudo -n\` only in a declared row (${c.pkgLines.join(' ')})${undeclared.length ? ' — UNDECLARED: ' + undeclared.join(' ') : ''}`);
+  ok(undeclared.length === 0 && verdictOf(c.pkgLines.some((x) => x.startsWith('src/hosts.js:'))), `§69a a package manager under \`sudo -n\` only in a declared row (${c.pkgLines.join(' ')})${undeclared.length ? ' — UNDECLARED: ' + undeclared.join(' ') : ''}`);
   // app-system-l1 (2.369.210): src/app-system.js is the THIRD plan builder — the app system's SYS_SCRIPT / INSTALL_SCRIPT
   // (design §3.2), run through the same package slot (sysArgv) and the boot install (installArgv, app-system-serve.js)
   ok(JSON.stringify(c.argvBuilders) === JSON.stringify(['src/app-manifest.js', 'src/app-system.js', 'src/install-slot.js']), `§69b the root-script argv ['sudo', '-n', …] is built only by the three plan builders (${c.argvBuilders.join(' ')})`);
-  ok(JSON.stringify(c.consumers.installArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.planArgv) === JSON.stringify(['src/agentd/setup-mode.js', 'src/server/desktop-access.js']) /* lane machine-needs-at-pairing pick 3: the pairing's `--setup ffmpeg` runs the UNELEVATED ffmpeg plan ON the machine whose person ran the installer — never the hub reaching a machine, never a root script */ && JSON.stringify(c.consumers.launcher) === JSON.stringify(['src/server/desktop-access.js']) && c.consumers.appArgv.includes('src/app-serve.js') && c.consumers.appArgv.every((f) => f === 'src/app-serve.js' || f.startsWith('src/app-kinds/')) /* lane dc-app-kinds: a kind's planner runs inside the machine half */,
+  ok(JSON.stringify(c.consumers.installArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.planArgv) === JSON.stringify(['src/agentd/setup-mode.js', 'src/server/desktop-access.js']) /* lane machine-needs-at-pairing pick 3: the pairing's `--setup ffmpeg` runs the UNELEVATED ffmpeg plan ON the machine whose person ran the installer — never the hub reaching a machine, never a root script */ && JSON.stringify(c.consumers.launcher) === JSON.stringify(['src/server/desktop-access.js']) && gateOf(c.consumers.appArgv.includes('src/app-serve.js')) && verdictOf(c.consumers.appArgv.every((f) => f === 'src/app-serve.js' || f.startsWith('src/app-kinds/'))) /* lane dc-app-kinds: a kind's planner runs inside the machine half */,
     `§69c their argv reaches a machine only through the slot (installArgv / plan.argv / installLauncherArgv in desktop-access.js; appArgv in the machine half; plan.argv also in the pairing's own setup mode, unelevated, on the machine itself): ${JSON.stringify(c.consumers)}`);
   ok(c.directSudo.length === 0, `§69d no direct sudo exec of a package manager or a shell${c.directSudo.length ? ' — ' + c.directSudo.join(' ') : ''}`);
   // NEGATIVE CONTROLS — each planted shape in a patched listing is caught by its rule
@@ -4245,9 +4245,9 @@ await section(async () => {
   const p3 = census(plant('src/routes/apps.js', 'const launch = M.installLauncherArgv(argv, { stateDir });'));
   const p4 = census(plant('src/server/jobs.js', "execFile('sudo', ['-n', 'apt-get', 'install', '-y', name], cb);"));
   const p5 = census(plant('src/server/apps-engine.js', "execFile('sudo', ['-n', 'sh', '-c', script], cb);"));
-  ok(p1.pkgLines.some((x) => x.startsWith('src/server/apps-engine.js:')) && p2.argvBuilders.includes('src/desktop-serve.js') && p3.consumers.launcher.includes('src/routes/apps.js') && p4.directSudo.some((x) => x.startsWith('src/server/jobs.js:')) && p5.directSudo.some((x) => x.startsWith('src/server/apps-engine.js:')),
+  ok(gateOf(p1.pkgLines.some((x) => x.startsWith('src/server/apps-engine.js:'))) && gateOf(p2.argvBuilders.includes('src/desktop-serve.js')) && gateOf(p3.consumers.launcher.includes('src/routes/apps.js')) && gateOf(p4.directSudo.some((x) => x.startsWith('src/server/jobs.js:'))) && verdictOf(p5.directSudo.some((x) => x.startsWith('src/server/apps-engine.js:'))),
     '§69 NEGATIVE CONTROLS: a `sudo -n apt-get` line outside the slot, a third root-script argv builder, a second launcher caller, a direct sudo of a package manager and of a shell are each caught');
-  ok(strip68("  // sudo -n apt-get install y\n   * sudo -n apt-get install z\n").split('\n').every((l) => !/sudo -n/.test(l)), '§69 a comment line naming `sudo -n apt-get` is no site');
+  ok(verdictOf(strip68("  // sudo -n apt-get install y\n   * sudo -n apt-get install z\n").split('\n').every((l) => !/sudo -n/.test(l))), '§69 a comment line naming `sudo -n apt-get` is no site');
 });
 
 // ═══ §70 THE WS KEEPALIVE CENSUS (lane stream-ping, browser-windows BL-r5-2) ═══════════════════════════════════════
@@ -4265,7 +4265,7 @@ await section(async () => {
   // arms the keepalive THROUGH them — the relays' text is that bridge's text
   const relaysOf = (src) => (/require\('\.\/stream-relays\.js'\)/.test(src) ? fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /^stream-relay-[a-z0-9-]+\.js$/.test(f)).map((f) => '\n' + read('src/server/' + f)).join('') : '');
   const bad = bridges.flatMap((f) => { const s = read('src/server/' + f); return kaBad(f, s + relaysOf(s)); });
-  ok(bridges.length >= 2 && bridges.includes('browser-stream.js') && bridges.includes('desktop-stream.js') && !bad.length, `§70 every src/server/*-stream.js arms the ONE ws keepalive (${bridges.join(', ')})${bad.length ? ' — ' + bad.join('; ') : ''}`);
+  ok(bridges.length >= 2 && gateOf(bridges.includes('browser-stream.js')) && gateOf(bridges.includes('desktop-stream.js')) && !bad.length, `§70 every src/server/*-stream.js arms the ONE ws keepalive (${bridges.join(', ')})${bad.length ? ' — ' + bad.join('; ') : ''}`);
   ok(kaBad('planted-stream.js', 'const t = setInterval(() => ws.ping(), 20000);').length === 3, '§70 NEGATIVE CONTROL: a planted bridge with its own pinger is red three ways');
   // verify r1 T1⑤ — THE SCOPE, stated and enforced: every ws server in server.js + src/** is a *-stream.js bridge (above)
   // or named HERE with the reason it needs no keepalive of this rule; a new long-lived ws server is red until classified
@@ -4319,12 +4319,12 @@ await section(async () => {
   const found68 = files68.flatMap((f) => hits68(f, read(f)));
   ok(files68.length > 300 && found68.length === 0, `§71 no compare of a raw secret outside sameToken in server.js + src (${files68.length} files)${found68.length ? ' — ' + found68.join(' | ') : ''}`);
   const pt = read('src/pairing-token.js');
-  ok(/function sameToken\(presented, secret\) \{[^}]*tokenMatches\(presented, tokenHash\(secret\)\)/.test(pt) && /module\.exports = \{[^}]*\bsameToken\b/.test(pt), '§71 sameToken is tokenMatches over the secret\'s digest, exported from the one door');
+  ok(gateOf(/function sameToken\(presented, secret\) \{[^}]*tokenMatches\(presented, tokenHash\(secret\)\)/.test(pt)) && verdictOf(/module\.exports = \{[^}]*\bsameToken\b/.test(pt)), '§71 sameToken is tokenMatches over the secret\'s digest, exported from the one door');
   const SITES68 = ['src/server/task-groups-wiring.js' /* «make room» 2026-11-17: server.js's one site (GET /api/tasks/:id/progress, a vsst_ bearer) moved there with the Task Groups' routes */, 'src/routes/editor.js', 'src/agent-routes.js', 'src/agent-routes/status.js', 'src/server/window-targets-engine.js', 'src/server/mounts-plugins-wiring.js', 'src/server/exit-routes.js', 'src/routes/browser.js', 'src/server/otel-ingest.js'];
   const noDoor = SITES68.filter((f) => !/\bsameToken\(/.test(strip68(read(f))));
   ok(noDoor.length === 0 && (strip68(read('src/agent-routes.js') + read('src/agent-routes/status.js')).match(/\bsameToken\(/g) || []).length >= 2, `§71 every lookup site compares through sameToken${noDoor.length ? ' — missing: ' + noDoor.join(' ') : ''}`);
   const { sameToken } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/pairing-token.js'));
-  ok(sameToken('vsst_ab12', 'vsst_ab12') && !sameToken('vsst_ab13', 'vsst_ab12') && !sameToken('vsst_ab1', 'vsst_ab12') && !sameToken(undefined, 'vsst_ab12') && !sameToken('vsst_ab12', undefined) && !sameToken('', ''),
+  ok(gateOf(sameToken('vsst_ab12', 'vsst_ab12')) && !sameToken('vsst_ab13', 'vsst_ab12') && !sameToken('vsst_ab1', 'vsst_ab12') && !sameToken(undefined, 'vsst_ab12') && !sameToken('vsst_ab12', undefined) && !sameToken('', ''),
     '§71 sameToken: equal ⇒ true; one character, a prefix, a missing or an empty side ⇒ false');
   // verify r1: what a request can carry instead of a string (a JSON body's number / array / object, a repeated header) is
   // false, never a throw — and so is a non-string secret
@@ -4430,7 +4430,7 @@ await section(async () => {
   // the control reads a store that still times its own synchronous write (session-meta's FIRST version, writeSessionMeta)
   const metaBare = strip72(read('src/server/session-stdout.js')).replace("timedSync('session-meta.write', () => { fs.writeFileSync(tmp, text); fs.renameSync(tmp, fp); });", 'fs.writeFileSync(tmp, text); fs.renameSync(tmp, fp);');
   const hit = unwrapped72(body72(metaBare, 'writeSessionMeta').text, ['session-meta.write']);
-  ok(hit.length === 1 && /fs\.writeFileSync\(tmp, text\)/.test(hit[0]), `§72 CONTROL: the real session-stdout.js writeSessionMeta with its first write unwrapped is printed (${hit.join(' | ')})`);
+  ok(hit.length === 1 && verdictOf(/fs\.writeFileSync\(tmp, text\)/.test(hit[0])), `§72 CONTROL: the real session-stdout.js writeSessionMeta with its first write unwrapped is printed (${hit.join(' | ')})`);
 });
 
 // §73 NO FILE OPENS A DATABASE FOR USAGE (row B-360d unit 1, the design read w0r2kz4cb law 1 — 2026-11-21; was «the usage index
@@ -4470,9 +4470,9 @@ await section(async () => {
   const texts72 = Object.fromEntries(files72.map((f) => [f, read(f)]));
   const found72 = judge72(texts72);
   ok(files72.length > 300 && !texts72['src/usage-index-worker.js'] && !texts72['src/server/usage-index.js'] && found72.length === 0, `§73 the census over ${files72.length} files is clean — no usage database, its worker and owner gone${found72.length ? ' — ' + found72.join(' | ') : ''}`);
-  ok(/['"]node:sqlite['"]/.test(strip72(texts72[SWORKER])) && /if \(isMainThread\) throw new Error\(/.test(texts72[SWORKER]) && /new Worker\(workerFile/.test(texts72[SOWNER]),
+  ok(gateOf(/['"]node:sqlite['"]/.test(strip72(texts72[SWORKER]))) && gateOf(/if \(isMainThread\) throw new Error\(/.test(texts72[SWORKER])) && verdictOf(/new Worker\(workerFile/.test(texts72[SOWNER])),
     '§73 the SEARCH index worker names node:sqlite, refuses the main thread, and its owner spawns it as a Worker (lane global-search)');
-  ok((strip72(texts72[WIRING]).match(/require\('\.\/usage-index-retire\.js'\)\.removeRetiredUsageIndex\(/g) || []).length === 1 && /fs\.promises\.rm\(/.test(texts72[RETIRE]) && !/rmSync|unlinkSync/.test(strip72(texts72[RETIRE])),
+  ok((strip72(texts72[WIRING]).match(/require\('\.\/usage-index-retire\.js'\)\.removeRetiredUsageIndex\(/g) || []).length === 1 && gateOf(/fs\.promises\.rm\(/.test(texts72[RETIRE])) && !/rmSync|unlinkSync/.test(strip72(texts72[RETIRE])),
     '§73 the retired index\'s files are removed at every start by ONE wiring, off the loop (fs.promises.rm — never a sync remove)');
   const plant = (f, line) => ({ ...texts72, [f]: texts72[f] + '\n' + line + '\n' });
   const PLANTS = [
@@ -4515,7 +4515,7 @@ await section(async () => {
   const srcs2 = SS.create({ vnc: { port: 5901 }, keeper: { noteInput: (id) => srcCalls.push('keeper ' + id), streamTarget: (id) => (srcCalls.push('keeper-target ' + id), null) }, engine: { noteUserInput: (id) => srcCalls.push('engine ' + id) }, access: { machineDesktopTarget: (id) => (srcCalls.push('access ' + id), { kind: 'rfb' }), machineDesktopGone: () => 'gone' } });
   const md = SS.sourceOf(srcs2, 'machine-desktop.h1');
   md.target('machine-desktop.h1'); md.onInput?.('machine-desktop.h1');
-  ok(wiringFolds() && md.name === 'machine-desktop' && md.personal && JSON.stringify(srcCalls) === '["access machine-desktop.h1"]' && SS.sourceOf(srcs2, 'da-1').name === 'keeper', '§D014 the bridge resolves a machine desktop through the access layer, never the keeper, and its input never reaches the keeper\'s idle clock (STREAM_SOURCES, by behaviour)');
+  ok(gateOf(wiringFolds()) && md.name === 'machine-desktop' && gateOf(md.personal) && JSON.stringify(srcCalls) === '["access machine-desktop.h1"]' && SS.sourceOf(srcs2, 'da-1').name === 'keeper', '§D014 the bridge resolves a machine desktop through the access layer, never the keeper, and its input never reaches the keeper\'s idle clock (STREAM_SOURCES, by behaviour)');
   ok(census({ ...srcs, 'src/agentd/agentd.js': srcs['src/agentd/agentd.js'] + "\nif (msg.op === 'machine-desktop') { }" }).length === 1 && census({ ...srcs, 'src/server/desktop-app-keeper.js': srcs['src/server/desktop-app-keeper.js'] + '\n// a vnc-native idle row' }).length === 1, '§D014 CONTROL: a planted daemon op / keeper row naming the rung is caught');
 });
 
@@ -4533,8 +4533,8 @@ await section(async () => {
       client: i >= 0 && gate >= 0, gateFirst: gate >= 0 && op > gate, capability: /'fs-write-stream'/.test(caps) };
   };
   const t70 = three(ad70, cl70);
-  ok(t70.handler && t70.client && t70.capability, `§74 write-stream: the daemon's handler, the client's gated method and the capability string are all present (${JSON.stringify(t70)})`);
-  ok(t70.gateFirst, '§74 the client asks the capability BEFORE the op is sent (an old agent is never asked an op it lacks)');
+  ok(gateOf(t70.handler) && gateOf(t70.client) && verdictOf(t70.capability), `§74 write-stream: the daemon's handler, the client's gated method and the capability string are all present (${JSON.stringify(t70)})`);
+  ok(verdictOf(t70.gateFirst), '§74 the client asks the capability BEFORE the op is sent (an old agent is never asked an op it lacks)');
   const noCap = three(ad70.replace(/'fs-write-stream'(, )?/, ''), cl70); // by content, never by the list's tail (§56): lane machine-desktop-apps appended a capability after it
   const noGate = three(ad70, cl70.replace("capabilities?.includes?.('fs-write-stream')", 'capabilities'));
   const late = three(ad70, cl70.replace("    if (!conn.info?.capabilities?.includes?.('fs-write-stream'))", "    await this._request({ op: 'fs-op', action: 'write-stream', step: 'probe' });\n    if (!conn.info?.capabilities?.includes?.('fs-write-stream'))"));
@@ -4648,7 +4648,7 @@ await section(async () => {
   const unguarded = judged.flatMap((j) => j.bad.map((s) => `${j.f}:${s.line} ${s.text}`));
   const unnamed = judged.filter((j) => !j.named).map((j) => j.f);
   const nSites = judged.reduce((a, j) => a + j.sites.length, 0);
-  ok(nSites >= 30 && judged.some((j) => j.f === 'test-windows-device-fs.mjs'), `§75 the census sees the old-object reads (${nSites} sites in ${judged.length} suites, test-windows-device-fs among them)`);
+  ok(nSites >= 30 && verdictOf(judged.some((j) => j.f === 'test-windows-device-fs.mjs')), `§75 the census sees the old-object reads (${nSites} sites in ${judged.length} suites, test-windows-device-fs among them)`);
   ok(unguarded.length === 0, `§75 every old-object git read sits behind a guard (try / a tested spawnSync / the probe itself)${unguarded.length ? ' — unguarded: ' + unguarded.join(' | ') : ''}`);
   ok(unnamed.length === 0, `§75 every suite with such a read says SKIP by name when it degrades${unnamed.length ? ' — no SKIP line: ' + unnamed.join(', ') : ''}`);
   // NEGATIVE CONTROLS: the shipped 94f0c1ea line, planted unguarded reads, and lookalikes that must stay quiet
@@ -4657,7 +4657,7 @@ await section(async () => {
   const GUARDED = 'const baseOf = (file) => { try { return execFileSync(';
   const shipped = wdfs.replace(/const baseOf = \(file\) => \{ try \{ return (execFileSync\([^\n]*?\}\)); \} catch \{ return null; \} \};/, 'const baseOf = (file) => $1;');
   const sj = judgeSrc(shipped);
-  ok(wdfs.includes(GUARDED) && shipped !== wdfs && sj.bad.length === 1 && /baseOf/.test(sj.bad[0].text), `§75 NEGATIVE CONTROL: test-windows-device-fs with its 94f0c1ea baseOf (no try) is red — ${JSON.stringify(sj.bad.map((s) => s.line))}`);
+  ok(gateOf(wdfs.includes(GUARDED)) && shipped !== wdfs && sj.bad.length === 1 && verdictOf(/baseOf/.test(sj.bad[0].text)), `§75 NEGATIVE CONTROL: test-windows-device-fs with its 94f0c1ea baseOf (no try) is red — ${JSON.stringify(sj.bad.map((s) => s.line))}`);
   ok(!judgeSrc(wdfs.replace(/SKIP/g, 'sk1p')).named, '§75 NEGATIVE CONTROL: the same suite without a SKIP line is red');
   const PLANTS = [
     [`const a = execFileSync('git', [${SH}, 'deadbeef:src/x.js']);`, 1],
@@ -4681,7 +4681,7 @@ await section(async () => {
   // from a PATCHED COPY of today's file in the scratch dir (voice-input.base-shape.js), and the suite reads no git object
   const vfc = fs.readFileSync(path.join(SCRIPTS, 'test-voice-follow-chrome.mjs'), 'utf8');
   const OLD_VF = "try { baseSrc = execFileSync('git', ['-C', REPO, " + SH + ", `${BASE_SHA}:src/lib/voice-input.js`], { encoding: 'utf8' }); } catch { }";
-  ok(!judged.some((j) => j.f === 'test-voice-follow-chrome.mjs') && !GIT_CALL.test(vfc) && vfc.includes("'voice-input.base-shape.js'") && judgeSrc(vfc + '\n' + OLD_VF).sites.length === 1,
+  ok(!judged.some((j) => j.f === 'test-voice-follow-chrome.mjs') && !GIT_CALL.test(vfc) && gateOf(vfc.includes("'voice-input.base-shape.js'")) && judgeSrc(vfc + '\n' + OLD_VF).sites.length === 1,
     '§75 test-voice-follow-chrome\'s RED CONTROL is a patched copy of today\'s voice-input.js — no git read at all (its .335 base read is seen when planted back)');
 });
 
@@ -4696,7 +4696,7 @@ await section(async () => {
   const listed = new Map(CLOCK_JUDGES.map((x) => [x.name, x.why]));
   const unlisted = found.filter((x) => !listed.has(x.name)), stale = [...listed.keys()].filter((n) => !found.some((x) => x.name === n));
   ok(!unlisted.length, `no suite judges complexity by the clock off the list (${found.length} listed: ${found.map((x) => `${x.name}:${x.lines.join(',')}`).join(' ')})${unlisted.length ? ' — UNLISTED: ' + unlisted.map((x) => `${x.name}:${x.lines.join(',')}`).join(' ') + ' (convert it to scripts/work-meter.mjs, or list it in ci.mjs CLOCK_JUDGES with why)' : ''}`);
-  ok(!stale.length && CLOCK_JUDGES.every((x) => String(x.why).length >= 40), `every CLOCK_JUDGES row is still found and says why it stays on the clock${stale.length ? ' — STALE: ' + stale.join(', ') : ''}`);
+  ok(!stale.length && verdictOf(CLOCK_JUDGES.every((x) => String(x.why).length >= 40)), `every CLOCK_JUDGES row is still found and says why it stays on the clock${stale.length ? ' — STALE: ' + stale.join(', ') : ''}`);
   // PATCHED-COPY CONTROL: test-channel-thread with its pre-.209 clock-ratio quote judge restored is found (and unlisted ⇒ red)
   const thread = fs.readFileSync(path.join(dir, 'test-channel-thread.mjs'), 'utf-8');
   const OLD = "  const timeOf = (n) => { const t0 = HR.bigint(); for (let i = 0; i < 20; i++) T.agentPlaceLine(T.placeOf(k, ix), {}); return Number(HR.bigint() - t0) / 1e6; };\n  const a = timeOf(64 * 1024), b = timeOf(512 * 1024);\n  ok(b < Math.max(5, a) * 16, `the quote path is LINEAR in the parent's text (8× the input ≤ 16× the time)`);\n".replaceAll('HR', ['process', 'hrtime'].join('.'));   // never the clock word itself here: this suite is censused too
@@ -4752,7 +4752,7 @@ await section(async () => {
   const daw = files.find(([f]) => f === 'src/lib/desktop-app-window.js')[1];
   const planted = scan([['src/lib/desktop-app-window.js', daw.replaceAll("if (!cap(rec, 'scales')) return '';", "if (!rec || rec.stream !== 'xpra') return '';")], ['src/desktop-serve.js', "const own = rec.backend !== M.DESKTOP_SINGLETON_ID;"]]);
   ok(planted.length === 3, `§DB1 CONTROL: the restored \`rec.stream !== 'xpra'\` (scaleChipText, scaleChipTitle) and a planted singleton-id branch are caught (${planted.length})`);
-  ok(DA.DISPLAY_BACKENDS.every((b) => DA.CAP_KEYS.every((k) => typeof b[k] === 'boolean')) && !DA.DISPLAY_BACKENDS.some((b) => 'adaptive' in b), `§DB1 every rung declares every cell (${DA.CAP_KEYS.join(', ')}) as a boolean; the unread \`adaptive\` column is gone`);
+  ok(gateOf(DA.DISPLAY_BACKENDS.every((b) => DA.CAP_KEYS.every((k) => typeof b[k] === 'boolean'))) && !DA.DISPLAY_BACKENDS.some((b) => 'adaptive' in b), `§DB1 every rung declares every cell (${DA.CAP_KEYS.join(', ')}) as a boolean; the unread \`adaptive\` column is gone`);
 });
 
 console.log('§76 every private-bus / GTK-fixture script gives its children a private XDG_RUNTIME_DIR');
@@ -4770,8 +4770,8 @@ await section(async () => {
   const strip = (t) => t.replace(/XDG_RUNTIME_DIR\s*:\s*(?!process\.env)[^,}]+,?/g, '');
   const ctl = [['test-desktop-app-snap.mjs', 'private bus'], ['test-desktop-xpra-window-close.mjs', 'GTK fixture']].map(([f, k]) => { const t = read('scripts/' + f); return { f, k, asWritten: unsafe(t), patched: unsafe(strip(t), imported(t).map(strip)) }; });
   const part = read('scripts/test-desktop-xpra-window-close.mjs');
-  ok(fixture(part) && !PRIV.test(part) && imported(part).some((m) => PRIV.test(m)), `§76 the xpra window part test-desktop-xpra-window-close resolves a GTK app and passes through the module it boots in (scripts/xpra-window-boot.mjs), not by an entry of its own`);
-  ok(ctl.every((c) => !c.asWritten && c.patched), `§76 NEGATIVE CONTROLS: ${ctl.map((c) => `${c.f} (${c.k}) passes as written and is caught with its XDG_RUNTIME_DIR entries stripped`).join('; ')}${ctl.some((c) => c.asWritten || !c.patched) ? ' — ' + JSON.stringify(ctl) : ''}`);
+  ok(gateOf(fixture(part)) && !PRIV.test(part) && verdictOf(imported(part).some((m) => PRIV.test(m))), `§76 the xpra window part test-desktop-xpra-window-close resolves a GTK app and passes through the module it boots in (scripts/xpra-window-boot.mjs), not by an entry of its own`);
+  ok(verdictOf(ctl.every((c) => !c.asWritten && c.patched)), `§76 NEGATIVE CONTROLS: ${ctl.map((c) => `${c.f} (${c.k}) passes as written and is caught with its XDG_RUNTIME_DIR entries stripped`).join('; ')}${ctl.some((c) => c.asWritten || !c.patched) ? ' — ' + JSON.stringify(ctl) : ''}`);
 });
 
 // §76b THE CONSENT MACHINE NAMES NO VENDOR (lane dc-channels-consent; the 2026-10-04 decoupling plan rows rv-channels-core
@@ -4799,11 +4799,11 @@ await section(async () => {
   };
   const FILES = ['src/server/channels-engine.js', ...Object.values(ENGINE_FAMILIES), 'src/routes/channels.js', 'src/oauth-loopback.js', 'src/lib/channel-account-dialogs.js'];
   const bad = census76b(FILES.map((f) => [f, read(f)]));
-  ok(FILES.every((f) => read(f).length > 5000) && bad.length === 0, `§76b the consent machine and the account dialog name no vendor — no quoted id, no vendor consent module, no paste fact (${bad.slice(0, 3).join(' | ') || 'clean'})`);
+  ok(gateOf(FILES.every((f) => read(f).length > 5000)) && bad.length === 0, `§76b the consent machine and the account dialog name no vendor — no quoted id, no vendor consent module, no paste fact (${bad.slice(0, 3).join(' | ') || 'clean'})`);
   const eng = engineSource(REPO), route = read('src/routes/channels.js'), dlg = read('src/lib/channel-account-dialogs.js');
-  ok(/for \(const m of REAL_ADAPTERS\) validateConsent\(m\.kind, m\.consent\);/.test(eng) && /const v = row\.landing\.stateVerdict\(state, \{ sign: signState,/.test(eng)
-    && /page = engine\(\)\.consentLandingOf\(kind\)|engine\(\)\.consentLandingOf\(kind\)/.test(route) && /\.send\(page\(r\)\);/.test(route) && /for \(const m of \[fake, \.\.\.REAL_ADAPTERS\]\) if \(m\.integration/.test(eng)
-    && /row\.signin === 'paste' && row\.paste/.test(dlg),
+  ok(gateOf(/for \(const m of REAL_ADAPTERS\) validateConsent\(m\.kind, m\.consent\);/.test(eng)) && gateOf(/const v = row\.landing\.stateVerdict\(state, \{ sign: signState,/.test(eng))
+    && gateOf(/page = engine\(\)\.consentLandingOf\(kind\)|engine\(\)\.consentLandingOf\(kind\)/.test(route)) && gateOf(/\.send\(page\(r\)\);/.test(route)) && gateOf(/for \(const m of \[fake, \.\.\.REAL_ADAPTERS\]\) if \(m\.integration/.test(eng))
+    && verdictOf(/row\.signin === 'paste' && row\.paste/.test(dlg)),
     '§76b every row is read where it is declared: the engine validates each REAL_ADAPTERS consent row at load and judges a landing by ITS row, the route sends the row\'s page, the fakes\' runner rides the one integration loop, the dialog draws the registry row\'s `paste`');
   const ctl = [
     ['engine judge', [['src/server/channels-engine.js', '    const v = SlackManifest.stateVerdict(state, { sign: signState, now: now(), ttlMs: PENDING_FLOW_TTL_MS });']]],
@@ -4816,7 +4816,7 @@ await section(async () => {
     ['dialog token words', [['src/lib/channel-account-dialogs.js', "    tr('3. Copy the User OAuth Token (it starts xoxp-) from “OAuth & Permissions” and paste it in the box below.'),"]]],
   ];
   const r = ctl.map(([n, files]) => ({ n, red: census76b(files).length > 0 }));
-  ok(r.every((x) => x.red), `§76b CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+  ok(verdictOf(r.every((x) => x.red)), `§76b CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
 });
 
 // §77 THE RAW API'S CORE NAMES NO VENDOR (B-2198, lane channel-api-declared; the owner 2026-10-04 "我需要当前系统低耦合"):
@@ -4842,7 +4842,7 @@ await section(async () => {
   const srcFiles = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => `src/${f}`).filter((f) => /\.(c|m)?js$/.test(f));
   const tree = srcFiles.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]);
   const bad = census77(tree);
-  ok(bad.length === 0 && CORE.every((c) => tree.some(([r]) => r === c)), `§77 ${tree.length} src files: no VENDORS / KIND_VENDOR table, the fence and the orchestrator name no vendor`, bad.join('; '));
+  ok(bad.length === 0 && verdictOf(CORE.every((c) => tree.some(([r]) => r === c))), `§77 ${tree.length} src files: no VENDORS / KIND_VENDOR table, the fence and the orchestrator name no vendor`, bad.join('; '));
   const core = new Map(tree.filter(([r]) => CORE.includes(r)));
   const ctl = [
     ['a VENDORS table back in the fence', [['src/channel-api.js', core.get('src/channel-api.js') + "\nconst VENDORS = Object.freeze({});\n"]]],
@@ -4851,7 +4851,7 @@ await section(async () => {
     ['a reader of F.VENDORS', [['src/routes/channels.js', 'const hosts = Object.values(F.VENDORS);']]],
   ];
   const r = ctl.map(([n, files]) => ({ n, red: census77(files).length > 0 }));
-  ok(r.every((x) => x.red), `§77 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+  ok(verdictOf(r.every((x) => x.red)), `§77 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
 });
 
 // §78 THE RATCHET: LITERAL-ID BRANCHES AND DEAD CODE ONLY SHRINK (lane dc-ratchet, 2026-10-04; the decoupling review's
@@ -4879,7 +4879,7 @@ await section(async () => {
   const run = await DEAD78;
   let dc = null; try { dc = JSON.parse(fs.readFileSync(run.out, 'utf8')); } catch {}
   fs.rmSync(run.dir, { recursive: true, force: true });
-  ok(run.code === 0 && dc, `§78 the dead-code census child ran (exit ${run.code}${run.err ? ' — ' + run.err.slice(0, 300) : ''})`);
+  ok(run.code === 0 && verdictOf(dc), `§78 the dead-code census child ran (exit ${run.code}${run.err ? ' — ' + run.err.slice(0, 300) : ''})`);
   dc = dc || { counts: {}, i18nKeys: {}, exportRows: [], libFiles: [] };
   const jDC = IB.judge(baseDC, dc.counts);
   const files = (byFile) => Object.keys(byFile || {}).length;
@@ -4899,11 +4899,11 @@ await section(async () => {
     : r.family === 'export-dead' ? dc.exportRows.filter((x) => x.startsWith(r.file + ' ')).map((x) => '      ' + x).join('\n') : '      ' + r.file;
   ok(jDC.rises.length === 0, `§78 no new dead text: unused i18n keys, unreferenced exports and unreached src/lib files stay at or under baseline${jDC.rises.length ? ' — RISES (use it or delete it):\n' + jDC.rises.map((r) => `    ${r.family} ${r.file}: ${r.base} → ${r.now}\n${dcDetail(r)}`).join('\n') : ''}`);
   ok(jDC.falls.length === 0, `§78 the dead-code baseline is current${jDC.falls.length ? ' — FALLS (good): lower the baseline in this commit with `node scripts/dead-code-census.mjs --lower`: ' + jDC.falls.map((r) => `${r.family} ${r.file} ${r.base} → ${r.now}`).join(' | ') : ''}`);
-  ok(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o)) && ib.owners.display.some((o) => /^src\/desktop-backends\.js:\d+-\d+$/.test(o)) && ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o)) && ib.owners.plugin.some((o) => o === 'src/plugins/'),
+  ok(gateOf(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o))) && gateOf(ib.owners.display.some((o) => /^src\/desktop-backends\.js:\d+-\d+$/.test(o))) && gateOf(ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o))) && verdictOf(ib.owners.plugin.some((o) => o === 'src/plugins/')),
     `§78 every owner table is found (a renamed table would silently count its own rows): ${['display', 'browser', 'plugin'].map((f) => ib.owners[f].join(' ')).join(' · ')}`);
   { // lane dc-harness-tail: an EXEMPT row (a declared registry / table / oracle) must still find its table and cover a line
     const exRows = Object.values(ib.exempt).flat();
-    ok(exRows.length === IB.EXEMPT.length && exRows.every((r) => r.span && r.lines > 0 && r.reason),
+    ok(exRows.length === IB.EXEMPT.length && verdictOf(exRows.every((r) => r.span && r.lines > 0 && r.reason)),
       `§78 every EXEMPT row finds its table and covers ≥ 1 member line (a dead exemption would hide a new branch): ${exRows.map((r) => `${r.file}:${r.span ? r.span.join('-') : 'NOT FOUND'} ${r.lines}`).join(' · ')}`);
   }
   // lane dc-dead-sweep (2026-10-05) deleted F3's 243 × 2 unused entries (+ the test-only ones), so the i18n half of the
@@ -4911,12 +4911,12 @@ await section(async () => {
   const { keyUnused } = await import('./dead-code-census.mjs');
   const planted = 'a planted key no source says ' + process.pid;
   const judgeOk = keyUnused(planted, new Set(), "x = t('Web view');") && !keyUnused('Web view', new Set(), "x = t('Web view');") && !keyUnused('Web view', new Set(['Web view']), '');
-  ok((dc.libFiles || []).includes('src/lib/usage-pace.js') && judgeOk, `§78 POSITIVE CONTROL: the census re-derives the review's findings (usage-pace.js unreached — rv-client F10) and flags a PLANTED unused dictionary key (${IB.total(dc.counts['i18n-unused'])} unused entries left)`);
+  ok(gateOf((dc.libFiles || []).includes('src/lib/usage-pace.js')) && verdictOf(judgeOk), `§78 POSITIVE CONTROL: the census re-derives the review's findings (usage-pace.js unreached — rv-client F10) and flags a PLANTED unused dictionary key (${IB.total(dc.counts['i18n-unused'])} unused entries left)`);
   // dc-browser-providers' CONTROL (its §79, folded into this family at int213): the keeper with ONE `=== 'chromium'` ladder
   // restored rises above its browser row — the launch shape is read from the PROVIDERS row, never branched on the id
   const KEEPER = 'src/server/browser-keeper.js';
   const kc = IB.census(REPO, { files: [KEEPER], read: (f) => read(f) + "\n    if (String(p.provider || 'chromium') === 'chromium') x();" });
-  ok((kc.counts.browser[KEEPER] || 0) > ((baseIB.browser || {})[KEEPER] || 0) && IB.judge(baseIB, { ...ib.counts, browser: { ...ib.counts.browser, [KEEPER]: kc.counts.browser[KEEPER] } }).rises.some((r) => r.family === 'browser' && r.file === KEEPER),
+  ok((kc.counts.browser[KEEPER] || 0) > ((baseIB.browser || {})[KEEPER] || 0) && verdictOf(IB.judge(baseIB, { ...ib.counts, browser: { ...ib.counts.browser, [KEEPER]: kc.counts.browser[KEEPER] } }).rises.some((r) => r.family === 'browser' && r.file === KEEPER)),
     `§78 NEGATIVE CONTROL (dc-browser-providers): the keeper with one \`=== 'chromium'\` branch restored is a browser rise (${(baseIB.browser || {})[KEEPER] || 0} → ${kc.counts.browser[KEEPER]})`);
   // NEGATIVE CONTROLS — the id-branch regexes and exclusions
   const PLANT = {
@@ -4962,7 +4962,7 @@ await section(async () => {
 // with a patched-copy control).
 await section(async () => {
   const rd = (f) => { try { return fs.readFileSync(path.join(ROOT_DIR_DCHS, f), 'utf8'); } catch { return ''; } };
-  ok(!/=== '(claude|codex|opencode|antigravity|shell)'/.test(rd('src/writer-sweep.js')) && !/=== '(claude|codex|opencode|antigravity|shell)'/.test(rd('src/resume-store.js')) && /store\.writerSweep|\.writerSweep\b/.test(rd('src/resume-store.js')),
+  ok(!/=== '(claude|codex|opencode|antigravity|shell)'/.test(rd('src/writer-sweep.js')) && !/=== '(claude|codex|opencode|antigravity|shell)'/.test(rd('src/resume-store.js')) && verdictOf(/store\.writerSweep|\.writerSweep\b/.test(rd('src/resume-store.js'))),
     'dc-harness-store: writer-sweep.js + resume-store.js read store.writerSweep / forkChain with no harness id branch (proof: test-harness-contract store:)');
 });
 
@@ -4981,7 +4981,7 @@ await section(async () => {
   const THREE = ['src/channel-settings.js', 'src/integration-registry.js', 'src/lib/settings-schema.js'];
   const now = THREE.map((f) => [f, read(f)]);
   const listSrc = read('src/channels/registry-list.js');
-  ok(KINDS.length >= 3 && census76c(now).length === 0 && KINDS.every((k) => listSrc.includes(`require('./${k}/manifest.js'),`)), `§76c the three derived files name no vendor (${census76c(now).join(', ') || 'clean'}); the list names each of ${KINDS.join(', ')} once`);
+  ok(KINDS.length >= 3 && census76c(now).length === 0 && verdictOf(KINDS.every((k) => listSrc.includes(`require('./${k}/manifest.js'),`))), `§76c the three derived files name no vendor (${census76c(now).join(', ') || 'clean'}); the list names each of ${KINDS.join(', ')} once`);
   const ctl = [
     ['a vendor table back in channel-settings.js', 'src/channel-settings.js', "\nconst T = { lark: { vendor: 'lark', rows: [] } };\n"],
     ['a vendor row back in integration-registry.js', 'src/integration-registry.js', "\nconst ROW = { id: 'slack', label: 'Slack' };\n"],
@@ -4989,7 +4989,7 @@ await section(async () => {
     ['a hand row back in settings-schema.js', 'src/lib/settings-schema.js', "\nconst H = { 'channels.larkNameField': { type: 'enum' } };\n"],
   ];
   const r = ctl.map(([n, f, add]) => ({ n, red: census76c([[f, read(f) + add]]).length > 0 }));
-  ok(r.every((x) => x.red), `§76c CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+  ok(verdictOf(r.every((x) => x.red)), `§76c CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
 });
 
 // §79 THE CHANNELS ENGINE'S FAMILIES MEET ONLY IN ITS ONE CONTEXT OBJECT (lane dc-channels-seams, rv-channels-core C11):
@@ -5038,7 +5038,7 @@ await section(async () => {
   const c1 = judge79(eng, { ...fams, [A]: fams[A].replace("const crypto = require('crypto');", "const crypto = require('crypto');\nconst Auth = require('./channels-auth.js');") }).bad.length > 0;
   const c2 = judge79(eng, { ...fams, [O]: fams[O].replace('  function outboxView(', '  const leak = () => engineCtx.tokensOf();\n  function outboxView(') }).bad.length > 0;
   const c3 = judge79(eng.replace(/(\n  const engineCtx = \{\n[^}]*?)\bbilledWake,/, '$1'), fams).bad.length > 0;
-  ok(c1 && c2 && c3, `§79 CONTROLS: a family requiring another (${c1 ? 'RED' : 'missed'}), a late door nobody answers (${c2 ? 'RED' : 'missed'}), a field dropped from the root (${c3 ? 'RED' : 'missed'})`);
+  ok(gateOf(c1) && gateOf(c2) && verdictOf(c3), `§79 CONTROLS: a family requiring another (${c1 ? 'RED' : 'missed'}), a late door nobody answers (${c2 ? 'RED' : 'missed'}), a field dropped from the root (${c3 ? 'RED' : 'missed'})`);
 });
 
 // §80 ONE BUILT-IN PLUGIN REGISTRY, NO ID DISPATCH (lane dc-plugins, 2026-10-04 — rv-server H3 + rv-client F9). A
@@ -5082,7 +5082,7 @@ await section(async () => {
     ['a member without provides', [[memberFiles[0], get(memberFiles[0]).replace(/^ {2}provides: \[[^\]]*\],\n/m, '')]]],
   ];
   const r = ctl.map(([n, files]) => ({ n, applied: files.every(([rel, t]) => t !== get(rel)), red: census79(files).length > 0 }));
-  ok(r.every((x) => x.applied && x.red), `§80 CONTROLS: ${r.map((x) => `${x.n} (${x.applied ? (x.red ? 'RED' : 'missed') : 'patch did not apply'})`).join(', ')}`);
+  ok(verdictOf(r.every((x) => x.applied && x.red)), `§80 CONTROLS: ${r.map((x) => `${x.n} (${x.applied ? (x.red ? 'RED' : 'missed') : 'patch did not apply'})`).join(', ')}`);
 });
 
 // lane dc-client-billing (2026-10-04): the client billing surfaces read the declared ui row — no billing-word / backend-label ternary on a harness id left in src/lib (test-billing-row carries the fake-harness proof)
@@ -5161,7 +5161,7 @@ await section(async () => { const NAME_DIGESTS = new Set([
   const key128 = (w) => { let h = 0x811c9dc5; for (let i = 0; i < w.length; i++) h = Math.imul(h ^ w.charCodeAt(i), 16777619); return (h ^ Math.imul(w.length, 0x9e3779b1)) & 0x3fffffff; };
   const [K1, K2] = ['zqqqaaglup', 'zqxqauwosz'], DK = new Set([crypto.createHash('sha256').update(K1).digest('hex')]);
   const byteCheck = key128(K1) === key128(K2) && nameCensus([['docs/kb-file-structure.md', `${doc}\n${K2} ${K1}\n`]], DK, {}).length === 1 && nameCensus([['docs/kb-file-structure.md', `${doc}\n${K2}\n`]], DK, {}).length === 0;
-  ok(r.every((x) => x.ok) && byteCheck, `public repo hygiene CONTROLS: ${r.map((x) => `${x.n} (${x.ok ? (x.wantRed ? 'RED' : 'green') : 'WRONG'})`).join(', ')}`);
+  ok(gateOf(r.every((x) => x.ok)) && verdictOf(byteCheck), `public repo hygiene CONTROLS: ${r.map((x) => `${x.n} (${x.ok ? (x.wantRed ? 'RED' : 'green') : 'WRONG'})`).join(', ')}`);
 });
 // §81 A FIXTURE NEVER NAMES A FIXED LOOPBACK ENDPOINT (lane fixture-ports, B-b6cd, 2026-10-06 — mirror-green-220). The
 // fake agent-browser of test-browser-ephemeral answered `get cdp-url` with the FIXED ws://127.0.0.1:19888 as its "dead"
@@ -5273,7 +5273,7 @@ await section(async () => {
     ['a deadPort() and a comment', c('test-x.mjs', "const P = await deadPort(); // ws://127.0.0.1' + ':19888 was alive\nconst u = `ws://127.0.0.1:${P}/x`;\n"), false],
     ['a dead EXEMPT row', judge81([['test-x.mjs', "const u = 'http://127.0.0.1" + ":3000/';\n"]], { 'test-x.mjs': [[3000, 4000], 'x'] }).dead.join() === 'test-x.mjs:4000', true],
   ];
-  ok(r81.every(([, got, want]) => got === want), `§81 CONTROLS: ${r81.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(r81.every(([, got, want]) => got === want)), `§81 CONTROLS: ${r81.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 });
 // §82 CLAUDE.md IS AN INDEX OF ≤ 100 000 BYTES (lane claude-md-diet, B-23e7, 2.369.235). Every agent session pays the
 // auto-loaded CLAUDE.md at its start AND again after each compaction: ≈ 115K tokens a copy with ~30 lane workers a day
@@ -5322,7 +5322,7 @@ await section(async () => {
   const md = fs.readFileSync(path.join(REPO, 'CLAUDE.md'), 'utf8'), bytes = Buffer.byteLength(md);
   ok(bytes <= CLAUDE_MD_MAX_BYTES, `§82 ① CLAUDE.md is ${bytes} bytes ≤ ${CLAUDE_MD_MAX_BYTES}, ${CLAUDE_MD_MAX_BYTES - bytes} of headroom (the ratchet; the law caps it at 100 000) — a per-file or per-incident line goes to its kb INDEX head`);
   const ptrs = [...new Set(pointers82(md))], dangling = ptrs.filter((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md')));
-  ok(ptrs.includes('kb-file-structure') && ptrs.includes('kb-bugfix-invariants') && dangling.length === 0, `§82 ② every ⇒ kb-… pointer in CLAUDE.md names a file in docs/ (${ptrs.length}: ${ptrs.join(' ')})${dangling.length ? ' — DANGLING: ' + dangling.join(' ') : ''}`);
+  ok(gateOf(ptrs.includes('kb-file-structure')) && gateOf(ptrs.includes('kb-bugfix-invariants')) && dangling.length === 0, `§82 ② every ⇒ kb-… pointer in CLAUDE.md names a file in docs/ (${ptrs.length}: ${ptrs.join(' ')})${dangling.length ? ' — DANGLING: ' + dangling.join(' ') : ''}`);
   // the before-text is read only when some block has a retirement (its sha leg); a depth-1 checkout says SKIP by name
   const retiring82 = fx82.blocks.some((b) => (b.retired || []).length), md82 = retiring82 ? beforeText(REPO) : null;
   if (retiring82 && !md82) console.log(`  SKIP §82 ④ the retired blocks' before-text sha leg: ${BEFORE82} is not in this checkout (depth-1) — the per-row leg still holds them`);
@@ -5358,9 +5358,9 @@ await section(async () => {
     const long = over300(b, lines);
     ok(long.length === 0, `§82 ③ every ${b.home} "${b.region}" line is ≤ 300 characters or a moved line's fixture row${long.length ? ' — OVER: ' + long.map((l) => [...l].slice(0, 60).join('')).join(' | ') : ''}`);
     const j = judgeMoved(fx82, b, lines, { before: before82 && before82[b.name] });
-    ok(j.ok, `§82 ④ ${j.line}${j.said.map((x) => '\n       ' + x).join('')}`);
+    ok(verdictOf(j.ok), `§82 ④ ${j.line}${j.said.map((x) => '\n       ' + x).join('')}`);
     const off = (b.heads || []).flatMap((t, i) => (h82(t) === String(b.rows[i]).split(':')[0] && [...t].length <= fx82.keyChars ? [] : [i + 1]));
-    ok(Array.isArray(b.retired) && Array.isArray(b.heads) && b.heads.length === b.rows.length && off.length === 0, `§82 ⑤ ${b.name}: ${(b.heads || []).length} clear heads align with its ${b.rows.length} rows (each hashes to its row's head) · ${(b.retired || []).length} retired${off.length ? ' — OFF at rows ' + off.slice(0, 10).join(' ') : ''}`);
+    ok(gateOf(Array.isArray(b.retired)) && gateOf(Array.isArray(b.heads)) && b.heads.length === b.rows.length && off.length === 0, `§82 ⑤ ${b.name}: ${(b.heads || []).length} clear heads align with its ${b.rows.length} rows (each hashes to its row's head) · ${(b.retired || []).length} retired${off.length ? ' — OFF at rows ' + off.slice(0, 10).join(' ') : ''}`);
     // lane vault-use-grants round 7/9 (MINOR): a dated INDEX line (ANY tail form) lives ONLY inside this `## INDEX` region — a
     // planted/stranded one in the essays (after the region's end) is RED by name. r6's hole: §82 ③/④ read only lines INSIDE
     // the region, so the stranded lane lines below the first essay kept every assert green. Judged by line INDEX (via regionAt)
@@ -5368,7 +5368,7 @@ await section(async () => {
     // caught too.
     if (b.name === 'bugfix-index') {
       const stray = strandedDated(text, b.region), dup = strandedDup(text, b.region);
-      ok(regionAt82(text, b.region) && stray.length === 0 && dup.length === 0, `§82 ⑥ no INDEX line stranded in the essays of ${b.home} — dated (any tail form) OR byte-identical to a region line${stray.length ? ' — dated OUTSIDE at ' + stray.map(([, i]) => i + 1).join(',') : ''}${dup.length ? ' — duplicate OUTSIDE at ' + dup.map(([, i]) => i + 1).join(',') : ''}`, { stray: stray.length, dup: dup.length });
+      ok(gateOf(regionAt82(text, b.region)) && stray.length === 0 && dup.length === 0, `§82 ⑥ no INDEX line stranded in the essays of ${b.home} — dated (any tail form) OR byte-identical to a region line${stray.length ? ' — dated OUTSIDE at ' + stray.map(([, i]) => i + 1).join(',') : ''}${dup.length ? ' — duplicate OUTSIDE at ' + dup.map(([, i]) => i + 1).join(',') : ''}`, { stray: stray.length, dup: dup.length });
     }
   }
   // CONTROLS: a home missing one moved line, a line's head reworded, a tail edit (quiet: edited, not lost), a new 301-char
@@ -5431,7 +5431,7 @@ await section(async () => {
     ['a COPIED region line stranded below the essays is caught (byte-identical)', strandedDup(homes.get('bugfix-index').text + '\n' + ((homes.get('bugfix-index').lines || []).find((l) => l.startsWith('- ')) || '- x') + '\n', '## INDEX').length > 0, true],
     ['a NON-identical essay bullet below the region is spared by strandedDup (no false positive)', strandedDup(homes.get('bugfix-index').text + '\n- a brand new essay bullet that matches no index line at all\n', '## INDEX').length > strandedDup(homes.get('bugfix-index').text, '## INDEX').length, false],
   ];
-  ok(mid > 0 && r82.every(([, got, want]) => got === want), `§82 CONTROLS: ${r82.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(mid > 0 && verdictOf(r82.every(([, got, want]) => got === want)), `§82 CONTROLS: ${r82.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 });
 // §83 A CHANNEL VENDOR IS ITS FOLDER + ONE LINE: NO SHARED CHANNEL FILE SPELLS A VENDOR ID (lane channel-vendor-one-file,
 // B-e3f1; the owner 2026-10-04: "保持通用内部接口格式，拓展 vendor 只需要 vendor-specific 的文件 + 一行注册"). A vendor declares
@@ -5476,7 +5476,7 @@ await section(async () => {
   const j83 = judge83(rows83, IDS83);
   console.log(`  ${files83.length} files · vendor ids ${IDS83.join(', ')} · ${j83.hits.length} hit(s)${j83.hits.length ? '\n    ' + j83.hits.join('\n    ') : ''}`);
   const BRIEF83 = ['src/server/channels-engine.js', 'src/server/channels-access.js', 'src/server/channels-wiring.js', 'src/server/channels-auth.js', 'src/server/channels-outbound.js', 'src/routes/channels.js', 'src/channel-caps.js', 'src/channel-drain.js', 'src/channel-feed.js', 'src/lib/channel-words.js', 'src/lib/channels-panel.js', 'src/lib/channel-account-dialogs.js', 'src/channel-settings.js', 'src/integration-registry.js'];
-  ok(BRIEF83.every((f) => files83.includes(f)) && IDS83.length >= 4, `§83 the scope holds the engine + its families, access, wiring, routes, caps, drain, feed, words, panel, dialogs, settings, registry (${files83.length} files)${BRIEF83.filter((f) => !files83.includes(f)).map((f) => ' — missing ' + f).join('')}`);
+  ok(gateOf(BRIEF83.every((f) => files83.includes(f))) && IDS83.length >= 4, `§83 the scope holds the engine + its families, access, wiring, routes, caps, drain, feed, words, panel, dialogs, settings, registry (${files83.length} files)${BRIEF83.filter((f) => !files83.includes(f)).map((f) => ' — missing ' + f).join('')}`);
   ok(j83.unread.length === 0 && j83.hits.length === 0, `§83 no shared channel file spells a vendor id in a string / template / regex (was 7 at f835b0e58)${j83.unread.length ? ' — unreadable: ' + j83.unread.join(', ') : ''}${j83.hits.length ? ' — ' + j83.hits.slice(0, 4).join(' ; ') : ''}`);
   // CONTROLS: one 'slack' literal planted back into the engine, the base's API-access kind list planted back into the
   // panel, a comment + an identifier that must stay quiet, a fake vendor joining the list joins the census
@@ -5489,7 +5489,7 @@ await section(async () => {
     ['a comment naming Slack + RANGE_SLACK_MS', red('src/channel-x.js', '// Slack and Lark answer here\nconst RANGE_SLACK_MS = 5;\n'), false],
     ['a fake vendor joining the list', red('src/channel-x.js', "if (k === 'acme') go();\n", [...IDS83, 'acme']) && !red('src/channel-x.js', "if (k === 'acme') go();\n"), true],
   ];
-  ok(r83.every(([, got, want]) => got === want), `§83 CONTROLS: ${r83.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(r83.every(([, got, want]) => got === want)), `§83 CONTROLS: ${r83.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 });
 // ── §84 A SUITE ENDS WHAT IT MADE (B-60d2, 2026-10-07) ─────────────────────
 // /tmp (tmpfs) held 30 of 62 GB of `vs-*` dirs older than a day. A suite's mint through scripts/scratch.mjs (scratch /
@@ -5553,13 +5553,13 @@ await section(async () => {
   const suites = fs.readdirSync(DIR).filter((f) => /^test-.*\.mjs$/.test(f)).sort();
   const SCR = read('scratch.mjs');
   const regPin = (src) => /let p = path\.join\(TMP_ROOTS\[0\], `\$\{FIXTURE_CWD_PREFIX\}\$\{name\}-\$\{process\.pid\}`\);\n\s*if \(fs\.existsSync\(p\)\) p = leftoverAside\(p\);\n\s*MINTED\.set\(name, p\);\n\s*if \(IS_SUITE\) endScratchAtExit\(p\);/.test(src) && /if \(!closerArmed\) \{ closerArmed = true; armCloser\(\); \}/.test(src) && /if \(event !== 'exit'\) return emit\.call\(this, event, \.\.\.rest\);\n\s*process\.removeListener\('exit', endAll\); process\.on\('exit', endAll\);\n\s*try \{ return emit\.call\(this, event, \.\.\.rest\); \} finally \{ endAll\(\); \}/.test(src);
-  ok(regPin(SCR), 'scratch.mjs registers every SUITE mint (scratch → scratchDir / scratchHome) and removes it at exit');
+  ok(verdictOf(regPin(SCR)), 'scratch.mjs registers every SUITE mint (scratch → scratchDir / scratchHome) and removes it at exit');
   ok(!regPin(SCR.replace('if (IS_SUITE) endScratchAtExit(p);', '')), 'CONTROL: scratch.mjs without the registration fails the pin (red)');
   ok(!regPin(SCR.replace('if (fs.existsSync(p)) p = leftoverAside(p);', '')), 'CONTROL B-d8e3: scratch.mjs that takes a leftover at its pid-keyed name as its own fails the pin (red; test-ci-gate-reaper §9d drives it)');
   ok(!regPin(SCR.replace("process.removeListener('exit', endAll); process.on('exit', endAll);\n", '')) && !regPin(SCR.replace('try { return emit.call(this, event, ...rest); } finally { endAll(); }', 'return emit.call(this, event, ...rest);')), 'CONTROL B-0d6d: scratch.mjs whose closer is not moved LAST at the exit, or not run in its finally, fails the pin (red; test-ci-gate-reaper §9d drives the order)');
   const minters = suites.filter((f) => /\b(?:scratch|scratchDir|scratchHome)\(/.test(read(f)));
   const keepers = suites.filter((f) => /\bkeepScratch\(/.test(read(f)));
-  ok(keepers.every((f) => SCRATCH_KEEP[f]) && Object.keys(SCRATCH_KEEP).every((f) => keepers.includes(f)), `every keepScratch caller is a KEEP row with its reason, and every row still calls it: ${keepers.join(' ') || 'none'}`);
+  ok(gateOf(keepers.every((f) => SCRATCH_KEEP[f])) && verdictOf(Object.keys(SCRATCH_KEEP).every((f) => keepers.includes(f))), `every keepScratch caller is a KEEP row with its reason, and every row still calls it: ${keepers.join(' ') || 'none'}`);
   const found = {}; for (const f of suites) { const u = unended(read(f)); if (u.length) found[f] = u; }
   const fresh = Object.entries(found).flatMap(([f, ns]) => ns.filter((n) => !(SCRATCH_END_EXEMPT[f] || []).includes(n)).map((n) => `${f} ${n}`));
   const stale = Object.entries(SCRATCH_END_EXEMPT).flatMap(([f, ns]) => ns.filter((n) => !(found[f] || []).includes(n)).map((n) => `${f} ${n}`));
@@ -5583,7 +5583,7 @@ await section(async () => {
   ok(j85.red.length === 0, `§85 ${files85.length} files: ${j85.rows.length} signal/alive sites, each a row with its proof ${JSON.stringify(j85.counts)}${j85.red.length ? ' — RED: ' + j85.red.join(' | ') : ''}`);
   ok(j85.dead.length === 0, `§85 every row names a live site (a dead row would hide a new bare kill)${j85.dead.length ? ' — DEAD: ' + j85.dead.join(' | ') : ''}`);
   const rec85 = C.recordsJudge(REPO);
-  ok(rec85.every((r) => r.ok), `§85 RECORDS: ${rec85.length} persisted pids, each writer on the page (${rec85.map((r) => r.what + ' = ' + r.proof).join('; ')})${rec85.some((r) => !r.ok) ? ' — MISSING: ' + rec85.filter((r) => !r.ok).map((r) => r.what).join(', ') : ''}`);
+  ok(verdictOf(rec85.every((r) => r.ok)), `§85 RECORDS: ${rec85.length} persisted pids, each writer on the page (${rec85.map((r) => r.what + ' = ' + r.proof).join('; ')})${rec85.some((r) => !r.ok) ? ' — MISSING: ' + rec85.filter((r) => !r.ok).map((r) => r.what).join(', ') : ''}`);
   // CONTROLS: a bare kill of the stored pid planted back into jobs.js, agentd's kill with its proof taken away, an
   // unlisted shell probe, and a comment that must stay quiet
   const [jf, jt] = files85.find(([f]) => f === 'src/jobs.js');
@@ -5602,7 +5602,7 @@ await section(async () => {
     ['a dated `legacy` row with its proof on the page', C.judgeCensus([['src/x.js', "if (proven(m)) process.kill(m.pid, 'SIGTERM');\n"]], [['src/x.js', "process.kill(m.pid, 'SIGTERM')", 'legacy', 'proven\\(m\\)', 'x', 12, 1, 'falls to cmdline — retire 2026-12-01']]).red.length > 0, false],
     ['the remote keeper\'s stop with its proof taken away', (() => { const [kf, kt] = files85.find(([f]) => f === 'data/bin/vibespace-remote-keeper'); const t = kt.replace(/proven\(m, role\)/g, 'true').replace(/proven\(m, 'child'\)/g, 'true'); return t !== kt && red85(kf, t); })(), true],
   ];
-  ok(r85.every(([, got, want]) => got === want), `§85 CONTROLS: ${r85.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(r85.every(([, got, want]) => got === want)), `§85 CONTROLS: ${r85.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
   // int238 HOTFIX (the owner's Update exit 1 at 2.369.237): the scope is the TRACKED data/bin, never a readdir — a scratch
   // repo whose data/bin holds an IGNORED file with a kill line (the downloaded rclone ELF's shape) and a TRACKED one
   const s85 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-arch85-'));
@@ -5615,7 +5615,7 @@ await section(async () => {
     const g85 = (...a) => spawnSync('git', ['-C', s85, ...a], { encoding: 'utf8', env: gitEnvFrom(process.env) });
     g85('init', '-q'); g85('add', '-A');
     const tracked85 = C.censusFiles(s85).map(([f]) => f), ignored85 = C.censusFiles(s85).filter(([f]) => f !== 'data/bin/vibespace-x');
-    ok(!tracked85.includes('data/bin/rclone') && tracked85.includes('data/bin/vibespace-x') && C.judgeCensus(ignored85).red.length === 0 && C.judgeCensus(C.censusFiles(s85)).red.length > 0,
+    ok(!tracked85.includes('data/bin/rclone') && gateOf(tracked85.includes('data/bin/vibespace-x')) && C.judgeCensus(ignored85).red.length === 0 && C.judgeCensus(C.censusFiles(s85)).red.length > 0,
       `§85 CONTROL: the scope is the TRACKED data/bin — an ignored data/bin/rclone holding a kill line is never read (quiet), a tracked data/bin kill line is RED (scope ${JSON.stringify(tracked85)})`);
   } finally { fs.rmSync(s85, { recursive: true, force: true }); }
 });
@@ -5633,7 +5633,7 @@ await section(async () => {
   ok(j86.red.length === 0, `§86 ${files86.length} files: ${C.ROWS.length} reader files (${sites86} sites), each a row ${JSON.stringify(j86.counts)}${j86.red.length ? ' — RED: ' + j86.red.join(' | ') : ''}`);
   ok(j86.dead.length === 0, `§86 every row names a live reader${j86.dead.length ? ' — DEAD: ' + j86.dead.join(' | ') : ''}`);
   const sfs86 = files86.find(([f]) => f === 'src/safe-fs.js')[1];
-  ok(C.doorPinned(sfs86), '§86 SafeFs.call asks the door before it picks a worker (a blocked path is never queued)');
+  ok(verdictOf(C.doorPinned(sfs86)), '§86 SafeFs.call asks the door before it picks a worker (a blocked path is never queued)');
   // CONTROLS: the design folder read with its door taken away, an unlisted reader, a new read in an own-tree file, the
   // SafeFs door moved after the pick, a dead row — and a comment naming a read that must stay quiet
   const [df, dt] = files86.find(([f]) => f === 'src/design-fs.js');
@@ -5648,7 +5648,7 @@ await section(async () => {
     ['the SafeFs door moved after the pick', C.doorPinned(sfs86.replace(C.DOOR_PIN.door, '').replace(C.DOOR_PIN.before, C.DOOR_PIN.before + ' ' + C.DOOR_PIN.door)), false],
     ['a row whose reader is gone', C.judgeCensus([[af, 'module.exports = 1;\n'], ['src/y.js', '']]).dead.length > 0, true],
   ];
-  ok(r86.every(([, got, want]) => got === want), `§86 CONTROLS: ${r86.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(r86.every(([, got, want]) => got === want)), `§86 CONTROLS: ${r86.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
   // lane file-preview-mount (userW inc-mvq4hn9x): a route never hands a LIBRARY a path to read — the xlsx lib's readFile
   // is its own readFileSync on the main thread (refused on a storage mount); the previews read through SafeFs (the row's door)
   const lib86 = C.libByPath(files86);
@@ -5661,7 +5661,7 @@ await section(async () => {
     ['a comment naming XLSX.readFile(', C.libByPath([[ff86, '// XLSX.readFile(path) did its own readFileSync\n']]).length > 0, false],
     ["the workbook's SafeFs road taken out of files.js", red86([[ff86, ft86.replace("sfs(req).call('xlsxSheets'", "sfs(req).call('stat'")]]), true],
   ];
-  ok(l86.every(([, got, want]) => got === want), `§86 LIB_BY_PATH CONTROLS: ${l86.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(l86.every(([, got, want]) => got === want)), `§86 LIB_BY_PATH CONTROLS: ${l86.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 });
 // §87 A VFS CACHE IS NEVER REMOVED OR COPIED ON THE LOOP OR THE THREADPOOL (B-4997, lane vfs-cache-local, 2026-10-09).
 // The owner's OneDrive cache held 164 788 files on fuse.bindfs over NFS; remove() ran fs.rm over it on the libuv threadpool
@@ -5675,15 +5675,15 @@ await section(async () => {
   const red87 = Object.entries(src87).flatMap(([f, s]) => hits87(s).map((h) => `${f}: ${h}`));
   ok(red87.length === 0, `§87 no fs rm/cp-family call over a VFS cache dir in the hub or the device twin${red87.length ? ' — RED: ' + red87.join(' | ') : ''}`);
   const mm87 = src87['src/mounts.js'];
-  ok(/viaStarter\('rm', \['-rf', '--one-file-system', '--', dir\], \{ timeoutMs: MountManager\.CACHE_RM_MS,/.test(mm87)
-    && /const ok = await this\._afterMounted\(m, mp\);\s*if \(ok && m\.cacheOld\) this\._dropCacheDir\(m, m\.cacheOld\);/.test(mm87),
+  ok(gateOf(/viaStarter\('rm', \['-rf', '--one-file-system', '--', dir\], \{ timeoutMs: MountManager\.CACHE_RM_MS,/.test(mm87))
+    && verdictOf(/const ok = await this\._afterMounted\(m, mp\);\s*if \(ok && m\.cacheOld\) this\._dropCacheDir\(m, m\.cacheOld\);/.test(mm87)),
     '§87 the old cache dir is removed by a CHILD rm with a timeout (asked of the starter since B-323e\'s part 3 remainder), only after the new daemon mounted');
   const c87 = [
     ['the pre-lane fs.rm over the cache', hits87("    try { fs.rm(path.join(this._vfsCacheRoot(), id), { recursive: true, force: true }, () => {}); } catch {}\n").length > 0, true],
     ['a copy of the old cache into the new', hits87('      fs.cpSync(p.from, p.dir, { recursive: true });\n').length > 0, true],
     ['a comment naming fs.rm(cacheDir)', hits87('  // never fs.rm(cacheDir) here\n').length > 0, false],
   ];
-  ok(c87.every(([, got, want]) => got === want), `§87 CONTROLS: ${c87.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(c87.every(([, got, want]) => got === want)), `§87 CONTROLS: ${c87.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 });
 // §88 NO `builtin` BRANCH OUTSIDE THE AGENTS MODULE (lane webhook-l1-server, docs/design-webhook.zh.md §1 rows 3 / 19). The
 // engine used to branch on `builtin` in eleven places (seeding, reach, listing, remove / duplicate, the account's auth
@@ -5706,7 +5706,7 @@ await section(async () => {
     ['the pre-lane reach branch', hits88("    if (mod && mod.builtin) {\n").length > 0, true],
     ['the projection to the client', hits88("      id: rec.id, builtin: !!rec.builtin,\n").length > 0, false],
   ];
-  ok(c88.every(([, got, want]) => got === want), `§88 CONTROLS: ${c88.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(c88.every(([, got, want]) => got === want)), `§88 CONTROLS: ${c88.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 });
 // §89 EVERY HUB LISTENER REACHES BOTH SERVERS (lane https-tailscale, 2026-10-12). The hub answers http AND https on ONE
 // port (src/server/tls.js: a first-byte demux in front of two servers); a listener attached to the http server alone
@@ -5757,7 +5757,7 @@ await section(async () => {
     ['a new upgrade site in a module', judge89(sj, { ...files89, 'src/server/x-new.js': "module.exports = (srv) => srv.on('upgrade', () => {});\n" }).length > 0, true],
     ['the tree as it is', red89.length > 0, false],
   ];
-  ok(c89.every(([, got, want]) => got === want), `§89 CONTROLS: ${c89.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(c89.every(([, got, want]) => got === want)), `§89 CONTROLS: ${c89.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 });
 // §90 EVERY NET HOP OF A PERSON'S PICTURE OR INPUT IS noDelay (lane picture-path-nodelay, owner "延迟更低"). Node keeps
 // Nagle ON for a `net` socket: a small write behind an un-ACKed one waits for the peer's delayed ACK (~40 ms) — a key's
@@ -5795,7 +5795,7 @@ await section(async () => {
     ['the fixed shape', red("      sock = net.connect(port, '127.0.0.1');\n      sock.setNoDelay(true);\n"), false],
     ['a commented-out connect', red("  // const s = net.connect(port);\n"), false],
   ];
-  ok(c90.every(([, got, want]) => got === want), `§90 CONTROLS: ${c90.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(c90.every(([, got, want]) => got === want)), `§90 CONTROLS: ${c90.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 });
 // §91 A HUB ACT ON A DEVICE IS NEVER ANONYMOUS (lane device-act-audit, design q-042 §3 D4, 2026-10-19). After `hello` a device
 // trusts its hub for every op; the hub's own acts there (a command, a file, a secret, keys, a LAN socket, new code) were
@@ -5819,13 +5819,13 @@ await section(async () => {
     ['a LAN tcpForward without by', C91.censusActCalls({ root: REPO, files: ['x.js'], override: { 'x.js': "async function f(dm) { await dm.tcpForward(22, '10.0.0.2'); }" } }).missing.length, 1],
     ['a by inside a string only', C91.censusActCalls({ root: REPO, files: ['x.js'], override: { 'x.js': "async function f(dm) { await dm.fsWrite(p, 'by: x'); }" } }).missing.length, 1],
   ];
-  ok(ctl91.every(([, got, want]) => got === want), `§91 CONTROLS: ${ctl91.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  ok(verdictOf(ctl91.every(([, got, want]) => got === want)), `§91 CONTROLS: ${ctl91.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
   // every client construction hands its acts to the audit (ssh: hosts.js, dial: dial-pairing.js, this machine: server.js)
   const mk91 = ['src/hosts.js', 'src/server/dial-pairing.js', 'server.js'].map((f) => {
     const t = read(f); const i = t.indexOf('new DeviceManager({');
     return { f, ok: i >= 0 && /\bonAct:\s*\(line\)\s*=>/.test(t.slice(i, i + 3000)) };
   });
-  ok(mk91.every((x) => x.ok), `§91 every DeviceManager construction passes onAct (${mk91.map((x) => x.f + (x.ok ? '' : ' — MISSING')).join(', ')})`);
+  ok(verdictOf(mk91.every((x) => x.ok)), `§91 every DeviceManager construction passes onAct (${mk91.map((x) => x.f + (x.ok ? '' : ' — MISSING')).join(', ')})`);
 });
 // §92 A DEVICE RE-EXECS NOTHING UNSIGNED (lane device-bundle-signing, design q-042 D2). Before, a hub whose bundle
 // version differed streamed its own data/bin bundle and the device landed it, repointed `current` and re-exec'd — a
@@ -5845,7 +5845,7 @@ await section(async () => {
     return calls === 1 && iV > 0 && iV < iNo && iNo < iRet && iRet < iRen && iRen < iRep && roads === 2;
   };
   const AD92 = read('src/agentd/agentd.js');
-  ok(judge92(AD92), '§92 the ONE writer of a device\'s `current` (landBundle — the stream and the ssh road land through it) runs only after the signature verdict over the bytes on disk');
+  ok(verdictOf(judge92(AD92)), '§92 the ONE writer of a device\'s `current` (landBundle — the stream and the ssh road land through it) runs only after the signature verdict over the bytes on disk');
   const strays92 = fs.readdirSync(path.join(REPO, 'src/agentd')).filter((f) => f.endsWith('.js') && !['agentd.js', 'reexec.js', 'client.js'].includes(f)).filter((f) => /repointCurrent\(|'current'\)/.test(read('src/agentd/' + f)));
   ok(!strays92.length, `§92 no other agent module writes \`current\` (${strays92.join(', ') || 'none'})`);
   const c92 = [
@@ -5853,7 +5853,7 @@ await section(async () => {
     ['a second repoint', judge92(AD92.replace('function beginUpgrade(', 'function other92() { repointCurrent(fs, { root: ROOT, dir: ROOT }); }\nfunction beginUpgrade('))],
     ['a road that skips landBundle', judge92(AD92.replace('const v = landBundle(tmp, dir, version, { sig }, { dialed: true });', 'const v = { ok: true };'))],
   ];
-  ok(c92.every(([, v]) => v === false), `§92 CONTROLS: ${c92.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
+  ok(verdictOf(c92.every(([, v]) => v === false)), `§92 CONTROLS: ${c92.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
 });
 // §93's DATA-FLOW NAME CENSUS (lane job-notify-user r6, accept-r5 confirmed 0 + unverified 1): r5's census read a job
 // record's name off fixed SPELLINGS and stayed green for a record copied into a PURE renderer (the injected digest) and for
@@ -6160,9 +6160,9 @@ await section(async () => {
   // wrapper carries the shape half. (WHICH module owns each store file is test-record-clear-census §A; this is the masking.)
   console.log('§93 the agent-output sink belt (the six writers mask before text lands)');
   const belt93 = read('src/agent-output-belt.js');
-  ok(/require\('\.\/secret-shapes\.js'\)/.test(belt93) && !/function\s+redactSecrets|function\s+maskText\b/.test(belt93),
+  ok(gateOf(/require\('\.\/secret-shapes\.js'\)/.test(belt93)) && !/function\s+redactSecrets|function\s+maskText\b/.test(belt93),
     '§93 the belt chains the existing scrubbers (secret-shapes + the guarded vault-run require) and forks neither');
-  ok(/require\('\.\/vault-run\.js'\)/.test(belt93), '§93 the belt reuses src/vault-run.js maskText (the P0-e seam — a guarded require)');
+  ok(verdictOf(/require\('\.\/vault-run\.js'\)/.test(belt93)), '§93 the belt reuses src/vault-run.js maskText (the P0-e seam — a guarded require)');
   // lane job-notify-user r2: + src/jobs.js — a notify cron's fire belts the agent's --text before the owner message and the For-you copy
   const EXPECTED93 = ['src/jobs.js', 'src/server/conversation-deliver.js', 'src/server/groups-engine.js', 'src/session-status.js', 'src/task-groups.js', 'src/user-todos.js'];
   const srcFiles93 = [];
@@ -6170,12 +6170,12 @@ await section(async () => {
   walk93('src');
   const callers93 = srcFiles93.filter((f) => /\.maskForSink\s*\(/.test(read(f))).sort();
   ok(JSON.stringify(callers93) === JSON.stringify(EXPECTED93), `§93 the belt's callers are EXACTLY the six sink writers${callers93.join() !== EXPECTED93.join() ? ` — got: ${callers93.join(', ') || '(none)'}` : ''}`);
-  for (const f of EXPECTED93) ok(/require\('[^']*agent-output-belt\.js'\)/.test(read(f)), `§93 ${f} requires the belt`);
+  for (const f of EXPECTED93) ok(verdictOf(/require\('[^']*agent-output-belt\.js'\)/.test(read(f))), `§93 ${f} requires the belt`);
   const jw93 = read('data/bin/job-wrapper.js');
   // lane vault-job-road (protocol 3): a job GIVEN vault values is masked by its values first (this run's own — the run door's
   // createRunMasker; the wrapper holds them to mask its log, never a DEK), then by the shape census; a job with none, by shapes
-  ok(/secret-shapes\.js/.test(jw93) && /child\.stdout\.on\('data', \(b\) => writeLog\(maskOut\('out', b\)\)\)/.test(jw93) && /child\.stderr\.on\('data', \(b\) => writeLog\(maskOut\('err', b\)\)\)/.test(jw93)
-    && /function maskOut\(k, b\) \{\n  if \(!VAL\) return maskChunk\(b\);/.test(jw93) && /const shaped = \(t\) => \(t \? maskChunk\(/.test(jw93) && !/vault-engine|secret-box|lawfulKey/.test(jw93),
+  ok(gateOf(/secret-shapes\.js/.test(jw93)) && gateOf(/child\.stdout\.on\('data', \(b\) => writeLog\(maskOut\('out', b\)\)\)/.test(jw93)) && gateOf(/child\.stderr\.on\('data', \(b\) => writeLog\(maskOut\('err', b\)\)\)/.test(jw93))
+    && gateOf(/function maskOut\(k, b\) \{\n  if \(!VAL\) return maskChunk\(b\);/.test(jw93)) && gateOf(/const shaped = \(t\) => \(t \? maskChunk\(/.test(jw93)) && !/vault-engine|secret-box|lawfulKey/.test(jw93),
     '§93 the detached job wrapper masks the child output through the shape census — after THIS run\'s vault values when it was given any (protocol 3) — and holds no engine, no DEK');
   // THE JOBS ROAD (lane job-notify-user r2 → r3): src/server/jobs-wiring.js files a job's For-you copy with origin 'jobs' — an
   // AGENT-FIELDS origin (src/inbox-origin.js AGENT_FIELDS_ORIGINS): the store belts each FIELD (the i18n params, the label's
@@ -6185,14 +6185,14 @@ await section(async () => {
   const jobsRoad93 = (io, ut) => set93(io, 'AGENT_FIELDS_ORIGINS').includes('jobs') && !set93(io, 'AGENT_WORDS_ORIGINS').includes('jobs')
     && /const agentFields = AGENT_FIELDS_ORIGINS\.includes\(origin\);/.test(ut) && /normalizeI18n\(\(normalizeI18n\(i18n\), maskI18nParams\(i18n, beltOf\)\)\)/.test(ut)
     && /beltOf\(jobName\.trim\(\)\.slice\(0, 200\)\)/.test(ut) && /\(agentWords \? beltOf\(text\.trim\(\)\) : text\.trim\(\)\)/.test(ut);
-  ok(/origin: 'jobs'/.test(jw93w) && jobsRoad93(io93, ut93), '§93 the jobs road: jobs-wiring files origin \'jobs\', an agent-FIELDS origin — the store belts each field (the params, the label\'s job name), never the sentence');
+  ok(gateOf(/origin: 'jobs'/.test(jw93w)) && verdictOf(jobsRoad93(io93, ut93)), '§93 the jobs road: jobs-wiring files origin \'jobs\', an agent-FIELDS origin — the store belts each field (the params, the label\'s job name), never the sentence');
   // THE MESSAGE ROAD (r3, claim r2-0 (b)): the job's NAME is belted on every copy of a job's message — the chat card's label
   // (fromName), the retry meta, the stash, the header (src/jobs.js labelOf) — and a SUBSCRIBER's copy of the agent's --text
   // is belted (its author's is whole)
   const msgRoad93 = (jb) => /labelOf\(job\) \{[\s\S]{0,800}?const out = this\._nameWords\(raw\);/.test(jb) && /fromName: 'Background Work · ' \+ this\.labelOf\(job\)/.test(jb)
     && /jobName: this\.labelOf\(job\), ev:/.test(jb) && /jobName: stale \? CLEARED_TEXT : this\.labelOf\(job\)/.test(jb) && /M\.renderOwnerNotify\(job, ev, \{ name \}\)/.test(jb)
     && /const subEv = ev && ev\.agentWhat \? \{ \.\.\.ev, what: this\._agentWords\(ev\.what\) \} : ev;/.test(jb);
-  ok(msgRoad93(jb93), '§93 the message road: the job\'s NAME belted on every copy (the label, the header, the retry meta, the stash), a subscriber\'s copy of the --text belted');
+  ok(verdictOf(msgRoad93(jb93)), '§93 the message road: the job\'s NAME belted on every copy (the label, the header, the retry meta, the stash), a subscriber\'s copy of the --text belted');
   // …and EVERY PERSON-FACING NAME (r4, claim r3-1 FINDING 3): the snapshot a non-author reads (the Jobs panel's card title, the
   // ask window's title, another lineage), the events ring (the injected digest), the Ports label — the record keeps it raw
   const nameRoad93 = (jb) => /name: author \|\| !job\.name \? job\.name : this\.labelOf\(job\),/.test(jb) && /this\.events\.push\(\{ ts: now\(\), jobId: job\.id, name: this\.labelOf\(job\),/.test(jb)
@@ -6200,7 +6200,7 @@ await section(async () => {
     && jb.includes('M.resolveName(spec.name, visNames, { mask: (t) => this._nameWords(t, { typed: true }) })')   // r7: the record's name belted WHOLE (the engine's belt, the vault's values too), then cut — r9: THE NAME RULE as typed, once
     && /_nameWords\(s, \{ typed = false \} = \{\}\) \{[\s\S]{0,1100}?\n {4}try \{ return require\('\.\/agent-output-belt\.js'\)\.maskForSink\(raw, \{ dataDir: this\.d\.dataDir, byValue: true, typed, onFailed: failed \}\); \} catch \(e\) \{[\s\S]{0,400}?\n {6}return '«redacted»';\n {4}\}/.test(jb)   // r8: judged BY THE VALUE — r9: THE NAME RULE (`typed` the record's only) — r253: a fallback journaled, a belt that cannot load answers the MARK
     && jb.includes("name: this._nameWords(`${job.name} run`),");   // r8: a scheduled run's new record too
-  ok(nameRoad93(jb93), '§93 the name road: a token-shaped job NAME is belted wherever a person or another conversation reads it (snapshot, events ring, Ports label) — its author reads the record (the create echo, its own views; r7: the record keeps the name belted at create)');
+  ok(verdictOf(nameRoad93(jb93)), '§93 the name road: a token-shaped job NAME is belted wherever a person or another conversation reads it (snapshot, events ring, Ports label) — its author reads the record (the create echo, its own views; r7: the record keeps the name belted at create)');
   // THE ONE FOR-YOU DOOR, CENSUSED BY ITS CALLERS (lane job-notify-user r4, accept-r3 unverified 0 + claim r3-1 FINDING 2): the
   // engine reaches the For-you store's dep in ONE method — _forYou (the constructor holds it; the stray door journals a call
   // that skipped _forYou) — and every _forYou call hands it the copy M.forYouCopy built. The census walks the METHODS that
@@ -6261,7 +6261,7 @@ await section(async () => {
   // to the job it was minted for) and _forYou files only a copy minted for ITS job; a hand-built one is refused by name
   const mint93 = (jm, jb) => jm.includes('const MINTED = new WeakMap();') && jm.includes('Object.freeze(c.words); MINTED.set(Object.freeze(c), job ? jobIdOf(job) || NO_ID : null);') && jm.includes("function jobIdOf(job) { return job && typeof job.id === 'string' && job.id ? job.id : null; }")
     && jb.includes('const minted = M.mintedFor(c), jobId = job ? M.jobIdOf(job) : null;') && jb.includes('if ((job && !jobId) || minted === undefined || minted !== jobId) {') && jb.indexOf('if ((job && !jobId) || minted === undefined || minted !== jobId) {') < jb.indexOf(GET93);   // r8: the job's ID — r9: a non-empty string (a job with no id: no copy)
-  ok(!doorBad93.length && view93(jb93) && mint93(read('src/job-model.js'), jb93), `§93 THE DOOR CENSUS (${doorFiles93.length} files — src/, server.js, data/bin — every scope): the engine reaches the For-you dep in _forYou alone (held off the object graph: the constructor's one set, _forYou's one get; \`this.d\` a view with no road back to deps — no prototype road), the door is called by name (never held as a value), every copy it files is one M.forYouCopy MINTED for its job (its own words, no shape — a hand-built copy is refused at run time) and the stray copy is the stray door's${doorBad93.length ? ' — ' + doorBad93.join(' | ') : ''}`);
+  ok(!doorBad93.length && gateOf(view93(jb93)) && verdictOf(mint93(read('src/job-model.js'), jb93)), `§93 THE DOOR CENSUS (${doorFiles93.length} files — src/, server.js, data/bin — every scope): the engine reaches the For-you dep in _forYou alone (held off the object graph: the constructor's one set, _forYou's one get; \`this.d\` a view with no road back to deps — no prototype road), the door is called by name (never held as a value), every copy it files is one M.forYouCopy MINTED for its job (its own words, no shape — a hand-built copy is refused at run time) and the stray copy is the stray door's${doorBad93.length ? ' — ' + doorBad93.join(' | ') : ''}`);
   const PARK93 = "this._forYou(job, M.forYouCopy(job, 'parked'));";
   const plant93 = (add) => jb93.replace(PARK93, PARK93 + '\n' + add);
   const redBy93 = (src, re) => door93(src, 'src/jobs.js').some((p) => re.test(p));
@@ -6286,14 +6286,14 @@ await section(async () => {
   };
   const keyStore93 = (ut) => { const code = ut.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n'); return /const FILER_KEYS = new WeakMap\(\);/.test(code) && !/\bthis\s*\.\s*_?filerKeys\b|\bthis\s*\[\s*['"`]_?filerKeys/.test(code) && (code.match(/\bFILER_KEYS\.(?:get|set)\(this\b/g) || []).length === 3; };
   const keyBad93 = keyHolders93(files93);
-  ok(!keyBad93.length && keyStore93(ut93), `§93 THE KEY HOLDER: the For-you store keeps its filer keys in a module WeakMap (FILER_KEYS — no property of the store holds one) and only origin 'jobs''s ONE filer holds its key (src/server/jobs-wiring.js: one ask, two hand-ons)${keyBad93.length ? ' — ' + keyBad93.join(' | ') : ''}`);
+  ok(!keyBad93.length && verdictOf(keyStore93(ut93)), `§93 THE KEY HOLDER: the For-you store keeps its filer keys in a module WeakMap (FILER_KEYS — no property of the store holds one) and only origin 'jobs''s ONE filer holds its key (src/server/jobs-wiring.js: one ask, two hand-ons)${keyBad93.length ? ' — ' + keyBad93.join(' | ') : ''}`);
   const ck93 = [
     ['a holder lifting the key off the store (140205ee `_filerKeys`)', !keyHolders93([...files93, ['src/server/ghost-lift.js', "const k = t._filerKeys.get('jo' + 'bs');\n"]]).some((p) => /^src\/server\/ghost-lift\.js:1 holds/.test(p))],
     ['an unlisted holder asking the store for the key', !keyHolders93([...files93, ['src/server/ghost-lift.js', "const k = store.filerKey('jobs');\n"]]).some((p) => /^src\/server\/ghost-lift\.js:1 holds/.test(p))],
     ['an unlisted holder handing a key on', !keyHolders93([...files93, ['src/server/ghost-lift.js', "store.add('x', { origin: 'jobs', filerKey: k });\n"]]).some((p) => /^src\/server\/ghost-lift\.js:1 holds/.test(p))],
     ['the store keeping its keys on itself (140205ee)', keyStore93(ut93.replace('const FILER_KEYS = new WeakMap();', 'const FILER_KEYS = new WeakMap();\nfunction keep() { this._filerKeys = new Map(); }'))],
   ];
-  ok(ck93.every(([, v]) => v === false), `§93 KEY HOLDER CONTROLS: ${ck93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
+  ok(verdictOf(ck93.every(([, v]) => v === false)), `§93 KEY HOLDER CONTROLS: ${ck93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
   // THE NAME CENSUS (lane job-notify-user r5 → r6, accept-r4 confirmed 0 + accept-r5 confirmed 0 + unverified 1): a job RECORD's
   // name reaches a person or another conversation through the engine's ONE accessor (src/jobs.js labelOf; a holder asks it
   // through M.labelVia(jm)). r5 read fixed SPELLINGS and stayed green while digestFor spread the record into jobLine, which cut
@@ -6424,7 +6424,7 @@ await section(async () => {
     ['an iterator\'s .next().value', !nameIsRed93(ghost93("module.exports = (jm, out) => {\n  out.push('job ' + jm.jobs.values().next().value.name);\n};\n"), /^src\/server\/ghost-name\.js:2 reads/)],
     ['Reflect.getOwnPropertyDescriptor and a template key', !nameIsRed93(ghost93("module.exports = (jm, id) => [Reflect.getOwnPropertyDescriptor(jm.jobs.get(id), 'name').value, jm.jobs.get(id)[`name`]];\n"), /^src\/server\/ghost-name\.js:1 reads/)],
   ];
-  ok(cn93.every(([, v]) => v === false), `§93 NAME CENSUS CONTROLS: ${cn93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
+  ok(verdictOf(cn93.every(([, v]) => v === false)), `§93 NAME CENSUS CONTROLS: ${cn93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
   // r7 (the real gate's plants C1 + C2, repro/r7/plants.sh): the controls above re-run from the base with each planted file
   // scanned directly — so they were red while a FULL run never read a caller of a sibling's lookup helper, nor a file that
   // destructured the Map, neither matching r6's origin text. The same plants through a FULL run (the start set, the return closure)
@@ -6432,9 +6432,9 @@ await section(async () => {
     'src/server/ghost-k6.js': "function get(jm, id) { return jm.jobs.get(id); }\nmodule.exports = { get };\n", 'src/routes/ghost-k7.js': "const H = require('../server/ghost-k6.js');\nmodule.exports = (box, id, res) => {\n  const j = H.get(box, id);\n  res.json({ asker: 'job ' + j.name });\n};\n",
     'src/server/ghost-n6.js': "module.exports = (jm, id) => { console.log('[x] job', jm.jobs.get(id)); };\n" };   // r8: the reviewers' two (skeptic-census-plants.mjs) through a FULL run
   const full93 = nameBad93(flow93({ ...flowOpts93, files: [...nameFiles93, ...Object.keys(FULL93)], read: (f) => (f in FULL93 ? FULL93[f] : read(f)) }));
-  ok(['src/routes/ghost-r.js:4 reads', 'src/server/ghost-d.js:4 reads', 'src/routes/ghost-k7.js:4 reads', 'src/server/ghost-n6.js:1 reads'].every((k) => full93.some((p) => p.startsWith(k))), `§93 NAME CENSUS CONTROL, a FULL run: a caller of a sibling module's lookup helper (r8: one named like a collection method, H.get), a destructured Map and a whole record handed to console.log are read and RED by name (no incremental start)${full93.length ? ' — ' + full93.slice(0, 3).join(' | ') : ''}`);
+  ok(verdictOf(['src/routes/ghost-r.js:4 reads', 'src/server/ghost-d.js:4 reads', 'src/routes/ghost-k7.js:4 reads', 'src/server/ghost-n6.js:1 reads'].every((k) => full93.some((p) => p.startsWith(k)))), `§93 NAME CENSUS CONTROL, a FULL run: a caller of a sibling module's lookup helper (r8: one named like a collection method, H.get), a destructured Map and a whole record handed to console.log are read and RED by name (no incremental start)${full93.length ? ' — ' + full93.slice(0, 3).join(' | ') : ''}`);
   // …and the digest's rows are BUILT (accept-r5 confirmed 0): digestFor hands the renderer the accessor's label, never a record
-  ok(jb93.includes(DIGEST93) && jm93.includes(LINE93) && !jb93.split('\n').some((l) => !/^\s*(\/\/|\*)/.test(l) && /\bwithAge\b|\.\.\.j, ageHint/.test(l)), '§93 the digest: digestFor builds each row ({id, kind, state, ageHint, label: this.labelOf(j), sub?}) of the jobs ADDRESSED to the caller — jobLine cuts the BELTED label (the cut never precedes the mask)');
+  ok(gateOf(jb93.includes(DIGEST93)) && gateOf(jm93.includes(LINE93)) && !jb93.split('\n').some((l) => !/^\s*(\/\/|\*)/.test(l) && /\bwithAge\b|\.\.\.j, ageHint/.test(l)), '§93 the digest: digestFor builds each row ({id, kind, state, ageHint, label: this.labelOf(j), sub?}) of the jobs ADDRESSED to the caller — jobLine cuts the BELTED label (the cut never precedes the mask)');
   const c93 = [
     ['a caller with its belt stripped', /\.maskForSink\s*\(/.test(read('src/user-todos.js').replace(/belt\.maskForSink\(([^,]+),[^)]*\)/g, '$1'))],
     ['a seventh, unlisted caller', JSON.stringify([...callers93, 'src/ghost.js'].sort()) === JSON.stringify(EXPECTED93)],
@@ -6484,7 +6484,7 @@ await section(async () => {
     ['r8\'s mint: an id-less job\'s copy minted `undefined`', mint93(read('src/job-model.js').replace('Object.freeze(c.words); MINTED.set(Object.freeze(c), job ? jobIdOf(job) || NO_ID : null);', 'Object.freeze(c.words); MINTED.set(Object.freeze(c), job ? job.id : null);'), jb93)],
     ['a data/bin plant through `d.notifyUser`', !door93(read('data/bin/vibespace-job') + "\nd.notifyUser({ text: 'raw' });\n", 'data/bin/vibespace-job').some((p) => /^data\/bin\/vibespace-job:\d+ \S+ reaches the For-you dep/.test(p))],
   ];
-  ok(c93.every(([, v]) => v === false), `§93 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
+  ok(verdictOf(c93.every(([, v]) => v === false)), `§93 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
 });
 
 // §94 A CHILD GETS THE ENV IT NEEDS, NEVER THE HUB'S BY DEFAULT (lane spawn-env-census, 2026-10-20 — the sweep of lane
@@ -6533,7 +6533,7 @@ await section(async () => {
     // 主开发 r1363: a guard that is not a platform fact (a setting, a flag, an env word) is NOT a guard — a site planted behind a setting
     const set94c = "function poll() { if (serverSetting('usage.activePolling') === true) { require('child_process').execFileSync('ps', ['-A']); } }\nsetInterval(poll, 90000);\n";
     const jSet = ST.judge({ sites: [], syncSites: ST.syncScan(REPO, ['src/x-planted.js'], { patch: { 'src/x-planted.js': set94c } }), read: () => set94c }, { rows: [], syncRows: [['src/x-planted.js', "'ps'", 'timer', 1, 'planted behind a setting', "serverSetting('usage.activePolling') === true", 'a cost written out as the law asks, the same length a real row says it in']], debtSum: 99 });
-    ok(jP.red.some((r) => r.includes('vs-planted-probe')) && jDebt.red.some((r) => r.includes('TIMER_DEBT_SUM')) && jSync.red.some((r) => r.startsWith('A SYNCHRONOUS START ON A TIMER')) && jDead.red.some((r) => r.includes('src/ssh-key.js')) && jGuard.red.some((r) => r.includes('src/usage-routes.js') && r.includes('not in the site')) && jSet.red.some((r) => r.includes('no platform fact')) && jComment.red.some((r) => r.includes('not in the site')) && jAlias.red.some((r) => r.startsWith('a RENAMED synchronous start')) && jSlack.red.some((r) => r.includes('src/ctx-sync.js') && r.includes('lower the row')),
+    ok(gateOf(jP.red.some((r) => r.includes('vs-planted-probe'))) && gateOf(jDebt.red.some((r) => r.includes('TIMER_DEBT_SUM'))) && gateOf(jSync.red.some((r) => r.startsWith('A SYNCHRONOUS START ON A TIMER'))) && gateOf(jDead.red.some((r) => r.includes('src/ssh-key.js'))) && gateOf(jGuard.red.some((r) => r.includes('src/usage-routes.js') && r.includes('not in the site'))) && gateOf(jSet.red.some((r) => r.includes('no platform fact'))) && gateOf(jComment.red.some((r) => r.includes('not in the site'))) && gateOf(jAlias.red.some((r) => r.startsWith('a RENAMED synchronous start'))) && verdictOf(jSlack.red.some((r) => r.includes('src/ctx-sync.js') && r.includes('lower the row'))),
       '§94c CONTROLS: a timer start planted in a copy of a hub file is red BY NAME; one more timer row passes the debt\'s sum; a synchronous timer row with no guard is red with no row possible; a press row whose site is gone is DEAD; a guard not in its site\'s lines is red; a synchronous start planted behind a SETTING, its row naming the setting as its guard, is red (no platform fact); a guard spelled only in a COMMENT is none; a RENAMED execFileSync on a timer is red; a timer row with slack (one more than its live sites) is red',
       { planted: jP.red, debt: jDebt.red.filter((r) => r.includes('TIMER')), sync: jSync.red, dead: jDead.red, guard: jGuard.red, setting: jSet.red, comment: jComment.red, alias: jAlias.red, slack: jSlack.red.filter((r) => r.includes('ctx-sync')) });
   }
@@ -6591,7 +6591,7 @@ await section(async () => {
     ['a DEAD ssh row', red93(C.judge(C.scan(REPO, { files: ['src/agentd/client.js'] }), { rows: [], copyRows: [], fixed: [], sshRows: [...C.SSH_ROWS, ['src/agentd/client.js', "'nope'", 'serviceEnv', 'x']] }).red, 'DEAD ssh row')],
   ];
   const q93 = one93('src/zz-quiet.js', quiet93, { rows: [], copyRows: [], fixed: [] });
-  ok(c93.every(([, v]) => v) && q93.length === 0, `§94 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'RED' : 'WRONG'})`).join(', ')}, a comment + a *Sync child + a literal env (${q93.length ? 'WRONG: ' + q93.join(' | ') : 'quiet'})`);
+  ok(gateOf(c93.every(([, v]) => v)) && q93.length === 0, `§94 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'RED' : 'WRONG'})`).join(', ')}, a comment + a *Sync child + a literal env (${q93.length ? 'WRONG: ' + q93.join(' | ') : 'quiet'})`);
 });
 // §95 A STORAGE SECRET NEVER RIDES `rclone obscure <plain>` ON ARGV (lane mount-password-off-argv, B-d752 —
 // credential class). rclone's obscure is a PUBLIC algorithm, computed in-process (src/rclone-obscure.js, AES-256-CTR
@@ -6604,7 +6604,7 @@ await section(async () => {
   const hits94 = [];
   for (const f of files94) read(f).split('\n').forEach((l, i) => { if (!/^\s*(?:\/\/|\*|\/\*)/.test(l) && OBSCURE_EXEC.test(l)) hits94.push(`${f}:${i + 1}: ${l.trim().slice(0, 90)}`); });
   ok(files94.length > 100 && !hits94.length, `§95 no child_process call hands a secret to \`rclone obscure\` on argv — obscure is in-process (${files94.length} files, src/rclone-obscure.js)`, hits94.join(' | '));
-  ok(OBSCURE_EXEC.test("    return execFileSync(this.rcloneBin(), ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();")
+  ok(gateOf(OBSCURE_EXEC.test("    return execFileSync(this.rcloneBin(), ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();"))
     && !OBSCURE_EXEC.test("  // we obscure the password before handing it to rclone")
     && !OBSCURE_EXEC.test("const { obscure: rcloneObscure } = require('./rclone-obscure.js');"),
     '§95 NEGATIVE CONTROL: the pre-fix `execFileSync(rclone, [\'obscure\', plain])` is caught; a comment and the pure-module require are not');
@@ -6694,18 +6694,18 @@ await section(async () => {
   const MUT_WALK = "  const bins = fs.readdirSync(path.join(REPO, 'data/bin')).filter((e) => isFile(e)); const ghost = bins.filter((b) => !ALLOW.includes(b)); ok(!ghost.length, 'no unlisted CLI');";
   const MUT_GIT = "  const bins = trackedFiles(REPO, 'data/bin'); const ghost = bins.filter((b) => !ALLOW.includes(b)); ok(!ghost.length, 'no unlisted CLI');";
   const flag96 = (line, exc = []) => { const m = DBIN.exec(line); return !!m && !gated96(line, line) && !exc.some((n) => line.includes(n)); };
-  ok(flag96(MUT_WALK) && !flag96(MUT_GIT) && !flag96(MUT_WALK, ["fs.readdirSync(path.join(REPO, 'data/bin'))"]),
+  ok(gateOf(flag96(MUT_WALK)) && !flag96(MUT_GIT) && !flag96(MUT_WALK, ["fs.readdirSync(path.join(REPO, 'data/bin'))"]),
     '§96 MUTANT: a census whose data/bin listing is a working-tree readdir is RED; the trackedFiles() / git ls-files form is green; a declared CENSUS_WALK_EXCEPTIONS needle turns it green');
   // r2: the LOCAL-WALKER shape (the readdir's argument a variable) — RED through the walker; the direct regex alone missed it
   const MUT_VAR = ["  const files = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(dir, e.name)) : [path.join(dir, e.name)]));",
     "  const hits = [...files(path.join(REPO, 'src')), ...files(path.join(REPO, 'data/bin'))].filter((f) => /job-secrets/.test(fs.readFileSync(f, 'utf8')));"];
   const MUT_VAR_GIT = [MUT_VAR[0], "  const hits = [...files(path.join(REPO, 'src')), ...trackedFiles(REPO, 'data/bin').map((f) => path.join(REPO, f))].filter((f) => /job-secrets/.test(fs.readFileSync(f, 'utf8')));"];
   const flagVar = (ls) => { const w = walkersOf(ls); return ls.some((l) => { const m = DBIN.exec(l) || walkerCall(l, w); return !!m && !gated96(l, l); }); };
-  ok(flagVar(MUT_VAR) && !MUT_VAR.some((l) => DBIN.test(l)) && !flagVar(MUT_VAR_GIT) && walkersOf(MUT_VAR).has('files'),
+  ok(gateOf(flagVar(MUT_VAR)) && !MUT_VAR.some((l) => DBIN.test(l)) && !flagVar(MUT_VAR_GIT) && verdictOf(walkersOf(MUT_VAR).has('files')),
     '§96 r2 MUTANT: a data/bin listing through a LOCAL WALKER (`files(path.join(REPO, \'data/bin\'))` — the readdir\'s argument a variable) is RED, the direct-call regex alone misses it, and the git form is green');
   // and the helper itself exists and is git-derived (not a readdir)
   const tf = read('scripts/tracked-files.mjs');
-  ok(/export function trackedFiles\(/.test(tf) && /git'[^)]*'ls-files'/.test(tf) && /gitEnvFrom/.test(tf) && !DBIN.test(tf), '§96 the shared trackedFiles() helper lists via `git ls-files` through the sanitized gitEnvFrom (no readdir of a root)');
+  ok(gateOf(/export function trackedFiles\(/.test(tf)) && gateOf(/git'[^)]*'ls-files'/.test(tf)) && gateOf(/gitEnvFrom/.test(tf)) && !DBIN.test(tf), '§96 the shared trackedFiles() helper lists via `git ls-files` through the sanitized gitEnvFrom (no readdir of a root)');
 });
 // §99 AN AGENT CLI'S WAIT IS BOUNDED AND NAMED (lane cli-call-timeouts, hub feedback 2026-10-23: «vibespace-task progress
 // hung for 30+ min … the same line re-issued 3 min later landed in 2 s»). Every agent CLI (data/bin/vibespace-*, and the
@@ -6738,18 +6738,18 @@ await section(async () => {
   }
   ok(!bad99.length, `§99 no agent CLI calls its hub with a bare fetch / http.request (${bad99.slice(0, 4).join('; ') || 'clean'})`);
   ok(!unloaded99.length, `§99 every CLI that calls through CC.call loads THE ONE CALL by its literal names and takes its flag with CC.cliStart (${unloaded99.join(', ') || 'clean'})`);
-  ok(['vibespace-task', 'vibespace-ask', 'vibespace-msg', 'vibespace-job', 'vibespace-channels', 'vibespace-feedback', 'vibespace-api', 'vibespace-vault', 'vibespace-design', 'vibespace-browser', 'vibespace-window', 'vibespace-exit', 'vibespace-page', 'vibespace-docs', 'vibespace-remote', 'vibespace-app'].every((n) => callers99.includes(n)),
+  ok(verdictOf(['vibespace-task', 'vibespace-ask', 'vibespace-msg', 'vibespace-job', 'vibespace-channels', 'vibespace-feedback', 'vibespace-api', 'vibespace-vault', 'vibespace-design', 'vibespace-browser', 'vibespace-window', 'vibespace-exit', 'vibespace-page', 'vibespace-docs', 'vibespace-remote', 'vibespace-app'].every((n) => callers99.includes(n))),
     `§99 the brief's CLI list calls through it (${callers99.length}: ${callers99.join(' ')})`);
   const dead99 = Object.keys(EXEMPT99).filter((f) => !clis99.includes(f) || !bare99(read(f)).length);
   ok(!dead99.length, `§99 every EXEMPT99 row still names a tracked CLI with a bare call (${dead99.join(', ') || 'none dead'})`);
   // the generated vibespace-status (its template in agent-tool-generators.js) is an agent CLI too
   const gen99 = read('src/server/agent-tool-generators.js');
   const st99 = (gen99.match(/const script = `#!\/usr\/bin\/env node\n\/\/ vibespace-status[\s\S]*?\nfs\.writeFileSync\(STATUS_CMD|const script = `#!\/usr\/bin\/env node\n\/\/ vibespace-status[\s\S]*?`;/) || [''])[0];
-  ok(st99.length > 500 && /CC\.call\(api \+ '\/api\/agent\/session-status'/.test(st99) && !bare99(st99).length && st99.includes("require('../../src/cli-call.js')") && st99.includes("join(__dirname, 'cli-call.js')") && /CC\.cliStart\(\{ tool: 'vibespace-status'/.test(st99),
+  ok(st99.length > 500 && gateOf(/CC\.call\(api \+ '\/api\/agent\/session-status'/.test(st99)) && !bare99(st99).length && gateOf(st99.includes("require('../../src/cli-call.js')")) && gateOf(st99.includes("join(__dirname, 'cli-call.js')")) && verdictOf(/CC\.cliStart\(\{ tool: 'vibespace-status'/.test(st99)),
     '§99 the GENERATED vibespace-status calls through the one call too (its template)');
   // shipped beside the CLIs: copied at boot, gitignored, in AGENT_TOOLS
-  ok(/function createCliCallCopy\(\)[\s\S]{0,400}'src', 'cli-call\.js'[\s\S]{0,200}'cli-call\.js'\)/.test(gen99) && /\ncreateCliCallCopy\(\);/.test(gen99)
-    && (await import('node:module')).createRequire(import.meta.url)('../src/hosts.js').HostManager.AGENT_TOOLS.includes('cli-call.js') && /^data\/bin\/cli-call\.js$/m.test(read('.gitignore')), '§99 cli-call.js rides beside the CLIs: copied at boot, gitignored, in AGENT_TOOLS (every ship path carries it)');
+  ok(gateOf(/function createCliCallCopy\(\)[\s\S]{0,400}'src', 'cli-call\.js'[\s\S]{0,200}'cli-call\.js'\)/.test(gen99)) && gateOf(/\ncreateCliCallCopy\(\);/.test(gen99))
+    && gateOf((await import('node:module')).createRequire(import.meta.url)('../src/hosts.js').HostManager.AGENT_TOOLS.includes('cli-call.js')) && verdictOf(/^data\/bin\/cli-call\.js$/m.test(read('.gitignore'))), '§99 cli-call.js rides beside the CLIs: copied at boot, gitignored, in AGENT_TOOLS (every ship path carries it)');
   // CONTROLS: a bare fetch in a CLI, and the pre-lane postLong shape (an unbounded http.request), are both RED
   const mutFetch = read('data/bin/vibespace-task').replace('await CC.call(full, {', 'await fetch(full, {');
   const preLane = "const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST' }, (res) => {});";
@@ -6772,7 +6772,7 @@ await section(async () => {
   const hits100 = [];
   for (const f of files100) strip100(read(f)).split('\n').forEach((l, i) => { if (hit100(l)) hits100.push(`${f}:${i + 1}: ${l.trim().slice(0, 100)}`); });
   ok(files100.length > 200 && !hits100.length, `§100 no native confirm / alert / prompt in the client (${files100.length} tracked files under src/lib + public/index.html) — showConfirmDialog / showInputDialog / showToast are the doors`, hits100.join(' | '));
-  ok(hit100("      if (!window.confirm('Fetch quota from Anthropic?')) return;") && hit100("    if (!confirm(t('Delete {name}?', { name }))) return;") && hit100('  alert(e.message);') && hit100("  const v = prompt('Name');")
+  ok(gateOf(hit100("      if (!window.confirm('Fetch quota from Anthropic?')) return;")) && gateOf(hit100("    if (!confirm(t('Delete {name}?', { name }))) return;")) && gateOf(hit100('  alert(e.message);')) && gateOf(hit100("  const v = prompt('Name');"))
     && !hit100("    const ok = await showConfirmDialog({ title: t('Check every account’s usage limits now?') });") && !hit100("  async function confirm(password, { ip = null } = {}) {")
     && !hit100("  const r = await engine.confirm(id, terms);") && !hit100("  t('the notices ride its next prompt (restart the session)')"),
     '§100 NEGATIVE CONTROL: a bare / window. confirm, an alert, a prompt are caught; showConfirmDialog, a declaration, a method of another object and the word in a sentence are not');
@@ -6812,7 +6812,7 @@ await section(async () => {
   };
   const aFiles = [...READERS97, ...ENGINES97].map((f) => [f, read(f)]);
   const badA = judgeA(aFiles);
-  ok(aFiles.every(([, s]) => s.length > 0) && !badA.length, `§97 (a) ${READERS97.length} readers ask THE model's admits and ${READERS97.length + ENGINES97.length} reader / engine files hold no hand-written membership test${badA.length ? ' — ' + badA.slice(0, 6).join(' · ') : ''}`);
+  ok(gateOf(aFiles.every(([, s]) => s.length > 0)) && !badA.length, `§97 (a) ${READERS97.length} readers ask THE model's admits and ${READERS97.length + ENGINES97.length} reader / engine files hold no hand-written membership test${badA.length ? ' — ' + badA.slice(0, 6).join(' · ') : ''}`);
   // (a) per function body: in a READER function (its own body calls GM.admits) the words below are read only in its
   // parameters and in the facts handed to GM.admits (the literal argument, or the literal the name it passes was given)
   const WORDS97 = new Set(['groups', 'taskIds', 'groupIds']);
@@ -6865,14 +6865,14 @@ await section(async () => {
   ok(plantA !== ACL97 && judgeA([['src/channel-acl.js', plantA]]).length === 1 && judgeWords97('src/channel-acl.js', plantA).length > 0, '§97 (a) CONTROL: the pre-unify `ctx.groups.includes(p.id)` planted back into channel-acl is RED (the line census and the body census)');
   // the verify's gates-plant4: the same test through an alias — the line census cannot see it, the body census must
   const plantA2 = ACL97.replace("  const n = preparedOf(grant, p);\n  if (!n) return false;", "  const gs = Array.isArray(ctx.groups) ? ctx.groups : []; if (p.kind === 'group' && gs.includes(p.id)) return true;\n  const n = preparedOf(grant, p);\n  if (!n) return false;");
-  ok(plantA2 !== ACL97 && judgeA([['src/channel-acl.js', plantA2]]).length === 0 && judgeWords97('src/channel-acl.js', plantA2).some((l) => /principalApplies reads `groups`/.test(l)), '§97 (a) CONTROL (verify F3, gates-plant4): an ALIASED `const gs = ctx.groups; … gs.includes(p.id)` in principalApplies is RED by the body census (the line census alone stays green on it)');
+  ok(plantA2 !== ACL97 && judgeA([['src/channel-acl.js', plantA2]]).length === 0 && verdictOf(judgeWords97('src/channel-acl.js', plantA2).some((l) => /principalApplies reads `groups`/.test(l))), '§97 (a) CONTROL (verify F3, gates-plant4): an ALIASED `const gs = ctx.groups; … gs.includes(p.id)` in principalApplies is RED by the body census (the line census alone stays green on it)');
   // lane grants-read-is-a-lookup (G4): the helper that prepares the asker's facts (channel-acl factsFor, channel-filter
   // namedFactsOf) is judged as a reader — a membership test planted in it, through an alias, is RED by the body census
   const FF97 = "function factsFor(ctx) {\n";
   const plantA3 = ACL97.replace(FF97, FF97 + "  const gs = Array.isArray(ctx.groups) ? ctx.groups : []; if (gs.includes('G-planted')) return GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: [] });\n");
   const FLT97 = read('src/channel-filter.js'), NF97 = "function namedFactsOf(ctx) {\n";
   const plantA4 = FLT97.replace(NF97, NF97 + "  const gs = ctx.groups; if (Array.isArray(gs) && gs.length > 3) return null;\n");
-  ok(plantA3 !== ACL97 && judgeWords97('src/channel-acl.js', plantA3).some((l) => /factsFor reads `groups`/.test(l)) && plantA4 !== FLT97 && judgeWords97('src/channel-filter.js', plantA4).some((l) => /namedFactsOf reads `groups`/.test(l)) && !judgeWords97('src/channel-acl.js', ACL97).length && !judgeWords97('src/channel-filter.js', FLT97).length,
+  ok(plantA3 !== ACL97 && gateOf(judgeWords97('src/channel-acl.js', plantA3).some((l) => /factsFor reads `groups`/.test(l))) && plantA4 !== FLT97 && gateOf(judgeWords97('src/channel-filter.js', plantA4).some((l) => /namedFactsOf reads `groups`/.test(l))) && !judgeWords97('src/channel-acl.js', ACL97).length && !judgeWords97('src/channel-filter.js', FLT97).length,
     '§97 (a) CONTROL (lane grants-read-is-a-lookup, G4): a membership test planted through an alias in the helpers that PREPARE the asker\'s facts (channel-acl factsFor, channel-filter namedFactsOf) is RED by the body census; the helpers as they stand are green');
   // (b)
   const OLD97 = [
@@ -6938,7 +6938,7 @@ await section(async () => {
   const EP97 = read('src/exit-proxy.js');
   const RJ97 = "  rejudgeAll(why = 'task-groups', { goneSessions = [], goneHosts = [] } = {}) {\n";
   const plantB2 = EP97.replace(RJ97, RJ97 + "    for (const h0 of this._hosts()) { const legacyUse = h0.exit; if (legacyUse && legacyUse.use && legacyUse.use.mode === 'everyone') this.log('legacy'); }\n");
-  ok(plantB2 !== EP97 && judgeB([['src/exit-proxy.js', plantB2]]).some((l) => /^src\/exit-proxy\.js:\d+ reads a machine's `exit`/.test(l)), '§97 (b) CONTROL (verify F3, gates-plant2): `const legacyUse = h0.exit; … legacyUse.use.mode` planted into exit-proxy\'s rejudgeAll is RED (a `.exit.use` regex let it through)');
+  ok(plantB2 !== EP97 && verdictOf(judgeB([['src/exit-proxy.js', plantB2]]).some((l) => /^src\/exit-proxy\.js:\d+ reads a machine's `exit`/.test(l))), '§97 (b) CONTROL (verify F3, gates-plant2): `const legacyUse = h0.exit; … legacyUse.use.mode` planted into exit-proxy\'s rejudgeAll is RED (a `.exit.use` regex let it through)');
   // (c)
   const WRITERS97 = [
     ['src/exit-proxy.js', 'setAccess(', /\.setMany\(/], ['src/server/window-targets-engine.js', 'function putReach(', /\bg\.(?:set|remove)\(/],
@@ -7034,7 +7034,7 @@ await section(async () => {
   const planted = census97({ ...tx97, 'src/lib/planted.js': `x.innerHTML = '<input type="text" id="export-folder" placeholder="~/somewhere">';\nconst k = document.createElement('input'); k.placeholder = t('Folder to watch');` });
   const plantedLegacy = census97({ ...tx97, 'src/lib/planted.js': 'setupDirAutocomplete(a, b);' });
   const gone = census97({ ...tx97, 'src/lib/setup-flows.js': tx97['src/lib/setup-flows.js'].replace('const cwdPf = pathField(cwdInput, {', 'const cwdPf = null; ({') });
-  ok(planted.raw.length === 2 && plantedLegacy.legacy.includes('src/lib/planted.js') && gone.dead.length === 1 && gone.raw.some((r) => r.includes('ob-cwd')), `§98d NEGATIVE CONTROLS: a planted raw path input (markup + a placeholder) is RED (${planted.raw.length}), a planted setupDirAutocomplete( is RED, a door whose call is gone is a dead row AND its input turns raw`);
+  ok(planted.raw.length === 2 && gateOf(plantedLegacy.legacy.includes('src/lib/planted.js')) && gone.dead.length === 1 && verdictOf(gone.raw.some((r) => r.includes('ob-cwd'))), `§98d NEGATIVE CONTROLS: a planted raw path input (markup + a placeholder) is RED (${planted.raw.length}), a planted setupDirAutocomplete( is RED, a door whose call is gone is a dead row AND its input turns raw`);
 });
 
 // §101 NO CHILD'S STDIN IS EVER UNLISTENED ON A MACHINE ROAD (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH:
@@ -7104,7 +7104,7 @@ await section(async () => {
   const files101 = trackedFiles(REPO, 'src', 'server.js').filter((f) => /\.(?:c|m)?js$/.test(f));
   const tx101 = Object.fromEntries(files101.map((f) => [f, read(f)]));
   const real101 = census101(tx101);
-  ok(files101.length > 300 && real101.helper, `§101a THE ONE feed exists — hosts.js feedStdin attaches its 'error' listener before the first write (${files101.length} tracked files scanned)`);
+  ok(files101.length > 300 && verdictOf(real101.helper), `§101a THE ONE feed exists — hosts.js feedStdin attaches its 'error' listener before the first write (${files101.length} tracked files scanned)`);
   ok(!real101.roadBad.length, `§101a the ssh roads write no child's stdin themselves — every feed is feedStdin (${Object.entries(real101.feeds).map(([f, n]) => `${f.replace(/^src\//, '')} ${n}`).join(', ')})${real101.roadBad.length ? ' — RED: ' + real101.roadBad.join(' | ') : ''}`);
   ok(!real101.newBad.length, `§101b no NEW unlistened child stdin anywhere in src/ (${Object.values(DEBT101).reduce((n, [c]) => n + c, 0)} counted debt sites in ${Object.keys(DEBT101).length} files)${real101.newBad.length ? ' — RED: ' + real101.newBad.join(' | ') : ''}`);
   ok(!real101.debtOff.length, `§101b every DEBT101 pin is exact (a fixed site lowers its pin)${real101.debtOff.length ? ' — off: ' + real101.debtOff.join(' | ') : ''}`);
@@ -7113,7 +7113,7 @@ await section(async () => {
   const late101 = census101({ ...tx101, 'src/hosts.js': hostsT.replace(/(\n  stdin\.on\('error'[^\n]*\n)(  try \{ if \(bytes == null\)[^\n]*\n)/, '\n$2$1') });
   const newF = census101({ ...tx101, 'src/planted-101.js': "const c = spawn('x');\nc.stdin.end(buf);\n" });
   const okF = census101({ ...tx101, 'src/planted-101.js': "const c = spawn('x');\nc.stdin.on('error', () => {});\nc.stdin.end(buf);\n" });
-  ok(bare101.roadBad.length >= 1 && late101.helper === false && hostsT !== hostsT.replace('const fed = feedStdin(child, tar);', '') && newF.newBad.some((x) => x.startsWith('src/planted-101.js')) && !okF.newBad.length,
+  ok(bare101.roadBad.length >= 1 && late101.helper === false && hostsT !== hostsT.replace('const fed = feedStdin(child, tar);', '') && gateOf(newF.newBad.some((x) => x.startsWith('src/planted-101.js'))) && !okF.newBad.length,
     `§101c CONTROLS: a bare child.stdin.end(tar) in hosts.js (${bare101.roadBad.length} red), the helper's listener after its write (${late101.helper ? 'WRONG' : 'red'}) and an unlistened write in a new file (${newF.newBad.length ? 'red' : 'WRONG'}) are caught; a listened one is not (${okF.newBad.length ? 'WRONG' : 'green'})`);
 });
 
@@ -7704,9 +7704,9 @@ await section(async () => {
   const inputDecisions = inputCallers.filter(([, , l]) => /kind:\s*'decision'/.test(l));
   console.log(`  showInputDialog (a FORM): ${inputCallers.length} callers — ${inputDecisions.length} ask for a decision${inputDecisions.length ? ': ' + inputDecisions.map(([f, n, l]) => `${f}:${n} — ${(/\/\/\s*decision:\s*(.*)$/.exec(l) || [, '(none)'])[1]}`).join(' | ') : ''}`);
   ok(real.rows.length >= 100 && real.bad.length === 0, `§103 every createModalShell( call in src/ names its kind — 'decision' or 'form' — and every decision says why on its line, none a retired phrase over a FIELD (${real.rows.length} calls)${real.bad.length ? ' — RED: ' + real.bad.join(' | ') : ''}`);
-  ok(of('form').length > of('decision').length && of('dynamic').length === 2 && of('dynamic').some((r) => r.at.startsWith('src/lib/plugin-client.js:')) && of('dynamic').some((r) => r.at.startsWith('src/lib/utils.js:')), `§103 the forms outnumber the decisions (${of('form').length} / ${of('decision').length}) and the TWO dynamic rows are plugin-client's (a plugin declares its own) and utils.js _modalShell's (confirm = decision, input = form)`);
-  ok(of('decision').every((r) => !r.field), `§103 no decision carries a FIELD (r3: the five that did — machine-desktop's sign-in, «Verify it's you», the vault's unlock / set / change — are forms) (${of('decision').filter((r) => r.field).map(short).join(', ') || 'none'})`);
-  ok(inputDecisions.every(([, , l]) => /\/\/\s*decision:\s*\S/.test(l)), `§103 a showInputDialog caller that asks for a decision says why on its line (${inputDecisions.length})`);
+  ok(of('form').length > of('decision').length && of('dynamic').length === 2 && gateOf(of('dynamic').some((r) => r.at.startsWith('src/lib/plugin-client.js:'))) && verdictOf(of('dynamic').some((r) => r.at.startsWith('src/lib/utils.js:'))), `§103 the forms outnumber the decisions (${of('form').length} / ${of('decision').length}) and the TWO dynamic rows are plugin-client's (a plugin declares its own) and utils.js _modalShell's (confirm = decision, input = form)`);
+  ok(verdictOf(of('decision').every((r) => !r.field)), `§103 no decision carries a FIELD (r3: the five that did — machine-desktop's sign-in, «Verify it's you», the vault's unlock / set / change — are forms) (${of('decision').filter((r) => r.field).map(short).join(', ') || 'none'})`);
+  ok(verdictOf(inputDecisions.every(([, , l]) => /\/\/\s*decision:\s*\S/.test(l))), `§103 a showInputDialog caller that asks for a decision says why on its line (${inputDecisions.length})`);
   ok(real.escRed.length === 0, `§103 no caller puts its own keydown-Escape listener on a FORM's root (the shell's ONE door — onEscape asks first)${real.escRed.length ? ' — RED: ' + real.escRed.join(' | ') : ''}`);
   ok(real.idRed.length === 0, `§103 r3 every form call names its OWN id (no shared default — a call without one is RED)${real.idRed.length ? ' — RED: ' + real.idRed.join(' | ') : ''}`);
   const fixed = real.rows.filter((r) => (r.kind === 'form' || r.kind === 'dynamic') && (r.idKind === 'fixed' || r.idKind === 'the caller\'s'));
@@ -7728,18 +7728,18 @@ await section(async () => {
   // every mounts helper caller names its id too (the shared default is retired)
   const MOUNTS_RE = spellsRe103(['mountsDialog', '_mountsDialog']);
   const mountsCalls = allSrc103.flatMap(([f, src]) => { if (!spells103(src, MOUNTS_RE)) return []; let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true }); } catch { return []; } const o = []; walkAll(ast, (n) => { if (n.type !== 'CallExpression') return; const nm = n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' ? n.callee.property.name : null; if (nm !== 'mountsDialog' && nm !== '_mountsDialog') return; if (f === 'src/lib/sidebar-mounts.js' && n.arguments.length === 5 && n.arguments[4].type === 'Identifier') return; const a5 = n.arguments[4]; const has = a5 && a5.type === 'ObjectExpression' && a5.properties.some((p) => p.type === 'Property' && p.key.name === 'id'); o.push({ at: `${f}:${n.loc.start.line}`, has }); }); return o; });
-  ok(mountsCalls.length >= 15 && mountsCalls.every((c) => c.has), `§103 r3 every mountsDialog / _mountsDialog call names its own id (${mountsCalls.length} calls)${mountsCalls.some((c) => !c.has) ? ' — RED: ' + mountsCalls.filter((c) => !c.has).map((c) => c.at).join(' | ') : ''}`);
+  ok(mountsCalls.length >= 15 && verdictOf(mountsCalls.every((c) => c.has)), `§103 r3 every mountsDialog / _mountsDialog call names its own id (${mountsCalls.length} calls)${mountsCalls.some((c) => !c.has) ? ' — RED: ' + mountsCalls.filter((c) => !c.has).map((c) => c.at).join(' | ') : ''}`);
   const sysOpens = systemOpens103(allSrc103);
   console.log(`  THE SYSTEM'S OPENS (r3 — derived: a form-opening call inside a setInterval / onGlobal / ws.on / onBroadcast callback, one local function deep; r4: a person's own download re-opening its form is theirs): ${sysOpens.map((r) => `${r.at.replace(/^src\/lib\//, '')} ${r.call}() · ${r.system ? 'system' : 'PERSON'}`).join(' | ') || 'none'}`);
-  ok(sysOpens.length >= 2 && sysOpens.every((r) => r.system), `§103 r3 an open the SYSTEM makes (a timer, a broadcast, a watcher's completion) says opener 'system' — it opens behind, never the keys of a person typing (${sysOpens.length})${sysOpens.some((r) => !r.system) ? ' — RED: ' + sysOpens.filter((r) => !r.system).map((r) => r.at).join(' | ') : ''}`);
+  ok(sysOpens.length >= 2 && verdictOf(sysOpens.every((r) => r.system)), `§103 r3 an open the SYSTEM makes (a timer, a broadcast, a watcher's completion) says opener 'system' — it opens behind, never the keys of a person typing (${sysOpens.length})${sysOpens.some((r) => !r.system) ? ' — RED: ' + sysOpens.filter((r) => !r.system).map((r) => r.at).join(' | ') : ''}`);
   const NP = fs.readFileSync(path.join(REPO, 'src/lib/browser-new-profile.js'), 'utf8');
-  ok(/openNewProfileDialog\(app, \{ label: nameInput\.value, [^\n]*onDismissed, opener: 'person' \}\);/.test(NP), "§103 r4 the New profile hand-off re-open says opener 'person' — the person's Create press caused it (r3's 'system' put the form they were in behind their window)");
+  ok(verdictOf(/openNewProfileDialog\(app, \{ label: nameInput\.value, [^\n]*onDismissed, opener: 'person' \}\);/.test(NP)), "§103 r4 the New profile hand-off re-open says opener 'person' — the person's Create press caused it (r3's 'system' put the form they were in behind their window)");
   const readers = readers103(allSrc103);
   console.log(`  THE ONE DIALOG PREDICATE (src/lib/form-yield.js — DIALOG_ROOTS / SHEET_ROOTS / FORM_ROOTS / BLOCKING_LAYERS / isPersonDialog / personDialogOf / ownerFormOf): readers outside it ${readers.length}`);
   ok(readers.length === 0, `§103 every «did the person open a dialog?» reader in src/ asks form-yield.js's predicate — no .dialog-overlay / .dialog-form selector or class read elsewhere, no data-owner-form read${readers.length ? ' — RED: ' + readers.join(' | ') : ''}`);
   const U = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8'), FW = fs.readFileSync(path.join(REPO, 'src/lib/form-window.js'), 'utf8'), A103 = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'), L103 = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
-  ok(/export function createModalShell\(opts = \{\}\) \{\s*const \{ kind, key = null, opener = 'person', beside = false \} = opts;/.test(U) && /export function setFormHost\(/.test(U) && /fh = hosted \? formHost\.open\(\{ id, title, opener: opener === 'system' \? 'system' : 'person', from \}\)/.test(U) && /reopenVerdict\(\{ open: fam\.map\(\(s\) => \(\{ key: s\.key, undismissable: s\.undismissable \}\)\), nextKey: key, beside: !!beside \}\)/.test(U) && !/function idleShell/.test(U), '§103 the shell takes `kind` with NO default, asks the form host (setFormHost) with its opener and its press token, and judges a re-open by KEY over the whole FAMILY under the id (r4 — no idle shell)');
-  ok(/registerWindowType\(\{ type: 'form',[\s\S]{0,300}?persist: false \}\)/.test(FW) && /installFormHost\(this\)/.test(A103) && /if \(win\.type === 'form'\) return null;/.test(L103) && !/< 1500/.test(FW), '§103 the host is wired: window type `form` (persist: false), app.js installFormHost, captureWin never records a form; no clock judges «from the layer»');
+  ok(gateOf(/export function createModalShell\(opts = \{\}\) \{\s*const \{ kind, key = null, opener = 'person', beside = false \} = opts;/.test(U)) && gateOf(/export function setFormHost\(/.test(U)) && gateOf(/fh = hosted \? formHost\.open\(\{ id, title, opener: opener === 'system' \? 'system' : 'person', from \}\)/.test(U)) && gateOf(/reopenVerdict\(\{ open: fam\.map\(\(s\) => \(\{ key: s\.key, undismissable: s\.undismissable \}\)\), nextKey: key, beside: !!beside \}\)/.test(U)) && !/function idleShell/.test(U), '§103 the shell takes `kind` with NO default, asks the form host (setFormHost) with its opener and its press token, and judges a re-open by KEY over the whole FAMILY under the id (r4 — no idle shell)');
+  ok(gateOf(/registerWindowType\(\{ type: 'form',[\s\S]{0,300}?persist: false \}\)/.test(FW)) && gateOf(/installFormHost\(this\)/.test(A103)) && gateOf(/if \(win\.type === 'form'\) return null;/.test(L103)) && !/< 1500/.test(FW), '§103 the host is wired: window type `form` (persist: false), app.js installFormHost, captureWin never records a form; no clock judges «from the layer»');
   const ctl = census103([
     ['src/lib/zz-a.js', "createModalShell({ id: 'a', title: 'A' });"],
     ['src/lib/zz-b.js', "createModalShell({ id: 'b', kind: 'modal' });"],
@@ -7759,10 +7759,10 @@ await section(async () => {
     ['src/lib/zz-q.js', "async function q(a) { const { body, raised } = createModalShell({ id: 'q', key: a, title: 'Q', kind: 'form' }); if (raised) return; const i = document.createElement('input'); body.append(i); const r = await fetchJson('/x'); if (!body.isConnected) return; }\nasync function q2(a) { const sh = createModalShell({ id: 'q2', key: a, title: 'Q', kind: 'form' }); if (sh.raised) return; const i = document.createElement('input'); if (!(await sh.ready)) return; if (!sh.live()) return; }\nfunction q3(a) { const { body, raised } = createModalShell({ id: 'q3', key: a, beside: true, title: 'Q', kind: 'form' }); if (raised) return; body.append(document.createElement('input')); if (!body.isConnected) return; }\nfunction q4(a) { const { body, raised } = createModalShell({ id: 'q4', key: a, title: 'Q', kind: 'form' }); if (raised) return; body.append(document.createElement('input')); b.onclick = async () => { await fetchJson('/s'); }; }\nfunction q5(a) { const { body, raised } = createModalShell({ id: 'q5', key: a, title: 'Q', kind: 'form' }); if (raised) return; const i = document.createElement('input'); body.append(i); setTimeout(() => i.focus(), 0); }"],
   ]);
   const has = (arr, k) => arr.some((b) => b.startsWith('src/lib/' + k));
-  ok(ctl.bad.length === 7 && ['zz-a.js:1', 'zz-b.js:1', 'zz-c.js:1', 'zz-d.js:1', 'zz-e.js:2', 'zz-g.js:1', 'zz-i.js:1'].every((k) => has(ctl.bad, k)) && ctl.rows.find((r) => r.at === 'src/lib/zz-e.js:1')?.why === 'awaited where it was asked' && ctl.escRed.length === 1 && ctl.escRed[0].startsWith('src/lib/zz-h.js:3')
-    && ctl.idRed.length === 1 && has(ctl.idRed, 'zz-j.js:1') && has(ctl.keyRed, 'zz-k.js:1') && !['zz-h.js', 'zz-l.js', 'zz-m.js'].some((k) => has(ctl.keyRed, k)) && has(ctl.raisedRed, 'zz-l.js:1') && !['zz-h.js', 'zz-k.js', 'zz-m.js'].some((k) => has(ctl.raisedRed, k)) && ctl.docRed.length === 1 && has(ctl.docRed, 'zz-m.js:1')
-    && ctl.subjRed.length === 3 && has(ctl.subjRed, 'zz-n.js:1') && has(ctl.subjRed, 'zz-o.js:1') && has(ctl.subjRed, 'zz-p.js:1') && !has(ctl.subjRed, 'zz-o.js:2') && !has(ctl.subjRed, 'zz-p.js:2')
-    && ctl.readyRed.length === 2 && has(ctl.readyRed, 'zz-q.js:1') && has(ctl.readyRed, 'zz-q.js:5') && ctl.liveRed.length === 1 && has(ctl.liveRed, 'zz-q.js:1'),
+  ok(ctl.bad.length === 7 && gateOf(['zz-a.js:1', 'zz-b.js:1', 'zz-c.js:1', 'zz-d.js:1', 'zz-e.js:2', 'zz-g.js:1', 'zz-i.js:1'].every((k) => has(ctl.bad, k))) && ctl.rows.find((r) => r.at === 'src/lib/zz-e.js:1')?.why === 'awaited where it was asked' && ctl.escRed.length === 1 && gateOf(ctl.escRed[0].startsWith('src/lib/zz-h.js:3'))
+    && ctl.idRed.length === 1 && gateOf(has(ctl.idRed, 'zz-j.js:1')) && gateOf(has(ctl.keyRed, 'zz-k.js:1')) && !['zz-h.js', 'zz-l.js', 'zz-m.js'].some((k) => has(ctl.keyRed, k)) && gateOf(has(ctl.raisedRed, 'zz-l.js:1')) && !['zz-h.js', 'zz-k.js', 'zz-m.js'].some((k) => has(ctl.raisedRed, k)) && ctl.docRed.length === 1 && gateOf(has(ctl.docRed, 'zz-m.js:1'))
+    && ctl.subjRed.length === 3 && gateOf(has(ctl.subjRed, 'zz-n.js:1')) && gateOf(has(ctl.subjRed, 'zz-o.js:1')) && gateOf(has(ctl.subjRed, 'zz-p.js:1')) && !has(ctl.subjRed, 'zz-o.js:2') && !has(ctl.subjRed, 'zz-p.js:2')
+    && ctl.readyRed.length === 2 && gateOf(has(ctl.readyRed, 'zz-q.js:1')) && gateOf(has(ctl.readyRed, 'zz-q.js:5')) && ctl.liveRed.length === 1 && verdictOf(has(ctl.liveRed, 'zz-q.js:1')),
     `§103 NEGATIVE CONTROLS: a call without kind, a kind that is no kind, a form-later on a form, a form-later without its reason, a nested \`kind\` (not the call's own), a decision without its reason and a FIELD decision with a retired reason are RED; a form root's own Escape listener is RED; r3: a form with no id, a keyless fixed id under a varying title, a fixed id whose caller never reads \`raised\` and a liveness found by document id are RED; r4: a literal key ('task-context-row'), a key that is a caller's id option (not minted per instance), a key dropping what its load sends (unless said), a queueable caller that never reads \`ready\` and one judging liveness by its body's isConnected are RED — a minted instance key, a said «not the subject», a caller reading ready + live() and a beside form are not (${JSON.stringify({ bad: ctl.bad, esc: ctl.escRed, id: ctl.idRed, key: ctl.keyRed, raised: ctl.raisedRed, doc: ctl.docRed, subj: ctl.subjRed, ready: ctl.readyRed, live: ctl.liveRed })})`);
   // r5: THE SHAPES THE ACCEPTANCE PLANTED (each GREEN on 37c1b566) — RED by name; their twins that name the input are not
   const ctl5 = census103([
@@ -7774,12 +7774,12 @@ await section(async () => {
     ['src/lib/zz-r5f.js', "async function f5(a) { const { body, overlay, raised, ready } = createModalShell({ id: 'r5f', key: a, title: 'F', kind: 'form' }); if (raised) return; body.append(document.createElement('input')); if (!(await ready)) return; if (!overlay.parentNode) return; if (!document.contains(body)) return; body.parentNode.append(document.createElement('div')); }"],
   ]);
   const r5 = (arr, k) => arr.filter((b) => b.startsWith('src/lib/' + k));
-  ok(r5(ctl5.subjRed, 'zz-r5a.js:1').length === 1 && /drops `path` \(its field shows it\)/.test(r5(ctl5.subjRed, 'zz-r5a.js:1')[0]) && !r5(ctl5.subjRed, 'zz-r5a.js:2').length
-    && r5(ctl5.subjRed, 'zz-r5b.js:1').some((x) => /reads `a\.id` but this function takes `a` as a LIST/.test(x)) && !r5(ctl5.subjRed, 'zz-r5b.js:2').length
-    && r5(ctl5.subjRed, 'zz-r5c.js:1').length === 1 && /drops `folder` \(its field shows it\)/.test(r5(ctl5.subjRed, 'zz-r5c.js:1')[0]) && !r5(ctl5.subjRed, 'zz-r5c.js:2').length
-    && r5(ctl5.subjRed, 'zz-r5d.js:2').some((x) => /key helper `keyOf\(\)` returns the same key/.test(x)) && !r5(ctl5.subjRed, 'zz-r5d.js:4').length
-    && r5(ctl5.readyRed, 'zz-r5e.js:1').length === 1 && /await in load\(\)/.test(r5(ctl5.readyRed, 'zz-r5e.js:1')[0]) && !r5(ctl5.readyRed, 'zz-r5e.js:2').length
-    && r5(ctl5.liveRed, 'zz-r5f.js:1').length === 2 && ctl5.liveRed.some((x) => /!overlay\.parentNode/.test(x)) && ctl5.liveRed.some((x) => /document\.contains\(body\)/.test(x)) && !ctl5.liveRed.some((x) => /body\.parentNode\.append|parentNode$/.test(x.split(' — ')[0]) && !/!/.test(x.split(' — ')[0])),
+  ok(r5(ctl5.subjRed, 'zz-r5a.js:1').length === 1 && gateOf(/drops `path` \(its field shows it\)/.test(r5(ctl5.subjRed, 'zz-r5a.js:1')[0])) && !r5(ctl5.subjRed, 'zz-r5a.js:2').length
+    && gateOf(r5(ctl5.subjRed, 'zz-r5b.js:1').some((x) => /reads `a\.id` but this function takes `a` as a LIST/.test(x))) && !r5(ctl5.subjRed, 'zz-r5b.js:2').length
+    && r5(ctl5.subjRed, 'zz-r5c.js:1').length === 1 && gateOf(/drops `folder` \(its field shows it\)/.test(r5(ctl5.subjRed, 'zz-r5c.js:1')[0])) && !r5(ctl5.subjRed, 'zz-r5c.js:2').length
+    && gateOf(r5(ctl5.subjRed, 'zz-r5d.js:2').some((x) => /key helper `keyOf\(\)` returns the same key/.test(x))) && !r5(ctl5.subjRed, 'zz-r5d.js:4').length
+    && r5(ctl5.readyRed, 'zz-r5e.js:1').length === 1 && gateOf(/await in load\(\)/.test(r5(ctl5.readyRed, 'zz-r5e.js:1')[0])) && !r5(ctl5.readyRed, 'zz-r5e.js:2').length
+    && r5(ctl5.liveRed, 'zz-r5f.js:1').length === 2 && gateOf(ctl5.liveRed.some((x) => /!overlay\.parentNode/.test(x))) && gateOf(ctl5.liveRed.some((x) => /document\.contains\(body\)/.test(x))) && !ctl5.liveRed.some((x) => /body\.parentNode\.append|parentNode$/.test(x.split(' — ')[0]) && !/!/.test(x.split(' — ')[0])),
     `§103 r5 NEGATIVE CONTROLS (the shapes the acceptance planted GREEN on 37c1b566): a prefilled field value the key drops, a key reading a member of a LIST (a.id), a wrapper's opts.key dropping its field's value (mountsDialog), a key helper returning a constant (keyOf(m)), a nested async loader the body calls (a «pure draw» on 37c1b566) and a liveness by !overlay.parentNode / document.contains(body) are RED by name — each twin that names the input / reads ready, and body.parentNode.append(…), is not (${JSON.stringify({ subj: ctl5.subjRed, ready: ctl5.readyRed, live: ctl5.liveRed })})`);
   // r6: THE ROADS (acceptance r5 — each shape GREEN on 0ae9fbcb) — RED by name; each twin that names the input, and a RECORD
   // named by its id showing its own name, are not
@@ -7792,11 +7792,11 @@ await section(async () => {
     ['src/lib/zz-r6f.js', "function f7(app, m, row) { const { body, raised } = createModalShell({ id: 'r6f', key: `${m.hostId}:${row && row.id}`, title: 'F', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = `${m.name} · ${row && row.label}`; body.append(i); }"],
   ]);
   const r6 = (k) => ctl6.subjRed.filter((b) => b.startsWith('src/lib/' + k + ' '));
-  ok(ctl6.subjRed.length === 5 && r6('zz-r6a.js:1').length === 1 && /drops `href` \(its field shows it, through `field\(\)`\), `text` \(its field shows it, through `field\(\)`\)/.test(r6('zz-r6a.js:1')[0])
-    && r6('zz-r6b.js:1').length === 1 && /drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6b.js:1')[0]) && !/opts\.path/.test(r6('zz-r6b.js:1')[0])
-    && r6('zz-r6c.js:1').length === 1 && /drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6c.js:1')[0])
-    && r6('zz-r6d.js:1').length === 1 && /drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6d.js:1')[0])
-    && r6('zz-r6e.js:2').length === 1 && /drops `words` \(its field shows it, through `field\(\)`\)/.test(r6('zz-r6e.js:2')[0])
+  ok(ctl6.subjRed.length === 5 && r6('zz-r6a.js:1').length === 1 && gateOf(/drops `href` \(its field shows it, through `field\(\)`\), `text` \(its field shows it, through `field\(\)`\)/.test(r6('zz-r6a.js:1')[0]))
+    && r6('zz-r6b.js:1').length === 1 && gateOf(/drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6b.js:1')[0])) && !/opts\.path/.test(r6('zz-r6b.js:1')[0])
+    && r6('zz-r6c.js:1').length === 1 && gateOf(/drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6c.js:1')[0]))
+    && r6('zz-r6d.js:1').length === 1 && gateOf(/drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6d.js:1')[0]))
+    && r6('zz-r6e.js:2').length === 1 && gateOf(/drops `words` \(its field shows it, through `field\(\)`\)/.test(r6('zz-r6e.js:2')[0]))
     && !['zz-r6a.js:2', 'zz-r6b.js:2', 'zz-r6c.js:2', 'zz-r6d.js:2', 'zz-r6e.js:3', 'zz-r6f.js:1'].some((k) => r6(k).length),
     `§103 r6 NEGATIVE CONTROLS (the roads — each GREEN on 0ae9fbcb): a field filled through a local helper's OWN parameter (the doc Link form: field(label, href)), a destructured opts (const { path, label } = opts), an opts member read straight (opts.label), an alias + an indirection (const o = opts; const k = o.path; key: k) and a module helper taking an object (field(body, { value: words })) are RED by name — each twin that names the input, and a RECORD named by its id showing its own name (m.hostId · m.name), are not (${JSON.stringify(ctl6.subjRed)})`);
   // r7: THE ACCEPTANCE'S ELEVEN SHAPES (repro/accept-r6/zz-acc-roads.js, verbatim — nine GREEN on f2c3b9c2) are RED by name, and
@@ -7844,7 +7844,7 @@ await section(async () => {
     ['src/lib/zz-r4.js', "const o = el.closest('[data-owner-form]'); const p = el.dataset.ownerForm;"],
     ['src/lib/form-yield.js', "export const DIALOG_ROOTS = '.dialog-overlay, .dialog-form'; el.closest('[data-owner-form]');"],
   ]);
-  ok(rctl.length === 4 && rctl[0].startsWith('src/lib/zz-r1.js:1') && rctl[1].startsWith('src/lib/zz-r2.js:1') && rctl.filter((x) => x.startsWith('src/lib/zz-r4.js:1')).length === 2, `§103 NEGATIVE CONTROLS (the predicate): a .dialog-overlay selector, a dialog-form class read and a floats'-owner read elsewhere are RED; a root's className write, the static overlay by id and form-yield.js itself are not (${JSON.stringify(rctl)})`);
+  ok(rctl.length === 4 && gateOf(rctl[0].startsWith('src/lib/zz-r1.js:1')) && gateOf(rctl[1].startsWith('src/lib/zz-r2.js:1')) && rctl.filter((x) => x.startsWith('src/lib/zz-r4.js:1')).length === 2, `§103 NEGATIVE CONTROLS (the predicate): a .dialog-overlay selector, a dialog-form class read and a floats'-owner read elsewhere are RED; a root's className write, the static overlay by id and form-yield.js itself are not (${JSON.stringify(rctl)})`);
   const sctl = systemOpens103([
     ['src/lib/zz-s1.js', "function openZ() { createModalShell({ id: 'z', kind: 'form' }); }\nexport function watch(app) { setInterval(() => openZ(), 1000); app.ws.onGlobal((m) => openZ({ opener: 'system' })); const done = () => openZ(); setInterval(() => done(), 5); setInterval(() => { b.onclick = () => openZ(); }, 9); }"],
   ]);
@@ -7899,15 +7899,15 @@ await section(async () => {
   // the CODE, never a comment (lane login-request-card's cure, must 3: a call swallowed by a comment in front of it stayed green on the text)
   const code104 = (x) => String(x || '').replace(/\/\/[^\n]*/g, '');
   const noteCall = /require\('\.\/src\/server\/local-index\.js'\)\.note\('sessions'\)/;
-  ok(noteCall.test(code104(notify)), '§104b the session list\'s ONE notify point (server.js broadcastActiveSessions) feeds the index writer: note(\'sessions\') — in code, not in a comment');
+  ok(verdictOf(noteCall.test(code104(notify))), '§104b the session list\'s ONE notify point (server.js broadcastActiveSessions) feeds the index writer: note(\'sessions\') — in code, not in a comment');
   ok(!noteCall.test(code104(notify.replace("try { require('./src/server/local-index.js').note('sessions'); } catch { }", "// try { require('./src/server/local-index.js').note('sessions'); } catch { }"))) && !noteCall.test(code104('try { a(); } catch { } // a comment that runs on: try { require(\'./src/server/local-index.js\').note(\'sessions\'); } catch { }')),
     '§104b RED CONTROL: the same call commented out — or swallowed by a comment in front of it on the same line — reads as no call');
-  ok(/require\('\.\/src\/server\/local-index\.js'\)\.stop\(\)/.test(fnBody(server, 'shutdownNow')), '§104b the shutdown tells the index the hub STOPPED (shutdownNow → stop())');
-  ok((server.match(/require\('\.\/src\/server\/local-index\.js'\)\.configure\(/g) || []).length === 1 && /hub\.listen\(PORT, HOST, \(\) => \{[\s\S]*?\n  restoreSessions\(\); hub\.turn\(\(\) => \{[^\n]*\n  rootFactsNow\(\)\.then\(\(\) => \{ try \{ require\('\.\/src\/server\/local-index\.js'\)\.configure\(\{ rootDir: __dirname/.test(server), '§104b the boot configures it ONCE, at listen — in the listen step\'s last turn, right after the restore registered the survivors (B-cd4b follow: the place decided once, the whole list written), once the root\'s facts have LANDED (B-1425 r827: never «not judged yet» as its role)');
-  ok(/local-index\.js'\)\.configure\(\{[^\n]*owner: \(\(\) => \{ try \{ return ownerWriteRefusal\(\); \}/.test(server) && !/local-index\.js'\)\.configure\(\{[^\n]*throwaway: throwawayRoot/.test(server), '§104b WHO IS INSTALLED is the root verdict\'s (src/server-root.js via ownerWriteRefusal — the one rule for every owner-file write): a worktree / temp / SKIP_AGENT_HOOKS hub writes under its own root, never the person\'s HOME');
+  ok(verdictOf(/require\('\.\/src\/server\/local-index\.js'\)\.stop\(\)/.test(fnBody(server, 'shutdownNow'))), '§104b the shutdown tells the index the hub STOPPED (shutdownNow → stop())');
+  ok((server.match(/require\('\.\/src\/server\/local-index\.js'\)\.configure\(/g) || []).length === 1 && verdictOf(/hub\.listen\(PORT, HOST, \(\) => \{[\s\S]*?\n  restoreSessions\(\); hub\.turn\(\(\) => \{[^\n]*\n  rootFactsNow\(\)\.then\(\(\) => \{ try \{ require\('\.\/src\/server\/local-index\.js'\)\.configure\(\{ rootDir: __dirname/.test(server)), '§104b the boot configures it ONCE, at listen — in the listen step\'s last turn, right after the restore registered the survivors (B-cd4b follow: the place decided once, the whole list written), once the root\'s facts have LANDED (B-1425 r827: never «not judged yet» as its role)');
+  ok(gateOf(/local-index\.js'\)\.configure\(\{[^\n]*owner: \(\(\) => \{ try \{ return ownerWriteRefusal\(\); \}/.test(server)) && !/local-index\.js'\)\.configure\(\{[^\n]*throwaway: throwawayRoot/.test(server), '§104b WHO IS INSTALLED is the root verdict\'s (src/server-root.js via ownerWriteRefusal — the one rule for every owner-file write): a worktree / temp / SKIP_AGENT_HOOKS hub writes under its own root, never the person\'s HOME');
   const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   const attachCase = (wsh.split("case 'attach': {")[1] || '').slice(0, 1500);
-  ok(/require\('\.\/server\/local-index\.js'\)\.note\('attach', data\.sessionId\)/.test(attachCase), '§104b a client attach is noted (the row\'s attachedAt) in ws-handler\'s attach case');
+  ok(verdictOf(/require\('\.\/server\/local-index\.js'\)\.note\('attach', data\.sessionId\)/.test(attachCase)), '§104b a client attach is noted (the row\'s attachedAt) in ws-handler\'s attach case');
   const requirers = files.concat(['data/bin/vibespace']).filter((f) => /local-index\.js'\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8').replace(/^\s*\/\/.*$/gm, '')) && /server\/local-index\.js'\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
   ok(JSON.stringify(requirers.sort()) === JSON.stringify(['server.js', 'src/ws-handler.js']), `§104b nothing else drives the ONE writer (${requirers.join(', ')})`);
 
@@ -7983,7 +7983,7 @@ await section(async () => {
     const show = (c) => `${c.kind} ${c.fn} ${c.arg.replace(D, '<scratch>').replace(REPO, '<checkout>')} @ ${c.at}`;
     ok(!err && !!place && calls.length > 0 && bad.length === 0, `§104d the ONE writer's fs callees, through ANY module (the boot, a note, the heartbeat, the stop): only procfs, its own place and its own two install files — ${err ? 'THREW ' + err.message : `${calls.length} calls${bad.length ? '; OUTSIDE: ' + [...new Set(bad.map(show))].slice(0, 6).join(' | ') : ''}`}`);
     const ctlBad = ctl.filter((c) => c.kind === 'sync' && c.fn === 'readdirSync' && c.arg === path.join(root, 'data'));
-    ok(ctlBad.length > 0 && ctlBad.every((c) => /^src\/server\/local-index\.js:\d+$/.test(c.at)), `§104d CONTROL: a planted harness path rule that lists <checkout>/data is named, with the writer's line that reached it (${ctlBad.map(show).slice(0, 2).join(' | ') || 'not seen'})`);
+    ok(ctlBad.length > 0 && verdictOf(ctlBad.every((c) => /^src\/server\/local-index\.js:\d+$/.test(c.at))), `§104d CONTROL: a planted harness path rule that lists <checkout>/data is named, with the writer's line that reached it (${ctlBad.map(show).slice(0, 2).join(' | ') || 'not seen'})`);
     try { fsm.rmSync(D, { recursive: true, force: true }); } catch { }
   }
 }, 'alone');
@@ -8083,18 +8083,18 @@ await section(async () => {
   // paired listing's collector with its three disk operations (lane bl-chat-c: 36,940 bytes), on top of the 94,995 of 102,248 bytes the
   // block had already used at 5b5fb7a9d. At the cut the base was restated to the signed size and THE MARGIN RETURNED TO 0.02 (2 %).
   const RELEASE_BUNDLE_BYTES = 5364726, DEVICE_BUNDLE_MARGIN = 0.02;
-  ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it to a side name, renaming it into data/bin/vibespace-agentd.js, and before agentd-release.mjs hashes it', script107);
+  ok(verdictOf(strips107), '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it to a side name, renaming it into data/bin/vibespace-agentd.js, and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
   const plain107 = r107.outputFiles[0].text, text107 = shipped107(r107), size107 = Buffer.byteLength(text107);
-  ok(/--external:xlsx\b/.test(flags107) && !got107.includes('xlsx') && extra107.length === 0, `§107 the device bundle's input list (build:agentd's own esbuild flags: ${ext107.join(', ')}) names no hub-only library — every node_modules package is a DEVICE_LIBS row (${got107.length} packages)`, extra107.length ? extra107 : got107.includes('xlsx') ? 'node_modules/xlsx' : flags107);
+  ok(gateOf(/--external:xlsx\b/.test(flags107)) && !got107.includes('xlsx') && extra107.length === 0, `§107 the device bundle's input list (build:agentd's own esbuild flags: ${ext107.join(', ')}) names no hub-only library — every node_modules package is a DEVICE_LIBS row (${got107.length} packages)`, extra107.length ? extra107 : got107.includes('xlsx') ? 'node_modules/xlsx' : flags107);
   // B-299b A1 (the coordinator's bound): the Antigravity cards' worker is the HUB's own — its script and its reads never enter
   // the device agent's bundle (the descriptor reaches it only by a path the worker pool starts, never a require)
   const in107 = Object.keys(r107.metafile.inputs);
-  ok(in107.some((k) => /src\/agy-backfill\.js$/.test(k)) && !in107.some((k) => /src\/agy-cards(?:-worker)?\.js$/.test(k)), `§107 the device bundle carries agy-backfill (the descriptor's reader) but NOT the hub's agy-cards worker nor its reads (${in107.filter((k) => /agy-/.test(k)).join(', ')})`);
+  ok(gateOf(in107.some((k) => /src\/agy-backfill\.js$/.test(k))) && !in107.some((k) => /src\/agy-cards(?:-worker)?\.js$/.test(k)), `§107 the device bundle carries agy-backfill (the descriptor's reader) but NOT the hub's agy-cards worker nor its reads (${in107.filter((k) => /agy-/.test(k)).join(', ')})`);
   // B-82b8 (主开发 r654): the harness settings' WORDS (a person's — shown only by the hub's Settings window) never ride the device bundle;
   // the table of machine facts does (the descriptors read its keys, types, defaults and apply road)
-  ok(in107.some((k) => /src\/harness-settings\.js$/.test(k)) && !in107.some((k) => /src\/harness-settings-words\.js$/.test(k)), `§107 B-82b8: the device bundle carries src/harness-settings.js (the machine facts) but NOT src/harness-settings-words.js (a person's words) — the bundle is ${size107} bytes`, in107.filter((k) => /harness-settings/.test(k)));
+  ok(gateOf(in107.some((k) => /src\/harness-settings\.js$/.test(k))) && !in107.some((k) => /src\/harness-settings-words\.js$/.test(k)), `§107 B-82b8: the device bundle carries src/harness-settings.js (the machine facts) but NOT src/harness-settings-words.js (a person's words) — the bundle is ${size107} bytes`, in107.filter((k) => /harness-settings/.test(k)));
   // B-ddf3 unit 3's cure (lane bl-vault, 主开发 r4675): THE HUB's CLOSE HELPER NEVER BECOMES A DEVICE INPUT. src/design-fs.js (a device
   // input) keeps its OWN reading of «no sync here»; src/fd-close.js stays the hub's (its changes never re-cut the signed agent). Read from
   // this build's own input list. RED CONTROL: the same build with design-fs asking the helper carries it
@@ -8103,7 +8103,7 @@ await section(async () => {
   const fcCtl107 = dfsSrc107.split(DFS_STRICT107).length === 2 ? await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107, preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent',
     plugins: [{ name: 'design-fs-asks-the-helper', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]design-fs\.js$/ }, () => ({ contents: dfsSrc107.replace(DFS_STRICT107, DFS_STRICT107 + "require('./fd-close.js');\n"), loader: 'js' })); } }] }) : null;
   const fcCtlIn107 = fcCtl107 ? Object.keys(fcCtl107.metafile.inputs) : [];
-  ok(!fc107 && fcCtlIn107.some((k) => /(^|\/)src\/fd-close\.js$/.test(k)), `§107 B-ddf3: the device bundle does NOT carry the hub's close helper src/fd-close.js (design-fs keeps its own «no sync» reading) — the bundle is ${size107} bytes, ${in107.length} inputs; CONTROL: design-fs asking it carries it (${fcCtlIn107.length} inputs)`, fc107 || null);
+  ok(!fc107 && verdictOf(fcCtlIn107.some((k) => /(^|\/)src\/fd-close\.js$/.test(k))), `§107 B-ddf3: the device bundle does NOT carry the hub's close helper src/fd-close.js (design-fs keeps its own «no sync» reading) — the bundle is ${size107} bytes, ${in107.length} inputs; CONTROL: design-fs asking it carries it (${fcCtlIn107.length} inputs)`, fc107 || null);
   // 主开发 r2660 (B): THE HUB'S FILE POOL NEVER RIDES THE DEVICE BUNDLE. src/safe-fs.js (about 23 KB as shipped) reached it through the
   // lazy requires of three files the device carries (the codex adapter, the transcript service, the agy backfill), each asked only when
   // its worker script exists, so no pool was ever built on a machine. They ask src/hub-pool.js now, whose require is a computed path the
@@ -8112,7 +8112,7 @@ await section(async () => {
   const lit107 = hubSrc107.split(POOL107).length === 2 ? await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107, preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent',
     plugins: [{ name: 'hub-pool-literal', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]hub-pool\.js$/ }, () => ({ contents: hubSrc107.replace(POOL107, "  return require('./safe-fs.js');\n"), loader: 'js' })); } }] }) : null;
   const litIn107 = lit107 ? Object.keys(lit107.metafile.inputs) : [];
-  ok(!in107.some((k) => /src\/safe-fs\.js$/.test(k)) && in107.some((k) => /src\/hub-pool\.js$/.test(k)) && litIn107.some((k) => /src\/safe-fs\.js$/.test(k)),
+  ok(!in107.some((k) => /src\/safe-fs\.js$/.test(k)) && gateOf(in107.some((k) => /src\/hub-pool\.js$/.test(k))) && verdictOf(litIn107.some((k) => /src\/safe-fs\.js$/.test(k))),
     `§107 r2660 (B): the device bundle carries src/hub-pool.js but NOT src/safe-fs.js, the hub's file pool; RED CONTROL: the helper's require written as a literal puts it back in the build's input list (${litIn107.filter((k) => /safe-fs|hub-pool/.test(k)).join(', ') || 'no control build: its require line moved'})`, in107.filter((k) => /safe-fs|hub-pool/.test(k)));
   // and a machine without the worker's script never reaches that require (the helper's own body, lifted; RED: its existence line cut)
   const body107 = (/function hubPool\(script\) \{\n([\s\S]*?)\n\}/.exec(hubSrc107) || [])[1] || '';
@@ -8126,13 +8126,13 @@ await section(async () => {
   // candidates' ranking and the verdict's words (src/path-candidates.js), nor the SafeFs worker (src/safe-fs-worker.js: xlsx, csv)
   const FOLDER107 = ['src/dir-collect.js', 'src/dir-ops.js', 'src/path-text.js'], HUBONLY107 = ['src/server/dir-slice.js', 'src/path-candidates.js', 'src/safe-fs-worker.js'];
   const has107 = (ins, f) => ins.some((k) => k === f || k.endsWith('/' + f));
-  ok(FOLDER107.every((f) => has107(in107, f)) && !HUBONLY107.some((f) => has107(in107, f)) && !got107.includes('xlsx'), `§107 r1636: the device bundle carries the folder field's collector and its ops (${FOLDER107.join(', ')}) and NOT the hub's shaper, the ranking or the SafeFs worker (${HUBONLY107.join(', ')}), nor xlsx — the bundle is ${size107} bytes`, in107.filter((k) => /dir-|path-|safe-fs/.test(k)));
+  ok(gateOf(FOLDER107.every((f) => has107(in107, f))) && !HUBONLY107.some((f) => has107(in107, f)) && !got107.includes('xlsx'), `§107 r1636: the device bundle carries the folder field's collector and its ops (${FOLDER107.join(', ')}) and NOT the hub's shaper, the ranking or the SafeFs worker (${HUBONLY107.join(', ')}), nor xlsx — the bundle is ${size107} bytes`, in107.filter((k) => /dir-|path-|safe-fs/.test(k)));
   // its RED: the collector reaching the hub's worker for its ops (the shape before the cut — the ops lived there), an in-memory copy through
   // the same build with xlsx NOT external: the SafeFs worker and node_modules/xlsx ride the bundle
   const DC107 = path.join(REPO, 'src/dir-collect.js');
   const reach107 = { name: 'reach-107', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]dir-collect\.js$/ }, (a) => (a.path === DC107 ? { contents: fs.readFileSync(a.path, 'utf8') + "\nrequire('./safe-fs-worker.js');\n", loader: 'js', resolveDir: path.dirname(a.path) } : undefined)); } };
   const rr107 = await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107.filter((x) => x !== 'xlsx'), preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent', plugins: [reach107] });
-  ok(has107(Object.keys(rr107.metafile.inputs), 'src/safe-fs-worker.js') && libs107(rr107).includes('xlsx'), `§107 r1636 CONTROL: the collector reaching the SafeFs worker (the ops' place before the cut) carries it and node_modules/xlsx into the device bundle — the leg above goes red on it`);
+  ok(gateOf(has107(Object.keys(rr107.metafile.inputs), 'src/safe-fs-worker.js')) && verdictOf(libs107(rr107).includes('xlsx')), `§107 r1636 CONTROL: the collector reaching the SafeFs worker (the ops' place before the cut) carries it and node_modules/xlsx into the device bundle — the leg above goes red on it`);
   ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of ${RELEASE_BUNDLE_BYTES} bytes — the 2.369.423 release's signed device bundle, plus ${DEVICE_BUNDLE_MARGIN * 100} % for this block's device code — as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code over the margin is the coordinator\'s to rule — the base is the last release\'s signed size, restated only at a cut' : ''}`, size107);
   ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
   // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the
@@ -8141,9 +8141,9 @@ await section(async () => {
   const margin107 = text107.split('\n').filter((l) => /^[ \t]/.test(l)).length;
   // the signed release needs every hub to strip the same esbuild output to the same bytes: the REAL bundle is a fixed point
   ok(strip107(text107, undefined, { check: false }) === text107, `§107 the shipped bundle is a fixed point of the strip — a second pass over all ${Buffer.byteLength(text107)} bytes changes nothing`);
-  ok(banners107(plain107).length > 100 && banners107(text107).join('\n') === banners107(plain107).join('\n') && plain107.includes('/*! Bundled license information') && legal107(text107) === legal107(plain107),
+  ok(banners107(plain107).length > 100 && banners107(text107).join('\n') === banners107(plain107).join('\n') && gateOf(plain107.includes('/*! Bundled license information')) && legal107(text107) === legal107(plain107),
     `§107 the strip keeps every module banner (${banners107(text107).length}, in order) and the libraries' licence block byte for byte; ${margin107} line(s) still open with a margin — each inside a template literal, a string or a kept comment`);
-  ok(/(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/.test(text107) && /createInjector\(\{\s*platform: process\.platform,/.test(text107) && /capabilities: \[[^\]]*"desktop-serve"/.test(text107),
+  ok(gateOf(/(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/.test(text107)) && gateOf(/createInjector\(\{\s*platform: process\.platform,/.test(text107)) && verdictOf(/capabilities: \[[^\]]*"desktop-serve"/.test(text107)),
     '§107 a line keeps its own spacing — the anchors the heavy suites patch a win32/mac copy of the real bundle by (HELLO, INJ, capabilities) still match the shipped text');
   // the bundle ON DISK is the stripped one (a build road that skipped the step — a hand esbuild, a CLI that did not run as
   // itself — exits 0 and ships the unstripped bytes, which the signed release does not name): a stripped bundle opens a few
@@ -8176,7 +8176,7 @@ await section(async () => {
   const CQ107 = path.join(REPO, 'src/harnesses/claude-quota.js'), cqSrc107 = read('src/harnesses/claude-quota.js'), NAME107 = "predict: 'claude',";
   const before107 = { name: 'before-107', setup(b) { b.onLoad({ filter: /claude-quota\.js$/ }, (a) => (a.path === CQ107 ? { contents: cqSrc107.split(NAME107).join("predict: require('./claude-predict.js'),"), loader: 'js' } : undefined)); } };
   const rp107 = await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107, preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent', plugins: [before107] });
-  ok(cqSrc107.includes(NAME107) && pred107(rp107).length > 0, `§107 CONTROL: claude-quota.js requiring its adapter (the shape before) carries prediction code into the device bundle (${pred107(rp107).join(', ')}) — the leg above goes red on it`);
+  ok(gateOf(cqSrc107.includes(NAME107)) && pred107(rp107).length > 0, `§107 CONTROL: claude-quota.js requiring its adapter (the shape before) carries prediction code into the device bundle (${pred107(rp107).join(', ')}) — the leg above goes red on it`);
   // B-3b03 (lane hub-loop-stalls): the device bundle no longer reaches the SafeFs worker at all (src/safe-fs.js stopped requiring it
   // for its in-main fallback), so xlsx is out of it even when not external — the CONTROL plants that require back (an esbuild onLoad
   // over safe-fs.js, the release's reach) and builds with xlsx NOT external: xlsx is inlined and both legs above go red on it.
@@ -8185,8 +8185,8 @@ await section(async () => {
   const plant107 = { name: 'plant-safe-fs-worker', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]hub-pool\.js$/ }, (a) => ({ contents: fs.readFileSync(a.path, 'utf8') + "\nrequire('./safe-fs-worker');\n", loader: 'js', resolveDir: path.dirname(a.path) })); } };
   const rc107 = await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107.filter((x) => x !== 'xlsx'), preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent', plugins: [plant107] });
   const rcSize107 = Buffer.byteLength(shipped107(rc107));
-  ok(libs107(rc107).includes('xlsx') && rcSize107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with the SafeFs worker's require planted back (the release's reach, B-3b03) and xlsx NOT external inlines node_modules/xlsx (${rcSize107} bytes as shipped) — both legs above go red on it`);
-  ok(/try \{ XLSX = require\('xlsx'\); \} catch \{ throw Object\.assign\(new Error\('[^']*'\), \{ code: 'xlsx_hub_only' \}\); \}/.test(read('src/safe-fs-worker.js')), '§107 asked on a paired machine (no spreadsheet library there), the xlsxSheets op refuses by name — xlsx_hub_only');
+  ok(gateOf(libs107(rc107).includes('xlsx')) && rcSize107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with the SafeFs worker's require planted back (the release's reach, B-3b03) and xlsx NOT external inlines node_modules/xlsx (${rcSize107} bytes as shipped) — both legs above go red on it`);
+  ok(verdictOf(/try \{ XLSX = require\('xlsx'\); \} catch \{ throw Object\.assign\(new Error\('[^']*'\), \{ code: 'xlsx_hub_only' \}\); \}/.test(read('src/safe-fs-worker.js'))), '§107 asked on a paired machine (no spreadsheet library there), the xlsxSheets op refuses by name — xlsx_hub_only');
   const code107 = (s) => s.replace(/\/\/[^\n]*/g, '');   // the CODE, never a comment that names the old words
   const files107 = read('src/routes/files.js'), sent107 = code107((files107.match(/function syncRefusedBody[\s\S]*?\n\}/) || [''])[0]);
   const fe107 = read('src/lib/file-explorer-ops.js'), said107 = code107((fe107.match(/storage_sync_refused'\) return [^\n]*/) || [''])[0]);
@@ -8230,7 +8230,7 @@ await section(async () => {
   ok(files108.length > 1000 && users.length >= 18, `§108 ${files108.length} scripts read; ${users.length} take the door (scripts/scratch.mjs realClicker) — non-vacuous`, users);
   ok(strays.length === 0, `§108 no realClick presses by itself outside the named exceptions${strays.length ? ' — a COPY at ' + strays.join(', ') + ' (wrap scratch.mjs realClicker: const RC = realClicker({ evalJs, cdp }))' : ''}`);
   ok(stale.length === 0, `§108 every named exception still holds its copy (a folded one drops its row)${stale.length ? ' — stale: ' + stale.join(', ') : ''}`);
-  ok(wrappers.every((f) => users.includes(f)), `§108 every other realClick is a wrapper over the door (${wrappers.length}: each calls realClicker)`, wrappers.filter((f) => !users.includes(f)));
+  ok(verdictOf(wrappers.every((f) => users.includes(f))), `§108 every other realClick is a wrapper over the door (${wrappers.length}: each calls realClicker)`, wrappers.filter((f) => !users.includes(f)));
   // controls over planted texts
   const COPY = ['const realClick = async (sel) => {', '  const r = await evalJs(`measure ${sel}`); if (!r || !r.hits) return false;', "  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });", '  return true;', '};', ''].join('\n');
   const ONE_LINE = "  const realClick = async (sel) => { const p = await centerOf(sel); await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); return true; };\n";
@@ -8262,10 +8262,10 @@ await section(async () => {
   const sitesOf10 = (src) => { const m = /const SITES = \[([\s\S]*?)\];/.exec(src); return m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1].replace(/#INDEX$/, '')) : null; };
   const lacks109 = (list) => (list || []).filter((f) => !SITES109.includes(f));
   const s10 = sitesOf10(read('scripts/test-codex-effort-meta.mjs'));
-  ok(Array.isArray(s10) && s10.length >= 10 && lacks109(s10).length === 0, `§109 reads ⑩'s own site list (${s10 ? s10.length : 'NONE found'} sites in test-codex-effort-meta) and holds every one${s10 && lacks109(s10).length ? ` — ADD: ${lacks109(s10).join(', ')}` : ''}`);
+  ok(gateOf(Array.isArray(s10)) && s10.length >= 10 && lacks109(s10).length === 0, `§109 reads ⑩'s own site list (${s10 ? s10.length : 'NONE found'} sites in test-codex-effort-meta) and holds every one${s10 && lacks109(s10).length ? ` — ADD: ${lacks109(s10).join(', ')}` : ''}`);
   ok(lacks109(sitesOf10("const SITES = ['src/ws-handler.js', 'src/new-site.js'];")).join() === 'src/new-site.js', '§109 RED CONTROL: a site ⑩ gains that §109 lacks is named (src/new-site.js)');
   const hits = SITES109.flatMap((f) => read(f).split('\n').flatMap((l, i) => futureIn(l).map((v) => `${f}:${i + 1} ${v}`)));
-  ok(SITES109.length >= 15 && SITES109.every((f) => read(f).length > 0) && hits.length === 0, `§109 no file of ${SITES109.length} (the kb, CLAUDE.md, the heavy ⑩'s sites) names a ${cMaj}.${cMin}.N past package.json's ${CUR} in full form — write «.NNN»${hits.length ? ' — ' + hits.slice(0, 8).join(' · ') : ''}`);
+  ok(SITES109.length >= 15 && gateOf(SITES109.every((f) => read(f).length > 0)) && hits.length === 0, `§109 no file of ${SITES109.length} (the kb, CLAUDE.md, the heavy ⑩'s sites) names a ${cMaj}.${cMin}.N past package.json's ${CUR} in full form — write «.NNN»${hits.length ? ' — ' + hits.slice(0, 8).join(' · ') : ''}`);
   const next = `${cMaj}.${cMin}.${cPat + 1}`;
   ok(futureIn(`a line about ${next} (the train)`).join() === next && futureIn(`the cure rides ${next}.`).join() === next && futureIn(`and ${cMaj}.${cMin + 1}.1 next`).join() === `${cMaj}.${cMin + 1}.1`
     && futureIn(`${CUR} and ${cMaj}.${cMin}.${cPat - 1}`).length === 0 && futureIn(`.${cPat + 1} · 1${next} · ${next}.1 · ${cMaj}.1.322`).length === 0,
@@ -8393,16 +8393,16 @@ await section(async () => {
   const j110 = judge110(texts110);
   const byKind = [...KINDS110].map((k) => `${k} ${ROWS110.filter((r) => r[2] === k).length}`).join(', ');
   console.log(`  · ${ROWS110.length} rows over ${product110.length} product files — ${byKind}`);
-  ok(ROWS110.every((r) => (r.length === 4 || (r.length === 5 && Number.isInteger(r[4]) && r[4] > 1)) && KINDS110.has(r[2]) && String(r[3]).length > 3), '§110 every row names its kind (per-data / per-user / unique / system / read / words / by-hand), its reason and, past one, its count');
+  ok(verdictOf(ROWS110.every((r) => (r.length === 4 || (r.length === 5 && Number.isInteger(r[4]) && r[4] > 1)) && KINDS110.has(r[2]) && String(r[3]).length > 3)), '§110 every row names its kind (per-data / per-user / unique / system / read / words / by-hand), its reason and, past one, its count');
   ok(!j110.fresh.length && !j110.stale.length && !j110.miscount.length, `§110 every product line naming the temp folder is a row, every row still finds its line, and each row holds exactly its count${j110.fresh.length ? ' — NEW: ' + j110.fresh.join(' | ') : ''}${j110.stale.length ? ' — STALE: ' + j110.stale.join(' | ') : ''}${j110.miscount.length ? ' — COUNT: ' + j110.miscount.join(' | ') : ''}`);
   const files110 = texts110.find(([f]) => f === 'src/routes/files.js')?.[1] || '';
   const plug110 = texts110.find(([f]) => f === 'src/server/plugin-loader.js')?.[1] || '';
   const back = judge110([['src/routes/files.js', files110 + "\nconst upload = multer({ dest: '/tmp/claude-webui-uploads/' });\n"], ['src/server/plugin-loader.js', plug110 + "\n      const up = multer({ dest: path.join(os.tmpdir(), 'vibespace-plugin-uploads') });\n"]]);   // stale-pins: kept — the release's two upload lines, planted on purpose (§110's red control)
-  ok(back.fresh.length === 2 && back.fresh.every((x) => /claude-webui-uploads|vibespace-plugin-uploads/.test(x)), `§110 RED CONTROL: the release's two machine-wide upload folders are new, unrowed lines (red): ${back.fresh.join(' | ')}`);   // stale-pins: kept — the planted lines' names (§110's red control)
+  ok(back.fresh.length === 2 && verdictOf(back.fresh.every((x) => /claude-webui-uploads|vibespace-plugin-uploads/.test(x))), `§110 RED CONTROL: the release's two machine-wide upload folders are new, unrowed lines (red): ${back.fresh.join(' | ')}`);   // stale-pins: kept — the planted lines' names (§110's red control)
   // the count's own RED control: one of files.js's rowed lines planted twice — the substring finds both, the count says so
   const dupRow = ROWS110.find((r) => r[0] === 'src/routes/files.js' && !r[4]), dupLine = dupRow ? linesOf110(files110).find((l) => l.includes(dupRow[1])) : null;
   const twice = dupLine ? judge110([['src/routes/files.js', files110 + '\n' + dupLine + '\n']]) : null;
-  ok(!!twice && !twice.fresh.length && twice.miscount.length === 1 && twice.miscount[0].includes(dupRow[1]), `§110 RED CONTROL: a second line carrying an existing row's words is red by its count (${twice ? twice.miscount.join(' | ') : 'no files.js row found'})`);
+  ok(!!twice && !twice.fresh.length && twice.miscount.length === 1 && verdictOf(twice.miscount[0].includes(dupRow[1])), `§110 RED CONTROL: a second line carrying an existing row's words is red by its count (${twice ? twice.miscount.join(' | ') : 'no files.js row found'})`);
   ok(judge110([['src/x.js', "// a comment naming '/tmp/x'\nconst b = path.join(os.homedir(), 'y');\n"]]).fresh.length === 0 && judge110([['src/x.js', "const d = path.join(os.tmpdir(), 'fixed-name');\n"]]).fresh.length === 1, '§110 CONTROL: a whole-line comment and a home path are not temp names; a new fixed name is');
 });
 
@@ -8420,7 +8420,7 @@ await section(async () => {
   const files111 = trackedFiles(REPO, 'public', 'src').filter((f) => /\.css$/.test(f));
   const bad111 = [];
   for (const f of files111) for (const w of warn111(read(f), f)) bad111.push(`${f}:${w.location?.line}: ${w.text}`);
-  ok(files111.length >= 5 && files111.includes('public/style.css') && !bad111.length, `§111 ${files111.length} stylesheets (public/ + src/), 0 esbuild CSS warnings${bad111.length ? ' — RED: ' + bad111.slice(0, 4).join(' | ') : ''}`);
+  ok(files111.length >= 5 && gateOf(files111.includes('public/style.css')) && !bad111.length, `§111 ${files111.length} stylesheets (public/ + src/), 0 esbuild CSS warnings${bad111.length ? ' — RED: ' + bad111.slice(0, 4).join(' | ') : ''}`);
   const style111 = read('public/style.css');
   const cut111 = style111.replace('/* backlog priority chip (Task Group log', '.planted-111 { color: red; } (Task Group log');
   const mut111 = warn111(cut111, 'public/style.css');
@@ -8514,25 +8514,25 @@ await section(async () => {
   };
   const files112 = Object.fromEntries(trackedFiles(REPO, 'src').filter((f) => /\.js$/.test(f)).concat(['server.js']).map((f) => [f, read(f)]));
   const real112 = census112(files112);
-  ok(Object.keys(SITES112).every((f) => files112[f] && files112[f].length) && real112.written.size === SITE_HELD112.length && !real112.red.length,
+  ok(gateOf(Object.keys(SITES112).every((f) => files112[f] && files112[f].length)) && real112.written.size === SITE_HELD112.length && !real112.red.length,
     `§112 ${SITE_HELD112.length} site-held names (${CE112.CONVERSATION_ENV.length} + the telemetry pair) + ${WEBUI_FAMS112.length} harness families, each written by a site (${Object.keys(SITES112).length} sites); no site writes a VIBESPACE_* name the list lacks; no new injector site${real112.red.length ? ' — RED: ' + real112.red.slice(0, 6).join(' | ') : ''}`, real112.red);
   // THE BROWSER FAMILY, held to the agent door's own prefix drop (a family that is not *_WEBUI_ is the hub's whole namespace)
   const doorDrops112 = (text) => [...text.matchAll(/k\.startsWith\('([A-Z][A-Z0-9_]*_)'\)\) continue/g)].map((m) => m[1]);
   const fam112 = (fams, text) => fams.filter((p) => !doorDrops112(text).includes(p));
   const doorText112 = files112['src/agent-env.js'] || '';
-  ok(OTHER_FAMS112.length >= 1 && doorDrops112(doorText112).includes('AGENT_BROWSER_') && !fam112(OTHER_FAMS112, doorText112).length,
+  ok(OTHER_FAMS112.length >= 1 && gateOf(doorDrops112(doorText112).includes('AGENT_BROWSER_')) && !fam112(OTHER_FAMS112, doorText112).length,
     `§112 every family that is not a harness's (${OTHER_FAMS112.join(', ')}) is a prefix src/agent-env.js agentEnv drops from every inherited env — the hub's own namespace${fam112(OTHER_FAMS112, doorText112).length ? ' — NOT dropped there: ' + fam112(OTHER_FAMS112, doorText112).join(', ') : ''}`);
   // THE ACCOUNT'S SIGN-IN, held to the descriptors both ways (the agent door's own answer: every spawnEnvVar / keyEnvVars, homes out)
   const declared112 = req112(path.join(REPO, 'src/harness-env.js')).agentCredentialEnvNames(req112(path.join(REPO, 'src/harnesses')).list());
   const acct112 = (list, decl) => ({ missing: decl.filter((n) => !list.includes(n)), extra: list.filter((n) => !decl.includes(n)) });
   const a112 = acct112(CE112.CONVERSATION_ACCOUNT_ENV, declared112);
-  ok(declared112.length >= 5 && !a112.missing.length && !a112.extra.length && CE112.CONVERSATION_ACCOUNT_ENV.every((n) => CE112.isConversationName(n)),
+  ok(declared112.length >= 5 && !a112.missing.length && !a112.extra.length && verdictOf(CE112.CONVERSATION_ACCOUNT_ENV.every((n) => CE112.isConversationName(n))),
     `§112 the account's sign-in group equals the descriptors' answer both ways (${declared112.join(', ')})${a112.missing.length ? ' — a descriptor declares ' + a112.missing.join(', ') + ' and the list lacks it' : ''}${a112.extra.length ? ' — the list holds ' + a112.extra.join(', ') + ' and no descriptor declares it' : ''}`);
   // THE PROCESS MARKS (主开发 r863 MUST 2): conversation names, each read as a mark by the left-behind or the job stop; kept on request
   const markRead112 = (k) => ['src/left-behind.js', 'src/jobs.js'].some((f) => (files112[f] || '').includes(k + '='));
   const kept112 = CE112.withoutConversationNames({ CLAUDE_WEBUI_SESSION_ID: 'x', VIBESPACE_JOB_ID: 'x', VIBESPACE_JOB_RUN: 'x', VIBESPACE_SESSION_TOKEN: 'x', CLAUDE_WEBUI_PORT: 'x', PATH: '/bin' }, { keepMarks: true });
   const strict112 = CE112.withoutConversationNames({ CLAUDE_WEBUI_SESSION_ID: 'x', VIBESPACE_JOB_RUN: 'x' });
-  ok(CE112.CONVERSATION_MARKS.length === 3 && CE112.CONVERSATION_MARKS.every((k) => CE112.isConversationName(k) && markRead112(k))
+  ok(CE112.CONVERSATION_MARKS.length === 3 && gateOf(CE112.CONVERSATION_MARKS.every((k) => CE112.isConversationName(k) && markRead112(k)))
     && kept112.kept.join() === 'CLAUDE_WEBUI_SESSION_ID,VIBESPACE_JOB_ID,VIBESPACE_JOB_RUN' && kept112.dropped.join() === 'CLAUDE_WEBUI_PORT,VIBESPACE_SESSION_TOKEN' && kept112.env.PATH === '/bin'
     && strict112.dropped.length === 2 && !strict112.kept.length,
     `§112 the three process marks (${CE112.CONVERSATION_MARKS.join(', ')}) are conversation names read as marks (src/left-behind.js, src/jobs.js): kept when asked (a suite's own process), dropped otherwise (a hub under test)`);
@@ -8574,15 +8574,15 @@ await section(async () => {
   };
   const rr112 = roads112(files112);
   ok(Object.keys(ROADS112).length >= 4 && !rr112.length, `§112 the computed mark: the ${Object.keys(ROADS112).length} roads that finish a child's env (the local line, the remote command, a job's run, the boot's re-adopt, a desktop app's env) each write VIBESPACE_HANDED, and each of the ${Object.keys(SITES112).length} injector sites reaches one or is named${rr112.length ? ' — RED: ' + rr112.join(' | ') : ''}`, rr112);
-  ok(roads112({ ...files112, 'src/remote-shell.js': (files112['src/remote-shell.js'] || '').replace('${HANDED_MARK}=', '${HANDED}=') }).some((r) => /remote-shell\.js finishes a child's env and no longer writes the mark/.test(r))
-    && roads112(files112, ROADS112, { ...SITE_ROAD112, 'src/spawn/dial.js': undefined }).some((r) => /dial\.js writes a conversation's names and reaches NO road/.test(r))
-    && roads112({ ...files112, 'src/spawn/ssh.js': (files112['src/spawn/ssh.js'] || '').split('buildRemoteExec(').join('buildRemote(') }).some((r) => /ssh\.js no longer reaches src\/remote-shell\.js/.test(r)),
+  ok(gateOf(roads112({ ...files112, 'src/remote-shell.js': (files112['src/remote-shell.js'] || '').replace('${HANDED_MARK}=', '${HANDED}=') }).some((r) => /remote-shell\.js finishes a child's env and no longer writes the mark/.test(r)))
+    && gateOf(roads112(files112, ROADS112, { ...SITE_ROAD112, 'src/spawn/dial.js': undefined }).some((r) => /dial\.js writes a conversation's names and reaches NO road/.test(r)))
+    && verdictOf(roads112({ ...files112, 'src/spawn/ssh.js': (files112['src/spawn/ssh.js'] || '').split('buildRemoteExec(').join('buildRemote(') }).some((r) => /ssh\.js no longer reaches src\/remote-shell\.js/.test(r))),
     '§112 CONTROL: a road that stops writing the mark, a site with no road, and a site that stops reaching its road are each red by name');
   // THE HUB'S OWN FAMILY ON THE FLOOR, held to agent-env.js AGENT_ENV_KEEP both ways (主开发 r1043 item 3)
   const keepFam112 = [...req112(path.join(REPO, 'src/agent-env.js')).AGENT_ENV_KEEP].filter((n) => n.startsWith('VIBESPACE_') && !CE112.CONVERSATION_ENV.includes(n)).sort();
   const hubFam112 = (list, keep) => ({ missing: keep.filter((n) => !list.includes(n)), extra: list.filter((n) => !keep.includes(n)) });
   const hf112 = hubFam112(CE112.CONVERSATION_HUB_ENV, keepFam112);
-  ok(keepFam112.length >= 4 && !hf112.missing.length && !hf112.extra.length && CE112.CONVERSATION_HUB_ENV.every((n) => CE112.isConversationName(n)),
+  ok(keepFam112.length >= 4 && !hf112.missing.length && !hf112.extra.length && verdictOf(CE112.CONVERSATION_HUB_ENV.every((n) => CE112.isConversationName(n))),
     `§112 the hub's own family on the floor equals the VIBESPACE_* names agentEnv keeps beside the conversation's (${keepFam112.join(', ')})${hf112.missing.length ? ' — agentEnv keeps ' + hf112.missing.join(', ') + ' and the floor lacks it' : ''}${hf112.extra.length ? ' — the floor holds ' + hf112.extra.join(', ') + ' and agentEnv keeps no such name' : ''}`);
   // THE ROADS THAT WRITE NO MARK BY RULING, named with the reason (the census cannot find them by shape)
   const UNMARKED112 = Object.freeze({
@@ -8595,17 +8595,17 @@ await section(async () => {
   // CONTROLS, one per rule — each red by name
   const plant112 = (f, add) => census112({ ...files112, [f]: (files112[f] || '') + '\n' + add });
   const has112 = (r, re) => r.red.some((x) => re.test(x));
-  ok(has112(plant112('src/ws-create.js', "const x = { VIBESPACE_CALLER_NEW: '1' };"), /ws-create\.js:\d+ \(the create\) writes VIBESPACE_CALLER_NEW/), '§112 CONTROL: a site writing a VIBESPACE_* name the list lacks is red by name');
-  ok(has112(census112(files112, [...SITE_HELD112, 'VIBESPACE_NEVER_WRITTEN']), /VIBESPACE_NEVER_WRITTEN is in src\/conversation-env\.js but NO site writes it/), '§112 CONTROL: a list name no site writes is red by name');
-  ok(has112(plant112('src/server/new-road.js', 'env.CLAUDE_WEBUI_SESSION_ID = id;'), /new-road\.js:\d+ writes CLAUDE_WEBUI_SESSION_ID — a NEW injector site/), '§112 CONTROL: a new file writing a conversation name is a NEW injector site, red by name');
-  ok(has112(plant112('src/adapters/acp.js', 'const e = { GEMINI_WEBUI_MODEL: m };'), /writes GEMINI_WEBUI_MODEL: no declared family/), '§112 CONTROL: a *_WEBUI_* name of no declared family is red by name');
-  ok(has112(plant112('src/adapters/acp.js', 'const e = { VIBESPACE_SESSION_TOKEN: t };'), /acp\.js:\d+ writes VIBESPACE_SESSION_TOKEN — a NEW injector site/), '§112 CONTROL: a family dir writing a VIBESPACE_* list name is a NEW injector site (the dir is exempt for its family names only)');
-  ok(has112(plant112('src/server/new-road.js', "const t = { OTEL_EXPORTER_OTLP_HEADERS: h };"), /new-road\.js:\d+ writes OTEL_EXPORTER_OTLP_HEADERS — a NEW injector site/),
+  ok(verdictOf(has112(plant112('src/ws-create.js', "const x = { VIBESPACE_CALLER_NEW: '1' };"), /ws-create\.js:\d+ \(the create\) writes VIBESPACE_CALLER_NEW/)), '§112 CONTROL: a site writing a VIBESPACE_* name the list lacks is red by name');
+  ok(verdictOf(has112(census112(files112, [...SITE_HELD112, 'VIBESPACE_NEVER_WRITTEN']), /VIBESPACE_NEVER_WRITTEN is in src\/conversation-env\.js but NO site writes it/)), '§112 CONTROL: a list name no site writes is red by name');
+  ok(verdictOf(has112(plant112('src/server/new-road.js', 'env.CLAUDE_WEBUI_SESSION_ID = id;'), /new-road\.js:\d+ writes CLAUDE_WEBUI_SESSION_ID — a NEW injector site/)), '§112 CONTROL: a new file writing a conversation name is a NEW injector site, red by name');
+  ok(verdictOf(has112(plant112('src/adapters/acp.js', 'const e = { GEMINI_WEBUI_MODEL: m };'), /writes GEMINI_WEBUI_MODEL: no declared family/)), '§112 CONTROL: a *_WEBUI_* name of no declared family is red by name');
+  ok(verdictOf(has112(plant112('src/adapters/acp.js', 'const e = { VIBESPACE_SESSION_TOKEN: t };'), /acp\.js:\d+ writes VIBESPACE_SESSION_TOKEN — a NEW injector site/)), '§112 CONTROL: a family dir writing a VIBESPACE_* list name is a NEW injector site (the dir is exempt for its family names only)');
+  ok(verdictOf(has112(plant112('src/server/new-road.js', "const t = { OTEL_EXPORTER_OTLP_HEADERS: h };"), /new-road\.js:\d+ writes OTEL_EXPORTER_OTLP_HEADERS — a NEW injector site/)),
     '§112 CONTROL: a new file writing the telemetry pair is a NEW injector site, red by name');
   ok(fam112(['AGENT_BROWSER_', 'NEW_FAMILY_'], doorText112).join() === 'NEW_FAMILY_' && fam112(['AGENT_BROWSER_'], doorText112.replace("k.startsWith('AGENT_BROWSER_')", "k.startsWith('AGENT_BROWSERX_')")).join() === 'AGENT_BROWSER_',
     '§112 CONTROL: a non-harness family the agent door does not drop is red by name (a new prefix; the door\u2019s drop of the browser family removed)');
   const readOnly112 = plant112('src/server/mark-scan.js', "PI.membersOf({ mark: `VIBESPACE_JOB_RUN=${id}` }); const q = `grep '^VIBESPACE_API=' x`; const re = /VIBESPACE_API=http/;");
-  ok(!readOnly112.red.some((x) => /mark-scan\.js/.test(x)) && has112(plant112('src/server/mark-scan.js', 'const e = { VIBESPACE_JOB_RUN: id };'), /mark-scan\.js:\d+ writes VIBESPACE_JOB_RUN — a NEW injector site/),
+  ok(!readOnly112.red.some((x) => /mark-scan\.js/.test(x)) && verdictOf(has112(plant112('src/server/mark-scan.js', 'const e = { VIBESPACE_JOB_RUN: id };'), /mark-scan\.js:\d+ writes VIBESPACE_JOB_RUN — a NEW injector site/)),
     '§112 CONTROL: a NAME= spelled to match (a mark scan, a grep, a regex) is a read and never a write; the same name as an env key is');
   ok(acct112(CE112.CONVERSATION_ACCOUNT_ENV, [...declared112, 'NEW_VENDOR_TOKEN']).missing.join() === 'NEW_VENDOR_TOKEN' && acct112([...CE112.CONVERSATION_ACCOUNT_ENV, 'OLD_TOKEN'], declared112).extra.join() === 'OLD_TOKEN',
     '§112 CONTROL: a descriptor declaring a sign-in name the list lacks, and a list name no descriptor declares, are each red by name');
@@ -8629,12 +8629,12 @@ await section(async () => {
   const has = (f) => r.files.some((x) => x.file === f);
   // the floors restated at the re-land (2026-11-21, B-ba47 pick B on the .414 train): the train moved boots onto hub-boot.mjs's
   // startHub (73 suites through the boot modules), so fewer files boot a hub THEMSELVES — measured 173 files, 186 sites
-  ok(r.files.length >= 160 && sites >= 175 && ['test-vault-chrome.mjs', 'test-chrome-marks-chrome.mjs', 'pairing-ui-harness.mjs', 'xpra-window-boot.mjs', 'dbg-close-smoke.mjs'].every(has)
+  ok(r.files.length >= 160 && sites >= 175 && gateOf(['test-vault-chrome.mjs', 'test-chrome-marks-chrome.mjs', 'pairing-ui-harness.mjs', 'xpra-window-boot.mjs', 'dbg-close-smoke.mjs'].every(has))
     && r.files.filter((f) => f.file.startsWith('dbg-')).length >= 14 && r.viaModules.length >= 10,
     `§113 the census is non-vacuous: ${r.files.length} files boot a hub at ${sites} sites (${Object.entries(byCls).map(([k, v]) => `${k} ${v}`).join(' · ')}) — the hotfix night's two suites, the ${r.modules.length} boot modules (${r.modules.join(', ')}, ${r.viaModules.length} suites through them) and the debug scripts among them`);
   ok(r.red.length === 0, `§113 every hub-booting file is re-homed and every boot site's HOME comes from the re-homed process or a scratch source (${HUB_SITE_ROWS.length} named sites)${r.red.length ? ' — ' + r.red.join(' | ') : ''}`, r.red);
   ok(r.stale.length === 0, `§113 every named site still names a red site (a row that matches none is stale)${r.stale.length ? ' — ' + r.stale.map((x) => x.file).join(', ') : ''}`);
-  ok(r.modules.every((m) => r.files.find((f) => f.file === m).rehome === 'direct'), `§113 each boot module imports ./scratch.mjs itself, so every suite booting through it is re-homed (${r.modules.join(', ')})`);
+  ok(verdictOf(r.modules.every((m) => r.files.find((f) => f.file === m).rehome === 'direct')), `§113 each boot module imports ./scratch.mjs itself, so every suite booting through it is re-homed (${r.modules.join(', ')})`);
   // NEGATIVE CONTROLS: the red shapes are named; the four good ones pass; a spawn spelled in a string is data; an import in a comment is none
   const cls = (t) => classifyBoots(t).map((x) => x.cls).join(',');
   const B = "spawn(process.execPath, ['server.js'], ";
@@ -8670,7 +8670,7 @@ await section(async () => {
   const codeCalls = (re) => fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => f.endsWith('.mjs') && f !== 'scratch.mjs')
     .filter((f) => { const t = read('scripts/' + f), data = dataRanges(t); return [...t.matchAll(re)].some((m) => !data.some(([a, b]) => m.index >= a && m.index < b)); }).sort();   // a call in CODE — never one spelled in a string or a comment
   const callers = codeCalls(/\bhandedCli(?:Candidates)?\s*\(/g);
-  ok(allowRows.length >= 5 && allow[0] === 'test-claude-steer-chrome.mjs' && JSON.stringify(callers) === JSON.stringify([...allow].sort()) && allowRows.every((r) => r.why.length > 40),
+  ok(allowRows.length >= 5 && allow[0] === 'test-claude-steer-chrome.mjs' && JSON.stringify(callers) === JSON.stringify([...allow].sort()) && verdictOf(allowRows.every((r) => r.why.length > 40)),
     `§113 THE REAL-CLI ALLOW LIST (${allowRows.map((r) => `${r.suite} [${r.kind}]`).join(', ')}): each row has its kind and reason and asks for the HANDED env's CLI; no other script does (callers: ${callers.join(', ') || 'none'})`);
   // (c2) 主开发 12:20Z: a BY-HAND row is by hand only — its reason says so, and NOTHING names or imports its file: no ci.mjs
   // tier row, no suite, no other script (the allow list itself and this census are the two places that may)
@@ -8680,7 +8680,7 @@ await section(async () => {
   const scriptTexts = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.(m?js|sh)$/.test(f)).map((f) => [f, read('scripts/' + f)]);
   const named = namers(scriptTexts), inTiers = later.filter((r) => read('scripts/ci.mjs').includes(`name: '${r.suite.replace(/\.mjs$/, '')}'`)).map((r) => r.suite);
   const plantedTier = namers([['ci.mjs', read('scripts/ci.mjs').replace("  { name: 'test-home-verdict',", `  { name: '${(later[0] || { suite: 'x.mjs' }).suite.replace(/\.mjs$/, '')}', tier: 'heavy', why: 'planted' },\n  { name: 'test-home-verdict',`)]]);
-  ok(later.length >= 1 && later.every((r) => r.why.startsWith(HAND_ONLY)) && named.length === 0 && inTiers.length === 0 && plantedTier.length === later.length && allowRows.filter((r) => r.kind === 'suite').every((r) => !r.why.startsWith(HAND_ONLY)),
+  ok(later.length >= 1 && gateOf(later.every((r) => r.why.startsWith(HAND_ONLY))) && named.length === 0 && inTiers.length === 0 && plantedTier.length === later.length && verdictOf(allowRows.filter((r) => r.kind === 'suite').every((r) => !r.why.startsWith(HAND_ONLY))),
     `§113 every BY-HAND allow-list row (${later.map((r) => r.suite).join(', ')}) is by hand only: its reason begins «${HAND_ONLY}», and no ci.mjs tier, suite or other script names or imports it (CONTROL: its name planted in a tier list is red)${named.length || inTiers.length ? ' — ' + [...named, ...inTiers].join(', ') : ''}`);
   // (c3) THE WATCHERS (主开发 17:06Z item C): only a HOME_WATCHERS row reads the handed home (scratch.mjs handedHome), its reason
   // says it READS, and the accessor refused is a RED in it (an ok(false…)), never a skip — CONTROL: a catch that prints SKIP is red
@@ -8688,8 +8688,8 @@ await section(async () => {
   const watchers = [...watchBlock.matchAll(/suite: '([\w.-]+\.mjs)', why: (['"])(.{20,}?)\2 \}/g)].map((m) => ({ suite: m[1], why: m[3] }));
   const watchCallers = codeCalls(/\bhandedHome\s*\(/g);
   const redOnCut = (t) => /try\s*\{[^{}]*?handedHome\(\)[^{}]*?\}\s*catch\s*\(\s*\w+\s*\)\s*\{\s*ok\(/.test(t.replace(/\(\) => \{/g, '(() => {'));
-  ok(watchers.length === 2 && watchers.every((w) => /^READS\b/.test(w.why)) && JSON.stringify(watchCallers) === JSON.stringify(watchers.map((w) => w.suite).sort()) && watchers.every((w) => redOnCut(read('scripts/' + w.suite)))
-    && redOnCut("let h; try { h = handedHome(); } catch (e) { ok(false, 'x', e.message); }") && !redOnCut("let h; try { h = handedHome(); } catch (e) { console.log('SKIP: no home'); }"),
+  ok(watchers.length === 2 && gateOf(watchers.every((w) => /^READS\b/.test(w.why))) && JSON.stringify(watchCallers) === JSON.stringify(watchers.map((w) => w.suite).sort()) && gateOf(watchers.every((w) => redOnCut(read('scripts/' + w.suite))))
+    && gateOf(redOnCut("let h; try { h = handedHome(); } catch (e) { ok(false, 'x', e.message); }")) && !redOnCut("let h; try { h = handedHome(); } catch (e) { console.log('SKIP: no home'); }"),
     `§113 THE WATCHERS (${watchers.map((w) => w.suite).join(', ')}): only they read the handed home, each READS (never writes) and is RED when the accessor refuses (CONTROL: a catch that skips is red)${JSON.stringify(watchCallers) !== JSON.stringify(watchers.map((w) => w.suite).sort()) ? ' — callers: ' + watchCallers.join(', ') : ''}`);
   // (c4) THE DEVICE DAEMON'S PATH (主开发 17:06Z, RULE-2 / RULE-7): agentd puts the REAL node's directory first on the PATH of
   // what it spawns (agentd.js composes it from execPath) — reached by NO suite: none sends a bare-name agent CLI to a daemon it
@@ -8697,7 +8697,7 @@ await section(async () => {
   const AGENT_BARE = /\b(?:openSession|openPipeSession|openPipeSess\w*|runCmd|runStream|execOp)\s*\([^)]*?['"`](?:claude|codex|opencode|agy|gemini)['"`]/;
   const daemonSuites = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && f !== 'test-architecture.mjs').filter((f) => /vibespace-agentd|agentd\/agentd\.js|agentd\.js['"`]/.test(read('scripts/' + f)));   // never this census (it holds the planted send)
   const bareSends = daemonSuites.filter((f) => AGENT_BARE.test(read('scripts/' + f)));
-  ok(daemonSuites.length >= 5 && bareSends.length === 0 && AGENT_BARE.test("await d.runCmd({ argv: ['claude', '-p', 'x'] })") && /const agentDirs = \[path\.dirname\(process\.execPath\)/.test(read('src/agentd/agentd.js')),   // its spelling since B-3d06 (withSpawnPath)
+  ok(daemonSuites.length >= 5 && bareSends.length === 0 && gateOf(AGENT_BARE.test("await d.runCmd({ argv: ['claude', '-p', 'x'] })")) && verdictOf(/const agentDirs = \[path\.dirname\(process\.execPath\)/.test(read('src/agentd/agentd.js'))),   // its spelling since B-3d06 (withSpawnPath)
     `§113 THE DEVICE DAEMON'S PATH: agentd still puts the real node's directory first for what it spawns, and none of the ${daemonSuites.length} suites that start one sends it a bare-name agent CLI (CONTROL: a planted send is seen) — curing it in the daemon is a pick of its own (the signed bundle)${bareSends.length ? ' — ' + bareSends.join(', ') : ''}`);
   // (e) THE ORDER (主开发 14:15Z): the re-home happens when scratch.mjs is EVALUATED — nothing of a suite's own code runs
   // before it. Every test-* / dbg-* file that reaches scratch.mjs loads it FIRST (builtins aside), directly or as the first
@@ -8707,10 +8707,10 @@ await section(async () => {
   const rf = (t) => rehomesFirst(t, (m) => planted[m] || '');
   const SPELLINGS = ["import{a}from'./m-second.mjs';\nimport { scratch } from './scratch.mjs';", "export { a } from './m-second.mjs';\nimport { scratch } from './scratch.mjs';",
     "import a from'./m-second.mjs';\nimport { scratch } from './scratch.mjs';", "import * as A from './m-second.mjs';\nimport { scratch } from './scratch.mjs';", "{}import a from './m-second.mjs';\nimport { scratch } from './scratch.mjs';"];
-  ok(ord.reach.length >= 700 && ord.late.length === 0 && rf("import fs from 'node:fs';\nimport path from 'path';\nimport { scratch } from './scratch.mjs';") && rf("import { a } from './m-first.mjs';")
+  ok(ord.reach.length >= 700 && ord.late.length === 0 && gateOf(rf("import fs from 'node:fs';\nimport path from 'path';\nimport { scratch } from './scratch.mjs';")) && gateOf(rf("import { a } from './m-first.mjs';"))
     && !rf("import { a } from './mutant-copy.mjs';\nimport { scratch } from './scratch.mjs';") && !rf("import { a } from './m-second.mjs';") && !rf("const t = \"import { scratch } from './scratch.mjs';\";\nimport x from './y.mjs';")
-    && rf("#!/usr/bin/env node\nimport { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nimport { scratch } from './scratch.mjs';")
-    && SPELLINGS.every((t) => !rf(t)) && !rf("import x from 'some-package';\nimport { scratch } from './scratch.mjs';"),
+    && gateOf(rf("#!/usr/bin/env node\nimport { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nimport { scratch } from './scratch.mjs';"))
+    && gateOf(SPELLINGS.every((t) => !rf(t))) && !rf("import x from 'some-package';\nimport { scratch } from './scratch.mjs';"),
     `§113 THE ORDER (stated as what the FIRST IMPORT IS — ESM runs every import before any other statement): every one of the ${ord.reach.length} suite / debug files that reaches scratch.mjs has, builtins aside, the scratch import as its first import, or a local module's whose first it is — CONTROLS: a module before it, a first import that loads it second, an import spelled in a string, and the five spellings of an earlier import (no space before the brace, an export-from, a default glued to «from», a namespace import, a block before it) are red; a plain statement before it is not${ord.late.length ? ' — LATE: ' + ord.late.join(', ') + " — add the scratch import as each file's first import, after node's own if any: import './scratch.mjs';" : ''}`, ord.late);
   // (e3) THE LATE LOAD (B-ba47 B2, the second hosted run — 主开发 2026-11-15 11:17Z): a file that loads scratch.mjs only AT RUN
   // TIME — a dynamic import or a require of a module that loads it (`import('./mutant-copy.mjs')`, a path joined to
@@ -8719,13 +8719,13 @@ await section(async () => {
   // held to the first import like any other — 25 were, and took it
   const reachP = (t) => reachesScratch(t, (m) => planted[m] || '');
   const LATE_SPELLINGS = ["const { a } = await import('./m-first.mjs');", "const M = await import(path.join(REPO, 'scripts/m-second.mjs'));", "const { b } = require('./m-first.mjs');", "if (x) { const s = await import('./scratch.mjs'); }"];
-  ok(LATE_SPELLINGS.every((t) => reachP(t) && !rf(t)) && !reachP("const t = 'await import(\"./m-first.mjs\")';") && !reachP("const { a } = await import('./m-none.mjs');")
-    && JSON.stringify(lateLoads("await import('./a.mjs'); await import(path.join(R, 'scripts', 'b.mjs')); require('./a.mjs');")) === JSON.stringify(['a.mjs', 'b.mjs']) && reachP("import './scratch.mjs';\nconst { a } = await import('./m-first.mjs');") && rf("import './scratch.mjs';\nconst { a } = await import('./m-first.mjs');"),
+  ok(gateOf(LATE_SPELLINGS.every((t) => reachP(t) && !rf(t))) && !reachP("const t = 'await import(\"./m-first.mjs\")';") && !reachP("const { a } = await import('./m-none.mjs');")
+    && JSON.stringify(lateLoads("await import('./a.mjs'); await import(path.join(R, 'scripts', 'b.mjs')); require('./a.mjs');")) === JSON.stringify(['a.mjs', 'b.mjs']) && gateOf(reachP("import './scratch.mjs';\nconst { a } = await import('./m-first.mjs');")) && verdictOf(rf("import './scratch.mjs';\nconst { a } = await import('./m-first.mjs');")),
     `§113 (e3) THE LATE LOAD: a file that loads scratch.mjs at run time — a dynamic import or a require of a module that loads it — REACHES it and is late unless the scratch import is its first; ${ord.reach.length} files reach it, ${ord.late.length} late (CONTROLS: ${LATE_SPELLINGS.length} run-time spellings counted and late; a load spelled in a string, a module that loads nothing, not counted; with the first import, first)`);
   // (e2) THE SEAM (主开发 23:36Z): VS_REHOME_NOT_TEMP is read by scripts/scratch.mjs alone and set by test-home-verdict alone —
   // nothing in the product, data/bin, the wrappers or ci.mjs sets or reads it (the docs may name it)
   const seamFiles = trackedFiles(REPO).filter((f) => (/\.(?:m?js|cjs|sh|ya?ml|json)$/.test(f) || f.startsWith('data/bin/')) && !f.startsWith('docs/') && f !== 'scripts/test-architecture.mjs').filter((f) => { try { return read(f).includes('VS_REHOME_NOT_TEMP') || (f !== 'scripts/scratch.mjs' && /\bNOT_TEMP_ENV\b/.test(read(f))); } catch { return false; } }).sort();
-  ok(JSON.stringify(seamFiles) === JSON.stringify(['scripts/scratch.mjs', 'scripts/test-home-verdict.mjs']) && /process\.env\[NOT_TEMP_ENV\]/.test(smCode),
+  ok(JSON.stringify(seamFiles) === JSON.stringify(['scripts/scratch.mjs', 'scripts/test-home-verdict.mjs']) && verdictOf(/process\.env\[NOT_TEMP_ENV\]/.test(smCode)),
     `§113 THE SEAM: VS_REHOME_NOT_TEMP is read by scripts/scratch.mjs alone and set by test-home-verdict alone — nothing in the product, data/bin, the wrappers or ci.mjs names it (${seamFiles.join(', ')})`, seamFiles);
   // (e4) THE ENVIRONMENT'S TABLE, HELD BOTH WAYS (主开发 01:23Z amendment 7): every name a test-* / dbg-* file reads in its own
   // code is carried, a not-carried row, set first, or one of the suites' own knobs — the derived list, equal both ways; every
@@ -8771,10 +8771,10 @@ await section(async () => {
   } else console.log(`  · §113 (e5) the kit's hand list (KIT_HANDED, ${KIT_HANDED.length} names) was read ${KIT_HANDED_READ.on} from the kit's ${KIT_HANDED_READ.files.join(' + ')} — the kit is outside the tree and its files are not readable here (VS_KIT_DIR unset), so the list can be stale`);
   const ruled113 = (n, HVx = HVm) => ['HOME', 'PATH'].includes(n) || HVx.ENV_ROWS.some((r) => r.name === n || (r.prefix && n.startsWith(r.prefix))) || HVx.ENV_NOT.some((r) => r.name === n);
   const unruled113 = [...handed113].filter(([n]) => !ruled113(n));
-  ok(handed113.size >= 10 && handed113.has('VIBESPACE_SUITE_EGRESS_FILE') && handed113.has('VIBESPACE_CI_OAT') && !unruled113.length,
+  ok(handed113.size >= 10 && gateOf(handed113.has('VIBESPACE_SUITE_EGRESS_FILE')) && gateOf(handed113.has('VIBESPACE_CI_OAT')) && !unruled113.length,
     `§113 (e5) every name the runner, the workflow file or the kit hands a suite is a row (carried) or a named NOT (${handed113.size} names: ${[...handed113.keys()].sort().join(', ')})${unruled113.length ? ' — RED: ' + unruled113.map(([n, at]) => `${n} (${at})`).join(', ') + ' is neither: give it a row or a named NOT with its reason' : ''}`);
   const wfCtl = wfNames("jobs:\n  a:\n    steps:\n      - name: gh\n        env:\n          GH_ONLY: x\n        run: install-gh\n      - name: name it\n        run: echo \"BY_GITHUB_ENV=$(command -v x)\" >> \"$GITHUB_ENV\"\n      - run: node scripts/ci.mjs --fast\n        env:\n          SUITE_NEW: y\n", 'ctl.yml').map(([n]) => n).sort();
-  ok(wfCtl.join() === 'BY_GITHUB_ENV,SUITE_NEW' && !ruled113('VIBESPACE_NEW_HANDED') && ruled113('VIBESPACE_SUITE_EGRESS_FILE') && ruled113('VIBESPACE_CI_LANES') && ruled113('VIBESPACE_CI_RUN') && ruled113('VS_CLAUDE_BIN'),
+  ok(wfCtl.join() === 'BY_GITHUB_ENV,SUITE_NEW' && !ruled113('VIBESPACE_NEW_HANDED') && gateOf(ruled113('VIBESPACE_SUITE_EGRESS_FILE')) && gateOf(ruled113('VIBESPACE_CI_LANES')) && gateOf(ruled113('VIBESPACE_CI_RUN')) && verdictOf(ruled113('VS_CLAUDE_BIN')),
     '§113 (e5) CONTROL: a step that runs a suite hands its env, a step that does not hands none, a $GITHUB_ENV write reaches every later step; a handed name in no row and no named NOT is red by name');
   ok(JSON.stringify(kitNamesOf("const env = { ...base, VS_NO_REAL_CLI: '1' };\nexport VIBESPACE_CI_LANES=4\nenv.VIBESPACE_SUITE_EGRESS_FILE = f;\nNODE_MAJOR=24")) === JSON.stringify(['VIBESPACE_CI_LANES', 'VIBESPACE_SUITE_EGRESS_FILE', 'VS_NO_REAL_CLI']),
     '§113 (e5) CONTROL: the kit reader takes an object key, an export and an env assignment of the house names (a shell variable outside them is no env name)');
@@ -8788,14 +8788,14 @@ await section(async () => {
   const looksUp113 = (src) => !!RC113 && src.split('\n').filter((l) => !/^\s*(?:\/\/|\*)/.test(l)).some((l) => RC113.test(l) || WALK113.some((r) => r.test(l)));
   const lookers113 = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && f !== 'test-architecture.mjs').filter((f) => looksUp113(read('scripts/' + f))).sort();
   const noRow113 = lookers113.filter((f) => !allow.includes(f) && !SELF_LOOKUP[f]), staleSelf113 = Object.keys(SELF_LOOKUP).filter((f) => !lookers113.includes(f)), rowLooks113 = allow.filter((f) => lookers113.includes(f));
-  ok(PROGS113.length >= 2 && lookers113.length >= 10 && !noRow113.length && !staleSelf113.length && !rowLooks113.length && allow.includes('test-claude-wrapper-queue.mjs'),
+  ok(PROGS113.length >= 2 && lookers113.length >= 10 && !noRow113.length && !staleSelf113.length && !rowLooks113.length && verdictOf(allow.includes('test-claude-wrapper-queue.mjs')),
     `§113 (c5) a suite reaches a real program after the re-home only through an allow row: ${lookers113.length} suites look one up by themselves, each a named self-lookup (${Object.keys(SELF_LOOKUP).length}); every allow row goes through the accessor${noRow113.length ? ' — RED, no row: ' + noRow113.join(', ') : ''}${staleSelf113.length ? ' — a self-lookup row that no longer looks one up: ' + staleSelf113.join(', ') : ''}${rowLooks113.length ? ' — an allow row that looks it up by itself: ' + rowLooks113.join(', ') : ''}`);
-  ok(looksUp113("const b = spawnSync('claude', ['--version']);") && looksUp113("const c = String(process.env.PATH).split(':').map((d) => path.join(d, 'codex'));") && !looksUp113("const c = handedCliCandidates('claude');"),
+  ok(gateOf(looksUp113("const b = spawnSync('claude', ['--version']);")) && gateOf(looksUp113("const c = String(process.env.PATH).split(':').map((d) => path.join(d, 'codex'));")) && !looksUp113("const c = handedCliCandidates('claude');"),
     '§113 (c5) CONTROL: a bare start and a PATH walk are a lookup, the accessor is not');
   // (f) the main files that run on the handed home ON PURPOSE: named rows, each a file of scripts/ with its reason
   const nrBlock = (sm.match(/export const NOT_REHOMED = Object\.freeze\(\[([\s\S]*?)\n\]\);/) || [, ''])[1];
   const nr = [...nrBlock.matchAll(/'([\w.-]+\.mjs)'/g)].map((m) => m[1]);
-  ok(nr.length === 11 && nr.slice(0, 3).join() === 'ci.mjs,probe-claude-stdout.mjs,measure-tier3.mjs' && nr.every((f) => fs.existsSync(path.join(REPO, 'scripts', f))) && /BY_HAND_BROWSER = "by hand: it drives the person's OWN browser driver/.test(sm),
+  ok(nr.length === 11 && nr.slice(0, 3).join() === 'ci.mjs,probe-claude-stdout.mjs,measure-tier3.mjs' && gateOf(nr.every((f) => fs.existsSync(path.join(REPO, 'scripts', f)))) && verdictOf(/BY_HAND_BROWSER = "by hand: it drives the person's OWN browser driver/.test(sm)),
     `§113 (f) every scripts/ main file that loads the scratch module re-homes, except the NAMED rows (${nr.join(', ')}), each a file with its reason`);
   // (g) said limits: a worker's own execPath, the process title and the report's command line still name the handed node — nothing reads them
   const codeFiles = trackedFiles(REPO).filter((f) => /^(?:scripts|src)\/.*\.(?:m?js|cjs)$/.test(f) && !f.startsWith('scripts/fixtures/') && f !== 'scripts/test-architecture.mjs');
@@ -8848,8 +8848,8 @@ await section(async () => {
   // runtime-boot's own require graph (that graph loads before the first act) — so each reads the re-homed home
   const srv1 = read('server.js').split('\n')[0], lth = loadTimeHomeFiles(REPO), bootGraph = requireClosure(REPO, 'src/server/runtime-boot.js');
   const lthCtl = loadTimeHomeOf("const A = path.join(os.homedir(), '.x');\nconst f = (h = process.env.HOME) => h;\nfunction g() { return os.homedir(); }\n  const inner = os.homedir();\nlet B = process.env.HOME + '/y';");
-  ok(srv1.startsWith(BOOT_LINE) && JSON.stringify(lth) === JSON.stringify([...LOAD_TIME_HOME].sort()) && !LOAD_TIME_HOME.some((f) => bootGraph.includes(f)) && bootGraph.includes('src/server/throwaway-root.js')
-    && lthCtl.length === 2 && lthCtl[0].startsWith('const A') && lthCtl[1].startsWith('let B'),
+  ok(gateOf(srv1.startsWith(BOOT_LINE)) && JSON.stringify(lth) === JSON.stringify([...LOAD_TIME_HOME].sort()) && !LOAD_TIME_HOME.some((f) => bootGraph.includes(f)) && gateOf(bootGraph.includes('src/server/throwaway-root.js'))
+    && lthCtl.length === 2 && gateOf(lthCtl[0].startsWith('const A')) && verdictOf(lthCtl[1].startsWith('let B')),
     `§113 (i) THE LINE-1 CENSUS: server.js's FIRST line is the runtime boot; the ${LOAD_TIME_HOME.length} modules that capture a home when they load (${LOAD_TIME_HOME.join(', ')}) are the named list both ways, and none is in runtime-boot's own graph (${bootGraph.length} files, the re-home's among them) — each loads after the first act — CONTROL: a top-level capture is counted; a function's read, a default parameter and an indented line are not`,
     { srv1: srv1.slice(0, 120), found: lth, inBoot: LOAD_TIME_HOME.filter((f) => bootGraph.includes(f)) });
   // (j) THE HUB'S SEAM (主开发 r1412 road (ii)): VIBESPACE_REHOME_NOT_TEMP is READ by src/server/throwaway-root.js alone (it can only make a
@@ -8862,11 +8862,11 @@ await section(async () => {
   // (d) ONE VERDICT: scratch.mjs decides by src/home-verdict.js, and no copy of its functions lives anywhere else
   const copies = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => 'src/' + f), ...fs.readdirSync(path.join(REPO, 'scripts')).map((f) => 'scripts/' + f)]
     .filter((f) => /\.(m?js)$/.test(f) && f !== 'src/home-verdict.js' && /\b(?:function\s+|(?:const|let)\s+)(?:suiteRehome|hubRehome|rehomeEnv|namesUnder)\b/.test(read(f)));
-  ok(/require\('\.\.\/src\/home-verdict\.js'\)/.test(smCode) && /HV\.suiteRehome\(/.test(smCode) && /HV\.rehomeEnv\(/.test(smCode) && copies.length === 0,
+  ok(gateOf(/require\('\.\.\/src\/home-verdict\.js'\)/.test(smCode)) && gateOf(/HV\.suiteRehome\(/.test(smCode)) && gateOf(/HV\.rehomeEnv\(/.test(smCode)) && copies.length === 0,
     `§113 ONE verdict: scratch.mjs re-homes by src/home-verdict.js's suiteRehome + rehomeEnv, and no other file keeps a copy of them${copies.length ? ' — ' + copies.join(', ') : ''}`);
 });
 
 await sectionsEnd();   // B-2c31: the worker's sections, every one handed over; the check floor
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -24,7 +24,7 @@ process.env.VIBESPACE_AGENTD_ROOT = path.join(tmp, 'agentd');
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const version = require('../package.json').version;
@@ -47,7 +47,7 @@ const srvPort = await new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv.
 try {
   // 1. runCmd: device $HOME
   const home = String((await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { by: 'system:test', timeoutMs: 8000 }))?.stdout || '').trim();
-  check('runCmd returns the device $HOME', home.startsWith('/'), JSON.stringify(home));
+  check('runCmd returns the device $HOME', verdictOf(home.startsWith('/')), JSON.stringify(home));
   const bin = `${home}/.vibespace/bin`;
 
   // 2. fsMkdir + fsWrite a tool + a 0600 token, chmod via runCmd, read back
@@ -63,7 +63,7 @@ try {
   check('token is 0600', (tokSt.mode & 0o777) === 0o600, (tokSt.mode & 0o777).toString(8));
   const listing = await dm.fsList(bin);
   // fsList returns {op,id,entries}
-  check('fsList shows both files', listing.entries.some((e) => e.name === 'vibespace-status') && listing.entries.some((e) => e.name === '.tok-xyz'));
+  check('fsList shows both files', gateOf(listing.entries.some((e) => e.name === 'vibespace-status')) && verdictOf(listing.entries.some((e) => e.name === '.tok-xyz')));
 
   // 3. reverseForward: a device-side loopback port that tunnels to our server.
   // Consume it the way the device's agent tools would: connect FROM inside the
@@ -73,7 +73,7 @@ try {
   let out = '';
   const rc = await dm.runStream('sh', ['-c', `command -v curl >/dev/null && curl -s http://127.0.0.1:${rf.port}/ping || (command -v wget >/dev/null && wget -qO- http://127.0.0.1:${rf.port}/ping) || echo NO-HTTP-CLIENT`], { by: 'system:test', onData: (b) => { out += b.toString(); } });
   check('VIBESPACE_API back-tunnel reaches our server from the device',
-    out.includes('VIBESPACE-API-OK /ping') || out.includes('NO-HTTP-CLIENT'),
+    verdictOf(out.includes('VIBESPACE-API-OK /ping')) || verdictOf(out.includes('NO-HTTP-CLIENT')),
     JSON.stringify(out.slice(0, 120)));
   if (out.includes('NO-HTTP-CLIENT')) console.log('    (no curl/wget on this box — tunnel bind verified, HTTP round-trip skipped)');
   await dm.reverseUnforward(rf.port);
@@ -87,4 +87,4 @@ try {
 }
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\ndevice-agent-setup primitives all work over the dial link');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

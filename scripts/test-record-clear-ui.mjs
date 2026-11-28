@@ -61,7 +61,7 @@ const CWD = path.join(fakeHome, 'proj');
 const CONV_CWD = `/opt/record-clear-ui-conv-${process.pid}`;
 const CTX = path.join(fakeHome, 'ctx');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
 
@@ -314,51 +314,51 @@ try {
   // ── ① one Activity entry, with a second client (zh) watching ──
   console.log('① the Task Group log window: right-click an entry → Clear content… → the one dialog → the row keeps its place');
   await P1.evalJs(`app.openTaskLog(${J(W)}, { tab: 'activity' }); true`);
-  check('the log window opens on the Activity tab with its rows keyed by entry id', await P1.waitFor(`document.querySelectorAll('.task-log-act[data-pid]').length === ${ENTRIES.length}`, 10000), await P1.evalJs(`document.querySelectorAll('.task-log-act').length`));
+  check('the log window opens on the Activity tab with its rows keyed by entry id', verdictOf(await P1.waitFor(`document.querySelectorAll('.task-log-act[data-pid]').length === ${ENTRIES.length}`, 10000)), await P1.evalJs(`document.querySelectorAll('.task-log-act').length`));
   // B-7960 a: every Activity row's time is the INSTANCE's zone, named (THE formatter, src/when-words.js) — the browser's clock never
   const rowsZ = await P1.evalJs(`(() => { const want = (at) => new Date(at).toLocaleTimeString('en-GB', { timeZone: ${J(ZONE)}, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) + ' ' + ${J(ZONE_SHORT)}; const ents = ${J(ENTRIES.map((e) => [e.id, e.at]))}; return { own: Intl.DateTimeFormat().resolvedOptions().timeZone, rows: ents.map(([id, at]) => { const r = document.querySelector('.task-log-act[data-pid="' + id + '"] .task-log-time'); return [id, r ? r.textContent : null, want(at)]; }) }; })()`);
-  check(`the board's Activity rows print the instance's zone, named (${ZONE}: «HH:MM ${ZONE_SHORT}»), not the browser's own (${rowsZ && rowsZ.own})`, rowsZ && rowsZ.own !== ZONE && rowsZ.rows.length === ENTRIES.length && rowsZ.rows.every(([, got, want]) => got === want), rowsZ);
-  check('client 1 saves its layout (the shared workspace)', await saveLayout(P1)); // client 2 then restores the SAME window
+  check(`the board's Activity rows print the instance's zone, named (${ZONE}: «HH:MM ${ZONE_SHORT}»), not the browser's own (${rowsZ && rowsZ.own})`, gateOf(rowsZ) && rowsZ.own !== ZONE && rowsZ.rows.length === ENTRIES.length && verdictOf(rowsZ.rows.every(([, got, want]) => got === want)), rowsZ);
+  check('client 1 saves its layout (the shared workspace)', verdictOf(await saveLayout(P1))); // client 2 then restores the SAME window
   const { t: t2, P: P2 } = await newPage();
   await page(P2, { lang: 'zh' });
-  check('client 2 (zh) shows the same log window (the shared workspace, replayed from its openSpec)', await P2.waitFor(`document.querySelectorAll('.task-log-act[data-pid]').length === ${ENTRIES.length}`, 15000),
+  check('client 2 (zh) shows the same log window (the shared workspace, replayed from its openSpec)', verdictOf(await P2.waitFor(`document.querySelectorAll('.task-log-act[data-pid]').length === ${ENTRIES.length}`, 15000)),
     await P2.evalJs(`({ wins: [...app.wm.windows.values()].map((w) => [w.type, w._taskLogId]), rows: document.querySelectorAll('.task-log-act').length })`));
   // the second client's Find box is IN USE (focused) when the broadcast lands
   await front(P1, target.id);
   await P2.evalJs(`(() => { const s = document.querySelector('.task-log-search'); s.__kept = 1; s.focus(); return true; })()`);
   const before1 = await rowText(P1, 'P-00000a');
-  check('a REAL right-click on the entry opens its menu with "Clear content…"', await press(P1, rowOf('P-00000a') + ' .task-log-note', 'right') && (await menuLabels(P1)).includes('Clear content…'), await menuLabels(P1));
+  check('a REAL right-click on the entry opens its menu with "Clear content…"', gateOf(await press(P1, rowOf('P-00000a') + ' .task-log-note', 'right')) && verdictOf((await menuLabels(P1)).includes('Clear content…')), await menuLabels(P1));
   await shot(P1, 'task-log-row-menu', '.context-menu');
-  check('choosing it opens THE confirm dialog', await pickMenu(P1, 'Clear content…') && await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000));
+  check('choosing it opens THE confirm dialog', gateOf(await pickMenu(P1, 'Clear content…')) && verdictOf(await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000)));
   const d1 = await dialogState(P1);
-  check('the dialog names the record: its time and its first words (quoted), and says what a clear does', d1 && d1.title === 'Clear content?' && d1.rows.length === 1 && d1.rows[0].words === `“Summary: the ${MARK} invoices”` && d1.rows[0].when.length >= 5 && /keeps its place and its time/.test(d1.hint) && d1.hint.includes(CT) && d1.confirm === 'Clear content', d1);
-  check('…inside the viewport, its buttons whole, the danger button focused', d1 && d1.inViewport && d1.buttonsInside && d1.unclipped && d1.focus, d1);
-  check('…and it says what a clear cannot reach: an agent that already received the words keeps them in its own conversation (verify r4)', d1 && d1.copies === "An agent that already received these words keeps them in its own conversation — only VibeSpace's records change.", d1 && d1.copies);
+  check('the dialog names the record: its time and its first words (quoted), and says what a clear does', gateOf(d1) && d1.title === 'Clear content?' && d1.rows.length === 1 && d1.rows[0].words === `“Summary: the ${MARK} invoices”` && d1.rows[0].when.length >= 5 && gateOf(/keeps its place and its time/.test(d1.hint)) && gateOf(d1.hint.includes(CT)) && d1.confirm === 'Clear content', d1);
+  check('…inside the viewport, its buttons whole, the danger button focused', gateOf(d1) && gateOf(d1.inViewport) && gateOf(d1.buttonsInside) && gateOf(d1.unclipped) && verdictOf(d1.focus), d1);
+  check('…and it says what a clear cannot reach: an agent that already received the words keeps them in its own conversation (verify r4)', gateOf(d1) && d1.copies === "An agent that already received these words keeps them in its own conversation — only VibeSpace's records change.", d1 && d1.copies);
   await shot(P1, 'confirm-dialog-one', '#record-clear-dialog .dialog');
-  check('Clear content → the row reads the sentence, dimmed, in the SAME place', await confirmIt(P1) && await P1.waitFor(`(() => { const r = document.querySelector(${J(rowOf('P-00000a'))}); return !!r && r.querySelector('.task-log-note').textContent === ${J(CT)} && r.querySelector('.task-log-note').classList.contains('rc-cleared'); })()`, 5000), await rowText(P1, 'P-00000a'));
+  check('Clear content → the row reads the sentence, dimmed, in the SAME place', gateOf(await confirmIt(P1)) && verdictOf(await P1.waitFor(`(() => { const r = document.querySelector(${J(rowOf('P-00000a'))}); return !!r && r.querySelector('.task-log-note').textContent === ${J(CT)} && r.querySelector('.task-log-note').classList.contains('rc-cleared'); })()`, 5000)), await rowText(P1, 'P-00000a'));
   check('…its index in the list is unchanged', (await rowText(P1, 'P-00000a')).index === before1.index, [before1, await rowText(P1, 'P-00000a')]);
   const e1 = await storeEntry('P-00000a');
   check('the store: the note is the English KEY, the detail gone, clearedBy owner; id, time and author kept', e1.note === CT && !e1.detail && e1.clearedBy === 'owner' && e1.at === ENTRIES[0].at && e1.session === K, e1);
   const md = fs.readFileSync(path.join(CTX, '.vibespace', 'TASK.md'), 'utf8');
-  check('TASK.md (the context folder\'s mirror) no longer carries the cleared words', !md.includes(`Summary: the ${MARK}`) && !md.includes('cfo@example.com') && md.includes(CT));
-  check('THE SECOND CLIENT (zh) is patched LIVE: the row reads 已按用户要求清除', await P2.waitFor(`document.querySelector(${J(rowOf('P-00000a'))})?.querySelector('.task-log-note').textContent === ${J(ZH)}`, 5000), await rowText(P2, 'P-00000a'));
-  check('…and its Find box — focused when the broadcast landed — is the SAME node, still focused (never wiped)', await P2.evalJs(`(() => { const s = document.querySelector('.task-log-search'); return !!s && s.__kept === 1 && document.activeElement === s; })()`));
+  check('TASK.md (the context folder\'s mirror) no longer carries the cleared words', !md.includes(`Summary: the ${MARK}`) && !md.includes('cfo@example.com') && verdictOf(md.includes(CT)));
+  check('THE SECOND CLIENT (zh) is patched LIVE: the row reads 已按用户要求清除', verdictOf(await P2.waitFor(`document.querySelector(${J(rowOf('P-00000a'))})?.querySelector('.task-log-note').textContent === ${J(ZH)}`, 5000)), await rowText(P2, 'P-00000a'));
+  check('…and its Find box — focused when the broadcast landed — is the SAME node, still focused (never wiped)', verdictOf(await P2.evalJs(`(() => { const s = document.querySelector('.task-log-search'); return !!s && s.__kept === 1 && document.activeElement === s; })()`)));
   await shot(P2, 'task-log-zh-live', '.window:has(.task-log)');
 
   // ── ⑦ the words (zh menu + dialog) ──
   console.log('⑦ the words in zh');
   await front(P2, t2.id);
   await press(P2, rowOf('P-00000b') + ' .task-log-note', 'right');
-  check('zh: the menu item reads 清除内容…', (await menuLabels(P2)).includes('清除内容…'), await menuLabels(P2));
+  check('zh: the menu item reads 清除内容…', verdictOf((await menuLabels(P2)).includes('清除内容…')), await menuLabels(P2));
   await pickMenu(P2, '清除内容…');
   const dz = await P2.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && await dialogState(P2);
-  check('zh: the dialog — 清除这条内容？ · 清除内容 · the sentence quoted in zh', dz && dz.title === '清除这条内容？' && dz.confirm === '清除内容' && dz.hint.includes(ZH), dz);
-  check('zh: …and the delivered-copies line in zh', dz && dz.copies === '已经收到这些内容的 agent 会在它自己的对话里保留它们——这里只改 VibeSpace 的记录。', dz && dz.copies);
+  check('zh: the dialog — 清除这条内容？ · 清除内容 · the sentence quoted in zh', gateOf(dz) && dz.title === '清除这条内容？' && dz.confirm === '清除内容' && verdictOf(dz.hint.includes(ZH)), dz);
+  check('zh: …and the delivered-copies line in zh', gateOf(dz) && dz.copies === '已经收到这些内容的 agent 会在它自己的对话里保留它们——这里只改 VibeSpace 的记录。', dz && dz.copies);
   await shot(P2, 'confirm-dialog-zh', '#record-clear-dialog .dialog');
   await P2.evalJs(`document.querySelector('#record-clear-dialog .btn-cancel')?.click(); true`);
   check('Cancel clears nothing', !(await storeEntry('P-00000b')).clearedAt);
   const cellsZh = await P2.evalJs(`(() => { const r = document.querySelector(${J(rowOf('P-00000b'))}); const at = ${ENTRIES[1].at}; const day = [...document.querySelectorAll('.task-log-day')].map((d) => d.firstChild.textContent); return { time: r.querySelector('.task-log-time').textContent, wantTime: new Date(at).toLocaleTimeString('en-GB', { timeZone: ${J(ZONE)}, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) + ' ' + ${J(ZONE_SHORT)}, days: day, wantDay: new Date(at).toLocaleDateString('zh-CN', { timeZone: ${J(ZONE)} }), browser: new Date(at).toLocaleDateString('en-US') }; })()`);   // B-7960 a: the time is the instance zone's, named; the DAY header the device's language in that zone
-  check('zh: the day headers speak the DEVICE\'s language (zh-CN) in the instance\'s zone, the time cell is the instance zone\'s, named — never the browser\'s en-US 9/28/2026 (verify r2)', cellsZh.time === cellsZh.wantTime && cellsZh.days.includes(cellsZh.wantDay) && !cellsZh.days.includes(cellsZh.browser), cellsZh);
+  check('zh: the day headers speak the DEVICE\'s language (zh-CN) in the instance\'s zone, the time cell is the instance zone\'s, named — never the browser\'s en-US 9/28/2026 (verify r2)', cellsZh.time === cellsZh.wantTime && gateOf(cellsZh.days.includes(cellsZh.wantDay)) && !cellsZh.days.includes(cellsZh.browser), cellsZh);
 
   // ── ② the batch: Find → Select… → Select all shown → Clear selected ──
   console.log('② the batch: Find the words, select every entry shown, clear them in one go');
@@ -366,30 +366,30 @@ try {
   await P1.evalJs(`(() => { const s = document.querySelector('.task-log-search'); s.focus(); s.value = ${J(MARK)}; s.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   const shown = await P1.evalJs(`[...document.querySelectorAll('.task-log-act')].map((r) => r.dataset.pid)`);
   const want = ENTRIES.filter((e) => e.id !== 'P-00000a' && (e.note.includes(MARK) || (e.detail || '').includes(MARK))).map((e) => e.id);
-  check(`Find (the box's placeholder "Find…") shows exactly the entries that mention the words (${want.join(', ')})`, J(shown.slice().sort()) === J(want.slice().sort()) && await P1.evalJs(`document.querySelector('.task-log-search').placeholder === 'Find…'`), shown);
+  check(`Find (the box's placeholder "Find…") shows exactly the entries that mention the words (${want.join(', ')})`, J(shown.slice().sort()) === J(want.slice().sort()) && verdictOf(await P1.evalJs(`document.querySelector('.task-log-search').placeholder === 'Find…'`)), shown);
   const detailOpen = await P1.evalJs(`(() => { const r = document.querySelector(${J(rowOf('P-00000f'))}); const d = r && r.querySelector('.task-log-detail'); return { tag: r && r.tagName, open: !!(r && r.open), shows: !!d && d.getClientRects().length > 0 && d.textContent.includes(${J(MARK)}), others: ${J(want.filter((id) => id !== 'P-00000f'))}.map((id) => { const x = document.querySelector('.task-log-act[data-pid="' + id + '"]'); return x && x.tagName === 'DETAILS' ? x.open : null; }) }; })()`);
-  check('an entry Find matched by its DETAIL alone ("deploy notes") OPENS that detail, so the row shows why it is there; rows whose note matches stay as they were (verify r2)', detailOpen.tag === 'DETAILS' && detailOpen.open && detailOpen.shows && detailOpen.others.every((o) => o !== true), detailOpen);
-  check('Select… turns on the checkboxes and the selection bar', await press(P1, '.task-log-selbtn') && await P1.waitFor(`getComputedStyle(document.querySelector('.task-log-selbar')).display !== 'none' && document.querySelectorAll('.task-log-act .task-log-pick').length === ${want.length}`, 3000));
-  check(`"Select all shown (${want.length})" ticks every shown entry`, await P1.evalJs(`document.querySelector('.task-log-pickall').textContent`) === `Select all shown (${want.length})` && await press(P1, '.task-log-pickall') && await P1.waitFor(`[...document.querySelectorAll('.task-log-act .task-log-pick')].every((c) => c.checked) && document.querySelector('.task-log-clearsel').textContent === ${J(`Clear selected (${want.length})`)}`, 3000), await P1.evalJs(`document.querySelector('.task-log-selbar').textContent`));
+  check('an entry Find matched by its DETAIL alone ("deploy notes") OPENS that detail, so the row shows why it is there; rows whose note matches stay as they were (verify r2)', detailOpen.tag === 'DETAILS' && gateOf(detailOpen.open) && gateOf(detailOpen.shows) && verdictOf(detailOpen.others.every((o) => o !== true)), detailOpen);
+  check('Select… turns on the checkboxes and the selection bar', gateOf(await press(P1, '.task-log-selbtn')) && verdictOf(await P1.waitFor(`getComputedStyle(document.querySelector('.task-log-selbar')).display !== 'none' && document.querySelectorAll('.task-log-act .task-log-pick').length === ${want.length}`, 3000)));
+  check(`"Select all shown (${want.length})" ticks every shown entry`, await P1.evalJs(`document.querySelector('.task-log-pickall').textContent`) === `Select all shown (${want.length})` && gateOf(await press(P1, '.task-log-pickall')) && verdictOf(await P1.waitFor(`[...document.querySelectorAll('.task-log-act .task-log-pick')].every((c) => c.checked) && document.querySelector('.task-log-clearsel').textContent === ${J(`Clear selected (${want.length})`)}`, 3000)), await P1.evalJs(`document.querySelector('.task-log-selbar').textContent`));
   const bar = await P1.evalJs(`(() => { const w = ${TL('P1')}; const wr = w.element.getBoundingClientRect(); return [...document.querySelectorAll('.task-log-selbar button, .task-log-head button, .task-log-head input')].filter((b) => b.getClientRects().length).map((b) => { const q = b.getBoundingClientRect(); return { t: b.textContent || b.placeholder, inside: q.left >= wr.left - 0.5 && q.right <= wr.right + 0.5, clip: b.tagName === 'BUTTON' && b.scrollWidth > b.clientWidth + 1 }; }); })()`);
-  check('rect census: every header / selection-bar control sits inside the window, no button text clipped', bar.length >= 6 && bar.every((b) => b.inside && !b.clip), bar);
+  check('rect census: every header / selection-bar control sits inside the window, no button text clipped', bar.length >= 6 && verdictOf(bar.every((b) => b.inside && !b.clip)), bar);
   await shot(P1, 'task-log-find-select', '.window:has(.task-log)');
-  check('"Clear selected" opens the ONE dialog listing every record by time + first words', await press(P1, '.task-log-clearsel') && await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000));
+  check('"Clear selected" opens the ONE dialog listing every record by time + first words', gateOf(await press(P1, '.task-log-clearsel')) && verdictOf(await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000)));
   const d2 = await dialogState(P1);
-  check(`…${want.length} rows, the title and the button say the count`, d2 && d2.rows.length === want.length && d2.title === `Clear the content of ${want.length} records?` && d2.confirm === `Clear ${want.length} records`, d2);
-  check('…a hostile note is shown as TEXT (quoted, never markup), and nothing ran', d2 && d2.rows.some((r) => r.words.startsWith(`“${HOSTILE}`)) && await P1.evalJs(`window.__xss === undefined && !document.querySelector('#record-clear-dialog img')`), d2 && d2.rows);
+  check(`…${want.length} rows, the title and the button say the count`, gateOf(d2) && d2.rows.length === want.length && d2.title === `Clear the content of ${want.length} records?` && d2.confirm === `Clear ${want.length} records`, d2);
+  check('…a hostile note is shown as TEXT (quoted, never markup), and nothing ran', gateOf(d2) && gateOf(d2.rows.some((r) => r.words.startsWith(`“${HOSTILE}`))) && verdictOf(await P1.evalJs(`window.__xss === undefined && !document.querySelector('#record-clear-dialog img')`)), d2 && d2.rows);
   const matchLines = await P1.evalJs(`[...document.querySelectorAll('#record-clear-dialog .rc-item')].map((x) => ({ words: x.querySelector('.rc-words').textContent, match: x.querySelector('.rc-match')?.textContent || '' }))`);
-  check('…the entry matched by its detail carries "Found in the detail: “…<the words>…”" under its note; the others none (verify r2)', matchLines.filter((m) => m.match).length === 1 && matchLines.find((m) => m.words === '“deploy notes”')?.match.startsWith('Found in the detail: “') && matchLines.find((m) => m.words === '“deploy notes”').match.includes(MARK), matchLines);
-  check('…the dialog sits inside the viewport with its rows and buttons whole', d2 && d2.inViewport && d2.buttonsInside && d2.rowsInside && d2.unclipped, d2);
+  check('…the entry matched by its detail carries "Found in the detail: “…<the words>…”" under its note; the others none (verify r2)', matchLines.filter((m) => m.match).length === 1 && gateOf(matchLines.find((m) => m.words === '“deploy notes”')?.match.startsWith('Found in the detail: “')) && verdictOf(matchLines.find((m) => m.words === '“deploy notes”').match.includes(MARK)), matchLines);
+  check('…the dialog sits inside the viewport with its rows and buttons whole', gateOf(d2) && gateOf(d2.inViewport) && gateOf(d2.buttonsInside) && gateOf(d2.rowsInside) && verdictOf(d2.unclipped), d2);
   await shot(P1, 'confirm-dialog-batch', '#record-clear-dialog .dialog');
   await confirmIt(P1);
   let allCleared = false;
   for (let i = 0; i < 30 && !allCleared; i++) { const tg = (await api('/api/tasks')).tasks.find((t) => t.id === W); allCleared = want.every((id) => tg.progress.find((p) => p.id === id).clearedAt); if (!allCleared) await sleep(150); }
-  check(`the store: all ${want.length} cleared in ONE request; the others untouched`, allCleared && !(await storeEntry('P-00000b')).clearedAt && !(await storeEntry('P-000010')).clearedAt);
+  check(`the store: all ${want.length} cleared in ONE request; the others untouched`, gateOf(allCleared) && !(await storeEntry('P-00000b')).clearedAt && !(await storeEntry('P-000010')).clearedAt);
   const tgNow = (await api('/api/tasks')).tasks.find((t) => t.id === W);
   check('the Task Group carries the words nowhere any more (notes and details)', !J(tgNow.progress).includes(MARK), tgNow.progress.filter((p) => J(p).includes(MARK)));
-  check('the second client (zh) shows every cleared row in its language', await P2.waitFor(`${J(want)}.every((id) => document.querySelector('.task-log-act[data-pid="' + id + '"] .task-log-note')?.textContent === ${J(ZH)})`, 5000));
-  check('the batch ENDED the selection — the bar gone, no checkboxes, the button back to "Select…" (the same as pressing Done; verify r2)', await P1.waitFor(`getComputedStyle(document.querySelector('.task-log-selbar')).display === 'none' && !document.querySelector('.task-log-pick') && document.querySelector('.task-log-selbtn').textContent === 'Select…'`, 4000),
+  check('the second client (zh) shows every cleared row in its language', verdictOf(await P2.waitFor(`${J(want)}.every((id) => document.querySelector('.task-log-act[data-pid="' + id + '"] .task-log-note')?.textContent === ${J(ZH)})`, 5000)));
+  check('the batch ENDED the selection — the bar gone, no checkboxes, the button back to "Select…" (the same as pressing Done; verify r2)', verdictOf(await P1.waitFor(`getComputedStyle(document.querySelector('.task-log-selbar')).display === 'none' && !document.querySelector('.task-log-pick') && document.querySelector('.task-log-selbtn').textContent === 'Select…'`, 4000)),
     await P1.evalJs(`({ bar: getComputedStyle(document.querySelector('.task-log-selbar')).display, picks: document.querySelectorAll('.task-log-pick').length, btn: document.querySelector('.task-log-selbtn').textContent })`));
   await P1.evalJs(`(() => { const s = document.querySelector('.task-log-search'); s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await sleep(200);
@@ -397,7 +397,7 @@ try {
   // a CLEARED entry in Select mode: no checkbox (it could be ticked and never counted), no ⋯, its column kept
   await press(P1, '.task-log-selbtn');
   const sel2 = await P1.evalJs(`(() => { const rows = [...document.querySelectorAll('.task-log-act')]; const cleared = rows.filter((r) => r.classList.contains('task-log-cleared')); const live = rows.filter((r) => !r.classList.contains('task-log-cleared')); const x = (r) => r.querySelector('.task-log-time').getBoundingClientRect().left; return { cleared: cleared.length, live: live.length, clearedBoxes: cleared.filter((r) => r.querySelector('.task-log-pick')).length, clearedMore: cleared.filter((r) => r.querySelector('.task-log-more')).length, clearedSpacer: cleared.every((r) => r.querySelector('.task-log-pick-sp')), liveBoxes: live.filter((r) => r.querySelector('.task-log-pick')).length, aligned: new Set(rows.map((r) => Math.round(x(r)))).size === 1, pickAll: document.querySelector('.task-log-pickall').textContent }; })()`);
-  check('Select mode: a cleared row has NO checkbox and no ⋯ (a spacer keeps the time column aligned); every other row has its box; "Select all shown" counts only those (verify r2)', sel2.cleared === 4 && sel2.clearedBoxes === 0 && sel2.clearedMore === 0 && sel2.clearedSpacer && sel2.liveBoxes === sel2.live && sel2.aligned && sel2.pickAll === `Select all shown (${sel2.live})`, sel2);
+  check('Select mode: a cleared row has NO checkbox and no ⋯ (a spacer keeps the time column aligned); every other row has its box; "Select all shown" counts only those (verify r2)', sel2.cleared === 4 && sel2.clearedBoxes === 0 && sel2.clearedMore === 0 && gateOf(sel2.clearedSpacer) && sel2.liveBoxes === sel2.live && gateOf(sel2.aligned) && sel2.pickAll === `Select all shown (${sel2.live})`, sel2);
   const noMenu = await P1.evalJs(`(() => { const r = document.querySelector(${J(rowOf('P-00000a'))} + ' .task-log-note'); const q = r.getBoundingClientRect(); const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: q.left + 5, clientY: q.top + 5 }); r.dispatchEvent(ev); return { prevented: ev.defaultPrevented, menu: !!document.querySelector('.context-menu') }; })()`);
   check('…and a right-click on it opens no menu (nothing to clear, nothing to pick)', !noMenu.menu, noMenu);
   await press(P1, '.task-log-selbtn'); // Done
@@ -406,20 +406,20 @@ try {
   console.log('②b a 250-entry batch: Find → Select all shown (250) → Clear selected (250) → sent in parts, all cleared');
   await P1.evalJs(`app.openTaskLog(${J(WB)}, { tab: 'activity' }); true`);
   const BW = `[...app.wm.windows.values()].find((w) => w._taskLogId === ${J(WB)})`;
-  check(`the bulk log window lists its ${NBULK} entries`, await P1.waitFor(`(() => { const w = ${BW}; return !!w && w.element.querySelectorAll('.task-log-act[data-pid]').length === ${NBULK}; })()`, 10000));
+  check(`the bulk log window lists its ${NBULK} entries`, verdictOf(await P1.waitFor(`(() => { const w = ${BW}; return !!w && w.element.querySelectorAll('.task-log-act[data-pid]').length === ${NBULK}; })()`, 10000)));
   await P1.evalJs(`(() => { const w = ${BW}; const s = w.element.querySelector('.task-log-search'); s.focus(); s.value = ${J(BULK)}; s.dispatchEvent(new Event('input', { bubbles: true })); w.element.querySelector('.task-log-selbtn').click(); return true; })()`);
   await sleep(200);
   await P1.evalJs(`(() => { const w = ${BW}; w.element.querySelector('.task-log-pickall').click(); return true; })()`);
-  check(`"Clear selected (${NBULK})"`, await P1.waitFor(`${BW}.element.querySelector('.task-log-clearsel').textContent === ${J(`Clear selected (${NBULK})`)}`, 3000), await P1.evalJs(`${BW}.element.querySelector('.task-log-clearsel').textContent`));
+  check(`"Clear selected (${NBULK})"`, verdictOf(await P1.waitFor(`${BW}.element.querySelector('.task-log-clearsel').textContent === ${J(`Clear selected (${NBULK})`)}`, 3000)), await P1.evalJs(`${BW}.element.querySelector('.task-log-clearsel').textContent`));
   await P1.evalJs(`${BW}.element.querySelector('.task-log-clearsel').click(); true`);
   const db = await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && await dialogState(P1);
-  check(`the dialog: "Clear the content of ${NBULK} records?", 8 named, "…and ${NBULK - 8} more"`, db && db.title === `Clear the content of ${NBULK} records?` && db.rows.length === 8 && db.more === `…and ${NBULK - 8} more` && db.confirm === `Clear ${NBULK} records`, db);
+  check(`the dialog: "Clear the content of ${NBULK} records?", 8 named, "…and ${NBULK - 8} more"`, gateOf(db) && db.title === `Clear the content of ${NBULK} records?` && db.rows.length === 8 && db.more === `…and ${NBULK - 8} more` && db.confirm === `Clear ${NBULK} records`, db);
   await P1.evalJs(`(() => { const n = document.querySelectorAll('#global-toasts > .global-toast').length; window.__toastsBefore = n; return true; })()`);
   await confirmIt(P1);
   let bulkDone = false;
   for (let i = 0; i < 40 && !bulkDone; i++) { const tg = (await api('/api/tasks')).tasks.find((t) => t.id === WB); bulkDone = tg.progress.every((p) => p.clearedAt); if (!bulkDone) await sleep(150); }
-  check(`all ${NBULK} entries cleared (the client sent them in parts of at most 200 — ONE request of ${NBULK} is refused too_many)`, bulkDone);
-  check(`the toast says "${NBULK} cleared" — one sentence for the whole batch, no refusal`, await P1.waitFor(`[...document.querySelectorAll('#global-toasts > .global-toast')].some((e) => e.textContent.includes(${J(`${NBULK} cleared`)})) && ![...document.querySelectorAll('#global-toasts > .global-toast')].some((e) => /could not be cleared/.test(e.textContent))`, 4000), await toasts(P1));
+  check(`all ${NBULK} entries cleared (the client sent them in parts of at most 200 — ONE request of ${NBULK} is refused too_many)`, verdictOf(bulkDone));
+  check(`the toast says "${NBULK} cleared" — one sentence for the whole batch, no refusal`, verdictOf(await P1.waitFor(`[...document.querySelectorAll('#global-toasts > .global-toast')].some((e) => e.textContent.includes(${J(`${NBULK} cleared`)})) && ![...document.querySelectorAll('#global-toasts > .global-toast')].some((e) => /could not be cleared/.test(e.textContent))`, 4000)), await toasts(P1));
   await P1.evalJs(`(() => { const w = ${BW}; if (w) app.wm.closeWindow(w.id); document.querySelectorAll('#global-toasts > .global-toast').forEach((e) => e.remove()); return true; })()`);
   await sleep(200);
   await shot(P1, 'task-log-after-batch', '.window:has(.task-log)');
@@ -432,35 +432,35 @@ try {
   // kept in this device's localStorage for the popup's Notifications tab, so the item's words outlived its clear there. The
   // arrival is driven through the model's own broadcast handler: a snapshot without the item, then the real one.
   const arrived = await P1.evalJs(`(async () => { const d = await (await fetch('/api/user-todos')).json(); const T = d.todos; const without = { ...T, open: T.open.filter((i) => i.id !== ${J(OPEN_ID)}) }; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos: without }`, "app.ws.globalHandlers")} await new Promise((r) => setTimeout(r, 150)); ${relayBroadcastJs(`{ type: 'user-todos-updated', todos: T }`, "app.ws.globalHandlers")} await new Promise((r) => setTimeout(r, 300)); return [...document.querySelectorAll('#global-toasts .global-toast-body')].map((e) => e.textContent); })()`);
-  check('setup: the item arriving while the page is open raises its toast WITH its words (the live toast is the item\'s own announcement)', arrived.some((x) => x.includes(MARK)), arrived);
+  check('setup: the item arriving while the page is open raises its toast WITH its words (the live toast is the item\'s own announcement)', verdictOf(arrived.some((x) => x.includes(MARK))), arrived);
   await P1.evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`);
   await P1.evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   const popRow = `#user-todos-popup .ut-item[data-id=${J(OPEN_ID)}]`;
-  check('the popup lists the open item', await P1.waitFor(`!!document.querySelector(${J(popRow)})`, 5000));
-  check('a REAL right-click on the row → "Clear content…"', await press(P1, popRow + ' .ut-text', 'right') && (await menuLabels(P1)).includes('Clear content…'), await menuLabels(P1));
+  check('the popup lists the open item', verdictOf(await P1.waitFor(`!!document.querySelector(${J(popRow)})`, 5000)));
+  check('a REAL right-click on the row → "Clear content…"', gateOf(await press(P1, popRow + ' .ut-text', 'right')) && verdictOf((await menuLabels(P1)).includes('Clear content…')), await menuLabels(P1));
   await pickMenu(P1, 'Clear content…');
   const d3 = await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && await dialogState(P1);
-  check('the dialog names it; the popup stays open behind it', d3 && d3.rows[0].words === `“Forward the ${MARK} thread to finance?”` && await P1.evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`), d3);
+  check('the dialog names it; the popup stays open behind it', gateOf(d3) && d3.rows[0].words === `“Forward the ${MARK} thread to finance?”` && verdictOf(await P1.evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`)), d3);
   await confirmIt(P1);
-  check('the row reads the sentence (dimmed), its chips and detail gone, in place', await P1.waitFor(`(() => { const r = document.querySelector(${J(popRow)}); return !!r && r.classList.contains('ut-item-cleared') && r.querySelector('.ut-text').textContent === ${J(CT)} && !r.querySelector('.ut-opt') && !r.querySelector('.ut-detail-exp'); })()`, 5000), await P1.evalJs(`document.querySelector(${J(popRow)})?.outerHTML?.slice(0, 400)`));
+  check('the row reads the sentence (dimmed), its chips and detail gone, in place', verdictOf(await P1.waitFor(`(() => { const r = document.querySelector(${J(popRow)}); return !!r && r.classList.contains('ut-item-cleared') && r.querySelector('.ut-text').textContent === ${J(CT)} && !r.querySelector('.ut-opt') && !r.querySelector('.ut-detail-exp'); })()`, 5000)), await P1.evalJs(`document.querySelector(${J(popRow)})?.outerHTML?.slice(0, 400)`));
   await shot(P1, 'foryou-popup-cleared', '#user-todos-popup');
   const hist = await P1.evalJs(`localStorage.getItem('vibespace.toastHistory') || ''`);
-  check('this device\'s toast history (localStorage) holds no word of the item — the arrival kept its head and the item\'s id (verify r4)', !hist.includes(MARK) && hist.includes(OPEN_ID), hist.slice(0, 300));
+  check('this device\'s toast history (localStorage) holds no word of the item — the arrival kept its head and the item\'s id (verify r4)', !hist.includes(MARK) && verdictOf(hist.includes(OPEN_ID)), hist.slice(0, 300));
   await P1.evalJs(`document.querySelector('#user-todos-popup .ut-tab[data-tab="history"]').click(); true`);
   const histPage = await P1.waitFor(`!!document.querySelector('#user-todos-popup .ut-hist .ut-hist-item')`, 3000) && await P1.evalJs(`document.querySelector('#user-todos-popup .ut-hist').textContent`);
-  check('…and the Notifications tab words the entry from the live store: the cleared sentence, never the words', typeof histPage === 'string' && !histPage.includes(MARK) && histPage.includes(CT), histPage && histPage.slice(0, 300));
+  check('…and the Notifications tab words the entry from the live store: the cleared sentence, never the words', typeof histPage === 'string' && !histPage.includes(MARK) && verdictOf(histPage.includes(CT)), histPage && histPage.slice(0, 300));
   await shot(P1, 'foryou-notifications-cleared', '#user-todos-popup');
   await P1.evalJs(`document.querySelector('#user-todos-popup .ut-tab[data-tab="inbox"]').click(); true`);
   await P1.evalJs(`document.getElementById('user-todos-popup').classList.add('hidden'); app.openInbox({ itemId: ${J(RES_ID)} }); true`);
   const iwRow = `.window .iw .iw-row[data-id=${J(RES_ID)}]`;
-  check('the For-you window opens on the resolved item', await P1.waitFor(`!!document.querySelector(${J(iwRow)}) && !!document.querySelector('.window .iw .iw-item[data-id=${JSON.stringify(RES_ID)}]')`, 6000));
-  check('a right-click on its row offers "Clear content…"', await press(P1, iwRow, 'right') && (await menuLabels(P1)).includes('Clear content…'), await menuLabels(P1));
+  check('the For-you window opens on the resolved item', verdictOf(await P1.waitFor(`!!document.querySelector(${J(iwRow)}) && !!document.querySelector('.window .iw .iw-item[data-id=${JSON.stringify(RES_ID)}]')`, 6000)));
+  check('a right-click on its row offers "Clear content…"', gateOf(await press(P1, iwRow, 'right')) && verdictOf((await menuLabels(P1)).includes('Clear content…')), await menuLabels(P1));
   await dropMenu(P1);
   const iwBtn = `.window .iw .iw-item[data-id=${J(RES_ID)}] .iw-act[data-act="clear"]`;
-  check('THE VISIBLE DOOR: the item pane\'s action row carries a "Clear content…" button, last (verify r2)', await P1.evalJs(`(() => { const b = document.querySelector(${J(iwBtn)}); return !!b && b.textContent === 'Clear content…' && b === b.parentNode.lastElementChild && b.getClientRects().length > 0; })()`),
+  check('THE VISIBLE DOOR: the item pane\'s action row carries a "Clear content…" button, last (verify r2)', verdictOf(await P1.evalJs(`(() => { const b = document.querySelector(${J(iwBtn)}); return !!b && b.textContent === 'Clear content…' && b === b.parentNode.lastElementChild && b.getClientRects().length > 0; })()`)),
     await P1.evalJs(`[...document.querySelectorAll('.window .iw .iw-item .iw-act')].map((b) => b.dataset.act + ':' + b.textContent)`));
-  check('pressing it → the dialog → cleared', await press(P1, iwBtn) && await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && (await dialogState(P1)).rows[0].words === `“Old question about ${MARK}”` && await confirmIt(P1));
-  check('the list row and the pane read the sentence, the detail gone', await P1.waitFor(`(() => { const r = document.querySelector(${J(iwRow)}); const it = document.querySelector('.window .iw .iw-item[data-id=${JSON.stringify(RES_ID)}]'); return !!r && r.classList.contains('iw-row-cleared') && r.querySelector('.iw-row-title').textContent === ${J(CT)} && !!it && it.querySelector('.iw-title').textContent === ${J(CT)} && it.querySelector('.iw-detail').textContent === ''; })()`, 5000));
+  check('pressing it → the dialog → cleared', gateOf(await press(P1, iwBtn)) && gateOf(await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000)) && (await dialogState(P1)).rows[0].words === `“Old question about ${MARK}”` && verdictOf(await confirmIt(P1)));
+  check('the list row and the pane read the sentence, the detail gone', verdictOf(await P1.waitFor(`(() => { const r = document.querySelector(${J(iwRow)}); const it = document.querySelector('.window .iw .iw-item[data-id=${JSON.stringify(RES_ID)}]'); return !!r && r.classList.contains('iw-row-cleared') && r.querySelector('.iw-row-title').textContent === ${J(CT)} && !!it && it.querySelector('.iw-title').textContent === ${J(CT)} && it.querySelector('.iw-detail').textContent === ''; })()`, 5000)));
   check('…and the cleared item\'s pane offers the button no more (nothing left to clear)', !(await P1.evalJs(`!!document.querySelector(${J(iwBtn)})`)));
   const todosNow = (await api('/api/user-todos')).todos;
   check('the wire: no For-you item carries the words any more (the resolved preview included)', !J(todosNow).includes(MARK), todosNow);
@@ -468,41 +468,41 @@ try {
 
   // ── ④ Session Properties ──
   console.log('④ Session Properties: a status history entry');
-  check('the stopped conversation is in the sidebar', await P1.waitFor(`(app.sidebar._allSessions || []).some((s) => app.sidebar._getSessionStateKey(s) === ${J(K)})`, 15000));
+  check('the stopped conversation is in the sidebar', verdictOf(await P1.waitFor(`(app.sidebar._allSessions || []).some((s) => app.sidebar._getSessionStateKey(s) === ${J(K)})`, 15000)));
   await P1.evalJs(`app.openSessionProps(${J(K)}); true`);
   const hRow = `.session-history-list .session-history-item`;
-  check('its history lists the entry with the words', await P1.waitFor(`[...document.querySelectorAll(${J(hRow)})].some((r) => r.textContent.includes(${J(MARK)}))`, 8000));
+  check('its history lists the entry with the words', verdictOf(await P1.waitFor(`[...document.querySelectorAll(${J(hRow)})].some((r) => r.textContent.includes(${J(MARK)}))`, 8000)));
   const hIdx = await P1.evalJs(`[...document.querySelectorAll(${J(hRow)})].findIndex((r) => r.textContent.includes(${J(MARK)}))`);
-  check('a right-click on it offers "Clear content…"', await press(P1, `${hRow}:nth-child(${hIdx + 1}) .session-history-reason`, 'right') && (await menuLabels(P1)).includes('Clear content…'), await menuLabels(P1));
+  check('a right-click on it offers "Clear content…"', gateOf(await press(P1, `${hRow}:nth-child(${hIdx + 1}) .session-history-reason`, 'right')) && verdictOf((await menuLabels(P1)).includes('Clear content…')), await menuLabels(P1));
   await dropMenu(P1);
   const hMore = `${hRow}:nth-child(${hIdx + 1}) .session-history-more`;
-  check('THE VISIBLE DOOR: the row carries a ⋯ (shown under the pointer, verify r2) → its menu → "Clear content…" → the dialog → cleared', await hover(P1, `${hRow}:nth-child(${hIdx + 1})`) && await P1.evalJs(`getComputedStyle(document.querySelector(${J(hMore)})).opacity === '1'`) && await press(P1, hMore) && await pickMenu(P1, 'Clear content…') && await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && (await dialogState(P1)).rows[0].words === `“waiting on the ${MARK} reply”` && await confirmIt(P1),
+  check('THE VISIBLE DOOR: the row carries a ⋯ (shown under the pointer, verify r2) → its menu → "Clear content…" → the dialog → cleared', gateOf(await hover(P1, `${hRow}:nth-child(${hIdx + 1})`)) && gateOf(await P1.evalJs(`getComputedStyle(document.querySelector(${J(hMore)})).opacity === '1'`)) && gateOf(await press(P1, hMore)) && gateOf(await pickMenu(P1, 'Clear content…')) && gateOf(await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000)) && (await dialogState(P1)).rows[0].words === `“waiting on the ${MARK} reply”` && verdictOf(await confirmIt(P1)),
     await P1.evalJs(`(() => { const b = document.querySelector(${J(hMore)}); return b ? { op: getComputedStyle(b).opacity, text: b.textContent } : null; })()`));
-  check('the history row and the "Now" line read the sentence (the window re-rendered from the broadcast)', await P1.waitFor(`![...document.querySelectorAll('.session-props, .window')].some((w) => w.textContent.includes(${J(MARK)})) && [...document.querySelectorAll(${J(hRow)})].some((r) => r.textContent.includes(${J(CT)}))`, 6000), await P1.evalJs(`[...document.querySelectorAll(${J(hRow)})].map((r) => r.textContent)`));
-  check('…a cleared row offers no ⋯ (nothing left to clear)', await P1.evalJs(`[...document.querySelectorAll(${J(hRow)})].filter((r) => r.textContent.includes(${J(CT)})).every((r) => !r.querySelector('.session-history-more'))`));
+  check('the history row and the "Now" line read the sentence (the window re-rendered from the broadcast)', verdictOf(await P1.waitFor(`![...document.querySelectorAll('.session-props, .window')].some((w) => w.textContent.includes(${J(MARK)})) && [...document.querySelectorAll(${J(hRow)})].some((r) => r.textContent.includes(${J(CT)}))`, 6000)), await P1.evalJs(`[...document.querySelectorAll(${J(hRow)})].map((r) => r.textContent)`));
+  check('…a cleared row offers no ⋯ (nothing left to clear)', verdictOf(await P1.evalJs(`[...document.querySelectorAll(${J(hRow)})].filter((r) => r.textContent.includes(${J(CT)})).every((r) => !r.querySelector('.session-history-more'))`)));
   await shot(P1, 'session-props-history-cleared', '.window:has(.session-history-list)');
 
   // ── ⑤ the Background Work panel ──
   console.log('⑤ Background Work: a job');
   await P1.evalJs(`app.openJobs({ forceWindow: true }); true`);
   const card = `.jobs-card[data-job=${J(JOB_ID)}]`;
-  check('the panel lists the job by its name', await P1.waitFor(`document.querySelector(${J(card)})?.querySelector('.jobs-name').textContent === ${J(`mail digest ${MARK}`)}`, 8000));
+  check('the panel lists the job by its name', verdictOf(await P1.waitFor(`document.querySelector(${J(card)})?.querySelector('.jobs-name').textContent === ${J(`mail digest ${MARK}`)}`, 8000)));
   // a REFUSAL is worded by its code (verify r2: the toast printed the server's English sentence to a zh / ja owner):
   // another client removes a job while this one's clear dialog is open ⇒ not_found ⇒ "no such record"
   const gone = `.jobs-card[data-job=${J(GONE_ID)}]`;
-  check('another job: right-click → "Clear content…" → the dialog opens', await P1.waitFor(`!!document.querySelector(${J(gone)})`, 5000) && await press(P1, gone + ' .jobs-name', 'right') && await pickMenu(P1, 'Clear content…') && await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000));
+  check('another job: right-click → "Clear content…" → the dialog opens', gateOf(await P1.waitFor(`!!document.querySelector(${J(gone)})`, 5000)) && gateOf(await press(P1, gone + ' .jobs-name', 'right')) && gateOf(await pickMenu(P1, 'Clear content…')) && verdictOf(await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000)));
   const rmR = await fetch(`http://127.0.0.1:${PORT}/api/jobs/${GONE_ID}/rm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   check('…meanwhile another client REMOVES that job', rmR.status === 200, rmR.status);
   await confirmIt(P1);
-  check('Clear content → the toast says "Could not clear: no such record" — the refusal\'s CODE worded on this device, never the server\'s sentence', await P1.waitFor(`[...document.querySelectorAll('#global-toasts > .global-toast')].some((e) => e.textContent.includes('Could not clear: no such record'))`, 4000), await toasts(P1));
+  check('Clear content → the toast says "Could not clear: no such record" — the refusal\'s CODE worded on this device, never the server\'s sentence', verdictOf(await P1.waitFor(`[...document.querySelectorAll('#global-toasts > .global-toast')].some((e) => e.textContent.includes('Could not clear: no such record'))`, 4000)), await toasts(P1));
   await P1.evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((e) => e.remove()); true`);
-  check('a right-click on the job offers "Clear content…"', await press(P1, card + ' .jobs-name', 'right') && (await menuLabels(P1)).includes('Clear content…'), await menuLabels(P1));
+  check('a right-click on the job offers "Clear content…"', gateOf(await press(P1, card + ' .jobs-name', 'right')) && verdictOf((await menuLabels(P1)).includes('Clear content…')), await menuLabels(P1));
   await dropMenu(P1);
-  check('THE VISIBLE DOOR: the expanded card shows its log (the words) and a "Clear content…" button (verify r2)', await press(P1, card + ' .jobs-name') && await P1.waitFor(`(() => { const c = document.querySelector(${J(card)}); return !!c && !!c.querySelector('.jobs-detail .jobs-clear') && (c.querySelector('.jobs-log')?.textContent || '').includes(${J(MARK)}); })()`, 6000),
+  check('THE VISIBLE DOOR: the expanded card shows its log (the words) and a "Clear content…" button (verify r2)', gateOf(await press(P1, card + ' .jobs-name')) && verdictOf(await P1.waitFor(`(() => { const c = document.querySelector(${J(card)}); return !!c && !!c.querySelector('.jobs-detail .jobs-clear') && (c.querySelector('.jobs-log')?.textContent || '').includes(${J(MARK)}); })()`, 6000)),
     await P1.evalJs(`document.querySelector(${J(card)})?.querySelector('.jobs-detail')?.textContent?.slice(0, 300)`));
-  check('pressing it → the dialog → cleared', await press(P1, card + ' .jobs-detail .jobs-clear') && await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && (await dialogState(P1)).rows[0].words === `“mail digest ${MARK}”` && await confirmIt(P1));
-  check('the card reads the sentence, dimmed', await P1.waitFor(`(() => { const n = document.querySelector(${J(card)})?.querySelector('.jobs-name'); return !!n && n.textContent === ${J(CT)} && n.classList.contains('rc-cleared'); })()`, 6000));
-  check('…its detail says the log is HIDDEN (the run the clear covered) — no words, never a blank that reads "no output" (verify r2)', await P1.waitFor(`(() => { const c = document.querySelector(${J(card)}); return !!c && (c.querySelector('.jobs-log-withheld')?.textContent || '') === 'The log is hidden — this job’s content was cleared' && !c.querySelector('.jobs-log') && !c.textContent.includes(${J(MARK)}); })()`, 6000),
+  check('pressing it → the dialog → cleared', gateOf(await press(P1, card + ' .jobs-detail .jobs-clear')) && gateOf(await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000)) && (await dialogState(P1)).rows[0].words === `“mail digest ${MARK}”` && verdictOf(await confirmIt(P1)));
+  check('the card reads the sentence, dimmed', verdictOf(await P1.waitFor(`(() => { const n = document.querySelector(${J(card)})?.querySelector('.jobs-name'); return !!n && n.textContent === ${J(CT)} && n.classList.contains('rc-cleared'); })()`, 6000)));
+  check('…its detail says the log is HIDDEN (the run the clear covered) — no words, never a blank that reads "no output" (verify r2)', verdictOf(await P1.waitFor(`(() => { const c = document.querySelector(${J(card)}); return !!c && (c.querySelector('.jobs-log-withheld')?.textContent || '') === 'The log is hidden — this job’s content was cleared' && !c.querySelector('.jobs-log') && !c.textContent.includes(${J(MARK)}); })()`, 6000)),
     await P1.evalJs(`document.querySelector(${J(card)})?.querySelector('.jobs-detail')?.textContent?.slice(0, 400)`));
   const jobNow = (await api(`/api/jobs/${JOB_ID}`)).job;
   check('the job keeps its id, kind and command; its name and context brief are gone', jobNow.name === CT && jobNow.context === null && jobNow.kind === 'cron' && J(jobNow.cmd.argv) === J(['sh', '-c', 'true']) && !J(jobNow).includes(MARK), jobNow);
@@ -512,33 +512,33 @@ try {
   console.log('⑥ an agent group: a message, patched live on a second client (ja)');
   const msg = `.chanmsg[data-vid=${J(MSG_VID)}]`;
   await P1.evalJs(`app.openChannel('groups', ${J(GID)}); true`);
-  check('client 1 draws the message', await P1.waitFor(`!!document.querySelector(${J(msg)})`, 8000));
-  check('client 1 saves its layout with the group window', await saveLayout(P1)); // client 2 restores the same group window
+  check('client 1 draws the message', verdictOf(await P1.waitFor(`!!document.querySelector(${J(msg)})`, 8000)));
+  check('client 1 saves its layout with the group window', verdictOf(await saveLayout(P1))); // client 2 restores the same group window
   const { t: t3, P: P3 } = await newPage();
   await page(P3, { lang: 'ja' });
-  check('client 2 (ja) draws it in the same window (the shared workspace)', await P3.waitFor(`!!document.querySelector(${J(msg)})`, 15000), await P3.evalJs(`[...app.wm.windows.values()].map((w) => w.type)`));
+  check('client 2 (ja) draws it in the same window (the shared workspace)', verdictOf(await P3.waitFor(`!!document.querySelector(${J(msg)})`, 15000)), await P3.evalJs(`[...app.wm.windows.values()].map((w) => w.type)`));
   await front(P3, t3.id);
   const idx3 = await P3.evalJs(`[...document.querySelectorAll('.chanmsg')].indexOf(document.querySelector(${J(msg)}))`);
   await press(P3, msg + ' .chanmsg-body', 'right');
-  check('ja: the menu item reads 内容を消去…', (await menuLabels(P3)).includes('内容を消去…'), await menuLabels(P3));
+  check('ja: the menu item reads 内容を消去…', verdictOf((await menuLabels(P3)).includes('内容を消去…')), await menuLabels(P3));
   await P3.evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
   await front(P1, target.id);
-  check('client 1: a right-click offers "Clear content…"', await press(P1, msg + ' .chanmsg-body', 'right') && (await menuLabels(P1)).includes('Clear content…'), await menuLabels(P1));
+  check('client 1: a right-click offers "Clear content…"', gateOf(await press(P1, msg + ' .chanmsg-body', 'right')) && verdictOf((await menuLabels(P1)).includes('Clear content…')), await menuLabels(P1));
   await dropMenu(P1);
   const mMore = msg + ' .chanmsg-more';
   await P1.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 }); // the right-click left the pointer ON the message
   // lane reaction-hover (2026-10-01): the ⋯ lives in the message's hover action bar (the SVG glyph, one bar per message) —
   // the BAR carries the opacity; its pointer-events reach the button by inheritance
   const hid = await P1.waitFor(`(() => { const b = document.querySelector(${J(mMore)}); const bar = b && b.closest('.chanmsg-bar'); return !!bar && getComputedStyle(bar).opacity === '0' && getComputedStyle(b).pointerEvents === 'none' && !!b.querySelector('svg') && b.textContent.trim() === ''; })()`, 2000);
-  check('THE VISIBLE DOOR: the message\'s ⋯ (an SVG glyph in its hover action bar) is hidden (and takes no click) until the pointer rests on the message, then shown (verify r2)', hid && await hover(P1, msg + ' .chanmsg-body') && await P1.waitFor(`(() => { const b = document.querySelector(${J(mMore)}); return getComputedStyle(b.closest('.chanmsg-bar')).opacity === '1' && getComputedStyle(b).pointerEvents === 'auto'; })()`, 2000),
+  check('THE VISIBLE DOOR: the message\'s ⋯ (an SVG glyph in its hover action bar) is hidden (and takes no click) until the pointer rests on the message, then shown (verify r2)', gateOf(hid) && gateOf(await hover(P1, msg + ' .chanmsg-body')) && verdictOf(await P1.waitFor(`(() => { const b = document.querySelector(${J(mMore)}); return getComputedStyle(b.closest('.chanmsg-bar')).opacity === '1' && getComputedStyle(b).pointerEvents === 'auto'; })()`, 2000)),
     await P1.evalJs(`(() => { const b = document.querySelector(${J(mMore)}); const bar = b && b.closest('.chanmsg-bar'); return b ? { op: bar && getComputedStyle(bar).opacity, pe: getComputedStyle(b).pointerEvents } : null; })()`));
-  check('client 1: ⋯ → "Clear content…" → the dialog → cleared', await press(P1, mMore) && await pickMenu(P1, 'Clear content…') && await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && (await dialogState(P1)).rows[0].words === `“pasting the ${MARK} mail: the CFO wrote …”` && await confirmIt(P1),
+  check('client 1: ⋯ → "Clear content…" → the dialog → cleared', gateOf(await press(P1, mMore)) && gateOf(await pickMenu(P1, 'Clear content…')) && gateOf(await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000)) && (await dialogState(P1)).rows[0].words === `“pasting the ${MARK} mail: the CFO wrote …”` && verdictOf(await confirmIt(P1)),
     await P1.evalJs(`(() => { const e = document.querySelector(${J(mMore)}); if (!e) return 'gone'; const q = e.getBoundingClientRect(); return { rect: [q.left, q.top, q.width, q.height], hoverNone: matchMedia('(hover: none)').matches, coarse: matchMedia('(pointer: coarse)').matches }; })()`));
-  check('client 1: the message reads the sentence in its place, its ⋯ gone', await P1.waitFor(`document.querySelector(${J(msg)})?.querySelector('.chanmsg-body')?.textContent === ${J(CT)} && !document.querySelector(${J(mMore)})`, 5000));
-  check('client 2 (ja) is patched IN PLACE, live: ユーザーの要請により消去済み at the same index', await P3.waitFor(`document.querySelector(${J(msg)})?.querySelector('.chanmsg-body')?.textContent === ${J(JA)}`, 5000) && await P3.evalJs(`[...document.querySelectorAll('.chanmsg')].indexOf(document.querySelector(${J(msg)}))`) === idx3);
+  check('client 1: the message reads the sentence in its place, its ⋯ gone', verdictOf(await P1.waitFor(`document.querySelector(${J(msg)})?.querySelector('.chanmsg-body')?.textContent === ${J(CT)} && !document.querySelector(${J(mMore)})`, 5000)));
+  check('client 2 (ja) is patched IN PLACE, live: ユーザーの要請により消去済み at the same index', gateOf(await P3.waitFor(`document.querySelector(${J(msg)})?.querySelector('.chanmsg-body')?.textContent === ${J(JA)}`, 5000)) && await P3.evalJs(`[...document.querySelectorAll('.chanmsg')].indexOf(document.querySelector(${J(msg)}))`) === idx3);
   await shot(P3, 'group-window-ja-cleared', '.window:has(.chanmsg)');
   const gl = await api(`/api/channel-groups/${GID}/messages?limit=50`);
-  check('the group read (the owner\'s route): the record cleared, the replacement never shown', gl.records && !J(gl.records).includes(MARK) && gl.records.some((r) => r.vendorId === MSG_VID && r.clearedAt) && !gl.records.some((r) => r.raw && r.raw.kind === 'cleared'), gl);
+  check('the group read (the owner\'s route): the record cleared, the replacement never shown', gateOf(gl.records) && !J(gl.records).includes(MARK) && gateOf(gl.records.some((r) => r.vendorId === MSG_VID && r.clearedAt)) && !gl.records.some((r) => r.raw && r.raw.kind === 'cleared'), gl);
   check('no uncaught page exception on client 2 / client 3', P3.errors.length === 0, P3.errors.slice(0, 3));
   try { P3.sock.close(); await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t3.id}`, { method: 'PUT' }); } catch {}
   await front(P1, target.id);
@@ -570,16 +570,16 @@ try {
   await P1.waitApp();
   await sleep(1200);
   { const h = await P1.evalJs(`localStorage.getItem('vibespace.toastHistory') || ''`);
-    check('the reload cut an older build\'s For-you arrival entry back to its HEAD — no word of the item, and no label (a Background Work ask\'s label is the job\'s name, verify r5); an unrelated toast kept whole', !h.includes(MARK) && h.includes(J('Added to For you (bottom right)').slice(1, -1)) && !h.includes('mail agent') && h.includes('Sent · an unrelated toast: kept'), h.slice(0, 400)); }
+    check('the reload cut an older build\'s For-you arrival entry back to its HEAD — no word of the item, and no label (a Background Work ask\'s label is the job\'s name, verify r5); an unrelated toast kept whole', !h.includes(MARK) && gateOf(h.includes(J('Added to For you (bottom right)').slice(1, -1))) && !h.includes('mail agent') && verdictOf(h.includes('Sent · an unrelated toast: kept')), h.slice(0, 400)); }
   await P1.evalJs(`app.openTaskLog(${J(W)}, { tab: 'activity' }); true`);
   await P1.waitFor(`!!document.querySelector(${J(rowOf('P-00000b'))})`, 8000);
   // a long-press is a contextmenu on touch (utils installLongPressContextMenu) — dispatched here directly
   await P1.evalJs(`(() => { const r = document.querySelector(${J(rowOf('P-00000b'))} + ' .task-log-note'); const q = r.getBoundingClientRect(); r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: q.left + 20, clientY: q.top + 5 })); return true; })()`);
   await sleep(200);
-  check('the phone: the row\'s menu offers "Clear content…"', (await menuLabels(P1)).includes('Clear content…'), await menuLabels(P1));
+  check('the phone: the row\'s menu offers "Clear content…"', verdictOf((await menuLabels(P1)).includes('Clear content…')), await menuLabels(P1));
   await pickMenu(P1, 'Clear content…');
   const dp = await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && await dialogState(P1);
-  check('the phone: the dialog sits inside the 390 px viewport, rows and buttons whole', dp && dp.inViewport && dp.buttonsInside && dp.rowsInside && dp.unclipped, dp);
+  check('the phone: the dialog sits inside the 390 px viewport, rows and buttons whole', gateOf(dp) && gateOf(dp.inViewport) && gateOf(dp.buttonsInside) && gateOf(dp.rowsInside) && verdictOf(dp.unclipped), dp);
   await shot(P1, 'confirm-dialog-phone');
   await P1.evalJs(`document.querySelector('#record-clear-dialog .btn-cancel')?.click(); true`);
   check('no uncaught page exception on the phone', P1.errors.length === 0, P1.errors.slice(0, 3));
@@ -590,4 +590,4 @@ try {
 
 console.log(`${failed ? `FAILED (${failed})` : 'ALL PASS'} — ${Math.round((Date.now() - T0) / 1000)} s`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

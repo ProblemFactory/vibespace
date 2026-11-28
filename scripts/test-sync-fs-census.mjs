@@ -34,7 +34,7 @@ import { anchored } from './scratch.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n, detail) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (detail === undefined ? '' : ' — ' + JSON.stringify(detail).slice(0, 1500))); } };
+const ok = (c, n, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (detail === undefined ? '' : ' — ' + JSON.stringify(detail).slice(0, 1500))); } };
 
 const PROOFS = new Set(['local-only', 'via-safefs', 'guarded']);
 // [file, scope, n, proof, why, match?]
@@ -484,11 +484,11 @@ console.log('① every non-constant sync fs site of the main thread is a row');
 
 console.log('② the rows');
 {
-  ok(ROWS.every((r) => PROOFS.has(r[3])), 'every proof is local-only / via-safefs / guarded', ROWS.filter((r) => !PROOFS.has(r[3])).map((r) => r[0]));
-  ok(ROWS.every((r) => typeof r[4] === 'string' && r[4].length >= 24), 'every row says WHY (≥ 24 chars: the root, the launcher or the user source)', ROWS.filter((r) => !(typeof r[4] === 'string' && r[4].length >= 24)).map((r) => r[0] + ' ' + r[1]));
-  ok(ROWS.every((r) => r[2] > 0 && FILES.includes(r[0])), 'no dead row: each names a scanned file and claims ≥ 1 site', ROWS.filter((r) => !(r[2] > 0 && FILES.includes(r[0]))).map((r) => r[0]));
+  ok(verdictOf(ROWS.every((r) => PROOFS.has(r[3]))), 'every proof is local-only / via-safefs / guarded', ROWS.filter((r) => !PROOFS.has(r[3])).map((r) => r[0]));
+  ok(verdictOf(ROWS.every((r) => typeof r[4] === 'string' && r[4].length >= 24)), 'every row says WHY (≥ 24 chars: the root, the launcher or the user source)', ROWS.filter((r) => !(typeof r[4] === 'string' && r[4].length >= 24)).map((r) => r[0] + ' ' + r[1]));
+  ok(verdictOf(ROWS.every((r) => r[2] > 0 && FILES.includes(r[0]))), 'no dead row: each names a scanned file and claims ≥ 1 site', ROWS.filter((r) => !(r[2] > 0 && FILES.includes(r[0]))).map((r) => r[0]));
   const stars = new Map(); for (const r of ROWS) if (r[1] === '*') stars.set(r[0], (stars.get(r[0]) || 0) + 1);
-  ok([...stars.values()].every((n) => n === 1) && ROWS.every((r, i) => r[1] !== '*' || !ROWS.slice(i + 1).some((x) => x[0] === r[0])), 'a file has at most ONE \'*\' row and it is that file\'s last');
+  ok(gateOf([...stars.values()].every((n) => n === 1)) && verdictOf(ROWS.every((r, i) => r[1] !== '*' || !ROWS.slice(i + 1).some((x) => x[0] === r[0]))), 'a file has at most ONE \'*\' row and it is that file\'s last');
   // B-8797 (lane hub-loop-stalls, 主开发 r5195): THE DATA FOLDER's EXEMPTION is JUDGED, not assumed — a path built of the data dir
   // counts as a constant above because the START judges that folder: src/server/data-folder-notice.js (armed by server.js's listen)
   // names its mount by THE ONE VERDICT (src/local-index.js netMountOf — the sync-fs witness's own question for the same folder) and
@@ -496,7 +496,7 @@ console.log('② the rows');
   const DF = fs.readFileSync(path.join(REPO, 'src/server/data-folder-notice.js'), 'utf8'), WI = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness.js'), 'utf8'), SJ = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const judged = (df, wi, sj) => df.split('LI.netMountOf(').length === 2 && /require\('\.\.\/local-index\.js'\)\.netMountOf\(path\.resolve\(dataDir\), mi\)/.test(wi)
     && sj.includes("require('./src/server/data-folder-notice.js').create({ dataDir: path.join(__dirname, 'data')") && sj.includes('  dataFolder.arm();');
-  ok(judged(DF, WI, SJ), 'B-8797: the data folder\'s exemption is JUDGED — the start\'s look (src/server/data-folder-notice.js, armed by server.js) and the sync-fs witness ask ONE verdict for that folder (src/local-index.js netMountOf)');
+  ok(verdictOf(judged(DF, WI, SJ)), 'B-8797: the data folder\'s exemption is JUDGED — the start\'s look (src/server/data-folder-notice.js, armed by server.js) and the sync-fs witness ask ONE verdict for that folder (src/local-index.js netMountOf)');
   ok(!judged(anchored(DF, 'LI.netMountOf(', 'LI.mountOf(', 'b8797-own-verdict'), WI, SJ), 'CONTROL (the look asking a question of its own — mountOf, any file system — in a copy): the pin is red');
 }
 
@@ -507,18 +507,18 @@ console.log('③ RED CONTROLS: a site with no row is RED');
   const others = (rel) => VAR.filter((s) => s.file !== rel);
   const NEW = "'use strict';\nconst fs = require('fs');\nfunction peek(p) { return fs.statSync(p); }\nmodule.exports = { peek };\n";
   const a = census([...VAR, ...plant('src/zz-planted.js', NEW)]);
-  ok(a.unclaimed.length === 1 && /src\/zz-planted\.js:3 «peek» statSync\(p\)/.test(a.unclaimed[0]), `a site in a NEW file is unclaimed: ${a.unclaimed[0]}`);
+  ok(a.unclaimed.length === 1 && verdictOf(/src\/zz-planted\.js:3 «peek» statSync\(p\)/.test(a.unclaimed[0])), `a site in a NEW file is unclaimed: ${a.unclaimed[0]}`);
   const TG = 'src/task-groups.js';
   const tg = base(TG).replace("    if (DOOR.blocked(abs)) return 'blocked';\n", "    if (DOOR.blocked(abs)) return 'blocked';\n    try { fs.accessSync(abs); } catch { }\n");
   const b = census([...others(TG), ...plant(TG, tg)]);
-  ok(tg !== base(TG) && b.stale.some((x) => /_kindOf/.test(x.row) && x.got === x.want + 1), 'one more site in a covered scope (task-groups _kindOf) reds that row\'s count', b.stale);
+  ok(tg !== base(TG) && verdictOf(b.stale.some((x) => /_kindOf/.test(x.row) && x.got === x.want + 1)), 'one more site in a covered scope (task-groups _kindOf) reds that row\'s count', b.stale);
   const tg2 = base(TG).replace('  _ctxRows(t) {', '  _peek(p) { return fs.existsSync(p); }\n  _ctxRows(t) {');
   const c2 = census([...others(TG), ...plant(TG, tg2)]);
   const star = ROWS.some((r) => r[0] === TG && r[1] === '*');
-  ok(tg2 !== base(TG) && (star ? c2.stale.some((x) => x.row === `${TG} «*»` && x.got === x.want + 1) : c2.unclaimed.some((u) => /«TaskGroupManager\._peek» existsSync\(p\)/.test(u))),
+  ok(tg2 !== base(TG) && (star ? verdictOf(c2.stale.some((x) => x.row === `${TG} «*»` && x.got === x.want + 1)) : verdictOf(c2.unclaimed.some((u) => /«TaskGroupManager\._peek» existsSync\(p\)/.test(u)))),
     `a site in a scope no row of its file names is RED (${star ? 'its file\'s \'*\' row count moves' : 'unclaimed'})`, { stale: c2.stale, unclaimed: c2.unclaimed });
   const CONST = "'use strict';\nconst fs = require('fs');\nconst path = require('path');\nconst FILE = path.join(__dirname, '..', 'data', 'x.json');\nfunction load() { return fs.readFileSync(FILE, 'utf8') + fs.readFileSync('/proc/self/stat', 'utf8'); }\nmodule.exports = { load };\n";
-  ok(sitesOf(REPO, 'src/zz-const.js', { src: CONST }).every((s) => s.kind === 'const'), 'CONTROL: a constant path (a file constant over __dirname, /proc) needs no row');
+  ok(verdictOf(sitesOf(REPO, 'src/zz-const.js', { src: CONST }).every((s) => s.kind === 'const')), 'CONTROL: a constant path (a file constant over __dirname, /proc) needs no row');
 }
 
 console.log('④ the conversions: a storage path is never read on the main thread');
@@ -546,7 +546,7 @@ console.log('④ the conversions: a storage path is never read on the main threa
   ok(JSON.stringify(runOp('contextFiles', { path: lc, cap: 100 }).result) === JSON.stringify(proto._listContextFiles(lc, 100)) && proto._listContextFiles(lc, 100).length === 4,
     'SafeFs contextFiles ≡ task-groups _listContextFiles (path order, .git skipped, sizes + mtimes)', proto._listContextFiles(lc, 100));
   const same = ['NOTES.md', 'bin.dat', 'big.txt'].every((f) => JSON.stringify(runOp('textHead', { path: path.join(lc, f), cap: 64 * 1024 }).result) === JSON.stringify(proto._readText(path.join(lc, f))));
-  ok(same, 'SafeFs textHead ≡ task-groups _readText (text, binary, past READ_CAP = big)');
+  ok(verdictOf(same), 'SafeFs textHead ≡ task-groups _readText (text, binary, past READ_CAP = big)');
   // a Task Group on the STORAGE root: no main-thread sync call lands there, the answers come from SafeFs facts
   SP.setRoots([{ root: store, kind: 'storage', name: 'NAS' }]);
   const onStore = [];
@@ -562,13 +562,13 @@ console.log('④ the conversions: a storage path is never read on the main threa
   ok(k0 === 'reading' && r0.reading === true && w0 === null, `before the first off-thread answer: the row is 'reading', the file not read, the listing NOT KNOWN (null — never an empty list, B-422c) (${k0})`);
   ok(k1 === 'dir' && r1.text === '# the notes\n' && w1.length === 4 && tgm._kindOf(path.join(store, 'nope')) === 'reading', `after it lands: dir, the file's text, the 4 files — every answer a SafeFs fact (${k1}, ${w1.length} files)`);
   ok(tgm.groupsForSession({ cwd: path.join(store, 'proj') }).length === 0 && !tgm._realCache?.has(path.join(store, 'proj')), 'a session cwd on the storage root is never realpathed (the cwd itself matches; not cached)');
-  ok(SS.recoverCwdFromProjDir(path.join(store, 'ctx', 'sub').replace(/[/._]/g, '-')).startsWith(store), `the project-dir decode takes the mount point as there and never probes below it (${SS.recoverCwdFromProjDir(path.join(store, 'ctx', 'sub').replace(/[/._]/g, '-'))})`);
+  ok(verdictOf(SS.recoverCwdFromProjDir(path.join(store, 'ctx', 'sub').replace(/[/._]/g, '-')).startsWith(store)), `the project-dir decode takes the mount point as there and never probes below it (${SS.recoverCwdFromProjDir(path.join(store, 'ctx', 'sub').replace(/[/._]/g, '-'))})`);
   ok(!onStore.length, `NO main-thread sync fs call landed on the storage root (${onStore.length})`, onStore.slice(0, 10));
   // CONTROL: the same reads with no roots set take the sync road — the hook counts them (the census of ④ can see a call)
   SP.setRoots([]);
   const t2 = new TaskGroupManager({ dataDir: path.join(dir, 'data2'), mirrorFs: () => pool, homeDir: dir });
   t2._kindOf(sc); t2._readText(path.join(sc, 'NOTES.md'));
-  ok(onStore.length >= 2 && onStore.some((x) => x.startsWith('statSync(')), `CONTROL: without the storage root the same rows are stat'd on the main thread (${onStore.length} calls seen)`, onStore);
+  ok(onStore.length >= 2 && verdictOf(onStore.some((x) => x.startsWith('statSync('))), `CONTROL: without the storage root the same rows are stat'd on the main thread (${onStore.length} calls seen)`, onStore);
   LB.setHook(null);
   pool.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -582,12 +582,12 @@ console.log('④ the conversions: a storage path is never read on the main threa
     ['src/desktop-serve.js', /const execHere = \(x\) => \(SP\.storageRootOf\(x\) \? x : fs\.existsSync\(x\) \? x : null\);/],
     ['src/session-store.js', /const probeCandidate = \(p\) => \{ const r = SP\.storageRootOf\(p\); return r \? p === r\.root : fs\.existsSync\(p\); \};/],
   ];
-  for (const [rel, re] of PINS) ok(re.test(src(rel)), `${rel}: the storage answer comes before the sync call`);
+  for (const [rel, re] of PINS) ok(verdictOf(re.test(src(rel))), `${rel}: the storage answer comes before the sync call`);
   ok(!/fs\.\w+Sync\(/.test(src('src/ctx-sync.js')), 'ctx-sync: the context folder sync makes no sync fs call (async fs, one per host:group in flight)');
-  ok(/function localDuBytes\(p\) \{\n\s*return fs\.promises\.stat\(p\)/.test(src('src/routes/files.js')) && /let busy = false; \/\/ one measurement at a time/.test(src('src/routes/files.js')), 'the explorer\'s copy progress (every 1.2 s): an async stat, one at a time');
+  ok(gateOf(/function localDuBytes\(p\) \{\n\s*return fs\.promises\.stat\(p\)/.test(src('src/routes/files.js'))) && verdictOf(/let busy = false; \/\/ one measurement at a time/.test(src('src/routes/files.js'))), 'the explorer\'s copy progress (every 1.2 s): an async stat, one at a time');
   { const dav = src('src/webdav.js'), handler = dav.slice(dav.indexOf("app.use('/dav', async (req, res) =>"));
-    ok(dav.includes("app.use('/dav', async (req, res) =>") && !/fs\.\w+Sync\(/.test(handler), '/dav: the route makes no sync fs call — every verb over the share is async fs'); }
-  ok(/await fs\.promises\.mkdir\(mountpoint, \{ recursive: true \}\);/.test(src('src/device-mount.js')), 'the device folder mount point: an async mkdir (a stale FUSE path right after the lazy unmount)');
+    ok(gateOf(dav.includes("app.use('/dav', async (req, res) =>")) && !/fs\.\w+Sync\(/.test(handler), '/dav: the route makes no sync fs call — every verb over the share is async fs'); }
+  ok(verdictOf(/await fs\.promises\.mkdir\(mountpoint, \{ recursive: true \}\);/.test(src('src/device-mount.js'))), 'the device folder mount point: an async mkdir (a stale FUSE path right after the lazy unmount)');
 }
 
 console.log('⑤ the via-safefs files are started off the main thread');
@@ -595,8 +595,8 @@ console.log('⑤ the via-safefs files are started off the main thread');
   const via = [...new Set(ROWS.filter((r) => r[3] === 'via-safefs').map((r) => r[0]))];
   const miss = via.filter((f) => !LAUNCHERS[f] || !fs.existsSync(path.join(REPO, LAUNCHERS[f])) || !fs.readFileSync(path.join(REPO, LAUNCHERS[f]), 'utf8').includes(path.basename(f)));
   ok(via.length >= 6 && !miss.length, `every via-safefs file (${via.length}) is named by its launcher (${via.map((f) => `${path.basename(f)} ← ${LAUNCHERS[f]}`).join(', ')})`, miss);
-  ok(ROWS.filter((r) => r[3] === 'via-safefs').every((r) => !ROWS.some((x) => x[0] === r[0] && x[3] !== 'via-safefs')), 'a via-safefs file is via-safefs whole (no main-thread row beside it)');
+  ok(verdictOf(ROWS.filter((r) => r[3] === 'via-safefs').every((r) => !ROWS.some((x) => x[0] === r[0] && x[3] !== 'via-safefs'))), 'a via-safefs file is via-safefs whole (no main-thread row beside it)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

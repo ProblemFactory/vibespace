@@ -22,7 +22,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -211,9 +211,9 @@ console.log('CONTROLS');
   console.log(`    the pass: ${got.broadcasts} broadcasts in ${got.ms} ms for ${got.okN} answered keys (the per-fetch shape: one per answered key)`);
   ok(got.okN === 200 && got.changed >= 200 && got.broadcasts <= got.bound && got.unsaid === 0 && got.late === 0, `a pass broadcasts its early keys at most once per 250 ms + its end (${got.broadcasts} ≤ ${got.bound}), every changed key named, every answer after its key's broadcast`, got);
   const ctl = ENG_SRC.includes(PACED) ? await viewsPass(MC.load('src/server/channels-engine.js', editAnchor(ENG_SRC, PACED, '          if (act.waiters.length) { notify([key], { full: false }); early.add(key); }', "src/server/channels-engine.js"), 'per-fetch'), 'per-fetch') : null;
-  ok(ctl && ctl.broadcasts > ctl.bound && ctl.broadcasts >= 200, `CONTROL: the per-fetch broadcast restored reads ${ctl && ctl.broadcasts} broadcasts for ${ctl && ctl.okN} answered keys — red`, ctl);
+  ok(gateOf(ctl) && ctl.broadcasts > ctl.bound && ctl.broadcasts >= 200, `CONTROL: the per-fetch broadcast restored reads ${ctl && ctl.broadcasts} broadcasts for ${ctl && ctl.okN} answered keys — red`, ctl);
 }
 
 console.log(`\ntest-channels-census-pace: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { gateOf } from './lib/check.mjs';

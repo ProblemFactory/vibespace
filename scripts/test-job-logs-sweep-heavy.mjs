@@ -27,7 +27,7 @@ const PI = require(path.join(ROOT, 'src/proc-identity.js'));
 let LS = null; try { LS = require(path.join(ROOT, 'src/job-logs-sweep.js')); } catch { /* the release: no remover — its legs are red by name */ }
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 15000, step = 10) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(step); } return false; };
 const DAY = 864e5;
@@ -128,14 +128,14 @@ try {
     await J1._sweep();
   }
   const listed1 = child.runs.map((r) => String(r.startedAt)), dropped1 = fired.slice(0, 10).map(String);
-  ok(child.runs.length === 20 && runsOn(d1, child.id).length === 30 && dropped1.every((t) => !listed1.includes(t)), 'the child holds its last 20 runs; 30 run dirs on disk (10 dropped by the record)', `${child.runs.length} listed, ${runsOn(d1, child.id).length} on disk`);
+  ok(child.runs.length === 20 && runsOn(d1, child.id).length === 30 && verdictOf(dropped1.every((t) => !listed1.includes(t))), 'the child holds its last 20 runs; 30 run dirs on disk (10 dropped by the record)', `${child.runs.length} listed, ${runsOn(d1, child.id).length} on disk`);
   await sweepAt(J1, Date.now());
   ok(runsOn(d1, child.id).length === 30, 'inside the retention nothing is removed (a dropped run is kept 14 days)');
   await sweepAt(J1, Date.now() + 15 * DAY);
   const left1 = runsOn(d1, child.id);
-  ok(dropped1.every((t) => !left1.includes(t)), 'past the retention the 10 runs the record dropped are GONE', `${left1.filter((t) => dropped1.includes(t)).length} of 10 still on disk`);
-  ok(listed1.every((t) => left1.includes(t)), 'the 20 runs the record lists stay');
-  ok(/fired/.test(J1.snapshot(child, { tail: 5 }).logTail || ''), 'the job\'s page still serves its last run\'s log');
+  ok(verdictOf(dropped1.every((t) => !left1.includes(t))), 'past the retention the 10 runs the record dropped are GONE', `${left1.filter((t) => dropped1.includes(t)).length} of 10 still on disk`);
+  ok(verdictOf(listed1.every((t) => left1.includes(t))), 'the 20 runs the record lists stay');
+  ok(verdictOf(/fired/.test(J1.snapshot(child, { tail: 5 }).logTail || '')), 'the job\'s page still serves its last run\'s log');
 
   // ── P2 A DROPPED RUN STILL ALIVE PAST THE RETENTION ────────────────────────────────────────────────────────────────────
   lap('P2 a dropped run alive past the retention');
@@ -144,7 +144,7 @@ try {
   const liveTs = fired[0] - 5000, liveDir = seedRun(d1, child.id, liveTs, { stamp: stampOf(live.pid) });
   const badTs = fired[0] - 6000, badDir = seedRun(d1, child.id, badTs, { stamp: null }); fs.writeFileSync(path.join(badDir, 'pid.json'), '{"pid": 12');
   await sweepAt(J1, Date.now() + 15 * DAY);
-  ok(has(liveDir), 'a run no record lists whose wrapper LIVES stays past the retention');
+  ok(verdictOf(has(liveDir)), 'a run no record lists whose wrapper LIVES stays past the retention');
   ok(!has(badDir), 'round 3 §5: a run whose stamp cannot be read, and that no running process\'s argv names, GOES (no clock — its one writer, the wrapper, is not running)');
   live.kill('SIGKILL'); await until(() => PI.aliveIdentity(stampOf(live.pid) || { pid: live.pid, starttime: -1 }) !== true, 3000);
   await sleep(50);
@@ -157,11 +157,11 @@ try {
   const j3 = J1.jobs.get(r3.job.id);
   await until(() => j3.runs && j3.runs.length && J1._verifyAlive(J1._readStamp(j3)), 10000);
   const ts3 = j3.runs[0].startedAt, ctl3 = path.join(d1, 'job-logs', j3.id, String(ts3));
-  ok(J1.rm(j3, { orphan: true }).ok && !J1.jobs.has(j3.id), 'rm --orphan: the record is gone while its run lives');
+  ok(gateOf(J1.rm(j3, { orphan: true }).ok) && !J1.jobs.has(j3.id), 'rm --orphan: the record is gone while its run lives');
   await sweepAt(J1, Date.now() + 15 * DAY);
-  ok(has(ctl3), 'the removed job\'s live run dir stays past the retention');
+  ok(verdictOf(has(ctl3)), 'the removed job\'s live run dir stays past the retention');
   const w3 = wrapperOf(d1, j3.id, ts3);
-  ok(w3 && endWrapper(w3, ctl3), 'its wrapper ended (cmdline checked: this scratch dir\'s job-wrapper.js)');
+  ok(gateOf(w3) && verdictOf(endWrapper(w3, ctl3)), 'its wrapper ended (cmdline checked: this scratch dir\'s job-wrapper.js)');
   await until(() => PI.aliveIdentity(w3) !== true, 5000); await sleep(50);
   await sweepAt(J1, Date.now() + 15 * DAY);
   ok(!has(ctl3) && !has(d1, 'job-logs', j3.id), '…once it ended: past the retention its run dir AND the job dir no record names are gone');
@@ -176,8 +176,8 @@ try {
     fs.writeFileSync(path.join(ctl5, 'pid.json'), '{ torn');   // a stamp that cannot be read
     J1.rm(j5, { orphan: true });
     const wl = typeof J1._logsWhole === 'function' ? await J1._logsWhole([j5.id]) : {};   // the release has no remover: red by name below
-    ok(has(ctl5) && (wl.keptWhy || {})[j5.id] === 'unjudgeable', 'THE REAL WRAPPER: its stamp torn, its record removed — a whole-dir verdict KEEPS the run while that wrapper runs (its argv names the run dir)');
-    ok(w5 && endWrapper(w5, ctl5), 'its wrapper ended (cmdline checked)');
+    ok(gateOf(has(ctl5)) && (wl.keptWhy || {})[j5.id] === 'unjudgeable', 'THE REAL WRAPPER: its stamp torn, its record removed — a whole-dir verdict KEEPS the run while that wrapper runs (its argv names the run dir)');
+    ok(gateOf(w5) && verdictOf(endWrapper(w5, ctl5)), 'its wrapper ended (cmdline checked)');
     await until(() => PI.aliveIdentity(w5) !== true, 5000); await sleep(50);
     if (typeof J1._logsWhole === 'function') await J1._logsWhole([j5.id]);
     ok(!has(ctl5), '…and once it ended, nothing names the run dir: the same verdict removes it');
@@ -191,14 +191,14 @@ try {
   J1._reapLater.set({ startedAt: heldTs }, { job: child, tries: 0 });
   fs.mkdirSync(path.join(d1, 'job-logs', child.id, 'notes'), { recursive: true });
   await sweepAt(J1, Date.now());
-  ok(has(longDir), 'a run that started 20 days ago but wrote 2 days ago stays (its age is its newest file — the owner\'s 10 long runs)');
+  ok(verdictOf(has(longDir)), 'a run that started 20 days ago but wrote 2 days ago stays (its age is its newest file — the owner\'s 10 long runs)');
   ok(!has(oldDir) && !has(emptyDir), 'a dropped run whose newest file is 20 days old goes; an EMPTY run dir is aged by its start');
-  ok(has(heldDir), 'a dropped run the hub holds a reap for stays');
-  ok(has(d1, 'job-logs', child.id, 'notes'), 'an entry of another name in a job dir is never the sweep\'s');
+  ok(verdictOf(has(heldDir)), 'a dropped run the hub holds a reap for stays');
+  ok(verdictOf(has(d1, 'job-logs', child.id, 'notes')), 'an entry of another name in a job dir is never the sweep\'s');
   const svc = 'jb-5e7f1ce0'; J1.jobs.set(svc, { id: svc, kind: 'service', name: 'a-service', state: 'up', desiredUp: true, owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - 3 * DAY }] });
   const svcDropped = seedRun(d1, svc, Date.now() - 30 * DAY, { ageMs: 25 * DAY }), svcListed = seedRun(d1, svc, Date.now() - 3 * DAY, { stamp: null });
   await gcAt(J1, Date.now());
-  ok(!has(svcDropped) && has(svcListed) && J1.jobs.has(svc), 'THE HOURLY ROAD (the real clock): the gc runs the law\'s pass — a service\'s run its record dropped 25 days ago is gone, its listed run and its record stay');
+  ok(!has(svcDropped) && gateOf(has(svcListed)) && verdictOf(J1.jobs.has(svc)), 'THE HOURLY ROAD (the real clock): the gc runs the law\'s pass — a service\'s run its record dropped 25 days ago is gone, its listed run and its record stay');
 
   // ── THE FIVE REMOVERS: their verdicts theirs, the removal off the main thread ─────────────────────────────────────────
   lap('§W the removers through the worker');
@@ -214,7 +214,7 @@ try {
   let rmA = null;
   try { rmA = await rmLanded(J1, arcId); } finally { Object.assign(fs, realRm); }   // the stub stays until the landing: its step (the dir handed to the worker) is the ✕'s too
   const byMain = mainRm.filter((p) => p === arcRun || p.startsWith(arcRun + path.sep) || p === path.dirname(arcRun));
-  ok(rmA && rmA.ok && rmA.landed && rmA.landed.ok && !byMain.length, 'the ✕ answers its record\'s removal with no removal on the main thread — none of its fs removals touched the run\'s dir', `ok=${rmA && rmA.ok} landed=${JSON.stringify(rmA && rmA.landed)} main-thread removals there: ${JSON.stringify(byMain)}`);
+  ok(gateOf(rmA) && gateOf(rmA.ok) && gateOf(rmA.landed) && gateOf(rmA.landed.ok) && !byMain.length, 'the ✕ answers its record\'s removal with no removal on the main thread — none of its fs removals touched the run\'s dir', `ok=${rmA && rmA.ok} landed=${JSON.stringify(rmA && rmA.landed)} main-thread removals there: ${JSON.stringify(byMain)}`);
   const gA = rmA && rmA.gone ? await rmA.gone : { notAsked: true };
   ok(typeof J1.logsGone === 'function' && gA.gone === true && !has(d1, 'job-logs', arcId), '…and logsGone() resolves once the remover\'s worker has removed it (the routes answer the person then)', gA);
   // a whole-dir verdict never takes a live run: the gc's leg (a) over a done task past 14 days with a live stray run
@@ -223,7 +223,7 @@ try {
   J1.jobs.set(gcT, { id: gcT, kind: 'task', name: 'done-long-ago', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - 30 * DAY, endedAt: Date.now() - 30 * DAY, exit: 0 }] });
   const gcDead = seedRun(d1, gcT, Date.now() - 30 * DAY), gcLive = seedRun(d1, gcT, Date.now() - 40 * DAY, { stamp: stampOf(live2.pid) });
   await gcAt(J1, Date.now());
-  ok(!J1.jobs.has(gcT) && !has(gcDead) && has(gcLive), 'the gc\'s leg (a): record gone, its finished run removed by the worker, a run whose wrapper lives kept');
+  ok(!J1.jobs.has(gcT) && !has(gcDead) && verdictOf(has(gcLive)), 'the gc\'s leg (a): record gone, its finished run removed by the worker, a run whose wrapper lives kept');
   live2.kill('SIGKILL'); await until(() => PI.aliveIdentity(stampOf(live2.pid) || { pid: live2.pid, starttime: -1 }) !== true, 3000); await sleep(50);
   await sweepAt(J1, Date.now() + 15 * DAY);
   ok(!has(gcLive) && !has(d1, 'job-logs', gcT), 'WHO REMOVES WHAT A WHOLE-DIR VERDICT LEFT: the law\'s pass — once that run ended and its newest file aged past the retention, its dir and the job dir no record names are gone');
@@ -234,7 +234,7 @@ try {
   const arc3Run = seedRun(d1, arc3, Date.now() - DAY);
   J1._logsRm = { whole: async () => ({ error: 'held', held: true, gone: [] }), sweep: (...a) => realRm.sweep(...a), settled: () => realRm.settled(), busy: () => realRm.busy(), held: () => true, stop() { } };
   const gone3 = await goneOf(rmLanded(J1, arc3));
-  ok(gone3 && gone3.pending === true && has(arc3Run) && J1._logsOwed && J1._logsOwed.has(arc3), 'a ✕ the remover could not do (HELD): answered false (the routes say logsPending), its dir owed', { gone3, dir: has(arc3Run), owed: !!(J1._logsOwed && J1._logsOwed.has(arc3)) });
+  ok(gateOf(gone3) && gone3.pending === true && gateOf(has(arc3Run)) && gateOf(J1._logsOwed) && verdictOf(J1._logsOwed.has(arc3)), 'a ✕ the remover could not do (HELD): answered false (the routes say logsPending), its dir owed', { gone3, dir: has(arc3Run), owed: !!(J1._logsOwed && J1._logsOwed.has(arc3)) });
   J1._logsRm = realRm; await sweepAt(J1, Date.now());
   ok(!has(d1, 'job-logs', arc3) && !J1._logsOwed.has(arc3), '…and the next pass re-sends it first: gone, nothing owed');
   } else ok(false, 'a ✕ the remover could not do is owed and re-sent (no remover on this tree)');
@@ -244,11 +244,11 @@ try {
   const arc2Run = seedRun(d1, arc2, arc2Ts, { ageMs: 20 * DAY }), arc2Dropped = seedRun(d1, arc2, arc2Ts - DAY, { ageMs: 21 * DAY });
   J1.archive = null;
   await sweepAt(J1, Date.now());
-  ok(J1.archive === null && has(arc2Run) && !has(arc2Dropped), 'an archive the hub has not loaded is read in the worker: its listed run stays, its dropped run goes — and the main thread loaded nothing');
+  ok(J1.archive === null && gateOf(has(arc2Run)) && !has(arc2Dropped), 'an archive the hub has not loaded is read in the worker: its listed run stays, its dropped run goes — and the main thread loaded nothing');
   fs.writeFileSync(path.join(d1, 'jobs-archive.json'), '[{ torn');
   const orphanOld = seedRun(d1, 'jb-0e1a0001', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
   await sweepAt(J1, Date.now());
-  ok(has(orphanOld), 'an archive that cannot be read removes NOTHING (a record it names could be lost) — the pass fails and says so');
+  ok(verdictOf(has(orphanOld)), 'an archive that cannot be read removes NOTHING (a record it names could be lost) — the pass fails and says so');
   fs.writeFileSync(path.join(d1, 'jobs-archive.json'), '[]');
   // A WEDGED CHILD: a storage call that never returns is an uninterruptible wait not even SIGKILL ends (a child cannot model it
   // on a local disk — a FIFO's open IS interruptible): B-323e — a stand-in for THE STARTER's run (the remover's one road) whose
@@ -263,11 +263,11 @@ try {
     const said = [], R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere'), log: (l) => said.push(l), timeoutMs: 150, wedgedMs: 300, runImpl: standIn });
     const a1 = await R.sweep({ keep: {}, cutoff: 0, max: 1, orphanDir: tmp });
     const a2 = await R.sweep({ keep: {}, cutoff: 0, max: 1, orphanDir: tmp });
-    ok(a1.error && !a1.held && /has not ended/.test(a1.partialUnknown || '') && a2.held && started === 1 && R.held(), `a sweep past its timeout answers its timeout (never repeated; its count «unknown» while its child has not ended); its child is killed and does not end ⇒ HELD — the next batch answers at once and NO second child is started (${started} started)`);
+    ok(gateOf(a1.error) && !a1.held && gateOf(/has not ended/.test(a1.partialUnknown || '')) && gateOf(a2.held) && started === 1 && verdictOf(R.held()), `a sweep past its timeout answers its timeout (never repeated; its count «unknown» while its child has not ended); its child is killed and does not end ⇒ HELD — the next batch answers at once and NO second child is started (${started} started)`);
     ok(said.filter((l) => /HELD/.test(l)).length === 1, 'the hold is said ONCE', said);
     answer = true; if (late[0]) late[0]();
     const a3 = await R.sweep({ keep: {}, cutoff: 0, max: 1, orphanDir: tmp });
-    ok(!R.held() && !a3.error && started === 2 && said.some((l) => /has ended — removals go on/.test(l)), 'once the wedged child ends the remover goes on (a new child answers), and says so');
+    ok(!R.held() && !a3.error && started === 2 && verdictOf(said.some((l) => /has ended — removals go on/.test(l))), 'once the wedged child ends the remover goes on (a new child answers), and says so');
     R.stop(); clearInterval(alive);
   } else ok(false, 'a wedged child holds the remover (no remover on this tree)');
   // THE HUB'S EXIT NEVER WAITS FOR THE REMOVER (round 2): a process whose remover child is blocked in a storage call (a FIFO's
@@ -286,8 +286,8 @@ try {
     // reader is left on the FIFO (ENXIO); one still there is released here and the leg says so
     await sleep(300);
     let readerLeft = null; try { const fd = fs.openSync(fifoX, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); readerLeft = true; } catch (e) { readerLeft = e && e.code === 'ENXIO' ? false : null; }
-    ok(fs.existsSync(markX) && readerLeft === false, `B-323e: …and the starter ended the child blocked in its storage call once the hub's pipe closed (it reached the FIFO: ${fs.existsSync(markX)}; no reader left on its FIFO${readerLeft ? ' — ONE WAS: it outlived its hub' : ''})`);
-    ok(r.code === 0 && !r.sig && /EXIT \d+/.test(r.err), `THE HUB'S EXIT NEVER WAITS FOR THE REMOVER: with its child blocked in a storage call, the process exits BY ITSELF (code ${r.code}${r.sig ? ', killed by the leg\'s 6 s backstop — it waited' : ''}; a thread there holds the exit until the backstop)`);
+    ok(gateOf(fs.existsSync(markX)) && readerLeft === false, `B-323e: …and the starter ended the child blocked in its storage call once the hub's pipe closed (it reached the FIFO: ${fs.existsSync(markX)}; no reader left on its FIFO${readerLeft ? ' — ONE WAS: it outlived its hub' : ''})`);
+    ok(r.code === 0 && !r.sig && verdictOf(/EXIT \d+/.test(r.err)), `THE HUB'S EXIT NEVER WAITS FOR THE REMOVER: with its child blocked in a storage call, the process exits BY ITSELF (code ${r.code}${r.sig ? ', killed by the leg\'s 6 s backstop — it waited' : ''}; a thread there holds the exit until the backstop)`);
   }
 
   // ── §G THE GUARDS, EACH DRIVEN (round 2 §2: nine mutants left the suite green while a deletion changed) ───────────────
@@ -321,21 +321,21 @@ try {
     // 5. a YOUNG empty unnamed job dir (a spawn between its two mkdirs) and an old empty NAMED one
     fs.mkdirSync(path.join(GL, 'jb-11110007')); fs.mkdirSync(path.join(GL, 'jb-11110008')); age(path.join(GL, 'jb-11110008'), 30 * DAY);
     const gAns = await R.sweep({ keep: { named: ['jb-11110008'], listed: [], skeleton: [], held: [] }, cutoff: Date.now() - 14 * DAY, max: 1000 });
-    ok(!gAns.error && intact(c1) && (() => { try { return fs.lstatSync(path.join(GL, 'jb-11110001')).isSymbolicLink(); } catch { return false; } })(), 'a job dir that is a LINK is never walked: the canary outside the tree is whole, the link stays');
+    ok(!gAns.error && gateOf(intact(c1)) && verdictOf((() => { try { return fs.lstatSync(path.join(GL, 'jb-11110001')).isSymbolicLink(); } catch { return false; } })()), 'a job dir that is a LINK is never walked: the canary outside the tree is whole, the link stays');
     const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
-    ok(intact(c2) && isLink(path.join(GL, 'jb-11110002', String(OLD + 1))), 'a run dir that is a LINK is never the sweep\'s: the link stays, the canary it points at is whole');
-    ok(has(bk) && has(GL, 'lost+found') && has(hexRun) && has(expRun), 'names that are not the sweep\'s stay at 30 days: backup/<ts>, lost+found, 0x10 and 1e3 inside a job dir');
-    ok(has(stDir) && has(stLink) && has(stObj) && has(stNull) && has(stNoStart) && has(stPid1), 'stamps that cannot be judged keep their run: a directory, a link to a dead stamp (never followed), {}, null, a pid without a start time, pid 1');
+    ok(gateOf(intact(c2)) && verdictOf(isLink(path.join(GL, 'jb-11110002', String(OLD + 1)))), 'a run dir that is a LINK is never the sweep\'s: the link stays, the canary it points at is whole');
+    ok(gateOf(has(bk)) && gateOf(has(GL, 'lost+found')) && gateOf(has(hexRun)) && verdictOf(has(expRun)), 'names that are not the sweep\'s stay at 30 days: backup/<ts>, lost+found, 0x10 and 1e3 inside a job dir');
+    ok(gateOf(has(stDir)) && gateOf(has(stLink)) && gateOf(has(stObj)) && gateOf(has(stNull)) && gateOf(has(stNoStart)) && verdictOf(has(stPid1)), 'stamps that cannot be judged keep their run: a directory, a link to a dead stamp (never followed), {}, null, a pid without a start time, pid 1');
     ok(!has(deadAfter), 'a dead run sorted AFTER the null stamp is removed in the same pass (a stamp of any shape never stops the walk)');
-    ok(has(nested), 'a run whose only young file is two levels down stays (its newest entry is its age, at any depth)');
-    ok(has(GL, 'jb-11110007') && has(GL, 'jb-11110008'), 'a young empty unnamed job dir stays (a spawn between its mkdirs); an empty job dir a record names stays');
+    ok(verdictOf(has(nested)), 'a run whose only young file is two levels down stays (its newest entry is its age, at any depth)');
+    ok(gateOf(has(GL, 'jb-11110007')) && verdictOf(has(GL, 'jb-11110008')), 'a young empty unnamed job dir stays (a spawn between its mkdirs); an empty job dir a record names stays');
     // 6. whole() ALONE over a link (its own guard — a second door out of the tree) and over a job dir holding a run link
     const c3 = canary('c3'), c4 = canary('c4');
     fs.symlinkSync(c3, path.join(GL, 'jb-11110009'));
     fs.mkdirSync(path.join(GL, 'jb-1111000a')); fs.symlinkSync(path.join(c4, String(OLD)), path.join(GL, 'jb-1111000a', String(OLD)));
     const wAns = await R.whole(['jb-11110009', 'jb-1111000a']);
-    ok(intact(c3) && !fs.existsSync(path.join(GL, 'jb-11110009')) && (wAns.gone || []).includes('jb-11110009'), 'whole() over a job dir that is a LINK unlinks the link alone (as the release did) — the canary outside is whole, the id is gone');
-    ok(intact(c4) && !has(GL, 'jb-1111000a'), 'whole() over a job dir holding a run LINK unlinks the link alone — its target stays whole');
+    ok(gateOf(intact(c3)) && !fs.existsSync(path.join(GL, 'jb-11110009')) && verdictOf((wAns.gone || []).includes('jb-11110009')), 'whole() over a job dir that is a LINK unlinks the link alone (as the release did) — the canary outside is whole, the id is gone');
+    ok(gateOf(intact(c4)) && !has(GL, 'jb-1111000a'), 'whole() over a job dir holding a run LINK unlinks the link alone — its target stays whole');
     // 7. «KEPT UNTIL EVIDENCE», NO CLOCK (round 3 §5): an unjudgeable stamp's run is removed only when NO running process's argv
     // names its run dir (the wrapper, its one writer, by the trailing components job-logs/<id>/<runTs>); a stamp that says THIS boot
     // is never evidence of an end; /proc unreadable ⇒ kept; another instance's wrapper of the same id + stamp keeps ours
@@ -350,17 +350,17 @@ try {
     await until(() => { try { return fs.readFileSync(`/proc/${st2.pid}/cmdline`, 'latin1').includes('jb-1111000e'); } catch { return false; } }, 3000, 10);
     const RE = LS.createRemover({ logsDir: GE });
     await RE.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now() + 1, max: 100 });
-    ok(has(evNamed) && !has(evNone), 'KEPT UNTIL EVIDENCE, NO CLOCK: an unjudgeable stamp\'s run named by a running process\'s argv is KEPT; with no process naming it, it goes');
-    ok(has(evStranger), 'the stranger\'s side: another instance\'s wrapper with the same job id and run stamp (a copied data dir) KEEPS our run — the safe side');
-    ok(has(evThisBoot), 'a stamp that says THIS boot (its boot id) is never evidence of an end, even with no process naming it');
+    ok(gateOf(has(evNamed)) && !has(evNone), 'KEPT UNTIL EVIDENCE, NO CLOCK: an unjudgeable stamp\'s run named by a running process\'s argv is KEPT; with no process naming it, it goes');
+    ok(verdictOf(has(evStranger)), 'the stranger\'s side: another instance\'s wrapper with the same job id and run stamp (a copied data dir) KEEPS our run — the safe side');
+    ok(verdictOf(has(evThisBoot)), 'a stamp that says THIS boot (its boot id) is never evidence of an end, even with no process naming it');
     nm.kill('SIGKILL'); st2.kill('SIGKILL'); await until(() => { try { fs.statSync('/proc/' + nm.pid); return false; } catch { return true; } }, 3000, 10);
     const JW2 = path.join(GE, 'jb-1111000f'); const wObj = seedAt(path.join(JW2, String(OLD)), { 'pid.json': '{}', 'current.log': 'x\n' });
     const wAns2 = await RE.whole(['jb-1111000f']);
-    ok(!has(JW2) && (wAns2.gone || []).includes('jb-1111000f'), '…and a whole-dir verdict takes such a run too when nothing names it (the release removed it; round 1 kept it for ever)');
+    ok(!has(JW2) && verdictOf((wAns2.gone || []).includes('jb-1111000f')), '…and a whole-dir verdict takes such a run too when nothing names it (the release removed it; round 1 kept it for ever)');
     const RX = LS.createRemover({ logsDir: GE, procRoot: path.join(tmp, 'no-proc-here') });
     const evNoProc = seedAt(path.join(JE, String(OLD + 5)), { 'pid.json': '{}', 'current.log': 'x\n' });
     await RX.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now() + 1, max: 100 });
-    ok(has(evNoProc), 'THE SAFE SIDE, PINNED: a /proc that cannot be listed is no evidence — the unjudgeable run is KEPT');
+    ok(verdictOf(has(evNoProc)), 'THE SAFE SIDE, PINNED: a /proc that cannot be listed is no evidence — the unjudgeable run is KEPT');
     RX.stop();
     RE.stop();
     R.stop();
@@ -379,22 +379,22 @@ try {
     const h1Listed = seedRun(h1, 'jb-a4c0ffee', a1Ts, { ageMs: 20 * DAY }), h1Orphan = seedRun(h1, 'jb-0e1a0002', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: JH1, logs: LH1, items: IH1 } = boot(h1);
     await gcAt(JH1, Date.now()); await gcAt(JH1, Date.now());
-    ok(setAsides(h1).length === 1 && has(h1Listed) && has(h1Orphan), 'THE HOURLY ROAD: the gc sets the torn archive aside, and its law\'s pass removes NOTHING (the set-aside bytes could name any run)', { setAside: setAsides(h1), listed: has(h1Listed), orphan: has(h1Orphan) });
+    ok(setAsides(h1).length === 1 && gateOf(has(h1Listed)) && verdictOf(has(h1Orphan)), 'THE HOURLY ROAD: the gc sets the torn archive aside, and its law\'s pass removes NOTHING (the set-aside bytes could name any run)', { setAside: setAsides(h1), listed: has(h1Listed), orphan: has(h1Orphan) });
     ok(LH1.filter((l) => /job-logs clean-up HELD: jobs-archive\.json\.corrupt-\d+ in the data dir/.test(l)).length === 1, 'the hold is said ONCE in the journal over two passes');
-    ok(heldItems(IH1).length === 1 && /could not be read/.test(heldItems(IH1)[0].words.key) && /jobs-archive\.json\.corrupt-\d+$/.test(heldItems(IH1)[0].words.params.file), 'ONE For-you item, filed at the set-aside: «Job records in <file> could not be read» first, the clean-up second');
+    ok(heldItems(IH1).length === 1 && gateOf(/could not be read/.test(heldItems(IH1)[0].words.key)) && verdictOf(/jobs-archive\.json\.corrupt-\d+$/.test(heldItems(IH1)[0].words.params.file)), 'ONE For-you item, filed at the set-aside: «Job records in <file> could not be read» first, the clean-up second');
     // H2 ANY LOAD FIRST: one archive list (the panel, an agent route) before a pass
     const h2 = mkDir('h2'); tornArchive(h2, 'jb-a5c0ffee', a1Ts);
     const h2Listed = seedRun(h2, 'jb-a5c0ffee', a1Ts, { ageMs: 20 * DAY }), h2Orphan = seedRun(h2, 'jb-0e1a0003', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: JH2 } = boot(h2);
     JH2.archivedList(); await sweepAt(JH2, Date.now());
-    ok(has(h2Listed) && has(h2Orphan), 'A LIST FIRST, THEN A PASS: nothing removed');
+    ok(gateOf(has(h2Listed)) && verdictOf(has(h2Orphan)), 'A LIST FIRST, THEN A PASS: nothing removed');
     // H3 PASS, THEN GC: the first pass refuses the torn file, the gc in the same process sets it aside — still nothing
     const h3 = mkDir('h3'); tornArchive(h3, 'jb-a6c0ffee', a1Ts);
     const h3Listed = seedRun(h3, 'jb-a6c0ffee', a1Ts, { ageMs: 20 * DAY }), h3Orphan = seedRun(h3, 'jb-0e1a0004', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: JH3 } = boot(h3);
     await sweepAt(JH3, Date.now()); const afterPass = has(h3Listed) && has(h3Orphan);
     await gcAt(JH3, Date.now());
-    ok(afterPass && has(h3Listed) && has(h3Orphan) && setAsides(h3).length === 1, 'A PASS, THEN THE GC: the pass refuses the torn file, the gc sets it aside, and its pass removes nothing');
+    ok(gateOf(afterPass) && gateOf(has(h3Listed)) && gateOf(has(h3Orphan)) && setAsides(h3).length === 1, 'A PASS, THEN THE GC: the pass refuses the torn file, the gc sets it aside, and its pass removes nothing');
     // H4 THE STORE, ACROSS A RESTART: a torn jobs.json (a live service listing a 20-day-old run) → skeletons at boot 1, WRITTEN
     // BACK (B-ef97; the release kept them in memory only and boot 2 loaded an empty store) → boot 2 lists them; its boot pass
     // removes nothing while the set-aside file is there; moved ⇒ resumes (a skeleton's own dir stays: a record names it)
@@ -405,28 +405,28 @@ try {
     if (A4._logsStateP) await A4._logsStateP;
     await W.storeWriter().durable(path.join(h4, 'jobs-logs-sweep.json'));
     const scItems = IA4.filter((n) => n && n.fact === 'store-corrupt');
-    ok(scItems.length === 1 && /old job logs are not cleaned up until that file is moved or deleted/.test(scItems[0].words.key) && /jobs\.json\.corrupt-\d+$/.test(scItems[0].words.params.file), 'ONE CAUSE, ONE ITEM: the torn store\'s own For-you item names the set-aside file and says the clean-up holds');
+    ok(scItems.length === 1 && gateOf(/old job logs are not cleaned up until that file is moved or deleted/.test(scItems[0].words.key)) && verdictOf(/jobs\.json\.corrupt-\d+$/.test(scItems[0].words.params.file)), 'ONE CAUSE, ONE ITEM: the torn store\'s own For-you item names the set-aside file and says the clean-up holds');
     A4.shutdown();
     const h4Orphan = seedRun(h4, 'jb-0e1a0004', Date.now() - 30 * DAY, { ageMs: 30 * DAY });   // after boot 1: no skeleton names it
     const { jm: B4, logs: LB4, items: IB4 } = boot(h4, { bootDelayMs: 20 });
     await until(() => B4._logsState && B4._logsState.last || LB4.some((l) => /HELD/.test(l)), 5000, 10); await settle(B4);
-    ok(B4.jobs.size === 1 && !!(LS && LS.isSkeleton(B4.jobs.get('jb-5e7f1ce4'))) && has(h4Run) && has(h4Orphan) && LB4.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-\d+/.test(l)), 'AFTER A RESTART the skeletons are still listed (B-ef97: written back at boot 1) — and the boot pass removes NOTHING: the set-aside file is the fact, on disk', { jobs: B4.jobs.size, run: has(h4Run) });
+    ok(B4.jobs.size === 1 && !!(LS && LS.isSkeleton(B4.jobs.get('jb-5e7f1ce4'))) && gateOf(has(h4Run)) && gateOf(has(h4Orphan)) && verdictOf(LB4.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-\d+/.test(l))), 'AFTER A RESTART the skeletons are still listed (B-ef97: written back at boot 1) — and the boot pass removes NOTHING: the set-aside file is the fact, on disk', { jobs: B4.jobs.size, run: has(h4Run) });
     ok(heldItems(IB4).length === 0 && IB4.filter((n) => n && n.fact === 'store-corrupt').length === 0, '…and nothing is said twice across the restart (the file\'s item is «said» in the record, written durably)');
     const moved = path.join(tmp, 'moved-by-a-person'); fs.mkdirSync(moved, { recursive: true });
     for (const f of setAsides(h4)) fs.renameSync(path.join(h4, f), path.join(moved, f));
     await sweepAt(B4, Date.now());
-    ok(has(h4Run) && !has(h4Orphan) && LB4.some((l) => /job-logs clean-up resumes/.test(l)), 'the file MOVED by a person lifts the hold by itself: the next pass removes what no record lists, and says it resumes');
+    ok(gateOf(has(h4Run)) && !has(h4Orphan) && verdictOf(LB4.some((l) => /job-logs clean-up resumes/.test(l))), 'the file MOVED by a person lifts the hold by itself: the next pass removes what no record lists, and says it resumes');
     // H5 A PARSED ARCHIVE THAT IS NOT A LIST: set aside like a torn one (the release read it as [] and kept no bytes) — held
     const h5 = mkDir('h5'); fs.writeFileSync(path.join(h5, 'jobs-archive.json'), '{"records":[]}');
     const h5Orphan = seedRun(h5, 'jb-0e1a0005', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: JH5 } = boot(h5);
     await sweepAt(JH5, Date.now()); const h5Worker = has(h5Orphan);
     JH5._loadArchive(); await sweepAt(JH5, Date.now());
-    ok(h5Worker && setAsides(h5).length === 1 && has(h5Orphan), 'an archive that parses to a non-list: the worker refuses it, the load sets it aside (bytes kept), the pass removes nothing');
+    ok(gateOf(h5Worker) && setAsides(h5).length === 1 && verdictOf(has(h5Orphan)), 'an archive that parses to a non-list: the worker refuses it, the load sets it aside (bytes kept), the pass removes nothing');
     const h5b = mkDir('h5b'); fs.writeFileSync(path.join(h5b, 'jobs-archive.json'), '"not a list"');
     const h5bOrphan = seedRun(h5b, 'jb-0e1a0015', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: JH5b } = boot(h5b); await sweepAt(JH5b, Date.now());
-    ok(has(h5bOrphan), 'the worker refuses an archive that parses to a non-list even when it iterates (a JSON string) — nothing removed');
+    ok(verdictOf(has(h5bOrphan)), 'the worker refuses an archive that parses to a non-list even when it iterates (a JSON string) — nothing removed');
     // H5c READ FIRST, THEN ASK WHETHER ANYTHING WAS SET ASIDE (round 3 §2): the child's archive read is held open until the main
     // thread sets the torn archive aside (a list) — or sets it aside AND writes a fresh one in the same call (the archive sweep)
     for (const scene of ['race', 'race-write']) {
@@ -449,7 +449,7 @@ try {
       fs.writeFileSync(path.join(fl, 'go'), '1');
       await passP; await settle(JR);
       if (scene === 'race-write') await W8w().storeWriter().durable(AF2);   // B-0248 step 3: the fresh archive write lands on the store writer (later than the call)
-      ok(!asideAtBoot && has(listedR) && has(orphanR) && LR.some((l) => /job-logs clean-up HELD: jobs-archive\.json\.corrupt-/.test(l)) && (scene === 'race' || fs.existsSync(AF2)), `READ FIRST, THEN ASK (${scene}): a set-aside made while the child read${scene === 'race-write' ? ' — and a fresh archive written in the same call' : ''} holds the pass; nothing removed`);
+      ok(!asideAtBoot && gateOf(has(listedR)) && gateOf(has(orphanR)) && gateOf(LR.some((l) => /job-logs clean-up HELD: jobs-archive\.json\.corrupt-/.test(l))) && (scene === 'race' || verdictOf(fs.existsSync(AF2))), `READ FIRST, THEN ASK (${scene}): a set-aside made while the child read${scene === 'race-write' ? ' — and a fresh archive written in the same call' : ''} holds the pass; nothing removed`);
     }
     // H5d A RECORD THAT CANNOT BE READ HOLDS, IT NEVER THROWS THE PASS (round 3 §3): `runs` as an object, a number, a string —
     // in the store and in the archive; the hourly gc completes its other work (a done task past 14 days collected beside them)
@@ -461,9 +461,9 @@ try {
       const u1 = seedRun(hu, 'jb-0b1ec701', uTs, { ageMs: 30 * DAY }), u2 = seedRun(hu, 'jb-0b1ec702', uTs, { ageMs: 30 * DAY }), u3 = seedRun(hu, 'jb-0b1ec703', uTs, { ageMs: 30 * DAY }), gcDone = seedRun(hu, 'jb-d0e5d0e5', uTs - 1000, { ageMs: 15 * DAY });
       const { jm: JU, logs: LU } = boot(hu);
       let threw = null; try { await gcAt(JU, Date.now()); await gcAt(JU, Date.now()); } catch (e) { threw = e; }
-      ok(!threw && has(u1) && has(u2) && has(u3), 'A RECORD THAT CANNOT BE READ HOLDS: `runs` as an object, a number, a string (store and archive) — every dir of that job is kept, and the gc never throws');
+      ok(!threw && gateOf(has(u1)) && gateOf(has(u2)) && verdictOf(has(u3)), 'A RECORD THAT CANNOT BE READ HOLDS: `runs` as an object, a number, a string (store and archive) — every dir of that job is kept, and the gc never throws');
       ok(!JU.jobs.has('jb-d0e5d0e5') && !has(gcDone), '…and the hourly gc completes its OTHER work beside them (a done task past 14 days collected)');
-      ok(['jb-0b1ec701', 'jb-0b1ec702', 'jb-0b1ec703'].every((id) => LU.filter((l) => l.includes(`the record ${id} lists its runs in a shape that cannot be read`)).length === 1), 'each such record is said ONCE in the journal, by its id');
+      ok(verdictOf(['jb-0b1ec701', 'jb-0b1ec702', 'jb-0b1ec703'].every((id) => LU.filter((l) => l.includes(`the record ${id} lists its runs in a shape that cannot be read`)).length === 1)), 'each such record is said ONCE in the journal, by its id');
     }
     // H6 A READ THAT FAILED WITH NO SET-ASIDE (a stand-in in code: EIO on the read, the rename refused) — this process holds,
     // and the next pass reads the file again in the worker: a read that succeeds keeps its records by itself
@@ -478,16 +478,16 @@ try {
     const heldAtOnce6 = !!(JH6._logsNoteOwed && JH6._logsNoteOwed.archive);
     if (JH6._logsNoteP) await JH6._logsNoteP;
     const notes6 = () => fs.readdirSync(h6).filter((n) => /corrupt-unread/.test(n));
-    ok(JH6._logsUnread && JH6._logsUnread.archive === 'EIO' && heldAtOnce6 && notes6().length === 1 && notes6()[0] === 'jobs-archive.json.corrupt-unread' && JH6.archive.length === 0, 'round 4 §1 + §2: an EIO read whose set-aside also failed HOLDS this process before the load returns, and the remover\'s child writes the archive\'s ONE note `jobs-archive.json.corrupt-unread`');
+    ok(gateOf(JH6._logsUnread) && JH6._logsUnread.archive === 'EIO' && gateOf(heldAtOnce6) && notes6().length === 1 && notes6()[0] === 'jobs-archive.json.corrupt-unread' && JH6.archive.length === 0, 'round 4 §1 + §2: an EIO read whose set-aside also failed HOLDS this process before the load returns, and the remover\'s child writes the archive\'s ONE note `jobs-archive.json.corrupt-unread`');
     ok(calls6.map((c) => c[0]).join() === 'readFileSync', `round 4 §3 + B-f276: the failed load on the MAIN THREAD makes its read alone — no existsSync, no rename of bytes it could not read (the release set the live archive aside here), no listing, no note write (${calls6.map((c) => c[0]).join(', ')})`);
     const w6 = JH6._writeArchive([]);   // THE HUB'S OWN OVERWRITE (the boot sweep, any save) — B-f276: refused while the archive is unread
-    ok(w6 && w6.ok === false && /could not be read \(EIO\) — it is not written over until a read answers/.test(w6.error) && fs.readFileSync(AF, 'utf8').includes('jb-a7c0ffee'), 'B-f276: the hub\'s own write over the unread archive is REFUSED — the file keeps its records', w6);
+    ok(gateOf(w6) && w6.ok === false && gateOf(/could not be read \(EIO\) — it is not written over until a read answers/.test(w6.error)) && verdictOf(fs.readFileSync(AF, 'utf8').includes('jb-a7c0ffee')), 'B-f276: the hub\'s own write over the unread archive is REFUSED — the file keeps its records', w6);
     await sweepAt(JH6, Date.now()); await sweepAt(JH6, Date.now());
-    ok(has(h6Listed) && has(h6Orphan), 'THE HOLD HAS A FILE: a read now SUCCEEDS — and the pass still removes NOTHING (the note holds it)');
+    ok(gateOf(has(h6Listed)) && verdictOf(has(h6Orphan)), 'THE HOLD HAS A FILE: a read now SUCCEEDS — and the pass still removes NOTHING (the note holds it)');
     fs.writeFileSync(AF, JSON.stringify([{ id: 'jb-a7c0ffee', kind: 'task', state: 'done', runs: [{ startedAt: a6Ts, endedAt: a6Ts + 1 }] }]));   // a person restores the records…
     for (const n of notes6()) fs.renameSync(path.join(h6, n), path.join(tmp, n + '.h6'));   // …and moves the note
     await sweepAt(JH6, Date.now());
-    ok(has(h6Listed) && !has(h6Orphan), 'lifted ONLY by a person moving the note: the file\'s records (re-read by the child, memory holds none) keep their run, a run no record names goes');
+    ok(gateOf(has(h6Listed)) && !has(h6Orphan), 'lifted ONLY by a person moving the note: the file\'s records (re-read by the child, memory holds none) keep their run, a run no record names goes');
     ok(LH6.filter((l) => /archive could not be read: EACCES/.test(l)).length <= 1, 'the same failure is said once, not every pass');
     // H6b THE RESTART ROAD (round 3 §1): an EIO at boot leaves a note; the hub's own overwrite; a NEW engine loads the hub-written
     // file cleanly — its boot pass removes nothing (the note is on disk), for the archive and for the store
@@ -504,7 +504,7 @@ try {
       J1r.shutdown();
       const { jm: J2r, logs: L2r } = boot(hr, { bootDelayMs: 20 });
       await until(() => L2r.some((l) => /job-logs clean-up HELD/.test(l)), 5000, 10); await settle(J2r);
-      ok(has(rRun) && L2r.some((l) => new RegExp('HELD: ' + path.basename(SF2).replace(/\./g, '\\.') + '\\.corrupt-unread\\b').test(l)), `THE RESTART ROAD (${which}): the next engine loads the hub-written file cleanly, and its boot pass removes NOTHING — the note on disk holds it`);
+      ok(gateOf(has(rRun)) && verdictOf(L2r.some((l) => new RegExp('HELD: ' + path.basename(SF2).replace(/\./g, '\\.') + '\\.corrupt-unread\\b').test(l))), `THE RESTART ROAD (${which}): the next engine loads the hub-written file cleanly, and its boot pass removes NOTHING — the note on disk holds it`);
     }
     // H6c THE ARCHIVE'S RENAME ALONE FAILS (no second fault): a torn archive whose set-aside rename is refused — its bytes are COPIED
     // aside, the copy holds the pass, the item names the copy (a name, never a path)
@@ -517,7 +517,7 @@ try {
       await sweepAt(JA, Date.now());
       const copies = fs.readdirSync(ha).filter((n) => /^jobs-archive\.json\.corrupt-\d+$/.test(n));
       const it6 = IA.find((n) => n && n.fact === 'records-held');
-      ok(copies.length === 1 && fs.readFileSync(path.join(ha, copies[0]), 'utf8') === fs.readFileSync(AF3, 'utf8') && has(haRun) && it6 && it6.words.params.file === copies[0], 'THE ARCHIVE\'S RENAME ALONE FAILS: its bytes are COPIED aside, the copy holds the pass, and the item names the copy (a name, never a path)');
+      ok(copies.length === 1 && fs.readFileSync(path.join(ha, copies[0]), 'utf8') === fs.readFileSync(AF3, 'utf8') && gateOf(has(haRun)) && gateOf(it6) && it6.words.params.file === copies[0], 'THE ARCHIVE\'S RENAME ALONE FAILS: its bytes are COPIED aside, the copy holds the pass, and the item names the copy (a name, never a path)');
     }
     // H6d THREE RESTARTS THROUGH ONE TRANSIENT READ FAILURE: one note, one item; the words stay true once the store reads again
     {
@@ -535,7 +535,7 @@ try {
       }
       const notes = fs.readdirSync(h3x).filter((n) => /corrupt-unread/.test(n));
       const w3 = allItems[0] ? fill(allItems[0].words) : '';
-      ok(notes.length === 1 && allItems.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: the storage did not answer in time \(ETIMEDOUT\)\)/.test(w3) && Number.isFinite(allItems[0].words.params.when.at) && /removed 14 days after their newest file/.test(w3) && !/when VibeSpace started/.test(w3) && /if the Jobs panel lists fewer jobs than before, the file may already have been written over: keep the note until it is restored/.test(w3) && !/\//.test(allItems[0].words.params.note), `THREE RESTARTS THROUGH ONE TRANSIENT FAILURE: ONE note (${notes.length}), ONE item (${allItems.length}) — its words say WHEN it failed (a later load too, never «when VibeSpace started») and what a person can SEE after the hub's own write («fewer jobs … keep the note until it is restored»), a name not a path`);
+      ok(notes.length === 1 && allItems.length === 1 && gateOf(/could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: the storage did not answer in time \(ETIMEDOUT\)\)/.test(w3)) && gateOf(Number.isFinite(allItems[0].words.params.when.at)) && gateOf(/removed 14 days after their newest file/.test(w3)) && !/when VibeSpace started/.test(w3) && gateOf(/if the Jobs panel lists fewer jobs than before, the file may already have been written over: keep the note until it is restored/.test(w3)) && !/\//.test(allItems[0].words.params.note), `THREE RESTARTS THROUGH ONE TRANSIENT FAILURE: ONE note (${notes.length}), ONE item (${allItems.length}) — its words say WHEN it failed (a later load too, never «when VibeSpace started») and what a person can SEE after the hub's own write («fewer jobs … keep the note until it is restored»), a name not a path`);
     }
     // H6e «SAID» ONLY AFTER THE FOR-YOU STORE HAS WRITTEN THE ITEM: a restart before that tells again (twice at worst, never never)
     {
@@ -548,7 +548,7 @@ try {
       let before = null; try { before = JSON.parse(fs.readFileSync(path.join(hw, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
       release(true); await sleep(30); if (JW._logsStateP) await JW._logsStateP; await W8w().storeWriter().durable(path.join(hw, 'jobs-logs-sweep.json'));
       let after = null; try { after = JSON.parse(fs.readFileSync(path.join(hw, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
-      ok(itemsW.length === 1 && before && !(before.heldSaid || []).includes('jobs.json.corrupt-123') && after && (after.heldSaid || []).includes('jobs.json.corrupt-123'), '«SAID» ONLY AFTER THE FOR-YOU STORE HAS WRITTEN THE ITEM: before its write the record holds no «said», after it, it does (a crash between tells twice, never never)');
+      ok(itemsW.length === 1 && gateOf(before) && !(before.heldSaid || []).includes('jobs.json.corrupt-123') && gateOf(after) && verdictOf((after.heldSaid || []).includes('jobs.json.corrupt-123')), '«SAID» ONLY AFTER THE FOR-YOU STORE HAS WRITTEN THE ITEM: before its write the record holds no «said», after it, it does (a crash between tells twice, never never)');
     }
     // H6f THE STORE'S RENAME FAILS: its bytes are copied aside and its item names the COPY — never the live jobs.json
     {
@@ -556,7 +556,7 @@ try {
       const rn4 = fs.renameSync; fs.renameSync = function (f, ...a) { if (String(f) === SF4) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); return rn4.call(this, f, ...a); };
       let IS; try { IS = boot(hs).items; } finally { fs.renameSync = rn4; }
       const sc6 = IS.find((n) => n && n.fact === 'store-corrupt'); const copy = fs.readdirSync(hs).find((n) => /^jobs\.json\.corrupt-\d+$/.test(n));
-      ok(sc6 && copy && sc6.words.params.file === copy && sc6.words.params.file !== 'jobs.json' && !/\//.test(sc6.words.params.file), 'THE WORDS NEVER TELL THE OWNER TO DELETE A LIVE STORE: a failed rename copies the bytes aside and the item names the copy, never jobs.json');
+      ok(gateOf(sc6) && gateOf(copy) && sc6.words.params.file === copy && sc6.words.params.file !== 'jobs.json' && !/\//.test(sc6.words.params.file), 'THE WORDS NEVER TELL THE OWNER TO DELETE A LIVE STORE: a failed rename copies the bytes aside and the item names the copy, never jobs.json');
     }
     // H6g EVEN THE NOTE CANNOT BE WRITTEN (the archive, loaded later): THIS PROCESS HOLDS — after the hub's own write too (round 4 §1:
     // round 3's fallback only re-read the file, and the read then succeeded on the hub's empty list)
@@ -569,7 +569,7 @@ try {
       unreadDuring(SF5, () => { JN.archive = null; JN._loadArchive(); }, { noNote: true });
       JN._writeArchive([]);   // THE HUB'S OWN WRITE: its empty list over the unread archive — a read of it now succeeds
       await sweepAt(JN, Date.now()); await gcAt(JN, Date.now());
-      ok(has(hnListed) && has(hnOrphan) && IN.filter((n) => n && n.fact === 'records-unread-unnoted').length === 1 && !fs.readdirSync(hn).some((n) => /corrupt-unread/.test(n)) && LN.some((l) => /HELD: jobs-archive\.json could not be read and no note of it is on disk/.test(l)), 'EVEN THE NOTE CANNOT BE WRITTEN: after the hub\'s own write the pass and the hourly gc remove NOTHING — not the run the unread archive listed, not a dir no record names — and the item says no note could be written (once)');
+      ok(gateOf(has(hnListed)) && gateOf(has(hnOrphan)) && IN.filter((n) => n && n.fact === 'records-unread-unnoted').length === 1 && !fs.readdirSync(hn).some((n) => /corrupt-unread/.test(n)) && verdictOf(LN.some((l) => /HELD: jobs-archive\.json could not be read and no note of it is on disk/.test(l))), 'EVEN THE NOTE CANNOT BE WRITTEN: after the hub\'s own write the pass and the hourly gc remove NOTHING — not the run the unread archive listed, not a dir no record names — and the item says no note could be written (once)');
       fs.unlinkSync(noteGate); JN.shutdown();
     }
     // H7 THE STORE READ FAILED WITH NO SET-ASIDE: a stand-in EIO at boot whose stat failed too (nothing to set aside, no
@@ -585,10 +585,10 @@ try {
     await sweepAt(JH7, Date.now());
     if (JH7._logsNoteP) await JH7._logsNoteP;
     const notes7 = () => fs.readdirSync(h7).filter((n) => n === 'jobs.json.corrupt-unread');
-    ok(JH7._logsUnread && JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && notes7().length === 1 && has(h7Listed) && has(h7Orphan), 'a STORE read that failed at boot with nothing to set aside (the stat failed too): a NOTE on disk, and the pass removes nothing');
+    ok(gateOf(JH7._logsUnread) && JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && notes7().length === 1 && gateOf(has(h7Listed)) && verdictOf(has(h7Orphan)), 'a STORE read that failed at boot with nothing to set aside (the stat failed too): a NOTE on disk, and the pass removes nothing');
     for (const n of notes7()) fs.renameSync(path.join(h7, n), path.join(tmp, n + '.h7'));
     await sweepAt(JH7, Date.now());
-    ok(has(h7Listed) && !has(h7Orphan), '…the note moved by a person: the child reads the store (memory holds no record of it) — its listed run stays, a run no record names goes');
+    ok(gateOf(has(h7Listed)) && !has(h7Orphan), '…the note moved by a person: the child reads the store (memory holds no record of it) — its listed run stays, a run no record names goes');
   }
 
 
@@ -609,22 +609,22 @@ try {
       const heldAtOnce = owedOf(J, 'store');
       if (J._logsOwed) J._logsOwed.add('jb-0e1a0b0d');
       const p1 = await J.sweepLogs({ now: Date.now() }); await settle(J);
-      ok(heldAtOnce && p1 && p1.heldBy === 'unread-unnoted' && has(svOld) && has(orphan) && has(owedT), 'round 4 §1 «THIS PROCESS HOLDS» HOLDS (the store): its read, its stat and its note all failed — pass 1, BEFORE any write, removes nothing (no unnamed dir, no owed removal): HELD before the owed re-send and the walk', p1);
+      ok(gateOf(heldAtOnce) && gateOf(p1) && p1.heldBy === 'unread-unnoted' && gateOf(has(svOld)) && gateOf(has(orphan)) && verdictOf(has(owedT)), 'round 4 §1 «THIS PROCESS HOLDS» HOLDS (the store): its read, its stat and its note all failed — pass 1, BEFORE any write, removes nothing (no unnamed dir, no owed removal): HELD before the owed re-send and the walk', p1);
       J._dirty = true; J._save();   // THE HUB'S OWN WRITE: its empty list over the unread store — a read of it now succeeds
       await sweepAt(J, Date.now()); await gcAt(J, Date.now());
-      ok(has(svOld) && has(orphan) && has(owedT), '…AFTER the hub\'s own write the pass and the hourly gc still remove nothing — not the run the unread store listed, not a dir no record names');
+      ok(gateOf(has(svOld)) && gateOf(has(orphan)) && verdictOf(has(owedT)), '…AFTER the hub\'s own write the pass and the hourly gc still remove nothing — not the run the unread store listed, not a dir no record names');
       const un = b.items.filter((n) => n && n.fact === 'records-unread-unnoted');
-      ok(un.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: a read or write error \(EIO\)\), and no note of it could be written yet/.test(fill(un[0].words)) && b.logs.filter((l) => /job-logs clean-up HELD: jobs\.json could not be read and no note of it is on disk/.test(l)).length === 1, 'its item says so ONCE (the failure\'s moment, never «when VibeSpace started»), and the journal\'s HELD line once');
+      ok(un.length === 1 && gateOf(/could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: a read or write error \(EIO\)\), and no note of it could be written yet/.test(fill(un[0].words))) && b.logs.filter((l) => /job-logs clean-up HELD: jobs\.json could not be read and no note of it is on disk/.test(l)).length === 1, 'its item says so ONCE (the failure\'s moment, never «when VibeSpace started»), and the journal\'s HELD line once');
       J._writeArchive([{ id: 'jb-a8c0ffb1', kind: 'task', name: 'x', state: 'done', owner, access: acc, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
       seedRun(n1, 'jb-a8c0ffb1', Date.now() - DAY); const gB = await goneOf(rmLanded(J, 'jb-a8c0ffb1'));
       ok(gB.gone === true && !has(n1, 'job-logs', 'jb-a8c0ffb1'), '…while the ✕ (a removal a person asks for) still removes its logs: the hold is the pass\'s');
       fs.unlinkSync(noteGate);   // THE STORAGE IS BACK
       await sweepAt(J, Date.now());
-      ok(has(n1, 'jobs.json.corrupt-unread') && !owedOf(J, 'store') && b.items.filter((n) => n && n.fact === 'records-unread').length === 1 && has(svOld) && has(orphan), 'the note is tried again before each pass: once the storage takes it, `jobs.json.corrupt-unread` is on disk, its item filed once, and the NOTE holds the pass');
+      ok(gateOf(has(n1, 'jobs.json.corrupt-unread')) && !owedOf(J, 'store') && b.items.filter((n) => n && n.fact === 'records-unread').length === 1 && gateOf(has(svOld)) && verdictOf(has(orphan)), 'the note is tried again before each pass: once the storage takes it, `jobs.json.corrupt-unread` is on disk, its item filed once, and the NOTE holds the pass');
       J.shutdown();
       const { jm: J2, logs: L2 } = boot(n1, { bootDelayMs: 20 });
       await until(() => L2.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-unread\b/.test(l)), 5000, 10); await settle(J2);
-      ok(has(svOld) && has(orphan), '…and after a restart (the store reads cleanly now — the hub wrote it) the note on disk holds the next engine\'s boot pass');
+      ok(gateOf(has(svOld)) && verdictOf(has(orphan)), '…and after a restart (the store reads cleanly now — the hub wrote it) the note on disk holds the next engine\'s boot pass');
       J2.shutdown();
     }
     // N2 THE ARCHIVE ROAD AT BOOT: the boot's own archive sweep would write over the unread archive INSIDE init (the release did;
@@ -638,9 +638,9 @@ try {
       const b2 = unreadDuring(AF, () => boot(n2, { bootDelayMs: 20, workerPath: noteRefuser }, { archivePolicy: () => ({ doneAfterHours: 24, failedAfterDays: 7 }) }), { noNote: true });
       await until(() => b2.logs.some((l) => /job-logs clean-up HELD/.test(l)), 5000, 10); await settle(b2.jm);
       let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(AF, 'utf8')); } catch { }
-      ok(Array.isArray(onDisk) && onDisk.some((r) => r.id === 'jb-a7c0ffb2') && !onDisk.some((r) => r.id === 'jb-d0e00b02') && b2.jm.jobs.has('jb-d0e00b02') && has(arOld) && has(orphan2), 'round 4 §1 (the archive) + B-f276: the boot\'s own archive sweep does NOT write over the unread archive INSIDE init (its record stays in the store; the release wrote over it) — and the FIRST boot pass removes nothing (not the run the unread archive listed, not an unnamed dir)', { onDisk: onDisk && onDisk.map((r) => r.id) });
+      ok(gateOf(Array.isArray(onDisk)) && gateOf(onDisk.some((r) => r.id === 'jb-a7c0ffb2')) && !onDisk.some((r) => r.id === 'jb-d0e00b02') && gateOf(b2.jm.jobs.has('jb-d0e00b02')) && gateOf(has(arOld)) && verdictOf(has(orphan2)), 'round 4 §1 (the archive) + B-f276: the boot\'s own archive sweep does NOT write over the unread archive INSIDE init (its record stays in the store; the release wrote over it) — and the FIRST boot pass removes nothing (not the run the unread archive listed, not an unnamed dir)', { onDisk: onDisk && onDisk.map((r) => r.id) });
       await gcAt(b2.jm, Date.now());
-      ok(has(arOld) && has(orphan2), '…nor does the hourly gc');
+      ok(gateOf(has(arOld)) && verdictOf(has(orphan2)), '…nor does the hourly gc');
       fs.unlinkSync(noteGate); b2.jm.shutdown();
     }
     // N3 THE EXIT ROAD: a note still owed at the hub's exit is written by the exit itself (one O_EXCL write) — the next engine holds
@@ -655,7 +655,7 @@ try {
       fs.unlinkSync(noteGate);
       const { jm: J3b, logs: L3b, items: I3b } = boot(n3, { bootDelayMs: 20 });
       await until(() => L3b.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-unread\b/.test(l)), 5000, 10); await settle(J3b);
-      ok(owedAtExit && has(n3, 'jobs.json.corrupt-unread') && has(orphan3) && I3b.some((n) => n && n.fact === 'records-unread'), 'round 4 §1: a note still OWED at the hub\'s exit is written by the exit itself — the next engine (its store read cleanly) is held by it and files its item');
+      ok(gateOf(owedAtExit) && gateOf(has(n3, 'jobs.json.corrupt-unread')) && gateOf(has(orphan3)) && verdictOf(I3b.some((n) => n && n.fact === 'records-unread')), 'round 4 §1: a note still OWED at the hub\'s exit is written by the exit itself — the next engine (its store read cleanly) is held by it and files its item');
       J3b.shutdown();
     }
     // N4 ONE NOTE PER STORE, WHATEVER THE DIRECTORY SAYS (round 4 §2) — REAL modes, no stand-in: the store a link to itself (the read
@@ -674,10 +674,10 @@ try {
       };
       for (let k = 0; k < 3; k++) await bootClosed();
       const notes4 = () => fs.readdirSync(n4).filter((n) => /corrupt-unread/.test(n));
-      ok(unlistable && notes4().join() === 'jobs.json.corrupt-unread' && all4.length === 1 && all4[0].fact === 'records-unread' && has(orphan4), `round 4 §2 ONE NOTE PER STORE, WHATEVER THE DIRECTORY SAYS (real modes: the store a link to itself, the data dir unlistable at each boot): three boots, ${notes4().length} note, ${all4.length} item — «a note already stands» files nothing`);
+      ok(gateOf(unlistable) && notes4().join() === 'jobs.json.corrupt-unread' && all4.length === 1 && all4[0].fact === 'records-unread' && verdictOf(has(orphan4)), `round 4 §2 ONE NOTE PER STORE, WHATEVER THE DIRECTORY SAYS (real modes: the store a link to itself, the data dir unlistable at each boot): three boots, ${notes4().length} note, ${all4.length} item — «a note already stands» files nothing`);
       try { fs.renameSync(path.join(n4, 'jobs.json.corrupt-unread'), path.join(tmp, 'n4-note-moved')); } catch { /* round 3's tree wrote other names: red by name above */ }   // a person moves it — the store is STILL unreadable
       await bootClosed();
-      ok(notes4().length === 1 && all4.length === 2 && has(orphan4), '…a person moves the note while the store still cannot be read: the next boot writes it again and tells again (a new failure, a new moment)');
+      ok(notes4().length === 1 && all4.length === 2 && verdictOf(has(orphan4)), '…a person moves the note while the store still cannot be read: the next boot writes it again and tells again (a new failure, a new moment)');
     }
     // N5 A PERSON'S FILE THAT MERELY STARTS LIKE THE NOTE (round 4 §3) swallows nothing, and moving it lifts nothing
     {
@@ -687,10 +687,10 @@ try {
       const b5 = unreadDuring(SF, () => boot(n5)); if (b5.jm._logsNoteP) await b5.jm._logsNoteP;
       await sweepAt(b5.jm, Date.now());
       const ru5 = b5.items.filter((n) => n && n.fact === 'records-unread'), so5 = b5.items.filter((n) => n && n.fact === 'set-aside-other');
-      ok(has(n5, 'jobs.json.corrupt-unread') && ru5.length === 1 && so5.length === 1 && so5[0].words.params.file === 'jobs.json.corrupt-unread-mine.txt' && has(orphan5), 'round 4 §3: a person\'s file that merely STARTS like the note swallows nothing — the real failure writes ITS note and files its item; the person\'s file gets its own true words');
+      ok(gateOf(has(n5, 'jobs.json.corrupt-unread')) && ru5.length === 1 && so5.length === 1 && so5[0].words.params.file === 'jobs.json.corrupt-unread-mine.txt' && verdictOf(has(orphan5)), 'round 4 §3: a person\'s file that merely STARTS like the note swallows nothing — the real failure writes ITS note and files its item; the person\'s file gets its own true words');
       fs.renameSync(path.join(n5, 'jobs.json.corrupt-unread-mine.txt'), path.join(tmp, 'n5-mine'));   // the person moves THEIR file, as its item says
       b5.jm._dirty = true; b5.jm._save(); await sweepAt(b5.jm, Date.now());
-      ok(has(orphan5), '…and moving it lifts nothing: the note still holds the pass');
+      ok(verdictOf(has(orphan5)), '…and moving it lifts nothing: the note still holds the pass');
       b5.jm.shutdown();
     }
     // N6 A READ-ONLY ENGINE (a second server against a live lock) writes nothing into the live engine's data dir (round 4 §3)
@@ -704,7 +704,7 @@ try {
       const ro2 = unreadDuring(SF, () => boot(n6));
       await sleep(150);
       const left6 = fs.readdirSync(n6).filter((n) => /\.corrupt-/.test(n));
-      ok(ro1.jm.readOnly && ro2.jm.readOnly && left6.length === 0 && fs.readFileSync(SF, 'utf8').startsWith('[{"id":"jb-70rn0006"') && !ro1.items.length && !ro2.items.length && !(ro2.jm._logsNoteOwed && ro2.jm._logsNoteOwed.store) && ro1.logs.concat(ro2.logs).filter((l) => /a read-only engine: nothing is set aside, noted or filed from it/.test(l)).length === 2, 'round 4 §3: a READ-ONLY engine whose read fails (torn bytes; an EIO) says it in its own log and writes NOTHING — no set-aside, no copy, no note, no item', { left6, items: ro1.items.length + ro2.items.length });
+      ok(gateOf(ro1.jm.readOnly) && gateOf(ro2.jm.readOnly) && left6.length === 0 && gateOf(fs.readFileSync(SF, 'utf8').startsWith('[{"id":"jb-70rn0006"')) && !ro1.items.length && !ro2.items.length && !(ro2.jm._logsNoteOwed && ro2.jm._logsNoteOwed.store) && ro1.logs.concat(ro2.logs).filter((l) => /a read-only engine: nothing is set aside, noted or filed from it/.test(l)).length === 2, 'round 4 §3: a READ-ONLY engine whose read fails (torn bytes; an EIO) says it in its own log and writes NOTHING — no set-aside, no copy, no note, no item', { left6, items: ro1.items.length + ro2.items.length });
       ro1.jm.shutdown(); ro2.jm.shutdown(); try { holder.kill('SIGKILL'); } catch { }
     }
     // N8 (round 4 acceptance) AN ENGINE WHOSE INIT FAILED holds no record set it can trust (here its lock could not be taken, so its
@@ -717,7 +717,7 @@ try {
     J8._takeLock = () => { throw new Error('stand-in: the lock could not be taken'); };   // init fails BEFORE the store is read
     J8.init(); engines.push(J8);
     const a8 = await J8.sweepLogs({ now: Date.now() }); await gcAt(J8, Date.now()); await settle(J8);
-    ok(!J8.ready && J8.initError && J8.jobs.size === 0 && a8 && a8.skipped === 'init-failed' && has(listed8) && has(orphan8), 'round 4 acceptance: an engine whose INIT FAILED (its store never read) — a direct pass and the hourly gc refuse: the run its store lists and a dir no record names both stay', a8);
+    ok(!J8.ready && gateOf(J8.initError) && J8.jobs.size === 0 && gateOf(a8) && a8.skipped === 'init-failed' && gateOf(has(listed8)) && verdictOf(has(orphan8)), 'round 4 acceptance: an engine whose INIT FAILED (its store never read) — a direct pass and the hourly gc refuse: the run its store lists and a dir no record names both stay', a8);
     J8.shutdown();
   }
   // N7 PAUSED, AND THE NOTE NOT WRITTEN: the paused road asks for the note too (the fact must reach the disk before a restart),
@@ -731,7 +731,7 @@ try {
       await gcAt(b7.jm, Date.now());
       const keptWhilePaused = has(owed7);
       fs.unlinkSync(noteGate); await gcAt(b7.jm, Date.now());
-      ok(keptWhilePaused && has(n7, 'jobs.json.corrupt-unread') && !has(owed7), 'round 4 §1 PAUSED: while the note is not on disk the paused road re-sends no owed removal either; once the storage takes it, the paused hourly tick writes the note — and only then the owed ✕ goes');
+      ok(gateOf(keptWhilePaused) && gateOf(has(n7, 'jobs.json.corrupt-unread')) && !has(owed7), 'round 4 §1 PAUSED: while the note is not on disk the paused road re-sends no owed removal either; once the storage takes it, the paused hourly tick writes the note — and only then the owed ✕ goes');
       b7.jm.shutdown();
     }
   } else ok(false, 'round 4: the hold that has no file (no remover on this tree)');
@@ -750,14 +750,14 @@ try {
     const ansA = [];
     const { jm: PA } = boot(pa, { max: 200, gapMs: 20, restFactor: 10, workerPath: slowWorker });
     if (typeof PA.sweepLogs === 'function') { const oa = PA.sweepLogs.bind(PA); PA.sweepLogs = (o) => { const pr = oa(o); pr.then((a) => ansA.push(a)); return pr; }; await PA.sweepLogs({ why: 'boot' }); }   // the release has no pass: red by name below
-    ok(ansA[0] && ansA[0].removed === 200 && PA._logsRestMs >= Math.max(20, 10 * ansA[0].ms) && ansA[0].ms >= 40, `A SLOW PASS EARNS A LONGER REST: a pass of ${ansA[0] && ansA[0].ms} ms rests ${PA._logsRestMs} ms (≥ 10× its own time, ≥ the gap)`);
+    ok(gateOf(ansA[0]) && ansA[0].removed === 200 && PA._logsRestMs >= Math.max(20, 10 * ansA[0].ms) && ansA[0].ms >= 40, `A SLOW PASS EARNS A LONGER REST: a pass of ${ansA[0] && ansA[0].ms} ms rests ${PA._logsRestMs} ms (≥ 10× its own time, ≥ the gap)`);
     PA.shutdown();
     // b. the count BY NAME reconciles: 600 runs started > 14 days ago, 60 of them young by their newest file — start 600, done 540 + 60 kept
     const pb = mkDir('pb'); seedOld(pb, 600, { youngEvery: 10 });
     const { jm: PB, logs: LPB } = boot(pb, { max: 200, gapMs: 15, bootDelayMs: 20 });
     await until(() => PB._logsState && PB._logsState.last && !PB._logsState.catchUp && LPB.some((l) => /catch-up done/.test(l)), typeof PB.sweepLogs === 'function' ? 15000 : 1000, 10);
     const jb = LPB.filter((l) => /job-logs catch-up/.test(l));
-    ok(jb.length === 2 && /catch-up: 600 run dir\(s\) that started more than 14 days ago/.test(jb[0]) && /done: 540 run dir\(s\) removed .*; 60 kept \(young by their newest file/.test(jb[1]), 'THE COUNT IS BY NAME and the done line names the same run dirs: 600 at the start = 540 removed + 60 kept (young by their newest file)', jb);
+    ok(jb.length === 2 && gateOf(/catch-up: 600 run dir\(s\) that started more than 14 days ago/.test(jb[0])) && verdictOf(/done: 540 run dir\(s\) removed .*; 60 kept \(young by their newest file/.test(jb[1])), 'THE COUNT IS BY NAME and the done line names the same run dirs: 600 at the start = 540 removed + 60 kept (young by their newest file)', jb);
     // c. a cut SWEEP batch is never repeated before its rest; a cut WHOLE-dir batch is retried once (its caller's verdict)
     if (LS) {
       const slowF = path.join(tmp, 'slow-answer-child.cjs');
@@ -767,10 +767,10 @@ try {
       const cut = await R.sweep({ keep: {}, cutoff: 0, max: 1, orphanDir: tmp }); const sweepStarts = started;
       await until(() => !R.held(), 3000);
       const w = await R.whole(['jb-12340001']);
-      ok(cut.error && /no answer in/.test(cut.error) && sweepStarts === 1, `A CUT SWEEP IS NOT REPEATED at once: one child, one timeout, answered («${cut.error}») — the pass's rest comes next`);
-      ok(w.error && started === 3, `…while a cut WHOLE-dir batch (a caller's verdict) is retried once (${started - sweepStarts} children)`);
+      ok(gateOf(cut.error) && gateOf(/no answer in/.test(cut.error)) && sweepStarts === 1, `A CUT SWEEP IS NOT REPEATED at once: one child, one timeout, answered («${cut.error}») — the pass's rest comes next`);
+      ok(gateOf(w.error) && started === 3, `…while a cut WHOLE-dir batch (a caller's verdict) is retried once (${started - sweepStarts} children)`);
       const fl = saidC.filter((l) => /remover: a (?:sweep|whole) batch failed/.test(l));   // B-323e: the cut sweep's count read (a count batch) fails here too — its own line
-      ok(fl.length === 3 && /a sweep batch failed .* — not repeated before the pass's rest$/.test(fl[0]) && /a whole batch failed .* — queued again$/.test(fl[1]) && !/queued again/.test(fl[2]), 'round 4 §3: the journal says «queued again» only for the whole-dir batch that IS queued again — the cut sweep\'s line says it waits for its pass\'s rest', fl);
+      ok(fl.length === 3 && gateOf(/a sweep batch failed .* — not repeated before the pass's rest$/.test(fl[0])) && gateOf(/a whole batch failed .* — queued again$/.test(fl[1])) && !/queued again/.test(fl[2]), 'round 4 §3: the journal says «queued again» only for the whole-dir batch that IS queued again — the cut sweep\'s line says it waits for its pass\'s rest', fl);
       R.stop();
     }
     // c2. the REAL worker's progress: a pass over a slow storage (1 ms a removal) cut at its timeout answers what it removed so far
@@ -782,7 +782,7 @@ try {
       const R2 = LS.createRemover({ logsDir: path.join(pc, 'job-logs'), timeoutMs: 350, wedgedMs: 2000, workerPath: slow1 });
       const cutAns = await R2.sweep({ keep: { named: ['jb-0ld0000c'], listed: [], skeleton: [], held: [] }, cutoff: Date.now() - 14 * DAY, max: 1000, orphanDir: pc });   // B-323e: its count file in the data dir
       const goneOnDisk = 600 - runsOn(pc, 'jb-0ld0000c').length;
-      ok(cutAns.error && cutAns.partial && cutAns.partial.removed >= 1 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed <= 3, `the REAL remover's progress: a pass cut at its timeout answers what it removed so far, never more (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — B-323e: its count file, rewritten after every removal and read once its child ended; a kill between a removal and its write may lag one)`);
+      ok(gateOf(cutAns.error) && gateOf(cutAns.partial) && cutAns.partial.removed >= 1 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed <= 3, `the REAL remover's progress: a pass cut at its timeout answers what it removed so far, never more (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — B-323e: its count file, rewritten after every removal and read once its child ended; a kill between a removal and its write may lag one)`);
       R2.stop();
     }
     // d. a pass cut at its timeout RESTS (≥ 5 min, ≥ 10× its timeout) and keeps the count of what it removed before it was ended
@@ -791,7 +791,7 @@ try {
       PD._logsState = { catchUp: { startedAt: Date.now(), counted: 900, removed: 0, entries: 0, jobDirs: 0, passes: 1 }, last: null, heldSaid: [] };
       const real = PD._logsRemover(); PD._logsRm = { ...real, sweep: async () => ({ error: 'no answer in 1 s', partial: { removed: 3, entries: 9, jobDirs: 0 } }), whole: (...a) => real.whole(...a), settled: () => real.settled(), busy: () => real.busy(), held: () => false, stop: () => real.stop() };
       await PD.sweepLogs({ why: 'catch-up' });
-      ok(PD._logsRestMs >= 300000 && PD._logsRestMs >= 10 * 1000 && PD._logsState.catchUp.removed === 3 && LPD.some((l) => /3 run dir\(s\) were removed before it was ended/.test(l)), `A CUT PASS RESTS (${PD._logsRestMs} ms) and keeps the count of what it removed before it was ended (3)`);
+      ok(PD._logsRestMs >= 300000 && PD._logsRestMs >= 10 * 1000 && PD._logsState.catchUp.removed === 3 && verdictOf(LPD.some((l) => /3 run dir\(s\) were removed before it was ended/.test(l))), `A CUT PASS RESTS (${PD._logsRestMs} ms) and keeps the count of what it removed before it was ended (3)`);
       clearTimeout(PD._logsGapT); PD._logsGapT = null; PD._logsRm = real;
     } else ok(false, 'a cut pass rests and keeps its count (no law on this tree)');
     // e. THE PAUSE: the setting off — the boot pass, the hourly one and an open catch-up remove nothing (said once); the removals a
@@ -800,7 +800,7 @@ try {
     const peRun = seedRun(pe, 'jb-0e1a00e1', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: PE, logs: LPE } = boot(pe, { bootDelayMs: 20 }, { logsSweepOn: () => on });
     await sleep(120); await sweepAt(PE, Date.now()); await gcAt(PE, Date.now());
-    ok(has(peRun) && LPE.filter((l) => /job-logs clean-up paused by the setting jobs\.logsSweep/.test(l)).length === 1, 'PAUSED (the setting off): the boot pass, a direct pass and the hourly gc remove nothing — said ONCE');
+    ok(gateOf(has(peRun)) && LPE.filter((l) => /job-logs clean-up paused by the setting jobs\.logsSweep/.test(l)).length === 1, 'PAUSED (the setting off): the boot pass, a direct pass and the hourly gc remove nothing — said ONCE');
     const peArc = 'jb-a8c0ffee'; PE._writeArchive([{ id: peArc, kind: 'task', name: 'arch', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
     seedRun(pe, peArc, Date.now() - DAY); const gP = await goneOf(rmLanded(PE, peArc));
     ok(typeof PE.logsGone === 'function' && gP.gone === true && !has(pe, 'job-logs', peArc), '…while the ✕ (a removal a person asks for) still removes its logs', gP);
@@ -810,7 +810,7 @@ try {
       PE._writeArchive([{ id: 'jb-a8c0ffe7', kind: 'task', name: 'arch7', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
       const owed7 = seedRun(pe, 'jb-a8c0ffe7', Date.now() - DAY); const v7 = await goneOf(rmLanded(PE, 'jb-a8c0ffe7'));
       PE._logsRm = realE; await gcAt(PE, Date.now());
-      ok(v7.pending && !has(owed7) && !PE._logsOwed.has('jb-a8c0ffe7') && has(peRun), 'A PERSON\'S REMOVAL IS NOT PAUSED: a held ✕, owed, is finished by the next hourly gc while the clean-up stays paused (the clean-up\'s own run dir is still kept)', { v7, dir: has(owed7), owed: PE._logsOwed.has('jb-a8c0ffe7'), kept: has(peRun) });
+      ok(gateOf(v7.pending) && !has(owed7) && !PE._logsOwed.has('jb-a8c0ffe7') && verdictOf(has(peRun)), 'A PERSON\'S REMOVAL IS NOT PAUSED: a held ✕, owed, is finished by the next hourly gc while the clean-up stays paused (the clean-up\'s own run dir is still kept)', { v7, dir: has(owed7), owed: PE._logsOwed.has('jb-a8c0ffe7'), kept: has(peRun) });
     } else ok(false, 'a person\'s removal is not paused (no remover on this tree)');
     on = true; await gcAt(PE, Date.now());
     ok(!has(peRun), 'turned ON again: the next hourly pass resumes and removes');
@@ -831,7 +831,7 @@ try {
       const nt = Date.now() - 20 * DAY; Q.jobs.set('jb-4e5ed001', { id: 'jb-4e5ed001', kind: 'task', name: 'named-again', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: nt }, { startedAt: nt + 1000 }] });
       const n1 = seedRun(q, 'jb-4e5ed001', nt), n2 = seedRun(q, 'jb-4e5ed001', nt + 1000);
       const [, wAns] = await Promise.all([passP, wholeP]);
-      ok(has(n1) && has(n2) && (wAns.keptWhy || {})['jb-4e5ed001'] === 'named', 'THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS: a live record naming the id again by then keeps both of its runs (the batch says «named»)');
+      ok(gateOf(has(n1)) && gateOf(has(n2)) && (wAns.keptWhy || {})['jb-4e5ed001'] === 'named', 'THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS: a live record naming the id again by then keeps both of its runs (the batch says «named»)');
     } else ok(false, 'the verdict is taken when the removal runs (no remover on this tree)');
     // b. THE ✕'S PROMISE IS TRUE OR NOT MADE: a run still running / a run whose stamp cannot be judged ⇒ «kept», with why
     const x = mkDir('x4'); const { jm: X } = boot(x, { procRoot: path.join(tmp, 'no-proc-here') });
@@ -851,7 +851,7 @@ try {
       if (X._logsStateP) await X._logsStateP;
       await W.storeWriter().durable(path.join(x, 'jobs-logs-sweep.json'));
       let rec3 = null; try { rec3 = JSON.parse(fs.readFileSync(path.join(x, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
-      ok(v3.pending && rec3 && (rec3.owed || []).includes('jb-a9c0ffe3'), 'a ✕ the storage held is OWED in the record, on disk (the «still being deleted» promise survives a restart)', { v3, owed: rec3 && rec3.owed });
+      ok(gateOf(v3.pending) && gateOf(rec3) && verdictOf((rec3.owed || []).includes('jb-a9c0ffe3')), 'a ✕ the storage held is OWED in the record, on disk (the «still being deleted» promise survives a restart)', { v3, owed: rec3 && rec3.owed });
       X._logsRm = real; X.shutdown();
       const { jm: X2 } = boot(x, { bootDelayMs: 20 });
       // B-d24c: the dir goes on the worker's thread BEFORE the main thread reads the worker's answer and clears what is owed —
@@ -874,7 +874,7 @@ try {
     if (typeof C4.sweepLogs === 'function') {
       let threw = null; try { await C4.sweepLogs({ why: 'boot' }); } catch (e) { threw = e; }
       let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(path.join(c4, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
-      ok(!threw && LC4.some((l) => /job-logs catch-up: 30 run dir\(s\)/.test(l)) && onDisk && onDisk.catchUp && onDisk.catchUp.counted === 30, 'a catch-up record of an odd shape adopts nothing and throws nowhere — a new catch-up opens, and its record is ON DISK when the opening pass answers (a restart resumes it)');
+      ok(!threw && gateOf(LC4.some((l) => /job-logs catch-up: 30 run dir\(s\)/.test(l))) && gateOf(onDisk) && gateOf(onDisk.catchUp) && onDisk.catchUp.counted === 30, 'a catch-up record of an odd shape adopts nothing and throws nowhere — a new catch-up opens, and its record is ON DISK when the opening pass answers (a restart resumes it)');
     } else ok(false, 'the catch-up record is durable at the open (no law on this tree)');
     // g. «resumes» is said after a restart too: the hold is in the record
     const r4 = mkDir('r4'); fs.writeFileSync(path.join(r4, 'jobs-archive.json'), '[{ torn');
@@ -885,7 +885,7 @@ try {
       for (const f of fs.readdirSync(r4).filter((n) => /\.corrupt-/.test(n))) fs.renameSync(path.join(r4, f), path.join(mv, f));
       const { jm: R4b, logs: LR4b } = boot(r4, { bootDelayMs: 20 });
       await until(() => LR4b.some((l) => /job-logs clean-up resumes/.test(l)), 5000, 10);
-      ok(LR4b.some((l) => /job-logs clean-up resumes: no set-aside job record file is left in the data dir \(held by jobs-archive\.json\.corrupt-\d+\)/.test(l)), '«resumes» is said where a person reads the journal even when the file was moved across a restart (the hold is in the record)');
+      ok(verdictOf(LR4b.some((l) => /job-logs clean-up resumes: no set-aside job record file is left in the data dir \(held by jobs-archive\.json\.corrupt-\d+\)/.test(l))), '«resumes» is said where a person reads the journal even when the file was moved across a restart (the hold is in the record)');
     } else ok(false, '«resumes» after a restart (no law on this tree)');
   }
 
@@ -910,11 +910,11 @@ try {
     await until(() => !!orphanFile(), 5000, 5);   // the child's own evidence that it stopped
     await sleep(60); const afterStop = left();
     let orphan = null; try { orphan = JSON.parse(fs.readFileSync(path.join(o5, orphanFile()), 'utf8')); } catch { }
-    ok(mid && orphan && afterStop >= atKill - 1, `NO REMOVER OUTLIVES ITS HUB: SIGKILLed mid-batch, its child stops within one run dir (${atKill} left at the kill, ${afterStop} once it stopped) and leaves what it removed (${orphan && orphan.removed})`, { mid, atKill, afterStop });
+    ok(gateOf(mid) && gateOf(orphan) && afterStop >= atKill - 1, `NO REMOVER OUTLIVES ITS HUB: SIGKILLed mid-batch, its child stops within one run dir (${atKill} left at the kill, ${afterStop} once it stopped) and leaves what it removed (${orphan && orphan.removed})`, { mid, atKill, afterStop });
     const { jm: N5, logs: LN5 } = boot(o5, { max: 20, gapMs: 15, bootDelayMs: 20 });
     await until(() => left() === 0 && N5._logsState && !N5._logsState.catchUp && LN5.some((l) => /catch-up done/.test(l)), 15000, 10);
     const done5 = LN5.find((l) => /catch-up done/.test(l)) || '';
-    ok(/catch-up done: 60 run dir\(s\) removed/.test(done5) && LN5.some((l) => /a remover whose hub ended removed \d+ run dir\(s\) before it stopped — counted in the catch-up/.test(l)) && !fs.readdirSync(o5).some((n) => n.startsWith(LS.ORPHAN_PREFIX) && n.endsWith('.json') && !((N5._logsState && N5._logsState.orphansCounted) || []).includes(n)), 'the NEXT engine counts what the orphan removed exactly once: the catch-up\'s done line says all 60, and the orphan\'s file is forgotten after its count is on disk (B-323e: only the engine\'s own last count file is left, named in its record — its next pass forgets it)', { done5 });
+    ok(gateOf(/catch-up done: 60 run dir\(s\) removed/.test(done5)) && gateOf(LN5.some((l) => /a remover whose hub ended removed \d+ run dir\(s\) before it stopped — counted in the catch-up/.test(l))) && !fs.readdirSync(o5).some((n) => n.startsWith(LS.ORPHAN_PREFIX) && n.endsWith('.json') && !((N5._logsState && N5._logsState.orphansCounted) || []).includes(n)), 'the NEXT engine counts what the orphan removed exactly once: the catch-up\'s done line says all 60, and the orphan\'s file is forgotten after its count is on disk (B-323e: only the engine\'s own last count file is left, named in its record — its next pass forgets it)', { done5 });
   } else ok(false, 'no remover outlives its hub (no remover on this tree)');
   // THE CHILD KNOWS ITS HUB BY WHAT THE HUB TELLS IT (round 3 §4): the hub is killed THE MOMENT its child's pid appears (said
   // once its batch message is written), while the child is still starting (a stand-in delays its start 400 ms) — the child,
@@ -932,7 +932,7 @@ try {
     let o7out = ''; const childPid = await new Promise((resolve) => { const k = setTimeout(() => resolve(0), 8000); h7.stdout.on('data', (d) => { o7out += d; const m = /CHILD (\d+)/.exec(o7out); if (m) { clearTimeout(k); try { process.kill(h7.pid, 'SIGKILL'); } catch { } resolve(Number(m[1])); } }); });
     const gone = await until(() => { try { fs.statSync('/proc/' + childPid); return false; } catch { return true; } }, 8000, 10);   // the child's own end
     const left7 = runsOn(o7, 'jb-0ld00011').length;
-    ok(childPid > 0 && gone && left7 === 20 && !fs.readdirSync(o7).some((n) => n.startsWith(LS.ORPHAN_PREFIX)) && !fs.existsSync(walked), `THE CHILD KNOWS ITS HUB BY WHAT THE HUB TELLS IT: its hub killed the moment the child appeared, the child refused to START the batch (it never listed job-logs) and ended (${20 - left7} of 20 removed)`);
+    ok(childPid > 0 && gateOf(gone) && left7 === 20 && !fs.readdirSync(o7).some((n) => n.startsWith(LS.ORPHAN_PREFIX)) && !fs.existsSync(walked), `THE CHILD KNOWS ITS HUB BY WHAT THE HUB TELLS IT: its hub killed the moment the child appeared, the child refused to START the batch (it never listed job-logs) and ended (${20 - left7} of 20 removed)`);
   }
   // a restart BETWEEN the count and the forget: the orphan's name is in the record, its file still there — never counted twice
   if (LS) {
@@ -943,7 +943,7 @@ try {
     fs.writeFileSync(path.join(o6, 'jobs-logs-sweep.json'), JSON.stringify({ catchUp: { startedAt: Date.now() - 3600e3, counted: 10, removed: 5, entries: 15, jobDirs: 0, passes: 2 }, last: null, heldSaid: [], owed: [], heldNow: [], orphansCounted: [oname] }));
     const { jm: N6, logs: LN6 } = boot(o6, { max: 20, gapMs: 15, bootDelayMs: 20 });
     await until(() => LN6.some((l) => /catch-up done/.test(l)), 10000, 10);
-    ok(LN6.some((l) => /catch-up done: 10 run dir\(s\) removed/.test(l)) && !fs.existsSync(path.join(o6, oname)), 'a restart between an orphan\'s count and its forget: its name in the record keeps it from being counted twice (done: 5 + 5 = 10), and its file is forgotten', LN6.filter((l) => /job-logs/.test(l)));
+    ok(gateOf(LN6.some((l) => /catch-up done: 10 run dir\(s\) removed/.test(l))) && !fs.existsSync(path.join(o6, oname)), 'a restart between an orphan\'s count and its forget: its name in the record keeps it from being counted twice (done: 5 + 5 = 10), and its file is forgotten', LN6.filter((l) => /job-logs/.test(l)));
   }
   // round 4 §3 (a survivor pinned): A BATCH FROM A HUB ALREADY GONE IS NEVER STARTED, WHATEVER ITS OP — the hub killed the moment its
   // child appears (its batch message written), the child starting 400 ms late: a whole-dir batch, the record read, a forget, a note
@@ -968,7 +968,7 @@ try {
     const e3 = await goneAtFork(L14, 'forget', [g14, [LS.ORPHAN_PREFIX + '9-9.json']]);
     const e4 = await goneAtFork(L14, 'note', [g14, [{ name: 'jobs.json.corrupt-unread', body: {} }]]);
     let lk = false; try { lk = fs.lstatSync(path.join(L14, 'jb-11dc0014')).isSymbolicLink(); } catch { }
-    ok(e1 && e2 && e3 && e4 && lk && has(L14, 'jb-e0000014') && fs.readFileSync(torn14, 'utf8') === '{ torn' && has(g14, LS.ORPHAN_PREFIX + '1-1.json.tmp') && has(g14, LS.ORPHAN_PREFIX + '9-9.json') && !has(g14, 'jobs.json.corrupt-unread'), 'round 4 §3: a batch from a hub already gone is never started, WHATEVER its op — a whole-dir batch (a link and an empty job dir untouched), the record read (a torn record not renamed, a cut count kept), a forget, a note', { e1, e2, e3, e4, lk });
+    ok(gateOf(e1) && gateOf(e2) && gateOf(e3) && gateOf(e4) && gateOf(lk) && gateOf(has(L14, 'jb-e0000014')) && fs.readFileSync(torn14, 'utf8') === '{ torn' && gateOf(has(g14, LS.ORPHAN_PREFIX + '1-1.json.tmp')) && gateOf(has(g14, LS.ORPHAN_PREFIX + '9-9.json')) && !has(g14, 'jobs.json.corrupt-unread'), 'round 4 §3: a batch from a hub already gone is never started, WHATEVER its op — a whole-dir batch (a link and an empty job dir untouched), the record read (a torn record not renamed, a cut count kept), a forget, a note', { e1, e2, e3, e4, lk });
   }
   // round 4 §3: A STOP ON THE HUB'S REAL EXIT KEEPS THE IN-FLIGHT BATCH'S COUNT — a child-process hub that exits the way server.js
   // shutdownNow does (beginExit, the rank-0 flush, the jobs engine's shutdown, the last exitFlush, process.exit) mid-batch
@@ -991,7 +991,7 @@ try {
     // B-323e: the in-flight batch's count rides ITS COUNT FILE (its name not in the record — the next engine counts it once)
     const inflightX = fs.readdirSync(x9).filter((n) => LS.COUNT_NAME.test(n) && !((recX && recX.orphansCounted) || []).includes(n)).reduce((s, n) => { try { return s + (Number(JSON.parse(fs.readFileSync(path.join(x9, n), 'utf8')).removed) || 0); } catch { return s; } }, 0);
     const keptX = recX && recX.catchUp ? recX.catchUp.removed + inflightX : -1;
-    ok(midX && recX && recX.catchUp && keptX >= goneX - 1 && keptX <= goneX, `round 4 §3: a stop on the hub's REAL exit road keeps the in-flight batch's count — the record the exit flushed says ${recX && recX.catchUp && recX.catchUp.removed}, the in-flight batch's count file ${inflightX} (B-323e: counted once by the next engine), ${goneX} are gone (a kill between a removal and its write may lag one)`, { midX, catchUp: recX && recX.catchUp, inflightX });
+    ok(gateOf(midX) && gateOf(recX) && gateOf(recX.catchUp) && keptX >= goneX - 1 && keptX <= goneX, `round 4 §3: a stop on the hub's REAL exit road keeps the in-flight batch's count — the record the exit flushed says ${recX && recX.catchUp && recX.catchUp.removed}, the in-flight batch's count file ${inflightX} (B-323e: counted once by the next engine), ${goneX} are gone (a kill between a removal and its write may lag one)`, { midX, catchUp: recX && recX.catchUp, inflightX });
   }
   // round 4 §3 (a survivor pinned): what a ✕ owed BEFORE A RESTART is re-sent while the clean-up is PAUSED — the record read first
   if (LS) {
@@ -1000,7 +1000,7 @@ try {
     fs.writeFileSync(path.join(p13, 'jobs-logs-sweep.json'), JSON.stringify({ catchUp: null, last: null, heldSaid: [], owed: ['jb-a8c0ff13'], heldNow: [], orphansCounted: [] }));
     const { jm: P13 } = boot(p13, { bootDelayMs: 20 }, { logsSweepOn: () => false });
     await until(() => !has(owedR), 5000, 10); await settle(P13); await gcAt(P13, Date.now());
-    ok(!has(owedR) && has(cand13), 'round 4 §3: a ✕ owed BEFORE A RESTART is finished by the next engine while the clean-up is PAUSED (its record read first) — the clean-up\'s own candidate stays');
+    ok(!has(owedR) && verdictOf(has(cand13)), 'round 4 §3: a ✕ owed BEFORE A RESTART is finished by the next engine while the clean-up is PAUSED (its record read first) — the clean-up\'s own candidate stays');
     P13.shutdown();
   }
   // round 4 (NOT ASKED, a reader's side note): the For-you store answers «written» when its flush finds memory already on disk too
@@ -1010,7 +1010,7 @@ try {
     U.flush(); U._dirty = true;   // nothing changed since the last write: memory IS on disk
     const w = typeof U.whenWritten === 'function' ? U.whenWritten() : null; U.flush();   // the release has no whenWritten: red by name
     const answered = !!w && await Promise.race([w.then(() => true), sleep(500).then(() => false)]);
-    ok(answered, 'the For-you store\'s whenWritten is answered when its flush finds memory unchanged (a «said» never waits for an unrelated later write)');
+    ok(verdictOf(answered), 'the For-you store\'s whenWritten is answered when its flush finds memory unchanged (a «said» never waits for an unrelated later write)');
     try { U.stop && U.stop(); } catch { }
   }
   // (B-323e: the IDLE leg is gone — no warm child exists to linger; r1283 (7): its «nothing pending» check could not fail)
@@ -1027,8 +1027,8 @@ try {
     const J8 = new JobManager({ dataDir: s8, broadcast() { }, notifyUser() { return { ok: true }; }, memoryRungs: [], logsSweep: { bootDelayMs: 3600e3, restFactor: 1, max: 10, gapMs: 3600e3 },
       log: (...a) => { const l = a.join(' '); logs8.push(l); if (/job-logs catch-up: 30 run dir/.test(l)) { try { onDiskAtStart = JSON.parse(fs.readFileSync(path.join(s8, 'jobs-logs-sweep.json'), 'utf8')); } catch { onDiskAtStart = false; } } } });
     J8.init(); engines.push(J8); await J8.sweepLogs({ why: 'boot' });
-    ok(onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.counted === 30, 'the catch-up\'s start line is said only once its record is ON DISK (a kill between never says it twice)');
-    ok(onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.removed === 10 && onDiskAtStart.catchUp.passes === 1, `round 4 §3: the record on disk AT the start line already holds the opening pass (removed ${onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.removed} of 10, passes ${onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.passes}) — a kill right after it leaves the done line whole`);
+    ok(gateOf(onDiskAtStart) && gateOf(onDiskAtStart.catchUp) && onDiskAtStart.catchUp.counted === 30, 'the catch-up\'s start line is said only once its record is ON DISK (a kill between never says it twice)');
+    ok(gateOf(onDiskAtStart) && gateOf(onDiskAtStart.catchUp) && onDiskAtStart.catchUp.removed === 10 && onDiskAtStart.catchUp.passes === 1, `round 4 §3: the record on disk AT the start line already holds the opening pass (removed ${onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.removed} of 10, passes ${onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.passes}) — a kill right after it leaves the done line whole`);
     // b. a batch ended by a STOP keeps its count (progress after every removal)
     const slow8 = path.join(tmp, 'slow8-child.cjs');
     fs.writeFileSync(slow8, `const fs = require('fs'); const rm = fs.rmSync; fs.rmSync = function (...a) { const t = performance.now() + 15; while (performance.now() < t) { } return rm.apply(this, a); };\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
@@ -1053,13 +1053,13 @@ try {
     const c8Run = seedRun(c8, 'jb-0e1a00c8', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: C8, logs: LC8, items: IC8 } = boot(c8);
     await sweepAt(C8, Date.now()); await sweepAt(C8, Date.now());
-    ok(has(c8Run) && fs.statSync(path.join(c8, 'jobs-logs-sweep.json')).isDirectory() && LC8.filter((l) => /the catch-up record could not be read/.test(l)).length === 1, 'a catch-up record that cannot be READ (a directory in its place): the pass WAITS — nothing removed, nothing overwritten, said once');
+    ok(gateOf(has(c8Run)) && gateOf(fs.statSync(path.join(c8, 'jobs-logs-sweep.json')).isDirectory()) && LC8.filter((l) => /the catch-up record could not be read/.test(l)).length === 1, 'a catch-up record that cannot be READ (a directory in its place): the pass WAITS — nothing removed, nothing overwritten, said once');
     const ic8 = IC8.filter((n) => n && n.fact === 'sweep-record-unread');
-    ok(LC8.some((l) => /the catch-up record could not be read: EISDIR — nothing removed; the clean-up waits until jobs-logs-sweep\.json can be read or is moved away/.test(l)) && ic8.length === 1 && ic8[0].words.params.file === 'jobs-logs-sweep.json' && ic8[0].words.params.error && ic8[0].words.params.error.key === 'a folder in its place (EISDIR)', 'round 4 §3: the journal names the cause (EISDIR) and the file, and ONE For-you item says what waits and what to move (over two passes)', { items: ic8.length });
+    ok(gateOf(LC8.some((l) => /the catch-up record could not be read: EISDIR — nothing removed; the clean-up waits until jobs-logs-sweep\.json can be read or is moved away/.test(l))) && ic8.length === 1 && ic8[0].words.params.file === 'jobs-logs-sweep.json' && gateOf(ic8[0].words.params.error) && ic8[0].words.params.error.key === 'a folder in its place (EISDIR)', 'round 4 §3: the journal names the cause (EISDIR) and the file, and ONE For-you item says what waits and what to move (over two passes)', { items: ic8.length });
     const d8 = mkDir('d8'); fs.writeFileSync(path.join(d8, 'jobs-logs-sweep.json'), '{ "catchUp": { torn');
     const d8Run = seedRun(d8, 'jb-0e1a00d8', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: D8, logs: LD8 } = boot(d8); await sweepAt(D8, Date.now());
-    ok(!has(d8Run) && fs.readdirSync(d8).some((n) => /^jobs-logs-sweep\.json\.corrupt-\d+$/.test(n)) && LD8.some((l) => /the catch-up record did not parse — set aside as/.test(l)), 'a catch-up record that does not PARSE is set aside (said) and a fresh one starts — the pass goes on');
+    ok(!has(d8Run) && gateOf(fs.readdirSync(d8).some((n) => /^jobs-logs-sweep\.json\.corrupt-\d+$/.test(n))) && verdictOf(LD8.some((l) => /the catch-up record did not parse — set aside as/.test(l))), 'a catch-up record that does not PARSE is set aside (said) and a fresh one starts — the pass goes on');
     // d. the orphan files: a cut write's .tmp is forgotten (said: its count is lost); a count that is not a remover's is never taken
     // verbatim; the forget comes only AFTER the record holding the count is on disk
     const e8 = mkDir('e8'); fs.mkdirSync(path.join(e8, 'job-logs'), { recursive: true });
@@ -1071,13 +1071,13 @@ try {
     const { jm: E8, logs: LE8 } = boot(e8, { max: 20, gapMs: 15 });
     let recAtForget = null; const realF = E8._logsRemover(); const of = realF.forget; realF.forget = (dir, names) => { try { recAtForget = JSON.parse(fs.readFileSync(path.join(e8, 'jobs-logs-sweep.json'), 'utf8')); } catch { } return of(dir, names); };
     await E8.sweepLogs({ why: 'boot' }); await settle(E8);
-    ok(LE8.some((l) => /count file was cut while it was written \(jobs-remover-orphan-11-1\.json\.tmp\)/.test(l)) && LE8.some((l) => /jobs-remover-orphan-12-1\.json does not hold a remover's count/.test(l)) && !fs.readdirSync(e8).some((n) => n.startsWith(LS.ORPHAN_PREFIX) && !((E8._logsState && E8._logsState.orphansCounted) || []).includes(n)), 'an orphan\'s cut write (.tmp) is forgotten and said; a count that is not a whole number of a batch is never taken verbatim (said, forgotten)');
-    ok(recAtForget && (recAtForget.orphansCounted || []).includes(LS.ORPHAN_PREFIX + '13-1.json') && recAtForget.catchUp && recAtForget.catchUp.removed >= 6, 'an orphan\'s file is FORGOTTEN only once the record holding its count is on disk (read from the disk at the forget)');
+    ok(gateOf(LE8.some((l) => /count file was cut while it was written \(jobs-remover-orphan-11-1\.json\.tmp\)/.test(l))) && gateOf(LE8.some((l) => /jobs-remover-orphan-12-1\.json does not hold a remover's count/.test(l))) && !fs.readdirSync(e8).some((n) => n.startsWith(LS.ORPHAN_PREFIX) && !((E8._logsState && E8._logsState.orphansCounted) || []).includes(n)), 'an orphan\'s cut write (.tmp) is forgotten and said; a count that is not a whole number of a batch is never taken verbatim (said, forgotten)');
+    ok(gateOf(recAtForget) && gateOf((recAtForget.orphansCounted || []).includes(LS.ORPHAN_PREFIX + '13-1.json')) && gateOf(recAtForget.catchUp) && recAtForget.catchUp.removed >= 6, 'an orphan\'s file is FORGOTTEN only once the record holding its count is on disk (read from the disk at the forget)');
     // e. a set-aside-named file a PERSON made: its item says only what is true of it
     const f8 = mkDir('f8'); fs.writeFileSync(path.join(f8, 'jobs.json.corrupt-backup'), 'a person\'s copy');
     const { jm: F8, items: IF8 } = boot(f8); await sweepAt(F8, Date.now());
     const it8 = IF8.find((n) => n && n.fact === 'set-aside-other');
-    ok(it8 && it8.words.params.file === 'jobs.json.corrupt-backup' && /named like a set-aside job record file/.test(it8.words.key) && !IF8.some((n) => n && n.fact === 'records-held'), 'a set-aside-named file a PERSON made holds the clean-up with true words («named like a set-aside job record file — move it away if you do not need it»), never «unreadable job records»');
+    ok(gateOf(it8) && it8.words.params.file === 'jobs.json.corrupt-backup' && gateOf(/named like a set-aside job record file/.test(it8.words.key)) && !IF8.some((n) => n && n.fact === 'records-held'), 'a set-aside-named file a PERSON made holds the clean-up with true words («named like a set-aside job record file — move it away if you do not need it»), never «unreadable job records»');
   } else ok(false, 'the small things (no remover on this tree)');
 
   // ── P4 THE CATCH-UP over 5 000 seeded dropped runs ─────────────────────────────────────────────────────────────────────
@@ -1106,16 +1106,16 @@ try {
   const done4 = await until(() => runsOn(d4, t4.id).length === 20 && J4._logsState && !J4._logsState.catchUp && (!law || (L4.some((l) => /catch-up done/.test(l)) && !J4._logsPassP)), law ? 30000 : 1500, 10);
   h.disable();
   const worstMs = h.max / 1e6;
-  ok(done4, 'the hub catches up BY ITSELF: the 5 000 dropped runs are gone, the 20 listed stay', `${runsOn(d4, t4.id).length} left`);
-  ok(t4.listed.every((t) => has(d4, 'job-logs', t4.id, t)), 'nothing a record lists was touched');
+  ok(verdictOf(done4), 'the hub catches up BY ITSELF: the 5 000 dropped runs are gone, the 20 listed stay', `${runsOn(d4, t4.id).length} left`);
+  ok(verdictOf(t4.listed.every((t) => has(d4, 'job-logs', t4.id, t))), 'nothing a record lists was touched');
   const real4 = answers4.filter((a) => !a.skipped && !a.error);
   // round 3 §9: a COUNT, never a pace — every pass it answered removed ≤ 500, and the product's own done line says ≥ 10 passes
   const passesSaid = (() => { const m = /— (\d+) pass\(es\) since/.exec(L4.find((l) => /catch-up done/.test(l)) || ''); return m ? Number(m[1]) : 0; })();
-  ok(real4.length >= 1 && real4.every((a) => a.removed <= 500) && passesSaid >= 10, `PACED: at most 500 a pass (${real4.map((a) => a.removed).join(' ')}), ${passesSaid} passes said by the done line for 5 000`);
+  ok(real4.length >= 1 && gateOf(real4.every((a) => a.removed <= 500)) && passesSaid >= 10, `PACED: at most 500 a pass (${real4.map((a) => a.removed).join(' ')}), ${passesSaid} passes said by the done line for 5 000`);
   ok(typeof J4._logsRestMs === 'number' && J4._logsRestMs >= 25, `each rest armed is at least the gap (${J4._logsRestMs} ms here; 30 s in the product) — the armed value, not a clock`);
-  ok(done4 && worstMs < 60, `OFF THE LOOP (a slow storage: ${SLOW_MS} ms a removal): the main loop's worst delay over the whole catch-up ${worstMs.toFixed(1)} ms (< 60 ms; a pass of 500 is ≥ ${500 * SLOW_MS} ms of removals)`);
+  ok(gateOf(done4) && worstMs < 60, `OFF THE LOOP (a slow storage: ${SLOW_MS} ms a removal): the main loop's worst delay over the whole catch-up ${worstMs.toFixed(1)} ms (< 60 ms; a pass of 500 is ≥ ${500 * SLOW_MS} ms of removals)`);
   const jl4 = L4.filter((l) => /job-logs/.test(l));
-  ok(jl4.length === 2 && /catch-up: 5,000 run dir\(s\) that started more than 14 days ago and no record lists — removing at most 500 per pass off the main thread, resting at least 25 ms/.test(jl4[0]) && /catch-up done: 5,000 run dir\(s\) removed \(15,000 entries\) and 0 job dir\(s\) no record names; 0 kept .* — \d+ pass\(es\)/.test(jl4[1]), 'SAID TWICE: once at the start with the count, once when done with the total — nothing in between', jl4);
+  ok(jl4.length === 2 && gateOf(/catch-up: 5,000 run dir\(s\) that started more than 14 days ago and no record lists — removing at most 500 per pass off the main thread, resting at least 25 ms/.test(jl4[0])) && verdictOf(/catch-up done: 5,000 run dir\(s\) removed \(15,000 entries\) and 0 job dir\(s\) no record names; 0 kept .* — \d+ pass\(es\)/.test(jl4[1])), 'SAID TWICE: once at the start with the count, once when done with the total — nothing in between', jl4);
   // CONTROL: ONE pass of the same removals ON the main thread (the release's shape: a synchronous rm per dir), the same slow
   // storage — the loop is held past the bound
   {
@@ -1134,24 +1134,24 @@ try {
   A.shutdown();
   if (mid) await require(path.join(ROOT, 'src/store-writer.js')).storeWriter().durable(A.logsSweepFile);
   const leftAtRestart = runsOn(d5, t5.id).length - 20;
-  ok(mid && leftAtRestart > 0 && leftAtRestart < 5000, `the first engine stopped mid catch-up (${5000 - leftAtRestart} removed, ${leftAtRestart} left)`);
+  ok(gateOf(mid) && leftAtRestart > 0 && leftAtRestart < 5000, `the first engine stopped mid catch-up (${5000 - leftAtRestart} removed, ${leftAtRestart} left)`);
   const { jm: B, logs: LB } = boot(d5, { max: 500, gapMs: 25, bootDelayMs: 20 });
   const done5 = await until(() => runsOn(d5, t5.id).length === 20 && B._logsState && !B._logsState.catchUp && (typeof B.sweepLogs !== 'function' || (LB.some((l) => /catch-up done/.test(l)) && !B._logsPassP)), typeof B.sweepLogs === 'function' ? 20000 : 1500, 10);   // the done line, said once its record is on disk (as P4's wait)
   const jlA = LA.filter((l) => /job-logs/.test(l)), jlB = LB.filter((l) => /job-logs/.test(l));
-  ok(done5, 'the restarted hub resumes by itself and finishes');
-  ok(jlA.length === 1 && /catch-up: 5,000/.test(jlA[0]) && jlB.length === 1 && /catch-up done: 5,000 run dir\(s\) removed/.test(jlB[0]), 'said twice across the restart: the start once (the first engine), the done once with the WHOLE total (the second)', { A: jlA, B: jlB });
-  ok(t5.listed.every((t) => has(d5, 'job-logs', t5.id, t)), 'nothing a record lists was touched across the restart');
+  ok(verdictOf(done5), 'the restarted hub resumes by itself and finishes');
+  ok(jlA.length === 1 && gateOf(/catch-up: 5,000/.test(jlA[0])) && jlB.length === 1 && verdictOf(/catch-up done: 5,000 run dir\(s\) removed/.test(jlB[0])), 'said twice across the restart: the start once (the first engine), the done once with the WHOLE total (the second)', { A: jlA, B: jlB });
+  ok(verdictOf(t5.listed.every((t) => has(d5, 'job-logs', t5.id, t))), 'nothing a record lists was touched across the restart');
   let rec5 = null; try { rec5 = JSON.parse(fs.readFileSync(path.join(d5, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
   await require(path.join(ROOT, 'src/store-writer.js')).storeWriter().durable(path.join(d5, 'jobs-logs-sweep.json'));
   try { rec5 = JSON.parse(fs.readFileSync(path.join(d5, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
-  ok(rec5 && rec5.catchUp === null && rec5.last && rec5.last.more === false, 'the catch-up\'s record (through the store writer) closes: catchUp null');
+  ok(gateOf(rec5) && rec5.catchUp === null && gateOf(rec5.last) && rec5.last.more === false, 'the catch-up\'s record (through the store writer) closes: catchUp null');
   // a pass that FAILS inside an open catch-up never stalls it: the retry is re-armed (5 min in the product)
   if (typeof B.sweepLogs === 'function') {
     B._logsState.catchUp = { startedAt: Date.now(), counted: 1, countedEntries: 1, removed: 0, entries: 0, passes: 0 };
     const realRm5 = B._logsRemover(); B._logsRm = { ...realRm5, sweep: async () => ({ error: 'held', held: true }), whole: (...a) => realRm5.whole(...a), settled: () => realRm5.settled(), busy: () => realRm5.busy(), held: () => true, stop: () => realRm5.stop() };
     if (B._logsGapT) { clearTimeout(B._logsGapT); B._logsGapT = null; }
     await B.sweepLogs({ why: 'catch-up' });
-    ok(!!B._logsGapT && B._logsState.catchUp, 'a failed pass inside an open catch-up re-arms its retry (the catch-up never stalls)');
+    ok(!!B._logsGapT && verdictOf(B._logsState.catchUp), 'a failed pass inside an open catch-up re-arms its retry (the catch-up never stalls)');
     clearTimeout(B._logsGapT); B._logsGapT = null; B._logsRm = realRm5;
     await B._gc();
     ok(!B._logsState.catchUp || !!B._logsGapT, '…and with no timer armed, the hourly gc picks the catch-up up itself');
@@ -1162,12 +1162,12 @@ try {
   const d6 = mkDir('p6'); fs.writeFileSync(path.join(d6, 'jobs.json'), '{ not json');
   const skRun = seedRun(d6, 'jb-5ce1e7a1', Date.now() - 40 * DAY, { ageMs: 40 * DAY });
   const { jm: K } = boot(d6);
-  ok(K.jobs.has('jb-5ce1e7a1') && K.jobs.get('jb-5ce1e7a1').state === 'unverified', 'a corrupt store recovers a skeleton from the job dir');
+  ok(gateOf(K.jobs.has('jb-5ce1e7a1')) && K.jobs.get('jb-5ce1e7a1').state === 'unverified', 'a corrupt store recovers a skeleton from the job dir');
   await sweepAt(K, Date.now() + 15 * DAY);
-  ok(has(skRun), 'the skeleton\'s run dir stays (its empty run list is not «lists nothing»)');
+  ok(verdictOf(has(skRun)), 'the skeleton\'s run dir stays (its empty run list is not «lists nothing»)');
   const ro = Object.assign(Object.create(JobManager.prototype), { readOnly: true, d: { log() { } } });
   const roAns = typeof ro.sweepLogs === 'function' ? await ro.sweepLogs() : null;
-  ok(roAns && roAns.skipped === 'read-only', 'a read-only engine runs no pass');
+  ok(gateOf(roAns) && roAns.skipped === 'read-only', 'a read-only engine runs no pass');
 } catch (e) {
   fail++; console.error('  ✗ the suite threw — ' + (e && e.stack || e));
 } finally {
@@ -1176,4 +1176,4 @@ try {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 }
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

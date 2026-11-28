@@ -30,7 +30,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const FB = require(path.join(REPO, 'src/fd-budget.js'));
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -62,9 +62,9 @@ function templateVerdict(src) {
 }
 const TEMPLATE = fs.readFileSync(path.join(REPO, 'scripts/install-service.sh'), 'utf8');
 const tv = templateVerdict(TEMPLATE);
-ok(tv.ok, `install-service.sh's unit sets LimitNOFILE=${tv.value} — soft AND hard, at systemd's default hard limit`, tv.why);
-ok(/node raises its OWN soft\s*\n?#?\s*limit to the hard one/.test(TEMPLATE) && /FUSE daemon/.test(TEMPLATE), 'the template says why (node raises its own soft limit; the 12:03 EMFILE was the FUSE daemon\'s)');
-ok(/KillMode=process/.test(unitOf(TEMPLATE)) && /OOMScoreAdjust=-500/.test(unitOf(TEMPLATE)), 'the load-bearing neighbours are still there (KillMode=process, OOMScoreAdjust)');
+ok(verdictOf(tv.ok), `install-service.sh's unit sets LimitNOFILE=${tv.value} — soft AND hard, at systemd's default hard limit`, tv.why);
+ok(gateOf(/node raises its OWN soft\s*\n?#?\s*limit to the hard one/.test(TEMPLATE)) && verdictOf(/FUSE daemon/.test(TEMPLATE)), 'the template says why (node raises its own soft limit; the 12:03 EMFILE was the FUSE daemon\'s)');
+ok(gateOf(/KillMode=process/.test(unitOf(TEMPLATE))) && verdictOf(/OOMScoreAdjust=-500/.test(unitOf(TEMPLATE))), 'the load-bearing neighbours are still there (KillMode=process, OOMScoreAdjust)');
 // B-442c (2026-10-02 16:23, the owner's ruling): one OOM-killed process in the unit (a leaked scratch daemon) must not stop the service
 const oomOf = (t) => (unitOf(t).match(/^OOMPolicy=(\S+)$/gm) || []).map((l) => l.split('=')[1]);
 ok(JSON.stringify(oomOf(TEMPLATE)) === '["continue"]', `install-service.sh's unit sets OOMPolicy=continue exactly once (${JSON.stringify(oomOf(TEMPLATE))}) — the kernel still kills the runaway, systemd no longer stops the server for it`);
@@ -101,8 +101,8 @@ const G = require(path.join(REPO, 'src/server/fd-gauge.js'));
   const lines = [];
   const g = G.create({ procSelf: dir, log: { log: (l) => lines.push(l), warn: (l) => lines.push(l) } });
   const b = g.bootLine({ sessions: 13 });
-  ok(b.soft === 524288 && b.count === 5 && /soft 524288 \/ hard 524288/.test(b.line) && /node raises its soft limit/.test(b.line), `the boot line: ${JSON.stringify(b.line.slice(0, 160))}…`);
-  ok(b.estimate === FB.fdBudget({ sessions: 13 }).total && /estimate for 13 session\(s\): \d+ \(session pty masters 13/.test(b.line), `…and the estimate beside it (${b.estimate} for 13 sessions)`);
+  ok(b.soft === 524288 && b.count === 5 && gateOf(/soft 524288 \/ hard 524288/.test(b.line)) && verdictOf(/node raises its soft limit/.test(b.line)), `the boot line: ${JSON.stringify(b.line.slice(0, 160))}…`);
+  ok(b.estimate === FB.fdBudget({ sessions: 13 }).total && verdictOf(/estimate for 13 session\(s\): \d+ \(session pty masters 13/.test(b.line)), `…and the estimate beside it (${b.estimate} for 13 sessions)`);
   const est = FB.fdBudget({ sessions: 13 });
   ok(est.total >= 60 && est.total <= 90, `fdBudget(13 sessions) = ${est.total} — the production server held 75 with 13 (measured 2026-09-30)`);
   ok(FB.fdBudget({ sessions: 80, clients: 4 }).total - FB.fdBudget({ sessions: 0, clients: 4 }).total === 80, 'one pty master per session — 80 sessions are 80 handles, nowhere near any limit node runs at');
@@ -122,7 +122,7 @@ const gaugeWalk = (fn) => {
 };
 const gw = gaugeWalk(FB.gaugeVerdict);
 const gaugeOk = (w) => w[0].level === 'ok' && !w[0].report && w[1].level === 'high' && w[1].report && w[2].level === 'high' && !w[2].report && w[3].report && w[4].level === 'ok' && !w[4].report;
-ok(gaugeOk(gw), `the walk: ${gw.map((v) => v.level + (v.report ? '+report' : '')).join(' → ')}`);
+ok(verdictOf(gaugeOk(gw)), `the walk: ${gw.map((v) => v.level + (v.report ? '+report' : '')).join(' → ')}`);
 ok(FB.gaugeVerdict({ count: 799, soft: 1000, now: 0 }).level === 'ok' && FB.gaugeVerdict({ count: 800, soft: 1000, now: 0 }).level === 'high', 'the line is exactly 80 %');
 ok(FB.gaugeVerdict({ count: 5, soft: null, now: 0 }).level === 'unknown' && FB.gaugeVerdict({ count: 5, soft: Infinity, now: 0 }).level === 'unknown', 'no limit known ⇒ unknown (never a guess)');
 {
@@ -150,9 +150,9 @@ console.log('\n§E the ORCH gauge: one notice, not twice in the hour, and ok aga
   let t = 10 * H;
   const g = G.create({ procSelf: dir, now: () => t, serverNotice: (k, text, o) => { notices.push({ k, text, o }); return 1; }, log: { log() { }, warn() { } } });
   const s1 = await g.tick();
-  ok(s1.level === 'high' && notices.length === 1 && notices[0].o.i18n && notices[0].o.i18n.key === FB.GAUGE_KEY && notices[0].o.i18n.params.count === 850,
+  ok(s1.level === 'high' && notices.length === 1 && gateOf(notices[0].o.i18n) && notices[0].o.i18n.key === FB.GAUGE_KEY && notices[0].o.i18n.params.count === 850,
     `850 of 1000 ⇒ ONE server notice with its i18n key: ${JSON.stringify(notices[0] && notices[0].text.slice(0, 110))}…`);
-  ok(/socket 425, pipe 425|pipe 425, socket 425/.test(notices[0].text), '…naming the holders by kind');
+  ok(verdictOf(/socket 425, pipe 425|pipe 425, socket 425/.test(notices[0].text)), '…naming the holders by kind');
   t += 60e3; await g.tick();
   ok(notices.length === 1, 'a minute later, still high: no second notice in the hour');
   for (let i = 100; i < 850; i++) fs.unlinkSync(path.join(dir, 'fd', String(i)));
@@ -186,10 +186,10 @@ console.log('\n§F who ran out — the next EMFILE has a name');
 {
   const mi = '22 1 0:20 / / rw - ext4 /dev/root rw\n88 22 0:55 / /home/u/workspace rw,relatime shared:1 - fuse.bindfs /mnt/nfs_workspace rw,user_id=0\n89 88 0:56 / /home/u/workspace/x\\040y rw - tmpfs tmpfs rw\n';
   const m = FB.mountOf('/home/u/workspace/AIWorkspace/vibespace/data/session-status.json.tmp', mi);
-  ok(m && m.target === '/home/u/workspace' && m.fstype === 'fuse.bindfs' && m.source === '/mnt/nfs_workspace', `mountOf: the path is on ${JSON.stringify(m)}`);
+  ok(gateOf(m) && m.target === '/home/u/workspace' && m.fstype === 'fuse.bindfs' && m.source === '/mnt/nfs_workspace', `mountOf: the path is on ${JSON.stringify(m)}`);
   ok(FB.mountOf('/home/u/workspace/x y/f', mi).fstype === 'tmpfs' && FB.mountOf('/etc/hosts', mi).fstype === 'ext4' && FB.mountOf('relative', mi) === null, 'mountOf: the longest prefix wins; an escaped space is a space; a relative path has none');
   const fsb = FB.emfileBlame({ code: 'EMFILE', path: '/home/u/workspace/data/session-status.json.tmp', ownCount: 75, soft: 524288, mount: m });
-  ok(fsb.who === 'file-system' && /fuse\.bindfs/.test(fsb.words) && /75 of 524288/.test(fsb.words) && fsb.i18n && fsb.i18n.key === FB.FS_BLAME_KEY, `THE 12:03 SHAPE: ${JSON.stringify(fsb.words.slice(0, 150))}…`);
+  ok(fsb.who === 'file-system' && gateOf(/fuse\.bindfs/.test(fsb.words)) && gateOf(/75 of 524288/.test(fsb.words)) && gateOf(fsb.i18n) && fsb.i18n.key === FB.FS_BLAME_KEY, `THE 12:03 SHAPE: ${JSON.stringify(fsb.words.slice(0, 150))}…`);
   ok(FB.emfileBlame({ code: 'EMFILE', ownCount: 1000, soft: 1024, mount: m }).who === 'this-server', 'own count at the limit ⇒ this server (whatever the mount)');
   ok(FB.emfileBlame({ code: 'ENFILE', ownCount: 10, soft: 1024 }).who === 'system', 'ENFILE ⇒ the machine');
   ok(FB.emfileBlame({ code: 'EMFILE', ownCount: 10, soft: 1024, mount: { target: '/', fstype: 'ext4' } }).who === 'unknown', 'EMFILE on a local fs while far below our limit ⇒ unknown, both numbers said');
@@ -203,9 +203,9 @@ console.log('\n§F who ran out — the next EMFILE has a name');
   const err = Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' });
   g.reportWriteError(err, '/home/u/workspace/data/session-status.json.tmp', { failures: 1, retryMs: 1000 });
   g.reportWriteError(err, '/home/u/workspace/data/session-status.json.tmp', { failures: 2, retryMs: 2000 });
-  ok(lines.length === 1 && /a background write failed \(EMFILE; attempt 1, retrying in 1 s\)/.test(lines[0]) && /file system under \/home\/u\/workspace \(fuse\.bindfs\)/.test(lines[0]),
+  ok(lines.length === 1 && gateOf(/a background write failed \(EMFILE; attempt 1, retrying in 1 s\)/.test(lines[0])) && verdictOf(/file system under \/home\/u\/workspace \(fuse\.bindfs\)/.test(lines[0])),
     `a failed background write: ONE journal line naming the mount — ${JSON.stringify((lines[0] || '').slice(0, 140))}…`);
-  ok(notices.length === 1 && notices[0].o.i18n && notices[0].o.i18n.key === FB.FS_BLAME_KEY, '…and ONE notice an hour (with the client\'s i18n key)');
+  ok(notices.length === 1 && gateOf(notices[0].o.i18n) && notices[0].o.i18n.key === FB.FS_BLAME_KEY, '…and ONE notice an hour (with the client\'s i18n key)');
   t += H; g.reportWriteError(err, '/home/u/workspace/data/x.tmp', { failures: 9 });
   ok(notices.length === 2, 'an hour later the same failure is said again');
 }
@@ -309,18 +309,18 @@ const legsG = await Promise.all([
   channelLeg(),
   controlLeg(),
 ]);
-for (const leg of legsG) for (const [c, msg] of leg) ok(c, msg);
+for (const leg of legsG) for (const [c, msg] of leg) ok(verdictOf(c), msg);
 
 // ── §H the wiring ──
 console.log('\n§H the wiring in server.js');
 {
   const S = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  ok(/const fdGauge = require\('\.\/src\/server\/fd-gauge\.js'\)\.create\(/.test(S), 'the gauge is created');
+  ok(verdictOf(/const fdGauge = require\('\.\/src\/server\/fd-gauge\.js'\)\.create\(/.test(S)), 'the gauge is created');
   ok((S.match(/onWriteError: \(e, file, o\) => fdGauge\.reportWriteError\(e, file, o\)/g) || []).length === 2, 'BOTH debounced stores report their failed writes to it (session-status + user-todos)');
   const crash = (/process\.on\('uncaughtException', \(e\) => \{([\s\S]*?)\n\}\);/.exec(S) || [])[1] || '';
-  ok(/e\.code === 'EMFILE' \|\| e\.code === 'ENFILE'[^\n]*fdGauge\.blame\(e, e\.path\)\.words/.test(crash), 'the crash handler names an EMFILE/ENFILE before exiting');
-  ok(/fdGauge\.bootLine\(\{ sessions: /.test(S) && /fdGauge\.start\(\)/.test(S) && S.indexOf('fdGauge.bootLine(') > S.indexOf('restoreSessions(); hub.turn(() => { bootBrowserKeeper()'), 'the boot line + the gauge run after the restore (the session count is known)');
+  ok(verdictOf(/e\.code === 'EMFILE' \|\| e\.code === 'ENFILE'[^\n]*fdGauge\.blame\(e, e\.path\)\.words/.test(crash)), 'the crash handler names an EMFILE/ENFILE before exiting');
+  ok(gateOf(/fdGauge\.bootLine\(\{ sessions: /.test(S)) && gateOf(/fdGauge\.start\(\)/.test(S)) && S.indexOf('fdGauge.bootLine(') > S.indexOf('restoreSessions(); hub.turn(() => { bootBrowserKeeper()'), 'the boot line + the gauge run after the restore (the session count is known)');
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

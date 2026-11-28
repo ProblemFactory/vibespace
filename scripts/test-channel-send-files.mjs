@@ -45,7 +45,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LF = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/lark/send-files.json'), 'utf8'));
 const SF = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/slack/send-files.json'), 'utf8'));
 let fails = 0, n = 0;
-const ok = (c, m) => { n++; if (c) console.log(`  ✓ ${m}`); else { fails++; console.log(`  ✗ ${m}`); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); n++; if (c) console.log(`  ✓ ${m}`); else { fails++; console.log(`  ✗ ${m}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -191,7 +191,7 @@ const slack = require(path.join(REPO, 'src/channels/slack.js'));
 const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
 for (const [k, m] of [['lark', lark], ['slack', slack]]) {
   const row = m.caps.sendAttachments;
-  ok(row && row.maxCount === gmail.caps.sendAttachments.maxCount && row.maxTotalBytes === gmail.caps.sendAttachments.maxTotalBytes && row.withText === true && m.caps.sendAttachmentsWhy === null, `${k}: takes files — at most ${row && row.maxCount}, ${row && row.maxTotalBytes / 1e6} MB together (Gmail's bounds), with text`);
+  ok(gateOf(row) && row.maxCount === gmail.caps.sendAttachments.maxCount && row.maxTotalBytes === gmail.caps.sendAttachments.maxTotalBytes && row.withText === true && m.caps.sendAttachmentsWhy === null, `${k}: takes files — at most ${row && row.maxCount}, ${row && row.maxTotalBytes / 1e6} MB together (Gmail's bounds), with text`);
   ok(CH.validateCaps(k, m.caps) === true, `${k}: the row validates under the registry contract`);
 }
 ok(lark.LARK_IMAGE_MAX === 10 * 1024 * 1024 && LF.image.maxBytes === lark.LARK_IMAGE_MAX && LF.file.maxBytes === lark.LARK_FILE_MAX, "lark: the picture (10 MB) and file (30 MB) ceilings are the doc's, both above the 25 MB row except a single picture (over 10 MB ⇒ sent as a file)");
@@ -207,10 +207,10 @@ console.log('⑤ the receipt');
 const P = require(path.join(REPO, 'src/channel-policy.js'));
 const prop = { id: 'p-9', state: 'sent', convId: 'oc_fixture', adapterId: 'lark', reason: null, result: { vendorMessageId: 'om_1', at: T0, parts: [{ part: 'text', ok: true, vendorMessageId: 'om_1' }, { part: 'attachment', name: 'a.png', ok: true }, { part: 'attachment', name: 'b.pdf', ok: false, code: 'forbidden', why: 'lark upload file: Unauthorized (99991679)', requiredScopes: ['im:resource'] }] } };
 const block = P.renderReceiptBlock(P.receiptFor(prop), { adapterLabel: 'Lark' });
-ok(/landed: the text, "a\.png"/.test(block) && /NOT landed: "b\.pdf" \(forbidden: .*99991679.* needs im:resource\)/.test(block), 'a send in parts: the receipt names what landed and what did not (the vendor code, the scope)');
+ok(gateOf(/landed: the text, "a\.png"/.test(block)) && verdictOf(/NOT landed: "b\.pdf" \(forbidden: .*99991679.* needs im:resource\)/.test(block)), 'a send in parts: the receipt names what landed and what did not (the vendor code, the scope)');
 const failed = { id: 'p-10', state: 'failed', convId: 'C1', adapterId: 'slack', reason: 'rate-limited: slack files.getUploadURLExternal: Slack answered 429', failure: { code: 'rate-limited', detail: { parts: [{ part: 'attachment', name: 'a.png', ok: false, code: 'rate-limited' }, { part: 'attachment', name: 'b.pdf', ok: false, code: 'not-sent' }] } } };
 const fb = P.renderReceiptBlock(P.receiptFor(failed), { adapterLabel: 'Slack' });
-ok(/FAILED/.test(fb) && /NOT landed: "a\.png" \(rate-limited\); "b\.pdf" \(not sent after the refusal before it\)/.test(fb), 'a refused send: the receipt says no part landed, by name');
+ok(gateOf(/FAILED/.test(fb)) && verdictOf(/NOT landed: "a\.png" \(rate-limited\); "b\.pdf" \(not sent after the refusal before it\)/.test(fb)), 'a refused send: the receipt says no part landed, by name');
 
 console.log('⑤b lane slack-file-send-key (B-2840): a Slack file send is keyed by its FILE ids; the self-authored share record names them');
 { // the documented completeUploadExternal answer names no share ts — the real adapter keys each part by its file id; the
@@ -224,13 +224,13 @@ console.log('⑤b lane slack-file-send-key (B-2840): a Slack file send is keyed 
   const by = P.sharedFilesOf(recs);
   const k = P.rekeyByFiles(r, by);
   ok(!JSON.stringify(SF.completeUploadExternal.answer).includes('shares') && r.vendorMessageId === 'F07FIXTURE01' && r.parts.map((x) => x.vendorMessageId).join() === 'F07FIXTURE01,F07FIXTURE02', 'at the send: the result and each part are keyed by the FILE id (the fixture answer carries no shares/ts — no send-time key, no new vendor call)', JSON.stringify(r.parts));
-  ok(recs[0].attachments[0].id === 'F07FIXTURE01' && recs[0].author.isSelf && recs[1].author.isSelf && !recs[2].author.isSelf && by.size === 2 && by.get('F07FIXTURE02') === '1700000102.000102', 'the share record (subtype file_share, or a plain message with files[]) keeps files[].id as attachments[].id; only SELF-authored shares are read', JSON.stringify([...by]));
-  ok(k && k.vendorMessageId === '1700000101.000101' && k.parts[1].vendorMessageId === '1700000102.000102' && k.parts[1].fileId === 'F07FIXTURE02' && k.fileIds.join() === 'F07FIXTURE01,F07FIXTURE02' && P.sentIdsOf(k).join() === '1700000101.000101,1700000102.000102' && P.rekeyByFiles(k, by) === null && P.rekeyByFiles(r, new Map([['F07FIXTURE09', 'x']])) === null, 're-keyed: the result and every landed part name their share message (what a thread reply names), the file ids kept; a replay moves nothing; an unrelated file moves nothing', JSON.stringify(k));
+  ok(recs[0].attachments[0].id === 'F07FIXTURE01' && gateOf(recs[0].author.isSelf) && gateOf(recs[1].author.isSelf) && !recs[2].author.isSelf && by.size === 2 && by.get('F07FIXTURE02') === '1700000102.000102', 'the share record (subtype file_share, or a plain message with files[]) keeps files[].id as attachments[].id; only SELF-authored shares are read', JSON.stringify([...by]));
+  ok(gateOf(k) && k.vendorMessageId === '1700000101.000101' && k.parts[1].vendorMessageId === '1700000102.000102' && k.parts[1].fileId === 'F07FIXTURE02' && k.fileIds.join() === 'F07FIXTURE01,F07FIXTURE02' && P.sentIdsOf(k).join() === '1700000101.000101,1700000102.000102' && P.rekeyByFiles(k, by) === null && P.rekeyByFiles(r, new Map([['F07FIXTURE09', 'x']])) === null, 're-keyed: the result and every landed part name their share message (what a thread reply names), the file ids kept; a replay moves nothing; an unrelated file moves nothing', JSON.stringify(k));
 }
 console.log('⑥ the vendor-response census');
 const VC = await import(path.join(REPO, 'scripts/vendor-response-census.mjs'));
 const cen = VC.responseCensus(fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8'), { direct: /\b(?:api|callJson|callForm|fetchFn)\s*\(/, raw: /\bfetchFn\s*\(/g, rateOkIds: new Set(lark.RATE_OK.map((r) => r.id)) });
-ok(cen.problems.length === 0 && cen.touching.includes('sendWithFiles') && cen.touching.includes('upload'), `lark.js: the 429 class — the upload's raw send judged, the parts chain's catch a RATE_OK row (it stops, never retries)${cen.problems.length ? ` — ${JSON.stringify(cen.problems).slice(0, 300)}` : ''}`);
+ok(cen.problems.length === 0 && gateOf(cen.touching.includes('sendWithFiles')) && verdictOf(cen.touching.includes('upload')), `lark.js: the 429 class — the upload's raw send judged, the parts chain's catch a RATE_OK row (it stops, never retries)${cen.problems.length ? ` — ${JSON.stringify(cen.problems).slice(0, 300)}` : ''}`);
 
 // ⑧ verify r1 (F1): a Lark send whose TEXT answer is lost (nothing landed ⇒ `unknown`), settled `sent` by the reconcile
 // (the scan finds the text) — the files never left, and the proposal must say so by name (it said SENT "with 2 attachments")
@@ -437,9 +437,9 @@ ok(rest.length === 0, `«Send the rest»: a partly sent proposal (b.pdf refused)
 // the shoulds: RED CONTROL — the door's «once» read off the bare stamp again (a stop's 'proposed' rest holds it for good)
 { const STALE = "if (restHeldBy(p)) return { ok: false, code: 'rest-already',";
   const staleRed = await mutantEngine(STALE, "if (p.restSentAs) return { ok: false, code: 'rest-already',", restJudge, 'rest-stale-holds');   // stale-pins: kept (the OLD door line is the mutant compiled back in, never an anchor)
-  ok(Array.isArray(staleRed) && staleRed.some((x) => /a stop left the rest 'proposed'/.test(x)), `RED CONTROL (the bare stamp holds): after a stop left the rest 'proposed', the press is refused — the leg goes red (${staleRed ? staleRed.join(' · ').slice(0, 200) : 'the control missed its line'})`); }
+  ok(gateOf(Array.isArray(staleRed)) && verdictOf(staleRed.some((x) => /a stop left the rest 'proposed'/.test(x))), `RED CONTROL (the bare stamp holds): after a stop left the rest 'proposed', the press is refused — the leg goes red (${staleRed ? staleRed.join(' · ').slice(0, 200) : 'the control missed its line'})`); }
 const restRed = await mutantEngine("parts.forEach((x, k) => { if (!x.ok && !x.lost && !REST_NEVER.has(x.code)", "parts.forEach((x, k) => { if (false && !x.ok && !x.lost && !REST_NEVER.has(x.code)", restJudge, 'no-rest');
-ok(Array.isArray(restRed) && restRed.length > 0, `RED CONTROL (the rest never found): the leg goes red (${restRed ? restRed.length : 'the control missed its line'})`);
+ok(gateOf(Array.isArray(restRed)) && restRed.length > 0, `RED CONTROL (the rest never found): the leg goes red (${restRed ? restRed.length : 'the control missed its line'})`);
 const restart = await restRestartJudge(ENG);
 ok(restart.length === 0, `«Send the rest» ONCE ACROSS A RESTART: the hub stops inside the rest's upload — the fresh engine's first card offers no rest, a second press is refused by name (rest-already), nothing goes up again${restart.length ? ' — ' + restart.join(' · ') : ''}`);
 { // RED CONTROL: today's order — the stamp and the back-link written AFTER propose() returns (after the upload)
@@ -447,15 +447,15 @@ ok(restart.length === 0, `«Send the rest» ONCE ACROSS A RESTART: the hub stops
   const LATE = '    if (r && r.ok && r.proposal && r.proposal.id) notifyOutbox([p.id, r.proposal.id]);';
   const LATE_OLD = "    if (r && r.ok && r.proposal && r.proposal.id) { const live = ['proposed', 'awaiting-approval', 'sending', 'unknown', 'sent'].includes(r.proposal.state); await store.outbox.update((ob) => { const q = ob.proposals[r.proposal.id]; if (q) q.restOf = p.id; const q0 = ob.proposals[p.id]; if (q0 && live) q0.restSentAs = r.proposal.id; }); notifyOutbox([p.id, r.proposal.id]); }";
   const es = engineSource(REPO), found = es.split(STAMP).length === 2 && es.split(LATE).length === 2;
-  ok(found, 'the control «today\'s order» finds its two lines (the stamp in the create update, the notify after propose)');
+  ok(verdictOf(found), 'the control «today\'s order» finds its two lines (the stamp in the create update, the notify after propose)');
   const late = found ? await restRestartJudge(require(MC.write('src/server/channels-engine.js', es.replace(STAMP, '').replace(LATE, LATE_OLD), 'rest-late-stamp'))) : null;
-  ok(Array.isArray(late) && late.length > 0, `RED CONTROL (today's order — the stamp after the upload): after the restart the rest is offered and sent again — the leg goes red (${late ? late.join(' · ') : 'the control missed its lines'})`);
+  ok(gateOf(Array.isArray(late)) && late.length > 0, `RED CONTROL (today's order — the stamp after the upload): after the restart the rest is offered and sent again — the leg goes red (${late ? late.join(' · ') : 'the control missed its lines'})`);
 }
 { // the cure: the four refusals reach the owner's toast in the owner's words (routeErrorText), never the engine's English sentence
   const CW = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-words.js')).href);
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const rows = ['rest-not-sent', 'rest-already', 'rest-nothing-left', 'rest-files-gone'].map((code) => { const w = CW.routeErrorText({ code, error: 'ENGLISH SENTENCE' }); return { code, w, zh: zh.includes(`"${w}":`), ja: ja.includes(`"${w}":`) }; });
-  ok(rows.every((x) => x.w && !x.w.includes('ENGLISH SENTENCE') && x.zh && x.ja), `the four «Send the rest» refusals are worded by code, in zh and ja (${rows.map((x) => `${x.code} → «${x.w}»${x.zh && x.ja ? '' : ' (a dictionary lacks it)'}`).join(' · ')})`);
+  ok(verdictOf(rows.every((x) => x.w && !x.w.includes('ENGLISH SENTENCE') && x.zh && x.ja)), `the four «Send the rest» refusals are worded by code, in zh and ja (${rows.map((x) => `${x.code} → «${x.w}»${x.zh && x.ja ? '' : ' (a dictionary lacks it)'}`).join(' · ')})`);
 }
 const own = await ownerJudge(ENG);
 ok(own.length === 0, `the owner's send with 2 files: out at once as the owner, the record keeps name/size/sha256, a refused upload "partly sent" + ONE For-you item, a changed file refused attachment-changed${own.length ? ` — ${own.join('; ')}` : ''}`);
@@ -526,7 +526,7 @@ ok(alo.length === 0, `Lark on a stub vendor: the owner's file alone ⇒ ONE uplo
 { const LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
   const from = "const pieces = [...(hasText ? [{ part: 'text' }] : []), ...files.map(";
   const red = LS.includes(from) ? await aloneOwnerJudge(ENG, require(MC.write('src/channels/lark.js', editAnchor(LS, from, "const pieces = [{ part: 'text' }, ...files.map(", "src/channels/lark.js"), 'lark-empty-text'))) : null;
-  ok(Array.isArray(red) && red.length > 0, `control — lark posts an EMPTY text message beside the file: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — lark posts an EMPTY text message beside the file: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 
 // ⑩ lane lark-send-hold (B-efa0, channel-send-files verify r1 L2): A LARK 429 ON A SEND HOLDS THE ACCOUNT'S NEXT SENDS.
 // The probe's shape (probe1 L2/L3): the text lands, the picture upload answers 429 reset 30 s ⇒ the chain stops; the
@@ -646,12 +646,12 @@ const slackMethodsMissing = (src, tiers) => [...new Set([...src.matchAll(SLACK_M
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8');
   const named = new Set([...ssrc.matchAll(SLACK_METHOD)].map((m) => m[1]).filter((m) => !/\.(?:com|net|org)$/.test(m)));
   const miss = slackMethodsMissing(ssrc, Limits.METHOD_TIERS);
-  ok(miss.length === 0 && named.has('files.upload') && named.has('files.getUploadURLExternal') && named.size >= 15, `slack.js names ${named.size} methods, every one a METHOD_TIERS row${miss.length ? ` — missing ${miss.join(', ')}` : ''}`);
+  ok(miss.length === 0 && gateOf(named.has('files.upload')) && gateOf(named.has('files.getUploadURLExternal')) && named.size >= 15, `slack.js names ${named.size} methods, every one a METHOD_TIERS row${miss.length ? ` — missing ${miss.join(', ')}` : ''}`);
   const lsrc = fs.readFileSync(path.join(REPO, 'src/channels/slack-limits.js'), 'utf8');
   const ROW = "  'files.upload': 4,\n";
   const L2 = lsrc.includes(ROW) ? require(MC.write('src/channels/slack-limits.js', editAnchor(lsrc, ROW, '', "src/channels/slack-limits.js"), 'no-files-upload')) : null;
   const red = L2 ? slackMethodsMissing(ssrc, L2.METHOD_TIERS) : null;
-  ok(Array.isArray(red) && red.join() === 'files.upload', `control — a copy of the table without 'files.upload': red (${red === null ? 'the patch site is gone' : red.join() || 'GREEN — the census missed it'})`);
+  ok(gateOf(Array.isArray(red)) && red.join() === 'files.upload', `control — a copy of the table without 'files.upload': red (${red === null ? 'the patch site is gone' : red.join() || 'GREEN — the census missed it'})`);
 }
 
 // ⑫ lane channel-upload-retry (userW inc-mw35tppf-jrvo, 2026-11-05: three PDFs in one Slack reply; files.slack.com answered
@@ -884,7 +884,7 @@ ok(rej.length === 0, `the words reach the agent (real engine over the Slack adap
   ];
   for (const [what, M, judge, pins] of rows) {
     const red = await redBy(M, judge, pins);
-    ok(Array.isArray(red) && red.length === pins.length, `control — ${what}: ${say(red, pins)}`);
+    ok(gateOf(Array.isArray(red)) && red.length === pins.length, `control — ${what}: ${say(red, pins)}`);
   }
   clearInterval(keepR);
 }
@@ -1074,7 +1074,7 @@ else {
     [nt({ n: 1, now: 0, deadline: 6000 }) === '{"go":true,"waitMs":1000}' && nt({ n: 1, now: 0, deadline: 5999 }) === '{"go":false,"stop":"budget","waitMs":1000}', 'nextTry: the wait + 5 s must fit before the deadline'],
     [Plan.stopWords({ n: 3 }) === '(after 3 attempts)' && Plan.stopWords({ n: 1, stop: 'budget' }) === '(after 1 attempt (budget))' && Plan.stopWords({ n: 2, stop: 'budget', retryAfterSec: 30 }) === '(after 2 attempts (budget) — Retry-After 30 s)', 'stopWords: a count stop «(after 3 attempts)» reads differently from a budget stop «(after 1 attempt (budget))»; a vendor wait that did not fit names its seconds'],
   ];
-  for (const [cond, words] of planRows) ok(cond, `plan — ${words}`);
+  for (const [cond, words] of planRows) ok(verdictOf(cond), `plan — ${words}`);
 }
 const vwj = await vendorWaitJudge(slack, lark);
 ok(!vwj['F1·lark'], `F1 lark: 503 + Retry-After 30 (or x-ogw-ratelimit-reset 30) ⇒ ONE upload, thrown at once «… (503) (after 1 attempt (budget) — Retry-After 30 s)», retryable, retryAfterSec 30, nothing left after the clock passes 30 s; Retry-After 2 ⇒ the second upload at +2000 (not the 1 s backoff), landed; no header ⇒ 1000 / 3000${vwj['F1·lark'] ? ` — ${vwj['F1·lark'].join('; ')}` : ''}`);
@@ -1114,7 +1114,7 @@ ok(!bj['F3·engine'], `F3 the lanes through a real engine: an agent's direct rep
   ];
   for (const [what, r, pins] of rows) {
     const red = r ? pins.filter((p) => r[p]) : null;
-    ok(Array.isArray(red) && red.length === pins.length, `control — ${what}: ${say(red, pins)}${red && red.length ? ` (${red.map((p) => `${p}: ${r[p][0].slice(0, 150)}`).join(' | ')})` : ''}`);
+    ok(gateOf(Array.isArray(red)) && red.length === pins.length, `control — ${what}: ${say(red, pins)}${red && red.length ? ` (${red.map((p) => `${p}: ${r[p][0].slice(0, 150)}`).join(' | ')})` : ''}`);
   }
   clearInterval(keepR);
 }
@@ -1238,7 +1238,7 @@ ok(!zw['m2·lark'], `m2 lark: a pace that eats the window before the retry's upl
   ];
   for (const [what, r, pins] of rows) {
     const red = r ? pins.filter((p) => r[p]) : null;
-    ok(Array.isArray(red) && red.length === pins.length, `control — ${what}: ${say(red, pins)}${red && red.length ? ` (${red.map((p) => `${p}: ${r[p][0].slice(0, 150)}`).join(' | ')})` : ''}`);
+    ok(gateOf(Array.isArray(red)) && red.length === pins.length, `control — ${what}: ${say(red, pins)}${red && red.length ? ` (${red.map((p) => `${p}: ${r[p][0].slice(0, 150)}`).join(' | ')})` : ''}`);
   }
   clearInterval(keepR);
 }
@@ -1333,7 +1333,7 @@ for (const [pin, what] of [['r4·fit·lark', 'r1: Lark\'s fit counts its two req
   for (const [what, m, pins] of rows) {
     const r = m ? await wholeSendJudge(m.S, m.L) : null;
     const red = r ? pins.filter((x) => r[x]) : null;
-    ok(Array.isArray(red) && red.length === pins.length, `control — ${what}: ${red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `GREEN on ${pins.filter((x) => !red.includes(x)).join(' ')}`}`);
+    ok(gateOf(Array.isArray(red)) && red.length === pins.length, `control — ${what}: ${red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `GREEN on ${pins.filter((x) => !red.includes(x)).join(' ')}`}`);
   }
   clearInterval(keepR);
 }
@@ -1349,24 +1349,24 @@ const ctl = [
   ['slack.js', 'parts.push(no, ...rest);', 'parts.push({ ...label, ok: true }, ...rest);', slackJudge, 'channels/slack.js', 'slack: a refusal DROPPED'],
 ];
 { const red = await mutantEngine('...(rp ? { parts: rp } : {}) }; q.reason = rp && rp.some((x) => !x.ok) ? `partly sent — ${P.partsWords(rp)}` : null;', '}; q.reason = null;', reconcileJudge, 'engine-reconcile-parts');
-  ok(Array.isArray(red) && red.length > 0, `control — engine: the reconcile forgets the parts: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — engine: the reconcile forgets the parts: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 for (const [f, from, to, judge, mod, what] of ctl) {
   const red = await mutant(`channels/${f}`, from, to, judge, what.replace(/\W+/g, '-'));
-  ok(Array.isArray(red) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 
 { const red = await mutantEngine("const own = !!(input && input.direct === true) && (!ctx || ctx.kind === 'user');", 'const own = false;', ownerJudge, 'engine-owner-not-direct');
-  ok(Array.isArray(red) && red.length > 0, `control — engine: the owner's send with files held as a proposal: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — engine: the owner's send with files held as a proposal: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 // ⑩ controls: THE BASE (no account hold — a copy whose send never checks it) sends the next proposal at once; a copy
 // whose upload 429 holds nothing, an engine that FAILS a held send, a boot sweep that calls a held send unknown
 { const red = await mutant('channels/lark.js', '    if (held) throw held;', '    if (false) throw held;', (L) => holdEngineJudge(ENG, L, { shape: 'text' }), 'lark-no-send-hold');
-  ok(Array.isArray(red) && red.length > 0 && /did not WAIT: sent, 1 requests/.test(red.join()), `control — BASE (no account hold): the next proposal 2 s later is SENT at once: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+  ok(gateOf(Array.isArray(red)) && red.length > 0 && verdictOf(/did not WAIT: sent, 1 requests/.test(red.join())), `control — BASE (no account hold): the next proposal 2 s later is SENT at once: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 { const red = await mutant('channels/lark.js', '        noteSendHold(e);   // lane lark-send-hold: a part\'s 429', '        void e;   // a part\'s 429', (L) => holdEngineJudge(ENG, L, { shape: 'upload' }), 'lark-upload-no-hold');
-  ok(Array.isArray(red) && red.length > 0, `control — lark: an upload's 429 holds nothing: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — lark: an upload's 429 holds nothing: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 { const red = await mutantEngine('    if (heldUntil) return holdSend(id, rec, r, heldUntil, t);', '', (E) => holdEngineJudge(E, lark, { shape: 'text' }), 'engine-held-fails');
-  ok(Array.isArray(red) && red.length > 0 && /did not WAIT: failed/.test(red.join()), `control — engine: a held send is FAILED: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+  ok(gateOf(Array.isArray(red)) && red.length > 0 && verdictOf(/did not WAIT: failed/.test(red.join())), `control — engine: a held send is FAILED: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 { const red = await mutantEngine("    const stuck = proposalsFor().filter((p) => p.state === 'sending' && !p.held);", "    const stuck = proposalsFor().filter((p) => p.state === 'sending');", (E) => holdEngineJudge(E, lark, { shape: 'text' }), 'engine-boot-unknown');
-  ok(Array.isArray(red) && red.length > 0 && /a restart called the held sends unknown/.test(red.join()), `control — engine: a restart calls a held send unknown: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+  ok(gateOf(Array.isArray(red)) && red.length > 0 && verdictOf(/a restart called the held sends unknown/.test(red.join())), `control — engine: a restart calls a held send unknown: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 clearInterval(keep);
 console.log(`\n${fails ? '✗' : '✓'} test-channel-send-files: ${n - fails}/${n} passed`);
-process.exit(fails ? 1 : 0);
+process.exit(fails ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

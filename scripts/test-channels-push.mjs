@@ -38,7 +38,7 @@ import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(pred, ms = 4000, step = 15) { const t0 = Date.now(); for (;;) { const v = pred(); if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(step); } }
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
@@ -173,15 +173,15 @@ await sleep(150);
 await eng.pass(A, { force: true });
 {
   const en = eng.store.index.snapshot().conversations[`${A}/${CID}`];
-  ok(en && !('tracked' in en) && en.anchor, `the conversation is ingested and anchored by the first walk, no tracked flag (anchor ${en && en.anchor})`);
+  ok(gateOf(en) && !('tracked' in en) && verdictOf(en.anchor), `the conversation is ingested and anchored by the first walk, no tracked flag (anchor ${en && en.anchor})`);
 }
 
 // ── ① FENCE 11: persist → ack → process ──────────────────────────────────
 console.log('① the ack arrives only after the record is durable');
 {
-  ok(view().push && view().push.state === null && view().push.claimedExclusive === 'unknown', 'before any declaration the push half is published as not started, claim unknown');
+  ok(gateOf(view().push) && view().push.state === null && view().push.claimedExclusive === 'unknown', 'before any declaration the push half is published as not started, claim unknown');
   const r = await eng.setPush(A, { claimedExclusive: 'exclusive' });
-  ok(r.ok && r.push.claimedExclusive === 'exclusive', 'setPush declares exclusivity');
+  ok(gateOf(r.ok) && r.push.claimedExclusive === 'exclusive', 'setPush declares exclusivity');
   const live = await waitFor(() => view().push.state === 'live');
   ok(!!live && server.connections === 1, `the lane is ARMED by the declaration and its handshake is positive evidence (state live, ${server.connections} connection)`);
   ok(lane().via === 'push' && lane().carryContent === true && lane().why === 'exclusive' && lane().pollCadence === 'reconcile', 'the resolver: live + exclusive ⇒ push carries content, the poll reconciles');
@@ -190,11 +190,11 @@ console.log('① the ack arrives only after the record is durable');
   const r1 = mint(CID, 'first pushed');
   const ev1 = emit(CID, r1);
   const ack = await server.waitAck(ev1);
-  ok(ack && ack.persisted === true && ack.seen === true, 'FENCE 11: the vendor receives the ack AFTER the record is in the durable log (the server checked the log at ack time)');
+  ok(gateOf(ack) && ack.persisted === true && ack.seen === true, 'FENCE 11: the vendor receives the ack AFTER the record is in the durable log (the server checked the log at ack time)');
   await sleep(400);
   const en = eng.store.index.snapshot().conversations[`${A}/${CID}`];
-  ok(en.unread >= 1 && en.lane.lastPushAt && en.lane.via === 'push', `the index moves AFTER the ack (unread ${en.unread}, lastPushAt stamped, via push)`);
-  ok(events.some((e) => e.type === 'channels-updated' && Array.isArray(e.changed) && e.changed.includes(CID)), 'ONE broadcast per push batch names the conversation');
+  ok(en.unread >= 1 && gateOf(en.lane.lastPushAt) && en.lane.via === 'push', `the index moves AFTER the ack (unread ${en.unread}, lastPushAt stamped, via push)`);
+  ok(verdictOf(events.some((e) => e.type === 'channels-updated' && Array.isArray(e.changed) && e.changed.includes(CID))), 'ONE broadcast per push batch names the conversation');
   const lines = () => fs.readFileSync(eng.store.logPath(A, CID), 'utf-8').trim().split('\n').length;
   const before = lines();
   server.send({ type: 'event', eventId: ev1, convId: CID, record: r1 });      // the vendor's at-least-once replay
@@ -211,14 +211,14 @@ console.log('① the ack arrives only after the record is durable');
   const ack3 = await server.waitAck(ev2);
   await sleep(400);
   eng.store.index.update = orig;
-  ok(ack3 && ack3.persisted === true && logHas(r2.vendorId) && !armed, 'the record is durable and acked even though the index step crashed');
+  ok(gateOf(ack3) && ack3.persisted === true && gateOf(logHas(r2.vendorId)) && !armed, 'the record is durable and acked even though the index step crashed');
   // Since P2 the funnel's DERIVED-ledger write (msgs7d) sits between the
   // persist and the batch flush too, so whichever consumer meets the injected
   // fault first must speak it — either spelling is the same promise kept.
-  ok(logs.some((l) => /(push batch failed|msgs ledger failed|wake path failed): injected crash/.test(l)), 'the crash is SAID (never swallowed)');
+  ok(verdictOf(logs.some((l) => /(push batch failed|msgs ledger failed|wake path failed): injected crash/.test(l))), 'the crash is SAID (never swallowed)');
   const p = await eng.pass(A, { force: true, origin: 'timer' });
   const en2 = eng.store.index.snapshot().conversations[`${A}/${CID}`];
-  ok(p.ok && en2.unread >= 2 && missRate().missed === 0, `the reconciliation poll finds it already there (a duplicate, not a miss: missed ${missRate().missed}) and the index heals (unread ${en2.unread})`);
+  ok(gateOf(p.ok) && en2.unread >= 2 && missRate().missed === 0, `the reconciliation poll finds it already there (a duplicate, not a miss: missed ${missRate().missed}) and the index heals (unread ${en2.unread})`);
 }
 
 // ── ② heartbeat silence ⇒ push-dead ⇒ fast cadence ───────────────────────
@@ -227,7 +227,7 @@ console.log('② liveness is positive evidence');
   offset += C.PUSH_HEARTBEAT_MS + 1000;
   const l = lane();
   ok(l.via === 'poll' && l.why === 'push-dead' && l.pollCadence === 'fast' && l.carryContent === false, 'silence past the heartbeat window: the resolver reads the lane as DEAD and the cadence is fast — while the socket is still connected');
-  ok(view().push.state === 'live' && /silent for/.test(C.pushLaneText(view().push, view().lane, { now: now() })), `the row says so: "${C.pushLaneText(view().push, view().lane, { now: now() })}"`);
+  ok(view().push.state === 'live' && verdictOf(/silent for/.test(C.pushLaneText(view().push, view().lane, { now: now() }))), `the row says so: "${C.pushLaneText(view().push, view().lane, { now: now() })}"`);
   server.send({ type: 'ping' });
   const back = await waitFor(() => lane().why === 'exclusive');
   ok(!!back, 'one heard frame revives it — no reconnect, no re-declaration');
@@ -247,11 +247,11 @@ console.log('③ stop() is terminal for an arm in flight');
   let hh = null; let engineCalls = 0; const st2 = [];
   const l2 = startLane({ name: 't2', now, log: quiet, onState: (s) => st2.push(s.state), onEvent: async () => { engineCalls++; return { ok: true }; }, connect: async (h) => { hh = h; return { close() {} }; } });
   await waitFor(() => st2.includes('live'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
-  ok(st2.includes('live'), 'positive control: the same lane reports live when the connect lands before stop()');
+  ok(verdictOf(st2.includes('live')), 'positive control: the same lane reports live when the connect lands before stop()');
   l2.stop();
   const ans = await hh.event({ kind: 'record' });
   hh.heard();
-  ok(ans && ans.ok === false && ans.why === 'stopped' && engineCalls === 0 && st2[st2.length - 1] === 'stopped', 'after stop(): event() answers {ok:false, why:stopped} WITHOUT calling the engine (no ack), heard() reports nothing');
+  ok(gateOf(ans) && ans.ok === false && ans.why === 'stopped' && engineCalls === 0 && st2[st2.length - 1] === 'stopped', 'after stop(): event() answers {ok:false, why:stopped} WITHOUT calling the engine (no ack), heard() reports nothing');
   // engine level: switching push off stops the lane; on again = a NEW connection
   await eng.setPush(A, { enabled: false });
   await waitFor(() => server.conns.length === 0);
@@ -274,22 +274,22 @@ console.log('④ a lane that declares exclusivity it does not have demotes itsel
     else pushed.push({ r, ev: emit(CID, r) });
   }
   const lastAck = await server.waitAck(pushed[pushed.length - 1].ev);
-  ok(!!lastAck && pushed.every((p) => logHas(p.r.vendorId)) && withheld.every((w) => !logHas(w.vendorId)), 'the 28 pushed records are durable via push, the 12 withheld ones are not there yet');
+  ok(!!lastAck && gateOf(pushed.every((p) => logHas(p.r.vendorId))) && verdictOf(withheld.every((w) => !logHas(w.vendorId))), 'the 28 pushed records are durable via push, the 12 withheld ones are not there yet');
   ok(!view().push.demotedAt, 'no demotion before the reconciliation poll has spoken');
   const p = await eng.pass(A, { force: true, origin: 'timer' });     // the 15-min reconciliation poll
-  ok(p.ok && withheld.every((w) => logHas(w.vendorId)), 'the reconciliation poll brings the withheld 12 in');
+  ok(gateOf(p.ok) && verdictOf(withheld.every((w) => logHas(w.vendorId))), 'the reconciliation poll brings the withheld 12 in');
   const v = view();
   const m = v.push.demoted || {};
   ok(!!v.push.demotedAt && v.push.demotedWhy === 'miss-rate' && m.missed === 12 && m.total >= 40 && m.rate > C.PUSH_MISS_THRESHOLD,
     `DEMOTED: ${m.missed} of ${m.total} records (${(m.rate * 100).toFixed(1)}%) were first seen by the poll — above the ${C.PUSH_MISS_THRESHOLD * 100}% threshold`);
-  ok(logs.some((l) => /push is not exclusive here — 12 of \d+ records/.test(l)), 'the demotion is SAID in the log with its numbers');
+  ok(verdictOf(logs.some((l) => /push is not exclusive here — 12 of \d+ records/.test(l))), 'the demotion is SAID in the log with its numbers');
   const sentence = C.pushLaneText(v.push, v.lane, { now: now() });
-  ok(/not exclusive here/.test(sentence) && /12 of \d+ records/.test(sentence) && /fast cadence/.test(sentence), `the adapter row says why: "${sentence}"`);
+  ok(gateOf(/not exclusive here/.test(sentence)) && gateOf(/12 of \d+ records/.test(sentence)) && verdictOf(/fast cadence/.test(sentence)), `the adapter row says why: "${sentence}"`);
   const l = lane();
   ok(l.via === 'poll' && l.why === 'demoted' && l.carryContent === false && l.pollCadence === 'fast', 'the resolver: DEMOTED outranks live + claim — no content, fast cadence');
   const last = events[events.length - 1];
   const row = last && last.digest && last.digest.adapters.find((a) => a.id === A);
-  ok(row && row.push && row.push.demotedAt && row.lane.why === 'demoted', 'the broadcast digest carries the demotion (every client sees the row change)');
+  ok(gateOf(row) && gateOf(row.push) && gateOf(row.push.demotedAt) && row.lane.why === 'demoted', 'the broadcast digest carries the demotion (every client sees the row change)');
   ok(v.push.state === 'live' && server.conns.length === 1, 'the connection itself stays up — the lane is demoted, not stopped');
 
   // THE DEMOTION CHANGES WHAT THE LANE CARRIES
@@ -300,7 +300,7 @@ console.log('④ a lane that declares exclusivity it does not have demotes itsel
   const evk = emit(CID, rk);
   const ackk = await server.waitAck(evk);
   await sleep(150);
-  ok(ackk && ackk.persisted === false && ackk.seen === false && !logHas(rk.vendorId), 'the next pushed event is a CURSOR KICK: acked, NOT taken from the event, not in the log');
+  ok(gateOf(ackk) && ackk.persisted === false && ackk.seen === false && !logHas(rk.vendorId), 'the next pushed event is a CURSOR KICK: acked, NOT taken from the event, not in the log');
   world.gate = null;
   hold.resolve();
   const viaPoll = await waitFor(() => logHas(rk.vendorId), 6000);
@@ -319,19 +319,19 @@ console.log('④ a lane that declares exclusivity it does not have demotes itsel
   await server.waitAck(clean[clean.length - 1].ev);
   await waitFor(() => logHas(clean[clean.length - 1].r.vendorId), 6000);
   ok(view().push.demotedAt === demotedAt && lane().why === 'demoted', '30 events the vendor delivers perfectly do NOT clear the demotion — the counters are not the trigger (the evidence that would clear it is what kick mode cannot produce)');
-  ok(clean.every((c) => logHas(c.r.vendorId)) && missRate().total === judgedAtDemotion, 'all 30 arrived through the poll; still no samples');
+  ok(gateOf(clean.every((c) => logHas(c.r.vendorId))) && missRate().total === judgedAtDemotion, 'all 30 arrived through the poll; still no samples');
 
   // RE-DECLARATION: the party that made the claim takes the demotion back
   const connsBefore = server.connections;
   const rd = await eng.setPush(A, { claimedExclusive: 'exclusive' });
-  ok(rd.ok && rd.push.demotedAt === null && rd.push.missRate.total === 0 && rd.push.redeclaredAt, 're-declaring exclusivity clears the demotion and ZEROES the counters');
+  ok(gateOf(rd.ok) && rd.push.demotedAt === null && rd.push.missRate.total === 0 && verdictOf(rd.push.redeclaredAt), 're-declaring exclusivity clears the demotion and ZEROES the counters');
   const relive = await waitFor(() => view().push.state === 'live' && server.connections === connsBefore + 1);
   ok(!!relive, 'and retries the lane ONCE with a fresh arm (a new connection)');
   const rr = mint(CID, 'content again');
   const evr = emit(CID, rr);
   const ackr = await server.waitAck(evr);
-  ok(ackr && ackr.persisted === true && lane().why === 'exclusive' && lane().carryContent === true, 'content mode is back: the next event is persisted before its ack');
-  ok(logs.some((l) => /re-declared as 'exclusive'/.test(l)), 'the re-declaration is logged');
+  ok(gateOf(ackr) && ackr.persisted === true && lane().why === 'exclusive' && lane().carryContent === true, 'content mode is back: the next event is persisted before its ack');
+  ok(verdictOf(logs.some((l) => /re-declared as 'exclusive'/.test(l))), 'the re-declaration is logged');
 }
 
 // ── ⑤ shared / unknown never carry; the route validates ──────────────────
@@ -342,8 +342,8 @@ console.log('⑤ shared / unknown are cursor kicks; the route');
   const r = mint(CID, 'shared');
   const ev = emit(CID, r);
   const ack = await server.waitAck(ev);
-  ok(ack && ack.persisted === false && lane().why === 'kick-shared' && lane().carryContent === false, '`shared`: the event is a kick, never content');
-  ok(/cursor kicks only \(declared shared\)/.test(C.pushLaneText(view().push, view().lane, { now: now() })), 'the row says "cursor kicks only (declared shared)"');
+  ok(gateOf(ack) && ack.persisted === false && lane().why === 'kick-shared' && lane().carryContent === false, '`shared`: the event is a kick, never content');
+  ok(verdictOf(/cursor kicks only \(declared shared\)/.test(C.pushLaneText(view().push, view().lane, { now: now() }))), 'the row says "cursor kicks only (declared shared)"');
   await eng.setPush(A, { claimedExclusive: 'unknown' });
   await waitFor(() => view().push.state === 'live' && lane().why === 'kick-unknown');
   ok(lane().why === 'kick-unknown' && lane().carryContent === false, '`unknown` (the default) is a kick too');
@@ -357,16 +357,16 @@ console.log('⑤ shared / unknown are cursor kicks; the route');
   const base = `http://127.0.0.1:${srv.address().port}`;
   const put = async (id, body) => { const r = await fetch(`${base}/api/channels/adapters/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json() }; };
   const bad = await put(A, { push: { claimedExclusive: 'bogus' } });
-  ok(bad.status === 400 && /claimedExclusive must be one of/.test(bad.body.error), 'PUT {push:{claimedExclusive:bogus}} is refused by name');
+  ok(bad.status === 400 && verdictOf(/claimedExclusive must be one of/.test(bad.body.error)), 'PUT {push:{claimedExclusive:bogus}} is refused by name');
   const none = await put('fake-poll', { push: { claimedExclusive: 'exclusive' } });
   ok(none.status === 400 && none.body.code === 'no-push-lane', 'PUT push on an adapter with no push lane is `no-push-lane`');
   const good = await put(A, { push: { claimedExclusive: 'exclusive' } });
-  ok(good.status === 200 && good.body.ok && good.body.push.claimedExclusive === 'exclusive', 'PUT {push:{claimedExclusive:exclusive}} re-declares through the route');
+  ok(good.status === 200 && gateOf(good.body.ok) && good.body.push.claimedExclusive === 'exclusive', 'PUT {push:{claimedExclusive:exclusive}} re-declares through the route');
   const digest = await (await fetch(`${base}/api/channels`)).json();
   const drow = digest.adapters.find((a) => a.id === A);
-  ok(drow && drow.push && drow.push.claimedExclusive === 'exclusive' && typeof drow.push.missRate.rate === 'number' && !('samples' in drow.push), 'the digest publishes the push half (claim, state, missRate summary) and never the raw sample batches');
+  ok(gateOf(drow) && gateOf(drow.push) && drow.push.claimedExclusive === 'exclusive' && typeof drow.push.missRate.rate === 'number' && !('samples' in drow.push), 'the digest publishes the push half (claim, state, missRate summary) and never the raw sample batches');
   const noPush = digest.adapters.find((a) => a.id === 'fake-poll');
-  ok(noPush && noPush.push === null, 'an adapter without a push lane publishes push:null (the panel gates its Push… control on it)');
+  ok(gateOf(noPush) && noPush.push === null, 'an adapter without a push lane publishes push:null (the panel gates its Push… control on it)');
   srv.close();
 }
 
@@ -388,7 +388,7 @@ console.log('⑥ the Lark long-connection lane');
   });
   const h = live.start({ onState: (s) => states.push(s), onEvent: async (ev) => { seen.push(ev); await gate.promise; persisted.push(ev.record.vendorId); return { ok: true, persisted: true }; } });
   await sleep(20);
-  ok(instances.length === 1 && instances[0].opts.appId === 'cli_app' && instances[0].opts.domain === 'lark' && states.some((s) => s.state === 'live' && s.heard), 'the SDK client is built with the APP credential + the brand\'s domain; the handshake is positive evidence');
+  ok(instances.length === 1 && instances[0].opts.appId === 'cli_app' && instances[0].opts.domain === 'lark' && verdictOf(states.some((s) => s.state === 'live' && s.heard)), 'the SDK client is built with the APP credential + the brand\'s domain; the handshake is positive evidence');
   const payload = { header: { event_id: 'evt-1', event_type: 'im.message.receive_v1' }, event: { sender: { sender_id: { open_id: 'ou_1' }, sender_type: 'user' }, message: { message_id: 'om_1', chat_id: 'oc_1', create_time: '1700000000000', message_type: 'text', content: '{"text":"hi @_user_1"}', mentions: [{ key: '@_user_1', id: { open_id: 'ou_2' }, name: 'Brook' }] } } };
   let settled = false;
   const p = instances[0].dispatcher.invoke('im.message.receive_v1', payload).then(() => { settled = true; });
@@ -396,27 +396,27 @@ console.log('⑥ the Lark long-connection lane');
   ok(!settled && seen.length === 1 && persisted.length === 0, 'THE ACK IS THE HANDLER\'S RETURN: it does not resolve before the engine persisted');
   gate.resolve();
   await p;
-  ok(settled && persisted[0] === 'om_1', '…and resolves once the record is durable');
+  ok(gateOf(settled) && persisted[0] === 'om_1', '…and resolves once the record is durable');
   ok(seen[0].eventId === 'evt-1' && seen[0].convId === 'oc_1' && seen[0].record.text === 'hi @Brook' && seen[0].record.mentions[0].name === 'Brook', `the v2 payload lands as the REST item shape through the adapter's own normalizer — the @_user_1 ORDINAL resolves against the record's own mentions exactly as on the poll path (one normalizer, two arrivals): "${seen[0].record.text}"`);
   const item = eventToItem(payload);
   ok(item.mentions[0].key === '@_user_1' && item.mentions[0].id === 'ou_2' && item.sender.id === 'ou_1' && item.msg_type === 'text', 'eventToItem keeps the ordinal key + the resolved open_id + the sender');
   h.stop();
   let threw = null;
   try { await instances[0].dispatcher.invoke('im.message.receive_v1', { ...payload, header: { event_id: 'evt-2' } }); } catch (e) { threw = e; }
-  ok(threw && /not acknowledged/.test(threw.message) && instances[0].closed === 1, 'after stop() the handler REFUSES the ack (the vendor redelivers to whoever is alive) and the client is closed');
+  ok(gateOf(threw) && gateOf(/not acknowledged/.test(threw.message)) && instances[0].closed === 1, 'after stop() the handler REFUSES the ack (the vendor redelivers to whoever is alive) and the client is closed');
   let installed = false; try { require.resolve(SDK_NAME); installed = true; } catch {}
   if (installed) console.log(`  … SKIP: ${SDK_NAME} is installed here, so the "not installed" refusal cannot be driven`);
   else {
     const st2 = [];
     const h2 = createLarkLive({ adapterId: 'lark', now, log: quiet, credential: () => ({ values: { appId: 'a', appSecret: 'b' } }), toRecord: async () => null }).start({ onState: (s) => st2.push(s), onEvent: async () => ({}) });
     await waitFor(() => st2.some((s) => s.state === 'unavailable'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
-    ok(st2.some((s) => s.state === 'unavailable' && /not installed/.test(s.why) && s.code === 'sdk-not-installed'), 'without the SDK the lane parks as `unavailable` naming the install line — never a crash, never a retry loop');
+    ok(verdictOf(st2.some((s) => s.state === 'unavailable' && /not installed/.test(s.why) && s.code === 'sdk-not-installed')), 'without the SDK the lane parks as `unavailable` naming the install line — never a crash, never a retry loop');
     h2.stop();
   }
   const st3 = [];
   const h3 = createLarkLive({ adapterId: 'lark', sdk, now, log: quiet, credential: () => ({ values: null, why: 'no app credential' }), toRecord: async () => null }).start({ onState: (s) => st3.push(s), onEvent: async () => ({}) });
   await waitFor(() => st3.some((s) => s.state === 'unavailable'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
-  ok(st3.some((s) => s.state === 'unavailable' && s.code === 'needs-credentials'), 'without an app credential the lane parks as `unavailable` (needs-credentials)');
+  ok(verdictOf(st3.some((s) => s.state === 'unavailable' && s.code === 'needs-credentials')), 'without an app credential the lane parks as `unavailable` (needs-credentials)');
   h3.stop();
 }
 
@@ -442,10 +442,10 @@ console.log('⑦ the Gmail push lane');
   const kicks = [], gs = [];
   const gh = mk().start({ onState: (s) => gs.push(s), onEvent: async (ev) => { kicks.push(ev); await sleep(30); return { ok: true, kicked: true }; } });
   const acked = await waitFor(() => calls.find((c) => /:acknowledge$/.test(c.url)));
-  ok(calls[0] && calls[0].url === 'gmail/watch' && calls[0].body.topicName === 'projects/p/topics/t', 'users.watch is armed FIRST, with the topic');
+  ok(gateOf(calls[0]) && calls[0].url === 'gmail/watch' && calls[0].body.topicName === 'projects/p/topics/t', 'users.watch is armed FIRST, with the topic');
   ok(kicks.length === 1 && kicks[0].kind === 'kick' && kicks[0].historyId === '123' && kicks[0].eventId === 'm-1' && !kicks[0].record, 'a pulled note is a CURSOR KICK carrying the historyId — never mail');
   ok(!!acked && acked.body.ackIds[0] === 'ack-1', 'the ack is sent after the engine answered');
-  ok(gs.some((s) => s.state === 'live' && s.heard), 'a pull that answered is positive evidence');
+  ok(verdictOf(gs.some((s) => s.state === 'live' && s.heard)), 'a pull that answered is positive evidence');
   gh.stop();
   await sleep(20);
   const pullsAtStop = pulls;
@@ -454,12 +454,12 @@ console.log('⑦ the Gmail push lane');
   const st2 = [];
   const h2 = mk({ tokenScopes: () => ['https://www.googleapis.com/auth/gmail.readonly'] }).start({ onState: (s) => st2.push(s), onEvent: async () => ({}) });
   await waitFor(() => st2.some((s) => s.state === 'unavailable'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
-  ok(st2.some((s) => s.state === 'unavailable' && s.code === 'scope-missing'), 'a token without the pubsub scope is a NAMED refusal (re-authorize with push enabled)');
+  ok(verdictOf(st2.some((s) => s.state === 'unavailable' && s.code === 'scope-missing')), 'a token without the pubsub scope is a NAMED refusal (re-authorize with push enabled)');
   h2.stop();
   const st3 = [];
   const h3 = mk({ options: () => ({ topic: '', subscription: '' }) }).start({ onState: (s) => st3.push(s), onEvent: async () => ({}) });
   await waitFor(() => st3.some((s) => s.state === 'unavailable'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
-  ok(st3.some((s) => s.state === 'unavailable' && s.code === 'push-not-configured'), 'missing topic/subscription options are a NAMED refusal');
+  ok(verdictOf(st3.some((s) => s.state === 'unavailable' && s.code === 'push-not-configured')), 'missing topic/subscription options are a NAMED refusal');
   h3.stop();
   // the default-off switch, through the ONE resolver
   const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
@@ -478,7 +478,7 @@ console.log('⑦ the Gmail push lane');
     const api403 = async (pathq) => { c403.push({ url: 'gmail' + pathq }); return { historyId: '1', expiration: '0' }; };
     const h = mk({ fetch: f403, api: api403, reconnectMinMs: 20, reconnectMaxMs: 40 }).start({ onState: (s) => st.push(s), onEvent: async () => ({}) });
     const parked = await waitFor(() => st.find((s) => s.state === 'unavailable'));
-    ok(parked && parked.code === 'pubsub-forbidden' && /403/.test(parked.why), `a 403 pull parks the lane as \`unavailable\` naming the code (${parked && parked.code}: ${parked && parked.why})`);
+    ok(gateOf(parked) && parked.code === 'pubsub-forbidden' && verdictOf(/403/.test(parked.why)), `a 403 pull parks the lane as \`unavailable\` naming the code (${parked && parked.code}: ${parked && parked.why})`);
     await sleep(150);                                              // several reconnect windows
     ok(c403.filter((c) => c.url === 'gmail/watch').length === 1 && pulls403 === 1 && !st.some((s) => s.state === 'reconnecting') && h.state() === 'unavailable', `parked stays parked: users.watch ${c403.filter((c) => c.url === 'gmail/watch').length}×, pull ${pulls403}×, no reconnecting`);
     h.stop();
@@ -490,7 +490,7 @@ console.log('⑦ the Gmail push lane');
     const h = mk({ fetch: f503 }).start({ onState: (s) => st.push(s), onEvent: async () => ({}) });
     await waitFor(() => pulls503 >= 1);
     await sleep(40);
-    ok(pulls503 >= 1 && st.some((s) => s.state === 'live') && !st.some((s) => s.state === 'unavailable' || s.state === 'reconnecting') && h.state() === 'live', 'CONTROL: a 503 pull is retried on the backoff — the lane is neither parked nor reconnected');
+    ok(pulls503 >= 1 && gateOf(st.some((s) => s.state === 'live')) && !st.some((s) => s.state === 'unavailable' || s.state === 'reconnecting') && h.state() === 'live', 'CONTROL: a 503 pull is retried on the backoff — the lane is neither parked nor reconnected');
     h.stop();
   }
   // THE WATCH RENEWAL: a refused renewal parks at once (the watch WILL lapse
@@ -503,13 +503,13 @@ console.log('⑦ the Gmail push lane');
     const parked = await waitFor(() => st.find((s) => s.state === 'unavailable'));
     const watchesAtPark = watches;
     await sleep(60);
-    ok(parked && parked.code === 'watch-renew-failed' && /refused/.test(parked.why) && watchesAtPark === 2 && watches === 2, `a REFUSED renewal parks the lane at once and the renewal timer stops with it (${watches} watch calls)`);
+    ok(gateOf(parked) && parked.code === 'watch-renew-failed' && gateOf(/refused/.test(parked.why)) && watchesAtPark === 2 && watches === 2, `a REFUSED renewal parks the lane at once and the renewal timer stops with it (${watches} watch calls)`);
     h.stop();
     let watches2 = 0; const st2 = [];
     const apiFlaky = async () => { watches2++; if (watches2 === 1) return { historyId: '1', expiration: '0' }; const e = new Error('503'); e.retryable = true; throw e; };
     const h2 = mk({ api: apiFlaky, watchRenewMs: 15 }).start({ onState: (s) => st2.push(s), onEvent: async () => ({}) });
     const parked2 = await waitFor(() => st2.find((s) => s.state === 'unavailable'));
-    ok(parked2 && parked2.code === 'watch-renew-failed' && /failed 3× in a row/.test(parked2.why) && watches2 - 1 === WATCH_RENEW_MAX_FAILS, `a transient renewal failure parks after ${WATCH_RENEW_MAX_FAILS} consecutive misses (${watches2 - 1})`);
+    ok(gateOf(parked2) && parked2.code === 'watch-renew-failed' && gateOf(/failed 3× in a row/.test(parked2.why)) && watches2 - 1 === WATCH_RENEW_MAX_FAILS, `a transient renewal failure parks after ${WATCH_RENEW_MAX_FAILS} consecutive misses (${watches2 - 1})`);
     h2.stop();
   }
 }
@@ -517,4 +517,4 @@ console.log('⑦ the Gmail push lane');
 eng.stop();
 wss.close();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

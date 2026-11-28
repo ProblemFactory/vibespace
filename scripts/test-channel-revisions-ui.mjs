@@ -30,7 +30,7 @@ const wt = path.join(ROOT, 'wt'), chromeDir = path.join(ROOT, 'chrome'), fakeHom
 for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 fs.writeFileSync(REVS, JSON.stringify({ revisions: {} }));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 
@@ -56,12 +56,12 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 const waitServer = async () => { for (let i = 0; i < 240; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-ok(await waitServer(), 'the worktree server booted (the fake accounts; fake-poll answers a stored message by id)');
+ok(verdictOf(await waitServer()), 'the worktree server booted (the fake accounts; fake-poll answers a stored message by id)');
 const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch {} return { status: r.status, json: j }; };
 const C = 'fake-poll-ops';
 let recs = [];
 for (let i = 0; i < 160; i++) { const r = await api('GET', `/api/channels/fake-poll/${C}/messages?limit=50`); recs = (r.json.records || r.json || []); if (r.status === 200 && Array.isArray(recs) && recs.length >= 5) break; await sleep(250); }
-ok(Array.isArray(recs) && recs.length >= 5, `the ops room was ingested (${recs.length} records)`);
+ok(gateOf(Array.isArray(recs)) && recs.length >= 5, `the ops room was ingested (${recs.length} records)`);
 
 const WebSocket = require('ws');
 // A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): newPage() opens each page with /json/new, which Chrome puts in FRONT
@@ -122,9 +122,9 @@ const STATE = (tag) => `(() => {
     rows: w.content.querySelectorAll('.chanmsg[data-vid=${J(String(gone.vendorId))}]').length };
 })()`;
 const p1 = await newPage({ lang: 'zh' }), p2 = await newPage({ lang: 'zh' });
-ok(p1.ready && p2.ready, 'two desk tabs (1100) loaded the app');
+ok(gateOf(p1.ready) && verdictOf(p2.ready), 'two desk tabs (1100) loaded the app');
 const o1 = await p1.evaljs(OPEN('a')), o2 = await p2.evaljs(OPEN('b'));
-ok(o1.found && o2.found && !o1.recalled && !o1.versions && !o2.recalled, 'both rows are drawn plain in both tabs (nothing learned yet)', J([o1, o2]));
+ok(gateOf(o1.found) && gateOf(o2.found) && !o1.recalled && !o1.versions && !o2.recalled, 'both rows are drawn plain in both tabs (nothing learned yet)', J([o1, o2]));
 console.log('(r) a stored message recalled — the recheck by id');
 const EDITED = 'the second words — edited after it was stored';
 fs.writeFileSync(REVS, JSON.stringify({ revisions: { [gone.vendorId]: { state: 'recalled' }, [edit.vendorId]: { state: 'edited', editedAt: Date.now() - 1000, text: EDITED } } }));
@@ -134,35 +134,35 @@ let s1 = null, s2 = null;
 for (let i = 0; i < 240; i++) { s1 = await p1.evaljs(STATE('a')); s2 = await p2.evaljs(STATE('b')); if (s1.recalled && s2.recalled && s1.tog && s2.tog) break; if (i % 24 === 23) await api('POST', `/api/channels/fake-poll/${encodeURIComponent(C)}/refresh`, {}); await sleep(250); }
 const who = (gone.author.display || gone.author.name || gone.author.id);
 if (!s1.recalled) { try { console.log(fs.readFileSync(path.join(ROOT, 'server.log'), 'utf8').split('\n').filter((l) => /recheck|revision/i.test(l)).slice(-12).join('\n')); } catch {} }
-ok(press.status === 200 && s1.recalled && s2.recalled && s1.noReload && s2.noReload && s1.rows === 1, `the OWNER's Refresh rechecks by id: the row folds IN PLACE in BOTH tabs (no reload, one row)`, J({ press: press.status, s1, s2 }));
-ok(s1.line.includes(`${who} 撤回了一条消息`) && s1.line.includes('展开') && s1.keptHidden === true, `the folded line: "${s1.line}" (▸ 展开, the content hidden)`);
-ok(await shot(p1, 'recalled.png'), 'recalled.png (desk 1100, folded)');
+ok(press.status === 200 && gateOf(s1.recalled) && gateOf(s2.recalled) && gateOf(s1.noReload) && gateOf(s2.noReload) && s1.rows === 1, `the OWNER's Refresh rechecks by id: the row folds IN PLACE in BOTH tabs (no reload, one row)`, J({ press: press.status, s1, s2 }));
+ok(gateOf(s1.line.includes(`${who} 撤回了一条消息`)) && gateOf(s1.line.includes('展开')) && s1.keptHidden === true, `the folded line: "${s1.line}" (▸ 展开, the content hidden)`);
+ok(verdictOf(await shot(p1, 'recalled.png')), 'recalled.png (desk 1100, folded)');
 const ex = await p1.evaljs(`(() => { const a = window.__w.a.content.querySelector('.chanmsg[data-vid=${J(String(gone.vendorId))}] .chanmsg-recall-tog'); a.click(); return true; })()`);
 const s3 = await p1.evaljs(STATE('a'));
-ok(ex && s3.keptHidden === false && s3.kept.includes(String(gone.text).trim().split('\n')[0].slice(0, 20)) && s3.kept.includes('撤回于') && s3.line.includes('折叠'), '▸ 展开 shows the KEPT content (never erased) under "撤回于 …"; the toggle says 折叠', J(s3));
+ok(gateOf(ex) && s3.keptHidden === false && gateOf(s3.kept.includes(String(gone.text).trim().split('\n')[0].slice(0, 20))) && gateOf(s3.kept.includes('撤回于')) && verdictOf(s3.line.includes('折叠')), '▸ 展开 shows the KEPT content (never erased) under "撤回于 …"; the toggle says 折叠', J(s3));
 const lst = await api('GET', '/api/channels');
 const convRow = JSON.stringify(lst.json).includes('"lastRecalled":true');
 const pre = await p1.evaljs(`(async () => { const b = document.querySelector('[data-rail="channels"], [data-tab="channels"]'); if (b) b.click(); for (let i = 0; i < 60; i++) { const r = document.querySelector('.chan-row[data-conv="fake-poll/${C}"] .chan-row-last'); if (r) return r.textContent; await new Promise((x) => setTimeout(x, 100)); } return null; })()`);
-ok(gone === newest && convRow && typeof pre === 'string' && pre.includes('撤回了一条消息'), `the conversation list's preview says 撤回 when the newest message is recalled ("${pre}")`, J({ convRow, newest: newest && newest.vendorId }));
+ok(gone === newest && gateOf(convRow) && typeof pre === 'string' && verdictOf(pre.includes('撤回了一条消息')), `the conversation list's preview says 撤回 when the newest message is recalled ("${pre}")`, J({ convRow, newest: newest && newest.vendorId }));
 console.log('(e) a stored message edited — its versions');
 if (!s1.tog) { const g = await api('GET', `/api/channels/fake-poll/${encodeURIComponent(C)}/messages?limit=50`); console.log('API edit row:', J((g.json.records || []).find((r) => r.vendorId === edit.vendorId)).slice(0, 600)); console.log('page errors:', J(await p1.evaljs('window.__errs || []'))); } if (!s1.tog) { try { console.log(fs.readFileSync(path.join(ROOT, 'server.log'), 'utf8').split('\n').filter((l) => /recheck|revis|refused|side record/i.test(l)).slice(-12).join('\n')); } catch {} }
-ok(s1.body.includes(EDITED) && s2.body.includes(EDITED) && /已编辑 · .*查看 2 个版本/.test(s1.tog) && s1.listHidden === true, `the row shows the NEWEST body in both tabs and "${s1.tog}" (the list closed)`, J({ body: s1.body, tog: s1.tog }));
+ok(gateOf(s1.body.includes(EDITED)) && gateOf(s2.body.includes(EDITED)) && gateOf(/已编辑 · .*查看 2 个版本/.test(s1.tog)) && s1.listHidden === true, `the row shows the NEWEST body in both tabs and "${s1.tog}" (the list closed)`, J({ body: s1.body, tog: s1.tog }));
 await p1.evaljs(`(() => { window.__w.a.content.querySelector('.chanmsg[data-vid=${J(String(edit.vendorId))}] .chanmsg-versions-tog').click(); return true; })()`);
 const s4 = await p1.evaljs(STATE('a'));
-ok(s4.listHidden === false && s4.items.length === 2 && s4.items[0].includes('原始版本') && s4.items[0].includes(String(edit.text).trim().split('\n')[0].slice(0, 20)) && s4.items[1].includes(EDITED) && s4.tog.includes('收起版本'), 'the expander lists 2 versions with their times — the original first, the edit last', J(s4.items));
-ok(await shot(p1, 'edit-history.png'), 'edit-history.png (desk 1100, the versions open)');
+ok(s4.listHidden === false && s4.items.length === 2 && gateOf(s4.items[0].includes('原始版本')) && gateOf(s4.items[0].includes(String(edit.text).trim().split('\n')[0].slice(0, 20))) && gateOf(s4.items[1].includes(EDITED)) && verdictOf(s4.tog.includes('收起版本')), 'the expander lists 2 versions with their times — the original first, the edit last', J(s4.items));
+ok(verdictOf(await shot(p1, 'edit-history.png')), 'edit-history.png (desk 1100, the versions open)');
 console.log('(p) phone 390');
 const p3 = await newPage({ lang: 'zh', width: 390, height: 844, mobile: true });
 const o3 = p3.ready ? await p3.evaljs(OPEN('c')) : {};
 const s5 = o3.found ? await p3.evaljs(STATE('c')) : {};
-ok(p3.ready && o3.found && s5.recalled && s5.line.includes('撤回了一条消息') && /查看 2 个版本/.test(s5.tog), 'phone 390: the folded recall and the versions expander, same words', J(s5));
+ok(gateOf(p3.ready) && gateOf(o3.found) && gateOf(s5.recalled) && gateOf(s5.line.includes('撤回了一条消息')) && verdictOf(/查看 2 个版本/.test(s5.tog)), 'phone 390: the folded recall and the versions expander, same words', J(s5));
 await p3.evaljs(`(() => { const c = window.__w.c.content; c.querySelector('.chanmsg[data-vid=${J(String(gone.vendorId))}] .chanmsg-recall-tog').click(); c.querySelector('.chanmsg[data-vid=${J(String(edit.vendorId))}] .chanmsg-versions-tog').click(); c.querySelector('.chanmsg[data-vid=${J(String(gone.vendorId))}]').scrollIntoView({ block: 'start' }); return true; })()`);
 await sleep(300);
-ok(await shot(p3, 'phone.png'), 'phone.png (390, both open)');
+ok(verdictOf(await shot(p3, 'phone.png')), 'phone.png (390, both open)');
 // the recheck is done for a recalled message: a second Refresh asks nothing more of it, and the record still holds its words
 const again = await api('GET', `/api/channels/fake-poll/${encodeURIComponent(C)}/messages?limit=50`);
 const kept = (again.json.records || []).find((r) => r.vendorId === gone.vendorId);
-ok(kept && kept.recalledAt > 0 && kept.text === gone.text, 'the stored copy keeps its words after the recall (recalledAt set, text unchanged)', J(kept && { recalledAt: kept.recalledAt, text: kept.text }));
+ok(gateOf(kept) && kept.recalledAt > 0 && kept.text === gone.text, 'the stored copy keeps its words after the recall (recalledAt set, text unchanged)', J(kept && { recalledAt: kept.recalledAt, text: kept.text }));
 for (const p of [p1, p2, p3]) p.close();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

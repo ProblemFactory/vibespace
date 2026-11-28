@@ -16,7 +16,7 @@ const waitUntil = async (pred, ms, what) => { for (let k = 0, n = Math.ceil(ms /
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 600)); } };
+const ok = (c, name, info) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 600)); } };
 const H = 3600 * 1000, T0 = Date.UTC(2026, 9, 4, 12);
 const base = (o = {}) => ({ id: 'api-aaaaaaaaaaaa', status: 'pending', cred: 'lark-1', credLabel: 'Lark · ops', at: T0, conv: 'agent-1', principal: { kind: 'agent', id: 'agent-1', name: 'Builder' }, method: 'POST', host: 'open.feishu.cn', path: '/open-apis/im/v1/messages', query: [['receive_id_type', 'chat_id']], digest: 'd'.repeat(64), sensitive: null, offersAlways: true, body: '{"x":1}', bodyBytes: 7, bodySha: 'e'.repeat(64), headers: { 'Content-Type': 'application/json' }, tier: 'write-ask', shape: 'POST open.feishu.cn/open-apis/im/v1/messages', ...o });
 
@@ -46,7 +46,7 @@ const WORDS = { pending: 'a pending card: Approve-able, says when it expires', f
 console.log('① PURE card model (src/channel-api-card.js)');
 const C = require(path.join(ROOT, 'src/channel-api-card.js'));
 const R = pureRows(C);
-for (const k of Object.keys(WORDS)) ok(R[k], WORDS[k]);
+for (const k of Object.keys(WORDS)) ok(verdictOf(R[k]), WORDS[k]);
 
 // ── ORCH over fakes ──
 function harness(cardsPath = path.join(ROOT, 'src/server/channel-api-cards.js'), opts = {}) {
@@ -115,7 +115,7 @@ async function orchRows(h) {
 const OWORDS = { markStaysOnFailedWrite: 'r3988 (A): a lift whose write FAILED clears nothing — the API receipt keeps «not on disk» (its entry in memory only)', takenMarked: 'r3919: an API receipt TAKEN while the list of waiting messages is unread carries «not on disk» on its record (how stashed)', markLeavesAtLift: 'r3919 / r3988 (A): when a write LANDS holding it (the stash\'s own word) — the mark leaves', objectNamed: 'a call\'s chat is NAMED from the channel store (+ the conversation it opens); an unknown one keeps its 8-char id chip', oneItem: 'a pending proposal files ONE For-you item (key/origin channels), never twice', record: 'the record carries the frozen headers, the body sha256, the tier, the shape', decisionResolves: 'a decision answers the For-you item WITH the outcome (one record, three surfaces)', receipt: 'the agent is told on its next turn — no wake, spendReason channel-receipt', receiptOnce: 'the receipt is handed once', expired: '24 h unanswered ⇒ expired: nothing ran, item answered, the receipt stashed when the ladder refuses', withdrawnTier: 'the tier withdrawn ⇒ withdrawn by name, the agent told', withdrawnAccount: 'the account removed ⇒ withdrawn "the account was removed"', persisted: 'the item / receipt bookkeeping survives a restart (api-cards.json)' };
 console.log('② ORCH over fakes (src/server/channel-api-cards.js)');
 const O = await orchRows(harness());
-for (const k of Object.keys(OWORDS)) ok(O[k], OWORDS[k], O);
+for (const k of Object.keys(OWORDS)) ok(verdictOf(O[k]), OWORDS[k], O);
 
 // ── ④ lane inline-receipts-compose-api: the CLI that waits on a proposal reads its outcome INLINE ──
 const MIN = 60 * 1000;
@@ -163,7 +163,7 @@ const IWORDS = {
 };
 console.log('④ lane inline-receipts-compose-api: a proposal its CLI waits on is read inline — no second receipt message');
 const IR = await inlineRows(harness());
-for (const k of Object.keys(IWORDS)) ok(IR[k], IWORDS[k], IR);
+for (const k of Object.keys(IWORDS)) ok(verdictOf(IR[k]), IWORDS[k], IR);
 {
   // the fallback's own timer (a real clock, a 60 ms window): nobody syncs — the receipt still goes once the window ends
   const h = harness(undefined, { collectWindowMs: 60 });
@@ -172,7 +172,7 @@ for (const k of Object.keys(IWORDS)) ok(IR[k], IWORDS[k], IR);
   const held = h.delivered.length === 0;
   h.setClock(Date.now() + 100); await waitUntil(() => h.delivered.length >= 1, 5000, 'the fallback timer\'s receipt');   // (B-1217 member 17, unit 2) the verdict waits for the receipt, never a 300 ms hope
   await new Promise((z) => setTimeout(z, 300));   // …then the old 300 ms as an ABSENCE window: a second receipt (nothing to wait for) would still be seen — nothing loosened
-  ok(held && h.delivered.length === 1 && /api-t1/.test(h.delivered[0].text), 'the fallback is its OWN one-shot timer — a held receipt whose CLI never reads it goes as a message after the window, with no other sync', JSON.stringify(h.delivered.map((d) => d.text.slice(0, 40))));
+  ok(gateOfGuard(held) && h.delivered.length === 1 && verdictOf(/api-t1/.test(h.delivered[0].text)), 'the fallback is its OWN one-shot timer — a held receipt whose CLI never reads it goes as a message after the window, with no other sync', JSON.stringify(h.delivered.map((d) => d.text.slice(0, 40))));
   h.cards.stop();
 }
 
@@ -257,9 +257,9 @@ await om("todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.item
   ok(e2.length === 0, 'r3059 (2) THE API CARDS\' SWEEP with the grants unread: the pending proposal stays pending — nothing withdrawn', e2);
   const NoWallCards = MUTG.load('src/server/channel-api-cards.js', anchored(CARDS_SRC, CWALL, '      // (r3059 red: no wall)', 'the api cards\' sweep without its grants wall'), 'cards-no-wall');
   const e2r = await sweep(NoWallCards, true);
-  ok(e2r.length === 1 && /withdrawn/.test(e2r[0].reason || ''), 'r3059 (2) RED without the wall (today): the unread grants read «API access … was withdrawn» — the proposal is ended', e2r);
+  ok(e2r.length === 1 && verdictOf(/withdrawn/.test(e2r[0].reason || '')), 'r3059 (2) RED without the wall (today): the unread grants read «API access … was withdrawn» — the proposal is ended', e2r);
   const WIRING = fs.readFileSync(path.join(ROOT, 'src/server/channels-wiring.js'), 'utf8'), ENG_SRC = fs.readFileSync(path.join(ROOT, 'src/server/channels-engine.js'), 'utf8');
-  ok(WIRING.includes("grantsUnread: () => (typeof channels.grantsUnread === 'function' ? channels.grantsUnread() : false)") && ENG_SRC.includes('    grantsUnread: () => CG.unread(),'),
+  ok(gateOfGuard(WIRING.includes("grantsUnread: () => (typeof channels.grantsUnread === 'function' ? channels.grantsUnread() : false)")) && verdictOf(ENG_SRC.includes('    grantsUnread: () => CG.unread(),')),
     'r3059 PIN: the hub wires the sweep to the engine\'s grants reader (channels-wiring → channels.grantsUnread → CG.unread)');
 }
 
@@ -284,7 +284,7 @@ console.log('⑥ B-574d the cards\' state through the store writer');
     return { loop: loop.join(' '), handed, again: w.calls.length - handed, name: last.name, makeDir: last.makeDir, holds: !!last.bytes && JSON.parse(last.bytes).items['api-w1'] !== undefined, file: last.file === path.join(h.dir, 'channels', 'api-cards.json') };
   };
   const g = await cardsOf(undefined);
-  ok(g.loop === '' && g.handed >= 1 && g.name === 'channel-api-cards.write' && g.makeDir && g.holds && g.file, '⑥ a sweep\'s save HANDS the cards\' file to the store writer under its row (channel-api-cards.write) — the bytes made at the write hold the new proposal\'s item; nothing is written on the hub\'s loop', g);
+  ok(g.loop === '' && g.handed >= 1 && g.name === 'channel-api-cards.write' && gateOfGuard(g.makeDir) && gateOfGuard(g.holds) && verdictOf(g.file), '⑥ a sweep\'s save HANDS the cards\' file to the store writer under its row (channel-api-cards.write) — the bytes made at the write hold the new proposal\'s item; nothing is written on the hub\'s loop', g);
   ok(g.again === 0, '⑥ …a sweep that changed nothing hands nothing (no write when nothing changed)', g);
   let threw = null; const hr = harness(undefined, { writer: recWriter({ refuse: true }) });
   try { hr.add({ id: 'api-w2', at: T0 }); await hr.cards.sync(); } catch (e) { threw = e.message; }
@@ -306,11 +306,11 @@ console.log('⑥ B-574d the cards\' state through the store writer');
     return { rec: !!rec, headers: rec ? rec.headers : null };
   };
   const ow = await owedOf(undefined);
-  ok(ow.rec && !!ow.headers && ow.headers['Content-Type'] === 'application/json', '⑥ the cards\' second reader of the proposals\' file takes the WRITER\'s owed bytes first: a card whose frozen request is not on disk yet still shows its headers', ow);
+  ok(gateOfGuard(ow.rec) && !!ow.headers && ow.headers['Content-Type'] === 'application/json', '⑥ the cards\' second reader of the proposals\' file takes the WRITER\'s owed bytes first: a card whose frozen request is not on disk yet still shows its headers', ow);
   const owr = await owedOf(mutant6("  const frozenOf = () => { try { const w = SW(), owed = w && typeof w.owed === 'function' ? w.owed(frozenFile) : null; return JSON.parse(owed != null ? owed : fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };", "  const frozenOf = () => { try { return JSON.parse(fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };"));   // stale-pins: kept (the release's reader — this red control's own text)
-  ok(owr.rec && (!owr.headers || owr.headers['Content-Type'] !== 'application/json'), 'RED ⑥ the release\'s reader (the file alone): the card is there, and its frozen request — owed — shows no headers', owr);
-  ok(/write/.test(r.loop) && /rename/.test(r.loop) && r.handed === 0, 'RED ⑥ the release\'s save: the cards\' file written and renamed ON the hub\'s loop at every sweep that changed it, nothing handed to the writer', r);
+  ok(gateOfGuard(owr.rec) && (!owr.headers || owr.headers['Content-Type'] !== 'application/json'), 'RED ⑥ the release\'s reader (the file alone): the card is there, and its frozen request — owed — shows no headers', owr);
+  ok(gateOfGuard(/write/.test(r.loop)) && gateOfGuard(/rename/.test(r.loop)) && r.handed === 0, 'RED ⑥ the release\'s save: the cards\' file written and renamed ON the hub\'s loop at every sweep that changed it, nothing handed to the writer', r);
 }
 
 console.log(fail ? `FAILED: ${fail} of ${pass + fail}` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf as gateOfGuard } from './lib/check.mjs';

@@ -90,7 +90,7 @@ os.homedir = () => fakeHome;
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rd = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
-const ok = (cond, name, detail = '') => {
+const ok = (cond, name, detail = '') => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ok  ${name}`); }
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ''}`); }
 };
@@ -119,10 +119,10 @@ console.log('① forkGroupPlan');
 console.log('② pendingBindVerdict / merge / sweep');
 {
   const e = mergePendingBind(undefined, ['T-alice', 'T-bob'], PARENT);
-  ok(e && e.notId === PARENT && e.taskIds.length === 2, 'a fork entry carries its source id', JSON.stringify(e));
+  ok(gateOf(e) && e.notId === PARENT && e.taskIds.length === 2, 'a fork entry carries its source id', JSON.stringify(e));
   const w = pendingBindVerdict(e, { id: 'w1', backend: 'claude', backendSessionId: PARENT });
-  ok(w.wait && w.why === 'fork-source-id', 'the live row still carries the PARENT id ⇒ wait (binding now would tag the parent and consume the entry)', JSON.stringify(w));
-  ok(pendingBindVerdict(e, undefined).wait && pendingBindVerdict(e, { id: 'w1' }).wait, 'not listed / no id yet ⇒ wait');
+  ok(gateOf(w.wait) && w.why === 'fork-source-id', 'the live row still carries the PARENT id ⇒ wait (binding now would tag the parent and consume the entry)', JSON.stringify(w));
+  ok(gateOf(pendingBindVerdict(e, undefined).wait) && verdictOf(pendingBindVerdict(e, { id: 'w1' }).wait), 'not listed / no id yet ⇒ wait');
   const b = pendingBindVerdict(e, { id: 'w1', backend: 'claude', backendSessionId: FORK });
   ok(!b.wait && b.sessionKey === `claude:${FORK}` && b.taskIds.join() === 'T-alice,T-bob', 'the fork\'s own id appears ⇒ bind EVERY group to the fork\'s key', JSON.stringify(b));
   const cx = pendingBindVerdict(mergePendingBind(null, ['T-a'], PARENT), { id: 'w2', backend: 'codex', backendSessionId: FORK });
@@ -238,12 +238,12 @@ const tasksSrc = rd('src/lib/sidebar-tasks.js');
 {
   const r = await forkLegs(lifeSrc, tasksSrc, FG, 'real');
   const j = forkJudged(r);
-  ok(j.card, 'card Fork… ⇒ createSession({fork:true, taskId: first group, extraTaskBinds: [the rest]})', JSON.stringify(r.card && { taskId: r.card.taskId, extra: r.card.extraTaskBinds }));
-  ok(j.terminal, 'terminal-mode fork (forkSession\'s non-chat branch calls the same method) ⇒ the same plan');
-  ok(j.atMessage, 'fork-at-message (the chat view\'s hand-built handle, no webuiId) ⇒ the same plan');
-  ok(j.none, 'a source in no group ⇒ no taskId, nothing extra');
-  ok(j.wait, 'while the fork\'s live row still carries the PARENT id nothing is bound (the entry is kept)', JSON.stringify(r.beforeAdopt));
-  ok(j.bind, 'the fork\'s own id appears ⇒ bound to BOTH groups under the fork\'s key, entry consumed', JSON.stringify(r.afterAdopt));
+  ok(verdictOf(j.card), 'card Fork… ⇒ createSession({fork:true, taskId: first group, extraTaskBinds: [the rest]})', JSON.stringify(r.card && { taskId: r.card.taskId, extra: r.card.extraTaskBinds }));
+  ok(verdictOf(j.terminal), 'terminal-mode fork (forkSession\'s non-chat branch calls the same method) ⇒ the same plan');
+  ok(verdictOf(j.atMessage), 'fork-at-message (the chat view\'s hand-built handle, no webuiId) ⇒ the same plan');
+  ok(verdictOf(j.none), 'a source in no group ⇒ no taskId, nothing extra');
+  ok(verdictOf(j.wait), 'while the fork\'s live row still carries the PARENT id nothing is bound (the entry is kept)', JSON.stringify(r.beforeAdopt));
+  ok(verdictOf(j.bind), 'the fork\'s own id appears ⇒ bound to BOTH groups under the fork\'s key, entry consumed', JSON.stringify(r.afterAdopt));
 }
 
 // (④ the wiring + the census over src/lib — MOVED to the fast scripts/test-fork-groups-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -759,12 +759,12 @@ console.log('⑥ END TO END — the terminal-mode fork learns its own id and lan
 {
   const r = await terminalForkChain(LC);
   const j = chainJudged(r);
-  ok(j.plan, 'terminal card Fork… ⇒ the plan rides the create (first group taskId, the other pending)', JSON.stringify(r.msg));
-  ok(j.waited, 'while the fork\'s row carries the PARENT id (seeded), nothing is bound', JSON.stringify(r.boundBeforeCapture));
-  ok(j.captured, 'the lock capture runs for a pending TERMINAL fork, adopts the lock its OWN wrapper\'s CLI wrote, records forkedFrom, disarms', JSON.stringify({ wanted: r.wanted, forkId: r.forkId, forkedFrom: r.forkedFrom, still: r.stillWanted }));
-  ok(j.parentKept, 'the parent (its own id) is not re-captured and keeps its id');
-  ok(j.bound, 'the queue binds BOTH groups under the fork\'s OWN key and empties', JSON.stringify(r.bound));
-  ok(j.groups, 'groupsForSession(claude:<fork own id>) with NO spawn group names both groups — the persisted membership the owner asked for', JSON.stringify(r.forkGroups));
+  ok(verdictOf(j.plan), 'terminal card Fork… ⇒ the plan rides the create (first group taskId, the other pending)', JSON.stringify(r.msg));
+  ok(verdictOf(j.waited), 'while the fork\'s row carries the PARENT id (seeded), nothing is bound', JSON.stringify(r.boundBeforeCapture));
+  ok(verdictOf(j.captured), 'the lock capture runs for a pending TERMINAL fork, adopts the lock its OWN wrapper\'s CLI wrote, records forkedFrom, disarms', JSON.stringify({ wanted: r.wanted, forkId: r.forkId, forkedFrom: r.forkedFrom, still: r.stillWanted }));
+  ok(verdictOf(j.parentKept), 'the parent (its own id) is not re-captured and keeps its id');
+  ok(verdictOf(j.bound), 'the queue binds BOTH groups under the fork\'s OWN key and empties', JSON.stringify(r.bound));
+  ok(verdictOf(j.groups), 'groupsForSession(claude:<fork own id>) with NO spawn group names both groups — the persisted membership the owner asked for', JSON.stringify(r.forkGroups));
   ok(JSON.stringify([...r.agentView].sort()) === JSON.stringify([...r.ids].sort()), 'the agent\'s task context (groupsForSession with the session\'s _initialGroupId) names both groups');
   const chat = { mode: 'chat', backend: 'claude', claudeSessionId: PARENT, _forkRequested: true };
   ok(LC.lockCaptureWanted(chat) === true, 'a pending CHAT fork is captured too (round 3: an init that landed while the server was down is never replayed to the parser; the first adopter ends the chain)');
@@ -787,48 +787,48 @@ console.log('⑥ THE PID WITNESS — two sessions created together, stray locks,
     }
   }
   const st = strayPicks(LC), sj = strayJudged(st);
-  ok(sj.external, 'an external same-cwd lock started 3 s BEFORE the session and one started after it, neither the wrapper\'s descendant ⇒ nothing (the chain waits)', JSON.stringify(st.external));
-  ok(sj.stale, 'a lock file under OUR pid but started before the session (a dead CLI\'s file whose pid name was re-used) ⇒ nothing', JSON.stringify(st.stale));
-  ok(sj.seedLock, 'our own CLI\'s lock while it still names the fork\'s SEED ⇒ nothing (the parent\'s id is never the fork\'s)', JSON.stringify(st.seedLock));
-  ok(sj.ownLate, 'the own lock landing 19 s later beside an external pre-creation one ⇒ the own', JSON.stringify(st.ownLate));
-  ok(sj.nested, 'a claude the CLI itself runs (a deeper descendant with its own lock) never wins over the CLI\'s own lock, in either order', JSON.stringify(st.nested));
-  ok(sj.tie, 'two locks at the same depth ⇒ refused (null), never a coin toss', JSON.stringify(st.tie));
-  ok(sj.noWitness, 'no witness function ⇒ nothing is picked by cwd or clock', JSON.stringify(st.noWitness));
-  ok(sj.pastSeed && sj.pastClaimed && sj.pastFloor, 'the NEAREST lock is judged, never skipped: the seed / a claimed id / a pre-creation file at depth 1 beside a nested claude\'s lock at depth 3 ⇒ nothing, never the nested id (round-4 finding 1)', JSON.stringify({ seed: st.pastSeed, claimed: st.pastClaimed, floor: st.pastFloor }));
-  ok(sj.pastTorn && sj.tornDeeper && sj.tornTie, 'a TORN nearest lock (unreadable placeholder) ⇒ nothing, never the nested lock below it; a torn deeper lock does not hide the CLI\'s readable one; a torn lock beside a readable one at the same depth is a tie (round-5 finding 2)', JSON.stringify({ torn: st.pastTorn, deeper: st.tornDeeper, tie: st.tornTie }));
+  ok(verdictOf(sj.external), 'an external same-cwd lock started 3 s BEFORE the session and one started after it, neither the wrapper\'s descendant ⇒ nothing (the chain waits)', JSON.stringify(st.external));
+  ok(verdictOf(sj.stale), 'a lock file under OUR pid but started before the session (a dead CLI\'s file whose pid name was re-used) ⇒ nothing', JSON.stringify(st.stale));
+  ok(verdictOf(sj.seedLock), 'our own CLI\'s lock while it still names the fork\'s SEED ⇒ nothing (the parent\'s id is never the fork\'s)', JSON.stringify(st.seedLock));
+  ok(verdictOf(sj.ownLate), 'the own lock landing 19 s later beside an external pre-creation one ⇒ the own', JSON.stringify(st.ownLate));
+  ok(verdictOf(sj.nested), 'a claude the CLI itself runs (a deeper descendant with its own lock) never wins over the CLI\'s own lock, in either order', JSON.stringify(st.nested));
+  ok(verdictOf(sj.tie), 'two locks at the same depth ⇒ refused (null), never a coin toss', JSON.stringify(st.tie));
+  ok(verdictOf(sj.noWitness), 'no witness function ⇒ nothing is picked by cwd or clock', JSON.stringify(st.noWitness));
+  ok(gateOf(sj.pastSeed) && gateOf(sj.pastClaimed) && verdictOf(sj.pastFloor), 'the NEAREST lock is judged, never skipped: the seed / a claimed id / a pre-creation file at depth 1 beside a nested claude\'s lock at depth 3 ⇒ nothing, never the nested id (round-4 finding 1)', JSON.stringify({ seed: st.pastSeed, claimed: st.pastClaimed, floor: st.pastFloor }));
+  ok(gateOf(sj.pastTorn) && gateOf(sj.tornDeeper) && verdictOf(sj.tornTie), 'a TORN nearest lock (unreadable placeholder) ⇒ nothing, never the nested lock below it; a torn deeper lock does not hide the CLI\'s readable one; a torn lock beside a readable one at the same depth is a tie (round-5 finding 2)', JSON.stringify({ torn: st.pastTorn, deeper: st.tornDeeper, tie: st.tornTie }));
   const a = driveArm(LC, 40);
   ok(a.armed === true && a.again === false, 'one chain per session (the boot sweep meeting a fresh create\'s chain arms nothing twice)', JSON.stringify({ armed: a.armed, again: a.again }));
   ok(a.adopted === FORK && a.calls === 40 && a.elapsed > 60_000, `a lock that lands at the 40th attempt (${Math.round(a.elapsed / 1000)} s — the old chain gave up after 15 attempts, ~17 s) is still adopted (round-2 finding 3)`, JSON.stringify({ adopted: a.adopted, calls: a.calls, elapsed: a.elapsed }));
   ok(a.calls2 === 3 && a.left === 0, 'a session that leaves the live list ends its chain', JSON.stringify({ calls2: a.calls2, left: a.left }));
-  ok([0, 1, 14, 15, 44, 45, 1000].every((n) => Number.isFinite(LC.captureDelay(n)) && LC.captureDelay(n) >= 1000 && LC.captureDelay(n) <= 30_000), 'the backoff is bounded (1 s … 30 s) and never ends the chain');
+  ok(verdictOf([0, 1, 14, 15, 44, 45, 1000].every((n) => Number.isFinite(LC.captureDelay(n)) && LC.captureDelay(n) >= 1000 && LC.captureDelay(n) <= 30_000)), 'the backoff is bounded (1 s … 30 s) and never ends the chain');
   const rr = await realRace(LC);
-  ok(rr.f2First && !rr.f1Before && rr.f1Early === null, 'REAL processes: the later-created fork\'s CLI (behind a shim, depth 2) writes its lock first ⇒ the earlier fork adopts nothing yet', JSON.stringify({ f2First: rr.f2First, f1Before: rr.f1Before, f1Early: rr.f1Early }));
-  ok(rr.f1Landed && rr.f1 === S1 && rr.f2 === S2, 'REAL processes: each fork adopts the lock its OWN wrapper\'s CLI wrote (the /proc ancestry, liveness included)', JSON.stringify({ f1: rr.f1, f2: rr.f2 }));
-  ok(rr.nEarly === null && rr.nLanded && rr.n === SN, 'REAL processes: a DEAD CLI\'s leftover lock and a live external same-cwd claude started 3 s earlier are never adopted; the slow session\'s own lock is (round-2 finding 2)', JSON.stringify({ nEarly: rr.nEarly, n: rr.n }));
+  ok(gateOf(rr.f2First) && !rr.f1Before && rr.f1Early === null, 'REAL processes: the later-created fork\'s CLI (behind a shim, depth 2) writes its lock first ⇒ the earlier fork adopts nothing yet', JSON.stringify({ f2First: rr.f2First, f1Before: rr.f1Before, f1Early: rr.f1Early }));
+  ok(gateOf(rr.f1Landed) && rr.f1 === S1 && rr.f2 === S2, 'REAL processes: each fork adopts the lock its OWN wrapper\'s CLI wrote (the /proc ancestry, liveness included)', JSON.stringify({ f1: rr.f1, f2: rr.f2 }));
+  ok(rr.nEarly === null && gateOf(rr.nLanded) && rr.n === SN, 'REAL processes: a DEAD CLI\'s leftover lock and a live external same-cwd claude started 3 s earlier are never adopted; the slow session\'s own lock is (round-2 finding 2)', JSON.stringify({ nEarly: rr.nEarly, n: rr.n }));
   ok(rr.noSidecar === null, 'no wrapper sidecar (no witness) ⇒ nothing (two locks here — the single-lock proof is below)');
   const rf = restoredFork(LC);
-  ok(restoredJudged(rf), 'a restored ADOPTED chat fork (meta kept forkRequested:true, own id ≠ forkSourceId) is not pending ⇒ its own id is a CLAIM; a seeded / id-less / legacy pending fork stays pending (round-2 finding 5)', JSON.stringify(rf));
+  ok(verdictOf(restoredJudged(rf)), 'a restored ADOPTED chat fork (meta kept forkRequested:true, own id ≠ forkSourceId) is not pending ⇒ its own id is a CLAIM; a seeded / id-less / legacy pending fork stays pending (round-2 finding 5)', JSON.stringify(rf));
 }
 
 console.log('⑥ ROUND 3 — the writer witness, the boot dedup, the chat consumer, the R6 re-open');
 {
   const w = await writerLegs(LC), wj = writerJudged(w);
-  ok(wj.shape, 'REAL tree wrapper → claude.js → sleep: the sleep descends at depth 2, its comm is `sleep`, the CLI has not written its lock yet (the window the finding names)', JSON.stringify({ depth: w.childDepth, comm: w.childComm, ownYet: w.ownYet }));
-  ok(wj.staleProc, 'a stale lock under the SLEEP\'s pid name, started inside the window, procStart ≠ the live pid\'s stat field 22 ⇒ nothing (round-3 finding 2: it was adopted)', JSON.stringify(w.staleProc));
-  ok(wj.restored, 'the same stale lock and a RESTORED pending fork (created days ago) ⇒ nothing, its fork flag still set', JSON.stringify({ restored: w.restored, flag: w.restoredFlag }));
-  ok(wj.staleNoProc, 'the same stale lock with NO procStart (a macOS / older-CLI shape) ⇒ nothing: the live pid is no claude by cli-identity', JSON.stringify(w.staleNoProc));
-  ok(wj.own, 'the CLI\'s own lock (its pid wrote it: procStart matches) ⇒ adopted', JSON.stringify(w.own));
-  ok(wj.chatFork, 'a restored pending CHAT fork adopts its own lock (the capture no longer refuses chat mode)', JSON.stringify(w.chatFork));
-  ok(wj.noSidecar, 'NO sidecar and exactly ONE eligible lock in the dir (live, ours, written by its pid) ⇒ nothing — the rule itself, not a tie (round-3 finding 5)', JSON.stringify({ n: w.lockCount, got: w.noSidecar }));
+  ok(verdictOf(wj.shape), 'REAL tree wrapper → claude.js → sleep: the sleep descends at depth 2, its comm is `sleep`, the CLI has not written its lock yet (the window the finding names)', JSON.stringify({ depth: w.childDepth, comm: w.childComm, ownYet: w.ownYet }));
+  ok(verdictOf(wj.staleProc), 'a stale lock under the SLEEP\'s pid name, started inside the window, procStart ≠ the live pid\'s stat field 22 ⇒ nothing (round-3 finding 2: it was adopted)', JSON.stringify(w.staleProc));
+  ok(verdictOf(wj.restored), 'the same stale lock and a RESTORED pending fork (created days ago) ⇒ nothing, its fork flag still set', JSON.stringify({ restored: w.restored, flag: w.restoredFlag }));
+  ok(verdictOf(wj.staleNoProc), 'the same stale lock with NO procStart (a macOS / older-CLI shape) ⇒ nothing: the live pid is no claude by cli-identity', JSON.stringify(w.staleNoProc));
+  ok(verdictOf(wj.own), 'the CLI\'s own lock (its pid wrote it: procStart matches) ⇒ adopted', JSON.stringify(w.own));
+  ok(verdictOf(wj.chatFork), 'a restored pending CHAT fork adopts its own lock (the capture no longer refuses chat mode)', JSON.stringify(w.chatFork));
+  ok(verdictOf(wj.noSidecar), 'NO sidecar and exactly ONE eligible lock in the dir (live, ours, written by its pid) ⇒ nothing — the rule itself, not a tie (round-3 finding 5)', JSON.stringify({ n: w.lockCount, got: w.noSidecar }));
   const nl = await nestedLegs(LC), nj = nestedJudged(nl);
-  ok(nj.shape, 'REAL tree wrapper → claude.js → sh → claude.js: the CLI\'s own lock at depth 1, the nested claude\'s at depth 3', JSON.stringify({ up: nl.up, depths: nl.depths }));
-  ok(nj.own, 'a restored record whose own id reads as a fork seed (forkRequested, no source, no adoption trace) ⇒ the capture answers NOTHING — never the nested claude\'s id (round-4 finding 1: the session was re-keyed to it)', JSON.stringify({ flag: nl.aFlag, got: nl.a }));
-  ok(nj.fork, 'a genuine pending fork beside its CLI\'s nested claude adopts the CLI\'s OWN lock', JSON.stringify(nl.f));
-  ok(nj.torn, 'the same fork with its CLI\'s lock TORN mid-rewrite: read as an unreadable placeholder, the capture answers nothing (never the nested claude\'s intact lock), and adopts its own once the rewrite lands (round-5 finding 2)', JSON.stringify({ read: nl.tornRead, torn: nl.torn, healed: nl.healed }));
+  ok(verdictOf(nj.shape), 'REAL tree wrapper → claude.js → sh → claude.js: the CLI\'s own lock at depth 1, the nested claude\'s at depth 3', JSON.stringify({ up: nl.up, depths: nl.depths }));
+  ok(verdictOf(nj.own), 'a restored record whose own id reads as a fork seed (forkRequested, no source, no adoption trace) ⇒ the capture answers NOTHING — never the nested claude\'s id (round-4 finding 1: the session was re-keyed to it)', JSON.stringify({ flag: nl.aFlag, got: nl.a }));
+  ok(verdictOf(nj.fork), 'a genuine pending fork beside its CLI\'s nested claude adopts the CLI\'s OWN lock', JSON.stringify(nl.f));
+  ok(verdictOf(nj.torn), 'the same fork with its CLI\'s lock TORN mid-rewrite: read as an unreadable placeholder, the capture answers nothing (never the nested claude\'s intact lock), and adopts its own once the rewrite lands (round-5 finding 2)', JSON.stringify({ read: nl.tornRead, torn: nl.torn, healed: nl.healed }));
   const d = dedupLeg(LC);
   ok(JSON.stringify(d) === JSON.stringify(['cw-4', 'cw-6']), 'boot dedup: a parent + its pending fork + an older server\'s never-adopted fork ⇒ NOTHING retired under the parent\'s id; two sockets that each own an id still dedup (cw-4 < cw-5, cw-6 < cw-7) (round-3 findings 1+4)', JSON.stringify(d));
   const cv = await consumerLeg(require(path.join(REPO, 'src/server/stdout/claude-stream-json.js')));
-  ok(cv.id === FORK && JSON.stringify(cv.forkedFrom) === JSON.stringify([PARENT]) && cv.flag === false && cv.persisted, 'the chat consumer: an init glued behind dtach\'s \\e[H\\e[J preamble is parsed and the pending fork adopts it (persisted forkRequested:false)', JSON.stringify(cv));
+  ok(cv.id === FORK && JSON.stringify(cv.forkedFrom) === JSON.stringify([PARENT]) && cv.flag === false && verdictOf(cv.persisted), 'the chat consumer: an init glued behind dtach\'s \\e[H\\e[J preamble is parsed and the pending fork adopts it (persisted forkRequested:false)', JSON.stringify(cv));
   ok(cv.dropped === 1, 'a torn record after it is REPORTED (one `cli-unparsable-line` event), never silently dropped', JSON.stringify(cv.dropped));
   ok(cv.bannerEvents === 0 && cv.bannerCount === 1, 'dtach\'s five banners ([EOF - dtach terminating] and [got signal 15 - dying] as real clients wrote them, [detached], [read returned an error], [select failed]) are transport chatter: zero events, nothing counted (round-4 finding 2: one false report per natural exit; round 5: all five)', JSON.stringify({ events: cv.bannerEvents, count: cv.bannerCount }));
   ok(cv.chattyCount === 250 && cv.chattyEvents === 4, '249 more torn lines (#2…#250): the count is exact (250) and telemetry is capped like the log (#2, #3, #100, #200 go out — 4 events, not 249)', JSON.stringify({ count: cv.chattyCount, events: cv.chattyEvents }));
@@ -854,26 +854,26 @@ const codeOnly = (src) => String(src).split('\n').map((l) => {
 }).join('\n');
 ok(!/armRestoredCapture\(id, session\);/.test(codeOnly('      // armRestoredCapture(id, session); // a pipe'))
   && !/armRestoredCapture\(id, session\);/.test(codeOnly('      foo(); // armRestoredCapture(id, session);'))
-  && /armRestoredCapture\(id, session\);/.test(codeOnly("      armRestoredCapture(id, session); // a pipe")),
+  && verdictOf(/armRestoredCapture\(id, session\);/.test(codeOnly("      armRestoredCapture(id, session); // a pipe"))),
   'codeOnly control: a commented-out call (whole line or after code) no longer satisfies a pin; the live call still does');
 
 console.log('⑥ WIRING — both capture sites use the ONE module');
 {
   const wc = codeOnly(rd('src/ws-create.js')), br = codeOnly(rd('src/server/boot-restore.js')), cs = codeOnly(rd('src/server/stdout/claude-stream-json.js'));
-  ok(/if \(lockCaptureWanted\(session\)\) \{/.test(wc) && /armLockCapture\(\{\s*id, session, activeSessions,\s*attempt: \(\) => captureLockId\(\{ session, id, activeSessions, sessionsDir: SESSIONS_DIR, sidecarPath: metaFileW, readPpid \}\),/.test(wc),
+  ok(gateOf(/if \(lockCaptureWanted\(session\)\) \{/.test(wc)) && verdictOf(/armLockCapture\(\{\s*id, session, activeSessions,\s*attempt: \(\) => captureLockId\(\{ session, id, activeSessions, sessionsDir: SESSIONS_DIR, sidecarPath: metaFileW, readPpid \}\),/.test(wc)),
     'ws-create: the chain is gated by lockCaptureWanted and armed through armLockCapture with the wrapper sidecar as the witness');
-  ok(/const adopted = adoptCapturedId\(session, lockId\);/.test(wc), 'ws-create: adopts through adoptCapturedId');
-  ok(/attempt: \(\) => captureLockId\(\{ session: s, id, activeSessions, sessionsDir: SESSIONS_DIR, sidecarPath, readPpid \}\),/.test(br)
-    && /restoredSidecars\.set\(id, wrapperFiles\.sidecar\);/.test(br)
-    && /setTimeout\(\(\) => \{ for \(const \[id, s\] of activeSessions\) armRestoredCapture\(id, s\); \}, 2000\);/.test(br)
-    && /armRestoredCapture\(id, session\);/.test(br),
+  ok(verdictOf(/const adopted = adoptCapturedId\(session, lockId\);/.test(wc)), 'ws-create: adopts through adoptCapturedId');
+  ok(gateOf(/attempt: \(\) => captureLockId\(\{ session: s, id, activeSessions, sessionsDir: SESSIONS_DIR, sidecarPath, readPpid \}\),/.test(br))
+    && gateOf(/restoredSidecars\.set\(id, wrapperFiles\.sidecar\);/.test(br))
+    && gateOf(/setTimeout\(\(\) => \{ for \(const \[id, s\] of activeSessions\) armRestoredCapture\(id, s\); \}, 2000\);/.test(br))
+    && verdictOf(/armRestoredCapture\(id, session\);/.test(br)),
     'boot-restore: every restored session (dtach AND R6 pipe) arms the same capture, witnessed by its resolved sidecar');
   ok((br.match(/_forkRequested: restoredForkPending\(meta\),/g) || []).length === 2, 'boot-restore: the fork flag is restored only while the record still names its source — dtach AND R6 pipe restores');
-  ok(/^\s*if \(ownsItsId\(m\)\) dedupMetas\.push\(\{ sockFile, m \}\);$/m.test(br) && !/if \(m && m\.claudeSessionId\) dedupMetas\.push/.test(br), 'boot-restore: the conversation dedup is fed only metas that OWN their id (ownsItsId)');
-  ok(/\.replace\(DTACH_CLEAR_PREAMBLE, ''\)/.test(cs) && /if \(parsed \|\| LOOKS_LIKE_RECORD\.test\(line\)\) noteDroppedLine\(session, id, parsed \? 'cli-line-handler-error' : 'cli-unparsable-line', line, e\);/.test(cs), 'the chat consumer strips the re-attach preamble and reports a dropped record');
+  ok(gateOf(/^\s*if \(ownsItsId\(m\)\) dedupMetas\.push\(\{ sockFile, m \}\);$/m.test(br)) && !/if \(m && m\.claudeSessionId\) dedupMetas\.push/.test(br), 'boot-restore: the conversation dedup is fed only metas that OWN their id (ownsItsId)');
+  ok(gateOf(/\.replace\(DTACH_CLEAR_PREAMBLE, ''\)/.test(cs)) && verdictOf(/if \(parsed \|\| LOOKS_LIKE_RECORD\.test\(line\)\) noteDroppedLine\(session, id, parsed \? 'cli-line-handler-error' : 'cli-unparsable-line', line, e\);/.test(cs)), 'the chat consumer strips the re-attach preamble and reports a dropped record');
   ok(!/DTACH_BANNER/.test(cs), 'the JSON-prefix test IS the whole record rule: no separate dtach banner list (round 5: it had no behaviour of its own under the prefix test)');
-  ok(/isWriter: \(l\) => lockWrittenByItsPid\(l, \{ procStartOf, isCli \}\),/.test(codeOnly(fs.readFileSync(LC_PATH, 'utf8'))), 'captureLockId passes the writer witness to the pick');
-  ok(/forkedFrom: session\.forkedFrom \|\| null,[\s\S]{0,400}?forkRequested: false,[\s\S]{0,400}?mode: session\.mode,/.test(cs), 'the stream parser\'s fork adoption write RE-LISTS forkRequested:false (it used to leave the stale true to the spread)');
+  ok(verdictOf(/isWriter: \(l\) => lockWrittenByItsPid\(l, \{ procStartOf, isCli \}\),/.test(codeOnly(fs.readFileSync(LC_PATH, 'utf8')))), 'captureLockId passes the writer witness to the pick');
+  ok(verdictOf(/forkedFrom: session\.forkedFrom \|\| null,[\s\S]{0,400}?forkRequested: false,[\s\S]{0,400}?mode: session\.mode,/.test(cs)), 'the stream parser\'s fork adoption write RE-LISTS forkRequested:false (it used to leave the stale true to the spread)');
   ok(!/lockData\.startedAt|claimed\.add\(os\.claudeSessionId\)|pickClaudeLock\(|readClaudeLocks\(|tryCapture\(15\)/.test(wc + br), 'CENSUS: no inline lock-matching loop and no capped claude chain left in ws-create / boot-restore');
 }
 
@@ -911,7 +911,7 @@ console.log('⑦ NEGATIVE CONTROLS for ⑥ (patched copies of src/claude-lock-ca
   ok(!writerJudged(await writerLegs(LCn)).chatFork, 'control (n): the chat exclusion put back ⇒ a restored pending chat fork never adopts from its lock ⇒ ⑥ RED (round-3 finding 3a)');
   const LCo = mut('o', '  return !!(meta && meta.claudeSessionId) && !restoredForkPending(meta);\n', '  return !!(meta && meta.claudeSessionId);\n');
   const ro = dedupLeg(LCo);
-  ok(ro.includes('cw-1'), 'control (o): every meta with an id fed to the dedup (the shipped loop) ⇒ the PARENT (cw-1) is retired beside its own fork ⇒ ⑥ RED (round-3 findings 1+4)', JSON.stringify(ro));
+  ok(verdictOf(ro.includes('cw-1')), 'control (o): every meta with an id fed to the dedup (the shipped loop) ⇒ the PARENT (cw-1) is retired beside its own fork ⇒ ⑥ RED (round-3 findings 1+4)', JSON.stringify(ro));
   const CS_PATH = path.join(REPO, 'src/server/stdout/claude-stream-json.js');
   const csSrc = fs.readFileSync(CS_PATH, 'utf8');
   const mutCs = (tag, from, to) => { const t = csSrc.replace(from, to); ok(t !== csSrc, `control (${tag}) edit applied`); return M.load('src/server/stdout/claude-stream-json.js', t, tag); };
@@ -954,7 +954,7 @@ console.log('⑦ NEGATIVE CONTROLS for ⑥ (patched copies of src/claude-lock-ca
   ok(rvRaw.pastTorn === SNEST && !rv.tornTie, 'control (v): the pick skips an unreadable placeholder ⇒ the nested lock below a torn nearest one is adopted and a torn tie is no tie ⇒ ⑥ RED', JSON.stringify(rv));
   const ct = await consumerLeg(mutCs('t', '  if (!(n <= 3 || n % 100 === 0)) return;\n', ''));
   ok(ct.chattyEvents === 249, 'control (t): the telemetry cap removed ⇒ one event per torn line (249) ⇒ ⑥ RED', JSON.stringify(ct.chattyEvents));
-  for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 22 })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 22 })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 // ── the REAL home is untouched (this process was re-homed before any fixture was written) ──
@@ -967,4 +967,4 @@ console.log('⑦ NEGATIVE CONTROLS for ⑥ (patched copies of src/claude-lock-ca
 }
 
 console.log(`\ntest-fork-groups: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

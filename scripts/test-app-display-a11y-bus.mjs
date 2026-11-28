@@ -21,29 +21,29 @@ const D = require('../src/desktop-display.js');
 const WT = require('../src/window-targets.js');
 
 let pass = 0, fail = 0;
-const ok = (c, msg) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}`); } };
+const ok = (c, msg) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 console.log('① PURE — the a11y row of the plan, whose bus, the ask\'s answer');
 const bins = { 'dbus-daemon': '/usr/bin/dbus-daemon', 'xdg-desktop-portal': '/x/xdp', 'xdg-desktop-portal-gtk': '/x/xdpg', 'at-spi-bus-launcher': '/usr/libexec/at-spi-bus-launcher' };
 const pl = M.portalPlan({ dir: '/d/da-1', display: ':7', bins, why: 'flatpak' });
 const svc = pl.files.find((f) => f.file === '/d/da-1/portal/services/org.a11y.Bus.service');
-ok(pl.ok && svc && svc.text === '[D-BUS Service]\nName=org.a11y.Bus\nExec=/usr/libexec/at-spi-bus-launcher\n', 'portalPlan: org.a11y.Bus is ACTIVATABLE on the private bus (the launcher binary, no shell)');
+ok(gateOf(pl.ok) && gateOf(svc) && svc.text === '[D-BUS Service]\nName=org.a11y.Bus\nExec=/usr/libexec/at-spi-bus-launcher\n', 'portalPlan: org.a11y.Bus is ACTIVATABLE on the private bus (the launcher binary, no shell)');
 const noL = M.portalPlan({ dir: '/d/da-1', display: ':7', bins: { ...bins, 'at-spi-bus-launcher': null } });
-ok(noL.ok && !noL.files.some((f) => /org\.a11y\.Bus/.test(f.file)), 'no launcher on this machine ⇒ no service file — the portal still starts');
-ok(M.PORTAL_BINS.includes('at-spi-bus-launcher') && M.A11Y_BINS.join() === 'at-spi-bus-launcher,at-spi2-registryd' && M.A11Y_BUS_NAME === 'org.a11y.Bus', 'the launcher is probed with the portal binaries (PATH, then /usr/libexec); registryd is required too');
+ok(gateOf(noL.ok) && !noL.files.some((f) => /org\.a11y\.Bus/.test(f.file)), 'no launcher on this machine ⇒ no service file — the portal still starts');
+ok(gateOf(M.PORTAL_BINS.includes('at-spi-bus-launcher')) && M.A11Y_BINS.join() === 'at-spi-bus-launcher,at-spi2-registryd' && M.A11Y_BUS_NAME === 'org.a11y.Bus', 'the launcher is probed with the portal binaries (PATH, then /usr/libexec); registryd is required too');
 const both = { 'at-spi-bus-launcher': '/l', 'at-spi2-registryd': '/r' };
 const u = M.a11yBusPlan({ user: 'unix:path=/run/user/1000/at-spi/bus_0', bins: both });
 ok(u.a11y === 'user' && !u.ask, 'the user HAS an a11y bus ⇒ \'user\', nothing asked (today\'s behaviour: the plan hands the user\'s address)');
 const o = M.a11yBusPlan({ user: null, bins: both });
-ok(o.a11y === 'own' && o.ask, 'no user a11y bus (a pod) + at-spi2-core here ⇒ \'own\': ask the private bus');
+ok(o.a11y === 'own' && verdictOf(o.ask), 'no user a11y bus (a pod) + at-spi2-core here ⇒ \'own\': ask the private bus');
 let threw = null, miss = null;
 try { miss = [M.a11yBusPlan({ bins: { 'at-spi2-registryd': '/r' } }), M.a11yBusPlan({ bins: null }), M.a11yBusPlan()]; } catch (e) { threw = e; }
-ok(!threw && miss.every((m) => !m.ask && /^unavailable: .*not found on this machine \(package at-spi2-core\)$/.test(m.a11y)) && miss[0].a11y.startsWith('unavailable: at-spi-bus-launcher not found'), `RED CONTROL: the launcher missing ⇒ the plan SAYS unavailable with the package, never a throw ("${miss && miss[0].a11y}")`);
+ok(!threw && gateOf(miss.every((m) => !m.ask && /^unavailable: .*not found on this machine \(package at-spi2-core\)$/.test(m.a11y))) && verdictOf(miss[0].a11y.startsWith('unavailable: at-spi-bus-launcher not found')), `RED CONTROL: the launcher missing ⇒ the plan SAYS unavailable with the package, never a throw ("${miss && miss[0].a11y}")`);
 const addr = 'unix:path=/d/da-1/portal/run/at-spi/bus_7,guid=ab';
 const got = M.a11yBusOf({ plan: o, got: addr });
 ok(got.a11y === 'own' && got.bus === addr && got.appEnv.AT_SPI_BUS_ADDRESS === addr, 'the ask answered ⇒ the record keeps the address (a11yBus) and the app is handed AT_SPI_BUS_ADDRESS');
-ok(M.a11yBusOf({ plan: o, got: null }).a11y.startsWith('unavailable: the private bus gave no org.a11y.Bus address') && M.a11yBusOf({ plan: o, got: 'tcp:host=x' }).bus === null, 'no answer / a non-unix answer ⇒ unavailable, nothing handed');
+ok(gateOf(M.a11yBusOf({ plan: o, got: null }).a11y.startsWith('unavailable: the private bus gave no org.a11y.Bus address')) && M.a11yBusOf({ plan: o, got: 'tcp:host=x' }).bus === null, 'no answer / a non-unix answer ⇒ unavailable, nothing handed');
 ok(M.a11yBusOf({ plan: u }).a11y === 'user' && !Object.keys(M.a11yBusOf({ plan: u }).appEnv).length && M.a11yBusOf({ plan: miss[0] }).a11y === miss[0].a11y, '\'user\' / \'unavailable\' hand nothing over the plan\'s appEnv');
 
 console.log('② PURE — the reader\'s env: the app\'s own bus, never a global');
@@ -66,7 +66,7 @@ const census = (src) => {
 };
 const rows = census(ENGINE);
 for (const r of rows) console.log(`    ${r.verdict === 'RED' ? '✗' : '·'} ${r.fn}: wt.${r.call} env: ${r.env.slice(0, 50)}`);
-ok(rows.length >= 9 && rows.every((r) => r.verdict === 'ok') && ['probeMode', 'snapshot', 'act', 'list'].every((f) => rows.some((r) => r.fn === f)), `${rows.length} tree calls (probeMode, snapshot, act's node verbs, list) — every one on treeEnvOf's env`);
+ok(rows.length >= 9 && gateOf(rows.every((r) => r.verdict === 'ok')) && verdictOf(['probeMode', 'snapshot', 'act', 'list'].every((f) => rows.some((r) => r.fn === f))), `${rows.length} tree calls (probeMode, snapshot, act's node verbs, list) — every one on treeEnvOf's env`);
 const mutant = ENGINE.replace('env: WT.treeEnvOf(rec, env()), ...helperOpts() });\n    const held', 'env: env(), ...helperOpts() });\n    const held');
 const red = census(mutant).filter((r) => r.verdict === 'RED');
 ok(mutant !== ENGINE && red.length === 1 && red[0].fn === 'snapshot' && red[0].call === 'snapshotTarget', `RED CONTROL: snapshot's read put back on the global env() ⇒ RED on exactly it (${red.map((r) => `${r.fn}:${r.call}`).join(', ')})`);
@@ -88,9 +88,9 @@ else {
     const t0 = Date.now();
     const ab = await D.appA11yBus({ user: null, address: plan.address, env: pod });
     const ms = Date.now() - t0;
-    ok(ab.a11y === 'own' && ab.bus && ab.bus.startsWith(`unix:path=${path.join(S, 'app', 'portal', 'run')}/`) && ab.appEnv.AT_SPI_BUS_ADDRESS === ab.bus, `appA11yBus on the plan's bus ⇒ own, the address under the plan's run/ dir (${ms} ms: GetAddress activated the launcher)`);
+    ok(ab.a11y === 'own' && gateOf(ab.bus) && gateOf(ab.bus.startsWith(`unix:path=${path.join(S, 'app', 'portal', 'run')}/`)) && ab.appEnv.AT_SPI_BUS_ADDRESS === ab.bus, `appA11yBus on the plan's bus ⇒ own, the address under the plan's run/ dir (${ms} ms: GetAddress activated the launcher)`);
     const ps = spawnSync('ps', ['-o', 'args', '--no-headers', '-s', String(child.pid)], { encoding: 'utf8' }).stdout;
-    ok(/at-spi-bus-launcher/.test(ps) && /accessibility\.conf/.test(ps), 'the launcher and its a11y dbus-daemon run in the private bus\'s session');
+    ok(gateOf(/at-spi-bus-launcher/.test(ps)) && verdictOf(/accessibility\.conf/.test(ps)), 'the launcher and its a11y dbus-daemon run in the private bus\'s session');
     const kept = await D.appA11yBus({ user: 'unix:path=/run/user/1000/at-spi/bus_0', address: plan.address, env: pod });
     ok(kept.a11y === 'user' && kept.bus === null, 'the user\'s address given ⇒ \'user\' (nothing asked)');
     child.kill('SIGTERM');
@@ -103,4 +103,4 @@ else {
 
 console.log(`\ntest-app-display-a11y-bus: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

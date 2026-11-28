@@ -32,7 +32,7 @@ const { SafeFs } = require('../src/safe-fs.js');
 const ROUTES = require('../src/agent-routes.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // r4456 (the flake census, round 2): a wait on the FACT the leg judges — its bound generous, its expiry a NAMED harness row (red), never a
 // silent read of whatever is there
@@ -50,8 +50,8 @@ function judge(clock, law = LAW_MS, control = null) {
 }
 const gapWords = (g) => g ? `${g.ms} ms (cpu ${g.cpu ?? '?'} · run-queue wait ${g.wait ?? '?'} · control ${g.ctl} ⇒ held ${g.held})` : 'none';
 console.log('① the judge');
-ok(!judge({ first: 900, gaps: [{ at: 2000, ms: 300 }] }).ok && judge({ first: 900, gaps: [{ at: 2000, ms: 249 }] }).ok, 'a 300 ms gap is red, a 249 ms one green');
-ok(judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 175, wait: 120 }] }).ok && judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 90, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 1990, ms: 220 }] }).ok, 'a gap the box made wait (run-queue) or stalled on the same-box control is excused by that much');
+ok(!judge({ first: 900, gaps: [{ at: 2000, ms: 300 }] }).ok && verdictOf(judge({ first: 900, gaps: [{ at: 2000, ms: 249 }] }).ok), 'a 300 ms gap is red, a 249 ms one green');
+ok(gateOf(judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 175, wait: 120 }] }).ok) && verdictOf(judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 90, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 1990, ms: 220 }] }).ok), 'a gap the box made wait (run-queue) or stalled on the same-box control is excused by that much');
 ok(!judge({ first: 900, gaps: [{ at: 2000, ms: 260, cpu: 2, wait: 0 }] }).ok && !judge(null).ok, 'a thread asleep IN a call (no CPU, no run-queue wait — the NFS shape) is all hold; no clock proves nothing');
 
 // ── the clocks: the main thread's own 10 ms clock (each gap with its CPU + run-queue wait), the same-box control ──
@@ -133,7 +133,7 @@ const restore = slowMain();
 const base = await measure('base', () => rigC.prompt('A'));
 restore();
 console.log(`    base: one prompt over the slow root answered in ${base.ms} ms; the loop's worst gap ${gapWords(base.j.top)}`);
-ok(!base.j.ok && base.j.maxHeld >= LAW_MS && base.r.includes(gid), `RED CONTROL: the old road holds the loop ${base.j.maxHeld} ms (≥ ${LAW_MS} ms) for one prompt — the hub stood still while it walked`, base.j.top);
+ok(!base.j.ok && base.j.maxHeld >= LAW_MS && verdictOf(base.r.includes(gid)), `RED CONTROL: the old road holds the loop ${base.j.maxHeld} ms (≥ ${LAW_MS} ms) for one prompt — the hub stood still while it walked`, base.j.top);
 
 // ════════ ③ the off-thread road ════════
 console.log('③ the off-thread road — the SafeFs workers\' fs slowed the same way');
@@ -142,7 +142,7 @@ const rigN = mkRig(); rigN.activeSessions.set('A', mkSession('A'));
 road = pool; fresh();
 const now = await measure('now', () => rigN.prompt('A'));
 console.log(`    now: the same prompt answered in ${now.ms} ms; the loop's worst gap ${gapWords(now.j.top)}`);
-ok(now.j.ok && now.j.maxHeld < LAW_MS, `the same prompt holds the loop ${now.j.maxHeld} ms at most (< ${LAW_MS} ms) — the walk ran in a worker`, now.j.over);
+ok(gateOf(now.j.ok) && now.j.maxHeld < LAW_MS, `the same prompt holds the loop ${now.j.maxHeld} ms at most (< ${LAW_MS} ms) — the walk ran in a worker`, now.j.over);
 ok(now.r === base.r && !rigN.activeSessions.get('A')._sigStale, 'it answered once the read landed (inside the bound) and told byte for byte what the old road told', { base: base.r.slice(0, 160), now: now.r.slice(0, 160) });
 pool.close();
 
@@ -157,12 +157,12 @@ console.log(`    the prompt answered at ${late.ms} ms; the loop's worst gap ${ga
 // r4456: no upper time bound in the verdict (a late timer on a loaded box passed it): the ORDER — the answer came by its bound (it
 // waited it: ≥ 900 ms) and BEFORE the read landed (the group not told, sigStale marked). The hook's own 3 s is NOT judged here: the bound
 // (src/task-groups.js SIG_BOUND_MS) sits under it, and the order caps the answer by the read's own time (line 1045's round)
-ok(late.j.ok && late.ms >= 900 && !late.r.includes(gid) && sB._sigStale && gid in sB._sigStale, `the answer at the BOUND (${late.ms} ms: it waited the bound, and came before the read landed), the group DEFERRED (nothing told, sigStale), the loop free (${late.j.maxHeld} ms at most)`, { ms: late.ms, stale: sB._sigStale, over: late.j.over });
+ok(gateOf(late.j.ok) && late.ms >= 900 && !late.r.includes(gid) && gateOf(sB._sigStale) && gid in sB._sigStale, `the answer at the BOUND (${late.ms} ms: it waited the bound, and came before the read landed), the group DEFERRED (nothing told, sigStale), the loop free (${late.j.maxHeld} ms at most)`, { ms: late.ms, stale: sB._sigStale, over: late.j.over });
 // r4456: the read LANDED after the mark (the group's signature newer than the session's sigStale) — its fact, never a fixed span
 const landedFor = (sess) => { const t = tasks._groupOf(gid), h = t && tasks._sigCache && tasks._sigCache.get(tasks._sigKey(t)), m = sess && sess._sigStale ? sess._sigStale[gid] : null; return m != null && !!h && (h.gen || 0) > m; };
 await untilFact(() => landedFor(sB), 'the worker\'s read LANDED after the mark (the group\'s signature newer than sigStale)');
 const after = await measure('after', () => rigS.prompt('B'));
-ok(after.j.ok && after.r.includes(gid) && !sB._sigStale, `the next turn tells the group (the read that landed after the mark answers) — never dropped; the loop free (${after.j.maxHeld} ms at most)`, { ms: after.ms, ctx: after.r.slice(0, 160) });
+ok(gateOf(after.j.ok) && gateOf(after.r.includes(gid)) && !sB._sigStale, `the next turn tells the group (the read that landed after the mark answers) — never dropped; the loop free (${after.j.maxHeld} ms at most)`, { ms: after.ms, ctx: after.r.slice(0, 160) });
 slower.close();
 
 // ════════ ④p PLACED (r4456, the flake census round 2): leg ④'s two clocks, each red AT WILL by the leg's own holds ════════
@@ -178,7 +178,7 @@ console.log('④p PLACED — leg ④\'s two clocks, made wrong at will by holds 
   const sC = rigP.activeSessions.get('C');
   const facts = !lateP.r.includes(gid) && !!sC._sigStale && gid in sC._sigStale;
   const oldV = lateP.j.ok && lateP.ms >= 900 && lateP.ms < 2000 && facts, newV = lateP.j.ok && lateP.ms >= 900 && facts;
-  ok(!oldV && newV, `PLACED (r4456) (1): the bound's answer delivered late (${lateP.ms} ms) with every deferral fact right — the old verdict's «< 2000 ms» reads it RED with nothing wrong; the verdict as it stands now (by its bound, before the read landed) reads it green`, { ms: lateP.ms, ok: lateP.j.ok, facts });
+  ok(!oldV && verdictOf(newV), `PLACED (r4456) (1): the bound's answer delivered late (${lateP.ms} ms) with every deferral fact right — the old verdict's «< 2000 ms» reads it RED with nothing wrong; the verdict as it stands now (by its bound, before the read landed) reads it green`, { ms: lateP.ms, ok: lateP.j.ok, facts });
   held1.close();
   // (2) the fixed span it had: the read HELD (not let go) — the old «sleep, then the next turn» reads the group NOT told with nothing
   // wrong; the read let go, the wait on its landing, then the next turn tells it
@@ -194,11 +194,11 @@ console.log('④p PLACED — leg ④\'s two clocks, made wrong at will by holds 
   fs.rmSync(hold2, { force: true });
   await untilFact(() => landedFor(sD), 'the held read LANDED once let go (scene 2)');
   const newAfter = await rigQ.prompt('D');
-  ok(!lateQ.includes(gid) && !oldTold && newAfter.includes(gid) && !sD._sigStale, 'PLACED (r4456) (2): the read HELD — the old fixed span then the next turn reads the group NOT told (red with nothing wrong); let go, the wait on its landing, then the next turn tells it', { deferredFirst: !lateQ.includes(gid), oldTold, newTold: newAfter.includes(gid) });
+  ok(!lateQ.includes(gid) && !oldTold && gateOf(newAfter.includes(gid)) && !sD._sigStale, 'PLACED (r4456) (2): the read HELD — the old fixed span then the next turn reads the group NOT told (red with nothing wrong); let go, the wait on its landing, then the next turn tells it', { deferredFirst: !lateQ.includes(gid), oldTold, newTold: newAfter.includes(gid) });
   held2.close();
 }
 
 clearInterval(tickT);
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -37,7 +37,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (pred, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(100); } return !!(await pred()); };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -55,9 +55,9 @@ const baseM = { id: 'acme.tool', version: '1.0.0', engines: { vibespace: '2.369.
 
 const dirty = `line one\rEVIL\nsecond${LS}third${PS}fourth${String.fromCharCode(0)}nul${String.fromCharCode(0x7f)}`;
 const cleaned = cleanText(dirty, 400);
-ok(!/[\r\n\u0000\u007f]/.test(cleaned) && !cleaned.includes(LS) && !cleaned.includes(PS) && cleaned.startsWith('line one EVIL second'), `cleanText strips CR/LF/NUL/DEL/U+2028/U+2029 (${JSON.stringify(cleaned.slice(0, 40))})`);
+ok(!/[\r\n\u0000\u007f]/.test(cleaned) && !cleaned.includes(LS) && !cleaned.includes(PS) && verdictOf(cleaned.startsWith('line one EVIL second')), `cleanText strips CR/LF/NUL/DEL/U+2028/U+2029 (${JSON.stringify(cleaned.slice(0, 40))})`);
 const dv = V({ ...baseM, description: dirty, label: `lab\rel`, contributes: { agentTools: [{ name: 'x', description: dirty, args: {} }], windows: [] } });
-ok(dv.ok && !/[\r\n]/.test(dv.manifest.description) && !/[\r\n]/.test(dv.manifest.label) && !/[\r\n]/.test(dv.manifest.contributes.agentTools[0].description) && !dv.manifest.contributes.agentTools[0].description.includes(PS), 'validateManifest sanitizes description / label / agent-tool description (the ONE choke point)', dv.errors);
+ok(gateOf(dv.ok) && !/[\r\n]/.test(dv.manifest.description) && !/[\r\n]/.test(dv.manifest.label) && !/[\r\n]/.test(dv.manifest.contributes.agentTools[0].description) && !dv.manifest.contributes.agentTools[0].description.includes(PS), 'validateManifest sanitizes description / label / agent-tool description (the ONE choke point)', dv.errors);
 
 const REFUSE = ['//home', '/home/u//vibespace/data', '~//vibespace/data', '/home/u/./vibespace/data', '/./', '//', '/home/u/vibespace/data', '~/../vibespace/data'];
 const refused = REFUSE.filter((p) => !!normalizeFsPath(p, { homeDir: HOME, forbiddenRoots: FORBIDDEN }).error);
@@ -65,7 +65,7 @@ ok(refused.length === REFUSE.length, `every slash/dot form that node's permissio
 const allowed = normalizeFsPath('~/data//sub/', { homeDir: HOME, forbiddenRoots: FORBIDDEN });
 ok(allowed.path === '/home/u/data/sub' && normalizeFsPath('/srv/x/', {}).path === '/srv/x' && normalizeFsPath('~', { homeDir: HOME }).path === HOME, `a legitimate path still normalizes (${JSON.stringify(allowed)})`);
 const capBad = V({ ...baseM, capabilities: { server: { fs: { write: ['/home/u//vibespace/data'] } } } }, { homeDir: HOME, forbiddenRoots: FORBIDDEN });
-ok(!capBad.ok && /covers the VibeSpace/.test(capBad.errors.join()), 'a manifest declaring the collapsed form of the data dir fails validation (named)', capBad.errors);
+ok(!capBad.ok && verdictOf(/covers the VibeSpace/.test(capBad.errors.join())), 'a manifest declaring the collapsed form of the data dir fails validation (named)', capBad.errors);
 
 // WILDCARDS (2.369.44): node reads a declared path only up to the FIRST `*` and
 // grants everything whose STRING starts with what came before it — so `/*`,
@@ -86,24 +86,24 @@ ok(normalizeFsPath('/srv/x/*', {}).path === '/srv/x/*' && normalizeFsPath('/srv/
 // to every user, and the widening was invisible in the manifest.
 const DOTGLOB = ['~/.*', '/srv/a/.*', '/home/u/.*'];
 const dotRes = DOTGLOB.map((x) => normalizeFsPath(x, { homeDir: HOME, forbiddenRoots: FORBIDDEN }));
-ok(dotRes.every((r) => !r.path && /is not a dotfile glob/.test(r.error || '')), `a "." segment before "*" is refused, not silently widened into a string prefix (${JSON.stringify(dotRes)})`);
+ok(verdictOf(dotRes.every((r) => !r.path && /is not a dotfile glob/.test(r.error || ''))), `a "." segment before "*" is refused, not silently widened into a string prefix (${JSON.stringify(dotRes)})`);
 ok(!dotRes.some((r) => (r.path || '').startsWith('/home/u*') || (r.path || '') === '/srv/a*'), 'NEGATIVE CONTROL: the pre-fix output "/home/u*" / "/srv/a*" (every sibling home) is never produced');
 const dotCap = V({ ...baseM, capabilities: { server: { fs: { read: ['~/.*'] } } } }, { homeDir: '/srv/bob', forbiddenRoots: FORBIDDEN });
-ok(!dotCap.ok && /is not a dotfile glob/.test(dotCap.errors.join()), 'the same refusal reaches manifest validation even when no forbidden root happens to sit under the widened prefix', dotCap.errors);
+ok(!dotCap.ok && verdictOf(/is not a dotfile glob/.test(dotCap.errors.join())), 'the same refusal reaches manifest validation even when no forbidden root happens to sit under the widened prefix', dotCap.errors);
 const dotOk = [normalizeFsPath('~/.config/*', { homeDir: HOME }), normalizeFsPath('~/./*', { homeDir: HOME }), normalizeFsPath('~/.ssh', { homeDir: HOME })];
 ok(dotOk[0].path === '/home/u/.config/*' && dotOk[1].path === '/home/u/*' && dotOk[2].path === '/home/u/.ssh', `real dot-directories and a lone "." segment node itself collapses still normalize (${JSON.stringify(dotOk)})`);
 const capWildRoot = V({ ...baseM, capabilities: { server: { fs: { read: ['/*'] } } } }, { homeDir: HOME, forbiddenRoots: FORBIDDEN });
-ok(!capWildRoot.ok && /whole filesystem/.test(capWildRoot.errors.join()), 'a manifest declaring "/*" fails validation, and says so', capWildRoot.errors);
+ok(!capWildRoot.ok && verdictOf(/whole filesystem/.test(capWildRoot.errors.join())), 'a manifest declaring "/*" fails validation, and says so', capWildRoot.errors);
 const capWildParent = V({ ...baseM, capabilities: { server: { fs: { write: ['/home/u/*'] } } } }, { homeDir: HOME, forbiddenRoots: FORBIDDEN });
-ok(!capWildParent.ok && /covers the VibeSpace/.test(capWildParent.errors.join()), 'a wildcard on a PARENT of a forbidden root fails validation, naming the dir it covers', capWildParent.errors);
+ok(!capWildParent.ok && verdictOf(/covers the VibeSpace/.test(capWildParent.errors.join())), 'a wildcard on a PARENT of a forbidden root fails validation, naming the dir it covers', capWildParent.errors);
 const capWildOk = V({ ...baseM, capabilities: { server: { fs: { read: ['~/projects/*'] } } } }, { homeDir: HOME, forbiddenRoots: FORBIDDEN });
-ok(capWildOk.ok && capWildOk.manifest.capabilities.server.fs.read[0] === '/home/u/projects/*' && capabilitySummary(capWildOk.manifest).some((i) => i.id === 'fs-read' && i.params.paths.includes('/home/u/projects/*')), 'a legitimate wildcard survives validation and reaches the consent summary (negative control)', capWildOk.errors);
+ok(gateOf(capWildOk.ok) && capWildOk.manifest.capabilities.server.fs.read[0] === '/home/u/projects/*' && verdictOf(capabilitySummary(capWildOk.manifest).some((i) => i.id === 'fs-read' && i.params.paths.includes('/home/u/projects/*'))), 'a legitimate wildcard survives validation and reaches the consent summary (negative control)', capWildOk.errors);
 
 const toolsOnly = V({ ...baseM, contributes: { agentTools: [{ name: 'do', description: 'does', args: {} }] } });
-ok(needsConsent(toolsOnly.manifest) && capabilitySummary(toolsOnly.manifest).some((i) => i.id === 'agent-tools' && /OUTSIDE the plugin sandbox/.test(i.text)), 'contributed agent tools need consent and the summary says they run outside the sandbox');
+ok(gateOf(needsConsent(toolsOnly.manifest)) && verdictOf(capabilitySummary(toolsOnly.manifest).some((i) => i.id === 'agent-tools' && /OUTSIDE the plugin sandbox/.test(i.text))), 'contributed agent tools need consent and the summary says they run outside the sandbox');
 ok(!needsConsent(V(baseM).manifest), 'a plain server plugin with no tools/capabilities still needs no consent');
 const wOnly = capabilitySummary(V({ ...baseM, capabilities: { server: { fs: { write: ['~/x'] } } } }, { homeDir: HOME }).manifest);
-ok(wOnly.some((i) => i.id === 'fs-write' && /write AND read/i.test(i.text)) && !wOnly.some((i) => i.id === 'fs-read'), 'the consent summary says write implies read (permissionArgs adds --allow-fs-read for every write path)', wOnly.map((i) => i.text));
+ok(gateOf(wOnly.some((i) => i.id === 'fs-write' && /write AND read/i.test(i.text))) && !wOnly.some((i) => i.id === 'fs-read'), 'the consent summary says write implies read (permissionArgs adds --allow-fs-read for every write path)', wOnly.map((i) => i.text));
 
 // ── ② loader: shim generation, consent, proxy headers, reinstall trust ──
 console.log('— loader');
@@ -142,27 +142,27 @@ const row = async (id) => (await j('/api/plugins/manifests')).body.plugins.find(
 
 const shimPath = path.join(root, 'data', 'bin', 'vibespace-tool-evil.tool-x');
 const denied = await post('/api/plugins/manifests/evil.tool/enabled', { enabled: true });
-ok(denied.status === 409 && denied.body.consentRequired === true && denied.body.capabilities.some((c) => c.id === 'agent-tools'), 'a plugin that only contributes agent tools is consent-gated (409 with the tool item)', denied.body);
+ok(denied.status === 409 && denied.body.consentRequired === true && verdictOf(denied.body.capabilities.some((c) => c.id === 'agent-tools')), 'a plugin that only contributes agent tools is consent-gated (409 with the tool item)', denied.body);
 ok(!fs.existsSync(shimPath), 'no shim is generated while the plugin is not enabled');
 await post('/api/plugins/manifests/evil.tool/enabled', { enabled: true, trusted: true });
-ok(fs.existsSync(shimPath), 'consent given → the shim is generated');
+ok(verdictOf(fs.existsSync(shimPath)), 'consent given → the shim is generated');
 const shimSrc = fs.readFileSync(shimPath, 'utf8');
-ok(!/^\s*require\(/m.test(shimSrc) && !shimSrc.includes(LS) && !shimSrc.includes(PS) && /const DESCRIPTION = "/.test(shimSrc) && /const ARGS_SCHEMA = "/.test(shimSrc), 'the shim carries description + args as JSON string constants — no raw line terminator, no statement outside them', shimSrc.split('\n').slice(1, 6).join(' | '));
+ok(!/^\s*require\(/m.test(shimSrc) && !shimSrc.includes(LS) && !shimSrc.includes(PS) && gateOf(/const DESCRIPTION = "/.test(shimSrc)) && verdictOf(/const ARGS_SCHEMA = "/.test(shimSrc)), 'the shim carries description + args as JSON string constants — no raw line terminator, no statement outside them', shimSrc.split('\n').slice(1, 6).join(' | '));
 const runShim = (args, env) => new Promise((r) => execFile(process.execPath, [shimPath, ...args], { encoding: 'utf8', env }, (err, stdout, stderr) => r({ status: err ? (err.code ?? 1) : 0, stdout: String(stdout), stderr: String(stderr) })));
 const help = await runShim(['--help'], { PATH: process.env.PATH });
-ok(help.status === 0 && help.stdout.includes('harmless helper') && !fs.existsSync(MARK), `--help prints the description as DATA and executes none of it (${JSON.stringify(help.stdout.slice(0, 40))})`);
+ok(help.status === 0 && gateOf(help.stdout.includes('harmless helper')) && !fs.existsSync(MARK), `--help prints the description as DATA and executes none of it (${JSON.stringify(help.stdout.slice(0, 40))})`);
 const noEnv = await runShim(['--name', 'x'], { PATH: process.env.PATH });
-ok(noEnv.status === 3 && /not inside a VibeSpace session/.test(noEnv.stderr) && !fs.existsSync(MARK), 'a normal call outside a session fails loudly — still nothing injected ran');
+ok(noEnv.status === 3 && gateOf(/not inside a VibeSpace session/.test(noEnv.stderr)) && !fs.existsSync(MARK), 'a normal call outside a session fails loudly — still nothing injected ran');
 const ran = await runShim(['--name', 'x'], { PATH: process.env.PATH, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: 'vsst_x' });
 ok(!fs.existsSync(MARK) && ran.status !== 9, 'a real invocation writes no injected file and never hits the injected process.exit(9)', ran.stderr.slice(0, 120));
 await post('/api/plugins/manifests/evil.tool/enabled', { enabled: false });
 
 // proxied route replies: data, never a live document on the app origin
 await post('/api/plugins/manifests/acme.plain/enabled', { enabled: true });
-ok(await waitFor(async () => (await row('acme.plain')).state === 'running'), 'the plain plugin runs');
+ok(verdictOf(await waitFor(async () => (await row('acme.plain')).state === 'running')), 'the plain plugin runs');
 const px = await j('/api/plugins/acme.plain/x/anything');
-ok(px.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(px.headers.get('content-security-policy') || '') && /default-src 'none'/.test(px.headers.get('content-security-policy') || ''), `proxied replies carry nosniff + a sandbox CSP (${px.headers.get('content-security-policy')})`);
-ok(/text\/plain/.test(px.headers.get('content-type') || '') && !/text\/html/.test(px.headers.get('content-type') || ''), `an untrusted plugin cannot serve a document content-type on the app origin (${px.headers.get('content-type')})`);
+ok(px.headers.get('x-content-type-options') === 'nosniff' && gateOf(/sandbox/.test(px.headers.get('content-security-policy') || '')) && verdictOf(/default-src 'none'/.test(px.headers.get('content-security-policy') || '')), `proxied replies carry nosniff + a sandbox CSP (${px.headers.get('content-security-policy')})`);
+ok(gateOf(/text\/plain/.test(px.headers.get('content-type') || '')) && !/text\/html/.test(px.headers.get('content-type') || ''), `an untrusted plugin cannot serve a document content-type on the app origin (${px.headers.get('content-type')})`);
 
 // ── ③ reinstall under an already-trusted id ──
 console.log('— reinstall / consent transfer');
@@ -179,24 +179,24 @@ const iA = await post('/api/plugins/install', { source: 'path', value: pkgA });
 ok(iA.status === 200 && iA.body.plugin?.id === 'acme.swap' && !iA.body.disabled, 'package A installs', iA.body);
 await post('/api/plugins/manifests/acme.swap/enabled', { enabled: true, trusted: true });
 const modA = await j('/plugins/acme.swap/client.js');
-ok((await row('acme.swap')).trusted && modA.status === 200 && /AAA/.test(modA.body), 'package A is trusted and its client module is served same-origin');
+ok(gateOf((await row('acme.swap')).trusted) && modA.status === 200 && verdictOf(/AAA/.test(modA.body)), 'package A is trusted and its client module is served same-origin');
 const regHash = JSON.parse(fs.readFileSync(path.join(root, 'data', 'plugin-registry.json'), 'utf8')).installs['acme.swap']?.contentHash;
 ok(typeof regHash === 'string' && regHash.length === 64, 'the install record fingerprints the package content (sha256)');
 const iB = await post('/api/plugins/install', { source: 'path', value: pkgB });
 const rowB = await row('acme.swap');
 const regB = JSON.parse(fs.readFileSync(path.join(root, 'data', 'plugin-registry.json'), 'utf8'));
 ok(iB.status === 200 && iB.body.disabled === true && iB.body.consentRequired === true, 'a DIFFERENT package under the same id reports that it was left disabled and needs consent again', iB.body);
-ok(!rowB.enabled && !rowB.trusted && rowB.consentRequired && /different package/.test(rowB.notice || ''), 'the row is disabled, untrusted, with a notice naming the reason', rowB);
+ok(!rowB.enabled && !rowB.trusted && gateOf(rowB.consentRequired) && verdictOf(/different package/.test(rowB.notice || '')), 'the row is disabled, untrusted, with a notice naming the reason', rowB);
 ok(!regB.trust['acme.swap'] && regB.enabled['acme.swap'] === false, 'the trust record is GONE from the registry (consent never transfers to new code)', regB.trust);
 ok((await j('/plugins/acme.swap/client.js')).status === 404, '…and the new package\'s client module is not served');
 ok(regB.installs['acme.swap'].contentHash !== regHash, 'the fingerprint changed with the package');
 await post('/api/plugins/manifests/acme.swap/enabled', { enabled: true, trusted: true });
 const iB2 = await post('/api/plugins/install', { source: 'path', value: pkgB });
 const rowB2 = await row('acme.swap');
-ok(iB2.status === 200 && !iB2.body.disabled && rowB2.enabled && rowB2.trusted, 'reinstalling the SAME package from the SAME source keeps consent (the byte-identical fast path)', iB2.body);
-ok(await waitFor(async () => (await row('acme.swap')).state === 'running', 20000), 'the reinstalled plugin is running again');
+ok(iB2.status === 200 && !iB2.body.disabled && gateOf(rowB2.enabled) && verdictOf(rowB2.trusted), 'reinstalling the SAME package from the SAME source keeps consent (the byte-identical fast path)', iB2.body);
+ok(verdictOf(await waitFor(async () => (await row('acme.swap')).state === 'running', 20000)), 'the reinstalled plugin is running again');
 const pxT = await j('/api/plugins/acme.swap/x/page');
-ok(/text\/html/.test(pxT.headers.get('content-type') || '') && /sandbox/.test(pxT.headers.get('content-security-policy') || ''), `a TRUSTED plugin may keep a document content-type, still under the sandbox CSP (${pxT.headers.get('content-type')})`);
+ok(gateOf(/text\/html/.test(pxT.headers.get('content-type') || '')) && verdictOf(/sandbox/.test(pxT.headers.get('content-security-policy') || '')), `a TRUSTED plugin may keep a document content-type, still under the sandbox CSP (${pxT.headers.get('content-type')})`);
 
 // …and the reset is gated on the REGISTRY RECORD, not on a folder having been
 // replaced (2.369.44). `enabled` and `trust` are keyed by id in
@@ -213,19 +213,19 @@ const reg = () => JSON.parse(fs.readFileSync(path.join(root, 'data', 'plugin-reg
 const dropFolder = async () => { fs.rmSync(pdir('acme.ghost'), { recursive: true, force: true }); await post('/api/plugins/manifests/reload', {}); };
 await post('/api/plugins/install', { source: 'path', value: ghostA });
 await post('/api/plugins/manifests/acme.ghost/enabled', { enabled: true, trusted: true });
-ok((await row('acme.ghost')).trusted && (await j('/plugins/acme.ghost/client.js')).status === 200, 'ghost package A is trusted and its client module is served');
+ok(gateOf((await row('acme.ghost')).trusted) && (await j('/plugins/acme.ghost/client.js')).status === 200, 'ghost package A is trusted and its client module is served');
 await dropFolder();
 ok(reg().enabled['acme.ghost'] === true && !!reg().trust['acme.ghost'] && !(await row('acme.ghost')), 'THE REPRODUCTION: with the plugin folder hand-deleted the registry still holds enabled + trust for that id', reg().trust);
 const iG = await post('/api/plugins/install', { source: 'path', value: ghostB });
 const rowG = await row('acme.ghost');
-ok(iG.body.disabled === true && iG.body.consentRequired === true && !rowG.enabled && !rowG.trusted && !reg().trust['acme.ghost'] && /different package/.test(rowG.notice || ''), 'a DIFFERENT package installed where NO folder was replaced does not inherit consent — disabled, untrusted, notice', { install: iG.body, row: rowG });
+ok(iG.body.disabled === true && iG.body.consentRequired === true && !rowG.enabled && !rowG.trusted && !reg().trust['acme.ghost'] && verdictOf(/different package/.test(rowG.notice || '')), 'a DIFFERENT package installed where NO folder was replaced does not inherit consent — disabled, untrusted, notice', { install: iG.body, row: rowG });
 ok((await j('/plugins/acme.ghost/client.js')).status === 404, '…and the new package\'s client module is not served');
 await post('/api/plugins/manifests/acme.ghost/enabled', { enabled: true, trusted: true });
 await dropFolder();
 const iG2 = await post('/api/plugins/install', { source: 'path', value: ghostB });
 const rowG2 = await row('acme.ghost');
 const modG2 = await j('/plugins/acme.ghost/client.js');
-ok(!iG2.body.disabled && rowG2.enabled && rowG2.trusted && modG2.status === 200 && /GHOST-B/.test(modG2.body), 'NEGATIVE CONTROL: the SAME package from the SAME source keeps consent even when the folder had to be recreated', { install: iG2.body, row: rowG2 });
+ok(!iG2.body.disabled && gateOf(rowG2.enabled) && gateOf(rowG2.trusted) && modG2.status === 200 && verdictOf(/GHOST-B/.test(modG2.body)), 'NEGATIVE CONTROL: the SAME package from the SAME source keeps consent even when the folder had to be recreated', { install: iG2.body, row: rowG2 });
 
 // the wildcard rule through the REAL installer: a package asking for the parent
 // of the install dir never lands on disk
@@ -233,7 +233,7 @@ const wildPkg = path.join(srcRoot, 'wild');
 writeJson(path.join(wildPkg, 'vibespace-plugin.json'), { id: 'acme.wild', version: '1.0.0', engines: { vibespace: '2.369.24' }, server: true, capabilities: { server: { fs: { read: [path.dirname(root) + '/*'] } } } });
 fs.writeFileSync(path.join(wildPkg, 'server.js'), "process.send({ t: 'hello', api: 1 });\n");
 const iW = await post('/api/plugins/install', { source: 'path', value: wildPkg });
-ok(iW.status === 400 && /invalid manifest/.test(iW.body.error || '') && /covers the VibeSpace/.test(iW.body.error || '') && !fs.existsSync(pdir('acme.wild')), `a package whose fs capability wildcards a PARENT of the install dir is refused by the real installer and never lands on disk (${(iW.body.error || '').slice(0, 120)})`);
+ok(iW.status === 400 && gateOf(/invalid manifest/.test(iW.body.error || '')) && gateOf(/covers the VibeSpace/.test(iW.body.error || '')) && !fs.existsSync(pdir('acme.wild')), `a package whose fs capability wildcards a PARENT of the install dir is refused by the real installer and never lands on disk (${(iW.body.error || '').slice(0, 120)})`);
 
 // ── ④ per-child intentional-stop mark ──
 console.log('— per-child stop mark');
@@ -242,14 +242,14 @@ writeJson(path.join(pdir('acme.stubborn'), 'vibespace-plugin.json'), { id: 'acme
 fs.writeFileSync(path.join(pdir('acme.stubborn'), 'server.js'), HANG);
 await post('/api/plugins/manifests/reload', {});
 await post('/api/plugins/manifests/acme.stubborn/enabled', { enabled: true });
-ok(await waitFor(async () => (await row('acme.stubborn')).state === 'running'), 'the stubborn plugin runs');
+ok(verdictOf(await waitFor(async () => (await row('acme.stubborn')).state === 'running')), 'the stubborn plugin runs');
 const stubborn = loader.get('acme.stubborn')?.child || null;   // B-b403: its handle — the suite ends it below
 await post('/api/plugins/manifests/acme.stubborn/enabled', { enabled: false }); // old child ignores SIGTERM → alive for ~3s
 fs.writeFileSync(path.join(pdir('acme.stubborn'), 'server.js'), "process.exit(7);\n");
 await post('/api/plugins/manifests/acme.stubborn/enabled', { enabled: true });   // fresh child crashes at once, while the old one still exits
-ok(await waitFor(async () => !!(await row('acme.stubborn')).lastError, 4000), 'a fresh child that crashes while the OLD child is still exiting is reported as a crash, not silently filed as an intentional stop', await row('acme.stubborn'));
+ok(verdictOf(await waitFor(async () => !!(await row('acme.stubborn')).lastError, 4000)), 'a fresh child that crashes while the OLD child is still exiting is reported as a crash, not silently filed as an intentional stop', await row('acme.stubborn'));
 const st = await row('acme.stubborn');
-ok(['crashed', 'starting', 'stopped'].includes(st.state) && /code 7|exited/.test(st.lastError || ''), `…and the exit reason reaches the panel (${st.lastError})`);
+ok(gateOf(['crashed', 'starting', 'stopped'].includes(st.state)) && verdictOf(/code 7|exited/.test(st.lastError || '')), `…and the exit reason reaches the panel (${st.lastError})`);
 await post('/api/plugins/manifests/acme.stubborn/enabled', { enabled: false });
 
 loader.shutdown(); srv.close();
@@ -289,24 +289,24 @@ try { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(srcRoot, { re
 // ── ⑥ source pins (the fixes must stay where they are) ──
 console.log('— pins');
 const ld = read('src/server/plugin-loader.js');
-ok(/const DESCRIPTION = \$\{jsLiteral\(t\.description\)\}/.test(ld) && /const ARGS_SCHEMA = \$\{jsLiteral\(jsonOf\(t\.args\)\)\}/.test(ld) && !/\/\/ \$\{t\.description/.test(ld), 'the shim template interpolates manifest text ONLY through jsLiteral (never into a comment or bare code)');
-ok(/\\u2028\\u2029/.test(ld.replace(/\\\\/g, '\\')) || /u2028/.test(ld), 'jsLiteral escapes the JS line terminators');
-ok(/const wanted = rec\.enabled && !child\[STOPPING\]/.test(ld) && /child\[STOPPING\] = true/.test(ld) && !/rec\._stopping\s*=/.test(ld), 'the intentional-stop mark lives on the CHILD, not the record');
-ok(/res\.setHeader\('X-Content-Type-Options', 'nosniff'\);\s*\n\s*res\.setHeader\('Content-Security-Policy', PROXY_CSP\)/.test(ld) && /DOCUMENT_CT\.test\(ct\) && !isTrusted\(rec\)/.test(ld), 'the proxy route sets nosniff + the sandbox CSP and downgrades documents from untrusted plugins');
+ok(gateOf(/const DESCRIPTION = \$\{jsLiteral\(t\.description\)\}/.test(ld)) && gateOf(/const ARGS_SCHEMA = \$\{jsLiteral\(jsonOf\(t\.args\)\)\}/.test(ld)) && !/\/\/ \$\{t\.description/.test(ld), 'the shim template interpolates manifest text ONLY through jsLiteral (never into a comment or bare code)');
+ok(verdictOf(/\\u2028\\u2029/.test(ld.replace(/\\\\/g, '\\'))) || verdictOf(/u2028/.test(ld)), 'jsLiteral escapes the JS line terminators');
+ok(gateOf(/const wanted = rec\.enabled && !child\[STOPPING\]/.test(ld)) && gateOf(/child\[STOPPING\] = true/.test(ld)) && !/rec\._stopping\s*=/.test(ld), 'the intentional-stop mark lives on the CHILD, not the record');
+ok(gateOf(/res\.setHeader\('X-Content-Type-Options', 'nosniff'\);\s*\n\s*res\.setHeader\('Content-Security-Policy', PROXY_CSP\)/.test(ld)) && verdictOf(/DOCUMENT_CT\.test\(ct\) && !isTrusted\(rec\)/.test(ld)), 'the proxy route sets nosniff + the sandbox CSP and downgrades documents from untrusted plugins');
 const pi = read('src/server/plugin-install.js');
-ok(/async function stageFromPath/.test(pi) && /await fsp\.cp\(src, dest/.test(pi) && !/fs\.cpSync\(src/.test(pi) && /async function auditTree/.test(pi), 'the path source stages asynchronously (no sync walk/copy against a user path on the event loop)');
-ok(/} finally {\n\s*if \(file\) \{ try \{ fs\.rmSync\(file, \{ force: true \}\); \} catch \{ \} \}/.test(pi), 'the uploaded-file cleanup wraps the WHOLE install (source validation included)');
+ok(gateOf(/async function stageFromPath/.test(pi)) && gateOf(/await fsp\.cp\(src, dest/.test(pi)) && !/fs\.cpSync\(src/.test(pi) && verdictOf(/async function auditTree/.test(pi)), 'the path source stages asynchronously (no sync walk/copy against a user path on the event loop)');
+ok(verdictOf(/} finally {\n\s*if \(file\) \{ try \{ fs\.rmSync\(file, \{ force: true \}\); \} catch \{ \} \}/.test(pi)), 'the uploaded-file cleanup wraps the WHOLE install (source validation included)');
 const pmSrc = read('src/plugin-manifest.js');
-ok(/function cleanText/.test(pmSrc) && /collapsePosixPath/.test(pmSrc) && /contributesAgentTools/.test(pmSrc), 'the validator owns cleanText + path collapsing + the agent-tools consent rule');
-ok(/const star = p\.indexOf\('\*'\)/.test(pmSrc) && /const prefix = tail === '\*' \? p : p \+ '\/'/.test(pmSrc) && /r\.startsWith\(prefix\)/.test(pmSrc), 'the forbidden-root test runs against the wildcard PREFIX node actually matches (never the raw pattern)');
-ok(/r\.replaced/.test(ld) && !/reconsent = r\.replaced/.test(ld) && /const reconsent = !\(sameSource && sameContent\) && \(!!registry\.enabled/.test(ld), 'the reinstall consent reset is gated on the REGISTRY record, not on a folder having been replaced');
+ok(gateOf(/function cleanText/.test(pmSrc)) && gateOf(/collapsePosixPath/.test(pmSrc)) && verdictOf(/contributesAgentTools/.test(pmSrc)), 'the validator owns cleanText + path collapsing + the agent-tools consent rule');
+ok(gateOf(/const star = p\.indexOf\('\*'\)/.test(pmSrc)) && gateOf(/const prefix = tail === '\*' \? p : p \+ '\/'/.test(pmSrc)) && verdictOf(/r\.startsWith\(prefix\)/.test(pmSrc)), 'the forbidden-root test runs against the wildcard PREFIX node actually matches (never the raw pattern)');
+ok(gateOf(/r\.replaced/.test(ld)) && !/reconsent = r\.replaced/.test(ld) && verdictOf(/const reconsent = !\(sameSource && sameContent\) && \(!!registry\.enabled/.test(ld)), 'the reinstall consent reset is gated on the REGISTRY record, not on a folder having been replaced');
 const pui = read('src/lib/plugins-ui.js');
-ok(/if \(res\.disabled\) showToast\(t\('This is a different package under the same id/.test(pui), 'the install dialog tells the user the replacement was left disabled (no silent failure)');
+ok(verdictOf(/if \(res\.disabled\) showToast\(t\('This is a different package under the same id/.test(pui)), 'the install dialog tells the user the replacement was left disabled (no silent failure)');
 for (const dict of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) {
   const d = read(dict);
-  ok(['Server: write AND read files under {paths}', 'This is a different package under the same id — it was left disabled. Review what it asks for and enable it again.'].every((k) => d.includes(JSON.stringify(k).slice(1, -1))) && /Adds agent tools every session can call: \{names\} — installed as programs/.test(d), `${dict} carries the reworded consent strings`);
+  ok(gateOf(['Server: write AND read files under {paths}', 'This is a different package under the same id — it was left disabled. Review what it asks for and enable it again.'].every((k) => d.includes(JSON.stringify(k).slice(1, -1)))) && verdictOf(/Adds agent tools every session can call: \{names\} — installed as programs/.test(d)), `${dict} carries the reworded consent strings`);
 }
-ok(/'test-plugin-security'/.test(read('scripts/ci.mjs')), 'this suite is in the release gate');
+ok(verdictOf(/'test-plugin-security'/.test(read('scripts/ci.mjs'))), 'this suite is in the release gate');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

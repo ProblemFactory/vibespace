@@ -21,21 +21,21 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 500) : '')); } };
 const WA = require(path.join(REPO, 'src/webhook-auth.js'));
 const V = await import(pathToFileURL(path.join(REPO, 'src/lib/webhook-view.js')).href);
 const t = (s, p) => String(s).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] !== undefined ? String(p[k]) : `{${k}}`));
 
 console.log('§1 the slug: the server\'s own rule, worded');
 const cases = [['deploys', null], ['ci-2', null], ['', 'grammar'], ['Bad Slug', 'grammar'], ['-x', 'grammar'], ['a'.repeat(64), 'grammar'], ...WA.RESERVED_SLUGS.map((r) => [r, 'reserved'])];
-ok(cases.every(([s, w]) => WA.slugProblem(s) === w), `slugProblem: ${cases.length} cases (good / grammar / every reserved name)`, cases.filter(([s, w]) => WA.slugProblem(s) !== w));
-ok(cases.every(([s, w]) => (V.slugText(s, { t }) === null) === (w === null)) && /reserved/.test(V.slugText('groups', { t })) && /a-z, 0-9/.test(V.slugText('Bad Slug', { t })) && /\/hook\/<name>/.test(V.slugText('', { t })), 'the wizard words exactly what the rule refuses (reserved by name, the grammar, an empty name)');
+ok(verdictOf(cases.every(([s, w]) => WA.slugProblem(s) === w)), `slugProblem: ${cases.length} cases (good / grammar / every reserved name)`, cases.filter(([s, w]) => WA.slugProblem(s) !== w));
+ok(gateOf(cases.every(([s, w]) => (V.slugText(s, { t }) === null) === (w === null))) && gateOf(/reserved/.test(V.slugText('groups', { t }))) && gateOf(/a-z, 0-9/.test(V.slugText('Bad Slug', { t }))) && verdictOf(/\/hook\/<name>/.test(V.slugText('', { t }))), 'the wizard words exactly what the rule refuses (reserved by name, the grammar, an empty name)');
 const route = read('src/routes/webhook.js');
-ok(/if \(WA\.slugProblem\(slug\)\) return bad\(res, 400,/.test(route) && !route.includes('!WA.SLUG_RE.test(slug) || WA.RESERVED_SLUGS.includes(slug)'), 'the create route refuses by the same verdict');
+ok(gateOf(/if \(WA\.slugProblem\(slug\)\) return bad\(res, 400,/.test(route)) && !route.includes('!WA.SLUG_RE.test(slug) || WA.RESERVED_SLUGS.includes(slug)'), 'the create route refuses by the same verdict');
 const SECOND = /\[a-z0-9\]\[a-z0-9-\]\{0,62\}/;
 const clientFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => 'src/lib/' + f);
 const second = clientFiles.filter((f) => SECOND.test(read(f)));
-ok(second.length === 0 && SECOND.test(String(WA.SLUG_RE.source)), `no client file holds a second slug regex (${clientFiles.length} files; control: the pattern matches the rule's own source)`, second);
+ok(second.length === 0 && verdictOf(SECOND.test(String(WA.SLUG_RE.source))), `no client file holds a second slug regex (${clientFiles.length} files; control: the pattern matches the rule's own source)`, second);
 
 console.log('§2 THE TOKEN LAW');
 /** every place channel-webhook.js reads a `.token` or holds the secret — each must be the showTokenOnce hand-off */
@@ -63,32 +63,32 @@ ok(census.start > 0 && census.bad.length === 0 && handOffs === 2, `the token is 
 const MUT = WSRC.replace("r.appendChild(el('div', 'chan-wh-caller-line', v.delivery));", "r.appendChild(el('div', 'chan-wh-caller-line', v.delivery + (c.token || '')));");
 ok(MUT !== WSRC && tokenCensus(MUT).bad.length === 1, 'RED CONTROL: a caller row that re-reads the token (a mutant) is caught by the census');
 const shown = WSRC.slice(WSRC.indexOf('export function showTokenOnce('));
-ok(/onClose: \(\) => \{ secret = ''; \}/.test(shown) && /closeOnBackdrop: false/.test(shown) && /'Shown once — rotate to get a new one\.'/.test(shown), 'the dialog: "Shown once — rotate to get a new one.", no backdrop close, its copy of the secret dropped on close');
+ok(gateOf(/onClose: \(\) => \{ secret = ''; \}/.test(shown)) && gateOf(/closeOnBackdrop: false/.test(shown)) && verdictOf(/'Shown once — rotate to get a new one\.'/.test(shown)), 'the dialog: "Shown once — rotate to get a new one.", no backdrop close, its copy of the secret dropped on close');
 const row = V.callerRow({ id: 'c-0123abcd', name: 'CI deploy-bot', auth: 'hmac', token: 'vswh_' + 'a'.repeat(40), tokenHash: 'h', delivery: { mode: 'reply-url', replyUrl: 'https://x.example/in' }, registeredAt: 1, lastCallAt: 0 }, { t });
-ok(!JSON.stringify(row).includes('vswh_') && !JSON.stringify(row).includes('tokenHash') && row.auth === 'HMAC-signed' && /x\.example/.test(row.delivery) && row.facts.includes('last call never'), 'callerRow: named fields only — a token or hash handed in never reaches the model', row);
+ok(!JSON.stringify(row).includes('vswh_') && !JSON.stringify(row).includes('tokenHash') && row.auth === 'HMAC-signed' && gateOf(/x\.example/.test(row.delivery)) && verdictOf(row.facts.includes('last call never')), 'callerRow: named fields only — a token or hash handed in never reaches the model', row);
 
 console.log('§3 the caller picker');
 const P = V.pickerRows([{ id: 'c-1', name: 'A', delivery: { mode: 'reply-url' } }, { id: 'c-2', name: 'B', delivery: { mode: 'poll' } }, { id: 'c-3', name: 'C', delivery: { mode: 'none' } }, { id: 'c-4', name: 'D', delivery: { mode: 'poll' }, revokedAt: 5 }], { t });
-ok(P.length === 3 && !P[0].disabled && !P[1].disabled && P[2].disabled && /takes no replies/.test(P[2].why) && P.every((x) => x.disabled === !!x.why), 'delivery none ⇒ disabled WITH its reason (never a bare greyed box); revoked ⇒ not offered', P);
-ok(/if \(pk\.disabled\) \{ m\.body\.appendChild\(needLine\(\{ words: `\$\{pk\.name\} — \$\{pk\.why\}`/.test(WSRC) && /door: 'callers'/.test(WSRC) && !/b\.disabled = pk\.disabled;/.test(WSRC), 'a caller that takes no replies is a line — its name, why and «Change delivery…» — never a greyed box (lane ui-needs-a-button)');   // stale-pins: kept — a «gone» check: the old words must stay out
+ok(P.length === 3 && !P[0].disabled && !P[1].disabled && gateOf(P[2].disabled) && gateOf(/takes no replies/.test(P[2].why)) && verdictOf(P.every((x) => x.disabled === !!x.why)), 'delivery none ⇒ disabled WITH its reason (never a bare greyed box); revoked ⇒ not offered', P);
+ok(gateOf(/if \(pk\.disabled\) \{ m\.body\.appendChild\(needLine\(\{ words: `\$\{pk\.name\} — \$\{pk\.why\}`/.test(WSRC)) && gateOf(/door: 'callers'/.test(WSRC)) && !/b\.disabled = pk\.disabled;/.test(WSRC), 'a caller that takes no replies is a line — its name, why and «Change delivery…» — never a greyed box (lane ui-needs-a-button)');   // stale-pins: kept — a «gone» check: the old words must stay out
 
 console.log('§4 the budget row');
 ok(V.budgetText('deploys', { used: 1, lim: 6 }, { t }) === 'path deploys: 1 / 6 wakes this hour' && V.budgetText('x', null, { t }) === null && V.budgetText('x', { used: 0, lim: 0 }, { t }) === null, '"path deploys: 1 / 6 wakes this hour"; nothing where none is declared');
 const ENG = read('src/server/channels-engine.js');
-ok(ENG.includes('wakeBudget: (() => { const b = pathBudgetVerdict(rec, convId, en, t); return b.lim ? { used: b.used, lim: b.lim, spent: !b.ok, why: b.why || null } : null; })(),'), 'the conversation view carries the ENGINE\'s budget verdict (its own words once spent)');
+ok(verdictOf(ENG.includes('wakeBudget: (() => { const b = pathBudgetVerdict(rec, convId, en, t); return b.lim ? { used: b.used, lim: b.lim, spent: !b.ok, why: b.why || null } : null; })(),')), 'the conversation view carries the ENGINE\'s budget verdict (its own words once spent)');
 const FE = read('src/lib/channel-filter-editor.js');
-ok(FE.includes("const how0 = !w && st.wakeBudget ? 'digest' : a0.how;") && FE.includes("case 'fact': bind(textInput(rule.key,") && FE.includes("'fact': t('has the fact (key = value)'),"), 'the Notify dialog: a new notification on a budgeted path starts as a digest; the `fact` rule row has key + value fields');
+ok(gateOf(FE.includes("const how0 = !w && st.wakeBudget ? 'digest' : a0.how;")) && gateOf(FE.includes("case 'fact': bind(textInput(rule.key,")) && verdictOf(FE.includes("'fact': t('has the fact (key = value)'),")), 'the Notify dialog: a new notification on a budgeted path starts as a digest; the `fact` rule row has key + value fields');
 
 console.log('§5 the section, by the capability row');
-ok(V.offersPaths({ pushTransport: 'http-inbound' }) && !V.offersPaths({ pushTransport: 'webhook' }) && !V.offersPaths({ kind: 'webhook' }) && !V.offersPaths(null), 'offersPaths reads the row\'s transport, never the kind');
-ok(ENG.includes('      pushTransport: c.pushTransport || null,'), 'the account view projects the row\'s pushTransport');
+ok(gateOf(V.offersPaths({ pushTransport: 'http-inbound' })) && !V.offersPaths({ pushTransport: 'webhook' }) && !V.offersPaths({ kind: 'webhook' }) && !V.offersPaths(null), 'offersPaths reads the row\'s transport, never the kind');
+ok(verdictOf(ENG.includes('      pushTransport: c.pushTransport || null,')), 'the account view projects the row\'s pushTransport');
 const PANEL = read('src/lib/channels-panel.js');
-ok(PANEL.includes("      const np = btn('', () => showNewPathDialog(app, { adapterId: a.id }), 'chan-wh-new');") && PANEL.includes("glyph: curSystems.has(conv.adapterId) ? 'robot' : null"), 'the section offers New path… and its rows wear the robot, muted — both by offersPaths');
+ok(gateOf(PANEL.includes("      const np = btn('', () => showNewPathDialog(app, { adapterId: a.id }), 'chan-wh-new');")) && verdictOf(PANEL.includes("glyph: curSystems.has(conv.adapterId) ? 'robot' : null")), 'the section offers New path… and its rows wear the robot, muted — both by offersPaths');
 const WH = require(path.join(REPO, 'src/channels/webhook.js'));
 ok(WH.removable === false && WH.consent === null && WH.manifest === undefined && WH.seed === true && WH.listed === true, 'the module declares removable: false, no consent and no manifest ⇒ not a connectable account (no Remove / Re-authorize / Disconnect in its ⋯)');
 
 console.log('§6 the reply line and the send outcomes');
-ok(V.replyToText({ quoteWho: 'CI deploy-bot' }, { t }) === 'to CI deploy-bot (caller)' && V.replyToText({ kind: 'dm', participants: 'Monitor' }, { t }) === 'to Monitor (caller)' && /Send a message…/.test(V.replyToText({ kind: 'group', participants: 'A, B' }, { t })), 'under the box: the quoted call\'s caller, the one caller, or how to choose');
+ok(V.replyToText({ quoteWho: 'CI deploy-bot' }, { t }) === 'to CI deploy-bot (caller)' && V.replyToText({ kind: 'dm', participants: 'Monitor' }, { t }) === 'to Monitor (caller)' && verdictOf(/Send a message…/.test(V.replyToText({ kind: 'group', participants: 'A, B' }, { t }))), 'under the box: the quoted call\'s caller, the one caller, or how to choose');
 const callers = [{ id: 'c-1', name: 'A', delivery: { mode: 'reply-url' } }, { id: 'c-2', name: 'B', delivery: { mode: 'poll' } }];
 const out = V.sendOutcomes({ ok: false, proposals: [{ recipient: 'c-1', proposal: { state: 'sent' } }, { recipient: 'c-2', proposal: { state: 'sent' } }, { recipient: 'c-1', proposal: { state: 'failed', reason: 'connect ECONNREFUSED' } }] }, callers, { t });
 ok(out.map((x) => x.text).join('|') === 'Sent to A|Queued for B to fetch|A: connect ECONNREFUSED' && out[2].type === 'error' && V.sendOutcomes({ ok: false, error: 'no caller on this path takes replies' }, callers, { t })[0].text === 'no caller on this path takes replies', 'sent / queued for poll / failed with the server\'s words — each its own toast');
@@ -118,14 +118,14 @@ console.log('§8 the Webhook section: last in Accounts, its New path… on the h
   const given = [door('webhook'), acct('lark:a', 'lark')];
   ok(V.accountSectionOrder(given) !== given && given[0].id === 'webhook', 'the rule returns a new list (the digest\'s adapters are never reordered in place)');
   ok(judge((xs) => xs) > 0 && judge((xs) => [...xs.filter(V.offersPaths), ...xs.filter((a) => !V.offersPaths(a))]) > 0, 'RED controls: arrival order (a webhook listed before a user account) and doors-first are each judged wrong by the same table');
-  ok(PANEL.includes('    const accounts = accountSectionOrder(adapters.filter((a) => !a.builtin));') && (PANEL.match(/accountSectionOrder\(/g) || []).length === 1 && !/\.sort\([^)]*offersPaths/.test(PANEL), 'the Accounts part orders its sections by the rule — its ONE call site, no second sort');
+  ok(gateOf(PANEL.includes('    const accounts = accountSectionOrder(adapters.filter((a) => !a.builtin));')) && (PANEL.match(/accountSectionOrder\(/g) || []).length === 1 && !/\.sort\([^)]*offersPaths/.test(PANEL), 'the Accounts part orders its sections by the rule — its ONE call site, no second sort');
   const sec = PANEL.slice(PANEL.indexOf('  function section(a, mine, siblings, ordinal, badge) {'), PANEL.indexOf('  let curBadges = new Map();'));
   const iNp = sec.indexOf("      h.appendChild(np);"), iCnt = sec.indexOf("    h.appendChild(cnt);"), iDot = sec.indexOf("    h.appendChild(dot);"), iMore = sec.indexOf("    h.appendChild(more);");
   ok(iDot > 0 && iNp > iDot && iCnt > iNp && iMore > iCnt && !/sec\.appendChild\([^\n]*(newpath|chan-wh-new|np\b)/.test(sec) && !sec.includes("keep('newpath:"), 'New path… is built INTO the head row — after the name and dot, before the count and the ⋯ — and no longer hangs below it', { iDot, iNp, iCnt, iMore });
-  ok(sec.includes("np.title = t('New path…');") && sec.includes("np.setAttribute('aria-label', t('New path…'));") && sec.includes("lab.className = 'chan-wh-new-label';") && read('src/lib/channel-chrome.js').includes('b.onclick = (ev) => { ev.stopPropagation(); onClick(ev); };'), 'its glyph-only form keeps the word in a tooltip + aria-label; btn stops the press (the head does not fold)');
-  ok(PANEL.includes("registerMenuItem({ menu: M, group: '1_rows', order: 1, when: (c) => offersPaths(A(c)), label: () => t('New path…'), run: (c) => showNewPathDialog(c.app, { adapterId: A(c).id }) });"), 'the head\'s ⋯ / right-click menu (one menu) gains New path… as its first row, for an inbound door only');
+  ok(gateOf(sec.includes("np.title = t('New path…');")) && gateOf(sec.includes("np.setAttribute('aria-label', t('New path…'));")) && gateOf(sec.includes("lab.className = 'chan-wh-new-label';")) && verdictOf(read('src/lib/channel-chrome.js').includes('b.onclick = (ev) => { ev.stopPropagation(); onClick(ev); };')), 'its glyph-only form keeps the word in a tooltip + aria-label; btn stops the press (the head does not fold)');
+  ok(verdictOf(PANEL.includes("registerMenuItem({ menu: M, group: '1_rows', order: 1, when: (c) => offersPaths(A(c)), label: () => t('New path…'), run: (c) => showNewPathDialog(c.app, { adapterId: A(c).id }) });")), 'the head\'s ⋯ / right-click menu (one menu) gains New path… as its first row, for an inbound door only');
   const CSS = read('public/style.css');
-  ok(CSS.includes('@container chan-panel (max-width: 300px) { .chan-wh-new-label { display: none; }') && CSS.includes('@media (max-width: 480px) { .chan-wh-new-label { display: none; }'), 'narrow (a phone, a ≤ 300 px panel) the button keeps its glyph alone');
+  ok(gateOf(CSS.includes('@container chan-panel (max-width: 300px) { .chan-wh-new-label { display: none; }')) && verdictOf(CSS.includes('@media (max-width: 480px) { .chan-wh-new-label { display: none; }')), 'narrow (a phone, a ≤ 300 px panel) the button keeps its glyph alone');
 }
 
 console.log('§9 the pairing doors (lane webhook-pair-join, B-5ee0)');
@@ -137,10 +137,10 @@ console.log('§9 the pairing doors (lane webhook-pair-join, B-5ee0)');
   const CMUT = WSRC.replace("  showPairCodeOnce({ code: a.code, expiresAt: a.expiresAt, path: title || slug });", "  showToast(a.code);\n  showPairCodeOnce({ code: a.code, expiresAt: a.expiresAt, path: title || slug });");
   ok(CMUT !== WSRC && codeCensus(CMUT).length === 1, 'RED CONTROL: a mutant that also toasts the code is caught by the code census');
   const pc = WSRC.slice(WSRC.indexOf('export function showPairCodeOnce('), WSRC.indexOf('export function showJoinDialog('));
-  ok(/closeOnBackdrop: false/.test(pc) && /onClose: \(\) => \{ secret = ''; if \(tick\) clearInterval\(tick\); tick = null; \}/.test(pc) && /secret = ''; shown\.textContent = '—'; copy\.disabled = true;/.test(pc) && /t\('Expired — make a new code'\)/.test(pc),
+  ok(gateOf(/closeOnBackdrop: false/.test(pc)) && gateOf(/onClose: \(\) => \{ secret = ''; if \(tick\) clearInterval\(tick\); tick = null; \}/.test(pc)) && gateOf(/secret = ''; shown\.textContent = '—'; copy\.disabled = true;/.test(pc)) && verdictOf(/t\('Expired — make a new code'\)/.test(pc)),
     'the shown-once code: no backdrop close; closing drops it and stops its clock; at the deadline the box drops it and says "Expired — make a new code"');
   const jd = WSRC.slice(WSRC.indexOf('export function showJoinDialog('));
-  ok(/onClose: \(\) => \{ box\.value = ''; seq\+\+; clearTimeout\(timer\); \}/.test(jd) && !/^(let|var) /m.test(WSRC) && /check: true/.test(jd) && (jd.match(/post\('\/api\/channels\/webhook\/join'/g) || []).length === 2,
+  ok(gateOf(/onClose: \(\) => \{ box\.value = ''; seq\+\+; clearTimeout\(timer\); \}/.test(jd)) && !/^(let|var) /m.test(WSRC) && gateOf(/check: true/.test(jd)) && (jd.match(/post\('\/api\/channels\/webhook\/join'/g) || []).length === 2,
     'the join box: the pasted code lives in the box alone (no module-level state; closing empties it); one read (`check: true`) and one join, both the existing route');
   // every refusal the two routes can NAME has words here — a drift census over the server's own codes
   const WPS = read('src/webhook-pair.js'), RT = read('src/routes/webhook.js');
@@ -153,19 +153,19 @@ console.log('§9 the pairing doors (lane webhook-pair-join, B-5ee0)');
   const named2 = [...drift.slice(drift.indexOf('function decodeCode(')).slice(0, 900).matchAll(/no\('([a-z-]+)'/g)].map((m) => m[1]).filter((c) => !V.PAIR_REFUSALS.includes(c));
   ok(drift !== WPS && named2.length === 1, 'RED CONTROL: a server refusal renamed without words (a mutant) is caught by the drift census', named2);
   const whys = V.PAIR_REFUSALS.map((c) => V.joinWhyText({ code: c, error: 'HTTP 500' }, { from: 'Hub A', t }));
-  ok(new Set(whys).size === V.PAIR_REFUSALS.length && whys.every((w) => w && !/\{/.test(w)) && /^Hub A says this code was already used/.test(V.joinWhyText({ code: 'code-used' }, { from: 'Hub A', t })) && /^Hub A does not know this code/.test(V.joinWhyText({ code: 'code-unknown' }, { from: 'Hub A', t }))
-    && /^The other side says/.test(V.joinWhyText({ code: 'code-used' }, { t })) && /caller token, not a pairing code/.test(V.joinWhyText({ code: 'caller-token' }, { t })) && /has expired/.test(V.joinWhyText({ code: 'expired' }, { t })) && V.joinWhyText({ code: 'pair-refused', error: 'HTTP 502' }, { t }) === 'The pairing did not complete: HTTP 502' && /no answer/.test(V.joinWhyText(null, { t })),
+  ok(new Set(whys).size === V.PAIR_REFUSALS.length && gateOf(whys.every((w) => w && !/\{/.test(w))) && gateOf(/^Hub A says this code was already used/.test(V.joinWhyText({ code: 'code-used' }, { from: 'Hub A', t }))) && gateOf(/^Hub A does not know this code/.test(V.joinWhyText({ code: 'code-unknown' }, { from: 'Hub A', t })))
+    && gateOf(/^The other side says/.test(V.joinWhyText({ code: 'code-used' }, { t }))) && gateOf(/caller token, not a pairing code/.test(V.joinWhyText({ code: 'caller-token' }, { t }))) && gateOf(/has expired/.test(V.joinWhyText({ code: 'expired' }, { t }))) && V.joinWhyText({ code: 'pair-refused', error: 'HTTP 502' }, { t }) === 'The pairing did not complete: HTTP 502' && verdictOf(/no answer/.test(V.joinWhyText(null, { t }))),
     'each refusal BY NAME — one distinct sentence per code; "Hub A says … already used" / "Hub A does not know this code" name who refused (else "The other side"); the rest in the server\'s words', whys);
   const NOW9 = 1_800_000_000_000, ck = { from: 'Hub A', host: 'a.example', theirPath: 'ci', slug: 'ci', exists: false, repair: false, expiresAt: NOW9 + 8 * 60e3 + 5e3 };
   ok(V.joinPreviewText(ck, { t, now: NOW9 }) === 'Hub A offers its path ci (a.example) — this code works once, for 9 more min' && V.joinPathText(ck, 'hub-a', { t }) === "A new path hub-a is made here for Hub A's calls"
-    && /already exists here — Hub A joins it as one more caller/.test(V.joinPathText({ ...ck, exists: true }, 'ci', { t })) && /already paired with Hub A on ci — this code renews/.test(V.joinPathText({ ...ck, exists: true, repair: true }, 'ci', { t })),
+    && gateOf(/already exists here — Hub A joins it as one more caller/.test(V.joinPathText({ ...ck, exists: true }, 'ci', { t }))) && verdictOf(/already paired with Hub A on ci — this code renews/.test(V.joinPathText({ ...ck, exists: true, repair: true }, 'ci', { t }))),
     'the paste box\'s read: who offers which path where and for how long; then what joining does here (a new path / joins one / renews)');
-  ok(V.joinDoneText({ path: { slug: 'hub-a' }, repaired: false }, { from: 'Hub A', t }) === 'Paired with Hub A — its calls land in path hub-a, and your replies go back to it' && /^Pairing with Hub A renewed on path hub-a/.test(V.joinDoneText({ path: { slug: 'hub-a' }, repaired: true }, { from: 'Hub A', t }))
+  ok(V.joinDoneText({ path: { slug: 'hub-a' }, repaired: false }, { from: 'Hub A', t }) === 'Paired with Hub A — its calls land in path hub-a, and your replies go back to it' && gateOf(/^Pairing with Hub A renewed on path hub-a/.test(V.joinDoneText({ path: { slug: 'hub-a' }, repaired: true }, { from: 'Hub A', t })))
     && V.codeClockText(NOW9 + 599e3, { t, now: NOW9 }) === 'Works once · expires in 9:59' && V.codeClockText(NOW9, { t, now: NOW9 }) === null, 'the finished join says what it did; the shown code\'s clock counts down m:ss and is null at the deadline');
-  ok(PANEL.includes("registerMenuItem({ menu: M, group: '1_rows', order: 2, when: (c) => offersPaths(A(c)), label: () => t('Join with a pairing code…'), run: (c) => showJoinDialog(c.app) });") && zh.includes('"Join with a pairing code…":') && ja.includes('"Join with a pairing code…":'),
+  ok(gateOf(PANEL.includes("registerMenuItem({ menu: M, group: '1_rows', order: 2, when: (c) => offersPaths(A(c)), label: () => t('Join with a pairing code…'), run: (c) => showJoinDialog(c.app) });")) && gateOf(zh.includes('"Join with a pairing code…":')) && verdictOf(ja.includes('"Join with a pairing code…":')),
     'the Webhook section\'s ⋯ (by the capability row): "Join with a pairing code…" right under New path… — zh + ja');
-  ok(/const pair = btn\(t\('Pair with another VibeSpace…'\), \(\) => mintPairCode\(slug, title\), 'chan-wh-add'\);/.test(WSRC) && /pair\.dataset\.whPairOpen = slug;/.test(WSRC), 'a path\'s caller panel: "Pair with another VibeSpace…" beside Register a caller (the mint door)');
+  ok(gateOf(/const pair = btn\(t\('Pair with another VibeSpace…'\), \(\) => mintPairCode\(slug, title\), 'chan-wh-add'\);/.test(WSRC)) && verdictOf(/pair\.dataset\.whPairOpen = slug;/.test(WSRC)), 'a path\'s caller panel: "Pair with another VibeSpace…" beside Register a caller (the mint door)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

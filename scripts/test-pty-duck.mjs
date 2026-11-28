@@ -24,7 +24,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { scratch, anchored } = await import(path.join(REPO, 'scripts/scratch.mjs'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? `\n      ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? `\n      ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -120,7 +120,7 @@ async function throughSetup(label, mkDuck) {
   await sleep(0);
   const t0 = Date.now();
   h.onData(Buffer.from(`hello-${label}`));
-  ok(outOf(id).includes(`hello-${label}`), `${label}: the consumer streams the byte`, outOf(id));
+  ok(verdictOf(outOf(id).includes(`hello-${label}`)), `${label}: the consumer streams the byte`, outOf(id));
   ok(eng.ptyQuietSince(session, t0) === false, `${label}: …AND the liveness stamp saw it (ptyQuietSince reads ALIVE)`, { stamp: session._lastPtyDataAt, t0 });
   activeSessions.delete(id);
 }
@@ -142,7 +142,7 @@ if (duck) await throughSetup('pipePtyShim (R6 create + R6 boot re-open)', (h) =>
   const { id, session } = wire(oneSlot);
   const t0 = Date.now();
   h.onData(Buffer.from('hello-oneslot'));
-  ok(outOf(id).includes('hello-oneslot'), 'CONTROL (pre-fix one-slot duck): the consumer still streams — the last registration won');
+  ok(verdictOf(outOf(id).includes('hello-oneslot')), 'CONTROL (pre-fix one-slot duck): the consumer still streams — the last registration won');
   ok(eng.ptyQuietSince(session, t0) === true && session._lastPtyDataAt === undefined,
     'CONTROL (pre-fix one-slot duck): the STAMP was dropped — ptyQuietSince reads "silent" for a bridge relaying bytes', { stamp: session._lastPtyDataAt });
   activeSessions.delete(id);
@@ -163,13 +163,13 @@ if (duck) await throughSetup('pipePtyShim (R6 create + R6 boot re-open)', (h) =>
     await sleep(500);                                    // the banner arrives BEFORE any listener (the create is still in flight)
     const { id, session } = wire(bridge.shim);           // stamp + terminal consumer, registered in one tick
     await sleep(300);
-    ok(outOf(id).includes('mock-shell$'), 'opencode serve terminal: the banner held before the listeners existed reaches the CONSUMER (the one-slot hold gave it to the stamp and the terminal opened blank)', outOf(id));
+    ok(verdictOf(outOf(id).includes('mock-shell$')), 'opencode serve terminal: the banner held before the listeners existed reaches the CONSUMER (the one-slot hold gave it to the stamp and the terminal opened blank)', outOf(id));
     ok(Number(session._lastPtyDataAt) > 0, 'opencode serve terminal: …and the liveness stamp saw it too', { stamp: session._lastPtyDataAt });
     const t0 = Date.now();
     const serverSide = mock.state.ptySockets.find((x) => x.id === bridge.ptyId);
     serverSide?.ws.send('later-bytes');                   // the serve's shell prints something after the replay
     for (let i = 0; i < 40 && !outOf(id).includes('later-bytes'); i++) await sleep(50);
-    ok(outOf(id).includes('later-bytes') && eng.ptyQuietSince(session, t0) === false,
+    ok(gateOf(outOf(id).includes('later-bytes')) && eng.ptyQuietSince(session, t0) === false,
       'opencode serve terminal: a LIVE byte after the replay reaches the consumer AND stamps (both stay registered)', { out: outOf(id), stamp: session._lastPtyDataAt, t0, sock: !!serverSide });
     const exits = []; bridge.shim.onExit((e) => exits.push(e)); bridge.shim.onExit((e) => exits.push(e));
     activeSessions.delete(id);
@@ -194,15 +194,15 @@ const ONE_SLOT = /on(?:Data|Exit)\s*:\s*\(\s*cb\s*\)\s*=>\s*\{?\s*[\w.]+\s*=(?!=
   // a multi-line literal (`onData: (cb) => {\n  onData = cb;`) is caught on the joined text too
   const multi = files.filter((f) => /on(?:Data|Exit)\s*:\s*\(\s*cb\s*\)\s*=>\s*\{\s*\n\s*on(?:Data|Exit)\s*=\s*cb\b/.test(read(f)));
   ok(hits.length === 0 && multi.length === 0, `no one-slot onData/onExit duck in ${files.length} server-side files`, [...hits, ...multi]);
-  ok(ONE_SLOT.test("onData: (cb) => { h.onData = (buf) => cb(buf.toString('utf-8')); },") && ONE_SLOT.test('onExit: (cb) => { onExit = cb; },')
-    && /on(?:Data|Exit)\s*:\s*\(\s*cb\s*\)\s*=>\s*\{\s*\n\s*on(?:Data|Exit)\s*=\s*cb\b/.test('onData: (cb) => {\n      onData = cb;')
+  ok(gateOf(ONE_SLOT.test("onData: (cb) => { h.onData = (buf) => cb(buf.toString('utf-8')); },")) && gateOf(ONE_SLOT.test('onExit: (cb) => { onExit = cb; },'))
+    && gateOf(/on(?:Data|Exit)\s*:\s*\(\s*cb\s*\)\s*=>\s*\{\s*\n\s*on(?:Data|Exit)\s*=\s*cb\b/.test('onData: (cb) => {\n      onData = cb;'))
     && !ONE_SLOT.test('onData: (cb) => data.on(cb),'),
   'CENSUS CONTROL: the three shipped one-slot shapes trip it, the shared SET does not');
   const wsc = read('src/ws-create.js'), br = read('src/server/boot-restore.js'), oc = read('src/server/opencode-pty-bridge.js');
-  ok(/pipePtyShim\(r6Handle\)/.test(wsc) && /require\('\.\/pty-duck'\)/.test(wsc), 'WIRING PIN: ws-create\'s R6 create path builds its duck with pipePtyShim');
-  ok(/pipePtyShim\(h\)/.test(br) && /require\('\.\.\/pty-duck'\)/.test(br), 'WIRING PIN: boot-restore\'s R6 re-open builds its duck with pipePtyShim');
-  ok(/ptyListeners\(\{ hold: 500 \}\)/.test(oc) && /require\('\.\.\/pty-duck'\)/.test(oc), 'WIRING PIN: the OpenCode serve terminal holds its early bytes in a ptyListeners SET (bound 500)');
-  ok(/ptyListeners\(\)/.test(read('src/server/dial-pairing.js')), 'WIRING PIN: daemonPtyShim shares the same SET');
+  ok(gateOf(/pipePtyShim\(r6Handle\)/.test(wsc)) && verdictOf(/require\('\.\/pty-duck'\)/.test(wsc)), 'WIRING PIN: ws-create\'s R6 create path builds its duck with pipePtyShim');
+  ok(gateOf(/pipePtyShim\(h\)/.test(br)) && verdictOf(/require\('\.\.\/pty-duck'\)/.test(br)), 'WIRING PIN: boot-restore\'s R6 re-open builds its duck with pipePtyShim');
+  ok(gateOf(/ptyListeners\(\{ hold: 500 \}\)/.test(oc)) && verdictOf(/require\('\.\.\/pty-duck'\)/.test(oc)), 'WIRING PIN: the OpenCode serve terminal holds its early bytes in a ptyListeners SET (bound 500)');
+  ok(verdictOf(/ptyListeners\(\)/.test(read('src/server/dial-pairing.js'))), 'WIRING PIN: daemonPtyShim shares the same SET');
 }
 
 // ── § 4 THE HEALER ON AN R6 PIPE SESSION (B-b675) ──────────────────────────
@@ -247,14 +247,14 @@ console.log('— §4 the healer on an R6-shaped session: it refuses the pipe duc
     return { healed, killed: h.killed || 0, still: session.pty === d, err: err && err.message };
   };
   const fixed = leg(eng, 'fix');
-  ok(fixed.healed === false && fixed.killed === 0 && fixed.still, 'the healer REFUSES an R6 pipe duck: nothing is killed, the pipe stays the session\'s bridge (B-b675)', fixed);
+  ok(fixed.healed === false && fixed.killed === 0 && verdictOf(fixed.still), 'the healer REFUSES an R6 pipe duck: nothing is killed, the pipe stays the session\'s bridge (B-b675)', fixed);
   const ctl = leg(engOf(MUT.load('src/server/session-stdout.js', noBelt, 'nobelt')), 'ctl');
   if (ctl.err && /ENOENT|spawn/i.test(ctl.err)) console.log(`  - SKIP: dtach is not installed here (${ctl.err}) — the control leg needs it`);
   else ok(ctl.healed === true && ctl.killed === 1, 'CONTROL: without the refusal the healer KILLS the pipe handle (a false "silent" verdict ends a healthy session — the pre-fix shape)', ctl);
   const wsc = read('src/ws-create.js');
   const r6 = (/\} else if \(r6Handle\) \{([\s\S]*?)setupSessionPty\(session, id, pipePtyShim\(r6Handle\)\);/.exec(wsc) || [])[1] || '';
-  ok(/^\s*session\.socketPath = null;/m.test(r6), 'ws-create\'s r6Handle branch nulls the socketPath it never creates (the braces: no detector, no dead-bridge watch on a pipe)');
-  ok(/^\s*_pipe: true,/m.test(read('src/pty-duck.js')), 'pipePtyShim marks its duck `_pipe` (what the healer refuses)');
+  ok(verdictOf(/^\s*session\.socketPath = null;/m.test(r6)), 'ws-create\'s r6Handle branch nulls the socketPath it never creates (the braces: no detector, no dead-bridge watch on a pipe)');
+  ok(verdictOf(/^\s*_pipe: true,/m.test(read('src/pty-duck.js'))), 'pipePtyShim marks its duck `_pipe` (what the healer refuses)');
 }
 
 // ── § 5 A BRIDGE'S LIFE SIGNS ARE ITS OWN (B-1217, lane lg-recovery) ──────────────
@@ -270,7 +270,7 @@ console.log('— §5 a bridge\'s life signs are its own: a replaced bridge\'s go
   const SS = read('src/server/session-stdout.js');
   const CURE = "  session._ptyOpenedAt = Math.max(Date.now(), (Number(session._lastPtyDataAt) || 0) + 1);";
   const STAMP = "  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Math.max(Date.now(), Number(session._ptyOpenedAt) || 0); });";
-  ok(SS.includes(CURE) && SS.includes(STAMP), 'the two lines stand in setupSessionPty (the birth after the predecessor\'s last byte; the stamp only from the current bridge, never dated before its birth)');
+  ok(gateOf(SS.includes(CURE)) && verdictOf(SS.includes(STAMP)), 'the two lines stand in setupSessionPty (the birth after the predecessor\'s last byte; the stamp only from the current bridge, never dated before its birth)');
   const releaseSS = anchored(anchored(SS, CURE, '  session._ptyOpenedAt = Date.now();' /* stale-pins: kept — the release's line, this control's plant */, 'release: the birth at now'),
     STAMP, '  ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });' /* stale-pins: kept — the release's line, this control's plant */, 'release: any pty stamps');
   const MUT5 = (await import(path.join(REPO, 'scripts/mutant-copy.mjs'))).mutantCopies('pty-duck-b1217', REPO);
@@ -370,8 +370,8 @@ console.log('— §5 a bridge\'s life signs are its own: a replaced bridge\'s go
       activeSessions.delete(id);
     }
   }
-  ok(MUT5.files.every((f) => !f.startsWith(REPO)), 'the release copy lives outside the tree');
+  ok(verdictOf(MUT5.files.every((f) => !f.startsWith(REPO))), 'the release copy lives outside the tree');
 }
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

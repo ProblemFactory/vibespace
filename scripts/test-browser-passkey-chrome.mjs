@@ -41,7 +41,7 @@ const PK = require('../src/browser-passkey.js');
 const AB_ROW = require('../src/browser-verbs.js').AGENT_BROWSER_CLI, { driverAtLeast: abAtLeast } = require('../src/browser-attach.js');   // the tree's ONE driver version row, never a version typed here (r2876)
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -161,33 +161,33 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
   const rows = () => (PSx.normalizeStore(fs.existsSync(STORE) ? JSON.parse(fs.readFileSync(STORE, 'utf8')) : null).profiles[PID] || { rows: [] }).rows;
   const answerLast = (W, choice) => { const it = items[items.length - 1]; return W.answerPasskey(it.action.id, { choice, shown: it.action.shown }); };
   try {
-    let W = mk(D, PSx); ok((await W.arm(PID, { budgetMs: 5000 })).ok, 'S0 the watch armed on the real headed Chrome (' + disp + ')');
+    let W = mk(D, PSx); ok(verdictOf((await W.arm(PID, { budgetMs: 5000 })).ok), 'S0 the watch armed on the real headed Chrome (' + disp + ')');
     let T = await tab(W);
     ok(!!W._watches.get(PID).targets.get(T.tid).pk.auth && (await T.creds()) === 0, 'S0 the tab carries ITS OWN authenticator (enable + add as one step), empty');
     let r = await T.run('signin()');
     ok(r.v === 'NotAllowedError' && r.ms < 1000, `S1 an empty authenticator: get fails in ${r.ms} ms (NotAllowedError), no window`, r);
     r = await T.run("reg('alice')");
-    ok(r.v === 'NotAllowedError' && rows().length === 0 && W.passkeyIn(PID, null).state === 'refused' && /passkey register localhost/.test(W.passkeyIn(PID, null).text), `S2 an UNGRANTED create ⇒ refused in-page in ${r.ms} ms, nothing stored, the agent told to register first`, [r, W.passkeyIn(PID, null)]);
+    ok(r.v === 'NotAllowedError' && rows().length === 0 && W.passkeyIn(PID, null).state === 'refused' && verdictOf(/passkey register localhost/.test(W.passkeyIn(PID, null).text)), `S2 an UNGRANTED create ⇒ refused in-page in ${r.ms} ms, nothing stored, the agent told to register first`, [r, W.passkeyIn(PID, null)]);
     const g = await W.passkeyRegister({ profileId: PID, browserKey: 'bk-aaaaaaaa', rpId: 'localhost', user: 'alice' });
-    ok(g.ok && g.state === 'open' && items.length === 1 && items[0].action.type === 'browser-proposal' && /register a passkey on localhost/.test(items[0].text), 'S3 `passkey register localhost` ⇒ ONE card (the For-you item, browser-proposal)', items[0]);
-    ok(answerLast(W, 'once').ok, 'S3 the owner allows once');
+    ok(gateOf(g.ok) && g.state === 'open' && items.length === 1 && items[0].action.type === 'browser-proposal' && verdictOf(/register a passkey on localhost/.test(items[0].text)), 'S3 `passkey register localhost` ⇒ ONE card (the For-you item, browser-proposal)', items[0]);
+    ok(verdictOf(answerLast(W, 'once').ok), 'S3 the owner allows once');
     r = await T.run("reg('alice')");
     await until(() => rows().length === 1, 3000);
     const st = fs.statSync(STORE);
     const row1 = rows()[0];
-    ok(r.v === 'ok' && row1 && row1.createdBy === 'agent' && row1.policy === 'ask' && /^v1\./.test(row1.keySealed) && (st.mode & 0o777) === 0o600 && !fs.readFileSync(STORE, 'utf8').includes('MIG'), `S3 the granted create: ok in ${r.ms} ms, harvested, SEALED, stored 0600, policy ask`, [r, row1 && PSx.publicRow(row1)]);
+    ok(r.v === 'ok' && gateOf(row1) && row1.createdBy === 'agent' && row1.policy === 'ask' && gateOf(/^v1\./.test(row1.keySealed)) && (st.mode & 0o777) === 0o600 && !fs.readFileSync(STORE, 'utf8').includes('MIG'), `S3 the granted create: ok in ${r.ms} ms, harvested, SEALED, stored 0600, policy ask`, [r, row1 && PSx.publicRow(row1)]);
     await sleep(300); ok((await T.creds()) === 0, 'S3 `getCredentials` is EMPTY after `end` (the key lives only in the sealed store)');
     r = await T.run("reg('bob')"); ok(r.v === 'NotAllowedError', 'S3 the grant was ONE use: a second create is refused');
     const n0 = items.length; const pS4 = T.run('signin()', 15000);
     await until(() => W.passkeyIn(PID, null).state === 'passkey_ask', 3000);
-    ok(W.passkeyIn(PID, null).state === 'passkey_ask' && items.length === n0 + 1 && /sign in to localhost with alice/.test(items[n0].text), 'S4 policy ask ⇒ passkey_ask + ONE sign-in card', [W.passkeyIn(PID, null).state, items[n0]]);
-    await sleep(2500); ok(answerLast(W, 'once').ok, 'S4 (held 2.5 s past the hook\'s 1.5 s by the heartbeat) the owner allows once');
+    ok(W.passkeyIn(PID, null).state === 'passkey_ask' && items.length === n0 + 1 && verdictOf(/sign in to localhost with alice/.test(items[n0].text)), 'S4 policy ask ⇒ passkey_ask + ONE sign-in card', [W.passkeyIn(PID, null).state, items[n0]]);
+    await sleep(2500); ok(verdictOf(answerLast(W, 'once').ok), 'S4 (held 2.5 s past the hook\'s 1.5 s by the heartbeat) the owner allows once');
     r = await pS4; await sleep(300);
     ok(r.v === 'ok' && rows()[0].signCount >= 2 && rows()[0].uses === 1 && (await T.creds()) === 0, `S4 ⇒ the sign-in succeeds; signCount ${rows()[0].signCount} on disk; the authenticator empty again`, [r, PSx.publicRow(rows()[0])]);
-    ok(W.passkeyPolicy(PID, rows()[0].credentialId.slice(0, 8), 'yes').ok, 'S5 the key\'s policy set to yes');
+    ok(verdictOf(W.passkeyPolicy(PID, rows()[0].credentialId.slice(0, 8), 'yes').ok), 'S5 the key\'s policy set to yes');
     const c0 = rows()[0].signCount; r = await T.run('signin()'); await sleep(300);
     ok(r.v === 'ok' && r.ms < 1000 && rows()[0].signCount === c0 + 1 && items.length === n0 + 1, `S5 policy yes ⇒ silent in ${r.ms} ms, no card, signCount ${c0} → ${rows()[0].signCount} on disk`);
-    const s5empty = (await T.creds()) === 0; ok(s5empty, 'S5 the authenticator empty after `end`');
+    const s5empty = (await T.creds()) === 0; ok(verdictOf(s5empty), 'S5 the authenticator empty after `end`');
     W.passkeyPolicy(PID, rows()[0].credentialId.slice(0, 8), 'ask');
     const n1 = items.length; const pS6 = T.run('signin(true)', 15000);
     await until(() => W.passkeyIn(PID, null).state === 'passkey_ask', 3000);
@@ -198,19 +198,19 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
     takeover = true; r = await pS7;
     ok(r.v === 'NotAllowedError' && items.length === n2 + 1 && W.passkeyList(PID).asks.length === 0, `S7 the person takes over mid-ask ⇒ the agent's ask WITHDRAWN (page: ${r.v}, the card closed)`);
     r = await T.run('signin()'); const n3 = items.length; const r2 = await T.run("reg('carol')"); await until(() => rows().length === 2, 3000);
-    ok(r.v === 'ok' && r2.v === 'ok' && items.length === n3 && rows().some((x) => x.userName === 'carol' && x.createdBy === 'human') && PSx.publicRow(rows().find((x) => x.userName === 'carol')).source === 'you', 'S7 the person\'s own sign-in and registration: no card, the new key lands as "you"', [r, r2]);
+    ok(r.v === 'ok' && r2.v === 'ok' && items.length === n3 && gateOf(rows().some((x) => x.userName === 'carol' && x.createdBy === 'human')) && PSx.publicRow(rows().find((x) => x.userName === 'carol')).source === 'you', 'S7 the person\'s own sign-in and registration: no card, the new key lands as "you"', [r, r2]);
     takeover = false;
     W.passkeyPolicy(PID, rows()[0].credentialId.slice(0, 8), 'yes');
     W._watches.get(PID).ws.terminate(); await sleep(300);
     r = await T.run('(async()=>{const t=performance.now();const v=await signin();return v+":"+Math.round(performance.now()-t)})()');
     const [s8v, s8ms] = String(r.v).split(':');
     ok(s8v === 'NotAllowedError' && Number(s8ms) <= 2000, `S8 P0 ④: the watch's socket closed ⇒ the page's get fails IN-PAGE in ${s8ms} ms by the page's clock (${r.ms} ms round trip; never the ≥ 9 s native hang)`, r);
-    ok((await W.arm(PID, { budgetMs: 5000 })).ok, 'S8 the watch re-attaches');
+    ok(verdictOf((await W.arm(PID, { budgetMs: 5000 })).ok), 'S8 the watch re-attaches');
     await until(() => { const e = W._watches.get(PID).targets.get(T.tid); return e && e.pk.auth; }, 5000);
     r = await T.run('signin()'); ok(r.v === 'ok' && r.ms < 1500, `S8 … re-armed (authenticator + the SAME hook rebound): a policy-yes sign-in works again (${r.v}, ${r.ms} ms)`);
     // S9 lane passkey-prewrap-fix (passkey-verify lens ②): the page's MARKED function in the slot BEFORE a re-arm
     const L = await lens2(W, T);
-    ok(L.armed && L.seen.length === 0 && L.oldKey && L.newKey && L.oldKey !== L.newKey, `S9 (a) lens ②: the page's MARKED function in the slot before a re-arm is never called — no binding, no key (${L.seen.length} calls); the key minted anew`, L.seen);
+    ok(gateOf(L.armed) && L.seen.length === 0 && gateOf(L.oldKey) && gateOf(L.newKey) && L.oldKey !== L.newKey, `S9 (a) lens ②: the page's MARKED function in the slot before a re-arm is never called — no binding, no key (${L.seen.length} calls); the key minted anew`, L.seen);
     ok(L.ours === true && L.globals === 0, 'S9 (a) … the slot is OURS again (retaken) and no binding is left on the global', { ours: L.ours, globals: L.globals });
     ok(L.traces.filter((a) => a.outcome === 'hook-displaced').length === 1 && W.passkeyList(PID).displaced === 1, 'S9 (a) … the trace says hook-displaced ONCE; the Passkeys card counts the episode', L.traces);
     r = await T.run('signin()');
@@ -244,7 +244,7 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
       await sleep(300); await dcall('Browser.resetPermissions'); // whatever the agent watch above decided is gone before he browses
       const HU = [{ browserKey: 'hu-pkstore0', sessionId: null, ephemeral: false, human: true, input: 'user' }], PSTORE = path.join(S, 'person-passkeys.json');
       let Wp = mk(D, PSx, { holders: HU, store: PSTORE }); // r4: S11b starts a fresh hub over the store that holds his key
-      ok((await Wp.arm(PID, { budgetMs: 5000 })).ok && Wp._watches.get(PID).mode === 'person', 'S11 the PERSON\'s watch armed on the real headed Chrome (only he holds the browser)', Wp._watches.get(PID) && Wp._watches.get(PID).mode);
+      ok(gateOf((await Wp.arm(PID, { budgetMs: 5000 })).ok) && Wp._watches.get(PID).mode === 'person', 'S11 the PERSON\'s watch armed on the real headed Chrome (only he holds the browser)', Wp._watches.get(PID) && Wp._watches.get(PID).mode);
       const ptab = async () => {
         const t = await dcall('Target.createTarget', { url: PAGE }); const tid = t.result.targetId;
         const a = await dcall('Target.attachToTarget', { targetId: tid, flatten: true }); const sid = a.result.sessionId;
@@ -258,10 +258,10 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
       await sleep(PK.PENDING_SAID_MS + 400);
       const v = Wp.passkeyIn(PID, null);
       ok(!P1.e().pk.auth && done === null && v.state === 'passkey_open', `S11 his passkey request reaches Chrome's OWN window: no virtual authenticator on his tab, the get still waits after ${PK.PENDING_SAID_MS + 400} ms (the agent's empty authenticator failed it in ms — S1) and the watch says passkey_open`, { auth: P1.e().pk.auth || null, done, v: v.state });
-      ok(perm.result && perm.result.result && perm.result.result.value === 'prompt', 'S11 no permission plan on his browser: a page\'s geolocation permission reads Chrome\'s own «prompt» (the agent watch decides «denied» ahead)', perm.result && perm.result.result);
+      ok(gateOf(perm.result) && gateOf(perm.result.result) && perm.result.result.value === 'prompt', 'S11 no permission plan on his browser: a page\'s geolocation permission reads Chrome\'s own «prompt» (the agent watch decides «denied» ahead)', perm.result && perm.result.result);
       const cn = await Wp.cancelPasskey({ profileId: PID, browserKey: 'hu-pkstore0', ephemeral: true }, { by: 'user' });
       const r1 = await Promise.race([pend, sleep(3000).then(() => null)]);
-      ok(cn.ok && cn.n === 1 && r1 && r1.v === 'AbortError', 'S11 … and his Cancel ends it (the page sees AbortError)', { cn, r1 });
+      ok(gateOf(cn.ok) && cn.n === 1 && gateOf(r1) && r1.v === 'AbortError', 'S11 … and his Cancel ends it (the page sees AbortError)', { cn, r1 });
       await dcall('Target.closeTarget', { targetId: P1.tid });
       // S11c acceptance r2: his AUTOFILL request (the page's own, at load) is handed to Chrome as is (`pass`) and holds no queue.
       // Acceptance r3: Chrome takes ONE WebAuthn request per page — r3's run MEASURED his sign-in beside the open autofill request
@@ -275,10 +275,10 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
       P3.ev('signin()').then((r) => { m3 = { v: r && r.result && r.result.result ? r.result.result.value : null, ms: Date.now() - t3m }; });
       await sleep(PK.PENDING_SAID_MS + 400);
       const v3 = Wp.passkeyIn(PID, null), recs3 = P3.e().pk.records.map((r) => ({ conditional: !!r.conditional, outcome: r.outcome }));
-      ok(v3.state === 'passkey_open' && !!c3 && c3.v === 'AbortError' && recs3.some((r) => r.conditional && r.outcome === 'aborted-by-page') && recs3.some((r) => !r.conditional && r.outcome === 'pending') && m3 === null && !P3.e().pk.auth, `S11c his AUTOFILL request goes to Chrome as is; his own «Sign in with a passkey» that follows ENDS it first (the page's autofill promise: «${c3 ? c3.v : 'still open'}»${c3 ? ` at ${c3.ms} ms` : ''}) and reaches Chrome's own window — it waits there (passkey_open, no authenticator), never OperationError${m3 ? ` — measured: his sign-in ended «${m3.v}» in ${m3.ms} ms` : ''}`, { v3: v3.state, recs3, c3, m3 });
+      ok(v3.state === 'passkey_open' && !!c3 && c3.v === 'AbortError' && gateOf(recs3.some((r) => r.conditional && r.outcome === 'aborted-by-page')) && gateOf(recs3.some((r) => !r.conditional && r.outcome === 'pending')) && m3 === null && !P3.e().pk.auth, `S11c his AUTOFILL request goes to Chrome as is; his own «Sign in with a passkey» that follows ENDS it first (the page's autofill promise: «${c3 ? c3.v : 'still open'}»${c3 ? ` at ${c3.ms} ms` : ''}) and reaches Chrome's own window — it waits there (passkey_open, no authenticator), never OperationError${m3 ? ` — measured: his sign-in ended «${m3.v}» in ${m3.ms} ms` : ''}`, { v3: v3.state, recs3, c3, m3 });
       const cn3 = await Wp.cancelPasskey({ profileId: PID, browserKey: 'hu-pkstore0', ephemeral: true }, { by: 'user' });
       await until(() => m3 !== null, 4000);
-      ok(cn3.ok && cn3.n === 1 && m3 && m3.v === 'AbortError', 'S11c … and his Cancel ends his sign-in (AbortError)', { cn3, m3, c3 });
+      ok(gateOf(cn3.ok) && cn3.n === 1 && gateOf(m3) && m3.v === 'AbortError', 'S11c … and his Cancel ends his sign-in (AbortError)', { cn3, m3, c3 });
       await dcall('Target.closeTarget', { targetId: P3.tid });
       // S11b the vault key he CHOSE (his «always» on the key S3 stored): an authenticator for THAT ceremony only, Chrome's UI on
       // (enableUI true), removed when it ends — and what Chrome does with its own sheet then is MEASURED (said in the line).
@@ -303,7 +303,7 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
       const out2 = held2 ? `Chrome's own sheet held it ${3400} ms for his pick; his Cancel ⇒ «${r2c && r2c.v}»` : `«${d2.v}» in ${d2.ms} ms`, ms2 = held2 ? null : d2.ms;
       const cnt2 = (PSx.profileOf(JSON.parse(fs.readFileSync(PSTORE, 'utf8')), PID).rows[0] || {}).signCount;
       const en = sent.filter((x) => x.method === 'WebAuthn.enable'), add = sent.filter((x) => x.method === 'WebAuthn.addVirtualAuthenticator'), rm = sent.filter((x) => x.method === 'WebAuthn.removeVirtualAuthenticator');
-      ok(reArmed && kept.length >= 1 && en.length === 1 && en[0].ui === true && add.length === 1 && rm.length === 1 && !P2.e().pk.auth, `S11b the vault key he chose (policy yes): an authenticator for THAT ceremony only, Chrome's UI on, its key loaded, removed after — measured: ${out2} (the key's count on disk ${kept[0].signCount} → ${cnt2})`, { reArmed, kept: kept.length, sent, out2, ms2, cn2, count: [kept[0].signCount, cnt2] });
+      ok(gateOf(reArmed) && kept.length >= 1 && en.length === 1 && en[0].ui === true && add.length === 1 && rm.length === 1 && !P2.e().pk.auth, `S11b the vault key he chose (policy yes): an authenticator for THAT ceremony only, Chrome's UI on, its key loaded, removed after — measured: ${out2} (the key's count on disk ${kept[0].signCount} → ${cnt2})`, { reArmed, kept: kept.length, sent, out2, ms2, cn2, count: [kept[0].signCount, cnt2] });
       w0.ws.send = send0;
       await dcall('Target.closeTarget', { targetId: P2.tid }); Wp.shutdown(); await sleep(300);
 
@@ -370,11 +370,11 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
         say(`S12 MEASURED: ${JSON.stringify(m12)}`);
         if (process.env.PK_MEASURE_OUT) fs.appendFileSync(process.env.PK_MEASURE_OUT, JSON.stringify({ at: new Date().toISOString(), m12, lA, lB, cArmed, authC, sentC }) + '\n'); // (the measuring round only — a green run's output is not kept)
         const signed = (x) => /(^|· )ok in \d+ ms$/.test(String(x));
-        ok(lA.ok && lB.ok && signed(m12.A_live) && signed(m12.B_live) && signed(m12.A_live_reloaded) && signed(m12.B_live_reloaded),
+        ok(gateOf(lA.ok) && gateOf(lB.ok) && gateOf(signed(m12.A_live)) && gateOf(signed(m12.B_live)) && gateOf(signed(m12.A_live_reloaded)) && verdictOf(signed(m12.B_live_reloaded)),
           `S12 (d) the CONTROL: while the lending session lives the page signs at once — «${m12.A_live}» / «${m12.B_live}», after a reload «${m12.A_live_reloaded}» / «${m12.B_live_reloaded}» (the look can see a live authenticator)`, { lA, lB, m12 });
         ok(!signed(m12.A_closed_look) && !signed(m12.A_closed) && !signed(m12.B_detached_look) && !signed(m12.B_detached),
           `S12 (d) the lending CONNECTION closed ⇒ «${m12.A_closed_look}» / «${m12.A_closed}»; its SESSION detached ⇒ «${m12.B_detached_look}» / «${m12.B_detached}»: Chrome took the authenticator, its key and UV with the session`, m12);
-        ok(cArmed && !!lentC && !!authC && !signed(m12.C_gone),
+        ok(gateOf(cArmed) && !!lentC && !!authC && !signed(m12.C_gone),
           `S12 (d) the person's watch lent the vault key (Chrome's UI on), the hub gone mid-ceremony (no clean-up) ⇒ the page «${m12.C_page}», then «${m12.C_gone}»: nothing of the lent key signs — a restart needs no sweep at re-arm`, { cArmed, lentC: !!lentC, authC, sentC, m12 });
         // S13 (B-97ae round 2, MUST 3(i) — MEASURED first): what Chrome SAYS when a tab's renderer CRASHES during a lend and when
         // the tab is reloaded after it — on a connection holding the tab's session (as the watch's: Target discovery on, Runtime /
@@ -418,9 +418,9 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
         wD.ws.send = sendD0; await dcall('Target.closeTarget', { targetId: Y.tid }); Wd.shutdown(); await sleep(300);
         say(`S13 MEASURED: ${JSON.stringify(m13)}`);
         if (process.env.PK_MEASURE_OUT) fs.appendFileSync(process.env.PK_MEASURE_OUT, JSON.stringify({ at: new Date().toISOString(), s13: m13, l13 }) + '\n');
-        ok(l13.ok && signed(m13.live) && m13.afterCrash.includes('b:Target.targetCrashed') && !m13.afterCrash.some((x) => /executionContext/.test(x)) && m13.credsAfterCrash === 1 && signed(m13.lookAfterReload),
+        ok(gateOf(l13.ok) && gateOf(signed(m13.live)) && gateOf(m13.afterCrash.includes('b:Target.targetCrashed')) && !m13.afterCrash.some((x) => /executionContext/.test(x)) && m13.credsAfterCrash === 1 && verdictOf(signed(m13.lookAfterReload)),
           `S13 (MUST 3(i)) MEASURED on real Chrome — a renderer crash during a lend says ${JSON.stringify(m13.afterCrash)} (no context event); the lent authenticator keeps its key (${m13.credsAfterCrash}); the reload says ${JSON.stringify(m13.afterReload)}; the key is still there (${m13.credsAfterReload}) and the reloaded page signs with it «${m13.lookAfterReload}» — so the CRASH must end the ceremony`, m13);
-        ok(m13.watch.armed && m13.watch.lent && m13.watch.ended && /Could not find a Virtual Authenticator|Virtual Authenticator Environment has not been enabled/.test(m13.watch.look), // either is GONE: the authenticator removed, then its environment disabled (measured)
+        ok(gateOf(m13.watch.armed) && gateOf(m13.watch.lent) && gateOf(m13.watch.ended) && verdictOf(/Could not find a Virtual Authenticator|Virtual Authenticator Environment has not been enabled/.test(m13.watch.look)), // either is GONE: the authenticator removed, then its environment disabled (measured)
           `S13b the watch on a crash: the person's watch lent the vault key, the renderer crashed ⇒ the ceremony ended and the lent authenticator removed in ${m13.watch.ms} ms (the watch's own session: «${m13.watch.look}»; sent ${JSON.stringify(m13.watch.sent)})`, m13.watch);
         c13.ws.close(); await dcall('Target.closeTarget', { targetId: X13.tid });
         // S14 (B-97ae round 3 MUST 3 — MEASURED): what Chrome reports as an UNTITLED page's title (TargetInfo.title), and the name the
@@ -430,7 +430,7 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
         const iU = await until(async () => { const r = await dcall('Target.getTargetInfo', { targetId: tU }); const ti = r.result && r.result.targetInfo; return ti && ti.url === UA && ti.title ? ti : null; }, 6000);
         const m14 = { title: iU ? iU.title : null, url: iU ? iU.url : null, named: iU ? D.tabName({ title: iU.title, url: iU.url }) : null };
         if (process.env.PK_MEASURE_OUT) fs.appendFileSync(process.env.PK_MEASURE_OUT, JSON.stringify({ at: new Date().toISOString(), s14: m14 }) + '\n');
-        ok(!!iU && /untitled\?token=abc123/.test(m14.title) && m14.named === new URL(UA).origin && !/token|email/.test(m14.named),
+        ok(!!iU && gateOf(/untitled\?token=abc123/.test(m14.title)) && m14.named === new URL(UA).origin && !/token|email/.test(m14.named),
           `S14 (MUST 3) MEASURED on real Chrome: an untitled page's TargetInfo.title is «${m14.title}» (its address) — the watch names that tab «${m14.named}», the origin, never the query`, m14);
         await dcall('Target.closeTarget', { targetId: tU });
         for (const t of [A, B, C]) await dcall('Target.closeTarget', { targetId: t.tid });
@@ -454,7 +454,7 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
       const Wm = mk(require(path.join(M, 'server/browser-dialogs.js')), require(path.join(M, 'browser-passkey-store.js')));
       await Wm.arm(PID, { budgetMs: 5000 }); const Tm = await tab(Wm);
       let red = false; try { red = await leg(Wm, Tm); } catch (e) { red = true; }
-      ok(red, `CONTROL ${name} ⇒ its leg is RED`);
+      ok(verdictOf(red), `CONTROL ${name} ⇒ its leg is RED`);
       await Tm.close(); Wm.shutdown(); await sleep(300);
     };
     await mutant('"skip removeCredential at end"', 'dialogs', "await call(w, 'WebAuthn.removeCredential',", "void 0 && call(w, 'WebAuthn.removeCredential',", async (Wm, Tm) => { await Tm.run('signin()'); await sleep(300); return (await Tm.creds()) !== 0; });
@@ -477,7 +477,7 @@ await storeLegs();
 // executionContextName (the binding must be isolated-world; a planted bare call is RED here and reopens the §2.8 window).
 { const dsrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const calls = dsrc0.match(/Runtime\.addBinding'[^\n;]*/g) || [];
-  ok(calls.length >= 1 && calls.every((l) => /executionContextName/.test(l)), `census: every Runtime.addBinding in the watch is isolated-world (executionContextName) \u2014 ${calls.length} call(s)`, calls); }
+  ok(calls.length >= 1 && verdictOf(calls.every((l) => /executionContextName/.test(l))), `census: every Runtime.addBinding in the watch is isolated-world (executionContextName) \u2014 ${calls.length} call(s)`, calls); }
 
 // ── LANE PASSKEY-SINK (2026-10-25, P2 of the custom browser kernel — design-custom-browser-plugin §3): THE KERNEL LEG. On a
 // kernel whose `features` list `webauthn` there is no Chrome authenticator at all: the browser is the fake kernel
@@ -544,20 +544,20 @@ async function kernelLegs(Dm, tag) {
 {
   const Dk = require('../src/server/browser-dialogs.js');
   const K = await kernelLegs(Dk, 'real');
-  ok(K.K1, 'K1 the kernel road: register (the owner\'s one-use grant) ⇒ the key made on the server, sealed in the store FILE (0600, key file 0600), the attestation names its public half — no plaintext in the file', K);
-  ok(K.K2sig, 'K2 the fake kernel\'s triggerWebAuthn ⇒ our get.signature VERIFIES against the SEALED key\'s public half (opened from the file through the key file)', K);
-  ok(K.K2uv, 'K2 … UP without UV: a policy-yes release is automatic — never the owner\'s verification', K);
-  ok(K.K3, `K3 the next sign-in ⇒ the count strictly increases and the file holds it (${JSON.stringify(K.counts)})`, K);
-  ok(K.K4, 'K4 a clientDataJSON naming another origin ⇒ refused webauthn_rp_mismatch, the page told NotAllowedError, nothing signed (VibeSpace re-checks — never trusts the kernel)', K);
-  ok(K.K5, 'K5 `passkey cancel` ⇒ VibeSpace.cancelSurface: the stub\'s promise lands `cancelled`, the page sees NotAllowedError', K);
-  ok(K.uses && K.uses.length === 3 && /register a passkey on example\.test/.test(K.uses[0]), 'the use law: the new key + two signatures = three uses through the vault\'s writer (purposes only)', K.uses);
+  ok(verdictOf(K.K1), 'K1 the kernel road: register (the owner\'s one-use grant) ⇒ the key made on the server, sealed in the store FILE (0600, key file 0600), the attestation names its public half — no plaintext in the file', K);
+  ok(verdictOf(K.K2sig), 'K2 the fake kernel\'s triggerWebAuthn ⇒ our get.signature VERIFIES against the SEALED key\'s public half (opened from the file through the key file)', K);
+  ok(verdictOf(K.K2uv), 'K2 … UP without UV: a policy-yes release is automatic — never the owner\'s verification', K);
+  ok(verdictOf(K.K3), `K3 the next sign-in ⇒ the count strictly increases and the file holds it (${JSON.stringify(K.counts)})`, K);
+  ok(verdictOf(K.K4), 'K4 a clientDataJSON naming another origin ⇒ refused webauthn_rp_mismatch, the page told NotAllowedError, nothing signed (VibeSpace re-checks — never trusts the kernel)', K);
+  ok(verdictOf(K.K5), 'K5 `passkey cancel` ⇒ VibeSpace.cancelSurface: the stub\'s promise lands `cancelled`, the page sees NotAllowedError', K);
+  ok(gateOf(K.uses) && K.uses.length === 3 && verdictOf(/register a passkey on example\.test/.test(K.uses[0])), 'the use law: the new key + two signatures = three uses through the vault\'s writer (purposes only)', K.uses);
   // THE THREE CONTROLS — mutant copies of the watch, each RED on its own leg
   const MUTK = mutantCopies('bpasskey-kernel', REPO);
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const control = async (name, from, to, red) => {
     if (!dsrc.includes(from)) return ok(false, `CONTROL ${name}: the anchor moved`, from);
     const Km = await kernelLegs(MUTK.load('src/server/browser-dialogs.js', editAnchor(dsrc, from, to, "src/server/browser-dialogs.js"), name.replace(/\W+/g, '-')), name.replace(/\W+/g, '-'));
-    return ok(red(Km), `CONTROL ${name} ⇒ its leg is RED`, Km);
+    return ok(verdictOf(red(Km)), `CONTROL ${name} ⇒ its leg is RED`, Km);
   };
   await control('uv always true', 'const f = PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === \'human\', userVerification: q.userVerification });', 'const f = { ...PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === \'human\', userVerification: q.userVerification }), uv: true };', (Km) => Km.K2sig && !Km.K2uv);
   await control('signCount not advanced', 'const used = PS.reconcile(PS.bumpSignCount(row).row, 0, now());', 'const used = PS.reconcile(row, 0, now());', (Km) => Km.K2sig && !Km.K3);
@@ -711,7 +711,7 @@ try {
     const ch = w.chrome();
     const c = xDisplayOf(ch);
     const headless = !ch || ch.argv.join(' ').includes('--headless');
-    ok(ch && !headless && c && /^:\d+$/.test(c.DISPLAY), `the browser is on the HIDDEN-WINDOW rung: a windowed Chrome on its daemon's own Xvfb (DISPLAY=${c && c.DISPLAY}, never the owner's)`, ch && ch.argv.join(' ').slice(0, 300));
+    ok(gateOf(ch) && !headless && gateOf(c) && verdictOf(/^:\d+$/.test(c.DISPLAY)), `the browser is on the HIDDEN-WINDOW rung: a windowed Chrome on its daemon's own Xvfb (DISPLAY=${c && c.DISPLAY}, never the owner's)`, ch && ch.argv.join(' ').slice(0, 300));
     let r = await w.cli(['open', U('/pk')]);
     ok(r.code === 0, 'the agent opened the local passkey page', r);
     const before = xwins(c), treeB = xtree(c);
@@ -721,7 +721,7 @@ try {
     const t0 = Date.now();
     r = await w.cli(['click', '#go']);
     const st = await until(() => starts(t0)[0], 5000);
-    ok(r.code === 0 && st && st.kind === 'get' && st.rpId === 'localhost', `(a) the agent's click starts navigator.credentials.get ⇒ the watch hears \`start\` (rpId localhost) ${st ? st.at - t0 : '?'} ms after the click — the binding works after the hook's \`delete\``, { r, SEEN });
+    ok(r.code === 0 && gateOf(st) && st.kind === 'get' && st.rpId === 'localhost', `(a) the agent's click starts navigator.credentials.get ⇒ the watch hears \`start\` (rpId localhost) ${st ? st.at - t0 : '?'} ms after the click — the binding works after the hook's \`delete\``, { r, SEEN });
     const s0 = st ? st.at : t0;
     // a verb issued before 3 s and still running at 3 s (`wait 10000` — an ACTING verb) is woken at 3 s by passkey_open;
     // a click meanwhile ACTS (measured: Chrome's own passkey window does not stop CDP input to the page)
@@ -733,36 +733,36 @@ try {
     const during = xwins(c), treeD = xtree(c);
     say(`the Xvfb's windows during: ${JSON.stringify(during)}; NEW in the tree: ${JSON.stringify(newIn(treeB, treeD))}`);
     const gD = scrimOf(c, 'during');
-    ok(gB > 240 && gD < 160 && during && before && during.length === before.length, `(b) Chrome's OWN passkey dialog is up on the hidden display — tab-modal (${before && before.length} → ${during && during.length} X windows), the page under its scrim (grey ${gB} → ${gD})`, { before, during, gB, gD });
+    ok(gB > 240 && gD < 160 && gateOf(during) && gateOf(before) && during.length === before.length, `(b) Chrome's OWN passkey dialog is up on the hidden display — tab-modal (${before && before.length} → ${during && during.length} X windows), the page under its scrim (grey ${gB} → ${gD})`, { before, during, gB, gD });
     const fl = await inflight;
     say(`the verb in flight (issued ${fl.at - s0} ms after start): exit ${fl.code} after ${fl.ms} ms; ${(fl.out + fl.err).replace(/\s+/g, ' ').slice(0, 160)}`);
-    ok(fl.code !== 0 && /passkey_open/.test(fl.out + fl.err) && fl.exitAt - s0 >= 2900 && fl.exitAt - s0 < 4500, `(a) the verb in flight (\`wait 10000\`) is WOKEN at 3 s with [passkey_open] (${fl.exitAt - s0} ms after start)`, fl);
+    ok(fl.code !== 0 && gateOf(/passkey_open/.test(fl.out + fl.err)) && fl.exitAt - s0 >= 2900 && fl.exitAt - s0 < 4500, `(a) the verb in flight (\`wait 10000\`) is WOKEN at 3 s with [passkey_open] (${fl.exitAt - s0} ms after start)`, fl);
     r = await w.cli(['click', '#n']);
-    ok(r.code !== 0 && (r.out + r.err).includes(HEAD) && /passkey_open/.test(r.out + r.err) && r.ms < 5000, `(a) the next \`click\` answers THE SENTENCE with [passkey_open] (${r.ms} ms) instead of acting`, r);
+    ok(r.code !== 0 && gateOf((r.out + r.err).includes(HEAD)) && gateOf(/passkey_open/.test(r.out + r.err)) && r.ms < 5000, `(a) the next \`click\` answers THE SENTENCE with [passkey_open] (${r.ms} ms) instead of acting`, r);
     const stuck = w.dialogs.stuckForKey(w.KEY);
     const words = stuck && stuck.state === 'passkey' ? PK.passkeyWords(stuck.passkey, null, { headed: stuck.headed === true }) : null;
     // the desktop note only where the window IS on a desktop (lane browser-passkey-chrome's fix: Chrome says it is headed
     // here, but its window — and the tab-modal dialog in it — is on the CLI's own Xvfb, which nobody sees)
     const rung = ((w.kk.browserOf(w.prof.id) || {}).display || {}).fallback;
-    ok(words && words.title === 'This page is waiting for a passkey (localhost)' && words.cancel && rung && rung.rung === 'hidden-window' && stuck.headed === false && words.desktop === '', `(a) the live view\'s banner: the stuck fact \`passkey\` ⇒ the title, ONE Cancel — and NO desktop note on the hidden-window rung (the keeper\'s display fact: ${rung && rung.rung})`, { stuck, words, rung });
+    ok(gateOf(words) && words.title === 'This page is waiting for a passkey (localhost)' && gateOf(words.cancel) && gateOf(rung) && rung.rung === 'hidden-window' && stuck.headed === false && words.desktop === '', `(a) the live view\'s banner: the stuck fact \`passkey\` ⇒ the title, ONE Cancel — and NO desktop note on the hidden-window rung (the keeper\'s display fact: ${rung && rung.rung})`, { stuck, words, rung });
     // (f) the For-you item after 20 s — ONE
     await until(() => FY.adds.length > 0, 22000, 100);
     await sleep(1200);
     const fy = FY.adds[0];
-    ok(FY.adds.length === 1 && fy.at - s0 >= 20000 && fy.at - s0 < 21500 && /waiting for a passkey \(localhost\)/.test(fy.item.text), `(f) ONE For-you item ${fy ? fy.at - s0 : '?'} ms after start`, FY);
+    ok(FY.adds.length === 1 && fy.at - s0 >= 20000 && fy.at - s0 < 21500 && verdictOf(/waiting for a passkey \(localhost\)/.test(fy.item.text)), `(f) ONE For-you item ${fy ? fy.at - s0 : '?'} ms after start`, FY);
     r = await w.cli(['passkey', 'status']);
     say(`passkey status: exit ${r.code}; ${(r.out + r.err).replace(/\s+/g, ' ').slice(0, 200)}`);
     // (b) cancel
     const tc = Date.now();
     r = await w.cli(['passkey', 'cancel']);
     const ab = await until(() => last('pk', 'pk', tc), 3000);
-    ok(r.code === 0 && ab && ab.v === 'AbortError' && ab.at - r.exitAt < 1000, `(b) \`passkey cancel\` ⇒ the page's catch reports AbortError ${ab ? ab.at - r.exitAt : '?'} ms after the verb returned (${ab ? ab.at - tc : '?'} ms after it started)`, { r, ab });
+    ok(r.code === 0 && gateOf(ab) && ab.v === 'AbortError' && ab.at - r.exitAt < 1000, `(b) \`passkey cancel\` ⇒ the page's catch reports AbortError ${ab ? ab.at - r.exitAt : '?'} ms after the verb returned (${ab ? ab.at - tc : '?'} ms after it started)`, { r, ab });
     const ended = await until(() => SEEN.find((x) => x.ev === 'end' && x.at >= tc), 2000);
-    ok(ended && ended.outcome === 'cancelled' && ended.name === 'AbortError', '(b) the hook reports `end cancelled` (AbortError)', ended);
+    ok(gateOf(ended) && ended.outcome === 'cancelled' && ended.name === 'AbortError', '(b) the hook reports `end cancelled` (AbortError)', ended);
     const gA = await until(() => { const g = scrimOf(c, 'after'); return g > 240 ? g : null; }, 3000, 100);
     const after = xwins(c);
     say(`the Xvfb's windows after: ${JSON.stringify(after)}; NEW in the tree: ${JSON.stringify(newIn(treeB, xtree(c)))}`);
-    ok(gA && after && after.length === before.length, `(b) Chrome's own passkey dialog is GONE after the cancel (grey ${gD} → ${gA}, ${after && after.length} X windows)`, { gA, after });
+    ok(gateOf(gA) && gateOf(after) && after.length === before.length, `(b) Chrome's own passkey dialog is GONE after the cancel (grey ${gD} → ${gA}, ${after && after.length} X windows)`, { gA, after });
     const st2 = w.dialogs.stuckForKey(w.KEY);
     ok(!st2 || st2.state !== 'passkey', '(b) the banner goes (the stuck fact is no longer `passkey`)', st2);
     const fr = await until(() => FY.resolves.find((x) => x.id === fy.id), 2000);
@@ -776,15 +776,15 @@ try {
     r = await w.cli(['click', '#pw']);
     const pw = await until(() => last('pk', 'pw', tp), 5000);
     await sleep(300);
-    ok(r.code === 0 && pw && /^ok:/.test(pw.v) && !starts(tp).length, `(g) credentials.get({password:true}) passes through untouched (${pw && pw.v}; no record)`, { pw, SEEN: starts(tp) });
+    ok(r.code === 0 && gateOf(pw) && gateOf(/^ok:/.test(pw.v)) && !starts(tp).length, `(g) credentials.get({password:true}) passes through untouched (${pw && pw.v}; no record)`, { pw, SEEN: starts(tp) });
     // (e) runImmediately: the inline script at document start — the same tab (an armed tab's next document)
     const te = Date.now();
     r = await w.cli(['open', U('/early-same')]);
     const es = await until(() => starts(te)[0], 5000);
-    ok(es && es.rpId === 'localhost', `(e) a page calling credentials.get in an inline script at document start is hooked on the armed tab (start ${es ? es.at - te : '?'} ms after open)`, { r, SEEN: SEEN.slice(-3) });
+    ok(gateOf(es) && es.rpId === 'localhost', `(e) a page calling credentials.get in an inline script at document start is hooked on the armed tab (start ${es ? es.at - te : '?'} ms after open)`, { r, SEEN: SEEN.slice(-3) });
     r = await w.cli(['passkey', 'cancel']);
     const ea = await until(() => last('early-same', 'pk', te), 3000);
-    ok(ea && ea.v === 'AbortError', `(e) …and cancellable (${ea && ea.v})`, r);
+    ok(gateOf(ea) && ea.v === 'AbortError', `(e) …and cancellable (${ea && ea.v})`, r);
     // (e) a NEW tab: the hook arms after the target appears — measured and said
     const tt = Date.now();
     r = await w.cli(['tab', 'new', U('/early-new')]);
@@ -793,7 +793,7 @@ try {
     await sleep(3200);
     const nv = await w.cli(['passkey', 'status']);
     say(`(e) passkey status on it: ${(nv.out + nv.err).replace(/\s+/g, ' ').slice(0, 220)}`);
-    if (ns) { r = await w.cli(['passkey', 'cancel']); const na = await until(() => last('early-new', 'pk', tt), 3000); ok(na && na.v === 'AbortError', `(e) the new tab's ceremony is cancellable (${na && na.v})`, r); }
+    if (ns) { r = await w.cli(['passkey', 'cancel']); const na = await until(() => last('early-new', 'pk', tt), 3000); ok(gateOf(na) && na.v === 'AbortError', `(e) the new tab's ceremony is cancellable (${na && na.v})`, r); }
     else ok(!/passkey_open/.test(nv.out + nv.err), '(e) a new tab\'s unhooked first document never reads passkey_open (the limit, said)', nv);
     // (c) CONTROL 1: a virtual authenticator holding a resident credential — the ceremony completes
     r = await w.cli(['open', U('/vauth')]);
@@ -804,7 +804,7 @@ try {
     const a2 = cdp && await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true } });
     const aid = a2 && a2.result && a2.result.authenticatorId;
     const a3 = aid && await cdp.send('WebAuthn.addCredential', { authenticatorId: aid, credential: { credentialId: Buffer.from('vs-passkey-control').toString('base64'), isResidentCredential: true, rpId: 'localhost', privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'), userHandle: Buffer.from('vs-user').toString('base64'), signCount: 0 } });
-    ok(a1 && !a1.error && aid && a3 && !a3.error, 'CONTROL 1: WebAuthn.enable + addVirtualAuthenticator (ctap2, internal, UV) + a resident credential for localhost', { a1, a2, a3 });
+    ok(gateOf(a1) && !a1.error && gateOf(aid) && gateOf(a3) && !a3.error, 'CONTROL 1: WebAuthn.enable + addVirtualAuthenticator (ctap2, internal, UV) + a resident credential for localhost', { a1, a2, a3 });
     const tv = Date.now(); const ev0 = w.events.length;
     // r4456 (the flake census, round 2): the hook's `end` reaches the server by its CDP binding, a channel apart from the page's own
     // report (vo) — so the leg WAITS for the `end` record (generous, its expiry a named harness line), then reads the events: a
@@ -823,7 +823,7 @@ try {
     ok(!!(vo && heldEnd && asStood === null && ve), `(c) CONTROL 1 PLACED (r4456): the end's record HELD, read as the leg stood (right after the page said ${vo && vo.v}) there is no end (${asStood === null}) — the control red with nothing wrong; the wait reads it once let go (${ve && ve.outcome})`, { vo, asStood, ve });
     const applied = await until(() => endedByProduct(w.events.slice(ev0)) || null, 15000);
     if (!applied) say('HARNESS (c): the product did not say «none» after the ceremony\'s «pending» within 15000 ms (its end never applied)');
-    ok(vo && vo.v === 'ok' && ve && ve.outcome === 'ok' && applied && !w.events.slice(ev0).some((e) => e.state === PK.PASSKEY_OPEN_CODE), `(c) CONTROL 1: the ceremony completes — \`end ok\`, the page says ${vo && vo.v}, and once the PRODUCT has applied the end (its own «none» after «pending»: ${!!applied}) never passkey_open (${w.events.slice(ev0).map((e) => e.state).join(' → ')})`, { vo, ve, ev: w.events.slice(ev0) });
+    ok(gateOf(vo) && vo.v === 'ok' && gateOf(ve) && ve.outcome === 'ok' && gateOf(applied) && !w.events.slice(ev0).some((e) => e.state === PK.PASSKEY_OPEN_CODE), `(c) CONTROL 1: the ceremony completes — \`end ok\`, the page says ${vo && vo.v}, and once the PRODUCT has applied the end (its own «none» after «pending»: ${!!applied}) never passkey_open (${w.events.slice(ev0).map((e) => e.state).join(' → ')})`, { vo, ve, ev: w.events.slice(ev0) });
     // ITS RED (r4579): a COPY of the product's apply that DROPS the end's match (src/browser-passkey.js applyEvent's record lookup cut,
     // through the one door for a control's edit): the record stays pending and the product says passkey_open from its own timer. The
     // reading of 8b5064ba9 (the events read at the end's arrival) is green there; the reading above waits for the product's «none», which
@@ -851,7 +851,7 @@ try {
   // the product line as it stands (2.369.271, f57d1cbe9, added executionContextName: the hook's binding lives in its own world); the needle
   // was the line before it — this control never ran on the declared driver until the box read it (row 438, r2876's gate), so nobody saw it
   const needle = "const r1 = await call(w, 'Runtime.addBinding', { name: e.pk.binding, executionContextName: w.pkWorld }, sid);";
-  ok(dsrc.includes(needle), 'CONTROL 2: the addBinding step is where this suite removes it');
+  ok(verdictOf(dsrc.includes(needle)), 'CONTROL 2: the addBinding step is where this suite removes it');
   const Dmut = MUT.load('src/server/browser-dialogs.js', editAnchor(dsrc, needle, 'const r1 = null;', "src/server/browser-dialogs.js"), 'no-arm');
   let wc = null;
   try { wc = await world('ctl', { Dmod: Dmut }); } catch (e) { skip(`CONTROL 2: the keeper could not launch a browser here: ${e && e.message}`); }
@@ -864,8 +864,8 @@ try {
     const fl = await inflight;
     const s = await wc.cli(['passkey', 'status']);
     const st = wc.dialogs.stuckForKey(wc.KEY);
-    ok(!starts(tk).length && /cannot see passkey requests/.test(s.out + s.err) && (!st || st.state !== 'passkey') && fl.code === 0 && fl.ms >= 4800 && !/passkey_open/.test(fl.out + fl.err) && !wc.events.length, `(d) CONTROL 2: a watch whose hook never armed ⇒ \`unknown\`, no banner, the verb in flight not woken (\`wait 5000\` exited ${fl.code} after ${fl.ms} ms)`, { s, st, fl, ev: wc.events });
+    ok(!starts(tk).length && gateOf(/cannot see passkey requests/.test(s.out + s.err)) && (!st || st.state !== 'passkey') && fl.code === 0 && fl.ms >= 4800 && !/passkey_open/.test(fl.out + fl.err) && !wc.events.length, `(d) CONTROL 2: a watch whose hook never armed ⇒ \`unknown\`, no banner, the verb in flight not woken (\`wait 5000\` exited ${fl.code} after ${fl.ms} ms)`, { s, st, fl, ev: wc.events });
     await wc.close();
   }
 } catch (e) { ok(false, 'the suite threw', String(e && e.stack)); }
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

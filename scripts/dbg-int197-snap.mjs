@@ -54,7 +54,7 @@ if (skipWhy) { console.log(`SKIP: ${skipWhy}`); process.exit(0); }
 const VW = 1920, VH = 963, SIDEBAR = 470;
 
 let failed = 0, skipped = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
 const skip = (n, why) => { skipped++; console.log(`  ⚠ SKIP ${n}: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
@@ -114,7 +114,7 @@ const bootServer = async (wt, name) => {
 const wt = mkTree('deskapp-snap');
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 const S = await bootServer(wt, 'deskapp-snap-home');
-check('the worktree server boots (under its own dbus-run-session)', S.up);
+check('the worktree server boots (under its own dbus-run-session)', verdictOf(S.up));
 const [CDP_PORT] = await freePorts(1);
 chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', `--window-size=${VW},${VH + 100}`, `--user-data-dir=${CHROME_DIR}`, 'about:blank'], { stdio: 'ignore', detached: true });
 const WebSocket = require('ws');
@@ -404,17 +404,17 @@ try {
     if (res.rows.length === want.length) {
       if (cfg.app === 'chromium' && cfg.dpr === 2 && cfg.ui === 1) {
         const o = res.rows.find((r) => r.a === 'grid13');
-        check(`THE OWNER'S CASE (inc-muhmqvzf-jodk): Chrome at DPR 2 / UI 100 % on a 1920×963 page with the sidebar at ${SIDEBAR}, snapped into the right third of a 1×3 grid — the window ends at ${o.win.r.toFixed(1)} ≤ the workspace's ${o.ws.r.toFixed(1)}, 0 px of the picture outside the pane or the workspace (R ${o.picHidR} / B ${o.picHidB} CSS), the picture's last 40 device columns FOUND on screen (${o.px.right.ok}/${o.px.right.n}) — Chrome's own ⋮ and ✕ there`, clean(o) && o.picHidR === 0 && o.picHidB === 0, { faults: faults(o), row: fmt(o) });
+        check(`THE OWNER'S CASE (inc-muhmqvzf-jodk): Chrome at DPR 2 / UI 100 % on a 1920×963 page with the sidebar at ${SIDEBAR}, snapped into the right third of a 1×3 grid — the window ends at ${o.win.r.toFixed(1)} ≤ the workspace's ${o.ws.r.toFixed(1)}, 0 px of the picture outside the pane or the workspace (R ${o.picHidR} / B ${o.picHidB} CSS), the picture's last 40 device columns FOUND on screen (${o.px.right.ok}/${o.px.right.n}) — Chrome's own ⋮ and ✕ there`, gateOf(clean(o)) && o.picHidR === 0 && o.picHidB === 0, { faults: faults(o), row: fmt(o) });
       }
       if (want.length > ACTS.length) {
         // r2 — THE VERIFIER'S FLOWS, each its own line: a box the window manager kept ITSELF through a minimize / a maximize
         // while the sidebar opened, the cascade through the captured fractions, the phone round trip on whole layout px
         const row = (a) => res.rows.find((r) => r.a === a);
         const w0 = row('sb0grid13'), mr = row('minrestore'), mx = row('maxsb'), wd = row('widen'), nr = row('narrow'), ph = row('phone');
-        check(`r2 FLOW (a): ${name} — the sidebar CLOSED, the right third of 1×3 (window ${w0.win.x.toFixed(0)}–${w0.win.r.toFixed(0)} on a workspace ending at ${w0.ws.r.toFixed(0)}) → minimize → the sidebar opens → restore: the window ends at ${mr.win.r.toFixed(1)} ≤ ${mr.ws.r.toFixed(1)}, ${mr.devHid} device px of the picture past the workspace (pre-r2: 842)`, clean(mr) && mr.devHid === 0 && mr.wsHidR <= 0.5, { faults: faults(mr), row: fmt(mr) });
-        check(`r2 FLOW (b): ${name} — the same drop → maximize → the sidebar opens → un-maximize: the window ends at ${mx.win.r.toFixed(1)} ≤ ${mx.ws.r.toFixed(1)}, ${mx.devHid} device px of the picture past the workspace (pre-r2: 842)`, clean(mx) && mx.devHid === 0 && mx.wsHidR <= 0.5, { faults: faults(mx), row: fmt(mx) });
-        check(`r2 THE CASCADE: ${name} — the sidebar closed again (${wd.win.x.toFixed(0)}–${wd.win.r.toFixed(0)} ≤ ${wd.ws.r.toFixed(0)}, ${wd.devHid} device px) and opened again (${nr.win.x.toFixed(0)}–${nr.win.r.toFixed(0)} ≤ ${nr.ws.r.toFixed(0)}, ${nr.devHid} device px) — the captured fractions never hang (pre-r2: 1090 on the widening, 842 on the narrowing)`, clean(wd) && clean(nr) && wd.devHid === 0 && nr.devHid === 0, { widen: fmt(wd), narrow: fmt(nr), faults: [...faults(wd), ...faults(nr)] });
-        check(`r2 WHOLE PX: ${name} — a phone viewport (390×844) and back: the window on whole layout px (${ph.win.style.join(' ')}), the picture EXACTLY 0 past its pane (R ${ph.picHidR} / B ${ph.picHidB} CSS; the verifier's pre-r2 0.55 / 0.47 — 727.03px-class fractions)`, clean(ph) && ph.picHidR === 0 && ph.picHidB === 0 && ph.win.style.every((v) => /^-?\d+px$/.test(v)), { faults: faults(ph), row: fmt(ph), style: ph.win.style });
+        check(`r2 FLOW (a): ${name} — the sidebar CLOSED, the right third of 1×3 (window ${w0.win.x.toFixed(0)}–${w0.win.r.toFixed(0)} on a workspace ending at ${w0.ws.r.toFixed(0)}) → minimize → the sidebar opens → restore: the window ends at ${mr.win.r.toFixed(1)} ≤ ${mr.ws.r.toFixed(1)}, ${mr.devHid} device px of the picture past the workspace (pre-r2: 842)`, gateOf(clean(mr)) && mr.devHid === 0 && mr.wsHidR <= 0.5, { faults: faults(mr), row: fmt(mr) });
+        check(`r2 FLOW (b): ${name} — the same drop → maximize → the sidebar opens → un-maximize: the window ends at ${mx.win.r.toFixed(1)} ≤ ${mx.ws.r.toFixed(1)}, ${mx.devHid} device px of the picture past the workspace (pre-r2: 842)`, gateOf(clean(mx)) && mx.devHid === 0 && mx.wsHidR <= 0.5, { faults: faults(mx), row: fmt(mx) });
+        check(`r2 THE CASCADE: ${name} — the sidebar closed again (${wd.win.x.toFixed(0)}–${wd.win.r.toFixed(0)} ≤ ${wd.ws.r.toFixed(0)}, ${wd.devHid} device px) and opened again (${nr.win.x.toFixed(0)}–${nr.win.r.toFixed(0)} ≤ ${nr.ws.r.toFixed(0)}, ${nr.devHid} device px) — the captured fractions never hang (pre-r2: 1090 on the widening, 842 on the narrowing)`, gateOf(clean(wd)) && gateOf(clean(nr)) && wd.devHid === 0 && nr.devHid === 0, { widen: fmt(wd), narrow: fmt(nr), faults: [...faults(wd), ...faults(nr)] });
+        check(`r2 WHOLE PX: ${name} — a phone viewport (390×844) and back: the window on whole layout px (${ph.win.style.join(' ')}), the picture EXACTLY 0 past its pane (R ${ph.picHidR} / B ${ph.picHidB} CSS; the verifier's pre-r2 0.55 / 0.47 — 727.03px-class fractions)`, gateOf(clean(ph)) && ph.picHidR === 0 && ph.picHidB === 0 && verdictOf(ph.win.style.every((v) => /^-?\d+px$/.test(v))), { faults: faults(ph), row: fmt(ph), style: ph.win.style });
       }
       const bad = res.rows.filter((r) => !clean(r));
       check(`${name}: every act (${want.join(', ')}) leaves the window, the pane and the picture inside the workspace, the picture's right / bottom edge pixels on screen (${((Date.now() - t0) / 1000).toFixed(0)} s)${bad.length ? ` — not clean: ${bad.map((r) => r.a).join(', ')}` : ''}`, !bad.length, bad.map((r) => `${r.a}: ${faults(r).join('; ')}`));
@@ -436,10 +436,10 @@ try {
   ];
   let once = true;
   for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtc, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 80)}`); } fs.writeFileSync(path.join(wtc, f), src.replace(from, to)); }
-  check('CONTROL: each placement lever (r1 + r2) is spelled exactly once in window.js (the copy pulls back exactly those)', once);
+  check('CONTROL: each placement lever (r1 + r2) is spelled exactly once in window.js (the copy pulls back exactly those)', verdictOf(once));
   execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
   const C = await bootServer(wtc, 'deskapp-snap-ctl-home');
-  check('CONTROL: the pre-fix copy boots', C.up);
+  check('CONTROL: the pre-fix copy boots', verdictOf(C.up));
   if (C.up) {
     const o = await runConfig(C.origin, { app: 'chromium', dpr: 2, ui: 1, acts: ['rest', 'grid13', 'sb0grid13', 'minrestore', 'sb0grid13b', 'maxsb', 'widen', 'narrow'], label: 'CONTROL' });
     for (const r of o.rows) console.log(`    ${fmt(r)}`);
@@ -462,4 +462,4 @@ try {
 finally { P.close(); }
 const narrowed = ONLY.length || NO_CONTROL;
 console.log(failed ? `\n${failed} FAILED${skipped ? ` (${skipped} skipped)` : ''}` : narrowed ? `\nNARROWED RUN (SNAP_ONLY / SNAP_CONTROL) — its checks passed, but a narrowed run is never a verdict` : `\ndesktop-app snap test passed${skipped ? ` (${skipped} skipped)` : ''}`);
-process.exit(failed || narrowed ? 1 : 0);
+process.exit(failed || narrowed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

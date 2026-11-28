@@ -31,7 +31,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 700) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 700) : '')); } };
 const J = JSON.stringify;
 const t = (k, p) => (p ? k.replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)) : k);
 
@@ -74,7 +74,7 @@ console.log('① optionsOf — the detail shapes of the stress fixture, bounded 
   }
   ok(ITEMS.filter((i) => O.optionsOf(i.detail || '', i.text).length).length === 19, 'every fixture question parses but the empty one and the question-mark-less «A / B / C» (19 of 21) — the base drew a chip for none', ITEMS.map((i) => O.optionsOf(i.detail || '', i.text).length));
   const eight = ITEMS.find((i) => i.text.length > 200);
-  ok(!!eight && eight.text.length >= 240 && O.optionsOf(eight.detail).length === 8 && O.optionsOf(eight.detail).every((l) => l.length <= O.LABEL_MAX), `the ${eight && eight.text.length}-char question with eight options ⇒ 8 chips, each its own words`);
+  ok(!!eight && eight.text.length >= 240 && O.optionsOf(eight.detail).length === 8 && verdictOf(O.optionsOf(eight.detail).every((l) => l.length <= O.LABEL_MAX)), `the ${eight && eight.text.length}-char question with eight options ⇒ 8 chips, each its own words`);
   const longLbl = 'A ' + '很'.repeat(200) + '；B 短';
   ok(J(O.optionsOf(longLbl)) === '[]' && O.LABEL_MAX === 120, 'a 200-char label ⇒ NO parse (bounded: a label ≤ 120 chars — the 200-char one stays prose in the detail)');
   ok(J(O.optionsOf('A 很'.repeat(1) + '；B ' + 'x'.repeat(118))) !== '[]', '…a label right at the bound still parses (≤ 120)');
@@ -89,7 +89,7 @@ console.log('① optionsOf — the detail shapes of the stress fixture, bounded 
   // detail became reply chips on every For-you surface and a tap posted a fragment of the plan as the person's reply)
   const [planQ, planD] = FIX.plan;
   const planAsk = { ...ITEMS[0], id: 'ut-fx-plan', text: planQ, detail: planD };
-  ok(/^1\. .+\n2\. .+\n3\. .+$/.test(planD) && J(O.askOptions(planAsk)) === '[]', 'an agent\'s three-step PLAN («1. … 2. … 3. …», a plain vibespace-ask, no explicit options) ⇒ 0 chips — the person types', O.askOptions(planAsk));
+  ok(gateOf(/^1\. .+\n2\. .+\n3\. .+$/.test(planD)) && J(O.askOptions(planAsk)) === '[]', 'an agent\'s three-step PLAN («1. … 2. … 3. …», a plain vibespace-ask, no explicit options) ⇒ 0 chips — the person types', O.askOptions(planAsk));
   ok(J(O.optionsOf('计划：1. 备份数据库 2. 跑迁移 3. 验证')) === '[]' && J(O.optionsOf('1 北京；2 上海', '哪个？')) === '[]', '…on one line too, and bare numbers are never letters (no choice cue around them ⇒ prose)');
   ok(J(O.askOptions({ ...planAsk, text: '我已经开始处理日志', detail: '把 ingest 的日志按天切分 / 保留 30 天' })) === '[]', '«把 ingest 的日志按天切分 / 保留 30 天» as a SENTENCE (no question mark in the question or the detail) ⇒ 0 chips');
   ok(J(O.askOptions({ ...planAsk, text: '签署日期写哪一天？', detail: 'A 今天；B 下周一' })) === J(['A 今天', 'B 下周一']), '«A 今天；B 下周一» (lettered) ⇒ 2 chips');
@@ -139,7 +139,7 @@ console.log('① optionsOf — the detail shapes of the stress fixture, bounded 
   const lineAsk = { ...planAsk, id: 'ut-fx-line', text: '选哪个？', detail: 'A) 北京 B) 上海' };
   ok(J(O.askOptions(lineAsk)) === J(['A) 北京', 'B) 上海']) && J(O.askOptions({ ...lineAsk, detail: 'A）北京 B）上海' })) === J(['A）北京', 'B）上海']),
     '«A) 北京 B) 上海» / «A）北京 B）上海» under «选哪个？» (ONE line, no separator between the items) ⇒ 2 chips', O.askOptions(lineAsk));
-  ok(['A、北京 B、上海', 'A: 北京 B: 上海', 'A：北京 B：上海', '选一个：A) 北京 B) 上海', '(A) 北京 (B) 上海'].every((d) => O.optionsOf(d, '选哪个？').length === 2) && J(O.optionsOf('A) 北京 B) 上海 — 选哪个？')) === J(['A) 北京', 'B) 上海']),
+  ok(gateOf(['A、北京 B、上海', 'A: 北京 B: 上海', 'A：北京 B：上海', '选一个：A) 北京 B) 上海', '(A) 北京 (B) 上海'].every((d) => O.optionsOf(d, '选哪个？').length === 2)) && J(O.optionsOf('A) 北京 B) 上海 — 选哪个？')) === J(['A) 北京', 'B) 上海']),
     '…the marker forms A、 A: A： too (after a lead-in ending in a colon, or parenthesised) ⇒ 2; the words after them are not the last chip');
   ok(J(O.askOptions({ ...lineAsk, text: '签署日期写哪一天？', detail: 'A）今天；B）下周一' })) === J(['A）今天', 'B）下周一']), '«A）今天；B）下周一» (a separator between) ⇒ 2 chips — as before');
   ok(J(O.optionsOf('A. do x B. do y', 'Which?')) === '[]' && J(O.optionsOf('A do x B do y', 'Which?')) === '[]' && J(O.optionsOf('Option A: fast B: slow', 'Which?')) === '[]' && J(O.optionsOf('A)x B)y', '?')) === '[]',
@@ -197,13 +197,13 @@ console.log('③ openCount + badgeWords — THE HONEST COUNT (P1-1)');
 console.log('④ sessionMark + firstLine — «needs you · N · <the newest question>» (P2-4)');
 {
   const m = L.sessionMark(ITEMS, ['claude:payments', 'webui:w-pay']);
-  ok(m.n === 6 && m.newest && m.newest.text === '第六个问题（短）', 'payments: n 6, the newest question = the one asked last', { n: m.n, newest: m.newest && m.newest.text });
+  ok(m.n === 6 && gateOf(m.newest) && m.newest.text === '第六个问题（短）', 'payments: n 6, the newest question = the one asked last', { n: m.n, newest: m.newest && m.newest.text });
   const re = { ...ITEMS[0], reaskedAt: NOW };
   ok(L.sessionMark([re, ...ITEMS.slice(1)], ['claude:payments']).newest.id === re.id, 'a re-ask makes a question the newest again');
   ok(L.sessionMark(ITEMS, ['claude:nobody']).n === 0 && L.sessionMark(ITEMS, ['claude:nobody']).newest === null && L.sessionMark(ITEMS, null).n === 0, 'a conversation with nothing open ⇒ n 0 (no marker)');
   ok(L.sessionMark([{ ...ITEMS[0], kind: 'notice' }], ['claude:payments']).n === 0, 'a notice is no «needs you»');
   ok(L.firstLine('\n  first line here  \nsecond') === 'first line here' && L.firstLine('x'.repeat(130), 120) === 'x'.repeat(119) + '…' && L.firstLine(null) === '', 'firstLine: the first non-empty line, cut at 120 with an ellipsis');
-  ok(L.firstLine(ITEMS[0].text).length === 120 && L.firstLine(ITEMS[0].text).endsWith('…'), 'the 243-char question\'s marker line is cut (the window holds the whole)');
+  ok(L.firstLine(ITEMS[0].text).length === 120 && verdictOf(L.firstLine(ITEMS[0].text).endsWith('…')), 'the 243-char question\'s marker line is cut (the window holds the whole)');
 }
 
 console.log('⑤ ONE RENDERER — the tray row and the For-you pane draw the agent\'s words as written (P1-2)');
@@ -223,7 +223,7 @@ console.log('⑤ ONE RENDERER — the tray row and the For-you pane draw the age
     ok(R.wordsHtml('<img src=x onerror=alert(1)>') === '&lt;img src=x onerror=alert(1)&gt;' && R.wordsHtml(null) === '', 'every segment escaped (an item is peer text); nothing ⇒ empty');
     const ctx = { t, nameFor: () => 'payments', wordsOf: (i) => i.text, detailOf: (i) => i.detail || '', replyState: () => ({ show: true, enabled: true }), optionsOf: (i) => O.askOptions(i, i.detail || '') };
     const row = R.renderRow({ item: q, resolved: false, band: 5 }, ctx).innerHTML;
-    ok(row.includes(`<div class="ut-text">${R.wordsHtml(q.text)}</div>`) && row.includes(`<div class="ut-detail">${R.wordsHtml(q.detail)}</div>`), 'the tray row\'s words and detail ARE wordsHtml (one renderer)');
+    ok(gateOf(row.includes(`<div class="ut-text">${R.wordsHtml(q.text)}</div>`)) && verdictOf(row.includes(`<div class="ut-detail">${R.wordsHtml(q.detail)}</div>`)), 'the tray row\'s words and detail ARE wordsHtml (one renderer)');
     const chips = [...row.matchAll(/<button type="button" class="ut-opt" data-idx="(\d+)" aria-label="([^"]*)"[^>]*>([^<]*)<\/button>/g)].map((m) => m[2]); // each pill NAMED by its whole reply (lane ui-phone-and-fit pick 0: «Reply:» said once on the row)
     ok(J(chips) === J(['Reply: A test/（现有）', 'Reply: B __tests__/']), 'the row draws the parsed options as chips — «Reply: B __tests__/» verbatim (addressed by index)', chips);
     const eight = ITEMS.find((i) => i.text.length > 200);
@@ -234,7 +234,7 @@ console.log('⑤ ONE RENDERER — the tray row and the For-you pane draw the age
     const { Marked } = await import(pathToFileURL(require.resolve('marked', { paths: [ROOT] })).href);
     const md = new Marked({ gfm: true, breaks: true });
     const baseTitle = md.parseInline(q.text), baseDetail = md.parse(q.detail);
-    ok(/<strong>tests<\/strong>/.test(baseTitle) && /<strong>tests<\/strong>/.test(baseDetail), 'RED CONTROL: the base pane\'s markdown made `__tests__/` a bold «tests/» in the title AND the detail (the option the person answered was not the agent\'s)', { baseTitle, baseDetail });
+    ok(gateOf(/<strong>tests<\/strong>/.test(baseTitle)) && verdictOf(/<strong>tests<\/strong>/.test(baseDetail)), 'RED CONTROL: the base pane\'s markdown made `__tests__/` a bold «tests/» in the title AND the detail (the option the person answered was not the agent\'s)', { baseTitle, baseDetail });
   } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
   // THE CENSUS OVER BOTH DOORS: an item's words reach the screen through wordsHtml only — no markdown in either file
   const ROW = read('src/lib/user-todos-row.js'), IW = read('src/lib/inbox-window.js');
@@ -244,7 +244,7 @@ console.log('⑤ ONE RENDERER — the tray row and the For-you pane draw the age
     noMarkdown: ![row, iw].some((s) => /from ['"]marked['"]|new Marked\(|renderMarkdown\(|\bmdInto\(/.test(s)),
   });
   const c = census(ROW, IW);
-  ok(c.row && c.pane && c.noMarkdown, 'CENSUS: the tray row (words + detail) and the For-you pane (title + detail) both draw wordsHtml; neither file parses markdown', c);
+  ok(gateOf(c.row) && gateOf(c.pane) && verdictOf(c.noMarkdown), 'CENSUS: the tray row (words + detail) and the For-you pane (title + detail) both draw wordsHtml; neither file parses markdown', c);
   const baseIW = IW.replace('function wordsInto(el, src, whole = false) {\n  el.innerHTML = wordsHtml(src, { whole });\n}', "import { Marked } from 'marked';\nconst md = new Marked({});\nfunction mdInto(el, src) {\n  el.innerHTML = md.parse(src);\n}").replace("wordsInto(c.title, v.title, fieldWhole(it, 'text', v.title));", 'mdInto(c.title, v.title);');
   const cb = census(ROW, baseIW);
   ok(baseIW !== IW && !(cb.pane && cb.noMarkdown), 'CONTROL: a pane with its markdown put back ⇒ the census is RED', cb);
@@ -260,38 +260,38 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
     head: /const openActions = openCount\(todos\.open\);/.test(p),
   });
   const w = wiring(P);
-  ok(w.badge && w.tab && w.head, 'the taskbar button AND the phone / Duo nav button (one renderBtn), the tray\'s Inbox tab and its head say THE honest count (openCount) with its words', w);
+  ok(gateOf(w.badge) && gateOf(w.tab) && verdictOf(w.head), 'the taskbar button AND the phone / Duo nav button (one renderBtn), the tray\'s Inbox tab and its head say THE honest count (openCount) with its words', w);
   ok(!wiring(P.replace("btn.classList.toggle('ut-has-items', total > 0);", "btn.classList.toggle('ut-has-items', n > 0);")).badge, 'CONTROL: the base\'s «lit only for bands 1–4» put back ⇒ RED');
-  ok(/const words = actionWords\(openInScope\.filter\(\(i\) => !isNotice\(i\)\), c\.inbox\.action\);/.test(W) && /export function actionWords\(action, total = action\.length\) \{ return badgeWords\(action, total, t\); \}/.test(ACT), 'the For-you window\'s Actions tab says the same count and words (badgeWords — ONE sentence)');
-  ok(/this\.app\.sessionAsks\?\.markIn\?\.\(card, s\);/.test(SR) && /markIn: \(card, s\) => \{/.test(P) && /sessionMark\(todos\.open, keys\)/.test(P) && /t\('needs you · \{n\}', \{ n: m\.n \}\)/.test(P) && /app\.openInbox\(\{ itemId: m\.newest\.id, sessionKey: m\.newest\.sessionKey \}\)/.test(P),
+  ok(gateOf(/const words = actionWords\(openInScope\.filter\(\(i\) => !isNotice\(i\)\), c\.inbox\.action\);/.test(W)) && verdictOf(/export function actionWords\(action, total = action\.length\) \{ return badgeWords\(action, total, t\); \}/.test(ACT)), 'the For-you window\'s Actions tab says the same count and words (badgeWords — ONE sentence)');
+  ok(gateOf(/this\.app\.sessionAsks\?\.markIn\?\.\(card, s\);/.test(SR)) && gateOf(/markIn: \(card, s\) => \{/.test(P)) && gateOf(/sessionMark\(todos\.open, keys\)/.test(P)) && gateOf(/t\('needs you · \{n\}', \{ n: m\.n \}\)/.test(P)) && verdictOf(/app\.openInbox\(\{ itemId: m\.newest\.id, sessionKey: m\.newest\.sessionKey \}\)/.test(P)),
     'every session row (_buildSessionCard: the Duo\'s column, the phone\'s drawer, the desktop\'s sidebar) gets ONE «needs you · N» marker; its tap opens the For-you window on that conversation\'s newest question');
   ok(!/sessionAsks\.render|col-asks/.test(COL) && !/\.col-asks\b/.test(CSS) && !/render: \(box, s\) =>|colAsks/.test(P), 'the inline answers of slice 2c are gone (no .col-asks box, no CSS, no render door) — the owner\'s B');
-  ok(/if \(e\.target\.closest\('\.ut-done'\)\) model\.resolveOne\(id, 'done'\);/.test(P) && /else if \(e\.target\.closest\('\.ut-dismiss'\)\) model\.resolveOne\(id, 'dismissed'\);/.test(P)
-    && /showToast\(status === 'done' \? t\('Marked done'\) : t\('Dismissed'\), \{ duration: 6000, actions: \[\{ label: t\('Undo'\), run: \(\) => setStatus\(id, 'open'\) \}\] \}\);/.test(ACT), '✓ / ✕ on a row: ONE toast with Undo for 6 s — the ↺ road (status open) on the same item (P3-2)');
-  ok(/app\.openInbox\(\{ scope: 'all' \}\)/.test(P) && /else if \(scope === 'all'\) st\.scopeKey = null;/.test(W), 'the tray head\'s ⤢ opens the window on ALL sessions — never the scope another device left (P3-7)');
-  ok(/if \(expand && !item\.classList\.contains\('ut-item-resolved'\) && !e\.target\.closest\('\.ut-sess'\) && !\(rec && model\.isDoor\(rec\.sessionKey, rec\)\)\) \{ toggleOpen\(item\); return; \}/.test(P) && /const isDoor = \(key, item\) =>/.test(ACT) && /rowClick\(e, item, \{ expand: true \}\);/.test(P) && /#user-todos-popup \.ut-bands \.ut-item:not\(\.ut-open\):not\(:has/.test(CSS), 'a tray row\'s body tap opens it in place (never navigates away); its conversation\'s name is the door (P3-8); a RESOLVED row has nothing to open — its body jumps (round 2)');
-  ok(/model\.optionsFor\(rec\)\[Number\(chip\.dataset\.idx\)\]/.test(P) && /model\.optionsFor\(it\)\[Number\(opt\.dataset\.idx\)\]/.test(W) && /options: model\.optionsFor\(it\)/.test(W) && /const optionsFor = \(i\) => askOptions\(i, detailOf\(i\)\);/.test(ACT), 'a chip answers with ITS label in the tray and in the window (THE model\'s optionsFor — explicit, else parsed)');
+  ok(gateOf(/if \(e\.target\.closest\('\.ut-done'\)\) model\.resolveOne\(id, 'done'\);/.test(P)) && gateOf(/else if \(e\.target\.closest\('\.ut-dismiss'\)\) model\.resolveOne\(id, 'dismissed'\);/.test(P))
+    && verdictOf(/showToast\(status === 'done' \? t\('Marked done'\) : t\('Dismissed'\), \{ duration: 6000, actions: \[\{ label: t\('Undo'\), run: \(\) => setStatus\(id, 'open'\) \}\] \}\);/.test(ACT)), '✓ / ✕ on a row: ONE toast with Undo for 6 s — the ↺ road (status open) on the same item (P3-2)');
+  ok(gateOf(/app\.openInbox\(\{ scope: 'all' \}\)/.test(P)) && verdictOf(/else if \(scope === 'all'\) st\.scopeKey = null;/.test(W)), 'the tray head\'s ⤢ opens the window on ALL sessions — never the scope another device left (P3-7)');
+  ok(gateOf(/if \(expand && !item\.classList\.contains\('ut-item-resolved'\) && !e\.target\.closest\('\.ut-sess'\) && !\(rec && model\.isDoor\(rec\.sessionKey, rec\)\)\) \{ toggleOpen\(item\); return; \}/.test(P)) && gateOf(/const isDoor = \(key, item\) =>/.test(ACT)) && gateOf(/rowClick\(e, item, \{ expand: true \}\);/.test(P)) && verdictOf(/#user-todos-popup \.ut-bands \.ut-item:not\(\.ut-open\):not\(:has/.test(CSS)), 'a tray row\'s body tap opens it in place (never navigates away); its conversation\'s name is the door (P3-8); a RESOLVED row has nothing to open — its body jumps (round 2)');
+  ok(gateOf(/model\.optionsFor\(rec\)\[Number\(chip\.dataset\.idx\)\]/.test(P)) && gateOf(/model\.optionsFor\(it\)\[Number\(opt\.dataset\.idx\)\]/.test(W)) && gateOf(/options: model\.optionsFor\(it\)/.test(W)) && verdictOf(/const optionsFor = \(i\) => askOptions\(i, detailOf\(i\)\);/.test(ACT)), 'a chip answers with ITS label in the tray and in the window (THE model\'s optionsFor — explicit, else parsed)');
   // THE TOUCH SCALE (the owner 2026-10-25: 「按钮这么大，字这么小」): ONE touch-only block, its floors, the phone's first-screen page outside it
   const blkA = CSS.indexOf('/* ── lane foryou-honest: THE TOUCH SCALE'), blkB = CSS.indexOf('/* ── end of the touch scale (lane foryou-honest) ── */');
   const blk = blkA >= 0 && blkB > blkA ? CSS.slice(blkA, blkB) : '';
-  ok(/@media \(hover: none\) and \(pointer: coarse\) \{/.test(blk) && /#user-todos-popup \*, \.ut-mini-popover \*, \.cn-card \*, #phone-home \*, \.iw \*, \.ut-sess-mark, \.ut-sess-mark \* \{ font-size: max\(14px, 1em\) !important; \}/.test(blk) && (blk.match(/min-height: 44px !important/g) || []).length === 1 && /  #phone-home :is\(button, \[role="button"\], summary/.test(blk) && /:is\(#user-todos-popup, \.ut-mini-popover, \.cn-card, #phone-home, \.iw\) :is\(textarea, select, input:not\(\[type="radio"\], \[type="checkbox"\]\)\) \{ font-size: 16px !important; \}/.test(blk) && CSS.split('/* ── lane foryou-honest: THE TOUCH SCALE').length === 2,
+  ok(gateOf(/@media \(hover: none\) and \(pointer: coarse\) \{/.test(blk)) && gateOf(/#user-todos-popup \*, \.ut-mini-popover \*, \.cn-card \*, #phone-home \*, \.iw \*, \.ut-sess-mark, \.ut-sess-mark \* \{ font-size: max\(14px, 1em\) !important; \}/.test(blk)) && (blk.match(/min-height: 44px !important/g) || []).length === 1 && gateOf(/  #phone-home :is\(button, \[role="button"\], summary/.test(blk)) && gateOf(/:is\(#user-todos-popup, \.ut-mini-popover, \.cn-card, #phone-home, \.iw\) :is\(textarea, select, input:not\(\[type="radio"\], \[type="checkbox"\]\)\) \{ font-size: 16px !important; \}/.test(blk)) && CSS.split('/* ── lane foryou-honest: THE TOUCH SCALE').length === 2,
     'THE TOUCH SCALE is ONE touch-only block (hover: none, pointer: coarse — the mouse keeps its sizes): text ≥ 14 px and targets ≥ 44 px on the tray, the mini inbox, the phone\'s first-screen page, the window and the marker; every field 16 px (iOS never zooms)');
   // lane chat-needs-you-card: the chat's needs card is ONE more surface of the same row — the same scale, the same renderer, the same chips
   // + acceptance round 2 (the accordion in the chat): a FOLDED card (.cn-card.cn-fold) is the sheet's folded row — the accordion's
   // own rules, never a bare .cn-card in them (the open card keeps the whole row)
-  ok(/\.cn-card :is\(button, \[role="button"\], summary, textarea/.test(blk) && (blk.match(/:is\(#user-todos-popup, \.ut-mini-popover, \.cn-card, #phone-home\)/g) || []).length >= 15 && !/:is\(#user-todos-popup, #phone-home(?:, \.cn-card\.cn-fold)?\)[^{,]*\.cn-card/.test(blk)
+  ok(gateOf(/\.cn-card :is\(button, \[role="button"\], summary, textarea/.test(blk)) && (blk.match(/:is\(#user-todos-popup, \.ut-mini-popover, \.cn-card, #phone-home\)/g) || []).length >= 15 && !/:is\(#user-todos-popup, #phone-home(?:, \.cn-card\.cn-fold)?\)[^{,]*\.cn-card/.test(blk)
     && (blk.match(/:is\(#user-todos-popup, #phone-home, \.cn-card\.cn-fold\) \.ut-item:not\(\.ut-open\)/g) || []).length === 6 &&   // + lane wake-approve-card r7: a folded row keeps its deadline line («60 秒内有效 · 还剩 42 秒»)
      !/:is\(#user-todos-popup, #phone-home, \.cn-card(?!\.cn-fold)/.test(blk),
     'the chat\'s needs card takes THE touch scale beside the mini inbox (16 px words, 44 px targets, the detail fold a row) — and the sheet\'s folded row only when FOLDED (.cn-card.cn-fold: the accordion in the chat, acceptance round 2)');
   { const CARD = read('src/lib/chat-needs-card.js'), P2 = read('src/lib/user-todos-panel.js');
-    ok(/reconcile: \(container, entries\) => reconcileRows\(container, entries, null, miniCtx, \{ arm: false \}\)/.test(P2) && /const reconcileRows = \(container, entries, head = null, ctx = rowCtx, \{ arm = true \} = \{\}\) => \{\s*reconcileKeyed\(container, entries, \{[\s\S]{0,160}create: \(e\) => renderRow\(e, ctx\), patch: \(row, e\) => patchRow\(row, e, ctx\)/.test(P2) && /this\.app\.foryouRows\?\.reconcile\(rows, \[\{ item: e\.item \}\]\);/.test(CARD) && !/innerHTML = [^;]*ut-text/.test(CARD),
+    ok(gateOf(/reconcile: \(container, entries\) => reconcileRows\(container, entries, null, miniCtx, \{ arm: false \}\)/.test(P2)) && gateOf(/const reconcileRows = \(container, entries, head = null, ctx = rowCtx, \{ arm = true \} = \{\}\) => \{\s*reconcileKeyed\(container, entries, \{[\s\S]{0,160}create: \(e\) => renderRow\(e, ctx\), patch: \(row, e\) => patchRow\(row, e, ctx\)/.test(P2)) && gateOf(/this\.app\.foryouRows\?\.reconcile\(rows, \[\{ item: e\.item \}\]\);/.test(CARD)) && !/innerHTML = [^;]*ut-text/.test(CARD),
       'ONE RENDERER in the chat too: the needs card\'s row is renderRow / patchRow (the panel\'s reconcileRows, the mini inbox\'s context) — the card writes no row of its own');
-    ok(/const miniCtx = \{ \.\.\.rowCtx, mini: true \};/.test(P2) && /rowCtx: \{ t, nameFor, wordsOf, detailOf, foldOf, replyState, optionsOf: optionsFor, lang: resolveLang \}/.test(ACT)   /* lane ui-plain-words: + foldOf, an item's `i18n.fold` through the same context */,
+    ok(gateOf(/const miniCtx = \{ \.\.\.rowCtx, mini: true \};/.test(P2)) && verdictOf(/rowCtx: \{ t, nameFor, wordsOf, detailOf, foldOf, replyState, optionsOf: optionsFor, lang: resolveLang \}/.test(ACT))   /* lane ui-plain-words: + foldOf, an item's `i18n.fold` through the same context */,
       'the needs card\'s chips are the tray\'s (the model\'s optionsFor — explicit, else the detail\'s parsed choice) through the same context');
   }
   const ROWS = read('src/lib/user-todos-row.js');
   const labelled = ['Open', 'Reply', 'Mark done', 'Reopen', 'More'].every((w) => ROWS.includes('data-label="${escHtml(t(\'' + w + '\'))}"')) && ROWS.includes('data-label="${escHtml(tc(\'inbox\', \'Dismiss\'))}"') && /\.ut-actions > \.ut-act\[data-label\]::after \{ content: attr\(data-label\);/.test(blk);
-  ok(labelled, 'every verb of a row carries its WORD (data-label: Reply · Open · Mark done · Dismiss · Reopen · More) — a touch screen draws it under the icon (::after; the button text, title and aria unchanged)');
+  ok(verdictOf(labelled), 'every verb of a row carries its WORD (data-label: Reply · Open · Mark done · Dismiss · Reopen · More) — a touch screen draws it under the icon (::after; the button text, title and aria unchanged)');
   ok(!(() => { const b = blk.replace(/(\.ut-actions > \.ut-act\[data-label\]::after \{ )content: attr\(data-label\);/, '$1content: none;'); return /\.ut-actions > \.ut-act\[data-label\]::after \{ content: attr\(data-label\);/.test(b); })(), 'CONTROL: a block that draws no word fails the label leg');
   // ONE ROW SHAPE on a phone (主开发's pick A, 2026-10-25): the sheet's and the page's rows FOLD on a touch screen — the question
   // + one meta line, the whole row the tap, its trailing conversation door; ONE open at a time; an answer folds it
@@ -308,7 +308,7 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
     row: /const go = \(notice \|\| entry\.band\) && rowDoor \? `<button type="button" class="ut-go ut-go-door"[^`]*`\s*: notice \|\| entry\.band \? `<button type="button" class="ut-go\$\{parkedGo \? ' ut-go-answer' : ''\}" title="\$\{escHtml\(parkedGo \|\| t\('Go to this session'\)\)\}" aria-label="\$\{escHtml\(parkedGo \|\| t\('Go to this session'\)\)\}" data-label="\$\{escHtml\(parkedGo \|\| tc\('inbox', 'Chat'\)\)\}">\$\{UI_ICONS\.chat\}<\/button>`/.test(ROWS)
       && /if \(wasOpen && !entry\.resolved\) el\.classList\.add\('ut-open'\);/.test(ROWS),
   };
-  ok(acc.css && acc.js && acc.row, 'ONE ROW SHAPE on a phone: the sheet\'s and the page\'s rows FOLD on a touch screen (the question in ONE line + one meta line, nothing tappable inside but the trailing «Chat» door — an SVG, 44 px), the whole row opens it, ONE open at a time, a repaint keeps it open and an answer folds it', acc);
+  ok(gateOf(acc.css) && gateOf(acc.js) && verdictOf(acc.row), 'ONE ROW SHAPE on a phone: the sheet\'s and the page\'s rows FOLD on a touch screen (the question in ONE line + one meta line, nothing tappable inside but the trailing «Chat» door — an SVG, 44 px), the whole row opens it, ONE open at a time, a repaint keeps it open and an answer folds it', acc);
   ok(!/if \(expand && isTouchDevice\(\)\) \{\n\s+if \(!item\.classList\.contains\('ut-open'\)\) \{ openOne\(item\); return; \}/.test(P.replace('if (expand && isTouchDevice()) {', 'if (false) {')), 'CONTROL: the accordion switched off ⇒ RED');
   // THE PHONE'S FIRST SCREEN's doors (the owner on a phone: «每次刷新都是这个» / «切到其他窗口之后又回不来了»)
   const NAV = read('src/lib/mobile-nav.js');
@@ -319,11 +319,11 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
     badge: /if \(app\.viewportClass\?\.\(\) === 'compact' && home\) \{\n\s+if \(homeShown\(\)\) \{ hideHome\(\); if \(!app\.wm\?\.activeWindowId\) app\.sidebar\?\.toggle\?\.\(true\); return; \}\n\s+if \(showHome\(\)\) \{/.test(P),
     drawer: /b\.id = 'drawer-foryou';/.test(P) && /sec\.prepend\(b\);/.test(P) && /paintDrawerRow\(total\);/.test(P) && /`<span>\$\{escHtml\(t\('For you'\)\)\} · \$\{heldWords\(todos\) \? escHtml\(t\('cannot be read'\)\) : total\}<\/span>`/.test(P) && /html\[data-vc="compact"\] \.drawer-foryou \{ display: flex;[^}]*min-height: 44px;/.test(CSS),
   };
-  ok(doors.reload && doors.badge && doors.drawer, 'THE PHONE\'S FIRST SCREEN: a RELOAD of a tab that had a window on show keeps it (the page only on a cold open, nothing on show, or the page itself on show); the top bar\'s For you TOGGLES the page (the sheet only when it has no row); the ☰ drawer\'s first row «For you · N» opens it', doors);
+  ok(gateOf(doors.reload) && gateOf(doors.badge) && verdictOf(doors.drawer), 'THE PHONE\'S FIRST SCREEN: a RELOAD of a tab that had a window on show keeps it (the page only on a cold open, nothing on show, or the page itself on show); the top bar\'s For you TOGGLES the page (the sheet only when it has no row); the ☰ drawer\'s first row «For you · N» opens it', doors);
   ok(!/if \(reloaded && homeWas !== '1' && app\.wm\?\.activeWindowId\) return;/.test(P.replace("        if (reloaded && homeWas !== '1' && app.wm?.activeWindowId) return;\n", '')), 'CONTROL: the base\'s boot (the guard cut — the page takes every reload) ⇒ RED');
   const land = CSS.slice(CSS.indexOf('/* ── landscape: the TRAILING BAR'), CSS.indexOf('/* ── portrait: list 320'));
-  ok(/html\[data-vc="regular"\] #mobile-nav #mobile-nav-todos \{\s*display: inline-flex !important; order: 11;/.test(land) && /html\[data-vc="regular"\] #mobile-nav-dest-tasks \{ order: 1[12]; \}/.test(land), 'the Duo\'s regular class has For you on its bar: the bottom section\'s first destination (order 11 — before Task Groups)');
+  ok(gateOf(/html\[data-vc="regular"\] #mobile-nav #mobile-nav-todos \{\s*display: inline-flex !important; order: 11;/.test(land)) && verdictOf(/html\[data-vc="regular"\] #mobile-nav-dest-tasks \{ order: 1[12]; \}/.test(land)), 'the Duo\'s regular class has For you on its bar: the bottom section\'s first destination (order 11 — before Task Groups)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

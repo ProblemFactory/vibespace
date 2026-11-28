@@ -46,7 +46,7 @@ import { bestMs } from './cost-ratio.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -163,18 +163,18 @@ const runCorpus = (mf, opts = {}) => {
   const badPics = runCorpus(MF, { pictures: true });
   ok(!badPics.filter((b) => !/70\.png/.test(b)).length, 'the same with Show pictures pressed — only an https picture\'s own src may appear (the http tracker never)', badPics.join('\n    '));
   const withPics = MF.sanitizeMailHtml(`<img src="${EVIL_S}/70.png"><img src="${EVIL}/69.gif">`, { pictures: true });
-  ok(/src="https:\/\/evil\.example\/70\.png"/.test(withPics.html) && !/69\.gif/.test(withPics.html), 'Show pictures: an https picture gets its src, an http one never (the CSP would not load it either)', withPics.html);
+  ok(gateOf(/src="https:\/\/evil\.example\/70\.png"/.test(withPics.html)) && !/69\.gif/.test(withPics.html), 'Show pictures: an https picture gets its src, an http one never (the CSP would not load it either)', withPics.html);
   // each costs at most 5 × a benign mail at the bound (measured 0.03–0.24 × idle and loaded) — CPU, this process
   const costX = (x) => { let r = null; const ms = bestMs(() => { r = MF.sanitizeMailHtml(x); }, { reps: 1 }); return { r, x: ms / mailCal() }; };
   const { r: huge, x: x0 } = costX('<p>' + 'x'.repeat(10 * 1024 * 1024) + '</p>');
   ok(huge.ok === false && huge.code === 'too-large' && x0 <= 5, `a 10 MB body is REFUSED BY NAME (too-large — the plain text is shown), at ${x0.toFixed(2)} × a benign mail's cost`, JSON.stringify({ ok: huge.ok, code: huge.code, x: x0 }));
   const { r: many, x: x1 } = costX(Array.from({ length: 1000 }, (_, i) => `<img src="data:image/png;base64,AAAA${i % 10}" alt="p${i}">`).join(''));
   const srcs = (many.html.match(/<img[^>]*\ssrc=/g) || []).length;
-  ok(many.ok && srcs === MF.MAX_IMAGES && many.droppedImages === 1000 - MF.MAX_IMAGES && x1 <= 5, `1 000 pictures: ${srcs} kept (MAX_IMAGES), ${many.droppedImages} dropped and COUNTED, at ${x1.toFixed(2)} × a benign mail's cost`);
+  ok(gateOf(many.ok) && srcs === MF.MAX_IMAGES && many.droppedImages === 1000 - MF.MAX_IMAGES && x1 <= 5, `1 000 pictures: ${srcs} kept (MAX_IMAGES), ${many.droppedImages} dropped and COUNTED, at ${x1.toFixed(2)} × a benign mail's cost`);
   const { r: deep, x: x2 } = costX('<div>'.repeat(20000) + 'deep' + '</div>'.repeat(20000));
-  ok(deep.ok && (deep.html.match(/<div>/g) || []).length <= 512 && /deep/.test(deep.html) && x2 <= 5, `20 000 nested divs: the element stack is bounded (≤ 512 written), the words kept, at ${x2.toFixed(2)} × a benign mail's cost`);
+  ok(gateOf(deep.ok) && (deep.html.match(/<div>/g) || []).length <= 512 && gateOf(/deep/.test(deep.html)) && x2 <= 5, `20 000 nested divs: the element stack is bounded (≤ 512 written), the words kept, at ${x2.toFixed(2)} × a benign mail's cost`);
   const { r: lt, x: x3 } = costX('<'.repeat(200000) + 'a' + ' x="'.repeat(20000));
-  ok(lt.ok && !/<[a-z]/i.test(lt.html) && x3 <= 5, `200 000 bare "<" and an unterminated attribute run: text, linear (${x3.toFixed(2)} × a benign mail's cost)`);
+  ok(gateOf(lt.ok) && !/<[a-z]/i.test(lt.html) && x3 <= 5, `200 000 bare "<" and an unterminated attribute run: text, linear (${x3.toFixed(2)} × a benign mail's cost)`);
 }
 
 // ── ② the mail still reads ───────────────────────────────────────────────
@@ -185,12 +185,12 @@ console.log('② a formatted mail keeps its formatting');
     + '<ul><li>one</li><li>two</li></ul><table border="1" cellpadding="3"><tr><td colspan="2" style="color:red;background:#eee">cell</td></tr></table>'
     + '<img alt="logo" src="cid:logo@x" width="8"><p>&copy; 2026 &mdash; ok</p></body></html>';
   const r = MF.sanitizeMailHtml(html, { cid: { 'logo@x': 'data:image/png;base64,iVBORw0KGgo=' } });
-  ok(/<h1>Weekly<\/h1>/.test(r.html) && /<b>team<\/b>/.test(r.html) && /<i>friends<\/i>/.test(r.html) && /<ul><li>one<\/li><li>two<\/li><\/ul>/.test(r.html), 'headings, emphasis and lists survive', r.html);
-  ok(/<a href="https:\/\/docs\.example\/q3\?x=1&amp;y=2">the report<\/a>/.test(r.html) && /<a href="mailto:ops@example\.com">/.test(r.html) && r.links === 2, 'links: http(s) and one-address mailto kept (href re-quoted, & escaped)', r.html);
-  ok(/<table border="1" cellpadding="3"><tr><td colspan="2" style="color:red;background:#eee">cell<\/td><\/tr><\/table>/.test(r.html), 'tables and their layout attributes + a url-free inline style kept');
-  ok(/<style>\.big\{font-size:20px;color:#333\} td\{padding:4px\}<\/style>/.test(r.html) && !/<title>/.test(r.html) && !/<html|<head|<body/.test(r.html), 'a head <style> kept (sanitized), <title>/<html>/<head>/<body> unwrapped');
-  ok(/<img alt="logo" src="data:image\/png;base64,iVBORw0KGgo=" width="8">/.test(r.html) && r.remoteImages === 0, 'a cid: picture becomes the data: picture the parent fetched through OUR route', r.html);
-  ok(/&copy; 2026 &mdash; ok/.test(r.html), 'entities in text pass through (the browser decodes them — as text)');
+  ok(gateOf(/<h1>Weekly<\/h1>/.test(r.html)) && gateOf(/<b>team<\/b>/.test(r.html)) && gateOf(/<i>friends<\/i>/.test(r.html)) && verdictOf(/<ul><li>one<\/li><li>two<\/li><\/ul>/.test(r.html)), 'headings, emphasis and lists survive', r.html);
+  ok(gateOf(/<a href="https:\/\/docs\.example\/q3\?x=1&amp;y=2">the report<\/a>/.test(r.html)) && gateOf(/<a href="mailto:ops@example\.com">/.test(r.html)) && r.links === 2, 'links: http(s) and one-address mailto kept (href re-quoted, & escaped)', r.html);
+  ok(verdictOf(/<table border="1" cellpadding="3"><tr><td colspan="2" style="color:red;background:#eee">cell<\/td><\/tr><\/table>/.test(r.html)), 'tables and their layout attributes + a url-free inline style kept');
+  ok(gateOf(/<style>\.big\{font-size:20px;color:#333\} td\{padding:4px\}<\/style>/.test(r.html)) && !/<title>/.test(r.html) && !/<html|<head|<body/.test(r.html), 'a head <style> kept (sanitized), <title>/<html>/<head>/<body> unwrapped');
+  ok(gateOf(/<img alt="logo" src="data:image\/png;base64,iVBORw0KGgo=" width="8">/.test(r.html)) && r.remoteImages === 0, 'a cid: picture becomes the data: picture the parent fetched through OUR route', r.html);
+  ok(verdictOf(/&copy; 2026 &mdash; ok/.test(r.html)), 'entities in text pass through (the browser decodes them — as text)');
   const miss = MF.sanitizeMailHtml('<img src="cid:gone@x">', { cid: {} });
   ok(miss.cidMissing.join() === 'gone@x' && !/src=/.test(miss.html), 'a cid: the parent could not resolve is dropped and NAMED (cidMissing)');
   ok(MF.cidRefs('<img src="cid:a@x"><IMG SRC=cid:b@y><img src=\'cid:a@x\'>').join() === 'a@x,b@y', 'cidRefs: the Content-IDs a mail names, once each');
@@ -201,9 +201,9 @@ console.log('③ remote pictures are blocked until Show pictures');
 {
   const html = `<p>x</p><img alt="r" src="https://img.example/p.png"><img src="http://track.example/t.gif"><img src="data:image/gif;base64,R0lGOD">`;
   const off = MF.sanitizeMailHtml(html);
-  ok(off.remoteImages === 2 && off.blockedImages === 2 && !/img\.example|track\.example/.test(off.html) && (off.html.match(/data-vs-blocked="1"/g) || []).length === 2 && /src="data:image\/gif/.test(off.html), 'OFF: no remote src is WRITTEN (two blocked, counted, marked), an inline data: picture drawn', off.html);
+  ok(off.remoteImages === 2 && off.blockedImages === 2 && !/img\.example|track\.example/.test(off.html) && (off.html.match(/data-vs-blocked="1"/g) || []).length === 2 && verdictOf(/src="data:image\/gif/.test(off.html)), 'OFF: no remote src is WRITTEN (two blocked, counted, marked), an inline data: picture drawn', off.html);
   const on = MF.sanitizeMailHtml(html, { pictures: true });
-  ok(/src="https:\/\/img\.example\/p\.png"/.test(on.html) && !/track\.example/.test(on.html) && on.blockedImages === 0, 'ON: the https picture gets its src; the http tracker never', on.html);
+  ok(gateOf(/src="https:\/\/img\.example\/p\.png"/.test(on.html)) && !/track\.example/.test(on.html) && on.blockedImages === 0, 'ON: the https picture gets its src; the http tracker never', on.html);
   const tbl = [
     ['https', 'https://a.example/x.png', false, 'blocked'], ['https on', 'https://a.example/x.png', true, 'src'], ['http on', 'http://a.example/x.png', true, 'drop'],
     ['javascript', 'javascript:alert(1)', true, 'drop'], ['data svg', 'data:image/svg+xml,<svg/>', true, 'drop'], ['data png', 'data:image/png;base64,AAAA', false, 'src'],
@@ -218,21 +218,21 @@ console.log('④ the CSP and the frame document');
 {
   ok(MF.cspFor({ nonce: 'abc' }) === "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-abc'; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'", 'the CSP, exact (pictures off)', MF.cspFor({ nonce: 'abc' }));
   ok(MF.cspFor({ nonce: 'abc', pictures: true }) === "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-abc'; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'", 'the CSP, exact (Show pictures: + https: to img-src, that frame only)');
-  ok(MF.cspFor({ nonce: "x' 'unsafe-inline" }).includes("'nonce-xunsafe-inline'"), 'a nonce is its own alphabet — a quote cannot widen the policy');
+  ok(verdictOf(MF.cspFor({ nonce: "x' 'unsafe-inline" }).includes("'nonce-xunsafe-inline'")), 'a nonce is its own alphabet — a quote cannot widen the policy');
   // lane design-frame-host: the HEADER's copy (src/server/frame-host.js) adds the host's own script by hash — that one
   // token only, in that one shape; the document's meta never carries it
   const H = "'sha256-" + 'A'.repeat(42) + "Q='";
-  ok(MF.cspFor({ nonce: 'abc', host: H }).includes(`script-src 'nonce-abc' ${H}; base-uri 'none'`) && MF.cspFor({ nonce: 'abc', host: H }).replace(` ${H}`, '') === MF.cspFor({ nonce: 'abc' }), 'the header\'s copy: the host\'s script hash joins script-src, nothing else moves');
+  ok(gateOf(MF.cspFor({ nonce: 'abc', host: H }).includes(`script-src 'nonce-abc' ${H}; base-uri 'none'`)) && MF.cspFor({ nonce: 'abc', host: H }).replace(` ${H}`, '') === MF.cspFor({ nonce: 'abc' }), 'the header\'s copy: the host\'s script hash joins script-src, nothing else moves');
   const wide = ["'unsafe-inline'", "'sha256-x' *", H + ' *', "'nonce-abc'", 'https:', H.replace("'sha256-", "'sha384-")];
-  ok(wide.every((h) => MF.cspFor({ nonce: 'abc', host: h }) === MF.cspFor({ nonce: 'abc' })), 'anything but ONE sha256 source is dropped — the host slot cannot widen the policy', wide.map((h) => MF.cspFor({ nonce: 'abc', host: h }).slice(90, 140)).join(' | '));
+  ok(verdictOf(wide.every((h) => MF.cspFor({ nonce: 'abc', host: h }) === MF.cspFor({ nonce: 'abc' }))), 'anything but ONE sha256 source is dropped — the host slot cannot widen the policy', wide.map((h) => MF.cspFor({ nonce: 'abc', host: h }).slice(90, 140)).join(' | '));
   ok(MF.frameHostSrc({ nonce: 'ab12' }) === '/frame-host?kind=mail&n=ab12' && MF.frameHostSrc({ nonce: 'ab12', pictures: true }) === '/frame-host?kind=mail&n=ab12&pictures=1', 'the frame host\'s address carries this frame\'s nonce (and the press)', MF.frameHostSrc({ nonce: 'ab12', pictures: true }));
   ok(MF.frameHostSrc({ nonce: 'a&kind=design&n=x y' }) === '/frame-host?kind=mail&n=akinddesignnxy' && MF.frameHostSrc({ nonce: 'z'.repeat(99) }).length === '/frame-host?kind=mail&n='.length + 64, 'a nonce is URL-safe and bounded in the address (no second parameter rides in it)', MF.frameHostSrc({ nonce: 'a&kind=design&n=x y' }));
   const body = MF.sanitizeMailHtml(CORPUS.map((c) => c[1]).join('')).html;
   const doc = MF.composeSrcdoc({ body, nonce: 'n0nce', token: 'tok1', pictures: false });
   const cspAt = doc.indexOf('Content-Security-Policy'), bodyAt = doc.indexOf('<body>');
   ok(cspAt > 0 && cspAt < doc.indexOf('<style>') && cspAt < bodyAt, 'the CSP <meta> comes FIRST (it governs only what follows it)');
-  ok((doc.match(/<script/gi) || []).length === 1 && /<script nonce="n0nce">/.test(doc) && doc.lastIndexOf('<script') > bodyAt, 'the frame carries exactly ONE script — ours, with the nonce, after the body');
-  ok(/vsMail:T/.test(MF.resizerScript('tok1')) && /"tok1"/.test(MF.resizerScript('tok1')) && MF.resizerScript('a"b</script>').includes('"ab/script"') === false && !/<\/script/i.test(MF.resizerScript('</script>')), 'the resizer posts with the frame\'s token; a token is its own alphabet (no </script> can be spelled into it)');
+  ok((doc.match(/<script/gi) || []).length === 1 && gateOf(/<script nonce="n0nce">/.test(doc)) && doc.lastIndexOf('<script') > bodyAt, 'the frame carries exactly ONE script — ours, with the nonce, after the body');
+  ok(gateOf(/vsMail:T/.test(MF.resizerScript('tok1'))) && gateOf(/"tok1"/.test(MF.resizerScript('tok1'))) && MF.resizerScript('a"b</script>').includes('"ab/script"') === false && !/<\/script/i.test(MF.resizerScript('</script>')), 'the resizer posts with the frame\'s token; a token is its own alphabet (no </script> can be spelled into it)');
 }
 
 // ── ⑤ Show pictures: per message, per sender ─────────────────────────────
@@ -242,7 +242,7 @@ console.log('⑤ Show pictures: this message, this sender, this session');
   ok(!MF.picturesShown(st, { vendorId: 'm1', sender: 'a@x' }), 'nothing is shown before a press');
   MF.showPictures(st, { vendorId: 'm1', sender: 'A@X' });
   const rows = [[{ vendorId: 'm1', sender: 'z@z' }, true], [{ vendorId: 'm2', sender: 'a@x' }, true], [{ vendorId: 'm3', sender: 'b@x' }, false], [{ vendorId: 'm3', sender: '' }, false]];
-  ok(rows.every(([q, want]) => MF.picturesShown(st, q) === want), 'the pressed message, and every message of its SENDER (case-insensitive), never another sender\'s', JSON.stringify(rows.map(([q]) => MF.picturesShown(st, q))));
+  ok(verdictOf(rows.every(([q, want]) => MF.picturesShown(st, q) === want)), 'the pressed message, and every message of its SENDER (case-insensitive), never another sender\'s', JSON.stringify(rows.map(([q]) => MF.picturesShown(st, q))));
   ok(MF.picturesShown(MF.picturesState(), { vendorId: 'm1', sender: 'a@x' }) === false, 'a new session (a new state) remembers nothing — the press is never stored or global');
 }
 
@@ -265,7 +265,7 @@ console.log('⑥ the parent trusts one clamped number from THAT frame');
     [{ source: W, frameWindow: W, token: '', data: { vsMail: '', h: 10 } }, 'ignore'],
   ];
   const out = cases.map(([q]) => { const v = MF.frameMessageVerdict(q); return v.act === 'height' ? `height:${v.h}` : v.act === 'open' ? `open:${v.href}` : 'ignore'; });
-  ok(out.every((x, i) => x === cases[i][1]), 'another window (a spoofing frame), a wrong or missing token, a non-number, a javascript:/entity/hfield href — ignored; a height clamped; an http(s) link opened', JSON.stringify(out));
+  ok(verdictOf(out.every((x, i) => x === cases[i][1])), 'another window (a spoofing frame), a wrong or missing token, a non-number, a javascript:/entity/hfield href — ignored; a height clamped; an http(s) link opened', JSON.stringify(out));
 }
 
 // ── ⑦ lazy frames ────────────────────────────────────────────────────────
@@ -276,10 +276,10 @@ console.log('⑦ frames are lazy: nearest first, capped, only inside the keep zo
   const live = MF.liveFrames(rows, { top: 1000, bottom: 1600 });
   ok(live.length === 7 && live.join() === 'm10,m11,m12,m13,m14,m15,m16', `30 mails, 7 of them on screen: all 7 visible rows are live (more than LIVE_FRAME_CAP ${MF.LIVE_FRAME_CAP} — the cap never blanks a visible mail), none pre-warmed`, live.join(','));
   const few = MF.liveFrames(rows, { top: 1000, bottom: 1250 });
-  ok(few.length === MF.LIVE_FRAME_CAP && few.slice(0, 3).join() === 'm10,m11,m12' && few.slice(3).every((id) => ['m9', 'm13', 'm8', 'm14'].includes(id)), `3 rows on screen: the 3 visible, then the keep zone's NEAREST pre-warmed up to the cap (${few.join(',')})`, few.join(','));
+  ok(few.length === MF.LIVE_FRAME_CAP && few.slice(0, 3).join() === 'm10,m11,m12' && verdictOf(few.slice(3).every((id) => ['m9', 'm13', 'm8', 'm14'].includes(id))), `3 rows on screen: the 3 visible, then the keep zone's NEAREST pre-warmed up to the cap (${few.join(',')})`, few.join(','));
   const shorts = Array.from({ length: 16 }, (_, i) => ({ id: `s${i}`, top: i * 70, bottom: i * 70 + 64 }));
   const tail = MF.liveFrames(shorts, { top: 1120 - 812, bottom: 1120 });
-  ok(['s10', 's11', 's12', 's13', 's14', 's15'].every((id) => tail.includes(id)) && tail.filter((id) => { const r = shorts.find((x) => x.id === id); return r.bottom >= 1120 - 812 && r.top <= 1120; }).length === shorts.filter((r) => r.bottom >= 1120 - 812 && r.top <= 1120).length, `the measured chrome shape — 16 short replies, the reader at the tail of an 812 px list: every row on screen is live, the NEWEST included (${tail.join(',')})`, tail.join(','));
+  ok(gateOf(['s10', 's11', 's12', 's13', 's14', 's15'].every((id) => tail.includes(id))) && tail.filter((id) => { const r = shorts.find((x) => x.id === id); return r.bottom >= 1120 - 812 && r.top <= 1120; }).length === shorts.filter((r) => r.bottom >= 1120 - 812 && r.top <= 1120).length, `the measured chrome shape — 16 short replies, the reader at the tail of an 812 px list: every row on screen is live, the NEWEST included (${tail.join(',')})`, tail.join(','));
   const far = MF.liveFrames([{ id: 'a', top: 10000, bottom: 10100 }, { id: 'b', top: 500, bottom: 600 }], { top: 0, bottom: 400 });
   ok(far.join() === 'b', 'a row beyond the keep zone is never live; one inside it is', far.join());
   ok(MF.liveFrames(rows, { top: 0, bottom: 95 }, { cap: 0 }).join() === 'm0' && MF.liveFrames(null, null).length === 0, 'cap 0 ⇒ only the rows on screen (nothing pre-warmed); nothing ⇒ nothing');
@@ -291,7 +291,7 @@ console.log('⑦ frames are lazy: nearest first, capped, only inside the keep zo
     const ml = Mv.load('src/mail-frame.js', oldLazy, 'cap-cuts-visible');
     const oldLive = ml.liveFrames(rows, { top: 1000, bottom: 1600 });
     ok(oldLazy !== srcL && oldLive.length === MF.LIVE_FRAME_CAP && !oldLive.includes('m16'), `CONTROL: the round-1 verdict keeps ${oldLive.length} of the 7 visible rows — a visible mail left a blank box (${oldLive.join(',')})`, oldLive.join(','));
-    for (const c of copiesCensus(Mv.files, Mv.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+    for (const c of copiesCensus(Mv.files, Mv.dir, REPO, { minCopies: 1 })) ok(verdictOf(c.pass), c.name, c.detail);
   }
   ok(MF.bodyAttachmentOf({ attachments: [{ id: 'a', mime: 'image/png' }, { id: 'b', mime: 'text/html', role: 'body' }] }).id === 'b' && MF.bodyAttachmentOf({ attachments: [{ id: 'c', mime: 'text/html' }] }) === null, 'the formatted body is the `role: body` text/html attachment — an attached .html FILE is a file');
 }
@@ -304,8 +304,8 @@ console.log('⑧ wiring: the ONE frame-document site (the frame host) and its or
   const at = (re) => { const m = re.exec(dom); return m ? m.index : -1; };
   const s1 = at(/MF\.sanitizeMailHtml\(/), s2 = at(/DOMPurify\.sanitize\(pure\.html, \{ \.\.\.MF\.DOMPURIFY_CONFIG/), s3 = at(/MF\.composeSrcdoc\(/), s4 = at(/writeFrame\(f, doc, MF\.frameHostSrc\(\{ nonce, pictures \}\)\);/);
   ok(s1 > 0 && s2 > s1 && s3 > s2 && s4 > s3, 'the DOM half runs step 1 (our sanitizer) → step 2 (DOMPurify with the module\'s config) → step 3 (composeSrcdoc) → the frame host (writeFrame at this mail\'s own address)', JSON.stringify({ s1, s2, s3, s4 }));
-  ok((dom.match(/\.srcdoc\s*=|setAttribute\(\s*['"]srcdoc/g) || []).length === 0 && (dom.match(/writeFrame\(/g) || []).length === 1 && /import \{ writeFrame \} from '\.\/frame-host\.js';/.test(dom) && /f\.setAttribute\('sandbox', 'allow-scripts'\);/.test(dom) && !/allow-same-origin|allow-popups|allow-forms|allow-top-navigation|allow-modals/.test(dom), 'NO srcdoc (lane design-frame-host: a srcdoc frame runs under the app page\'s policy) — ONE writeFrame through the frame host; sandbox = "allow-scripts" and nothing else');
-  ok(/const nonce = rnd\(\);\n\s+const doc = MF\.composeSrcdoc\(\{ body: clean, nonce, token: s\.token,/.test(dom), 'ONE nonce per document, the same in its meta and in the host\'s address (the header) — a fresh one per frame');
+  ok((dom.match(/\.srcdoc\s*=|setAttribute\(\s*['"]srcdoc/g) || []).length === 0 && (dom.match(/writeFrame\(/g) || []).length === 1 && gateOf(/import \{ writeFrame \} from '\.\/frame-host\.js';/.test(dom)) && gateOf(/f\.setAttribute\('sandbox', 'allow-scripts'\);/.test(dom)) && !/allow-same-origin|allow-popups|allow-forms|allow-top-navigation|allow-modals/.test(dom), 'NO srcdoc (lane design-frame-host: a srcdoc frame runs under the app page\'s policy) — ONE writeFrame through the frame host; sandbox = "allow-scripts" and nothing else');
+  ok(verdictOf(/const nonce = rnd\(\);\n\s+const doc = MF\.composeSrcdoc\(\{ body: clean, nonce, token: s\.token,/.test(dom)), 'ONE nonce per document, the same in its meta and in the host\'s address (the header) — a fresh one per frame');
   // THE FRAME'S ORDER (security verify r2, continued): sandbox flags bind at NAVIGATION — so the flags must be on the
   // element before its document is handed in (the host's src) and before it is inserted. Created fresh per live frame.
   // (The host's header sandboxes it too since lane design-frame-host — a second wall, never the reason to relax this.)
@@ -314,18 +314,18 @@ console.log('⑧ wiring: the ONE frame-document site (the frame host) and its or
     const between = i0 >= 0 && i3 > i0 ? code.slice(i0, i3) : '';
     return i0 >= 0 && i1 > i0 && i2 > i1 && i3 > i2 && !/appendChild\(f\)|replaceChildren\(f\)|insertBefore\(f|\.append\(f\)/.test(between) && (code.match(/document\.createElement\('iframe'\)/g) || []).length === 1;
   };
-  ok(orderOf(dom), 'the frame is CREATED fresh, sandboxed, THEN handed its document (the host), THEN inserted — never inserted or navigated before its flags');
+  ok(verdictOf(orderOf(dom)), 'the frame is CREATED fresh, sandboxed, THEN handed its document (the host), THEN inserted — never inserted or navigated before its flags');
   const lateSandbox = dom.replace("    f.setAttribute('sandbox', 'allow-scripts');\n", '').replace('    s.box.replaceChildren(f);\n', "    s.box.replaceChildren(f);\n    f.setAttribute('sandbox', 'allow-scripts');\n");
   const earlyInsert = dom.replace('    writeFrame(f, doc, MF.frameHostSrc({ nonce, pictures }));\n', "    s.box.appendChild(f);\n    writeFrame(f, doc, MF.frameHostSrc({ nonce, pictures }));\n");
   ok(lateSandbox !== dom && earlyInsert !== dom && !orderOf(lateSandbox) && !orderOf(earlyInsert), 'NEGATIVE CONTROLS: the sandbox set after the insertion, or the frame inserted before its document, are both flagged');
-  ok(/MF\.frameMessageVerdict\(\{ source: e\.source, frameWindow: s\.frame\.contentWindow, token: s\.token, data: e\.data \}\)/.test(dom) && /window\.open\(v\.href, '_blank', 'noopener,noreferrer'\)/.test(dom), 'the message listener asks the PURE verdict with the event\'s source and THAT frame\'s window; a link opens with no opener');
-  ok(/MF\.liveFrames\(/.test(dom) && /new IntersectionObserver\(/.test(dom) && /signal: signal \|\| undefined/.test(dom), 'lazy frames: the PURE verdict over an IntersectionObserver; every listener on the window\'s controller');
+  ok(gateOf(/MF\.frameMessageVerdict\(\{ source: e\.source, frameWindow: s\.frame\.contentWindow, token: s\.token, data: e\.data \}\)/.test(dom)) && verdictOf(/window\.open\(v\.href, '_blank', 'noopener,noreferrer'\)/.test(dom)), 'the message listener asks the PURE verdict with the event\'s source and THAT frame\'s window; a link opens with no opener');
+  ok(gateOf(/MF\.liveFrames\(/.test(dom)) && gateOf(/new IntersectionObserver\(/.test(dom)) && verdictOf(/signal: signal \|\| undefined/.test(dom)), 'lazy frames: the PURE verdict over an IntersectionObserver; every listener on the window\'s controller');
   ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(dom), 'the DOM half writes no HTML anywhere else');
   const mfSrc = strip(fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8'));
   ok(!/\brequire\(|\bimport\s/.test(mfSrc), 'src/mail-frame.js imports NOTHING (PURE — the bundle and this suite take the same rules)');
   const cfg = MF.DOMPURIFY_CONFIG;
-  ok(JSON.stringify(cfg.ADD_URI_SAFE_ATTR) === JSON.stringify([...MF.ALLOWED_ATTR.filter((a) => a !== 'href' && a !== 'src'), 'data-vs-blocked', 'data-vs-quote']) && cfg.ALLOWED_ATTR.includes('data-vs-quote') && !cfg.ADD_URI_SAFE_ATTR.includes('href') && !cfg.ADD_URI_SAFE_ATTR.includes('src') && /ADD_URI_SAFE_ATTR: MF\.DOMPURIFY_CONFIG\.ADD_URI_SAFE_ATTR/.test(dom), 'DOMPurify is told every NON-URL attribute is URI-safe (its strict URI regexp would strip width / colspan / bgcolor / the blocked marker — measured in chrome) — href and src stay judged');
-  ok(cfg.ALLOWED_TAGS.every((t) => MF.ALLOWED_TAGS.includes(t)) && MF.DROP_TAGS.every((t) => cfg.FORBID_TAGS.includes(t)) && ['script', 'iframe', 'svg', 'math', 'meta', 'base', 'link', 'object', 'embed', 'input', 'button'].every((t) => cfg.FORBID_TAGS.includes(t) && !cfg.ALLOWED_TAGS.includes(t)) && !cfg.ALLOWED_TAGS.includes('form') && cfg.ALLOWED_URI_REGEXP.test('https://a') && !cfg.ALLOWED_URI_REGEXP.test('javascript:x') && !cfg.ALLOWED_URI_REGEXP.test('data:text/html,x') && cfg.ALLOW_DATA_ATTR === false && !cfg.ALLOWED_ATTR.some((a) => /^on/.test(a)), 'DOMPurify\'s config is the module\'s lists: dangerous elements FORBIDDEN, no on* / data-* attribute, URIs http(s) / mailto / a data: raster only');
+  ok(JSON.stringify(cfg.ADD_URI_SAFE_ATTR) === JSON.stringify([...MF.ALLOWED_ATTR.filter((a) => a !== 'href' && a !== 'src'), 'data-vs-blocked', 'data-vs-quote']) && gateOf(cfg.ALLOWED_ATTR.includes('data-vs-quote')) && !cfg.ADD_URI_SAFE_ATTR.includes('href') && !cfg.ADD_URI_SAFE_ATTR.includes('src') && verdictOf(/ADD_URI_SAFE_ATTR: MF\.DOMPURIFY_CONFIG\.ADD_URI_SAFE_ATTR/.test(dom)), 'DOMPurify is told every NON-URL attribute is URI-safe (its strict URI regexp would strip width / colspan / bgcolor / the blocked marker — measured in chrome) — href and src stay judged');
+  ok(gateOf(cfg.ALLOWED_TAGS.every((t) => MF.ALLOWED_TAGS.includes(t))) && gateOf(MF.DROP_TAGS.every((t) => cfg.FORBID_TAGS.includes(t))) && gateOf(['script', 'iframe', 'svg', 'math', 'meta', 'base', 'link', 'object', 'embed', 'input', 'button'].every((t) => cfg.FORBID_TAGS.includes(t) && !cfg.ALLOWED_TAGS.includes(t))) && !cfg.ALLOWED_TAGS.includes('form') && gateOf(cfg.ALLOWED_URI_REGEXP.test('https://a')) && !cfg.ALLOWED_URI_REGEXP.test('javascript:x') && !cfg.ALLOWED_URI_REGEXP.test('data:text/html,x') && cfg.ALLOW_DATA_ATTR === false && !cfg.ALLOWED_ATTR.some((a) => /^on/.test(a)), 'DOMPurify\'s config is the module\'s lists: dangerous elements FORBIDDEN, no on* / data-* attribute, URIs http(s) / mailto / a data: raster only');
 }
 
 // ── ⑨ CONTROLS: a weakened sanitizer goes RED on ① ───────────────────────
@@ -336,16 +336,16 @@ console.log('⑨ controls: patched copies (outside the tree)');
   const keepAll = editAnchor(src, '      if (!ALLOWED_ATTR.includes(an)) continue;', '      if (false) continue;', "src/mail-frame.js");
   const m1 = M.load('src/mail-frame.js', keepAll, 'keep-every-attr');
   const b1 = runCorpus(m1);
-  ok(keepAll !== src && b1.some((b) => /on\* attribute/.test(b)), `CONTROL: a sanitizer that keeps every attribute is RED on the corpus (${b1.length} mails)`, b1.slice(0, 2).join(' | '));
+  ok(keepAll !== src && verdictOf(b1.some((b) => /on\* attribute/.test(b))), `CONTROL: a sanitizer that keeps every attribute is RED on the corpus (${b1.length} mails)`, b1.slice(0, 2).join(' | '));
   const scriptOk = editAnchor(editAnchor(editAnchor(src, "const RAW_TEXT = Object.freeze(['script', ", "const RAW_TEXT = Object.freeze([", "src/mail-frame.js"), "const DROP_TAGS = Object.freeze(['script', ", "const DROP_TAGS = Object.freeze([", "src/mail-frame.js"), "const ALLOWED_TAGS = Object.freeze(['a', ", "const ALLOWED_TAGS = Object.freeze(['script', 'a', ", "src/mail-frame.js");
   const m2 = M.load('src/mail-frame.js', scriptOk, 'script-through');
   const b2 = runCorpus(m2);
-  ok(scriptOk !== src && b2.some((b) => /a <script/.test(b)), `CONTROL: a sanitizer that lets <script> through is RED on the corpus (${b2.length} mails)`, b2.slice(0, 2).join(' | '));
+  ok(scriptOk !== src && verdictOf(b2.some((b) => /a <script/.test(b))), `CONTROL: a sanitizer that lets <script> through is RED on the corpus (${b2.length} mails)`, b2.slice(0, 2).join(' | '));
   const noCssFix = editAnchor(src, "  s = s.replace(/\\\\/g, '');\n", '', "src/mail-frame.js");
   const m3 = M.load('src/mail-frame.js', noCssFix, 'css-escapes');
   const b3 = runCorpus(m3);
-  ok(noCssFix !== src && b3.some((b) => /^style attr url quoted \+ escapes/.test(b)), `CONTROL: CSS without the backslash rule lets u\\rl( reach the attacker (${b3.length})`, b3.slice(0, 2).join(' | '));
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(c.pass, c.name, c.detail);
+  ok(noCssFix !== src && verdictOf(b3.some((b) => /^style attr url quoted \+ escapes/.test(b))), `CONTROL: CSS without the backslash rule lets u\\rl( reach the attacker (${b3.length})`, b3.slice(0, 2).join(' | '));
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── ⑩ the quoted history is folded; a wide mail fits ─────────────────────
@@ -353,26 +353,26 @@ console.log('⑩ quoted history folded once (the outermost), a wide mail fitted'
 {
   const gm = '<div dir="ltr"><p>new words</p></div><div class="gmail_quote"><div class="gmail_attr">On x, A wrote:</div><blockquote class="gmail_quote"><p>old</p><div class="gmail_quote"><blockquote class="gmail_quote"><p>older</p></blockquote></div></blockquote></div>';
   const r1 = MF.sanitizeMailHtml(gm);
-  ok(r1.quotes === 1 && (r1.html.match(/data-vs-quote="1"/g) || []).length === 1 && /<div class="gmail_quote" data-vs-quote="1"><div class="gmail_attr">/.test(r1.html) && /<p>new words<\/p>/.test(r1.html), 'a Gmail reply: the OUTERMOST gmail_quote is marked once; the quotes inside it carry no mark; the new words are untouched', r1.html);
+  ok(r1.quotes === 1 && (r1.html.match(/data-vs-quote="1"/g) || []).length === 1 && gateOf(/<div class="gmail_quote" data-vs-quote="1"><div class="gmail_attr">/.test(r1.html)) && verdictOf(/<p>new words<\/p>/.test(r1.html)), 'a Gmail reply: the OUTERMOST gmail_quote is marked once; the quotes inside it carry no mark; the new words are untouched', r1.html);
   const r2 = MF.sanitizeMailHtml('<p>a</p><blockquote type="cite"><p>cited</p></blockquote><p>b</p><blockquote type="cite"><p>cited again</p></blockquote>');
   ok(r2.quotes === 2 && (r2.html.match(/<blockquote type="cite" data-vs-quote="1">/g) || []).length === 2, 'Apple Mail / Thunderbird: each top-level blockquote type=cite is its own fold (two quotes, two marks)', r2.html);
   const r3 = MF.sanitizeMailHtml('<blockquote>the author\'s own emphasis</blockquote><div class="yahoo_quoted"><p>y</p></div><div class="x gmail_quote y">g</div><div class="gmail_quoted">no</div><div id="divRplyFwdMsg">hdr</div>');
-  ok(r3.quotes === 2 && !/<blockquote data-vs-quote/.test(r3.html) && /<div class="yahoo_quoted" data-vs-quote="1">/.test(r3.html) && /<div class="x gmail_quote y" data-vs-quote="1">/.test(r3.html) && !/gmail_quoted" data-vs-quote/.test(r3.html) && !/divRplyFwdMsg[^>]*data-vs-quote/.test(r3.html), 'a bare <blockquote> is NOT folded; yahoo_quoted and a class list holding gmail_quote are; a look-alike class and Outlook\'s header are not', r3.html);
+  ok(r3.quotes === 2 && !/<blockquote data-vs-quote/.test(r3.html) && gateOf(/<div class="yahoo_quoted" data-vs-quote="1">/.test(r3.html)) && gateOf(/<div class="x gmail_quote y" data-vs-quote="1">/.test(r3.html)) && !/gmail_quoted" data-vs-quote/.test(r3.html) && !/divRplyFwdMsg[^>]*data-vs-quote/.test(r3.html), 'a bare <blockquote> is NOT folded; yahoo_quoted and a class list holding gmail_quote are; a look-alike class and Outlook\'s header are not', r3.html);
   const r4 = MF.sanitizeMailHtml('<div class="gmail_quote" data-vs-quote="1"><p>q</p></div><p data-vs-quote="1">not a quote</p>');
   ok(r4.quotes === 1 && (r4.html.match(/data-vs-quote/g) || []).length === 1 && !/<p data-vs-quote/.test(r4.html), 'the mark is OURS: a data-vs-quote the mail itself carries is dropped (not an allowed attribute) — only the reader\'s own marking survives', r4.html);
-  ok(MF.isQuoteContainer('div', [['class', 'GMAIL_QUOTE']]) && MF.isQuoteContainer('blockquote', [['type', 'Cite']]) && !MF.isQuoteContainer('span', [['class', 'gmail_quote']]) && !MF.isQuoteContainer('div', [['class', 'gmail_attr']]), 'isQuoteContainer: case-insensitive; a span is never a container; gmail_attr (the "On … wrote" line) is not one');
+  ok(gateOf(MF.isQuoteContainer('div', [['class', 'GMAIL_QUOTE']])) && gateOf(MF.isQuoteContainer('blockquote', [['type', 'Cite']])) && !MF.isQuoteContainer('span', [['class', 'gmail_quote']]) && !MF.isQuoteContainer('div', [['class', 'gmail_attr']]), 'isQuoteContainer: case-insensitive; a span is never a container; gmail_attr (the "On … wrote" line) is not one');
   const doc = MF.composeSrcdoc({ body: r1.html, nonce: 'n', token: 't', quoteShow: 'Show </script><b>x', quoteHide: 'Hide "q"' });
-  ok(/\[data-vs-quote\]:not\(\.vs-open\)\{display:none;\}/.test(doc) && /var S="Show \\u003c\/script>\\u003cb>x",Hh="Hide \\"q\\""/.test(doc) && (doc.match(/<\/script/g) || []).length === 1 && (doc.match(/<script/g) || []).length === 1, 'the frame hides a marked quote until opened; the button\'s words ride in OUR script with < escaped — a label cannot close the script', doc.slice(doc.indexOf('var S='), doc.indexOf('var S=') + 80));
+  ok(gateOf(/\[data-vs-quote\]:not\(\.vs-open\)\{display:none;\}/.test(doc)) && gateOf(/var S="Show \\u003c\/script>\\u003cb>x",Hh="Hide \\"q\\""/.test(doc)) && (doc.match(/<\/script/g) || []).length === 1 && (doc.match(/<script/g) || []).length === 1, 'the frame hides a marked quote until opened; the button\'s words ride in OUR script with < escaped — a label cannot close the script', doc.slice(doc.indexOf('var S='), doc.indexOf('var S=') + 80));
   const rs = MF.resizerScript('t');
-  ok(/lastW=-1/.test(rs) && /if\(cw===lastW\)return;lastW=cw;b\.style\.zoom='1';var sw=b\.scrollWidth;b\.style\.zoom=sw>cw\+1\?String\(cw\/sw\):'1';/.test(rs) && /function h\(\)\{fit\(\);/.test(rs) && /b\.getBoundingClientRect\(\)\.height,b\.scrollHeight\*z/.test(rs) && /ro\.observe\(document\.body\)/.test(rs), 'the resizer fits a wide mail to the frame (zoom = frame ÷ the body\'s natural width), re-judged only when the frame\'s width CHANGES, before every height it posts — and the height is the body\'s ZOOMED box (a frame can shrink again), the body observed too');
-  ok(/document\.querySelectorAll\('\[data-vs-quote\]'\)/.test(rs) && /classList\.toggle\('vs-open'\)/.test(rs) && /aria-expanded/.test(rs) && /el\.parentNode\.insertBefore\(b,el\)/.test(rs), 'one button per marked quote, inserted before it, toggling vs-open and saying so (aria-expanded), then the height is re-posted');
+  ok(gateOf(/lastW=-1/.test(rs)) && gateOf(/if\(cw===lastW\)return;lastW=cw;b\.style\.zoom='1';var sw=b\.scrollWidth;b\.style\.zoom=sw>cw\+1\?String\(cw\/sw\):'1';/.test(rs)) && gateOf(/function h\(\)\{fit\(\);/.test(rs)) && gateOf(/b\.getBoundingClientRect\(\)\.height,b\.scrollHeight\*z/.test(rs)) && verdictOf(/ro\.observe\(document\.body\)/.test(rs)), 'the resizer fits a wide mail to the frame (zoom = frame ÷ the body\'s natural width), re-judged only when the frame\'s width CHANGES, before every height it posts — and the height is the body\'s ZOOMED box (a frame can shrink again), the body observed too');
+  ok(gateOf(/document\.querySelectorAll\('\[data-vs-quote\]'\)/.test(rs)) && gateOf(/classList\.toggle\('vs-open'\)/.test(rs)) && gateOf(/aria-expanded/.test(rs)) && verdictOf(/el\.parentNode\.insertBefore\(b,el\)/.test(rs)), 'one button per marked quote, inserted before it, toggling vs-open and saying so (aria-expanded), then the height is re-posted');
   const wire = fs.readFileSync(path.join(REPO, 'src/lib/channel-mail-frame.js'), 'utf-8');
-  ok(/composeSrcdoc\(\{ body: clean, nonce, token: s\.token, pictures, quoteShow: t\('Show quoted text'\), quoteHide: t\('Hide quoted text'\) \}\)/.test(wire), 'WIRING: the DOM half hands the frame the device\'s words for the quote toggle');
+  ok(verdictOf(/composeSrcdoc\(\{ body: clean, nonce, token: s\.token, pictures, quoteShow: t\('Show quoted text'\), quoteHide: t\('Hide quoted text'\) \}\)/.test(wire)), 'WIRING: the DOM half hands the frame the device\'s words for the quote toggle');
   const win = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
-  ok(/if \(slot\) row\.insertBefore\(slot, body\);/.test(win) && !/row\.appendChild\(slot\)/.test(win), 'WIRING: the mail slot (bar + frame) is inserted BEFORE the text body — the bar never jumps under the text in Plain text');
+  ok(gateOf(/if \(slot\) row\.insertBefore\(slot, body\);/.test(win)) && !/row\.appendChild\(slot\)/.test(win), 'WIRING: the mail slot (bar + frame) is inserted BEFORE the text body — the bar never jumps under the text in Plain text');
   for (const [lang, show, hide] of [['zh', '显示引用内容', '收起引用内容'], ['ja', '引用を表示', '引用を隠す']]) {
     const dict = fs.readFileSync(path.join(REPO, `src/lib/i18n-${lang}.js`), 'utf-8');
-    ok(dict.includes(`"Show quoted text": "${show}"`) && dict.includes(`"Hide quoted text": "${hide}"`), `i18n ${lang}: the quote toggle's two labels (Hide quoted text is the plain view's own key, shared)`);
+    ok(gateOf(dict.includes(`"Show quoted text": "${show}"`)) && verdictOf(dict.includes(`"Hide quoted text": "${hide}"`)), `i18n ${lang}: the quote toggle's two labels (Hide quoted text is the plain view's own key, shared)`);
   }
   // CONTROL: a reader that never marks a quote — ⑩'s first pin goes red on it
   const M = mutantCopies('mail-frame-quote', REPO);
@@ -381,7 +381,7 @@ console.log('⑩ quoted history folded once (the outermost), a wide mail fitted'
   const m1 = M.load('src/mail-frame.js', noMark, 'no-quote-mark');
   const c1 = m1.sanitizeMailHtml(gm);
   ok(noMark !== src && c1.quotes === 0 && !/data-vs-quote/.test(c1.html), 'CONTROL: a sanitizer that never marks a quote is RED on the Gmail reply (no mark, no fold)');
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── ⑪ bounded work: the sanitizer is linear at its own bound ─────────────
@@ -414,7 +414,7 @@ console.log('⑪ bounded work: every quadratic shape at MAX_HTML_BYTES costs wha
     const x = build(src);
     let r = null;
     const ms = bestMs(() => { r = MF.sanitizeMailHtml(x); }, { reps: 1 });
-    ok(r.ok && ms / CAL <= BOUND_X && !/<(?!\/?(style|p)\b)[a-z]/i.test(r.html.slice(0, 4096)), `${name} at ${(x.length / 1048576).toFixed(2)} MB: ${(ms / CAL).toFixed(2)} × a benign mail at the bound (≤ ${BOUND_X} ×; ${CAL.toFixed(0)} ms CPU here)`, `ok=${r.ok} x=${ms / CAL}`);
+    ok(gateOf(r.ok) && ms / CAL <= BOUND_X && !/<(?!\/?(style|p)\b)[a-z]/i.test(r.html.slice(0, 4096)), `${name} at ${(x.length / 1048576).toFixed(2)} MB: ${(ms / CAL).toFixed(2)} × a benign mail at the bound (≤ ${BOUND_X} ×; ${CAL.toFixed(0)} ms CPU here)`, `ok=${r.ok} x=${ms / CAL}`);
   }
   /** THE SAME JUDGE in a child: require `file`, CAL on the benign mail, then the shape — both CPU, one process. A MUTANT
    *  is cut after CONTROL_WAIT_MS (a wait, never a verdict on speed: a cut copy is over by construction); the REAL
@@ -442,13 +442,13 @@ console.log('⑪ bounded work: every quadratic shape at MAX_HTML_BYTES costs wha
     const patched = editAnchor(src, from, to, "src/mail-frame.js");
     if (patched === src) { ok(false, `CONTROL setup: ${what} — the fixed line is present`, from); continue; }
     const file = M.write('src/mail-frame.js', patched, `linear-${shape}`);
-    runs.push(inChild(file, SHAPES[shape][1]).then((r) => ok(r.over, `CONTROL: a copy with ${what} is OVER the bound on "${SHAPES[shape][0]}" (${r.killed ? `still running after the ${CONTROL_WAIT_MS} ms wait — cut` : `${r.x.toFixed(1)} × a benign mail`})`, JSON.stringify(r))));
+    runs.push(inChild(file, SHAPES[shape][1]).then((r) => ok(verdictOf(r.over), `CONTROL: a copy with ${what} is OVER the bound on "${SHAPES[shape][0]}" (${r.killed ? `still running after the ${CONTROL_WAIT_MS} ms wait — cut` : `${r.x.toFixed(1)} × a benign mail`})`, JSON.stringify(r))));
   }
   // the judge itself: the REAL module in the same child harness is under the budget (the harness is not what fails)
   runs.push(inChild(path.join(REPO, 'src/mail-frame.js'), SHAPES[0][1], { cut: false }).then((r) => ok(!r.over, `the child harness on the REAL module: under the bound (${r.x == null ? 'no answer' : r.x.toFixed(2) + ' × a benign mail'}; never cut)`, JSON.stringify(r))));
   await Promise.all(runs);
   // (round 1's Content-Length wiring pin moved into ⑫: the header rung lives in readBounded, the bytes decide)
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 5 })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 5 })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── ⑫ (security verify r2, 2026-09-28) THE BODY IS BOUNDED AT THE BYTES, NEVER AT A HEADER ─────────────────
@@ -474,28 +474,28 @@ console.log('⑫ the mail body is read to the bound and no further (a header is 
   ok(r1.over === true && r1.bytes > MAX && r1.bytes <= MAX + CHUNK && s1.sent <= MAX + 2 * CHUNK && s1.cancelled === true, `a 3 MB chunked body with no Content-Length: refused OVER the bound after ${r1.bytes} bytes (≤ bound + one chunk), the stream CANCELLED (${s1.sent} bytes pulled of 3 MB)`, JSON.stringify([r1, s1]));
   const s2 = { sent: 0, cancelled: false };
   const r2 = await readBounded(chunked(1024 * 1024, s2), MAX);
-  ok(!r2.over && r2.buf && r2.buf.byteLength === 1024 * 1024 && r2.bytes === 1024 * 1024 && !s2.cancelled, 'a 1 MB chunked body: read whole (1 048 576 bytes), never cancelled');
+  ok(!r2.over && gateOf(r2.buf) && r2.buf.byteLength === 1024 * 1024 && r2.bytes === 1024 * 1024 && !s2.cancelled, 'a 1 MB chunked body: read whole (1 048 576 bytes), never cancelled');
   const s3 = { sent: 0, cancelled: false };
   const r3 = await readBounded(chunked(10, s3, { 'content-length': String(MAX + 1) }), MAX);
   ok(r3.over === true && r3.bytes === 0 && r3.claimed === MAX + 1 && s3.sent === 0, 'a Content-Length OVER the bound is refused before the first byte (the cheap rung stays)', JSON.stringify([r3, s3]));
   const s4 = { sent: 0, cancelled: false };
   const r4 = await readBounded(chunked(MAX + 1, s4, { 'content-length': '10' }), MAX);
-  ok(r4.over === true && s4.cancelled, 'a Content-Length UNDER the bound is never trusted: the bytes still decide (a lying header is refused at the bound)', JSON.stringify([r4, s4]));
+  ok(r4.over === true && verdictOf(s4.cancelled), 'a Content-Length UNDER the bound is never trusted: the bytes still decide (a lying header is refused at the bound)', JSON.stringify([r4, s4]));
   const r5 = await readBounded(new Response('abc'), 2).catch((e) => ({ threw: e.message }));
   ok(r5.over === true, 'a Response whose body is a static string is judged by its bytes too', JSON.stringify(r5));
   let threw = null; try { await readBounded(new Response('x'), NaN); } catch (e) { threw = e.message; }
-  ok(/finite bound/.test(threw || ''), 'no bound ⇒ refused loudly (never an unbounded read by omission)');
+  ok(verdictOf(/finite bound/.test(threw || '')), 'no bound ⇒ refused loudly (never an unbounded read by omission)');
   // WIRING: the DOM half reads through readBounded (never arrayBuffer); the route says the size before the stream
   const dom = fs.readFileSync(path.join(REPO, 'src/lib/channel-mail-frame.js'), 'utf-8');
-  ok(/import \{ readBounded \} from '\.\/bounded-read\.js';/.test(dom) && /const got = await readBounded\(res, MF\.MAX_HTML_BYTES\);/.test(dom) && /if \(got\.over\) return \{ error: t\('This message is too large to show formatted — showing plain text'\), code: 'too-large', noRetry: true \};/.test(dom) && !/arrayBuffer\(\)/.test(dom) && !/res\.headers\.get\('content-length'\)/.test(dom), 'WIRING: the DOM half reads the body through readBounded at MAX_HTML_BYTES — no arrayBuffer(), no header rung of its own');
+  ok(gateOf(/import \{ readBounded \} from '\.\/bounded-read\.js';/.test(dom)) && gateOf(/const got = await readBounded\(res, MF\.MAX_HTML_BYTES\);/.test(dom)) && gateOf(/if \(got\.over\) return \{ error: t\('This message is too large to show formatted — showing plain text'\), code: 'too-large', noRetry: true \};/.test(dom)) && !/arrayBuffer\(\)/.test(dom) && !/res\.headers\.get\('content-length'\)/.test(dom), 'WIRING: the DOM half reads the body through readBounded at MAX_HTML_BYTES — no arrayBuffer(), no header rung of its own');
   // the ATTACHMENT route's own text (the .197 integration: lane channel-threads' emoji route streams a file too, earlier in the file)
   const routeAll = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
   const attAt = routeAll.indexOf("router.get('/api/channels/:adapterId/:convId/attachment/:id',");
   const route = attAt >= 0 ? routeAll.slice(attAt, (routeAll.indexOf('\nrouter.', attAt + 1) + 1 || routeAll.length + 1) - 1) : '';
   const clAt = route.indexOf("res.setHeader('Content-Length', String(stat.size))"), pipeAt = route.indexOf('const st = fs.createReadStream(r.file);');
-  ok(attAt > 0 && clAt > 0 && pipeAt > clAt && /await fs\.promises\.stat\(r\.file\)/.test(route), 'WIRING: the attachment route answers Content-Length (the file\'s stat, async) BEFORE piping the stream');
+  ok(attAt > 0 && clAt > 0 && pipeAt > clAt && verdictOf(/await fs\.promises\.stat\(r\.file\)/.test(route)), 'WIRING: the attachment route answers Content-Length (the file\'s stat, async) BEFORE piping the stream');
   const br = fs.readFileSync(path.join(REPO, 'src/lib/bounded-read.js'), 'utf-8');
-  ok(!/^\s*import\s/m.test(br) && /export async function readBounded/.test(br), 'src/lib/bounded-read.js imports nothing (PURE over the Fetch primitives; the suite and the bundle take the same rule)');
+  ok(!/^\s*import\s/m.test(br) && verdictOf(/export async function readBounded/.test(br)), 'src/lib/bounded-read.js imports nothing (PURE over the Fetch primitives; the suite and the bundle take the same rule)');
   // CONTROL: a copy with the running bound removed reads the 3 MB body WHOLE
   const M = mutantCopies('mail-frame-bounded', REPO);
   const noBound = editAnchor(br, '    if (n > limit) {', '    if (false) {', "src/lib/bounded-read.js");
@@ -504,7 +504,7 @@ console.log('⑫ the mail body is read to the bound and no further (a header is 
   const sc = { sent: 0, cancelled: false };
   const rc = await m.readBounded(chunked(3 * 1024 * 1024, sc), MAX);
   ok(noBound !== br && !rc.over && rc.bytes === 3 * 1024 * 1024 && !sc.cancelled, `CONTROL: without the running bound the 3 MB chunked body is read whole (${rc.bytes} bytes, never cancelled) — the round-1 shape`, JSON.stringify([rc && rc.over, rc && rc.bytes, sc]));
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── ⑬ (security verify r2, 2026-09-28) A MAIL DOES NOT ANIMATE ITS ROW: no keyframes, and the parent's height budget ─
@@ -517,10 +517,10 @@ console.log('⑫ the mail body is read to the bound and no further (a header is 
 console.log('⑬ a mail does not animate its row: keyframes stripped, the parent\'s height budget');
 {
   const css = MF.sanitizeCss('@keyframes g{from{height:100px}to{height:19000px}} body{animation:g .2s linear infinite alternate;color:red} .x{transition:height 1s;-webkit-animation-name:g;animation-duration:2s} @-webkit-keyframes k { 0% { top: 0 } 100% { top: 1px } } @-moz-keyframes m{from{a:b}} p{margin:0}');
-  ok(!/keyframes|animation|transition/i.test(css) && /color:red/.test(css) && /p\{margin:0\}/.test(css), 'a <style>: every @keyframes block (nested braces, every vendor prefix) and every animation-* / transition-* declaration is gone; the other rules stay', css);
+  ok(!/keyframes|animation|transition/i.test(css) && gateOf(/color:red/.test(css)) && verdictOf(/p\{margin:0\}/.test(css)), 'a <style>: every @keyframes block (nested braces, every vendor prefix) and every animation-* / transition-* declaration is gone; the other rules stay', css);
   ok(MF.sanitizeCss('@keyframes g{from{height:100px} to{height:1px}') === '', 'an unclosed @keyframes takes the rest (never a half block left to parse)');
   const inline = MF.sanitizeMailHtml('<div style="animation:g 1s infinite;height:10px;transition:all 1s">x</div>');
-  ok(/style=";?height:10px;?"/.test(inline.html) && !/animation|transition/.test(inline.html), 'an inline style loses its animation / transition and keeps the rest', inline.html);
+  ok(gateOf(/style=";?height:10px;?"/.test(inline.html)) && !/animation|transition/.test(inline.html), 'an inline style loses its animation / transition and keeps the rest', inline.html);
   ok(MF.cssKeyframes('a{b:c} @keyframes x{0%{a:b}} @keyframes y{} z{q:r}') === 'a{b:c}   z{q:r}', 'cssKeyframes: two blocks, the text between and after kept');
   // the budget's table (t in ms since the frame went live at 0)
   const walk = (rows) => { const b = MF.heightBudget(0); return rows.map(([h, t]) => MF.heightVerdict(b, h, t).act); };
@@ -528,10 +528,10 @@ console.log('⑬ a mail does not animate its row: keyframes stripped, the parent
   ok(walk([[100, 10], [200, 1600], [300, 1700], [300, 1900], [400, 1950], [400, 2300], [400, 2400]]).join() === 'apply,apply,hold,apply,hold,apply,hold', 'after the settle: one change per 250 ms — a change inside the gap is held, the same height asked again past the gap applies (the final size lands), an equal height is nothing');
   const pulse = []; for (let i = 0; i < 20; i++) pulse.push([i % 2 ? 300 : 100, 1600 + i * 300]);
   const acts = walk(pulse);
-  ok(acts.slice(0, 9).every((a) => a === 'apply') && acts[9] === 'frozen' && acts.slice(9).every((a) => a === 'frozen'), `a height that FLIPS direction ${MF.HEIGHT_FLIP_CAP} times inside ${MF.HEIGHT_FLIP_WINDOW_MS / 1000} s is FROZEN for the frame's life — the first two heights set the direction, the ${MF.HEIGHT_FLIP_CAP}th reversal freezes (${acts.slice(0, 11).join(',')})`);
+  ok(gateOf(acts.slice(0, 9).every((a) => a === 'apply')) && acts[9] === 'frozen' && verdictOf(acts.slice(9).every((a) => a === 'frozen')), `a height that FLIPS direction ${MF.HEIGHT_FLIP_CAP} times inside ${MF.HEIGHT_FLIP_WINDOW_MS / 1000} s is FROZEN for the frame's life — the first two heights set the direction, the ${MF.HEIGHT_FLIP_CAP}th reversal freezes (${acts.slice(0, 11).join(',')})`);
   const slow = []; for (let i = 0; i < 20; i++) slow.push([i % 2 ? 300 : 100, 1600 + i * 2000]);
-  ok(walk(slow).every((a) => a === 'apply'), 'a person toggling a quote open and closed every 2 s is never frozen (the flips leave the 10 s window)');
-  ok(walk([[100, 10], [200, 1600], [300, 1900], [400, 2200], [500, 2500], [600, 2800]]).every((a) => a === 'apply'), 'a row that only GROWS (pictures arriving, the quote opened) never freezes');
+  ok(verdictOf(walk(slow).every((a) => a === 'apply')), 'a person toggling a quote open and closed every 2 s is never frozen (the flips leave the 10 s window)');
+  ok(verdictOf(walk([[100, 10], [200, 1600], [300, 1900], [400, 2200], [500, 2500], [600, 2800]]).every((a) => a === 'apply')), 'a row that only GROWS (pictures arriving, the quote opened) never freezes');
   const fb = MF.heightBudget(0); MF.heightVerdict(fb, 100, 10); fb.frozen = true;
   ok(MF.heightVerdict(fb, 5000, 20).act === 'frozen' && MF.heightVerdict(fb, 5000, 20).h === 100, 'a frozen budget answers its LAST height, whatever is asked');
   ok(MF.heightVerdict(null, 100, 0).act === 'hold', 'no budget ⇒ hold (never an unbudgeted apply)');
@@ -566,30 +566,30 @@ console.log('⑬ a mail does not animate its row: keyframes stripped, the parent
   // WIRING: the DOM half mints the budget when the frame goes live and asks it before every applied height
   const dom = fs.readFileSync(path.join(REPO, 'src/lib/channel-mail-frame.js'), 'utf-8');
   const mintAt = dom.indexOf('s.budget = MF.heightBudget(Date.now());'), askAt = dom.indexOf('const hv = MF.heightVerdict(s.budget, h, Date.now());'), applyAt = dom.indexOf("s.h = hv.h; s.frame.style.height = hv.h + 'px'; s.box.dataset.h = String(hv.h);");
-  ok(mintAt > 0 && askAt > 0 && applyAt > askAt && /if \(v\.act === 'height'\) applyHeight\(s, v\.h\);/.test(dom) && /if \(hv\.act === 'frozen' && !s\.frozenSaid\) \{ s\.frozenSaid = true; s\.box\.dataset\.frozen = '1'; \}/.test(dom) && !/s\.h = v\.h;/.test(dom), 'WIRING: a budget per live frame (minted with the token), the listener hands every height to applyHeight, the verdict is asked there, only an `apply` reaches the row; a freeze is marked on the box (data-frozen)');
-  ok(/if \(hv\.act === 'hold' && hv\.retryAt !== undefined && !s\.trail\) \{/.test(dom) && /s\.trail = setTimeout\(\(\) => \{ s\.trail = 0; const p = MF\.heightPending\(b\); if \(p !== null && s\.frame && s\.budget === b\) applyHeight\(s, p\); \}, Math\.max\(0, hv\.retryAt - Date\.now\(\)\) \+ 5\);/.test(dom) && /if \(s\.trail\) \{ clearTimeout\(s\.trail\); s\.trail = 0; \}/.test(dom), 'WIRING: a hold with retryAt arms ONE timer per frame that re-judges heightPending of THAT budget (a rebuilt frame\'s new budget is never fed an old height); dropping the frame clears it');
+  ok(mintAt > 0 && askAt > 0 && applyAt > askAt && gateOf(/if \(v\.act === 'height'\) applyHeight\(s, v\.h\);/.test(dom)) && gateOf(/if \(hv\.act === 'frozen' && !s\.frozenSaid\) \{ s\.frozenSaid = true; s\.box\.dataset\.frozen = '1'; \}/.test(dom)) && !/s\.h = v\.h;/.test(dom), 'WIRING: a budget per live frame (minted with the token), the listener hands every height to applyHeight, the verdict is asked there, only an `apply` reaches the row; a freeze is marked on the box (data-frozen)');
+  ok(gateOf(/if \(hv\.act === 'hold' && hv\.retryAt !== undefined && !s\.trail\) \{/.test(dom)) && gateOf(/s\.trail = setTimeout\(\(\) => \{ s\.trail = 0; const p = MF\.heightPending\(b\); if \(p !== null && s\.frame && s\.budget === b\) applyHeight\(s, p\); \}, Math\.max\(0, hv\.retryAt - Date\.now\(\)\) \+ 5\);/.test(dom)) && verdictOf(/if \(s\.trail\) \{ clearTimeout\(s\.trail\); s\.trail = 0; \}/.test(dom)), 'WIRING: a hold with retryAt arms ONE timer per frame that re-judges heightPending of THAT budget (a rebuilt frame\'s new budget is never fed an old height); dropping the frame clears it');
   // the animation shape at the bound stays linear (⑪'s judge)
   const N = MF.MAX_HTML_BYTES - 64;
   const kx = '<style>' + '@keyframes x{'.repeat(Math.floor(N / 13) - 2) + '</style>';
   let r = null;
   const kxX = bestMs(() => { r = MF.sanitizeMailHtml(kx); }, { reps: 1 }) / mailCal();
-  ok(r.ok && kxX <= 5 && !/keyframes/.test(r.html), `"@keyframes x{" with no "}" at the bound: ${kxX.toFixed(2)} × a benign mail's cost (≤ 5 ×, linear — ⑪'s judge)`);
+  ok(gateOf(r.ok) && kxX <= 5 && !/keyframes/.test(r.html), `"@keyframes x{" with no "}" at the bound: ${kxX.toFixed(2)} × a benign mail's cost (≤ 5 ×, linear — ⑪'s judge)`);
   // CONTROLS
   const M = mutantCopies('mail-frame-anim', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');
   const keepAnim = editAnchor(src, "  s = cssKeyframes(s);\n  s = s.replace(/(?:-webkit-|-moz-|-o-)?(?:animation|transition)(?:-[a-z-]+)?\\s*:[^;}]*/gi, '');", '', "src/mail-frame.js");
   const m1 = M.load('src/mail-frame.js', keepAnim, 'keep-animation');
   const c1 = m1.sanitizeCss('@keyframes g{from{height:100px}to{height:19000px}} body{animation:g .2s infinite alternate}');
-  ok(keepAnim !== src && /@keyframes/.test(c1) && /animation:g/.test(c1), 'CONTROL: a sanitizer that keeps CSS animations lets the pulse through (the round-2 shape)', c1);
+  ok(keepAnim !== src && gateOf(/@keyframes/.test(c1)) && verdictOf(/animation:g/.test(c1)), 'CONTROL: a sanitizer that keeps CSS animations lets the pulse through (the round-2 shape)', c1);
   const noFreeze = editAnchor(src, '    if (b.flips.length >= HEIGHT_FLIP_CAP) { b.frozen = true; b.pending = null; return { act: \'frozen\', h: b.lastH }; }', '', "src/mail-frame.js");
   const m2 = M.load('src/mail-frame.js', noFreeze, 'never-freeze');
   const b2 = m2.heightBudget(0); const a2 = pulse.map(([h, t2]) => m2.heightVerdict(b2, h, t2).act);
-  ok(noFreeze !== src && a2.every((a) => a === 'apply'), 'CONTROL: a budget without the flip cap applies a pulse forever (the jumping conversation)', a2.join(','));
+  ok(noFreeze !== src && verdictOf(a2.every((a) => a === 'apply')), 'CONTROL: a budget without the flip cap applies a pulse forever (the jumping conversation)', a2.join(','));
   // the round-2 budget as it shipped: a hold kept nothing and named no retry — the burst's last height is lost
   const noTrail = editAnchor(src, "  if (!settling && t - b.lastAt < HEIGHT_MIN_GAP_MS) { b.pending = h; return { act: 'hold', h, retryAt: b.lastAt + HEIGHT_MIN_GAP_MS }; }", "  if (!settling && t - b.lastAt < HEIGHT_MIN_GAP_MS) return { act: 'hold', h };", "src/mail-frame.js");
   const m3 = M.load('src/mail-frame.js', noTrail, 'no-trailing-edge');
   ok(noTrail !== src && burst(m3, drag) === 677 && burst(m3, pics) === 420, `CONTROL: the round-2 budget (a hold keeps nothing) ends the drag at 677 for a 696 mail and the pictures at 420 for 610 — the last line cut, the measured chrome shape`, J([burst(m3, drag), burst(m3, pics)]));
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── ⑭ (security verify r2, continued) THE SHARED ATTACK CORPUS, IN NODE (the fast tier's half of ⑩x) ─────────────
@@ -647,7 +647,7 @@ console.log('⑭ the shared attack corpus through the re-serializer (a token cen
   }
   ok(corpus.length >= 55 && !bad.length, `every one of the ${corpus.length} corpus mails, pictures off AND on: only allowed tags / attributes, no handler, no scheme but http(s) / mailto / a data: raster, no reach in any style, no raw < in text, no remote picture before the press and no http one after`, bad.join('\n    '));
   const doc = MF.composeSrcdoc({ body: MF.sanitizeMailHtml(corpus.find((c) => c.name === 'csp-meta-attacker').html).html, nonce: 'n0nce', token: 't0ken' });
-  ok(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;|^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'/.test(doc) && (doc.match(/<meta /g) || []).length === 3 && (doc.match(/<script/g) || []).length === 1, 'the CSP <meta> is the SECOND element of the head (right after the charset), the mail\'s own CSP meta is gone, ONE script', doc.slice(0, 200));
+  ok(gateOf(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;|^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'/.test(doc)) && (doc.match(/<meta /g) || []).length === 3 && (doc.match(/<script/g) || []).length === 1, 'the CSP <meta> is the SECOND element of the head (right after the charset), the mail\'s own CSP meta is gone, ONE script', doc.slice(0, 200));
   // CONTROL: the census is not blind — the SAME census over the RAW corpus (the step skipped) flags nearly every mail
   const rawFlagged = corpus.filter((c) => censusOf(c.html, false).length).map((c) => c.name);
   const rawClean = corpus.filter((c) => !censusOf(c.html, false).length).map((c) => c.name);
@@ -655,4 +655,4 @@ console.log('⑭ the shared attack corpus through the re-serializer (a token cen
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -32,7 +32,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -78,7 +78,7 @@ console.log('§1 the verdicts (src/lib/press-select.js)');
     [['text'], 'text'], [['auto', 'auto', 'text', 'none'], 'text'], [['auto', 'none', 'text'], 'none'],
     [['', null, undefined, 'auto'], 'auto'], [[], 'auto'], [null, 'auto'], [[' None '], 'none'], [['all'], 'all'],
   ];
-  ok(US.every(([v, w]) => PS.effectiveUserSelect(v) === w), `effectiveUserSelect: ${US.length} rows — the first non-auto value from the element up decides (Blink/WebKit report it inherited, Gecko reports auto: the same answer)`, US.map(([v]) => PS.effectiveUserSelect(v)));
+  ok(verdictOf(US.every(([v, w]) => PS.effectiveUserSelect(v) === w)), `effectiveUserSelect: ${US.length} rows — the first non-auto value from the element up decides (Blink/WebKit report it inherited, Gecko reports auto: the same answer)`, US.map(([v]) => PS.effectiveUserSelect(v)));
   const S = PS.TEXT_SLOP_PX;
   const line = { left: 10, right: 200, top: 100, bottom: 115 };
   const ON = [
@@ -87,7 +87,7 @@ console.log('§1 the verdicts (src/lib/press-select.js)');
     [[line, { left: 10, right: 120, top: 121, bottom: 136 }], 150, 128, false], // right of a SHORT last line: the gutter
     [[{ left: 0, right: 0, top: 0, bottom: 0 }], 0, 0, false], [[], 50, 107, false], [[line], NaN, 107, false],
   ];
-  ok(S === 6 && ON.every(([r, x, y, w]) => PS.pointOnText(r, x, y) === w), `pointOnText: ${ON.length} rows — within ${S} px of a line fragment (the ~6 px gap between lines counts), right of a short last line does not, empty rects never`, ON.map(([r, x, y]) => PS.pointOnText(r, x, y)));
+  ok(S === 6 && verdictOf(ON.every(([r, x, y, w]) => PS.pointOnText(r, x, y) === w)), `pointOnText: ${ON.length} rows — within ${S} px of a line fragment (the ~6 px gap between lines counts), right of a short last line does not, empty rects never`, ON.map(([r, x, y]) => PS.pointOnText(r, x, y)));
   const SEL = [
     [{ connected: false, touch: true, collapsed: false, textAnchor: true }, false, true],
     [{ touch: true, collapsed: false, textAnchor: true }, true, false], // THE CASE: a selection starts outside
@@ -98,14 +98,14 @@ console.log('§1 the verdicts (src/lib/press-select.js)');
     [{ touch: true, collapsed: false, textAnchor: true, sameAsOpen: true }, false, false],
     [{}, false, false],
   ];
-  ok(SEL.every(([f, c, r]) => { const v = PS.selectionCloses(f); return v.close === c && v.retire === r; }), `selectionCloses: ${SEL.length} rows — only a touch, non-collapsed, text-anchored selection that starts outside and is not the opening one closes; a removed surface retires`, SEL.map(([f]) => PS.selectionCloses(f)));
+  ok(verdictOf(SEL.every(([f, c, r]) => { const v = PS.selectionCloses(f); return v.close === c && v.retire === r; })), `selectionCloses: ${SEL.length} rows — only a touch, non-collapsed, text-anchored selection that starts outside and is not the opening one closes; a removed surface retires`, SEL.map(([f]) => PS.selectionCloses(f)));
   const SS = [
     [{ touching: true, verdict: 'menu', handled: true }, false], // a menu is open: the platform's long press may not also select
     [{ touching: true, verdict: 'menu', handled: false }, true], // nobody took the menu (the file viewer): the platform selects as before
     [{ touching: true, verdict: 'selection', handled: true }, true], [{ touching: true, verdict: 'native', handled: true }, true], [{ touching: true, verdict: null, handled: true }, true],
     [{ touching: false, verdict: 'menu', handled: true }, true], [{}, true],
   ];
-  ok(SS.every(([f, w]) => PS.selectStartAllowed(f) === w), `selectStartAllowed: ${SS.length} rows — only a touch DOWN whose verdict is menu AND whose menu an app handler took holds the platform's selection off (measured: Chrome's long press on the role strip selected "Answer" under our menu)`, SS.map(([f]) => PS.selectStartAllowed(f)));
+  ok(verdictOf(SS.every(([f, w]) => PS.selectStartAllowed(f) === w)), `selectStartAllowed: ${SS.length} rows — only a touch DOWN whose verdict is menu AND whose menu an app handler took holds the platform's selection off (measured: Chrome's long press on the role strip selected "Answer" under our menu)`, SS.map(([f]) => PS.selectStartAllowed(f)));
   const TC = [
     [{ touch: false, verdict: 'selection' }, 'pass'], // a mouse right-click: never judged
     [{ touch: true, verdict: 'selection' }, 'stop'], // Android on the words: no handler, never cancelled
@@ -115,9 +115,9 @@ console.log('§1 the verdicts (src/lib/press-select.js)');
     [{ touch: true, fired: true, handled: false }, 'pass'], // nobody took ours: the platform's own menu (save image)
     [{}, 'pass'],
   ];
-  ok(TC.every(([f, w]) => PS.trustedContextMenu(f) === w), `trustedContextMenu: ${TC.length} rows — mouse / menu / field pass, touch on text stops (never cancels), after ours was taken swallow, after ours nobody took pass`, TC.map(([f]) => PS.trustedContextMenu(f)));
+  ok(verdictOf(TC.every(([f, w]) => PS.trustedContextMenu(f) === w)), `trustedContextMenu: ${TC.length} rows — mouse / menu / field pass, touch on text stops (never cancels), after ours was taken swallow, after ours nobody took pass`, TC.map(([f]) => PS.trustedContextMenu(f)));
   ok(PS.NATIVE_PRESS_SELECTOR === 'textarea, input, select, [contenteditable], .xterm', 'NATIVE_PRESS_SELECTOR = the pre-lane exclusion list, verbatim (text fields, the terminal)');
-  ok(['button', 'summary', '[role="button"]', '[data-popover]', '.context-menu'].every((s) => PS.PRESS_CHROME_SELECTOR.split(',').map((x) => x.trim()).includes(s)), `PRESS_CHROME_SELECTOR names the controls: ${PS.PRESS_CHROME_SELECTOR}`);
+  ok(verdictOf(['button', 'summary', '[role="button"]', '[data-popover]', '.context-menu'].every((s) => PS.PRESS_CHROME_SELECTOR.split(',').map((x) => x.trim()).includes(s))), `PRESS_CHROME_SELECTOR names the controls: ${PS.PRESS_CHROME_SELECTOR}`);
   ok(!/\bimport\b|\brequire\s*\(/.test(read('src/lib/press-select.js').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), 'press-select.js is PURE (imports nothing)');
 }
 
@@ -280,7 +280,7 @@ const doorLegs = (mod) => withDoor(mod, () => ({
   const R = doorLegs(U);
   ok(R.text.synth === 0 && R.text.menus === 0 && !R.text.endPrevented, `a touch long press on the WORDS: no synthetic contextmenu, no menu, touchend not cancelled (the platform's selection stands) — ${JSON.stringify(R.text)}`);
   ok(R.gapBetweenLines.synth === 0 && R.gapBetweenLines.menus === 0, '…between two lines of the paragraph too (within the slop)');
-  ok(R.gutter.synth === 1 && R.gutter.menus === 1 && R.gutter.endPrevented, `a long press in the GUTTER (right of a short last line): the synthetic contextmenu opens the menu, the emulated click is cancelled — ${JSON.stringify(R.gutter)}`);
+  ok(R.gutter.synth === 1 && R.gutter.menus === 1 && verdictOf(R.gutter.endPrevented), `a long press in the GUTTER (right of a short last line): the synthetic contextmenu opens the menu, the emulated click is cancelled — ${JSON.stringify(R.gutter)}`);
   ok(R.summary.synth === 1 && R.summary.menus === 1, 'a long press on a <summary> toggle (a tool card\'s Output, Thinking): the menu — a control\'s words are a control');
   ok(R.button.synth === 1 && R.button.menus === 1, 'a long press on the … button: the menu');
   ok(R.noneLabel.synth === 1 && R.noneLabel.menus === 1, 'a long press on a user-select:none label (Gecko-style auto on the span, none set on it): the menu');
@@ -295,9 +295,9 @@ const doorLegs = (mod) => withDoor(mod, () => ({
   ok(mo.menus === 1 && mo.ev.calls.stopImmediatePropagation === 0, 'a MOUSE right-click on the words (no touch down, pointerType mouse): never judged — the handlers run as before');
   ok(R.moved.synth === 0 && R.moved.menus === 0, 'a press that moves > 10 px before 500 ms (a scroll) never fires');
   const pf = R.platformFirst;
-  ok(pf.ssPrevented && pf.menusAtSelectstart === 1 && pf.menus === 1 && pf.synth === 1 && pf.cm.preventDefault === 1 && pf.cm.stopImmediatePropagation === 1 && pf.endPrevented && !pf.lifted, `the platform's long press FIRST on a menu press (its selectstart before our 500 ms): our menu opens AT the selectstart, the selection is held off, no second synthetic, the trusted contextmenu swallowed; lifted, selection is free again — ${JSON.stringify(pf)}`);
+  ok(gateOf(pf.ssPrevented) && pf.menusAtSelectstart === 1 && pf.menus === 1 && pf.synth === 1 && pf.cm.preventDefault === 1 && pf.cm.stopImmediatePropagation === 1 && gateOf(pf.endPrevented) && !pf.lifted, `the platform's long press FIRST on a menu press (its selectstart before our 500 ms): our menu opens AT the selectstart, the selection is held off, no second synthetic, the trusted contextmenu swallowed; lifted, selection is free again — ${JSON.stringify(pf)}`);
   const tf = R.timerFirst;
-  ok(tf.ssPrevented && tf.menus === 1 && tf.synth === 1, `our timer FIRST (the measured order): the menu at 500 ms, the platform's selectstart after it held off — ${JSON.stringify(tf)}`);
+  ok(gateOf(tf.ssPrevented) && tf.menus === 1 && tf.synth === 1, `our timer FIRST (the measured order): the menu at 500 ms, the platform's selectstart after it held off — ${JSON.stringify(tf)}`);
   const nm = R.noMenuSurface;
   ok(!nm.ssPrevented && nm.synth === 1 && nm.cm.preventDefault === 0 && nm.cm.stopImmediatePropagation === 0, `a selectable surface with NO menu (the file viewer), a press beside its words: nobody takes ours ⇒ the platform's selection and its own contextmenu go through (${JSON.stringify(nm)})`);
   ok(R.trustedField.stopImmediatePropagation === 0 && R.trustedField.preventDefault === 0, 'a trusted touch contextmenu on a text field (CodeMirror, a textarea): untouched, as before the lane');
@@ -342,7 +342,7 @@ console.log('§3 onOutsidePress — a selection that starts outside a menu close
   // attachPopoverClose (createPopover / showContextMenu / hand-built menus) gets it by default
   touchDevice = true; const before = [...doc.l];
   U.attachPopoverClose(pop);
-  ok(doc.l.some((r) => !before.includes(r) && r.type === 'selectionchange'), 'attachPopoverClose (every createPopover / showContextMenu / hand-built menu) arms the selection closer on touch');
+  ok(verdictOf(doc.l.some((r) => !before.includes(r) && r.type === 'selectionchange')), 'attachPopoverClose (every createPopover / showContextMenu / hand-built menu) arms the selection closer on touch');
   doc.l = before;
 }
 
@@ -425,8 +425,8 @@ ok(chromeOpt.length === 0, `no opt-in names a chrome surface (${CHROME_TOKENS.jo
   const m = /([^{}]*\[data-popover\][^{}]*)\{\s*user-select:\s*none;\s*\}/.exec(style);
   const sels = m ? m[1].split(',').map((s) => s.trim()) : [];
   const want = ['[data-popover]', '.context-menu', '#global-toasts', '.global-toast', '.overlap-switcher', '.tab-item', '.chat-msg-more', '.chanmsg-tmore'];
-  ok(want.every((s) => sels.includes(s)), `the chrome rule says user-select:none ITSELF for every surface (menus, popovers, toasts, the taskbar chooser, tab chips, the … button): ${JSON.stringify(sels)}`);
-  ok(/html, body \{[^}]*user-select: none;/.test(style), 'the page default stays none (content opts in)');
+  ok(verdictOf(want.every((s) => sels.includes(s))), `the chrome rule says user-select:none ITSELF for every surface (menus, popovers, toasts, the taskbar chooser, tab chips, the … button): ${JSON.stringify(sels)}`);
+  ok(verdictOf(/html, body \{[^}]*user-select: none;/.test(style)), 'the page default stays none (content opts in)');
   ok(!/-webkit-user-select:\s*none/.test(m ? m[0] : ''), 'the chrome rule is unprefixed like the page rule (an inherited -webkit- none breaks typing in a field on older iOS)');
 }
 
@@ -435,26 +435,26 @@ console.log('§5 wiring pins');
 {
   const utils = read('src/lib/utils.js'), rend = read('src/lib/chat-renderers.js'), view = read('src/lib/chat-view.js'), seek = read('src/lib/chat-view-seek.js');
   const door = utils.slice(utils.indexOf('export function installLongPressContextMenu'), utils.indexOf('export function anchorFixedPopup'));
-  ok(/if \(!selectStartAllowed\(\{ touching, verdict, handled \}\)\) e\.preventDefault\(\);/.test(door) && /document\.addEventListener\('selectstart'/.test(door), 'the door holds the platform\'s selection off for a TAKEN menu press (selectstart, through selectStartAllowed)');
-  ok(/const act = trustedContextMenu\(\{ touch, fired, handled, verdict:/.test(door), 'the trusted contextmenu is decided by ONE table (trustedContextMenu)');
+  ok(gateOf(/if \(!selectStartAllowed\(\{ touching, verdict, handled \}\)\) e\.preventDefault\(\);/.test(door)) && verdictOf(/document\.addEventListener\('selectstart'/.test(door)), 'the door holds the platform\'s selection off for a TAKEN menu press (selectstart, through selectStartAllowed)');
+  ok(verdictOf(/const act = trustedContextMenu\(\{ touch, fired, handled, verdict:/.test(door)), 'the trusted contextmenu is decided by ONE table (trustedContextMenu)');
   ok(door.split('touchPressVerdict(').length === 3, 'the door judges twice through ONE verdict: touchstart (arm the timer only on a menu press) and the trusted contextmenu');
-  ok(/verdict = touchPressVerdict\(target, sx, sy\);\n\s*if \(verdict !== 'menu'\) return;/.test(door) && /else if \(act === 'stop'\) e\.stopImmediatePropagation\(\);/.test(door), 'the timer arms only on a menu press; a trusted touch contextmenu on text is stopped (never cancelled)');
+  ok(gateOf(/verdict = touchPressVerdict\(target, sx, sy\);\n\s*if \(verdict !== 'menu'\) return;/.test(door)) && verdictOf(/else if \(act === 'stop'\) e\.stopImmediatePropagation\(\);/.test(door)), 'the timer arms only on a menu press; a trusted touch contextmenu on text is stopped (never cancelled)');
   ok(!/'textarea, input, select, \[contenteditable\], \.xterm'/.test(utils), 'the native exclusion list lives in press-select.js only (NATIVE_PRESS_SELECTOR), never re-spelled in utils.js');
-  ok(/this\.addMsgMoreBtn\(el\);/.test(rend.slice(rend.indexOf('  addOpenInEditorBtn(el) {'), rend.indexOf('  addOpenInEditorBtn(el) {') + 900)), 'addOpenInEditorBtn adds the … button — every element path calls it');
+  ok(verdictOf(/this\.addMsgMoreBtn\(el\);/.test(rend.slice(rend.indexOf('  addOpenInEditorBtn(el) {'), rend.indexOf('  addOpenInEditorBtn(el) {') + 900))), 'addOpenInEditorBtn adds the … button — every element path calls it');
   const paths = (view.match(/this\._renderers\.addOpenInEditorBtn\(/g) || []).length + (seek.match(/this\._renderers\.addOpenInEditorBtn\(/g) || []).length;
   ok(paths >= 3, `…and the element paths call it: create, swap, gap slab (${paths} sites)`);
-  ok(/onMsgMenu: \(msg, x, y\) => this\._showMsgMenu\(msg, x, y\)/.test(view), 'the view hands the renderers its touch menu (onMsgMenu → _showMsgMenu)');
-  ok(/if \(!this\._onMsgMenu \|\| !this\.app\?\.isTouch \|\| !el\?\._rawMsg\) return;/.test(rend), 'the … button exists on touch clients only, for a message the menu can name');
-  ok(/insertBefore\(btn, host\.firstChild\)/.test(rend) && /\.chat-msg-more \{[^}]*float: right;/.test(read('public/chat.css')), 'the … button is FLOATED as the content\'s first child (the words wrap around it, never under it)');
-  ok(/t\('Copied the whole message \(\{n\} lines\)', \{ n: lines \}\)/.test(view) && /t\('Copied the whole message \(1 line\)'\)/.test(view), 'M3: the touch menu\'s Copy text toast names what landed on the clipboard (the whole message, its lines)');
+  ok(verdictOf(/onMsgMenu: \(msg, x, y\) => this\._showMsgMenu\(msg, x, y\)/.test(view)), 'the view hands the renderers its touch menu (onMsgMenu → _showMsgMenu)');
+  ok(verdictOf(/if \(!this\._onMsgMenu \|\| !this\.app\?\.isTouch \|\| !el\?\._rawMsg\) return;/.test(rend)), 'the … button exists on touch clients only, for a message the menu can name');
+  ok(gateOf(/insertBefore\(btn, host\.firstChild\)/.test(rend)) && verdictOf(/\.chat-msg-more \{[^}]*float: right;/.test(read('public/chat.css'))), 'the … button is FLOATED as the content\'s first child (the words wrap around it, never under it)');
+  ok(gateOf(/t\('Copied the whole message \(\{n\} lines\)', \{ n: lines \}\)/.test(view)) && verdictOf(/t\('Copied the whole message \(1 line\)'\)/.test(view)), 'M3: the touch menu\'s Copy text toast names what landed on the clipboard (the whole message, its lines)');
   // verify r1 (2026-10-02): three layouts the lane's one fixture (compact, paragraph-first) never met
   const chatCss = read('public/chat.css');
-  ok(/\.chat-msg:has\(\.chat-msg-more\) :is\(\.chat-pre-wrap, \.chat-table-wrap\) \{ clear: right; \}/.test(chatCss), 'verify r1 F1: a code block / table in a message with the … button clears the float (a BFC beside it was narrowed to its last line and its toolbar painted over the button)');
-  ok(/if \(first && first\.nodeType === 1 && \/\^\(P\|H\[1-6\]\)\$\/\.test\(first\.tagName\)\) host = first;/.test(rend) && /if \(el\.querySelector\('\.chat-msg-more'\)\) return;/.test(rend), 'verify r1 F2: in bubble mode the button goes into the first inline-content block (the shrink-to-fit bubble measured max(float, words), never their sum — short messages sat under it); one button per message');
-  ok(/@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-open-editor-btn, \.chat-msg > \.chat-fork-btn \{ display: none; \} \}/.test(chatCss), 'verify r1 F3: the hover buttons are hidden on EVERY touch client (app.isTouch\'s media query), not only ≤ 768 px — an invisible one covered the … on a touch tablet');
+  ok(verdictOf(/\.chat-msg:has\(\.chat-msg-more\) :is\(\.chat-pre-wrap, \.chat-table-wrap\) \{ clear: right; \}/.test(chatCss)), 'verify r1 F1: a code block / table in a message with the … button clears the float (a BFC beside it was narrowed to its last line and its toolbar painted over the button)');
+  ok(gateOf(/if \(first && first\.nodeType === 1 && \/\^\(P\|H\[1-6\]\)\$\/\.test\(first\.tagName\)\) host = first;/.test(rend)) && verdictOf(/if \(el\.querySelector\('\.chat-msg-more'\)\) return;/.test(rend)), 'verify r1 F2: in bubble mode the button goes into the first inline-content block (the shrink-to-fit bubble measured max(float, words), never their sum — short messages sat under it); one button per message');
+  ok(verdictOf(/@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-open-editor-btn, \.chat-msg > \.chat-fork-btn \{ display: none; \} \}/.test(chatCss)), 'verify r1 F3: the hover buttons are hidden on EVERY touch client (app.isTouch\'s media query), not only ≤ 768 px — an invisible one covered the … on a touch tablet');
   for (const lang of ['zh', 'ja']) {
     const d = read(`src/lib/i18n-${lang}.js`);
-    ok(['Message actions', 'Copied the whole message (1 line)', 'Copied the whole message ({n} lines)'].every((k) => d.includes(JSON.stringify(k) + ':')), `i18n-${lang} carries the three new strings`);
+    ok(verdictOf(['Message actions', 'Copied the whole message (1 line)', 'Copied the whole message ({n} lines)'].every((k) => d.includes(JSON.stringify(k) + ':'))), `i18n-${lang} carries the three new strings`);
   }
 }
 
@@ -477,7 +477,7 @@ const M = mutantCopies('msel', repo);
   const UC = await import(pathToFileURL(pdF).href);
   const Tc = withDoor(UC, () => trusted(para, 60, 107, paraText));
   const Tr = withDoor(U, () => trusted(para, 60, 107, paraText));
-  ok(Tc.ev.defaultPrevented && !Tr.ev.defaultPrevented, 'CONTROL (a door that cancels the trusted contextmenu): the event is cancelled — on Android no selection handles; the real door leaves it uncancelled');
+  ok(gateOf(Tc.ev.defaultPrevented) && !Tr.ev.defaultPrevented, 'CONTROL (a door that cancels the trusted contextmenu): the event is cancelled — on Android no selection handles; the real door leaves it uncancelled');
   // (c) a class that ignores user-select: a none label's words read as text (no menu where there is nothing to select)
   const ps = read('src/lib/press-select.js');
   const CLS = "  if (overText && String(userSelect || 'auto').toLowerCase() !== 'none') return 'text';\n";
@@ -485,7 +485,7 @@ const M = mutantCopies('msel', repo);
   const clsF = M.write('src/lib/press-select.js', editAnchor(ps, CLS, "  if (overText) return 'text';\n", "src/lib/press-select.js"), 'no-user-select');
   const PM = await import(pathToFileURL(clsF).href);
   ok(PM.pressTargetClass({ overText: true, userSelect: 'none' }) === 'text' && PS.pressTargetClass({ overText: true, userSelect: 'none' }) === 'chrome', 'CONTROL (a class that ignores user-select): a user-select:none label reads as text — its menu would be lost; the real class keeps it chrome');
-  for (const row of copiesCensus(M.files, M.dir, repo, { label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(M.files, M.dir, repo, { label: 'mutant copies: ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 // ── §7 THE CHANNEL MESSAGE ON A TOUCH-FIRST DEVICE (lane channel-touch-menu, 2.369.203). The .202 transition made a
@@ -517,20 +517,20 @@ console.log('§7 the channel message on a touch-first device (lane channel-touch
   const style = read('public/style.css');
   const c = census(style);
   ok(c.none.length === 0, 'no rule makes a channel message body user-select:none (the .202 transition is gone: a long press on the words is a selection)', c.none);
-  ok(c.shown && c.hidden, 'the … button: hidden by default, drawn (a 44 × 44 box in a 44 px right gutter) only under (hover: none) and (pointer: coarse)', c);
+  ok(gateOf(c.shown) && verdictOf(c.hidden), 'the … button: hidden by default, drawn (a 44 × 44 box in a 44 px right gutter) only under (hover: none) and (pointer: coarse)', c);
   // the wiring: created only on a touch-first device, the same menu as the long press / the right click
   const cw = read('src/lib/channel-window.js'), mb = read('src/lib/channel-msg-bar.js');
-  ok(/row\._menu = \(\) => menuActs\(row\._acts\(\), rec\);/.test(cw) && /if \(isTouchFirst\(\) && row\._menu\(\)\.length\) row\.appendChild\(renderMsgMore\(/.test(cw), 'renderRecord: the row\'s menu = the bar\'s actions + Copy text; a … button opens it on a touch-first device');
-  ok(/const acts = row\._menu \? row\._menu\(\) : row\._acts\(\);/.test(cw), 'the long press on the chrome / a right click opens the SAME menu (Copy text included)');
-  ok(/if \(isTouchFirst\(\)\) row\.appendChild\(renderMsgMore\(null, 'chanmsg-more'\)\);/.test(cw), 'the agent-group row: the touch … is a `.chanmsg-more` (the list\'s delegated menu: Copy text · Clear content…)');
-  ok(/export const isTouchFirst = \(\) => !!\(typeof matchMedia === 'function' && matchMedia\(TOUCH_QUERY\)\.matches\);/.test(mb) && /b\.appendChild\(icon\('more', 16\)\);/.test(mb) && /b\.setAttribute\('aria-label', t\('Message actions'\)\);/.test(mb), 'renderMsgMore: the library SVG, named, created only when the touch-first query matches');
+  ok(gateOf(/row\._menu = \(\) => menuActs\(row\._acts\(\), rec\);/.test(cw)) && verdictOf(/if \(isTouchFirst\(\) && row\._menu\(\)\.length\) row\.appendChild\(renderMsgMore\(/.test(cw)), 'renderRecord: the row\'s menu = the bar\'s actions + Copy text; a … button opens it on a touch-first device');
+  ok(verdictOf(/const acts = row\._menu \? row\._menu\(\) : row\._acts\(\);/.test(cw)), 'the long press on the chrome / a right click opens the SAME menu (Copy text included)');
+  ok(verdictOf(/if \(isTouchFirst\(\)\) row\.appendChild\(renderMsgMore\(null, 'chanmsg-more'\)\);/.test(cw)), 'the agent-group row: the touch … is a `.chanmsg-more` (the list\'s delegated menu: Copy text · Clear content…)');
+  ok(gateOf(/export const isTouchFirst = \(\) => !!\(typeof matchMedia === 'function' && matchMedia\(TOUCH_QUERY\)\.matches\);/.test(mb)) && gateOf(/b\.appendChild\(icon\('more', 16\)\);/.test(mb)) && verdictOf(/b\.setAttribute\('aria-label', t\('Message actions'\)\);/.test(mb)), 'renderMsgMore: the library SVG, named, created only when the touch-first query matches');
   // CONTROL: the transition's rule back ⇒ the census is red
   const TRANSITION = '@media (hover: none) and (pointer: coarse) { .chanmsg-body { -webkit-user-select: none; user-select: none; cursor: default; } }';
   const anchor = '.chanmsg-body { font-size: 13px;';
-  ok(style.includes(anchor), 'the control\'s anchor (the body rule) is in style.css');
+  ok(verdictOf(style.includes(anchor)), 'the control\'s anchor (the body rule) is in style.css');
   const back = census(style.replace(anchor, TRANSITION + '\n' + anchor));
   ok(back.none.length === 1, 'CONTROL (the .202 transition\'s rule back): the census names it — red', back.none);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

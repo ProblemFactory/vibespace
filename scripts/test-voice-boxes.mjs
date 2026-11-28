@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LIB = 'src/lib';
 let pass = 0, fail = 0;
-const ok = (cond, name, detail) => {
+const ok = (cond, name, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : ''}`); }
 };
@@ -125,21 +125,21 @@ for (const r of ROWS.filter((x) => x.verdict === A)) console.log(`      · ${r.f
 console.log('    left out:');
 for (const r of ROWS.filter((x) => x.verdict !== A)) console.log(`      · ${r.file} «${r.anchor}»${r.n > 1 ? ` ×${r.n}` : ''} — ${r.why}`);
 const named = ['user-todos-row.js', 'inbox-window.js', 'channel-window.js', 'channel-thread-pane.js', 'chat-input.js'];
-ok(named.every((f) => ROWS.some((r) => r.file === f && r.verdict === A)), 'the owner\'s boxes are attached: chat, For-you reply, Inbox window reply, channel + thread composers', named);
+ok(verdictOf(named.every((f) => ROWS.some((r) => r.file === f && r.verdict === A))), 'the owner\'s boxes are attached: chat, For-you reply, Inbox window reply, channel + thread composers', named);
 
 console.log('② RED controls — each plant turns the census red');
 {
   const planted = { ...FILES, 'zz-planted.js': "export function box() {\n  const note = document.createElement('textarea');\n  return note;\n}\n" };
   const r1 = census(planted, ROWS);
-  ok(r1.problems.some((p) => /zz-planted\.js:2 a NEW textarea/.test(p)), 'RED: a planted textarea without a row', r1.problems);
+  ok(verdictOf(r1.problems.some((p) => /zz-planted\.js:2 a NEW textarea/.test(p))), 'RED: a planted textarea without a row', r1.problems);
   const dropped = { ...FILES, 'user-todos-row.js': FILES['user-todos-row.js'].replace('voiceField(ta, attachDictation(ta))', 'ta') };
   const r2 = census(dropped, ROWS);
-  ok(dropped['user-todos-row.js'] !== FILES['user-todos-row.js'] && r2.problems.some((p) => /user-todos-row\.js: 0 attach call/.test(p)), 'RED: the For-you reply box without its attach call', r2.problems);
+  ok(dropped['user-todos-row.js'] !== FILES['user-todos-row.js'] && verdictOf(r2.problems.some((p) => /user-todos-row\.js: 0 attach call/.test(p))), 'RED: the For-you reply box without its attach call', r2.problems);
   const r3 = census(FILES, [...ROWS, { file: 'inbox-window.js', anchor: 'iw-gone-box', verdict: 'x', n: 1 }]);
-  ok(r3.problems.some((p) => /iw-gone-box.*DEAD/.test(p)), 'RED: a row whose box is gone (a dead row)', r3.problems);
+  ok(verdictOf(r3.problems.some((p) => /iw-gone-box.*DEAD/.test(p))), 'RED: a row whose box is gone (a dead row)', r3.problems);
   const decoless = { ...FILES, 'chat-status-bar.js': FILES['chat-status-bar.js'].replace(/, decorate: \(ta\) => \{[^}]*\} \}/, ' }') };
   const r4 = census(decoless, ROWS);
-  ok(decoless['chat-status-bar.js'] !== FILES['chat-status-bar.js'] && r4.problems.some((p) => /chat-status-bar\.js: 2 attach call/.test(p)), 'RED: Custom review\'s dialog without its decorate hook', r4.problems);
+  ok(decoless['chat-status-bar.js'] !== FILES['chat-status-bar.js'] && verdictOf(r4.problems.some((p) => /chat-status-bar\.js: 2 attach call/.test(p))), 'RED: Custom review\'s dialog without its decorate hook', r4.problems);
 }
 
 console.log('③ the attach point: ONE implementation, never a focus, absent when off, no idle listener');
@@ -158,15 +158,15 @@ const pins = (src) => ({
   neverFocusedEnd: /stopSel = everFocused \?/.test(src),
 });
 const P = pins(V);
-for (const [k, v] of Object.entries(P)) ok(v, `voice-input.js: ${({ oneAttach: 'ONE attachDictation', chatFlavour: 'createVoiceInput = attachDictation(…, placement chat)', oneRecorder: 'one MediaRecorder, one dictate request', noFocus: 'no .focus() anywhere — the mic never focuses the box (nor the chip\'s Undo)', pressHeld: 'pointerdown + mousedown cancelled on the button (no focus moves on the press)', phoneTab: 'the phone: tabIndex −1 (never a focus stop); a focus follower\'s mic never is either', escWhileRecording: 'Esc is bound when recording starts and unbound at release', docListeners: 'four document listeners in the file: Esc (while recording) + ONE page-lifetime visibilitychange + the focus follower\'s ONE focusin / focusout pair (lane voice-follows-focus; its scroll / resize / press guard bind only while a followed mic shows)', absentClass: 'the plugin off / not connected ⇒ html.voice-absent', neverFocusedEnd: 'a box never focused takes the words at its end' })[k]}`);
+for (const [k, v] of Object.entries(P)) ok(verdictOf(v), `voice-input.js: ${({ oneAttach: 'ONE attachDictation', chatFlavour: 'createVoiceInput = attachDictation(…, placement chat)', oneRecorder: 'one MediaRecorder, one dictate request', noFocus: 'no .focus() anywhere — the mic never focuses the box (nor the chip\'s Undo)', pressHeld: 'pointerdown + mousedown cancelled on the button (no focus moves on the press)', phoneTab: 'the phone: tabIndex −1 (never a focus stop); a focus follower\'s mic never is either', escWhileRecording: 'Esc is bound when recording starts and unbound at release', docListeners: 'four document listeners in the file: Esc (while recording) + ONE page-lifetime visibilitychange + the focus follower\'s ONE focusin / focusout pair (lane voice-follows-focus; its scroll / resize / press guard bind only while a followed mic shows)', absentClass: 'the plugin off / not connected ⇒ html.voice-absent', neverFocusedEnd: 'a box never focused takes the words at its end' })[k]}`);
 ok(pins(V.replace('stopSel = null;\n    // never focus', 'stopSel = null; textarea.focus();\n    // never focus')).noFocus === false, 'RED: a planted textarea.focus() in insert() is caught');
 const CSS = read('public/style.css');
-ok(/html\.voice-absent \.chat-voice-btn \{ display: none !important; \}/.test(CSS), 'style.css (app-wide, not chat.css — a surface may load style.css alone): html.voice-absent hides every microphone (absent, never greyed)');
+ok(verdictOf(/html\.voice-absent \.chat-voice-btn \{ display: none !important; \}/.test(CSS)), 'style.css (app-wide, not chat.css — a surface may load style.css alone): html.voice-absent hides every microphone (absent, never greyed)');
 const APP = read(`${LIB}/app.js`);
-ok(/if \(msg\.type === 'plugins-updated'\) noteVoicePlugins\(msg\.plugins\);/.test(APP), 'app.js: the plugins-updated broadcast tells every microphone (multi-client: another client switching voice off removes it here)');
-ok(/noteVoiceStatus\(st\);/.test(read(`${LIB}/voice-plugin-card.js`)), 'voice-plugin-card.js: the card\'s status read tells every microphone too');
+ok(verdictOf(/if \(msg\.type === 'plugins-updated'\) noteVoicePlugins\(msg\.plugins\);/.test(APP)), 'app.js: the plugins-updated broadcast tells every microphone (multi-client: another client switching voice off removes it here)');
+ok(verdictOf(/noteVoiceStatus\(st\);/.test(read(`${LIB}/voice-plugin-card.js`))), 'voice-plugin-card.js: the card\'s status read tells every microphone too');
 const PANEL = read(`${LIB}/user-todos-panel.js`);
-ok(PANEL.includes("item.querySelector(':scope > .ut-body > .ut-reply textarea')") && !PANEL.includes('.ut-reply > textarea'), 'user-todos-panel.js: Send reads the reply inside its field (the box is no longer a direct child of .ut-reply)');
+ok(gateOf(PANEL.includes("item.querySelector(':scope > .ut-body > .ut-reply textarea')")) && !PANEL.includes('.ut-reply > textarea'), 'user-todos-panel.js: Send reads the reply inside its field (the box is no longer a direct child of .ut-reply)');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -32,7 +32,7 @@ let pass = 0, fail = 0;
 // r5135 law 1: a control whose plant was never read is a NAMED SKIP — counted and said in the closing line, never a red, never a green
 let skipped = 0;
 const skip = (m) => { skipped++; console.log(`  ⚠ SKIP: ${m}`); };
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -114,12 +114,12 @@ console.log('§1 the PURE words (xpra-proto.js)');
 {
   const caps = P.helloCaps({ width: 900, height: 600 });
   ok(caps.rencodeplus === true && caps.lz4 === true && caps.brotli === true && caps.version === '21' && caps.client_type === 'HTML5', 'hello: rencodeplus + lz4 + brotli (the worker inflates both), version 21, client_type HTML5');
-  ok(same(caps.display.desktop_size, [900, 600]) && caps.screen_sizes[0][1] === 900 && caps.dpi.x === 96, 'hello: the desktop size IS the pane (the pane is the X root)');
-  ok(caps.clipboard.enabled && caps.clipboard.greedy && caps.clipboard.want_targets && same(caps.clipboard.selections, ['CLIPBOARD']), 'hello: clipboard greedy on CLIPBOARD only (PRIMARY would copy on every selection)');
+  ok(gateOf(same(caps.display.desktop_size, [900, 600])) && caps.screen_sizes[0][1] === 900 && caps.dpi.x === 96, 'hello: the desktop size IS the pane (the pane is the X root)');
+  ok(gateOf(caps.clipboard.enabled) && gateOf(caps.clipboard.greedy) && gateOf(caps.clipboard.want_targets) && verdictOf(same(caps.clipboard.selections, ['CLIPBOARD'])), 'hello: clipboard greedy on CLIPBOARD only (PRIMARY would copy on every selection)');
   ok(caps.audio.receive === false && caps.file.enabled === false && caps.notifications.enabled === false && caps.system_tray === false && caps['xdg-menu'] === false, 'hello: no audio, file transfer, printing, notifications, tray, xdg menu — what this window does not do is not announced');
-  ok(same(caps.encodings[''], [...P.ENCODINGS]) && !P.ENCODINGS.includes('rgb32') && !P.ENCODINGS.includes('scroll') && P.ENCODINGS.includes('void'), 'hello: png/jpeg/webp + void, NO rgb (its lz4 lives in the worker, not on the main thread), NO scroll (xpra 6.5.4\'s scroll encoder loses every frame it encodes — lane xpra-ime-mac)');
+  ok(gateOf(same(caps.encodings[''], [...P.ENCODINGS])) && !P.ENCODINGS.includes('rgb32') && !P.ENCODINGS.includes('scroll') && verdictOf(P.ENCODINGS.includes('void')), 'hello: png/jpeg/webp + void, NO rgb (its lz4 lives in the worker, not on the main thread), NO scroll (xpra 6.5.4\'s scroll encoder loses every frame it encodes — lane xpra-ime-mac)');
   ok(caps.share === true && caps.steal === true && caps.windows === true && caps.keyboard === true && caps.cursors === true, 'hello: share (N viewers on one app — the recipe runs --sharing=yes), windows, keyboard, cursors');
-  ok(caps.keymap.keycodes.some((r) => same(r, [38, 'a', 38, 0, 0])) && caps.keymap.keycodes.some((r) => same(r, [36, 'Return', 36, 0, 0])), 'hello: the keycode table rows are [keycode, keysym, keycode, 0, 0] (a key-action resolves by (keycode, keyname) first)');
+  ok(gateOf(caps.keymap.keycodes.some((r) => same(r, [38, 'a', 38, 0, 0]))) && verdictOf(caps.keymap.keycodes.some((r) => same(r, [36, 'Return', 36, 0, 0]))), 'hello: the keycode table rows are [keycode, keysym, keycode, 0, 0] (a key-action resolves by (keycode, keyname) first)');
   const K = (key, code, keyCode, mods = {}, location = 0) => P.keyActionFor({ key, code, keyCode, location, mods });
   const table = [
     [K('a', 'KeyA', 65), { keyname: 'a', keyval: 97, string: 'a', keycode: 38, modifiers: [] }],
@@ -141,8 +141,8 @@ console.log('§1 the PURE words (xpra-proto.js)');
     [K('中', '', 0), { keyname: 'U4E2D', keyval: 0x1004E2D, string: '中', keycode: 0, modifiers: [] }],
     [K('c', 'KeyC', 67, { control: true, capsLock: true, numLock: true }), { keyname: 'c', keyval: 99, string: 'c', keycode: 54, modifiers: ['control', 'mod2'] }], // lane browser-uppercase-keys: never `lock` (§3e)
   ];
-  ok(table.every(([got, want]) => same(got, want)), 'the browser-key → keysym rule: letters lower-case with shift on the modifier list, punctuation by X name on its base keycode, code first (KP_Enter on its own keycode 104, right-hand modifiers on the left name), every key on its EVDEV X keycode (w = 25, never the browser keyCode 87 — lane xpra-ime-mac), Meta = Super (mod4), AltGraph = ISO_Level3_Shift (mod5), Latin-1 by name, anything else U<HEX> with the Unicode keysym value', table.filter(([g, w]) => !same(g, w)).map(([g, w]) => ({ got: g, want: w })));
-  ok(P.nativeKey(K('a', 'KeyA', 65)) && P.nativeKey(K('!', 'Digit1', 49, { shift: true })) && P.nativeKey(K('Enter', 'Enter', 13)) && !P.nativeKey(K('é', 'KeyE', 69, { altGraph: true })) && !P.nativeKey(K('中', '', 0)), 'nativeKey: a / ! / Return are on the published keymap; é (US layout) and 中 are not — they go publish-then-press');
+  ok(verdictOf(table.every(([got, want]) => same(got, want))), 'the browser-key → keysym rule: letters lower-case with shift on the modifier list, punctuation by X name on its base keycode, code first (KP_Enter on its own keycode 104, right-hand modifiers on the left name), every key on its EVDEV X keycode (w = 25, never the browser keyCode 87 — lane xpra-ime-mac), Meta = Super (mod4), AltGraph = ISO_Level3_Shift (mod5), Latin-1 by name, anything else U<HEX> with the Unicode keysym value', table.filter(([g, w]) => !same(g, w)).map(([g, w]) => ({ got: g, want: w })));
+  ok(gateOf(P.nativeKey(K('a', 'KeyA', 65))) && gateOf(P.nativeKey(K('!', 'Digit1', 49, { shift: true }))) && gateOf(P.nativeKey(K('Enter', 'Enter', 13))) && !P.nativeKey(K('é', 'KeyE', 69, { altGraph: true })) && !P.nativeKey(K('中', '', 0)), 'nativeKey: a / ! / Return are on the published keymap; é (US layout) and 中 are not — they go publish-then-press');
   // ── THE STOCK-KEYMAP CENSUS (lane xpra-ime-mac, inc-mvaddc4m-6m0t: w = End, s = Left, x = Down in a Google Docs window). The
   // map this client publishes must coincide with the STOCK evdev `us` map — scripts/fixtures/evdev-us-pke.txt, captured by
   // scripts/capture-evdev-keymap.mjs from a fresh Xvfb, never hand-typed — wherever both have a key: a real Chrome names
@@ -152,7 +152,7 @@ console.log('§1 the PURE words (xpra-proto.js)');
   {
     const stock = new Map();
     for (const l of fs.readFileSync(path.join(repo, 'scripts', 'fixtures', 'evdev-us-pke.txt'), 'utf8').split('\n')) { const m = /^keycode\s+(\d+) =(.*)$/.exec(l); if (m) stock.set(Number(m[1]), m[2].trim().split(/\s+/).filter((x) => x && x !== 'NoSymbol')); }
-    ok(stock.size === 248 && same(stock.get(25).slice(0, 2), ['w', 'W']) && same(stock.get(87).slice(0, 2), ['KP_End', 'KP_1']) && same(stock.get(8), []), `the fixture is the stock evdev us map (${stock.size} keycodes; 25 = w W, 87 = KP_End KP_1, 8 = NoSymbol)`, { n: stock.size, k25: stock.get(25), k87: stock.get(87) });
+    ok(stock.size === 248 && gateOf(same(stock.get(25).slice(0, 2), ['w', 'W'])) && gateOf(same(stock.get(87).slice(0, 2), ['KP_End', 'KP_1'])) && verdictOf(same(stock.get(8), [])), `the fixture is the stock evdev us map (${stock.size} keycodes; 25 = w W, 87 = KP_End KP_1, 8 = NoSymbol)`, { n: stock.size, k25: stock.get(25), k87: stock.get(87) });
     /** Violations of the census: a published keysym the stock map does not carry on that keycode, or an IME slot on a keycode
      *  the stock map gives a keysym (or the published table uses). */
     const census = (table, shifted, slots) => {
@@ -164,19 +164,19 @@ console.log('§1 the PURE words (xpra-proto.js)');
     const shipped = census(P.KEYCODE_TABLE, P.SHIFTED_TABLE, P.IME_KEYCODES);
     ok(shipped.length === 0 && Object.keys(P.KEYCODE_TABLE).length === 105, `every keysym the client publishes sits where the stock map has it (${Object.keys(P.KEYCODE_TABLE).length} keycodes) and the ${P.IME_KEYCODES.length} IME slots are stock NoSymbol`, shipped);
     const letters = [...'abcdefghijklmnopqrstuvwxyz0123456789'].map((ch) => { const k = K(ch, /\d/.test(ch) ? `Digit${ch}` : `Key${ch.toUpperCase()}`, ch.toUpperCase().charCodeAt(0)); return [ch, k.keycode, (stock.get(k.keycode) || [])[0]]; });
-    ok(letters.every(([ch, , st]) => st === ch), 'every letter and digit, keyed by its browser keyCode, is pressed on the keycode whose STOCK level 0 is that very character (none on a keypad or function keycode)', letters.filter(([ch, , st]) => st !== ch));
+    ok(verdictOf(letters.every(([ch, , st]) => st === ch)), 'every letter and digit, keyed by its browser keyCode, is pressed on the keycode whose STOCK level 0 is that very character (none on a keypad or function keycode)', letters.filter(([ch, , st]) => st !== ch));
     // CONTROL 1: the pre-lane table (xpra-html5's CHARCODE_TO_NAME — keyed by the BROWSER's keyCodes) fails the same census on
     // exactly the incident's keys, and the old 226–255 slot run sits on stock media keys
     const preTable = { 8: 'BackSpace', 13: 'Return', 32: 'space', ...Object.fromEntries([...'0123456789'].map((d) => [48 + Number(d), d])), ...Object.fromEntries([...'abcdefghijklmnopqrstuvwxyz'].map((c, i) => [65 + i, c])) };
     const pre = census(preTable, {}, [226, 227, 228]);
-    ok(['w@87 (stock KP_End KP_1)', 's@83 (stock KP_Left KP_4)', 'x@88 (stock KP_Down KP_2)', 'd@68 (stock F2 F2)'].every((v) => pre.includes(v)) && pre.some((v) => /^slot 226 \(stock XF86/.test(v)), `CONTROL: the pre-lane browser-keyCode table fails the census (${pre.length} violations: w@87, s@83, x@88, d@68 among them) and a slot at 226 is a stock media key`, pre.slice(0, 12));
+    ok(gateOf(['w@87 (stock KP_End KP_1)', 's@83 (stock KP_Left KP_4)', 'x@88 (stock KP_Down KP_2)', 'd@68 (stock F2 F2)'].every((v) => pre.includes(v))) && verdictOf(pre.some((v) => /^slot 226 \(stock XF86/.test(v))), `CONTROL: the pre-lane browser-keyCode table fails the census (${pre.length} violations: w@87, s@83, x@88, d@68 among them) and a slot at 226 is a stock media key`, pre.slice(0, 12));
     // CONTROL 2: the pre-lane keyActionFor fallback (the browser's keyCode as the X keycode) on a copy — keyCode 87 'w' leaves on 87
     const src = read('src/lib/xpra-proto.js'), own = '  const own = NAME_TO_KEYCODE[keyname];', fb = '  const keycode = own != null ? own : 0;';
     ok(src.split(own).length === 2 && src.split(fb).length === 2, 'CONTROL anchor: the keycode rule is two lines in xpra-proto.js');
     const Pk = await import(pathToFileURL(MUTXC.write('src/lib/xpra-proto.js', editAnchor(editAnchor(src, own, '  const own = undefined;', "src/lib/xpra-proto.js"), fb, '  const keycode = own != null ? own : (Number(ev.keyCode) || 0);', "src/lib/xpra-proto.js"), 'browserkeycode')).href);
     ok(Pk.keyActionFor({ key: 'w', code: 'KeyW', keyCode: 87, mods: {} }).keycode === 87 && K('w', 'KeyW', 87).keycode === 25, 'CONTROL: with the browser keyCode as the X keycode, w leaves on 87 (stock KP_1 — Chrome code Numpad1); the shipped rule sends 25');
   }
-  ok(caps.keymap.x11_keycodes instanceof Map && same(caps.keymap.x11_keycodes.get(10), ['1', 'exclam']) && same(caps.keymap.x11_keycodes.get(38), ['a', 'A']) && same(caps.keymap.x11_keycodes.get(50), ['Shift_L']) && caps.keymap.query_struct.rules === 'evdev' && caps.keymap.query_struct.layout === 'us', 'hello: the NATIVE keymap shape — x11_keycodes as a Map of integer keycodes with the shifted level, the modifiers on their own keycodes, a query_struct naming the base layout (the server PROGRAMS the X keymap from it; the keycodes-only shape is only translated onto `us`)');
+  ok(caps.keymap.x11_keycodes instanceof Map && gateOf(same(caps.keymap.x11_keycodes.get(10), ['1', 'exclam'])) && gateOf(same(caps.keymap.x11_keycodes.get(38), ['a', 'A'])) && gateOf(same(caps.keymap.x11_keycodes.get(50), ['Shift_L'])) && caps.keymap.query_struct.rules === 'evdev' && caps.keymap.query_struct.layout === 'us', 'hello: the NATIVE keymap shape — x11_keycodes as a Map of integer keycodes with the shifted level, the modifiers on their own keycodes, a query_struct naming the base layout (the server PROGRAMS the X keymap from it; the keycodes-only shape is only translated onto `us`)');
   ok(K('Process', 'KeyA', 229) === null && K('Dead', 'Quote', 222) === null && K('Unidentified', '', 0) === null && P.keyActionFor({ key: 'a', code: 'KeyA', keyCode: 65, mods: {}, composing: true }) === null, 'an IME in flight (229 / composing), a dead key and an unidentified key send NOTHING — composition delivers the text');
   ok(P.clipboardShortcut({ key: 'v', control: true }) === 'paste' && P.clipboardShortcut({ key: 'V', meta: true }) === 'paste' && P.clipboardShortcut({ key: 'c', control: true }) === 'copy' && P.clipboardShortcut({ key: 'x', control: true }) === 'copy' && P.clipboardShortcut({ key: 'v' }) === null && P.clipboardShortcut({ key: 'a', control: true }) === null, 'Ctrl/⌘+V is the browser\'s (the paste event carries the text on plain http); Ctrl+C/X go to the app AND the browser; everything else is the app\'s');
   ok(S.clipboardDelivery({ secure: true, canWrite: true }) === 'api' && S.clipboardDelivery({ secure: false, canWrite: true }) === 'chip' && S.clipboardDelivery({ secure: true, canWrite: false }) === 'chip', 'a copy in the app goes to the Clipboard API only on a secure context that has it — else the click-to-copy chip, never a silent no-op (the rule is the SHARED shell\'s: every rung, RFB too)');
@@ -184,26 +184,26 @@ console.log('§1 the PURE words (xpra-proto.js)');
   // less than Chrome's 5 s transient activation (MEASURED M1: 4800 ms ok, 5200 ms refused) is written with no click
   const G = (gestureAge, o = {}) => S.clipboardDelivery({ secure: false, canWrite: false, gestureAge, ...o });
   const gTable = [[0, 'gesture'], [23, 'gesture'], [300, 'gesture'], [4800, 'gesture'], [4999, 'gesture'], [5000, 'chip'], [5200, 'chip'], [7000, 'chip'], [null, 'chip'], [undefined, 'chip'], [-1, 'chip'], [NaN, 'chip'], [Infinity, 'chip'], ['100', 'chip']];
-  ok(S.GESTURE_WINDOW_MS === 5000 && gTable.every(([a, want]) => G(a) === want), 'A1 DOM-FREE: the gesture stamp\'s AGE decides execCommand vs the chip — 0/23/300/4800/4999 ms ⇒ gesture, 5000/5200/7000 ms ⇒ chip, no stamp / a negative / NaN / ∞ / a string ⇒ chip', gTable.filter(([a, want]) => G(a) !== want).map(([a, want]) => ({ age: a, want, got: G(a) })));
+  ok(S.GESTURE_WINDOW_MS === 5000 && verdictOf(gTable.every(([a, want]) => G(a) === want)), 'A1 DOM-FREE: the gesture stamp\'s AGE decides execCommand vs the chip — 0/23/300/4800/4999 ms ⇒ gesture, 5000/5200/7000 ms ⇒ chip, no stamp / a negative / NaN / ∞ / a string ⇒ chip', gTable.filter(([a, want]) => G(a) !== want).map(([a, want]) => ({ age: a, want, got: G(a) })));
   ok(S.clipboardDelivery({ secure: true, canWrite: true, gestureAge: 10 }) === 'api' && S.clipboardDelivery({ secure: true, canWrite: false, gestureAge: 10 }) === 'gesture' && S.clipboardDelivery({ secure: false, canWrite: true, gestureAge: 10 }) === 'gesture', 'A1: a secure page with the API keeps the API (the gesture is not needed); a page without it uses the gesture however it is served');
   ok(!('clipboardDelivery' in P), 'A1: the delivery rule lives ONLY in the shell — the dead xpra-proto.js twin is gone (one rule, every rung)');
   const store = (v) => ({ getItem: (k) => (k === S.COPY_HINT_KEY ? v : null), setItem() {} });
   ok(S.COPY_HINT_KEY === 'vibespace.desktopCopyHintShown' && S.copyHintDue({ secure: false, storage: store(null) }) === true && S.copyHintDue({ secure: false, storage: store('1') }) === false && S.copyHintDue({ secure: true, storage: store(null) }) === false && S.copyHintDue({ secure: false, storage: null }) === false && S.copyHintDue({ secure: false, storage: { getItem() { throw new Error('denied'); } } }) === false, 'A1: the HTTPS hint is due only on a NON-secure page of a device that never showed it (a secure page, a shown one, no / an unreadable storage ⇒ not due)');
-  ok(/^https:\/\/github\.com\/ProblemFactory\/vibespace\/blob\/master\/docs\/getting-started\.md#https-for-seamless-copy$/.test(S.HTTPS_DOCS_URL) && /^## HTTPS for seamless copy$/m.test(read('docs/getting-started.md')), 'A1: the hint links the docs section that EXISTS (docs/getting-started.md "## HTTPS for seamless copy" — its GitHub anchor)');
+  ok(gateOf(/^https:\/\/github\.com\/ProblemFactory\/vibespace\/blob\/master\/docs\/getting-started\.md#https-for-seamless-copy$/.test(S.HTTPS_DOCS_URL)) && verdictOf(/^## HTTPS for seamless copy$/m.test(read('docs/getting-started.md'))), 'A1: the hint links the docs section that EXISTS (docs/getting-started.md "## HTTPS for seamless copy" — its GitHub anchor)');
   const fit = (pane, c) => P.fitGeometry(pane, c);
-  ok(same(fit({ paneW: 900, paneH: 600 }, null), { x: 0, y: 0, w: 900, h: 600 }), 'fit: no hints ⇒ the whole pane at 0,0');
-  ok(same(fit({ paneW: 900, paneH: 600 }, { increment: [9, 17], 'base-size': [10, 20], 'minimum-size': [100, 50] }), { x: 0, y: 0, w: 892, h: 598 }), 'fit: xterm-like hints snap DOWN to the cell grid from the base (10+98×9, 20+34×17)');
-  ok(same(fit({ paneW: 300, paneH: 200 }, { 'minimum-size': [400, 300] }), { x: 0, y: 0, w: 450, h: 300 }) && same(fit({ paneW: 3000, paneH: 2000 }, { 'maximum-size': [640, 480] }), { x: 0, y: 0, w: 640, h: 480 }), 'fit: never below the minimum, never above the maximum — and a pane below the minimum keeps its SHAPE at the fit scale (lane D (a): 300x200 under 400x300 ⇒ 450x300, the scaled picture fills the pane)');
-  ok(same(fit({ paneW: 898, paneH: 913 }, { 'minimum-size': [720, 1232], increment: [2, 2] }), { x: 0, y: 0, w: 1212, h: 1232 }) && same(fit({ paneW: 400, paneH: 300 }, { 'minimum-size': [400, 300] }), { x: 0, y: 0, w: 400, h: 300 }), 'fit, lane D (a) MEASURED case: a 2× calculator (720x1232) in a DPR-1 pane capped at the workspace (898x913) ⇒ 1212x1232 — the free axis snaps UP one cell, so the picture scaled by 913/1232 covers the 898 px width (was 720 wide: 116 CSS px of background either side); a pane exactly the minimum is untouched');
+  ok(verdictOf(same(fit({ paneW: 900, paneH: 600 }, null), { x: 0, y: 0, w: 900, h: 600 })), 'fit: no hints ⇒ the whole pane at 0,0');
+  ok(verdictOf(same(fit({ paneW: 900, paneH: 600 }, { increment: [9, 17], 'base-size': [10, 20], 'minimum-size': [100, 50] }), { x: 0, y: 0, w: 892, h: 598 })), 'fit: xterm-like hints snap DOWN to the cell grid from the base (10+98×9, 20+34×17)');
+  ok(gateOf(same(fit({ paneW: 300, paneH: 200 }, { 'minimum-size': [400, 300] }), { x: 0, y: 0, w: 450, h: 300 })) && verdictOf(same(fit({ paneW: 3000, paneH: 2000 }, { 'maximum-size': [640, 480] }), { x: 0, y: 0, w: 640, h: 480 })), 'fit: never below the minimum, never above the maximum — and a pane below the minimum keeps its SHAPE at the fit scale (lane D (a): 300x200 under 400x300 ⇒ 450x300, the scaled picture fills the pane)');
+  ok(gateOf(same(fit({ paneW: 898, paneH: 913 }, { 'minimum-size': [720, 1232], increment: [2, 2] }), { x: 0, y: 0, w: 1212, h: 1232 })) && verdictOf(same(fit({ paneW: 400, paneH: 300 }, { 'minimum-size': [400, 300] }), { x: 0, y: 0, w: 400, h: 300 })), 'fit, lane D (a) MEASURED case: a 2× calculator (720x1232) in a DPR-1 pane capped at the workspace (898x913) ⇒ 1212x1232 — the free axis snaps UP one cell, so the picture scaled by 913/1232 covers the 898 px width (was 720 wide: 116 CSS px of background either side); a pane exactly the minimum is untouched');
   { // CONTROL: the pre-lane-D fit (no aspect) leaves the scaled picture short of the pane
     const k = 913 / 1232, preW = 720 * k, nowW = 1212 * k;
     ok(898 - preW > 100 && Math.abs(898 - nowW) < 1, `CONTROL: the pre-lane-D fit (720 wide) scaled by ${k.toFixed(4)} is ${preW.toFixed(1)} CSS px in the 898 pane; ours ${nowW.toFixed(1)}`); }
-  ok(same(fit({ paneW: 0, paneH: -5 }, { increment: [0, 0] }), { x: 0, y: 0, w: 1, h: 1 }), 'fit: degenerate panes and zero increments never produce a zero size');
-  ok(same(P.placeInside({ x: 850, y: 550, w: 200, h: 100 }, { paneW: 900, paneH: 600 }), { x: 700, y: 500, w: 200, h: 100, moved: true }) && same(P.placeInside({ x: -20, y: 10, w: 2000, h: 50 }, { paneW: 900, paneH: 600 }), { x: 0, y: 10, w: 2000, h: 50, moved: true }), 'a dialog is nudged INSIDE the pane; one bigger than the pane pins to the origin');
+  ok(verdictOf(same(fit({ paneW: 0, paneH: -5 }, { increment: [0, 0] }), { x: 0, y: 0, w: 1, h: 1 })), 'fit: degenerate panes and zero increments never produce a zero size');
+  ok(gateOf(same(P.placeInside({ x: 850, y: 550, w: 200, h: 100 }, { paneW: 900, paneH: 600 }), { x: 700, y: 500, w: 200, h: 100, moved: true })) && verdictOf(same(P.placeInside({ x: -20, y: 10, w: 2000, h: 50 }, { paneW: 900, paneH: 600 }), { x: 0, y: 10, w: 2000, h: 50, moved: true })), 'a dialog is nudged INSIDE the pane; one bigger than the pane pins to the origin');
   ok(P.windowKind({}, true) === 'popup' && P.windowKind({ 'override-redirect': true }) === 'popup' && P.windowKind({ 'transient-for': 1 }) === 'dialog' && P.windowKind({ 'window-type': ['DIALOG'] }) === 'dialog' && P.windowKind({ 'window-type': ['NORMAL'] }) === 'main', 'window kinds: override-redirect ⇒ popup, transient / DIALOG ⇒ dialog, else main');
   const w = new P.WheelAccumulator();
-  ok(same(w.feed(0, 100), []) && same(w.feed(0, 30), [[5, 1]]) && same(w.feed(0, -250), [[4, 2]]) && same(w.feed(130, 0), [[7, 1]]) && same(w.feed(0, 2, 1), []) && same(w.feed(0, 1, 2), [[5, 4]]), 'the wheel: deltas accumulate to 120-unit notches ⇒ button 4/5 (vertical) and 6/7 (horizontal) clicks; line and page modes scale (a trackpad\'s small deltas add up)');
-  ok(same(P.displayPacket(['display-configure'], { width: 640, height: 480 }), ['display-configure', { 'desktop-size': [640, 480], dpi: { x: 96, y: 96 } }]) && P.displayPacket(['configure-display'], { width: 1, height: 1 })[0] === 'configure-display' && P.displayPacket([], { width: 640, height: 480 })[0] === 'desktop_size', 'the pane resize speaks 6.5.3\'s display-configure (its legacy alias when that is what the server names), else the pre-5 desktop_size');
+  ok(gateOf(same(w.feed(0, 100), [])) && gateOf(same(w.feed(0, 30), [[5, 1]])) && gateOf(same(w.feed(0, -250), [[4, 2]])) && gateOf(same(w.feed(130, 0), [[7, 1]])) && gateOf(same(w.feed(0, 2, 1), [])) && verdictOf(same(w.feed(0, 1, 2), [[5, 4]])), 'the wheel: deltas accumulate to 120-unit notches ⇒ button 4/5 (vertical) and 6/7 (horizontal) clicks; line and page modes scale (a trackpad\'s small deltas add up)');
+  ok(gateOf(same(P.displayPacket(['display-configure'], { width: 640, height: 480 }), ['display-configure', { 'desktop-size': [640, 480], dpi: { x: 96, y: 96 } }])) && P.displayPacket(['configure-display'], { width: 1, height: 1 })[0] === 'configure-display' && P.displayPacket([], { width: 640, height: 480 })[0] === 'desktop_size', 'the pane resize speaks 6.5.3\'s display-configure (its legacy alias when that is what the server names), else the pre-5 desktop_size');
   ok(P.keyboardConfigPacket(['keyboard-config'])[0] === 'keyboard-config' && P.keyboardConfigPacket([])[0] === 'keymap-changed', 'the keymap speaks keyboard-config on 6.5.3, keymap-changed before');
   { // THE WORK AREA FOLLOWS EVERY PANE (lane desktop-workarea, 2.369.205; the owner's 2.369.203 WeChat: root 1660×1296,
     // _NET_WORKAREA 0,0,1573,973, the app capped at it ⇒ a blank strip under it). xpra 6.5.4 computes the work area from the
@@ -232,44 +232,44 @@ console.log('§1 the PURE words (xpra-proto.js)');
     ok(!bad, `the display packet carries the WORK AREA for every size (${n} sizes, 1..7680 per axis): 6.5.4 names desktop_size ⇒ its FULL form — the rows (one monitor, work area 0,0,w,h — the hello's own shape), then the same desktop size / dpi it re-dispatches as a display-configure`, bad);
     const seq = [[1574, 974], [1200, 800], [1660, 1296]];
     const ours = serverAfter(P, seq[0], seq.slice(1));
-    ok(same(ours.wa, [0, 0, 1660, 1296]) && same(ours.size, [1660, 1296]), `the owner's sizes through the modelled 6.5.4 server: hello 1574×974 → 1200×800 → 1660×1296 ⇒ the work area ${ours.wa.join(',')} = the root`, ours);
+    ok(gateOf(same(ours.wa, [0, 0, 1660, 1296])) && verdictOf(same(ours.size, [1660, 1296])), `the owner's sizes through the modelled 6.5.4 server: hello 1574×974 → 1200×800 → 1660×1296 ⇒ the work area ${ours.wa.join(',')} = the root`, ours);
     // CONTROL: the pre-lane rule (display-configure whenever the server names it) — the root follows, the work area stays at the hello's
     const src = read('src/lib/xpra-proto.js'), line = "  const rowsTaken = types.includes('desktop_size') || !name;";
     ok(src.split(line).length === 2, 'CONTROL anchor: the rows rule is one line in xpra-proto.js');
     const Ppre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-proto.js', editAnchor(src, line, '  const rowsTaken = !name;', "src/lib/xpra-proto.js"), 'workarea')).href);
     const pre = serverAfter(Ppre, seq[0], seq.slice(1));
-    ok(same(pre.size, [1660, 1296]) && same(pre.wa, [0, 0, 1574, 974]) && Ppre.displayPacket(T654, { width: 1660, height: 1296 })[0] === 'display-configure', `CONTROL: the pre-lane packet on the same sizes — root ${pre.size.join('×')}, work area ${pre.wa.join(',')} (the hello's: the owner's blank strip)`, pre);
+    ok(gateOf(same(pre.size, [1660, 1296])) && gateOf(same(pre.wa, [0, 0, 1574, 974])) && Ppre.displayPacket(T654, { width: 1660, height: 1296 })[0] === 'display-configure', `CONTROL: the pre-lane packet on the same sizes — root ${pre.size.join('×')}, work area ${pre.wa.join(',')} (the hello's: the owner's blank strip)`, pre);
     ok(P.displayPacket(T654, { width: 640, height: 480, dpi: 143.6 })[8] === 144, 'the legacy form\'s dpi fields are whole numbers (xpra reads them as u16; the worker\'s rencode writes every number as an int)');
   }
   const ime = new P.ImeKeymap();
   const p1 = ime.plan('a中文');
-  ok(p1.changed && same(p1.rows, [['U4E2D', 8], ['U6587', 120]]) && p1.keys.length === 3 && p1.keys[0].keyname === 'a' && p1.keys[0].keycode === 38 && p1.keys[1].keycode === 8 && p1.rest === '', 'IME: composed characters outside the keymap get PUBLISHED keycode rows (U<hex> on the stock-NoSymbol slots, 8 first) before their presses; a keymap character presses its own keycode');
+  ok(gateOf(p1.changed) && gateOf(same(p1.rows, [['U4E2D', 8], ['U6587', 120]])) && p1.keys.length === 3 && p1.keys[0].keyname === 'a' && p1.keys[0].keycode === 38 && p1.keys[1].keycode === 8 && p1.rest === '', 'IME: composed characters outside the keymap get PUBLISHED keycode rows (U<hex> on the stock-NoSymbol slots, 8 first) before their presses; a keymap character presses its own keycode');
   const p0 = ime.plan('A!');
-  ok(same(p0.keys.map((k) => [k.keyname, k.keycode, k.modifiers]), [['a', 38, ['shift']], ['exclam', 10, ['shift']]]) && !p0.changed, 'IME: an upper-case letter and a shifted symbol press their base keycode WITH shift (nothing to publish)');
+  ok(gateOf(same(p0.keys.map((k) => [k.keyname, k.keycode, k.modifiers]), [['a', 38, ['shift']], ['exclam', 10, ['shift']]])) && !p0.changed, 'IME: an upper-case letter and a shifted symbol press their base keycode WITH shift (nothing to publish)');
   const kc = P.keyboardConfigPacket(['keyboard-config'], { extra: p1.rows });
-  ok(kc[1].x11_keycodes instanceof Map && same(kc[1].x11_keycodes.get(8), ['U4E2D']) && kc[1].keycodes.some((r) => same(r, [8, 'U4E2D', 8, 0, 0])) && kc[1].force === true && kc[1].query_struct.layout === 'us', 'keyboard-config with IME rows: the x11 map AND the gtk rows carry them, force set, the query struct kept');
+  ok(kc[1].x11_keycodes instanceof Map && gateOf(same(kc[1].x11_keycodes.get(8), ['U4E2D'])) && gateOf(kc[1].keycodes.some((r) => same(r, [8, 'U4E2D', 8, 0, 0]))) && kc[1].force === true && kc[1].query_struct.layout === 'us', 'keyboard-config with IME rows: the x11 map AND the gtk rows carry them, force set, the query struct kept');
   const p2 = ime.plan('中');
   ok(!p2.changed && p2.keys[0].keycode === 8, 'IME: a character already published needs no new table');
   for (let i = 0; i < 40; i++) ime.plan(String.fromCodePoint(0x4e00 + i));
-  ok(ime.slots.size === P.IME_KEYCODES.length && [...ime.slots.values()].every((kc) => P.IME_KEYCODES.includes(kc)), `IME: the table rolls over its ${P.IME_KEYCODES.length} slots — a slot\'s old name leaves when it is reused`);
+  ok(ime.slots.size === P.IME_KEYCODES.length && verdictOf([...ime.slots.values()].every((kc) => P.IME_KEYCODES.includes(kc))), `IME: the table rolls over its ${P.IME_KEYCODES.length} slots — a slot\'s old name leaves when it is reused`);
   // ONE BATCH NEVER MOVES A SLOT IT PRESSES (lane xpra-ime-mac, MEASURED on a real Chrome: two tables back to back that move a
   // slot made Chrome read the earlier press with the later table — 一丁 typed as 一万): more new characters than slots ⇒ the
   // head that fits + `rest`; without `mayEvict` (the last table is too fresh) nothing published is moved
   const big = new P.ImeKeymap();
   const long = Array.from({ length: 20 }, (_, i) => String.fromCodePoint(0x5000 + i)).join('');
   const b1 = big.plan(long);
-  ok(b1.keys.length === P.IME_KEYCODES.length && new Set(b1.keys.map((k) => k.keycode)).size === b1.keys.length && b1.rest === long.slice(P.IME_KEYCODES.length) && b1.changed, `IME batch: 20 new characters ⇒ the first ${P.IME_KEYCODES.length} on distinct slots, the other ${20 - P.IME_KEYCODES.length} left for a later batch`, { keys: b1.keys.length, rest: [...b1.rest].length });
+  ok(b1.keys.length === P.IME_KEYCODES.length && new Set(b1.keys.map((k) => k.keycode)).size === b1.keys.length && b1.rest === long.slice(P.IME_KEYCODES.length) && verdictOf(b1.changed), `IME batch: 20 new characters ⇒ the first ${P.IME_KEYCODES.length} on distinct slots, the other ${20 - P.IME_KEYCODES.length} left for a later batch`, { keys: b1.keys.length, rest: [...b1.rest].length });
   const b2 = big.plan(b1.rest, { mayEvict: false });
   ok(b2.keys.length === 0 && b2.rest === b1.rest && !b2.changed, 'IME batch: with the last table too fresh, a batch that would move a slot presses nothing and keeps all of its text for later');
   const b3 = big.plan(b1.rest);
-  ok(b3.keys.length === 20 - P.IME_KEYCODES.length && b3.rest === '' && b3.changed && b3.keys.every((k) => big.slots.get(k.keyname) === k.keycode), 'IME batch: once the table may move, the rest lands on reused slots (their old names leave the table)');
+  ok(b3.keys.length === 20 - P.IME_KEYCODES.length && b3.rest === '' && gateOf(b3.changed) && verdictOf(b3.keys.every((k) => big.slots.get(k.keyname) === k.keycode)), 'IME batch: once the table may move, the rest lands on reused slots (their old names leave the table)');
   const repeat = new P.ImeKeymap().plan('中中中a中');
   ok(repeat.keys.length === 5 && new Set(repeat.keys.filter((k) => k.keyname === 'U4E2D').map((k) => k.keycode)).size === 1 && repeat.rest === '', 'IME batch: a repeated character presses its one slot again (a batch is bounded by NEW characters, not by length)');
-  ok(same(P.keyAction(3, { keyname: 'a', keyval: 97, string: 'a', keycode: 65, modifiers: ['shift'] }, true), ['key-action', 3, 'a', true, ['shift'], 97, 'a', 65, 0]) && same(P.buttonAction(3, 1, false, [5, 6, 1, 2], []), ['button-action', 3, 1, false, [5, 6, 1, 2], [], []]) && same(P.pointerPosition(3, [5, 6, 1, 2], ['control']), ['pointer-position', 3, [5, 6, 1, 2], ['control'], []]) && same(P.mapWindow(3, { x: 0, y: 0, w: 10, h: 20 }), ['map-window', 3, 0, 0, 10, 20, {}]) && same(P.configureWindow(3, { x: 0, y: 0, w: 10, h: 20 }), ['configure-window', 3, 0, 0, 10, 20, {}, 0, {}, false]) && same(P.damageAck(7, 3, 10, 20, 4, ''), ['damage-sequence', 7, 3, 10, 20, 4, '']) && same(P.focusPacket(3), ['focus', 3, []]) && same(P.pingEcho(12, 'sid'), ['ping_echo', 12, 0, 0, 0, 0, 'sid']), 'the packet forms are xpra-html5 v21\'s (read from its Client.js on this box)');
+  ok(gateOf(same(P.keyAction(3, { keyname: 'a', keyval: 97, string: 'a', keycode: 65, modifiers: ['shift'] }, true), ['key-action', 3, 'a', true, ['shift'], 97, 'a', 65, 0])) && gateOf(same(P.buttonAction(3, 1, false, [5, 6, 1, 2], []), ['button-action', 3, 1, false, [5, 6, 1, 2], [], []])) && gateOf(same(P.pointerPosition(3, [5, 6, 1, 2], ['control']), ['pointer-position', 3, [5, 6, 1, 2], ['control'], []])) && gateOf(same(P.mapWindow(3, { x: 0, y: 0, w: 10, h: 20 }), ['map-window', 3, 0, 0, 10, 20, {}])) && gateOf(same(P.configureWindow(3, { x: 0, y: 0, w: 10, h: 20 }), ['configure-window', 3, 0, 0, 10, 20, {}, 0, {}, false])) && gateOf(same(P.damageAck(7, 3, 10, 20, 4, ''), ['damage-sequence', 7, 3, 10, 20, 4, ''])) && gateOf(same(P.focusPacket(3), ['focus', 3, []])) && verdictOf(same(P.pingEcho(12, 'sid'), ['ping_echo', 12, 0, 0, 0, 0, 'sid'])), 'the packet forms are xpra-html5 v21\'s (read from its Client.js on this box)');
   const tok = P.clipboardToken('hi');
-  ok(tok[0] === 'clipboard-token' && tok[1] === 'CLIPBOARD' && tok[3] === 'UTF8_STRING' && tok[5] === 8 && tok[6] === 'bytes' && str(tok[7]) === 'hi' && tok[8] === true && tok[9] === true && tok[10] === true && same(P.clipboardNone(4, 'CLIPBOARD'), ['clipboard-contents-none', 4, 'CLIPBOARD']) && str(P.clipboardContents(4, 'CLIPBOARD', 'x')[6]) === 'x', 'clipboard packets: a greedy token carrying UTF8_STRING bytes; contents / contents-none answer a request');
-  ok(same(P.parseClipboardToken(['clipboard-token', 'CLIPBOARD', ['UTF8_STRING'], 'UTF8_STRING', 'UTF8_STRING', 8, 'bytes', bytes('yo'), true, true, true]), { selection: 'CLIPBOARD', text: 'yo' }) && P.parseClipboardToken(['clipboard-token', 'PRIMARY', [], 'UTF8_STRING', 'UTF8_STRING', 8, 'bytes', bytes('yo')]).text === null && P.parseClipboardToken(['clipboard-token', 'CLIPBOARD', [], 'image/png', 'image/png', 8, 'bytes', bytes('..')]).text === null && P.parseClipboardToken(['clipboard-token', 'CLIPBOARD', []]).text === null, 'a token yields text only for CLIPBOARD with a text-ish type and data');
-  ok(same(P.pointerCoords(10.4, 20.6, { x: 3, y: 4 }), [10, 21, 7, 17]) && same(P.pointerCoords(1, 2, null), [1, 2]) && P.xButton(0) === 1 && P.xButton(1) === 2 && P.xButton(2) === 3, 'pointer coords are [root, root, window-relative] rounded; DOM buttons map to X buttons');
+  ok(tok[0] === 'clipboard-token' && tok[1] === 'CLIPBOARD' && tok[3] === 'UTF8_STRING' && tok[5] === 8 && tok[6] === 'bytes' && str(tok[7]) === 'hi' && tok[8] === true && tok[9] === true && tok[10] === true && gateOf(same(P.clipboardNone(4, 'CLIPBOARD'), ['clipboard-contents-none', 4, 'CLIPBOARD'])) && str(P.clipboardContents(4, 'CLIPBOARD', 'x')[6]) === 'x', 'clipboard packets: a greedy token carrying UTF8_STRING bytes; contents / contents-none answer a request');
+  ok(gateOf(same(P.parseClipboardToken(['clipboard-token', 'CLIPBOARD', ['UTF8_STRING'], 'UTF8_STRING', 'UTF8_STRING', 8, 'bytes', bytes('yo'), true, true, true]), { selection: 'CLIPBOARD', text: 'yo' })) && P.parseClipboardToken(['clipboard-token', 'PRIMARY', [], 'UTF8_STRING', 'UTF8_STRING', 8, 'bytes', bytes('yo')]).text === null && P.parseClipboardToken(['clipboard-token', 'CLIPBOARD', [], 'image/png', 'image/png', 8, 'bytes', bytes('..')]).text === null && P.parseClipboardToken(['clipboard-token', 'CLIPBOARD', []]).text === null, 'a token yields text only for CLIPBOARD with a text-ish type and data');
+  ok(gateOf(same(P.pointerCoords(10.4, 20.6, { x: 3, y: 4 }), [10, 21, 7, 17])) && gateOf(same(P.pointerCoords(1, 2, null), [1, 2])) && P.xButton(0) === 1 && P.xButton(1) === 2 && P.xButton(2) === 3, 'pointer coords are [root, root, window-relative] rounded; DOM buttons map to X buttons');
   ok(P.mimeFor('png/P') === 'image/png' && P.mimeFor('jpeg') === 'image/jpeg' && P.mimeFor('webp') === 'image/webp' && P.mimeFor('h264') === null, 'mime per coding; video codings are not painted');
 }
 
@@ -288,19 +288,19 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
   await until(() => wk.opened);
   ok(wk.url === '/api/desktop/app-1/xpra-ui/js/Protocol.js' && wk.opened === 'ws://box.example:3456/api/desktop/app-1/stream?viewer=v1', 'the worker is the upstream Protocol.js served under our auth, opened on the ONE bridge url');
   const hello = await until(() => wk.sent('hello')[0]);
-  ok(!!hello && hello[1].rencodeplus === true && same(hello[1].display.desktop_size, [900, 600]), 'the socket opening ⇒ ONE hello with the caps, the pane as the desktop size');
+  ok(!!hello && hello[1].rencodeplus === true && verdictOf(same(hello[1].display.desktop_size, [900, 600])), 'the socket opening ⇒ ONE hello with the caps, the pane as the desktop size');
   wk.feed(['hello', { version: '6.5.3', 'packet-types': ['keyboard-config', 'display-configure', 'draw', 'ping'], rencodeplus: true }]);
-  ok(client.state === 'connected' && same(events.status.map((e) => e[0]), ['connecting', 'connected']) && wk.sent('keyboard-config').length === 1 && wk.sent('keyboard-config')[0][1].keycodes.some((r) => r[1] === 'a'), 'the server hello ⇒ connected, and the keymap is published as keyboard-config (6.5.3 names it)');
+  ok(client.state === 'connected' && gateOf(same(events.status.map((e) => e[0]), ['connecting', 'connected'])) && wk.sent('keyboard-config').length === 1 && verdictOf(wk.sent('keyboard-config')[0][1].keycodes.some((r) => r[1] === 'a')), 'the server hello ⇒ connected, and the keymap is published as keyboard-config (6.5.3 names it)');
   // (a) the FIRST top-level window is FIT to the pane and mapped at 0,0 — never small in a corner
   wk.feed(['new-window', 1, 100, 80, 300, 200, { title: 'Calc', 'size-constraints': { increment: [9, 17], 'base-size': [10, 20], 'minimum-size': [100, 50] }, 'window-type': ['NORMAL'] }]);
-  ok(same(wk.sent('map-window')[0], ['map-window', 1, 0, 0, 892, 598, {}]) && same(wk.sent('focus')[0], ['focus', 1, []]), 'the first top-level window: map-window at 0,0 with the FITTED size (892×598 under xterm-like hints), then focus');
-  ok(same(events.windows[0], ['new', 1, 'main', 0, 0, 892, 598]) && same(events.titles, ['Calc']) && client.mainWid === 1, 'the view learns a main window of the fitted geometry and the app\'s own title');
+  ok(gateOf(same(wk.sent('map-window')[0], ['map-window', 1, 0, 0, 892, 598, {}])) && verdictOf(same(wk.sent('focus')[0], ['focus', 1, []])), 'the first top-level window: map-window at 0,0 with the FITTED size (892×598 under xterm-like hints), then focus');
+  ok(gateOf(same(events.windows[0], ['new', 1, 'main', 0, 0, 892, 598])) && gateOf(same(events.titles, ['Calc'])) && client.mainWid === 1, 'the view learns a main window of the fitted geometry and the app\'s own title');
   // (b) a dialog keeps its size and is nudged inside; a popup is drawn where X put it and never mapped
   wk.feed(['new-window', 2, 850, 550, 200, 100, { title: 'Save as', 'transient-for': 1, 'window-type': ['DIALOG'] }]);
   const lastNew = () => events.windows.filter((e) => e[0] === 'new').slice(-1)[0];
-  ok(same(wk.sent('map-window')[1], ['map-window', 2, 700, 500, 200, 100, {}]) && same(lastNew(), ['new', 2, 'dialog', 700, 500, 200, 100]) && same(events.titles, ['Calc']), 'a dialog: its own size, nudged INSIDE the pane (700,500), mapped there; the title bar keeps the main window\'s title');
+  ok(gateOf(same(wk.sent('map-window')[1], ['map-window', 2, 700, 500, 200, 100, {}])) && gateOf(same(lastNew(), ['new', 2, 'dialog', 700, 500, 200, 100])) && verdictOf(same(events.titles, ['Calc'])), 'a dialog: its own size, nudged INSIDE the pane (700,500), mapped there; the title bar keeps the main window\'s title');
   wk.feed(['new-override-redirect', 3, 20, 30, 100, 50, {}]);
-  ok(wk.sent('map-window').length === 2 && same(lastNew(), ['new', 3, 'popup', 20, 30, 100, 50]) && client.focusedWid === 2, 'a popup (override-redirect) is not mapped, keeps X\'s geometry, does not take focus');
+  ok(wk.sent('map-window').length === 2 && gateOf(same(lastNew(), ['new', 3, 'popup', 20, 30, 100, 50])) && client.focusedWid === 2, 'a popup (override-redirect) is not mapped, keeps X\'s geometry, does not take focus');
   // (c) draws are painted IN ORDER under an out-of-order decoder, and every draw is acked
   delays.set('first', 40); delays.set('second', 0);
   wk.feed(['draw', 1, 0, 0, 10, 10, 'png', bytes('first'), 1, 40, {}]);
@@ -311,64 +311,64 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
   wk.feed(['draw', 9, 0, 0, 5, 5, 'png', bytes('x'), 6, 0, {}]);
   await until(() => wk.sent('damage-sequence').length >= 6, 2000);
   const acks = wk.sent('damage-sequence');
-  ok(same(events.paints.filter((p) => p[0] === 1).map((p) => p[1] === 'image' ? p[2] : p[1]), ['first', 'second', 'scroll']), 'draws on one window are PAINTED IN ORDER although the first decode finished last (the promise chain)', events.paints);
-  ok(acks.filter((a) => a[2] === 1).map((a) => a[1]).join() === '1,2,3,4,5' && acks.filter((a) => a[2] === 1 && a[1] <= 4).every((a) => a[5] >= 0 && a[6] === '') && acks.find((a) => a[1] === 5)[5] === -1 && /unsupported encoding h264/.test(acks.find((a) => a[1] === 5)[6]) && acks.find((a) => a[1] === 6)[5] === -1 && /no such window/.test(acks.find((a) => a[1] === 6)[6]), 'every draw is ACKED in sequence: decode time for the painted ones (void and scroll too), -1 + the reason for an unsupported coding and for an unknown window', acks);
+  ok(verdictOf(same(events.paints.filter((p) => p[0] === 1).map((p) => p[1] === 'image' ? p[2] : p[1]), ['first', 'second', 'scroll'])), 'draws on one window are PAINTED IN ORDER although the first decode finished last (the promise chain)', events.paints);
+  ok(acks.filter((a) => a[2] === 1).map((a) => a[1]).join() === '1,2,3,4,5' && gateOf(acks.filter((a) => a[2] === 1 && a[1] <= 4).every((a) => a[5] >= 0 && a[6] === '')) && acks.find((a) => a[1] === 5)[5] === -1 && gateOf(/unsupported encoding h264/.test(acks.find((a) => a[1] === 5)[6])) && acks.find((a) => a[1] === 6)[5] === -1 && verdictOf(/no such window/.test(acks.find((a) => a[1] === 6)[6])), 'every draw is ACKED in sequence: decode time for the painted ones (void and scroll too), -1 + the reason for an unsupported coding and for an unknown window', acks);
   ok(events.paints.find((p) => p[1] === 'scroll')[2][0][5] === -10, 'a scroll draw hands the view its copy moves verbatim');
   // (d) metadata: title/icon only for the MAIN window; a new size hint refits it
   wk.feed(['window-metadata', 1, { title: 'Calc — 2+2' }]);
   wk.feed(['window-metadata', 2, { title: 'Save as (2)' }]);
   wk.feed(['window-icon', 2, 16, 16, 'png', bytes('PNG2')]);
   wk.feed(['window-icon', 1, 16, 16, 'png', bytes('PNG1')]);
-  ok(same(events.titles, ['Calc', 'Calc — 2+2']) && events.icons.length === 1 && str(events.icons[0].data) === 'PNG1', 'window-metadata title and window-icon reach the caller for the main window only');
+  ok(gateOf(same(events.titles, ['Calc', 'Calc — 2+2'])) && events.icons.length === 1 && str(events.icons[0].data) === 'PNG1', 'window-metadata title and window-icon reach the caller for the main window only');
   wk.feed(['window-metadata', 1, { 'size-constraints': { increment: [10, 10], 'base-size': [0, 0] } }]);
-  ok(same(wk.sent('configure-window').slice(-1)[0], ['configure-window', 1, 0, 0, 900, 600, {}, 0, {}, false]), 'a new size hint on the main window ⇒ a fresh fit sent as configure-window');
+  ok(verdictOf(same(wk.sent('configure-window').slice(-1)[0], ['configure-window', 1, 0, 0, 900, 600, {}, 0, {}, false])), 'a new size hint on the main window ⇒ a fresh fit sent as configure-window');
   wk.feed(['window-move-resize', 2, 650, 480, 220, 110, 3]);
   wk.feed(['window-resized', 1, 895, 595, 4]); // X's snap of our 900x600 fit — within one 10 px increment, so the belt leaves it
   const w1 = client.windows.get(1), w2 = client.windows.get(2);
   ok(w2.x === 650 && w2.w === 220 && w1.w === 895 && w1.h === 595 && w1.x === 0 && events.windows.filter((e) => e[0] === 'geometry').length >= 3, 'the server\'s own move/resize confirmations update the geometry the view draws with');
   // (e) ping / cursor
   wk.feed(['ping', 12345, 0, 'sid-9']); // [ping, echotime, server_time, sid] — the upstream reads the sid at index 3
-  ok(same(wk.sent('ping_echo')[0], ['ping_echo', 12345, 0, 0, 0, 0, 'sid-9']), 'a server ping is echoed with its sid');
+  ok(verdictOf(same(wk.sent('ping_echo')[0], ['ping_echo', 12345, 0, 0, 0, 0, 'sid-9'])), 'a server ping is echoed with its sid');
   wk.feed(['cursor', 'png', 0, 0, 12, 12, 3, 4, 0, bytes('CUR')]);
   wk.feed(['cursor']);
   ok(events.cursors.length === 2 && events.cursors[0].xhot === 3 && str(events.cursors[0].data) === 'CUR' && events.cursors[1] === null, 'a cursor packet and a cursor reset reach the view');
   // (f) the clipboard both ways, deduped
   wk.feed(['clipboard-request', 7, 'CLIPBOARD', 'UTF8_STRING']);
-  ok(same(wk.sent('clipboard-contents-none')[0], ['clipboard-contents-none', 7, 'CLIPBOARD']), 'a request before any paste is answered contents-none');
+  ok(verdictOf(same(wk.sent('clipboard-contents-none')[0], ['clipboard-contents-none', 7, 'CLIPBOARD'])), 'a request before any paste is answered contents-none');
   const tokenIn = (s) => ['clipboard-token', 'CLIPBOARD', ['UTF8_STRING', 'text/plain'], 'UTF8_STRING', 'UTF8_STRING', 8, 'bytes', bytes(s), true, true, true];
   wk.feed(tokenIn('copied in the app'));
   wk.feed(tokenIn('copied in the app'));
   wk.feed(['clipboard-token', 'PRIMARY', ['UTF8_STRING'], 'UTF8_STRING', 'UTF8_STRING', 8, 'bytes', bytes('a selection'), true, true, true]);
   wk.feed(['clipboard-token', 'CLIPBOARD', ['image/png'], 'image/png', 'image/png', 8, 'bytes', bytes('PNG'), true, true, true]);
-  ok(same(events.clips, ['copied in the app']), 'a text token on CLIPBOARD surfaces ONCE; a repeat, a PRIMARY selection and an image do not');
+  ok(verdictOf(same(events.clips, ['copied in the app'])), 'a text token on CLIPBOARD surfaces ONCE; a repeat, a PRIMARY selection and an image do not');
   ok(client.pasteText('pasted from the browser') === true && str(wk.sent('clipboard-token')[0][7]) === 'pasted from the browser', 'a paste from the browser is a greedy token with the text');
   await sleep(30);
   const keysAfterPaste = wk.sent('key-action').slice(-4);
-  ok(keysAfterPaste.length === 4 && keysAfterPaste[0][2] === 'Control_L' && keysAfterPaste[0][3] === true && keysAfterPaste[1][2] === 'v' && same(keysAfterPaste[1][4], ['control']) && keysAfterPaste[2][3] === false && keysAfterPaste[3][2] === 'Control_L' && keysAfterPaste[3][3] === false, '…followed, after the token has had time to land, by the app\'s own Ctrl+V (press v with control, release both)');
+  ok(keysAfterPaste.length === 4 && keysAfterPaste[0][2] === 'Control_L' && keysAfterPaste[0][3] === true && keysAfterPaste[1][2] === 'v' && gateOf(same(keysAfterPaste[1][4], ['control'])) && keysAfterPaste[2][3] === false && keysAfterPaste[3][2] === 'Control_L' && keysAfterPaste[3][3] === false, '…followed, after the token has had time to land, by the app\'s own Ctrl+V (press v with control, release both)');
   wk.feed(['clipboard-request', 8, 'CLIPBOARD', 'UTF8_STRING']);
   ok(str(wk.sent('clipboard-contents')[0][6]) === 'pasted from the browser', 'a later request is answered with the last pasted text');
   wk.feed(tokenIn('pasted from the browser'));
-  ok(same(events.clips, ['copied in the app']), 'an echo of our own token is not surfaced as a copy');
+  ok(verdictOf(same(events.clips, ['copied in the app'])), 'an echo of our own token is not surfaced as a copy');
   // (g) the pane resizes ⇒ display-configure then the main window refits
   wk.posted.length = 0;
   client.resize(640, 480);
   const resizeSends = wk.all.map((p) => p[0]);
-  ok(same(resizeSends, ['display-configure', 'configure-window', 'configure-window']) && same(wk.all[0][1]['desktop-size'], [640, 480]) && same(wk.all[1].slice(1, 6), [1, 0, 0, 640, 480]) && same(wk.all[2].slice(1, 6), [2, 420, 370, 220, 110]), 'resize ⇒ display-configure (the virtual screen follows the pane) THEN configure-window (the app follows the pane), in that order — and the dialog now overflowing the smaller pane is nudged back inside (650,480 ⇒ 420,370)', wk.all.map((p) => p.slice(0, 6)));
+  ok(gateOf(same(resizeSends, ['display-configure', 'configure-window', 'configure-window'])) && gateOf(same(wk.all[0][1]['desktop-size'], [640, 480])) && gateOf(same(wk.all[1].slice(1, 6), [1, 0, 0, 640, 480])) && verdictOf(same(wk.all[2].slice(1, 6), [2, 420, 370, 220, 110])), 'resize ⇒ display-configure (the virtual screen follows the pane) THEN configure-window (the app follows the pane), in that order — and the dialog now overflowing the smaller pane is nudged back inside (650,480 ⇒ 420,370)', wk.all.map((p) => p.slice(0, 6)));
   client.resize(640, 480);
   ok(wk.all.length === 3, 'the same size again sends nothing');
   // (h) keys, pointer, wheel
   wk.posted.length = 0;
-  ok(client.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }) === 'sent' && same(wk.all[0], ['key-action', 2, 'a', true, [], 97, 'a', 38, 0]), 'a key goes to the FOCUSED window (the dialog took focus when it mapped)');
+  ok(client.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }) === 'sent' && verdictOf(same(wk.all[0], ['key-action', 2, 'a', true, [], 97, 'a', 38, 0])), 'a key goes to the FOCUSED window (the dialog took focus when it mapped)');
   ok(client.keyDown({ key: 'v', code: 'KeyV', keyCode: 86, mods: { control: true } }) === 'paste' && wk.all.length === 1, 'Ctrl+V sends NOTHING and answers paste (the browser must fire its paste event)');
-  ok(client.keyDown({ key: 'c', code: 'KeyC', keyCode: 67, mods: { control: true } }) === 'copy' && wk.all.length === 2 && same(wk.all[1][4], ['control']), 'Ctrl+C goes to the app (it copies) and answers copy (the browser keeps its event too)');
+  ok(client.keyDown({ key: 'c', code: 'KeyC', keyCode: 67, mods: { control: true } }) === 'copy' && wk.all.length === 2 && verdictOf(same(wk.all[1][4], ['control'])), 'Ctrl+C goes to the app (it copies) and answers copy (the browser keeps its event too)');
   ok(client.keyUp({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }) === 'sent' && wk.all[2][3] === false, 'a key release is sent as pressed=false');
   wk.posted.length = 0;
-  ok(client.typeText('中a') === 2 && wk.all[0][0] === 'keyboard-config' && wk.all[0][1].keycodes.some((r) => same(r, [8, 'U4E2D', 8, 0, 0])) && same(wk.all[0][1].x11_keycodes.get(8), ['U4E2D']) && wk.all.slice(1).length === 4 && wk.all[1][2] === 'U4E2D' && wk.all[1][7] === 8 && wk.all[3][2] === 'a' && wk.all[3][7] === 38, 'IME text: the keymap with the new U<hex> row is published FIRST (gtk rows + x11 map), then press/release per character');
+  ok(client.typeText('中a') === 2 && wk.all[0][0] === 'keyboard-config' && gateOf(wk.all[0][1].keycodes.some((r) => same(r, [8, 'U4E2D', 8, 0, 0]))) && gateOf(same(wk.all[0][1].x11_keycodes.get(8), ['U4E2D'])) && wk.all.slice(1).length === 4 && wk.all[1][2] === 'U4E2D' && wk.all[1][7] === 8 && wk.all[3][2] === 'a' && wk.all[3][7] === 38, 'IME text: the keymap with the new U<hex> row is published FIRST (gtk rows + x11 map), then press/release per character');
   wk.posted.length = 0;
   client.typeText('中');
   ok(wk.all.length === 2 && wk.all[0][0] === 'key-action', 'a character already published needs no new table');
   wk.posted.length = 0;
-  ok(client.keyDown({ key: 'é', code: 'KeyE', keyCode: 69, mods: { altGraph: true } }) === 'sent' && wk.all[0][0] === 'keyboard-config' && same(wk.all[0][1].x11_keycodes.get(120), ['eacute']) && wk.all[1][2] === 'eacute' && wk.all[1][7] === 120 && wk.all[2][3] === false && wk.all.length === 3, 'a key the US keymap lacks (é via AltGr) goes publish-then-press from keyDown (the html5 shape would drop it)');
+  ok(client.keyDown({ key: 'é', code: 'KeyE', keyCode: 69, mods: { altGraph: true } }) === 'sent' && wk.all[0][0] === 'keyboard-config' && gateOf(same(wk.all[0][1].x11_keycodes.get(120), ['eacute'])) && wk.all[1][2] === 'eacute' && wk.all[1][7] === 120 && wk.all[2][3] === false && wk.all.length === 3, 'a key the US keymap lacks (é via AltGr) goes publish-then-press from keyDown (the html5 shape would drop it)');
   ok(client.keyUp({ key: 'é', code: 'KeyE', keyCode: 69, mods: {} }) === 'sent' && wk.all.length === 3, 'its keyUp sends nothing more (the press already released)');
   // A LONG COMMIT IN BATCHES, IN ORDER (lane xpra-ime-mac): more new characters than IME slots ⇒ one table + its presses now,
   // the rest one gap later (a table that moves a slot right behind the last one is read by a real Chrome for the EARLIER
@@ -399,12 +399,12 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
     };
     const r = await imeRun(C);
     ok(r.n === 20 && r.now.filter((x) => x === 'keyboard-config').length === 1 && r.now.length === 1 + 2 * P.IME_KEYCODES.length, `a 20-character commit: ONE table + ${P.IME_KEYCODES.length} presses at once (the slots it has), nothing else yet`, r.now.length);
-    ok(same(r.typed, r.want) && r.all.filter((x) => x === 'keyboard-config').length === 2, 'one gap later the second table and the other 7 presses — and the key pressed meanwhile (a) comes AFTER them: every character once, in order', { typed: r.typed.join(' ') });
+    ok(gateOf(same(r.typed, r.want)) && r.all.filter((x) => x === 'keyboard-config').length === 2, 'one gap later the second table and the other 7 presses — and the key pressed meanwhile (a) comes AFTER them: every character once, in order', { typed: r.typed.join(' ') });
     ok(r.again === P.IME_KEYCODES.length, `a reconnect's first keyboard-config republishes the ${P.IME_KEYCODES.length} IME rows the client already uses (else a slot it counts as published would press NoSymbol)`, r.again);
     // CONTROLS on copies of the client: the rest dropped; the key not held behind the rest; the post-hello keymap without the rows
     const csrc = read('src/lib/xpra-client.js');
     const REST = '    if (plan.rest) {', HOLD = '  const keyOut = (k, pressed) => { if (held) held.push', AGAIN = '        send(P.keyboardConfigPacket(packetTypes, { layout, extra: ime.slots.size ? [...ime.slots.entries()] : null }));';
-    ok([REST, HOLD, AGAIN].every((l) => csrc.split(l).length === 2), 'CONTROL anchors: the rest, the hold and the republish are one line each in xpra-client.js');
+    ok(verdictOf([REST, HOLD, AGAIN].every((l) => csrc.split(l).length === 2)), 'CONTROL anchors: the rest, the hold and the republish are one line each in xpra-client.js');
     const r1 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, REST, '    if (false) {', "src/lib/xpra-client.js"), 'imerest')).href));
     ok(r1.typed.length === P.IME_KEYCODES.length + 1, `CONTROL: without the later batch the commit loses ${20 - P.IME_KEYCODES.length} characters (${r1.typed.length - 1} of 20 typed)`, r1.typed.length);
     const r2 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, HOLD, '  const keyOut = (k, pressed) => { if (false) held.push', "src/lib/xpra-client.js"), 'imehold')).href));
@@ -434,18 +434,18 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
       return { r, up, atDown, atUp };
     };
     const t1 = await tapRun(C, true, { meta: true });
-    ok(t1.r === 'sent' && same(t1.atDown, ['a+', 'a-']) && same(t1.atUp, ['a+', 'a-']), `a Mac client's ⌘+a: press AND release at the keydown (${t1.atDown.join(' ')}); the keyup that may never come adds nothing`, t1);
+    ok(t1.r === 'sent' && gateOf(same(t1.atDown, ['a+', 'a-'])) && verdictOf(same(t1.atUp, ['a+', 'a-'])), `a Mac client's ⌘+a: press AND release at the keydown (${t1.atDown.join(' ')}); the keyup that may never come adds nothing`, t1);
     const t2 = await tapRun(C, true, {});
-    ok(same(t2.atDown, ['a+']) && same(t2.atUp, ['a+', 'a-']), `RED-side: a plain a on the same Mac client still waits for its keyup (${t2.atDown.join(' ')} → ${t2.atUp.join(' ')})`, t2);
+    ok(gateOf(same(t2.atDown, ['a+'])) && verdictOf(same(t2.atUp, ['a+', 'a-'])), `RED-side: a plain a on the same Mac client still waits for its keyup (${t2.atDown.join(' ')} → ${t2.atUp.join(' ')})`, t2);
     const t3 = await tapRun(C, false, { meta: true });
-    ok(same(t3.atDown, ['a+']) && same(t3.atUp, ['a+', 'a-']), `a Linux / Windows client's Super+a keeps its real key-up (${t3.atDown.join(' ')} → ${t3.atUp.join(' ')})`, t3);
+    ok(gateOf(same(t3.atDown, ['a+'])) && verdictOf(same(t3.atUp, ['a+', 'a-'])), `a Linux / Windows client's Super+a keeps its real key-up (${t3.atDown.join(' ')} → ${t3.atUp.join(' ')})`, t3);
     const t4 = await tapRun(C, true, { meta: true }, 'Meta', 'MetaLeft');
-    ok(same(t4.atDown, ['Super_L+']) && same(t4.atUp, ['Super_L+', 'Super_L-']), 'the ⌘ key itself is held as pressed (a modifier is never tapped)', t4);
+    ok(gateOf(same(t4.atDown, ['Super_L+'])) && verdictOf(same(t4.atUp, ['Super_L+', 'Super_L-'])), 'the ⌘ key itself is held as pressed (a modifier is never tapped)', t4);
     // CONTROL on a copy: without the tap line the Mac ⌘+a press stays down until a keyup a Mac never sends
     const csrc = read('src/lib/xpra-client.js'), TAP = "    if ((ev?.viewerMeta ?? ev?.mods?.meta) && (typeof mac === 'function' ? mac() : mac) && !P.MODIFIER_KEYNAMES.has(k.keyname)) {";
     ok(csrc.split(TAP).length === 2, 'CONTROL anchor: the tap is one line in xpra-client.js');
     const t0 = await tapRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, TAP, '    if (false) {', "src/lib/xpra-client.js"), 'mactap')).href), true, { meta: true });
-    ok(same(t0.atDown, ['a+']), `CONTROL: the pre-lane client leaves ⌘+a pressed at the keydown (${t0.atDown.join(' ')}) — X holds it and autorepeats`, t0);
+    ok(verdictOf(same(t0.atDown, ['a+'])), `CONTROL: the pre-lane client leaves ⌘+a pressed at the keydown (${t0.atDown.join(' ')}) — X holds it and autorepeats`, t0);
     // lane xpra-mac-modifiers: ⌘+a (tapped; its keyup never comes), THEN a plain a — the fresh press clears the stale mark, so
     // the plain a's own keyup releases it (the .286 mark swallowed that keyup: X held a and autorepeated it)
     const againRun = async (CC) => {
@@ -466,24 +466,24 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
       return seq;
     };
     const s1 = await againRun(C);
-    ok(same(s1, ['a+', 'a-', 'a+', 'a-']), `a Mac viewer's ⌘+a, then a plain a: the plain a's own keyup releases it (${s1.join(' ')}) — the tapped press's mark is cleared by the next press of that key`, s1);
+    ok(verdictOf(same(s1, ['a+', 'a-', 'a+', 'a-'])), `a Mac viewer's ⌘+a, then a plain a: the plain a's own keyup releases it (${s1.join(' ')}) — the tapped press's mark is cleared by the next press of that key`, s1);
     const FRESH = '    foreignDown.delete(ev?.code || ev?.key); // a FRESH press:';
     ok(csrc.split(FRESH).length === 2, 'CONTROL anchor: the stale-mark clear is one line');
     const s0 = await againRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, FRESH, '    void 0; //', "src/lib/xpra-client.js"), 'stalemark')).href));
-    ok(same(s0, ['a+', 'a-', 'a+']), `CONTROL: without it the stale mark swallows the plain a's keyup (${s0.join(' ')}) — X holds a and autorepeats it`, s0);
+    ok(verdictOf(same(s0, ['a+', 'a-', 'a+'])), `CONTROL: without it the stale mark swallows the plain a's keyup (${s0.join(' ')}) — X holds a and autorepeats it`, s0);
   }
   wk.posted.length = 0;
   client.pointerButton(50, 40, 0, true, {});
-  ok(same(wk.all, [['button-action', 3, 1, true, [50, 40, 30, 10], [], []]]), 'a press on the popup: button-action to wid 3 with root + window coords, no focus change (popups never take focus)');
+  ok(verdictOf(same(wk.all, [['button-action', 3, 1, true, [50, 40, 30, 10], [], []]])), 'a press on the popup: button-action to wid 3 with root + window coords, no focus change (popups never take focus)');
   wk.posted.length = 0;
   client.pointerButton(300, 300, 2, true, { shift: true });
-  ok(same(wk.all[0], ['focus', 1, []]) && same(wk.all[1], ['button-action', 1, 3, true, [300, 300, 300, 300], ['shift'], []]) && client.focusedWid === 1, 'a press on the main window focuses it first (focus packet), then the right button with the modifiers');
+  ok(gateOf(same(wk.all[0], ['focus', 1, []])) && gateOf(same(wk.all[1], ['button-action', 1, 3, true, [300, 300, 300, 300], ['shift'], []])) && client.focusedWid === 1, 'a press on the main window focuses it first (focus packet), then the right button with the modifiers');
   wk.posted.length = 0;
   client.pointerMove(430, 380, {});
-  ok(same(wk.all, [['pointer-position', 2, [430, 380, 10, 10], [], []]]), 'a move over the dialog (topmost there — at 420,370 since the pane shrank) reports window-relative coords from the window\'s geometry');
+  ok(verdictOf(same(wk.all, [['pointer-position', 2, [430, 380, 10, 10], [], []]])), 'a move over the dialog (topmost there — at 420,370 since the pane shrank) reports window-relative coords from the window\'s geometry');
   wk.posted.length = 0;
   client.wheel(300, 300, 0, 240, 0, {});
-  ok(wk.all.length === 4 && wk.all.every((p) => p[0] === 'button-action' && p[2] === 5) && wk.all[0][3] === true && wk.all[1][3] === false, 'a 240 px wheel ⇒ two button-5 clicks (press+release each)');
+  ok(wk.all.length === 4 && gateOf(wk.all.every((p) => p[0] === 'button-action' && p[2] === 5)) && wk.all[0][3] === true && wk.all[1][3] === false, 'a 240 px wheel ⇒ two button-5 clicks (press+release each)');
   // (i) view-only drops every input at the source (the bridge would drop it anyway)
   client.viewOnly = true; wk.posted.length = 0;
   ok(client.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }) === null && client.keyDown({ key: 'v', code: 'KeyV', keyCode: 86, mods: { control: true } }) === 'paste' && client.typeText('x') === 0 && client.pasteText('nope') === false && (client.pointerMove(1, 1), client.pointerButton(1, 1, 0, true), client.wheel(1, 1, 0, 120), wk.all.length === 0), 'view-only: keys, text, paste, pointer and wheel send nothing (Ctrl+V still answers paste so the browser keeps working)');
@@ -495,18 +495,18 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
   ok(client.windows.size === 0, 'every window can go');
   // (k) a disconnect names its reason; nothing is sent after
   wk.feed(['disconnect', 'server shutdown', 'bye']);
-  ok(client.state === 'closed' && client.closedReason === 'server shutdown / bye' && same(events.status.slice(-1)[0], ['closed', 'server shutdown / bye']) && wk.terminated, 'a disconnect packet closes the session with ITS reason, and the worker is terminated');
+  ok(client.state === 'closed' && client.closedReason === 'server shutdown / bye' && gateOf(same(events.status.slice(-1)[0], ['closed', 'server shutdown / bye'])) && verdictOf(wk.terminated), 'a disconnect packet closes the session with ITS reason, and the worker is terminated');
   ok(client.send(['ping', 1]) === false, 'nothing is sent after the close');
   // (l) no hello ⇒ a named close; a worker that fails to load ⇒ a named close
   const ev2 = [];
   const c2 = C.createXpraClient({ url: 'ws://x/y', workerUrl: '/w', screen: { width: 10, height: 10 }, Worker: FakeWorker, decode, helloTimeoutMs: 60, on: { status: (s, d) => ev2.push([s, d]) } });
   c2.connect();
   await sleep(120);
-  ok(c2.state === 'closed' && /no hello from the xpra server within 0 s/.test(c2.closedReason), 'no server hello within the deadline ⇒ closed with that reason');
+  ok(c2.state === 'closed' && verdictOf(/no hello from the xpra server within 0 s/.test(c2.closedReason)), 'no server hello within the deadline ⇒ closed with that reason');
   class BrokenWorker { constructor() { throw new Error('404 on the worker script'); } }
   const c3 = C.createXpraClient({ url: 'ws://x/y', workerUrl: '/w', screen: { width: 10, height: 10 }, Worker: BrokenWorker, decode });
   c3.connect();
-  ok(c3.state === 'closed' && /could not start: 404 on the worker script/.test(c3.closedReason), 'a worker that cannot be constructed ⇒ closed with the reason (the html5 package missing on a host is a named failure)');
+  ok(c3.state === 'closed' && verdictOf(/could not start: 404 on the worker script/.test(c3.closedReason)), 'a worker that cannot be constructed ⇒ closed with the reason (the html5 package missing on a host is a named failure)');
 }
 
 console.log('§2b THE BELT (2026-09-22): a second top-level placed inside, the app\'s own resize/move undone, bounded');
@@ -524,24 +524,24 @@ console.log('§2b THE BELT (2026-09-22): a second top-level placed inside, the a
   wk.feed(['hello', { version: '6.5.3', 'packet-types': ['display-configure'] }]);
   const cfg = (wid) => wk.sent('configure-window').filter((p) => p[1] === wid).map((p) => p.slice(2, 6));
   wk.feed(['new-window', 1, 0, 0, 898, 616, { title: 'Calculator', 'window-type': ['NORMAL'] }]);
-  ok(same(wk.sent('map-window')[0].slice(1, 6), [1, 0, 0, 1098, 653]), 'the first top-level is fitted to the pane (1098x653 at 0,0)');
+  ok(verdictOf(same(wk.sent('map-window')[0].slice(1, 6), [1, 0, 0, 1098, 653])), 'the first top-level is fitted to the pane (1098x653 at 0,0)');
   // (a) a SECOND top-level (kind main, not transient) where xpra clamped it: mapped INSIDE the pane
   wk.feed(['new-window', 5, 1078, 633, 484, 316, { title: 'xterm', 'window-type': ['NORMAL'] }]);
-  ok(client.windows.get(5).kind === 'main' && client.mainWid === 1 && same(wk.sent('map-window')[1].slice(1, 6), [5, 307, 168, 484, 316]), 'a second top-level at xpra\'s clamp 1078,633 (20x20 px visible) is mapped CENTRED over the main at 307,168 (design 016 S1b) — its own size, wholly inside; the first stays the main');
+  ok(client.windows.get(5).kind === 'main' && client.mainWid === 1 && verdictOf(same(wk.sent('map-window')[1].slice(1, 6), [5, 307, 168, 484, 316])), 'a second top-level at xpra\'s clamp 1078,633 (20x20 px visible) is mapped CENTRED over the main at 307,168 (design 016 S1b) — its own size, wholly inside; the first stays the main');
   // (b) X moves it off the pane later (the zenity repro): nudged back inside at once
   wk.feed(['window-move-resize', 5, 950, 600, 484, 316, 0]);
-  ok(same(cfg(5), [[614, 337, 484, 316]]) && client.windows.get(5).x === 614, 'a secondary window X moved to 950,600 ⇒ ONE configure-window back to 614,337 (it used to follow off the pane)');
+  ok(gateOf(same(cfg(5), [[614, 337, 484, 316]])) && client.windows.get(5).x === 614, 'a secondary window X moved to 950,600 ⇒ ONE configure-window back to 614,337 (it used to follow off the pane)');
   // (c) the app SHRINKS the main (Calculator's mode switch): configure-window back to the fit
   wk.feed(['window-move-resize', 1, 0, 0, 370, 616, 0]);
-  ok(same(cfg(1), [[0, 0, 1098, 653]]) && client.windows.get(1).w === 1098, 'the main resized itself to 370x616 (40 % of the pane) ⇒ configure-window back to 1098x653 at 0,0');
+  ok(gateOf(same(cfg(1), [[0, 0, 1098, 653]])) && client.windows.get(1).w === 1098, 'the main resized itself to 370x616 (40 % of the pane) ⇒ configure-window back to 1098x653 at 0,0');
   // (d) the app MOVES the main inside the gap after our correction: held until the gap ends, then corrected once
   wk.feed(['window-move-resize', 1, 900, 500, 1098, 653, 0]);
-  ok(cfg(1).length === 1 && client.beltState(1).pending, 'a move inside the gap after our own configure is NOT answered at once (it may be the confirmation) — a re-check is pending');
+  ok(cfg(1).length === 1 && verdictOf(client.beltState(1).pending), 'a move inside the gap after our own configure is NOT answered at once (it may be the confirmation) — a re-check is pending');
   await until(() => (cfg(1).length === 2 ? true : null), 1000, 5);
-  ok(same(cfg(1)[1], [0, 0, 1098, 653]), 'when the gap ends the main (moved to 900,500) is put back at 0,0 — one configure per gap, never a burst');
+  ok(verdictOf(same(cfg(1)[1], [0, 0, 1098, 653])), 'when the gap ends the main (moved to 900,500) is put back at 0,0 — one configure per gap, never a burst');
   // (e) CONTROL: X's snap within one size increment is the fit, not an undo
   wk.feed(['window-metadata', 1, { 'size-constraints': { increment: [9, 17], 'base-size': [10, 20] } }]);
-  ok(same(cfg(1)[2], [0, 0, 1090, 649]), 'new size hints ⇒ a fresh fit under them (1090x649)');
+  ok(verdictOf(same(cfg(1)[2], [0, 0, 1090, 649])), 'new size hints ⇒ a fresh fit under them (1090x649)');
   await sleep(60);
   wk.feed(['window-resized', 1, 1090, 645, 0]);
   await sleep(80);
@@ -553,17 +553,17 @@ console.log('§2b THE BELT (2026-09-22): a second top-level placed inside, the a
   await sleep(450); // past the fight window: a fresh fight
   const before = cfg(1).length;
   for (let i = 0; i < 5; i++) { wk.feed(['window-move-resize', 1, 0, 0, 370, 616, 0]); await sleep(55); }
-  ok(cfg(1).length - before === 3 && client.beltState(1).gaveUp && logs.some((l) => /undid the fit 3 times in a row/.test(l)), `five rapid undos ⇒ exactly THREE corrections, then the app wins and it is said once (${cfg(1).length - before} sent)`);
+  ok(cfg(1).length - before === 3 && gateOf(client.beltState(1).gaveUp) && verdictOf(logs.some((l) => /undid the fit 3 times in a row/.test(l))), `five rapid undos ⇒ exactly THREE corrections, then the app wins and it is said once (${cfg(1).length - before} sent)`);
   client.resize(1000, 600);
-  ok(same(cfg(1).slice(-1)[0], [0, 0, 1000, 598]) && !client.beltState(1).gaveUp, 'a pane resize is a new target: the main is fitted again under its hints (1000x598) and the belt re-armed', cfg(1).slice(-1)[0]);
+  ok(gateOf(same(cfg(1).slice(-1)[0], [0, 0, 1000, 598])) && !client.beltState(1).gaveUp, 'a pane resize is a new target: the main is fitted again under its hints (1000x598) and the belt re-armed', cfg(1).slice(-1)[0]);
   // (g) popups are never moved; a pane that SHRINKS keeps the secondary window inside
   wk.feed(['new-override-redirect', 7, 10, 10, 50, 50, {}]);
   wk.feed(['configure-override-redirect', 7, 3000, 3000, 50, 50]);
   ok(cfg(7).length === 0 && client.windows.get(7).x === 3000, 'a popup X put off the pane is drawn where X put it — never configured');
-  ok(same(cfg(5).slice(-1)[0], [516, 284, 484, 316]), 'the 1000x600 pane already nudged the secondary window (614,337 overflowed it) to 516,284', cfg(5));
+  ok(verdictOf(same(cfg(5).slice(-1)[0], [516, 284, 484, 316])), 'the 1000x600 pane already nudged the secondary window (614,337 overflowed it) to 516,284', cfg(5));
   client.resize(700, 500);
   await until(() => (same(cfg(5).slice(-1)[0], [216, 184, 484, 316]) ? true : null), 1000, 5);
-  ok(same(cfg(5).slice(-1)[0], [216, 184, 484, 316]), 'the pane shrinking again to 700x500 (inside the gap: held, then sent once) puts it at 216,184', cfg(5));
+  ok(verdictOf(same(cfg(5).slice(-1)[0], [216, 184, 484, 316])), 'the pane shrinking again to 700x500 (inside the gap: held, then sent once) puts it at 216,184', cfg(5));
   client.close();
 }
 
@@ -580,7 +580,7 @@ console.log('§2c round 3 A2 (docs/design-desktop-apps-seamless §3.2): the oute
   w.feed(['new-window', 4, 0, 0, 360, 616, { title: 'Calculator', 'window-type': ['NORMAL'] }]);
   w.feed(['new-window', 5, 40, 40, 200, 100, { title: 'Save?', 'transient-for': 4, 'window-type': ['DIALOG'] }]);
   c.focusWindow(5);
-  ok(c.closeMain() === true && same(w.sent('close-window'), [['close-window', 4]]), 'the ✕ ⇒ ONE close-window naming the MAIN window (4) — not the focused dialog (5): WM_DELETE_WINDOW to the app, which may answer with its own save dialog', w.sent('close-window'));
+  ok(c.closeMain() === true && verdictOf(same(w.sent('close-window'), [['close-window', 4]])), 'the ✕ ⇒ ONE close-window naming the MAIN window (4) — not the focused dialog (5): WM_DELETE_WINDOW to the app, which may answer with its own save dialog', w.sent('close-window'));
   c.watch = true;
   ok(c.closeMain() === false && w.sent('close-window').length === 1, 'x5 Watch: the pane may not ask (false, nothing sent — the bridge would drop it anyway)');
   c.watch = false; c.viewOnly = true;
@@ -595,7 +595,7 @@ console.log('§2d round 3 lane B (docs/design-desktop-apps-seamless §3.3): init
 {
   const S = await import('../src/lib/desktop-seamless.js');
   // the PURE word
-  ok(same(P.parseMoveResize(['initiate-moveresize', 4, 120, 22, 8, 1, 1]), { wid: 4, xRoot: 120, yRoot: 22, direction: 8, button: 1, source: 1 }) && same(P.parseMoveResize(['window-initiate-moveresize', 4, 0, 0, 11, 0, 1]), { wid: 4, xRoot: 0, yRoot: 0, direction: 11, button: 0, source: 1 }), 'parseMoveResize reads both names (6.5.3 sends the BACKWARDS_COMPATIBLE `initiate-moveresize`, MEASURED) — [wid, x_root, y_root, direction, button, source]');
+  ok(gateOf(same(P.parseMoveResize(['initiate-moveresize', 4, 120, 22, 8, 1, 1]), { wid: 4, xRoot: 120, yRoot: 22, direction: 8, button: 1, source: 1 })) && verdictOf(same(P.parseMoveResize(['window-initiate-moveresize', 4, 0, 0, 11, 0, 1]), { wid: 4, xRoot: 0, yRoot: 0, direction: 11, button: 0, source: 1 })), 'parseMoveResize reads both names (6.5.3 sends the BACKWARDS_COMPATIBLE `initiate-moveresize`, MEASURED) — [wid, x_root, y_root, direction, button, source]');
   ok(P.parseMoveResize(['draw', 1]) === null && P.parseMoveResize(['initiate-moveresize', 4, 0, 0, 'x']) === null && P.parseMoveResize(null) === null, 'parseMoveResize: anything else is null (never guessed)');
   const run = async (mod, { watch = false, viewOnly = false, dormant = false } = {}) => {
     FakeWorker.instances.length = 0;
@@ -617,21 +617,21 @@ console.log('§2d round 3 lane B (docs/design-desktop-apps-seamless §3.3): init
     return { c, w, ev, cfgAfter: w.sent('configure-window').length - cfg0 };
   };
   const A = await run(C);
-  ok(A.ev.mr.length === 13 && same(A.ev.mr.map((e) => e.direction).slice(0, 12), [8, 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]) && same(A.ev.mr[0], { wid: 4, xRoot: 128, yRoot: 22, direction: 8, button: 1, source: 1, main: true }), 'every initiate-moveresize of a known window reaches on.moveresize with its direction, press point and button, `main` naming the main window', A.ev.mr.slice(0, 2));
+  ok(A.ev.mr.length === 13 && gateOf(same(A.ev.mr.map((e) => e.direction).slice(0, 12), [8, 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11])) && verdictOf(same(A.ev.mr[0], { wid: 4, xRoot: 128, yRoot: 22, direction: 8, button: 1, source: 1, main: true })), 'every initiate-moveresize of a known window reaches on.moveresize with its direction, press point and button, `main` naming the main window', A.ev.mr.slice(0, 2));
   ok(A.ev.mr[12].wid === 5 && A.ev.mr[12].main === false, 'a DIALOG\'s own drag is surfaced as not-main (the window leaves it to the app — only the main moves the VibeSpace window)');
   const ops = A.ev.mr.slice(0, 12).map((e) => S.moveResizeAction(e.direction));
-  ok(same(ops, [{ op: 'move' }, { op: 'resize', dir: 'nw' }, { op: 'resize', dir: 'n' }, { op: 'resize', dir: 'ne' }, { op: 'resize', dir: 'e' }, { op: 'resize', dir: 'se' }, { op: 'resize', dir: 's' }, { op: 'resize', dir: 'sw' }, { op: 'resize', dir: 'w' }, { op: 'resize', dir: 'se' }, { op: 'move' }, { op: 'cancel' }]), 'the mapping (PURE moveResizeAction): 8 MOVE ⇒ move; 0–7 ⇒ the eight edges nw n ne e se s sw w; 9 SIZE_KEYBOARD ⇒ resize from se, 10 MOVE_KEYBOARD ⇒ move (the mouse takes over); 11 CANCEL ⇒ cancel', ops);
+  ok(verdictOf(same(ops, [{ op: 'move' }, { op: 'resize', dir: 'nw' }, { op: 'resize', dir: 'n' }, { op: 'resize', dir: 'ne' }, { op: 'resize', dir: 'e' }, { op: 'resize', dir: 'se' }, { op: 'resize', dir: 's' }, { op: 'resize', dir: 'sw' }, { op: 'resize', dir: 'w' }, { op: 'resize', dir: 'se' }, { op: 'move' }, { op: 'cancel' }])), 'the mapping (PURE moveResizeAction): 8 MOVE ⇒ move; 0–7 ⇒ the eight edges nw n ne e se s sw w; 9 SIZE_KEYBOARD ⇒ resize from se, 10 MOVE_KEYBOARD ⇒ move (the mouse takes over); 11 CANCEL ⇒ cancel', ops);
   ok(A.cfgAfter === 0 && A.c.windows.get(4).x === 0 && A.c.windows.get(4).y === 0, `the client applies NOTHING itself: no configure-window for any of the 13 gestures (${A.cfgAfter}) — the X main window stays at 0,0 (the belt does not move); the VibeSpace window moves`);
-  ok(A.ev.main.length >= 1 && A.ev.main[0].wid === 4 && A.ev.main[0].decorations === 0 && S.isCsd(A.c.windows.get(4).meta), 'on.main names the main window with its metadata the moment it maps — `decorations: 0` = the app draws its own title bar (isCsd)', A.ev.main);
+  ok(A.ev.main.length >= 1 && A.ev.main[0].wid === 4 && A.ev.main[0].decorations === 0 && verdictOf(S.isCsd(A.c.windows.get(4).meta)), 'on.main names the main window with its metadata the moment it maps — `decorations: 0` = the app draws its own title bar (isCsd)', A.ev.main);
   A.w.feed(['window-metadata', 4, { maximized: true }]);
   A.w.feed(['window-metadata', 4, { iconic: true }]);
   A.w.feed(['window-metadata', 4, { title: 'Calc 2' }]);
   A.w.feed(['window-metadata', 5, { maximized: true }]);
-  ok(same(A.ev.state, [[4, { maximized: true }], [4, { iconic: true }], [5, { maximized: true }]]), 'on.state carries window-metadata {maximized} / {iconic} as sent (a title change is not a state); the view filters to the main window', A.ev.state);
-  ok(A.ev.main.slice(-1)[0] && A.ev.main.slice(-1)[0].maximized === true && A.ev.main.length >= 4, 'on.main re-fires for every metadata change of the main window (the verdict re-reads its decorations)');
+  ok(verdictOf(same(A.ev.state, [[4, { maximized: true }], [4, { iconic: true }], [5, { maximized: true }]])), 'on.state carries window-metadata {maximized} / {iconic} as sent (a title change is not a state); the view filters to the main window', A.ev.state);
+  ok(gateOf(A.ev.main.slice(-1)[0]) && A.ev.main.slice(-1)[0].maximized === true && A.ev.main.length >= 4, 'on.main re-fires for every metadata change of the main window (the verdict re-reads its decorations)');
   const n0 = A.w.sent('configure-window').length;
-  ok(A.c.setMainState({ maximized: false }) === true && same(A.w.sent('configure-window').slice(n0)[0], ['configure-window', 4, 0, 0, A.c.windows.get(4).w, A.c.windows.get(4).h, {}, 0, { maximized: false }, false]), 'setMainState({maximized:false}) ⇒ configure-window of the MAIN at its own geometry with the state dict (the ui driver\'s; xpra seamless.py _set_window_state)');
-  ok(A.c.setMainState({ iconified: false }) === true && same(A.w.sent('configure-window').slice(-1)[0][8], { iconified: false }) && A.c.setMainState({ bogus: 1 }) === false, 'setMainState({iconified:false}) likewise; an empty/unknown state sends nothing');
+  ok(A.c.setMainState({ maximized: false }) === true && verdictOf(same(A.w.sent('configure-window').slice(n0)[0], ['configure-window', 4, 0, 0, A.c.windows.get(4).w, A.c.windows.get(4).h, {}, 0, { maximized: false }, false])), 'setMainState({maximized:false}) ⇒ configure-window of the MAIN at its own geometry with the state dict (the ui driver\'s; xpra seamless.py _set_window_state)');
+  ok(A.c.setMainState({ iconified: false }) === true && gateOf(same(A.w.sent('configure-window').slice(-1)[0][8], { iconified: false })) && A.c.setMainState({ bogus: 1 }) === false, 'setMainState({iconified:false}) likewise; an empty/unknown state sends nothing');
   A.c.close();
   // THE REPAINT ASK (the .197 integration, MEASURED on xpra 6.5.4: the Calculator minimized, resized by the sidebar
   // opening and restored kept 0 % of its bottom edge painted until ONE buffer-refresh): after an un-iconify / a client fit
@@ -651,7 +651,7 @@ console.log('§2d round 3 lane B (docs/design-desktop-apps-seamless §3.3): init
     R.c.setMainState({ iconified: false }); R.c.setMainState({ iconified: false }); await sleep(200);
     const after = R.w.sent('buffer-refresh').slice(r0);
     const WANT = ['buffer-refresh', 4, 0, 100, { 'refresh-now': true, batch: { reset: true } }, {}];
-    ok(m0 === 0 && fit === 2 && shrink.cfgs >= 1 && shrink.asks === 0 && whileIconic === 0 && after.length === 2 && after.every((p) => same(p, WANT)), `the repaint ask: a map asks nothing (${m0}), a client fit that GROWS the window asks (${fit} — at +20 / +50 ms), a shrinking fit asks nothing (${shrink.asks} after ${shrink.cfgs} configure), nothing while iconic (${whileIconic}), and two un-iconifies in a row ask ONCE per delay (${after.length} × buffer-refresh 4) — xpra-html5's request_refresh`, { fit, shrink, whileIconic, after });
+    ok(m0 === 0 && fit === 2 && shrink.cfgs >= 1 && shrink.asks === 0 && whileIconic === 0 && after.length === 2 && verdictOf(after.every((p) => same(p, WANT))), `the repaint ask: a map asks nothing (${m0}), a client fit that GROWS the window asks (${fit} — at +20 / +50 ms), a shrinking fit asks nothing (${shrink.asks} after ${shrink.cfgs} configure), nothing while iconic (${whileIconic}), and two un-iconifies in a row ask ONCE per delay (${after.length} × buffer-refresh 4) — xpra-html5's request_refresh`, { fit, shrink, whileIconic, after });
     R.c.close();
     const Wt = await mk(); Wt.c.watch = true; const w0 = Wt.w.sent('buffer-refresh').length; Wt.c.setMainState({ iconified: false }); await sleep(150);
     ok(Wt.w.sent('buffer-refresh').length === w0, 'Watch: no repaint ask (a refused viewer asks the server for nothing)');
@@ -694,7 +694,7 @@ console.log('§2e lane B — the VIEW hands the header-bar gesture over: the pre
     pane.fire('pointerdown', { clientX: 110, clientY: 91, button: 0, pointerId: 3 });
     ok(pane.captured === true, 'the press is captured by the pane as always');
     wk.feed(['initiate-moveresize', 7, 120, 22, 8, 1, 1]);
-    ok(got.length === 1 && got[0].direction === 8 && got[0].main === true && same(got[0].press, { clientX: 110, clientY: 91, pointerId: 3 }) && got[0].held === true, 'onMoveResize: direction 8, the press point in VIEWPORT px (X root 120,22 device px at ratio 2 + the pane at 50,80 ⇒ 110,91)', got[0]);
+    ok(got.length === 1 && got[0].direction === 8 && got[0].main === true && gateOf(same(got[0].press, { clientX: 110, clientY: 91, pointerId: 3 })) && got[0].held === true, 'onMoveResize: direction 8, the press point in VIEWPORT px (X root 120,22 device px at ratio 2 + the pane at 50,80 ⇒ 110,91)', got[0]);
     ok(pane.captured === false && view.wmHeld === true, 'the pane RELEASES its pointer capture — the window manager\'s drag owns the pointer now');
     wk.posted.length = 0;
     pane.fire('pointermove', { clientX: 200, clientY: 150, pointerId: 3 });
@@ -709,7 +709,7 @@ console.log('§2e lane B — the VIEW hands the header-bar gesture over: the pre
     wk.feed(['initiate-moveresize', 7, 0, 0, 11, 0, 1]);
     ok(got.length === 2 && got[1].direction === 11 && got[1].press === null && got[1].held === false, 'the CANCEL GTK sends on the button release arrives after it (x_root 0,0 ⇒ no press point) — nothing held');
     wk.feed(['window-metadata', 7, { maximized: true }]);
-    ok(same(states, [{ maximized: true }]), 'onState: the main window\'s maximize reaches the window');
+    ok(verdictOf(same(states, [{ maximized: true }])), 'onState: the main window\'s maximize reaches the window');
     view.dispose();
   } finally { doc.addEventListener = prevAdd; }
 }
@@ -726,7 +726,7 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   const A = mk({ secure: false, clipboardApi: false });
   const container = A.host.children[0];
   const [bar, mount] = container.children;
-  ok(container.style.zoom === 'calc(1 / var(--ui-scale, 1))' && bar.className === 'desktop-bar' && container.style.cssText.includes('background:var(--bg-primary)'), 'the view stands on the picture shell: counter-zoomed container, the ONE .desktop-bar, a theme-var background (no #000)');
+  ok(container.style.zoom === 'calc(1 / var(--ui-scale, 1))' && bar.className === 'desktop-bar' && verdictOf(container.style.cssText.includes('background:var(--bg-primary)')), 'the view stands on the picture shell: counter-zoomed container, the ONE .desktop-bar, a theme-var background (no #000)');
   const pane = mount.children[0];
   ok(pane.className === 'xpra-pane' && pane.children[0].className === 'xpra-stage' && pane.children[1].className === 'xpra-ime' && pane.children[1].tagName === 'textarea', 'the pane holds the window STAGE (x5: identity while active, a fit-scale in Watch) and the IME textarea');
   ok(A.view.chip.style.display === 'none' && A.view.chip.textContent === 'Copied in the app — click to copy', 'the copy chip exists, hidden, with its words');
@@ -734,37 +734,37 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   await A.view.connect();
   const wk = await until(() => FakeWorker.instances[FakeWorker.instances.length - 1]);
   await until(() => wk.sent('hello').length);
-  ok(same(wk.sent('hello')[0][1].display.desktop_size, [800, 500]) && A.view.status.textContent === 'Starting…', 'connect ⇒ the hello carries the PANE size; before the first window the chip says the ONE starting line (design 009 §B8: "Starting…", counting seconds)');
+  ok(gateOf(same(wk.sent('hello')[0][1].display.desktop_size, [800, 500])) && A.view.status.textContent === 'Starting…', 'connect ⇒ the hello carries the PANE size; before the first window the chip says the ONE starting line (design 009 §B8: "Starting…", counting seconds)');
   wk.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
-  ok(A.view.status.textContent === 'Starting…' && A.statuses.includes('connected') && pane.children[1].focused >= 1, 'the server hello ⇒ still the starting line until a window maps (design 009 §B8), the IME textarea takes focus');
+  ok(A.view.status.textContent === 'Starting…' && gateOf(A.statuses.includes('connected')) && pane.children[1].focused >= 1, 'the server hello ⇒ still the starting line until a window maps (design 009 §B8), the IME textarea takes focus');
   wk.feed(['new-window', 1, 0, 0, 300, 200, { title: 'xterm', 'size-constraints': { increment: [8, 16], 'base-size': [0, 0] } }]);
   const winEl = A.view.stage.children[0];
-  ok(winEl && winEl.className === 'xpra-win xpra-win-main' && winEl.style.left === '0px' && winEl.style.width === '800px' && winEl.style.height === '496px' && winEl.children[0].width === 800 && winEl.children[0].height === 496 && A.view.status.textContent === 'Connected', 'a window ⇒ one canvas element sized to the FITTED geometry (800×496 on 8×16 cells), the chip says Connected');
-  ok(same(A.titles, ['xterm']), 'the app window\'s own title reaches the caller');
+  ok(gateOf(winEl) && winEl.className === 'xpra-win xpra-win-main' && winEl.style.left === '0px' && winEl.style.width === '800px' && winEl.style.height === '496px' && winEl.children[0].width === 800 && winEl.children[0].height === 496 && A.view.status.textContent === 'Connected', 'a window ⇒ one canvas element sized to the FITTED geometry (800×496 on 8×16 cells), the chip says Connected');
+  ok(verdictOf(same(A.titles, ['xterm'])), 'the app window\'s own title reaches the caller');
   wk.feed(['window-icon', 1, 8, 8, 'png', bytes('PNGBYTES')]);
-  ok(A.icons.length === 1 && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(A.icons[0]), 'the icon reaches the caller as a validated data: URL');
+  ok(A.icons.length === 1 && verdictOf(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(A.icons[0])), 'the icon reaches the caller as a validated data: URL');
   wk.feed(['draw', 1, 5, 6, 10, 10, 'png', bytes('img'), 1, 40, {}]);
   await until(() => wk.sent('damage-sequence').length);
   const ctx = winEl.children[0].getContext('2d');
-  ok(ctx.drawn.length === 1 && ctx.drawn[0][0].bitmap === 'img' && same(ctx.drawn[0].slice(1), [5, 6, 10, 10]), 'a draw is painted onto the window\'s canvas at its rect');
+  ok(ctx.drawn.length === 1 && ctx.drawn[0][0].bitmap === 'img' && verdictOf(same(ctx.drawn[0].slice(1), [5, 6, 10, 10])), 'a draw is painted onto the window\'s canvas at its rect');
   wk.feed(['draw', 1, 0, 0, 50, 50, 'scroll', [[0, 16, 800, 480, 0, -16]], 2, 0, {}]);
   await until(() => wk.sent('damage-sequence').length >= 2);
-  ok(ctx.drawn.length === 2 && ctx.drawn[1][0] === winEl.children[0] && same(ctx.drawn[1].slice(1), [0, 16, 800, 480, 0, 0, 800, 480]), 'a scroll draw copies the canvas onto itself by the move');
+  ok(ctx.drawn.length === 2 && ctx.drawn[1][0] === winEl.children[0] && verdictOf(same(ctx.drawn[1].slice(1), [0, 16, 800, 480, 0, 0, 800, 480])), 'a scroll draw copies the canvas onto itself by the move');
   // the pointer: coords from the pane\'s OWN rect (10,20 here)
   wk.posted.length = 0;
   pane.fire('pointerdown', { clientX: 110, clientY: 70, button: 0, pointerId: 1 });
-  ok(pane.captured === true && pane.children[1].focused >= 2 && same(wk.all.slice(-1)[0], ['button-action', 1, 1, true, [100, 50, 100, 50], [], []]), 'pointerdown: the IME textarea is focused, the pointer captured, coords = client − the pane rect');
+  ok(pane.captured === true && pane.children[1].focused >= 2 && verdictOf(same(wk.all.slice(-1)[0], ['button-action', 1, 1, true, [100, 50, 100, 50], [], []])), 'pointerdown: the IME textarea is focused, the pointer captured, coords = client − the pane rect');
   pane.fire('pointerup', { clientX: 110, clientY: 70, button: 0, pointerId: 1 });
   ok(wk.all.slice(-1)[0][3] === false, 'pointerup releases');
   const wheelEv = pane.fire('wheel', { clientX: 110, clientY: 70, deltaX: 0, deltaY: 120, deltaMode: 0 });
-  ok(wheelEv.prevented && wk.all.slice(-2).every((p) => p[0] === 'button-action' && p[2] === 5), 'wheel is prevented (no page scroll) and becomes button-5 clicks');
+  ok(gateOf(wheelEv.prevented) && verdictOf(wk.all.slice(-2).every((p) => p[0] === 'button-action' && p[2] === 5)), 'wheel is prevented (no page scroll) and becomes button-5 clicks');
   // the keyboard: Ctrl+V is LEFT to the browser, a letter is sent + prevented, composition types text
   const ime = pane.children[1];
   wk.posted.length = 0;
   const kv = ime.fire('keydown', { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true, getModifierState: () => false });
   ok(!kv.prevented && wk.all.length === 0, 'Ctrl+V on the textarea: not prevented, nothing sent — the paste event will carry the text');
   const ka = ime.fire('keydown', { key: 'a', code: 'KeyA', keyCode: 65, getModifierState: () => false });
-  ok(ka.prevented && wk.all.length === 1 && wk.all[0][2] === 'a', 'a letter: sent as key-action and prevented (nothing lands in the textarea)');
+  ok(gateOf(ka.prevented) && wk.all.length === 1 && wk.all[0][2] === 'a', 'a letter: sent as key-action and prevented (nothing lands in the textarea)');
   const kp = ime.fire('keydown', { key: 'Process', code: 'KeyA', keyCode: 229, isComposing: true, getModifierState: () => false });
   ok(!kp.prevented && wk.all.length === 1, 'an IME in flight (229 / isComposing) is left alone');
   ime.value = '中文';
@@ -773,16 +773,16 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   // the paste EVENT (plain http): the text becomes a token + the app\'s Ctrl+V
   wk.posted.length = 0;
   const pe = ime.fire('paste', { clipboardData: { getData: (t) => (t === 'text/plain' ? 'from the paste event' : '') } });
-  ok(pe.prevented && str(wk.sent('clipboard-token')[0][7]) === 'from the paste event' && toastTexts().some((x) => /Pasted into the application/.test(x)), 'a paste event: prevented, its text sent as a token, a toast');
+  ok(gateOf(pe.prevented) && str(wk.sent('clipboard-token')[0][7]) === 'from the paste event' && verdictOf(toastTexts().some((x) => /Pasted into the application/.test(x))), 'a paste event: prevented, its text sent as a token, a toast');
   // the Paste chip on plain http cannot read the clipboard: the shell's PASTE BOX (a textarea whose native paste works on plain http and on a touch screen)
   const pasteBtnA = A.view.container.children[0].children[1]; // bar: [status, pasteBtn, reBtn, copy chip] — the shell's pasteBtn
   ok(pasteBtnA.textContent === 'Paste' && !A.view.pasteOpen, 'the bar\'s second child is the shell\'s Paste (the copy chip sits after Reconnect, so addControl keeps its slots)');
   await pasteBtnA.onclick();
   const boxA = A.view.container.children.find((c) => c.className === 'vnc-paste-box');
-  ok(A.view.pasteOpen && boxA && /not served over HTTPS/.test(boxA.children[0].textContent) && boxA.children[1].tagName === 'textarea' && boxA.children[1].focused === 1 && A.view.container.children.indexOf(boxA) === 1, 'the Paste chip on plain http opens the paste box (under the bar, above the picture) naming HTTPS as the reason, its textarea focused — never a silent no-op', boxA && boxA.children[0].textContent);
+  ok(gateOf(A.view.pasteOpen) && gateOf(boxA) && gateOf(/not served over HTTPS/.test(boxA.children[0].textContent)) && boxA.children[1].tagName === 'textarea' && boxA.children[1].focused === 1 && A.view.container.children.indexOf(boxA) === 1, 'the Paste chip on plain http opens the paste box (under the bar, above the picture) naming HTTPS as the reason, its textarea focused — never a silent no-op', boxA && boxA.children[0].textContent);
   wk.posted.length = 0;
   boxA.children[2].children[0].onclick();
-  ok(A.view.pasteOpen && wk.all.length === 0, 'Send with an empty box sends nothing and keeps the box');
+  ok(gateOf(A.view.pasteOpen) && wk.all.length === 0, 'Send with an empty box sends nothing and keeps the box');
   boxA.children[1].value = 'typed into the box';
   const f0 = ime.focused;
   boxA.children[2].children[0].onclick();
@@ -799,13 +799,13 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   ok(A.view.chip.style.display === '' && A.view.chipText === 'copied inside the app', 'a copy inside the app on plain http ⇒ the "Copied in the app — click to copy" chip appears, holding the text');
   execCalls.length = 0;
   A.view.chip.onclick();
-  ok(execCalls.length === 1 && execCalls[0][0] === 'copy' && same(execCalls[0][1], ['copied inside the app']) && A.view.chip.style.display === 'none' && A.view.chipText === null && toastTexts().some((x) => /Copied to your clipboard/.test(x)), 'the click copies through execCommand on a hidden textarea holding the text, toasts, and the chip goes away');
+  ok(execCalls.length === 1 && execCalls[0][0] === 'copy' && gateOf(same(execCalls[0][1], ['copied inside the app'])) && A.view.chip.style.display === 'none' && A.view.chipText === null && verdictOf(toastTexts().some((x) => /Copied to your clipboard/.test(x))), 'the click copies through execCommand on a hidden textarea holding the text, toasts, and the chip goes away');
   wk.feed(tokenIn('second copy'));
   execOk = false; A.view.chip.onclick(); execOk = true;
-  ok(A.view.chip.style.display === '' && toastTexts().some((x) => /Could not copy/.test(x)), 'a refused execCommand keeps the chip and says so');
+  ok(A.view.chip.style.display === '' && verdictOf(toastTexts().some((x) => /Could not copy/.test(x))), 'a refused execCommand keeps the chip and says so');
   // view-only + the window-closed sentence + the ladder
   A.view.setViewOnly(true);
-  ok(A.view.client.viewOnly === true && pane.classes.has('xpra-view-only'), 'setViewOnly reaches the session and marks the pane');
+  ok(A.view.client.viewOnly === true && verdictOf(pane.classes.has('xpra-view-only')), 'setViewOnly reaches the session and marks the pane');
   A.view.setViewOnly(false);
   wk.feed(['lost-window', 1]);
   ok(A.view.stage.children.length === 0 && A.view.status.textContent === 'The application closed its window', 'the last window going ⇒ its element removed, the chip says the application closed its window');
@@ -828,7 +828,7 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
     for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r));   // (any rung dispose left armed would have run by now: it runs at once)
     await sleep(0);
   } finally { globalThis.setTimeout = realSetTimeout; }
-  ok(FakeWorker.instances.length === n && FakeWorker.instances[n - 1].terminated && rungs === rungsAtDispose, `dispose terminates the worker and nothing reconnects (no rung armed after it: ${rungs - rungsAtDispose})`);
+  ok(FakeWorker.instances.length === n && gateOf(FakeWorker.instances[n - 1].terminated) && rungs === rungsAtDispose, `dispose terminates the worker and nothing reconnects (no rung armed after it: ${rungs - rungsAtDispose})`);
   // the SECURE branch: the API takes the copy; a refused write falls to the chip; the Paste chip reads the API
   const written = [];
   let writeOk = true;
@@ -842,7 +842,7 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   toasts.length = 0;
   wkB.feed(tokenIn('api copy'));
   await sleep(0);
-  ok(same(written, ['api copy']) && B.view.chip.style.display === 'none' && toastTexts().some((x) => /Copied to your clipboard/.test(x)), 'secure context: the copy lands in navigator.clipboard, no chip, a toast');
+  ok(gateOf(same(written, ['api copy'])) && B.view.chip.style.display === 'none' && verdictOf(toastTexts().some((x) => /Copied to your clipboard/.test(x))), 'secure context: the copy lands in navigator.clipboard, no chip, a toast');
   writeOk = false;
   wkB.feed(tokenIn('refused copy'));
   await sleep(0);
@@ -855,7 +855,7 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   const Bd = mk({ secure: true, clipboardApi: clipB });
   toasts.length = 0;
   await Bd.host.children[0].children[0].children[1].onclick();
-  ok(!Bd.view.pasteOpen && toastTexts().some((x) => /The application is not connected/.test(x)), 'Paste before the session is up: "The application is not connected", no box (never pressed into a dead view)');
+  ok(!Bd.view.pasteOpen && verdictOf(toastTexts().some((x) => /The application is not connected/.test(x))), 'Paste before the session is up: "The application is not connected", no box (never pressed into a dead view)');
   const paneBd = Bd.host.children[0].children[1].children[0];
   paneBd.clientWidth = 300; paneBd.clientHeight = 200;
   await Bd.view.connect();
@@ -864,7 +864,7 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   wkBd.feed(['hello', { 'packet-types': [] }]);
   await Bd.host.children[0].children[0].children[1].onclick();
   const boxBd = Bd.view.container.children.find((c) => c.className === 'vnc-paste-box');
-  ok(Bd.view.pasteOpen && boxBd && /refused clipboard access/.test(boxBd.children[0].textContent), 'a secure page whose browser refuses the read (permission) opens the box with the permission sentence', boxBd && boxBd.children[0].textContent);
+  ok(gateOf(Bd.view.pasteOpen) && gateOf(boxBd) && verdictOf(/refused clipboard access/.test(boxBd.children[0].textContent)), 'a secure page whose browser refuses the read (permission) opens the box with the permission sentence', boxBd && boxBd.children[0].textContent);
   Bd.view.dispose();
   ok(!Bd.view.pasteOpen, 'dispose closes an open paste box');
   B.view.dispose();
@@ -896,22 +896,22 @@ console.log('§3c A1 (round 3): the plain-http GESTURE WINDOW — the user\'s ow
   const C = mkC();
   const { wk, ime } = await up(C);
   // (a) the hint is not shown before any chip; a Ctrl+C is forwarded to the app AND left to the browser (not prevented)
-  ok(C.view.hintShown === false && C.view.copyHint && C.view.copyHint.className === 'desktop-copy-hint' && C.view.copyHint.style.display === 'none', 'the HTTPS hint exists in the bar, hidden, before any chip');
+  ok(C.view.hintShown === false && gateOf(C.view.copyHint) && C.view.copyHint.className === 'desktop-copy-hint' && C.view.copyHint.style.display === 'none', 'the HTTPS hint exists in the bar, hidden, before any chip');
   wk.posted.length = 0;
   const kc = ctrlC(ime);
   ok(!kc.prevented && wk.sent('key-action').length === 1 && wk.sent('key-action')[0][2] === 'c', 'a trusted Ctrl+C: forwarded to the app (it copies) and NOT prevented');
   // (b) the token arrives 300 ms later: written by execCommand, NO chip, a toast
   execCalls.length = 0; toasts.length = 0; clock += 300;
   wk.feed(tokenIn('42'));
-  ok(execCalls.length === 1 && execCalls[0][0] === 'copy' && same(execCalls[0][1], ['42']) && C.view.chip.style.display === 'none' && C.view.chipText === null && toastTexts().some((x) => /Copied to your clipboard/.test(x)), 'A1: the app\'s token 300 ms after the user\'s Ctrl+C is copied through execCommand on a hidden textarea — NO chip, NO click, a toast', { exec: execCalls, chip: C.view.chip.style.display });
+  ok(execCalls.length === 1 && execCalls[0][0] === 'copy' && gateOf(same(execCalls[0][1], ['42'])) && C.view.chip.style.display === 'none' && C.view.chipText === null && verdictOf(toastTexts().some((x) => /Copied to your clipboard/.test(x))), 'A1: the app\'s token 300 ms after the user\'s Ctrl+C is copied through execCommand on a hidden textarea — NO chip, NO click, a toast', { exec: execCalls, chip: C.view.chip.style.display });
   ok(C.view.hintShown === false && !store.has(S.COPY_HINT_KEY), '…and a seamless copy shows no HTTPS hint (the hint is for the chip)');
   // (c) the stamp is SPENT: a second token with no new chord ⇒ the chip (an agent / a timer / another client copying)
   execCalls.length = 0; clock += 200;
   wk.feed(tokenIn('an agent copied this'));
   ok(execCalls.length === 0 && C.view.chip.style.display === '' && C.view.chipText === 'an agent copied this', 'A1: ONE chord, at most ONE write — a later token with no new chord (an agent, a timer, another client) keeps the chip, execCommand never tried');
   // (d) the FIRST chip on this plain-http device shows the one-time hint and remembers it
-  ok(C.view.hintShown === true && store.has(S.COPY_HINT_KEY) && C.view.copyHint.children[0].textContent === 'Enable HTTPS for seamless copy' && C.view.copyHint.children[1].tagName === 'a' && C.view.copyHint.children[1].href === S.HTTPS_DOCS_URL && C.view.copyHint.children[1].target === '_blank' && C.view.copyHint.children[1].rel === 'noopener' && C.view.copyHint.children[1].textContent === 'How to enable HTTPS', 'A1: the first chip on a plain-http device shows "Enable HTTPS for seamless copy" + the docs link (new tab, noopener), and the device remembers it', { shown: C.view.hintShown, stored: [...store.keys()] });
-  ok(/<svg[^>]*>/.test(C.view.copyHint.children[2].innerHTML) && C.view.copyHint.children[2].attrs['aria-label'] === 'Dismiss', 'the hint\'s dismiss is an SVG icon with an accessible name (never a ✕ character)');
+  ok(C.view.hintShown === true && gateOf(store.has(S.COPY_HINT_KEY)) && C.view.copyHint.children[0].textContent === 'Enable HTTPS for seamless copy' && C.view.copyHint.children[1].tagName === 'a' && C.view.copyHint.children[1].href === S.HTTPS_DOCS_URL && C.view.copyHint.children[1].target === '_blank' && C.view.copyHint.children[1].rel === 'noopener' && C.view.copyHint.children[1].textContent === 'How to enable HTTPS', 'A1: the first chip on a plain-http device shows "Enable HTTPS for seamless copy" + the docs link (new tab, noopener), and the device remembers it', { shown: C.view.hintShown, stored: [...store.keys()] });
+  ok(gateOf(/<svg[^>]*>/.test(C.view.copyHint.children[2].innerHTML)) && C.view.copyHint.children[2].attrs['aria-label'] === 'Dismiss', 'the hint\'s dismiss is an SVG icon with an accessible name (never a ✕ character)');
   C.view.copyHint.children[2].onclick();
   ok(C.view.hintShown === false, 'dismiss hides the hint');
   C.view.chip.onclick();
@@ -1004,28 +1004,28 @@ console.log('§3d lane xpra-mac-modifiers (the owner, 2026-10-16: 「根据 host
     return { atMeta, atA, chord, ctrl, click, prevented: !!ka.prevented };
   };
   const m = await modRun(V, 'mac', null);
-  ok(same(m.atMeta, ['Control_L+[control]']), `a Mac viewer, an app on Linux (the record names no platform): the ⌘ keydown ITSELF goes as Control_L with control held (${m.atMeta.join(' ')})`, m);
-  ok(same(m.atA, ['Control_L+[control]', 'a+[control]', 'a-[control]']) && m.prevented, `…⌘+a reaches the packet as a with control — keyname a, modifiers [control], never Super / mod4 — and the .286 tap still releases it at the keydown (${m.atA.slice(1).join(' ')})`, m);
-  ok(same(m.chord, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]']), `…and the ⌘ keyup releases Control_L (${m.chord.join(' ')})`, m);
-  ok(same(m.ctrl, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]']), `…the Mac's own Ctrl stays Ctrl (${m.ctrl.join(' ')})`, m);
-  ok(same(m.click, ['down[control]', 'up[control]']), `…⌘+click on the pane is Ctrl+click in the app (button-action modifiers ${m.click.join(' ')})`, m);
+  ok(verdictOf(same(m.atMeta, ['Control_L+[control]'])), `a Mac viewer, an app on Linux (the record names no platform): the ⌘ keydown ITSELF goes as Control_L with control held (${m.atMeta.join(' ')})`, m);
+  ok(gateOf(same(m.atA, ['Control_L+[control]', 'a+[control]', 'a-[control]'])) && verdictOf(m.prevented), `…⌘+a reaches the packet as a with control — keyname a, modifiers [control], never Super / mod4 — and the .286 tap still releases it at the keydown (${m.atA.slice(1).join(' ')})`, m);
+  ok(verdictOf(same(m.chord, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]'])), `…and the ⌘ keyup releases Control_L (${m.chord.join(' ')})`, m);
+  ok(verdictOf(same(m.ctrl, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]'])), `…the Mac's own Ctrl stays Ctrl (${m.ctrl.join(' ')})`, m);
+  ok(verdictOf(same(m.click, ['down[control]', 'up[control]'])), `…⌘+click on the pane is Ctrl+click in the app (button-action modifiers ${m.click.join(' ')})`, m);
   const l = await modRun(V, 'linux', null);
-  ok(same(l.chord, ['Super_L+[mod4]', 'a+[mod4]', 'Super_L-[]']), `a Linux viewer is unchanged: Super is Super (${l.chord.join(' ')} — a's keyup is its own; no tap off a Mac)`, l);
-  ok(same(l.ctrl, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]']) && same(l.click, ['down[mod4]', 'up[mod4]']), `…its Ctrl+a is control, its Super+click mod4 (${l.ctrl.join(' ')} · ${l.click.join(' ')})`, l);
+  ok(verdictOf(same(l.chord, ['Super_L+[mod4]', 'a+[mod4]', 'Super_L-[]'])), `a Linux viewer is unchanged: Super is Super (${l.chord.join(' ')} — a's keyup is its own; no tap off a Mac)`, l);
+  ok(gateOf(same(l.ctrl, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]'])) && verdictOf(same(l.click, ['down[mod4]', 'up[mod4]'])), `…its Ctrl+a is control, its Super+click mod4 (${l.ctrl.join(' ')} · ${l.click.join(' ')})`, l);
   const w = await modRun(V, 'windows', null);
-  ok(same(w.chord, l.chord) && same(w.ctrl, l.ctrl), 'a Windows viewer on Linux: same family, identity', w);
+  ok(gateOf(same(w.chord, l.chord)) && verdictOf(same(w.ctrl, l.ctrl)), 'a Windows viewer on Linux: same family, identity', w);
   const mm = await modRun(V, 'mac', 'macOS');
-  ok(same(mm.chord, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]']), `a Mac viewer on a host whose record names macOS (hostPlatform): same family, ⌘ stays ⌘ (${mm.chord.join(' ')}; the tap is the viewer's)`, mm);
+  ok(verdictOf(same(mm.chord, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]'])), `a Mac viewer on a host whose record names macOS (hostPlatform): same family, ⌘ stays ⌘ (${mm.chord.join(' ')}; the tap is the viewer's)`, mm);
   const lm = await modRun(V, 'linux', 'darwin');
-  ok(same(lm.ctrl, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]']), `a Linux viewer on a Mac host: Ctrl is the host's ⌘ (${lm.ctrl.join(' ')})`, lm);
+  ok(verdictOf(same(lm.ctrl, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]'])), `a Linux viewer on a Mac host: Ctrl is the host's ⌘ (${lm.ctrl.join(' ')})`, lm);
   const u = await modRun(V, 'unknown', null);
-  ok(same(u.chord, l.chord), 'a viewer that names no platform keeps its keys as pressed', u);
+  ok(verdictOf(same(u.chord, l.chord)), 'a viewer that names no platform keeps its keys as pressed', u);
   // CONTROL: the view with no map (the pre-lane door) — the Mac viewer's ⌘+a goes as Super_L + a under mod4
   const vsrc = read('src/lib/xpra-view.js'), MAPLINE = "  const modMap = () => primaryModifierMap({ viewer: viewerPlatform(), host: typeof hostPlatform === 'function' ? hostPlatform() : hostPlatform });";
   ok(vsrc.split(MAPLINE).length === 2, 'CONTROL anchor: the view asks the table on one line');
   const V0 = await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', editAnchor(vsrc, MAPLINE, '  const modMap = () => null;', "src/lib/xpra-view.js"), 'nomodmap')).href);
   const m0 = await modRun(V0, 'mac', null);
-  ok(same(m0.chord, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]']) && same(m0.click, ['down[mod4]', 'up[mod4]']), `CONTROL: without the map a Mac viewer's ⌘+a reaches the Linux app as ${m0.chord.join(' ')} and ⌘+click as mod4 — Super, never select-all`, m0);
+  ok(gateOf(same(m0.chord, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]'])) && verdictOf(same(m0.click, ['down[mod4]', 'up[mod4]'])), `CONTROL: without the map a Mac viewer's ⌘+a reaches the Linux app as ${m0.chord.join(' ')} and ⌘+click as mod4 — Super, never select-all`, m0);
 }
 
 console.log('§3e lane browser-uppercase-keys (a fleet user on a Mac, 2026-10-22: 「在 Chrome 浏览器里无法输入大写，导致输入密码的时候无法输入大写」): through the VIEW, the TYPED CHARACTER decides its level — Shift+letter, Shift+digit, Caps Lock, a Mac\'s Caps Lock + Shift, a Caps Lock flag over small letters, another layout\'s digit row; X never applies a Caps Lock of its own');
@@ -1038,7 +1038,7 @@ console.log('§3e lane browser-uppercase-keys (a fleet user on a Mac, 2026-10-22
   // the shift level for letters is ON the published keymap (the brief's (b) — measured present): every letter [l, L], every
   // SHIFTED_TABLE key [base, symbol]
   const letters = Object.entries(P.X11_KEYMAP).filter(([, lv]) => /^[a-z]$/.test(lv[0]));
-  ok(letters.length === 26 && letters.every(([, lv]) => lv.length === 2 && lv[1] === lv[0].toUpperCase()) && Object.entries(P.SHIFTED_TABLE).every(([kc, n]) => same(P.X11_KEYMAP[kc], [P.KEYCODE_TABLE[kc], n])), `the published keymap carries the SHIFT LEVEL: all 26 letters as [l, L] (38 = ${JSON.stringify(P.X11_KEYMAP[38])}) and every shifted symbol on its base key (10 = ${JSON.stringify(P.X11_KEYMAP[10])})`);
+  ok(letters.length === 26 && gateOf(letters.every(([, lv]) => lv.length === 2 && lv[1] === lv[0].toUpperCase())) && verdictOf(Object.entries(P.SHIFTED_TABLE).every(([kc, n]) => same(P.X11_KEYMAP[kc], [P.KEYCODE_TABLE[kc], n]))), `the published keymap carries the SHIFT LEVEL: all 26 letters as [l, L] (38 = ${JSON.stringify(P.X11_KEYMAP[38])}) and every shifted symbol on its base key (10 = ${JSON.stringify(P.X11_KEYMAP[10])})`);
   /** One view, one viewer platform: DOM keystrokes in (each with its own CapsLock state), the key-actions out + what X types. */
   const typeRun = async (VV, viewer, events) => {
     const h = new El('div');
@@ -1079,10 +1079,10 @@ console.log('§3e lane browser-uppercase-keys (a fleet user on a Mac, 2026-10-22
   for (const [name, who, events, typed, packets] of ROWS) for (const viewer of who === 'any' ? ['mac', 'linux'] : [who]) {
     const r = await typeRun(V, viewer, events);
     results.push({ name, viewer, r });
-    ok(same(r.packets, packets) && (typed === null || same(r.typed, typed)), `${viewer} viewer — ${name}: the packets ${r.packets.join(' ')}${typed ? ` ⇒ X types ${JSON.stringify(r.typed)}` : ''}`, { want: { packets, typed }, got: r });
+    ok(gateOf(same(r.packets, packets)) && (typed === null || verdictOf(same(r.typed, typed))), `${viewer} viewer — ${name}: the packets ${r.packets.join(' ')}${typed ? ` ⇒ X types ${JSON.stringify(r.typed)}` : ''}`, { want: { packets, typed }, got: r });
   }
-  ok(results.every(({ r }) => !r.packets.some((x) => x.startsWith('Caps_Lock')) && !r.packets.some((x) => /\block\b/.test(x))), 'no Caps_Lock key-action and no `lock` modifier ever leaves the view (X never applies a Caps Lock of its own on top of the viewer machine\'s)');
-  ok(results.filter(({ name }) => /^Shift/.test(name)).every(({ r }) => { const up = r.packets.indexOf('Shift_L-[]'); const keyUp = r.packets.findIndex((x) => !x.startsWith('Shift_L') && x.includes('-[')); return up > keyUp && keyUp > 0; }), 'a held Shift is released only by its own keyup, after the keys typed under it — never tapped at its keydown (the ⌘-chord tap is ⌘\'s only), on a Mac viewer too');
+  ok(verdictOf(results.every(({ r }) => !r.packets.some((x) => x.startsWith('Caps_Lock')) && !r.packets.some((x) => /\block\b/.test(x)))), 'no Caps_Lock key-action and no `lock` modifier ever leaves the view (X never applies a Caps Lock of its own on top of the viewer machine\'s)');
+  ok(verdictOf(results.filter(({ name }) => /^Shift/.test(name)).every(({ r }) => { const up = r.packets.indexOf('Shift_L-[]'); const keyUp = r.packets.findIndex((x) => !x.startsWith('Shift_L') && x.includes('-[')); return up > keyUp && keyUp > 0; })), 'a held Shift is released only by its own keyup, after the keys typed under it — never tapped at its keydown (the ⌘-chord tap is ⌘\'s only), on a Mac viewer too');
   // RED CONTROL: the pre-fix trio (keyActionFor's flags passed through, Caps_Lock forwarded) — the same keystrokes
   const psrc = read('src/lib/xpra-proto.js');
   const LEVEL = '  return { keyname, keyval, string, keycode, modifiers: typedModifiers(modifiers, string, keyname, keycode) };';
@@ -1094,9 +1094,9 @@ console.log('§3e lane browser-uppercase-keys (a fleet user on a Mac, 2026-10-22
   const V0 = await import(fileUrl(xv));
   const pre = {};
   for (const i of [5, 7, 8]) { const [name, who, events] = ROWS[i]; pre[i] = await typeRun(V0, who === 'any' ? 'mac' : who, events); void name; }
-  ok(same(pre[5].typed, ['a']) && pre[5].packets.includes('a+[shift,lock]') && pre[5].packets.some((x) => x.startsWith('Caps_Lock+')), `RED CONTROL (the pre-fix keymap road): a Mac's Caps Lock + Shift + a goes as a+[shift,lock] ⇒ X types ${JSON.stringify(pre[5].typed)} — the small letter (the Mac typed "A"); the Caps Lock key itself went to X`, pre[5]);
-  ok(same(pre[7].typed, ['A', 'b']), `RED CONTROL: the Caps Lock FLAG over small letters ⇒ X types ${JSON.stringify(pre[7].typed)} — a is a capital and Shift+b is NOT (the user's report: no capitals where Shift is held)`, pre[7]);
-  ok(same(pre[8].typed, ['exclam', '7']), `RED CONTROL: a French layout's Shift+& ("1") and & ⇒ X types ${JSON.stringify(pre[8].typed)}`, pre[8]);
+  ok(gateOf(same(pre[5].typed, ['a'])) && gateOf(pre[5].packets.includes('a+[shift,lock]')) && verdictOf(pre[5].packets.some((x) => x.startsWith('Caps_Lock+'))), `RED CONTROL (the pre-fix keymap road): a Mac's Caps Lock + Shift + a goes as a+[shift,lock] ⇒ X types ${JSON.stringify(pre[5].typed)} — the small letter (the Mac typed "A"); the Caps Lock key itself went to X`, pre[5]);
+  ok(verdictOf(same(pre[7].typed, ['A', 'b'])), `RED CONTROL: the Caps Lock FLAG over small letters ⇒ X types ${JSON.stringify(pre[7].typed)} — a is a capital and Shift+b is NOT (the user's report: no capitals where Shift is held)`, pre[7]);
+  ok(verdictOf(same(pre[8].typed, ['exclam', '7'])), `RED CONTROL: a French layout's Shift+& ("1") and & ⇒ X types ${JSON.stringify(pre[8].typed)}`, pre[8]);
 }
 
 console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): Watch sends no geometry and is fit-scaled, a dormant (blocked) pane never times out, a held hello re-sizes');
@@ -1108,7 +1108,7 @@ console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): W
     ["    if (!win || win.wid !== mainWid || win.kind !== 'main' || watch || win.premap) return;", "    if (!win || win.wid !== mainWid || win.kind !== 'main' || win.premap) return;"],
   ];
   const guardHits = guards.map(([from]) => src.split(from).length - 1);
-  ok(guardHits.every((n) => n === 1), `the Watch guards are spelled once each in xpra-client.js (the control patches exactly them: ${guardHits.join(', ')})`);
+  ok(verdictOf(guardHits.every((n) => n === 1)), `the Watch guards are spelled once each in xpra-client.js (the control patches exactly them: ${guardHits.join(', ')})`);
   let mut = src; for (const [from, to] of guards) mut = mut.replace(from, to);
   const mutFile = MUTXC.write('src/lib/xpra-client.js', mut, 'watch');
   const runWatch = async (mod) => {
@@ -1130,14 +1130,14 @@ console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): W
   };
   try {
     const A = await runWatch(C);
-    ok(same(A.map, ['map-window', 1, 0, 0, 1200, 700, {}]), 'Watch: a window is drawn where the SERVER has it (1200x700 — the active viewer\'s geometry), never fitted to this pane', A.map);
+    ok(verdictOf(same(A.map, ['map-window', 1, 0, 0, 1200, 700, {}])), 'Watch: a window is drawn where the SERVER has it (1200x700 — the active viewer\'s geometry), never fitted to this pane', A.map);
     ok(A.after.length === 0 && A.c.windows.get(1).w === 1100, `Watch: resize() and the server's own geometry send NOTHING — no display-configure, no configure-window, no belt (${A.after.join(', ') || 'nothing sent'}) — the window just follows the server (1100x650)`, A.after);
     A.c.watch = false;
     const back = A.w.all.slice(-2).map((p) => [p[0], ...(p[0] === 'configure-window' ? p.slice(2, 6) : [])]);
-    ok(same(back[0], ['display-configure']) && back[1][0] === 'configure-window' && back[1][1] === 0 && back[1][2] === 0 && back[1][3] === 640 && back[1][4] === 480, 'leaving Watch (the pane took over) re-fits to THIS pane: display-configure then the main\'s configure-window 640x480 at 0,0', back);
+    ok(gateOf(same(back[0], ['display-configure'])) && back[1][0] === 'configure-window' && back[1][1] === 0 && back[1][2] === 0 && back[1][3] === 640 && back[1][4] === 480, 'leaving Watch (the pane took over) re-fits to THIS pane: display-configure then the main\'s configure-window 640x480 at 0,0', back);
     A.c.close();
     const M = await runWatch(await import(mutFile));
-    ok(M.after.includes('display-configure') || M.after.includes('configure-window'), `CONTROL: the pre-x5 client in the same Watch pane sends geometry (${M.after.join(', ')}) — the r3 open item, a Watch pane resizing the holder's app`, M.after);
+    ok(verdictOf(M.after.includes('display-configure')) || verdictOf(M.after.includes('configure-window')), `CONTROL: the pre-x5 client in the same Watch pane sends geometry (${M.after.join(', ')}) — the r3 open item, a Watch pane resizing the holder's app`, M.after);
     M.c.close();
   } finally { /* MUTXC's scratch dir is removed at exit */ }
 
@@ -1149,20 +1149,20 @@ console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): W
   const dw = await until(() => FakeWorker.instances[0]);
   await until(() => dw.sent('hello').length);
   await sleep(150);
-  ok(d.state !== 'closed' && d.dormant, `a DORMANT (blocked) client outlives its hello timeout (60 ms; ${d.state} after 150 ms) — it waits for its turn, not for a timeout`);
+  ok(d.state !== 'closed' && verdictOf(d.dormant), `a DORMANT (blocked) client outlives its hello timeout (60 ms; ${d.state} after 150 ms) — it waits for its turn, not for a timeout`);
   d.resize(700, 500);
   d.dormant = false; // Resume here
   dw.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
   const firstTwo = dw.all.slice(1, 3).map((p) => p[0]);
   const disp = dw.sent('display-configure')[0];
-  ok(d.state === 'connected' && same(firstTwo, ['keyboard-config', 'display-configure']) && disp && same(disp[1]['desktop-size'], [700, 500]), 'the held hello carried 900x600; the pane is 700x500 when the server answers ⇒ the keymap, then display-configure 700x500 (the display follows the pane of NOW)', { firstTwo, disp: disp && disp[1]['desktop-size'] });
+  ok(d.state === 'connected' && gateOf(same(firstTwo, ['keyboard-config', 'display-configure'])) && gateOf(disp) && verdictOf(same(disp[1]['desktop-size'], [700, 500])), 'the held hello carried 900x600; the pane is 700x500 when the server answers ⇒ the keymap, then display-configure 700x500 (the display follows the pane of NOW)', { firstTwo, disp: disp && disp[1]['desktop-size'] });
   d.close();
   FakeWorker.instances.length = 0;
   const e = C.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, helloTimeoutMs: 60 });
   e.connect();
   await until(() => FakeWorker.instances[0]);
   await sleep(150);
-  ok(e.state === 'closed' && /no hello/.test(e.closedReason || ''), `CONTROL: the same client NOT dormant closes on its hello timeout (${e.closedReason})`);
+  ok(e.state === 'closed' && verdictOf(/no hello/.test(e.closedReason || '')), `CONTROL: the same client NOT dormant closes on its hello timeout (${e.closedReason})`);
 
   // THE VIEW: Watch scales the stage to fit (contain — never cropped); active is identity; a cut (close 4001) reconnects at once
   const host = new El('div');
@@ -1200,7 +1200,7 @@ console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): W
 console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps.zh.md §7.6): device px end to end, the min pane from size-constraints, the scaled-to-fit picture');
 {
   // ── the PURE words ──
-  ok(P.METADATA_SUPPORTED.includes('size-constraints'), 'the hello asks for `size-constraints` — xpra 6.x\'s NAME for the X size hints (the server only sends the keys a client lists)');
+  ok(verdictOf(P.METADATA_SUPPORTED.includes('size-constraints')), 'the hello asks for `size-constraints` — xpra 6.x\'s NAME for the X size hints (the server only sends the keys a client lists)');
   // the root cause of the owner's cropped calculator: xpra filters window metadata by the client's list (measured on 6.5.3:
   // the calculator's new-window carried has-alpha,title,class-instance,window-type,decorations — no hints — under the v21 list)
   const serverMeta = { title: 'Calculator', 'size-constraints': { increment: [2, 2], 'minimum-size': [720, 1232] } };
@@ -1210,10 +1210,10 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
   const fitOld = P.fitGeometry({ paneW: 1400, paneH: 800 }, P.sizeHintsOf(filtered(OLD)));
   ok(fitNew.h === 1232 && fitNew.w === 2156, `the fit NEVER asks for less than the app's minimum: a 1400x800 pane ⇒ ${fitNew.w}x${fitNew.h} (the minimum height 1232 and the pane's shape at that scale — lane D (a); the view scales the picture to fill)`, fitNew);
   ok(fitOld.h === 800, `CONTROL: under the pre-fix metadata list the hints never arrive and the same pane asks for ${fitOld.w}x${fitOld.h} — below the minimum, X clamps it and the pane crops the keypad (the owner's screenshot)`, fitOld);
-  ok(same(P.devicePane({ width: 640, height: 400 }, 2), { width: 1280, height: 800 }) && same(P.devicePane({ width: 641.4, height: 400 }, 1.25), { width: 801, height: 500 }) && same(P.devicePane({ width: 733, height: 700 }, 1.15), { width: 842, height: 805 }) && same(P.devicePane({ width: 640, height: 400 }, 'x'), { width: 640, height: 400 }), 'devicePane: CSS px × the ratio, rounded DOWN (2 ⇒ 1280x800; 641.4 × 1.25 = 801.75 ⇒ 801, never 802 — whose 641.6 CSS box overflows the pane; 700 × 1.15 = 804.99…98 ⇒ 805, float noise absorbed; a junk ratio ⇒ 1)');
-  ok(same(P.minPaneCss({ 'minimum-size': [720, 1232], increment: [2, 2] }, 2), { w: 360, h: 616 }), 'minPaneCss: the calculator at GDK_SCALE=2 (minimum 720x1232 device px) on a 2x screen needs a 360x616 CSS pane');
-  ok(same(P.minPaneCss({ 'minimum-size': [721, 1233] }, 2), { w: 361, h: 617 }), 'minPaneCss rounds UP (721x1233 at 2 ⇒ 361x617 — never a pane half a pixel short)');
-  ok(same(P.minPaneCss({ 'base-size': [4, 4], increment: [6, 13] }, 1), { w: 4, h: 4 }) && same(P.minPaneCss({ 'base-size': [4, 4], increment: [6, 13], 'minimum-size': [10, 17] }, 1), { w: 10, h: 17 }), 'minPaneCss: the minimum wins, an unset minimum falls back to the base (ICCCM) — xterm\'s 10x17');
+  ok(gateOf(same(P.devicePane({ width: 640, height: 400 }, 2), { width: 1280, height: 800 })) && gateOf(same(P.devicePane({ width: 641.4, height: 400 }, 1.25), { width: 801, height: 500 })) && gateOf(same(P.devicePane({ width: 733, height: 700 }, 1.15), { width: 842, height: 805 })) && verdictOf(same(P.devicePane({ width: 640, height: 400 }, 'x'), { width: 640, height: 400 })), 'devicePane: CSS px × the ratio, rounded DOWN (2 ⇒ 1280x800; 641.4 × 1.25 = 801.75 ⇒ 801, never 802 — whose 641.6 CSS box overflows the pane; 700 × 1.15 = 804.99…98 ⇒ 805, float noise absorbed; a junk ratio ⇒ 1)');
+  ok(verdictOf(same(P.minPaneCss({ 'minimum-size': [720, 1232], increment: [2, 2] }, 2), { w: 360, h: 616 })), 'minPaneCss: the calculator at GDK_SCALE=2 (minimum 720x1232 device px) on a 2x screen needs a 360x616 CSS pane');
+  ok(verdictOf(same(P.minPaneCss({ 'minimum-size': [721, 1233] }, 2), { w: 361, h: 617 })), 'minPaneCss rounds UP (721x1233 at 2 ⇒ 361x617 — never a pane half a pixel short)');
+  ok(gateOf(same(P.minPaneCss({ 'base-size': [4, 4], increment: [6, 13] }, 1), { w: 4, h: 4 })) && verdictOf(same(P.minPaneCss({ 'base-size': [4, 4], increment: [6, 13], 'minimum-size': [10, 17] }, 1), { w: 10, h: 17 })), 'minPaneCss: the minimum wins, an unset minimum falls back to the base (ICCCM) — xterm\'s 10x17');
   ok(P.minPaneCss(null, 2) === null && P.minPaneCss({}, 2) === null && P.minPaneCss({ increment: [6, 13] }, 2) === null && P.minPaneCss({ 'minimum-size': [0, 5] }, 1) === null, 'missing hints (or neither size, or a zero size) ⇒ NO minimum');
   let everyRatio = true; const bad = [];
   for (const r of [1, 1.1, 1.25, 1.333, 1.5, 1.75, 2, 2.5, 3]) for (const [mw, mh] of [[720, 1232], [721, 1233], [10, 17], [333, 555]]) {
@@ -1221,7 +1221,7 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
     const g = P.fitGeometry({ paneW: d.width, paneH: d.height }, { 'minimum-size': [mw, mh], increment: [3, 7], 'base-size': [1, 1] });
     if (d.width < mw || d.height < mh || g.w > d.width || g.h > d.height) { everyRatio = false; bad.push({ r, mw, mh, d, g }); }
   }
-  ok(everyRatio, 'for 9 ratios × 4 minimums: a pane of exactly minPaneCss holds the minimum in device px AND the increment-snapped fit never exceeds it (never cropped at the clamp)', bad.slice(0, 3));
+  ok(verdictOf(everyRatio), 'for 9 ratios × 4 minimums: a pane of exactly minPaneCss holds the minimum in device px AND the increment-snapped fit never exceeds it (never cropped at the clamp)', bad.slice(0, 3));
 
   // ── the client: device px out, the display's dpi (never 96 × ratio), the main's constraints named ──
   const src = read('src/lib/xpra-client.js');
@@ -1242,11 +1242,11 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
   };
   try {
     const A = await runDpr(C);
-    ok(same(A.hello.display.desktop_size, [1400, 900]) && A.hello.screen_sizes[0][1] === 1400 && A.hello.screen_sizes[0][2] === 900, `ratio 2: the hello's desktop size is the pane in DEVICE px (700x450 CSS ⇒ ${A.hello.display.desktop_size.join('x')})`);
+    ok(gateOf(same(A.hello.display.desktop_size, [1400, 900])) && A.hello.screen_sizes[0][1] === 1400 && A.hello.screen_sizes[0][2] === 900, `ratio 2: the hello's desktop size is the pane in DEVICE px (700x450 CSS ⇒ ${A.hello.display.desktop_size.join('x')})`);
     ok(A.hello.dpi.x === 96 && A.disp[1].dpi.x === 96, 'the hello and every display-configure carry the DISPLAY\'s font dpi (96 at GDK_SCALE=2) — never 96 × the ratio (xpra would rewrite Xft.dpi to 192: 4x text, measured)');
-    ok(same(A.map.slice(2, 6), [0, 0, 1918, 1232]), `the main window is mapped at the device-px fit, the height held at its minimum 1232 and the width at the pane's shape (the 900 px pane is shorter — the view scales, lane D (a) fills): ${A.map.slice(2, 6).join(',')}`);
-    ok(same(A.disp[1]['desktop-size'], [1600, 1400]) && same(A.cfg.slice(2, 6), [0, 0, 1600, 1400]), `resize(800x700 CSS) ⇒ display-configure 1600x1400 and the main refitted 1600x1400 at 0,0 (device px, ≥ the minimum): ${A.disp[1]['desktop-size']} / ${A.cfg.slice(2, 6)}`);
-    ok(A.cons.length === 1 && same(A.cons[0], { increment: [2, 2], 'minimum-size': [720, 1232] }) && same(A.c.mainConstraints, A.cons[0]), 'on.constraints names the MAIN window\'s size constraints once (and mainConstraints reads them)', A.cons);
+    ok(verdictOf(same(A.map.slice(2, 6), [0, 0, 1918, 1232])), `the main window is mapped at the device-px fit, the height held at its minimum 1232 and the width at the pane's shape (the 900 px pane is shorter — the view scales, lane D (a) fills): ${A.map.slice(2, 6).join(',')}`);
+    ok(gateOf(same(A.disp[1]['desktop-size'], [1600, 1400])) && verdictOf(same(A.cfg.slice(2, 6), [0, 0, 1600, 1400])), `resize(800x700 CSS) ⇒ display-configure 1600x1400 and the main refitted 1600x1400 at 0,0 (device px, ≥ the minimum): ${A.disp[1]['desktop-size']} / ${A.cfg.slice(2, 6)}`);
+    ok(A.cons.length === 1 && gateOf(same(A.cons[0], { increment: [2, 2], 'minimum-size': [720, 1232] })) && verdictOf(same(A.c.mainConstraints, A.cons[0])), 'on.constraints names the MAIN window\'s size constraints once (and mainConstraints reads them)', A.cons);
     A.w.feed(['window-metadata', 1, { 'size-constraints': { increment: [2, 2], 'minimum-size': [800, 1300] } }]);
     ok(A.cons.length === 2 && A.cons[1]['minimum-size'][1] === 1300, 'a size-constraints change on the main window is announced again (the window re-clamps)');
     A.w.feed(['window-metadata', 1, { title: 'Calculator — sci' }]);
@@ -1255,7 +1255,7 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
     ok(A.cons.length === 3 && A.cons[2] === null, 'the main window gone ⇒ constraints null (no minimum any more)');
     A.c.close();
     const M = await runDpr(await import(mutFile));
-    ok(same(M.hello.display.desktop_size, [700, 450]) && same(M.disp[1]['desktop-size'], [1408, 1232]), `CONTROL: the pre-fix client (CSS px are X px) says ${M.hello.display.desktop_size.join('x')} / ${M.disp[1]['desktop-size'].join('x')} — a 96-dpi bitmap the 2x screen blows up (the owner's "looks like VNC")`);
+    ok(gateOf(same(M.hello.display.desktop_size, [700, 450])) && verdictOf(same(M.disp[1]['desktop-size'], [1408, 1232])), `CONTROL: the pre-fix client (CSS px are X px) says ${M.hello.display.desktop_size.join('x')} / ${M.disp[1]['desktop-size'].join('x')} — a 96-dpi bitmap the 2x screen blows up (the owner's "looks like VNC")`);
     M.c.close();
   } finally { /* MUTXC's scratch dir is removed at exit */ }
 
@@ -1281,7 +1281,7 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
     const A = await runView(V);
     const cv = A.winEl.children[0];
     ok(cv.width === 1918 && cv.height === 1232 && A.winEl.style.width === '959px' && A.winEl.style.height === '616px' && cv.style.width === '959px' && cv.style.height === '616px', `the canvas backing store is DEVICE px (${cv.width}x${cv.height}) in a CSS box of device ÷ 2 (${A.winEl.style.width} × ${A.winEl.style.height}) — 1:1 on the 2x screen, crisp`);
-    ok(same(A.mins, [{ w: 360, h: 616 }]) && same(A.view.minSize, { w: 360, h: 616 }), 'onMinSize hands the window the smallest pane in CSS px (360x616)', A.mins);
+    ok(gateOf(same(A.mins, [{ w: 360, h: 616 }])) && verdictOf(same(A.view.minSize, { w: 360, h: 616 })), 'onMinSize hands the window the smallest pane in CSS px (360x616)', A.mins);
     const s = A.view.stageScale;
     ok(Math.abs(s - 700 / 959) < 1e-9 && Math.abs(959 * s - 700) < 1e-6 && 616 * s <= 450 + 1e-6 && 450 - 616 * s < 1 && A.view.fitBadge.style.display === '' && A.view.fitBadge.textContent === 'Scaled to fit — the app needs at least 360×616', `a 450 px tall pane under a 616 px minimum: the ACTIVE picture is scaled to fit (${s.toFixed(3)}), never cropped, and the badge says why ("${A.view.fitBadge.textContent}")`);
     A.w.posted.length = 0;
@@ -1323,7 +1323,7 @@ console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 
   ok(P.gridStep(2) === 2 && P.gridStep(1) === 1 && P.gridStep(1.5) === 3 && P.gridStep(1.25) === 5 && P.gridStep(1.75) === 7 && P.gridStep(1.1) === 11 && P.gridStep(1.3337) === 1, 'gridStep: the smallest device step whose CSS size is a WHOLE CSS px (2 ⇒ 2 — an odd width at DPR 2 is 697.5 CSS, measured resampled —, 1.5 ⇒ 3, 1.25 ⇒ 5, 1.75 ⇒ 7, 1.1 ⇒ 11; none ≤ 16 ⇒ 1)');
   let exact = true; const inexact = [];
   for (const r of [1, 1.1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) for (let n = 1; n <= 2000; n += 1) { const b = P.backingSize(n, r); const u = b / r; if (b < n || b - n >= P.gridStep(r) || Math.abs(u - Math.round(u)) > 1e-6) { exact = false; inexact.push({ r, n, b }); break; } }
-  ok(exact, 'backingSize: for 9 ratios × every size 1..2000 the backing is ≥ the window, less than one step larger, and its CSS box (backing ÷ ratio) is a whole CSS px', inexact.slice(0, 3));
+  ok(verdictOf(exact), 'backingSize: for 9 ratios × every size 1..2000 the backing is ≥ the window, less than one step larger, and its CSS box (backing ÷ ratio) is a whole CSS px', inexact.slice(0, 3));
   const cssOf = (n, r) => n / r;
   ok(!Number.isInteger(cssOf(1346, 1.5)) && !Number.isInteger(cssOf(1395, 2)) && P.backingSize(1395, 2) === 1396 && P.backingSize(1346, 1.5) === 1347, `CONTROL: the unpadded boxes are not whole CSS px — 1346 at 1.5 = ${cssOf(1346, 1.5).toFixed(3)} CSS, 1395 at 2 = ${cssOf(1395, 2)} CSS (measured: resampled, 1.5 % / 18.6 % of the pixels off); padded: 1347 ⇒ 898, 1396 ⇒ 698`);
   ok(worst === null, 'for 10 ratios × every pane width 200..1400: the device pane\'s CSS box (device ÷ ratio) is never larger than the pane and less than one device px short of it', worst);
@@ -1347,12 +1347,12 @@ console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 
     const A = await runFrac(V);
     const fcv = A.view.stage.children[0].children[0];
     ok(fcv.width === 1347 && fcv.height === 1101 && fcv.style.width === '898px' && fcv.style.height === '734px', `…and its canvas backing is the window rounded UP to the ratio's grid step (1347x1099 ⇒ ${fcv.width}x${fcv.height}, multiples of 3 at 1.5) in a CSS box of ${fcv.style.width} × ${fcv.style.height} — whole CSS px, so the browser draws it 1:1 (1347 / 1.5 = 898 exactly; the bare 1346 / 1.5 = 897.33… CSS is snapped and RESAMPLED — measured 1.5 % of the pixels off)`, { w: fcv.width, h: fcv.height, cw: fcv.style.width, ch: fcv.style.height });
-    ok(same(A.map.slice(4, 6), [1347, 1099]) && A.view.stageScale === 1 && A.view.stage.style.transform === '' && A.view.fitBadge.style.display === 'none', `DPR 1.5, an 898x733 pane holding the calculator: the app is fitted to ${A.map.slice(4, 6).join('x')} device px (CSS ${(A.map[4] / 1.5).toFixed(2)} × ${(A.map[5] / 1.5).toFixed(2)} ≤ the pane) and the stage stays IDENTITY — no transform, no badge (the picture is the canvas 1:1)`, { map: A.map, scale: A.view.stageScale, t: A.view.stage.style.transform });
+    ok(gateOf(same(A.map.slice(4, 6), [1347, 1099])) && A.view.stageScale === 1 && A.view.stage.style.transform === '' && A.view.fitBadge.style.display === 'none', `DPR 1.5, an 898x733 pane holding the calculator: the app is fitted to ${A.map.slice(4, 6).join('x')} device px (CSS ${(A.map[4] / 1.5).toFixed(2)} × ${(A.map[5] / 1.5).toFixed(2)} ≤ the pane) and the stage stays IDENTITY — no transform, no badge (the picture is the canvas 1:1)`, { map: A.map, scale: A.view.stageScale, t: A.view.stage.style.transform });
     A.view.dispose();
     const T = await mkTrio('frac', { proto: [ROUND], view: [NO_SLACK] });
     try {
       const B = await runFrac(T.V);
-      ok(same(B.map.slice(4, 6), [1347, 1100]) && B.view.stageScale < 1 && B.view.fitBadge.style.display === '', `CONTROL: the pre-fix rounding (and no slack) fits 1347x1100 and the stage takes scale(${B.view.stageScale.toFixed(6)}) with the "Scaled to fit" badge on a pane that HOLDS the app — the resampled, blurred picture the verifier measured (4.18 % of the pixels off)`, { map: B.map, scale: B.view.stageScale });
+      ok(gateOf(same(B.map.slice(4, 6), [1347, 1100])) && B.view.stageScale < 1 && B.view.fitBadge.style.display === '', `CONTROL: the pre-fix rounding (and no slack) fits 1347x1100 and the stage takes scale(${B.view.stageScale.toFixed(6)}) with the "Scaled to fit" badge on a pane that HOLDS the app — the resampled, blurred picture the verifier measured (4.18 % of the pixels off)`, { map: B.map, scale: B.view.stageScale });
       B.view.dispose();
     } finally { T.cleanup(); }
   }
@@ -1376,8 +1376,8 @@ console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 
   };
   {
     const A = await runPhone(C);
-    ok(same(A.hello, [640, 982]) && same(A.map, [0, 0, 804, 1232]) && same(A.dispAtMap, [804, 1232]) && A.dispBeforeMap, /* lane D (a): the pane's shape at the fit scale — 804 = 640 ÷ (982/1232), one cell up */ `a 320x491 phone pane @2 (640x982 device) under a calculator whose minimum is 740x1232: the display is GROWN to ${A.dispAtMap && A.dispAtMap.join('x')} BEFORE the window is mapped at ${A.map.slice(2).join('x')} — X never clamps the pointer at the pane's last row (the verifier: '0' landed on row 981)`, A);
-    ok(same(A.big, [1600, 1400]) && same(A.back, [804, 1232]) && same(A.gone, [640, 982]), `the display follows: a pane that holds the app ⇒ the pane (${A.big}); small again ⇒ the app's minimum (${A.back}); no main window ⇒ the pane (${A.gone})`, A);
+    ok(gateOf(same(A.hello, [640, 982])) && gateOf(same(A.map, [0, 0, 804, 1232])) && gateOf(same(A.dispAtMap, [804, 1232])) && verdictOf(A.dispBeforeMap), /* lane D (a): the pane's shape at the fit scale — 804 = 640 ÷ (982/1232), one cell up */ `a 320x491 phone pane @2 (640x982 device) under a calculator whose minimum is 740x1232: the display is GROWN to ${A.dispAtMap && A.dispAtMap.join('x')} BEFORE the window is mapped at ${A.map.slice(2).join('x')} — X never clamps the pointer at the pane's last row (the verifier: '0' landed on row 981)`, A);
+    ok(gateOf(same(A.big, [1600, 1400])) && gateOf(same(A.back, [804, 1232])) && verdictOf(same(A.gone, [640, 982])), `the display follows: a pane that holds the app ⇒ the pane (${A.big}); small again ⇒ the app's minimum (${A.back}); no main window ⇒ the pane (${A.gone})`, A);
     A.c.close();
     const T = await mkTrio('disp', { client: [PANE_DISPLAY] });
     try {
@@ -1423,7 +1423,7 @@ console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 
   // the launch half: the launcher sends THIS client's devicePixelRatio as `dpr` (clamped to the route's 1..3)
   const L = await import('../src/lib/desktop-app-launcher.js');
   ok(L.launchDpr(2) === 2 && L.launchDpr(1.25) === 1.25 && L.launchDpr(0.9) === 1 && L.launchDpr(4) === 3 && L.launchDpr('x') === 1, 'launchDpr: the page\'s devicePixelRatio, clamped to 1..3 (a zoomed-out page launches at 1)');
-  ok(/body: JSON\.stringify\(\{ \.\.\.payload, dpr: launchDpr\(\), uiScale: launchUiScale\(\)(, \.\.\.\(scaleChoice != null \? \{ scaleChoice \} : \{\}\))?(, \.\.\.\(host !== 'local' \? \{ host \} : \{\}\))?(, \.\.\.\(share \? \{ share \} : \{\}\))?(, \.\.\.\(pin \? \{ pin: `\$\{pin\.w\}x\$\{pin\.h\}` \} : \{\}\))? \}\)/.test(read('src/lib/desktop-app-launcher.js')), 'WIRING PIN: every launch POST carries `dpr: launchDpr()` and (round 3 A3) `uiScale: launchUiScale()` (lane D: + the app\'s stored default scale as `scaleChoice`; lane C2: + the chosen machine\'s `host` when it is not this one; desktop lane E: + the `share` the dialog\'s row / the app\'s memory proposes)');
+  ok(verdictOf(/body: JSON\.stringify\(\{ \.\.\.payload, dpr: launchDpr\(\), uiScale: launchUiScale\(\)(, \.\.\.\(scaleChoice != null \? \{ scaleChoice \} : \{\}\))?(, \.\.\.\(host !== 'local' \? \{ host \} : \{\}\))?(, \.\.\.\(share \? \{ share \} : \{\}\))?(, \.\.\.\(pin \? \{ pin: `\$\{pin\.w\}x\$\{pin\.h\}` \} : \{\}\))? \}\)/.test(read('src/lib/desktop-app-launcher.js'))), 'WIRING PIN: every launch POST carries `dpr: launchDpr()` and (round 3 A3) `uiScale: launchUiScale()` (lane D: + the app\'s stored default scale as `scaleChoice`; lane C2: + the chosen machine\'s `host` when it is not this one; desktop lane E: + the `share` the dialog\'s row / the app\'s memory proposes)');
   // round 3 A3: the UI scale half — utils' uiScale() (the body zoom; 1 on a phone) clamped to the route's 0.6..2
   ok(L.launchUiScale(1.25) === 1.25 && L.launchUiScale(1) === 1 && L.launchUiScale(0.5) === 0.6 && L.launchUiScale(3) === 2 && L.launchUiScale('x') === 1 && L.launchUiScale(1.333) === 1.33, 'launchUiScale: the page\'s UI scale, clamped to 0.6..2, two decimals');
 }
@@ -1447,8 +1447,8 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
     return { c, w, order, after, types: after.map((p) => p[0]), map: w.sent('map-window')[0], disp: w.sent('display-configure').map((p) => p[1]['desktop-size']) };
   };
   const A = await runF3(C);
-  ok(same(A.order.slice(0, 2), [['main', true], ['constraints']]) && A.order.findIndex((e) => e[0] === 'window') > 1, `on.main is heard FIRST, with the window still being announced (premap), then the constraints, then 'new' (${JSON.stringify(A.order.slice(0, 4))})`, A.order);
-  ok(same(A.map.slice(2, 6), [0, 0, 900, 664]) && same(A.disp.slice(-1)[0], [900, 665]) && A.types.indexOf('display-configure') < A.types.indexOf('map-window'), `the map uses the pane the callback left (900x665 — the fold's pane, snapped to the 2-px cell): map ${A.map.slice(2, 6)}, display ${A.disp.slice(-1)[0]} BEFORE it`, A.types);
+  ok(gateOf(same(A.order.slice(0, 2), [['main', true], ['constraints']])) && A.order.findIndex((e) => e[0] === 'window') > 1, `on.main is heard FIRST, with the window still being announced (premap), then the constraints, then 'new' (${JSON.stringify(A.order.slice(0, 4))})`, A.order);
+  ok(gateOf(same(A.map.slice(2, 6), [0, 0, 900, 664])) && gateOf(same(A.disp.slice(-1)[0], [900, 665])) && A.types.indexOf('display-configure') < A.types.indexOf('map-window'), `the map uses the pane the callback left (900x665 — the fold's pane, snapped to the 2-px cell): map ${A.map.slice(2, 6)}, display ${A.disp.slice(-1)[0]} BEFORE it`, A.types);
   ok(!A.types.includes('configure-window') && A.c.windows.get(5).premap === false, `no re-fit follows the map (${A.types.join(' → ')}) — refit / belt skip a window being announced; the flag is gone once it is mapped`);
   // CONTROL: the pre-lane-D order (fitted first, named after 'new') maps at the pane of BEFORE the fold and re-fits
   const srcC = read('src/lib/xpra-client.js');
@@ -1456,7 +1456,7 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
   ok(srcC.split(f1).length === 2 && srcC.split(f2).length === 2, 'the F3 order is spelled once (the control patches exactly it)');
   const f3Mut = MUTXC.write('src/lib/xpra-client.js', editAnchor(editAnchor(srcC, f1, "    if (isMain) { mainWid = wid; emit('title', win.title); }", "src/lib/xpra-client.js"), f2, "    emit('window', 'new', win);\n    if (isMain) { announceConstraints(); emit('main', win); } // pre-lane-D order\n    if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }", "src/lib/xpra-client.js"), 'f3');
   const B = await runF3(await import(fileUrl(f3Mut)));
-  ok(same(B.map.slice(2, 6), [0, 0, 924, 616]) && B.types.includes('configure-window') && B.types.indexOf('configure-window') < B.types.indexOf('map-window'), `CONTROL: the pre-lane-D order fits the pane of BEFORE the fold (600 tall: ${B.map.slice(2, 6)}, the minimum's scaled shape) and re-fits around its own map (${B.types.join(' → ')}) — the measured band`);
+  ok(gateOf(same(B.map.slice(2, 6), [0, 0, 924, 616])) && gateOf(B.types.includes('configure-window')) && B.types.indexOf('configure-window') < B.types.indexOf('map-window'), `CONTROL: the pre-lane-D order fits the pane of BEFORE the fold (600 tall: ${B.map.slice(2, 6)}, the minimum's scaled shape) and re-fits around its own map (${B.types.join(' → ')}) — the measured band`);
   A.c.close(); B.c.close();
 
   // ── (b) the picture scale: ratio = devicePixelRatio ÷ pictureScale, the pane COVERED (rounded up), no 1:1 grid nudge ──
@@ -1480,12 +1480,12 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
     mqs.length = 0;
     const F = await runPic(0.75);
     const cssW = parseFloat(F.el.style.width), cssH = parseFloat(F.el.style.height);
-    ok(Math.abs(F.view.ratio - 8 / 3) < 1e-9 && F.view.pictureScale === 0.75 && same(F.hello, [2395, 1816]) && same(F.map, [0, 0, 2394, 1816]), `pictureScale 0.75 on a 2× screen: the windows are laid out at ${F.view.ratio.toFixed(4)} X px per CSS px — the 898x681 pane is ${F.hello.join('x')} X px (ROUNDED UP: the picture covers it), the main mapped ${F.map.join('x')}`);
+    ok(Math.abs(F.view.ratio - 8 / 3) < 1e-9 && F.view.pictureScale === 0.75 && gateOf(same(F.hello, [2395, 1816])) && verdictOf(same(F.map, [0, 0, 2394, 1816])), `pictureScale 0.75 on a 2× screen: the windows are laid out at ${F.view.ratio.toFixed(4)} X px per CSS px — the 898x681 pane is ${F.hello.join('x')} X px (ROUNDED UP: the picture covers it), the main mapped ${F.map.join('x')}`);
     ok(cssW >= 897.75 && Math.abs(cssH - 681) < 1e-9 && F.view.stage.style.transform === '' && F.view.stageScale === 1, `the main's CSS box ${cssW.toFixed(2)}×${cssH.toFixed(2)} (a < 1 px snap cell short at most), identity stage — NO device-grid nudge for a resampled picture (the 1:1 rule's translate would bare a sliver)`, F.view.stage.style.transform);
-    ok(mqs.length >= 1 && mqs.every((q) => q === '(resolution: 2dppx)'), `the monitor-move watch asks for the SCREEN's ratio (${JSON.stringify(mqs)}) — (resolution: 2.667dppx) never matches, so it would never fire`);
+    ok(mqs.length >= 1 && verdictOf(mqs.every((q) => q === '(resolution: 2dppx)')), `the monitor-move watch asks for the SCREEN's ratio (${JSON.stringify(mqs)}) — (resolution: 2.667dppx) never matches, so it would never fire`);
     F.view.dispose();
     const U = await runPic(1);
-    ok(U.view.ratio === 2 && U.view.pictureScale === 1 && same(U.hello, [1796, 1362]) && same(U.map, [0, 0, 1796, 1362]), `pictureScale 1 is the 2.369.158 picture bit for bit: ratio 2, the pane ${U.hello.join('x')} (rounded DOWN), mapped ${U.map.join('x')}`);
+    ok(U.view.ratio === 2 && U.view.pictureScale === 1 && gateOf(same(U.hello, [1796, 1362])) && verdictOf(same(U.map, [0, 0, 1796, 1362])), `pictureScale 1 is the 2.369.158 picture bit for bit: ratio 2, the pane ${U.hello.join('x')} (rounded DOWN), mapped ${U.map.join('x')}`);
     U.view.dispose();
     const X = await runPic(5);
     ok(X.view.pictureScale === 1 && X.view.ratio === 2, 'a pictureScale outside (0.3, 1] is 1 (never trusted)');
@@ -1517,12 +1517,12 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
     // the snapshot canvas is filled from the window's canvas, and EVERY move reads the snapshot (never the canvas it writes)
     const snapEl = moves.length ? moves[0][0] : null;
     const snapDrawn = snapEl && snapEl.getContext ? snapEl.getContext('2d').drawn : [];
-    ok(snapEl && snapEl !== R.cv && moves.every((a) => a[0] === snapEl) && snapDrawn.length === 1 && snapDrawn[0][0] === R.cv, `each move of ONE packet reads the picture as it was BEFORE the packet — ${moves.length} moves, all from one snapshot filled from the window canvas (upstream do_paint; a move applied after another read rows it had already overwritten: ghost rows)`);
+    ok(gateOf(snapEl) && snapEl !== R.cv && gateOf(moves.every((a) => a[0] === snapEl)) && snapDrawn.length === 1 && snapDrawn[0][0] === R.cv, `each move of ONE packet reads the picture as it was BEFORE the packet — ${moves.length} moves, all from one snapshot filled from the window canvas (upstream do_paint; a move applied after another read rows it had already overwritten: ghost rows)`);
     // (d) has-alpha ⇒ cleared under the draw
     R.w.feed(['draw', 3, 10, 20, 30, 40, 'png', new Uint8Array([1]), 12, 0, {}]);
     await until(() => R.w.sent('damage-sequence').length >= 2);
     const ctx = R.cv.getContext('2d');
-    ok(same(ctx.cleared.slice(-1)[0], [10, 20, 30, 40]) && same(ctx.drawn.slice(-1)[0].slice(1), [10, 20, 30, 40]), 'a window with `has-alpha` (Chrome\'s own frame, rounded corners) is CLEARED under each image draw before the pixels land (never blended over stale ones)', ctx.cleared);
+    ok(gateOf(same(ctx.cleared.slice(-1)[0], [10, 20, 30, 40])) && verdictOf(same(ctx.drawn.slice(-1)[0].slice(1), [10, 20, 30, 40])), 'a window with `has-alpha` (Chrome\'s own frame, rounded corners) is CLEARED under each image draw before the pixels land (never blended over stale ones)', ctx.cleared);
     // (e) a SHRINK keeps the backing for BACKING_SHRINK_MS: the app snapping to its own size and the belt re-fitting it in the SAME task never clears the rows in between
     ok(R.cv.width === 800 && R.cv.height === 600, 'the backing starts at the window (800x600)');
     const winObj = R.view.client.windows.get(3);
@@ -1547,7 +1547,7 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
     RC.w.feed(['draw', 3, 0, 0, 800, 600, 'scroll', [[0, 100, 800, 200, 0, -40], [0, 300, 800, 200, 0, -40]], 11, 0, {}]);
     await until(() => RC.w.sent('damage-sequence').length);
     const cm = RC.cv.getContext('2d').drawn.filter((a) => a.length === 9);
-    ok(cm.length === 2 && cm.every((a) => a[0] === RC.cv), 'CONTROL: the pre-lane-D loop reads every move from the canvas it is writing (the second move reads rows the first overwrote — the ghost rows measured on chrome://settings)');
+    ok(cm.length === 2 && verdictOf(cm.every((a) => a[0] === RC.cv)), 'CONTROL: the pre-lane-D loop reads every move from the canvas it is writing (the second move reads rows the first overwrote — the ghost rows measured on chrome://settings)');
     RC.view.dispose();
   }
 
@@ -1568,10 +1568,10 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
       wk.feed(['new-window', 4, 0, 0, 900, 600, { title: 'Chrome', 'window-type': ['NORMAL'], decorations: 0 }]);
       view.pane.fire('pointerdown', { clientX: 550, clientY: 98, button: 0, pointerId: 9 });
       wk.feed(['initiate-moveresize', 4, 510, 23, 8, 0, 0]); // Chrome 153: the press was at pane 500,18 — it says 510,23
-      ok(got.length === 1 && same(got[0].press, { clientX: 550, clientY: 98, pointerId: 9 }), `a move started while OUR press is in flight starts at that press (${JSON.stringify(got[0] && got[0].press)}), never at the app's root point (${JSON.stringify(view.rootToClient(510, 23))}) — Chrome's is +10,+5 off (the window moved 110/59 for a 120/64 drag)`);
+      ok(got.length === 1 && verdictOf(same(got[0].press, { clientX: 550, clientY: 98, pointerId: 9 })), `a move started while OUR press is in flight starts at that press (${JSON.stringify(got[0] && got[0].press)}), never at the app's root point (${JSON.stringify(view.rootToClient(510, 23))}) — Chrome's is +10,+5 off (the window moved 110/59 for a 120/64 drag)`);
       for (const l of docL.filter((x) => x.k === 'pointerup')) l.fn({ preventDefault() {}, type: 'pointerup', clientX: 600, clientY: 120, button: 0, pointerId: 9 }); // a real event carries its type
       wk.feed(['initiate-moveresize', 4, 300, 40, 10, 0, 0]); // a keyboard move: no press in flight ⇒ the root point
-      ok(got.length === 2 && same(got[1].press, view.rootToClient(300, 40)), 'with no press in flight (a keyboard move) the app\'s own root point is used, as before');
+      ok(got.length === 2 && verdictOf(same(got[1].press, view.rootToClient(300, 40))), 'with no press in flight (a keyboard move) the app\'s own root point is used, as before');
       view.dispose();
     } finally { doc.addEventListener = prevAdd; }
   }
@@ -1582,7 +1582,7 @@ console.log('§8 lane app-fit-fixed (2026-10-03, the owner: WeChat\'s login in a
   // ── the PURE word: the hints as xpra 6.5.4 stated them at 2× on this machine (measured by the lane's reproducer) ──
   const WXC = { increment: [2, 2], gravity: 10, 'minimum-size': [560, 760], 'maximum-size': [560, 760] };
   const INKC = { 'base-size': [0, 0], increment: [2, 2], gravity: 1, 'minimum-size': [1420, 1356], 'maximum-size': [1420, 1356] };
-  ok(same(P.fixedSizeOf(WXC), { w: 560, h: 760 }) && same(P.fixedSizeOf(INKC), { w: 1420, h: 1356 }), 'fixedSizeOf: WeChat 4.1\'s login (560×760) and Inkscape 1.4.3\'s welcome (1420×1356) — minimum = maximum');
+  ok(gateOf(same(P.fixedSizeOf(WXC), { w: 560, h: 760 })) && verdictOf(same(P.fixedSizeOf(INKC), { w: 1420, h: 1356 })), 'fixedSizeOf: WeChat 4.1\'s login (560×760) and Inkscape 1.4.3\'s welcome (1420×1356) — minimum = maximum');
   ok(P.fixedSizeOf({ 'minimum-size': [720, 1232] }) === null && P.fixedSizeOf({ 'minimum-size': [400, 300], 'maximum-size': [800, 300] }) === null && P.fixedSizeOf(null) === null && P.fixedSizeOf({ 'minimum-size': [0, 0], 'maximum-size': [0, 0] }) === null, 'a minimum alone (the calculator), a range, no hints, an unusable pair ⇒ null (resizable: today\'s fit)');
   const WX = { title: 'Weixin', 'size-constraints': WXC, decorations: 0, 'window-type': ['_KDEOVERRIDE', 'NORMAL'] };
   const INK = { title: 'Inkscape 1.4.3', 'size-constraints': INKC, decorations: 0, 'window-type': ['DIALOG'], modal: true };
@@ -1599,31 +1599,31 @@ console.log('§8 lane app-fit-fixed (2026-10-03, the owner: WeChat\'s login in a
   { // WeChat: a fixed MAIN — fitted to its own size at 0,0, named; the login replaced by a resizable main ⇒ null
     const A = await runFixed(C);
     A.w.feed(['new-window', 7, 1768, 772, 560, 760, WX]);
-    ok(same(A.w.sent('map-window')[0].slice(1, 6), [7, 0, 0, 560, 760]) && same(A.fixed, [{ wid: 7, w: 560, h: 760 }]) && same(A.c.fixed, { wid: 7, w: 560, h: 760 }), `WeChat's login (a NORMAL main, min = max 560×760) is mapped at 0,0 at its own size and on.fixed names it once (${JSON.stringify(A.fixed)})`);
+    ok(gateOf(same(A.w.sent('map-window')[0].slice(1, 6), [7, 0, 0, 560, 760])) && gateOf(same(A.fixed, [{ wid: 7, w: 560, h: 760 }])) && verdictOf(same(A.c.fixed, { wid: 7, w: 560, h: 760 })), `WeChat's login (a NORMAL main, min = max 560×760) is mapped at 0,0 at its own size and on.fixed names it once (${JSON.stringify(A.fixed)})`);
     A.w.feed(['window-metadata', 7, { title: 'Weixin ' }]);
     ok(A.fixed.length === 1, 'a metadata change that is not the constraints announces nothing');
     A.w.feed(['new-window', 9, 0, 0, 1000, 700, { title: 'Weixin', 'size-constraints': { 'minimum-size': [800, 600] }, 'window-type': ['NORMAL'] }]);
     A.w.feed(['lost-window', 7]);
-    ok(same(A.fixed, [{ wid: 7, w: 560, h: 760 }, null]) && A.c.mainWid === 9 && A.c.fixed === null, `the login replaced by the resizable main window ⇒ on.fixed(null) — the window becomes resizable again (${JSON.stringify(A.fixed)})`);
+    ok(gateOf(same(A.fixed, [{ wid: 7, w: 560, h: 760 }, null])) && A.c.mainWid === 9 && A.c.fixed === null, `the login replaced by the resizable main window ⇒ on.fixed(null) — the window becomes resizable again (${JSON.stringify(A.fixed)})`);
     A.c.close();
   }
   { // Inkscape: a LONE fixed DIALOG (no main) — at 0,0 (X centred it at 188,0), named, contained by the display, kept there
     const B = await runFixed(C);
     B.w.feed(['new-window', 9, 188, 0, 1420, 1356, INK]);
     const disp = B.w.sent('display-configure').slice(-1)[0];
-    ok(same(B.w.sent('map-window')[0].slice(1, 6), [9, 0, 0, 1420, 1356]) && same(B.fixed, [{ wid: 9, w: 1420, h: 1356 }]) && B.c.mainWid === 0, `Inkscape's welcome (DIALOG + modal, no transient-for, the app's only window) is mapped at 0,0 — never where X centred it — and named (${JSON.stringify(B.fixed)})`);
+    ok(gateOf(same(B.w.sent('map-window')[0].slice(1, 6), [9, 0, 0, 1420, 1356])) && gateOf(same(B.fixed, [{ wid: 9, w: 1420, h: 1356 }])) && B.c.mainWid === 0, `Inkscape's welcome (DIALOG + modal, no transient-for, the app's only window) is mapped at 0,0 — never where X centred it — and named (${JSON.stringify(B.fixed)})`);
     ok(!!disp && disp[1]['desktop-size'][0] >= 1420 && disp[1]['desktop-size'][1] >= 1356, `the display CONTAINS it before the map (${disp && disp[1]['desktop-size']}) — never a 1110 px display under a 1356 px dialog (the pointer would clamp at its last row)`);
     B.w.feed(['window-move-resize', 9, 188, 0, 1420, 1356]);
-    ok(same(B.w.sent('configure-window').slice(-1)[0].slice(1, 6), [9, 0, 0, 1420, 1356]), 'X moving it back to its centre ⇒ the belt returns it to 0,0');
+    ok(verdictOf(same(B.w.sent('configure-window').slice(-1)[0].slice(1, 6), [9, 0, 0, 1420, 1356])), 'X moving it back to its centre ⇒ the belt returns it to 0,0');
     B.w.feed(['lost-window', 9]);
-    ok(same(B.fixed.slice(-1), [null]) && B.c.fixed === null, 'the welcome closed ⇒ on.fixed(null)');
+    ok(gateOf(same(B.fixed.slice(-1), [null])) && B.c.fixed === null, 'the welcome closed ⇒ on.fixed(null)');
     B.c.close();
   }
   { // a fixed dialog OF a resizable main is never the picture (today's dialog rule)
     const D = await runFixed(C);
     D.w.feed(['new-window', 1, 0, 0, 800, 600, { title: 'Inkscape', 'size-constraints': { 'minimum-size': [600, 400] }, 'window-type': ['NORMAL'] }]);
     D.w.feed(['new-window', 2, 1700, 300, 400, 300, { title: 'About', 'transient-for': 1, 'window-type': ['DIALOG'], 'size-constraints': { 'minimum-size': [400, 300], 'maximum-size': [400, 300] } }]);
-    ok(D.fixed.every((f) => f === null) && D.c.fixed === null && same(D.w.sent('map-window')[1].slice(1, 6), [2, 1400, 300, 400, 300]), `a resizable main + a fixed dialog OF it: nothing is fixed, the dialog is nudged inside as before (${JSON.stringify(D.w.sent('map-window')[1].slice(1, 6))})`);
+    ok(gateOf(D.fixed.every((f) => f === null)) && D.c.fixed === null && verdictOf(same(D.w.sent('map-window')[1].slice(1, 6), [2, 1400, 300, 400, 300])), `a resizable main + a fixed dialog OF it: nothing is fixed, the dialog is nudged inside as before (${JSON.stringify(D.w.sent('map-window')[1].slice(1, 6))})`);
     D.c.close();
   }
   // CONTROL: the lone-dialog levers pulled back (only a main can be the picture; a dialog is placed where X put it)
@@ -1635,7 +1635,7 @@ console.log('§8 lane app-fit-fixed (2026-10-03, the owner: WeChat\'s login in a
   {
     const M = await runFixed(await import(cm));
     M.w.feed(['new-window', 9, 188, 0, 1420, 1356, INK]);
-    ok(same(M.w.sent('map-window')[0].slice(1, 6), [9, 188, 0, 1420, 1356]) && !M.fixed.some(Boolean), `CONTROL: pre-fix the welcome is mapped where X centred it (${M.w.sent('map-window')[0].slice(2, 4)}) and nothing names its size — the owner's bands either side and a 1356 px dialog cut by a 1110 px pane`);
+    ok(gateOf(same(M.w.sent('map-window')[0].slice(1, 6), [9, 188, 0, 1420, 1356])) && !M.fixed.some(Boolean), `CONTROL: pre-fix the welcome is mapped where X centred it (${M.w.sent('map-window')[0].slice(2, 4)}) and nothing names its size — the owner's bands either side and a 1356 px dialog cut by a 1110 px pane`);
     M.c.close();
   }
 
@@ -1654,7 +1654,7 @@ console.log('§8 lane app-fit-fixed (2026-10-03, the owner: WeChat\'s login in a
   };
   {
     const A = await runFixedView(V, true);
-    ok(same(A.got, [{ w: 1000, h: 900 }]) && same(A.view.fixedSize(), { w: 1000, h: 900 }) && A.view.stageScale === 1 && A.view.fitBadge.style.display === 'none' && A.view.stage.style.transform === '', `a fixed 2000×1800 window at ratio 2 ⇒ onFixedSize 1000×900 CSS, and in a 700×450 pane (before the window adopts it) the picture is NOT scaled — no badge (stage ${A.view.stageScale})`);
+    ok(gateOf(same(A.got, [{ w: 1000, h: 900 }])) && gateOf(same(A.view.fixedSize(), { w: 1000, h: 900 })) && A.view.stageScale === 1 && A.view.fitBadge.style.display === 'none' && A.view.stage.style.transform === '', `a fixed 2000×1800 window at ratio 2 ⇒ onFixedSize 1000×900 CSS, and in a 700×450 pane (before the window adopts it) the picture is NOT scaled — no badge (stage ${A.view.stageScale})`);
     A.view.dispose();
     const Ph = await runFixedView(V, false);
     ok(Ph.view.stageScale < 1 && Ph.view.fitBadge.style.display === '', `the phone layout (fixedFollows false: the window IS the screen) keeps today's scale-to-fit with the badge (stage ${Ph.view.stageScale.toFixed(3)})`);
@@ -1712,21 +1712,21 @@ console.log('§9 design 016 S1 (lane app-guest-window, 2026-10-03 — WeChat\'s 
   };
   {
     const A = await runGuest(C);
-    ok(same(A.ev.cons.map((h) => h && h['minimum-size']), [[840, 816], [880, 1120]]) && same(A.ev.cons[1]['maximum-size'], [1574, 974]), `S1a: on.constraints names Weixin's minimum, then — Moments mapped — the UNION 880×1120 (the main's other hints kept): ${JSON.stringify(A.ev.cons)}`);
-    ok(same(A.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 974]) && A.c.mainWid === 1, `S1b: Moments (X put it at 324,0) is mapped CENTRED over Weixin at 347,0, its own size; Weixin stays the main (${A.w.sent('map-window')[1].slice(2, 6)})`);
-    ok(same(A.ev.front, [[1, '微信'], [2, '朋友圈']]) && A.c.frontWid === 2, `S1c: on.front names Weixin, then Moments as it maps on top — the tooltip never (${JSON.stringify(A.ev.front)})`);
+    ok(gateOf(same(A.ev.cons.map((h) => h && h['minimum-size']), [[840, 816], [880, 1120]])) && verdictOf(same(A.ev.cons[1]['maximum-size'], [1574, 974])), `S1a: on.constraints names Weixin's minimum, then — Moments mapped — the UNION 880×1120 (the main's other hints kept): ${JSON.stringify(A.ev.cons)}`);
+    ok(gateOf(same(A.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 974])) && A.c.mainWid === 1, `S1b: Moments (X put it at 324,0) is mapped CENTRED over Weixin at 347,0, its own size; Weixin stays the main (${A.w.sent('map-window')[1].slice(2, 6)})`);
+    ok(gateOf(same(A.ev.front, [[1, '微信'], [2, '朋友圈']])) && A.c.frontWid === 2, `S1c: on.front names Weixin, then Moments as it maps on top — the tooltip never (${JSON.stringify(A.ev.front)})`);
     A.c.focusWindow(1); // a press into the main (pointerButton → focusWindow)
-    ok(same(A.ev.front.slice(-1), [[1, '微信']]) && A.c.frontWid === 1, 'the main raised (a press into it) ⇒ front = Weixin');
+    ok(gateOf(same(A.ev.front.slice(-1), [[1, '微信']])) && A.c.frontWid === 1, 'the main raised (a press into it) ⇒ front = Weixin');
     A.w.feed(['raise-window', 2]);
-    ok(same(A.ev.front.slice(-1), [[2, '朋友圈']]), 'X raising Moments ⇒ front = Moments again');
+    ok(verdictOf(same(A.ev.front.slice(-1), [[2, '朋友圈']])), 'X raising Moments ⇒ front = Moments again');
     A.w.feed(['window-metadata', 2, { title: '朋友圈 · 2' }]);
-    ok(same(A.ev.front.slice(-1), [[2, '朋友圈 · 2']]), 'the front window\'s title changing ⇒ named again');
+    ok(verdictOf(same(A.ev.front.slice(-1), [[2, '朋友圈 · 2']])), 'the front window\'s title changing ⇒ named again');
     const n = A.ev.front.length;
     A.w.feed(['window-metadata', 1, { title: '微信 ' }]);
     ok(A.ev.front.length === n, 'a title change on a window BEHIND the front announces nothing');
-    ok(A.c.closeFront() === true && same(A.w.sent('close-window'), [['close-window', 2]]), 'closeFront() ⇒ ONE close-window naming Moments (2) — never the main');
+    ok(A.c.closeFront() === true && verdictOf(same(A.w.sent('close-window'), [['close-window', 2]])), 'closeFront() ⇒ ONE close-window naming Moments (2) — never the main');
     A.w.feed(['lost-window', 2]);
-    ok(same(A.ev.front.slice(-1), [[1, '微信 ']]) && same(A.ev.cons.slice(-1)[0]['minimum-size'], [840, 816]), `Moments closed ⇒ front = Weixin and the minimum back to Weixin's 840×816 (${JSON.stringify(A.ev.cons.slice(-1))})`);
+    ok(gateOf(same(A.ev.front.slice(-1), [[1, '微信 ']])) && verdictOf(same(A.ev.cons.slice(-1)[0]['minimum-size'], [840, 816])), `Moments closed ⇒ front = Weixin and the minimum back to Weixin's 840×816 (${JSON.stringify(A.ev.cons.slice(-1))})`);
     A.c.watch = true;
     ok(A.c.closeFront() === false && A.w.sent('close-window').length === 1, 'x5 Watch: closeFront sends nothing');
     A.c.close();
@@ -1734,7 +1734,7 @@ console.log('§9 design 016 S1 (lane app-guest-window, 2026-10-03 — WeChat\'s 
   { // the main lost while Moments is left: Moments becomes the main (pickMain) — re-announced as the MAIN (the title drops the " · ")
     const B = await runGuest(C);
     B.w.feed(['lost-window', 1]);
-    ok(B.c.mainWid === 2 && same(B.ev.front.slice(-1), [[2, '朋友圈']]) && B.ev.front.length === 3, `the main lost ⇒ Moments is elected the main and on.front fires again for it (now the main) (${JSON.stringify(B.ev.front)})`);
+    ok(B.c.mainWid === 2 && gateOf(same(B.ev.front.slice(-1), [[2, '朋友圈']])) && B.ev.front.length === 3, `the main lost ⇒ Moments is elected the main and on.front fires again for it (now the main) (${JSON.stringify(B.ev.front)})`);
     B.c.close();
   }
 
@@ -1750,9 +1750,9 @@ console.log('§9 design 016 S1 (lane app-guest-window, 2026-10-03 — WeChat\'s 
     w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
     w.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
     w.feed(['new-window', 2, 324, 0, 880, 974, structuredClone(MOM)]);
-    ok(same(mins, [{ w: 420, h: 408 }, { w: 440, h: 560 }]), `the window's minimum (CSS px at ratio 2): Weixin's 420×408, then the union 440×560 — Moments is 1120 device px tall (${JSON.stringify(mins)})`);
-    ok(same(fronts.map((f) => f && [f.wid, f.title, f.main]), [[1, '微信', true], [2, '朋友圈', false]]), `onFront: Weixin (the main), then Moments (main: false — the window titles "微信 · 朋友圈") (${JSON.stringify(fronts)})`);
-    ok(view.closeFront() === true && same(w.sent('close-window'), [['close-window', 2]]), 'view.closeFront() ⇒ close-window to Moments');
+    ok(verdictOf(same(mins, [{ w: 420, h: 408 }, { w: 440, h: 560 }])), `the window's minimum (CSS px at ratio 2): Weixin's 420×408, then the union 440×560 — Moments is 1120 device px tall (${JSON.stringify(mins)})`);
+    ok(verdictOf(same(fronts.map((f) => f && [f.wid, f.title, f.main]), [[1, '微信', true], [2, '朋友圈', false]])), `onFront: Weixin (the main), then Moments (main: false — the window titles "微信 · 朋友圈") (${JSON.stringify(fronts)})`);
+    ok(view.closeFront() === true && verdictOf(same(w.sent('close-window'), [['close-window', 2]])), 'view.closeFront() ⇒ close-window to Moments');
     view.disconnect();
     ok(fronts.slice(-1)[0] === null, 'disconnect ⇒ onFront(null) — the title drops the second window');
     view.dispose();
@@ -1767,9 +1767,9 @@ console.log('§9 design 016 S1 (lane app-guest-window, 2026-10-03 — WeChat\'s 
   const gm = MUTXC.write('src/lib/xpra-client.js', editAnchor(editAnchor(editAnchor(gsrc, UNION, '    const c = own; // pre-fix CONTROL: the main alone', "src/lib/xpra-client.js"), GUEST, '    else if (false /* pre-fix CONTROL */) { const m = windows.get(mainWid);', "src/lib/xpra-client.js"), FRONT, '    const f = mainWid ? windows.get(mainWid) : null; // pre-fix CONTROL: the title is always the main\'s\n    const key = f ?', "src/lib/xpra-client.js"), 'guest');
   {
     const M = await runGuest(await import(gm));
-    ok(same(M.ev.cons.map((h) => h && h['minimum-size']), [[840, 816]]), `CONTROL: pre-fix Moments' minimum enters nowhere — the constraints stay Weixin's 840×816, a 974-px pane cuts the 1120-px Moments (the owner's report) (${JSON.stringify(M.ev.cons)})`);
-    ok(same(M.w.sent('map-window')[1].slice(1, 6), [2, 324, 0, 880, 974]), `CONTROL: pre-fix Moments stays where X put it (${M.w.sent('map-window')[1].slice(2, 4)}), not centred`);
-    ok(M.ev.front.length >= 1 && M.ev.front.every((f) => !f || f[0] === 1), `CONTROL: pre-fix the front is always the main — the title never names Moments (${JSON.stringify(M.ev.front)})`);
+    ok(verdictOf(same(M.ev.cons.map((h) => h && h['minimum-size']), [[840, 816]])), `CONTROL: pre-fix Moments' minimum enters nowhere — the constraints stay Weixin's 840×816, a 974-px pane cuts the 1120-px Moments (the owner's report) (${JSON.stringify(M.ev.cons)})`);
+    ok(verdictOf(same(M.w.sent('map-window')[1].slice(1, 6), [2, 324, 0, 880, 974])), `CONTROL: pre-fix Moments stays where X put it (${M.w.sent('map-window')[1].slice(2, 4)}), not centred`);
+    ok(M.ev.front.length >= 1 && verdictOf(M.ev.front.every((f) => !f || f[0] === 1)), `CONTROL: pre-fix the front is always the main — the title never names Moments (${JSON.stringify(M.ev.front)})`);
     M.c.close();
   }
 }
@@ -1829,46 +1829,46 @@ console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the 
   const cfg = (w, wid) => w.sent('configure-window').filter((p) => p[1] === wid).map((p) => p.slice(1, 6));
   {
     const A = await runSlots(C);
-    ok(same(A.ev.slot, [[2, [1606, 0, 880, 1120]]]) && same(A.c.slotOf(2), { x: 1606, y: 0, w: 880, h: 1120 }), `S2a: Moments gets a SLOT to the right of Weixin's display — 1606,0 880×1120 (${JSON.stringify(A.ev.slot)})`);
-    ok(same(A.w.sent('map-window')[1].slice(1, 6), [2, 1606, 0, 880, 1120]) && A.c.mainWid === 1, `S2a: Moments is MAPPED at its slot's origin, its own size — never over Weixin (${A.w.sent('map-window')[1].slice(2, 6)})`);
-    ok(same(A.c.display, { width: 2486, height: 1120 }), `S2a: the root holds both side by side — 2486×1120 (${JSON.stringify(A.c.display)})`);
-    ok(same(A.ev.cons, [[840, 816]]) && same(A.ev.front, [1]), `S2: Moments grows NOT the main window (its minimum stays Weixin's) and is never the main window's front (${JSON.stringify(A.ev)})`);
-    ok(A.c.ownerOf(A.c.windows.get(2)) === 2 && A.c.ownerOf(A.c.windows.get(1)) === 0 && same(A.c.constraintsOf(2)['minimum-size'], [880, 1120]), 'ownerOf: Moments is its own pane\'s; constraintsOf(2) carries Moments\' 880×1120');
-    ok(A.c.setSlotPane(2, { width: 900, height: 1200 }) === true && same(cfg(A.w, 2).slice(-1), [[2, 1606, 0, 900, 1200]]) && same(A.c.display, { width: 2506, height: 1200 }), `setSlotPane: the satellite's pane 900×1200 ⇒ Moments fitted to it IN its slot, the root grows (${JSON.stringify(cfg(A.w, 2))}, ${JSON.stringify(A.c.display)})`);
+    ok(gateOf(same(A.ev.slot, [[2, [1606, 0, 880, 1120]]])) && verdictOf(same(A.c.slotOf(2), { x: 1606, y: 0, w: 880, h: 1120 })), `S2a: Moments gets a SLOT to the right of Weixin's display — 1606,0 880×1120 (${JSON.stringify(A.ev.slot)})`);
+    ok(gateOf(same(A.w.sent('map-window')[1].slice(1, 6), [2, 1606, 0, 880, 1120])) && A.c.mainWid === 1, `S2a: Moments is MAPPED at its slot's origin, its own size — never over Weixin (${A.w.sent('map-window')[1].slice(2, 6)})`);
+    ok(verdictOf(same(A.c.display, { width: 2486, height: 1120 })), `S2a: the root holds both side by side — 2486×1120 (${JSON.stringify(A.c.display)})`);
+    ok(gateOf(same(A.ev.cons, [[840, 816]])) && verdictOf(same(A.ev.front, [1])), `S2: Moments grows NOT the main window (its minimum stays Weixin's) and is never the main window's front (${JSON.stringify(A.ev)})`);
+    ok(A.c.ownerOf(A.c.windows.get(2)) === 2 && A.c.ownerOf(A.c.windows.get(1)) === 0 && verdictOf(same(A.c.constraintsOf(2)['minimum-size'], [880, 1120])), 'ownerOf: Moments is its own pane\'s; constraintsOf(2) carries Moments\' 880×1120');
+    ok(A.c.setSlotPane(2, { width: 900, height: 1200 }) === true && gateOf(same(cfg(A.w, 2).slice(-1), [[2, 1606, 0, 900, 1200]])) && verdictOf(same(A.c.display, { width: 2506, height: 1200 })), `setSlotPane: the satellite's pane 900×1200 ⇒ Moments fitted to it IN its slot, the root grows (${JSON.stringify(cfg(A.w, 2))}, ${JSON.stringify(A.c.display)})`);
     A.w.feed(['window-move-resize', 2, 1606, 0, 900, 1200]);
     A.w.feed(['window-move-resize', 2, 300, 40, 900, 1200]); // the app (or X) moved it
-    ok(same(cfg(A.w, 2).slice(-1), [[2, 1606, 0, 900, 1200]]), 'the belt keeps it in its slot: an app move to 300,40 ⇒ ONE corrective configure back to 1606,0');
+    ok(verdictOf(same(cfg(A.w, 2).slice(-1), [[2, 1606, 0, 900, 1200]])), 'the belt keeps it in its slot: an app move to 300,40 ⇒ ONE corrective configure back to 1606,0');
     A.w.feed(['new-window', 4, 10, 10, 300, 200, { title: 'dlg', 'transient-for': 2 }]);
-    ok(same(A.w.sent('map-window').slice(-1)[0].slice(1, 6), [4, 1606, 10, 300, 200]) && A.c.ownerOf(A.c.windows.get(4)) === 2, 'a dialog transient for Moments is placed inside ITS slot and belongs to its pane');
+    ok(gateOf(same(A.w.sent('map-window').slice(-1)[0].slice(1, 6), [4, 1606, 10, 300, 200])) && A.c.ownerOf(A.c.windows.get(4)) === 2, 'a dialog transient for Moments is placed inside ITS slot and belongs to its pane');
     A.w.feed(['new-override-redirect', 8, 1700, 60, 120, 80, { 'override-redirect': true }]);
     A.w.feed(['new-override-redirect', 9, 100, 60, 120, 80, { 'override-redirect': true }]);
     ok(A.c.ownerOf(A.c.windows.get(8)) === 2 && A.c.ownerOf(A.c.windows.get(9)) === 0, 'a popup opened in Moments (origin in its slot) is drawn in its pane; one over Weixin in the main pane');
     A.w.feed(['lost-window', 4]); A.w.feed(['lost-window', 8]); A.w.feed(['lost-window', 9]);
     A.c.focusWindow(1);
     const f0 = A.w.sent('focus').length;
-    ok(A.c.focusPane(2) === true && same(A.w.sent('focus').slice(-1)[0].slice(1, 2), [2]) && A.c.focusPane(2) === false && A.w.sent('focus').length === f0 + 1, 'focusPane(2): keys typed into the satellite move the X focus to Moments ONCE (a second ask sends nothing)');
+    ok(A.c.focusPane(2) === true && gateOf(same(A.w.sent('focus').slice(-1)[0].slice(1, 2), [2])) && A.c.focusPane(2) === false && A.w.sent('focus').length === f0 + 1, 'focusPane(2): keys typed into the satellite move the X focus to Moments ONCE (a second ask sends nothing)');
     A.w.feed(['new-window', 5, 0, 0, 400, 300, { title: 'third', 'window-type': ['NORMAL'] }]);
-    ok(same(A.c.slotOf(5), { x: 2538, y: 0, w: 400, h: 300 }), `a third top-level gets the next slot (${JSON.stringify(A.c.slotOf(5))})`);
+    ok(verdictOf(same(A.c.slotOf(5), { x: 2538, y: 0, w: 400, h: 300 })), `a third top-level gets the next slot (${JSON.stringify(A.c.slotOf(5))})`);
     A.w.feed(['lost-window', 2]);
-    ok(same(A.ev.slot.filter(([wid]) => wid === 2).slice(-1), [[2, null]]) && same(A.c.slotOf(5), { x: 1606, y: 0, w: 400, h: 300 }) && same(cfg(A.w, 5).slice(-1), [[5, 1606, 0, 400, 300]]) && same(A.c.display, { width: 2006, height: 974 }), `Moments lost ⇒ its slot goes (on.slot null), the third closes up to 1606 (configure-window), the root shrinks (${JSON.stringify(A.c.display)})`);
-    ok(A.c.closeWindow(5) === true && same(A.w.sent('close-window').slice(-1), [['close-window', 5]]), 'closeWindow(5) ⇒ close-window to THAT window (the satellite\'s ✕)');
+    ok(gateOf(same(A.ev.slot.filter(([wid]) => wid === 2).slice(-1), [[2, null]])) && gateOf(same(A.c.slotOf(5), { x: 1606, y: 0, w: 400, h: 300 })) && gateOf(same(cfg(A.w, 5).slice(-1), [[5, 1606, 0, 400, 300]])) && verdictOf(same(A.c.display, { width: 2006, height: 974 })), `Moments lost ⇒ its slot goes (on.slot null), the third closes up to 1606 (configure-window), the root shrinks (${JSON.stringify(A.c.display)})`);
+    ok(A.c.closeWindow(5) === true && verdictOf(same(A.w.sent('close-window').slice(-1), [['close-window', 5]])), 'closeWindow(5) ⇒ close-window to THAT window (the satellite\'s ✕)');
     A.w.feed(['lost-window', 1]);
-    ok(A.c.mainWid === 5 && A.c.slotOf(5) === null && same(cfg(A.w, 5).slice(-1), [[5, 0, 0, 1574, 974]]) && same(A.ev.slot.slice(-1), [[5, null]]), `ADOPT: the main lost ⇒ the third window is the main, its slot goes and it is FITTED to the main pane at 0,0 (no hints: 1574×974) (${JSON.stringify(cfg(A.w, 5).slice(-1))})`);
+    ok(A.c.mainWid === 5 && A.c.slotOf(5) === null && gateOf(same(cfg(A.w, 5).slice(-1), [[5, 0, 0, 1574, 974]])) && verdictOf(same(A.ev.slot.slice(-1), [[5, null]])), `ADOPT: the main lost ⇒ the third window is the main, its slot goes and it is FITTED to the main pane at 0,0 (no hints: 1574×974) (${JSON.stringify(cfg(A.w, 5).slice(-1))})`);
     A.c.close();
   }
   {
     const B = await runSlots(C);
-    ok(B.c.releaseSlot(2) === true && B.c.slotOf(2) === null && same(cfg(B.w, 2).slice(-1), [[2, 347, 0, 880, 1120]]) && same(B.ev.cons.slice(-1), [[880, 1120]]), `releaseSlot: a satellite closed while Moments lives ⇒ Moments is S1's guest again (centred over Weixin; the main's minimum the union) (${JSON.stringify(cfg(B.w, 2))})`);
+    ok(B.c.releaseSlot(2) === true && B.c.slotOf(2) === null && gateOf(same(cfg(B.w, 2).slice(-1), [[2, 347, 0, 880, 1120]])) && verdictOf(same(B.ev.cons.slice(-1), [[880, 1120]])), `releaseSlot: a satellite closed while Moments lives ⇒ Moments is S1's guest again (centred over Weixin; the main's minimum the union) (${JSON.stringify(cfg(B.w, 2))})`);
     B.w.feed(['window-move-resize', 2, 0, 0, 880, 1120]);
     ok(B.c.slotOf(2) === null, '…and stays a guest for this session (no slot on its next move)');
     B.c.close();
     const W = await runSlots(C, { watch: true });
     ok(W.ev.slot.length === 0 && W.c.slotOf(2) === null && W.w.sent('map-window').length === 2, 'x5 Watch: no slot for a window that maps meanwhile (the active viewer placed it)');
     W.c.watch = false;
-    ok(same(W.c.slotOf(2), { x: 1606, y: 0, w: 880, h: 1120 }) && same(cfg(W.w, 2).slice(-1), [[2, 1606, 0, 880, 1120]]), 'leaving Watch slots what mapped meanwhile and moves it there');
+    ok(gateOf(same(W.c.slotOf(2), { x: 1606, y: 0, w: 880, h: 1120 })) && verdictOf(same(cfg(W.w, 2).slice(-1), [[2, 1606, 0, 880, 1120]])), 'leaving Watch slots what mapped meanwhile and moves it there');
     W.c.close();
     const N = await runSlots(C, { slots: false });
-    ok(N.ev.slot.length === 0 && same(N.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 1120]), 'slots off (no satellite possible — the default) ⇒ S1 exactly: Moments centred over Weixin');
+    ok(N.ev.slot.length === 0 && verdictOf(same(N.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 1120])), 'slots off (no satellite possible — the default) ⇒ S1 exactly: Moments centred over Weixin');
     N.c.close();
   }
 
@@ -1885,15 +1885,15 @@ console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the 
     w.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
     w.feed(['new-window', 2, 324, 0, 880, 1120, structuredClone(MOM)]);
     await sleep(0);
-    ok(same(asked, [{ wid: 2, title: '朋友圈' }]), `onSatellite({wid: 2, title: '朋友圈'}) — the window is asked to open a satellite (${JSON.stringify(asked)})`);
+    ok(verdictOf(same(asked, [{ wid: 2, title: '朋友圈' }])), `onSatellite({wid: 2, title: '朋友圈'}) — the window is asked to open a satellite (${JSON.stringify(asked)})`);
     const host2 = new El('div'); const got = { title: [], min: [], fixed: [], gone: [], moves: [], meta: 0 };
     const sat = view.attachSatellite(host2, 2, { onTitle: (x) => got.title.push(x), onMinSize: (m) => got.min.push(m), onFixedSize: (f) => got.fixed.push(f), onMeta: () => got.meta++, onGone: (why) => got.gone.push(why), onMoveResize: (e) => got.moves.push(e) });
     sat.pane.clientWidth = 440; sat.pane.clientHeight = 560; sat.pane.rect = { left: 1000, top: 100 };
-    ok(sat.bound && sat.stage.children.some((el) => el.dataset.wid === '2') && !view.stage.children.some((el) => el.dataset.wid === '2') && view.stage.children.some((el) => el.dataset.wid === '1'), 'attachSatellite: the satellite\'s stage draws Moments; the main pane no longer does (Weixin stays)');
-    ok(same(got.title, ['朋友圈']) && same(got.min, [{ w: 440, h: 560 }]) && same(got.fixed, [null]) && got.meta > 0, `its title, its minimum (CSS px at ratio 2: 440×560) and its metadata reach ITS window (${JSON.stringify(got)})`);
+    ok(gateOf(sat.bound) && gateOf(sat.stage.children.some((el) => el.dataset.wid === '2')) && !view.stage.children.some((el) => el.dataset.wid === '2') && verdictOf(view.stage.children.some((el) => el.dataset.wid === '1')), 'attachSatellite: the satellite\'s stage draws Moments; the main pane no longer does (Weixin stays)');
+    ok(gateOf(same(got.title, ['朋友圈'])) && gateOf(same(got.min, [{ w: 440, h: 560 }])) && gateOf(same(got.fixed, [null])) && got.meta > 0, `its title, its minimum (CSS px at ratio 2: 440×560) and its metadata reach ITS window (${JSON.stringify(got)})`);
     ok(FakeWorker.instances.length === 1, 'ONE connection: the satellite opened no socket (one worker for the session)');
     sat.resnap();
-    ok(/translate\(-803px, 0px\)|translate\(-803px, -0px\)/.test(sat.stage.style.transform), `the viewport: the stage shifted by Moments' origin (1606 device px = 803 CSS px) — ${sat.stage.style.transform}`);
+    ok(verdictOf(/translate\(-803px, 0px\)|translate\(-803px, -0px\)/.test(sat.stage.style.transform)), `the viewport: the stage shifted by Moments' origin (1606 device px = 803 CSS px) — ${sat.stage.style.transform}`);
     const b0 = w.sent('button-action').length;
     sat.pane.fire('pointerdown', { clientX: 1010, clientY: 120, button: 0, pointerId: 7 });
     const press = w.sent('button-action').slice(b0)[0];
@@ -1903,34 +1903,34 @@ console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the 
     const k0 = w.all.length;
     sat.ime.fire('keydown', { key: 'a', code: 'KeyA', keyCode: 65 });
     const after = w.all.slice(k0);
-    ok(after[0] && after[0][0] === 'focus' && after[0][1] === 2 && after.some((p) => p[0] === 'key-action' && p[1] === 2), `a key in the satellite: the X focus moves to Moments FIRST, then the key goes to it (${JSON.stringify(after.map((p) => p.slice(0, 2)))})`);
+    ok(gateOf(after[0]) && after[0][0] === 'focus' && after[0][1] === 2 && verdictOf(after.some((p) => p[0] === 'key-action' && p[1] === 2)), `a key in the satellite: the X focus moves to Moments FIRST, then the key goes to it (${JSON.stringify(after.map((p) => p.slice(0, 2)))})`);
     const k1 = w.all.length;
     view.ime.fire('keydown', { key: 'b', code: 'KeyB', keyCode: 66 });
     const after2 = w.all.slice(k1);
-    ok(after2[0] && after2[0][0] === 'focus' && after2[0][1] === 1 && after2.some((p) => p[0] === 'key-action' && p[1] === 1), `a key in the main pane goes back to Weixin (${JSON.stringify(after2.map((p) => p.slice(0, 2)))})`);
+    ok(gateOf(after2[0]) && after2[0][0] === 'focus' && after2[0][1] === 1 && verdictOf(after2.some((p) => p[0] === 'key-action' && p[1] === 1)), `a key in the main pane goes back to Weixin (${JSON.stringify(after2.map((p) => p.slice(0, 2)))})`);
     sat.pane.fire('pointerdown', { clientX: 1010, clientY: 105, button: 0, pointerId: 8 });
     w.feed(['initiate-moveresize', 2, 1626, 10, 8, 1, 1]);
-    ok(got.moves.length === 1 && got.moves[0].wid === 2 && mainMoves.length === 0 && got.moves[0].press && got.moves[0].press.clientX === 1010, `Moments' own header-bar drag moves the SATELLITE (its callback, from its press), never the main window (${JSON.stringify(got.moves)})`);
+    ok(got.moves.length === 1 && got.moves[0].wid === 2 && mainMoves.length === 0 && gateOf(got.moves[0].press) && got.moves[0].press.clientX === 1010, `Moments' own header-bar drag moves the SATELLITE (its callback, from its press), never the main window (${JSON.stringify(got.moves)})`);
     document.dispatch?.('pointerup');
     view.setMode('watch');
-    ok(view.stage.children.some((el) => el.dataset.wid === '2') && !sat.stage.children.length && sat.note.style.display === '' && /main window while an agent drives/.test(sat.note.textContent), 'Watch: ONE picture — Moments drawn in the main pane again, the satellite says where it is');
+    ok(gateOf(view.stage.children.some((el) => el.dataset.wid === '2')) && !sat.stage.children.length && sat.note.style.display === '' && verdictOf(/main window while an agent drives/.test(sat.note.textContent)), 'Watch: ONE picture — Moments drawn in the main pane again, the satellite says where it is');
     view.setMode('active');
-    ok(sat.stage.children.some((el) => el.dataset.wid === '2') && sat.note.style.display === 'none', 'active again: Moments back in its satellite');
+    ok(gateOf(sat.stage.children.some((el) => el.dataset.wid === '2')) && sat.note.style.display === 'none', 'active again: Moments back in its satellite');
     w.feed(['lost-window', 2]);
-    ok(same(got.gone, ['lost']) && !view.satellites().length, `Moments closed by the app ⇒ the satellite hears 'lost' (its window closes) (${JSON.stringify(got.gone)})`);
+    ok(gateOf(same(got.gone, ['lost'])) && !view.satellites().length, `Moments closed by the app ⇒ the satellite hears 'lost' (its window closes) (${JSON.stringify(got.gone)})`);
     // a window that maps and is handed back: the person closed the satellite while the X window lives
     w.feed(['new-window', 3, 0, 0, 600, 400, { title: 'third', 'window-type': ['NORMAL'] }]);
     await sleep(0);
     const host3 = new El('div'); const sat3 = view.attachSatellite(host3, 3, {});
-    ok(sat3.bound && sat3.stage.children.some((el) => el.dataset.wid === '3'), 'a third top-level: its satellite draws it');
+    ok(gateOf(sat3.bound) && verdictOf(sat3.stage.children.some((el) => el.dataset.wid === '3')), 'a third top-level: its satellite draws it');
     sat3.dispose();
-    ok(view.stage.children.some((el) => el.dataset.wid === '3') && view.client.slotOf(3) === null, 'the person closes that satellite (the app keeps the window) ⇒ it is drawn in the main pane again (released), never nowhere');
+    ok(gateOf(view.stage.children.some((el) => el.dataset.wid === '3')) && view.client.slotOf(3) === null, 'the person closes that satellite (the app keeps the window) ⇒ it is drawn in the main pane again (released), never nowhere');
     // adopt: Moments-like window slotted, then the main lost
     w.feed(['new-window', 6, 0, 0, 500, 300, { title: 'six', 'window-type': ['NORMAL'] }]);
     await sleep(0);
     const g6 = []; view.attachSatellite(new El('div'), 6, { onGone: (why) => g6.push(why) });
     w.feed(['lost-window', 3]); w.feed(['lost-window', 1]);
-    ok(same(g6, ['adopted']) && view.client.mainWid === 6 && view.stage.children.some((el) => el.dataset.wid === '6'), `the main lost ⇒ the next main is ADOPTED by the main window: its satellite hears 'adopted' and the main pane draws it (${JSON.stringify(g6)})`);
+    ok(gateOf(same(g6, ['adopted'])) && view.client.mainWid === 6 && verdictOf(view.stage.children.some((el) => el.dataset.wid === '6')), `the main lost ⇒ the next main is ADOPTED by the main window: its satellite hears 'adopted' and the main pane draws it (${JSON.stringify(g6)})`);
     // missing: a replayed satellite for a wid the session does not have
     view.disconnect();
     const gm = []; view.attachSatellite(new El('div'), 77, { onGone: (why) => gm.push(why) });
@@ -1941,11 +1941,11 @@ console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the 
     w2.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
     ok(gm.length === 0, 'a replayed satellite waits while the window list arrives…');
     w2.feed(['startup-complete']);
-    ok(same(gm, ['missing']), `…and closes quietly once it is in without its wid (${JSON.stringify(gm)})`);
+    ok(verdictOf(same(gm, ['missing'])), `…and closes quietly once it is in without its wid (${JSON.stringify(gm)})`);
     const gd = []; w2.feed(['new-window', 2, 0, 0, 880, 1120, structuredClone(MOM)]); await sleep(0);
     view.attachSatellite(new El('div'), 2, { onGone: (why) => gd.push(why) });
     view.dispose();
-    ok(same(gd, ['main-closed']), 'the main window\'s view goes ⇒ its satellites go with it');
+    ok(verdictOf(same(gd, ['main-closed'])), 'the main window\'s view goes ⇒ its satellites go with it');
   }
 
   // ── CONTROLS: the pre-lane client (no slot ⇒ Moments over Weixin, no satellite) and a view that never hands a canvas over ──
@@ -1955,7 +1955,7 @@ console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the 
   const cm = MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, SLOT, '    // pre-lane CONTROL: no slot', "src/lib/xpra-client.js"), 'noslot');
   {
     const M = await runSlots(await import(cm));
-    ok(M.ev.slot.length === 0 && same(M.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 1120]) && same(M.ev.cons.slice(-1), [[880, 1120]]), `CONTROL: pre-lane Moments is S1's guest — centred OVER Weixin in the one pane, growing it (${JSON.stringify(M.w.sent('map-window')[1].slice(2, 6))})`);
+    ok(M.ev.slot.length === 0 && gateOf(same(M.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 1120])) && verdictOf(same(M.ev.cons.slice(-1), [[880, 1120]])), `CONTROL: pre-lane Moments is S1's guest — centred OVER Weixin in the one pane, growing it (${JSON.stringify(M.w.sent('map-window')[1].slice(2, 6))})`);
     M.c.close();
   }
   const vsrc = read('src/lib/xpra-view.js');
@@ -1974,7 +1974,7 @@ console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the 
     w.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
     w.feed(['new-window', 2, 324, 0, 880, 1120, structuredClone(MOM)]);
     const sat = view.attachSatellite(new El('div'), 2, {});
-    ok(!sat.stage.children.length && view.stage.children.some((el) => el.dataset.wid === '2'), 'CONTROL: a view that never re-homes leaves the satellite EMPTY and Moments in the main pane (outside its visible area)');
+    ok(!sat.stage.children.length && verdictOf(view.stage.children.some((el) => el.dataset.wid === '2')), 'CONTROL: a view that never re-homes leaves the satellite EMPTY and Moments in the main pane (outside its visible area)');
     view.dispose();
   }
 }
@@ -1984,22 +1984,22 @@ console.log('§4 the census (grep over src/lib + style.css)');
   const lib = path.join(repo, 'src/lib');
   const files = fs.readdirSync(lib).filter((f) => f.endsWith('.js'));
   const where = (re) => files.filter((f) => re.test(read(`src/lib/${f}`)));
-  ok(same(where(/new WorkerCtor\(|new Worker\(/), ['xpra-client.js']), 'ONE worker construction site under src/lib: xpra-client.js', where(/new WorkerCtor\(|new Worker\(/));
-  ok(same(where(/className = 'desktop-bar'/), ['picture-shell.js']), 'the .desktop-bar is built in ONE file (picture-shell.js) — vnc-view and xpra-view stand on it', where(/className = 'desktop-bar'/));
+  ok(verdictOf(same(where(/new WorkerCtor\(|new Worker\(/), ['xpra-client.js'])), 'ONE worker construction site under src/lib: xpra-client.js', where(/new WorkerCtor\(|new Worker\(/));
+  ok(verdictOf(same(where(/className = 'desktop-bar'/), ['picture-shell.js'])), 'the .desktop-bar is built in ONE file (picture-shell.js) — vnc-view and xpra-view stand on it', where(/className = 'desktop-bar'/));
   const code = (f) => read(`src/lib/${f}`).replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   const whereCode = (re) => files.filter((f) => re.test(code(f)));
-  ok(same(whereCode(/xpra-ui\/js\/Protocol\.js/), ['xpra-view.js']), 'the upstream worker asset is spelled ONCE in code (xpra-view.js workerUrlFor — the desktop app window and the agent browser\'s X picture ask it)', whereCode(/xpra-ui\/js\/Protocol\.js/));
+  ok(verdictOf(same(whereCode(/xpra-ui\/js\/Protocol\.js/), ['xpra-view.js'])), 'the upstream worker asset is spelled ONCE in code (xpra-view.js workerUrlFor — the desktop app window and the agent browser\'s X picture ask it)', whereCode(/xpra-ui\/js\/Protocol\.js/));
   // lane browser-x-in-window (B2): THE VIEW IS REUSED — no second client: the live view's X picture is createXpraView over the
   // desktop app window's worker asset (workerUrlFor) with its `admit` (one window of a shared display); no Worker, no protocol of its own
-  { const lv = code('browser-live-window.js'); ok(/import \{[^}]*\bcreateXpraView\b[^}]*\bworkerUrlFor\b[^}]*\} from '\.\/xpra-view\.js'/.test(lv) && /createXpraView\(xHost, \{/.test(lv) && /workerUrl: workerUrlFor\(ds\)/.test(lv) && /admit: admitX/.test(lv) && !/new (?:Worker|WebSocket)\(/.test(lv.replace(/new WebSocket\(`\$\{proto\}:\/\/\$\{location\.host\}\$\{STREAM_PATH\}\?\$\{q\}`\)/, '')), 'lane browser-x-in-window: the agent browser\'s live view draws its X picture with THIS view (createXpraView + workerUrlFor + admit) — no second xpra client, no worker of its own'); }
-  { const dw = code('desktop-app-window.js'); ok(/workerUrl: workerUrlFor\(id\)/.test(dw), 'the desktop app window asks the same workerUrlFor'); }
-  ok(/\.xpra-pane \{[^}]*background: var\(--/.test(read('public/style.css')) && !/#000/.test(read('src/lib/xpra-view.js')) && !/#000/.test(read('src/lib/xpra-client.js')), 'the pane is a THEME colour and no xpra file spells #000 (no root, no black — owner acceptance 1)');
-  ok(/isSecureContext/.test(read('src/lib/xpra-view.js')) && /execCommand\('copy'\)/.test(read('src/lib/picture-shell.js')) && /addEventListener\('paste'/.test(read('src/lib/xpra-view.js')), 'the view consults isSecureContext and listens to the paste event; the shell copies through execCommand on plain http');
-  ok(same(whereCode(/desktop-copied-chip/), ['picture-shell.js']) && same(whereCode(/vnc-paste-box/), ['picture-shell.js']) && same(whereCode(/execCommand\('copy'\)/).filter((f) => /^(picture|vnc|xpra|desktop)/.test(f)), ['picture-shell.js']), 'the copy chip, the paste box and the picture views\' execCommand copy are built in ONE file (picture-shell.js) — both views stand on them, never a twin (utils.copyText / terminal.js keep their own, result-less fallbacks)', { chip: whereCode(/desktop-copied-chip/), box: whereCode(/vnc-paste-box/), exec: whereCode(/execCommand\('copy'\)/) });
-  ok(/shell\.deliverCopy\(text, \{ secure: pageIsSecure\(\), clipboard: navigator\.clipboard, toast: false \}\)/.test(read('src/lib/vnc-view.js')) && /shell\.deliverCopy\(text, \{ secure: isSecure\(\), clipboard: clip\(\), gestureAge \}\)/.test(read('src/lib/xpra-view.js')) && /else if \(r === 'copy' && e\.isTrusted === true && !e\.repeat\) copyGestureAt = clock\(\);/.test(read('src/lib/xpra-view.js')) && /shell\.pasteFromClipboard\(/.test(read('src/lib/vnc-view.js')) && /shell\.pasteFromClipboard\(/.test(read('src/lib/xpra-view.js')), 'WIRING PIN: both views deliver app copies and run Paste through the shell (the RFB rung too — the fleet image\'s rung); the xpra view hands the shell the age of its trusted copy-chord stamp (A1)');
-  ok(/import \{ createPictureShell, RECONNECT_LADDER, streamUrl[^}]*\} from '\.\/picture-shell\.js'/.test(read('src/lib/vnc-view.js')) && /import \{ createPictureShell, streamUrl[^}]*\} from '\.\/picture-shell\.js'/.test(read('src/lib/xpra-view.js')), 'both views import the shell');
-  ok(/view = viewOf\(kind\)\(winInfo\.content/.test(read('src/lib/desktop-app-window.js')) && /const streamKindOf = \(r\) => \(r && r\.stream\) \|\| STATUS_KIND;/.test(read('src/lib/desktop-app-window.js')) && /\{ kind: xpra\.STREAM_KIND, create: xpra\.createXpraView \}/.test(read('src/lib/stream-views.js')) && /export const STREAM_KIND = 'xpra';/.test(read('src/lib/xpra-view.js')) && /export const STREAM_KIND = 'rfb';/.test(read('src/lib/vnc-view.js')) && !/iframe/.test(read('src/lib/desktop-app-window.js').replace(/\/\/.*$/gm, '')), 'the desktop-app window picks the view by the record\'s stream KIND and hosts no iframe any more');
-  ok(/img\.src = dataUrl/.test(read('src/lib/desktop-app-window.js')) && /app\.wm\.setTitle\(winInfo\.id, /.test(read('src/lib/desktop-app-window.js')), 'the icon reaches the title bar through .src and the title through setTitle (textContent)');
+  { const lv = code('browser-live-window.js'); ok(gateOf(/import \{[^}]*\bcreateXpraView\b[^}]*\bworkerUrlFor\b[^}]*\} from '\.\/xpra-view\.js'/.test(lv)) && gateOf(/createXpraView\(xHost, \{/.test(lv)) && gateOf(/workerUrl: workerUrlFor\(ds\)/.test(lv)) && gateOf(/admit: admitX/.test(lv)) && !/new (?:Worker|WebSocket)\(/.test(lv.replace(/new WebSocket\(`\$\{proto\}:\/\/\$\{location\.host\}\$\{STREAM_PATH\}\?\$\{q\}`\)/, '')), 'lane browser-x-in-window: the agent browser\'s live view draws its X picture with THIS view (createXpraView + workerUrlFor + admit) — no second xpra client, no worker of its own'); }
+  { const dw = code('desktop-app-window.js'); ok(verdictOf(/workerUrl: workerUrlFor\(id\)/.test(dw)), 'the desktop app window asks the same workerUrlFor'); }
+  ok(gateOf(/\.xpra-pane \{[^}]*background: var\(--/.test(read('public/style.css'))) && !/#000/.test(read('src/lib/xpra-view.js')) && !/#000/.test(read('src/lib/xpra-client.js')), 'the pane is a THEME colour and no xpra file spells #000 (no root, no black — owner acceptance 1)');
+  ok(gateOf(/isSecureContext/.test(read('src/lib/xpra-view.js'))) && gateOf(/execCommand\('copy'\)/.test(read('src/lib/picture-shell.js'))) && verdictOf(/addEventListener\('paste'/.test(read('src/lib/xpra-view.js'))), 'the view consults isSecureContext and listens to the paste event; the shell copies through execCommand on plain http');
+  ok(gateOf(same(whereCode(/desktop-copied-chip/), ['picture-shell.js'])) && gateOf(same(whereCode(/vnc-paste-box/), ['picture-shell.js'])) && verdictOf(same(whereCode(/execCommand\('copy'\)/).filter((f) => /^(picture|vnc|xpra|desktop)/.test(f)), ['picture-shell.js'])), 'the copy chip, the paste box and the picture views\' execCommand copy are built in ONE file (picture-shell.js) — both views stand on them, never a twin (utils.copyText / terminal.js keep their own, result-less fallbacks)', { chip: whereCode(/desktop-copied-chip/), box: whereCode(/vnc-paste-box/), exec: whereCode(/execCommand\('copy'\)/) });
+  ok(gateOf(/shell\.deliverCopy\(text, \{ secure: pageIsSecure\(\), clipboard: navigator\.clipboard, toast: false \}\)/.test(read('src/lib/vnc-view.js'))) && gateOf(/shell\.deliverCopy\(text, \{ secure: isSecure\(\), clipboard: clip\(\), gestureAge \}\)/.test(read('src/lib/xpra-view.js'))) && gateOf(/else if \(r === 'copy' && e\.isTrusted === true && !e\.repeat\) copyGestureAt = clock\(\);/.test(read('src/lib/xpra-view.js'))) && gateOf(/shell\.pasteFromClipboard\(/.test(read('src/lib/vnc-view.js'))) && verdictOf(/shell\.pasteFromClipboard\(/.test(read('src/lib/xpra-view.js'))), 'WIRING PIN: both views deliver app copies and run Paste through the shell (the RFB rung too — the fleet image\'s rung); the xpra view hands the shell the age of its trusted copy-chord stamp (A1)');
+  ok(gateOf(/import \{ createPictureShell, RECONNECT_LADDER, streamUrl[^}]*\} from '\.\/picture-shell\.js'/.test(read('src/lib/vnc-view.js'))) && verdictOf(/import \{ createPictureShell, streamUrl[^}]*\} from '\.\/picture-shell\.js'/.test(read('src/lib/xpra-view.js'))), 'both views import the shell');
+  ok(gateOf(/view = viewOf\(kind\)\(winInfo\.content/.test(read('src/lib/desktop-app-window.js'))) && gateOf(/const streamKindOf = \(r\) => \(r && r\.stream\) \|\| STATUS_KIND;/.test(read('src/lib/desktop-app-window.js'))) && gateOf(/\{ kind: xpra\.STREAM_KIND, create: xpra\.createXpraView \}/.test(read('src/lib/stream-views.js'))) && gateOf(/export const STREAM_KIND = 'xpra';/.test(read('src/lib/xpra-view.js'))) && gateOf(/export const STREAM_KIND = 'rfb';/.test(read('src/lib/vnc-view.js'))) && !/iframe/.test(read('src/lib/desktop-app-window.js').replace(/\/\/.*$/gm, '')), 'the desktop-app window picks the view by the record\'s stream KIND and hosts no iframe any more');
+  ok(gateOf(/img\.src = dataUrl/.test(read('src/lib/desktop-app-window.js'))) && verdictOf(/app\.wm\.setTitle\(winInfo\.id, /.test(read('src/lib/desktop-app-window.js'))), 'the icon reaches the title bar through .src and the title through setTitle (textContent)');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const keys = [...(read('src/lib/xpra-view.js') + read('src/lib/picture-shell.js')).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
   const missing = keys.filter((k) => !(k in zh) || !(k in ja));
@@ -2040,7 +2040,7 @@ console.log('§late — a worker message delivered after close() is ignored (the
   const pre = editAnchor(editAnchor(src, guard, '', "src/lib/xpra-client.js"), post, "      if (m.c === 'r') { worker.postMessage({ c: 'o', u: url }); return; }", "src/lib/xpra-client.js");
   const Cpre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', pre, 'late-prefix')).href);
   const control = await run(Cpre);
-  ok(!!control.threw && /postMessage/.test(String(control.threw && control.threw.message)), `NEGATIVE CONTROL: the pre-fix handler throws on the late message (${control.threw ? control.threw.message : 'no throw'})`);
+  ok(!!control.threw && verdictOf(/postMessage/.test(String(control.threw && control.threw.message))), `NEGATIVE CONTROL: the pre-fix handler throws on the late message (${control.threw ? control.threw.message : 'no throw'})`);
 }
 
 // lane e2b (design-agent-browser-v2 §E2.2): a PINNED window — the X side (hello, display, fit) speaks the pin, never the pane
@@ -2050,19 +2050,19 @@ console.log('§late — a worker message delivered after close() is ignored (the
   client.connect();
   const wk = await until(() => FakeWorker.instances[0]);
   const hello = await until(() => wk.sent('hello')[0]);
-  ok(same(hello[1].display.desktop_size, [1600, 900]), 'e2b: pinned 1600×900 in a 700×500 pane — the hello asks the PIN as the desktop size');
+  ok(verdictOf(same(hello[1].display.desktop_size, [1600, 900])), 'e2b: pinned 1600×900 in a 700×500 pane — the hello asks the PIN as the desktop size');
   wk.feed(['hello', { version: '6.5.3', 'packet-types': ['display-configure'] }]);
   wk.feed(['new-window', 1, 0, 0, 640, 400, { title: 'xterm', 'window-type': ['NORMAL'] }]);
-  ok(same(wk.sent('map-window')[0].slice(1, 6), [1, 0, 0, 1600, 900]) && same(client.pin, { w: 1600, h: 900 }), 'e2b: the main window is fitted to the PIN (1600×900 at 0,0), not to the 700×500 pane');
+  ok(gateOf(same(wk.sent('map-window')[0].slice(1, 6), [1, 0, 0, 1600, 900])) && verdictOf(same(client.pin, { w: 1600, h: 900 })), 'e2b: the main window is fitted to the PIN (1600×900 at 0,0), not to the 700×500 pane');
   wk.posted.length = 0;
   client.resize(900, 300);
   ok(wk.sent('configure-window').length === 0 && wk.sent('display-configure').length === 0 && client.windows.get(1).w === 1600 && client.windows.get(1).h === 900, 'e2b: a pane resize does NOT change a pinned fit (no display-configure, no configure-window)');
   client.setPin({ w: 1280, h: 720 });
   const lastDisp = wk.sent('display-configure').slice(-1)[0], lastCfg = wk.sent('configure-window').slice(-1)[0];
-  ok(!!lastDisp && same(lastDisp[1]['desktop-size'], [1280, 720]) && !!lastCfg && same(lastCfg.slice(1, 6), [1, 0, 0, 1280, 720]), 'e2b: re-pinned 1280×720 ⇒ the display, then the main re-fitted IN PLACE (no re-create)', { lastDisp, lastCfg });
+  ok(!!lastDisp && gateOf(same(lastDisp[1]['desktop-size'], [1280, 720])) && !!lastCfg && verdictOf(same(lastCfg.slice(1, 6), [1, 0, 0, 1280, 720])), 'e2b: re-pinned 1280×720 ⇒ the display, then the main re-fitted IN PLACE (no re-create)', { lastDisp, lastCfg });
   client.setPin(null);
   const unCfg = wk.sent('configure-window').slice(-1)[0];
-  ok(client.pin === null && same(unCfg.slice(1, 6), [1, 0, 0, 900, 300]) && same(wk.sent('display-configure').slice(-1)[0][1]['desktop-size'], [900, 300]), 'e2b: unpinned (auto) ⇒ re-fit to the pane (900×300)', unCfg);
+  ok(client.pin === null && gateOf(same(unCfg.slice(1, 6), [1, 0, 0, 900, 300])) && verdictOf(same(wk.sent('display-configure').slice(-1)[0][1]['desktop-size'], [900, 300])), 'e2b: unpinned (auto) ⇒ re-fit to the pane (900×300)', unCfg);
   client.close();
 }
 
@@ -2089,7 +2089,7 @@ console.log('§T lane xpra-title-election — the main-window title reaches the 
 
   // (a) a title that FOLLOWS new-window reaches the pane (self-heal — the common order)
   const ra = await titleRun(C, [['new-window', 1, 0, 0, 300, 200, { title: 'A', 'window-type': ['NORMAL'] }], ['window-metadata', 1, { title: 'B' }]]);
-  ok(same(ra.titles, ['A', 'B']) && ra.rec === 'B' && ra.mainWid === 1, '(a) a title that follows new-window reaches the pane: titles [A, B], the record holds B', ra);
+  ok(gateOf(same(ra.titles, ['A', 'B'])) && ra.rec === 'B' && ra.mainWid === 1, '(a) a title that follows new-window reaches the pane: titles [A, B], the record holds B', ra);
 
   // (b) a title that RACES AHEAD of new-window (metadata for a wid the record does not exist for yet)
   const rb = await titleRun(C, [['window-metadata', 7, { title: 'B' }], ['new-window', 7, 0, 0, 300, 200, { title: 'A', 'window-type': ['NORMAL'] }]]);
@@ -2123,9 +2123,9 @@ console.log('§T lane xpra-title-election — the main-window title reaches the 
   // (f) RED CONTROL: a copy of the client with the stash reverted to the pre-fix `if (!win) return;` DROPS the raced title
   const csrc = read('src/lib/xpra-client.js');
   const stashRe = /if \(!win\) \{ \/\/ lane xpra-title-election[\s\S]*?\n {8}\}/;
-  ok(stashRe.test(csrc), 'CONTROL anchor: the window-metadata stash block is present (the control reverts exactly it)');
+  ok(verdictOf(stashRe.test(csrc)), 'CONTROL anchor: the window-metadata stash block is present (the control reverts exactly it)');
   const dropSrc = editAnchor(csrc, stashRe, 'if (!win) return;', "src/lib/xpra-client.js");
-  ok(dropSrc.includes('if (!win) return;') && dropSrc !== csrc && !/STASH it \(bounded\)/.test(dropSrc), 'CONTROL: the copy reverts the stash to the pre-fix `if (!win) return;`');
+  ok(gateOf(dropSrc.includes('if (!win) return;')) && dropSrc !== csrc && !/STASH it \(bounded\)/.test(dropSrc), 'CONTROL: the copy reverts the stash to the pre-fix `if (!win) return;`');
   const preMut = await import(fileUrl(MUTXC.write('src/lib/xpra-client.js', dropSrc, 'titledrop')));
   const mb = await titleRun(preMut, [['window-metadata', 7, { title: 'B' }], ['new-window', 7, 0, 0, 300, 200, { title: 'A', 'window-type': ['NORMAL'] }]]);
   ok(mb.rec === 'A' && mb.rec !== 'B' && mb.titles.slice(-1)[0] === 'A', '(f) RED CONTROL (b): the pre-fix `if (!win) return;` DROPS the raced-ahead title — the record holds the stale A, never B', mb);
@@ -2170,10 +2170,10 @@ console.log('§X lane browser-x-in-window (B2): ONE window of a SHARED display �
   w.feed(['new-override-redirect', MENU_FAR, own.x + own.w + 40, 10, 100, 50, { 'window-type': ['MENU'] }]);
   await sleep(30);
   const kept = [...c.windows.keys()].sort();
-  ok(same(kept, [OWN, DLG, MENU].sort()), `admit: the client KEEPS this conversation\'s window, the dialog transient for it and the menu opened inside it — never the other window, its dialog, a menu outside (${kept.map((x) => x.toString(16)).join(', ')})`, kept);
+  ok(verdictOf(same(kept, [OWN, DLG, MENU].sort())), `admit: the client KEEPS this conversation\'s window, the dialog transient for it and the menu opened inside it — never the other window, its dialog, a menu outside (${kept.map((x) => x.toString(16)).join(', ')})`, kept);
   ok(c.mainWid === OWN, `admit: THIS window is the main even though another was announced first (main ${Number(c.mainWid).toString(16)})`);
   const maps = w.sent('map-window').map((p) => p[1]);
-  ok(!maps.includes(OTHER) && !maps.includes(DLG_OTHER) && maps.includes(OWN) && maps.includes(DLG), `admit: a refused window is never MAPPED by this client (map-window sent for ${maps.map((x) => x.toString(16)).join(', ')})`, maps);
+  ok(!maps.includes(OTHER) && !maps.includes(DLG_OTHER) && gateOf(maps.includes(OWN)) && verdictOf(maps.includes(DLG)), `admit: a refused window is never MAPPED by this client (map-window sent for ${maps.map((x) => x.toString(16)).join(', ')})`, maps);
   ok(!evs.new.includes(OTHER) && !evs.new.includes(DLG_OTHER) && !w.sent('focus').some((p) => p[1] === OTHER), 'admit: a refused window is never handed to the view and never focused');
   // its draws: acked as painted (xpra keeps its pace for this client), never painted; its metadata: dropped (nothing stashed)
   const acks0 = w.sent('damage-sequence').length;
@@ -2184,13 +2184,13 @@ console.log('§X lane browser-x-in-window (B2): ONE window of a SHARED display �
   const acks = w.sent('damage-sequence').slice(acks0);
   const ackOther = acks.find((p) => p[1] === 77), ackOwn = acks.find((p) => p[1] === 78);
   ok(!!ackOther && ackOther[2] === OTHER && ackOther[5] === 0 && ackOther[6] === '' && !evs.paint.includes(OTHER), `admit: a refused window\'s draw is ACKED as painted (decode 0 ms, no error — never "no such window", which makes xpra back off) and never painted (${JSON.stringify(ackOther)})`, acks);
-  ok(!!ackOwn && evs.paint.includes(OWN), 'admit: this window\'s draw is painted and acked as before');
+  ok(!!ackOwn && verdictOf(evs.paint.includes(OWN)), 'admit: this window\'s draw is painted and acked as before');
   ok(!c.windows.has(OTHER), 'admit: a refused window\'s metadata reaches nothing');
   // lost: a refused window that goes and a NEW window under its wid is judged afresh
   w.feed(['lost-window', OTHER]);
   w.feed(['new-window', OTHER, 20, 20, 1050, 980, { title: 'reused - Google Chrome', 'window-type': ['DIALOG'], 'transient-for': OWN }]);
   await sleep(20);
-  ok(c.windows.has(OTHER) && asked.filter((x) => x === OTHER).length === 2, 'admit: a wid lost and announced again is asked again (a dialog of this window now ⇒ kept)');
+  ok(gateOf(c.windows.has(OTHER)) && asked.filter((x) => x === OTHER).length === 2, 'admit: a wid lost and announced again is asked again (a dialog of this window now ⇒ kept)');
   c.close();
   // CONTROL (RED): the client WITHOUT the filter keeps the other conversation\'s window and makes it the main (the leak admit closes)
   FakeWorker.instances.length = 0;
@@ -2202,7 +2202,7 @@ console.log('§X lane browser-x-in-window (B2): ONE window of a SHARED display �
   w2.feed(['new-window', OTHER, 10, 10, 1050, 980, { title: 'other - Google Chrome', 'window-type': ['NORMAL'] }]);
   w2.feed(['new-window', OWN, 20, 20, 1050, 980, { title: 'mine - Google Chrome', 'window-type': ['NORMAL'] }]);
   await sleep(30);
-  ok(c2.windows.has(OTHER) && c2.mainWid === OTHER, 'CONTROL (RED): without `admit` the other conversation\'s window is drawn and made the main — the filter is load-bearing');
+  ok(gateOf(c2.windows.has(OTHER)) && c2.mainWid === OTHER, 'CONTROL (RED): without `admit` the other conversation\'s window is drawn and made the main — the filter is load-bearing');
   c2.close();
 }
 
@@ -2251,8 +2251,8 @@ console.log('§XS lane desktop-x-seat-browser r6 (主开发\'s acceptance r5 on 
     return out;
   };
   const WR = await writerRun(C);
-  ok(WR.atTool === 2 && WR.atPress === 1 && WR.title === 'LibreOffice Writer' && same(WR.x, { act: 'ask-app', to: [1] }), `r6 MINOR 2 — the acceptance's probe: the Navigator is the front as it maps; his click into the document makes the MAIN the front — the title is the app's alone and the ✕ asks the app (closeMain), never closes the Navigator (r5: «Writer · Navigator» for good, close-window to the Navigator)`, WR);
-  ok(WR.atSave === 3 && WR.title2 === 'LibreOffice Writer · Save Document?' && same(WR.x2, { act: 'ask-front', to: [3] }), 'r6 MINOR 2 — a dialog mapped last IS the front: the title names it, the ✕ goes to it', WR);
+  ok(WR.atTool === 2 && WR.atPress === 1 && WR.title === 'LibreOffice Writer' && verdictOf(same(WR.x, { act: 'ask-app', to: [1] })), `r6 MINOR 2 — the acceptance's probe: the Navigator is the front as it maps; his click into the document makes the MAIN the front — the title is the app's alone and the ✕ asks the app (closeMain), never closes the Navigator (r5: «Writer · Navigator» for good, close-window to the Navigator)`, WR);
+  ok(WR.atSave === 3 && WR.title2 === 'LibreOffice Writer · Save Document?' && verdictOf(same(WR.x2, { act: 'ask-front', to: [3] })), 'r6 MINOR 2 — a dialog mapped last IS the front: the title names it, the ✕ goes to it', WR);
 
   // ── the acceptance's probe: HIS main + his own file chooser (transient-for HIS, focused as it maps) + an agent window mapped
   // later over the bottom-right of HIS; he scrolls his page beside the chooser, where the agent's window covers it in X ──
@@ -2288,10 +2288,10 @@ console.log('§XS lane desktop-x-seat-browser r6 (主开发\'s acceptance r5 on 
   };
   const B = (wid, b) => [['button', wid, b, true], ['button', wid, b, false]], PAIR = [['focus', 0], ['focus', HIS]];
   const WH = await wheelRun(C);
-  ok(WH.focused0 === MYDLG && same(WH.covered, []) && WH.focusedAfter === MYDLG && same(WH.said, [{ act: 'wheel', code: 'click-first' }]) && same(WH.nextKey, [['key', MYDLG, true], ['key', MYDLG, false]]), 'r6 MINOR 1 — the acceptance\'s probe: his wheel over his main where an agent\'s window covers it in X while HIS FILE CHOOSER holds his focus — REFUSED by the client and said (on.refused «click your window first»): no focus packet, no scroll sent to the window on top in X; his focus stays on his chooser and his next key goes to it (r5: focus 0 + focus HIS, his keys to the main behind his modal)', WH);
-  ok(same(WH.open, B(HIS, 5)), 'r6 MINOR 1 — a point of his main nothing covers: the scroll only, his chooser keeps his focus', WH.open);
-  ok(same(WH.press, [...PAIR, ...B(HIS, 1)]), 'r6 — his PRESS on the covered point keeps the raise (focus 0, then HIS, then the click: a press moves focus by nature)', WH.press);
-  ok(same(WH.focusedWheel, B(HIS, 5)) && same(WH.focusedRaise, [...PAIR, ...B(HIS, 5)]) && WH.focusedEnd === HIS, 'r6 — his wheel over his FOCUSED main: nothing over it ⇒ the scroll only; an agent window mapped over it ⇒ raised first (focus 0 + focus HIS keeps his focus where it is), then the scroll', { focusedWheel: WH.focusedWheel, focusedRaise: WH.focusedRaise });
+  ok(WH.focused0 === MYDLG && gateOf(same(WH.covered, [])) && WH.focusedAfter === MYDLG && gateOf(same(WH.said, [{ act: 'wheel', code: 'click-first' }])) && verdictOf(same(WH.nextKey, [['key', MYDLG, true], ['key', MYDLG, false]])), 'r6 MINOR 1 — the acceptance\'s probe: his wheel over his main where an agent\'s window covers it in X while HIS FILE CHOOSER holds his focus — REFUSED by the client and said (on.refused «click your window first»): no focus packet, no scroll sent to the window on top in X; his focus stays on his chooser and his next key goes to it (r5: focus 0 + focus HIS, his keys to the main behind his modal)', WH);
+  ok(verdictOf(same(WH.open, B(HIS, 5))), 'r6 MINOR 1 — a point of his main nothing covers: the scroll only, his chooser keeps his focus', WH.open);
+  ok(verdictOf(same(WH.press, [...PAIR, ...B(HIS, 1)])), 'r6 — his PRESS on the covered point keeps the raise (focus 0, then HIS, then the click: a press moves focus by nature)', WH.press);
+  ok(gateOf(same(WH.focusedWheel, B(HIS, 5))) && gateOf(same(WH.focusedRaise, [...PAIR, ...B(HIS, 5)])) && WH.focusedEnd === HIS, 'r6 — his wheel over his FOCUSED main: nothing over it ⇒ the scroll only; an agent window mapped over it ⇒ raised first (focus 0 + focus HIS keeps his focus where it is), then the scroll', { focusedWheel: WH.focusedWheel, focusedRaise: WH.focusedRaise });
 
   // ── MUTANTS: each rule undone in a copy — its leg goes red ──
   const csrc = read('src/lib/xpra-client.js'), psrc = read('src/lib/xpra-proto.js');
@@ -2302,7 +2302,7 @@ console.log('§XS lane desktop-x-seat-browser r6 (主开发\'s acceptance r5 on 
   ok(MW.focusedAfter === HIS && !same(MW.covered, []), `MUTANT wheel-takes-focus (r5's wheel: the raise whoever holds his focus) ⇒ the probe's leg goes RED: focus moves to ${MW.focusedAfter.toString(16)}, his next key to ${JSON.stringify(MW.nextKey)}`, MW);
   const pp = MUTXC.write('src/lib/xpra-proto.js', editAnchor(psrc, FRONT_RANK, 'if (heldWindow(win) && (!best || stackRank(win) > stackRank(best))) best = win;', "src/lib/xpra-proto.js"), 'front-by-stack-rank');
   const MF = await writerRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, "from './xpra-proto.js'", `from ${JSON.stringify(pathToFileURL(pp).href)}`, "src/lib/xpra-client.js"), 'front-by-stack-rank')).href));
-  ok(MF.atPress === 2 && same(MF.x, { act: 'ask-front', to: [2] }), `MUTANT front-by-stack-rank (r5's frontOf: the drawn tiers) ⇒ the Writer leg goes RED: the Navigator stays the front, the ✕ closes it (${JSON.stringify(MF.x)})`, MF);
+  ok(MF.atPress === 2 && verdictOf(same(MF.x, { act: 'ask-front', to: [2] })), `MUTANT front-by-stack-rank (r5's frontOf: the drawn tiers) ⇒ the Writer leg goes RED: the Navigator stays the front, the ✕ closes it (${JSON.stringify(MF.x)})`, MF);
 
   // ── r7 (acceptance r6): ONE TOAST PACER PER SENTENCE in desktop-app-window.js — the bridge's refusal (a refused press) at t0, the
   // client's wheel refusal at t0 + 1 s: BOTH said (r6 shared one `lastHintAt`: the second was silent for up to 8 s) ──
@@ -2319,11 +2319,11 @@ console.log('§XS lane desktop-x-seat-browser r6 (主开发\'s acceptance r5 on 
     return { keys, bridgeT0: say(keys.bridge, t0), wheelT1: say(keys.wheel, t0 + 1000), wheelT2: say(keys.wheel, t0 + 2000), bridgeT3: say(keys.bridge, t0 + 3000), wheelT9: say(keys.wheel, t0 + 9001) };
   };
   const PR = pacedRun(DW, toastKeys(dwsrc));
-  ok(!PR.error && PR.bridgeT0 && PR.wheelT1 && !PR.wheelT2 && !PR.bridgeT3 && PR.wheelT9 && new Set(Object.values(PR.keys)).size === 3 && !/lastHintAt/.test(dwsrc), 'r7 (acceptance r6) — ONE PACER PER SENTENCE: a bridge refusal said at t0, the wheel\'s own refusal at t0 + 1 s is SAID too (r6: one shared `lastHintAt` silenced it up to 8 s); each sentence still on its own 8 s pace (the wheel again at +2 s, the bridge again at +3 s: quiet; the wheel at +9 s: said) — the window hands each toast its own key', PR);
+  ok(!PR.error && gateOf(PR.bridgeT0) && gateOf(PR.wheelT1) && !PR.wheelT2 && !PR.bridgeT3 && gateOf(PR.wheelT9) && new Set(Object.values(PR.keys)).size === 3 && !/lastHintAt/.test(dwsrc), 'r7 (acceptance r6) — ONE PACER PER SENTENCE: a bridge refusal said at t0, the wheel\'s own refusal at t0 + 1 s is SAID too (r6: one shared `lastHintAt` silenced it up to 8 s); each sentence still on its own 8 s pace (the wheel again at +2 s, the bridge again at +3 s: quiet; the wheel at +9 s: said) — the window hands each toast its own key', PR);
   const sameKey = dwsrc.replace("if (sayPaced('click-first', now)) { showToast(t('Click your window first", "if (sayPaced('not-your-window', now)) { showToast(t('Click your window first");
   ok(sameKey !== dwsrc, 'r7 mutant: the wheel refusal\'s pacer line is spelled once');
   const MP = pacedRun(DW, toastKeys(sameKey));
-  ok(!MP.error && MP.bridgeT0 && !MP.wheelT1, `MUTANT one-pacer (the wheel's refusal back on the bridge refusal's pace) ⇒ the leg goes RED: the wheel's refusal at t0 + 1 s is silent (${JSON.stringify(MP)})`, MP);
+  ok(!MP.error && gateOf(MP.bridgeT0) && !MP.wheelT1, `MUTANT one-pacer (the wheel's refusal back on the bridge refusal's pace) ⇒ the leg goes RED: the wheel's refusal at t0 + 1 s is silent (${JSON.stringify(MP)})`, MP);
 }
 
 console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER IS NAMED»): a relaunch\'s PLANNED pane sizes the new connection\'s FIRST map — never the pane as it stands before the fit lands');
@@ -2354,7 +2354,7 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   let asked = 0;
   const oneShot = () => { let left = 1; return () => { asked++; return left-- > 0 ? { width: 1818, height: 1232 } : null; }; }; // as the window's viewOpts hands it: once
   const a = await firstMap(V, oneShot(), true), b = await firstMap(V, undefined), c = await firstMap(V, () => null);
-  ok(same(a.first, [1818, 1232]) && same(a.second, [1634, 1232]) && asked === 2 && same(b.first, [1634, 1232]) && same(c.first, [1634, 1232]),
+  ok(gateOf(same(a.first, [1818, 1232])) && gateOf(same(a.second, [1634, 1232])) && asked === 2 && gateOf(same(b.first, [1634, 1232])) && verdictOf(same(c.first, [1634, 1232])),
     'B-92aa: the main\'s FIRST map takes the planned pane (1818×1232 while the pane still stands at 1634×1232); the plan is one connect\'s (a reconnect maps the pane); no plan, or a null one ⇒ the pane as it is (today\'s road)', { a, b, c, asked });
   const vsrc = read('src/lib/xpra-view.js');
   const CONNECT_NOW = "    const p0 = (typeof firstPane === 'function' && firstPane()) || null; // B-92aa: the caller's plan for this first map, if any — always read: it is one connect's\n    planned = mode === 'active' ? p0 : null; // r2217 (c): a watching or blocked pane's hello takes the pane, as at the release\n    const s = planned || paneSize();";
@@ -2362,7 +2362,7 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   let today = anchored(vsrc, CONNECT_NOW, '    const s = paneSize();', 'B-92aa control: today\'s connect');
   today = anchored(today, MAIN_NOW, "if (client && win && mode === 'active') { const s = paneSize(); client.resize(s.width, s.height); }", 'B-92aa control: today\'s main announce');
   const red = await firstMap(await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', today, 'b92aa-no-plan')).href), oneShot());
-  ok(same(red.first, [1634, 1232]), `RED CONTROL (B-92aa): today's view reads no plan — the main maps at the STALE pane (${red.first}) and the fit's resize refits it later (the jump a person sees)`, red);
+  ok(verdictOf(same(red.first, [1634, 1232])), `RED CONTROL (B-92aa): today's view reads no plan — the main maps at the STALE pane (${red.first}) and the fit's resize refits it later (the jump a person sees)`, red);
   // THE ONE COMPUTATION (r1635's first law): desktop-app-window.js plans the fit ONCE and resizes the window with the SAME value;
   // r2217: the new connection is handed only the size the window TAKES — the window manager's own answer to the fit's ask
   // (fitSizeFor, what resizeWindowTo applies), stamped, checked at the read, dropped when the fit applied another size or the
@@ -2424,12 +2424,12 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
     fraction: { fit: { w: 1225.56, h: 951.26 }, landed: { w: 1225.56, h: 951.26 }, paneAt: { w: 1226, h: 919 } }, // a fractional fit (relaunchPaneCss keeps 0.01 px)
   };
   const got = {}; for (const [k, v] of Object.entries(SC)) got[k] = await scene(DF, v);
-  ok(same(got.heldRefused, [1634, 1232]) && same(got.heldOther, [1634, 1232]), 'B-92aa r2391: a not-landed plan never outlives its relaunch — the fit then REFUSED, or applying another size, leaves NO plan at the next read: the pane (1634×1232)', { heldRefused: got.heldRefused, heldOther: got.heldOther });
-  ok(same(got.held, [1818, 1232]) && same(got.back, [1634, 1232]), 'B-92aa r2389: the window\'s size from BEFORE the fit holds the plan only while the fit has NOT run (held past the read: 1818×1232, the stall\'s order); once it ran, the window put BACK at that size in the wait (the same zone) drops it — the pane, 1634×1232', { held: got.held, back: got.back });
-  ok(same(got.applied, [1818, 1232]) && same(got.refused, [1634, 1232]) && same(got.refusedNow, [1634, 1232]) && same(got.capped, [1700, 1232]) && same(got.wait, [1750, 1232]),
+  ok(gateOf(same(got.heldRefused, [1634, 1232])) && verdictOf(same(got.heldOther, [1634, 1232])), 'B-92aa r2391: a not-landed plan never outlives its relaunch — the fit then REFUSED, or applying another size, leaves NO plan at the next read: the pane (1634×1232)', { heldRefused: got.heldRefused, heldOther: got.heldOther });
+  ok(gateOf(same(got.held, [1818, 1232])) && verdictOf(same(got.back, [1634, 1232])), 'B-92aa r2389: the window\'s size from BEFORE the fit holds the plan only while the fit has NOT run (held past the read: 1818×1232, the stall\'s order); once it ran, the window put BACK at that size in the wait (the same zone) drops it — the pane, 1634×1232', { held: got.held, back: got.back });
+  ok(gateOf(same(got.applied, [1818, 1232])) && gateOf(same(got.refused, [1634, 1232])) && gateOf(same(got.refusedNow, [1634, 1232])) && gateOf(same(got.capped, [1700, 1232])) && verdictOf(same(got.wait, [1750, 1232])),
     'B-92aa r2217: the first map takes ONLY a size the window takes — the fit\'s plan when the window takes it (1818×1232, the fit not landed yet); a REFUSED fit (maximized, the phone layout) hands no plan: the pane (1634×1232); a fit CAPPED at the workspace hands the capped pane (1700×1232: what the pane then measures — no refit); a resize of the window in the wait drops the plan: the person\'s pane (1750×1232); a window maximized in the wait: the pane', got);
-  ok(same(got.fraction, [1226, 919]), `B-92aa r2217 (a): a FRACTIONAL fit (1225.56×951.26 for the window) maps WHOLE pixels, as the pane measures them (${got.fraction}: 1226×919 — never a pixel narrow and refit)`, got.fraction);
-  ok(same(DF.relaunchHandOver({ fit: null }), null) && same(DF.relaunchHandOver({ fit: { w: 1000, h: 800 }, chrome: { w: 0, h: 40 }, uiScale: 1.25 }), { width: 1250, height: 960 }) && DF.relaunchHandOver({ fit: { w: 20, h: 20 }, chrome: { w: 0, h: 40 } }) === null
+  ok(verdictOf(same(got.fraction, [1226, 919])), `B-92aa r2217 (a): a FRACTIONAL fit (1225.56×951.26 for the window) maps WHOLE pixels, as the pane measures them (${got.fraction}: 1226×919 — never a pixel narrow and refit)`, got.fraction);
+  ok(gateOf(same(DF.relaunchHandOver({ fit: null }), null)) && gateOf(same(DF.relaunchHandOver({ fit: { w: 1000, h: 800 }, chrome: { w: 0, h: 40 }, uiScale: 1.25 }), { width: 1250, height: 960 })) && DF.relaunchHandOver({ fit: { w: 20, h: 20 }, chrome: { w: 0, h: 40 } }) === null
     && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' }, landed: false }) === true && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' } }) === false && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '900px', h: '700px' } }) === true
     && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '880px', h: '700px' } }) === false && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' }, refused: true }) === false,
     'B-92aa r2217 (PURE): relaunchHandOver — refused ⇒ null; the pane = the size × the UI scale − the chrome, whole px (1000×800 at 1.25, 40 px of chrome ⇒ 1250×960); nothing left past the chrome ⇒ null; relaunchPlanHolds — at the fit\'s size ⇒ holds; at its size from before the fit ⇒ holds only while the fit has not run; any other size, or a fit refused now ⇒ dropped');
@@ -2439,20 +2439,20 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   // older plan over the person's resize
   const rawOnce = () => { let left = 1; return () => (left-- > 0 ? { width: 1818, height: 1232 } : null); };
   const rawRefused = (await firstMap(V, rawOnce())).first, rawCapped = (await firstMap(V, rawOnce(), false, SC.capped.paneAt)).first, rawWait = (await firstMap(V, rawOnce(), false, SC.wait.paneAt)).first;
-  ok(same(rawRefused, [1818, 1232]) && same(rawCapped, [1818, 1232]) && same(rawWait, [1818, 1232]), `RED CONTROL (B-92aa r2217, 76cc2bb77's hand-over: the asked plan, the window manager's answer not read): a refused fit maps ${rawRefused} in a 1634×1232 pane, a capped one ${rawCapped} in 1700×1232, a resize in the wait ${rawWait} in 1750×1232 — a size the pane never gets`, { rawRefused, rawCapped, rawWait });
+  ok(gateOf(same(rawRefused, [1818, 1232])) && gateOf(same(rawCapped, [1818, 1232])) && verdictOf(same(rawWait, [1818, 1232])), `RED CONTROL (B-92aa r2217, 76cc2bb77's hand-over: the asked plan, the window manager's answer not read): a refused fit maps ${rawRefused} in a 1634×1232 pane, a capped one ${rawCapped} in 1700×1232, a resize in the wait ${rawWait} in 1750×1232 — a size the pane never gets`, { rawRefused, rawCapped, rawWait });
   const dfsrc = read('src/lib/desktop-app-scale.js');
   const DFnoRound = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  const width = Math.round(Number(fit.w) * s - (Number(c.w) || 0)), height = Math.round(Number(fit.h) * s - (Number(c.h) || 0));', '  const width = Number(fit.w) * s - (Number(c.w) || 0), height = Number(fit.h) * s - (Number(c.h) || 0);', 'B-92aa r2217 control: the fraction kept'), 'b92aa-fraction')).href);
   const redFraction = await scene(DFnoRound, SC.fraction);
-  ok(redFraction && redFraction[0] === 1225, `RED CONTROL (B-92aa r2217 (a)): a hand-over that keeps the fraction maps ${redFraction} — a pixel narrower than the 1226 px pane, refit after`, redFraction);
+  ok(gateOf(redFraction) && redFraction[0] === 1225, `RED CONTROL (B-92aa r2217 (a)): a hand-over that keeps the fraction maps ${redFraction} — a pixel narrower than the 1226 px pane, refit after`, redFraction);
   const DFholds = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return same(now, fit) || (!landed && !!at && same(now, at));', '  return true;', 'B-92aa r2217 control: the plan always holds'), 'b92aa-holds')).href);
   const redWait = await scene(DFholds, SC.wait);
-  ok(same(redWait, [1818, 1232]), `RED CONTROL (B-92aa r2217): a plan that always holds maps the older plan (${redWait}) over the person's resize in the wait (the pane: 1750×1232)`, redWait);
+  ok(verdictOf(same(redWait, [1818, 1232])), `RED CONTROL (B-92aa r2217): a plan that always holds maps the older plan (${redWait}) over the person's resize in the wait (the pane: 1750×1232)`, redWait);
   const DFatAny = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return same(now, fit) || (!landed && !!at && same(now, at));', '  return same(now, fit) || (!!at && same(now, at));', 'B-92aa r2389 control: e659077a0\'s «at» branch'), 'b92aa-at-any')).href);
   const redBack = await scene(DFatAny, SC.back);
   const DFkeeps = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return done && done.w === plan.fit.w && done.h === plan.fit.h ? { ...plan, landed: true } : null;', '  return { ...plan, landed: !!done };', 'B-92aa r2391 control: the fit\'s verdict ignored'), 'b92aa-keeps')).href);
   const redHeldRefused = await scene(DFkeeps, SC.heldRefused);
-  ok(same(redHeldRefused, [1818, 1232]), `RED CONTROL (B-92aa r2391): a plan kept whatever the fit did — the fit refused, and the next read still maps the plan (${redHeldRefused}) in a 1634×1232 pane`, redHeldRefused);
-  ok(same(redBack, [1818, 1232]), `RED CONTROL (B-92aa r2389, e659077a0's «at» branch): the window put back at its old size after the fit maps the fit's plan (${redBack}) in a 1634×1232 pane — cropped, nothing refits it`, redBack);
+  ok(verdictOf(same(redHeldRefused, [1818, 1232])), `RED CONTROL (B-92aa r2391): a plan kept whatever the fit did — the fit refused, and the next read still maps the plan (${redHeldRefused}) in a 1634×1232 pane`, redHeldRefused);
+  ok(verdictOf(same(redBack, [1818, 1232])), `RED CONTROL (B-92aa r2389, e659077a0's «at» branch): the window put back at its old size after the fit maps the fit's plan (${redBack}) in a 1634×1232 pane — cropped, nothing refits it`, redBack);
 
   // B-a52d (主开发 r4884; the placed stall 823b4235e-20261126093305-box: with the press's answer held past the successor's map, EVERY
   // relaunch that changes the size mapped stale and was refit — 1634×1232 → 1818×1232 among them) — THE PLAN AT THE FIRST OF THE TWO
@@ -2511,11 +2511,11 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   };
   const pg = {}; for (const [k, [ev, o]] of Object.entries(PS)) pg[k] = await pressScene(DF, ev, o || {});
   const fin = (x) => same(x.map, [1818, 1232]) && x.fits === 1, asRelease = (x) => same(x.map, [1634, 1232]) && x.fits === 0;
-  ok(fin(pg.lateAnswer) && same(pg.lateAfterDoor.map, [1634, 1232]) && pg.lateAfterDoor.fits === 1 && fin(pg.askedConfirmed) && asRelease(pg.askedThenOther),
+  ok(gateOf(fin(pg.lateAnswer)) && gateOf(same(pg.lateAfterDoor.map, [1634, 1232])) && pg.lateAfterDoor.fits === 1 && gateOf(fin(pg.askedConfirmed)) && verdictOf(asRelease(pg.askedThenOther)),
     'B-a52d (主开发 r5322): the press\'s OWN answer is never refused by the age bound — an answer 61 s after the press plans and fits (1818×1232, one fit); past the door\'s bound the window maps as at the release and the late answer still fits it (the release\'s refit, never no fit); while the person decides on «app-asked» there is NO press (another client\'s relaunch maps as a second client\'s), and the confirmed request is a press of its own', { lateAnswer: pg.lateAnswer, lateAfterDoor: pg.lateAfterDoor, askedThenOther: pg.askedThenOther, askedConfirmed: pg.askedConfirmed });
-  ok(fin(pg.broadcastFirst) && fin(pg.answerFirst) && fin(pg.answerThenBroadcast) && fin(pg.lostAfterBroadcast) && fin(pg.atBound),
+  ok(gateOf(fin(pg.broadcastFirst)) && gateOf(fin(pg.answerFirst)) && gateOf(fin(pg.answerThenBroadcast)) && gateOf(fin(pg.lostAfterBroadcast)) && verdictOf(fin(pg.atBound)),
     'B-a52d (主开发 r4884): the successor maps ONCE at its FINAL size whichever comes first — the hub\'s broadcast (the window followed it, mapped, THEN the answer) or the answer; the second plans nothing and fits nothing (one fit each); a broadcast met while the request was in flight plans even when its answer is then lost', pg);
-  ok(asRelease(pg.refusedThenOther) && asRelease(pg.lostThenOther) && same(pg.answeredThenOther.maps, [[1818, 1232], [1818, 1232]]) && pg.answeredThenOther.fits === 1 && asRelease(pg.secondClient) && asRelease(pg.pastBound),
+  ok(gateOf(asRelease(pg.refusedThenOther)) && gateOf(asRelease(pg.lostThenOther)) && gateOf(same(pg.answeredThenOther.maps, [[1818, 1232], [1818, 1232]])) && pg.answeredThenOther.fits === 1 && gateOf(asRelease(pg.secondClient)) && verdictOf(asRelease(pg.pastBound)),
     'B-a52d (主开发 r5011 (a)): a press ENDS WITH ITS ANSWER — refused, lost or answered — so nothing it leaves can shape a LATER relaunch: another client\'s relaunch after it maps as a second client\'s (no plan, no fit; after an answered press its pane stays where the first fit put it); a window that did not press maps the pane as at the release; a request in flight past 60 s plans nothing', { refusedThenOther: pg.refusedThenOther, lostThenOther: pg.lostThenOther, answeredThenOther: pg.answeredThenOther, secondClient: pg.secondClient, pastBound: pg.pastBound });
   ok(DF.RELAUNCH_PRESS_MS === 60000 && DF.relaunchPressTakes(null, { nextId: 'b', now: 1 }) === false && DF.relaunchPressTakes({ fromId: 'a', at: 0 }, { nextId: 'b', now: 1 }) === false
     && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'c', now: 1 }) === false && DF.relaunchPressTakes({ fromId: 'a', nextId: 'a', at: 0 }, { nextId: 'a', now: 1 }) === false
@@ -2526,29 +2526,29 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
     'B-a52d (PURE): relaunchPressTakes — no press, a press its window has not retargeted yet (no successor named), another record, a successor that is the press\'s own record, a clock before the press, past 60 s ⇒ false; the named successor inside 60 s ⇒ true; THE ANSWER (r5322): its named successor at any age ⇒ true, another record, none named or no press ⇒ false');
   const relX = await pressScene(DF, ['broadcast', 'connect', 'answer'], { doorPlans: false });
   if (relX.doorSkipped !== 1) skip(`RED CONTROL (B-a52d, the release's window): its plant — the record's door planning nothing — was never reached (${relX.doorSkipped} door(s) passed by): not judged`);
-  else ok(same(relX.map, [1634, 1232]) && relX.fits === 1, `RED CONTROL (B-a52d, the release's window: the plan and the fit made only at the answer): the window that followed the broadcast maps the STALE pane (${relX.map}) and the answer's fit lands after the map — the refit a person sees`, relX);
+  else ok(gateOf(same(relX.map, [1634, 1232])) && relX.fits === 1, `RED CONTROL (B-a52d, the release's window: the plan and the fit made only at the answer): the window that followed the broadcast maps the STALE pane (${relX.map}) and the answer's fit lands after the map — the refit a person sees`, relX);
   const keptX = await pressScene(DF, ['lost', 'other', 'connect']).then(async (a) => ({ a, b: await pressScene(DF, ['lost', 'other', 'connect'], { endsWithAnswer: false }) }));
   if (keptX.b.keptAfterAnswer !== 1) skip(`RED CONTROL (B-a52d, r5011 (a)): its plant — a press kept past its lost answer — was never in force (${keptX.b.keptAfterAnswer} kept): not judged`);
-  else ok(asRelease(keptX.a) && same(keptX.b.map, [1818, 1232]) && keptX.b.fits === 1, `RED CONTROL (B-a52d, r5011 (a)): a press KEPT past its lost answer shapes another client's later relaunch — the window is fitted for it (${keptX.b.map}, one fit) where a second client maps its pane`, keptX);
+  else ok(gateOf(asRelease(keptX.a)) && gateOf(same(keptX.b.map, [1818, 1232])) && keptX.b.fits === 1, `RED CONTROL (B-a52d, r5011 (a)): a press KEPT past its lost answer shapes another client's later relaunch — the window is fitted for it (${keptX.b.map}, one fit) where a second client maps its pane`, keptX);
   const DFnoTake = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(anchored(dfsrc, '  return age >= 0 && age <= RELAUNCH_PRESS_MS;', '  return false;', 'B-a52d control: a press nothing takes (the door)'), '  if (answer) return true;', '  if (answer) return false;', 'B-a52d control: a press nothing takes (the answer)'), 'a52d-no-take')).href);
   const redNoTake = await pressScene(DFnoTake, ['broadcast', 'connect', 'answer']);
   const PRESS_W = [{ fromId: 'old', nextId: 'new', at: 0 }, { nextId: 'new', now: 1000 }], PRESS_LATE = [{ fromId: 'old', nextId: 'new', at: 0 }, { nextId: 'new', now: 60001 }];
   // the WITNESS (law 1): the scene asked the planted module, and the plant answers otherwise than the module does, on the scene's own input
   if (!(redNoTake.asked > 0 && DFnoTake.relaunchPressTakes(...PRESS_W) === false && DF.relaunchPressTakes(...PRESS_W) === true && DFnoTake.relaunchPressTakes(PRESS_W[0], { ...PRESS_W[1], answer: true }) === false)) skip(`RED CONTROL (B-a52d): its plant — a press nothing takes — was never read (${redNoTake.asked} asks): not judged`);
-  else ok(same(redNoTake.map, [1634, 1232]) && redNoTake.fits === 0, `RED CONTROL (B-a52d): a press nothing takes plans nothing at either event — the broadcast's follow maps the stale pane (${redNoTake.map}), no fit at all`, redNoTake);
+  else ok(gateOf(same(redNoTake.map, [1634, 1232])) && redNoTake.fits === 0, `RED CONTROL (B-a52d): a press nothing takes plans nothing at either event — the broadcast's follow maps the stale pane (${redNoTake.map}), no fit at all`, redNoTake);
   // RED (r5322, e06b22906's rule): the answer's road under the door's 60 s bound — an answer 61 s after the press gets NO fit at all
   const DFansBound = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  if (answer) return true;', '  void answer;', 'B-a52d control: the answer under the age bound'), 'a52d-answer-bound')).href);
   const redAnsBound = await pressScene(DFansBound, ['answer', 'connect'], { pressAt: 0, now: 61000 });
   const PRESS_ANS = [{ fromId: 'old', nextId: 'new', at: 0 }, { nextId: 'new', now: 61000, answer: true }];
   if (!(redAnsBound.asked > 0 && DFansBound.relaunchPressTakes(...PRESS_ANS) === false && DF.relaunchPressTakes(...PRESS_ANS) === true)) skip(`RED CONTROL (B-a52d, r5322): its plant — the answer under the age bound — was never read (${redAnsBound.asked} asks): not judged`);
-  else ok(same(redAnsBound.map, [1634, 1232]) && redAnsBound.fits === 0, `RED CONTROL (B-a52d, r5322 — e06b22906's rule): with the answer's road under the 60 s bound, an answer 61 s after the press plans NOTHING — the successor maps at the old pane (${redAnsBound.map}) and is never refit (no fit at all)`, redAnsBound);
+  else ok(gateOf(same(redAnsBound.map, [1634, 1232])) && redAnsBound.fits === 0, `RED CONTROL (B-a52d, r5322 — e06b22906's rule): with the answer's road under the 60 s bound, an answer 61 s after the press plans NOTHING — the successor maps at the old pane (${redAnsBound.map}) and is never refit (no fit at all)`, redAnsBound);
   const askedX = await pressScene(DF, ['asked', 'other', 'connect'], { askedKeeps: true });
   if (askedX.heldThroughAsked !== 1) skip('RED CONTROL (B-a52d, r5322): its plant — a press kept open through «app-asked» — was never read: not judged');
-  else ok(same(askedX.map, [1818, 1232]) && askedX.fits === 1, `RED CONTROL (B-a52d, r5322 — e06b22906's press through «app-asked»): a press kept open while the person decides is fitted for another client's relaunch (${askedX.map}, one fit) where a second client maps its pane`, askedX);
+  else ok(gateOf(same(askedX.map, [1818, 1232])) && askedX.fits === 1, `RED CONTROL (B-a52d, r5322 — e06b22906's press through «app-asked»): a press kept open while the person decides is fitted for another client's relaunch (${askedX.map}, one fit) where a second client maps its pane`, askedX);
   const DFnoBound = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return age >= 0 && age <= RELAUNCH_PRESS_MS;', '  return true;', 'B-a52d control: a press with no bound'), 'a52d-no-bound')).href);
   const redNoBound = await pressScene(DFnoBound, ['broadcast', 'connect'], { pressAt: 0, now: 60001 });
   if (!(redNoBound.asked > 0 && DFnoBound.relaunchPressTakes(...PRESS_LATE) === true && DF.relaunchPressTakes(...PRESS_LATE) === false)) skip(`RED CONTROL (B-a52d): its plant — a press with no bound — was never read (${redNoBound.asked} asks): not judged`);
-  else ok(same(redNoBound.map, [1818, 1232]) && redNoBound.fits === 1, `RED CONTROL (B-a52d): a press with no bound plans a successor met ${60001} ms later (${redNoBound.map}, one fit) — the 60 s bound is what ends it`, redNoBound);
+  else ok(gateOf(same(redNoBound.map, [1818, 1232])) && redNoBound.fits === 1, `RED CONTROL (B-a52d): a press with no bound plans a successor met ${60001} ms later (${redNoBound.map}, one fit) — the 60 s bound is what ends it`, redNoBound);
   // r2217 (b) THE MARK GOES AT THE FIRST MAIN WHATEVER THE MODE, and (c) A WATCHING PANE'S HELLO TAKES THE PANE (as at the release);
   // the plan is READ either way (one connect's: never left for a later one)
   const modes = async (Vmod) => {
@@ -2582,14 +2582,14 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
     return out;
   };
   const mo = await modes(V);
-  ok(same(mo.watchHello, [1634, 1232]) && mo.watchAsked === 1 && same(mo.second, [1634, 1232]) && mo.mainAsked === 1, `B-92aa r2217 (b)(c): a WATCHING pane's hello takes the pane (${mo.watchHello}), the plan still read once; the plan's mark goes at the FIRST main whatever the mode — a later main of the same connection maps the pane (${mo.second}), never the old plan`, mo);
+  ok(gateOf(same(mo.watchHello, [1634, 1232])) && mo.watchAsked === 1 && gateOf(same(mo.second, [1634, 1232])) && mo.mainAsked === 1, `B-92aa r2217 (b)(c): a WATCHING pane's hello takes the pane (${mo.watchHello}), the plan still read once; the plan's mark goes at the FIRST main whatever the mode — a later main of the same connection maps the pane (${mo.second}), never the old plan`, mo);
   const old = anchored(anchored(vsrc, CONNECT_NOW, "    planned = (typeof firstPane === 'function' && firstPane()) || null; // 76cc2bb77\n    const s = planned || paneSize();", 'B-92aa r2217 control: 76cc2bb77\'s connect'), MAIN_NOW, "if (client && win && mode === 'active') { const s = planned || paneSize(); planned = null; client.resize(s.width, s.height); }", 'B-92aa r2217 control: 76cc2bb77\'s main announce'); // stale-pins: kept — the RED plants 76cc2bb77's own connect and main lines into a copy of today's view
   const mOld = await modes(await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', old, 'b92aa-modes')).href));
-  ok(same(mOld.watchHello, [1818, 1232]) && same(mOld.second, [1818, 1232]), `RED CONTROL (B-92aa r2217, 76cc2bb77's view): the watching pane's hello takes the plan (${mOld.watchHello}) and the replaced main maps the OLD plan (${mOld.second})`, mOld);
-  ok(/    planned = null; \/\/ B-92aa \(r2217\): the pane moved under a live client/.test(vsrc) && vsrc.indexOf('    planned = null; // B-92aa (r2217)') > vsrc.indexOf('  const relayout = () => {') && vsrc.indexOf('    planned = null; // B-92aa (r2217)') < vsrc.indexOf('  const ro = typeof ResizeObserver'), 'B-92aa r2217: a pane change under a live client (relayout) drops the plan — the main announce never puts an older plan over it');
+  ok(gateOf(same(mOld.watchHello, [1818, 1232])) && verdictOf(same(mOld.second, [1818, 1232])), `RED CONTROL (B-92aa r2217, 76cc2bb77's view): the watching pane's hello takes the plan (${mOld.watchHello}) and the replaced main maps the OLD plan (${mOld.second})`, mOld);
+  ok(gateOf(/    planned = null; \/\/ B-92aa \(r2217\): the pane moved under a live client/.test(vsrc)) && vsrc.indexOf('    planned = null; // B-92aa (r2217)') > vsrc.indexOf('  const relayout = () => {') && vsrc.indexOf('    planned = null; // B-92aa (r2217)') < vsrc.indexOf('  const ro = typeof ResizeObserver'), 'B-92aa r2217: a pane change under a live client (relayout) drops the plan — the main announce never puts an older plan over it');
 }
 
-for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} SKIPPED` : ''})` : skipped ? `\n${pass} passed, ${skipped} SKIPPED (named above) — not ALL PASS` : `\nALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

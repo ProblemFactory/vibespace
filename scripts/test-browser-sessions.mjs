@@ -38,7 +38,7 @@ const N = require('../src/normalizers.js');
 const express = require('express');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -73,12 +73,12 @@ console.log('— ① sessions: pairing, open, restart, the implicit ones, the ca
     e('tr-0000000000c1', t0 + 2 * DAY, { browserSession: 'bs-000000cc' })];
   const ss = BS.pairSessions({ markers, entries, now: t0 + DAY + 30 * MIN });
   const by = Object.fromEntries(ss.map((s) => [s.id, s]));
-  ok(ss.length === 5 && ss[0].id === 'bs-000000cc' && ss.map((s) => s.startAt).every((v, i, a) => i === 0 || a[i - 1] >= v), `five sessions, NEWEST first (${ss.map((s) => s.id).join(' ')})`);
+  ok(ss.length === 5 && ss[0].id === 'bs-000000cc' && verdictOf(ss.map((s) => s.startAt).every((v, i, a) => i === 0 || a[i - 1] >= v)), `five sessions, NEWEST first (${ss.map((s) => s.id).join(' ')})`);
   ok(by['bs-00000001'].open === false && by['bs-00000001'].count === 2 && by['bs-00000001'].durationMs === 10 * MIN && by['bs-00000001'].reason === 'released' && by['bs-00000001'].label === 'work' && !by['bs-00000001'].implicit, 'a start + an end pair: closed, its two actions, 10 min, why it ended, the profile\'s name at the start');
   ok(by['bs-00000002'].open === true && by['bs-00000002'].count === 1 && by['bs-00000002'].durationMs === 30 * MIN && by['bs-00000002'].endAt === null, 'a start with no end is OPEN — its duration runs to now');
   const imp = ss.filter((s) => s.implicit && s.id !== 'bs-000000cc');
-  ok(imp.length === 2 && imp.every((s) => /^bs-[0-9a-f]{8}$/.test(s.id)) && imp.map((s) => s.count).sort().join() === '1,2' && imp.every((s) => s.open === false && s.reason === null), 'untagged (pre-session) records form IMPLICIT sessions, split at the 30-min gap — an action before any start is its own session, closed');
-  ok(by['bs-000000cc'].implicit && by['bs-000000cc'].count === 1 && by['bs-000000cc'].startAt === t0 + 2 * DAY, 'a tagged record whose markers are gone makes its session from its entries');
+  ok(imp.length === 2 && gateOf(imp.every((s) => /^bs-[0-9a-f]{8}$/.test(s.id))) && imp.map((s) => s.count).sort().join() === '1,2' && verdictOf(imp.every((s) => s.open === false && s.reason === null)), 'untagged (pre-session) records form IMPLICIT sessions, split at the 30-min gap — an action before any start is its own session, closed');
+  ok(gateOf(by['bs-000000cc'].implicit) && by['bs-000000cc'].count === 1 && by['bs-000000cc'].startAt === t0 + 2 * DAY, 'a tagged record whose markers are gone makes its session from its entries');
   const ord = BS.sessionOrdinals(ss);
   ok(ord.get(imp.sort((a, b) => a.startAt - b.startAt)[0].id) === 1 && ord.get('bs-00000001') === 3 && ord.get('bs-000000cc') === 5, 'the ordinals count OLDEST first (Session 1 is the first)');
   ok(BS.sessionOfEntry(entries[0], ss) === 'bs-00000001' && BS.sessionOfEntry(entries[4], ss) === imp.find((s) => s.count === 2).id && BS.sessionOfEntry({ id: 'x', at: 1, browserKey: KA, profileId: P1 }, ss) === null, 'which session an entry belongs to: its tag, else the implicit span of its browser, else none');
@@ -93,9 +93,9 @@ console.log('— ① sessions: pairing, open, restart, the implicit ones, the ca
   const cards = BS.chatCardsFor(withHelper, KA, { limit: 1024 * MB });
   ok(cards.map((c) => c.id).join() === 'bs:bs-00000001:start,bs:bs-00000001:end,bs:bs-00000002:start', `the chat gets start + end per MARKED session of its own key, oldest first — no implicit one, no helper's (${KC}), no other conversation's (${cards.map((c) => c.id).join(' ')})`);
   ok(cards[1].durationMs === 10 * MIN && cards[1].count === 2 && cards[1].reason === 'released' && cards[1].limit === 1024 * MB && cards[0].label === 'work' && cards[0].profileId === P1, 'the end card carries the duration, the count, the reason and the limit; the start card the profile');
-  ok(BS.sessionsOfKey(withHelper, KA).some((s) => s.id === 'bs-000000dd') && !BS.sessionsOfKey(withHelper, KA).some((s) => s.id === 'bs-000000ee'), '…while the conversation\'s LIST includes its helpers\' browsers (not another conversation\'s)');
+  ok(gateOf(BS.sessionsOfKey(withHelper, KA).some((s) => s.id === 'bs-000000dd')) && !BS.sessionsOfKey(withHelper, KA).some((s) => s.id === 'bs-000000ee'), '…while the conversation\'s LIST includes its helpers\' browsers (not another conversation\'s)');
   const blk = BS.cardBlock({ phase: 'start', session: 'bs-00000001', at: 5, browserKey: KA, profileId: P1, label: '<img src=x onerror=alert(1)>' });
-  ok(blk && blk.type === 'browser_session' && blk.label === '<img src=x onerror=alert(1)>' && BS.cardBlock({ phase: 'start', session: 'bs-1', at: 5 }) === null && BS.cardBlock({ phase: 'middle', session: 'bs-00000001' }) === null && BS.cardBlock({ phase: 'end', session: 'bs-00000001', browserKey: 'x', profileId: '../p', reason: 'x' }).reason === 'stopped', 'a card block: a label stays TEXT (the renderer sets textContent), a bad id / phase is refused, a bad key / profile / reason never passes');
+  ok(gateOf(blk) && blk.type === 'browser_session' && blk.label === '<img src=x onerror=alert(1)>' && BS.cardBlock({ phase: 'start', session: 'bs-1', at: 5 }) === null && BS.cardBlock({ phase: 'middle', session: 'bs-00000001' }) === null && BS.cardBlock({ phase: 'end', session: 'bs-00000001', browserKey: 'x', profileId: '../p', reason: 'x' }).reason === 'stopped', 'a card block: a label stays TEXT (the renderer sets textContent), a bad id / phase is refused, a bad key / profile / reason never passes');
   // a session that ended in the SAME millisecond the next one started: its end, then the next start — never two starts
   const tie = BS.pairSessions({ markers: [BS.markerFor({ phase: 'start', id: 'bs-000000f1', browserKey: KA, at: 7 }), BS.markerFor({ phase: 'end', id: 'bs-000000f1', browserKey: KA, at: 9, reason: 'released' }), BS.markerFor({ phase: 'start', id: 'bs-000000f2', browserKey: KA, at: 9 }), BS.markerFor({ phase: 'end', id: 'bs-000000f2', browserKey: KA, at: 9, reason: 'stopped' }), BS.markerFor({ phase: 'start', id: 'bs-000000f3', browserKey: KA, at: 9 })] });
   ok(BS.chatCardsFor(tie, KA).map((c) => c.id.replace('bs:bs-000000', '')).join() === 'f1:start,f1:end,f2:start,f2:end,f3:start' && tie.map((s) => s.id.slice(3)).join() === '000000f3,000000f2,000000f1', 'three sessions in one millisecond keep the order they happened in (start, end, start, end, start) — the marker file\'s order breaks the tie');
@@ -108,7 +108,7 @@ console.log('— ① sessions: pairing, open, restart, the implicit ones, the ca
     ok(hs.holder === 'user' && hs.recorded === false && !('webuiSessionId' in hs) && he.reason === 'left' && BS.markerFor({ phase: 'start', id: 'bs-000000a2', browserKey: KA, at: 1, holder: 'agent', recorded: true }).holder === undefined && BS.markerFor({ phase: 'start', id: 'bs-000000a2', browserKey: KA, at: 1, holder: 'agent', recorded: true }).recorded === undefined, 'a human marker carries holder:user + whether it was recorded (never a webui session id); `left` is an end reason; any other holder value (and its `recorded`) is dropped');
     const hss = BS.pairSessions({ markers: [...markers, hs, he], entries });
     const h = hss.find((x) => x.id === 'bs-000000a1');
-    ok(h && h.holder === 'user' && h.browserKey === HU && h.reason === 'left' && h.durationMs === 4 * MIN && h.count === 0 && !h.open && hss.filter((x) => x.holder === 'user').length === 1, 'pairSessions copies the holder: the user\'s session pairs (4 min, left), every other session has none', h);
+    ok(gateOf(h) && h.holder === 'user' && h.browserKey === HU && h.reason === 'left' && h.durationMs === 4 * MIN && h.count === 0 && !h.open && hss.filter((x) => x.holder === 'user').length === 1, 'pairSessions copies the holder: the user\'s session pairs (4 min, left), every other session has none', h);
     ok(BS.chatCardsFor(hss, HU).length === 0 && !BS.chatCardsFor(hss, KA).some((c) => c.session === 'bs-000000a1'), 'chatCardsFor: a human key is refused by the first gate (not a browser key), and the user\'s session is never a conversation\'s card');
     // the second gate on its own: a marker that names the user under a conversation's key (a forged / migrated line) is skipped too
     const forged = BS.pairSessions({ markers: [BS.markerFor({ phase: 'start', id: 'bs-000000a3', browserKey: KA, profileId: P1, at: t0, holder: 'user' })] });
@@ -147,20 +147,20 @@ function planLegs(TT, tag = '') {
   return res;
 }
 {
-  for (const x of planLegs(T)) ok(x.c, x.n);
+  for (const x of planLegs(T)) ok(verdictOf(x.c), x.n);
   ok(T.traceBytesLimit(undefined) === 1024 * MB && T.traceBytesLimit('') === 1024 * MB && T.traceBytesLimit('nope') === 1024 * MB && T.traceBytesLimit(0) === 1024 * MB, 'the setting unset / garbage ⇒ the 1 GiB default (browser.traceBytesPerProfile, MB)');
   ok(T.traceBytesLimit(512) === 512 * MB && T.traceBytesLimit(10) === 64 * MB && T.traceBytesLimit(64) === 64 * MB && T.TRACE_BYTES_FLOOR === 64 * MB && T.TRACE_BYTES_SETTING === 'browser.traceBytesPerProfile', 'a set value in MB, never below the 64 MB floor');
   ok(T.entryFrameBytes({ before: { file: 'a.jpg', bytes: 7 }, after: { file: 'a.jpg', bytes: 7 } }) === 7 && T.entryFrameBytes({ before: { file: 'a.jpg', bytes: 7 }, after: { file: 'b.jpg', bytes: 5 } }) === 12 && T.entryFrameBytes({ before: null, after: null, framesRemoved: {} }) === 0, 'an entry\'s frame bytes count each FILE once (an unchanged after IS the before file)');
   // the schema row matches the PURE constants
   const schema = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8');
-  ok(/'browser\.traceBytesPerProfile': \{[\s\S]{0,600}?type: 'number', default: 1024, min: 64,/.test(schema), 'the setting row: number, default 1024 MB, min 64 — the same numbers the PURE limit reads');
+  ok(verdictOf(/'browser\.traceBytesPerProfile': \{[\s\S]{0,600}?type: 'number', default: 1024, min: 64,/.test(schema)), 'the setting row: number, default 1024 MB, min 64 — the same numbers the PURE limit reads');
   // CONTROL (a): a patched copy that ALSO sweeps by age ⇒ the legs go red
   const src = fs.readFileSync(path.join(REPO, 'src/browser-trace.js'), 'utf8');
   const needle = '    for (const s of order) {\n      if (frames + lists <= limit) break;';
-  ok(src.includes(needle), 'the control\'s anchor is in the plan (else the control would judge nothing)');
+  ok(verdictOf(src.includes(needle)), 'the control\'s anchor is in the plan (else the control would judge nothing)');
   const aged = M.load('src/browser-trace.js', editAnchor(src, needle, "    for (const s of sessions) for (const e of s.entries) if ((Number(e.frameBytes) || 0) && (Date.now() - (Number(e.at) || 0) > 7 * 86400000 || (arguments[0].now && arguments[0].now - (Number(e.at) || 0) > 7 * 86400000))) { removeFrames.push({ key, id: e.id, session: s.id, bytes: Number(e.frameBytes) || 0, why: 'older than 7 d' }); frames -= Number(e.frameBytes) || 0; e.frameBytes = 0; }\n" + needle, "src/browser-trace.js"), 'by-age');
   const agedLegs = planLegs(aged, '[age copy] ');
-  ok(agedLegs.some((x) => !x.c), `CONTROL: a copy that also sweeps by AGE fails the legs (${agedLegs.filter((x) => !x.c).map((x) => x.n.replace('[age copy] ', '')).join(' | ')})`);
+  ok(verdictOf(agedLegs.some((x) => !x.c)), `CONTROL: a copy that also sweeps by AGE fails the legs (${agedLegs.filter((x) => !x.c).map((x) => x.n.replace('[age copy] ', '')).join(' | ')})`);
   // the census: no age rule in either browser-trace.js; TRACE_RETENTION_MS nowhere in the product
   const pureTxt = src, orchTxt = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
   // (the stale-PROFILE listing's "unused for N d" is a label on a row nobody deletes by itself — not a record rule)
@@ -174,7 +174,7 @@ function planLegs(TT, tag = '') {
   ok(hits.length === 0, `TRACE_RETENTION_MS is gone from src/ (${hits.join(' ') || 'none'})`);
   const RRm = require('../src/browser-recording-retention.js');
   const rp = RRm.recordingRetentionPlan({ groups: [{ key: P1, entries: [{ id: 'a.webm', at: 0, bytes: 1 }, { id: 'b.webm', at: 9 * DAY, bytes: 5 }] }], now: 10 * DAY });
-  ok(rp.remove.length === 1 && rp.remove[0].id === 'a.webm' && /older than 7 d/.test(rp.remove[0].why) && RRm.RECORDING_BYTES_PER_PROFILE === 200 * MB, 'the VIDEO recordings keep their own bound, unchanged (7 d / 200 MB, oldest first)');
+  ok(rp.remove.length === 1 && rp.remove[0].id === 'a.webm' && gateOf(/older than 7 d/.test(rp.remove[0].why)) && RRm.RECORDING_BYTES_PER_PROFILE === 200 * MB, 'the VIDEO recordings keep their own bound, unchanged (7 d / 200 MB, oldest first)');
 }
 
 // ═══ ③ the REAL recorder: markers on the lease seam, tags, restart, the sweep ═══
@@ -216,14 +216,14 @@ async function click(w, key, id) {
   w1.reg.leases.push({ profileId: P1, browserKey: KA, sessionId: 's-a' });
   await w1.emit({ kind: 'attach', browserKey: KA, profileId: P1, sessionId: 's-a' });
   let ms = markersOn(w1, P1);
-  ok(ms.length === 1 && ms[0].phase === 'start' && BS.isSessionId(ms[0].id) && ms[0].browserKey === KA && ms[0].label === 'work' && ms[0].webuiSessionId === 's-a' && ms[0].reason === 'attach', 'an ATTACH (the lease granted) writes the session\'s start marker — its id, key, profile name, the conversation\'s live id');
+  ok(ms.length === 1 && ms[0].phase === 'start' && gateOf(BS.isSessionId(ms[0].id)) && ms[0].browserKey === KA && ms[0].label === 'work' && ms[0].webuiSessionId === 's-a' && ms[0].reason === 'attach', 'an ATTACH (the lease granted) writes the session\'s start marker — its id, key, profile name, the conversation\'s live id');
   const sid = ms[0].id;
-  ok(hook1.length === 1 && hook1[0].id === sid && bc1.some((m) => m.type === 'browser-sessions-updated' && m.marker.id === sid && m.browserKey === KA), 'the wiring\'s hook and every client hear the marker (browser-sessions-updated)');
+  ok(hook1.length === 1 && hook1[0].id === sid && verdictOf(bc1.some((m) => m.type === 'browser-sessions-updated' && m.marker.id === sid && m.browserKey === KA)), 'the wiring\'s hook and every client hear the marker (browser-sessions-updated)');
   await w1.emit({ kind: 'browser-ready', profileId: P1 });
   ok(markersOn(w1, P1).length === 1, 'the browser starting under the open session opens nothing new (one lease, one session)');
   await click(w1, `s-a|${P1}`, 'c1'); await click(w1, `s-a|${P1}`, 'c2');
   const es = tr1.list({ profileId: P1 });
-  ok(es.length === 2 && es.every((e) => e.browserSession === sid), 'every action of the run carries the session id (`browserSession`)');
+  ok(es.length === 2 && verdictOf(es.every((e) => e.browserSession === sid)), 'every action of the run carries the session id (`browserSession`)');
   await w1.emit({ kind: 'browser-stopped', profileId: P1, why: 'idle' });
   await w1.emit({ kind: 'browser-stopped', profileId: P1, why: 'turn-idle' });
   ok(markersOn(w1, P1).length === 1, 'an IDLE stop (idle, turn-idle) ends nothing — the lease lives, so the session does');
@@ -260,10 +260,10 @@ async function click(w, key, id) {
   settings['browser.actionTrace'] = true;
   // the readers
   const sl = tr1.sessions({ browserKey: KA });
-  ok(sl.length === 4 && sl.every((s) => s.browserKey === KA) && sl[0].startAt >= sl[1].startAt && tr1.sessions({ profileId: null }).length === 1, `the reader: this conversation's sessions newest first (${sl.length}); one scope alone (the ephemeral one: 1)`);
-  ok(tr1.sessionEntries(sid).length === 2 && tr1.sessionEntries(sid).every((e) => e.browserSession === sid) && tr1.sessionEntries('bs-deadbeef').length === 0 && tr1.sessionEntries('x').length === 0, '…one session\'s actions, oldest first; an unknown / bad id none');
+  ok(sl.length === 4 && gateOf(sl.every((s) => s.browserKey === KA)) && sl[0].startAt >= sl[1].startAt && tr1.sessions({ profileId: null }).length === 1, `the reader: this conversation's sessions newest first (${sl.length}); one scope alone (the ephemeral one: 1)`);
+  ok(tr1.sessionEntries(sid).length === 2 && gateOf(tr1.sessionEntries(sid).every((e) => e.browserSession === sid)) && tr1.sessionEntries('bs-deadbeef').length === 0 && tr1.sessionEntries('x').length === 0, '…one session\'s actions, oldest first; an unknown / bad id none');
   const cc = tr1.chatCardsFor(KA);
-  ok(cc.length === 8 && cc[0].id === `bs:${sid}:start` && cc[1].id === `bs:${sid}:end` && cc.every((c) => c.browserKey === KA) && tr1.chatCardsFor('nope').length === 0, `the chat cards of the conversation (${cc.length}: start + end of its four sessions, oldest first)`);
+  ok(cc.length === 8 && cc[0].id === `bs:${sid}:start` && cc[1].id === `bs:${sid}:end` && gateOf(cc.every((c) => c.browserKey === KA)) && tr1.chatCardsFor('nope').length === 0, `the chat cards of the conversation (${cc.length}: start + end of its four sessions, oldest first)`);
 }
 {
   // A RESTART: a session left open whose lease came back is RE-OPENED (no end); one without a lease ends `restart` at its last action
@@ -316,18 +316,18 @@ async function click(w, key, id) {
   // CONTROL (b) FIRST, on a copy of the files: a recorder whose sweep DROPS the lists must fail the legs
   const osrc = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
   const needle = '      await rewriteIndexAsync(sc, step);\n    }\n    // recordings: their own bound';   // r4522: the rewrite reads the live list
-  ok(osrc.includes(needle), 'the list-dropping control\'s anchor is in the sweep');
+  ok(verdictOf(osrc.includes(needle)), 'the list-dropping control\'s anchor is in the sweep');
   const snap = fs.mkdtempSync(path.join(ROOT, 'snap-'));
   fs.cpSync(sd, snap, { recursive: true });
   const dropper = M.load('src/server/browser-trace.js', editAnchor(osrc, needle, '      indexes.set(sc, list.filter((e) => !gone.has(e.id))); await rewriteIndexAsync(sc, step);\n    }\n    // recordings: their own bound', "src/server/browser-trace.js"), 'drops-lists');
   const bad = await legs(dropper);
-  ok(bad.some((x) => !x.c), `CONTROL: a sweep that DROPS the swept actions' lists fails (${bad.filter((x) => !x.c).map((x) => x.n).join(' | ')})`);
+  ok(verdictOf(bad.some((x) => !x.c)), `CONTROL: a sweep that DROPS the swept actions' lists fails (${bad.filter((x) => !x.c).map((x) => x.n).join(' | ')})`);
   fs.rmSync(sd, { recursive: true, force: true }); fs.cpSync(snap, sd, { recursive: true });
-  for (const x of await legs(R)) ok(x.c, x.n);
+  for (const x of await legs(R)) ok(verdictOf(x.c), x.n);
   delete settings['browser.traceBytesPerProfile'];
   const hk = await mk(w3, [], []).housekeeping();
   const row = hk.profiles.find((r) => r.id === P1);
-  ok(row && row.trace.limit === 1024 * MB && row.trace.used > 0 && row.trace.used === row.trace.frameBytes + row.trace.listBytes && hk.limits.bytesPerProfile === 1024 * MB, 'the panel row says what the records use against the limit ({used} of {size})');
+  ok(gateOf(row) && row.trace.limit === 1024 * MB && row.trace.used > 0 && row.trace.used === row.trace.frameBytes + row.trace.listBytes && hk.limits.bytesPerProfile === 1024 * MB, 'the panel row says what the records use against the limit ({used} of {size})');
 }
 
 // ═══ ④ the normalizers: by time, and the live gate ═══════════════════════════
@@ -368,13 +368,13 @@ console.log('— ④ the chat cards in the normalizers: by time on a rebuild, ga
   live._normalizer.onOp((o) => ops2.push(o));
   ok(N.feedBrowserCard(live, cards[1]) === false && N.feedBrowserCard(live, cards[0]) === true && ops2.length === 1 && ops2[0].op === 'create' && ops2[0].message.content[0].phase === 'end', 'once loaded: the end card is a live `create` op; the start card the rebuild already placed is not drawn twice');
   const src = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-  ok(/(?:await |gatedRead\(\{ host: data\.host \|\| null, conv: backendSessionId \}, \(\) => )convertWithCards\(mm, sm\.raw\(\), browserCardsFor\(\{ conversationId: backendSessionId \}\)(?:, \{ artifacts: artifactDeriveOpts\(\{[^}]*\}\) \})?\)/.test(src), 'a view-only history (a stopped conversation) places its cards the same way — wiring pin in ws-handler');
+  ok(verdictOf(/(?:await |gatedRead\(\{ host: data\.host \|\| null, conv: backendSessionId \}, \(\) => )convertWithCards\(mm, sm\.raw\(\), browserCardsFor\(\{ conversationId: backendSessionId \}\)(?:, \{ artifacts: artifactDeriveOpts\(\{[^}]*\}\) \})?\)/.test(src)), 'a view-only history (a stopped conversation) places its cards the same way — wiring pin in ws-handler');
   // the tool card's window ends at the NEXT MESSAGE — a session card lands inside the call that started the browser, so
   // ending there cut off the call's own actions (test-browser-live's lane H leg went red on it: the navigation 3 s after)
   const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  ok(/n\.classList\.contains\('chat-browser-session'\) \? 0 : Number\(n\.dataset && n\.dataset\.ts\)/.test(tv), 'a tool card\'s actions window skips a browser-session card (it is not the next message) — wiring pin in createCardTraceLoader.windowOf');
+  ok(verdictOf(/n\.classList\.contains\('chat-browser-session'\) \? 0 : Number\(n\.dataset && n\.dataset\.ts\)/.test(tv)), 'a tool card\'s actions window skips a browser-session card (it is not the next message) — wiring pin in createCardTraceLoader.windowOf');
   const wir = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/N\.setBrowserCardSource\(/.test(wir) && /onSession\s*\}\)/.test(wir) && /N\.feedBrowserCard\(s, cardOfMarker\(m\)\)/.test(wir), 'the wiring: the recorder\'s hook feeds the live card, the card source reads the markers (bindings for a stopped one)');
+  ok(gateOf(/N\.setBrowserCardSource\(/.test(wir)) && gateOf(/onSession\s*\}\)/.test(wir)) && verdictOf(/N\.feedBrowserCard\(s, cardOfMarker\(m\)\)/.test(wir)), 'the wiring: the recorder\'s hook feeds the live card, the card source reads the markers (bindings for a stopped one)');
 }
 
 // ═══ ⑤ the route, in-process ═══════════════════════════════════════════════════
@@ -394,7 +394,7 @@ console.log('— ⑤ GET /api/browser/sessions');
   ok((await get(`?browserKey=${KA}`)).body.keyFrom === 'given' && (await get('?conversation=conv-nope')).body.sessions.length === 0, 'by a key given outright; an unknown conversation is EMPTY, never every session');
   const one = a.body.sessions.find((s) => s.count === 2);
   const s = await get(`?sessionId=s-a&session=${one.id}`);
-  ok(s.status === 200 && s.body.entries.length === 2 && s.body.entries.every((e) => e.browserSession === one.id) && s.body.session.id === one.id, '`session=` adds that session\'s actions (oldest first)');
+  ok(s.status === 200 && s.body.entries.length === 2 && gateOf(s.body.entries.every((e) => e.browserSession === one.id)) && s.body.session.id === one.id, '`session=` adds that session\'s actions (oldest first)');
   ok(s.body.entriesTotal === 2, 'a session under the cap: `entriesTotal` equals the actions carried (no cut to name)');
   // verifier 2026-09-28: a long session's answer carries the NEWEST 1 000 actions and NAMES the cut — the window used to say
   // "Actions (1000)" under a session row saying 5 000, a silent cut
@@ -408,14 +408,14 @@ console.log('— ⑤ GET /api/browser/sessions');
     const tr5 = mk(w1, [], []); // a fresh recorder reads the index again
     setup({ keeper: w1.keeper, trace: tr5, activeSessions, bindings: { lookup: (c) => (c === 'conv-a' ? KA : '') } });
     const l = await get(`?sessionId=s-a&session=${one.id}`);
-    ok(l.status === 200 && l.body.entries.length === 1000 && l.body.entriesTotal === 1200 && l.body.entries[999].at === Math.max(...l.body.entries.map((e) => e.at)) && l.body.entries.every((e) => e.browserSession === one.id), `a 1 200-action session: the NEWEST 1 000 ride the answer and \`entriesTotal\` names the whole (${l.body.entries.length} of ${l.body.entriesTotal})`);
+    ok(l.status === 200 && l.body.entries.length === 1000 && l.body.entriesTotal === 1200 && l.body.entries[999].at === Math.max(...l.body.entries.map((e) => e.at)) && verdictOf(l.body.entries.every((e) => e.browserSession === one.id)), `a 1 200-action session: the NEWEST 1 000 ride the answer and \`entriesTotal\` names the whole (${l.body.entries.length} of ${l.body.entriesTotal})`);
     setup({ keeper: w1.keeper, trace: tr1, activeSessions, bindings: { lookup: (c) => (c === 'conv-a' ? KA : '') } });
   }
   const p = await get(`?profile=${P1}`);
   ok(p.status === 200 && p.body.sessions.length === 4 && (await get('?profile=ephemeral')).body.sessions.length === 1, 'by profile alone: every conversation\'s sessions on it (the Agent browser panel\'s Replay…)');
   ok((await get('')).status === 400 && (await get('?session=bs-1&sessionId=s-a')).status === 400 && (await get('?browserKey=nope')).status === 400 && (await get('?sessionId=s-a&host=h1')).body.code === 'unsupported-host', 'nothing asked / a bad session id / a bad key are 400; a host is refused by name');
   const auth = fs.readFileSync(path.join(REPO, 'src/door.js'), 'utf8');   // the door class, lifted verbatim out of src/auth.js by B3a
-  ok(/if \(p\.startsWith\('\/api\/agent\/'\)\) return next\(\);/.test(auth) && !fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8').includes('/api/agent/browser/sessions'), 'cookie only: the route is not under /api/agent/ (the only prefix the bearer tokens pass) and the agent routes got nothing new');
+  ok(gateOf(/if \(p\.startsWith\('\/api\/agent\/'\)\) return next\(\);/.test(auth)) && !fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8').includes('/api/agent/browser/sessions'), 'cookie only: the route is not under /api/agent/ (the only prefix the bearer tokens pass) and the agent routes got nothing new');
 }
 
 // ═══ ⑥ the replay model ═══════════════════════════════════════════════════════
@@ -426,11 +426,11 @@ console.log('— ⑥ the replay model');
   st = BS.replayKey(st, 'ArrowRight', 5); st = BS.replayKey(st, 'ArrowRight', 5); ok(st.index === 2, '→ steps');
   st = BS.replayKey(st, 'End', 5); ok(st.index === 4, 'End = the last');
   st = BS.replayKey(st, 'Home', 5); ok(st.index === 0, 'Home = the first');
-  st = BS.replayKey(st, ' ', 5); ok(st.playing && st.index === 0, 'Space plays');
+  st = BS.replayKey(st, ' ', 5); ok(gateOf(st.playing) && st.index === 0, 'Space plays');
   const seen = [st.index];
   for (let i = 0; i < 10 && st.playing; i++) { st = BS.playTick(st, 5); seen.push(st.index); }
   ok(seen.join() === '0,1,2,3,4' && st.playing === false, `play steps one action at a time and STOPS at the last (${seen.join(' ')}) — ${BS.PLAY_STEP_MS} ms a step`);
-  st = BS.replayKey(st, ' ', 5); ok(st.playing && st.index === 0, 'Space at the last action plays it again from the start');
+  st = BS.replayKey(st, ' ', 5); ok(gateOf(st.playing) && st.index === 0, 'Space at the last action plays it again from the start');
   st = BS.replayKey(st, ' ', 5); ok(!st.playing, 'Space while playing pauses');
   st = BS.replayKey({ index: 3, playing: true }, 'ArrowLeft', 5); ok(!st.playing && st.index === 2, 'a step key stops the play');
   ok(!BS.replayKey({ index: 0 }, ' ', 1).playing && !BS.replayKey({ index: 0 }, ' ', 0).playing, 'one action (or none) has nothing to play');
@@ -451,20 +451,20 @@ console.log('— ⑦ the words (en through the module; zh + ja in the dictionari
   const W = await import('../src/lib/browser-session-words.js');
   ok(W.durationText(42000) === '42 sec' && W.durationText(3 * MIN) === '3 min' && W.durationText(65 * MIN) === '1 h 5 min' && W.durationText(120 * MIN) === '2 h', 'durations: 42 sec · 3 min · 1 h 5 min · 2 h');
   ok(W.sizeText(1024 * MB) === '1 GB' && W.sizeText(64 * MB) === '64 MB' && W.sizeText(1536 * MB) === '1.5 GB', 'sizes: 1 GB · 64 MB · 1.5 GB');
-  ok(/^Browser session started · work · /.test(W.startCardText({ label: 'work', at: Date.now() })) && /^Browser session started · a browser of its own · /.test(W.startCardText({ at: Date.now() })), 'the start card: "Browser session started · {profile} · {time}", an ephemeral one "a browser of its own"');
+  ok(gateOf(/^Browser session started · work · /.test(W.startCardText({ label: 'work', at: Date.now() }))) && verdictOf(/^Browser session started · a browser of its own · /.test(W.startCardText({ at: Date.now() }))), 'the start card: "Browser session started · {profile} · {time}", an ephemeral one "a browser of its own"');
   // the end card says WHY it ended (the naive-user verifier, 2026-09-28), one word per END_REASONS entry; Replay only with actions
   const REASONS = { released: 'the conversation stopped using this browser', dropped: 'the conversation stopped', stopped: 'the browser was stopped', switched: 'the browser was switched', restart: 'VibeSpace restarted', left: 'you closed your browsing window' };
-  ok(BS.END_REASONS.every((r) => W.endReasonText(r) === REASONS[r]) && Object.keys(REASONS).length === BS.END_REASONS.length && W.endReasonText('zz') === '' && W.endCardText({ durationMs: 125000, count: 4, reason: 'switched' }) === 'Browser session ended · 2 min · 4 actions · the browser was switched',
+  ok(gateOf(BS.END_REASONS.every((r) => W.endReasonText(r) === REASONS[r])) && Object.keys(REASONS).length === BS.END_REASONS.length && W.endReasonText('zz') === '' && W.endCardText({ durationMs: 125000, count: 4, reason: 'switched' }) === 'Browser session ended · 2 min · 4 actions · the browser was switched',
     'the end card names why the session ended — every reason of the closed set has its words, an unknown one says nothing');
   ok(W.endCardReplays({ count: 3 }) === true && W.endCardReplays({ count: 0 }) === false && W.endCardReplays({}) === false, 'an end card offers Replay only when the agent acted (a 0-action replay could only say "the agent did not act")');
   const chatR = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
   // lane browser-resume B: the end card may also offer Resume — Replay is still drawn only behind endCardReplays
-  ok(/if \(endCardReplays\(b\)\) \{\n\s+const replay = textBtn\(t\('Replay'\)/.test(chatR) && /if \(!endCardReplays\(b\) && !resumable\) \{ this\._noteBrowserCard\(b, el, null\); return el; \}/.test(chatR), 'WIRING: the chat\'s end card asks endCardReplays before it draws Replay (lane browser-resume B: a card with neither Replay nor Resume draws no action row)');
+  ok(gateOf(/if \(endCardReplays\(b\)\) \{\n\s+const replay = textBtn\(t\('Replay'\)/.test(chatR)) && verdictOf(/if \(!endCardReplays\(b\) && !resumable\) \{ this\._noteBrowserCard\(b, el, null\); return el; \}/.test(chatR)), 'WIRING: the chat\'s end card asks endCardReplays before it draws Replay (lane browser-resume B: a card with neither Replay nor Resume draws no action row)');
   ok(W.endCardText({ durationMs: 125000, count: 4 }) === 'Browser session ended · 2 min · 4 actions' && W.endCardText({ durationMs: 5000, count: 1 }) === 'Browser session ended · 5 sec · 1 action', 'the end card: "Browser session ended · {duration} · {n} actions" (one action singular)');
   ok(W.retentionText(1024 * MB) === "Frames are kept until this profile's records reach 1 GB; the oldest are removed first." && W.framesGoneText(1024 * MB) === 'Frames of this session were removed to stay under the 1 GB limit; the action list is kept', 'the retention sentence and the swept-frames state, word for word');
-  ok(W.emptyText('no-sessions') === 'No browser sessions recorded for this conversation' && W.emptyText('trace-off') === 'Action trace is off' && W.replayTitle('Fix login') === 'Browser replay · Fix login' && /^Session 3 · started /.test(W.dividerText(3, Date.now())), 'the empty states, the title, the divider');
+  ok(W.emptyText('no-sessions') === 'No browser sessions recorded for this conversation' && W.emptyText('trace-off') === 'Action trace is off' && W.replayTitle('Fix login') === 'Browser replay · Fix login' && verdictOf(/^Session 3 · started /.test(W.dividerText(3, Date.now()))), 'the empty states, the title, the divider');
   // BROWSE YOURSELF (B-6ae8): the user's own session is ONE row "You · 14:02 · 4 min", no Replay, its named empty state
-  ok(/^You · .+ · 4 min$/.test(W.sessionRowText({ holder: 'user', startAt: Date.now(), durationMs: 4 * MIN, count: 0 })) && /^You · .+ · 4 min · 3 actions$/.test(W.sessionRowText({ holder: 'user', startAt: Date.now(), durationMs: 4 * MIN, count: 3 })) && W.sessionReplays({ holder: 'user', count: 3 }) === true && W.sessionReplays({ holder: 'user', count: 0 }) === false && W.sessionReplays({ count: 2 }) === true && W.emptyText('yours-not-recorded') === 'Only when you started and stopped is kept.' && W.emptyText('yours-no-actions') === 'You did not act on the page in this session', 'the user\'s own session: "You · {time} · {dur}" (+ its actions when recorded, then Replay), the opt-out\'s "Only when you started and stopped is kept."');
+  ok(gateOf(/^You · .+ · 4 min$/.test(W.sessionRowText({ holder: 'user', startAt: Date.now(), durationMs: 4 * MIN, count: 0 }))) && gateOf(/^You · .+ · 4 min · 3 actions$/.test(W.sessionRowText({ holder: 'user', startAt: Date.now(), durationMs: 4 * MIN, count: 3 }))) && W.sessionReplays({ holder: 'user', count: 3 }) === true && W.sessionReplays({ holder: 'user', count: 0 }) === false && W.sessionReplays({ count: 2 }) === true && W.emptyText('yours-not-recorded') === 'Only when you started and stopped is kept.' && W.emptyText('yours-no-actions') === 'You did not act on the page in this session', 'the user\'s own session: "You · {time} · {dur}" (+ its actions when recorded, then Replay), the opt-out\'s "Only when you started and stopped is kept."');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const OWNER = {
     'Browser session started · {profile} · {time}': ['浏览器会话开始 · {profile} · {time}', 'ブラウザセッション開始 · {profile} · {time}'],
@@ -486,9 +486,9 @@ console.log('— ⑦ the words (en through the module; zh + ja in the dictionari
   const missing = keys.filter((k) => !zh[k] || !ja[k]);
   ok(keys.length > 30 && missing.length === 0, `every word of the session surfaces is in zh AND ja (${keys.length} keys)`, missing);
   const retired = ['Frames of a logged-in page are secrets: kept {days} days or {mb} MB per profile, whichever comes first, then removed by the sweep.', 'Traces and recordings are kept {days} days or {mb} MB per profile, whichever comes first; frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.'];
-  ok(retired.every((k) => !zh[k] && !ja[k]), 'the retired "kept 7 days" sentences are gone from both dictionaries');
+  ok(verdictOf(retired.every((k) => !zh[k] && !ja[k])), 'the retired "kept 7 days" sentences are gone from both dictionaries');
 }
 
-for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(verdictOf(x.pass), x.name + (x.pass ? '' : ' — ' + x.detail));
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

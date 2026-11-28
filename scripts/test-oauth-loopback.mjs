@@ -27,7 +27,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -104,22 +104,22 @@ const quiet = { warn() {}, log() {}, error() {} };
     exchange: async ({ code, redirectUri }) => { exchanges.push({ code, redirectUri }); return { refresh_token: 'rt-' + code }; },
   });
   ok(f.mode === 'ephemeral' && f.listening === true && f.port > 0 && f.redirectUri === `http://127.0.0.1:${f.port}`, `ephemeral: bound a fresh loopback port and redirect_uri is the bare origin (${f.redirectUri})`);
-  ok(f.consentUrl.includes(encodeURIComponent(f.redirectUri)), 'ephemeral: the consent URL carries THAT redirect_uri');
+  ok(verdictOf(f.consentUrl.includes(encodeURIComponent(f.redirectUri))), 'ephemeral: the consent URL carries THAT redirect_uri');
   ok(f.refusal === null && f.pasteBack === true, 'ephemeral: no refusal, paste-back still offered (a remote browser takes it whatever the port did)');
   const state = new URL(f.consentUrl).searchParams.get('state');
   const bad = await get(`${f.redirectUri}/?state=wrong&code=stolen`);
-  ok(bad.status === 400 && /state mismatch/.test(bad.body) && exchanges.length === 0, 'ephemeral: a callback with the WRONG state is refused (400 "state mismatch") and nothing is exchanged');
+  ok(bad.status === 400 && gateOf(/state mismatch/.test(bad.body)) && exchanges.length === 0, 'ephemeral: a callback with the WRONG state is refused (400 "state mismatch") and nothing is exchanged');
   ok(ol.status(f.flowId).running === true, '…and the flow is still running (a wrong state does not consume it)');
   const good = await get(`${f.redirectUri}/?state=${state}&code=abc123`);
-  ok(good.status === 200 && /close this tab/.test(good.body), 'ephemeral: the right state lands a 200 that tells the user to close the tab');
+  ok(good.status === 200 && verdictOf(/close this tab/.test(good.body)), 'ephemeral: the right state lands a 200 that tells the user to close the tab');
   await sleep(30);
   const s1 = ol.status(f.flowId);
   ok(s1.done === true && s1.ok === true && exchanges.length === 1 && exchanges[0].code === 'abc123' && exchanges[0].redirectUri === f.redirectUri, `ephemeral: the code was exchanged ONCE with the same redirect_uri (${JSON.stringify(exchanges)})`);
-  ok(s1.listening === false && (await portFreed(f.port)), 'ephemeral: the port is RELEASED on completion');
+  ok(s1.listening === false && (verdictOf(await portFreed(f.port))), 'ephemeral: the port is RELEASED on completion');
   const replay = await get(`${f.redirectUri}/?state=${state}&code=abc123`);
   ok(replay.status === 0, 'ephemeral: a replayed callback finds nobody listening (the port was held for ONE flow)');
   const taken = ol.take(f.flowId);
-  ok(taken && taken.ok && taken.result.refresh_token === 'rt-abc123' && ol.status(f.flowId) === null, 'take() hands the adapter its token record ONCE and forgets the flow');
+  ok(gateOf(taken) && gateOf(taken.ok) && taken.result.refresh_token === 'rt-abc123' && ol.status(f.flowId) === null, 'take() hands the adapter its token record ONCE and forgets the flow');
 }
 
 // ── ② FIXED: the registered port + path; another path is not this callback ──
@@ -139,17 +139,17 @@ const quiet = { warn() {}, log() {}, error() {} };
   const wrongPath = await get(`http://127.0.0.1:${P_FIXED}/other?state=${state}&code=x`);
   ok(wrongPath.status === 404 && exchanges.length === 0, 'fixed: a request on ANOTHER path is not this flow\'s callback (404, nothing exchanged)');
   const wrongState = await get(`http://127.0.0.1:${P_FIXED}/lark/cb?state=nope&code=x`);
-  ok(wrongState.status === 400 && /state mismatch/.test(wrongState.body) && exchanges.length === 0, 'fixed: the WRONG state is refused on the request handler too');
+  ok(wrongState.status === 400 && gateOf(/state mismatch/.test(wrongState.body)) && exchanges.length === 0, 'fixed: the WRONG state is refused on the request handler too');
   const good = await get(`http://127.0.0.1:${P_FIXED}/lark/cb?state=${state}&code=lark-code-1`);
   await sleep(30);
   ok(good.status === 200 && exchanges.length === 1 && exchanges[0] === 'lark-code-1' && ol.status(f.flowId).ok === true, 'fixed: the right state on the registered path exchanges the code');
-  ok((await portFreed(P_FIXED)), 'fixed: the port is RELEASED on completion');
+  ok((verdictOf(await portFreed(P_FIXED))), 'fixed: the port is RELEASED on completion');
   // lane dc-channels-consent: the machine holds NO default fixed target — the caller's consent row names its callback
   let noDefault = null; try { OL.fixedTarget(); } catch (e) { noDefault = e.message; }
   const t = OL.fixedTarget(require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL);
-  ok(/no default/.test(noDefault || '') && t.url === require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL && t.pathname === '/lark/cb' && t.port === Number(new URL(require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL).port), 'fixed: with no callback the machine refuses by name (no vendor default); the Lark row\'s registered callback parses to its port and path');
+  ok(gateOf(/no default/.test(noDefault || '')) && t.url === require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL && t.pathname === '/lark/cb' && t.port === Number(new URL(require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL).port), 'fixed: with no callback the machine refuses by name (no vendor default); the Lark row\'s registered callback parses to its port and path');
   let refusedTarget = null; try { OL.fixedTarget('https://my-instance.example/lark/cb'); } catch (e) { refusedTarget = e.message; }
-  ok(/loopback/.test(refusedTarget || ''), 'fixed: a non-loopback callback is refused by name (decision 4/21: the callback is a VibeSpace-owned loopback, never an instance address)');
+  ok(verdictOf(/loopback/.test(refusedTarget || '')), 'fixed: a non-loopback callback is refused by name (decision 4/21: the callback is a VibeSpace-owned loopback, never an instance address)');
 }
 
 // ── ③ PRE-BOUND PORT ⇒ NAMED REFUSAL + PASTE-BACK, never an opaque EADDRINUSE ──
@@ -168,12 +168,12 @@ const quiet = { warn() {}, log() {}, error() {} };
       exchange: async ({ code, redirectUri }) => { exchanges.push({ code, redirectUri }); return { access_token: 'u-' + code }; },
     });
   } catch (e) { threw = e; }
-  ok(!threw && f, 'a pre-bound fixed port does NOT throw out of begin()', threw && threw.message);
-  ok(f && f.refusal && f.refusal.code === OL.PORT_BUSY_CODE && f.refusal.port === P_BUSY && new RegExp(`Lark consent flow on port ${P_BUSY}`).test(f.refusal.message) && /paste-back/.test(f.refusal.message),
+  ok(!threw && verdictOf(f), 'a pre-bound fixed port does NOT throw out of begin()', threw && threw.message);
+  ok(gateOf(f) && gateOf(f.refusal) && f.refusal.code === OL.PORT_BUSY_CODE && f.refusal.port === P_BUSY && gateOf(new RegExp(`Lark consent flow on port ${P_BUSY}`).test(f.refusal.message)) && verdictOf(/paste-back/.test(f.refusal.message)),
     `…it is a NAMED refusal that names the port and the paste-back fallback (${f && f.refusal && f.refusal.message})`);
-  ok(f && f.listening === false && f.pasteBack === true && f.running === true, '…the flow is RUNNING without the port, on the paste-back path');
-  ok(f && f.redirectUri === cb && f.consentUrl.includes(encodeURIComponent(cb)), '…and the consent URL still carries the REGISTERED redirect_uri (the vendor only redirects there)');
-  ok(warned.some((w) => /port-busy|consent flow on port/.test(w)), 'the refusal is logged once with its reason');
+  ok(gateOf(f) && f.listening === false && f.pasteBack === true && f.running === true, '…the flow is RUNNING without the port, on the paste-back path');
+  ok(gateOf(f) && f.redirectUri === cb && verdictOf(f.consentUrl.includes(encodeURIComponent(cb))), '…and the consent URL still carries the REGISTERED redirect_uri (the vendor only redirects there)');
+  ok(verdictOf(warned.some((w) => /port-busy|consent flow on port/.test(w))), 'the refusal is logged once with its reason');
   const state = new URL(f.consentUrl).searchParams.get('state');
   let pb = null; try { await ol.forwardCallback(f.flowId, `${cb}?state=forged&code=stolen`); } catch (e) { pb = e.message; }
   ok(pb === 'state mismatch — restart the flow' && exchanges.length === 0, 'PASTE-BACK: a pasted URL with the WRONG state is refused with gmail-sync\'s exact words, and nothing is exchanged');
@@ -198,14 +198,14 @@ const quiet = { warn() {}, log() {}, error() {} };
   const c = await mk(P_CANCEL, 60000);
   ok(c.listening === true && !(await portFree(P_CANCEL)), 'cancel leg: the port is held while the flow runs');
   ok(ol.cancel(c.flowId) === true && ol.status(c.flowId).cancelled === 'cancelled' && ol.status(c.flowId).running === false, 'cancel() is terminal and says so');
-  ok(await portFreed(P_CANCEL), 'cancel releases the port');
+  ok(verdictOf(await portFreed(P_CANCEL)), 'cancel releases the port');
   ok(ol.cancel(c.flowId) === false, 'cancelling twice is a no-op');
 
   const HT = await held(), P_TIMEOUT = HT.port; await HT.handOver();
   const tmo = await mk(P_TIMEOUT, 120);
   ok(!(await portFree(P_TIMEOUT)), 'timeout leg: the port is held while the flow runs');
   await sleep(250);
-  ok(ol.status(tmo.flowId).cancelled === 'timeout' && (await portFreed(P_TIMEOUT)), 'the flow\'s own timeout releases the port and names the reason');
+  ok(ol.status(tmo.flowId).cancelled === 'timeout' && (verdictOf(await portFreed(P_TIMEOUT))), 'the flow\'s own timeout releases the port and names the reason');
 
   // one flow per id: a second begin() for the same id supersedes the first
   const HS = await held(), P_SUPER = HS.port; await HS.handOver();   // (never the cancel leg's released port again)
@@ -218,18 +218,18 @@ const quiet = { warn() {}, log() {}, error() {} };
   const stopped = ol.stopAll();
   ok(stopped instanceof Promise, 'stopAll() hands back a promise of its servers\' close events (B-cabe)');
   await stopped;
-  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFreed(P_SUPER)), 'stopAll() releases everything (the shutdown path) — its promise resolved, the port free by the bounded re-ask');
+  ok(ol.status(b.flowId).cancelled === 'shutdown' && (verdictOf(await portFreed(P_SUPER))), 'stopAll() releases everything (the shutdown path) — its promise resolved, the port free by the bounded re-ask');
   // CONTROL of the shape leg (its plant proves itself first: the line it replaces is in the tree): a copy whose stopAll() only
   // closes (the old shape) hands back nothing to wait on — the «hands back a promise» leg is RED on it (the port leg is not a
   // control of this change: the listener is gone at close() either way)
   {
     const src = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf8');
     const NEW = "return Promise.all(sts.map((st) => st.closing || Promise.resolve())).then(() => undefined);";
-    ok(src.includes(NEW), 'B-cabe control: its plant is where it claims (stopAll\'s promise line is in src/oauth-loopback.js)');
+    ok(verdictOf(src.includes(NEW)), 'B-cabe control: its plant is where it claims (stopAll\'s promise line is in src/oauth-loopback.js)');
     const MC = mutantCopies('oauth-loopback-stopall', REPO);
     // (the edit goes through anchored(): an anchor that moved THROWS BY NAME — never a copy that controls nothing)
     const OL0 = require(MC.write('src/oauth-loopback.js', anchored(src, NEW, 'return undefined;', 'B-cabe: the stopAll shape control')));
-    for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
+    for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1 })) ok(verdictOf(c.pass), 'tree: ' + c.name, c.pass ? undefined : c.detail);
     const old = OL0 ? OL0.createOAuthLoopback({ log: quiet }) : null;
     const handed = old ? old.stopAll() : 'no copy';
     ok(!!OL0 && !(handed instanceof Promise), 'CONTROL: a copy whose stopAll() only closes (the old shape) hands back no promise — the «hands back a promise» leg is RED on it', String(handed));
@@ -283,16 +283,16 @@ const quiet = { warn() {}, log() {}, error() {} };
     };
     const HD = await held(), PD = HD.port;
     const D = await heldStop(OL, HD);
-    ok(D.listening && D.began && D.within, `B-cabe THE DROP: a keep-alive connection whose response is pending at the stop is dropped — stopAll()'s promise lands within ${TURNS} loop turns (at turn ${D.landedTurn})`, D.began ? undefined : `the held request never reached its exchange: ${D.early || '?'}`);
-    ok(await portFreed(PD), 'B-cabe THE DROP: …and the port is free by the bounded re-ask');
-    ok(src.includes(DROP), 'B-cabe THE DROP control: its plant is where it claims (the drop line is in src/oauth-loopback.js)', src.includes(DROP) ? undefined : 'the anchor of the control «the drop» is not in the source');
+    ok(gateOf(D.listening) && gateOf(D.began) && verdictOf(D.within), `B-cabe THE DROP: a keep-alive connection whose response is pending at the stop is dropped — stopAll()'s promise lands within ${TURNS} loop turns (at turn ${D.landedTurn})`, D.began ? undefined : `the held request never reached its exchange: ${D.early || '?'}`);
+    ok(verdictOf(await portFreed(PD)), 'B-cabe THE DROP: …and the port is free by the bounded re-ask');
+    ok(verdictOf(src.includes(DROP)), 'B-cabe THE DROP control: its plant is where it claims (the drop line is in src/oauth-loopback.js)', src.includes(DROP) ? undefined : 'the anchor of the control «the drop» is not in the source');
     const MD = mutantCopies('oauth-loopback-drop', REPO);
     const OLd = require(MD.write('src/oauth-loopback.js', anchored(src, DROP, '/* the drop cut out (the control) */', 'B-cabe: the drop control')));   // (through anchored(): a moved anchor throws by name)
-    for (const c of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 1, label: 'drop control: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+    for (const c of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 1, label: 'drop control: ' })) ok(verdictOf(c.pass), c.name, c.pass ? undefined : c.detail);
     const HDc = await held(), PDc = HDc.port;
     const C = OLd ? await heldStop(OLd, HDc) : (await HDc.handOver(), { listening: false, began: false, within: true, landedTurn: -1 });
-    ok(!!OLd && C.listening && C.began && !C.within, `B-cabe THE DROP CONTROL: a copy without the drop — stopAll()'s promise has NOT landed within ${TURNS} loop turns while the connection is held (landed at ${C.landedTurn < 0 ? 'never, not even in the cleanup after the hold ended' : 'turn ' + C.landedTurn + ', after the hold ended'}) — the drop leg is RED on it`);
-    ok(await portFreed(PDc), 'B-cabe THE DROP control: …its port is free again (the listener went at close())');
+    ok(!!OLd && gateOf(C.listening) && gateOf(C.began) && !C.within, `B-cabe THE DROP CONTROL: a copy without the drop — stopAll()'s promise has NOT landed within ${TURNS} loop turns while the connection is held (landed at ${C.landedTurn < 0 ? 'never, not even in the cleanup after the hold ended' : 'turn ' + C.landedTurn + ', after the hold ended'}) — the drop leg is RED on it`);
+    ok(verdictOf(await portFreed(PDc)), 'B-cabe THE DROP control: …its port is free again (the listener went at close())');
   }
   // B-cabe PLACED: a listener that closes only once the FIRST probe has answered «held» (the probe's onTry) — a close landing after
   // the leg's probe. ONE probe reads «held» (the old leg's shape, red); the bounded re-ask reads free. NOTE (the adversarial read):
@@ -305,7 +305,7 @@ const quiet = { warn() {}, log() {}, error() {} };
 
   // bad inputs are typed refusals, not stack traces
   let e1 = null; try { await ol.begin({ id: 'x', mode: 'osmosis', buildConsentUrl: () => '', exchange: async () => ({}) }); } catch (e) { e1 = e; }
-  ok(e1 && e1.code === 'bad-request' && /mode must be one of/.test(e1.message), 'an unknown mode is a typed refusal');
+  ok(gateOf(e1) && e1.code === 'bad-request' && verdictOf(/mode must be one of/.test(e1.message)), 'an unknown mode is a typed refusal');
 }
 
 // ── ⑤ THE TWO `state` CHECKS ARE THE GMAIL-SYNC LINES, VERBATIM ──
@@ -314,8 +314,8 @@ const quiet = { warn() {}, log() {}, error() {} };
   const gs = fs.readFileSync(path.join(REPO, 'src/gmail-sync.js'), 'utf-8');
   const HANDLER = "if (u.searchParams.get('state') !== state) { res.writeHead(400).end('state mismatch'); return; }";
   const PASTE = "if (u.searchParams.get('state') !== st.state) throw new Error('state mismatch — restart the flow');";
-  ok(src.includes(HANDLER) && gs.includes(HANDLER), 'the request-handler `state` check is carried VERBATIM from src/gmail-sync.js');
-  ok(src.includes(PASTE) && gs.includes(PASTE), 'the paste-back `state` check is carried VERBATIM from src/gmail-sync.js');
+  ok(gateOf(src.includes(HANDLER)) && verdictOf(gs.includes(HANDLER)), 'the request-handler `state` check is carried VERBATIM from src/gmail-sync.js');
+  ok(gateOf(src.includes(PASTE)) && verdictOf(gs.includes(PASTE)), 'the paste-back `state` check is carried VERBATIM from src/gmail-sync.js');
   const LIT = require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL;
   ok(!src.includes(LIT) && !/LARK_CALLBACK_URL|require\('\.\/integration-registry\.js'\)/.test(src), 'lane dc-channels-consent: the loopback names no vendor callback — neither the Lark literal nor its registry name (the caller\'s consent row hands it; the registry census asserts the same from its side)');
   ok(!fs.readFileSync(new URL(import.meta.url).pathname, 'utf-8').includes(LIT), 'this suite never spells the literal either — every fixed port under test is a FREE one built at runtime');
@@ -333,16 +333,16 @@ const quiet = { warn() {}, log() {}, error() {} };
   release(); await landing; await until(() => dones.length === 1, 3000, '⑥ the cancelled flow\'s one report');
   const s = ol.status(st.flowId);
   ok(seen.length === 2 && seen[1].after === 'cancelled', 'cancelled() inside the exchange reads the cancel that landed meanwhile (the exchange checks it before storing anything)');
-  ok(s && s.done === true && s.ok === true && s.error === null && s.cancelled === 'cancelled', `r8: an exchange that RESOLVED after the cancel is a landed consent — the report is ok:true with the cancel carried (ok ${s && s.ok}, cancelled ${s && s.cancelled}, error ${s && s.error})`);
-  ok(dones.length === 1 && dones[0].ok === true && dones[0].cancelled === 'cancelled' && dones[0].result && dones[0].result.access_token === 'u', 'onDone carries {ok:true, cancelled} + the result — the record door reads ok as landed, the pending path refuses the carried cancel itself');
+  ok(gateOf(s) && s.done === true && s.ok === true && s.error === null && s.cancelled === 'cancelled', `r8: an exchange that RESOLVED after the cancel is a landed consent — the report is ok:true with the cancel carried (ok ${s && s.ok}, cancelled ${s && s.cancelled}, error ${s && s.error})`);
+  ok(dones.length === 1 && dones[0].ok === true && dones[0].cancelled === 'cancelled' && gateOf(dones[0].result) && dones[0].result.access_token === 'u', 'onDone carries {ok:true, cancelled} + the result — the record door reads ok as landed, the pending path refuses the carried cancel itself');
   // the door's shape: an exchange that consults cancelled() and THROWS ⇒ {ok:false, cancelled} with the exchange's own sentence
   { let rel, entered3 = false; const h2 = new Promise((r) => { rel = r; });
     const st3 = await ol.begin({ id: 'g3', mode: 'ephemeral', buildConsentUrl: ({ state: s3 }) => `https://x/?state=${s3}`, onDone: (r) => { dones.push(r); }, exchange: async (args) => { entered3 = true; await h2; const c = args.cancelled(); if (c) throw new Error(`the Gmail sign-in was ${c} while it was being completed — nothing was connected`); return { access_token: 'v' }; } });
     const l3 = get(`${st3.redirectUri}/?state=${new URL(st3.consentUrl).searchParams.get('state')}&code=c3`); await until(() => entered3, 3000, '⑥ the door-shaped exchange entered');
     ok(ol.cancel(st3.flowId, 'cancelled') === true, 'the door-shaped flow is cancelled while its exchange is in flight'); rel(); await l3; await until(() => dones.length === 2, 3000, '⑥ the refused flow\'s one report');
     const s3 = ol.status(st3.flowId); const d3 = dones[dones.length - 1];
-    ok(s3 && s3.done === true && s3.ok === false && s3.cancelled === 'cancelled' && /was cancelled while it was being completed/.test(s3.error || ''), `an exchange that consulted cancelled() and refused ends {ok:false, cancelled} with ITS sentence (${s3 && s3.error})`);
-    ok(d3 && d3.ok === false && d3.cancelled === 'cancelled' && d3.result === null, 'onDone carries {ok:false, cancelled} for the refused exchange'); }
+    ok(gateOf(s3) && s3.done === true && s3.ok === false && s3.cancelled === 'cancelled' && verdictOf(/was cancelled while it was being completed/.test(s3.error || '')), `an exchange that consulted cancelled() and refused ends {ok:false, cancelled} with ITS sentence (${s3 && s3.error})`);
+    ok(gateOf(d3) && d3.ok === false && d3.cancelled === 'cancelled' && d3.result === null, 'onDone carries {ok:false, cancelled} for the refused exchange'); }
   const st2 = await ol.begin({ id: 'g2', mode: 'ephemeral', buildConsentUrl: ({ state: s2 }) => `https://x/?state=${s2}`, onDone: (r) => { dones.push(r); }, exchange: async () => ({ access_token: 'u' }) });
   await get(`${st2.redirectUri}/?state=${new URL(st2.consentUrl).searchParams.get('state')}&code=c2`); await until(() => dones.length === 3, 3000, '⑥ the uncancelled flow\'s report');
   ok(dones.length === 3 && dones[2].ok === true && dones[2].cancelled === null, 'a flow that was not cancelled reports cancelled: null');
@@ -378,17 +378,17 @@ console.log('\n⑦ a flow\'s end is the end of what it held (verify r3)');
   else {
     const ol = mkFlows(OL);
     const { collected, ids, exchanges } = await drive(ol);
-    ok(['cancelled-1', 'cancelled-2', 'timeout', 'done'].every((t) => collected.has(t)) && !collected.has('running'), `the exchange closure of a CANCELLED / TIMED-OUT / LANDED flow is released at its end (collected: ${[...collected].sort().join(', ')}); the running flow keeps its own`);
-    ok(['c1', 'c2', 't1', 'd1'].every((k) => ol.status(ids[k].flowId) !== null) && ol.status(ids.c1.flowId).cancelled === 'cancelled' && ol.status(ids.t1.flowId).cancelled === 'timeout' && ol.status(ids.d1.flowId).done === true, 'an ended flow still answers status() (the dialog polls it) …');
+    ok(gateOf(['cancelled-1', 'cancelled-2', 'timeout', 'done'].every((t) => collected.has(t))) && !collected.has('running'), `the exchange closure of a CANCELLED / TIMED-OUT / LANDED flow is released at its end (collected: ${[...collected].sort().join(', ')}); the running flow keeps its own`);
+    ok(gateOf(['c1', 'c2', 't1', 'd1'].every((k) => ol.status(ids[k].flowId) !== null)) && ol.status(ids.c1.flowId).cancelled === 'cancelled' && ol.status(ids.t1.flowId).cancelled === 'timeout' && ol.status(ids.d1.flowId).done === true, 'an ended flow still answers status() (the dialog polls it) …');
     const pb = await (async () => { try { await ol.forwardCallback(ids.c1.flowId, `http://127.0.0.1/?state=${new URL(ids.c1.consentUrl).searchParams.get('state')}&code=late`); return null; } catch (e) { return e; } })();
-    ok(pb && pb.code === 'no-flow' && exchanges() === 1, `… a paste-back onto a cancelled flow is refused by name and nothing is exchanged (${exchanges()} exchange — the landed flow's)`);
+    ok(gateOf(pb) && pb.code === 'no-flow' && exchanges() === 1, `… a paste-back onto a cancelled flow is refused by name and nothing is exchanged (${exchanges()} exchange — the landed flow's)`);
     T += OL.FLOW_RETIRE_MS + 1000;
-    ok(['c1', 'c2', 't1', 'd1'].every((k) => ol.status(ids[k].flowId) === null) && ol.status(ids.live.flowId) !== null && ol.status(ids.live.flowId).running === true, `… and is RETIRED from the map FLOW_RETIRE_MS (${OL.FLOW_RETIRE_MS / 60000} min) after its end; a running flow is not`);
+    ok(gateOf(['c1', 'c2', 't1', 'd1'].every((k) => ol.status(ids[k].flowId) === null)) && ol.status(ids.live.flowId) !== null && ol.status(ids.live.flowId).running === true, `… and is RETIRED from the map FLOW_RETIRE_MS (${OL.FLOW_RETIRE_MS / 60000} min) after its end; a running flow is not`);
     ol.stopAll();
     // the bound
     const olc = mkFlows(OL); const many = [];
     for (let i = 0; i <= OL.MAX_RUNNING_FLOWS; i++) many.push(await olc.begin({ id: `m${i}`, mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) }));
-    ok(olc.status(many[0].flowId).cancelled === OL.CAUSE_OVER_LIMIT && olc.runningFor('m0') === null && many.slice(1).every((f) => olc.status(f.flowId).running === true), `begin() #${OL.MAX_RUNNING_FLOWS + 1} ends the OLDEST running flow by name (${OL.CAUSE_OVER_LIMIT} — verify r4: its own cause, never 'superseded') — ${OL.MAX_RUNNING_FLOWS} run at most`);
+    ok(olc.status(many[0].flowId).cancelled === OL.CAUSE_OVER_LIMIT && olc.runningFor('m0') === null && verdictOf(many.slice(1).every((f) => olc.status(f.flowId).running === true)), `begin() #${OL.MAX_RUNNING_FLOWS + 1} ends the OLDEST running flow by name (${OL.CAUSE_OVER_LIMIT} — verify r4: its own cause, never 'superseded') — ${OL.MAX_RUNNING_FLOWS} run at most`);
     olc.stopAll();
     // CONTROL: a copy without the release (the pre-r3 shape) keeps every closure
     const src = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8');
@@ -399,7 +399,7 @@ console.log('\n⑦ a flow\'s end is the end of what it held (verify r3)');
     const r = await drive(olm);
     ok(r.collected.size === 0, `CONTROL: a copy without the release keeps every closure after gc (${r.collected.size} collected) — the release check above would be red`);
     olm.stopAll();
-    for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
+    for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(verdictOf(c.pass), 'tree: ' + c.name, c.pass ? undefined : c.detail);
   }
 }
 
@@ -446,7 +446,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
   if (!gcNow) ok(false, 'SKIP: no gc handle — the closure legs cannot be judged');
   else {
     const r = await driveScoped(OL);
-    ok(r.collected.has('cancelled') && r.collected.has('timeout') && !r.collected.has('over-limit'), `(a) exchange + onDone born in one scope: the object they share is collected after cancel and timeout (${[...r.collected].sort().join(', ')}); the running flow keeps its own`);
+    ok(gateOf(r.collected.has('cancelled')) && gateOf(r.collected.has('timeout')) && !r.collected.has('over-limit'), `(a) exchange + onDone born in one scope: the object they share is collected after cancel and timeout (${[...r.collected].sort().join(', ')}); the running flow keeps its own`);
     r.ol.stopAll();
     // CONTROL: the r3 shape — cancel keeps onDone
     const rk = await driveScoped(keep);
@@ -486,7 +486,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     const ol = OL.createOAuthLoopback({ log: quiet });
     const mk = (id, extra = {}) => { const reports = []; return ol.begin({ id, mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({ ok: true }), onDone: (r) => reports.push(r), ...extra }).then((f) => ({ f, reports })); };
     const t = await mk('t', { timeoutMs: 30 }); await sleep(80);
-    ok(t.reports.length === 1 && t.reports[0].ok === false && t.reports[0].cancelled === OL.CAUSE_TIMEOUT && /not finished in time/.test(t.reports[0].error) && ol.status(t.f.flowId).error === t.reports[0].error, `(c) the TIMEOUT reports once {ok:false, cancelled:${OL.CAUSE_TIMEOUT}, error} and status() carries the same sentence ("${t.reports[0] && t.reports[0].error}")`);
+    ok(t.reports.length === 1 && t.reports[0].ok === false && t.reports[0].cancelled === OL.CAUSE_TIMEOUT && gateOf(/not finished in time/.test(t.reports[0].error)) && ol.status(t.f.flowId).error === t.reports[0].error, `(c) the TIMEOUT reports once {ok:false, cancelled:${OL.CAUSE_TIMEOUT}, error} and status() carries the same sentence ("${t.reports[0] && t.reports[0].error}")`);
     const c = await mk('c'); ol.cancel(c.f.flowId, 'cancelled');
     const s1 = await mk('s'); const s2 = await mk('s');
     const sh = await mk('sh'); ol.stopAll();
@@ -496,7 +496,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     const o = await ol2.begin({ id: 'oldest', mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}), onDone: (r) => oRep.push(r) }); const oRep = [];
     for (let i = 0; i < OL.MAX_RUNNING_FLOWS; i++) await ol2.begin({ id: `f${i}`, mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
     await sleep(10);
-    ok(oRep.length === 1 && oRep[0].cancelled === OL.CAUSE_OVER_LIMIT && /open sign-ins at 32/.test(oRep[0].error) && ol2.status(o.flowId).cancelled === OL.CAUSE_OVER_LIMIT, `(c) the CAP reports the evicted flow once by its own cause ("${oRep[0] && oRep[0].error}")`);
+    ok(oRep.length === 1 && oRep[0].cancelled === OL.CAUSE_OVER_LIMIT && gateOf(/open sign-ins at 32/.test(oRep[0].error)) && ol2.status(o.flowId).cancelled === OL.CAUSE_OVER_LIMIT, `(c) the CAP reports the evicted flow once by its own cause ("${oRep[0] && oRep[0].error}")`);
     // mid-exchange: the exchange's own return is the ONE report (the timeout's not a second)
     let rel; const holdX = new Promise((r) => { rel = r; }); const mRep = []; let mEntered = false;
     const m = await ol2.begin({ id: 'mid', mode: 'ephemeral', timeoutMs: 60, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async ({ cancelled }) => { mEntered = true; await holdX; const c2 = cancelled(); if (c2) throw new Error(`refused: ${c2}`); return { ok: true }; }, onDone: (r) => mRep.push(r) });
@@ -505,7 +505,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     await until(() => mEntered, 3000, '(c) the mid-exchange flow\'s exchange entered');
     await until(() => (ol2.status(m.flowId) || {}).cancelled === OL.CAUSE_TIMEOUT, 3000, '(c) the 60 ms timeout firing mid-exchange');
     rel(); await landing; await until(() => mRep.some((r) => /refused: timeout/.test((r && r.error) || '')), 3000, '(c) the exchange\'s own refusal reported');
-    ok(mRep.length === 1 && mRep[0].ok === false && mRep[0].cancelled === OL.CAUSE_TIMEOUT && /refused: timeout/.test(mRep[0].error), `(c) the timeout landing MID-EXCHANGE: exactly one report, the exchange's own refusal (${mRep.length}: ${mRep[0] && mRep[0].error})`);
+    ok(mRep.length === 1 && mRep[0].ok === false && mRep[0].cancelled === OL.CAUSE_TIMEOUT && verdictOf(/refused: timeout/.test(mRep[0].error)), `(c) the timeout landing MID-EXCHANGE: exactly one report, the exchange's own refusal (${mRep.length}: ${mRep[0] && mRep[0].error})`);
     ol2.stopAll();
   }
   // (d) begin()'s own exits
@@ -523,7 +523,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
       ol.stopAll();
       const base = listeners();
       let threw = null; try { await ol.begin({ id: 'boom', mode, buildConsentUrl: () => { throw new Error('consent url refused'); }, exchange: async () => ({}) }); } catch (e) { threw = e; }
-      ok(threw && /consent url refused/.test(threw.message) && listeners() - base === 0 && ol.runningFor('boom') === null, `(d) ${mode}: a buildConsentUrl that throws leaves no flow and no listener (${listeners() - base})`);
+      ok(gateOf(threw) && gateOf(/consent url refused/.test(threw.message)) && listeners() - base === 0 && ol.runningFor('boom') === null, `(d) ${mode}: a buildConsentUrl that throws leaves no flow and no listener (${listeners() - base})`);
     }
     // CONTROL: a copy whose post-bind step ignores the flow's end (the r3 shape) keeps the listener — in fixed mode the port
     const B = "    const bound = () => { if (st.cancelled || st.done) { try { srv.close(); } catch {} return; } st.server = srv; st.listening = true; };\n";
@@ -532,12 +532,12 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     await HPF2.handOver();   // the control's own held port (never the leg's released one)
     const rm = await twice(olm, 'fixed');
     const nextm = await olm.begin({ id: 'next', mode: 'fixed', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
-    ok(rm.left === 1 && nextm.refusal && nextm.refusal.code === 'port-busy', `(d) CONTROL: a copy that binds after the end keeps ${rm.left} listener past stopAll and the next fixed begin is ${nextm.refusal && nextm.refusal.code} — the checks above would be red`);
+    ok(rm.left === 1 && gateOf(nextm.refusal) && nextm.refusal.code === 'port-busy', `(d) CONTROL: a copy that binds after the end keeps ${rm.left} listener past stopAll and the next fixed begin is ${nextm.refusal && nextm.refusal.code} — the checks above would be red`);
     olm.stopAll();
     // the leaked control listener is closed by hand (it is nobody's flow now)
     for (const h of process._getActiveHandles()) if (h instanceof net.Server && h.listening && h.address() && h.address().port === PF2) { try { h.close(); } catch {} }
   }
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(verdictOf(c.pass), 'tree: ' + c.name, c.pass ? undefined : c.detail);
 }
 
 // ── ⑨ OPTIONAL SCOPES — THE ONE NARROWING RETRY + THE VENDOR'S ERROR REDIRECT (owner ruling 2026-09-28) ──
@@ -586,19 +586,19 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
   };
   {
     const { ol, f, ex, done } = await run9(OL, H9);
-    ok(JSON.stringify(f.optional) === JSON.stringify([OPT]) && f.narrowed === null && new URL(f.consentUrl).searchParams.get('scope').split(' ').includes(OPT), 'the flow names its optional scopes (deduped, strings only) and the FIRST consent asks for them', JSON.stringify([f.optional, f.narrowed]));
+    ok(JSON.stringify(f.optional) === JSON.stringify([OPT]) && f.narrowed === null && verdictOf(new URL(f.consentUrl).searchParams.get('scope').split(' ').includes(OPT)), 'the flow names its optional scopes (deduped, strings only) and the FIRST consent asks for them', JSON.stringify([f.optional, f.narrowed]));
     const p1 = await browse(f.consentUrl);
-    ok(p1.status === 200 && /20027/.test(p1.body) && !p1.location && ex.length === 0 && ol.status(f.flowId).running === true, 'the fake vendor refuses the whole consent ON ITS PAGE (200, 20027, no redirect) — nothing reaches the loopback, the flow is still running');
+    ok(p1.status === 200 && gateOf(/20027/.test(p1.body)) && !p1.location && ex.length === 0 && ol.status(f.flowId).running === true, 'the fake vendor refuses the whole consent ON ITS PAGE (200, 20027, no redirect) — nothing reaches the loopback, the flow is still running');
     const state0 = new URL(f.consentUrl).searchParams.get('state');
     const n1 = ol.narrow(f.flowId);
     const u1 = new URL(n1.consentUrl);
     ok(JSON.stringify(n1.narrowed) === JSON.stringify([OPT]) && !u1.searchParams.get('scope').split(' ').includes(OPT) && u1.searchParams.get('scope') === 'im:message im:chat:readonly' && u1.searchParams.get('state') === state0 && n1.listening === true && n1.flowId === f.flowId, 'narrow(): the SAME flow (same state, still listening) gets a consent URL without the optional scope — the base scopes kept', n1.consentUrl);
     let again = null; try { ol.narrow(f.flowId); } catch (e) { again = e; }
-    ok(again && again.code === 'already-narrowed' && /already dropped im:message\.reactions:read once/.test(again.message), `narrow() is ONCE — the second is refused by name (${again && again.code})`);
+    ok(gateOf(again) && again.code === 'already-narrowed' && verdictOf(/already dropped im:message\.reactions:read once/.test(again.message)), `narrow() is ONCE — the second is refused by name (${again && again.code})`);
     const p2 = await browse(n1.consentUrl);
-    ok(p2.status === 302 && p2.back && p2.back.status === 200 && ex.length === 1 && JSON.stringify(ex[0].narrowed) === JSON.stringify([OPT]) && ol.status(f.flowId).ok === true && done.length === 1 && done[0].ok === true, 'the narrowed consent is granted (302 → the loopback) and the exchange is TOLD what was dropped (narrowed) — the account can say it, never a silent narrower consent', JSON.stringify(ex));
+    ok(p2.status === 302 && gateOf(p2.back) && p2.back.status === 200 && ex.length === 1 && JSON.stringify(ex[0].narrowed) === JSON.stringify([OPT]) && ol.status(f.flowId).ok === true && done.length === 1 && done[0].ok === true, 'the narrowed consent is granted (302 → the loopback) and the exchange is TOLD what was dropped (narrowed) — the account can say it, never a silent narrower consent', JSON.stringify(ex));
     let late = null; try { ol.narrow(f.flowId); } catch (e) { late = e; }
-    ok(late && late.code === 'no-flow', 'a narrow on a finished flow is refused (no-flow)');
+    ok(gateOf(late) && late.code === 'no-flow', 'a narrow on a finished flow is refused (no-flow)');
     ol.stopAll();
   }
   {
@@ -606,7 +606,7 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
     const ol = OL.createOAuthLoopback({ log: quiet });
     const f = await ol.begin({ id: 'g', mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
     let e0 = null; try { ol.narrow(f.flowId); } catch (e) { e0 = e; }
-    ok(e0 && e0.code === 'nothing-optional' && JSON.stringify(ol.status(f.flowId).optional) === '[]', 'a flow with no optional scopes answers nothing-optional (never a changed URL)');
+    ok(gateOf(e0) && e0.code === 'nothing-optional' && JSON.stringify(ol.status(f.flowId).optional) === '[]', 'a flow with no optional scopes answers nothing-optional (never a changed URL)');
     ol.stopAll();
   }
   {
@@ -616,8 +616,8 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
     const r = await get(`http://127.0.0.1:${P9b}/lark/cb?error=access_denied&state=${st}`);
     await sleep(30);
     const s9 = ol.status(f.flowId);
-    ok(r.status === 200 && /did not grant the sign-in \(access_denied\)/.test(r.body) && !/connected — you can close/.test(r.body) && ex.length === 0, 'the tab says the vendor did not grant it (access_denied) — never "connected"; nothing exchanged', r.body);
-    ok(s9.done === true && s9.ok === false && s9.running === false && /Lark did not grant the sign-in \(access_denied\)/.test(s9.error || '') && done.length === 1 && done[0].ok === false && (await portFree(P9b)), 'the flow ENDS by name (done, the error sentence, reported once, the port released)', JSON.stringify(s9));
+    ok(r.status === 200 && gateOf(/did not grant the sign-in \(access_denied\)/.test(r.body)) && !/connected — you can close/.test(r.body) && ex.length === 0, 'the tab says the vendor did not grant it (access_denied) — never "connected"; nothing exchanged', r.body);
+    ok(s9.done === true && s9.ok === false && s9.running === false && gateOf(/Lark did not grant the sign-in \(access_denied\)/.test(s9.error || '')) && done.length === 1 && done[0].ok === false && (verdictOf(await portFree(P9b))), 'the flow ENDS by name (done, the error sentence, reported once, the port released)', JSON.stringify(s9));
     const hostile = await (async () => { const x = await run9(OL, H9c); const st2 = new URL(x.f.consentUrl).searchParams.get('state'); const rr = await get(`http://127.0.0.1:${P9c}/lark/cb?error=${encodeURIComponent('<img src=x onerror=alert(1)>' + 'e'.repeat(5000))}&state=${st2}`); await sleep(30); const e = x.ol.status(x.f.flowId).error || ''; x.ol.stopAll(); return { body: rr.body, e }; })();
     ok(!/<img/.test(hostile.body) && !/<img/.test(hostile.e) && hostile.e.length < 200, 'a hostile error parameter is bounded and reduced to a code\'s alphabet before it is said (no markup, < 200 chars)', hostile.e);
     ol.stopAll();
@@ -640,9 +640,9 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
     const b = await run9(OLb, HBb);
     const rb = await get(`http://127.0.0.1:${Pb}/lark/cb?error=access_denied&state=${new URL(b.f.consentUrl).searchParams.get('state')}`);
     await sleep(30);
-    ok(/connected — you can close this tab/.test(rb.body) && b.ol.status(b.f.flowId).running === true, 'CONTROL: a copy without the error branch answers "connected" over a DENIED consent and leaves the flow running — the two asserts above would be red');
+    ok(gateOf(/connected — you can close this tab/.test(rb.body)) && b.ol.status(b.f.flowId).running === true, 'CONTROL: a copy without the error branch answers "connected" over a DENIED consent and leaves the flow running — the two asserts above would be red');
     b.ol.stopAll();
-    for (const c of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 2, label: 'oauth-narrow: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+    for (const c of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 2, label: 'oauth-narrow: ' })) ok(verdictOf(c.pass), c.name, c.pass ? undefined : c.detail);
   }
   // ⑨b ORDERED GROUPS (lane lark-search-poll, owner decision 5: "one scope dropped per retry, each a click naming the
   // scope"): three groups, least valuable first — each narrow drops the NEXT group only, the next one is named, the
@@ -670,7 +670,7 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
       const p0 = await browse(f.consentUrl);
       const n1 = ol.narrow(f.flowId);
       const sc1 = new URL(n1.consentUrl).searchParams.get('scope').split(' ');
-      ok(/20027/.test(p0.body) && JSON.stringify(n1.narrowed) === JSON.stringify([RX]) && !sc1.includes(RX) && sc1.includes(S) && sc1.includes(P2P) && JSON.stringify(n1.nextNarrow) === JSON.stringify([P2P]), 'the FIRST press drops the reactions read ONLY — the search and the single-chat read are still asked for; the next press would drop the single-chat read (named)', JSON.stringify(n1));
+      ok(gateOf(/20027/.test(p0.body)) && JSON.stringify(n1.narrowed) === JSON.stringify([RX]) && !sc1.includes(RX) && gateOf(sc1.includes(S)) && gateOf(sc1.includes(P2P)) && JSON.stringify(n1.nextNarrow) === JSON.stringify([P2P]), 'the FIRST press drops the reactions read ONLY — the search and the single-chat read are still asked for; the next press would drop the single-chat read (named)', JSON.stringify(n1));
       const p1 = await browse(n1.consentUrl);
       ok(p1.status === 302 && ex.length === 1 && JSON.stringify(ex[0].narrowed) === JSON.stringify([RX]), 'an app that lacks only the reactions scope KEEPS the search: granted after one press, the exchange told exactly what was dropped', JSON.stringify(ex));
       ol.stopAll();
@@ -684,7 +684,7 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
       for (let i = 0; i < 3; i++) { names.push((last.nextNarrow || []).join('+')); last = ol.narrow(f.flowId); const pg = await browse(last.consentUrl); if (pg.status === 302) break; }
       ok(JSON.stringify(names) === JSON.stringify([RX, P2P, S]) && JSON.stringify(last.narrowed) === JSON.stringify([RX, P2P, S]) && last.nextNarrow === null && ex.length === 1 && JSON.stringify(ex[0].narrowed) === JSON.stringify([RX, P2P, S]), 'three presses, least valuable first (reactions → the single-chat read → the search), each naming what it drops; the third consent is granted and the exchange hears all three', JSON.stringify({ names, last: last.narrowed, ex }));
       let over = null; try { ol.narrow(f.flowId); } catch (e) { over = e; }
-      ok(over && (over.code === 'no-flow' || over.code === 'already-narrowed'), 'past the last group nothing narrows further', over && over.code);
+      ok(gateOf(over) && (over.code === 'no-flow' || over.code === 'already-narrowed'), 'past the last group nothing narrows further', over && over.code);
       ol.stopAll();
     }
     {
@@ -692,7 +692,7 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
       const f = await ol.begin({ id: 'lark-h', mode: 'ephemeral', optionalScopes: [[RX], [S]], buildConsentUrl: ({ state, without = [] }) => `https://x/?state=${state}&w=${without.join(',')}`, exchange: async () => ({}) });
       ol.narrow(f.flowId); ol.narrow(f.flowId);
       let e3 = null; try { ol.narrow(f.flowId); } catch (e) { e3 = e; }
-      ok(e3 && e3.code === 'already-narrowed' && /already dropped every permission it can do without \(im:message\.reactions:read \+ search:message\)/.test(e3.message), 'after every group is gone the next press is refused by name, naming everything dropped', e3 && e3.message);
+      ok(gateOf(e3) && e3.code === 'already-narrowed' && verdictOf(/already dropped every permission it can do without \(im:message\.reactions:read \+ search:message\)/.test(e3.message)), 'after every group is gone the next press is refused by name, naming everything dropped', e3 && e3.message);
       ol.stopAll();
     }
   }
@@ -712,11 +712,11 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
   const b = await ol.forwardCallback(f.flowId, 'right');
   ok(b.ok === true && ol.status(f.flowId).done === true && seen.map((x) => `${x[0]}:${x[1]}`).join() === 'wrong:null,right:null', 'design 012: the right paste lands and ends the flow (the text is the exchange\'s code; no URL is parsed, no state)');
   const e = await (async () => { try { await ol.forwardCallback(f.flowId, 'right'); return null; } catch (x) { return x; } })();
-  ok(e && e.code === 'no-flow', 'design 012: a paste after the landing has no flow to land on');
+  ok(gateOf(e) && e.code === 'no-flow', 'design 012: a paste after the landing has no flow to land on');
   const g = await ol.begin({ id: 'paste-2', mode: 'paste', buildConsentUrl: () => 'https://x.test/', exchange: async () => ({ ok: true }) });
   ol.cancel(g.flowId, 'cancelled');
   const e2 = await (async () => { try { await ol.forwardCallback(g.flowId, 'right'); return null; } catch (x) { return x; } })();
-  ok(e2 && e2.code === 'no-flow' && ol.status(g.flowId).cancelled === 'cancelled', 'design 012: a cancelled paste flow takes no paste');
+  ok(gateOf(e2) && e2.code === 'no-flow' && ol.status(g.flowId).cancelled === 'cancelled', 'design 012: a cancelled paste flow takes no paste');
   const h = await ol.begin({ id: 'paste-3', mode: 'paste', timeoutMs: 30, buildConsentUrl: () => 'https://x.test/', exchange: async () => ({ ok: true }) });
   await new Promise((r) => setTimeout(r, 80));
   ok(ol.status(h.flowId).cancelled === OL.CAUSE_TIMEOUT, 'design 012: a paste flow ends at its timeout like any flow');
@@ -733,7 +733,7 @@ console.log('design 018: public mode');
   const seen = [];
   const mk = async (id, extra = {}) => ol.begin({ id, mode: 'public', label: 'Slack', redirectUri: 'https://relay.example.test/slack/', stateFor: ({ flowId }) => `v1.${flowId}.sigsigsigsigsigsig`, buildConsentUrl: ({ redirectUri, state }) => `https://slack.example.test/authorize?r=${encodeURIComponent(redirectUri)}&state=${state}`, exchange: async (a) => { seen.push({ id, code: a.code, redirectUri: a.redirectUri }); return { ok: true, user: 'u' }; }, ...extra });
   const a = await mk('a');
-  ok(a.mode === 'public' && a.port === null && a.listening === false && a.redirectUri === 'https://relay.example.test/slack/' && a.consentUrl.includes(`state=v1.${a.flowId}.`), 'begin(public): no listener, no port; the state from stateFor names the flow; the redirect is the adapter\'s');
+  ok(a.mode === 'public' && a.port === null && a.listening === false && a.redirectUri === 'https://relay.example.test/slack/' && verdictOf(a.consentUrl.includes(`state=v1.${a.flowId}.`)), 'begin(public): no listener, no port; the state from stateFor names the flow; the redirect is the adapter\'s');
   const w = await ol.finishByState(`v1.${a.flowId}.sigsigsigsigsigsiX`, 'CODE1');
   const r1 = await ol.finishByState(`v1.${a.flowId}.sigsigsigsigsigsig`, 'CODE1');
   const r2 = await ol.finishByState(`v1.${a.flowId}.sigsigsigsigsigsig`, 'CODE2');
@@ -741,13 +741,13 @@ console.log('design 018: public mode');
   const b = await mk('b');
   const fe = await threw(() => ol.forwardCallback(b.flowId, `https://relay.example.test/slack/?code=C3&state=v1.${a.flowId}.sigsigsigsigsigsig`));
   const fb = await ol.forwardCallback(b.flowId, 'C3.bare-code-xyz');
-  ok(fe && fe.code === 'state-mismatch' && fb.ok === true && seen.at(-1).code === 'C3.bare-code-xyz', 'a paste-back carrying ANOTHER flow\'s state is refused by name; a bare code (what the relay page shows) finishes the flow');
+  ok(gateOf(fe) && fe.code === 'state-mismatch' && fb.ok === true && seen.at(-1).code === 'C3.bare-code-xyz', 'a paste-back carrying ANOTHER flow\'s state is refused by name; a bare code (what the relay page shows) finishes the flow');
   const c = await mk('c');
   const dn = await ol.finishByState(`v1.${c.flowId}.sigsigsigsigsigsig`, null, { error: 'access_denied' });
   const d = await mk('d', { timeoutMs: 50 });
   await new Promise((r) => setTimeout(r, 120));
   const ex = await ol.finishByState(`v1.${d.flowId}.sigsigsigsigsigsig`, 'C4');
-  ok(dn.why === 'denied' && /did not grant/.test(ol.status(c.flowId).error) && ex.why === 'timed-out' && seen.length === 2, 'error=access_denied ends the flow by name (denied); a code after the flow\'s own timeout is `timed-out` (lane oauth-landing-words: no longer the catch-all `expired`) and never exchanged');
+  ok(dn.why === 'denied' && gateOf(/did not grant/.test(ol.status(c.flowId).error)) && ex.why === 'timed-out' && seen.length === 2, 'error=access_denied ends the flow by name (denied); a code after the flow\'s own timeout is `timed-out` (lane oauth-landing-words: no longer the catch-all `expired`) and never exchanged');
   // lane oauth-landing-words (B-24d8): EVERY end read `expired` — a sign-in the person cancelled, or replaced by pressing
   // Connect again, told them it had run out of time. Each end is its own why now; the base answered ONE word for all five.
   const ends = {};
@@ -765,7 +765,7 @@ console.log('design 018: public mode');
   ok(ends.superseded === 'superseded' && ends.cancelled === 'cancelled' && ends.expired === 'expired' && ends.shutdown === 'cancelled' && ends.overLimit === 'over-limit' && ex.why === 'timed-out' && seen.length === 2,
     'an ended flow lands with ITS end: replaced by a newer sign-in = superseded, Cancel = cancelled, the engine\'s sweep = expired, a shutdown = cancelled, past the cap = over-limit, its own time limit = timed-out — never exchanged', ends);
   const nf = await threw(() => ol.begin({ id: 'e', mode: 'public', buildConsentUrl: () => 'x', exchange: async () => ({}) }));
-  ok(nf && nf.code === 'bad-request', 'a public flow without stateFor is refused by name');
+  ok(gateOf(nf) && nf.code === 'bad-request', 'a public flow without stateFor is refused by name');
   ol.stopAll();
 }
 
@@ -786,14 +786,14 @@ console.log('design 018: public mode');
   });
   const state = new URL(st.consentUrl).searchParams.get('state');
   const v = DO.stateVerdict(state, { sign });
-  ok(v.ok && v.parts.flowId === st.flowId && JSON.parse(Buffer.from(state.split('.')[1], 'base64url').toString()).k === 'dropline', 'dropline public flow: the state is this boot\'s HMAC over {u, f, t, k:dropline} and names the running flow');
+  ok(gateOf(v.ok) && v.parts.flowId === st.flowId && JSON.parse(Buffer.from(state.split('.')[1], 'base64url').toString()).k === 'dropline', 'dropline public flow: the state is this boot\'s HMAC over {u, f, t, k:dropline} and names the running flow');
   const otherBoot = (c) => crypto.createHmac('sha256', 'another-boot').update(c).digest('base64url');
   ok(DO.stateVerdict(state, { sign: otherBoot }).why === 'bad-hmac' && DO.stateVerdict(state, { sign, kind: 'slack' }).why === 'wrong-kind' && DO.stateVerdict(state, { sign, now: Date.now() + DO.STATE_TTL_MS + 120e3 }).why === 'expired', 'dropline state: another boot\'s HMAC, another kind, an old state — each refused by name');
-  ok(!JSON.stringify(ol.status(st.flowId)).includes(verifier) && !st.consentUrl.includes(verifier) && st.consentUrl.includes(challenge), 'the verifier is in no status answer and not in the consent URL (only its S256 challenge is)');
+  ok(!JSON.stringify(ol.status(st.flowId)).includes(verifier) && !st.consentUrl.includes(verifier) && verdictOf(st.consentUrl.includes(challenge)), 'the verifier is in no status answer and not in the consent URL (only its S256 challenge is)');
   const r = await ol.finishByState(state, 'code_12345678');
-  ok(r.ok && seenVerifier === verifier && (await ol.finishByState(state, 'code_12345678')).why === 'used', 'finishByState exchanges ONCE through the closure that holds the verifier; a second landing is `used`');
+  ok(gateOf(r.ok) && seenVerifier === verifier && (await ol.finishByState(state, 'code_12345678')).why === 'used', 'finishByState exchanges ONCE through the closure that holds the verifier; a second landing is `used`');
   ol.stopAll();
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

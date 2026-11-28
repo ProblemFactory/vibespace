@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const J = JSON.stringify;
 const MUT = mutantCopies('wait-fleet', REPO);
 const day = (env) => { const out = execFileSync(process.execPath, [path.join(REPO, 'scripts/wait-fleet.mjs')], { cwd: REPO, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 600000 }); const l = out.split('\n').find((x) => x.startsWith('FLEET ')); return l ? JSON.parse(l.slice(6)) : null; };

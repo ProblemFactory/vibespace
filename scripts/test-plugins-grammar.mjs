@@ -23,7 +23,7 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 const PS = require(path.join(repo, 'src/plugin-settings.js'));
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
 // THE BASE (7b6fa3c7b, the LLM plugin's base — a lane commit master never held): B-43a0 (lane bl-tests-e) — the RED controls
@@ -45,7 +45,7 @@ for (const p of plugins) {
   const tbl = PS.PLUGIN_SETTINGS[p.id];
   ok(!!tbl !== (typeof p.noSettings === 'string' && p.noSettings.length > 10), `① ${p.id}: ${tbl ? `a table of ${tbl.rows.length} rows` : `no table — «${p.noSettings}»`}`);
 }
-ok(Object.keys(PS.PLUGIN_SETTINGS).every((id) => plugins.some((p) => p.id === id)), '① every table names a real plugin');
+ok(verdictOf(Object.keys(PS.PLUGIN_SETTINGS).every((id) => plugins.some((p) => p.id === id))), '① every table names a real plugin');
 
 console.log('② the sidebar is a list: name · description · chip · switch · [install] · ⚙ — nothing else');
 // the list's controls, counted in the source of the Plugins panel (src/lib/plugins-ui.js minus the dialogs it opens:
@@ -62,13 +62,13 @@ const controls = (src) => ({
 const now = read('src/lib/plugins-ui.js');
 const c = controls(helpersSrc(now) + listSrc(now));
 ok(c.inputs === 1 && c.checkbox === 1 && !c.password && !c.integrationCard, `② ONE input in the list's code — the switch's checkbox (role=switch): ${JSON.stringify(c)}`);
-ok(/cb\.setAttribute\('role', 'switch'\)/.test(now), '② the toggle is a role=switch');
+ok(verdictOf(/cb\.setAttribute\('role', 'switch'\)/.test(now)), '② the toggle is a role=switch');
 const rowFn = now.slice(now.indexOf('function pluginRow('), now.indexOf('\n}\n', now.indexOf('function pluginRow(')));
 // lane ui-phone-and-fit pick 1: the row is the RAIL ROW (src/lib/rail-row.js) — railRow draws lead · the name block · the controls in
 // the order given (a fourth control folds into «⋯», its order kept); the law read through it: dot · name+description · chip · switch · [install] · ⚙
 const RAIL = read('src/lib/rail-row.js');
-ok(/railRow\(\{ className: 'plugin-row', lead: dot, name: label,[^}]*desc: description \|\| '',[^}]*main: \[fact\], controls: \[c, sw, install, gear\] \}\)/.test(rowFn)
-  && /r\.replaceChildren\(\.\.\.\[lead, m, ctl\]\.filter\(Boolean\)\);/.test(RAIL) && /const list = \(controls \|\| \[\]\)\.filter\(Boolean\);/.test(RAIL), '② a row appends exactly dot · name+description · chip · [switch — none when it cannot be used, lane ui-controls-and-bugs: railRow drops it] · [install] · ⚙');
+ok(gateOf(/railRow\(\{ className: 'plugin-row', lead: dot, name: label,[^}]*desc: description \|\| '',[^}]*main: \[fact\], controls: \[c, sw, install, gear\] \}\)/.test(rowFn))
+  && gateOf(/r\.replaceChildren\(\.\.\.\[lead, m, ctl\]\.filter\(Boolean\)\);/.test(RAIL)) && verdictOf(/const list = \(controls \|\| \[\]\)\.filter\(Boolean\);/.test(RAIL)), '② a row appends exactly dot · name+description · chip · [switch — none when it cannot be used, lane ui-controls-and-bugs: railRow drops it] · [install] · ⚙');
 ok((listSrc(now).match(/pluginRow\(\{/g) || []).length === 2, '② built-in AND manifest plugins draw through the same row');
 // lane decision-spend-readout: the ONE extra line a row may carry is a READOUT under the description (the LLM plugin's
 // money today) — a div inside the name+description block, painted from the PURE line, never a control
@@ -76,13 +76,13 @@ const factIsReadout = (src, fn) => /main: \[fact\]/.test(fn) && /for \(const x o
   && (src.match(/\bfact = Object\.assign\(document\.createElement\('(\w+)'\)/g) || []).every((m) => /'div'/.test(m))
   && /\bfact = Object\.assign\(document\.createElement\('div'\), \{ className: 'plugin-row-fact' \}\)/.test(src)
   && !/\bfact\.(onclick|addEventListener|tabIndex|contentEditable)\b/.test(src) && /paintDecisionLine\(fact, x, 'short'\)/.test(src);
-ok(factIsReadout(listSrc(now), rowFn), '② the row\'s second line (plugin-row-fact) is a readout in the name+description block: a div, painted from decisionTodayLine, no handler');
+ok(verdictOf(factIsReadout(listSrc(now), rowFn)), '② the row\'s second line (plugin-row-fact) is a readout in the name+description block: a div, painted from decisionTodayLine, no handler');
 const asButton = listSrc(now).replace("fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact' });", () => "fact = Object.assign(document.createElement('button'), { className: 'plugin-row-fact' }); fact.onclick = () => {};");
 ok(asButton !== listSrc(now) && !factIsReadout(asButton, rowFn), '② RED CONTROL: the same line drawn as a button with a handler is refused by the census');
 const cb = controls(FX43.panelLines.join('\n'));
 ok(FX43.panelLines.length > 5 && cb.inputs > 1 && cb.checkbox >= 3 && cb.integrationCard > 0, `② RED CONTROL: the base's panel (7b6fa3c7b, its control lines frozen) draws ${cb.inputs} inputs, ${cb.checkbox} checkboxes, a key box (${cb.integrationCard} card mounts) — this census refuses it`);
 const voiceCard = read('src/lib/voice-plugin-card.js');
-ok(!/createElement\('(input|select)'\)/.test(voiceCard) && /renderVoiceSheet/.test(voiceCard), '② the Voice sheet holds actions only (Connect + proposal cards) — no key box, no language select');
+ok(!/createElement\('(input|select)'\)/.test(voiceCard) && verdictOf(/renderVoiceSheet/.test(voiceCard)), '② the Voice sheet holds actions only (Connect + proposal cards) — no key box, no language select');
 
 console.log('③ nobody reads a plugin\'s configuration from plugins.json config');
 const READERS = ['src/server/decision-engine.js', 'src/server/voice-teach-engine.js', 'src/routes/voice.js', 'src/plugins/llm.js', 'src/plugins/voice-input.js', 'src/plugins/tailscale.js', 'src/plugins/frp.js'];
@@ -91,7 +91,7 @@ const configReads = (src) => (code(src).match(/(peek\(\)|rec)\.config\b|\.config
 const hits = READERS.map((f) => [f, configReads(read(f))]).filter(([f, n]) => n && f !== 'src/plugins/frp.js');
 ok(!hits.length, `③ no config reads in ${READERS.length - 1} engines / plugins / routes${hits.length ? ' — ' + JSON.stringify(hits) : ''}`);
 const frp = read('src/plugins/frp.js');
-ok(/token: c\.token \|\| FRPS_TOKEN/.test(frp) && /serverAddr: v\.serverAddr \|\| FRPS_ADDR/.test(frp) && /subDomainHost: v\.subDomainHost/.test(frp), '③ frp reads only its relay TOKEN (a secret) from its record; the address / port / subdomain host are settings rows');
+ok(gateOf(/token: c\.token \|\| FRPS_TOKEN/.test(frp)) && gateOf(/serverAddr: v\.serverAddr \|\| FRPS_ADDR/.test(frp)) && verdictOf(/subDomainHost: v\.subDomainHost/.test(frp)), '③ frp reads only its relay TOKEN (a secret) from its record; the address / port / subdomain host are settings rows');
 const baseHits = FX43.configReadLines.map((x) => configReads(x.line)).reduce((a, x) => a + x, 0);
 ok(FX43.configReadLines.length > 3 && baseHits >= 4, `③ RED CONTROL: the base (7b6fa3c7b, its seven readers' config lines frozen) reads plugin configuration from plugins.json ${baseHits} times`);
 
@@ -129,11 +129,11 @@ else {
   ok(!dead.length, `④ every allowed row still holds the old name (a dead row would hide a new hit)${dead.length ? ' — dead: ' + dead.join(', ') : ''}`);
   // RED CONTROLS — a planted user-visible string in three shapes, through the SAME census
   const plant = (f, from, to) => nameCensus([f], (x) => { const t = read(x); if (!t.includes(from)) throw new Error('anchor'); return t.replace(from, to); }).offenders.includes(f);
-  ok(plant('src/plugins/llm.js', "label: 'LLM',", "label: 'Decision API',"), '④ RED CONTROL: the plugin\'s label planted back as "Decision API" is caught');
-  ok(plant('src/lib/i18n-zh.js', '"Judging model": "判断模型",', '"Judging model": "决策 API 判断模型",'), '④ RED CONTROL: a zh word planted back as 「决策 API」 is caught');
-  ok(plant('src/lib/settings-ui.js', "pluginCategoryOf('llm')", "pluginCategoryOf('decision-api')"), '④ RED CONTROL: the old id planted back into a client door is caught');
+  ok(verdictOf(plant('src/plugins/llm.js', "label: 'LLM',", "label: 'Decision API',")), '④ RED CONTROL: the plugin\'s label planted back as "Decision API" is caught');
+  ok(verdictOf(plant('src/lib/i18n-zh.js', '"Judging model": "判断模型",', '"Judging model": "决策 API 判断模型",')), '④ RED CONTROL: a zh word planted back as 「决策 API」 is caught');
+  ok(verdictOf(plant('src/lib/settings-ui.js', "pluginCategoryOf('llm')", "pluginCategoryOf('decision-api')")), '④ RED CONTROL: the old id planted back into a client door is caught');
   ok(!OLD_NAME.test('see docs/design-decision-api.zh.md §2.2'.replace(DOC_NAME, '')), '④ the design doc\'s FILE name is not a hit (its head note says the plugin is the LLM plugin now)');
-  ok(FX43.pluginNames.length === 2 && FX43.pluginNames.every((l) => OLD_NAME.test(l)), '④ RED CONTROL: the base\'s plugin file (7b6fa3c7b, its id and label frozen) names the old plugin — the needle reads it');
+  ok(FX43.pluginNames.length === 2 && verdictOf(FX43.pluginNames.every((l) => OLD_NAME.test(l))), '④ RED CONTROL: the base\'s plugin file (7b6fa3c7b, its id and label frozen) names the old plugin — the needle reads it');
 }
 
 // ⑤ lane engine-plugin (design-custom-browser-plugin §1.1): the capability word `browser-engine` — the built-in family's half of
@@ -147,13 +147,13 @@ console.log('— ⑤ the capability word browser-engine (CAP_VERBS: probe + laun
   const def = (extra = {}) => ({ id: 'fake-engine', label: 'Fake engine', description: 'x', provides: ['browser-engine'], create: () => ({ ...base0, ...extra }) });
   let e1 = null; try { PL.validatePlugin(def(), { ...base0 }); } catch (e) { e1 = e; }
   let e2 = null; try { PL.validatePlugin(def(), { ...base0, probe() {}, launchOptions() {} }); } catch (e) { e2 = e; }
-  ok(e1 && /verb probe\(\) missing/.test(e1.message) && !e2, '⑤ a built-in plugin declaring browser-engine without probe() is refused BY NAME at registration; with both verbs it registers', e1 && e1.message);
+  ok(gateOf(e1) && gateOf(/verb probe\(\) missing/.test(e1.message)) && !e2, '⑤ a built-in plugin declaring browser-engine without probe() is refused BY NAME at registration; with both verbs it registers', e1 && e1.message);
   const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'vs-pg-eng-'));
   try {
     const m = new PL.PluginManager({ dataDir: dir, broadcast: () => {}, plugins: [def({ probe: () => ({ ok: 1 }), launchOptions: () => ({}) }), { id: 'plain-one', label: 'Plain', description: 'x', provides: [], create: () => ({ ...base0 }) }] });
     let e3 = null; try { m.capVerb('plain-one', 'browser-engine', 'probe'); } catch (e) { e3 = e; }
     let e4 = null; try { m.capVerb('fake-engine', 'browser-engine', 'install'); } catch (e) { e4 = e; }
-    ok(JSON.stringify(m.providerIds('browser-engine')) === '["fake-engine"]' && m.capVerb('fake-engine', 'browser-engine', 'probe')().ok === 1 && e3 && e4, '⑤ providerIds lists every declarer; capVerb hands out only a CAP_VERBS verb of a declared capability (a plugin that does not declare it, or another verb, refused)', { e3: e3 && e3.message, e4: e4 && e4.message });
+    ok(JSON.stringify(m.providerIds('browser-engine')) === '["fake-engine"]' && m.capVerb('fake-engine', 'browser-engine', 'probe')().ok === 1 && gateOf(e3) && verdictOf(e4), '⑤ providerIds lists every declarer; capVerb hands out only a CAP_VERBS verb of a declared capability (a plugin that does not declare it, or another verb, refused)', { e3: e3 && e3.message, e4: e4 && e4.message });
     const reg = require(path.join(repo, 'src/server/browser-engines.js')).create({ plugins: m });
     ok(JSON.stringify(reg.rows()) === JSON.stringify([{ id: 'builtin.fake-engine', label: 'Fake engine', family: 'builtin', version: null }]), '⑤ …and the engine table addresses a built-in engine `builtin.<id>` (the manifest id rule), beside the manifest family', reg.rows());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -175,9 +175,9 @@ console.log('⑥ the consent dialogs open with their own body text (.dialog-intr
   };
   const holds = (f) => f.intros.every((c) => c === 'dialog-intro') && f.listPad != null && f.listPad <= 20 && f.listMargin0 && f.listFs != null && f.listFs === f.introFs && !f.introDim;
   const f = fence(now, read('public/style.css'));
-  ok(holds(f), `⑥ both consent bodies open with ${JSON.stringify(f.intros)}; .plugin-caps-list { padding-left ${f.listPad}px, margin 0: ${f.listMargin0}, ${f.listFs}px } = .dialog-intro's ${f.introFs}px, not --text-dim`);
+  ok(verdictOf(holds(f)), `⑥ both consent bodies open with ${JSON.stringify(f.intros)}; .plugin-caps-list { padding-left ${f.listPad}px, margin 0: ${f.listMargin0}, ${f.listFs}px } = .dialog-intro's ${f.introFs}px, not --text-dim`);
   const zh = read('src/lib/i18n-zh.js').split('\n').find((l) => l.includes('"Can be chosen as the agent browser: it names the program')) || '';
-  ok(zh.includes('它指定一个程序，由 VibeSpace 作为浏览器档案的浏览器来启动'), '⑥ the browser-engine capability in zh names the program VibeSpace starts as a profile\'s browser');
+  ok(verdictOf(zh.includes('它指定一个程序，由 VibeSpace 作为浏览器档案的浏览器来启动')), '⑥ the browser-engine capability in zh names the program VibeSpace starts as a profile\'s browser');
   const bu = at('160045063', 'src/lib/plugins-ui.js'), bc = at('160045063', 'public/style.css');
   if (bu && bc) { const fb = fence(bu, bc); ok(!holds(fb), `⑥ RED CONTROL: the base 160045063 fails the same fence (${JSON.stringify(fb.intros)}, list rule ${fb.listPad == null ? 'absent' : fb.listPad + 'px'})`); }
   else console.log('  SKIP ⑥ RED CONTROL — the base object 160045063 is not in this clone');
@@ -319,22 +319,22 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
     oneDoor: w.menu.includes('Show capabilities…') && !w.menu.some((l) => /^Update/.test(l)),
   });
   const w = await walk(now, 'now'), v = verdict(w);
-  ok(v.updatable, `⑦ B-db5d: git / path / github-release installs: the row's «⋯» lists «Update…» then «Uninstall…», neither drawn on the row (${['kit.git', 'kit.path', 'kit.release'].map((id) => `${id}: row ${J(w.rows[id].buttons)}, ⋯ ${J(w.rows[id].menu)}`).join(' · ')})`);
-  ok(v.zip, `⑦ a zip install: the «⋯» has NO Update row (only ${J(w.rows['kit.zip'].menu)}), the row says «${w.rows['kit.zip'].fact}» (row ${J(w.rows['kit.zip'].buttons)})`);
-  ok(v.hand, `⑦ a hand-placed folder: the «⋯» has NO Update row (only ${J(w.rows['kit.hand'].menu)}), the row says «${w.rows['kit.hand'].fact}» (row ${J(w.rows['kit.hand'].buttons)})`);
-  ok(v.gearInline, `⑦ B-db5d: a plugin with settings keeps its ⚙ ON the row, never in the «⋯» (kit.path: row ${J(w.rows['kit.path'].buttons)}, ⋯ ${J(w.rows['kit.path'].menu)})`);
-  ok(v.uninstall, `⑦ B-db5d: the «⋯»'s «Uninstall…» asks its confirm (${J(w.puninstall.confirms)}) and, refused, deletes nothing (${w.puninstall.deletes} DELETE)`);
-  ok(v.inFlight, `⑦ B-db5d: while the update runs, the «⋯»'s Update… is an OFF row that says why — «${w.pgit.during}» (never «not available»)`);
-  ok(v.unchanged, `⑦ the press posts /api/plugins/manifests/kit.git/update and, the ref still at its commit (unchanged), toasts ${J(w.pgit.toasts.map(([m]) => m))}`);
-  ok(v.changed, `⑦ a new package toasts «Updated … to …» (${J(w.ppath.toasts.map(([m]) => m))})`);
-  ok(v.refused, `⑦ a refusal toasts the server's error and the «⋯»'s Update… is pressable again, its in-flight why cleared (${J(w.prel.toasts)}, pressable after: ${w.prel.pressableAfter}, title after: ${J(w.prel.titleAfter)})`);
-  ok(v.oneDoor, `⑦ ONE door: the chip's menu lists ${J(w.menu)} — no Update`);
+  ok(verdictOf(v.updatable), `⑦ B-db5d: git / path / github-release installs: the row's «⋯» lists «Update…» then «Uninstall…», neither drawn on the row (${['kit.git', 'kit.path', 'kit.release'].map((id) => `${id}: row ${J(w.rows[id].buttons)}, ⋯ ${J(w.rows[id].menu)}`).join(' · ')})`);
+  ok(verdictOf(v.zip), `⑦ a zip install: the «⋯» has NO Update row (only ${J(w.rows['kit.zip'].menu)}), the row says «${w.rows['kit.zip'].fact}» (row ${J(w.rows['kit.zip'].buttons)})`);
+  ok(verdictOf(v.hand), `⑦ a hand-placed folder: the «⋯» has NO Update row (only ${J(w.rows['kit.hand'].menu)}), the row says «${w.rows['kit.hand'].fact}» (row ${J(w.rows['kit.hand'].buttons)})`);
+  ok(verdictOf(v.gearInline), `⑦ B-db5d: a plugin with settings keeps its ⚙ ON the row, never in the «⋯» (kit.path: row ${J(w.rows['kit.path'].buttons)}, ⋯ ${J(w.rows['kit.path'].menu)})`);
+  ok(verdictOf(v.uninstall), `⑦ B-db5d: the «⋯»'s «Uninstall…» asks its confirm (${J(w.puninstall.confirms)}) and, refused, deletes nothing (${w.puninstall.deletes} DELETE)`);
+  ok(verdictOf(v.inFlight), `⑦ B-db5d: while the update runs, the «⋯»'s Update… is an OFF row that says why — «${w.pgit.during}» (never «not available»)`);
+  ok(verdictOf(v.unchanged), `⑦ the press posts /api/plugins/manifests/kit.git/update and, the ref still at its commit (unchanged), toasts ${J(w.pgit.toasts.map(([m]) => m))}`);
+  ok(verdictOf(v.changed), `⑦ a new package toasts «Updated … to …» (${J(w.ppath.toasts.map(([m]) => m))})`);
+  ok(verdictOf(v.refused), `⑦ a refusal toasts the server's error and the «⋯»'s Update… is pressable again, its in-flight why cleared (${J(w.prel.toasts)}, pressable after: ${w.prel.pressableAfter}, title after: ${J(w.prel.titleAfter)})`);
+  ok(verdictOf(v.oneDoor), `⑦ ONE door: the chip's menu lists ${J(w.menu)} — no Update`);
   const b0 = (() => { try { return execFileSync('git', ['-C', repo, 'show', '63f59d572:src/lib/plugins-ui.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } })();
   if (b0 === null) console.log('  SKIP ⑦ RED CONTROL — the base object 63f59d572 is not in this clone');
   else {
     const wb = await walk(b0, 'base'), vb = verdict(wb);
     const red = Object.entries(vb).filter(([, x]) => !x).map(([k]) => k);
-    ok(['updatable', 'zip', 'hand', 'unchanged', 'oneDoor'].every((k) => red.includes(k)), `⑦ RED CONTROL: the base 63f59d572 fails the same walk — ${red.join(', ')} (its kit.git row: ${J(wb.rows['kit.git'].buttons)}; its chip menu: ${J(wb.menu)})`);
+    ok(verdictOf(['updatable', 'zip', 'hand', 'unchanged', 'oneDoor'].every((k) => red.includes(k))), `⑦ RED CONTROL: the base 63f59d572 fails the same walk — ${red.join(', ')} (its kit.git row: ${J(wb.rows['kit.git'].buttons)}; its chip menu: ${J(wb.menu)})`);
   }
   // B-db5d RED CONTROLS — anchored copies of THIS tree's file (scratch.mjs anchored: a moved line throws by name; never a git object a
   // shallow clone lacks — a skip is no red): (1) THE CHECKPOINT'S ROW — the cluster not always-folded (Update… / Uninstall… inline,
@@ -345,7 +345,7 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
     const code = anchored(now, from, to, name);
     const wc = await walk(code, name.replace(/\W+/g, '-').slice(0, 24)), vc = verdict(wc);
     const red = Object.entries(vc).filter(([, x]) => !x).map(([k]) => k);
-    ok(keys.every((k) => red.includes(k)), `⑦ B-db5d RED CONTROL (${name}): the same walk goes red on ${keys.join(', ')} (red: ${red.join(', ')})`);
+    ok(verdictOf(keys.every((k) => red.includes(k))), `⑦ B-db5d RED CONTROL (${name}): the same walk goes red on ${keys.join(', ')} (red: ${red.join(', ')})`);
   };
   await runRed('the checkpoint row', " actions.dataset.railFold = 'always';", '', ['updatable', 'zip', 'hand', 'gearInline', 'unchanged']);
   await runRed('an in-flight Update with no why', "            upd.title = t('Updating {id}…', { id: p.id });", '', ['inFlight']);
@@ -353,4 +353,4 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

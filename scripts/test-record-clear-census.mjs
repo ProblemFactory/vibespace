@@ -57,7 +57,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUT = mutantCopies('record-clear-census', ROOT);
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const J = JSON.stringify;
 // THE TREE IS READ ONCE (lane fast-tier-ratchet): every census pass and every control re-read the whole checkout — 18 passes over
 // ~430 server files and 18 over the client tree, ~3 s of the suite's 8. The checkout never changes during the run (§tree proves
@@ -128,7 +128,7 @@ function fileOwnership(src) {
 console.log('§A file ownership: a store\'s data file is named by its owner module only');
 {
   const rows = fileOwnership(sources());
-  for (const r of rows) ok(r.ownerPresent && !r.strangers.length, `${r.token} — named by ${r.named.join(', ')}${r.strangers.length ? ' (STRANGERS: ' + r.strangers.join(', ') + ')' : ''}`, r);
+  for (const r of rows) ok(gateOf(r.ownerPresent) && !r.strangers.length, `${r.token} — named by ${r.named.join(', ')}${r.strangers.length ? ' (STRANGERS: ' + r.strangers.join(', ') + ')' : ''}`, r);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -261,20 +261,20 @@ console.log('§B the group log: every read folded, the clear\'s own, or gated of
   ok(c.sites >= 15, `${c.sites} store-read call sites in the tree (the census saw the readers)`);
   ok(!c.outside.length, 'no store-log read outside channel-store / groups-engine / channels-engine', c.outside);
   ok(!c.groupsRaw.length, 'groups-engine reads the log raw ONLY inside readFolded (the fold) and originalsOf (the clear\'s own lookup, shared with the held-entry judge)', c.groupsRaw);
-  { const ge = read('src/server/groups-engine.js'); const calls = (ge.match(/(?<!function )originalsOf\(/g) || []).length, acalls = (ge.match(/(?<!function )originalsOfAsync\(/g) || []).length; ok(/const found = originalsOf\(gid, want\);/.test(ge) && /const recs = \[\.\.\.originalsOf\(gid, vids\)\.values\(\)\]\.filter\(Boolean\); c = needlesOf\(gid, recs, vids\.length, recs\.length < vids\.length\);/.test(ge) && /try \{ recs = \[\.\.\.\(await originalsOfAsync\(id, vids\)\)\.values\(\)\]\.filter\(Boolean\); \} catch/.test(ge) && /c = needlesOf\(id, recs, vids\.length, recs\.length < vids\.length\); heldNeedles\.set\(id, c\);/.test(ge) && calls === 2 && acalls === 1, `originalsOf has exactly its two callers — clearMessages (cleared copies out) and clearedNeedles (the held-entry judge's and the search index's, B-b291) — and its async twin one (clearedCopiesAsync); needlesOf keeps witnesses, card keys and whole digests, never a record (${calls} + ${acalls} callers)`); }
+  { const ge = read('src/server/groups-engine.js'); const calls = (ge.match(/(?<!function )originalsOf\(/g) || []).length, acalls = (ge.match(/(?<!function )originalsOfAsync\(/g) || []).length; ok(gateOf(/const found = originalsOf\(gid, want\);/.test(ge)) && gateOf(/const recs = \[\.\.\.originalsOf\(gid, vids\)\.values\(\)\]\.filter\(Boolean\); c = needlesOf\(gid, recs, vids\.length, recs\.length < vids\.length\);/.test(ge)) && gateOf(/try \{ recs = \[\.\.\.\(await originalsOfAsync\(id, vids\)\)\.values\(\)\]\.filter\(Boolean\); \} catch/.test(ge)) && gateOf(/c = needlesOf\(id, recs, vids\.length, recs\.length < vids\.length\); heldNeedles\.set\(id, c\);/.test(ge)) && calls === 2 && acalls === 1, `originalsOf has exactly its two callers — clearMessages (cleared copies out) and clearedNeedles (the held-entry judge's and the search index's, B-b291) — and its async twin one (clearedCopiesAsync); needlesOf keeps witnesses, card keys and whole digests, never a record (${calls} + ${acalls} callers)`); }
   ok(!c.channelsUnknown.length, 'every channels-engine reader is a declared function with a declared gate', c.channelsUnknown);
   ok(!c.channelsUngated.length, 'every channels-engine reader\'s gate stands before its read', c.channelsUngated);
   // int228 CONTROLS for the helper-of-a-helper rule (channel-self-unread's countFresh → unreadSince): a stray caller, and a declared
   // caller whose call stands BEFORE its gate, are each reported
   { const E = 'src/server/channels-engine.js', src0 = sources(), eng = src0.get(E);
     const sIn = "  async function ingest(e, rec, convId, origin = 'timer') {\n";
-    ok(eng.split(sIn).length === 2 && /\n  function countFresh\(/.test(eng), 'CONTROL setup (int228): the ingest head and countFresh are found once each');
+    ok(eng.split(sIn).length === 2 && verdictOf(/\n  function countFresh\(/.test(eng)), 'CONTROL setup (int228): the ingest head and countFresh are found once each');
     const m1 = new Map(src0); m1.set(E, eng.replace(sIn, "  function strayCount(rec, en) { countFresh(rec, 'c', en, []); }\n" + sIn));
     const u1 = groupLogCensus(m1).channelsUngated;
-    ok(u1.some((x) => /^countFresh called from strayCount@/.test(x)), 'CONTROL (int228): countFresh called from an undeclared function is reported (a helper of a helper still needs a gated caller)', u1);
+    ok(verdictOf(u1.some((x) => /^countFresh called from strayCount@/.test(x))), 'CONTROL (int228): countFresh called from an undeclared function is reported (a helper of a helper still needs a gated caller)', u1);
     const m2 = new Map(src0); m2.set(E, eng.replace(sIn, sIn + '    countFresh(rec, convId, null, []);\n'));
     const u2 = groupLogCensus(m2).channelsUngated;
-    ok(u2.some((x) => /^countFresh called from ingest@/.test(x)), 'CONTROL (int228): a declared caller counting BEFORE its index row (store.index.entry( after the call) is reported', u2); }
+    ok(verdictOf(u2.some((x) => /^countFresh called from ingest@/.test(x))), 'CONTROL (int228): a declared caller counting BEFORE its index row (store.index.entry( after the call) is reported', u2); }
   ok(!c.groupsNamed, 'channels-engine never names the groups adapter (a group log is not one of its conversations)');
   // the declared functions really read (a dead row would let a renamed reader hide behind it)
   const seen = new Set();
@@ -287,7 +287,7 @@ console.log('§B the group log: every read folded, the clear\'s own, or gated of
   ok(!dead.length, 'every declared channels-engine reader still reads (no dead row)', dead);
   // groups-engine's public readers go through the fold: read(), readLog, reportFor's log, the wake's report
   const ge = read('src/server/groups-engine.js');
-  ok(/records: readFolded\(rg\.group\.id, opts\)/.test(ge) && /const readLog = \(gid\) => readFolded\(gid/.test(ge) && /RC\.foldClears\(store\.readTail\(A, gid/.test(ge), 'read() and readLog (reports, wakes, unread) go through readFolded = RC.foldClears over the store read');
+  ok(gateOf(/records: readFolded\(rg\.group\.id, opts\)/.test(ge)) && gateOf(/const readLog = \(gid\) => readFolded\(gid/.test(ge)) && verdictOf(/RC\.foldClears\(store\.readTail\(A, gid/.test(ge)), 'read() and readLog (reports, wakes, unread) go through readFolded = RC.foldClears over the store read');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -527,7 +527,7 @@ const CLASSES = new Set(['reads', 'folded', 'echo', 'writes', 'meta']);
 console.log('§C the reader surfaces: every store-touching route is classified, every reader probed by the walk');
 {
   const files = routeFilesOf(sources());
-  ok(files.length >= 30 && files.includes('src/server/stash-handover.js') && files.includes('src/server/mounts-plugins-wiring.js') && files.includes('src/agent-routes.js'), `${files.length} route-registering files DERIVED from the tree (the old hand list named 4 + src/routes/*; stash-handover.js among the ${files.length})`, files);
+  ok(files.length >= 30 && gateOf(files.includes('src/server/stash-handover.js')) && gateOf(files.includes('src/server/mounts-plugins-wiring.js')) && verdictOf(files.includes('src/agent-routes.js')), `${files.length} route-registering files DERIVED from the tree (the old hand list named 4 + src/routes/*; stash-handover.js among the ${files.length})`, files);
   const rows = routeCensus(sources());
   const keys = new Set(rows.map((r) => r.key));
   const unknown = rows.filter((r) => !(r.key in ROUTES)).map((r) => `${r.key} (${r.file}:${r.line})`);
@@ -535,7 +535,7 @@ console.log('§C the reader surfaces: every store-touching route is classified, 
   ok(rows.length >= 75, `${rows.length} store-touching routes derived from the tree (through the call closure, depth ${CALL_DEPTH})`);
   ok(!unknown.length, 'every store-touching route is in the table', unknown);
   ok(!dead.length, 'every table row is still a route (no dead row)', dead);
-  ok(Object.values(ROUTES).every((v) => CLASSES.has(v) || /^exception: .{40,}/.test(v)), 'every class is one of reads / folded / echo / writes / meta, or an exception with a reason of 40+ characters');
+  ok(verdictOf(Object.values(ROUTES).every((v) => CLASSES.has(v) || /^exception: .{40,}/.test(v))), 'every class is one of reads / folded / echo / writes / meta, or an exception with a reason of 40+ characters');
   // THE WALK exercises every reader: its probe list names each `reads` / `folded` route's path
   const walkSrc = read('scripts/test-record-clear-walk.mjs');
   const probed = (key) => { const p = key.split(' ')[1]; const re = new RegExp(p.split('/').map((seg) => (seg.startsWith(':') ? '[^/\'"`]+' : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('/')); return re.test(walkSrc); };
@@ -559,11 +559,11 @@ console.log('§D the broadcasts');
   const walkSrc = read('scripts/test-record-clear-walk.mjs');
   for (const b of BROADCASTS) {
     const src = read(b.file);
-    ok(src.includes(`'${b.type}'`), `${b.type} is built in ${b.file} — ${b.how}`);
+    ok(verdictOf(src.includes(`'${b.type}'`)), `${b.type} is built in ${b.file} — ${b.how}`);
   }
-  ok(/frames\.slice\(judgeFrames\)/.test(walkSrc) && /carries no word/.test(walkSrc), 'the walk captures every frame on a live client and judges them after the clear');
+  ok(gateOf(/frames\.slice\(judgeFrames\)/.test(walkSrc)) && verdictOf(/carries no word/.test(walkSrc)), 'the walk captures every frame on a live client and judges them after the clear');
   // the per-session peer card (`msg`) is a delivery, not a store read: the words ride it AT DELIVERY (transcript class, declared)
-  ok(read('src/server/conversation-deliver.js').includes('emitPeerCard'), 'the peer card is emitted by the delivery ladder at delivery time (declared: transcript class)');
+  ok(verdictOf(read('src/server/conversation-deliver.js').includes('emitPeerCard')), 'the peer card is emitted by the delivery ladder at delivery time (declared: transcript class)');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -678,26 +678,26 @@ const EXCEPTIONS = [
 ];
 console.log('§F the derived copies the doors rewrite (pinned) and the declared exceptions');
 {
-  for (const [holder, file, stmt] of HOLDERS) ok(read(file).includes(stmt), `${holder} — ${file} has \`${stmt.slice(0, 60)}\``);
+  for (const [holder, file, stmt] of HOLDERS) ok(verdictOf(read(file).includes(stmt)), `${holder} — ${file} has \`${stmt.slice(0, 60)}\``);
   // THE DOORS have exactly two kinds of caller: the owner module itself and the ONE entry point (src/server/record-clear.js) —
   // a device op, a route or a producer calling a door directly would be a second rule (the agentd op table has none)
   const DOORS = ['clearProgress(', 'clearItems(', 'clearHistory(', 'clearJobs(', 'clearMessages('];
   const OWNERS = { 'clearProgress(': 'src/task-groups.js', 'clearItems(': 'src/user-todos.js', 'clearHistory(': 'src/session-status.js', 'clearJobs(': 'src/jobs.js', 'clearMessages(': 'src/server/groups-engine.js' };
   for (const d of DOORS) {
     const callers = [...sources()].filter(([rel, text]) => codeLines(text).some(({ l }) => l.includes(d))).map(([rel]) => rel);
-    ok(callers.every((rel) => rel === OWNERS[d] || rel === 'src/server/record-clear.js') && callers.includes('src/server/record-clear.js'), `the door ${d}) is called only by its owner and the ONE entry point`, callers);
+    ok(gateOf(callers.every((rel) => rel === OWNERS[d] || rel === 'src/server/record-clear.js')) && verdictOf(callers.includes('src/server/record-clear.js')), `the door ${d}) is called only by its owner and the ONE entry point`, callers);
   }
   const orchCallers = [...sources()].filter(([rel, text]) => codeLines(text).some(({ l }) => /\b(recordClear|getRecordClear\(\)|rc)\.(clear|clearMany)\(/.test(l))).map(([rel]) => rel);
-  ok(orchCallers.every((rel) => ['src/routes/records-clear.js', 'src/agent-routes.js'].includes(rel)) && orchCallers.length === 2, 'the ONE entry point is used by the owner routes and the agent verbs only (no device op, no other route)', orchCallers);
+  ok(gateOf(orchCallers.every((rel) => ['src/routes/records-clear.js', 'src/agent-routes.js'].includes(rel))) && orchCallers.length === 2, 'the ONE entry point is used by the owner routes and the agent verbs only (no device op, no other route)', orchCallers);
   // verify r7: A REFUSAL SENTENCE NEVER CARRIES A RECORD'S WORDS — a surface toasts a route's `error` and the device's toast
   // history (the For-you Notifications tab) keeps EVERY toast: a double-click on a failed job's Start was refused as
   // `<job name> is already running`, and the name outlived the job's clear there (reproduced in chrome, r7/hooks/toast.mjs)
-  { const hits = sentenceHits(sources()); ok(!hits.length && SENTENCE_FILES.every((f) => sources().has(f)), `no refusal sentence the store modules answer interpolates a record's text field (${SENTENCE_FILES.length} files: a job's name / note, an item's text, a reason, a note, a message's text)`, hits); }
-  ok(EXCEPTIONS.every(([, why]) => why.length >= 40), `${EXCEPTIONS.length} declared exceptions, each with a reason`);
+  { const hits = sentenceHits(sources()); ok(!hits.length && verdictOf(SENTENCE_FILES.every((f) => sources().has(f))), `no refusal sentence the store modules answer interpolates a record's text field (${SENTENCE_FILES.length} files: a job's name / note, an item's text, a reason, a note, a message's text)`, hits); }
+  ok(verdictOf(EXCEPTIONS.every(([, why]) => why.length >= 40)), `${EXCEPTIONS.length} declared exceptions, each with a reason`);
   for (const [what, why] of EXCEPTIONS) console.log(`  · exception: ${what} — ${why}`);
   // the two append-only holders are exactly what the walk finds still holding a word on disk
   const walkSrc = read('scripts/test-record-clear-walk.mjs');
-  ok(walkSrc.includes('data\\/channels\\/msgs\\/groups\\/') && walkSrc.includes('data\\/job-logs\\/'), 'the walk\'s on-disk grep admits exactly the two append-only holders');
+  ok(gateOf(walkSrc.includes('data\\/channels\\/msgs\\/groups\\/')) && verdictOf(walkSrc.includes('data\\/job-logs\\/')), 'the walk\'s on-disk grep admits exactly the two append-only holders');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -709,23 +709,23 @@ console.log('§G controls: one added raw reader per class, each RED on its leg')
   const rel1 = 'src/routes/channels.js';
   const src1 = read(rel1);
   const anchor1 = "router.get('/api/channel-groups/:id/messages'";
-  ok(src1.includes(anchor1), 'control 1 anchor present');
+  ok(verdictOf(src1.includes(anchor1)), 'control 1 anchor present');
   const mut1 = MUT.write(rel1, src1.replace(anchor1, "router.get('/api/channel-groups/:id/raw', (req, res) => { const store = groupsEngine().store; res.json({ records: store.readTail('groups', req.params.id, { limit: 50 }) }); });\n" + anchor1), 'raw-group-route');
   const c1 = groupLogCensus(sources({ [rel1]: mut1 }));
-  ok(c1.outside.length === 1 && c1.outside[0].startsWith(rel1), 'CONTROL 1: a route reading the group log by path is RED under §B (a read outside the store modules)', c1.outside);
+  ok(c1.outside.length === 1 && verdictOf(c1.outside[0].startsWith(rel1)), 'CONTROL 1: a route reading the group log by path is RED under §B (a read outside the store modules)', c1.outside);
   // 2. the group window's read without the fold (groups-engine.js) — §B "raw only inside readFolded / clearMessages"
   const rel2 = 'src/server/groups-engine.js';
   const src2 = read(rel2);
   const anchor2 = 'records: readFolded(rg.group.id, opts)';
-  ok(src2.includes(anchor2), 'control 2 anchor present');
+  ok(verdictOf(src2.includes(anchor2)), 'control 2 anchor present');
   const mut2 = MUT.write(rel2, src2.replace(anchor2, 'records: store.readTail(A, rg.group.id, opts)'), 'read-unfolded');
   const c2 = groupLogCensus(sources({ [rel2]: mut2 }));
-  ok(c2.groupsRaw.length === 1 && /^read@/.test(c2.groupsRaw[0]), 'CONTROL 2: read() served without the fold is RED under §B (a raw read outside readFolded / originalsOf)', c2.groupsRaw);
+  ok(c2.groupsRaw.length === 1 && verdictOf(/^read@/.test(c2.groupsRaw[0])), 'CONTROL 2: read() served without the fold is RED under §B (a raw read outside readFolded / originalsOf)', c2.groupsRaw);
   // 3. a route reading jobs.json off disk (jobs-wiring.js) — §A ownership
   const rel3 = 'src/server/jobs-wiring.js';
   const src3 = read(rel3);
   const anchor3 = "app.get('/api/jobs', (req, res) => {";
-  ok(src3.includes(anchor3), 'control 3 anchor present');
+  ok(verdictOf(src3.includes(anchor3)), 'control 3 anchor present');
   const mut3 = MUT.write(rel3, src3.replace(anchor3, "app.get('/api/jobs/raw', (req, res) => { res.type('json').send(require('fs').readFileSync(path.join(dataDir, 'jobs.json'), 'utf8')); });\n  " + anchor3), 'raw-jobs-file');
   const c3 = fileOwnership(sources({ [rel3]: mut3 })).find((r) => r.token === "'jobs.json'");
   ok(c3.strangers.length === 1 && c3.strangers[0] === rel3, 'CONTROL 3: a route reading jobs.json off disk is RED under §A (a stranger names the store file)', c3);
@@ -733,7 +733,7 @@ console.log('§G controls: one added raw reader per class, each RED on its leg')
   const rel4 = 'src/agent-routes.js';
   const src4 = read(rel4);
   const anchor4 = "app.get('/api/agent/task', ";
-  ok(src4.includes(anchor4), 'control 4 anchor present');
+  ok(verdictOf(src4.includes(anchor4)), 'control 4 anchor present');
   const mut4 = MUT.write(rel4, src4.replace(anchor4, "app.get('/api/agent/task-raw', (req, res) => { const hit = agentSession(req, res); if (!hit) return; res.json({ tasks: tasks.list() }); });\n" + anchor4), 'raw-task-route');
   const rows4 = routeCensus(sources({ [rel4]: mut4 }));
   const unknown4 = rows4.filter((r) => !(r.key in ROUTES)).map((r) => r.key);
@@ -744,7 +744,7 @@ console.log('§G controls: one added raw reader per class, each RED on its leg')
   const rel5 = 'src/server/stash-handover.js';
   const src5 = read(rel5);
   const anchor5 = "    app.post('/api/sessions/:id/stash/hand-over', async (req, res) => {";
-  ok(src5.includes(anchor5), 'control 5 anchor present');
+  ok(verdictOf(src5.includes(anchor5)), 'control 5 anchor present');
   const mut5 = MUT.write(rel5, src5.replace(anchor5, "    app.get('/api/sessions/:id/stash/raw', (req, res) => { const s = activeSessions.get(String(req.params.id)); res.json(entriesOf(cidOf(s))); });\n" + anchor5), 'raw-stash-route');
   const rows5 = routeCensus(sources({ [rel5]: mut5 }));
   const unknown5 = rows5.filter((r) => !(r.key in ROUTES)).map((r) => r.key);
@@ -756,8 +756,8 @@ console.log('§G controls: one added raw reader per class, each RED on its leg')
   ok(src6.split(a6).length === 2, 'control 6 anchor present once');
   const mut6 = MUT.write(rel6, src6.replace(a6, "return { error: `${job.name} is already running` };"), 'refusal-names-job');
   const h6 = sentenceHits(sources({ [rel6]: mut6 }));
-  ok(h6.length === 1 && h6[0].startsWith(rel6 + ':'), 'CONTROL 6 (verify r7): a refusal sentence naming the job (`${job.name} is already running`) is RED under §F — the device toast history would keep the name past the clear', h6);
-for (const row of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 6, label: '§G ' })) ok(row.pass, row.name, row.detail);
+  ok(h6.length === 1 && verdictOf(h6[0].startsWith(rel6 + ':')), 'CONTROL 6 (verify r7): a refusal sentence naming the job (`${job.name} is already running`) is RED under §F — the device toast history would keep the name past the clear', h6);
+for (const row of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 6, label: '§G ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -919,7 +919,7 @@ console.log('§H the client (verify r5): storage · titles · the belt · caches
   const unknown = rows.filter((r) => !(r in STORAGE)), dead = Object.keys(STORAGE).filter((k) => !rows.includes(k));
   ok(rows.length >= 60 && unknown.length === 0, `H1 every browser storage write is classified (${rows.length} keys over ${LIB_FILES.length} client files)`, unknown);
   ok(dead.length === 0, 'H1 no dead row (every classified key is still written)', dead);
-  ok(Object.values(STORAGE).every(([c, why]) => STORAGE_CLASSES.has(c) && why.length >= 6), 'H1 every row names its class (pref / ids / owner / ref / plugin / telemetry / marker) and what it holds');
+  ok(verdictOf(Object.values(STORAGE).every(([c, why]) => STORAGE_CLASSES.has(c) && why.length >= 6)), 'H1 every row names its class (pref / ids / owner / ref / plugin / telemetry / marker) and what it holds');
   // lane mobile-back-guard: the phone's back sentinel is the ONE history write — the constant state {vs: 1} with the URL untouched
   // (no third argument), so the entry holds no record, no words, no id; any other pushState / replaceState stays red.
   // Lane phone-back-reload: plus ONE replaceState(null, '') — the boot's rebuild clears a sentinel's state (no URL, nothing kept)
@@ -930,18 +930,18 @@ console.log('§H the client (verify r5): storage · titles · the belt · caches
     && !(o === 'src/lib/themes.js: document.cookie =' && groundCookieOnly('src/lib/themes.js', read('src/lib/themes.js'))));
   ok(otherWrites.length === 0, 'H1 the client writes NO IndexedDB database, CacheStorage cache, service worker, cookie, window.name, URL or indexed storage slot (the phone\'s back sentinel {vs: 1} and the launch ground\'s one colour cookie aside)', otherWrites);
   { const T = read('src/lib/themes.js');
-    ok(groundCookieOnly('src/lib/themes.js', T) && !groundCookieOnly('src/lib/themes.js', T + "\ndocument.cookie = 'theme=' + name;") && !groundCookieOnly('src/lib/sidebar.js', T)
+    ok(gateOf(groundCookieOnly('src/lib/themes.js', T)) && !groundCookieOnly('src/lib/themes.js', T + "\ndocument.cookie = 'theme=' + name;") && !groundCookieOnly('src/lib/sidebar.js', T)
       && !groundCookieOnly('src/lib/themes.js', T.replace(GROUND_COOKIE, GROUND_COOKIE.replace('groundCookie(', 'String('))),
       'H1 the launch ground\'s cookie is ONE statement in src/lib/themes.js through launch-ground.js\'s groundCookie (a colour, or the clearing cookie) — CONTROL: a second cookie there, the same statement in another file, or a value not groundCookie\'s is red'); }
   ok(!sentinelOnly('src/lib/mobile-back.js', "const push = () => history.pushState({ vs: 1, id: rec.id }, '');\nhistory.replaceState(null, '');") && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState({ vs: 1 }, '', '/s/' + id);")
     && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');\nhistory.replaceState(null, '');")
     && !sentinelOnly('src/lib/other.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');")
-    && sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');"), 'H1 CONTROL: a sentinel carrying an id, a history write with a URL, a third write, the same calls in another file — each is red (the pair itself green)');
+    && verdictOf(sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');")), 'H1 CONTROL: a sentinel carrying an id, a history write with a URL, a third write, the same calls in another file — each is red (the pair itself green)');
   ok(Object.entries(STORAGE).filter(([, [c]]) => c === 'ref').map(([k]) => k).join() === "src/lib/utils.js|localStorage|'vibespace.toastHistory'", 'H1 exactly ONE key can name a record: the toast history');
   const utils = read('src/lib/utils.js');
   // B-3f5d ① (lane for-you-jobs): the entry may carry `seen: true` (shown while the user acted) — a flag, no words
-  ok(/h\.unshift\(\{ m: String\(message\)\.slice\(0, 500\), type, ts: Date\.now\(\), \.\.\.\(ref && ref\.kind && ref\.id \? \{ ref: \{ kind: String\(ref\.kind\), id: String\(ref\.id\) \} \} : \{\}\), \.\.\.\(seen \? \{ seen: true \} : \{\}\) \}\);/.test(utils)
-    && /_recordToast\(history && typeof history\.m === 'string' \? history\.m : message, type, history && history\.ref\);/.test(utils), 'H1 …and it keeps what the caller\'s `history.m` says (the head) + a {kind, id} ref');
+  ok(gateOf(/h\.unshift\(\{ m: String\(message\)\.slice\(0, 500\), type, ts: Date\.now\(\), \.\.\.\(ref && ref\.kind && ref\.id \? \{ ref: \{ kind: String\(ref\.kind\), id: String\(ref\.id\) \} \} : \{\}\), \.\.\.\(seen \? \{ seen: true \} : \{\}\) \}\);/.test(utils))
+    && verdictOf(/_recordToast\(history && typeof history\.m === 'string' \? history\.m : message, type, history && history\.ref\);/.test(utils)), 'H1 …and it keeps what the caller\'s `history.m` says (the head) + a {kind, id} ref');
   // a toast about a record passes `history` — every showToast in the surface files whose message reads a record's words
   const SURF = ['src/lib/task-log.js', 'src/lib/task-detail.js', 'src/lib/user-todos-panel.js', 'src/lib/user-todos-actions.js', 'src/lib/inbox-window.js', 'src/lib/session-props.js', 'src/lib/session-card.js', 'src/lib/sidebar-tasks.js', 'src/lib/jobs-panel.js', 'src/lib/channel-window.js', 'src/lib/channels-panel.js', 'src/lib/record-clear-ui.js'];
   const WORDISH = /\bwordsOf\(|\bdetailOf\(|\b(p|e|entry)\.(note|detail)\b|\b(i|it|item)\.(text|detail)\b|\b(st|h|rec|cur)\.(reason|detail)\b|\b(j|job)\.(name|note)\b|\brec\.text\b|\.lastText\b|\.lastLine\b|\.payload\b/;
@@ -1001,11 +1001,11 @@ const foldsCarryWords = async (layoutPath) => {
   const rows = userStateWrites(libSources());
   const unknown = rows.filter((r) => !(r in USER_STATE)), dead = Object.keys(USER_STATE).filter((k) => !rows.includes(k));
   ok(rows.length >= 7 && unknown.length === 0 && dead.length === 0, `H1b every client write to the server's user state is classified by its key (${rows.length})`, { unknown, dead });
-  ok(Object.values(USER_STATE).every(([c, why]) => STORAGE_CLASSES.has(c) && why.length >= 20) && !Object.values(USER_STATE).some(([c]) => c === 'ref'), 'H1b every row names its class and what it holds — none can name a record');
+  ok(gateOf(Object.values(USER_STATE).every(([c, why]) => STORAGE_CLASSES.has(c) && why.length >= 20)) && !Object.values(USER_STATE).some(([c]) => c === 'ref'), 'H1b every row names its class and what it holds — none can name a record');
   const f = await foldsCarryWords(path.join(ROOT, 'src/lib/jobs-layout.js'));
-  ok(f.words.length === 0 && f.valid && f.keys.length === 4, 'H1b …and jobsPanelFolds, proved on the REAL jobs-layout: a job named with a sentinel folds to keys that carry no word (session keys + family digests), every one a key this build keeps', f);
+  ok(f.words.length === 0 && gateOf(f.valid) && f.keys.length === 4, 'H1b …and jobsPanelFolds, proved on the REAL jobs-layout: a job named with a sentinel folds to keys that carry no word (session keys + family digests), every one a key this build keeps', f);
   const jp = read('src/lib/jobs-panel.js');
-  ok(/const foldsOf = \(m\) => \{[^\n]*if \(isFoldKey\(k\)\) out\[k\] = !!v; else dropped\+\+;/.test(jp) && /FOLDS = foldsOf\(msg\.state\.jobsPanelFolds\)\.folds;/.test(jp) && /if \(dropped && !foldsCleaned\) \{ foldsCleaned = true; fetch\('\/api\/user-state', \{ method: 'PATCH'/.test(jp), 'H1b …an older build\'s word-keyed fold is dropped wherever the map is read (the load and the broadcast) and the cleaned map written back once');
+  ok(gateOf(/const foldsOf = \(m\) => \{[^\n]*if \(isFoldKey\(k\)\) out\[k\] = !!v; else dropped\+\+;/.test(jp)) && gateOf(/FOLDS = foldsOf\(msg\.state\.jobsPanelFolds\)\.folds;/.test(jp)) && verdictOf(/if \(dropped && !foldsCleaned\) \{ foldsCleaned = true; fetch\('\/api\/user-state', \{ method: 'PATCH'/.test(jp)), 'H1b …an older build\'s word-keyed fold is dropped wherever the map is read (the load and the broadcast) and the cleaned map written back once');
 }
 // ── H1c (verify r7 — the r6 ⑥ class, widened: EVERY SERVER-PERSISTED store a client's state reaches, not only user state)
 // ── grep-derived: the SyncStores server.js declares, the files routes/persistence.js persists, the config export's sections,
@@ -1058,16 +1058,16 @@ const serverStores = (srcs) => {
   const rows = serverStores(sources());
   const unknown = rows.filter((r) => !(r in SERVER_STORES)), dead = Object.keys(SERVER_STORES).filter((k) => !rows.includes(k));
   ok(rows.length >= 20 && !unknown.length && !dead.length, `H1c every server-persisted store a client's state reaches is named with its gate or its reason (${rows.length}: ${rows.filter((r) => r.startsWith('sync:')).length} SyncStores, ${rows.filter((r) => r.startsWith('file:')).length} persistence files, ${rows.filter((r) => r.startsWith('export:')).length} export sections, capture / tee / sidecars)`, { unknown, dead });
-  ok(Object.values(SERVER_STORES).every(([c, why]) => SERVER_STORE_CLASSES.has(c) && why.length >= 30), 'H1c every row names its class (owner / pref / ids / guarded / telemetry / declared) and what it holds');
+  ok(verdictOf(Object.values(SERVER_STORES).every(([c, why]) => SERVER_STORE_CLASSES.has(c) && why.length >= 30)), 'H1c every row names its class (owner / pref / ids / guarded / telemetry / declared) and what it holds');
   // the one store the owner TYPES into: nothing but the composer writes a draft
   const drafters = [...libSources()].filter(([, text]) => /\bsaveDraft\(/.test(text.replace(/export function saveDraft\(/, ''))).map(([rel]) => rel);
-  ok(drafters.join() === 'src/lib/chat-input.js,src/lib/doc-window-ui.js,src/lib/utils.js' && /saveDraft\('doc', draftId, comments\.length \? comments\.slice\(\) : ''\)/.test(read('src/lib/doc-window-ui.js')) && /export function clearDraft\(type, id\) \{\s*saveDraft\(type, id, ''\);/.test(read('src/lib/utils.js')), 'H1c …a draft is written by the composer (chat-input.js; utils.js clearDraft writes \'\') and the Doc window\'s comment strip only (doc-window-ui.js: the owner\'s notes on a markdown file under doc:) — no surface puts a record\'s words into data/drafts.json', drafters);
+  ok(drafters.join() === 'src/lib/chat-input.js,src/lib/doc-window-ui.js,src/lib/utils.js' && gateOf(/saveDraft\('doc', draftId, comments\.length \? comments\.slice\(\) : ''\)/.test(read('src/lib/doc-window-ui.js'))) && verdictOf(/export function clearDraft\(type, id\) \{\s*saveDraft\(type, id, ''\);/.test(read('src/lib/utils.js'))), 'H1c …a draft is written by the composer (chat-input.js; utils.js clearDraft writes \'\') and the Doc window\'s comment strip only (doc-window-ui.js: the owner\'s notes on a markdown file under doc:) — no surface puts a record\'s words into data/drafts.json', drafters);
   // the export leg: the walk's probe exports EVERY section the route offers, after the clear
   const walk = read('scripts/test-record-clear-walk.mjs');
   const secs = rows.filter((r) => r.startsWith('export:')).map((r) => r.slice(7));
   const probe = /name: 'POST \/api\/config\/export \{every section\} \(cookie\)', call: \(\) => raw\('\/api\/config\/export', \{ method: 'POST', body: \{ sections: (\[[^\]]*\]), clientPrefs: /.exec(walk);
   const probed = probe ? JSON.parse(probe[1].replace(/'/g, '"')) : [];
-  ok(probe && secs.every((s) => probed.includes(s)), `H1c …and test-record-clear-walk's config-export probe exports every section the route offers (${secs.join(', ')}) — before and after the clear`, { probed, secs });
+  ok(gateOf(probe) && verdictOf(secs.every((s) => probed.includes(s))), `H1c …and test-record-clear-walk's config-export probe exports every section the route offers (${secs.join(', ')}) — before and after the clear`, { probed, secs });
 }
 // ── H2 ──
 const PERSIST = require(path.join(ROOT, 'src/routes/persistence.js'));
@@ -1088,16 +1088,16 @@ const titleCensus = (srcs) => {
 };
 {
   const rows = titleCensus(libSources());
-  ok(rows.length >= 1 && rows.every((r) => r.action && Object.prototype.hasOwnProperty.call(PERSIST.WORDLESS_TITLES, r.action)), `H2 every window title that reads a record's words (${rows.length}) belongs to a window whose layout record keeps a generic title (WORDLESS_TITLES)`, rows);
-  ok(rows.every((r) => /isCleared\(|clearedText\(|wordsOf\(|shownText\(/.test(r.line)), 'H2 …and draws a cleared record in this device\'s words', rows);
+  ok(rows.length >= 1 && verdictOf(rows.every((r) => r.action && Object.prototype.hasOwnProperty.call(PERSIST.WORDLESS_TITLES, r.action))), `H2 every window title that reads a record's words (${rows.length}) belongs to a window whose layout record keeps a generic title (WORDLESS_TITLES)`, rows);
+  ok(verdictOf(rows.every((r) => /isCleared\(|clearedText\(|wordsOf\(|shownText\(/.test(r.line))), 'H2 …and draws a cleared record in this device\'s words', rows);
   const ws = read('src/ws-handler.js');
-  ok(/layoutData\.desktops\[desktopId\]\.autoSave = \{ \.\.\.data\.state, updatedAt: Date\.now\(\) \};/.test(ws) && /writeLayouts\(layoutData\);\s*\/\/ Broadcast[^\n]*\n\s*const syncMsg = JSON\.stringify\(\{ type: 'layout-sync', seq: \+\+layoutSyncSeqRef\.value, desktopId, state: data\.state,/.test(ws), 'H2 the ws layout-sync handler writes a SHALLOW copy of the client\'s state (the same window objects) BEFORE it relays that state — the choke point\'s generic title is what other clients receive');
+  ok(gateOf(/layoutData\.desktops\[desktopId\]\.autoSave = \{ \.\.\.data\.state, updatedAt: Date\.now\(\) \};/.test(ws)) && verdictOf(/writeLayouts\(layoutData\);\s*\/\/ Broadcast[^\n]*\n\s*const syncMsg = JSON\.stringify\(\{ type: 'layout-sync', seq: \+\+layoutSyncSeqRef\.value, desktopId, state: data\.state,/.test(ws)), 'H2 the ws layout-sync handler writes a SHALLOW copy of the client\'s state (the same window objects) BEFORE it relays that state — the choke point\'s generic title is what other clients receive');
   // the five surfaces' openSpecs carry ids (+ a session's own name) — never a record's words
   const specs = [['src/lib/task-log.js', "const openSpec = { action: 'openTaskLog', taskId, tab: tab === 'backlog' ? 'backlog' : 'activity' };"], ['src/lib/task-detail.js', "const openSpec = { action: 'openTaskDetail', taskId };"],
     ['src/lib/session-props.js', "const openSpec = { action: 'openSessionProps', sessionKey: refKey, cwd: s0.cwd || '', name: s0.name || '' };"], ['src/lib/jobs-panel.js', "openSpec: { action: 'openJobInteract', jobId }"], ['src/lib/jobs-panel.js', "openSpec: { action: 'openJobs' }"],
     ['src/lib/channel-window.js', "openSpec: { action: 'openChannel', adapterId, convId },"], ['src/lib/inbox-window.js', "const spec = { action: 'openInbox' };"]];
   const missing = specs.filter(([f, s]) => !read(f).includes(s));
-  ok(missing.length === 0 && /if \(itemId\) spec\.itemId = String\(itemId\);\s*if \(sessionKey\) spec\.sessionKey = String\(sessionKey\);/.test(read('src/lib/inbox-window.js')), 'H2 the surfaces\' openSpecs (persisted in data/layouts.json) carry ids and a session\'s own name — no Find text, no selected item\'s words', missing);
+  ok(missing.length === 0 && verdictOf(/if \(itemId\) spec\.itemId = String\(itemId\);\s*if \(sessionKey\) spec\.sessionKey = String\(sessionKey\);/.test(read('src/lib/inbox-window.js'))), 'H2 the surfaces\' openSpecs (persisted in data/layouts.json) carry ids and a session\'s own name — no Find text, no selected item\'s words', missing);
 }
 // ── H2b (verify r7 — THE PAGE'S OWN LAYOUT RECORDS: a named preset saved before a clear kept the Job input window's title
 // — the job's name — in LayoutManager._savedPresets, and the record of a desktop the owner had switched away from kept it
@@ -1155,12 +1155,12 @@ const captureTitled = (layoutSrc) => { const i = layoutSrc.indexOf('  captureWin
 {
   ok(PERSIST.WORDLESS_TITLES === RC.WORDLESS_TITLES && RC.wordlessTitleOf({ action: 'openJobInteract', jobId: 'jb-1' }, 'digest SENTINEL — needs your input') === 'Job input' && RC.wordlessTitleOf({ action: 'openTaskLog' }, 'census — Log') === 'census — Log' && RC.wordlessTitleOf(null, 'x') === 'x', 'H2b ONE table: the server\'s choke point and the client\'s capture read the same WORDLESS_TITLES (PURE src/record-clear.js); wordlessTitleOf keeps any other window\'s title');
   const ct = captureTitled(read('src/lib/layout.js'));
-  ok(ct.wordless && !ct.raw && /import \{ wordlessTitleOf \} from '\.\.\/record-clear\.js';/.test(read('src/lib/layout.js')), 'H2b the client\'s ONE capture (layout.js captureState) records a record-titled window under its generic title — never `title: win.title`', ct);
+  ok(gateOf(ct.wordless) && !ct.raw && verdictOf(/import \{ wordlessTitleOf \} from '\.\.\/record-clear\.js';/.test(read('src/lib/layout.js'))), 'H2b the client\'s ONE capture (layout.js captureState) records a record-titled window under its generic title — never `title: win.title`', ct);
   const sites = holderSites(libSources());
   const bad = sites.filter((s) => s.rows.length !== 1 || (s.rows[0][2] === 'capture' && !s.captured) || (s.rows[0][2] === 'merge' && !s.merged));
   ok(sites.length >= 12 && !bad.length, `H2b every site that keeps a layout record in the page (${sites.length}) is classified — a capture (captureState() above it), a record the server sent, built without titles, or empty`, bad);
   const used = new Set(sites.flatMap((s) => s.rows));
-  ok(HOLDERS_H2B.every((r) => used.has(r)) && HOLDERS_H2B.every(([, , k, why]) => HOLDER_KINDS.has(k) && why.length >= 8), 'H2b no dead row; every row names its kind and why', HOLDERS_H2B.filter((r) => !used.has(r)).map(([f, s]) => `${f}: ${s.slice(0, 50)}`));
+  ok(gateOf(HOLDERS_H2B.every((r) => used.has(r))) && verdictOf(HOLDERS_H2B.every(([, , k, why]) => HOLDER_KINDS.has(k) && why.length >= 8)), 'H2b no dead row; every row names its kind and why', HOLDERS_H2B.filter((r) => !used.has(r)).map(([f, s]) => `${f}: ${s.slice(0, 50)}`));
 }
 // ── H3 ──
 // the .197 integration adds src/lib/stash-strip.js (lane stash-detail's previews of what waits for an agent — lane-redact's own note)
@@ -1216,7 +1216,7 @@ const beltCensus = (srcs) => {
   const undeclared = hits.filter((h) => !h.declared);
   ok(undeclared.length === 0, `H3 THE BELT: every text field of the five kinds a surface reads goes through the cleared-aware words on its line, or is declared (${hits.length} declared over ${SURFACE_FILES.length} surface files)`, undeclared);
   const dead = BELT.filter(([f, snip]) => !(srcs.get(f) || '').includes(snip));
-  ok(dead.length === 0 && BELT.every(([, , why]) => why.length >= 20), 'H3 no dead declaration; every one says why', dead.map(([f, s]) => `${f}: ${s.slice(0, 60)}`));
+  ok(dead.length === 0 && verdictOf(BELT.every(([, , why]) => why.length >= 20)), 'H3 no dead declaration; every one says why', dead.map(([f, s]) => `${f}: ${s.slice(0, 60)}`));
   ok(hits.length === BELT.length, `H3 each declaration matches exactly one line (${hits.length} lines ↔ ${BELT.length} rows)`, { hits: hits.length, rows: BELT.length });
 }
 // ── H4 ──
@@ -1342,7 +1342,7 @@ const repaintCensus = (srcs) => REPAINT.filter(([, f, re]) => { const src = srcs
 }
 // verify r7: the popup has ONE closer — a site that only hides it would leave its rows (the words) in the hidden DOM
 const oneCloser = (src) => (src.match(/\bpopup\.classList\.add\('hidden'\)/g) || []).length === 1 && /const hidePopup = \(why\) => \{ notePopupHide\(why\); popup\.classList\.add\('hidden'\);/.test(src);
-ok(oneCloser(read('src/lib/user-todos-panel.js')), 'H5 …the For-you popup has ONE closer (hidePopup — its rows leave with it): no other site hides the popup and leaves its rows (verify r7)');
+ok(verdictOf(oneCloser(read('src/lib/user-todos-panel.js'))), 'H5 …the For-you popup has ONE closer (hidePopup — its rows leave with it): no other site hides the popup and leaves its rows (verify r7)');
 // ── H7 ORDER (verify r6 — census adequacy: r5 ④'s latest-fill guard reverted on a copy turned NO gate red — not the
 // census, not the chrome census, not the fix's own pin, which matched the catch branch's twin) ──
 // Every client GET of a route that serves the five stores' words (/api/tasks, /api/user-todos, /api/session-status,
@@ -1413,8 +1413,8 @@ const orderCensus = (srcs) => {
   const { sites, unguarded, dead } = orderCensus(libSources());
   ok(sites.length >= 18 && unguarded.length === 0, `H7 ORDER: every client GET of a five-store route (${sites.length}) passes a guard before it paints — the latest render, a generation, a re-check, a substitution, its own container — or declares it carries no record words`, unguarded);
   ok(dead.length === 0, 'H7 no dead row', dead);
-  ok(ORDER.every(([, , , kind, why]) => ORDER_KINDS.has(kind) && why.length >= 30) && ORDER.filter(([, , g]) => !g).every(([, , , kind]) => ['own-container', 'counts', 'no-words'].includes(kind)), 'H7 every row names its kind and why; a row with no guard pattern is a declaration (counts / no words / its own element)');
-  ok(substituteOk(read('src/lib/channel-window.js')), 'H7 …and the group window\'s place() substitutes every record a clear named (the `substitute` row\'s guard, file-wide)');
+  ok(gateOf(ORDER.every(([, , , kind, why]) => ORDER_KINDS.has(kind) && why.length >= 30)) && verdictOf(ORDER.filter(([, , g]) => !g).every(([, , , kind]) => ['own-container', 'counts', 'no-words'].includes(kind))), 'H7 every row names its kind and why; a row with no guard pattern is a declaration (counts / no words / its own element)');
+  ok(verdictOf(substituteOk(read('src/lib/channel-window.js'))), 'H7 …and the group window\'s place() substitutes every record a clear named (the `substitute` row\'s guard, file-wide)');
 }
 const CLIENT_EXCEPTIONS = [
   ['a chat window\'s peer / notification cards and the chat transcript', 'delivered words — the transcript class (server §F); the chat view is a transcript surface'],
@@ -1427,40 +1427,40 @@ const CLIENT_EXCEPTIONS = [
   ['lane-stash-detail\'s strip previews + the hand-over card\'s expander (0e324b5f, NOT in this lane — TO RE-CENSUS AT INTEGRATION)', 'ride the `stash` fact recomputed per active-sessions frame and are patched by digest — no client cache; a cleared entry\'s text IS the sentence (r3 f3e; r6 probe-merged the branch: every lane suite green). Owed at integration: add src/lib/stash-strip.js to §H3\'s SURFACE_FILES, and word a cleared preview — previewWords prints the stored English key for a cleared entry\'s head and label on a zh / ja device (the r4 board-chip / r5 ⑨ class, LOW); the card\'s expander shows what the hand-over DELIVERED (the transcript class, in the normalizer\'s memory, replaced by the transcript\'s own record on a rebuild)'],
 ];
 {
-  ok(CLIENT_EXCEPTIONS.every(([, why]) => why.length >= 40), `§H ${CLIENT_EXCEPTIONS.length} declared client exceptions, each with a reason`);
+  ok(verdictOf(CLIENT_EXCEPTIONS.every(([, why]) => why.length >= 40)), `§H ${CLIENT_EXCEPTIONS.length} declared client exceptions, each with a reason`);
   for (const [what, why] of CLIENT_EXCEPTIONS) console.log(`  · client exception: ${what} — ${why}`);
   const walkSrc = read('scripts/test-record-clear-client.mjs');
-  ok(/heapHolds\(P1, 'A'\)/.test(walkSrc) && /heapHolds\(P2, 'A'\)/.test(walkSrc) && /localStorage', 'sessionStorage'\]/.test(walkSrc) && /indexedDB\.databases/.test(walkSrc) && /caches\.keys\(\)/.test(walkSrc) && /layoutsHave\('A'\)/.test(walkSrc) && /autoCaptureIncident\(/.test(walkSrc), '§H the chrome half greps the DOM, both storages, IndexedDB, CacheStorage, both clients\' heaps, data/layouts.json and an incident captured after the clear');
+  ok(gateOf(/heapHolds\(P1, 'A'\)/.test(walkSrc)) && gateOf(/heapHolds\(P2, 'A'\)/.test(walkSrc)) && gateOf(/localStorage', 'sessionStorage'\]/.test(walkSrc)) && gateOf(/indexedDB\.databases/.test(walkSrc)) && gateOf(/caches\.keys\(\)/.test(walkSrc)) && gateOf(/layoutsHave\('A'\)/.test(walkSrc)) && verdictOf(/autoCaptureIncident\(/.test(walkSrc)), '§H the chrome half greps the DOM, both storages, IndexedDB, CacheStorage, both clients\' heaps, data/layouts.json and an incident captured after the clear');
 }
 // ── H6 CONTROLS ──
 console.log('§H6 controls: one client-side copy per class, each RED on its leg');
 {
   // 1. a new storage key holding a record's words (the For-you window remembers the selected item's text)
   const r1 = 'src/lib/inbox-window.js', s1 = read(r1), a1 = "  const textOf = (i) => [";
-  ok(s1.includes(a1), 'H6 control 1 anchor present');
+  ok(verdictOf(s1.includes(a1)), 'H6 control 1 anchor present');
   const m1 = MUT.write(r1, s1.replace(a1, "  const rememberLast = (i) => { try { localStorage.setItem('vibespace.inboxLast', model.wordsOf(i)); } catch { } };\n" + a1), 'storage-holds-words');
   const c1 = storageWrites(libSources({ [r1]: m1 }));
   ok(c1.rows.filter((r) => !(r in STORAGE)).join() === "src/lib/inbox-window.js|localStorage|'vibespace.inboxLast'", 'CONTROL 1: a new key holding the selected item\'s words is RED under H1 (an unclassified storage write)', c1.rows.filter((r) => !(r in STORAGE)));
   // 2. a window title reading a record's words on a window whose layout record KEEPS its title (the task log)
   const r2 = 'src/lib/task-log.js', s2 = read(r2), a2 = "    onTitle?.(task.title);\n\n    // Preserve focus";   // lane task-group-context: the viewer is mounted (the window sets its title through onTitle)
-  ok(s2.includes(a2), 'H6 control 2 anchor present');
+  ok(verdictOf(s2.includes(a2)), 'H6 control 2 anchor present');
   const m2 = MUT.write(r2, s2.replace(a2, "    app.wm.setTitle(winInfo.id, (task.progress || []).map((p) => (isCleared(p) ? clearedText() : p.note)).pop() + ' — ' + t('Log'));\n\n    // Preserve focus"), 'title-reads-words');
   const c2 = titleCensus(libSources({ [r2]: m2 }));
   const bad2 = c2.filter((r) => !Object.prototype.hasOwnProperty.call(PERSIST.WORDLESS_TITLES, r.action));
   ok(bad2.length === 1 && bad2[0].action === 'openTaskLog', 'CONTROL 2: a task log window titled by its newest note is RED under H2 (its layout record would keep the words)', bad2);
   // 3. THE r4 PATTERN in a keyed renderer: `{ text: p.note }` captured into a module Map when the row is added
   const r3 = 'src/lib/task-log.js', a3 = '  const buildActRow = (p) => {\n    const k = keyOf(p);';
-  ok(s2.includes(a3), 'H6 control 3 anchor present');
+  ok(verdictOf(s2.includes(a3)), 'H6 control 3 anchor present');
   const m3 = MUT.write(r3, s2.replace(a3, a3 + '\n    CAPTURED.set(k, { text: p.note, at: p.at });').replace("import { escHtml, showToast, showContextMenu } from './utils.js';", "import { escHtml, showToast, showContextMenu } from './utils.js';\nconst CAPTURED = new Map();"), 'row-captures-text');
   const srcs3 = libSources({ [r3]: m3 });
   const u3 = beltCensus(srcs3).filter((h) => !h.declared), k3 = cacheCensus(srcs3).filter((r) => !(r in CACHES));
-  ok(u3.length === 1 && /CAPTURED\.set\(k, \{ text: p\.note/.test(u3[0].line) && k3.join() === 'src/lib/task-log.js|CAPTURED', 'CONTROL 3: a row that captures `{ text: p.note }` into a module Map at add time is RED under H3 (the words, uncleared) AND H4 (an undeclared cache)', { belt: u3, caches: k3 });
+  ok(u3.length === 1 && gateOf(/CAPTURED\.set\(k, \{ text: p\.note/.test(u3[0].line)) && k3.join() === 'src/lib/task-log.js|CAPTURED', 'CONTROL 3: a row that captures `{ text: p.note }` into a module Map at add time is RED under H3 (the words, uncleared) AND H4 (an undeclared cache)', { belt: u3, caches: k3 });
   // 4. a repaint that ignores the clear (the Job input window listening to its own id only — the pre-r5 listener)
   const r4 = 'src/lib/jobs-panel.js', s4 = read(r4), a4 = "if (msg.type === 'jobs-updated' && (msg.id === jobId || (Array.isArray(msg.cleared) && msg.cleared.includes(jobId)))) render();";
-  ok(s4.includes(a4), 'H6 control 4 anchor present');
+  ok(verdictOf(s4.includes(a4)), 'H6 control 4 anchor present');
   const m4 = MUT.write(r4, s4.replace(a4, "if (msg.type === 'jobs-updated' && msg.id === jobId) render();"), 'repaint-ignores-clear');
   const c4 = repaintCensus(libSources({ [r4]: m4 }));
-  ok(c4.length === 1 && /Job input/.test(c4[0]), 'CONTROL 4: a Job input window that ignores its job\'s clear is RED under H5', c4);
+  ok(c4.length === 1 && verdictOf(/Job input/.test(c4[0])), 'CONTROL 4: a Job input window that ignores its job\'s clear is RED under H5', c4);
   // 5. verify r6 (census adequacy): each r5 repaint a row's label CLAIMS, reverted on a copy, reddens exactly its own row —
   // ③ the detail window's typing guard, ④ Session Properties' select guard, ⑤ the live arrival toast's re-word loop
   const REV5 = [
@@ -1472,7 +1472,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
     const src = read(rel);
     ok(src.split(from).length === 2, `H6 control 5 (${tag}) anchor present once`);
     const c5 = repaintCensus(libSources({ [rel]: MUT.write(rel, src.replace(from, to), tag) }));
-    ok(c5.length === 1 && want.test(c5[0]), `CONTROL 5 (verify r6): the r5 repaint reverted on a copy (${tag}) is RED under H5 on exactly its own row`, c5);
+    ok(c5.length === 1 && verdictOf(want.test(c5[0])), `CONTROL 5 (verify r6): the r5 repaint reverted on a copy (${tag}) is RED under H5 on exactly its own row`, c5);
   }
   // 6. verify r6 (census adequacy — THE ORDER CLASS): each order guard of r5 / r6 removed on a copy leaves its site matched by
   // no H7 row — RED on exactly that site; and a NEW painter of a five-store GET is RED until the table names its guard
@@ -1493,7 +1493,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
     const src = read(rel);
     ok(src.split(from).length === 2, `H6 control 6 (${tag}) anchor present once`);
     const r6 = orderCensus(libSources({ [rel]: MUT.write(rel, src.replace(from, to), tag) }));
-    ok(r6.unguarded.length === 1 && r6.unguarded[0].at.startsWith(rel + ':'), `CONTROL 6 (verify r6): ${tag} — the site is RED under H7 (no row's guard holds for it), and only it`, r6.unguarded);
+    ok(r6.unguarded.length === 1 && verdictOf(r6.unguarded[0].at.startsWith(rel + ':')), `CONTROL 6 (verify r6): ${tag} — the site is RED under H7 (no row's guard holds for it), and only it`, r6.unguarded);
   }
   // 7. verify r6: the fold key spelled with the family again (the pre-r6 jobs-layout) is RED under H1b's real-module proof
   {
@@ -1514,7 +1514,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
     const rel = 'src/lib/layout.js', src = read(rel), from = 'title: wordlessTitleOf(win._openSpec, win.title), type: win.type,';
     ok(src.split(from).length === 2, 'H6 control 9 (capture-keeps-title) anchor present once');
     const c9 = captureTitled(fs.readFileSync(MUT.write(rel, src.replace(from, 'title: win.title, type: win.type,'), 'capture-keeps-title', { esm: true }), 'utf8'));
-    ok(!c9.wordless && c9.raw, 'CONTROL 9 (verify r7): a captureState that records `title: win.title` (every page-side layout record would keep the job\'s name) is RED under H2b', c9);
+    ok(!c9.wordless && verdictOf(c9.raw), 'CONTROL 9 (verify r7): a captureState that records `title: win.title` (every page-side layout record would keep the job\'s name) is RED under H2b', c9);
   }
   // 10. verify r7: a NEW page-side holder of layout records (a desktop cache built from the live windows, titles and all) is RED
   {
@@ -1522,7 +1522,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
     ok(src.split(a).length === 2, 'H6 control 10 (new-titled-holder) anchor present once');
     const m10 = MUT.write(rel, src.replace(a, "  _snapshotAll() { for (const d of this._desktops) this._savedStates.set(d.id, { windows: [...this.app.wm.windows.values()].filter((w) => w._desktopId === d.id).map((w) => ({ winId: w.id, title: w.title, openSpec: w._openSpec })) }); }\n" + a), 'new-titled-holder', { esm: true });
     const bad10 = holderSites(libSources({ [rel]: m10 })).filter((s) => s.rows.length !== 1 || (s.rows[0][2] === 'capture' && !s.captured) || (s.rows[0][2] === 'merge' && !s.merged));
-    ok(bad10.length === 1 && bad10[0].at.startsWith(rel + ':') && /_snapshotAll/.test(bad10[0].line), 'CONTROL 10 (verify r7): a new page-side holder of layout records (a desktop cache built from the live windows with their titles) is RED under H2b, and only it', bad10);
+    ok(bad10.length === 1 && gateOf(bad10[0].at.startsWith(rel + ':')) && verdictOf(/_snapshotAll/.test(bad10[0].line)), 'CONTROL 10 (verify r7): a new page-side holder of layout records (a desktop cache built from the live windows with their titles) is RED under H2b, and only it', bad10);
   }
   // 11. verify r7: a NEW server-persisted store a client writes (a SyncStore remembering the For-you window's last item) is RED
   {
@@ -1546,12 +1546,12 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
     ok(src.split(from).length === 2, 'H6 control 13 (closer-keeps-rows) anchor present once');
     const m13 = MUT.write(rel, src.replace(from, "  onOutsidePress(popup, () => popup.classList.add('hidden'), {"), 'closer-keeps-rows', { esm: true });
     const c13 = repaintCensus(libSources({ [rel]: m13 }));
-    ok(c13.length === 1 && /For-you popup CLOSED/.test(c13[0]) && !oneCloser(fs.readFileSync(m13, 'utf8')), 'CONTROL 13 (verify r7): an outside press that only hides the popup (the pre-r7 closer) is RED under H5 on exactly the closed-popup row, and the one-closer check', c13);
+    ok(c13.length === 1 && gateOf(/For-you popup CLOSED/.test(c13[0])) && !oneCloser(fs.readFileSync(m13, 'utf8')), 'CONTROL 13 (verify r7): an outside press that only hides the popup (the pre-r7 closer) is RED under H5 on exactly the closed-popup row, and the one-closer check', c13);
   }
   // …and no row can pass on half of what it claims again: a top-level `|` in a pattern is refused
   const topAlt = (src) => { let d = 0, cls = false; for (let i = 0; i < src.length; i++) { const c = src[i]; if (c === '\\') { i++; continue; } if (cls) { if (c === ']') cls = false; continue; } if (c === '[') cls = true; else if (c === '(') d++; else if (c === ')') d--; else if (c === '|' && d === 0) return true; } return false; };
-  ok(REPAINT.every(([, , re]) => (Array.isArray(re) ? re : [re]).every((r) => !topAlt(r.source))) && topAlt('a[\\s\\S]*|b') && !topAlt('(a|b)c'), 'H5 no row\'s pattern is a top-level alternation (one that passes on half of the row\'s claim)');
-  for (const row of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 26, label: '§H6 ' })) ok(row.pass, row.name, row.detail);
+  ok(gateOf(REPAINT.every(([, , re]) => (Array.isArray(re) ? re : [re]).every((r) => !topAlt(r.source)))) && gateOf(topAlt('a[\\s\\S]*|b')) && !topAlt('(a|b)c'), 'H5 no row\'s pattern is a top-level alternation (one that passes on half of the row\'s claim)');
+  for (const row of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 26, label: '§H6 ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 
@@ -1590,7 +1590,7 @@ console.log('\n§H8 the For-you openers\' toasts: each keeps a head + the item\'
   };
   const bareOf = (rows) => rows.filter((r) => !r.missing && !r.ref).map((r) => `${r.name}@${r.line}`);
   const rel = 'src/lib/user-todos-actions.js', src = read(rel), rows = openerToasts(src);
-  ok(OPENERS.every((n) => rows.filter((r) => r.name === n && !r.missing).length >= 2), `${rows.length} toasts in openArtifact + openLink (each opener found, two or more toasts in each)`, rows);
+  ok(verdictOf(OPENERS.every((n) => rows.filter((r) => r.name === n && !r.missing).length >= 2)), `${rows.length} toasts in openArtifact + openLink (each opener found, two or more toasts in each)`, rows);
   ok(!bareOf(rows).length, 'every toast of openArtifact and openLink carries history { m: t(<a head>), ref: { kind: \'todo\', id } } — a cleared item\'s attachment name or link never stays in Notifications', bareOf(rows));
   // the REDS: a copy with today's line (the candidate c51494dbc's storage toast, no history) — RED on exactly that toast
   const TODAY = [
@@ -1599,10 +1599,10 @@ console.log('\n§H8 the For-you openers\' toasts: each keeps a head + the item\'
   ];
   for (const [name, cured, today] of TODAY) {
     const red = bareOf(openerToasts(anchored(src, cured, today, `opener-toast-today-${name}`)));
-    ok(red.length === 1 && red[0].startsWith(name + '@'), `CONTROL (r2960): a copy with today's storage toast in ${name} (no history ref) is RED on exactly that toast`, red);
+    ok(red.length === 1 && verdictOf(red[0].startsWith(name + '@')), `CONTROL (r2960): a copy with today's storage toast in ${name} (no history ref) is RED on exactly that toast`, red);
   }
 }
 
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

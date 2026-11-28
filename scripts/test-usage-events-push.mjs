@@ -34,7 +34,7 @@ process.env.HOME = fakeHome;
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const pids = []; // the daemons this suite spawned — stopped by their own pid (never by a name), on every path
 const pidLog = (m) => { const x = /spawned local daemon pid=(\d+)/.exec(String(m)); if (x) pids.push(Number(x[1])); };
 const more = []; // …and the scratch dirs it made (tmp + each block's own)
@@ -63,7 +63,7 @@ const { DeviceManager } = require('../src/agentd/client.js');
 const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: pidLog });
 dm.installLocal();
 const conn = await dm.connect();
-check('hello-ack advertises usage-events', conn.info.capabilities.includes('usage-events'));
+check('hello-ack advertises usage-events', verdictOf(conn.info.capabilities.includes('usage-events')));
 
 try {
   const got = []; // parsed events
@@ -74,10 +74,10 @@ try {
   });
   // initial drain
   for (let i = 0; i < 40 && got.length < 2; i++) await sleep(250);
-  check(`initial drain pushes the existing events (${got.length})`, got.length === 2 && got.some((e) => e.rid === 'r1') && got.some((e) => e.rid === 'r2'));
+  check(`initial drain pushes the existing events (${got.length})`, got.length === 2 && gateOf(got.some((e) => e.rid === 'r1')) && verdictOf(got.some((e) => e.rid === 'r2')));
   const cursorFile = path.join(ROOT, 'state', 'usage-push-cursor.json');
   for (let i = 0; i < 20 && !fs.existsSync(cursorFile); i++) await sleep(250);
-  check('ack committed the device-side cursor file', fs.existsSync(cursorFile));
+  check('ack committed the device-side cursor file', verdictOf(fs.existsSync(cursorFile)));
   let cur1 = {}; try { cur1 = JSON.parse(fs.readFileSync(cursorFile, 'utf8')); } catch { }
   check('cursor holds the transcript byte offset', (cur1[jsonl]?.offset || 0) > 0);
 
@@ -140,7 +140,7 @@ try {
     process.env.VIBESPACE_AGENTD_ROOT = was.root; process.env.HOME = was.home;
     const realAck = dm2.ackUsageEvents.bind(dm2);
     dm2.ackUsageEvents = (seq) => { acks.push(seq); realAck(seq); };
-    check('r5 the probe: October proven-over at the hub, server.js\'s handler read from its source', !!handler && v0 && v0.ok === false && v0.why === 'size' && v0.proven === true, JSON.stringify(v0));
+    check('r5 the probe: October proven-over at the hub, server.js\'s handler read from its source', !!handler && gateOf(v0) && v0.ok === false && v0.why === 'size' && v0.proven === true, JSON.stringify(v0));
     HostManager.prototype._armDirtyPush.call(hostsLike, 'host-m', dm2); // hosts.js's push handler — the real one
     for (let i = 0; i < 40 && !pushes.length; i++) await sleep(250);
     const cursor2 = path.join(ROOT2, 'state', 'usage-push-cursor.json');
@@ -154,17 +154,17 @@ try {
     for (let i = 0; i < 40 && pushes.length < 2; i++) await sleep(250);
     let novRows2 = 0; try { novRows2 = fs.readFileSync(novShard, 'utf8').split('\n').filter(Boolean).length; } catch { }
     check(`r5 the next push carries ONLY the new event (${pushes[1]} event(s)), the November file 6 rows (${novRows2}) (ff094d46: the whole window again, 11 events, at every transcript change)`, pushes[1] === 1 && novRows2 === 6, JSON.stringify({ pushes, acks, novRows2 }));
-    check('r5 the push road and the harvest road read ONE verdict: server.js returns usage-history ackOf(r) — a pause alone acks, a deferral or a month\'s unwritten hold does not', /return usageAckOf\(r\);/.test(m ? m[1] : '') && ackOf({ appended: 1, paused: {}, held: 5 }) === true && ackOf({ deferred: 'ledger-index-loading' }) === false && ackOf({ appended: 1, holdFailed: [{ month: '2026-10' }] }) === false);
+    check('r5 the push road and the harvest road read ONE verdict: server.js returns usage-history ackOf(r) — a pause alone acks, a deferral or a month\'s unwritten hold does not', gateOf(/return usageAckOf\(r\);/.test(m ? m[1] : '')) && ackOf({ appended: 1, paused: {}, held: 5 }) === true && ackOf({ deferred: 'ledger-index-loading' }) === false && ackOf({ appended: 1, holdFailed: [{ month: '2026-10' }] }) === false);
   } finally {
     process.env.VIBESPACE_AGENTD_ROOT = was.root; process.env.HOME = was.home;
     try { dm2.stop?.(); } catch { }
     // r5404: the second daemon is GONE before its root goes (it was still running when this removal was bare)
     const end2 = endDaemonsAndWait(ROOT2);
-    check(`the second root's daemon(s) (${end2.pids.length} still running) end on SIGTERM and are gone before its root is removed`, end2.gone && !end2.killed, JSON.stringify(end2));
+    check(`the second root's daemon(s) (${end2.pids.length} still running) end on SIGTERM and are gone before its root is removed`, gateOf(end2.gone) && !end2.killed, JSON.stringify(end2));
     fs.rmSync(tmp2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
-{ const end = endDaemonsAndWait(ROOT); check(`the root's daemon(s) (${end.pids.length} still running) end on SIGTERM and are gone before its root is removed`, end.gone && !end.killed, JSON.stringify(end)); }   // r5404
+{ const end = endDaemonsAndWait(ROOT); check(`the root's daemon(s) (${end.pids.length} still running) end on SIGTERM and are gone before its root is removed`, gateOf(end.gone) && !end.killed, JSON.stringify(end)); }   // r5404
 cleanup();
 console.log(failed ? `FAIL (${failed})` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

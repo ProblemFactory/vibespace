@@ -69,7 +69,7 @@ const M = require(path.join(REPO, 'src/desktop-switch.js'));
 // the Rename door shows a stored default name («Desktop N») in the reader's words (lane ui-language pick 3): its source reads storedNameWords
 const VW = await import('file://' + path.join(REPO, 'src/lib/value-words.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -144,26 +144,26 @@ ok(M.otherDesktopWindows({ desktops: D, activeId: 'd1' }).length === 0 && M.othe
 console.log('⑥ wiring pins');
 {
   const pure = read('src/desktop-switch.js');
-  ok(!/\brequire\(|^\s*import\s/m.test(pure) && /module\.exports = \{ windowWaits, waitingElsewhere, turnWaitStep, turnSeq, TITLES_MAX, DOORS, DOOR_WHY, desktopRows, switchVerdict, rowWords, doorState, otherDesktopWindows, desktopDoors, doorItems, sheetItems, followDesktops \};/.test(pure), 'src/desktop-switch.js is PURE (imports nothing) and CommonJS (a root src/ module)');
+  ok(!/\brequire\(|^\s*import\s/m.test(pure) && verdictOf(/module\.exports = \{ windowWaits, waitingElsewhere, turnWaitStep, turnSeq, TITLES_MAX, DOORS, DOOR_WHY, desktopRows, switchVerdict, rowWords, doorState, otherDesktopWindows, desktopDoors, doorItems, sheetItems, followDesktops \};/.test(pure)), 'src/desktop-switch.js is PURE (imports nothing) and CommonJS (a root src/ module)');
   const sh = read('src/lib/desktop-switch-sheet.js');
-  ok(/import \{ desktopRows, switchVerdict, sheetItems, followDesktops, windowWaits, waitingElsewhere \} from '\.\.\/desktop-switch\.js';/.test(sh) && /const desktops = drawn \? followDesktops\(\{ drawn, desktops: dm\.desktops \}\) : dm\.desktops;/.test(sh) && /return desktopRows\(\{ desktops, activeId: dm\.activeDesktopId, windowsByDesktop, heldByDesktop \}\);/.test(sh) && /const items = sheetItems\(rows, \{ t \}\)\.map\(\(s\) => \(s\.door === 'new'/.test(sh) && !/rowWords/.test(sh),
+  ok(gateOf(/import \{ desktopRows, switchVerdict, sheetItems, followDesktops, windowWaits, waitingElsewhere \} from '\.\.\/desktop-switch\.js';/.test(sh)) && gateOf(/const desktops = drawn \? followDesktops\(\{ drawn, desktops: dm\.desktops \}\) : dm\.desktops;/.test(sh)) && gateOf(/return desktopRows\(\{ desktops, activeId: dm\.activeDesktopId, windowsByDesktop, heldByDesktop \}\);/.test(sh)) && gateOf(/const items = sheetItems\(rows, \{ t \}\)\.map\(\(s\) => \(s\.door === 'new'/.test(sh)) && !/rowWords/.test(sh),
     'the sheet reads the model — one count, one set of words (its rows are PURE sheetItems: rowWords + the table\'s doors)');
-  ok(/const menu = showContextMenu\(/.test(sh) && /menu\.classList\.add\('mobile-sheet'\)/.test(sh) && !/createModalShell|document\.createElement\('dialog'\)/.test(sh),
+  ok(gateOf(/const menu = showContextMenu\(/.test(sh)) && gateOf(/menu\.classList\.add\('mobile-sheet'\)/.test(sh)) && !/createModalShell|document\.createElement\('dialog'\)/.test(sh),
     'the sheet is the product\'s own (showContextMenu + the phone\'s .mobile-sheet) — no new component');
-  ok(/else placeOverColumn\(menu, ar\);/.test(sh) && /const w = Math\.max\(0, Math\.min\(480, right - \(colL \+ 4\)\)\);/.test(sh) && /menu\.style\.width = \(w \/ Z\) \+ 'px'; menu\.style\.minWidth = '0'; menu\.style\.maxWidth = 'none';/.test(sh),
+  ok(gateOf(/else placeOverColumn\(menu, ar\);/.test(sh)) && gateOf(/const w = Math\.max\(0, Math\.min\(480, right - \(colL \+ 4\)\)\);/.test(sh)) && verdictOf(/menu\.style\.width = \(w \/ Z\) \+ 'px'; menu\.style\.minWidth = '0'; menu\.style\.maxWidth = 'none';/.test(sh)),
     'the regular class places the sheet OVER THE CONVERSATION COLUMN with an explicit width (≤ 480 px, the column\'s less 4 px a side) — never its rows\' max-content width (主开发\'s 8fda0ac8 defect: ~1790 px, off the left edge; the geometry is test-duo-layout ⑧\'s)');
-  ok(/const ctl = new AbortController\(\);/.test(sh) && /\}, \{ signal: ctl\.signal \}\);/.test(sh) && /openCtl\?\.abort\(\);/.test(sh), 'the rows\' long-press listeners hang on the sheet\'s own AbortController (a reopen aborts the last)');
-  ok(/const v = switchVerdict\(\{ from: dm\.activeDesktopId, to: r\.id, name: r\.name, rows: sheetRows\(app\) \}\);/.test(sh) && /if \(v\.act === 'refused'\) return void dm\._doorRefused\(\{ id: r\.id, name: v\.name \}, 'switch'\);/.test(sh), 'a tap asks the verdict over the rows as they are NOW (a desktop deleted elsewhere is said — the table\'s why, r3 ④ — never switched to)');
-  ok(/const after = \(\) => \(dm\.desktops\.some\(\(d\) => d\.id === desk\.id\) \? setTimeout\(\(\) => \{ if \(anchor\?\.isConnected\) openDesktopSheet\(app, anchor, \{ onSwitch \}\); \}, 0\) : onSwitch\(dm\.activeDesktopId\)\);/.test(sh),
+  ok(gateOf(/const ctl = new AbortController\(\);/.test(sh)) && gateOf(/\}, \{ signal: ctl\.signal \}\);/.test(sh)) && verdictOf(/openCtl\?\.abort\(\);/.test(sh)), 'the rows\' long-press listeners hang on the sheet\'s own AbortController (a reopen aborts the last)');
+  ok(gateOf(/const v = switchVerdict\(\{ from: dm\.activeDesktopId, to: r\.id, name: r\.name, rows: sheetRows\(app\) \}\);/.test(sh)) && verdictOf(/if \(v\.act === 'refused'\) return void dm\._doorRefused\(\{ id: r\.id, name: v\.name \}, 'switch'\);/.test(sh)), 'a tap asks the verdict over the rows as they are NOW (a desktop deleted elsewhere is said — the table\'s why, r3 ④ — never switched to)');
+  ok(verdictOf(/const after = \(\) => \(dm\.desktops\.some\(\(d\) => d\.id === desk\.id\) \? setTimeout\(\(\) => \{ if \(anchor\?\.isConnected\) openDesktopSheet\(app, anchor, \{ onSwitch \}\); \}, 0\) : onSwitch\(dm\.activeDesktopId\)\);/.test(sh)),
     'a long press = the desktop\'s doors (⑨: THE builder, phone tier); once an act is done a delete re-shows the desktop on show (its windows moved to the next desktop), any other brings the sheet back on its new state');
   const mn = read('src/lib/mobile-nav.js');
-  ok(/openDesktopSheet\(this\.app, b, \{ onSwitch: \(id, o\) => this\.switchDesktop\(id, o\) \}\)/.test(mn) && /const s = doorState\(/.test(mn), 'the nav\'s Desktops button opens THE sheet; its badge / label are doorState\'s');
+  ok(gateOf(/openDesktopSheet\(this\.app, b, \{ onSwitch: \(id, o\) => this\.switchDesktop\(id, o\) \}\)/.test(mn)) && verdictOf(/const s = doorState\(/.test(mn)), 'the nav\'s Desktops button opens THE sheet; its badge / label are doorState\'s');
   const tb = read('src/lib/taskbar.js');
-  ok(/return otherDesktopWindows\(\{ desktops: dm\.desktops, activeId: dm\.activeDesktopId, built, held \}\);/.test(tb) && /if \(r\.built\) \{ app\.wm\.revealWindow\(r\.id\); return; \}/.test(tb) && /dm\.revealHeld\(r\.id, r\.deskId, /.test(tb) && /\n    wm\.revealWindow\?\.\(id\);\n  \}/.test(read('src/lib/desktop-manager.js')),
+  ok(gateOf(/return otherDesktopWindows\(\{ desktops: dm\.desktops, activeId: dm\.activeDesktopId, built, held \}\);/.test(tb)) && gateOf(/if \(r\.built\) \{ app\.wm\.revealWindow\(r\.id\); return; \}/.test(tb)) && gateOf(/dm\.revealHeld\(r\.id, r\.deskId, /.test(tb)) && verdictOf(/\n    wm\.revealWindow\?\.\(id\);\n  \}/.test(read('src/lib/desktop-manager.js'))),
     'the ⧉ list\'s «Other desktops» rows are the model\'s and go through THE door (wm.revealWindow switches the desktop first; a held row = the desktop\'s deferred reveal, desktop-manager revealHeld → _revealWhenBuilt → the door — r8 of userW inc-mw1ogdno-5jny)');
-  ok(/if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb) && /let otherDesksOpen = false;/.test(tb), 'the ⧉ list\'s active-desktop filter stays the default view; the group starts folded');
+  ok(gateOf(/if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb)) && verdictOf(/let otherDesksOpen = false;/.test(tb)), 'the ⧉ list\'s active-desktop filter stays the default view; the group starts folded');
   const dm = read('src/lib/desktop-manager.js');
-  ok(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm) && !/openDesktopSheet/.test(dm) && (dm.match(/desktop-switch-sheet/g) || []).length === 1 && /^import \{ sheetRows \} from '\.\/desktop-switch-sheet\.js';/m.test(dm), 'the switcher\'s home stays the taskbar (desktop-manager.js); it only tells the door (int358: it reads the sheet\'s ROWS — sheetRows, its compact list\'s one source — and never opens the sheet)');
+  ok(gateOf(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm)) && !/openDesktopSheet/.test(dm) && (dm.match(/desktop-switch-sheet/g) || []).length === 1 && verdictOf(/^import \{ sheetRows \} from '\.\/desktop-switch-sheet\.js';/m.test(dm)), 'the switcher\'s home stays the taskbar (desktop-manager.js); it only tells the door (int358: it reads the sheet\'s ROWS — sheetRows, its compact list\'s one source — and never opens the sheet)');
 }
 
 console.log('⑦ §6b guard 10 across a switch — MobileNav._noteShown, run on the real source text');
@@ -185,7 +185,7 @@ console.log('⑦ §6b guard 10 across a switch — MobileNav._noteShown, run on 
   ok(!('d2' in real.between) && real.after.d2 === 'w2' && real.after.d1 === 'w1', 'a switch\'s in-between notes NOTHING for the new desktop; its own window, once focused, is noted', real);
   const guardLine = '    if (desk && w?._desktopId && w._desktopId !== desk) return; // a switch\'s in-between: the old desktop\'s window is still the active one\n';
   const red = run(m ? m[1].replace(guardLine, '') : '');
-  ok(m && m[1].includes(guardLine) && red.between.d2 === 'w1', 'RED CONTROL: the method without the guard (the base) notes desktop 1\'s window as desktop 2\'s window on show — a reload would then show a window of another desktop', red);
+  ok(gateOf(m) && gateOf(m[1].includes(guardLine)) && red.between.d2 === 'w1', 'RED CONTROL: the method without the guard (the base) notes desktop 1\'s window as desktop 2\'s window on show — a reload would then show a window of another desktop', red);
 }
 
 console.log('⑧ desktopDoors — THE desktop doors, one table');
@@ -194,24 +194,24 @@ const D4 = [{ id: 'd1', name: 'Desktop 1' }, { id: 'd2', name: 'Desk B' }, { id:
 const by = (r) => Object.fromEntries(r.map((x) => [x.id, x]));
 {
   const worlds = [{ desk: 'd1', desktops: D4 }, { desk: 'd2', desktops: D4 }, { desk: 'd4', desktops: D4 }, { desk: 'd1', desktops: D4.slice(0, 1) }, { desk: 'zz', desktops: D4 }, {}, { desk: 'd1', desktops: [null, 7, { name: 'x' }] }];
-  ok(M.DOORS.map((d) => d.id).join() === IDS && worlds.every((w) => ['desk', 'phone'].every((tier) => [false, true].every((order) => M.desktopDoors({ ...w, tier, order }).map((r) => r.id).join() === IDS))), 'every door, always, in ONE order — whatever the desktop, the tier, the order flag (junk in: no throw)');
+  ok(M.DOORS.map((d) => d.id).join() === IDS && verdictOf(worlds.every((w) => ['desk', 'phone'].every((tier) => [false, true].every((order) => M.desktopDoors({ ...w, tier, order }).map((r) => r.id).join() === IDS)))), 'every door, always, in ONE order — whatever the desktop, the tier, the order flag (junk in: no throw)');
   const mid = by(M.desktopDoors({ desk: 'd2', desktops: D4 })), first = by(M.desktopDoors({ desk: 'd1', desktops: D4 })), last = by(M.desktopDoors({ desk: 'd4', desktops: D4 }));
   const only = by(M.desktopDoors({ desk: 'd1', desktops: D4.slice(0, 1) })), gone = by(M.desktopDoors({ desk: 'zz', name: 'Old desk', desktops: D4 })), nameless = by(M.desktopDoors({ desk: 'zz', desktops: D4 }));
-  ok(Object.values(mid).every((r) => r.enabled && r.why === ''), 'a middle desktop: every door open');
-  ok(!first['move-up'].enabled && first['move-up'].why === 'Already the first desktop' && first['move-down'].enabled && !last['move-down'].enabled && last['move-down'].why === 'Already the last desktop' && last['move-up'].enabled,
+  ok(verdictOf(Object.values(mid).every((r) => r.enabled && r.why === '')), 'a middle desktop: every door open');
+  ok(!first['move-up'].enabled && first['move-up'].why === 'Already the first desktop' && gateOf(first['move-down'].enabled) && !last['move-down'].enabled && last['move-down'].why === 'Already the last desktop' && verdictOf(last['move-up'].enabled),
     'move up shut on the first desktop, move down shut on the last — each with its why', { first: first['move-up'], last: last['move-down'] });
-  ok(!only.delete.enabled && only.delete.why === 'Your only desktop — it cannot be deleted' && only.rename.enabled && only.switch.enabled && only.new.enabled && !only['move-up'].enabled && !only['move-down'].enabled,
+  ok(!only.delete.enabled && only.delete.why === 'Your only desktop — it cannot be deleted' && gateOf(only.rename.enabled) && gateOf(only.switch.enabled) && gateOf(only.new.enabled) && !only['move-up'].enabled && !only['move-down'].enabled,
     'the only desktop: delete shut with its why (never the last desktop), rename / switch / new open', only);
-  ok(['switch', 'rename', 'delete', 'move-up', 'move-down'].every((id) => !gone[id].enabled && gone[id].why === '“{name}” is no longer there' && gone[id].params.name === 'Old desk') && gone.new.enabled,
+  ok(gateOf(['switch', 'rename', 'delete', 'move-up', 'move-down'].every((id) => !gone[id].enabled && gone[id].why === '“{name}” is no longer there' && gone[id].params.name === 'Old desk')) && verdictOf(gone.new.enabled),
     'a desktop gone meanwhile (another device): all its doors shut, said by THE NAME ITS ROW SHOWED — never its id (r2 ③: 8c680dcf pinned the id «zz» here); new stays open', gone);
-  ok(['switch', 'rename', 'delete', 'move-up', 'move-down'].every((id) => !nameless[id].enabled && nameless[id].why === 'This desktop is no longer there' && nameless[id].params.name === '') && JSON.stringify(nameless).indexOf('zz') < 0,
+  ok(gateOf(['switch', 'rename', 'delete', 'move-up', 'move-down'].every((id) => !nameless[id].enabled && nameless[id].why === 'This desktop is no longer there' && nameless[id].params.name === '')) && JSON.stringify(nameless).indexOf('zz') < 0,
     'r2 ③: no name given — the nameless why; a raw id is never a word in a sentence', nameless.rename);
-  ok(JSON.stringify(mid.rename.dialog) === JSON.stringify({ title: 'Rename Desktop', label: 'Desktop name', confirm: 'Rename', meanwhile: '“{was}” was renamed to “{now}” on another screen meanwhile — your name “{name}” replaces it' }) && ['switch', 'delete', 'move-up', 'move-down', 'new'].every((id) => mid[id].dialog === null),
+  ok(JSON.stringify(mid.rename.dialog) === JSON.stringify({ title: 'Rename Desktop', label: 'Desktop name', confirm: 'Rename', meanwhile: '“{was}” was renamed to “{now}” on another screen meanwhile — your name “{name}” replaces it' }) && verdictOf(['switch', 'delete', 'move-up', 'move-down', 'new'].every((id) => mid[id].dialog === null)),
     'r2 ④: the Rename door carries ITS DIALOG\'s words (t() keys) — the dialog reads them from the table (r3 ⑤: and what it says when another screen renamed the desktop meanwhile)', mid.rename);
-  ok(mid.rename.label === 'Rename…' && mid.delete.label === 'Delete' && mid.delete.danger && mid['move-up'].label === 'Move up' && mid['move-down'].label === 'Move down' && mid.new.label === 'New desktop' && mid.switch.label === 'Switch desktop — {name}' && mid.switch.params.name === 'Desk B',
+  ok(mid.rename.label === 'Rename…' && mid.delete.label === 'Delete' && gateOf(mid.delete.danger) && mid['move-up'].label === 'Move up' && mid['move-down'].label === 'Move down' && mid.new.label === 'New desktop' && mid.switch.label === 'Switch desktop — {name}' && mid.switch.params.name === 'Desk B',
     'ONE label set: 『Rename…』 (the ellipsis rule — a dialog follows — on the phone too), Delete (danger), Move up / Move down, New desktop, the switch door by the desktop\'s name');
   const strip = (r) => JSON.stringify(r.map(({ draw, ...x }) => x));
-  ok(worlds.every((w) => [false, true].every((order) => strip(M.desktopDoors({ ...w, order, tier: 'desk' })) === strip(M.desktopDoors({ ...w, order, tier: 'phone' })))),
+  ok(verdictOf(worlds.every((w) => [false, true].every((order) => strip(M.desktopDoors({ ...w, order, tier: 'desk' })) === strip(M.desktopDoors({ ...w, order, tier: 'phone' }))))),
     'the tier changes only HOW a door is drawn — never its label, its rule, its why');
   const draw = (o) => M.desktopDoors(o).map((r) => r.draw).join();
   ok(draw({ desk: 'd2', desktops: D4, tier: 'desk' }) === 'row,item,item,drag,drag,row' && draw({ desk: 'd2', desktops: D4, tier: 'desk', order: true }) === 'row,item,item,item,item,row',
@@ -220,7 +220,7 @@ const by = (r) => Object.fromEntries(r.map((x) => [x.id, x]));
     'desk: a shut door is LEFT OUT of a desk menu (the compact row\'s menu stays what it was)');
   const goneMenu = (order) => M.doorItems(M.desktopDoors({ desk: 'zz', name: 'Old desk', desktops: D4, tier: 'desk', order }), { t: tt });
   const gm = goneMenu(false), gr = goneMenu(true);
-  ok(gm.length > 0 && gm.map((x) => x.id).join() === 'rename,delete' && gr.filter((x) => !x.separator).map((x) => x.id).join() === 'rename,delete,move-up,move-down' && [...gm, ...gr].every((x) => x.separator || (!x.enabled && x.why === '“Old desk” is no longer there')),
+  ok(gm.length > 0 && gm.map((x) => x.id).join() === 'rename,delete' && gr.filter((x) => !x.separator).map((x) => x.id).join() === 'rename,delete,move-up,move-down' && verdictOf([...gm, ...gr].every((x) => x.separator || (!x.enabled && x.why === '“Old desk” is no longer there'))),
     'r2 ①: a desktop NO LONGER THERE on the DESK tier — the preview\'s menu and a compact row\'s are NOT empty: every door greyed with the why that names it (8c680dcf: [] — showContextMenu opened an empty box)', { gm, gr });
   ok(draw({ desk: 'zz', name: 'Old desk', desktops: D4, tier: 'desk', order: true }) === 'row,item,item,item,item,row' && draw({ desk: 'zz', name: 'Old desk', desktops: D4, tier: 'desk' }) === 'row,item,item,drag,drag,row',
     'r2 ①: a desk menu leaves a shut door out only while its desktop is HERE (the first one\'s Move up, the only one\'s Delete) — a gone one\'s are drawn, on every tier');
@@ -232,7 +232,7 @@ const by = (r) => Object.fromEntries(r.map((x) => [x.id, x]));
   ok(M.doorItems(M.desktopDoors({ desk: 'd1', desktops: D4.slice(0, 1), tier: 'desk', order: true })).map((x) => x.label).join() === 'Rename…' && M.doorItems(null).length === 0,
     'doorItems: nothing drawn after the first group ⇒ no separator; junk ⇒ nothing');
   const si = M.sheetItems(rows, { t: tt });
-  ok(si.length === rows.length + 1 && si.slice(0, -1).every((x, k) => x.door === 'switch' && x.id === rows[k].id && x.title === 'Switch desktop — ' + rows[k].name) && si[1].active && si[0].sub === 'Q3 decks · shell · refund retry · +1 more' && si[1].sub === 'payments · Files — 1 not opened on this screen yet' && JSON.stringify(si.at(-1)) === '{"door":"new","id":null,"label":"New desktop"}',
+  ok(si.length === rows.length + 1 && gateOf(si.slice(0, -1).every((x, k) => x.door === 'switch' && x.id === rows[k].id && x.title === 'Switch desktop — ' + rows[k].name)) && gateOf(si[1].active) && si[0].sub === 'Q3 decks · shell · refund retry · +1 more' && si[1].sub === 'payments · Files — 1 not opened on this screen yet' && JSON.stringify(si.at(-1)) === '{"door":"new","id":null,"label":"New desktop"}',
     'sheetItems: one row per desktop = its switch door (its title) with its words, then the \'new\' door — the sheet\'s DOM is drawn from these', si);
   const sg = M.sheetItems(M.desktopRows({ desktops: [{ id: 'd1', name: 'Desktop 1' }, { id: 'd9', name: 'Old desk', gone: true }], activeId: 'd1' }), { t: tt });
   ok(sg.length === 3 && !sg[0].gone && sg[0].count === '0 windows' && JSON.stringify(sg[1]) === JSON.stringify({ door: 'switch', id: 'd9', name: 'Old desk', active: false, count: '', sub: '“Old desk” is no longer there', title: '“Old desk” is no longer there', gone: true }),
@@ -240,7 +240,7 @@ const by = (r) => Object.fromEntries(r.map((x) => [x.id, x]));
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = [...M.DOORS.map((d) => d.label), ...M.DOORS.flatMap((d) => (d.dialog ? Object.values(d.dialog) : [])), ...Object.values(M.DOOR_WHY)];
   const miss = keys.filter((k) => !zh.includes(`  ${JSON.stringify(k)}:`) || !ja.includes(`  ${JSON.stringify(k)}:`));
-  ok(miss.length === 0 && keys.includes('Rename Desktop') && keys.includes('Desktop name'), `i18n: every door's label, every word of a door's dialog and every shut door's why is in zh + ja (${keys.length})`, miss);
+  ok(miss.length === 0 && gateOf(keys.includes('Rename Desktop')) && verdictOf(keys.includes('Desktop name')), `i18n: every door's label, every word of a door's dialog and every shut door's why is in zh + ja (${keys.length})`, miss);
 }
 
 console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
@@ -313,7 +313,7 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
   // innerText / textContent / placeholder of a surface file, t()-wrapped or not (8c680dcf: the Rename dialog's three)
   const WORDS = ['Switch desktop — {name}', 'Rename…', 'Rename', 'Rename Desktop', 'Desktop name', '“{was}” was renamed to “{now}” on another screen meanwhile — your name “{name}” replaces it', 'Delete', 'Move up', 'Move down', 'New desktop', 'Add desktop'];
   const tableWords = [...M.DOORS.map((d) => d.label), ...M.DOORS.flatMap((d) => (d.dialog ? Object.values(d.dialog) : []))];
-  ok(tableWords.every((w) => WORDS.includes(w)), 'the fence\'s words cover the table\'s (every door\'s label, every word of a door\'s dialog)', tableWords.filter((w) => !WORDS.includes(w)));
+  ok(verdictOf(tableWords.every((w) => WORDS.includes(w))), 'the fence\'s words cover the table\'s (every door\'s label, every word of a door\'s dialog)', tableWords.filter((w) => !WORDS.includes(w)));
   const alt = WORDS.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const FENCE = new RegExp(`\\bt\\((['"\`])(?:${alt})\\1|\\b(?:title|label|confirmText|innerText|textContent|placeholder)\\s*[:=]\\s*(['"\`])(?:${alt})\\2|'Add desktop'`, 'g');
   const hits = [];
@@ -327,9 +327,9 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
   const whyHits = [];
   for (const f of ['src/lib/desktop-manager.js', 'src/lib/desktop-switch-sheet.js', 'src/lib/mobile-nav.js']) codeLines(read(f)).forEach((line, k) => { for (const w of FRAGS) if (line.includes(w)) whyHits.push(`${f.slice(8)}:${k + 1}: «${w}» in ${line.trim().slice(0, 90)}`); });
   ok(FRAGS.length === 4 && whyHits.length === 0, `no surface keeps a shut door's WHY words of its own — ${FRAGS.map((w) => '«' + w + '»').join(' ')} come from the table (${whyHits.length} hits)`, whyHits);
-  ok(/addBtn\.title = this\._doorLabel\('new'\);/.test(dmSrc) && /items\.push\(\{ label: '\+ ' \+ this\._doorLabel\('new'\),/.test(dmSrc) && /addTab\.title = dm\._doorLabel\('new'\);/.test(mn) && /escHtml\(s\.label\)/.test(sh),
+  ok(gateOf(/addBtn\.title = this\._doorLabel\('new'\);/.test(dmSrc)) && gateOf(/items\.push\(\{ label: '\+ ' \+ this\._doorLabel\('new'\),/.test(dmSrc)) && gateOf(/addTab\.title = dm\._doorLabel\('new'\);/.test(mn)) && verdictOf(/escHtml\(s\.label\)/.test(sh)),
     'every «+» says the table\'s \'new\' door: the preview strip\'s (an untranslated literal before), the compact list\'s, the window switcher\'s, the sheet\'s last row');
-  ok(/wrapper\.title = this\._doorLabel\('switch', desk\.id\);/.test(dmSrc) && /el\.title = this\._doorLabel\('switch', r\.id, r\.name\);/.test(dmSrc) && /tab\.title = dm\._doorLabel\('switch', desk\.id, desk\.name\);/.test(mn) && /title: s\.title,/.test(sh),
+  ok(gateOf(/wrapper\.title = this\._doorLabel\('switch', desk\.id\);/.test(dmSrc)) && gateOf(/el\.title = this\._doorLabel\('switch', r\.id, r\.name\);/.test(dmSrc)) && gateOf(/tab\.title = dm\._doorLabel\('switch', desk\.id, desk\.name\);/.test(mn)) && verdictOf(/title: s\.title,/.test(sh)),
     'every row that switches says the table\'s switch door: the preview tile, a compact-list row, the window switcher\'s tab, a sheet row (a gone one: its why, by the name it showed)');
   ok(!/preview\.title = /.test(dmSrc), 'the preview\'s thumbnail keeps no title of its own — the tile\'s switch door covers it (its inner `desk.name` won the hover over the thumbnail)');
   const w0 = world(D4).self;
@@ -344,7 +344,7 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
     const said = [], wM = { _desktops: [{ id: 'd1', name: 'Desktop 1' }, { id: 'd2', name: 'Desk B' }], nameOf: nameOfM, _doorParams: dpM };
     const sw = dlM.call(wM, 'switch', 'd1'), gone = dlM.call(wM, 'switch', 'zz', 'Desktop 3'), own = dlM.call(wM, 'switch', 'd2');
     drM.call(wM, { id: 'zz', name: 'Desktop 3' }, 'switch');
-    ok(!!nameOfSrc && !!doorParamsSrc && sw.includes('‹Desktop 1›') && gone.includes('‹Desktop 3›') && said.some((m) => m.includes('‹Desktop 3›')) && own.includes('Desk B') && !own.includes('‹Desk B›'),
+    ok(!!nameOfSrc && !!doorParamsSrc && gateOf(sw.includes('‹Desktop 1›')) && gateOf(gone.includes('‹Desktop 3›')) && gateOf(said.some((m) => m.includes('‹Desktop 3›'))) && gateOf(own.includes('Desk B')) && !own.includes('‹Desk B›'),
       'F5: a stored default name reaches the switch door\'s words, the gone why and its toast WORDED (‹Desktop 1›) — a person\'s own name as typed', { sw, gone, own, said });
     // every surface: no desktop's stored name drawn (a textContent / title / a t() name param) past the door
     const raw = [];
@@ -380,7 +380,7 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
     const items3 = deskItems.call(w3.self, w3.self._desktops[2], { tier: 'phone', after: () => { a3++; } }); // «Reading» (d3): prev d2, next d4
     w3.self._desktops = w3.self._desktops.filter((d) => d.id !== 'd3'); // deleted on another screen
     const rets = await pressAll(items3);
-    ok(w3.calls.length === 0 && a3 === 0 && rets.every((r) => r === false) && toasts.length === 4 && toasts.every((x) => x === '“Reading” is no longer there'),
+    ok(w3.calls.length === 0 && a3 === 0 && gateOf(rets.every((r) => r === false)) && toasts.length === 4 && verdictOf(toasts.every((x) => x === '“Reading” is no longer there')),
       'r2 ②: the desktop deleted on another screen between the menu and the press — every act REFUSES: its why said by the name the row showed (a toast), nothing run, `after` never', { calls: w3.calls, afters: a3, rets, toasts: [...toasts] });
     const w4 = world(D4); let a4 = 0;
     const items4 = deskItems.call(w4.self, w4.self._desktops[2], { tier: 'phone', after: () => { a4++; } });
@@ -434,7 +434,7 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
     const BASE_SHEET = "const verbs = [{ label: t('Rename'), action: () => dm._startRename(desk) }];\n      if (dm.desktops.length > 1) verbs.push({ label: t('Delete'), style: 'color:var(--red, #e55)', action: async () => { await dm.deleteDesktop(desk.id); onSwitch(dm.activeDesktopId); } });\n      return verbs;";
     const base = new Function('t', 'dm', 'desk', 'onSwitch', BASE_SHEET); // eslint-disable-line no-new-func
     const bad = walk((s, desk) => base(tr, { ...s, desktops: s._desktops, activeDesktopId: 'd1' }, desk, () => {}), 'phone', false);
-    ok(bad.length === CASES.length && bad.every((b) => /move-up: not drawn/.test(b) && /move-down: not drawn/.test(b) && /rename: not drawn \(want «Rename…»\)/.test(b)),
+    ok(bad.length === CASES.length && verdictOf(bad.every((b) => /move-up: not drawn/.test(b) && /move-down: not drawn/.test(b) && /rename: not drawn \(want «Rename…»\)/.test(b))),
       'RED CONTROL: the base\'s sheet (Rename · Delete, hand-written) fails the census on every desktop — no Move up / Move down (a phone could not reorder), «Rename» for 「Rename…」', bad);
   }
 }
@@ -455,17 +455,17 @@ console.log('⑩ followDesktops — an OPEN list follows a remote change (r2 ①
   const follow = (dmSrc.match(/\n  _followOpenLists\(before\) \{\n[\s\S]*?\n  \}\n/) || [''])[0];
   ok((dmSrc.match(/this\._renderSwitcher\(\);\n\s*this\._followOpenLists\(before\);/g) || []).length === 2 && (dmSrc.match(/const before = JSON\.stringify\(this\._desktops\.map\(\(d\) => \[d\.id, d\.name\]\)\);/g) || []).length === 2,
     'the manager redraws the open lists on BOTH roads a remote list arrives by (desktop-updated, the layout-sync meta) — after its own switcher');
-  ok(/if \(list\?\._follow && btn\) list\._follow\(\);/.test(follow) && /window\.dispatchEvent\(new CustomEvent\('vs-desktops'\)\);/.test(follow) && /menu\._deskRows = rows\.filter\(/.test(dmSrc) && /const now = this\._desktopListRows\(menu\._deskRows\)/.test(dmSrc) && /el\.classList\.toggle\('dsc-gone', !!r\.gone\);/.test(dmSrc),
+  ok(gateOf(/if \(list\?\._follow && btn\) list\._follow\(\);/.test(follow)) && gateOf(/window\.dispatchEvent\(new CustomEvent\('vs-desktops'\)\);/.test(follow)) && gateOf(/menu\._deskRows = rows\.filter\(/.test(dmSrc)) && gateOf(/const now = this\._desktopListRows\(menu\._deskRows\)/.test(dmSrc)) && verdictOf(/el\.classList\.toggle\('dsc-gone', !!r\.gone\);/.test(dmSrc)),
     'the compact list follows from the rows it shows (a gone row greyed) — patched in place, so a sprung one is still THE DRAG\'s list (r3 ②); the phone\'s two are told (vs-desktops)');
-  ok(/window\.addEventListener\('vs-desktops', \(\) => \{/.test(sh) && /openDesktopSheet\(app, anchor, \{ onSwitch, drawn: rows \}\)/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  return menu;/.test(sh) && /el\.classList\.toggle\('mdesk-gone', !!r\.gone\);/.test(sh) && /const desk = dm\.desktops\.find\(\(d\) => d\.id === r\.id\) \|\| \{ id: r\.id, name: r\.name \};/.test(sh) && !/if \(!desk\) return;/.test(sh),
+  ok(gateOf(/window\.addEventListener\('vs-desktops', \(\) => \{/.test(sh)) && gateOf(/openDesktopSheet\(app, anchor, \{ onSwitch, drawn: rows \}\)/.test(sh)) && gateOf(/\}, \{ signal: ctl\.signal \}\);\n  return menu;/.test(sh)) && gateOf(/el\.classList\.toggle\('mdesk-gone', !!r\.gone\);/.test(sh)) && gateOf(/const desk = dm\.desktops\.find\(\(d\) => d\.id === r\.id\) \|\| \{ id: r\.id, name: r\.name \};/.test(sh)) && !/if \(!desk\) return;/.test(sh),
     'the sheet follows while open (its own AbortController), a gone row greyed with its why; its long press asks the doors BY THE NAME the row showed — never a press that opens nothing');
-  ok(/tabsDrawn = followDesktops\(\{ drawn: follow \? tabsDrawn : \[\], desktops: dm\.desktops \}\);/.test(mn) && /window\.addEventListener\('vs-desktops', \(\) => renderContent\(true\), \{ signal: ctl\.signal \}\);/.test(mn) && !/const desktops = dm\?\.desktops \|\| \[\];/.test(mn),
+  ok(gateOf(/tabsDrawn = followDesktops\(\{ drawn: follow \? tabsDrawn : \[\], desktops: dm\.desktops \}\);/.test(mn)) && gateOf(/window\.addEventListener\('vs-desktops', \(\) => renderContent\(true\), \{ signal: ctl\.signal \}\);/.test(mn)) && !/const desktops = dm\?\.desktops \|\| \[\];/.test(mn),
     'the window switcher\'s tabs read the list as it is at every render (it read it once, at open) and follow a remote change while open');
   { // RED CONTROL — an open list that is never told: the compact list keeps the row of a desktop deleted elsewhere as a live row
     const live = [{ id: 'd1', name: 'Desktop 1' }, { id: 'd3', name: 'Reading' }];
     const stale = drawn.map((d) => ({ ...d, gone: false })); // what 8c680dcf's open list kept showing
     const red = stale.find((x) => x.id === 'd2'), green = fd({ drawn, desktops: live }).find((x) => x.id === 'd2');
-    ok(red && !red.gone && green && green.gone, 'RED CONTROL: a list that is not redrawn keeps «Desk B» as a LIVE row (its doors open on a gone desktop); the followed one marks it gone', { red, green });
+    ok(gateOf(red) && !red.gone && gateOf(green) && verdictOf(green.gone), 'RED CONTROL: a list that is not redrawn keeps «Desk B» as a LIVE row (its doors open on a gone desktop); the followed one marks it gone', { red, green });
   }
 }
 
@@ -484,10 +484,10 @@ console.log('⑪ ROUND 3 — a list\'s listeners live while it is in the page; t
     const sig = untilGone(el, ctl);
     cb(); const keptWhileIn = !ctl.signal.aborted; // a change elsewhere in the page: the list still in it
     el.isConnected = false; cb(); // the list taken out — by whatever road
-    ok(sig === ctl.signal && keptWhileIn && ctl.signal.aborted && seen.disconnected === 1 && seen.observed?.n === body && seen.observed.o.childList === true,
+    ok(sig === ctl.signal && gateOf(keptWhileIn) && gateOf(ctl.signal.aborted) && seen.disconnected === 1 && seen.observed?.n === body && seen.observed.o.childList === true,
       'r3 ①: untilGone (its own text): a list\'s listeners live while it is in the page and are aborted the moment it leaves — by ANY road; the observer goes with them', { keptWhileIn, aborted: ctl.signal.aborted, seen: { disconnected: seen.disconnected, childList: seen.observed?.o?.childList } });
     const c2 = new AbortController(); untilGone({ isConnected: false }, c2);
-    ok(c2.signal.aborted, 'r3 ①: …a list already out of the page: aborted at once (nothing hangs on it)');
+    ok(verdictOf(c2.signal.aborted), 'r3 ①: …a list already out of the page: aborted at once (nothing hangs on it)');
   }
   // the window switcher: ONE close (abort + remove) — its toggle, an outside tap, both row taps call it; its two listeners
   // (the remote-change redraw, the outside-press watch) on its signal; a road that only removes it aborts them (untilGone)
@@ -507,8 +507,8 @@ console.log('⑪ ROUND 3 — a list\'s listeners live while it is in the page; t
   };
   const swBad = lifeCensus(sw, item);
   ok(!!sw && !!item && !!road && swBad.length === 0, 'r3 ①: the window switcher has ONE close — its title toggle, an outside tap and both row taps call it; its vs-desktops listener and outside-press watch hang on its signal; a road that only removes it aborts them too', swBad);
-  ok(lifeCensus(sw, item, road.replace('    close();\n', '')).includes('a row tap does not call the close'), 'RED CONTROL (r1793): a row road (_openRow) that never calls the list\'s close fails the census by name');
-  ok(/const menu = showContextMenu\(regular \? ar\.left : 0, regular \? ar\.top : 0, items, 'context-menu', \{ placesItself: true \}\);[^\n]*\n  menu\.classList\.add\('mdesk-menu'\);\n  untilGone\(menu, ctl\);/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  return menu;/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  \}\);/.test(sh),
+  ok(verdictOf(lifeCensus(sw, item, road.replace('    close();\n', '')).includes('a row tap does not call the close')), 'RED CONTROL (r1793): a row road (_openRow) that never calls the list\'s close fails the census by name');
+  ok(gateOf(/const menu = showContextMenu\(regular \? ar\.left : 0, regular \? ar\.top : 0, items, 'context-menu', \{ placesItself: true \}\);[^\n]*\n  menu\.classList\.add\('mdesk-menu'\);\n  untilGone\(menu, ctl\);/.test(sh)) && gateOf(/\}, \{ signal: ctl\.signal \}\);\n  return menu;/.test(sh)) && verdictOf(/\}, \{ signal: ctl\.signal \}\);\n  \}\);/.test(sh)),
     'r3 ①: the sheet\'s listeners (its rows\' long press, its vs-desktops) hang on its controller, aborted on EVERY road that takes it out (an outside press, Esc, a row\'s tap, the doors\' menu, the next open — 25151f0b: only the next open)');
   { // RED CONTROL — 25151f0b's switcher: a self-removing listener with no controller, three bare removes
     const I2 = item.replace('item.onclick = () => this._openRow(win, wm, close, rerender);', 'item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };');
@@ -520,15 +520,15 @@ console.log('⑪ ROUND 3 — a list\'s listeners live while it is in the page; t
   }
   // r3 ②: the compact list follows IN PLACE — _followOpenLists never rebuilds it; its _follow patches rows keyed by their desktop id
   const follow = (dmSrc.match(/\n  _followOpenLists\(before\) \{\n[\s\S]*?\n  \}\n/) || [''])[0], open = (dmSrc.match(/\n  _openDesktopList\(anchor\) \{\n[\s\S]*?\n  \}\n/) || [''])[0];
-  ok(/if \(list\?\._follow && btn\) list\._follow\(\);/.test(follow) && !/_openDesktopList\(/.test(follow) && /menu\._follow = \(\) => \{/.test(open) && /menu\.querySelectorAll\(':scope > \[data-desktop-id\]'\)/.test(open) && /if \(el !== at\) menu\.insertBefore\(el, at\);/.test(open) && /this\._paintListRow\(el, row\);/.test(open) && /this\._deskItems\(el\._desk, /.test(dmSrc) && /this\.dropOnRow\(winId, el\._desk\.id, el\._desk\.name\);/.test(dmSrc),
+  ok(gateOf(/if \(list\?\._follow && btn\) list\._follow\(\);/.test(follow)) && !/_openDesktopList\(/.test(follow) && gateOf(/menu\._follow = \(\) => \{/.test(open)) && gateOf(/menu\.querySelectorAll\(':scope > \[data-desktop-id\]'\)/.test(open)) && gateOf(/if \(el !== at\) menu\.insertBefore\(el, at\);/.test(open)) && gateOf(/this\._paintListRow\(el, row\);/.test(open)) && gateOf(/this\._deskItems\(el\._desk, /.test(dmSrc)) && verdictOf(/this\.dropOnRow\(winId, el\._desk\.id, el\._desk\.name\);/.test(dmSrc)),
     'r3 ②: a remote change PATCHES the open compact list — keyed by data-desktop-id: each row re-worded, a new row added at its place, a moved one moved alone; its doors and its drop read the row as it shows now — never rebuilt (25151f0b: a new popover, the node under the pointer gone)');
   // r3 ④: ONE sayer of every switch refusal — the table's why through _doorRefused (a drop: its why + where the window stays)
-  ok(/if \(this\._doorRefused\(shown, 'switch'\)\) return;/.test(open) && /if \(v\.act === 'refused'\) return void dm\._doorRefused\(\{ id: r\.id, name: v\.name \}, 'switch'\);/.test(sh) && /tab\.onclick = desk\.gone \? \(\) => dm\._doorRefused\(desk, 'switch'\)/.test(mn) && /showToast\(t\('\{why\} — the window stays where it is', \{ why: this\._doorLabel\('switch', deskId, name\) \}\)/.test(dmSrc),
+  ok(gateOf(/if \(this\._doorRefused\(shown, 'switch'\)\) return;/.test(open)) && gateOf(/if \(v\.act === 'refused'\) return void dm\._doorRefused\(\{ id: r\.id, name: v\.name \}, 'switch'\);/.test(sh)) && gateOf(/tab\.onclick = desk\.gone \? \(\) => dm\._doorRefused\(desk, 'switch'\)/.test(mn)) && verdictOf(/showToast\(t\('\{why\} — the window stays where it is', \{ why: this\._doorLabel\('switch', deskId, name\) \}\)/.test(dmSrc)),
     'r3 ④: every switch refusal says THE table\'s why — a compact row, a sheet row, a tab (through _doorRefused), a drop on a gone row (its why + where the window stays)');
   // r3 ③: the kb-bugfix INDEX carries round 2's law (an essay bullet alone is not the index)
   const kb = read('docs/kb-bugfix-invariants.md'), idx = (kb.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0];
   const law = idx.split('\n').filter((l) => /a door is judged when it is pressed, and a list that is open says what changed under it/.test(l));
-  ok(law.length === 1 && /^- \(2026-10-26\) /.test(law[0]) && law[0].length <= 300, 'r3 ③: the kb-bugfix INDEX head has ONE line (dated 2026-10-26, ≤ 300 chars) for round 2\'s law «a door is judged when it is pressed, and a list that is open says what changed under it»', law);
+  ok(law.length === 1 && gateOf(/^- \(2026-10-26\) /.test(law[0])) && law[0].length <= 300, 'r3 ③: the kb-bugfix INDEX head has ONE line (dated 2026-10-26, ≤ 300 chars) for round 2\'s law «a door is judged when it is pressed, and a list that is open says what changed under it»', law);
 }
 
 console.log('⑫ ROUND 4 — ONE placement door: the compact list placed by PURE menuPlace at its open and after every patch');
@@ -586,11 +586,11 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
   const WB = { a: [{ id: 'a1', title: 'on show', z: 9 }, { id: 'a2', title: 'quiet', z: 5 }], b: [{ id: 'b1', title: 'top', z: 9 }, { id: 'b2', title: 'mid', z: 7 }, { id: 'b3', title: 'waits', z: 1, waiting: true }, { id: 'b4', title: 'low', z: 0 }] };
   const rollUp = (Mod) => { const r = Mod.desktopRows({ desktops: DW, activeId: 'a', windowsByDesktop: WB, heldByDesktop: {} }); return { ok: r[1].waiting === 1 && JSON.stringify(r[1].titles) === '["waits","top","mid"]' && JSON.stringify(r[1].waitingIds) === '["b3"]' && r[0].waiting === undefined && r[0].waitingIds === undefined && JSON.stringify(r[0].titles) === '["on show","quiet"]', r }; };
   const real = rollUp(M);
-  ok(real.ok, 'THE ROLL-UP: a desktop that holds a waiting conversation counts it and NAMES it first (beyond the three a stack order would show); a quiet desktop\'s row is unchanged', real.r);
+  ok(verdictOf(real.ok), 'THE ROLL-UP: a desktop that holds a waiting conversation counts it and NAMES it first (beyond the three a stack order would show); a quiet desktop\'s row is unchanged', real.r);
   const w1 = M.rowWords(real.r[1], { t: tt }), w0 = M.rowWords(real.r[0], { t: tt });
   ok(w1.waiting === '1 waiting for input' && w0.waiting === undefined, 'its words: «{n} waiting for input» (the product\'s own words for the blink); none for a quiet desktop', [w1, w0]);
   const si = M.sheetItems(real.r, { t: tt });
-  ok(si[1].waiting === '1 waiting for input' && si[0].waiting === undefined && si[1].sub.startsWith('waits'), 'the sheet\'s rows carry it (PURE sheetItems) — the waiting title leads the row\'s second line', si);
+  ok(si[1].waiting === '1 waiting for input' && si[0].waiting === undefined && verdictOf(si[1].sub.startsWith('waits')), 'the sheet\'s rows carry it (PURE sheetItems) — the waiting title leads the row\'s second line', si);
   ok(M.desktopRows({ desktops: [{ id: 'g', name: 'Gone', gone: true }], windowsByDesktop: { g: [{ title: 'x', waiting: true }] } })[0].waiting === undefined, 'a desktop gone meanwhile shouts nothing (its row is greyed with its why)');
   const wins = [{ id: 'x', waiting: true }, { id: 'y', waiting: true }, { id: 'z', waiting: false }];
   ok(M.waitingElsewhere({ windows: wins, shownId: 'x' }) === 1 && M.waitingElsewhere({ windows: wins, shownId: 'q' }) === 2 && M.waitingElsewhere({}) === 0,
@@ -599,17 +599,17 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
   const READERS = { 'src/lib/taskbar.js': 4, 'src/lib/desktop-switch-sheet.js': 2, 'src/lib/mobile-nav.js': 3 };
   const seam = (srcOf) => Object.entries(READERS).map(([f, min]) => { const x = srcOf(f).replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''); return { f, via: (x.match(/windowWaits\(/g) || []).length, min, raw: (x.match(/contains\(['"]window-waiting['"]\)/g) || []).length }; });
   const seamOk = (c) => c.every((r) => r.via >= r.min && r.raw === 0);
-  ok(seamOk(seam(read)), 'ONE SEAM shared with the taskbar: the taskbar\'s tiles and lists, the Desktops sheet and the nav read «waiting» only through windowWaits — no second derivation', seam(read));
+  ok(verdictOf(seamOk(seam(read))), 'ONE SEAM shared with the taskbar: the taskbar\'s tiles and lists, the Desktops sheet and the nav read «waiting» only through windowWaits — no second derivation', seam(read));
   const mn = read('src/lib/mobile-nav.js'), sh = read('src/lib/desktop-switch-sheet.js'), dmSrc = read('src/lib/desktop-manager.js');
   const door = mn.slice(mn.indexOf('  updateDesktopsDoor() {'), mn.indexOf('\n  }\n', mn.indexOf('  updateDesktopsDoor() {')));
-  ok(/_renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dmSrc) && /const waiting = doorWaiting\(this\.app\);/.test(door) && /patchDesktopSheet\(this\.app\);/.test(door) && /this\._patchSwitcherWaiting\(\);/.test(door) && /this\._waitDot\(b, waiting > 0\);/.test(door) && /this\._paintWaitingMore\(\);/.test(door),
+  ok(gateOf(/_renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dmSrc)) && gateOf(/const waiting = doorWaiting\(this\.app\);/.test(door)) && gateOf(/patchDesktopSheet\(this\.app\);/.test(door)) && gateOf(/this\._patchSwitcherWaiting\(\);/.test(door)) && gateOf(/this\._waitDot\(b, waiting > 0\);/.test(door)) && verdictOf(/this\._paintWaitingMore\(\);/.test(door)),
     'LIVE on the taskbar\'s own funnel (updateTaskbar → _renderSwitcher → updateDesktopsDoor): the closed door, the ⋯, the open sheet and the open switcher follow every waiting toggle — no second event plumbing');
   const patch = sh.slice(sh.indexOf('export function patchDesktopSheet('), sh.indexOf('\n}\n', sh.indexOf('export function patchDesktopSheet(')));
-  ok(!!patch && !/openDesktopSheet\(|innerHTML\s*=|replaceChildren|\.remove\(\)\s*;\s*$/m.test(patch.replace(/chip\.remove\(\)/g, '')) && /el\.classList\.toggle\('mdesk-waiting', on\)/.test(patch),
+  ok(!!patch && !/openDesktopSheet\(|innerHTML\s*=|replaceChildren|\.remove\(\)\s*;\s*$/m.test(patch.replace(/chip\.remove\(\)/g, '')) && verdictOf(/el\.classList\.toggle\('mdesk-waiting', on\)/.test(patch)),
     'the open sheet is PATCHED in place (its rows\' mark, words and titles line) — never rebuilt under a finger');
-  ok(/const n = \(this\._folded \|\| \[\]\)\.includes\('desktops'\) \? \(this\.desktopsBtn\?\._door\?\.waiting \|\| 0\) : 0;/.test(mn) && /this\._paintWaitingMore\(\); \/\/ lane phone-take-photo[^\n]*\n    this\._barMo\?\.takeRecords\(\);/.test(mn),
+  ok(gateOf(/const n = \(this\._folded \|\| \[\]\)\.includes\('desktops'\) \? \(this\.desktopsBtn\?\._door\?\.waiting \|\| 0\) : 0;/.test(mn)) && verdictOf(/this\._paintWaitingMore\(\); \/\/ lane phone-take-photo[^\n]*\n    this\._barMo\?\.takeRecords\(\);/.test(mn)),
     '⋯ says it only while it stands in for a FOLDED Desktops door (after every fold pass too)');
-  ok(/const firstId = show \|\| this\._shown\[desk\]/.test(mn) && /onSwitch\(r\.id, show \? \{ show \} : undefined\);/.test(sh),
+  ok(gateOf(/const firstId = show \|\| this\._shown\[desk\]/.test(mn)) && verdictOf(/onSwitch\(r\.id, show \? \{ show \} : undefined\);/.test(sh)),
     'a row that says a conversation waits LANDS on it (the switch shows that conversation — its waiting then ends by its own road)');
 
   // ── ⑪ r2 (主开发 00:43Z) ──
@@ -618,21 +618,21 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
     const S0 = { why: [], waiting: false }, step = M.turnWaitStep;
     const A1 = step(S0, 'end'), B1 = step(S0, 'end');
     const A2 = step(A1, 'start'), B2 = step(B1, 'start');
-    ok(A1.waiting && B1.waiting && JSON.stringify(A1.why) === '["turn"]' && !A2.waiting && !B2.waiting && A2.why.length === 0 && B2.why.length === 0,
+    ok(gateOf(A1.waiting) && gateOf(B1.waiting) && JSON.stringify(A1.why) === '["turn"]' && !A2.waiting && !B2.waiting && A2.why.length === 0 && B2.why.length === 0,
       'TWO CLIENTS: the turn ends on both ⇒ both wait; the next turn starts (the person answered — on either device) ⇒ NEITHER waits, with no focus on the second', { A1, B1, A2, B2 });
     const act = step(S0, 'end', { active: true });
     ok(!act.waiting && act.why.length === 0, 'a client on which the conversation is the ACTIVE window never starts waiting (its turn ended in front of the person)', act);
     const ask = step(step({ why: ['ask'], waiting: true }, 'end'), 'start');
-    ok(ask.waiting && JSON.stringify(ask.why) === '["ask"]', 'an ASK outlives the next turn\'s start (it is answered on its own road) — only the finished turn\'s reason goes', ask);
+    ok(gateOf(ask.waiting) && JSON.stringify(ask.why) === '["ask"]', 'an ASK outlives the next turn\'s start (it is answered on its own road) — only the finished turn\'s reason goes', ask);
     const seenA = step(A1, 'seen');
-    ok(!seenA.waiting && B1.waiting, 'THE RULE, per device: the person LOOKED at it on one device (seen) — the other still waits for them until a turn starts', { seenA, B1 });
+    ok(!seenA.waiting && verdictOf(B1.waiting), 'THE RULE, per device: the person LOOKED at it on one device (seen) — the other still waits for them until a turn starts', { seenA, B1 });
     ok(step({ why: ['turn'], waiting: false }, 'start').why.length === 0, 'a reason outlives no blink');
     // r3 (主开发's tidy ①): the start is the TURN SEQUENCE's — a record of a turn past the completed one — never a label
     const cv = read('src/lib/chat-view.js'), lab = cv.slice(cv.indexOf('  _onServerStreamLabel(label, kind) {'), cv.indexOf('\n  }\n', cv.indexOf('  _onServerStreamLabel(label, kind) {')));
     const ts = cv.slice(cv.indexOf('  _turnStarted() {'), cv.indexOf('\n  }\n', cv.indexOf('  _turnStarted() {')));
-    ok(!!lab && !/_turnStarted\(/.test(lab) && /turnWaitStep\(\{ why: \[\.\.\.\(w\._waitWhy \|\| \[\]\)\], waiting: cl\.contains\('window-waiting'\) \}, 'start'\)/.test(ts) && /import \{ turnWaitStep, turnSeq \} from '\.\.\/desktop-switch\.js';/.test(cv)
-      && /this\._channelTouches\?\.noteTurn\(msg\.ts\);\n(?:\s*\/\/[^\n]*\n)*\s*this\._turnSeqNote\(\{ record: msg \}\);/.test(cv) && /this\._statusBar\.turnCost\(op\.data\?\.cost, op\.data\?\.modelUsage\);\n\s*this\._turnSeqNote\(\{ done: true \}\);/.test(cv)
-      && /_turnSeqNote\(ev\) \{\n\s*const r = turnSeq\(this\._turnSeqState, \{ \.\.\.ev, epoch: this\._normEpoch \}\);\n\s*this\._turnSeqState = r\.s;\n\s*if \(r\.starts\) this\._turnStarted\(\);/.test(cv),
+    ok(!!lab && !/_turnStarted\(/.test(lab) && gateOf(/turnWaitStep\(\{ why: \[\.\.\.\(w\._waitWhy \|\| \[\]\)\], waiting: cl\.contains\('window-waiting'\) \}, 'start'\)/.test(ts)) && gateOf(/import \{ turnWaitStep, turnSeq \} from '\.\.\/desktop-switch\.js';/.test(cv))
+      && gateOf(/this\._channelTouches\?\.noteTurn\(msg\.ts\);\n(?:\s*\/\/[^\n]*\n)*\s*this\._turnSeqNote\(\{ record: msg \}\);/.test(cv)) && gateOf(/this\._statusBar\.turnCost\(op\.data\?\.cost, op\.data\?\.modelUsage\);\n\s*this\._turnSeqNote\(\{ done: true \}\);/.test(cv))
+      && verdictOf(/_turnSeqNote\(ev\) \{\n\s*const r = turnSeq\(this\._turnSeqState, \{ \.\.\.ev, epoch: this\._normEpoch \}\);\n\s*this\._turnSeqState = r\.s;\n\s*if \(r\.starts\) this\._turnStarted\(\);/.test(cv)),
       'chat-view: every record (above the deferral, every path) and every completion feed PURE turnSeq; a record of a LATER turn ends the finished turn\'s mark through turnWaitStep — the activity label ends nothing (r3)');
   }
   // ── ⑪ r3 (主开发's tidy, 2026-11-11 04:03Z) ① A RECONNECT BETWEEN THE RESULT AND THE IDLE ERASED THE MARK FOR GOOD: the session
@@ -645,11 +645,11 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
     ok(JSON.stringify(run.starts) === '[false,false,false,false,false,false,true]',
       'THE TURN\'S OWN SEQUENCE (PURE turnSeq): after a completion only a person-side record of a LATER turn starts one — the completed turn\'s own records (a tail, a replay) and a page-image attachment never do', run);
     const ep = feed(null, [rec('user', 7), fin, { record: { role: 'user', turnIndex: 8 }, epoch: 'e2' }]);
-    ok(ep.starts.every((x) => !x), 'another normalization epoch numbers turns afresh: the completion\'s place is unknown there, nothing starts (the mark stays, as on master)', ep);
+    ok(verdictOf(ep.starts.every((x) => !x)), 'another normalization epoch numbers turns afresh: the completion\'s place is unknown there, nothing starts (the mark stays, as on master)', ep);
     const none = feed(null, [rec('user', 8), rec('user', 9)]), once = feed(null, [rec('user', 7), fin, rec('user', 8), rec('user', 9)]);
-    ok(none.starts.every((x) => !x) && JSON.stringify(once.starts) === '[false,false,true,false]', 'no completion ⇒ nothing to end; one completion is ended once', { none, once });
+    ok(gateOf(none.starts.every((x) => !x)) && JSON.stringify(once.starts) === '[false,false,true,false]', 'no completion ⇒ nothing to end; one completion is ended once', { none, once });
     const back = feed(null, [rec('user', 40), rec('assistant', 40), rec('user', 3), fin, rec('user', 12), rec('user', 40)]);
-    ok(back.starts.every((x) => !x), 'a reader scrolled back (an older page told after the newest) moves nothing: the completion is the HIGHEST turn told', back);
+    ok(verdictOf(back.starts.every((x) => !x)), 'a reader scrolled back (an older page told after the newest) moves nothing: the completion is the HIGHEST turn told', back);
   }
   // r3 ① THE GAP on the REAL ChatView prototype (test-reattach-stagger's harness shape), two clients, the person away from both:
   // the turn completes → each re-attaches IN THE GAP with isStreaming + «thinking...» (one by the held rung, one by the same-epoch
@@ -701,23 +701,23 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
     };
     const { ChatView } = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-view.js')).href);
     const g = scene(ChatView.prototype);
-    ok(g.gapHolds, 'THE GAP (the real ChatView, two clients): the turn completes ⇒ both wait; a re-attach IN THE GAP restates «streaming» + «thinking...» (the held rung on one, the same-epoch catch-up on the other), a background tail\'s label, the idle ⇒ STILL waits on both', g);
-    ok(g.nextEnds, '…and the NEXT turn\'s record (a turn past the completed one — live on one client, a held resume\'s replay on the other) ⇒ quiet on BOTH, with no focus', g);
+    ok(verdictOf(g.gapHolds), 'THE GAP (the real ChatView, two clients): the turn completes ⇒ both wait; a re-attach IN THE GAP restates «streaming» + «thinking...» (the held rung on one, the same-epoch catch-up on the other), a background tail\'s label, the idle ⇒ STILL waits on both', g);
+    ok(verdictOf(g.nextEnds), '…and the NEXT turn\'s record (a turn past the completed one — live on one client, a held resume\'s replay on the other) ⇒ quiet on BOTH, with no focus', g);
     const MC = mutantCopies('desktop-switch-gap', REPO), cvSrc = read('src/lib/chat-view.js');
     const labelNeedle = "      this._startCollabTick();\n", recNeedle = '    this._turnSeqNote({ record: msg });\n';
     ok(cvSrc.split(labelNeedle).length === 2 && cvSrc.split(recNeedle).length === 2, 'the two RED patch sites exist');
     const r2Shape = await import(pathToFileURL(MC.write('src/lib/chat-view.js', editAnchor(cvSrc, labelNeedle, labelNeedle + '      this._turnStarted();\n', "src/lib/chat-view.js"), 'label-is-a-start')).href);
     const gR = scene(r2Shape.ChatView.prototype);
-    ok(!gR.gapHolds && gR.done.every(Boolean) && gR.reattach.every((x) => !x), 'RED (46dee2822\'s reading — the activity label is a start): the re-attach IN THE GAP erases the mark on both, and nothing brings it back ⇒ «THE GAP» red by name', gR);
+    ok(!gR.gapHolds && gateOf(gR.done.every(Boolean)) && verdictOf(gR.reattach.every((x) => !x)), 'RED (46dee2822\'s reading — the activity label is a start): the re-attach IN THE GAP erases the mark on both, and nothing brings it back ⇒ «THE GAP» red by name', gR);
     const unfed = await import(pathToFileURL(MC.write('src/lib/chat-view.js', editAnchor(cvSrc, recNeedle, '', "src/lib/chat-view.js"), 'record-unfed')).href);
     const gU = scene(unfed.ChatView.prototype);
-    ok(gU.gapHolds && !gU.nextEnds, 'RED (the record never fed to the turn sequence): the next turn\'s record no longer ends the mark ⇒ «…and the NEXT turn» red by name', gU);
+    ok(gateOf(gU.gapHolds) && !gU.nextEnds, 'RED (the record never fed to the turn sequence): the next turn\'s record no longer ends the mark ⇒ «…and the NEXT turn» red by name', gU);
   }
   // r3 ② THE SWITCHER'S DESKTOP TAB said it waits: its landing is seeing when it lands on the waiting conversation
   {
     const mn = read('src/lib/mobile-nav.js');
-    ok(/tab\.onclick = desk\.gone \? [^\n]*this\.switchDesktop\(desk\.id, \{ seeing: true \}\)\.then\(afterSwitch\);/.test(mn) && /switchDesktop\(id, \{ show = null, seeing = false \} = \{\}\)/.test(mn)
-      && /this\._showOnDesk\(id, show, seeing\), \(\) => this\._showOnDesk\(id, show, seeing\)/.test(mn) && /if \(show\) this\._seen\(wantId\); else if \(seeing && windowWaits\(want\)\) this\._seen\(wantId\);/.test(mn),
+    ok(gateOf(/tab\.onclick = desk\.gone \? [^\n]*this\.switchDesktop\(desk\.id, \{ seeing: true \}\)\.then\(afterSwitch\);/.test(mn)) && gateOf(/switchDesktop\(id, \{ show = null, seeing = false \} = \{\}\)/.test(mn))
+      && gateOf(/this\._showOnDesk\(id, show, seeing\), \(\) => this\._showOnDesk\(id, show, seeing\)/.test(mn)) && verdictOf(/if \(show\) this\._seen\(wantId\); else if \(seeing && windowWaits\(want\)\) this\._seen\(wantId\);/.test(mn)),
       'THE SWITCHER\'S DESKTOP TAB (it wore the dot): its landing on the desktop\'s remembered window IS seeing it when that is the waiting conversation (r3 ②; the Chrome leg in test-mobile-gaps #W)');
   }
   // ⑤ PIN THE EXCLUSION — each half on its own: the sheet's rows (sheetRows) and the closed door's count (doorWaiting) never count the one on show
@@ -738,34 +738,34 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
       try { return await import('file://' + f + '?v=' + Math.random()); } finally { fs.rmSync(d, { recursive: true, force: true }); } };
     const judge = (SH) => { const app = mkApp(), rows = SH.sheetRows(app); return { rowsOk: rows[0].waiting === 1 && rows[0].titles[0] === 'here waits' && rows[1].waiting === 2, doorOk: SH.doorWaiting(app) === 3, rows, door: SH.doorWaiting(app) }; };
     const real = judge(await loadSheet(sheetSrc));
-    ok(real.rowsOk, 'THE SHEET\'S HALF: a desktop\'s roll-up never counts the conversation on show (this desktop: 1 — «here waits» — not 2)', real.rows.map((r) => [r.id, r.waiting, r.titles]));
-    ok(real.doorOk, 'THE DOOR\'S HALF: the closed door counts what waits anywhere but on show (3, not 4)', real.door);
+    ok(verdictOf(real.rowsOk), 'THE SHEET\'S HALF: a desktop\'s roll-up never counts the conversation on show (this desktop: 1 — «here waits» — not 2)', real.rows.map((r) => [r.id, r.waiting, r.titles]));
+    ok(verdictOf(real.doorOk), 'THE DOOR\'S HALF: the closed door counts what waits anywhere but on show (3, not 4)', real.door);
     const mSheet = judge(await loadSheet(sheetSrc.replace('waiting: windowWaits(w) && w.id !== wm.activeWindowId });', 'waiting: windowWaits(w) });')));
-    ok(!mSheet.rowsOk && mSheet.doorOk, 'RED: the sheet counting the one on show ⇒ the sheet\'s half red by name (the door\'s stands)', mSheet.rows.map((r) => [r.id, r.waiting]));
+    ok(!mSheet.rowsOk && verdictOf(mSheet.doorOk), 'RED: the sheet counting the one on show ⇒ the sheet\'s half red by name (the door\'s stands)', mSheet.rows.map((r) => [r.id, r.waiting]));
     const mDoor = judge(await loadSheet(sheetSrc.replace('waiting: windowWaits(w) })), shownId: wm.activeWindowId }) : 0;', 'waiting: windowWaits(w) })), shownId: null }) : 0;')));
-    ok(!mDoor.doorOk && mDoor.rowsOk, 'RED: the door counting the one on show ⇒ the door\'s half red by name (the sheet\'s stands)', mDoor.door);
+    ok(!mDoor.doorOk && verdictOf(mDoor.rowsOk), 'RED: the door counting the one on show ⇒ the door\'s half red by name (the sheet\'s stands)', mDoor.door);
     // ③ THE TAP LANDS WHERE THE ROW SAYS: ONE order (a tab-group guest ranks by its frame's z for the title AND the landing); live facts
     const r2 = real.rows[1];
     ok(r2.titles[0] === 'guest waits' && r2.waitingIds[0] === 'guest', 'ONE ORDER: the title the row names first IS the conversation its tap lands on (a guest ranked by its host\'s z, both ways)', { titles: r2.titles, ids: r2.waitingIds });
     const go = sheetSrc.slice(sheetSrc.indexOf('  const go = (r) => {'), sheetSrc.indexOf('  };', sheetSrc.indexOf('  const go = (r) => {')));
-    ok(/const live = sheetRows\(app\)\.find\(\(x\) => x\.id === r\.id\), show = live && live\.waiting \? \(live\.waitingIds \|\| \[\]\)\[0\] \|\| null : null;/.test(go) && !/zIndex|sort\(/.test(go),
+    ok(gateOf(/const live = sheetRows\(app\)\.find\(\(x\) => x\.id === r\.id\), show = live && live\.waiting \? \(live\.waitingIds \|\| \[\]\)\[0\] \|\| null : null;/.test(go)) && !/zIndex|sort\(/.test(go),
       'the landing reads the SAME live rows the patch draws (a row that started waiting after the open lands on it) — no order of its own');
   }
   // ② a landing through a door that said «it waits» IS seeing it (on this device); ④ ⋯ says the words
   {
     const mn = read('src/lib/mobile-nav.js');
-    ok(/if \(show\) this\._seen\(wantId\);/.test(mn) && /item\.addEventListener\('click', \(\) => \{ if \(item\.classList\.contains\('waiting'\)\) this\._seen\(win\.id\); \}\);/.test(mn)
-      && /_seen\(id\) \{[\s\S]{0,260}v\._clearWaiting\(\);[\s\S]{0,120}v\._setWaiting\(false, \{ seen: true \}\);/.test(mn),
+    ok(gateOf(/if \(show\) this\._seen\(wantId\);/.test(mn)) && gateOf(/item\.addEventListener\('click', \(\) => \{ if \(item\.classList\.contains\('waiting'\)\) this\._seen\(win\.id\); \}\);/.test(mn))
+      && verdictOf(/_seen\(id\) \{[\s\S]{0,260}v\._clearWaiting\(\);[\s\S]{0,120}v\._setWaiting\(false, \{ seen: true \}\);/.test(mn)),
       'REACHING IT THROUGH A DOOR THAT SAID «IT WAITS» IS SEEING IT: the sheet\'s landing and the switcher row\'s tap acknowledge it through the view\'s own road');
     const TC = await import(new URL('../src/lib/title-chips.js', import.meta.url).href);
     const rows = TC.navMoreRows(['desktops', 'gear'], { desktops: { k: 1, n: 2, name: 'One', waiting: 2, waitingWords: '2 waiting for input' } }), d = rows.find((r) => r.key === 'desktops');
     const quiet = TC.navMoreRows(['desktops'], { desktops: { k: 1, n: 2, name: 'One', waiting: 0, waitingWords: '' } })[0];
-    ok(d && d.value === '1/2 · One · 2 waiting for input' && d.waiting === true && quiet.value === '1/2 · One' && quiet.waiting === undefined,
+    ok(gateOf(d) && d.value === '1/2 · One · 2 waiting for input' && d.waiting === true && quiet.value === '1/2 · One' && quiet.waiting === undefined,
       '⋯\'s Desktops row says what its door says — «1/2 · One · 2 waiting for input», marked; a quiet door\'s row unchanged', { d, quiet });
-    ok(/const base = more\._name \|\| t\('More'\), title = n \? base \+ ' · ' \+ t\('\{n\} waiting for input', \{ n \}\) : base;/.test(mn)
-      && /more\.title = loud \? t\('More — Vault locked'\) : t\('More'\); more\._name = more\.title;/.test(mn) && (mn.match(/t\('More — Vault locked'\)/g) || []).length === 1,
+    ok(gateOf(/const base = more\._name \|\| t\('More'\), title = n \? base \+ ' · ' \+ t\('\{n\} waiting for input', \{ n \}\) : base;/.test(mn))
+      && gateOf(/more\.title = loud \? t\('More — Vault locked'\) : t\('More'\); more\._name = more\.title;/.test(mn)) && (mn.match(/t\('More — Vault locked'\)/g) || []).length === 1,
       '⋯ standing in for the folded door SAYS it in its name (its dot is aria-hidden) — after the name the lock pass gave it (ONE site says «More — Vault locked»)');
-    ok(/tab\.textContent = desk\.gone \? [^\n]*\n[^\n]*tab\.classList\.add\('waiting'\); this\._waitDot\(tab, true\);/.test(mn)
+    ok(gateOf(/tab\.textContent = desk\.gone \? [^\n]*\n[^\n]*tab\.classList\.add\('waiting'\); this\._waitDot\(tab, true\);/.test(mn))
       && !/tab\.classList\.add\('waiting'\); this\._waitDot\(tab, true\);[\s\S]{0,600}tab\.textContent = desk\.gone/.test(mn),
       'the switcher tab\'s standing dot is drawn AFTER its words (`textContent` wipes children — the first heavy run of #W r2 found the tab dot-less)');
   }
@@ -782,4 +782,4 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

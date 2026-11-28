@@ -31,7 +31,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -97,7 +97,7 @@ else await (async () => {
   let journal = '';
   const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 40000), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000)), 'the worktree server booted', journal.slice(-800))) return;
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
   const create = async (reqId, o) => { ws.send(JSON.stringify({ type: 'create', cols: 80, rows: 24, reqId, ...o })); await until(() => msgs.some((m) => m.type === 'created' && m.reqId === reqId), 15000); return msgs.find((m) => m.type === 'created' && m.reqId === reqId)?.sessionId || null; };
@@ -148,9 +148,9 @@ else await (async () => {
     for (let i = 0; i < 120; i++) { try { if (await ev('if (!window.app || !window.app.ready) return false; return await Promise.race([window.app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 100))]);')) return true; } catch { } await sleep(250); }
     return false;
   };
-  if (!ok(await boot(), 'the app booted in headless chrome (desktop, 1280×900)')) return;
+  if (!ok(verdictOf(await boot()), 'the app booted in headless chrome (desktop, 1280×900)')) return;
   const pre = await status();
-  ok(pre && !pre.backfill?.finishedAt, 'the index is not built yet (the backfill waits a minute after boot)', S(pre));
+  ok(gateOf(pre) && !pre.backfill?.finishedAt, 'the index is not built yet (the backfill waits a minute after boot)', S(pre));
 
   console.log('\n① ⚙ Tools ▸ Search everything… opens the window; a second open focuses it');
   await ev(`document.querySelector('.global-settings-popover')?.remove(); document.getElementById('btn-global-settings').click(); return true;`);
@@ -158,11 +158,11 @@ else await (async () => {
   await sleep(300); // the popover is placed on the next frame (test-gear-menu's own wait)
   await ev(`document.querySelector('.global-settings-popover .gs-menu-item[data-id="tools"]').click(); return true;`);
   const toolsRow = await until(() => ev(`return [...document.querySelectorAll('.global-settings-popover .gs-menu-item')].some((r) => /^Search everything…/.test(r.textContent.trim()));`), 3000);
-  ok(toolsRow, 'the Tools flyout lists "Search everything…"', await ev(`return [...document.querySelectorAll('.global-settings-popover .gs-menu-item')].map((r) => r.textContent.trim()).join(' | ');`));
+  ok(verdictOf(toolsRow), 'the Tools flyout lists "Search everything…"', await ev(`return [...document.querySelectorAll('.global-settings-popover .gs-menu-item')].map((r) => r.textContent.trim()).join(' | ');`));
   await ev(`window.__gsClickAt = Date.now(); [...document.querySelectorAll('.global-settings-popover .gs-menu-item')].find((r) => /^Search everything…/.test(r.textContent.trim()))?.click(); return true;`);
-  ok(await until(() => ev(`return !!sw();`), 4000), 'the row opened a window of type `search`');
+  ok(verdictOf(await until(() => ev(`return !!sw();`), 4000)), 'the row opened a window of type `search`');
   const box0 = await until(() => ev(`return document.activeElement === q('.search-input');`), 3000);
-  ok(box0, 'the search box holds the focus');
+  ok(verdictOf(box0), 'the search box holds the focus');
   await ev(`window.__gsStatusNode = q('.search-status'); window.__gsTexts = []; window.__gsAt = []; new MutationObserver(() => { window.__gsTexts.push(window.__gsStatusNode.textContent); window.__gsAt.push(Date.now()); }).observe(window.__gsStatusNode, { childList: true, characterData: true, subtree: true }); window.__gsTexts.push(window.__gsStatusNode.textContent); window.__gsAt.push(Date.now()); app.wm.focusWindow && null; return true;`);
   await ev(`app.openSearch({}); return true;`);
   const single = await ev(`return { n: [...wm.windows.values()].filter((w) => w.type === 'search').length, active: wm.windows.get(wm.activeWindowId)?.type || null };`);
@@ -184,17 +184,17 @@ else await (async () => {
   const first = await saidWithin('__gsTexts', SAY_MS);
   const blank = await ev(`const i = window.__gsTexts.findIndex((x) => x !== ''); return { i, click: window.__gsClickAt || null, at: i >= 0 ? window.__gsAt[i] : null, texts: window.__gsTexts.length };`);
   console.log(`    (the first moment a person sees: ${blank.i < 0 || !blank.click ? 'no words yet' : blank.i === 0 ? `the line already held its words when the suite looked, ${blank.at - blank.click} ms after the row's click — blank for at most that` : `the line was BLANK until ${blank.at - blank.click} ms after the row's click (its first /status answer), then «${first.text}»`})`);
-  ok(!!first.text && /minute|^Indexing/.test(first.text), first.text ? `before the backfill the window says the index is not built ("${first.text}") — never counts of a half-filled index` : first.red, S({ ...first, blank }));
+  ok(!!first.text && verdictOf(/minute|^Indexing/.test(first.text)), first.text ? `before the backfill the window says the index is not built ("${first.text}") — never counts of a half-filled index` : first.red, S({ ...first, blank }));
   holdRunning = true; await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/search/status*', requestStage: 'Request' }] });
-  ok(await until(() => ev(`return window.__gsStatusNode.textContent === 'Indexing 1 of 2 conversations…';`), 6000), 'a running walk on /status is drawn as "Indexing 1 of 2 conversations…" on the same line', S(await ev(`return window.__gsTexts;`)));
+  ok(verdictOf(await until(() => ev(`return window.__gsStatusNode.textContent === 'Indexing 1 of 2 conversations…';`), 6000)), 'a running walk on /status is drawn as "Indexing 1 of 2 conversations…" on the same line', S(await ev(`return window.__gsTexts;`)));
   holdRunning = false; await send('Fetch.disable');
   const built = await until(async () => { const s = await status(); return !!(s && s.backfill && s.backfill.finishedAt && !s.backfill.running && s.index && s.index.rows > 0); }, 150000, 250);
-  ok(built, 'the real backfill built the index (GET /api/search/status)', S(await status()));
+  ok(verdictOf(built), 'the real backfill built the index (GET /api/search/status)', S(await status()));
   console.log('    ' + ((journal.match(/\[search-index\] backfill[^\n]*/) || ['(no backfill line in the journal)'])[0]));
-  ok(await until(() => ev(`return /messages and \\d+ files indexed/.test(window.__gsStatusNode.textContent);`), 8000), 'the SAME status line now reads the counts (patched in place, no reload, no reopen)', S(await ev(`return { now: window.__gsStatusNode.textContent, connected: window.__gsStatusNode.isConnected, seen: window.__gsTexts };`)));
+  ok(verdictOf(await until(() => ev(`return /messages and \\d+ files indexed/.test(window.__gsStatusNode.textContent);`), 8000)), 'the SAME status line now reads the counts (patched in place, no reload, no reopen)', S(await ev(`return { now: window.__gsStatusNode.textContent, connected: window.__gsStatusNode.isConnected, seen: window.__gsTexts };`)));
   const seen = await ev(`return window.__gsTexts;`);
-  ok(seen.length >= 3 && seen.every((x, i) => i === 0 || x !== seen[i - 1]) && /files indexed$/.test(seen[seen.length - 1]), `the line changed only when its words did (${seen.length - 1} changes, a poll per second while unbuilt), ending at the counts`, S(seen));
-  ok(await ev(`return window.__gsStatusNode.isConnected && q('.search-status') === window.__gsStatusNode;`), 'the status node was never replaced');
+  ok(seen.length >= 3 && gateOf(seen.every((x, i) => i === 0 || x !== seen[i - 1])) && verdictOf(/files indexed$/.test(seen[seen.length - 1])), `the line changed only when its words did (${seen.length - 1} changes, a poll per second while unbuilt), ending at the counts`, S(seen));
+  ok(verdictOf(await ev(`return window.__gsStatusNode.isConnected && q('.search-status') === window.__gsStatusNode;`)), 'the status node was never replaced');
   {
     // ⑦ CONTROL (the leg's red, made): the hosted run's race on purpose — a fresh window whose FIRST /status answer is held at
     // the door. The OLD snapshot (the line once the box has the focus) reads the blank line; the leg's wait with a short bound
@@ -207,58 +207,58 @@ else await (async () => {
     const held = await until(() => holdStatus.length > 0, 3000);
     const snap = await ev(`return window.__gsCtl[0];`);
     const red = await saidWithin('__gsCtl', 1500);
-    ok(held && snap === '' && !red.text && red.red === 'the search window never said its index state within 1.5 s — its status line stayed empty', `CONTROL (⑦'s wait): a window whose first /status answer is held — the old snapshot reads the blank line ("${snap}") and the wait is red BY NAME: «${red.red || red.text}»`, S({ held: holdStatus.length, snap, red }));
+    ok(gateOf(held) && snap === '' && !red.text && red.red === 'the search window never said its index state within 1.5 s — its status line stayed empty', `CONTROL (⑦'s wait): a window whose first /status answer is held — the old snapshot reads the blank line ("${snap}") and the wait is red BY NAME: «${red.red || red.text}»`, S({ held: holdStatus.length, snap, red }));
     const ids = holdStatus; holdStatus = null; for (const id of ids) await answerStatus(id);
     const back = await saidWithin('__gsCtl', SAY_MS);
-    ok(/files indexed$/.test(back.text), `…the held answer released, the same wait reads the window's words («${back.text}» after ${back.ms} ms)`, S(back));
+    ok(verdictOf(/files indexed$/.test(back.text)), `…the held answer released, the same wait reads the window's words («${back.text}» after ${back.ms} ms)`, S(back));
     await send('Fetch.disable');
     await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'search') wm.closeWindow(w.id); return true;`);
     await ev(`app.openSearch({}); return true;`);
     await until(() => ev(`return document.activeElement === q('.search-input');`), 3000);
   }
-  ok(await until(async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/search?q=${encodeURIComponent('设计笔记')}&scope=artifacts`)).json()).total >= 1, 15000), 'the live session\'s Write filed note.md and the index holds it (the registry\'s door)');
+  ok(verdictOf(await until(async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/search?q=${encodeURIComponent('设计笔记')}&scope=artifacts`)).json()).total >= 1, 15000)), 'the live session\'s Write filed note.md and the index holds it (the registry\'s door)');
 
   console.log('\n② a 2-character Chinese query lists both conversations, grouped, marked');
   await typeQuery('限额');
-  ok(await until(async () => (await listState()).groups.length >= 3, 8000), 'results are drawn', S(await listState()));
+  ok(verdictOf(await until(async () => (await listState()).groups.length >= 3, 8000)), 'results are drawn', S(await listState()));
   let ls = await listState();
   const names = ls.groups.map((g) => g.name);
   const cl = ls.groups.find((g) => g.hits.some((h) => h.includes('Gmail'))), cx = ls.groups.find((g) => g.hits.some((h) => h.includes('codex 线程')));
   ok(!!cl && !!cx && cl !== cx, 'the claude conversation and the codex conversation are each a group', S(ls));
-  ok(names.every((n) => n && !/^[0-9a-f]{8}$/.test(n)) && new Set(names).size === names.length, `groups carry names (${names.join(' · ')})`, S(names));
-  ok(ls.groups.some((g) => g.name === 'Files' && g.hits.some((h) => h.includes('发现页'))), 'the artifact is listed under Files', S(ls));
-  ok(ls.marks.length >= 3 && ls.marks.every((m) => m === '限额'), `every <mark> is the hit (${ls.marks.length} marks)`, S(ls.marks));
+  ok(gateOf(names.every((n) => n && !/^[0-9a-f]{8}$/.test(n))) && new Set(names).size === names.length, `groups carry names (${names.join(' · ')})`, S(names));
+  ok(verdictOf(ls.groups.some((g) => g.name === 'Files' && g.hits.some((h) => h.includes('发现页')))), 'the artifact is listed under Files', S(ls));
+  ok(ls.marks.length >= 3 && verdictOf(ls.marks.every((m) => m === '限额')), `every <mark> is the hit (${ls.marks.length} marks)`, S(ls.marks));
   const census = await ev(`const bad = qa('.search-list *').filter((e) => !['DIV', 'SPAN', 'MARK', 'BUTTON'].includes(e.tagName) || [...e.attributes].some((a) => !['class', 'role', 'title', 'aria-selected', 'data-key'].includes(a.name))).map((e) => e.outerHTML.slice(0, 80)); const x = qa('.search-snippet').find((s) => s.textContent.includes('onerror')); return { bad, xss: x ? x.textContent : null, fired: !!window.__gsXss };`);
-  ok(census.bad.length === 0 && census.xss && census.xss.includes('<img src=x') && !census.fired, 'textContent census: a peer\'s <img onerror> is drawn as text — the list holds only div/span/mark/button', S(census));
+  ok(census.bad.length === 0 && gateOf(census.xss) && gateOf(census.xss.includes('<img src=x')) && !census.fired, 'textContent census: a peer\'s <img onerror> is drawn as text — the list holds only div/span/mark/button', S(census));
 
   console.log('\n⑥ the scope chips filter in place (keyed rows)');
   await ev(`qa('.search-hit').forEach((r, i) => { r.__gsMark = 'k' + i; }); qa('.search-group').forEach((g) => { g.__gsMark = g.querySelector('.search-group-name').textContent; }); return true;`);
   const before = await ev(`return qa('.search-hit').map((r) => ({ m: r.__gsMark, t: r.querySelector('.search-snippet').textContent, art: r.closest('.search-group').querySelector('.search-group-name').textContent === 'Files' }));`);
   await ev(`qa('.search-chip')[1].click(); return true;`);
-  ok(await until(async () => !(await listState()).groups.some((g) => g.name === 'Files'), 6000), 'Conversations: the Files group leaves', S(await listState()));
+  ok(verdictOf(await until(async () => !(await listState()).groups.some((g) => g.name === 'Files'), 6000)), 'Conversations: the Files group leaves', S(await listState()));
   const chats = await ev(`return qa('.search-hit').map((r) => ({ m: r.__gsMark || null, t: r.querySelector('.search-snippet').textContent }));`);
   const kept = chats.filter((r) => before.some((b) => b.m === r.m && b.t === r.t));
   ok(chats.length > 0 && kept.length === chats.length, `every message row that stayed is the SAME node (${kept.length} of ${chats.length})`, S({ before, chats }));
-  ok(await ev(`return qa('.search-group').every((g) => !!g.__gsMark);`), '…and so is every group head');
+  ok(verdictOf(await ev(`return qa('.search-group').every((g) => !!g.__gsMark);`)), '…and so is every group head');
   await ev(`qa('.search-chip')[2].click(); return true;`);
-  ok(await until(async () => { const s = await listState(); return s.groups.length === 1 && s.groups[0].name === 'Files'; }, 6000), 'Files: the artifact group only', S(await listState()));
+  ok(verdictOf(await until(async () => { const s = await listState(); return s.groups.length === 1 && s.groups[0].name === 'Files'; }, 6000)), 'Files: the artifact group only', S(await listState()));
   await ev(`qa('.search-chip')[0].click(); return true;`);
-  ok(await until(async () => (await listState()).groups.length >= 3, 6000), 'All: everything is back', S(await listState()));
-  ok(await ev(`return qa('.search-chip').map((c) => c.classList.contains('on')).join() === 'true,false,false';`), 'the chip that is on is All');
+  ok(verdictOf(await until(async () => (await listState()).groups.length >= 3, 6000)), 'All: everything is back', S(await listState()));
+  ok(verdictOf(await ev(`return qa('.search-chip').map((c) => c.classList.contains('on')).join() === 'true,false,false';`)), 'the chip that is on is All');
 
   console.log('\n⑦ a query of only operators');
   await ev(`window.__gsToasts = 0; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && /error/.test(n.className || '')) window.__gsToasts++; }).observe(document.body, { childList: true, subtree: true }); return true;`);
   await typeQuery('AND OR NOT');
-  ok(await until(() => ev(`return q('.search-status').textContent === 'No matches' && qa('.search-hit').length === 0;`), 6000), 'it says "No matches" and lists nothing', S(await listState()));
+  ok(verdictOf(await until(() => ev(`return q('.search-status').textContent === 'No matches' && qa('.search-hit').length === 0;`), 6000)), 'it says "No matches" and lists nothing', S(await listState()));
   await sleep(500);
-  ok(await ev(`return window.__gsToasts === 0;`), 'no error toast');
+  ok(verdictOf(await ev(`return window.__gsToasts === 0;`)), 'no error toast');
 
   console.log('\n③ ↓ + Enter lands on the hit, in the chat viewport');
   await typeQuery('限额');
   await until(async () => (await listState()).groups.length >= 3, 8000);
   const idx = await ev(`return qa('.search-hit').findIndex((r) => r.textContent.includes('Gmail'));`);
   for (let i = 0; i <= idx; i++) await DOWN();
-  ok(await ev(`const r = qa('.search-hit'); return r[${idx}].classList.contains('active') && r.filter((x) => x.classList.contains('active')).length === 1;`), `↓ ×${idx + 1} selects the first-message hit`);
+  ok(verdictOf(await ev(`const r = qa('.search-hit'); return r[${idx}].classList.contains('active') && r.filter((x) => x.classList.contains('active')).length === 1;`)), `↓ ×${idx + 1} selects the first-message hit`);
   await ENTER();
   const probe = (sid, needle) => ev(`const cv = [...app.sessions.values()].find((v) => v && v._search && typeof v._getSessionIds === 'function' && (v._getSessionIds() || {}).backendSessionId === ${S(sid)});
     if (!cv || !cv._messageList) return { cv: !!cv };
@@ -271,48 +271,48 @@ else await (async () => {
     return { cv: true, msg: true, sc: true, vis, h: Math.round(a.height), tall: sc.scrollHeight / sc.clientHeight, top: Math.round(sc.scrollTop), atBottom: sc.scrollHeight - sc.scrollTop - sc.clientHeight < 4 };`);
   let landed = null;
   const land = await until(async () => { landed = await probe(SID, HIT); return !!(landed && landed.vis >= Math.min(20, landed.h)); }, 20000, 250);
-  ok(land, 'the padded conversation opened and the first-message hit is IN the chat viewport', S(landed));
-  ok(landed && landed.tall > 3 && !landed.atBottom, 'it is a long conversation and the view left its bottom (the jump moved it)', S(landed));
-  ok(await ev(`return !(app.sidebar._webuiSessions || []).some((r) => r.backendSessionId === ${S(SID)} || r.claudeSessionId === ${S(SID)});`), 'it opened as history (no live session was started for it)');
+  ok(verdictOf(land), 'the padded conversation opened and the first-message hit is IN the chat viewport', S(landed));
+  ok(gateOf(landed) && landed.tall > 3 && !landed.atBottom, 'it is a long conversation and the view left its bottom (the jump moved it)', S(landed));
+  ok(verdictOf(await ev(`return !(app.sidebar._webuiSessions || []).some((r) => r.backendSessionId === ${S(SID)} || r.claudeSessionId === ${S(SID)});`)), 'it opened as history (no live session was started for it)');
   await ev(`app.openSearch({}); return true;`);
   await until(() => ev(`return wm.windows.get(wm.activeWindowId)?.type === 'search';`), 3000);
   const cidx = await ev(`return qa('.search-hit').findIndex((r) => r.textContent.includes('codex 线程'));`);
   await ev(`qa('.search-hit')[${cidx}].click(); return true;`);
   let cl2 = null;
-  ok(await until(async () => { cl2 = await probe(TA, 'codex 线程里也问了限额'); return !!(cl2 && cl2.msg && (cl2.vis >= Math.min(20, cl2.h) || !cl2.sc)); }, 20000, 250), 'the codex conversation (dead) opened and its hit is in view', S(cl2));
+  ok(verdictOf(await until(async () => { cl2 = await probe(TA, 'codex 线程里也问了限额'); return !!(cl2 && cl2.msg && (cl2.vis >= Math.min(20, cl2.h) || !cl2.sc)); }, 20000, 250)), 'the codex conversation (dead) opened and its hit is in view', S(cl2));
 
   console.log('\n④ the artifact hit opens the Doc window on the file');
   await ev(`app.openSearch({}); return true;`);
   await until(() => ev(`return wm.windows.get(wm.activeWindowId)?.type === 'search';`), 3000);
   await ev(`qa('.search-hit').find((r) => r.closest('.search-group').querySelector('.search-group-name').textContent === 'Files').click(); return true;`);
   let doc = null;
-  ok(await until(async () => { doc = await ev(`const w = [...wm.windows.values()].find((w) => w.type === 'doc'); return w ? { title: w.title, text: (w.content.textContent || '').slice(0, 400) } : null;`); return !!(doc && /设计笔记/.test(doc.text)); }, 15000), 'a Doc window opened on note.md and shows its words', S(doc));
+  ok(verdictOf(await until(async () => { doc = await ev(`const w = [...wm.windows.values()].find((w) => w.type === 'doc'); return w ? { title: w.title, text: (w.content.textContent || '').slice(0, 400) } : null;`); return !!(doc && /设计笔记/.test(doc.text)); }, 15000)), 'a Doc window opened on note.md and shows its words', S(doc));
 
   console.log('\n⑤ Ctrl+K: the last row hands the words to Search everything');
   await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'search') wm.closeWindow(w.id); document.activeElement?.blur?.(); return true;`);
   await key('k', 'KeyK', 75, 2);
-  ok(await until(() => ev(`const i = document.querySelector('.session-palette input, .palette-input'); return !!i && document.activeElement === i;`), 4000), 'Ctrl+K opened the palette with its input focused');
+  ok(verdictOf(await until(() => ev(`const i = document.querySelector('.session-palette input, .palette-input'); return !!i && document.activeElement === i;`), 4000)), 'Ctrl+K opened the palette with its input focused');
   await send('Input.insertText', { text: '发现页' });
   let pal = null;
-  ok(await until(async () => { pal = await ev(`const rows = [...document.querySelectorAll('.palette-row, .palette-item')].filter((r) => r.offsetParent); return rows.map((r) => ({ t: r.textContent.trim(), all: r.classList.contains('palette-search-all') }));`); return !!(pal && pal.length && pal[pal.length - 1].all); }, 5000), 'the last row is the "search everything" row', S(pal));
-  ok(pal && pal.length === 1 && pal[0].t === "Search conversations and files for '发现页'", 'nothing is named like the text ⇒ it is the only row, and it names the words', S(pal));
+  ok(verdictOf(await until(async () => { pal = await ev(`const rows = [...document.querySelectorAll('.palette-row, .palette-item')].filter((r) => r.offsetParent); return rows.map((r) => ({ t: r.textContent.trim(), all: r.classList.contains('palette-search-all') }));`); return !!(pal && pal.length && pal[pal.length - 1].all); }, 5000)), 'the last row is the "search everything" row', S(pal));
+  ok(gateOf(pal) && pal.length === 1 && pal[0].t === "Search conversations and files for '发现页'", 'nothing is named like the text ⇒ it is the only row, and it names the words', S(pal));
   await ENTER();
-  ok(await until(() => ev(`return !!sw() && q('.search-input').value === '发现页';`), 5000), 'Enter opened the window WITH the query');
-  ok(await until(async () => (await listState()).groups.some((g) => g.name === 'Files'), 6000), '…and it ran (the artifact is listed)', S(await listState()));
+  ok(verdictOf(await until(() => ev(`return !!sw() && q('.search-input').value === '发现页';`), 5000)), 'Enter opened the window WITH the query');
+  ok(verdictOf(await until(async () => (await listState()).groups.some((g) => g.name === 'Files'), 6000)), '…and it ran (the artifact is listed)', S(await listState()));
 
   console.log('\n⑨ Ctrl+Shift+F from a chat composer and from a terminal');
   await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'search') wm.closeWindow(w.id); return true;`);
   await ev(`app.attachSession(${S(live)}, '', ${S(LIVE)}, { mode: 'chat', backend: 'claude' }); return true;`);
   const composer = `[...wm.windows.values()].map((w) => app.sessions.get(w.id)).find((v) => v && v.sessionId === ${S(live)})?.container?.querySelector('textarea') || [...document.querySelectorAll('.window textarea')].find((t) => t.offsetParent)`;
-  ok(await until(() => ev(`return !!(${composer});`), 10000), 'the live chat window shows its composer');
+  ok(verdictOf(await until(() => ev(`return !!(${composer});`), 10000)), 'the live chat window shows its composer');
   await ev(`const t = ${composer}; t.focus(); return true;`);
   await send('Input.insertText', { text: 'draft' });
   await key('F', 'KeyF', 70, 10);
-  ok(await until(() => ev(`return !!sw() && wm.windows.get(wm.activeWindowId)?.type === 'search';`), 4000), 'from the composer: the search window opened and is active');
-  ok(await ev(`return (${composer}).value === 'draft';`), 'the composer kept its text (no F typed into it)', await ev(`return (${composer}).value;`));
+  ok(verdictOf(await until(() => ev(`return !!sw() && wm.windows.get(wm.activeWindowId)?.type === 'search';`), 4000)), 'from the composer: the search window opened and is active');
+  ok(verdictOf(await ev(`return (${composer}).value === 'draft';`)), 'the composer kept its text (no F typed into it)', await ev(`return (${composer}).value;`));
   await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'search') wm.closeWindow(w.id); return true;`);
   await ev(`app.attachSession(${S(term)}, '', ${S(ROOT)}, { mode: 'terminal', backend: 'shell' }); return true;`);
-  ok(await until(() => ev(`return !!document.querySelector('.xterm-helper-textarea');`), 10000), 'the terminal window is drawn');
+  ok(verdictOf(await until(() => ev(`return !!document.querySelector('.xterm-helper-textarea');`), 10000)), 'the terminal window is drawn');
   await ev(`window.__gsSent = []; const o = WebSocket.prototype.send; WebSocket.prototype.send = function (d) { try { window.__gsSent.push(String(d)); } catch { } return o.call(this, d); }; const t = [...document.querySelectorAll('.xterm-helper-textarea')].pop(); t.focus(); return document.activeElement === t;`);
   await key('F', 'KeyF', 70, 10);
   await sleep(600);
@@ -327,7 +327,7 @@ else await (async () => {
   for (const lang of ['zh', 'ja']) {
     await ev(`localStorage.setItem('vibespace.lang', ${S(lang)}); return true;`);
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-    if (!ok(await boot(), `${lang}: the app re-booted at 390×844`)) continue;
+    if (!ok(verdictOf(await boot()), `${lang}: the app re-booted at 390×844`)) continue;
     await ev(`app.openSearch({ q: '限额' }); return true;`);
     await until(async () => (await listState()).groups.length >= 3, 8000);
     const w = await ev(`const r = q('.search-win').getBoundingClientRect(), L = q('.search-list').getBoundingClientRect(), chips = qa('.search-chip').map((c) => { const b = c.getBoundingClientRect(); return { t: c.textContent, l: b.left, r: b.right, top: b.top }; });
@@ -338,7 +338,7 @@ else await (async () => {
     ok(w.vw === 390 && w.win[1] - w.win[0] >= 360, `${lang}: the window spans the phone width (${w.win.join('..')})`, S(w));
     ok(w.list >= (w.win[1] - w.win[0]) - 40, `${lang}: the list fills it (${w.list} px)`, S(w));
     ok(w.clipped.length === 0 && w.overflow.length === 0, `${lang}: nothing clipped (rect census over the window)`, S(w));
-    ok(w.chips.every((c) => c.r <= w.win[1] + 1), `${lang}: the chips stay inside (wrap if they must)`, S(w.chips));
+    ok(verdictOf(w.chips.every((c) => c.r <= w.win[1] + 1)), `${lang}: the chips stay inside (wrap if they must)`, S(w.chips));
     const en = ['All', 'Conversations', 'Files', 'Search conversations and files…'];
     ok(!w.words.chips.some((c) => en.includes(c)) && !en.includes(w.words.ph) && !/matches/.test(w.words.status) && !w.words.files.includes('Files'), `${lang}: the window speaks ${lang} (${w.words.chips.join(' / ')} · ${w.words.status})`, S(w.words));
   }
@@ -354,4 +354,4 @@ else await (async () => {
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`}`);
 cleanup();
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

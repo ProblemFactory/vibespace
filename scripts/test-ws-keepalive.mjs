@@ -29,7 +29,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const KA = require(path.join(REPO, 'src/ws-keepalive.js'));
 const { WebSocket, WebSocketServer } = require('ws');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } return !!c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -49,7 +49,7 @@ console.log('① the step table');
   r = KA.keepaliveStep(s, 'tick', 20000); ok(r.send === 'ping' && r.drop === false, 'tick 1: ping'); s = r.state;
   r = KA.keepaliveStep(s, 'pong', 20100); s = r.state; ok(s.alive === true && s.lastPongAt === 20100 && r.send === null, 'a pong keeps the peer');
   r = KA.keepaliveStep(s, 'tick', 40000); ok(r.send === 'ping' && !r.drop, 'tick 2 after a pong: ping again'); s = r.state;
-  r = KA.keepaliveStep(s, 'tick', 60000); ok(r.drop && r.drop.code === 1006 && r.drop.reason === 'no pong for 40000 ms' && r.send === null, 'tick 3 with no pong since tick 2: dropped — "no pong for 40000 ms", code 1006 (the desktop bridge\'s words)', JSON.stringify(r));
+  r = KA.keepaliveStep(s, 'tick', 60000); ok(gateOf(r.drop) && r.drop.code === 1006 && r.drop.reason === 'no pong for 40000 ms' && r.send === null, 'tick 3 with no pong since tick 2: dropped — "no pong for 40000 ms", code 1006 (the desktop bridge\'s words)', JSON.stringify(r));
   ok(KA.PING_MS === 20000 && KA.dropReason(200) === 'no pong for 400 ms', 'the cadence is 20 s; the reason names two rounds');
   ok(KA.keepaliveStep(KA.keepaliveInit(0), 'hello', 1).drop === false, 'an unknown event changes nothing');
 }
@@ -66,7 +66,7 @@ function armedLeg(K) {
 {
   const r = armedLeg(KA);
   ok(r.live.pings === 50 && r.live.terminated === 0 && r.live.drops === 0, 'a peer that answers every ping survives 50 rounds', JSON.stringify(r.live));
-  ok(r.silent.pings === 1 && r.silent.terminated === 1 && r.silent.seen.length === 1 && r.silent.seen[0].reason === 'no pong for 200 ms and nothing acknowledged' && r.silent.cleared, 'a silent peer: pinged once, terminated at the 2nd tick, onDrop once with the named reason (the round\'s evidence read and silent: "… and nothing acknowledged" — the 2.369.202 integration folded lane desktop-keepalive\'s rule in here), the timer stopped', JSON.stringify(r.silent));
+  ok(r.silent.pings === 1 && r.silent.terminated === 1 && r.silent.seen.length === 1 && r.silent.seen[0].reason === 'no pong for 200 ms and nothing acknowledged' && verdictOf(r.silent.cleared), 'a silent peer: pinged once, terminated at the 2nd tick, onDrop once with the named reason (the round\'s evidence read and silent: "… and nothing acknowledged" — the 2.369.202 integration folded lane desktop-keepalive\'s rule in here), the timer stopped', JSON.stringify(r.silent));
   // the evidence rule (lane desktop-keepalive, ONE rule for both bridges since the 2.369.202 integration): a peer whose pong
   // waits behind the send queue but who TALKS every round (an RFB client\'s update requests, a live view\'s input) is alive
   { const ws = fakeWs(), T = fakeTimers(); let drops = 0; KA.armKeepalive(ws, { pingMs: 100, now: () => 0, onDrop: () => drops++, ...T }); for (let i = 0; i < 20; i++) { T.tick(); ws.emit('message'); } ok(ws.terminated === 0 && drops === 0 && ws.pings === 20, 'a peer with no pong that sends bytes every round is never dropped (livenessVerdict: bytes from the peer ⇒ alive) — still pinged every round', JSON.stringify({ terminated: ws.terminated, pings: ws.pings })); }
@@ -101,11 +101,11 @@ function census(files, relays = (src) => relaysOf(src)) {
   const bad = census(bridges);
   ok(bridges.length >= 2 && !bad.length, `every src/server/*-stream.js (${bridges.map((b) => b[0]).join(', ')}) arms the keepalive and pings nowhere else`, bad.join('; '));
   const planted = census([...bridges, ['src/server/planted-stream.js', "const pinger = setInterval(() => ws.ping(), 20000);"]]);
-  ok(planted.some((b) => b.startsWith('src/server/planted-stream.js: does not require')) && planted.some((b) => /planted-stream\.js: pings by hand/.test(b)), 'CONTROL: a planted bridge with its own pinger is red by name', planted.join('; '));
+  ok(gateOf(planted.some((b) => b.startsWith('src/server/planted-stream.js: does not require'))) && verdictOf(planted.some((b) => /planted-stream\.js: pings by hand/.test(b))), 'CONTROL: a planted bridge with its own pinger is red by name', planted.join('; '));
   // the 2.369.215 integration: the desktop bridge is credited through its relays — one relay that stops arming reddens it by name
   const relaysCut = (src) => relaysOf(src).map(([rf, r]) => [rf, rf.endsWith('stream-relay-rfb.js') ? r.split('KA.armKeepalive(').join('KA.armKeepAlive(') : r]);
   const unarmed = census(bridges, relaysCut);
-  ok(relaysOf(fs.readFileSync(path.join(dir, 'desktop-stream.js'), 'utf8')).length >= 2 && unarmed.some((b) => /desktop-stream\.js: never arms the keepalive \(relays that do not: src\/server\/stream-relay-rfb\.js\)/.test(b)), 'CONTROL: a relay of the desktop bridge that never arms the keepalive is red by name (the bridge is credited through its relays only)', unarmed.join('; '));
+  ok(relaysOf(fs.readFileSync(path.join(dir, 'desktop-stream.js'), 'utf8')).length >= 2 && verdictOf(unarmed.some((b) => /desktop-stream\.js: never arms the keepalive \(relays that do not: src\/server\/stream-relay-rfb\.js\)/.test(b))), 'CONTROL: a relay of the desktop bridge that never arms the keepalive is red by name (the bridge is credited through its relays only)', unarmed.join('; '));
 }
 
 console.log('④ the real browser bridge: a half-open viewer is dropped, the other keeps its picture');
@@ -145,20 +145,20 @@ console.log('④ the real browser bridge: a half-open viewer is dropped, the oth
   const took = Date.now() - t0;
   // the drop is judged by the MECHANISM'S COUNT, never a stopwatch (lane mirror-flake-hardening: `took <= 800` judged the
   // runner's timers): ONE ping went unanswered and the next round dropped it — two rounds of 200 ms, whatever the clock read
-  ok(two === 2 && gone && b.pings === 1, `the silent viewer is dropped at the round after its ONE unanswered ping (pings ${b.pings}; ${took} ms here, information), the count 2 → ${bridge.viewerCount('sess-1')}`, JSON.stringify({ two, took, pings: b.pings }));
+  ok(two === 2 && gateOf(gone) && b.pings === 1, `the silent viewer is dropped at the round after its ONE unanswered ping (pings ${b.pings}; ${took} ms here, information), the count 2 → ${bridge.viewerCount('sess-1')}`, JSON.stringify({ two, took, pings: b.pings }));
   const named = lines.filter((l) => /\[browser-stream\] .*: viewer \d+ closed \(no pong for 400 ms and nothing acknowledged\) after \d+s, code 1006/.test(l));
   ok(named.length === 1, 'ONE named close line: "viewer N closed (no pong for 400 ms and nothing acknowledged) after Ns, code 1006"', lines.join(' | '));
   await sleep(700);
   const f0 = a.frames; blast(); await until(() => a.frames > f0, 2000);
   ok(a.frames > f0 && a.closed === null && bridge.viewerCount('sess-1') === 1, 'the other viewer is never dropped (it answers its pings) and keeps its picture after the drop', JSON.stringify({ frames: a.frames, f0, closed: a.closed }));
   a.ws.close(); await until(() => bridge.viewerCount('sess-1') === 0, 2000);
-  ok(lines.some((l) => /viewer \d+ closed \(the viewer closed its socket\) after \d+s, code 1005/.test(l)), 'a clean close is named too (who closed, the code)', lines.slice(-2).join(' | '));
+  ok(verdictOf(lines.some((l) => /viewer \d+ closed \(the viewer closed its socket\) after \d+s, code 1005/.test(l))), 'a clean close is named too (who closed, the code)', lines.slice(-2).join(' | '));
   try { b.ws.terminate(); } catch { }
   bridge.shutdown?.(); srv.close(); for (const c of clients) c.terminate(); wss.close();
   const win = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(/ws\.onclose = \(\) => \{/.test(win) && !/ws\.onclose = \(e\w*\)/.test(win), 'the client\'s reconnect ladder reads every close alike (no code test) — a keepalive drop reconnects like a network loss');
+  ok(gateOf(/ws\.onclose = \(\) => \{/.test(win)) && !/ws\.onclose = \(e\w*\)/.test(win), 'the client\'s reconnect ladder reads every close alike (no code test) — a keepalive drop reconnects like a network loss');
   const oc = (win.match(/ws\.onclose = \(\) => \{[\s\S]*?\n    \};/) || [''])[0];
-  ok(oc && !/showToast/.test(oc) && /scheduleReconnect\(\)/.test(oc) && /Connection lost/.test(oc), 'verify r1 T1②: a keepalive drop names nothing to the client (terminate ⇒ 1006, like any network loss) — no toast, the status line "Connection lost" and the reconnect ladder (first step 1 s)', oc.slice(0, 300));
+  ok(gateOf(oc) && !/showToast/.test(oc) && gateOf(/scheduleReconnect\(\)/.test(oc)) && verdictOf(/Connection lost/.test(oc)), 'verify r1 T1②: a keepalive drop names nothing to the client (terminate ⇒ 1006, like any network loss) — no toast, the status line "Connection lost" and the reconnect ladder (first step 1 s)', oc.slice(0, 300));
 }
 console.log('⑤ our own stall is not the peer\'s death (verify r1 T1①, the 2.369.16 rule)');
 const KA_SRC = fs.readFileSync(path.join(REPO, 'src/ws-keepalive.js'), 'utf8');
@@ -184,9 +184,9 @@ function stallTable(K) {
   ok(!o.stall60.drop && o.stall60.send === 'ping' && o.stall60.stalled === true, 'a ping at 20 s, then OUR loop blocked 60 s (no pong could be read): the tick at 80 s is no verdict — re-pinged, not dropped', JSON.stringify(o.stall60));
   ok(!o.after.drop && o.after.send === 'ping', '…the pong read when the loop is back keeps the peer; the next clean round pings as usual', JSON.stringify(o.after));
   ok(!o.blind.drop && o.blind.stalled === true, 'the blind band: the tick ON TIME but the gauge saw a 19 s loop gap in the round ⇒ no verdict', JSON.stringify(o.blind));
-  ok(o.cleanAfter.drop && o.cleanAfter.drop.code === 1006 && o.cleanAfter.drop.reason === 'no pong for 40000 ms after 1 stalled round(s)', 'a peer still silent in the next CLEAN round is dropped — the reason names the forgiven round', JSON.stringify(o.cleanAfter));
-  ok(o.late4.drop && o.late4.drop.reason === 'no pong for 40000 ms', 'a tick 4 s late (within the 5 s grace) is still a verdict, in the classic words', JSON.stringify(o.late4));
-  ok(o.bound.length === 7 && o.bound.slice(0, 6).every((x) => x === 'ping') && /^no pong for \d+ ms \(7 stalled rounds in a row\)$/.test(o.bound[6]), 'the bound: a peer silent through 6 stalled rounds in a row is dropped at the 7th (2.369.16 MAX_TAINTED_MISSES)', JSON.stringify(o.bound));
+  ok(gateOf(o.cleanAfter.drop) && o.cleanAfter.drop.code === 1006 && o.cleanAfter.drop.reason === 'no pong for 40000 ms after 1 stalled round(s)', 'a peer still silent in the next CLEAN round is dropped — the reason names the forgiven round', JSON.stringify(o.cleanAfter));
+  ok(gateOf(o.late4.drop) && o.late4.drop.reason === 'no pong for 40000 ms', 'a tick 4 s late (within the 5 s grace) is still a verdict, in the classic words', JSON.stringify(o.late4));
+  ok(o.bound.length === 7 && gateOf(o.bound.slice(0, 6).every((x) => x === 'ping')) && verdictOf(/^no pong for \d+ ms \(7 stalled rounds in a row\)$/.test(o.bound[6])), 'the bound: a peer silent through 6 stalled rounds in a row is dropped at the 7th (2.369.16 MAX_TAINTED_MISSES)', JSON.stringify(o.bound));
   ok(KA.keepaliveInit(0).stallGraceMs === 5000 && KA.keepaliveInit(0, { pingMs: 200 }).stallGraceMs === 100 && KA.STALL_GRACE_MS === 5000 && KA.MAX_STALLED_MISSES === 6, 'the grace is min(5 s, pingMs / 2): 5000 at the production 20 s, 100 at 200 ms');
   let c = 0, pulse = null, cleared = 0;
   const G = KA.createLoopGauge({ clock: () => c, pulseMs: 1000, setIntervalFn: (f) => { pulse = f; return 7; }, clearIntervalFn: () => { cleared++; } });
@@ -210,7 +210,7 @@ function stallTable(K) {
   const wm = wiringLeg(MUT.load('src/ws-keepalive.js', NO_WIRE, 'no-gauge-wire'));
   ok(NO_WIRE !== KA_SRC && wm.mid.terminated === 1, 'CONTROL: an armKeepalive that never reads the gauge drops the silent peer inside the stalled round', JSON.stringify(wm));
   const pre = stallTable(MUT.load('src/ws-keepalive.js', NO_STALL, 'no-stall-verdict'));
-  ok(NO_STALL !== KA_SRC && pre.stall60.drop && pre.blind.drop, 'CONTROL: the step without its stall verdict (the pre-fix rule) drops the peer at the 60 s stall and in the blind band', JSON.stringify({ stall60: pre.stall60.drop, blind: pre.blind.drop }));
+  ok(NO_STALL !== KA_SRC && gateOf(pre.stall60.drop) && verdictOf(pre.blind.drop), 'CONTROL: the step without its stall verdict (the pre-fix rule) drops the peer at the 60 s stall and in the blind band', JSON.stringify({ stall60: pre.stall60.drop, blind: pre.blind.drop }));
 }
 
 console.log('⑥ the REAL browser bridge through a stall storm: nobody is dropped');
@@ -256,4 +256,4 @@ async function stormLeg(BSmod) {
   ok(bsPre !== bsSrc && c.before === 3 && c.after === 0 && c.named.length === 3, `CONTROL: the same storm through the bridge on the pre-fix rule drops all 3 live viewers at once (count ${c.before} → ${c.after}, ${c.named.length} named line(s)) — our stall read as their death`, JSON.stringify(c));
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

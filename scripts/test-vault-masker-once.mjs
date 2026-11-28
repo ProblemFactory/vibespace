@@ -28,7 +28,7 @@ const VE = r('src/server/vault-engine.js'), SB = r('src/secret-box.js'), belt = 
 const { redactSecrets } = r('src/secret-shapes.js');
 
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
 const quiet = { log() {}, warn() {}, error() {}, info() {} };
 let seed = 0x2a11ce;
 const rnd = () => { seed = (seed * 1103515245 + 12345) >>> 0; return seed / 2 ** 32; };
@@ -69,7 +69,7 @@ try {
   ok(builds === 1, `50 texts ⇒ compileForms ran ONCE (${builds})`, { builds });
   ok(typeof real.masksHeld === 'function' && real.masksHeld() === true, 'the vault holds ONE compiled set while unlocked (masksHeld)');
   const t1 = `x ${M0[3].value} y`;
-  ok(belt.maskForSink(t1, { dataDir: wrapDir }).includes(`[vault:${M0[3].label}]`) && !belt.maskForSink(t1, { dataDir: wrapDir }).includes(M0[3].value), 'a value in a text is masked by the shared set — its placeholder, never the value');
+  ok(gateOf(belt.maskForSink(t1, { dataDir: wrapDir }).includes(`[vault:${M0[3].label}]`)) && !belt.maskForSink(t1, { dataDir: wrapDir }).includes(M0[3].value), 'a value in a text is masked by the shared set — its placeholder, never the value');
 
   console.log('② a vault change ⇒ a rebuild; the very next text sees it');
   const NEWV = 'mo-added-' + strOf(24), EDV = 'mo-edited-' + strOf(30), OLDV = M0.find((x) => x.label === 'apikey:mo-5').value;
@@ -121,7 +121,7 @@ try {
   ok(diffs === 0 && hits > M.length, `${corpus.length} texts carrying every form of all ${M.length} values, their near-misses and mixes ⇒ 0 differences from the per-call build (${hits} texts masked something)`, first || { diffs, hits });
   const big = corpus.join('\n');
   ok(belt.maskForSink(big, { dataDir: wrapDir }) === reference(big), `…and one ${Math.round(big.length / 1024)} KB text holding all of them: identical`);
-  ok(VR.isCompiledForms && !VR.isCompiledForms(M) && VR.maskText('z ' + M[0].value, M) === VR.maskText('z ' + M[0].value, VR.compileForms(M)), 'a masker from a compiled set and one from the list mask alike (createRunMasker takes either)');
+  ok(gateOf(VR.isCompiledForms) && !VR.isCompiledForms(M) && VR.maskText('z ' + M[0].value, M) === VR.maskText('z ' + M[0].value, VR.compileForms(M)), 'a masker from a compiled set and one from the list mask alike (createRunMasker takes either)');
   VR.compileForms = compile0;
 } catch (e) {
   ok(false, 'the run did not throw', e && e.stack);
@@ -129,4 +129,4 @@ try {
   try { eng.close(); } catch { }
 }
 console.log(`\n${fail ? '✗' : '✓'} test-vault-masker-once: ${pass} passed, ${fail} failed`);
-if (fail) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${pass}) — ${Math.round(performance.now() - T0)} ms`); process.exit(0); }
+if (fail) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${pass}) — ${Math.round(performance.now() - T0)} ms`); process.exit(0); };import { gateOf } from './lib/check.mjs';

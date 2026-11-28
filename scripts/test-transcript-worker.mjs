@@ -16,7 +16,7 @@ const codex = require('../src/adapters/codex.js');
 const store = require('../src/session-store.js');
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 
 // ── fixture: ~36MB, ~90k lines (above the 34MB head+tail threshold) ──
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tw-'));
@@ -47,10 +47,10 @@ const recs = await codex.readJsonlBoundedParsedAsync(fp, { tailOnly: true, dropS
 const asyncMs = Date.now() - t0;
 clearInterval(probeT);
 
-check('gapInfo returns a real gap (elided file)', gap && gap.totalLines === 90000 && gap.tailStartLine > 0, JSON.stringify(gap));
-check('userTurns found the user lines', Array.isArray(turns) && turns.length === 10000, `got ${turns?.length}`);
-check('lineRange slab parsed', Array.isArray(slab) && slab.length === 2000 && slab[0].uuid === 'u100');
-check('boundedParsed returned tail records', Array.isArray(recs) && recs.length > 1000 && recs[recs.length - 1].uuid === 'u89999', `n=${recs?.length}`);
+check('gapInfo returns a real gap (elided file)', gateOf(gap) && gap.totalLines === 90000 && gap.tailStartLine > 0, JSON.stringify(gap));
+check('userTurns found the user lines', gateOf(Array.isArray(turns)) && turns.length === 10000, `got ${turns?.length}`);
+check('lineRange slab parsed', gateOf(Array.isArray(slab)) && slab.length === 2000 && slab[0].uuid === 'u100');
+check('boundedParsed returned tail records', gateOf(Array.isArray(recs)) && recs.length > 1000 && recs[recs.length - 1].uuid === 'u89999', `n=${recs?.length}`);
 check(`main thread never blocked >150ms during worker calls (max ${maxBlock}ms, total ${asyncMs}ms)`, maxBlock < 150, `maxBlock=${maxBlock}ms`);
 
 // ── parity vs sync originals ──
@@ -94,4 +94,4 @@ try {
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { gateOf } from './lib/check.mjs';

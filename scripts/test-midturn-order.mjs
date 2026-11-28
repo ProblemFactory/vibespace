@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
 const S = JSON.stringify;
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 /** A section that THROWS (an older tree has no such method) is one red line naming it — the sections after it still run. */
@@ -156,7 +156,7 @@ await guard('§6', () => {
   const moves = ops.filter((x) => x.op === 'move');
   const bId = mm.messages.find((m) => m.webuiMsgId === 'm-b')?.id;
   const at = mm.messages.indexOf(mm.get(bId));
-  ok(moves.length === 1 && moves[0].id === bId && moves[0].before === mm.messages[at + 1].id && moves[0].from === mm.messages.length - 1 && moves[0].to === at && /^\[Request interrupted by user\]/.test(textOf(mm.messages[at + 1])), 'ONE move op says it: {id, before, from, to} — from the tail (its last index) back to just above the interrupt row', { moves, at, n: mm.messages.length });
+  ok(moves.length === 1 && moves[0].id === bId && moves[0].before === mm.messages[at + 1].id && moves[0].from === mm.messages.length - 1 && moves[0].to === at && verdictOf(/^\[Request interrupted by user\]/.test(textOf(mm.messages[at + 1]))), 'ONE move op says it: {id, before, from, to} — from the tail (its last index) back to just above the interrupt row', { moves, at, n: mm.messages.length });
 });
 
 // ── §7 LIVE = REBUILD ──
@@ -172,9 +172,9 @@ await guard('§7', () => {
   const mm = createMessageManager('claude', 'mo-rebuild');
   mm.convertHistory(recs);
   const below = (o) => o.indexOf('B[kept]') > o.lastIndexOf('i2') && o.lastIndexOf('i2') > o.indexOf('i1');
-  ok(S(order(mm)) === S(shotLive) && below(order(mm)), 'the rebuild draws the live order — the kept message below both interrupt rows, ONE bubble (its copy, claimed by the CLI\'s record, never a second)', { rebuild: order(mm), live: shotLive });
+  ok(S(order(mm)) === S(shotLive) && verdictOf(below(order(mm))), 'the rebuild draws the live order — the kept message below both interrupt rows, ONE bubble (its copy, claimed by the CLI\'s record, never a second)', { rebuild: order(mm), live: shotLive });
   const viaAsync = createMessageManager('claude', 'mo-rebuild-a');
-  return viaAsync.convertHistoryAsync(recs, { budgetMs: 1e9 }).then(() => ok(S(order(viaAsync)) === S(shotLive) && below(order(viaAsync)), '…and the time-sliced rebuild (convertHistoryAsync) the same', order(viaAsync)));
+  return viaAsync.convertHistoryAsync(recs, { budgetMs: 1e9 }).then(() => ok(S(order(viaAsync)) === S(shotLive) && verdictOf(below(order(viaAsync))), '…and the time-sliced rebuild (convertHistoryAsync) the same', order(viaAsync)));
 });
 
 // ── §8 THE OPS SAY WHERE ──
@@ -194,15 +194,15 @@ await guard('§8', () => {
     const { mm, ops } = live(recs, 'mo-ops');
     ok(S(replay(ops)) === S(mm.messages.map((m) => m.id)), `${name}: the client's replay of the live ops = the server's list, card for card`, { client: replay(ops), server: mm.messages.map((m) => m.id) });
     const creates = ops.filter((x) => x.op === 'create' && x.before);
-    ok(creates.every((x) => typeof x.at === 'number' && x.at >= 0) && creates.length > 0, `${name}: each create placed above an afloat message carries {before, at}`, creates.map((x) => ({ before: x.before, at: x.at })));
+    ok(gateOf(creates.every((x) => typeof x.at === 'number' && x.at >= 0)) && creates.length > 0, `${name}: each create placed above an afloat message carries {before, at}`, creates.map((x) => ({ before: x.before, at: x.at })));
   }
   const cv = read('src/lib/chat-view.js');
-  ok(/import \{ moveVerdict \} from '\.\.\/queue-chips\.js';/.test(cv) && /\} else if \(op\.op === 'move'\) \{\n\s+this\._onMoveMessage\(op\);/.test(cv) && /this\._onCreateMessage\(op\.message, op\.before \? op : null\);/.test(cv),
+  ok(gateOf(/import \{ moveVerdict \} from '\.\.\/queue-chips\.js';/.test(cv)) && gateOf(/\} else if \(op\.op === 'move'\) \{\n\s+this\._onMoveMessage\(op\);/.test(cv)) && verdictOf(/this\._onCreateMessage\(op\.message, op\.before \? op : null\);/.test(cv)),
     'chat-view routes `move` to _onMoveMessage and hands a create its {before, at}; the window rule is the PURE moveVerdict');
-  ok(/if \(beforeIdx >= 0 && beforeEl\.parentNode === this\._messageList\) this\._messageList\.insertBefore\(el, beforeEl\); else this\._messageList\.appendChild\(el\);/.test(cv) && /_reorderStale\(why\) \{[\s\S]{0,200}this\._seqPoisoned = true;[\s\S]{0,120}this\._reattach\(\);/.test(cv)
-    && /if \(this\._teleported\) \{ this\._moveInSlab\(op\); return; \}/.test(cv) && /if \(w\.kind === 'leave'\) \{/.test(cv) && /if \(w\.kind === 'enter'\) \{/.test(cv),
+  ok(gateOf(/if \(beforeIdx >= 0 && beforeEl\.parentNode === this\._messageList\) this\._messageList\.insertBefore\(el, beforeEl\); else this\._messageList\.appendChild\(el\);/.test(cv)) && gateOf(/_reorderStale\(why\) \{[\s\S]{0,200}this\._seqPoisoned = true;[\s\S]{0,120}this\._reattach\(\);/.test(cv))
+    && gateOf(/if \(this\._teleported\) \{ this\._moveInSlab\(op\); return; \}/.test(cv)) && gateOf(/if \(w\.kind === 'leave'\) \{/.test(cv)) && verdictOf(/if \(w\.kind === 'enter'\) \{/.test(cv)),
     '…inserts before the named card; a move is judged by moveVerdict (leave / enter drawn from the op\'s own card), a teleported slab by the ids it holds — the re-read is only for a malformed op, never a guessed position');
-  ok(/messages\.every\(\(m, i\) => this\._messages\[i\]\?\.id === m\?\.id\)/.test(cv), 'the reconnect no-op compares the WHOLE order (a card moved inside the slab is another slab)');
+  ok(verdictOf(/messages\.every\(\(m, i\) => this\._messages\[i\]\?\.id === m\?\.id\)/.test(cv)), 'the reconnect no-op compares the WHOLE order (a card moved inside the slab is another slab)');
 });
 
 // ── §9 NOTHING ELSE MOVES ──
@@ -218,18 +218,18 @@ await guard('§9', () => {
   mm.processLive(R.result(false));
   mm.processLive({ type: 'system', subtype: 'turn_duration', duration_ms: 1234, message_count: 3 });
   const said = mm.messages.find((m) => m.role === 'assistant');
-  ok(said && said.meta && said.meta.turn && said.meta.turn.durationMs === 1234, 'the result\'s turn meta reaches the turn\'s cards across an afloat message', said && said.meta);
+  ok(gateOf(said) && gateOf(said.meta) && gateOf(said.meta.turn) && said.meta.turn.durationMs === 1234, 'the result\'s turn meta reaches the turn\'s cards across an afloat message', said && said.meta);
   // codex / acp keep their place rules: their normalizers never float a bubble
   for (const h of ['codex', 'opencode']) {
     let m = null; try { m = createMessageManager(h, 'mo-' + h); } catch { m = null; }
-    ok(m && Array.isArray(m._afloat) && m._afloat.length === 0 && typeof m._place === 'function', `${h}: the base placement exists and stays idle (no harness but claude floats a message)`);
+    ok(gateOf(m) && gateOf(Array.isArray(m._afloat)) && m._afloat.length === 0 && typeof m._place === 'function', `${h}: the base placement exists and stays idle (no harness but claude floats a message)`);
   }
   // THE CENSUS: every card writer places through `_place` — no bare push below the afloat block
   const pushes = (f) => (read(f).match(/messages\.push\(/g) || []).length;
   const mw = read('src/message-window.js'), nz = read('src/normalizers.js');
-  ok(pushes('src/message-manager.js') === 0 && pushes('src/message-window.js') === 3 && /_place\(msg, \{ afloat = false, startsTurn = false \} = \{\}\) \{\n\s+const f = this\._afloat;\n\s+if \(afloat\) \{ this\.messages\.push\(msg\);/.test(mw)
-    && /if \(b >= 0\) this\.messages\.splice\(b, 0, msg\); else this\.messages\.push\(msg\);/.test(mw)
-    && (nz.match(/mm\.messages\.push\(/g) || []).length === 1 && /const placeIn = \(mm, msg\) => \{ if \(typeof mm\._place === 'function'\) mm\._place\(msg\); else mm\.messages\.push\(msg\); \};/.test(nz),
+  ok(pushes('src/message-manager.js') === 0 && pushes('src/message-window.js') === 3 && gateOf(/_place\(msg, \{ afloat = false, startsTurn = false \} = \{\}\) \{\n\s+const f = this\._afloat;\n\s+if \(afloat\) \{ this\.messages\.push\(msg\);/.test(mw))
+    && gateOf(/if \(b >= 0\) this\.messages\.splice\(b, 0, msg\); else this\.messages\.push\(msg\);/.test(mw))
+    && (nz.match(/mm\.messages\.push\(/g) || []).length === 1 && verdictOf(/const placeIn = \(mm, msg\) => \{ if \(typeof mm\._place === 'function'\) mm\._place\(msg\); else mm\.messages\.push\(msg\); \};/.test(nz)),
     'every card writer places through _place: message-manager pushes nothing, message-window only inside _place (and _moveBefore re-placing a card it holds), the normalizers\' card placers through placeIn', { mm: pushes('src/message-manager.js'), mw: pushes('src/message-window.js') });
 });
 
@@ -239,9 +239,9 @@ await guard('§10', () => {
   const rend = read('src/lib/chat-renderers.js'), zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const L = 'Unread when stopped — goes with your next message';
   const T = 'Stop came before the agent read it. It stays in the conversation and reaches the agent with the next message it gets — yours, or a notice that wakes it — so there is no need to send it again';
-  ok(rend.includes(`state === 'kept' ? t('${L}')`) && rend.includes(`state === 'kept' ? t('${T}')`) && !rend.includes("t('Stays with the stopped turn')"), 'the label says the agent had not read it and where it goes; the title says when it arrives and that nothing needs resending', L);
+  ok(gateOf(rend.includes(`state === 'kept' ? t('${L}')`)) && gateOf(rend.includes(`state === 'kept' ? t('${T}')`)) && !rend.includes("t('Stays with the stopped turn')"), 'the label says the agent had not read it and where it goes; the title says when it arrives and that nothing needs resending', L);
   const zhL = new RegExp(`\\n  "${L}": "停止时未读 · 随你的下一条消息送达",`), jaL = new RegExp(`\\n  "${L}": "停止時は未読 · 次のメッセージと一緒に届きます",`);
-  ok(zhL.test(zh) && jaL.test(ja) && zh.includes(`"${T}": "停止先于 agent 读到它。`) && ja.includes(`"${T}": "エージェントが読む前に停止しました。`), 'zh + ja carry both new keys (the label and the title)');
+  ok(gateOf(zhL.test(zh)) && gateOf(jaL.test(ja)) && gateOf(zh.includes(`"${T}": "停止先于 agent 读到它。`)) && verdictOf(ja.includes(`"${T}": "エージェントが読む前に停止しました。`)), 'zh + ja carry both new keys (the label and the title)');
   ok(!zh.includes('"Stays with the stopped turn"') && !ja.includes('"Stays with the stopped turn"'), 'the retired label left both dictionaries');
 });
 
@@ -266,9 +266,9 @@ await guard('§11 M2', () => {
   const { mm, ops } = live(recs, 'mo-m2');
   const said = mm.messages.filter((m) => m.role === 'assistant').map((m) => [textOf(m).slice(0, 12), m.status]);
   const completes = ops.filter((o) => o.op === 'edit' && o.fields && o.fields.status === 'complete' && mm.get(o.id)?.role === 'assistant').length;
-  ok(said.length === 2 && said.every(([, st]) => st === 'complete') && completes === 2, 'M2 a text card created while a message is afloat ends \'complete\' — the streaming finalize never stops at the afloat bubble (2 status edits sent)', { said, completes });
+  ok(said.length === 2 && gateOf(said.every(([, st]) => st === 'complete')) && completes === 2, 'M2 a text card created while a message is afloat ends \'complete\' — the streaming finalize never stops at the afloat bubble (2 status edits sent)', { said, completes });
   const rb = createMessageManager('claude', 'mo-m2-rb'); rb.convertHistory(recs);
-  ok(rb.messages.filter((m) => m.role === 'assistant').every((m) => m.status === 'complete'), '…and the rebuild\'s text cards are complete too', rb.messages.filter((m) => m.role === 'assistant').map((m) => m.status));
+  ok(verdictOf(rb.messages.filter((m) => m.role === 'assistant').every((m) => m.status === 'complete')), '…and the rebuild\'s text cards are complete too', rb.messages.filter((m) => m.role === 'assistant').map((m) => m.status));
 });
 await guard('§11 F3', () => {
   // the person's message keeps its own turn in the minimap / TOC (the server's turnMap = what a reload draws)
@@ -283,14 +283,14 @@ await guard('§11 F3', () => {
     ok(S(userTurns(mm)) === S(['A', 'B']) && S(userTurns(rb)) === S(['A', 'B']), `F3 ${name}: the minimap / TOC keep the person's message as its own turn — live and rebuilt (a card placed above it belongs to the running turn)`, { live: userTurns(mm), rebuild: userTurns(rb) });
   }
   const cvm = read('src/lib/chat-minimap.js');
-  ok(/shiftFrom\(at\) \{/.test(cvm) && /moveCard\(from, to\) \{[\s\S]{0,300}movedIndex\(t\.startIdx, from, to\)/.test(cvm) && /insertTurn\(turn, total\) \{/.test(cvm)
-    && /this\._chatMinimap\?\.moveCard\?\.\(from, to\);/.test(read('src/lib/chat-view.js')) && /if \(beforeIdx >= 0\) this\._chatMinimap\?\.shiftFrom\?\.\(this\._windowStart \+ beforeIdx\);/.test(read('src/lib/chat-view.js')),
+  ok(gateOf(/shiftFrom\(at\) \{/.test(cvm)) && gateOf(/moveCard\(from, to\) \{[\s\S]{0,300}movedIndex\(t\.startIdx, from, to\)/.test(cvm)) && gateOf(/insertTurn\(turn, total\) \{/.test(cvm))
+    && gateOf(/this\._chatMinimap\?\.moveCard\?\.\(from, to\);/.test(read('src/lib/chat-view.js'))) && verdictOf(/if \(beforeIdx >= 0\) this\._chatMinimap\?\.shiftFrom\?\.\(this\._windowStart \+ beforeIdx\);/.test(read('src/lib/chat-view.js'))),
     'F3 live: a marker follows its card — an insert above shifts the markers below it, a move carries the marker (movedIndex), a user card inserted above later turns takes its place (the browser leg measures it)');
 });
 await guard('§11 m5', () => {
   const cv = read('src/lib/chat-view.js'), zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const K = '{k} message(s) unread when stopped — they go with your next message';
-  ok(cv.includes(`t('${K}', { k: op.kept })`) && zh.includes(`"${K}": "{k} 条消息停止时未读 · 随你的下一条消息送达",`) && ja.includes(`"${K}": "{k} 件のメッセージは停止時に未読 · 次のメッセージと一緒に届きます",`) && ![cv, zh, ja].some((x) => x.includes('you sent into the turn stay with it')),
+  ok(gateOf(cv.includes(`t('${K}', { k: op.kept })`)) && gateOf(zh.includes(`"${K}": "{k} 条消息停止时未读 · 随你的下一条消息送达",`)) && gateOf(ja.includes(`"${K}": "{k} 件のメッセージは停止時に未読 · 次のメッセージと一緒に届きます",`)) && ![cv, zh, ja].some((x) => x.includes('you sent into the turn stay with it')),
     'm5 Stop\'s toast says what the chip says — unread when stopped, goes with the next message (en / zh / ja); the retired words left every file');
 });
 await guard('§11 m6', () => {
@@ -302,7 +302,7 @@ await guard('§11 m6', () => {
   for (const r of [R.queue(), R.send('A go', 'm-a'), R.running(), R.init(), R.toolUse('toolu_1'), R.send('B held', 'm-b'), R.queueOf('m-b'), R.queued('m-b'), R.toolResult('toolu_1'), R.toolUse('toolu_2'), R.toolResult('toolu_2'), R.said('final answer'), R.result(false)]) { mm.processLive(r); flush(); }
   const missing = mm.messages.filter((m) => (!m.status || m.status === 'complete') && !cur.sent.has(m.id)).map((m) => m.role + ':' + textOf(m).slice(0, 14));
   ok(typeof SM.liveWalk === 'function' && missing.length === 0, 'm6 the live search index sends every card inserted above an afloat message (its cursor never passes the afloat block)', missing);
-  ok(/const walk = M\.liveWalk\(msgs, Math\.min\(cur\.from, msgs\.length\), cur\.sent, Array\.isArray\(mm\._afloat\) \? mm\._afloat\.length : 0, cur\.walked\);/.test(read('src/server/search-index.js')), '…the hub\'s flushLive walks with that rule');
+  ok(verdictOf(/const walk = M\.liveWalk\(msgs, Math\.min\(cur\.from, msgs\.length\), cur\.sent, Array\.isArray\(mm\._afloat\) \? mm\._afloat\.length : 0, cur\.walked\);/.test(read('src/server/search-index.js'))), '…the hub\'s flushLive walks with that rule');
 });
 await guard('§11 m7', () => {
   // a send INSIDE the Stop window (after the stop's first result, before the follow-up's interrupt) — the wrapper HOLDS it
@@ -330,8 +330,8 @@ await guard('§11 r1', () => {
   // the real CLI's interrupted result carries no words (2.1.312 measured: `result` absent on error_during_execution) ⇒ «Interrupted» alone
   const { mm } = live([R.queue(), R.send('A go', 'm-a'), R.running(), R.init(), { type: 'result', subtype: 'error_during_execution', is_error: true, session_id: SID, errors: ['[ede_diagnostic] result_type=user'] }]);
   const row = mm.messages.find((m) => m.role === 'system' && /^Interrupted/.test(textOf(m)));
-  ok(row && textOf(row) === 'Interrupted', 'r1 the interrupted row the real CLI writes reads «Interrupted» alone — it never names a message below it (the stand-in now writes the measured shape)', row && textOf(row));
-  ok(/\.\.\.\(interrupted \? \{\} : \{ result: busy\.text \}\)/.test(read('scripts/fixtures/claude-stand-in-cli.cjs')), '…the stand-in CLI writes the same shape');
+  ok(gateOf(row) && textOf(row) === 'Interrupted', 'r1 the interrupted row the real CLI writes reads «Interrupted» alone — it never names a message below it (the stand-in now writes the measured shape)', row && textOf(row));
+  ok(verdictOf(/\.\.\.\(interrupted \? \{\} : \{ result: busy\.text \}\)/.test(read('scripts/fixtures/claude-stand-in-cli.cjs'))), '…the stand-in CLI writes the same shape');
 });
 
 // ── §12 ROUND 3 (the r2 acceptance of 6c7d4d7ca) ──
@@ -393,8 +393,8 @@ await guard('§13 m13', () => {
   flush();
   for (let k = 0; k < 3; k++) { msgs.push({ id: 'new' + k, role: 'assistant', status: 'complete', content: [{ type: 'text', text: 'new ' + k }] }); flush(); }
   ok(S(walkedPerFlush) === S([12000, 1, 1, 1]) && S(indexed) === S(['new0', 'new1', 'new2']) && dropped === 12000, 'm13 after one capped (dropped) flush, each next flush walks only the card placed since — 3/3 new cards indexed; the dropped batch waits for the backfill, never re-walked and re-dropped at every flush', { walkedPerFlush, indexed, dropped });
-  ok(/cur\.walked\.add\(id\)/.test(read('src/server/search-index.js')) && /walked: new Set\(\)/.test(read('src/server/search-index.js')), '…and the hub\'s flushLive keeps that walked set (a dropped batch leaves `sent`, never `walked`)');
+  ok(gateOf(/cur\.walked\.add\(id\)/.test(read('src/server/search-index.js'))) && verdictOf(/walked: new Set\(\)/.test(read('src/server/search-index.js'))), '…and the hub\'s flushLive keeps that walked set (a dropped batch leaves `sent`, never `walked`)');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

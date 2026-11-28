@@ -34,7 +34,7 @@ process.env.VIBESPACE_AGENTD_ROOT = AGENTD_ROOT;
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const version = require('../package.json').version;
@@ -89,7 +89,7 @@ console.log('— T3 a real HTTP request through the tunnel (the /dav shape) —'
     });
     req.on('error', reject); req.end();
   });
-  check('WebDAV PROPFIND rode the tunnel (207 + body)', body.status === 207 && body.b.includes('PROPFIND /dav/x'), JSON.stringify(body));
+  check('WebDAV PROPFIND rode the tunnel (207 + body)', body.status === 207 && verdictOf(body.b.includes('PROPFIND /dav/x')), JSON.stringify(body));
   await dm.reverseUnforward(port);
   httpSrv.close();
 }
@@ -107,7 +107,7 @@ console.log('— T4 link drop: port stays bound, reconnect re-owns it in place �
   let got = '';
   c.on('data', (d) => { got += d; });
   const ok = await new Promise((r) => { c.on('connect', () => r(true)); c.on('error', () => r(false)); });
-  check('device port SURVIVED the drop (still accepts)', ok, '');
+  check('device port SURVIVED the drop (still accepts)', verdictOf(ok), '');
   c.write('after-reconnect');
   await sleep(500);
   check('re-owned tunnel round-trips to the local target', got === 'R:after-reconnect', JSON.stringify(got));
@@ -145,7 +145,7 @@ console.log('— T6 reverseUnforward frees the device port —');
   await dm.reverseUnforward(devPort);
   await sleep(300);
   const refused = await new Promise((r) => { const c = net.connect(devPort, '127.0.0.1'); c.on('connect', () => { c.destroy(); r(false); }); c.on('error', () => r(true)); });
-  check('device port refused after unforward', refused, '');
+  check('device port refused after unforward', verdictOf(refused), '');
 }
 
 endDaemonsAndWait(AGENTD_ROOT);
@@ -154,4 +154,4 @@ localEcho.close();
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall tunnel (reverse-forward) tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf } from './lib/check.mjs';

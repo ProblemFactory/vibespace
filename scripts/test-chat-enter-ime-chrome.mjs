@@ -25,7 +25,7 @@ import { ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.on('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 
@@ -128,17 +128,17 @@ try {
 
   // B-4d28 r2 (the adversarial read): the replay steps Date.now — if the guard's clock moves (performance.now, the event's
   // timeStamp), the replay must move with it; said here by name, never as a send the legs below would misread
-  ok(`the guard's clock is Date.now (EnterGuard's default \`now\`) and its window is IME_COMMIT_BURST_MS = ${BURST} ms — the clock and the window this replay drives`, GUARD_ON_DATE_NOW && BURST > 20 && BURST < 150, { GUARD_ON_DATE_NOW, BURST });
+  ok(`the guard's clock is Date.now (EnterGuard's default \`now\`) and its window is IME_COMMIT_BURST_MS = ${BURST} ms — the clock and the window this replay drives`, gateOf(GUARD_ON_DATE_NOW) && BURST > 20 && BURST < 150, { GUARD_ON_DATE_NOW, BURST });
   ok('a real ChatInput mounts and its textarea holds the focus', await mount('/real') === true);
   let s = await commit(20);
-  ok('the replay went through the IME path: compositionstart → the IME\'s Enter keydown → compositionend → a plain Enter keydown', /compositionstart.*keydown:Enter.*compositionend.*keydown:Enter$/.test(s.ev.join(' ')), s.ev);
+  ok('the replay went through the IME path: compositionstart → the IME\'s Enter keydown → compositionend → a plain Enter keydown', verdictOf(/compositionstart.*keydown:Enter.*compositionend.*keydown:Enter$/.test(s.ev.join(' '))), s.ev);
   // the verdict's follow-up (B-4d28): the runner's own delivery is still SEEN — printed, and under a loose ceiling (a page or a
   // guard made slow by a second must go red somewhere; the burst itself is judged on the page's clock, below)
-  ok(`the runner delivered the replay's plain Enter within a second of its commit (real gap ${s.gap} ms — a loose ceiling, the load is not judged)`, Number.isFinite(s.gap) && s.gap < 1000, { realGap: s.gap });
+  ok(`the runner delivered the replay's plain Enter within a second of its commit (real gap ${s.gap} ms — a loose ceiling, the load is not judged)`, gateOf(Number.isFinite(s.gap)) && s.gap < 1000, { realGap: s.gap });
   ok(`the replay's precondition: on the page's own clock the plain Enter came ${s.clkGap} ms after compositionend — the leg's 20 ms, inside IME_COMMIT_BURST_MS = ${BURST} ms (the runner's real gap ${s.gap} ms is told, not judged)`, BURST > 20 && s.clkGap === 20, { clkGap: s.clkGap, burst: BURST, realGap: s.gap });
   ok('THE OWNER\'S SEQUENCE: a plain Enter 20 ms after an Enter-committed word does NOT send', s.sent.length === 0, s);
   ok('…and adds no newline (the committing Enter does nothing visible)', s.value === 'hello', s.value);
-  ok('…and the line under the composer says so', s.hint && /Input method just ended/.test(s.hintText), s);
+  ok('…and the line under the composer says so', gateOf(s.hint) && verdictOf(/Input method just ended/.test(s.hintText)), s);
   await sleep(2150);
   s = await state();
   ok('the line hides after 2 s', !s.hint, s);
@@ -148,7 +148,7 @@ try {
 
   await mount('/real');
   s = await commit(20, { lateMs: 120 });
-  ok(`B-4d28 the same 20 ms burst delivered 120 ms late in real time (a loaded runner's CDP; real gap ${s.gap} ms) ⇒ still NOT sent, the line shown — the guard judges the page's clock (${s.clkGap} ms), so the replay cannot be raced`, s.clkGap === 20 && s.gap >= BURST && s.sent.length === 0 && s.value === 'hello' && s.hint, s);
+  ok(`B-4d28 the same 20 ms burst delivered 120 ms late in real time (a loaded runner's CDP; real gap ${s.gap} ms) ⇒ still NOT sent, the line shown — the guard judges the page's clock (${s.clkGap} ms), so the replay cannot be raced`, s.clkGap === 20 && s.gap >= BURST && s.sent.length === 0 && s.value === 'hello' && verdictOf(s.hint), s);
 
   await mount('/real');
   s = await commit(150);
@@ -163,7 +163,7 @@ try {
   s = await state();
   ok('…and Ctrl+Enter sends', s.sent.length === 1 && s.sent[0] === 'draft', s.sent);
   const hint = await evaljs(`(() => { window.__ci.showTyping('thinking...'); const h = document.querySelector('.chat-send-hint'); return { shown: !h.classList.contains('hidden'), text: h.textContent }; })()`);
-  ok('…mid-turn the send-mode line names the send key ("Ctrl+Enter sends")', hint.shown && /Ctrl\+Enter sends/.test(hint.text), hint);
+  ok('…mid-turn the send-mode line names the send key ("Ctrl+Enter sends")', gateOf(hint.shown) && verdictOf(/Ctrl\+Enter sends/.test(hint.text)), hint);
 
   await mount('/mut-r1');
   s = await commit(20);
@@ -181,4 +181,4 @@ try {
 await sleep(300);
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

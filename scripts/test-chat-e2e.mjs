@@ -94,7 +94,7 @@ const swept = [];
 }
 // <<< real-home sweep
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + String(e).slice(0, 300) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + String(e).slice(0, 300) : ''}`); } };
 // B-5a57 cure: a SKIP is not a green — each is COUNTED and said in the closing line, which never reads ALL PASS over one
 let skipped = 0;
 const skip = (m) => { skipped++; console.log('  ⚠ SKIP: ' + m); };
@@ -128,7 +128,7 @@ const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...V
 // below threw an unhandled ECONNREFUSED at 18 s). 120 s is a floor (hub.ready's
 // own); a server that never answers is a LOUD fail naming the wait, never a stack trace.
 const booted = await hub.ready();
-check(`worktree server answered /api/home within the boot budget (${booted ? 'yes' : 'NO — 120 s elapsed'})`, booted);
+check(`worktree server answered /api/home within the boot budget (${booted ? 'yes' : 'NO — 120 s elapsed'})`, verdictOf(booted));
 if (!booted) console.log(hub.log().slice(-2000));
 if (!booted) { console.log('FAIL'); process.exit(1); }
 
@@ -136,7 +136,7 @@ const WebSocket = require('ws');
 const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 // a refused/dropped socket is an ASSERT with a reason, not an unhandled 'error' event
 const wsOpened = await new Promise((r) => { ws.once('open', () => r(true)); ws.once('error', (e) => { console.log('  ws error: ' + (e && e.message)); r(false); }); });
-check('websocket connected to the worktree server', wsOpened);
+check('websocket connected to the worktree server', verdictOf(wsOpened));
 if (!wsOpened) { console.log('FAIL'); process.exit(1); }
 const frames = [];
 ws.on('message', (d) => { const s = d.toString(); frames.push(s); });
@@ -188,7 +188,7 @@ for (let i = 0; i < 30 && !settled; i++) {
   } catch { }
   if (!settled) await sleep(1000);
 }
-check('turn settles (result record processed, not stuck streaming)', settled);
+check('turn settles (result record processed, not stuck streaming)', verdictOf(settled));
 
 // billing identity really was the oat account (badge path)
 try {
@@ -274,8 +274,8 @@ await sleep(1500);
   const iso = path.join(fakeHome, '.claude', 'projects');
   const isoDirs = (() => { try { return fs.readdirSync(iso); } catch { return []; } })();
   check(`the real turn's transcript landed under the ISOLATED home (${isoDirs.length} project dir(s))`,
-    isoDirs.includes(cwdToProjectDir(cwd)), JSON.stringify(isoDirs.slice(0, 3)));
+    verdictOf(isoDirs.includes(cwdToProjectDir(cwd))), JSON.stringify(isoDirs.slice(0, 3)));
 }
 ws.close();
 console.log(failed ? `\n${failed} FAILED${skipped ? ` · ${skipped} SKIPPED` : ''}` : skipped ? `\n${skipped} SKIPPED — not a pass: what each skip names was not proven` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

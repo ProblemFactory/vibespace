@@ -50,7 +50,7 @@ const MUTW = mutantCopies('wm-minsize', repo);
 
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -86,20 +86,20 @@ const MS = await import('../src/lib/window-min-size.js');
 
 console.log('§1 the PURE rule (src/lib/window-min-size.js)');
 {
-  ok(same(MS.WINDOW_FLOOR, { w: 320, h: 180 }) && /\.window \{[^}]*min-width: 320px; min-height: 180px;/.test(read('public/style.css')), 'the floor IS the .window CSS minimum (320×180 — the rule the terminal lives by)');
-  ok(same(MS.minOf({}), { w: 320, h: 180 }) && same(MS.minOf({ minWidth: 100, minHeight: 90 }), { w: 320, h: 180 }) && same(MS.minOf({ minWidth: 402.2, minHeight: 700 }), { w: 403, h: 700 }), 'minOf: a window\'s own minimum, never below the floor, whole px up');
+  ok(gateOf(same(MS.WINDOW_FLOOR, { w: 320, h: 180 })) && verdictOf(/\.window \{[^}]*min-width: 320px; min-height: 180px;/.test(read('public/style.css'))), 'the floor IS the .window CSS minimum (320×180 — the rule the terminal lives by)');
+  ok(gateOf(same(MS.minOf({}), { w: 320, h: 180 })) && gateOf(same(MS.minOf({ minWidth: 100, minHeight: 90 }), { w: 320, h: 180 })) && verdictOf(same(MS.minOf({ minWidth: 402.2, minHeight: 700 }), { w: 403, h: 700 })), 'minOf: a window\'s own minimum, never below the floor, whole px up');
   const min = { w: 400, h: 700 };
-  ok(same(MS.clampToMin({ left: 100, top: 50, width: 300, height: 500 }, 'se', min), { left: 100, top: 50, width: 400, height: 700 }), 'an se drag past the minimum stops there (the top-left stays)');
-  ok(same(MS.clampToMin({ left: 250, top: 250, width: 250, height: 500 }, 'nw', min), { left: 100, top: 50, width: 400, height: 700 }), 'an nw drag past the minimum: the RIGHT and BOTTOM edges stay where they were (right 500, bottom 750) — the window never slides');
-  ok(same(MS.clampToMin({ left: 10, top: 10, width: 800, height: 900 }, 'se', min), { left: 10, top: 10, width: 800, height: 900 }), 'a size above the minimum is untouched');
-  ok(same(MS.raiseToMin({ width: 380, height: 600 }, min), { width: 400, height: 700, raised: true }) && MS.raiseToMin({ width: 900, height: 800 }, min).raised === false, 'raiseToMin: a restored / open size below the minimum is raised to it');
-  ok(same(MS.windowMinForPane({ w: 360, h: 616 }, { w: 2, h: 60 }, 1), { w: 362, h: 676 }), 'windowMinForPane: the app\'s 360×616 pane + the window\'s own chrome (title bar + status strip + borders, 2×60) = 362×676');
-  ok(same(MS.windowMinForPane({ w: 360, h: 616 }, { w: 2, h: 60 }, 1.25), { w: 290, h: 541 }), 'under UI scale 1.25 the chrome + pane are VIEWPORT px ⇒ ÷ 1.25 = layout px (290×541; minOf then applies the floor)');
+  ok(verdictOf(same(MS.clampToMin({ left: 100, top: 50, width: 300, height: 500 }, 'se', min), { left: 100, top: 50, width: 400, height: 700 })), 'an se drag past the minimum stops there (the top-left stays)');
+  ok(verdictOf(same(MS.clampToMin({ left: 250, top: 250, width: 250, height: 500 }, 'nw', min), { left: 100, top: 50, width: 400, height: 700 })), 'an nw drag past the minimum: the RIGHT and BOTTOM edges stay where they were (right 500, bottom 750) — the window never slides');
+  ok(verdictOf(same(MS.clampToMin({ left: 10, top: 10, width: 800, height: 900 }, 'se', min), { left: 10, top: 10, width: 800, height: 900 })), 'a size above the minimum is untouched');
+  ok(gateOf(same(MS.raiseToMin({ width: 380, height: 600 }, min), { width: 400, height: 700, raised: true })) && MS.raiseToMin({ width: 900, height: 800 }, min).raised === false, 'raiseToMin: a restored / open size below the minimum is raised to it');
+  ok(verdictOf(same(MS.windowMinForPane({ w: 360, h: 616 }, { w: 2, h: 60 }, 1), { w: 362, h: 676 })), 'windowMinForPane: the app\'s 360×616 pane + the window\'s own chrome (title bar + status strip + borders, 2×60) = 362×676');
+  ok(verdictOf(same(MS.windowMinForPane({ w: 360, h: 616 }, { w: 2, h: 60 }, 1.25), { w: 290, h: 541 })), 'under UI scale 1.25 the chrome + pane are VIEWPORT px ⇒ ÷ 1.25 = layout px (290×541; minOf then applies the floor)');
   ok(MS.windowMinForPane(null, { w: 2, h: 60 }, 1) === null && MS.windowMinForPane({ w: 0, h: 10 }, {}, 1) === null, 'no content minimum ⇒ no window minimum of its own');
   // r2 (the verifier: a DPR-1 takeover of a 2x calculator asked for a 742x1299 window on an 815 px workspace)
-  ok(same(MS.minOf({ minWidth: 742, minHeight: 1299 }, { w: 1356, h: 815 }), { w: 742, h: 815 }) && same(MS.minOf({ minWidth: 742, minHeight: 1299 }, { w: 1356.6, h: 815.4 }), { w: 742, h: 815 }), 'minOf(win, workspace): a minimum TALLER than the workspace is capped at the workspace (whole px down) — the content then scales');
-  ok(same(MS.minOf({ minWidth: 742, minHeight: 1299 }, { w: 200, h: 100 }), { w: 320, h: 180 }) && same(MS.minOf({ minWidth: 742, minHeight: 1299 }), { w: 742, h: 1299 }) && same(MS.minOf({ minWidth: 742, minHeight: 1299 }, { w: 0, h: 0 }), { w: 742, h: 1299 }), '…never below the .window floor (a tiny workspace), and no cap without a laid-out workspace');
-  ok(same(MS.keepInside({ left: 70, top: 70, width: 742, height: 815 }, { w: 1356, h: 815 }), { left: 70, top: 0, width: 742, height: 815, moved: true }) && MS.keepInside({ left: 10, top: 10, width: 400, height: 300 }, { w: 1356, h: 815 }).moved === false, 'keepInside: a window raised past the workspace edge slides up/left just enough (never resized); one inside is untouched');
+  ok(gateOf(same(MS.minOf({ minWidth: 742, minHeight: 1299 }, { w: 1356, h: 815 }), { w: 742, h: 815 })) && verdictOf(same(MS.minOf({ minWidth: 742, minHeight: 1299 }, { w: 1356.6, h: 815.4 }), { w: 742, h: 815 })), 'minOf(win, workspace): a minimum TALLER than the workspace is capped at the workspace (whole px down) — the content then scales');
+  ok(gateOf(same(MS.minOf({ minWidth: 742, minHeight: 1299 }, { w: 200, h: 100 }), { w: 320, h: 180 })) && gateOf(same(MS.minOf({ minWidth: 742, minHeight: 1299 }), { w: 742, h: 1299 })) && verdictOf(same(MS.minOf({ minWidth: 742, minHeight: 1299 }, { w: 0, h: 0 }), { w: 742, h: 1299 })), '…never below the .window floor (a tiny workspace), and no cap without a laid-out workspace');
+  ok(gateOf(same(MS.keepInside({ left: 70, top: 70, width: 742, height: 815 }, { w: 1356, h: 815 }), { left: 70, top: 0, width: 742, height: 815, moved: true })) && MS.keepInside({ left: 10, top: 10, width: 400, height: 300 }, { w: 1356, h: 815 }).moved === false, 'keepInside: a window raised past the workspace edge slides up/left just enough (never resized); one inside is untouched');
 }
 
 console.log('§2 the REAL WindowManager methods over a fake DOM');
@@ -140,8 +140,8 @@ const run = async (WM, label) => {
   const { WindowManager } = await import('../src/lib/window.js');
   const A = await run(WindowManager, 'shipped');
   ok(A.win.element.style.minWidth === '402px' && A.win.element.style.minHeight === '700px' && A.win.minWidth === 402 && A.win.minHeight === 700, 'setMinSize pins the minimum on the window (winInfo.minWidth/minHeight) AND as the inline min-width/min-height — the one rule every sizing path honours (snap, grid cells, presets, maximize, layout restore)');
-  ok(same(A.se, { left: 100, top: 100, width: 402, height: 700 }), `a resize drag from the SE corner 800 px past it STOPS at the minimum — the cursor overshoots, the window does not (${JSON.stringify(A.se)})`);
-  ok(same(A.nw, { left: 598, top: 200, width: 402, height: 700 }), `from the NW corner the right/bottom edges stay put (right 1000, bottom 900) and the size stops at 402×700 (${JSON.stringify(A.nw)})`);
+  ok(verdictOf(same(A.se, { left: 100, top: 100, width: 402, height: 700 })), `a resize drag from the SE corner 800 px past it STOPS at the minimum — the cursor overshoots, the window does not (${JSON.stringify(A.se)})`);
+  ok(verdictOf(same(A.nw, { left: 598, top: 200, width: 402, height: 700 })), `from the NW corner the right/bottom edges stay put (right 1000, bottom 900) and the size stops at 402×700 (${JSON.stringify(A.nw)})`);
   // an OPEN window below a new minimum is raised now
   const wm = mkWm(WindowManager);
   const w2 = { id: 'w2', element: mkEl(500, 400, 20, 30), onResize() { w2.r = (w2.r || 0) + 1; }, gridBounds: { left: 0, top: 0, width: 0.3, height: 0.4 }, _tabChain: null, isMaximized: false };
@@ -152,7 +152,7 @@ const run = async (WM, label) => {
   wm.setMinSize('w2', { w: 640, h: 700 });
   ok(w2.r === 1 && wm.notified === 1, 'the same minimum again is a no-op (no resize storm from a re-announced constraint)');
   wm.setMinSize('w2', null);
-  ok(w2.element.style.minWidth === '' && w2.minWidth === null && same(MS.minOf(w2), MS.WINDOW_FLOOR), 'null clears the minimum (back to the .window floor)');
+  ok(w2.element.style.minWidth === '' && w2.minWidth === null && verdictOf(same(MS.minOf(w2), MS.WINDOW_FLOOR)), 'null clears the minimum (back to the .window floor)');
   // a MINIMIZED window (display:none ⇒ offset 0) is judged by its inline size, never shrunk to the minimum from a zero reading
   const w4 = { id: 'w4', element: mkEl(900, 800, 0, 0), onResize() { w4.r = 1; }, gridBounds: null, _tabChain: null, isMaximized: false, isMinimized: true };
   Object.defineProperty(w4.element, 'offsetWidth', { get: () => 0 }); Object.defineProperty(w4.element, 'offsetHeight', { get: () => 0 });
@@ -187,7 +187,7 @@ const run = async (WM, label) => {
     ["          ({ left: newL, top: newT, width: newW, height: newH } = clampToMin({ left: newL, top: newT, width: newW, height: newH }, dir, min)); // a grid snap never takes it below", ''],
   ];
   const hits = lines.map(([from]) => src.split(from).length - 1);
-  ok(hits.every((n) => n === 1), `the drag's minimum is spelled once per edge in window.js (the control patches exactly those lines: ${hits.join(', ')})`);
+  ok(verdictOf(hits.every((n) => n === 1)), `the drag's minimum is spelled once per edge in window.js (the control patches exactly those lines: ${hits.join(', ')})`);
   let mut = src; for (const [from, to] of lines) mut = mut.replace(from, to);
   const mutFile = MUTW.write('src/lib/window.js', mut, 'min');
   try {
@@ -211,14 +211,14 @@ const run = async (WM, label) => {
 console.log('§3 wiring pins');
 {
   const wj = read('src/lib/window.js'), css = read('public/style.css'), daw = read('src/lib/desktop-app-window.js'), xv = read('src/lib/xpra-view.js');
-  ok(/import \{ minOf, clampToMin, raiseToMin, keepInside, zoneBox, wholePx, rescaleBox \} from '\.\/window-min-size\.js';/.test(wj) && /const min = this\._ownMinOf\(win\);/.test(wj) && /clampToMin\(\{ left: newL, top: newT, width: newW, height: newH \}, dir, min\)/.test(wj), 'window.js\'s resize drag reads the window\'s minimum through the PURE rule and clamps AFTER the grid snap');
+  ok(gateOf(/import \{ minOf, clampToMin, raiseToMin, keepInside, zoneBox, wholePx, rescaleBox \} from '\.\/window-min-size\.js';/.test(wj)) && gateOf(/const min = this\._ownMinOf\(win\);/.test(wj)) && verdictOf(/clampToMin\(\{ left: newL, top: newT, width: newW, height: newH \}, dir, min\)/.test(wj)), 'window.js\'s resize drag reads the window\'s minimum through the PURE rule and clamps AFTER the grid snap');
   ok(!/Math\.max\(320, new[WH]\)|Math\.max\(180, new[WH]\)/.test(wj), 'no second spelling of the floor in the drag (the old `Math.max(320, newW)` is gone)');
-  ok(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)[\s\S]*?\.window \{[^}]*min-width: 0 !important; min-height: 0 !important;/.test(css), 'the phone layout forces min 0 !important (an inline minimum would push the full-screen window off the phone)');
-  ok(/app\.wm\.setMinSize\(winInfo\.id, min\)/.test(daw) && /windowMinForPane\(minPane, \{ w: er\.width - pr\.width, h: er\.height - pr\.height \}, uiScale\(\)\)/.test(daw) && /onMinSize: applyMinSize/.test(daw), 'desktop-app-window turns the view\'s onMinSize into setMinSize: pane + the window\'s own chrome (viewport rects) under the UI scale');
-  ok(/if \(win\.minWidth \|\| win\.minHeight\) this\._applyOwnMin\(win\);/.test(wj), 'WIRING PIN (r2): the workspace-resize reflow re-applies every own minimum (the cap follows the workspace)');
-  ok(/new ResizeObserver\(scheduleMin\)/.test(daw) && /minRo\?\.observe\(winInfo\.element\); minRo\?\.observe\(winInfo\.titleBar\);/.test(daw) && /for \(const el of \[view\.bar, view\.pane\]\) if \(el && minRo\) minRo\.observe\(el\);/.test(daw) && /window\.addEventListener\('vs:ui-scale', scheduleMin, \{ signal: winInfo\._listenerCtl\?\.signal \}\)/.test(daw) && !/minTries/.test(daw), 'WIRING PIN (r2): the window minimum is RE-MEASURED when the chrome resizes (title bar, status strip), when the window is laid out again (a hidden tab / desktop / minimize — the bounded 20 s retry `minTries` is gone) and when the UI scale changes');
-  ok(/const changed = _uiScaleVal !== s;/.test(read('src/lib/utils.js')) && /if \(changed\) \{ try \{ window\.dispatchEvent\(new CustomEvent\('vs:ui-scale'/.test(read('src/lib/utils.js')), 'WIRING PIN (r2): applyUiPrefs announces a UI-scale CHANGE (`vs:ui-scale`) — the one place the scale is applied');
-  ok(/onMinSize\?\.\(m \? \{ \.\.\.m \} : null\)/.test(xv) && /minPaneCss\(constraints, drawRatio\)/.test(xv), 'the xpra view computes the minimum pane from the main window\'s constraints and the ratio');
+  ok(verdictOf(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)[\s\S]*?\.window \{[^}]*min-width: 0 !important; min-height: 0 !important;/.test(css)), 'the phone layout forces min 0 !important (an inline minimum would push the full-screen window off the phone)');
+  ok(gateOf(/app\.wm\.setMinSize\(winInfo\.id, min\)/.test(daw)) && gateOf(/windowMinForPane\(minPane, \{ w: er\.width - pr\.width, h: er\.height - pr\.height \}, uiScale\(\)\)/.test(daw)) && verdictOf(/onMinSize: applyMinSize/.test(daw)), 'desktop-app-window turns the view\'s onMinSize into setMinSize: pane + the window\'s own chrome (viewport rects) under the UI scale');
+  ok(verdictOf(/if \(win\.minWidth \|\| win\.minHeight\) this\._applyOwnMin\(win\);/.test(wj)), 'WIRING PIN (r2): the workspace-resize reflow re-applies every own minimum (the cap follows the workspace)');
+  ok(gateOf(/new ResizeObserver\(scheduleMin\)/.test(daw)) && gateOf(/minRo\?\.observe\(winInfo\.element\); minRo\?\.observe\(winInfo\.titleBar\);/.test(daw)) && gateOf(/for \(const el of \[view\.bar, view\.pane\]\) if \(el && minRo\) minRo\.observe\(el\);/.test(daw)) && gateOf(/window\.addEventListener\('vs:ui-scale', scheduleMin, \{ signal: winInfo\._listenerCtl\?\.signal \}\)/.test(daw)) && !/minTries/.test(daw), 'WIRING PIN (r2): the window minimum is RE-MEASURED when the chrome resizes (title bar, status strip), when the window is laid out again (a hidden tab / desktop / minimize — the bounded 20 s retry `minTries` is gone) and when the UI scale changes');
+  ok(gateOf(/const changed = _uiScaleVal !== s;/.test(read('src/lib/utils.js'))) && verdictOf(/if \(changed\) \{ try \{ window\.dispatchEvent\(new CustomEvent\('vs:ui-scale'/.test(read('src/lib/utils.js'))), 'WIRING PIN (r2): applyUiPrefs announces a UI-scale CHANGE (`vs:ui-scale`) — the one place the scale is applied');
+  ok(gateOf(/onMinSize\?\.\(m \? \{ \.\.\.m \} : null\)/.test(xv)) && verdictOf(/minPaneCss\(constraints, drawRatio\)/.test(xv)), 'the xpra view computes the minimum pane from the main window\'s constraints and the ratio');
 }
 
 console.log('§4 a zone smaller than the minimum never hangs past the workspace (inc-muhmqvzf-jodk)');
@@ -226,13 +226,13 @@ console.log('§4 a zone smaller than the minimum never hangs past the workspace 
   // ── the PURE rule ──
   const WS = { w: 1450, h: 878 }, CHROME_MIN = { w: 502, h: 154 };
   const zb = (z, m, ws, g) => { const r = MS.zoneBox(z, m, ws, g); return { left: r.left, top: r.top, width: r.width, height: r.height, moved: r.moved, raised: r.raised }; };
-  ok(same(zb({ left: 968, top: 4, width: 478, height: 870 }, CHROME_MIN, WS, 4), { left: 944, top: 4, width: 502, height: 870, moved: true, raised: true }), 'zoneBox: the owner\'s right third of a 1×3 grid on a 1450 px workspace (478 px cell, 502 px minimum) — raised to 502 and slid left to end at the cell\'s edge (944 + 502 = 1446, the 4 px gutter kept), never 968 + 502 = 1470');
-  ok(same(zb({ left: 4, top: 4, width: 478, height: 870 }, CHROME_MIN, WS, 4), { left: 4, top: 4, width: 502, height: 870, moved: false, raised: true }), '…the FIRST cell grows into its neighbour and stays where it is (the overlap the law always allowed)');
-  ok(same(zb({ left: 4, top: 441, width: 1442, height: 433 }, { w: 362, h: 618 }, WS, 4), { left: 4, top: 256, width: 1442, height: 618, moved: true, raised: true }), 'zoneBox: the calculator\'s bottom half (433 px zone, 618 px minimum) slides UP to end at 874, never 441 + 618 = 1059');
-  ok(same(zb({ left: 200, top: 100, width: 600, height: 400 }, CHROME_MIN, WS, 4), { left: 200, top: 100, width: 600, height: 400, moved: false, raised: false }), 'a zone above the minimum is untouched');
-  ok(same(zb({ left: 1305, top: 88, width: 435, height: 263 }, { w: 320, h: 180 }, WS, 4), { left: 1305, top: 88, width: 435, height: 263, moved: false, raised: false }) && same(zb({ left: 1305, top: 88, width: 435, height: 263 }, CHROME_MIN, WS, 4), { left: 1238, top: 88, width: 502, height: 263, moved: true, raised: true }), 'a zone the PERSON left hanging off the edge: never moved without a raised minimum, and with one it keeps ITS right edge (1740) — the minimum never adds a crop');
-  ok(same(zb({ left: 100, top: 0, width: 300, height: 100 }, { w: 1600, h: 100 }, WS, 4), { left: 0, top: 0, width: 1600, height: 100, moved: true, raised: true }) && same(zb({ left: -50, top: 0, width: 400, height: 100 }, { w: 600, h: 100 }, WS, 4), { left: -50, top: 0, width: 600, height: 100, moved: false, raised: true }), 'never slid past the workspace\'s own left edge (a box wider than the room stops at 0); a zone already left of it is not pushed further');
-  ok(same(zb({ left: 968, top: 4, width: 478, height: 870 }, CHROME_MIN, null, 4), { left: 968, top: 4, width: 502, height: 870, moved: false, raised: true }), 'no laid-out workspace ⇒ the raised size, no slide');
+  ok(verdictOf(same(zb({ left: 968, top: 4, width: 478, height: 870 }, CHROME_MIN, WS, 4), { left: 944, top: 4, width: 502, height: 870, moved: true, raised: true })), 'zoneBox: the owner\'s right third of a 1×3 grid on a 1450 px workspace (478 px cell, 502 px minimum) — raised to 502 and slid left to end at the cell\'s edge (944 + 502 = 1446, the 4 px gutter kept), never 968 + 502 = 1470');
+  ok(verdictOf(same(zb({ left: 4, top: 4, width: 478, height: 870 }, CHROME_MIN, WS, 4), { left: 4, top: 4, width: 502, height: 870, moved: false, raised: true })), '…the FIRST cell grows into its neighbour and stays where it is (the overlap the law always allowed)');
+  ok(verdictOf(same(zb({ left: 4, top: 441, width: 1442, height: 433 }, { w: 362, h: 618 }, WS, 4), { left: 4, top: 256, width: 1442, height: 618, moved: true, raised: true })), 'zoneBox: the calculator\'s bottom half (433 px zone, 618 px minimum) slides UP to end at 874, never 441 + 618 = 1059');
+  ok(verdictOf(same(zb({ left: 200, top: 100, width: 600, height: 400 }, CHROME_MIN, WS, 4), { left: 200, top: 100, width: 600, height: 400, moved: false, raised: false })), 'a zone above the minimum is untouched');
+  ok(gateOf(same(zb({ left: 1305, top: 88, width: 435, height: 263 }, { w: 320, h: 180 }, WS, 4), { left: 1305, top: 88, width: 435, height: 263, moved: false, raised: false })) && verdictOf(same(zb({ left: 1305, top: 88, width: 435, height: 263 }, CHROME_MIN, WS, 4), { left: 1238, top: 88, width: 502, height: 263, moved: true, raised: true })), 'a zone the PERSON left hanging off the edge: never moved without a raised minimum, and with one it keeps ITS right edge (1740) — the minimum never adds a crop');
+  ok(gateOf(same(zb({ left: 100, top: 0, width: 300, height: 100 }, { w: 1600, h: 100 }, WS, 4), { left: 0, top: 0, width: 1600, height: 100, moved: true, raised: true })) && verdictOf(same(zb({ left: -50, top: 0, width: 400, height: 100 }, { w: 600, h: 100 }, WS, 4), { left: -50, top: 0, width: 600, height: 100, moved: false, raised: true })), 'never slid past the workspace\'s own left edge (a box wider than the room stops at 0); a zone already left of it is not pushed further');
+  ok(verdictOf(same(zb({ left: 968, top: 4, width: 478, height: 870 }, CHROME_MIN, null, 4), { left: 968, top: 4, width: 502, height: 870, moved: false, raised: true })), 'no laid-out workspace ⇒ the raised size, no slide');
 
   // ── the REAL WindowManager paths, the owner's workspace (1450×878 layout px: a 1920 px viewport, the sidebar at 470) ──
   const pathsOn = async (WM) => {
@@ -279,16 +279,16 @@ console.log('§4 a zone smaller than the minimum never hangs past the workspace 
   const { WindowManager } = await import('../src/lib/window.js');
   const A = await pathsOn(WindowManager);
   await sleep(300); // the snap paths' own 220 ms timers
-  ok(inside(A.cell) && A.cell.l === 944 && A.cell.w === 502 && A.cell.r === 1446, `THE OWNER'S CASE: Chrome (minimum 502) snapped into the right cell of a 1×3 grid on a 1450 px workspace ends at ${A.cell.r} ≤ 1450 (left ${A.cell.l}, the pre-fix 968 hung 20 px past the edge)`, A.cell);
+  ok(gateOf(inside(A.cell)) && A.cell.l === 944 && A.cell.w === 502 && A.cell.r === 1446, `THE OWNER'S CASE: Chrome (minimum 502) snapped into the right cell of a 1×3 grid on a 1450 px workspace ends at ${A.cell.r} ≤ 1450 (left ${A.cell.l}, the pre-fix 968 hung 20 px past the edge)`, A.cell);
   ok(A.cell0.l === 4 && A.cell0.w === 502, `the first cell: the window stays at 4 and overlaps its neighbour (${A.cell0.l} + ${A.cell0.w})`, A.cell0);
-  ok(inside(A.snapBottom) && A.snapBottom.t === 256 && A.snapBottom.h === 618, `the calculator (minimum 618 high) dragged to the BOTTOM snap zone ends at ${A.snapBottom.b} ≤ 878 (top ${A.snapBottom.t}; pre-fix 441 + 618 = 1059)`, A.snapBottom);
-  ok(inside(A.halfBottom) && A.halfBottom.t === 256, `…snapToHalf('bottom') (command mode) the same (${A.halfBottom.t}–${A.halfBottom.b})`, A.halfBottom);
-  ok(inside(A.range) && inside(A.cell22), `…a shift-drag grid RANGE (the bottom row of 2×2, ${A.range.t}–${A.range.b}) and the bottom-right cell of 2×2 (${A.cell22.l},${A.cell22.t}–${A.cell22.r},${A.cell22.b}) the same`, { range: A.range, cell22: A.cell22 });
-  ok(inside(A.bounds) && inside(A.reflow) && A.bounds.w === 502, `stored bounds of the right third from a 1876 px workspace applied on the 1450 px one (layout restore / sync / the sidebar opening — _applyGridBounds) end at ${A.bounds.r.toFixed(1)} ≤ 1450, and the workspace reflow keeps it there (${A.reflow.r.toFixed(1)})`, { bounds: A.bounds, reflow: A.reflow });
-  ok(inside(A.restore) && A.restoreMax === false, `the restore from maximize of a stored bottom half (4,441 1442×433) lands inside (${A.restore.t}–${A.restore.b})`, A.restore);
-  ok(inside(A.floor6) && A.floor6.w === 320, `a terminal (the .window floor 320) in the last cell of a 1×6 grid (237 px) ends at ${A.floor6.r.toFixed(1)} ≤ 1450 — the rule is every window's, not the desktop app's`, A.floor6);
-  ok(same(A.def, { left: 70, top: 66, width: 900, height: 620 }) && same(A.def7, { left: 250, top: 66, width: 900, height: 620 }) && same(A.defTiny, { left: 0, top: 0, width: 600, height: 400 }), `the DEFAULT placement at UI 125 % (a 686 px workspace): the cascade's 70 + 620 slides up to ${A.def.top} (pre-fix 4 px hung past the bottom); a tiny workspace caps the size`, { def: A.def, def7: A.def7, tiny: A.defTiny });
-  ok(same({ ...A.phone }, { left: 0, top: 0, width: 390, height: 700 }), 'the ≤768 px phone layout takes the zone as given (the window IS the screen; the picture scales)');
+  ok(gateOf(inside(A.snapBottom)) && A.snapBottom.t === 256 && A.snapBottom.h === 618, `the calculator (minimum 618 high) dragged to the BOTTOM snap zone ends at ${A.snapBottom.b} ≤ 878 (top ${A.snapBottom.t}; pre-fix 441 + 618 = 1059)`, A.snapBottom);
+  ok(gateOf(inside(A.halfBottom)) && A.halfBottom.t === 256, `…snapToHalf('bottom') (command mode) the same (${A.halfBottom.t}–${A.halfBottom.b})`, A.halfBottom);
+  ok(gateOf(inside(A.range)) && verdictOf(inside(A.cell22)), `…a shift-drag grid RANGE (the bottom row of 2×2, ${A.range.t}–${A.range.b}) and the bottom-right cell of 2×2 (${A.cell22.l},${A.cell22.t}–${A.cell22.r},${A.cell22.b}) the same`, { range: A.range, cell22: A.cell22 });
+  ok(gateOf(inside(A.bounds)) && gateOf(inside(A.reflow)) && A.bounds.w === 502, `stored bounds of the right third from a 1876 px workspace applied on the 1450 px one (layout restore / sync / the sidebar opening — _applyGridBounds) end at ${A.bounds.r.toFixed(1)} ≤ 1450, and the workspace reflow keeps it there (${A.reflow.r.toFixed(1)})`, { bounds: A.bounds, reflow: A.reflow });
+  ok(gateOf(inside(A.restore)) && A.restoreMax === false, `the restore from maximize of a stored bottom half (4,441 1442×433) lands inside (${A.restore.t}–${A.restore.b})`, A.restore);
+  ok(gateOf(inside(A.floor6)) && A.floor6.w === 320, `a terminal (the .window floor 320) in the last cell of a 1×6 grid (237 px) ends at ${A.floor6.r.toFixed(1)} ≤ 1450 — the rule is every window's, not the desktop app's`, A.floor6);
+  ok(gateOf(same(A.def, { left: 70, top: 66, width: 900, height: 620 })) && gateOf(same(A.def7, { left: 250, top: 66, width: 900, height: 620 })) && verdictOf(same(A.defTiny, { left: 0, top: 0, width: 600, height: 400 })), `the DEFAULT placement at UI 125 % (a 686 px workspace): the cascade's 70 + 620 slides up to ${A.def.top} (pre-fix 4 px hung past the bottom); a tiny workspace caps the size`, { def: A.def, def7: A.def7, tiny: A.defTiny });
+  ok(verdictOf(same({ ...A.phone }, { left: 0, top: 0, width: 390, height: 700 })), 'the ≤768 px phone layout takes the zone as given (the window IS the screen; the picture scales)');
 
   // CONTROL: a patched copy of window.js with the pre-fix placement — the zone written as given, the cascade as it falls
   const src = read('src/lib/window.js');
@@ -297,7 +297,7 @@ console.log('§4 a zone smaller than the minimum never hangs past the workspace 
     ['    if (!ws) return box;', '    return box; // pre-fix CONTROL: the cascade as it falls'],
   ];
   const hits = levers.map(([from]) => src.split(from).length - 1);
-  ok(hits.every((n) => n === 1), `CONTROL: each placement lever is spelled exactly once in window.js (${hits.join(', ')})`);
+  ok(verdictOf(hits.every((n) => n === 1)), `CONTROL: each placement lever is spelled exactly once in window.js (${hits.join(', ')})`);
   let mut = src; for (const [from, to] of levers) mut = mut.replace(from, to);
   const f = MUTW.write('src/lib/window.js', mut, 'place');
   const C = await pathsOn((await import(f)).WindowManager);
@@ -309,14 +309,14 @@ console.log('§4 a zone smaller than the minimum never hangs past the workspace 
   const through = ['_applyGridBounds', '_applySnap', 'snapToHalf', '_snapToGridRange', '_positionToCell'];
   const bad = through.filter((n) => !/this\._placeWindow\(win, /.test(body(n)) || /style\.(width|height|left|top)\s*=/.test(body(n)));
   ok(!bad.length, `WIRING: ${through.join(', ')} place through _placeWindow and write no left/top/width/height of their own${bad.length ? ` — not: ${bad.join(', ')}` : ''}`);
-  ok(/this\._placeWindow\(win, box, 4\)/.test(body('toggleMaximize')) && /if \(x === undefined\) \(\{ left: x, top: y, width, height \} = this\._defaultPlacement\(width, height\)\);/.test(src), 'WIRING: the restore from maximize places through _placeWindow; createWindow takes the default placement from _defaultPlacement');
+  ok(gateOf(/this\._placeWindow\(win, box, 4\)/.test(body('toggleMaximize'))) && verdictOf(/if \(x === undefined\) \(\{ left: x, top: y, width, height \} = this\._defaultPlacement\(width, height\)\);/.test(src)), 'WIRING: the restore from maximize places through _placeWindow; createWindow takes the default placement from _defaultPlacement');
 }
 
 console.log('§4b r2 — a box the window manager kept ITSELF, on a workspace that changed meanwhile (inc-muhmqvzf-jodk r2)');
 {
   // ── the PURE rules ──
-  ok(same(MS.wholePx({ left: 727.03, top: 4.0388, width: 778.94, height: 870.01 }), { left: 727, top: 4, width: 779, height: 870 }) && same(MS.wholePx({ left: 967.73, top: 4.04, width: 479.2, height: 870.0 }), { left: 968, top: 4, width: 479, height: 870 }), 'wholePx: the EDGES on whole layout px (727.03 + 778.94 = 1505.97 ⇒ 727 … 1506, width 779) — the sizes follow the edges, never rounded apart');
-  ok(same(MS.rescaleBox({ left: 1252, top: 4, width: 620, height: 870 }, { w: 1876, h: 878 }, { w: 1450, h: 878 }), { left: 968, top: 4, width: 479, height: 870 }), 'rescaleBox: the right third of a 1876 px workspace carried to a 1450 px one = the same fractions (968 … 1447), where the reflow puts a visible twin');
+  ok(gateOf(same(MS.wholePx({ left: 727.03, top: 4.0388, width: 778.94, height: 870.01 }), { left: 727, top: 4, width: 779, height: 870 })) && verdictOf(same(MS.wholePx({ left: 967.73, top: 4.04, width: 479.2, height: 870.0 }), { left: 968, top: 4, width: 479, height: 870 })), 'wholePx: the EDGES on whole layout px (727.03 + 778.94 = 1505.97 ⇒ 727 … 1506, width 779) — the sizes follow the edges, never rounded apart');
+  ok(verdictOf(same(MS.rescaleBox({ left: 1252, top: 4, width: 620, height: 870 }, { w: 1876, h: 878 }, { w: 1450, h: 878 }), { left: 968, top: 4, width: 479, height: 870 })), 'rescaleBox: the right third of a 1876 px workspace carried to a 1450 px one = the same fractions (968 … 1447), where the reflow puts a visible twin');
   const B0 = { left: 1252, top: 4, width: 620, height: 870 };
   ok(MS.rescaleBox(B0, { w: 1876, h: 878 }, { w: 1876, h: 878 }) === B0 && MS.rescaleBox(B0, undefined, { w: 1450, h: 878 }) === B0 && MS.rescaleBox(B0, { w: 1876, h: 878 }, null) === B0 && MS.rescaleBox(B0, { w: 0, h: 0 }, { w: 1450, h: 878 }) === B0, 'rescaleBox: the same workspace, an older record without one, or none laid out ⇒ the box exactly as stored');
 
@@ -399,19 +399,19 @@ console.log('§4b r2 — a box the window manager kept ITSELF, on a workspace th
   const A = await flowsOn(WindowManager);
   console.log(`    (a) right third on 1876: ${JSON.stringify(A.aWide)} → minimized, 1450 → restored ${JSON.stringify(A.aRestored)} bounds ${JSON.stringify(A.aBounds)} → 1876 ${JSON.stringify(A.aWiden)} → 1450 ${JSON.stringify(A.aNarrow)}`);
   console.log(`    (b) right third on 1876 → maximized, 1450 → un-maximized ${JSON.stringify(A.bRestored)} bounds ${JSON.stringify(A.bBounds)} → 1876 ${JSON.stringify(A.bWiden)} → 1450 ${JSON.stringify(A.bNarrow)}`);
-  ok(inside(A.aWide, WIDE) && A.aWide.l === 1252 && A.aWide.w === 620, `(a) the drop: Chrome in the right third of 1×3 with the sidebar CLOSED (1876 px) — ${A.aWide.l} + ${A.aWide.w}`, A.aWide);
-  ok(inside(A.aRestored, NARROW), `(a) THE VERIFIER'S FLOW: minimize → the sidebar opens (1450 px) → restore lands INSIDE (${A.aRestored.l}–${A.aRestored.r}, ${past(A.aRestored, NARROW)} CSS px past; pre-fix 1252–1872 = 422 past ⇒ 844 device px at DPR 2)`, A.aRestored);
-  ok(fracOk(A.aBounds), `(a) …and restore's capture persists fractions INSIDE the workspace (left ${A.aBounds.left} + width ${A.aBounds.width} ≤ 1; pre-fix 0.8634 + 0.4276)`, A.aBounds);
-  ok(inside(A.aWiden, WIDE) && inside(A.aNarrow, NARROW), `(a) THE CASCADE: the sidebar closed again (1876) ⇒ ${A.aWiden.l}–${A.aWiden.r}, opened again (1450) ⇒ ${A.aNarrow.l}–${A.aNarrow.r} — inside both times`, { widen: A.aWiden, narrow: A.aNarrow });
+  ok(gateOf(inside(A.aWide, WIDE)) && A.aWide.l === 1252 && A.aWide.w === 620, `(a) the drop: Chrome in the right third of 1×3 with the sidebar CLOSED (1876 px) — ${A.aWide.l} + ${A.aWide.w}`, A.aWide);
+  ok(verdictOf(inside(A.aRestored, NARROW)), `(a) THE VERIFIER'S FLOW: minimize → the sidebar opens (1450 px) → restore lands INSIDE (${A.aRestored.l}–${A.aRestored.r}, ${past(A.aRestored, NARROW)} CSS px past; pre-fix 1252–1872 = 422 past ⇒ 844 device px at DPR 2)`, A.aRestored);
+  ok(verdictOf(fracOk(A.aBounds)), `(a) …and restore's capture persists fractions INSIDE the workspace (left ${A.aBounds.left} + width ${A.aBounds.width} ≤ 1; pre-fix 0.8634 + 0.4276)`, A.aBounds);
+  ok(gateOf(inside(A.aWiden, WIDE)) && verdictOf(inside(A.aNarrow, NARROW)), `(a) THE CASCADE: the sidebar closed again (1876) ⇒ ${A.aWiden.l}–${A.aWiden.r}, opened again (1450) ⇒ ${A.aNarrow.l}–${A.aNarrow.r} — inside both times`, { widen: A.aWiden, narrow: A.aNarrow });
   ok(A.aHiddenResized === 0 && A.aHiddenStyle[0] === '945px' && A.aHiddenStyle[1] === '502px', `(a) the reflow PLACES the minimized window (its inline box ${A.aHiddenStyle.join(' / ')} while display:none) and tells its view nothing until the restore (onResize ×${A.aHiddenResized} while hidden)`, { hiddenResized: A.aHiddenResized, style: A.aHiddenStyle });
-  ok(fracOk(A.aHiddenBounds) && A.aHiddenBounds.width > 0.3 && A.aHiddenBounds.left > 0.6, `(a) a capture of the display:none window reads its inline px, never zeros (${JSON.stringify(A.aHiddenBounds)}; pre-fix {0,0,0,0} — the autosave's first capture of a minimized window, a snap's 220 ms capture after a quick minimize)`, A.aHiddenBounds);
-  ok(inside(A.bRestored, NARROW), `(b) THE VERIFIER'S FLOW: maximize → the sidebar opens (1450 px) → un-maximize lands INSIDE (${A.bRestored.l}–${A.bRestored.r}, ${past(A.bRestored, NARROW)} CSS px past; pre-fix the stale prevBounds 1252–1872 = 422 past)`, A.bRestored);
+  ok(gateOf(fracOk(A.aHiddenBounds)) && A.aHiddenBounds.width > 0.3 && A.aHiddenBounds.left > 0.6, `(a) a capture of the display:none window reads its inline px, never zeros (${JSON.stringify(A.aHiddenBounds)}; pre-fix {0,0,0,0} — the autosave's first capture of a minimized window, a snap's 220 ms capture after a quick minimize)`, A.aHiddenBounds);
+  ok(verdictOf(inside(A.bRestored, NARROW)), `(b) THE VERIFIER'S FLOW: maximize → the sidebar opens (1450 px) → un-maximize lands INSIDE (${A.bRestored.l}–${A.bRestored.r}, ${past(A.bRestored, NARROW)} CSS px past; pre-fix the stale prevBounds 1252–1872 = 422 past)`, A.bRestored);
   ok(A.bRestored.l === A.aRestored.l && A.bRestored.w === A.aRestored.w, `(b) …exactly where the minimized twin and a visible window's reflow land (${A.bRestored.l} + ${A.bRestored.w}) — the box carried as fractions, then the ONE placement`, { a: A.aRestored, b: A.bRestored });
-  ok(fracOk(A.bBounds) && inside(A.bWiden, WIDE) && inside(A.bNarrow, NARROW), `(b) THE CASCADE: the captured fractions stay inside (${A.bBounds.left} + ${A.bBounds.width}; pre-fix 0.8634 + 0.4276) and the sidebar closing / opening again keeps the window inside (${A.bWiden.l}–${A.bWiden.r} on 1876, ${A.bNarrow.l}–${A.bNarrow.r} on 1450)`, { bounds: A.bBounds, widen: A.bWiden, narrow: A.bNarrow });
-  ok(same(A.cBefore, A.cAfter), `(b) a maximize with NO workspace change restores the stored px exactly (${JSON.stringify(A.cAfter)})`, { before: A.cBefore, after: A.cAfter });
-  ok(A.whole.every((v) => /^\d+px$/.test(v)), `low: stored bounds on a 1450 px workspace land on WHOLE layout px (${A.whole.join(' ')}; pre-fix 727.03px-class fractions)`, A.whole);
-  ok(A.capped.h === '715px' && A.capped.top === '0px' && A.capped.boundsKept && A.capped.notified === 0, `low: a raise by a workspace-CAPPED minimum stays this client's — raised to ${A.capped.h} at top ${A.capped.top}, the shared grid bounds untouched (${A.capped.boundsKept}), nothing announced (${A.capped.notified} notify) — the sync no longer moves the other client's window`, A.capped);
-  ok(A.uncapped.h === '1234px' && A.uncapped.recaptured && A.uncapped.notified === 1, `low: …an UNCAPPED raise is still re-captured and announced (${A.uncapped.h}, notify ×${A.uncapped.notified}) — the 2.369.158 rule unchanged`, A.uncapped);
+  ok(gateOf(fracOk(A.bBounds)) && gateOf(inside(A.bWiden, WIDE)) && verdictOf(inside(A.bNarrow, NARROW)), `(b) THE CASCADE: the captured fractions stay inside (${A.bBounds.left} + ${A.bBounds.width}; pre-fix 0.8634 + 0.4276) and the sidebar closing / opening again keeps the window inside (${A.bWiden.l}–${A.bWiden.r} on 1876, ${A.bNarrow.l}–${A.bNarrow.r} on 1450)`, { bounds: A.bBounds, widen: A.bWiden, narrow: A.bNarrow });
+  ok(verdictOf(same(A.cBefore, A.cAfter)), `(b) a maximize with NO workspace change restores the stored px exactly (${JSON.stringify(A.cAfter)})`, { before: A.cBefore, after: A.cAfter });
+  ok(verdictOf(A.whole.every((v) => /^\d+px$/.test(v))), `low: stored bounds on a 1450 px workspace land on WHOLE layout px (${A.whole.join(' ')}; pre-fix 727.03px-class fractions)`, A.whole);
+  ok(A.capped.h === '715px' && A.capped.top === '0px' && gateOf(A.capped.boundsKept) && A.capped.notified === 0, `low: a raise by a workspace-CAPPED minimum stays this client's — raised to ${A.capped.h} at top ${A.capped.top}, the shared grid bounds untouched (${A.capped.boundsKept}), nothing announced (${A.capped.notified} notify) — the sync no longer moves the other client's window`, A.capped);
+  ok(A.uncapped.h === '1234px' && gateOf(A.uncapped.recaptured) && A.uncapped.notified === 1, `low: …an UNCAPPED raise is still re-captured and announced (${A.uncapped.h}, notify ×${A.uncapped.notified}) — the 2.369.158 rule unchanged`, A.uncapped);
 
   // CONTROL: a patched copy with the r2 levers pulled back (minimized windows skipped by the reflow, the stale prevBounds
   // px, the offsets read of a display:none window, the fractional stored box, the capped raise shared)
@@ -424,14 +424,14 @@ console.log('§4b r2 — a box the window manager kept ITSELF, on a workspace th
     ['    const full = minOf(win), local = full.w > min.w || full.h > min.h;', '    const local = false; // pre-fix CONTROL'],
   ];
   const hits = levers.map(([from]) => src.split(from).length - 1);
-  ok(hits.every((n) => n === 1), `CONTROL: each r2 lever is spelled exactly once in window.js (${hits.join(', ')})`);
+  ok(verdictOf(hits.every((n) => n === 1)), `CONTROL: each r2 lever is spelled exactly once in window.js (${hits.join(', ')})`);
   let mut = src; for (const [from, to] of levers) mut = mut.replace(from, to);
   const f = MUTW.write('src/lib/window.js', mut, 'r2');
   const C = await flowsOn((await import(f)).WindowManager);
   console.log(`    CONTROL (a) restored ${JSON.stringify(C.aRestored)} bounds ${JSON.stringify(C.aBounds)} → 1876 ${JSON.stringify(C.aWiden)}; (b) un-maximized ${JSON.stringify(C.bRestored)} bounds ${JSON.stringify(C.bBounds)} → 1876 ${JSON.stringify(C.bWiden)}`);
   ok(!inside(C.aRestored, NARROW) && past(C.aRestored, NARROW) === 422 && !fracOk(C.aBounds) && !inside(C.aWiden, WIDE), `CONTROL (a): pre-r2, minimize → sidebar → restore hangs ${past(C.aRestored, NARROW)} CSS px past the 1450 px workspace (the verifier's 422 ⇒ 844 device px at DPR 2), captures ${C.aBounds.left} + ${C.aBounds.width}, and the widening cascades to ${past(C.aWiden, WIDE)} past 1876`, C);
   ok(!inside(C.bRestored, NARROW) && past(C.bRestored, NARROW) === 422 && !fracOk(C.bBounds) && !inside(C.bWiden, WIDE), `CONTROL (b): pre-r2, maximize → sidebar → un-maximize hangs ${past(C.bRestored, NARROW)} CSS px past, captures ${C.bBounds.left} + ${C.bBounds.width}, cascades to ${past(C.bWiden, WIDE)} past 1876`, C);
-  ok(same(C.aHiddenBounds, { left: 0, top: 0, width: 0, height: 0 }), `CONTROL: pre-r2, a capture of the display:none window writes ${JSON.stringify(C.aHiddenBounds)}`, C.aHiddenBounds);
+  ok(verdictOf(same(C.aHiddenBounds, { left: 0, top: 0, width: 0, height: 0 })), `CONTROL: pre-r2, a capture of the display:none window writes ${JSON.stringify(C.aHiddenBounds)}`, C.aHiddenBounds);
   ok(!C.whole.every((v) => /^\d+px$/.test(v)), `CONTROL: pre-r2, stored bounds land on fractional px (${C.whole.join(' ')})`, C.whole);
   ok(!C.capped.boundsKept && C.capped.notified === 1, `CONTROL: pre-r2, the capped raise re-captures the shared bounds and announces them (kept ${C.capped.boundsKept}, notify ×${C.capped.notified})`, C.capped);
 }
@@ -474,15 +474,15 @@ console.log('§5 lane app-fit-fixed — a window whose app FIXES its size takes 
   };
   const { WindowManager } = await import('../src/lib/window.js');
   const A = await fixedOn(WindowManager);
-  ok(A.lock === true && A.again === false && same(A.locked, { left: 130, top: 130, width: 282, height: 382 }) && same(A.inline, ['282px', '282px', '382px', '382px']) && A.cls, `setFixedSize: WeChat's 282×382 — the window TAKES the app's size (its top-left kept), min = max inline (the .window floor 320 overruled), class window-fixed-size; the same size again changes nothing (${JSON.stringify(A.locked)})`);
-  ok(same(A.se, A.locked) && same(A.nw, A.locked), `no resize drag: the SE and NW handles leave it at 282×382 (${JSON.stringify(A.se)} / ${JSON.stringify(A.nw)})`);
-  ok(A.max.isMax === false && same(A.max.box, A.locked), 'no maximize: toggleMaximize (the button, the double-click, the command, the app\'s own request) leaves it at its size');
-  ok(same(A.halfBox, { left: 800, top: 4, width: 282, height: 382 }) && same(A.half, A.halfBox), `a zone (a snap half, a grid cell, stored bounds, a layout) MOVES it to the zone's corner and never sizes it (${JSON.stringify(A.halfBox)})`);
-  ok(A.resizeTo === false && same(A.afterResizeTo, A.halfBox) && same(A.minKept, ['282px', '282px']), 'resizeWindowTo (a Scale ▸ relaunch\'s fit) refuses; a new minimum never overwrites the fixed min / max');
-  ok(A.release === true && same(A.released, { left: 700, top: 4, width: 900, height: 620 }) && A.releasedInline[1] === '' && A.releasedInline[3] === '' && A.releasedInline[0] === '320px' && !A.releasedCls, `null RELEASES it (WeChat's login replaced by its resizable main): the size before the lock comes back (900×620, slid inside the workspace), max cleared, the own minimum back under the .window floor, resizable (${JSON.stringify(A.released)})`);
+  ok(A.lock === true && A.again === false && gateOf(same(A.locked, { left: 130, top: 130, width: 282, height: 382 })) && gateOf(same(A.inline, ['282px', '282px', '382px', '382px'])) && verdictOf(A.cls), `setFixedSize: WeChat's 282×382 — the window TAKES the app's size (its top-left kept), min = max inline (the .window floor 320 overruled), class window-fixed-size; the same size again changes nothing (${JSON.stringify(A.locked)})`);
+  ok(gateOf(same(A.se, A.locked)) && verdictOf(same(A.nw, A.locked)), `no resize drag: the SE and NW handles leave it at 282×382 (${JSON.stringify(A.se)} / ${JSON.stringify(A.nw)})`);
+  ok(A.max.isMax === false && verdictOf(same(A.max.box, A.locked)), 'no maximize: toggleMaximize (the button, the double-click, the command, the app\'s own request) leaves it at its size');
+  ok(gateOf(same(A.halfBox, { left: 800, top: 4, width: 282, height: 382 })) && verdictOf(same(A.half, A.halfBox)), `a zone (a snap half, a grid cell, stored bounds, a layout) MOVES it to the zone's corner and never sizes it (${JSON.stringify(A.halfBox)})`);
+  ok(A.resizeTo === false && gateOf(same(A.afterResizeTo, A.halfBox)) && verdictOf(same(A.minKept, ['282px', '282px'])), 'resizeWindowTo (a Scale ▸ relaunch\'s fit) refuses; a new minimum never overwrites the fixed min / max');
+  ok(A.release === true && gateOf(same(A.released, { left: 700, top: 4, width: 900, height: 620 })) && A.releasedInline[1] === '' && A.releasedInline[3] === '' && A.releasedInline[0] === '320px' && !A.releasedCls, `null RELEASES it (WeChat's login replaced by its resizable main): the size before the lock comes back (900×620, slid inside the workspace), max cleared, the own minimum back under the .window floor, resizable (${JSON.stringify(A.released)})`);
   ok(A.seAfter.width > 900 && A.seAfter.height > 620, `…and the SE handle resizes it again (${JSON.stringify(A.seAfter)})`);
-  ok(same(A.big, { left: 0, top: 0, width: 1702, height: 1065 }) && same(A.bigCell, { left: 0, top: 0, width: 1702, height: 1065 }), `a fixed window LARGER than the 1600×1000 workspace keeps the app's size (never capped, never scaled), its top-left slid onto the workspace (0,0), the rest past the edge — a grid cell moves it, never shrinks it (${JSON.stringify(A.big)})`);
-  ok(A.mx.isMax === false && same(A.mx.box, { left: 50, top: 60, width: 400, height: 300 }), `a MAXIMIZED window whose app fixes its size is restored first, then takes the size (${JSON.stringify(A.mx.box)})`);
+  ok(gateOf(same(A.big, { left: 0, top: 0, width: 1702, height: 1065 })) && verdictOf(same(A.bigCell, { left: 0, top: 0, width: 1702, height: 1065 })), `a fixed window LARGER than the 1600×1000 workspace keeps the app's size (never capped, never scaled), its top-left slid onto the workspace (0,0), the rest past the edge — a grid cell moves it, never shrinks it (${JSON.stringify(A.big)})`);
+  ok(A.mx.isMax === false && verdictOf(same(A.mx.box, { left: 50, top: 60, width: 400, height: 300 })), `a MAXIMIZED window whose app fixes its size is restored first, then takes the size (${JSON.stringify(A.mx.box)})`);
 
   // CONTROL: a patched copy with the lock's levers pulled back (no setFixedSize — the window only gets the app's size as a
   // MINIMUM, today's rule: workspace-capped, resizable, maximizable, zone-sized)
@@ -493,7 +493,7 @@ console.log('§5 lane app-fit-fixed — a window whose app FIXES its size takes 
     ['    if (win.fixedSize && !win.isMaximized) return; // lane app-fit-fixed', '    if (false) return; // pre-fix CONTROL'],
   ];
   const hits = levers.map(([from]) => src.split(from).length - 1);
-  ok(hits.every((n) => n === 1), `CONTROL: each lock lever is spelled exactly once in window.js (${hits.join(', ')})`);
+  ok(verdictOf(hits.every((n) => n === 1)), `CONTROL: each lock lever is spelled exactly once in window.js (${hits.join(', ')})`);
   let mut = src; for (const [from, to] of levers) mut = mut.replace(from, to);
   const C = await fixedOn((await import(MUTW.write('src/lib/window.js', mut, 'fixed'))).WindowManager);
   ok(!same(C.se, C.locked) && C.max.isMax === true && C.big.width < 1702, `CONTROL: pre-fix the "fixed" window is resized by the handle (${JSON.stringify(C.se)}), maximized (${C.max.isMax}) and capped at the workspace (${C.big.width}×${C.big.height}) — the app's fixed picture then sits in a blank pane or is scaled`);
@@ -502,8 +502,8 @@ console.log('§5 lane app-fit-fixed — a window whose app FIXES its size takes 
   // handles + maximize, the phone layout overrules the inline max, desktop-app-window feeds setFixedSize
   ok(src.split('if (!e.altKey && !shakeBypass && snapEnabled && !win.fixedSize) {').length === 3, 'WIRING: the title-bar drag\'s snap / grid branch is skipped for a fixed window on the move AND on the drop (2 sites)');
   const css = read('public/style.css'), daw = read('src/lib/desktop-app-window.js');
-  ok(/\.window\.window-fixed-size > \.resize-handle, \.window\.window-fixed-size \.win-maximize \{ display: none; \}/.test(css) && /@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)[\s\S]*?\.window \{[^}]*max-width: none !important; max-height: none !important;/.test(css), 'WIRING: style.css hides a fixed window\'s resize handles and maximize button; the phone layout forces max none !important (the window IS the screen)');
-  ok(/onFixedSize: applyFixedSize, fixedFollows: \(\) => !app\.wm\._mobileLayout\(\)/.test(daw) && /app\.wm\.setFixedSize\(winInfo\.id, windowMinForPane\(fixedPane, \{ w: er\.width - pr\.width, h: er\.height - pr\.height \}, uiScale\(\)\)\)/.test(daw) && /if \(!fixedPane && winInfo\.fixedSize\) \{ app\.wm\.setFixedSize\(winInfo\.id, null\)/.test(daw), 'WIRING: desktop-app-window turns the view\'s onFixedSize into setFixedSize (pane + the measured chrome, windowMinForPane) and releases it when the view says null; the picture scales only on the phone layout');
+  ok(gateOf(/\.window\.window-fixed-size > \.resize-handle, \.window\.window-fixed-size \.win-maximize \{ display: none; \}/.test(css)) && verdictOf(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)[\s\S]*?\.window \{[^}]*max-width: none !important; max-height: none !important;/.test(css)), 'WIRING: style.css hides a fixed window\'s resize handles and maximize button; the phone layout forces max none !important (the window IS the screen)');
+  ok(gateOf(/onFixedSize: applyFixedSize, fixedFollows: \(\) => !app\.wm\._mobileLayout\(\)/.test(daw)) && gateOf(/app\.wm\.setFixedSize\(winInfo\.id, windowMinForPane\(fixedPane, \{ w: er\.width - pr\.width, h: er\.height - pr\.height \}, uiScale\(\)\)\)/.test(daw)) && verdictOf(/if \(!fixedPane && winInfo\.fixedSize\) \{ app\.wm\.setFixedSize\(winInfo\.id, null\)/.test(daw)), 'WIRING: desktop-app-window turns the view\'s onFixedSize into setFixedSize (pane + the measured chrome, windowMinForPane) and releases it when the view says null; the picture scales only on the phone layout');
 }
 
 console.log('§6 lane app-window-fit-topleft (B-1f0b) — a fixed window LARGER than the workspace stands at its top-left, its ✕ on screen');
@@ -527,8 +527,8 @@ console.log('§6 lane app-window-fit-topleft (B-1f0b) — a fixed window LARGER 
     ['a workspace not laid out', V(true, { w: 1002, h: 965 }, null), ['none', null, null, null, 'no-workspace']],
     ['no frame', V(true, null), ['none', null, null, null, 'no-frame']],
   ];
-  for (const [name, got, want] of TABLE) ok(same(cellOf(got), want), `PURE fixedWindowPlacement: ${name} ⇒ ${want[0]}${want[0] === 'top-left' ? ' (0,0)' : ''}${want[3] ? `, the title bar ≤ ${want[3]} px` : ''}`, got);
-  ok(same(V(true, { w: 1002, h: 965 }), V(true, { w: 1002, h: 965 })) && !/^\s*import\b|\brequire\(/m.test(read('src/lib/desktop-app-placement.js')), 'PURE: the same facts give the same cell; desktop-app-placement.js imports nothing');
+  for (const [name, got, want] of TABLE) ok(verdictOf(same(cellOf(got), want)), `PURE fixedWindowPlacement: ${name} ⇒ ${want[0]}${want[0] === 'top-left' ? ' (0,0)' : ''}${want[3] ? `, the title bar ≤ ${want[3]} px` : ''}`, got);
+  ok(gateOf(same(V(true, { w: 1002, h: 965 }), V(true, { w: 1002, h: 965 }))) && !/^\s*import\b|\brequire\(/m.test(read('src/lib/desktop-app-placement.js')), 'PURE: the same facts give the same cell; desktop-app-placement.js imports nothing');
 
   // the REAL WindowManager over the fake DOM, on the owner's 1450×878 workspace
   const placeOn = async (WM) => {
@@ -565,23 +565,23 @@ console.log('§6 lane app-window-fit-topleft (B-1f0b) — a fixed window LARGER 
   };
   const { WindowManager } = await import('../src/lib/window.js');
   const A = await placeOn(WindowManager);
-  ok(same(A.tall, { left: 0, top: 0, width: 1002, height: 965, bar: '' }), `LOCK, taller (the 1000×900 fixture at 2×): the window stands at the workspace's top-left (0,0), the app's size kept — never the cascade's x (${JSON.stringify(A.tall)})`);
-  ok(same(A.wide, { left: 0, top: 0, width: 1602, height: 465, bar: '1449px' }), `LOCK, wider: (0,0), and its title bar held to the workspace (1450 − the 1 px border = 1449 px: the ✕ at the workspace's right edge, on screen) (${JSON.stringify(A.wide)})`);
-  ok(same(A.fits, { left: 130, top: 130, width: 712, height: 743, bar: '' }), `LOCK, fits (Inkscape's welcome): it keeps the cascade (130,130), the bar free (${JSON.stringify(A.fits)})`);
-  ok(same(A.phone, { left: 12, top: 34, width: 1002, height: 965, bar: '' }), `LOCK on the phone layout: no placement (the window IS the screen there; the picture scales to fit) (${JSON.stringify(A.phone)})`);
+  ok(verdictOf(same(A.tall, { left: 0, top: 0, width: 1002, height: 965, bar: '' })), `LOCK, taller (the 1000×900 fixture at 2×): the window stands at the workspace's top-left (0,0), the app's size kept — never the cascade's x (${JSON.stringify(A.tall)})`);
+  ok(verdictOf(same(A.wide, { left: 0, top: 0, width: 1602, height: 465, bar: '1449px' })), `LOCK, wider: (0,0), and its title bar held to the workspace (1450 − the 1 px border = 1449 px: the ✕ at the workspace's right edge, on screen) (${JSON.stringify(A.wide)})`);
+  ok(verdictOf(same(A.fits, { left: 130, top: 130, width: 712, height: 743, bar: '' })), `LOCK, fits (Inkscape's welcome): it keeps the cascade (130,130), the bar free (${JSON.stringify(A.fits)})`);
+  ok(verdictOf(same(A.phone, { left: 12, top: 34, width: 1002, height: 965, bar: '' })), `LOCK on the phone layout: no placement (the window IS the screen there; the picture scales to fit) (${JSON.stringify(A.phone)})`);
   ok(A.released.bar === '' && A.released.width === 700, `RELEASE (null): the bar is free again, the size before the lock back (${JSON.stringify(A.released)})`);
-  ok(same(A.rsLock, { left: 100, top: 60, width: 712, height: 743, bar: '' }) && same(A.rsShort, { left: 0, top: 0, width: 712, height: 743, bar: '' }) && A.rsMoved === 1, `WORKSPACE RESIZE (the browser made 600 px tall): the reflow re-judges — the window that fit at 100,60 is now taller ⇒ (0,0), told once as a move (${JSON.stringify(A.rsShort)})`);
-  ok(same(A.rsAgain, A.rsShort) && A.rsMovedAgain === 1, 'the same workspace reflowed again moves nothing (the verdict stands, the window is there)');
-  ok(same(A.rsQuiet, { captured: 0, notified: 0 }), `the reflow's move is THIS client's: never captured into the shared grid bounds, never announced (${JSON.stringify(A.rsQuiet)})`);
-  ok(same(A.rsBack, A.rsLock), `the workspace back at 878 px: it fits again ⇒ its stored place comes back (${JSON.stringify(A.rsBack)})`);
-  ok(same(A.narrow, { left: 0, top: 0, width: 1002, height: 600, bar: '899px' }) && same(A.narrowBack, { left: 200, top: 50, width: 1002, height: 600, bar: '' }), `the SIDEBAR opened wider (a 900 px workspace): a 1002-wide window ⇒ (0,0) with its bar at 899 px; narrowed again ⇒ its place, the bar free (${JSON.stringify(A.narrow)} → ${JSON.stringify(A.narrowBack)})`);
+  ok(gateOf(same(A.rsLock, { left: 100, top: 60, width: 712, height: 743, bar: '' })) && gateOf(same(A.rsShort, { left: 0, top: 0, width: 712, height: 743, bar: '' })) && A.rsMoved === 1, `WORKSPACE RESIZE (the browser made 600 px tall): the reflow re-judges — the window that fit at 100,60 is now taller ⇒ (0,0), told once as a move (${JSON.stringify(A.rsShort)})`);
+  ok(gateOf(same(A.rsAgain, A.rsShort)) && A.rsMovedAgain === 1, 'the same workspace reflowed again moves nothing (the verdict stands, the window is there)');
+  ok(verdictOf(same(A.rsQuiet, { captured: 0, notified: 0 })), `the reflow's move is THIS client's: never captured into the shared grid bounds, never announced (${JSON.stringify(A.rsQuiet)})`);
+  ok(verdictOf(same(A.rsBack, A.rsLock)), `the workspace back at 878 px: it fits again ⇒ its stored place comes back (${JSON.stringify(A.rsBack)})`);
+  ok(gateOf(same(A.narrow, { left: 0, top: 0, width: 1002, height: 600, bar: '899px' })) && verdictOf(same(A.narrowBack, { left: 200, top: 50, width: 1002, height: 600, bar: '' })), `the SIDEBAR opened wider (a 900 px workspace): a 1002-wide window ⇒ (0,0) with its bar at 899 px; narrowed again ⇒ its place, the bar free (${JSON.stringify(A.narrow)} → ${JSON.stringify(A.narrowBack)})`);
 
   // the call sites: the verdict is asked in ONE place, and that place only at the lock and at the workspace reflow
   const src = read('src/lib/window.js');
   const sites = (re) => (src.match(re) || []).length;
-  ok(sites(/fixedWindowPlacement\(/g) === 1 && sites(/this\._placeFixed\(/g) === 2 && /if \(!this\._placeFixed\(win, true\) && !this\._mobileLayout\(\)\) \{/.test(src) && /if \(win\.fixedSize && this\._placeFixed\(win\)\) continue;/.test(src), `CENSUS: fixedWindowPlacement( is asked once (_placeFixed: ${sites(/fixedWindowPlacement\(/g)}), _placeFixed( from the lock (setFixedSize) and the workspace reflow (_reflowWindows) only — never a drag frame (${sites(/this\._placeFixed\(/g)} sites)`);
+  ok(sites(/fixedWindowPlacement\(/g) === 1 && sites(/this\._placeFixed\(/g) === 2 && gateOf(/if \(!this\._placeFixed\(win, true\) && !this\._mobileLayout\(\)\) \{/.test(src)) && verdictOf(/if \(win\.fixedSize && this\._placeFixed\(win\)\) continue;/.test(src)), `CENSUS: fixedWindowPlacement( is asked once (_placeFixed: ${sites(/fixedWindowPlacement\(/g)}), _placeFixed( from the lock (setFixedSize) and the workspace reflow (_reflowWindows) only — never a drag frame (${sites(/this\._placeFixed\(/g)} sites)`);
   const reflowBody = src.slice(src.indexOf('  _reflowWindows() {'), src.indexOf('  _scheduleReflowWindows() {'));
-  ok(reflowBody.includes('this._placeFixed(win)') && /new ResizeObserver\(\(\) => this\._scheduleReflowWindows\(\)\)/.test(src), 'WIRING: the re-judge rides the workspace ResizeObserver\'s rAF-coalesced reflow (the sidebar, the browser window) — no observer, timer or listener of its own');
+  ok(gateOf(reflowBody.includes('this._placeFixed(win)')) && verdictOf(/new ResizeObserver\(\(\) => this\._scheduleReflowWindows\(\)\)/.test(src)), 'WIRING: the re-judge rides the workspace ResizeObserver\'s rAF-coalesced reflow (the sidebar, the browser window) — no observer, timer or listener of its own');
 
   // CONTROL: the verdict's two calls pulled back (lane app-fit-fixed's code: keepInside alone at the lock, no re-judge)
   const levers = [
@@ -589,7 +589,7 @@ console.log('§6 lane app-window-fit-topleft (B-1f0b) — a fixed window LARGER 
     ['      if (win.fixedSize && this._placeFixed(win)) continue;', '      if (false) continue; // pre-fix CONTROL'],
   ];
   const hits = levers.map(([from]) => src.split(from).length - 1);
-  ok(hits.every((n) => n === 1), `CONTROL: each lever is spelled exactly once in window.js (${hits.join(', ')})`);
+  ok(verdictOf(hits.every((n) => n === 1)), `CONTROL: each lever is spelled exactly once in window.js (${hits.join(', ')})`);
   let mut = src; for (const [from, to] of levers) mut = mut.replace(from, to);
   const C = await placeOn((await import(MUTW.write('src/lib/window.js', mut, 'topleft'))).WindowManager);
   ok(C.tall.left === 100 && C.tall.top === 0 && C.wide.top === 100 && C.wide.bar === '' && C.rsShort.left === 100 && C.rsMoved === 0, `CONTROL: pre-fix the taller window keeps the cascade's x (${C.tall.left},${C.tall.top}: "x kept, top slid to 0" — app-fit-fixed's report), the wider one its y (${C.wide.left},${C.wide.top}) with its bar — and the ✕ — 1602 px wide past a 1450 px workspace, and a workspace resize re-judges nothing (${JSON.stringify(C.rsShort)})`);
@@ -617,11 +617,11 @@ console.log('§7 B-92aa (the coordinator\'s r2217) — the window manager SAYS w
   };
   const { WindowManager } = await import('../src/lib/window.js');
   const F = fitOn(WindowManager);
-  ok(same(F.plain[0], { w: 1225.5, h: 951.25 }) && same(F.plain[1], F.plain[0]) && same(F.plain[2], ['1225.5px', '951.25px'])
-    && same(F.capped[0], { w: 1600, h: 1000 }) && same(F.capped[1], F.capped[0]) && same(F.capped[2], ['1600px', '1000px'])
-    && same(F.raised[0], { w: 700, h: 500 }) && same(F.raised[1], F.raised[0]) && same(F.raised[2], ['700px', '500px']),
+  ok(gateOf(same(F.plain[0], { w: 1225.5, h: 951.25 })) && gateOf(same(F.plain[1], F.plain[0])) && gateOf(same(F.plain[2], ['1225.5px', '951.25px']))
+    && gateOf(same(F.capped[0], { w: 1600, h: 1000 })) && gateOf(same(F.capped[1], F.capped[0])) && gateOf(same(F.capped[2], ['1600px', '1000px']))
+    && gateOf(same(F.raised[0], { w: 700, h: 500 })) && gateOf(same(F.raised[1], F.raised[0])) && verdictOf(same(F.raised[2], ['700px', '500px'])),
     `B-92aa r2217: fitSizeFor answers what resizeWindowTo then APPLIES and returns — a size kept at 0.01 px (${JSON.stringify(F.plain[0])}), capped at the 1600×1000 workspace (${JSON.stringify(F.capped[0])}), raised to the window's own 700×500 minimum (${JSON.stringify(F.raised[0])})`, F);
-  ok(F.max[0] === null && F.max[1] === false && same(F.max[2], ['700px', '500px']) && F.phone[0] === null && F.phone[1] === false && same(F.phone[2], ['700px', '500px']) && F.none[0] === null && F.none[1] === null,
+  ok(F.max[0] === null && F.max[1] === false && gateOf(same(F.max[2], ['700px', '500px'])) && F.phone[0] === null && F.phone[1] === false && gateOf(same(F.phone[2], ['700px', '500px'])) && F.none[0] === null && F.none[1] === null,
     'B-92aa r2217: where resizeWindowTo REFUSES (a maximized window, the phone layout), fitSizeFor answers null and nothing moves — no window, no size asked: null', F);
   const wsrc = read('src/lib/window.js');
   const relSrc = anchored(wsrc, '    return { w: nw, h: nh };\n  }\n  /** B-92aa (the coordinator\'s r2217)', '    return true;\n  }\n  /** B-92aa (the coordinator\'s r2217)', 'B-92aa r2217 control: the release\'s answer');
@@ -637,7 +637,7 @@ console.log('§7 B-92aa (the coordinator\'s r2217) — the window manager SAYS w
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 4 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 4 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

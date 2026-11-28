@@ -21,7 +21,7 @@ const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit
 const REPO = path.resolve('.');
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
-const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 const SCR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-psl-'));
 const PROD = 'Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask you…'; // the journal's line, verbatim (truncated by the notice)
 
@@ -34,7 +34,7 @@ const { NULL_QUOTA } = require(path.join(REPO, 'src/harnesses/null-quota.js'));
 ck('claude: the production sentence (the journal\'s words) ⇒ lapsed', CQ.classifyServeFailure({ message: PROD })?.kind === 'lapsed');
 ck('claude: the CLI\'s full sentence (2.1.288 `oauth_org_not_allowed`) ⇒ lapsed', CQ.classifyServeFailure({ message: 'API Error: 403 Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access' })?.kind === 'lapsed');
 ck('claude: the raw API message the CLI renders that sentence from ⇒ lapsed', CQ.classifyServeFailure({ status: 403, message: 'OAuth authentication is currently not allowed for this organization' })?.kind === 'lapsed');
-ck('claude: the census is CLOSED — exactly the two measured rows, each quoting the CLI version it was read from', CQ.SERVE_CENSUS.length === 2 && CQ.SERVE_CENSUS.every((r) => r.kind === 'lapsed' && r.cli === '2.1.288' && typeof r.needle === 'string') && Object.isFrozen(CQ.SERVE_CENSUS));
+ck('claude: the census is CLOSED — exactly the two measured rows, each quoting the CLI version it was read from', CQ.SERVE_CENSUS.length === 2 && gateOf(CQ.SERVE_CENSUS.every((r) => r.kind === 'lapsed' && r.cli === '2.1.288' && typeof r.needle === 'string')) && verdictOf(Object.isFrozen(CQ.SERVE_CENSUS)));
 ck('CONTROL: an account HOLD is not a lapse (stays the 10-minute auth mark)', CQ.classifyServeFailure({ status: 403, message: "Your account is on hold and can't sign in to Claude Code" })?.kind === 'auth');
 ck('CONTROL: a revoked OAuth token / a disabled org stay `auth`', CQ.classifyServeFailure({ status: 401, attempt: 2, message: 'OAuth token revoked' })?.kind === 'auth' && CQ.classifyServeFailure({ message: 'API Error: organization has been disabled', status: 403 })?.kind === 'auth');
 ck('CONTROL: an unknown wording is NEVER promoted to a lapse (auth or nothing)', CQ.classifyServeFailure({ message: 'something else entirely' }) === null && CQ.classifyServeFailure({ status: 403, message: 'Forbidden' })?.kind === 'auth');
@@ -42,9 +42,9 @@ ck('claude: the lapse sentence also passes today\'s auth gate (notePoolAuthFailu
 ck('codex: NO lapse census (0.159.3 measured) — its plan wall `usage_not_included` stays an exhaustion enum, never `lapsed`',
   XQ.classifyServeFailure({ message: 'To use Codex with your ChatGPT plan, upgrade to Plus: https://chatgpt.com/explore/plus.', codexErrorInfo: 'usage_not_included' }) === null && XQ.classifyServeFailure({ codexErrorInfo: 'unauthorized' })?.kind === 'auth');
 ck('null quota: no verdict', NULL_QUOTA.classifyServeFailure({ message: PROD }) === null);
-ck('registry: every registered harness that declares classifyServeFailure declares a function (optional in the contract)', harnesses.list().every((h) => h.quota.classifyServeFailure === undefined || typeof h.quota.classifyServeFailure === 'function'));
+ck('registry: every registered harness that declares classifyServeFailure declares a function (optional in the contract)', verdictOf(harnesses.list().every((h) => h.quota.classifyServeFailure === undefined || typeof h.quota.classifyServeFailure === 'function')));
 let contractErr = null; try { harnesses.register({ id: 'fake-psl', label: 'x', quota: { ...NULL_QUOTA, classifyServeFailure: 'no' } }); } catch (e) { contractErr = e.message; } finally { try { harnesses.unregister?.('fake-psl'); } catch { } }
-ck('contract: a non-function classifyServeFailure is refused', /classifyServeFailure must be a function/.test(contractErr || ''));
+ck('contract: a non-function classifyServeFailure is refused', verdictOf(/classifyServeFailure must be a function/.test(contractErr || '')));
 
 // ── §2 THE PERSISTED RECORD ─────────────────────────────────────────────────
 console.log('§2 the record lives on the account, through the atomic writer');
@@ -69,16 +69,16 @@ await am2.displaySettled();   // B-360d: a store just built reads its folders of
 const row = am2.list().accounts.find((a) => a.id === U);
 ck('the roster row carries `serve`; the note and the login are KEPT (nothing to re-add after renewal)', row.serve?.state === 'lapsed' && row.note === '0248 08 Canceled' && row.loggedIn === true && !('serve' in am2.list().accounts.find((a) => a.id === M)));
 let bad = []; for (const s of [{ state: 'gone', since: 1, lastFail: 1 }, { state: 'lapsed', since: 0, lastFail: 1 }, { state: 'lapsed', since: 1 }]) { try { am2.setServeState(U, s); bad.push('accepted'); } catch { bad.push('refused'); } }
-ck('the writer refuses an unknown state / a missing instant (a closed shape)', bad.every((x) => x === 'refused') && am2.serveStateOf(U)?.since === T0);
+ck('the writer refuses an unknown state / a missing instant (a closed shape)', gateOf(bad.every((x) => x === 'refused')) && am2.serveStateOf(U)?.since === T0);
 const P = am2.createPool({ name: '全部', members: [U, M] }).id;
-ck('pool MEMBERSHIP is untouched by a lapse', JSON.stringify(am2.poolMembership(P)) === JSON.stringify([U, M]) || (Array.isArray(am2.poolMembership(P)) && am2.poolMembership(P).includes(U)));
+ck('pool MEMBERSHIP is untouched by a lapse', JSON.stringify(am2.poolMembership(P)) === JSON.stringify([U, M]) || (gateOf(Array.isArray(am2.poolMembership(P))) && verdictOf(am2.poolMembership(P).includes(U))));
 
 // ── §3 THE ENGINE'S TWO FUNCTIONS, RUN FOR REAL ─────────────────────────────
 console.log('§3 memberServeLapsed / noteMemberServeFailure on a scratch store');
 const ENG = read('src/server/usage-pool-engine.js');
 const i0 = ENG.indexOf('function ownReading(id) {'), i1 = ENG.indexOf('\n/** A RENEWED SUBSCRIPTION\'S FIRST ANSWER');
 const SLICE = i0 > 0 && i1 > i0 ? ENG.slice(i0, i1) : '';
-ck('the engine declares ownReading + memberServeLapsed + noteMemberServeFailure together, before the renewal rung', /function memberServeLapsed\(id, \{ verified = false \} = \{\}\)/.test(SLICE) && /function noteMemberServeFailure\(/.test(SLICE));
+ck('the engine declares ownReading + memberServeLapsed + noteMemberServeFailure together, before the renewal rung', gateOf(/function memberServeLapsed\(id, \{ verified = false \} = \{\}\)/.test(SLICE)) && verdictOf(/function noteMemberServeFailure\(/.test(SLICE)));
 const PA = require(path.join(REPO, 'src/account-pool-auto.js'));
 const CACHE = path.join(SCR, 'usage-cache'); fs.mkdirSync(CACHE);
 const NUM = { fiveHour: { utilization: 0.4, resetsAt: 1791100000 }, sevenDay: { utilization: 0.6, resetsAt: 1791500000 } };
@@ -101,7 +101,7 @@ ck('a lapse answer opens an EPISODE: the record is persisted (state lapsed, sinc
 ck('…said ONCE: one journal line + one For-you item (origin pool, notice, the member\'s name), its id kept on the record',
   E.lines.filter((l) => /\[pool\] serve: UCI Max .* subscription inactive/.test(l)).length === 1 && E.todos.length === 1 && E.todos[0].origin === 'pool' && E.todos[0].kind === 'notice' && E.todos[0].i18n?.text?.params?.account === 'UCI Max' && r1.todoId === E.todos[0].id);
 ck('…and SAYS WHAT IS TRUE under the default usage-refresh setting (manual: nothing asks it by itself — "after renewing, press Re-check")',
-  /^UCI Max's subscription is no longer active \(since .+\): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents$/.test(E.todos[0].text) && /Nothing asks it by itself/.test(E.todos[0].detail) && !/by itself once|hourly/.test(E.todos[0].text));
+  gateOf(/^UCI Max's subscription is no longer active \(since .+\): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents$/.test(E.todos[0].text)) && gateOf(/Nothing asks it by itself/.test(E.todos[0].detail)) && !/by itself once|hourly/.test(E.todos[0].text));
 const lastFail1 = r1.lastFail;
 await new Promise((r) => setTimeout(r, 5));
 const v2 = E.noteMemberServeFailure(U, { message: PROD }, { source: 'a usage check' });
@@ -130,10 +130,10 @@ am2.setServeState(U, { ...r2 });
 writeReading(U, r2.lastFail + 120e3, { numbers: { ...NUM, fiveHour: { utilization: 0.01, resetsAt: 1791900000 } } });
 const E2 = build(SLICE);
 ck('numbers that MOVED after the failure clear it: null, record removed, one "answered again" line, the For-you item done',
-  E2.memberServeLapsed(U) === null && am2.serveStateOf(U) === null && E2.lines.filter((l) => /\[pool\] serve: UCI Max .* answered again/.test(l)).length === 1 && E2.events.some(([k]) => k === 'pool-member-serve-restored'));
+  E2.memberServeLapsed(U) === null && am2.serveStateOf(U) === null && E2.lines.filter((l) => /\[pool\] serve: UCI Max .* answered again/.test(l)).length === 1 && verdictOf(E2.events.some(([k]) => k === 'pool-member-serve-restored')));
 const E3 = build(SLICE, { setting: 'auto-cli' });
 ck('…a NEW lapse after that is a NEW episode; under accounts.onDemandQuotaRefresh = auto-cli its words say the hourly check is asking',
-  E3.noteMemberServeFailure(U, { message: PROD })?.episode === true && E3.todos.length === 1 && /it rejoins by itself once it answers again \(checked about hourly\) — Re-check it in Manage Agents$/.test(E3.todos[0].text) && /every 30–60 min/.test(E3.todos[0].detail));
+  E3.noteMemberServeFailure(U, { message: PROD })?.episode === true && E3.todos.length === 1 && gateOf(/it rejoins by itself once it answers again \(checked about hourly\) — Re-check it in Manage Agents$/.test(E3.todos[0].text)) && verdictOf(/every 30–60 min/.test(E3.todos[0].detail)));
 am2.setServeState(U, null);
 
 // verify r2 ②: under 'off' the ⟳ route refuses (403) — the words NAME the setting instead of sending the owner to Re-check
@@ -141,22 +141,22 @@ am2.setServeState(U, null);
 const EO = build(SLICE, { setting: 'off' });
 EO.noteMemberServeFailure(U, { message: PROD });
 ck('r2 ② under accounts.onDemandQuotaRefresh = off the item NAMES the setting — by its title in Settings, «Claude usage refresh» — and never says Re-check asks the CLI',
-  EO.todos.length === 1 && /usage refresh is off: its chip in Manage Agents turns it on to Re-check, or run a turn on it directly$/.test(EO.todos[0].text) && /Claude usage refresh is Off in Settings/.test(EO.todos[0].detail) && !/asks the CLI once/.test(EO.todos[0].detail));
+  EO.todos.length === 1 && gateOf(/usage refresh is off: its chip in Manage Agents turns it on to Re-check, or run a turn on it directly$/.test(EO.todos[0].text)) && gateOf(/Claude usage refresh is Off in Settings/.test(EO.todos[0].detail)) && !/asks the CLI once/.test(EO.todos[0].detail));
 const OFFMUT = SLICE.replace("todos.add('accounts', mode === 'off' ? {", "todos.add('accounts', false ? {");
 am2.setServeState(U, null);
 const EOM = build(OFFMUT, { setting: 'off' }); EOM.noteMemberServeFailure(U, { message: PROD });
-ck('CONTROL (patched copy without the off branch): under Off the item tells the owner to press Re-check — the press the route refuses', OFFMUT !== SLICE && /press Re-check on its row in Manage Agents$/.test((EOM.todos[0] || {}).text || ''));
+ck('CONTROL (patched copy without the off branch): under Off the item tells the owner to press Re-check — the press the route refuses', OFFMUT !== SLICE && verdictOf(/press Re-check on its row in Manage Agents$/.test((EOM.todos[0] || {}).text || '')));
 // verify r2 ③: a subscription NO pool lists gets no pool words
 am2.setServeState(U, null);
 const SOLO = am2.createSubscription({ name: 'Solo Max' }).id; login(am2, SOLO);
 const ES = build(SLICE);
 const vs = ES.noteMemberServeFailure(SOLO, { message: PROD });
 ck('r2 ③ a subscription NO pool lists: the lapse is recorded (its roster row says it) but NO pool-worded For-you item; the journal says no pool lists it',
-  vs?.episode === true && am2.serveStateOf(SOLO)?.state === 'lapsed' && ES.todos.length === 0 && ES.lines.some((l) => /no pool lists it; its conversations fail/.test(l)) && !ES.lines.some((l) => /the pool skips it/.test(l)));
+  vs?.episode === true && am2.serveStateOf(SOLO)?.state === 'lapsed' && ES.todos.length === 0 && gateOf(ES.lines.some((l) => /no pool lists it; its conversations fail/.test(l))) && !ES.lines.some((l) => /the pool skips it/.test(l)));
 const SOLOMUT = SLICE.replace('const item = !pooled ? null : todos', 'const item = false ? null : todos');
 am2.setServeState(SOLO, null);
 const ESM = build(SOLOMUT); ESM.noteMemberServeFailure(SOLO, { message: PROD });
-ck('CONTROL (patched copy with the pooled branch forced): "Solo Max\'s … the pool skips it" is filed for an account no pool lists', SOLOMUT !== SLICE && /^Solo Max's .*the pool skips it/.test((ESM.todos[0] || {}).text || ''));
+ck('CONTROL (patched copy with the pooled branch forced): "Solo Max\'s … the pool skips it" is filed for an account no pool lists', SOLOMUT !== SLICE && verdictOf(/^Solo Max's .*the pool skips it/.test((ESM.todos[0] || {}).text || '')));
 am2.setServeState(U, { state: 'lapsed', since: Date.now(), why: 'x', lastFail: Date.now() });
 const rowsNow = am2.list().accounts;
 ck('accounts.list() carries inPools beside serve (true for a pool member, false for an account no pool lists)', rowsNow.find((x) => x.id === U)?.inPools === true && rowsNow.find((x) => x.id === SOLO)?.inPools === false);
@@ -190,22 +190,22 @@ ck(`CONTROL: without the lapse dep the same failures back off to hours (${ctl.n}
 console.log('§5 wiring');
 const UR = read('src/usage-routes.js'), SRV = read('server.js'), ACL = read('src/server/auto-cli-loop.js');
 const prl = (ENG.match(/\nfunction poolReadLogin\(\) \{[\s\S]*?\n\}\n/) || [''])[0];
-ck('poolReadLogin — the reader EVERY gate consults — folds the record in as `serve` (never as a login state)', /const sv = memberServeLapsed\(id\); if \(sv\) st = \{ \.\.\.\(st \|\| \{ state: 'unknown'/.test(prl) && /serve: sv \}/.test(prl));
+ck('poolReadLogin — the reader EVERY gate consults — folds the record in as `serve` (never as a login state)', gateOf(/const sv = memberServeLapsed\(id\); if \(sv\) st = \{ \.\.\.\(st \|\| \{ state: 'unknown'/.test(prl)) && verdictOf(/serve: sv \}/.test(prl)));
 const hpm = (ENG.match(/\nfunction healthyPoolMembers\(poolId\) \{[\s\S]*?\n\}\n/) || [''])[0];
-ck('healthyPoolMembers (the act list) drops a lapsed member with NO fallback — like a dead login', /return \(!st \|\| st\.usable\) && !memberServeLapsed\(m\.id\);/.test(hpm) && /return ok\.length \? ok : usable;/.test(hpm));
+ck('healthyPoolMembers (the act list) drops a lapsed member with NO fallback — like a dead login', gateOf(/return \(!st \|\| st\.usable\) && !memberServeLapsed\(m\.id\);/.test(hpm)) && verdictOf(/return ok\.length \? ok : usable;/.test(hpm)));
 const npa = (ENG.match(/\nfunction notePoolAuthFailure\(session, sid, info = \{\}\) \{[\s\S]*?\n\}\n/) || [''])[0];
 ck('notePoolAuthFailure: a lapse is recorded durably and NEVER sets the 10-minute mark; the 10-minute path is unchanged for the rest',
-  /classifyServeFailure\?\.\(info\)/.test(npa) && /noteMemberServeFailure\(memberId, info, \{/.test(npa) && /if \(!lapsed && !memberAuthFailed\(memberId\)\) \{\n\s*_memberAuthFail\.set\(memberId, \{ at: now, reason: why, tok: credsTokenSig\(memberId\) \}\);/.test(npa)
-  && /const AUTH_FAIL_TTL_MS = 10 \* 60e3;/.test(ENG) && /if \(credsTokenSig\(id\) !== m\.tok\) \{ _memberAuthFail\.delete\(id\); return false; \}/.test(ENG));
-ck('notePoolAuthFailure: no toast per attempt for a lapse (the episode\'s For-you item is the one voice)', /if \(!lapsed && now - \(_authNoticeAt\.get\(memberId\) \|\| 0\) > 60000\) \{/.test(npa) && /if \(lapsed\) \{ console\.log\(/.test(npa));
-ck('the evidence edge: onMemberReadingFresh asks memberServeLapsed first (a Re-check that answers re-admits at once)', /out\.reason = 'no-member'; return out; \}\n\s*try \{ memberServeLapsed\(memberId\); \} catch \{ \}/.test(ENG));
+  gateOf(/classifyServeFailure\?\.\(info\)/.test(npa)) && gateOf(/noteMemberServeFailure\(memberId, info, \{/.test(npa)) && gateOf(/if \(!lapsed && !memberAuthFailed\(memberId\)\) \{\n\s*_memberAuthFail\.set\(memberId, \{ at: now, reason: why, tok: credsTokenSig\(memberId\) \}\);/.test(npa))
+  && gateOf(/const AUTH_FAIL_TTL_MS = 10 \* 60e3;/.test(ENG)) && verdictOf(/if \(credsTokenSig\(id\) !== m\.tok\) \{ _memberAuthFail\.delete\(id\); return false; \}/.test(ENG)));
+ck('notePoolAuthFailure: no toast per attempt for a lapse (the episode\'s For-you item is the one voice)', gateOf(/if \(!lapsed && now - \(_authNoticeAt\.get\(memberId\) \|\| 0\) > 60000\) \{/.test(npa)) && verdictOf(/if \(lapsed\) \{ console\.log\(/.test(npa)));
+ck('the evidence edge: onMemberReadingFresh asks memberServeLapsed first (a Re-check that answers re-admits at once)', verdictOf(/out\.reason = 'no-member'; return out; \}\n\s*try \{ memberServeLapsed\(memberId\); \} catch \{ \}/.test(ENG)));
 ck('the ⟳ route: a failed panel on a lapsed member answers lapsed and never falls to the token ladder; the panel\'s failed answer reaches the census',
-  /if \(!cliOk && !isGlobal && typeof app\.locals\.memberServeLapsed === 'function' && app\.locals\.memberServeLapsed\(key\)\) \{\n\s*if \(refusedByName\) return res\.json\(refusalAnswer\(refusedByName\)\);\n\s*const refused = !!\(pv && pv\.outcome === 'write-refused' && pv\.code === 'identity' && pv\.at >= t0\);/.test(UR) // (acceptance r3: a door's refusal BY NAME first — the lapsed sentence only after a panel ran) && /app\.locals\.noteMemberServeFailure\?\.\(key, \{ message: /.test(UR)
-  && /app\.locals\.memberServeLapsed = memberServeLapsed;/.test(ENG) && /app\.locals\.noteMemberServeFailure = \(id, info\) => noteMemberServeFailure\(id, info, \{ source: 'a usage check' \}\);/.test(ENG));
-ck('server.js hands memberServeLapsed to the auto-cli loop; the loop paces a lapsed member by the idle threshold', /createAutoCliLoop\(\{ serverSetting, accounts, autoCliReady, memberServeLapsed,/.test(SRV) && /const lapsed = !!\(d\.memberServeLapsed && d\.memberServeLapsed\(a\.id\)\);/.test(ACL));
+  gateOf(/if \(!cliOk && !isGlobal && typeof app\.locals\.memberServeLapsed === 'function' && app\.locals\.memberServeLapsed\(key\)\) \{\n\s*if \(refusedByName\) return res\.json\(refusalAnswer\(refusedByName\)\);\n\s*const refused = !!\(pv && pv\.outcome === 'write-refused' && pv\.code === 'identity' && pv\.at >= t0\);/.test(UR)) // (acceptance r3: a door's refusal BY NAME first — the lapsed sentence only after a panel ran) && /app\.locals\.noteMemberServeFailure\?\.\(key, \{ message: /.test(UR)
+  && gateOf(/app\.locals\.memberServeLapsed = memberServeLapsed;/.test(ENG)) && verdictOf(/app\.locals\.noteMemberServeFailure = \(id, info\) => noteMemberServeFailure\(id, info, \{ source: 'a usage check' \}\);/.test(ENG)));
+ck('server.js hands memberServeLapsed to the auto-cli loop; the loop paces a lapsed member by the idle threshold', gateOf(/createAutoCliLoop\(\{ serverSetting, accounts, autoCliReady, memberServeLapsed,/.test(SRV)) && verdictOf(/const lapsed = !!\(d\.memberServeLapsed && d\.memberServeLapsed\(a\.id\)\);/.test(ACL)));
 ck('the panel\'s renewal rung (verify r1 ③): a lapsed member\'s phase-only refusal is handed to reanchorLapsedMember BEFORE the refusal branch, and a verified write is the evidence',
-  /if \(idv && idv\.refused && !isGlobal && typeof app\.locals\.reanchorLapsedMember === 'function' && app\.locals\.reanchorLapsedMember\(key, idv\)\) \{/.test(UR) && UR.indexOf('app.locals.reanchorLapsedMember(key, idv)') < UR.indexOf('  if (idv.refused) {')
-  && /if \(wrote\.ok && idv && idv\.verified && !isGlobal\) \{ try \{ app\.locals\.memberServeLapsed\?\.\(key, \{ verified: true \}\); \} catch \{ \} \}/.test(UR) && /app\.locals\.reanchorLapsedMember = reanchorLapsedMember;/.test(ENG));
+  gateOf(/if \(idv && idv\.refused && !isGlobal && typeof app\.locals\.reanchorLapsedMember === 'function' && app\.locals\.reanchorLapsedMember\(key, idv\)\) \{/.test(UR)) && UR.indexOf('app.locals.reanchorLapsedMember(key, idv)') < UR.indexOf('  if (idv.refused) {')
+  && gateOf(/if \(wrote\.ok && idv && idv\.verified && !isGlobal\) \{ try \{ app\.locals\.memberServeLapsed\?\.\(key, \{ verified: true \}\); \} catch \{ \} \}/.test(UR)) && verdictOf(/app\.locals\.reanchorLapsedMember = reanchorLapsedMember;/.test(ENG)));
 ck('the dwell belt exempts a lapse escape (hard death) like a dead login, in both passes', (ENG.match(/reason !== 'subscription-lapsed' && (ds|d)\.reason !== 'login-expired'/g) || []).length === 2);
 
 // ── §6 THE WORDS ────────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ const { memberState, gatherWords } = await import(path.join(REPO, 'src/lib/pool-
 const ms = memberState({ loggedIn: true, loginState: { state: 'live' }, usage: { sevenDay: { utilization: 0.1, resetsAt: Date.now() / 1000 + 86400 } }, serve: { state: 'lapsed', since: 1 } });
 ck('pool submenu: a lapsed member is worded "skipped — subscription inactive" (never greyed without words), even with a usable-looking cache', ms.code === 'lapsed' && ms.key === 'skipped — subscription inactive');
 ck('…a dead login still wins the row (order: not signed in › login expired › subscription inactive)', memberState({ loggedIn: true, loginState: { state: 'expired' }, serve: { state: 'lapsed' } }).code === 'login-expired');
-ck('gather refusal words a pin-lapsed target', /subscription inactive/.test(gatherWords({ success: false, code: 'target_cannot_serve', why: 'pin-lapsed', member: 'UCI Max' }, (k, p) => k.replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : '')), {}).text));
+ck('gather refusal words a pin-lapsed target', verdictOf(/subscription inactive/.test(gatherWords({ success: false, code: 'target_cannot_serve', why: 'pin-lapsed', member: 'UCI Max' }, (k, p) => k.replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : '')), {}).text)));
 const MA = read('src/lib/manage-agents.js');
 const cs = MA.indexOf('export function serveLapsedChipHtml('), ce = MA.indexOf('\n}\n', cs);
 const chipFn = new Function('t', 'escHtml', 'loginWhenText', 'ROSTER_ICONS', MA.slice(cs, ce + 2).replace(/^export /, '') + '\nreturn serveLapsedChipHtml;')(
@@ -223,19 +223,19 @@ const chip = chipFn({ id: 'sub-080ce98c7dca', serve: { state: 'lapsed', since: 1
 const chipAuto = chipFn({ id: 'sub-080ce98c7dca', serve: { state: 'lapsed', since: 1, why: 'x' } }, { mode: 'auto-cli' });
 const chipOff = chipFn({ id: 'sub-080ce98c7dca', serve: { state: 'lapsed', since: 1, why: 'x' } }, { mode: 'off' });
 const chipSolo = chipFn({ id: 'sub-solo', serve: { state: 'lapsed', since: 1, why: 'x' } }, { pooled: false });
-ck('r2 ② roster chip under Off: NO Re-check verb — the chip is the usage-refresh setting\'s door (lane ui-needs-a-button pick 5)', !/Re-check/.test(chipOff) && !/data-serve-recheck/.test(chipOff) && /data-serve-setting="accounts\.onDemandQuotaRefresh"/.test(chipOff) && /Usage refresh is off — click to turn it on/.test(chipOff));
-ck('r2 ③ roster chip for an account NO pool lists: no pool words (its conversations fail until it answers again)', !/pool/i.test(chipSolo) && /its conversations fail until it answers again/.test(chipSolo) && /· Re-check<\/span>$/.test(chipSolo));
-ck('roster chip title says what is true per setting (manual: nothing asks it by itself; auto-cli: it rejoins by itself)', /Nothing asks it by itself under the current usage-refresh setting/.test(chip) && !/rejoins by itself/.test(chip) && /rejoins by itself once it answers again/.test(chipAuto));
-ck('roster chip: "subscription inactive since {when} · Re-check", a Re-check button for THIS account, the why escaped', /subscription inactive since 10\/8\/26, 1:30 PM · Re-check<\/span>$/.test(chip) && /data-serve-recheck="sub-080ce98c7dca"/.test(chip) && /has &lt;disabled&gt; access/.test(chip) && chipFn({ id: 'x' }) === '' && chipFn({ id: 'x', serve: { state: 'other' } }) === '');
-ck('roster: the chip rides the login slot of a subscription row (outside the note\'s ellipsis box) and Re-check posts the existing ⟳ route', /\+ \(isSub && !selectedHost \? serveLapsedChipHtml\(a, \{ mode: this\.settings\?\.get\?\.\('accounts\.onDemandQuotaRefresh'\) \|\| 'manual', pooled: a\.inPools !== false \}\) : ''\);/.test(MA) && /else if \(r && r\.refused\) showToast\(/.test(MA) && /closest\?\.\('\.acct-serve-chip'\)/.test(MA) && /fetchJson\('\/api\/usage\/refresh', \{ method: 'POST', headers: \{ 'Content-Type': 'application\/json' \}, body: JSON\.stringify\(\{ account: target \}\) \}\)/.test(MA));
+ck('r2 ② roster chip under Off: NO Re-check verb — the chip is the usage-refresh setting\'s door (lane ui-needs-a-button pick 5)', !/Re-check/.test(chipOff) && !/data-serve-recheck/.test(chipOff) && gateOf(/data-serve-setting="accounts\.onDemandQuotaRefresh"/.test(chipOff)) && verdictOf(/Usage refresh is off — click to turn it on/.test(chipOff)));
+ck('r2 ③ roster chip for an account NO pool lists: no pool words (its conversations fail until it answers again)', !/pool/i.test(chipSolo) && gateOf(/its conversations fail until it answers again/.test(chipSolo)) && verdictOf(/· Re-check<\/span>$/.test(chipSolo)));
+ck('roster chip title says what is true per setting (manual: nothing asks it by itself; auto-cli: it rejoins by itself)', gateOf(/Nothing asks it by itself under the current usage-refresh setting/.test(chip)) && !/rejoins by itself/.test(chip) && verdictOf(/rejoins by itself once it answers again/.test(chipAuto)));
+ck('roster chip: "subscription inactive since {when} · Re-check", a Re-check button for THIS account, the why escaped', gateOf(/subscription inactive since 10\/8\/26, 1:30 PM · Re-check<\/span>$/.test(chip)) && gateOf(/data-serve-recheck="sub-080ce98c7dca"/.test(chip)) && gateOf(/has &lt;disabled&gt; access/.test(chip)) && chipFn({ id: 'x' }) === '' && chipFn({ id: 'x', serve: { state: 'other' } }) === '');
+ck('roster: the chip rides the login slot of a subscription row (outside the note\'s ellipsis box) and Re-check posts the existing ⟳ route', gateOf(/\+ \(isSub && !selectedHost \? serveLapsedChipHtml\(a, \{ mode: this\.settings\?\.get\?\.\('accounts\.onDemandQuotaRefresh'\) \|\| 'manual', pooled: a\.inPools !== false \}\) : ''\);/.test(MA)) && gateOf(/else if \(r && r\.refused\) showToast\(/.test(MA)) && gateOf(/closest\?\.\('\.acct-serve-chip'\)/.test(MA)) && verdictOf(/fetchJson\('\/api\/usage\/refresh', \{ method: 'POST', headers: \{ 'Content-Type': 'application\/json' \}, body: JSON\.stringify\(\{ account: target \}\) \}\)/.test(MA)));
 const hs = MA.indexOf("const serveChip = e.target.closest?.('.acct-serve-chip');"), hb = MA.indexOf('.then((r) => {', hs), he = MA.indexOf('\n          });', hb);
 const thenBody = hs > 0 && hb > hs && he > hb ? MA.slice(hb + '.then((r) => {'.length, he) : '';
 const runThen = (body, r, inPools = true) => { const toasts = []; new Function('r', 'showToast', 't', 'name', 'inPools', 'refresh', body)(r, (m, o) => toasts.push([m, (o && o.type) || null]), (k, p) => k.replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : '')), 'UCI Max', inPools, () => { }); return toasts; };
 const off403 = { error: 'on-demand quota refresh is disabled in Settings' };
 ck('r2 ② the chip handler toasts the ROUTE\'s own refusal (the 403 under Off), never "still does not answer"', JSON.stringify(runThen(thenBody, off403)) === JSON.stringify([['on-demand quota refresh is disabled in Settings', 'error']]));
-ck('…a lapsed "did not answer" still gets the plain words; an account no pool lists gets no pool words', /still does not answer — the pool keeps skipping it/.test(runThen(thenBody, { error: 'x', lapsed: true })[0][0]) && /still does not answer — its subscription stays inactive/.test(runThen(thenBody, { error: 'x', lapsed: true }, false)[0][0]));
+ck('…a lapsed "did not answer" still gets the plain words; an account no pool lists gets no pool words', gateOf(/still does not answer — the pool keeps skipping it/.test(runThen(thenBody, { error: 'x', lapsed: true })[0][0])) && verdictOf(/still does not answer — its subscription stays inactive/.test(runThen(thenBody, { error: 'x', lapsed: true }, false)[0][0])));
 const thenMut = thenBody.replace(/\n\s*else if \(r && r\.error && !r\.lapsed\) showToast\(String\(r\.error\), \{ type: 'error' \}\);[^\n]*/, '');
-ck('CONTROL (patched copy without the r.error branch): the 403 is reported as "still does not answer"', thenMut !== thenBody && /still does not answer/.test(runThen(thenMut, off403)[0][0]));
+ck('CONTROL (patched copy without the r.error branch): the 403 is reported as "still does not answer"', thenMut !== thenBody && verdictOf(/still does not answer/.test(runThen(thenMut, off403)[0][0])));
 const KEYS = ['skipped — subscription inactive', 'subscription inactive', 'subscription inactive since {when}', 'Re-check', '{name} answered — it is back in its pools', '{name} still does not answer — the pool keeps skipping it',
   'This account’s subscription no longer serves ({why}). The pool skips it and keeps its membership, note and readings.', 'This account’s subscription no longer serves ({why}); its conversations fail until it answers again.',
   'Usage refresh is off — click to turn it on, or run a turn on it directly.', 'It rejoins by itself once it answers again (checked about hourly). Click to check now.',
@@ -252,7 +252,7 @@ for (const lang of ['zh', 'ja']) {
   const ph = KEYS.filter((k) => dict[k] && JSON.stringify((k.match(/\{\w+\}/g) || []).sort()) !== JSON.stringify((dict[k].match(/\{\w+\}/g) || []).sort()));
   ck(`${lang}: every new word is translated with the same {placeholders}`, !miss.length && !ph.length);
 }
-ck('the For-you keys and the engine texts are the same sentences (the client words the item with t(key, params))', ENG.includes("i18nKey('{account}\\'s subscription is no longer active (since {since}): the pool skips it; it rejoins by itself once it answers again (checked about hourly) — Re-check it in Manage Agents')") && ENG.includes("i18nKey('{account}\\'s subscription is no longer active (since {since}): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents')"));
+ck('the For-you keys and the engine texts are the same sentences (the client words the item with t(key, params))', gateOf(ENG.includes("i18nKey('{account}\\'s subscription is no longer active (since {since}): the pool skips it; it rejoins by itself once it answers again (checked about hourly) — Re-check it in Manage Agents')")) && verdictOf(ENG.includes("i18nKey('{account}\\'s subscription is no longer active (since {since}): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents')")));
 
 // ── §7 THE REAL ENGINE (verify r1 ⑥): the money paths, each fix beside a PATCHED COPY that reverts it ──
 console.log('§7 the real engine: quotaVerdictFor, beforeAutoResumeFire, fallbackDefaultTarget, the evidence writers');
@@ -305,12 +305,12 @@ console.log('§7 the real engine: quotaVerdictFor, beforeAutoResumeFire, fallbac
   const v1 = await quiet(() => w1.eng.quotaVerdictFor(w1.P, { model: 'claude-opus-4-5' }));
   ck(`① CONTROL: before the lapse the pool verdict is "usable via UCI Max" (${v0.usable} via ${v0.via})`, v0.usable === true && v0.viaId === w1.A);
   ck(`① quotaVerdictFor never answers "usable via" a LAPSED member — usable false, armed at the others' real reset, the lapse named (${String(v1.reason).slice(0, 90)})`,
-    v1.usable === false && v1.blockedUntil > Date.now() && /UCI Max: subscription inactive/.test(v1.reason));
+    v1.usable === false && v1.blockedUntil > Date.now() && verdictOf(/UCI Max: subscription inactive/.test(v1.reason)));
   const wN = mkWorld(NO_VERDICT); wN.lapse(wN.A);
   const vN = await quiet(() => wN.eng.quotaVerdictFor(wN.P, { model: 'claude-opus-4-5' }));
   ck('① PATCHED COPY without the lapse refusal: "usable via UCI Max" — the billed continue into a member that cannot serve', vN.usable === true && vN.viaId === wN.A);
   const vd = await quiet(() => w1.eng.quotaVerdictFor(w1.A, { model: 'claude-opus-4-5' }));
-  ck('① a subscription bound DIRECTLY and lapsed is refused too (usable false, no timer heals it)', vd.usable === false && vd.blockedUntil === 0 && /subscription inactive/.test(vd.reason));
+  ck('① a subscription bound DIRECTLY and lapsed is refused too (usable false, no timer heals it)', vd.usable === false && vd.blockedUntil === 0 && verdictOf(/subscription inactive/.test(vd.reason)));
   // the pre-fire gate (auto-resume asks it before it spends a turn): a conversation walled on Mat Max
   const sid = 'sess-walled';
   w1.sessions.set(sid, { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, _accountId: w1.P, _servedModel: 'claude-opus-4-5', name: 'walled', createdAt: Date.now() - 6e5 });
@@ -390,7 +390,7 @@ console.log('§7 the real engine: quotaVerdictFor, beforeAutoResumeFire, fallbac
   const fb6 = await quiet(() => w6.eng.fallbackDefaultTarget(w6.P, w6.B));
   const sp6 = await quiet(() => spawnErr(w6.am, w6.P, w6.eng, 'n-1'));
   ck(`r2 ① removal leaves only a lapsed member: fallbackDefaultTarget null, the default STAYS (not onto UCI Max), journal "…is signed in and active", a new conversation REFUSED by name (${sp6.code})`,
-    fb6 === null && w6.am.poolCurrent(w6.P) !== w6.A && logs6.some((l) => /stays — no member the pool lists is signed in and active/.test(l)) && sp6.code === 'all_lapsed' && /inactive subscription — renew one and press Re-check/.test(sp6.msg));
+    fb6 === null && w6.am.poolCurrent(w6.P) !== w6.A && gateOf(logs6.some((l) => /stays — no member the pool lists is signed in and active/.test(l))) && sp6.code === 'all_lapsed' && verdictOf(/inactive subscription — renew one and press Re-check/.test(sp6.msg)));
   const w6r = mkWorld(ENG_R2); w6r.lapse(w6r.A); await removeAllBut(w6r);
   ck('r2 ① PATCHED COPY (r2\'s rank-last soonestUsableMember): after the same removal fallbackDefaultTarget hands out the lapsed UCI Max and the default lands on it', (await quiet(() => w6r.eng.fallbackDefaultTarget(w6r.P, w6r.B))) === w6r.A && w6r.am.poolCurrent(w6r.P) === w6r.A);
   // (b) a single-member pool whose only member lapsed
@@ -413,9 +413,9 @@ console.log('§7 the real engine: quotaVerdictFor, beforeAutoResumeFire, fallbac
   // (c) with another active member listed, the store re-points the lapsed default instead of refusing
   const w8 = mkWorld(REAL); w8.am.setPoolTarget(w8.P, w8.A); w8.lapse(w8.A);
   const s8 = await quiet(() => spawnErr(w8.am, w8.P, w8.eng, 'n-4'));
-  ck('r2 ① a lapsed default with an active member listed: the conversation starts on the active one (never on UCI Max), and the default moves off it', s8.target && s8.target !== w8.A && w8.am.poolCurrent(w8.P) !== w8.A);
+  ck('r2 ① a lapsed default with an active member listed: the conversation starts on the active one (never on UCI Max), and the default moves off it', gateOf(s8.target) && s8.target !== w8.A && w8.am.poolCurrent(w8.P) !== w8.A);
 }
 
 fs.rmSync(SCR, { recursive: true, force: true });
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

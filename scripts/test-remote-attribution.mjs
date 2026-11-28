@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { UsageHistory } = require(REPO + '/src/usage-history.js');
-let pass=0, fail=0; const ok=(c,n,e)=>{if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
+let pass=0, fail=0; const ok=(c,n,e)=>{ if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-remattr-'));
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-remattr-home-'));

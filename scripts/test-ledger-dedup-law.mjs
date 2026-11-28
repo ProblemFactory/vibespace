@@ -36,7 +36,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); if (d !== undefined) console.error('    ' + JSON.stringify(d).slice(0, 600)); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); if (d !== undefined) console.error('    ' + JSON.stringify(d).slice(0, 600)); } };
 const legMs = [];
 const leg = async (name, fn) => { const t0 = performance.now(); try { await fn(); } catch (e) { fail++; console.error(`  ✗ ${name} — threw: ${String((e && e.stack) || e).split('\n').slice(0, 3).join(' | ')}`); } legMs.push(`${name} ${Math.round(performance.now() - t0)} ms`); };
 const tick = () => new Promise((r) => setImmediate(r));
@@ -142,7 +142,7 @@ await leg('②', async () => {
   ok(dev.calls.scans[1].events === 0 && dev.calls.scans[1].useHub === true && s2 === s1, `② run 2 with the device commit REFUSED: the hub's cursor was walked from — ${dev.calls.scans[1].events} events, the shard ${s1} → ${s2} B (the base re-read the whole window and appended it again)`, { scans: dev.calls.scans, s1, s2 });
   ok(dev.calls.fsWrite === 0 && dev.calls.fsRename === 0 && !fs.existsSync(dev.deviceCursor), `② no device-side cursor write at all — nothing went to the hub-act gate (fsWrite ${dev.calls.fsWrite}, fsRename ${dev.calls.fsRename})`);
   const hc = w.uh.hostCursorOf?.(w.hid); await w.uh.whenHostCursorWritten(w.hid);   // B-0248 unit 4: the cursor file is the store writer's — on disk once its write lands
-  ok(hc && hc.v === 1 && hc.cursors && Object.keys(hc.cursors).length === 1 && fs.existsSync(path.join(w.d, 'usage-history', '_host-cursors', w.hid + '.json')), '② the hub keeps the cursor beside the ledger (_host-cursors/<host>.json — the walker\'s own cursor map + the newest ts / rid)', hc && { since: hc.since, lastTs: hc.lastTs });
+  ok(gateOf(hc) && hc.v === 1 && gateOf(hc.cursors) && Object.keys(hc.cursors).length === 1 && verdictOf(fs.existsSync(path.join(w.d, 'usage-history', '_host-cursors', w.hid + '.json'))), '② the hub keeps the cursor beside the ledger (_host-cursors/<host>.json — the walker\'s own cursor map + the newest ts / rid)', hc && { since: hc.since, lastTs: hc.lastTs });
   H.add(3);
   const h3 = await w.harvest();
   ok(dev.calls.scans[2].events === 3 && h3.res.appended === 3, `② new transcript records: the next run brings exactly them (${dev.calls.scans[2].events})`, h3.res);
@@ -184,18 +184,18 @@ await leg('③', async () => {
   }
   const items = w.hubItems();
   ok(items.length === 1 && items[0].status === 'open' && items[0].action.standing === true && items[0].action.count === 20, `③ 20 refusals of the usage harvest ⇒ ${items.length} item(s) (the base: 20 cards) — ONE standing item, open, its count in place (${items[0] && items[0].action.count})`, items.map((i) => ({ s: i.status, a: i.action })));
-  ok(codes[0] === 'ask_expired' && codes.slice(1).every((c) => c === 'ask_standing'), '③ its first act was held the 60 s and expired; every later one refused AT ONCE (ask_standing) — none held', codes);
-  ok(items[0] && /^Usage of mac1 is not being recorded/.test(items[0].text) && !items[0].expiresAt && /Refused 20 time\(s\)/.test(items[0].detail), '③ the item names the consequence («Usage of mac1 is not being recorded»), never expires, says how often and when last', items[0] && [items[0].text, items[0].detail]);
+  ok(codes[0] === 'ask_expired' && verdictOf(codes.slice(1).every((c) => c === 'ask_standing')), '③ its first act was held the 60 s and expired; every later one refused AT ONCE (ask_standing) — none held', codes);
+  ok(gateOf(items[0]) && gateOf(/^Usage of mac1 is not being recorded/.test(items[0].text)) && !items[0].expiresAt && verdictOf(/Refused 20 time\(s\)/.test(items[0].detail)), '③ the item names the consequence («Usage of mac1 is not being recorded»), never expires, says how often and when last', items[0] && [items[0].text, items[0].detail]);
   // Allow once ⇒ the NEXT act goes; the one after asks again — on the SAME item (reopened), never a second
   await w.asker.answer(items[0].action.askId, { answer: 'once', by: 'user', answeredBy: 'human:0123456789ab' });
   const g1 = await w.asker.check(w.hid, HARVEST_WRITE);
   const p2 = w.asker.check(w.hid, HARVEST_WRITE); await tick(); w.clock.t += 61000; w.fire(); await p2;
-  ok(g1 && g1.ok === true && w.hubItems().length === 1 && w.hubItems()[0].status === 'open', '③ Allow once ⇒ the next act goes; the one after stands again on the SAME item (reopened), never a second', { g1, n: w.hubItems().length });
+  ok(gateOf(g1) && g1.ok === true && w.hubItems().length === 1 && w.hubItems()[0].status === 'open', '③ Allow once ⇒ the next act goes; the one after stands again on the SAME item (reopened), never a second', { g1, n: w.hubItems().length });
   // a restart: the open standing item keeps standing — no new card for the next life (a crash loop is not a card per life)
   const a2 = ASK.create({ hosts: w.hosts, userTodos: w.todos, log: () => { }, now: () => w.clock.t, instanceKind: 'cluster', settingOf: () => undefined, timers: { set: () => ({}), clear: () => { } } });
   a2.reconcile();
   const g3 = await a2.check(w.hid, HARVEST_WRITE);
-  ok(g3 && g3.code === 'ask_standing' && w.hubItems().length === 1 && w.hubItems()[0].status === 'open', '③ after a restart the standing item still stands: the next act is refused at once, no new card', g3);
+  ok(gateOf(g3) && g3.code === 'ask_standing' && w.hubItems().length === 1 && w.hubItems()[0].status === 'open', '③ after a restart the standing item still stands: the next act is refused at once, no new card', g3);
 });
 await leg('③ the cap', async () => {
   // the For-you cap: the expired go first, the open stay, a person's answered item outlives newer expired ones
@@ -212,9 +212,9 @@ await leg('③ the cap', async () => {
     return { u: u.id, ex, open, ids };
   };
   const c5 = cap('f3-cap5', 5, 4);
-  ok(c5.ids.size === 5 && !c5.ids.has(c5.ex[0]) && !c5.ids.has(c5.ex[1]) && c5.ids.has(c5.u) && c5.open.every((id) => c5.ids.has(id)), `③ a cap of 5 with 1 answered + 4 expired + 2 open ⇒ the two oldest EXPIRED go; the open and the owner's answered item stay`, [...c5.ids]);
+  ok(c5.ids.size === 5 && !c5.ids.has(c5.ex[0]) && !c5.ids.has(c5.ex[1]) && gateOf(c5.ids.has(c5.u)) && verdictOf(c5.open.every((id) => c5.ids.has(id))), `③ a cap of 5 with 1 answered + 4 expired + 2 open ⇒ the two oldest EXPIRED go; the open and the owner's answered item stay`, [...c5.ids]);
   const c1000 = cap('f3-cap1000', undefined, 998);
-  ok(c1000.ids.size === 1000 && c1000.ids.has(c1000.u) && !c1000.ids.has(c1000.ex[0]) && c1000.open.every((id) => c1000.ids.has(id)), '③ the real 1000 cap: 998 expired asks + 2 open never evict the owner\'s older answered item (base: it went first — oldest resolved)');
+  ok(c1000.ids.size === 1000 && gateOf(c1000.ids.has(c1000.u)) && !c1000.ids.has(c1000.ex[0]) && verdictOf(c1000.open.every((id) => c1000.ids.has(id))), '③ the real 1000 cap: 998 expired asks + 2 open never evict the owner\'s older answered item (base: it went first — oldest resolved)');
 });
 
 console.log('④ F4 THE GROWTH ALARM — a shard out of shape pauses its machine and is said');
@@ -228,21 +228,21 @@ await leg('④', async () => {
   uh.onShape = (e) => said.push(e);
   uh.dedupShard = (f, o) => { remedy = { f: path.basename(f), why: o && o.why }; const p = new Promise(() => { }); if (uh._dedupJobs) uh._dedupJobs.set(f, p); return p; }; // the remedy is asked (in flight, as the real one registers); its 3 GiB pass is ⑦'s to prove
   const [r] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
-  ok(r.paused && r.appended === 0 && size(sh) === 3 * GiB, `④ a 3 GiB shard: ${size(sh) - 3 * GiB} B appended, the machine's ingest PAUSED (the base appended the batch)`, r);
+  ok(gateOf(r.paused) && r.appended === 0 && size(sh) === 3 * GiB, `④ a 3 GiB shard: ${size(sh) - 3 * GiB} B appended, the machine's ingest PAUSED (the base appended the batch)`, r);
   const pz = (uh.ingestPaused?.() || [])[0];
-  ok(said.length === 1 && said[0].kind === 'paused' && pz && pz.host === 'host-m' && pz.shard === SHARD && pz.why === 'size' && remedy && remedy.f === SHARD, '④ said ONCE (onShape: paused — what, how big, which machine) + the remedy started (the shard\'s streaming dedup)', { said, pz, remedy });
+  ok(said.length === 1 && said[0].kind === 'paused' && gateOf(pz) && pz.host === 'host-m' && pz.shard === SHARD && pz.why === 'size' && gateOf(remedy) && remedy.f === SHARD, '④ said ONCE (onShape: paused — what, how big, which machine) + the remedy started (the shard\'s streaming dedup)', { said, pz, remedy });
   const w = LSN && LSN.noticeOf(said[0] || {});
   // r4 (a pause is ONE month's, its rows HELD at the hub): the words name the month held, and how many of its events
-  ok(w && /Usage of M for 2026-10 is held/.test(w.text) && /3\.00 GiB/.test(w.detail) && /events-2026-10/.test(w.detail) && /Which machine: M/.test(w.detail) && /50 events of 2026-10 held/.test(w.detail) && /What to do/.test(w.detail), '④ the notice names what (the file), how big, which machine, what is held (50 events of 2026-10), what happens now and what to do', w && [w.text, w.detail]);
+  ok(gateOf(w) && gateOf(/Usage of M for 2026-10 is held/.test(w.text)) && gateOf(/3\.00 GiB/.test(w.detail)) && gateOf(/events-2026-10/.test(w.detail)) && gateOf(/Which machine: M/.test(w.detail)) && gateOf(/50 events of 2026-10 held/.test(w.detail)) && verdictOf(/What to do/.test(w.detail)), '④ the notice names what (the file), how big, which machine, what is held (50 events of 2026-10), what happens now and what to do', w && [w.text, w.detail]);
   const [r2] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
   // r4 re-derived: it PINNED «held 100 events on the device» (the same 50 refused twice); it PINS NOW the same 50 held ONCE
   // at the hub (the re-send is 50 duplicates), so nothing new to say
-  ok(r2.paused && r2.paused.held === 50 && r2.duplicates === 50 && said.length === 1, '④ a second batch (the same 50 re-sent): still paused, held ONCE at the hub (50 held, 50 duplicates), not said again');
+  ok(gateOf(r2.paused) && r2.paused.held === 50 && r2.duplicates === 50 && said.length === 1, '④ a second batch (the same 50 re-sent): still paused, held ONCE at the hub (50 held, 50 duplicates), not said again');
   fs.truncateSync(sh, small); // back in shape (what the dedup leaves)
   const [r3] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(100, 50)));
   // r8: the drain runs on the hold's async road — the batch is queued in the hold behind it (held 50, acked) and recorded in
   // order once it ends (the tail below); r7 drained a small hold inline and appended the batch after it (appended 50)
-  ok((r3.appended === 50 || (r3.held === 50 && r3.ack)) && said.length === 2 && said[1].kind === 'resumed' && !(uh.ingestPaused?.() || []).length, `④ back in shape ⇒ recorded again (${r3.appended ? `${r3.appended} appended` : `${r3.held} held behind the drain, acked`}), said (resumed), the pause gone from the Usage window's state`, { r3, said: said.map((e) => e.kind) });
+  ok((r3.appended === 50 || (r3.held === 50 && gateOf(r3.ack))) && said.length === 2 && said[1].kind === 'resumed' && !(uh.ingestPaused?.() || []).length, `④ back in shape ⇒ recorded again (${r3.appended ? `${r3.appended} appended` : `${r3.held} held behind the drain, acked`}), said (resumed), the pause gone from the Usage window's state`, { r3, said: said.map((e) => e.kind) });
   const tail = fs.readFileSync(sh, 'utf-8').split('\n').filter(Boolean).slice(3).map((l) => JSON.parse(l).rid);
   const want = [...Array.from({ length: 47 }, (_, k) => 3 + k), ...Array.from({ length: 50 }, (_, k) => 100 + k)].map((i) => 'h:host-m:req_' + String(i).padStart(8, '0'));
   ok(tail.join() === want.join(), `④ r4: the 50 events held while paused are in the ledger first, in order — the 3 it already held (req 0–2) cost 0 bytes, the ledger law — then the batch that found it in shape (${tail.length} rows after the 3)`, tail.slice(0, 2).concat(tail.slice(45, 49)));
@@ -252,7 +252,7 @@ await leg('④', async () => {
   fs.writeFileSync(shardOf(d2), rows.join('\n') + '\n');
   const u2 = newUh(d2); u2.shapeRatioMinBytes = 0; u2.dedupShard = () => new Promise(() => { });
   const [r4] = await quiet(() => u2.ingestRemoteEvents('host-m', 'M', batchOf(5000, 5)));
-  ok(r4.paused && r4.paused.why === 'ratio' && r4.paused.ratio >= 2.9, `④ a shard ~3× its distinct rows ⇒ paused (why ratio, ${r4.paused && r4.paused.ratio}×)`, r4);
+  ok(gateOf(r4.paused) && r4.paused.why === 'ratio' && r4.paused.ratio >= 2.9, `④ a shard ~3× its distinct rows ⇒ paused (why ratio, ${r4.paused && r4.paused.ratio}×)`, r4);
 });
 
 console.log('⑤ F5 THE MEMORY NOTICE NAMES THE STRANGER');
@@ -274,17 +274,17 @@ await leg('⑤', async () => {
   if (typeof SI.cmdlineHeadOf === 'function') { g.topCmd = SI.cmdlineHeadOf(Buffer.from('node\0')); g.rootCmd = SI.cmdlineHeadOf(Buffer.from(`runuser\0-u\0userq\0--\0bash\0-lc\0cd ~/vibespace && echo ${B64} | base64 -d | node\0`)); }
   const it = MP.pressureItem({ pct: 96, used: 30.1 * GiB, limit: 32 * GiB, groups });
   ok(g.kind === 'unknown' && g.topPid === 346 && g.rootPid === 339 && g.outside === true, `⑤ the stranger's group: its largest process pid ${g.topPid}, its tree's root pid ${g.rootPid} with no parent in the container (outside: ${g.outside})`, { kind: g.kind, topPid: g.topPid, rootPid: g.rootPid, outside: g.outside });
-  ok(/held by pid 346 \(node\) — not started by VibeSpace, an exec from outside the container/.test(it.text), `⑤ the item names it: pid, command line, «not started by VibeSpace — an exec from outside the container» (here: «${it.text.split('— the most is held by ')[1] || it.text}»; the base: «a process VibeSpace did not start: runuser (339)»)`, it.text);
-  ok(/pid 346 was started under pid 339: runuser -u userq -- bash -lc cd ~\/vibespace && echo /.test(it.detail) && it.detail.split('\n').every((l) => l.length <= 400) && !it.detail.includes(B64), '⑤ …and who started it: the root\'s command-line head, cut at 120 chars (the base64 payload never whole)', it.detail);
+  ok(verdictOf(/held by pid 346 \(node\) — not started by VibeSpace, an exec from outside the container/.test(it.text)), `⑤ the item names it: pid, command line, «not started by VibeSpace — an exec from outside the container» (here: «${it.text.split('— the most is held by ')[1] || it.text}»; the base: «a process VibeSpace did not start: runuser (339)»)`, it.text);
+  ok(gateOf(/pid 346 was started under pid 339: runuser -u userq -- bash -lc cd ~\/vibespace && echo /.test(it.detail)) && gateOf(it.detail.split('\n').every((l) => l.length <= 400)) && !it.detail.includes(B64), '⑤ …and who started it: the root\'s command-line head, cut at 120 chars (the base64 payload never whole)', it.detail);
   const tok = ['sk', '-an', 't-0123456789abcdefghijklmnop'].join(''); // a key SHAPE built at runtime (never a literal in the tree — push protection)
   const secret = SI.cmdlineHeadOf && SI.cmdlineHeadOf(Buffer.from(`curl\0-H\0Authorization: Bearer ${tok}\0https://x\0`));
-  ok(typeof secret === 'string' && !secret.includes(tok.slice(0, 16)) && /«redacted»/.test(secret), '⑤ a secret on a command line is redacted (secret-shapes, the one rule)', secret);
+  ok(typeof secret === 'string' && !secret.includes(tok.slice(0, 16)) && verdictOf(/«redacted»/.test(secret)), '⑤ a secret on a command line is redacted (secret-shapes, the one rule)', secret);
   const own = await (SI.cmdlineHead ? SI.cmdlineHead(process.pid) : Promise.resolve(null));
   // r10 (int361's train fact): /proc/<pid>/cmdline starts with argv[0] AS THE SPAWNER PASSED IT — `process.argv0`, a bare `node` or
   // the full path ci.mjs spawns (process.execPath); r1–r9 compared its basename, red under ci.mjs (green by hand)
-  ok(typeof own === 'string' && own.startsWith(String(process.argv0).slice(0, 100)) && own.length <= 120, '⑤ the shared reader on a live process: /proc/<pid>/cmdline, ≤ 120 chars', own);
+  ok(typeof own === 'string' && gateOf(own.startsWith(String(process.argv0).slice(0, 100))) && own.length <= 120, '⑤ the shared reader on a live process: /proc/<pid>/cmdline, ≤ 120 chars', own);
   const watch = fs.readFileSync(path.join(REPO, 'src/server/memory-pressure-watch.js'), 'utf8');
-  ok(/SI\.cmdlineHead\(g\.topPid\)/.test(watch) && !/['"`]\/cmdline/.test(watch.replace(/\/\/.*$/gm, '')), '⑤ the watch names strangers through sysinfo\'s reader (the shared module) — no /proc cmdline reader of its own');
+  ok(gateOf(/SI\.cmdlineHead\(g\.topPid\)/.test(watch)) && !/['"`]\/cmdline/.test(watch.replace(/\/\/.*$/gm, '')), '⑤ the watch names strangers through sysinfo\'s reader (the shared module) — no /proc cmdline reader of its own');
 });
 
 console.log('⑥ THE LATENT TWIN — the tail reader is bounded');
@@ -310,14 +310,14 @@ await leg('⑥', async () => {
   const warm = u2.warmStepped({ next: (fn) => q.push(fn) });
   const t0 = performance.now(); u2.sourceWatermarks(); const held = performance.now() - t0;
   const loaded = u2._evCache.events.length + u2._evCache.cold.n;
-  ok(loaded < lines.length && u2._evCache.pending && u2.ledgerLoading?.() && u2.ledgerLoading().bytesLeft > MiB, `⑥ a sync reader during a ${(size(shardOf(d2)) / MiB).toFixed(0)} MiB warm (past the takeover bound) does not take it over (${loaded} of ${lines.length} rows loaded, ${held.toFixed(0)} ms) and ledgerLoading() says what is left (base: the reader parses the whole rest in its own tick)`, { loaded, total: lines.length, held });
+  ok(loaded < lines.length && gateOf(u2._evCache.pending) && gateOf(u2.ledgerLoading?.()) && u2.ledgerLoading().bytesLeft > MiB, `⑥ a sync reader during a ${(size(shardOf(d2)) / MiB).toFixed(0)} MiB warm (past the takeover bound) does not take it over (${loaded} of ${lines.length} rows loaded, ${held.toFixed(0)} ms) and ledgerLoading() says what is left (base: the reader parses the whole rest in its own tick)`, { loaded, total: lines.length, held });
   let aDone = false;
   const ap = u2.aggregateAsync({}).then((a) => { aDone = true; return a; });
   await tick(); await tick();
   const waited = !aDone;
   while (q.length) q.shift()();
   await warm; const a = await ap;
-  ok(waited && a && a.totals && a.totals.requests === lines.length, `⑥ an async reader waits for the warm and then answers from the whole ledger (${a && a.totals && a.totals.requests} requests)`, a && a.totals);
+  ok(gateOf(waited) && gateOf(a) && gateOf(a.totals) && a.totals.requests === lines.length, `⑥ an async reader waits for the warm and then answers from the whole ledger (${a && a.totals && a.totals.requests} requests)`, a && a.totals);
 });
 
 console.log('⑦ M THE ONE-SHOT MIGRATION — a 3× shard to ⅓, the same totals');
@@ -338,17 +338,17 @@ await leg('⑦', async () => {
   const rss = process.resourceUsage().maxRSS;
   const after = size(sh), tot1 = newUh(d).aggregate().totals;
   const line = rep && rep.journal && rep.journal[0];
-  ok(rep && after === uniqueBytes && Math.abs(after * 3 - before) <= 3 && line && line.shard === SHARD && line.before === before && line.after === after && line.removed === 2 * N, `⑦ the 3× shard: ${before} → ${after} B (⅓), journal {shard, before, after, removed: ${line && line.removed}} — peak RSS ${(rss / 1024).toFixed(0)} MiB (+${((rss - r0) / 1024).toFixed(0)})`, { rep, after, uniqueBytes });
+  ok(gateOf(rep) && after === uniqueBytes && Math.abs(after * 3 - before) <= 3 && gateOf(line) && line.shard === SHARD && line.before === before && line.after === after && line.removed === 2 * N, `⑦ the 3× shard: ${before} → ${after} B (⅓), journal {shard, before, after, removed: ${line && line.removed}} — peak RSS ${(rss / 1024).toFixed(0)} MiB (+${((rss - r0) / 1024).toFixed(0)})`, { rep, after, uniqueBytes });
   ok(JSON.stringify(tot0) === JSON.stringify(tot1) && tot0.requests === N, `⑦ the totals from a fresh ledger read are the SAME before and after (${tot0.requests} requests, $${(tot0.cost || 0).toFixed ? tot0.cost.toFixed(4) : tot0.cost})`, { tot0, tot1 });
   const [rep2] = await quietAsync(async () => (m ? m.run() : null));
-  ok(rep2 && rep2.deduped === 0 && size(sh) === after, '⑦ run again: nothing repeated is left (the shard sampled in shape, untouched)');
+  ok(gateOf(rep2) && rep2.deduped === 0 && size(sh) === after, '⑦ run again: nothing repeated is left (the shard sampled in shape, untouched)');
   // a restart MID-WAY: the pass leaves its tmp; the next run discards it and resumes from the shard's start
   fs.writeFileSync(sh, windows.join('\n') + '\n');
   const gen = LD.dedupSteps(sh, { step: 64 * 1024 });
   for (let i = 0; i < 5; i++) gen.next(); // … and the process dies here (no return, no finally)
   const tmpLeft = fs.existsSync(sh + LD.TMP_SUFFIX);
   const res = LD.runNow(LD.dedupSteps(sh, { step: 64 * 1024 }));
-  ok(tmpLeft && res.renamed && size(sh) === uniqueBytes && !fs.existsSync(sh + LD.TMP_SUFFIX), '⑦ a restart mid-way: the stale tmp is discarded, the run resumes and ends at the same ⅓');
+  ok(gateOf(tmpLeft) && gateOf(res.renamed) && size(sh) === uniqueBytes && !fs.existsSync(sh + LD.TMP_SUFFIX), '⑦ a restart mid-way: the stale tmp is discarded, the run resumes and ends at the same ⅓');
   // the boot law: stepped on the loop. ALSO CURED (r611's unit A): a literal wall-clock bound (`maxStepMs < 250`) judged the
   // MACHINE — the wall-clock census saw it once this suite named src/usage-ledger-dedup.js as a string (⑩'s copy). Judged now by
   // a CENSUS OF THE WORK: each step reads at most one step's bytes, so the run takes at least ⌈the shard's bytes / the step⌉
@@ -356,7 +356,7 @@ await leg('⑦', async () => {
   fs.writeFileSync(sh, windows.join('\n') + '\n');
   const STEP7 = 64 * 1024, minSteps7 = Math.ceil(size(sh) / STEP7);
   const r2 = await LD.runStepped(LD.dedupSteps(sh, { step: STEP7 }), { sliceMs: 40 });
-  ok(r2.drive && r2.drive.steps > 10 && r2.drive.steps >= minSteps7, `⑦ stepped: ${r2.drive && r2.drive.steps} steps for ${size(sh)} B read ${STEP7} B at a time — at least ⌈bytes / step⌉ = ${minSteps7} (the work is cut by bytes; the longest step took ${r2.drive && r2.drive.maxStepMs} ms, printed, judged by nothing)`, r2.drive);
+  ok(gateOf(r2.drive) && r2.drive.steps > 10 && r2.drive.steps >= minSteps7, `⑦ stepped: ${r2.drive && r2.drive.steps} steps for ${size(sh)} B read ${STEP7} B at a time — at least ⌈bytes / step⌉ = ${minSteps7} (the work is cut by bytes; the longest step took ${r2.drive && r2.drive.maxStepMs} ms, printed, judged by nothing)`, r2.drive);
   // through the runner: the boot goes on at once ("started"), the ledger records it when it ENDS
   fs.writeFileSync(sh, windows.join('\n') + '\n');
   const [res3] = await quiet(() => M.runLocalMigrations({ only: ['2026-10-usage-ledger-dedup'] }));
@@ -365,7 +365,7 @@ await leg('⑦', async () => {
   const at0 = !!(ledger().applied || {})['2026-10-usage-ledger-dedup'];
   for (let i = 0; i < 2000 && !(ledger().applied || {})['2026-10-usage-ledger-dedup']; i++) await new Promise((r) => setTimeout(r, 5));
   const rec = ledger();
-  ok(st0 === 'started' && !at0 && rec.applied && rec.applied['2026-10-usage-ledger-dedup'] && rec.reports['2026-10-usage-ledger-dedup'].deduped === 1 && size(sh) === uniqueBytes, `⑦ through the runner: the boot goes on at once (${st0}), recorded only when it ends (ledger: applied + its report)`, { st0, at0, report: rec.reports && rec.reports['2026-10-usage-ledger-dedup'] });
+  ok(st0 === 'started' && !at0 && gateOf(rec.applied) && gateOf(rec.applied['2026-10-usage-ledger-dedup']) && rec.reports['2026-10-usage-ledger-dedup'].deduped === 1 && size(sh) === uniqueBytes, `⑦ through the runner: the boot goes on at once (${st0}), recorded only when it ends (ledger: applied + its report)`, { st0, at0, report: rec.reports && rec.reports['2026-10-usage-ledger-dedup'] });
 });
 
 // ── ⑧ (r11 — test-cache-bounds §30 red 13 of 34 at 3c8c0501: the usage fold worker requires usage-history.js, which had grown
@@ -398,7 +398,7 @@ require(${JSON.stringify(path.join(REPO, 'src/usage-cold-worker.js'))});`;
   } finally { await w.terminate(); }
   const rel = files.map((f) => path.relative(REPO, f)).filter((f) => f.startsWith('src/'));
   const loadedRoad = rel.filter((f) => f === 'src/usage-hold-road.js' || f === 'src/usage-ledger-dedup.js');
-  ok(R && rm.size > 50 && !both.length && !reachedRoad.length && rb && rb.ev === 'done' && fold && fold.ev === 'done' && rel.includes('src/usage-history.js') && !loadedRoad.length,
+  ok(gateOf(R) && rm.size > 50 && !both.length && !reachedRoad.length && gateOf(rb) && rb.ev === 'done' && gateOf(fold) && fold.ev === 'done' && gateOf(rel.includes('src/usage-history.js')) && !loadedRoad.length,
     `⑧ the usage fold worker (a rebuild ${rb && rb.ev}, a fold ${fold && fold.ev}) loads ${rel.length} src modules — usage-history.js, ${loadedRoad.length ? 'AND ' + loadedRoad.join(' + ') : 'not the hold road (' + rm.size + ' methods) nor the dedup'}; the two files define ${both.length} method(s) twice; the worker's reach (${seen.size} methods) holds ${reachedRoad.length} of the road's (3c8c0501: no road — the worker loads usage-ledger-dedup.js with the 3 006-line usage-history.js)`,
     { both, reachedRoad, rel, rb: rb && rb.ev, fold: fold && (fold.error || fold.ev) });
 });
@@ -430,10 +430,10 @@ await leg('⑨ B-6ed4', async () => {
     return { during, after, hits, said: said.filter((l) => /could not be removed/.test(l)).length, nextEarlier: !!(next._unreadMarks && next._unreadMarks.has(df)) };
   };
   const g = await scene('b6ed4');
-  ok(g.during.disk && g.during.marked && !g.during.earlier && !g.during.twice && g.hits === 1 && g.said === 1 && !g.after.disk && !g.after.marked && !g.nextEarlier,
+  ok(gateOf(g.during.disk) && gateOf(g.during.marked) && !g.during.earlier && !g.during.twice && g.hits === 1 && g.said === 1 && !g.after.disk && !g.after.marked && !g.nextEarlier,
     '⑨ the mark\'s unlink fails ⇒ kept and known (this process\'s: an EIO now is no «twice»), said once, removed again once the disk lets it; the next start finds nothing to take for its own', g);
   const c = await scene('b6ed4-release', RELEASE);
-  ok(c.after.disk && !c.after.marked && c.nextEarlier, '⑨ CONTROL RED: the release\'s _unmark — memory forgets first, nobody removes it again, the next start takes the leftover for an earlier start\'s (its first EIO is «the disk\'s answer»)', c);
+  ok(gateOf(c.after.disk) && !c.after.marked && verdictOf(c.nextEarlier), '⑨ CONTROL RED: the release\'s _unmark — memory forgets first, nobody removes it again, the next start takes the leftover for an earlier start\'s (its first EIO is «the disk\'s answer»)', c);
   // r1 (the lane's read): the unlink refused for the start's WHOLE life — the start ends with the mark on disk; its READ NOTE
   // tells the next start by name that the set read since (accept-r17's legA A1/A2 scene)
   const life = async (name, dropNote) => {
@@ -452,8 +452,8 @@ await leg('⑨ B-6ed4', async () => {
     return { left, nextEarlier: !!(next._unreadMarks && next._unreadMarks.has(df)), twice: next._setVerdict(df, EIO()).twice, swept: !fs.existsSync(df + '.unread') && !fs.existsSync(df + '.unread.read') };
   };
   const L1 = await life('b6ed4-life', false), L0 = await life('b6ed4-life-nonote', true);
-  ok(L1.left.mark && L1.left.note && !L1.nextEarlier && !L1.twice && L1.swept, '⑨ r1: the unlink refused for the start\'s whole life ⇒ the mark stays WITH its read note; the next start reads the note by name — no «twice», both swept', L1);
-  ok(L0.nextEarlier && L0.twice, '⑨ r1 CONTROL RED: the same leftover WITHOUT its note ⇒ the next start takes it for an earlier start\'s — the set\'s first EIO is «the disk\'s answer»', L0);
+  ok(gateOf(L1.left.mark) && gateOf(L1.left.note) && !L1.nextEarlier && !L1.twice && verdictOf(L1.swept), '⑨ r1: the unlink refused for the start\'s whole life ⇒ the mark stays WITH its read note; the next start reads the note by name — no «twice», both swept', L1);
+  ok(gateOf(L0.nextEarlier) && verdictOf(L0.twice), '⑨ r1 CONTROL RED: the same leftover WITHOUT its note ⇒ the next start takes it for an earlier start\'s — the set\'s first EIO is «the disk\'s answer»', L0);
   // r1: a retry IN FLIGHT when the set fails again never takes that failure's mark
   {
     const d = dirOf('b6ed4-race'), uh = newUh(d);
@@ -472,7 +472,7 @@ await leg('⑨ B-6ed4', async () => {
       release(); await p; await settle();
       after = { disk: fs.existsSync(df + '.unread'), marked: uh._marked(df) };
     } finally { fs.promises.unlink = real; }
-    ok(after.disk && after.marked, '⑨ r1: a retry in flight when the set fails again ⇒ that failure\'s mark stays (on disk and known) — the unlink that took it wrote it back', after);
+    ok(gateOf(after.disk) && verdictOf(after.marked), '⑨ r1: a retry in flight when the set fails again ⇒ that failure\'s mark stays (on disk and known) — the unlink that took it wrote it back', after);
   }
 });
 
@@ -510,10 +510,10 @@ await leg('⑩ one close', async () => {
   const counts = async (L, tag) => Object.fromEntries(Object.entries(ROADS).map(([road, mk]) => { const { file, opts } = mk(path.join(tmp, `fdc-${tag}-${road.replace(/\W+/g, '-')}`)); return [road, fdCount(() => L.runNow(L.dedupSteps(file, opts)))]; }));
   const now = await counts(LD, 'tree');
   const say = (c) => Object.entries(c).map(([road, x]) => `${road}: ${x.opens} opened / ${x.closes} closed${x.res ? `, renamed ${x.res.renamed}, removed ${x.res.removed}, passes ${x.res.passes}, archived ${x.res.archived}` : ''}${x.threw ? ', THREW ' + x.threw.message : ''}${x.bad.length ? ' — ' + x.bad.join('; ') : ''}`).join(' | ');
-  ok(Object.values(now).every((x) => !x.threw && x.bad.length === 0 && x.opens > 0 && x.opens === x.closes) && now.rename.res.renamed && now.rename.res.removed === 2 && !now['nothing repeated'].res.renamed && now['split + an archive copy'].res.passes > 1 && now['split + an archive copy'].res.archived >= 1,
+  ok(gateOf(Object.values(now).every((x) => !x.threw && x.bad.length === 0 && x.opens > 0 && x.opens === x.closes)) && gateOf(now.rename.res.renamed) && now.rename.res.removed === 2 && !now['nothing repeated'].res.renamed && now['split + an archive copy'].res.passes > 1 && now['split + an archive copy'].res.archived >= 1,
     `⑩ every descriptor dedupSteps opens is closed EXACTLY once, on its three roads — ${say(now)}`);
   const rel = await counts(await releaseCopy(), 'release');
-  ok(rel.rename.bad.some((b) => /closed while not open/.test(b)) && rel['split + an archive copy'].bad.some((b) => /closed while not open/.test(b)) && rel['nothing repeated'].bad.length === 0,
+  ok(gateOf(rel.rename.bad.some((b) => /closed while not open/.test(b))) && gateOf(rel['split + an archive copy'].bad.some((b) => /closed while not open/.test(b))) && rel['nothing repeated'].bad.length === 0,
     `⑩ RED CONTROL: the release's close planted back closes a number that is no longer open on the rename road and on the split road (the second close of the SAME number); the road that renames nothing closes once — ${say(rel)}`);
 });
 await leg('⑪ the theft', async () => {
@@ -554,8 +554,8 @@ await leg('⑪ the theft', async () => {
   };
   const now = await scene(LD, 'tree'), rel = await scene(await releaseCopy(), 'release');
   const say = (x) => `the tmp writer held fd ${x.tmpFd}; the helper opened fd ${x.fd} during the rename (${x.opened ? 'opened' : 'NEVER opened'}, the stall ${x.stalled}: ${x.fd === x.tmpFd ? 'the number the writer\'s close freed' : 'ANOTHER number'}); after the run: ${x.open ? (x.mine ? 'still open, still its file' : 'open but ANOTHER file') : 'CLOSED under it'}; renamed ${x.res && x.res.renamed}${x.threw ? ', threw ' + x.threw.message : ''}`;
-  ok(now.opened && now.fd === now.tmpFd && now.open && now.mine && now.res && now.res.renamed && !now.threw, `⑪ another thread's descriptor survives the rewrite — ${say(now)}`);
-  ok(rel.opened && rel.fd === rel.tmpFd && !(rel.open && rel.mine), `⑪ RED CONTROL: with the release's close the number the writer's close freed is closed AGAIN — under the helper, which had just been given it — ${say(rel)}`);
+  ok(gateOf(now.opened) && now.fd === now.tmpFd && gateOf(now.open) && gateOf(now.mine) && gateOf(now.res) && gateOf(now.res.renamed) && !now.threw, `⑪ another thread's descriptor survives the rewrite — ${say(now)}`);
+  ok(gateOf(rel.opened) && rel.fd === rel.tmpFd && !(rel.open && rel.mine), `⑪ RED CONTROL: with the release's close the number the writer's close freed is closed AGAIN — under the helper, which had just been given it — ${say(rel)}`);
 });
 
 await leg('⑫ a failed close', async () => {
@@ -577,7 +577,7 @@ await leg('⑫ a failed close', async () => {
   const a1 = failTmpClose(LD, path.join(tmp, 'fail-rename'));
   ok(a1.placed === 1 && !!a1.threw && a1.threw.code === 'EIO' && a1.threw.path === a1.tmpPath,
     `⑫ the rename road: the tmp writer's close fails — the run THROWS it, said by name («${a1.threw && a1.threw.message}», path ${a1.threw && a1.threw.path})`);
-  ok(a1.whole && a1.tmpGone && a1.archived === 0 && a1.bad.length === 0 && a1.opens === a1.closes,
+  ok(gateOf(a1.whole) && gateOf(a1.tmpGone) && a1.archived === 0 && a1.bad.length === 0 && a1.opens === a1.closes,
     `⑫ …the shard stays whole (${a1.whole}), the tmp file is gone (${a1.tmpGone}), the archive is untouched (${a1.archived} copies), and every descriptor is closed exactly once (${a1.opens} opened / ${a1.closes} closed${a1.bad.length ? ' — ' + a1.bad.join('; ') : ''})`);
   // RED CONTROL (r797 (2)): the release's order planted back on a copy — the archive appended BEFORE the writer's close
   const { anchored } = await import('./scratch.mjs'), { mutantCopies } = await import('./mutant-copy.mjs');
@@ -585,7 +585,7 @@ await leg('⑫ a failed close', async () => {
   const OLD_ORDER = "        if (arch) { arch.flush(); fs.fsyncSync(arch.fd); arch.close(); arch = null; appendFile(archFile, archTmp, step); fs.unlinkSync(archTmp); } // the differing copies are kept BEFORE the rewrite\n        w.close();\n";   // stale-pins: kept — the release's order, planted back as the RED CONTROL
   const oldOrder = mutantCopies('ldl-close-order', REPO).load('src/usage-ledger-dedup.js', anchored(DEDUP_SRC, NOW_ORDER, OLD_ORDER, 'test-ledger-dedup-law ⑫ the release order'), 'release-order');
   const a1r = failTmpClose(oldOrder, path.join(tmp, 'fail-rename-old'));
-  ok(a1r.threw && a1r.whole && a1r.archived > 0, `⑫ RED CONTROL: with the release's order the same failed close leaves the shard whole but the archive already holds ${a1r.archived} copies — the next run appends them again`);
+  ok(gateOf(a1r.threw) && gateOf(a1r.whole) && a1r.archived > 0, `⑫ RED CONTROL: with the release's order the same failed close leaves the shard whole but the archive already holds ${a1r.archived} copies — the next run appends them again`);
   // the line reader's handle (eachLineAsync): its close fails alone ⇒ the read throws it by name; it fails AFTER a read error ⇒
   // it rides that error as closeError (the read's error is the one thrown)
   const lr = path.join(tmp, 'fail-reader.ndjson'); fs.writeFileSync(lr, '{"rid":"a","ts":1}\n{"rid":"b","ts":2}\n');
@@ -607,19 +607,19 @@ await leg('⑫ a failed close', async () => {
     return { placed, lines, err };
   };
   const b1 = await readWith({ readFails: false }), b2 = await readWith({ readFails: true });
-  ok(b1.placed === 1 && b1.lines === 2 && b1.err && b1.err.code === 'EIO' && b1.err.path === lr && /close/.test(b1.err.message),
+  ok(b1.placed === 1 && b1.lines === 2 && gateOf(b1.err) && b1.err.code === 'EIO' && b1.err.path === lr && verdictOf(/close/.test(b1.err.message)),
     `⑫ the line reader's handle: its close fails after a whole read — the read THROWS it, named (${b1.err && `«${b1.err.message}», path ${path.basename(String(b1.err.path))}`}; ${b1.lines} lines read)`);
-  ok(b2.placed === 1 && b2.err && /read \(placed\)/.test(b2.err.message) && b2.err.closeError && b2.err.closeError.code === 'EIO',
+  ok(b2.placed === 1 && gateOf(b2.err) && gateOf(/read \(placed\)/.test(b2.err.message)) && gateOf(b2.err.closeError) && b2.err.closeError.code === 'EIO',
     `⑫ …and after a READ error the failed close rides it as closeError: the read's own error is the one thrown («${b2.err && b2.err.message}», closeError «${b2.err && b2.err.closeError && b2.err.closeError.message}»)`);
   // the append whose destination cannot open (the archive's file is a folder): the run throws, the source is closed, nothing leaks
   const d3 = path.join(tmp, 'fail-append'), { file: f3, opts: o3 } = archRoad(d3), before3 = fs.readFileSync(f3);
   fs.mkdirSync(archOf(f3, o3), { recursive: true });
   const c3 = fdCount(() => LD.runNow(LD.dedupSteps(f3, o3)));
-  ok(c3.threw && /EISDIR|EPERM|EACCES/.test(String(c3.threw.code)) && c3.bad.length === 0 && c3.opens === c3.closes && fs.readFileSync(f3).equals(before3) && !fs.existsSync(f3 + LD.TMP_SUFFIX),
+  ok(gateOf(c3.threw) && gateOf(/EISDIR|EPERM|EACCES/.test(String(c3.threw.code))) && c3.bad.length === 0 && c3.opens === c3.closes && gateOf(fs.readFileSync(f3).equals(before3)) && !fs.existsSync(f3 + LD.TMP_SUFFIX),
     `⑫ the archive append whose destination cannot open: the run throws (${c3.threw && c3.threw.code}), its source is closed — every descriptor closed exactly once (${c3.opens} / ${c3.closes}${c3.bad.length ? ' — ' + c3.bad.join('; ') : ''}) — and the shard stays whole`);
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('  · ' + legMs.join(' · '));
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

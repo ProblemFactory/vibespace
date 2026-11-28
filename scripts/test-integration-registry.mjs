@@ -39,7 +39,7 @@ import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const R = require(path.join(REPO, 'src/integration-registry.js'));
@@ -75,53 +75,53 @@ function patchCopy(srcPath, tag, replacements) {
 console.log('§1 the PURE table');
 {
   const src = fs.readFileSync(path.join(REPO, 'src/integration-registry.js'), 'utf-8');
-  ok((src.replace(/^\s*(\*|\/\/).*$/gm, '').match(/\brequire\(|\bimport\s/g) || []).length === 3 && src.includes("require('./channels/registry-list.js')") && src.includes("require('./plugin-settings.js')") && src.includes("require('./ssh-key-format.js')"), 'src/integration-registry.js imports NOTHING but three PURE leaves: the vendor list (lane dc-channels-manifest: the vendors\' rows are their manifests\'), the plugin settings table (lane integrations-menu-home: which built-in plugin names a row) and the ssh key formats (lane lg-remote-hardening: the known_hosts lines the plugin-git host-key pin is validated by — the same reader the installer uses)');
+  ok((src.replace(/^\s*(\*|\/\/).*$/gm, '').match(/\brequire\(|\bimport\s/g) || []).length === 3 && gateOf(src.includes("require('./channels/registry-list.js')")) && gateOf(src.includes("require('./plugin-settings.js')")) && verdictOf(src.includes("require('./ssh-key-format.js')")), 'src/integration-registry.js imports NOTHING but three PURE leaves: the vendor list (lane dc-channels-manifest: the vendors\' rows are their manifests\'), the plugin settings table (lane integrations-menu-home: which built-in plugin names a row) and the ssh key formats (lane lg-remote-hardening: the known_hosts lines the plugin-git host-key pin is validated by — the same reader the installer uses)');
   const ids = R.rowIds();
   ok(new Set(ids).size === ids.length && ids.length >= 4, `row ids are unique (${ids.join(', ')})`);
   for (const row of R.ROWS) { const errs = R.checkRow(row); ok(!errs.length, `row ${row.id} passes its own checks`, errs.join('; ')); }
-  ok(['fake', 'lark', 'gmail'].every((id) => R.rowById(id)) && !R.rowById('cloak'), 'the P0b rows exist: fake, lark, gmail (lane engine-spi-egress L3: the anti-bot backend\'s key row left with it)');
+  ok(gateOf(['fake', 'lark', 'gmail'].every((id) => R.rowById(id))) && !R.rowById('cloak'), 'the P0b rows exist: fake, lark, gmail (lane engine-spi-egress L3: the anti-bot backend\'s key row left with it)');
   ok(R.TEST_KINDS.length === 3 && Object.keys(R.TEST_BUTTON_LABEL).sort().join() === [...R.TEST_KINDS].sort().join(), 'test.kind is a CLOSED set of 3 and every kind has its button wording');
   const fake = R.rowById('fake');
-  ok(fake.consumers.length === 1 && fake.setup && fake.setup.callbackUrl && fake.setup.prerequisites.length >= 1 && fake.test.caveat, 'the fake row has a LIVE consumer, a setup block with a callback URL + prerequisites, and a caveat (§19 r7/r8 exits)');
+  ok(fake.consumers.length === 1 && gateOf(fake.setup) && gateOf(fake.setup.callbackUrl) && fake.setup.prerequisites.length >= 1 && verdictOf(fake.test.caveat), 'the fake row has a LIVE consumer, a setup block with a callback URL + prerequisites, and a caveat (§19 r7/r8 exits)');
   const lark = R.rowById('lark');
   ok(lark.setup.callbackUrl === require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL && lark.setup.callbackUrl === 'http://127.0.0.1:17865/lark/cb', 'the Lark callback URL is the fixed VibeSpace loopback (decision 4) and the exported constant IS the row\'s value');
-  ok(lark.setup.prerequisites.length === 3 && lark.test.kind === 'credential-exchange' && /consent/i.test(lark.test.caveat), 'lark: three prerequisites, credential-exchange, a caveat naming the consent page');
+  ok(lark.setup.prerequisites.length === 3 && lark.test.kind === 'credential-exchange' && verdictOf(/consent/i.test(lark.test.caveat)), 'lark: three prerequisites, credential-exchange, a caveat naming the consent page');
   ok(lark.fields.find((f) => f.key === 'appSecret').secret === true && lark.fields.find((f) => f.key === 'appId').secret === false, 'lark: appSecret is secret, appId is not');
   const gmail = R.rowById('gmail');
-  ok(gmail.delegate && gmail.delegate.to === 'drive-presets' && gmail.delegate.prefer === 'channels' && gmail.delegate.multi === true && !gmail.clusterEnv, 'gmail DELEGATES to drive-presets with prefer:channels + multi and declares NO env of its own (decision 5)');
-  ok(gmail.test.kind === 'shape-only' && /shape/i.test(gmail.test.caveat), 'gmail: shape-only and says so');
+  ok(gateOf(gmail.delegate) && gmail.delegate.to === 'drive-presets' && gmail.delegate.prefer === 'channels' && gmail.delegate.multi === true && !gmail.clusterEnv, 'gmail DELEGATES to drive-presets with prefer:channels + multi and declares NO env of its own (decision 5)');
+  ok(gmail.test.kind === 'shape-only' && verdictOf(/shape/i.test(gmail.test.caveat)), 'gmail: shape-only and says so');
   const cloak = R.rowById('cloud:browserbase'); // a pure-key browser row (the fixture the census controls below copy)
   for (const row of R.ROWS) if (!row.consumers.length) ok(!!row.wiredIn, `${row.id}: no live consumer ⇒ names the phase it is wired in (decision 25, ${row.wiredIn})`);
   // negative controls on checkRow
   const noCaveat = { ...lark, test: { ...lark.test, caveat: '' } };
-  ok(R.checkRow(noCaveat).some((e) => /caveat/.test(e)), 'CONTROL: a row with prerequisites but no caveat is refused');
+  ok(verdictOf(R.checkRow(noCaveat).some((e) => /caveat/.test(e))), 'CONTROL: a row with prerequisites but no caveat is refused');
   const orphan = { ...cloak, consumers: [], wiredIn: null };
-  ok(R.checkRow(orphan).some((e) => /decision 25/.test(e)), 'CONTROL: a row with no consumer and no wiredIn phase is refused');
+  ok(verdictOf(R.checkRow(orphan).some((e) => /decision 25/.test(e))), 'CONTROL: a row with no consumer and no wiredIn phase is refused');
   const both = { ...lark, delegate: gmail.delegate };
-  ok(R.checkRow(both).some((e) => /UNION/.test(e)), 'CONTROL: clusterEnv and delegate together are refused (a union)');
+  ok(verdictOf(R.checkRow(both).some((e) => /UNION/.test(e))), 'CONTROL: clusterEnv and delegate together are refused (a union)');
   const publicCb = { ...lark, setup: { ...lark.setup, callbackUrl: 'https://my-instance.example/lark/cb' } };
-  ok(R.checkRow(publicCb).some((e) => /loopback/.test(e)), 'CONTROL: a per-instance public callback URL is refused (decision 4/21)');
+  ok(verdictOf(R.checkRow(publicCb).some((e) => /loopback/.test(e))), 'CONTROL: a per-instance public callback URL is refused (decision 4/21)');
   ok(storeMod.envFieldName('lark', 'appSecret') === 'VIBESPACE_INTEGRATION_LARK_APPSECRET' && storeMod.envFieldName('cloud:kernel', 'api-key') === 'VIBESPACE_INTEGRATION_CLOUD_KERNEL_API_KEY', 'envFieldName (the STORE\'s since r3) upper-cases and maps - and : to _');
-  ok(R.ROWS.filter((r) => r.clusterEnv).every((r) => storeMod.envFieldName(r.id, 'x').startsWith(r.clusterEnv.prefix)), 'every declared prefix IS what the store derives from the row id (one declaration, one derivation)');
-  ok(R.ROWS.filter((r) => r.id.startsWith('cloud:')).length === 5 && R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.consumers.length === 1 && r.consumers[0] === 'src/server/browser-backend.js' && !r.wiredIn && !r.setup), 'the agent-browser track contributes five pure-key rows (cloud:*), each consumed by its ONE key module, none declaring a setup block (design-agent-browser-v2 §7.5)');
-  ok(R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.test.kind === 'credential-exchange'), 'the five cloud:* Tests are credential-exchange (§7.5\'s Test-contract table)');
+  ok(verdictOf(R.ROWS.filter((r) => r.clusterEnv).every((r) => storeMod.envFieldName(r.id, 'x').startsWith(r.clusterEnv.prefix))), 'every declared prefix IS what the store derives from the row id (one declaration, one derivation)');
+  ok(R.ROWS.filter((r) => r.id.startsWith('cloud:')).length === 5 && verdictOf(R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.consumers.length === 1 && r.consumers[0] === 'src/server/browser-backend.js' && !r.wiredIn && !r.setup)), 'the agent-browser track contributes five pure-key rows (cloud:*), each consumed by its ONE key module, none declaring a setup block (design-agent-browser-v2 §7.5)');
+  ok(verdictOf(R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.test.kind === 'credential-exchange')), 'the five cloud:* Tests are credential-exchange (§7.5\'s Test-contract table)');
   // r4 (2.369.165, design-integrations-per-account §2.3): the ACCOUNT-BOUND rows
   ok(R.ROWS.filter((r) => r.bindsPerAccount).map((r) => r.id).join() === 'fake,lark,gmail,slack', 'bindsPerAccount = exactly fake, lark, gmail, slack (their sign-in is chosen per account — Slack\'s is a pasted token, design 012)');
-  ok(R.ROWS.filter((r) => r.signin).map((r) => `${r.id}:${r.signin}`).join() === 'slack:paste' && !R.checkRow(R.rowById('slack')).length && R.checkRow({ ...R.rowById('slack'), signin: 'carrier-pigeon' }).some((e) => /signin must be one of/.test(e)) && R.checkRow({ ...R.rowById('slack'), fields: [], setup: undefined }).some((e) => /paste/.test(e)) && R.checkRow({ ...R.rowById('slack'), clusterEnv: undefined }).some((e) => /paste/.test(e)), 'design 012 / 018: the ONE paste row (slack) also declares a workspace client with its cluster env; an unknown signin kind, a field-less paste row with an env, and a client without one are refused by name');
-  ok(R.ROWS.filter((r) => r.bindsPerAccount).every((r) => typeof r.clientHint === 'string' && r.clientHint.length > 20) && R.ROWS.filter((r) => !r.bindsPerAccount).every((r) => r.clientHint === undefined && r.bindsPerAccount === undefined), 'each account-bound row declares ONE clientHint; the six browser rows declare neither (untouched)');
+  ok(R.ROWS.filter((r) => r.signin).map((r) => `${r.id}:${r.signin}`).join() === 'slack:paste' && !R.checkRow(R.rowById('slack')).length && gateOf(R.checkRow({ ...R.rowById('slack'), signin: 'carrier-pigeon' }).some((e) => /signin must be one of/.test(e))) && gateOf(R.checkRow({ ...R.rowById('slack'), fields: [], setup: undefined }).some((e) => /paste/.test(e))) && verdictOf(R.checkRow({ ...R.rowById('slack'), clusterEnv: undefined }).some((e) => /paste/.test(e))), 'design 012 / 018: the ONE paste row (slack) also declares a workspace client with its cluster env; an unknown signin kind, a field-less paste row with an env, and a client without one are refused by name');
+  ok(gateOf(R.ROWS.filter((r) => r.bindsPerAccount).every((r) => typeof r.clientHint === 'string' && r.clientHint.length > 20)) && verdictOf(R.ROWS.filter((r) => !r.bindsPerAccount).every((r) => r.clientHint === undefined && r.bindsPerAccount === undefined)), 'each account-bound row declares ONE clientHint; the six browser rows declare neither (untouched)');
   ok(JSON.stringify([R.clientFieldsOf('lark').idKey, R.clientFieldsOf('lark').secretKey, R.clientFieldsOf('gmail').idKey, R.clientFieldsOf('gmail').secretKey]) === JSON.stringify(['appId', 'appSecret', 'clientId', 'clientSecret']) && R.clientFieldsOf('lark').id.label === 'App ID' && R.clientFieldsOf('gmail').secret.label === 'OAuth client secret', 'clientFieldsOf maps each row\'s custom client onto its declared fields (Lark App ID / App Secret, Google client id / secret) with the row\'s own labels');
   ok(R.bindsPerAccount('gmail') === true && R.bindsPerAccount('cloud:browserbase') === false && R.bindsPerAccount('nope') === false, 'bindsPerAccount(id) answers by the row');
   // lane remoteapp-r1b (design q-024 r1 §1.3): THE PER-MACHINE ROW — a paired Windows machine's RemoteApp sign-in
   const ra = R.rowById('remoteapp');
-  ok(ra && ra.bindsPerMachine === true && !ra.bindsPerAccount && !ra.clusterEnv && !ra.delegate && !ra.setup && !ra.wiredIn && ra.test.kind === 'shape-only' && ra.test.caveat && JSON.stringify(ra.consumers) === '["src/server/desktop-access.js"]' && R.bindsPerMachine('remoteapp') && !R.bindsPerMachine('cloak'), 'remoteapp: ONE record per paired machine — no cluster env (a machine\'s sign-in is nobody\'s company preset), no setup, not account-bound, shape-only with its caveat, consumed by the RemoteApp launch (desktop-access)');
+  ok(gateOf(ra) && ra.bindsPerMachine === true && !ra.bindsPerAccount && !ra.clusterEnv && !ra.delegate && !ra.setup && !ra.wiredIn && ra.test.kind === 'shape-only' && gateOf(ra.test.caveat) && JSON.stringify(ra.consumers) === '["src/server/desktop-access.js"]' && gateOf(R.bindsPerMachine('remoteapp')) && !R.bindsPerMachine('cloak'), 'remoteapp: ONE record per paired machine — no cluster env (a machine\'s sign-in is nobody\'s company preset), no setup, not account-bound, shape-only with its caveat, consumed by the RemoteApp launch (desktop-access)');
   ok(JSON.stringify(ra.fields.map((f) => [f.key, !!f.secret, !!f.required])) === JSON.stringify([['user', false, true], ['domain', false, false], ['password', true, true], ['certFp', false, true]]), 'its fields: user, domain (optional), password (the ONE secret), certFp (pinned by the first connection)');
   const rv = (patch) => R.validateValues(ra, patch);
-  ok(rv({ user: 'someone', domain: 'LAB', password: 'a b;c#' + 'd', certFp: Array(32).fill('ab').join(':') }).ok && rv({ user: 'a"b' }).errors.user && rv({ domain: 'a,b' }).errors.domain && rv({ password: 'line\nbreak' }).errors.password && rv({ certFp: 'AB:CD' }).errors.certFp && rv({ password: 'x'.repeat(257) }).errors.password, 'its validators: a quote / control char in the user, a comma in the domain, a line break in the password (it is ONE stdin line), a non-sha256 pin — each refused by name');
-  ok(R.checkRow({ ...ra, clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_REMOTEAPP_' } }).some((e) => /bindsPerMachine/.test(e)) && R.checkRow({ ...ra, bindsPerAccount: true }).some((e) => /bindsPerMachine/.test(e)) && R.checkRow({ ...ra, bindsPerMachine: 'yes' }).some((e) => /boolean/.test(e)) && R.checkRow({ ...ra, bindsPerMachine: undefined }).some((e) => /clusterEnv or delegate required/.test(e)), 'CONTROL: a per-machine row with a cluster env / account-bound / a non-boolean flag is refused; without the flag the row needs a cluster env like any card');
-  ok(R.checkRow({ ...lark, clientHint: '' }).some((e) => /clientHint/.test(e)), 'CONTROL: an account-bound row without its hint is refused');
-  ok(R.checkRow({ ...lark, fields: lark.fields.map((f) => ({ ...f, secret: true })) }).some((e) => /non-secret field/.test(e)) && R.checkRow({ ...lark, fields: [...lark.fields, { ...lark.fields[1], key: 'x' }] }).some((e) => /exactly ONE secret/.test(e)), 'CONTROL: an account-bound row needs exactly one secret field and a non-secret one (the custom client\'s id + secret)');
-  ok(R.checkRow({ ...cloak, clientHint: 'x' }).some((e) => /bindsPerAccount row only/.test(e)) && R.checkRow({ ...cloak, bindsPerAccount: 'yes' }).some((e) => /boolean/.test(e)), 'CONTROL: a hint on a card row, or a non-boolean flag, is refused');
-  ok(R.credentialWhyText({ whyCode: 'own-retired' }) !== 'own-retired' && /per account/.test(R.credentialWhyText({ whyCode: 'own-retired' })) && /\(clientSecret\)/.test(R.credentialWhyText({ whyCode: 'custom-missing', whyParams: { fields: ['clientSecret'] } })) && /decrypted/.test(R.credentialWhyText({ whyCode: 'custom-undecryptable' })), 'credentialWhyText words the r4 codes (own-retired / custom-missing / custom-undecryptable)');
+  ok(gateOf(rv({ user: 'someone', domain: 'LAB', password: 'a b;c#' + 'd', certFp: Array(32).fill('ab').join(':') }).ok) && gateOf(rv({ user: 'a"b' }).errors.user) && gateOf(rv({ domain: 'a,b' }).errors.domain) && gateOf(rv({ password: 'line\nbreak' }).errors.password) && gateOf(rv({ certFp: 'AB:CD' }).errors.certFp) && verdictOf(rv({ password: 'x'.repeat(257) }).errors.password), 'its validators: a quote / control char in the user, a comma in the domain, a line break in the password (it is ONE stdin line), a non-sha256 pin — each refused by name');
+  ok(gateOf(R.checkRow({ ...ra, clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_REMOTEAPP_' } }).some((e) => /bindsPerMachine/.test(e))) && gateOf(R.checkRow({ ...ra, bindsPerAccount: true }).some((e) => /bindsPerMachine/.test(e))) && gateOf(R.checkRow({ ...ra, bindsPerMachine: 'yes' }).some((e) => /boolean/.test(e))) && verdictOf(R.checkRow({ ...ra, bindsPerMachine: undefined }).some((e) => /clusterEnv or delegate required/.test(e))), 'CONTROL: a per-machine row with a cluster env / account-bound / a non-boolean flag is refused; without the flag the row needs a cluster env like any card');
+  ok(verdictOf(R.checkRow({ ...lark, clientHint: '' }).some((e) => /clientHint/.test(e))), 'CONTROL: an account-bound row without its hint is refused');
+  ok(gateOf(R.checkRow({ ...lark, fields: lark.fields.map((f) => ({ ...f, secret: true })) }).some((e) => /non-secret field/.test(e))) && verdictOf(R.checkRow({ ...lark, fields: [...lark.fields, { ...lark.fields[1], key: 'x' }] }).some((e) => /exactly ONE secret/.test(e))), 'CONTROL: an account-bound row needs exactly one secret field and a non-secret one (the custom client\'s id + secret)');
+  ok(gateOf(R.checkRow({ ...cloak, clientHint: 'x' }).some((e) => /bindsPerAccount row only/.test(e))) && verdictOf(R.checkRow({ ...cloak, bindsPerAccount: 'yes' }).some((e) => /boolean/.test(e))), 'CONTROL: a hint on a card row, or a non-boolean flag, is refused');
+  ok(R.credentialWhyText({ whyCode: 'own-retired' }) !== 'own-retired' && gateOf(/per account/.test(R.credentialWhyText({ whyCode: 'own-retired' }))) && gateOf(/\(clientSecret\)/.test(R.credentialWhyText({ whyCode: 'custom-missing', whyParams: { fields: ['clientSecret'] } }))) && verdictOf(/decrypted/.test(R.credentialWhyText({ whyCode: 'custom-undecryptable' }))), 'credentialWhyText words the r4 codes (own-retired / custom-missing / custom-undecryptable)');
 }
 
 // ═══ §1b THE WINDOW'S GROUPS (lane integrations-menu-home, owner 2026-10-13) ═══
@@ -135,14 +135,14 @@ console.log("§1b the window's groups");
   // the store's list() leaves it out and groupOf answers null for it BY THAT FLAG (asserted, with its control, below)
   const table = R.ROWS.filter((r) => r.bindsPerMachine !== true).map((r) => [r.id, R.groupOf(r)]);
   const perMachine = R.ROWS.filter((r) => r.bindsPerMachine === true);
-  ok(perMachine.map((r) => r.id).join() === 'remoteapp,desktop-signin' && perMachine.every((r) => R.groupOf(r) === null) && R.groupOf({ ...R.rowById('cloud:browserbase'), bindsPerMachine: true }) === null, 'the per-machine rows (exactly remoteapp + desktop-signin — lane desktop-vnc-remember) land in NO group — never drawn in the window; CONTROL: a browser key row flagged per-machine leaves its group too');
+  ok(perMachine.map((r) => r.id).join() === 'remoteapp,desktop-signin' && gateOf(perMachine.every((r) => R.groupOf(r) === null)) && R.groupOf({ ...R.rowById('cloud:browserbase'), bindsPerMachine: true }) === null, 'the per-machine rows (exactly remoteapp + desktop-signin — lane desktop-vnc-remember) land in NO group — never drawn in the window; CONTROL: a browser key row flagged per-machine leaves its group too');
   const ids = (g) => table.filter(([, x]) => x === g).map(([id]) => id).sort().join();
-  ok(JSON.stringify(R.GROUPS) === JSON.stringify(['communication', 'browser', 'plugins']) && R.GROUPS.every((g) => typeof R.GROUP_WORDS[g] === 'string' && R.GROUP_WORDS[g].length > 0), 'three groups in the window\'s order (communication, browser, plugins), each with its plain noun');
-  ok(table.every(([, g]) => R.GROUPS.includes(g)), `every row lands in exactly ONE group (${table.map(([id, g]) => id + '→' + g).join(', ')})`);
+  ok(JSON.stringify(R.GROUPS) === JSON.stringify(['communication', 'browser', 'plugins']) && verdictOf(R.GROUPS.every((g) => typeof R.GROUP_WORDS[g] === 'string' && R.GROUP_WORDS[g].length > 0)), 'three groups in the window\'s order (communication, browser, plugins), each with its plain noun');
+  ok(verdictOf(table.every(([, g]) => R.GROUPS.includes(g))), `every row lands in exactly ONE group (${table.map(([id, g]) => id + '→' + g).join(', ')})`);
   ok(ids('browser') === R.ROWS.filter((r) => r.id.startsWith('cloud:')).map((r) => r.id).sort().join() && ids('browser').split(',').length === 5, `browser = every cloud:* row (${ids('browser')})`);
   const named = [...Object.values(PS.PLUGIN_SETTINGS).map((p) => p.integration).filter(Boolean), ...R.ROWS.filter((r) => r.consumers.includes(R.PLUGIN_INSTALL_CONSUMER)).map((r) => r.id)].sort().join();
-  ok(ids('plugins') === named && /\bllm\b/.test(named) && /dropline/.test(named) && /plugin-git/.test(named), `plugins = exactly the rows a built-in plugin's settings table names + the plugin installer's credential (lane engine-distribution) (${ids('plugins')}) — the LLM plugin's key is a plugin's, not Communication's`);
-  ok(ids('communication') === R.ROWS.filter((r) => r.consumers.some((c) => c.startsWith('src/channels/'))).map((r) => r.id).sort().join() && R.ROWS.filter((r) => R.groupOf(r) === 'communication').every((r) => r.bindsPerAccount === true),
+  ok(ids('plugins') === named && gateOf(/\bllm\b/.test(named)) && gateOf(/dropline/.test(named)) && verdictOf(/plugin-git/.test(named)), `plugins = exactly the rows a built-in plugin's settings table names + the plugin installer's credential (lane engine-distribution) (${ids('plugins')}) — the LLM plugin's key is a plugin's, not Communication's`);
+  ok(ids('communication') === R.ROWS.filter((r) => r.consumers.some((c) => c.startsWith('src/channels/'))).map((r) => r.id).sort().join() && verdictOf(R.ROWS.filter((r) => R.groupOf(r) === 'communication').every((r) => r.bindsPerAccount === true)),
     `communication = the rows a channel adapter consumes (${ids('communication')}); today every one is account-bound, so the window (which draws no account-bound row) shows no 通讯 head — it draws when such a row becomes a card`);
   ok(R.groupOf('llm') === 'plugins' && R.groupOf('cloud:kernel') === 'browser' && R.groupOf('no-such-row') === null && R.groupOf(null) === null, 'groupOf answers an id as it answers the row; an unknown id is null (the window draws it last, never drops it)');
   // derived, never listed: groupOf's own source names no row id
@@ -163,13 +163,13 @@ console.log("§1b the window's groups");
 console.log('§1c the plugin-git row');
 {
   const g = R.rowById('plugin-git');
-  ok(g && !R.checkRow(g).length && g.test.kind === 'reachability' && g.test.caveat && JSON.stringify(g.consumers) === '["src/server/plugin-install.js","src/server/engine-distribution.js"]' && !g.wiredIn && !g.bindsPerAccount && !g.bindsPerMachine && g.clusterEnv && g.clusterEnv.json === 'VIBESPACE_INTEGRATIONS' && !g.setup,
+  ok(gateOf(g) && !R.checkRow(g).length && g.test.kind === 'reachability' && gateOf(g.test.caveat) && JSON.stringify(g.consumers) === '["src/server/plugin-install.js","src/server/engine-distribution.js"]' && !g.wiredIn && !g.bindsPerAccount && !g.bindsPerMachine && gateOf(g.clusterEnv) && g.clusterEnv.json === 'VIBESPACE_INTEGRATIONS' && !g.setup,
     'plugin-git: ONE card row — a reachability Test (git ls-remote) with its caveat, consumed by the plugin installer (landed WITH its consumer: no wiredIn, decision 25) and — lane kernel-asset-credential — the kernel\'s download (a release asset of the plugin\'s own repository), still a Plugins row; the cluster ships it through integrations.json');
   ok(JSON.stringify(g.fields.map((f) => [f.key, !!f.secret, !!f.required, !!f.multiline])) === JSON.stringify([['host', false, true, false], ['username', false, false, false], ['token', true, false, false], ['deployKey', true, false, true], ['knownHosts', false, false, true]]), 'its fields: host (the ONE host the credential goes to), username (optional), token (secret, https), deployKey (secret, ssh, several lines), knownHosts (NOT secret, optional, several lines — the ssh host-key pin, lane lg-remote-hardening)');
   ok(R.fieldDecls(g).find((f) => f.key === 'deployKey').multiline === true && !('multiline' in R.fieldDecls(g).find((f) => f.key === 'token')), 'the wire declares the several-line field (the card draws a text box for it), nothing else');
   const v = (patch) => R.validateValues(g, patch);
   const key = ['-----BEGIN OPENSSH ', 'PRIVATE KEY-----\n', 'b3BlbnNzaC1rZXktdjEAAAAA'.repeat(3), '\n-----END OPENSSH ', 'PRIVATE KEY-----'].join('');
-  ok(v({ host: 'github.com', token: 'x'.repeat(8) + 'y', deployKey: key }).ok && v({ host: 'git.example.com:8443' }).ok && v({ host: 'https://github.com' }).errors.host && v({ host: 'github.com/x' }).errors.host && v({ deployKey: 'ssh-ed25519 AAAA… a public key' }).errors.deployKey && /passphrase/.test(v({ deployKey: key.replace('b3Bl', 'Proc-Type: 4,ENCRYPTED\nb3Bl') }).errors.deployKey || '') && v({ token: 'short' }).errors.token,
+  ok(gateOf(v({ host: 'github.com', token: 'x'.repeat(8) + 'y', deployKey: key }).ok) && gateOf(v({ host: 'git.example.com:8443' }).ok) && gateOf(v({ host: 'https://github.com' }).errors.host) && gateOf(v({ host: 'github.com/x' }).errors.host) && gateOf(v({ deployKey: 'ssh-ed25519 AAAA… a public key' }).errors.deployKey) && gateOf(/passphrase/.test(v({ deployKey: key.replace('b3Bl', 'Proc-Type: 4,ENCRYPTED\nb3Bl') }).errors.deployKey || '')) && verdictOf(v({ token: 'short' }).errors.token),
     'its validators: a bare host (no scheme, no path), a private key (a public one / a passphrase-protected one refused by name), a token of at least 8 characters');
   ok(R.groupOf(g) === 'plugins', 'it is drawn in the Integrations window\'s Plugins group');
 }
@@ -181,13 +181,13 @@ console.log('§2 masking + validation');
   ok(R.maskValue('abcdefgh1234') === '••••1234', '12 chars: mask + last 4 (the boundary)');
   ok(R.maskValue('x'.repeat(40) + 'WXYZ') === '••••WXYZ' && R.maskValue('') === null && R.maskValue(null) === null, 'long ⇒ last 4; empty/null ⇒ null');
   const v = R.validateValues('lark', { appId: '  cli_abc123  ', appSecret: undefined });
-  ok(v.ok && v.values.appId === 'cli_abc123' && !('appSecret' in v.values), 'a value is TRIMMED; an omitted field is not in the result (untouched)');
+  ok(gateOf(v.ok) && v.values.appId === 'cli_abc123' && !('appSecret' in v.values), 'a value is TRIMMED; an omitted field is not in the result (untouched)');
   const cleared = R.validateValues('lark', { appSecret: '' });
-  ok(cleared.ok && cleared.values.appSecret === '', "'' means CLEARED and is not validated");
+  ok(gateOf(cleared.ok) && cleared.values.appSecret === '', "'' means CLEARED and is not validated");
   const badId = R.validateValues('lark', { appId: 'nope' });
-  ok(!badId.ok && /cli_/.test(badId.errors.appId), `a bad App ID is a NAMED complaint (${badId.errors.appId})`);
+  ok(!badId.ok && verdictOf(/cli_/.test(badId.errors.appId)), `a bad App ID is a NAMED complaint (${badId.errors.appId})`);
   const unknown = R.validateValues('lark', { bogus: 'x' });
-  ok(!unknown.ok && /not a field/.test(unknown.errors.bogus), 'an unknown field is a named error, never silently dropped');
+  ok(!unknown.ok && verdictOf(/not a field/.test(unknown.errors.bogus)), 'an unknown field is a named error, never silently dropped');
   ok(R.missingFields('lark', { appId: 'cli_x' }).join() === 'appSecret' && R.missingFields('lark', { appId: 'cli_x', appSecret: 's' }).length === 0, 'missingFields names the required gap and nothing for optional fields');
 }
 
@@ -195,21 +195,21 @@ console.log('§2 masking + validation');
 console.log('§3 precedence, pure');
 {
   const cluster = { key: 'default', label: 'Cluster', values: { appId: 'cli_cluster', appSecret: 'cluster-secret-1234' } };
-  ok(R.resolvePrecedence(null, null).source === 'none' && /no user values/.test(R.resolvePrecedence(null, null).why), 'nothing ⇒ none WITH a reason');
+  ok(R.resolvePrecedence(null, null).source === 'none' && verdictOf(/no user values/.test(R.resolvePrecedence(null, null).why)), 'nothing ⇒ none WITH a reason');
   ok(R.resolvePrecedence(null, cluster).source === 'cluster' && R.resolvePrecedence(null, cluster).clusterKey === 'default', 'cluster only ⇒ cluster, with its key');
   const u = R.resolvePrecedence({ appId: 'cli_mine', appSecret: 'my-secret-123456' }, cluster);
   ok(u.source === 'user' && u.values.appId === 'cli_mine', 'USER > CLUSTER: a user value survives a later env injection');
   ok(R.resolvePrecedence({ appId: '' }, cluster).source === 'cluster', "an EMPTY user value is absent, not 'user'");
-  ok(R.resolvePrecedence(null, null, { clusterWhy: 'the cluster default this row used (org1) is no longer provided' }).why.includes('no longer provided'), 'a withdrawn default carries ITS reason into `why`');
+  ok(verdictOf(R.resolvePrecedence(null, null, { clusterWhy: 'the cluster default this row used (org1) is no longer provided' }).why.includes('no longer provided')), 'a withdrawn default carries ITS reason into `why`');
   // the delegating pick
   const two = [{ key: 'org1', label: 'Org 1', values: {} }, { key: 'channels', label: 'Channels', values: {} }];
   ok(R.pickPreset(two, { prefer: 'channels' }).preset.key === 'channels', 'two presets (org1 + channels, no default) ⇒ `prefer` wins');
   ok(R.pickPreset(two, { prefer: 'channels', savedKey: 'org1' }).preset.key === 'org1', 'the user\'s SAVED choice beats `prefer`');
   const gone = R.pickPreset(two, { prefer: 'channels', savedKey: 'legacy' });
-  ok(gone.preset === null && /legacy/.test(gone.why), 'a saved key the cluster no longer provides ⇒ null WITH the key named (never a silent swap to prefer)');
+  ok(gone.preset === null && verdictOf(/legacy/.test(gone.why)), 'a saved key the cluster no longer provides ⇒ null WITH the key named (never a silent swap to prefer)');
   ok(R.pickPreset([two[0]], { prefer: 'channels' }).preset.key === 'org1', 'one preset and prefer misses ⇒ the only one');
   const ambiguous = R.pickPreset(two, { prefer: 'nope' });
-  ok(ambiguous.preset === null && /choose one/.test(ambiguous.why), 'two presets, no saved, prefer misses ⇒ null + "choose one" (no fourth rung)');
+  ok(ambiguous.preset === null && verdictOf(/choose one/.test(ambiguous.why)), 'two presets, no saved, prefer misses ⇒ null + "choose one" (no fourth rung)');
   // NEGATIVE CONTROL: `_driveClient()`'s fallback shape (src/mounts.js) on the same list
   const driveClientFallback = (presets) => (presets.length === 1 ? presets[0] : presets.find((c) => c.key === 'default') || null);
   ok(driveClientFallback(two) === null, 'CONTROL: the _driveClient() `default` fallback answers null on org1 + channels — the shape the delegating row must not inherit');
@@ -258,8 +258,8 @@ store.registerTest(CARD, shapeRunner);
 {
   const r0 = await get('/api/integrations');
   const cards = R.ROWS.filter((r) => !r.bindsPerAccount && !r.bindsPerMachine).map((r) => r.id); // lane remoteapp-r1b: a per-machine row is not a card either
-  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 8 && cards[5] === 'dropline' && cards[6] === 'llm' && cards[7] === 'plugin-git', `GET /api/integrations lists the five browser key rows + the Dropline voice key row + the llm row + the plugin installer's Git credential (lane engine-distribution) ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
-  ok(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id)) && ['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
+  ok(r0.status === 200 && gateOf(Array.isArray(r0.json.integrations)) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 8 && cards[5] === 'dropline' && cards[6] === 'llm' && cards[7] === 'plugin-git', `GET /api/integrations lists the five browser key rows + the Dropline voice key row + the llm row + the plugin installer's Git credential (lane engine-distribution) ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
+  ok(gateOf(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id))) && verdictOf(['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true)), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
   // every card verb on an account-bound row: 404 BY NAME
   for (const id of ['fake', 'lark', 'gmail']) {
     const g = await api('GET', `/api/integrations/${id}`);
@@ -269,27 +269,27 @@ store.registerTest(CARD, shapeRunner);
     const d = await api('DELETE', `/api/integrations/${id}`);
     const t = await api('POST', `/api/integrations/${id}/test`);
     const all = [g, p, pc, pu, d, t];
-    ok(all.every((x) => x.status === 404 && x.json && x.json.code === 'binds-per-account' && /chosen per account where the account is added/.test(x.json.error) && /Connect an account/.test(x.json.error)), `${id}: GET / PUT {values|clusterKey|use} / DELETE / test are each 404 binds-per-account BY NAME (${all.map((x) => x.status).join(',')})`);
+    ok(verdictOf(all.every((x) => x.status === 404 && x.json && x.json.code === 'binds-per-account' && /chosen per account where the account is added/.test(x.json.error) && /Connect an account/.test(x.json.error))), `${id}: GET / PUT {values|clusterKey|use} / DELETE / test are each 404 binds-per-account BY NAME (${all.map((x) => x.status).join(',')})`);
   }
   ok(!fs.existsSync(path.join(dataDir, 'integrations.json')), 'and none of those refusals wrote anything');
   const f0 = r0.json.integrations.find((x) => x.id === CARD);
-  ok(f0.source === 'none' && f0.missing.join() === 'apiKey,apiUrl' && /no default/.test(f0.why), `the card starts as none, names the missing fields, says why (${f0.why})`);
-  ok(f0.fields.every((f) => !('validate' in f)) && f0.setup === null && f0.testButton === 'Test connection', 'the wire carries declarations only (no validate fns), no setup block, and the button wording its kind decides');
-  ok(!('values' in f0) || Object.keys(f0.values).every((k) => !f0.fields.find((x) => x.key === k).secret), 'no secret key appears under `values` on the wire');
+  ok(f0.source === 'none' && f0.missing.join() === 'apiKey,apiUrl' && verdictOf(/no default/.test(f0.why)), `the card starts as none, names the missing fields, says why (${f0.why})`);
+  ok(gateOf(f0.fields.every((f) => !('validate' in f))) && f0.setup === null && f0.testButton === 'Test connection', 'the wire carries declarations only (no validate fns), no setup block, and the button wording its kind decides');
+  ok(!('values' in f0) || verdictOf(Object.keys(f0.values).every((k) => !f0.fields.find((x) => x.key === k).secret)), 'no secret key appears under `values` on the wire');
 
   // PUT a 40-char secret ⇒ user; masked; plaintext nowhere
   const put = await api('PUT', CARDP, { values: { apiKey: `  ${SECRET40}\n`, stealth: 'true' } });
-  ok(put.status === 200 && put.json.ok && put.json.integration.source === 'user', 'PUT {values} ⇒ source user');
+  ok(put.status === 200 && gateOf(put.json.ok) && put.json.integration.source === 'user', 'PUT {values} ⇒ source user');
   const v1 = put.json.integration;
   ok(v1.set.apiKey === true && v1.masked.apiKey === '••••ZZ99' && v1.values.stealth === 'true', 'the secret is SET and masked with its last 4; the non-secret is plain');
   ok(!put.text.includes(SECRET40), 'the PUT response body does not carry the plaintext');
   const g1 = await get(CARDP);
   ok(!g1.text.includes(SECRET40) && g1.json.integration.masked.apiKey === '••••ZZ99', 'GET one: masked, never the plaintext');
   const onDisk = fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8');
-  ok(!onDisk.includes(SECRET40) && /"apiKey": "[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+"/.test(onDisk) && onDisk.includes('"stealth": "true"'), 'on disk: the secret is `iv.tag.data` ciphertext, the non-secret is plain, no `source` field');
+  ok(!onDisk.includes(SECRET40) && gateOf(/"apiKey": "[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+"/.test(onDisk)) && verdictOf(onDisk.includes('"stealth": "true"')), 'on disk: the secret is `iv.tag.data` ciphertext, the non-secret is plain, no `source` field');
   ok(!/"source"/.test(onDisk), '`source` is NEVER stored — it is derived at read time');
   ok((fs.statSync(path.join(dataDir, 'integrations.json')).mode & 0o777) === 0o600, 'integrations.json is 0600 (encrypted secrets inside — owner-only like the key file, 2.369.165)');
-  ok(fs.existsSync(path.join(dataDir, '.integrations-key')) && (fs.statSync(path.join(dataDir, '.integrations-key')).mode & 0o777) === 0o600, 'the store has its OWN 0600 key file (decision 24)');
+  ok(gateOf(fs.existsSync(path.join(dataDir, '.integrations-key'))) && (fs.statSync(path.join(dataDir, '.integrations-key')).mode & 0o777) === 0o600, 'the store has its OWN 0600 key file (decision 24)');
   const res1 = store.resolveIntegration(CARD);
   ok(res1.source === 'user' && res1.values.apiKey === SECRET40 && res1.values.stealth === 'true', 'resolveIntegration (the consumer\'s call) hands back the TRIMMED plaintext');
 
@@ -300,7 +300,7 @@ store.registerTest(CARD, shapeRunner);
   ok(put3.json.integration.set.apiKey === false && put3.json.integration.values.stealth === 'false', "'' CLEARS the secret and leaves the sibling");
   // named refusal on a bad value, nothing written
   const bad = await api('PUT', CARDP, { values: { apiUrl: 'ftp:nohost' } });
-  ok(bad.status === 400 && /apiUrl: .*http/.test(bad.json.error) && bad.json.code === 'invalid-values', `a bad value is a 400 with the field NAMED (${bad.json.error})`);
+  ok(bad.status === 400 && gateOf(/apiUrl: .*http/.test(bad.json.error)) && bad.json.code === 'invalid-values', `a bad value is a 400 with the field NAMED (${bad.json.error})`);
   ok(!store.resolveIntegration(CARD).values.apiUrl, 'and nothing was written for it');
   const unk = await api('PUT', '/api/integrations/nope', { values: {} });
   ok(unk.status === 404 && unk.json.code === 'unknown-integration', 'an unknown id is 404 unknown-integration (a different refusal from binds-per-account)');
@@ -322,12 +322,12 @@ store.registerTest(CARD, shapeRunner);
   ok(use.status === 200 && use.json.integration.source === 'cluster', "PUT {use:'cluster'} keeps it on the cluster");
   delete env.VIBESPACE_INTEGRATIONS;
   const g3 = await get(CARDP);
-  ok(g3.json.integration.source === 'none' && /no longer provided/.test(g3.json.integration.why) && g3.json.integration.set.apiKey === false,
+  ok(g3.json.integration.source === 'none' && gateOf(/no longer provided/.test(g3.json.integration.why)) && g3.json.integration.set.apiKey === false,
     `INJECT-THEN-REMOVE: the row answers none WITH THE REASON, never the old value (${g3.json.integration.why})`);
   ok(store.resolveIntegration(CARD).source === 'none', 'and the consumer is told none too (a consumer is never quietly handed a dead credential)');
   // use:'cluster' now REFUSES BY NAME
   const refuse = await api('PUT', CARDP, { use: 'cluster' });
-  ok(refuse.status === 409 && refuse.json.code === 'no-cluster-default' && /no longer provided|no default/.test(refuse.json.error), `useClusterDefault with no default is a NAMED refusal (${refuse.json.code})`);
+  ok(refuse.status === 409 && refuse.json.code === 'no-cluster-default' && verdictOf(/no longer provided|no default/.test(refuse.json.error)), `useClusterDefault with no default is a NAMED refusal (${refuse.json.code})`);
   const del2 = await api('DELETE', CARDP);
   ok(del2.status === 200 && del2.json.integration.source === 'none', 'DELETE with no default is ALWAYS allowed and lands on none');
   // the single-field env form
@@ -376,7 +376,7 @@ store.registerTest(CARD, shapeRunner);
   delete env2.VIBESPACE_INTEGRATIONS;
   const stale = badStore.resolveIntegration(CARD);
   ok(stale.source === 'user' && stale.values.apiKey === 'rotated-away-key-000', 'PRE-FIX CONTROL: a store that copies the cluster value keeps serving it after the env is rotated away (as "user"!) — the exact defect §14.3 forbids');
-  ok(/"apiKey": "[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+"/.test(fs.readFileSync(path.join(d2, 'integrations.json'), 'utf-8')), 'PRE-FIX CONTROL: …and wrote the cluster credential to disk (encrypted, but a rotated-away credential all the same)');
+  ok(verdictOf(/"apiKey": "[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+"/.test(fs.readFileSync(path.join(d2, 'integrations.json'), 'utf-8'))), 'PRE-FIX CONTROL: …and wrote the cluster credential to disk (encrypted, but a rotated-away credential all the same)');
   // CONTROL: a copy WITHOUT the card guard lets PUT write an account-bound row again
   const noGuard = patchCopy(STORE_PATH, 'prefix', [[
     "    if (bindsPer(row)) throw new IntegrationError('binds-per-account',",
@@ -385,24 +385,24 @@ store.registerTest(CARD, shapeRunner);
   const dG = path.join(ROOT, 'data-noguard'); fs.mkdirSync(dG, { recursive: true });
   const ng = require(noGuard).create({ dataDir: dG, env: {}, log: { log() {}, warn() {}, error() {} } });
   let ngWrote = true; try { ng.setIntegration('lark', { appId: 'cli_abc123', appSecret: 'lark-secret-000000' }); } catch { ngWrote = false; }
-  ok(ngWrote && fs.readFileSync(path.join(dG, 'integrations.json'), 'utf-8').includes('"lark"'), 'CONTROL: a store copy without the card guard writes a Lark card again — the 404s above are the guard, not an accident');
+  ok(gateOf(ngWrote) && verdictOf(fs.readFileSync(path.join(dG, 'integrations.json'), 'utf-8').includes('"lark"')), 'CONTROL: a store copy without the card guard writes a Lark card again — the 404s above are the guard, not an accident');
 
   // Test: dispatch to the consumer's runner, refusal by name, single flight
   const notWired = await api('POST', '/api/integrations/cloud%3Abrowserbase/test');
-  ok(notWired.status === 501 && notWired.json.code === 'no-test-runner' && /registered a runner/.test(notWired.json.error), `a browser key row's Test in a harness with NO browser wiring is a NAMED no-test-runner refusal — its runner is src/server/browser-backend.js's, registered at boot (proved through the real store below) (${notWired.status} ${notWired.json.code}: ${notWired.json.error})`);
+  ok(notWired.status === 501 && notWired.json.code === 'no-test-runner' && verdictOf(/registered a runner/.test(notWired.json.error)), `a browser key row's Test in a harness with NO browser wiring is a NAMED no-test-runner refusal — its runner is src/server/browser-backend.js's, registered at boot (proved through the real store below) (${notWired.status} ${notWired.json.code}: ${notWired.json.error})`);
   ok(store.publicView('cloud:browserbase').testedAt === null, 'a refusal is not a verdict — nothing was recorded');
   await api('PUT', CARDP, { values: { apiKey: 'good-key-12345678', apiUrl: 'https://chrome.example.net' } });
   const t1 = await api('POST', `${CARDP}/test`);
-  ok(t1.status === 200 && t1.json.ok === true && t1.json.caveat && t1.json.kind === 'credential-exchange', 'Test dispatched to the registered runner: ok, WITH the caveat and the kind');
+  ok(t1.status === 200 && t1.json.ok === true && gateOf(t1.json.caveat) && t1.json.kind === 'credential-exchange', 'Test dispatched to the registered runner: ok, WITH the caveat and the kind');
   ok(store.publicView(CARD).lastOk === true && store.publicView(CARD).testedAt === clock, 'the verdict + its instant are recorded');
   await api('PUT', CARDP, { values: { apiKey: 'this-will-fail-key' } });
   const t2 = await api('POST', `${CARDP}/test`);
-  ok(t2.json.ok === false && /fail/.test(t2.json.error) && t2.json.caveat, `a failing runner is said with its words and the caveat (${t2.json.error})`);
+  ok(t2.json.ok === false && gateOf(/fail/.test(t2.json.error)) && verdictOf(t2.json.caveat), `a failing runner is said with its words and the caveat (${t2.json.error})`);
   const [c1, c2] = await Promise.all([store.test(CARD), store.test(CARD)]);
   ok(c1 === c2 || (c1.testedAt === c2.testedAt), 'two concurrent Tests share ONE flight');
   await api('DELETE', CARDP);
   const before = frames.length;
-  ok(frames.length > 0 && frames.every((f) => f.type === 'integrations-updated' && f.integration && f.id), `every write broadcast integrations-updated with publicView (${frames.length} frames so far)`);
+  ok(frames.length > 0 && verdictOf(frames.every((f) => f.type === 'integrations-updated' && f.integration && f.id)), `every write broadcast integrations-updated with publicView (${frames.length} frames so far)`);
   ok(!frames.some((f) => ['fake', 'lark', 'gmail'].includes(f.id)), 'no frame ever named an account-bound row (they are not cards)');
   ok(!frames.some((f) => JSON.stringify(f).includes(SECRET40) || JSON.stringify(f).includes('cluster-fake-key') || JSON.stringify(f).includes('org1-secret')), 'no broadcast frame ever carried a plaintext secret');
   ok(!allBodies.some((b) => b.includes(SECRET40)), `the 40-char secret is absent from all ${allBodies.length} GET bodies`);
@@ -419,8 +419,8 @@ store.registerTest(CARD, shapeRunner);
   fs.writeFileSync(keyFile, 'f'.repeat(64));
   const store2 = storeMod.create({ dataDir, env, drivePresets: () => [], log: { log() {}, warn() {}, error() {} } });
   const v = store2.publicView('cloud:browserbase');
-  ok(v.source === 'none' && /could not be decrypted/.test(v.why), `a stored value the key cannot open is SAID (${v.why}) — the opposite sentence from "nothing configured"`);
-  ok(v.hasOwnValues === true && v.storeError && v.storeError.code === 'values-undecryptable' && v.storeError.fields.join() === 'apiKey', 'CONTROL (no cluster default): hasOwnValues stays TRUE and the view carries the typed values-undecryptable storeError (r3)');
+  ok(v.source === 'none' && verdictOf(/could not be decrypted/.test(v.why)), `a stored value the key cannot open is SAID (${v.why}) — the opposite sentence from "nothing configured"`);
+  ok(v.hasOwnValues === true && gateOf(v.storeError) && v.storeError.code === 'values-undecryptable' && v.storeError.fields.join() === 'apiKey', 'CONTROL (no cluster default): hasOwnValues stays TRUE and the view carries the typed values-undecryptable storeError (r3)');
   fs.writeFileSync(keyFile, keyBytes);
   const store3 = storeMod.create({ dataDir, env, drivePresets: () => [], log: { log() {}, warn() {}, error() {} } });
   ok(store3.resolveIntegration('cloud:browserbase').values.apiKey === 'bb_1234567890abcd', 'with the right key back, the value is readable again — nothing was destroyed');
@@ -445,17 +445,17 @@ store.registerTest(CARD, shapeRunner);
     const g = await get(CARDP);
     const rv = g.json.integration;
     ok(g.status === 200 && rv.source === 'none' && rv.clusterAvailable === true && rv.clusterKey === null && rv.fromEnv === false, `ROTATED KEY + CLUSTER DEFAULT: the row answers none, NOT cluster, while the env offers tenantA (source ${rv.source}, clusterAvailable ${rv.clusterAvailable})`);
-    ok(/could not be decrypted \(apiKey\)/.test(rv.why) && /not the one they were written with/.test(rv.why), `the why names the field and the reason (${rv.why})`);
+    ok(gateOf(/could not be decrypted \(apiKey\)/.test(rv.why)) && verdictOf(/not the one they were written with/.test(rv.why)), `the why names the field and the reason (${rv.why})`);
     ok(rv.hasOwnValues === true, 'hasOwnValues is a fact about the RECORD — "Clear my keys" is reachable for the orphaned ciphertext');
-    ok(rv.storeError && rv.storeError.code === 'values-undecryptable' && /restore the \.integrations-key/.test(rv.storeError.message) && /clear the keys/.test(rv.storeError.message) && rv.storeError.fields.join() === 'apiKey', `the view carries a typed values-undecryptable storeError with the remedy (${rv.storeError && rv.storeError.message})`);
+    ok(gateOf(rv.storeError) && rv.storeError.code === 'values-undecryptable' && gateOf(/restore the \.integrations-key/.test(rv.storeError.message)) && gateOf(/clear the keys/.test(rv.storeError.message)) && rv.storeError.fields.join() === 'apiKey', `the view carries a typed values-undecryptable storeError with the remedy (${rv.storeError && rv.storeError.message})`);
     ok(rv.set.apiKey === false && rv.masked.apiKey === null && !g.text.includes('IJKL') && !g.text.includes('MNOP'), "no value is SET on the wire — neither the cluster secret's tail nor the user's");
     const res = s2.resolveIntegration(CARD);
     ok(res.source === 'none' && Object.keys(res.values).length === 0 && res.missing.join() === 'apiKey,apiUrl', 'the CONSUMER is told none with apiKey missing — it is never handed the cluster credential');
     const tr = await api('POST', `${CARDP}/test`);
-    ok(tr.status === 200 && tr.json.ok === false && /no key resolved/.test(tr.json.error) && !(tr.json.detail && tr.json.detail.source === 'cluster'), `Test does NOT pass on the cluster credential (${tr.json.error})`);
+    ok(tr.status === 200 && tr.json.ok === false && gateOf(/no key resolved/.test(tr.json.error)) && !(tr.json.detail && tr.json.detail.source === 'cluster'), `Test does NOT pass on the cluster credential (${tr.json.error})`);
     await get(CARDP); await get('/api/integrations');
     const said = lines.filter((l) => /could not be decrypted \(apiKey\)/.test(l));
-    ok(said.length === 1 && said[0].includes(`${CARD}:`) && /cluster default is NOT consulted/.test(said[0]), `logged ONCE per row per transition over five reads (${said.length} line(s) of ${lines.length})`);
+    ok(said.length === 1 && gateOf(said[0].includes(`${CARD}:`)) && verdictOf(/cluster default is NOT consulted/.test(said[0])), `logged ONCE per row per transition over five reads (${said.length} line(s) of ${lines.length})`);
     ok(s2.list().storeError === null && s2.list().integrations.find((x) => x.id === CARD).storeError.code === 'values-undecryptable', 'list(): the store-level storeError stays null (the key FILE is fine) while the row carries its own');
     // the way out the card offers: Clear my keys ⇒ lands on the cluster default (the user decided, not the fall-through)
     const del = await api('DELETE', CARDP);
@@ -468,7 +468,7 @@ store.registerTest(CARD, shapeRunner);
     const lines3 = []; const cap3 = (lvl) => (...a) => lines3.push(lvl + ' ' + a.map(String).join(' '));
     const s3 = storeMod.create({ dataDir, env, now: () => clock, drivePresets: () => [], log: { log: cap3('log'), warn: cap3('warn'), error: cap3('error') } });
     const v3 = s3.publicView(CARD);
-    ok(v3.source === 'none' && v3.storeError && v3.storeError.code === 'values-undecryptable' && lines3.filter((l) => /could not be decrypted \(apiKey\)/.test(l)).length === 1, 'the original key restored ⇒ the rotated-era value is the orphan: none, typed, said once on the new instance');
+    ok(v3.source === 'none' && gateOf(v3.storeError) && v3.storeError.code === 'values-undecryptable' && lines3.filter((l) => /could not be decrypted \(apiKey\)/.test(l)).length === 1, 'the original key restored ⇒ the rotated-era value is the orphan: none, typed, said once on the new instance');
     s3.clearUserValues(CARD);                    // leave the record decryptable for the legs below
     delete env.VIBESPACE_INTEGRATIONS;
     routes.setup({ getStore: () => store });
@@ -495,23 +495,23 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     const cap = captured();
     const life2 = storeMod.create({ dataDir: d, env: {}, log: cap.log });
     const v = life2.publicView(CARD);
-    ok(v.storeError && v.storeError.code === 'store-unreadable' && /cannot be read/.test(v.storeError.message), `the unreadable file is a TYPED storeError on the view (${v.storeError && v.storeError.code})`);
-    ok(v.source === 'none' && /cannot be read/.test(v.why), `and the row's why says the real reason, not "no user values" (${v.why})`);
-    ok(life2.list().storeError && life2.list().storeError.code === 'store-unreadable', 'list() carries it too');
-    ok(cap.lines.some((l) => /store-unreadable|cannot be read/.test(l)) && cap.lines.filter((l) => /cannot be read/.test(l)).length === 1, `it is LOGGED once per transition, not once per poll (${cap.lines.filter((l) => /cannot be read/.test(l)).length} line(s) over 3 reads)`);
+    ok(gateOf(v.storeError) && v.storeError.code === 'store-unreadable' && verdictOf(/cannot be read/.test(v.storeError.message)), `the unreadable file is a TYPED storeError on the view (${v.storeError && v.storeError.code})`);
+    ok(v.source === 'none' && verdictOf(/cannot be read/.test(v.why)), `and the row's why says the real reason, not "no user values" (${v.why})`);
+    ok(gateOf(life2.list().storeError) && life2.list().storeError.code === 'store-unreadable', 'list() carries it too');
+    ok(gateOf(cap.lines.some((l) => /store-unreadable|cannot be read/.test(l))) && cap.lines.filter((l) => /cannot be read/.test(l)).length === 1, `it is LOGGED once per transition, not once per poll (${cap.lines.filter((l) => /cannot be read/.test(l)).length} line(s) over 3 reads)`);
     const refused = (fn) => { try { fn(); return null; } catch (e) { return e; } };
     const e1 = refused(() => life2.setIntegration('cloud:browserbase', { apiKey: 'fake-key-0123456789' }));
-    ok(e1 && e1.code === 'store-unreadable' && e1.status === 500, 'setIntegration REFUSES with the typed error (500 store-unreadable)');
+    ok(gateOf(e1) && e1.code === 'store-unreadable' && e1.status === 500, 'setIntegration REFUSES with the typed error (500 store-unreadable)');
     ok(refused(() => life2.useClusterDefault('cloud:browserbase'))?.code === 'store-unreadable' && refused(() => life2.setClusterKey('cloud:browserbase', null))?.code === 'store-unreadable' && refused(() => life2.clearUserValues(CARD))?.code === 'store-unreadable', 'useClusterDefault / setClusterKey / clearUserValues refuse too');
     life2.registerTest('cloud:browserbase', async () => ({ ok: true }));
     const eT = await life2.test('cloud:browserbase').then(() => null, (e) => e);
-    ok(eT && eT.code === 'store-unreadable', 'test() refuses BEFORE running (its verdict is recorded, and the record cannot land)');
+    ok(gateOf(eT) && eT.code === 'store-unreadable', 'test() refuses BEFORE running (its verdict is recorded, and the record cannot land)');
     // through the REAL route: the typed error reaches the wire with its status
     routes.setup({ getStore: () => life2 });
     const put = await api('PUT', '/api/integrations/cloud%3Abrowserbase', { values: { apiKey: 'fake-key-0123456789' } });
-    ok(put.status === 500 && put.json && put.json.code === 'store-unreadable', `PUT answers 500 {code:'store-unreadable'} on the wire (${put.status} ${put.json && put.json.code})`);
+    ok(put.status === 500 && gateOf(put.json) && put.json.code === 'store-unreadable', `PUT answers 500 {code:'store-unreadable'} on the wire (${put.status} ${put.json && put.json.code})`);
     const g = await api('GET', '/api/integrations');
-    ok(g.status === 200 && g.json.storeError && g.json.storeError.code === 'store-unreadable', 'GET still answers 200 with the storeError beside the rows (a card can say it)');
+    ok(g.status === 200 && gateOf(g.json.storeError) && g.json.storeError.code === 'store-unreadable', 'GET still answers 200 with the storeError beside the rows (a card can say it)');
     routes.setup({ getStore: () => store });
     fs.chmodSync(f, 0o600);
     const back = life2.publicView(CARD);
@@ -535,7 +535,7 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     let preAccepted = true; try { pre2.setIntegration('cloud:browserbase', { apiKey: 'fake-key-0123456789' }); } catch { preAccepted = false; }
     fs.chmodSync(f2, 0o600);
     const preDisk = JSON.parse(fs.readFileSync(f2, 'utf-8')).integrations;
-    ok(preAccepted && Object.keys(preDisk).join() === 'cloud:browserbase' && !preDisk[CARD], 'PRE-FIX CONTROL: …accepts the next write and the file now holds ONLY the second row — the first row\'s secret is destroyed (the defect, kept as the control)');
+    ok(gateOf(preAccepted) && Object.keys(preDisk).join() === 'cloud:browserbase' && !preDisk[CARD], 'PRE-FIX CONTROL: …accepts the next write and the file now holds ONLY the second row — the first row\'s secret is destroyed (the defect, kept as the control)');
   }
 
   // (ii) A FILE THAT IS NOT A STORE IS ARCHIVED, NEVER OVERWRITTEN (archive-never-destroy)
@@ -547,9 +547,9 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     const v = s.publicView('cloud:browserbase');
     const archived = fs.readdirSync(d3).filter((n) => /^integrations\.json\.corrupt-/.test(n));
     ok(v.source === 'none' && !v.storeError && archived.length === 1 && fs.readFileSync(path.join(d3, archived[0]), 'utf-8') === bytes, `${label}: the bytes are ARCHIVED beside the file (${archived[0]}) and the store starts fresh with no storeError`);
-    ok(cap.lines.some((l) => /not a valid store/.test(l) && l.includes(archived[0])), `${label}: …and the archive is logged by name`);
+    ok(verdictOf(cap.lines.some((l) => /not a valid store/.test(l) && l.includes(archived[0]))), `${label}: …and the archive is logged by name`);
     s.setIntegration('cloud:browserbase', { apiKey: 'fake-key-0123456789' });
-    ok(fs.existsSync(path.join(d3, 'integrations.json')) && fs.existsSync(path.join(d3, archived[0])), `${label}: the next write lands in a fresh file and the archive is untouched`);
+    ok(gateOf(fs.existsSync(path.join(d3, 'integrations.json'))) && verdictOf(fs.existsSync(path.join(d3, archived[0]))), `${label}: the next write lands in a fresh file and the archive is untouched`);
   }
 
   // (iii) THE LOG ABOUT A MISTYPED ENV CARRIES NO BYTES OF IT. V8's SyntaxError
@@ -558,9 +558,9 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
   const { describeJsonError } = require(path.join(REPO, 'src/secret-box.js'));
   const bad = `[{"id":"fake","values":{"apiKey":"${SECRET40}"}},]`;
   let v8err = null; try { JSON.parse(bad); } catch (e) { v8err = e; }
-  ok(v8err instanceof SyntaxError && v8err.message.includes(SECRET40.slice(-6)), `CONTROL: V8's own message carries the secret's tail — the retired \`e.message\` line leaked it (…${v8err && v8err.message.slice(-40)})`);
+  ok(v8err instanceof SyntaxError && verdictOf(v8err.message.includes(SECRET40.slice(-6))), `CONTROL: V8's own message carries the secret's tail — the retired \`e.message\` line leaked it (…${v8err && v8err.message.slice(-40)})`);
   const desc = describeJsonError(v8err);
-  ok(/not valid JSON \(SyntaxError/.test(desc) && !desc.includes(SECRET40.slice(-6)) && !desc.includes(SECRET40.slice(0, 6)) && !/"/.test(desc), `describeJsonError keeps the class (+ position when V8 states one) and no quoted fragment (${desc})`);
+  ok(gateOf(/not valid JSON \(SyntaxError/.test(desc)) && !desc.includes(SECRET40.slice(-6)) && !desc.includes(SECRET40.slice(0, 6)) && !/"/.test(desc), `describeJsonError keeps the class (+ position when V8 states one) and no quoted fragment (${desc})`);
   // the same rule over a matrix of malformed shapes, each with the secret mid-string
   for (const shape of [`[{"id":"fake","values":{"apiKey":"${SECRET40}"}},]`, `[{"id":"fake","values":{"apiKey":"${SECRET40}"}}`, `[{"id":"fake","values":{"apiKey":"${SECRET40}"`, `{"apiKey":"${SECRET40}"} trailing`, `[{"id":"fake","values":{"apiKey":"${SECRET40.slice(0, 20)}"${SECRET40.slice(20)}"}}]`]) {
     let e = null; try { JSON.parse(shape); } catch (x) { e = x; }
@@ -582,7 +582,7 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     try {
       process.env.VIBESPACE_GDRIVE_CLIENTS = `[{"key":"x","clientId":"c","clientSecret":"${SECRET40}"},]`;
       const presets = MountManager.drivePresets();
-      ok(Array.isArray(presets) && lines.length === 1 && /unparseable/.test(lines[0]) && !lines[0].includes(SECRET40.slice(-6)) && !lines[0].includes(SECRET40.slice(0, 6)), `mounts.drivePresets logs the same redacted form (${lines[0]})`);
+      ok(gateOf(Array.isArray(presets)) && lines.length === 1 && gateOf(/unparseable/.test(lines[0])) && !lines[0].includes(SECRET40.slice(-6)) && !lines[0].includes(SECRET40.slice(0, 6)), `mounts.drivePresets logs the same redacted form (${lines[0]})`);
     } finally { console.error = prevErr; if (prevEnv === undefined) delete process.env.VIBESPACE_GDRIVE_CLIENTS; else process.env.VIBESPACE_GDRIVE_CLIENTS = prevEnv; }
   }
 
@@ -597,7 +597,7 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     ok(s5.publicView(CARD).source === 'cluster' && s5.publicView(CARD).savedClusterKey === 'default', 'the radio stores the implicit selector `default`');
     env5.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: CARD, key: 'tenantA', label: 'Tenant A', values: { apiKey: 'cluster-key-000000000' } }]);
     const v5 = s5.publicView(CARD);
-    ok(v5.source === 'cluster' && v5.clusterKey === 'tenantA' && v5.savedClusterKey === 'default' && v5.clusterAvailable === true && /re-keyed to tenantA/.test(v5.why), `the admin re-keys the ONLY default ⇒ the row still resolves cluster, on tenantA, and SAYS the re-bind (${v5.why})`);
+    ok(v5.source === 'cluster' && v5.clusterKey === 'tenantA' && v5.savedClusterKey === 'default' && v5.clusterAvailable === true && verdictOf(/re-keyed to tenantA/.test(v5.why)), `the admin re-keys the ONLY default ⇒ the row still resolves cluster, on tenantA, and SAYS the re-bind (${v5.why})`);
     ok(s5.resolveIntegration(CARD).values.apiKey === 'cluster-key-000000000', 'and the consumer gets the value');
     s5.useClusterDefault(CARD);
     ok(s5.publicView(CARD).savedClusterKey === 'tenantA' && !s5.publicView(CARD).why, 'clicking the radio again re-saves the live key and the why clears');
@@ -605,12 +605,12 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     s5.setClusterKey(CARD, 'tenantB');
     env5.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: CARD, key: 'tenantA', values: { apiKey: 'a-000000000' } }, { id: CARD, key: 'tenantC', values: { apiKey: 'c-000000000' } }]);
     const v5b = s5.publicView(CARD);
-    ok(v5b.source === 'none' && /tenantB/.test(v5b.why) && v5b.clusterOptions.length === 2, `CONTROL: with TWO presets offered a vanished saved key is a picker's question — none naming tenantB (${v5b.why})`);
+    ok(v5b.source === 'none' && gateOf(/tenantB/.test(v5b.why)) && v5b.clusterOptions.length === 2, `CONTROL: with TWO presets offered a vanished saved key is a picker's question — none naming tenantB (${v5b.why})`);
     // PURE: the rule and its boundary
     const one = [{ key: 'tenantA', label: 'A', values: {} }], two = [...one, { key: 'tenantB', label: 'B', values: {} }];
     ok(R.pickPreset(one, { savedKey: 'default' }).preset === null, 'PURE CONTROL: without the flag a vanished saved key on one preset answers null (the delegating dropdown\'s rule, unchanged)');
     const rb = R.pickPreset(one, { savedKey: 'default', rebindSingle: true });
-    ok(rb.preset && rb.preset.key === 'tenantA' && rb.rebound && rb.rebound.from === 'default' && rb.rebound.to === 'tenantA', 'PURE: with the flag the single preset is re-bound and the re-bind is reported');
+    ok(gateOf(rb.preset) && rb.preset.key === 'tenantA' && gateOf(rb.rebound) && rb.rebound.from === 'default' && rb.rebound.to === 'tenantA', 'PURE: with the flag the single preset is re-bound and the re-bind is reported');
     ok(R.pickPreset(two, { savedKey: 'default', rebindSingle: true }).preset === null, 'PURE: the flag never re-binds among two');
     ok(R.pickPreset(one, { savedKey: 'tenantA', rebindSingle: true }).rebound === undefined, 'PURE: a saved key that still exists reports no re-bind');
     // the delegating row keeps its refusal (§4's gm2 leg is the functional twin of this control)
@@ -619,7 +619,7 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     // `cluster:<key>` rung indexes it); the PICK — and the flag — stay in
     // `clusterDefaultFor`, whose delegating branch returns before the flag.
     const cdf = wiringSrc.slice(wiringSrc.indexOf('function clusterDefaultFor(row)'), wiringSrc.indexOf('// ── resolution: THE ONE ANSWER'));
-    ok((wiringSrc.match(/rebindSingle: true/g) || []).length === 1 && /rebindSingle: true/.test(cdf) && !/rebindSingle/.test(cdf.slice(cdf.indexOf('if (row.delegate) {'), cdf.indexOf('// The env\'s offers for this row, as PRESETS'))), 'WIRING: the flag is passed at the env-preset site ONLY — the delegating branch never passes it');
+    ok((wiringSrc.match(/rebindSingle: true/g) || []).length === 1 && gateOf(/rebindSingle: true/.test(cdf)) && !/rebindSingle/.test(cdf.slice(cdf.indexOf('if (row.delegate) {'), cdf.indexOf('// The env\'s offers for this row, as PRESETS'))), 'WIRING: the flag is passed at the env-preset site ONLY — the delegating branch never passes it');
   }
 }
 
@@ -636,13 +636,13 @@ console.log('§4c the per-machine row (remoteapp/<hostId>) through the real stor
   ok(res.values.password === PW && res.values.user === 'someone' && res.undecryptable.length === 0, 'resolveMachine (the consumer\'s call) opens the seal');
   const fileText = fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8');
   const fileRec = JSON.parse(fileText).integrations[`remoteapp/${HOST}`];
-  ok(fileRec && !fileText.includes(PW) && fileRec.values.user === 'someone' && /^[A-Za-z0-9+/=:._-]+$/.test(fileRec.values.password) && fileRec.values.password !== PW, 'integrations.json holds the record under remoteapp/<hostId> with the password SEALED (ciphertext), never its bytes');
+  ok(gateOf(fileRec) && !fileText.includes(PW) && fileRec.values.user === 'someone' && gateOf(/^[A-Za-z0-9+/=:._-]+$/.test(fileRec.values.password)) && fileRec.values.password !== PW, 'integrations.json holds the record under remoteapp/<hostId> with the password SEALED (ciphertext), never its bytes');
   const fr = frames.slice(f0);
   ok(fr.length === 1 && fr[0].type === 'integration-machine-updated' && fr[0].hostId === HOST && !JSON.stringify(fr).includes(PW) && !fr.some((m) => m.type === 'integrations-updated'), 'ONE broadcast `integration-machine-updated` with the machine view — no password, and never `integrations-updated` (the Integrations window would draw it as a card)');
   ok(!logLines.slice(l0).join('\n').includes(PW), 'no log line carries it');
   const card = ['publicView', 'resolveIntegration', 'clearUserValues', 'useClusterDefault'].map((fn) => { try { store[fn]('remoteapp'); return 'answered'; } catch (e) { return e.code; } });
   let setRef; try { store.setIntegration('remoteapp', { user: 'x' }); } catch (e) { setRef = e.code; }
-  ok(card.every((c) => c === 'binds-per-machine') && setRef === 'binds-per-machine', 'every card verb and resolveIntegration refuse it BY NAME (binds-per-machine)', { card, setRef });
+  ok(gateOf(card.every((c) => c === 'binds-per-machine')) && setRef === 'binds-per-machine', 'every card verb and resolveIntegration refuse it BY NAME (binds-per-machine)', { card, setRef });
   ok(!store.list().integrations.some((v) => v.id === 'remoteapp'), 'list() leaves it out (not an Integrations card)');
   const g = await get('/api/integrations/remoteapp');
   const put = await api('PUT', '/api/integrations/remoteapp', { values: { user: 'x' } });
@@ -674,11 +674,11 @@ console.log('§5 the Adapters row flips');
   env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', values: { apiKey: 'good-key-12345678' } }]);
   await eng.pass('fake-poll', { force: true });
   const a1 = eng.digest().adapters.find((a) => a.id === 'fake-poll');
-  ok(a1 && a1.auth.state === 'unknown' && a1.auth.why === 'never-authenticated', `with a cluster key resolved the digest says what the RECORD proves — unknown/never-authenticated — and NOT needs-credentials (${JSON.stringify(a1 && a1.auth)})`);
+  ok(gateOf(a1) && a1.auth.state === 'unknown' && a1.auth.why === 'never-authenticated', `with a cluster key resolved the digest says what the RECORD proves — unknown/never-authenticated — and NOT needs-credentials (${JSON.stringify(a1 && a1.auth)})`);
   delete env.VIBESPACE_INTEGRATIONS;   // the env withdraws the default
   await eng.pass('fake-poll', { force: true });
   const a2 = eng.digest().adapters.find((a) => a.id === 'fake-poll');
-  ok(a2.auth.state === 'needs-credentials' && a2.auth.missing.join() === 'apiKey' && /no default|no preset|no longer provided|no user/.test(a2.auth.why), `THE ADAPTERS ROW FLIPS on the next pass: needs-credentials, naming apiKey and the reason (${JSON.stringify(a2.auth)})`);
+  ok(a2.auth.state === 'needs-credentials' && a2.auth.missing.join() === 'apiKey' && verdictOf(/no default|no preset|no longer provided|no user/.test(a2.auth.why)), `THE ADAPTERS ROW FLIPS on the next pass: needs-credentials, naming apiKey and the reason (${JSON.stringify(a2.auth)})`);
   env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', values: { apiKey: 'back-again-12345678' } }]);
   await eng.pass('fake-poll', { force: true });
   ok(eng.digest().adapters.find((a) => a.id === 'fake-poll').auth.state === 'unknown', "and flips back (to the record's honest unknown) when the env offers a key again");
@@ -759,7 +759,7 @@ function envNameCensus(files, read) {
 if (tracked.length) {
   const c = envNameCensus(tracked, readRepo);
   console.log(`  … env-name census walked ${c.walked} tracked files (docs excluded); hits: ${c.hits.join(', ')}`);
-  ok(c.hits.includes('src/server/integration-store.js'), 'the census SEES the resolver (a census that sees nothing is not a census)');
+  ok(verdictOf(c.hits.includes('src/server/integration-store.js')), 'the census SEES the resolver (a census that sees nothing is not a census)');
   ok(!c.offenders.length, `no file outside the allowlist names VIBESPACE_INTEGRATIONS / VIBESPACE_INTEGRATION_* (offenders: ${c.offenders.join(', ') || 'none'})`);
   for (const [f] of ENV_ALLOW) if (!c.hits.includes(f) && fs.existsSync(path.join(REPO, f))) ok(false, `ALLOWLIST DEAD ENTRY: ${f} no longer names the env — remove the row`);
   // two spellings that a "process.env.X" regex would miss — each must be RED
@@ -768,7 +768,7 @@ if (tracked.length) {
   const destr = path.join(tmpDir, 'destr.js'); fs.writeFileSync(destr, 'const { VIBESPACE_INTEGRATIONS } = process.env;\n');
   const aliased = path.join(tmpDir, 'alias.js'); fs.writeFileSync(aliased, 'const env = process.env; const s = env.VIBESPACE_INTEGRATION_LARK_APPSECRET;\n');
   const ctl = envNameCensus([...tracked, bracket, destr, aliased], (f) => (f.startsWith('/') ? fs.readFileSync(f, 'utf-8') : readRepo(f)));
-  ok(ctl.offenders.length === 3 && ctl.offenders.includes(bracket) && ctl.offenders.includes(destr) && ctl.offenders.includes(aliased), 'CONTROL: the bracket form, the destructuring form and the aliased-env form are each RED');
+  ok(ctl.offenders.length === 3 && gateOf(ctl.offenders.includes(bracket)) && gateOf(ctl.offenders.includes(destr)) && verdictOf(ctl.offenders.includes(aliased)), 'CONTROL: the bracket form, the destructuring form and the aliased-env form are each RED');
 }
 
 // (a″) THE FILE RUNG HAS ONE READER TOO (lane cluster-presets, B-53fe): the
@@ -806,7 +806,7 @@ function fileRungCensus(files, read) {
 if (tracked.length) {
   const c = fileRungCensus(tracked, readRepo);
   console.log(`  … presets-directory census hits: ${c.hits.join(', ')}`);
-  ok(c.hits.includes('src/server/cluster-presets.js'), 'the file-rung census SEES the reader');
+  ok(verdictOf(c.hits.includes('src/server/cluster-presets.js')), 'the file-rung census SEES the reader');
   ok(!c.offenders.length, `nothing outside the reader names the presets directory or its file in code (offenders: ${c.offenders.join(', ') || 'none'})`);
   for (const [f] of FILE_ALLOW) if (!c.hits.includes(f) && fs.existsSync(path.join(REPO, f))) ok(false, `FILE-RUNG ALLOWLIST DEAD ENTRY: ${f} no longer names it — remove the row`);
   const dir = path.join(ROOT, 'census'); fs.mkdirSync(dir, { recursive: true });
@@ -816,7 +816,7 @@ if (tracked.length) {
   const noted = path.join(dir, 'noted.js'); fs.writeFileSync(noted, "// reads the presets directory's `gdrive-clients.json` through the shared reader\nconst x = 1;\n");
   const fleetRead = path.join(dir, 'fleet-read.js'); fs.writeFileSync(fleetRead, "const relay = JSON.parse(require('fs').readFileSync(require('path').join(dir, 'fleet.json'), 'utf-8')).relayUrl;\n");
   const fc = fileRungCensus([...tracked, direct, viaEnv, noted, fleetRead], readAny);
-  ok(fc.offenders.includes(direct) && fc.offenders.includes(viaEnv) && fc.offenders.includes(fleetRead) && !fc.offenders.includes(noted) && fc.offenders.length === 3, 'CONTROLS: a direct read of the default path, an env read of VIBESPACE_PRESETS_DIR and a second reader of fleet.json are RED; a comment naming the file is not');
+  ok(gateOf(fc.offenders.includes(direct)) && gateOf(fc.offenders.includes(viaEnv)) && gateOf(fc.offenders.includes(fleetRead)) && !fc.offenders.includes(noted) && fc.offenders.length === 3, 'CONTROLS: a direct read of the default path, an env read of VIBESPACE_PRESETS_DIR and a second reader of fleet.json are RED; a comment naming the file is not');
 }
 
 // (a′) THE NAME MAY NOT BE BUILT OUTSIDE THE RESOLVER EITHER (r3, the round-2
@@ -840,7 +840,7 @@ function builderCensus(files, read) {
 if (tracked.length) {
   const c = builderCensus(tracked, readRepo);
   console.log(`  … env-name BUILDER census hits: ${c.hits.join(', ')}`);
-  ok(c.hits.includes('src/server/integration-store.js'), "the builder census SEES the store's own envFieldName( / clusterEnv.prefix reads");
+  ok(verdictOf(c.hits.includes('src/server/integration-store.js')), "the builder census SEES the store's own envFieldName( / clusterEnv.prefix reads");
   ok(!c.offenders.length, `nothing outside the store builds an env name or reads a row's declared prefix (offenders: ${c.offenders.join(', ') || 'none'})`);
   ok(!('envFieldName' in R) && !('envNamesOf' in R), 'the PURE registry exports NO builder (envFieldName / envNamesOf are gone)');
   const dir = path.join(ROOT, 'census'); fs.mkdirSync(dir, { recursive: true });
@@ -849,7 +849,7 @@ if (tracked.length) {
   const prefixed = path.join(dir, 'prefixed.js'); fs.writeFileSync(prefixed, "const row = R.rowById('lark');\nconst s = env[row.clusterEnv.prefix + 'APPSECRET'];\n");
   const commented = path.join(dir, 'commented.js'); fs.writeFileSync(commented, "// the store's envFieldName( builds the name; see clusterEnv.prefix\nconst x = 1;\n");
   const bc = builderCensus([...tracked, built, prefixed, commented], readAny);
-  ok(bc.offenders.includes(built) && bc.offenders.includes(prefixed) && !bc.offenders.includes(commented) && bc.offenders.length === 2, "CONTROLS: the built-name probe (the verifier's exact shape) and a prefix concatenation are RED; a comment naming the builder is not");
+  ok(gateOf(bc.offenders.includes(built)) && gateOf(bc.offenders.includes(prefixed)) && !bc.offenders.includes(commented) && bc.offenders.length === 2, "CONTROLS: the built-name probe (the verifier's exact shape) and a prefix concatenation are RED; a comment naming the builder is not");
   ok(envNameCensus([...tracked, built], readAny).offenders.length === 0, 'CONTROL: census (a) alone still walks the built-name probe GREEN — which is why this census exists');
 }
 
@@ -926,7 +926,7 @@ if (tracked.length) {
   console.log(`  … .test( receiver census: ${c.seen.map((x) => `${x.f} → ${x.sites.map((s) => `${s.recv}.test(${s.arg})[${s.via}]`).join(', ')}`).join(' | ') || 'no store call sites'}`);
   ok(!c.offenders.length, `nothing outside the route calls the store's test( (offenders: ${c.offenders.join(', ') || 'none'}) — a Test is a human's click, never a timer's (§14.11.2)`);
   const route = c.seen.find((x) => x.f === 'src/routes/integrations.js');
-  ok(route && route.sites.some((s) => s.recv === 'store()' && s.via === 'accessor'), 'POSITIVE CONTROL: the census SEES the route\'s own `store().test(req.params.id)` without rewriting it');
+  ok(gateOf(route) && verdictOf(route.sites.some((s) => s.recv === 'store()' && s.via === 'accessor')), 'POSITIVE CONTROL: the census SEES the route\'s own `store().test(req.params.id)` without rewriting it');
   const dir = path.join(ROOT, 'census'); fs.mkdirSync(dir, { recursive: true });
   const readAny = (f) => (f.startsWith('/') ? fs.readFileSync(f, 'utf-8') : readRepo(f));
   const timerFile = path.join(dir, 'timer.js');
@@ -941,7 +941,7 @@ if (tracked.length) {
   fs.writeFileSync(innocent, "const ID_RE = /^[a-z][a-z0-9-]*$/;\nif (!ID_RE.test(req.params.id)) throw new Error('bad');\nif (!/^inc-[a-z0-9-]+$/.test(id)) throw new Error('bad');\nconst r = await hosts.test(req.params.id);\nconst re = new RegExp('^x'); re.test(row.id);\n");
   const ctl = timerTestCensus([...tracked, timerFile, accessorFile, handleFile, destrFile, innocent], readAny);
   const red = (f) => ctl.offenders.some((o) => o.startsWith(f));
-  ok(red(timerFile) && red(accessorFile) && red(handleFile) && red(destrFile), 'CONTROLS: the typed-handle timer, the verifier\'s accessor-idiom timer, a traced-handle timer with an id-shaped argument and the destructured-dep shape are each RED');
+  ok(gateOf(red(timerFile)) && gateOf(red(accessorFile)) && gateOf(red(handleFile)) && verdictOf(red(destrFile)), 'CONTROLS: the typed-handle timer, the verifier\'s accessor-idiom timer, a traced-handle timer with an id-shaped argument and the destructured-dep shape are each RED');
   ok(!red(innocent) && !ctl.seen.some((x) => x.f === innocent), 'CONTROL: RegExp validators (`ID_RE.test(id)`, a literal, `new RegExp`) and `hosts.test(req.params.id)` are NOT flagged');
   ok(ctl.offenders.length === 4, `exactly the four synthetic producers are red (${ctl.offenders.length})`);
 }
@@ -963,14 +963,14 @@ if (tracked.length) {
     for (const [i, line] of s.split('\n').entries()) if (RAW_ENV_LITERAL_RE.test(line)) offenders.push(`${f}:${i + 1}`);
   }
   ok(!offenders.length, `no daemon spawn hands a raw process.env to a child or to a daemon being born (offenders: ${offenders.join(', ') || 'none'})`);
-  ok(RAW_ENV_LITERAL_RE.test('spawn(process.execPath, [f], { detached: true, stdio: "ignore", env: process.env })') && RAW_ENV_LITERAL_RE.test('env: { ...process.env, ...(extra || {}) }') && !RAW_ENV_LITERAL_RE.test('env: { ...daemonEnv(process.env), X: 1 }'), 'CONTROL: the two retired spellings are RED, the sanitized one is not');
+  ok(gateOf(RAW_ENV_LITERAL_RE.test('spawn(process.execPath, [f], { detached: true, stdio: "ignore", env: process.env })')) && gateOf(RAW_ENV_LITERAL_RE.test('env: { ...process.env, ...(extra || {}) }')) && !RAW_ENV_LITERAL_RE.test('env: { ...daemonEnv(process.env), X: 1 }'), 'CONTROL: the two retired spellings are RED, the sanitized one is not');
   const { agentEnv, daemonEnv, DAEMON_ENV_KEEP, AGENT_ENV_KEEP } = require(path.join(REPO, 'src/agent-env.js'));
   const base = { VIBESPACE_INTEGRATIONS: '[…]', VIBESPACE_INTEGRATION_LARK_APPSECRET: 's', VIBESPACE_GDRIVE_CLIENTS: '[…]', VIBESPACE_PASSWORD: 'p', VIBESPACE_NODE_MODULES: '/nm', VIBESPACE_AGENTD_ROOT: '/r', VIBESPACE_API: 'http://x', HOME: '/h', PATH: '/bin', CLAUDE_CODE_OAUTH_TOKEN: 't', npm_config_x: '1', NODE_ENV: 'production' };
   const a = agentEnv(base), d = daemonEnv(base);
   ok(!('VIBESPACE_INTEGRATIONS' in a) && !('VIBESPACE_INTEGRATION_LARK_APPSECRET' in a) && !('VIBESPACE_GDRIVE_CLIENTS' in a) && !('VIBESPACE_PASSWORD' in a) && !('CLAUDE_CODE_OAUTH_TOKEN' in a) && !('npm_config_x' in a) && !('NODE_ENV' in a) && a.HOME === '/h' && a.VIBESPACE_API === 'http://x' && a.VIBESPACE_AGENTD_ROOT === '/r' && !('VIBESPACE_NODE_MODULES' in a), 'agentEnv drops both cluster env forms, the drive presets, the password, the ambient oauth token, npm_* and NODE_ENV — keeps HOME/PATH and the agent keep set');
   ok(!('VIBESPACE_INTEGRATIONS' in d) && !('VIBESPACE_GDRIVE_CLIENTS' in d) && d.VIBESPACE_NODE_MODULES === '/nm' && d.VIBESPACE_AGENTD_ROOT === '/r', 'daemonEnv is the same rule plus the daemon tier\'s own names');
-  ok([...AGENT_ENV_KEEP].every((n) => DAEMON_ENV_KEEP.has(n)) && [...DAEMON_ENV_KEEP].filter((n) => !AGENT_ENV_KEEP.has(n)).sort().join() === 'VIBESPACE_AGENTD_VERSION,VIBESPACE_DIROPS_TEST,VIBESPACE_INPUT_STUB_FILE,VIBESPACE_MIC_HELPER,VIBESPACE_NODE_MIRROR,VIBESPACE_NODE_MODULES,VIBESPACE_RUNTIME_REEXEC,VIBESPACE_RUNTIME_SWITCH,VIBESPACE_SOUND_FFMPEG', 'DAEMON_ENV_KEEP ⊇ AGENT_ENV_KEEP + exactly {VIBESPACE_AGENTD_VERSION, VIBESPACE_INPUT_STUB_FILE (lane stream-p1a-transport: the Linux input stub\'s record), VIBESPACE_DIROPS_TEST (lane bl-chat-c, r2752: the suites\' dead-path stand-in of the folder field\'s ops), VIBESPACE_MIC_HELPER (lane stream-mic-road: the suites\' fake microphone helper), VIBESPACE_SOUND_FFMPEG (lane speaker-passthrough-v1: the suites\' fake Opus encoder — a box without ffmpeg), VIBESPACE_NODE_MIRROR + VIBESPACE_RUNTIME_SWITCH + VIBESPACE_RUNTIME_REEXEC (lane runtime-floor: the agent\'s own node), VIBESPACE_NODE_MODULES} (derived from the daemon tier\'s reads in test-agentd-session)');
-  ok(/agentEnvPure\(base[,)]/.test(readRepo('src/ws-handler.js')) && !/function agentEnv\(base = process\.env\) \{\s*const out = \{\}/.test(readRepo('src/ws-handler.js')), 'WIRING: ws-handler\'s agentEnv is the PURE rule re-exported, not a second copy');
+  ok(gateOf([...AGENT_ENV_KEEP].every((n) => DAEMON_ENV_KEEP.has(n))) && [...DAEMON_ENV_KEEP].filter((n) => !AGENT_ENV_KEEP.has(n)).sort().join() === 'VIBESPACE_AGENTD_VERSION,VIBESPACE_DIROPS_TEST,VIBESPACE_INPUT_STUB_FILE,VIBESPACE_MIC_HELPER,VIBESPACE_NODE_MIRROR,VIBESPACE_NODE_MODULES,VIBESPACE_RUNTIME_REEXEC,VIBESPACE_RUNTIME_SWITCH,VIBESPACE_SOUND_FFMPEG', 'DAEMON_ENV_KEEP ⊇ AGENT_ENV_KEEP + exactly {VIBESPACE_AGENTD_VERSION, VIBESPACE_INPUT_STUB_FILE (lane stream-p1a-transport: the Linux input stub\'s record), VIBESPACE_DIROPS_TEST (lane bl-chat-c, r2752: the suites\' dead-path stand-in of the folder field\'s ops), VIBESPACE_MIC_HELPER (lane stream-mic-road: the suites\' fake microphone helper), VIBESPACE_SOUND_FFMPEG (lane speaker-passthrough-v1: the suites\' fake Opus encoder — a box without ffmpeg), VIBESPACE_NODE_MIRROR + VIBESPACE_RUNTIME_SWITCH + VIBESPACE_RUNTIME_REEXEC (lane runtime-floor: the agent\'s own node), VIBESPACE_NODE_MODULES} (derived from the daemon tier\'s reads in test-agentd-session)');
+  ok(gateOf(/agentEnvPure\(base[,)]/.test(readRepo('src/ws-handler.js'))) && !/function agentEnv\(base = process\.env\) \{\s*const out = \{\}/.test(readRepo('src/ws-handler.js')), 'WIRING: ws-handler\'s agentEnv is the PURE rule re-exported, not a second copy');
 }
 
 // (c) CONSUMERS: every named consumer exists AND calls resolveIntegration('<id>'[, {credentialKey}])
@@ -996,11 +996,11 @@ function consumerCensus(rows, read) {
   const p = consumerCensus(R.ROWS, readRepo);
   ok(!p.length, `every consumer file exists and REALLY calls resolveIntegration('<id>') (${p.join('; ') || 'clean'})`);
   const ctl = consumerCensus([{ id: 'fake', consumers: ['src/channels/index.js'], wiredIn: null }], readRepo);
-  ok(ctl.length === 1 && /never calls/.test(ctl[0]), 'CONTROL: a consumer that EXISTS but never calls resolveIntegration is RED ("file exists" is the degenerate form of this census)');
+  ok(ctl.length === 1 && verdictOf(/never calls/.test(ctl[0])), 'CONTROL: a consumer that EXISTS but never calls resolveIntegration is RED ("file exists" is the degenerate form of this census)');
   const mctl = consumerCensus([{ id: 'remoteapp', bindsPerMachine: true, consumers: ['src/server/desktop-serve-nope.js'], wiredIn: null }, { id: 'remoteapp', bindsPerMachine: true, consumers: ['src/server/desktop-app-keeper.js'], wiredIn: null }, { id: 'remoteapp', consumers: ['src/server/desktop-access.js'], wiredIn: null }], readRepo);
-  ok(mctl.length === 3 && /does not exist/.test(mctl[0]) && /never calls resolveMachine\('remoteapp'\)/.test(mctl[1]) && /never calls resolveIntegration\('remoteapp'\)/.test(mctl[2]), 'CONTROL (lane remoteapp-r1b): a per-machine row\'s consumer must call resolveMachine(\'<id>\') — a file that only names the store, or the card verb spelling, is RED', mctl);
+  ok(mctl.length === 3 && gateOf(/does not exist/.test(mctl[0])) && gateOf(/never calls resolveMachine\('remoteapp'\)/.test(mctl[1])) && verdictOf(/never calls resolveIntegration\('remoteapp'\)/.test(mctl[2])), 'CONTROL (lane remoteapp-r1b): a per-machine row\'s consumer must call resolveMachine(\'<id>\') — a file that only names the store, or the card verb spelling, is RED', mctl);
   const tctl = consumerCensus([{ id: 'fake', consumers: ['src/server/browser-backend.js'], wiredIn: null }], readRepo);
-  ok(tctl.length === 1 && /never calls/.test(tctl[0]), 'CONTROL: the table consumer\'s generic call covers only its DECLARED key rows — a row it does not declare (fake) is RED');
+  ok(tctl.length === 1 && verdictOf(/never calls/.test(tctl[0])), 'CONTROL: the table consumer\'s generic call covers only its DECLARED key rows — a row it does not declare (fake) is RED');
 }
 
 // (d) THE CALLBACK URL HAS ONE DEFINITION
@@ -1008,7 +1008,7 @@ if (tracked.length) {
   const LIT = 'http://127.0.0.1:17865/lark/cb';
   const holders = tracked.filter((f) => !isDoc(f) && !isGeneratedDoc(f)).filter((f) => { try { return readRepo(f).includes(LIT); } catch { return false; } });
   const allowed = new Set(['src/channels/lark/manifest.js', 'scripts/test-integration-registry.mjs', 'scripts/test-integrations-ui.mjs']);
-  ok(holders.includes('src/channels/lark/manifest.js') && holders.every((f) => allowed.has(f)), `the Lark callback literal is defined in its manifest (src/channels/lark/manifest.js) and nowhere else in code (holders: ${holders.join(', ')})`);
+  ok(gateOf(holders.includes('src/channels/lark/manifest.js')) && verdictOf(holders.every((f) => allowed.has(f))), `the Lark callback literal is defined in its manifest (src/channels/lark/manifest.js) and nowhere else in code (holders: ${holders.join(', ')})`);
   if (fs.existsSync(path.join(REPO, 'src/oauth-loopback.js'))) ok(!readRepo('src/oauth-loopback.js').includes(LIT) && !/LARK_CALLBACK_URL/.test(readRepo('src/oauth-loopback.js')) && require(path.join(REPO, 'src/channels/lark.js')).consent.callbackUrl === LIT, 'lane dc-channels-consent: src/oauth-loopback.js names no vendor callback — the Lark adapter\'s consent row hands the loopback THIS row\'s URL');
   const fakeCb = R.rowById('fake').setup.callbackUrl;
   ok(new URL(fakeCb).origin === new URL(LIT).origin && fakeCb !== LIT, 'the fake row\'s callback shares the ONE VibeSpace loopback origin under its own path');
@@ -1018,9 +1018,9 @@ if (tracked.length) {
 {
   const prefixes = R.ROWS.filter((r) => r.clusterEnv).map((r) => r.clusterEnv.prefix);
   ok(new Set(prefixes).size === prefixes.length, 'every own-env row has a UNIQUE prefix');
-  ok(R.ROWS.every((r) => !r.clusterEnv || r.clusterEnv.json === 'VIBESPACE_INTEGRATIONS'), 'every own-env row shares the ONE JSON name, resolved by the ONE store');
+  ok(verdictOf(R.ROWS.every((r) => !r.clusterEnv || r.clusterEnv.json === 'VIBESPACE_INTEGRATIONS')), 'every own-env row shares the ONE JSON name, resolved by the ONE store');
   ok(!R.ROWS.some((r) => JSON.stringify(r).includes('VIBESPACE_GDRIVE_CLIENTS')), 'no row re-declares VIBESPACE_GDRIVE_CLIENTS — the gmail row DELEGATES to its existing reader');
-  ok(R.ROWS.filter((r) => r.delegate).every((r) => !r.clusterEnv), 'a delegating row declares no env of its own');
+  ok(verdictOf(R.ROWS.filter((r) => r.delegate).every((r) => !r.clusterEnv)), 'a delegating row declares no env of its own');
   const twin = [{ ...R.rowById('lark'), id: 'lark2' }];
   const dupPrefix = [...R.ROWS, ...twin].map((r) => r.clusterEnv && r.clusterEnv.prefix).filter(Boolean);
   ok(new Set(dupPrefix).size !== dupPrefix.length, 'CONTROL: a second row claiming lark\'s prefix would collide (the uniqueness assert above would go red)');
@@ -1035,7 +1035,7 @@ if (tracked.length) {
   const registered = bb.registerTests();
   // Dropline voice input (q-029 P0): the wiring registers the `dropline` row's Test (GET /v1/me) from THE vendor module
   store.registerTest('dropline', require(path.join(REPO, 'src/server/dropline-client.js')).create({ integrations: () => store }).testRunner);
-  ok(registered.length === 5 && registered.includes('cloud:browserbase') && registered.includes('cloud:agentcore'), `browser-backend registered its five rows' runners through the real store (${registered.join(', ')})`);
+  ok(registered.length === 5 && gateOf(registered.includes('cloud:browserbase')) && verdictOf(registered.includes('cloud:agentcore')), `browser-backend registered its five rows' runners through the real store (${registered.join(', ')})`);
   // lane decision-core: the decision engine's one-question Test, registered the way mounts-plugins-wiring does
   const de = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: (() => { const d = path.join(ROOT, 'decision'); fs.mkdirSync(d, { recursive: true }); return d; })(), integrations: store, log: { warn() {} } });
   store.registerTest(de.ROW_ID, de.testRunner);
@@ -1046,19 +1046,19 @@ if (tracked.length) {
   // string the card shows (row, plugin description, the three switches + their example hints) carries an engine word
   const ENGINE = /\b(judge[sd]?|judg(e)?ments?|records?|rows?|first screen|route[sd]?|routing|predicates?)\b/i;
   const dv = store.publicView('llm');
-  ok(dv.setup && dv.setup.title === 'How to use it' && dv.setup.ordered === true && dv.setup.prerequisites.length === 3 && /Test connection/.test(dv.setup.prerequisites[1]) && dv.choiceWords && dv.choiceWords.cluster === 'Use the key the cluster set up' && dv.choiceWords.own === 'Use a key of my own', 'llm: the view carries its own title, three ordered steps (the second names the Test button) and its radios\' words', JSON.stringify([dv.setup, dv.choiceWords]));
-  ok(R.ROWS.every((r) => r.id === 'llm' || (!(r.setup && (r.setup.title || r.setup.ordered)) && !r.choiceWords)) && store.publicView('cloud:browserbase').choiceWords === null && store.publicView('cloud:browserbase').setup === null, 'every other row keeps the shared words (no title / ordered / choiceWords; the view says null)');
+  ok(gateOf(dv.setup) && dv.setup.title === 'How to use it' && dv.setup.ordered === true && dv.setup.prerequisites.length === 3 && gateOf(/Test connection/.test(dv.setup.prerequisites[1])) && gateOf(dv.choiceWords) && dv.choiceWords.cluster === 'Use the key the cluster set up' && dv.choiceWords.own === 'Use a key of my own', 'llm: the view carries its own title, three ordered steps (the second names the Test button) and its radios\' words', JSON.stringify([dv.setup, dv.choiceWords]));
+  ok(gateOf(R.ROWS.every((r) => r.id === 'llm' || (!(r.setup && (r.setup.title || r.setup.ordered)) && !r.choiceWords))) && store.publicView('cloud:browserbase').choiceWords === null && store.publicView('cloud:browserbase').setup === null, 'every other row keeps the shared words (no title / ordered / choiceWords; the view says null)');
   // lane plugin-settings-p0: the three switches are settings rows now (src/plugin-settings.js llm) — label + example hint
   const featRows = require(path.join(REPO, 'src/plugin-settings.js')).PLUGIN_SETTINGS['llm'].rows.filter((r) => ['attention', 'rules', 'routing'].includes(r.key));
   const feats = featRows.flatMap((r) => [r.label, Array.isArray(r.description) ? r.description[0] : r.description]);
   ok(feats.length === 6 && feats.filter((s) => /^Example: /.test(s)).length === 3, `the three switches each carry ONE example hint (${feats.length} strings)`);
   const shown = [dv.setup.title, ...dv.setup.prerequisites, dv.choiceWords.cluster, dv.choiceWords.own, dv.testDescribe, dv.testCaveat, dv.usedBy, require(path.join(REPO, 'src/plugins/llm.js')).description, ...feats];
-  ok(shown.every((s) => typeof s === 'string' && s && !ENGINE.test(s)), `no engine word on the card (${shown.length} strings)`, shown.filter((s) => ENGINE.test(s)).join(' | '));
-  ok(ENGINE.test('Lets VibeSpace judge records for you') && ENGINE.test('Judge the first screen\'s other rows') && ENGINE.test('Route records to a group or agent'), 'CONTROL: the .261 card words are caught by the same needle');
+  ok(verdictOf(shown.every((s) => typeof s === 'string' && s && !ENGINE.test(s))), `no engine word on the card (${shown.length} strings)`, shown.filter((s) => ENGINE.test(s)).join(' | '));
+  ok(gateOf(ENGINE.test('Lets VibeSpace judge records for you')) && gateOf(ENGINE.test('Judge the first screen\'s other rows')) && verdictOf(ENGINE.test('Route records to a group or agent')), 'CONTROL: the .261 card words are caught by the same needle');
   // lane llm-plugin-rename (owner 2026-10-14): the key card is named by its PROVIDER, holds provider + key only (the model is
   // the LLM plugin's judgeModel row), says every feature of the plugin uses it, and its third step names where the switches are
   const llm = R.rowById('llm');
-  ok(llm.label === 'Language model (OpenAI / OpenRouter)' && llm.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.usedBy === 'Every feature of the LLM plugin uses this key' && /the LLM plugin’s settings/.test(dv.setup.prerequisites[2]) && !/Settings ›/.test(dv.setup.prerequisites[2]),
+  ok(llm.label === 'Language model (OpenAI / OpenRouter)' && llm.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.usedBy === 'Every feature of the LLM plugin uses this key' && gateOf(/the LLM plugin’s settings/.test(dv.setup.prerequisites[2])) && !/Settings ›/.test(dv.setup.prerequisites[2]),
     `llm: named by its provider, provider + key ONLY, used by every feature of the LLM plugin, step 3 names the plugin's switches (${llm.label} · ${llm.fields.map((f) => f.key)} · ${dv.setup.prerequisites[2]})`);
   const zhD = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default || {}, jaD = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default || {};
   ok(zhD[llm.label] === '语言模型（OpenAI / OpenRouter）' && jaD[llm.label] === '言語モデル（OpenAI / OpenRouter）' && zhD[dv.usedBy] === 'LLM 插件的各项功能用这把钥匙' && !!jaD[dv.usedBy] && !!zhD[dv.setup.prerequisites[2]] && !!jaD[dv.setup.prerequisites[2]],
@@ -1066,22 +1066,22 @@ if (tracked.length) {
   // the LEGACY spellings: DECLARED on the row (the store reads them — test-cluster-presets resolves them), one declaration one
   // derivation: each old prefix IS what the store derives from the old id; no other row claims an old prefix or id
   const lg = llm.clusterEnv.legacy;
-  ok(lg && lg.jsonKeys.length === 1 && lg.prefixes.length === 1 && storeMod.envFieldName(lg.jsonKeys[0], 'x').startsWith(lg.prefixes[0]) && storeMod.envFieldName('llm', 'x').startsWith(llm.clusterEnv.prefix) && llm.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_LLM_',
+  ok(gateOf(lg) && lg.jsonKeys.length === 1 && lg.prefixes.length === 1 && gateOf(storeMod.envFieldName(lg.jsonKeys[0], 'x').startsWith(lg.prefixes[0])) && gateOf(storeMod.envFieldName('llm', 'x').startsWith(llm.clusterEnv.prefix)) && llm.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_LLM_',
     `llm: the new prefix ${llm.clusterEnv.prefix} and the declared legacy ${JSON.stringify(lg)} are each what the store derives from an id`);
   const claimed = R.ROWS.flatMap((r) => (r.clusterEnv ? [r.clusterEnv.prefix, ...((r.clusterEnv.legacy && r.clusterEnv.legacy.prefixes) || [])] : []));
-  ok(new Set(claimed).size === claimed.length && lg.jsonKeys.every((id) => !R.rowById(id)), 'every prefix — new or legacy — belongs to ONE row, and an old id is no row');
-  ok(Array.isArray(llm.clusterEnv.extras) && llm.clusterEnv.extras.join() === 'model' && !llm.fields.some((f) => f.key === 'model'), 'llm: the preset may carry `model` beyond the card\'s fields (clusterEnv.extras — the judgeModel default), never a card field');
-  ok(R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, legacy: { jsonKeys: ['llm'], prefixes: ['VIBESPACE_INTEGRATION_LLM_'] } } }).some((e) => /legacy/.test(e))
-    && R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, legacy: { jsonKeys: ['a', 'b'], prefixes: ['X_'] } } }).some((e) => /legacy/.test(e))
-    && R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, extras: ['apiKey'] } }).some((e) => /extras/.test(e)) && !R.checkRow(llm).length,
+  ok(new Set(claimed).size === claimed.length && verdictOf(lg.jsonKeys.every((id) => !R.rowById(id))), 'every prefix — new or legacy — belongs to ONE row, and an old id is no row');
+  ok(gateOf(Array.isArray(llm.clusterEnv.extras)) && llm.clusterEnv.extras.join() === 'model' && !llm.fields.some((f) => f.key === 'model'), 'llm: the preset may carry `model` beyond the card\'s fields (clusterEnv.extras — the judgeModel default), never a card field');
+  ok(gateOf(R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, legacy: { jsonKeys: ['llm'], prefixes: ['VIBESPACE_INTEGRATION_LLM_'] } } }).some((e) => /legacy/.test(e)))
+    && gateOf(R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, legacy: { jsonKeys: ['a', 'b'], prefixes: ['X_'] } } }).some((e) => /legacy/.test(e)))
+    && gateOf(R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, extras: ['apiKey'] } }).some((e) => /extras/.test(e))) && !R.checkRow(llm).length,
     'CONTROLS: a legacy list naming the row\'s own id, an unbalanced one, and an extra that IS a field are each refused by checkRow; the row itself passes');
   for (const row of R.ROWS) {
     if (row.wiredIn) continue;
     // D7 (r4): an account-bound row is not a card — no Test verb, no runner (the store refuses test() by name)
     if (row.bindsPerAccount) { ok(!store.hasTestRunner(row.id), `${row.id}: account-bound — NO Test runner (D7)`); continue; }
     // lane remoteapp-r1b: a per-machine row is not a card — no Test verb (its check is the machine card's First connection)
-    if (row.bindsPerMachine) { const t = await store.test(row.id).then(() => null, (e) => e); ok(!store.hasTestRunner(row.id) && t && t.code === 'binds-per-machine', `${row.id}: per-machine — NO Test runner, test() refused by name (its check is the first connection)`); continue; }
-    ok(store.hasTestRunner(row.id), `${row.id}: declares a test and its consumer registered the runner`);
+    if (row.bindsPerMachine) { const t = await store.test(row.id).then(() => null, (e) => e); ok(!store.hasTestRunner(row.id) && gateOf(t) && t.code === 'binds-per-machine', `${row.id}: per-machine — NO Test runner, test() refused by name (its check is the first connection)`); continue; }
+    ok(verdictOf(store.hasTestRunner(row.id)), `${row.id}: declares a test and its consumer registered the runner`);
   }
 }
 
@@ -1091,7 +1091,7 @@ if (tracked.length) {
   ok(!/resolveIntegration/.test(routeSrc) && !/\.values\b/.test(routeSrc.replace(/body\.values/g, '')), 'src/routes/integrations.js never calls resolveIntegration and never reads a resolved `values` — publicView is the ONE view it serves');
   const winSrc = readRepo('src/lib/integrations-window.js');
   ok(!/innerHTML\s*=/.test(winSrc), 'the window sets no innerHTML on any path (every vendor/user string goes through textContent)');
-  ok(/registerWindowType\(\{[\s\S]*type: 'integrations'[\s\S]*singleton: true/.test(winSrc) && /registerMenuItem\(\{[\s\S]*menu: 'gear'/.test(winSrc), 'the window is a registered singleton type with a gear-menu contribution');
+  ok(gateOf(/registerWindowType\(\{[\s\S]*type: 'integrations'[\s\S]*singleton: true/.test(winSrc)) && verdictOf(/registerMenuItem\(\{[\s\S]*menu: 'gear'/.test(winSrc)), 'the window is a registered singleton type with a gear-menu contribution');
 }
 
 server.close();
@@ -1120,11 +1120,11 @@ console.log('\nB-3b8e 4b: a Test that cannot run yet is not offered — the card
   A.sent.length = 0;
   const unknownCard = A.s.testWaitsMoved('no-such-card'), N = make(storeMod, 'lane-nowaits');
   N.s.registerTest(CARD, async (x) => shapeRunner(x));   // re-registered WITHOUT waits: the card never waits
-  ok(p0.length === 1 && p0[0].type === 'integrations-updated' && p0[0].id === CARD && p0[0].why === 'test-waits' && p0[0].integration.testWaits.code === 'repository-unknown' && m0 && m0.testWaits.code === 'repository-unknown'
+  ok(p0.length === 1 && p0[0].type === 'integrations-updated' && p0[0].id === CARD && p0[0].why === 'test-waits' && p0[0].integration.testWaits.code === 'repository-unknown' && gateOf(m0) && m0.testWaits.code === 'repository-unknown'
       && p1.length === 1 && p1[0].integration.testWaits === null && m1.testWaits === null && unknownCard === null && N.s.testWaitsMoved(CARD) === null && !A.sent.length && !N.sent.length,
     'B-3b8e 4b (the read\'s should): when what a Test waits for moves, the card\'s RECOMPUTED view is pushed (integrations-updated, why test-waits) — waiting, then offered; a row that never waits pushes nothing',
     { p0: p0.map((m) => [m.why, m.integration.testWaits]), p1: p1.map((m) => [m.why, m.integration.testWaits]) });
-  ok(v0.testWaits && v0.testWaits.code === 'repository-unknown' && v0.testWaits.params.host === 'repo.test' && e0 && e0.code === 'test-waits' && e0.status === 409 && v1.testWaits === null && r1 && typeof r1.ok === 'boolean' && A.ran.length === 1,
+  ok(gateOf(v0.testWaits) && v0.testWaits.code === 'repository-unknown' && v0.testWaits.params.host === 'repo.test' && gateOf(e0) && e0.code === 'test-waits' && e0.status === 409 && v1.testWaits === null && gateOf(r1) && typeof r1.ok === 'boolean' && A.ran.length === 1,
     'B-3b8e 4b: while the consumer says its Test cannot run yet, the view carries WHEN (testWaits) and a direct Test is refused by name (409 test-waits) — the runner never ran; once it can, testWaits is null and the Test runs',
     { v0: v0.testWaits, e0: e0 && e0.code, v1: v1.testWaits, ran: A.ran.length });
   // RED CONTROL — its plant proven first: the store's one reader of the consumer's answer, spelled once
@@ -1134,16 +1134,16 @@ console.log('\nB-3b8e 4b: a Test that cannot run yet is not offered — the card
     const B = make(require(patchCopy(STORE_PATH, 'waits-ignored', [[WANCHOR, '    const w = null;\n']])), 'mutant');
     const vb = B.s.publicView(CARD), eb = await thrown(B.s.test(CARD));
     const mb = B.s.testWaitsMoved(CARD);
-    ok(vb.testWaits === null && !eb && B.ran.length === 1 && mb && mb.testWaits === null, 'MUTANT RED: a store that ignores the consumer\'s waits offers a Test that can only refuse (no testWaits — in the view and in the pushed one — the runner runs)', { vb: vb.testWaits, ran: B.ran.length });
+    ok(vb.testWaits === null && !eb && B.ran.length === 1 && gateOf(mb) && mb.testWaits === null, 'MUTANT RED: a store that ignores the consumer\'s waits offers a Test that can only refuse (no testWaits — in the view and in the pushed one — the runner runs)', { vb: vb.testWaits, ran: B.ran.length });
   }
   // the card: no Test button while testWaits stands; the one sentence instead, in zh and ja
   const IW = fs.readFileSync(path.join(REPO, 'src/lib/integrations-window.js'), 'utf-8');
   const ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8');
   const WORDS = ['The Test is offered after the first install from {host}.', 'The Test is offered after the first install from its host.', 'The Test is not offered yet'];
-  ok(IW.includes("if (v.testWaits) actions.appendChild(testWaitsRow(app, v.testWaits));\n  else actions.appendChild(testBtn);")
-      && IW.includes("if (r && r.code === 'test-waits') { result.textContent = ''; result.appendChild(testWaitsRow(app, r.detail)); refresh(v.id); return; }")
-      && IW.includes("const testWaitsRow = (app, w) => { const d = el('div', 'plugin-detail integ-test-waits', testWaitsLine(w)); if (w && w.code === 'repository-unknown') { const door = pluginsDoor(app, { kind: 'secondary', install: true }); if (door) d.append(' ', needDoorButton(door)); } return d; };")
-      && /if \(install && typeof app\._pluginInstallDialog === 'function'\) return \{ label: label \|\| t\('Install plugin…'\), kind, door: 'plugins', run: \(\) => app\._pluginInstallDialog\(/.test(fs.readFileSync(path.join(REPO, 'src/lib/need-line.js'), 'utf-8')) && WORDS.every((w) => IW.includes(`t('${w}'`) && ZH.includes(`  "${w}": "`) && JA.includes(`  "${w}": "`)),
+  ok(gateOf(IW.includes("if (v.testWaits) actions.appendChild(testWaitsRow(app, v.testWaits));\n  else actions.appendChild(testBtn);"))
+      && gateOf(IW.includes("if (r && r.code === 'test-waits') { result.textContent = ''; result.appendChild(testWaitsRow(app, r.detail)); refresh(v.id); return; }"))
+      && gateOf(IW.includes("const testWaitsRow = (app, w) => { const d = el('div', 'plugin-detail integ-test-waits', testWaitsLine(w)); if (w && w.code === 'repository-unknown') { const door = pluginsDoor(app, { kind: 'secondary', install: true }); if (door) d.append(' ', needDoorButton(door)); } return d; };"))
+      && gateOf(/if \(install && typeof app\._pluginInstallDialog === 'function'\) return \{ label: label \|\| t\('Install plugin…'\), kind, door: 'plugins', run: \(\) => app\._pluginInstallDialog\(/.test(fs.readFileSync(path.join(REPO, 'src/lib/need-line.js'), 'utf-8'))) && verdictOf(WORDS.every((w) => IW.includes(`t('${w}'`) && ZH.includes(`  "${w}": "`) && JA.includes(`  "${w}": "`))),
     'B-3b8e 4b WIRING: the card draws NO Test button while testWaits stands — one sentence says when it will be there (zh / ja rows), with the install form\'s door («Install plugin…») ON its line when it waits for a first install (B-d073: never a menu path; the Plugins list when the app has no form); a Test pressed on a card drawn before its repository went says that sentence and draws the card again');
 }
 
@@ -1155,7 +1155,7 @@ console.log('\nB-3b8e 4b: a Test that cannot run yet is not offered — the card
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 // lane voice-p1-oauth-teach: the `dropline` row's OAUTH TIER fields — ONE client per deployment (design D4): the key
 // stays the one secret; clientId + relayUrl are NOT secrets (a public client has none) and come from the cluster as
@@ -1168,7 +1168,7 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   ok(dl.fields.map((f) => storeMod.envFieldName('dropline', f.key)).join() === 'VIBESPACE_INTEGRATION_DROPLINE_APIKEY,VIBESPACE_INTEGRATION_DROPLINE_CLIENTID,VIBESPACE_INTEGRATION_DROPLINE_RELAYURL' && dl.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_DROPLINE_', 'dropline cluster env names: _APIKEY, _CLIENTID, _RELAYURL under the declared prefix');
   const v = R.validateValues(dl, { clientId: 'cid_abc12345', relayUrl: 'https://admin.example.test/relay/' });
   const b = R.validateValues(dl, { relayUrl: 'http://x.lan/relay', clientId: 'a b' });
-  ok(v.ok && !b.ok && b.errors.relayUrl && b.errors.clientId, 'clientId / relayUrl validate (an http relay page or a spaced id is refused by name)', JSON.stringify(b.errors));
+  ok(gateOf(v.ok) && !b.ok && gateOf(b.errors.relayUrl) && verdictOf(b.errors.clientId), 'clientId / relayUrl validate (an http relay page or a spaced id is refused by name)', JSON.stringify(b.errors));
 }
 
 // lane oauth-relay-road (the owner 2026-10-22: one registered redirect per app — the fleet's admin host /relay/ or
@@ -1180,14 +1180,14 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   const CR = require(path.join(REPO, 'src/consent-road.js'));
   const shapeOf = (r) => r.fields.map((f) => `${f.key}:${f.secret ? 's' : 'p'}${f.required ? 'R' : 'o'}`).join();
   const lk = R.rowById('lark'), gm = R.rowById('gmail'), sl = R.rowById('slack');
-  ok(shapeOf(lk) === 'appId:pR,appSecret:sR,relayUrl:po' && shapeOf(gm) === 'clientId:pR,clientSecret:sR,relayUrl:po,clientType:po' && sl.fields.some((f) => f.key === 'relayUrl' && !f.secret && !f.required) && !R.checkRow(lk).length && !R.checkRow(gm).length,
+  ok(shapeOf(lk) === 'appId:pR,appSecret:sR,relayUrl:po' && shapeOf(gm) === 'clientId:pR,clientSecret:sR,relayUrl:po,clientType:po' && gateOf(sl.fields.some((f) => f.key === 'relayUrl' && !f.secret && !f.required)) && !R.checkRow(lk).length && !R.checkRow(gm).length,
     `lark / gmail gain relayUrl (public, optional) like slack's (${shapeOf(lk)} · ${shapeOf(gm)})`);
   ok(JSON.stringify([R.clientFieldsOf('lark').idKey, R.clientFieldsOf('lark').secretKey, R.clientFieldsOf('gmail').idKey, R.clientFieldsOf('gmail').secretKey]) === JSON.stringify(['appId', 'appSecret', 'clientId', 'clientSecret']), 'the custom client is still the first id + the first secret (the relay page never becomes the client id)');
   const good = [R.validateValues(lk, { appId: 'cli_abc', appSecret: 'dummy-secret-1', relayUrl: 'https://admin.example.test/relay/' }), R.validateValues(gm, { clientId: 'x.apps.googleusercontent.com', clientSecret: 'dummy-secret-1', relayUrl: CR.RELAY_DEFAULT })];
   const badV = ['http://admin.example.test/relay/', 'https://admin.example.test/relay/?x=1', 'https://a b/'].map((u) => R.validateValues(lk, { appId: 'cli_abc', appSecret: 'dummy-secret-1', relayUrl: u }));
-  ok(good.every((x) => x.ok) && badV.every((x) => !x.ok && x.errors.relayUrl), 'relayUrl validates: an https page passes; http, a query, a space are refused by name', JSON.stringify(badV.map((x) => x.errors)));
-  ok(lk.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_LARK_' && storeMod.envFieldName('lark', 'relayUrl') === 'VIBESPACE_INTEGRATION_LARK_RELAYURL' && gm.delegate && gm.delegate.to === 'drive-presets', 'a Lark preset names its page as VIBESPACE_INTEGRATION_LARK_RELAYURL (or a JSON entry\'s value); a Google preset in its drive-presets entry');
-  ok(lk.setup.callbackUrl === 'http://127.0.0.1:17865/lark/cb' && gm.setup && !gm.setup.callbackUrl && /Web application client/.test(gm.setup.callbackNote) && /Desktop client cannot take an https address/.test(gm.setup.callbackNote) && !(gm.setup.prerequisites || []).length,
+  ok(gateOf(good.every((x) => x.ok)) && verdictOf(badV.every((x) => !x.ok && x.errors.relayUrl)), 'relayUrl validates: an https page passes; http, a query, a space are refused by name', JSON.stringify(badV.map((x) => x.errors)));
+  ok(lk.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_LARK_' && storeMod.envFieldName('lark', 'relayUrl') === 'VIBESPACE_INTEGRATION_LARK_RELAYURL' && gateOf(gm.delegate) && gm.delegate.to === 'drive-presets', 'a Lark preset names its page as VIBESPACE_INTEGRATION_LARK_RELAYURL (or a JSON entry\'s value); a Google preset in its drive-presets entry');
+  ok(lk.setup.callbackUrl === 'http://127.0.0.1:17865/lark/cb' && gateOf(gm.setup) && !gm.setup.callbackUrl && gateOf(/Web application client/.test(gm.setup.callbackNote)) && gateOf(/Desktop client cannot take an https address/.test(gm.setup.callbackNote)) && !(gm.setup.prerequisites || []).length,
     'setup blocks: Lark keeps its loopback callback (the other road); Gmail names where a WEB application client lists the relay pages (a Desktop client cannot take https)');
   const L = require(path.join(REPO, 'src/channels/lark.js')), G = require(path.join(REPO, 'src/channels/gmail.js'));
   const LM = require(path.join(REPO, 'src/channels/lark/manifest.js')), GMm = require(path.join(REPO, 'src/channels/gmail/manifest.js'));
@@ -1197,22 +1197,22 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
     'the consent rows read channels.larkRelayUrl / gmailRelayUrl (advanced option rows), default = the public page — the same default as Slack\'s');
   const dz = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default || {}, dj = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default || {};
   const said = [lk.fields[2].help, gm.setup.callbackNote, opt(LM, 'larkRelayUrl').label, opt(LM, 'larkRelayUrl').description, opt(GMm, 'gmailRelayUrl').label, opt(GMm, 'gmailRelayUrl').description];
-  ok(said.every((s) => typeof dz[s] === 'string' && dz[s] && typeof dj[s] === 'string' && dj[s]), 'every new word of these rows has its zh and ja line', said.filter((s) => !dz[s] || !dj[s]));
+  ok(verdictOf(said.every((s) => typeof dz[s] === 'string' && dz[s] && typeof dj[s] === 'string' && dj[s])), 'every new word of these rows has its zh and ja line', said.filter((s) => !dz[s] || !dj[s]));
   // addendum 1 (the owner 2026-10-22: «github 那个 url 不能加到我们公司的 lark 和 slack app 默认配置里»): a COMPANY preset's relay
   // field names the cluster's own page only (empty = the fleet's, else none) and says the public page is never its; the
   // relay SETTING is worded as a person's OWN app's, the public page an option «if this VibeSpace has no https address»;
   // no setup block carries the public page's address (a preset's page is its own value; a custom app's comes from the digest)
   const host = new URL(CR.RELAY_DEFAULT).hostname;
   const presetHelp = [lk, gm].map((r) => r.fields.find((f) => f.key === 'relayUrl').help);
-  ok(presetHelp.every((h) => /^The company app’s relay page/.test(h) && /fleet’s admin host \/relay\//.test(h) && /Empty = the fleet’s relay page on a fleet pod, else none/.test(h) && /never uses the public relay page/.test(h) && !/VibeSpace’s public page|each instance’s own relay setting/.test(h)),
+  ok(verdictOf(presetHelp.every((h) => /^The company app’s relay page/.test(h) && /fleet’s admin host \/relay\//.test(h) && /Empty = the fleet’s relay page on a fleet pod, else none/.test(h) && /never uses the public relay page/.test(h) && !/VibeSpace’s public page|each instance’s own relay setting/.test(h))),
     'a preset\'s relayUrl field: the cluster\'s own page, empty = the fleet\'s else none — never «the public page» nor «the instance\'s setting»', presetHelp);
   const desc = [opt(LM, 'larkRelayUrl').description, opt(GMm, 'gmailRelayUrl').description];
-  ok(/your own Lark app/.test(desc[0]) && /your own Google OAuth client/.test(desc[1]) && desc.every((d) => /a public relay page you may register .* if this VibeSpace has no https address/.test(d) && /(company app|company client) never uses this setting/.test(d)),
+  ok(gateOf(/your own Lark app/.test(desc[0])) && gateOf(/your own Google OAuth client/.test(desc[1])) && verdictOf(desc.every((d) => /a public relay page you may register .* if this VibeSpace has no https address/.test(d) && /(company app|company client) never uses this setting/.test(d))),
     'the relay SETTING is a person\'s own app\'s: the public page offered «if this VibeSpace has no https address»; a company app never uses it', desc);
   const setups = [lk, gm, sl].map((r) => JSON.stringify(r.setup || {}));
-  ok(setups.every((s) => !s.includes(host)), 'no setup block (Lark, Gmail, Slack) carries the public page\'s address — a preset\'s page is its own value, a custom app\'s comes from the digest', setups.map((s) => s.slice(0, 120)));
+  ok(verdictOf(setups.every((s) => !s.includes(host))), 'no setup block (Lark, Gmail, Slack) carries the public page\'s address — a preset\'s page is its own value, a custom app\'s comes from the digest', setups.map((s) => s.slice(0, 120)));
   const words = [...presetHelp, ...desc];
-  ok(words.every((s) => typeof dz[s] === 'string' && dz[s] && typeof dj[s] === 'string' && dj[s]), 'the re-worded rows have their zh and ja lines', words.filter((s) => !dz[s] || !dj[s]).map((s) => s.slice(0, 60)));
+  ok(verdictOf(words.every((s) => typeof dz[s] === 'string' && dz[s] && typeof dj[s] === 'string' && dj[s])), 'the re-worded rows have their zh and ja lines', words.filter((s) => !dz[s] || !dj[s]).map((s) => s.slice(0, 60)));
 }
 
 // lane dropline-connect-door (a fleet user's report 2026-10-18: "plugin页面没地方进行登录，integrations里也只能setup key"):
@@ -1221,13 +1221,13 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
 {
   const dl = R.rowById('dropline');
   const withConnect = R.ROWS.filter((r) => r.connect !== undefined).map((r) => r.id);
-  ok(withConnect.join() === 'dropline' && withConnect.every((id) => !R.bindsPerAccount(id) && !R.bindsPerMachine(id) && !R.checkRow(R.rowById(id)).length), `the rows declaring connect (${withConnect.join(', ')}) are card rows that pass the grammar`);
+  ok(withConnect.join() === 'dropline' && verdictOf(withConnect.every((id) => !R.bindsPerAccount(id) && !R.bindsPerMachine(id) && !R.checkRow(R.rowById(id)).length)), `the rows declaring connect (${withConnect.join(', ')}) are card rows that pass the grammar`);
   ok(dl.connect.label === 'Connect with Fish Audio' && Object.keys(dl.connect.words).sort().join() === [...R.CONNECT_WORDS].sort().join() && Object.keys(dl.connect.whys).sort().join() === [...R.CONNECT_WHYS].sort().join(), 'dropline connect: the button label + exactly the closed word set + one sentence per connectWhy code');
   // each declared route is SERVED: the route file's router.<verb>('<path>' (flow = the declared prefix + :id)
   const servedBy = (src, verb, p) => new RegExp(`router\\.${verb}\\('${p.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(:id)?'`).test(src);
   const voiceSrc = readRepo('src/routes/voice.js');
   const routes = [['get', dl.connect.status], ['post', dl.connect.start], ['get', dl.connect.flow], ['post', dl.connect.disconnect]];
-  ok(routes.every(([verb, p]) => servedBy(voiceSrc, verb, p)), `the four declared routes are served by src/routes/voice.js (${routes.map((x) => x.join(' ')).join(' · ')})`);
+  ok(verdictOf(routes.every(([verb, p]) => servedBy(voiceSrc, verb, p))), `the four declared routes are served by src/routes/voice.js (${routes.map((x) => x.join(' ')).join(' · ')})`);
   ok(!servedBy(voiceSrc, 'post', '/api/voice/oauth/begin'), 'CONTROL: a route the file does not serve is not found by the same check');
   // the view carries a COPY (a caller mutating it never reaches the registry); a row without it says null
   const view = store.publicView('dropline');
@@ -1236,11 +1236,11 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   // RED controls — each plant is refused BY NAME
   const plant = (patch) => R.checkRow({ ...dl, ...patch(dl) });
   const has = (errs, re) => errs.some((e) => re.test(e));
-  ok(has(plant((r) => ({ fields: r.fields.map((f) => (f.key === 'apiKey' ? { ...f, required: true } : f)) })), /requires no field/), 'CONTROL: a connect row with a REQUIRED key is refused (the sign-in alone must serve it)');
-  ok(has(plant(() => ({ bindsPerAccount: true, clientHint: 'h' })), /card row/), 'CONTROL: connect on an account-bound row is refused');
-  ok(has(plant((r) => ({ connect: { ...r.connect, start: 'https://fish.audio/oauth' } })), /^connect = /), 'CONTROL: a non-/api route is refused');
-  ok(has(plant((r) => ({ connect: { ...r.connect, whys: { 'self-hosted': r.connect.whys['self-hosted'] } } })), /^connect = /), 'CONTROL: a missing connectWhy sentence is refused');
-  ok(has(plant((r) => ({ connect: { ...r.connect, words: { ...r.connect.words, extra: 'x' } } })), /^connect = /), 'CONTROL: a word outside the closed set is refused');
+  ok(verdictOf(has(plant((r) => ({ fields: r.fields.map((f) => (f.key === 'apiKey' ? { ...f, required: true } : f)) })), /requires no field/)), 'CONTROL: a connect row with a REQUIRED key is refused (the sign-in alone must serve it)');
+  ok(verdictOf(has(plant(() => ({ bindsPerAccount: true, clientHint: 'h' })), /card row/)), 'CONTROL: connect on an account-bound row is refused');
+  ok(verdictOf(has(plant((r) => ({ connect: { ...r.connect, start: 'https://fish.audio/oauth' } })), /^connect = /)), 'CONTROL: a non-/api route is refused');
+  ok(verdictOf(has(plant((r) => ({ connect: { ...r.connect, whys: { 'self-hosted': r.connect.whys['self-hosted'] } } })), /^connect = /)), 'CONTROL: a missing connectWhy sentence is refused');
+  ok(verdictOf(has(plant((r) => ({ connect: { ...r.connect, words: { ...r.connect.words, extra: 'x' } } })), /^connect = /)), 'CONTROL: a word outside the closed set is refused');
 }
 
 // (f) lane oauth-setup-instructions (the owner 2026-10-23: a self-hoster with their own vendor app met the redirect URIs
@@ -1251,29 +1251,29 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   const GMm = require(path.join(REPO, 'src/channels/gmail/manifest.js'));
   const lk = R.rowById('lark'), gm = R.rowById('gmail'), sl = R.rowById('slack'), dl = R.rowById('dropline');
   const withRedirect = R.ROWS.filter((r) => r.redirect).map((r) => r.id);
-  ok(JSON.stringify(withRedirect) === JSON.stringify(['lark', 'gmail', 'slack', 'dropline']) && R.ROWS.filter((r) => r.redirect).every((r) => !R.checkRow(r).length),
+  ok(JSON.stringify(withRedirect) === JSON.stringify(['lark', 'gmail', 'slack', 'dropline']) && verdictOf(R.ROWS.filter((r) => r.redirect).every((r) => !R.checkRow(r).length)),
     `exactly the four OAuth rows declare a redirect block, each passing checkRow (${withRedirect.join(', ')})`);
-  ok(gm.redirect.clientTypes === true && gm.redirect.loopback === GMm.GMAIL_LOOPBACK_URL && Number(new URL(GMm.GMAIL_LOOPBACK_URL).port) > 1024 && new URL(GMm.GMAIL_LOOPBACK_URL).port !== new URL(lk.setup.callbackUrl).port && new URL(GMm.GMAIL_LOOPBACK_URL).pathname === '/gmail/cb' && /Authorized redirect URIs$/.test(gm.redirect.console.path) && gm.redirect.console.links[0].url === 'https://console.cloud.google.com/apis/credentials' && /redirect_uri_mismatch/.test(gm.redirect.refusal) && gm.redirect.also[0].for === 'drive',
+  ok(gm.redirect.clientTypes === true && gm.redirect.loopback === GMm.GMAIL_LOOPBACK_URL && Number(new URL(GMm.GMAIL_LOOPBACK_URL).port) > 1024 && new URL(GMm.GMAIL_LOOPBACK_URL).port !== new URL(lk.setup.callbackUrl).port && new URL(GMm.GMAIL_LOOPBACK_URL).pathname === '/gmail/cb' && gateOf(/Authorized redirect URIs$/.test(gm.redirect.console.path)) && gm.redirect.console.links[0].url === 'https://console.cloud.google.com/apis/credentials' && gateOf(/redirect_uri_mismatch/.test(gm.redirect.refusal)) && gm.redirect.also[0].for === 'drive',
     'Google: a Web application OR a Desktop app client (the card says which), its OWN fixed loopback (/gmail/cb, not Lark\'s port) for a Web client, the console path ending at «Authorized redirect URIs», redirect_uri_mismatch, Drive\'s rclone address');
-  ok(lk.redirect.loopback === lk.setup.callbackUrl && /Security Settings → Redirect URLs$/.test(lk.redirect.console.path) && lk.redirect.refusal === '20029' && lk.redirect.console.links.map((l) => new URL(l.url).hostname).join() === 'open.larksuite.com,open.feishu.cn' && !lk.redirect.clientTypes && lk.redirect.create,
+  ok(lk.redirect.loopback === lk.setup.callbackUrl && gateOf(/Security Settings → Redirect URLs$/.test(lk.redirect.console.path)) && lk.redirect.refusal === '20029' && lk.redirect.console.links.map((l) => new URL(l.url).hostname).join() === 'open.larksuite.com,open.feishu.cn' && !lk.redirect.clientTypes && verdictOf(lk.redirect.create),
     'Lark: its registered loopback IS setup.callbackUrl (one spelling), Developer Console → Security Settings → Redirect URLs (both brands linked), 20029, one kind of app');
-  ok(!sl.redirect.loopback && /OAuth & Permissions → Redirect URLs$/.test(sl.redirect.console.path) && sl.redirect.create && dl.redirect.selfRegisters === true && dl.redirect.vendor === 'Fish Audio' && Object.keys(dl.redirect).length === 2,
+  ok(!sl.redirect.loopback && gateOf(/OAuth & Permissions → Redirect URLs$/.test(sl.redirect.console.path)) && gateOf(sl.redirect.create) && dl.redirect.selfRegisters === true && dl.redirect.vendor === 'Fish Audio' && Object.keys(dl.redirect).length === 2,
     'Slack: https only (no loopback), OAuth & Permissions → Redirect URLs; Dropline registers its own client (nothing to set up in a console)');
   const shape = gm.fields.find((f) => f.key === 'clientType');
-  ok(shape && !shape.secret && !shape.required && shape.validate('web').ok && shape.validate('desktop').ok && !shape.validate('Web').ok && !shape.validate('').ok && JSON.stringify(gm.delegate.facts) === JSON.stringify(['clientType']),
+  ok(gateOf(shape) && !shape.secret && !shape.required && gateOf(shape.validate('web').ok) && gateOf(shape.validate('desktop').ok) && !shape.validate('Web').ok && !shape.validate('').ok && JSON.stringify(gm.delegate.facts) === JSON.stringify(['clientType']),
     'Gmail\'s registry field `clientType` (web | desktop, optional, never secret) — a delegating row\'s readable preset fact');
   const plant = (id, patch) => R.checkRow({ ...R.rowById(id), ...patch(R.rowById(id)) });
   const has = (errs, re) => errs.some((e) => re.test(e));
-  ok(has(plant('gmail', (r) => ({ redirect: { ...r.redirect, loopback: 'https://x.example.test/cb' } })), /^redirect\.loopback must be/)
-    && has(plant('gmail', (r) => ({ redirect: { ...r.redirect, extra: 1 } })), /^redirect\.extra is not a key/)
-    && has(plant('lark', (r) => ({ redirect: { ...r.redirect, loopback: r.setup.callbackUrl.replace('/lark/cb', '/lark/cb2') } })), /one spelling/)
-    && has(plant('slack', (r) => ({ redirect: { ...r.redirect, refusal: '' } })), /^redirect\.refusal/)
-    && has(plant('slack', (r) => ({ redirect: { ...r.redirect, create: undefined } })), /^redirect\.create/)
-    && has(plant('dropline', (r) => ({ redirect: { ...r.redirect, refusal: 'x' } })), /selfRegisters/)
-    && has(plant('lark', (r) => ({ redirect: { ...r.redirect, vendor: 'X' } })), /^redirect\.vendor/)
-    && has(plant('gmail', (r) => ({ redirect: { ...r.redirect, console: { path: 'x', links: [{ label: 'x', url: 'http://x.example.test/' }] } } })), /^redirect\.console/)
-    && has(plant('gmail', (r) => ({ redirect: { ...r.redirect, also: [{ uri: r.redirect.also[0].uri, for: 'nas' }] } })), /^redirect\.also/)
-    && has(plant('gmail', (r) => ({ delegate: { ...r.delegate, facts: ['clientSecret'] } })), /^delegate\.facts/),
+  ok(gateOf(has(plant('gmail', (r) => ({ redirect: { ...r.redirect, loopback: 'https://x.example.test/cb' } })), /^redirect\.loopback must be/))
+    && gateOf(has(plant('gmail', (r) => ({ redirect: { ...r.redirect, extra: 1 } })), /^redirect\.extra is not a key/))
+    && gateOf(has(plant('lark', (r) => ({ redirect: { ...r.redirect, loopback: r.setup.callbackUrl.replace('/lark/cb', '/lark/cb2') } })), /one spelling/))
+    && gateOf(has(plant('slack', (r) => ({ redirect: { ...r.redirect, refusal: '' } })), /^redirect\.refusal/))
+    && gateOf(has(plant('slack', (r) => ({ redirect: { ...r.redirect, create: undefined } })), /^redirect\.create/))
+    && gateOf(has(plant('dropline', (r) => ({ redirect: { ...r.redirect, refusal: 'x' } })), /selfRegisters/))
+    && gateOf(has(plant('lark', (r) => ({ redirect: { ...r.redirect, vendor: 'X' } })), /^redirect\.vendor/))
+    && gateOf(has(plant('gmail', (r) => ({ redirect: { ...r.redirect, console: { path: 'x', links: [{ label: 'x', url: 'http://x.example.test/' }] } } })), /^redirect\.console/))
+    && gateOf(has(plant('gmail', (r) => ({ redirect: { ...r.redirect, also: [{ uri: r.redirect.also[0].uri, for: 'nas' }] } })), /^redirect\.also/))
+    && verdictOf(has(plant('gmail', (r) => ({ delegate: { ...r.delegate, facts: ['clientSecret'] } })), /^delegate\.facts/)),
     'CONTROLS: checkRow refuses a non-loopback / a second spelling of the loopback, an unknown key, a missing refusal or app, extras beside selfRegisters, a vendor elsewhere, an http console link, an unknown `also` consumer, a fact naming the secret');
   // THE GMAIL LOOPBACK HAS ONE DEFINITION (as Lark's): its manifest; the README is generated from it
   if (tracked.length) {
@@ -1289,7 +1289,7 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   const cardUris = gen.entries().flatMap((x) => OS.setupCard({ kind: x.kind, redirect: x.redirect, base: OS.HOST_TPL, relayPages: [{ url: OS.PUBLIC_RELAY, who: 'page' }] }).rows.map((r) => r.uri).filter(Boolean));
   const docUris = [...block.matchAll(/`((?:https?):\/\/[^`]+)`/g)].map((m) => m[1]);
   ok(cardUris.length >= 10 && JSON.stringify(docUris) === JSON.stringify(cardUris), `the README lists exactly the card's addresses, in the card's order (${docUris.length})`, JSON.stringify({ docUris, cardUris }));
-  ok(doc.includes(`\`${OS.PUBLIC_RELAY}\``) && /never an open redirect/.test(block) && /docs\/slack-relay/.test(block) && /\/api\/channels\/oauth\/cb\/<kind>/.test(doc) && /paste the last page/.test(block),
+  ok(gateOf(doc.includes(`\`${OS.PUBLIC_RELAY}\``)) && gateOf(/never an open redirect/.test(block)) && gateOf(/docs\/slack-relay/.test(block)) && gateOf(/\/api\/channels\/oauth\/cb\/<kind>/.test(doc)) && verdictOf(/paste the last page/.test(block)),
     'the README names the three ways back for a person\'s own app (the public page — its address a stable contract —, your own copy of docs/slack-relay, the instance\'s own https address) and the paste-back last resort');
   const stale = doc.replace(`\`${GMm.GMAIL_LOOPBACK_URL}\``, `\`${GMm.GMAIL_LOOPBACK_URL.replace('/gmail/cb', '/gmail/cb2')}\``);
   ok(stale !== doc && gen.render(stale) !== stale, 'CONTROL: a hand-edited address in the block is caught (the regenerated block differs)');
@@ -1312,10 +1312,10 @@ console.log('lane vault-paste-request: a `secret: true` field of a CARD row is a
   const row = R.rowById('llm');
   const bad = R.validateValues(row, { apiKey: P.valueOf('  short\n').value });
   const good = R.validateValues(row, { apiKey: P.valueOf('  sk-long-enough-key\n').value });
-  ok(!bad.ok && /at least 8 characters/.test(bad.errors.apiKey) && good.ok && good.values.apiKey === 'sk-long-enough-key', 'the field\'s validate decides: «at least 8 characters» refused by name, a good one kept TRIMMED (the paste\'s copied newline gone, nothing else rewritten)', { bad, good });
+  ok(!bad.ok && gateOf(/at least 8 characters/.test(bad.errors.apiKey)) && gateOf(good.ok) && good.values.apiKey === 'sk-long-enough-key', 'the field\'s validate decides: «at least 8 characters» refused by name, a good one kept TRIMMED (the paste\'s copied newline gone, nothing else rewritten)', { bad, good });
   const dl = R.validateValues(R.rowById('dropline'), { apiKey: ['not', 'a', 'dropline', 'key'].join('-') });   // built at run time (the secret scan's rule for a key-shaped fixture)
-  ok(!dl.ok && /dl_/.test(dl.errors.apiKey), 'a row\'s own rule (Dropline: «A Dropline key starts with dl_») is the refusal the paste box says', dl.errors);
+  ok(!dl.ok && verdictOf(/dl_/.test(dl.errors.apiKey)), 'a row\'s own rule (Dropline: «A Dropline key starts with dl_») is the refusal the paste box says', dl.errors);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

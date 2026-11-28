@@ -20,7 +20,7 @@ const D = require('../src/desktop-display.js');
 const WT = require('../src/window-targets.js');
 
 let pass = 0, fail = 0;
-const ok = (c, msg) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}`); } };
+const ok = (c, msg) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const FIXTURE = new URL('./fixtures/window-target-app.py', import.meta.url).pathname;
 
@@ -63,7 +63,7 @@ let shot = null;
 try {
   console.log('① WITH the launcher — a pod\'s app on its own session, read by the agent');
   const on = await launch({ withLauncher: true });
-  ok(on.pid && on.ab.a11y === 'own' && /^unix:path=/.test(on.rec.a11yBus || ''), `the app is up (pid ${on.pid}); the record: a11y ${on.ab.a11y}, a11yBus ${(on.rec.a11yBus || '').slice(0, 70)}…`);
+  ok(gateOf(on.pid) && on.ab.a11y === 'own' && verdictOf(/^unix:path=/.test(on.rec.a11yBus || '')), `the app is up (pid ${on.pid}); the record: a11y ${on.ab.a11y}, a11yBus ${(on.rec.a11yBus || '').slice(0, 70)}…`);
   await sleep(400);
   const env1 = WT.treeEnvOf(on.rec, pod);
   let r = null;
@@ -72,7 +72,7 @@ try {
   const PB = gtkRow().pushButtonRole;
   for (let i = 0; i < 10; i++) { r = await WT.snapshotTarget({ pids: [on.pid], budget: 300, env: env1 }); if (r.ok && names(r.snapshot.nodes).includes(`${PB}:Count`)) break; await sleep(300); }
   const seen = r && r.ok ? names(r.snapshot.nodes) : [];
-  ok(seen.includes(`${PB}:Count`) && seen.includes('label:count 0'), `the tree reader on the app's bus names its widgets: ${seen.slice(0, 5).join(', ')} (${r && r.ok ? r.snapshot.nodes.length : 0} nodes)`);
+  ok(gateOf(seen.includes(`${PB}:Count`)) && verdictOf(seen.includes('label:count 0')), `the tree reader on the app's bus names its widgets: ${seen.slice(0, 5).join(', ')} (${r && r.ok ? r.snapshot.nodes.length : 0} nodes)`);
   ok(!/Error retrieving accessibility bus address/.test(on.err()), 'the app found its a11y bus (no "Error retrieving accessibility bus address" warning)');
   const btn = r && r.ok ? r.snapshot.nodes.find((n) => n.role === PB && n.name === 'Count') : null;
   const entry = btn ? { pid: btn.pid ?? on.pid, path: btn.path, role: btn.role, name: btn.name } : null;
@@ -80,7 +80,7 @@ try {
   const a = entry && pick.ok ? await WT.actOnNode({ entry, verb: 'do_action', action: pick.index, env: env1 }) : { ok: false, why: `no Count node (${btn ? Object.keys(btn).join(',') : 'none'})` };
   await sleep(300);
   const r2 = await WT.snapshotTarget({ pids: [on.pid], budget: 300, env: env1 });
-  ok(a.ok && r2.ok && names(r2.snapshot.nodes).includes('label:count 1'), `pressing Count BY THE TREE on the app's bus ⇒ the label reads "count 1" (${a.ok ? 'pressed' : a.why})`);
+  ok(gateOf(a.ok) && gateOf(r2.ok) && verdictOf(names(r2.snapshot.nodes).includes('label:count 1')), `pressing Count BY THE TREE on the app's bus ⇒ the label reads "count 1" (${a.ok ? 'pressed' : a.why})`);
   if (process.env.VS_A11Y_PNG && r2.ok) {
     const px = path.join(S, 'display.png');
     const sh = await WT.screenshotDisplay({ xenv: { ...pod, DISPLAY: on.display }, out: px });
@@ -103,7 +103,7 @@ try {
   const env0 = WT.treeEnvOf(off.rec, pod);
   const r0 = await WT.snapshotTarget({ pids: [off.pid], budget: 300, env: env0 });
   const n0 = r0.ok ? r0.snapshot.nodes.length : 0;
-  ok(off.pid && !off.rec.a11yBus && env0 === pod && n0 === 0 && /Error retrieving accessibility bus address/.test(off.err()), `without the launcher: no a11yBus, the app warned it has no a11y bus, the reader got ${r0.ok ? `${n0} nodes` : `${r0.code}: ${(r0.why || '').slice(0, 90)}`}`);
+  ok(gateOf(off.pid) && !off.rec.a11yBus && env0 === pod && n0 === 0 && verdictOf(/Error retrieving accessibility bus address/.test(off.err())), `without the launcher: no a11yBus, the app warned it has no a11y bus, the reader got ${r0.ok ? `${n0} nodes` : `${r0.code}: ${(r0.why || '').slice(0, 90)}`}`);
   if (shot) shot.red = r0.ok ? `${n0} nodes` : `${r0.code} (${(r0.why || '').match(/Couldn't connect to accessibility bus|[^:]+$/)?.[0] || ''})`;
   off.bus.kill('SIGTERM'); off.app.kill('SIGTERM');
 } catch (e) { ok(false, `the run: ${e.stack}`); }
@@ -114,11 +114,11 @@ if (shot && process.env.VS_A11Y_PNG) {
   const chrome = D.binOnPath('google-chrome', { env: process.env }) || D.binOnPath('chromium', { env: process.env });
   if (chrome) {
     const c = spawnSync(chrome, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', '--no-sandbox', '--disable-gpu', `--user-data-dir=${path.join(S, 'chrome')}`, '--window-size=1100,560', `--screenshot=${process.env.VS_A11Y_PNG}`, `file://${shot.html}`], { env: { ...pod, HOME: S }, encoding: 'utf8', timeout: 30000 });
-    ok(fs.existsSync(process.env.VS_A11Y_PNG), `PNG ${process.env.VS_A11Y_PNG} (chrome rc ${c.status})`);
+    ok(verdictOf(fs.existsSync(process.env.VS_A11Y_PNG)), `PNG ${process.env.VS_A11Y_PNG} (chrome rc ${c.status})`);
   }
 }
 await sleep(300);
 try { fs.rmSync(S, { recursive: true, force: true }); } catch { /* left for the sweep */ }
 console.log(`\ntest-app-display-a11y-bus-tree: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

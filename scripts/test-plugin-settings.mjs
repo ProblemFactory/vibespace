@@ -16,7 +16,7 @@ import { execFileSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -48,12 +48,12 @@ const TRUTH = [
 ];
 for (const [n, r, want] of TRUTH) ok((PS.checkPluginRows([r]).length === 0) === want, `① ${n} → ${want ? 'accepted' : 'refused'}`);
 ok(PS.checkPluginRows([row({ path: 'decision.threshold' })], { builtin: true }).length === 0, '① a BUILT-IN row may keep a legacy spelling through `path`');
-ok(PS.checkPluginRows([row({}), row({})]).some((e) => /duplicate/.test(e)), '① a duplicate key is refused');
+ok(verdictOf(PS.checkPluginRows([row({}), row({})]).some((e) => /duplicate/.test(e))), '① a duplicate key is refused');
 
 console.log('② the derivation — every table row is a schema row, field by field, in the Plugins group');
 for (const [id, tbl] of Object.entries(PS.PLUGIN_SETTINGS)) {
   const cat = `Plugin: ${tbl.label}`;
-  ok(S.pluginCategoryOf(id) === cat && S.settingsGroupOf(cat) === 'plugins' && S.SETTINGS_CATEGORIES.includes(cat), `② ${id} → the category "${cat}" in the Plugins group`);
+  ok(S.pluginCategoryOf(id) === cat && S.settingsGroupOf(cat) === 'plugins' && verdictOf(S.SETTINGS_CATEGORIES.includes(cat)), `② ${id} → the category "${cat}" in the Plugins group`);
   const bad = [];
   for (const r of tbl.rows) {
     const e = S.SETTINGS_SCHEMA[PS.rowPath(id, r)];
@@ -68,13 +68,13 @@ for (const [id, tbl] of Object.entries(PS.PLUGIN_SETTINGS)) {
 ok(S.SETTINGS_SCHEMA['decision.threshold']?.category === 'Plugin: LLM' && S.SETTINGS_SCHEMA['decision.attentionBlock']?.category === 'Plugin: LLM' && !S.SETTINGS_SCHEMA['plugin.llm.threshold'], '② the legacy keys decision.threshold / decision.attentionBlock keep their spelling, now under Plugin: LLM (one truth — no second threshold)');
 ok(!Object.keys(S.SETTINGS_SCHEMA).some((k) => Object.keys(PS.PLUGIN_SETTINGS).some((id) => k === `plugin.${id}.enabled`)), '② `enabled` is never a settings row');
 const links = S.pluginSectionFor('Plugin: LLM');
-ok(links && links.links.some((l) => l.to.kind === 'integration' && l.to.id === 'llm') && links.links.some((l) => l.to.kind === 'plugins-panel'), '② the LLM plugin section links the key (Services › Integrations) and the on-switch (the Plugins list)');
-ok(S.pluginSectionFor('Plugin: Public URLs (frp)').links.some((l) => l.to.kind === 'plugin-secret' && l.to.key === 'token') && !S.SETTINGS_SCHEMA['plugin.frp.token'], '② the frp relay token is a plugin-held secret link, never a settings row');
+ok(gateOf(links) && gateOf(links.links.some((l) => l.to.kind === 'integration' && l.to.id === 'llm')) && verdictOf(links.links.some((l) => l.to.kind === 'plugins-panel')), '② the LLM plugin section links the key (Services › Integrations) and the on-switch (the Plugins list)');
+ok(gateOf(S.pluginSectionFor('Plugin: Public URLs (frp)').links.some((l) => l.to.kind === 'plugin-secret' && l.to.key === 'token')) && !S.SETTINGS_SCHEMA['plugin.frp.token'], '② the frp relay token is a plugin-held secret link, never a settings row');
 const mp = S.registerPluginSettings('hello-zz', 'Hello', [{ key: 'greeting', type: 'string', default: 'hi' }, { key: 'apiKey', type: 'string' }, { key: 'mode', type: 'select', options: ['a', 'b'], default: 'b' }]);
 ok(JSON.stringify(mp) === JSON.stringify(['plugin.hello-zz.greeting', 'plugin.hello-zz.mode']) && S.SETTINGS_SCHEMA['plugin.hello-zz.mode'].type === 'enum' && S.settingsGroupOf('Plugin: Hello') === 'plugins', '② a manifest\'s contributes.settings[] goes through the same validator (the secret-shaped apiKey dropped) and derivation');
 S.unregisterPluginSettings('hello-zz');
 let threw = false; try { S.registerPluginSettings('frp', 'x', []); } catch { threw = true; }
-ok(threw && S.unregisterPluginSettings('frp') === false && S.SETTINGS_SCHEMA['plugin.frp.serverAddr'], '② a manifest cannot take over or remove a built-in table');
+ok(gateOf(threw) && S.unregisterPluginSettings('frp') === false && verdictOf(S.SETTINGS_SCHEMA['plugin.frp.serverAddr']), '② a manifest cannot take over or remove a built-in table');
 
 console.log('③ the one-time move (migration 2026-10-plugin-config-to-settings)');
 const cases = [
@@ -125,7 +125,7 @@ const baseFile = path.join(tmp, 'base-plugin.js'); // the re-planted copy in the
 try {
   const live = fs.readFileSync(path.join(repo, 'src/plugins/llm.js'), 'utf8');
   const A_CFG = '      const v = h.settings();', A_REQ = "require('../decision-model.js')";   // the control's anchors — each fails BY NAME when gone (rule 06:25Z)
-  for (const a of [A_CFG, A_REQ]) ok(live.includes(a), `④ the anchor of the RED CONTROL is in the source (src/plugins/llm.js): ${a.trim()}`);
+  for (const a of [A_CFG, A_REQ]) ok(verdictOf(live.includes(a)), `④ the anchor of the RED CONTROL is in the source (src/plugins/llm.js): ${a.trim()}`);
   const planted = editAnchor(editAnchor(live, A_CFG, `      const v = { ...h.settings(), ${SECOND_TRUTH} }; // the base's second truth (7b6fa3c7b, frozen)`, "src/plugins/llm.js"),
     A_REQ, `require(${JSON.stringify(path.join(repo, 'src/decision-model.js'))})`, "src/plugins/llm.js");
   ok(!!SECOND_TRUTH && planted !== live, `④ the base's cfg line (frozen) carries its second truth ${SECOND_TRUTH} — the expression re-planted below is that line's own`);
@@ -136,7 +136,7 @@ try {
 const engine = require(path.join(repo, 'src/server/decision-engine.js')).create({ dataDir: fs.mkdtempSync(path.join(tmp, 'e-')), integrations: null });
 const pmE = new PluginManager({ dataDir: mkData(plant), plugins: [decisionApi], settings: store({ 'plugin.llm.rules': true }), decisionEngine: engine });
 const es = engine.status();
-ok(es && pmE && (es.features ? es.features.rules === true && es.features.attention === false : true), `④ the decision engine reads the rows through the plugin (features ${JSON.stringify(es && es.features)})`);
+ok(gateOf(es) && gateOf(pmE) && (es.features ? es.features.rules === true && es.features.attention === false : true), `④ the decision engine reads the rows through the plugin (features ${JSON.stringify(es && es.features)})`);
 const voiceInput = require(path.join(repo, 'src/plugins/voice-input.js'));
 let bound = null;
 const pmV = new PluginManager({ dataDir: mkData({ 'voice-input': { enabled: true, config: { language: 'zh', teach: true } } }), plugins: [voiceInput], settings: store({ 'plugin.voice-input.language': 'en' }), voiceBind: (v) => { bound = v; }, integrations: () => null });
@@ -154,7 +154,7 @@ console.log('⑤ writes go through the one settings writer');
   h.w({ language: 'auto' });
   ok(!('plugin.voice-input.language' in st.get()), '⑤ writing the default drops the key (sparse store)');
   let refused = false; try { h.w({ apiKey: 'dl_x' }); } catch { refused = true; }
-  ok(refused, '⑤ a key outside the plugin\'s table is refused by name');
+  ok(verdictOf(refused), '⑤ a key outside the plugin\'s table is refused by name');
 }
 
 console.log('⑥ a plugin-config row re-applies; a server row does not');
@@ -169,4 +169,4 @@ console.log('⑥ a plugin-config row re-applies; a server row does not');
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

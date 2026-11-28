@@ -59,7 +59,7 @@ const CWD = path.join(fakeHome, 'proj');
 const CTX = path.join(fakeHome, 'ctx');
 const CTX2 = path.join(fakeHome, 'ctx2');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -259,7 +259,7 @@ for (let i = 0; i < 120; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/
 // ── the owner's cookie (sign-in ON) ──
 const login = await fetch(`http://127.0.0.1:${PORT}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: J({ password: PASSWORD }) });
 const COOKIE = (login.headers.get('set-cookie') || '').split(';')[0];
-check('sign-in is ON and the owner holds a cookie', login.status === 200 && /=/.test(COOKIE), { status: login.status, COOKIE });
+check('sign-in is ON and the owner holds a cookie', login.status === 200 && verdictOf(/=/.test(COOKIE)), { status: login.status, COOKIE });
 const url = (p) => `http://127.0.0.1:${PORT}${p}`;
 const raw = async (p, { method = 'GET', body, headers = {}, cookie = true } = {}) => {
   const r = await fetch(url(p), { method, headers: { ...(cookie ? { cookie: COOKIE } : {}), ...(body !== undefined && typeof body !== 'string' ? { 'content-type': 'application/json' } : {}), ...headers }, body: body === undefined ? undefined : typeof body === 'string' ? body : J(body) });
@@ -290,7 +290,7 @@ for (let i = 0; i < 60 && !TOKEN; i++) {
   try { for (const f of fs.readdirSync(path.join(DATA, 'session-meta'))) { const m = JSON.parse(fs.readFileSync(path.join(DATA, 'session-meta', f), 'utf8')); if (m.agentToken && m.cwd === CWD) { TOKEN = m.agentToken; META = path.join(DATA, 'session-meta', f); } } } catch {}
   if (!TOKEN) await sleep(250);
 }
-check('the agent\'s seat exists: a chat session with a vsst_ token', !!TOKEN && TOKEN.startsWith('vsst_'), { WIN, TOKEN });
+check('the agent\'s seat exists: a chat session with a vsst_ token', !!TOKEN && verdictOf(TOKEN.startsWith('vsst_')), { WIN, TOKEN });
 wsSend({ type: 'attach', sessionId: WIN });
 // its conversation id must be SID (the stub's init record) — the routes key it as claude:<SID>
 let seat = null;
@@ -305,7 +305,7 @@ const agent = (p, opts = {}) => raw(p, { ...opts, cookie: false, headers: { ...A
 const turn = async (text) => { wsSend({ type: 'chat-input', sessionId: WIN, text }); await sleep(900); };
 await turn('hello');
 const stdinLog = () => { try { return fs.readFileSync(STDIN_LOG, 'utf8'); } catch { return ''; } };
-check('the stub received the typed turn on its stdin', stdinLog().includes('hello'), stdinLog().slice(-300));
+check('the stub received the typed turn on its stdin', verdictOf(stdinLog().includes('hello')), stdinLog().slice(-300));
 
 // a real Background Work job created by the agent: its command writes its jbt_ token to a file
 const TOKFILE = path.join(stubDir, 'jbt.txt');
@@ -314,7 +314,7 @@ const mk = await agent('/api/agent/jobs', { method: 'POST', body: { kind: 'task'
 const LIVE_JOB = mk.json && mk.json.job && mk.json.job.id;
 let JBT = null;
 for (let i = 0; i < 60 && !JBT; i++) { try { JBT = fs.readFileSync(TOKFILE, 'utf8').trim(); } catch {} if (!JBT) await sleep(250); }
-check('a live job of the agent\'s conversation holds a jbt_ token', !!LIVE_JOB && !!JBT && JBT.startsWith('jbt_'), { mk: mk.json, JBT });
+check('a live job of the agent\'s conversation holds a jbt_ token', !!LIVE_JOB && !!JBT && verdictOf(JBT.startsWith('jbt_')), { mk: mk.json, JBT });
 const jobAs = (p, opts = {}) => raw(p, { ...opts, cookie: false, headers: { authorization: `Bearer ${JBT}` } });
 // verify r8 ③: a PUBLISHED SERVICE the owner created — its forward is labelled `service: <name>`, and on an instance without
 // frp its publish logs a line (the journal rides the server's console ring into every incident captured later)
@@ -407,7 +407,7 @@ note(`prompt-context before carried: ${wordsIn(before.get('GET /api/agent/prompt
 // job announces a word; its owner conversation is the stub (no CLI inbox) ⇒ the ladder cannot deliver ⇒ held in the stash
 { const an = await agent(`/api/agent/jobs/${JOB_OTHER_ID}/announce`, { method: 'POST', body: { text: `${w('j8a')}\nsecond line ${w('j8b')}` } }); await sleep(2600);
   const held = fs.readFileSync(path.join(DATA, 'job-notifications.json'), 'utf8');
-  check('an announce on a job whose owner conversation is NOT live is HELD with its words (before the clear)', an.status === 200 && held.includes(w('j8a')) && held.includes(w('j8b')), { an: an.json, held: held.slice(0, 300) }); }
+  check('an announce on a job whose owner conversation is NOT live is HELD with its words (before the clear)', an.status === 200 && gateOf(held.includes(w('j8a'))) && verdictOf(held.includes(w('j8b'))), { an: an.json, held: held.slice(0, 300) }); }
 
 // ── §2 AUTHORITY ──
 console.log('\n§2 AUTHORITY: the owner\'s door under every token kind, and an agent\'s reach');
@@ -416,25 +416,25 @@ const stillThere = async (probeName, word) => (textOf(await PROBES.find((p) => p
 { const r = await clearOne({ kind: 'activity', groupId: W, id: 'P-0000a2' }, { cookie: false }); check('no cookie ⇒ 401 (sign-in on)', r.status === 401, r); }
 { const r = await clearOne({ kind: 'activity', groupId: W, id: 'P-0000a2' }, { cookie: false, headers: { authorization: 'Bearer vsmt_0000000000000000000000000000000000000000' } }); check('a mount token (vsmt_) ⇒ 401 (it opens /dav only)', r.status === 401, r); }
 { const r = await clearOne({ kind: 'activity', groupId: W, id: 'P-0000a2' }, { cookie: false, headers: AG }); check('a session token (vsst_) alone ⇒ 401 (the cookie route needs the cookie)', r.status === 401, r); }
-{ const r = await clearOne({ kind: 'activity', groupId: W, id: 'P-0000a2' }, { headers: AG }); check('cookie + vsst_ ⇒ 403 agent_forbidden (an agent volunteering its token is refused by name)', r.status === 403 && r.json && r.json.code === 'agent_forbidden', r); }
-{ const r = await clearOne({ kind: 'activity', groupId: W, id: 'P-0000a2' }, { headers: { authorization: `Bearer ${JBT}` } }); check('cookie + jbt_ ⇒ 403 agent_forbidden', r.status === 403 && r.json && r.json.code === 'agent_forbidden', r); }
-{ const r = await raw('/api/records/clear', { method: 'POST', body: `kind=activity&groupId=${W}&id=P-0000a2`, headers: { 'content-type': 'application/x-www-form-urlencoded' } }); check('a cross-site FORM post (urlencoded body, cookie SameSite=Lax) ⇒ 400 bad_items (no urlencoded parser; Lax withholds the cookie cross-site anyway)', r.status === 400 && r.json && r.json.code === 'bad_items', r); }
-{ const r = await raw('/api/records/clear', { method: 'POST', body: J({ kind: 'activity', groupId: W, id: 'P-0000a2' }), headers: { 'content-type': 'text/plain' } }); check('a text/plain JSON body (a form\'s enctype trick) ⇒ 400 bad_items', r.status === 400 && r.json && r.json.code === 'bad_items', r); }
-{ const r = await raw('/api/records/clear-many', { method: 'POST', body: { items: Array.from({ length: 201 }, (_, i) => ({ kind: 'activity', groupId: W, id: 'P-' + String(i).padStart(6, '0') })) } }); check('201 items ⇒ 400 too_many (the cap is 200)', r.status === 400 && r.json && r.json.code === 'too_many', r); }
-{ const r = await clearOne({ kind: 'mailbox', id: 'x' }); check('an unknown kind ⇒ 400 bad_kind', r.status === 400 && r.json && r.json.code === 'bad_kind', r); }
+{ const r = await clearOne({ kind: 'activity', groupId: W, id: 'P-0000a2' }, { headers: AG }); check('cookie + vsst_ ⇒ 403 agent_forbidden (an agent volunteering its token is refused by name)', r.status === 403 && gateOf(r.json) && r.json.code === 'agent_forbidden', r); }
+{ const r = await clearOne({ kind: 'activity', groupId: W, id: 'P-0000a2' }, { headers: { authorization: `Bearer ${JBT}` } }); check('cookie + jbt_ ⇒ 403 agent_forbidden', r.status === 403 && gateOf(r.json) && r.json.code === 'agent_forbidden', r); }
+{ const r = await raw('/api/records/clear', { method: 'POST', body: `kind=activity&groupId=${W}&id=P-0000a2`, headers: { 'content-type': 'application/x-www-form-urlencoded' } }); check('a cross-site FORM post (urlencoded body, cookie SameSite=Lax) ⇒ 400 bad_items (no urlencoded parser; Lax withholds the cookie cross-site anyway)', r.status === 400 && gateOf(r.json) && r.json.code === 'bad_items', r); }
+{ const r = await raw('/api/records/clear', { method: 'POST', body: J({ kind: 'activity', groupId: W, id: 'P-0000a2' }), headers: { 'content-type': 'text/plain' } }); check('a text/plain JSON body (a form\'s enctype trick) ⇒ 400 bad_items', r.status === 400 && gateOf(r.json) && r.json.code === 'bad_items', r); }
+{ const r = await raw('/api/records/clear-many', { method: 'POST', body: { items: Array.from({ length: 201 }, (_, i) => ({ kind: 'activity', groupId: W, id: 'P-' + String(i).padStart(6, '0') })) } }); check('201 items ⇒ 400 too_many (the cap is 200)', r.status === 400 && gateOf(r.json) && r.json.code === 'too_many', r); }
+{ const r = await clearOne({ kind: 'mailbox', id: 'x' }); check('an unknown kind ⇒ 400 bad_kind', r.status === 400 && gateOf(r.json) && r.json.code === 'bad_kind', r); }
 // an id from ANOTHER store's namespace: nothing is cleared anywhere
 { const r1 = await clearOne({ kind: 'todo', id: JOB_ID }); const r2 = await clearOne({ kind: 'job', id: T1 }); const r3 = await clearOne({ kind: 'activity', groupId: W, id: T1 }); const r4 = await clearOne({ kind: 'status', sessionKey: K, id: 'P-0000a1' }); const r5 = await clearOne({ kind: 'group-message', groupId: GID, id: JOB_ID });
-  check('an id from another store\'s namespace ⇒ 404 not_found on every kind', [r1, r2, r3, r4, r5].every((r) => r.status === 404 && r.json.code === 'not_found'), [r1, r2, r3, r4, r5].map((r) => r.status + ' ' + (r.json && r.json.code)));
-  check('…and the records those ids DO name are untouched', (await stillThere('GET /api/jobs/:id?tail (cookie: snapshot + interaction + runs, the cron parent)', 'j1n')) && (await stillThere('GET /api/user-todos/:id (cookie, the whole item)', 't2x')) && (await stillThere('GET /api/tasks (cookie)', 'a1n'))); }
+  check('an id from another store\'s namespace ⇒ 404 not_found on every kind', verdictOf([r1, r2, r3, r4, r5].every((r) => r.status === 404 && r.json.code === 'not_found')), [r1, r2, r3, r4, r5].map((r) => r.status + ' ' + (r.json && r.json.code)));
+  check('…and the records those ids DO name are untouched', (gateOf(await stillThere('GET /api/jobs/:id?tail (cookie: snapshot + interaction + runs, the cron parent)', 'j1n'))) && (gateOf(await stillThere('GET /api/user-todos/:id (cookie, the whole item)', 't2x'))) && (verdictOf(await stillThere('GET /api/tasks (cookie)', 'a1n')))); }
 // the agent's own verbs: its own entry ✓, another session's ✗, a job token ✗, another member's message ✗
 const redact = (body) => agent('/api/agent/task/progress-redact', { method: 'POST', body });
 { const r = await redact({ group: W, ref: 'P-0000a2' }); check('agent: another session\'s Activity entry ⇒ 403 not_yours', r.status === 403 && r.json.code === 'not_yours', r); }
 { const r = await redact({ group: W, ref: 'P-0000a3' }); check('agent: the OWNER\'s entry (no session) ⇒ 403 not_yours (fails closed)', r.status === 403 && r.json.code === 'not_yours', r); }
-{ const r = await redact({ group: WX, ref: 'P-0000e1' }); check('agent: an entry of a group it is NOT in ⇒ refused (403/404), never cleared', r.status === 403 || r.status === 404, r); check('…and that entry still carries its word', await stillThere('GET /api/tasks (cookie)', 'x1n')); }
-{ const r = await raw('/api/agent/task/progress-redact', { method: 'POST', body: { group: W, ref: 'P-0000a1' }, cookie: false, headers: { authorization: `Bearer ${JBT}` } }); check('a job token on the agent verb ⇒ 401/403, nothing cleared', (r.status === 401 || r.status === 403) && (await stillThere('GET /api/tasks (cookie)', 'a1n')), r); }
+{ const r = await redact({ group: WX, ref: 'P-0000e1' }); check('agent: an entry of a group it is NOT in ⇒ refused (403/404), never cleared', r.status === 403 || r.status === 404, r); check('…and that entry still carries its word', verdictOf(await stillThere('GET /api/tasks (cookie)', 'x1n'))); }
+{ const r = await raw('/api/agent/task/progress-redact', { method: 'POST', body: { group: W, ref: 'P-0000a1' }, cookie: false, headers: { authorization: `Bearer ${JBT}` } }); check('a job token on the agent verb ⇒ 401/403, nothing cleared', (r.status === 401 || r.status === 403) && (verdictOf(await stillThere('GET /api/tasks (cookie)', 'a1n'))), r); }
 { const r = await agent('/api/agent/user-todo', { method: 'POST', body: { clear: T5 } }); check('agent: another session\'s For-you item ⇒ 403 not_yours', r.status === 403 && r.json.code === 'not_yours', r); }
 { const r = await agent('/api/agent/user-todo', { method: 'POST', body: { clear: T3 } }); check('agent: a Background-Work item under its OWN key (origin jobs) ⇒ 403 not_yours (a producer\'s item is never the agent\'s)', r.status === 403 && r.json.code === 'not_yours', r); }
-{ const r = await agent('/api/agent/msg/group', { method: 'POST', body: { verb: 'clear', group: GID, id: M1 } }); check('agent: another member\'s group message through vibespace-msg ⇒ refused (no clear verb for groups on the agent side — the owner clears)', r.status >= 400 && (await stillThere('GET /api/channel-groups/:id/messages (cookie, folded)', 'g1t')), r); }
+{ const r = await agent('/api/agent/msg/group', { method: 'POST', body: { verb: 'clear', group: GID, id: M1 } }); check('agent: another member\'s group message through vibespace-msg ⇒ refused (no clear verb for groups on the agent side — the owner clears)', r.status >= 400 && (verdictOf(await stillThere('GET /api/channel-groups/:id/messages (cookie, folded)', 'g1t'))), r); }
 { const r = await redact({ group: W, ref: 'P-0000a1' }); check('agent: its OWN entry ⇒ cleared', r.status === 200 && r.json.cleared === 1, r); }
 { const r = await agent('/api/agent/user-todo', { method: 'POST', body: { clear: T1 } }); check('agent: its OWN For-you item ⇒ cleared', r.status === 200 && r.json.cleared === 1, r); }
 { const r = await redact({ group: W, ref: 'P-0000a1' }); check('agent: clearing its own entry again ⇒ already (idempotent)', r.status === 200 && r.json.already === 1, r); }
@@ -453,17 +453,17 @@ const items = [
 ];
 const many = await raw('/api/records/clear-many', { method: 'POST', body: { items } });
 const clearedFramesDone = frames.length;
-check('the owner\'s clear-many clears every record (T3 rides the job cascade)', many.status === 200 && many.json.ok && many.json.cleared >= items.length && !many.json.refused.length && !many.json.unknown.length, many.json);
+check('the owner\'s clear-many clears every record (T3 rides the job cascade)', many.status === 200 && gateOf(many.json.ok) && many.json.cleared >= items.length && !many.json.refused.length && !many.json.unknown.length, many.json);
 await sleep(1200); // the debounced stores flush (500 ms) + the broadcasts
 const CLEAR_AT = Date.now();
 // (a) a reply typed AFTER the clear (a client mid-edit sends its reply to the item id): the quote block is built from the store
 { const r = await raw(`/api/user-todos/${T2}/reply`, { method: 'POST', body: { text: 'my own reply words' } }); await sleep(900);
   const tail = stdinLog().split('\n').filter(Boolean).slice(-3).join('\n');
-  check('(a) a reply sent after the clear reaches the session with the SENTENCE in its quote, never the old words', (r.status === 200 || r.status === 409) && !has(tail) && (tail.includes(CT) || r.status === 409), { status: r.status, body: r.text.slice(0, 200), tail: tail.slice(0, 400) }); }
+  check('(a) a reply sent after the clear reaches the session with the SENTENCE in its quote, never the old words', (r.status === 200 || r.status === 409) && !has(tail) && (verdictOf(tail.includes(CT)) || r.status === 409), { status: r.status, body: r.text.slice(0, 200), tail: tail.slice(0, 400) }); }
 // (b) the agent resolving by the OLD text finds nothing; "cleared" matches nothing (a cleared item answers to its id only)
 { const r1 = await agent('/api/agent/user-todo', { method: 'POST', body: { resolve: w('t1x') } }); const r2 = await agent('/api/agent/user-todo', { method: 'POST', body: { resolve: 'cleared' } });
   const only = (t, q) => wordsIn(t).every((x) => x === q);
-  check('(b) resolve by the old text ⇒ no match (the answer echoes the query, nothing else); resolve "cleared" ⇒ no match', !!(r1.json && r1.json.error) && !!(r2.json && r2.json.error) && only(r1.text, w('t1x')) && !has(r2.text), { r1: r1.text.slice(0, 200), r2: r2.text.slice(0, 200) }); }
+  check('(b) resolve by the old text ⇒ no match (the answer echoes the query, nothing else); resolve "cleared" ⇒ no match', !!(r1.json && r1.json.error) && !!(r2.json && r2.json.error) && gateOf(only(r1.text, w('t1x'))) && !has(r2.text), { r1: r1.text.slice(0, 200), r2: r2.text.slice(0, 200) }); }
 // (c) a job whose For-you item was ALREADY resolved: the cascade cleared it too
 { const r = await raw('/api/user-todos'); const all = [...((r.json.todos || {}).open || []), ...((r.json.todos || {}).resolved || [])]; const it = all.find((x) => x.id === T3) || null; check('(c) the cleared job\'s already-resolved For-you item lost its words too (the cascade covers every status)', !!it && it.text === CT && !has(it), it); }
 // (d) a group message posted after the last report, cleared BEFORE the member's next turn: the report says the sentence
@@ -476,7 +476,7 @@ if (M6) {
   const rc = await clearOne({ kind: 'group-message', groupId: GID, id: M6 });
   await sleep(300); judgeFrames = frames.length; // the post itself rode a broadcast (its words, as posted — before its clear)
   const pc = await agent('/api/agent/prompt-context');
-  check('(d) the next-turn report of a message cleared before the turn carries the sentence, not the word', rc.status === 200 && !pc.text.includes(w('g6t')) && pc.text.includes(CT), { rc: rc.json, pc: pc.text.slice(0, 600) });
+  check('(d) the next-turn report of a message cleared before the turn carries the sentence, not the word', rc.status === 200 && !pc.text.includes(w('g6t')) && verdictOf(pc.text.includes(CT)), { rc: rc.json, pc: pc.text.slice(0, 600) });
 }
 // a job that announces AFTER its clear puts new words in the viewers' ring; a SECOND clear answers `already` for the record and still takes them
 { const an = await jobAs(`/api/agent/jobs/${LIVE_JOB}/announce`, { method: 'POST', body: { text: w('j9a') } }); await sleep(800);
@@ -484,7 +484,7 @@ if (M6) {
   const an2 = await jobAs(`/api/agent/jobs/${LIVE_JOB}/announce`, { method: 'POST', body: { text: w('j9b') } }); await sleep(800);
   const rc = await clearOne({ kind: 'job', id: LIVE_JOB });
   const pc2 = await agent('/api/agent/prompt-context');
-  check('a second clear of a cleared job (the record answers already, or cleared for its new delivery reason) takes a later announce\'s words from the viewers\' ring', an.status === 200 && an2.status === 200 && rc.status === 200 && (rc.json.already + rc.json.cleared) === 1 && pc1.text.includes(w('j9a')) && !pc2.text.includes(w('j9b')), { rc: rc.json, pc1: wordsIn(pc1.text), pc2: wordsIn(pc2.text) }); }
+  check('a second clear of a cleared job (the record answers already, or cleared for its new delivery reason) takes a later announce\'s words from the viewers\' ring', an.status === 200 && an2.status === 200 && rc.status === 200 && (rc.json.already + rc.json.cleared) === 1 && gateOf(pc1.text.includes(w('j9a'))) && !pc2.text.includes(w('j9b')), { rc: rc.json, pc1: wordsIn(pc1.text), pc2: wordsIn(pc2.text) }); }
 await sleep(300); judgeFrames = frames.length; // the announces above rode live peer cards (their words as new output, before the second clear)
 // (e) a wake that could not be delivered is NEVER stashed (the engine's law) — the stash file holds no group word
 { let stash = ''; try { stash = fs.readFileSync(path.join(DATA, 'msg-stash.json'), 'utf8'); } catch {} check('(e) data/msg-stash.json holds no group message word (a refused wake rides the next report, never the stash)', !has(stash), stash.slice(0, 300)); }
@@ -501,7 +501,7 @@ for (const p of PROBES) {
   check(`${p.name} — clean`, !has(t), { words: wordsIn(t), status: r && r.status, head: t.slice(0, 300) });
 }
 // a job that ran again after the clear: its NEW output is its own (the live job's run started before the clear ⇒ withheld)
-{ const r = await raw(`/api/jobs/${LIVE_JOB}?tail=50`); check('the live job cleared mid-run: its snapshot withholds the covered log and names it', r.json && r.json.job && r.json.job.logWithheld === true && !has(r.text), r.json && r.json.job && { logWithheld: r.json.job.logWithheld, logTail: r.json.job.logTail, name: r.json.job.name, words: wordsIn(r.text) }); }
+{ const r = await raw(`/api/jobs/${LIVE_JOB}?tail=50`); check('the live job cleared mid-run: its snapshot withholds the covered log and names it', gateOf(r.json) && gateOf(r.json.job) && r.json.job.logWithheld === true && !has(r.text), r.json && r.json.job && { logWithheld: r.json.job.logWithheld, logTail: r.json.job.logTail, name: r.json.job.name, words: wordsIn(r.text) }); }
 // the live job is STOPPED by force after the clear (the wrapper dies with it: no exit marker) — the run's finalize must not re-stamp its last line from the withheld log
 { const st = await raw(`/api/jobs/${LIVE_JOB}/stop`, { method: 'POST', body: { force: true } }); let r = null, run = null; for (let i = 0; i < 60; i++) { r = await raw(`/api/jobs/${LIVE_JOB}?tail=50`); run = r.json && r.json.job && r.json.job.run; if (run && run.endedAt) break; await sleep(500); } check('a run that started before the clear and ended after it does not re-publish the withheld log as its last line', st.status === 200 && !!run && !!run.endedAt && !has(r.text), { st: st.json, run, words: wordsIn(r.text) }); }
 // the broadcasts the owner's client saw from the clear on
@@ -511,10 +511,10 @@ for (const p of PROBES) {
 // seat with nothing waiting is refused by name (409 nothing_waiting), never a leak
 { const ho = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {}, headers: { 'sec-fetch-site': 'same-origin' } }); await sleep(900);   // lane owner-press-attended r3: the person's page (the hand-over is a press — write-origin pressOf)
   const tail = stdinLog().split('\n').filter(Boolean).slice(-3).join('\n');
-  check(`POST /api/sessions/:id/stash/hand-over after the clear ⇒ ${ho.status} ${(ho.json && (ho.json.code || (ho.json.ok && 'delivered ' + ho.json.delivered))) || ''}: nothing it delivered carries a word`, (ho.status === 200 || (ho.status === 409 && ho.json && ho.json.code === 'nothing_waiting')) && !has(tail) && !has(ho.text), { status: ho.status, body: ho.text.slice(0, 200), tail: wordsIn(tail) });
-  const hoA = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {}, headers: AG }); check('…and an agent\'s bearer on it ⇒ 403 agent_forbidden', hoA.status === 403 && hoA.json && hoA.json.code === 'agent_forbidden', hoA);
+  check(`POST /api/sessions/:id/stash/hand-over after the clear ⇒ ${ho.status} ${(ho.json && (ho.json.code || (ho.json.ok && 'delivered ' + ho.json.delivered))) || ''}: nothing it delivered carries a word`, (ho.status === 200 || (ho.status === 409 && gateOf(ho.json) && ho.json.code === 'nothing_waiting')) && !has(tail) && !has(ho.text), { status: ho.status, body: ho.text.slice(0, 200), tail: wordsIn(tail) });
+  const hoA = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {}, headers: AG }); check('…and an agent\'s bearer on it ⇒ 403 agent_forbidden', hoA.status === 403 && gateOf(hoA.json) && hoA.json.code === 'agent_forbidden', hoA);
   // lane owner-press-attended r2/r3: a request with no page (Node fetch: the cookie, no Sec-Fetch-Site, no Origin) is no press ⇒ refused by name
-  const hoS = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {} }); check('…and the owner\'s cookie with NO page (a script: no Sec-Fetch-Site, no Origin) ⇒ 403 not_a_person', hoS.status === 403 && hoS.json && hoS.json.code === 'not_a_person', { status: hoS.status, body: hoS.text.slice(0, 200) }); }
+  const hoS = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {} }); check('…and the owner\'s cookie with NO page (a script: no Sec-Fetch-Site, no Origin) ⇒ 403 not_a_person', hoS.status === 403 && gateOf(hoS.json) && hoS.json.code === 'not_a_person', { status: hoS.status, body: hoS.text.slice(0, 200) }); }
 // a second user turn after the clear: what the chat injects (override notices, the group report, the held job notifications) carries no word
 await turn('second turn');
 { const log = stdinLog(); const after = log.slice(log.indexOf('second turn')); check('the stub\'s stdin after the clear (a typed turn + what rode it) carries no word', !has(after), wordsIn(after)); }
@@ -544,18 +544,18 @@ await turn('second turn');
   const declared = (f) => /^data\/channels\/msgs\/groups\/[^/]+\.ndjson$/.test(f) || /^data\/job-logs\/[^/]+\/\d+\/current\.log$/.test(f) || (IX.test(f) && ixDeclared);
   const undeclared = rel.filter((f) => !declared(f));
   check(`the data dir + HOME: every file still holding a word is a DECLARED append-only holder (${rel.length} files: ${rel.join(', ')})`, !undeclared.length, undeclared);
-  check(`…the search index holds a word only in the seat's own user-side rows (${ixWords.length} word(s) in its files; GET /api/search finds them in: ${[...new Set(ixHits.map((h) => h.kind + ' ' + (h.role || '') + ' ' + h.at))].join(', ') || 'nothing'})`, !ixFiles.length || ixDeclared, { hits: ixHits, words: ixWords });
-  check('…and the declared holders are exactly the group log and the run logs (the clear withholds both from every reader)', rel.some((f) => f.startsWith('data/channels/msgs/groups/')) && rel.some((f) => f.startsWith('data/job-logs/')), rel);
+  check(`…the search index holds a word only in the seat's own user-side rows (${ixWords.length} word(s) in its files; GET /api/search finds them in: ${[...new Set(ixHits.map((h) => h.kind + ' ' + (h.role || '') + ' ' + h.at))].join(', ') || 'nothing'})`, !ixFiles.length || verdictOf(ixDeclared), { hits: ixHits, words: ixWords });
+  check('…and the declared holders are exactly the group log and the run logs (the clear withholds both from every reader)', gateOf(rel.some((f) => f.startsWith('data/channels/msgs/groups/'))) && verdictOf(rel.some((f) => f.startsWith('data/job-logs/'))), rel);
 }
 // the server's own journal: ids only
-{ const j = hub.log(); const lines = j.split('\n').filter((l) => has(l)); check('the server journal carries no word (the [clear] lines name ids only)', !lines.length, lines.slice(0, 5)); check('…and it DID write the [clear] receipts', /\[clear\] (activity|todo|status|job|group-message)/.test(j), j.split('\n').filter((l) => l.includes('[clear]')).slice(0, 3)); }
+{ const j = hub.log(); const lines = j.split('\n').filter((l) => has(l)); check('the server journal carries no word (the [clear] lines name ids only)', !lines.length, lines.slice(0, 5)); check('…and it DID write the [clear] receipts', verdictOf(/\[clear\] (activity|todo|status|job|group-message)/.test(j)), j.split('\n').filter((l) => l.includes('[clear]')).slice(0, 3)); }
 // verify r8 ③ ②: an incident captured AFTER the clear (its server half copies the console ring — the journal) and the
 // published service's forward (relabelled by the door) carry no word
 { const inc = await raw('/api/incident', { method: 'POST', body: { note: 'walk after the clear', rings: {}, snapshot: {} } });
   const b = inc.json && inc.json.id ? fs.readFileSync(path.join(DATA, 'incidents', inc.json.id, 'bundle.json'), 'utf8') : '';
-  check('verify r8: an incident captured after the clear — its server console ring (the journal) included — carries no word', !!b && b.includes('"console"') && !has(b), { id: inc.json, words: wordsIn(b), at: b.slice(Math.max(0, b.indexOf(S) - 200), b.indexOf(S) + 40) });
+  check('verify r8: an incident captured after the clear — its server console ring (the journal) included — carries no word', !!b && gateOf(b.includes('"console"')) && !has(b), { id: inc.json, words: wordsIn(b), at: b.slice(Math.max(0, b.indexOf(S) - 200), b.indexOf(S) + 40) });
   let fwds = null; for (let i = 0; i < 20; i++) { fwds = await raw('/api/port-forwards'); if (!has(fwds.text)) break; await sleep(250); }
-  check('verify r8: the published service\'s forward reads the sentence (GET /api/port-forwards carries no word)', !has(fwds.text) && ((fwds.json && fwds.json.forwards) || []).some((f) => Number(f.remotePort) === SVC_PORT && f.label === 'service: ' + CT), wordsIn(fwds.text));
+  check('verify r8: the published service\'s forward reads the sentence (GET /api/port-forwards carries no word)', !has(fwds.text) && verdictOf(((fwds.json && fwds.json.forwards) || []).some((f) => Number(f.remotePort) === SVC_PORT && f.label === 'service: ' + CT)), wordsIn(fwds.text));
   await raw(`/api/jobs/${SVC_JOB}/stop`, { method: 'POST', body: { force: true } }); }
 // telemetry + incidents: no word
 { const tel = execSync(`grep -rl -F ${J(S)} ${J(path.join(DATA, 'telemetry'))} ${J(path.join(DATA, 'incidents'))} 2>/dev/null || true`, { encoding: 'utf8' }).trim(); check('telemetry shards + incident captures carry no word', !tel, tel); }
@@ -575,10 +575,10 @@ console.log('\n§6 THE SIGN-IN ROAD: a code typed into the sign-in card reaches 
   const aid = acct.json && acct.json.id;
   const st = await raw(`/api/accounts/${aid}/signin`, { method: 'POST', body: {} });
   let g = null; for (let i = 0; i < 60; i++) { g = await raw(`/api/accounts/${aid}/signin`); if (g.json && g.json.signin && g.json.signin.phase === 'waiting-code') break; await sleep(150); }
-  check('§6 the sign-in drives the stub CLI to its code prompt (POST …/subscription {signin:true} → POST …/signin)', !!aid && st.status === 200 && g.json && g.json.signin && g.json.signin.phase === 'waiting-code', { acct: acct.text.slice(0, 120), st: st.text.slice(0, 200), g: g && g.text.slice(0, 200) });
+  check('§6 the sign-in drives the stub CLI to its code prompt (POST …/subscription {signin:true} → POST …/signin)', !!aid && st.status === 200 && gateOf(g.json) && gateOf(g.json.signin) && g.json.signin.phase === 'waiting-code', { acct: acct.text.slice(0, 120), st: st.text.slice(0, 200), g: g && g.text.slice(0, 200) });
   const sent = await raw(`/api/accounts/${aid}/signin/code`, { method: 'POST', body: { code: SW + '#walkstate' } });
   for (let i = 0; i < 60; i++) { g = await raw(`/api/accounts/${aid}/signin`); if (g.json && g.json.signin && g.json.signin.phase === 'failed') break; await sleep(150); }
-  check('§6 the CLI read the code (its tty echoed it) and died silently ⇒ the sign-in failed', sent.status === 200 && g.json && g.json.signin && g.json.signin.phase === 'failed', { sent: sent.text.slice(0, 200), g: g.text.slice(0, 200) });
+  check('§6 the CLI read the code (its tty echoed it) and died silently ⇒ the sign-in failed', sent.status === 200 && gateOf(g.json) && gateOf(g.json.signin) && g.json.signin.phase === 'failed', { sent: sent.text.slice(0, 200), g: g.text.slice(0, 200) });
   check('§6 no answer of the sign-in routes holds the typed code (start, code, GET after the death)', !holds(st.text) && !holds(sent.text) && !holds(g.text), { st: holds(st.text), sent: holds(sent.text), get: g.text.slice(0, 300) });
   const seen = frames.slice(f0).filter((f) => f.type === 'claude-signin');
   check(`§6 no claude-signin broadcast holds it (${seen.length} frames)`, seen.length > 0 && !seen.some(holds), seen.filter(holds).slice(0, 2));
@@ -597,14 +597,14 @@ console.log('\n§7 THE PASTE ROAD: a value pasted into a paste request reaches i
   const f0 = frames.length;
   const ask = await agent('/api/agent/vault/secret-request', { method: 'POST', body: { words: `the judge key ${PW7}`, purpose: 'the walk', into: 'llm.apiKey' } });
   const rid = ask.json && ask.json.requestId;
-  check('§7 the agent asks (POST /api/agent/vault/secret-request) ⇒ a request id, ONE For-you item', ask.status === 200 && /^sr-[0-9a-f]{12}$/.test(rid || ''), ask.text.slice(0, 300));
+  check('§7 the agent asks (POST /api/agent/vault/secret-request) ⇒ a request id, ONE For-you item', ask.status === 200 && verdictOf(/^sr-[0-9a-f]{12}$/.test(rid || '')), ask.text.slice(0, 300));
   const bearer = await agent(`/api/vault/secret-requests/${rid}/answer`, { method: 'POST', body: { answer: 'store', value: PV } });
   const riding = await raw(`/api/vault/secret-requests/${rid}/answer`, { method: 'POST', headers: { ...PAGE7, ...AG }, body: { answer: 'store', value: PV } });
-  check('§7 the agent cannot answer it: its bearer alone ⇒ 401 at the sign-in gate; its bearer riding the owner\'s cookie ⇒ 403 human_only at the vault\'s door', bearer.status === 401 && riding.status === 403 && /human_only/.test(riding.text) && !holds(bearer.text) && !holds(riding.text), { bearer: bearer.text.slice(0, 120), riding: riding.text.slice(0, 160) });
+  check('§7 the agent cannot answer it: its bearer alone ⇒ 401 at the sign-in gate; its bearer riding the owner\'s cookie ⇒ 403 human_only at the vault\'s door', bearer.status === 401 && riding.status === 403 && gateOf(/human_only/.test(riding.text)) && !holds(bearer.text) && !holds(riding.text), { bearer: bearer.text.slice(0, 120), riding: riding.text.slice(0, 160) });
   const st = await raw(`/api/vault/secret-requests/${rid}/answer`, { method: 'POST', headers: PAGE7, body: { answer: 'store', value: PV } });
-  check('§7 the owner pastes it (the cookie door) ⇒ stored into llm.apiKey — the answer holds no value', st.status === 200 && st.json && st.json.outcome === 'stored' && st.json.into === 'llm.apiKey' && !holds(st.text), st.text.slice(0, 300));
+  check('§7 the owner pastes it (the cookie door) ⇒ stored into llm.apiKey — the answer holds no value', st.status === 200 && gateOf(st.json) && st.json.outcome === 'stored' && st.json.into === 'llm.apiKey' && !holds(st.text), st.text.slice(0, 300));
   const next = await agent('/api/agent/prompt-context');
-  check('§7 the agent\'s next turn says STORED (llm.apiKey) — never the value', /STORED/.test(next.text) && /llm\.apiKey/.test(next.text) && !holds(next.text), next.text.slice(0, 400));
+  check('§7 the agent\'s next turn says STORED (llm.apiKey) — never the value', gateOf(/STORED/.test(next.text)) && gateOf(/llm\.apiKey/.test(next.text)) && !holds(next.text), next.text.slice(0, 400));
   const answers = [];
   for (const p of PROBES) { let r = null; try { r = await p.call(); } catch (e) { r = { out: '' }; } if (holds(textOf(r))) answers.push(p.name); }
   check(`§7 no probe's answer holds the pasted value (${PROBES.length} probes)`, answers.length === 0, answers);
@@ -614,7 +614,7 @@ console.log('\n§7 THE PASTE ROAD: a value pasted into a paste request reaches i
   // the request's item is the record: it holds the agent's words (never the value) — the owner's clear takes them
   const items = ((await raw('/api/user-todos')).json || {}).todos || {};
   const it = [...(items.open || []), ...(items.resolved || [])].find((x) => x && x.action && x.action.requestId === rid);
-  check('§7 the request\'s item (done · stored) holds the agent\'s words and no value', !!it && it.status === 'done' && holds(it, PW7) && !holds(it), it && { status: it.status, by: it.resolvedBy });
+  check('§7 the request\'s item (done · stored) holds the agent\'s words and no value', !!it && it.status === 'done' && gateOf(holds(it, PW7)) && !holds(it), it && { status: it.status, by: it.resolvedBy });
   const cl = await clearOne({ kind: 'todo', id: it && it.id, at: it && it.createdAt });
   const after = ((await raw('/api/user-todos')).json || {}).todos || {};
   const it2 = [...(after.open || []), ...(after.resolved || [])].find((x) => x && x.id === (it && it.id));
@@ -631,10 +631,10 @@ console.log('\nitem 7: §6\'s and §7\'s file censuses, after the server\'s stop
   const exited = hub.child.exitCode !== null || hub.child.signalCode !== null ? { code: hub.child.exitCode, signal: hub.child.signalCode, before: true }
     : await new Promise((res) => { const to = setTimeout(() => res(null), 60000); hub.child.once('exit', (code, signal) => { clearTimeout(to); res({ code, signal }); }); hub.stop({ signal: 'SIGTERM', hubOnly: true }); });   // the hub alone, by its identity
   const flushed = !!exited && !exited.before && exited.code === 0;
-  check(`the server STOPPED on SIGTERM through its shutdown (exit 0 — the exit flush ran): ${exited ? `${exited.before ? 'it had already exited, ' : ''}exit ${exited.code}${exited.signal ? ` (${exited.signal})` : ''} after ${Date.now() - t0s} ms` : 'NOT EXITED within 60 s'}`, flushed, exited);
+  check(`the server STOPPED on SIGTERM through its shutdown (exit 0 — the exit flush ran): ${exited ? `${exited.before ? 'it had already exited, ' : ''}exit ${exited.code}${exited.signal ? ` (${exited.signal})` : ''} after ${Date.now() - t0s} ms` : 'NOT EXITED within 60 s'}`, verdictOf(flushed), exited);
   for (const a of afterStop) {
     const files = execSync(`grep -rl -F ${J(a.v)} ${J(DATA)} ${J(fakeHome)} 2>/dev/null || true`, { encoding: 'utf8' }).trim();
-    check(a.name, flushed && !files && a.also(), files || (flushed ? 'the journal / the stub\'s stdin' : 'the server did not stop through its shutdown — what it owed was never written, so no file read here is the truth'));
+    check(a.name, gateOf(flushed) && !files && verdictOf(a.also()), files || (flushed ? 'the journal / the stub\'s stdin' : 'the server did not stop through its shutdown — what it owed was never written, so no file read here is the truth'));
   }
 }
 
@@ -651,7 +651,7 @@ console.log('\n§5 CONTROL: a reader that keeps a shadow copy of the words makes
   m.snapshot(); // the shadow forms
   const r = m.clearItems(['ut-c0000001'], { by: 'owner' });
   const leak = has(m.snapshot());
-  check('CONTROL: the patched copy (a snapshot reading a shadow copy of the text) still shows the word after the clear — the walk\'s judge is RED on it', r.cleared.length === 1 && leak, { r, snap: m.snapshot() });
+  check('CONTROL: the patched copy (a snapshot reading a shadow copy of the text) still shows the word after the clear — the walk\'s judge is RED on it', r.cleared.length === 1 && verdictOf(leak), { r, snap: m.snapshot() });
   try { m.stop(); } catch {}
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -682,12 +682,12 @@ console.log('\n§5b MUTANT: a clear that keeps the group summary\'s lastText mak
     return { before: has(before), after: has(after), cleared: (cr.cleared || []).length };
   };
   const real = await run(REAL, 'real', 'bee'), keep = await run(KEEP, 'keep', 'bee'), blind = await run(KEEP, 'blind', 'private');
-  check('§5b the real clear: the word shows in the summary\'s lastText before, and is gone after', real.before && !real.after && real.cleared === 1, real);
-  check('§5b MUTANT: a clear that keeps lastText still shows the word after — the judge is RED on it', keep.before && keep.after && keep.cleared === 1, keep);
+  check('§5b the real clear: the word shows in the summary\'s lastText before, and is gone after', gateOf(real.before) && !real.after && real.cleared === 1, real);
+  check('§5b MUTANT: a clear that keeps lastText still shows the word after — the judge is RED on it', gateOf(keep.before) && gateOf(keep.after) && keep.cleared === 1, keep);
   check('§5b CONTROL: the base\'s seed label («private: …», blanked by the write-time belt) shows NO word before — under the same mutant the walk had nothing to miss', !blind.before && !blind.after && blind.cleared === 1, blind);
 }
-for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: '§5 ' })) check(row.name, row.pass, row.detail);
+for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: '§5 ' })) check(row.name, verdictOf(row.pass), row.detail);
 
 try { wsc.close(); } catch {}
 console.log(`\n${failed ? '✗' : '✓'} test-record-clear-walk: ${passed} passed, ${failed} failed (${((Date.now() - T0) / 1000).toFixed(1)} s)`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

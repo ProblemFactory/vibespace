@@ -27,7 +27,7 @@ import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // 主开发 r3677: THE FACT, never a time — the push lane's coalesced window FIRED and its wake landed: no window open for the
 // conversation (the engine's own pendingWindows) and nothing pending on its row, after the wakes in flight settled. Bounded by
@@ -215,13 +215,13 @@ const hitsOf = (r) => (r.snap.stats.wakes[0] || {}).n;
 ok(hitsOf(P) === EXPECTED_HITS && hitsOf(L) === EXPECTED_HITS && hitsOf(S) === EXPECTED_HITS, `every lane's wake carried the same ${EXPECTED_HITS} hits`);
 for (const r of [P, L, S]) {
   const c = r.ladder.calls[0];
-  ok(c && c.cid === AGENT && c.opts.spendReason === 'channel-message' && c.opts.kind === 'notification', `${r.kind}: the wake went to the assigned agent through the ladder with spendReason 'channel-message' as a notification`);
-  ok(c && /^### Channel message — fake-\w+ · Ops room/.test(c.text) && /matched: keyword "gpu"/.test(c.text) && /GPU box/.test(c.text), `${r.kind}: the block names the conversation, the rule that fired and the message`);
-  ok(c && (c.text.match(/^from /gm) || []).length === F.BLOCK_MAX_RECORDS && new RegExp(`\\(${EXPECTED_HITS - F.BLOCK_MAX_RECORDS} older elided\\)`).test(c.text), `${r.kind}: ≤${F.BLOCK_MAX_RECORDS} records shown, the rest elided by count`);
+  ok(gateOf(c) && c.cid === AGENT && c.opts.spendReason === 'channel-message' && c.opts.kind === 'notification', `${r.kind}: the wake went to the assigned agent through the ladder with spendReason 'channel-message' as a notification`);
+  ok(gateOf(c) && gateOf(/^### Channel message — fake-\w+ · Ops room/.test(c.text)) && gateOf(/matched: keyword "gpu"/.test(c.text)) && verdictOf(/GPU box/.test(c.text)), `${r.kind}: the block names the conversation, the rule that fired and the message`);
+  ok(gateOf(c) && (c.text.match(/^from /gm) || []).length === F.BLOCK_MAX_RECORDS && verdictOf(new RegExp(`\\(${EXPECTED_HITS - F.BLOCK_MAX_RECORDS} older elided\\)`).test(c.text)), `${r.kind}: ≤${F.BLOCK_MAX_RECORDS} records shown, the rest elided by count`);
   ok(r.snap.stats.hits7d === EXPECTED_HITS && r.snap.stats.msgs7d === 40, `${r.kind}: the after-the-fact measurement counts ${EXPECTED_HITS} hits of 40 messages`);
   ok(r.snap.pending.length === 0 && r.snap.pendingElided === 0, `${r.kind}: nothing left pending`);
 }
-ok(/coalesced|messages in \d+ s, one wake/.test(P.ladder.calls[0].text) && P.snap.stats.wakes[0].n === EXPECTED_HITS, 'the push wake SAYS it was coalesced ("N messages in S s, one wake")');
+ok(gateOf(/coalesced|messages in \d+ s, one wake/.test(P.ladder.calls[0].text)) && P.snap.stats.wakes[0].n === EXPECTED_HITS, 'the push wake SAYS it was coalesced ("N messages in S s, one wake")');
 ok(!/one wake/.test(L.ladder.calls[0].text), 'a poll batch does not claim a coalescing window (it was a batch already)');
 
 // ── ② THE CONTROL: the window is what buys the batch back ─────────────────
@@ -230,7 +230,7 @@ const P0 = await runLane('push', { coalesceSeconds: 0, name: 'push-nocoalesce' }
 ok(P0.ids.length === 40 && JSON.stringify(P0.ids) === JSON.stringify(P.ids), 'same record set');
 ok(P0.wakes === EXPECTED_HITS && P0.wakes > P.wakes, `CONTROL: with channels.pushCoalesceSeconds = 0 the push lane woke ${P0.wakes} times (one per hit) — ${P0.wakes}× the coalesced lane's ${P.wakes}`);
 ok(P0.charges === EXPECTED_HITS && P0.charges > P.charges, `CONTROL: …and charged the slot ${P0.charges} times — the bill the window exists to prevent`);
-ok(P0.ladder.calls.every((c) => !/one wake/.test(c.text) && (c.text.match(/^from /gm) || []).length === 1), 'each uncoalesced wake carries exactly one record');
+ok(verdictOf(P0.ladder.calls.every((c) => !/one wake/.test(c.text) && (c.text.match(/^from /gm) || []).length === 1)), 'each uncoalesced wake carries exactly one record');
 
 // ── ③ pushed once, polled once = one record, no second wake ───────────────
 console.log('③ a record pushed once and polled once collapses to one');
@@ -274,4 +274,4 @@ console.log('⑤ the push lane\'s window placed late: the leg waits for its wake
 
 for (const e of engines) { try { e.stop(); } catch {} }
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -49,7 +49,7 @@ const require = createRequire(import.meta.url);
  *  (2.369.198): the product's own switch is then the ONLY a11y input a launch carries. */
 const A11Y_ENV = Object.freeze(['ACCESSIBILITY_ENABLED', 'GNOME_ACCESSIBILITY', 'QT_ACCESSIBILITY', 'GTK_MODULES']);
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 15000, step = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(step); } return false; };
@@ -111,57 +111,57 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   const s = S.rfbInputSieve();
   const relayed = [];
   for (const b of HS) { const r = s.strip(b, false); if (r.relay) relayed.push(r.relay); }
-  ok(Buffer.concat(relayed).equals(Buffer.concat(HS)), 'the handshake relays whole in strip mode (it is not input)');
+  ok(verdictOf(Buffer.concat(relayed).equals(Buffer.concat(HS))), 'the handshake relays whole in strip mode (it is not input)');
   const r1 = s.strip(Buffer.concat([FBUR, KEY_DOWN, PTR(1, 2), KEY_UP]), false);
-  ok(r1.inputs === 3 && r1.dropped === 3 && r1.relay && r1.relay.equals(FBUR), 'a frame carrying an update request + KeyEvent + PointerEvent + KeyEvent in Watch: the three inputs are cut out, the update request alone relays (the picture never freezes on a refused click)');
+  ok(r1.inputs === 3 && r1.dropped === 3 && gateOf(r1.relay) && verdictOf(r1.relay.equals(FBUR)), 'a frame carrying an update request + KeyEvent + PointerEvent + KeyEvent in Watch: the three inputs are cut out, the update request alone relays (the picture never freezes on a refused click)');
   const s2 = S.rfbInputSieve();
   for (const b of HS) s2.strip(b, true);
   const mix = Buffer.concat([FBUR, KEY_DOWN, PTR(3, 4), Buffer.from([2, 0, 0, 1, 0, 0, 0, 7]), KEY_UP, FBUR]);
   const r2 = s2.strip(mix, true);
-  ok(r2.inputs === 3 && r2.dropped === 0 && r2.relay.equals(mix), 'allowed ⇒ byte-identical relay (SetEncodings, update requests and inputs in their order)');
+  ok(r2.inputs === 3 && r2.dropped === 0 && verdictOf(r2.relay.equals(mix)), 'allowed ⇒ byte-identical relay (SetEncodings, update requests and inputs in their order)');
   ok(s2.feed(KEY_DOWN) === 1 && s2.feed(FBUR) === 0, '`feed` still answers the idle clock\'s count on the same parser');
   // a message split across chunks: nothing relays until it completes, then the verdict applies to the whole message
   const s3 = S.rfbInputSieve();
   for (const b of HS) s3.strip(b, true);
   const a = s3.strip(KEY_DOWN.subarray(0, 3), false);
   const b = s3.strip(Buffer.concat([KEY_DOWN.subarray(3), FBUR]), false);
-  ok(a.inputs === 0 && a.relay === null && b.inputs === 1 && b.dropped === 1 && b.relay.equals(FBUR), 'a KeyEvent split across two chunks is judged once it is complete — dropped whole, the update request behind it relays');
+  ok(a.inputs === 0 && a.relay === null && b.inputs === 1 && b.dropped === 1 && verdictOf(b.relay.equals(FBUR)), 'a KeyEvent split across two chunks is judged once it is complete — dropped whole, the update request behind it relays');
   const s3b = S.rfbInputSieve();
   for (const b2 of HS) s3b.strip(b2, true);
   const c1 = s3b.strip(FBUR.subarray(0, 4), true), c2 = s3b.strip(FBUR.subarray(4), true);
-  ok(c1.relay === null && c2.relay && c2.relay.equals(FBUR), 'a NON-input message split across chunks relays once complete, whole (the server never sees half a message)');
+  ok(c1.relay === null && gateOf(c2.relay) && verdictOf(c2.relay.equals(FBUR)), 'a NON-input message split across chunks relays once complete, whole (the server never sees half a message)');
   // opaque: all-or-nothing
   const s4 = S.rfbInputSieve();
   const o1 = s4.strip(Buffer.from('GET / HTTP/1.1\r\n'), false);
   const o2 = s4.strip(Buffer.from('more'), true);
-  ok(o1.inputs === 1 && o1.dropped === 1 && o1.relay === null && s4.state().opaque && o2.relay && o2.relay.toString() === 'more', 'a stream the sieve cannot follow is opaque: a refused chunk is dropped WHOLE, an allowed one relays raw');
+  ok(o1.inputs === 1 && o1.dropped === 1 && o1.relay === null && gateOf(s4.state().opaque) && gateOf(o2.relay) && o2.relay.toString() === 'more', 'a stream the sieve cannot follow is opaque: a refused chunk is dropped WHOLE, an allowed one relays raw');
   ok(S.viewerOf('/api/desktop/da-1/stream?viewer=wl-abc.1') === 'wl-abc.1' && S.viewerOf('/api/desktop/da-1/stream') === null && S.viewerOf('/x?viewer=bad%20id') === null && S.viewerOf('/x?viewer=' + 'a'.repeat(65)) === null, 'viewerOf: the ?viewer= id, validated (charset + length), else null');
 
   // the window noun in the shared model — the browser strings byte-identical
   const browserPaused = T.browserPausedRefusal({ state: { takenAt: 1000, lastUserInputAt: 1000 }, label: 'work', now: 31000 });
   const windowPaused = T.browserPausedRefusal({ state: { takenAt: 1000, lastUserInputAt: 1000 }, label: 'Notes', now: 31000, target: 'window' });
   ok(browserPaused.code === 'browser_paused' && browserPaused.error === 'the user took over your window of the "work" browser 30 s ago — your command did NOT run. Wait for the handback (the live view hands back explicitly, or by itself after 10 min without input); it names the page they left you on. Do not retry in a loop.', 'the browser refusal is byte-identical to P3\'s');
-  ok(windowPaused.code === 'window_paused' && /the "Notes" window 30 s ago/.test(windowPaused.error) && /snapshot the window again/.test(windowPaused.error) && !/page/.test(windowPaused.error) && windowPaused.target === 'window', 'the window refusal: window_paused, the window noun, "snapshot again" instead of a page — and never a URL');
+  ok(windowPaused.code === 'window_paused' && gateOf(/the "Notes" window 30 s ago/.test(windowPaused.error)) && gateOf(/snapshot the window again/.test(windowPaused.error)) && !/page/.test(windowPaused.error) && windowPaused.target === 'window', 'the window refusal: window_paused, the window noun, "snapshot again" instead of a page — and never a URL');
   const bt = T.handbackText({ cause: 'explicit', label: 'work', url: 'https://a.example/x', heldMs: 65000 });
   ok(bt === 'The user handed your window of the "work" browser back to you after 65 s of driving it. Current URL: https://a.example/x. Re-orient before continuing — the page may have changed (a login, a captcha, a navigation).', 'the browser handback text is byte-identical to P3\'s');
   const wtx = T.handbackText({ cause: 'explicit', label: 'Notes', heldMs: 65000, target: 'window', handle: 'da-9' });
-  ok(/^The user handed the "Notes" window back to you after 65 s of driving it\. Snapshot it before continuing \(`vibespace-window snapshot da-9`\)/.test(wtx) && !/URL/.test(wtx) && /refs from before the takeover are stale/.test(wtx), 'the window handback text names the handle to snapshot and says the refs are stale — no URL line');
-  ok(/lapsed \(no input for 10 min\)/.test(T.handbackText({ cause: 'idle', label: 'Notes', target: 'window' })) && /closed the live view that held the "Notes" window/.test(T.handbackText({ cause: 'viewer-left', label: 'Notes', target: 'window' })), 'idle / viewer-left causes keep their heads with the window noun');
+  ok(gateOf(/^The user handed the "Notes" window back to you after 65 s of driving it\. Snapshot it before continuing \(`vibespace-window snapshot da-9`\)/.test(wtx)) && !/URL/.test(wtx) && verdictOf(/refs from before the takeover are stale/.test(wtx)), 'the window handback text names the handle to snapshot and says the refs are stale — no URL line');
+  ok(gateOf(/lapsed \(no input for 10 min\)/.test(T.handbackText({ cause: 'idle', label: 'Notes', target: 'window' }))) && verdictOf(/closed the live view that held the "Notes" window/.test(T.handbackText({ cause: 'viewer-left', label: 'Notes', target: 'window' }))), 'idle / viewer-left causes keep their heads with the window noun');
   const wn = T.handbackNotice({ cause: 'idle', label: 'Notes', target: 'window', handle: 'da-9', at: 5 });
-  ok(wn.kind === 'browser-handback' && wn.target === 'window' && wn.handle === 'da-9' && /the "Notes" window/.test(T.renderHandbackNotice(wn)) && !('target' in T.handbackNotice({ cause: 'idle' })), 'the zero-spend notice carries target+handle for a window (and nothing new for a browser) and renders with the window noun');
+  ok(wn.kind === 'browser-handback' && wn.target === 'window' && wn.handle === 'da-9' && gateOf(/the "Notes" window/.test(T.renderHandbackNotice(wn))) && !('target' in T.handbackNotice({ cause: 'idle' })), 'the zero-spend notice carries target+handle for a window (and nothing new for a browser) and renders with the window noun');
   const wi = T.idleInboxItem({ label: 'Notes', target: 'window', sessionName: 'alpha' });
-  ok(/the "Notes" window \(alpha\)/.test(wi.text) && /next window command/.test(wi.detail) && /the "x" browser/.test(T.idleInboxItem({ label: 'x' }).text), 'the idle inbox item says window / browser by target');
-  ok(T.TARGETS.length === 2 && T.handbackText({ cause: 'explicit', label: 'z', target: 'bogus' }).includes('the "z" browser'), 'an unknown target falls to the browser noun (the closed set holds)');
+  ok(gateOf(/the "Notes" window \(alpha\)/.test(wi.text)) && gateOf(/next window command/.test(wi.detail)) && verdictOf(/the "x" browser/.test(T.idleInboxItem({ label: 'x' }).text)), 'the idle inbox item says window / browser by target');
+  ok(T.TARGETS.length === 2 && verdictOf(T.handbackText({ cause: 'explicit', label: 'z', target: 'bogus' }).includes('the "z" browser')), 'an unknown target falls to the browser noun (the closed set holds)');
 
   // the mode arithmetic
   ok(windowLiveMode({}).leased === false && windowLiveMode({}).viewOnly === false, 'no lease ⇒ not leased, never view-only (the user\'s own app, as before)');
   ok(windowLiveMode({ lease: { input: 'agent' }, viewerTag: 't1' }).mode === 'watch' && windowLiveMode({ lease: { input: 'agent' }, viewerTag: 't1' }).viewOnly === true, 'an agent lease ⇒ Watch, view-only');
   const mineM = windowLiveMode({ lease: { input: 'user', takenBy: { tag: 't1' } }, viewerTag: 't1' });
   const otherM = windowLiveMode({ lease: { input: 'user', takenBy: { tag: 't2' } }, viewerTag: 't1' });
-  ok(mineM.mode === 'takeover' && mineM.mine && !mineM.viewOnly && otherM.mode === 'takeover' && !otherM.mine && otherM.viewOnly && otherM.holder === 't2', 'taken over: mine ⇒ input flows; somebody else\'s ⇒ view-only for me, the holder named by its OPAQUE tag');
+  ok(mineM.mode === 'takeover' && gateOf(mineM.mine) && !mineM.viewOnly && otherM.mode === 'takeover' && !otherM.mine && gateOf(otherM.viewOnly) && otherM.holder === 't2', 'taken over: mine ⇒ input flows; somebody else\'s ⇒ view-only for me, the holder named by its OPAQUE tag');
   ok(windowModeBadge(mineM) === 'You are driving — agent asked to pause' && windowModeBadge(otherM) === 'Another viewer is driving — agent asked to pause' && windowModeBadge(windowLiveMode({ lease: { input: 'agent' } })) === 'Agent is driving' && windowModeBadge(windowLiveMode({})) === null, 'the badge uses the browser live view\'s exact three phrases (T.modeBadge\'s words), none without a lease');
   ok(leaseTransition({ input: 'agent' }, { input: 'user', takenBy: { tag: 't1' } }, 't1') === 'took-over' && leaseTransition({ input: 'user', takenBy: { tag: 't1' } }, { input: 'agent', handbackCause: 'explicit' }, 't1') === 'handed-back' && leaseTransition({ input: 'user', takenBy: { tag: 't1' } }, { input: 'agent', handbackCause: 'idle' }, 't1') === 'lapsed' && leaseTransition({ input: 'user', takenBy: { tag: 't1' } }, { input: 'agent', handbackCause: 'viewer-left' }, 't1') === 'lapsed' && leaseTransition({ input: 'agent' }, { input: 'user', takenBy: { tag: 't2' } }, 't1') === 'other-took' && leaseTransition(null, { input: 'agent' }, 't1') === 'agent-attached' && leaseTransition({ input: 'agent' }, null, 't1') === 'agent-left' && leaseTransition({ input: 'agent' }, { input: 'agent' }, 't1') === null, 'leaseTransition names every change the person looking at the pane must hear about, and nothing else');
-  ok(/^wl-[a-z0-9]+$/.test(newViewerId()) && S.VIEWER_RE.test(newViewerId()) && newViewerId() !== newViewerId(), 'a viewer id fits the bridge\'s charset and differs per pane');
+  ok(gateOf(/^wl-[a-z0-9]+$/.test(newViewerId())) && gateOf(S.VIEWER_RE.test(newViewerId())) && newViewerId() !== newViewerId(), 'a viewer id fits the bridge\'s charset and differs per pane');
 
   // the engine over a fake keeper (no display): persistence, orphans, reconcile, the input side, the policy
   const edir = path.join(dir, 'engine'); fs.mkdirSync(edir, { recursive: true });
@@ -179,16 +179,16 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   const f1 = e1.factsForToken('vsst_aaaa'), f2 = e1.factsForToken('vsst_bbbb');
   // lane E (D1): a window is hidden until the user shares it — share both windows with both sessions (persisted in
   // edir: every later engine over it — the "restart" — reads the same share)
-  { let hid = null; try { e1.attach('da-one', f1); } catch (e) { hid = e; } ok(hid && hid.code === 'not_exposed', 'lane E: before any share the window is hidden (attach ⇒ not_exposed)'); }
+  { let hid = null; try { e1.attach('da-one', f1); } catch (e) { hid = e; } ok(gateOf(hid) && hid.code === 'not_exposed', 'lane E: before any share the window is hidden (attach ⇒ not_exposed)'); }
   for (const h of ['da-one', 'da-two']) for (const sid of ['s1', 's2']) e1.grantReach(h, { kind: 'session', id: sid });
   const a1 = e1.attach('da-one', f1);
   ok(a1.lease.origin === 'vibespace' && a1.lease.input === 'agent' && a1.lease.sessionName === 'alpha' && a1.lease.orphaned === false, 'a lease view carries origin (§6.6\'s class marker), input, the holder\'s name, orphaned');
-  ok(e1.storesLanded() && fs.existsSync(e1.leaseFile) && JSON.parse(fs.readFileSync(e1.leaseFile, 'utf8')).leases['da-one'].sessionId === 's1', 'the lease is written to data/window-leases.json (handed to the store writer at once, on disk once it landed — B-574d browser-stores)');
+  ok(gateOf(e1.storesLanded()) && gateOf(fs.existsSync(e1.leaseFile)) && JSON.parse(fs.readFileSync(e1.leaseFile, 'utf8')).leases['da-one'].sessionId === 's1', 'the lease is written to data/window-leases.json (handed to the store writer at once, on disk once it landed — B-574d browser-stores)');
   ok(bcasts.length >= 1 && bcasts[bcasts.length - 1].type === 'window-leases-updated' && bcasts[bcasts.length - 1].leases[0].handle === 'da-one', 'window-leases-updated is broadcast with the views');
   const e2 = mkEngine();
   ok(e2.leaseOf('da-one').sessionId === 's1' && e2.leaseOf('da-one').input === 'agent', 'a second engine over the same data dir (a restart) still says s1 holds da-one — with a FRESH input side (a restart is a handback by construction)');
   let err = null; try { e2.attach('da-one', f2); } catch (e) { err = e; }
-  ok(err && err.code === 'window_leased' && err.holder === 's1', 'and refuses s2 window_leased after the restart');
+  ok(gateOf(err) && err.code === 'window_leased' && err.holder === 's1', 'and refuses s2 window_leased after the restart');
   // an orphaned holder: s1 vanishes ⇒ s2 may attach, the audit names the previous holder
   sessions.delete('s1');
   ok(e2.leaseOf('da-one').orphaned === true, 'a lease whose session is gone reads orphaned');
@@ -199,15 +199,15 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   e2.attach('da-two', f1);
   sessions.delete('s1');
   let r = e2.reconcile({ graceMs: 60000 });
-  ok(r.stamped.includes('da-two') && r.dropped.length === 0 && e2.leaseOf('da-two'), 'a holder that just vanished is STAMPED, not dropped (the grace)');
+  ok(gateOf(r.stamped.includes('da-two')) && r.dropped.length === 0 && verdictOf(e2.leaseOf('da-two')), 'a holder that just vanished is STAMPED, not dropped (the grace)');
   clock += 61000;
   r = e2.reconcile({ graceMs: 60000 });
-  ok(r.dropped.some((d) => d.handle === 'da-two') && e2.leaseOf('da-two') === null, 'past the grace it is dropped');
+  ok(gateOf(r.dropped.some((d) => d.handle === 'da-two')) && e2.leaseOf('da-two') === null, 'past the grace it is dropped');
   sessions.set('s1', { agentToken: 'vsst_aaaa', _browserKey: 'bk-11111111', name: 'alpha', backendSessionId: 'conv-1' });
   e2.attach('da-two', f1);
   records.get('da-two').state = 'exited';
   r = e2.reconcile({ graceMs: 60000 });
-  ok(r.dropped.some((d) => d.handle === 'da-two' && d.why === 'window gone') && e2.leaseOf('da-two') === null, 'a window that is gone loses its lease at once, grace or not');
+  ok(gateOf(r.dropped.some((d) => d.handle === 'da-two' && d.why === 'window gone')) && e2.leaseOf('da-two') === null, 'a window that is gone loses its lease at once, grace or not');
   records.get('da-two').state = 'ready';
   ok(e2.dropSession('s2') === 1 && e2.leaseOf('da-one') === null, 'dropSession (the kill path) drops the session\'s leases');
   // the input side + the policy
@@ -219,7 +219,7 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   ok(e2.takeover({ handle: 'da-two', viewerId: 'v1' }).code === 'no_lease', 'takeover on a window no agent holds ⇒ no_lease (nothing to take)');
   ok(e2.takeover({ handle: 'da-one', viewerId: '' }).code === 'bad-request', 'a takeover needs a viewer');
   const tk = e2.takeover({ handle: 'da-one', viewerId: 'v1' });
-  ok(tk.ok && tk.lease.input === 'user' && /^tk-[0-9a-f]{16}$/.test(tk.lease.takenBy.tag) && !('viewerId' in tk.lease.takenBy) && !JSON.stringify(tk.lease).includes('"v1"') && events.at(-1).kind === 'takeover' && events.at(-1).target === 'window' && events.at(-1).handle === 'da-one', 'the user takes over: input user, the takeover named by an OPAQUE tag (the viewer id is in no lease view), an input event with target window');
+  ok(gateOf(tk.ok) && tk.lease.input === 'user' && gateOf(/^tk-[0-9a-f]{16}$/.test(tk.lease.takenBy.tag)) && !('viewerId' in tk.lease.takenBy) && !JSON.stringify(tk.lease).includes('"v1"') && events.at(-1).kind === 'takeover' && events.at(-1).target === 'window' && events.at(-1).handle === 'da-one', 'the user takes over: input user, the takeover named by an OPAQUE tag (the viewer id is in no lease view), an input event with target window');
   ok(e2.takeover({ handle: 'da-one', viewerId: 'v1' }).already === true, 'the same viewer again is idempotent');
   ok(e2.inputPolicy('da-one', 'v1').relay === true && e2.inputPolicy('da-one', 'v2').code === 'held', 'taken over: the holder relays, another viewer is held');
   ok(e2.takeover({ handle: 'da-one', viewerId: 'v2' }).code === 'held', 'a second viewer cannot take over while the holder\'s socket is alive (no probe ⇒ alive)');
@@ -227,7 +227,7 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   ok(e2.takeover({ handle: 'da-one', viewerId: 'v2' }).ok === true && e2.inputPolicy('da-one', 'v2').relay === true && e2.inputPolicy('da-one', 'v1').code === 'held', 'when the bridge says the holder\'s socket is gone, another viewer may take over');
   e2.setViewerProbe(null);
   let paused = null; try { await e2.snapshot('da-one', f1); } catch (e) { paused = e; }
-  ok(paused && paused.code === 'window_paused' && /the "App da-one" window/.test(paused.message) && /snapshot the window again/.test(paused.message) && /^tk-[0-9a-f]{16}$/.test(paused.viewer) && paused.viewer !== 'v2', 'every agent verb is refused window_paused with the shared wording while the user drives (§6.6: nothing is injected) — the refusal names the takeover by its opaque tag, never the viewer id');
+  ok(gateOf(paused) && paused.code === 'window_paused' && gateOf(/the "App da-one" window/.test(paused.message)) && gateOf(/snapshot the window again/.test(paused.message)) && gateOf(/^tk-[0-9a-f]{16}$/.test(paused.viewer)) && paused.viewer !== 'v2', 'every agent verb is refused window_paused with the shared wording while the user drives (§6.6: nothing is injected) — the refusal names the takeover by its opaque tag, never the viewer id');
   ok(e2.noteUserInput('da-one', clock + 5) === true && e2.inputStateFor('da-one').lastUserInputAt === clock + 5, 'the bridge\'s input note restarts the idle clock');
   ok(e2.viewerLeft('da-one', 'v9') === false && e2.inputStateFor('da-one').input === 'user', 'a non-holder viewer leaving changes nothing');
   ok(e2.viewerLeft('da-one', 'v2') === true && e2.inputStateFor('da-one').input === 'agent' && events.at(-1).kind === 'handback' && events.at(-1).cause === 'viewer-left', 'the holder\'s socket closing hands back (viewer-left)');
@@ -239,13 +239,13 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   ok(e2.handback({ handle: 'da-one', cause: 'explicit' }).code === 'not_taken', 'a handback when nobody drives ⇒ not_taken');
   e2.takeover({ handle: 'da-one', viewerId: 'v1' });
   const hb = e2.handback({ handle: 'da-one', viewerId: 'v1', cause: 'explicit' });
-  ok(hb.ok && hb.cause === 'explicit' && hb.byHolder === true && hb.lease.input === 'agent' && hb.lease.handbackCause === 'explicit', 'an explicit handback flips it back and says by whom');
+  ok(gateOf(hb.ok) && hb.cause === 'explicit' && hb.byHolder === true && hb.lease.input === 'agent' && hb.lease.handbackCause === 'explicit', 'an explicit handback flips it back and says by whom');
   e2.takeover({ handle: 'da-one', viewerId: 'v1' });
   e2.detach('da-one', f1);
   ok(e2.inputStateFor('da-one').input === 'agent' && events.at(-1).kind === 'handback' && events.at(-1).cause === 'detach', 'detaching a taken-over window hands back first (detach — a state change, never a delivery)');
   const audit = fs.readFileSync(e2.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  ok(audit.every((l) => l.origin === 'vibespace'), `every audit line carries origin:'vibespace' (${audit.length} lines)`);
-  ok(audit.some((l) => l.verb === 'takeover' && l.by === 'user' && l.viewer === 'v1') && audit.some((l) => l.verb === 'handback' && l.by === 'user' && l.cause === 'idle') && audit.some((l) => l.verb === 'attach' && l.orphanedFrom === 's1') && audit.some((l) => l.verb === 'lease-dropped'), 'the audit names takeover (viewer), handback (cause), the orphaned attach and the dropped lease');
+  ok(verdictOf(audit.every((l) => l.origin === 'vibespace')), `every audit line carries origin:'vibespace' (${audit.length} lines)`);
+  ok(gateOf(audit.some((l) => l.verb === 'takeover' && l.by === 'user' && l.viewer === 'v1')) && gateOf(audit.some((l) => l.verb === 'handback' && l.by === 'user' && l.cause === 'idle')) && gateOf(audit.some((l) => l.verb === 'attach' && l.orphanedFrom === 's1')) && verdictOf(audit.some((l) => l.verb === 'lease-dropped')), 'the audit names takeover (viewer), handback (cause), the orphaned attach and the dropped lease');
   ok(e2.inputSummaryFor('s1') === null && (e2.attach('da-one', f1), e2.inputSummaryFor('s1').input === 'agent') && (e2.takeover({ handle: 'da-one', viewerId: 'v1' }), e2.inputSummaryFor('s1').input === 'user'), 'inputSummaryFor: null / agent / user for one session');
   e2.detach('da-one', f1);
   ok(e2.boot().leases === 0 && typeof e2.tick().idle === 'number', 'boot and tick answer their counts');
@@ -264,12 +264,12 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   e3.takeover({ handle: 'da-one', viewerId: 'v1' });
   e3.handback({ handle: 'da-one', viewerId: 'v1', cause: 'explicit', pressed: PRESS });
   await sleep(20);
-  ok(delivered.length === 1 && delivered[0].cid === 'conv-1' && delivered[0].opts.spendReason === 'browser-handback' && delivered[0].opts.kind === 'notification' && /the "App da-one" window back to you/.test(delivered[0].text) && /vibespace-window snapshot da-one/.test(delivered[0].text), 'an explicit window handback is delivered through the ONE ladder under the ONE reason (browser-handback) with the window text');
+  ok(delivered.length === 1 && delivered[0].cid === 'conv-1' && delivered[0].opts.spendReason === 'browser-handback' && delivered[0].opts.kind === 'notification' && gateOf(/the "App da-one" window back to you/.test(delivered[0].text)) && verdictOf(/vibespace-window snapshot da-one/.test(delivered[0].text)), 'an explicit window handback is delivered through the ONE ladder under the ONE reason (browser-handback) with the window text');
   e3.takeover({ handle: 'da-one', viewerId: 'v1' });
   clock += 61000;
   e3.sweepIdleTakeovers(clock);
   await sleep(20);
-  ok(delivered.length === 1 && notices.length === 1 && notices[0].target === 'window' && notices[0].handle === 'da-one' && inbox.length === 1 && /the "App da-one" window/.test(inbox[0].item.text), 'an idle window handback delivers NOTHING (zero-spend): the notice with target window rides the next message, one inbox item names the window');
+  ok(delivered.length === 1 && notices.length === 1 && notices[0].target === 'window' && notices[0].handle === 'da-one' && inbox.length === 1 && verdictOf(/the "App da-one" window/.test(inbox[0].item.text)), 'an idle window handback delivers NOTHING (zero-spend): the notice with target window rides the next message, one inbox item names the window');
   ann.shutdown(); e3.shutdown();
 }
 
@@ -299,29 +299,29 @@ console.log('§2 THE BRIDGE over a fake RFB server, policy = the engine');
   const f1 = engine.factsForToken('vsst_aaaa');
   engine.grantReach('da-b', { kind: 'session', id: 's1' }); // lane E: shared before the agent may attach
   const A = await open('vA'), B = await open('vB');
-  ok(stream.viewersOf('da-b').sort().join(',') === 'vA,vB' && stream.viewerAlive('da-b', 'vA') && !stream.viewerAlive('da-b', 'vZ'), 'the bridge knows its viewers by id');
+  ok(stream.viewersOf('da-b').sort().join(',') === 'vA,vB' && gateOf(stream.viewerAlive('da-b', 'vA')) && !stream.viewerAlive('da-b', 'vZ'), 'the bridge knows its viewers by id');
   // 2026-09-21 (the verifier's finding): a second socket claiming a LIVE id used to REPLACE the holder's socket in the map
   const dup = await open('vA').then(() => 'opened', (e) => String(e && e.message));
-  ok(/409/.test(dup) && stream.viewersOf('da-b').sort().join(',') === 'vA,vB' && stream.viewerAlive('da-b', 'vA') && stream.stats().held === 1, `a SECOND socket claiming a LIVE viewer id is refused 409 (bound to its socket; the holder keeps it; stats.held counts it) — got ${dup}`);
+  ok(gateOf(/409/.test(dup)) && stream.viewersOf('da-b').sort().join(',') === 'vA,vB' && gateOf(stream.viewerAlive('da-b', 'vA')) && stream.stats().held === 1, `a SECOND socket claiming a LIVE viewer id is refused 409 (bound to its socket; the holder keeps it; stats.held counts it) — got ${dup}`);
   for (const ws of [A, B]) for (const b of HS) ws.send(b);
   await until(() => seen().length >= 2 * 14, 3000);
   // no lease yet: a human's own app — input relays
   reset(); A.send(Buffer.concat([FBUR, KEY_DOWN])); await sleep(150);
-  ok(seen().equals(Buffer.concat([FBUR, KEY_DOWN])) && inputs.includes('vA'), 'no agent lease: a viewer\'s KeyEvent relays (the desktop-app window behaves as before) and is reported as input');
+  ok(gateOf(seen().equals(Buffer.concat([FBUR, KEY_DOWN]))) && verdictOf(inputs.includes('vA')), 'no agent lease: a viewer\'s KeyEvent relays (the desktop-app window behaves as before) and is reported as input');
   engine.attach('da-b', f1);
   reset(); A.send(Buffer.concat([FBUR, KEY_DOWN, KEY_UP])); await sleep(150);
-  ok(seen().equals(FBUR), 'an agent holds it: in Watch the KeyEvents never reach the server, the update request beside them does');
+  ok(verdictOf(seen().equals(FBUR)), 'an agent holds it: in Watch the KeyEvents never reach the server, the update request beside them does');
   const n0 = inputs.length;
   reset(); A.send(PTR(5, 5)); await sleep(150);
   ok(seen().length === 0 && inputs.length === n0 && stream.stats().dropped >= 3, 'a PointerEvent in Watch is dropped and NOT reported as input (a refused click is nobody at the keyboard); stats count the drops');
   const tk = engine.takeover({ handle: 'da-b', viewerId: 'vA' });
-  ok(tk.ok && tk.lease.input === 'user', 'viewer A takes over (the bridge says its socket is alive)');
+  ok(gateOf(tk.ok) && tk.lease.input === 'user', 'viewer A takes over (the bridge says its socket is alive)');
   await sleep(2100); // the bridge reports input to onInput at most once per 2 s per socket (INPUT_REPORT_MS) — A reported at the no-lease step above
   reset(); A.send(Buffer.concat([KEY_DOWN, KEY_UP])); await sleep(150);
-  ok(seen().equals(Buffer.concat([KEY_DOWN, KEY_UP])), 'the holder\'s KeyEvents now relay');
+  ok(verdictOf(seen().equals(Buffer.concat([KEY_DOWN, KEY_UP]))), 'the holder\'s KeyEvents now relay');
   ok(inputs.length > n0 && inputs.at(-1) === 'vA', 'and are reported as input (the idle clock restarts; the refused ones above never were)');
   reset(); B.send(Buffer.concat([FBUR, KEY_DOWN])); await sleep(150);
-  ok(seen().equals(FBUR) && engine.takeover({ handle: 'da-b', viewerId: 'vB' }).code === 'held', 'viewer B is held: its KeyEvent is dropped, its update request relays, its takeover is refused held');
+  ok(gateOf(seen().equals(FBUR)) && engine.takeover({ handle: 'da-b', viewerId: 'vB' }).code === 'held', 'viewer B is held: its KeyEvent is dropped, its update request relays, its takeover is refused held');
   A.close();
   await until(() => engine.inputStateFor('da-b').input === 'agent', 3000);
   ok(engine.inputStateFor('da-b').input === 'agent' && engine.inputStateFor('da-b').handbackCause === 'viewer-left' && !stream.viewerAlive('da-b', 'vA'), 'A\'s socket closing hands back (viewer-left) through the bridge\'s onViewerLeft');
@@ -329,7 +329,7 @@ console.log('§2 THE BRIDGE over a fake RFB server, policy = the engine');
   ok(seen().length === 0, 'and B is back in Watch: its KeyEvent is dropped again');
   ok(engine.takeover({ handle: 'da-b', viewerId: 'vB' }).ok === true, 'B may now take over (the holder is gone)');
   const A2 = await open('vA').then((ws) => ws, () => null);
-  ok(A2 && stream.viewerAlive('da-b', 'vA'), 'once the holder\'s socket is gone its id may be claimed again (a reconnect after a drop)');
+  ok(gateOf(A2) && verdictOf(stream.viewerAlive('da-b', 'vA')), 'once the holder\'s socket is gone its id may be claimed again (a reconnect after a drop)');
   if (A2) A2.close();
   B.close();
   await sleep(100);
@@ -448,27 +448,27 @@ async function laneE() {
   try {
     // ── the calculator on the xpra rung, launched by the USER (no share) ──
     const calc = await launch({ appId: 'vs-calc', dpr: 2, uiScale: 1 });
-    ok(calc.ready && calc.rec.stream === 'xpra', `the user launches GNOME Calculator on the xpra rung (${calc.rec && calc.rec.backend}, scale ${calc.rec && calc.rec.scale})`, calc.err);
+    ok(gateOf(calc.ready) && calc.rec.stream === 'xpra', `the user launches GNOME Calculator on the xpra rung (${calc.rec && calc.rec.backend}, scale ${calc.rec && calc.rec.scale})`, calc.err);
     if (!calc.ready || calc.rec.stream !== 'xpra') throw new Error('no xpra calculator — the lane-E legs need it');
     const C = calc.id;
     // D1 hidden by default
     const l0 = await cli('vsst_aaaa', 'list');
     const a0 = await cli('vsst_aaaa', 'attach', C);
-    ok(l0.code === 0 && !l0.out.includes(C) && /no window is shared with you/.test(l0.out) && a0.code === 1 && /\[not_exposed\]/.test(a0.err) && a0.err.includes(RE.NOT_EXPOSED_SENTENCE), 'D1 HIDDEN BY DEFAULT: `list` shows nothing, `attach` answers [not_exposed] with "ask them (they can share it from the window\'s ⋯ menu)"');
+    ok(l0.code === 0 && !l0.out.includes(C) && gateOf(/no window is shared with you/.test(l0.out)) && a0.code === 1 && gateOf(/\[not_exposed\]/.test(a0.err)) && verdictOf(a0.err.includes(RE.NOT_EXPOSED_SENTENCE)), 'D1 HIDDEN BY DEFAULT: `list` shows nothing, `attach` answers [not_exposed] with "ask them (they can share it from the window\'s ⋯ menu)"');
     // D2 after launch: share with the session
     ok((await api('POST', `/api/desktop/apps/${C}/reach`, { principal: { kind: 'session', id: 's1' } })).status === 200, 'D2: the user shares it with alpha (POST …/reach, the Share with agent… dialog\'s write)');
     const l1 = await cli('vsst_aaaa', 'list');
     const a1 = await cli('vsst_aaaa', 'attach', C);
-    ok(l1.out.includes(C) && /mode: auto/.test(l1.out) && a1.code === 0 && /mode: auto → tree — its accessibility tree answers/.test(a1.out), `shared: listed with its mode, and attach RESOLVES auto → tree (the calculator exports a tree) — "${(a1.out.match(/mode: .*/) || [''])[0]}"`);
+    ok(gateOf(l1.out.includes(C)) && gateOf(/mode: auto/.test(l1.out)) && a1.code === 0 && verdictOf(/mode: auto → tree — its accessibility tree answers/.test(a1.out)), `shared: listed with its mode, and attach RESOLVES auto → tree (the calculator exports a tree) — "${(a1.out.match(/mode: .*/) || [''])[0]}"`);
     // D7 pixels: the tree is refused by name; with nobody viewing, pixels are refused too (never a silent no-op)
     ok((await api('PUT', `/api/desktop/apps/${C}/reach/mode`, { mode: 'pixels' })).status === 200, 'D7: the user switches the share to PIXELS (PUT …/reach/mode)');
     const s0 = await cli('vsst_aaaa', 'snapshot', C);
-    ok(s0.code === 1 && /\[mode_pixels\]/.test(s0.err) && s0.err.includes(RE.PIXELS_SENTENCE), 'pixels: `snapshot` is refused [mode_pixels] with the owner\'s sentence');
+    ok(s0.code === 1 && gateOf(/\[mode_pixels\]/.test(s0.err)) && verdictOf(s0.err.includes(RE.PIXELS_SENTENCE)), 'pixels: `snapshot` is refused [mode_pixels] with the owner\'s sentence');
     const sh0 = await cli('vsst_aaaa', 'screenshot', C, '--out', path.join(HOME, 'no-viewer.png'));
-    ok(sh0.code === 1 && /\[window_not_visible\]/.test(sh0.err) && !fs.existsSync(path.join(HOME, 'no-viewer.png')), 'with NO viewer the xpra window is unmapped: `screenshot` is refused [window_not_visible] (never a black image passed off as the window)');
+    ok(sh0.code === 1 && gateOf(/\[window_not_visible\]/.test(sh0.err)) && !fs.existsSync(path.join(HOME, 'no-viewer.png')), 'with NO viewer the xpra window is unmapped: `screenshot` is refused [window_not_visible] (never a black image passed off as the window)');
     const ck0 = await cli('vsst_aaaa', 'click', C, '--at', '10,10');
-    ok(ck0.code === 1 && /window_not_visible/.test(ck0.err), '…and a point click too (it would have been silently lost)');
-    ok(await viewer(C), 'the user opens the window (a headless xpra client stands in for the pane) — the main window MAPS');
+    ok(ck0.code === 1 && verdictOf(/window_not_visible/.test(ck0.err)), '…and a point click too (it would have been silently lost)');
+    ok(verdictOf(await viewer(C)), 'the user opens the window (a headless xpra client stands in for the pane) — the main window MAPS');
     const shotFile = path.join(HOME, 'calc.png');
     const sh1 = await cli('vsst_aaaa', 'screenshot', C, '--out', shotFile);
     const png = fs.existsSync(shotFile) ? fs.readFileSync(shotFile) : Buffer.alloc(0);
@@ -476,7 +476,7 @@ async function laneE() {
     // the calculator's window at 2× is THIS box's measured row (B-4260 — scripts/fixtures/gtk-rows.json calcSize2x:
     // 720×1232 on the hub's GTK 4.22, 720×1004 on AIDev's 4.14), never the hub's pixels
     const G = gtkRow();
-    ok(sh1.code === 0 && png.slice(0, 8).toString('hex') === '89504e470d0a1a0a' && pw === G.calcSize2x[0] && ph === G.calcSize2x[1] && /the window's own pixels \(origin 0,0 on its display, scale 2×\)/.test(sh1.out) && !/BLANK/.test(sh1.out), `pixels: \`screenshot\` = the window's OWN image ${pw}x${ph} (scale 2), window coordinates named — "${sh1.out.trim().slice(0, 160)}"`);
+    ok(sh1.code === 0 && png.slice(0, 8).toString('hex') === '89504e470d0a1a0a' && pw === G.calcSize2x[0] && ph === G.calcSize2x[1] && gateOf(/the window's own pixels \(origin 0,0 on its display, scale 2×\)/.test(sh1.out)) && !/BLANK/.test(sh1.out), `pixels: \`screenshot\` = the window's OWN image ${pw}x${ph} (scale 2), window coordinates named — "${sh1.out.trim().slice(0, 160)}"`);
     // where is "7"? the tree's WINDOW-relative extents (GTK4's screen extents are all 0,0 — measured) × the scale, read test-side
     const py = await run('python3', ['-c', `import gi\ngi.require_version('Atspi','2.0')\nfrom gi.repository import Atspi\npids=set(${JSON.stringify(keeper.sessionPids(keeper.get(C)))})\nd=Atspi.get_desktop(0)\ndef walk(a):\n  if a.get_role_name()==${JSON.stringify(G.pushButtonRole)} and a.get_name()=='7':\n    e=a.get_component_iface().get_extents(Atspi.CoordType.WINDOW); print(e.x,e.y,e.width,e.height); raise SystemExit\n  for i in range(a.get_child_count()): walk(a.get_child_at_index(i))\nfor i in range(d.get_child_count()):\n  app=d.get_child_at_index(i)\n  if app.get_process_id() in pids: walk(app)`], base, 20000);
     const b7 = py.stdout.trim().split(/\s+/).map(Number);
@@ -485,30 +485,30 @@ async function laneE() {
     const c7b = await cli('vsst_aaaa', 'click', C, '--at', at7);
     let disp = null;
     await until(async () => { disp = displayHas(await tree(C), '77'); return !!disp; }, 5000, 250);
-    ok(c7.code === 0 && c7b.code === 0 && /of the window image/.test(c7.out) && !!disp, `pixels: \`click --at ${at7}\` (a pixel of the screenshot) pressed "7" — TWICE on the same point (M9: the old --sync move hung and failed the second) — the display reads "77"`, c7.err + c7b.err);
+    ok(c7.code === 0 && c7b.code === 0 && gateOf(/of the window image/.test(c7.out)) && !!disp, `pixels: \`click --at ${at7}\` (a pixel of the screenshot) pressed "7" — TWICE on the same point (M9: the old --sync move hung and failed the second) — the display reads "77"`, c7.err + c7b.err);
     const k5 = await cli('vsst_aaaa', 'key', C, '5');
     const k5b = await cli('vsst_aaaa', 'key', C, '5');
     await until(async () => displayHas(await tree(C), '7755'), 5000, 250);
-    ok(k5.code === 0 && k5b.code === 0 && displayHas(await tree(C), '7755'), 'pixels: `key 5` twice in a row lands both (the display reads "7755")');
+    ok(k5.code === 0 && k5b.code === 0 && verdictOf(displayHas(await tree(C), '7755')), 'pixels: `key 5` twice in a row lands both (the display reads "7755")');
     // switched to tree: snapshot has refs; the switch is audited at the holder's next verb
     ok((await api('PUT', `/api/desktop/apps/${C}/reach/mode`, { mode: 'tree' })).status === 200, 'the user switches the same window to TREE');
     const s1 = await cli('vsst_aaaa', 'snapshot', C, '--json');
     let sj = null; try { sj = JSON.parse(s1.out); } catch { }
     const btn1 = sj && sj.nodes.find((n) => /button/.test(n.role) && n.name === '1');
-    ok(s1.code === 0 && sj && sj.nodes.length > 50 && btn1 && btn1.actions && btn1.actions.length, `tree: \`snapshot\` answers the calculator's tree with refs (${sj && sj.nodes.length} nodes; button "1" = ${btn1 && btn1.ref})`);
-    ok(audit().some((l) => l.verb === 'mode-changed' && l.from === 'pixels' && l.to === 'tree' && l.by === 'user' && l.handle === C), 'the switch took effect at the holder\'s NEXT verb — audited mode-changed pixels → tree');
+    ok(s1.code === 0 && gateOf(sj) && sj.nodes.length > 50 && gateOf(btn1) && gateOf(btn1.actions) && verdictOf(btn1.actions.length), `tree: \`snapshot\` answers the calculator's tree with refs (${sj && sj.nodes.length} nodes; button "1" = ${btn1 && btn1.ref})`);
+    ok(verdictOf(audit().some((l) => l.verb === 'mode-changed' && l.from === 'pixels' && l.to === 'tree' && l.by === 'user' && l.handle === C)), 'the switch took effect at the holder\'s NEXT verb — audited mode-changed pixels → tree');
     // ── xterm: a Task Group joined later; auto resolves to pixels ──
     const xt = await launch({ appId: 'vs-xterm', dpr: 1, uiScale: 1 });
-    ok(xt.ready, 'the user launches xterm (its shell is `cat > file`, the injection witness)');
+    ok(verdictOf(xt.ready), 'the user launches xterm (its shell is `cat > file`, the injection witness)');
     const X = xt.id;
     ok((await api('POST', `/api/desktop/apps/${X}/reach`, { principal: { kind: 'group', id: 'task-ops', name: 'Ops' } })).status === 200, 'D2: the user shares xterm with the Task Group Ops');
     const lb0 = await cli('vsst_bbbb', 'list');
     groups.s2 = ['task-ops'];
     const lb1 = await cli('vsst_bbbb', 'list');
-    ok(!lb0.out.includes(X) && lb1.out.includes(X) && /through a Task Group/.test(lb1.out), 'a session that JOINS the group later sees it (membership asked at the verb) — listed "through a Task Group"');
+    ok(!lb0.out.includes(X) && gateOf(lb1.out.includes(X)) && verdictOf(/through a Task Group/.test(lb1.out)), 'a session that JOINS the group later sees it (membership asked at the verb) — listed "through a Task Group"');
     const ax = await cli('vsst_bbbb', 'attach', X);
-    ok(ax.code === 0 && /mode: auto → pixels — no accessibility tree — pixel mode/.test(ax.out), `auto on xterm resolves to PIXELS and says why — "${(ax.out.match(/mode: .*/) || [''])[0]}"`);
-    ok(await viewer(X), 'the user opens xterm too');
+    ok(ax.code === 0 && verdictOf(/mode: auto → pixels — no accessibility tree — pixel mode/.test(ax.out)), `auto on xterm resolves to PIXELS and says why — "${(ax.out.match(/mode: .*/) || [''])[0]}"`);
+    ok(verdictOf(await viewer(X)), 'the user opens xterm too');
     // ── D6: two agents, two windows, acting at the same time ──
     const [pa, pb] = await Promise.all([cli('vsst_aaaa', 'click', C, btn1 ? btn1.ref : '@e1'), cli('vsst_bbbb', 'type', X, 'lane-e-typed')]);
     const kr = await cli('vsst_bbbb', 'key', X, 'Return');
@@ -516,21 +516,21 @@ async function laneE() {
     await until(() => { try { typed = fs.readFileSync(outFile, 'utf8'); } catch { typed = ''; } return /lane-e-typed/.test(typed); }, 6000, 200);
     let d551 = false;
     await until(async () => { d551 = displayHas(await tree(C), '77551'); return d551; }, 5000, 250);
-    ok(pa.code === 0 && pb.code === 0 && kr.code === 0 && /lane-e-typed/.test(typed) && d551, 'D6: alpha clicks @ref on the calculator WHILE beta types into xterm (pixels: keys into its focus) — both land (display "77551", the file reads "lane-e-typed")', { pa: pa.err, pb: pb.err, typed });
+    ok(pa.code === 0 && pb.code === 0 && kr.code === 0 && gateOf(/lane-e-typed/.test(typed)) && verdictOf(d551), 'D6: alpha clicks @ref on the calculator WHILE beta types into xterm (pixels: keys into its focus) — both land (display "77551", the file reads "lane-e-typed")', { pa: pa.err, pb: pb.err, typed });
     ok((await api('POST', `/api/desktop/apps/${C}/reach`, { principal: { kind: 'group', id: 'task-ops' } })).status === 200, 'the calculator is shared with Ops too — beta now reaches it');
     const cross = await cli('vsst_bbbb', 'click', C, '--at', '10,10');
-    ok(cross.code === 1 && /\[not_attached\]/.test(cross.err), 'D6: beta acting on alpha\'s window is refused [not_attached] — one holder per window');
+    ok(cross.code === 1 && verdictOf(/\[not_attached\]/.test(cross.err)), 'D6: beta acting on alpha\'s window is refused [not_attached] — one holder per window');
     // ── revoke mid-lease: alpha loses the calculator at once ──
     ok((await api('DELETE', `/api/desktop/apps/${C}/reach`, { principal: { kind: 'session', id: 'claude:conv-a' } })).status === 200, 'the user REVOKES alpha while it holds the calculator');
-    ok(!engine.leaseOf(C) && audit().some((l) => l.verb === 'lease-dropped' && l.handle === C && l.by === 'user' && /revoked/.test(l.why)), 'the lease is gone at once (audited by:user)');
+    ok(!engine.leaseOf(C) && verdictOf(audit().some((l) => l.verb === 'lease-dropped' && l.handle === C && l.by === 'user' && /revoked/.test(l.why))), 'the lease is gone at once (audited by:user)');
     const afterRv = await cli('vsst_aaaa', 'snapshot', C);
-    ok(afterRv.code === 1 && /\[not_exposed\]/.test(afterRv.err), 'alpha\'s next verb: [not_exposed]');
+    ok(afterRv.code === 1 && verdictOf(/\[not_exposed\]/.test(afterRv.err)), 'alpha\'s next verb: [not_exposed]');
     // ── the opener exception ──
     const op = await cli('vsst_aaaa', 'open', 'vs-xterm', '--json');
     let opened = null; try { opened = JSON.parse(op.out); } catch { }
     const lo = await cli('vsst_aaaa', 'list');
     const bo = opened ? await cli('vsst_bbbb', 'attach', opened.handle) : { code: -1, err: op.err };
-    ok(opened && opened.attached && lo.out.includes(opened.handle) && /because you opened it/.test(lo.out) && bo.code === 1 && /not_exposed/.test(bo.err), 'D1\'s exception: the xterm alpha OPENED is shared with alpha ("because you opened it") and with nobody else (beta: not_exposed)', op.err);
+    ok(gateOf(opened) && gateOf(opened.attached) && gateOf(lo.out.includes(opened.handle)) && gateOf(/because you opened it/.test(lo.out)) && bo.code === 1 && verdictOf(/not_exposed/.test(bo.err)), 'D1\'s exception: the xterm alpha OPENED is shared with alpha ("because you opened it") and with nobody else (beta: not_exposed)', op.err);
     // ── D3: the request — free next turn; a wake refused by the spend guard (cap 0) falls to the next turn, said ──
     const rq = await api('POST', `/api/desktop/apps/${C}/reach/request`, { sessionId: 's1', note: 'please press 5' });
     ok(rq.status === 200 && rq.j.delivered === 'next-turn' && rq.j.granted === true, 'D3: "Ask alpha to take control" GRANTS the calculator back to alpha (by:request) and rides its next turn (free)');
@@ -538,9 +538,9 @@ async function laneE() {
     ok(rw.status === 200 && rw.j.delivered === 'next-turn' && rw.j.whyCode === 'no_lane' && !/budget|hour-cap/.test(rw.j.why), `D3 "wake it now" at an owner cap of 0 (lane owner-press-attended): the press is ATTENDED — the cap does not refuse it (r1 left this heavy leg asserting the refusal); with no live inbox the request falls to the next turn, said — "${rw.j && rw.j.why}"`);
     deliver.flush();
     const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'msg-stash.json'), 'utf8'));
-    ok(Array.isArray(st['conv-a']) && st['conv-a'].length === 2 && st['conv-a'].every((e) => e.source === 'window-request' && e.fromName === 'The user (Desktop apps)' && e.text.includes(`handle ${C}`)) && /please press 5/.test(st['conv-a'][0].text), 'both ride alpha\'s next turn on the ladder\'s stash (source window-request, the handle, the user\'s line)');
+    ok(gateOf(Array.isArray(st['conv-a'])) && st['conv-a'].length === 2 && gateOf(st['conv-a'].every((e) => e.source === 'window-request' && e.fromName === 'The user (Desktop apps)' && e.text.includes(`handle ${C}`))) && verdictOf(/please press 5/.test(st['conv-a'][0].text)), 'both ride alpha\'s next turn on the ladder\'s stash (source window-request, the handle, the user\'s line)');
     const ar = require('../src/agent-routes.js').renderMsgStash(st['conv-a']);
-    ok(/a window request is answered by acting on the window/.test(ar.text) && !/vibespace-msg send/.test(ar.text) && ar.text.includes('please press 5'), 'the next injection renders them as a block with the window hint (never the agent-message hint)');
+    ok(gateOf(/a window request is answered by acting on the window/.test(ar.text)) && !/vibespace-msg send/.test(ar.text) && verdictOf(ar.text.includes('please press 5')), 'the next injection renders them as a block with the window hint (never the agent-message hint)');
     // ── D4: Chrome shared at LAUNCH in tree mode: the page's tree, click @ref, type, scroll ──
     if (!chromeBin) skip('google-chrome is not installed — the D4 browser legs need it');
     else {
@@ -551,31 +551,31 @@ async function laneE() {
       const ch = await launch({ appId: 'vs-chrome', dpr: 1, uiScale: 1, url: URL0, share: { principals: [{ kind: 'session', id: 's2', name: 'beta' }], mode: 'tree' } });
       // int346: lane grants-unify — a conversation is named by its conversation id in the ONE grants store (no harness prefix;
       // its test-desktop-app-window says so) — the share row reads back `conv-b`
-      ok(ch.ready && ch.reach && ch.reach.mode === 'tree' && ch.reach.rows.some((r) => r.principal.id === 'conv-b') && ch.rec.args.includes('--force-renderer-accessibility'), 'D2 before launch + D4: the user launches Chrome SHARED with beta in tree mode — its argv carries --force-renderer-accessibility', ch.err);
+      ok(gateOf(ch.ready) && gateOf(ch.reach) && ch.reach.mode === 'tree' && gateOf(ch.reach.rows.some((r) => r.principal.id === 'conv-b')) && verdictOf(ch.rec.args.includes('--force-renderer-accessibility')), 'D2 before launch + D4: the user launches Chrome SHARED with beta in tree mode — its argv carries --force-renderer-accessibility', ch.err);
       const H = ch.id;
       const ac = await cli('vsst_bbbb', 'attach', H);
-      ok(ac.code === 0 && /\[the user's browser\]|the user's own browser/.test(ac.out + (await cli('vsst_bbbb', 'list')).out) && /mode: tree/.test(ac.out), 'beta attaches the user\'s browser like any app (marked as the user\'s browser), mode tree');
+      ok(ac.code === 0 && gateOf(/\[the user's browser\]|the user's own browser/.test(ac.out + (await cli('vsst_bbbb', 'list')).out)) && verdictOf(/mode: tree/.test(ac.out)), 'beta attaches the user\'s browser like any app (marked as the user\'s browser), mode tree');
       let pj = null;
       const t0 = Date.now();
       await until(async () => { const r = await cli('vsst_bbbb', 'snapshot', H, '--json', '--budget', '3000'); try { pj = JSON.parse(r.out); } catch { pj = null; } return !!(pj && pj.nodes.some((n) => n.name === 'Press me')); }, 25000, 700);
       const press = pj && pj.nodes.find((n) => n.name === 'Press me');
-      ok(!!press && press.actions.includes('press'), `THE MEASUREMENT: a snapshot of the Chrome desktop app reaches the PAGE — ${pj && pj.nodes.length} nodes (census Action ${pj && pj.census.action}, EditableText ${pj && pj.census.editableText}), the button "Press me" [${press && press.actions.join(' ')}] ${Date.now() - t0} ms after attach`);
+      ok(!!press && verdictOf(press.actions.includes('press')), `THE MEASUREMENT: a snapshot of the Chrome desktop app reaches the PAGE — ${pj && pj.nodes.length} nodes (census Action ${pj && pj.census.action}, EditableText ${pj && pj.census.editableText}), the button "Press me" [${press && press.actions.join(' ')}] ${Date.now() - t0} ms after attach`);
       const cp = press ? await cli('vsst_bbbb', 'click', H, press.ref) : { code: -1 };
       let pressed = null;
       await until(async () => { pressed = textOf(await tree(H), /^pressed 1$/); return !!pressed; }, 5000, 250);
       ok(cp.code === 0 && !!pressed, 'click @ref on the page button runs its own `press` — the page reads "pressed 1" (read back from its tree)');
-      ok(await viewer(H), 'the user opens the browser window (typing needs a mapped window)');
+      ok(verdictOf(await viewer(H)), 'the user opens the browser window (typing needs a mapped window)');
       const snapE = await cli('vsst_bbbb', 'snapshot', H, '--json', '--budget', '3000');
       let ej = null; try { ej = JSON.parse(snapE.out); } catch { }
       const entry = ej && ej.nodes.find((n) => n.role === 'entry' && n.name === 'Your name');
       const tp = entry ? await cli('vsst_bbbb', 'type', H, 'xyz', entry.ref) : { code: -1, err: 'no entry' };
       let typedP = null;
       await until(async () => { typedP = textOf(await tree(H), /^typed xyz$/); return !!typedP; }, 6000, 250);
-      ok(entry && !entry.editable && tp.code === 0 && /as keys into @e\d+ \(focused through the tree\)/.test(tp.out) && !!typedP, 'type @ref into the page field (editable, no EditableText — Chromium) focuses it through the tree and types keys — the page reads "typed xyz"', tp.err);
+      ok(gateOf(entry) && !entry.editable && tp.code === 0 && gateOf(/as keys into @e\d+ \(focused through the tree\)/.test(tp.out)) && !!typedP, 'type @ref into the page field (editable, no EditableText — Chromium) focuses it through the tree and types keys — the page reads "typed xyz"', tp.err);
       const sc = await cli('vsst_bbbb', 'scroll', H, 'down', '--by', '5');
       let scrolled = null;
       await until(async () => { scrolled = textOf(await tree(H), /^scrolled \d+$/); return !!scrolled; }, 5000, 250);
-      ok(sc.code === 0 && scrolled && Number(String(scrolled.text || scrolled.name).split(' ')[1]) >= 500, `\`scroll down --by 5\` scrolls the page (${scrolled && (scrolled.text || scrolled.name)})`);
+      ok(sc.code === 0 && gateOf(scrolled) && Number(String(scrolled.text || scrolled.name).split(' ')[1]) >= 500, `\`scroll down --by 5\` scrolls the page (${scrolled && (scrolled.text || scrolled.name)})`);
       // THE CONTROL: the same browser launched WITHOUT the switch (an ad-hoc command — no browser row, so no a11y flag)
       const ctl = await launch({ exec: chromeBin, args: [`--user-data-dir=${path.join(HOME, 'chrome-ctl')}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', ...NET, URL0], dpr: 1, uiScale: 1, share: { principals: [{ kind: 'session', id: 's2' }], mode: 'auto' } });
       const acl = ctl.ready ? await cli('vsst_bbbb', 'attach', ctl.id) : { code: -1, out: '', err: JSON.stringify(ctl.err) };
@@ -604,7 +604,7 @@ async function laneE() {
       const a11yCarried = A11Y_ENV.filter((k) => process.env[k] !== undefined);
       ok(rows.length > 0, `Chrome ${chromeMajor}: why a switch-less launch reads as pixels is a MEASURED row (${rows.length ? rows.length + ' observed reason(s)' : 'none — launch it without the switch and record the mode line'})`);
       ok(a11yCarried.length === 0, `the control's launch carries no accessibility env of the shell's (${A11Y_ENV.join(' / ')} all unset in the child) — the reason is the code's, not the caller's shell`, a11yCarried.join(', '));
-      ok(ctl.ready && !ctl.rec.args.includes('--force-renderer-accessibility') && !(ctl.rec.env && ctl.rec.env.ACCESSIBILITY_ENABLED) && !!seen && sn.code === 1 && /mode_pixels/.test(sn.err), `NEGATIVE CONTROL: Chrome launched WITHOUT the switch exposes no page — auto resolves to pixels and a snapshot is refused; Chrome ${chromeMajor}'s reason seen: ${seen ? seen.when : `NOT A MEASURED ROW — "${modeLine}"`}`, JSON.stringify({ modeLine, rows: rows.map((r) => r.when), snapshot: (sn.err || '').slice(0, 200) }));
+      ok(gateOf(ctl.ready) && !ctl.rec.args.includes('--force-renderer-accessibility') && !(ctl.rec.env && ctl.rec.env.ACCESSIBILITY_ENABLED) && !!seen && sn.code === 1 && verdictOf(/mode_pixels/.test(sn.err)), `NEGATIVE CONTROL: Chrome launched WITHOUT the switch exposes no page — auto resolves to pixels and a snapshot is refused; Chrome ${chromeMajor}'s reason seen: ${seen ? seen.when : `NOT A MEASURED ROW — "${modeLine}"`}`, JSON.stringify({ modeLine, rows: rows.map((r) => r.when), snapshot: (sn.err || '').slice(0, 200) }));
       void cj;
       pageSrv.close();
     }
@@ -655,7 +655,7 @@ async function section3() {
     const app = express();
     app.use(express.json());
     const wired = WIRING.install({ app, auth: { requestAuthed: () => true }, vnc: { port: 0 }, keeper, DESKTOP_SINGLETON_ID: 'desktop-singleton', dataDir, env: () => ({ ...base }), activeSessions: () => sessions, serverSetting: () => undefined, broadcast: (m) => bcasts.push(m), browserHandback: announcer, log: { log() { }, warn() { } } });
-    ok(wired.announced === true && wired.windowEngine && wired.desktopStream, 'the wiring composes the engine, the bridge and the announcer\'s window seam');
+    ok(wired.announced === true && gateOf(wired.windowEngine) && verdictOf(wired.desktopStream), 'the wiring composes the engine, the bridge and the announcer\'s window seam');
     const srv = http.createServer(app);
     srv.on('upgrade', (req, socket, head) => { const id = wired.desktopStream.upgradeId(req.url.split('?')[0]); if (!id) { socket.destroy(); return; } wired.desktopStream.handleUpgrade(req, socket, head, id); });
     const port = await freePort();
@@ -667,50 +667,50 @@ async function section3() {
     const f1 = engine.factsForToken('vsst_aaaa');
     // the agent (session 1) opens the fixture through the CLI
     const refused = await cli('vsst_aaaa', 'open', '--exec', python, '--args', fixture, '--json');
-    ok(refused.code !== 0 && /exec_is_human/.test(refused.err), `open --exec is refused by the CLI itself, exec_is_human (${refused.err.trim().split('\n').pop().slice(0, 80)})`);
+    ok(refused.code !== 0 && verdictOf(/exec_is_human/.test(refused.err)), `open --exec is refused by the CLI itself, exec_is_human (${refused.err.trim().split('\n').pop().slice(0, 80)})`);
     const opened = await cli('vsst_aaaa', 'open', 'vs-window-fixture', '--title', 'vs window fixture', '--json');
     let handle = null; try { handle = JSON.parse(opened.out).handle; } catch { }
-    ok(opened.code === 0 && handle && /^da-/.test(handle), `vibespace-window open (as a child process) starts the fixture through the keeper and answers a handle (${handle}) — ${opened.err.trim().split('\n').pop() || 'no stderr'}`);
+    ok(opened.code === 0 && gateOf(handle) && verdictOf(/^da-/.test(handle)), `vibespace-window open (as a child process) starts the fixture through the keeper and answers a handle (${handle}) — ${opened.err.trim().split('\n').pop() || 'no stderr'}`);
     if (!handle) { console.log(opened.out, opened.err); }
     else {
       const ready = await until(() => { const r = keeper.get(handle); return r && r.state === 'ready'; }, 30000, 200);
       const rec = keeper.get(handle);
-      ok(ready && rec.backend === 'vnc-display', `the keeper brings it up on ${rec && rec.display} via ${rec && rec.via} (state ${rec && rec.state})`);
+      ok(gateOf(ready) && rec.backend === 'vnc-display', `the keeper brings it up on ${rec && rec.display} via ${rec && rec.via} (state ${rec && rec.state})`);
       // wait for the app on the a11y bus, then snapshot through the CLI
       let snap = null;
       const onBus = await until(async () => { const r = await cli('vsst_aaaa', 'snapshot', handle, '--json'); if (r.code === 0) { try { const j = JSON.parse(r.out); if (j.nodes && j.nodes.length) { snap = j; return true; } } catch { } } return false; }, 30000, 500);
-      ok(onBus && snap && snap.census.nodes > 5, `snapshot through the CLI: ${snap && snap.census.nodes} nodes from the real tree (Action ${snap && snap.census.action}, EditableText ${snap && snap.census.editableText})`);
+      ok(gateOf(onBus) && gateOf(snap) && snap.census.nodes > 5, `snapshot through the CLI: ${snap && snap.census.nodes} nodes from the real tree (Action ${snap && snap.census.action}, EditableText ${snap && snap.census.editableText})`);
       // r2305 (line 392's own word on the REAL helper): a walk the traversal deadline cuts says «deadline» — the real helper on the
       // real (private) bus over the real fixture, a 1 ms wall (the desktop's application list alone takes longer), its words naming it
       if (onBus && snap && Array.isArray(snap.apps) && snap.apps.length) {
         const dl = await WT.runHelper({ op: 'snapshot', pids: snap.apps.map((a) => a.pid), budget: 600, wallMs: 1 }, { env: base });
         const dlSays = WT.truncationSays(dl);
-        ok(!!dl && dl.ok === true && dl.truncated === true && JSON.stringify(dl.truncatedBy) === JSON.stringify(['deadline']) && /traversal deadline/.test(dlSays || '') && !/budget/.test(dlSays || ''),
+        ok(!!dl && dl.ok === true && dl.truncated === true && JSON.stringify(dl.truncatedBy) === JSON.stringify(['deadline']) && gateOf(/traversal deadline/.test(dlSays || '')) && !/budget/.test(dlSays || ''),
           `line 392 on the REAL helper: a walk the traversal deadline cuts (a 1 ms wall) says «deadline», never the budget — ${dlSays}`, dl && dl.ok ? { by: dl.truncatedBy, nodes: (dl.nodes || []).length } : dl);
       }
       const listed = await cli('vsst_aaaa', 'list');
-      ok(listed.code === 0 && listed.out.includes(`* ${handle}`) && /held by me/.test(listed.out) && /only windows the user shared with you \(or you opened\)/.test(listed.out) && /because you opened it/.test(listed.out), 'list marks the window as held by me, says it reaches me because I opened it, and states the scope');
+      ok(listed.code === 0 && gateOf(listed.out.includes(`* ${handle}`)) && gateOf(/held by me/.test(listed.out)) && gateOf(/only windows the user shared with you \(or you opened\)/.test(listed.out)) && verdictOf(/because you opened it/.test(listed.out)), 'list marks the window as held by me, says it reaches me because I opened it, and states the scope');
       const countBtn = snap && snap.nodes.find((n) => n.role === 'push button' || n.role === 'button') && snap.nodes.find((n) => (n.role === 'push button' || n.role === 'button') && n.name === 'Count');
       const countLabel = () => snap && snap.nodes.find((n) => n.role === 'label' && /^count \d+/.test(n.name || ''));
-      ok(!!countBtn && countBtn.actions && countBtn.actions.length > 0 && countLabel() && countLabel().name === 'count 0', 'the Count button (with Action) and the count label are in the snapshot');
+      ok(!!countBtn && gateOf(countBtn.actions) && countBtn.actions.length > 0 && gateOf(countLabel()) && countLabel().name === 'count 0', 'the Count button (with Action) and the count label are in the snapshot');
       if (countBtn) {
         const clicked = await cli('vsst_aaaa', 'click', handle, countBtn.ref);
         const again = await cli('vsst_aaaa', 'snapshot', handle, '--json');
         try { snap = JSON.parse(again.out); } catch { }
-        ok(clicked.code === 0 && /click/.test(clicked.out) && countLabel() && countLabel().name === 'count 1', `click @ref through the CLI changed the app's state, read back from ITS OWN tree (${countLabel() && countLabel().name})`);
+        ok(clicked.code === 0 && gateOf(/click/.test(clicked.out)) && gateOf(countLabel()) && countLabel().name === 'count 1', `click @ref through the CLI changed the app's state, read back from ITS OWN tree (${countLabel() && countLabel().name})`);
       }
       // lane E (D1): the window the agent OPENED is shared with IT only — the second session does not even see it
       const hid2 = await cli('vsst_bbbb', 'attach', handle);
       const hidList = await cli('vsst_bbbb', 'list');
-      ok(hid2.code === 1 && /not_exposed/.test(hid2.err) && hidList.code === 0 && !hidList.out.includes(handle) && /no window is shared with you/.test(hidList.out), 'lane E: a SECOND session cannot see the window the first one opened (not listed, attach ⇒ not_exposed) — the opener\'s self-open share reaches only itself');
+      ok(hid2.code === 1 && gateOf(/not_exposed/.test(hid2.err)) && hidList.code === 0 && !hidList.out.includes(handle) && verdictOf(/no window is shared with you/.test(hidList.out)), 'lane E: a SECOND session cannot see the window the first one opened (not listed, attach ⇒ not_exposed) — the opener\'s self-open share reaches only itself');
       ok((await api('POST', `/api/desktop/apps/${handle}/reach`, { principal: { kind: 'session', id: 's2' } })).status === 200, 'the user shares it with the second session (POST …/reach)');
       // the second session is refused by the lease — attach and act alike, typed, exit 1
       const at2 = await cli('vsst_bbbb', 'attach', handle);
-      ok(at2.code === 1 && /window_leased/.test(at2.err) && /alpha/.test(at2.err) && /one holder per window/.test(at2.err), 'a SECOND session\'s attach is refused window_leased naming the holder (exit 1)');
+      ok(at2.code === 1 && gateOf(/window_leased/.test(at2.err)) && gateOf(/alpha/.test(at2.err)) && verdictOf(/one holder per window/.test(at2.err)), 'a SECOND session\'s attach is refused window_leased naming the holder (exit 1)');
       const act2 = await cli('vsst_bbbb', 'click', handle, countBtn ? countBtn.ref : '@e1');
-      ok(act2.code === 1 && /not_attached/.test(act2.err), 'and its click is refused not_attached — two agents never fight one pointer');
+      ok(act2.code === 1 && verdictOf(/not_attached/.test(act2.err)), 'and its click is refused not_attached — two agents never fight one pointer');
       const snap2 = await cli('vsst_bbbb', 'snapshot', handle);
-      ok(snap2.code === 1 && /not_attached/.test(snap2.err), 'nor may it read the tree');
+      ok(snap2.code === 1 && verdictOf(/not_attached/.test(snap2.err)), 'nor may it read the tree');
       // the user's live view on the REAL bridge: a viewer in Watch sends 'a' — the key witness stays "key none"
       const WebSocket = require('ws');
       const keyLabel = async () => { const r = await cli('vsst_aaaa', 'snapshot', handle, '--json'); try { const j = JSON.parse(r.out); const n = j.nodes.find((x) => x.role === 'label' && /^key /.test(x.name || '')); return n ? n.name : null; } catch { return null; } };
@@ -732,7 +732,7 @@ async function section3() {
         });
         setTimeout(() => reject(new Error('RFB handshake did not finish in 8 s')), 8000);
       }).catch((e) => ({ error: e.message }));
-      ok(rfb && !rfb.error, `a viewer completes the RFB handshake with the keeper's x11vnc through the bridge${rfb && rfb.error ? ' — ' + rfb.error : ''}`);
+      ok(gateOf(rfb) && !rfb.error, `a viewer completes the RFB handshake with the keeper's x11vnc through the bridge${rfb && rfb.error ? ' — ' + rfb.error : ''}`);
       if (rfb && !rfb.error) {
         const pressA = () => { rfb.ws.send(Buffer.concat([PTR(60, 60), KEY_DOWN, KEY_UP])); };
         ok((await keyLabel()) === 'key none', 'before anything: the fixture\'s key witness reads "key none"');
@@ -740,32 +740,32 @@ async function section3() {
         ok((await keyLabel()) === 'key none', 'in Watch the viewer\'s pointer move + KeyEvent \'a\' are dropped by the bridge: the witness still reads "key none" (the agent is driving)');
         // the user takes over through the desktop route (the live view's Take over)
         const lease0 = await api('GET', `/api/desktop/apps/${handle}/lease`);
-        ok(lease0.status === 200 && lease0.j.lease && lease0.j.lease.sessionId === 's1' && lease0.j.lease.input === 'agent' && lease0.j.origin === 'vibespace', 'GET …/lease says the agent holds it (input agent, origin vibespace)');
+        ok(lease0.status === 200 && gateOf(lease0.j.lease) && lease0.j.lease.sessionId === 's1' && lease0.j.lease.input === 'agent' && lease0.j.origin === 'vibespace', 'GET …/lease says the agent holds it (input agent, origin vibespace)');
         const tk = await api('POST', `/api/desktop/apps/${handle}/takeover`, { viewerId });
-        ok(tk.status === 200 && tk.j.ok && tk.j.lease.input === 'user' && /^tk-[0-9a-f]{16}$/.test(tk.j.lease.takenBy.tag) && !JSON.stringify(tk.j.lease).includes(viewerId), 'POST …/takeover flips the lease to the user and answers the taker its OPAQUE tag — the viewer id is not in the lease');
-        ok(bcasts.some((m) => m.type === 'window-leases-updated' && m.leases.some((l) => l.handle === handle && l.input === 'user')), 'window-leases-updated was broadcast with input user');
-        ok(!bcasts.some((m) => m.type === 'window-leases-updated' && JSON.stringify(m).includes(viewerId)) && bcasts.some((m) => m.type === 'window-leases-updated' && m.leases.some((l) => l.handle === handle && l.takenBy && /^tk-/.test(l.takenBy.tag))), 'the broadcast names the takeover by its tag and carries the viewer id (the socket\'s secret) NOWHERE — another client cannot drive or hand back with it');
+        ok(tk.status === 200 && gateOf(tk.j.ok) && tk.j.lease.input === 'user' && gateOf(/^tk-[0-9a-f]{16}$/.test(tk.j.lease.takenBy.tag)) && !JSON.stringify(tk.j.lease).includes(viewerId), 'POST …/takeover flips the lease to the user and answers the taker its OPAQUE tag — the viewer id is not in the lease');
+        ok(verdictOf(bcasts.some((m) => m.type === 'window-leases-updated' && m.leases.some((l) => l.handle === handle && l.input === 'user'))), 'window-leases-updated was broadcast with input user');
+        ok(!bcasts.some((m) => m.type === 'window-leases-updated' && JSON.stringify(m).includes(viewerId)) && verdictOf(bcasts.some((m) => m.type === 'window-leases-updated' && m.leases.some((l) => l.handle === handle && l.takenBy && /^tk-/.test(l.takenBy.tag)))), 'the broadcast names the takeover by its tag and carries the viewer id (the socket\'s secret) NOWHERE — another client cannot drive or hand back with it');
         const pausedClick = await cli('vsst_aaaa', 'click', handle, countBtn ? countBtn.ref : '@e1');
-        ok(pausedClick.code === 1 && /window_paused/.test(pausedClick.err) && /do NOT retry/.test(pausedClick.err), 'the agent\'s click is refused window_paused (exit 1, "do NOT retry") — nothing was injected');
+        ok(pausedClick.code === 1 && gateOf(/window_paused/.test(pausedClick.err)) && verdictOf(/do NOT retry/.test(pausedClick.err)), 'the agent\'s click is refused window_paused (exit 1, "do NOT retry") — nothing was injected');
         const pausedKey = await cli('vsst_aaaa', 'key', handle, 'ctrl+s');
-        ok(pausedKey.code === 1 && /window_paused/.test(pausedKey.err), 'a chord too: §6.6 — a takeover stops injection of every kind');
+        ok(pausedKey.code === 1 && verdictOf(/window_paused/.test(pausedKey.err)), 'a chord too: §6.6 — a takeover stops injection of every kind');
         ok((await api('POST', `/api/desktop/apps/${handle}/takeover`, { viewerId: 'wl-other' })).j.code === 'held', 'another viewer is refused held (409) while this one drives');
         pressA(); await sleep(800);
         const afterKey = await (async () => { const r = await fetch(API + '/api/agent/window/snapshot', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_aaaa' }, body: JSON.stringify({ handle }) }); return r.status; })();
         ok(afterKey === 409, 'the agent cannot even snapshot while the user drives (409 window_paused)');
         const hb = await api('POST', `/api/desktop/apps/${handle}/handback`, { viewerId });
-        ok(hb.status === 200 && hb.j.ok && hb.j.cause === 'explicit' && hb.j.byHolder === true && hb.j.lease.input === 'agent', 'POST …/handback returns it to the agent (explicit, by the holder)');
+        ok(hb.status === 200 && gateOf(hb.j.ok) && hb.j.cause === 'explicit' && hb.j.byHolder === true && hb.j.lease.input === 'agent', 'POST …/handback returns it to the agent (explicit, by the holder)');
         ok((await keyLabel()) === 'key a', 'the \'a\' the user sent WHILE driving landed: the witness reads "key a" (their input relayed only while they held the window)');
         await sleep(50);
-        ok(delivered.length === 1 && delivered[0].cid === 'conv-1' && delivered[0].opts.spendReason === 'browser-handback' && /the "vs window fixture" window back to you/.test(delivered[0].text) && delivered[0].text.includes(`vibespace-window snapshot ${handle}`), 'the explicit handback was announced into the holder\'s conversation through the ONE ladder, with the window text');
+        ok(delivered.length === 1 && delivered[0].cid === 'conv-1' && delivered[0].opts.spendReason === 'browser-handback' && gateOf(/the "vs window fixture" window back to you/.test(delivered[0].text)) && verdictOf(delivered[0].text.includes(`vibespace-window snapshot ${handle}`)), 'the explicit handback was announced into the holder\'s conversation through the ONE ladder, with the window text');
         const snapHb = await cli('vsst_aaaa', 'snapshot', handle, '--json');
         let btn2 = null; try { snap = JSON.parse(snapHb.out); btn2 = snap.nodes.find((n) => (n.role === 'push button' || n.role === 'button') && n.name === 'Count'); } catch { }
         const afterHb = btn2 ? await cli('vsst_aaaa', 'click', handle, btn2.ref) : { code: -1, err: 'no Count button after the handback snapshot' };
         const snapHb2 = await cli('vsst_aaaa', 'snapshot', handle, '--json');
         try { snap = JSON.parse(snapHb2.out); } catch { }
-        ok(snapHb.code === 0 && afterHb.code === 0 && countLabel() && countLabel().name === 'count 2', `after the handback the agent snapshots and clicks again (${countLabel() && countLabel().name}) — the window is theirs once more`);
+        ok(snapHb.code === 0 && afterHb.code === 0 && gateOf(countLabel()) && countLabel().name === 'count 2', `after the handback the agent snapshots and clicks again (${countLabel() && countLabel().name}) — the window is theirs once more`);
         const w = await cli('vsst_aaaa', 'watch', handle);
-        ok(w.code === 0 && /window-live/.test(w.out) && /origin vibespace/.test(w.out) && /Take over/.test(w.out), 'watch names the window-live form, the origin and the three moves');
+        ok(w.code === 0 && gateOf(/window-live/.test(w.out)) && gateOf(/origin vibespace/.test(w.out)) && verdictOf(/Take over/.test(w.out)), 'watch names the window-live form, the origin and the three moves');
         rfb.ws.close();
       }
       // a RESTART: a new engine over the same data dir + keeper still holds the lease; the CLI snapshots without re-attaching
@@ -777,12 +777,12 @@ async function section3() {
       const snapAfter = await cli('vsst_aaaa', 'snapshot', handle, '--json');
       ok(snapAfter.code === 0 && JSON.parse(snapAfter.out).nodes.length > 5, 'after the restart the CLI snapshots without re-attaching (the persisted lease)');
       const at2b = await cli('vsst_bbbb', 'attach', handle);
-      ok(at2b.code === 1 && /window_leased/.test(at2b.err), 'and the second session is still refused');
+      ok(at2b.code === 1 && verdictOf(/window_leased/.test(at2b.err)), 'and the second session is still refused');
       const audit = fs.readFileSync(engine2.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-      ok(audit.some((l) => l.verb === 'takeover' && l.by === 'user' && l.viewer === 'wl-user1' && l.origin === 'vibespace') && audit.some((l) => l.verb === 'handback' && l.cause === 'explicit' && l.origin === 'vibespace') && audit.some((l) => l.verb === 'click' && l.by === 'node' && l.node && l.node.action) && !audit.some((l) => 'text' in l), 'the audit carries the takeover (viewer) and handback (cause) lines with origin, the node click with its action, and never typed text');
+      ok(gateOf(audit.some((l) => l.verb === 'takeover' && l.by === 'user' && l.viewer === 'wl-user1' && l.origin === 'vibespace')) && gateOf(audit.some((l) => l.verb === 'handback' && l.cause === 'explicit' && l.origin === 'vibespace')) && gateOf(audit.some((l) => l.verb === 'click' && l.by === 'node' && l.node && l.node.action)) && !audit.some((l) => 'text' in l), 'the audit carries the takeover (viewer) and handback (cause) lines with origin, the node click with its action, and never typed text');
       engine2.shutdown();
       const det = await cli('vsst_aaaa', 'detach', handle);
-      ok(det.code === 0 && /detached/.test(det.out), 'detach through the CLI');
+      ok(det.code === 0 && verdictOf(/detached/.test(det.out)), 'detach through the CLI');
       await keeper.stop(handle);
     }
     await new Promise((r) => srv.close(r));
@@ -811,4 +811,4 @@ async function privateBusChild(flag, tag, timeoutMs) {
   if (!summary) ok(false, `the ${tag} child answered no summary (exit ${code})`, errTail.split('\n').filter((l) => !/dbus-daemon|WARNING|Message:|SpiRegistry|discover_other/.test(l)).slice(-12).join('\n'));
   else { pass += summary[0]; fail += summary[1]; skipped += summary[2]; ok(code === 0 || summary[1] > 0, `the ${tag} child ran to its end on its private bus (${summary[0]} passed, ${summary[1]} failed, ${summary[2]} skipped, exit ${code})`); }
   try { fs.rmSync(path.join(dir, tag), { recursive: true, force: true }); } catch { }
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

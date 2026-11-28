@@ -35,7 +35,7 @@ import { chromeZip } from './fixtures/chrome-for-testing/fake-zip.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
 const thr = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms = 15000, every = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await pred(); if (v) return v; await sleep(every); } return pred(); };
@@ -127,14 +127,14 @@ const done = async (k = kk) => { await until(() => !k.chromeBuildFacts().install
 console.log('— ① the lists: no fetch at boot / for the facts; the channel list fresh; the known-good list kept 24 h');
 {
   const f = await kk.chromeBuildsAvailable({});
-  ok(hits.length === 0 && f.platform.offered === (process.platform === 'linux' && process.arch === 'x64') && f.root === BROWSERS && f.unzip === true && Array.isArray(f.installed) && f.install.running === false,
+  ok(hits.length === 0 && f.platform.offered === (process.platform === 'linux' && process.arch === 'x64') && f.root === BROWSERS && f.unzip === true && gateOf(Array.isArray(f.installed)) && f.install.running === false,
     'a keeper booted and its facts read (the progress poll): ZERO requests to either host; the facts say the platform, the builds folder, unzip, the slot', { hits, f: { ...f, installed: undefined } });
   const pr = kk.createProfile({ label: 'Old logins' });
   kk._reg().profiles.find((p) => p.id === pr.id).lastChromiumMajor = 156;
   const c = await kk.chromeBuildsAvailable({ lists: 'channels', profileId: pr.id });
   const st = (c.channels || []).find((r) => r.channel === 'Stable');
   const chip = (row, kind) => (row && row.verdict.chips || []).find((x) => x.kind === kind);
-  ok(hits.filter((h) => h.path === CBR.lists.lastKnownGood).length === 1 && (c.channels || []).map((r) => r.channel).join() === 'Stable,Beta,Dev,Canary' && st.version === LKG0.channels.Stable.version && st.url.startsWith(`https://${CBR.fileHost}/`),
+  ok(hits.filter((h) => h.path === CBR.lists.lastKnownGood).length === 1 && (c.channels || []).map((r) => r.channel).join() === 'Stable,Beta,Dev,Canary' && st.version === LKG0.channels.Stable.version && verdictOf(st.url.startsWith(`https://${CBR.fileHost}/`)),
     'the picker opens: ONE read of the 10 KB channel list — four rows, each url on the file host', c.channels);
   // lane mediation-chrome-155: Chrome 155 joined the census and the fixture's Stable 154.0.8037.92 went from newer to
   // between it (the chip says older) — the expectation is THE census's own relation and newest Chrome; the fixture's
@@ -142,18 +142,18 @@ console.log('— ① the lists: no fetch at boot / for the facts; the channel li
   // 157.0.8083.0 went from newer to between (the chip says older): its expectation is the census's own relation too
   const censusWant = (v) => { const r = CC.chromeRelation(v); return { relation: r === 'between' ? 'older' : r, census: CC.CENSUS_CHROME }; };
   const ca = (c.channels || []).find((r) => r.channel === 'Canary'), want = censusWant(st.version);
-  ok(chip(st, 'census').relation === want.relation && chip(st, 'census').census === want.census && ca && chip(ca, 'census').relation === censusWant(ca.version).relation && chip(ca, 'census').census === CC.CENSUS_CHROME && !chip(st, 'cloak') && chip(st, 'profile').wrote === 156 && chip(st, 'cli') && st.verdict.offer === true,
+  ok(chip(st, 'census').relation === want.relation && chip(st, 'census').census === want.census && gateOf(ca) && chip(ca, 'census').relation === censusWant(ca.version).relation && chip(ca, 'census').census === CC.CENSUS_CHROME && !chip(st, 'cloak') && chip(st, 'profile').wrote === 156 && gateOf(chip(st, 'cli')) && st.verdict.offer === true,
     `Stable ${st.version}: ${want.relation} than the census (${want.census}; Canary ${ca && ca.version} ${ca ? censusWant(ca.version).relation : '?'} than it), can't switch to CloakBrowser later, older than the Chrome that last opened "Old logins" (156) — chips, not refusals (offered)`, { stable: st.verdict, canary: ca && ca.verdict });
   await kk.chromeBuildsAvailable({ lists: 'channels' });
   ok(hits.filter((h) => h.path === CBR.lists.lastKnownGood).length === 2, 'opened again: read again (fresh every time a person opens it)');
   const o = await kk.chromeBuildsAvailable({ lists: 'older' });
   const kgReads = () => hits.filter((h) => h.path === CBR.lists.knownGood);
-  ok((o.majors || []).map((m) => m.major).join() === '157,154,153,151,146,113' && o.majors.find((m) => m.major === 146).newest === '146.0.7680.165' && fs.existsSync(landedFile(path.join(DATA, 'browser-tools', 'chrome-builds', 'known-good.json'))) && kgReads().length === 1 && !kgReads()[0].ims,
+  ok((o.majors || []).map((m) => m.major).join() === '157,154,153,151,146,113' && o.majors.find((m) => m.major === 146).newest === '146.0.7680.165' && gateOf(fs.existsSync(landedFile(path.join(DATA, 'browser-tools', 'chrome-builds', 'known-good.json')))) && kgReads().length === 1 && !kgReads()[0].ims,
     '"Older versions…": the known-good list read once, kept under data/browser-tools/chrome-builds/, one row per major (newest first, its newest version)', o.majors);
   const v146 = await kk.chromeBuildsAvailable({ major: 146 });
   const v151 = await kk.chromeBuildsAvailable({ major: 151 });
   const v153 = await kk.chromeBuildsAvailable({ major: 153 });
-  ok(v146.versions.length === 4 && [...v146.versions, ...v151.versions].every((v) => !chip(v, 'cloak')) && chip(v153.versions.find((v) => v.version === '153.0.8010.47'), 'census').relation === 'censused' && kgReads().length === 1,
+  ok(v146.versions.length === 4 && gateOf([...v146.versions, ...v151.versions].every((v) => !chip(v, 'cloak'))) && chip(v153.versions.find((v) => v.version === '153.0.8010.47'), 'census').relation === 'censused' && kgReads().length === 1,
     'a major expands to its versions from the KEPT list (no read): 146 can still switch to CloakBrowser Free or Pro, 151 to Pro only; 153.0.8010.47 is censused');
   clock += 25 * 3600e3;
   const o2 = await kk.chromeBuildsAvailable({ lists: 'older' });
@@ -168,21 +168,21 @@ const STABLE = LKG0.channels.Stable.version;
   const r = await kk.installChromeBuild({ version: STABLE });
   const f0 = kk.chromeBuildFacts();
   const m0 = marker();
-  ok(r.started && r.host === CBR.fileHost && f0.install.running && f0.install.version === STABLE && m0 && m0.kind === 'chrome-build' && m0.version === STABLE && m0.bytes === MODES.get(STABLE).zip.length,
+  ok(gateOf(r.started) && r.host === CBR.fileHost && gateOf(f0.install.running) && f0.install.version === STABLE && gateOf(m0) && m0.kind === 'chrome-build' && m0.version === STABLE && m0.bytes === MODES.get(STABLE).zip.length,
     'the POST: the slot taken (the facts say it), THE marker names a `chrome-build` of that version and its length', { r, f0: f0.install, m0 });
   const i = await done();
   await markerGone();
   const w = JSON.parse(fs.readFileSync(path.join(BROWSERS, `chrome-${STABLE}`, BB.WITNESS_FILE), 'utf8'));
-  ok(i.done === STABLE && !i.failed && listed(STABLE) && w.version === STABLE && w.url === `https://${CBR.fileHost}${zipUrl(STABLE)}` && w.bytes === MODES.get(STABLE).zip.length && w.etag && leftovers(STABLE).length === 0 && !marker(),
+  ok(i.done === STABLE && !i.failed && gateOf(listed(STABLE)) && w.version === STABLE && w.url === `https://${CBR.fileHost}${zipUrl(STABLE)}` && w.bytes === MODES.get(STABLE).zip.length && gateOf(w.etag) && leftovers(STABLE).length === 0 && !marker(),
     'done: the build is listed (chrome-<v>/chrome runnable), its witness inside names the version, url, length and etag; no .part, no .unpack, no marker', { i, w, left: leftovers(STABLE) });
   ok(spyCalls(STABLE).join() === '-Z1,-Zs,-q' && fileHits(STABLE, 'HEAD') === 1 && fileHits(STABLE, 'GET') === 1, 'one HEAD, one GET; unzip listed the zip twice BEFORE it extracted', spyCalls(STABLE));
   const pf = kk.createProfile({ label: 'Fresh', browser: { kind: 'build', version: STABLE } });
-  ok(pf && pf.browser && pf.browser.version === STABLE, 'it is simply one more build: a profile picks it (the choice verdict, unchanged)');
+  ok(gateOf(pf) && gateOf(pf.browser) && pf.browser.version === STABLE, 'it is simply one more build: a profile picks it (the choice verdict, unchanged)');
   const again = await thr(() => kk.installChromeBuild({ version: STABLE }));
-  ok(again && again.code === 'build_present', 'downloading it again: refused `build_present`');
+  ok(gateOf(again) && again.code === 'build_present', 'downloading it again: refused `build_present`');
   const c = await kk.chromeBuildsAvailable({ lists: 'channels' });
   const row = c.channels.find((x) => x.version === STABLE);
-  ok(row.verdict.chips.some((x) => x.kind === 'present') && row.verdict.offer === false && c.installed.find((b) => b.version === STABLE).downloaded === true && c.installed.find((b) => b.version === STABLE).bytes > 5000,
+  ok(gateOf(row.verdict.chips.some((x) => x.kind === 'present')) && row.verdict.offer === false && c.installed.find((b) => b.version === STABLE).downloaded === true && c.installed.find((b) => b.version === STABLE).bytes > 5000,
     'the picker now says "Already on this computer" on its row (it offers nothing) and lists it with its size, downloaded by VibeSpace');
 }
 
@@ -193,7 +193,7 @@ for (const [v, mode, code] of [[LKG0.channels.Beta.version, 'badetag', 'build_ch
   await kk.installChromeBuild({ version: v });
   const i = await done();
   await markerGone();
-  ok(i.failed && i.version === v && (code ? i.code === code : !!i.code) && /^(fetch|check): /.test(i.error) && !listed(v) && leftovers(v).length === 0 && spyCalls(v).length === 0 && !marker(),
+  ok(gateOf(i.failed) && i.version === v && (code ? i.code === code : !!i.code) && gateOf(/^(fetch|check): /.test(i.error)) && !listed(v) && leftovers(v).length === 0 && spyCalls(v).length === 0 && !marker(),
     `${mode}: refused by name (${i.code}: ${String(i.error).slice(0, 90)}) — nothing kept, nothing listed, unzip never ran`, i);
 }
 
@@ -210,14 +210,14 @@ console.log('— ④ the zip: refused before `unzip -q`; a chrome that says anot
     plant(v, 'ok', chromeZip(v, { extra }));
     await kk.installChromeBuild({ version: v });
     const i = await done();
-    ok(i.failed && i.code === 'build_zip_shape' && spyCalls(v).join() === '-Z1,-Zs' && !fs.existsSync(plan(v).unpackDir) && !listed(v) && leftovers(v).length === 0 && !fs.existsSync(path.join(HOME, '.agent-browser', 'escaped')) && !fs.existsSync('/tmp/vs-cbdl-absolute'),
+    ok(gateOf(i.failed) && i.code === 'build_zip_shape' && spyCalls(v).join() === '-Z1,-Zs' && !fs.existsSync(plan(v).unpackDir) && !listed(v) && leftovers(v).length === 0 && !fs.existsSync(path.join(HOME, '.agent-browser', 'escaped')) && !fs.existsSync('/tmp/vs-cbdl-absolute'),
       `${what}: refused \`build_zip_shape\` from unzip's own listing — \`unzip -q\` never ran, nothing written`, { i, spy: spyCalls(v) });
   }
   const v = '113.0.5672.0';
   plant(v, 'ok', chromeZip(v, { says: '113.0.5672.1' }));
   await kk.installChromeBuild({ version: v });
   const i = await done();
-  ok(i.failed && i.code === 'build_verify_failed' && /says 113\.0\.5672\.1, not 113\.0\.5672\.0/.test(i.error) && !listed(v) && !fs.existsSync(plan(v).targetDir) && leftovers(v).length === 0,
+  ok(gateOf(i.failed) && i.code === 'build_verify_failed' && gateOf(/says 113\.0\.5672\.1, not 113\.0\.5672\.0/.test(i.error)) && !listed(v) && !fs.existsSync(plan(v).targetDir) && leftovers(v).length === 0,
     'a chrome that says another version: refused at verify, removed — never listed, not even for a moment (the rename comes after the witness)', i);
 }
 
@@ -229,19 +229,19 @@ console.log('— ⑤ the egress: an off-host url in a list, a 302 elsewhere, a 3
   beta.url = 'https://evil.example.com/chrome-linux64.zip';
   const c = await kk.chromeBuildsAvailable({ lists: 'channels' });
   const e = await thr(() => kk.installChromeBuild({ version: LKG.channels.Beta.version }));
-  ok(!c.channels.some((r) => r.channel === 'Beta') && c.refusedRows.some((r) => r.channel === 'Beta' && r.code === 'build_url_offhost') && e && e.code === 'build_url_offhost' && /evil\.example\.com/.test(e.message) && !hits.some((h) => h.host === 'evil.example.com') && !kk.chromeBuildFacts().install.running,
+  ok(!c.channels.some((r) => r.channel === 'Beta') && gateOf(c.refusedRows.some((r) => r.channel === 'Beta' && r.code === 'build_url_offhost')) && gateOf(e) && e.code === 'build_url_offhost' && gateOf(/evil\.example\.com/.test(e.message)) && !hits.some((h) => h.host === 'evil.example.com') && !kk.chromeBuildFacts().install.running,
     'a channel list naming another host: that row refused BY NAME (never offered), its download refused `build_url_offhost`, nothing fetched there, the slot free', { refused: c.refusedRows, e: e && e.message });
   LKG = LKG0; await kk.chromeBuildsAvailable({ lists: 'channels' });
   const v = '146.0.7680.153';
   plant(v, 'redirect-away');
   const e2 = await thr(() => kk.installChromeBuild({ version: v }));
-  ok(e2 && e2.code === 'build_url_offhost' && /evil\.example\.com/.test(e2.message) && !hits.some((h) => h.host === 'evil.example.com') && !listed(v) && leftovers(v).length === 0 && !kk.chromeBuildFacts().install.running,
+  ok(gateOf(e2) && e2.code === 'build_url_offhost' && gateOf(/evil\.example\.com/.test(e2.message)) && !hits.some((h) => h.host === 'evil.example.com') && !listed(v) && leftovers(v).length === 0 && !kk.chromeBuildFacts().install.running,
     'a 302 from the file host to another host: refused by name before the hop is fetched; nothing written', e2 && e2.message);
   const v2 = '146.0.7680.165';
   plant(v2, 'redirect-ok');
   await kk.installChromeBuild({ version: v2 });
   const i = await done();
-  ok(i.done === v2 && listed(v2) && hits.some((h) => h.path === `/alt/${v2}.zip`), 'a 302 on the file host itself is followed (re-judged) and lands', i);
+  ok(i.done === v2 && gateOf(listed(v2)) && verdictOf(hits.some((h) => h.path === `/alt/${v2}.zip`)), 'a 302 on the file host itself is followed (re-judged) and lands', i);
 }
 
 // ═══ ⑥ the slot ═══════════════════════════════════════════════════════════════
@@ -252,10 +252,10 @@ console.log('— ⑥ the slot: one at a time; unzip absent; the disk row');
   await kk.installChromeBuild({ version: v });
   const e = await thr(() => kk.installChromeBuild({ version: '151.0.7872.0' }));
   const e2 = await thr(() => kk.installCli({}));
-  ok(e && e.code === 'install_running' && /Chrome 151\.0\.7922\.138/.test(e.message) && e2 && e2.code === 'install_running', 'while a download runs: a second download and the browser CLI install are refused `install_running` (THE one slot), by name', { e: e && e.message, e2: e2 && e2.code });
+  ok(gateOf(e) && e.code === 'install_running' && gateOf(/Chrome 151\.0\.7922\.138/.test(e.message)) && gateOf(e2) && e2.code === 'install_running', 'while a download runs: a second download and the browser CLI install are refused `install_running` (THE one slot), by name', { e: e && e.message, e2: e2 && e2.code });
   await until(() => fs.existsSync(plan(v).part) && kk.chromeBuildFacts().install.bytes > 0, 5000, 5);
   const mid = kk.chromeBuildFacts().install;
-  ok(fs.existsSync(plan(v).part) && mid.step === 'fetch' && mid.bytes > 0 && mid.total === MODES.get(v).zip.length, 'mid-download: the bytes stream into chrome-<v>.part; the facts say N of M bytes (the progress line)', mid);
+  ok(gateOf(fs.existsSync(plan(v).part)) && mid.step === 'fetch' && mid.bytes > 0 && mid.total === MODES.get(v).zip.length, 'mid-download: the bytes stream into chrome-<v>.part; the facts say N of M bytes (the progress line)', mid);
   ok((await done()).done === v, '…and it lands');
   // B-8f20: absence is FAKED by a PATH dir holding only a link to node — never dirname(process.execPath), which on a box whose
   // node lives in /usr/bin (a lane env without nvm) holds unzip too, and the leg could not fake it (red there, 527/528)
@@ -265,12 +265,12 @@ console.log('— ⑥ the slot: one at a time; unzip absent; the disk row');
   const kn = mkKeeper(path.join(ROOT, 'data-nozip'), { env: () => ({ PATH: noZipBin, HOME }) });
   const n0 = hits.length;
   const e3 = await thr(() => kn.installChromeBuild({ version: '151.0.7872.0' }));
-  ok(e3 && e3.code === 'unzip_unavailable' && hits.length === n0 && !kn.chromeBuildFacts().install.running, 'unzip absent: refused `unzip_unavailable` before ANY request (not even the list)', e3 && e3.message);
+  ok(gateOf(e3) && e3.code === 'unzip_unavailable' && hits.length === n0 && !kn.chromeBuildFacts().install.running, 'unzip absent: refused `unzip_unavailable` before ANY request (not even the list)', e3 && e3.message);
   kn.shutdown();
   const vh = '151.0.7872.0';
   plant(vh, 'huge');
   const e4 = await thr(() => kk.installChromeBuild({ version: vh }));
-  ok(e4 && e4.code === 'disk' && e4.build && e4.build.need === 3e15 && e4.build.free > 0 && /needs about 3000000000 MB free, \d+ MB left on \//.test(e4.message) && fileHits(vh, 'GET') === 0 && !fs.existsSync(plan(vh).part) && !kk.chromeBuildFacts().install.running,
+  ok(gateOf(e4) && e4.code === 'disk' && gateOf(e4.build) && e4.build.need === 3e15 && e4.build.free > 0 && gateOf(/needs about 3000000000 MB free, \d+ MB left on \//.test(e4.message)) && fileHits(vh, 'GET') === 0 && !fs.existsSync(plan(vh).part) && !kk.chromeBuildFacts().install.running,
     'the disk row: refused `disk` with the numbers (need = length × 3, free, the path) after ONE HEAD — no byte fetched, the slot free', e4 && e4.message);
 }
 
@@ -286,7 +286,7 @@ console.log('— ⑦ a restart mid-download: in the fetch ⇒ failed cleanly; in
   const i = await done();
   await sleep(300);
   await markerGone();
-  ok(i.failed && /restarted during the download \(step fetch\)/.test(i.error) && leftovers(v).length === 0 && !listed(v) && !marker() && kk._reattached() === 'ended',
+  ok(gateOf(i.failed) && gateOf(/restarted during the download \(step fetch\)/.test(i.error)) && leftovers(v).length === 0 && !listed(v) && !marker() && kk._reattached() === 'ended',
     'VibeSpace restarted while the bytes came in: the new keeper judges the marker at once — failed by name, the partial removed, the slot free', { i, left: leftovers(v) });
   const v2 = '151.0.7922.77';
   plant(v2, 'ok');
@@ -300,7 +300,7 @@ console.log('— ⑦ a restart mid-download: in the fetch ⇒ failed cleanly; in
   fs.rmSync(SLOW, { force: true });
   const i2 = await done();
   await markerGone();
-  ok(m && Number.isInteger(m.pid) && m.files === 2 && f1.running && f1.step === 'unpack' && f1.version === v2 && kk._reattached() === 'running' && i2.done === v2 && listed(v2) && fs.existsSync(path.join(plan(v2).targetDir, BB.WITNESS_FILE)) && leftovers(v2).length === 0 && !marker(),
+  ok(gateOf(m) && gateOf(Number.isInteger(m.pid)) && m.files === 2 && gateOf(f1.running) && f1.step === 'unpack' && f1.version === v2 && kk._reattached() === 'running' && i2.done === v2 && gateOf(listed(v2)) && gateOf(fs.existsSync(path.join(plan(v2).targetDir, BB.WITNESS_FILE))) && leftovers(v2).length === 0 && !marker(),
     'VibeSpace restarted while unzip ran: the marker named the unzip (pid + files); the new keeper RE-ATTACHED (the slot busy, said "unpacking"), then verified, witnessed and landed it', { m, f1, i2 });
 }
 
@@ -313,18 +313,18 @@ console.log('— ⑧ removal: pinned / running / hand-installed refused by name;
   ok((await done()).done === v, 'a build to remove landed');
   const pp = kk.createProfile({ label: 'Pinned one', browser: { kind: 'build', version: v } });
   const e = await thr(() => kk.removeChromeBuild({ version: v }));
-  ok(e && e.code === 'build_in_use' && e.build.profiles.includes('Pinned one') && /"Pinned one"/.test(e.message) && listed(v), 'a profile chooses it: refused `build_in_use`, naming the profile', e && e.message);
+  ok(gateOf(e) && e.code === 'build_in_use' && gateOf(e.build.profiles.includes('Pinned one')) && gateOf(/"Pinned one"/.test(e.message)) && verdictOf(listed(v)), 'a profile chooses it: refused `build_in_use`, naming the profile', e && e.message);
   await kk.setBrowserChoice({ profileId: pp.id, choice: { kind: 'default' }, by: 'user' });
   const pr = kk.createProfile({ label: 'Running one' });
   kk._reg().browsers[pr.id] = { state: 'ready', cdpBrowser: `Chrome/${v}` };
   const e2 = await thr(() => kk.removeChromeBuild({ version: v }));
   delete kk._reg().browsers[pr.id];
-  ok(e2 && e2.code === 'build_in_use' && e2.build.running.includes('Running one'), 'a running browser reports it: refused `build_in_use`, naming it', e2 && e2.message);
+  ok(gateOf(e2) && e2.code === 'build_in_use' && verdictOf(e2.build.running.includes('Running one')), 'a running browser reports it: refused `build_in_use`, naming it', e2 && e2.message);
   const hand = path.join(BROWSERS, 'chrome-150.0.1.2'); fs.mkdirSync(hand, { recursive: true }); fs.writeFileSync(path.join(hand, 'chrome'), '#!/bin/sh\n', { mode: 0o755 });
   const e3 = await thr(() => kk.removeChromeBuild({ version: '150.0.1.2' }));
-  ok(e3 && e3.code === 'build_not_downloaded' && fs.existsSync(hand), 'a folder installed by hand (no witness): refused `build_not_downloaded`, untouched');
+  ok(gateOf(e3) && e3.code === 'build_not_downloaded' && verdictOf(fs.existsSync(hand)), 'a folder installed by hand (no witness): refused `build_not_downloaded`, untouched');
   const e4 = await thr(() => kk.removeChromeBuild({ version: '../../etc' }));
-  ok(e4 && e4.code === 'build_version_invalid', 'a version that is a path: refused before any file is named');
+  ok(gateOf(e4) && e4.code === 'build_version_invalid', 'a version that is a path: refused before any file is named');
   const r = kk.removeChromeBuild({ version: v });
   ok(r.removed === v && !fs.existsSync(plan(v).targetDir) && !fs.existsSync(plan(v).removingDir) && !listed(v), 'nobody uses it: removed (renamed to .removing-<v>, then deleted)');
 }
@@ -336,7 +336,7 @@ console.log('— ⑨ controls: patched keeper copies the gates above must turn r
   // rv-browser F7 (lane dc-browser-installs): the download is the builds ROW's file — patched there, run by the real keeper
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-builds-keeper.js'), 'utf8');
   const runCopy = async (label, from, to, v, mode, zip) => {
-    ok(src.includes(from), `control (${label}): the patch applies`);
+    ok(verdictOf(src.includes(from)), `control (${label}): the patch applies`);
     const Kc = keeperWithInstalls(MUT, REPO, { 'src/server/browser-builds-keeper.js': src.replace(from, to) }, label);
     const kc = mkKeeper(path.join(ROOT, 'data-' + label), {}, Kc);
     await kc.chromeBuildsAvailable({ lists: 'older' });
@@ -345,11 +345,11 @@ console.log('— ⑨ controls: patched keeper copies the gates above must turn r
     const i = await done(kc); kc.shutdown(); return { i };
   };
   const a = await runCopy('no-egress-verdict', "if (!ev.allow || x.protocol !== 'https:') throw namedError('build_url_offhost',", "if (false) throw namedError('build_url_offhost',", '154.0.8011.0', 'redirect-away');
-  ok(hits.some((h) => h.host === 'evil.example.com'), 'control (a): a fetch without the egress verdict FOLLOWED the 302 to evil.example.com — exactly what ⑤ refuses', a);
+  ok(verdictOf(hits.some((h) => h.host === 'evil.example.com')), 'control (a): a fetch without the egress verdict FOLLOWED the 302 to evil.example.com — exactly what ⑤ refuses', a);
   const b = await runCopy('no-zip-shape', 'if (!shape.ok) throw namedError(shape.code, shape.error);', '', '154.0.8012.0', 'ok', chromeZip('154.0.8012.0', { extra: [{ name: 'chrome-linux64/../../escaped2', data: 'x' }] }));
-  ok(spyCalls('154.0.8012.0').includes('-q'), 'control (b): a keeper that skips the zip\'s shape RAN `unzip -q` on a ".." zip — exactly what ④ refuses', { b, spy: spyCalls('154.0.8012.0') });
+  ok(verdictOf(spyCalls('154.0.8012.0').includes('-q')), 'control (b): a keeper that skips the zip\'s shape RAN `unzip -q` on a ".." zip — exactly what ④ refuses', { b, spy: spyCalls('154.0.8012.0') });
   const c = await runCopy('no-md5', 'if (got !== sum.md5) throw namedError(', 'if (false) throw namedError(', '157.0.8079.0', 'flip');
-  ok(c.i && c.i.code !== 'build_check_failed' && spyCalls('157.0.8079.0').length > 0, 'control (c): a keeper that skips the md5 check handed the flipped bytes to unzip — exactly what ③ refuses at the check', c);
+  ok(gateOf(c.i) && c.i.code !== 'build_check_failed' && spyCalls('157.0.8079.0').length > 0, 'control (c): a keeper that skips the md5 check handed the flipped bytes to unzip — exactly what ③ refuses at the check', c);
 }
 try { kk.shutdown(); } catch { /* none */ }
 
@@ -363,24 +363,24 @@ console.log('— verify r1: a download newer than every build is the CLI\'s next
   const dp = kk.createProfile({ label: 'Default one' });
   const c = await kk.chromeBuildsAvailable({ lists: 'channels' });
   const can = c.channels.find((r) => r.channel === 'Canary'), dch = can.verdict.chips.find((x) => x.kind === 'default');
-  ok(dch && dch.users.includes('Default one') && dch.from === BB.listBuilds({ homeDir: HOME }).builds.find((b) => b.usable).version, 'a version newer than every build here: its row says it becomes the browser CLI\'s default (now the newest build), naming the default-choice profiles', can.verdict.chips);
+  ok(gateOf(dch) && gateOf(dch.users.includes('Default one')) && dch.from === BB.listBuilds({ homeDir: HOME }).builds.find((b) => b.usable).version, 'a version newer than every build here: its row says it becomes the browser CLI\'s default (now the newest build), naming the default-choice profiles', can.verdict.chips);
   await kk.installChromeBuild({ version: vNew });
   ok((await done()).done === vNew, 'it landed (now the newest build — the default of every default-choice profile)');
   kk._reg().profiles.find((p) => p.id === dp.id).lastChromiumMajor = 158;
   const e = await thr(() => kk.removeChromeBuild({ version: vNew }));
-  ok(e && e.code === 'build_in_use' && e.build.profiles.includes('Default one') && /default build of .*"Default one"/.test(e.message) && listed(vNew), 'Remove while a default-choice profile was last opened by it and every build left is older: refused by name', e && e.message);
+  ok(gateOf(e) && e.code === 'build_in_use' && gateOf(e.build.profiles.includes('Default one')) && gateOf(/default build of .*"Default one"/.test(e.message)) && verdictOf(listed(vNew)), 'Remove while a default-choice profile was last opened by it and every build left is older: refused by name', e && e.message);
   // verify r2 (kept): a conversation's KEPT browser launches the default too — its directory's `Last Version` stamp guards the removal
   { kk._reg().profiles.find((p) => p.id === dp.id).lastChromiumMajor = null; kk.shutdown();
     const ks = require('../src/server/browser-kept.js').create({ dataDir: DATA, log: quiet }), kd = (bk, stamp) => { const d = ks.dirOf(bk); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'Last Version'), stamp); ks.noteStart(bk, { hasDir: true, label: bk === 'bk-0000a157' ? 'Research chat' : 'Old chat' }); ks.noteStop(bk, { why: 'idle', hasDir: true }); };
     kd('bk-0000a157', vNew); kd('bk-0000a154', '100.0.1.1'); kk = mkKeeper(DATA, { kept: ks });
     const e3 = await thr(() => kk.removeChromeBuild({ version: vNew }));
-    ok(e3 && e3.code === 'build_in_use' && e3.build.profiles.includes('Research chat') && !e3.build.profiles.includes('Old chat') && !e3.build.profiles.includes('Default one') && /kept browser of "Research chat"/.test(e3.message) && listed(vNew), 'Remove while a conversation\'s kept browser was last opened by it (its `Last Version`) and every build left is older: refused by name (an older stamp is not counted)', e3 && e3.message);
+    ok(gateOf(e3) && e3.code === 'build_in_use' && gateOf(e3.build.profiles.includes('Research chat')) && !e3.build.profiles.includes('Old chat') && !e3.build.profiles.includes('Default one') && gateOf(/kept browser of "Research chat"/.test(e3.message)) && verdictOf(listed(vNew)), 'Remove while a conversation\'s kept browser was last opened by it (its `Last Version`) and every build left is older: refused by name (an older stamp is not counted)', e3 && e3.message);
     ks.shutdown(); }
   const real = fs.statfsSync;
   fs.statfsSync = (p, ...a) => { const r = real(p, ...a); return String(p).startsWith(ROOT) ? { ...r, bsize: 4096, bavail: Math.floor((24 << 20) / 4096) } : r; };
   try {
     const e2 = await thr(() => kk.installChromeBuild({ version: vBomb })); const i = e2 ? null : await done();
-    ok(!e2 && i.failed && i.code === 'disk' && !spyCalls(vBomb).includes('-q') && !listed(vBomb) && !leftovers(vBomb).length, 'a zip that declares more than the free space (64 MB, 24 MB free): refused `disk` BEFORE unzip -q, nothing kept', { e2: e2 && e2.code, i, calls: spyCalls(vBomb) });
+    ok(!e2 && gateOf(i.failed) && i.code === 'disk' && !spyCalls(vBomb).includes('-q') && !listed(vBomb) && !leftovers(vBomb).length, 'a zip that declares more than the free space (64 MB, 24 MB free): refused `disk` BEFORE unzip -q, nothing kept', { e2: e2 && e2.code, i, calls: spyCalls(vBomb) });
   } finally { fs.statfsSync = real; }
 }
 
@@ -406,7 +406,7 @@ module.exports = { create };
   const LINE = "  require('./browser-builds-keeper.js'),\n";
   const fakeAt = MUT.write('src/server/browser-acme-install.js', FAKE, 'acme');
   const withFake = (slotSrc) => slotSrc.replace(LINE, LINE + `  require(${JSON.stringify(fakeAt)}),\n`);
-  ok(slot0.includes(LINE) && withFake(slot0) !== slot0, 'the fake row is registered by ONE added INSTALLERS line (its file is the only other one)');
+  ok(gateOf(slot0.includes(LINE)) && withFake(slot0) !== slot0, 'the fake row is registered by ONE added INSTALLERS line (its file is the only other one)');
   const leg = async (label, patched) => {
     const KA = keeperWithInstalls(MUT, REPO, patched, label);
     const dir = path.join(ROOT, 'data-rows-' + label);
@@ -421,8 +421,8 @@ module.exports = { create };
     return { started: !!(started && started.ok), cfOther: cf.other, refusal: e && e.code, words: e && e.message, re, cf2Other: cf2.other };
   };
   const a = await leg('fake', { [SLOT]: withFake(slot0) });
-  ok(a.started && a.cfOther === 'acme', 'the fake holds THE slot: the Chrome-build row says other: acme', a);
-  ok(a.refusal === 'install_running' && /an install is already running \(the Acme tool\)/.test(a.words || ''), 'a Chrome download is refused in the fake row\'s own words', a);
+  ok(gateOf(a.started) && a.cfOther === 'acme', 'the fake holds THE slot: the Chrome-build row says other: acme', a);
+  ok(a.refusal === 'install_running' && verdictOf(/an install is already running \(the Acme tool\)/.test(a.words || '')), 'a Chrome download is refused in the fake row\'s own words', a);
   ok(a.re === 'running' && a.cf2Other === 'acme', 'a restart RE-ATTACHES to the fake\'s marker (its row is registered) — the slot stays busy', a);
   // controls: the slot / the refusal with their old kind lists restored ⇒ the fake is not known
   const oldGuard = withFake(slot0).replace('    const row = m ? rows.get(m.kind) : null;', "    const row = m && ['cli', 'cloak', 'chrome-build'].includes(m.kind) ? rows.get(m.kind) : null;");
@@ -432,4 +432,4 @@ module.exports = { create };
   ok(c.re === null && c.cf2Other !== 'acme' && !/the Acme tool/.test(c.words || ''), 'control: …the old lists drop the fake\'s marker at a restart (the slot free again) and misname it — exactly what ⑩ catches', c);
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

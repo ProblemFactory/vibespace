@@ -55,7 +55,7 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const PREV = 'data:text/html,<title>prev</title><h1>the page before VibeSpace</h1>';
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (no rebuild: overlays the built public/) ──
@@ -225,17 +225,17 @@ const dictate = async (words, { ms = 2400, during = null, after = null } = {}) =
 try {
   console.log('the owner\'s phone: 448×850, DPR 3, Android Chrome UA, touch');
   const env = await boot();
-  check('the phone: app.isMobile + isTouch, a microphone on the page (voice on), the incident recorder\'s op ring armed, the back sentinel standing', env.mobile && env.touch && !env.absent && env.rec && env.state?.vs === 1, env);
+  check('the phone: app.isMobile + isTouch, a microphone on the page (voice on), the incident recorder\'s op ring armed, the back sentinel standing', gateOf(env.mobile) && gateOf(env.touch) && !env.absent && gateOf(env.rec) && env.state?.vs === 1, env);
   await tapAt(224, 820); // a first touch (the page's activation)
 
   // ── ① THE OWNER'S SEQUENCE ──
   console.log('① the sheet → its row → Reply → the microphone → the stop held on 「0:02」 across a redraw');
   await openReply();
   const d1 = await dictate('Use the cold bucket');
-  check('①a the stop went down on the capsule\'s time and that span LEFT the page before the lift (a redraw under the finger — the field\'s shape), a tap still (< 500 ms)', d1.boxEl && d1.recording && d1.stop.downTag === 'span.voice-time' && d1.stop.gone && d1.stop.heldMs < 500, d1.stop);
-  check('①b the tray STAYS OPEN through the stop and the words landing', d1.open, d1);
+  check('①a the stop went down on the capsule\'s time and that span LEFT the page before the lift (a redraw under the finger — the field\'s shape), a tap still (< 500 ms)', gateOf(d1.boxEl) && gateOf(d1.recording) && d1.stop.downTag === 'span.voice-time' && gateOf(d1.stop.gone) && d1.stop.heldMs < 500, d1.stop);
+  check('①b the tray STAYS OPEN through the stop and the words landing', verdictOf(d1.open), d1);
   check('①c ONE request left the page (the stop was a stop — not the cancel of a microphone gone from the page)', d1.requests === 1, d1);
-  check('①d the words are in the reply box — the same box, still on the page and still focused (the keyboard stays up)', d1.landed && d1.same && d1.focused && d1.value === 'Use the cold bucket' && d1.idle, d1);
+  check('①d the words are in the reply box — the same box, still on the page and still focused (the keyboard stays up)', gateOf(d1.landed) && gateOf(d1.same) && gateOf(d1.focused) && d1.value === 'Use the cold bucket' && verdictOf(d1.idle), d1);
   check('①e the incident recorder\'s op ring holds no popup-hide', (await hides()).length === 0, await hides());
   await cdp('Page.captureScreenshot', { format: 'png' }).then((s) => fs.writeFileSync(path.join(SHOTS, 'tray-voice-phone.png'), Buffer.from(s.data, 'base64')));
 
@@ -245,14 +245,14 @@ try {
   await tap('.voice-chip-float:not(.hidden) .voice-chip-btn');
   await sleep(300);
   const c2 = await evalJs(`({ open: !document.getElementById('user-todos-popup').classList.contains('hidden'), value: document.querySelector(${JSON.stringify(BOX)})?.value ?? null })`);
-  check('②a the chip floats outside the tray (document.body); a tap on its Undo takes the words back and the tray STAYS OPEN', !!chip && !chip.inTray && c2.open && c2.value === '', { chip, c2 });
+  check('②a the chip floats outside the tray (document.body); a tap on its Undo takes the words back and the tray STAYS OPEN', !!chip && !chip.inTray && gateOf(c2.open) && c2.value === '', { chip, c2 });
   check('②b …no popup-hide in the op ring', (await hides()).length === 0, await hides());
 
   // ── ③ THE KEYBOARD ──
   console.log('③ the keyboard: the viewport shrinks mid-recording and grows back after the stop');
   const kb = (h) => cdp('Emulation.setDeviceMetricsOverride', { width: 448, height: h, deviceScaleFactor: 3, mobile: true });
   const d3 = await dictate('Ship it on Friday', { during: () => kb(500), after: async () => { await kb(850); } });
-  check('③ the keyboard up (850 → 500) while recording and folding (→ 850) after the stop: the tray stays open, ONE request, the words land in the same focused box', d3.open && d3.requests === 1 && d3.landed && d3.same && d3.value.includes('Ship it on Friday') && (await hides()).length === 0, d3);
+  check('③ the keyboard up (850 → 500) while recording and folding (→ 850) after the stop: the tray stays open, ONE request, the words land in the same focused box', gateOf(d3.open) && d3.requests === 1 && gateOf(d3.landed) && gateOf(d3.same) && gateOf(d3.value.includes('Ship it on Friday')) && (await hides()).length === 0, d3);
 
   // ── ④ THE CLOSERS STILL CLOSE — each says why ──
   console.log('④ Escape, a real outside tap and the back still close — and name their cause');
@@ -260,10 +260,10 @@ try {
   await cdp('Input.insertText', { text: 'draft words' });
   await key('Escape');
   const e1 = await evalJs(`({ open: !document.getElementById('user-todos-popup').classList.contains('hidden'), box: !!document.querySelector(${JSON.stringify(BOX)}) })`);
-  check('④a Escape in the reply box FOLDS it (the box gone) and the tray stays open — no popup-hide', e1.open && !e1.box && (await hides()).length === 0, e1);
+  check('④a Escape in the reply box FOLDS it (the box gone) and the tray stays open — no popup-hide', gateOf(e1.open) && !e1.box && (await hides()).length === 0, e1);
   const out = await evalJs(`(() => { const p = document.getElementById('user-todos-popup').getBoundingClientRect(); const y = Math.min(innerHeight - 12, Math.max(p.bottom + 40, innerHeight - 40)); const el = document.elementFromPoint(224, y); return { y, below: y > p.bottom, el: el ? (el.id || el.className || el.tagName) : null, inTray: !!(el && el.closest('#user-todos-popup')), control: !!(el && el.closest('button, a[href], input, textarea, .ut-item')) }; })()`);
   await tapAt(224, out.y);
-  check('④b a real tap OUTSIDE the tray (the page behind, no control under it) closes it — why \'outside\' in the op ring', out.below && !out.inTray && !out.control && !(await trayOpen()) && JSON.stringify(await hides()) === JSON.stringify([{ op: 'popup-hide', panel: 'for-you', why: 'outside' }]), { out, hides: await hides() });
+  check('④b a real tap OUTSIDE the tray (the page behind, no control under it) closes it — why \'outside\' in the op ring', gateOf(out.below) && !out.inTray && !out.control && !(await trayOpen()) && JSON.stringify(await hides()) === JSON.stringify([{ op: 'popup-hide', panel: 'for-you', why: 'outside' }]), { out, hides: await hides() });
   await openReply();
   const draft = await evalJs(`document.querySelector(${JSON.stringify(BOX)})?.value ?? null`);
   check('④c …and the folded box\'s draft is back on the next Reply (a closed tray keeps nothing but the drafts)', draft === 'draft words', draft);
@@ -275,7 +275,7 @@ try {
   for (const type of ['rawKeyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, modifiers: 1, key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37 }); // the browser's own back (Alt+Left = NavigationController::GoBack)
   await sleep(800);
   const h = await cdp('Page.getNavigationHistory');
-  check('④e the browser\'s back closes the tray — why \'back\' — and VibeSpace stays', opened && !(await trayOpen()) && (await hides()).at(-1)?.why === 'back' && h.entries[h.currentIndex].url.startsWith(ORIGIN), { opened, hides: await hides(), url: h.entries[h.currentIndex].url });
+  check('④e the browser\'s back closes the tray — why \'back\' — and VibeSpace stays', gateOf(opened) && !(await trayOpen()) && (await hides()).at(-1)?.why === 'back' && verdictOf(h.entries[h.currentIndex].url.startsWith(ORIGIN)), { opened, hides: await hides(), url: h.entries[h.currentIndex].url });
   check('no page errors (the real bundle)', pageErrors.length === 0, pageErrors.slice(0, 5));
 
   // ── ⑤ RED CONTROL: the base's closer, from a patched copy of today's utils.js ──
@@ -287,7 +287,7 @@ try {
     ['seen: where(e.target, e) };', 'target: e.target };'], // the base kept the down TARGET…
     ['judge(p.seen, e);', 'judge(where(p.target, e), e);'], // …and measured it at the LIFT
   ];
-  check('the three edits the control makes are each spelled exactly once in utils.js', EDITS.every(([a]) => src.split(a).length === 2));
+  check('the three edits the control makes are each spelled exactly once in utils.js', verdictOf(EDITS.every(([a]) => src.split(a).length === 2)));
   fs.writeFileSync(U, EDITS.reduce((s, [a, b]) => s.replace(a, b), src));
   const esbuild = path.join(repo, 'node_modules', '.bin', 'esbuild');
   execFileSync(esbuild, ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify', '--log-level=error'], { cwd: wt, stdio: 'ignore' });
@@ -295,7 +295,7 @@ try {
   await openReply();
   const r1 = await dictate('Use the cold bucket');
   await sleep(600); // the recording's tick (four times a second) finds its microphone gone
-  check('CONTROL ① the base closer: the same held stop CLOSES the tray (why \'outside\' — the op ring names the closer the incident could not), NO request leaves the page, the words never land', r1.stop.gone && !r1.open && !r1.landed && r1.requests === 0 && (await hides()).some((x) => x.why === 'outside'), { r1, hides: await hides() });
+  check('CONTROL ① the base closer: the same held stop CLOSES the tray (why \'outside\' — the op ring names the closer the incident could not), NO request leaves the page, the words never land', gateOf(r1.stop.gone) && !r1.open && !r1.landed && r1.requests === 0 && verdictOf((await hides()).some((x) => x.why === 'outside')), { r1, hides: await hides() });
   await openReply();
   const before2 = await evalJs('window.__dictates');
   await tap(MIC); await waitFor(`!!document.querySelector(${JSON.stringify(`${MIC}.recording`)})`, 3000); await sleep(600);
@@ -304,13 +304,13 @@ try {
   await waitFor('!!document.querySelector(".voice-chip-float:not(.hidden) .voice-chip-btn")', 5000);
   await evalJs('window.__ops.length = 0; true');
   await tap('.voice-chip-float:not(.hidden) .voice-chip-btn');
-  check('CONTROL ② the base closer: a tap on the floating chip CLOSES the tray (why \'outside\')', (await evalJs('window.__dictates')) === before2 + 1 && !(await trayOpen()) && (await hides()).some((x) => x.why === 'outside'), await hides());
+  check('CONTROL ② the base closer: a tap on the floating chip CLOSES the tray (why \'outside\')', (await evalJs('window.__dictates')) === before2 + 1 && !(await trayOpen()) && verdictOf((await hides()).some((x) => x.why === 'outside')), await hides());
   fs.writeFileSync(U, src);
   fs.copyFileSync(path.join(repo, 'public', 'bundle.js'), path.join(wt, 'public', 'bundle.js'));
   await boot(); await tapAt(224, 820);
   await openReply();
   const r3 = await dictate('Use the cold bucket');
-  check('the real bundle back: the same held stop keeps the tray open and the words land (the fix, not the reload)', r3.stop.gone && r3.open && r3.requests === 1 && r3.landed && (await hides()).length === 0, r3);
+  check('the real bundle back: the same held stop keeps the tray open and the words land (the fix, not the reload)', gateOf(r3.stop.gone) && gateOf(r3.open) && r3.requests === 1 && gateOf(r3.landed) && (await hides()).length === 0, r3);
 } catch (err) {
   fail++; console.log('  ✗ the suite threw: ' + (err?.stack || err));
 }
@@ -320,4 +320,4 @@ console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass}
 try { sock.close(); } catch { }
 if (chrome.exitCode === null) { const gone = new Promise((r) => chrome.once('exit', r)); chrome.kill('SIGKILL'); await Promise.race([gone, sleep(3000)]); }
 await sleep(300);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

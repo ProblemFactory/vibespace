@@ -26,7 +26,7 @@ const BASE = 'fd4acdc61';   // 2.369.397 — the reply road held mid-turn
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-reply-door-'));
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 let passed = 0, failed = 0;
-const ok = (c, msg) => { if (c) { passed++; console.log('  ✓ ' + msg); } else { failed++; console.log('  ✗ ' + msg); } return !!c; };
+const ok = (c, msg) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log('  ✓ ' + msg); } else { failed++; console.log('  ✗ ' + msg); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -137,7 +137,7 @@ const LEGS = {
 };
 
 say('this tree');
-for (const leg of Object.keys(LEGS)) { let r; try { r = await LEGS[leg](REPO); } catch (e) { r = { ok: false, detail: 'threw: ' + (e && e.message) }; } ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of Object.keys(LEGS)) { let r; try { r = await LEGS[leg](REPO); } catch (e) { r = { ok: false, detail: 'threw: ' + (e && e.message) }; } ok(verdictOf(r.ok), `${leg}: ${r.detail}`); }
 
 // §4 RED CONTROLS — the release (a git archive; a COUNTED skip without it) and a patch the suite carries
 let skipped = 0;
@@ -162,4 +162,4 @@ let skipped = 0;
   }
 }
 say(failed ? `\n${failed} FAILED (${passed} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${passed}${skipped ? `; ${skipped} red control SKIPPED — not in this clone` : ''})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

@@ -41,7 +41,7 @@ const CB = require('../src/cache-bounds.js');
 const EST = require('../src/usage-estimator.js');
 const UA = require('../src/usage-anchors.js');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; if (process.env.VERBOSE) console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; if (process.env.VERBOSE) console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 const tmp = scratchDir('ledger-boot-load');
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
 const UH_REL = 'src/usage-history.js', uhSrc = fs.readFileSync(path.join(REPO, UH_REL), 'utf8');
@@ -131,11 +131,11 @@ async function firstSecond(UH, flag) {
 }
 {
   const a = await firstSecond(UsageHistory, true), bytes = shards(fx.dir).reduce((t, f) => t + fs.statSync(path.join(ledgerDir(fx.dir), f)).size, 0);
-  ok(a.loading && a.loading.booting === true && a.loading.bytesLeft === bytes && a.loadingAfter && a.loadingAfter.booting, `① ledgerLoading() before any other ask: ${JSON.stringify(a.loading)} — the bytes left = the ledger's ${bytes}`);
+  ok(gateOf(a.loading) && a.loading.booting === true && a.loading.bytesLeft === bytes && gateOf(a.loadingAfter) && verdictOf(a.loadingAfter.booting), `① ledgerLoading() before any other ask: ${JSON.stringify(a.loading)} — the bytes left = the ledger's ${bytes}`);
   ok(a.rows === 0 && a.count === 0 && a.knows === false && a.wm === 0 && a.hosts === 0, `① the readers answer from the empty «loading» cache: rows ${a.rows}, count ${a.count}, knows ${a.knows}, watermarks ${a.wm}, host accounts ${a.hosts}`);
-  ok(a.cost && a.cost.partial === true, `① a cost sum says partial (never a final 0): ${JSON.stringify(a.cost).slice(0, 160)}`);
+  ok(gateOf(a.cost) && a.cost.partial === true, `① a cost sum says partial (never a final 0): ${JSON.stringify(a.cost).slice(0, 160)}`);
   ok(a.meter.take === 0 && a.meter.hash === 0 && a.meter.firstLoads === 0, `① NO line parsed (${a.meter.take}) or hashed (${a.meter.hash}) on the loop, no load pass (${a.meter.firstLoads}), all asked in ${a.ms} ms`);
-  ok(a.after.count === fx.rows && a.after.loading === null && a.after.said.some((l) => /the ledger's first load ran in the fold worker: \d+ rows read and hashed in [\d.]+ s off the loop, handed over in [\d.]+ s \(\d+ chunks, one a turn\)/.test(l)), `① then the worker's load lands: ${a.after.count} rows, loading ${JSON.stringify(a.after.loading)}; «${a.after.said.find((l) => /first load/.test(l)) || 'NO LINE'}»`);
+  ok(a.after.count === fx.rows && a.after.loading === null && verdictOf(a.after.said.some((l) => /the ledger's first load ran in the fold worker: \d+ rows read and hashed in [\d.]+ s off the loop, handed over in [\d.]+ s \(\d+ chunks, one a turn\)/.test(l))), `① then the worker's load lands: ${a.after.count} rows, loading ${JSON.stringify(a.after.loading)}; «${a.after.said.find((l) => /first load/.test(l)) || 'NO LINE'}»`);
   const R = await firstSecond(UsageHistory, false);
   ok(R.meter.take === fx.rows && R.meter.hash >= fx.rows && R.loading === null && R.count === fx.rows, `control (the flag off — the base road): the first ask parsed ${R.meter.take} lines and hashed ${R.meter.hash} on the loop, not loading ⇒ RED`);
 }
@@ -147,8 +147,8 @@ console.log('② the numbers after the load = a synchronous load\'s');
   rowsOf(u);
   await quiet(() => u.bootLoadSettled());
   const c = u._evCache, ref = syncAt(d, c.cutoff, u._ledgerWindowMs()), r = ref._evCache;
-  ok(c.whole && !c.booting && digest(c) === digest(r) && c.events.length + c.cold.n === fx.rows && c.cold.n > 1000 && c.events.length > 1000, `② byte for byte the synchronous load: ${digest(c)} = ${digest(r)} (hot ${c.events.length} + cold ${c.cold.n} = ${fx.rows})`);
-  ok(markHash(c) === markHash(r) && c.hrh.every((x) => Number.isFinite(x)), `② the whole-line staleness marks equal (hot hrh + cold rh: ${markHash(c)} = ${markHash(r)})`);
+  ok(gateOf(c.whole) && !c.booting && digest(c) === digest(r) && c.events.length + c.cold.n === fx.rows && c.cold.n > 1000 && c.events.length > 1000, `② byte for byte the synchronous load: ${digest(c)} = ${digest(r)} (hot ${c.events.length} + cold ${c.cold.n} = ${fx.rows})`);
+  ok(markHash(c) === markHash(r) && verdictOf(c.hrh.every((x) => Number.isFinite(x))), `② the whole-line staleness marks equal (hot hrh + cold rh: ${markHash(c)} = ${markHash(r)})`);
   ok(c.rids.size === r.rids.size && idSet(c.rids) === idSet(r.rids) && idSet(c.mids) === idSet(r.mids) && c.rids.size > 0, `② the dedup sets equal: ${c.rids.size} rids (${idSet(c.rids)}), ${c.mids.size} mids (${idSet(c.mids)})`);
   const fresh = base(UsageHistory, d); fresh.ledgerWindowMs = u._ledgerWindowMs();
   const COST12 = (k, v) => (k === 'cost' && typeof v === 'number' ? Number(v.toPrecision(12)) : v);   // B-360d unit 1: a cost to 12 significant digits (cells vs rows sum in another order — law 2's 1e-9)
@@ -156,7 +156,7 @@ console.log('② the numbers after the load = a synchronous load\'s');
   ok(t1 === t2 && JSON.parse(t1).requests === fx.rows, `② the route's totals = a fresh instance's synchronous fold (${JSON.parse(t1).requests} requests, $${JSON.parse(t1).cost?.toFixed?.(2)})`);
   const acct = aRow.acct || null, s1 = UA.costBetweenMulti(u, [acct], NOW - 30 * 864e5, NOW), s2 = UA.costBetweenMulti(fresh, [acct], NOW - 30 * 864e5, NOW);
   ok(JSON.stringify(s1) === JSON.stringify(s2) && !s1.partial, `② a cost sum equals (${acct}: ${JSON.stringify(s1).slice(0, 120)})`);
-  ok(u.ledgerKnowsId(oldRow.rid) && u.ledgerKnowsId(aRow.rid), '② a cold row and a hot row are found by id (the moved indexes)');
+  ok(gateOf(u.ledgerKnowsId(oldRow.rid)) && verdictOf(u.ledgerKnowsId(aRow.rid)), '② a cold row and a hot row are found by id (the moved indexes)');
 }
 
 // ── ③ ROWS THAT ARRIVE DURING THE LOAD ───────────────────────────────────────────────────────────────────────────────
@@ -186,8 +186,8 @@ async function during(UH, tag) {
 }
 {
   const r = await during(UsageHistory, 'a');
-  ok(r.between.length === 2 && r.between.every((b) => b.rows === 0 && b.loading && b.knows.every((k) => k === false)), `③ a reader between the append and the swap sees NONE of them (the «loading» cache): ${JSON.stringify(r.between.map((b) => [b.rows, b.knows]))}`);
-  ok(r.between[0].first && r.between[0].first.appended === 1 && r.between[1].again && r.between[1].again.appended === 0 && r.between[1].again.duplicates === 1, `③ the device's batch appended once, its re-send costs zero bytes (${JSON.stringify(r.between[0].first)} · ${JSON.stringify(r.between[1].again)})`);
+  ok(r.between.length === 2 && verdictOf(r.between.every((b) => b.rows === 0 && b.loading && b.knows.every((k) => k === false))), `③ a reader between the append and the swap sees NONE of them (the «loading» cache): ${JSON.stringify(r.between.map((b) => [b.rows, b.knows]))}`);
+  ok(gateOf(r.between[0].first) && r.between[0].first.appended === 1 && gateOf(r.between[1].again) && r.between[1].again.appended === 0 && r.between[1].again.duplicates === 1, `③ the device's batch appended once, its re-send costs zero bytes (${JSON.stringify(r.between[0].first)} · ${JSON.stringify(r.between[1].again)})`);
   ok(r.n.before === 1 && r.n.after === 1 && r.n.dev === 1 && r.n.rewritten === 1 && r.total === fx.rows + 3, `③ after the swap each is in the cache ONCE: before the worker's read ${r.n.before}, after it ${r.n.after}, the device's ${r.n.dev}, the re-written line's rid ${r.n.rewritten}; ${r.total} rows = ${fx.rows} + 3`);
   // usage-cpu U5: the swap's absorb re-checks the files too — the planted bug keeps the re-check time AND takes nothing appended
   const kept = uhSrc.replace('_swapCache(next) { next.checkedAt = 0; this._evCache = next; this.ledgerGen = (this.ledgerGen || 0) + 1; this._absorbStepped(); }', '_swapCache(next) { next.checkedAt = Date.now(); this._evCache = next; this.ledgerGen = (this.ledgerGen || 0) + 1; }');
@@ -234,12 +234,12 @@ async function failing(UH, how, { short = false } = {}) {
 }
 for (const how of Object.keys(DIES)) {
   const r = await failing(UsageHistory, how);
-  ok(r.warns.length === 1 && /\[usage\] the ledger's first load in the fold worker failed \((the fold worker exited \(9\)|the fold worker ran out of memory|planted: the shard could not be read)\) — the usage figures say «loading»; it is tried again after 5 s, then doubling to ≤ 2 min — never parsed on the main loop/.test(r.warns[0]) && !/previous|60 s/.test(r.warns[0]) && r.events.length === 1, `④ ${how}: said ONCE by name (${r.warns.length} line, ${r.events.length} event): «${(r.warns[0] || '').slice(0, 200)}»`);
+  ok(r.warns.length === 1 && gateOf(/\[usage\] the ledger's first load in the fold worker failed \((the fold worker exited \(9\)|the fold worker ran out of memory|planted: the shard could not be read)\) — the usage figures say «loading»; it is tried again after 5 s, then doubling to ≤ 2 min — never parsed on the main loop/.test(r.warns[0])) && !/previous|60 s/.test(r.warns[0]) && r.events.length === 1, `④ ${how}: said ONCE by name (${r.warns.length} line, ${r.events.length} event): «${(r.warns[0] || '').slice(0, 200)}»`);
   ok(r.meter.take === 0 && r.meter.hash === 0 && r.meter.firstLoads === 0, `④ ${how}: no line read on the loop through three tries (${r.meter.take} parsed, ${r.meter.hash} hashed, ${r.meter.firstLoads} load passes)`);
-  ok(r.inBackoff.loading && r.inBackoff.loading.booting && r.inBackoff.rows === 0 && r.inBackoff.workers === 1 && r.retried === 2, `④ ${how}: inside the backoff the readers say «loading» and start no worker (${r.inBackoff.workers}); the next ask after it tries once (${r.retried} workers)`);
+  ok(gateOf(r.inBackoff.loading) && gateOf(r.inBackoff.loading.booting) && r.inBackoff.rows === 0 && r.inBackoff.workers === 1 && r.retried === 2, `④ ${how}: inside the backoff the readers say «loading» and start no worker (${r.inBackoff.workers}); the next ask after it tries once (${r.retried} workers)`);
   ok(r.backoff1 > 4500 && r.backoff1 <= 5000 && r.backoff2 > 9500 && r.backoff2 <= 10000, `④ ${how}: the backoff doubles — ${r.backoff1} ms, then ${r.backoff2} ms`);
-  ok(r.agg && r.agg.code === 'LOADING' && /the usage ledger is still loading — its first load in the fold worker failed \(.+\); it is tried again at the next ask after \d+ s/.test(r.agg.message) && r.rid && r.rid.code === 'LOADING', `④ ${how}: an async reader is told LOADING (the route says it, the popup says «still loading»): «${r.agg && r.agg.message.slice(0, 160)}»`);
-  ok(r.landed && r.workers === 3 && r.count === fx.rows && r.said.some((l) => /first load ran in the fold worker \(try 3; the failure said above\): \d+ rows/.test(l)), `④ ${how}: a waiter asked again by itself when the backoff ended — try 3 landed (${r.count} rows, ${r.workers} workers): «${(r.said.find((l) => /first load ran/.test(l)) || 'NO LINE').slice(0, 140)}»`);
+  ok(gateOf(r.agg) && r.agg.code === 'LOADING' && gateOf(/the usage ledger is still loading — its first load in the fold worker failed \(.+\); it is tried again at the next ask after \d+ s/.test(r.agg.message)) && gateOf(r.rid) && r.rid.code === 'LOADING', `④ ${how}: an async reader is told LOADING (the route says it, the popup says «still loading»): «${r.agg && r.agg.message.slice(0, 160)}»`);
+  ok(gateOf(r.landed) && r.workers === 3 && r.count === fx.rows && verdictOf(r.said.some((l) => /first load ran in the fold worker \(try 3; the failure said above\): \d+ rows/.test(l))), `④ ${how}: a waiter asked again by itself when the backoff ended — try 3 landed (${r.count} rows, ${r.workers} workers): «${(r.said.find((l) => /first load ran/.test(l)) || 'NO LINE').slice(0, 140)}»`);
 }
 {
   const fallback = uhSrc.replace('b.job = null; b.fails++;', 'b.job = null; b.fails++; this.firstLoadInWorker = false; this._rebuildOnLoop();');
@@ -268,7 +268,7 @@ async function pool(mutate) {
   const r = await pool();
   ok(r.run === 'waiting' && r.held[0] === true && r.held[1] === true && r.heldRows === 0, `⑤ while it loads the sweep waits (${r.run}) and the automatic decision is held at the wall (${r.held})`);
   ok(r.wholes === 1 && r.at.whole >= 400 && r.at.whole >= r.at.swap && r.wholeRows === fx.rows && r.wholeLoading === null, `⑤ the load lands at +${r.at.swap} ms ⇒ the pools are decided again ONCE (onWhole ×${r.wholes} at +${r.at.whole} ms), on the whole ledger (${r.wholeRows} rows)`);
-  ok(r.sweeps === 1 && r.sweptRows === fx.rows && r.said.length === 1 && /ledger still loading \(\d+ MiB left\)/.test(r.said[0]), `⑤ the queued sweep ran once on the whole ledger (${r.sweptRows} rows); said once: «${r.said[0]}»`);
+  ok(r.sweeps === 1 && r.sweptRows === fx.rows && r.said.length === 1 && verdictOf(/ledger still loading \(\d+ MiB left\)/.test(r.said[0])), `⑤ the queued sweep ran once on the whole ledger (${r.sweptRows} rows); said once: «${r.said[0]}»`);
   const R = await pool((u) => { u._warmLoading = () => null; });
   ok(R.held[0] === false && R.heldRows === 0, `control (a ledger that does not say it is loading): the wall is decided on an empty ledger (held ${R.held[0]}, ${R.heldRows} rows) ⇒ RED`);
 }
@@ -281,9 +281,9 @@ console.log('⑥ the wiring: the hub\'s ledger has the flag; the migration keeps
 {
   const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const news = [...server.matchAll(/new UsageHistory\(\{([\s\S]*?)\n\}\);/g)];
-  ok(news.length === 1 && /firstLoadInWorker: !bootTrace\.syncControl\b/.test(news[0][1]) && /syncControl: env\.VIBESPACE_BOOT_TRACE_SYNC === '1'/.test(fs.readFileSync(path.join(REPO, 'src/server/boot-trace.js'), 'utf8')), `⑥ server.js builds ONE ledger, with the first load in the worker (all but the boot-trace control boot, VIBESPACE_BOOT_TRACE_SYNC=1 — test-boot-loop-hold's RED: the one-tick warm) (${news.length})`);
+  ok(news.length === 1 && gateOf(/firstLoadInWorker: !bootTrace\.syncControl\b/.test(news[0][1])) && verdictOf(/syncControl: env\.VIBESPACE_BOOT_TRACE_SYNC === '1'/.test(fs.readFileSync(path.join(REPO, 'src/server/boot-trace.js'), 'utf8'))), `⑥ server.js builds ONE ledger, with the first load in the worker (all but the boot-trace control boot, VIBESPACE_BOOT_TRACE_SYNC=1 — test-boot-loop-hold's RED: the one-tick warm) (${news.length})`);
   const backfill = fs.readFileSync(path.join(REPO, 'src/ledger-slot-backfill.js'), 'utf8');
-  ok(/new UsageHistory\(\{ dataDir, homeDir: path\.join\(dataDir, '\.no-home'\) \}\)/.test(backfill) && !/firstLoadInWorker/.test(backfill), "⑥ the migration's own instance (ledger-slot-backfill) keeps the named synchronous load (no flag)");
+  ok(gateOf(/new UsageHistory\(\{ dataDir, homeDir: path\.join\(dataDir, '\.no-home'\) \}\)/.test(backfill)) && !/firstLoadInWorker/.test(backfill), "⑥ the migration's own instance (ledger-slot-backfill) keeps the named synchronous load (no flag)");
   // the migrations run INSIDE the listen callback as one of its top-level statements — its synchronous step, before the loop
   // serves the first request — and nothing else in the product calls the registry or the backfill
   const ast = acorn.parse(server, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true });
@@ -291,9 +291,9 @@ console.log('⑥ the wiring: the hub\'s ledger has the flag; the migration keeps
   (function walk(n) { if (!n || typeof n.type !== 'string' || listenCb) return; if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.property.name === 'listen' && n.callee.object.name === 'hub') { const f = n.arguments.at(-1); if (f && /Function/.test(f.type)) { listenCb = f; return; } } for (const k of Object.keys(n)) { const v = n[k]; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') walk(v); } })(ast);
   const top = listenCb ? listenCb.body.body.map((s) => server.slice(s.start, s.end)) : [];
   const at = top.findIndex((s) => /require\('\.\/src\/server\/migrations\.js'\)\.create\(\{[\s\S]*\}\)\.runLocalMigrations\(\)/.test(s));
-  ok(listenCb && !listenCb.async && at >= 0 && !top.slice(0, at).some((s) => /\bawait\b/.test(s)), `⑥ the migrations run in the listen callback's synchronous step (statement ${at} of ${top.length}: create(…).runLocalMigrations(), no await before it)`);
+  ok(gateOf(listenCb) && !listenCb.async && at >= 0 && !top.slice(0, at).some((s) => /\bawait\b/.test(s)), `⑥ the migrations run in the listen callback's synchronous step (statement ${at} of ${top.length}: create(…).runLocalMigrations(), no await before it)`);
   const mig = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf8'), rl = mig.slice(mig.indexOf('  function runLocalMigrations('), mig.indexOf('  function runLocalMigrations(') + 4000);   // lane lg-store-writes (a meeting met at its gate): the U4/U5 cure's landing by change count grew the function past 2000 chars
-  ok(/const results = runMigrations\(/.test(rl) && /\n {4}return results;\n {2}\}/.test(rl), '⑥ runLocalMigrations is synchronous: the registry\'s results are read and returned in the same call');
+  ok(gateOf(/const results = runMigrations\(/.test(rl)) && verdictOf(/\n {4}return results;\n {2}\}/.test(rl)), '⑥ runLocalMigrations is synchronous: the registry\'s results are read and returned in the same call');
   // THE CALLERS, by call expression (acorn: a comment never counts) — the sync road's three names, in all of src/ + server.js
   const NAMES = new Set(['backfillLedgerBySlot', 'runLocalMigrations', 'learnNow']), WANT = { 'server.js runLocalMigrations': 1, 'src/server/migrations.js backfillLedgerBySlot': 1, 'src/ledger-slot-backfill.js learnNow': 1, 'src/server/migrations.js runLocalMigrations': 1 };   // + B-44f3: the rows For you refused while held run again at its read (migrations.js sayFailures — an async step for those rows only; the ledger backfill touches no For-you item)
   const files = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => /\.(c|m)?js$/.test(f)).map((f) => path.join('src', f)).concat([SERVER_SOURCE]);
@@ -308,8 +308,8 @@ console.log('⑥ the wiring: the hub\'s ledger has the flag; the migration keeps
   ok(JSON.stringify(Object.entries(got).sort()) === JSON.stringify(Object.entries(WANT).sort()), `⑥ the synchronous road has its three calls and no other: ${JSON.stringify(got)}`);
   const routes = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8'), chat = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-  ok(/if \(e && e\.code === 'LOADING'\) return res\.json\(\{ found: false, loading: true \}\);/.test(routes) && /\} else if \(r\?\.loading\) \{[\s\S]{0,300}t\('the usage ledger is still loading'\)/.test(chat) && /"the usage ledger is still loading": "/.test(zh) && /"the usage ledger is still loading": "/.test(ja), '⑥ rid-info answers {found:false, loading:true} on LOADING; the popup says «the usage ledger is still loading» (zh, ja), never «not in the ledger yet»');
+  ok(gateOf(/if \(e && e\.code === 'LOADING'\) return res\.json\(\{ found: false, loading: true \}\);/.test(routes)) && gateOf(/\} else if \(r\?\.loading\) \{[\s\S]{0,300}t\('the usage ledger is still loading'\)/.test(chat)) && gateOf(/"the usage ledger is still loading": "/.test(zh)) && verdictOf(/"the usage ledger is still loading": "/.test(ja)), '⑥ rid-info answers {found:false, loading:true} on LOADING; the popup says «the usage ledger is still loading» (zh, ja), never «not in the ledger yet»');
 }
 
 console.log(fail ? `\n✗ ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

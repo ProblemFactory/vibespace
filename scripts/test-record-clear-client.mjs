@@ -55,7 +55,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 const CONV_CWD = `/opt/record-clear-client-conv-${process.pid}`; // outside the /tmp/vs-* shape (discovery refuses a fixture cwd)
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
 
@@ -381,7 +381,7 @@ async function openSurfaces(P, r) {
   // verify r6 (the owner's own path): the owner folds the job's name family and opens it again — the fold map is persisted
   // in the SERVER's user state (GET /api/user-state, the user-state-updated broadcast, a config export)
   const folded = await P.evalJs(`(async () => { const part = ${J(PARTS[r][1])}; const pick = () => [...document.querySelectorAll('.jobs-win .jobs-group')].find((b) => (b.textContent || '').includes(part)); const g = pick(); if (!g) return false; g.click(); await new Promise((res) => setTimeout(res, 800)); const g2 = pick(); if (g2) g2.click(); await new Promise((res) => setTimeout(res, 800)); return true; })()`);
-  check(`round ${r}: the owner folded and re-opened the job's family (the fold map is persisted in the server's user state)`, folded && !!(await api('/api/user-state')).jobsPanelFolds);
+  check(`round ${r}: the owner folded and re-opened the job's family (the fold map is persisted in the server's user state)`, gateOf(folded) && !!(await api('/api/user-state')).jobsPanelFolds);
   // the For-you item's ARRIVAL, through the model's own broadcast handler (a snapshot without it, then the real one): the live toast + the device history
   await P.evalJs(`(async () => { const d = await (await fetch('/api/user-todos')).json(); const T = d.todos; const without = { ...T, open: T.open.filter((i) => i.id !== ${J(TODO[r])} && i.id !== ${J(JTODO[r])}) }; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos: without }`, "app.ws.globalHandlers")} await new Promise((res) => setTimeout(res, 150)); ${relayBroadcastJs(`{ type: 'user-todos-updated', todos: T }`, "app.ws.globalHandlers")} return true; })()`);
   // the For-you popup open
@@ -441,7 +441,7 @@ const clearAll = async (r, label = '') => {
   const heldAll = () => P1.evalJs(`window.__rcHold.q.map((x) => x.url)`);
   let held = [];
   for (let i = 0; i < 100; i++) { held = await heldAll(); if (want.every((w) => held.some((u) => u === w || u.startsWith(w + '?')))) break; await sleep(150); }
-  check(`${label}the clear races STALE ANSWERS: ${held.length} GETs of five-store routes answered before it are held in client 1 (every reconnect resync, the re-renders, the group window's first page)`, want.every((w) => held.some((u) => u === w || u.startsWith(w + '?'))), { held, missing: want.filter((w) => !held.some((u) => u === w || u.startsWith(w + '?'))) });
+  check(`${label}the clear races STALE ANSWERS: ${held.length} GETs of five-store routes answered before it are held in client 1 (every reconnect resync, the re-renders, the group window's first page)`, verdictOf(want.every((w) => held.some((u) => u === w || u.startsWith(w + '?')))), { held, missing: want.filter((w) => !held.some((u) => u === w || u.startsWith(w + '?'))) });
   const staleN = held.length;
   await P1.waitFor(`app.ws.connected`, 10000);
   await sleep(600);
@@ -469,26 +469,26 @@ const clearAll = async (r, label = '') => {
 try {
   console.log('① client 1 (en) opens every surface; client 2 (zh) replays the workspace');
   await page(P1);
-  check('the stopped conversation is listed (Session Properties + the sidebar card have a session to show)', await P1.waitFor(`(app.sidebar._allSessions || []).some((s) => app.sidebar._getSessionStateKey(s) === ${J(K)})`, 20000));
+  check('the stopped conversation is listed (Session Properties + the sidebar card have a session to show)', verdictOf(await P1.waitFor(`(app.sidebar._allSessions || []).some((s) => app.sidebar._getSessionStateKey(s) === ${J(K)})`, 20000)));
   await openSurfaces(P1, 'A');
   const selFocused = await P1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._sessionPropsKey); const s = w && w.element.querySelector('select'); if (s) s.focus(); return !!s && document.activeElement === s; })()`);
-  check('Session Properties: a select is focused (its render guard armed)', selFocused);
-  check('client 1 saves its layout (the shared workspace)', await saveLayout(P1));
+  check('Session Properties: a select is focused (its render guard armed)', verdictOf(selFocused));
+  check('client 1 saves its layout (the shared workspace)', verdictOf(await saveLayout(P1)));
   const { t: t2, P: P2 } = await newPage();
   await page(P2, { lang: 'zh' });
-  check('client 2 (zh) replays the windows (task log, detail, jobs, job input, channels, group, properties, For you)', await P2.waitFor(`['openTaskLog', 'openTaskDetail', 'openJobs', 'openJobInteract', 'openChannels', 'openChannel', 'openSessionProps', 'openInbox'].every((a) => [...app.wm.windows.values()].some((w) => w._openSpec && w._openSpec.action === a))`, 20000),
+  check('client 2 (zh) replays the windows (task log, detail, jobs, job input, channels, group, properties, For you)', verdictOf(await P2.waitFor(`['openTaskLog', 'openTaskDetail', 'openJobs', 'openJobInteract', 'openChannels', 'openChannel', 'openSessionProps', 'openInbox'].every((a) => [...app.wm.windows.values()].some((w) => w._openSpec && w._openSpec.action === a))`, 20000)),
     await P2.evalJs(`[...app.wm.windows.values()].map((w) => w._openSpec && w._openSpec.action)`));
   // client 2 arms the OTHER guard: its Task Group detail window's title field focused (one focus per page — client 1's is on the select)
-  check('client 2: the Task Group detail window\'s title field is focused, non-empty (its render\'s typing guard armed)', await P2.waitFor(`(() => { const w = [...app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.action === 'openTaskDetail'); const i = w && w.element.querySelector('.task-detail-title'); if (i) i.focus(); return !!i && document.activeElement === i && !!i.value; })()`, 8000));
+  check('client 2: the Task Group detail window\'s title field is focused, non-empty (its render\'s typing guard armed)', verdictOf(await P2.waitFor(`(() => { const w = [...app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.action === 'openTaskDetail'); const i = w && w.element.querySelector('.task-detail-title'); if (i) i.focus(); return !!i && document.activeElement === i && !!i.value; })()`, 8000)));
   await front(P1, target.id);
   await sleep(1500);
 
   const beforeA1 = await census(P1, 'A');
   const missing = EXPECT.filter((s) => !surfaces(beforeA1).includes(s));
   check(`BEFORE: every surface carries the round's word (${EXPECT.length} surfaces — an absence afterwards is never vacuous)`, missing.length === 0, { missing, seen: surfaces(beforeA1), channels: missing.includes('window:channels:openChannels') ? await P1.evalJs(`([...app.wm.windows.values()].find((w) => w.type === 'channels')?.element.textContent || '').slice(0, 600)`) : '' });
-  check('BEFORE: the device\'s toast history holds a ref to each arrived item (the question + the job\'s ask), never its words — nor the job\'s name its head would show', await P1.evalJs(`(() => { const h = localStorage.getItem('vibespace.toastHistory') || ''; return h.includes(${J(TODO.A)}) && h.includes(${J(JTODO.A)}); })()`) && !beforeA1.storage.length, beforeA1.storage);
-  check('BEFORE: the job\'s ask arrived as a toast naming the job on screen (its head is the item\'s label)', await P1.evalJs(`[...document.querySelectorAll('#global-toasts .global-toast[data-todo-id=${J(JTODO.A)}]')].length === 1`));
-  check('BEFORE: the Job input window\'s title names the job on screen, yet data/layouts.json never carries it (the layout choke point keeps that window\'s title generic — verify r5)', surfaces(beforeA1).includes('window:job-interact:openJobInteract:title') && !layoutsHave('A'));
+  check('BEFORE: the device\'s toast history holds a ref to each arrived item (the question + the job\'s ask), never its words — nor the job\'s name its head would show', gateOf(await P1.evalJs(`(() => { const h = localStorage.getItem('vibespace.toastHistory') || ''; return h.includes(${J(TODO.A)}) && h.includes(${J(JTODO.A)}); })()`)) && !beforeA1.storage.length, beforeA1.storage);
+  check('BEFORE: the job\'s ask arrived as a toast naming the job on screen (its head is the item\'s label)', verdictOf(await P1.evalJs(`[...document.querySelectorAll('#global-toasts .global-toast[data-todo-id=${J(JTODO.A)}]')].length === 1`)));
+  check('BEFORE: the Job input window\'s title names the job on screen, yet data/layouts.json never carries it (the layout choke point keeps that window\'s title generic — verify r5)', gateOf(surfaces(beforeA1).includes('window:job-interact:openJobInteract:title')) && !layoutsHave('A'));
   const stateHadWordA = userStateHas('A');
   const beforeA2 = await census(P2, 'A');
   check('BEFORE: client 2 draws the word too (its replayed windows)', beforeA2.dom.length > 0, surfaces(beforeA2));
@@ -499,25 +499,25 @@ try {
   const pp = await P1.evalJs(`(() => { const pop = document.getElementById('user-todos-popup'); for (const w of [...app.wm.windows.values()]) { const e = w.element && w.element.querySelector('.window-titlebar'); if (!e) continue; const q = e.getBoundingClientRect(); for (const dx of [40, 90, 140]) { const x = q.left + dx, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); if (hit && e.contains(hit) && !hit.closest('button') && !(pop && pop.contains(hit))) return { x, y, ok: true, win: w.type }; } } return { ok: false }; })()`);
   if (pp && pp.ok) { await P1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: pp.x, y: pp.y, button: 'left', buttons: 1, clickCount: 1 }); await P1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pp.x, y: pp.y, button: 'left', buttons: 0, clickCount: 1 }); }
   await sleep(400);
-  check('verify r7: a press on another window closed the For-you popup — and a closed popup holds no rows (a clear while it is closed has nothing there to miss)', await P1.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); return !!p && p.classList.contains('hidden') && !p.querySelector('.ut-item'); })()`), pp);
+  check('verify r7: a press on another window closed the For-you popup — and a closed popup holds no rows (a clear while it is closed has nothing there to miss)', verdictOf(await P1.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); return !!p && p.classList.contains('hidden') && !p.querySelector('.ut-item'); })()`)), pp);
 
   console.log('② the owner clears the five records (one request per kind, the status history entry last)');
   check('setup: an earlier status broadcast reached both pages (the owner set another session\'s status)', (await statusBroadcastFirst()).success === true);
   await sleep(1200);
   const ra = await clearAll('A');
-  check('the clear answered: every kind cleared (the job\'s ask item with it — the cascade — and the CURRENT status entry)', ra && ra.ok && ra.current && ra.answers.every((a) => a && a.ok && a.cleared >= 1) && ra.cleared === 7, ra);
+  check('the clear answered: every kind cleared (the job\'s ask item with it — the cascade — and the CURRENT status entry)', gateOf(ra) && gateOf(ra.ok) && gateOf(ra.current) && gateOf(ra.answers.every((a) => a && a.ok && a.cleared >= 1)) && ra.cleared === 7, ra);
   await sleep(2500); // the broadcasts, Session Properties' 300 ms debounce, the popup's patches
-  check('the guards stayed armed through the broadcasts (client 1\'s select, client 2\'s title field still focused — the words must go anyway)', await P1.evalJs(`document.activeElement && document.activeElement.tagName`) === 'SELECT' && await P2.evalJs(`!!document.activeElement && document.activeElement.classList.contains('task-detail-title')`), [await P1.evalJs(`document.activeElement && document.activeElement.tagName`), await P2.evalJs(`document.activeElement && document.activeElement.className`)]);
+  check('the guards stayed armed through the broadcasts (client 1\'s select, client 2\'s title field still focused — the words must go anyway)', await P1.evalJs(`document.activeElement && document.activeElement.tagName`) === 'SELECT' && verdictOf(await P2.evalJs(`!!document.activeElement && document.activeElement.classList.contains('task-detail-title')`)), [await P1.evalJs(`document.activeElement && document.activeElement.tagName`), await P2.evalJs(`document.activeElement && document.activeElement.className`)]);
   const afterA1 = await census(P1, 'A');
   check('AFTER — client 1: no surface draws the word (DOM text, attributes, input values, shadow roots)', afterA1.dom.length === 0, afterA1.dom);
   check('AFTER — client 1: no storage holds it (localStorage, sessionStorage), no IndexedDB database, no CacheStorage cache, not in window.name / the URL / the tab title', afterA1.storage.length === 0 && afterA1.other.length === 0, [afterA1.storage, afterA1.other]);
   check('AFTER — client 1: the cleared records read the sentence where they were drawn (the task log row)', await P1.evalJs(`document.querySelector('.task-log-act[data-pid=${J(PID.A)}] .task-log-note')?.textContent`) === CT);
   const afterA2 = await census(P2, 'A');
   check('AFTER — client 2 (zh): no surface draws the word, no storage holds it', afterA2.dom.length === 0 && afterA2.storage.length === 0 && afterA2.other.length === 0, [afterA2.dom, afterA2.storage, afterA2.other]);
-  check('AFTER — client 2 reads the sentence in its language (the Job input window\'s title)', await P2.waitFor(`[...app.wm.windows.values()].some((w) => w._openSpec && w._openSpec.action === 'openJobInteract' && (w.title || '').startsWith(${J(ZH)}))`, 5000),
+  check('AFTER — client 2 reads the sentence in its language (the Job input window\'s title)', verdictOf(await P2.waitFor(`[...app.wm.windows.values()].some((w) => w._openSpec && w._openSpec.action === 'openJobInteract' && (w.title || '').startsWith(${J(ZH)}))`, 5000)),
     await P2.evalJs(`[...app.wm.windows.values()].filter((w) => w._openSpec && w._openSpec.action === 'openJobInteract').map((w) => w.title)`));
   check('AFTER: data/user-state.json (the job family\'s fold, persisted — verify r6) holds no word, and never did: a fold key is a digest of the family', !userStateHas('A') && !stateHadWordA, { now: userStateHas('A'), before: stateHadWordA });
-  check('AFTER: data/layouts.json (client 1\'s next user-caused save) holds no word', await saveLayout(P1) && !layoutsHave('A'), (() => { try { const s = fs.readFileSync(path.join(DATA, 'layouts.json'), 'utf8'); const i = s.indexOf(S.A); return i < 0 ? 'clean' : s.slice(Math.max(0, i - 200), i + 40); } catch (e) { return e.message; } })());
+  check('AFTER: data/layouts.json (client 1\'s next user-caused save) holds no word', gateOf(await saveLayout(P1)) && !layoutsHave('A'), (() => { try { const s = fs.readFileSync(path.join(DATA, 'layouts.json'), 'utf8'); const i = s.indexOf(S.A); return i < 0 ? 'clean' : s.slice(Math.max(0, i - 200), i + 40); } catch (e) { return e.message; } })());
   {
     const id = await P1.evalJs(`app.autoCaptureIncident('census', 'client census after the clear')`);
     const dir = id ? path.join(DATA, 'incidents', id) : null;
@@ -570,44 +570,44 @@ try {
   await reload(P2);
   await openSurfaces(P1, 'B');
   await P1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._sessionPropsKey); const s = w && w.element.querySelector('select'); if (s) s.focus(); return true; })()`);
-  check('CONTROL: client 1 saves its layout', await saveLayout(P1));
+  check('CONTROL: client 1 saves its layout', verdictOf(await saveLayout(P1)));
   await front(P1, target.id);
   await sleep(1500);
   const beforeB = await census(P1, 'B');
-  check('CONTROL: BEFORE, the patched bundle draws the word on every surface too', EXPECT_B.every((s) => surfaces(beforeB).includes(s)), { missing: EXPECT_B.filter((s) => !surfaces(beforeB).includes(s)) });
+  check('CONTROL: BEFORE, the patched bundle draws the word on every surface too', verdictOf(EXPECT_B.every((s) => surfaces(beforeB).includes(s))), { missing: EXPECT_B.filter((s) => !surfaces(beforeB).includes(s)) });
   await statusBroadcastFirst();
   await sleep(1200);
   const rb = await clearAll('B', 'CONTROL: ');
-  check('CONTROL: the clear answered', rb && rb.ok && rb.current && rb.cleared === 7, rb);
+  check('CONTROL: the clear answered', gateOf(rb) && gateOf(rb.ok) && gateOf(rb.current) && rb.cleared === 7, rb);
   await sleep(2500);
   const afterB1 = await census(P1, 'B');
   const redB = surfaces(afterB1);
-  check('CONTROL: the patched surfaces go RED — the Job input window still names the job (its title, and the taskbar\'s copy of it) after the clear', redB.includes('window:job-interact:openJobInteract:title'), afterB1.dom);
-  check('CONTROL (verify r6): …and Session Properties\' history shows the words again — a fill answered before the clear painted last', redB.includes('window:task:openSessionProps'), afterB1.dom);
-  check('CONTROL (verify r6): …and the sidebar card\'s status history shows them again — its guard dropped the last clear (a history entry that is not the current status)', redB.includes('sidebar'), afterB1.dom);
-  check('CONTROL: …and ONLY those surfaces — every other surface and every storage is clean on the same run (the stale answers raced every surface)', redB.length > 0 && redB.every((s) => /^window:job-interact:|^taskbar$|^window:task:openSessionProps$|^sidebar$/.test(s)) && afterB1.storage.length === 0, [redB, afterB1.storage]);
-  check('CONTROL: …while the layout file stays wordless all the same (the server\'s choke point keeps the record, whatever a client draws)', await saveLayout(P1) && !layoutsHave('B'));
+  check('CONTROL: the patched surfaces go RED — the Job input window still names the job (its title, and the taskbar\'s copy of it) after the clear', verdictOf(redB.includes('window:job-interact:openJobInteract:title')), afterB1.dom);
+  check('CONTROL (verify r6): …and Session Properties\' history shows the words again — a fill answered before the clear painted last', verdictOf(redB.includes('window:task:openSessionProps')), afterB1.dom);
+  check('CONTROL (verify r6): …and the sidebar card\'s status history shows them again — its guard dropped the last clear (a history entry that is not the current status)', verdictOf(redB.includes('sidebar')), afterB1.dom);
+  check('CONTROL: …and ONLY those surfaces — every other surface and every storage is clean on the same run (the stale answers raced every surface)', redB.length > 0 && gateOf(redB.every((s) => /^window:job-interact:|^taskbar$|^window:task:openSessionProps$|^sidebar$/.test(s))) && afterB1.storage.length === 0, [redB, afterB1.storage]);
+  check('CONTROL: …while the layout file stays wordless all the same (the server\'s choke point keeps the record, whatever a client draws)', gateOf(await saveLayout(P1)) && !layoutsHave('B'));
   const heapB = await heapHolds(P1, 'B');
-  check('CONTROL: …and the HEAP judge sees it too — the product reaches the word (the window\'s title), so excluding Chrome\'s layout cache hides nothing the page holds', heapB.holds, { browserOnly: heapB.browserOnly });
+  check('CONTROL: …and the HEAP judge sees it too — the product reaches the word (the window\'s title), so excluding Chrome\'s layout cache hides nothing the page holds', verdictOf(heapB.holds), { browserOnly: heapB.browserOnly });
   console.log('⑦ 2.369.204 — client 2 (zh): the Task log scrolled past the live 500 into the archive; a clear of an archived entry');
   await front(P2, t2.id);
   const LOGW = `[...app.wm.windows.values()].find((w) => w._taskLogId === ${J(W_ARC)})`;
   await P2.evalJs(`window.__skel = 0; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList && m.target.classList.contains('task-log-skel')) window.__skel++; }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); app.openTaskLog(${J(W_ARC)}, { tab: 'activity' }); true`);
-  check('⑦ the zh Task log window opens on the 500 live entries', await P2.waitFor(`(() => { const w = ${LOGW}; return !!w && w.element.querySelectorAll('.task-log-act').length >= 500; })()`, 20000));
+  check('⑦ the zh Task log window opens on the 500 live entries', verdictOf(await P2.waitFor(`(() => { const w = ${LOGW}; return !!w && w.element.querySelectorAll('.task-log-act').length >= 500; })()`, 20000)));
   let reached = false;
   for (let i = 0; i < 60 && !reached; i++) {
     reached = await P2.evalJs(`(() => { const w = ${LOGW}; const b = w.element.querySelector('.task-log-body'); b.scrollTop = b.scrollHeight; b.dispatchEvent(new Event('scroll')); return !!w.element.querySelector('[data-pid="${ARC_PID}"]') && !w.element.querySelector('.task-log-older'); })()`);
     if (!reached) await sleep(300);
   }
   const st = await P2.evalJs(`(() => { const w = ${LOGW}; const rows = [...w.element.querySelectorAll('.task-log-act')]; const pids = rows.map((r) => r.dataset.pid); const ats = pids.map((p) => p.startsWith('P-a') ? 1000 + parseInt(p.slice(3), 16) : parseInt(p.slice(3), 16)); return { n: rows.length, uniq: new Set(pids).size, word: w.element.textContent.includes(${J(ARC_WORD)}), newestFirst: ats.every((x, i) => !i || ats[i - 1] > x), buttons: [...w.element.querySelectorAll('.task-log-body button')].map((b) => b.textContent).filter((x) => /more|older|更多|更早/i.test(x)), skel: window.__skel, lang: localStorage.getItem('vibespace.lang') }; })()`);
-  check('⑦ scrolling down the zh list reads the archive seamlessly: 620 rows each once, newest first, the archived entry there — no "more" button; a skeleton row showed while a page was read', reached && st.n === 620 && st.uniq === 620 && st.newestFirst && st.word && !st.buttons.length && st.skel > 0 && st.lang === 'zh', st);
+  check('⑦ scrolling down the zh list reads the archive seamlessly: 620 rows each once, newest first, the archived entry there — no "more" button; a skeleton row showed while a page was read', gateOf(reached) && st.n === 620 && st.uniq === 620 && gateOf(st.newestFirst) && gateOf(st.word) && !st.buttons.length && st.skel > 0 && st.lang === 'zh', st);
   await shot(P2, 'progress-archive-zh');
   const cr = await api('/api/records/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: J({ kind: 'activity', groupId: W_ARC, id: ARC_PID }) });
-  check('⑦ the owner clears the archived entry (the request the dialog posts)', cr && cr.ok && cr.cleared === 1, cr);
+  check('⑦ the owner clears the archived entry (the request the dialog posts)', gateOf(cr) && gateOf(cr.ok) && cr.cleared === 1, cr);
   const patchedInPlace = await P2.waitFor(`(() => { const w = ${LOGW}; const r = w && w.element.querySelector('[data-pid="${ARC_PID}"]'); return !!r && r.textContent.includes(${J(ZH)}) && !w.element.textContent.includes(${J(ARC_WORD)}) && w.element.querySelectorAll('.task-log-act').length === 620; })()`, 15000);
   const disk = fs.readdirSync(path.join(DATA, 'task-groups-archive', W_ARC)).map((f) => fs.readFileSync(path.join(DATA, 'task-groups-archive', W_ARC, f), 'utf8')).join('');
-  check('⑦ …the open zh window re-reads that archive row and patches it in place to the cleared sentence (620 rows kept); the archive file no longer holds the word', patchedInPlace && !disk.includes(ARC_WORD) && disk.includes(CT), await P2.evalJs(`(() => { const w = ${LOGW}; const r = w && w.element.querySelector('[data-pid="${ARC_PID}"]'); return r ? r.textContent : null; })()`));
-  for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3, label: 'CONTROL: ' })) check(row.name, row.pass, row.detail);
+  check('⑦ …the open zh window re-reads that archive row and patches it in place to the cleared sentence (620 rows kept); the archive file no longer holds the word', gateOf(patchedInPlace) && !disk.includes(ARC_WORD) && verdictOf(disk.includes(CT)), await P2.evalJs(`(() => { const w = ${LOGW}; const r = w && w.element.querySelector('[data-pid="${ARC_PID}"]'); return r ? r.textContent : null; })()`));
+  for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3, label: 'CONTROL: ' })) check(row.name, verdictOf(row.pass), row.detail);
   try { P2.sock.close(); await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t2.id}`, { method: 'PUT' }); } catch {}
 } catch (e) {
   failed++;
@@ -616,4 +616,4 @@ try {
 
 console.log(`${failed ? `FAILED (${failed})` : 'ALL PASS'} (${passed} passed) — ${Math.round((Date.now() - T0) / 1000)} s`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

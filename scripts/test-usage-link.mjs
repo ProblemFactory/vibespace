@@ -14,7 +14,7 @@ const cacheDir = path.join(tmp, 'usage-cache');
 fs.mkdirSync(cacheDir, { recursive: true });
 
 let failures = 0;
-const check = (name, cond) => { console.log(`${cond ? 'ok' : 'FAIL'}  ${name}`); if (!cond) failures++; };
+const check = (name, cond) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); console.log(`${cond ? 'ok' : 'FAIL'}  ${name}`); if (!cond) failures++; };
 
 // fake express app that records routes; we only need /api/usage's handler
 const routes = {};

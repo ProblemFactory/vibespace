@@ -25,7 +25,7 @@ import vm from 'node:vm';
 import { SUITES } from './ci.mjs';
 const t0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 
 // the measured frames (m2, logs/m2/b8-rate1-try0.json): 确定 54 × 29, the workspace sliding under it
 const LOOK = (x, extra = {}) => ({ found: true, rect: [x, 550.3, 54, 29], x: x + 27, y: 564.8, hits: true, under: 'button.btn-create', disabled: false, movers: [], ...extra });
@@ -64,14 +64,14 @@ const LANDS = [
   ['…but a click that came went elsewhere (the .373 row) is still a miss', ROW373, { click: 'any' }, false, /released over div\.dialog-footer/],
 ];
 const lands = (lv) => LANDS.map(([name, seen, o, want, why]) => { const r = lv(seen, o); return [name, r.ok === want && (!why || why.test(r.why || '')), r]; });
-for (const [name, good, r] of lands(landingVerdict)) ok(good, `${name} ⇒ ${r.ok ? 'landed' : `MISSED — «${r.why}»`}`, r);
+for (const [name, good, r] of lands(landingVerdict)) ok(verdictOf(good), `${name} ⇒ ${r.ok ? 'landed' : `MISSED — «${r.why}»`}`, r);
 
 console.log('③ the page half');
 const src = stillLookSource('#refresh-live-dialog .btn-create'), srcJs = stillLookSource("JS:[...document.querySelectorAll('.context-menu-item')].find((n) => /x/.test(n.textContent))");
 let compiles = true; try { new Function(src); new Function(srcJs); } catch (e) { compiles = String(e); }
 ok(compiles === true, 'the look compiles — by selector and by a JS: expression', compiles);
-ok(src.includes('document.querySelector("#refresh-live-dialog .btn-create")') && srcJs.includes("[...document.querySelectorAll('.context-menu-item')]"), 'it names its target by the selector, or evaluates the JS: expression');
-ok(/a\.effect\.target\.contains\(e\)/.test(src) && /playState === 'running'/.test(src) && /elementFromPoint\(x, y\)/.test(src), 'a mover is any RUNNING animation whose effect target CONTAINS the target (an ancestor\'s slide counts); the point is read by elementFromPoint');
+ok(gateOf(src.includes('document.querySelector("#refresh-live-dialog .btn-create")')) && verdictOf(srcJs.includes("[...document.querySelectorAll('.context-menu-item')]")), 'it names its target by the selector, or evaluates the JS: expression');
+ok(gateOf(/a\.effect\.target\.contains\(e\)/.test(src)) && gateOf(/playState === 'running'/.test(src)) && verdictOf(/elementFromPoint\(x, y\)/.test(src)), 'a mover is any RUNNING animation whose effect target CONTAINS the target (an ancestor\'s slide counts); the point is read by elementFromPoint');
 // A WRAPPED TARGET (an inline link over two lines — the UI train's hosted mirror, test-setting-links-chrome: «covered, under its point:
 // div.ut-text»): the look aims at its FIRST line fragment, where the link is; its bounding box's centre is its paragraph
 {
@@ -85,12 +85,12 @@ ok(/a\.effect\.target\.contains\(e\)/.test(src) && /playState === 'running'/.tes
     return new Function('document', `return ${source};`)(doc);
   };
   const wrapped = lookOn(stillLookSource('.fy-link'));
-  ok(wrapped.found && wrapped.hits === true && wrapped.x === 255 && wrapped.y === 110, 'A WRAPPED TARGET is aimed at its FIRST line fragment — the point is on the link, so it is pressed, never «covered»', wrapped);
+  ok(gateOf(wrapped.found) && wrapped.hits === true && wrapped.x === 255 && wrapped.y === 110, 'A WRAPPED TARGET is aimed at its FIRST line fragment — the point is on the link, so it is pressed, never «covered»', wrapped);
   const centre = lookOn(stillLookSource('.fy-link').replace("fr && fr.length > 1 && fr[0].width > 0 && fr[0].height > 0 ? fr[0] : q", 'q'));
   ok(centre.hits === false && centre.under === 'div.ut-text', 'RED CONTROL: aimed at its bounding box\'s centre (the look before) the wrapped link reads «covered» by its own paragraph', centre);
 }
 const MOVES = ['margin-left', 'left', 'top', 'transform', 'translate', 'width', 'height', 'padding-left', 'inset'], STAYS = ['opacity', 'color', 'background-color', 'box-shadow', 'outline-color', 'border-color', 'visibility'];
-ok(MOVES.every((p) => STILL_MOVERS.test(p)) && STAYS.every((p) => !STILL_MOVERS.test(p)), `STILL_MOVERS moves a box (${MOVES.join(', ')}) — a fade or a colour does not (${STAYS.join(', ')})`, { moves: MOVES.filter((p) => !STILL_MOVERS.test(p)), stays: STAYS.filter((p) => STILL_MOVERS.test(p)) });
+ok(gateOf(MOVES.every((p) => STILL_MOVERS.test(p))) && verdictOf(STAYS.every((p) => !STILL_MOVERS.test(p))), `STILL_MOVERS moves a box (${MOVES.join(', ')}) — a fade or a colour does not (${STAYS.join(', ')})`, { moves: MOVES.filter((p) => !STILL_MOVERS.test(p)), stays: STAYS.filter((p) => STILL_MOVERS.test(p)) });
 // the door's own loop over scripted looks: it waits out the slide, then presses once, and names a landing elsewhere
 const drive = async (looks, seen, opts = {}) => {
   let i = 0; const sent = [], logs = [];
@@ -102,14 +102,14 @@ const MINE = { down: at(true, 'button.btn-create'), click: at(true, 'button.btn-
 const waited = await drive([LOOK(759.2, { movers: SLIDE }), LOOK(791.6, { movers: SLIDE }), LOOK(852), LOOK(852)], MINE);
 ok(waited.r === true && waited.looks === 4 && waited.sent.join() === 'mouseMoved,mousePressed,mouseReleased', 'the door waits out the slide (two moving looks), presses ONCE on the still target', waited);
 const missed = await drive([LOOK(852), LOOK(852)], ROW390);
-ok(missed.r === false && /MISSED — the press landed on button\.btn-cancel/.test(missed.logs.join('\n')), 'a press that lands on 取消 is a named MISS, never a silent one', missed.logs);
+ok(missed.r === false && verdictOf(/MISSED — the press landed on button\.btn-cancel/.test(missed.logs.join('\n'))), 'a press that lands on 取消 is a named MISS, never a silent one', missed.logs);
 const touched = await drive([LOOK(852), LOOK(852)], MINE, { touch: true });
 ok(touched.r === true && touched.sent.join() === 'touchStart,touchEnd', 'a touch press: touchStart / touchEnd at the still point', touched.sent);
 {
   const pts = []; let i = 0;
   const press = stillPresser({ evalJs: async (s) => (s.startsWith('window.__vsStillSeen') ? ROW390 : s.includes('__vsStillSeen = {') ? true : [LOOK(852), LOOK(852)][Math.min(i++, 1)]), cdp: async (m, p) => { if (p.type === 'mousePressed') pts.push([p.x, p.y]); return {}; }, log: () => {}, sleep: async () => {} });
   const r = await press('#refresh-live-dialog .btn-create', { aim: async () => ({ x: 811, y: 564 }) });
-  ok(r === false && pts.length === 1 && pts[0].join() === '811,564' && /landed on button\.btn-cancel/.test(press.last.landed.why), 'the aim hook presses the point it hands back (a RED control\'s stale aim) — and the landing still judges it', { pts, landed: press.last.landed });
+  ok(r === false && pts.length === 1 && pts[0].join() === '811,564' && verdictOf(/landed on button\.btn-cancel/.test(press.last.landed.why)), 'the aim hook presses the point it hands back (a RED control\'s stale aim) — and the landing still judges it', { pts, landed: press.last.landed });
 }
 
 console.log('④ MUTANTS — each RED by name');
@@ -118,10 +118,10 @@ console.log('④ MUTANTS — each RED by name');
 const mutate = (fn, from, to) => { const s = fn.toString(), n = s.split(from).length - 1; if (n !== 1) { ok(false, `ANCHOR (${fn.name} of scripts/scratch.mjs): ${JSON.stringify(from).slice(0, 100)} — found ${n} times in its source, one meant: the mutant builds nothing`); return null; } return new Function(`return (${s.replace(from, to)})`)(); };
 const blindToMovers = mutate(stillVerdict, "if (Array.isArray(now.movers) && now.movers.length) return 'moving';", '');
 const redV = blindToMovers ? table(blindToMovers).filter(([, got, want]) => got !== want).map(([name]) => name) : ['(the anchor is gone)'];
-ok(redV.length === 1 && /^MID-SLIDE/.test(redV[0]), `MUTANT the verdict ignores a running mover ⇒ RED by name: «${redV[0]}»`, redV);
+ok(redV.length === 1 && verdictOf(/^MID-SLIDE/.test(redV[0])), `MUTANT the verdict ignores a running mover ⇒ RED by name: «${redV[0]}»`, redV);
 const downOnly = (() => { let s = landingVerdict.toString(); const a = 'if (seen.up && !seen.up.gone && !seen.up.mine)', b = 'if (!click) return { ok: true };'; if (!s.includes(a) || !s.includes(b)) return null; s = s.replace(a, 'if (false)').replace(b, 'return { ok: true };'); return new Function(`return (${s})`)(); })();
 const redL = downOnly ? lands(downOnly).filter(([, good]) => !good).map(([name]) => name) : ['(the anchor is gone)'];
-ok(redL.length === 4 && /^the \.373 row/.test(redL[0]), `MUTANT the landing reads the pointerdown only ⇒ RED by name: «${redL[0]}»`, redL);
+ok(redL.length === 4 && verdictOf(/^the \.373 row/.test(redL[0])), `MUTANT the landing reads the pointerdown only ⇒ RED by name: «${redL[0]}»`, redL);
 
 console.log('⑤ THE CENSUS — heavy suites that press by coordinates outside THE still door (a ratchet: the ledger may only shrink)');
 {
@@ -174,12 +174,12 @@ console.log('⑤ THE CENSUS — heavy suites that press by coordinates outside T
   ok(j.grew.length === 0, 'no heavy suite presses by coordinates outside THE still door beyond its ledger row (a new or a grown press goes through stillPresser / realClicker)', j.grew);
   ok(j.shrank.length === 0, 'the ledger is honest — a suite that moved its presses onto the door has its row lowered', j.shrank);
   const rn = readReal('test-refresh-note-chrome') || '';
-  ok(!now['test-refresh-note-chrome'] && /stillPresser\(\{ evalJs: ev, cdp: S \}\)/.test(rn), 'test-refresh-note-chrome presses only through THE still door (0 direct sites)', now['test-refresh-note-chrome']);
+  ok(!now['test-refresh-note-chrome'] && verdictOf(/stillPresser\(\{ evalJs: ev, cdp: S \}\)/.test(rn)), 'test-refresh-note-chrome presses only through THE still door (0 direct sites)', now['test-refresh-note-chrome']);
   const planted = judge(census((n) => (n === 'test-refresh-note-chrome' ? (readReal(n) || '') + "\nawait S('Input.dispatchMouseEvent', { type: 'mousePressed', x: 1, y: 1 });" : readReal(n))), LEDGER);
-  ok(planted.grew.length === 1 && /^test-refresh-note-chrome: 1 direct site/.test(planted.grew[0]), 'RED CONTROL: a press planted in a door-only suite ⇒ named', planted.grew);
+  ok(planted.grew.length === 1 && verdictOf(/^test-refresh-note-chrome: 1 direct site/.test(planted.grew[0])), 'RED CONTROL: a press planted in a door-only suite ⇒ named', planted.grew);
   const first = Object.keys(LEDGER)[0];
   const converted = judge(census((n) => (n === first ? (readReal(n) || '').replace(/['"]mousePressed['"]/g, "'pressed-by-the-door'").replace(/type:\s*['"]touchStart['"]/g, "type: 'door'") : readReal(n))), LEDGER);
-  ok(converted.shrank.length === 1 && converted.shrank[0].startsWith(first + ': 0 now'), `RED CONTROL: a suite converted onto the door with its row unlowered ⇒ named (${first})`, converted.shrank);
+  ok(converted.shrank.length === 1 && verdictOf(converted.shrank[0].startsWith(first + ': 0 now')), `RED CONTROL: a suite converted onto the door with its row unlowered ⇒ named (${first})`, converted.shrank);
 }
 
 // ⑥ B-4f03 (lane bl-tests-e): realClicker's MEASURE — the three last copies' needs as options of the one door. The page half is a
@@ -195,7 +195,7 @@ console.log('⑥ B-4f03: the door\'s measure — an EXPRESSION target, the three
   const IN = { left: 100, top: 300, width: 300, height: 40 }, OUT = { left: 100, top: -30, width: 300, height: 40 };
   const BELOW = { left: 100, top: 780, width: 300, height: 40 }, RIGHT = { left: 1100, top: 300, width: 300, height: 40 };
   const a = page(IN), ra = a.run(realClickMeasureSource('.b'));
-  ok(ra && ra.hits && ra.x === 250 && ra.y === 320 && a.scrolls.join() === 'center' && a.ctx.window.__vsRealClickEl === a.el, 'the default is the door as it was: centred scroll, aimed at the centre, the element kept for the still look', { ra, scrolls: a.scrolls });
+  ok(gateOf(ra) && gateOf(ra.hits) && ra.x === 250 && ra.y === 320 && a.scrolls.join() === 'center' && a.ctx.window.__vsRealClickEl === a.el, 'the default is the door as it was: centred scroll, aimed at the centre, the element kept for the still look', { ra, scrolls: a.scrolls });
   const b = page(IN); b.run(realClickMeasureSource('.b', { scroll: 'nearest' }));
   ok(b.scrolls.join() === 'nearest', 'scroll: \'nearest\' asks the least move (a row in a list)', b.scrolls);
   const c = page(IN); c.run(realClickMeasureSource('.b', { scroll: 'if-needed' }));
@@ -208,7 +208,7 @@ console.log('⑥ B-4f03: the door\'s measure — an EXPRESSION target, the three
   ok(re.x === 140 && rf.x === 125, 'aimLeft: 40 px in from the left edge; a target narrower than twice that is aimed at its centre', { wide: re.x, narrow: rf.x });
   const g = page(IN, { viaExpr: true }), rg = g.run(realClickMeasureSource('(THE_EL)'));
   const h = page(IN, { viaExpr: true }), rh = h.run(realClickMeasureSource('THE_EL'));
-  ok(rg && rg.hits && rh === null, 'a target that starts with «(» is an EXPRESSION evaluated in the page; any other string is a selector (here it finds nothing)', { expr: rg, selector: rh });
+  ok(gateOf(rg) && gateOf(rg.hits) && rh === null, 'a target that starts with «(» is an EXPRESSION evaluated in the page; any other string is a selector (here it finds nothing)', { expr: rg, selector: rh });
   let threw = [];
   for (const o of [{ scroll: 'middle' }, { aimLeft: -1 }, { aimLeft: '40' }]) { try { realClickMeasureSource('.b', o); } catch (x) { threw.push(x.message.slice(0, 40)); } }
   ok(threw.length === 3, 'an unknown scroll or an aim that is no number ≥ 0 is refused by name', threw);
@@ -240,13 +240,13 @@ const drive6 = async ({ measures, unders, uncover = null, opts = {}, arms = [{ m
   const drive = drive6;
   const HIT = { x: 250, y: 320, hits: true, hit: 'BUTTON.b' }, COVERED = { x: 250, y: 320, hits: false, hit: 'DIV.global-toast' };
   const A = await drive({ measures: [HIT], unders: [{ hits: true }], opts: { scroll: 'nearest', aimLeft: 40 } });
-  ok(A.r === true && A.asked[0].includes("block: 'nearest'") && A.asked[0].includes('Math.min(q.width / 2, 40)') && A.sent.includes('mousePressed@140,320'), 'the options REACH the page (the measure asks the nearest scroll and the aim) and the press lands at the aim from the still look\'s rect (140, 320), never its centre', A);
+  ok(A.r === true && gateOf(A.asked[0].includes("block: 'nearest'")) && gateOf(A.asked[0].includes('Math.min(q.width / 2, 40)')) && verdictOf(A.sent.includes('mousePressed@140,320')), 'the options REACH the page (the measure asks the nearest scroll and the aim) and the press lands at the aim from the still look\'s rect (140, 320), never its centre', A);
   const B = await drive({ measures: [HIT], unders: [{ hits: true }] });
-  ok(B.r === true && B.asked[0].includes("block: 'center'") && B.sent.includes('mousePressed@250,320'), 'no option: the door as it was — the centred scroll, the press at the still look\'s centre', B);
+  ok(B.r === true && gateOf(B.asked[0].includes("block: 'center'")) && verdictOf(B.sent.includes('mousePressed@250,320')), 'no option: the door as it was — the centred scroll, the press at the still look\'s centre', B);
   const C = await drive({ measures: [COVERED, HIT, HIT], unders: [{ hits: false, hit: 'DIV.global-toast' }, { hits: true }], uncover: true });
   ok(C.r === true && C.uncovers === 1 && C.asked.length === 3, 'uncover runs ONCE a call: covered at the measure it clears and measures again; covered again at the press it re-aims without a second clear', C);
   const D = await drive({ measures: [HIT, HIT], unders: [{ hits: false, hit: 'DIV.global-toast' }, { hits: true }], uncover: true });
-  ok(D.r === true && D.uncovers === 1 && D.reaimed && D.reaimed.uncovered === true && D.logs.some((l) => /covered at press time by DIV\.global-toast — the suite's uncover ran once/.test(l)), 'covered at the press: the suite\'s uncover runs, the point is measured again, and the log says a cover was cleared (never «it moved»)', D);
+  ok(D.r === true && D.uncovers === 1 && gateOf(D.reaimed) && D.reaimed.uncovered === true && verdictOf(D.logs.some((l) => /covered at press time by DIV\.global-toast — the suite's uncover ran once/.test(l))), 'covered at the press: the suite\'s uncover runs, the point is measured again, and the log says a cover was cleared (never «it moved»)', D);
   const E = await drive({ measures: [COVERED], unders: [{ hits: true }] });
   ok(E.r === false && E.sent.length === 0, 'covered and no uncover hook: no press, as before', E);
 }
@@ -257,7 +257,7 @@ const drive6 = async ({ measures, unders, uncover = null, opts = {}, arms = [{ m
 console.log('⑦ the press arm — the product\'s own marks, its ARM_MS, never a press inside it');
 {
   const { ARM_MS } = await import(new URL('../src/lib/press-arm.js', import.meta.url).href);
-  ok(Number.isFinite(ARM_MS) && ARM_MS > 0, `the product's ARM_MS is read from its module (${ARM_MS} ms)`);
+  ok(gateOf(Number.isFinite(ARM_MS)) && ARM_MS > 0, `the product's ARM_MS is read from its module (${ARM_MS} ms)`);
   // the step, PURE: the LATEST mark decides
   const st = (marks) => JSON.stringify(armStep({ marks }, ARM_MS));
   ok(st([]) === '"press"' && st([{ age: ARM_MS + 1 }]) === '"press"' && st([{ age: ARM_MS - 300 }]) === JSON.stringify({ wait: 300 })
@@ -274,24 +274,24 @@ console.log('⑦ the press arm — the product\'s own marks, its ARM_MS, never a
   const moved = probe(el({ _armSince: 1000, _armTop: 140 })), never = probe(el({ _armSince: 1000 }));
   ok(mk(moved, '_armSince').moved === true && mk(never, '_armSince').moved === true, 'a top that moved since the product read it, or NONE read at all (press-arm.js armAfterLayout re-arms both at the press), is «moved»', { moved, never });
   const outbox = el({ dataset: { armedAt: '1400' } }), pb = probe(el({ parentElement: outbox, dataset: {} }));
-  ok(mk(pb, 'data-armed-at') && mk(pb, 'data-armed-at').readyIn === 400 && JSON.stringify(armStep(pb, ARM_MS)) === JSON.stringify({ wait: 400 }), 'an Outbox card\'s data-armed-at (its ready time, the Date clock): the door waits until it passed', pb);
+  ok(gateOf(mk(pb, 'data-armed-at')) && mk(pb, 'data-armed-at').readyIn === 400 && JSON.stringify(armStep(pb, ARM_MS)) === JSON.stringify({ wait: 400 }), 'an Outbox card\'s data-armed-at (its ready time, the Date clock): the door waits until it passed', pb);
   ok(probe(el()).marks.length === 0, 'a plain control carries no mark: no wait');
   // the door itself on a scripted page and a scripted clock (no real waiting)
   const HIT = { x: 250, y: 320, hits: true, hit: 'BUTTON.b' };
   const clock = () => { const waits = []; return { waits, sleep: async (ms) => { waits.push(ms); } }; };
   const own = (age, since = 1000, extra = {}) => ({ mark: '_armSince', self: true, since, age, moved: false, ...extra });
   const c1 = clock(), A = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c1.sleep, arms: [{ marks: [own(ARM_MS - 300)] }, { marks: [own(ARM_MS + 30)] }, { marks: [own(ARM_MS + 60)] }] });
-  ok(A.r === true && A.armed && A.armed.waitedMs === 330 && A.sent.includes('mousePressed@250,320'), `an armed control ${ARM_MS - 300} ms old: the door WAITS out the arm (${A.armed && A.armed.waitedMs} ms on the clock), proves the point again, then presses`, A);
+  ok(A.r === true && gateOf(A.armed) && A.armed.waitedMs === 330 && verdictOf(A.sent.includes('mousePressed@250,320')), `an armed control ${ARM_MS - 300} ms old: the door WAITS out the arm (${A.armed && A.armed.waitedMs} ms on the clock), proves the point again, then presses`, A);
   const c2 = clock(), B = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c2.sleep, arms: [{ marks: [own(99999, 1000, { moved: true })] }] });
-  ok(B.r === false && !B.sent.includes('mousePressed@250,320') && /ARMED \(_armSince \(moved\)\).*STALE stamp.*no pass of the product read it again.*not pressed/.test(B.miss && B.miss.why), 'a STALE stamp (it moved; no pass of the product read it again): NOT pressed — it fails BY NAME at the press, in words that point at the stamp, never at timing', B.miss);
+  ok(B.r === false && !B.sent.includes('mousePressed@250,320') && verdictOf(/ARMED \(_armSince \(moved\)\).*STALE stamp.*no pass of the product read it again.*not pressed/.test(B.miss && B.miss.why)), 'a STALE stamp (it moved; no pass of the product read it again): NOT pressed — it fails BY NAME at the press, in words that point at the stamp, never at timing', B.miss);
   const c3 = clock(), C = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c3.sleep, arms: [{ marks: [own(ARM_MS + 100)] }], stamps: { stampDown: 1000, stampAfter: 1900 } });
-  ok(C.r === false && C.sent.includes('mousePressed@250,320') && /RE-ARMED it at the press/.test(C.miss && C.miss.why), 'a press at which the product re-stamped the target\'s OWN arm — read at the INSTANT of the press and right after its click: said by name, the press counted for nothing', C.miss);
+  ok(C.r === false && gateOf(C.sent.includes('mousePressed@250,320')) && verdictOf(/RE-ARMED it at the press/.test(C.miss && C.miss.why)), 'a press at which the product re-stamped the target\'s OWN arm — read at the INSTANT of the press and right after its click: said by name, the press counted for nothing', C.miss);
   const c3b = clock(), C2 = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c3b.sleep, arms: [{ marks: [own(ARM_MS + 100)] }, { marks: [own(1, 1900)] }], stamps: { stampDown: 1000, stampAfter: 1000 } });
   ok(C2.r === true, 'a stamp a LATER row pass made (the element moved after the press — the probe a round trip later reads it younger) is NO re-arm: the press counted, the door says so', C2.miss);
   const c4 = clock(), D = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c4.sleep });
   ok(D.r === true && D.armed === null && c4.waits.join() === '40', 'an unarmed control: no arm wait at all — the scripted clock holds only the still look\'s one 40 ms pause', { armed: D.armed, waits: c4.waits });
   const c5 = clock(), E = await drive6({ measures: [HIT], unders: [{ hits: true }, { hits: false, hit: 'DIV.global-toast' }], sleep: c5.sleep, arms: [{ marks: [own(ARM_MS - 300)] }, { marks: [own(ARM_MS + 30)] }] });
-  ok(E.r === false && !E.sent.includes('mousePressed@250,320') && /not under the pointer after the arm/.test(E.miss && E.miss.why), 'the point no longer the target after the arm\'s wait: NOT pressed, said by name', E.miss);
+  ok(E.r === false && !E.sent.includes('mousePressed@250,320') && verdictOf(/not under the pointer after the arm/.test(E.miss && E.miss.why)), 'the point no longer the target after the arm\'s wait: NOT pressed, said by name', E.miss);
   const c6 = clock(), F = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c6.sleep, hidden: true });
   const c7 = clock(), G = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c7.sleep, hidden: false });
   ok(F.r === true && F.sent[0] === 'front' && G.r === true && !G.sent.includes('front'), 'the DOOR brings a HIDDEN page to the front before it measures (a background tab advances no animation); a visible page is left as the suite put it', { hidden: F.sent, visible: G.sent });
@@ -347,8 +347,8 @@ console.log('⑧ the door says what it saw — a cover by its element, a zero bo
   // the hosted shape: the card's summary in a MINIMIZED window — a zero box; the page's corner under its (0, 0)
   const zero = M(W8.b2, W8.corner, { scroll: 'nearest', aimLeft: 40 });
   const zw = lostWords(zero);
-  ok(zero && zero.hits === false && zero.laid === false && zero.size === '0×0' && zero.hiddenBy === 'div.window [0,0 0×0] (display: none)' && zero.win && zero.win.id === 'win-2' && zero.win.conv === 'sid-2' && zero.win.onShow === false
-    && /^NOT LAID OUT \(0×0\) — hidden by div\.window \[0,0 0×0\] \(display: none\) — in window win-2 \(chat, «proj2», conversation sid-2 \[0,0 0×0\]\), on show: no — minimized, hidden by div\.window/.test(zw) && !/covered/.test(zw),
+  ok(gateOf(zero) && zero.hits === false && zero.laid === false && zero.size === '0×0' && zero.hiddenBy === 'div.window [0,0 0×0] (display: none)' && gateOf(zero.win) && zero.win.id === 'win-2' && zero.win.conv === 'sid-2' && zero.win.onShow === false
+    && gateOf(/^NOT LAID OUT \(0×0\) — hidden by div\.window \[0,0 0×0\] \(display: none\) — in window win-2 \(chat, «proj2», conversation sid-2 \[0,0 0×0\]\), on show: no — minimized, hidden by div\.window/.test(zw)) && !/covered/.test(zw),
     'a ZERO box is NOT LAID OUT: the ancestor that hides it (display: none) and the window it sits in — its conversation, on show: no and why — never «covered»', { zero, zw });
   ok(zero.hit === 'div [0,0 200×40] (no id, no class — inside footer#taskbar)', 'what stood under its point is named by its box and its nearest named ancestor — never an empty class («DIV.»)', zero.hit);
   // a real cover: the For-you popup's row over a laid-out target in a window on show
@@ -357,7 +357,7 @@ console.log('⑧ the door says what it saw — a cover by its element, a zero bo
     'a COVER is named by its tag, classes and box, with the target\'s window on show', cw);
   // hidden, not covered: a window on another desktop (visibility: hidden starts AT the window; its content inherits it)
   const hid = M(W8.b3, W8.ws), hw = lostWords(hid);
-  ok(hid.laid === true && /^HIDDEN by div\.window \[200,80 600×400\] \(content-visibility: hidden, visibility: hidden\) — in window win-3 \(chat, «proj3», conversation sid-3 \[200,110 600×370\]\), on show: no — on another desktop, hidden by div\.window/.test(hw) && /under its point: main#workspace \[0,40 1280×780\]$/.test(hw),
+  ok(hid.laid === true && gateOf(/^HIDDEN by div\.window \[200,80 600×400\] \(content-visibility: hidden, visibility: hidden\) — in window win-3 \(chat, «proj3», conversation sid-3 \[200,110 600×370\]\), on show: no — on another desktop, hidden by div\.window/.test(hw)) && verdictOf(/under its point: main#workspace \[0,40 1280×780\]$/.test(hw)),
     'a target with a box under a hidden window is HIDDEN by the element where the hiding STARTS (never its inheriting content, never «covered»)', hw);
   // the read's must: a TAB of a group is judged by the group's frame, as the product's own hider is (its own element is display: none)
   const tabw = lostWords(M(W8.b6, W8.item));
@@ -365,17 +365,17 @@ console.log('⑧ the door says what it saw — a cover by its element, a zero bo
     'a window shown as a TAB (its content in its host\'s element, its own element display: none) is ON SHOW — never «hidden by its own element»', tabw);
   // the read's should: a closed <details> hides all but its summary — named, never «an empty box»
   const fold = lostWords(M(W8.all1, W8.corner));
-  ok(/^NOT LAID OUT \(0×0\) — hidden by details\.chat-exit-out-full \[120,340 300×20\] \(a closed details: only its summary is drawn\) — in window win-1/.test(fold), 'a target inside a CLOSED details is hidden by that details, by name', fold);
-  ok(/^covered by div \[0,0 200×40\]/.test(lostWords(M(W8.vis, W8.corner))), 'a visible descendant of a visibility: hidden ancestor is drawn: never «hidden by» that ancestor', lostWords(M(W8.vis, W8.corner)));
+  ok(verdictOf(/^NOT LAID OUT \(0×0\) — hidden by details\.chat-exit-out-full \[120,340 300×20\] \(a closed details: only its summary is drawn\) — in window win-1/.test(fold)), 'a target inside a CLOSED details is hidden by that details, by name', fold);
+  ok(verdictOf(/^covered by div \[0,0 200×40\]/.test(lostWords(M(W8.vis, W8.corner)))), 'a visible descendant of a visibility: hidden ancestor is drawn: never «hidden by» that ancestor', lostWords(M(W8.vis, W8.corner)));
   ok(lostWords({ gone: 'it left the document' }) === 'it left the page (it left the document)' && lostWords(null) === 'nothing measured (no such element on the page)'
-    && /^NOT LAID OUT \(0×0\) — the page could not say what hides it \(boom\)/.test(lostWords({ laid: false, size: '0×0', sayErr: 'boom' })), 'a target that left the page, none at all, or a zero box the page could not explain — each says so (a zero box stays NOT LAID OUT)');
+    && verdictOf(/^NOT LAID OUT \(0×0\) — the page could not say what hides it \(boom\)/.test(lostWords({ laid: false, size: '0×0', sayErr: 'boom' }))), 'a target that left the page, none at all, or a zero box the page could not explain — each says so (a zero box stays NOT LAID OUT)');
   // the scene: each window's conversation, on show or why not, what stands over it; what is open over the page
   const sc = W8.run(pageSceneSource({ names: { 'sid-1': 'conversation 1' } }), { stack: (x) => (x < 800 ? [W8.item, W8.pop, W8.c1] : [W8.c6]), open: [W8.pop, W8.toast] });
   const sw = sceneWords(sc);
   ok(sw.length === 7 && sw[0] === 'page: visible, focused · 1280×820 · desktop d-1 · 5 window(s)'
     && sw[1] === 'window win-1 chat «proj1» conversation sid-1 (conversation 1) — ON SHOW [100,90 700×470], active · over its middle: div#user-todos-popup.ut-popup [100,280 420×300]'
-    && /^window win-2 chat «proj2» conversation sid-2 — NOT on show: minimized, hidden by div\.window \[0,0 0×0\] \(display: none\), not laid out$/.test(sw[2])
-    && /^window win-3 chat «proj3» conversation sid-3 — NOT on show: on another desktop, hidden by div\.window/.test(sw[3])
+    && gateOf(/^window win-2 chat «proj2» conversation sid-2 — NOT on show: minimized, hidden by div\.window \[0,0 0×0\] \(display: none\), not laid out$/.test(sw[2]))
+    && gateOf(/^window win-3 chat «proj3» conversation sid-3 — NOT on show: on another desktop, hidden by div\.window/.test(sw[3]))
     && sw[4] === 'window win-5 chat «proj5» — NOT on show: a hidden tab, hidden by div.window-content.tab-hidden [0,0 0×0] (display: none), not laid out'
     && sw[5] === 'window win-6 chat «proj6» conversation sid-6 (a tab of win-5) — ON SHOW [850,90 400×270] · nothing over its middle'
     && sw[6] === 'open over the page: div#user-todos-popup.ut-popup [100,280 420×300] · div.global-toast [900,700 360×60]',
@@ -385,22 +385,22 @@ console.log('⑧ the door says what it saw — a cover by its element, a zero bo
   const big = { page: 'visible, focused', size: '1280×820', desktop: 'd-1', open: Array.from({ length: 20 }, (_, i) => el(i)),
     windows: Array.from({ length: 15 }, (_, i) => ({ id: 'w' + i, type: 'chat', title: longT, conv: null, onShow: true, box: '[0,0 1×1]', active: false, why: [], over: Array.from({ length: 6 }, (_, j) => el(j)) })) };
   const bw = sceneWords(big), w0 = bw[1];
-  ok(bw.length === 1 + B.windows + 1 + 1 && w0.includes('«' + 'T'.repeat(B.title - 1) + '…»') && !w0.includes('T'.repeat(B.title)) && w0.endsWith(`${el(3)} · 2 more`)
+  ok(bw.length === 1 + B.windows + 1 + 1 && gateOf(w0.includes('«' + 'T'.repeat(B.title - 1) + '…»')) && !w0.includes('T'.repeat(B.title)) && gateOf(w0.endsWith(`${el(3)} · 2 more`))
     && bw[1 + B.windows] === `${15 - B.windows} more window(s)` && bw[bw.length - 1] === `open over the page: ${Array.from({ length: B.open }, (_, i) => el(i)).join(' · ')} · ${20 - B.open} more`
-    && /«T{79}…»/.test(lostWords({ laid: false, size: '0×0', hiddenBy: null, win: { id: 'w', type: 'chat', title: longT, onShow: true, why: [] } })),
+    && verdictOf(/«T{79}…»/.test(lostWords({ laid: false, size: '0×0', hiddenBy: null, win: { id: 'w', type: 'chat', title: longT, onShow: true, why: [] } }))),
     `a scene's words are BOUNDED: a title at ${B.title} characters (the cut said «…»), ${B.windows} windows, ${B.over} elements over one, ${B.open} open things — the rest counted, never printed (the door's own sentence too)`, bw.map((l) => l.length));
   // …counted from the PAGE's own counts (the follow-up read's should: the page lists at most 40 open things and 12 over a window, and
   // says how many there were), each named element cut at its own bound, no whole-line cut that could eat a «more»
   const counted = sceneWords({ page: 'visible', size: '1280×820', desktop: null, open: ['x'.repeat(300), ...Array.from({ length: 39 }, (_, i) => el(i))], openCount: 100,
     windows: [{ id: 'w', type: 'chat', title: 't', onShow: true, box: '[0,0 1×1]', why: [], over: Array.from({ length: 12 }, (_, j) => el(j)), overCount: 30 }] });
   const openLine = counted[counted.length - 1];
-  ok(openLine.startsWith('open over the page: ' + 'x'.repeat(B.item - 1) + '… · ') && openLine.endsWith(' · 94 more') && counted[1].endsWith(`${el(3)} · 26 more`),
+  ok(gateOf(openLine.startsWith('open over the page: ' + 'x'.repeat(B.item - 1) + '… · ')) && gateOf(openLine.endsWith(' · 94 more')) && verdictOf(counted[1].endsWith(`${el(3)} · 26 more`)),
     `«N more» is the page's own count (100 open, 40 listed ⇒ «94 more»; 30 over a window, 12 listed ⇒ «26 more»); each element cut at ${B.item} characters`, counted);
   // the read's should: the PAGE half counts what it stops listing (15 distinct elements over win-1, 12 listed; 45 open things, 40 listed)
   const many = (n, tag) => Array.from({ length: n }, (_, i) => W8.mk('div', { cls: tag + i, rect: [10 * i, 0, 10, 10], parent: W8.main }));
   const fifteen = many(15, 'f'), fortyFive = many(45, 'o');
   const sc2 = W8.run(pageSceneSource(), { stack: (x) => (x < 800 ? [...fifteen, W8.c1] : [W8.c6]), open: fortyFive }), sw2 = sceneWords(sc2);
-  ok(sc2.windows[0].overCount === 15 && sc2.windows[0].over.length === 12 && sc2.openCount === 45 && sc2.open.length === 40 && sw2[1].endsWith('· 11 more') && sw2[sw2.length - 1].endsWith('· 39 more'),
+  ok(sc2.windows[0].overCount === 15 && sc2.windows[0].over.length === 12 && sc2.openCount === 45 && sc2.open.length === 40 && gateOf(sw2[1].endsWith('· 11 more')) && verdictOf(sw2[sw2.length - 1].endsWith('· 39 more')),
     'the PAGE half counts what it stops listing — 15 over a window (12 listed), 45 open things (40 listed) — and the words say «11 more», «39 more»', { over: [sc2.windows[0].overCount, sc2.windows[0].over.length], open: [sc2.openCount, sc2.open.length] });
   ok(sceneWords({ error: 'x' })[0] === '(the page could not be read: x)' && W8.run(pageSceneSource(), { stack: [], open: [] }).windows.length === 5, 'a page that cannot be read says so; the scene reads the window manager\'s windows');
 }
@@ -410,36 +410,36 @@ console.log('⑧ the door says what it saw — a cover by its element, a zero bo
   const HIT = { x: 250, y: 320, hits: true, hit: 'button.b [100,300 300×40]' }, HIT2 = { x: 260, y: 330, hits: true, hit: 'button.b [110,310 300×40]' };
   const TOAST = { x: 260, y: 330, hits: false, hit: 'div.global-toast [200,310 300×60]', laid: true, hiddenBy: null, win: null };
   const A = await drive6({ measures: [HIT, { x: 0, y: 0, ...NLO }], unders: [NLO], uncover: true });
-  ok(A.r === false && A.uncovers === 0 && !A.sent.some((x) => x.startsWith('mousePressed')) && /^NOT LAID OUT \(0×0\) — hidden by div\.window .* — seen at the press and once more$/.test(A.miss && A.miss.why)
-    && A.logs.length === 1 && /: NOT LAID OUT \(0×0\) .* — seen at the press and once more — not pressed$/.test(A.logs[0]) && !A.logs.some((l) => /covered/.test(l)),
+  ok(A.r === false && A.uncovers === 0 && !A.sent.some((x) => x.startsWith('mousePressed')) && gateOf(/^NOT LAID OUT \(0×0\) — hidden by div\.window .* — seen at the press and once more$/.test(A.miss && A.miss.why))
+    && A.logs.length === 1 && gateOf(/: NOT LAID OUT \(0×0\) .* — seen at the press and once more — not pressed$/.test(A.logs[0])) && !A.logs.some((l) => /covered/.test(l)),
     'NOT LAID OUT at the press: no uncover, looked at once more, failed BY NAME in one line — never «covered»', A);
   const B = await drive6({ measures: [HIT, HIT2], unders: [NLO, { hits: true }], uncover: true });
-  ok(B.r === true && B.uncovers === 0 && B.reaimed && B.reaimed.notLaidOut === true && B.sent.includes('mousePressed@260,330') && /NOT LAID OUT \(0×0\) .* — seen at the press; laid out again at \(260, 330\) — re-aimed once/.test(B.logs.join('\n')),
+  ok(B.r === true && B.uncovers === 0 && gateOf(B.reaimed) && B.reaimed.notLaidOut === true && gateOf(B.sent.includes('mousePressed@260,330')) && verdictOf(/NOT LAID OUT \(0×0\) .* — seen at the press; laid out again at \(260, 330\) — re-aimed once/.test(B.logs.join('\n'))),
     'a zero box that lays out again on the one more look: pressed where it now is, the line says it (the door\'s one re-aim, as for a move)', B);
   const B2 = await drive6({ measures: [HIT, TOAST, HIT2], unders: [NLO, { hits: true }], uncover: true });
-  ok(B2.r === true && B2.uncovers === 1 && B2.reaimed && B2.reaimed.uncovered === true && B2.sent.includes('mousePressed@260,330') && /seen at the press \(on that look covered by div\.global-toast \[200,310 300×60\] — in no window — the suite's uncover ran once\); laid out again at \(260, 330\)/.test(B2.logs.join('\n')),
+  ok(B2.r === true && B2.uncovers === 1 && gateOf(B2.reaimed) && B2.reaimed.uncovered === true && gateOf(B2.sent.includes('mousePressed@260,330')) && verdictOf(/seen at the press \(on that look covered by div\.global-toast \[200,310 300×60\] — in no window — the suite's uncover ran once\); laid out again at \(260, 330\)/.test(B2.logs.join('\n'))),
     'the read\'s must: laid out on that look but COVERED there — the suite\'s uncover runs once (as the old door\'s did) and the press is made; the cover is said', B2.logs);
   const B3 = await drive6({ measures: [HIT, TOAST], unders: [NLO] });
-  ok(B3.r === false && /— seen at the press; on one more look \(260, 330\) — still not under its point: covered by div\.global-toast \[200,310 300×60\]/.test(B3.miss && B3.miss.why) && !/once more/.test(B3.miss && B3.miss.why) && B3.miss.again && B3.miss.again.hit === TOAST.hit,
+  ok(B3.r === false && gateOf(/— seen at the press; on one more look \(260, 330\) — still not under its point: covered by div\.global-toast \[200,310 300×60\]/.test(B3.miss && B3.miss.why)) && !/once more/.test(B3.miss && B3.miss.why) && gateOf(B3.miss.again) && B3.miss.again.hit === TOAST.hit,
     'laid out on that look and covered, no uncover hook: not pressed — the second look\'s cover NAMED (never «not laid out … once more»), its facts kept (`lastMiss.again`)', B3.miss);
   const C = await drive6({ measures: [{ x: 0, y: 0, ...NLO }], unders: [{ hits: true }], uncover: true });
-  ok(C.r === false && C.uncovers === 0 && C.sent.length === 0 && C.asked.length === 2 && /^NOT LAID OUT \(0×0\)/.test(C.miss && C.miss.why), 'NOT LAID OUT at the first measure: looked at once more (as the uncover\'s second measure gave it before), no uncover, no press — `lastMiss.why` names it', { miss: C.miss, measures: C.asked.length });
+  ok(C.r === false && C.uncovers === 0 && C.sent.length === 0 && C.asked.length === 2 && verdictOf(/^NOT LAID OUT \(0×0\)/.test(C.miss && C.miss.why)), 'NOT LAID OUT at the first measure: looked at once more (as the uncover\'s second measure gave it before), no uncover, no press — `lastMiss.why` names it', { miss: C.miss, measures: C.asked.length });
   const C2 = await drive6({ measures: [{ x: 0, y: 0, ...NLO }, HIT], unders: [{ hits: true }], uncover: true });
-  ok(C2.r === true && C2.uncovers === 0 && C2.sent.includes('mousePressed@250,320'), 'a zero box at the first measure that lays out on the second look is pressed (a single-call suite keeps the recovery it had)', C2.sent);
+  ok(C2.r === true && C2.uncovers === 0 && verdictOf(C2.sent.includes('mousePressed@250,320')), 'a zero box at the first measure that lays out on the second look is pressed (a single-call suite keeps the recovery it had)', C2.sent);
   const D = await drive6({ measures: [HIT, { x: 0, y: 0, ...NLO }], unders: [NLO], look: { found: true, rect: [0, 0, 0, 0], x: 0, y: 0, hits: false, under: 'div', disabled: false, movers: [] } });
-  ok(D.r === false && D.sent.includes('mouseMoved@250,320') && !D.sent.some((x) => /@0,0$/.test(x)) && /NOT LAID OUT/.test(D.miss && D.miss.why),
+  ok(D.r === false && gateOf(D.sent.includes('mouseMoved@250,320')) && !D.sent.some((x) => /@0,0$/.test(x)) && verdictOf(/NOT LAID OUT/.test(D.miss && D.miss.why)),
     'a still look with NO box is never the aim (its centre is the page\'s corner, (0, 0)): the pointer stays at the measured point and the press loop names it', D.sent);
   const E = await drive6({ measures: [HIT], unders: [{ hits: true }], hidden: true }), F = await drive6({ measures: [HIT], unders: [{ hits: true }] });
-  ok(E.r === true && E.front === true && E.logs.some((l) => /the page was HIDDEN \(another page in front\) — the door brought it to the front \(Page\.bringToFront\)/.test(l)) && F.front === false && !F.logs.some((l) => /front/.test(l)),
+  ok(E.r === true && E.front === true && gateOf(E.logs.some((l) => /the page was HIDDEN \(another page in front\) — the door brought it to the front \(Page\.bringToFront\)/.test(l))) && F.front === false && !F.logs.some((l) => /front/.test(l)),
     'the door SAYS when it changes which page is in front (`realClick.front`, a line); a visible page: no line', { hidden: E.logs, visible: F.logs });
   const G = await drive6({ measures: [HIT, HIT2], unders: [{ hits: false, hit: 'div.ut-item [110,290 400×60]', laid: true, hiddenBy: null, win: { id: 'win-1', onShow: true, why: [] } }, { hits: true }], uncover: true });
-  ok(G.r === true && G.uncovers === 1 && /covered at press time by div\.ut-item \[110,290 400×60\] — the suite's uncover ran once; measured again: \(260, 330\)/.test(G.logs.join('\n')), 'a real cover at the press: named by its element and box, the uncover runs once, the point measured again', G.logs);
+  ok(G.r === true && G.uncovers === 1 && verdictOf(/covered at press time by div\.ut-item \[110,290 400×60\] — the suite's uncover ran once; measured again: \(260, 330\)/.test(G.logs.join('\n'))), 'a real cover at the press: named by its element and box, the uncover runs once, the point measured again', G.logs);
   const H = await drive6({ measures: [HIT, HIT2], unders: [{ hits: false, hit: 'main#workspace [0,40 1280×780]', laid: true, hiddenBy: 'div.window [200,80 600×400] (visibility: hidden)', win: null }, { hits: true }] });
-  ok(H.r === true && H.logs.some((l) => /HIDDEN at press time — HIDDEN by div\.window .* the pointer was over main#workspace/.test(l)) && !H.logs.some((l) => /it moved/.test(l)), 'the read\'s should: a target HIDDEN with a box at the press and no uncover hook is said HIDDEN — never «it moved»', H.logs);
-  ok(!A.armSrc.length && B.armSrc.length === 1 && !B.armSrc[0].includes('getBoundingClientRect') && B.armSrc[0].includes('const desc = (n) => (n && n.tagName ? named(n) : null)'), 'the press instant\'s listeners name what they saw WITHOUT reading a box (no layout flush before the product\'s handlers)', B.armSrc.map((x) => x.length));
+  ok(H.r === true && gateOf(H.logs.some((l) => /HIDDEN at press time — HIDDEN by div\.window .* the pointer was over main#workspace/.test(l))) && !H.logs.some((l) => /it moved/.test(l)), 'the read\'s should: a target HIDDEN with a box at the press and no uncover hook is said HIDDEN — never «it moved»', H.logs);
+  ok(!A.armSrc.length && B.armSrc.length === 1 && !B.armSrc[0].includes('getBoundingClientRect') && verdictOf(B.armSrc[0].includes('const desc = (n) => (n && n.tagName ? named(n) : null)')), 'the press instant\'s listeners name what they saw WITHOUT reading a box (no layout flush before the product\'s handlers)', B.armSrc.map((x) => x.length));
   const all = [A, B, B2, B3, C, C2, D, E, F, G, H].flatMap((x) => x.bad);
   ok(all.length === 0 && A.asked.length >= 1, 'every page source the door sent COMPILES (vm) — measure, under, still look, arm probe, landing', all);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass}) — ${Date.now() - t0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

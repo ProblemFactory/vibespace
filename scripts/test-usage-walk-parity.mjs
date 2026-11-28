@@ -28,7 +28,7 @@ const { UsageHistory: LedgerOf } = require(path.join(REPO, 'src/usage-history.js
 class UsageHistory extends LedgerOf { constructor(o) { super(o); this.ledgerWindowMs = this.ledgerHotMaxBytes = 1e15; } }
 
 let pass = 0, fail = 0;
-const ok = (c, n, why) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (why ? ' — ' + why : '')); } };
+const ok = (c, n, why) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (why ? ' — ' + why : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -88,9 +88,9 @@ ok(onlyRemote.length === 0, 'nothing counted remotely is missed locally' + (only
 // requestId, so per-message billing lookups join on message.id — BOTH walkers
 // must carry it or remote replies can never attribute in the popup.
 const remoteEvs = stdout.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-ok(remoteEvs.every((e) => e.mid && e.mid.startsWith('msg_')), 'remote walker emits the mid join field on every event');
+ok(verdictOf(remoteEvs.every((e) => e.mid && e.mid.startsWith('msg_'))), 'remote walker emits the mid join field on every event');
 const localEvsAll = (localEvents?.events || localEvents || []);
-ok(localEvsAll.every((e) => e.mid && String(e.mid).startsWith('msg_')), 'local walker bakes mid on every event');
+ok(verdictOf(localEvsAll.every((e) => e.mid && String(e.mid).startsWith('msg_'))), 'local walker bakes mid on every event');
 
 // Cursor semantics: a second run must emit NOTHING new (both sides are
 // incremental; a re-emitting scanner would double-count on every harvest).
@@ -120,8 +120,8 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   const r1 = runUsageWalk({ home, cursorFile: modCursor });
   const modRids = new Set(r1.events.map((l) => { try { return JSON.parse(l).rid; } catch { return null; } }).filter(Boolean));
   ok(modRids.size === 5, `walker MODULE counts everything the scanner does (${modRids.size}/5)`);
-  ok([...afterRids].every((r) => modRids.has(r)), 'module coverage identical to the local walk');
-  ok(r1.events.every((l) => { const e = JSON.parse(l); return e.mid && e.mid.startsWith('msg_'); }), 'module emits the mid join field on every event');
+  ok(verdictOf([...afterRids].every((r) => modRids.has(r))), 'module coverage identical to the local walk');
+  ok(verdictOf(r1.events.every((l) => { const e = JSON.parse(l); return e.mid && e.mid.startsWith('msg_'); })), 'module emits the mid join field on every event');
   ok(!fs.existsSync(modCursor), 'module NEVER persists the cursor itself (two-phase commit is the caller)');
   // caller-committed cursor → next walk emits nothing (incremental holds)
   fs.writeFileSync(modCursor, JSON.stringify(r1.cursors));
@@ -189,7 +189,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   if (prevCodexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCodexHome;
   const l3 = uh3._loadEvents();
   const localCx = (l3?.events || l3 || []).filter((e) => e.be === 'codex');
-  ok(localCx.length === 2 && localCx.every((e, i) => e.rid === scCx[i].rid), 'LOCAL walk counts the same codex rids (three-walker parity)');
+  ok(localCx.length === 2 && verdictOf(localCx.every((e, i) => e.rid === scCx[i].rid)), 'LOCAL walk counts the same codex rids (three-walker parity)');
   ok(localCx[0].mid === 'resp_p1' && localCx[0].effort === 'high' && !('mid' in localCx[1]), 'LOCAL ledger bakes the same mid/effort (scan enrichment passes them through)');
   // the rid-info route's two lookups (rid first, mid fallback) resolve a codex event
   ok((await uh3.eventForRid('cx:' + TID + ':1050'))?.mid === 'resp_p1', 'eventForRid finds the codex event by its ledger key');
@@ -283,7 +283,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   const cut = "if (cur.forkTs && ts <= cur.forkTs + 2000) return;";
   fs.writeFileSync(ctl, src.replace(cut, ''));
   const ctlEvs = scan(ctl, path.join(dataDir, 'fk-ctl-cursor.json'));
-  ok(src.includes(cut) && ctlEvs.length === 5 && ctlEvs.filter((e) => e.sid === FID).length === 3, `CONTROL: without the skip the scanner counts the 2 replayed requests again under the fork's thread (${ctlEvs.length} rows)`);
+  ok(gateOf(src.includes(cut)) && ctlEvs.length === 5 && ctlEvs.filter((e) => e.sid === FID).length === 3, `CONTROL: without the skip the scanner counts the 2 replayed requests again under the fork's thread (${ctlEvs.length} rows)`);
 }
 
 // ── FORK REPLAY ENDS BY IDENTITY (verify r1): the 2 s window alone drops a
@@ -352,7 +352,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   const end = "if (tid != null && tid >= cur.forkOwn && (r.type === 'turn_context' || p.type === 'task_started')) cur.forkTs = 0;";
   const ctlScan = (name, text) => { const f = path.join(dataDir, name); fs.writeFileSync(f, text); return scan(f, path.join(dataDir, name + '-cursor.json')); };
   const noEnd = ctlScan('scan-no-identity-end', src.replace(end, ''));
-  ok(src.includes(end) && rids(noEnd) === 'cx:' + PID + ':1050', `CONTROL: the window alone drops the fork's own fast request (${rids(noEnd)})`);
+  ok(gateOf(src.includes(end)) && rids(noEnd) === 'cx:' + PID + ':1050', `CONTROL: the window alone drops the fork's own fast request (${rids(noEnd)})`);
   const anyId = ctlScan('scan-any-turn-ends', src.replace('tid >= cur.forkOwn &&', 'true &&'));
   ok(anyId.filter((e) => e.sid === FID).length === 2, `CONTROL: if an ancestor's (older) turn id ended the replay, the replayed request would count again (${anyId.filter((e) => e.sid === FID).length} fork rows)`);
 }
@@ -442,7 +442,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     ok(modR.req_o_ren0?.cwd === OLD && modR.req_o_ren1?.cwd === OREPO,
       'NEGATIVE CONTROL: a MAIN row still carries its own record\'s cwd — only agent rows are re-attributed');
   }
-  ok(scanOrg.every((e) => typeof e.origin === 'string' && e.origin),
+  ok(verdictOf(scanOrg.every((e) => typeof e.origin === 'string' && e.origin)),
     'the shipped scanner stamps an origin on EVERY event (a remote host that runs workflows is exactly where the split matters)');
   ok(so.req_o_wf?.wf === 'wf_run9' && so.req_o_wf?.agent === 'agent-wt' && so.req_o_wf?.wcwd === OTREE,
     'the shipped scanner carries wf/agent/wcwd too — the 2.265.0/2.271.0 one-sided-port class');
@@ -530,8 +530,8 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   ok(sidsDiff.length === 0, `both spellings agree on ${TABLE_SIDS.length} session ids`, JSON.stringify(sidsDiff));
   // The table must be non-vacuous in BOTH directions, or "they agree" would be
   // satisfied by two predicates that always say no.
-  ok(TABLE_DIRS.some((d) => G.isFixtureProjectDir(d)) && TABLE_DIRS.some((d) => !G.isFixtureProjectDir(d))
-    && TABLE_SIDS.some((d) => G.isFixtureSid(d)) && TABLE_SIDS.some((d) => !G.isFixtureSid(d)),
+  ok(gateOf(TABLE_DIRS.some((d) => G.isFixtureProjectDir(d))) && gateOf(TABLE_DIRS.some((d) => !G.isFixtureProjectDir(d)))
+    && gateOf(TABLE_SIDS.some((d) => G.isFixtureSid(d))) && verdictOf(TABLE_SIDS.some((d) => !G.isFixtureSid(d))),
     'the parity table exercises both answers (an all-no table would agree vacuously)');
 
   fs.rmSync(fxHome, { recursive: true, force: true });
@@ -599,7 +599,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   const hooked = walkB({ home: bHome, codexSessionsDir: cxRoot, cursors: {}, budgetBytes: MiB,
     onBudget: () => { yields++; return new Promise(setImmediate); } });
   ok(!!hooked && typeof hooked.then === 'function', 'the hooked walk answers a PROMISE (async only when a hook is given)');
-  ok(!!syncW && typeof syncW.then !== 'function' && Array.isArray(syncW.events), 'without a hook the walk stays SYNCHRONOUS (the daemon child + the shipped scanner form)');
+  ok(!!syncW && typeof syncW.then !== 'function' && verdictOf(Array.isArray(syncW.events)), 'without a hook the walk stays SYNCHRONOUS (the daemon child + the shipped scanner form)');
   const yW = await hooked;
   const scanCur = path.join(bData, 'budget-scan-cursor.json');
   const scanEvB = execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {
@@ -607,7 +607,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   }).split('\n').filter(Boolean);
   const scanCurB = JSON.parse(fs.readFileSync(scanCur, 'utf-8'));
   console.log(`  budget fixture: ${(fixtureBytes / MiB).toFixed(2)} MiB consumed, ${syncW.events.length} events, ${yields} yields at 1 MiB (zstd ${ZSTD_OK ? 'on' : 'off'})`);
-  ok(syncW.events.length > 1000 && syncW.events.some((l) => l.includes('"be":"codex"')), `the budget fixture is non-vacuous (${syncW.events.length} events, codex included)`);
+  ok(syncW.events.length > 1000 && verdictOf(syncW.events.some((l) => l.includes('"be":"codex"'))), `the budget fixture is non-vacuous (${syncW.events.length} events, codex included)`);
   ok(JSON.stringify(yW.events) === JSON.stringify(syncW.events), 'EVENTS: the budgeted yielding walk ≡ the sync module walk');
   ok(JSON.stringify(scanEvB) === JSON.stringify(syncW.events), 'EVENTS: ≡ the shipped scanner (byte-identical NDJSON)');
   ok(JSON.stringify(yW.cursors) === JSON.stringify(syncW.cursors), 'CURSORS: the yielding walk ≡ the sync walk (whole lines only, the cut tail unconsumed)');
@@ -633,7 +633,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     const fdsBefore = fs.readdirSync('/proc/self/fd').length;
     let threw = null;
     try { await walkB({ home: bHome, codexSessionsDir: cxRoot, cursors: {}, budgetBytes: MiB, onBudget: () => Promise.reject(new Error('hook down')) }); } catch (e) { threw = e; }
-    ok(threw && threw.message === 'hook down' && fs.readdirSync('/proc/self/fd').length === fdsBefore, 'a rejected hook rejects the walk and leaks no descriptor (the suspended file is closed)');
+    ok(gateOf(threw) && threw.message === 'hook down' && fs.readdirSync('/proc/self/fd').length === fdsBefore, 'a rejected hook rejects the walk and leaks no descriptor (the suspended file is closed)');
   }
 
   // NEGATIVE CONTROL (a scratch-dir patched copy): the plausible one-sided bug
@@ -696,12 +696,12 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     if (prevCx === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCx;
     let r0 = null, threw = null;
     try { r0 = uhB.scan(true); } catch (e) { threw = e; }
-    ok(!threw && r0 && typeof r0.then === 'function' && typeof uhB.scanSettled === 'function', 'UsageHistory.scan() runs the yielding walk (a promise) and exposes scanSettled()');
+    ok(!threw && gateOf(r0) && typeof r0.then === 'function' && typeof uhB.scanSettled === 'function', 'UsageHistory.scan() runs the yielding walk (a promise) and exposes scanSettled()');
     if (r0 && typeof r0.then === 'function' && typeof uhB.scanSettled === 'function') {
       await new Promise(setImmediate);
       ok(gates.length === 1, `the walk is parked at its first budget point (${gates.length} gate)`);
       const again = uhB.scan(true);
-      ok(again && again.skipped === true && typeof again.then !== 'function', 'a scan while one is in flight keeps the SYNC {skipped} answer (single-flight)');
+      ok(gateOf(again) && again.skipped === true && typeof again.then !== 'function', 'a scan while one is in flight keeps the SYNC {skipped} answer (single-flight)');
       const shardEvs = () => { const l = uhB._loadEvents(); return (l?.events || l || []).length; };
       ok(shardEvs() === 0, 'nothing of the walk is visible yet — the ledger is appended once, at the end (no half ledger)');
       // the route, through the real registration, on a fake app
@@ -725,10 +725,10 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
       const done = await uhB.scanSettled();
       await pRoute;
       ok(settledAt === syncW.events.length, `scanSettled() resolves after the LAST event is in the ledger (${settledAt}/${syncW.events.length})`);
-      ok(done && done.added === syncW.events.length && done.filesTouched === syncW.filesTouched, 'scanSettled() carries the scan\'s own answer {added, filesTouched}');
+      ok(gateOf(done) && done.added === syncW.events.length && done.filesTouched === syncW.filesTouched, 'scanSettled() carries the scan\'s own answer {added, filesTouched}');
       const post = uhB.aggregate({});
       const COST12 = (k, v) => (k === 'cost' && typeof v === 'number' ? Number(v.toPrecision(12)) : v);   // B-360d unit 1: a cost to 12 significant digits (law 2's 1e-9)
-      ok(answered && JSON.stringify(answered.totals, COST12) === JSON.stringify(post.totals, COST12) && answered.totals && post.totals && JSON.stringify(post.totals) !== JSON.stringify(new UsageHistory({ dataDir: path.join(bData, 'empty'), homeDir: path.join(bHome, 'nowhere') }).aggregate({}).totals),
+      ok(gateOf(answered) && JSON.stringify(answered.totals, COST12) === JSON.stringify(post.totals, COST12) && gateOf(answered.totals) && gateOf(post.totals) && JSON.stringify(post.totals) !== JSON.stringify(new UsageHistory({ dataDir: path.join(bData, 'empty'), homeDir: path.join(bHome, 'nowhere') }).aggregate({}).totals),
         'the route\'s totals EQUAL the post-walk totals (and are non-empty) — never a partial answer');
       uhB.flushCursors();   // lane hub-loop-stalls: the cursors go through the store writer — on disk now for the read
       const cur2 = JSON.parse(fs.readFileSync(path.join(bData, 'usage-history', '_cursors.json'), 'utf-8'));
@@ -736,7 +736,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
       ok(uhB.scan().skipped === true, 'the 15 s throttle keeps its meaning (an unforced scan right after answers {skipped})');
       // the popup lookups await the settled walk too
       const evR = await uhB.eventForRid('req_b1');
-      ok(evR && evR.rid === 'req_b1' && (await uhB.eventForMid('msg_b2'))?.rid === 'req_b2', 'eventForRid / eventForMid answer from the settled ledger');
+      ok(gateOf(evR) && evR.rid === 'req_b1' && (await uhB.eventForMid('msg_b2'))?.rid === 'req_b2', 'eventForRid / eventForMid answer from the settled ledger');
     }
   }
   fs.rmSync(bHome, { recursive: true, force: true });
@@ -776,8 +776,8 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     return { stopped, wholeOk, calls, after: JSON.stringify(handed) === before ? 'as found' : 'ADVANCED' };
   };
   const m = await modLegs(walk6, 'real');
-  ok(m.stopped, `B-6ded MODULE: a walk stopped at its 2nd budget point leaves the map handed to it exactly as it found it — every key, every entry the same object, the same offset (${m.after})`);
-  ok(m.wholeOk, 'B-6ded MODULE: a whole walk RETURNS its advanced cursors as a map of its own — the one handed in is unchanged (the caller commits)');
+  ok(verdictOf(m.stopped), `B-6ded MODULE: a walk stopped at its 2nd budget point leaves the map handed to it exactly as it found it — every key, every entry the same object, the same offset (${m.after})`);
+  ok(verdictOf(m.wholeOk), 'B-6ded MODULE: a whole walk RETURNS its advanced cursors as a map of its own — the one handed in is unchanged (the caller commits)');
 
   // (b) THE HUB, through UsageHistory: the readers' scenes, the mount gate tripping at a chosen yield of ONE walk
   let sceneNo = 0;
@@ -822,7 +822,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   for (const [label, budget, once, run] of SCENES) {
     const sc = hubScene(budget);
     const v = verdict(sc, await run(sc), once);
-    ok(v.good, `B-6ded HUB ${label}: the stopped walk leaves \`_cursors\` as it found it; after the next walk every request is in the ledger${once ? ', once' : ''}`, v.why);
+    ok(verdictOf(v.good), `B-6ded HUB ${label}: the stopped walk leaves \`_cursors\` as it found it; after the next walk every request is in the ledger${once ? ', once' : ''}`, v.why);
   }
   // the commit's own failure: an append that throws (December's shard path is a directory) after November's rows landed —
   // the map as the walk found it; the fault cleared, the next walk appends December and refuses November's re-read
@@ -837,7 +837,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     fs.rmdirSync(dec);
     const after = await sc.walk();
     const rows = sc.rows(), miss = sc.missing();
-    ok(failed.r && failed.r.error && failed.kept && midRows === 5 && miss.length === 0 && rows.length === new Set(rows).size && after.r.added === 3 && after.r.reWalked === 3,
+    ok(gateOf(failed.r) && gateOf(failed.r.error) && gateOf(failed.kept) && midRows === 5 && miss.length === 0 && rows.length === new Set(rows).size && after.r.added === 3 && after.r.reWalked === 3,
       'B-6ded HUB an append that fails AT the commit (one shard written, the next refused): `_cursors` as the walk found it; once the fault clears every request is in the ledger once — the re-read rows refused by the ledger\'s id filter',
       `error ${failed.r && failed.r.error}, map ${failed.kept ? 'as found' : 'ADVANCED'}, ${midRows} rows mid-way, then added ${after.r.added} reWalked ${after.r.reWalked}, missing ${JSON.stringify(miss)}, ${rows.length} rows / ${new Set(rows).size}`);
   }
@@ -864,7 +864,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     });
     const kept = Buffer.compare(before, fs.readFileSync(scCur)) === 0;
     const next = live();
-    ok(first.length === 2 && dead.code === 1 && kept && next.length === 400 && JSON.parse(next[0]).rid === 'req_3',
+    ok(first.length === 2 && dead.code === 1 && gateOf(kept) && next.length === 400 && JSON.parse(next[0]).rid === 'req_3',
       'B-6ded SCANNER a dead stdout pipe (EPIPE) leaves the scanner\'s cursor file byte for byte; the next live run emits all 400 events of those bytes',
       `first ${first.length}, dead run exit ${dead.code}/${dead.sig}, cursor ${kept ? 'as found' : 'WRITTEN'}, next run ${next.length} events`);
   }
@@ -888,14 +888,14 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     return { stopped: !!(threw && threw.paused) && JSON.stringify(handed) === before && handed[fp] === entry, after: JSON.stringify(handed) === before ? 'as found' : 'ADVANCED' };
   };
   const cm = await codexModLeg(walk6, 'real');
-  ok(cm.stopped, `B-6ded CODEX MODULE: a walk over a grown rollout stopped at its 2nd budget point leaves the handed map as it found it — the rollout's entry the same object (${cm.after})`);
+  ok(verdictOf(cm.stopped), `B-6ded CODEX MODULE: a walk over a grown rollout stopped at its 2nd budget point leaves the handed map as it found it — the rollout's entry the same object (${cm.after})`);
   for (const at of [1, 3, 6]) {
     const sc = hubScene(300), cxRoot = path.join(sc.home, '.codex'), w = cxWriter(rolloutOf(cxRoot));
     w.open(); w.add(2); await sc.walk();
     w.add(20);
     const cut = await sc.walk(at); await sc.walk(); await sc.walk();
     const rows = sc.rows(), distinct = new Set(rows).size;
-    ok(cut.r && cut.r.paused === true && cut.kept && distinct === w.n && rows.length === distinct,
+    ok(gateOf(cut.r) && cut.r.paused === true && gateOf(cut.kept) && distinct === w.n && rows.length === distinct,
       `B-6ded CODEX HUB a paused walk over a grown rollout (the gate at yield ${at}): \`_cursors\` as it found it; after the next walk all ${w.n} requests in the ledger, once`,
       `paused ${!!(cut.r && cut.r.paused)} at yield ${cut.yields}, map ${cut.kept ? 'as found' : 'MOVED'}, ${rows.length} rows / ${distinct} distinct of ${w.n}`);
   }
@@ -913,7 +913,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     fs.rmdirSync(dec);
     const after = await sc.walk();
     const rows = sc.rows(), miss = sc.missing();
-    ok(failed.r && failed.r.error && failed.kept && miss.length === 0 && rows.length === new Set(rows).size && after.r.added === 3 && after.r.reWalked === 3,
+    ok(gateOf(failed.r) && gateOf(failed.r.error) && gateOf(failed.kept) && miss.length === 0 && rows.length === new Set(rows).size && after.r.added === 3 && after.r.reWalked === 3,
       'B-6ded HUB a WARM ledger, an append that fails at the commit after one shard landed: the next walk refuses what landed (the filter knows a half-done commit\'s rows) — every request once',
       `map ${failed.kept ? 'as found' : 'ADVANCED'}, then added ${after.r.added} reWalked ${after.r.reWalked}, ${rows.length} rows / ${new Set(rows).size}, missing ${JSON.stringify(miss)}`);
   }
@@ -953,7 +953,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     const rounds = [];
     for (let i = 1; i <= 12 && (i <= 3 || missingR() > 0); i++) { if (i === 2 || i === 3) addR(20); const r = await harvest(); rounds.push(r.err ? 'ERR ' + r.err : r.appended); }
     const said = calls().filter((l) => l !== 'down');
-    ok(first.appended === 2 && rounds.length >= 3 && rounds.every((x) => typeof x === 'number' && x > 0 && x <= Math.ceil(B.maxBytes / 190))   /* an event line is ≥ 190 bytes here: a run stops at the line that crosses the bound */ && missingR() === 0 && said.every((l) => l.includes(`VIBESPACE_USAGE_SCAN_MAX_BYTES=${B.maxBytes} VIBESPACE_USAGE_SCAN_MAX_MS=${B.maxMs} node `)),
+    ok(first.appended === 2 && rounds.length >= 3 && gateOf(rounds.every((x) => typeof x === 'number' && x > 0 && x <= Math.ceil(B.maxBytes / 190)))   /* an event line is ≥ 190 bytes here: a run stops at the line that crosses the bound */ && missingR() === 0 && verdictOf(said.every((l) => l.includes(`VIBESPACE_USAGE_SCAN_MAX_BYTES=${B.maxBytes} VIBESPACE_USAGE_SCAN_MAX_MS=${B.maxMs} node `))),
       `B-6ded HARVEST a backlog over the hub's limits (240 requests, a ${hm.usageHarvestLimits.maxBuffer}-byte buffer) lands over ${rounds.length} harvests, each one within the bound the command carries, the spend made meanwhile with it — none missing`,
       `rounds ${JSON.stringify(rounds)}, missing ${missingR()} of ${k}, command ${said.length ? said[said.length - 1].slice(-110) : '—'}`);
     // a failed harvest backs off: the next kick does not walk the machine again at once
@@ -964,7 +964,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     if (b1) b1.until = 0;   // the clock past the first pause
     const f3 = await harvest({ minIntervalMs: 60000 });
     const b2 = hm._usageHarvestFail && hm._usageHarvestFail.get('h-ssh'), wait2 = b2 ? b2.until - Date.now() : 0;
-    ok(f1.err && f2.throttled && f2.backoff && f2.backoff.failures === 1 && calls().length - n0 === 2 && f3.err && b2 && b2.n === 2 && wait2 > 110000 && wait2 <= 120000,
+    ok(gateOf(f1.err) && gateOf(f2.throttled) && gateOf(f2.backoff) && f2.backoff.failures === 1 && calls().length - n0 === 2 && gateOf(f3.err) && gateOf(b2) && b2.n === 2 && wait2 > 110000 && wait2 <= 120000,
       'B-6ded HARVEST a failed harvest BACKS OFF: the kick right after it walks nothing (1 min), the next failure doubles the pause (2 min)',
       `f1 ${JSON.stringify(f1)}, f2 ${JSON.stringify(f2)}, ssh runs ${calls().length - n0}, then ${b2 ? b2.n : '—'} failures, ${Math.round(wait2 / 1000)} s`);
     onPath(okBin); if (b2) b2.until = 0; addR(3);
@@ -1006,7 +1006,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
       const all = [], sizes = []; let sawPart = false;
       for (let i = 0; i < 400; i++) { const evs = runIn(cur, env, tick); sizes.push(evs.length); all.push(...evs); try { if (Object.values(JSON.parse(fs.readFileSync(cur, 'utf8'))).some((c) => c.zpart)) sawPart = true; } catch { } if (!evs.length) break; }
       const endCur = fs.readFileSync(cur, 'utf8');
-      ok(sizes.length > 3 && JSON.stringify(all) === JSON.stringify(w1.events) && endCur === JSON.stringify(w2.cursors) && (!zOK || label !== 'bytes' || sawPart),
+      ok(sizes.length > 3 && JSON.stringify(all) === JSON.stringify(w1.events) && endCur === JSON.stringify(w2.cursors) && (!zOK || label !== 'bytes' || verdictOf(sawPart)),
         `B-6ded SCANNER runs held to a small bound in ${label} emit, over ${sizes.length - 1} runs, exactly the ${w1.events.length} events of one walk in its order, and end at the walk's cursors${zOK && label === 'bytes' ? ' (a compressed rollout read part-way, then on)' : ''}`,
         `runs ${sizes.length}, events ${all.length} vs ${w1.events.length}, cursor ${endCur === JSON.stringify(w2.cursors) ? 'equal' : 'DIFFERS'}, zpart seen ${sawPart}`);
     }
@@ -1067,7 +1067,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   };
   for (const n of [1000, 10000]) {
     const r = await opsBetween(walkU, n);
-    ok(r.max <= 256 + 2 && r.yields >= Math.floor(n / 256) && r.same, `U2 ${n} unchanged transcripts: at most ${r.max} directory reads + stats between two yields (${r.yields} yields), the cursors = the sync walk's`);
+    ok(r.max <= 256 + 2 && r.yields >= Math.floor(n / 256) && verdictOf(r.same), `U2 ${n} unchanged transcripts: at most ${r.max} directory reads + stats between two yields (${r.yields} yields), the cursors = the sync walk's`);
   }
   { // the op yields among CHANGED files too (a small budget): the same events and cursors as the sync walk
     const h = path.join(uRoot, 'changed'), d = path.join(h, '.claude', 'projects', '-srv-work-c'); fs.mkdirSync(d, { recursive: true });
@@ -1081,7 +1081,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     let rd = 0; const rd0 = fs.readdirSync, st0 = fs.statSync;
     fs.statSync = function (p0, ...a) { if (String(p0).startsWith(d + path.sep)) rd++; return st0.call(this, p0, ...a); };
     let wb; try { wb = await walkU({ home: h, codexSessionsDir: path.join(h, 'no-codex'), cursors: {}, budgetBytes: 1 << 20, budgetOps: 3, onBudget: () => new Promise(setImmediate) }); } finally { DOOR.blocked = b0; fs.statSync = st0; }
-    ok(wb && wb.events.length < 20 && rd < 20, `U2 a folder whose mount is blocked mid-walk is left after the yield: ${rd} of its 20 files statted, ${wb && wb.events.length} events (the next walk reads on from the cursors)`);
+    ok(gateOf(wb) && wb.events.length < 20 && rd < 20, `U2 a folder whose mount is blocked mid-walk is left after the yield: ${rd} of its 20 files statted, ${wb && wb.events.length} events (the next walk reads on from the cursors)`);
   }
   const uSrc = fs.readFileSync(path.join(REPO, 'src/usage-walker.js'), 'utf-8');
   const byteOnly = editAnchor(uSrc, 'if (++meter.ops < meter.opsBudget) return false;\n    meter.ops = 0; yield;', 'if (true) return false;\n    meter.ops = 0; yield;', "src/usage-walker.js");
@@ -1100,11 +1100,11 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   const syncMap = mu._metaMap(); const runSync = Math.max(maxRun, parsed);
   ok(JSON.stringify(asyncMap) === JSON.stringify(syncMap) && Object.keys(syncMap).length === 1000 && runAsync <= 16, `U2 the scan's session metas: the same ${Object.keys(asyncMap).length}-row map, at most ${runAsync} parsed between two of the scan's yields`);
   ok(runSync === 1000, `control (the sync map, the release's scan road): ${runSync} metas parsed in one run ⇒ RED`);
-  ok(/const meta = await this\._metaMapAsync\(\);/.test(fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8')), 'U2 the scan (_walkAndAppend) takes the metas on their own road');
+  ok(verdictOf(/const meta = await this\._metaMapAsync\(\);/.test(fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8'))), 'U2 the scan (_walkAndAppend) takes the metas on their own road');
   fs.rmSync(uRoot, { recursive: true, force: true });
 }
 
 fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

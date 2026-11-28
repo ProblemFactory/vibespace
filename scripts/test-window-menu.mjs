@@ -34,7 +34,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -126,21 +126,21 @@ try {
     const ok = [${JSON.stringify(w1)}, ${JSON.stringify(w2)}].every((id) => { const w = app.wm.windows.get(id); const sp = (w && w._openSpec) || {};
       return (app.sidebar?._allSessions || []).some((s) => (sp.backendSessionId && s.sessionId === sp.backendSessionId) || (sp.serverId && s.webuiId === sp.serverId)); });
     if (ok || Date.now() - t0 > 15000) return res(ok); setTimeout(look, 250); })(); })`);
-  check('both terminals are sessions the sidebar lists (Rename / Task Groups follow them)', bothListed);
+  check('both terminals are sessions the sidebar lists (Rename / Task Groups follow them)', verdictOf(bothListed));
 
   // ── title-bar menu, default scope (overlap) ──
   const m1 = await openTitleMenu(w1);
   check('title-bar right-click opens a menu', !!m1, JSON.stringify(m1));
   check('menu has Switch window submenu', !!m1?.sub, JSON.stringify(m1?.top));
-  check('overlap scope lists the overlapping terminal', (m1?.sub || []).some((s) => s.includes('zwei-term')), JSON.stringify(m1?.sub));
-  check('menu has Rename', (m1?.top || []).some((s) => s.includes('Rename')), JSON.stringify(m1?.top));
-  check('menu keeps Move/Minimize/Close', ['Move', 'Minimize', 'Close'].every((k) => (m1?.top || []).some((s) => s.includes(k))), JSON.stringify(m1?.top));
+  check('overlap scope lists the overlapping terminal', verdictOf((m1?.sub || []).some((s) => s.includes('zwei-term'))), JSON.stringify(m1?.sub));
+  check('menu has Rename', verdictOf((m1?.top || []).some((s) => s.includes('Rename'))), JSON.stringify(m1?.top));
+  check('menu keeps Move/Minimize/Close', verdictOf(['Move', 'Minimize', 'Close'].every((k) => (m1?.top || []).some((s) => s.includes(k)))), JSON.stringify(m1?.top));
 
   // task group present → Task Groups submenu appears
   await fetch(`http://127.0.0.1:${PORT}/api/tasks`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'menu-smoke-group' }) });
   await sleep(1200); // tasks-updated broadcast → sidebar._tasks
   const m2 = await openTitleMenu(w1);
-  check('menu has Task Groups submenu (session window)', (m2?.top || []).some((s) => s.includes('Task Groups')), JSON.stringify(m2?.top));
+  check('menu has Task Groups submenu (session window)', verdictOf((m2?.top || []).some((s) => s.includes('Task Groups'))), JSON.stringify(m2?.top));
 
   // ── scope: all — non-overlapping windows appear too ──
   await evalJs(`(() => { const b = app.wm.windows.get(${JSON.stringify(w2)});
@@ -150,7 +150,7 @@ try {
   await evalJs(`app.settings.set('window.titlebarSwitchScope', 'all')`);
   await sleep(300);
   const mAll = await openTitleMenu(w1);
-  check('scope=all lists the non-overlapping terminal', (mAll?.sub || []).some((s) => s.includes('zwei-term')), JSON.stringify(mAll?.sub));
+  check('scope=all lists the non-overlapping terminal', verdictOf((mAll?.sub || []).some((s) => s.includes('zwei-term'))), JSON.stringify(mAll?.sub));
 
   // clicking the entry focuses the target window
   await evalJs(`(() => {
@@ -159,7 +159,7 @@ try {
     const entry = [...subEl.querySelectorAll('div > div')].find((el) => el.textContent.includes('zwei-term'));
     entry.click(); return true; })()`);
   await sleep(300);
-  check('clicking the submenu entry focuses the window', await evalJs(`app.wm.activeWindowId === ${JSON.stringify(w2)}`));
+  check('clicking the submenu entry focuses the window', verdictOf(await evalJs(`app.wm.activeWindowId === ${JSON.stringify(w2)}`)));
 
   // ── taskbar item right-click carries Rename too ──
   const tb = await evalJs(`(() => {
@@ -170,8 +170,8 @@ try {
     item.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 8, clientY: r.top + 8 }));
     const menu = document.querySelector('[data-popover]');
     return menu ? [...menu.children].map((el) => el.firstChild?.textContent ?? el.textContent) : null; })()`);
-  check('taskbar item menu has Rename', (tb || []).some((s) => s && s.includes('Rename')), JSON.stringify(tb));
-  check('taskbar item menu has Task Groups', (tb || []).some((s) => s && s.includes('Task Groups')), JSON.stringify(tb));
+  check('taskbar item menu has Rename', verdictOf((tb || []).some((s) => s && s.includes('Rename'))), JSON.stringify(tb));
+  check('taskbar item menu has Task Groups', verdictOf((tb || []).some((s) => s && s.includes('Task Groups'))), JSON.stringify(tb));
   check('taskbar item menu has NO switch submenu (title-bar only)', !(tb || []).some((s) => s && s.includes('Switch window')), JSON.stringify(tb));
 } catch (e) {
   failed++; console.error('  ✗ harness threw:', e.message);
@@ -181,4 +181,4 @@ try {
 
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nwindow-menu smoke passed');
-process.exit(0);
+process.exit(0); import { verdictOf } from './lib/check.mjs';

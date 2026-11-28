@@ -70,7 +70,7 @@ const code = (f) => read(f).split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, ''
 let pass = 0, fail = 0, skips = 0;
 // a leg that cannot run here is COUNTED as a skip, never a pass (the hosted mirror is a depth-one clone)
 const skip = (n) => { skips++; console.log('  - SKIP ' + n); };
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
 
 let CW = null; try { CW = require(path.join(REPO, 'src/cache-warmth.js')); } catch (e) { CW = { why: e.message.split('\n')[0] }; }
 ok('THE TIER FUNCTION exists — src/cache-warmth.js tierOf / warmthOf / warmthTitle (RED on 3f8429cd5: there was none)', !!(CW.tierOf && CW.warmthOf && CW.warmthTitle), CW.why || '');
@@ -90,7 +90,7 @@ if (HAVE) {
     ok(`${label}: every boundary ± 1 s (fresh 0–20 · mid 20–40 · late 40–50 · critical 50–60 · expired) — a boundary is the LATER tier`, bad.length === 0, bad.join('; '));
   }
   ok('5 min: the same proportions in seconds — 99 s fresh, 100 s mid, 249 s late, 250 s critical, 299 s critical, 300 s expired',
-    [[99, 'fresh'], [100, 'mid'], [199, 'mid'], [200, 'late'], [249, 'late'], [250, 'critical'], [299, 'critical'], [300, 'expired']].every(([s, w]) => tierOf({ agoMs: s * 1000, ttlMs: 300e3 }) === w));
+    verdictOf([[99, 'fresh'], [100, 'mid'], [199, 'mid'], [200, 'late'], [249, 'late'], [250, 'critical'], [299, 'critical'], [300, 'expired']].every(([s, w]) => tierOf({ agoMs: s * 1000, ttlMs: 300e3 }) === w)));
   ok('no TTL (an unknown harness) ⇒ unknown; a nonsense ago ⇒ unknown; a negative ago (a clock ahead) ⇒ fresh',
     tierOf({ agoMs: 5, ttlMs: null }) === 'unknown' && tierOf({ agoMs: 5, ttlMs: 0 }) === 'unknown' && tierOf({ agoMs: NaN, ttlMs: 3600e3 }) === 'unknown' && tierOf() === 'unknown' && tierOf({ agoMs: -5e3, ttlMs: 3600e3 }) === 'fresh');
 }
@@ -107,8 +107,8 @@ if (HAVE) {
   const naive = tierOf({ agoMs: (S - 3600e3 + 6 * 60e3) - fact.lastRequestAt, ttlMs: 3600e3 });
   ok('…where the device clock alone would have said otherwise (the control: its own now against the hub\'s stamp)', naive !== 'critical', naive);
   ok('a device clock that steps BACK after the answer counts as no time (never younger than the answer said)', warmthOf(fact, { serverNow: S, receivedAt: 10_000, now: 4_000 }).leftMs === 15 * 60e3);
-  ok('the time SINCE the answer runs the band down: 15 min later ⇒ expired, frac 0', (() => { const x = warmthOf(fact, { serverNow: S, receivedAt: 0, now: 15 * 60e3 }); return x.tier === 'expired' && x.frac === 0 && x.leftMs === 0; })());
-  ok('a fresh request ⇒ fresh, frac 1', (() => { const x = warmthOf({ ...fact, lastRequestAt: S }, { serverNow: S, receivedAt: 0, now: 0 }); return x.tier === 'fresh' && x.frac === 1; })());
+  ok('the time SINCE the answer runs the band down: 15 min later ⇒ expired, frac 0', verdictOf((() => { const x = warmthOf(fact, { serverNow: S, receivedAt: 0, now: 15 * 60e3 }); return x.tier === 'expired' && x.frac === 0 && x.leftMs === 0; })()));
+  ok('a fresh request ⇒ fresh, frac 1', verdictOf((() => { const x = warmthOf({ ...fact, lastRequestAt: S }, { serverNow: S, receivedAt: 0, now: 0 }); return x.tier === 'fresh' && x.frac === 1; })()));
   ok('no serverNow (never the device clock alone) ⇒ unknown', warmthOf(fact, { receivedAt: 0, now: 0 }).tier === 'unknown');
   ok('no request stamp ⇒ unknown; no TTL ⇒ unknown; no fact ⇒ unknown',
     warmthOf({ ...fact, lastRequestAt: null }, { serverNow: S, receivedAt: 0, now: 0 }).tier === 'unknown' && warmthOf({ ...fact, cacheTtlSec: null }, { serverNow: S, receivedAt: 0, now: 0 }).tier === 'unknown' && warmthOf(null, { serverNow: S, receivedAt: 0, now: 0 }).tier === 'unknown');
@@ -143,7 +143,7 @@ if (HAVE) {
   const last = warmthOf({ lastRequestAt: S - 3600e3 + 20e3, cacheTtlSec: 3600 }, { serverNow: S, receivedAt: 0, now: 0 });
   ok('20 s left reads «1 min», never 0', warmthTitle(last, { timeText }) === 'Cache: about 1 min left · last request 14:05');
   const gone = warmthOf({ lastRequestAt: S - 2 * 3600e3, cacheTtlSec: 3600 }, { serverNow: S, receivedAt: 0, now: 0 });
-  ok('expired: «缓存已过期 · 上次请求 14:05» (zh), the en and ja keys translated', warmthTitle(gone, { t: tr(zh), timeText }) === '缓存已过期 · 上次请求 14:05' && warmthTitle(gone, { timeText }) === 'Cache expired · last request 14:05' && /期限切れ/.test(warmthTitle(gone, { t: tr(ja), timeText })));
+  ok('expired: «缓存已过期 · 上次请求 14:05» (zh), the en and ja keys translated', warmthTitle(gone, { t: tr(zh), timeText }) === '缓存已过期 · 上次请求 14:05' && warmthTitle(gone, { timeText }) === 'Cache expired · last request 14:05' && verdictOf(/期限切れ/.test(warmthTitle(gone, { t: tr(ja), timeText }))));
   const moved = warmthOf({ lastRequestAt: S - 60e3, cacheTtlSec: 3600, lost: true }, { serverNow: S, receivedAt: 0, now: 0 });
   ok('the move says itself: «缓存已过期 — 对话已换到另一个账号 · 上次请求 14:05»', warmthTitle(moved, { t: tr(zh), timeText }) === '缓存已过期 — 对话已换到另一个账号 · 上次请求 14:05', warmthTitle(moved, { t: tr(zh), timeText }));
   ok('unknown says nothing', warmthTitle(warmthOf(null, {}), { timeText }) === '' && warmthTitle(null) === '');
@@ -151,9 +151,9 @@ if (HAVE) {
   const pausedW = warmthOf({ lastRequestAt: S - 45 * 60e3 - 30e3, cacheTtlSec: 3600, inFlight: false }, { serverNow: S, receivedAt: 0, now: 0 });
   ok('paused on the owner: the countdown words (never «a turn is running» — no request is in flight)', warmthTitle(pausedW, { timeText }) === 'Cache: about 15 min left · last request 14:05', warmthTitle(pausedW, { timeText }));
   ok('a request in flight: «Cache: warm — a turn is running» / «缓存正热 — 回合进行中» (no minutes: the countdown starts at its response)',
-    warmthTitle(turn, { timeText }) === 'Cache: warm — a turn is running' && warmthTitle(turn, { t: tr(zh), timeText }) === '缓存正热 — 回合进行中' && /ターン実行中/.test(warmthTitle(turn, { t: tr(ja), timeText })), warmthTitle(turn, { t: tr(zh), timeText }));
+    warmthTitle(turn, { timeText }) === 'Cache: warm — a turn is running' && warmthTitle(turn, { t: tr(zh), timeText }) === '缓存正热 — 回合进行中' && verdictOf(/ターン実行中/.test(warmthTitle(turn, { t: tr(ja), timeText }))), warmthTitle(turn, { t: tr(zh), timeText }));
   const keys = ['Cache: about {n} min left · last request {time}', 'Cache expired · last request {time}', 'Cache expired — the conversation moved to another account · last request {time}', 'Cache: warm — a turn is running'];
-  ok('every hover key has a zh AND a ja entry carrying the same placeholders', keys.every((k) => [zh, ja].every((d) => typeof d[k] === 'string' && (k.match(/\{\w+\}/g) || []).every((p) => d[k].includes(p)))));
+  ok('every hover key has a zh AND a ja entry carrying the same placeholders', verdictOf(keys.every((k) => [zh, ja].every((d) => typeof d[k] === 'string' && (k.match(/\{\w+\}/g) || []).every((p) => d[k].includes(p))))));
   const r1b = ['Going cold {n}', 'Late {n}', 'Expired {n}', '+{n} · {k} critical', '+{n} · {k} expired', 'By time left', 'Every desktop', 'Prompt-cache warmth on every desktop — click for the list by time left'];
   const same = (k, v) => JSON.stringify((k.match(/\{\w+\}/g) || []).sort()) === JSON.stringify((String(v).match(/\{\w+\}/g) || []).sort());
   const bad = r1b.filter((k) => ![zh, ja].every((d) => typeof d[k] === 'string' && same(k, d[k])));
@@ -191,8 +191,8 @@ console.log('— ④ the session-list diff');
     JSON.stringify(dT.warmth) === JSON.stringify({ 'sess-turn': { lastRequestAt: null, cacheTtlSec: 3600, lost: false, inFlight: true, turnStartedAt: 4 } }), JSON.stringify(dT));
   const rt = code('src/routes/sessions.js');
   ok('WIRING: the 5 s poll\'s answer (cached AND fresh sweep) carries the diff ONLY while desktop.cacheWarmth is on — off is not even computed (B-360d rank 9: through sendSessions, the sweep\'s bytes made once)',
-    /const warm = serverSetting\?\.\('desktop\.cacheWarmth'\) === true \? warmthDiff\(activeSessions, ctx\.cacheFactsOf\) : null;/.test(rt) && /return sendSessions\(res, body, warm \|\| stale \|\| aged \? \{ \.\.\.\(warm \|\| \{\}\), \.\.\.\(stale \|\| \{\}\), \.\.\.\(aged \|\| \{\}\) \} : null\);/.test(rt) // the sweep's -cure: answer() also joins listStale; B-80cb B: and listAge (a list answered mid-sweep says its age)
-    && /return answer\(_sessionsCache\);/.test(rt) && /answer\(await _sweepInFlight\);/.test(rt) && (rt.match(/res\.json\(_sessionsCache\)|res\.json\(await _sweepInFlight\)|res\.json\(answer\(/g) || []).length === 0);
+    gateOf(/const warm = serverSetting\?\.\('desktop\.cacheWarmth'\) === true \? warmthDiff\(activeSessions, ctx\.cacheFactsOf\) : null;/.test(rt)) && gateOf(/return sendSessions\(res, body, warm \|\| stale \|\| aged \? \{ \.\.\.\(warm \|\| \{\}\), \.\.\.\(stale \|\| \{\}\), \.\.\.\(aged \|\| \{\}\) \} : null\);/.test(rt)) // the sweep's -cure: answer() also joins listStale; B-80cb B: and listAge (a list answered mid-sweep says its age)
+    && gateOf(/return answer\(_sessionsCache\);/.test(rt)) && gateOf(/answer\(await _sweepInFlight\);/.test(rt)) && (rt.match(/res\.json\(_sessionsCache\)|res\.json\(await _sweepInFlight\)|res\.json\(answer\(/g) || []).length === 0);
   // B-360d rank 9: THE SESSION LIST IS SERIALISED ONCE PER SWEEP — by the sweep's worker (src/sessions-assemble.js
   // answerBytes); every answer of that sweep sends those bytes and their ETag, nothing serialised on this thread; with the
   // switch on, the diff is joined after the sweep's keys (the spread's bytes). RED: the release's route serialised per answer
@@ -206,7 +206,7 @@ console.log('— ④ the session-list diff');
     try { cache = A.answerBytes(sweep); made = 0; outs = Array.from({ length: 10 }, () => R.sendSessions(fakeRes(), cache)); } finally { JSON.stringify = realStringify; }
     const want = realStringify({ sessions: sweep });
     ok('B-360d rank 9: the sweep\'s bytes are made once (answerBytes); ten answers send them as they are — nothing serialised on this thread, typed JSON, one weak ETag',
-      made === 0 && cache.buf.toString() === want && cache.count === 300 && outs.every((r) => r.body === cache.buf && r.headers['content-type'] === 'application/json' && r.headers.etag === cache.etag) && /^W\/"[0-9a-f]+-/.test(cache.etag), { made });
+      made === 0 && cache.buf.toString() === want && cache.count === 300 && gateOf(outs.every((r) => r.body === cache.buf && r.headers['content-type'] === 'application/json' && r.headers.etag === cache.etag)) && verdictOf(/^W\/"[0-9a-f]+-/.test(cache.etag)), { made });
     const diff = R.warmthDiff(live, factsOf, 1000000), withDiff = R.sendSessions(fakeRes(), cache, diff);
     ok('…with the switch on: the diff joined after the sweep\'s keys — the spread\'s bytes, under a tag of its own (never the shared one; Express never hashes the bytes on the loop)', withDiff.body.toString() === realStringify({ sessions: sweep, ...diff }) && !!withDiff.headers.etag && withDiff.headers.etag !== cache.etag);
     let base = '';
@@ -216,7 +216,7 @@ console.log('— ④ the session-list diff');
   }
   const srv = code('server.js');
   ok('WIRING: server.js hands the engine\'s cacheFactsOf to the session routes, and both feeds\' engine literals carry the request stamp\'s writer (noteModelRequest)',
-    /setupSessions\(\{[^\n]*\bcacheFactsOf\b/.test(srv) && (srv.match(/\bnoteModelRequest\b/g) || []).length === 3);
+    gateOf(/setupSessions\(\{[^\n]*\bcacheFactsOf\b/.test(srv)) && (srv.match(/\bnoteModelRequest\b/g) || []).length === 3);
   const eng = code('src/server/usage-pool-engine.js');
   ok('ONE PRODUCER: the pool\'s every warmCache( reads cacheFactsOf — the facts the list sends', (eng.match(/warmCache\(\{ \.\.\.cacheFactsOf\(/g) || []).length === 3 && !/warmCache\(\{ lastActivityMs/.test(eng));
 }
@@ -225,18 +225,18 @@ console.log('— ⑤ the switch');
 {
   const src = read('src/lib/settings-schema.js');
   const i = src.indexOf("'desktop.cacheWarmth': {"), row = i < 0 ? '' : src.slice(i, src.indexOf('\n  },', i));
-  ok('desktop.cacheWarmth: boolean, OFF by default (the owner: opt-in), in the Window group, live', /type: 'boolean', default: false/.test(row) && /category: t\('Window'\)/.test(row) && /liveApply: true/.test(row), row.slice(0, 200));
+  ok('desktop.cacheWarmth: boolean, OFF by default (the owner: opt-in), in the Window group, live', gateOf(/type: 'boolean', default: false/.test(row)) && gateOf(/category: t\('Window'\)/.test(row)) && verdictOf(/liveApply: true/.test(row)), row.slice(0, 200));
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const words = [...row.matchAll(/t\(("(?:[^"\\]|\\.)*")\)/g)].map((m) => JSON.parse(m[1]));
   ok('its label and description say what it shows, that it is off by default and costs nothing — in zh and ja too',
-    words.length === 2 && /Off by default/.test(words[1]) && /no request and no timer/.test(words[1]) && words.every((w) => zh[w] && ja[w]) && /默认关闭/.test(zh[words[1]]) && /既定はオフ/.test(ja[words[1]]), JSON.stringify(words));
+    words.length === 2 && gateOf(/Off by default/.test(words[1])) && gateOf(/no request and no timer/.test(words[1])) && gateOf(words.every((w) => zh[w] && ja[w])) && gateOf(/默认关闭/.test(zh[words[1]])) && verdictOf(/既定はオフ/.test(ja[words[1]])), JSON.stringify(words));
   const SM = await import(path.join(REPO, 'src/lib/settings-schema.js'));
   const SV = await import(path.join(REPO, 'src/lib/settings-view.js'));
   const drawn = (schema, query, modified) => SV.settingsViewModel(schema, { categories: SM.SETTINGS_CATEGORIES, query, isModified: () => modified }).sections.flatMap((x) => x.rows.map((r) => r.path));
   const row0 = SM.SETTINGS_SCHEMA['desktop.cacheWarmth'];
   const windowRows = (schema) => (SV.settingsViewModel(schema, { categories: SM.SETTINGS_CATEGORIES }).byCategory[row0 && row0.category]?.rows || []).map((r) => r.path);
   ok('DRAWN (r1b — the band landed): no `held`; a plain listing of the Window category includes it; a search for «prompt-cache» finds it',
-    row0 && row0.default === false && row0.held === undefined && windowRows(SM.SETTINGS_SCHEMA).includes('desktop.cacheWarmth') && drawn(SM.SETTINGS_SCHEMA, 'prompt-cache', false).includes('desktop.cacheWarmth'));
+    gateOf(row0) && row0.default === false && row0.held === undefined && gateOf(windowRows(SM.SETTINGS_SCHEMA).includes('desktop.cacheWarmth')) && verdictOf(drawn(SM.SETTINGS_SCHEMA, 'prompt-cache', false).includes('desktop.cacheWarmth')));
   const heldRow = { ...SM.SETTINGS_SCHEMA, 'desktop.cacheWarmth': { ...row0, held: 'a control — the field still hides' } };
   ok('…CONTROL: the same row WITH a `held` string is NOT drawn (not plainly, not by a search) — the field still hides',
     !windowRows(heldRow).includes('desktop.cacheWarmth') && !drawn(heldRow, 'prompt-cache', false).includes('desktop.cacheWarmth'));
@@ -253,17 +253,17 @@ console.log('— ⑥ the tokens');
   const derivation = (src) => { const decl = [...src.matchAll(/^  (--warmth-(?:fresh|mid|late|critical|expired)): ([^;]+);$/gm)]; const got = Object.fromEntries(decl.map((m) => [m[1], m[2]])); return { ok: decl.length === 5 && Object.entries(want).every(([k, v]) => got[k] === v), got }; };
   const d0 = derivation(css);
   ok('r5: the four live tiers derive from the theme\'s RAW hues — fresh ← --green, mid ← --blue (#3b82f6 for a plugin theme without one), late ← --yellow, critical ← --red — and expired from --text-dim at 45 %, never from a text mix (RED on 749aa7bf9: --ok-text / --accent / --warn-text / --bad-text / --border)',
-    d0.ok, JSON.stringify(d0.got));
+    verdictOf(d0.ok), JSON.stringify(d0.got));
   const MID = '  --warmth-mid: var(--blue, #3b82f6);', EXP = '  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);';
   ok('…CONTROL: the .374 line planted back reds the pin — mid ← --accent (the second green); expired ← --border (the invisible one)',
-    css.includes(MID) && css.includes(EXP) && !derivation(css.replace(MID, '  --warmth-mid: var(--accent);')).ok && !derivation(css.replace(EXP, '  --warmth-expired: var(--border);')).ok);
-  ok('…declared in the block every theme inherits (`:root, [data-theme]`) beside the status tokens they read', /\/\*[\s\S]*\*\/\s*:root, \[data-theme\]$|^:root, \[data-theme\]$/.test(sel) || sel.endsWith(':root, [data-theme]'), sel.slice(-80));
+    gateOf(css.includes(MID)) && gateOf(css.includes(EXP)) && !derivation(css.replace(MID, '  --warmth-mid: var(--accent);')).ok && !derivation(css.replace(EXP, '  --warmth-expired: var(--border);')).ok);
+  ok('…declared in the block every theme inherits (`:root, [data-theme]`) beside the status tokens they read', verdictOf(/\/\*[\s\S]*\*\/\s*:root, \[data-theme\]$|^:root, \[data-theme\]$/.test(sel)) || verdictOf(sel.endsWith(':root, [data-theme]')), sel.slice(-80));
   ok('…and no built-in theme block spells a literal warmth colour of its own', (css.match(/--warmth-(fresh|mid|late|critical|expired)\s*:/g) || []).length === 5);
   const ed = read('src/lib/theme-editor.js');
   // lane ui-language: a row's label is worded at definition — `label: t('…')` (the Theme Editor was English in every language)
   const rows = [...ed.matchAll(/\{ key: '(--warmth-[a-z]+)', label: (?:t\()?'([^']+)'\)?, group: 'Cache warmth', isText: true, derived: '([^']+)' \}/g)].map((m) => [m[1], m[3]]);
-  ok('the theme editor lists the five under «Cache warmth», each starting as the theme\'s own derivation (r5: the raw hues, expired dim)', rows.length === 5 && rows.every(([k, v]) => want[k] === v), JSON.stringify(rows));
-  ok('…and seeds them so (a theme saved from a built-in base keeps deriving from ITS status colours)', /for \(const d of CSS_VAR_DEFS\) if \(d\.derived\) this\._cssValues\[d\.key\] = d\.derived;/.test(code('src/lib/theme-editor.js')));
+  ok('the theme editor lists the five under «Cache warmth», each starting as the theme\'s own derivation (r5: the raw hues, expired dim)', rows.length === 5 && verdictOf(rows.every(([k, v]) => want[k] === v)), JSON.stringify(rows));
+  ok('…and seeds them so (a theme saved from a built-in base keeps deriving from ITS status colours)', verdictOf(/for \(const d of CSS_VAR_DEFS\) if \(d\.derived\) this\._cssValues\[d\.key\] = d\.derived;/.test(code('src/lib/theme-editor.js'))));
   // B-2e7b: a save stores only what the person chose — a derived row still at its derivation is left out (the theme keeps
   // deriving); re-opening shows the derivation. The editor's own lines (the defs + the two rules), run as written
   const edc = code('src/lib/theme-editor.js');
@@ -273,14 +273,14 @@ console.log('— ⑥ the tokens');
   const judge = (R) => { if (!R || R.error || typeof R.storedCss !== 'function') return { ok: false, R }; const s = R.storedCss(values), back = R.shownCss(s);
     return { ok: Object.keys(s).sort().join() === '--green,--warmth-late' && s['--warmth-late'] === '#ffaa00' && back['--warmth-fresh'] === 'var(--green)' && back['--warmth-mid'] === rows.find(([k]) => k === '--warmth-mid')[1] && back['--warmth-late'] === '#ffaa00' && back['--green'] === '#22c55e', s, back }; };
   const j = judge(rulesOf(edc));
-  ok('B-2e7b: a save STORES the person\'s rows only — the four warmth rows still at their derivation are left out (a padded copy too), the one changed (#ffaa00) and --green stay; re-opening shows the derivation again', j.ok, JSON.stringify(j.s));
+  ok('B-2e7b: a save STORES the person\'s rows only — the four warmth rows still at their derivation are left out (a padded copy too), the one changed (#ffaa00) and --green stay; re-opening shows the derivation again', verdictOf(j.ok), JSON.stringify(j.s));
   const KEEPALL = /const storedCss = \(values\) => [^\n]*/;
   const mut = KEEPALL.test(edc) ? judge(rulesOf(edc.replace(KEEPALL, 'const storedCss = (values) => ({ ...(values || {}) });'))) : { ok: true };
-  ok('…CONTROL: a save that stores every row (the release\'s) reds the leg — the derivations freeze in the theme', KEEPALL.test(edc) && !mut.ok && Object.keys(mut.s || {}).length === 6, JSON.stringify(mut.s));
+  ok('…CONTROL: a save that stores every row (the release\'s) reds the leg — the derivations freeze in the theme', gateOf(KEEPALL.test(edc)) && !mut.ok && Object.keys(mut.s || {}).length === 6, JSON.stringify(mut.s));
   const NZ = require(path.join(REPO, 'src/custom-theme-normalize.js'));
-  ok('B-2e7b r1: ONE derivation table — the store\'s rule (DERIVED_WARMTH) spells exactly the editor\'s five `derived` strings', rows.length === 5 && rows.every(([k, v]) => NZ.DERIVED_WARMTH[k] === v) && Object.keys(NZ.DERIVED_WARMTH).length === 5, JSON.stringify(NZ.DERIVED_WARMTH));
+  ok('B-2e7b r1: ONE derivation table — the store\'s rule (DERIVED_WARMTH) spells exactly the editor\'s five `derived` strings', rows.length === 5 && gateOf(rows.every(([k, v]) => NZ.DERIVED_WARMTH[k] === v)) && Object.keys(NZ.DERIVED_WARMTH).length === 5, JSON.stringify(NZ.DERIVED_WARMTH));
   ok('…wired: the POST body and the theme registered are the STORED rows; a saved theme opens through shownCss',
-    /const css = storedCss\(this\._cssValues\);/.test(edc) && /body: JSON\.stringify\(\{ name, css, terminal: this\._termValues \}\)/.test(edc) && /registerCustomTheme\(name, css, this\._termValues\)/.test(edc) && /this\._cssValues = shownCss\(saved\.css\);/.test(edc));
+    gateOf(/const css = storedCss\(this\._cssValues\);/.test(edc)) && gateOf(/body: JSON\.stringify\(\{ name, css, terminal: this\._termValues \}\)/.test(edc)) && gateOf(/registerCustomTheme\(name, css, this\._termValues\)/.test(edc)) && verdictOf(/this\._cssValues = shownCss\(saved\.css\);/.test(edc)));
 }
 
 console.log('— ⑦ the stamp outlives a restart');
@@ -308,22 +308,22 @@ console.log('— ⑦ the stamp outlives a restart');
   try { await api.probeSockets(); api.restoreSessions(); } catch (e) { console.error(e); } finally { process.env.PATH = p0; console.log = l0; console.warn = w0; }
   const sS = active.get(idStamped), sB = active.get(idBare);
   ok('the REAL boot-restore brought both conversations back live', !!sS && !!sB, [...active.keys()].join(','));
-  ok('THE PIN (r1a′): the persisted stamp is read back as the conversation\'s last request', sS && sS._lastRequestAt === T0 - 30 * 60e3, String(sS && sS._lastRequestAt));
+  ok('THE PIN (r1a′): the persisted stamp is read back as the conversation\'s last request', gateOf(sS) && sS._lastRequestAt === T0 - 30 * 60e3, String(sS && sS._lastRequestAt));
   const w = A.warmCache({ lastRequestAt: sS && sS._lastRequestAt, cacheTtlSec: A.cacheTtlSecFor({ harness: 'claude' }), nowMs: T0 });
   ok('…so a 30-minute-old stamp is WARM, 30 min ago, after the restart (the hold and the colour read it — test-pool-auto)', w.warm === true && w.agoSec === 1800, JSON.stringify(w));
-  ok('…and a meta with none restores none (the engine then calls the conversation UNKNOWN: no colour, no hold — never the attach preamble)', sB && sB._lastRequestAt === undefined, String(sB && sB._lastRequestAt));
+  ok('…and a meta with none restores none (the engine then calls the conversation UNKNOWN: no colour, no hold — never the attach preamble)', gateOf(sB) && sB._lastRequestAt === undefined, String(sB && sB._lastRequestAt));
   const sR = active.get(idReset);
   ok('⑪ (round 2, C) a conversation the REAL boot-restore brings back is never born here (`_bornHere` unset on every restored session) — so a stamp-less one reads `unseen`, never «no request yet» (the engine leg: test-pool-auto CW6)',
-    [sS, sB, active.get(idReset)].every((x) => x && x._bornHere !== true), JSON.stringify([sS, sB, active.get(idReset)].map((x) => x && x._bornHere)));
+    verdictOf([sS, sB, active.get(idReset)].every((x) => x && x._bornHere !== true)), JSON.stringify([sS, sB, active.get(idReset)].map((x) => x && x._bornHere)));
   ok('⑪ THE PIN (lane cache-warmth-compact): what the last record SAID (its TTL, read / created / cold) and a compaction\'s reset still standing are read back — the ONE spelling (sessionFromMeta); a meta with neither restores neither (RED on 749aa7bf9)',
-    sR && JSON.stringify(sR._cacheFact) === JSON.stringify(factW) && sR._compactedAt === T0 - 2 * 60e3 && sS && sS._cacheFact === null && sS._compactedAt === null, JSON.stringify(sR && [sR._cacheFact, sR._compactedAt, sS && sS._cacheFact, sS && sS._compactedAt]));
-  ok('G3 (e) THE PIN (round 3): the member that served the last request is read back with it — a restart does not forget where the cache lives (a moved link reads lost: test-pool-auto)', sS && sS._lastRequestMember === 'sub-member-a' && sB && sB._lastRequestMember === null, JSON.stringify([sS && sS._lastRequestMember, sB && sB._lastRequestMember]));
+    gateOf(sR) && JSON.stringify(sR._cacheFact) === JSON.stringify(factW) && sR._compactedAt === T0 - 2 * 60e3 && gateOf(sS) && sS._cacheFact === null && sS._compactedAt === null, JSON.stringify(sR && [sR._cacheFact, sR._compactedAt, sS && sS._cacheFact, sS && sS._compactedAt]));
+  ok('G3 (e) THE PIN (round 3): the member that served the last request is read back with it — a restart does not forget where the cache lives (a moved link reads lost: test-pool-auto)', gateOf(sS) && sS._lastRequestMember === 'sub-member-a' && gateOf(sB) && sB._lastRequestMember === null, JSON.stringify([sS && sS._lastRequestMember, sB && sB._lastRequestMember]));
 }
 
 console.log('— ⑧ the pure summaries (r1b)');
 if (HAVE) {
   const { worstOf, warmthCounts, byTimeLeft } = CW;
-  ok('worstOf / warmthCounts / byTimeLeft exist (RED on da86012d5: there were none)', [worstOf, warmthCounts, byTimeLeft].every((f) => typeof f === 'function'));
+  ok('worstOf / warmthCounts / byTimeLeft exist (RED on da86012d5: there were none)', verdictOf([worstOf, warmthCounts, byTimeLeft].every((f) => typeof f === 'function')));
   if (typeof worstOf === 'function') {
     const S = 1_800_000_000_000, at = { serverNow: S, receivedAt: 0, now: 0 };
     const W = (agoMin, ttlS = 3600, extra = {}) => warmthOf({ lastRequestAt: S - agoMin * 60e3, cacheTtlSec: ttlS, lost: false, ...extra }, at);
@@ -380,7 +380,7 @@ if (HAVE) {
   const badA1 = keysA1.filter((k) => ![zh, ja].every((d) => typeof d[k] === 'string' && sameP(k, d[k])));
   const unusedA1 = keysA1.filter((k) => !code('src/cache-warmth.js').includes(`t('${k}'`));
   ok('⑪ every new key has a zh AND a ja entry with the same {placeholders}, each used through a t(\'…\') literal (§78 stays flat)', badA1.length === 0 && unusedA1.length === 0, badA1.concat(unusedA1).join(' | '));
-  ok('⑪ tokensText: 950 · 42k · 1.2M', CW.tokensText && CW.tokensText(950) === '950' && CW.tokensText(42123) === '42k' && CW.tokensText(1_234_000) === '1.2M');
+  ok('⑪ tokensText: 950 · 42k · 1.2M', gateOf(CW.tokensText) && CW.tokensText(950) === '950' && CW.tokensText(42123) === '42k' && CW.tokensText(1_234_000) === '1.2M');
   // the session list
   const R = require(path.join(REPO, 'src/routes/sessions.js'));
   const live = new Map([['c-rec', {}], ['c-reset', {}], ['c-none', {}], ['c-codex', {}], ['c-unseen', {}]]);
@@ -395,13 +395,13 @@ if (HAVE) {
     JSON.stringify(dA.warmth['c-rec']) === JSON.stringify({ lastRequestAt: 900, cacheTtlSec: 300, lost: false, inFlight: false, turnStartedAt: null, ttlSource: 'record', cacheObserved: 'cold', cacheReadTokens: 0, cacheCreatedTokens: 9000 }), JSON.stringify(dA.warmth['c-rec']));
   ok('⑪ THE PIN — a REASONED unknown is sent with no instant (a compaction\'s reset; no request yet) — the client still draws nothing; an unknown without a reason (codex: no TTL) is left out as before (RED on 749aa7bf9)',
     JSON.stringify(dA.warmth['c-reset']) === JSON.stringify({ lastRequestAt: null, cacheTtlSec: 3600, lost: false, inFlight: false, turnStartedAt: null, unknown: 'compacted', ttlSource: 'inferred' })
-    && dA.warmth['c-none'] && dA.warmth['c-none'].unknown === 'no-request' && dA.warmth['c-none'].lastRequestAt === null && !('c-codex' in dA.warmth)
-    && dA.warmth['c-unseen'] && dA.warmth['c-unseen'].unknown === 'unseen' && dA.warmth['c-unseen'].lastRequestAt === null && warmthOf(dA.warmth['c-reset'], { serverNow: 1000, receivedAt: 0, now: 0 }).tier === 'unknown', JSON.stringify(dA.warmth));
+    && gateOf(dA.warmth['c-none']) && dA.warmth['c-none'].unknown === 'no-request' && dA.warmth['c-none'].lastRequestAt === null && !('c-codex' in dA.warmth)
+    && gateOf(dA.warmth['c-unseen']) && dA.warmth['c-unseen'].unknown === 'unseen' && dA.warmth['c-unseen'].lastRequestAt === null && warmthOf(dA.warmth['c-reset'], { serverNow: 1000, receivedAt: 0, now: 0 }).tier === 'unknown', JSON.stringify(dA.warmth));
   // the chrome: the reasoned words live only where words already live
   const wcA1 = code('src/lib/warmth-chrome.js');
   ok('⑪ the chrome: the reasoned unknown\'s words go through wordsOf alone — the bar\'s and a tab label\'s hover — while every ring, square, count and list row still asks isKnown (nothing drawn)',
-    /const wordsOf = \(w\) => \(isKnown\(w\) \|\| \(w && w\.unknown\) \? warmthTitle\(w, \{ t \}\) : ''\);/.test(wcA1) && (wcA1.match(/wordsOf\(w\)/g) || []).length === 2
-    && /if \(!isKnown\(w\)\) \{ if \(ring\) ring\.remove\(\); return; \}/.test(wcA1) && /if \(!isKnown\(w\) \|\| seen\.has\(key\)\) continue;/.test(wcA1) && /const isKnown = \(w\) => !!w && \(LIVE\.has\(w\.tier\) \|\| w\.tier === 'expired'\);/.test(wcA1),
+    gateOf(/const wordsOf = \(w\) => \(isKnown\(w\) \|\| \(w && w\.unknown\) \? warmthTitle\(w, \{ t \}\) : ''\);/.test(wcA1)) && (wcA1.match(/wordsOf\(w\)/g) || []).length === 2
+    && gateOf(/if \(!isKnown\(w\)\) \{ if \(ring\) ring\.remove\(\); return; \}/.test(wcA1)) && gateOf(/if \(!isKnown\(w\) \|\| seen\.has\(key\)\) continue;/.test(wcA1)) && verdictOf(/const isKnown = \(w\) => !!w && \(LIVE\.has\(w\.tier\) \|\| w\.tier === 'expired'\);/.test(wcA1)),
     String((wcA1.match(/wordsOf\(w\)/g) || []).length));
 }
 
@@ -420,25 +420,25 @@ console.log('— ⑨ the wiring and the laws (r1b)');
   const sb = codeAll('src/lib/sidebar.js'), poll = bodyOf(sb, /\n  async _poll\(\) /);
   const fetchTry = poll.slice(poll.indexOf("await fetch('/api/sessions')"), poll.indexOf("pollErr = e?.message || 'server unreachable'"));
   ok('sidebar.js _poll: warmth, serverNow and Date.now() come from the SAME parsed answer, inside the fetch try',
-    /warmthAnswer = \(data\.warmth && typeof data\.warmth === 'object' && data\.serverNow > 0\) \? \{ map: data\.warmth, serverNow: data\.serverNow, receivedAt: Date\.now\(\) \} : null;/.test(fetchTry));
+    verdictOf(/warmthAnswer = \(data\.warmth && typeof data\.warmth === 'object' && data\.serverNow > 0\) \? \{ map: data\.warmth, serverNow: data\.serverNow, receivedAt: Date\.now\(\) \} : null;/.test(fetchTry)));
   ok('…and calls noteWarmthAnswer( exactly ONCE (in its own try: a failed fetch ⇒ undefined, a good answer without warmth ⇒ null)',
-    (sb.match(/noteWarmthAnswer\(/g) || []).length === 1 && /try \{ noteWarmthAnswer\(this\.app, sessions \? warmthAnswer : undefined\); \} catch \{\}/.test(poll));
+    (sb.match(/noteWarmthAnswer\(/g) || []).length === 1 && verdictOf(/try \{ noteWarmthAnswer\(this\.app, sessions \? warmthAnswer : undefined\); \} catch \{\}/.test(poll)));
   const sbOutside = sb.replace(poll, '').replace(/^import \{ noteWarmthAnswer \} from '\.\/warmth-chrome\.js';$/m, '');
   ok('…and nothing else in the sidebar names warmth (never LIVE_SESSION_FACTS, the digest or the merge)', !/warmth/i.test(sbOutside));
   const wc = codeAll('src/lib/warmth-chrome.js');
-  ok('src/lib/warmth-chrome.js exists and reads the PURE table (RED on da86012d5: there was no client)', /^import \{ warmthOf, warmthTitle, worstOf, warmthCounts, byTimeLeft \} from '\.\.\/cache-warmth\.js';$/m.test(wc));
+  ok('src/lib/warmth-chrome.js exists and reads the PURE table (RED on da86012d5: there was no client)', verdictOf(/^import \{ warmthOf, warmthTitle, worstOf, warmthCounts, byTimeLeft \} from '\.\.\/cache-warmth\.js';$/m.test(wc)));
   ok('…ONE computation: warmthOf( is called at exactly one site (the tick\'s pass)', (wc.match(/\bwarmthOf\(/g) || []).length === 1);
   const banned = ['setInterval', 'setTimeout', 'requestAnimationFrame', 'settings.on(', '_notify(', 'setTitleMeta(', 'LIVE_SESSION_FACTS', 'revealWindow(', 'MutationObserver', 'ResizeObserver', 'addEventListener(\'scroll'].filter((b) => wc.includes(b));
   ok('…no timer, no rAF, no settings listener, no observer, never _notify / setTitleMeta / LIVE_SESSION_FACTS / revealWindow', !!wc && banned.length === 0, banned.join(','));
   const colourWrites = (wc.match(/\.style\.(background|color|borderColor|outline)\b|setProperty\('--warmth-c'|#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/g) || []);
   ok('…writes no colour (the tier attribute + --warmth-frac only; the CSS maps tier → token)', !!wc && colourWrites.length === 0, colourWrites.join(','));
   ok('…XSS: no innerHTML at all; the only markup parsed is the constant ring (insertAdjacentHTML of RING, aria-hidden)',
-    !!wc && !/\.innerHTML\s*=/.test(wc) && (wc.match(/insertAdjacentHTML\(/g) || []).length === (wc.match(/insertAdjacentHTML\('afterbegin', RING\)/g) || []).length && /const RING = '<svg class="warmth-ring" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4\.5" pathLength="100"\/><\/svg>';/.test(wc));
-  ok('…every mark node it builds is aria-hidden (markNode) — paint-only, never a target', /function markNode\(tag, cls\) \{ const el = document\.createElement\(tag\); el\.className = cls; el\.setAttribute\('aria-hidden', 'true'\); return el; \}/.test(wc)
+    !!wc && !/\.innerHTML\s*=/.test(wc) && (wc.match(/insertAdjacentHTML\(/g) || []).length === (wc.match(/insertAdjacentHTML\('afterbegin', RING\)/g) || []).length && verdictOf(/const RING = '<svg class="warmth-ring" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4\.5" pathLength="100"\/><\/svg>';/.test(wc)));
+  ok('…every mark node it builds is aria-hidden (markNode) — paint-only, never a target', gateOf(/function markNode\(tag, cls\) \{ const el = document\.createElement\(tag\); el\.className = cls; el\.setAttribute\('aria-hidden', 'true'\); return el; \}/.test(wc))
     && !/createElement\('(span|div|i)'\)/.test(wc.replace(/function markNode[^\n]*\n/, '').replace(/left = document\.createElement\('span'\); left\.className = '(wl-left|sess-warmth-left)'/g, '').replace(/const (seg|total) = document\.createElement\('span'\)/g, '')));
   const app = codeAll('src/lib/app.js');
   ok('app.js imports the module (the client graph reaches it) and seats the chip beside the lock chip after every arrangement',
-    /^import \{ placeWarmthChip \} from '\.\/warmth-chrome\.js';/m.test(app) && /placeVaultChip\(\);\s*\n\s*placeWarmthChip\(\);/.test(app));
+    gateOf(/^import \{ placeWarmthChip \} from '\.\/warmth-chrome\.js';/m.test(app)) && verdictOf(/placeVaultChip\(\);\s*\n\s*placeWarmthChip\(\);/.test(app)));
   const tg = codeAll('src/lib/tab-group.js'), tb = codeAll('src/lib/taskbar.js'), dm = codeAll('src/lib/desktop-manager.js'), sr = codeAll('src/lib/sidebar-render.js'), mn = codeAll('src/lib/mobile-nav.js');
   const builders = [
     ['tab-group.js makeTab', bodyOf(tg, /const makeTab = \(tabWinId\) => /), /paintTab\(this\._app, tab\);\s*return tab;/],
@@ -454,53 +454,53 @@ console.log('— ⑨ the wiring and the laws (r1b)');
   const missing = builders.filter(([, body, re]) => !re.test(body)).map(([n]) => n);
   ok('EVERY BUILDER re-applies from the map (a mark set only by the tick is lost at the next rebuild — the badge-stale lesson)', missing.length === 0, missing.join(' | '));
   ok('…and the pinned lines around them stand: the switcher\'s digest guard + the compact early return, and no warmth in the taskbar structKey',
-    /if \(digest \+ form === this\._switcherDigest\) return;/.test(dm) && /if \(form === 'compact'\) \{ this\._renderCompactSwitcher\(container\); return; \}/.test(dm) && !/warmth/i.test(bodyOf(tb, /\nexport function updateTaskbar\(app\) /).split('fitTaskbarStrip(app);')[0]));
+    gateOf(/if \(digest \+ form === this\._switcherDigest\) return;/.test(dm)) && gateOf(/if \(form === 'compact'\) \{ this\._renderCompactSwitcher\(container\); return; \}/.test(dm)) && !/warmth/i.test(bodyOf(tb, /\nexport function updateTaskbar\(app\) /).split('fitTaskbarStrip(app);')[0]));
   ok('…the ⧉ list keeps its pinned lines and THE door count (taskbar.js .revealWindow( = 4 — a held row is the desktop\'s deferred reveal since r8 of userW inc-mw1ogdno-5jny; the summary\'s rows jump through goOtherDesk)',
-    (tb.match(/\.revealWindow\(/g) || []).length === 4 && /if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb) && /let otherDesksOpen = false;/.test(tb)
-    && /item\.onclick = \(\) => \{ pop\.remove\(\); goOtherDesk\(app, \{ id: idOf\(r\), deskId: r\.deskId, built: r\.built \}\); \};/.test(tb));
+    (tb.match(/\.revealWindow\(/g) || []).length === 4 && gateOf(/if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb)) && gateOf(/let otherDesksOpen = false;/.test(tb))
+    && verdictOf(/item\.onclick = \(\) => \{ pop\.remove\(\); goOtherDesk\(app, \{ id: idOf\(r\), deskId: r\.deskId, built: r\.built \}\); \};/.test(tb)));
   const css = read('public/style.css');
   const a = css.indexOf('/* q-059 r1b (lane cache-warmth-band)'), z = css.indexOf('/* ── end of the q-059 r1b warmth block');
   const block = a >= 0 && z > a ? stripAll(css.slice(a, z)) : '';
   ok('the CSS block: the frame band rides ::before on a bar that is not seamless and hosts no tab strip (a group frame draws none)',
-    /\.window:not\(\.seamless\) > \.window-titlebar\[data-warmth-tier\]:not\(:has\(> \.tab-bar-tabs\)\)::before \{/.test(block));
+    verdictOf(/\.window:not\(\.seamless\) > \.window-titlebar\[data-warmth-tier\]:not\(:has\(> \.tab-bar-tabs\)\)::before \{/.test(block)));
   ok('…a square keeps its tier WHILE IT WAITS (lane desktop-blink-colour: the blink pulses the square\'s own colour) and the find flash keeps its own (the tier rule steps aside for the flash alone)',
-    /\.desktop-preview-win\[data-warmth-tier\]:not\(\.desktop-preview-find-flash\) \{ background: var\(--warmth-c\); \}/.test(block) && !/desktop-preview-win\[data-warmth-tier\][^{]*:not\(\.desktop-preview-win-waiting\)/.test(block));
+    gateOf(/\.desktop-preview-win\[data-warmth-tier\]:not\(\.desktop-preview-find-flash\) \{ background: var\(--warmth-c\); \}/.test(block)) && !/desktop-preview-win\[data-warmth-tier\][^{]*:not\(\.desktop-preview-win-waiting\)/.test(block));
   ok('r5: NO expired special case — the one mapping line stands and nothing re-points an expired mark (the ring, the square, the preview ring and the dots all read --warmth-expired, one quiet value)',
-    (block.match(/\[data-warmth-tier="expired"\]/g) || []).length === 1 && /\[data-warmth-tier="expired"\]  \{ --warmth-c: var\(--warmth-expired\); \}/.test(block) && !/--warmth-c: var\(--text-dim\)/.test(block));
+    (block.match(/\[data-warmth-tier="expired"\]/g) || []).length === 1 && gateOf(/\[data-warmth-tier="expired"\]  \{ --warmth-c: var\(--warmth-expired\); \}/.test(block)) && !/--warmth-c: var\(--text-dim\)/.test(block));
   const R1B_LEFT = 'font-variant-numeric: tabular-nums; color: var(--text-dim); }';
   const wordsMix = (b) => /\.wl-left \{[^}]*color: var\(--text-dim\); \}/.test(b) && /\.sess-warmth-left \{[^}]*color: var\(--text-dim\); \}/.test(b)
     && /\.wl-left\[data-warmth-tier\], \.sess-warmth-left\[data-warmth-tier\] \{ color: color-mix\(in srgb, var\(--warmth-c\) 50%, var\(--text\)\); \}/.test(b) && !/color: var\(--warmth-c\b/.test(b);
   ok('r5: a tier\'s WORDS mix the hue toward --text (50 %: ≥ 4.5:1 on every built-in theme — 60 % fell to 4.05:1 in light) and words with no tier stay --text-dim; no text site wears the raw hue',
-    wordsMix(block));
-  ok('…CONTROL: the r1b .wl-left planted back (the raw var(--warmth-c, …) as its colour) reds the pin', block.includes(R1B_LEFT) && !wordsMix(block.replace(R1B_LEFT, 'font-variant-numeric: tabular-nums; color: var(--warmth-c, var(--text-dim)); }')));
+    verdictOf(wordsMix(block)));
+  ok('…CONTROL: the r1b .wl-left planted back (the raw var(--warmth-c, …) as its colour) reds the pin', gateOf(block.includes(R1B_LEFT)) && !wordsMix(block.replace(R1B_LEFT, 'font-variant-numeric: tabular-nums; color: var(--warmth-c, var(--text-dim)); }')));
   const LITERAL = /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/;
   ok('…NO literal colour in the block (theme vars only) — and nothing in it animates (no transition, no animation)', !!block && !LITERAL.test(block) && !/\b(transition|animation)\s*:/.test(block), (block.match(LITERAL) || [''])[0]);
-  ok('…CONTROL: the literal check fires on the blink\'s own literal planted into the block', LITERAL.test(block + '\n.x { background: rgba(250,180,40,0.4); }') && LITERAL.test(block + '\n.x { color: #e5c07b; }'));
+  ok('…CONTROL: the literal check fires on the blink\'s own literal planted into the block', gateOf(LITERAL.test(block + '\n.x { background: rgba(250,180,40,0.4); }')) && verdictOf(LITERAL.test(block + '\n.x { color: #e5c07b; }')));
   ok('…the five token names are only ever READ in it (⑥\'s exact-5 declarations hold)', !/--warmth-(fresh|mid|late|critical|expired)\s*:/.test(block) && (css.match(/--warmth-(fresh|mid|late|critical|expired)\s*:/g) || []).length === 5);
   // round 2 (fixups-r2: the acceptance of ca2670be0)
   ok('r2 H1: a list row\'s label SHRINKS (every ⧉ list row and the summary list\'s: flex 1 1 auto, min-width 0, the ellipsis) and the words never wrap or shrink; paintListRow marks the label; OFF takes the mark back off the ⧉ list',
-    /\.overlap-switcher-item > \.wl-name \{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; \}/.test(block) && /\.wl-left \{ flex: none; margin-left: auto; white-space: nowrap;/.test(block) && !/\.warmth-list \.wl-name/.test(block)
-    && /if \(label\) label\.classList\.add\('wl-name'\);/.test(bodyOf(wc, /\nexport function paintListRow\(app, item, src, label\) /))
-    && /for \(const el of document\.querySelectorAll\('\.overlap-switcher:not\(\.warmth-list\) \.wl-name'\)\) el\.classList\.remove\('wl-name'\);/.test(bodyOf(wc, /\nfunction clearAll\(app\) /)));
+    gateOf(/\.overlap-switcher-item > \.wl-name \{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; \}/.test(block)) && gateOf(/\.wl-left \{ flex: none; margin-left: auto; white-space: nowrap;/.test(block)) && !/\.warmth-list \.wl-name/.test(block)
+    && gateOf(/if \(label\) label\.classList\.add\('wl-name'\);/.test(bodyOf(wc, /\nexport function paintListRow\(app, item, src, label\) /)))
+    && verdictOf(/for \(const el of document\.querySelectorAll\('\.overlap-switcher:not\(\.warmth-list\) \.wl-name'\)\) el\.classList\.remove\('wl-name'\);/.test(bodyOf(wc, /\nfunction clearAll\(app\) /))));
   const otherRow = (src) => /if \(warm\) paintListRow\(app, item, \{ ids: tileIds\(app, r\.id\) \}, label\);/.test(src) && !/paintListRow\(app, item, \{ ids: \[r\.id\] \}, label\)/.test(src);
   ok('r2 H2: an «Other desktops» row paints its GROUP (tileIds: a built chain, a held record\'s host entry `tabChain.tabs`) — the tile and the square ask the same',
-    otherRow(tb) && /^export function tileIds\(app, id\) \{$/m.test(wc) && /const tabs = !ws\.isTabGuest && ws\.tabChain && Array\.isArray\(ws\.tabChain\.tabs\) \? ws\.tabChain\.tabs\.map\(String\) : null;/.test(wc)
-    && /const ids = tileIds\(app, id\);/.test(bodyOf(wc, /\nfunction warmthOfTile\(app, id\) /)) && /const w = warmthOfTile\(app, sq\.dataset\.winId\);/.test(bodyOf(wc, /\nexport function paintPreviews\(app\) /)));
+    gateOf(otherRow(tb)) && gateOf(/^export function tileIds\(app, id\) \{$/m.test(wc)) && gateOf(/const tabs = !ws\.isTabGuest && ws\.tabChain && Array\.isArray\(ws\.tabChain\.tabs\) \? ws\.tabChain\.tabs\.map\(String\) : null;/.test(wc))
+    && gateOf(/const ids = tileIds\(app, id\);/.test(bodyOf(wc, /\nfunction warmthOfTile\(app, id\) /))) && verdictOf(/const w = warmthOfTile\(app, sq\.dataset\.winId\);/.test(bodyOf(wc, /\nexport function paintPreviews\(app\) /))));
   ok('…CONTROL: the r1 line planted back (the host alone, `{ ids: [r.id] }`) reds the pin', !otherRow(tb.replace('{ ids: tileIds(app, r.id) }', '{ ids: [r.id] }')));
   ok('r2 H3: on a TILE the ring rides its icon\'s corner (absolute — no width, the 90-px floor keeps its word); a chooser row keeps it inline',
-    /\.taskbar-icon > \.warmth-ring, \.taskbar-icon-stack > \.warmth-ring \{ position: absolute; right: -5px; bottom: -5px; z-index: 1;/.test(block) && /\.taskbar-icon:has\(> \.warmth-ring\) \{ position: relative; \}/.test(block)
-    && /const host = el\.querySelector\(':scope > \.taskbar-icon, :scope > \.taskbar-icon-stack'\) \|\| el;/.test(bodyOf(wc, /\nexport function paintTile\(app, el\) /)));
+    gateOf(/\.taskbar-icon > \.warmth-ring, \.taskbar-icon-stack > \.warmth-ring \{ position: absolute; right: -5px; bottom: -5px; z-index: 1;/.test(block)) && gateOf(/\.taskbar-icon:has\(> \.warmth-ring\) \{ position: relative; \}/.test(block))
+    && verdictOf(/const host = el\.querySelector\(':scope > \.taskbar-icon, :scope > \.taskbar-icon-stack'\) \|\| el;/.test(bodyOf(wc, /\nexport function paintTile\(app, el\) /))));
   const tf = read('src/lib/taskbar-fit.js');
   const budget = (src) => /let others = warmthDrawn\(this\.app\) \? OVERFLOW_CHIP_WARM_PX : OVERFLOW_CHIP_PX;/.test(src) && !/let others = 48;/.test(src);
   ok('r2 H4: the switcher budgets the «+N» chip by a PURE constant — the warm chip\'s longest form while warmth is drawn (taskbar-fit.js, beside TILE_MIN_PX), never its measured width',
-    budget(dm) && /^export const OVERFLOW_CHIP_PX = 48;$/m.test(tf) && /^export const OVERFLOW_CHIP_WARM_PX = \d+;$/m.test(tf) && /^import \{ paintPreviews, warmthDrawn \} from '\.\/warmth-chrome\.js';/m.test(read('src/lib/desktop-manager.js')));
+    gateOf(budget(dm)) && gateOf(/^export const OVERFLOW_CHIP_PX = 48;$/m.test(tf)) && gateOf(/^export const OVERFLOW_CHIP_WARM_PX = \d+;$/m.test(tf)) && verdictOf(/^import \{ paintPreviews, warmthDrawn \} from '\.\/warmth-chrome\.js';/m.test(read('src/lib/desktop-manager.js'))));
   ok('…CONTROL: the r1 literal planted back (`let others = 48;`) reds the pin', !budget(dm.replace('let others = warmthDrawn(this.app) ? OVERFLOW_CHIP_WARM_PX : OVERFLOW_CHIP_PX;', 'let others = 48;')));
   // round 3 (fixups-r3: the acceptance of 6550a3a51) — J1: the warm chip and the strip refit each other every frame
   const boxRule = (b) => /\.taskbar-overflow\.warmth-box \{ width: (\d+)px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; \}/.exec(b);
   const bx = boxRule(block), BOX = Number((/^export const OVERFLOW_CHIP_WARM_BOX_PX = (\d+);$/m.exec(tf) || [])[1]), ROOM = Number((/^export const OVERFLOW_CHIP_WARM_PX = (\d+);$/m.exec(tf) || [])[1]);
   const gaps = /#taskbar \{[^}]*\bgap: 3px;/.test(css) && /#taskbar-items \{ flex: 1; display: flex; gap: 2px;/.test(css);
   ok('r3 J1: while warmth is drawn the «+N» chip\'s BOX is CONSTANT — the CSS width = taskbar-fit.js OVERFLOW_CHIP_WARM_BOX_PX (the fit reads a constant, never the chip\'s content); the room the switcher budgets = that box + the bar\'s 3-px gap before it + the floor\'s three 2-px tile gaps; paintOverflowChip toggles the box with the drawing',
-    !!bx && Number(bx[1]) === BOX && ROOM === BOX + 3 + 3 * 2 && gaps && /const ids = chip\._hiddenIds \|\| \[\], n = ids\.length, drawn = warmthDrawn\(app\);\s*chip\.classList\.toggle\('warmth-box', drawn\);/.test(bodyOf(wc, /\nexport function paintOverflowChip\(app, chip\) /)), { css: bx && bx[1], BOX, ROOM, gaps });
+    !!bx && Number(bx[1]) === BOX && ROOM === BOX + 3 + 3 * 2 && gateOf(gaps) && verdictOf(/const ids = chip\._hiddenIds \|\| \[\], n = ids\.length, drawn = warmthDrawn\(app\);\s*chip\.classList\.toggle\('warmth-box', drawn\);/.test(bodyOf(wc, /\nexport function paintOverflowChip\(app, chip\) /))), { css: bx && bx[1], BOX, ROOM, gaps });
   ok('…CONTROL: the box rule taken out of the block reds the pin', !boxRule(block.replace(/\.taskbar-overflow\.warmth-box \{[^}]*\}/, '')));
 }
 
@@ -572,7 +572,7 @@ console.log('— ⑩ the ramp\'s gauge (r5 round 2): six theme blocks × four li
   for (const r of g.rows) console.log('    ' + r);
   const by = (floor) => g.fails.filter((f) => f.floor === floor).map((f) => `${f.theme} ${f.what} ${f.value}`).join('; ');
   const SIX = ['dark', 'light', 'dracula', 'nord', 'solarized', 'monokai'];   // the built-in blocks today; the gauge walks whatever blocks it FINDS (r3)
-  ok(`⑩ the gauge walks every theme block it finds (${(g.themes || []).length}: ${(g.themes || []).join(', ')}) — the six built-in ones among them — and resolves every colour it needs`, !g.error && SIX.every((t) => (g.themes || []).includes(t)), g.error);
+  ok(`⑩ the gauge walks every theme block it finds (${(g.themes || []).length}: ${(g.themes || []).join(', ')}) — the six built-in ones among them — and resolves every colour it needs`, !g.error && verdictOf(SIX.every((t) => (g.themes || []).includes(t))), g.error);
   ok(`⑩ every ADJACENT pair of tiers ≥ ${HUE_FLOOR}° of hue on every theme (RED on 749aa7bf9: .374's mint → teal)`, !g.error && !by('hue'), by('hue'));
   ok(`⑩ every band ≥ ${BAND_FLOOR}:1 on its title bar (the lower of idle / active) on every theme`, !g.error && !by('band'), by('band'));
   ok(`⑩ a tier's words (the block's own mix toward --text) ≥ ${WORDS_FLOOR}:1 on the list / phone row / window on every theme`, !g.error && !by('words'), by('words'));
@@ -582,28 +582,28 @@ console.log('— ⑩ the ramp\'s gauge (r5 round 2): six theme blocks × four li
   const failsOf = (x, floor) => (x ? x.fails.filter((f) => f.floor === floor) : []);
   const pm = plant('  --warmth-mid: var(--blue, #3b82f6);', '  --warmth-mid: var(--accent);');
   ok('…CONTROL: --warmth-mid ← var(--accent) planted (the .374 «second green») ⇒ the hue floor reds — on monokai, whose accent IS its green (0° from the raw green)',
-    failsOf(pm, 'hue').some((f) => f.theme === 'monokai' && f.what === 'fresh→mid' && f.value === '0°'), JSON.stringify(pm && failsOf(pm, 'hue')));
+    verdictOf(failsOf(pm, 'hue').some((f) => f.theme === 'monokai' && f.what === 'fresh→mid' && f.value === '0°')), JSON.stringify(pm && failsOf(pm, 'hue')));
   const p374 = (() => { const x = '  --warmth-fresh: var(--green);'; return css.includes(x) && css.includes('  --warmth-mid: var(--blue, #3b82f6);') ? gauge(css.replace(x, '  --warmth-fresh: var(--ok-text);').replace('  --warmth-mid: var(--blue, #3b82f6);', '  --warmth-mid: var(--accent);')) : null; })();
   const hue374 = Object.fromEntries(failsOf(p374, 'hue').filter((f) => f.what === 'fresh→mid').map((f) => [f.theme, f.value]));
   ok(`…CONTROL: the .374 pair planted back (fresh ← --ok-text, mid ← --accent) ⇒ the hue floor reds at the complaint's own gaps — dark ${hue374.dark}, light ${hue374.light}, monokai ${hue374.monokai}`,
     hue374.dark === '25°' && hue374.light === '22°' && hue374.monokai === '1°', JSON.stringify(p374 && failsOf(p374, 'hue')));
   const pw = plant('var(--warmth-c) 50%, var(--text)', 'var(--warmth-c) 60%, var(--text)');
   ok('…CONTROL: the words at 60 % planted (the brief\'s first number) ⇒ the AA floor reds — light\'s amber on the phone row',
-    failsOf(pw, 'words').some((f) => f.theme === 'light' && f.what === 'late on --bg-sidebar'), JSON.stringify(pw && failsOf(pw, 'words')));
+    verdictOf(failsOf(pw, 'words').some((f) => f.theme === 'light' && f.what === 'late on --bg-sidebar')), JSON.stringify(pw && failsOf(pw, 'words')));
   const pe = plant('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);', '  --warmth-expired: var(--border);');
   const every = (x, floor, pick = () => true) => !!x && x.themes.length >= SIX.length && failsOf(x, floor).filter(pick).length === x.themes.length;   // r3: counted over the blocks the walk FOUND
   ok('…CONTROL: expired ← var(--border) planted (.374\'s invisible mark) ⇒ the expired floor reds on every theme block found',
-    every(pe, 'expired'), JSON.stringify(pe && failsOf(pe, 'expired')));
+    verdictOf(every(pe, 'expired')), JSON.stringify(pe && failsOf(pe, 'expired')));
   const pb = plant('  --warmth-late: var(--yellow);', '  --warmth-late: var(--bg-titlebar-active);');
   ok('…CONTROL: a band planted in its title bar\'s own colour (--warmth-late ← var(--bg-titlebar-active)) ⇒ the band floor reds on every theme block found',
-    every(pb, 'band', (f) => f.what === 'late'), JSON.stringify(pb && failsOf(pb, 'band')));
+    verdictOf(every(pb, 'band', (f) => f.what === 'late')), JSON.stringify(pb && failsOf(pb, 'band')));
   // r3 (the acceptance of 3ba074455): a SEVENTH theme block reds only the floor it breaks — never a control that counted six
   const SEVENTH = '[data-theme="seventh"] {\n  --green: #22c55e; --blue: #2fc56a;\n}\n';
   const css7 = css.includes('\nhtml, body {') ? css.replace('\nhtml, body {', '\n' + SEVENTH + '\nhtml, body {') : null;
   let g7 = null; try { g7 = css7 && gauge(css7); } catch (e) { g7 = { rows: [], fails: [], themes: [], error: e.message }; }
   const pe7 = css7 && css7.includes('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);') ? gauge(css7.replace('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);', '  --warmth-expired: var(--border);')) : null;
   ok('…a SEVENTH theme block planted (its blue under 2° from its green) ⇒ the gauge walks seven, reds the hue floor on that block ALONE; the expired control over the same copy counts seven and still reds every one',
-    !!g7 && !g7.error && g7.themes.length === 7 && g7.fails.length > 0 && g7.fails.every((f) => f.theme === 'seventh' && f.floor === 'hue') && every(pe7, 'expired'), JSON.stringify(g7 && { themes: g7.themes, fails: g7.fails }));
+    !!g7 && !g7.error && g7.themes.length === 7 && g7.fails.length > 0 && gateOf(g7.fails.every((f) => f.theme === 'seventh' && f.floor === 'hue')) && verdictOf(every(pe7, 'expired')), JSON.stringify(g7 && { themes: g7.themes, fails: g7.fails }));
 }
 
 console.log('— ⑫ the strip\'s blink law (lane desktop-blink-colour): a waiting square blinks its OWN colour, the cadence unchanged');
@@ -794,17 +794,17 @@ console.log('— ⑫ the strip\'s blink law (lane desktop-blink-colour): a waiti
   for (const [s, what, verdict] of WAIT_CENSUS) console.log(`      ${s.padEnd(42)} ${verdict.padEnd(10)} ${what}`);
   for (const theme of ['dark', 'light']) {
     ok(`THE LAW (${theme}): a waiting square blinks its OWN tier colour — green blinks green, red blinks red, blue blue, amber amber, the quiet grey grey — the same fill it has at rest`,
-      TIERS.every(([tier]) => by(real, `tint:${tier}:${theme}`).pass), TIERS.map(([tier]) => by(real, `tint:${tier}:${theme}`).detail).join(' | '));
-    ok(`…a waiting square with NO state colour blinks yellow, as before (${theme})`, by(real, `tint:none:${theme}`).pass, by(real, `tint:none:${theme}`).detail);
-    ok(`…and stays yellow inside a desktop whose ring is critical (the ring's inherited --warmth-c never tints it) (${theme})`, by(real, `tint:none-in-ring:${theme}`).pass, by(real, `tint:none-in-ring:${theme}`).detail);
-    ok(`…the find flash keeps its own colour and its 0.3 s, waiting or not (${theme})`, by(real, `flash:${theme}`).pass, by(real, `flash:${theme}`).detail);
+      verdictOf(TIERS.every(([tier]) => by(real, `tint:${tier}:${theme}`).pass)), TIERS.map(([tier]) => by(real, `tint:${tier}:${theme}`).detail).join(' | '));
+    ok(`…a waiting square with NO state colour blinks yellow, as before (${theme})`, verdictOf(by(real, `tint:none:${theme}`).pass), by(real, `tint:none:${theme}`).detail);
+    ok(`…and stays yellow inside a desktop whose ring is critical (the ring's inherited --warmth-c never tints it) (${theme})`, verdictOf(by(real, `tint:none-in-ring:${theme}`).pass), by(real, `tint:none-in-ring:${theme}`).detail);
+    ok(`…the find flash keeps its own colour and its 0.3 s, waiting or not (${theme})`, verdictOf(by(real, `flash:${theme}`).pass), by(real, `flash:${theme}`).detail);
   }
-  ok(`THE BLINK UNCHANGED: every waiting square (each tier, none, none in a critical ring) runs «${CADENCE}» — no longhand overrides it`, by(real, 'cadence').pass, by(real, 'cadence').detail);
-  ok('…a square that does not wait does not animate', by(real, 'cadence:resting').pass, by(real, 'cadence:resting').detail);
-  ok(`…the keyframes: blink-fade = «${FRAMES}»`, by(real, 'keyframes').pass, by(real, 'keyframes').detail);
-  ok('THE CENSUS: the waiting blinks in style.css are exactly the table\'s five (a new one must be judged here)', by(real, 'census:set').pass, by(real, 'census:set').detail);
+  ok(`THE BLINK UNCHANGED: every waiting square (each tier, none, none in a critical ring) runs «${CADENCE}» — no longhand overrides it`, verdictOf(by(real, 'cadence').pass), by(real, 'cadence').detail);
+  ok('…a square that does not wait does not animate', verdictOf(by(real, 'cadence:resting').pass), by(real, 'cadence:resting').detail);
+  ok(`…the keyframes: blink-fade = «${FRAMES}»`, verdictOf(by(real, 'keyframes').pass), by(real, 'keyframes').detail);
+  ok('THE CENSUS: the waiting blinks in style.css are exactly the table\'s five (a new one must be judged here)', verdictOf(by(real, 'census:set').pass), by(real, 'census:set').detail);
   ok('…the four ::after blinks ride hosts that are NOT state-coloured ⇒ yellow, the same with a tier or none (their 0.7 s kept)',
-    WAIT_CENSUS.slice(1).every(([s]) => by(real, 'census:' + s).pass), WAIT_CENSUS.slice(1).map(([s]) => by(real, 'census:' + s).detail).join(' | '));
+    verdictOf(WAIT_CENSUS.slice(1).every(([s]) => by(real, 'census:' + s).pass)), WAIT_CENSUS.slice(1).map(([s]) => by(real, 'census:' + s).detail).join(' | '));
   // PLANTED copies — each reds its own row(s), and the rest stand
   const TIER_RULE = '.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-find-flash) { background: var(--warmth-c); }';
   const WAIT_RULE = '.desktop-preview-win-waiting { animation: blink-fade 0.7s ease-in-out infinite reverse; background: var(--yellow, #e5c07b); }';
@@ -812,17 +812,17 @@ console.log('— ⑫ the strip\'s blink law (lane desktop-blink-colour): a waiti
   const BASE_TIER_RULE = '.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash) { background: var(--warmth-c); }';
   const yellowAlways = planted([TIER_RULE, BASE_TIER_RULE]);
   ok('CONTROL: the yellow-always rule planted back (the base\'s `:not(.desktop-preview-win-waiting)`) reds the law — red and green blink yellow — and nothing else',
-    !!yellowAlways && !by(yellowAlways, 'tint:critical:dark').pass && !by(yellowAlways, 'tint:fresh:light').pass && by(yellowAlways, 'tint:none:dark').pass && by(yellowAlways, 'cadence').pass, yellowAlways && by(yellowAlways, 'tint:critical:dark').detail);
+    !!yellowAlways && !by(yellowAlways, 'tint:critical:dark').pass && !by(yellowAlways, 'tint:fresh:light').pass && gateOf(by(yellowAlways, 'tint:none:dark').pass) && verdictOf(by(yellowAlways, 'cadence').pass), yellowAlways && by(yellowAlways, 'tint:critical:dark').detail);
   const slower = planted([WAIT_RULE, WAIT_RULE.replace('0.7s', '0.5s')]);
   const longhand = planted([TIER_RULE, TIER_RULE.replace('{ background: var(--warmth-c); }', '{ background: var(--warmth-c); animation-duration: 1.4s; }')]);
   ok('CONTROL: a cadence changed — the blink at 0.5 s, or a tier rule adding its own animation-duration — reds THE BLINK UNCHANGED, the colours still hold',
-    !!slower && !by(slower, 'cadence').pass && by(slower, 'tint:critical:dark').pass && !!longhand && !by(longhand, 'cadence').pass, [slower && by(slower, 'cadence').detail, longhand && by(longhand, 'cadence').detail].join(' | '));
+    !!slower && !by(slower, 'cadence').pass && gateOf(by(slower, 'tint:critical:dark').pass) && !!longhand && !by(longhand, 'cadence').pass, [slower && by(slower, 'cadence').detail, longhand && by(longhand, 'cadence').detail].join(' | '));
   const unguarded = planted([TIER_RULE, BASE_TIER_RULE], [WAIT_RULE, WAIT_RULE.replace('var(--yellow, #e5c07b)', 'var(--warmth-c, var(--yellow, #e5c07b))')]);
   ok('CONTROL: the unguarded var road (the blink reads var(--warmth-c, yellow) by inheritance) colours the tiered squares but tints a NO-state square with its desktop ring\'s red ⇒ that row reds',
-    !!unguarded && by(unguarded, 'tint:critical:dark').pass && !by(unguarded, 'tint:none-in-ring:dark').pass, unguarded && by(unguarded, 'tint:none-in-ring:dark').detail);
+    !!unguarded && gateOf(by(unguarded, 'tint:critical:dark').pass) && !by(unguarded, 'tint:none-in-ring:dark').pass, unguarded && by(unguarded, 'tint:none-in-ring:dark').detail);
   const newBlink = law({ raw: scanned.raw.concat(rawOf('.mobile-win-row.waiting::after { animation: blink-fade 0.7s ease-in-out infinite; }').raw), frames: scanned.frames });
   ok('CONTROL: a NEW waiting blink planted (a phone row\'s ::after) reds THE CENSUS until it is judged in the table', !by(newBlink, 'census:set').pass, by(newBlink, 'census:set').detail);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skips ? ', ' + skips + ' SKIPPED' : '') + ')' : 'ALL PASS (' + pass + ')' + (skips ? ' · ' + skips + ' SKIPPED (counted, never a pass)' : '')}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

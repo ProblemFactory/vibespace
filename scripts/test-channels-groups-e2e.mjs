@@ -77,7 +77,7 @@ const fakeHome = scratchHome('chan-groups-e2e-home', fs);
 const chromeDir = scratch('chan-groups-e2e-chrome');
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway worktree + WORKING-TREE overlay (a pre-commit run tests what is about to ship) ──
@@ -152,7 +152,7 @@ process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 
 const waitServer = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-ok(await waitServer(), 'the worktree server booted');
+ok(verdictOf(await waitServer()), 'the worktree server booted');
 // the owner's login: ONE cookie for the node-side calls and the page
 const unauthed = await fetch(`http://127.0.0.1:${PORT}/api/channel-groups`).then((r) => r.status).catch(() => 0);
 ok(unauthed === 401, `FIXTURE: auth is ON — a cookie-less owner route answers 401 (${unauthed})`);
@@ -162,8 +162,8 @@ ok(login.status === 200 && !!TOKEN, 'FIXTURE: the owner logs in (the vs_token co
 const api = async (method, p, body, headers = {}) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json', Cookie: `vs_token=${TOKEN}`, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, body: j }; };
 let roster = null;
 for (let i = 0; i < 60; i++) { roster = await api('GET', '/api/channel-groups/roster'); if (roster.body && Array.isArray(roster.body.sessions) && roster.body.sessions.length >= 2) break; await sleep(500); }
-ok(roster.body && AGENTS.every((ag) => roster.body.sessions.some((s) => s.cid === ag.cid && s.name === ag.name)), 'FIXTURE: the server adopted BOTH fake sessions and the roster lists them (conversation id + name)', JSON.stringify(roster.body));
-ok(AGENTS.every((ag) => fs.readdirSync(path.join(fakeHome, '.claude', 'sessions')).some((f) => JSON.parse(fs.readFileSync(path.join(fakeHome, '.claude', 'sessions', f), 'utf-8')).sessionId === ag.cid)), 'FIXTURE: each stub CLI published itself in the SCRATCH home\'s CLI registry');
+ok(gateOf(roster.body) && verdictOf(AGENTS.every((ag) => roster.body.sessions.some((s) => s.cid === ag.cid && s.name === ag.name))), 'FIXTURE: the server adopted BOTH fake sessions and the roster lists them (conversation id + name)', JSON.stringify(roster.body));
+ok(verdictOf(AGENTS.every((ag) => fs.readdirSync(path.join(fakeHome, '.claude', 'sessions')).some((f) => JSON.parse(fs.readFileSync(path.join(fakeHome, '.claude', 'sessions', f), 'utf-8')).sessionId === ag.cid))), 'FIXTURE: each stub CLI published itself in the SCRATCH home\'s CLI registry');
 
 // ── CDP plumbing ──
 const WebSocket = require('ws');
@@ -193,12 +193,12 @@ async function newPage() {
 // lane attention-predicate-shared: 「相关」 open (`related: false`) — these legs read the hand-over / read / agent-group rows, which fold under it by default
 await api('PATCH', '/api/user-state', { channelsPanelFolds: { related: false } });
 const p1 = await newPage();
-ok(await p1.load(), 'page 1 loaded the app');
+ok(verdictOf(await p1.load()), 'page 1 loaded the app');
 const until = async (expr, ms = 20000) => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await p1.evaljs(expr); } catch {} if (v) return v; await sleep(250); } return v; };
 const OPEN_PANEL = `(async () => { const sb = window.app.sidebar; if (!sb._railEl) return false; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels'); for (let i = 0; i < 80; i++) { if (document.querySelector('.rail-panel-channels .chan-groups')) return true; await new Promise((r) => setTimeout(r, 250)); } return false; })()`;
-ok(await p1.evaljs(OPEN_PANEL), 'the Channels rail panel renders the GROUP LIST as its first section');
+ok(verdictOf(await p1.evaljs(OPEN_PANEL)), 'the Channels rail panel renders the GROUP LIST as its first section');
 const order = await p1.evaljs(`(() => { const l = document.querySelector('.rail-panel-channels .chan-list'); return [...l.children].map((c) => c.className.split(' ')[0] + (c.dataset.part ? ':' + c.dataset.part : '')); })()`);
-ok(order[0] === 'chan-groups' && order.includes('chan-part:accounts') && order.includes('chan-part:watcher') && order.indexOf('chan-part:accounts') > 0, 'FIRST the group list, THEN the secondary sections (Accounts, Message watcher)', JSON.stringify(order));
+ok(order[0] === 'chan-groups' && gateOf(order.includes('chan-part:accounts')) && gateOf(order.includes('chan-part:watcher')) && order.indexOf('chan-part:accounts') > 0, 'FIRST the group list, THEN the secondary sections (Accounts, Message watcher)', JSON.stringify(order));
 
 // ── ① New group ──
 const HOSTILE = '<img src=x onerror="window.__pwned=1">lane & co';
@@ -222,10 +222,10 @@ const dlg = await p1.evaljs(`(async () => {
   out.toast = [...document.querySelectorAll('.global-toast')].map((t) => t.textContent).pop() || null;
   return out;
 })()`);
-ok(dlg.names && dlg.names.slice().sort().join(',') === 'alpha,beta' && dlg.preChecked === 0 && dlg.disabledBefore === false && dlg.saidBefore === 'Pick at least two agents' && dlg.openAfterEarlyPress, 'the New group dialog lists the live sessions, NOTHING pre-selected; «Create» stays live and, pressed before two are picked, says «Pick at least two agents» above the buttons and creates nothing', JSON.stringify(dlg));
-ok(dlg.wakeOn === true && /will wake 2 agent\(s\) \(2 billed turn\(s\)\)/.test(dlg.echo || '') && dlg.disabledAfter === false, `"Wake now" is ON by default and the echo states the cost BEFORE the click ("${dlg.echo}")`);
-ok(dlg.win && dlg.win.spec.action === 'openChannel' && /^g-[0-9a-f]{8}$/.test(dlg.win.spec.convId), 'Create opens the group\'s window at once (the same window type, openSpec adapterId = the group namespace)', JSON.stringify(dlg.win));
-ok(dlg.toast && /woke 2 agent\(s\) = 2 billed turn\(s\)/.test(dlg.toast), 'the toast says what the SERVER did — woke 2 agents = 2 billed turns', String(dlg.toast));
+ok(gateOf(dlg.names) && dlg.names.slice().sort().join(',') === 'alpha,beta' && dlg.preChecked === 0 && dlg.disabledBefore === false && dlg.saidBefore === 'Pick at least two agents' && verdictOf(dlg.openAfterEarlyPress), 'the New group dialog lists the live sessions, NOTHING pre-selected; «Create» stays live and, pressed before two are picked, says «Pick at least two agents» above the buttons and creates nothing', JSON.stringify(dlg));
+ok(dlg.wakeOn === true && gateOf(/will wake 2 agent\(s\) \(2 billed turn\(s\)\)/.test(dlg.echo || '')) && dlg.disabledAfter === false, `"Wake now" is ON by default and the echo states the cost BEFORE the click ("${dlg.echo}")`);
+ok(gateOf(dlg.win) && dlg.win.spec.action === 'openChannel' && verdictOf(/^g-[0-9a-f]{8}$/.test(dlg.win.spec.convId)), 'Create opens the group\'s window at once (the same window type, openSpec adapterId = the group namespace)', JSON.stringify(dlg.win));
+ok(gateOf(dlg.toast) && verdictOf(/woke 2 agent\(s\) = 2 billed turn\(s\)/.test(dlg.toast)), 'the toast says what the SERVER did — woke 2 agents = 2 billed turns', String(dlg.toast));
 const gid = dlg.win ? dlg.win.spec.convId : null;
 
 // ── ①b lane channels-fold (the owner, 2026-10-03): VibeSpace internal is FOLDED BY DEFAULT — on a fresh user state the
@@ -235,13 +235,13 @@ const IHEAD = `(() => { const P = document.querySelector('.rail-panel-channels')
   return { folded: ih.classList.contains('chan-ihead-folded'), expanded: ih.getAttribute('aria-expanded'), groups: P.querySelectorAll('.chan-groups .chan-grow[data-group]').length, count: ih.querySelector('.chan-ihead-count').textContent }; })()`;
 const us0 = (await api('GET', '/api/user-state')).body;
 const fd0 = await until(IHEAD);
-ok(fd0 && fd0.folded === true && fd0.expanded === 'false' && fd0.groups === 0 && /^\([1-9]\d*\)$/.test(fd0.count) && !(us0 && us0.channelsPanelFolds && 'internal' in us0.channelsPanelFolds),
+ok(gateOf(fd0) && fd0.folded === true && fd0.expanded === 'false' && fd0.groups === 0 && gateOf(/^\([1-9]\d*\)$/.test(fd0.count)) && !(us0 && us0.channelsPanelFolds && 'internal' in us0.channelsPanelFolds),
   '①b THE DEFAULT IS FOLDED: on a fresh user state (no `internal` key) the new group stands under the folded "VibeSpace internal (N)" head — no row of its own', JSON.stringify({ fd0, folds: us0 && us0.channelsPanelFolds }));
 await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-groups .chan-ihead').click(); return 1; })()`);
 let usU = null;
 for (let i = 0; i < 20; i++) { usU = (await api('GET', '/api/user-state')).body; if (usU && usU.channelsPanelFolds && usU.channelsPanelFolds.internal === false) break; await sleep(250); }
 const fd1 = await until(`(() => { const v = ${IHEAD}; return v && v.folded === false && v.groups >= 1 ? v : null; })()`);
-ok(usU && usU.channelsPanelFolds && usU.channelsPanelFolds.internal === false && fd1 && fd1.expanded === 'true' && fd1.count === fd0.count,
+ok(gateOf(usU) && gateOf(usU.channelsPanelFolds) && usU.channelsPanelFolds.internal === false && gateOf(fd1) && fd1.expanded === 'true' && fd1.count === fd0.count,
   '①b the owner\'s UNFOLD is an explicit choice — user state `channelsPanelFolds.internal: false` — and the group\'s row stands under the open head', JSON.stringify({ fd1, folds: usU && usU.channelsPanelFolds }));
 
 // ── ② the hostile name is TEXT ──
@@ -256,7 +256,7 @@ ok(xss.pwned === false && xss.imgs === 0 && xss.planted === 1, 'no element was i
 await sleep(800);
 const fA0 = frames(AGENTS[0]), fB0 = frames(AGENTS[1]);
 ok(fA0.length === 1 && fB0.length === 1, `each invitee's stub CLI recorded exactly ONE frame (the invite wake) — alpha ${fA0.length}, beta ${fB0.length}`);
-ok([fA0[0], fB0[0]].every((f) => f && /You were just added to this group/.test(f.message.content) && f.message.content.includes(CONTEXT)), 'the invite frame carries the lead line AND the opening context — the invitee\'s first content', JSON.stringify(fA0[0] && fA0[0].message.content.slice(0, 200)));
+ok(verdictOf([fA0[0], fB0[0]].every((f) => f && /You were just added to this group/.test(f.message.content) && f.message.content.includes(CONTEXT))), 'the invite frame carries the lead line AND the opening context — the invitee\'s first content', JSON.stringify(fA0[0] && fA0[0].message.content.slice(0, 200)));
 
 // ── ④ alpha → always (the detail dialog), beta stays next-turn; the owner sends ──
 const setMode = await p1.evaljs(`(async () => {
@@ -271,7 +271,7 @@ const setMode = await p1.evaljs(`(async () => {
   d.querySelector('.dialog-close').click();
   return rows;
 })()`);
-ok(setMode[0].member === 'user' && setMode[0].name === 'You (observer)' && setMode[0].notify === null && setMode.slice(1).every((r) => r.notify === 'next-turn'), 'the detail lists the owner FIRST as "You (observer)" (no mode), every member on the default next-turn', JSON.stringify(setMode));
+ok(setMode[0].member === 'user' && setMode[0].name === 'You (observer)' && setMode[0].notify === null && verdictOf(setMode.slice(1).every((r) => r.notify === 'next-turn')), 'the detail lists the owner FIRST as "You (observer)" (no mode), every member on the default next-turn', JSON.stringify(setMode));
 const g1 = (await api('GET', '/api/channel-groups')).body.groups.find((g) => g.id === gid);
 ok(g1.members.find((m) => m.member === AGENTS[0].cid).notify === 'always' && g1.members.find((m) => m.member === AGENTS[1].cid).notify === 'next-turn', 'the owner changed ANOTHER member\'s mode from the select (alpha → always; beta untouched)');
 const SEND = (text, { mention = null } = {}) => `(async () => {
@@ -301,10 +301,10 @@ const SEND = (text, { mention = null } = {}) => `(async () => {
 const s1 = await p1.evaljs(SEND('hello team — status please'));
 await sleep(800);
 const fA1 = frames(AGENTS[0]), fB1 = frames(AGENTS[1]);
-ok(/Will wake alpha — 1 billed turn/.test(s1.preview || ''), `the preview under the box names who THIS text wakes before the click ("${s1.preview}")`);
-ok(fA1.length === 2 && /notify mode in this group is "always"/.test(fA1[1].message.content) && fA1[1].message.content.includes('hello team'), 'the member on `always` IS WOKEN: its stub recorded the wake frame carrying the message', JSON.stringify(fA1.map((f) => f.message.content.slice(0, 80))));
+ok(verdictOf(/Will wake alpha — 1 billed turn/.test(s1.preview || '')), `the preview under the box names who THIS text wakes before the click ("${s1.preview}")`);
+ok(fA1.length === 2 && gateOf(/notify mode in this group is "always"/.test(fA1[1].message.content)) && verdictOf(fA1[1].message.content.includes('hello team')), 'the member on `always` IS WOKEN: its stub recorded the wake frame carrying the message', JSON.stringify(fA1.map((f) => f.message.content.slice(0, 80))));
 ok(fB1.length === 1, 'the member on `next-turn` is NOT woken: its stub recorded nothing new (the message waits for its next report)', `beta frames ${fB1.length}`);
-ok(s1.drawnAs === 'You' && s1.body === 'hello team — status please' && /woke 1 agent\(s\) = 1 billed turn\(s\)/.test(s1.toast || '') && /1 will read it on their next turn/.test(s1.toast || ''), 'the owner\'s message is drawn at once as "You", and the toast states the wake count and who reads it next turn', JSON.stringify(s1));
+ok(s1.drawnAs === 'You' && s1.body === 'hello team — status please' && gateOf(/woke 1 agent\(s\) = 1 billed turn\(s\)/.test(s1.toast || '')) && verdictOf(/1 will read it on their next turn/.test(s1.toast || '')), 'the owner\'s message is drawn at once as "You", and the toast states the wake count and who reads it next turn', JSON.stringify(s1));
 
 // ── ④b WHERE THE MESSAGE STANDS (lane group-pending; the owner 2026-10-01: a message to a next-turn member was
 //      drawn exactly like a delivered one) — the line under the owner's message: alpha (always, woken) read it,
@@ -324,41 +324,41 @@ const DLV = (body) => `(() => {
 })()`;
 const HELLO = 'hello team — status please';
 const d1 = await p1.evaljs(DLV(HELLO));
-ok(d1 && !d1.noLine && d1.text === '1 waiting · 1 read' && d1.tone === 'waiting' && d1.dotFilled === false && d1.whole && d1.hidden === false, '④b the owner\'s message carries its line: "1 waiting · 1 read" (alpha woken, beta waits), a HOLLOW dot, whole in its row', JSON.stringify(d1));
-ok(d1 && d1.title.split('\n').length === 2 && d1.title.split('\n').includes("Waiting for beta's next turn") && d1.title.split('\n').some((l) => /^Read by alpha · \d{2}:\d{2}$/.test(l)), '④b …its title names each recipient\'s state (alpha, woken, with its hand-over clock)', d1 && d1.title);
+ok(gateOf(d1) && !d1.noLine && d1.text === '1 waiting · 1 read' && d1.tone === 'waiting' && d1.dotFilled === false && gateOf(d1.whole) && d1.hidden === false, '④b the owner\'s message carries its line: "1 waiting · 1 read" (alpha woken, beta waits), a HOLLOW dot, whole in its row', JSON.stringify(d1));
+ok(gateOf(d1) && d1.title.split('\n').length === 2 && gateOf(d1.title.split('\n').includes("Waiting for beta's next turn")) && verdictOf(d1.title.split('\n').some((l) => /^Read by alpha · \d{2}:\d{2}$/.test(l))), '④b …its title names each recipient\'s state (alpha, woken, with its hand-over clock)', d1 && d1.title);
 // beta's next turn: one typed character into its session makes the next hook call a USER turn (the §22 gate — the
 // invite wake stamped a machine turn), the hook hands the report over (an HTTP answer: the stub records nothing),
 // the marker moves, the broadcast carries it, the line flips
 await p1.evaljs(`(() => { window.app.ws.send({ type: 'input', sessionId: 'sess-grp-${AGENTS[1].key}', data: ' ' }); return 1; })()`);
 await sleep(300);
 const pc = await api('GET', '/api/agent/prompt-context', undefined, { Authorization: 'Bearer ' + AGENTS[1].token });
-ok(pc.status === 200 && /hello team/.test(JSON.stringify(pc.body)), '④b beta\'s UserPromptSubmit hook (a typed turn) is handed the report carrying the owner\'s message', JSON.stringify(pc.body).slice(0, 300));
+ok(pc.status === 200 && verdictOf(/hello team/.test(JSON.stringify(pc.body))), '④b beta\'s UserPromptSubmit hook (a typed turn) is handed the report carrying the owner\'s message', JSON.stringify(pc.body).slice(0, 300));
 const d2 = await until(`(() => { const d = ${DLV(HELLO)}; return d && d.text === '2 read' ? d : null; })()`);
-ok(d2 && d2.tone === 'handed' && d2.dotFilled === true && d2.mark === d1.mark, '④b …and the line under the owner\'s message flips to "2 read" with a FILLED dot — the SAME node, patched in place, no reload', JSON.stringify(d2));
-ok(d2 && /^Read by beta · \d{2}:\d{2}$/m.test(d2.title) && /^Read by alpha · \d{2}:\d{2}$/m.test(d2.title), '④b …its title says WHEN each was read (the hand-over clock, HH:MM like the message head)', d2 && d2.title);
+ok(gateOf(d2) && d2.tone === 'handed' && d2.dotFilled === true && d2.mark === d1.mark, '④b …and the line under the owner\'s message flips to "2 read" with a FILLED dot — the SAME node, patched in place, no reload', JSON.stringify(d2));
+ok(gateOf(d2) && gateOf(/^Read by beta · \d{2}:\d{2}$/m.test(d2.title)) && verdictOf(/^Read by alpha · \d{2}:\d{2}$/m.test(d2.title)), '④b …its title says WHEN each was read (the hand-over clock, HH:MM like the message head)', d2 && d2.title);
 ok(frames(AGENTS[1]).length === fB1.length, 'CONTROL: the hand-over was the hook\'s answer — beta\'s stub recorded no frame for it (nobody was woken, nothing billed)', `beta frames ${frames(AGENTS[1]).length}`);
 // a muted member is said; a mode change repaints the line in place
 const mute = await api('POST', `/api/channel-groups/${gid}/notify`, { member: AGENTS[1].cid, notify: 'mute' });
-ok(mute.status === 200 && mute.body.ok, '④b FIXTURE: beta → mute (the owner may set anyone\'s mode)');
+ok(mute.status === 200 && verdictOf(mute.body.ok), '④b FIXTURE: beta → mute (the owner may set anyone\'s mode)');
 const MUTED = 'a note while beta is muted';
 await p1.evaljs(SEND(MUTED));
 const d3 = await until(`(() => { const d = ${DLV(MUTED)}; return d && /muted/.test(d.text) ? d : null; })()`);
-ok(d3 && d3.text === '1 read · 1 muted' && d3.tone === 'handed' && /beta is muted and will not read it/.test(d3.title), `④b a muted member is SAID under the message ("${d3 && d3.text}"); alpha (always) read it`, JSON.stringify(d3));
+ok(gateOf(d3) && d3.text === '1 read · 1 muted' && d3.tone === 'handed' && verdictOf(/beta is muted and will not read it/.test(d3.title)), `④b a muted member is SAID under the message ("${d3 && d3.text}"); alpha (always) read it`, JSON.stringify(d3));
 const unmute = await api('POST', `/api/channel-groups/${gid}/notify`, { member: AGENTS[1].cid, notify: 'next-turn' });
 const d4 = await until(`(() => { const d = ${DLV(MUTED)}; return d && d.text === '1 waiting · 1 read' ? d : null; })()`);
-ok(unmute.status === 200 && d4 && d4.mark === d3.mark && d4.tone === 'waiting', '④b beta back on next-turn ⇒ the SAME line now reads "1 waiting · 1 read" (a mode change repaints in place — the line is a live fact)', JSON.stringify(d4));
+ok(unmute.status === 200 && gateOf(d4) && d4.mark === d3.mark && d4.tone === 'waiting', '④b beta back on next-turn ⇒ the SAME line now reads "1 waiting · 1 read" (a mode change repaints in place — the line is a live fact)', JSON.stringify(d4));
 // zh / ja: the same line whole on a second page in each language (the width budget lives in the words)
 for (const lang of ['zh', 'ja']) {
   const p = await newPage();
   await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); } catch {}` });
-  ok(await p.load(), `④b ${lang}: a second page in ${lang} loaded`);
+  ok(verdictOf(await p.load()), `④b ${lang}: a second page in ${lang} loaded`);
   const want = lang === 'zh' ? '1 人待读 · 1 人已读' : '1 人が未読 · 1 人が既読';
   await p.evaljs(`(() => { window.app.openChannel('groups', '${gid}'); return 1; })()`);
   let dl = null;
   for (const end = Date.now() + 20000; Date.now() < end && !dl;) { try { dl = await p.evaljs(`(() => { const d = ${DLV(MUTED)}; return d && d.text === ${JSON.stringify(want)} ? d : null; })()`); } catch {} if (!dl) await sleep(250); }
-  ok(dl && dl.whole && (lang === 'zh' ? /等待 beta 的下一回合/ : /beta の次のターンを待っています/).test(dl.title), `④b ${lang}: the line reads "${want}", whole in its row, its title in ${lang}`, JSON.stringify(dl));
+  ok(gateOf(dl) && gateOf(dl.whole) && verdictOf((lang === 'zh' ? /等待 beta 的下一回合/ : /beta の次のターンを待っています/).test(dl.title)), `④b ${lang}: the line reads "${want}", whole in its row, its title in ${lang}`, JSON.stringify(dl));
   const dlh = await p.evaljs(DLV(HELLO));
-  ok(dlh && (lang === 'zh' ? /beta 已在 \d{2}:\d{2} 读到/ : /beta が \d{2}:\d{2} に読みました/).test(dlh.title), `④b ${lang}: a read row says WHEN in ${lang}`, dlh && dlh.title);
+  ok(gateOf(dlh) && verdictOf((lang === 'zh' ? /beta 已在 \d{2}:\d{2} 读到/ : /beta が \d{2}:\d{2} に読みました/).test(dlh.title)), `④b ${lang}: a read row says WHEN in ${lang}`, dlh && dlh.title);
   await p.evaljs(`localStorage.removeItem('vibespace.lang'), 1`);
 }
 
@@ -367,7 +367,7 @@ const s2 = await p1.evaljs(SEND('can you take the data half?', { mention: '@be' 
 await sleep(800);
 const fB2 = frames(AGENTS[1]);
 ok(JSON.stringify(s2.pop) === '["beta"]' && s2.afterPick === '@beta ', 'the @-autocomplete offers the member list ("@be" ⇒ beta) and Enter inserts "@beta "', JSON.stringify(s2));
-ok(/Will wake .*beta/.test(s2.preview || '') && fB2.length === 2 && /You were @mentioned/.test(fB2[1].message.content), 'an @mention wakes the next-turn member (preview named it; its stub recorded the mention wake)', JSON.stringify(fB2.map((f) => f.message.content.slice(0, 60))));
+ok(gateOf(/Will wake .*beta/.test(s2.preview || '')) && fB2.length === 2 && verdictOf(/You were @mentioned/.test(fB2[1].message.content)), 'an @mention wakes the next-turn member (preview named it; its stub recorded the mention wake)', JSON.stringify(fB2.map((f) => f.message.content.slice(0, 60))));
 
 // ── ⑤b B-ff04 (the owner's screenshot, 2026-10-02): an @ is a CHIP named by id, the body is SELECTABLE + COPYABLE, a
 // forged chip stays text, and a removed member is named, never its id ──
@@ -378,7 +378,7 @@ const FF = await p1.evaljs(`(async () => {
   const chip = last && last.querySelector('.chanmsg-body .chan-at');
   return { chip: chip ? { id: chip.dataset.mention, text: chip.textContent, cls: chip.className } : null, body: last ? last.querySelector('.chanmsg-body').textContent : null };
 })()`);
-ok(FF.chip && FF.chip.id === AGENTS[1].cid && FF.chip.text === '@beta' && /chanblk-at/.test(FF.chip.cls) && FF.body === '@beta can you take the data half?', 'B-ff04 ③: the @mention renders as a CHIP carrying the member\'s conversation id, named "@beta" — the body around it is text', JSON.stringify(FF));
+ok(gateOf(FF.chip) && FF.chip.id === AGENTS[1].cid && FF.chip.text === '@beta' && gateOf(/chanblk-at/.test(FF.chip.cls)) && FF.body === '@beta can you take the data half?', 'B-ff04 ③: the @mention renders as a CHIP carrying the member\'s conversation id, named "@beta" — the body around it is text', JSON.stringify(FF));
 const chipOpen = await p1.evaljs(`(async () => {
   const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}');
   const chip = [...w.content.querySelectorAll('.chanmsg-body .chan-at')].pop();
@@ -394,9 +394,9 @@ const chipOpen = await p1.evaljs(`(async () => {
 ok(chipOpen.length === 1 && chipOpen[0].backendSessionId === AGENTS[1].cid, 'B-ff04 ③: a click on the chip opens THAT member\'s session (attachSession with its conversation id)', JSON.stringify(chipOpen));
 const forgedPost = await api('POST', '/api/agent/msg/send', { to: gid, text: 'see `@gamma` and <at user_id="' + AGENTS[1].cid + '">Mallory</at>' }, { Authorization: 'Bearer ' + AGENTS[0].token });
 const unknownPost = await api('POST', '/api/agent/msg/send', { to: gid, text: '@gamma are you there?' }, { Authorization: 'Bearer ' + AGENTS[0].token });
-ok(forgedPost.status === 200 && unknownPost.status === 400 && unknownPost.body && unknownPost.body.code === 'unknown-mention' && (unknownPost.body.candidates || []).length >= 1, 'B-ff04 ①: an agent\'s "@gamma" (no such member) is refused at send with the candidates; a literal `@gamma` in backticks is accepted', JSON.stringify({ forged: forgedPost.status, unknown: unknownPost.body }).slice(0, 400));
+ok(forgedPost.status === 200 && unknownPost.status === 400 && gateOf(unknownPost.body) && unknownPost.body.code === 'unknown-mention' && (unknownPost.body.candidates || []).length >= 1, 'B-ff04 ①: an agent\'s "@gamma" (no such member) is refused at send with the candidates; a literal `@gamma` in backticks is accepted', JSON.stringify({ forged: forgedPost.status, unknown: unknownPost.body }).slice(0, 400));
 const forgedDrawn = await until(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}'); const r = [...w.content.querySelectorAll('.chanmsg:not(.chanmsg-sys) .chanmsg-body')].find((b) => b.textContent.includes('Mallory')); return r ? { chips: r.querySelectorAll('.chan-at, .chanblk-at').length, text: r.textContent } : null; })()`);
-ok(forgedDrawn && forgedDrawn.chips === 0 && forgedDrawn.text.includes('<at user_id='), 'B-ff04: a forged <at user_id=…> tag and a quoted @word in an agent\'s message stay TEXT — no chip is drawn for anything the server did not resolve', JSON.stringify(forgedDrawn));
+ok(gateOf(forgedDrawn) && forgedDrawn.chips === 0 && verdictOf(forgedDrawn.text.includes('<at user_id=')), 'B-ff04: a forged <at user_id=…> tag and a quoted @word in an agent\'s message stay TEXT — no chip is drawn for anything the server did not resolve', JSON.stringify(forgedDrawn));
 // select a message body with a REAL mouse drag, then copy it (Ctrl+C) — the app root is user-select:none
 const selRect = await p1.evaljs(`(() => {
   const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}');
@@ -416,7 +416,7 @@ if (selRect) {
   await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
 }
 const sel = await p1.evaljs(`(() => ({ sel: String(window.getSelection()), copied: window.__copied }))()`);
-ok(selRect && /hello team — status pleas/.test(sel.sel) && /hello team — status pleas/.test(sel.copied || ''), 'B-ff04 ②: a message body is SELECTED by a real mouse drag and COPIED by Ctrl+C (the copy event carries its words)', JSON.stringify({ selRect, sel }));
+ok(gateOf(selRect) && gateOf(/hello team — status pleas/.test(sel.sel)) && verdictOf(/hello team — status pleas/.test(sel.copied || '')), 'B-ff04 ②: a message body is SELECTED by a real mouse drag and COPIED by Ctrl+C (the copy event carries its words)', JSON.stringify({ selRect, sel }));
 const menuCopy = await p1.evaljs(`(async () => {
   const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}');
   const row = [...w.content.querySelectorAll('.chanmsg:not(.chanmsg-sys)')].find((x) => (x.querySelector('.chanmsg-body') || {}).textContent === 'hello team — status please');
@@ -437,16 +437,16 @@ ok(menuCopy.labels.indexOf('Copy text') >= 0 && menuCopy.labels.indexOf('Copy te
 const kg = await api('POST', '/api/channel-groups', { name: 'kick lane', members: AGENTS.map((a) => a.cid), quiet: true });
 const kgid = kg.body && kg.body.group && kg.body.group.id;
 const kicked = kgid ? await api('POST', `/api/channel-groups/${kgid}/kick`, { member: AGENTS[1].cid }) : null;
-ok(kicked && kicked.status === 200, 'FIXTURE: the owner removed beta from a fresh quiet group', JSON.stringify(kicked && kicked.body).slice(0, 200));
+ok(gateOf(kicked) && kicked.status === 200, 'FIXTURE: the owner removed beta from a fresh quiet group', JSON.stringify(kicked && kicked.body).slice(0, 200));
 await p1.evaljs(`(() => { window.app.openChannel('groups', '${kgid}'); return 1; })()`);
 const sysLine = await until(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${kgid}'); const l = w && [...w.content.querySelectorAll('.chanmsg-sys .chanmsg-sys-line')].map((x) => x.textContent).find((x) => /removed/.test(x)); return l || null; })()`);
-ok(sysLine && /removed beta/.test(sysLine) && !sysLine.includes(AGENTS[1].cid.slice(0, 8)), `B-ff04 ③: the removed member is named by its last known name — "${sysLine}" (never its id)`);
+ok(gateOf(sysLine) && gateOf(/removed beta/.test(sysLine)) && !sysLine.includes(AGENTS[1].cid.slice(0, 8)), `B-ff04 ③: the removed member is named by its last known name — "${sysLine}" (never its id)`);
 
 // ── ⑥ the list orders by ACTIVITY, repainted in place ──
 // 2026-09-26 (aggregated IM): every conversation of a linked account is listed — no track step
 await sleep(1500);
 const second = await api('POST', '/api/channel-groups', { name: 'second lane', members: AGENTS.map((a) => a.cid), quiet: true });
-ok(second.status === 200 && second.body.ok && second.body.woke.length === 0, 'CONTROL: a QUIET create wakes nobody (woke 0)', JSON.stringify(second.body && second.body.woke));
+ok(second.status === 200 && gateOf(second.body.ok) && second.body.woke.length === 0, 'CONTROL: a QUIET create wakes nobody (woke 0)', JSON.stringify(second.body && second.body.woke));
 const armFetch = await p1.evaljs(`(() => { window.__gf = 0; const of = window.fetch; window.__of = of; window.fetch = function (u, ...r) { if (/^\\/api\\/channel-groups(\\?|$)/.test(String(u)) || /^\\/api\\/channels(\\?|$)/.test(String(u))) window.__gf++; return of.call(this, u, ...r); }; return 1; })()`);
 // R3 (§23): the first screen is the ATTENTION list — an untouched conversation is under ALL, one switch away
 // (the switch redraws from the digest in hand: it is inside the zero-fetch window below)
@@ -456,13 +456,13 @@ const A2 = `groups/${second.body.group.id}`, A1 = `groups/${gid}`, CONV = 'fake-
 const sortedByActivity = (o) => o.every((x, i) => i === 0 || o[i - 1].at >= x.at);
 const idx = (o, k) => o.findIndex((x) => x.key === k);
 const o1 = await until(`(() => { const o = ${ORDER}; const k = o.map((x) => x.key); return k.includes('${A2}') && k.includes('${CONV}') ? o : null; })()`);
-ok(o1 && sortedByActivity(o1) && idx(o1, A2) < idx(o1, A1) && idx(o1, CONV) >= 0, 'THE LIST ORDERS BY ACTIVITY: groups and the account\'s conversation in ONE list, newest first — the later group ahead of the earlier one (the fake conversation sits by its own records\' instants)', JSON.stringify(o1));
+ok(gateOf(o1) && gateOf(sortedByActivity(o1)) && idx(o1, A2) < idx(o1, A1) && idx(o1, CONV) >= 0, 'THE LIST ORDERS BY ACTIVITY: groups and the account\'s conversation in ONE list, newest first — the later group ahead of the earlier one (the fake conversation sits by its own records\' instants)', JSON.stringify(o1));
 const bump = await api('POST', `/api/channel-groups/${gid}/post`, { text: 'bumping the first group', expectWakes: 1 });   // alpha is on always: the echo says 1 (r2 consent)
-ok(bump.status === 200 && bump.body && bump.body.ok, 'the owner\'s post with its consent echo (expectWakes = the always member) is accepted', JSON.stringify(bump));
+ok(bump.status === 200 && gateOf(bump.body) && verdictOf(bump.body.ok), 'the owner\'s post with its consent echo (expectWakes = the always member) is accepted', JSON.stringify(bump));
 const noEcho = await api('POST', `/api/channel-groups/${gid}/post`, { text: 'no echo this time' });
-ok(noEcho.status === 409 && noEcho.body && noEcho.body.code === 'wake-count-mismatch' && noEcho.body.wakes === 1, 'CONTROL: the same route with no echo is refused wake-count-mismatch (wakes:1) — a caller that never saw the preview cannot wake', JSON.stringify(noEcho));
+ok(noEcho.status === 409 && gateOf(noEcho.body) && noEcho.body.code === 'wake-count-mismatch' && noEcho.body.wakes === 1, 'CONTROL: the same route with no echo is refused wake-count-mismatch (wakes:1) — a caller that never saw the preview cannot wake', JSON.stringify(noEcho));
 const o2 = await until(`(() => { const o = ${ORDER}; const i1 = o.findIndex((x) => x.key === '${A1}'), i2 = o.findIndex((x) => x.key === '${A2}'); return i1 >= 0 && i1 < i2 ? o : null; })()`);
-ok(o2 && sortedByActivity(o2) && idx(o2, A1) < idx(o2, A2), 'a message in the first group moves it AHEAD of the later one — the order follows activity, live', JSON.stringify(o2));
+ok(gateOf(o2) && gateOf(sortedByActivity(o2)) && idx(o2, A1) < idx(o2, A2), 'a message in the first group moves it AHEAD of the later one — the order follows activity, live', JSON.stringify(o2));
 const gf = await p1.evaljs(`(() => { const n = window.__gf; window.fetch = window.__of; return n; })()`);
 ok(armFetch === 1 && gf === 0, `…repainted IN PLACE from the broadcasts — ZERO /api/channels or /api/channel-groups fetches (${gf})`);
 
@@ -470,7 +470,7 @@ ok(armFetch === 1 && gf === 0, `…repainted IN PLACE from the broadcasts — ZE
 await p1.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x._openSpec && x._openSpec.convId === '${gid}')) window.app.wm.closeWindow(w.id); return 1; })()`);
 await sleep(300);
 const agentPost = await api('POST', '/api/agent/msg/send', { to: gid, text: 'schema half is done' }, { Authorization: 'Bearer ' + AGENTS[0].token });
-ok(agentPost.status === 200 && agentPost.body && agentPost.body.ok !== false, 'FIXTURE: the agent posted through its own session token (the CLI\'s route)', JSON.stringify(agentPost));
+ok(agentPost.status === 200 && gateOf(agentPost.body) && agentPost.body.ok !== false, 'FIXTURE: the agent posted through its own session token (the CLI\'s route)', JSON.stringify(agentPost));
 const unread = await until(`(() => { const u = document.querySelector('.rail-panel-channels .chan-grow[data-group="${gid}"] .chan-grow-unread'); return u ? u.textContent : null; })()`);
 const lastLine = await p1.evaljs(`(() => document.querySelector('.rail-panel-channels .chan-grow[data-group="${gid}"] .chan-grow-last').textContent)()`);
 ok(unread === '1' && lastLine === 'schema half is done', 'the row shows 1 UNREAD and the message as its last line', JSON.stringify({ unread, lastLine }));
@@ -492,13 +492,13 @@ ok(railBefore >= 1 && railAfter === railBefore && railBefore === Number(totals.n
 await p1.evaljs(`(() => { const h = document.querySelector('.rail-panel-channels .chan-part[data-part="accounts"] .chan-part-head'); if (h.parentElement.classList.contains('chan-part-collapsed')) h.click(); h.click(); return 1; })()`);
 let us = null;
 for (let i = 0; i < 20; i++) { us = (await api('GET', '/api/user-state')).body; if (us && us.channelsPanelFolds && us.channelsPanelFolds.accounts === true) break; await sleep(250); }
-ok(us && us.channelsPanelFolds && us.channelsPanelFolds.accounts === true, 'folding Accounts PATCHes user state (`channelsPanelFolds.accounts: true`)', JSON.stringify(us && us.channelsPanelFolds));
-ok(await p1.load(), 'page reloaded');
-ok(await p1.evaljs(OPEN_PANEL), 'the panel renders again after the reload');
+ok(gateOf(us) && gateOf(us.channelsPanelFolds) && us.channelsPanelFolds.accounts === true, 'folding Accounts PATCHes user state (`channelsPanelFolds.accounts: true`)', JSON.stringify(us && us.channelsPanelFolds));
+ok(verdictOf(await p1.load()), 'page reloaded');
+ok(verdictOf(await p1.evaljs(OPEN_PANEL)), 'the panel renders again after the reload');
 const persisted = await until(`(() => { const p = document.querySelector('.rail-panel-channels .chan-part[data-part="accounts"]'); return p ? { folded: p.classList.contains('chan-part-collapsed'), bodyShown: getComputedStyle(p.querySelector('.chan-part-body')).display !== 'none' } : null; })()`);
-ok(persisted && persisted.folded === true && persisted.bodyShown === false, 'after the reload the Accounts section is STILL folded (its body hidden)', JSON.stringify(persisted));
+ok(gateOf(persisted) && persisted.folded === true && persisted.bodyShown === false, 'after the reload the Accounts section is STILL folded (its body hidden)', JSON.stringify(persisted));
 const keptOpen = await until(`(() => { const v = ${IHEAD}; return v && v.folded === false && v.groups >= 1 ? v : null; })()`);
-ok(keptOpen && keptOpen.expanded === 'true', '⑧ lane channels-fold: the owner\'s explicit UNFOLD (①b) survives the reload — VibeSpace internal stays open, though the default folds it', JSON.stringify(keptOpen));
+ok(gateOf(keptOpen) && keptOpen.expanded === 'true', '⑧ lane channels-fold: the owner\'s explicit UNFOLD (①b) survives the reload — VibeSpace internal stays open, though the default folds it', JSON.stringify(keptOpen));
 const watcher = await p1.evaljs(`(() => document.querySelector('.rail-panel-channels .chan-part[data-part="watcher"]').classList.contains('chan-part-collapsed'))()`);
 ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is open — the fold is per section');
 
@@ -524,10 +524,10 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   const DAY = 24 * 3600e3;
   const directsOf = (list) => new Set(list.filter((c) => c.kind === 'dm' && Number(c.unread) > 0 && Date.now() - Number(c.lastAt) < DAY).map((c) => `${c.adapterId}/${c.id}`));
   const directs0 = directsOf(convs);
-  ok(directs0.size >= 3 && [...directs0].every((k) => /-room-\d+$/.test(k) && Number(k.split('-').pop()) % 5 === 0), `FIXTURE: ${directs0.size} single chats carry new messages inside 24 h (the \`direct\` rows — the fixture's every-fifth-room DMs)`, JSON.stringify([...directs0]));
+  ok(directs0.size >= 3 && verdictOf([...directs0].every((k) => /-room-\d+$/.test(k) && Number(k.split('-').pop()) % 5 === 0)), `FIXTURE: ${directs0.size} single chats carry new messages inside 24 h (the \`direct\` rows — the fixture's every-fifth-room DMs)`, JSON.stringify([...directs0]));
   const f0 = await p1.evaljs(FOCUS);
   const f0conv = f0.rows.filter((r) => !r.group);
-  ok(f0.view === 'focus' && f0.segs.find((x) => x.view === 'focus').on && f0.rows.filter((r) => r.group).length === groupsNow.length && f0conv.length === directs0.size && f0conv.every((r) => directs0.has(r.key) && r.tag === 'direct'), `the panel OPENS on the attention list: the ${groupsNow.length} agent groups and the ${directs0.size} single chats with new messages (tag \`direct\`) — NO untouched group conversation (${f0.rows.length} rows)`, JSON.stringify(f0.rows.map((r) => `${r.key}=${r.tag}`)));
+  ok(f0.view === 'focus' && gateOf(f0.segs.find((x) => x.view === 'focus').on) && f0.rows.filter((r) => r.group).length === groupsNow.length && f0conv.length === directs0.size && verdictOf(f0conv.every((r) => directs0.has(r.key) && r.tag === 'direct')), `the panel OPENS on the attention list: the ${groupsNow.length} agent groups and the ${directs0.size} single chats with new messages (tag \`direct\`) — NO untouched group conversation (${f0.rows.length} rows)`, JSON.stringify(f0.rows.map((r) => `${r.key}=${r.tag}`)));
   ok(f0.segs.map((x) => x.text).join(' | ') === `${groupsNow.length + directs0.size} need attention | All ${ALL}`, `the header is the switch: "${f0.segs.map((x) => x.text).join(' | ')}"`);
   const ids = convs.filter((c) => c.adapterId === 'fake-poll' && /-room-\d+$/.test(c.id)).map((c) => c.id).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
   const assigned = ids.slice(0, 5), readByBeta = ids.slice(5, 8), awaitingId = ids[8];
@@ -536,10 +536,10 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   for (const id of readByBeta) {
     await api('PUT', `/api/channels/fake-poll/${id}/reach`, { principal: { kind: 'agent', id: AGENTS[1].cid, name: 'beta' }, level: 'visible' });
     const rd = await api('GET', `/api/agent/channels/read?conv=${encodeURIComponent('fake-poll/' + id)}`, undefined, { Authorization: 'Bearer ' + AGENTS[1].token });
-    ok(rd.status === 200 && rd.body.ok && rd.body.records.length > 0, `FIXTURE: beta READS fake-poll/${id} through its own agent route (vibespace-channels read)`, JSON.stringify(rd.body).slice(0, 200));
+    ok(rd.status === 200 && gateOf(rd.body.ok) && rd.body.records.length > 0, `FIXTURE: beta READS fake-poll/${id} through its own agent route (vibespace-channels read)`, JSON.stringify(rd.body).slice(0, 200));
   }
   const prop = await api('POST', `/api/channels/fake-poll/${awaitingId}/propose`, { text: 'a draft that waits for approval' });
-  ok(prop.status === 200 && prop.body && (prop.body.proposal || {}).state === 'awaiting-approval', `FIXTURE: a draft waits for approval on ${awaitingId}`, JSON.stringify(prop.body).slice(0, 200));
+  ok(prop.status === 200 && gateOf(prop.body) && (prop.body.proposal || {}).state === 'awaiting-approval', `FIXTURE: a draft waits for approval on ${awaitingId}`, JSON.stringify(prop.body).slice(0, 200));
   const want9 = { ...Object.fromEntries(assigned.map((id) => [`fake-poll/${id}`, 'assigned'])), ...Object.fromEntries(readByBeta.map((id) => [`fake-poll/${id}`, 'read'])), [`fake-poll/${awaitingId}`]: 'awaiting' };
   // the single chats stay beside them (`direct`); a DM among the 9 wears the stronger tag (assigned › direct, TAG_ORDER)
   const directs1 = directsOf(((await api('GET', '/api/channels')).body.conversations || []).filter((c) => !c.unlisted));
@@ -547,14 +547,14 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   const N1 = Object.keys(want).length;
   const f1 = await until(`(() => { const f = ${FOCUS}; return f.rows.filter((r) => !r.group).length === ${N1} ? f : null; })()`, 20000);
   const convRows = f1 ? f1.rows.filter((r) => !r.group) : [];
-  ok(f1 && convRows.length === N1 && convRows.every((r) => want[r.key] === r.tag) && Object.keys(want9).every((k) => convRows.some((r) => r.key === k)), `EXACTLY the 9 join the attention list beside the ${N1 - 9} single chats, each with its ONE tag — repainted from the broadcasts (${convRows.map((r) => `${r.key.split('-').pop()}=${r.tag}`).join(' ')})`, JSON.stringify(f1 && f1.rows));
-  ok(convRows.filter((r) => r.tag === 'assigned').every((r) => r.tagText === '→ alpha' && r.who === 'alpha') && convRows.filter((r) => r.tag === 'read').every((r) => /^beta read /.test(r.tagText) && r.who === 'beta') && convRows.filter((r) => r.tag === 'awaiting').every((r) => r.tagText === '1 to approve'), 'the tags say it: "→ alpha", "beta read …" (the name its own part), "1 to approve"', JSON.stringify(convRows.map((r) => r.tagText)));
-  ok(f1 && f1.segs.map((x) => x.text).join(' | ') === `${groupsNow.length + N1} need attention | All ${ALL}`, `the header counts: "${f1 && f1.segs.map((x) => x.text).join(' | ')}"`);
+  ok(gateOf(f1) && convRows.length === N1 && gateOf(convRows.every((r) => want[r.key] === r.tag)) && verdictOf(Object.keys(want9).every((k) => convRows.some((r) => r.key === k))), `EXACTLY the 9 join the attention list beside the ${N1 - 9} single chats, each with its ONE tag — repainted from the broadcasts (${convRows.map((r) => `${r.key.split('-').pop()}=${r.tag}`).join(' ')})`, JSON.stringify(f1 && f1.rows));
+  ok(gateOf(convRows.filter((r) => r.tag === 'assigned').every((r) => r.tagText === '→ alpha' && r.who === 'alpha')) && gateOf(convRows.filter((r) => r.tag === 'read').every((r) => /^beta read /.test(r.tagText) && r.who === 'beta')) && verdictOf(convRows.filter((r) => r.tag === 'awaiting').every((r) => r.tagText === '1 to approve')), 'the tags say it: "→ alpha", "beta read …" (the name its own part), "1 to approve"', JSON.stringify(convRows.map((r) => r.tagText)));
+  ok(gateOf(f1) && f1.segs.map((x) => x.text).join(' | ') === `${groupsNow.length + N1} need attention | All ${ALL}`, `the header counts: "${f1 && f1.segs.map((x) => x.text).join(' | ')}"`);
   // ALL: the whole list, one switch away
   await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]').click(); return 1; })()`);
   // design 008: All is the server's pages (60 a read) — read on the switch, so it is awaited, never assumed in hand
   const fa = (await until(`(() => { const f = ${FOCUS}; return f.view === 'all' && f.rows.length === ${ALL} ? f : null; })()`, 10000)) || (await p1.evaljs(FOCUS));
-  ok(fa.view === 'all' && fa.rows.length === ALL && fa.segs.find((x) => x.view === 'all').on, `"All" shows the whole list (${fa.rows.length} of ${ALL}); a tagged row keeps its tag there`, JSON.stringify(fa.rows.length));
+  ok(fa.view === 'all' && fa.rows.length === ALL && verdictOf(fa.segs.find((x) => x.view === 'all').on), `"All" shows the whole list (${fa.rows.length} of ${ALL}); a tagged row keeps its tag there`, JSON.stringify(fa.rows.length));
   // THE FILTER, in both views
   const typeQ = (q) => p1.evaljs(`(() => { const i = document.querySelector('.rail-panel-channels .chan-find-input'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input')); return 1; })()`);
   const one = readByBeta[0];
@@ -562,7 +562,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   await typeQ(oneTitle);
   // design 008: in All the filter is the SERVER's (250 ms after the last keystroke, then a page)
   const fq = (await until(`(() => { const f = ${FOCUS}; return f.rows.some((r) => r.key === ${JSON.stringify(`fake-poll/${one}`)}) ? f : null; })()`, 10000)) || (await p1.evaljs(FOCUS));
-  ok(fq.rows.some((r) => r.key === `fake-poll/${one}`) && fq.rows.every((r) => r.key.endsWith(one) || /Room/.test(oneTitle)), `the filter narrows ALL to "${oneTitle}" (${fq.rows.length} rows)`, JSON.stringify(fq.rows.map((r) => r.key)));
+  ok(gateOf(fq.rows.some((r) => r.key === `fake-poll/${one}`)) && verdictOf(fq.rows.every((r) => r.key.endsWith(one) || /Room/.test(oneTitle))), `the filter narrows ALL to "${oneTitle}" (${fq.rows.length} rows)`, JSON.stringify(fq.rows.map((r) => r.key)));
   await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="focus"]').click(); return 1; })()`);
   const untouched = ids[12];
   const untouchedTitle = convs.find((c) => c.id === untouched).title;
@@ -570,15 +570,15 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   // design 008: "{n} more in All" is the server's count of the matches (250 ms after the last keystroke)
   const fmExpr = `(() => { const f = ${FOCUS}; const more = document.querySelector('.rail-panel-channels [data-more-in-all]'); const sm = document.querySelector('.rail-panel-channels [data-search-messages]'); return { ...f, more: more ? { n: more.dataset.moreInAll, text: more.textContent } : null, search: sm ? sm.textContent : null }; })()`;
   const fm = (await until(`(() => { const x = ${fmExpr}; return x.more ? x : null; })()`, 10000)) || (await p1.evaljs(fmExpr));
-  ok(fm.view === 'focus' && !fm.rows.some((r) => r.key === `fake-poll/${untouched}`) && fm.more && Number(fm.more.n) >= 1 && /more in All/.test(fm.more.text), `in the attention view a match OUTSIDE it is offered, never hidden: "${fm.more && fm.more.text}"`, JSON.stringify(fm));
-  ok(fm.search && /Search messages for "/.test(fm.search), `…and the words are a message search too ("${fm.search}")`);
+  ok(fm.view === 'focus' && !fm.rows.some((r) => r.key === `fake-poll/${untouched}`) && gateOf(fm.more) && Number(fm.more.n) >= 1 && verdictOf(/more in All/.test(fm.more.text)), `in the attention view a match OUTSIDE it is offered, never hidden: "${fm.more && fm.more.text}"`, JSON.stringify(fm));
+  ok(gateOf(fm.search) && verdictOf(/Search messages for "/.test(fm.search)), `…and the words are a message search too ("${fm.search}")`);
   await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels [data-more-in-all]').click(); return 1; })()`);
   const fm2 = (await until(`(() => { const f = ${FOCUS}; return f.view === 'all' && f.rows.some((r) => r.key === ${JSON.stringify(`fake-poll/${untouched}`)}) ? f : null; })()`, 10000)) || (await p1.evaljs(FOCUS));
-  ok(fm2.view === 'all' && fm2.rows.some((r) => r.key === `fake-poll/${untouched}`), '"more in All" switches to All with the words kept — the row is there');
+  ok(fm2.view === 'all' && verdictOf(fm2.rows.some((r) => r.key === `fake-poll/${untouched}`)), '"more in All" switches to All with the words kept — the row is there');
   await typeQ('');
   // AT 375 px: one column, the tag UNDER the title
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });
-  ok(await p1.load(), 'page reloaded at 375 × 667 (a phone)');
+  ok(verdictOf(await p1.load()), 'page reloaded at 375 × 667 (a phone)');
   const phone = await until(`(async () => {
     if (!document.querySelector('.chan-window .chan-groups')) { window.app.openChannels(); await new Promise((r) => setTimeout(r, 300)); }
     for (const f of document.querySelectorAll('.chan-window .chan-attn-fold[data-state="folded"]')) f.click();   // lane attention-predicate-shared: the whole list (every band open)
@@ -587,7 +587,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     const list = document.querySelector('.chan-window .chan-groups').getBoundingClientRect();
     return rows.map((r) => { const ti = r.querySelector('.chan-grow-title').getBoundingClientRect(), tg = r.querySelector('.chan-grow-tag').getBoundingClientRect(), rr = r.getBoundingClientRect(); const words = [...r.querySelectorAll('.chan-tag-words')]; const who = r.querySelector('.chan-tag-who'); return { key: r.dataset.grow, under: tg.top >= ti.bottom - 0.5, tagW: Math.round(tg.width), wordsWhole: words.every((w) => w.scrollWidth <= w.clientWidth + 0.5), whoWhole: !who || who.scrollWidth <= who.clientWidth + 0.5, rowW: Math.round(rr.width), listW: Math.round(list.width) }; });
   })()`, 20000);
-  ok(Array.isArray(phone) && phone.length === N1 && phone.every((x) => x.under && x.wordsWhole && x.whoWhole && Math.abs(x.rowW - x.listW) <= 2), `at 375 px every tagged row is ONE column with its tag UNDER the title, its words AND the agent's name whole (tags ${Array.isArray(phone) ? phone.map((x) => x.tagW).join(',') : phone} px)`, JSON.stringify(phone));
+  ok(gateOf(Array.isArray(phone)) && phone.length === N1 && verdictOf(phone.every((x) => x.under && x.wordsWhole && x.whoWhole && Math.abs(x.rowW - x.listW) <= 2)), `at 375 px every tagged row is ONE column with its tag UNDER the title, its words AND the agent's name whole (tags ${Array.isArray(phone) ? phone.map((x) => x.tagW).join(',') : phone} px)`, JSON.stringify(phone));
   await p1.cdp('Emulation.clearDeviceMetricsOverride');
 
   // ── ⑩ 2026-09-27 (lane channel-withdraw): THE AGENT TAKES A DRAFT BACK; HOW IT HEARS OF A DECISION IS
@@ -598,14 +598,14 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   // REMEMBERED as the primary of the next card; the woken receipt reaches beta's stub and the fate line says
   // "Handed to beta at HH:MM — it was woken for it"; a next-message approve reads "Waiting for beta's next
   // message" until beta's next prompt drains the stash — the SAME card's fate line is patched in place.
-  ok(await p1.load(), '⑩ page reloaded at desktop size');
+  ok(verdictOf(await p1.load()), '⑩ page reloaded at desktop size');
   await p1.evaljs(`(() => { localStorage.removeItem('vibespace.channels.receiptDeliver'); return 1; })()`);
   const BETA = AGENTS[1];
   const asBeta = (method, p, body) => api(method, p, body, { Authorization: 'Bearer ' + BETA.token });
   const [wId, aId, nId] = readByBeta;
   const wTitle = convs.find((c) => c.id === wId).title;
   const pw = await asBeta('POST', '/api/agent/channels/reply', { conv: `fake-poll/${wId}`, text: 'a draft beta will take back' });
-  ok(pw.status === 200 && pw.body.proposal && pw.body.proposal.state === 'awaiting-approval', '⑩ FIXTURE: beta proposes through its own agent route (vibespace-channels reply) — awaiting approval', JSON.stringify(pw.body).slice(0, 200));
+  ok(pw.status === 200 && gateOf(pw.body.proposal) && pw.body.proposal.state === 'awaiting-approval', '⑩ FIXTURE: beta proposes through its own agent route (vibespace-channels reply) — awaiting approval', JSON.stringify(pw.body).slice(0, 200));
   const pid = pw.body.proposal.id;
   const ptr = ((await api('GET', '/api/user-todos')).body.todos.open || []).find((x) => x.sessionKey === 'channels' && x.text === `Proposals awaiting approval in ${wTitle}`);
   ok(!!ptr, `⑩ FIXTURE: its For-you pointer is open ("Proposals awaiting approval in ${wTitle}")`);
@@ -623,7 +623,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     }
     return { fail: 'no outbox card / for-you row', card: !!document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]') };
   })()`);
-  ok(!shown.fail && /chan-prop-awaiting-approval/.test(shown.card) && shown.splitA && shown.splitR && shown.approve === 'Approve — tell the agent with your next message' && shown.deliver === 'next-turn' && !/ut-item-resolved/.test(shown.row), `⑩ the Outbox card awaits with the SPLIT buttons (Approve ▾ / Reject ▾), the primary says the free choice ("${shown.approve}"), and the For-you row is open`, JSON.stringify(shown));
+  ok(!shown.fail && gateOf(/chan-prop-awaiting-approval/.test(shown.card)) && gateOf(shown.splitA) && gateOf(shown.splitR) && shown.approve === 'Approve — tell the agent with your next message' && shown.deliver === 'next-turn' && !/ut-item-resolved/.test(shown.row), `⑩ the Outbox card awaits with the SPLIT buttons (Approve ▾ / Reject ▾), the primary says the free choice ("${shown.approve}"), and the For-you row is open`, JSON.stringify(shown));
   // the Outbox shows ALL (another draft from ⑨ still awaits, so it opened on the Awaiting queue)
   await p1.evaljs(`(() => { const b = document.querySelector('.chan-outbox .chan-seg button[data-view="all"]'); if (b) b.click(); return !!b; })()`);
   const wd = await asBeta('POST', `/api/agent/channels/proposals/${pid}/withdraw`, { why: 'wrong thread' });
@@ -638,7 +638,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     return { fail: 'never withdrawn on the page', cls: document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]')?.className || null };
   })()`);
   ok(!gone.fail && gone.reason === 'Withdrawn by beta · wrong thread' && gone.state === 'withdrawn' && gone.buttons === 0 && gone.pill === 'withdrawn', `⑩ WITHOUT A RELOAD the card reads "${gone.reason}", its row's pill says "withdrawn" (lane outbox-window-scroll-filter: 「全部」 is newest first, each row with its outcome — no per-state heads), with NO buttons`, JSON.stringify(gone));
-  ok(!gone.fail && (gone.row === null || /ut-item-resolved/.test(gone.row)), '⑩ …and the For-you row resolved live (retracted by the engine, never by a reload)', JSON.stringify(gone.row));
+  ok(!gone.fail && (gone.row === null || verdictOf(/ut-item-resolved/.test(gone.row))), '⑩ …and the For-you row resolved live (retracted by the engine, never by a reload)', JSON.stringify(gone.row));
   const reopened = await p1.evaljs(`(async () => {
     const b = document.getElementById('taskbar-user-todos'); const pop = document.getElementById('user-todos-popup');
     if (!pop.classList.contains('hidden')) b.click();
@@ -681,7 +681,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     }
     return { fail: 'never sent with a fate line' };
   })()`);
-  ok(!woke.fail && /^Handed to beta at (\d\d-\d\d )?\d\d:\d\d — it was woken for it$/.test(woke.fate), `⑩ "wake the agent now" ⇒ sent, and the fate line: "${woke.fate}"`, JSON.stringify(woke));
+  ok(!woke.fail && verdictOf(/^Handed to beta at (\d\d-\d\d )?\d\d:\d\d — it was woken for it$/.test(woke.fate)), `⑩ "wake the agent now" ⇒ sent, and the fate line: "${woke.fate}"`, JSON.stringify(woke));
   let rcFrames = [];
   for (let i = 0; i < 40 && !(rcFrames = frames(BETA).slice(fr0).filter((f) => /Channel receipt/.test(JSON.stringify(f)))).length; i++) await sleep(250);
   ok(rcFrames.length === 1, `⑩ the woken receipt reached beta's stub through the REAL ladder, ONCE (${rcFrames.length})`);
@@ -719,7 +719,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     }
     return { fail: 'the fate never moved' };
   })()`);
-  ok(!handed.fail && /^Handed to beta at (\d\d-\d\d )?\d\d:\d\d$/.test(handed.fate) && handed.sameCard && handed.sameLine, `⑩ WITHOUT A RELOAD the fate line reads "${handed.fate}" — the SAME card and the SAME line, patched in place`, JSON.stringify(handed));
+  ok(!handed.fail && gateOf(/^Handed to beta at (\d\d-\d\d )?\d\d:\d\d$/.test(handed.fate)) && gateOf(handed.sameCard) && verdictOf(handed.sameLine), `⑩ WITHOUT A RELOAD the fate line reads "${handed.fate}" — the SAME card and the SAME line, patched in place`, JSON.stringify(handed));
   // verify r3 (2026-09-27): THE PRESS DOES WHAT THE BUTTON SAYS. Two drafts await; on card X the owner picks
   // "Reject with a reason and wake now" (the box opens, nothing is posted, no broadcast) — card Y's primary
   // must now READ the wake words, and its press must post exactly what it reads (a billed turn the words said
@@ -750,8 +750,8 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     }
     return { fail: 'Y never sent', before, boxOpen, after };
   })()`);
-  ok(!said.fail && said.before.deliver === 'next-turn' && said.boxOpen && said.after.deliver === 'wake-now' && said.after.text === 'Approve and wake the agent now (starts a turn)', `⑩ r3: after "Reject … and wake now" is picked on card X (box open, nothing posted), card Y's primary READS the wake words at once ("${said.after && said.after.text}")`, JSON.stringify(said));
-  ok(!said.fail && /^Handed to beta at (\d\d-\d\d )?\d\d:\d\d — it was woken for it$/.test(said.fate) && said.xState === 'awaiting your approval', `⑩ r3: …and its press does what it says: woken ("${said.fate}"); card X still awaits`, JSON.stringify(said));
+  ok(!said.fail && said.before.deliver === 'next-turn' && gateOf(said.boxOpen) && said.after.deliver === 'wake-now' && said.after.text === 'Approve and wake the agent now (starts a turn)', `⑩ r3: after "Reject … and wake now" is picked on card X (box open, nothing posted), card Y's primary READS the wake words at once ("${said.after && said.after.text}")`, JSON.stringify(said));
+  ok(!said.fail && gateOf(/^Handed to beta at (\d\d-\d\d )?\d\d:\d\d — it was woken for it$/.test(said.fate)) && said.xState === 'awaiting your approval', `⑩ r3: …and its press does what it says: woken ("${said.fate}"); card X still awaits`, JSON.stringify(said));
   let fr2 = [];
   for (let i = 0; i < 40 && !(fr2 = frames(BETA).slice(fr1).filter((f) => /Channel receipt/.test(JSON.stringify(f)))).length; i++) await sleep(250);
   ok(fr2.length === 1, `⑩ r3: ONE woken receipt reached beta's stub for the press (${fr2.length})`);
@@ -763,7 +763,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   const fg = await api('POST', '/api/channel-groups', { name: 'fold lane', members: AGENTS.map((a) => a.cid), quiet: true });
   const fgid = fg.body && fg.body.group && fg.body.group.id;
   const p2 = await newPage();
-  ok(!!fgid && (await p2.load()) && (await p2.evaljs(OPEN_PANEL)) && (await p1.evaljs(OPEN_PANEL)), '⑪ FIXTURE: a fresh agent group + a SECOND client with the panel open');
+  ok(!!fgid && (gateOf(await p2.load())) && (gateOf(await p2.evaljs(OPEN_PANEL))) && (verdictOf(await p1.evaljs(OPEN_PANEL))), '⑪ FIXTURE: a fresh agent group + a SECOND client with the panel open');
   const CENSUS = `(() => {
     const P = document.querySelector('.rail-panel-channels'); if (!P) return null;
     const sig = (b) => (b ? [b.dataset.hue || '', b.dataset.vs || '', (b.querySelector('svg') || {}).innerHTML || ''].join('|') : null);
@@ -778,11 +778,11 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   })()`;
   const cs = await until(CENSUS);
   const adapterOf = (k) => { const i = k.lastIndexOf('/'); return k.slice(0, i); };
-  ok(cs && cs.conv.every((c) => { const h = cs.heads[adapterOf(c.key)]; return h && h.b && h.b === c.b && h.t && c.t === h.t; }) && Object.values(cs.heads).every((h) => h.b && !h.kindTile),
+  ok(gateOf(cs) && gateOf(cs.conv.every((c) => { const h = cs.heads[adapterOf(c.key)]; return h && h.b && h.b === c.b && h.t && c.t === h.t; })) && verdictOf(Object.values(cs.heads).every((h) => h.b && !h.kindTile)),
     `⑪ BADGE CENSUS: every conversation row's badge (glyph + hue) is EXACTLY its account card's icon, and both hovers name the account (${cs ? cs.conv.length : 0} rows, ${cs ? Object.keys(cs.heads).length : 0} cards)`, JSON.stringify(cs));
   // lane internal-rows-look (the owner, 2026-10-09: the 8 px corner badge did not tell agent rows from a Lark group): the
   //  group row's avatar IS the VibeSpace mark on a muted disc — no hue, no corner badge; the internal head wears that mark
-  ok(cs && cs.groups.length >= 1 && cs.ihead && cs.ihead.split('|')[1] === '1' && cs.groups.every((g) => !g.b && g.vs && g.hue === null && g.mark && g.mark === cs.ihead.split('|')[2]) && Object.values(cs.heads).some((h) => h.b === cs.ihead),
+  ok(gateOf(cs) && cs.groups.length >= 1 && gateOf(cs.ihead) && cs.ihead.split('|')[1] === '1' && gateOf(cs.groups.every((g) => !g.b && g.vs && g.hue === null && g.mark && g.mark === cs.ihead.split('|')[2])) && verdictOf(Object.values(cs.heads).some((h) => h.b === cs.ihead)),
     '⑪ every agent group row wears the VibeSpace mark AS its avatar (muted, no hue, no corner badge) — the mark the internal head and the built-in agents card wear', JSON.stringify(cs && { groups: cs.groups, ihead: cs.ihead }));
   const shots = process.env.VS_SHOTS_DIR || '';
   // the account cards folded for this page only (their heads — icon · name — in one view with the internal block)
@@ -803,22 +803,22 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     return { folded: ih.classList.contains('chan-ihead-folded'), expanded: ih.getAttribute('aria-expanded'), groups: P.querySelectorAll('.chan-groups .chan-grow[data-group]').length, convs: P.querySelectorAll('.chan-groups .chan-grow:not([data-group])').length, count: ih.querySelector('.chan-ihead-count').textContent }; })()`;
   const on = (pg, want, ms = 15000) => (async () => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await pg.evaljs(FOLDED); } catch {} if (v && v.folded === want) return v; await sleep(250); } return markTimedOut(v, ms, 'on (the fold)'); })();
   const before = await p1.evaljs(FOLDED), before2 = await on(p2, false);
-  ok(before && before.folded === false && before.expanded === 'true' && before.groups >= 1 && before2 && before2.folded === false && before2.groups >= 1,
+  ok(gateOf(before) && before.folded === false && before.expanded === 'true' && before.groups >= 1 && gateOf(before2) && before2.folded === false && before2.groups >= 1,
     '⑪ lane channels-fold: the owner\'s explicit UNFOLD (①b) holds here AND on the SECOND client\'s fresh load (user state, not this page)', JSON.stringify({ before, before2 }));
   await shoot('after-unfolded-zh.png');
   await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-groups .chan-ihead').click(); return 1; })()`);
   let us2 = null;
   for (let i = 0; i < 20; i++) { us2 = (await api('GET', '/api/user-state')).body; if (us2 && us2.channelsPanelFolds && us2.channelsPanelFolds.internal === true) break; await sleep(250); }
-  ok(us2 && us2.channelsPanelFolds && us2.channelsPanelFolds.internal === true, '⑪ folding VibeSpace internal PATCHes user state (`channelsPanelFolds.internal: true`)', JSON.stringify(us2 && us2.channelsPanelFolds));
+  ok(gateOf(us2) && gateOf(us2.channelsPanelFolds) && us2.channelsPanelFolds.internal === true, '⑪ folding VibeSpace internal PATCHes user state (`channelsPanelFolds.internal: true`)', JSON.stringify(us2 && us2.channelsPanelFolds));
   const f1 = await on(p1, true), f2 = await on(p2, true);
-  ok(f1 && f1.folded && f1.groups === 0 && f1.convs >= 1 && f1.count === before.count, '⑪ folded: the head ALONE stands for the internal rows (its count kept); the people\'s conversations stay', JSON.stringify(f1));
-  ok(f2 && f2.folded && f2.groups === 0, '⑪ …and the SECOND client folds too — the user-state broadcast, no reload', JSON.stringify(f2));
+  ok(gateOf(f1) && gateOf(f1.folded) && f1.groups === 0 && f1.convs >= 1 && f1.count === before.count, '⑪ folded: the head ALONE stands for the internal rows (its count kept); the people\'s conversations stay', JSON.stringify(f1));
+  ok(gateOf(f2) && gateOf(f2.folded) && f2.groups === 0, '⑪ …and the SECOND client folds too — the user-state broadcast, no reload', JSON.stringify(f2));
   await shoot('after-zh.png');
   await p2.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-groups .chan-ihead').click(); return 1; })()`);
   const u1 = await on(p1, false);
   let us3 = null;
   for (let i = 0; i < 20; i++) { us3 = (await api('GET', '/api/user-state')).body; if (us3 && us3.channelsPanelFolds && us3.channelsPanelFolds.internal === false) break; await sleep(250); }
-  ok(u1 && u1.folded === false && u1.groups >= 1 && us3 && us3.channelsPanelFolds && us3.channelsPanelFolds.internal === false,
+  ok(gateOf(u1) && u1.folded === false && u1.groups >= 1 && gateOf(us3) && gateOf(us3.channelsPanelFolds) && us3.channelsPanelFolds.internal === false,
     '⑪ unfolding on the second client unfolds the first (synced both ways) — and it is the explicit `internal: false` again', JSON.stringify({ u1, folds: us3 && us3.channelsPanelFolds }));
 }
 
@@ -841,7 +841,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     return { group: items.filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0), cards: [...v._messageList.querySelectorAll('.chat-group-message')].map((e) => e.textContent) }; })()`;
   const viewUntil = async (pred, ms = 20000) => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await p1.evaljs(VIEWB); } catch {} if (v && pred(v)) return v; await sleep(250); } return markTimedOut(v, ms, 'viewUntil (the view)'); };
   const pre = await viewUntil((v) => v.group >= 1);
-  ok(pre && pre.group >= 1 && !pre.cards.some((t) => t.includes(PARKED)), '⑫ beta\'s strip counts the parked group message (waiting for the next turn) and its chat has no card for it yet', JSON.stringify(pre));
+  ok(gateOf(pre) && pre.group >= 1 && !pre.cards.some((t) => t.includes(PARKED)), '⑫ beta\'s strip counts the parked group message (waiting for the next turn) and its chat has no card for it yet', JSON.stringify(pre));
   // the wake: alpha @mentions beta in a SECOND group (a group wake through THE ladder — the fixture sessions share no
   // Task Group, so a direct `send beta` is out of reach here); the parked group is not the woken one
   const wk = await api('POST', '/api/channel-groups', { name: 'wake lane', members: AGENTS.map((a) => a.cid), quiet: true });
@@ -851,12 +851,12 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   ok(woke.status === 200 && frames(BETA).length === fr0 + 1, `⑫ alpha's @beta in another group wakes beta's stub ONCE through the REAL ladder — a billed turn nobody typed (${frames(BETA).length - fr0})`, JSON.stringify(woke.body));
   const ctx = await api('GET', '/api/agent/prompt-context', undefined, { Authorization: 'Bearer ' + BETA.token });
   const c = String((ctx.body && ctx.body.context) || '');
-  ok(c.includes(PARKED) && c.includes('### Group messages since your last turn') && c.split('(these arrived while you were handling something else').length === 2,
+  ok(gateOf(c.includes(PARKED)) && gateOf(c.includes('### Group messages since your last turn')) && c.split('(these arrived while you were handling something else').length === 2,
     '⑫ the WOKEN turn\'s prompt-context carries the parked report — under the echo guard\'s words, said once', c.slice(-1200));
-  ok(!c.includes('one quick question') && frames(BETA).slice(fr0).some((f) => JSON.stringify(f).includes('one quick question')), '⑫ …and not the wake\'s own message again (its frame carried it)', c.slice(-1200));
+  ok(!c.includes('one quick question') && verdictOf(frames(BETA).slice(fr0).some((f) => JSON.stringify(f).includes('one quick question'))), '⑫ …and not the wake\'s own message again (its frame carried it)', c.slice(-1200));
   const post = await viewUntil((v) => v.group === 0 && v.cards.some((t) => t.includes(PARKED)));
-  ok(post && post.group === 0, '⑫ the strip EMPTIES — nothing waits for a keystroke', JSON.stringify(post));
-  ok(post && post.cards.some((t) => t.includes(PARKED)), '⑫ beta\'s chat draws the report\'s card at the injection point (the group-report-card rule)', JSON.stringify(post));
+  ok(gateOf(post) && post.group === 0, '⑫ the strip EMPTIES — nothing waits for a keystroke', JSON.stringify(post));
+  ok(gateOf(post) && verdictOf(post.cards.some((t) => t.includes(PARKED))), '⑫ beta\'s chat draws the report\'s card at the injection point (the group-report-card rule)', JSON.stringify(post));
   const again = await api('GET', '/api/agent/prompt-context', undefined, { Authorization: 'Bearer ' + BETA.token });
   ok(!String((again.body && again.body.context) || '').includes(PARKED), '⑫ …exactly once: the next turn carries it no more');
 }
@@ -875,17 +875,17 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   const ar = await api('PATCH', '/api/user-state', { archivedSessions: [...(us.archivedSessions || []), 'claude:' + BETA.cid] });
   let closed = null;
   for (let i = 0; i < 40 && !closed; i++) { const l = await api('GET', '/api/channel-groups'); closed = ((l.body && l.body.groups) || []).find((g) => g.id === pid && g.archivedAt) || null; if (!closed) await sleep(250); }
-  ok(ar.status === 200 && closed && closed.closed && closed.closed.why === 'archived', '⑬ the sidebar archive of beta (THE user-state write) CLOSES the pair (archived)', JSON.stringify(closed).slice(0, 400));
+  ok(ar.status === 200 && gateOf(closed) && gateOf(closed.closed) && closed.closed.why === 'archived', '⑬ the sidebar archive of beta (THE user-state write) CLOSES the pair (archived)', JSON.stringify(closed).slice(0, 400));
   const again = await api('POST', '/api/agent/msg/send', { to: BETA.cid, text: 'still there?' }, { Authorization: 'Bearer ' + ALPHA.token });
-  ok(again.body && again.body.code === 'ended', '⑬ send beta is now refused `ended`, by name', JSON.stringify(again.body).slice(0, 300));
+  ok(gateOf(again.body) && again.body.code === 'ended', '⑬ send beta is now refused `ended`, by name', JSON.stringify(again.body).slice(0, 300));
   const p = await newPage();
   await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}` });
-  ok(await p.load(), '⑬ zh: a page in zh loaded');
+  ok(verdictOf(await p.load()), '⑬ zh: a page in zh loaded');
   await p.evaljs(`(() => { window.app.openChannel('groups', '${pid}'); return 1; })()`);
   const DLVP = DLV(FATE).replace(`=== '${gid}'`, `=== '${pid}'`);
   let dz = null;
   for (const end = Date.now() + 20000; Date.now() < end && !dz;) { try { dz = await p.evaljs(`(() => { const d = ${DLVP}; return d && /未送达/.test(d.text || '') ? d : null; })()`); } catch {} if (!dz) await sleep(250); }
-  ok(dz && /^未送达——beta 的对话已于 .+ 归档$/.test(dz.text) && dz.whole && dz.tone !== 'waiting' && !/等待/.test(dz.title), '⑬ zh: the line under alpha\'s message reads "未送达——beta 的对话已于 … 归档", whole in its row — never 等待', JSON.stringify(dz));
+  ok(gateOf(dz) && gateOf(/^未送达——beta 的对话已于 .+ 归档$/.test(dz.text)) && gateOf(dz.whole) && dz.tone !== 'waiting' && !/等待/.test(dz.title), '⑬ zh: the line under alpha\'s message reads "未送达——beta 的对话已于 … 归档", whole in its row — never 等待', JSON.stringify(dz));
   await p.evaljs(OPEN_PANEL);
   let li = null;
   for (const end = Date.now() + 20000; Date.now() < end && !(li && li.row);) {
@@ -895,8 +895,8 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
       return { label: P.querySelector('.chan-archived-toggle').textContent, row: row ? row.textContent : null, live: !!live }; })()`); } catch {}
     if (!(li && li.row)) await sleep(250);
   }
-  ok(li && li.row && !li.live && /归档/.test(li.label), '⑬ zh: the closed pair is listed under the archived groups (not among the live rows)', JSON.stringify(li));
+  ok(gateOf(li) && gateOf(li.row) && !li.live && verdictOf(/归档/.test(li.label)), '⑬ zh: the closed pair is listed under the archived groups (not among the live rows)', JSON.stringify(li));
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

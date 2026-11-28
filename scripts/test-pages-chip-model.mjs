@@ -15,7 +15,7 @@ import { scratchDir } from './scratch.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -49,13 +49,13 @@ function groupsOk(v) {
 }
 {
   const v = run(M);
-  ok(groupsOk(v), '① own (newest first, the design\'s page left on its design row) then shown (newest mention first); an own page also linked here is own only', v.groups.map((g) => [g.key, g.rows.map((r) => r.id)]));
+  ok(verdictOf(groupsOk(v)), '① own (newest first, the design\'s page left on its design row) then shown (newest mention first); an own page also linked here is own only', v.groups.map((g) => [g.key, g.rows.map((r) => r.id)]));
   ok(v.groups[0].label === 'Published by this conversation' && v.groups[1].label === 'Shown here', '① the group heads', v.groups.map((g) => g.label));
   ok(v.ownCount === 2 && v.shownCount === 3 && v.chipCount === 1 + 2 + 3, '① chipCount = designs + own + shown (1 + 2 + 3)', [v.ownCount, v.shownCount, v.chipCount]);
   ok(v.tip === '3 from this conversation · 3 shown here — click to open one or request a design', '① the tooltip spells the split', v.tip);
   const none = M.pagesChipGroups({ own: own.slice(0, 1), presented: [], designs: [] });
   ok(none.tip === '1 design(s) and page(s) from this session — click to open one or request a design' && none.groups[1].rows.length === 0 && none.chipCount === 1, '① nothing shown here ⇒ the sentence of before, an empty shown group', none.tip);
-  ok(M.pagesChipGroups({}).chipCount === 0 && /^Request a design canvas/.test(M.pagesChipGroups({}).tip), '① nothing at all ⇒ count 0 and the request sentence');
+  ok(M.pagesChipGroups({}).chipCount === 0 && verdictOf(/^Request a design canvas/.test(M.pagesChipGroups({}).tip)), '① nothing at all ⇒ count 0 and the request sentence');
   ok(M.pageOfDesign(designs[0], own)?.id === 'pgown0000002' && M.pageOfDesign({ dir: '/x', page: { id: 'pgown0000003' } }, own)?.id === 'pgown0000003', '① pageOfDesign: by srcKey, or by the id GET /api/designs named');
 }
 
@@ -65,7 +65,7 @@ console.log('— ② a row\'s words, en / zh / ja');
   ok(words().join(' | ') === 'from another conversation | from Publisher | no longer published', '② en: no live publisher name / the publisher\'s name / gone', words());
   ok(words(tOf(zh)).join(' | ') === '来自另一个会话 | 来自 Publisher | 已不再发布' && run(M, tOf(zh)).groups.map((g) => g.label).join() === '本会话发布的,在这里展示过的', '② zh', words(tOf(zh)));
   ok(words(tOf(ja)).join(' | ') === '別の会話から | Publisher から | 公開終了' && run(M, tOf(ja)).groups.map((g) => g.label).join() === 'この会話が公開したもの,ここで表示されたもの', '② ja', words(tOf(ja)));
-  ok(run(M, tOf(zh)).tip.includes('3') && run(M, tOf(zh)).tip !== run(M).tip && run(M, tOf(ja)).tip !== run(M).tip, '② the split tooltip is translated (zh, ja)');
+  ok(gateOf(run(M, tOf(zh)).tip.includes('3')) && run(M, tOf(zh)).tip !== run(M).tip && run(M, tOf(ja)).tip !== run(M).tip, '② the split tooltip is translated (zh, ja)');
   const g = run(M).groups[1].rows.find((r) => r.id === 'pgshow000003');
   ok(g.gone === true && g.url === '/p/pgshow000003', '② a gone row keeps its /p/ link (it answers "unpublished")');
 }
@@ -119,11 +119,11 @@ async function drive(Bar) {
   const v = await drive(ChatStatusBar);
   ok(v.s1.join() === 'H:Published by this conversation,own:pgown0000001,own:pgown0000003,H:Shown here,shown:pgshow000001,shown:pgshow000003', '③ the list: a head per group, own rows then shown rows (the design\'s page is not in the list)', v.s1);
   ok(v.s2.join() === 'H:Published by this conversation,own:pgown0000001,own:pgown0000003,H:Shown here,shown:pgshow000002,shown:pgshow000001,shown:pgshow000003' && v.keptSame === v.n2 - 1, `③ a new page shown here inserts ONE row; the other ${v.n2 - 1} keep their element (keyed, no repaint)`, [v.s2, v.keptSame]);
-  ok(v.goneReplaced && v.otherKept, '③ a page going gone replaces only its own row (drawn gone); its neighbours keep their element');
+  ok(gateOf(v.goneReplaced) && verdictOf(v.otherKept), '③ a page going gone replaces only its own row (drawn gone); its neighbours keep their element');
   ok(v.s4.join() === 'H:Published by this conversation,own:pgown0000001,own:pgown0000003', '③ nothing shown any more ⇒ the shown group and its head leave', v.s4);
   const src = fs.readFileSync(path.join(repo, 'src/lib/chat-status-bar.js'), 'utf8');
   const refill = src.slice(src.indexOf('\n  _refillDesignList() {'), src.indexOf('\n    const dl = this._designsEl;'));
-  ok(refill.length > 0 && !/replaceChildren\(|innerHTML/.test(refill) && /pagesChipGroups\(/.test(src) && /const pc = this\._pagesChip\(\);[^\n]*\n\s*const n = pc\.chipCount, dTitle = (?:this\._pagesUnread \? `\$\{pc\.tip\}\\n\$\{this\._pagesUnread\}` : )?pc\.tip;/.test(src), '③ pins: the pages list is patched by key (no replaceChildren / innerHTML), the chip\'s number + tooltip are the model\'s');
+  ok(refill.length > 0 && !/replaceChildren\(|innerHTML/.test(refill) && gateOf(/pagesChipGroups\(/.test(src)) && verdictOf(/const pc = this\._pagesChip\(\);[^\n]*\n\s*const n = pc\.chipCount, dTitle = (?:this\._pagesUnread \? `\$\{pc\.tip\}\\n\$\{this\._pagesUnread\}` : )?pc\.tip;/.test(src)), '③ pins: the pages list is patched by key (no replaceChildren / innerHTML), the chip\'s number + tooltip are the model\'s');
 }
 
 console.log('— ③b r3139: a held list DRAWN (the REAL ChatStatusBar): the open list says why it is empty');
@@ -136,7 +136,7 @@ console.log('— ③b r3139: a held list DRAWN (the REAL ChatStatusBar): the ope
   const held = list.children.find((el) => /chat-pages-held/.test(el.className));
   ok(!!held && held.textContent === W && list.children[0] === held && !list._cls.has('hidden'), '③b held: the open list draws the held words FIRST and is shown, though no page is listed', list.children.map((el) => el.className));
   bar.setPages([]);   // the call as it was (no unread): the RED — an empty list that says nothing
-  ok(!list.children.some((el) => /chat-pages-held/.test(el.className)) && list._cls.has('hidden'), '③b RED: the call as it was (setPages(pages), no unread) draws nothing about why the list is empty', null);
+  ok(!list.children.some((el) => /chat-pages-held/.test(el.className)) && verdictOf(list._cls.has('hidden')), '③b RED: the call as it was (setPages(pages), no unread) draws nothing about why the list is empty', null);
   bar.dispose?.();
 }
 
@@ -153,9 +153,9 @@ console.log('— ④ CONTROL: a model copy that mixes the groups');
     const MX = await import(pathToFileURL(f).href);
     ok(!groupsOk(run(MX)), '④ the mixed copy FAILS the ① groups check (it can fail)');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  ok(/\{ name: 'test-pages-chip-model', tier: 'fast'/.test(fs.readFileSync(path.join(repo, 'scripts/ci.mjs'), 'utf8')), '④ ci.mjs carries test-pages-chip-model in the fast tier');
+  ok(verdictOf(/\{ name: 'test-pages-chip-model', tier: 'fast'/.test(fs.readFileSync(path.join(repo, 'scripts/ci.mjs'), 'utf8'))), '④ ci.mjs carries test-pages-chip-model in the fast tier');
   ok(!/^\s*import\s/m.test(src) && !/require\(/.test(src), '④ the model imports nothing (PURE; t injected)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

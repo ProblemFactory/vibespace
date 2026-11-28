@@ -33,7 +33,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return Date.now() - t0; await sleep(15); } return -1; };
 
@@ -111,14 +111,14 @@ console.log('§1 the file rung');
   const envOnly = require(STORE_PATH).create({ dataDir: path.join(ROOT, 'data-envonly'), env, presets: bare, log: { log() {}, error() {}, warn() {} } });
   ok(envOnly.resolveIntegration('cloud:browserbase').values.apiKey === 'cb_env_license_ZZZZZZZZZZZZZZZZ' && envOnly.resolveIntegration('cloud:browserless').source === 'cluster', 'a directory with no integrations file: the env is the fallback rung (a release still on env works unchanged)');
   const items = store.presetItems();
-  ok(items.some((i) => i.kind === 'cloud:browserbase' && i.source === 'cluster' && i.n === 1) && items.some((i) => i.kind === 'lark' && i.source === 'cluster' && i.n === 1) && items.some((i) => i.kind === 'lark' && i.source === 'release' && i.n === 1), `presetItems: counted by the layer each preset came from (${JSON.stringify(items)})`);
+  ok(gateOf(items.some((i) => i.kind === 'cloud:browserbase' && i.source === 'cluster' && i.n === 1)) && gateOf(items.some((i) => i.kind === 'lark' && i.source === 'cluster' && i.n === 1)) && verdictOf(items.some((i) => i.kind === 'lark' && i.source === 'release' && i.n === 1)), `presetItems: counted by the layer each preset came from (${JSON.stringify(items)})`);
 }
 
 // ═══ §2 LIVE ═════════════════════════════════════════════════════════════
 console.log('§2 live re-derive + notify');
 {
   const view0 = (await get('/api/integrations'));
-  ok(view0.presets && view0.presets.dir === DIR && view0.presets.groups.some((gr) => gr.source === 'cluster') && view0.presets.groups.some((gr) => gr.source === 'release'), 'GET /api/integrations carries the presets summary (dir + groups by source)');
+  ok(gateOf(view0.presets) && view0.presets.dir === DIR && gateOf(view0.presets.groups.some((gr) => gr.source === 'cluster')) && verdictOf(view0.presets.groups.some((gr) => gr.source === 'release')), 'GET /api/integrations carries the presets summary (dir + groups by source)');
   ok(!SECRETS.some((s) => JSON.stringify(view0).includes(s)), 'the GET body carries no secret (the cards are masked, the summary is counts)');
   const listened = []; store.onChange((id, why) => listened.push([id, why]));
   frames.length = 0; lines.length = 0;
@@ -131,15 +131,15 @@ console.log('§2 live re-derive + notify');
   ok(ms >= 0, `the swap reached the clients (${ms} ms after the rename)`);
   const cards = frames.filter((f) => f.type === 'integrations-updated');
   const cloak = cards.find((f) => f.id === 'cloud:browserbase');
-  ok(cloak && cloak.why === 'presets' && cloak.integration.source === 'cluster' && cloak.integration.masked.apiKey === '••••' + CLOAK_B.slice(-4), `the cloak card's RECOMPUTED view is pushed (masked ••••${CLOAK_B.slice(-4)}, why: presets)`);
+  ok(gateOf(cloak) && cloak.why === 'presets' && cloak.integration.source === 'cluster' && cloak.integration.masked.apiKey === '••••' + CLOAK_B.slice(-4), `the cloak card's RECOMPUTED view is pushed (masked ••••${CLOAK_B.slice(-4)}, why: presets)`);
   const cardIds = R.ROWS.filter((r) => !r.bindsPerAccount && !r.bindsPerMachine).map((r) => r.id); // lane remoteapp-r1b: a per-machine row is no card either (never re-broadcast as one)
-  ok(cards.length === cardIds.length && cardIds.every((id) => cards.filter((f) => f.id === id).length === 1) && !cards.some((f) => ['lark', 'gmail', 'fake'].includes(f.id)), `every CARD row re-broadcast exactly once (${cards.length} of the registry's ${cardIds.length}), no account-bound row (not a card)`);
+  ok(cards.length === cardIds.length && gateOf(cardIds.every((id) => cards.filter((f) => f.id === id).length === 1)) && !cards.some((f) => ['lark', 'gmail', 'fake'].includes(f.id)), `every CARD row re-broadcast exactly once (${cards.length} of the registry's ${cardIds.length}), no account-bound row (not a card)`);
   ok(listened.length === 1 && listened[0][0] === null && listened[0][1] === 'presets', 'the store listeners run ONCE (the channels engine re-asks every adapter and re-pushes its digest)');
   const sumF = frames.filter((f) => f.type === 'cluster-presets-updated');
-  ok(sumF.length === 1 && sumF[0].presets.groups.find((gr) => gr.source === 'cluster').items.some((i) => i.kind === 'gdrive' && i.n === 2), 'ONE cluster-presets-updated frame with the recomputed summary');
+  ok(sumF.length === 1 && verdictOf(sumF[0].presets.groups.find((gr) => gr.source === 'cluster').items.some((i) => i.kind === 'gdrive' && i.n === 2)), 'ONE cluster-presets-updated frame with the recomputed summary');
   ok(!SECRETS.some((s) => JSON.stringify(frames).includes(s)), 'no frame carries a secret — not the old, not the new');
   const jl = lines.filter((l) => /\[presets\] changed/.test(l));
-  ok(jl.length === 1 && /rotated org1/.test(jl[0]) && /rotated cloud:browserbase\/default/.test(jl[0]) && /removed lark\/other/.test(jl[0]) && !SECRETS.some((s) => jl[0].includes(s)), `ONE journal line naming what changed: ${jl[0]}`);
+  ok(jl.length === 1 && gateOf(/rotated org1/.test(jl[0])) && gateOf(/rotated cloud:browserbase\/default/.test(jl[0])) && gateOf(/removed lark\/other/.test(jl[0])) && !SECRETS.some((s) => jl[0].includes(s)), `ONE journal line naming what changed: ${jl[0]}`);
   ok(store.resolveIntegration('cloud:browserbase').values.apiKey === CLOAK_B, 'the consumers\' call answers the rotated key now — no restart');
   const gone = store.resolveIntegration('lark', { credentialKey: 'cluster:other' });
   ok(gone.source === 'none' && gone.whyCode === 'preset-gone' && gone.whyParams.key === 'other', 'a preset the cluster withdrew answers preset-gone BY NAME on the account rung — never another preset');
@@ -156,9 +156,9 @@ console.log('§3 malformed');
   await until(() => frames.some((f) => f.type === 'cluster-presets-updated'));
   ok(store.resolveIntegration('cloud:browserbase').values.apiKey === CLOAK_B, 'a malformed integrations file: the PREVIOUS presets stay in effect (cloak keeps the last good key)');
   const el = lines.filter((l) => /could not be read/.test(l));
-  ok(el.length === 1 && /integrations\.json/.test(el[0]) && !el[0].includes(CLOAK_A.slice(-6)), `ONE journal line, no secret bytes: ${el[0]}`);
+  ok(el.length === 1 && gateOf(/integrations\.json/.test(el[0])) && !el[0].includes(CLOAK_A.slice(-6)), `ONE journal line, no secret bytes: ${el[0]}`);
   const sf = frames.find((f) => f.type === 'cluster-presets-updated');
-  ok(sf && sf.presets.errors.length === 1 && sf.presets.errors[0].code === 'unparseable' && sf.presets.errors[0].kept === true, 'the summary says it to every client (kept: true) — and no card was re-broadcast (the presets did not change)');
+  ok(gateOf(sf) && sf.presets.errors.length === 1 && sf.presets.errors[0].code === 'unparseable' && sf.presets.errors[0].kept === true, 'the summary says it to every client (kept: true) — and no card was re-broadcast (the presets did not change)');
   ok(!frames.some((f) => f.type === 'integrations-updated'), '…no card frame: nothing to re-derive');
   frames.length = 0;
   project(DIR, { 'integrations.json': [{ id: 'cloud:browserbase', values: { apiKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')] });
@@ -178,7 +178,7 @@ console.log('§4 fleet.json — the relay page, live');
   ok(ms >= 0 && store.fleetRelayUrl() === RELAY, `a fleet.json added by a Secret edit answers at the store\'s fleetRelayUrl() ${ms} ms after the rename — no restart`);
   ok(listened.length === 1 && listened[0][0] === null && listened[0][1] === 'presets', 'the store listeners run ONCE (the channels engine re-asks its adapters and re-pushes its digest: the setup card\'s relay pages follow)');
   const jl = lines.filter((l) => /\[presets\] changed/.test(l));
-  ok(jl.length === 1 && jl[0].endsWith(`relay page changed (now ${RELAY})`) && !SECRETS.some((x) => JSON.stringify(frames).includes(x)), `ONE journal line, no secret in any frame: ${jl[0]}`);
+  ok(jl.length === 1 && gateOf(jl[0].endsWith(`relay page changed (now ${RELAY})`)) && !SECRETS.some((x) => JSON.stringify(frames).includes(x)), `ONE journal line, no secret in any frame: ${jl[0]}`);
   frames.length = 0;
   project(DIR, { 'integrations.json': [{ id: 'cloud:browserbase', values: { apiKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')] });
   await until(() => frames.some((f) => f.type === 'cluster-presets-updated'));
@@ -190,13 +190,13 @@ console.log('§4 fleet.json — the relay page, live');
 {
   const src = fs.readFileSync(STORE_PATH, 'utf-8');
   const anchor = "    const fromFile = presets && typeof presets.entries === 'function' ? presets.entries('integrations') : null;";
-  ok(src.includes(anchor), 'the control\'s anchor exists in the store');
+  ok(verdictOf(src.includes(anchor)), 'the control\'s anchor exists in the store');
   const envOnly = M.load('src/server/integration-store.js', src.replace(anchor, '    const fromFile = null;'), 'envonly');
   const s2 = envOnly.create({ dataDir: path.join(ROOT, 'data-ctl'), env, presets: reader, log: { log() {}, error() {}, warn() {} } });
   ok(s2.resolveIntegration('cloud:browserbase').values.apiKey === 'cb_env_license_ZZZZZZZZZZZZZZZZ', 'CONTROL: a store without the file rung keeps serving the env\'s boot-time key — the §1/§2 asserts are red on it');
 }
 
-for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(verdictOf(row.pass), row.name, row.detail);
 reader.stop(); server.close(); CP.setSharedPresets(null);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -52,7 +52,7 @@ const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 const SUMMARY = path.join(CWD, 'reports', 'summary.md');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -176,26 +176,26 @@ try {
   console.log('① an Antigravity chat: one turn that writes a file ⇒ the bar\'s five facts + the Artifacts chip');
   const agySid = await createChat('__agy', { cwd: CWD, name: 'agy-facts', mode: 'chat', backend: 'antigravity', model: 'gemini-4-argon-high' });
   check('an Antigravity chat is created through the page\'s own createSession (the fake agy behind the real agy-wrapper)', !!agySid);
-  check('the turn played (the fake agy wrote reports/summary.md)', await turn(agySid, '__agy', 'please write the summary', /Antigravity \(gemini-4-argon-high/) && fs.existsSync(SUMMARY));
+  check('the turn played (the fake agy wrote reports/summary.md)', gateOf(await turn(agySid, '__agy', 'please write the summary', /Antigravity \(gemini-4-argon-high/)) && verdictOf(fs.existsSync(SUMMARY)));
   // (lane mask-value-shape) 产出 is ALWAYS drawn now: the gate waits for the COUNT, never the chip's presence («Artifacts · 0»
   // stands before the list's fetch lands — the hosted run read it)
   await waitFor(`(() => { const v = ${viewOf('__agy')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!(v._statusBar._doorRows || []).some((y) => y.key === 'odometer') && !!el.querySelector('[data-chip="ctx"]') && el.querySelector('.chat-status-artifacts-text')?.textContent === 'Artifacts · 1'; })()`, 15000);
   const a = await facts('__agy');
-  check('context: a % of the model\'s DOCUMENTED window (1.0m, gemini-4-argon) — the title names the window\'s source (the door\'s face the %, its [used/total] in data-*)', a?.ctx && /\d+%/.test(a.ctx.text) && a.ctx.total === '1.0m' && /^\d+(\.\d+)?k?$/.test(a.ctx.used || '') && /documented window/.test(a.ctx.title) && !a.unknown, a);
-  check('⚡ the cache hit rate of the turn\'s last call (a row of the context door)', a?.cache && /\d+%/.test(a.cache.text) && /Prompt cache hit rate/.test(a.cache.title), a?.cache);
-  check('Σ the conversation\'s token total, as agy counts it, with the thinking share (a row of the context door)', a?.odometer && /^Σ\d+$/.test(a.odometer.text) && /thinking \d+ = \d+% of the total/.test(a.odometer.title), a?.odometer);
-  check('the model it ran on + the turn\'s own time', a?.model && /gemini-4-argon-high/.test(a.model.text) && a?.time && /\d+s/.test(a.time.text) && /^The last turn took \d+s · it spent \d+ tokens \(in \d+, cached \d+, out \d+\) over (one model call|\d+ model calls)$/.test(a.time.title), { model: a?.model, time: a?.time });
+  check('context: a % of the model\'s DOCUMENTED window (1.0m, gemini-4-argon) — the title names the window\'s source (the door\'s face the %, its [used/total] in data-*)', gateOf(a?.ctx) && gateOf(/\d+%/.test(a.ctx.text)) && a.ctx.total === '1.0m' && gateOf(/^\d+(\.\d+)?k?$/.test(a.ctx.used || '')) && gateOf(/documented window/.test(a.ctx.title)) && !a.unknown, a);
+  check('⚡ the cache hit rate of the turn\'s last call (a row of the context door)', gateOf(a?.cache) && gateOf(/\d+%/.test(a.cache.text)) && verdictOf(/Prompt cache hit rate/.test(a.cache.title)), a?.cache);
+  check('Σ the conversation\'s token total, as agy counts it, with the thinking share (a row of the context door)', gateOf(a?.odometer) && gateOf(/^Σ\d+$/.test(a.odometer.text)) && verdictOf(/thinking \d+ = \d+% of the total/.test(a.odometer.title)), a?.odometer);
+  check('the model it ran on + the turn\'s own time', gateOf(a?.model) && gateOf(/gemini-4-argon-high/.test(a.model.text)) && gateOf(a?.time) && gateOf(/\d+s/.test(a.time.text)) && verdictOf(/^The last turn took \d+s · it spent \d+ tokens \(in \d+, cached \d+, out \d+\) over (one model call|\d+ model calls)$/.test(a.time.title)), { model: a?.model, time: a?.time });
   check('the Artifacts chip lists the file agy wrote (write_file, its absolute Path)', a?.artifacts === 'Artifacts · 1', a?.artifacts);
   check('…and no «not reported» row: agy reports all five', !!a && !a.unreported && !!a.cache, a?.unreported);
   { // the person's road to them: a press on the context door opens its panel — the window, then ⚡, Σ and the turn time
     const v = viewOf('__agy');
     await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); ${v}._statusBar.element.querySelector('[data-chip="ctx"]').click(); return true; })()`);
     const p = await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'); return d ? [...d.querySelectorAll('.chat-status-ctx-row')].map((x) => x.className.replace(/.*chat-status-ctx-row /, '') + '=' + x.textContent.trim()) : null; })()`);
-    check('the context door\'s panel says the window, then the cache, Σ and the turn time — each its own sentence (moved, not lost)', !!p && /^chat-status-ctx-window=/.test(p[0]) && ['cache', 'odometer', 'turn-time'].every((k) => p.some((x) => x.startsWith('chat-status-ctx-' + k + '=') && /\d/.test(x))), p);
+    check('the context door\'s panel says the window, then the cache, Σ and the turn time — each its own sentence (moved, not lost)', !!p && gateOf(/^chat-status-ctx-window=/.test(p[0])) && verdictOf(['cache', 'odometer', 'turn-time'].every((k) => p.some((x) => x.startsWith('chat-status-ctx-' + k + '=') && /\d/.test(x)))), p);
     await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); true`);
   }
   const listed = await evalJs(`fetch('/api/artifacts?sessionId=' + encodeURIComponent(window.__agy)).then((r) => r.json()).then((j) => JSON.stringify(j)).catch((e) => String(e))`);
-  check('the server\'s Artifacts list names reports/summary.md (the ONE registry)', listed.includes('summary.md'), listed.slice(0, 400));
+  check('the server\'s Artifacts list names reports/summary.md (the ONE registry)', verdictOf(listed.includes('summary.md')), listed.slice(0, 400));
   if (process.env.VS_AGY_BAR_PNG) {
     const r = await evalJs(`(() => { const v = ${viewOf('__agy')}; const b = v._statusBar.element.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; })()`);
     const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: r.x, y: Math.max(0, r.y - 4), width: Math.min(r.w, 1500), height: r.h + 8, scale: 1 } });
@@ -215,10 +215,10 @@ try {
   console.log('③ a claude chat: its context + cache, and «not reported» for what its stream does not give the bar');
   const clSid = await createChat('__cl', { cwd: CWD, name: 'claude-facts', mode: 'chat', backend: 'claude' });
   check('a claude chat is created (stub CLI behind the real chat-wrapper)', !!clSid);
-  check('its turn played', await turn(clSid, '__cl', 'hello', /Claude answered/));
+  check('its turn played', verdictOf(await turn(clSid, '__cl', 'hello', /Claude answered/)));
   await waitFor(`(() => { const v = ${viewOf('__cl')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!el.querySelector('[data-chip="ctx"]') && !!(v._statusBar._doorRows || []).some((y) => y.key === 'unreported'); })()`, 15000);
   const c = await facts('__cl');
-  check('claude: context 25% of the window its result names, ⚡96%', c?.ctx && /25%/.test(c.ctx.text) && c?.cache && /96%/.test(c.cache.text), c);
+  check('claude: context 25% of the window its result names, ⚡96%', gateOf(c?.ctx) && gateOf(/25%/.test(c.ctx.text)) && gateOf(c?.cache) && verdictOf(/96%/.test(c.cache.text)), c);
   check('claude: ONE «not reported» row naming the token total and the turn time — no Σ, no time row', c?.unreported?.text === 'not reported' && c.unreported.title === 'Not reported by this harness: token total, turn time' && !c.odometer && !c.time, c);
 
   console.log('④ a card shows an expander only where there is something to open (the owner 2026-10-24: 「这俩为啥无法展开」)');
@@ -252,13 +252,13 @@ try {
     for (let i = 0; i < 40; i++) { const b = JSON.stringify((await readCard(sidVar))?.box || null); if (b === prev && b !== 'null') break; prev = b; await sleep(100); }
     return !!h;
   };
-  check('agy: the read turn played (the fake agy\'s read_file through the real wrapper)', await turn(agySid, '__agy', 'please read the summary', /Antigravity \([^)]*\): [\s\S]*read the summary/));
+  check('agy: the read turn played (the fake agy\'s read_file through the real wrapper)', verdictOf(await turn(agySid, '__agy', 'please read the summary', /Antigravity \([^)]*\): [\s\S]*read the summary/)));
   await waitFor(`(() => { const v = ${viewOf('__agy')}; return !!v && [...v._messageList.querySelectorAll('.chat-tool-use .chat-diff-summary')].some((e) => /\\d+ lines · \\d+ B/.test(e.textContent)); })()`, 15000);
   const foldedA = await reveal('__agy');
   const g1 = await readCard('__agy');
   const lines = fs.readFileSync(SUMMARY, 'utf8').replace(/\n$/, '').split('\n').length, bytes = Buffer.byteLength(fs.readFileSync(SUMMARY, 'utf8'));
   check(`agy Read (its window raised${foldedA ? ', its run fold opened by a click' : ''}): ONE status line «✓ ${lines} lines · ${bytes} B» over the clickable path — ON SCREEN (the press point is the line itself), a line, not inside a <details>, no ▸ (caret: ${g1 && g1.caret}), no pointer`,
-    !!g1 && g1.box.width > 100 && g1.hit && g1.text === `✓ ${lines} lines · ${bytes} B` && !g1.inDetails && g1.details === 0 && !CARET.test(g1.caret || '') && g1.cursor !== 'pointer' && g1.link, g1 && { ...g1, html: g1.html.slice(0, 600) });
+    !!g1 && g1.box.width > 100 && gateOf(g1.hit) && g1.text === `✓ ${lines} lines · ${bytes} B` && !g1.inDetails && g1.details === 0 && !CARET.test(g1.caret || '') && g1.cursor !== 'pointer' && verdictOf(g1.link), g1 && { ...g1, html: g1.html.slice(0, 600) });
   await shot('agy-read.png', (await readCard('__agy'))?.box);
   if (g1 && g1.x) await press(g1.x, g1.y);
   const g2 = await readCard('__agy');
@@ -266,17 +266,17 @@ try {
   // CONTROL: the caret rule as it shipped (every .chat-diff-summary) — the static line wears the ▸ again: the leg above can go red
   await evalJs(`(() => { const st = document.createElement('style'); st.id = '__caret_control'; st.textContent = ".chat-diff-summary::before { content: '\\\\25B8  '; }"; document.head.appendChild(st); return true; })()`);
   const gc = await readCard('__agy');
-  check(`CONTROL: the pre-fix caret rule (on every .chat-diff-summary) puts a ▸ on the agy line that opens nothing (caret: ${gc && gc.caret})`, !!gc && CARET.test(gc.caret || '') && !gc.inDetails, gc && gc.caret);
+  check(`CONTROL: the pre-fix caret rule (on every .chat-diff-summary) puts a ▸ on the agy line that opens nothing (caret: ${gc && gc.caret})`, !!gc && gateOf(CARET.test(gc.caret || '')) && !gc.inDetails, gc && gc.caret);
   await shot('agy-read-control.png', (await readCard('__agy'))?.box);
   await evalJs(`document.getElementById('__caret_control').remove(); true`);
-  check('claude: the read turn played (a stub Read tool_use + its tool_result through the real chat-wrapper)', await turn(clSid, '__cl', 'please read the summary', /Claude read the summary/));
+  check('claude: the read turn played (a stub Read tool_use + its tool_result through the real chat-wrapper)', verdictOf(await turn(clSid, '__cl', 'please read the summary', /Claude read the summary/)));
   await waitFor(`(() => { const v = ${viewOf('__cl')}; return !!v && !!v._messageList.querySelector('.chat-tool-use details.chat-diff > summary.chat-diff-summary'); })()`, 15000);
   const foldedC = await reveal('__cl');
   const k1 = await readCard('__cl');
-  check(`claude Read (its window raised${foldedC ? ', its run fold opened by a click' : ''}): its «✓ N lines» is the summary of a <details> — ON SCREEN (the press point is the summary itself), closed, with ▸ (caret: ${k1 && k1.caret})`, !!k1 && k1.box.width > 100 && k1.hit && k1.tag === 'SUMMARY' && k1.inDetails && !k1.open && /\u25B8/.test(k1.caret || '') && /^✓ \d+ lines$/.test(k1.text), k1 && { ...k1, html: k1.html.slice(0, 600) });
+  check(`claude Read (its window raised${foldedC ? ', its run fold opened by a click' : ''}): its «✓ N lines» is the summary of a <details> — ON SCREEN (the press point is the summary itself), closed, with ▸ (caret: ${k1 && k1.caret})`, !!k1 && k1.box.width > 100 && gateOf(k1.hit) && k1.tag === 'SUMMARY' && gateOf(k1.inDetails) && !k1.open && gateOf(/\u25B8/.test(k1.caret || '')) && verdictOf(/^✓ \d+ lines$/.test(k1.text)), k1 && { ...k1, html: k1.html.slice(0, 600) });
   if (k1 && k1.x) await press(k1.x, k1.y);
   const k2 = await readCard('__cl');
-  check(`claude Read: a REAL click opens it — ▾ and the file's text shown (${k2 && Math.round(k2.bodyH)} px)`, !!k2 && k2.open && /\u25BE/.test(k2.caret || '') && k2.bodyH > 10 && /Written by the fake agy/.test(k2.html), k2 && { open: k2.open, caret: k2.caret, bodyH: k2.bodyH });
+  check(`claude Read: a REAL click opens it — ▾ and the file's text shown (${k2 && Math.round(k2.bodyH)} px)`, !!k2 && gateOf(k2.open) && gateOf(/\u25BE/.test(k2.caret || '')) && k2.bodyH > 10 && verdictOf(/Written by the fake agy/.test(k2.html)), k2 && { open: k2.open, caret: k2.caret, bodyH: k2.bodyH });
   await shot('claude-read-open.png', (await readCard('__cl'))?.box);
 
   console.log('⑤ THE MODE CHIP (lane agy-harness-fixes-2): picked in the chip, through a reply that cuts the journal\'s head, a reload, a Resume');
@@ -309,7 +309,7 @@ try {
   for (let i = 0; i < 60 && sideOf(mSid)?.agentMode !== 'bypassPermissions'; i++) await sleep(250);
   const s1 = sideOf(mSid);
   check('…a real press on «bypassPermissions» reaches the wrapper: its sidecar says agentMode + meta.modes {the four, current bypassPermissions}', s1?.agentMode === 'bypassPermissions' && s1?.modes?.currentModeId === 'bypassPermissions' && JSON.stringify((s1.modes.availableModes || []).map((m) => m.id)) === JSON.stringify(FOUR), s1 && { agentMode: s1.agentMode, modes: s1.modes });
-  check('a 1.2 MB reply played (300 bubbles) under always-proceed', await turn(mSid, '__agym', 'a bulk reply', /always-proceed\): [\s\S]*a bulk reply/));
+  check('a 1.2 MB reply played (300 bubbles) under always-proceed', verdictOf(await turn(mSid, '__agym', 'a bulk reply', /always-proceed\): [\s\S]*a bulk reply/)));
   let cutBuf = '';
   for (let i = 0; i < 40; i++) { try { cutBuf = fs.readFileSync(path.join(BUFS, mSid + '.buf'), 'utf8'); } catch { } if (cutBuf.length > 700000 && !cutBuf.includes('"kind":"session"') && cutBuf.includes('"kind":"prompt_end"')) break; await sleep(250); }
   check(`the wrapper's journal lost its head to the ring (${cutBuf.length} chars ≤ 800 000): no \`session\` and no \`config\` record — the mode is in no journal line any more`, cutBuf.length > 700000 && cutBuf.length <= 800000 && !cutBuf.includes('"kind":"session"') && !cutBuf.includes('"kind":"config"'), cutBuf.length);
@@ -319,7 +319,7 @@ try {
   await evalJs(`window.__agym = ${JSON.stringify(mSid)}; if (!${viewOf('__agym')}) app.attachSession(${JSON.stringify(mSid)}, 'agy-mode', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'antigravity' }); true`);
   await chipSays('__agym', '/bypassPermissions/');
   const m2 = await openMenu('__agym');
-  check(`after a RELOAD over the cut journal: the chip says «${m2.chip && m2.chip.text}» and a real press opens the four (the attach's chatStatus reads the sidecar)`, /bypassPermissions/.test(m2.chip?.raw || m2.chip?.text || '') && JSON.stringify(m2.items) === JSON.stringify(FOUR), m2);
+  check(`after a RELOAD over the cut journal: the chip says «${m2.chip && m2.chip.text}» and a real press opens the four (the attach's chatStatus reads the sidecar)`, gateOf(/bypassPermissions/.test(m2.chip?.raw || m2.chip?.text || '')) && JSON.stringify(m2.items) === JSON.stringify(FOUR), m2);
   await evalJs(`(() => { const v = ${viewOf('__agym')}; v._statusBar.applyStatus({ permissionModes: [] }); v._statusBar.render(); return true; })()`);
   const m3 = await openMenu('__agym');
   check('a status saying permissionModes: [] (what a cut journal used to send) leaves the declared list: a real press still opens the four', JSON.stringify(m3.items) === JSON.stringify(FOUR), m3);
@@ -341,9 +341,9 @@ try {
   await chipSays('__agyr', '/bypassPermissions/');
   const rc = await permChip('__agyr');
   const said = /bypassPermissions/.test(rc?.raw || rc?.text || '') ? null : await evalJs(`fetch('/api/session-messages?backend=antigravity&backendSessionId=' + encodeURIComponent(${JSON.stringify(cid)}) + '&cwd=' + encodeURIComponent(${JSON.stringify(CWD)}) + '&withStatus=1').then((r) => r.json()).then((j) => ({ status: j.chatStatus, n: (j.messages || []).length, bar: (() => { const v = ${viewOf('__agyr')}; return v ? { perm: v._statusBar._statusPermMode, list: v._statusBar._permissionModes } : null; })() })).catch((e) => String(e))`);
-  check(`the resumed chat's chip says «${rc && rc.text}» — its own mode, never «default»`, /bypassPermissions/.test(rc?.raw || rc?.text || ''), { rc, said, sidecars: fs.readdirSync(BUFS).filter((f) => f.endsWith('.json')).map((f) => [f, sideOf(f.slice(0, -5))?.agentMode, sideOf(f.slice(0, -5))?.sessionId === cid]) });
-  check('…and agy really runs with every tool approved: the next reply comes under always-proceed (--dangerously-skip-permissions)', await turn(rSid, '__agyr', 'after the resume', /always-proceed\): [\s\S]*after the resume/));
-  check('…and the chat says why, ONE line: «Resumed in this conversation\'s own mode: bypassPermissions»', await waitFor(`(() => { const v = ${viewOf('__agyr')}; return !!v && (v._messageList.textContent.match(/Resumed in this conversation's own mode: bypassPermissions/g) || []).length === 1; })()`, 8000));
+  check(`the resumed chat's chip says «${rc && rc.text}» — its own mode, never «default»`, verdictOf(/bypassPermissions/.test(rc?.raw || rc?.text || '')), { rc, said, sidecars: fs.readdirSync(BUFS).filter((f) => f.endsWith('.json')).map((f) => [f, sideOf(f.slice(0, -5))?.agentMode, sideOf(f.slice(0, -5))?.sessionId === cid]) });
+  check('…and agy really runs with every tool approved: the next reply comes under always-proceed (--dangerously-skip-permissions)', verdictOf(await turn(rSid, '__agyr', 'after the resume', /always-proceed\): [\s\S]*after the resume/)));
+  check('…and the chat says why, ONE line: «Resumed in this conversation\'s own mode: bypassPermissions»', verdictOf(await waitFor(`(() => { const v = ${viewOf('__agyr')}; return !!v && (v._messageList.textContent.match(/Resumed in this conversation's own mode: bypassPermissions/g) || []).length === 1; })()`, 8000)));
   console.log('⑥ the models Antigravity reported (the New Session field + a chat\'s model menu)');
   const PNGD = process.env.VS_AGY_MODELS_PNG_DIR || null;
   const shotTo = async (name) => { if (!PNGD) return; fs.mkdirSync(PNGD, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(PNGD, name), Buffer.from(r.data, 'base64')); };
@@ -366,7 +366,7 @@ try {
   await shotTo('chat-menu.png');
   const cm2 = await evalJs(`window.__cm.slice()`);
   const at = (menu || []).findIndex((x) => /^As reported by Antigravity \d+min ago$/.test(x));
-  check('a chat\'s model menu (a real press on its chip): the same line, then EXACTLY the reported rows, Custom… and «Refresh from Antigravity»; its opening = ONE POST open (floor), then ONE GET', at >= 0 && JSON.stringify(menu.slice(at + 1, at + 1 + REPORTED.length)) === JSON.stringify(REPORTED.map((r) => r[1])) && menu.includes('Custom\u2026') && menu.at(-1) === 'Refresh from Antigravity'
+  check('a chat\'s model menu (a real press on its chip): the same line, then EXACTLY the reported rows, Custom… and «Refresh from Antigravity»; its opening = ONE POST open (floor), then ONE GET', at >= 0 && JSON.stringify(menu.slice(at + 1, at + 1 + REPORTED.length)) === JSON.stringify(REPORTED.map((r) => r[1])) && gateOf(menu.includes('Custom\u2026')) && menu.at(-1) === 'Refresh from Antigravity'
     && cm2.filter((c) => /cli-models\/open/.test(c.url) && c.code === 'floor').length === 1 && cm2.filter((c) => /available-models\?session=/.test(c.url)).length === 1, { menu, cm2, dd: await evalJs('window.__dd'), sv: mc && mc.sv, direct: await evalJs(`fetch('/api/available-models?session=' + encodeURIComponent(window[${JSON.stringify((mc && mc.sv) || '__agyr')}])).then((r) => r.json()).then((j) => ({ keys: Object.keys(j).join(','), models: Array.isArray(j.models) ? j.models.length : -1, report: j.report || null, err: j.error || null })).catch((e) => String(e))`) });
   await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); true`);
   await evalJs(`app.showNewSessionDialog({ backend: 'antigravity' }); true`);
@@ -374,7 +374,7 @@ try {
   await waitFor(`JSON.stringify([...document.querySelectorAll('#input-model option')].map((o) => o.textContent)) === ${JSON.stringify(want)}`, 15000);
   const ns = await evalJs(`(() => { const sel = document.getElementById('input-model'); const src = document.querySelector('#row-model .ns-models-src'); return { opts: [...sel.options].map((o) => [o.value, o.textContent]), line: src && !src.classList.contains('hidden') ? src.textContent : null, warn: !!(src && src.classList.contains('ns-models-src-warn')) }; })()`);
   check(`the New Session field for Antigravity = EXACTLY the reported rows (agy's order and labels) under Default, then Custom… and «Refresh from Antigravity»`, JSON.stringify(ns.opts.map((o) => o[1])) === want && ns.opts[0][0] === '' && ns.opts.at(-1)[0] === '__refresh__' && ns.opts.at(-2)[0] === '__custom__' && ns.opts[10][0] === 'claude-opus-5-5-high', ns.opts.map((o) => o[0]));
-  check(`…under ONE line «${ns.line}» — as reported by Antigravity, the moment by the client's relative-time helper`, /^As reported by Antigravity \d+min ago$/.test(ns.line || '') && !ns.warn, ns);
+  check(`…under ONE line «${ns.line}» — as reported by Antigravity, the moment by the client's relative-time helper`, gateOf(/^As reported by Antigravity \d+min ago$/.test(ns.line || '')) && !ns.warn, ns);
   const fr = await evalJs(`(() => { const sel = document.getElementById('input-model'); sel.scrollIntoView({ block: 'center' }); const r = sel.getBoundingClientRect(); window.__cm.length = 0; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await press(fr.x, fr.y);
   for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -410,4 +410,4 @@ try {
   try { liveWs?.close(); } catch {}
 }
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -44,7 +44,7 @@ const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
 waitEverySave(AccountManager);
 const Module = require('node:module');
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -126,11 +126,11 @@ const TABLE = [
   ['F1: a file holding only the CLI\'s other keys (mcpOAuth, no login) ⇒ materialize, NOTHING archived (merged in place)', { file: { mcpOAuth: { 'srv|1': { accessToken: 'm' } } } }, { verdict: 'materialize', archive: false, cleanup: false }],
 ];
 const runTable = (fn) => TABLE.map(([name, m, want]) => { const got = fn({ caps, shape: SHAPE, oat: { present: true, validUntil: NOW + 300 * DAY }, fileState: 'present', ...m }, NOW); return { name, ok: JSON.stringify(got) === JSON.stringify(want), got, want }; });
-for (const r of runTable(LE.materializeVerdict)) ok(r.ok, 'verdict: ' + r.name, r.ok ? undefined : { got: r.got, want: r.want });
+for (const r of runTable(LE.materializeVerdict)) ok(verdictOf(r.ok), 'verdict: ' + r.name, r.ok ? undefined : { got: r.got, want: r.want });
 {
   const f = LE.loginState(oursFile, NOW);
   ok(f.state === 'oat-only' && f.oatFile === true && f.login === 'none' && f.oatValidUntil === NOW + 300 * DAY && f.msLeft === 300 * DAY && f.refreshExpiresAt === null, 'our file reads oat-only — dated by ITS expiresAt (the token\'s death), login none, oatFile', f);
-  ok(LE.loginUsable(f) && LE.loginRank(f) === 1 && LE.loginSwitchTarget(f), '…usable, a switch target, ranked below an equal healthy login (rank 1)');
+  ok(gateOf(LE.loginUsable(f)) && LE.loginRank(f) === 1 && verdictOf(LE.loginSwitchTarget(f)), '…usable, a switch target, ranked below an equal healthy login (rank 1)');
   const near = LE.loginState(LE.oatFileBody(OAT, { expiresAt: NOW + 10 * 60e3, shape: SHAPE }), NOW);
   ok(near.state === 'oat-only' && !LE.loginSwitchTarget(near) && LE.loginRank(near) === 2, 'inside its last 30 min it is never MOVED onto (the NEAR rule counts the token)');
   const gone = LE.loginState(LE.oatFileBody(OAT, { expiresAt: NOW - 1, shape: SHAPE }), NOW);
@@ -146,17 +146,17 @@ for (const r of runTable(LE.materializeVerdict)) ok(r.ok, 'verdict: ' + r.name, 
   // RED: a verdict that forgets the live login overwrites it
   const mut = compileWith('src/login-expiry.js', "loginUsable(loginFileState(f, now))) return { verdict: 'keep-login'", "false) return { verdict: 'keep-login'");
   const red = mut ? runTable(mut.materializeVerdict).filter((r) => !r.ok).map((r) => r.name) : null;
-  ok(!!red && red.some((n) => /live login/.test(n)), 'RED control (invariant 4): a verdict without the keep-login rung overwrites a live login — the table catches it', red);
+  ok(!!red && verdictOf(red.some((n) => /live login/.test(n))), 'RED control (invariant 4): a verdict without the keep-login rung overwrites a live login — the table catches it', red);
   const mut3 = compileWith('src/login-expiry.js', "return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };", "return { verdict: 'cli-unmeasured', archive: false, cleanup: ours };");
   const red3 = mut3 ? runTable(mut3.materializeVerdict).filter((r) => !r.ok).map((r) => r.name) : null;
-  ok(!!red3 && red3.some((n) => /UNKNOWN/.test(n)), 'RED control (layer 2): a verdict that cleans up on an UNKNOWN CLI would take files back on a failed probe — caught', red3);
+  ok(!!red3 && verdictOf(red3.some((n) => /UNKNOWN/.test(n))), 'RED control (layer 2): a verdict that cleans up on an UNKNOWN CLI would take files back on a failed probe — caught', red3);
   // RED control (R1): the 90c995a3 rule itself — held only while a link names the member, else taken back on a KNOWN version
   const mut360 = compileWith('src/login-expiry.js', "    return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };\n", "    if (ours && known && m.linked) return { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true };\n    return { verdict: 'cli-unmeasured', archive: false, cleanup: ours && known };\n");
   const red360 = mut360 ? runTable(mut360.materializeVerdict).filter((r) => !r.ok).map((r) => r.name) : null;
-  ok(!!red360 && red360.some((n) => /^this CLI unmeasured \+ our file/.test(n)) && red360.some((n) => /^F5: …a stale ours, no link/.test(n)), 'RED control (R1, the 90c995a3 rule): a verdict that takes our file back on a KNOWN unmeasured CLI once no link names the member — the rows catch it', red360);
+  ok(!!red360 && gateOf(red360.some((n) => /^this CLI unmeasured \+ our file/.test(n))) && verdictOf(red360.some((n) => /^F5: …a stale ours, no link/.test(n))), 'RED control (R1, the 90c995a3 rule): a verdict that takes our file back on a KNOWN unmeasured CLI once no link names the member — the rows catch it', red360);
   const mut2 = compileWith('src/login-expiry.js', "archive: !ours && (m.fileState === 'unreadable' || !!o)", 'archive: false');
   const red2 = mut2 ? runTable(mut2.materializeVerdict).filter((r) => !r.ok).map((r) => r.name) : null;
-  ok(!!red2 && red2.some((n) => /dead login/.test(n)), 'RED control (invariant 4): a verdict that never archives would lose a dead login — caught', red2);
+  ok(!!red2 && verdictOf(red2.some((n) => /dead login/.test(n))), 'RED control (invariant 4): a verdict that never archives would lose a dead login — caught', red2);
   // verify r1: each new rung, removed, turns its row RED
   for (const [what, from, to, re] of [
     ['F2 (a failed read archived like unreadable bytes)', "  if (m.fileState === 'read-failed') return { verdict: 'read-failed', archive: false, cleanup: false };\n", '', /^F2:/],
@@ -168,7 +168,7 @@ for (const r of runTable(LE.materializeVerdict)) ok(r.ok, 'verdict: ' + r.name, 
   ]) {
     const mu = compileWith('src/login-expiry.js', from, to);
     const r = mu ? runTable(mu.materializeVerdict).filter((x) => !x.ok).map((x) => x.name) : null;
-    ok(!!r && r.some((n) => re.test(n)), `RED control (verify r1 ${what}) — its row goes RED`, r);
+    ok(!!r && verdictOf(r.some((n) => re.test(n))), `RED control (verify r1 ${what}) — its row goes RED`, r);
   }
 }
 
@@ -196,7 +196,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   const f = readJ(credsOf(am, dead));
   const a = am.get(dead);
   ok(arch.length === 1 && sha(path.join(am.subDir(dead), arch[0])) === deadBytes && modeOf(path.join(am.subDir(dead), arch[0])) === '600', 'the DEAD login is archived first — .credentials.json.dead-<ms>, byte-identical, 0600 (never deleted)', arch);
-  ok(!!f && f.claudeAiOauth.accessToken === OAT && !('refreshToken' in f.claudeAiOauth) && f.claudeAiOauth.expiresAt === a.oatMintedAt + am.OAT_TTL_MS && JSON.stringify(f.claudeAiOauth.scopes) === JSON.stringify(SHAPE.scopes) && f.claudeAiOauth.subscriptionType === 'max' && f.claudeAiOauth.rateLimitTier === SHAPE.rateLimitTier && f.vibespaceOat && f.vibespaceOat.mintedAt === a.oatMintedAt, '…then the file: the oat, expiresAt = mint + OAT_TTL, the row\'s scopes / subscriptionType / rateLimitTier, NO refreshToken, our mark', f && { ...f, claudeAiOauth: { ...f.claudeAiOauth, accessToken: '…' } });
+  ok(!!f && f.claudeAiOauth.accessToken === OAT && !('refreshToken' in f.claudeAiOauth) && f.claudeAiOauth.expiresAt === a.oatMintedAt + am.OAT_TTL_MS && JSON.stringify(f.claudeAiOauth.scopes) === JSON.stringify(SHAPE.scopes) && f.claudeAiOauth.subscriptionType === 'max' && f.claudeAiOauth.rateLimitTier === SHAPE.rateLimitTier && gateOf(f.vibespaceOat) && f.vibespaceOat.mintedAt === a.oatMintedAt, '…then the file: the oat, expiresAt = mint + OAT_TTL, the row\'s scopes / subscriptionType / rateLimitTier, NO refreshToken, our mark', f && { ...f, claudeAiOauth: { ...f.claudeAiOauth, accessToken: '…' } });
   ok(modeOf(credsOf(am, dead)) === '600' && modeOf(am.subDir(dead)) === '700' && !fs.readdirSync(am.subDir(dead)).some((n) => n.endsWith('.tmp')), 'file 0600, dir 0700, no tmp left behind (atomic: tmp `wx` + rename)');
   ok(JSON.stringify(a.oatShape) === JSON.stringify(SHAPE), 'the shape now rides on the row (it outlives the archived file it came from)', a.oatShape);
   const r2 = await so(am, live, OAT2);
@@ -246,7 +246,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   };
   const mA = mutantStore({ acc: [OURS_ALL] }), mB = mutantStore({ acc: [OURS_ALL], mat: [NO_ASK] });
   if (mA && mB) {
-    ok(await liveAfter(mA, 'a'), 'a store whose verdict calls every file ours still leaves a LIVE login byte-identical — the remover asks "ours?" again on the bytes it would remove');
+    ok(verdictOf(await liveAfter(mA, 'a')), 'a store whose verdict calls every file ours still leaves a LIVE login byte-identical — the remover asks "ours?" again on the bytes it would remove');
     ok(!(await liveAfter(mB, 'b')), 'RED control (invariant 4): …and with the remover\'s own question gone too, the LIVE login is destroyed — the byte check above catches exactly that');
   } else ok(false, 'RED control anchors present (accounts.js ours / account-material remover)');
 }
@@ -259,9 +259,9 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   await so(am2, m, OAT);
   ok(readJ(credsOf(am2, m))?.claudeAiOauth?.accessToken === OAT, '(2.1.296: written)');
   const c = await nv(am2, '2.1.300 (Claude Code)');
-  ok(c.ok === false && c.changed && readJ(credsOf(am2, m))?.claudeAiOauth?.accessToken === OAT && archives(am2, m).length === 1, 'the hub moves to an UNMEASURED 2.1.300 ⇒ our file STAYS (R1: a CLI update never takes it back — the pool names the member unplaceable instead), the archive stays', c);
+  ok(c.ok === false && gateOf(c.changed) && readJ(credsOf(am2, m))?.claudeAiOauth?.accessToken === OAT && archives(am2, m).length === 1, 'the hub moves to an UNMEASURED 2.1.300 ⇒ our file STAYS (R1: a CLI update never takes it back — the pool names the member unplaceable instead), the archive stays', c);
   const row = am2.list().accounts.find((a) => a.id === m);
-  ok(row.oatFile && row.oatFile.state === 'held' && row.oatFile.reason === 'cli-unmeasured' && row.oatFile.cli === '2.1.300' && row.loginState && row.loginState.state === 'oat-only', 'the row says why: held · cli-unmeasured · CLI 2.1.300 (long-lived token only — never «not logged in»)', { door: row.oatFile, ls: row.loginState && row.loginState.state });
+  ok(gateOf(row.oatFile) && row.oatFile.state === 'held' && row.oatFile.reason === 'cli-unmeasured' && row.oatFile.cli === '2.1.300' && gateOf(row.loginState) && row.loginState.state === 'oat-only', 'the row says why: held · cli-unmeasured · CLI 2.1.300 (long-lived token only — never «not logged in»)', { door: row.oatFile, ls: row.loginState && row.loginState.state });
   // (the file a CLI update no longer takes back is removed by hand: the leg below is about a WRITE that fails)
   fs.rmSync(credsOf(am2, m), { force: true });
   // a failed write leaves the token working on today's env road
@@ -269,7 +269,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   fs.promises.open = function (p, flags, ...r) { if (flags === 'wx' && String(p).startsWith(am2.subDir(m) + path.sep)) return Promise.reject(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })); return open0.call(this, p, flags, ...r); };
   let w = null, sp = null;
   try { await nv(am2, '2.1.296'); w = await am2.syncOatFile(m); sp = am2.resolveForSpawn(m); } finally { fs.promises.open = open0; }
-  ok(w && w.verdict === 'write-failed' && /^E/.test(w.code || '') && sp.localEnv.CLAUDE_CODE_OAUTH_TOKEN === OAT && !sp.oatFile, 'a write that fails (EACCES) is said (write-failed) and the token keeps serving on the env road', { w, kind: sp.kind });
+  ok(gateOf(w) && w.verdict === 'write-failed' && gateOf(/^E/.test(w.code || '')) && sp.localEnv.CLAUDE_CODE_OAUTH_TOKEN === OAT && !sp.oatFile, 'a write that fails (EACCES) is said (write-failed) and the token keeps serving on the env road', { w, kind: sp.kind });
   // a fixture that names another version: the gate reads the fixture, not a wish
   const fx = path.join(tmp, 'fx.json');
   fs.writeFileSync(fx, JSON.stringify({ cliVersion: '9.9.9', variants: { 'oat-file': { verdict: 'PASS' }, 'oat-file-401': { verdict: 'PASS' }, 'oat-file-switch': { verdict: 'FAIL' } } }));
@@ -291,10 +291,10 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on306('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.306' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.306' && now.spawn, 'the hub\'s CLI = 2.1.306 (measured 2026-10-21) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.306, the spawn reads the file — as on 2.1.296', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.306' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && gateOf(now.file) && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.306' && verdictOf(now.spawn), 'the hub\'s CLI = 2.1.306 (measured 2026-10-21) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.306, the spawn reads the file — as on 2.1.296', now);
   const one = path.join(tmp, 'fx-2.1.296-only.json'); fs.writeFileSync(one, JSON.stringify(COMMITTED.versions['2.1.296'], null, 1) + '\n');
   const base = await on306('base', one);
-  ok(base.c.ok === false && base.c.known && base.c.measured === '2.1.296' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the base): over the one-version file (2.1.296 only) the same 2.1.306 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
+  ok(base.c.ok === false && gateOf(base.c.known) && base.c.measured === '2.1.296' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the base): over the one-version file (2.1.296 only) the same 2.1.306 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
 }
 {
   // lane cli-2-1-307-records: the hub's claude AUTO-UPDATED to 2.1.307 — measured 2026-10-22 with the verdicts 2.1.306 has — so a
@@ -309,11 +309,11 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on307('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.307' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.307' && now.spawn, 'the hub\'s CLI = 2.1.307 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.307, the spawn reads the file — as on 2.1.306', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.307' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && gateOf(now.file) && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.307' && verdictOf(now.spawn), 'the hub\'s CLI = 2.1.307 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.307, the spawn reads the file — as on 2.1.306', now);
   const measured307 = COMMITTED.versions['2.1.307'], two = versionsBefore(COMMITTED.versions, '2.1.307'); // B-5e52: the fixture before 2.1.307 was measured
   const twoF = path.join(tmp, 'fx-2.1.296-2.1.306.json'); fs.writeFileSync(twoF, JSON.stringify({ versions: two }, null, 1) + '\n');
   const base = await on307('base', twoF);
-  ok(!!measured307 && base.c.ok === false && base.c.known && base.c.measured === '2.1.296, 2.1.306' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .340 base): over the two-version file (2.1.296 + 2.1.306) the same 2.1.307 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
+  ok(!!measured307 && base.c.ok === false && gateOf(base.c.known) && base.c.measured === '2.1.296, 2.1.306' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .340 base): over the two-version file (2.1.296 + 2.1.306) the same 2.1.307 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
 }
 {
   // lane cli-2-1-308-records: the hub's claude AUTO-UPDATED again, to 2.1.308 — measured 2026-10-22 07:09Z with the verdicts 2.1.307
@@ -328,11 +328,11 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on308('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.308' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.308' && now.spawn, 'the hub\'s CLI = 2.1.308 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.308, the spawn reads the file — as on 2.1.307', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.308' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && gateOf(now.file) && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.308' && verdictOf(now.spawn), 'the hub\'s CLI = 2.1.308 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.308, the spawn reads the file — as on 2.1.307', now);
   const measured308 = COMMITTED.versions['2.1.308'], three = versionsBefore(COMMITTED.versions, '2.1.308'); // B-5e52: the fixture before 2.1.308 was measured
   const threeF = path.join(tmp, 'fx-2.1.296-2.1.306-2.1.307.json'); fs.writeFileSync(threeF, JSON.stringify({ versions: three }, null, 1) + '\n');
   const base = await on308('base', threeF);
-  ok(!!measured308 && base.c.ok === false && base.c.known && base.c.measured === '2.1.296, 2.1.306, 2.1.307' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .341 base): over the three-version file (2.1.296 + 2.1.306 + 2.1.307) the same 2.1.308 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
+  ok(!!measured308 && base.c.ok === false && gateOf(base.c.known) && base.c.measured === '2.1.296, 2.1.306, 2.1.307' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .341 base): over the three-version file (2.1.296 + 2.1.306 + 2.1.307) the same 2.1.308 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
 }
 {
   // lane oat-in-file-2-1-314: the hub's claude AUTO-UPDATED to 2.1.314 on 2026-10-30 — measured that day (the loopback rung) with the
@@ -348,11 +348,11 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on314('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.314' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.314' && now.spawn, 'the hub\'s CLI = 2.1.314 (measured 2026-10-30) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.314, the spawn reads the file — as on 2.1.312', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.314' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && gateOf(now.file) && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.314' && verdictOf(now.spawn), 'the hub\'s CLI = 2.1.314 (measured 2026-10-30) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.314, the spawn reads the file — as on 2.1.312', now);
   const measured314 = COMMITTED.versions['2.1.314'], five = versionsBefore(COMMITTED.versions, '2.1.314'); // B-5e52: the fixture before 2.1.314 was measured
   const fiveF = path.join(tmp, 'fx-2.1.296-to-2.1.312.json'); fs.writeFileSync(fiveF, JSON.stringify({ versions: five }, null, 1) + '\n');
   const base = await on314('base', fiveF);
-  ok(!!measured314 && base.c.ok === false && base.c.known && base.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .364 base, 43d0f8d2d): over the five-version file (2.1.296 – 2.1.312) the same 2.1.314 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
+  ok(!!measured314 && base.c.ok === false && gateOf(base.c.known) && base.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .364 base, 43d0f8d2d): over the five-version file (2.1.296 – 2.1.312) the same 2.1.314 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
 }
 {
   // lane cli-2-1-319-records: the hub's claude SELF-UPDATED to 2.1.319 on 2026-11-06 — measured 2026-11-07 (the loopback rung) with the
@@ -368,11 +368,11 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on319('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.319' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.319' && now.spawn, 'the hub\'s CLI = 2.1.319 (measured 2026-11-07) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.319, the spawn reads the file — as on 2.1.314', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.319' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && gateOf(now.file) && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.319' && verdictOf(now.spawn), 'the hub\'s CLI = 2.1.319 (measured 2026-11-07) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.319, the spawn reads the file — as on 2.1.314', now);
   const measured319 = COMMITTED.versions['2.1.319'], six = versionsBefore(COMMITTED.versions, '2.1.319'); // B-5e52: the fixture before 2.1.319 was measured
   const sixF = path.join(tmp, 'fx-2.1.296-to-2.1.314.json'); fs.writeFileSync(sixF, JSON.stringify({ versions: six }, null, 1) + '\n');
   const base = await on319('base', sixF);
-  ok(!!measured319 && base.c.ok === false && base.c.known && base.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312, 2.1.314' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .383 base, 8b3fdb6ab): over the six-version file (2.1.296 – 2.1.314) the same 2.1.319 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
+  ok(!!measured319 && base.c.ok === false && gateOf(base.c.known) && base.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312, 2.1.314' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .383 base, 8b3fdb6ab): over the six-version file (2.1.296 – 2.1.314) the same 2.1.319 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
 }
 {
   // lane fable-52-cli-321: npm's 2.1.321 (2026-11-09, Fable 5.2 ships with it) measured before the owner installed it that day, with the verdicts 2.1.319 has —
@@ -388,11 +388,11 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on321('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.321' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.321' && now.spawn, 'the hub\'s CLI = 2.1.321 (measured 2026-11-09) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.321, the spawn reads the file — as on 2.1.319', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.321' && now.c.measured === ALL_MEASURED && now.r === 'materialize' && gateOf(now.file) && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.321' && verdictOf(now.spawn), 'the hub\'s CLI = 2.1.321 (measured 2026-11-09) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.321, the spawn reads the file — as on 2.1.319', now);
   const measured321 = COMMITTED.versions['2.1.321'], seven = versionsBefore(COMMITTED.versions, '2.1.321'); // B-5e52: the fixture before 2.1.321 was measured
   const sevenF = path.join(tmp, 'fx-2.1.296-to-2.1.319.json'); fs.writeFileSync(sevenF, JSON.stringify({ versions: seven }, null, 1) + '\n');
   const base = await on321('base', sevenF);
-  ok(!!measured321 && base.c.ok === false && base.c.known && base.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312, 2.1.314, 2.1.319' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .386 base, f5e087bb5): over the seven-version file (2.1.296 – 2.1.319) the same 2.1.321 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
+  ok(!!measured321 && base.c.ok === false && gateOf(base.c.known) && base.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312, 2.1.314, 2.1.319' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .386 base, f5e087bb5): over the seven-version file (2.1.296 – 2.1.319) the same 2.1.321 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
 }
 {
   // our token file is not a LOGIN where a login is the question
@@ -403,7 +403,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   ok(readJ(credsOf(amL, t))?.claudeAiOauth?.accessToken === OAT, '(the row holds our token file)');
   ok(amL.reloginResolve(t).outcome === 'pending', 'a re-login of that row stays PENDING until the CLI writes a real login (our file is not "signed in again")');
   const v = amL.evaluateOnHost(amL.get(t), null);
-  ok(v.usable && v.how === 'oat', 'availability says it runs through its long-lived token (how: oat), not a login to ship', v);
+  ok(gateOf(v.usable) && v.how === 'oat', 'availability says it runs through its long-lived token (how: oat), not a login to ship', v);
   const f = amL.createSubscription({ name: 'Fresh login' }).id;
   put(amL, f, login(NOW));
   const fBytes = sha(credsOf(amL, f));
@@ -423,8 +423,8 @@ const P = amP.createPool({ name: 'Pool' }).id;
   ok(esc.worstId === O && !!esc.worstOatValidUntil && esc.worstOatFileRefused === 'cli-unmeasured', 'gate shut: the pool still escapes O and says why (worstOatValidUntil + cli-unmeasured)', { worstId: esc.worstId, refused: esc.worstOatFileRefused });
   await nv(amP, '2.1.296');
   const st = amP.loginStateOf(O, Date.now(), { slot: true });
-  ok(st.state === 'oat-only' && st.oatFile && LE.loginUsable(st), 'gate open: O\'s SLOT reads oat-only, usable — the file is the whole answer, as before');
-  ok(amP.poolMembers(P).some((m) => m.id === O) && amP.isPoolMember(P, O), 'O is a candidate member (poolMembers / isPoolMember read the file the CLI reads)');
+  ok(st.state === 'oat-only' && gateOf(st.oatFile) && verdictOf(LE.loginUsable(st)), 'gate open: O\'s SLOT reads oat-only, usable — the file is the whole answer, as before');
+  ok(gateOf(amP.poolMembers(P).some((m) => m.id === O)) && verdictOf(amP.isPoolMember(P, O)), 'O is a candidate member (poolMembers / isPoolMember read the file the CLI reads)');
   const pl = amP.poolLoginState(P);
   ok(!pl.worstOatValidUntil && !pl.worstOatFileRefused, 'the escape is gone (no worstOatValidUntil — the pool row loses 「池用不了它的长期 token」)', pl);
   const slotsBefore = amP.slotTransitions.read?.() || null;
@@ -458,7 +458,7 @@ const P = amP.createPool({ name: 'Pool' }).id;
   const mutated = h(fnText(src.replace("const from = this.poolCurrentFor(poolId, sessKey);", "const from = this.poolCurrentFor(poolId, sessKey) ;"), 'ensureSessionPoolLink'));
   ok(mutated !== PIN.ensureSessionPoolLink, 'RED control: one added character in ensureSessionPoolLink moves its pin');
   const mutatedHelper = h(fnText(src.replace("const dir = this._acctDir(be, member.id);", "const dir = this._acctDir(be, member.id) ;"), '_memberSignIn'));
-  ok(mutatedHelper !== PIN._memberSignIn && fnText(src, '_memberSignIn').includes('const dir = this._acctDir(be, member.id);'), 'RED control (B-e381): one added character in _memberSignIn — the helper that names the link\'s target — moves its pin');
+  ok(mutatedHelper !== PIN._memberSignIn && verdictOf(fnText(src, '_memberSignIn').includes('const dir = this._acctDir(be, member.id);')), 'RED control (B-e381): one added character in _memberSignIn — the helper that names the link\'s target — moves its pin');
   // its death: an expired file leaves the candidate list through the slot reader
   const amD = new AccountManager({ dataDir: path.join(tmp, 'data-death') });
   const D = amD.createSubscription({ name: 'Dying' }).id;
@@ -470,25 +470,25 @@ console.log('§4 THE SPAWN — the file, not CLAUDE_CODE_OAUTH_TOKEN');
 {
   const s = amP.resolveForSpawn(O);
   ok(s.oatOnly === true && s.oatFile === true && Object.keys(s.localEnv).join() === 'CLAUDE_SECURESTORAGE_CONFIG_DIR' && s.localEnv.CLAUDE_SECURESTORAGE_CONFIG_DIR === amP.subDir(O), 'an oat-only member WITH our file spawns on its dir — localEnv carries no CLAUDE_CODE_OAUTH_TOKEN (the env road defaults the model to sonnet: oat-env)', Object.keys(s.localEnv));
-  ok(s.secret && s.secret.var === 'CLAUDE_CODE_OAUTH_TOKEN' && !s.remoteCreds, '…a REMOTE spawn keeps the secret channel; no creds dir is ever shipped for it');
+  ok(gateOf(s.secret) && s.secret.var === 'CLAUDE_CODE_OAUTH_TOKEN' && !s.remoteCreds, '…a REMOTE spawn keeps the secret channel; no creds dir is ever shipped for it');
   const amE = new AccountManager({ dataDir: path.join(tmp, 'data-env') });
   const E = amE.createSubscription({ name: 'Env road' }).id;
   put(amE, E, login(NOW, { dead: true }));
   await so(amE, E, OAT); // no CLI version: no file
   const se = amE.resolveForSpawn(E);
-  ok(se.oatOnly && se.localEnv.CLAUDE_CODE_OAUTH_TOKEN === OAT && !se.oatFile, 'a row WITHOUT the file (unmeasured CLI) keeps today\'s env spawn');
+  ok(gateOf(se.oatOnly) && se.localEnv.CLAUDE_CODE_OAUTH_TOKEN === OAT && !se.oatFile, 'a row WITHOUT the file (unmeasured CLI) keeps today\'s env spawn');
   const amX = new AccountManager({ dataDir: path.join(tmp, 'data-x') });
   const X = amX.createSubscription({ name: 'Ended' }).id;
   await nv(amX, '2.1.296');
   fs.writeFileSync(credsOf(amX, X), JSON.stringify(LE.oatFileBody(OAT, { expiresAt: Date.now() - 1, shape: SHAPE })), { mode: 0o600 });
   let err = null; try { amX.resolveForSpawn(X); } catch (e) { err = e.message; }
-  ok(/not logged in/.test(err || ''), 'a token file left with no token on the row is not a login — the spawn is refused, never a dir spawn on a dead token', err);
+  ok(verdictOf(/not logged in/.test(err || '')), 'a token file left with no token on the row is not a login — the spawn is refused, never a dir spawn on a dead token', err);
   const mutS = compileWith('src/accounts.js', "localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id) }, secret: oatSecret };", "localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id), CLAUDE_CODE_OAUTH_TOKEN: oat }, secret: oatSecret };");
   if (mutS) {
     const amS = new mutS.AccountManager({ dataDir: path.join(tmp, 'data-s') });
     const y = amS.createSubscription({ name: 'S' }).id;
     put(amS, y, login(NOW, { dead: true })); await nv(amS, '2.1.296'); await so(amS, y, OAT);
-    ok(Object.keys(amS.resolveForSpawn(y).localEnv).includes('CLAUDE_CODE_OAUTH_TOKEN'), 'RED control (spawn): a resolver that also puts the token in env is caught by the localEnv key check above');
+    ok(verdictOf(Object.keys(amS.resolveForSpawn(y).localEnv).includes('CLAUDE_CODE_OAUTH_TOKEN')), 'RED control (spawn): a resolver that also puts the token in env is caught by the localEnv key check above');
   } else ok(false, 'RED control anchor present (spawn)');
   const mutC = compileWith('src/accounts.js', '    const caps = this.oatFileCaps();\n    const linked', '    const caps = { ok: true, known: true };\n    const linked');
   if (mutC) {
@@ -503,10 +503,10 @@ let MA5 = null; // the real manage-agents chip module, kept for §8's words
 console.log('§5 THE DOORS — the row, the pool row, the client chip and model, the words');
 {
   const rowO = amP.list().accounts.find((a) => a.id === O);
-  ok(rowO.oatFile && rowO.oatFile.state === 'written' && rowO.oatFile.cli === '2.1.296' && rowO.loginState.oatFile === true, 'the member row carries oatFile {written, cli 2.1.296} (proved by its own slot reading)', rowO.oatFile);
+  ok(gateOf(rowO.oatFile) && rowO.oatFile.state === 'written' && rowO.oatFile.cli === '2.1.296' && rowO.loginState.oatFile === true, 'the member row carries oatFile {written, cli 2.1.296} (proved by its own slot reading)', rowO.oatFile);
   ok(!JSON.stringify(amP.list()).includes(OAT) && !JSON.stringify(amP.list()).includes(OAT.slice(14, 40)), 'the roster (every GET / broadcast of it) carries no token bytes');
   const rowN = am.list().accounts.find((a) => a.id === never);
-  ok(rowN.oatFile && rowN.oatFile.reason === 'no-scopes', 'a refusal is a door with its reason (no-scopes)', rowN.oatFile);
+  ok(gateOf(rowN.oatFile) && rowN.oatFile.reason === 'no-scopes', 'a refusal is a door with its reason (no-scopes)', rowN.oatFile);
   const M = await import(path.join(REPO, 'src/lib/pool-priority-model.js'));
   ok(M.memberState({ loggedIn: true, loginState: { state: 'oat-only', oatFile: true } }).code !== 'login-expired' && M.memberState({ loggedIn: true, loginState: { state: 'oat-only' } }).code === 'login-expired', 'the Members… dialog: oat-only WITH the file is not "login expired"; without it, unchanged');
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
@@ -514,8 +514,8 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
   const K = ['Long-lived token', 'this Claude Code version is not cleared on this machine yet', 'the subscription type is missing — sign in once, or choose it', 'could not write it to the account folder', 'long-lived token ends in {left}',
     'Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.',
     'Written to this account’s folder, but Claude Code {cli} is not in this VibeSpace’s records yet: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.'];
-  ok(zh[K[0]] === '长期 token' && ja[K[0]] === '長期トークン' && zh[K[1]] === '这个 Claude Code 版本还没有在本机确认通过' && zh[K[2]] === '还差订阅类型：登录一次，或自己选' && zh[K[5]].startsWith('已写入此账号目录；CLI {cli} 已验。') && zh[K[6]].startsWith('已写入这个账号的文件夹，但 Claude Code {cli} 还不在这个 VibeSpace 的记录里'), 'zh says the brief\'s words: chip 长期 token (ja 長期トークン), hover 已写入此账号目录；CLI {cli} 已验 / 这个 Claude Code 版本还没有在本机确认通过 (lane cli-self-measure: never «未测量») / 重新铸造一次以记录订阅类型');
-  ok(K.every((k) => zh[k] && ja[k] && zh[k].includes('{cli}') === k.includes('{cli}') && ja[k].includes('{left}') === k.includes('{left}')), 'every new door word has zh + ja with its placeholders');
+  ok(zh[K[0]] === '长期 token' && ja[K[0]] === '長期トークン' && zh[K[1]] === '这个 Claude Code 版本还没有在本机确认通过' && zh[K[2]] === '还差订阅类型：登录一次，或自己选' && gateOf(zh[K[5]].startsWith('已写入此账号目录；CLI {cli} 已验。')) && verdictOf(zh[K[6]].startsWith('已写入这个账号的文件夹，但 Claude Code {cli} 还不在这个 VibeSpace 的记录里')), 'zh says the brief\'s words: chip 长期 token (ja 長期トークン), hover 已写入此账号目录；CLI {cli} 已验 / 这个 Claude Code 版本还没有在本机确认通过 (lane cli-self-measure: never «未测量») / 重新铸造一次以记录订阅类型');
+  ok(verdictOf(K.every((k) => zh[k] && ja[k] && zh[k].includes('{cli}') === k.includes('{cli}') && ja[k].includes('{left}') === k.includes('{left}'))), 'every new door word has zh + ja with its placeholders');
   // the chip itself, rendered by the real manage-agents module (esbuild, a fake DOM)
   let MA = null, why = null;
   try {
@@ -535,17 +535,17 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
     const ls = am.list().accounts.find((a) => a.id === wiped);
     const chip = MA.loginExpiryChipHtml(ls);
     // lane oat-chip-icon (2026-11-12): a QUIET token's chip is its clock alone — the noun is its screen-reader name
-    ok(/<\/svg><\/span>$/.test(chip) && !/>Long-lived token</.test(chip) && /aria-label="Long-lived token"/.test(chip) && /title="Written to this account’s folder; CLI 2\.1\.296 verified\. /.test(chip) && !/written to this account’s folder \(CLI/.test(chip) && /data-relogin="sub-/.test(chip) && !chip.includes(OAT.slice(14, 30)), 'the member row\'s chip (quiet): the clock alone, the noun "Long-lived token" its screen-reader name; its hover leads "Written to this account’s folder; CLI 2.1.296 verified." (the re-login door kept for the quota ⟳)', chip.slice(0, 200));
+    ok(gateOf(/<\/svg><\/span>$/.test(chip)) && !/>Long-lived token</.test(chip) && gateOf(/aria-label="Long-lived token"/.test(chip)) && gateOf(/title="Written to this account’s folder; CLI 2\.1\.296 verified\. /.test(chip)) && !/written to this account’s folder \(CLI/.test(chip) && gateOf(/data-relogin="sub-/.test(chip)) && !chip.includes(OAT.slice(14, 30)), 'the member row\'s chip (quiet): the clock alone, the noun "Long-lived token" its screen-reader name; its hover leads "Written to this account’s folder; CLI 2.1.296 verified." (the re-login door kept for the quota ⟳)', chip.slice(0, 200));
     const heldChip = MA.loginExpiryChipHtml({ ...ls, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.999' } });
-    ok(/>Long-lived token<\/span>$/.test(heldChip) && /title="Written to this account’s folder, but Claude Code 2\.1\.999 is not in this VibeSpace’s records yet: running sessions continue/.test(heldChip) && !/verified|not measured/.test(heldChip), 'a HELD file: the same noun "Long-lived token"; the hover names the hub\'s CLI as not in the records yet (lane cli-self-measure: never «not measured»), never "verified"', heldChip.slice(0, 300));
+    ok(gateOf(/>Long-lived token<\/span>$/.test(heldChip)) && gateOf(/title="Written to this account’s folder, but Claude Code 2\.1\.999 is not in this VibeSpace’s records yet: running sessions continue/.test(heldChip)) && !/verified|not measured/.test(heldChip), 'a HELD file: the same noun "Long-lived token"; the hover names the hub\'s CLI as not in the records yet (lane cli-self-measure: never «not measured»), never "verified"', heldChip.slice(0, 300));
     const poolRow = amP.list().accounts.find((a) => a.id === P);
     ok(MA.loginExpiryChipHtml(poolRow) === '', 'the POOL row whose worst member is the token slot says nothing (the escape sentence is gone; a slot that serves is not a warning)', MA.loginExpiryChipHtml(poolRow));
     const nearPool = { ...poolRow, loginState: { ...poolRow.loginState, state: 'oat-only', oatFile: true, msLeft: 5 * H, worstId: O, worstName: 'Token O' } };
-    ok(/Token O: long-lived token ends in/.test(MA.loginExpiryChipHtml(nearPool)), '…until the token\'s last day: "Token O: long-lived token ends in …"');
+    ok(verdictOf(/Token O: long-lived token ends in/.test(MA.loginExpiryChipHtml(nearPool))), '…until the token\'s last day: "Token O: long-lived token ends in …"');
     const escRow = { id: 'pool-x', name: 'P', type: 'pooled', pooled: true, loginState: { state: 'expired', msLeft: -H, refreshExpiresAt: NOW - H, worstId: 'sub-1', worstName: 'Old', worstOatValidUntil: NOW + 99 * DAY, worstOatFileRefused: 'cli-unmeasured' } };
-    ok(/the pool can’t use its long-lived token · this Claude Code version is not cleared on this machine yet/.test(MA.loginExpiryChipHtml(escRow)), 'gate shut: the pool row keeps 「池用不了它的长期 token」 and adds 「这个 Claude Code 版本还没有在本机确认通过」 (en words here)', MA.loginExpiryChipHtml(escRow).slice(0, 300));
+    ok(verdictOf(/the pool can’t use its long-lived token · this Claude Code version is not cleared on this machine yet/.test(MA.loginExpiryChipHtml(escRow))), 'gate shut: the pool row keeps 「池用不了它的长期 token」 and adds 「这个 Claude Code 版本还没有在本机确认通过」 (en words here)', MA.loginExpiryChipHtml(escRow).slice(0, 300));
     const noSc = { ...escRow, loginState: { ...escRow.loginState, worstOatFileRefused: 'no-scopes' } };
-    ok(/the subscription type is missing — sign in once, or choose it/.test(MA.loginExpiryChipHtml(noSc)), '…no shape known: 「还差订阅类型：登录一次，或自己选」 names the two ways (lane oat-add-door: never «mint again» / «re-login» alone)');
+    ok(verdictOf(/the subscription type is missing — sign in once, or choose it/.test(MA.loginExpiryChipHtml(noSc))), '…no shape known: 「还差订阅类型：登录一次，或自己选」 names the two ways (lane oat-add-door: never «mint again» / «re-login» alone)');
   }
 }
 
@@ -559,17 +559,17 @@ console.log('§6 oat-file-sync — the spawned claude\'s --version gates it');
   const logs = [];
   const h = S.start({ accounts: amY, machineProbes: { cliVersion: async () => ver }, claudeCmd: '/nowhere/claude', log: (...a) => logs.push(a.join(' ')), bootDelayMs: 1e9, recheckMs: 1e9 });
   const c1 = await h.tick();
-  ok(c1.ok && readJ(credsOf(amY, y))?.claudeAiOauth?.accessToken === OAT && logs.some((l) => /claude CLI 2\.1\.296 — measured/.test(l)), 'a tick learns 2.1.296 through machineProbes.cliVersion and the row materializes (said once in the log, never a token)', logs);
+  ok(gateOf(c1.ok) && readJ(credsOf(amY, y))?.claudeAiOauth?.accessToken === OAT && verdictOf(logs.some((l) => /claude CLI 2\.1\.296 — measured/.test(l))), 'a tick learns 2.1.296 through machineProbes.cliVersion and the row materializes (said once in the log, never a token)', logs);
   // a login that dies AFTER the mint: the sweep materializes it
   const yl = amY.createSubscription({ name: 'Later' }).id;
   put(amY, yl, login(NOW)); await so(amY, yl, OAT2);
-  ok(fs.existsSync(credsOf(amY, yl)) && readJ(credsOf(amY, yl)).claudeAiOauth.refreshToken, '(a live login at mint time: kept)');
+  ok(gateOf(fs.existsSync(credsOf(amY, yl))) && verdictOf(readJ(credsOf(amY, yl)).claudeAiOauth.refreshToken), '(a live login at mint time: kept)');
   put(amY, yl, login(NOW, { dead: true }));
   await h.tick();
   ok(readJ(credsOf(amY, yl))?.claudeAiOauth?.accessToken === OAT2 && archives(amY, yl).length === 1, 'its login dies later ⇒ the next sweep archives it and writes the token (nobody presses anything)');
   ver = null; // the probe times out on a loaded box
   const c0 = await h.tick();
-  ok(c0.ok && amY.oatFileCaps().cli === '2.1.296' && fs.existsSync(credsOf(amY, y)) && logs.some((l) => /gave no answer — keeping CLI 2\.1\.296/.test(l)), 'a probe that FAILS keeps the last known version — no file is taken back from running sessions on a hiccup', logs.slice(-1));
+  ok(gateOf(c0.ok) && amY.oatFileCaps().cli === '2.1.296' && gateOf(fs.existsSync(credsOf(amY, y))) && verdictOf(logs.some((l) => /gave no answer — keeping CLI 2\.1\.296/.test(l))), 'a probe that FAILS keeps the last known version — no file is taken back from running sessions on a hiccup', logs.slice(-1));
   const mutY = compileWith('src/server/oat-file-sync.js', "if (!v) { if (binFacts", "if (false) { if (binFacts"); // (lane cli-self-measure: the silent-version branch first notes the bytes — law B)
   if (mutY) {
     const amR = new AccountManager({ dataDir: path.join(tmp, 'data-sync-red') });
@@ -579,12 +579,12 @@ console.log('§6 oat-file-sync — the spawned claude\'s --version gates it');
     const hr = mutY.start({ accounts: amR, machineProbes: { cliVersion: async () => vv }, claudeCmd: 'x', log: () => { }, bootDelayMs: 1e9, recheckMs: 1e9 });
     await hr.tick(); const had = fs.existsSync(credsOf(amR, q));
     vv = null; await hr.tick(); hr.stop();
-    ok(had && amR.oatFileCaps().cli === null, 'RED control (layer 1): a sync that hands the failed probe on as the version LOSES the measured CLI (spawns fall back to env, the door goes quiet) — the leg above pins the real one');
-    ok(fs.existsSync(credsOf(amR, q)), '…and even then nothing is taken back: the store never cleans up for an UNKNOWN version (layer 2, the verdict\'s known rule — its own RED in §1)');
+    ok(gateOf(had) && amR.oatFileCaps().cli === null, 'RED control (layer 1): a sync that hands the failed probe on as the version LOSES the measured CLI (spawns fall back to env, the door goes quiet) — the leg above pins the real one');
+    ok(verdictOf(fs.existsSync(credsOf(amR, q))), '…and even then nothing is taken back: the store never cleans up for an UNKNOWN version (layer 2, the verdict\'s known rule — its own RED in §1)');
   } else ok(false, 'RED control anchor present (oat-file-sync)');
   ver = '2.1.300';
   const c2 = await h.tick();
-  ok(!c2.ok && fs.existsSync(credsOf(amY, y)) && readJ(credsOf(amY, y))?.claudeAiOauth?.accessToken === OAT && logs.some((l) => /2\.1\.300 — held — no PASS on record/.test(l)), 'the CLI upgrades to an unmeasured version ⇒ the next tick KEEPS the files and says the version (R1 — 90c995a3 took them back in silence)', logs.slice(-1));
+  ok(!c2.ok && gateOf(fs.existsSync(credsOf(amY, y))) && readJ(credsOf(amY, y))?.claudeAiOauth?.accessToken === OAT && verdictOf(logs.some((l) => /2\.1\.300 — held — no PASS on record/.test(l))), 'the CLI upgrades to an unmeasured version ⇒ the next tick KEEPS the files and says the version (R1 — 90c995a3 took them back in silence)', logs.slice(-1));
   h.stop();
   ok(!logs.join('\n').includes(OAT.slice(14, 40)), 'nothing it logged carries token bytes');
   const P2 = require(path.join(REPO, 'src/machine-probes.js'));
@@ -621,7 +621,7 @@ console.log('§6b R1 (lane pool-silent-members, inc-mvsjhna7) — a CLI update n
   const h = mkSync();
   amI.setOat(D1, OAT); await amI.oatFileSettled();
   await h.tick();
-  ok(readJ(credsOf(amI, D1))?.claudeAiOauth?.accessToken === OAT && amI.poolMembers(PI).some((m) => m.id === D1), '(2.1.308, measured: acct-1 lives on its token file and is a pool candidate)');
+  ok(readJ(credsOf(amI, D1))?.claudeAiOauth?.accessToken === OAT && verdictOf(amI.poolMembers(PI).some((m) => m.id === D1)), '(2.1.308, measured: acct-1 lives on its token file and is a pool candidate)');
   const said0 = [];
   const log0 = console.log; console.log = (...a) => { said0.push(a.join(' ')); };
   ver = '2.1.312';
@@ -629,21 +629,21 @@ console.log('§6b R1 (lane pool-silent-members, inc-mvsjhna7) — a CLI update n
   ok(readJ(credsOf(amI, D1))?.claudeAiOauth?.accessToken === OAT, 'R1: the hub auto-updates to 2.1.312 (a version the fixture never measured) ⇒ acct-1\'s token file STAYS in its folder (90c995a3: deleted at this sweep, no line said)', { exists: fs.existsSync(credsOf(amI, D1)) });
   const roster = typeof amI.poolRoster === 'function' ? amI.poolRoster(PI) : null;
   const rD = roster && roster.find((r) => r.id === D1);
-  ok(!amI.poolMembers(PI).some((m) => m.id === D1) && !!rD && rD.placeable === false && rD.why && rD.why.code === 'cli-unmeasured' && rD.why.cli === '2.1.312' && rD.why.file === true,
+  ok(!amI.poolMembers(PI).some((m) => m.id === D1) && !!rD && rD.placeable === false && gateOf(rD.why) && rD.why.code === 'cli-unmeasured' && rD.why.cli === '2.1.312' && rD.why.file === true,
     'R1: …the pool places nothing NEW on it, and its ROSTER still lists it — unplaceable WITH its reason (cli-unmeasured · CLI 2.1.312 · the file there)', roster);
   ok(!!rD && typeof APA.unplaceableText === 'function' && APA.unplaceableText(rD.why) === 'long-lived token only, and Claude Code 2.1.312 is not in this VibeSpace\'s records yet — re-login, or a VibeSpace update places it', 'R1: …in words (lane cli-self-measure: never «unmeasured», never «wait for the measurement»): «long-lived token only, and Claude Code 2.1.312 is not in this VibeSpace\'s records yet — re-login, or a VibeSpace update places it»', rD && typeof APA.unplaceableText === 'function' && APA.unplaceableText(rD.why));
   const rowI = amI.list().accounts.find((a) => a.id === D1);
-  ok(rowI.loginState && rowI.loginState.state === 'oat-only' && rowI.oatFile && rowI.oatFile.state === 'held' && rowI.oatFile.cli === '2.1.312', 'R1: …the row reads «long-lived token only» (held · cli-unmeasured · CLI 2.1.312), never «not logged in»', { ls: rowI.loginState && rowI.loginState.state, door: rowI.oatFile });
+  ok(gateOf(rowI.loginState) && rowI.loginState.state === 'oat-only' && gateOf(rowI.oatFile) && rowI.oatFile.state === 'held' && rowI.oatFile.cli === '2.1.312', 'R1: …the row reads «long-lived token only» (held · cli-unmeasured · CLI 2.1.312), never «not logged in»', { ls: rowI.loginState && rowI.loginState.state, door: rowI.oatFile });
   const it1 = ITEMS();
-  ok(it1.length === 1 && it1[0].text === 'Claude Code updated to 2.1.312; 1 account cannot be placed by the pool yet — its login is kept' && /Accounts: acct-1\./.test(it1[0].detail) && it1[0].origin === 'pool' && it1[0].i18n && it1[0].i18n.text.params.v === '2.1.312',
+  ok(it1.length === 1 && it1[0].text === 'Claude Code updated to 2.1.312; 1 account cannot be placed by the pool yet — its login is kept' && gateOf(/Accounts: acct-1\./.test(it1[0].detail)) && it1[0].origin === 'pool' && gateOf(it1[0].i18n) && it1[0].i18n.text.params.v === '2.1.312',
     'R1: …ONE For-you item (no hub check here: no binary hash): «Claude Code updated to 2.1.312; 1 account cannot be placed by the pool yet — its login is kept», naming acct-1 (origin pool, zh/ja params)', it1.map((i) => ({ text: i.text, detail: i.detail, origin: i.origin })));
-  ok(logs.some((l) => /claude CLI 2\.1\.312 is not measured: 1 pool member\(s\) cannot be placed until it is \(their token files are kept\) — For-you item filed/.test(l)) && !logs.some((l) => l.includes('acct-1')), 'R1: …the journal says the version, the count and that the item was filed — never the item\'s words', logs.slice(-2));
+  ok(gateOf(logs.some((l) => /claude CLI 2\.1\.312 is not measured: 1 pool member\(s\) cannot be placed until it is \(their token files are kept\) — For-you item filed/.test(l))) && !logs.some((l) => l.includes('acct-1')), 'R1: …the journal says the version, the count and that the item was filed — never the item\'s words', logs.slice(-2));
   await h.tick();
   ok(ITEMS().length === 1, 'R1: …a second sweep files nothing more (one item per version)', ITEMS().length);
   const engSrc = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
-  ok(/const cliUnmeasuredNotice = require\('\.\/cli-unmeasured-notice\.js'\)\.create\(\{ accounts: \(\) => accounts, todos: \(\) => getUserTodos\(\), file: path\.join\(rootDir, 'data', 'cli-unmeasured-notice\.json'\) \}\);[^\n]*[\s\S]{0,1200}?\nsetInterval\(\(\) => \{ try \{ sweepUsageAnchors\(\); \} catch \{\} try \{ cliUnmeasuredNotice\.tick\(\); \} catch \{\} try \{ cliSelfMeasure\.tick\(\)\.catch\(\(\) => \{\}\); \} catch \{\} \}, 60000\);/.test(engSrc), 'R1 WIRING: the pool engine creates the notice with the store, the For-you store and its OWN memory file (data/cli-unmeasured-notice.json), and ticks it every 60 s (oat-file-sync itself still requires nothing)');
+  ok(verdictOf(/const cliUnmeasuredNotice = require\('\.\/cli-unmeasured-notice\.js'\)\.create\(\{ accounts: \(\) => accounts, todos: \(\) => getUserTodos\(\), file: path\.join\(rootDir, 'data', 'cli-unmeasured-notice\.json'\) \}\);[^\n]*[\s\S]{0,1200}?\nsetInterval\(\(\) => \{ try \{ sweepUsageAnchors\(\); \} catch \{\} try \{ cliUnmeasuredNotice\.tick\(\); \} catch \{\} try \{ cliSelfMeasure\.tick\(\)\.catch\(\(\) => \{\}\); \} catch \{\} \}, 60000\);/.test(engSrc)), 'R1 WIRING: the pool engine creates the notice with the store, the For-you store and its OWN memory file (data/cli-unmeasured-notice.json), and ticks it every 60 s (oat-file-sync itself still requires nothing)');
   ver = '2.1.308'; await h.tick();
-  ok(ITEMS().length === 0 && amI.poolMembers(PI).some((m) => m.id === D1), 'R1: the version is measured again ⇒ the item resolves itself and acct-1 is a candidate again (its file never left)', { open: ITEMS().length });
+  ok(ITEMS().length === 0 && verdictOf(amI.poolMembers(PI).some((m) => m.id === D1)), 'R1: the version is measured again ⇒ the item resolves itself and acct-1 is a candidate again (its file never left)', { open: ITEMS().length });
   const told = todos.idsWhere((i) => i.sessionKey === 'pool:cli-unmeasured');
   ver = '2.1.312'; const h2 = mkSync(); await h2.tick(); h2.stop();
   // (acceptance r2) the AGENT closed it (the CLI was on a measured version), the owner never did: acct-1 held out again
@@ -654,7 +654,7 @@ console.log('§6b R1 (lane pool-silent-members, inc-mvsjhna7) — a CLI update n
   ver = '2.1.308'; amI.noteCliVersion('2.1.308'); await amI.oatFileSettled();
   const said = []; const log1 = console.log; console.log = (...a) => { said.push(a.join(' ')); };
   try { amI.clearOat(D1); await amI.oatFileSettled(); } finally { console.log = log1; }
-  ok(!fs.existsSync(credsOf(amI, D1)) && said.some((l) => /^\[oat-file\] took acct-1's long-lived-token file back out of its folder — none; the pool cannot place it/.test(l)), 'R1: a take-back for another reason (the token removed) is journaled BY NAME — never a quiet sweep', said);
+  ok(!fs.existsSync(credsOf(amI, D1)) && verdictOf(said.some((l) => /^\[oat-file\] took acct-1's long-lived-token file back out of its folder — none; the pool cannot place it/.test(l))), 'R1: a take-back for another reason (the token removed) is journaled BY NAME — never a quiet sweep', said);
   ok(!said0.some((l) => /took acct-1/.test(l)), '…and the CLI update itself took nothing back (no take-back line at the 2.1.312 sweep)', said0);
 }
 
@@ -703,11 +703,11 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
       return { id, during, after, open: open.map((i) => i.id), unreadable: logs.filter((l) => /version unreadable/.test(l)).length };
     };
     const r = await run(NOTICE);
-    ok(!!r.id && r.during && r.during.status === 'open' && r.unreadable === 1, 'r2 (1): a restart whose `claude --version` gets no answer (the CLI unknown) leaves the open item EXACTLY as it is — two ticks in the unknown spell, the item still open, and the journal says «version unreadable» ONCE (9d53db09: «done» by the agent at the first tick)', r);
-    ok(r.after && r.after.status === 'open' && r.open.length === 1 && r.open[0] === r.id, 'r2 (1): …the version reads again (2.1.312, still unmeasured, acct-1 held out): the SAME item is open — never closed, never a second filing (9d53db09: closed and never re-filed)', r);
+    ok(!!r.id && gateOf(r.during) && r.during.status === 'open' && r.unreadable === 1, 'r2 (1): a restart whose `claude --version` gets no answer (the CLI unknown) leaves the open item EXACTLY as it is — two ticks in the unknown spell, the item still open, and the journal says «version unreadable» ONCE (9d53db09: «done» by the agent at the first tick)', r);
+    ok(gateOf(r.after) && r.after.status === 'open' && r.open.length === 1 && r.open[0] === r.id, 'r2 (1): …the version reads again (2.1.312, still unmeasured, acct-1 held out): the SAME item is open — never closed, never a second filing (9d53db09: closed and never re-filed)', r);
     const M0 = compileWith('src/server/cli-unmeasured-notice.js', "const unreadable = !caps.ok && (!caps.known || !caps.cli || caps.cli === 'unparsed');", 'const unreadable = false;');
     const rc = M0 ? await run(M0) : null;
-    ok(!!rc && rc.during && rc.during.status === 'done' && rc.during.by === 'agent', 'RED CONTROL (1): the same restart with the unknown-version guard taken out closes the item «done» by the agent — 9d53db09\'s defect, so the guard is what keeps it', rc);
+    ok(!!rc && gateOf(rc.during) && rc.during.status === 'done' && rc.during.by === 'agent', 'RED CONTROL (1): the same restart with the unknown-version guard taken out closes the item «done» by the agent — 9d53db09\'s defect, so the guard is what keeps it', rc);
   }
   // (2) THE OWNER'S DISMISSAL IS FINAL; THE OPEN ITEM IS PATCHED; THE ROSTER READ IS THROTTLED — the REAL For-you store on an
   // injected clock and the module's OWN memory file (data/cli-unmeasured-notice.json); the store is a stand-in that counts
@@ -732,14 +732,14 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
   {
     const w = world(); const n1 = w.mk();
     const id = n1.tick();
-    ok(!!id && w.todos.get(id).text.startsWith('Claude Code updated to 2.1.312; 6 accounts') && w.reads === 1, 'r2 (2): filed once for 2.1.312 — «6 accounts cannot be placed …»', w.mine().map((i) => i.text));
+    ok(!!id && gateOf(w.todos.get(id).text.startsWith('Claude Code updated to 2.1.312; 6 accounts')) && w.reads === 1, 'r2 (2): filed once for 2.1.312 — «6 accounts cannot be placed …»', w.mine().map((i) => i.text));
     const r0 = w.reads; w.wait(60e3); n1.tick(); w.wait(60e3); n1.tick();
     ok(w.reads === r0, 'r2 (2) THROTTLE: inside the 15-min recheck the roster is NOT read again (every pool member\'s credential files, on the main thread)', { reads: w.reads });
     w.names = w.names.slice(0, 4); w.wait(16 * 60e3); n1.tick(); // two members re-logged
     const p = w.todos.get(id);
     ok(p.id === id && p.status === 'open' && p.text === 'Claude Code updated to 2.1.312; 4 accounts cannot be placed by the pool yet — their logins are kept' && p.detail.split('\n')[0] === 'Accounts: acct-7, acct-8, acct-9, acct-10.' && p.i18n.text.params.n === 4 && w.mine().length === 1,
       'r2 (2) PATCH: two members re-logged ⇒ the OPEN item is patched IN PLACE — the same id, «4 accounts», the four names, the zh/ja params — never a second filing (9d53db09: «6 accounts … acct-7 … acct-12» for as long as it stayed open)', { text: p.text, detail: p.detail.split('\n')[0], items: w.mine().length });
-    ok(w.logs.some((l) => /claude CLI 2\.1\.312 is not measured: the For-you item now counts 4 pool member\(s\) \(was 6\)/.test(l)) && !w.logs.some((l) => /acct-/.test(l)), 'r2 (2) PATCH: …the journal says the new count — never the item\'s words', w.logs);
+    ok(gateOf(w.logs.some((l) => /claude CLI 2\.1\.312 is not measured: the For-you item now counts 4 pool member\(s\) \(was 6\)/.test(l))) && !w.logs.some((l) => /acct-/.test(l)), 'r2 (2) PATCH: …the journal says the new count — never the item\'s words', w.logs);
     w.todos.setStatus(id, 'dismissed', 'user'); // THE OWNER dismisses it
     w.othersResolved(16); w.wait(61 * 60e3); // a busy For-you: 16 other items resolved over 80 min, then an hour more
     const inTail = (w.todos.snapshot().resolved || []).some((x) => x.id === id);
@@ -750,12 +750,12 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     w.wait(16 * 60e3); w.mk(NOTICE, null).tick();
     ok(w.todos.get(id).status === 'dismissed', 'r2 (2) FINAL: …after a restart with NO memory file (the store\'s FULL ledger is the belt — never its display tail): still dismissed', w.todos.get(id).status);
     const mem = JSON.parse(fs.readFileSync(w.memFile, 'utf8'));
-    ok(mem.versions && mem.versions['2.1.312'] && mem.versions['2.1.312'].itemId === id && mem.versions['2.1.312'].resolvedBy === 'user' && mem.versions['2.1.312'].count === 4 && mem.versions['2.1.312'].filedAt > 0, 'r2 (2) the module\'s OWN memory: {versions: {"2.1.312": {filedAt, itemId, count: 4, resolvedBy: "user", resolvedAt}}} — written atomically, read at the next boot', mem);
+    ok(gateOf(mem.versions) && gateOf(mem.versions['2.1.312']) && mem.versions['2.1.312'].itemId === id && mem.versions['2.1.312'].resolvedBy === 'user' && mem.versions['2.1.312'].count === 4 && mem.versions['2.1.312'].filedAt > 0, 'r2 (2) the module\'s OWN memory: {versions: {"2.1.312": {filedAt, itemId, count: 4, resolvedBy: "user", resolvedAt}}} — written atomically, read at the next boot', mem);
     w.todos._state.items = w.todos._state.items.filter((i) => i.id !== id); // the store's 1000-item ledger pruned it
     w.wait(16 * 60e3); w.mk().tick();
     ok(w.mine().length === 0, 'r2 (2) FINAL: …and once the store\'s ledger has PRUNED the item, its memory alone keeps the owner\'s word — nothing filed again for 2.1.312', w.mine().map((i) => i.status));
     w.cli = '2.1.313'; w.wait(16 * 60e3); const id13 = w.mk().tick();
-    ok(!!id13 && w.todos.get(id13).text.startsWith('Claude Code updated to 2.1.313; 4 accounts'), 'r2 (2): …a NEW version is a new key — 2.1.313 files its own item', w.mine().map((i) => i.text));
+    ok(!!id13 && verdictOf(w.todos.get(id13).text.startsWith('Claude Code updated to 2.1.313; 4 accounts')), 'r2 (2): …a NEW version is a new key — 2.1.313 files its own item', w.mine().map((i) => i.text));
   }
   {
     // RED CONTROL (2): the same owner's dismissal with the module's memory taken out (the rec never read) — `add` re-opens it
@@ -771,7 +771,7 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     const closed = { ...w.todos.get(id) }; // the store hands its live record: copied now
     w.names = names.slice(0, 2); w.wait(16 * 60e3); n1.tick();
     const back = { ...w.todos.get(id) };
-    ok(closed.status === 'done' && closed.resolvedBy === 'agent' && back.status === 'open' && back.text.startsWith('Claude Code updated to 2.1.312; 2 accounts') && w.mine().length === 1, 'r2 (3): nobody left out ⇒ resolved by the agent; two held out again on 2.1.312 ⇒ the SAME item re-opens, patched to «2 accounts» (the agent closed it, the owner never did)', { closed: closed.status + '/' + closed.resolvedBy, back: back.status, text: back.text });
+    ok(closed.status === 'done' && closed.resolvedBy === 'agent' && back.status === 'open' && gateOf(back.text.startsWith('Claude Code updated to 2.1.312; 2 accounts')) && w.mine().length === 1, 'r2 (3): nobody left out ⇒ resolved by the agent; two held out again on 2.1.312 ⇒ the SAME item re-opens, patched to «2 accounts» (the agent closed it, the owner never did)', { closed: closed.status + '/' + closed.resolvedBy, back: back.status, text: back.text });
     const r0 = w.reads; w.ok = true; w.wait(60e3); n1.tick(); w.wait(16 * 60e3); n1.tick();
     ok(w.todos.get(id).status === 'done' && w.todos.get(id).resolvedBy === 'agent' && w.reads === r0, 'r2 (3): the version MEASURED ⇒ the item resolves itself, and a measured CLI reads no roster at all', { status: w.todos.get(id).status, reads: w.reads - r0 });
   }
@@ -797,14 +797,14 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     const g = await leg(NOTICE, garbage), nh = await leg(NOTICE, neverHad);
     ok(g.st === 'dismissed' && g.items === 1 && g.said === 1, 'r3 (5) a GARBAGE memory file (then two members re-logged): said ONCE in the journal over two restarts, rebuilt from the ledger — the dismissal holds, no second item', g);
     ok(nh.st === 'dismissed' && nh.items === 1, 'r3 (5) a memory naming an item the store never had (resolvedBy null) while the dismissed item is in the ledger, the count 6→4 ⇒ still dismissed, no second item (b552c972: a SECOND item filed beside it)', nh);
-    ok(w0FactOf(NOTICE), 'r3 (5) …the item carries its FACT (`' + NF + '`: the version) — the ledger belt keys on it, never on the words');
+    ok(verdictOf(w0FactOf(NOTICE)), 'r3 (5) …the item carries its FACT (`' + NF + '`: the version) — the ledger belt keys on it, never on the words');
     const M = red('(5)', 'const byFact = (todos) => {', 'const byFact = (todos) => new Map(); const byFact0 = (todos) => {');
     if (M) { const rr = await leg(M, neverHad); ok(rr.items === 2, 'RED CONTROL (5): with the ledger belt not keyed on the fact, the never-had memory files a SECOND item for the dismissed version', rr); }
   }
   { // (6) (d) the bound: 21 versions, the first one dismissed, the ledger pruned — the owner's word outlives the agent's
     const leg = (M) => { const w = world(M); const n = w.mk(M); const ids = []; for (let k = 0; k < 21; k++) { w.cli = '2.1.' + (400 + k); w.wait(16 * 60e3); ids.push(n.tick()); if (k === 0) { w.todos.setStatus(ids[0], 'dismissed', 'user'); w.wait(60e3); n.tick(); } } for (const id of ids) if (id && w.todos.get(id) && w.todos.get(id).status !== 'open') prune(w, id); const keys = Object.keys(JSON.parse(fs.readFileSync(w.memFile, 'utf8')).versions); w.cli = '2.1.400'; w.wait(16 * 60e3); const back = n.tick(); return { kept: keys.length, has400: keys.includes('2.1.400'), refiled: back }; };
     const r = leg(NOTICE);
-    ok(r.kept === 20 && r.has400 && !r.refiled, 'r3 (6) 21 versions (the first dismissed by the owner), the ledger pruned: the memory keeps 20 and the owner\'s word is never the one evicted — back on 2.1.400, nothing filed (b552c972: its own save evicted the record it had just written)', r);
+    ok(r.kept === 20 && gateOf(r.has400) && !r.refiled, 'r3 (6) 21 versions (the first dismissed by the owner), the ledger pruned: the memory keeps 20 and the owner\'s word is never the one evicted — back on 2.1.400, nothing filed (b552c972: its own save evicted the record it had just written)', r);
     const M = red('(6)', '(ownerWord(memory.versions[b].resolvedBy) - ownerWord(memory.versions[a].resolvedBy)) || ', '');
     if (M) { const rr = leg(M); ok(!!rr.refiled, 'RED CONTROL (6): evicting by last use alone drops the dismissed version, and back on it a new item is filed', rr); }
   }
@@ -816,7 +816,7 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     if (M) { const rr = leg(M); ok(!!rr.refiled, 'RED CONTROL (7): an item filed without its fact is lost to the belt once cleared (its words are gone) — re-filed', rr); }
   }
   { // (8) the owner's LATER word: a hand reopen / the Mark-all-read Undo — learned, and the open item patched again
-    const leg = (M, undo) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.wait(60e3); if (undo) w.todos.readNotices([id], true, 'user'); else w.todos.setStatus(id, 'dismissed', 'user'); w.wait(30e3); n.tick(); w.wait(5e3); if (undo) w.todos.readNotices([id], false, 'user'); else w.todos.setStatus(id, 'open', 'user'); w.names = w.names.slice(0, 1); w.wait(16 * 60e3); n.tick(); const it = w.todos.get(id); return { st: it.status, text: it.text.replace(/^Claude Code updated to 2\.1\.312; /, '').replace(/ cannot be placed.*$/, '') }; };
+    const leg = (M, undo) => { if (typeof undo !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof undo}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); const w = world(M); const n = w.mk(M); const id = n.tick(); w.wait(60e3); if (undo) w.todos.readNotices([id], true, 'user'); else w.todos.setStatus(id, 'dismissed', 'user'); w.wait(30e3); n.tick(); w.wait(5e3); if (undo) w.todos.readNotices([id], false, 'user'); else w.todos.setStatus(id, 'open', 'user'); w.names = w.names.slice(0, 1); w.wait(16 * 60e3); n.tick(); const it = w.todos.get(id); return { st: it.status, text: it.text.replace(/^Claude Code updated to 2\.1\.312; /, '').replace(/ cannot be placed.*$/, '') }; };
     const a = leg(NOTICE, false), b = leg(NOTICE, true);
     ok(a.st === 'open' && a.text === '1 account' && b.st === 'open' && b.text === '1 account', 'r3 (8) the owner REOPENS the dismissed item by hand / presses Mark-all-read\'s Undo, five members re-log ⇒ the open item reads «1 account» (the last transition is learned in both directions — b552c972: frozen at «6 accounts»)', { a, b });
     const M = red('(8)', '      const by = lastWord(it);\n', '      const by = r && ownerWord(r.resolvedBy) ? r.resolvedBy : lastWord(it);\n');
@@ -883,7 +883,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
   };
   const r2 = await f2(), r2b = await f2(undefined, { failWrite: true });
   ok(r2.s.verdict === 'read-failed' && r2.s.code === 'EMFILE' && r2.file?.claudeAiOauth?.refreshToken === r2.live.claudeAiOauth.refreshToken && !r2.arch.length, 'F2 emfile: one EMFILE reading a LIVE login ⇒ read-failed:EMFILE — the login untouched, nothing archived, nothing written', r2.s);
-  ok(r2.row.oatFile && r2.row.oatFile.state === 'refused' && r2.row.oatFile.reason === 'read-failed' && r2.row.oatFile.code === 'EMFILE', 'F2: the row says it (refused · read-failed · EMFILE)', r2.row.oatFile);
+  ok(gateOf(r2.row.oatFile) && r2.row.oatFile.state === 'refused' && r2.row.oatFile.reason === 'read-failed' && r2.row.oatFile.code === 'EMFILE', 'F2: the row says it (refused · read-failed · EMFILE)', r2.row.oatFile);
   ok(r2b.s.verdict === 'read-failed' && !!r2b.file && !r2b.arch.length, 'F2 emfile2: the read AND the write fail ⇒ the member still has its credential file (no archive ran, so no write could leave it bare)', { s: r2b.s, present: !!r2b.file });
   const mF2 = mutantStore({ mat: [["return e.code === 'ENOENT' ? out('dir', 'absent') : out('dir', 'read-failed', { code: String(e.code || 'error') });", "return e.code === 'ENOENT' ? out('dir', 'absent') : out('dir', 'unreadable');"], ['  if (expect !== undefined) await stillSame(src, expect);\n', '']] });
   const r2m = mF2 ? await f2(mF2, { failWrite: true }) : null;
@@ -926,7 +926,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     await so(amM, from, OAT);
     amM.mergeSubscription(from, into, { liveAccountIds: new Set() }); await amM.oatFileSettled();
     const f = readJ(credsOf(amM, into));
-    ok(f?.claudeAiOauth?.accessToken === OAT && f?.vibespaceOat?.account === into && LE.oatFileOurs(f, into), 'F3: a merge never copies our file — the survivor\'s is re-derived from the moved token, its mark naming the survivor', f && f.vibespaceOat);
+    ok(f?.claudeAiOauth?.accessToken === OAT && f?.vibespaceOat?.account === into && verdictOf(LE.oatFileOurs(f, into)), 'F3: a merge never copies our file — the survivor\'s is re-derived from the moved token, its mark naming the survivor', f && f.vibespaceOat);
   }
 
   // ── F4: a token that does not decrypt is oat-unreadable — nothing archived, written or removed; the writer refuses a non-object ──
@@ -945,8 +945,8 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     return { v, same: fs.readFileSync(credsOf(amB, m), 'utf8') === before, archAdded: archives(amB, m).length - arch0, door: amB.list().accounts.find((a) => a.id === m).oatFile };
   };
   const r4 = await f4();
-  ok(r4.v.every((x) => x === 'none') && r4.same && r4.archAdded === 0, 'F4 decrypt: 5 sweeps over a token that no longer decrypts — zero archives, zero writes, the file byte-identical', r4);
-  ok(r4.door && r4.door.state === 'refused' && r4.door.reason === 'oat-unreadable', 'F4: the row names it (refused · oat-unreadable — 「长期 token 无法解密——重新铸造」)', r4.door);
+  ok(gateOf(r4.v.every((x) => x === 'none')) && gateOf(r4.same) && r4.archAdded === 0, 'F4 decrypt: 5 sweeps over a token that no longer decrypts — zero archives, zero writes, the file byte-identical', r4);
+  ok(gateOf(r4.door) && r4.door.state === 'refused' && r4.door.reason === 'oat-unreadable', 'F4: the row names it (refused · oat-unreadable — 「长期 token 无法解密——重新铸造」)', r4.door);
   const mF4 = mutantStore({ le: [["  if (m.oat && m.oat.present && m.oat.readable === false) return { verdict: 'none', archive: false, cleanup: false, reason: 'oat-unreadable' };\n", '']] });
   const r4m = mF4 ? await f4(mF4) : null;
   ok(!!r4m && !(r4m.door && r4m.door.reason === 'oat-unreadable'), 'RED control (F4): without the oat-unreadable rung the row never says why (the door leg above goes RED)', r4m && r4m.door);
@@ -955,7 +955,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     const d = fs.mkdtempSync(path.join(tmp, 'f4w-'));
     const codes = [];
     for (const body of [null, 'null', [], 7]) { try { await MAT.writeCredentialFile(d, body); codes.push('wrote'); } catch (e) { codes.push(e.code); } }
-    ok(codes.every((c) => c === 'not-an-object') && !fs.existsSync(path.join(d, '.credentials.json')), 'F4: writeCredentialFile REFUSES a non-object body by name (not-an-object) and writes nothing', codes);
+    ok(gateOf(codes.every((c) => c === 'not-an-object')) && !fs.existsSync(path.join(d, '.credentials.json')), 'F4: writeCredentialFile REFUSES a non-object body by name (not-an-object) and writes nothing', codes);
   }
 
   // ── F5 (ruling): an unmeasured CLI never pulls a linked member's file; the pool stops placing on it ──
@@ -974,9 +974,9 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     return out;
   };
   const r5 = await f5();
-  ok(r5.c.ok === false && r5.c.known && r5.linkedCreds && r5.o2Kept, 'F5 gateFlip: the hub moves to an unmeasured 2.1.300 — the linked conversation\'s file STAYS (its creds intact through the link); the unlinked member\'s STAYS too (R1: never taken back for a version reason)', r5);
-  ok(r5.cands === 0 && r5.isMember === false && r5.spawnErr && r5.spawnErr.code === 'oat-cli-unmeasured' && /conversations already running continue/.test(r5.spawnErr.msg), 'F5: the pool has 0 candidates for a NEW placement (poolMembers / isPoolMember) and a new conversation is refused by name (oat-cli-unmeasured), never "signed out"', { cands: r5.cands, err: r5.spawnErr });
-  ok(r5.doorO1 && r5.doorO1.state === 'held' && r5.doorO1.cli === '2.1.300', 'F5: the row says it — held (「此 CLI 版本未测量：现有会话继续，不再新派」)', r5.doorO1);
+  ok(r5.c.ok === false && gateOf(r5.c.known) && gateOf(r5.linkedCreds) && verdictOf(r5.o2Kept), 'F5 gateFlip: the hub moves to an unmeasured 2.1.300 — the linked conversation\'s file STAYS (its creds intact through the link); the unlinked member\'s STAYS too (R1: never taken back for a version reason)', r5);
+  ok(r5.cands === 0 && r5.isMember === false && gateOf(r5.spawnErr) && r5.spawnErr.code === 'oat-cli-unmeasured' && verdictOf(/conversations already running continue/.test(r5.spawnErr.msg)), 'F5: the pool has 0 candidates for a NEW placement (poolMembers / isPoolMember) and a new conversation is refused by name (oat-cli-unmeasured), never "signed out"', { cands: r5.cands, err: r5.spawnErr });
+  ok(gateOf(r5.doorO1) && r5.doorO1.state === 'held' && r5.doorO1.cli === '2.1.300', 'F5: the row says it — held (「此 CLI 版本未测量：现有会话继续，不再新派」)', r5.doorO1);
   ok(r5.afterLast === true, 'F5: the last link gone, the next sweep KEEPS the file (R1 — 90c995a3 took it back here, with no word said)', r5.afterLast);
   const mF5 = mutantStore({ le: [["    return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };\n", "    return { verdict: 'cli-unmeasured', archive: false, cleanup: ours };\n"]] });
   const r5m = mF5 ? await f5(mF5) : null;
@@ -1003,11 +1003,11 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     return { landed, kept: readJ(credsOf(am7, m))?.claudeAiOauth?.refreshToken === fresher.claudeAiOauth.refreshToken, fact: am7._oatFileFacts.get(m) };
   };
   const r7a = await f7(undefined, 'lstat'), r7b = await f7(undefined, 'rename');
-  ok(r7a.landed && r7a.kept && r7a.fact.code === 'changed', 'F7: a `claude login` landing between the verdict\'s read and the archive is never displaced — the fresh stat refuses (changed), the next sweep reads a live login', r7a);
-  ok(r7b.landed && r7b.kept, 'F7: …landing INSIDE the archive rename window too: what moved is checked against what was judged and put straight back (link(2), never over a file)', r7b);
+  ok(gateOf(r7a.landed) && gateOf(r7a.kept) && r7a.fact.code === 'changed', 'F7: a `claude login` landing between the verdict\'s read and the archive is never displaced — the fresh stat refuses (changed), the next sweep reads a live login', r7a);
+  ok(gateOf(r7b.landed) && verdictOf(r7b.kept), 'F7: …landing INSIDE the archive rename window too: what moved is checked against what was judged and put straight back (link(2), never over a file)', r7b);
   const mF7 = mutantStore({ mat: [['  if (expect !== undefined) await stillSame(src, expect);\n', ''], ['  if (expect) {\n    const st = await fsp.lstat(dst);', '  if (false) {\n    const st = await fsp.lstat(dst);']] });
   const r7m = mF7 ? await f7(mF7, 'rename') : null;
-  ok(!!r7m && r7m.landed && !r7m.kept, 'RED control (F7): the r1 archive (no fresh stat, no check after) displaces the fresh login — the leg above catches it', r7m);
+  ok(!!r7m && gateOf(r7m.landed) && !r7m.kept, 'RED control (F7): the r1 archive (no fresh stat, no check after) displaces the fresh login — the leg above catches it', r7m);
 
   // ── F8: a member dir that is a symlink is refused (lstat, never followed) ──
   const f8 = async (M) => {
@@ -1021,7 +1021,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     return { r, untouched: sha(path.join(real, '.credentials.json')) === b && !fs.readdirSync(real).some((f) => /dead-/.test(f)), mode: (fs.statSync(real).mode & 0o777).toString(8), door: am8.list().accounts.find((a) => a.id === m).oatFile };
   };
   const r8 = await f8();
-  ok(r8.r.oatFile === 'dir-symlink' && r8.untouched && r8.mode === '755' && r8.door?.reason === 'dir-symlink', 'F8: a member dir that is a symlink is refused (dir-symlink) — nothing archived or written through it, its target\'s mode untouched, the row says it', r8);
+  ok(r8.r.oatFile === 'dir-symlink' && gateOf(r8.untouched) && r8.mode === '755' && r8.door?.reason === 'dir-symlink', 'F8: a member dir that is a symlink is refused (dir-symlink) — nothing archived or written through it, its target\'s mode untouched, the row says it', r8);
   const mF8 = mutantStore({ le: [["  if (m.dirState === 'symlink') return { verdict: 'dir-symlink', archive: false, cleanup: false };\n", '']], mat: [["  try { if ((await fsp.lstat(dir)).isSymbolicLink()) throw Object.assign(new Error('the account folder is a symlink'), { code: 'dir-symlink' }); } catch (e) { if (e.code !== 'ENOENT') throw e; }\n", ''], ["  try { if ((await fsp.lstat(dir)).isSymbolicLink()) return out('symlink', 'absent'); }", "  try { await fsp.lstat(dir); }"]] });
   const r8m = mF8 ? await f8(mF8) : null;
   ok(!!r8m && !r8m.untouched, 'RED control (F8): the r1 reader + writer (no lstat) write through the symlink — the leg above catches it', r8m && r8m.r);
@@ -1030,7 +1030,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
   {
     const am9 = mk();
     const c1 = am9.noteCliVersion('2.1.296-dev.1'), c2 = am9.noteCliVersion('unparsed'), c3 = am9.noteCliVersion('2.1.296 (Claude Code)');
-    ok(c1.ok === false && c1.known && c1.cli === '2.1.296-dev.1' && c2.ok === false && c2.known && c2.cli === 'unparsed' && c3.ok === true, 'F9: 2.1.296-dev.1 never opens the gate (an exact measured version only); \'unparsed\' is a known CLI nobody measured', { c1, c2 });
+    ok(c1.ok === false && gateOf(c1.known) && c1.cli === '2.1.296-dev.1' && c2.ok === false && gateOf(c2.known) && c2.cli === 'unparsed' && c3.ok === true, 'F9: 2.1.296-dev.1 never opens the gate (an exact measured version only); \'unparsed\' is a known CLI nobody measured', { c1, c2 });
     await am9.oatFileSettled();
   }
 
@@ -1062,8 +1062,8 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     return { copies: txt.split(OAT).length - 1, rec: bundle.accounts.find((a) => a.id === m), imp };
   };
   const r11 = await f11();
-  ok(r11.copies === 1 && r11.rec.oat === OAT && !String(r11.rec.files['.credentials.json'] || '').includes(OAT) && /mcpOAuth/.test(r11.rec.files['.credentials.json'] || ''), 'F11: the export carries the token ONCE (rec.oat) — our file is left out, the CLI\'s other keys in it travel', { copies: r11.copies, files: Object.keys(r11.rec.files || {}) });
-  ok(LE.oatFileOurs(r11.imp, r11.rec.id) && r11.imp.claudeAiOauth.accessToken === OAT && !!r11.imp.mcpOAuth, '…and the import re-derives ours on the target (its mcpOAuth kept)', r11.imp && Object.keys(r11.imp));
+  ok(r11.copies === 1 && r11.rec.oat === OAT && !String(r11.rec.files['.credentials.json'] || '').includes(OAT) && verdictOf(/mcpOAuth/.test(r11.rec.files['.credentials.json'] || '')), 'F11: the export carries the token ONCE (rec.oat) — our file is left out, the CLI\'s other keys in it travel', { copies: r11.copies, files: Object.keys(r11.rec.files || {}) });
+  ok(gateOf(LE.oatFileOurs(r11.imp, r11.rec.id)) && r11.imp.claudeAiOauth.accessToken === OAT && !!r11.imp.mcpOAuth, '…and the import re-derives ours on the target (its mcpOAuth kept)', r11.imp && Object.keys(r11.imp));
   const mF11 = mutantStore({ acc: [["        if (rec.files['.credentials.json'] && a.oatEnc) {", "        if (false) {"]] });
   const r11m = mF11 ? await f11(mF11) : null;
   ok(!!r11m && r11m.copies === 2, 'RED control (F11): the r1 export carries the token twice — the leg above catches it', r11m && r11m.copies);
@@ -1079,7 +1079,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     return { a0, a1: archives(amG, into).map((f) => sha(path.join(amG.subDir(into), f))), gone: !fs.existsSync(amG.subDir(from)) };
   };
   const r12 = await f12();
-  ok(r12.a0.length === 1 && r12.gone && r12.a0.every((h) => r12.a1.includes(h)), 'F12: the merge moves the folded record\'s .dead-* archives (byte-identical) into the survivor before its dir goes', r12);
+  ok(r12.a0.length === 1 && gateOf(r12.gone) && verdictOf(r12.a0.every((h) => r12.a1.includes(h))), 'F12: the merge moves the folded record\'s .dead-* archives (byte-identical) into the survivor before its dir goes', r12);
   const mF12 = mutantStore({ acc: [["      const moved = require('./account-material.js').moveCredentialArchives(fromDir, intoDir);\n", '      const moved = null;\n']] });
   const r12m = mF12 ? await f12(mF12) : null;
   ok(!!r12m && r12m.a1.length === 0, 'RED control (F12): the r1 merge destroys them with the dir — the leg above catches it', r12m);
@@ -1110,8 +1110,8 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     return { hit, keySame: fs.readFileSync(kf, 'utf8') === k0, fileSame: fs.readFileSync(credsOf(am, m), 'utf8') === f0, decrypts: am.getOat(m) === OAT, during, after };
   };
   const rk = await keyRegen();
-  ok(rk.hit >= 1 && rk.keySame && rk.fileSame && rk.decrypts && rk.after.every((v) => v === 'written'), 'O1 keyRegen (the verifier\'s probe): one EIO reading .accounts-key during a sweep — the key byte-identical, the member\'s file untouched, every token still decrypts, the next sweeps find it written', rk);
-  ok(rk.during && rk.during.fact.reason === 'key-unreadable' && rk.during.fact.code === 'EIO' && rk.during.door.state === 'refused' && rk.during.door.reason === 'key-unreadable' && rk.during.door.code === 'EIO', 'O1: that sweep\'s row names the KEY FILE (refused · key-unreadable · EIO) — never "mint it again"', rk.during);
+  ok(rk.hit >= 1 && gateOf(rk.keySame) && gateOf(rk.fileSame) && gateOf(rk.decrypts) && verdictOf(rk.after.every((v) => v === 'written')), 'O1 keyRegen (the verifier\'s probe): one EIO reading .accounts-key during a sweep — the key byte-identical, the member\'s file untouched, every token still decrypts, the next sweeps find it written', rk);
+  ok(gateOf(rk.during) && rk.during.fact.reason === 'key-unreadable' && rk.during.fact.code === 'EIO' && rk.during.door.state === 'refused' && rk.during.door.reason === 'key-unreadable' && rk.during.door.code === 'EIO', 'O1: that sweep\'s row names the KEY FILE (refused · key-unreadable · EIO) — never "mint it again"', rk.during);
   const mKey = mutantStore({ acc: [["    const r = lawfulKey(this._keyFile, { hasCiphertext: () => this._holdsCiphertext() });\n    if (!r.ok) throw keyRefusal(r.code === 'key-malformed' ? 'key-unreadable:malformed' : r.code, this._keyFile);\n    return r.key;\n", "    try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); } catch { const k = crypto.randomBytes(32); fs.writeFileSync(this._keyFile, k.toString('hex'), { mode: 0o600 }); return k; }\n"]] }); // lane key-file-law-stores: _key() routed through lawfulKey — the old bare catch as the mutant
   const rkm = mKey ? await keyRegen(mKey) : null;
   ok(!!rkm && rkm.hit >= 1 && !rkm.keySame && !rkm.decrypts, 'RED control (O1): the old mint-on-any-error _key() — that one EIO REPLACES the key and every stored token is undecryptable from then on (the leg above catches it)', rkm && { keySame: rkm.keySame, decrypts: rkm.decrypts });
@@ -1125,10 +1125,10 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     const sweeps = []; for (let i = 0; i < 3; i++) sweeps.push((await am2.syncOatFiles())[m]);
     const codes = { setOat: refusal(() => am2.setOat(m, OAT2)), add: refusal(() => am2.add({ name: 'API2', key: APIKEY2 })), spawn: refusal(() => am2.resolveForSpawn(api, 'claude')) };
     const door = am2.list().accounts.find((a) => a.id === m).oatFile;
-    ok(!fs.existsSync(kf) && sweeps.every((v) => v === 'none') && fs.readFileSync(credsOf(am2, m), 'utf8') === f0 && fs.readFileSync(path.join(am2.dataDir, 'accounts.json'), 'utf8') === acc0, 'O1 key-missing: ciphertext in the store and no key file — 3 sweeps mint NO key, the member\'s file and accounts.json byte-identical (F4\'s rung: nothing moves)', { keyFile: fs.existsSync(kf), sweeps });
-    ok(codes.setOat === 'key-missing' && codes.add === 'key-missing' && codes.spawn === 'key-missing' && door && door.reason === 'key-missing', 'O1: every road refuses by NAME — setOat, a new API key, an API-key spawn (key-missing) — and the row says it', { codes, door });
+    ok(!fs.existsSync(kf) && gateOf(sweeps.every((v) => v === 'none')) && fs.readFileSync(credsOf(am2, m), 'utf8') === f0 && fs.readFileSync(path.join(am2.dataDir, 'accounts.json'), 'utf8') === acc0, 'O1 key-missing: ciphertext in the store and no key file — 3 sweeps mint NO key, the member\'s file and accounts.json byte-identical (F4\'s rung: nothing moves)', { keyFile: fs.existsSync(kf), sweeps });
+    ok(codes.setOat === 'key-missing' && codes.add === 'key-missing' && codes.spawn === 'key-missing' && gateOf(door) && door.reason === 'key-missing', 'O1: every road refuses by NAME — setOat, a new API key, an API-key spawn (key-missing) — and the row says it', { codes, door });
     let words = ''; try { am2.add({ name: 'API3', key: APIKEY2 }); } catch (e) { words = e.message; }
-    ok(/restore it from a backup/.test(words) && !/sk-ant/.test(words), 'O1: the refusal\'s words say restore the key file from a backup (and carry no secret)', words);
+    ok(gateOf(/restore it from a backup/.test(words)) && !/sk-ant/.test(words), 'O1: the refusal\'s words say restore the key file from a backup (and carry no secret)', words);
   }
   { // accounts.json holding ciphertext this process could NOT load + no key file ⇒ still key-missing (the disk is asked)
     const am = mk8(); fs.mkdirSync(am.dataDir, { recursive: true });
@@ -1141,7 +1141,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     const id = am.add({ name: 'First', key: APIKEY }).id;
     const k1 = fs.readFileSync(kf, 'utf8'), mode = fs.statSync(kf).mode & 0o777;
     const am2 = new AccountManager({ dataDir: am.dataDir });
-    ok(!existed && /^[0-9a-f]{64}$/.test(k1) && mode === 0o600 && am2.getKey(id) === APIKEY && fs.readFileSync(kf, 'utf8') === k1, 'O1 fresh: no key file and no ciphertext — the first secret mints ONE key (0600, 64 hex, through secret-box\'s link(2)), a second store reads the same one', { existed, mode: mode.toString(8) });
+    ok(!existed && gateOf(/^[0-9a-f]{64}$/.test(k1)) && mode === 0o600 && am2.getKey(id) === APIKEY && fs.readFileSync(kf, 'utf8') === k1, 'O1 fresh: no key file and no ciphertext — the first secret mints ONE key (0600, 64 hex, through secret-box\'s link(2)), a second store reads the same one', { existed, mode: mode.toString(8) });
   }
   { // every other failure is key-unreadable:<code> FOR THAT CALL: nothing written, the next call reads again
     const faults = {
@@ -1162,7 +1162,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
       rows[name] = { ...r, keyNotReplaced: (() => { try { return faulted == null || fs.readFileSync(kf, 'utf8') !== faulted || name === 'truncated' || name === 'emptied'; } catch { return false; } })(), accSame: fs.readFileSync(path.join(am.dataDir, 'accounts.json'), 'utf8') === acc0, decryptsAfter: am.getOat(m) === OAT };
     }
     const want = { EACCES: 'EACCES', EIO: 'EIO', EMFILE: 'EMFILE', truncated: 'malformed', emptied: 'malformed' };
-    ok(Object.entries(rows).every(([n, x]) => x.sweep === 'none' && x.fact.reason === 'key-unreadable' && x.fact.code === want[n] && x.setOat === 'key-unreadable:' + want[n] && x.accSame && x.decryptsAfter), 'O1 errnos: EACCES (a real chmod 000) / EIO / EMFILE / a truncated / an emptied key file — each a named key-unreadable:<code> for that call (the sweep moves nothing, setOat refuses, accounts.json untouched) and the secrets decrypt again once the fault is gone', rows);
+    ok(verdictOf(Object.entries(rows).every(([n, x]) => x.sweep === 'none' && x.fact.reason === 'key-unreadable' && x.fact.code === want[n] && x.setOat === 'key-unreadable:' + want[n] && x.accSame && x.decryptsAfter)), 'O1 errnos: EACCES (a real chmod 000) / EIO / EMFILE / a truncated / an emptied key file — each a named key-unreadable:<code> for that call (the sweep moves nothing, setOat refuses, accounts.json untouched) and the secrets decrypt again once the fault is gone', rows);
   }
 
   // ── F2 RENAME-ASIDE: the swap and the remove move the judged file aside FIRST, check it, then act ──
@@ -1185,12 +1185,12 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
   };
   const T2 = {};
   for (const k of ['remint:before-aside', 'remint:before-link', 'clear:before-aside', 'clear:before-unlink', 'strip:before-aside', 'strip:before-link']) T2[k] = await toc(undefined, k);
-  ok(Object.values(T2).every((x) => x.landed && x.fresh !== 'LOST'), 'F2 toctou (the verifier\'s probe, ported to the new acts): a CLI login landing at every point of a re-mint swap, a clearOat and a strip — before the move aside, before the link into the empty name, before the aside\'s unlink — is never LOST', T2);
-  ok(['remint:before-aside', 'clear:before-aside', 'strip:before-aside'].every((k) => T2[k].fresh === 'in place' && T2[k].fact.code === 'changed') && ['remint:before-link', 'strip:before-link'].every((k) => T2[k].fresh === 'in place' && T2[k].fact.code === 'changed'), 'F2: a login that is what moved goes straight back (refused · changed); one that took the empty name stays where it landed (refused · changed)', T2);
+  ok(verdictOf(Object.values(T2).every((x) => x.landed && x.fresh !== 'LOST')), 'F2 toctou (the verifier\'s probe, ported to the new acts): a CLI login landing at every point of a re-mint swap, a clearOat and a strip — before the move aside, before the link into the empty name, before the aside\'s unlink — is never LOST', T2);
+  ok(gateOf(['remint:before-aside', 'clear:before-aside', 'strip:before-aside'].every((k) => T2[k].fresh === 'in place' && T2[k].fact.code === 'changed')) && verdictOf(['remint:before-link', 'strip:before-link'].every((k) => T2[k].fresh === 'in place' && T2[k].fact.code === 'changed')), 'F2: a login that is what moved goes straight back (refused · changed); one that took the empty name stays where it landed (refused · changed)', T2);
   const mF2r = mutantStore({ mat: [["    else if (expect !== undefined) {\n      const aside = await moveAside(dest, expect);\n      try { await linkInto(tmp, dest); } catch (e) {   // a login that took the empty name stays; ours goes back or rests archived\n        // r2928: the put-back's three replies — the aside is the file the verdict read (moveAside proved it): when it cannot go back\n        // it becomes what `asideAs` says (OUR long-lived token never rests in an archive), and 'kept' is said true\n        const pb = await putBack(aside, dest);\n        if (pb !== 'back') e.asideSettled = await settleAside(aside, asideAs);\n        if (pb === 'kept') e.restsArchived = true;\n        throw e;\n      }\n      try { await fsp.unlink(aside); } catch { }\n    } else await fsp.rename(tmp, dest);\n", "    else { if (expect !== undefined) await stillSame(dest, expect); await fsp.rename(tmp, dest); }\n"], ['  await fsp.unlink(await moveAside(p, seen.stat)); // F2: rename aside → check → unlink (never the name itself)\n', '  await stillSame(p, seen.stat);\n  await fsp.unlink(p);\n']] });
   const T2m = {};
   if (mF2r) for (const k of ['remint:old-rename', 'clear:old-unlink', 'strip:old-rename']) T2m[k] = await toc(mF2r, k);
-  ok(!!mF2r && Object.values(T2m).every((x) => x.landed && x.fresh === 'LOST'), 'RED control (F2): c9fea70ad\'s check-then-rename / check-then-unlink — a login landing after the stat guard is LOST in all three acts (the legs above catch it)', T2m);
+  ok(!!mF2r && verdictOf(Object.values(T2m).every((x) => x.landed && x.fresh === 'LOST')), 'RED control (F2): c9fea70ad\'s check-then-rename / check-then-unlink — a login landing after the stat guard is LOST in all three acts (the legs above catch it)', T2m);
   // ── r2697 THE CONTENT GUARD (lane bl-loop-b): a refresh of the SAME SIZE inside ONE FROZEN tick (both writes' times pinned to one whole
   // second) keeps the inode (in place), the time and the size equal; the guard compares the BYTES (a sum kept in memory only): ours is
   // not written, the fresher file stands, said ONCE in the journal by the member's name; by rename too; the sum never in any text ──
@@ -1242,57 +1242,57 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     };
     const TK = {};
     for (const k of ['remint', 'clear', 'strip']) TK[k] = await tick(undefined, k, 'in-place');
-    ok(Object.values(TK).every((x) => x.landed === 1 && x.sameSize && x.freshStands && x.fact.code === 'changed' && x.said === 1 && !x.sumInText),
+    ok(verdictOf(Object.values(TK).every((x) => x.landed === 1 && x.sameSize && x.freshStands && x.fact.code === 'changed' && x.said === 1 && !x.sumInText)),
       'r2697: a SAME-SIZE refresh written IN PLACE inside one frozen tick (inode, time and size equal) right before the move aside — a re-mint, a clear, a strip: the bytes differ, ours is NOT written, the fresher file stands, said ONCE by the member\'s name; no content sum (nor its first 16 characters) in any console line, the reply, the facts or accounts.json', TK);
     const CMP = "  if (!(await sameBytes(aside, expect))) throw refused(await putBack(aside, p));\n";
     const mTK = mutantStore({ mat: [[CMP, '']] });
     const TKX = {};
     if (mTK) for (const k of ['remint', 'clear', 'strip']) TKX[k] = await tick(mTK, k, 'in-place');
-    ok(!!mTK && Object.values(TKX).length === 3 && Object.values(TKX).every((x) => x.landed === 1 && !x.freshStands), 'RED control (the content compare cut — the stat guard alone): the same-size in-place refresh is written over, taken out or stripped, in all three acts (red)', TKX);
+    ok(!!mTK && Object.values(TKX).length === 3 && verdictOf(Object.values(TKX).every((x) => x.landed === 1 && !x.freshStands)), 'RED control (the content compare cut — the stat guard alone): the same-size in-place refresh is written over, taken out or stripped, in all three acts (red)', TKX);
     const TR = await tick(undefined, 'remint', 'by-rename');
-    ok(TR.landed === 1 && TR.freshStands && TR.fact.code === 'changed' && !TR.sumInText, '…and a same-size refresh BY RENAME inside the same frozen tick: refused too (another inode, other bytes), the fresher file stands', TR);
+    ok(TR.landed === 1 && gateOf(TR.freshStands) && TR.fact.code === 'changed' && !TR.sumInText, '…and a same-size refresh BY RENAME inside the same frozen tick: refused too (another inode, other bytes), the fresher file stands', TR);
     const mTR = mutantStore({ mat: [[CMP, ''], ['st.ino !== expect.ino || st.mtimeMs', 'st.mtimeMs']] });
     const TRX = mTR ? await tick(mTR, 'remint', 'by-rename') : null;
     ok(!!TRX && TRX.landed === 1 && !TRX.freshStands, 'RED control (the inode AND the content cut): the renamed refresh is written over (red)', TRX);
     // THE ARCHIVE'S ROAD: a dead login refreshed in place at the same size right before it is archived — it goes back, ours is not written
     const TA = await tick(undefined, 'remint', 'in-place', { at: 'archive' });
-    ok(TA.landed === 1 && TA.sameSize && TA.freshStands && TA.arch === 0 && TA.fact.code === 'changed' && TA.said === 1 && !TA.sumInText, 'r2697 the archive\'s road: a dead login refreshed IN PLACE at the same size inside the frozen tick right before its archive rename — the bytes differ, it goes back to its name (nothing left archived), ours is NOT written, said once', TA);
+    ok(TA.landed === 1 && gateOf(TA.sameSize) && gateOf(TA.freshStands) && TA.arch === 0 && TA.fact.code === 'changed' && TA.said === 1 && !TA.sumInText, 'r2697 the archive\'s road: a dead login refreshed IN PLACE at the same size inside the frozen tick right before its archive rename — the bytes differ, it goes back to its name (nothing left archived), ours is NOT written, said once', TA);
     const mTA = mutantStore({ mat: [['st.size !== expect.size || !(await sameBytes(dst, expect))) {', 'st.size !== expect.size) {']] });
     const TAX = mTA ? await tick(mTA, 'remint', 'in-place', { at: 'archive' }) : null;
     ok(!!TAX && TAX.landed === 1 && !TAX.freshStands, 'RED control (the archive\'s content compare cut): the refreshed login is archived and ours written over its name (red)', TAX);
     // THE REMOVER'S READ AGAIN: the refresh lands before the remover reads the file again — the bytes then and now differ: refused
     const TQ = await tick(undefined, 'clear', 'in-place', { at: 'reread' });
-    ok(TQ.landed === 1 && TQ.freshStands && TQ.fact.code === 'changed' && TQ.said === 1 && !TQ.sumInText, 'r2697 the remover\'s own read again: a same-size refresh landing right before it (inode, time and size equal) — the bytes read then and now differ, the file is NOT taken out', TQ);
+    ok(TQ.landed === 1 && gateOf(TQ.freshStands) && TQ.fact.code === 'changed' && TQ.said === 1 && !TQ.sumInText, 'r2697 the remover\'s own read again: a same-size refresh landing right before it (inode, time and size equal) — the bytes read then and now differ, the file is NOT taken out', TQ);
     const mTQ = mutantStore({ mat: [['  if (expect && (!READ_SUMS.get(expect) || READ_SUMS.get(expect) !== READ_SUMS.get(seen.stat))) throw changed();', '']] });
     const TQX = mTQ ? await tick(mTQ, 'clear', 'in-place', { at: 'reread' }) : null;
     ok(!!TQX && TQX.landed === 1 && !TQX.freshStands, 'RED control (the remover\'s content compare cut): the move aside checks against the read AGAIN, so the refreshed file is taken out (red)', TQX);
     // SAID ONCE: two refused acts back to back on one row — one journal line
     const TW = await tick(undefined, 'remint', 'in-place', { twice: true });
-    ok(TW.landed === 2 && TW.freshStands && TW.fact.code === 'changed' && TW.said === 1 && !TW.sumInText, 'r2697 said ONCE an episode: two refused acts back to back (a refresh before each move aside) — one journal line by the member\'s name', TW);
+    ok(TW.landed === 2 && gateOf(TW.freshStands) && TW.fact.code === 'changed' && TW.said === 1 && !TW.sumInText, 'r2697 said ONCE an episode: two refused acts back to back (a refresh before each move aside) — one journal line by the member\'s name', TW);
     const SAY = "} else if (out.code === 'changed' && this._oatFileFacts.get(id)?.code !== 'changed') console.log(";
     const mSAY1 = mutantStore({ acc: [[SAY, "} else if (out.code === 'changed') console.log("]] });
     const TWX = mSAY1 ? await tick(mSAY1, 'remint', 'in-place', { twice: true }) : null;
     ok(!!TWX && TWX.landed === 2 && TWX.said === 2, 'RED control (the once-an-episode clause cut): the second refusal says it again (red)', TWX);
     const mSAY = mutantStore({ acc: [[SAY, "} else if (false) console.log("]] });
     const TSX = mSAY ? await tick(mSAY, 'remint', 'in-place') : null;
-    ok(!!TSX && TSX.freshStands && TSX.said === 0, 'RED control (the journal line cut): the refusal says nothing by the member\'s name (red)', TSX);
+    ok(!!TSX && gateOf(TSX.freshStands) && TSX.said === 0, 'RED control (the journal line cut): the refusal says nothing by the member\'s name (red)', TSX);
     const mSUM = mutantStore({ mat: [[CMP, "  if (!(await sameBytes(aside, expect))) { console.warn('[debug] ' + READ_SUMS.get(expect).slice(0, 16)); throw refused(await putBack(aside, p)); }   // MUTANT: a sum prefix in a warning\n"]] });
     const TUX = mSUM ? await tick(mSUM, 'remint', 'in-place') : null;
-    ok(!!TUX && TUX.sumInText, 'RED control (16 characters of the sum planted in a console WARNING): the search of every console door finds it (red)', TUX);
+    ok(!!TUX && verdictOf(TUX.sumInText), 'RED control (16 characters of the sum planted in a console WARNING): the search of every console door finds it (red)', TUX);
     // NO HARD LINKS (its fresh read's must): the put-back after a refusal is an EXCLUSIVE copy into the empty name — the fresher file at its name
     const TL = await tick(undefined, 'remint', 'in-place', { linkless: true });
-    ok(TL.landed === 1 && TL.freshStands && TL.arch === 0 && TL.fact.code === 'changed' && TL.said === 1, 'r2697 a filesystem WITHOUT hard links (link EPERM): the refused act\'s put-back copies the fresher file back into its EMPTY name (never a replace) — it stands at its name, nothing left at a .dead name', TL);
+    ok(TL.landed === 1 && gateOf(TL.freshStands) && TL.arch === 0 && TL.fact.code === 'changed' && TL.said === 1, 'r2697 a filesystem WITHOUT hard links (link EPERM): the refused act\'s put-back copies the fresher file back into its EMPTY name (never a replace) — it stands at its name, nothing left at a .dead name', TL);
     const mTL = mutantStore({ mat: [["    else if (LINKLESS.includes(e && e.code)) { try { back = await copyInto(aside, p); taken = !back; } catch { } }\n", '']] });
     const TLX = mTL ? await tick(mTL, 'remint', 'in-place', { linkless: true }) : null;
     ok(!!TLX && TLX.landed === 1 && !TLX.freshStands && TLX.arch === 1, 'RED control (the copy back cut — 63901f549\'s put-back): the fresher sign-in rests at a .dead name and its own name is EMPTY (red: the next tick writes ours)', TLX);
     const TLA = await tick(undefined, 'remint', 'in-place', { at: 'archive', linkless: true });
-    ok(TLA.landed === 1 && TLA.freshStands && TLA.arch === 0 && TLA.fact.code === 'changed', '…the archive\'s put-back too, with no hard links: the refreshed login is copied back to its name', TLA);
+    ok(TLA.landed === 1 && gateOf(TLA.freshStands) && TLA.arch === 0 && TLA.fact.code === 'changed', '…the archive\'s put-back too, with no hard links: the refreshed login is copied back to its name', TLA);
     // r2824 (4): the copy back takes the SOURCE's mode, then 0600 — a vendor file wider than 0600 comes back 0600
     const TM = await tick(undefined, 'remint', 'in-place', { linkless: true, widen: true });
-    ok(TM.landed === 1 && TM.freshStands && TM.mode === 0o600, 'r2824: no hard links, the fresher file 0644 — the exclusive copy back is set to 0600 (its second open read-only, for the mode and the sync)', TM);
+    ok(TM.landed === 1 && gateOf(TM.freshStands) && TM.mode === 0o600, 'r2824: no hard links, the fresher file 0644 — the exclusive copy back is set to 0600 (its second open read-only, for the mode and the sync)', TM);
     const mTM = mutantStore({ mat: [['  try { await fh.chmod(0o600); await fh.sync(); } finally { await fh.close(); }', '  try { await fh.sync(); } finally { await fh.close(); }']] });
     const TMX = mTM ? await tick(mTM, 'remint', 'in-place', { linkless: true, widen: true }) : null;
-    ok(!!TMX && TMX.freshStands && TMX.mode === 0o644, 'RED control (the copy\'s mode line cut) ⇒ the copy back keeps the source\'s 0644 (red)', TMX);
+    ok(!!TMX && gateOf(TMX.freshStands) && TMX.mode === 0o644, 'RED control (the copy\'s mode line cut) ⇒ the copy back keeps the source\'s 0644 (red)', TMX);
     // r2824 (1): A FAILED PUT-BACK IS SAID TRUE — link(2) failing with a code outside the no-hard-link list (EIO): the fresher file rests
     // at its archive name and its own name is EMPTY; said so by the member's name, never «what is there stands»
     const TF = await tick(undefined, 'remint', 'in-place', { linkErr: 'EIO' });
@@ -1316,14 +1316,14 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     };
     for (const kind of ['strip', 'remint']) {
       const L = await lawScene(undefined, kind);
-      ok(L.landed && L.fresh === 'in place' && !L.oursArchived && L.keysKept, `r2928 THE LAW (the ${kind} road): a vendor sign-in took the empty name before ours — it stays; the aside (ours as read) keeps the CLI's keys alone, our token rests in no archive`, L);
+      ok(gateOf(L.landed) && L.fresh === 'in place' && !L.oursArchived && verdictOf(L.keysKept), `r2928 THE LAW (the ${kind} road): a vendor sign-in took the empty name before ours — it stays; the aside (ours as read) keeps the CLI's keys alone, our token rests in no archive`, L);
     }
     const mLS = mutantStore({ mat: [['{ expect: seen.stat, asideAs: JSON.stringify(keep) }', '{ expect: seen.stat }']] });
     const LSX = mLS ? await lawScene(mLS, 'strip') : null;
-    ok(!!LSX && LSX.landed && LSX.oursArchived, 'RED control (the strip\'s verdict not handed to the writer: the aside kept whole) ⇒ our token rests in an archive (red)', LSX);
+    ok(!!LSX && gateOf(LSX.landed) && verdictOf(LSX.oursArchived), 'RED control (the strip\'s verdict not handed to the writer: the aside kept whole) ⇒ our token rests in an archive (red)', LSX);
     const mLR = mutantStore({ acc: [['...(!v.archive && ours ? { asideAs } : {})', '...({})']] });
     const LRX = mLR ? await lawScene(mLR, 'remint') : null;
-    ok(!!LRX && LRX.landed && LRX.oursArchived, 'RED control (the re-mint\'s verdict not handed to the writer) ⇒ our earlier token rests in an archive (red)', LRX);
+    ok(!!LRX && gateOf(LRX.landed) && verdictOf(LRX.oursArchived), 'RED control (the re-mint\'s verdict not handed to the writer) ⇒ our earlier token rests in an archive (red)', LRX);
     // r3042 (1): ours could not be written (link EIO) and the file read could not go back — it held OUR token alone (no CLI keys), so
     // its aside is REMOVED: the journal says that, never «the CLI's keys rest archived»
     const TA1 = await tick(undefined, 'remint', 'in-place', { at: 'none', linkErr: 'EIO' });
@@ -1334,7 +1334,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     // r2824 (4): THE STAT AFTER THE BYTES — a same-size refresh placed right before the read's stat (after its bytes) is refused: the
     // pair is a newer stat with the bytes read; the old order (the stat first) takes the refresh as read and writes over it
     const TS = await tick(undefined, 'remint', 'in-place', { at: 'stat' });
-    ok(TS.landed === 1 && TS.freshStands && TS.fact.code === 'changed' && TS.said === 1, 'r2824: a refresh placed between the read\'s bytes and its stat — refused, the fresher file stands', TS);
+    ok(TS.landed === 1 && gateOf(TS.freshStands) && TS.fact.code === 'changed' && TS.said === 1, 'r2824: a refresh placed between the read\'s bytes and its stat — refused, the fresher file stands', TS);
     const mTS = mutantStore({ mat: [['    const buf = await fh.readFile();\n    const st0 = await fh.stat();', '    const st0 = await fh.stat();\n    const buf = await fh.readFile();']] });
     const TSO = mTS ? await tick(mTS, 'remint', 'in-place', { at: 'stat' }) : null;
     ok(!!TSO && TSO.landed === 1 && !TSO.freshStands, 'RED control (the stat taken BEFORE the bytes, 63901f549\'s order) ⇒ the refresh is taken as the read and written over (red)', TSO);
@@ -1353,12 +1353,12 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
         mode: (() => { try { return fs.statSync(p).mode & 0o777; } catch { return null; } })(), litter: fs.readdirSync(am.subDir(m)).filter((n) => /\.tmp$/.test(n)).length };
     };
     const EN0 = await emptyName(undefined, { landing: false });
-    ok(!EN0.landed && EN0.ours && EN0.fact.verdict !== 'write-failed' && EN0.mode === 0o600 && EN0.litter === 0, 'r2697 no hard links, nothing landing: ours goes into the empty name by an exclusive copy (0600, no temp left)', EN0);
+    ok(!EN0.landed && gateOf(EN0.ours) && EN0.fact.verdict !== 'write-failed' && EN0.mode === 0o600 && EN0.litter === 0, 'r2697 no hard links, nothing landing: ours goes into the empty name by an exclusive copy (0600, no temp left)', EN0);
     const EN = await emptyName();
-    ok(EN.landed && EN.fresh === 'in place' && EN.fact.code === 'changed', 'r2697 no hard links: a sign-in that took the EMPTY name right before ours goes in stays in place (the exclusive copy refuses: changed)', EN);
+    ok(gateOf(EN.landed) && EN.fresh === 'in place' && EN.fact.code === 'changed', 'r2697 no hard links: a sign-in that took the EMPTY name right before ours goes in stays in place (the exclusive copy refuses: changed)', EN);
     const mEN = mutantStore({ mat: [['    else taken = !(await copyInto(tmp, dest));\n', '    else { await stillSame(dest, null); await fsp.rename(tmp, dest); }\n']] });
     const ENX = mEN ? await emptyName(mEN) : null;
-    ok(!!ENX && ENX.landed && ENX.fresh === 'LOST', 'RED control (the check-then-rename fallback before r2697): the sign-in that took the empty name between the check and the rename is LOST (red)', ENX);
+    ok(!!ENX && gateOf(ENX.landed) && ENX.fresh === 'LOST', 'RED control (the check-then-rename fallback before r2697): the sign-in that took the empty name between the check and the rename is LOST (red)', ENX);
     // AN EXPECT WITH NO SUM (a copied stat) is no proof: refused, never a silent fall back to the stat alone
     const noSum = async (MAT, n) => {
       const d = path.join(tmp, 'nosum-' + n); fs.mkdirSync(d, { recursive: true, mode: 0o700 });
@@ -1373,7 +1373,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     };
     const MATn = require(path.join(REPO, 'src/account-material.js'));
     const NS = await noSum(MATn, 'g');
-    ok(NS.w === 'changed' && NS.kept && NS.r === 'changed' && NS.stays, 'r2697: an expect that carries no content sum (a copied stat, every field equal) is refused by the swap and by the remover — never a silent fall back to the stat alone', NS);
+    ok(NS.w === 'changed' && gateOf(NS.kept) && NS.r === 'changed' && verdictOf(NS.stays), 'r2697: an expect that carries no content sum (a copied stat, every field equal) is refused by the swap and by the remover — never a silent fall back to the stat alone', NS);
     const NSW = await noSum(compileWith('src/account-material.js', '  if (!want) return false;', '  if (!want) return true;'), 'w');
     ok(NSW.w === 'wrote', 'RED control (no sum read as «the same»): the swap writes over the file (red)', NSW);
     const NSR = await noSum(compileWith('src/account-material.js', '  if (expect && (!READ_SUMS.get(expect) || READ_SUMS.get(expect) !== READ_SUMS.get(seen.stat))) throw changed();', '  if (expect && READ_SUMS.get(expect) && READ_SUMS.get(expect) !== READ_SUMS.get(seen.stat)) throw changed();'), 'r');
@@ -1405,19 +1405,19 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     return { login: f?.claudeAiOauth?.refreshToken === lv.claudeAiOauth.refreshToken, fileMcp: JSON.stringify(f?.mcpOAuth) === JSON.stringify(foldedMcp || mcp), design: f?.designOauth?.t === 'd', restArchived: arch.some((a) => a && JSON.stringify(a.mcpOAuth) === JSON.stringify(mcp) && !a.claudeAiOauth && !a.vibespaceOat), tokenFiles: tokenFiles(path.dirname(am.dataDir), OAT), fact: am._oatFileFacts.get(into)?.verdict };
   };
   const m3 = await mergeKeys(), m3c = await mergeKeys(undefined, { foldedMcp: { 'srv|2': { accessToken: 'other' } } });
-  ok(m3.login && m3.fileMcp && m3.design && m3.restArchived, 'F3 merge.cliKeys (the verifier\'s probe): a live login folded onto a member holding OUR file — the new file is the login over the CLI\'s other keys (mcpOAuth + designOauth kept), and those keys were archived first', m3);
-  ok(m3c.login && m3c.fileMcp && m3c.restArchived, 'F3: …a folded login that brings its OWN mcpOAuth wins the key, and the survivor\'s is in the archive — never lost', m3c);
+  ok(gateOf(m3.login) && gateOf(m3.fileMcp) && gateOf(m3.design) && verdictOf(m3.restArchived), 'F3 merge.cliKeys (the verifier\'s probe): a live login folded onto a member holding OUR file — the new file is the login over the CLI\'s other keys (mcpOAuth + designOauth kept), and those keys were archived first', m3);
+  ok(gateOf(m3c.login) && gateOf(m3c.fileMcp) && verdictOf(m3c.restArchived), 'F3: …a folded login that brings its OWN mcpOAuth wins the key, and the survivor\'s is in the archive — never lost', m3c);
   ok(m3.tokenFiles.length === 0 && m3c.tokenFiles.length === 0, 'F3: our token rests in no file afterwards — not the new file, not the archive (the survivor now has a live login; the store keeps the token)', { a: m3.tokenFiles, b: m3c.tokenFiles });
   const mF3 = mutantStore({ mat: [['  const keeps = intoFile != null;', '  const keeps = false;']] }); // the merge's verdict (lane creds-merge-keep-rest): no survivor file kept
   const m3m = mF3 ? await mergeKeys(mF3) : null;
-  ok(!!m3m && m3m.login && !m3m.fileMcp && !m3m.restArchived, 'RED control (F3): c9fea70ad\'s whole-file copy — mcpOAuth in no file and no archive (the legs above catch it)', m3m);
+  ok(!!m3m && gateOf(m3m.login) && !m3m.fileMcp && !m3m.restArchived, 'RED control (F3): c9fea70ad\'s whole-file copy — mcpOAuth in no file and no archive (the legs above catch it)', m3m);
 
   // ── the two lows: a top-level "__proto__" key kept; a symlinked credential FILE named on its row ──
   {
     const txt = '{"__proto__":{"polluted":true},"mcpOAuth":{"a":1},"claudeAiOauth":{"accessToken":"x"},"vibespaceOat":{"v":1}}';
     const r = LE.credsRestOf(JSON.parse(txt));
     const merged = JSON.stringify(LE.oatFileMerge(JSON.parse(txt), { claudeAiOauth: { accessToken: 'y' }, vibespaceOat: { v: 1, account: 'a' } }));
-    ok(Object.prototype.hasOwnProperty.call(r, '__proto__') && Object.getPrototypeOf(r) === Object.prototype && JSON.stringify(r) === '{"__proto__":{"polluted":true},"mcpOAuth":{"a":1}}' && merged.includes('"__proto__":{"polluted":true}') && ({}).polluted === undefined, 'low ①: a top-level "__proto__" key (JSON.parse makes it an OWN key) is kept by credsRestOf and the merge — an own data property, never the prototype', { rest: JSON.stringify(r), merged: merged.slice(0, 120) });
+    ok(gateOf(Object.prototype.hasOwnProperty.call(r, '__proto__')) && Object.getPrototypeOf(r) === Object.prototype && JSON.stringify(r) === '{"__proto__":{"polluted":true},"mcpOAuth":{"a":1}}' && gateOf(merged.includes('"__proto__":{"polluted":true}')) && ({}).polluted === undefined, 'low ①: a top-level "__proto__" key (JSON.parse makes it an OWN key) is kept by credsRestOf and the merge — an own data property, never the prototype', { rest: JSON.stringify(r), merged: merged.slice(0, 120) });
   }
   {
     const am = mk8(); await nv(am, '2.1.296');
@@ -1427,25 +1427,25 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     fs.symlinkSync(tgt, credsOf(am, m));
     const r = await so(am, m, OAT); const again = (await am.syncOatFiles())[m];
     const door = am.list().accounts.find((a) => a.id === m).oatFile;
-    ok(r.oatFile === 'write-failed' && again === 'write-failed' && door && door.code === 'symlink' && sha(tgt) === b && fs.lstatSync(credsOf(am, m)).isSymbolicLink() && !allArch(am, m).length && fs.readdirSync(real).length === 1, 'low ②: a .credentials.json that is itself a symlink is never archived or written through, and its row says so (write-failed · symlink), sweep after sweep', { r: r.oatFile, again, door });
+    ok(r.oatFile === 'write-failed' && again === 'write-failed' && gateOf(door) && door.code === 'symlink' && sha(tgt) === b && gateOf(fs.lstatSync(credsOf(am, m)).isSymbolicLink()) && !allArch(am, m).length && fs.readdirSync(real).length === 1, 'low ②: a .credentials.json that is itself a symlink is never archived or written through, and its row says so (write-failed · symlink), sweep after sweep', { r: r.oatFile, again, door });
     const d = am.createSubscription({ name: 'Dangling' }).id; const gone = path.join(real, 'never-there.json');
     put(am, d, login(NOW, { dead: true })); await so(am, d, OAT); // the shape is recorded (ours written) …
     fs.unlinkSync(credsOf(am, d)); fs.symlinkSync(gone, credsOf(am, d)); // … then the name becomes a dangling symlink
     const rd = { oatFile: (await am.syncOatFiles())[d] }; const doorD = am.list().accounts.find((a) => a.id === d).oatFile;
-    ok(rd.oatFile === 'write-failed' && doorD && doorD.code === 'symlink' && !fs.existsSync(gone) && fs.lstatSync(credsOf(am, d)).isSymbolicLink(), 'low ②: …a DANGLING one too (the link-in\'s EEXIST is asked what is there): write-failed · symlink, no target created', { rd: rd.oatFile, door: doorD });
+    ok(rd.oatFile === 'write-failed' && gateOf(doorD) && doorD.code === 'symlink' && !fs.existsSync(gone) && verdictOf(fs.lstatSync(credsOf(am, d)).isSymbolicLink()), 'low ②: …a DANGLING one too (the link-in\'s EEXIST is asked what is there): write-failed · symlink, no target created', { rd: rd.oatFile, door: doorD });
   }
   if (!MA5) ok(false, 'the real manage-agents chip module (§5) for the words');
   else {
     const row = (reason, code) => ({ id: 'sub-k', name: 'K', loginState: { state: 'oat-only', msLeft: 200 * DAY, refreshExpiresAt: NOW - H, oatValidUntil: NOW + 200 * DAY }, oatFile: { state: 'refused', reason, ...(code ? { code } : {}) } });
     const c1 = MA5.loginExpiryChipHtml(row('key-missing')), c2 = MA5.loginExpiryChipHtml(row('key-unreadable', 'EIO')), c3 = MA5.loginExpiryChipHtml(row('write-failed', 'symlink'));
-    ok(/the key file is missing — restore it from a backup/.test(c1) && /the key file could not be read \(EIO\) — nothing was replaced/.test(c2) && /the credential file is a symlink — nothing written/.test(c3), 'the row\'s chip (the real manage-agents module) says each: the key file is missing — restore it from a backup / could not be read (EIO) — nothing was replaced / the credential file is a symlink', { c1: c1.slice(0, 200), c2: c2.slice(0, 200), c3: c3.slice(0, 200) });
+    ok(gateOf(/the key file is missing — restore it from a backup/.test(c1)) && gateOf(/the key file could not be read \(EIO\) — nothing was replaced/.test(c2)) && verdictOf(/the credential file is a symlink — nothing written/.test(c3)), 'the row\'s chip (the real manage-agents module) says each: the key file is missing — restore it from a backup / could not be read (EIO) — nothing was replaced / the credential file is a symlink', { c1: c1.slice(0, 200), c2: c2.slice(0, 200), c3: c3.slice(0, 200) });
     const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
     const K8 = ['the key file is missing — restore it from a backup', 'the key file could not be read ({code}) — nothing was replaced', 'the credential file is a symlink — nothing written'];
-    ok(zh[K8[0]] === '密钥文件丢失——恢复备份' && K8.every((k) => zh[k] && ja[k] && zh[k].includes('{code}') === k.includes('{code}') && ja[k].includes('{code}') === k.includes('{code}')), 'zh says the brief\'s words 「密钥文件丢失——恢复备份」; every new door word has zh + ja with its placeholder');
+    ok(zh[K8[0]] === '密钥文件丢失——恢复备份' && verdictOf(K8.every((k) => zh[k] && ja[k] && zh[k].includes('{code}') === k.includes('{code}') && ja[k].includes('{code}') === k.includes('{code}'))), 'zh says the brief\'s words 「密钥文件丢失——恢复备份」; every new door word has zh + ja with its placeholder');
   }
 }
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(`\ntest-oat-materialize: ${pass} passed, ${fail} failed · ${Date.now() - T0} ms`);
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

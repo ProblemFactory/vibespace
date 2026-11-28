@@ -35,7 +35,7 @@ const BROWSER = ['chromium', 'chromium-browser', 'google-chrome'].map(which).fin
 const skipWhy = !CHROME ? 'no chrome for the client' : !XPRA ? 'xpra not on PATH' : !XAUTH ? 'xauth not on PATH' : !DBUS ? 'dbus-run-session not on PATH' : !BROWSER ? 'no chromium-family browser on PATH (a snap is refused by name)' : null;
 if (skipWhy) { console.log(`SKIP: ${skipWhy}`); process.exit(0); }
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 250) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const PNG_DIR = process.env.VIBESPACE_RUNG_PNG_DIR || null;
@@ -118,7 +118,7 @@ try {
   const created = await until(() => msgs.find((m) => m.type === 'created' && m.reqId === 'e2a'), 20000, 100);
   const SID = created && created.sessionId;
   const token = created && await until(() => { for (const f of fs.readdirSync(path.join(wt, 'data', 'session-meta'))) { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'session-meta', f), 'utf8')); if (j.agentToken && j.webuiSessionId === SID) return j.agentToken; } catch { } } return null; }, 15000, 200);
-  check('a live agent session with its vsst_ token', !!SID && /^vsst_/.test(String(token)), created);
+  check('a live agent session with its vsst_ token', !!SID && verdictOf(/^vsst_/.test(String(token))), created);
   const cliEnv = { PATH: `${FAKE_BIN}:${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: fakeHome, VIBESPACE_API: `http://127.0.0.1:${PORT}`, VIBESPACE_SESSION_TOKEN: token, VIBESPACE_SESSION_CWD: fakeHome, LANG: 'C.UTF-8' };
   const cli = (bin, args) => new Promise((resolve) => execFile(process.execPath, [path.join(repo, 'data/bin', bin), ...args], { env: cliEnv, cwd: fakeHome, timeout: 90000 }, (e, out, err) => resolve({ code: e ? (e.code ?? 1) : 0, out: String(out), err: String(err) })));
 
@@ -147,21 +147,21 @@ try {
   const desk = await newPage(1400, 900, false);
   const phone = await newPage(390, 844, true);
   const vis = [await desk.ev('document.visibilityState'), await phone.ev('document.visibilityState')];
-  check(`the desktop client (1400×900) and the phone (390 px) both SHOW the chat window, both pages visible (${vis.join(', ')})`, !!desk.showing && !!phone.showing && (await phone.ev('!!app.isMobile')) === true && vis.every((v) => v === 'visible'), { desk: desk.ready, phone: phone.ready, vis });
+  check(`the desktop client (1400×900) and the phone (390 px) both SHOW the chat window, both pages visible (${vis.join(', ')})`, !!desk.showing && !!phone.showing && (await phone.ev('!!app.isMobile')) === true && verdictOf(vis.every((v) => v === 'visible')), { desk: desk.ready, phone: phone.ready, vis });
 
   // ① the door, a REAL browser on the xpra rung
   const url = `http://127.0.0.1:${PAGE_PORT}/rung`;
   const n1 = await cli('vibespace-browser', ['new', 'Rung page', '--backend', 'desktop-app', '--url', url, '--mode', 'tree']);
   const H = (/handle (\S+)/.exec(n1.out) || [])[1];
-  check('e2c: --mode tree at launch ⇒ the CLI prints the verdict "mode: tree — tree mode as asked…" (the snapshot leg below reads the page)', /mode: tree — tree mode as asked/.test(n1.out), n1);
-  check(`vibespace-browser new --backend desktop-app answers a handle (${H})`, n1.code === 0 && !!H && /beside your chat/.test(n1.out) && /no_cdp_on_this_backend/.test(n1.out), n1);
+  check('e2c: --mode tree at launch ⇒ the CLI prints the verdict "mode: tree — tree mode as asked…" (the snapshot leg below reads the page)', verdictOf(/mode: tree — tree mode as asked/.test(n1.out)), n1);
+  check(`vibespace-browser new --backend desktop-app answers a handle (${H})`, n1.code === 0 && !!H && gateOf(/beside your chat/.test(n1.out)) && verdictOf(/no_cdp_on_this_backend/.test(n1.out)), n1);
   const got = await until(() => hits.find((x) => x.url === '/rung'), 90000, 300);
-  check(`a REAL browser fetched our page (${got ? got.ua.slice(0, 60) : 'no request'})`, !!got && /Chrome|Chromium/.test(got.ua), hits);
+  check(`a REAL browser fetched our page (${got ? got.ua.slice(0, 60) : 'no request'})`, !!got && verdictOf(/Chrome|Chromium/.test(got.ua)), hits);
   const rec = await until(async () => { const j = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps`)).json(); const a = (j.apps || []).find((x) => x.id === H); return a && a.state === 'ready' ? a : null; }, 90000, 500);
-  check(`the record: origin agent-browser, by the opener (${rec && rec.by && rec.by.name}), the agent's label (${rec && rec.label}), on the xpra rung, ready`, !!rec && rec.origin === 'agent-browser' && rec.by && rec.by.sessionId === SID && typeof rec.by.name === 'string' && !!rec.by.name && rec.label === 'Rung page' && /xpra/.test(String(rec.backend)), rec && { origin: rec.origin, by: rec.by, label: rec.label, backend: rec.backend, state: rec.state });
+  check(`the record: origin agent-browser, by the opener (${rec && rec.by && rec.by.name}), the agent's label (${rec && rec.label}), on the xpra rung, ready`, !!rec && rec.origin === 'agent-browser' && gateOf(rec.by) && rec.by.sessionId === SID && typeof rec.by.name === 'string' && !!rec.by.name && rec.label === 'Rung page' && verdictOf(/xpra/.test(String(rec.backend))), rec && { origin: rec.origin, by: rec.by, label: rec.label, backend: rec.backend, state: rec.state });
   const ENG = require(path.join(wt, 'src/server/window-targets-engine.js'));
   const leases = JSON.parse(fs.readFileSync(path.join(wt, 'data', ENG.LEASE_FILE), 'utf8')).leases || {};
-  check('the lease: the opener\'s, origin agent-browser (persisted)', leases[H] && leases[H].origin === 'agent-browser' && leases[H].sessionId === SID, leases[H]);
+  check('the lease: the opener\'s, origin agent-browser (persisted)', gateOf(leases[H]) && leases[H].origin === 'agent-browser' && leases[H].sessionId === SID, leases[H]);
   const tg = await (await fetch(`http://127.0.0.1:${PORT}/api/agent/window/targets`, { headers: { Authorization: `Bearer ${token}` } })).json();
   const row = (tg.targets || []).find((t) => t.handle === H);
   check('the opener grant: the agent\'s own targets list shows the window (hidden from every agent unless shared)', !!row, (tg.targets || []).map((t) => t.handle));
@@ -179,9 +179,9 @@ try {
   const snap = await until(async () => { const r = await cli('vibespace-window', ['snapshot', H]); return r.code === 0 && /Press me|Hello rung/.test(r.out) ? r : null; }, 120000, 2000);
   check('vibespace-window snapshot <h> reads the page through the accessibility tree (the a11y env on the agent\'s Chrome)', !!snap, snap || (await cli('vibespace-window', ['snapshot', H])));
   const gu = await cli('vibespace-browser', ['--profile', H, 'get', 'url']);
-  check('vibespace-browser --profile <h> get url ⇒ no_cdp_on_this_backend with the window recipe (nothing ran)', gu.code === 1 && /no_cdp_on_this_backend/.test(gu.err) && /vibespace-window snapshot/.test(gu.err) && !/fake browser CLI was run/.test(gu.err), gu);
+  check('vibespace-browser --profile <h> get url ⇒ no_cdp_on_this_backend with the window recipe (nothing ran)', gu.code === 1 && gateOf(/no_cdp_on_this_backend/.test(gu.err)) && gateOf(/vibespace-window snapshot/.test(gu.err)) && !/fake browser CLI was run/.test(gu.err), gu);
   const oc = await cli('vibespace-window', ['open', 'chromium']);
-  check('vibespace-window open chromium stays browser_is_human — and names the door', oc.code !== 0 && /browser_is_human/.test(oc.err + oc.out) && /--backend desktop-app/.test(oc.err + oc.out), oc);
+  check('vibespace-window open chromium stays browser_is_human — and names the door', oc.code !== 0 && gateOf(/browser_is_human/.test(oc.err + oc.out)) && verdictOf(/--backend desktop-app/.test(oc.err + oc.out)), oc);
 
   // ③ placement: beside the chat on the desktop client, its own window on the phone
   const WHERE = (h) => `(() => { const c = [...app.sessions.entries()].find(([, v]) => v && v.sessionId === ${JSON.stringify(SID)}); const w = [...app.wm.windows.values()].find((x) => x._desktopAppId === ${JSON.stringify(h)} && !x._desktopSatelliteWid); if (!c || !w) return null; const cw = app.wm.windows.get(c[0]); const r = (e) => { const b = e.getBoundingClientRect(); return { x: Math.round(b.left), y: Math.round(b.top), w: Math.round(b.width), h: Math.round(b.height) }; }; return { chat: r(cw.element), app: r(w.element), canvas: !!w.element.querySelector('canvas'), pending: w.element.classList.contains('desktop-app-pending'), chain: !!(w._tabChain && w._tabChain.tabs && w._tabChain.tabs.includes(c[0])), split: !!(w._tabChain && w._tabChain.layout === 'split' && w._tabChain.split && w._tabChain.split.pair.includes(w.id) && w._tabChain.split.pair.includes(c[0])) }; })()`;
@@ -193,7 +193,7 @@ try {
   // lane agent-window-no-steal rule 4: the phone holds it as its OWN window but never shows it in place of the shown one
   const pw = await until(async () => { const v = await phone.ev(WHERE(H)); return v && !v.pending ? v : null; }, 60000, 500);
   const pShown = await phone.ev(`({ chatShown: app.wm.activeWindowId === [...app.sessions.entries()].find(([, v]) => v && v.sessionId === ${JSON.stringify(SID)})[0], badge: !!document.getElementById('mobile-nav-title')?.classList.contains('arrived') })`);
-  check(`the phone holds it as its OWN window, never shown in place of the chat (the chat stays shown, the title carries the badge)`, !!pw && !pw.chain && !!pShown && pShown.chatShown && pShown.badge, { pw, pShown });
+  check(`the phone holds it as its OWN window, never shown in place of the chat (the chat stays shown, the title carries the badge)`, !!pw && !pw.chain && !!pShown && gateOf(pShown.chatShown) && verdictOf(pShown.badge), { pw, pShown });
   const chip = await until(() => desk.ev(`(() => { const w = [...app.wm.windows.values()].find((x) => x._desktopAppId === ${JSON.stringify(H)}); const host = w && (w._tabChain ? app.wm.windows.get(w._tabChain.tabs[0]) : w); const el = host && host.element.querySelector('.desktop-app-chip-agent-browser'); return el ? el.textContent : null; })()`), 30000, 500);
   check(`r3 #11: the window says whose browser it is ("${chip}" — the opener's live name)`, !!rec && chip === `Agent browser (${rec.by.name})`, chip);
   await sleep(4000); // the xpra picture paints
@@ -201,16 +201,16 @@ try {
     const shot = await p.S('Page.captureScreenshot', { format: 'png' });
     const out = path.join(PNG_DIR || scratch('da-rung-png'), f);
     if (shot.result && shot.result.data) { fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, Buffer.from(shot.result.data, 'base64')); }
-    check(`PNG ${out}`, fs.existsSync(out) && fs.statSync(out).size > 5000);
+    check(`PNG ${out}`, gateOf(fs.existsSync(out)) && fs.statSync(out).size > 5000);
   }
 
   // ④b LANE e2b (design-agent-browser-v2 §E2.2): the agent PINS its Chrome at 1600×900 while the desktop client shows it in
   // the split pane (~700 px) — the X window IS 1600×900 (xwininfo), the picture is scaled to the pane, screenshot = the pin,
   // and `click --at 1500,800` lands on X's own pixel (xdotool getmouselocation)
   const sz = await cli('vibespace-window', ['size', H, '1600x900']);
-  check('e2b: vibespace-window size <h> 1600x900 ⇒ pinned (the opener on its own browser)', sz.code === 0 && /pinned \S+ to 1600×900/.test(sz.out), sz);
+  check('e2b: vibespace-window size <h> 1600x900 ⇒ pinned (the opener on its own browser)', sz.code === 0 && verdictOf(/pinned \S+ to 1600×900/.test(sz.out)), sz);
   const pinRec = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${H}`)).json();
-  check('e2b: the record\'s fact pin {w:1600, h:900} (saved + broadcast by the keeper)', pinRec && pinRec.pin && pinRec.pin.w === 1600 && pinRec.pin.h === 900, pinRec && pinRec.pin);
+  check('e2b: the record\'s fact pin {w:1600, h:900} (saved + broadcast by the keeper)', gateOf(pinRec) && gateOf(pinRec.pin) && pinRec.pin.w === 1600 && pinRec.pin.h === 900, pinRec && pinRec.pin);
   const xenv = { ...baseEnv, DISPLAY: rec.display, XAUTHORITY: path.join(wt, 'data', 'desktop-apps', H, 'Xauthority') }; // the keeper's per-app auth file (desktop-serve needlesOf)
   const xsh = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { env: xenv, timeout: 10000 }, (e, out, err) => resolve({ code: e ? (e.code ?? 1) : 0, out: String(out), err: String(err) })));
   let lastTree = '';
@@ -226,7 +226,7 @@ try {
   for (const l of appLog) console.log(`  · xpra: ${l.trim().slice(0, 200)}`);
   for (const l of srvLog.join('').split('\n').filter((x) => x.includes(H) && /pinned|fitted|cannot fit/.test(x)).slice(-5)) console.log(`  · server: ${l.trim().slice(0, 220)}`);
   check(`e2b r3: xpra took the pin (root 1600x900) and it HOLDS for 8 s — no flap (${roots.join(' → ')})`, !!firstRoot && roots.length === 1 && roots[0] === '1600x900', roots);
-  check(`e2b r2: the agent HOLDS the lease (Watch-only viewers, no detach) and the KEEPER made the X window the pin — xwininfo ${xw ? `${xw.wid} ${(/Width: (\d+)/.exec(xi.out) || [])[1]}×${(/Height: (\d+)/.exec(xi.out) || [])[1]}` : 'none at 1600×900'}`, !!xw && /Width: 1600\b/.test(xi.out) && /Height: 900\b/.test(xi.out), lastTree.split('\n').filter((l) => /\+0\+0/.test(l)).slice(0, 6));
+  check(`e2b r2: the agent HOLDS the lease (Watch-only viewers, no detach) and the KEEPER made the X window the pin — xwininfo ${xw ? `${xw.wid} ${(/Width: (\d+)/.exec(xi.out) || [])[1]}×${(/Height: (\d+)/.exec(xi.out) || [])[1]}` : 'none at 1600×900'}`, !!xw && gateOf(/Width: 1600\b/.test(xi.out)) && verdictOf(/Height: 900\b/.test(xi.out)), lastTree.split('\n').filter((l) => /\+0\+0/.test(l)).slice(0, 6));
   const PV = `(() => { const w = [...app.wm.windows.values()].find((x) => x._desktopAppId === ${JSON.stringify(H)}); const host = w && (w._tabChain ? app.wm.windows.get(w._tabChain.tabs[0]) : w); const chip = host && host.element.querySelector('.desktop-app-chip-pin'); const st = host && host.element.querySelector('.xpra-stage'); if (!chip || !st) return null; const pr = st.parentElement.getBoundingClientRect(), sr = st.getBoundingClientRect(); return { chip: chip.textContent, transform: st.style.transform, paneW: Math.round(pr.width), paneH: Math.round(pr.height), picW: Math.round(sr.width), picH: Math.round(sr.height) }; })()`;
   let lastPv = null;
   const pv = await until(async () => { const v = await desk.ev(PV); lastPv = v; return v && v.chip && /scale\(/.test(v.transform) ? v : null; }, 30000, 500);
@@ -241,7 +241,7 @@ try {
   check(`e2b r3: the Chrome CLIENT inside xpra's corral is the pin too (${lastClient})`, !!cw, lastClient);
   const ck = await cli('vibespace-window', ['click', H, '--at', '1500,800']);
   const ml = await xsh('xdotool', ['getmouselocation']);
-  check(`e2b: click --at 1500,800 lands on X's pixel — xdotool getmouselocation "${ml.out.trim()}"`, ck.code === 0 && /^x:1500 y:800 /.test(ml.out.trim()), { ck, ml });
+  check(`e2b: click --at 1500,800 lands on X's pixel — xdotool getmouselocation "${ml.out.trim()}"`, ck.code === 0 && verdictOf(/^x:1500 y:800 /.test(ml.out.trim())), { ck, ml });
   if (pv) { const shot = await desk.S('Page.captureScreenshot', { format: 'png' }); const out = path.join(PNG_DIR || scratch('da-rung-png'), 'pinned-pane.png'); if (shot.result && shot.result.data) fs.writeFileSync(out, Buffer.from(shot.result.data, 'base64')); }
   const rootOf = async () => { const r = await xsh('xwininfo', ['-root']); return `${(/Width: (\d+)/.exec(r.out) || [])[1]}x${(/Height: (\d+)/.exec(r.out) || [])[1]}`; };
   const mainOf = async () => { const t = await xsh('xwininfo', ['-root', '-children']); return t.out.split('\n').filter((l) => /"/.test(l) && /\d+x\d+\+-?\d+\+-?\d+\s/.test(l)).map((l) => (/(\d+x\d+)\+-?\d+\+-?\d+\s/.exec(l) || [])[1]).sort((a, b) => (+b.split('x')[0] * +b.split('x')[1]) - (+a.split('x')[0] * +a.split('x')[1]))[0] || null; };
@@ -254,7 +254,7 @@ try {
   const afterResize = { root: await rootOf(), main: await mainOf() };
   check(`e2b r2: detached (a viewer ACTIVE), both panes resized while pinned ⇒ X unchanged (root ${afterResize.root}, main ${afterResize.main})`, dt.code === 0 && afterResize.root === '1600x900' && afterResize.main === '1600x900', { dt, afterResize });
   const un = await cli('vibespace-window', ['size', H, 'auto']);
-  check('e2b: size <h> auto ⇒ unpinned (the record fact removed)', un.code === 0 && /unpinned/.test(un.out) && !(await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${H}`)).json()).pin, un);
+  check('e2b: size <h> auto ⇒ unpinned (the record fact removed)', un.code === 0 && gateOf(/unpinned/.test(un.out)) && !(await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${H}`)).json()).pin, un);
   // r2: auto ⇒ the ACTIVE viewer's geometry applies again (today's one-owner rule)
   let lastBack = null;
   const back = await until(async () => { const v = { root: await rootOf(), main: await mainOf() }; lastBack = v; return v.root !== '1600x900' && v.main && v.main !== '1600x900' ? v : null; }, 20000, 500);
@@ -279,7 +279,7 @@ try {
   // lane e2c (§E2.3): `--mode pixels` at launch ⇒ E2b's default pin 1920×1080 on the record and a screenshot of exactly
   // that size; `mode <h> auto` ⇒ the probe runs now and its answer comes back with its why
   const pngDims = (f) => { const b = fs.existsSync(f) ? fs.readFileSync(f) : null; return b && b.length > 24 && b.readUInt32BE(12) === 0x49484452 ? [b.readUInt32BE(16), b.readUInt32BE(20)] : null; };
-  check(`e2c: --mode pixels at launch ⇒ the record's pin is 1920×1080 and the CLI prints why (${rec2 && JSON.stringify(rec2.pin)})`, !!rec2 && !!rec2.pin && rec2.pin.w === 1920 && rec2.pin.h === 1080 && /mode: pixels — pixel mode as asked, pinned to 1920x1080/.test(n2.out), { out: n2.out, pin: rec2 && rec2.pin });
+  check(`e2c: --mode pixels at launch ⇒ the record's pin is 1920×1080 and the CLI prints why (${rec2 && JSON.stringify(rec2.pin)})`, !!rec2 && !!rec2.pin && rec2.pin.w === 1920 && rec2.pin.h === 1080 && verdictOf(/mode: pixels — pixel mode as asked, pinned to 1920x1080/.test(n2.out)), { out: n2.out, pin: rec2 && rec2.pin });
   const shot2 = path.join(PNG_DIR || scratch('da-rung-png'), 'e2c-pixels-screenshot.png'); let ss2 = null, dims2 = null;
   await until(async () => { ss2 = await cli('vibespace-window', ['screenshot', H2, '--out', shot2]); dims2 = pngDims(shot2); return dims2 && dims2[0] === 1920 && dims2[1] === 1080 ? true : null; }, 90000, 3000);
   check(`e2c: vibespace-window screenshot of the --mode pixels browser is exactly 1920×1080 (${dims2 ? dims2.join('×') : 'no PNG'})`, !!dims2 && dims2[0] === 1920 && dims2[1] === 1080, { ss2, dims2 });
@@ -312,7 +312,7 @@ try {
     // and its own handle gave its own image
     const popNamed = ((ssP && ssP.out) || '').match(/«Sign in – stand-in ([12])(?: - [^»]*)?» \d+x\d+ at [^;]*? its own handle `([^`]+)`/); // the title as the window bar has it: + the browser's own suffix
     const popOwn = popNamed ? own.find((x) => x.h === popNamed[2]) : null;
-    check(`B-dbb4 unit 2 on the real chromium: a NAMED window is the stand-in's own popup by its title (${popNamed ? `«Sign in – stand-in ${popNamed[1]}» as ${popNamed[2]}` : 'none named'}) and its OWN handle gives its own image; every other named window's too (${own.length} named)`, !!popNamed && !!popOwn && popOwn.code === 0 && popOwn.subject && !!popOwn.dims && own.every((x) => (x.code === 0 && x.subject && x.dims) || /\[window_not_visible\]/.test(x.err)), { popNamed, own });
+    check(`B-dbb4 unit 2 on the real chromium: a NAMED window is the stand-in's own popup by its title (${popNamed ? `«Sign in – stand-in ${popNamed[1]}» as ${popNamed[2]}` : 'none named'}) and its OWN handle gives its own image; every other named window's too (${own.length} named)`, !!popNamed && !!popOwn && popOwn.code === 0 && gateOf(popOwn.subject) && !!popOwn.dims && verdictOf(own.every((x) => (x.code === 0 && x.subject && x.dims) || /\[window_not_visible\]/.test(x.err))), { popNamed, own });
     // M3, THE SHAPE (the coordinator's r1873 / r1879): THE ENGINE FOCUSES NOTHING for a key on the APP's own handle; the display's
     // own word (X's input focus, read right before the key) says where the keyboard was. Here, the box's scene: the clicks opened
     // the popups and one of them took the keyboard; this lease aimed at no popup.
@@ -343,7 +343,7 @@ try {
       const namedByPage = new Map([...((ssP && ssP.out) || '').matchAll(/«Sign in – stand-in ([12])(?: - [^»]*)?» \d+x\d+ at [^;]*? its own handle `([^`]+)`/g)].map((m) => [`p${m[1]}`, m[2]]));
       const unseen = !!who && namedByPage.has(who);
       console.log(`    MEASURE B-dbb4 M3 shape (not a proof): \`key ${H2} c\` was heard by ${JSON.stringify(heardC)}; the reply's note: ${noteC ? JSON.stringify(noteC.trim()) : 'none'}`);
-      check(`B-dbb4 M3 shape on the real chromium: \`key ${H2} c\` goes where the keyboard is (ONE page heard it: ${who || 'none'}) and the reply ${noteC ? 'NAMES the own handle of the window this image does not show that held the keyboard' : 'says nothing (the keyboard was in a window this image shows)'} — a note only for an unseen window, and always for the named popup when it heard the key`, kc.code === 0 && heardC.length === 1 && (who !== 'main' || !noteC) && (!noteC || ((acc && acc.named) || []).some((h) => noteC.includes(h))) && (!unseen || noteC.includes(namedByPage.get(who))) && (unseen || !noteC), { kc, heardC, noteC, named: [...namedByPage] });
+      check(`B-dbb4 M3 shape on the real chromium: \`key ${H2} c\` goes where the keyboard is (ONE page heard it: ${who || 'none'}) and the reply ${noteC ? 'NAMES the own handle of the window this image does not show that held the keyboard' : 'says nothing (the keyboard was in a window this image shows)'} — a note only for an unseen window, and always for the named popup when it heard the key`, kc.code === 0 && heardC.length === 1 && (who !== 'main' || !noteC) && (!noteC || gateOf(((acc && acc.named) || []).some((h) => noteC.includes(h)))) && (!unseen || gateOf(noteC.includes(namedByPage.get(who)))) && (verdictOf(unseen) || !noteC), { kc, heardC, noteC, named: [...namedByPage] });
       const k0 = hits.length;
       const kp = await cli('vibespace-window', ['key', popNamed[2], 'k']);
       const inPop = await until(async () => (hits.slice(k0).some((h) => h.url === `/key?w=p${popNamed[1]}&k=k`) ? true : null), 15000, 300);
@@ -369,7 +369,7 @@ try {
       // list that never opened would let the page hear a second ArrowDown and the Enter
       const heardSel = hits.slice(s0).filter((h) => /^\/(key|pick)/.test(h.url)).map((h) => h.url);
       const listHeld = heardSel.filter((u) => u === '/key?w=main&k=ArrowDown').length === 1 && !heardSel.includes('/key?w=main&k=Enter');
-      check(`B-dbb4 r1691 on the real chromium: after an aim into the main page, a select's list OPEN (the page's own keys: after alt+Down, Down and Return reached the open list, not the page — ${listHeld ? 'it heard neither' : 'it heard them'}; the windows composed ${before} → ${after}, measured only), Down then Return on the APP's own handle PICK the option «two» (nothing forced)`, ckA.code === 0 && kt.code === 0 && ko.code === 0 && kd.code === 0 && kr.code === 0 && listHeld && !!picked, { ckA: ckA.code, kt: kt.code, ko: ko.code, kd: kd.code, kr: kr.code, before, after, picked: !!picked, heardSel });
+      check(`B-dbb4 r1691 on the real chromium: after an aim into the main page, a select's list OPEN (the page's own keys: after alt+Down, Down and Return reached the open list, not the page — ${listHeld ? 'it heard neither' : 'it heard them'}; the windows composed ${before} → ${after}, measured only), Down then Return on the APP's own handle PICK the option «two» (nothing forced)`, ckA.code === 0 && kt.code === 0 && ko.code === 0 && kd.code === 0 && kr.code === 0 && gateOf(listHeld) && !!picked, { ckA: ckA.code, kt: kt.code, ko: ko.code, kd: kd.code, kr: kr.code, before, after, picked: !!picked, heardSel });
       const k1 = hits.length;
       const km = await cli('vibespace-window', ['key', H2, 'x']);
       const mainGot = await until(async () => (hits.slice(k1).some((h) => h.url === '/key?w=main&k=x') ? true : null), 15000, 300);
@@ -395,19 +395,19 @@ try {
   for (const pg of [desk, phone]) await pg.ev('(() => { if (window.__vsF0) { window.fetch = window.__vsF0; delete window.__vsF0; } return true; })()');
   check(`int243: the race ran — ${held} record answer(s) saying launching were held 4 s past the keeper's ready broadcast, and the picture came up anyway (the screenshot above)`, held >= 1 && !!dims2 && dims2[0] === 1920, { held, dims2 });
   const ma = await cli('vibespace-window', ['mode', H2, 'auto']);
-  check(`e2c: vibespace-window mode <h> auto ⇒ the probe's answer + why (${(ma.out || '').trim().slice(0, 160)})`, ma.code === 0 && /auto → (tree|pixels) — \S/.test(ma.out), ma);
+  check(`e2c: vibespace-window mode <h> auto ⇒ the probe's answer + why (${(ma.out || '').trim().slice(0, 160)})`, ma.code === 0 && verdictOf(/auto → (tree|pixels) — \S/.test(ma.out)), ma);
   const n3 = await cli('vibespace-browser', ['new', 'Third', '--backend', 'desktop-app']);
-  check('r3 #5/#9: a THIRD desktop browser of this conversation is refused desktop_app_cap naming its two handles', n3.code === 1 && /\[desktop_app_cap\]/.test(n3.err) && n3.err.includes(H) && n3.err.includes(H2), n3);
+  check('r3 #5/#9: a THIRD desktop browser of this conversation is refused desktop_app_cap naming its two handles', n3.code === 1 && gateOf(/\[desktop_app_cap\]/.test(n3.err)) && gateOf(n3.err.includes(H)) && verdictOf(n3.err.includes(H2)), n3);
   // r3 #2/#6 + #0 on the REAL keeper: the agent detaches, the USER relaunches it at another scale (Scale ▸ — refused while a
   // lease exists), the successor stays the agent's; the opener re-attaches; D6 below stops the successor though it was detached
   const det = await cli('vibespace-window', ['detach', H]);
   const rl = det.code === 0 ? await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${H}/relaunch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: 2, dpr: 1 }) })).json() : null;
   const S1 = rl && rl.app && rl.app.id;
   const srec = S1 && await until(async () => { const j = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps`)).json(); const a = (j.apps || []).find((x) => x.id === S1); return a && a.state === 'ready' ? a : null; }, 90000, 500);
-  check(`r3 #2/#6: the user's Scale ▸ relaunch keeps the agent's rung — successor ${S1}: origin agent-browser, the opener, the label`, !!srec && srec.origin === 'agent-browser' && srec.by && srec.by.sessionId === SID && srec.label === 'Rung page', srec && { origin: srec.origin, by: srec.by, label: srec.label });
+  check(`r3 #2/#6: the user's Scale ▸ relaunch keeps the agent's rung — successor ${S1}: origin agent-browser, the opener, the label`, !!srec && srec.origin === 'agent-browser' && gateOf(srec.by) && srec.by.sessionId === SID && srec.label === 'Rung page', srec && { origin: srec.origin, by: srec.by, label: srec.label });
   const ra = S1 ? await cli('vibespace-window', ['attach', S1]) : null;
   const gu2 = S1 ? await cli('vibespace-browser', ['--profile', S1, 'get', 'url']) : null;
-  check('r3 #2/#6: the opener re-attaches to the successor and `get url` on it is still no_cdp_on_this_backend', !!ra && ra.code === 0 && !!gu2 && /no_cdp_on_this_backend/.test(gu2.err), { ra, gu2 });
+  check('r3 #2/#6: the opener re-attaches to the successor and `get url` on it is still no_cdp_on_this_backend', !!ra && ra.code === 0 && !!gu2 && verdictOf(/no_cdp_on_this_backend/.test(gu2.err)), { ra, gu2 });
   const prof1 = srec && srec.profileDir, prof2 = rec2 && rec2.profileDir;
   ws.send(JSON.stringify({ type: 'kill', sessionId: SID }));
   // r3 #3/#10: the clients have it open (viewers) ⇒ the stop waits one grace more and the showing client is told once
@@ -416,7 +416,7 @@ try {
   const ended = await until(() => { const a = appsOf(); const r1 = a.find((x) => x.id === S1), r2 = a.find((x) => x.id === H2); return r1 && r2 && r1.state === 'exited' && r2.state === 'exited' ? { r1, r2 } : null; }, 240000, 1000);
   check('the session ended ⇒ BOTH of its desktop browsers stopped (why opener-ended — the detached+relaunched successor included), in words (#12)', !!ended && ended.r1.stoppedBy === 'opener-ended' && ended.r2.stoppedBy === 'opener-ended' && ended.r1.lastError === 'closed with the conversation that opened it', ended && { s1: ended.r1.stoppedBy, s2: ended.r2.stoppedBy, why: ended.r1.lastError });
   const gone = await until(() => (prof1 && !fs.existsSync(prof1) ? true : null), 30000, 500);
-  check(`D6: the throwaway profile is removed (${prof1})`, !!gone && !!prof2 && fs.existsSync(prof2), { prof1: prof1 && fs.existsSync(prof1), prof2: prof2 && fs.existsSync(prof2) });
+  check(`D6: the throwaway profile is removed (${prof1})`, !!gone && !!prof2 && verdictOf(fs.existsSync(prof2)), { prof1: prof1 && fs.existsSync(prof1), prof2: prof2 && fs.existsSync(prof2) });
   const alive = ended ? [ended.r1, ended.r2].flatMap((r) => Object.values(r.pids || {})).filter((p) => p && fs.existsSync(`/proc/${p}`)) : ['?'];
   check('nothing of either browser is left running', !alive.length, alive);
   // ⑦ LANE e2b r2: a USER's xterm (no viewer at all) pinned 1600×900 through the user route ⇒ the KEEPER fits X; X knocked
@@ -425,7 +425,7 @@ try {
   const XT = xl && (xl.id || (xl.app && xl.app.id));
   const xtRec = XT ? await until(async () => { const a = appsOf().find((x) => x.id === XT); return a && a.state === 'ready' ? a : null; }, 90000, 500) : null;
   const pinR = XT ? await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${XT}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ size: '1600x900' }) })).json() : null;
-  check(`e2b r2: a user's xterm (${XT}) pinned 1600x900 through the user route (who: user)`, !!xtRec && !!pinR && pinR.pin && pinR.pin.w === 1600, { xl, pinR });
+  check(`e2b r2: a user's xterm (${XT}) pinned 1600x900 through the user route (who: user)`, !!xtRec && !!pinR && gateOf(pinR.pin) && pinR.pin.w === 1600, { xl, pinR });
   const xtEnv = xtRec ? { ...baseEnv, DISPLAY: xtRec.display, XAUTHORITY: path.join(wt, 'data', 'desktop-apps', XT, 'Xauthority') } : baseEnv;
   const xx = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { env: xtEnv, timeout: 10000 }, (e, out) => resolve({ code: e ? (e.code ?? 1) : 0, out: String(out) })));
   const xtGeom = async () => { const r = await xx('xwininfo', ['-root']); const t = await xx('xwininfo', ['-root', '-children']); const big = t.out.split('\n').filter((l) => /"/.test(l)).map((l) => /^\s*(0x[0-9a-f]+) .*?(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s/.exec(l)).filter(Boolean).sort((a, b) => b[2] * b[3] - a[2] * a[3])[0]; return { root: `${(/Width: (\d+)/.exec(r.out) || [])[1]}x${(/Height: (\d+)/.exec(r.out) || [])[1]}`, wid: big ? big[1] : null, main: big ? `${big[2]}x${big[3]}+${big[4]}+${big[5]}` : null }; };
@@ -443,7 +443,7 @@ try {
   await until(async () => { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { return null; } }, 120000, 250);
   let lastRe = null;
   const restored = await until(async () => { const g = await xtGeom(); lastRe = g; return g.main && /^1600x900\+0\+0$/.test(g.main) ? g : null; }, 60000, 500);
-  check(`e2b r3: a RESTART restores the pin to X (xterm knocked to ${knocked.main} while down ⇒ xwininfo after the restart: xterm ${lastRe && lastRe.main}, root ${lastRe && lastRe.root})`, !!restored && knocked.main && !/^1600x900/.test(knocked.main), { knocked, lastRe });
+  check(`e2b r3: a RESTART restores the pin to X (xterm knocked to ${knocked.main} while down ⇒ xwininfo after the restart: xterm ${lastRe && lastRe.main}, root ${lastRe && lastRe.root})`, !!restored && gateOf(knocked.main) && !/^1600x900/.test(knocked.main), { knocked, lastRe });
   try { await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${XT}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch { }
   ws.close(); cdp.close();
 } catch (e) { failed++; console.error(`  ✗ the suite threw: ${e && e.stack}`); console.error(srvLog.join('').slice(-1500)); }
@@ -454,4 +454,4 @@ try {
   check(`the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`, lit.offenders.length === 0, JSON.stringify(lit.offenders.slice(0, 3)));
 }
 console.log(failed ? `\nFAIL (${failed} failed)` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

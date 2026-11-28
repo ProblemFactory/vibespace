@@ -51,7 +51,7 @@ const K = require('../src/server/browser-keeper.js');
 const LIMITS = require('../src/keeper-limits.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -111,30 +111,30 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); proc
 console.log('— ① the provider rows, their refusals, the egress record, the cdp pair, the cloakserve plan');
 {
   const ids = B.providerIds();
-  ok(ids.includes('chromium') && !ids.includes('cloak') && ids.includes('cdp') && ids.includes('desktop-app') && ids.includes('local-window') && ids.includes('cloud:browserbase') && ids.length === 4 + B.CLOUD_PROVIDERS.length, // lane e2a: + desktop-app (§E2); lane engine-spi-egress L3: − the anti-bot backend (it left the core)
+  ok(gateOf(ids.includes('chromium')) && !ids.includes('cloak') && gateOf(ids.includes('cdp')) && gateOf(ids.includes('desktop-app')) && gateOf(ids.includes('local-window')) && gateOf(ids.includes('cloud:browserbase')) && ids.length === 4 + B.CLOUD_PROVIDERS.length, // lane e2a: + desktop-app (§E2); lane engine-spi-egress L3: − the anti-bot backend (it left the core)
      `every §7.1 row exists (${ids.join(', ')})`);
   const cells = ['tier', 'wired', 'label', 'keyScope', 'canSwitchTo', 'ownsDir', 'leaseKind', 'remote', 'starts', 'headed', 'binary'];
-  ok(ids.every((id) => cells.every((c) => c in B.providerRow(id))), 'every row carries every capability cell (a row, not an if chain)');
+  ok(verdictOf(ids.every((id) => cells.every((c) => c in B.providerRow(id)))), 'every row carries every capability cell (a row, not an if chain)');
   const cdp = B.providerRow('cdp'), lw = B.providerRow('local-window'), chromium = B.providerRow('chromium'), cloud = B.providerRow('cloud:kernel');
   ok(cdp.canSwitchTo === 'no' && cdp.ownsDir === false && cdp.leaseKind === 'tab' && cdp.keyScope === 'none' && cdp.starts === false && cdp.remote === 'tcp-forward' && cdp.tier === 1, '`cdp`: tier 1, no key, switch "no", owns no dir, starts nothing, reached over tcp-forward');
   ok(lw.canSwitchTo === 'no' && lw.ownsDir === false && lw.leaseKind === 'window-target' && lw.tier === 3 && lw.wired === true && lw.consent === 'window.realDesktopTargets' && lw.cdp === false, '`local-window`: the three "no"s (§7.6 rule 3), the window-target lease kind, WIRED since P10 behind its named consent setting, no CDP');
   ok(B.providerRow('cloak') === null && !Object.values(B.PROVIDERS).some((r) => r.seeded || r.egressProxy || r.executable || r.antiBot || r.install), 'no anti-bot row, and no row carries the cells only it had (a seed, its own binary, the egress proxy, an install) — lane engine-spi-egress L3');
-  ok(chromium.wired && chromium.remote === 'browser-serve' && chromium.keyScope === 'none' && chromium.ownsDir, '`chromium`: wired, runs on a paired machine through browser-serve');
-  ok(cloud && cloud.cloud === 'kernel' && cloud.keyScope === 'local-only' && cloud.canSwitchTo === 'export-only' && cloud.ownsDir === false && cloud.wired && cloud.starts && B.providerRow('cloud:agentcore').wired === false && /unverified/.test(B.providerRow('cloud:agentcore').unwiredWhy), '`cloud:<name>`: a FAMILY of rows — local-only key, export-only switch, no dir; wired since the key half landed (P4 second half), except agentcore whose field set is unverified — unwired BY NAME');
+  ok(gateOf(chromium.wired) && chromium.remote === 'browser-serve' && chromium.keyScope === 'none' && verdictOf(chromium.ownsDir), '`chromium`: wired, runs on a paired machine through browser-serve');
+  ok(gateOf(cloud) && cloud.cloud === 'kernel' && cloud.keyScope === 'local-only' && cloud.canSwitchTo === 'export-only' && cloud.ownsDir === false && gateOf(cloud.wired) && gateOf(cloud.starts) && B.providerRow('cloud:agentcore').wired === false && verdictOf(/unverified/.test(B.providerRow('cloud:agentcore').unwiredWhy)), '`cloud:<name>`: a FAMILY of rows — local-only key, export-only switch, no dir; wired since the key half landed (P4 second half), except agentcore whose field set is unverified — unwired BY NAME');
   ok(B.providerRow('cloud:nope') === null && B.providerRow('nope') === null, 'an unknown provider / cloud name is not a row');
   // the exact refusal a disabled control shows
   const c1 = B.providerControl('nope');
-  ok(!c1.ok && c1.code === 'provider_unknown' && /one of chromium/.test(c1.error), 'unknown ⇒ provider_unknown listing the rows');
+  ok(!c1.ok && c1.code === 'provider_unknown' && verdictOf(/one of chromium/.test(c1.error)), 'unknown ⇒ provider_unknown listing the rows');
   const c2 = B.providerControl('cloak');
-  ok(!c2.ok && c2.code === 'provider_unknown' && /unknown provider "cloak"/.test(c2.error), 'a record still naming the removed backend is refused BY NAME (provider_unknown) — no shim');
+  ok(!c2.ok && c2.code === 'provider_unknown' && verdictOf(/unknown provider "cloak"/.test(c2.error)), 'a record still naming the removed backend is refused BY NAME (provider_unknown) — no shim');
   const c3 = B.providerControl('cloud:browserbase', { host: 'dev-1' });
-  ok(!c3.ok && c3.code === 'provider_needs_local_key' && /D34/.test(c3.error) && /dev-1/.test(c3.error), 'a key-bearing row on host != null ⇒ provider_needs_local_key (D34)');
+  ok(!c3.ok && c3.code === 'provider_needs_local_key' && gateOf(/D34/.test(c3.error)) && verdictOf(/dev-1/.test(c3.error)), 'a key-bearing row on host != null ⇒ provider_needs_local_key (D34)');
   ok(B.providerControl('cloud:browserbase', { host: 'dev-1' }).code === 'provider_needs_local_key', 'cloud:* on host != null ⇒ provider_needs_local_key too');
   const c4 = B.providerControl('local-window', { host: 'dev-1' });
   ok(!c4.ok && c4.code === 'provider_local_only', 'a row with no remote transport on a host ⇒ provider_local_only');
-  ok(B.providerControl('chromium', { host: 'dev-1' }).ok && B.providerControl('cdp', { host: 'dev-1' }).ok && B.providerControl('').ok && B.providerControl(undefined).row === chromium, 'chromium/cdp are admitted on a host; empty/undefined = chromium');
+  ok(gateOf(B.providerControl('chromium', { host: 'dev-1' }).ok) && gateOf(B.providerControl('cdp', { host: 'dev-1' }).ok) && gateOf(B.providerControl('').ok) && B.providerControl(undefined).row === chromium, 'chromium/cdp are admitted on a host; empty/undefined = chromium');
   const r1 = B.capabilityRefusal('cdp', 'start');
-  ok(r1 && r1.code === 'provider_lacks_capability' && r1.capability === 'start' && /somebody else/.test(r1.error), 'capabilityRefusal(cdp, start) names the cell\'s reason');
+  ok(gateOf(r1) && r1.code === 'provider_lacks_capability' && r1.capability === 'start' && verdictOf(/somebody else/.test(r1.error)), 'capabilityRefusal(cdp, start) names the cell\'s reason');
   ok(B.capabilityRefusal('chromium', 'start') === null && B.capabilityRefusal('cdp', 'switch').code === 'provider_lacks_capability' && B.capabilityRefusal('local-window', 'sweep').code === 'provider_lacks_capability' && B.capabilityRefusal('chromium', 'headed') === null && B.capabilityRefusal('local-window', 'remote').code === 'provider_lacks_capability', 'a control the row HAS answers null; one it lacks is typed per cell (switch / sweep / remote)');
   ok(B.capabilityRefusal('chromium', 'fly').code === 'bad-request' && B.capabilityRefusal('nope', 'start').code === 'provider_unknown', 'an unknown capability / provider is refused, never silently "has it"');
   const rows = B.providerRows({ host: 'dev-1' });
@@ -143,11 +143,11 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
 
   // lane engine-spi-egress L3: the §7.2.1 record discipline (proofVerdict / egressHostsOf / blockedCell / the two allowlists)
   // left with the one backend that carried a record; a wrapped engine's list is its plugin's row (src/browser-engines.js)
-  ok(['CLOAK_EGRESS_PROOF', 'CLOAK_EGRESS_RUNS', 'proofVerdict', 'egressHostsOf', 'blockedCell', 'cloakRunAllowlist', 'cloakInstallAllowlist', 'CLOAK_WIRED'].every((k) => !(k in B)) && typeof B.egressVerdict === 'function' && typeof B.parseEgressAllowlist === 'function', 'the record discipline is gone; the generic allowlist verdict (the proxy\'s rule) stays');
+  ok(gateOf(['CLOAK_EGRESS_PROOF', 'CLOAK_EGRESS_RUNS', 'proofVerdict', 'egressHostsOf', 'blockedCell', 'cloakRunAllowlist', 'cloakInstallAllowlist', 'CLOAK_WIRED'].every((k) => !(k in B))) && typeof B.egressVerdict === 'function' && typeof B.parseEgressAllowlist === 'function', 'the record discipline is gone; the generic allowlist verdict (the proxy\'s rule) stays');
 
   // the create validator with host / cdpPort
   const v = B.validateProfileInput({ label: 'Ext', provider: 'cdp', host: 'dev-1', cdpPort: '9222' });
-  ok(v.ok && v.value.host === 'dev-1' && v.value.cdpPort === 9222 && v.value.ownsDir === false, 'a cdp profile on a paired machine: host + numeric cdpPort, owns no dir');
+  ok(gateOf(v.ok) && v.value.host === 'dev-1' && v.value.cdpPort === 9222 && v.value.ownsDir === false, 'a cdp profile on a paired machine: host + numeric cdpPort, owns no dir');
   ok(B.validateProfileInput({ label: 'Ext', provider: 'cdp' }).code === 'cdp_port_required', 'a cdp profile without a port is refused cdp_port_required');
   ok(B.validateProfileInput({ label: 'Ext', provider: 'cdp', cdpPort: 70000 }).code === 'cdp_port_required' && B.validateProfileInput({ label: 'Ext', provider: 'cdp', cdpPort: 0 }).code === 'cdp_port_required', 'an out-of-range port is refused');
   ok(B.validateProfileInput({ label: 'C', cdpPort: 9222 }).code === 'bad-request', 'cdpPort on a non-cdp provider is refused (never silently dropped)');
@@ -158,7 +158,7 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
 
   // the cdp env pair
   const e1 = B.attachedEnvFor({ browserKey: 'bk-0123abcd', profileId: 'bp-0123abcd', profileDir: '/p', cdpUrl: 'ws://127.0.0.1:4444/devtools/browser/x' });
-  ok(e1.includes('AGENT_BROWSER_CDP=ws://127.0.0.1:4444/devtools/browser/x') && !e1.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && e1.includes('AGENT_BROWSER_NAMESPACE=vs-bp-0123abcd'), 'a reached browser: the env names the loopback CDP url and NO profile directory');
+  ok(gateOf(e1.includes('AGENT_BROWSER_CDP=ws://127.0.0.1:4444/devtools/browser/x')) && !e1.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && verdictOf(e1.includes('AGENT_BROWSER_NAMESPACE=vs-bp-0123abcd')), 'a reached browser: the env names the loopback CDP url and NO profile directory');
   const e2 = B.attachedEnvFor({ browserKey: 'bk-0123abcd', profileId: 'bp-0123abcd', profileDir: '/p', cdpUrl: 'ws://10.0.0.5:4444/x' });
   ok(e2 === null, 'a NON-loopback CDP url is never handed to a session (§6.1: only through the forward) — and no directory instead (naive study 2: the keeper is the only launcher; the caller refuses `browser_no_cdp`)');
   ok(B.forwardedCdpUrl('ws://127.0.0.1:9222/devtools/browser/abc', 5555) === 'ws://127.0.0.1:5555/devtools/browser/abc' && B.forwardedCdpUrl(9222, 5555) === 'http://127.0.0.1:5555' && B.forwardedCdpUrl('', 5555) === 'http://127.0.0.1:5555' && B.forwardedCdpUrl('ftp://x', 5555) === null && B.forwardedCdpUrl('9222', 0) === null, 'forwardedCdpUrl keeps scheme + path and re-points host:port; a bare port becomes an http endpoint');
@@ -172,8 +172,8 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
     ['portal.example', true], ['sub.portal.example', false], ['docs.example', true], ['a.docs.example', true], ['a.b.docs.example', true], ['xdocs.example', false],
     ['localhost', false], ['127.0.0.1', false], ['127.9.9.9', false], ['::1', false], ['169.254.1.1', false], ['host.docker.internal', false], ['x.localhost', false], ['', false],
   ];
-  ok(T.every(([h, want]) => B.egressVerdict(h, L).allow === want), 'the egress verdict table: exact / dotted-suffix admit, loopback + link-local NEVER, everything else refused', JSON.stringify(T.map(([h]) => [h, B.egressVerdict(h, L).allow])));
-  ok(!B.egressVerdict('portal.example', '').allow && /empty/.test(B.egressVerdict('portal.example', '').why) && /loopback/.test(B.egressVerdict('localhost', L).why) && /not in the egress allowlist/.test(B.egressVerdict('evil.test', L).why), 'every refusal carries its sentence (empty list / loopback / not listed)');
+  ok(verdictOf(T.every(([h, want]) => B.egressVerdict(h, L).allow === want)), 'the egress verdict table: exact / dotted-suffix admit, loopback + link-local NEVER, everything else refused', JSON.stringify(T.map(([h]) => [h, B.egressVerdict(h, L).allow])));
+  ok(!B.egressVerdict('portal.example', '').allow && gateOf(/empty/.test(B.egressVerdict('portal.example', '').why)) && gateOf(/loopback/.test(B.egressVerdict('localhost', L).why)) && verdictOf(/not in the egress allowlist/.test(B.egressVerdict('evil.test', L).why)), 'every refusal carries its sentence (empty list / loopback / not listed)');
 }
 
 // ═══ ② SHARED: the op runner over the fake binary ═══════════════════════════
@@ -182,24 +182,24 @@ const localEnv = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE };
 {
   const bs = S.install({ env: localEnv, homeDir: HOME });
   const v = await S.runBrowserServeOp(bs, 'version');
-  ok(v.ok && v.version === '0.38.0' && v.floor && v.floor.sharedProfiles === true, `version op probes the binary (${v.version}) and answers the floor verdict`);
+  ok(gateOf(v.ok) && v.version === '0.38.0' && gateOf(v.floor) && v.floor.sharedProfiles === true, `version op probes the binary (${v.version}) and answers the floor verdict`);
   const bad = await S.runBrowserServeOp(bs, 'start', { profileId: '../../etc' });
-  ok(!bad.ok && bad.code === 'bad-request' && /profile id/.test(bad.error), 'a profileId that is not bp-<8 hex> is refused — the hub cannot point a machine at an arbitrary directory');
+  ok(!bad.ok && bad.code === 'bad-request' && verdictOf(/profile id/.test(bad.error)), 'a profileId that is not bp-<8 hex> is refused — the hub cannot point a machine at an arbitrary directory');
   ok((await S.runBrowserServeOp(bs, 'bogus', {})).code === 'bad-request', 'an unknown op is refused by name');
   const id = 'bp-0a0a0a0a';
   const st0 = await S.runBrowserServeOp(bs, 'status', { profileId: id });
-  ok(st0.ok && st0.active === false && st0.exists === false && st0.dir === path.join(HOME, '.agent-browser', 'vs-' + id), 'status before start: inactive, the directory named but not yet made');
+  ok(gateOf(st0.ok) && st0.active === false && st0.exists === false && st0.dir === path.join(HOME, '.agent-browser', 'vs-' + id), 'status before start: inactive, the directory named but not yet made');
   const s1 = await S.runBrowserServeOp(bs, 'start', { profileId: id, idleMs: 0 });
-  ok(s1.ok && s1.active && Number.isInteger(s1.pid) && s1.starttime != null && s1.cdpUrl === `ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${id}` && s1.cdpPort === DEAD_CDP && s1.dir === st0.dir, `start: pid ${s1.pid} + starttime, the machine's own loopback cdp url + its port, the dir it composed`);
-  ok((fs.statSync(s1.dir).mode & 0o777) === 0o700 && launches().some((l) => l.ns === 'vs-' + id && l.profile === s1.dir && l.idle === '0'), 'the directory is 0700 and the launch used it with the CLI timeout OFF');
+  ok(gateOf(s1.ok) && gateOf(s1.active) && gateOf(Number.isInteger(s1.pid)) && s1.starttime != null && s1.cdpUrl === `ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${id}` && s1.cdpPort === DEAD_CDP && s1.dir === st0.dir, `start: pid ${s1.pid} + starttime, the machine's own loopback cdp url + its port, the dir it composed`);
+  ok((fs.statSync(s1.dir).mode & 0o777) === 0o700 && verdictOf(launches().some((l) => l.ns === 'vs-' + id && l.profile === s1.dir && l.idle === '0')), 'the directory is 0700 and the launch used it with the CLI timeout OFF');
   const s2 = await S.runBrowserServeOp(bs, 'start', { profileId: id });
-  ok(s2.ok && s2.pid === s1.pid && launches().filter((l) => l.ns === 'vs-' + id).length === 1, 'a second start reuses the live daemon (one launch)');
+  ok(gateOf(s2.ok) && s2.pid === s1.pid && launches().filter((l) => l.ns === 'vs-' + id).length === 1, 'a second start reuses the live daemon (one launch)');
   const cu = await S.runBrowserServeOp(bs, 'cdp-url', { profileId: id });
-  ok(cu.ok && cu.port === DEAD_CDP && cu.url === s1.cdpUrl, 'cdp-url answers the same url + port');
+  ok(gateOf(cu.ok) && cu.port === DEAD_CDP && cu.url === s1.cdpUrl, 'cdp-url answers the same url + port');
   const st1 = await S.runBrowserServeOp(bs, 'status', { profileId: id });
-  ok(st1.ok && st1.active && st1.pid === s1.pid && st1.starttime === s1.starttime, 'status after start: active with the same identity');
+  ok(gateOf(st1.ok) && gateOf(st1.active) && st1.pid === s1.pid && st1.starttime === s1.starttime, 'status after start: active with the same identity');
   const sp = await S.runBrowserServeOp(bs, 'stop', { profileId: id });
-  ok(sp.ok && sp.closed === 1 && sp.left === null && closes().some((c) => c.ns === 'vs-' + id), 'stop: the CLI\'s own close --all, the daemon gone within the grace');
+  ok(gateOf(sp.ok) && sp.closed === 1 && sp.left === null && verdictOf(closes().some((c) => c.ns === 'vs-' + id)), 'stop: the CLI\'s own close --all, the daemon gone within the grace');
   ok((await S.runBrowserServeOp(bs, 'status', { profileId: id })).active === false && (await S.runBrowserServeOp(bs, 'cdp-url', { profileId: id })).code === 'no_cdp', 'after stop: inactive, no cdp url (typed)');
 }
 
@@ -210,22 +210,22 @@ console.log('— ③ a real agentd answers browser-serve; an old daemon is never
   const dataDir = path.join(ROOT, 'dm-data'); fs.mkdirSync(dataDir, { recursive: true });
   dmReal = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
   const conn = await dmReal.connect();
-  ok(conn.info?.capabilities?.includes?.('browser-serve'), 'the daemon advertises the browser-serve capability in its hello-ack');
+  ok(verdictOf(conn.info?.capabilities?.includes?.('browser-serve')), 'the daemon advertises the browser-serve capability in its hello-ack');
   const v = await dmReal.browserServe('version', undefined, { by: 'system:test' });
-  ok(v.ok && v.version === '0.38.0', `the op answers over the mux (version ${v.version}) — reply routed by its own op`);
+  ok(gateOf(v.ok) && v.version === '0.38.0', `the op answers over the mux (version ${v.version}) — reply routed by its own op`);
   const id = 'bp-0b0b0b0b';
   const s1 = await dmReal.browserServe('start', { profileId: id }, { by: 'system:test' });
-  ok(s1.ok && s1.active && Number.isInteger(s1.pid) && s1.cdpPort === DEAD_CDP && s1.dir === path.join(HOME, '.agent-browser', 'vs-' + id), `start through the daemon: pid ${s1.pid}, the daemon composed the dir under ITS home`);
+  ok(gateOf(s1.ok) && gateOf(s1.active) && gateOf(Number.isInteger(s1.pid)) && s1.cdpPort === DEAD_CDP && s1.dir === path.join(HOME, '.agent-browser', 'vs-' + id), `start through the daemon: pid ${s1.pid}, the daemon composed the dir under ITS home`);
   const st = await dmReal.browserServe('status', { profileId: id }, { by: 'system:test' });
-  ok(st.ok && st.active && st.pid === s1.pid, 'status through the daemon agrees');
+  ok(gateOf(st.ok) && gateOf(st.active) && st.pid === s1.pid, 'status through the daemon agrees');
   const cu = await dmReal.browserServe('cdp-url', { profileId: id }, { by: 'system:test' });
-  ok(cu.ok && cu.port === DEAD_CDP, 'cdp-url through the daemon');
+  ok(gateOf(cu.ok) && cu.port === DEAD_CDP, 'cdp-url through the daemon');
   const sp = await dmReal.browserServe('stop', { profileId: id }, { by: 'system:test' });
-  ok(sp.ok && sp.closed === 1, 'stop through the daemon');
+  ok(gateOf(sp.ok) && sp.closed === 1, 'stop through the daemon');
   // the op never throws across the wire (the daemon relays the runner's own
   // {ok:false, code, error}); the ACCESS layer is where it becomes a coded throw (④)
   const bad = await dmReal.browserServe('start', { profileId: 'nope' }, { by: 'system:test' });
-  ok(bad && bad.ok === false && bad.code === 'bad-request' && /profile id/.test(bad.error), 'a machine-side refusal arrives as the machine\'s own {ok:false, code, error} object — never a throw across the wire');
+  ok(gateOf(bad) && bad.ok === false && bad.code === 'bad-request' && verdictOf(/profile id/.test(bad.error)), 'a machine-side refusal arrives as the machine\'s own {ok:false, code, error} object — never a throw across the wire');
   // THE GATE: an OLD daemon (no capability) is never sent a frame
   const c2 = await dmReal.connect();
   const saved = c2.info.capabilities;
@@ -233,16 +233,16 @@ console.log('— ③ a real agentd answers browser-serve; an old daemon is never
   let sent = 0; const origControl = c2.mux.control.bind(c2.mux);
   c2.mux.control = (m) => { if (m && m.op === 'browser-serve') sent++; return origControl(m); };
   const g = await threw(() => dmReal.browserServe('version', undefined, { by: 'system:test' }));
-  ok(g && /lacks browser-serve \(capabilities gate\)/.test(g.message) && g.code === 'host_needs_daemon' && sent === 0, 'an old daemon is refused by the capability gate BEFORE any frame is sent (unknown ops hang)');
+  ok(gateOf(g) && gateOf(/lacks browser-serve \(capabilities gate\)/.test(g.message)) && g.code === 'host_needs_daemon' && sent === 0, 'an old daemon is refused by the capability gate BEFORE any frame is sent (unknown ops hang)');
   c2.info.capabilities = saved; c2.mux.control = origControl;
   ok((await dmReal.browserServe('version', undefined, { by: 'system:test' })).version === '0.38.0', 'with the capability back, the op answers again');
   // drift guards over the three touches
   const cli = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
   const daemon = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
   const bundle = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-agentd.js'), 'utf8');
-  ok(/m\.op === 'browser-serve-result'/.test(cli) && /daemon lacks browser-serve \(capabilities gate\)/.test(cli), 'client: the reply op is in the id-keyed routing set and the method is gated');
-  ok(/capabilities: \[[^\]]*'browser-serve'[^\]]*\]/.test(daemon) && /msg\.op === 'browser-serve'/.test(daemon) && /op: 'browser-serve-result'/.test(daemon) && /^let bsFacts = null;/m.test(daemon), 'daemon: capability in the hello-ack, the handler, the reply op, ONE facts singleton per process');
-  ok(/\/\/ src\/browser-serve\.js/.test(bundle), 'the daemon bundle carries src/browser-serve.js (the SHARED module, one implementation)');
+  ok(gateOf(/m\.op === 'browser-serve-result'/.test(cli)) && verdictOf(/daemon lacks browser-serve \(capabilities gate\)/.test(cli)), 'client: the reply op is in the id-keyed routing set and the method is gated');
+  ok(gateOf(/capabilities: \[[^\]]*'browser-serve'[^\]]*\]/.test(daemon)) && gateOf(/msg\.op === 'browser-serve'/.test(daemon)) && gateOf(/op: 'browser-serve-result'/.test(daemon)) && verdictOf(/^let bsFacts = null;/m.test(daemon)), 'daemon: capability in the hello-ack, the handler, the reply op, ONE facts singleton per process');
+  ok(verdictOf(/\/\/ src\/browser-serve\.js/.test(bundle)), 'the daemon bundle carries src/browser-serve.js (the SHARED module, one implementation)');
   try { await dmReal.stop?.(); } catch { /* gone */ }
   dmReal = null;
 }
@@ -279,11 +279,11 @@ const fakeHosts = {
 const access = A.create({ hosts: fakeHosts, env: () => localEnv, homeDir: HOME, install: false, log: { log: () => { }, warn: () => { } } });
 const getJson = (url) => new Promise((resolve) => { const req = http.get(url, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch { j = null; } resolve({ status: res.statusCode, body: b, json: j }); }); }); req.on('error', (e) => resolve({ status: 0, error: e.message })); });
 {
-  ok(access.hostKnown('dev-1') && access.hostKnown('') && access.hostKnown('local') && !access.hostKnown('nope'), 'hostKnown: paired machines + this one; an unknown id is not known');
+  ok(gateOf(access.hostKnown('dev-1')) && gateOf(access.hostKnown('')) && gateOf(access.hostKnown('local')) && !access.hostKnown('nope'), 'hostKnown: paired machines + this one; an unknown id is not known');
   const f1 = await access.forwardCdp('dev-1', CDP_PORT);
   ok(f1.localPort !== CDP_PORT && f1.url === `http://127.0.0.1:${f1.localPort}`, `a paired machine's port ${CDP_PORT} becomes a hub-side loopback port ${f1.localPort}`);
   const r = await getJson(f1.url + '/json/version');
-  ok(r.status === 200 && r.json && r.json.Browser === 'Fake/1.0' && forwardOpens === 1, 'bytes round-trip through tcpForward (the device was asked once per connection)');
+  ok(r.status === 200 && gateOf(r.json) && r.json.Browser === 'Fake/1.0' && forwardOpens === 1, 'bytes round-trip through tcpForward (the device was asked once per connection)');
   const f2 = await access.forwardCdp('dev-1', CDP_PORT, { remoteUrl: `ws://127.0.0.1:${CDP_PORT}/devtools/browser/abc` });
   ok(f2.localPort === f1.localPort && f2.url === `ws://127.0.0.1:${f1.localPort}/devtools/browser/abc`, 'idempotent per (host, port); a ws url keeps its scheme + path');
   ok(access.forwards().length === 1 && access.forwards()[0].hostId === 'dev-1' && access.forwards()[0].refs === 2 && f2.close() === false && access.forwards().length === 1 && (await getJson(f1.url + '/json/version')).status === 200, 'two holders of one (host, port) share ONE listener (refs 2); releasing one keeps it up for the other');
@@ -292,11 +292,11 @@ const getJson = (url) => new Promise((resolve) => { const req = http.get(url, (r
   ok(fl.local === true && fl.localPort === CDP_PORT && fl.url === `http://127.0.0.1:${CDP_PORT}` && access.forwards().length === 0, 'the LOCAL machine needs no forward: the port is already ours');
   ok((await threw(() => access.forwardCdp('nope', CDP_PORT))).code === 'unsupported-host' && (await threw(() => access.forwardCdp('dev-down', CDP_PORT))).code === 'host_unavailable' && (await threw(() => access.forwardCdp('dev-1', 0))).code === 'bad-request', 'forward refusals: unknown host / device down / bad port, each by name');
   const v = await access.call('dev-1', 'version');
-  ok(v.ok && v.version === '0.38.0', 'call(dev-1, version) runs the SHARED runner at the far end');
+  ok(gateOf(v.ok) && v.version === '0.38.0', 'call(dev-1, version) runs the SHARED runner at the far end');
   ok((await access.call(null, 'version')).version === '0.38.0' && (await access.call('local', 'version')).version === '0.38.0', 'call(null|local, …) runs it in-process — the same code, zero hops');
   ok((await threw(() => access.call('nope', 'version'))).code === 'unsupported-host' && (await threw(() => access.call('dev-1', 'bogus'))).code === 'bad-request' && (await threw(() => access.call('dev-old', 'version'))).code === 'host_needs_daemon' && (await threw(() => access.call('dev-down', 'version'))).code === 'host_unavailable', 'call refusals: unknown host / unknown op / a daemon without the op / device down');
   const e = await threw(() => access.call('dev-1', 'start', { profileId: 'nope' }));
-  ok(e && e.code === 'bad-request' && /profile id/.test(e.message), 'a machine-side {ok:false} is thrown with ITS code and sentence (one shape for callers)');
+  ok(gateOf(e) && e.code === 'bad-request' && verdictOf(/profile id/.test(e.message)), 'a machine-side {ok:false} is thrown with ITS code and sentence (one shape for callers)');
   const unwired = A.access();
   ok((await threw(() => unwired.call('dev-1', 'version'))).code === 'host_unavailable' && unwired.hostKnown('dev-1') === false, 'an unwired process refuses LOUDLY, never a no-op');
 }
@@ -318,7 +318,7 @@ let remoteId, extId, localCdpId;
   remoteId = rp.id;
   ok(rp.host === 'dev-1' && rp.dir === null && rp.provider === 'chromium' && !fs.existsSync(path.join(HOME, '.agent-browser', 'vs-' + rp.id)), 'a chromium profile on a paired machine: host set, NO directory here (the machine owns its own)');
   const e1 = await threw(() => k.createProfile({ label: 'X', host: 'nope' }));
-  ok(e1 && e1.code === 'unsupported-host' && /not a paired machine/.test(e1.message), 'an unpaired host is refused BY NAME by the keeper');
+  ok(gateOf(e1) && e1.code === 'unsupported-host' && verdictOf(/not a paired machine/.test(e1.message)), 'an unpaired host is refused BY NAME by the keeper');
   ok((await threw(() => k.createProfile({ label: 'C1', provider: 'cloud:agentcore' }))).code === 'provider_unavailable' && (await threw(() => k.createProfile({ label: 'C2', provider: 'cloud:browserbase', host: 'dev-1' }))).code === 'provider_needs_local_key' && (await threw(() => k.createProfile({ label: 'C3', provider: 'cdp' }))).code === 'cdp_port_required' && (await threw(() => k.createProfile({ label: 'C4', provider: 'cloak' }))).code === 'provider_unknown', 'the keeper speaks the PURE refusals (an unwired row / a key row on a host / cdp without a port / the removed backend by name)');
   const ep = k.createProfile({ label: 'Their Chrome', provider: 'cdp', host: 'dev-1', cdpPort: CDP_PORT }, { owner: { kind: 'session', id: KEY_A } });
   extId = ep.id;
@@ -332,22 +332,22 @@ let remoteId, extId, localCdpId;
   const launchesBefore = launches().length;
   const a1 = await k.attach({ profileId: remoteId, browserKey: KEY_A, sessionId: 'sess-a' });
   const rec1 = k.browserOf(remoteId);
-  ok(a1.browser.state === 'ready' && rec1.hostId === 'dev-1' && Number.isInteger(rec1.pid) && rec1.forward && rec1.forward.remotePort === CDP_PORT && rec1.forward.localPort !== CDP_PORT && rec1.dir === path.join(REMOTE_HOME, '.agent-browser', 'vs-' + remoteId), `attach: the device started it (pid ${rec1.pid} THERE, dir under the device's home), the hub forwarded ${CDP_PORT} → ${rec1.forward.localPort}`);
+  ok(a1.browser.state === 'ready' && rec1.hostId === 'dev-1' && gateOf(Number.isInteger(rec1.pid)) && gateOf(rec1.forward) && rec1.forward.remotePort === CDP_PORT && rec1.forward.localPort !== CDP_PORT && rec1.dir === path.join(REMOTE_HOME, '.agent-browser', 'vs-' + remoteId), `attach: the device started it (pid ${rec1.pid} THERE, dir under the device's home), the hub forwarded ${CDP_PORT} → ${rec1.forward.localPort}`);
   ok(launches().length === launchesBefore + 1 && launches().slice(-1)[0].profile === rec1.dir, 'exactly one launch, on the device-composed directory');
   const cdpPair = a1.env.find(B.isCdpPair);
   ok(cdpPair === `AGENT_BROWSER_CDP=ws://127.0.0.1:${rec1.forward.localPort}/devtools/browser/fake-vs-${remoteId}` && !a1.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && a1.cdpUrl === cdpPair.slice('AGENT_BROWSER_CDP='.length), 'the session\'s env names the hub-side forward (scheme + path kept) and no directory; the wrapper\'s cdpUrl is the same');
   const view = k.list().browsers[remoteId];
   ok(view.cdpUrl === undefined && view.remoteCdpUrl === undefined && view.hostId === 'dev-1' && view.forward.localPort === rec1.forward.localPort, 'the UI view strips both CDP urls and keeps the forward + host');
-  ok(access.forwards().some((f) => f.hostId === 'dev-1' && f.remotePort === CDP_PORT), 'the forward is live in the access layer');
+  ok(verdictOf(access.forwards().some((f) => f.hostId === 'dev-1' && f.remotePort === CDP_PORT)), 'the forward is live in the access layer');
   // the tick never pid-judges or samples a remote record
   await k.tick();
   ok(k.browserOf(remoteId).state === 'ready' && !k.list().browsers[remoteId].live, 'the tick leaves a remote record alone: still ready, never sampled (the pid is not local)');
-  ok(k.setFor(KEY_A).attachments.some((a) => a.profileId === remoteId), 'the lease is an ordinary lease');
+  ok(verdictOf(k.setFor(KEY_A).attachments.some((a) => a.profileId === remoteId)), 'the lease is an ordinary lease');
   // stop: the device's own stop, the forward closed, nothing signalled here
   const closesBefore = closes().length;
   const sp = await k.stop(remoteId, { why: 'user' });
   ok(sp.state === 'stopped' && closes().length === closesBefore + 1 && closes().slice(-1)[0].ns === 'vs-' + remoteId && !access.forwards().some((f) => f.remotePort === CDP_PORT && f.hostId === 'dev-1'), 'stop: the device ran its own close --all, the hub closed the forward');
-  ok(lines.some((l) => /stopped on dev-1 \(user\)/.test(l)), 'the log says WHERE it stopped');
+  ok(verdictOf(lines.some((l) => /stopped on dev-1 \(user\)/.test(l))), 'the log says WHERE it stopped');
 
   // remote cdp (external): reached, probed, never launched
   const a2 = await k.attach({ profileId: extId, browserKey: KEY_A, sessionId: 'sess-a' });
@@ -355,26 +355,26 @@ let remoteId, extId, localCdpId;
   ok(rec2.external === true && rec2.pid === null && rec2.state === 'ready' && rec2.cdpBrowser === 'Fake/1.0' && rec2.forward.remotePort === CDP_PORT && launches().length === launchesBefore + 1, 'an external browser over CDP: reached (probed /json/version through the forward), NOTHING launched, no pid');
   ok(a2.env.find(B.isCdpPair) === `AGENT_BROWSER_CDP=http://127.0.0.1:${rec2.forward.localPort}`, 'its env names the forward as an http endpoint');
   const sp2 = await k.stop(extId, { why: 'user' });
-  ok(sp2.state === 'stopped' && /released/.test(lines.slice(-1)[0]) && (await getJson(`http://127.0.0.1:${CDP_PORT}/json/version`)).status === 200 && access.forwards().length === 0, 'stop releases it: the forward is closed and the external browser is LEFT RUNNING (never signalled)');
+  ok(sp2.state === 'stopped' && gateOf(/released/.test(lines.slice(-1)[0])) && (await getJson(`http://127.0.0.1:${CDP_PORT}/json/version`)).status === 200 && access.forwards().length === 0, 'stop releases it: the forward is closed and the external browser is LEFT RUNNING (never signalled)');
 
   // local cdp: no forward, the port is ours
   const a3 = await k.attach({ profileId: localCdpId, browserKey: KEY_B, sessionId: 'sess-b' });
-  ok(a3.env.find(B.isCdpPair) === `AGENT_BROWSER_CDP=http://127.0.0.1:${CDP_PORT}` && k.browserOf(localCdpId).forward === null && k.browserOf(localCdpId).external && access.forwards().length === 0, 'a local cdp profile: the env names the port directly, no forward');
+  ok(a3.env.find(B.isCdpPair) === `AGENT_BROWSER_CDP=http://127.0.0.1:${CDP_PORT}` && k.browserOf(localCdpId).forward === null && gateOf(k.browserOf(localCdpId).external) && access.forwards().length === 0, 'a local cdp profile: the env names the port directly, no forward');
   ok((await k.streamPortFor({ ok: true, kind: 'attachment', profileId: localCdpId, ns: 'x', sessionName: 'y' })).code === 'stream_unavailable', 'the live view of a reached browser is refused by name (not bridged in this release)');
   await k.stop(localCdpId, { why: 'user' });
 
   // a dead cdp port is a named refusal, never a local launch
   const dead = k.createProfile({ label: 'Dead', provider: 'cdp', cdpPort: 1 }, { owner: { kind: 'instance', id: null } });
   const e2 = await threw(() => k.attach({ profileId: dead.id, browserKey: KEY_B, sessionId: 'sess-b' }));
-  ok(e2 && e2.code === 'cdp_unreachable' && /remote-debugging-port=1/.test(e2.message) && /NON-default --user-data-dir/.test(e2.message) && k.browserOf(dead.id).state === 'failed' && launches().length === launchesBefore + 1, 'a port nobody answers ⇒ cdp_unreachable with the remedy (Chrome ≥ 136 needs a non-default user-data-dir) and NO launch');
+  ok(gateOf(e2) && e2.code === 'cdp_unreachable' && gateOf(/remote-debugging-port=1/.test(e2.message)) && gateOf(/NON-default --user-data-dir/.test(e2.message)) && k.browserOf(dead.id).state === 'failed' && launches().length === launchesBefore + 1, 'a port nobody answers ⇒ cdp_unreachable with the remedy (Chrome ≥ 136 needs a non-default user-data-dir) and NO launch');
   // a device without the op / a device down: the keeper refuses by name
   const kd = mkKeeper(new Set([KEY_A]));
   const onOld = kd.createProfile({ label: 'Old box', host: 'dev-old' }, { owner: { kind: 'instance', id: null } });
   const e3 = await threw(() => kd.attach({ profileId: onOld.id, browserKey: KEY_A, sessionId: 'sess-a' }));
-  ok(e3 && e3.code === 'host_needs_daemon' && /upgrade the agent/.test(e3.message) && kd.browserOf(onOld.id).state === 'failed', 'a machine whose daemon predates browser-serve ⇒ host_needs_daemon (upgrade the agent), the record failed WITH the reason');
+  ok(gateOf(e3) && e3.code === 'host_needs_daemon' && gateOf(/upgrade the agent/.test(e3.message)) && kd.browserOf(onOld.id).state === 'failed', 'a machine whose daemon predates browser-serve ⇒ host_needs_daemon (upgrade the agent), the record failed WITH the reason');
   const onDown = kd.createProfile({ label: 'Down box', host: 'dev-down' }, { owner: { kind: 'instance', id: null } });
   const e4 = await threw(() => kd.attach({ profileId: onDown.id, browserKey: KEY_A, sessionId: 'sess-a' }));
-  ok(e4 && e4.code === 'host_unavailable' && /device link not responding/.test(e4.message), 'a machine that cannot be reached ⇒ host_unavailable with the link\'s sentence');
+  ok(gateOf(e4) && e4.code === 'host_unavailable' && verdictOf(/device link not responding/.test(e4.message)), 'a machine that cannot be reached ⇒ host_unavailable with the link\'s sentence');
   k.shutdown(); kd.shutdown();
 }
 // boot adoption of remote records: ask, never signal
@@ -389,10 +389,10 @@ let remoteId, extId, localCdpId;
   const k2 = mkKeeper(new Set([KEY_A]));
   const b = await k2.boot();
   const r1 = k2.browserOf(remoteId), r2 = k2.browserOf(extId);
-  ok(b.browsers === 2 && r1.state === 'ready' && r1.adoptedAt && r1.pid === pidThere && r1.forward && r1.forward.remotePort === CDP_PORT, 'boot re-adopts the remote chromium record by ASKING the device (status + cdp-url) and re-forwards its port');
+  ok(b.browsers === 2 && r1.state === 'ready' && gateOf(r1.adoptedAt) && r1.pid === pidThere && gateOf(r1.forward) && r1.forward.remotePort === CDP_PORT, 'boot re-adopts the remote chromium record by ASKING the device (status + cdp-url) and re-forwards its port');
   // both records name dev-1:CDP_PORT (the fake device's browser reports the same port the cdp profile points at) ⇒ ONE shared listener, two holders
-  ok(r2.state === 'ready' && r2.adoptedAt && r2.forward && access.forwards().length === 1 && access.forwards()[0].refs === 2, 'boot re-adopts the external record by re-probing through a forward it SHARES with the chromium record (one listener, refs 2)');
-  ok(lines.some((l) => /adopted .* on dev-1 \(daemon pid \d+ there\)/.test(l)) && lines.some((l) => /adopted .*external browser over CDP/.test(l)), 'both adoptions are logged with where the process is');
+  ok(r2.state === 'ready' && gateOf(r2.adoptedAt) && gateOf(r2.forward) && access.forwards().length === 1 && access.forwards()[0].refs === 2, 'boot re-adopts the external record by re-probing through a forward it SHARES with the chromium record (one listener, refs 2)');
+  ok(gateOf(lines.some((l) => /adopted .* on dev-1 \(daemon pid \d+ there\)/.test(l))) && verdictOf(lines.some((l) => /adopted .*external browser over CDP/.test(l))), 'both adoptions are logged with where the process is');
   await k2.stop(remoteId, { why: 'user' });
   ok(access.forwards().length === 1 && access.forwards()[0].refs === 1 && (await getJson(`http://127.0.0.1:${r2.forward.localPort}/json/version`)).status === 200, 'stopping the chromium record releases ITS reference only — the external record\'s forward still answers (never torn down under the other record\'s feet)');
   // the external browser goes away: the next boot records it stopped WITH the reason
@@ -401,7 +401,7 @@ let remoteId, extId, localCdpId;
   access.shutdown();
   const k3 = mkKeeper(new Set([KEY_A]));
   await k3.boot();
-  ok(k3.browserOf(extId).state === 'stopped' && /no browser answers CDP at dev-1:/.test(k3.browserOf(extId).lastError) && access.forwards().length === 0, 'an external browser that vanished: recorded stopped naming the machine + port, its forward closed');
+  ok(k3.browserOf(extId).state === 'stopped' && gateOf(/no browser answers CDP at dev-1:/.test(k3.browserOf(extId).lastError)) && access.forwards().length === 0, 'an external browser that vanished: recorded stopped naming the machine + port, its forward closed');
   k3.shutdown();
 }
 
@@ -431,7 +431,7 @@ let srv = null;
   };
   const bearer = (t) => ({ Authorization: 'Bearer ' + t });
   let r = await j('GET', '/api/browser/providers');
-  ok(r.status === 200 && r.json.providers.length === B.providerIds().length && !('proof' in r.json) && !('egress' in r.json) && !('cloakSites' in r.json) && !('cloak' in r.json) && r.json.host === null && r.json.hostKnown === true && Array.isArray(r.json.forwards), 'GET /api/browser/providers: the rows and the forwards — no §7.2.1 record, allowlist or site list any more (lane engine-spi-egress L3)');
+  ok(r.status === 200 && r.json.providers.length === B.providerIds().length && !('proof' in r.json) && !('egress' in r.json) && !('cloakSites' in r.json) && !('cloak' in r.json) && r.json.host === null && r.json.hostKnown === true && verdictOf(Array.isArray(r.json.forwards)), 'GET /api/browser/providers: the rows and the forwards — no §7.2.1 record, allowlist or site list any more (lane engine-spi-egress L3)');
   r = await j('GET', '/api/browser/providers?host=dev-1');
   ok(r.status === 200 && r.json.hostKnown === true && r.json.providers.find((x) => x.id === 'cloud:browserbase').onHost.code === 'provider_needs_local_key' && r.json.providers.find((x) => x.id === 'chromium').onHost.ok === true, '?host=dev-1: the verdict FOR that machine per row (a host the route answers ABOUT is not refused)');
   r = await j('GET', '/api/browser/providers?host=nope');
@@ -442,17 +442,17 @@ let srv = null;
   ok(r.status === 200 && r.json.profile.host === 'dev-1' && r.json.profile.cdpPort === CDP2 && r.json.profile.dir === null, 'POST /api/browser/profiles with host + cdpPort creates the remote cdp profile', JSON.stringify(r.json));
   const extRoute = r.json.profile.id;
   r = await j('POST', '/api/browser/profiles', { label: 'Cloaked', provider: 'cloud:agentcore' });
-  ok(r.status === 400 && r.json.code === 'provider_unavailable' && /unverified/.test(r.json.error), 'an unwired row (agentcore) ⇒ 400 provider_unavailable naming why');
+  ok(r.status === 400 && r.json.code === 'provider_unavailable' && verdictOf(/unverified/.test(r.json.error)), 'an unwired row (agentcore) ⇒ 400 provider_unavailable naming why');
   r = await j('POST', '/api/browser/profiles', { label: 'Cloaked', provider: 'cloak' });
-  ok(r.status === 400 && r.json.code === 'provider_unknown' && /unknown provider "cloak"/.test(r.json.error), 'the removed backend ⇒ 400 provider_unknown by name (no shim)', JSON.stringify(r.json).slice(0, 300));
+  ok(r.status === 400 && r.json.code === 'provider_unknown' && verdictOf(/unknown provider "cloak"/.test(r.json.error)), 'the removed backend ⇒ 400 provider_unknown by name (no shim)', JSON.stringify(r.json).slice(0, 300));
   r = await j('POST', '/api/browser/profiles', { label: 'Elsewhere', host: 'nope' });
-  ok(r.status === 400 && r.json.code === 'unsupported-host' && /not a paired machine/.test(r.json.error), 'an unpaired host ⇒ 400 unsupported-host by name');
+  ok(r.status === 400 && r.json.code === 'unsupported-host' && verdictOf(/not a paired machine/.test(r.json.error)), 'an unpaired host ⇒ 400 unsupported-host by name');
   r = await j('POST', '/api/browser/profiles', { label: 'Portless', provider: 'cdp' });
   ok(r.status === 400 && r.json.code === 'cdp_port_required', 'cdp without a port ⇒ 400 cdp_port_required');
   r = await j('GET', '/api/browser/profiles');
-  ok(r.status === 200 && Array.isArray(r.json.providers) && r.json.providers.length === B.providerIds().length, 'the digest carries the provider rows');
+  ok(r.status === 200 && gateOf(Array.isArray(r.json.providers)) && r.json.providers.length === B.providerIds().length, 'the digest carries the provider rows');
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-1', profile: extRoute });
-  ok(r.status === 200 && !('cdpUrl' in r.json) && r.json.env.some(B.isCdpPair) && r.json.browser.hostId === 'dev-1' && r.json.browser.cdpUrl === undefined, 'attach over the route: the env carries the pair, the UI answer no top-level cdpUrl and the browser view none either');
+  ok(r.status === 200 && !('cdpUrl' in r.json) && gateOf(r.json.env.some(B.isCdpPair)) && r.json.browser.hostId === 'dev-1' && r.json.browser.cdpUrl === undefined, 'attach over the route: the env carries the pair, the UI answer no top-level cdpUrl and the browser view none either');
   r = await j('GET', '/api/agent/browser/providers?host=dev-1', undefined, bearer(TOKEN_A));
   ok(r.status === 200 && r.json.providers.find((x) => x.id === 'cdp').onHost.ok === true, 'the agent-side providers route answers the same rows');
   // the shipped CLI
@@ -461,16 +461,16 @@ let srv = null;
   // runs in THIS process, so a spawnSync would block the very loop that has to answer it
   const cli = (args) => new Promise((resolve) => execFile(process.execPath, [path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: cliEnv, encoding: 'utf8', timeout: 20000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') + (err && typeof err.code !== 'number' ? `\n[spawn error] ${err.message}` : '') })));
   const pv = await cli(['providers', '--host', 'dev-1']);
-  ok(pv.status === 0 && /✗ cloud:browserbase/.test(pv.stdout) && /provider_needs_local_key|needs a key/.test(pv.stdout) && /✓ chromium/.test(pv.stdout) && !/cloak|egress measurement/i.test(pv.stdout), 'vibespace-browser providers --host dev-1 prints each row with its verdict (no egress record line any more)', pv.stdout + pv.stderr);
+  ok(pv.status === 0 && gateOf(/✗ cloud:browserbase/.test(pv.stdout)) && gateOf(/provider_needs_local_key|needs a key/.test(pv.stdout)) && gateOf(/✓ chromium/.test(pv.stdout)) && !/cloak|egress measurement/i.test(pv.stdout), 'vibespace-browser providers --host dev-1 prints each row with its verdict (no egress record line any more)', pv.stdout + pv.stderr);
   const nw = await cli(['new', 'Laptop Chrome', '--provider', 'cdp', '--host', 'dev-1', '--cdp-port', String(CDP2)]);
-  ok(nw.status === 0 && /reaching an existing browser over CDP \(dev-1:\d+; nothing is started\)/.test(nw.stdout), 'vibespace-browser new --provider cdp --host --cdp-port says what it made', nw.stdout + nw.stderr);
+  ok(nw.status === 0 && verdictOf(/reaching an existing browser over CDP \(dev-1:\d+; nothing is started\)/.test(nw.stdout)), 'vibespace-browser new --provider cdp --host --cdp-port says what it made', nw.stdout + nw.stderr);
   const newId = /\((bp-[0-9a-f]{8})\)/.exec(nw.stdout)?.[1];
   const up = await cli(['use', newId]);
-  ok(up.status === 0 && !/AGENT_BROWSER_CDP=|ws:\/\/|devtools/i.test(up.stdout + up.stderr) && !/export /.test(up.stdout) && /attached — run `vibespace-browser <verb>`/.test(up.stdout), '`use` of a reached browser prints no env and no CDP url (§5.1; takeover C2: there is nothing to export)', up.stdout + up.stderr);
+  ok(up.status === 0 && !/AGENT_BROWSER_CDP=|ws:\/\/|devtools/i.test(up.stdout + up.stderr) && !/export /.test(up.stdout) && verdictOf(/attached — run `vibespace-browser <verb>`/.test(up.stdout)), '`use` of a reached browser prints no env and no CDP url (§5.1; takeover C2: there is nothing to export)', up.stdout + up.stderr);
   const cl = await cli(['new', 'Agentcore box', '--provider', 'cloud:agentcore']);
-  ok(cl.status !== 0 && /provider_unavailable/.test(cl.stdout + cl.stderr), 'the CLI prints the typed refusal for an unwired row (agentcore)', cl.stdout + cl.stderr);
+  ok(cl.status !== 0 && verdictOf(/provider_unavailable/.test(cl.stdout + cl.stderr)), 'the CLI prints the typed refusal for an unwired row (agentcore)', cl.stdout + cl.stderr);
   const pf = await cli(['profiles']);
-  ok(pf.status === 0 && /cdp on dev-1 cdp:\d+/.test(pf.stdout), '`profiles` shows host + cdp port on the row', pf.stdout);
+  ok(pf.status === 0 && verdictOf(/cdp on dev-1 cdp:\d+/.test(pf.stdout)), '`profiles` shows host + cdp port on the row', pf.stdout);
   await kR.stop(extRoute, { why: 'user' }).catch(() => { });
   await kR.stop(newId, { why: 'user' }).catch(() => { });
   kR.shutdown();
@@ -487,7 +487,7 @@ console.log('— ⑥ the allowlisting egress proxy (§7.2.1: enforcing, not obse
   let list = 'allowed.test, .sub.test';
   const proxy = E.create({ allowlist: () => list, resolve: (h) => (h === 'allowed.test' || h.endsWith('.sub.test') ? '127.0.0.1' : h), log: { log: () => { } } });
   const PP = await proxy.listen();
-  ok(Number.isInteger(PP) && PP > 0 && proxy.url() === `http://127.0.0.1:${PP}`, `the proxy listens on loopback:${PP}`);
+  ok(gateOf(Number.isInteger(PP)) && PP > 0 && proxy.url() === `http://127.0.0.1:${PP}`, `the proxy listens on loopback:${PP}`);
   const raw = (lines2) => new Promise((resolve) => {
     const s = net.connect({ host: '127.0.0.1', port: PP }); let buf = '';
     s.on('data', (d) => { buf += d; }); s.on('close', () => resolve(buf)); s.on('error', () => resolve(buf));
@@ -502,22 +502,22 @@ console.log('— ⑥ the allowlisting egress proxy (§7.2.1: enforcing, not obse
     setTimeout(() => { try { s.destroy(); } catch { /* gone */ } }, 3000);
   });
   const t1 = await tunnel('allowed.test');
-  ok(t1.stage === 1 && /hi \/through/.test(t1.buf), 'CONNECT to an allowlisted host: 200 Connection Established, bytes tunnelled both ways');
+  ok(t1.stage === 1 && verdictOf(/hi \/through/.test(t1.buf)), 'CONNECT to an allowlisted host: 200 Connection Established, bytes tunnelled both ways');
   const t2 = await tunnel('a.sub.test');
-  ok(t2.stage === 1 && /hi \/through/.test(t2.buf), 'a dotted-suffix rule admits a sub-domain');
+  ok(t2.stage === 1 && verdictOf(/hi \/through/.test(t2.buf)), 'a dotted-suffix rule admits a sub-domain');
   const t3 = await tunnel('blocked.test');
-  ok(t3.stage === 0 && /HTTP\/1\.1 403/.test(t3.buf) && /egress refused: blocked.test is not in the egress allowlist/.test(t3.buf), 'CONNECT to a host not listed: 403 with the verdict\'s own sentence, socket closed');
+  ok(t3.stage === 0 && gateOf(/HTTP\/1\.1 403/.test(t3.buf)) && verdictOf(/egress refused: blocked.test is not in the egress allowlist/.test(t3.buf)), 'CONNECT to a host not listed: 403 with the verdict\'s own sentence, socket closed');
   const t4 = await tunnel('localhost');
-  ok(t4.stage === 0 && /403/.test(t4.buf) && /loopback/.test(t4.buf), 'CONNECT to loopback is refused even though 127.0.0.1 is where the target lives (never a way back into the hub)');
+  ok(t4.stage === 0 && gateOf(/403/.test(t4.buf)) && verdictOf(/loopback/.test(t4.buf)), 'CONNECT to loopback is refused even though 127.0.0.1 is where the target lives (never a way back into the hub)');
   const g1 = await raw(`GET http://allowed.test:${TP}/plain HTTP/1.1\r\nHost: allowed.test\r\nConnection: close\r\n\r\n`);
-  ok(/HTTP\/1\.1 200/.test(g1) && /hi \/plain/.test(g1), 'plain http through the proxy for an allowlisted host');
+  ok(gateOf(/HTTP\/1\.1 200/.test(g1)) && verdictOf(/hi \/plain/.test(g1)), 'plain http through the proxy for an allowlisted host');
   const g2 = await raw(`GET http://blocked.test:${TP}/plain HTTP/1.1\r\nHost: blocked.test\r\nConnection: close\r\n\r\n`);
-  ok(/HTTP\/1\.1 403/.test(g2) && /egress refused/.test(g2), 'plain http to a host not listed: 403');
+  ok(gateOf(/HTTP\/1\.1 403/.test(g2)) && verdictOf(/egress refused/.test(g2)), 'plain http to a host not listed: 403');
   const g3 = await raw('GET /relative HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
-  ok(/HTTP\/1\.1 400/.test(g3), 'a non-proxy (origin-form) request is refused 400 — it is a proxy, not a server');
+  ok(verdictOf(/HTTP\/1\.1 400/.test(g3)), 'a non-proxy (origin-form) request is refused 400 — it is a proxy, not a server');
   list = '';
   const t5 = await tunnel('allowed.test');
-  ok(t5.stage === 0 && /403/.test(t5.buf) && /empty/.test(t5.buf), 'the allowlist is re-read per request: emptied ⇒ the same host is now refused (deny by default)');
+  ok(t5.stage === 0 && gateOf(/403/.test(t5.buf)) && verdictOf(/empty/.test(t5.buf)), 'the allowlist is re-read per request: emptied ⇒ the same host is now refused (deny by default)');
   // allowed: t1, t2, g1 · refused: t3, t4, g2, t5 (g3's 400 is a malformed request, not a verdict)
   ok(proxy.stats.allowed === 3 && proxy.stats.refused === 4, `stats count what happened (${proxy.stats.allowed} allowed / ${proxy.stats.refused} refused)`);
   await proxy.close();
@@ -554,4 +554,4 @@ console.log('— ⑥ the allowlisting egress proxy (§7.2.1: enforcing, not obse
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -36,7 +36,7 @@ const D = require('../src/server/browser-dialogs.js');
 const ST = require('../src/browser-stuck.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -141,49 +141,49 @@ try {
   try { w = await world('lane'); } catch (e) { skip(`the keeper could not launch a browser here: ${e && e.message}`); w = null; }
   if (w) {
     console.log('— the lane: a real beforeunload through the real keeper + routes + CLI + watch');
-    ok(w.launchCfg() && w.launchCfg().noAutoDialog === true, 'the keeper\'s LAUNCH config for this browser holds page dialogs (noAutoDialog — launched after the lane)', w.launchCfg());
+    ok(gateOf(w.launchCfg()) && w.launchCfg().noAutoDialog === true, 'the keeper\'s LAUNCH config for this browser holds page dialogs (noAutoDialog — launched after the lane)', w.launchCfg());
     let r = await typeDraft(w, 'draft text');
     ok(r.code === 0, 'the agent opened the compose page, clicked and typed (sticky user activation)', r);
     // ① the navigation the page holds
     const before = w.opens.length;
     r = await w.cli(['open', U('/other-1')]);
     const ev = w.opens[before];
-    ok(r.code === 1 && r.out.startsWith(HEAD + 'beforeunload: "Leave site? Changes you made may not be saved.". Answer it: vibespace-browser dialog accept [text]  |  vibespace-browser dialog dismiss.  (beforeunload: accept = leave the page and lose unsaved input; dismiss = stay.)') && /\[dialog_open\]/.test(r.err), '① `open` elsewhere ⇒ [dialog_open], exit 1, THE sentence first (the real 0.38.1 + Chrome)', r);
-    ok(ev && ev.type === 'beforeunload' && r.exitAt - ev.at > 0 && r.exitAt - ev.at < 1000, `① …within 1 s of Chrome's own javascriptDialogOpening (${ev ? r.exitAt - ev.at : '?'} ms; the pre-lane shape sat 30 s)`, { ev, r: r.ms });
+    ok(r.code === 1 && gateOf(r.out.startsWith(HEAD + 'beforeunload: "Leave site? Changes you made may not be saved.". Answer it: vibespace-browser dialog accept [text]  |  vibespace-browser dialog dismiss.  (beforeunload: accept = leave the page and lose unsaved input; dismiss = stay.)')) && verdictOf(/\[dialog_open\]/.test(r.err)), '① `open` elsewhere ⇒ [dialog_open], exit 1, THE sentence first (the real 0.38.1 + Chrome)', r);
+    ok(gateOf(ev) && ev.type === 'beforeunload' && r.exitAt - ev.at > 0 && r.exitAt - ev.at < 1000, `① …within 1 s of Chrome's own javascriptDialogOpening (${ev ? r.exitAt - ev.at : '?'} ms; the pre-lane shape sat 30 s)`, { ev, r: r.ms });
     const jl = (await w.jsonList()).find((t) => t.type === 'page' && /\/other-1|\/form/.test(t.url));
-    ok(jl && /\/other-1$/.test(jl.url) && jl.title === 'COMPOSE-DRAFT', `① Chrome's /json/list shows userW's signature — the pending url over the OLD title ("${jl && jl.title}")`, jl);
+    ok(gateOf(jl) && gateOf(/\/other-1$/.test(jl.url)) && jl.title === 'COMPOSE-DRAFT', `① Chrome's /json/list shows userW's signature — the pending url over the OLD title ("${jl && jl.title}")`, jl);
     // ②
     r = await w.cli(['get', 'url']);
-    ok(r.code === 1 && r.out.split('\n')[0].startsWith(HEAD + 'beforeunload:') && /It has been open for/.test(r.out) && r.ms < 5000, `② the next verb repeats it at once (${r.ms} ms) — \`get url\` with the dialog line first`, r);
+    ok(r.code === 1 && gateOf(r.out.split('\n')[0].startsWith(HEAD + 'beforeunload:')) && gateOf(/It has been open for/.test(r.out)) && r.ms < 5000, `② the next verb repeats it at once (${r.ms} ms) — \`get url\` with the dialog line first`, r);
     // ③ dismiss ⇒ stay, draft kept
     r = await w.cli(['dialog', 'dismiss']);
-    ok(r.code === 0 && /dismissed — the page stays/.test(r.out), '③ `dialog dismiss` answers it through the watch', r);
+    ok(r.code === 0 && verdictOf(/dismissed — the page stays/.test(r.out)), '③ `dialog dismiss` answers it through the watch', r);
     await sleep(500);
     r = await w.cli(['get', 'value', '#f']);
     const t1 = await w.cli(['get', 'title']);
-    ok(r.code === 0 && /draft text/.test(r.out) && /COMPOSE-DRAFT/.test(t1.out), '③ …the page STAYS with the typed draft (never silently discarded)', { v: r, t: t1 });
+    ok(r.code === 0 && gateOf(/draft text/.test(r.out)) && verdictOf(/COMPOSE-DRAFT/.test(t1.out)), '③ …the page STAYS with the typed draft (never silently discarded)', { v: r, t: t1 });
     // ④ accept ⇒ leave
     r = await w.cli(['open', U('/other-2')]);
-    ok(r.code === 1 && r.out.startsWith(HEAD), '④ the next navigation is held again (the draft is still unsaved)', r);
+    ok(r.code === 1 && verdictOf(r.out.startsWith(HEAD)), '④ the next navigation is held again (the draft is still unsaved)', r);
     r = await w.cli(['dialog', 'accept']);
-    ok(r.code === 0 && /accepted — the page is being left/.test(r.out), '④ `dialog accept` = leave', r);
+    ok(r.code === 0 && verdictOf(/accepted — the page is being left/.test(r.out)), '④ `dialog accept` = leave', r);
     const t2 = await until(async () => { const x = await w.cli(['get', 'title']); return /OTHER \/other-2/.test(x.out) ? x : null; }, 8000, 300);
     ok(!!t2, '④ …the held navigation completes');
     // ⑤ an alert
     await w.cli(['open', U('/form')]);
     r = await w.cli(['click', '#b']);
-    ok(r.code === 0 && /\(a page alert was auto-accepted: "hello from alert"\)/.test(r.err) && !/blocking the page/.test(r.out + r.err), '⑤ an alert from a click is accepted by the watch and said once (the browser CLI\'s own "blocking" line replaced)', r);
+    ok(r.code === 0 && gateOf(/\(a page alert was auto-accepted: "hello from alert"\)/.test(r.err)) && !/blocking the page/.test(r.out + r.err), '⑤ an alert from a click is accepted by the watch and said once (the browser CLI\'s own "blocking" line replaced)', r);
     const r5 = await w.cli(['get', 'title']);
     ok(r5.code === 0 && !/auto-accepted/.test(r5.err), '⑤ …once');
     // ⑥ userW's shape: the lease's daemon dies under an open dialog
     r = await typeDraft(w, 'second draft');
     const held = await w.cli(['open', U('/other-3')]);
-    ok(held.code === 1 && held.out.startsWith(HEAD), '⑥ a dialog holds the page again', held);
+    ok(held.code === 1 && verdictOf(held.out.startsWith(HEAD)), '⑥ a dialog holds the page again', held);
     const pids = w.leaseDaemons();
     for (const pid of pids) { try { process.kill(pid, 'SIGKILL'); } catch { } }
     await until(() => w.leaseDaemons().length === 0, 3000);
     r = await w.cli(['dialog', 'accept']);
-    ok(pids.length >= 1 && r.code === 0 && /accepted/.test(r.out), `⑥ the lease's daemon (${pids.join(',')}) killed mid-hold — a new daemon could neither see nor answer it (measured), the watch answers it: \`dialog accept\``, r);
+    ok(pids.length >= 1 && r.code === 0 && verdictOf(/accepted/.test(r.out)), `⑥ the lease's daemon (${pids.join(',')}) killed mid-hold — a new daemon could neither see nor answer it (measured), the watch answers it: \`dialog accept\``, r);
     const st6 = await w.cli(['dialog', 'status']);
     const next = await w.cli(['get', 'title']);
     ok(st6.code === 0 && st6.out.trim() === ST.NO_DIALOG_TEXT && next.code === 0 && next.ms < 10000 && !/not responding/.test(next.out + next.err), `⑥ …the dialog is gone and the page ANSWERS the next daemon (${next.ms} ms: "${next.out.trim()}") — never the measured 16 s "tab is not responding"`, { st6, next });
@@ -197,15 +197,15 @@ try {
     // page dialog is open" and the stuck words pushed a Restart, while the lease's own daemon had seen the dialog
     await w.cli(['open', U('/form')]);
     r = await w.cli(['click', '#c']);
-    ok(r.code === 1 && r.out.startsWith(HEAD + 'confirm: "Discard this draft?" (the page\'s own words)'), '⑦ a confirm holds the page', r);
+    ok(r.code === 1 && verdictOf(r.out.startsWith(HEAD + 'confirm: "Discard this draft?" (the page\'s own words)')), '⑦ a confirm holds the page', r);
     w.restartWatch();
     r = await w.cli(['open', U('/other-7')]);
-    ok(r.code === 1 && r.out.startsWith(HEAD + 'confirm: "Discard this draft?"') && /\[dialog_open\]/.test(r.err) && r.ms < 10000, `⑦ right after the restart the next verb still names the dialog (${r.ms} ms) — the lease's daemon's line, as THE sentence`, r);
+    ok(r.code === 1 && gateOf(r.out.startsWith(HEAD + 'confirm: "Discard this draft?"')) && gateOf(/\[dialog_open\]/.test(r.err)) && r.ms < 10000, `⑦ right after the restart the next verb still names the dialog (${r.ms} ms) — the lease's daemon's line, as THE sentence`, r);
     r = await w.cli(['dialog', 'status']);
-    ok(r.code === 0 && /confirm dialog is open: "Discard this draft\?"/.test(r.out) && !/No page dialog is open/.test(r.out), '⑦ `dialog status` asks the browser\'s own view — never "No page dialog is open"', r);
+    ok(r.code === 0 && gateOf(/confirm dialog is open: "Discard this draft\?"/.test(r.out)) && !/No page dialog is open/.test(r.out), '⑦ `dialog status` asks the browser\'s own view — never "No page dialog is open"', r);
     r = await w.cli(['dialog', 'dismiss']);
     const t7 = await w.cli(['get', 'title']);
-    ok(r.code === 0 && t7.code === 0 && /COMPOSE-DRAFT/.test(t7.out) && t7.ms < 10000, `⑦ \`dialog dismiss\` is answered by the daemon that saw it; the page answers again (${t7.ms} ms) — no Restart, nothing typed lost`, { r, t7 });
+    ok(r.code === 0 && t7.code === 0 && gateOf(/COMPOSE-DRAFT/.test(t7.out)) && t7.ms < 10000, `⑦ \`dialog dismiss\` is answered by the daemon that saw it; the page answers again (${t7.ms} ms) — no Restart, nothing typed lost`, { r, t7 });
     await w.close();
   }
   // VERIFY r2 #3 (the real stack): a SHARED named profile, TWO conversations each on ITS tab, a confirm held on BOTH tabs at
@@ -227,8 +227,8 @@ try {
     const sa = await s2.cli(['dialog', 'status']);
     await turn();
     const sb = await s2.cliB(['dialog', 'status']);
-    ok(/A asks: discard\?/.test(ca.out) && /B asks: transfer\?/.test(cb.out) && !/B asks/.test(ca.out + ca.err) && !/A asks/.test(cb.out + cb.err)
-      && /A asks: discard\?/.test(sa.out) && !/B asks/.test(sa.out + sa.err) && /B asks: transfer\?/.test(sb.out) && !/A asks/.test(sb.out + sb.err),
+    ok(gateOf(/A asks: discard\?/.test(ca.out)) && gateOf(/B asks: transfer\?/.test(cb.out)) && !/B asks/.test(ca.out + ca.err) && !/A asks/.test(cb.out + cb.err)
+      && gateOf(/A asks: discard\?/.test(sa.out)) && !/B asks/.test(sa.out + sa.err) && gateOf(/B asks: transfer\?/.test(sb.out)) && !/A asks/.test(sb.out + sb.err),
       'r2 #3: with BOTH dialogs held, each conversation\'s click and `dialog status` name ITS page\'s dialog only (never the other conversation\'s words)', { ca: ca.out.slice(0, 160) + ca.err.slice(0, 160), cb: cb.out.slice(0, 160) + cb.err.slice(0, 160), sa: sa.out.slice(0, 200) + sa.err.slice(0, 200), sb: sb.out.slice(0, 200) + sb.err.slice(0, 200) });
     await turn();
     const da = await s2.cli(['dialog', 'dismiss']);
@@ -236,11 +236,11 @@ try {
     const sa2 = await s2.cli(['get', 'title']);
     await turn();
     const sb2 = await s2.cliB(['dialog', 'status']);
-    ok(da.code === 0 && sa2.code === 0 && /ASK A/.test(sa2.out) && /B asks: transfer\?/.test(sb2.out), 'r2 #3: A\'s `dialog dismiss` answers A\'s dialog only — A\'s page answers again, B\'s dialog is still open for B', { da: da.out + da.err, sa2: sa2.out + sa2.err, sb2: sb2.out + sb2.err });
+    ok(da.code === 0 && sa2.code === 0 && gateOf(/ASK A/.test(sa2.out)) && verdictOf(/B asks: transfer\?/.test(sb2.out)), 'r2 #3: A\'s `dialog dismiss` answers A\'s dialog only — A\'s page answers again, B\'s dialog is still open for B', { da: da.out + da.err, sa2: sa2.out + sa2.err, sb2: sb2.out + sb2.err });
     const db = await s2.cliB(['dialog', 'accept']);
     await sleep(300);
     const sb3 = await s2.cliB(['get', 'title']);
-    ok(db.code === 0 && sb3.code === 0 && /ASK B/.test(sb3.out), 'r2 #3: B answers its own', { db: db.out + db.err, sb3: sb3.out + sb3.err });
+    ok(db.code === 0 && sb3.code === 0 && verdictOf(/ASK B/.test(sb3.out)), 'r2 #3: B answers its own', { db: db.out + db.err, sb3: sb3.out + sb3.err });
     await s2.close();
   }
   // THE COMMON AGENT PATH: the conversation's own EPHEMERAL browser (rung D — its spawn config holds dialogs)
@@ -249,15 +249,15 @@ try {
   if (e) {
     let r = await typeDraft(e, 'eph draft');
     const rec = e.kk.ephemeralFor(e.KEY);
-    ok(r.code === 0 && rec && rec.state === 'ready' && e.kk.holdsDialogsFor(rec.profileId) === true, 'the first verbs started the conversation\'s own browser (managed ephemeral); it holds dialogs (its spawn config says noAutoDialog)', { r, rec });
+    ok(r.code === 0 && gateOf(rec) && rec.state === 'ready' && e.kk.holdsDialogsFor(rec.profileId) === true, 'the first verbs started the conversation\'s own browser (managed ephemeral); it holds dialogs (its spawn config says noAutoDialog)', { r, rec });
     const b0 = e.opens.length;
     r = await e.cli(['open', U('/other-e')]);
     const ev = e.opens[b0];
-    ok(r.code === 1 && r.out.startsWith(HEAD + 'beforeunload:') && ev && r.exitAt - ev.at < 1000, `ephemeral: \`open\` elsewhere ⇒ [dialog_open] within 1 s of the event (${ev ? r.exitAt - ev.at : '?'} ms)`, r);
+    ok(r.code === 1 && gateOf(r.out.startsWith(HEAD + 'beforeunload:')) && gateOf(ev) && r.exitAt - ev.at < 1000, `ephemeral: \`open\` elsewhere ⇒ [dialog_open] within 1 s of the event (${ev ? r.exitAt - ev.at : '?'} ms)`, r);
     r = await e.cli(['dialog', 'dismiss']);
     await sleep(400);
     const v = await e.cli(['get', 'value', '#f']);
-    ok(r.code === 0 && /draft/.test(v.out), 'ephemeral: `dialog dismiss` keeps the page and the draft', { r, v });
+    ok(r.code === 0 && verdictOf(/draft/.test(v.out)), 'ephemeral: `dialog dismiss` keeps the page and the draft', { r, v });
     await e.close();
   }
   // CONTROL: the pre-lane launch config (nothing holds the dialog) — 0.38.1 accepts the beforeunload silently
@@ -269,7 +269,7 @@ try {
     const Kmut = MUT.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, needle, '    return false;', "src/server/browser-keeper.js"), 'rec.holdDialogs = true;', '', "src/server/browser-keeper.js", 'join'), 'no-hold'); // the pre-lane keeper: no noAutoDialog in any file, no launch stamp
     let c = null; try { c = await world('ctl', { Kmod: Kmut }); } catch (e) { skip(`control: the keeper could not launch: ${e && e.message}`); }
     if (c) {
-      ok(c.launchCfg() && c.launchCfg().noAutoDialog === undefined, 'control setup: its launch config carries no noAutoDialog');
+      ok(gateOf(c.launchCfg()) && c.launchCfg().noAutoDialog === undefined, 'control setup: its launch config carries no noAutoDialog');
       // r4456 (the flake census, round 2): the fault is judged by its FACTS — the navigation answers ok, the page left is the OTHER one,
       // the typed draft is gone — never by the child's wall time (`r.ms < 5000` read red on a loaded box with the fault shown); the
       // CLI's own 90 s kill is the harness's named expiry. PLACED FIRST, RED AT WILL: the same fault on a SLOW child — its CLI held at
@@ -283,7 +283,7 @@ try {
       await c.cli(['open', U('/form')]);
       const vh = await c.cli(['get', 'value', '#f']);
       const faultH = rh.code === 0 && /OTHER \/other-c/.test(th.out) && !/held draft/.test(vh.out);
-      ok(faultH && !(rh.ms < 5000), `CONTROL PLACED (r4456): its CLI held past 5 s (${rh.ms} ms), the fault shows (code ${rh.code}, the OTHER page, the draft gone) — the old verdict with its time term reads red with nothing wrong; the verdict on the facts reads the fault`, { rh: { code: rh.code, ms: rh.ms }, t: th.out, v: vh.out });
+      ok(gateOf(faultH) && !(rh.ms < 5000), `CONTROL PLACED (r4456): its CLI held past 5 s (${rh.ms} ms), the fault shows (code ${rh.code}, the OTHER page, the draft gone) — the old verdict with its time term reads red with nothing wrong; the verdict on the facts reads the fault`, { rh: { code: rh.code, ms: rh.ms }, t: th.out, v: vh.out });
       if (rh.code === null) console.log('    · HARNESS (CONTROL): the held CLI was killed at its own 90 s bound');
       await typeDraft(c, 'lost draft');
       const r = await c.cli(['open', U('/other-c')]);
@@ -291,11 +291,11 @@ try {
       await c.cli(['open', U('/form')]);
       const v = await c.cli(['get', 'value', '#f']);
       if (r.code === null) console.log('    · HARNESS (CONTROL): the navigation\'s CLI was killed at its own 90 s bound');
-      ok(r.code === 0 && /OTHER \/other-c/.test(t.out) && !/lost draft/.test(v.out), `CONTROL: without it the navigation answers ok (in ${r.ms} ms) and the typed draft is GONE — the browser CLI's silent beforeunload accept the lane turns off`, { r, t: t.out, v: v.out });
-      ok(/the browser accepted the page's leave-page dialog by itself — the page was left and what was typed on it is gone/.test(r.err) && !/dialog_open/.test(r.out + r.err), '…and on such a browser (launched before the lane) the watch never reports a dialog 0.38.1 closes itself — it SAYS afterwards that the draft is gone', r);
+      ok(r.code === 0 && gateOf(/OTHER \/other-c/.test(t.out)) && !/lost draft/.test(v.out), `CONTROL: without it the navigation answers ok (in ${r.ms} ms) and the typed draft is GONE — the browser CLI's silent beforeunload accept the lane turns off`, { r, t: t.out, v: v.out });
+      ok(gateOf(/the browser accepted the page's leave-page dialog by itself — the page was left and what was typed on it is gone/.test(r.err)) && !/dialog_open/.test(r.out + r.err), '…and on such a browser (launched before the lane) the watch never reports a dialog 0.38.1 closes itself — it SAYS afterwards that the draft is gone', r);
       await c.close();
     }
   }
 } finally { pages.close(); cleanup(); }
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed, ${skipped} skipped)` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

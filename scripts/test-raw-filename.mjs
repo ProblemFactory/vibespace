@@ -73,7 +73,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -136,19 +136,19 @@ function formsOf(h) {
   const T = [
     ['/home/u/pics/photo.png', 'photo.png'], ['/a/b/', 'b'], ['/', ''], ['', ''], ['~', '~'], ['~/x/截图.png', '截图.png'], ['rel.txt', 'rel.txt'], [null, ''],
   ];
-  ok(T.every(([p, want]) => CD.fileNameOf(p) === want), 'fileNameOf: the last POSIX segment, trailing slashes ignored, "" for a root', T.map(([p]) => CD.fileNameOf(p)));
+  ok(verdictOf(T.every(([p, want]) => CD.fileNameOf(p) === want)), 'fileNameOf: the last POSIX segment, trailing slashes ignored, "" for a root', T.map(([p]) => CD.fileNameOf(p)));
   ok(CD.contentDisposition('') === null && CD.contentDisposition('\r\n\t') === null && CD.contentDisposition(null) === null, 'no name to give ⇒ null (the caller sends no header, exactly as before)');
   const a = CD.contentDisposition('photo.png');
   ok(a === `inline; filename="photo.png"; filename*=UTF-8''photo.png`, 'an ASCII name: inline + both forms, spelled exactly', a);
-  ok(CD.contentDisposition('x.pdf', 'attachment').startsWith('attachment; ') && CD.contentDisposition('x.pdf', 'bogus').startsWith('inline; '), 'type: attachment only when asked by name, else inline');
+  ok(gateOf(CD.contentDisposition('x.pdf', 'attachment').startsWith('attachment; ')) && verdictOf(CD.contentDisposition('x.pdf', 'bogus').startsWith('inline; ')), 'type: attachment only when asked by name, else inline');
   const q = formsOf(CD.contentDisposition('it\'s (a)*.txt'));
   const qx = CD.extValue('it\'s (a)*.txt');
-  ok(q.star === 'it\'s (a)*.txt' && ['%27', '%28', '%29', '%2A'].every((e) => qx.includes(e)) && !/['()*]/.test(qx), "`'()*` are percent-encoded in filename* (RFC 8187 attr-char) and decode back", qx);
+  ok(q.star === 'it\'s (a)*.txt' && gateOf(['%27', '%28', '%29', '%2A'].every((e) => qx.includes(e))) && !/['()*]/.test(qx), "`'()*` are percent-encoded in filename* (RFC 8187 attr-char) and decode back", qx);
   const lone = CD.contentDisposition('bad\uD800name.png');
-  ok(lone && validHeader(lone) && formsOf(lone).star === 'bad�name.png', 'a lone surrogate becomes U+FFFD (encodeURIComponent would throw)', lone);
+  ok(gateOf(lone) && gateOf(validHeader(lone)) && formsOf(lone).star === 'bad�name.png', 'a lone surrogate becomes U+FFFD (encodeURIComponent would throw)', lone);
   for (const f of FIXTURES) {
     const h = CD.contentDisposition(f.name), g = formsOf(h);
-    ok(validHeader(h) && g.type === 'inline' && g.star === f.star && g.ascii === f.ascii && g.parsed?.parameters?.filename === f.star,
+    ok(gateOf(validHeader(h)) && g.type === 'inline' && g.star === f.star && g.ascii === f.ascii && g.parsed?.parameters?.filename === f.star,
       `${JSON.stringify(f.name)}: Node accepts the header; filename* = the name minus controls, filename="${f.ascii}"; the oracle parser reads the name`, { h, g });
   }
   // seeded sweep: every range a filename can hold
@@ -240,7 +240,7 @@ const FILES_SRC = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8'
 const RFS_SRC = fs.readFileSync(path.join(REPO, 'src/remote-fs.js'), 'utf8');
 const LOCAL_NAMING = "res.sendFile(filePath, { dotfiles: 'allow', ...(named ? { headers: { 'Content-Disposition': named } } : {}) });";
 const REMOTE_NAMING = "const inlineName = attachment ? null : contentDisposition(fileNameOf(filePath), 'inline');";
-ok(FILES_SRC.includes(LOCAL_NAMING) && RFS_SRC.includes(REMOTE_NAMING), 'the two naming lines the controls strip are present verbatim (else the controls would judge nothing)');
+ok(gateOf(FILES_SRC.includes(LOCAL_NAMING)) && verdictOf(RFS_SRC.includes(REMOTE_NAMING)), 'the two naming lines the controls strip are present verbatim (else the controls would judge nothing)');
 const filesCtl = M.load('src/routes/files.js', editAnchor(FILES_SRC, LOCAL_NAMING, "res.sendFile(filePath, { dotfiles: 'allow' });", "src/routes/files.js"), 'nolocalname');
 const filesCtlPath = M.files[M.files.length - 1]; // a 404's development-mode stack names the module file: compare as if it were the real one
 const asReal = (buf) => buf.toString('utf8').split(filesCtlPath).join(path.join(REPO, 'src/routes/files.js'));
@@ -251,14 +251,14 @@ const ATTACH_PRE = "if (attachment) res.setHeader('Content-Disposition', `attach
 const ZIP_R2 = "const zipName = contentDisposition((base || 'archive') + '.zip', 'attachment'); // both forms, ASCII (a CJK folder name threw here)\n    if (zipName) res.setHeader('Content-Disposition', zipName);";
 const ZIP_PRE = "res.setHeader('Content-Disposition', `attachment; filename=\"${base.replace(/\"/g, '')}.zip\"`);";
 const BELT = "  try { return fn(); }\n  catch (e) {\n    if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.status(502).json({ error: String((e && e.message) || e) }); }\n    else { try { res.end(); } catch { } }\n  }";
-ok(RFS_SRC.includes(ATTACH_R2) && RFS_SRC.includes(ZIP_R2) && FILES_SRC.includes(BELT), 'the r2 lines the controls replace are present verbatim');
+ok(gateOf(RFS_SRC.includes(ATTACH_R2)) && gateOf(RFS_SRC.includes(ZIP_R2)) && verdictOf(FILES_SRC.includes(BELT)), 'the r2 lines the controls replace are present verbatim');
 const { RemoteFs: RemoteFsPre } = M.load('src/remote-fs.js', editAnchor(editAnchor(RFS_SRC, ATTACH_R2, ATTACH_PRE, "src/remote-fs.js"), ZIP_R2, ZIP_PRE, "src/remote-fs.js"), 'preattach');
 const filesNoBelt = M.load('src/routes/files.js', editAnchor(FILES_SRC, BELT, '  return fn();', "src/routes/files.js"), 'nobelt');
 // r2 (3) controls: the pre-r2 raw sendFile (send's legacy dotfile rule) and the pre-r2 ssh stream (pipe's default end, no 'error', no kill)
 const filesNoDot = M.load('src/routes/files.js', editAnchor(FILES_SRC, LOCAL_NAMING, "res.sendFile(filePath, named ? { headers: { 'Content-Disposition': named } } : {});", "src/routes/files.js"), 'nodotfiles');
 const STREAM_R2 = "this._streamChild(this._spawn(id, `cat ${shq(filePath)}`), res, { beforeBody: nameIt });";
 const STREAM_PRE = "const child = this._spawn(id, `cat ${shq(filePath)}`);\n    child.stdout.once('data', nameIt);\n    child.stdout.pipe(res);\n    child.stderr.on('data', () => {});\n    child.on('close', (code) => { if (code !== 0 && !res.headersSent) res.status(404).end(); });";
-ok(RFS_SRC.includes(STREAM_R2), 'the r2 (3) stream line the control replaces is present verbatim');
+ok(verdictOf(RFS_SRC.includes(STREAM_R2)), 'the r2 (3) stream line the control replaces is present verbatim');
 const { RemoteFs: RemoteFsPreStream } = M.load('src/remote-fs.js', editAnchor(RFS_SRC, STREAM_R2, STREAM_PRE, "src/remote-fs.js"), 'prestream');
 // the pre-r2 stream has no child 'error' listener — in the server that is uncaughtException ⇒ exit(1); here it is caught and counted
 const uncaught = [];
@@ -285,12 +285,12 @@ try {
   console.log('② GET /api/file/raw — this machine');
   for (const f of FIXTURES) {
     const r = await namedLeg(real.base, f);
-    ok(r.pass, `${JSON.stringify(f.name)}: 200, the bytes, ${f.type}, inline; filename="${f.ascii}"; filename*= the name`, r.detail);
+    ok(verdictOf(r.pass), `${JSON.stringify(f.name)}: 200, the bytes, ${f.type}, inline; filename="${f.ascii}"; filename*= the name`, r.detail);
   }
   {
     const f = FIXTURES[1];
     const r = await get(real.base, '/api/file/raw', path.join(DIR, f.name), { headers: { Range: 'bytes=0-7' } });
-    ok(r.status === 206 && r.range === `bytes 0-7/${f.bytes.length}` && r.body.equals(f.bytes.subarray(0, 8)) && formsOf(r.cd).star === f.star,
+    ok(r.status === 206 && r.range === `bytes 0-7/${f.bytes.length}` && gateOf(r.body.equals(f.bytes.subarray(0, 8))) && formsOf(r.cd).star === f.star,
       'a Range request is still 206 with its Content-Range and its 8 bytes — and still named (a <video> seeks this way)', { status: r.status, range: r.range, cd: r.cd });
     const head = await fetch(`${real.base}/api/file/raw?path=${encodeURIComponent(path.join(DIR, FIXTURES[0].name))}`, { method: 'HEAD' });
     ok(head.status === 200 && formsOf(head.headers.get('content-disposition')).star === 'photo.png', 'HEAD answers the same name');
@@ -300,7 +300,7 @@ try {
     ok(a.status === 404 && a.cd === null && a.status === b.status && a.type === b.type && a.body.toString('utf8') === asReal(b.body),
       'a missing file: 404, no name — byte-for-byte what the pre-fix route answers', { real: [a.status, a.cd, a.type], pre: [b.status, b.cd, b.type] });
     const d = await get(real.base, '/api/file/raw', HIDDEN), e = await get(real.base, '/api/download', HIDDEN), n = await get(noDot.base, '/api/file/raw', HIDDEN);
-    ok(d.status === 200 && d.body.equals(PNG) && formsOf(d.cd).star === '.hidden.png' && formsOf(d.cd).type === 'inline' && e.status === 200 && formsOf(e.cd).parsed?.parameters?.filename === '.hidden.png',
+    ok(d.status === 200 && gateOf(d.body.equals(PNG)) && formsOf(d.cd).star === '.hidden.png' && formsOf(d.cd).type === 'inline' && e.status === 200 && formsOf(e.cd).parsed?.parameters?.filename === '.hidden.png',
       'r2: a dotfile (.hidden.png) is previewed and downloaded under its name — send\'s legacy dotfile rule made both a 404', { raw: [d.status, d.cd], download: [e.status, e.cd] });
     ok(n.status === 404, 'control: the raw route without dotfiles:\'allow\' ⇒ the dotfile is a 404 again (RED)', [n.status]);
   }
@@ -310,13 +310,13 @@ try {
     console.log(`③ GET /api/file/raw?host= — ${label}`);
     for (const f of FIXTURES) {
       const r = await namedLeg(srv.base, f, host);
-      ok(r.pass, `${JSON.stringify(f.name)}: 200, the bytes, inline; filename="${f.ascii}"; filename*= the name`, r.detail);
+      ok(verdictOf(r.pass), `${JSON.stringify(f.name)}: 200, the bytes, inline; filename="${f.ascii}"; filename*= the name`, r.detail);
     }
   }
   console.log('③b a missing file / folder, an empty file, a failed spawn, a viewer that leaves');
   for (const [label, srv, host] of [['ssh', realSsh, 'box'], ['dial', realDial, 'dev']]) {
     const r = await get(srv.base, '/api/file/raw', MISSING, { host }), d = await get(srv.base, '/api/download', MISSING, { host }), z = await get(srv.base, '/api/download-zip', MISSING_DIR, { host });
-    ok([r, d, z].every((x) => x.status === 404 && x.cd === null && x.body.length === 0) && z.type === null,
+    ok(gateOf([r, d, z].every((x) => x.status === 404 && x.cd === null && x.body.length === 0)) && z.type === null,
       `${label}: a missing file answers 404 with no name on /api/file/raw AND /api/download, a missing folder 404 (no name, no zip type) on /api/download-zip`, { raw: [r.status, r.cd], download: [d.status, d.cd], zip: [z.status, z.cd, z.type] });
     const e = await get(srv.base, '/api/file/raw', EMPTY, { host }), f = await get(srv.base, '/api/download', EMPTY, { host });
     ok(e.status === 200 && e.body.length === 0 && formsOf(e.cd).star === '空 empty.txt' && f.status === 200 && formsOf(f.cd).type === 'attachment' && formsOf(f.cd).star === '空 empty.txt',
@@ -331,7 +331,7 @@ try {
     ok(b.status === 502 && b.cd === null && uncaught.length === u0, 'no ssh binary: the spawn fails ⇒ 502, no name, and no uncaught error (the child\'s \'error\' is handled)', { status: b.status, uncaught: uncaught.slice(u0) });
     const bp = await get(brokenPre.base, '/api/file/raw', path.join(DIR, 'photo.png'), { host: 'box', timeoutMs: 1500 });
     await new Promise((r) => setTimeout(r, 50));
-    ok(uncaught.slice(u0).includes('ENOENT'), `control: the pre-r2 ssh stream + no ssh binary ⇒ an UNCAUGHT 'error' (in the server: uncaughtException ⇒ process.exit(1)) — answered ${bp.status} (RED)`, { status: bp.status, uncaught: uncaught.slice(u0) });
+    ok(verdictOf(uncaught.slice(u0).includes('ENOENT')), `control: the pre-r2 ssh stream + no ssh binary ⇒ an UNCAUGHT 'error' (in the server: uncaughtException ⇒ process.exit(1)) — answered ${bp.status} (RED)`, { status: bp.status, uncaught: uncaught.slice(u0) });
   }
   {
     // a viewer that goes away (an aborted <video> seek): the child must end, not block on a full pipe forever
@@ -346,7 +346,7 @@ try {
       return { ended, signal: c.signalCode };
     };
     const [a, b] = await Promise.all([leave(realSsh, realSshFs, 3000), leave(preStreamSsh, preStreamFs, 2000)]); // each watches its own RemoteFs's child
-    ok(a.ended, `a viewer that leaves mid-stream (32 MB file, aborted after the first chunk) ⇒ the child is ended (${a.signal})`, a);
+    ok(verdictOf(a.ended), `a viewer that leaves mid-stream (32 MB file, aborted after the first chunk) ⇒ the child is ended (${a.signal})`, a);
     ok(!b.ended, 'control: the pre-r2 ssh stream ⇒ the child is STILL blocked 2 s later (an unpiped stdout — one leaked process per aborted seek) (RED)', b);
   }
 
@@ -356,14 +356,14 @@ try {
   {
     const f = FIXTURES[0];
     const a = await get(real.base, '/api/download', path.join(DIR, f.name)), b = await get(ctlLocal.base, '/api/download', path.join(DIR, f.name));
-    ok(a.status === 200 && a.cd === b.cd && /^attachment; filename="photo\.png"$/.test(a.cd || ''), 'local /api/download: res.download\'s attachment header, exactly as before', { real: a.cd, pre: b.cd });
+    ok(a.status === 200 && a.cd === b.cd && verdictOf(/^attachment; filename="photo\.png"$/.test(a.cd || '')), 'local /api/download: res.download\'s attachment header, exactly as before', { real: a.cd, pre: b.cd });
     for (const g of [FIXTURES[1], FIXTURES[3]]) {
       const r = await get(real.base, '/api/download', path.join(DIR, g.name));
       // express's res.download (untouched) percent-encodes a CR rather than dropping it, so its filename* is the on-disk name
-      ok(attachOk(r, g.name, (x) => x.equals(g.bytes)), `local /api/download ${JSON.stringify(g.name)}: 200, attachment, the name (res.download)`, { status: r.status, cd: r.cd });
+      ok(verdictOf(attachOk(r, g.name, (x) => x.equals(g.bytes))), `local /api/download ${JSON.stringify(g.name)}: 200, attachment, the name (res.download)`, { status: r.status, cd: r.cd });
     }
     const z = await get(real.base, '/api/download-zip', ZIPDIR);
-    ok(attachOk(z, '报告 2026.zip', isZip('报告 2026/说明.txt')), 'local /api/download-zip "报告 2026": 200, attachment, "报告 2026.zip", a real zip holding 报告 2026/说明.txt', { status: z.status, cd: z.cd, bytes: z.body.length });
+    ok(verdictOf(attachOk(z, '报告 2026.zip', isZip('报告 2026/说明.txt'))), 'local /api/download-zip "报告 2026": 200, attachment, "报告 2026.zip", a real zip holding 报告 2026/说明.txt', { status: z.status, cd: z.cd, bytes: z.body.length });
   }
   for (const [label, srv, host] of [['ssh', realSsh, 'box'], ['dial', realDial, 'dev']]) {
     for (const g of FIXTURES) {
@@ -371,10 +371,10 @@ try {
       const fb = formsOf(r.cd).ascii;
       // (lane wall-clock-ratchet-down: the old `r.ms < 5000` judged the machine — the 200 with every byte IS the answer;
       // a hang reads `no answer` at the helper's cut; the ms are information)
-      ok(attachOk(r, g.star, (x) => x.equals(g.bytes)) && fb === g.ascii, `remote (${label}) /api/download ${JSON.stringify(g.name)}: answered 200, attachment; filename="${g.ascii}"; filename*= the name, the bytes`, { status: r.status, cd: r.cd, ms: r.ms });
+      ok(gateOf(attachOk(r, g.star, (x) => x.equals(g.bytes))) && fb === g.ascii, `remote (${label}) /api/download ${JSON.stringify(g.name)}: answered 200, attachment; filename="${g.ascii}"; filename*= the name, the bytes`, { status: r.status, cd: r.cd, ms: r.ms });
     }
     const z = await get(srv.base, '/api/download-zip', ZIPDIR, { host });
-    ok(attachOk(z, '报告 2026.zip', isZip('报告 2026/说明.txt')) && formsOf(z.cd).ascii === '__ 2026.zip', `remote (${label}) /api/download-zip "报告 2026": answered 200, attachment; filename="__ 2026.zip"; filename*="报告 2026.zip", a real zip`, { status: z.status, cd: z.cd, bytes: z.body.length });
+    ok(gateOf(attachOk(z, '报告 2026.zip', isZip('报告 2026/说明.txt'))) && formsOf(z.cd).ascii === '__ 2026.zip', `remote (${label}) /api/download-zip "报告 2026": answered 200, attachment; filename="__ 2026.zip"; filename*="报告 2026.zip", a real zip`, { status: z.status, cd: z.cd, bytes: z.body.length });
   }
 
   // ── ⑤ CONTROLS ──
@@ -498,9 +498,9 @@ function census(sources, rows = CENSUS) {
   ok(!c.unverified.length, 'every NAMED row sets a Content-Disposition inside its own handler (source span), every DECLARED row states why', c.unverified);
   // CONTROLS on the census itself
   const stripped = census({ ...S, 'src/routes/files.js': S['src/routes/files.js'].replace(LOCAL_NAMING, 'res.sendFile(filePath);').replace(/^\s*const named = contentDisposition.*$/m, '') });
-  ok(stripped.unverified.some((u) => /\/api\/file\/raw \(this machine\)/.test(u)) || stripped.dead.some((d) => /\/api\/file\/raw \(this machine\)/.test(d)), 'control: files.js with the local naming stripped ⇒ the census is RED on /api/file/raw', stripped);
+  ok(verdictOf(stripped.unverified.some((u) => /\/api\/file\/raw \(this machine\)/.test(u))) || verdictOf(stripped.dead.some((d) => /\/api\/file\/raw \(this machine\)/.test(d))), 'control: files.js with the local naming stripped ⇒ the census is RED on /api/file/raw', stripped);
   const planted = census({ ...S, 'src/routes/files.js': S['src/routes/files.js'] + "\nrouter.get('/api/file/thumb', (req, res) => { res.sendFile(safePath(req.query.path)); });\n" });
-  ok(planted.unclassified.some((u) => /res\.sendFile\(safePath/.test(u)), 'control: a planted nameless route ⇒ the census is RED (an unclassified site)', planted.unclassified);
+  ok(verdictOf(planted.unclassified.some((u) => /res\.sendFile\(safePath/.test(u))), 'control: a planted nameless route ⇒ the census is RED (an unclassified site)', planted.unclassified);
   globalThis.__census = CENSUS;
 }
 // ⑥b (lane outbox-attachment-preview): the DRAFT's attachment route answers with `res.end(bytes)` — no stream site the
@@ -510,10 +510,10 @@ function census(sources, rows = CENSUS) {
   const src = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf8');
   const at = src.indexOf("router.get('/api/channels/outbox/:id/attachment/:n'");
   const span = at < 0 ? '' : src.slice(at, src.indexOf('\nrouter.', at + 10));
-  ok(span.includes("contentDisposition(name, inline ? 'inline' : 'attachment')") && span.includes("const name = String(r.meta.name || 'attachment');"), '⑥b GET /api/channels/outbox/:id/attachment/:n names its bytes through contentDisposition (inline ?inline=1 picture / attachment, both forms)', span.slice(0, 120));
-  ok(span.includes("const mime = String(r.meta.mime || '').toLowerCase();") && span.includes("res.setHeader('X-Content-Type-Options', 'nosniff');") && span.includes("res.setHeader('Content-Security-Policy', \"default-src 'none'; sandbox\");"), '⑥b … its type is the STORED record\'s (never sniffed from the name), nosniff, sandbox CSP — peer bytes never run in our origin');
+  ok(gateOf(span.includes("contentDisposition(name, inline ? 'inline' : 'attachment')")) && verdictOf(span.includes("const name = String(r.meta.name || 'attachment');")), '⑥b GET /api/channels/outbox/:id/attachment/:n names its bytes through contentDisposition (inline ?inline=1 picture / attachment, both forms)', span.slice(0, 120));
+  ok(gateOf(span.includes("const mime = String(r.meta.mime || '').toLowerCase();")) && gateOf(span.includes("res.setHeader('X-Content-Type-Options', 'nosniff');")) && verdictOf(span.includes("res.setHeader('Content-Security-Policy', \"default-src 'none'; sandbox\");")), '⑥b … its type is the STORED record\'s (never sniffed from the name), nosniff, sandbox CSP — peer bytes never run in our origin');
   const h = CD.contentDisposition('季度 报告.md', 'attachment'), f = formsOf(h);
-  ok(h.startsWith('attachment; ') && f.ascii && f.star === '季度 报告.md', '⑥b … a CJK attachment name reaches a save in both forms', h);
+  ok(gateOf(h.startsWith('attachment; ')) && gateOf(f.ascii) && f.star === '季度 报告.md', '⑥b … a CJK attachment name reaches a save in both forms', h);
 }
 
 // ── ⑦ THE SPELLING CENSUS ────────────────────────────────────────────────────
@@ -557,7 +557,7 @@ function spelling(sources, decl = SPELLINGS) {
   ok(!sp.raw.length, 'every Content-Disposition value is contentDisposition()\'s (directly or through the variable it assigned) or a DECLARED ASCII-by-construction spelling', sp.raw);
   ok(!sp.dead.length && !sp.unexplained.length, 'no dead or unexplained declared spelling', sp);
   const planted = spelling({ ...S, 'src/remote-fs.js': S['src/remote-fs.js'].replace(ATTACH_R2, ATTACH_PRE) });
-  ok(planted.raw.some((r) => r.startsWith('src/remote-fs.js') && /path\.basename\(filePath\)/.test(r)), 'control: the pre-r2 remote spelling (the raw name in filename="…") planted back ⇒ RED', planted.raw);
+  ok(verdictOf(planted.raw.some((r) => r.startsWith('src/remote-fs.js') && /path\.basename\(filePath\)/.test(r))), 'control: the pre-r2 remote spelling (the raw name in filename="…") planted back ⇒ RED', planted.raw);
 }
 
 // ── ⑧ THE CLIENT HOST CENSUS ─────────────────────────────────────────────────
@@ -599,11 +599,11 @@ function hostCensus(sources, decl = LOCAL_ONLY) {
   // lane viewer-download: the editor's Download goes through THE file-window helper (file-download.js) — its
   // target names the editor's machine, and the helper's URL is the census row that must carry it
   const ED = C['src/lib/code-editor.js'], DL = C['src/lib/file-download.js'];
-  ok(/wireFileDownload\(winInfo, \{[^}]*\}, host: this\._host\b/.test(ED), 'the code editor\'s Download target carries this._host (the r2 rule, through the shared helper)');
+  ok(verdictOf(/wireFileDownload\(winInfo, \{[^}]*\}, host: this\._host\b/.test(ED)), 'the code editor\'s Download target carries this._host (the r2 rule, through the shared helper)');
   const DL_FIX = 'return `/api/download?path=${encodeURIComponent(path)}${hostParam(host)}`;';
-  ok(DL.includes(DL_FIX), 'the shared helper\'s download URL carries the file\'s machine');
+  ok(verdictOf(DL.includes(DL_FIX)), 'the shared helper\'s download URL carries the file\'s machine');
   const pre = hostCensus({ ...C, 'src/lib/file-download.js': DL.replace(DL_FIX, 'return `/api/download?path=${encodeURIComponent(path)}`;') });
-  ok(pre.missing.some((m) => m.startsWith('src/lib/file-download.js')), 'control: the helper\'s URL without &host= ⇒ RED', pre.missing);
+  ok(verdictOf(pre.missing.some((m) => m.startsWith('src/lib/file-download.js'))), 'control: the helper\'s URL without &host= ⇒ RED', pre.missing);
 }
 
 if (process.env.RAWNAME_PRINT_CENSUS) {
@@ -611,7 +611,7 @@ if (process.env.RAWNAME_PRINT_CENSUS) {
   for (const r of CENSUS) console.log(`| ${r.route} | ${r.file} | ${r.verdict} | ${r.how || r.why} |`);
 }
 
-for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(verdictOf(row.pass), row.name, row.detail);
 
 console.log('⑨ lane artifacts-registries — the composer\'s upload (POST /api/upload naming its chat) reaches the artifacts registry');
 {
@@ -635,11 +635,11 @@ console.log('⑨ lane artifacts-registries — the composer\'s upload (POST /api
   const j = await up('brief.pdf', 'u1');
   const k = ':' + path.join(DIR, 'up', 'brief.pdf');
   const row = live._artifacts && live._artifacts[k];
-  ok(j.success && row && row.kind === 'upload' && row.by === 'user' && row.bytes === 9, 'an upload naming its chat ⇒ that conversation\'s `upload` row by: user (its size)', j.noAnswer || row);
+  ok(gateOf(j.success) && gateOf(row) && row.kind === 'upload' && row.by === 'user' && row.bytes === 9, 'an upload naming its chat ⇒ that conversation\'s `upload` row by: user (its size)', j.noAnswer || row);
   await up('loose.txt', '');
   ok(Object.keys(live._artifacts || {}).length === 1, 'a file-explorer upload (no chat named) feeds nothing');
   const cli = fs.readFileSync(path.join(REPO, 'src/lib/chat-input.js'), 'utf8'), ut = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8');
-  ok(cli.includes('sessionId: this._sessionId, // lane artifacts-registries') && ut.includes("if (sessionId) fd.append('sessionId', sessionId);"), 'the composer\'s upload names its chat (chat-input → uploadFilesBatched → the form\'s sessionId)');
+  ok(gateOf(cli.includes('sessionId: this._sessionId, // lane artifacts-registries')) && verdictOf(ut.includes("if (sessionId) fd.append('sessionId', sessionId);")), 'the composer\'s upload names its chat (chat-input → uploadFilesBatched → the form\'s sessionId)');
   clearTimeout(live._artifactsTimer); await S.close();
 }
 
@@ -659,15 +659,15 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
     const root = HT.hubTmpRoot({ dataDir: DATA, tmpRoot: T, uid });
     const a = await post();
     const mode = (() => { try { return fs.statSync(path.join(root, 'uploads')).mode & 0o777; } catch { return null; } })();
-    ok(a.status === 200 && a.j.success && fs.existsSync(path.join(DIR, 'up10', 'ten.txt')) && mode === 0o700,
+    ok(a.status === 200 && gateOf(a.j.success) && gateOf(fs.existsSync(path.join(DIR, 'up10', 'ten.txt'))) && mode === 0o700,
       `B-3767: an upload's temp lands in the hub's own folder ${path.basename(root)}/uploads (0700, keyed by user and data folder), never a machine-wide name: ${JSON.stringify({ status: a.status, mode: mode && mode.toString(8) })}`);
     fs.rmSync(path.join(root, 'uploads'), { recursive: true, force: true });
     fs.symlinkSync(path.join(DIR, 'elsewhere10'), path.join(root, 'uploads'));
     const b = await post();
-    ok(b.status === 500 && b.j.code === 'hub_tmp_refused' && b.j.error.includes(path.join(root, 'uploads')) && /SYMLINK/.test(b.j.error) && /the way out: .*TMPDIR/.test(b.j.error),
+    ok(b.status === 500 && b.j.code === 'hub_tmp_refused' && gateOf(b.j.error.includes(path.join(root, 'uploads'))) && gateOf(/SYMLINK/.test(b.j.error)) && verdictOf(/the way out: .*TMPDIR/.test(b.j.error)),
       `B-3767: a temp folder the hub cannot use (here a link) is the upload's answer BY NAME, with the path and the way out — never a hang: ${JSON.stringify(b)}`);
     const st = (o) => ({ isSymbolicLink: () => !!o.link, isDirectory: () => o.dir !== false, uid: o.uid ?? uid, mode: o.mode ?? 0o40700 });
-    ok(/owned by uid/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && !/socket/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && /group\/other/.test(HT.ownVerdict(st({ mode: 0o40777 }), { uid })) && /group\/other/.test(HT.ownVerdict(st({ mode: 0o40755 }), { uid })) && /not a directory/.test(HT.ownVerdict(st({ dir: false }), { uid })) && HT.ownVerdict(st({}), { uid }) === null,
+    ok(gateOf(/owned by uid/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid }))) && !/socket/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && gateOf(/group\/other/.test(HT.ownVerdict(st({ mode: 0o40777 }), { uid }))) && gateOf(/group\/other/.test(HT.ownVerdict(st({ mode: 0o40755 }), { uid }))) && gateOf(/not a directory/.test(HT.ownVerdict(st({ dir: false }), { uid }))) && HT.ownVerdict(st({}), { uid }) === null,
       "B-3767: the verdict (sock-path's own) refuses another user's folder, one open to others (0777 and 0755 alike), and a file; this user's private folder passes");
     // «open in editor»: the hub names its own temp file (POST /api/file/temp) — a plain name only; a folder it cannot use, by name
     const tmpFile = async (body) => { const r = await fetch(S.base + '/api/file/temp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) }); return { status: r.status, j: await r.json() }; };
@@ -677,9 +677,9 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
     ok(e2.status === 400 && e2.j.code === 'bad_name' && !fs.existsSync(path.join(root, 'escape.txt')), `B-3767: …a name that is not a plain file name is refused (${e2.status} ${e2.j.code})`);
     fs.rmSync(path.join(root, 'editor'), { recursive: true, force: true }); fs.symlinkSync(path.join(DIR, 'elsewhere10e'), path.join(root, 'editor'));
     const e3 = await tmpFile({ name: 'chat-block-2.txt', content: 'x' });
-    ok(e3.status === 500 && e3.j.code === 'hub_tmp_refused' && e3.j.error.includes(path.join(root, 'editor')) && /the way out: .*TMPDIR/.test(e3.j.error), `B-3767: …and a folder it cannot use is its answer by name, with the path: ${JSON.stringify(e3)}`);
+    ok(e3.status === 500 && e3.j.code === 'hub_tmp_refused' && gateOf(e3.j.error.includes(path.join(root, 'editor'))) && verdictOf(/the way out: .*TMPDIR/.test(e3.j.error)), `B-3767: …and a folder it cannot use is its answer by name, with the path: ${JSON.stringify(e3)}`);
     const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
-    ok(cr.includes("fetch('/api/file/temp'") && !cr.includes("'/tmp/claude-webui") && cr.includes(".then((tmpPath) => {"), "B-3767: the client asks the hub for its temp file and opens the path the hub answered (it spells no /tmp folder)");   // stale-pins: kept — an absence check: the client spells no /tmp folder
+    ok(gateOf(cr.includes("fetch('/api/file/temp'")) && !cr.includes("'/tmp/claude-webui") && verdictOf(cr.includes(".then((tmpPath) => {")), "B-3767: the client asks the hub for its temp file and opens the path the hub answered (it spells no /tmp folder)");   // stale-pins: kept — an absence check: the client spells no /tmp folder
     ok(HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 7 }) !== HT.hubTmpRoot({ dataDir: '/b/data', tmpRoot: '/t', uid: 7 }) && HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 7 }) !== HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 8 }),
       'B-3767: two hubs (two data folders) and two users never share a folder');
     // B-3767 unit 2 (主开发 11:40Z, B-4371): THE AGE SWEEP OF THE HUB'S OWN ROOT — in its purposes an old file goes and a fresh one
@@ -700,15 +700,15 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
       for (const d of [path.join(rootX, 'uploads'), path.join(rootX, 'editor')]) fs.chmodSync(d, 0o700);
       const r = await HT.sweepHubTmp({ dataDir: dataX, tmpRoot: SR, uid: uidX });
       const there = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
-      ok(!there(oldUp) && there(freshUp) && !there(link) && there(target) && there(victim) && there(sharedOld) && r.refused.length === 1 && r.refused[0].includes(path.join(rootX, 'paste')) && /SYMLINK/.test(r.refused[0]),
+      ok(!there(oldUp) && gateOf(there(freshUp)) && !there(link) && gateOf(there(target)) && gateOf(there(victim)) && gateOf(there(sharedOld)) && r.refused.length === 1 && gateOf(r.refused[0].includes(path.join(rootX, 'paste'))) && verdictOf(/SYMLINK/.test(r.refused[0])),
         `B-3767 unit 2: the age sweep of the hub's own root — the old upload and the old link go (the link's target stays), the fresh file stays, a planted purpose folder is refused by name and nothing behind it is touched, the shared temp folder is never looked at: ${JSON.stringify({ removed: r.removed.length, kept: r.kept, refused: r.refused })}`);
       const htSrc = fs.readFileSync(path.join(REPO, 'src/server/hub-tmp.js'), 'utf8'), JUDGE = '    if (!(await own(d))) continue;\n';
       const victim2 = mk(path.join(SR, 'victim', 'old-in-victim-2.bin'));
       const HT0 = M.load('src/server/hub-tmp.js', editAnchor(htSrc, JUDGE, '', "src/server/hub-tmp.js"), 'nojudge');
       await HT0.sweepHubTmp({ dataDir: dataX, tmpRoot: SR, uid: uidX });
-      ok(htSrc.includes(JUDGE) && !there(victim2), `CONTROL B-3767 unit 2: without the purpose judgment the sweep deletes through the planted link (red): ${there(victim2) ? 'kept' : 'deleted'}`);
+      ok(gateOf(htSrc.includes(JUDGE)) && !there(victim2), `CONTROL B-3767 unit 2: without the purpose judgment the sweep deletes through the planted link (red): ${there(victim2) ? 'kept' : 'deleted'}`);
       const filesSrc = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
-      ok(/sweepOwnTmp\(\); upload\.array\('files'\)/.test(filesSrc) && (filesSrc.match(/\n\s+sweepOwnTmp\(\);\n/g) || []).length === 2,
+      ok(gateOf(/sweepOwnTmp\(\); upload\.array\('files'\)/.test(filesSrc)) && (filesSrc.match(/\n\s+sweepOwnTmp\(\);\n/g) || []).length === 2,
         'B-3767 unit 2: the roads that write into the root ask the sweep (upload, temp file, paste) — throttled, never awaited');
     }
     // B-5527 (主开发 r590 — one release after B-3767): THE PASTE SWEEP'S LEGACY LEG IS RETIRED. It deleted claude-paste-* files older
@@ -717,7 +717,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
     // not at all. Judged at the moment the route's own write resolves — where the retired leg began its read of the shared folder — then
     // the request is let go (the clipboard step's poll is not this leg's). RED: a copy with the legacy leg back deletes it.
     {
-      const okP = (c, n, facts) => { ok(c, n, facts); if (c) console.log('      ' + JSON.stringify(facts)); };
+      const okP = (c, n, facts) => { ok(verdictOf(c), n, facts); if (c) console.log('      ' + JSON.stringify(facts)); };
       // K65 (主开发 r1058 — the integrator's watcher found a real xclip left by this leg on the hub box): A SUITE NEVER TOUCHES A
       // DISPLAY'S CLIPBOARD AND NEVER STARTS THE REAL CLIPBOARD PROGRAM. The route starts `cat <file> | xclip -selection clipboard
       // -t <type>` and polls `xclip … -o`, both with the hub's env (its PATH; DISPLAY = the probed one, else the inherited one,
@@ -779,7 +779,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         'B-5527: a paste through the REAL route lands in the hub\'s own paste folder and leaves an old paste-named file in the SHARED temp folder alone — it never reads that folder',
         { pasteLanded: a1.file && path.relative(T, a1.file), legacyKept: there(legacy), sharedFolderRead: a1.reads.includes(path.resolve(T)) });
       const PNG_BYTES = Buffer.from(PNG.split(',')[1], 'base64');
-      ok(!!a1.clip && a1.clipRuns === 1 && JSON.stringify(a1.clip.args) === JSON.stringify(['-selection', 'clipboard', '-t', 'image/png']) && a1.clip.stdin.equals(PNG_BYTES) && a1.clip.display === NO_DISPLAY,
+      ok(!!a1.clip && a1.clipRuns === 1 && JSON.stringify(a1.clip.args) === JSON.stringify(['-selection', 'clipboard', '-t', 'image/png']) && gateOf(a1.clip.stdin.equals(PNG_BYTES)) && a1.clip.display === NO_DISPLAY,
         `K65: the route's clipboard step reached the suite's STAND-IN, never the real xclip — «-selection clipboard -t image/png», the pasted image's bytes on its input, and the display the suite named (${NO_DISPLAY}: no such display) — and the stand-in exited`,
         a1.clip ? { args: a1.clip.args, bytes: a1.clip.stdin.length, display: a1.clip.display } : { clipRuns: a1.clipRuns });
       {
@@ -787,7 +787,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         const g0 = clipGuard(withoutStandIn), envPath = process.env.PATH;
         process.env.PATH = withoutStandIn;
         let r0; try { r0 = await pasteOnce(S.base); } finally { process.env.PATH = envPath; }
-        ok(!g0.ok && /^REFUSED: the xclip first on the suite's search path is .*, not the suite's stand-in \(/.test(g0.refused) && r0.refused === g0.refused && r0.file === null,
+        ok(!g0.ok && gateOf(/^REFUSED: the xclip first on the suite's search path is .*, not the suite's stand-in \(/.test(g0.refused)) && r0.refused === g0.refused && r0.file === null,
           'K65 CONTROL: with the stand-in taken off the search path the paste leg REFUSES BY NAME before any request — it never falls through to the real clipboard program', r0.refused || r0);
       }
       // r1066 (主开发 — the K65 find, now a unit; B-323e's family): THE CLIPBOARD'S POLL NEVER HOLDS THE HUB'S LOOP. The route asks
@@ -824,7 +824,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
       const SC = await serve(filesRouter, null, { json: true, locals: POLL_LOCALS });
       try {
         const L1 = await loopScene(SC.base);
-        ok(L1.started && L1.turnedInFlight === true && !!L1.answer && L1.answer.ready === true,
+        ok(gateOf(L1.started) && L1.turnedInFlight === true && !!L1.answer && L1.answer.ready === true,
           'r1066: while the clipboard\'s read is in flight (a placed slow stand-in) the hub\'s loop TURNS — the read runs in the starter\'s small process, awaited; the paste then answers ready as before', L1);
         // the three named failures that wait the poll's bound — at once, each on its own server (its display keys the stand-in / the starter)
         const own = async (d) => { const X = await serve(filesRouter, null, { json: true, locals: { ...POLL_LOCALS, xEnv: { DISPLAY: d } } }); try { return await pasteAnswer(X.base); } finally { await X.close(); } };
@@ -833,7 +833,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
           'r1066: a picture the clipboard never takes is ANSWERED BY NAME within the poll\'s bound (code + words the terminal says) — it was a silent «ready: false»', n1);
         ok(!!nd && nd.ready === false && nd.code === 'clipboard_no_display' && nd.error === `the display ${NODISP_D} could not be opened for the clipboard`,
           'r1090: a display the clipboard program cannot open (the stand-in says what xclip says) is answered by THAT name, the display in its words', nd);
-        ok(!!nh && nh.ready === false && nh.code === 'clipboard_no_helper' && /^could not ask the clipboard \(the helper process did not answer\) — paste again$/.test(nh.error || ''),
+        ok(!!nh && nh.ready === false && nh.code === 'clipboard_no_helper' && verdictOf(/^could not ask the clipboard \(the helper process did not answer\) — paste again$/.test(nh.error || '')),
           'r1090: when the starter could not ask at all the person is told THAT — never «the clipboard did not take the picture»', nh);
         // the clipboard program missing: a search path holding bash and cat only — nothing named xclip anywhere, so no real program can answer
         const NOBIN = path.join(DIR, 'nobin'); fs.mkdirSync(NOBIN, { recursive: true });
@@ -843,7 +843,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         const pathNow = process.env.PATH; process.env.PATH = NOBIN;
         let n2; try { n2 = await pasteAnswer(SN.base); } finally { process.env.PATH = pathNow; await SN.close(); }
         const noProgReads = reads.filter((d) => d === NOPROG_D).length;
-        ok(!!n2 && n2.ready === false && n2.code === 'clipboard_no_program' && /^the clipboard program is not installed/.test(n2.error || '') && noProgReads === 1 && reprobes === 0,
+        ok(!!n2 && n2.ready === false && n2.code === 'clipboard_no_program' && gateOf(/^the clipboard program is not installed/.test(n2.error || '')) && noProgReads === 1 && reprobes === 0,
           'r1090: with no clipboard program on the machine the answer names THAT AT ONCE — the first read\'s answer: no second read is started, no re-probe (by order: one read counted, the re-probe never called)', { n2, reads: noProgReads, reprobes });
       } finally { await SC.close(); CS.setChildStarter(null); realStarter.closePipe(); }
       // r1090: THE TERMINAL WORDS EVERY CODE THE ROUTE ANSWERS — each code the route can answer has its branch and its sentence in the
@@ -853,7 +853,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         const ZHD = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, JAD = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
         const codes = [...new Set([...FSRCC.matchAll(/code: '(clipboard_[a-z_]+)'/g)].map((m) => m[1]))];
         const rows = codes.map((c) => { const m = new RegExp(`data\\.code === '${c}'\\) \\{[^\\n]*\\n\\s*showToast\\(t\\('([^']+)'\\)`).exec(TERM); return { c, key: m && m[1], zh: !!(m && ZHD[m[1]]), ja: !!(m && JAD[m[1]]) }; });
-        ok(codes.length === 4 && rows.every((r) => r.key && r.zh && r.ja), `r1090: the terminal words each of the route's ${codes.length} codes (${codes.join(', ')}) — a branch with its sentence, in zh and ja`, rows);
+        ok(codes.length === 4 && verdictOf(rows.every((r) => r.key && r.zh && r.ja)), `r1090: the terminal words each of the route's ${codes.length} codes (${codes.join(', ')}) — a branch with its sentence, in zh and ja`, rows);
       }
       {
         const FSRC1 = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
@@ -862,7 +862,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         const SR = await serve(M.load('src/routes/files.js', anchored(FSRC1, RUN, SYNC, 'r1066-sync-poll'), 'r1066-sync'), null, { json: true, locals: POLL_LOCALS });
         try {
           const L0 = await loopScene(SR.base);
-          ok(L0.started && L0.turnedInFlight === false, 'CONTROL r1066 (an equivalent of the base\'s synchronous read — execFileSync with its arguments, env and 1 s bound — in a copy): NO loop turn lands while the read is in flight — the leg above would be red', L0);
+          ok(gateOf(L0.started) && L0.turnedInFlight === false, 'CONTROL r1066 (an equivalent of the base\'s synchronous read — execFileSync with its arguments, env and 1 s bound — in a copy): NO loop turn lands while the read is in flight — the leg above would be red', L0);
         } finally { await SR.close(); }
       }
       const FSRC = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
@@ -887,4 +887,4 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

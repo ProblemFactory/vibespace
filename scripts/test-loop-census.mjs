@@ -50,7 +50,7 @@ const skip = (n, why) => { skipped++; console.log(`  ⊘ SKIP ${n} — ${why}`);
 /** the MAIN thread's own time on the CPU or waiting for one (ms; its schedstat): the only time a census tick can find it
  *  running — idle in its loop, a tick books «idle» and asks nothing. null where there is no /proc */
 const ssMain = () => { try { const t = fs.readFileSync('/proc/self/task/' + process.pid + '/schedstat', 'utf8').split(' '); return (Number(t[0]) + Number(t[1])) / 1e6; } catch { return null; } };
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-loop-census-'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ORDER = 'interface,vault,channels,money,workspace,machines,conversation';
@@ -78,7 +78,7 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
     ['node_modules/ws/lib/websocket.js', null], ['data/plugins/x/index.js', null], ['src/agentd/agentd.js', null], ['', null],
   ];
   const wrong = FIX.map(([p, id]) => [p, id, ownerOf(p)]).filter(([, id, got]) => got !== id);
-  ok(!wrong.length && (LC.IDS || []).join() === [ORDER, ...SPLIT_IDS, 'outside'].join() && SPLIT.length && OWNERS.length === 7 && OWNERS.every((o) => FIX.some(([, id]) => id === o.id)) && FIX.every(([p]) => !p.startsWith('src/') || fs.existsSync(path.join(REPO, p))) && fs.existsSync(path.join(REPO, 'server.js')),
+  ok(!wrong.length && (LC.IDS || []).join() === [ORDER, ...SPLIT_IDS, 'outside'].join() && gateOf(SPLIT.length) && OWNERS.length === 7 && gateOf(OWNERS.every((o) => FIX.some(([, id]) => id === o.id))) && gateOf(FIX.every(([p]) => !p.startsWith('src/') || fs.existsSync(path.join(REPO, p)))) && verdictOf(fs.existsSync(path.join(REPO, 'server.js'))),
     `ownerOf: a real file of the tree per owner (${(LC.IDS || []).join(', ')} — that order: the seven, the split buckets, outside), the families two owners share (browser, harnesses, usage, stream, exit, session, jobs, mounts, plugins), the split files' own buckets, the helpers, and no row for node_modules / data / the device agent / nothing`, wrong);
   // THE CENSUS SMALLS (cure r3): each misfile the verifier named, with its owner now — or why it stays
   const SMALLS = [
@@ -93,7 +93,7 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
     ['src/telemetry.js', 'interface'], ['src/migration-runner.js', 'interface'],   // STAY: telemetry's stringify runs at its own flush (a 2 s timer, the summary route, exit) and in the collector's door, never inside an engine's call; the runner holds no owner's store
   ];
   const smallsWrong = SMALLS.map(([p, id]) => [p, id, ownerOf(p)]).filter(([, id, got]) => got !== id);
-  ok(!smallsWrong.length && !HELPERS.some((h) => h.path === 'src/peer-text.js') && SMALLS.every(([p]) => fs.existsSync(path.join(REPO, p))),
+  ok(!smallsWrong.length && !HELPERS.some((h) => h.path === 'src/peer-text.js') && verdictOf(SMALLS.every(([p]) => fs.existsSync(path.join(REPO, p)))),
     'the census smalls: peer-text is channels\' (off the helpers\' list), msg-acl and the worker dispatch pair workspace\'s, the job-log sweep and the harness capability table the conversation\'s (the machine side), migrations a split file of its own; telemetry and the migration runner stay the interface\'s', smallsWrong);
   // B-403e FOLLOW-UP (5): THE RULE FOR THE READS HELPER, its reason held (src/loop-census.js 'money'): with a caller after it the
   // helper's frames are passed (the hold is the caller's); a stack that is the helper's ALONE keeps them, and the rule books it to
@@ -166,11 +166,11 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
   const src = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
   const WSH = src('src/ws-handler.js'), OPS = src('src/server/conversation-ops.js'), RV = src('src/routes/vault.js'), AR = src('src/agent-routes.js');
   const vaultRoutes = [...RV.matchAll(/app\.(?:get|post|put|delete)\('\/api\/agent\/vault\//g)].length;
-  ok(/case 'create': \{\s*await convOps\.openConversation\(data,/.test(WSH) && /if \(ws\) return D\(\)\.handleCreate\(ws, spec/.test(OPS)
-    && /const \{ createWsCreateHandler \} = require\('\.\/ws-create'\);/.test(WSH) && /const handleCreate = createWsCreateHandler\(\{/.test(WSH)
+  ok(gateOf(/case 'create': \{\s*await convOps\.openConversation\(data,/.test(WSH)) && gateOf(/if \(ws\) return D\(\)\.handleCreate\(ws, spec/.test(OPS))
+    && gateOf(/const \{ createWsCreateHandler \} = require\('\.\/ws-create'\);/.test(WSH)) && gateOf(/const handleCreate = createWsCreateHandler\(\{/.test(WSH))
     && vaultRoutes >= 5 && !/\/api\/agent\/vault/.test(AR) && ownerOf('src/routes/vault.js') === 'vault',
     `the real shapes' roads: the page handler's case 'create' → conversation-ops openConversation → the create handler from src/ws-create.js; every /api/agent/vault/* route (${vaultRoutes}) in the vault's own route file (src/routes/vault.js, the vault's), none in src/agent-routes.js`);
-  ok(/E\.stackTraceLimit = 32;/.test(LH.SAMPLE_EXPR) && /for \(let i = 1; i < cs\.length; i\+\+\)/.test(LH.SAMPLE_EXPR) && LC.FRAME_LIMIT === 32 - 1,
+  ok(gateOf(/E\.stackTraceLimit = 32;/.test(LH.SAMPLE_EXPR)) && gateOf(/for \(let i = 1; i < cs\.length; i\+\+\)/.test(LH.SAMPLE_EXPR)) && LC.FRAME_LIMIT === 32 - 1,
     `FRAME_LIMIT ${LC.FRAME_LIMIT} = the sample's own expression: 32 frames asked of V8, its own skipped`);
   const sl = [LC.slowerAfter(1000, 4.5), LC.slowerAfter(1000, LC.ASK_BOUND_MS), LC.slowerAfter(4000, 9), LC.slowerAfter(8000, 50), LC.slowerAfter(1000, NaN), LC.slowerAfter(1000, 0.2)];
   ok(JSON.stringify(sl) === '[2000,null,8000,null,null,null]' && LC.ASK_BOUND_MS === 4 && LC.CENSUS_FLOOR_MS === 8000 && LC.CENSUS_EVERY_MS === 1000,
@@ -191,11 +191,11 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
     idle: { ticks: 1500, share: 1500 / 3130 }, held: { ticks: 30, share: 30 / 3130 }, stopped: { ticks: 0, share: 0 },
     notSampled: { ticks: 20, paused: 8, pausedBy: { heap: 8 } }, cost: { asks: 1290, ownMs: 258, meanMs: 0.2, maxMs: 1.75, halved: null, dispatchMs: 1290 * LC.DISPATCH_MS, paidMs: 258 + 1290 * LC.DISPATCH_MS }, words: LC.TICK_WORDS };
   const F = LC.censusFold(TAKE);
-  ok(SPLIT.length && JSON.stringify(F) === JSON.stringify(WANT) && Math.abs(F.shares.reduce((s, x) => s + x.share, 0) + F.native.share - 1) < 1e-12,
+  ok(gateOf(SPLIT.length) && JSON.stringify(F) === JSON.stringify(WANT) && Math.abs(F.shares.reduce((s, x) => s + x.share, 0) + F.native.share - 1) < 1e-12,
     'censusFold of a FIXED take ⇒ a FIXED result: shares = the seven owners, then one row per split bucket (family split:<short>, its short and why, the list\'s order), then outside — each a share of the BUSY ticks (an id the table does not know, a retired owner\'s or a split file off the list, is outside\'s), native beside them — together 1; viaHelper and deep as ticks; idle / held of the sampled; paused counted not sampled; the asks\' cost', F);
   const E = LC.censusFold(null);
-  ok(E.busyTicks === 0 && E.busyShare === null && E.shares.length === 8 + SPLIT.length && E.shares.every((x) => x.share === null) && E.viaHelper?.ticks === 0 && E.deep?.ticks === 0 && E.cost.meanMs === null, 'an empty take folds to nothing claimed (no share without a tick)', E);
-  ok(/OWNER of the first owned frame walking outward/.test(LC.TICK_WORDS) && /split:<short>/.test(LC.TICK_WORDS) && !/innermost frame of/.test(LC.TICK_WORDS) && /outside/.test(LC.TICK_WORDS) && /deep/.test(LC.TICK_WORDS),
+  ok(E.busyTicks === 0 && E.busyShare === null && E.shares.length === 8 + SPLIT.length && gateOf(E.shares.every((x) => x.share === null)) && E.viaHelper?.ticks === 0 && E.deep?.ticks === 0 && E.cost.meanMs === null, 'an empty take folds to nothing claimed (no share without a tick)', E);
+  ok(gateOf(/OWNER of the first owned frame walking outward/.test(LC.TICK_WORDS)) && gateOf(/split:<short>/.test(LC.TICK_WORDS)) && !/innermost frame of/.test(LC.TICK_WORDS) && gateOf(/outside/.test(LC.TICK_WORDS)) && verdictOf(/deep/.test(LC.TICK_WORDS)),
     'the tick words say the outward walk to the first owned frame, a two-owner file\'s own bucket, outside and deep — never «the innermost frame»', LC.TICK_WORDS);
 }
 
@@ -246,13 +246,13 @@ console.log('② the owners cover the hub — every file the hub can load in exa
   for (const s of SPLIT) console.log(`      split:${s.short} ${s.path} (${(s.owners || []).join(' + ')}) — ${s.why}`);
   for (const h of HELPERS) console.log(`      helper ${h.path} — ${h.why}`);
   if (unowned.length) console.log(`    UNOWNED (each needs an owner's rule or, holding no state, a helper's row): ${unowned.join(', ')}`);
-  ok(entries.browser.includes('src/client.js') && entries.node.includes('src/agentd/agentd.js') && HUB.has('src/ws-handler.js') && pageOnly.length > 100 && hubSide.length > 600,
+  ok(gateOf(entries.browser.includes('src/client.js')) && gateOf(entries.node.includes('src/agentd/agentd.js')) && gateOf(HUB.has('src/ws-handler.js')) && pageOnly.length > 100 && hubSide.length > 600,
     `the bundles' entries read off package.json (${entries.browser.length} page, ${entries.node.length} device) and server.js's closure walked`, { entries, hub: HUB.size });
   ok(!unowned.length, `UNOWNED = 0 — every one of the ${hubSide.length} files the hub can load has an owner, is a split file or a helper`, unowned);
   ok(OWNERS.length === 7 && !twice.length && !helperRuled.length, 'EXACTLY ONE owner per file — no file matches two owners\' rules, no helper matches an owner\'s', { twice, helperRuled });
-  ok(OWNERS.map((o) => o.id).join() === ORDER && OWNERS.every((o) => by[o.id] > 0) && !dead.length && !strayHelpers.length && HELPERS.length && HELPERS.length <= 16 && HELPERS.every((h) => h.why && fs.existsSync(path.join(REPO, h.path))),
+  ok(OWNERS.map((o) => o.id).join() === ORDER && gateOf(OWNERS.every((o) => by[o.id] > 0)) && !dead.length && !strayHelpers.length && gateOf(HELPERS.length) && HELPERS.length <= 16 && verdictOf(HELPERS.every((h) => h.why && fs.existsSync(path.join(REPO, h.path)))),
     `the seven owners in their order, each takes files; no rule matches nothing; the helpers' list is short (${HELPERS.length}), each a real hub-side file with its why`, { by, dead, strayHelpers });
-  ok(OWNERS.length && OWNERS.reduce((s, o) => s + by[o.id], 0) + SPLIT.length + HELPERS.length === hubSide.length, 'the owners\' counts, the split files and the helpers add up to the files the hub loads', { by, split: SPLIT.length, helpers: HELPERS.length });
+  ok(gateOf(OWNERS.length) && OWNERS.reduce((s, o) => s + by[o.id], 0) + SPLIT.length + HELPERS.length === hubSide.length, 'the owners\' counts, the split files and the helpers add up to the files the hub loads', { by, split: SPLIT.length, helpers: HELPERS.length });
   // THE SPLIT LIST (cure r3, T1): short, explicit, each a real hub-side file with its OWN short name, two or more owners of the
   // table (in its order) and one line of why; NO owner's rule matches a split file (it would be booked on that owner)
   const ids = OWNERS.map((o) => o.id);
@@ -322,7 +322,7 @@ try {
     if (!take) continue;
     idleTakes++; idleTicks += take.ticks.idle; idleChannels += take.families.channels || 0;
   }
-  ok(a && a.families.channels >= 5 && faCh.share > 0.5 && fa.shares.every((s) => s === faCh || !(s.share > faCh.share)) && idleTicks >= 5 && a.asks >= 5 && a.askMaxMs > 0 && a.everyMs === 50 && a.viaHelper === 0 && a.deep === 0,
+  ok(gateOf(a) && a.families.channels >= 5 && faCh.share > 0.5 && gateOf(fa.shares.every((s) => s === faCh || !(s.share > faCh.share))) && idleTicks >= 5 && a.asks >= 5 && a.askMaxMs > 0 && a.everyMs === 50 && a.viaHelper === 0 && a.deep === 0,
     `(a) a burn inside src/server/channels-burn.js: «channels» books ${a && a.families.channels} of ${fa.busyTicks} busy ticks; the idle half ${idleTicks} idle ticks over ${idleTakes} takes (${idleChannels} more on channels there); ${a && a.asks} asks, their own run ${a && a.askOwnMs.toFixed(2)} ms (largest ${a && a.askMaxMs.toFixed(3)} ms); none through a helper, none deep`, { a, idleTicks, idleChannels, idleTakes });
   // (a2) the same burn inside a HELPER the channels file calls: booked on channels, counted through a helper.
   // r5455 (the placement of its red at load 45, run 10f53ad7b-20261127010837-both): «outside» counts the ticks whose answer stood in
@@ -346,7 +346,7 @@ try {
   await W.census();
   const { t: a2, busyMs: g2, allowed: al2 } = await gapsOf(), fa2 = LC.censusFold(a2), out2 = (a2 && a2.families.outside) || 0;
   if (out2 > 1) console.log(`  · (a2) THE STRETCHED BAND (r5455): ${out2} ticks outside, the main thread ${g2.toFixed(0)} ms on the CPU or waiting for one between the burns (allowed ${al2})`);
-  ok(a2 && a2.families.channels >= 3 && a2.viaHelper >= 3 && a2.viaHelper <= a2.families.channels && out2 <= al2 && fa2.viaHelper?.ticks === a2.viaHelper,
+  ok(gateOf(a2) && a2.families.channels >= 3 && a2.viaHelper >= 3 && a2.viaHelper <= a2.families.channels && out2 <= al2 && fa2.viaHelper?.ticks === a2.viaHelper,
     `(a2) a burn inside a helper (src/shell-words.js) called by src/server/channels-burn.js: «channels» books ${a2 && a2.families.channels} ticks, ${a2 && a2.viaHelper} of them through the helper (viaHelper), ${out2} outside (the test's own frames between burns; allowed ${al2}: one, plus what the main thread's own ${g2.toFixed(0)} ms busy between the burns can hold)`, { a2, busyMs: g2, allowed: al2 });
   // (a2b) r5455 THE STRETCHED GAP, PLACED AT WILL with no load: the same four helper burns with a ~120 ms native call in the test's
   // own frames after the second one. The RELEASE's bound (outside ≤ 1) is red there by name; the cured bound is not. Witnessed:
@@ -357,12 +357,12 @@ try {
   if (!(g2b >= 100 && out2b >= 2)) skip('(a2b) the stretched gap, placed: the release\'s bound red, the cured bound green', `the plant missed its band: ${g2b.toFixed(0)} ms busy between the burns (≥ 100 wanted), ${out2b} outside (≥ 2 wanted)`);
   else {
     ok(!(out2b <= 1), `CONTROL r5455 (the RELEASE's bound, «outside ≤ 1») on a ~120 ms native call in the test's own frames between the helper burns: RED by name — «(a2) … ${out2b} outside (the test's own frames between burns)»`);
-    ok(a2b && a2b.families.channels >= 3 && a2b.viaHelper >= 3 && a2b.viaHelper <= a2b.families.channels && out2b <= al2b, `r5455: the cured bound on that gap — ${out2b} outside ≤ ${al2b} allowed (one, plus what its ${g2b.toFixed(0)} ms can hold); the helper's ticks still booked on channels through the helper`, { a2b, busyMs: g2b, allowed: al2b });
+    ok(gateOf(a2b) && a2b.families.channels >= 3 && a2b.viaHelper >= 3 && a2b.viaHelper <= a2b.families.channels && out2b <= al2b, `r5455: the cured bound on that gap — ${out2b} outside ≤ ${al2b} allowed (one, plus what its ${g2b.toFixed(0)} ms can hold); the helper's ticks still booked on channels through the helper`, { a2b, busyMs: g2b, allowed: al2b });
   }
   // (a3) the burn 40 helper frames deep: the sample's 31 frames hold no owned one — outside, deep (the owner lies beyond)
   for (let i = 0; i < 4; i++) { B.deepBurn(100); await sleep(1); }
   const a3 = await W.census(), fa3 = LC.censusFold(a3);
-  ok(a3 && a3.families.outside >= 3 && a3.deep >= 3 && a3.deep <= a3.families.outside && (a3.families.channels || 0) <= 1 && fa3.deep?.ticks === a3.deep,
+  ok(gateOf(a3) && a3.families.outside >= 3 && a3.deep >= 3 && a3.deep <= a3.families.outside && (a3.families.channels || 0) <= 1 && fa3.deep?.ticks === a3.deep,
     `(a3) the burn under 40 helper frames: ${a3 && a3.families.outside} ticks outside, ${a3 && a3.deep} of them deep — the sample's ${LC.FRAME_LIMIT} frames end before channels-burn.js`, a3);
   // (b) the setting off: paused, nothing asked. The flag reaches the thread on a beat: the take that first shows it paused ends the hour
   // the flag arrived in; the hours after it are paused WHOLE — summed until three paused ticks (r4729: was 120 + 300 + 150 ms of sleeps)
@@ -371,7 +371,7 @@ try {
   const b = await sumUntil(W, (acc) => acc.paused >= 3, 'three paused ticks after the setting went off');
   samplingOn = true;
   await takeUntil(W, (t) => sumOf(t) >= 1 && !((t.pausedBy && t.pausedBy.off) || 0), 'an hour wholly after the setting came back on');
-  ok(b && b.paused >= 3 && b.off >= 3 && b.asks === 0, `(b) the sampling setting off pauses the census as it stops a capture: ${b && b.paused} ticks paused (off) over ${b && b.takes} takes, nothing asked`, b);
+  ok(gateOf(b) && b.paused >= 3 && b.off >= 3 && b.asks === 0, `(b) the sampling setting off pauses the census as it stops a capture: ${b && b.paused} ticks paused (off) over ${b && b.takes} takes, nothing asked`, b);
   // (c) a hold: a synchronous child (no JavaScript runs) past the 0.4 s bar — the census's ask in flight is TAKEN by the hold
   const h0 = W.holds().ring().length;
   cp.spawnSync('sleep', ['0.8']);
@@ -382,7 +382,7 @@ try {
   const HOLD_MS = 400, BEAT_MS = 50;
   await sleep(HOLD_MS + 2 * BEAT_MS);
   const c = await take(W), held = W.holds().ring().slice(h0);
-  ok(c && held.length === 1 && held[0].samples >= 1 && c.ticks.held >= 1 && c.ticks.notSampled >= 1,
+  ok(gateOf(c) && held.length === 1 && held[0].samples >= 1 && c.ticks.held >= 1 && c.ticks.notSampled >= 1,
     `(c) a 0.8 s synchronous child: ${c && c.ticks.held} ticks held; the HOLD TOOK the census's ask in flight — its first sample «${held[0] && held[0].frame}» — and the census's waiting ticks are not sampled (${c && c.ticks.notSampled})`, { c, held });
   // (d0) B-518e — WHAT TURNED (d) RED IN A PACKED RUN, NAMED BY ELIMINATION AND PLACED: «7 asks — the capture took 2 samples»
   // (the first test machine, the box's zone, green alone). The old leg printed no `stopped`, so the road is read off what
@@ -398,7 +398,7 @@ try {
   const d0 = await W.census();
   for (let i = 0; i < 40 && (W.holds().captureReport().last || {}).id !== r0.id; i++) await sleep(100);   // its end and its names
   const last0 = W.holds().captureReport().last;
-  ok(r0.ok && last0 && last0.id === r0.id && last0.stopped === 'cost' && d0 && d0.asks >= 1,
+  ok(gateOf(r0.ok) && gateOf(last0) && last0.id === r0.id && last0.stopped === 'cost' && gateOf(d0) && d0.asks >= 1,
     `(d0) a capture whose asks pass its cost bound stops early («${last0 && last0.stopped}», ${last0 && last0.samples} samples) and the census asks again (${d0 && d0.asks} asks) — the packed run's shape, placed`, { r0, d0, last0: last0 && { id: last0.id, samples: last0.samples, stopped: last0.stopped, costMs: last0.costMs } });
   // (d) a capture running: the census asks nothing (its busy ticks are not sampled); the capture samples. This capture's cost
   // bounds are lifted (one ask past 4 ms halving its rate, the sum past 2 % stopping it — the capture's own law, judged in
@@ -412,7 +412,7 @@ try {
   for (let i = 0; i < 40 && (W.holds().captureReport().last || {}).id !== r.id; i++) await sleep(100);   // the capture's end (its 1.5 s window, then its names)
   const last = W.holds().captureReport().last;
   const dSpan = d ? d.toM - d.fromM : null;
-  ok(r.ok && d && d.asks === 0 && d.ticks.notSampled >= 3 && last && last.id === r.id && !last.stopped && dSpan < last.windowMs && last.samples >= 10,
+  ok(gateOf(r.ok) && gateOf(d) && d.asks === 0 && d.ticks.notSampled >= 3 && gateOf(last) && last.id === r.id && !last.stopped && dSpan < last.windowMs && last.samples >= 10,
     `(d) while a capture runs the census asks nothing: ${d && d.ticks.notSampled} busy ticks not sampled, ${d && d.asks} asks — the capture took ${last && last.samples} samples${last && last.stopped ? `, STOPPED «${last.stopped}»` : ''}; the take ${dSpan != null ? dSpan.toFixed(0) : '?'} ms of the capture's ${last && last.windowMs} ms window`, { r, d, last: last && { id: last.id, samples: last.samples, split: last.split, stopped: last.stopped, costMs: last.costMs, windowMs: last.windowMs } });
   // (e) the take resets: the next hour starts where it ended, from zero. A take holding three ticks is waited for by a growing pause
   // before each take (r4729: was one 250 ms sleep, three ticks of a 50 ms timer that runs late under load), then the very next take
@@ -425,7 +425,7 @@ try {
     e2 = await take(W, eEnd - Date.now()); if (e2 && sumOf(e1) > maxTicks(e2)) break;
   }
   if (!(e1 && e2 && sumOf(e1) >= 3 && sumOf(e1) > maxTicks(e2))) noFact('a take of three ticks followed by a shorter one', { e1, e2 });
-  ok(e1 && e2 && e2.fromM === e1.toM && sumOf(e1) >= 3 && sumOf(e2) <= maxTicks(e2) && sumOf(e1) > maxTicks(e2) && e2.asks <= maxTicks(e2) && (e2.halved === null || e2.asks >= 1),
+  ok(gateOf(e1) && gateOf(e2) && e2.fromM === e1.toM && sumOf(e1) >= 3 && sumOf(e2) <= maxTicks(e2) && sumOf(e1) > maxTicks(e2) && e2.asks <= maxTicks(e2) && (e2.halved === null || e2.asks >= 1),
     `(e) a take resets the counts: the next starts at its end (${e1 && sumOf(e1)} ticks, then ${e2 && sumOf(e2)} of at most ${e2 && maxTicks(e2)} its own ${e2 ? (e2.toM - e2.fromM).toFixed(0) : '?'} ms hold)`, { e1, e2 });
 } finally { W.stop(); }
 
@@ -456,14 +456,14 @@ console.log('④ the doors');
   if (waited >= TAKE_MS / 2) noFact('the census-off thread\'s own answer', { waited });
   ok(n1 === null && n2 === null && waited < TAKE_MS / 2, 'census() answers null with no watchdog thread and with the census off (no take, never a guess)', { n1, n2, waited });
   const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8');
-  ok(/const q = takeCensusAsk\(\{ kind: 'hold', h \}\) \|\| ask\(\{ kind: 'hold', h \}\);/.test(WK) && /if \(!openHold\(now\)\) takeCensusAsk\(\{ kind: 'capture', c, pending: \[\] \}\);/.test(WK)
-    && /if \(!openHold\(now\) && takeCensusAsk\(\{ kind: 'profile', pr, pq: \{ countedTo: now, counted: false \} \}\)\) return;/.test(WK)
-    && /const k = CC\.tickOf\(\{ state, wchan, sys, beatAgeMs: now - T\[1\], freshMs: 2 \* beatMs \+ noAnswerMs, holdOpen: openHold\(now\), mine: own, other: \(!!inflight && !own\) \|\| !!cap \|\| !!prof \}\);/.test(WK)
-    && /startCensus\(censusEveryMs\);/.test(WK),
+  ok(gateOf(/const q = takeCensusAsk\(\{ kind: 'hold', h \}\) \|\| ask\(\{ kind: 'hold', h \}\);/.test(WK)) && gateOf(/if \(!openHold\(now\)\) takeCensusAsk\(\{ kind: 'capture', c, pending: \[\] \}\);/.test(WK))
+    && gateOf(/if \(!openHold\(now\) && takeCensusAsk\(\{ kind: 'profile', pr, pq: \{ countedTo: now, counted: false \} \}\)\) return;/.test(WK))
+    && gateOf(/const k = CC\.tickOf\(\{ state, wchan, sys, beatAgeMs: now - T\[1\], freshMs: 2 \* beatMs \+ noAnswerMs, holdOpen: openHold\(now\), mine: own, other: \(!!inflight && !own\) \|\| !!cap \|\| !!prof \}\);/.test(WK))
+    && verdictOf(/startCensus\(censusEveryMs\);/.test(WK)),
     'the watchdog: a hold, a capture and a profile TAKE the census\'s ask through ONE function; the census\'s tick is a capture\'s tick (CC.tickOf) with every other asker counted as «another ask out»; it starts with the watchdog');
 }
 
 fs.rmSync(TMP, { recursive: true, force: true });
 const sk = skipped ? `, ${skipped} skipped` : '';
 console.log(fail ? `\n${fail} FAILED (${pass} passed${sk})` : `\nALL PASS (${pass}${sk})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

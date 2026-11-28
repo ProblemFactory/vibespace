@@ -11,7 +11,7 @@ const { ConversationIndex } = require(REPO + '/src/conversation-index.js');
 // B-574d (lane bl-jobs): the index is THE STORE WRITER's (paced 1.5 s, synced on its thread) — the suite lands it through the writer
 const SW = require(REPO + '/src/store-writer.js').storeWriter();
 const land = (d) => SW.flushSync([path.join(d, 'conversation-index.json')]);
-let pass=0, fail=0; const ok=(c,n)=>{c?(pass++,console.log('  ✓ '+n)):(fail++,console.error('  ✗ '+n));};
+let pass=0, fail=0; const ok=(c,n)=>{ if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);c?(pass++,console.log('  ✓ '+n)):(fail++,console.error('  ✗ '+n));};
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ci-'));
 const ix = new ConversationIndex({ dataDir: dir });

@@ -33,7 +33,7 @@ const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 15; SM-S938B) AppleWebKit/537.36
 const FLAPS = 10;
 const SLOW_BYTES_PER_S = 12 * 1024;
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms, step = 200) => { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch { } await sleep(step); } return false; };
 const procs = new Set(), dirs = new Set();
@@ -148,8 +148,8 @@ console.log('② the drain mark on real sockets (' + process.version + ')');
     for (const kind of ['plain', 'tls', 'demux']) {
       const [slow, stopped] = await Promise.all([runOne(kind, 'slow'), runOne(kind, 'stopped')]);
       const taken = (a) => a.map((m) => m && m.taken);
-      ok(`${kind}: a reader that reads moves it, the queue behind it non-empty (the proof's two halves)`, slow.every((m) => m != null) && taken(slow).at(-1) > taken(slow)[1] && slow.slice(1, -1).every((m) => m.queued > 0), slow); // 400 ms samples of a chunky reader on a busy box can read one flat step (seen on Node 22); a heartbeat round is 30 s
-      ok(`${kind}: a reader that stopped leaves it flat, the queue full`, stopped.every((m) => m != null) && taken(stopped).at(-1) === taken(stopped).at(-2) && taken(stopped).at(-2) === taken(stopped).at(-3) && stopped.at(-1).queued > 0, stopped);
+      ok(`${kind}: a reader that reads moves it, the queue behind it non-empty (the proof's two halves)`, gateOf(slow.every((m) => m != null)) && taken(slow).at(-1) > taken(slow)[1] && verdictOf(slow.slice(1, -1).every((m) => m.queued > 0)), slow); // 400 ms samples of a chunky reader on a busy box can read one flat step (seen on Node 22); a heartbeat round is 30 s
+      ok(`${kind}: a reader that stopped leaves it flat, the queue full`, gateOf(stopped.every((m) => m != null)) && taken(stopped).at(-1) === taken(stopped).at(-2) && taken(stopped).at(-2) === taken(stopped).at(-3) && stopped.at(-1).queued > 0, stopped);
     }
     // the stream bridges' keepalive reads the same mark. Measured before it did (bytesWritten − writableLength holds a frame whole): one frame longer than two rounds ⇒ cut at round 2, never landed.
     console.log('② the keepalive on the same mark: one frame longer than its rounds, behind a slow link');
@@ -223,7 +223,7 @@ console.log('② the drain mark on real sockets (' + process.version + ')');
     };
     const [kaPlain, kaTls, floodPlain, floodTls, keptPlain, keptTls] = await Promise.all([slowFrame('plain'), slowFrame('tls'), flood('plain'), flood('tls'), keepsUp('plain'), keepsUp('tls')]);
     for (const [kind, r] of [['plain', kaPlain], ['tls', kaTls]]) {
-      ok(`${kind}: the frame landed whole, never cut`, r.landed && !r.dropped, r);
+      ok(`${kind}: the frame landed whole, never cut`, gateOf(r.landed) && !r.dropped, r);
       ok(`${kind}: …and it really was longer than the two rounds that used to cut it`, r.rounds > 2, r);
     }
     console.log('② the heartbeat on the same mark: a reader the producer outruns, and one that keeps up');
@@ -233,7 +233,7 @@ console.log('② the drain mark on real sockets (' + process.version + ')');
       ok(`${kind}: …its queue within the stated bound (${floodBound.toFixed(1)} MiB; 73 MiB and rising without the law)`, r.maxMiB <= floodBound, r);
     }
     for (const [kind, r] of [['plain', keptPlain], ['tls', keptTls]]) {
-      ok(`${kind}: a reader that keeps up lands its frame and is never cut, ≥ 10 rounds, twice the allowance`, r.landed && r.alive && r.rounds >= 10, r);
+      ok(`${kind}: a reader that keeps up lands its frame and is never cut, ≥ 10 rounds, twice the allowance`, gateOf(r.landed) && gateOf(r.alive) && r.rounds >= 10, r);
     }
   }
 }
@@ -356,12 +356,12 @@ const end = await ev(`(() => { const S = window.__cn, v = window.__view(); retur
 const cuts = (journal.match(/heartbeat terminating/g) || []).length - cutsBefore;
 console.log(`    the control socket's port ${ctl._socket?.localPort}; the proxy's websockets: ${fs.readFileSync(proxyLog, 'utf8').trim().split('\n').slice(-4).map((l) => l.split(' ').slice(1).join(' ')).join(' · ')}`);
 console.log(`    elapsed ${Math.round(elapsed / 1000)} s; ${cuts} heartbeat cut(s); ${end.downs} socket drop(s) (1 is ours); frame ${JSON.stringify(end.frames)}; total ${end.total}/${owedTotal}`);
-ok('the transcript is complete on the slow link', landed, { total: end.total, owedTotal, cuts, downs: end.downs });
+ok('the transcript is complete on the slow link', verdictOf(landed), { total: end.total, owedTotal, cuts, downs: end.downs });
 ok('the heartbeat cut nothing', cuts === 0, cuts);
 ok('one socket cycle: the one this leg made', end.downs === 1, end.downs);
-ok('it came as the owed resume, one frame, once', end.attached.length === 1 && end.attached[0].held && end.attached[0].replay > 0, end.attached);
+ok('it came as the owed resume, one frame, once', end.attached.length === 1 && gateOf(end.attached[0].held) && end.attached[0].replay > 0, end.attached);
 ok('the link really was slower than a heartbeat round for that frame', (end.frames[0]?.len || 0) / SLOW_BYTES_PER_S > 30 && elapsed >= 0.7 * (end.frames[0]?.len || 0) / SLOW_BYTES_PER_S * 1000, { elapsed, frames: end.frames });
-await until(() => { const dir = path.join(wt, 'data', 'telemetry'); try { return fs.readdirSync(dir).some((f) => /^events-/.test(f) && fs.readFileSync(path.join(dir, f), 'utf8').includes('ws-heartbeat-slow-drain')); } catch { return false; } }, 20000, 1000).then((seen) => ok('the waived round left its mark in telemetry', seen));
+await until(() => { const dir = path.join(wt, 'data', 'telemetry'); try { return fs.readdirSync(dir).some((f) => /^events-/.test(f) && fs.readFileSync(path.join(dir, f), 'utf8').includes('ws-heartbeat-slow-drain')); } catch { return false; } }, 20000, 1000).then((seen) => ok('the waived round left its mark in telemetry', verdictOf(seen)));
 await shot('slow-link-complete.png');
 
 console.log('the real home');
@@ -373,4 +373,4 @@ console.log('the real home');
 }
 
 console.log(fail ? `\nFAILED: ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

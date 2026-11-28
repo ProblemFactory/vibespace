@@ -43,7 +43,7 @@ const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
 // a credential as the ORCH hands it to the fence: its kind + the row its OWNER declared (never a table in the core)
 const C = Object.freeze({ lark: { kind: 'lark', api: LARK.API_ROW }, slack: { kind: 'slack', api: SLACK.API_ROW }, google: { kind: 'gmail', api: GMAIL.API_ROW } });
 let pass = 0, fail = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 400) : ''}`); } };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 400) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -144,7 +144,7 @@ const ROWS = [
     file: 'src/channels/lark.js', cred: 'lark', mutant: ['/delete/i, /remove/i', '/\\/delete/, /\\/remove/'] },   // the vendor's own row: the mutant is of ITS file
 ];
 for (const r of ROWS) {
-  ok(r.judge(F), r.name);
+  ok(verdictOf(r.judge(F)), r.name);
   let red;
   try {
     if (r.file) { const L = MUT.load(r.file, mutate(textOf(r.file), r.mutant[0], r.mutant[1]), 'row'); red = !r.judge(F, { ...C, [r.cred]: { ...C[r.cred], api: L.API_ROW } }); }
@@ -226,7 +226,7 @@ const B = { kind: 'agent', id: 'conv-B', name: 'Agent B', groups: [] };
   await api.setTiers('lark-1', [{ principal: P, tier: 'write-auto' }]);
   await api.setTiers('lark-1', []);
   const lo = said('lowered');
-  ok(lo.length === 2 && lo[0].tier === 'write-auto' && lo[0].from === 'write-all' && lo[1].tier === 'none' && lo[1].from === 'write-auto' && lo.every((l) => l.by === 'user' && l.principal.id === 'conv-A' && l.method === null), 'L2: every step DOWN writes ONE lowered line of the grant line\'s shape (from → to, who, by you); a re-save writes none, a removal says none', api.auditTail('lark-1'));
+  ok(lo.length === 2 && lo[0].tier === 'write-auto' && lo[0].from === 'write-all' && lo[1].tier === 'none' && lo[1].from === 'write-auto' && verdictOf(lo.every((l) => l.by === 'user' && l.principal.id === 'conv-A' && l.method === null)), 'L2: every step DOWN writes ONE lowered line of the grant line\'s shape (from → to, who, by you); a re-save writes none, a removal says none', api.auditTail('lark-1'));
   const r = await api.setTiers('lark-1', [{ principal: { kind: 'group', id: 'T-1', name: 'Team' }, tier: 'write-all' }]);
   ok(r.ok === false && r.code === 'write_all_named_only' && eng.apiGrants().length === 0 && said('granted').length === 1, 'M1: 完全信任 for a Task Group is refused by name (write_all_named_only); nothing written, no grant line', r);
 }
@@ -243,21 +243,21 @@ const B = { kind: 'agent', id: 'conv-B', name: 'Agent B', groups: [] };
   ok((await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-auto' }], { by: 'agent:conv-A' })).ok === false && eng.apiTierFor(A, 'lark-1').tier === 'read', 'an agent cannot widen its own tier (setTiers by agent:… refused; the row unchanged)');
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/open-apis/im/v1/chats', query: { page_size: '5' } });
   const last = seen[seen.length - 1];
-  ok(r.ok && r.status === 200 && last.auth === 'Bearer u-TOKEN-SECRET' && last.url === '/open-apis/im/v1/chats?page_size=5', 'a granted read runs: the token is added SERVER-SIDE, the path + query as given', { r, last });
+  ok(gateOf(r.ok) && r.status === 200 && last.auth === 'Bearer u-TOKEN-SECRET' && last.url === '/open-apis/im/v1/chats?page_size=5', 'a granted read runs: the token is added SERVER-SIDE, the path + query as given', { r, last });
   ok(!JSON.stringify(r).includes('u-TOKEN-SECRET') && !('set-cookie' in r.headers) && r.headers['x-request-id'] === 'rq-1', 'the answer never carries the token or set-cookie; allowed headers pass');
   ok(r.json.data.tenant_access_token === REDACTED && !JSON.stringify(r.json).includes('sk-ant-api03') && !JSON.stringify(r.json).includes('<system-reminder>'), 'the answer goes through the redaction (token keys, secret shapes) and the peer-text belt (no frame tag reaches the agent)', r.json);
-  ok(r.touch && r.touch.op === 'api' && r.touch.adapterId === 'lark-1' && r.touch.title === 'GET /open-apis/im/v1/chats' && r.touch.count === 200, 'the call carries its chat row (op api, the credential, method + path, the status)', r.touch);
+  ok(gateOf(r.touch) && r.touch.op === 'api' && r.touch.adapterId === 'lark-1' && r.touch.title === 'GET /open-apis/im/v1/chats' && r.touch.count === 200, 'the call carries its chat row (op api, the credential, method + path, the status)', r.touch);
   const lines = api.auditTail('lark-1');
   const al = lines[lines.length - 1];
-  ok(al && al.verdict === 'ok' && al.status === 200 && al.queryKeys[0] === 'page_size' && !JSON.stringify(lines).includes('tenant_access_token') && fs.existsSync(path.join(dataDir, 'channels', 'lark-1', 'api.ndjson')), 'the audit ring: one line per call under data/channels/<cred>/api.ndjson — who, method, path, query keys, status; never a body', al);
+  ok(gateOf(al) && al.verdict === 'ok' && al.status === 200 && al.queryKeys[0] === 'page_size' && !JSON.stringify(lines).includes('tenant_access_token') && verdictOf(fs.existsSync(path.join(dataDir, 'channels', 'lark-1', 'api.ndjson'))), 'the audit ring: one line per call under data/channels/<cred>/api.ndjson — who, method, path, query keys, status; never a body', al);
   r = await api.call(A, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents', body: '{"title":"x"}' });
   ok(r.code === 'api_tier_read', 'a write under a read grant ⇒ api_tier_read', r);
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/x', headers: { Authorization: 'Bearer mine' } });
-  ok(r.code === 'api_header_refused' && seen.every((s) => s.auth !== 'Bearer mine'), 'the agent\'s own Authorization is refused by name, never sent');
+  ok(r.code === 'api_header_refused' && verdictOf(seen.every((s) => s.auth !== 'Bearer mine')), 'the agent\'s own Authorization is refused by name, never sent');
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/redirect-off' });
   ok(r.code === 'api_redirect_unjudged' && r.why === 'off-host' && !seen.some((s) => s.host === 'evil.example'), 'a vendor redirect off the host is not followed (api_redirect_unjudged, off-host) — nothing reaches the other host', r);
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/limited' });
-  ok(r.ok && r.status === 429 && eng.backoffSec === 7, 'a vendor 429 is answered once and enters the account\'s rate ladder (its Retry-After), never retried', { r: r.status, b: eng.backoffSec });
+  ok(gateOf(r.ok) && r.status === 429 && eng.backoffSec === 7, 'a vendor 429 is answered once and enters the account\'s rate ladder (its Retry-After), never retried', { r: r.status, b: eng.backoffSec });
   eng.gateRefusal = { ok: false, code: 'vendor-budget', error: 'the account minute is spent', retryAfterSec: 9 };
   const n0 = seen.length;
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/x' });
@@ -272,7 +272,7 @@ const B = { kind: 'agent', id: 'conv-B', name: 'Agent B', groups: [] };
   const nW = seen.length;
   r = await api.call(A, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents/doxAAAA1111/blocks', body: '{"title":"frozen"}' });
   const pid = r.proposal && r.proposal.id;
-  ok(r.code === 'api_pending' && pid && seen.length === nW && r.touch.proposalId === pid, 'a write under "ask each" files a proposal (api_pending <id>), sends nothing', r);
+  ok(r.code === 'api_pending' && gateOf(pid) && seen.length === nW && r.touch.proposalId === pid, 'a write under "ask each" files a proposal (api_pending <id>), sends nothing', r);
   ok(api.proposalFor(B, pid).code === 'not-found' && api.proposalFor(A, pid).proposal.status === 'pending', 'another conversation cannot read the proposal (uniform not-found)');
   const sf = path.join(dataDir, 'channels', 'api-proposals.json');
   const st = JSON.parse(fs.readFileSync(sf, 'utf8'));
@@ -285,18 +285,18 @@ const B = { kind: 'agent', id: 'conv-B', name: 'Agent B', groups: [] };
   const pid2 = r.proposal.id;
   r = await api.approve(pid2, { always: true, digest: r.proposal.digest });
   const sent = seen[seen.length - 1];
-  ok(r.ok && r.proposal.status === 'ran' && sent.method === 'POST' && sent.url === '/open-apis/docx/v1/documents/doxAAAA1111/blocks' && sent.body === '{"title":"frozen"}' && sent.auth === 'Bearer u-TOKEN-SECRET', 'Approve runs EXACTLY the frozen bytes (method, path, body) with the server\'s token', sent);
+  ok(gateOf(r.ok) && r.proposal.status === 'ran' && sent.method === 'POST' && sent.url === '/open-apis/docx/v1/documents/doxAAAA1111/blocks' && sent.body === '{"title":"frozen"}' && sent.auth === 'Bearer u-TOKEN-SECRET', 'Approve runs EXACTLY the frozen bytes (method, path, body) with the server\'s token', sent);
   ok(api.proposalFor(A, pid2).proposal.result.status === 200 && !JSON.stringify(api.proposalFor(A, pid2)).includes('t-LEAK'), 'the agent reads the outcome through `wait` (the result belted + redacted)');
   r = await api.call(A, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents/doxBBBB2222/blocks', body: '{"title":"again"}' });
-  ok(r.ok && r.status === 200, '"always allow this call shape" runs the next call of the same shape (ids as *) at once', r.code);
+  ok(gateOf(r.ok) && r.status === 200, '"always allow this call shape" runs the next call of the same shape (ids as *) at once', r.code);
   r = await api.call(B, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents/doxBBBB2222/blocks', body: '{}' });
   ok(r.code === 'api_not_granted', 'the shape is per conversation (another conversation has no grant at all here)');
   r = await api.call(A, { cred: 'lark-1', method: 'DELETE', path: '/open-apis/docx/v1/documents/doxBBBB2222' });
   ok(r.code === 'api_pending' && r.proposal.sensitive === 'delete' && r.proposal.offersAlways === false, 'DELETE is always a proposal, never "always allow"', r.proposal);
   const sh = api.ownerView().creds[0].shapes;
-  ok(sh.length === 1 && api.revokeShape(sh[0].id).ok && api.ownerView().creds[0].shapes.length === 0, 'the always-allowed shape is listed in the owner view and revocable');
+  ok(sh.length === 1 && gateOf(api.revokeShape(sh[0].id).ok) && api.ownerView().creds[0].shapes.length === 0, 'the always-allowed shape is listed in the owner view and revocable');
   r = api.reject(r.proposal.id, { reason: 'not now' });
-  ok(r.ok && api.proposalFor(A, r.proposal.id).proposal.reason === 'not now', 'Reject carries a reason the agent reads');
+  ok(gateOf(r.ok) && api.proposalFor(A, r.proposal.id).proposal.reason === 'not now', 'Reject carries a reason the agent reads');
   // the budget wall of the grant
   await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'read', perDay: 3 }]);
   const api3 = mkOrch(ORCH, eng, fs.mkdtempSync(path.join(tmpRoot, 'd-')));
@@ -307,7 +307,7 @@ const B = { kind: 'agent', id: 'conv-B', name: 'Agent B', groups: [] };
   await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'read' }]);
   const MB = MUT.load('src/server/channel-api.js', mutate(OSRC, `...beltBody(scrubToken(b.body, token), res.headers.get('content-type'))`, `json: JSON.parse(b.body.toString())`), 'nobelt');
   const rb = await mkOrch(MB, eng, fs.mkdtempSync(path.join(tmpRoot, 'd-'))).call(A, { cred: 'lark-1', method: 'GET', path: '/open-apis/x' });
-  ok(rb.ok && JSON.stringify(rb.json).includes('<system-reminder>'), 'CONTROL: the answer without the belt — the frame tag and the token reach the agent (the belt row above is what catches it)');
+  ok(gateOf(rb.ok) && verdictOf(JSON.stringify(rb.json).includes('<system-reminder>')), 'CONTROL: the answer without the belt — the frame tag and the token reach the agent (the belt row above is what catches it)');
   const MA = MUT.load('src/server/channel-api.js', mutate(OSRC, `    line(req, { verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused'`, `    void ({ verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused'`), 'noaudit');
   const dA = fs.mkdtempSync(path.join(tmpRoot, 'd-'));
   const apiA = mkOrch(MA, eng, dA);
@@ -335,7 +335,7 @@ console.log('③b B-4e97 cure: the engine\'s own scopes row — what the sign-in
   const ROWS3 = 'scopes: () => (rec.auth && Array.isArray(rec.auth.scopes) && rec.auth.scopes.length ? rec.auth.scopes.map(String) : null),';
   ok(ESRC3.split(ROWS3).length === 2, 'control setup: the engine\'s scopes row is present once');
   const r3c = await row3(MUT.load('src/server/channels-engine.js', editAnchor(ESRC3, ROWS3, 'scopes: () => (rec.auth && Array.isArray(rec.auth.scopes) ? rec.auth.scopes.map(String) : null),', "src/server/channels-engine.js"), 'scopes-empty'), 'ctl');
-  ok(Array.isArray(r3c.empty) && r3c.empty.length === 0, 'RED CONTROL: a row that hands an empty list on — «holds nothing», every Google host dropped (the leg above is red on it)', JSON.stringify(r3c));
+  ok(gateOf(Array.isArray(r3c.empty)) && r3c.empty.length === 0, 'RED CONTROL: a row that hands an empty list on — «holds nothing», every Google host dropped (the leg above is red on it)', JSON.stringify(r3c));
 }
 console.log('③ the engine: the `apiGrants` table (widen-only, the owner\'s, persisted, no reach)');
 {
@@ -345,7 +345,7 @@ console.log('③ the engine: the `apiGrants` table (widen-only, the owner\'s, pe
   let eng = create({ dataDir, log: quiet, fetch: async () => { throw new Error('no network in this suite'); } });
   const row = F.apiGrant({ principal: { kind: 'agent', id: 'conv-A' }, cred: 'lark-x', tier: 'write-ask', at: 1 });
   ok((await eng.setApiGrants('lark-x', [row], { by: 'agent:conv-A' })).ok === false && eng.apiGrants().length === 0, 'the engine refuses an agent writing tier rows');
-  ok((await eng.setApiGrants('lark-x', [row], { by: 'user' })).ok && eng.apiTierFor(A, 'lark-x').tier === 'write-ask' && eng.apiTierFor(B, 'lark-x').tier === 'none', 'the owner\'s row sets the tier of that principal only');
+  ok(gateOf((await eng.setApiGrants('lark-x', [row], { by: 'user' })).ok) && eng.apiTierFor(A, 'lark-x').tier === 'write-ask' && eng.apiTierFor(B, 'lark-x').tier === 'none', 'the owner\'s row sets the tier of that principal only');
   ok(eng.listFor(A).ok !== false && !(eng.listFor(A).conversations || []).length, 'the API row widens no conversation reach');
   try { eng.stop(); } catch {}
   eng = create({ dataDir, log: quiet, fetch: async () => { throw new Error('no network'); } });
@@ -380,21 +380,21 @@ console.log('④ vibespace-channels api … end to end');
   const CLI = path.join(REPO, 'data/bin/vibespace-channels');
   const run = (args, input) => new Promise((resolve) => { const p = spawn(process.execPath, [CLI, ...args], { env }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); if (input !== undefined) p.stdin.end(input); else p.stdin.end(); p.on('close', (code) => resolve({ code, out, err })); });
   let c = await run(['api', 'creds']);
-  ok(c.code === 0 && /"lark-1"/.test(c.out) && /write-ask/.test(c.out), 'api creds lists the granted credential with its tier', c);
+  ok(c.code === 0 && gateOf(/"lark-1"/.test(c.out)) && verdictOf(/write-ask/.test(c.out)), 'api creds lists the granted credential with its tier', c);
   c = await run(['api', 'docs', 'lark-1']);
-  ok(c.code === 0 && /open\.feishu\.cn\/document/.test(c.out) && /sensitive/.test(c.out) && /perMin/.test(c.out), 'api docs prints the vendor\'s own reference + the fence summary', c.err);
+  ok(c.code === 0 && gateOf(/open\.feishu\.cn\/document/.test(c.out)) && gateOf(/sensitive/.test(c.out)) && verdictOf(/perMin/.test(c.out)), 'api docs prints the vendor\'s own reference + the fence summary', c.err);
   c = await run(['api', 'lark-1', 'GET', '/open-apis/im/v1/chats?page_size=2']);
-  ok(c.code === 0 && /"status": 200/.test(c.out) && !/u-TOKEN-SECRET/.test(c.out + c.err), 'api <cred> GET /path prints the vendor answer; the token never appears', c);
+  ok(c.code === 0 && gateOf(/"status": 200/.test(c.out)) && !/u-TOKEN-SECRET/.test(c.out + c.err), 'api <cred> GET /path prints the vendor answer; the token never appears', c);
   c = await run(['api', 'lark-1', 'GET', '/x', '--header', 'Authorization: Bearer x']);
-  ok(c.code === 1 && /api_header_refused/.test(c.err), 'a refusal is printed with its code', c);
+  ok(c.code === 1 && verdictOf(/api_header_refused/.test(c.err)), 'a refusal is printed with its code', c);
   c = await run(['api', 'lark-1', 'POST', '/open-apis/docx/v1/documents', '--body', '-'], '{"title":"cli"}');
   const pidC = (/api-[0-9a-f]{12}/.exec(c.err) || [])[0];
-  ok(c.code === 4 && pidC && /api wait/.test(c.err), 'a write under "ask each" prints api_pending with the wait recipe (exit 4)', c);
+  ok(c.code === 4 && gateOf(pidC) && verdictOf(/api wait/.test(c.err)), 'a write under "ask each" prints api_pending with the wait recipe (exit 4)', c);
   setTimeout(() => { api.approve(pidC, { digest: api.ownerView().proposals.find((x) => x.id === pidC).digest }); }, 300);
   c = await run(['api', 'wait', pidC, '--timeout', '20']);
-  ok(c.code === 0 && /"outcome": "ran"/.test(c.out) && /"status": 200/.test(c.out) && seen[seen.length - 1].body === '{"title":"cli"}', 'api wait <id> prints the outcome once the user approves (the stdin body ran)', c);
+  ok(c.code === 0 && gateOf(/"outcome": "ran"/.test(c.out)) && gateOf(/"status": 200/.test(c.out)) && seen[seen.length - 1].body === '{"title":"cli"}', 'api wait <id> prints the outcome once the user approves (the stdin body ran)', c);
   c = await run(['api', 'log', 'lark-1']);
-  ok(c.code === 0 && /"verdict": "approved"/.test(c.out), 'api log prints this conversation\'s own audit lines', c.err);
+  ok(c.code === 0 && verdictOf(/"verdict": "approved"/.test(c.out)), 'api log prints this conversation\'s own audit lines', c.err);
   srv.close();
 }
 // ── ⑤ verify r1 (adversarial): each ORCH rule a row on the real code + a control without it ──
@@ -503,7 +503,7 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
     ['withheld', 'a revoke while the vendor stalls: the answer withheld, the audit says `withheld` with the vendor\'s status (M6)', ["verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, status", "verdict: r.ok ? 'ok' : 'refused', code: r.ok ? null : r.code, status"]],
   ];
   for (const [leg, name, mut] of R1) {
-    ok(await legs[leg](ORCH), name);
+    ok(verdictOf(await legs[leg](ORCH)), name);
     let red; try { red = !(await legs[leg](MUT.load('src/server/channel-api.js', mutate(OSRC, mut[0], mut[1]), `r1-${leg}`))); } catch (e) { red = `threw: ${e.message}`; }
     ok(red === true, `CONTROL: ${name} — without its rule the row goes red`, red);
   }
@@ -526,7 +526,7 @@ console.log('⑥ the declared row: census, the registry contract, a fake vendor 
   let invalid = null; try { for (const m of rows) CH.validateApi(m.kind, m.api); } catch (e) { invalid = e.message; }
   ok(rows.map((m) => m.kind).sort().join(',') === 'gmail,lark,slack' && !bad.length && !invalid, 'CENSUS: every registered adapter whose file hands an apiBearer declares a valid api row, and no row lacks one', { rows: rows.map((m) => m.kind), bad, invalid });
   let mErr = null; try { for (const [v, row] of Object.entries(MountManager.OAUTH_API)) CH.validateApi(`mount-${v}`, row); } catch (e) { mErr = e.message; }
-  ok(!mErr && Object.values(MountManager.OAUTH_API).every((r) => /^https:\/\//.test(r.refresh)), 'CENSUS: the storage mounts\' declared row (src/mounts.js OAUTH_API) is the same schema + its token endpoint', mErr);
+  ok(!mErr && verdictOf(Object.values(MountManager.OAUTH_API).every((r) => /^https:\/\//.test(r.refresh))), 'CENSUS: the storage mounts\' declared row (src/mounts.js OAUTH_API) is the same schema + its token endpoint', mErr);
   try { eng0.stop(); } catch {}
   // the registry's contract, each refusal a control (a scratch registry; nothing shipped is touched)
   const base = (kind) => makeFakeAdapter({ kind, receive: 'poll', sendAs: [] });
@@ -544,7 +544,7 @@ console.log('⑥ the declared row: census, the registry contract, a fake vendor 
     ['an unanchored string pattern', () => reg().register({ ...withBearer(base('p1')), api: { ...ROW, sensitive: ['/admin/'] } }), /sensitive must be a list of RegExp or strings anchored/],
     ['an unknown key', () => reg().register({ ...withBearer(base('k1')), api: { ...ROW, paths: [] } }), /paths is not a key/],
   ];
-  for (const [name, fn, want] of cases) { const m = refusal(fn); ok(!!m && want.test(m), `the registry THROWS on ${name} (like an undeclared capability)`, m); }
+  for (const [name, fn, want] of cases) { const m = refusal(fn); ok(!!m && verdictOf(want.test(m)), `the registry THROWS on ${name} (like an undeclared capability)`, m); }
   const good = reg(); const gb = base('acme-ok'); good.register({ ...withBearer(gb), api: ROW });
   ok(good.create(gb.kind, rec(gb.kind)).api === ROW, 'a valid row registers and the instance carries it beside its bearer');
   // the core names no vendor (a grep of the deleted tables is test-architecture's; this is the stronger read)
@@ -565,27 +565,27 @@ module.exports = { ...adapter, consent: Object.freeze({ mode: 'ephemeral', landi
   const ENG = MUT.load('src/server/channels-engine.js', ESRC2, 'acme');
   const before = ESRC.split('\n'), after = ESRC2.split('\n');
   const diff = after.length === before.length ? after.filter((l, i) => l !== before[i]) : ['(line count changed)'];
-  ok(diff.length === 1 && diff[0].startsWith('const REAL_ADAPTERS = Object.freeze([...VendorList.MANIFESTS.map(adapterOf), require('), 'the engine copy differs from src/ by the ONE registration line (REAL_ADAPTERS) and nothing else', diff.map((l) => l.slice(0, 120)));
+  ok(diff.length === 1 && verdictOf(diff[0].startsWith('const REAL_ADAPTERS = Object.freeze([...VendorList.MANIFESTS.map(adapterOf), require(')), 'the engine copy differs from src/ by the ONE registration line (REAL_ADAPTERS) and nothing else', diff.map((l) => l.slice(0, 120)));
   const dataDir = fs.mkdtempSync(path.join(tmpRoot, 'acme-'));
   const engA = ENG.create({ dataDir, log: quiet, fetch: async () => { throw new Error('no network'); } });
   await engA.store.adapters.update((a) => { a.adapters.push({ id: 'acme-1', kind: 'acme', label: 'Acme (test)', enabled: true, options: {} }); });
   const hosts = [];
   const fetchA = (url, init) => { hosts.push(new URL(url).host); return fetchFn(url, init); };
   const api = ORCH.create({ dataDir, engine: engA, fetchFn: fetchA, broadcast: () => {}, writer: LW() });
-  ok((await api.setTiers('acme-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }])).ok && api.creds(A).creds.some((c) => c.id === 'acme-1' && c.kind === 'acme'), 'acme: the account is a raw-API credential (the engine read its adapter\'s declared row — no list of kinds)', api.creds(A));
+  ok(gateOf((await api.setTiers('acme-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }])).ok) && verdictOf(api.creds(A).creds.some((c) => c.id === 'acme-1' && c.kind === 'acme')), 'acme: the account is a raw-API credential (the engine read its adapter\'s declared row — no list of kinds)', api.creds(A));
   let r = await api.call(A, { cred: 'acme-1', method: 'GET', path: '/v1/items', query: { page: '1' } });
   let last = seen[seen.length - 1];
-  ok(r.ok && r.status === 200 && last.auth === 'Bearer acme-TOKEN-SECRET' && last.url === '/v1/items?page=1' && hosts.at(-1) === 'api.acme.test' && !JSON.stringify(r).includes('acme-TOKEN-SECRET'), 'acme: a read runs through the REAL fence + ORCH on hosts[0] with the adapter\'s bearer, belted', { r: r.code, last, host: hosts.at(-1) });
+  ok(gateOf(r.ok) && r.status === 200 && last.auth === 'Bearer acme-TOKEN-SECRET' && last.url === '/v1/items?page=1' && hosts.at(-1) === 'api.acme.test' && !JSON.stringify(r).includes('acme-TOKEN-SECRET'), 'acme: a read runs through the REAL fence + ORCH on hosts[0] with the adapter\'s bearer, belted', { r: r.code, last, host: hosts.at(-1) });
   r = await api.call(A, { cred: 'acme-1', method: 'GET', path: '/v1/items', host: 'eu.acme.test' });
   const rOff = await api.call(A, { cred: 'acme-1', method: 'GET', path: '/v1/items', host: 'open.feishu.cn' });
-  ok(r.ok && hosts.at(-1) === 'eu.acme.test' && rOff.code === 'api_host_refused', 'acme: another DECLARED host passes; a host of another vendor\'s row is refused (api_host_refused)', { a: r.code, b: rOff.code });
+  ok(gateOf(r.ok) && hosts.at(-1) === 'eu.acme.test' && rOff.code === 'api_host_refused', 'acme: another DECLARED host passes; a host of another vendor\'s row is refused (api_host_refused)', { a: r.code, b: rOff.code });
   r = await api.call(A, { cred: 'acme-1', method: 'POST', path: '/v1/search', body: '{"q":"x"}' });
-  ok(r.ok && r.status === 200, 'acme: its declared read-by-POST (an anchored string) reads — no proposal under "ask each"', r.code);
+  ok(gateOf(r.ok) && r.status === 200, 'acme: its declared read-by-POST (an anchored string) reads — no proposal under "ask each"', r.code);
   r = await api.call(A, { cred: 'acme-1', method: 'POST', path: '/v1/admin/users', body: '{}' });
   const card = r.proposal ? CARD.cardModel(api.ownerView().proposals.find((p) => p.id === r.proposal.id)) : null;
-  ok(r.code === 'api_pending' && r.proposal.sensitive === 'path' && r.proposal.offersAlways === false && card && card.head.what.key === 'call the {vendor} API ({call})' && card.head.what.params.vendor === 'Acme (test)' && card.head.what.params.call === 'POST users' && card.request.path === '/v1/admin/users' && card.sensitive && card.sensitive.key === 'Sensitive path · always asks', 'acme: its declared sensitive path is a proposal, never "always allow"; the owner\'s card draws it (an unknown vendor call: the account + METHOD + last segment; the full path in the fold; the policy chip)', { code: r.code, card: card && card.head });
+  ok(r.code === 'api_pending' && r.proposal.sensitive === 'path' && r.proposal.offersAlways === false && gateOf(card) && card.head.what.key === 'call the {vendor} API ({call})' && card.head.what.params.vendor === 'Acme (test)' && card.head.what.params.call === 'POST users' && card.request.path === '/v1/admin/users' && gateOf(card.sensitive) && card.sensitive.key === 'Sensitive path · always asks', 'acme: its declared sensitive path is a proposal, never "always allow"; the owner\'s card draws it (an unknown vendor call: the account + METHOD + last segment; the full path in the fold; the policy chip)', { code: r.code, card: card && card.head });
   const dv = api.docs(A, 'acme-1');
-  ok(dv.ok && dv.vendor === 'Acme' && dv.docs[0] === 'https://docs.acme.test/api' && dv.hosts.join(',') === 'api.acme.test,eu.acme.test' && dv.fence.readByPost[0] === String(/^\/v1\/search$/), 'acme: docs answers the DECLARED label, docs, hosts and fence lists', dv);
+  ok(gateOf(dv.ok) && dv.vendor === 'Acme' && dv.docs[0] === 'https://docs.acme.test/api' && dv.hosts.join(',') === 'api.acme.test,eu.acme.test' && dv.fence.readByPost[0] === String(/^\/v1\/search$/), 'acme: docs answers the DECLARED label, docs, hosts and fence lists', dv);
   // THE FOLLOW-OWED READ'S MUST (a group list RECORDED while Task Groups were held keeps its own mark): agent A, in Task Group G,
   // files a write while held (admitted by its own row — its live groups read [] then); the owner removes A's row, leaving «All
   // agents, except G»; the store reads; Approve is refused BY NAME (groups_unknown_filed) — never run as «A is in no group». CONTROL:
@@ -660,9 +660,9 @@ module.exports = { ...adapter, consent: Object.freeze({ mode: 'ephemeral', landi
   const envA = { ...process.env, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_test' };
   const cli = (args) => new Promise((resolve) => { const pr = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-channels'), ...args], { env: envA }); let out = '', err = ''; pr.stdout.on('data', (d) => { out += d; }); pr.stderr.on('data', (d) => { err += d; }); pr.on('close', (code) => resolve({ code, out, err })); });
   let c = await cli(['api', 'docs', 'acme-1']);
-  ok(c.code === 0 && /docs\.acme\.test\/api/.test(c.out) && /Acme/.test(c.out), 'acme: `vibespace-channels api docs acme-1` prints the declared docs', c.err || c.out.slice(0, 300));
+  ok(c.code === 0 && gateOf(/docs\.acme\.test\/api/.test(c.out)) && verdictOf(/Acme/.test(c.out)), 'acme: `vibespace-channels api docs acme-1` prints the declared docs', c.err || c.out.slice(0, 300));
   c = await cli(['api', 'acme-1', 'GET', '/v1/items']);
-  ok(c.code === 0 && /"status": 200/.test(c.out) && !/acme-TOKEN-SECRET/.test(c.out + c.err), 'acme: `vibespace-channels api acme-1 GET /v1/items` prints the vendor answer, never the token', c.err || c.out.slice(0, 300));
+  ok(c.code === 0 && gateOf(/"status": 200/.test(c.out)) && !/acme-TOKEN-SECRET/.test(c.out + c.err), 'acme: `vibespace-channels api acme-1 GET /v1/items` prints the vendor answer, never the token', c.err || c.out.slice(0, 300));
   srv.close();
   try { engA.stop(); } catch {}
 }
@@ -684,8 +684,8 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
   // 1. on-host 307 to a SENSITIVE path — a write-auto conversation's plain write: refused by name, 0 bytes re-sent
   let { api, r, n0 } = await leg(ORCH, 'write-auto', { method: 'POST', path: '/r/307-sensitive', body: BODY });
   const l1 = api.auditTail('lark-1', { n: 1 })[0];
-  ok(r.code === 'api_redirect_unjudged' && r.why === 'approval' && r.to === `POST open.feishu.cn${SENS_PATH}` && at(SENS_PATH, n0).length === 0 && at('/r/307-sensitive', n0).length === 1 && !('target' in r) && /pointed POST open\.feishu\.cn\/r\/307-sensitive at POST open\.feishu\.cn\/open-apis\/drive/.test(r.error), 'on-host 307 to a sensitive path ⇒ api_redirect_unjudged (approval) by name, where the vendor pointed in the answer; NOTHING sent there (the target\'s query never in the agent\'s answer)', { code: r.code, why: r.why, there: at(SENS_PATH, n0).length });
-  ok(l1 && l1.verdict === 'refused' && l1.code === 'api_redirect_unjudged' && l1.status === 307 && l1.redirect && l1.redirect.to === `POST open.feishu.cn${SENS_PATH}` && l1.redirect.why === 'approval', 'the API log line names the redirect: where (method + host + path) and why it was not followed', l1);
+  ok(r.code === 'api_redirect_unjudged' && r.why === 'approval' && r.to === `POST open.feishu.cn${SENS_PATH}` && at(SENS_PATH, n0).length === 0 && at('/r/307-sensitive', n0).length === 1 && !('target' in r) && verdictOf(/pointed POST open\.feishu\.cn\/r\/307-sensitive at POST open\.feishu\.cn\/open-apis\/drive/.test(r.error)), 'on-host 307 to a sensitive path ⇒ api_redirect_unjudged (approval) by name, where the vendor pointed in the answer; NOTHING sent there (the target\'s query never in the agent\'s answer)', { code: r.code, why: r.why, there: at(SENS_PATH, n0).length });
+  ok(gateOf(l1) && l1.verdict === 'refused' && l1.code === 'api_redirect_unjudged' && l1.status === 307 && gateOf(l1.redirect) && l1.redirect.to === `POST open.feishu.cn${SENS_PATH}` && l1.redirect.why === 'approval', 'the API log line names the redirect: where (method + host + path) and why it was not followed', l1);
   row(307, `on-host · ${SENS_PATH}`, `refused · api_redirect_unjudged (approval)`, `${bytesAt(SENS_PATH, n0)} B re-sent`);
   // 2. off-host 308
   ({ api, r, n0 } = await leg(ORCH, 'write-auto', { method: 'POST', path: '/r/308-off', body: BODY }));
@@ -693,12 +693,12 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
   row(308, 'off-host · https://evil.example/steal', 'refused · api_redirect_unjudged (off-host)', `${after(n0).filter((s) => s.host === 'evil.example').length} requests there`);
   // 3. same host, same tier 307 — followed once, the body re-sent once
   ({ api, r, n0 } = await leg(ORCH, 'write-auto', { method: 'POST', path: '/r/307-same', body: BODY }));
-  ok(r.ok && r.status === 200 && at('/open-apis/docx/v2/documents', n0).length === 1 && bytesAt('/open-apis/docx/v2/documents', n0) === BODY.length && at('/open-apis/docx/v2/documents', n0)[0].method === 'POST', 'same host, same tier 307 (a write onto a write under write-auto) ⇒ followed once, the body re-sent once', { r: r.code || r.status, n: at('/open-apis/docx/v2/documents', n0).length });
+  ok(gateOf(r.ok) && r.status === 200 && at('/open-apis/docx/v2/documents', n0).length === 1 && bytesAt('/open-apis/docx/v2/documents', n0) === BODY.length && at('/open-apis/docx/v2/documents', n0)[0].method === 'POST', 'same host, same tier 307 (a write onto a write under write-auto) ⇒ followed once, the body re-sent once', { r: r.code || r.status, n: at('/open-apis/docx/v2/documents', n0).length });
   row(307, 'on-host · /open-apis/docx/v2/documents (write → write)', 'followed · 200', `${bytesAt('/open-apis/docx/v2/documents', n0)} B re-sent (×${at('/open-apis/docx/v2/documents', n0).length})`);
   // 4. 303 ⇒ GET without the body
   ({ api, r, n0 } = await leg(ORCH, 'write-auto', { method: 'POST', path: '/r/303', body: BODY }));
   const g = at('/open-apis/docx/v1/documents/doc_1', n0);
-  ok(r.ok && r.status === 200 && g.length === 1 && g[0].method === 'GET' && g[0].body === '' && !g[0].ct, '303 ⇒ followed as a GET without the body (nor its content type)', g);
+  ok(gateOf(r.ok) && r.status === 200 && g.length === 1 && g[0].method === 'GET' && g[0].body === '' && !g[0].ct, '303 ⇒ followed as a GET without the body (nor its content type)', g);
   row(303, 'on-host · /open-apis/docx/v1/documents/doc_1', 'followed as GET · 200', `${bytesAt('/open-apis/docx/v1/documents/doc_1', n0)} B (no body)`);
   // 5. an endless chain — 5 followed, the 6th refused
   ({ api, r, n0 } = await leg(ORCH, 'read', { method: 'GET', path: '/r/loop/0' }));
@@ -712,7 +712,7 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
   // 7. THE RED CONTROL — the old auto-follow (on-host only, the target never judged) re-sends the body to the sensitive path
   const AUTO = MUT.load('src/server/channel-api.js', mutate(OSRC, 'const j = F.judgeRedirect(c, { call: req, req: cur, status: res.status, location, tier: tierNow(ctx, cred).tier, shapes: shapesOf(ctx, cred), hops, seen });', 'const j = F.redirectRequest(c, cur, res.status, location);'), 'autofollow');
   ({ api, r, n0 } = await leg(AUTO, 'write-auto', { method: 'POST', path: '/r/307-sensitive', body: BODY }));
-  ok(r.ok && bytesAt(SENS_PATH, n0) === BODY.length, 'CONTROL: the old auto-follow (on-host only, the target never judged) re-sends the body to the sensitive path — the redirect rule is what stops it', { r: r.code || r.status, bytes: bytesAt(SENS_PATH, n0) });
+  ok(gateOf(r.ok) && bytesAt(SENS_PATH, n0) === BODY.length, 'CONTROL: the old auto-follow (on-host only, the target never judged) re-sends the body to the sensitive path — the redirect rule is what stops it', { r: r.code || r.status, bytes: bytesAt(SENS_PATH, n0) });
   row(307, `on-host · ${SENS_PATH} (CONTROL: old auto-follow)`, `followed · ${r.status || r.code}`, `${bytesAt(SENS_PATH, n0)} B re-sent`);
   console.log(`  the redirect table (status │ target │ verdict │ sent there):\n${table.join('\n')}`);
 
@@ -722,18 +722,18 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
   const a1 = await api.approve(pid, { digest: r.proposal.digest });
   const rec = () => api.ownerView().proposals.find((p) => p.id === pid);
   let m = CARD.cardModel(rec());
-  ok(a1.ok && rec().status === 'failed' && at(SENS_PATH, n0).length === 0 && rec().result.code === 'api_redirect_unjudged' && rec().result.why === 'approval' && rec().result.resubmit === true && rec().result.status === 307, 'an approved write the vendor redirects (307) to a sensitive path: the card fails by name — nothing sent there', rec().result);
-  ok(m.outcome.key === 'The vendor redirected it — not followed' && m.redirect && m.redirect.to === `POST open.feishu.cn${SENS_PATH}` && m.redirect.status === 307 && m.redirect.why.key === CARD.REDIRECT_WHY_WORDS.approval && m.resubmit === true && m.actionable === false, 'the card: outcome "The vendor redirected it — not followed", where + why for 技术细节, the 「重新提交」 door', { outcome: m.outcome, redirect: m.redirect, resubmit: m.resubmit });
-  ok(/approved, but the vendor redirected it — the vendor answered 307 and pointed POST open\.feishu\.cn\/r\/307-sensitive at POST open\.feishu\.cn\/open-apis\/drive\/v1\/permissions\/doc_1\/members/.test(CARD.receiptText(rec())), 'the agent\'s receipt says the vendor redirected it and where', CARD.receiptText(rec()));
+  ok(gateOf(a1.ok) && rec().status === 'failed' && at(SENS_PATH, n0).length === 0 && rec().result.code === 'api_redirect_unjudged' && rec().result.why === 'approval' && rec().result.resubmit === true && rec().result.status === 307, 'an approved write the vendor redirects (307) to a sensitive path: the card fails by name — nothing sent there', rec().result);
+  ok(m.outcome.key === 'The vendor redirected it — not followed' && gateOf(m.redirect) && m.redirect.to === `POST open.feishu.cn${SENS_PATH}` && m.redirect.status === 307 && m.redirect.why.key === CARD.REDIRECT_WHY_WORDS.approval && m.resubmit === true && m.actionable === false, 'the card: outcome "The vendor redirected it — not followed", where + why for 技术细节, the 「重新提交」 door', { outcome: m.outcome, redirect: m.redirect, resubmit: m.resubmit });
+  ok(verdictOf(/approved, but the vendor redirected it — the vendor answered 307 and pointed POST open\.feishu\.cn\/r\/307-sensitive at POST open\.feishu\.cn\/open-apis\/drive\/v1\/permissions\/doc_1\/members/.test(CARD.receiptText(rec()))), 'the agent\'s receipt says the vendor redirected it and where', CARD.receiptText(rec()));
   const stale = api.resubmit(pid, { digest: 'f'.repeat(64) });
   const rs = api.resubmit(pid, { digest: r.proposal.digest });
   const np = rs.proposal;
-  ok(stale.code === 'api_frozen_mismatch' && rs.ok && np && np.status === 'pending' && np.method === 'POST' && np.path === SENS_PATH && np.sensitive === 'path' && np.resubmitOf === pid && rec().resubmittedAs === np.id && at(SENS_PATH, n0).length === 0, '重新提交 files the vendor\'s target as a NEW pending card (its own digest, sensitive chip) — nothing runs; a stale digest files nothing', { stale: stale.code, np });
+  ok(stale.code === 'api_frozen_mismatch' && gateOf(rs.ok) && gateOf(np) && np.status === 'pending' && np.method === 'POST' && np.path === SENS_PATH && np.sensitive === 'path' && np.resubmitOf === pid && rec().resubmittedAs === np.id && at(SENS_PATH, n0).length === 0, '重新提交 files the vendor\'s target as a NEW pending card (its own digest, sensitive chip) — nothing runs; a stale digest files nothing', { stale: stale.code, np });
   m = CARD.cardModel(rec());
   const again = api.resubmit(pid, { digest: r.proposal.digest });
-  ok(m.outcome.key === 'The vendor redirected it — resubmitted as a new card' && m.resubmit === false && again.code === 'not-resubmittable' && CARD.chainIds([pid], api.ownerView().proposals).includes(np.id), 'once resubmitted: the card says so, the door is gone, a second resubmit is refused; the new card sits in the call row\'s chain', { outcome: m.outcome.key, again: again.code });
+  ok(m.outcome.key === 'The vendor redirected it — resubmitted as a new card' && m.resubmit === false && again.code === 'not-resubmittable' && verdictOf(CARD.chainIds([pid], api.ownerView().proposals).includes(np.id)), 'once resubmitted: the card says so, the door is gone, a second resubmit is refused; the new card sits in the call row\'s chain', { outcome: m.outcome.key, again: again.code });
   const a2 = await api.approve(np.id, { digest: np.digest });
-  ok(a2.ok && api.ownerView().proposals.find((p) => p.id === np.id).status === 'ran' && at(SENS_PATH, n0).length === 1 && bytesAt(SENS_PATH, n0) === BODY.length, 'Approve on the new card runs it at the address the vendor gave — the body sent there once, now that the user judged it', { there: at(SENS_PATH, n0).length });
+  ok(gateOf(a2.ok) && api.ownerView().proposals.find((p) => p.id === np.id).status === 'ran' && at(SENS_PATH, n0).length === 1 && bytesAt(SENS_PATH, n0) === BODY.length, 'Approve on the new card runs it at the address the vendor gave — the body sent there once, now that the user judged it', { there: at(SENS_PATH, n0).length });
   const off = await leg(ORCH, 'write-ask', { method: 'POST', path: '/r/308-off', body: BODY });
   await off.api.approve(off.r.proposal.id, { digest: off.r.proposal.digest });
   const offRec = off.api.ownerView().proposals.find((p) => p.id === off.r.proposal.id);
@@ -742,7 +742,7 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
   // 9. THE CODES: the agent route maps both; the retired api_redirect_refused is gone from src/
   const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
   const retired = srcJs().filter((f) => textOf('src/' + f).includes('api_redirect_refused'));
-  ok(/api_redirect_unjudged: 502, api_redirect_loop: 502/.test(ar) && retired.length === 0, 'the agent route answers api_redirect_unjudged / api_redirect_loop as 502; api_redirect_refused is retired from src/', retired);
+  ok(gateOf(/api_redirect_unjudged: 502, api_redirect_loop: 502/.test(ar)) && retired.length === 0, 'the agent route answers api_redirect_unjudged / api_redirect_loop as 502; api_redirect_refused is retired from src/', retired);
 
   // 10. THE REDIRECT POLICY CENSUS (grep-derived): every src/ server file that requires the fence is a raw-API file; each
   //     outbound fetch site in it (`fetchFn(`, a bare `fetch(`, `http(s).request(` / `.get(`) must spell `redirect:
@@ -768,11 +768,11 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
   };
   const c0 = census(texts);
   console.log(`  the redirect census (${files.length} raw-API files: ${files.join(', ')}):\n${c0.rows.map((x) => `    ${x}`).join('\n')}`);
-  ok(files.includes('src/server/channel-api.js') && c0.rows.filter((x) => / fetchFn\( /.test(x)).length === 1 && c0.bad.length === 0, `the redirect census: every raw-API fetch site names redirect: 'manual' after its init spread, no other redirect value (${c0.rows.length} sites)`, c0.bad);
+  ok(gateOf(files.includes('src/server/channel-api.js')) && c0.rows.filter((x) => / fetchFn\( /.test(x)).length === 1 && c0.bad.length === 0, `the redirect census: every raw-API fetch site names redirect: 'manual' after its init spread, no other redirect value (${c0.rows.length} sites)`, c0.bad);
   const O = 'src/server/channel-api.js';
   const plant = census({ ...texts, [O]: texts[O].replace("headers: { ...cur.headers, authorization: `Bearer ${token}` }, body: cur.body || undefined }", "headers: { ...cur.headers, authorization: `Bearer ${token}` }, body: cur.body || undefined, redirect: 'follow' }") });
   const before = census({ ...texts, [O]: texts[O].replace("{ ...init, redirect: 'manual', signal:", "{ redirect: 'manual', ...init, signal:") });
-  ok(plant.bad.some((x) => /redirect: 'follow'/.test(x)) && before.bad.some((x) => /NO manual redirect/.test(x)), 'CONTROL: the census goes red on a planted redirect: \'follow\' (in the run\'s init) and on the policy put before the init spread', { plant: plant.bad, before: before.bad });
+  ok(gateOf(plant.bad.some((x) => /redirect: 'follow'/.test(x))) && verdictOf(before.bad.some((x) => /NO manual redirect/.test(x))), 'CONTROL: the census goes red on a planted redirect: \'follow\' (in the run\'s init) and on the policy put before the init spread', { plant: plant.bad, before: before.bad });
 }
 // ── ⑧ THE API LOG THE OWNER READS (lane channel-api-log-blank) ──
 console.log('⑧ the API log (lane channel-api-log-blank): one line at each run / refuse / decide point, read back per credential, bounded');
@@ -780,9 +780,9 @@ console.log('⑧ the API log (lane channel-api-log-blank): one line at each run 
   // PURE: the tail is ONE credential's last n lines; a MUTANT that does not check the credential is RED
   const rows = [{ cred: 'lark-1', at: 1, principal: { id: 'conv-A' } }, { cred: 'lark_1', at: 2 }, { cred: 'lark-1', at: 3, principal: { id: 'conv-B' } }, null, 'junk', { cred: 'lark-1', at: 4, principal: { id: 'conv-A' } }, { cred: 'lark:1', at: 5 }];
   const judge = (Fx) => { const ats = (o) => Fx.logTail(rows, { cred: 'lark-1', ...o }).map((l) => l.at).join(); return ats({ n: 10 }) === '1,3,4' && ats({ n: 1 }) === '4' && ats({ n: 0 }) === '4' && ats({ n: 10, principal: { id: 'conv-A' } }) === '1,4' && Fx.logTail(rows, { cred: 'lark-1', n: 1e9 }).length === 3; };
-  ok(judge(F), 'PURE logTail: the last n lines OF THAT credential, oldest first (n clamped 1…500), a principal = its own lines; lines of lark_1 / lark:1 (one file name) and junk rows never appear');
+  ok(verdictOf(judge(F)), 'PURE logTail: the last n lines OF THAT credential, oldest first (n clamped 1…500), a principal = its own lines; lines of lark_1 / lark:1 (one file name) and junk rows never appear');
   const MT = MUT.load('src/channel-api.js', mutate(SRC, 'l.cred !== cred) continue;', 'false) continue;'), 'tailanycred');
-  ok(!judge(MT) && MT.logTail(rows, { cred: 'lark-1', n: 10 }).some((l) => l.cred !== 'lark-1'), 'MUTANT: a tail that does not check the credential hands back another credential\'s lines ⇒ RED');
+  ok(!judge(MT) && verdictOf(MT.logTail(rows, { cred: 'lark-1', n: 10 }).some((l) => l.cred !== 'lark-1')), 'MUTANT: a tail that does not check the credential hands back another credential\'s lines ⇒ RED');
 
   // ORCH: every call leaves ONE line at the point it ran, was refused or decided
   const eng = fakeEngine();
@@ -797,7 +797,7 @@ console.log('⑧ the API log (lane channel-api-log-blank): one line at each run 
   ok(r.code === 'api_not_granted' && !fs.existsSync(path.join(dataDir, 'channels', 'nope')) && ring().length === 1, 'an id that names no credential writes nothing anywhere (no file for a made-up id) — the agent\'s answer is the same');
   await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]);
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/open-apis/im/v1/chats' });
-  ok(r.ok && of('ok').length === 1 && of('ok')[0].status === 200 && of('ok')[0].path === '/open-apis/im/v1/chats', 'a call that ran is ONE ok line (its status)', ring());
+  ok(gateOf(r.ok) && of('ok').length === 1 && of('ok')[0].status === 200 && of('ok')[0].path === '/open-apis/im/v1/chats', 'a call that ran is ONE ok line (its status)', ring());
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/x', headers: { Authorization: 'Bearer mine' } });
   ok(r.code === 'api_header_refused' && of('refused', 'api_header_refused').length === 1, 'a call the fence refused is ONE refused line (its code)');
   r = await api.call(A, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents', body: '{"t":1}' });
@@ -827,7 +827,7 @@ console.log('⑧ the API log (lane channel-api-log-blank): one line at each run 
   const calls = ring().filter((l) => l.method !== null);
   const tally = {}; for (const l of calls) tally[l.verdict + (l.code ? ':' + l.code : '')] = (tally[l.verdict + (l.code ? ':' + l.code : '')] || 0) + 1;
   ok(JSON.stringify(tally) === JSON.stringify({ 'refused:api_not_granted': 2, ok: 1, 'refused:api_header_refused': 1, proposed: 4, rejected: 1, approved: 1, 'refused:api_frozen_mismatch': 1 }), 'the ring holds EXACTLY one line per event — no call without its line, none twice', tally);
-  ok(calls.every((l) => typeof l.at === 'number' && l.cred === 'lark-1' && l.principal && l.principal.kind === 'agent' && l.principal.id === 'conv-A' && l.principal.name === 'Agent A' && typeof l.method === 'string' && typeof l.path === 'string' && ['ok', 'proposed', 'approved', 'rejected', 'refused', 'withheld'].includes(l.verdict) && ['status', 'code', 'proposal', 'by'].every((k) => k in l)), 'every call line has the shape the dialog words: when, who, the credential, method + path, status, verdict, code, the card', calls[0]);
+  ok(verdictOf(calls.every((l) => typeof l.at === 'number' && l.cred === 'lark-1' && l.principal && l.principal.kind === 'agent' && l.principal.id === 'conv-A' && l.principal.name === 'Agent A' && typeof l.method === 'string' && typeof l.path === 'string' && ['ok', 'proposed', 'approved', 'rejected', 'refused', 'withheld'].includes(l.verdict) && ['status', 'code', 'proposal', 'by'].every((k) => k in l))), 'every call line has the shape the dialog words: when, who, the credential, method + path, status, verdict, code, the card', calls[0]);
 
   // PER CREDENTIAL on disk too: two ids that share a file name (lark:1 / lark_1) never read each other's lines
   const cd = fs.mkdtempSync(path.join(tmpRoot, 'coll-')), apiC = mkOrch(ORCH, eng, cd);
@@ -981,7 +981,7 @@ console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api �
   };
   // the four legs wait on real CLI polls (every 2 s) — run them side by side (each has its own server), report in order
   const rowsOf = await Promise.all([legInline, legNoWait, legTimeout, legBase].map(async (leg) => { const rows = []; await leg((c, n, i) => rows.push([c, n, i])); return rows; }));
-  for (const rows of rowsOf) for (const [c, n, i] of rows) ok(c, n, i);
+  for (const rows of rowsOf) for (const [c, n, i] of rows) ok(verdictOf(c), n, i);
 }
 
 // ── B-4e97 (fb-168e36f9a3, 2026-11-02): the raw API on a Gmail account listed six Google hosts its token can never reach
@@ -998,10 +998,10 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
   const HELD = [GS('gmail.readonly'), GS('gmail.compose')];
   // the PURE half
   const rr = F.reachOf(F.vendorRowOf({ api: G.API_ROW }), HELD);
-  ok(rr.reach.join(',') === 'www.googleapis.com,gmail.googleapis.com' && rr.needs.map((n) => n.host).join(',') === 'docs.googleapis.com,sheets.googleapis.com,slides.googleapis.com,drive.googleapis.com,people.googleapis.com,tasks.googleapis.com' && rr.needs.find((n) => n.host === 'drive.googleapis.com').scopes.includes(GS('drive.readonly')),
+  ok(rr.reach.join(',') === 'www.googleapis.com,gmail.googleapis.com' && rr.needs.map((n) => n.host).join(',') === 'docs.googleapis.com,sheets.googleapis.com,slides.googleapis.com,drive.googleapis.com,people.googleapis.com,tasks.googleapis.com' && verdictOf(rr.needs.find((n) => n.host === 'drive.googleapis.com').scopes.includes(GS('drive.readonly'))),
     'a Gmail consent (readonly + compose) reaches gmail + www only; the six other Google hosts are named with the scopes they need', JSON.stringify(rr));
   const rd = F.reachOf(F.vendorRowOf({ api: G.API_ROW }), [...HELD, GS('drive.readonly')]);
-  ok(['docs.googleapis.com', 'sheets.googleapis.com', 'slides.googleapis.com', 'drive.googleapis.com'].every((h) => rd.reach.includes(h)) && rd.needs.map((n) => n.host).join(',') === 'people.googleapis.com,tasks.googleapis.com', 'a token that also holds drive.readonly reaches Drive, Docs, Sheets and Slides', JSON.stringify(rd));
+  ok(gateOf(['docs.googleapis.com', 'sheets.googleapis.com', 'slides.googleapis.com', 'drive.googleapis.com'].every((h) => rd.reach.includes(h))) && rd.needs.map((n) => n.host).join(',') === 'people.googleapis.com,tasks.googleapis.com', 'a token that also holds drive.readonly reaches Drive, Docs, Sheets and Slides', JSON.stringify(rd));
   ok(F.reachOf(F.vendorRowOf({ api: G.API_ROW }), null).reach.length === G.API_ROW.hosts.length && F.reachOf(F.vendorRowOf({ api: LARK.API_ROW }), []).needs.length === 0, 'a credential that cannot say its scopes reaches every declared host (as before); a row with no hostScopes judges none');
   const CH = [
     ['Bearer realm="x", error="insufficient_scope", scope="a b"', ['a', 'b']],
@@ -1019,7 +1019,7 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
   const withRow = (k, row) => { const b = baseA(k); return { ...b, api: row, create: (r, d) => ({ ...b.create(r, d), apiBearer: async () => 't' }) }; };
   const ROW0 = { label: 'X', hosts: ['a.example.test', 'b.example.test'], docs: ['https://docs.example.test'], readByPost: [], sensitive: [] };
   const refuse = (row) => { try { const r = reg(); const a = withRow('hs-' + Math.random().toString(36).slice(2, 7), row); r.register(a); r.create(a.kind, { id: a.kind, options: {} }); return null; } catch (e) { return String(e.message); } };
-  ok(refuse({ ...ROW0, hostScopes: { 'a.example.test': ['s1'] } }) === null && /hostScopes names c\.example\.test, which is not one of its hosts/.test(refuse({ ...ROW0, hostScopes: { 'c.example.test': ['s1'] } }) || '') && /hostScopes\.a\.example\.test must be a non-empty list/.test(refuse({ ...ROW0, hostScopes: { 'a.example.test': [] } }) || '') && /hostScopes must be/.test(refuse({ ...ROW0, hostScopes: ['s'] }) || ''),
+  ok(refuse({ ...ROW0, hostScopes: { 'a.example.test': ['s1'] } }) === null && gateOf(/hostScopes names c\.example\.test, which is not one of its hosts/.test(refuse({ ...ROW0, hostScopes: { 'c.example.test': ['s1'] } }) || '')) && gateOf(/hostScopes\.a\.example\.test must be a non-empty list/.test(refuse({ ...ROW0, hostScopes: { 'a.example.test': [] } }) || '')) && verdictOf(/hostScopes must be/.test(refuse({ ...ROW0, hostScopes: ['s'] }) || '')),
     'the registry takes a valid hostScopes and refuses by name one naming a host the row lacks, an empty list, a non-object');
   // THROUGH THE ORCHESTRATOR: a Gmail-shaped credential whose sign-in holds the two Gmail scopes
   const gEng = () => {
@@ -1043,17 +1043,17 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
   const X = await run4(ORCH);
   const ECHO = async (Mod) => { const eng = gEng(), api = mkOrch(Mod, eng, fs.mkdtempSync(path.join(tmpRoot, 'gme-'))); await api.setTiers('gm-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]); return api.call(A, { cred: 'gm-1', method: 'GET', path: '/scope403echo', host: 'gmail.googleapis.com' }); };
   const xe = await ECHO(ORCH);
-  ok(xe.status === 403 && /lacks the permission this API needs/.test(xe.scopeSays || '') && !JSON.stringify(xe).includes('ya29-TOKEN-SECRET'), 'B-4e97 cure: a challenge that echoes the request\'s own bearer in scope= is scrubbed like the headers — the scope line is said, the bearer is not', JSON.stringify(xe).slice(0, 400));
-  ok(X.docs.ok && X.docs.hosts.join(',') === 'www.googleapis.com,gmail.googleapis.com' && X.docs.needsScope.length === 6 && /did not ask for/.test(X.docs.needsScopeSays), '`api docs` lists the hosts the held token reaches and names the six it cannot, with the scopes they need', JSON.stringify({ hosts: X.docs.hosts, needs: (X.docs.needsScope || []).map((n) => n.host) }));
-  ok(X.sc.ok && X.sc.status === 403 && /lacks the permission this API needs \(https:\/\/scopes\.example\.test\/drive\.readonly or https:\/\/scopes\.example\.test\/drive\)/.test(X.sc.scopeSays || ''), 'a 403 carrying the standard insufficient_scope challenge gains ONE line naming the scopes the vendor named', X.sc.scopeSays);
-  ok(X.unreach.status === 403 && /lacks the permission/.test(X.unreach.scopeSays || '') && X.unreach.scopeSays.includes(GS('drive.readonly')), 'a bare 403 from a host the held token cannot reach is said too, with the row\'s scopes', X.unreach.scopeSays);
+  ok(xe.status === 403 && gateOf(/lacks the permission this API needs/.test(xe.scopeSays || '')) && !JSON.stringify(xe).includes('ya29-TOKEN-SECRET'), 'B-4e97 cure: a challenge that echoes the request\'s own bearer in scope= is scrubbed like the headers — the scope line is said, the bearer is not', JSON.stringify(xe).slice(0, 400));
+  ok(gateOf(X.docs.ok) && X.docs.hosts.join(',') === 'www.googleapis.com,gmail.googleapis.com' && X.docs.needsScope.length === 6 && verdictOf(/did not ask for/.test(X.docs.needsScopeSays)), '`api docs` lists the hosts the held token reaches and names the six it cannot, with the scopes they need', JSON.stringify({ hosts: X.docs.hosts, needs: (X.docs.needsScope || []).map((n) => n.host) }));
+  ok(gateOf(X.sc.ok) && X.sc.status === 403 && verdictOf(/lacks the permission this API needs \(https:\/\/scopes\.example\.test\/drive\.readonly or https:\/\/scopes\.example\.test\/drive\)/.test(X.sc.scopeSays || '')), 'a 403 carrying the standard insufficient_scope challenge gains ONE line naming the scopes the vendor named', X.sc.scopeSays);
+  ok(X.unreach.status === 403 && gateOf(/lacks the permission/.test(X.unreach.scopeSays || '')) && verdictOf(X.unreach.scopeSays.includes(GS('drive.readonly'))), 'a bare 403 from a host the held token cannot reach is said too, with the row\'s scopes', X.unreach.scopeSays);
   ok(X.plain.status === 403 && X.plain.scopeSays === undefined && X.ok200.status === 200 && X.ok200.scopeSays === undefined, 'a bare 403 on a host the token reaches, and a 200, add nothing (no guessed cause)', { plain: X.plain.scopeSays, ok: X.ok200.scopeSays });
   // a WRITE under «ask each»: approved, refused 403 — the scope line rides the card's result (`api wait` reads it)
   const wr = await X.api.call(A, { cred: 'gm-1', method: 'POST', path: '/scope403', host: 'gmail.googleapis.com', body: '{}' });
   const pr0 = wr.proposal ? X.api.ownerView().proposals.find((q) => q.id === wr.proposal.id) : null;
   const ap = pr0 ? await X.api.approve(wr.proposal.id, { digest: pr0.digest }) : null;
   const pr = wr.proposal ? X.api.ownerView().proposals.find((q) => q.id === wr.proposal.id) : null;
-  ok(wr.code === 'api_pending' && pr && pr.result && pr.result.status === 403 && /lacks the permission this API needs/.test(pr.result.scopeSays || ''), 'an APPROVED write refused 403 for a missing scope keeps the line on its result (the card and `api wait` say it)', JSON.stringify({ code: wr.code, ap: ap && (ap.code || ap.ok), result: pr && pr.result && { status: pr.result.status, scopeSays: pr.result.scopeSays } }));
+  ok(wr.code === 'api_pending' && gateOf(pr) && gateOf(pr.result) && pr.result.status === 403 && verdictOf(/lacks the permission this API needs/.test(pr.result.scopeSays || '')), 'an APPROVED write refused 403 for a missing scope keeps the line on its result (the card and `api wait` say it)', JSON.stringify({ code: wr.code, ap: ap && (ap.code || ap.ok), result: pr && pr.result && { status: pr.result.status, scopeSays: pr.result.scopeSays } }));
   // the CLI prints it
   const srv4 = http.createServer((req, res) => {
     const chunks = []; req.on('data', (c) => chunks.push(c));
@@ -1066,13 +1066,13 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
   await new Promise((rs) => srv4.listen(0, '127.0.0.1', rs));
   const c4 = await new Promise((resolve) => { const pr = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-channels'), 'api', 'gm-1', 'GET', '/scope403', '--host', 'gmail.googleapis.com'], { env: { ...process.env, VIBESPACE_API: `http://127.0.0.1:${srv4.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_test' } }); let out = '', err = ''; pr.stdout.on('data', (d) => { out += d; }); pr.stderr.on('data', (d) => { err += d; }); pr.on('close', (code) => resolve({ code, out, err })); });
   srv4.close();
-  ok(c4.code === 0 && /"status": 403/.test(c4.out) && /"scopeSays": "the token lacks the permission this API needs/.test(c4.out), '`vibespace-channels api … GET` prints the scope line beside the 403', c4.err || c4.out.slice(0, 400));
+  ok(c4.code === 0 && gateOf(/"status": 403/.test(c4.out)) && verdictOf(/"scopeSays": "the token lacks the permission this API needs/.test(c4.out)), '`vibespace-channels api … GET` prints the scope line beside the 403', c4.err || c4.out.slice(0, 400));
   // CONTROLS: the release's docs (every declared host) and run (no line)
   const OSRC4 = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf-8');
   const SCRUB = "scopeRefusalOf(c, cur, String(res.headers.get('www-authenticate') || '').split(token).join(REDACTED))";
   ok(OSRC4.split(SCRUB).length === 2, 'control setup: the scrubbed challenge read is present once');
   const xeOld = await ECHO(MUT.load('src/server/channel-api.js', editAnchor(OSRC4, SCRUB, "scopeRefusalOf(c, cur, res.headers.get('www-authenticate'))", "src/server/channel-api.js"), 'b4e97-noscrub'));   // stale-pins: kept (the release's read, restored by the red control)
-  ok(JSON.stringify(xeOld).includes('ya29-TOKEN-SECRET'), 'RED CONTROL: the release\'s challenge read — the echoed bearer rides the scope line (the leg above is red on it)', JSON.stringify(xeOld).slice(0, 300));
+  ok(verdictOf(JSON.stringify(xeOld).includes('ya29-TOKEN-SECRET')), 'RED CONTROL: the release\'s challenge read — the echoed bearer rides the scope line (the leg above is red on it)', JSON.stringify(xeOld).slice(0, 300));
   const DOCS_NEW = "hosts: r.reach, ...(r.needs.length ? { needsScope: r.needs,";
   const RUN_NEW = "ms: now() - t0, ...(scopeSays ? { scopeSays } : {}) };";
   ok(OSRC4.split(DOCS_NEW).length === 2 && OSRC4.split(RUN_NEW).length === 2, 'control setup: the docs line and the run line are present once each');
@@ -1081,8 +1081,8 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
   ok(P4.docs.hosts.length === 8 && P4.sc.status === 403 && P4.sc.scopeSays === undefined && P4.unreach.scopeSays === undefined, 'RED CONTROL: the release\'s orchestrator lists all eight hosts and passes the scope 403 back with no word — the legs above are red on it', JSON.stringify({ hosts: P4.docs.hosts.length, sc: P4.sc.scopeSays }));
 }
 
-for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 20, label: '' })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 20, label: '' })) ok(verdictOf(c.pass), c.name, c.detail);
 vendor.close();
 fs.rmSync(tmpRoot, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

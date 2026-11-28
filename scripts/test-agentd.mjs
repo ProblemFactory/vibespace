@@ -26,7 +26,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 process.env.VIBESPACE_AGENTD_ROOT = AGENTD_ROOT;
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -47,16 +47,16 @@ const { DeviceManager } = require('../src/agentd/client.js');
 console.log('— agentd M0: mint token, install, spawn, handshake —');
 const dmA = new DeviceManager({ dataDir, bundlePath: bundleA, version: '9.9.1', log: () => {} });
 dmA.installLocal();
-check('install landed current symlink', fs.existsSync(path.join(AGENTD_ROOT, 'current', 'agentd.js')), '');
+check('install landed current symlink', verdictOf(fs.existsSync(path.join(AGENTD_ROOT, 'current', 'agentd.js'))), '');
 const conn = await dmA.connect();
 check('handshake produced a connection', !!conn && !!conn.info, '');
 check('daemon reports its version + platform', conn.info.daemonVersion === '9.9.1' && !!conn.info.arch, JSON.stringify(conn.info));
-check('token minted 0600 + sha stored server-side', (() => {
+check('token minted 0600 + sha stored server-side', verdictOf((() => {
   const tokFile = path.join(AGENTD_ROOT, 'state', 'token');
   const st = fs.statSync(tokFile);
   const toks = JSON.parse(fs.readFileSync(path.join(dataDir, 'agentd-tokens.json'), 'utf8'));
   return (st.mode & 0o777) === 0o600 && !!toks.local && fs.readFileSync(tokFile, 'utf8').startsWith('vsht_');
-})(), '');
+})()), '');
 
 console.log('— agentd M0: auth failure on a bad token —');
 {
@@ -86,15 +86,15 @@ const dmB = new DeviceManager({ dataDir, bundlePath: bundleB, version: '9.9.2', 
 const conn2 = await dmB.connect();
 check('reconnected after upgrade', !!conn2 && !!conn2.info, '');
 check('daemon now reports the upgraded version', conn2.info.daemonVersion === '9.9.2', JSON.stringify(conn2.info));
-check('9.9.2 install dir exists', fs.existsSync(path.join(AGENTD_ROOT, '9.9.2', 'agentd.js')), '');
-check('current symlink repointed to 9.9.2', fs.readlinkSync(path.join(AGENTD_ROOT, 'current')).includes('9.9.2'), '');
+check('9.9.2 install dir exists', verdictOf(fs.existsSync(path.join(AGENTD_ROOT, '9.9.2', 'agentd.js'))), '');
+check('current symlink repointed to 9.9.2', verdictOf(fs.readlinkSync(path.join(AGENTD_ROOT, 'current')).includes('9.9.2')), '');
 const pidAfter = Number(fs.readFileSync(path.join(AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8').trim());
 check('daemon re-exec produced a new pid', pidAfter !== pidBefore, `${pidBefore} → ${pidAfter}`);
 
 console.log('— agentd M0: multiple concurrent servers on one daemon —');
 const dmC = new DeviceManager({ dataDir, bundlePath: bundleB, version: '9.9.2', log: () => {} });
 const conn3 = await dmC.connect();
-check('a second concurrent server connects to the same daemon', !!conn3 && dmB.status().connected && dmC.status().connected, '');
+check('a second concurrent server connects to the same daemon', !!conn3 && gateOf(dmB.status().connected) && verdictOf(dmC.status().connected), '');
 
 console.log('— agentd M0: flock singleton (no double daemon) —');
 {
@@ -108,8 +108,8 @@ dmB.stop(); dmC.stop();
 // r5404 (lane bl-machines-b — the 2.369.422 hosted proof's red, placed): a daemon must be GONE before its root goes — its SIGTERM
 // handler's last log line re-creates agentd/state/agentd.log under a racing rmSync (ENOTEMPTY, the 2.369.217 runner red's class)
 const end = endDaemonsAndWait(AGENTD_ROOT);
-check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && end.gone && !end.killed, JSON.stringify(end));
+check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && gateOf(end.gone) && !end.killed, JSON.stringify(end));
 fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M0 tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

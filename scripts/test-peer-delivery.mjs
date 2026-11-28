@@ -28,7 +28,7 @@ import { stopWrapper, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -96,7 +96,7 @@ const deliver = require(path.join(REPO, 'src/server/conversation-deliver.js')).c
 const r = await deliver.deliverToConversation(CID, 'Message from session "A": hello codex', { fromName: 'A', cardText: 'hello codex' });
 ok("a live codex session delivers on lane 'rpc-queue'", r.ok === true && r.lane === 'rpc-queue' && r.peerName === 'CxPeer', JSON.stringify(r));
 const frame = frames.length === 1 ? JSON.parse(frames[0]) : null;
-ok("…as ONE 'peer-message' stdin frame carrying the text", !!frame && frame.type === 'peer-message' && /hello codex/.test(frame.text));
+ok("…as ONE 'peer-message' stdin frame carrying the text", !!frame && frame.type === 'peer-message' && verdictOf(/hello codex/.test(frame.text)));
 ok('…plus the card label fields (fromName + cardText) the wrapper writes into its webui_peer marker (P1: labelled peer card, not a "You" bubble)', !!frame && frame.fromName === 'A' && frame.cardText === 'hello codex', JSON.stringify(frame));
 ok('…and NO in-memory peer card is emitted (the wrapper record is the ONE carrier — 2.362.2: the party holding the information renders it; a card here double-renders live)', cards === 0);
 ok("…and TYPED as a peer message by default (a human's message keeps its own turn)", frame.kind === 'peer' && r.kind === 'peer', JSON.stringify([frame.kind, r.kind]));
@@ -162,7 +162,7 @@ ok('a claude session never rides rpc-queue (registry gate, even with a caps-bear
   ok('B-d963: wrapperCaps says a verb-LESS advert does NOT steer notifications (its own process wrote no verb table)', wrapperCaps(BUF, WID, S.socketPath).notificationSteer === false, JSON.stringify(wrapperCaps(BUF, WID, S.socketPath)));
   const r0 = await L.deliverToConversation(CID, '[VibeSpace Background Work] task "nightly" (job-1): done.', { fromName: 'Background Work · nightly', kind: 'notification', spendReason: 'job-notification' });
   ok("B-d963: a notification to a BUSY old wrapper is NOT written (it would queue a billed turn) — a typed miss 'wrapper-no-steer' the caller stashes", r0.ok === false && r0.refused === 'wrapper-no-steer' && skewFrames.length === 0, JSON.stringify(r0));
-  ok('…the refusal SAYS what to do (restart the session) — a held entry must name its cause', /restart/i.test(r0.reason || ''), r0.reason);
+  ok('…the refusal SAYS what to do (restart the session) — a held entry must name its cause', verdictOf(/restart/i.test(r0.reason || '')), r0.reason);
   ok('…and the spend hold is GIVEN BACK, never charged (no turn happened)', money.note === 0 && money.release === 1, JSON.stringify(money));
   // the rules this does NOT change (negative controls)
   const r1 = await L.deliverToConversation(CID, 'hello from B', { fromName: 'session B' });
@@ -180,10 +180,10 @@ ok('a claude session never rides rpc-queue (registry gate, even with a caps-bear
   // the caller's stash is TYPED with the new cause (the Background Work panel
   // names it instead of "the conversation has no live inbox")
   const M = require(path.join(REPO, 'src/job-model.js'));
-  ok("B-d963: job-model types the stash 'wrapper-no-steer' from the ladder's answer (a closed HELD_KINDS member)", M.heldKind(r0, r0.reason) === 'wrapper-no-steer' && M.HELD_KINDS.includes('wrapper-no-steer'), M.heldKind(r0, r0.reason));
+  ok("B-d963: job-model types the stash 'wrapper-no-steer' from the ladder's answer (a closed HELD_KINDS member)", M.heldKind(r0, r0.reason) === 'wrapper-no-steer' && verdictOf(M.HELD_KINDS.includes('wrapper-no-steer')), M.heldKind(r0, r0.reason));
   const JL = await import(path.join(REPO, 'src/lib/jobs-layout.js'));
   const held = JL.heldText({ total: 1, byConversation: { [CID]: { count: 1, kinds: { 'wrapper-no-steer': 1 }, reason: { kind: 'wrapper-no-steer' } } } });
-  ok('…and the panel sentence names the restart', /Restart this session/.test(held), held);
+  ok('…and the panel sentence names the restart', verdictOf(/Restart this session/.test(held)), held);
   writeSidecar({ peerMessage: true });
 }
 
@@ -192,18 +192,18 @@ ok('a claude session never rides rpc-queue (registry gate, even with a caps-bear
 // every producer that delivers kind:'notification' ──
 {
   const NS = require(path.join(REPO, 'src/notification-senders.js'));
-  ok('B-d963: a Background Work queue row is a notification; a person is not; a typed kind:notification row is', NS.isNotificationQueueItem({ kind: 'peer', from: 'Background Work · nightly' }) && !NS.isNotificationQueueItem({ kind: 'peer', from: 'session B' }) && !NS.isNotificationQueueItem({ kind: 'user', from: 'Background Work · x' }) && NS.isNotificationQueueItem({ kind: 'notification' }));
+  ok('B-d963: a Background Work queue row is a notification; a person is not; a typed kind:notification row is', gateOf(NS.isNotificationQueueItem({ kind: 'peer', from: 'Background Work · nightly' })) && !NS.isNotificationQueueItem({ kind: 'peer', from: 'session B' }) && !NS.isNotificationQueueItem({ kind: 'user', from: 'Background Work · x' }) && verdictOf(NS.isNotificationQueueItem({ kind: 'notification' })));
   const files = ['src/jobs.js', 'src/server/browser-handback.js', 'src/server/channel-api-cards.js', 'src/server/channels-engine.js', 'src/server/channels-outbound.js', 'src/server/stash-handover.js'];   // + the stash hand-over (2026-09-27), + B-2198's raw-API receipt (int212)
   const producers = [];
   const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.join(d, e.name); if (e.isDirectory()) walk(rel); else if (/\.js$/.test(e.name) && /deliverToConversation\([^;]*kind: 'notification'/.test(read(rel))) producers.push(rel); } };
   walk('src');
   ok(`…the census finds every kind:'notification' producer (${producers.join(', ')})`, JSON.stringify(producers.sort()) === JSON.stringify(files.slice().sort()), producers);
-  for (const f of producers) ok(`…${f} speaks under a sender the list names`, NS.NOTIFICATION_SENDERS.some((p) => read(f).includes(p)), f);
+  for (const f of producers) ok(`…${f} speaks under a sender the list names`, verdictOf(NS.NOTIFICATION_SENDERS.some((p) => read(f).includes(p))), f);
   ok('NEGATIVE CONTROL: a producer file with an unlisted sender fails the census', !NS.NOTIFICATION_SENDERS.some((p) => "fromName: 'Somebody new · x', kind: 'notification'".includes(p)));
   // lane-pairing ⑥: the exit's display-only card ("ran `…` on <machine> — exit 0 · 1.2 s") speaks as "Machines · <machine>"
   // through feedPeerCard (never delivered, never billed) — its sender is a listed prefix and its producer names it
   const exitSrc = read('src/exit-proxy.js');
-  ok("lane-pairing ⑥: 'Machines · ' is a notification sender, and src/exit-proxy.js's card producer speaks under it (kind notification)", NS.NOTIFICATION_SENDERS.includes('Machines · ') && /fromName: `Machines · \$\{machine\}`, kind: 'notification'/.test(exitSrc) && NS.isNotificationSender('Machines · Macbook') && NS.isVibespaceNotice('Machines · Macbook', 'ran `id` on Macbook — exit 0 · 0.1 s', 'notification'));
+  ok("lane-pairing ⑥: 'Machines · ' is a notification sender, and src/exit-proxy.js's card producer speaks under it (kind notification)", gateOf(NS.NOTIFICATION_SENDERS.includes('Machines · ')) && gateOf(/fromName: `Machines · \$\{machine\}`, kind: 'notification'/.test(exitSrc)) && gateOf(NS.isNotificationSender('Machines · Macbook')) && verdictOf(NS.isVibespaceNotice('Machines · Macbook', 'ran `id` on Macbook — exit 0 · 0.1 s', 'notification')));
   ok('…and the card view titles it by the machine, the words as its body', JSON.stringify(NS.noticeCardView('Machines · Macbook', 'ran `id` on Macbook — exit 0 · 0.1 s')) === JSON.stringify({ title: { text: 'Machines · Macbook' }, body: 'ran `id` on Macbook — exit 0 · 0.1 s', folded: false }));
 }
 
@@ -215,38 +215,38 @@ ok('the stash rung is intact (queued + drained once)', deliver.drainStash(CID).l
 const w = read('data/bin/codex-chat-wrapper.js');
 // caps grew a NON-boolean member in 2026-09-07 (`queueVerbs`, the verb table the
 // running wrapper serves) — the advert this suite owns is still peerMessage.
-ok('the codex wrapper adverts caps.peerMessage in its sidecar meta', /caps: \{ peerMessage: true(, [a-zA-Z]+: (?:true|[A-Z_]+))* \}/.test(w), /caps: \{[^}]*\}/.exec(w)?.[0]);
-ok("…serves the 'peer-message' verb: busy ⇒ thread/queue/add, idle ⇒ turn/start", /msg\.type === 'peer-message'/.test(w) && /meta\.activeTurnId\) \{[\s\S]{0,600}?await request\('thread\/queue\/add'/.test(w) && /noteQueued\(cid, \{ kind: 'peer', msgId: '', from: fromName, text, via: peerKind \}\)/.test(w) && /await startTurn\(text\);/.test(w));
+ok('the codex wrapper adverts caps.peerMessage in its sidecar meta', verdictOf(/caps: \{ peerMessage: true(, [a-zA-Z]+: (?:true|[A-Z_]+))* \}/.test(w)), /caps: \{[^}]*\}/.exec(w)?.[0]);
+ok("…serves the 'peer-message' verb: busy ⇒ thread/queue/add, idle ⇒ turn/start", gateOf(/msg\.type === 'peer-message'/.test(w)) && gateOf(/meta\.activeTurnId\) \{[\s\S]{0,600}?await request\('thread\/queue\/add'/.test(w)) && gateOf(/noteQueued\(cid, \{ kind: 'peer', msgId: '', from: fromName, text, via: peerKind \}\)/.test(w)) && verdictOf(/await startTurn\(text\);/.test(w)));
 // The record grew TWO named facts (2026-09-07 rounds 2-3): which side of
 // codex's own copy it lands on, and the submission id the app-server knows it
 // by. The pin follows the shape; what it owns is unchanged — every lane writes
 // the SAME labelled record.
-ok('…records the peer user message itself (item notifications never carry userMessage) — with the webui_peer marker, on the steered, queued and turn paths', /const recordPeerMessage = \(afterCommit, queueCid\) => record\('response_item', \{\n\s*type: 'message', role: 'user', content: \[\{ type: 'input_text', text \}\],\n\s*webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerChannel \? \{ channel: peerChannel \} : \{\}\))?(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \},/.test(w) && /thread\/queue\/add[\s\S]{0,400}recordPeerMessage\(false, cid\);/.test(w) && /await startTurn\(text\);\s*\n\s*recordPeerMessage\(true, ''\);/.test(w));
-ok('…reports peer_message_result on EVERY lane, echoing text + fromName on failure so the server can re-stash with its label', /peer_message_result', \{ ok: true, mode: 'steered' \}/.test(w) && /peer_message_result', \{ ok: true, mode: 'queued', \.\.\.fell \}/.test(w) && /peer_message_result', \{ ok: true, mode: 'turn', \.\.\.fell \}/.test(w) && /peer_message_result', \{ ok: false, reason: e\.message, text, fromName, kind: peerKind \}/.test(w));
+ok('…records the peer user message itself (item notifications never carry userMessage) — with the webui_peer marker, on the steered, queued and turn paths', gateOf(/const recordPeerMessage = \(afterCommit, queueCid\) => record\('response_item', \{\n\s*type: 'message', role: 'user', content: \[\{ type: 'input_text', text \}\],\n\s*webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerChannel \? \{ channel: peerChannel \} : \{\}\))?(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \},/.test(w)) && gateOf(/thread\/queue\/add[\s\S]{0,400}recordPeerMessage\(false, cid\);/.test(w)) && verdictOf(/await startTurn\(text\);\s*\n\s*recordPeerMessage\(true, ''\);/.test(w)));
+ok('…reports peer_message_result on EVERY lane, echoing text + fromName on failure so the server can re-stash with its label', gateOf(/peer_message_result', \{ ok: true, mode: 'steered' \}/.test(w)) && gateOf(/peer_message_result', \{ ok: true, mode: 'queued', \.\.\.fell \}/.test(w)) && gateOf(/peer_message_result', \{ ok: true, mode: 'turn', \.\.\.fell \}/.test(w)) && verdictOf(/peer_message_result', \{ ok: false, reason: e\.message, text, fromName, kind: peerKind \}/.test(w)));
 // the NOTIFICATION rule, at the wrapper: typed frame → steer lane; unknown
 // origin → peer; the ACP wrapper has no steer verb and says so on the wire.
-ok("…routes a kind:'notification' frame to turn/steer while busy, and leaves human peer messages on thread/queue/add", /const peerKind = msg\.kind === 'notification' \? 'notification' : 'peer';/.test(w) && /if \(peerKind === 'notification' && meta\.activeTurnId\)/.test(w) && /const notifCid = `notif-\$\{process\.pid\}/.test(w) && /await steerInput\(encodeUserInput\(text, \[\]\), notifCid\)/.test(w) && /noteRecordedUserCid\(notifCid\);\n\s*recordPeerMessage\(false, notifCid\)/.test(w));
+ok("…routes a kind:'notification' frame to turn/steer while busy, and leaves human peer messages on thread/queue/add", gateOf(/const peerKind = msg\.kind === 'notification' \? 'notification' : 'peer';/.test(w)) && gateOf(/if \(peerKind === 'notification' && meta\.activeTurnId\)/.test(w)) && gateOf(/const notifCid = `notif-\$\{process\.pid\}/.test(w)) && gateOf(/await steerInput\(encodeUserInput\(text, \[\]\), notifCid\)/.test(w)) && verdictOf(/noteRecordedUserCid\(notifCid\);\n\s*recordPeerMessage\(false, notifCid\)/.test(w)));
 {
   const acp = read('data/bin/acp-wrapper.js');
-  ok('the ACP wrapper accepts the same typed frame and REPORTS that it cannot steer (ACP v1 has no such method) instead of silently queueing', /const peerKind = msg\.kind === 'notification' \? 'notification' : 'peer';/.test(acp) && /steer: 'unsupported'/.test(acp));
+  ok('the ACP wrapper accepts the same typed frame and REPORTS that it cannot steer (ACP v1 has no such method) instead of silently queueing', gateOf(/const peerKind = msg\.kind === 'notification' \? 'notification' : 'peer';/.test(acp)) && verdictOf(/steer: 'unsupported'/.test(acp)));
 }
 const cd = read('src/server/conversation-deliver.js');
-ok('the LADDER tags the frame and never decides the lane itself (only the wrapper knows whether a turn is running)', /const kind = opts\.kind === 'notification' \? 'notification' : 'peer';/.test(cd) && /type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null, kind(?:, \.\.\.\(opts\.channel \? \{ channel: opts\.channel \} : \{\}\))?(?:, \.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\))? \}/.test(cd));
+ok('the LADDER tags the frame and never decides the lane itself (only the wrapper knows whether a turn is running)', gateOf(/const kind = opts\.kind === 'notification' \? 'notification' : 'peer';/.test(cd)) && verdictOf(/type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null, kind(?:, \.\.\.\(opts\.channel \? \{ channel: opts\.channel \} : \{\}\))?(?:, \.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\))? \}/.test(cd)));
 const jb = read('src/jobs.js');
 // Asserted by MEMBERSHIP, not verbatim: the options object gained
 // `spendReason` with the spend ceiling (design-account-hardening §4.4c), and a
 // pin on the exact literal fails for a field ADDED beside the one it protects.
-ok("jobs.js TYPES its owner notifications (the wiring pin: a rule with no call site is dead code)", /deliverToConversation\(cid, text, \{[^}]*fromName: 'Background Work · ' \+ this\.labelOf\(job\)[^}]*kind: 'notification'[^}]*\}\)/.test(jb));
+ok("jobs.js TYPES its owner notifications (the wiring pin: a rule with no call site is dead code)", verdictOf(/deliverToConversation\(cid, text, \{[^}]*fromName: 'Background Work · ' \+ this\.labelOf\(job\)[^}]*kind: 'notification'[^}]*\}\)/.test(jb)));
 const ar = read('src/agent-routes.js');
-ok('…while vibespace-msg (a PERSON writing to another session) passes no kind at all ⇒ peer', /deliver\.deliverToConversation\(target\.cid, framed, \{(?![^}]*\bkind:)[^}]*fromName[^}]*cardText: text[^}]*\}\)/.test(ar) && !/msg\/send[\s\S]{0,2000}kind: 'notification'/.test(ar));
+ok('…while vibespace-msg (a PERSON writing to another session) passes no kind at all ⇒ peer', gateOf(/deliver\.deliverToConversation\(target\.cid, framed, \{(?![^}]*\bkind:)[^}]*fromName[^}]*cardText: text[^}]*\}\)/.test(ar)) && !/msg\/send[\s\S]{0,2000}kind: 'notification'/.test(ar));
 const sp = read('src/lib/session-props.js');
-ok('Session Properties STATES the rule (derived from the caps row, never a backend id)', /notificationDeliveryFor\(s\.backend \|\| 'claude'\)/.test(sp) && /Steered into the running turn/.test(sp) && /carries only itself/.test(sp));
+ok('Session Properties STATES the rule (derived from the caps row, never a backend id)', gateOf(/notificationDeliveryFor\(s\.backend \|\| 'claude'\)/.test(sp)) && gateOf(/Steered into the running turn/.test(sp)) && verdictOf(/carries only itself/.test(sp)));
 const cev = read('src/server/stdout/codex-events.js');
-ok('a notification that could NOT be steered is LOUD about the lane it took instead (no silent divergence from the documented rule)', /msg\.payload\.ok === true && msg\.payload\.steerFailed/.test(cev) && /turn\/steer refused/.test(cev));
+ok('a notification that could NOT be steered is LOUD about the lane it took instead (no silent divergence from the documented rule)', gateOf(/msg\.payload\.ok === true && msg\.payload\.steerFailed/.test(cev)) && verdictOf(/turn\/steer refused/.test(cev)));
 
 // ── wiring pins (the 2.355.0 lesson: a pure fix with an unstaged call site stays dead while unit tests glow green) ──
 const srv = read('server.js');
-ok('server.js DESTRUCTURES recordCodexQuotaSignal from the engine (was exported-but-never-wired: the whole codex quota chain silently dead)', /probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent/.test(srv));
+ok('server.js DESTRUCTURES recordCodexQuotaSignal from the engine (was exported-but-never-wired: the whole codex quota chain silently dead)', verdictOf(/probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent/.test(srv)));
 // The pin is MEMBERSHIP in the literal, not the literal's exact tail: anchoring
 // on `… usageEstimator }` made this assert a hostage of whichever name happens
 // to be last (2026-09-13 r3 added three and broke it). Slice the balanced
@@ -264,10 +264,10 @@ const stdoutEngineLiteral = (() => {
   return '';
 })();
 ok('…and forwards it to session-stdout in the engine object',
-  /(^|[,{\s])recordCodexQuotaSignal\s*[,}]/.test(stdoutEngineLiteral + '}'), stdoutEngineLiteral.slice(0, 120));
-ok('…and passes getDeliver for the re-stash fallback', /getDeliver: \(\) => \{ try \{ return deliver; \} catch \{ return null; \} \}/.test(srv));
+  verdictOf(/(^|[,{\s])recordCodexQuotaSignal\s*[,}]/.test(stdoutEngineLiteral + '}')), stdoutEngineLiteral.slice(0, 120));
+ok('…and passes getDeliver for the re-stash fallback', verdictOf(/getDeliver: \(\) => \{ try \{ return deliver; \} catch \{ return null; \} \}/.test(srv)));
 const ss = read('src/server/stdout/codex-events.js'); // S5: the codex-events consumer module
-ok('stdout/codex-events re-stashes on peer_message_result ok:false (a promised message is never silently lost), keeping the echoed label and path (kind, S3 verify F3)', /peer_message_result' && msg\.payload\.ok === false && msg\.payload\.text/.test(ss) && /stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.payload\.kind \|\| null, fromName: msg\.payload\.fromName \|\| null, text: String\(msg\.payload\.text\) \}\)/.test(ss));
+ok('stdout/codex-events re-stashes on peer_message_result ok:false (a promised message is never silently lost), keeping the echoed label and path (kind, S3 verify F3)', gateOf(/peer_message_result' && msg\.payload\.ok === false && msg\.payload\.text/.test(ss)) && verdictOf(/stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.payload\.kind \|\| null, fromName: msg\.payload\.fromName \|\| null, text: String\(msg\.payload\.text\) \}\)/.test(ss)));
 // …and it reaches stashFor THROUGH the lazy ref rather than calling it (round
 // 3, reproduced): `deliverRef` is an mk() Proxy over a plain `{}` — truthy but
 // NOT callable — so the shipped `deliverRef()?.stashFor(...)` threw TypeError
@@ -281,19 +281,19 @@ ok('stdout/codex-events re-stashes on peer_message_result ok:false (a promised m
 // Comment lines are exempt from the negative half — they are where the retired
 // spelling is NAMED so the next reader knows what not to write.
 const codeOnly = (src) => src.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
-ok('…through the lazy ref, never CALLING it (a mk() Proxy is not a function — the shipped `deliverRef()` threw into a bare catch)', /deliverRef\?\.stashFor\?\./.test(ss) && !/deliverRef\s*\(/.test(codeOnly(ss)));
-ok('…and the degrade catch on that path REPORTS instead of swallowing (2.276.0 — the silent catch is why this lived)', /catch \(e\) \{ console\.warn\(`\[deliver\] \$\{id\}: re-stash failed/.test(ss));
+ok('…through the lazy ref, never CALLING it (a mk() Proxy is not a function — the shipped `deliverRef()` threw into a bare catch)', gateOf(/deliverRef\?\.stashFor\?\./.test(ss)) && !/deliverRef\s*\(/.test(codeOnly(ss)));
+ok('…and the degrade catch on that path REPORTS instead of swallowing (2.276.0 — the silent catch is why this lived)', verdictOf(/catch \(e\) \{ console\.warn\(`\[deliver\] \$\{id\}: re-stash failed/.test(ss)));
 const acpEv = read('src/server/stdout/acp-events.js');
-ok('ACP twin: same two properties on its own peer_result lane (the two consumers were copies of each other, so the bug was too)', /deliverRef\?\.stashFor\?\./.test(acpEv) && !/deliverRef\s*\(/.test(codeOnly(acpEv)) && /re-stash failed/.test(acpEv));
+ok('ACP twin: same two properties on its own peer_result lane (the two consumers were copies of each other, so the bug was too)', gateOf(/deliverRef\?\.stashFor\?\./.test(acpEv)) && !/deliverRef\s*\(/.test(codeOnly(acpEv)) && verdictOf(/re-stash failed/.test(acpEv)));
 // NEGATIVE CONTROL: the shipped line really is what this pair rejects, and the
 // replacement really is what it accepts (otherwise "no offender" is a regex bug).
-ok('NEGATIVE CONTROL: the pin rejects the exact line that shipped and accepts the one that replaced it', (() => {
+ok('NEGATIVE CONTROL: the pin rejects the exact line that shipped and accepts the one that replaced it', verdictOf((() => {
   const bad = "            try { if (cid) deliverRef()?.stashFor(cid, { source: 'agent' }); } catch {}";
   const good = "            try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent' }); } catch (e) {}";
   return /deliverRef\s*\(/.test(codeOnly(bad)) && !/deliverRef\s*\(/.test(codeOnly(good));
-})());
+})()));
 const wf = read('src/server/wrapper-files.js');
-ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)', /peerMessage: !!\(caps && caps\.peerMessage\)/.test(wf));
+ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)', verdictOf(/peerMessage: !!\(caps && caps\.peerMessage\)/.test(wf)));
 
 // B-df40 part 1 (lane settings-prune): THE LADDER HAS NO RUNG 0. The experimental VibeSpace channel socket
 // (agents.vibespaceChannel, data/channel-socks/<wid>.sock, peerMsg.postChannelEvent) is removed: with EVERY setting
@@ -319,7 +319,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   };
   const firstRungIsInbox = ({ r, calls }) => r.ok === true && r.lane === 'message' && calls.inbox.length === 1 && calls.inbox[0].includes('hello from B') && calls.channel === 0;
   const real = await run(require(path.join(REPO, 'src/server/conversation-deliver.js')));
-  ok('B-df40: every setting on + a channel socket on disk ⇒ the peer message lands on rung 1 (the local CLI inbox), the channel post is never called', firstRungIsInbox(real), JSON.stringify({ r: real.r, channel: real.calls.channel, inbox: real.calls.inbox.length }));
+  ok('B-df40: every setting on + a channel socket on disk ⇒ the peer message lands on rung 1 (the local CLI inbox), the channel post is never called', verdictOf(firstRungIsInbox(real)), JSON.stringify({ r: real.r, channel: real.calls.channel, inbox: real.calls.inbox.length }));
   const cdSrc = read('src/server/conversation-deliver.js');
   ok('B-df40: the ladder names no channel socket, no postChannelEvent and journals no lane \'channel\' any more', !/postChannelEvent|channel-socks|vibespaceChannel|lane: 'channel'/.test(cdSrc));
   ok('B-df40: peer-messaging exports no postChannelEvent (the channel ingress is gone with its script)', !('postChannelEvent' in require(path.join(REPO, 'src/peer-messaging.js'))) && !fs.existsSync(path.join(REPO, 'data/bin/vibespace-channel.js')));
@@ -343,13 +343,13 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   // V1's shape at the spawn: a session option left over from the old build is ignored — no development-channels flag, no channel MCP server
   const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
   const argv = new ClaudeCodeAdapter({ claudeCmd: 'claude' }).buildSessionArgs({ cwd: '/tmp', mode: 'chat', vibespaceChannel: { script: '/x/vibespace-channel.js', sock: '/x/w.sock' } }).args;
-  ok('B-df40: a spawn handed the old vibespaceChannel option builds argv without --dangerously-load-development-channels or a vibespace channel MCP config', Array.isArray(argv) && argv.includes('--settings') && !argv.includes('--mcp-config') && !argv.includes('--dangerously-load-development-channels') && !argv.some((a) => /VIBESPACE_CHANNEL_SOCK|vibespace-channel\.js/.test(String(a))), JSON.stringify(argv));
+  ok('B-df40: a spawn handed the old vibespaceChannel option builds argv without --dangerously-load-development-channels or a vibespace channel MCP config', gateOf(Array.isArray(argv)) && gateOf(argv.includes('--settings')) && !argv.includes('--mcp-config') && !argv.includes('--dangerously-load-development-channels') && !argv.some((a) => /VIBESPACE_CHANNEL_SOCK|vibespace-channel\.js/.test(String(a))), JSON.stringify(argv));
   const ccSrc = read('src/adapters/claude-code.js');
   const TUI = '    // TUI renderer for terminal-mode sessions';
   const OLD_PUSH = "    if (options.vibespaceChannel && options.vibespaceChannel.script) { args.push('--mcp-config', JSON.stringify({ mcpServers: { vibespace: { command: process.execPath, args: [options.vibespaceChannel.script], env: { VIBESPACE_CHANNEL_SOCK: options.vibespaceChannel.sock } } } })); args.push('--dangerously-load-development-channels', 'server:vibespace'); }\n";
   const { ClaudeCodeAdapter: MutAdapter } = M.load('src/adapters/claude-code.js', editAnchor(ccSrc, TUI, OLD_PUSH + TUI, "src/adapters/claude-code.js"), 'channel-flags');
   const mutArgv = new MutAdapter({ claudeCmd: 'claude' }).buildSessionArgs({ cwd: '/tmp', mode: 'chat', vibespaceChannel: { script: '/x/vibespace-channel.js', sock: '/x/w.sock' } }).args;
-  ok('NEGATIVE CONTROL: a patched adapter with the old flag push put back emits --dangerously-load-development-channels for the same options (the argv leg can go red)', ccSrc.split(TUI).length === 2 && mutArgv.includes('--dangerously-load-development-channels') && mutArgv.includes('--mcp-config'));
+  ok('NEGATIVE CONTROL: a patched adapter with the old flag push put back emits --dangerously-load-development-channels for the same options (the argv leg can go red)', ccSrc.split(TUI).length === 2 && gateOf(mutArgv.includes('--dangerously-load-development-channels')) && verdictOf(mutArgv.includes('--mcp-config')));
 }
 
 // ── rung 1 over the REAL registry rule (lane peer-registry-identity, 2026-10-14) ──
@@ -375,7 +375,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const A = mk(realPM);
   const ra = await A.d.deliverToConversation(HCID, 'Message from session "B": 现在交给它', { fromName: 'B' });
   await new Promise((r) => setTimeout(r, 100));
-  ok('the hub\'s shape (stale record sorts first, its pid alive with another start time): rung 1 delivers to the LIVE record', ra.ok === true && ra.lane === 'message' && got.some((f) => f.type === 'user' && /现在交给它/.test(f.message.content)), JSON.stringify(ra));
+  ok('the hub\'s shape (stale record sorts first, its pid alive with another start time): rung 1 delivers to the LIVE record', ra.ok === true && ra.lane === 'message' && verdictOf(got.some((f) => f.type === 'user' && /现在交给它/.test(f.message.content))), JSON.stringify(ra));
   ok('…and the journal says nothing about stale registrations when one passed', !A.logs.some((l) => /stale registration/.test(l)), A.logs.join(' | '));
 
   put([[`${process.pid}.json`, stale]]);
@@ -383,7 +383,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const rb = await B.d.deliverToConversation(HCID, 'only a stale record', { fromName: 'B' });
   const lb = B.logs.join('\n');
   ok('stale registrations only: nothing is posted, the ladder ends not-running', rb.ok === false && rb.notRunning === true && got.length === nb, JSON.stringify(rb));
-  ok('…and the journal SAYS so: "stale registration(s) only — pid reused / socket absent" + the counts', lb.includes(`[deliver] ${HCID}: no live inbox on this machine — stale registration(s) only — pid reused / socket absent (candidates: 1, stale: 1 (pid-reused: 1, socket-absent: 1))`), lb);
+  ok('…and the journal SAYS so: "stale registration(s) only — pid reused / socket absent" + the counts', verdictOf(lb.includes(`[deliver] ${HCID}: no live inbox on this machine — stale registration(s) only — pid reused / socket absent (candidates: 1, stale: 1 (pid-reused: 1, socket-absent: 1))`)), lb);
   ok('…never "the conversation is not running" for a registry that held records', !/conversation is not running/.test(lb), lb);
 
   put([]);
@@ -396,14 +396,14 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const refuse = { ok: false, reason: 'socket error: connect ECONNREFUSED', code: 'ECONNREFUSED', phase: 'connect', transient: false };
   const D = mk({ ...realPM, postToPeer: async () => refuse });
   await D.d.deliverToConversation(HCID, 'refused by a live registration', { fromName: 'B' });
-  ok('a final refusal while the registration still passes: the line says the socket refused a LIVE registration — not "not running"', D.logs.some((l) => /local peer post to .*live\.sock failed: socket error: connect ECONNREFUSED .* — the socket refused the post, though a registration still passes its identity check \(pid \d+, pid\+start; candidates: 1, stale: 0\)/.test(l)) && !D.logs.some((l) => /not running/.test(l)), D.logs.join(' | '));
+  ok('a final refusal while the registration still passes: the line says the socket refused a LIVE registration — not "not running"', gateOf(D.logs.some((l) => /local peer post to .*live\.sock failed: socket error: connect ECONNREFUSED .* — the socket refused the post, though a registration still passes its identity check \(pid \d+, pid\+start; candidates: 1, stale: 0\)/.test(l))) && !D.logs.some((l) => /not running/.test(l)), D.logs.join(' | '));
   const E = mk({ ...realPM, postToPeer: async () => { put([]); return { ...refuse, reason: 'socket error: connect ENOENT', code: 'ENOENT' }; } });
   await E.d.deliverToConversation(HCID, 'the CLI exited between the lookup and the post', { fromName: 'B' });
-  ok('…the CLI gone between the lookup and the post (no record passes now): "the socket is not served: the conversation is not running"', E.logs.some((l) => /failed: socket error: connect ENOENT .* — the socket is not served: the conversation is not running$/.test(l)), E.logs.join(' | '));
+  ok('…the CLI gone between the lookup and the post (no record passes now): "the socket is not served: the conversation is not running"', verdictOf(E.logs.some((l) => /failed: socket error: connect ENOENT .* — the socket is not served: the conversation is not running$/.test(l))), E.logs.join(' | '));
   put([[`9${process.pid}.json`, live]]);
   const F = mk({ ...realPM, postToPeer: async () => { put([[`${process.pid}.json`, stale]]); return { ...refuse, reason: 'socket error: connect ENOENT', code: 'ENOENT' }; } });
   await F.d.deliverToConversation(HCID, 'only a stale record is left after the miss', { fromName: 'B' });
-  ok('…only stale records left after the miss: the line names them (stale registration(s) only + the counts)', F.logs.some((l) => /— the socket is not served: stale registration\(s\) only — pid reused \/ socket absent \(candidates: 1, stale: 1 \(pid-reused: 1, socket-absent: 1\)\)$/.test(l)), F.logs.join(' | '));
+  ok('…only stale records left after the miss: the line names them (stale registration(s) only + the counts)', verdictOf(F.logs.some((l) => /— the socket is not served: stale registration\(s\) only — pid reused \/ socket absent \(candidates: 1, stale: 1 \(pid-reused: 1, socket-absent: 1\)\)$/.test(l))), F.logs.join(' | '));
 
   // RED CONTROL: the base's lookup (the FIRST record whose pid answers kill -0) behind the same ladder posts to the
   // stale socket and stashes — the owner's 「联系不上这个 agent」
@@ -416,7 +416,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const n0 = got.length;
   const G = mk({ findPeer: (c) => Old.findPeer(c, reg), postToPeer: PM.postToPeer });
   const rg = await G.d.deliverToConversation(HCID, 'pid-only rule', { fromName: 'B' });
-  ok('RED CONTROL: the pid-only first-record lookup behind the same ladder posts to the STALE socket and fails not-running (the incident)', rg.ok === false && rg.notRunning === true && got.length === n0 && G.logs.some((l) => l.includes('pre-freeze.sock failed: socket error: connect ENOENT')), JSON.stringify(rg) + ' | ' + G.logs.join(' | '));
+  ok('RED CONTROL: the pid-only first-record lookup behind the same ladder posts to the STALE socket and fails not-running (the incident)', rg.ok === false && rg.notRunning === true && got.length === n0 && verdictOf(G.logs.some((l) => l.includes('pre-freeze.sock failed: socket error: connect ENOENT'))), JSON.stringify(rg) + ' | ' + G.logs.join(' | '));
   srv.close();
   fs.rmSync(root, { recursive: true, force: true });
 }
@@ -515,23 +515,23 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
       await until(() => S._isStreaming === true, 5000, 'busy');
       ok("agy-peer-wake ②: the derived lane — antigravity's notifications take 'queue' (its row DECLARES steerJoinsTurn:false), codex's still 'steer'", notificationDelivery(capsOf('antigravity')) === 'queue' && notificationDelivery(capsOf('codex')) === 'steer' && capsOf('antigravity').inputModes.steer === true);
       ok("agy-peer-wake ②: RED CONTROL — the same verb list WITHOUT the declaration derives 'steer': the busy notification would be predicted FREE (the lie a stop + new turn would bill)", notificationDelivery({ peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: capsOf('antigravity').inputModes.queueVerbs }) }) === 'steer');
-      ok('agy-peer-wake ②: …and the PROCESS says it too: wrapperCaps takes the explicit notificationSteer:false over its list\'s derived true (explicit beats derived)', wrapperCaps(BUF, AWID, S.socketPath).notificationSteer === false && wrapperCaps(BUF, AWID, S.socketPath).queueVerbs.includes('steer'));
+      ok('agy-peer-wake ②: …and the PROCESS says it too: wrapperCaps takes the explicit notificationSteer:false over its list\'s derived true (explicit beats derived)', wrapperCaps(BUF, AWID, S.socketPath).notificationSteer === false && verdictOf(wrapperCaps(BUF, AWID, S.socketPath).queueVerbs.includes('steer')));
       const r2 = await L.deliverToConversation(ACID, '[VibeSpace Background Work] task "nightly" (job-1): done.', { fromName: 'Background Work · nightly', kind: 'notification', spendReason: 'job-notification' });
       // restated (lane queued-is-not-woke, law 1 — 主开发's ruling 2026-11-12): a frame written behind a RUNNING turn is
       // queued — authorized at the send, OWED (never predicted free), charged when the turn that carries it starts
       ok('agy-peer-wake ②: a notification to the BUSY agy is written, steered:false, QUEUED — its unit RESERVED at the write (law 1 round 2: counted like a spent turn; the turn that carries it is that unit)', r2.ok === true && r2.steered === false && r2.queued === true && frames.length === 2 && JSON.parse(frames[1]).kind === 'notification' && money.auth === 2 && money.note === 2, JSON.stringify({ r2, money }));
       const s2 = await until(() => settles[1], 5000, 'the second settle');
-      ok("agy-peer-wake ②: …the wrapper answers mode 'queued' (settle: 'queued' — its reservation stands, nothing given back) and the consumer SAYS the notification found no steer (codex's steerFailed twin)", s2.mode === 'queued' && s2.v === 'queued' && money.note === 2 && money.release === 0 && logs.some((l) => /rpc-queue: no steer into the running turn on antigravity — the notification took the 'queued' lane instead/.test(l)), JSON.stringify({ s2, logs }));
+      ok("agy-peer-wake ②: …the wrapper answers mode 'queued' (settle: 'queued' — its reservation stands, nothing given back) and the consumer SAYS the notification found no steer (codex's steerFailed twin)", s2.mode === 'queued' && s2.v === 'queued' && money.note === 2 && money.release === 0 && verdictOf(logs.some((l) => /rpc-queue: no steer into the running turn on antigravity — the notification took the 'queued' lane instead/.test(l))), JSON.stringify({ s2, logs }));
       const r3 = await L.deliverToConversation(ACID, '[VibeSpace] a receipt', { fromName: 'Channels · API', kind: 'notification', noWake: true, spendReason: 'channel-receipt' });
-      ok('agy-peer-wake ②: a noWake notice to the busy agy is REFUSED before any frame, its words true ("would not join the running turn"), the hold given back', r3.ok === false && r3.refused === 'no-wake' && /would not join the running turn/.test(r3.reason) && frames.length === 2 && money.release === 1, JSON.stringify({ r3, money }));   // r3's hold only (r2's became its reservation)
+      ok('agy-peer-wake ②: a noWake notice to the busy agy is REFUSED before any frame, its words true ("would not join the running turn"), the hold given back', r3.ok === false && r3.refused === 'no-wake' && gateOf(/would not join the running turn/.test(r3.reason)) && frames.length === 2 && money.release === 1, JSON.stringify({ r3, money }));   // r3's hold only (r2's became its reservation)
       // ③ a queued peer dropped by Stop goes BACK: ok:false + its words, mode-less (about an earlier frame) ⇒ re-stashed
       const r4 = await L.deliverToConversation(ACID, 'one more thing', { fromName: 'session C', cardText: 'one more thing' });
       await until(() => settles[2], 5000, 'the third settle');
       A.stdin.write(JSON.stringify({ type: 'interrupt' }) + '\n');
       await until(() => L.stashEntries(ACID).length >= 2, 5000, 'the re-stash');
       const st = L.stashEntries(ACID);
-      ok('agy-peer-wake ③: Stop drops the queue (the owner\'s law) and the two queued frames come BACK — the REAL consumer re-stashes their words with their sender and path', r4.ok === true && st.some((e) => e.text === 'one more thing' && e.fromName === 'session C' && e.kind === 'peer') && st.some((e) => /task "nightly"/.test(e.text) && e.kind === 'notification'), JSON.stringify(st.map((e) => [e.text, e.fromName, e.kind])));
-      ok("agy-peer-wake ③: …and those answers settle NOTHING ('not-ours' — mode-less, about earlier frames); law 1 round 2: the two queued frames Stop handed back have their reservations RETURNED (by their ids) — only the idle wake's unit stands", settles.slice(3).every((s) => s.v === 'not-ours' && s.mode === null) && settles.slice(3).length === 2 && money.note === 3 && money.release === 3 && L.queuedEntries(ACID).length === 0, JSON.stringify({ tail: settles.slice(3), money, held: L.queuedEntries(ACID) }));
+      ok('agy-peer-wake ③: Stop drops the queue (the owner\'s law) and the two queued frames come BACK — the REAL consumer re-stashes their words with their sender and path', r4.ok === true && gateOf(st.some((e) => e.text === 'one more thing' && e.fromName === 'session C' && e.kind === 'peer')) && verdictOf(st.some((e) => /task "nightly"/.test(e.text) && e.kind === 'notification')), JSON.stringify(st.map((e) => [e.text, e.fromName, e.kind])));
+      ok("agy-peer-wake ③: …and those answers settle NOTHING ('not-ours' — mode-less, about earlier frames); law 1 round 2: the two queued frames Stop handed back have their reservations RETURNED (by their ids) — only the idle wake's unit stands", gateOf(settles.slice(3).every((s) => s.v === 'not-ours' && s.mode === null)) && settles.slice(3).length === 2 && money.note === 3 && money.release === 3 && L.queuedEntries(ACID).length === 0, JSON.stringify({ tail: settles.slice(3), money, held: L.queuedEntries(ACID) }));
       // ④ THE RED COPY: the same wrapper with peerMessage:false — findRpcPeer skips it, nothing is written, and the miss
       // names the cure (the owner's own conversation: its wrapper predates this lane until the session restarts).
       // ASKED WHILE ITS SIDECAR IS BEING WRITTEN (ci358-reds item 7, the .358 mirror's fast red: the runner's ④ landed on
@@ -545,26 +545,26 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
       const seen = (wid) => { let bytes = -1; try { bytes = fs.statSync(path.join(BUF, wid + '.json')).size; } catch { } return { bytes, read: wrapperCaps(BUF, wid, null).reason }; };   // what the leg saw
       const rr = await L.deliverToConversation(RCID, 'wake up, old one', { fromName: 'session B' });
       const seenR = seen(RWID);
-      ok('agy-peer-wake ④: RED COPY (peerMessage:false, the base advert) — findRpcPeer SKIPS it: no frame, the ladder misses (asked while its sidecar write is held: the held bytes are a temp file\'s, the sidecar stays whole)', wsrc.includes(ADVERT) && heldOf(HOLD_R).startsWith(path.join(BUF, RWID + '.json.')) && seenR.read === 'ok' && wrapperCaps(BUF, RWID, RS.socketPath).peerMessage === false && rr.ok === false && redFrames.length === 0 && !rr.notRunning, JSON.stringify({ rr, sidecar: seenR, held: heldOf(HOLD_R) }));
-      ok('agy-peer-wake ④: …and the miss SAYS it is running with a process that predates live messages + the cure (restart), never «no live inbox … any reachable machine»', /running, but its agent's process predates live messages — restart the session/.test(rr.reason) && !/no live inbox/.test(rr.reason) && M.heldKind(rr, rr.reason) === 'not-reachable', rr.reason + ' | sidecar ' + JSON.stringify(seenR));
+      ok('agy-peer-wake ④: RED COPY (peerMessage:false, the base advert) — findRpcPeer SKIPS it: no frame, the ladder misses (asked while its sidecar write is held: the held bytes are a temp file\'s, the sidecar stays whole)', gateOf(wsrc.includes(ADVERT)) && gateOf(heldOf(HOLD_R).startsWith(path.join(BUF, RWID + '.json.'))) && seenR.read === 'ok' && wrapperCaps(BUF, RWID, RS.socketPath).peerMessage === false && rr.ok === false && redFrames.length === 0 && !rr.notRunning, JSON.stringify({ rr, sidecar: seenR, held: heldOf(HOLD_R) }));
+      ok('agy-peer-wake ④: …and the miss SAYS it is running with a process that predates live messages + the cure (restart), never «no live inbox … any reachable machine»', gateOf(/running, but its agent's process predates live messages — restart the session/.test(rr.reason)) && !/no live inbox/.test(rr.reason) && M.heldKind(rr, rr.reason) === 'not-reachable', rr.reason + ' | sidecar ' + JSON.stringify(seenR));
       const ri = await L.deliverToConversation(OCID, 'wake up, old one', { fromName: 'session B' });
       const seenI = seen(OWID);
-      ok('agy-peer-wake ④: NEGATIVE CONTROL — the pre-.358 IN-PLACE sidecar write under the same hold shows the ladder an EMPTY file: «no live inbox … any reachable machine», notRunning — the runner\'s ✗ (the two legs above can go red)', wsrc.split(ATOMIC).length === 2 && heldOf(HOLD_O) === path.join(BUF, OWID + '.json') && seenI.bytes === 0 && seenI.read === 'no-sidecar' && ri.ok === false && ri.notRunning === true && /no live inbox for this conversation on any reachable machine/.test(ri.reason) && inFrames.length === 0, JSON.stringify({ ri, sidecar: seenI, held: heldOf(HOLD_O) }));
+      ok('agy-peer-wake ④: NEGATIVE CONTROL — the pre-.358 IN-PLACE sidecar write under the same hold shows the ladder an EMPTY file: «no live inbox … any reachable machine», notRunning — the runner\'s ✗ (the two legs above can go red)', wsrc.split(ATOMIC).length === 2 && heldOf(HOLD_O) === path.join(BUF, OWID + '.json') && seenI.bytes === 0 && seenI.read === 'no-sidecar' && ri.ok === false && ri.notRunning === true && gateOf(/no live inbox for this conversation on any reachable machine/.test(ri.reason)) && inFrames.length === 0, JSON.stringify({ ri, sidecar: seenI, held: heldOf(HOLD_O) }));
       for (const h of [HOLD_R, HOLD_O]) fs.writeFileSync(path.join(h, 'release'), '');
       // …and every chat wrapper the hub reads with wrapperCaps writes its sidecar the same way (a temp file renamed over it)
       const persistOf = (f) => { const t = read(f), i = t.indexOf('function persistMeta() {'); return i < 0 ? '' : t.slice(i, t.indexOf(t[i + 24] === '\n' ? '\n}\n' : '\n', i)); };
       const WRAPPERS = ['data/bin/chat-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/acp-wrapper.js', 'data/bin/agy-wrapper.js'];
       const REPLACES = /(?:fs\.renameSync|renameSynced)\(tmp, metaFile\b/;   // B-bcb8 unit B: the temp + rename through the synced helper (src/fd-close.js renameSynced) or by hand
-      ok('…every chat wrapper REPLACES its sidecar (temp file + rename — through the synced helper since B-bcb8 unit B), none rewrites it in place (ci358-reds item 7)', WRAPPERS.every((f) => REPLACES.test(persistOf(f)) && !/writeFileSync\(metaFile/.test(persistOf(f))), WRAPPERS.filter((f) => !REPLACES.test(persistOf(f)) || /writeFileSync\(metaFile/.test(persistOf(f))));
+      ok('…every chat wrapper REPLACES its sidecar (temp file + rename — through the synced helper since B-bcb8 unit B), none rewrites it in place (ci358-reds item 7)', verdictOf(WRAPPERS.every((f) => REPLACES.test(persistOf(f)) && !/writeFileSync\(metaFile/.test(persistOf(f)))), WRAPPERS.filter((f) => !REPLACES.test(persistOf(f)) || /writeFileSync\(metaFile/.test(persistOf(f))));
       // ci358-reds round 2: the pin's scope is the WHOLE file — the boot write included (chat-wrapper's went through writeFileSync(metaFile)
       // until round 2); the one in-place write left is the exit record (overwriteIfPresent: opened r+, never truncated, padded to the
       // old length — it must never recreate a sidecar the hub already removed)
-      ok('…no chat wrapper writes its sidecar with writeFileSync(metaFile, …) ANYWHERE — the boot write is persistMeta\'s too (ci358-reds round 2)', WRAPPERS.every((f) => !/writeFileSync\(metaFile/.test(read(f))) && /\{ const e = persistMeta\(\); if \(e\) log\(`meta write failed/.test(read('data/bin/chat-wrapper.js')), WRAPPERS.filter((f) => /writeFileSync\(metaFile/.test(read(f))).join(' ') || 'chat-wrapper\'s boot write is not persistMeta');
-      ok('…and a write or rename that throws unlinks its own temp (best-effort) — a temp is left only by a wrapper killed between the two, the age sweep\'s business', WRAPPERS.every((f) => /catch(?: \(e\))? \{ try \{ fs\.unlinkSync\(tmp\); \} catch \{ ?\}/.test(persistOf(f))), WRAPPERS.filter((f) => !/catch(?: \(e\))? \{ try \{ fs\.unlinkSync\(tmp\); \} catch \{ ?\}/.test(persistOf(f))).join(' '));
+      ok('…no chat wrapper writes its sidecar with writeFileSync(metaFile, …) ANYWHERE — the boot write is persistMeta\'s too (ci358-reds round 2)', gateOf(WRAPPERS.every((f) => !/writeFileSync\(metaFile/.test(read(f)))) && verdictOf(/\{ const e = persistMeta\(\); if \(e\) log\(`meta write failed/.test(read('data/bin/chat-wrapper.js'))), WRAPPERS.filter((f) => /writeFileSync\(metaFile/.test(read(f))).join(' ') || 'chat-wrapper\'s boot write is not persistMeta');
+      ok('…and a write or rename that throws unlinks its own temp (best-effort) — a temp is left only by a wrapper killed between the two, the age sweep\'s business', verdictOf(WRAPPERS.every((f) => /catch(?: \(e\))? \{ try \{ fs\.unlinkSync\(tmp\); \} catch \{ ?\}/.test(persistOf(f)))), WRAPPERS.filter((f) => !/catch(?: \(e\))? \{ try \{ fs\.unlinkSync\(tmp\); \} catch \{ ?\}/.test(persistOf(f))).join(' '));
       const ro = await L.deliverToConversation('oc-live-1', 'hello opencode', { fromName: 'session B' });
-      ok('agy-peer-wake ④: a RUNNING session whose harness has no live lane (opencode, stash-only) is said as running — not "not running"', ro.ok === false && /running, but its agent takes no message mid-session/.test(ro.reason) && !ro.notRunning, JSON.stringify(ro));
+      ok('agy-peer-wake ④: a RUNNING session whose harness has no live lane (opencode, stash-only) is said as running — not "not running"', ro.ok === false && gateOf(/running, but its agent takes no message mid-session/.test(ro.reason)) && !ro.notRunning, JSON.stringify(ro));
       const rn = await L.deliverToConversation('no-such-conversation', 'hello?', { fromName: 'session B' });
-      ok('agy-peer-wake ④: …while a conversation running NOWHERE keeps its words + type (the classifier still reads it not-running)', rn.ok === false && rn.notRunning === true && /no live inbox for this conversation on any reachable machine/.test(rn.reason) && M.heldKind(rn, rn.reason) === 'not-running', JSON.stringify(rn));
+      ok('agy-peer-wake ④: …while a conversation running NOWHERE keeps its words + type (the classifier still reads it not-running)', rn.ok === false && rn.notRunning === true && gateOf(/no live inbox for this conversation on any reachable machine/.test(rn.reason)) && M.heldKind(rn, rn.reason) === 'not-running', JSON.stringify(rn));
     } finally { console.log = log0; }
   } catch (e) { ok('agy-peer-wake: the round trip ran to its end (a timeout here = a leg above never got its answer)', false, e.message); }
   finally {
@@ -587,10 +587,10 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const left = `swept ${n}; left: ${fs.readdirSync(SD).sort().join(' ')}`;
   ok('age sweep (ci358-reds round 2): a sidecar TEMP untouched for longer than the age, of a session not live, is REAPED', !fs.existsSync(deadTmp), left);
   ok('age sweep: …beside the old law\'s own files — the dead session\'s aged .buf and .json go too (3 unlinked)', !fs.existsSync(deadBuf) && !fs.existsSync(deadSide) && n === 3, left);
-  ok('age sweep CONTROL: a temp YOUNGER than the age is left alone', fs.existsSync(youngTmp), left);
-  ok('age sweep CONTROL: a LIVE session\'s aged temp is left alone (the same id rule as its .buf / .json)', fs.existsSync(liveTmp), left);
-  ok('age sweep CONTROL: a file not shaped <id>.buf / <id>.json / <id>.json.<pid>.tmp is never touched', fs.existsSync(stranger), left);
-  ok('age sweep WIRING: server.js\'s boot sweep IS this function over BUFFERS_DIR with the live-session check — no inline pattern of its own', /sweepAgedWrapperFiles\(BUFFERS_DIR, \{ cutoff, isActive: \(id\) => activeSessions\.has\(id\)(?: \|\| require\('\.\/src\/server\/session-meta-verdict\.js'\)\.keeps\(id\))? \}\)/.test(srv) && !srv.includes('(buf|json)'));
+  ok('age sweep CONTROL: a temp YOUNGER than the age is left alone', verdictOf(fs.existsSync(youngTmp)), left);
+  ok('age sweep CONTROL: a LIVE session\'s aged temp is left alone (the same id rule as its .buf / .json)', verdictOf(fs.existsSync(liveTmp)), left);
+  ok('age sweep CONTROL: a file not shaped <id>.buf / <id>.json / <id>.json.<pid>.tmp is never touched', verdictOf(fs.existsSync(stranger)), left);
+  ok('age sweep WIRING: server.js\'s boot sweep IS this function over BUFFERS_DIR with the live-session check — no inline pattern of its own', gateOf(/sweepAgedWrapperFiles\(BUFFERS_DIR, \{ cutoff, isActive: \(id\) => activeSessions\.has\(id\)(?: \|\| require\('\.\/src\/server\/session-meta-verdict\.js'\)\.keeps\(id\))? \}\)/.test(srv)) && !srv.includes('(buf|json)'));
   fs.rmSync(SD, { recursive: true, force: true });
 }
 
@@ -648,7 +648,7 @@ fs.rmSync(dataDir, { recursive: true, force: true });
   const rw = await keepRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, KEEP, "      if (v.keep) v = { text: 'held back — whether it still reaches you was unknown' };\n", 'keep as the precedent\'s rewrite'), 'keep-rewrite')), 'rewrite');
   ok('B-f276 {keep} CONTROL (the precedent: the words rewritten for good): the kept entry\'s stored bytes CHANGE — red', rw.keptSame === false, JSON.stringify(rw));
   const dr = await keepRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, KEEP, '      if (v.keep) { i++; continue; }\n', 'keep delivered as recorded'), 'keep-as-recorded')), 'as-recorded');
-  ok('B-f276 {keep} CONTROL (delivered as recorded, unjudged): the entry is handed over while its reach is unknown — red', dr.mixed.includes('the kept one') || dr.allKept.length > 0 || dr.fullDrain.length > 0, JSON.stringify(dr));
+  ok('B-f276 {keep} CONTROL (delivered as recorded, unjudged): the entry is handed over while its reach is unknown — red', verdictOf(dr.mixed.includes('the kept one')) || dr.allKept.length > 0 || dr.fullDrain.length > 0, JSON.stringify(dr));
   const bi = await keepRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, 'const mine = byId ? (e) => only.has(e) : ', 'const mine = byId ? (e) => only.has(e) && !isKept(cid, e) : ', 'the drain by id skips a kept entry (shape A)'), 'byid-skips-kept')), 'byid');
   ok('B-f276 1a CONTROL (the drain by id skips an entry kept since, as shape A): what went out stays and is handed over again — red', bi.byIdTook.length === 0 && bi.byIdLeft.join('|') === 'on the wire', JSON.stringify(bi));
 
@@ -755,4 +755,4 @@ fs.rmSync(dataDir, { recursive: true, force: true });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

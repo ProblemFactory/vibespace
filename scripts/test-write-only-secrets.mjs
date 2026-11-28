@@ -31,7 +31,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -92,15 +92,15 @@ function plantMounts(MM, tag) {
   return out;
 }
 console.log('① STORAGE — every sealed cell × every provider row: no byte, inside the vault\'s reveal window or out of it');
-ok(CELLS.length >= 7 && ['token', 'clientSecret', 'secretKey', 'pass'].every((c) => CELLS.includes(c)), `the sealed cells are read from the tree (${CELLS.join(', ')})`);
+ok(CELLS.length >= 7 && verdictOf(['token', 'clientSecret', 'secretKey', 'pass'].every((c) => CELLS.includes(c))), `the sealed cells are read from the tree (${CELLS.join(', ')})`);
 const mt = plantMounts(MountManager, 'mounts');
 ok(mt.answered >= PROV.rows.length * 4, `config() answered for every row and its child, masked and not (${mt.answered} answers over ${PROV.rows.length} rows)`, mt.errors.join(' ; '));
 ok(mt.leaks.length === 0, `none of the ${CELLS.length} planted cells, the ${SECRET_P.length} secret parameters or the extra-parameter token reached an answer`, mt.leaks.slice(0, 6).join(' ; '));
-for (const r of PROV.rows) { const cells = decOf(r.id); if (cells.length) ok(cells.every((c) => (mt.held[r.id] || []).includes(c)), `${r.id}: every cell its config hook decrypts (${cells.join(', ')}) is named in \`held\``, JSON.stringify(mt.held[r.id])); }
+for (const r of PROV.rows) { const cells = decOf(r.id); if (cells.length) ok(verdictOf(cells.every((c) => (mt.held[r.id] || []).includes(c))), `${r.id}: every cell its config hook decrypts (${cells.join(', ')}) is named in \`held\``, JSON.stringify(mt.held[r.id])); }
 console.log('② THE rclone PARAMETER RULE');
 const raw = PROV.rows.find((r) => r.rawRclone), rp = raw && mt.params[raw.id];
-ok(!!rp && SECRET_P.length >= 4 && SECRET_P.every((p) => rp[p] === '' && (mt.held[raw.id] || []).includes('param:' + p)), `${raw && raw.id}: the secret parameters (${SECRET_P.join(', ')}) are blank and held`, JSON.stringify(rp));
-ok(!!rp && PLAIN_P.length >= 3 && PLAIN_P.every((p) => rp[p] === PARAMS[p]), `${raw && raw.id}: the others (${PLAIN_P.join(', ')}) keep their value inside the window`, JSON.stringify(rp));
+ok(!!rp && SECRET_P.length >= 4 && verdictOf(SECRET_P.every((p) => rp[p] === '' && (mt.held[raw.id] || []).includes('param:' + p))), `${raw && raw.id}: the secret parameters (${SECRET_P.join(', ')}) are blank and held`, JSON.stringify(rp));
+ok(!!rp && PLAIN_P.length >= 3 && verdictOf(PLAIN_P.every((p) => rp[p] === PARAMS[p])), `${raw && raw.id}: the others (${PLAIN_P.join(', ')}) keep their value inside the window`, JSON.stringify(rp));
 { const a = (() => { const dir = path.join(ROOT, 'sp'); fs.mkdirSync(dir, { recursive: true }); const mm = new MountManager({ dataDir: dir });
     mm._state.mounts.push({ id: 'mnt-sp', name: 'sp', type: raw.id, origin: 'manual', mode: 'rw', createdAt: 0, paramsEnc: Object.fromEntries(Object.entries(PARAMS).map(([k, v]) => [k, mm._enc(v)])) });
     mm._state.mounts.push({ id: 'mnt-cells', name: 'cells', type: 'webdav', origin: 'manual', mode: 'rw', createdAt: 0, passEnc: mm._enc('wo-cell-7f3a') });
@@ -117,10 +117,10 @@ ok(!!rp && PLAIN_P.length >= 3 && PLAIN_P.every((p) => rp[p] === PARAMS[p]), `${
   const known = [...new Set(['src/mounts.js', ...PROVIDER_FILES].flatMap((f) => { const s = read(f); return [...[...s.matchAll(/\bP\('([A-Z0-9_]+)'\)/g)].map((m) => m[1]),
     ...[...s.matchAll(/RCLONE_CONFIG_VS_([A-Z0-9_]+)/g)].map((m) => m[1]), ...[...s.matchAll(/_KEYS = new Set\(\[([^\]]*)\]\)/g)].flatMap((m) => [...m[1].matchAll(/'([a-z0-9_]+)'/g)].map((x) => x[1]))].map((x) => x.toLowerCase()); }))].sort();
   const missing = T ? known.filter((k) => !Object.prototype.hasOwnProperty.call(T, k)) : known;
-  ok(!!T && Object.isFrozen(T) && known.length >= 20 && missing.length === 0 && Object.values(T).every((v) => v === 'plain' || v === 'secret'),
+  ok(!!T && gateOf(Object.isFrozen(T)) && known.length >= 20 && missing.length === 0 && verdictOf(Object.values(T).every((v) => v === 'plain' || v === 'secret')),
     `THE ONE TABLE: every rclone option the tree's providers write has its row, plain or secret (${known.length} options; with no row: ${missing.join(', ') || 'none'})`);
   const unknown = [['mystery_url', 'https://kept.example.test/x'], ['unlisted_flag', 'true'], ['service_creds_id', 'abc'], ['some_path', '/x/y']];
-  ok(unknown.every(([n, v]) => SP(n, v) === true), 'deny by default: a name with no row is a SECRET whatever its value or its ending (a boolean, an _url / _id / _path name)', JSON.stringify(unknown.map(([n, v]) => [n, SP(n, v)]))); }
+  ok(verdictOf(unknown.every(([n, v]) => SP(n, v) === true)), 'deny by default: a name with no row is a SECRET whatever its value or its ending (a boolean, an _url / _id / _path name)', JSON.stringify(unknown.map(([n, v]) => [n, SP(n, v)]))); }
 // A CREDENTIAL URL is a secret whatever its row (the closure's verifier: url / endpoint / api_url with userinfo and a signed
 // storage_url came back in clear) — the verdicts written here; then through the answer, inside the window and out
 { const SP = MountManager.SECRET_PARAM;
@@ -128,14 +128,14 @@ ok(!!rp && PLAIN_P.length >= 3 && PLAIN_P.every((p) => rp[p] === PARAMS[p]), `${
     ['storage_url', 'https://acct.blob.example.test/c?sv=2024-01-01&sig=wo-u-4', true], ['url', 'https://files.example.test/dav?token=wo-u-5', true],
     ['url', 'https://files.example.test/dav', false], ['endpoint', 'https://s3.example.test', false], ['token_url', 'https://kept.example.test/token', false], ['region', 'eu-west', false]];
   const got = cases.map(([n, v]) => SP(n, v));
-  ok(cases.every(([, , want], i) => got[i] === want), 'a value that parses as a URL with userinfo or a signed query is a SECRET whatever its name; a bare URL keeps its plain row', JSON.stringify(cases.map(([n, v], i) => [n, v.slice(0, 36), got[i]])));
+  ok(verdictOf(cases.every(([, , want], i) => got[i] === want)), 'a value that parses as a URL with userinfo or a signed query is a SECRET whatever its name; a bare URL keeps its plain row', JSON.stringify(cases.map(([n, v], i) => [n, v.slice(0, 36), got[i]])));
   const dir = path.join(ROOT, 'curl'); fs.mkdirSync(dir, { recursive: true }); const mm = new MountManager({ dataDir: dir });
   const CP = { url: 'https://someone:' + 'wo-u-1@files.example.test/dav', endpoint: 'https://ak:' + 'wo-u-2@s3.example.test', api_url: 'http://user:' + 'wo-u-3@sia.example.test:9980', storage_url: 'https://acct.blob.example.test/c?sv=2024-01-01&sig=wo-u-4' };
   mm._state.mounts.push({ id: 'mnt-curl', name: 'curl', type: raw.id, origin: 'manual', mode: 'rw', createdAt: 0, paramsEnc: Object.fromEntries(Object.entries(CP).map(([k, v]) => [k, mm._enc(v)])) });
   mm._state.mounts.push({ id: 'mnt-curl2', name: 'curl2', type: raw.id, origin: 'manual', mode: 'rw', createdAt: 0, paramsEnc: { url: mm._enc(CP.url), region: mm._enc('eu') } });
   const inside = mm.config('mnt-curl'), outside = mm.config('mnt-curl', { masked: true }), rn = (id) => (typeof mm.revealNeeded === 'function' ? mm.revealNeeded(id) : 'none');
   const leaks = ['wo-u-1', 'wo-u-2', 'wo-u-3', 'wo-u-4'].filter((x) => JSON.stringify(inside).includes(x) || JSON.stringify(outside).includes(x));
-  ok(leaks.length === 0 && Object.keys(CP).every((k) => (inside.params || {})[k] === '' && (outside.params || {})[k] === '') && rn('mnt-curl') === false && rn('mnt-curl2') === true,
+  ok(leaks.length === 0 && gateOf(Object.keys(CP).every((k) => (inside.params || {})[k] === '' && (outside.params || {})[k] === '')) && rn('mnt-curl') === false && rn('mnt-curl2') === true,
     'a raw record planted with credential URLs (url / endpoint / api_url userinfo, a signed storage_url) answers none of their bytes inside the window or out — blank, never the mask of a plain field; no reveal asked for a record with no plain parameter',
     JSON.stringify({ leaks, inside: inside.params, outside: outside.params, reveal: [rn('mnt-curl'), rn('mnt-curl2')] })); }
 
@@ -173,9 +173,9 @@ for (const row of machineRows) {
   }
   mviews.push([row, view, why]);
 }
-ok(machineRows.length >= 2 && mviews.every(([row, v]) => v && row.fields.filter((f) => f.secret).every((f) => v.set[f.key] === true)), `every per-machine row holds its planted secrets and SAYS so (${machineRows.map((r) => r.id).join(', ')})`, mviews.filter(([, v]) => !v).map(([r, , w]) => `${r.id}: ${w}`).join(' ; '));
+ok(machineRows.length >= 2 && verdictOf(mviews.every(([row, v]) => v && row.fields.filter((f) => f.secret).every((f) => v.set[f.key] === true))), `every per-machine row holds its planted secrets and SAYS so (${machineRows.map((r) => r.id).join(', ')})`, mviews.filter(([, v]) => !v).map(([r, , w]) => `${r.id}: ${w}`).join(' ; '));
 const mText = JSON.stringify(mviews.map(([, v]) => v));
-ok(mviews.every(([, v]) => !!v) && machineRows.every((row) => row.fields.filter((f) => f.secret).every((f) => !windows(mPlant(row, f), 4).some((w) => mText.includes(w)))), 'machineView carries none of a secret — not even a 4-character tail');
+ok(gateOf(mviews.every(([, v]) => !!v)) && verdictOf(machineRows.every((row) => row.fields.filter((f) => f.secret).every((f) => !windows(mPlant(row, f), 4).some((w) => mText.includes(w))))), 'machineView carries none of a secret — not even a 4-character tail');
 
 // ── ④ CHANNEL ACCOUNTS ────────────────────────────────────────────────────────────────────────────────────────────
 console.log('④ CHANNEL ACCOUNTS — every vendor row with a client secret: an account holding a planted custom secret');
@@ -210,7 +210,7 @@ ok(vendorRows.length >= 3, `the account-bound vendor rows with a client secret a
 const ch = await plantChannels(ENG_PATH, 'channels');
 ok(ch.answered >= vendorRows.length * 2 && ch.errors.length === 0, `adapterConfig + adapterView answered for every vendor, and the digest (${ch.answered} answers)`, ch.errors.join(' ; '));
 ok(ch.leaks.length === 0, 'no answer carries an account\'s custom client secret — not even a 4-character tail (only an Integrations card keeps one)', ch.leaks.join(' ; '));
-ok(vendorRows.every((row) => ch.said[row.id]), 'adapterConfig SAYS the secret is held (client.secretSet) — the Edit dialog\'s «已保存» stands on it', JSON.stringify(ch.said));
+ok(verdictOf(vendorRows.every((row) => ch.said[row.id])), 'adapterConfig SAYS the secret is held (client.secretSet) — the Edit dialog\'s «已保存» stands on it', JSON.stringify(ch.said));
 
 // ── ⑤ THE ROUTES ──────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑤ THE ROUTES — a GET handler that decrypts is a named site; mounts.config( has one caller');
@@ -227,27 +227,27 @@ for (const f of files) {
     if (/\b(?:box|_box)?\.?_?dec\(|\.oauth(?:Token|Client)Of\(/.test(body.replace(/\/\/[^\n]*/g, ''))) getsThatDecrypt.push(`${f} GET ${route}`);
   });
 }
-ok(getsThatDecrypt.every((s) => DECRYPTING_GETS[s.split(' GET ')[0]]), `no GET handler decrypts in its own body (${getsThatDecrypt.length} found${getsThatDecrypt.length ? ': ' + getsThatDecrypt.join(', ') : ''}) — a secret reaches a page only through the checked answers above`);
+ok(verdictOf(getsThatDecrypt.every((s) => DECRYPTING_GETS[s.split(' GET ')[0]])), `no GET handler decrypts in its own body (${getsThatDecrypt.length} found${getsThatDecrypt.length ? ': ' + getsThatDecrypt.join(', ') : ''}) — a secret reaches a page only through the checked answers above`);
 const cfgSites = files.filter((f) => f !== 'src/mounts.js' && /\bmounts\.config\(/.test(read(f)));
 ok(cfgSites.length === 1 && cfgSites[0] === 'src/server/mounts-plugins-wiring.js' && (read(cfgSites[0]).match(/\bmounts\.config\(/g) || []).length === 1, 'mounts.config( has ONE caller — GET /api/mounts/:id/config', cfgSites.join(', '));
 const adSites = files.filter((f) => f !== 'src/server/channels-auth.js' && /\.adapterConfig\(/.test(read(f)) && !/src\/adapters\//.test(f));
 ok(adSites.length === 1 && adSites[0] === 'src/routes/channels.js', 'adapterConfig( has ONE caller — GET /api/channels/adapters/:id/config', adSites.join(', '));
 const SERVER_ONLY = { 'src/server/channel-api.js': 'the channel API\'s ONE fetch site — the token goes to Google, never to a page', 'src/server/channels-wiring.js': 'a channel account borrowing a storage mount\'s client (server-side)' };
 const readers = files.filter((f) => f !== 'src/mounts.js' && /\.oauth(Token|Client)Of\b/.test(read(f)));
-ok(readers.length > 0 && readers.every((f) => SERVER_ONLY[f]), `the server-only readers of a storage OAuth secret are only the named sites (${readers.join(', ')})`, readers.filter((f) => !SERVER_ONLY[f]).join(', '));
+ok(readers.length > 0 && verdictOf(readers.every((f) => SERVER_ONLY[f])), `the server-only readers of a storage OAuth secret are only the named sites (${readers.join(', ')})`, readers.filter((f) => !SERVER_ONLY[f]).join(', '));
 
 // ── ⑥ THE PAGES ───────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑥ THE PAGES — a held secret is «已保存» + «替换…», never its value');
 const SM = read('src/lib/sidebar-mounts.js');
 const meth = SM.slice(SM.indexOf('    async _showEditMountDialog(m) {'), SM.indexOf('    _showMintShareDialog('));
-ok(meth.length > 1000 && /maskVaultFields\(fields, cfg\);[^\n]*\n\s*heldFields\(fields, cfg,/.test(meth) && /if \(opts\?\.html\) return opts\.html;/.test(meth) && /wireHeld\(form\)/.test(meth), 'the storage Edit dialog runs every field through heldFields() before it draws, draws its html and wires «替换…»');
-ok(/const box = form\.querySelector\(`\[name="\$\{k\}"\]`\);\s*\n\s*if \(!box\) continue;/.test(meth), 'its submit skips a field with no box (the token\'s sign-in line sends nothing)');
+ok(meth.length > 1000 && gateOf(/maskVaultFields\(fields, cfg\);[^\n]*\n\s*heldFields\(fields, cfg,/.test(meth)) && gateOf(/if \(opts\?\.html\) return opts\.html;/.test(meth)) && verdictOf(/wireHeld\(form\)/.test(meth)), 'the storage Edit dialog runs every field through heldFields() before it draws, draws its html and wires «替换…»');
+ok(verdictOf(/const box = form\.querySelector\(`\[name="\$\{k\}"\]`\);\s*\n\s*if \(!box\) continue;/.test(meth)), 'its submit skips a field with no box (the token\'s sign-in line sends nothing)');
 const hf = SM.slice(SM.indexOf('const SECRET_CELL = '), SM.indexOf('function wireHeld('));
 const sets = [...hf.matchAll(/f\[3\]\s*=\s*([^;]+);/g)].map((m) => m[1].trim());
-ok(hf.length > 400 && sets.length >= 2 && sets.every((v) => v === "''") && /tr\('Authorized · \{provider\}'/.test(hf) && /tr\('Saved'\)/.test(hf) && /tr\('Replace…'\)/.test(hf), 'heldFields never prefills a secret, says «已保存» + «替换…», and the token is the «已授权 · …» line');
+ok(hf.length > 400 && sets.length >= 2 && gateOf(sets.every((v) => v === "''")) && gateOf(/tr\('Authorized · \{provider\}'/.test(hf)) && gateOf(/tr\('Saved'\)/.test(hf)) && verdictOf(/tr\('Replace…'\)/.test(hf)), 'heldFields never prefills a secret, says «已保存» + «替换…», and the token is the «已授权 · …» line');
 const cellRe = (hf.match(/const SECRET_CELL = \(k\) => \/(\^\([^)]*\)\$)\//) || [])[1];
 const FIELD = cellRe ? new RegExp(cellRe) : null;
-ok(!!FIELD && CELLS.every((c) => FIELD.test(c)), `SECRET_CELL names every sealed cell of ① (missing: ${CELLS.filter((c) => !FIELD || !FIELD.test(c)).join(', ') || 'none'})`);
+ok(!!FIELD && verdictOf(CELLS.every((c) => FIELD.test(c))), `SECRET_CELL names every sealed cell of ① (missing: ${CELLS.filter((c) => !FIELD || !FIELD.test(c)).join(', ') || 'none'})`);
 // heldFields, EVALUATED from its own source (it builds strings): a parameter field is write-only because the SERVER named it in
 // `secretParams` (the acceptance reader's mutant — the page's own copy of the rule ignoring params — stayed green on a text pin);
 // a held parameter offers «替换…» AND «删除»; a plain parameter is left as it is
@@ -255,11 +255,11 @@ ok(!!FIELD && CELLS.every((c) => FIELD.test(c)), `SECRET_CELL names every sealed
   const fields = [['param:passphrase', 'passphrase', 'text', 'wo-orig'], ['param:mystery', 'mystery', 'text', 'wo-orig-2'], ['param:region', 'region', 'text', 'eu'], ['secretKey', 'Secret key', 'password', 'wo-orig-3']];
   if (hfn) hfn(fields, { held: ['param:passphrase', 'secretKey'], secretParams: ['param:passphrase', 'param:mystery'] }, 'S3', false);
   const html = (i) => (fields[i][4] && fields[i][4].html) || '';
-  ok(!!hfn && /Saved/.test(html(0)) && /mounts-held-replace/.test(html(0)) && /mounts-held-remove/.test(html(0)) && fields[0][3] === ''
-    && /type="password"/.test(html(1)) && !/mounts-held-remove/.test(html(1)) && fields[1][3] === '' && !fields[2][4] && fields[2][3] === 'eu'
-    && /Saved/.test(html(3)) && !/mounts-held-remove/.test(html(3)),
+  ok(!!hfn && gateOf(/Saved/.test(html(0))) && gateOf(/mounts-held-replace/.test(html(0))) && gateOf(/mounts-held-remove/.test(html(0))) && fields[0][3] === ''
+    && gateOf(/type="password"/.test(html(1))) && !/mounts-held-remove/.test(html(1)) && fields[1][3] === '' && !fields[2][4] && fields[2][3] === 'eu'
+    && gateOf(/Saved/.test(html(3))) && !/mounts-held-remove/.test(html(3)),
     'heldFields (evaluated): a parameter the server named secret is write-only — a held one «已保存» + «替换…» + «删除», an unset one an empty password box; a plain parameter keeps its value; a held CELL has no «删除»', JSON.stringify(fields.map((f) => [f[0], f[3], (f[4] && f[4].html || '').slice(0, 80)]))); }
-ok(/if \(box\.dataset\.remove === '1'\) params\[k\.slice\(6\)\] = '';/.test(meth) && /box\.dataset\.remove = '1';/.test(SM),
+ok(gateOf(/if \(box\.dataset\.remove === '1'\) params\[k\.slice\(6\)\] = '';/.test(meth)) && verdictOf(/box\.dataset\.remove = '1';/.test(SM)),
   'a held parameter\'s «删除» sends the empty value the server deletes on (the dialog\'s «clear a parameter\'s value to remove it» stays true)');
 // «撤销» (the closure's minor: a «删除» mark had no road back but closing the dialog) — wireHeld EVALUATED on a fake form: «删除»
 // marks the box and shows «撤销»; «撤销» takes the mark back — «已保存» and both doors again, nothing sent
@@ -274,12 +274,12 @@ ok(/if \(box\.dataset\.remove === '1'\) params\[k\.slice\(6\)\] = '';/.test(meth
   press(remove); const marked = { remove: box.dataset.remove, state: state.textContent, doors: [replace.hidden, remove.hidden], undoShown: !undo.hidden };
   press(undo); const back = { remove: box.dataset.remove, state: state.textContent, doors: [replace.hidden, remove.hidden], undoShown: !undo.hidden };
   const hf2 = SM.slice(SM.indexOf('const SECRET_CELL = '), SM.indexOf('function wireHeld('));
-  ok(!!handler && marked.remove === '1' && marked.state === 'Removed when you save' && marked.undoShown && back.remove === undefined && back.state === 'Saved' && back.doors.every((h) => h === false) && !back.undoShown
-    && /class="mounts-btn mounts-held-undo" hidden>\$\{escHtml\(tr\('Undo'\)\)\}/.test(hf2),
+  ok(!!handler && marked.remove === '1' && marked.state === 'Removed when you save' && gateOf(marked.undoShown) && back.remove === undefined && back.state === 'Saved' && gateOf(back.doors.every((h) => h === false)) && !back.undoShown
+    && verdictOf(/class="mounts-btn mounts-held-undo" hidden>\$\{escHtml\(tr\('Undo'\)\)\}/.test(hf2)),
     'a held parameter\'s «删除» shows «撤销», and «撤销» takes the mark back before Save — «已保存», «替换…» and «删除» again, nothing sent (wireHeld evaluated)', JSON.stringify({ marked, back })); }
-ok(CELLS.every((c) => !new RegExp(`\\bcfg\\.${c}\\b`).test(SM)), 'no line of src/lib/sidebar-mounts.js reads cfg.<a secret cell>');
+ok(verdictOf(CELLS.every((c) => !new RegExp(`\\bcfg\\.${c}\\b`).test(SM))), 'no line of src/lib/sidebar-mounts.js reads cfg.<a secret cell>');
 const MD = read('src/lib/mounts-dialog.js');
-ok(/const heldRow = f\.held && el\.tagName === 'INPUT' \? heldSecretRow\(el\) : null;/.test(MD) && /function heldSecretRow\(input\)[\s\S]{0,400}input\.value = ''; input\.hidden = true;/.test(MD) && /tr\('Saved'\)/.test(MD) && /tr\('Replace…'\)/.test(MD), 'the shared field renderer draws a `held` field as «已保存» + «替换…» over an EMPTY, hidden box');
+ok(gateOf(/const heldRow = f\.held && el\.tagName === 'INPUT' \? heldSecretRow\(el\) : null;/.test(MD)) && gateOf(/function heldSecretRow\(input\)[\s\S]{0,400}input\.value = ''; input\.hidden = true;/.test(MD)) && gateOf(/tr\('Saved'\)/.test(MD)) && verdictOf(/tr\('Replace…'\)/.test(MD)), 'the shared field renderer draws a `held` field as «已保存» + «替换…» over an EMPTY, hidden box');
 const CAD = read('src/lib/channel-account-dialogs.js');
 ok(!/\bclient\.appSecret\b|cfg\.client\.appSecret|c\.appSecret/.test(CAD) && (CAD.match(/held: !!(?:c\.secretSet|cfg\.client\.secretSet)/g) || []).length === 3, 'the channel dialogs never read the answer\'s secret — the custom client is {appId, held} from client.secretSet (Edit, Re-authorize, Duplicate)');
 
@@ -310,7 +310,7 @@ ok(eSrc.split(VIEW_LINE).length === 2, 'channels-engine.js answers an account\'s
 const engTail = MC.write('src/server/channels-engine.js', editAnchor(eSrc, VIEW_LINE, "return { appId: String(rec.credential.appId || ''), secretSet: !!rec.credential.appSecretEnc, secretMasked: R.maskValue(box.dec(rec.credential.appSecretEnc)), undecryptable };", "src/server/channels-engine.js"), 'tail');
 const tRed = await plantChannels(engTail, 'channels-tail');
 ok(tRed.leaks.length >= vendorRows.length, `a channels-engine.js whose account view carries the mask tail is caught (${tRed.leaks.length} leaks) ⇒ ④ red on a TAIL`, tRed.errors.join(' ; '));
-for (const row of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 5 })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 5 })) ok(verdictOf(row.pass), row.name, row.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

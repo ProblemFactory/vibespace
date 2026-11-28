@@ -52,7 +52,7 @@ const DD = require('../src/desktop-display.js');
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 50) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { let v = null; try { v = await pred(); } catch { v = null; } if (v) return v; await sleep(every); } try { return await pred(); } catch { return null; } };
@@ -184,7 +184,7 @@ const srv = spawn(process.execPath, ['server.js'], { cwd: INST, env: { ...env, .
 procs.add(srv);
 srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
 const booted = await until(() => journal.includes('Ready.'), 60000, 100);
-if (!ok(booted, 'the scratch server booted (its own data/, HOME, XDG root; the real driver on its PATH; xpra on this machine)', journal.slice(-800))) await done();
+if (!ok(verdictOf(booted), 'the scratch server booted (its own data/, HOME, XDG root; the real driver on its PATH; xpra on this machine)', journal.slice(-800))) await done();
 const api = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
 const wsMain = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
@@ -252,29 +252,29 @@ const S1 = await createSession('x-agent');
 const newRes = await S1.vb(['new', 'xwork']); await S1.vb(['use', 'xwork']);
 const PID = (/\((bp-[0-9a-f]{8})\)/.exec(newRes.stdout + newRes.stderr) || [])[1] || null;
 const o1 = await S1.vb(['open', `${ORIGIN}/blk?n=1`]);
-if (!ok(PID && o1.ok, `the conversation "x-agent" browses on its named profile "xwork" (${PID})`, JSON.stringify({ newRes, o1 }).slice(0, 600))) await done();
+if (!ok(gateOf(PID) && verdictOf(o1.ok), `the conversation "x-agent" browses on its named profile "xwork" (${PID})`, JSON.stringify({ newRes, o1 }).slice(0, 600))) await done();
 const prof = await api('GET', '/api/browser/profiles');
 const rec = prof.json && prof.json.browsers ? prof.json.browsers[PID] : null;
 const verdict = PIC.pictureSourceOf(rec);
 if (!(rec && rec.launch === 'attach')) { skip(`the server took the ${rec && rec.launch} road (${rec && rec.launchWhy}) — no X picture to show on this machine`); await done(); }
-ok(verdict.source === 'x' && verdict.why === 'attach' && rec.displaySession && verdict.displaySession === rec.displaySession.id, `the record says the ATTACH road on display session ${rec.displaySession && rec.displaySession.id} (${rec.displaySession && rec.displaySession.display}) ⇒ the picture source is 'x' (PURE pictureSourceOf over the digest's record)`, JSON.stringify({ launch: rec.launch, ds: rec.displaySession, verdict }));
+ok(verdict.source === 'x' && verdict.why === 'attach' && gateOf(rec.displaySession) && verdict.displaySession === rec.displaySession.id, `the record says the ATTACH road on display session ${rec.displaySession && rec.displaySession.id} (${rec.displaySession && rec.displaySession.display}) ⇒ the picture source is 'x' (PURE pictureSourceOf over the digest's record)`, JSON.stringify({ launch: rec.launch, ds: rec.displaySession, verdict }));
 const hk = await api('GET', '/api/browser/housekeeping');
 const DIR = ((hk.json && hk.json.profiles) || []).find((r) => r.id === PID)?.dir || null;
 const A = DIR ? await agentPage(DIR, '/blk') : null;
 if (!ok(!!A, `the agent's page in the profile's own Chrome answers CDP (the oracle) — ${DIR}`)) await done();
 const P = await viewerPage();
-if (!ok(P.ready, 'the viewer page runs the real bundle')) await done();
+if (!ok(verdictOf(P.ready), 'the viewer page runs the real bundle')) await done();
 await P.ev(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(S1.sessionId)}, profileId: ${JSON.stringify(PID)} })`);
 const tOpen = Date.now();
 await until(() => P.l('app.wm.focusWindow(w.id); w.element.style.left = "20px"; w.element.style.top = "10px"; w.element.style.width = "1300px"; w.element.style.height = "920px"; if (w.onResize) w.onResize(); return true;'), 15000, 200); // a desktop-sized live view (its pane sizes Chrome's window)
 const xs = await until(async () => { const x = await P.l('return L.x();'); return x && x.mounted && x.status === 'connected' ? x : null; }, 45000, 200);
-ok(!!xs && xs.source && xs.source.source === 'x' && xs.seat === 'size' && xs.viewOnly, `the live view MOUNTS the X picture (display session ${xs && xs.ds}, window ${xs && xs.wid}, ${Date.now() - tOpen} ms) — the agent drives, this lone pane RULES the window's size (seat ${xs && xs.seat}) and sends no input (view-only)`, JSON.stringify(xs || (await P.l('return L.x();'))));
+ok(!!xs && gateOf(xs.source) && xs.source.source === 'x' && xs.seat === 'size' && verdictOf(xs.viewOnly), `the live view MOUNTS the X picture (display session ${xs && xs.ds}, window ${xs && xs.wid}, ${Date.now() - tOpen} ms) — the agent drives, this lone pane RULES the window's size (seat ${xs && xs.seat}) and sends no input (view-only)`, JSON.stringify(xs || (await P.l('return L.x();'))));
 const drawn = await until(async () => { const w = await P.l('const v = L.xView(); return v ? v.windows() : null;'); return w && w.some((x) => x.wid === (xs && xs.wid)) ? w : null; }, 20000, 200);
 ok(!!drawn && drawn.filter((x) => x.kind === 'main').length === 1 && drawn.find((x) => x.wid === xs.wid).kind === 'main', `ONE window drawn — this conversation's Chrome window ${xs && xs.wid} (${drawn && drawn.map((x) => `${x.wid}:${x.kind} ${x.w}×${x.h}`).join(', ')})`, JSON.stringify(drawn));
 const fitted = await until(async () => { const w = await P.l('const v = L.xView(); return v ? v.windows() : null;'); const m = w && w.find((x) => x.wid === xs.wid); return m && m.w >= 1000 && m.h >= 700 && m.x === 0 && m.y === 0 ? m : null; }, 20000, 250);
 ok(!!fitted && fitted.x === 0 && fitted.y === 0, `the ruling pane sizes Chrome's window through xpra's own configure-window (the desktop app window's fit — never \`set viewport\`, never a CDP resize): ${fitted && `${fitted.w}×${fitted.h}+${fitted.x}+${fitted.y}`}`, JSON.stringify(await P.l('const v = L.xView(); return v ? v.windows() : null;')));
 const words = await P.l('return L.x();');
-ok(words && /the browser's own window/.test(words.badgeTitle || ''), `the badge's tooltip names the source: "${words && words.badgeTitle}"`);
+ok(gateOf(words) && verdictOf(/the browser's own window/.test(words.badgeTitle || '')), `the badge's tooltip names the source: "${words && words.badgeTitle}"`);
 const hidden = await P.l(`return L.el().querySelector('.browser-live-canvas').style.display;`);
 ok(hidden === 'none', `the screencast canvas is hidden while the X picture shows (display: ${hidden})`);
 // THE PIXEL: the block's centre in the X picture's backing (window px: the page offset is Chrome's top chrome) vs the CDP screenshot's pixel there
@@ -282,7 +282,7 @@ const geom = await A.ev(`(() => { const b = document.getElementById('blk').getBo
 const shot = await A.call('Page.captureScreenshot', { format: 'png', clip: { x: geom.x, y: geom.y, width: 1, height: 1, scale: 1 } });
 const cdpPx = shot.result && shot.result.data ? pngPixel(Buffer.from(shot.result.data, 'base64')) : null;
 const xPx = await until(async () => { const v = await P.xPixel(xs.wid, geom.left + geom.x, geom.top + geom.y); return v && near(v, BLOCK, 40) ? v : null; }, 15000, 250) || (await P.xPixel(xs.wid, geom.left + geom.x, geom.top + geom.y));
-ok(near(xPx, cdpPx) && near(cdpPx, BLOCK), `PIXEL-COMPARE: the block's centre in the X picture ${JSON.stringify(xPx)} = the CDP screenshot's ${JSON.stringify(cdpPx)} (the block is rgb(${BLOCK.join(',')}); window ${geom.outerW}×${geom.outerH}, page at +${geom.left}+${geom.top})`, JSON.stringify({ geom }));
+ok(gateOf(near(xPx, cdpPx)) && verdictOf(near(cdpPx, BLOCK)), `PIXEL-COMPARE: the block's centre in the X picture ${JSON.stringify(xPx)} = the CDP screenshot's ${JSON.stringify(cdpPx)} (the block is rgb(${BLOCK.join(',')}); window ${geom.outerW}×${geom.outerH}, page at +${geom.left}+${geom.top})`, JSON.stringify({ geom }));
 const PNG = PNG0;
 if (PNG) { fs.mkdirSync(PNG, { recursive: true }); const s = await P.call('Page.captureScreenshot', { format: 'png' }); if (s.result) fs.writeFileSync(path.join(PNG, 'x1-viewer.png'), Buffer.from(s.result.data, 'base64')); }
 
@@ -292,13 +292,13 @@ const tAuth = Date.now();
 const o2 = await S1.vb(['open', `${ORIGIN}/auth?n=1`], 60000);
 const authMs = Date.now() - tAuth;
 const sheetText = /Chrome's own sign-in sheet \("Sign in", "http:\/\/127\.0\.0\.1:\d+", realm "bxw realm"\)/;
-ok(!o2.ok && /\[dialog_open\]/.test(o2.stderr) && sheetText.test(o2.stdout), `the agent's \`open\` of the sign-in page answers [dialog_open] BY NAME at once (${authMs} ms): "${(o2.stdout.match(sheetText) || [''])[0]}"`, JSON.stringify(o2).slice(0, 900));
+ok(!o2.ok && gateOf(/\[dialog_open\]/.test(o2.stderr)) && verdictOf(sheetText.test(o2.stdout)), `the agent's \`open\` of the sign-in page answers [dialog_open] BY NAME at once (${authMs} ms): "${(o2.stdout.match(sheetText) || [''])[0]}"`, JSON.stringify(o2).slice(0, 900));
 const o3 = await S1.vb(['get', 'title'], 60000);
-ok(!o3.ok && /\[dialog_open\]/.test(o3.stderr) && sheetText.test(o3.stdout), 'its NEXT verb (`get title`) is answered [dialog_open] with the same sentence — nothing ran behind the sheet', JSON.stringify(o3).slice(0, 900));
+ok(!o3.ok && gateOf(/\[dialog_open\]/.test(o3.stderr)) && verdictOf(sheetText.test(o3.stdout)), 'its NEXT verb (`get title`) is answered [dialog_open] with the same sentence — nothing ran behind the sheet', JSON.stringify(o3).slice(0, 900));
 const o4 = await S1.vb(['dialog', 'status'], 60000);
-ok(o4.ok && sheetText.test(o4.stdout), '`dialog status` names it (exit 0)', JSON.stringify(o4).slice(0, 600));
+ok(gateOf(o4.ok) && verdictOf(sheetText.test(o4.stdout)), '`dialog status` names it (exit 0)', JSON.stringify(o4).slice(0, 600));
 const o5 = await S1.vb(['dialog', 'accept'], 60000);
-ok(!o5.ok && /\[native_dialog\]/.test(o5.stderr), '`dialog accept` cannot answer it — only a person can ([native_dialog])', JSON.stringify(o5).slice(0, 600));
+ok(!o5.ok && verdictOf(/\[native_dialog\]/.test(o5.stderr)), '`dialog accept` cannot answer it — only a person can ([native_dialog])', JSON.stringify(o5).slice(0, 600));
 // VISIBLE: near-white sheet pixels below Chrome's top chrome, centred, in the X picture — over a DARK page
 // MEASURED: Chrome draws its sheet (white, a BLUE "Sign in" button) hanging from the toolbar, centred, over a commit of
 // chrome-error://chromewebdata/ (itself white) — the sheet's signature is its blue; the page under it has none
@@ -359,8 +359,8 @@ if (backAt) { await P.clickAt(backAt.x, backAt.y); back = await until(async () =
 ok(!!back, 'Hand back (a real click) ⇒ the agent drives again, the X picture view-only (this pane keeps sizing the window)', JSON.stringify(back || (await P.l('return { mode: L.state().mode, x: L.x() };'))));
 await sleep(1200);
 const o6 = await S1.vb(['get', 'title'], 60000);
-ok(o6.ok && /bxw signed in/.test(o6.stdout), `the agent's next verb runs again: \`get title\` ⇒ "${o6.stdout.trim().split('\n').pop()}"`, JSON.stringify(o6).slice(0, 900));
-ok(/closed in its window/.test(o6.stderr) || /closed in its window/.test(o6.stdout), 'and it is told ONCE that the sign-in sheet closed in Chrome\'s window (the page moved on)', JSON.stringify(o6).slice(0, 900));
+ok(gateOf(o6.ok) && verdictOf(/bxw signed in/.test(o6.stdout)), `the agent's next verb runs again: \`get title\` ⇒ "${o6.stdout.trim().split('\n').pop()}"`, JSON.stringify(o6).slice(0, 900));
+ok(verdictOf(/closed in its window/.test(o6.stderr)) || verdictOf(/closed in its window/.test(o6.stdout)), 'and it is told ONCE that the sign-in sheet closed in Chrome\'s window (the page moved on)', JSON.stringify(o6).slice(0, 900));
 
 // ═══ ⑤ THE SAME SCENE ON THE SCREENCAST ROAD (the RED control's source, measured beside the X road) ═══
 // A headless browser (Settings: browser.headed off ⇒ the driver's own launch, no display session) keeps the page's frames: the
@@ -374,15 +374,15 @@ const PID2 = (/\((bp-[0-9a-f]{8})\)/.exec(new2.stdout + new2.stderr) || [])[1] |
 const o21 = await S2.vb(['open', `${ORIGIN}/blk?n=2`]);
 const rec2 = ((await api('GET', '/api/browser/profiles')).json || {}).browsers?.[PID2] || null;
 const v2 = PIC.pictureSourceOf(rec2);
-ok(o21.ok && rec2 && rec2.launch === 'driver' && v2.source === 'screencast' && v2.why === 'driver', `a HEADLESS browser (the driver's own launch) ⇒ the screencast (${v2.why}: "${v2.words}")`, JSON.stringify({ o21: o21.ok, launch: rec2 && rec2.launch, why: rec2 && rec2.launchWhy, v2 }));
+ok(gateOf(o21.ok) && gateOf(rec2) && rec2.launch === 'driver' && v2.source === 'screencast' && v2.why === 'driver', `a HEADLESS browser (the driver's own launch) ⇒ the screencast (${v2.why}: "${v2.words}")`, JSON.stringify({ o21: o21.ok, launch: rec2 && rec2.launch, why: rec2 && rec2.launchWhy, v2 }));
 const P2 = await viewerPage();
 P2.l2 = (js) => P2.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live' && x._browserLive && !x._browserLive.isHuman() && x._browserLive.state().sessionId === ${JSON.stringify(S2.sessionId)}); const L = w && w._browserLive; if (!L) return null; ${js} })()`); // THIS conversation's view (a new page replays the layout: ①'s view comes back too)
 await P2.ev(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(S2.sessionId)}, profileId: ${JSON.stringify(PID2)} })`);
 await until(() => P2.l2('app.wm.focusWindow(w.id); w.element.style.left = "20px"; w.element.style.top = "10px"; w.element.style.width = "1300px"; w.element.style.height = "920px"; if (w.onResize) w.onResize(); return true;'), 15000, 200);
 const sc = await until(async () => { const r = await P2.l2('return { x: L.x(), frames: L.state().frames, nat: L.img().naturalWidth };'); return r && r.frames >= 1 && r.nat > 0 ? r : null; }, 45000, 250);
-ok(!!sc && sc.x.source.source === 'screencast' && !sc.x.mounted && /the page's picture/.test(sc.x.badgeTitle || ''), `its live view draws the page's frames (no X view; the badge: "${sc && sc.x.words}")`, JSON.stringify(sc));
+ok(!!sc && sc.x.source.source === 'screencast' && !sc.x.mounted && verdictOf(/the page's picture/.test(sc.x.badgeTitle || '')), `its live view draws the page's frames (no X view; the badge: "${sc && sc.x.words}")`, JSON.stringify(sc));
 const o22 = await S2.vb(['open', `${ORIGIN}/auth?n=2`], 60000);
-ok(!o22.ok && /\[page_prompt\]/.test(o22.stderr) && /only the user can answer it/.test(o22.stdout), "the screencast road's sign-in is held for the product's own form, said as before ([page_prompt])", JSON.stringify(o22).slice(0, 600));
+ok(!o22.ok && gateOf(/\[page_prompt\]/.test(o22.stderr)) && verdictOf(/only the user can answer it/.test(o22.stdout)), "the screencast road's sign-in is held for the product's own form, said as before ([page_prompt])", JSON.stringify(o22).slice(0, 600));
 const form = await until(async () => { const b = await P2.l2(`const e = L.el().querySelector('.browser-live-dialog'); return e && e.style.display !== 'none' ? { text: e.textContent, inputs: e.querySelectorAll('input').length } : null;`); return b && b.inputs === 2 ? b : null; }, 15000, 200);
 ok(!!form, `the product's own form is under the bar (${form && form.inputs} boxes) — the fact now carries the prompt (it never reached the bar before this lane)`, JSON.stringify(form));
 await sleep(800);
@@ -431,7 +431,7 @@ console.log('— ⑥ one person, one seat: the desktop window on the browser dis
   const dv = await until(async () => { const x = await P.ev(`(() => { const w = ${DWQ}; const v = w && w._desktopAppView; return v && v.state === 'connected' && w._desktopBrowserSeat ? { seat: w._desktopBrowserSeat, viewer: w._windowViewerId } : null; })()`); return x; }, 45000, 250);
   ok(!!dv && dv.seat === 'watch', `the desktop window on display session ${DS} asks ITS seat: watch (the agent drives; nobody browses it himself) — never the silent 'active' it believed before`, JSON.stringify(dv));
   const door = await until(async () => P.ev(`(() => { const w = ${DWQ}; const d = w && w.element.querySelector('.desktop-app-xseat'); const b = d && d.querySelector('.desktop-app-xseat-take'); return d && d.style.display !== 'none' ? { text: d.querySelector('.desktop-app-xseat-text').textContent, btn: !!b && b.style.display !== 'none', act: b && b.dataset.act, label: b && b.textContent } : null; })()`), 10000, 200);
-  ok(!!door && /^View only — (this browser is used by (the agent of «[^»]+»|the agents of \d+ conversations); browse it yourself|browse this browser yourself) to act in your own window here/.test(door.text) && door.btn && door.act === 'browse' && door.label === 'Browse yourself', `Watch is SAID over the picture — who uses it and the way, the button's label its act: "${door && door.text}"`, JSON.stringify(door));
+  ok(!!door && gateOf(/^View only — (this browser is used by (the agent of «[^»]+»|the agents of \d+ conversations); browse it yourself|browse this browser yourself) to act in your own window here/.test(door.text)) && gateOf(door.btn) && door.act === 'browse' && door.label === 'Browse yourself', `Watch is SAID over the picture — who uses it and the way, the button's label its act: "${door && door.text}"`, JSON.stringify(door));
   // THE HOLD: pointer motion + a click every ~30 s, all cut by the bridge; xpra's own close of this socket is the event watched
   const pane = await P.ev(`(() => { const w = ${DWQ}; window.app.wm.focusWindow(w.id); const r = w._desktopAppView.pane.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
   const closeRe = new RegExp(`\\[desktop-stream\\] ${DS}: closed \\([^\\n]*viewer ${dv ? dv.viewer : 'none'}[^\\n]*`);
@@ -460,7 +460,7 @@ console.log('— ⑥ one person, one seat: the desktop window on the browser dis
   await sleep(3000);
   const afterG = await P.ev(geomQ);
   const moved = (before || []).map((b) => ({ b, a: (afterG || []).find((x) => x.wid === b.wid) })).filter(({ b, a }) => a && (a.x !== b.x || a.y !== b.y || a.w !== b.w || a.h !== b.h));
-  ok(Array.isArray(before) && before.length >= 1 && moved.length === 0, `his INPUT seat sizes nothing: the ${before ? before.length : 0} Chrome window(s) already on the display keep their geometry (${JSON.stringify((before || []).map((x) => [x.wid, x.x, x.y, x.w, x.h]))})`, JSON.stringify(moved));
+  ok(gateOf(Array.isArray(before)) && before.length >= 1 && moved.length === 0, `his INPUT seat sizes nothing: the ${before ? before.length : 0} Chrome window(s) already on the display keep their geometry (${JSON.stringify((before || []).map((x) => [x.wid, x.x, x.y, x.w, x.h]))})`, JSON.stringify(moved));
   // THE RAW FALLBACK: Chrome's own passkey dialog over HIS page — CDP never reaches it; his click + Escape in the desktop window do
   if (human) await api('POST', `/api/browser/browse/${human.browserKey}/navigate`, { url: `http://localhost:${CP}/pk` });
   const H = DIR ? await agentPage(DIR, '/pk') : null;
@@ -551,7 +551,7 @@ console.log('— ⑥ one person, one seat: the desktop window on the browser dis
     ok(!!B && !!Af && B.ag >= 0 && B.his >= 0 && B.ag < B.his && Af.his >= 0 && Af.his < Af.ag && r.hisDowns === 1 && r.agDowns === 0 && String(r.drawnAt) === String(r.his), `r5 MAJOR A — A REAL RAISE, READ OFF X: an agent's window (${r.ag}) mapped over his resting pointer is ON TOP in X (xwininfo, topmost first: ${JSON.stringify(r.stackBefore)}) and drawn UNDER his (the pane's hit: ${r.drawnAt}); his press there with no move raises HIS in X first (after: ${JSON.stringify(r.stackAfter)}) and lands in HIS page (his mousedowns ${r.hisDowns}, the agent page's ${r.agDowns})`, JSON.stringify(r));
   }
   ok(pk0 === 'pending' && pkCdp === 'pending', `MEASURED (the RED control of the raw fallback): the page waits in navigator.credentials.get and five of CDP's own clicks never reach Chrome's dialog (${pk0} → ${pkCdp})`);
-  ok(/rejected NotAllowedError/.test(String(pkDesk)), `THE RAW FALLBACK: his click + Escape in the desktop window answer Chrome's OWN passkey dialog (__pk = ${pkDesk})`);
+  ok(verdictOf(/rejected NotAllowedError/.test(String(pkDesk))), `THE RAW FALLBACK: his click + Escape in the desktop window answer Chrome's OWN passkey dialog (__pk = ${pkDesk})`);
   // the scene ends: his browsing closed, the display's windows closed — the layout syncs to every client, ⑤'s viewer page included
   // (its own Take over would otherwise find the desktop window's button first: the same class)
   if (human) await api('POST', `/api/browser/browse/${human.browserKey}/close`);
@@ -583,7 +583,7 @@ console.log('— ⑦ the X picture shows the tab the view says it shows: a tab i
   const sameCdp = !!(winA && winA.result && winA0 && winA0.result && winA.result.windowId === winA0.result.windowId);
   const pxA = gA ? await until(async () => { const v = await P.xPixel(wid1, gA.left + gA.x, gA.top + gA.y); return v && near(v, RED, 40) ? v : null; }, 15000, 250) : null;
   const stA = await state();
-  ok(!!tn.ok && sameCdp && stA.mounted && stA.wid === wid1 && !!pxA, `A — the agent's tab new lands in its own lease's window (the same CDP window: ${sameCdp}): the X picture stays on window ${stA.wid} and DRAWS the new page there — its block ${JSON.stringify(pxA)} is rgb(${RED.join(',')})`, JSON.stringify({ tn: tn && { ok: tn.ok, out: String(tn.stdout || '').slice(0, 160) }, winA: winA && winA.result, winA0: winA0 && winA0.result, stA, server: serverLines(jA) }).slice(0, 1100));
+  ok(!!tn.ok && gateOf(sameCdp) && gateOf(stA.mounted) && stA.wid === wid1 && !!pxA, `A — the agent's tab new lands in its own lease's window (the same CDP window: ${sameCdp}): the X picture stays on window ${stA.wid} and DRAWS the new page there — its block ${JSON.stringify(pxA)} is rgb(${RED.join(',')})`, JSON.stringify({ tn: tn && { ok: tn.ok, out: String(tn.stdout || '').slice(0, 160) }, winA: winA && winA.result, winA0: winA0 && winA0.result, stA, server: serverLines(jA) }).slice(0, 1100));
   const redId = RA && RA.target ? String(RA.target.id) : null;
   if (RA) RA.close();
   // B — a tab in ANOTHER window: the agent's page opens a POPUP (window.open with features — a Chrome window of its own; the lease's
@@ -638,7 +638,7 @@ console.log('— ⑧ one window: the tab on show behind another tab of its windo
   const t0 = Date.now(); let own = null, pxOwn = null;
   while (Date.now() - t0 < 20000) { const q = await view(); if (!q.mounted && q.why === 'background-tab' && g) { const px = await imgPx(g.x, g.y); if (px && near(px, RED, 40)) { own = q; pxOwn = px; break; } } await sleep(250); }
   const redTid = R && R.target ? String(R.target.id).toUpperCase() : '';
-  ok(!!sw.ok && !!front0 && !!bf && !bf.error && !!own && /\/red\?n=7/.test(own.url) && /its window shows another tab in front/.test(own.tip) && own.chip.toUpperCase() === redTid,
+  ok(!!sw.ok && !!front0 && !!bf && !bf.error && !!own && gateOf(/\/red\?n=7/.test(own.url)) && gateOf(/its window shows another tab in front/.test(own.tip)) && own.chip.toUpperCase() === redTid,
     `the red tab on show, pushed behind the green tab of its own window: the view leaves the X window and draws the red tab's OWN picture (${JSON.stringify(pxOwn)} at its block), under its own address (${own && own.url}), the row's active chip the same tab (${own && own.chip.slice(0, 8)}), and the badge's words (${own && own.tip.slice(-80)})`, JSON.stringify({ sw: !!sw.ok, front0: !!front0, bf: !!bf, now: await view() }));
   // its read (S2): the HALF-SECOND picture proven live — the hidden tab's block recoloured (its stream is silent: only the hub's
   // poll carries it) reaches the view's picture within about two polls
@@ -652,7 +652,7 @@ console.log('— ⑧ one window: the tab on show behind another tab of its windo
   await sleep(3000);
   const afterTicket = await view();
   const pxStill = g ? await imgPx(g.x, g.y) : null;
-  ok(!afterTicket.mounted && afterTicket.why === 'background-tab' && /\/red\?n=7/.test(afterTicket.url) && !!pxStill && !near(pxStill, BLOCK, 40), `a ticket sent while the verdict says hidden mounts nothing: still the tab's own picture (${afterTicket.why}), never the window's green front tab under the red tab's address`, JSON.stringify(afterTicket));
+  ok(!afterTicket.mounted && afterTicket.why === 'background-tab' && gateOf(/\/red\?n=7/.test(afterTicket.url)) && !!pxStill && !near(pxStill, BLOCK, 40), `a ticket sent while the verdict says hidden mounts nothing: still the tab's own picture (${afterTicket.why}), never the window's green front tab under the red tab's address`, JSON.stringify(afterTicket));
   // the red tab brought to the front again (CDP): it paints again ⇒ the X picture returns only once the clear has held its settle
   const tBack = Date.now(), back = R ? await R.call('Page.bringToFront', {}) : null;
   let settleAt = null;
@@ -662,4 +662,4 @@ console.log('— ⑧ one window: the tab on show behind another tab of its windo
   if (R) R.close();
 }
 
-await done();
+await done(); import { verdictOf, gateOf } from './lib/check.mjs';

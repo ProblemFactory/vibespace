@@ -25,7 +25,7 @@ const { TaskGroupManager } = require('../src/task-groups.js');
 const { SessionStatusManager } = require('../src/session-status.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } };
 const J = (v) => JSON.stringify(v);
 // a group's equality, field by field (a rebuilt group's keys arrive in another order — no reader keys on that order)
 const C = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((y) => [y, x[y]])) : x));
@@ -40,7 +40,7 @@ console.log('§1 src/task-delta.js (PURE)');
 {
   const g0 = { id: 'T-1-a', title: 'a', objective: 'o', color: null, createdAt: 1, updatedAt: 1, contentUpdatedAt: 1, ctx: [], progress: [{ id: 'P-1', at: 1, note: 'one', detail: 'd1' }], backlog: [{ id: 'B-1', text: 'x', status: 'open' }], sessions: ['claude:a'] };
   const first = TD.groupChange(undefined, g0);
-  ok(first.change && first.change.patch.title === 'a' && first.change.patch.createdAt === 1 && J(first.change.patch.progress) === J(g0.progress) && J(first.change.patch.sessions) === '["claude:a"]' && C(TD.applyGroupPatch(null, first.change)) === C(g0),
+  ok(gateOf(first.change) && first.change.patch.title === 'a' && first.change.patch.createdAt === 1 && J(first.change.patch.progress) === J(g0.progress) && J(first.change.patch.sessions) === '["claude:a"]' && C(TD.applyGroupPatch(null, first.change)) === C(g0),
     'a group nobody holds yet travels WHOLE (every field, every entry) and is rebuilt exactly');
   ok(TD.groupChange(first.sent, g0).change === null, 'nothing moved ⇒ no change at all');
   const g1 = { ...g0, updatedAt: 2, contentUpdatedAt: 2, progress: [...g0.progress, { id: 'P-2', at: 2, note: 'two' }] };
@@ -59,13 +59,13 @@ console.log('§1 src/task-delta.js (PURE)');
   ok(J(c3.change.patch.progressDropped) === '["P-1"]' && c3.change.patch.progress.length === 1 && C(TD.applyGroupPatch(g2, c3.change)) === C(g3), 'the live list trimmed from its front (an entry archived) ⇒ progressDropped + the new one', c3.change.patch);
   const g4 = { ...g3, updatedAt: 5, progress: [g3.progress[1], g3.progress[0]] };
   const c4 = TD.groupChange(c3.sent, g4);
-  ok(Array.isArray(c4.change.patch.progressAll) && C(TD.applyGroupPatch(g3, c4.change)) === C(g4), 'an order the patch cannot express (an import reordered it) ⇒ the whole log once (progressAll)');
+  ok(gateOf(Array.isArray(c4.change.patch.progressAll)) && C(TD.applyGroupPatch(g3, c4.change)) === C(g4), 'an order the patch cannot express (an import reordered it) ⇒ the whole log once (progressAll)');
   ok(TD.groupChange(c3.sent, { ...g3, title: 'renamed', progress: [{ id: 'P-9', note: 'not compared' }] }, { deep: false }).change.patch.title === 'renamed' && !TD.groupChange(c3.sent, { ...g3, progress: [] }, { deep: false }).change,
     'deep:false (a group no write named) compares the fields only — its derived fields still travel, its logs are never read');
   ok(TD.applyGroupPatch(null, { id: 'T-x', patch: { progress: [] } }) === null && TD.applyTasksDelta([], { changed: [{ id: 'T-x', patch: { progress: [] } }] }) === null && TD.applyTasksDelta([g0], { refetch: true }) === null,
     'a PART of a group the mirror does not hold, or a refetch frame ⇒ null (re-fetch, never a guessed group)');
   const r = TD.applyTasksDelta([g0, { id: 'T-0', title: 'z', createdAt: 0 }], { changed: [c1.change], removed: ['T-0'] });
-  ok(r && r.tasks.length === 1 && r.tasks[0].progress.length === 2 && J([...r.ids].sort()) === '["T-0","T-1-a"]', 'a frame over the list: the changed group patched, the removed one gone, the ids it concerned');
+  ok(gateOf(r) && r.tasks.length === 1 && r.tasks[0].progress.length === 2 && J([...r.ids].sort()) === '["T-0","T-1-a"]', 'a frame over the list: the changed group patched, the removed one gone, the ids it concerned');
   // the order rule
   const M = { loaded: true, epoch: 100, seq: 5 };
   const v = (mark, msg) => TD.mirrorVerdict(mark, msg);
@@ -78,9 +78,9 @@ console.log('§1 src/task-delta.js (PURE)');
   const fsx = (mark, msg, o) => TD.frameStep(mark, msg, o);
   ok(fsx(M, { epoch: 100, base: 5, seq: 6 }) === 'apply' && fsx(M, { epoch: 100, base: 4, seq: 5 }) === 'drop' && fsx(null, { epoch: 100, base: 5, seq: 6 }) === 'hold' && fsx(M, { epoch: 100, base: 7, seq: 8 }) === 'refetch' && fsx(M, { epoch: 100, base: 7, seq: 8 }, { replayed: true }) === 'cover' && fsx(M, { type: 'tasks-updated' }) === 'refresh' && fsx(null, { type: 'tasks-updated' }) === 'refresh',
     'frameStep (what the bundle\'s mirror DOES): apply / drop / hold / refetch — a REPLAYED frame that still does not follow is covered (never held twice), an unordered frame only asks for a fetch');
-  ok(TD.touches({ changed: [{ id: 'a' }], removed: [] }, 'a') && !TD.touches({ changed: [{ id: 'a' }], removed: [] }, 'b') && TD.touches({ changed: [], removed: ['b'] }, 'b') && TD.touches({ refetch: true }, 'b') && TD.touches({ type: 'tasks-updated' }, 'b'),
+  ok(gateOf(TD.touches({ changed: [{ id: 'a' }], removed: [] }, 'a')) && !TD.touches({ changed: [{ id: 'a' }], removed: [] }, 'b') && gateOf(TD.touches({ changed: [], removed: ['b'] }, 'b')) && gateOf(TD.touches({ refetch: true }, 'b')) && verdictOf(TD.touches({ type: 'tasks-updated' }, 'b')),
     'touches: its own group, its removal, a refetch / unordered frame (re-read everything)');
-  ok(!TD.metaChanged({ changed: [c1.change], removed: [] }) && TD.metaChanged({ changed: [c2.change], removed: [] }) && TD.metaChanged({ changed: [], removed: ['x'] }) && TD.metaChanged({ refetch: true }),
+  ok(!TD.metaChanged({ changed: [c1.change], removed: [] }) && gateOf(TD.metaChanged({ changed: [c2.change], removed: [] })) && gateOf(TD.metaChanged({ changed: [], removed: ['x'] })) && verdictOf(TD.metaChanged({ refetch: true })),
     'metaChanged: an Activity line / clocks ⇒ false (the board and the rosters stay); a member, a colour, a removal, a refetch ⇒ true');
   const st = { 'claude:a': { state: 'working' }, 'claude:b': { state: 'done' } };
   const d = TD.statusChange(['claude:a', 'claude:gone'], st);
@@ -154,12 +154,12 @@ console.log('§2 the fan-out (src/server/task-fanout.js) over a real TaskGroupMa
   }
   T.fire(); for (const m of frames.slice(-1)) A.take(m);
   ok(!bad && checks > 60 && C(A.tasks) === C(tasks.list()) && A.fetches === 1, `a seeded walk of ${writes} writes (every writer) — the client mirror that takes only the frames equals tasks.list() at all ${checks} checks; ONE fetch (the first)`, bad);
-  ok(frames.every((m, i) => m.type === 'tasks-updated' && m.seq === i + 1 && m.base === i && m.epoch === 1792900000000) && coalescedFrames < writes, `${frames.length} frames for ${writes} writes, numbered contiguously in this boot (seq = base + 1)`);
+  ok(gateOf(frames.every((m, i) => m.type === 'tasks-updated' && m.seq === i + 1 && m.base === i && m.epoch === 1792900000000)) && coalescedFrames < writes, `${frames.length} frames for ${writes} writes, numbered contiguously in this boot (seq = base + 1)`);
   // a burst is ONE frame; a frame for an Activity line carries that line only
   const n0 = frames.length;
   const gid = ids()[0];
   for (let i = 0; i < 20; i++) tasks.addProgress(gid, { note: 'burst ' + i, detail: 'x'.repeat(200) });
-  ok(frames.length === n0 && T.armed(), 'a burst of 20 Activity lines sends NOTHING until the coalescing timer fires (the store writes stayed synchronous)');
+  ok(frames.length === n0 && verdictOf(T.armed()), 'a burst of 20 Activity lines sends NOTHING until the coalescing timer fires (the store writes stayed synchronous)');
   T.fire();
   const burst = frames[frames.length - 1];
   ok(frames.length === n0 + 1 && burst.changed.length === 1 && burst.changed[0].patch.progress.length === 20 && !('backlog' in burst.changed[0].patch) && !('title' in burst.changed[0].patch), '…then ONE frame: that group, the 20 entries, nothing else', Object.keys(burst.changed[0].patch));
@@ -167,7 +167,7 @@ console.log('§2 the fan-out (src/server/task-fanout.js) over a real TaskGroupMa
   // GET flushes first: a write pending at the GET is in the answer AND its frame is out before it, at the seq it answers
   tasks.addProgress(gid, { note: 'pending at the GET' });
   const B = client(); B.fetch();
-  ok(frames.length === n0 + 2 && B.mark.seq === frames[frames.length - 1].seq && B.tasks.find((t) => t.id === gid).progress.some((pp) => pp.note === 'pending at the GET') && !T.armed(), 'GET /api/tasks\'s mark flushes the pending write first — the answer sits exactly at the frame that carried it');
+  ok(frames.length === n0 + 2 && B.mark.seq === frames[frames.length - 1].seq && gateOf(B.tasks.find((t) => t.id === gid).progress.some((pp) => pp.note === 'pending at the GET')) && !T.armed(), 'GET /api/tasks\'s mark flushes the pending write first — the answer sits exactly at the frame that carried it');
   A.take(frames[frames.length - 1]);
   // a client that MISSED a frame re-fetches; another boot re-fetches; an oversized frame says refetch
   const Cl = client(); Cl.fetch();
@@ -194,7 +194,7 @@ console.log('§2 the fan-out (src/server/task-fanout.js) over a real TaskGroupMa
   const preFix = (mark, msg) => { const vv = TD.mirrorVerdict(mark, msg); return vv; };   // the first cut: every non-apply ⇒ hold + refetch, replays too
   const Ctl = client(preFix, { preFix: true }); Ctl.fetch();
   let looped = false; try { Ctl.take({ type: 'tasks-updated' }); } catch (e) { looped = /fetch loop/.test(e.message); }
-  ok(looped, 'RED CONTROL: the pre-fix step (an unordered frame held and replayed) fetches without end');
+  ok(verdictOf(looped), 'RED CONTROL: the pre-fix step (an unordered frame held and replayed) fetches without end');
   const F = client(); F.fetch();
   tasks.update(ids()[0], { title: 'gap' }); T.fire();
   const gapFrame = frames[frames.length - 1];
@@ -204,7 +204,7 @@ console.log('§2 the fan-out (src/server/task-fanout.js) over a real TaskGroupMa
   ok(F.mark === null && F.held.length === 1, 'a gap whose re-fetch FAILED: the mirror unloaded, the frame held');
   tasks.update(ids()[0], { title: 'next' }); T.fire();
   F.take(frames[frames.length - 1]);
-  ok(F.mark && F.held.length === 0 && C(F.tasks) === C(tasks.list()), 'the NEXT frame (held, no fetch on its way) asks again — the mirror heals without waiting for a reconnect');
+  ok(gateOf(F.mark) && F.held.length === 0 && C(F.tasks) === C(tasks.list()), 'the NEXT frame (held, no fetch on its way) asks again — the mirror heals without waiting for a reconnect');
 }
 
 // ════════ §3 session-status-updated = the touched keys ════════
@@ -288,7 +288,7 @@ console.log('§4 the measurement (the owner\'s shape: 6 groups, 500 Activity ent
     ['Task Group window — group 1', () => TD.touches(msg, 'T-261001-shape-1') || TD.metaChanged(msg)], ['Task log — group 2', () => TD.touches(msg, 'T-261001-shape-2')], ['Session Properties', () => TD.metaChanged(msg)], ['a principal picker', () => TD.metaChanged(msg)], ['the browser trace view', () => TD.metaChanged(msg)]];
   const now = desk.filter(([, f]) => f()).map(([n]) => n);
   console.log(`    repaints for that line on the owner's desk (${desk.length} open surfaces): base ${desk.length} (every one) · now ${now.length} — ${now.join(', ')}`);
-  ok(now.length === 2 && now.every((n) => n.includes('the lanes group')), `an Activity line repaints ${now.length} of ${desk.length} open surfaces (its own group's window + log), not all ${desk.length}`, now);
+  ok(now.length === 2 && verdictOf(now.every((n) => n.includes('the lanes group'))), `an Activity line repaints ${now.length} of ${desk.length} open surfaces (its own group's window + log), not all ${desk.length}`, now);
   // the status records
   const ss = new SessionStatusManager({ dataDir, onChange: (statuses, extra) => frames.push(J({ type: 'session-status-updated', statuses, ...(extra && extra.sync) })) });
   for (let i = 0; i < 500; i++) ss.setByAgent(`claude:${String(i).padStart(8, '0')}-0000-4000-8000-000000000000`, { state: 'working', reason: text(120), detail: text(60) });
@@ -301,4 +301,4 @@ console.log('§4 the measurement (the owner\'s shape: 6 groups, 500 Activity ent
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -26,7 +26,7 @@ import { endScratchAtExit, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 const J = JSON.stringify;
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const ENG = 'src/server/usage-pool-engine.js';
@@ -128,8 +128,8 @@ console.log('LAW 1 — the shared-phase episode, replayed through the real engin
   const seen = await replay(W, FX.steps);
   const pmAfter = W.u7(W.MA), cxAfter = W.u7(W.MB);
   const moved = seen.filter((x) => x.at > FX.moveAt);
-  ok(`the first member's number never moves: ${FX.before.MA} before, ${pmAfter} after the move and the next turn's readings (the second member's numbers never shown as the first's)`, pmAfter === FX.before.MA && seen.every((x) => x.MA === FX.before.MA), J(seen));
-  ok(`…the next turn's readings (the second member's numbers) land on the second member: ${moved.map((x) => x.u).join(' → ')}`, cxAfter === moved[moved.length - 1].u && moved.every((x) => x.MB === x.u), J(moved));
+  ok(`the first member's number never moves: ${FX.before.MA} before, ${pmAfter} after the move and the next turn's readings (the second member's numbers never shown as the first's)`, pmAfter === FX.before.MA && verdictOf(seen.every((x) => x.MA === FX.before.MA)), J(seen));
+  ok(`…the next turn's readings (the second member's numbers) land on the second member: ${moved.map((x) => x.u).join(' → ')}`, cxAfter === moved[moved.length - 1].u && verdictOf(moved.every((x) => x.MB === x.u)), J(moved));
   ok('…and nothing was archived: no reading had to be refused to keep the numbers right', W.archive().length === 0, J(W.archive()));
 }
 {
@@ -158,7 +158,7 @@ console.log('LAW 1 — the shared-phase episode, replayed through the real engin
   W.reading(0.33, W.R7MC);
   const a = W.archive();
   ok('A DISAGREEMENT IS ARCHIVED BY NAME, NEVER RE-FILED: the request went out on one member, the reading\'s window names another ⇒ written on neither, archived «the reading and its request disagree»',
-    W.u7(W.MA) === before.MA && W.u7(W.MC) === before.MC && a.length === 1 && /the reading and its request disagree/.test(a[0].reason) && a[0].entry?.slot?.slotReason === 'request-stamped', J({ before, after: { MA: W.u7(W.MA), MC: W.u7(W.MC) }, a: a.map((x) => x.reason) }));
+    W.u7(W.MA) === before.MA && W.u7(W.MC) === before.MC && a.length === 1 && gateOf(/the reading and its request disagree/.test(a[0].reason)) && a[0].entry?.slot?.slotReason === 'request-stamped', J({ before, after: { MA: W.u7(W.MA), MC: W.u7(W.MC) }, a: a.map((x) => x.reason) }));
 }
 {
   // a conversation whose request this hub never saw (a restore before its first request): the ladder it had — filed on the link
@@ -170,9 +170,9 @@ console.log('LAW 1 — the shared-phase episode, replayed through the real engin
   // EVERY road that ends a turn ends its pins: a stop, and a move of a conversation not in a turn
   const src = read(ENG);
   ok('EVERY ROAD THAT ENDS A TURN ENDS ITS PINS: a stop of a conversation no longer in a turn clears the reading pin, and so does a move of one not in a turn',
-    /if \(stop && !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\)\) \{ session\._turnReadingSlot = null; session\._turnAsks = null; \}/.test(src)
-      && /if \(!conversationInTurn\(\{ isStreaming: s2\._isStreaming, turnState: s2\._turnState \}\)\) s2\._turnReadingSlot = null;/.test(src));
-  ok('…and the request\'s instant is kept by turn-state\'s ONE request-out writer, never cleared by a pause or the turn\'s end', /if \(inFlight && Number\(now\) > 0\) session\._lastRequestOutAt = Number\(now\);/.test(read('src/turn-state.js')) && !/_lastRequestOutAt = null/.test(read('src/turn-state.js')));
+    gateOf(/if \(stop && !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\)\) \{ session\._turnReadingSlot = null; session\._turnAsks = null; \}/.test(src))
+      && verdictOf(/if \(!conversationInTurn\(\{ isStreaming: s2\._isStreaming, turnState: s2\._turnState \}\)\) s2\._turnReadingSlot = null;/.test(src)));
+  ok('…and the request\'s instant is kept by turn-state\'s ONE request-out writer, never cleared by a pause or the turn\'s end', gateOf(/if \(inFlight && Number\(now\) > 0\) session\._lastRequestOutAt = Number\(now\);/.test(read('src/turn-state.js'))) && !/_lastRequestOutAt = null/.test(read('src/turn-state.js')));
 }
 console.log('LAW 2 — a model\'s cap is stated by that model\'s requests');
 {
@@ -184,7 +184,7 @@ console.log('LAW 2 — a model\'s cap is stated by that model\'s requests');
   W.capReading(0.902, W.R7, 0.03, RCAP);
   const a = W.archive();
   ok('LAW 2: a Fable cap on a turn that asked this account for no Fable request ⇒ the cap lane archived by name («a fable model cap on a turn in which this hub saw no fable request to …»), the plan week written',
-    W.capOf(W.MA) === null && W.u7(W.MA) === 0.902 && a.some((x) => /a fable model cap on a turn in which this hub saw no fable request to /.test(x.reason)), J({ cap: W.capOf(W.MA), u7: W.u7(W.MA), a: a.map((x) => x.reason) }));
+    W.capOf(W.MA) === null && W.u7(W.MA) === 0.902 && verdictOf(a.some((x) => /a fable model cap on a turn in which this hub saw no fable request to /.test(x.reason))), J({ cap: W.capOf(W.MA), u7: W.u7(W.MA), a: a.map((x) => x.reason) }));
 }
 {
   const W = mkWorld(); const RCAP = W.R7 - 3600; W.stampCap(W.MA, W.R7, RCAP);
@@ -223,8 +223,8 @@ const heldWorld = async () => {
 }
 {
   const words = read('src/lib/account-wall-words.js');
-  ok('…the unconfirmed fall has its OWN words (not the «reset — unconfirmed» look), in en and in the zh / ja dictionaries', /o\.state === 'fall-unconfirmed'\) return t\('\{name\}: \{what\} fell from \{before\}% to \{after\}% in one reading — not confirmed yet/.test(words)
-    && /fell from \{before\}% to \{after\}% in one reading — not confirmed yet[^"]*": "[^"]+/.test(read('src/lib/i18n-zh.js')) && /fell from \{before\}% to \{after\}% in one reading — not confirmed yet[^"]*": "[^"]+/.test(read('src/lib/i18n-ja.js')));
+  ok('…the unconfirmed fall has its OWN words (not the «reset — unconfirmed» look), in en and in the zh / ja dictionaries', gateOf(/o\.state === 'fall-unconfirmed'\) return t\('\{name\}: \{what\} fell from \{before\}% to \{after\}% in one reading — not confirmed yet/.test(words))
+    && gateOf(/fell from \{before\}% to \{after\}% in one reading — not confirmed yet[^"]*": "[^"]+/.test(read('src/lib/i18n-zh.js'))) && verdictOf(/fell from \{before\}% to \{after\}% in one reading — not confirmed yet[^"]*": "[^"]+/.test(read('src/lib/i18n-ja.js'))));
 }
 console.log('THE CAP ROWS (invented, of the shape five of the six clear episodes had) — an answer IN FLIGHT across the pool\'s move');
 // each: conversations moved onto the account a few minutes before, and the account's cap lane showed
@@ -291,7 +291,7 @@ console.log('THE CLOSURE LOOK (two verifiers, bounded by the owner\'s four musts
   const parse = read('src/server/stdout/claude-stream-json.js'), brain = read('src/server/session-brain.js');
   const WIRE = /if \(sendsSubRequest\(msg\) && !recordIsLate\?\.\(session, msg\)\) noteSubRequestSent\(session, Date\.now\(\)\);/;
   ok('M1 (a sub-agent\'s request): the sub-agent\'s tool result after a mid-turn move stamps its request-out — its reading lands on MB, the member it went out on; MA keeps its own (6d5e94692: stamped nothing, so the reading was MA\'s and its fall held) — both feeds make the call, sendsRequest stays the main thread\'s, and the conversation\'s own turn start is left alone',
-    W.u7(W.MB) === 0.2 && W.u7(W.MA) === FX.before.MA && WIRE.test(parse) && WIRE.test(brain) && TS.sendsRequest(sub) === false && turnStart > 0 && W.session._turnStartedAt === turnStart, J({ mb: W.u7(W.MB), ma: W.u7(W.MA), parse: WIRE.test(parse), brain: WIRE.test(brain), turnStart, after: W.session._turnStartedAt }));
+    W.u7(W.MB) === 0.2 && W.u7(W.MA) === FX.before.MA && gateOf(WIRE.test(parse)) && gateOf(WIRE.test(brain)) && TS.sendsRequest(sub) === false && turnStart > 0 && W.session._turnStartedAt === turnStart, J({ mb: W.u7(W.MB), ma: W.u7(W.MA), parse: WIRE.test(parse), brain: WIRE.test(brain), turnStart, after: W.session._turnStartedAt }));
 }
 {
   // M2 — law 2 with the cap as the record's REPRESENTATIVE: a 2.1.274+ record states the plan 5-hour and week as well; they are a
@@ -304,7 +304,7 @@ console.log('THE CLOSURE LOOK (two verifiers, bounded by the owner\'s four musts
     unifiedWindows: { five_hour: { utilization: 0.27, resets_at: r5 }, seven_day: { utilization: 0.93, resets_at: W.R7 }, seven_day_overage_included: { utilization: 0.03, resets_at: RCAP } } } }));
   const c = W.readCache(W.MA), a = W.archive();
   ok('M2 (law 2, the cap the representative): the record\'s plan week and 5-hour are written (93 %, 27 %), its unasked Fable cap archived by name — never the whole record lost',
-    W.u7(W.MA) === 0.93 && c.fiveHour.utilization === 0.27 && W.capOf(W.MA) === null && a.some((x) => /a fable model cap on a turn in which this hub saw no fable request to /.test(x.reason)), J({ u7: W.u7(W.MA), u5: c.fiveHour.utilization, cap: W.capOf(W.MA), a: a.map((x) => x.reason) }));
+    W.u7(W.MA) === 0.93 && c.fiveHour.utilization === 0.27 && W.capOf(W.MA) === null && verdictOf(a.some((x) => /a fable model cap on a turn in which this hub saw no fable request to /.test(x.reason))), J({ u7: W.u7(W.MA), u5: c.fiveHour.utilization, cap: W.capOf(W.MA), a: a.map((x) => x.reason) }));
 }
 {
   // M2 — law 3 with the plan week as the representative that fell: the record's 5-hour did not fall and is written; only the week is held
@@ -319,7 +319,7 @@ console.log('THE CLOSURE LOOK (two verifiers, bounded by the owner\'s four musts
   const o = W.outcomesOf(W.MA).find((x) => x.lane === 'plan:7d');
   ok('M2 (law 3, the representative fell): the week is held (91 % kept, an unconfirmed fall said) and the same record\'s 5-hour, which did not fall, is written (37 %) — never held with it',
     W.u7(W.MA) === 0.91 && !!o && o.state === 'fall-unconfirmed' && W.readCache(W.MA).fiveHour.utilization === 0.37, J({ u7: W.u7(W.MA), u5: W.readCache(W.MA).fiveHour.utilization, o }));
-  ok('…and the resume edge is handed that record WITHOUT its held lane (its 5-hour, never the week that fell)', edge.length > 0 && edge.every((x) => !x.sevenDay) && edge.some((x) => x.fiveHour && x.fiveHour.utilization === 0.37), J(edge));
+  ok('…and the resume edge is handed that record WITHOUT its held lane (its 5-hour, never the week that fell)', edge.length > 0 && gateOf(edge.every((x) => !x.sevenDay)) && verdictOf(edge.some((x) => x.fiveHour && x.fiveHour.utilization === 0.37)), J(edge));
 }
 {
   // M2 — a hub restart inside a turn keeps neither the turn's asks nor its request's instant: law 2 cannot judge, so it refuses nothing
@@ -339,7 +339,7 @@ console.log('THE CLOSURE LOOK (two verifiers, bounded by the owner\'s four musts
   W.out(); await sleep(3); W.reading(0.05);
   const outs = W.outcomesOf(W.MA).filter((x) => x.lane === 'plan:7d');
   ok('M4 (a standing reset claim): the moved conversation\'s fall on a lane a person claimed reset is taken (5 %), the claim settled — no «not confirmed yet; it counts as 91 %» said',
-    !!cl && cl.ok && W.u7(W.MA) === 0.05 && !outs.some((x) => x.state === 'fall-unconfirmed') && !RC.get(W.MA), J({ cl, u7: W.u7(W.MA), outs, claim: RC.get(W.MA) }));
+    !!cl && gateOf(cl.ok) && W.u7(W.MA) === 0.05 && !outs.some((x) => x.state === 'fall-unconfirmed') && !RC.get(W.MA), J({ cl, u7: W.u7(W.MA), outs, claim: RC.get(W.MA) }));
 }
 console.log('THE BOUNDED CHECK (主开发 13:21Z) — a conversation\'s creation is no re-point; law 3\'s end on a skewed clock');
 {
@@ -366,7 +366,7 @@ console.log('THE BOUNDED CHECK (主开发 13:21Z) — a conversation\'s creation
   const storeAt = (t) => { const f = path.join(W.root, `reset-claims-copy-${++n}.json`); fs.copyFileSync(live.file, f); return RCm.create({ file: f, now: () => t, log: () => { } }); };
   const held = (st) => ((st.forClients()[W.MA] || {}).outcomes || []).some((x) => x.lane === 'plan:7d' && x.state === 'fall-unconfirmed');
   const short = !!o && held(storeAt(o.until - 60e3)), past = !!o && held(storeAt(o.until + 60e3));
-  ok('LAW 3\'s END (the clock past the window\'s reset): the held fall is gone past its until, kept a minute short of it', !!o && short && !past, J({ o, short, past }));
+  ok('LAW 3\'s END (the clock past the window\'s reset): the held fall is gone past its until, kept a minute short of it', !!o && gateOf(short) && !past, J({ o, short, past }));
   const re = storeAt(Date.now()).outcomesOf(W.MA).find((x) => x.lane === 'plan:7d');
   ok('…a RELOAD of the store keeps the held fall and its until (the window\'s own reset)', !!re && re.state === 'fall-unconfirmed' && re.until === W.R7 * 1000, J(re));
 }
@@ -413,9 +413,9 @@ const askLeg = async (engMod) => {
 };
 {
   const r = await askLeg(realEng);
-  ok('THE ASK (a stand-in restart, no request known): an answered request records NO ask, and a cap reading of that family is filed (unjudged, as the release files it)', r.noAsk && r.filedUnjudged, J(r));
-  ok('…the over-defence control: after the first stamped request the conversation\'s own family is judged asked — its cap filed, nothing archived', r.ownFamilyFiled, J(r));
-  ok('…and an answer of another family before the first stamp keys no ask to the member the pool moved to — that family\'s cap is not taken there', r.notTakenOnMoved, J(r));
+  ok('THE ASK (a stand-in restart, no request known): an answered request records NO ask, and a cap reading of that family is filed (unjudged, as the release files it)', gateOf(r.noAsk) && verdictOf(r.filedUnjudged), J(r));
+  ok('…the over-defence control: after the first stamped request the conversation\'s own family is judged asked — its cap filed, nothing archived', verdictOf(r.ownFamilyFiled), J(r));
+  ok('…and an answer of another family before the first stamp keys no ask to the member the pool moved to — that family\'s cap is not taken there', verdictOf(r.notTakenOnMoved), J(r));
 }
 console.log('MUTANTS — law 1, each red by name');
 {
@@ -595,7 +595,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   };
   const lc = loginCensus();
   const usesOne = /const expected = probeLog\.loginOfAccount\(isGlobal \? '__global__' : key, \{ dir: credsDir \}\);/.test(read('src/usage-routes.js')) && esrc.includes(ONE) && /own = loginOfAccount\(id, \{ accounts \}\);/.test(read('src/server/oat-mint.js'));
-  ok('B-6a92 THE ONE READER: every machineOauthAccount( call is a rowed one (the reader itself, the machine\'s own login around the probe — by its text —, the probe folder, the mint folders), and the three identity sites ask loginOfAccount', lc.length === 0 && usesOne, { lc, usesOne });
+  ok('B-6a92 THE ONE READER: every machineOauthAccount( call is a rowed one (the reader itself, the machine\'s own login around the probe — by its text —, the probe folder, the mint folders), and the three identity sites ask loginOfAccount', lc.length === 0 && verdictOf(usesOne), { lc, usesOne });
   const planted = loginCensus({ [ENG]: esrc.split(ONE).join(FOLDER) });
   const plantedBare = loginCensus({ 'src/usage-routes.js': read('src/usage-routes.js').replace('  const expected = probeLog.loginOfAccount(', '  const homeAgain = probeLog.machineOauthAccount(); void homeAgain;\n  const expected = probeLog.loginOfAccount(') });
   ok('B-6a92 RED CONTROL (the census): a planted second reader (a held name read from its pool folder by hand) is red BY NAME, and so is a second read of the home\'s login in the route', planted.length === 1 && planted[0] === 'src/server/usage-pool-engine.js › accounts.subDir(n)' && plantedBare.length === 1 && plantedBare[0] === 'src/usage-routes.js › (none)', { planted, plantedBare });
@@ -716,7 +716,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   console.log(`    THE TABLE: ${T1.worlds.length} worlds (seed ${SEED}) — reach ${J(reach)} — ${T1.refusing.length} refuse ${J(byCode)}; ${T1.cannot.length} where the facts cannot tell the reply's account apart from the row's (printed below, then the refusing rows):`);
   for (const r of T1.cannot) console.log('      cannot tell: ' + r);
   for (const r of T1.refusing) console.log('      ' + r);
-  ok('B-6a92 THE TABLE: every law holds on every world (a never refused as another\'s when it is the row\'s own · b a name only for the reply\'s true account the facts know · c a lift only for the row\'s own shown read · d «not the row\'s» only when shown · e the honest row never stuck · f the r6 refusal), and every refusal\'s remedy leads to the row\'s own proven read', T1.bad.length === 0 && T1.remedyBad.length === 0 && T1.refusing.length > 0 && Object.values(reach).every((x) => x > 0), { bad: T1.bad.slice(0, 3), n: T1.bad.length, remedyBad: T1.remedyBad.slice(0, 2) });
+  ok('B-6a92 THE TABLE: every law holds on every world (a never refused as another\'s when it is the row\'s own · b a name only for the reply\'s true account the facts know · c a lift only for the row\'s own shown read · d «not the row\'s» only when shown · e the honest row never stuck · f the r6 refusal), and every refusal\'s remedy leads to the row\'s own proven read', T1.bad.length === 0 && T1.remedyBad.length === 0 && T1.refusing.length > 0 && verdictOf(Object.values(reach).every((x) => x > 0)), { bad: T1.bad.slice(0, 3), n: T1.bad.length, remedyBad: T1.remedyBad.slice(0, 2) });
   // RED CONTROLS: the hit put back BEFORE proven (r8's verdict) — the Team seats break law a / e; and r8's BLIND generator put back
   // — FOUR dimensions fixed at once, not one: no shared organisation, every login carrying both fields, every login readable,
   // every witness present — the same mutant is green there by blindness: the control proves the generator's reach
@@ -724,7 +724,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const R8HIT = "  if (rowKey && answer) { const k = (l) => (l && l.org ? 'org:' + String(l.org).toLowerCase() : l && l.email ? 'email:' + String(l.email).trim().toLowerCase() : null); const hit = others.filter((h) => k(h.login) && k(h.login) === k(answer)); if (hit.length) return { act: 'refuse', code: 'signed-in-as', names: hit.map((h) => h.name) }; }\n";
   const mHit = rlsrc.includes(PROVEN) ? require(MUT.write(RLF, rlsrc.split(PROVEN).join(R8HIT + PROVEN), 'b6a92-hit-before-proven')).heldLiftVerdict : null;
   const T2 = mHit ? tableOf(mHit, { seed: SEED, n: N }) : null, T3 = mHit ? tableOf(mHit, { seed: SEED, n: N, blind: true }) : null;
-  ok('B-6a92 RED CONTROL (the hit before proven): the free generator finds worlds where an honest seat is refused as its pool-mate', !!T2 && T2.bad.some((b) => b.laws.includes('a') || b.laws.includes('e')), T2 && { n: T2.bad.length, first: T2.bad[0] });
+  ok('B-6a92 RED CONTROL (the hit before proven): the free generator finds worlds where an honest seat is refused as its pool-mate', !!T2 && verdictOf(T2.bad.some((b) => b.laws.includes('a') || b.laws.includes('e'))), T2 && { n: T2.bad.length, first: T2.bad[0] });
   ok('B-6a92 RED CONTROL (r8\'s blind generator put back — four dimensions fixed at once: no shared organisation, both fields, every login readable, every witness): the same mutant is GREEN there by blindness (the generator\'s reach is what found it)', !!T3 && T3.bad.length === 0, T3 && { n: T3.bad.length, first: T3.bad[0] });
   // PRIVACY (主开发 r975 ALSO CURED, pinned r1034): a panel that answers for ANOTHER login (the CLI rewrote the probe's isolated
   // login file to another account) is refused on the organisation — and its words, the probe record's identity block and the
@@ -737,7 +737,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const probeRec = lastOf(path.join(PV.root, 'data', require(path.join(REPO, 'src/server/usage-probe-log.js')).FILE));
   const archRow = lastOf(path.join(PV.root, 'data', 'archive', 'readings-window-mismatch.ndjson'));
   const blocks = J([probeRec && probeRec.identity, archRow && archRow.identity]);
-  ok('B-6a92 PRIVACY: a panel answering for another login is refused on the organisation, and its words, the probe record\'s identity block and the archive row\'s carry no organisation and no address', pvr.v === false && /answered for/.test(pvWhy) && noId(pvWhy) && !!(probeRec && probeRec.identity && probeRec.identity.org === 'differ') && !!(archRow && archRow.identity && archRow.identity.org === 'differ') && noId(blocks) && !/expected|"panel"/.test(blocks), { v: pvr.v, why: pvWhy, blocks });
+  ok('B-6a92 PRIVACY: a panel answering for another login is refused on the organisation, and its words, the probe record\'s identity block and the archive row\'s carry no organisation and no address', pvr.v === false && gateOf(/answered for/.test(pvWhy)) && gateOf(noId(pvWhy)) && !!(probeRec && probeRec.identity && probeRec.identity.org === 'differ') && !!(archRow && archRow.identity && archRow.identity.org === 'differ') && gateOf(noId(blocks)) && !/expected|"panel"/.test(blocks), { v: pvr.v, why: pvWhy, blocks });
   // 2.369.422: the restarted world holds no row (no clock hold); the poll's law stands — no file read on a poll
   // NO FILE IS READ ON A POLL (ruled in 2; r6 ruled 3 and 4): a RESTARTED hub — a fresh engine over the held scene, warmed by its
   // start's identity repair — then ten polls, each its own run, the clock carried past the window list's 5 s memo halfway, each
@@ -814,7 +814,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     ok('B-6a92 r2688 THE PANEL ROUNDS: two honest rows anchored by panel reads on one hour (their events 30 s apart) hold NOBODY', !ph.v && !ph.o && !ph.vu && !ph.ou, ph);
     // (6) THE POOL: both rows of a pair on one instant read WITH their numbers, no held mark
     const PP = arrive(realEng, { v: roP }), ppV = PP.eng.poolReadCache(null)(PP.V), ppO = PP.eng.poolReadCache(null)(PP.O);
-    ok('2.369.422 RESTATED (r2688\'s pool): both rows of a pair on one instant read WITH their numbers — no held mark, the pool may place on both', placedR(ppV) && placedR(ppO), { ppV, ppO });
+    ok('2.369.422 RESTATED (r2688\'s pool): both rows of a pair on one instant read WITH their numbers — no held mark, the pool may place on both', gateOf(placedR(ppV)) && verdictOf(placedR(ppO)), { ppV, ppO });
     // (r2855, small) A ROUNDED INSTANT NEVER TAKES THE EXACT LABEL THROUGH A KEPT VALUE: Vela's witness holds a lift's panel week
     // (source own-panel); a run of scoped events only (the week kept) leaves its label the panel's — the standing check never
     // compares it as exact
@@ -831,7 +831,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const xlxW = XLx.wit() || {};
     ok('B-6a92 r2855 A ROUNDED INSTANT NEVER TAKES THE EXACT LABEL THROUGH A KEPT VALUE: a run of scoped events over a witness whose week a panel read stated keeps that week and its label (own-panel) — never «rate-limit-events»; the run\'s own scoped window is written',
       xlW.sevenDay === XL.RV && xlW.source === 'own-panel' && !readingLag.eventPreciseWitness(xlW) && !!xlW.scoped && xlW.scoped.opus === XL.RV + 5, { sevenDay: xlW.sevenDay, source: xlW.source, scoped: xlW.scoped });
-    ok('B-6a92 RED CONTROL (r2855 small: the kept week labelled by the run, in a copy): the panel\'s week takes the exact label — the leg above can fail', xlxW.sevenDay === XLx.RV && xlxW.source === 'rate-limit-events' && readingLag.eventPreciseWitness(xlxW), { sevenDay: xlxW.sevenDay, source: xlxW.source });
+    ok('B-6a92 RED CONTROL (r2855 small: the kept week labelled by the run, in a copy): the panel\'s week takes the exact label — the leg above can fail', xlxW.sevenDay === XLx.RV && xlxW.source === 'rate-limit-events' && verdictOf(readingLag.eventPreciseWitness(xlxW)), { sevenDay: xlxW.sevenDay, source: xlxW.source });
     // r3630 (the pool's held mark for a file that cannot be read, not a clock): the notice names the cause it has
     {
       const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
@@ -891,10 +891,10 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
         const unreadNote = noteOf(PU), startedNote = noteOf(PS), unreadNoteX = noteOf(PUx);
         const SAME = /another account's weekly instant/;
         ok('B-6a92 r3630 THE NOTICE NAMES THE CAUSE IT HAS (a file that cannot be read): Hale, held only because its usage file is torn AFTER its wall, moves the conversation to Mira, and the notice says its usage reading could not be read, never «another account\'s weekly instant»',
-          !!PU && PU.heldAtMove && PU.walledH && PU.on === PU.M && !!unreadNote && /its usage reading could not be read/.test(unreadNote) && !SAME.test(unreadNote), {  notices: PU && PU.notices.slice(-3) });
+          !!PU && gateOf(PU.heldAtMove) && gateOf(PU.walledH) && PU.on === PU.M && !!unreadNote && gateOf(/its usage reading could not be read/.test(unreadNote)) && !SAME.test(unreadNote), {  notices: PU && PU.notices.slice(-3) });
         ok('B-6a92 r3630 …AND (a file started again): Hale\'s file torn BEFORE its wall: the wall\'s own write starts it again with its caps unstated, the move goes to Mira and the notice says no whole usage reading has come since, never another account\'s instant',
-          !!PS && PS.heldAtStart && PS.walledH && PS.on === PS.M && !!startedNote && /no whole usage reading has come since its reading file started again/.test(startedNote) && !SAME.test(startedNote), { on: PS && (PS.on === PS.M ? 'Mira' : PS.on === PS.H ? 'Hale' : PS.on), startedNote });
-        ok('B-6a92 RED CONTROL (r3630: the clause unconditional, in a copy): the unread member\'s move is said to be on another account\'s weekly instant — the legs above can fail', !!PUx && PUx.on === PUx.M && !!unreadNoteX && SAME.test(unreadNoteX), { unreadNoteX });
+          !!PS && gateOf(PS.heldAtStart) && gateOf(PS.walledH) && PS.on === PS.M && !!startedNote && gateOf(/no whole usage reading has come since its reading file started again/.test(startedNote)) && !SAME.test(startedNote), { on: PS && (PS.on === PS.M ? 'Mira' : PS.on === PS.H ? 'Hale' : PS.on), startedNote });
+        ok('B-6a92 RED CONTROL (r3630: the clause unconditional, in a copy): the unread member\'s move is said to be on another account\'s weekly instant — the legs above can fail', !!PUx && PUx.on === PUx.M && !!unreadNoteX && verdictOf(SAME.test(unreadNoteX)), { unreadNoteX });
       }
       // (r2923 4) THE REMOVAL'S JOURNAL SAYS THE TRUE REASON: the removed default's only other listed member is held — the parking pick
       // passes it over, the default stays, and the line names the hold (never «no member is signed in and active»)
@@ -924,8 +924,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
       const rmUx = rmWorld(engRmSame, { unread: true });
       if (rmU) {
         ok('B-6a92 r3630 THE REMOVAL\'S JOURNAL COUNTS ANY HELD MARK: the only other listed member\'s usage file cannot be read — the default stays and the line says so in its own words (1 whose usage reading could not be read), never «another account\'s weekly instant» nor «signed in and active»',
-          !!rmU && rmU.length === 1 && /stays — no member the pool lists can take it: 1 whose usage reading could not be read/.test(rmU[0]) && !/weekly instant|is signed in and active/.test(rmU[0]), rmU);
-        ok('B-6a92 RED CONTROL (r3630: only the same-instant hold counted, in a copy): the line gives the untrue reason — the leg above can fail', !!rmUx && rmUx.length === 1 && /is signed in and active/.test(rmUx[0]), rmUx);
+          !!rmU && rmU.length === 1 && gateOf(/stays — no member the pool lists can take it: 1 whose usage reading could not be read/.test(rmU[0])) && !/weekly instant|is signed in and active/.test(rmU[0]), rmU);
+        ok('B-6a92 RED CONTROL (r3630: only the same-instant hold counted, in a copy): the line gives the untrue reason — the leg above can fail', !!rmUx && rmUx.length === 1 && verdictOf(/is signed in and active/.test(rmUx[0])), rmUx);
       }
     }
     // (7) THE REPAIR seeds and confirms as at 2.369.418: Vela's written readings name Orin's instant — the repair SEEDS Vela from them
@@ -956,7 +956,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const X = held();
   for (let i = 0; i < 4; i++) { X.reading(0.33, X.RX); await sleep(3); }
   const xSt = X.stamp(), xF = (X.eng.apiDerivedWindow(X.V, { witness: true }) || {}).foreign;
-  ok('B-6a92 a move onto a phase NO known account holds re-anchors at K, as today (a genuine plan change), and nothing is unknown', xSt && xSt.sevenDay === X.RX && !xF, { xSt, xF });
+  ok('B-6a92 a move onto a phase NO known account holds re-anchors at K, as today (a genuine plan change), and nothing is unknown', gateOf(xSt) && xSt.sevenDay === X.RX && !xF, { xSt, xF });
   // ═══ 2.369.422 HOTFIX (主开发 r5407 / r5410, the owner's hub) — NO ROW IS HELD BECAUSE TWO ACCOUNTS' WEEKLY RESETS COINCIDE ═══
   // The vendor states a weekly reset ON THE HOUR (measured on a real hub: every weekly reset instant the event stream stated there was on a whole hour),
   // so honest accounts share one. Three scenes on a WHOLE HOUR, each with its red: the release's rule planted back in a copy.
@@ -1008,9 +1008,9 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const m1 = await measured(realEng);
   console.log(`    the measured scene: ${J(m1)}`);
   ok('2.369.422 THE MEASURED SCENE — two honest rows on one whole hour (Vela unproven, Orin proven): after the start NEITHER is held, nothing is «unknown», each files its own reading, the pool places on both',
-    !m1.heldV && !m1.heldO && !m1.unknownV && !m1.unknownO && m1.filedV && m1.filedO && m1.placedV && m1.placedO && !m1.poolV0 && !m1.poolO0, m1);
+    !m1.heldV && !m1.heldO && !m1.unknownV && !m1.unknownO && gateOf(m1.filedV) && gateOf(m1.filedO) && gateOf(m1.placedV) && gateOf(m1.placedO) && !m1.poolV0 && !m1.poolO0, m1);
   const m1r = mStanding ? await measured(mStanding) : null;
-  ok('2.369.422 RED CONTROL (the release\'s standing check planted back, in a copy): Vela is held on Orin\'s hour and the pool reads it held — the leg above can fail', !!m1r && !!m1r.heldV && Array.isArray(m1r.heldV.names) && m1r.heldV.names.includes(m1r.O) && (m1r.poolV0 || !m1r.placedV), m1r);
+  ok('2.369.422 RED CONTROL (the release\'s standing check planted back, in a copy): Vela is held on Orin\'s hour and the pool reads it held — the leg above can fail', !!m1r && !!m1r.heldV && gateOf(Array.isArray(m1r.heldV.names)) && gateOf(m1r.heldV.names.includes(m1r.O)) && (verdictOf(m1r.poolV0) || !m1r.placedV), m1r);
   // ② A PHASE MOVE ONTO ONE NEW WHOLE HOUR (a plan change, the vendor re-binning): both rows move onto it — Orin's ring first (nobody holds it), then Vela's (now Orin's hour)
   const turned = async (engMod) => {
     const W = held(engMod, { rv: HOUR, ro: HOUR, logins: { V: VELA, O: ORIN }, oStamp: { verifiedBy: 'own-panel' } });
@@ -1025,10 +1025,10 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const m2 = await turned(realEng);
   console.log(`    the move onto one new hour: ${J(m2)}`);
   ok('2.369.422 A PHASE MOVE — both rings move onto one new whole hour: NEITHER is held, both re-anchor there, Vela\'s next reading is filed on Vela and the pool places on it',
-    !m2.heldV && !m2.heldO && m2.stampV && m2.stampO && !m2.unknownV && m2.filedV && m2.placedV && !m2.went.includes('Orin'), m2);
+    !m2.heldV && !m2.heldO && gateOf(m2.stampV) && gateOf(m2.stampO) && !m2.unknownV && gateOf(m2.filedV) && gateOf(m2.placedV) && !m2.went.includes('Orin'), m2);
   console.log(`    the move's first readings of the new hour (a request known): ${m2.went.join(' · ')} — none under Orin; the window guard's re-file road (no request known) is the train's (B)`);
   const m2r = mMove ? await turned(mMove) : null;
-  ok('2.369.422 RED CONTROL (the release\'s hold at a move planted back, in a copy): Vela, moving onto Orin\'s new hour, is held naming Orin — the leg above can fail', !!m2r && !!m2r.heldV && Array.isArray(m2r.heldV.names) && m2r.heldV.names.includes(m2r.O) && !m2r.stampV, m2r);
+  ok('2.369.422 RED CONTROL (the release\'s hold at a move planted back, in a copy): Vela, moving onto Orin\'s new hour, is held naming Orin — the leg above can fail', !!m2r && !!m2r.heldV && gateOf(Array.isArray(m2r.heldV.names)) && gateOf(m2r.heldV.names.includes(m2r.O)) && !m2r.stampV, m2r);
   // ③ A HUB THAT STARTS WITH A HOLD ON DISK, of each kind (written by 2.369.419–2.369.421): Vela held by the standing check, Orin by the
   // ring at a move — a FRESH engine over that folder: both are free at the start, no press; the start says it once a row
   const started = async (engMod) => {
@@ -1044,7 +1044,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const m3 = await started(realEng);
   console.log(`    a start with both hold kinds on disk: ${J(m3)}`);
   ok('2.369.422 A START WITH A HOLD ON DISK (each kind: the standing check\'s, the ring\'s at a move): both rows are free at once — no hold in memory or on file, nothing «unknown», the pool places on both, and the start says it once a row',
-    !m3.heldV && !m3.heldO && !m3.fileV && !m3.fileO && !m3.unknownV && !m3.unknownO && m3.placedV && m3.placedO && m3.lines === 2, m3);
+    !m3.heldV && !m3.heldO && !m3.fileV && !m3.fileO && !m3.unknownV && !m3.unknownO && gateOf(m3.placedV) && gateOf(m3.placedO) && m3.lines === 2, m3);
   const m3r = mKeep ? await started(mKeep) : null;
   ok('2.369.422 RED CONTROL (a start that keeps a hold on disk, as the release\'s did): both rows stay held — the leg above can fail', !!m3r && !!m3r.heldV && !!m3r.heldO, m3r);
 
@@ -1064,7 +1064,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const SIGNED = /sign-in folder is signed in as/;
   const a1 = await pressScene(realEng, { logins: { V: ORIN, O: ORIN }, rowOrg: VELA.org }, { land: true });
   console.log(`    the r6 press, no hold: ${J(a1)}`);
-  ok('2.369.423 (A) THE r6 PRESS WITH NO HOLD: Vela (its own organisation on file, its folder signed in as Orin) — refused «signed in as Orin», NOTHING written (its file not the panel\'s 12 %, its stamp not the own read\'s)', a1.v === false && /Vela's sign-in folder is signed in as Orin/.test(a1.why) && a1.ownU !== 0.12 && a1.stamp !== 'own-panel', a1);
+  ok('2.369.423 (A) THE r6 PRESS WITH NO HOLD: Vela (its own organisation on file, its folder signed in as Orin) — refused «signed in as Orin», NOTHING written (its file not the panel\'s 12 %, its stamp not the own read\'s)', a1.v === false && gateOf(/Vela's sign-in folder is signed in as Orin/.test(a1.why)) && a1.ownU !== 0.12 && a1.stamp !== 'own-panel', a1);
   const WIDEN = "    if (!h) {\n      const answer = answeringLogin(idv);";
   const mNoWiden = esrc.includes(WIDEN) ? require(MUT.write(ENG, esrc.split(WIDEN).join("    if (!h) { return false;\n      const answer = answeringLogin(idv);"), 'a423-no-widening')) : null;
   const a1r = mNoWiden ? await pressScene(mNoWiden, { logins: { V: ORIN, O: ORIN }, rowOrg: VELA.org }, { land: true }) : null;
@@ -1076,7 +1076,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const a4 = await pressScene(realEng, { logins: { V: TEAMV, O: TEAMO } });   // two seats of one Team organisation, Vela's folder its own seat
   ok('2.369.423 (A) TWO SEATS OF ONE ORGANISATION: Vela\'s own read (its own address) is NEVER refused as Orin\'s', !SIGNED.test(a4.why), a4);
   const a5 = await pressScene(realEng, { logins: { V: GLOBAL, O: ORIN }, withGlobal: true, rowOrg: VELA.org }, { home: GLOBAL });
-  ok('2.369.423 (A) THE HUB\'S OWN LOGIN (r7): Vela\'s folder holds the hub\'s login — refused «signed in as» the hub\'s label, nothing written', a5.v === false && SIGNED.test(a5.why), a5);
+  ok('2.369.423 (A) THE HUB\'S OWN LOGIN (r7): Vela\'s folder holds the hub\'s login — refused «signed in as» the hub\'s label, nothing written', a5.v === false && verdictOf(SIGNED.test(a5.why)), a5);
   // r5481 — THE TRUE TWIN: both rows the same organisation on file, both folders that login — one account: never refused, written
   const a6 = await pressScene(realEng, { logins: { V: ORIN, O: ORIN }, rowOrg: ORIN.org, oExtra: { orgUuid: ORIN.org } }, { land: true });
   ok('2.369.423 (A) A TRUE TWIN (both rows Orin\'s organisation on file, both folders Orin\'s login): NEVER refused by it, the read written', !SIGNED.test(a6.why) && a6.v === true, a6);
@@ -1101,7 +1101,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const R6 = { logins: { V: ORIN, O: ORIN }, rowOrg: VELA.org }, HONEST = { logins: { V: VELA, O: ORIN }, rowOrg: VELA.org, rv: roP };   // honest: Vela's folder its own login, its own window the panel's
   const c1 = await doorCalls(realEng, R6), c2 = await doorCalls(realEng, HONEST), c1r = mFileReader ? await doorCalls(mFileReader, R6) : null;
   console.log(`    the door's synchronous file calls: the r6 press ${c1.n}, an honest press ${c2.n}; the folder reader's (red) ${c1r && c1r.n}`);
-  ok('2.369.423 (A) r5481 (2) THE DOOR TOUCHES NO FILE: inside the door, the r6 press (refused) and an honest press (written) make NO synchronous file call — every login it compares is in memory', c1.called >= 1 && c2.called >= 1 && c1.n === 0 && c2.n === 0 && c1.v === false && SIGNED.test(c1.why) && c2.v === true, { c1, c2 });
+  ok('2.369.423 (A) r5481 (2) THE DOOR TOUCHES NO FILE: inside the door, the r6 press (refused) and an honest press (written) make NO synchronous file call — every login it compares is in memory', c1.called >= 1 && c2.called >= 1 && c1.n === 0 && c2.n === 0 && c1.v === false && gateOf(SIGNED.test(c1.why)) && c2.v === true, { c1, c2 });
   ok('2.369.423 (A) r5481 (2) RED CONTROL (each login read from its folder, as dcffa2828 did, in a copy): the same press makes one synchronous read per known account — the leg above can fail', !!c1r && c1r.n >= 2 && c1r.v === false, c1r);
   // r5481 (4) — A PERSON's OWN SIGN-IN ON A ROW IS THE ROW's EDIT DOOR. Vela (its own organisation on file, its folder its own login,
   // signed in through the product: a proven tie) is signed in AGAIN by its own door into Orin's account — the door's landing
@@ -1125,11 +1125,11 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const e1 = await editDoor(realEng, { act: true }), e2 = await editDoor(realEng, { act: false });
   console.log(`    the edit door: re-signed ${J(e1)}; copied ${J(e2)}`);
   ok('2.369.423 (A) r5481 (4) A PERSON\'s OWN SIGN-IN IS THE ROW\'s EDIT DOOR: Vela signed in again by its own door into Orin\'s account (its tie proven, its record Orin\'s) is from that act that account — its read WRITTEN, never refused', e1.tie === 'proven' && e1.recOrg === 'orin' && e1.v === true && !SIGNED.test(e1.why), e1);
-  ok('2.369.423 (A) r5481 (4) …A COPIED FOLDER (Orin\'s login put in Vela\'s folder with no such act: untied, its record names no organisation) is REFUSED «signed in as Orin», nothing written', e2.recOrg === null && e2.v === false && /Vela's sign-in folder is signed in as Orin/.test(e2.why) && e2.ownU !== 0.12, e2);
+  ok('2.369.423 (A) r5481 (4) …A COPIED FOLDER (Orin\'s login put in Vela\'s folder with no such act: untied, its record names no organisation) is REFUSED «signed in as Orin», nothing written', e2.recOrg === null && e2.v === false && gateOf(/Vela's sign-in folder is signed in as Orin/.test(e2.why)) && e2.ownU !== 0.12, e2);
   const EDIT1 = "  if (rec && rec.tie === 'proven' && typeof rec.org === 'string' && rec.org) return 'org:' + rec.org.toLowerCase();\n", EDIT2 = "return (r && m.rec.tie === 'proven') ? r : (c || r || null); };";
   const mNoEdit = esrc.includes(EDIT1) && esrc.includes(EDIT2) ? require(MUT.write(ENG, esrc.split(EDIT1).join('').split(EDIT2).join('return c || r || null; };'), 'a423-no-edit-door')) : null;   // stale-pins: kept (the red puts dcffa2828's rule back)
   const e1r = mNoEdit ? await editDoor(mNoEdit, { act: true }) : null;
-  ok('2.369.423 (A) r5481 (4) RED CONTROL (the row\'s identity its file\'s alone, as dcffa2828 read it, in a copy): the person\'s own re-sign is refused at every press — the leg above can fail', !!e1r && e1r.v === false && SIGNED.test(e1r.why), e1r);
+  ok('2.369.423 (A) r5481 (4) RED CONTROL (the row\'s identity its file\'s alone, as dcffa2828 read it, in a copy): the person\'s own re-sign is refused at every press — the leg above can fail', !!e1r && e1r.v === false && verdictOf(SIGNED.test(e1r.why)), e1r);
   // r5516 (4) — THE RE-SIGN THROUGH THE REAL ROAD: a sign-in a person finished on Vela whose BEFORE is lost (a start between the press and
   // the sign-in, or one another process wrote) — the door ASKS (reloginResolve «ask»), the person answers «same» (reloginAnswer): from
   // that act Vela is that account, its read written; red: the row's identity its file's alone (the same copy as above)
@@ -1150,7 +1150,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const rr1 = await realRoad(realEng), rr1r = mNoEdit ? await realRoad(mNoEdit) : null;
   console.log(`    the real road: ${J(rr1)}`);
   ok('2.369.423 (A) r5516 (4) THE RE-SIGN THROUGH THE REAL ROAD (a lost before: the door asks, the person answers «same»): from that act Vela is Orin\'s account — its tie proven, its record Orin\'s, its read WRITTEN, never refused', rr1.asked === 'ask' && rr1.answered === 'same' && rr1.tie === 'proven' && rr1.recOrg === 'orin' && rr1.v === true && !SIGNED.test(rr1.why), rr1);
-  ok('2.369.423 (A) r5516 (4) RED CONTROL (the same road, the row\'s identity its file\'s alone, in a copy): refused — the leg above can fail', !!rr1r && rr1r.asked === 'ask' && rr1r.v === false && SIGNED.test(rr1r.why), rr1r);
+  ok('2.369.423 (A) r5516 (4) RED CONTROL (the same road, the row\'s identity its file\'s alone, in a copy): refused — the leg above can fail', !!rr1r && rr1r.asked === 'ask' && rr1r.v === false && verdictOf(SIGNED.test(rr1r.why)), rr1r);
   // r5516 (3) — THE REFUSAL NEVER NAMES A ROW OF ANOTHER HARNESS: Vela (its own organisation on file) holds a login no row has; a row of
   // ANOTHER harness (Cora: its kept record a codex one) carries that login's address — never «the other account»; red: every row compared
   const ELSE = { email: 'mail-else-0001', org: 'org-else-0001' };   // invented
@@ -1169,7 +1169,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const hs1 = await harnessScene(realEng), hs1r = mAnyHarness ? await harnessScene(mAnyHarness) : null;
   console.log(`    another harness's row: ${J(hs1)}; every row compared (red): ${J(hs1r)}`);
   ok('2.369.423 (A) r5516 (3) ANOTHER HARNESS\'s ROW sharing the address is NEVER named: Vela\'s read is not refused «signed in as Cora»', !SIGNED.test(hs1.why), hs1);
-  ok('2.369.423 (A) r5516 (3) RED CONTROL (every row compared, its harness unasked, in a copy): the refusal names Cora — the leg above can fail', !!hs1r && hs1r.v === false && /signed in as Cora/.test(hs1r.why), hs1r);
+  ok('2.369.423 (A) r5516 (3) RED CONTROL (every row compared, its harness unasked, in a copy): the refusal names Cora — the leg above can fail', !!hs1r && hs1r.v === false && verdictOf(/signed in as Cora/.test(hs1r.why)), hs1r);
   // THE CAPTURE's AND THE BANNER's IDENTITY (the door unit's (B) must, r5302 / r5326): a row's file never takes another account's
   // organisation through a sibling's base — judged on the files (no hold any more), each with its red
   const freshV = (W) => { const vf = path.join(W.cacheDir, W.V + '.json'), o = JSON.parse(fs.readFileSync(vf, 'utf8')); fs.writeFileSync(vf, J({ ...o, fetchedAt: Date.now() })); const of = path.join(W.cacheDir, W.O + '.json'), oo = JSON.parse(fs.readFileSync(of, 'utf8')); fs.writeFileSync(of, J({ ...oo, fetchedAt: Date.now() - 3600e3 })); };
@@ -1192,8 +1192,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const g = await idScene(realEng, road), r = mod ? await idScene(mod, road) : null;
     const goodOk = road === 'mirror' ? g.velaOrg === VELA.org : g.orinOrg !== VELA.org && g.velaOrg === VELA.org;
     const redOk = !!r && (road === 'mirror' ? !r.velaOrg : r.orinOrg === VELA.org);
-    ok(`2.369.423 (A) THE ${road.toUpperCase()}'s IDENTITY: a row's file never takes another account's organisation through a sibling's base (each file names only its own)`, goodOk, g);
-    ok(`2.369.423 (A) RED CONTROL (${red}, in a copy): the organisation moves between the two files — the leg above can fail`, redOk, r);
+    ok(`2.369.423 (A) THE ${road.toUpperCase()}'s IDENTITY: a row's file never takes another account's organisation through a sibling's base (each file names only its own)`, verdictOf(goodOk), g);
+    ok(`2.369.423 (A) RED CONTROL (${red}, in a copy): the organisation moves between the two files — the leg above can fail`, verdictOf(redOk), r);
   }
   // …and the org-less machine login as the freshest base, the group split (the should of r5326): Vela keeps its organisation
   const machine = async (engMod) => {
@@ -1208,8 +1208,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const capCopyB = capSrc.includes(CLS) ? MUT.write(CAPF, capSrc.split(CLS).join('  if (!outside) return false;'), 'a423-capture-orgless') : null;
   const mCapB = capCopyB && esrc.includes(CAPREQ) ? require(MUT.write(ENG, esrc.split(CAPREQ).join(`require(${J(capCopyB)});`), 'a423-engine-capture-orgless')) : null;
   const mg = await machine(realEng), mgr = mCapB ? await machine(mCapB) : null;
-  ok('2.369.423 (A) THE ORG-LESS MACHINE LOGIN (the scene formed: it joined the group and stands in Vela\'s own set, Orin does not): a reading filed on Vela keeps Vela\'s OWN organisation', mg.formed && mg.velaOrg === VELA.org, mg);
-  ok('2.369.423 (A) RED CONTROL (the rule without the split clause, in a copy; the scene formed): the machine login\'s base takes Vela\'s organisation off its file', !!mgr && mgr.formed && !mgr.velaOrg, mgr);
+  ok('2.369.423 (A) THE ORG-LESS MACHINE LOGIN (the scene formed: it joined the group and stands in Vela\'s own set, Orin does not): a reading filed on Vela keeps Vela\'s OWN organisation', gateOf(mg.formed) && mg.velaOrg === VELA.org, mg);
+  ok('2.369.423 (A) RED CONTROL (the rule without the split clause, in a copy; the scene formed): the machine login\'s base takes Vela\'s organisation off its file', !!mgr && gateOf(mgr.formed) && !mgr.velaOrg, mgr);
   // THE POOL's HELD MARK, restated on the mark that still stands (主开发 r5442's should): a member whose usage file cannot be read
   {
     const AP = require(path.join(REPO, 'src/account-pool-auto.js'));
@@ -1251,7 +1251,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     if (W) { W.reading(0.37, HOUR); await sleep(3); }
     const fileHeld1 = !!(W && (W.wit() || {}).foreign);
     ok('2.369.423 (A) A RELEASE WHOSE WRITE IS REFUSED: the start says so by name, the row is free in memory at once (nothing «unknown», the lazy loader reads no hold from disk), and its next reading\'s ring write drops the hold from the file',
-      !!W && said.some((l) => /could not be released at this start/.test(l)) && fileHeld0 && !memHeld && !sideOf(u, W.V) && !fileHeld1, { said: said.filter((l) => /hold/.test(l)), fileHeld0, memHeld, fileHeld1 });
+      !!W && gateOf(said.some((l) => /could not be released at this start/.test(l))) && gateOf(fileHeld0) && !memHeld && !sideOf(u, W.V) && !fileHeld1, { said: said.filter((l) => /hold/.test(l)), fileHeld0, memHeld, fileHeld1 });
   // ═══ 2.369.423 (B) (主开发 r5471 / r5534): A RE-FILE IS AN ARCHIVE, NEVER ANOTHER ROW; THE GUARD JUDGES ONE HARNESS ═══
   // Vela's phase TRULY moves onto the one hour Orin stands on; eight readings on each road. The red is the release's rule planted
   // back in a copy of this engine (no history needed): the guard over every harness's stamps, a re-file to the window's owner and
@@ -1325,7 +1325,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const b1 = await roadB(realEng), b1r = mRelB ? await roadB(mRelB) : null;
     console.log(`    road (b): the answers ${b1.answers}, then Vela's own events ${b1.then} (re-anchored at ${b1.reAt}); the release: ${b1r && b1r.answers}`);
     ok('2.369.423 (B) ROAD (b), control:get_usage: three answers naming Orin\'s hour are archived (none under Orin, none under Vela), and Vela\'s own conversation\'s events re-anchor it at the third', b1.answers === 'aaa' && b1.underOrin === 0 && b1.reAt === 3, b1);
-    ok('2.369.423 (B) RED CONTROL (the release\'s rule, in a copy), road (b): the answers are filed under Orin', !!b1r && /O/.test(b1r.answers), b1r);
+    ok('2.369.423 (B) RED CONTROL (the release\'s rule, in a copy), road (b): the answers are filed under Orin', !!b1r && verdictOf(/O/.test(b1r.answers)), b1r);
     // ROAD (c) — your scene six: a codex row whose leftover stamp stands on the hour Vela's claude row moved off, its readings on Orin's
     // hour: a harness whose stamps nothing writes has no guard — every reading filed under the codex row, none elsewhere, none archived
     const roadC = async (engMod) => {
@@ -1371,7 +1371,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const relTool = tool.includes(TOOL_LINE) && tool.includes(TOOL_ARCH) ? tool.split(TOOL_ARCH).join("    const d = d0;\n").split(TOOL_LINE).join("    if (d.action === 'archive') return;\n    if (d.action === 'refile') key = d.key;\n") : null;   // stale-pins: kept (the release statusline rule put back in the red)
     const sl = statusScene(tool), slr = relTool ? statusScene(relTool) : null;   // stale-pins: kept (the release's statusline rule put back in the red)
     console.log(`    the statusline: ${J(sl)}; the release's: ${J(slr)}`);
-    ok('2.369.423 (B) THE STATUSLINE MIRROR: a render of Vela\'s carrying Orin\'s hour is REFUSED (written down), Orin\'s file untouched and Vela\'s too', sl.orin === 0.2 && sl.vela === 0.2 && sl.refused, sl);
+    ok('2.369.423 (B) THE STATUSLINE MIRROR: a render of Vela\'s carrying Orin\'s hour is REFUSED (written down), Orin\'s file untouched and Vela\'s too', sl.orin === 0.2 && sl.vela === 0.2 && verdictOf(sl.refused), sl);
     ok('2.369.423 (B) RED CONTROL (the release\'s statusline rule, in a copy): the render lands on Orin\'s file', !!slr && slr.orin === 0.47, slr);
     // r5575 (5) — A CODEX ACCOUNT ROW (the harness reader's second branch: a row by its record), its leftover stamp on the hour Vela
     // left, its readings on Orin's hour: all its own, none under Orin, none archived; red: the release's guard over every harness
@@ -1425,9 +1425,9 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     };
     const oh = await oneH(realEng), ohr = mAllH ? await oneH(mAllH) : null;
     console.log(`    a claude reading on a codex leftover's hour: ${J(oh)}; every harness's table (red): ${J(ohr)}`);
-    ok('2.369.423 (B) r5575 (5) THE WINDOWS OF ONE HARNESS: a claude reading whose window matches only a codex leftover stamp is archived naming NOBODY', oh.archived && Array.isArray(oh.names) && oh.names.length === 0, oh);
-    ok('2.369.423 (B) r5575 (5) RED CONTROL (that one call put back to every harness\'s windows, in a copy): the codex leftover is named', !!ohr && Array.isArray(ohr.names) && ohr.names.includes('__global_codex__'), ohr);
+    ok('2.369.423 (B) r5575 (5) THE WINDOWS OF ONE HARNESS: a claude reading whose window matches only a codex leftover stamp is archived naming NOBODY', gateOf(oh.archived) && gateOf(Array.isArray(oh.names)) && oh.names.length === 0, oh);
+    ok('2.369.423 (B) r5575 (5) RED CONTROL (that one call put back to every harness\'s windows, in a copy): the codex leftover is named', !!ohr && gateOf(Array.isArray(ohr.names)) && verdictOf(ohr.names.includes('__global_codex__')), ohr);
   }
   }}
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass}${typeof globalThis.__rtSkipped === 'number' && globalThis.__rtSkipped ? `, ${globalThis.__rtSkipped} skipped — the release's history is not in this clone` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

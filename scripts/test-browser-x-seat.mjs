@@ -58,7 +58,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const express = require('express');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 4000, step = 20) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { v = null; } if (v) return v; await sleep(step); } return null; };
 const ROOT = scratch('bxseat'); fs.mkdirSync(ROOT, { recursive: true });
@@ -633,13 +633,13 @@ async function satelliteFacts(root) {
 // ═══ §1 ═══
 console.log('§1 PURE — the seat, why it watches, his window (the real row path), the door\'s act (src/browser-picture.js); the bridge\'s readers');
 const W0 = load(REPO);
-{ const p = pureTable(W0.PIC); ok(p.ok, "a person's ELECTED socket ⇒ 'input' only while the browser has its human holder; his other socket, no holder, an agent's socket, a ticket-shaped id, no id ⇒ 'watch'", p.rows); }
+{ const p = pureTable(W0.PIC); ok(verdictOf(p.ok), "a person's ELECTED socket ⇒ 'input' only while the browser has its human holder; his other socket, no holder, an agent's socket, a ticket-shaped id, no id ⇒ 'watch'", p.rows); }
 {
   const PIC = W0.PIC, DD = W0.DD, why = typeof PIC.deskSeatWhy === 'function' ? PIC.deskSeatWhy : () => 'missing';
   ok(why({ viewerId: PERSON, person: true, human: true }) === null && why({ viewerId: PERSON, person: true, human: true, elected: false }) === 'other-window' && why({ viewerId: PERSON, person: true }) === 'not-browsing' && why({ viewerId: AGENT, human: true }) === 'watch-mode' && why({ viewerId: TICKET, person: true, human: true }) === 'watch-mode', "deskSeatWhy names every watch: 'other-window' (his other pane holds it), 'not-browsing' (its agents use it), 'watch-mode' (an agent's token, a ticket, no id); null = held");
   // THE REAL ROW PATH (acceptance r2 MAJOR 1: r2's fixture row was a shape this path never produces): the measured tree → rows
   const raw = DD.parseWininfoTree(TREE(MENU_ROW)), rows = rowsOf(DD, TREE(MENU_ROW));
-  ok(raw.some((r) => r.id === MENU && r.name === null && r.cls === null && r.depth === 1) && !rows.some((r) => r.id === MENU) && rows.some((r) => r.id === DLG && r.frame), "MEASURED: his <select> popup is a nameless, classless top-level in the tree and seamlessWindows drops it — no row can say whose a menu is (the bridge reads xpra's announcements in order)", rows.map((r) => [r.id, r.title]));
+  ok(gateOf(raw.some((r) => r.id === MENU && r.name === null && r.cls === null && r.depth === 1)) && !rows.some((r) => r.id === MENU) && verdictOf(rows.some((r) => r.id === DLG && r.frame)), "MEASURED: his <select> popup is a nameless, classless top-level in the tree and seamlessWindows drops it — no row can say whose a menu is (the bridge reads xpra's announcements in order)", rows.map((r) => [r.id, r.title]));
   const sc = keeperScope(PIC, rows);
   ok(sc.wid === HIS && JSON.stringify(sc.wids) === JSON.stringify([HIS]) && sc.rects.length === 1 && sc.rects[0].x === 100, "xScopeOf over the real path: HIS window (his CDP bounds told) and only it — never the agent's file chooser cascaded over it (its centre inside his rect: r2's dialogsOver took it)", sc);
   ok(keeperScope(PIC, rows.filter((r) => r.id !== HIS && r.id !== AGENTS)).wids.length === 0 && PIC.xScopeOf(null, rows).wids.length === 0, 'xScopeOf: his window not on the display (or untold) ⇒ it reaches nothing');
@@ -654,7 +654,7 @@ const W0 = load(REPO);
   ok(f({ source: X, xShown: false, stuck: pk, human: true }) === 'da-x1' && f({ source: X, xShown: false, stuck: sheet, human: true }) === 'da-x1', "THE RAW FALLBACK's door in HIS browse window: Chrome's own window holds the page (a passkey request on a headed browser, Chrome's sign-in sheet) and the view draws the page's picture ⇒ the browser's display");
   ok(f({ source: X, xShown: false, stuck: pk }) === null, "…never in a conversation's view (the Desktop's seat reaches HIS window only — r2)");
   ok(f({ source: X, xShown: true, stuck: pk, human: true }) === null && f({ source: SC, stuck: pk, human: true }) === null && f({ source: X, stuck: { state: 'passkey', headed: false }, human: true }) === null && f({ source: X, stuck: { state: 'prompt', prompt: { type: 'file' } }, human: true }) === null && f({ source: X, stuck: null, human: true }) === null, 'no door when the view draws the X picture, off the X road, a headless passkey, a page prompt, no fact');
-  ok(!!PIC.DESK_DOOR_WORDS && /Desktop/.test(PIC.DESK_DOOR_WORDS.line) && PIC.DESK_DOOR_WORDS.button === 'Open in Desktop', 'the ONE line lives in the shared words module (browser-picture.js DESK_DOOR_WORDS) — the way, never a second sentence');
+  ok(!!PIC.DESK_DOOR_WORDS && gateOf(/Desktop/.test(PIC.DESK_DOOR_WORDS.line)) && PIC.DESK_DOOR_WORDS.button === 'Open in Desktop', 'the ONE line lives in the shared words module (browser-picture.js DESK_DOOR_WORDS) — the way, never a second sentence');
   // the .367 seam (× passkey-browse-yourself, the integrator's ruling 10-31): HIS browse window has no session row, so its passkey
   // wait lives on the relay's record (the banner's pkFactNow), never on the row's `stuck` — the door judges deskDoorStuck. RED with
   // either half's fact alone: the row's stuck misses his passkey; the passkey fact misses Chrome's sign-in sheet.
@@ -678,7 +678,7 @@ const W0 = load(REPO);
   const spans = [], kp = rp(['key-action', 7, 'a', true, [], 97, 'a', 38, 0]); fx(kp, 4, 4096, spans);
   ok(!!fl && fl[1] === 1.5 && fl[2] === 0.25 && !!big && big[1] === 12345678901 && spans.length === 4 && kp[spans[3][0]] === 67, "xpraFields (r3): a float64 / float32 / long int of xpra's metadata reads (never the whole packet unreadable); `spans` points at a press's own CHR_TRUE", { fl, big, spans });
   const lz = typeof XR.lz4Inflate === 'function' ? XR.lz4Inflate(LZ4_HIS) : null, rawHis = enc(['new-window', HIS, 100, 50, 400, 300, META_HIS, {}]).subarray(8);
-  ok(!!lz && lz.equals(rawHis) && LZ4_HIS.length < rawHis.length, `lz4Inflate reads xpra's OWN lz4 bytes (xpra 6.5.4's compressor, ${LZ4_HIS.length} B → ${rawHis.length} B: literals + matches) — a Chrome window's announcement is over xpra's 378-byte compress floor`);
+  ok(!!lz && gateOf(lz.equals(rawHis)) && LZ4_HIS.length < rawHis.length, `lz4Inflate reads xpra's OWN lz4 bytes (xpra 6.5.4's compressor, ${LZ4_HIS.length} B → ${rawHis.length} B: literals + matches) — a Chrome window's announcement is over xpra's 378-byte compress floor`);
   ok(typeof XR.lz4Inflate === 'function' && XR.lz4Inflate(Buffer.from([0x10, 0, 0, 0, 0x50, 0x61])) === null && XR.lz4Inflate(Buffer.concat([Buffer.from([0xff, 0xff, 0xff, 0x7f]), LZ4_HIS.subarray(4)])) === null, 'lz4Inflate: a truncated block, a declared size over the bound ⇒ null (never a guess)');
   // the way down, read: a header split across chunks, a raw chunk skipped unread, an lz4 main packet, a plain one, a draw (not a window)
   const got = [];
@@ -699,7 +699,7 @@ const W0 = load(REPO);
 console.log('§2 the REAL wiring — the desktop bridge, the live-view relay, a fake xpra upstream that announces its windows');
 const S = await scene(REPO, 'main');
 if (S.error) ok(false, 'the scene ran', S.error);
-ok(S.opened, 'three sockets on the browser display: a person\'s (the desktop window), an agent\'s token, a ticket-shaped id');
+ok(verdictOf(S.opened), 'three sockets on the browser display: a person\'s (the desktop window), an agent\'s token, a ticket-shaped id');
 ok(S.toldWatch === true && S.toldAgent === true, "FAIL 3 — every seated socket is TOLD its seat in-band: the person 'watch' / 'not-browsing', the agent's token 'watch' / 'watch-mode'");
 ok(S.watchCut === true, 'no human holder: the person\'s key, keymap, display size and geometry are CUT');
 ok(S.toldWatchRefused === true, "…and the refused act is told to THAT socket (its count, its code) — never only the hub's close line");
@@ -737,7 +737,7 @@ ok(S.agentCut === true, 'an AGENT\'s token on the same display never types (its 
 ok(S.ticketCut === true, 'a ticket-shaped id never falls to the person rule (the live-view relay\'s ticket verdict is the only one for it)');
 ok(S.secondPaneWins === true && S.toldOther === true, "FAIL 1 — a second pane of his: the NEWEST pane holds the seat; the first watches, told 'other-window'");
 ok(S.oneSeat === true, `FAIL 1 — two panes + another client: exactly ONE of his sockets types (the newest) (${JSON.stringify(S.ones)})`);
-ok(S.takeHere === true && S.take && S.take.ok === true && S.take.seat === 'input', `«Use it here» (POST browser-seat) moves his seat to that pane; the other client watches (${JSON.stringify(S.take)})`);
+ok(S.takeHere === true && gateOf(S.take) && S.take.ok === true && S.take.seat === 'input', `«Use it here» (POST browser-seat) moves his seat to that pane; the other client watches (${JSON.stringify(S.take)})`);
 ok(S.takeAgent === 403 && S.takeBad === 400 && S.takeGone === 409, `«Use it here» is a person's press: an agent token 403, a bad id 400, a pane not connected 409 (${S.takeAgent}, ${S.takeBad}, ${S.takeGone})`);
 ok(S.reconnectKeeps === true, "r3 MINOR — a pane that RECONNECTS (its old socket gone first) keeps its place: it never undoes «Use it here»");
 ok(S.leaveReelect === true, 'the pane that held it gone: the newest remaining pane takes the seat');
@@ -745,18 +745,18 @@ ok(S.noAskAfterClose === true, "r5 MINOR C — his socket closed with a read def
 ok(S.toldEnd === true && S.endCut === true, 'his holding ended (human-end): cut again, told');
 // (const D = doorFacts(REPO) — §5's source facts: MOVED to the fast scripts/test-browser-x-seat-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 console.log('§3 the routes the window asks, and the client');
-ok(S.routeWatch && S.routeWatch.status === 200 && S.routeWatch.seat === 'watch' && S.routeWatch.why === 'not-browsing' && S.routeWatch.profileId === 'bp-x1', `before: 'watch' / 'not-browsing' for his socket, the browser named (${JSON.stringify(S.routeWatch)})`);
-ok(S.routeInput && S.routeInput.seat === 'input' && S.routeInput.why === null && S.routeAgent && S.routeAgent.seat === 'watch' && S.routeAgent.why === 'watch-mode', `holding: 'input' for his socket, 'watch' / 'watch-mode' for the agent's (${JSON.stringify([S.routeInput, S.routeAgent])})`);
-ok(S.routeOther && S.routeOther.seat === 'watch' && S.routeOther.why === 'other-window', `his older pane: 'watch' / 'other-window' (${JSON.stringify(S.routeOther)})`);
-ok(S.routeAfter && S.routeAfter.seat === 'watch', `ended: 'watch' again (${JSON.stringify(S.routeAfter)})`);
-ok(S.routeBad === 400 && S.routeMissing === 404 && S.routeApp && S.routeApp.status === 200 && S.routeApp.seat === null, `a bad viewer id 400, an unknown app 404, a desktop app that is no browser display: seat null (${S.routeBad}, ${S.routeMissing}, ${JSON.stringify(S.routeApp)})`);
+ok(gateOf(S.routeWatch) && S.routeWatch.status === 200 && S.routeWatch.seat === 'watch' && S.routeWatch.why === 'not-browsing' && S.routeWatch.profileId === 'bp-x1', `before: 'watch' / 'not-browsing' for his socket, the browser named (${JSON.stringify(S.routeWatch)})`);
+ok(gateOf(S.routeInput) && S.routeInput.seat === 'input' && S.routeInput.why === null && gateOf(S.routeAgent) && S.routeAgent.seat === 'watch' && S.routeAgent.why === 'watch-mode', `holding: 'input' for his socket, 'watch' / 'watch-mode' for the agent's (${JSON.stringify([S.routeInput, S.routeAgent])})`);
+ok(gateOf(S.routeOther) && S.routeOther.seat === 'watch' && S.routeOther.why === 'other-window', `his older pane: 'watch' / 'other-window' (${JSON.stringify(S.routeOther)})`);
+ok(gateOf(S.routeAfter) && S.routeAfter.seat === 'watch', `ended: 'watch' again (${JSON.stringify(S.routeAfter)})`);
+ok(S.routeBad === 400 && S.routeMissing === 404 && gateOf(S.routeApp) && S.routeApp.status === 200 && S.routeApp.seat === null, `a bad viewer id 400, an unknown app 404, a desktop app that is no browser display: seat null (${S.routeBad}, ${S.routeMissing}, ${JSON.stringify(S.routeApp)})`);
 {
   const c = await clientFacts(REPO);
   ok(!c.error && c.seen.length >= 1 && c.seen[0].seat === 'input' && c.seen[0].code === 'not-your-window' && c.seen[0].refused === 2 && c.seen[0].acts === 1 && JSON.stringify(c.seen[0].wids) === JSON.stringify([HIS]), "the client hands the bridge's word to the view (on.seat): seat, code, counts (every refusal, the acts), windows", c.seen);
   ok(!c.error && JSON.stringify(c.keys) === JSON.stringify([[HIS, 'a', true], [HIS, 'a', false], [HIS, 'b', true], [HIS, 'b', false]]) && !c.focusLater, "r3 MAJOR 3 — focus stays in his reach: the seat word brings it home (another's window announced last), a window that appears mid-typing takes nothing — his keys land in his window", c.keys);
-  ok(!c.error && c.seatRaise && JSON.stringify(c.seatRaise.focus) === JSON.stringify([0, HIS]) && c.seatRaise.above === true && c.seatRaise.at === HIS, "r4 MAJOR 1 + r5 — the seat word RAISES his window in X (focus 0, then HIS: xpra raises only a focus it does not hold — measured on the display, test-browser-x-picture ⑥), above the agent's announced after it, a point they share is his", c.seatRaise);
+  ok(!c.error && gateOf(c.seatRaise) && JSON.stringify(c.seatRaise.focus) === JSON.stringify([0, HIS]) && c.seatRaise.above === true && c.seatRaise.at === HIS, "r4 MAJOR 1 + r5 — the seat word RAISES his window in X (focus 0, then HIS: xpra raises only a focus it does not hold — measured on the display, test-browser-x-picture ⑥), above the agent's announced after it, a point they share is his", c.seatRaise);
   ok(!c.error && JSON.stringify(c.pressRaise) === JSON.stringify([['button', HIS, true], ['button', HIS, false]]), "r5 — his press in the overlap, his window raised by the seat word (no window mapped or raised over it since): the click only — no focus packet (r4's raised nothing: xpra's `_focus` returns when it holds the focus)", c.pressRaise);
-  ok(!c.error && c.reach && c.reach.his === true && c.reach.ag2 === false && c.reach.at === HIS && JSON.stringify(c.btn.slice(0, 2)) === JSON.stringify([[HIS, true], [HIS, false]]), "r4 MAJOR 1 — an agent's window announced AFTER the seat word, over his: his reach stays above it (drawn and addressed) — his click in the overlap is his", { reach: c.reach, btn: c.btn });
+  ok(!c.error && gateOf(c.reach) && c.reach.his === true && c.reach.ag2 === false && c.reach.at === HIS && JSON.stringify(c.btn.slice(0, 2)) === JSON.stringify([[HIS, true], [HIS, false]]), "r4 MAJOR 1 — an agent's window announced AFTER the seat word, over his: his reach stays above it (drawn and addressed) — his click in the overlap is his", { reach: c.reach, btn: c.btn });
   ok(!c.error && JSON.stringify(c.keysC) === JSON.stringify([[HIS, true], [MYDLG, false]]), "r4 MINOR — a key held while focus moves to his own dialog is released at the FOCUSED window (xpra raises nothing — r3's release at the press's window raised his window over his dialog)", c.keysC);
   ok(!c.error && JSON.stringify(c.keysL) === JSON.stringify([[MYDLG, true], [MYDLG, false]]), "r4 — in his input seat with no window of his focused (his dialog gone before the bridge's word): a held key's release goes to the window of its press", c.keysL);
   ok(!c.error && JSON.stringify(c.activeKeys) === JSON.stringify([[100, true], [100, true], [100, false], [101, false]]), "r4 MINOR — outside the input seat (an app's desktop window): Ctrl released after the app's dialog opened goes to the focused dialog, never back to the main window", c.activeKeys);
@@ -765,13 +765,13 @@ ok(S.routeBad === 400 && S.routeMissing === 404 && S.routeApp && S.routeApp.stat
   ok(!c.error && JSON.stringify(r5.seatPair) === JSON.stringify(PAIR), "r5 MAJOR A — the seat word's raise is a REAL one: focus 0, then focus HIS (r4: `focus HIS` alone — nothing when xpra holds it)", r5.seatPair);
   ok(!c.error && JSON.stringify(r5.pressPlain) === JSON.stringify(B(HIS)), "r5 — his press where nothing can cover his window in X: the click only", r5.pressPlain);
   ok(!c.error && JSON.stringify(r5.pressRaise) === JSON.stringify([...PAIR, ...B(HIS)]) && JSON.stringify(r5.pressAgain) === JSON.stringify(B(HIS)), "r5 MAJOR A — an agent's window mapped after his raise covers the point (on top in X; drawn under his): his press raises HIS in X first (focus 0, then HIS), then the click — once: the next press is the click only", { pressRaise: r5.pressRaise, pressAgain: r5.pressAgain });
-  ok(!c.error && r5.popupOver && r5.popupOver.at === APOP2 && JSON.stringify(r5.popupOver.sent) === JSON.stringify(B(APOP2)), "r5 MAJOR A — an agent's <select> popup over his window (the acceptance's probe: HIS 100,50 400×300, the popup 140,90 120×80, a click at 150,100) stays ABOVE his window: the click is addressed to the popup (the bridge refuses it, his window says so) — never to HIS while X has the popup on top", r5.popupOver);
+  ok(!c.error && gateOf(r5.popupOver) && r5.popupOver.at === APOP2 && JSON.stringify(r5.popupOver.sent) === JSON.stringify(B(APOP2)), "r5 MAJOR A — an agent's <select> popup over his window (the acceptance's probe: HIS 100,50 400×300, the popup 140,90 120×80, a click at 150,100) stays ABOVE his window: the click is addressed to the popup (the bridge refuses it, his window says so) — never to HIS while X has the popup on top", r5.popupOver);
   ok(!c.error && JSON.stringify(r5.wheelRaise) === JSON.stringify([...PAIR, ...B(HIS, 5)]), "r5 MAJOR A — his wheel over his window where an agent's newer window covers it in X: raised first, then the scroll his", r5.wheelRaise);
-  ok(!c.error && r5.front && r5.front.last === HIS && r5.front.wid === HIS, "r5 MINOR B — in his input seat the FRONT window is his (his reach first): after his popup closes, on.front and frontWid name HIS, never the agent's window announced after his (r4: z alone named it — the Desktop window's title, the ✕'s verdict)", r5.front);
+  ok(!c.error && gateOf(r5.front) && r5.front.last === HIS && r5.front.wid === HIS, "r5 MINOR B — in his input seat the FRONT window is his (his reach first): after his popup closes, on.front and frontWid name HIS, never the agent's window announced after his (r4: z alone named it — the Desktop window's title, the ✕'s verdict)", r5.front);
   const r6 = c.r6 || {};
   ok(!c.error && JSON.stringify(r6.atConnect) === JSON.stringify([['focus', 0], ['focus', NEWHIS]]) && JSON.stringify(r6.press) === JSON.stringify(B(NEWHIS)), "r6 (acceptance r5, honesty) — a FRESH socket in the bridge's order (its word right after xpra's hello, then xpra's windows by X id: the agent's older one first): the seat word's raise is OWED to his first window — focus 0, then HIS as it maps (r5: a lone `focus HIS`, nothing when xpra held it), the agent's window pays nothing; his press in the overlap is then the click only", r6);
-  ok(!c.error && c.maps.some((m) => JSON.stringify(m) === JSON.stringify([HIS, 300, 200, 400, 300])), "r3 MINOR — xpra moved his window: the client maps it where it now draws it (the server's own geometry), so his pointer lands where he points", c.maps);
-  ok(!c.error && c.sent.includes('key-action') && c.sent.includes('button-action') && !c.sent.some((x) => /desktop_size|display-configure|configure-display|configure-window/.test(x)) && JSON.stringify(c.maps[0]) === JSON.stringify([HIS, 100, 50, 400, 300]), "Watch's picture with his input (the view's 'input' mode): his key and click are sent, his window mapped where the server has it, a pane resize sends no size", c.sent);
+  ok(!c.error && verdictOf(c.maps.some((m) => JSON.stringify(m) === JSON.stringify([HIS, 300, 200, 400, 300]))), "r3 MINOR — xpra moved his window: the client maps it where it now draws it (the server's own geometry), so his pointer lands where he points", c.maps);
+  ok(!c.error && gateOf(c.sent.includes('key-action')) && gateOf(c.sent.includes('button-action')) && !c.sent.some((x) => /desktop_size|display-configure|configure-display|configure-window/.test(x)) && JSON.stringify(c.maps[0]) === JSON.stringify([HIS, 100, 50, 400, 300]), "Watch's picture with his input (the view's 'input' mode): his key and click are sent, his window mapped where the server has it, a pane resize sends no size", c.sent);
 }
 {
   const pf = protoFacts(await import(pathToFileURL(path.join(REPO, 'src/lib/xpra-proto.js')).href));
@@ -868,9 +868,9 @@ console.log('§6 mutants — each rule undone in a copy of src: its leg goes red
     try { facts = m.pure ? load(M).PIC : m.proto ? protoFacts(await import(pathToFileURL(path.join(M, m.file)).href + `?mutant=${m.tag}`)) : m.sat ? await satelliteFacts(M + '/./') : m.client ? await clientFacts(M, `?mutant=${m.tag}`) : await scene(M, m.tag, m.need); } catch (e) { facts = { error: String(e && e.message) }; }
     fs.writeFileSync(f, orig);
     const shown = facts && !m.pure ? (m.client && facts.r5 ? facts.r5 : facts) : undefined;
-    ok(!!facts && !facts.error && m.red(facts), `MUTANT ${m.tag} (${m.file}) ⇒ its leg goes RED`, shown);
+    ok(!!facts && !facts.error && verdictOf(m.red(facts)), `MUTANT ${m.tag} (${m.file}) ⇒ its leg goes RED`, shown);
   }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

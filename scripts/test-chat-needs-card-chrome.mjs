@@ -88,7 +88,7 @@ const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0, skipped = 0;
 /** a leg whose premise is a FONT fact absent here: said BY NAME with what was measured, never assumed (lane needs-card-tail r13) */
 const skip = (n, why) => { skipped++; console.log(`  ○ SKIP ${n} — ${typeof why === 'string' ? why : JSON.stringify(why).slice(0, 1500)}`); };
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CONV = 'fake-poll/fake-poll-ops';
 
@@ -376,9 +376,9 @@ try {
   if (!reach || reach.status !== 200) console.log('  (setup: the reach write answered ' + JSON.stringify(reach).slice(0, 300) + ')');
   say('now do:request');
   const acc = await findOpen((i) => /requests access to/.test(i.text));
-  check('setup: the stub ran the real CLIs — an ask with options (vibespace-ask) and an access request (vibespace-channels request, filed under \'channels\' + about)', !!ask && Array.isArray(ask.options) && ask.options.length === 2 && !!acc && acc.sessionKey === 'channels' && acc.about === ask.sessionKey, { ask, acc, cli: cliLog().slice(-1200) });
+  check('setup: the stub ran the real CLIs — an ask with options (vibespace-ask) and an access request (vibespace-channels request, filed under \'channels\' + about)', !!ask && gateOf(Array.isArray(ask.options)) && ask.options.length === 2 && !!acc && acc.sessionKey === 'channels' && acc.about === ask.sessionKey, { ask, acc, cli: cliLog().slice(-1200) });
   await logHas(/\(rq-[^)]+\)/);
-  check('setup: the agent\'s ONE line after each filing — «Filed for you: … — answer it on the card in this conversation or in …»', /Filed for you: a question — answer it on the card in this conversation or in the “For you” tray \(ut-[0-9a-f]{10}\)/.test(cliLog()) && /Filed for you: an approval — answer it on the card in this conversation or in the “For you” tray \(rq-/.test(cliLog()), cliLog().slice(-1500));
+  check('setup: the agent\'s ONE line after each filing — «Filed for you: … — answer it on the card in this conversation or in …»', gateOf(/Filed for you: a question — answer it on the card in this conversation or in the “For you” tray \(ut-[0-9a-f]{10}\)/.test(cliLog())) && verdictOf(/Filed for you: an approval — answer it on the card in this conversation or in the “For you” tray \(rq-/.test(cliLog())), cliLog().slice(-1500));
 
   if (!MUT_BUNDLE) check('⓪ the RED CONTROL bundle builds from this source (its anchor is this lane\'s line)', false, MUT_ERR);
   else try {
@@ -400,9 +400,9 @@ try {
   await B.device(1280, 800, { mouse: true }); await B.load(); await openChat(B);
   for (const P of [A, B]) await P.waitFor(`!!${CHAT(SID)} && !!document.querySelector('.cn-card[data-item="${ask.id}"]')`, 15000);
   const askA = await A.evalJs(CARD(ask.id));
-  check('the ask\'s card stands IN the tool card that ran vibespace-ask, with its two option chips and the tray\'s verbs', !!askA && askA.open && askA.hostRole === 'tool' && /vibespace-ask/.test(askA.hostCmd) && askA.chips.length === 2 && askA.chips.every((c) => /^Reply: [AB] — /.test(c)) && askA.kind === 'question' && /Waiting for you — a question/.test(askA.head), askA);
+  check('the ask\'s card stands IN the tool card that ran vibespace-ask, with its two option chips and the tray\'s verbs', !!askA && gateOf(askA.open) && askA.hostRole === 'tool' && gateOf(/vibespace-ask/.test(askA.hostCmd)) && askA.chips.length === 2 && gateOf(askA.chips.every((c) => /^Reply: [AB] — /.test(c))) && askA.kind === 'question' && verdictOf(/Waiting for you — a question/.test(askA.head)), askA);
   const accA = await A.evalJs(CARD(acc.id));
-  check('the access request (filed under \'channels\', addressing this conversation) is a card in ITS tool card — an approval', !!accA && accA.open && /vibespace-channels request/.test(accA.hostCmd) && accA.kind === 'approval', accA);
+  check('the access request (filed under \'channels\', addressing this conversation) is a card in ITS tool card — an approval', !!accA && gateOf(accA.open) && gateOf(/vibespace-channels request/.test(accA.hostCmd)) && accA.kind === 'approval', accA);
   await A.shot('desktop-1280-ask-chips.png');
   // the owner grants the access from its own door (the reach route — the Reach dialog's), then the agent asks to be woken
   const rqId = (/\((rq-[^)]+)\)/.exec(cliLog()) || [])[1] || '';
@@ -411,7 +411,7 @@ try {
   check('the owner approved the access request — its item resolves `allowed` (its card\'s record says «approved»)', !!accDone && accDone.resolvedBy === 'allowed', { rqId, g, accDone });
   await A.waitFor(`document.querySelector('.cn-card[data-item="${acc.id}"]')?.classList.contains('cn-done')`, 6000);
   const accRec = await A.evalJs(CARD(acc.id));
-  check('…and on the page its card is the quiet one-line record «approved by you · HH:MM» in the same place (lane wake-approve-card: a person-only decision says who and when)', !!accRec && accRec.done && accRec.verb === 'approved by you' && /vibespace-channels request/.test(accRec.hostCmd), accRec);
+  check('…and on the page its card is the quiet one-line record «approved by you · HH:MM» in the same place (lane wake-approve-card: a person-only decision says who and when)', !!accRec && gateOf(accRec.done) && accRec.verb === 'approved by you' && verdictOf(/vibespace-channels request/.test(accRec.hostCmd)), accRec);
   say('then do:watch');
   const wr = await findOpen((i) => i.action && i.action.type === 'channel-watch-request');
   const seen = {};
@@ -419,9 +419,9 @@ try {
   const lagA = seen.A && wr ? seen.A - wr.createdAt : null, lagB = seen.B && wr ? seen.B - wr.createdAt : null;
   check(`THE OWNER'S CASE: the watch request (wr-…, filed under 'channels' + about) is a card on BOTH clients within 1 s of its filing (A ${lagA} ms, B ${lagB} ms)`, !!wr && wr.sessionKey === 'channels' && wr.about === ask.sessionKey && lagA != null && lagB != null && lagA <= 1000 && lagB <= 1000, { wr, seen });
   const wA = await A.evalJs(CARD(wr && wr.id));
-  check('…inside the tool card that ran `vibespace-channels watch … --mode wake`, saying who asks and what Approve writes, with the tray\'s Approve / Reject', !!wA && wA.open && /vibespace-channels watch/.test(wA.hostCmd) && /asks to be woken by/.test(wA.text) && wA.approve && wA.kind === 'approval' && /Waiting for you — an approval/.test(wA.head), wA);
+  check('…inside the tool card that ran `vibespace-channels watch … --mode wake`, saying who asks and what Approve writes, with the tray\'s Approve / Reject', !!wA && gateOf(wA.open) && gateOf(/vibespace-channels watch/.test(wA.hostCmd)) && gateOf(/asks to be woken by/.test(wA.text)) && gateOf(wA.approve) && wA.kind === 'approval' && verdictOf(/Waiting for you — an approval/.test(wA.head)), wA);
   await logHas(/### watch rc=/);
-  check('…and the agent\'s tool output carries the ONE line to quote: «Filed for you: an approval — answer it on the card in this conversation or in … (wr-…)»', new RegExp('Filed for you: an approval — answer it on the card in this conversation or in the “For you” tray \\(' + (wr && wr.action.id) + '\\)').test(cliLog()), cliLog().slice(-900));
+  check('…and the agent\'s tool output carries the ONE line to quote: «Filed for you: an approval — answer it on the card in this conversation or in … (wr-…)»', verdictOf(new RegExp('Filed for you: an approval — answer it on the card in this conversation or in the “For you” tray \\(' + (wr && wr.action.id) + '\\)').test(cliLog())), cliLog().slice(-900));
   await A.evalJs(`document.querySelector('.cn-card[data-item="${wr && wr.id}"]').scrollIntoView({ block: 'center' })`); await sleep(300);
   await A.shot('desktop-1280-watch-request.png');
   // …and the same card on a phone (client B at 375 touch for one look — then back to its desk)
@@ -431,7 +431,7 @@ try {
   const onPhone = await B.waitFor(`!!document.querySelector('.cn-card[data-item="${wr && wr.id}"]') && document.querySelector('.cn-card[data-item="${wr && wr.id}"]').getClientRects().length > 0`, 12000);
   await B.evalJs(`document.querySelector('.cn-card[data-item="${wr && wr.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
   await B.shot('phone-375-watch-request.png');
-  check('the watch request\'s card on a phone (375 touch): in its tool card, Approve / Reject 44 px tall', onPhone && (await B.evalJs(`(() => { const b = document.querySelector('.cn-card[data-item="${wr && wr.id}"] .ut-action-proposal[data-answer="approve"]'); return !!b && b.getBoundingClientRect().height >= 43.5; })()`)));
+  check('the watch request\'s card on a phone (375 touch): in its tool card, Approve / Reject 44 px tall', gateOf(onPhone) && (verdictOf(await B.evalJs(`(() => { const b = document.querySelector('.cn-card[data-item="${wr && wr.id}"] .ut-action-proposal[data-answer="approve"]'); return !!b && b.getBoundingClientRect().height >= 43.5; })()`))));
   await B.device(1280, 800, { mouse: true }); await B.load(); await openChat(B);
   await B.waitFor(`!!document.querySelector('.cn-card[data-item="${wr && wr.id}"]')`, 12000);
   // ④b's law reads THIS view later: the one that saw both filings open (its open slot the newest, the watch request) — marked, so
@@ -442,12 +442,12 @@ try {
 
   console.log('② THE STRIP «waiting for you · N» (lane needs-card-tail r10 — the attention dock above the message box): the kinds named, a tap on its question lands the newest card and flashes it');
   const chip = await A.evalJs(CHIP);
-  check('the strip above the message box: «waiting for you · 2» naming an approval and a question; its question a button', !!chip && chip.text === 'waiting for you · 2' && /an approval/.test(chip.title) && /a question/.test(chip.title) && chip.clickable, chip);
+  check('the strip above the message box: «waiting for you · 2» naming an approval and a question; its question a button', !!chip && chip.text === 'waiting for you · 2' && gateOf(/an approval/.test(chip.title)) && gateOf(/a question/.test(chip.title)) && verdictOf(chip.clickable), chip);
   await A.evalJs(`(() => { const l = ${CHAT(SID)} && app.sessions.get(${CHAT(SID)}.id)._messageList; l.scrollTop = 0; return true; })()`); await sleep(500);
   const shown = await A.evalJs(`(document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item') || {}).dataset?.id || null`);
   await A.press('.chat-attn-dock .cad-jump', { touch: false }) /* the landing is its own worded door (lane ui-phone-and-fit pick 0: the question now opens the item in place) */; await sleep(700);
   const land = await A.evalJs(CARD(wr && wr.id));
-  check('…the strip shows the NEWEST (the watch request) and a tap on its question lands its card in view and flashes it (THE ONE LANDING)', shown === (wr && wr.id) && !!land && land.flash && land.list && land.rect.top >= land.list.top - 2 && land.rect.bottom <= land.list.bottom + 2, { shown, land });
+  check('…the strip shows the NEWEST (the watch request) and a tap on its question lands its card in view and flashes it (THE ONE LANDING)', shown === (wr && wr.id) && !!land && gateOf(land.flash) && gateOf(land.list) && land.rect.top >= land.list.top - 2 && land.rect.bottom <= land.list.bottom + 2, { shown, land });
   // acceptance round 4 (#3): A PASS THAT CHANGED NO CARD READS NO LAYOUT — the pass a broadcast runs, over cards already what
   // the store says (the watch request's Approve on screen): every rect read during it counted (the first three commits'
   // reconcile re-stamped every Allow of the page, a rect per hit, inside every card's patch)
@@ -456,7 +456,7 @@ try {
     P.getBoundingClientRect = function () { note(this); return g.call(this); }; P.getClientRects = function () { note(this); return gc.call(this); };
     try { v._needsCards.render(); } finally { P.getBoundingClientRect = g; P.getClientRects = gc; }
     return { n, who, approve: !!document.querySelector('.cn-card .ut-action-proposal.ut-proposal-approve'), cards: document.querySelectorAll('.cn-card').length }; })()`);
-  check(`RED-able (round 4, #3): a pass that changed no card reads NO layout — ${reads && reads.n} rect reads over the pass (an Approve on screen, ${reads && reads.cards} cards)`, !!reads && reads.approve && reads.cards >= 2 && reads.n === 0, reads);
+  check(`RED-able (round 4, #3): a pass that changed no card reads NO layout — ${reads && reads.n} rect reads over the pass (an Approve on screen, ${reads && reads.cards} cards)`, !!reads && gateOf(reads.approve) && reads.cards >= 2 && reads.n === 0, reads);
   lap('② done');
 
   if (!ARM_BUNDLE) check('②b the press arm\'s RED CONTROL bundle builds from this source (its anchor is this lane\'s line)', false, ARM_ERR);
@@ -467,7 +467,7 @@ try {
     await A.waitFor(`!!document.querySelector('.cn-card[data-item="${wr && wr.id}"] .ut-action-proposal[data-answer="approve"]')`, 12000); await sleep(1200);
     const r = await scrollThenPress(A, wr && wr.id);
     const still = (await api()).open.some((i) => i.id === (wr && wr.id));
-    check(`RED CONTROL: the old stamp — the transcript scrolled the Approve ${r.moved} px, it rested 1.5 s, the press is REFUSED («moved under the pointer») and the request stays open (the owner met it today)`, r.moved && /moved under the pointer/.test(r.toast) && still, { r, still });
+    check(`RED CONTROL: the old stamp — the transcript scrolled the Approve ${r.moved} px, it rested 1.5 s, the press is REFUSED («moved under the pointer») and the request stays open (the owner met it today)`, gateOf(r.moved) && gateOf(/moved under the pointer/.test(r.toast)) && verdictOf(still), { r, still });
   } catch (e) { fail++; console.log('  ✗ ②b threw: ' + (e?.message || e)); } finally { mutant = null; }
   console.log('③ Approve on client A after a scroll ⇒ accepted, approved on the hub; client B\'s card a quiet record, its tray item resolved');
   // the SAME person's press as ②b's RED: the transcript scrolls the Approve, it rests, a click where it stands — now ACCEPTED
@@ -479,7 +479,7 @@ try {
   await B.front();
   await B.waitFor(`document.querySelector('.cn-card[data-item="${wr && wr.id}"]')?.classList.contains('cn-done')`, 8000);
   const wB = await B.evalJs(CARD(wr && wr.id));
-  check('client B: the watch request\'s card is now the quiet record «approved by you · HH:MM», still in its tool card', !!wB && wB.done && wB.verb === 'approved by you' && /vibespace-channels watch/.test(wB.hostCmd), wB);
+  check('client B: the watch request\'s card is now the quiet record «approved by you · HH:MM», still in its tool card', !!wB && gateOf(wB.done) && wB.verb === 'approved by you' && verdictOf(/vibespace-channels watch/.test(wB.hostCmd)), wB);
   const trayB = await B.evalJs(`(() => { const it = app._inboxModel?.byId(${JSON.stringify(wr && wr.id)}); return it ? it.status : null; })()`);
   check('client B\'s tray (the For-you store) holds it resolved; the chip says the one left', trayB === 'done' && (await B.evalJs(CHIP))?.text === 'waiting for you · a question', { trayB, chip: await B.evalJs(CHIP) });
   await B.evalJs(`document.querySelector('.cn-card[data-item="${wr && wr.id}"]').scrollIntoView({ block: 'center' })`); await sleep(300);
@@ -492,7 +492,7 @@ try {
   await A.load();
   await A.waitFor(`!!document.querySelector('.cn-card[data-item="${ask.id}"]')`, 15000);
   const ra = await A.evalJs(CARD(ask.id)), rw = await A.evalJs(CARD(wr && wr.id));
-  check('after a reload: the ask\'s card is back OPEN in its tool card (its chips), the chip «waiting for you · a question» stands, the watch request\'s record «approved» in its own', !!ra && ra.open && /vibespace-ask/.test(ra.hostCmd) && ra.chips.length === 2 && (await A.evalJs(CHIP))?.text === 'waiting for you · a question' && !!rw && rw.done && rw.verb === 'approved by you', { ra, rw, chip: await A.evalJs(CHIP) });
+  check('after a reload: the ask\'s card is back OPEN in its tool card (its chips), the chip «waiting for you · a question» stands, the watch request\'s record «approved» in its own', !!ra && gateOf(ra.open) && gateOf(/vibespace-ask/.test(ra.hostCmd)) && ra.chips.length === 2 && (await A.evalJs(CHIP))?.text === 'waiting for you · a question' && !!rw && gateOf(rw.done) && rw.verb === 'approved by you', { ra, rw, chip: await A.evalJs(CHIP) });
   lap('④ done');
 
   console.log('④b ANSWERED ON ANOTHER CLIENT: the card patched in place');
@@ -513,7 +513,7 @@ try {
     unfolded = !!(await B.waitFor(`${OPENED} && document.querySelector('.cn-card[data-item="${ask.id}"]').dataset.lawFold === '1' && ${accB.same ? `(${VIEW})?.__ncBothSeen === 1` : 'true'}`, 4000));
   }
   check(`THE LAW ON THE SECOND PAGE (${accB && accB.same ? 'the view that saw both filings — not built again since ①' : 'a view built again since ①'}): the ask's card is folded exactly when the open slot is not the ask${accB && accB.same ? ' — here the slot stayed on the NEWER request the first client resolved, so the ask is FOLDED' : ''}; a folded card opens with ONE press on its row — THAT card, in place: open, not folded, its Reply with a box`,
-    !!accB && accB.open && accB.fold === (accB.slot !== ask.id) && (!accB.same || (accB.slot === (wr && wr.id) && accB.fold)) && (!accB.fold || unfolded === true), { accB, unfolded });
+    !!accB && gateOf(accB.open) && accB.fold === (accB.slot !== ask.id) && (!accB.same || (accB.slot === (wr && wr.id) && gateOf(accB.fold))) && (!accB.fold || unfolded === true), { accB, unfolded });
   // the Reply below is pressed on an OPEN card (whatever road opened it), past the press arm (ARM_MS 700: what an open moved under
   // the pointer answers nothing that long)
   if (!(await B.waitFor(OPENED, 6000))) throw new Error('④b: the ask\'s card on B is not OPEN and NOT FOLDED with a Reply that has a box — ' + JSON.stringify(await B.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${ask.id}"]'), b = c && c.querySelector('.ut-reply-btn'), r = b && b.getBoundingClientRect(); return { cls: c ? c.className : null, reply: !!b, w: r ? r.width : 0, h: r ? r.height : 0 }; })()`)));
@@ -532,7 +532,7 @@ try {
   await B.waitFor(`document.querySelector('.cn-card[data-item="${ask.id}"]')?.classList.contains('cn-done')`, 6000); await sleep(300);
   const same = await B.evalJs(`(() => { const all = [...document.querySelectorAll('.cn-card[data-item="${ask.id}"]')]; const ta = all[0]?.querySelector('.ut-reply textarea'); return { n: all.length, marked: all.filter((c) => c.dataset.probe === 'before').length, verb: all[0]?.querySelector('.cn-line-verb')?.textContent || '', box: !!ta, text: ta ? ta.value : null, focus: !!ta && document.activeElement === ta }; })()`);
   check('an answer from ANOTHER client: B\'s ask card becomes «you replied» — the SAME element, patched in place (never the transcript re-rendered)', rep === 200 && same.n === 1 && same.marked === 1 && same.verb === 'you replied', { rep, same });
-  check(`RED-able (round 3, #4): B was typing three lines in that card's box — the box, the ${typed.split('\n').length} lines and the focus SURVIVE the answer (the quiet line above it)`, typed === TYPED && same.box && same.text === TYPED && same.focus, { typed, same });
+  check(`RED-able (round 3, #4): B was typing three lines in that card's box — the box, the ${typed.split('\n').length} lines and the focus SURVIVE the answer (the quiet line above it)`, typed === TYPED && gateOf(same.box) && same.text === TYPED && verdictOf(same.focus), { typed, same });
   // acceptance round 4 (#2): EVERY road out of a kept box is ONE exit — B presses Esc in it (the panel's fold of a reply box):
   // the card is its one quiet line by the next frame, the text a draft (the first three commits left the line, the resolved
   // row and .cn-kept up — the record out of the run — until an unrelated broadcast)
@@ -540,7 +540,7 @@ try {
   const esc = await B.evalJs(`new Promise((res) => { let done = false; const read = (by) => { if (done) return; done = true; const c = document.querySelector('.cn-card[data-item="${ask.id}"]');
     res(c ? { by, line: !!c.querySelector(':scope > .cn-line'), rows: !!c.querySelector(':scope > .cn-rows'), kept: c.classList.contains('cn-kept'), box: !!c.querySelector('.ut-reply'), kids: c.children.length, draft: app._inboxModel.drafts?.get?.(${JSON.stringify(ask.id)}) || null } : null); };
     requestAnimationFrame(() => read('frame')); setTimeout(() => read('timer'), 400); })`);
-  check(`RED-able (round 4, #2): Esc in the kept box — by the next ${esc && esc.by} the card is its ONE quiet line (no row, no box, not kept) and the three lines a draft`, !!esc && esc.by === 'frame' && esc.line && !esc.rows && !esc.kept && !esc.box && esc.kids === 1 && esc.draft === TYPED, esc);
+  check(`RED-able (round 4, #2): Esc in the kept box — by the next ${esc && esc.by} the card is its ONE quiet line (no row, no box, not kept) and the three lines a draft`, !!esc && esc.by === 'frame' && gateOf(esc.line) && !esc.rows && !esc.kept && !esc.box && esc.kids === 1 && esc.draft === TYPED, esc);
 
   console.log('⑤ THE PHONE (375×812 touch): the card at the touch scale; the phone page\'s row is the same item; a chip answers both');
   await B.close();
@@ -564,14 +564,14 @@ try {
     const sum = c.querySelector('.ut-detail-exp > summary'); const sr = sum && sum.getBoundingClientRect(), cr = c.querySelector('.ut-body').getBoundingClientRect();
     return { text: parseFloat(getComputedStyle(c.querySelector('.ut-text')).fontSize), small, tiny, foldRow: !!sr && sr.width >= cr.width - 2 && sr.height >= 43.5 }; })()`);
   await A.shot('phone-375-ask-chips.png');
-  check(`the phone: the card's words 16 px, every target ≥ 44 × 44 (${sz.small.length} under), no text under 14 px (${sz.tiny.length}), the detail fold a full-width row`, sz.text >= 16 && !sz.small.length && !sz.tiny.length && sz.foldRow, sz);
+  check(`the phone: the card's words 16 px, every target ≥ 44 × 44 (${sz.small.length} under), no text under 14 px (${sz.tiny.length}), the detail fold a full-width row`, sz.text >= 16 && !sz.small.length && !sz.tiny.length && verdictOf(sz.foldRow), sz);
   check('the phone page (its first screen) lists the SAME item the card shows; its «Chat» door lands on the conversation with the card', !!homeRow && !!door && !(await A.evalJs(`!!app.phoneHome?.shown?.()`)), { homeRow, door });
   const tapAim = await A.evalJs(`(() => { const e = document.querySelector('.cn-card[data-item="${ask.id}"] .ut-opt[data-idx="0"]'); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + b.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hit: hit ? (hit.className || hit.tagName) : null, isChip: !!(hit && hit.closest('.ut-opt')), disabled: e.disabled }; })()`);
   if (tapAim) await A.tapAt(tapAim.x, tapAim.y);
   const askDone = await (async () => { for (let i = 0; i < 40; i++) { const r = (await api()).resolved.find((x) => x.id === ask.id && x.reply && x.reply.text === 'A — payments fix'); if (r) return r; await sleep(150); } return null; })();
   await A.waitFor(`document.querySelector('.cn-card[data-item="${ask.id}"]')?.classList.contains('cn-done')`, 5000);
   const homeResolved = await A.evalJs(`(() => { const it = app._inboxModel.byId(${JSON.stringify(ask.id)}); return it && it.status; })()`);
-  check('a chip on the phone card ANSWERS it (the reply is its label) — the card turns «you replied», the store (the phone page\'s row) resolved', !!askDone && askDone.status === 'done' && askDone.reply && /^A — payments fix$/.test(askDone.reply.text) && homeResolved === 'done' && (await A.evalJs(CARD(ask.id)))?.verb === 'you replied', { askDone, homeResolved, tapAim, toasts: await A.evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).slice(-3)`) });
+  check('a chip on the phone card ANSWERS it (the reply is its label) — the card turns «you replied», the store (the phone page\'s row) resolved', !!askDone && askDone.status === 'done' && gateOf(askDone.reply) && gateOf(/^A — payments fix$/.test(askDone.reply.text)) && homeResolved === 'done' && (await A.evalJs(CARD(ask.id)))?.verb === 'you replied', { askDone, homeResolved, tapAim, toasts: await A.evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).slice(-3)`) });
   await A.evalJs(`document.querySelector('.cn-card[data-item="${ask.id}"]').scrollIntoView({ block: 'center' })`); await sleep(300);
   await A.shot('phone-375-resolved.png');
   lap('⑤ done');
@@ -582,7 +582,7 @@ try {
   const stress = async (n) => { const t0 = Date.now(); let o = []; while (Date.now() - t0 < 30000) { o = (await api()).open.filter((i) => STRESS.test(i.text)); if (o.length >= n) break; await sleep(200); } return (o.length >= n ? o : markTimedOut(o, 30000, `stress (${n} stress questions open)`)).sort((a, b) => a.createdAt - b.createdAt); };   // a wait that runs out says so (r1372; test-ci-gate §2p)
   const six = await stress(6);
   await logHas(/### q6 rc=/, 20000);
-  check('setup: ONE agent turn ran vibespace-ask six times — six open questions of this conversation', six.length === 6 && six.every((i) => i.sessionKey === ask.sessionKey), six.map((i) => i.text));
+  check('setup: ONE agent turn ran vibespace-ask six times — six open questions of this conversation', six.length === 6 && verdictOf(six.every((i) => i.sessionKey === ask.sessionKey)), six.map((i) => i.text));
   const q = (k) => (six[k - 1] && six[k - 1].id) || '§';
   /** every waiting card on the page, as the person sees it (a card in a hidden record is not seen) */
   const ACC = `(() => { const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
@@ -618,13 +618,13 @@ try {
     mutant = { bundle: FOLD_BUNDLE };
     await A.device(375, 812); await A.load(); await toPhoneChat(A); await sixUp(A); await sleep(800);
     const r = await A.evalJs(ACC);
-    check(`RED CONTROL (375): the first commit's shape — the six waiting cards all whole (${openOnes(r).length} open, ${r.reduce((s, c) => s + c.h, 0)} px of cards)`, r.length === 6 && openOnes(r).length === 6 && r.every((c) => c.verbs > 0), r);
+    check(`RED CONTROL (375): the first commit's shape — the six waiting cards all whole (${openOnes(r).length} open, ${r.reduce((s, c) => s + c.h, 0)} px of cards)`, r.length === 6 && openOnes(r).length === 6 && verdictOf(r.every((c) => c.verbs > 0)), r);
   } catch (e) { fail++; console.log('  ✗ ⑥ RED (375) threw: ' + (e?.message || e)); } finally { mutant = null; }
   await A.device(375, 812); await A.load(); await toPhoneChat(A); await sixUp(A); await sleep(800);
   const p = await A.evalJs(ACC), pf = p.filter((c) => c.fold);
-  check(`375 touch: ONE open card — the newest — and five folded rows, each the sheet's row: the question on one line + its age, nothing else (rows ${pf.map((c) => c.h).join('/')} px, targets ${pf.map((c) => c.rowH).join('/')} px)`, p.length === 6 && openOnes(p).length === 1 && openOnes(p)[0].id === q(6) && openOnes(p)[0].verbs > 0 && openOnes(p)[0].open && pf.length === 5 && pf.every((c) => c.h <= 60 && c.rowH >= 43.5 && c.textLines === 1 && c.verbs === 0 && !c.head && c.role === 'button' && !c.open && /ago|now/.test(c.meta)), p);
+  check(`375 touch: ONE open card — the newest — and five folded rows, each the sheet's row: the question on one line + its age, nothing else (rows ${pf.map((c) => c.h).join('/')} px, targets ${pf.map((c) => c.rowH).join('/')} px)`, p.length === 6 && openOnes(p).length === 1 && openOnes(p)[0].id === q(6) && openOnes(p)[0].verbs > 0 && gateOf(openOnes(p)[0].open) && pf.length === 5 && verdictOf(pf.every((c) => c.h <= 60 && c.rowH >= 43.5 && c.textLines === 1 && c.verbs === 0 && !c.head && c.role === 'button' && !c.open && /ago|now/.test(c.meta))), p);
   const hp = await A.evalJs(HIT);
-  check(`⑦ THE STRIP's question at 375 touch (r10 — the chip's place): a ≥ 44 × 44 target by hit-testing (${hp && hp.hitW}×${hp && hp.hitH}; box ${hp && hp.box}, the bar ${hp && hp.bar} px)`, !!hp && hp.centre && hp.hitW >= 44 && hp.hitH >= 44 && /waiting for you · 6 questions/.test(hp.text), hp);
+  check(`⑦ THE STRIP's question at 375 touch (r10 — the chip's place): a ≥ 44 × 44 target by hit-testing (${hp && hp.hitW}×${hp && hp.hitH}; box ${hp && hp.box}, the bar ${hp && hp.bar} px)`, !!hp && gateOf(hp.centre) && hp.hitW >= 44 && hp.hitH >= 44 && verdictOf(/waiting for you · 6 questions/.test(hp.text)), hp);
   // acceptance round 3 (m3): the bar grew 40 → 44 the instant a filing landed (the composer 4 px under a finger) — it keeps its
   // 40 px (the one-line bar of test-turn-truth-ui) with the chip on show, the 44 px hit area reaching past its edges
   // (lane mask-value-shape, the strip's step two: the phone bar is the strip's TWO rows now — ≤ 84 px, test-turn-truth-ui's bound)
@@ -643,7 +643,7 @@ try {
   const moved3 = a3 && t3 != null ? t3 - a3.top : null;
   const need3 = room3 && room3.low != null && moved3 != null ? Math.max(0, Math.min(Math.ceil(room3.low - moved3 - room3.listBottom), Math.floor(a3.top - room3.listTop))) : null;
   check(`375: a tap on a folded row (the third) opens it ${need3 ? `with the planned reveal of ${need3} px (its verbs would end ${need3} px under the list at this font — the line moved ${Math.round(moved3)} px, exactly that)` : `IN PLACE (its line held under the finger: ${moved3 != null ? Math.round(moved3) : '?'} px)`} and folds the newest — still ONE open, its verbs back`,
-    !!a3 && a3.onRow && openOnes(p2).length === 1 && openOnes(p2)[0].id === q(3) && at(p2, q(3)).verbs > 0 && at(p2, q(6)).fold && need3 != null && Math.abs(moved3 + need3) <= 2, { a3, t3, moved3, need3, room3, p2 });
+    !!a3 && gateOf(a3.onRow) && openOnes(p2).length === 1 && openOnes(p2)[0].id === q(3) && at(p2, q(3)).verbs > 0 && gateOf(at(p2, q(6)).fold) && need3 != null && Math.abs(moved3 + need3) <= 2, { a3, t3, moved3, need3, room3, p2 });
   await A.shot('phone-375-accordion-opened.png');
   lap('⑥ 375 done');
 
@@ -652,22 +652,22 @@ try {
     mutant = { bundle: FOLD_BUNDLE };
     await A.device(1280, 800, { mouse: true }); await A.load(); await openChat(A); await sixUp(A); await sleep(800);
     const r = await A.evalJs(ACC);
-    check(`RED CONTROL (1280): the first commit's shape — the six waiting cards all whole (${openOnes(r).length} open, ${r.reduce((s, c) => s + c.h, 0)} px of cards)`, r.length === 6 && openOnes(r).length === 6 && r.every((c) => c.verbs > 0), r);
+    check(`RED CONTROL (1280): the first commit's shape — the six waiting cards all whole (${openOnes(r).length} open, ${r.reduce((s, c) => s + c.h, 0)} px of cards)`, r.length === 6 && openOnes(r).length === 6 && verdictOf(r.every((c) => c.verbs > 0)), r);
   } catch (e) { fail++; console.log('  ✗ ⑥ RED (1280) threw: ' + (e?.message || e)); } finally { mutant = null; }
   await A.device(1280, 800, { mouse: true }); await A.load(); await openChat(A); await sixUp(A); await sleep(800);
   const d = await A.evalJs(ACC), df = d.filter((c) => c.fold);
-  check(`1280: ONE open card — the newest — and five ONE-LINE rows: the question and « · age» on one line, no verb, no head, the row a ≥ 24 px target (rows ${df.map((c) => c.h).join('/')} px)`, d.length === 6 && openOnes(d).length === 1 && openOnes(d)[0].id === q(6) && openOnes(d)[0].verbs > 0 && df.length === 5 && df.every((c) => c.h <= 30 && c.rowH >= 23.5 && c.textLines === 1 && c.sameLine && c.verbs === 0 && !c.head && c.role === 'button' && /ago|now/.test(c.meta)), d);
+  check(`1280: ONE open card — the newest — and five ONE-LINE rows: the question and « · age» on one line, no verb, no head, the row a ≥ 24 px target (rows ${df.map((c) => c.h).join('/')} px)`, d.length === 6 && openOnes(d).length === 1 && openOnes(d)[0].id === q(6) && openOnes(d)[0].verbs > 0 && df.length === 5 && verdictOf(df.every((c) => c.h <= 30 && c.rowH >= 23.5 && c.textLines === 1 && c.sameLine && c.verbs === 0 && !c.head && c.role === 'button' && /ago|now/.test(c.meta))), d);
   const hd = await A.evalJs(HIT), census = await A.evalJs(CARD_HITS);
-  check(`⑦ THE STRIP's question at 1280: a ≥ 24 × 24 target by hit-testing (${hd && hd.hitW}×${hd && hd.hitH}; box ${hd && hd.box}) — and every visible clickable in the cards and the strip ≥ 24 × 24 (${census.length} under)`, !!hd && hd.centre && hd.hitW >= 24 && hd.hitH >= 24 && census.length === 0, { hd, census });
+  check(`⑦ THE STRIP's question at 1280: a ≥ 24 × 24 target by hit-testing (${hd && hd.hitW}×${hd && hd.hitH}; box ${hd && hd.box}) — and every visible clickable in the cards and the strip ≥ 24 × 24 (${census.length} under)`, !!hd && gateOf(hd.centre) && hd.hitW >= 24 && hd.hitH >= 24 && census.length === 0, { hd, census });
   const a2 = await aimAt(A, q(2)); await sleep(250);
   if (a2) await A.clickAt(a2.x, a2.y);
   await sleep(300);
   const d2 = await A.evalJs(ACC), t2 = await topOf(A, q(2));
-  check(`1280: a click on a folded row (the second) opens it IN PLACE (its line held: ${a2 && t2 != null ? Math.round(t2 - a2.top) : '?'} px) and folds the newest — ONE open`, !!a2 && a2.onRow && openOnes(d2).length === 1 && openOnes(d2)[0].id === q(2) && at(d2, q(6)).fold && Math.abs(t2 - a2.top) <= 2, { a2, t2, d2 });
+  check(`1280: a click on a folded row (the second) opens it IN PLACE (its line held: ${a2 && t2 != null ? Math.round(t2 - a2.top) : '?'} px) and folds the newest — ONE open`, !!a2 && gateOf(a2.onRow) && openOnes(d2).length === 1 && openOnes(d2)[0].id === q(2) && gateOf(at(d2, q(6)).fold) && Math.abs(t2 - a2.top) <= 2, { a2, t2, d2 });
   await A.evalJs(`(() => { const r = document.querySelector('.cn-card[data-item="${q(4)}"] .ut-item'); r.scrollIntoView({ block: 'center' }); r.focus(); return document.activeElement === r; })()`);
   await A.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }); await A.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }); await sleep(300);
   const d3 = await A.evalJs(ACC), focus3 = await A.evalJs(`(() => { const a = document.activeElement; return a ? { card: a.closest('.cn-card')?.dataset.item || null, cls: String(a.className || a.tagName) } : null; })()`);
-  check('1280: Enter on a focused folded row (the fourth) opens it and folds the one open before — ONE open; the focus moves to its first answer', openOnes(d3).length === 1 && openOnes(d3)[0].id === q(4) && at(d3, q(2)).fold && !!focus3 && focus3.card === q(4) && /ut-opt|ut-act/.test(focus3.cls), { d3, focus3 });
+  check('1280: Enter on a focused folded row (the fourth) opens it and folds the one open before — ONE open; the focus moves to its first answer', openOnes(d3).length === 1 && openOnes(d3)[0].id === q(4) && gateOf(at(d3, q(2)).fold) && !!focus3 && focus3.card === q(4) && verdictOf(/ut-opt|ut-act/.test(focus3.cls)), { d3, focus3 });
   await A.evalJs(`document.querySelector('.cn-card[data-item="${q(1)}"]')?.scrollIntoView({ block: 'start' }); true`); await sleep(300);
   await A.shot('desktop-1280-accordion.png');
   lap('⑥⑦ 1280 done');
@@ -695,7 +695,7 @@ try {
     await A.device(1280, 800, { mouse: true }); await A.load(); await openChat(A);
     if (face) {
       const has = await A.evalJs(`(() => { const c = document.createElement('canvas').getContext('2d'), w = (f) => { c.font = f; return c.measureText('Reply options wrap whole 回复').width; }; return w('16px "${face}", monospace') !== w('16px monospace'); })()`);
-      check(`⑥b font pass: «${face}» is installed and drawn (a canvas width that is not the fallback's)`, has);
+      check(`⑥b font pass: «${face}» is installed and drawn (a canvas width that is not the fallback's)`, verdictOf(has));
       await A.evalJs(`(() => { const st = document.createElement('style'); st.id = 'vs-font-pass'; st.textContent = '.chat-view, .chat-view * { font-family: "${face}", "Noto Sans CJK SC", sans-serif !important; }'; document.head.appendChild(st); return true; })()`);
     }
     await sixUp(A); await sleep(1500);
@@ -720,7 +720,7 @@ try {
     const after = await A.evalJs(ACC), pinned1 = await A.evalJs(`${VIEW}?._pinned`), tail1 = await A.evalJs(`(() => { const l = ${VIEW}._messageList; return l.scrollHeight - l.scrollTop - l.clientHeight < 50; })()`);
     // the pin follows the landing (the chat's own law, PINNED ⇔ AT THE LIVE TAIL < 50 px — round 4: a line held at the very
     // end leaves the view AT the tail, pinned; an open that grew the card past the edge leaves it a reader's position)
-    check(`RED-able${face ? ' (' + face + ' — the hosted runner\'s face)' : ''}: on a PINNED view (the live tail, never scrolled) a click on the folded row above the newest holds its TEXT LINE under the pointer (${how(o5)}, every frame for 0.9 s; its card fits) — then the one below it: ${how(o6)} — never dropped, the answers inside; the pin follows the landing (${pinned1 ? 'pinned' : 'unpinned'}, ${tail1 ? 'at' : 'off'} the live tail) [every conjunct, so a hosted red names its own (.400 mirror 2): worst frame ${o5 && o5.drop} / ${o6 && o6.drop} px · the window grown ${grown} px for the row to be wholly seen · rows seen-on-folded ${!!s5 && s5.seen && s5.onRow && s5.fold} / ${!!s6 && s6.seen && s6.onRow && s6.fold} · heads ${o5 && o5.head} / ${o6 && o6.head} · opened ${o5 && o5.open} / ${o6 && o6.open} · pinned before ${pinned0} · open now ${openOnes(after).map((c) => c.id).join(',') || 'none'}]`, pinned0 && !!s5 && s5.seen && s5.onRow && s5.fold && held(o5) && Math.abs(o5.end) <= 1 && !!s6 && s6.seen && s6.onRow && s6.fold && held(o6) && pinned1 === tail1 && openOnes(after).length === 1 && openOnes(after)[0].id === q(6), { pinned0, s5, o5, s6, o6, pinned1, tail1, open: openOnes(after).map((c) => c.id) });
+    check(`RED-able${face ? ' (' + face + ' — the hosted runner\'s face)' : ''}: on a PINNED view (the live tail, never scrolled) a click on the folded row above the newest holds its TEXT LINE under the pointer (${how(o5)}, every frame for 0.9 s; its card fits) — then the one below it: ${how(o6)} — never dropped, the answers inside; the pin follows the landing (${pinned1 ? 'pinned' : 'unpinned'}, ${tail1 ? 'at' : 'off'} the live tail) [every conjunct, so a hosted red names its own (.400 mirror 2): worst frame ${o5 && o5.drop} / ${o6 && o6.drop} px · the window grown ${grown} px for the row to be wholly seen · rows seen-on-folded ${!!s5 && s5.seen && s5.onRow && s5.fold} / ${!!s6 && s6.seen && s6.onRow && s6.fold} · heads ${o5 && o5.head} / ${o6 && o6.head} · opened ${o5 && o5.open} / ${o6 && o6.open} · pinned before ${pinned0} · open now ${openOnes(after).map((c) => c.id).join(',') || 'none'}]`, gateOf(pinned0) && !!s5 && gateOf(s5.seen) && gateOf(s5.onRow) && gateOf(s5.fold) && gateOf(held(o5)) && Math.abs(o5.end) <= 1 && !!s6 && gateOf(s6.seen) && gateOf(s6.onRow) && gateOf(s6.fold) && gateOf(held(o6)) && pinned1 === tail1 && openOnes(after).length === 1 && openOnes(after)[0].id === q(6), { pinned0, s5, o5, s6, o6, pinned1, tail1, open: openOnes(after).map((c) => c.id) });
   };
   await pinnedHold('DejaVu Sans');   // first: the box's own pass reloads the page after it, so ⑥c and every leg after
   await pinnedHold(null);            // it start from the box's face, exactly as before
@@ -743,14 +743,14 @@ try {
     const s = ok ? await spot(P, q(6)) : null;
     if (s) { await track(P, q(6)); await (touch ? P.tapAt(s.x, s.y) : P.clickAt(s.x, s.y)); }
     const o = s ? await opened(P, q(6), s) : null;
-    check(`RED-able (${size}): the folded row ON the bottom edge — a ${touch ? 'tap' : 'click'} opens it with its line never dropping (${o && o.drop} px at worst) and its lowest verb brought inside by the minimum scroll (${how(o)})`, ok && !!s && s.seen && s.onRow && s.fold && held(o) && o.end < -1, { ok, s, o });
+    check(`RED-able (${size}): the folded row ON the bottom edge — a ${touch ? 'tap' : 'click'} opens it with its line never dropping (${o && o.drop} px at worst) and its lowest verb brought inside by the minimum scroll (${how(o)})`, gateOf(ok) && !!s && gateOf(s.seen) && gateOf(s.onRow) && gateOf(s.fold) && gateOf(held(o)) && o.end < -1, { ok, s, o });
     // …and a DOUBLE press there: the second lands on what the reveal moved under the pointer — and answers nothing (the card
     // refuses its verbs for ARM_MS, the press arm's law; this tree's own guard of the move it makes)
     const ok2 = await toEdge(P);
     const s2 = ok2 ? await spot(P, q(6)) : null;
     const under = s2 ? await twice(P, s2, touch, q(6)) : null;
     const it6 = (await api()).open.find((i) => i.id === q(6));
-    check(`(${size}) a DOUBLE ${touch ? 'tap' : 'click'} there: the second press lands on ${under && under.verb ? 'its verb ' + under.verb : 'no verb'} — and answers nothing (the item still waiting, no reply${under && under.verb ? ', «moved under the pointer» said' : ''})`, ok2 && !!s2 && !!under && under.inCard && !!it6 && !it6.reply && (!under.verb || /moved under the pointer/.test(under.toast)), { s2, under, it6: it6 && { status: it6.status, reply: it6.reply || null } });
+    check(`(${size}) a DOUBLE ${touch ? 'tap' : 'click'} there: the second press lands on ${under && under.verb ? 'its verb ' + under.verb : 'no verb'} — and answers nothing (the item still waiting, no reply${under && under.verb ? ', «moved under the pointer» said' : ''})`, gateOf(ok2) && !!s2 && !!under && gateOf(under.inCard) && !!it6 && !it6.reply && (!under.verb || verdictOf(/moved under the pointer/.test(under.toast))), { s2, under, it6: it6 && { status: it6.status, reply: it6.reply || null } });
   };
   await A.device(375, 812); await A.load(); await toPhoneChat(A); await sixUp(A); await sleep(800);
   await edge(A, true, '375 touch');
@@ -772,13 +772,13 @@ try {
   await A.waitFor(`document.querySelectorAll('.cn-card.cn-open').length >= 7 && /· 7 /.test(document.querySelector('.chat-attn-dock:not([hidden]) .cad-count')?.textContent || '')`, 10000);
   const f1 = await frames();
   const op7 = openOnes(await A.evalJs(ACC));
-  check(`a filing ⇒ the chip and the cards move TOGETHER, frame by frame (${f1.join(' → ')}): 6/6 → 7/7, never one without the other — and the new one takes the open slot`, !!q7 && f1.length >= 2 && f1[0] === '6/6' && f1[f1.length - 1] === '7/7' && f1.every((k) => k.split('/')[0] === k.split('/')[1]) && op7.length === 1 && op7[0].id === q7.id, { f1, op7, q7: q7 && q7.id });
+  check(`a filing ⇒ the chip and the cards move TOGETHER, frame by frame (${f1.join(' → ')}): 6/6 → 7/7, never one without the other — and the new one takes the open slot`, !!q7 && f1.length >= 2 && f1[0] === '6/6' && f1[f1.length - 1] === '7/7' && gateOf(f1.every((k) => k.split('/')[0] === k.split('/')[1])) && op7.length === 1 && op7[0].id === q7.id, { f1, op7, q7: q7 && q7.id });
   await A.evalJs(SAMPLE);
   await A.press(`.cn-card[data-item="${q7 && q7.id}"] .ut-done`, { touch: false });
   const q7Done = await (async () => { for (let i = 0; i < 40; i++) { const r = (await api()).resolved.find((x) => x.id === (q7 && q7.id)); if (r) return r; await sleep(150); } return null; })();
   await A.waitFor(`document.querySelector('.cn-card[data-item="${q7 && q7.id}"]')?.classList.contains('cn-done') && /· 6 /.test(document.querySelector('.chat-attn-dock:not([hidden]) .cad-count')?.textContent || '')`, 8000);
   const f2 = await frames();
-  check(`Mark done on it ⇒ both N again in the same frame (${f2.join(' → ')}): 7/7 → 6/6`, !!q7Done && f2.length >= 2 && f2[0] === '7/7' && f2[f2.length - 1] === '6/6' && f2.every((k) => k.split('/')[0] === k.split('/')[1]), { f2, q7Done: q7Done && q7Done.status });
+  check(`Mark done on it ⇒ both N again in the same frame (${f2.join(' → ')}): 7/7 → 6/6`, !!q7Done && f2.length >= 2 && f2[0] === '7/7' && f2[f2.length - 1] === '6/6' && verdictOf(f2.every((k) => k.split('/')[0] === k.split('/')[1])), { f2, q7Done: q7Done && q7Done.status });
   lap('⑧ done');
 
   console.log('⑧b THE OPEN SLOT MOVES ONLY ON A FILING (acceptance round 3, #3): the newest answered elsewhere, then the pick itself');
@@ -795,7 +795,7 @@ try {
     const st2 = await resolve(q(2));
     await A.waitFor(`document.querySelector('.cn-card[data-item="${q(2)}"]')?.classList.contains('cn-done')`, 8000); await sleep(400);
     const r2 = await A.evalJs(ACC), line2 = await A.evalJs(`!!document.querySelector('.cn-card[data-item="${q(2)}"].cn-done > .cn-line')`);
-    check(`RED-able: the pick ITSELF answered (POST ${st2}) — its quiet line stays where it was and the next card is NOT opened by itself (${openOnes(r2).length} open of ${r2.length} waiting)`, st2 === 200 && line2 && r2.length === 4 && openOnes(r2).length === 0 && r2.every((c) => c.fold), { line2, r2 });
+    check(`RED-able: the pick ITSELF answered (POST ${st2}) — its quiet line stays where it was and the next card is NOT opened by itself (${openOnes(r2).length} open of ${r2.length} waiting)`, st2 === 200 && gateOf(line2) && r2.length === 4 && openOnes(r2).length === 0 && verdictOf(r2.every((c) => c.fold)), { line2, r2 });
   }
   console.log('⑨ A KEPT CARD STAYS IN THE PASS (acceptance round 4, #4): its item leaves the snapshot\'s resolved tail while the box is in use');
   {
@@ -815,13 +815,13 @@ try {
     const aged = await A.evalJs(`new Promise((res) => { const m = app._inboxModel, v = ${VIEW}; m.todos.resolved = m.todos.resolved.filter((i) => i.id !== ${JSON.stringify(id3)});
       const real = Date.now; window.__cnRealNow = real; Date.now = () => real() + 3 * 60e3; v._needsCards.schedule();
       setTimeout(() => { const c = document.querySelector('.cn-card[data-item="${id3}"]'), ta = c && c.querySelector('.ut-reply textarea'); res({ listed: !!m.byId(${JSON.stringify(id3)}), ago: c ? (c.querySelector('.cn-line-ago')?.textContent || '') : null, kept: !!c && c.classList.contains('cn-kept'), text: ta ? ta.value : null, focus: !!ta && document.activeElement === ta }); }, 300); })`);
-    check(`RED-able (round 4, #4): the kept card's item left the snapshot's tail while A types in its box — the card is STILL patched («${aged && aged.ago}» three minutes on), its box, text and focus kept`, st3 === 200 && !!aged && !aged.listed && /3\s?min ago/.test(aged.ago || '') && aged.kept && aged.text === TYPED3 && aged.focus, { st3, aged });
+    check(`RED-able (round 4, #4): the kept card's item left the snapshot's tail while A types in its box — the card is STILL patched («${aged && aged.ago}» three minutes on), its box, text and focus kept`, st3 === 200 && !!aged && !aged.listed && gateOf(/3\s?min ago/.test(aged.ago || '')) && gateOf(aged.kept) && aged.text === TYPED3 && verdictOf(aged.focus), { st3, aged });
     // …and once A LEAVES the box (a blur — through the panel's one exit), the normal removal applies
     await A.evalJs(`document.activeElement?.blur?.(); true`);
     const gone = await A.waitFor(`!document.querySelector('.cn-card[data-item="${id3}"]')`, 4000);
     const draft = await A.evalJs(`app._inboxModel.drafts?.get?.(${JSON.stringify(id3)}) || null`);
     await A.evalJs(`(() => { if (window.__cnRealNow) Date.now = window.__cnRealNow; return true; })()`);
-    check('…and once A leaves the box (a blur — the panel\'s one exit), the normal removal applies: the card goes (its item no longer listed), the typed text a draft', gone && draft === TYPED3, { gone, draft });
+    check('…and once A leaves the box (a blur — the panel\'s one exit), the normal removal applies: the card goes (its item no longer listed), the typed text a draft', gateOf(gone) && draft === TYPED3, { gone, draft });
   }
   // ⑥c's guard's RED CONTROL, LAST (it answers an item): THIS source without the card's refusal of a moved verb — the reveal
   // at the bottom edge puts a verb under the pointer, and a double click's second press answers with it (the press arm alone
@@ -846,7 +846,7 @@ try {
     const under = s ? await twiceNear(A, s, q(5)) : null;
     const t5 = await api(), r5 = t5.resolved.find((i) => i.id === q(5)) || t5.open.find((i) => i.id === q(5));
     // (the card answered is a quiet line by then — what the point holds afterwards is no longer the verb it pressed)
-    check(`RED CONTROL: without the card's refusal, a double click on the folded row at the bottom edge ANSWERS it with what the reveal moved under the pointer (the fifth ${r5 && r5.status}${r5 && r5.reply ? `, replied «${r5.reply.text}»` : ''} — the first press only opened it)`, ok && !!s && !!under && !!r5 && (r5.status !== 'open' || !!r5.reply), { ok, s, under, r5: r5 && { status: r5.status, reply: r5.reply || null } });
+    check(`RED CONTROL: without the card's refusal, a double click on the folded row at the bottom edge ANSWERS it with what the reveal moved under the pointer (the fifth ${r5 && r5.status}${r5 && r5.reply ? `, replied «${r5.reply.text}»` : ''} — the first press only opened it)`, gateOf(ok) && !!s && !!under && !!r5 && (r5.status !== 'open' || !!r5.reply), { ok, s, under, r5: r5 && { status: r5.status, reply: r5.reply || null } });
   } catch (e) { fail++; console.log('  ✗ ⑥c guard RED threw: ' + (e?.message || e)); } finally { mutant = null; }
   // ── ROUND 5: three short conversations of their own (a window each; the others closed — one list, its own geometry) ──
   const { J, newConv, sayTo, byText, openOnly, toConv } = chatNeedsKit({ hubWs, WORK, api, sleep, CHAT }); // scripts/chat-needs-kit.mjs (shared with the strip half)
@@ -899,7 +899,7 @@ try {
       const it2 = (await api()).open.find((i) => i.id === Q2), gone = (await api()).resolved.find((i) => i.id === Q2) || null;
       if (!at) skip(`RED-able (${size}): a transcript that fits its list with the opened card fitting below its held line — NO such geometry at this font (r13: the .365 runner's DejaVu, every candidate measured)`, { tried });
       else check(`RED-able (${size}${at ? ', ' + at.says : ', NO geometry found'}): the transcript fits its list (${room && room.sh} ≤ ${room && room.ch} px) and the opened card would fit below its held line (a planned reveal of 0) — a double ${touch ? 'tap' : 'click'} on the second's folded row: the line could not land (${s2 && t2 != null ? Math.round(t2 - s2.top) : aim ? aim.moved : '?'} px), the second press lands on ${under && under.verb ? 'its verb ' + under.verb : aim && aim.verb ? aim.verb : 'no verb'} — REFUSED («moved under the pointer»), nothing answered${gone ? ` (it ANSWERED: ${gone.status}${gone.reply ? ', replied «' + gone.reply.text + '»' : ''})` : ''}`,
-        !!at && !!room && room.fits && !!s1 && s1.fold && !!s2 && s2.fold && s2.onRow && Math.abs(s2.top - aim.line) < 1 && t2 != null && Math.abs(t2 - s2.top) > 1 && !!under && under.inCard && !!under.verb && /moved under the pointer/.test(under.toast) && !!it2 && !it2.reply && !gone, { tried, room, s1, s2, aim, t2, under, it2: it2 ? { status: it2.status, reply: it2.reply || null } : null, gone: gone ? { status: gone.status, reply: gone.reply || null } : null });
+        !!at && !!room && gateOf(room.fits) && !!s1 && gateOf(s1.fold) && !!s2 && gateOf(s2.fold) && gateOf(s2.onRow) && Math.abs(s2.top - aim.line) < 1 && t2 != null && Math.abs(t2 - s2.top) > 1 && !!under && gateOf(under.inCard) && !!under.verb && gateOf(/moved under the pointer/.test(under.toast)) && !!it2 && !it2.reply && !gone, { tried, room, s1, s2, aim, t2, under, it2: it2 ? { status: it2.status, reply: it2.reply || null } : null, gone: gone ? { status: gone.status, reply: gone.reply || null } : null });
       // ⑩b (a desk) THE LINE HELD, AND STILL A VERB UNDER THE POINTER: Mark done / Dismiss share the question's line at its
       // right end — a double click on the right end of a folded row (the first now folded above the open one) lands its second
       // press on them though the line landed exactly; what the pressed row now holds is measured too
@@ -910,7 +910,7 @@ try {
         const t1 = await lineTop(A, Q1);
         const it1 = (await api()).open.find((i) => i.id === Q1), gone1 = (await api()).resolved.find((i) => i.id === Q1) || null;
         check(`RED-able (${size}): the line HELD (${e1 && t1 != null ? Math.round(t1 - e1.top) : '?'} px) — a double click on the right end of the first's folded row lands its second press on ${u1 && u1.verb ? 'its verb ' + u1.verb : 'no verb'} (Mark done / Dismiss share the line) — REFUSED, nothing answered${gone1 ? ` (it ANSWERED: ${gone1.status})` : ''}`,
-          !!e1 && t1 != null && Math.abs(t1 - e1.top) <= 1 && !!u1 && u1.inCard && /ut-done|ut-dismiss/.test(u1.verb || '') && /moved under the pointer/.test(u1.toast) && !!it1 && !gone1, { e1, t1, u1, gone1: gone1 ? { status: gone1.status } : null });
+          !!e1 && t1 != null && Math.abs(t1 - e1.top) <= 1 && !!u1 && gateOf(u1.inCard) && gateOf(/ut-done|ut-dismiss/.test(u1.verb || '')) && gateOf(/moved under the pointer/.test(u1.toast)) && !!it1 && !gone1, { e1, t1, u1, gone1: gone1 ? { status: gone1.status } : null });
         // …its RED CONTROL: THIS source without the pressed-row clause (the measured line alone) — the same double click ANSWERS
         if (!ROW_BUNDLE) check('⑩b the pressed-row RED CONTROL bundle builds from this source (its anchor is this lane\'s line)', false, ROW_ERR);
         else try {
@@ -942,7 +942,7 @@ try {
     const g = await A.evalJs(`(() => { const v = ${VIEW}, l = v._messageList, c = document.querySelector('.cn-card[data-item="${tall && tall.id}"]'), tx = ${LINE(tall && tall.id)}; const lr = l.getBoundingClientRect(), r = tx.getBoundingClientRect(), cr = c.getBoundingClientRect(); const x = r.left + Math.min(r.width / 2, 60), y = r.top + 6; const hit = document.elementFromPoint(x, y);
       return { list: Math.round(lr.height), card: Math.round(cr.height), line: Math.round(r.top - lr.top), lineSeen: r.top >= lr.top - 1 && r.top < lr.bottom, onLine: !!(hit && (hit === tx || tx.contains(hit))), chips: c.querySelectorAll('.ut-opt').length }; })()`);
     check(`RED-able (375×667): a tap on the folded row of a card TALLER than the list (${g && g.card} px open, the list ${g && g.list} px, ${g && g.chips} chips) — its question line stays INSIDE the list (${g && g.line} px below its top, seen at the point: ${g && g.onLine}); ${how(o)} — the person scrolls to its verbs`,
-      !!s && s.fold && s.onRow && !!o && o.open && o.drop != null && o.drop <= 1 && !!g && g.card > g.list && g.chips === 5 && g.lineSeen && g.onLine, { s, o, g });
+      !!s && gateOf(s.fold) && gateOf(s.onRow) && !!o && gateOf(o.open) && o.drop != null && o.drop <= 1 && !!g && g.card > g.list && g.chips === 5 && gateOf(g.lineSeen) && verdictOf(g.onLine), { s, o, g });
     await A.shot('phone-375x667-tall-card.png');
   } catch (e) { fail++; console.log('  ✗ ⑪ threw: ' + (e?.message || e)); }
   lap('⑪ done');
@@ -963,7 +963,7 @@ try {
     if (s1) await A.clickAt(s1.x, s1.y);
     await sleep(900);
     const r0 = await A.evalJs(ROOM);
-    check(`setup: a click on the folded row above the newest at the live tail borrows room to hold its line (${r0.lent} px, padding «${r0.pad}»), the view pinned`, !!s1 && s1.fold && r0.lent > 0 && !!r0.pad && r0.pinned, { s1, r0 });
+    check(`setup: a click on the folded row above the newest at the live tail borrows room to hold its line (${r0.lent} px, padding «${r0.pad}»), the view pinned`, !!s1 && gateOf(s1.fold) && r0.lent > 0 && !!r0.pad && verdictOf(r0.pinned), { s1, r0 });
     // (a0) THE CARD'S OWN SIZE (acceptance round 6): the card that borrowed opens its «detail» fold (it grows below its line),
     //      then closes it (it shrinks back) — neither is the content the room was lent for (the tail, the list's edge): the
     //      room stays, and the line stays within 1 px every frame (d5e373b8 returned the room on the growth, so the shrink
@@ -981,13 +981,13 @@ try {
     const ownTr = await A.evalJs(`window.__cnOwn || []`);
     const ownDev = own0 && ownTr.length ? Math.round(Math.max(...ownTr.map((y) => Math.abs(y - own0.top))) * 10) / 10 : null;
     check(`RED-able (round 6): the card that borrowed opens its «detail» (${own0 && own0.h} → ${own1 && own1.h} px) and closes it again (→ ${own2 && own2.h} px) at the live tail — its line moved at most ${ownDev} px over ${ownTr.length} frames (the room ${r0.lent} → ${room1.lent} → ${room2.lent} px: the card's own size neither returns nor needs it)`,
-      !!own0 && !own0.open && !!own1 && own1.open && own1.h > own0.h + 4 && !!own2 && !own2.open && Math.abs(own2.h - own0.h) <= 1 && ownTr.length > 20 && ownDev != null && ownDev <= 1 && room2.lent === r0.lent, { own0, own1, own2, room1, room2, ownDev, frames: ownTr.length });
+      !!own0 && !own0.open && !!own1 && gateOf(own1.open) && own1.h > own0.h + 4 && !!own2 && !own2.open && Math.abs(own2.h - own0.h) <= 1 && ownTr.length > 20 && ownDev != null && ownDev <= 1 && room2.lent === r0.lent, { own0, own1, own2, room1, room2, ownDev, frames: ownTr.length });
     // (a) A RECORD LANDS on the pinned view while the room stands: the follow is answered by the room first — the new records
     //     fill it (nothing moves for them), never a blank band followed below the last record
     sayTo(sid, 'a turn that lands while the room stands');
     await A.waitFor(`[...document.querySelectorAll('.chat-msg')].some((m) => /a turn that lands while the room stands/.test(m.textContent))`, 8000); await sleep(1200);
     const ra = await A.evalJs(ROOM), la = await lastBottom();
-    check(`RED-able (round 5, #3): a record landing on the pinned view while ${r0.lent} px of room stand fills it — ${r0.lent} → ${ra.lent} px, the last record ${la} px above the list's bottom (its padding, ${ra.padPx} px: no blank band beyond the room left), the view at its bottom, pinned`, ra.lent < r0.lent && ra.pinned && ra.below <= 1 && la != null && Math.abs(la - ra.padPx) <= 2, { r0, ra, la });
+    check(`RED-able (round 5, #3): a record landing on the pinned view while ${r0.lent} px of room stand fills it — ${r0.lent} → ${ra.lent} px, the last record ${la} px above the list's bottom (its padding, ${ra.padPx} px: no blank band beyond the room left), the view at its bottom, pinned`, ra.lent < r0.lent && gateOf(ra.pinned) && ra.below <= 1 && la != null && Math.abs(la - ra.padPx) <= 2, { r0, ra, la });
     // a second hold at the live tail: two more asks at the end, the folded one above the newest
     sayTo(sid, 'two more do:q63 do:q64');
     const more = await byText(/^Stress question (63|64):/, 2);
@@ -1002,7 +1002,7 @@ try {
     const d = Math.max(2, Math.min(8, rb0.lent - 4));
     await A.evalJs(`(() => { ${VIEW}._messageList.scrollTop -= ${d}; return true; })()`); await sleep(500);
     const rb = await A.evalJs(ROOM);
-    check(`RED-able (round 5, #3): a scroll up by ${d} px inside the room (${rb0.lent} px) returns what left the view (${rb0.lent} → ${rb.lent} px) — the view at its very bottom (${rb.below} px below), pinned (${rb.pinned})`, !!s3 && s3.fold && rb0.lent > d && rb.lent <= rb0.lent - d + 1 && rb.below <= 1 && rb.pinned, { s3, rb0, d, rb });
+    check(`RED-able (round 5, #3): a scroll up by ${d} px inside the room (${rb0.lent} px) returns what left the view (${rb0.lent} → ${rb.lent} px) — the view at its very bottom (${rb.below} px below), pinned (${rb.pinned})`, !!s3 && gateOf(s3.fold) && rb0.lent > d && rb.lent <= rb0.lent - d + 1 && rb.below <= 1 && verdictOf(rb.pinned), { s3, rb0, d, rb });
     // (c) THE CARD THAT BORROWED RESOLVES (another client): the room goes with it — the briefed RED control
     const st = await A.evalJs(`fetch('/api/user-todos/' + encodeURIComponent(${J(R3)}), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then((r) => r.status)`);
     await A.waitFor(`document.querySelector('.cn-card[data-item="${R3}"]')?.classList.contains('cn-done')`, 8000); await sleep(400);
@@ -1010,14 +1010,14 @@ try {
     check(`RED-able (round 5, #3): the card that borrowed RESOLVES (POST ${st}) — the room is returned (${rb.lent} → ${rc.lent} px, padding «${rc.pad}»)`, st === 200 && rb.lent > 0 && rc.lent === 0 && rc.pad === '', { rb, rc });
     // (d) THE VIEW DISPOSED (its window closed) with room borrowed: nothing borrowed outlives it
     const rd = await A.evalJs(`(() => { const v = ${VIEW}, l = v._messageList, n = v._needsCards; if (!n._lent) n._lend(l, 30, document.querySelector('.cn-card[data-item="${R4}"]')); const lent = Math.round(n._lent || 0); app.wm.closeWindow(${CHAT(sid)}.id); return { lent, pad: l.style.paddingBottom || '', disposed: !!v._disposed }; })()`);
-    check(`the view disposed with ${rd.lent} px borrowed: returned (padding «${rd.pad}»)`, rd.lent > 0 && rd.disposed && rd.pad === '', rd);
+    check(`the view disposed with ${rd.lent} px borrowed: returned (padding «${rd.pad}»)`, rd.lent > 0 && gateOf(rd.disposed) && rd.pad === '', rd);
   } catch (e) { fail++; console.log('  ✗ ⑫ threw: ' + (e?.message || e)); }
   lap('⑫ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  check('the shots are written (desktop 1280 + phone 375)', verdictOf(['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png'].every((f) => fs.existsSync(path.join(SHOTS, f))))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 
 console.log(`\nshots: ${SHOTS}`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

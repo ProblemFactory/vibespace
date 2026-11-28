@@ -18,7 +18,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const express = require(path.join(REPO, 'node_modules/express'));
 let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', typeof info === 'string' ? info : JSON.stringify(info).slice(0, 900)); } };
+const ok = (c, name, info) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', typeof info === 'string' ? info : JSON.stringify(info).slice(0, 900)); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-spend-owner-'));
 const servers = new Set();
@@ -70,8 +70,8 @@ console.log('① every write road × every caller (sign-in OFF: no auth layer be
     for (const [road, go] of Object.entries(roads)) {
       const before = H.bytes(), r = await go(), after = H.bytes();
       if (c.writes) ok(r.status === 200 && after !== before, `${who} — ${road} ⇒ written`, { status: r.status, body: r.body.slice(0, 200) });
-      else ok(r.status === 403 && r.json && r.json.code === 'spend_row_owner_only' && r.json.why === c.why && after === before
-        && /change only by the owner's press on the owner's own page/.test(r.json.error) && new RegExp(`vibespace://settings/spend\\.`).test(r.json.error) && /^vibespace:\/\/settings\/spend\./.test(r.json.door) && Array.isArray(r.json.rows) && r.json.rows.every((k) => /^spend\./.test(k)),   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
+      else ok(r.status === 403 && gateOf(r.json) && r.json.code === 'spend_row_owner_only' && r.json.why === c.why && after === before
+        && gateOf(/change only by the owner's press on the owner's own page/.test(r.json.error)) && gateOf(new RegExp(`vibespace://settings/spend\\.`).test(r.json.error)) && gateOf(/^vibespace:\/\/settings\/spend\./.test(r.json.door)) && gateOf(Array.isArray(r.json.rows)) && verdictOf(r.json.rows.every((k) => /^spend\./.test(k))),   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
         `${who} — ${road} ⇒ 403 spend_row_owner_only (${c.why}), the file's bytes unchanged, the rule + the row + its link named`, { status: r.status, json: r.json });
     }
   }
@@ -91,7 +91,7 @@ console.log('② what is NOT fenced: other rows, and spending rows carried verba
   ok(f.status === 200 && H.read()[DAY] === 801, 'THE SAID LIMIT: a request that KNOWINGLY dresses as the owner\'s page is written — the model guards against a loop and an eager agent, not a determined one (and the refusal it met first told it whose press this is)');
   // f2: a refused spend key that is NO row names a REAL door (the limits' first row) and says the key is no setting
   const nr = await send(H, 'PATCH', '/api/settings', { 'spend.dayCeiling': 9 }, { Authorization: 'Bearer vsst_fixture_agent' });
-  ok(nr.status === 403 && nr.json && nr.json.door === 'vibespace://settings/spend.unattendedPerIdentityHour' && /«spend\.dayCeiling» is no setting/.test(nr.json.error) && H.read()['spend.dayCeiling'] === undefined,
+  ok(nr.status === 403 && gateOf(nr.json) && nr.json.door === 'vibespace://settings/spend.unattendedPerIdentityHour' && gateOf(/«spend\.dayCeiling» is no setting/.test(nr.json.error)) && H.read()['spend.dayCeiling'] === undefined,
     'f2: a key that is no row (spend.dayCeiling) is refused with a REAL door — the limits\' first row — and «is no setting» said', nr.json);
   // f4: the judge's daily dollar cap (drawn under Settings › Spending) is ONE more owner-only row — its own door
   const BUD = 'plugin.llm.dailyBudgetUsd';
@@ -102,7 +102,7 @@ console.log('② what is NOT fenced: other rows, and spending rows carried verba
   const b4 = await send(H, 'PATCH', '/api/settings', { [BUD]: 2.5 }, page);
   ok(b4.status === 200 && H.read()[BUD] === 2.5, 'f4: the owner\'s page changes it');
   const wiring = read('src/server/mounts-plugins-wiring.js');
-  ok(/app\.post\('\/api\/plugins\/:id\/config', \(req, res\) => \{[\s\S]{0,900}ownerPageWhy\(req\)[\s\S]{0,1600}code: 'spend_row_owner_only'[\s\S]{0,700}const call = \(\) => plugins\.setConfig\(req\.params\.id, b\);\n  try \{ res\.json\(require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) && typeof persistenceRouter\.asMachineCall === 'function' \? persistenceRouter\.asMachineCall\(call\) : call\(\)\); \}/.test(wiring),   // r5185: the plugin's write runs in the machine scope for a bearer (its settings write unsynced)
+  ok(verdictOf(/app\.post\('\/api\/plugins\/:id\/config', \(req, res\) => \{[\s\S]{0,900}ownerPageWhy\(req\)[\s\S]{0,1600}code: 'spend_row_owner_only'[\s\S]{0,700}const call = \(\) => plugins\.setConfig\(req\.params\.id, b\);\n  try \{ res\.json\(require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) && typeof persistenceRouter\.asMachineCall === 'function' \? persistenceRouter\.asMachineCall\(call\) : call\(\)\); \}/.test(wiring)),   // r5185: the plugin's write runs in the machine scope for a bearer (its settings write unsynced)
     'f4: the old /api/plugins/llm/config door asks the SAME verdict before the plugin writes its budget (the plugin\'s own rename and migration write through the store — server acts, ④)');
   const x = await send(H, 'PATCH', '/api/settings', { [DAY]: 5 }, { Origin: 'http://elsewhere.example', 'Sec-Fetch-Site': 'cross-site' });
   ok(x.status === 403 && H.read()[DAY] === 801, 'a page of ANOTHER site is not the owner\'s page (the router\'s own verdict; the auth layer refuses it before, too)', { status: x.status, body: x.body.slice(0, 160) });
@@ -114,7 +114,7 @@ console.log('③ red controls — a patched copy of the router');
   const callP = "    if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press\n";
   const markA = "  const spendWriteWhy = (req) => require('../write-origin.js').ownerPageWhy(req);   // null = the owner's page\n";
   const cmpA = "const same = (k) => Object.hasOwn(cur, k) === Object.hasOwn(nxt, k) && (JSON.stringify(cur[k]) === JSON.stringify(nxt[k]) || (nothing(k, cur[k]) && nothing(k, nxt[k])));";   // B-0a33 cure 2: a cap's null and blank are one «nothing»
-  ok(src.includes(callP) && src.includes(markA) && src.includes(cmpA), 'the anchors the controls patch are in this tree');
+  ok(gateOf(src.includes(callP)) && gateOf(src.includes(markA)) && verdictOf(src.includes(cmpA)), 'the anchors the controls patch are in this tree');
   const run = async (patched, tag, go) => { const P = M.load('src/routes/persistence.js', patched, tag); const h = await hub(P, `mut-${tag}`); await send(h, 'PATCH', '/api/settings', { [DAY]: 800, [HOUR]: 30 }, ownerPageHeaders(h.base)); const r = await go(h); return { r, s: h.read() }; };
   const noPatch = await run(src.replace(callP, ''), 'no-patch-fence', (h) => send(h, 'PATCH', '/api/settings', { [DAY]: 9999 }, { Authorization: 'Bearer vsst_fixture_agent' }));
   ok(noPatch.r.status === 200 && noPatch.s[DAY] === 9999, 'control (a): PATCH without the spending fence — an agent\'s token raises the day ceiling (what ① catches)', noPatch.r.status);
@@ -161,12 +161,12 @@ console.log('④ EVERY WRITER of the settings file — a grep-derived census, pr
   for (const s of sites) { const r = rowOf(s); if (r) console.log(`    · ${s.f}:${s.line}${s.fn ? ` (${s.fn})` : ''} — ${r.road} — a spending row: ${r.spend}`); else unknown.push(s); }
   ok(unknown.length === 0, 'every site that writes the settings file is a row of this census (the routes, the import, the server act and its callers, the boot migrations)', unknown);
   const planted = { f: 'src/server/some-new-writer.js', line: 1, l: "writeSettings({ 'spend.unattendedPerInstanceDay': 10000 });" };
-  ok(SITE.test(planted.l) && !ROWS.some((x) => x.file === planted.f && x.re.test(planted.l)), 'control: a writer the census does not know (a planted site) is found by the grep and matches no row — it would be red', planted);
-  ok(ROWS.every((r) => sites.some((s) => rowOf(s) === r)), 'every census row still names a live site (none stale)', ROWS.filter((r) => !sites.some((s) => rowOf(s) === r)).map((r) => r.road));
+  ok(gateOf(SITE.test(planted.l)) && !ROWS.some((x) => x.file === planted.f && x.re.test(planted.l)), 'control: a writer the census does not know (a planted site) is found by the grep and matches no row — it would be red', planted);
+  ok(verdictOf(ROWS.every((r) => sites.some((s) => rowOf(s) === r))), 'every census row still names a live site (none stale)', ROWS.filter((r) => !sites.some((s) => rowOf(s) === r)).map((r) => r.road));
   // ④b the plugin road writes only its own namespace; ④c browser-propose takes no writer; ④d no migration names a spending row
   const PS = require(path.join(REPO, 'src/plugin-settings.js'));
   const rowPaths = Object.entries(PS.PLUGIN_SETTINGS).flatMap(([id, tbl]) => (tbl.rows || []).map((r) => PS.rowPath(id, r)));
-  ok(rowPaths.length > 0 && !rowPaths.some((k) => /^spend\./.test(k)) && /out\[PS\.rowPath\(id, r\)\]/.test(read('src/plugins.js')) && /if \(!r\) throw new Error\(`plugin \$\{id\} has no setting \$\{k\}`\);/.test(read('src/plugins.js')), `④b the plugin road writes only its PLUGIN_SETTINGS rows (an unknown key throws): ${rowPaths.length} paths, none a spend.* row`, rowPaths.filter((k) => /^spend\./.test(k)));
+  ok(rowPaths.length > 0 && !rowPaths.some((k) => /^spend\./.test(k)) && gateOf(/out\[PS\.rowPath\(id, r\)\]/.test(read('src/plugins.js'))) && verdictOf(/if \(!r\) throw new Error\(`plugin \$\{id\} has no setting \$\{k\}`\);/.test(read('src/plugins.js'))), `④b the plugin road writes only its PLUGIN_SETTINGS rows (an unknown key throws): ${rowPaths.length} paths, none a spend.* row`, rowPaths.filter((k) => /^spend\./.test(k)));
   ok(!/patchSettings/.test(read('src/server/browser-propose.js')), '④c browser-propose takes no settings writer');
   ok(!/['"`]spend\./.test(read('src/server/migrations.js')), '④d no boot migration names a spend.* key');
 }
@@ -180,23 +180,23 @@ console.log('⑤ the suites: a spending row written on a scratch hub goes throug
     t.split('\n').forEach((l, i) => { if (/\/api\/(settings|config\/import)\b/.test(l) && /['"`]spend\./.test(l) && /\b(PATCH|POST|patch|post)\b/.test(l)) writes.push({ f, line: i + 1, viaHelper: /ownerPageHeaders\(/.test(l) }); });
   }
   console.log(`    · ${writes.length} line(s) in ${new Set(writes.map((w) => w.f)).size} suite(s) write a spending row through the settings routes today${writes.length ? ': ' + writes.map((w) => `${w.f}:${w.line}`).join(', ') : ''} (the readers of these rows stub serverSetting in-process)`);
-  ok(writes.every((w) => w.viaHelper), 'every suite line that writes a spending row through the routes writes it as the owner\'s page through the ONE helper', writes.filter((w) => !w.viaHelper));
-  ok(/export function ownerPageHeaders\(base\) \{ return \{ Origin: new URL\(base\)\.origin, 'Sec-Fetch-Site': 'same-origin' \}; \}/.test(read('scripts/scratch.mjs')), 'the helper: the two marks a browser on the instance\'s own page sends');
+  ok(verdictOf(writes.every((w) => w.viaHelper)), 'every suite line that writes a spending row through the routes writes it as the owner\'s page through the ONE helper', writes.filter((w) => !w.viaHelper));
+  ok(verdictOf(/export function ownerPageHeaders\(base\) \{ return \{ Origin: new URL\(base\)\.origin, 'Sec-Fetch-Site': 'same-origin' \}; \}/.test(read('scripts/scratch.mjs'))), 'the helper: the two marks a browser on the instance\'s own page sends');
 }
 
 console.log('⑥ (b3) Settings › Spending says the truth on a sign-in-off instance — with the door to turn sign-in on');
 {
   const ui = read('src/lib/settings-ui.js');
-  ok(/if \(cat === t\('Spending'\) && this\.app\?\._authEnabled === false\) this\._renderSpendSignInOff\(section\);/.test(ui) && /_renderSpendSignInOff\(section\) \{[\s\S]{0,900}className: 'settings-row-info'[\s\S]{0,200}t\('Sign-in is off: anything that can reach VibeSpace can change these limits\. Set a password so only you can\.'\)[\s\S]{0,300}className: 'settings-row-control'[\s\S]{0,200}t\('Set password…'\)[\s\S]{0,120}open\.onclick = \(\) => this\.app\._showPasswordDialog\(\);/.test(ui),
+  ok(gateOf(/if \(cat === t\('Spending'\) && this\.app\?\._authEnabled === false\) this\._renderSpendSignInOff\(section\);/.test(ui)) && verdictOf(/_renderSpendSignInOff\(section\) \{[\s\S]{0,900}className: 'settings-row-info'[\s\S]{0,200}t\('Sign-in is off: anything that can reach VibeSpace can change these limits\. Set a password so only you can\.'\)[\s\S]{0,300}className: 'settings-row-control'[\s\S]{0,200}t\('Set password…'\)[\s\S]{0,120}open\.onclick = \(\) => this\.app\._showPasswordDialog\(\);/.test(ui)),
     'the Spending section, on an instance with sign-in off, says anything that can reach VibeSpace can change these limits (a standard row: words in .settings-row-info, the door in .settings-row-control), and its button opens the ⚙ menu\'s own password dialog');
   const key = '"Sign-in is off: anything that can reach VibeSpace can change these limits. Set a password so only you can.": "';
-  ok(read('src/lib/i18n-zh.js').includes(key) && read('src/lib/i18n-ja.js').includes(key), 'the words in zh and ja');
+  ok(gateOf(read('src/lib/i18n-zh.js').includes(key)) && verdictOf(read('src/lib/i18n-ja.js').includes(key)), 'the words in zh and ja');
   // f1 (主开发 2026-11-15, REQUIRED): drawn only when sign-in is KNOWN off, and the open Settings redrawn when the flag changes — the
   // password set or removed, the home answer (a sentence about who can change money limits is never left false while shown)
   const sf = read('src/lib/setup-flows.js'), app = read('src/lib/app.js');
-  ok(/redrawOpen\(\) \{[\s\S]{0,300}this\._rerenderKeepingPlace\(content, nav\);/.test(ui) && (sf.match(/this\._authEnabled = (true|false);\n\s*this\._settingsUI\?\.redrawOpen\?\.\(\);/g) || []).length === 3 && /this\._authEnabled = !!d\.authEnabled;\n\s*this\._settingsUI\?\.redrawOpen\?\.\(\);/.test(app),
+  ok(gateOf(/redrawOpen\(\) \{[\s\S]{0,300}this\._rerenderKeepingPlace\(content, nav\);/.test(ui)) && (sf.match(/this\._authEnabled = (true|false);\n\s*this\._settingsUI\?\.redrawOpen\?\.\(\);/g) || []).length === 3 && verdictOf(/this\._authEnabled = !!d\.authEnabled;\n\s*this\._settingsUI\?\.redrawOpen\?\.\(\);/.test(app)),
     'f1: every change of the sign-in flag (the password set, removed; the home answer) redraws the open Settings in place');
 }
 
 console.log(fail ? `✗ test-spend-rows-owner: ${pass} passed, ${fail} failed` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

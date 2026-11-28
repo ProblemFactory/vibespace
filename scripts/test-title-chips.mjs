@@ -27,7 +27,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUT = mutantCopies('title-chips', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -70,7 +70,7 @@ const TC = await import('../src/lib/title-chips.js');
 
 console.log('§1 the PURE rule (src/lib/title-chips.js)');
 {
-  for (const [name, input, want] of TABLE) { const got = TC.chipMode(input); ok(matches(got, want), `${name} → ${got}`, { input, want }); }
+  for (const [name, input, want] of TABLE) { const got = TC.chipMode(input); ok(verdictOf(matches(got, want)), `${name} → ${got}`, { input, want }); }
   ok(TC.chipMode() === 'full' && TC.chipMode({}) === 'full', 'no input at all ⇒ full (never throws)');
   // monotonic in the room: more room never yields a NARROWER form
   const rank = { icon: 0, compact: 1, full: 2 };
@@ -81,10 +81,10 @@ console.log('§1 the PURE rule (src/lib/title-chips.js)');
     if (rank[m] < last) { mono = false; at = a; }
     last = rank[m];
   }
-  ok(mono && seen.size === 3, `monotonic: sweeping the room 0 → 400 px the form only widens icon → compact → full (all three reached${at != null ? `; narrowed at ${at}` : ''})`, [...seen]);
+  ok(gateOf(mono) && seen.size === 3, `monotonic: sweeping the room 0 → 400 px the form only widens icon → compact → full (all three reached${at != null ? `; narrowed at ${at}` : ''})`, [...seen]);
   const first = (m) => { for (let a = 0; a <= 400; a++) if (TC.chipMode({ availablePx: a, titlePx: 138, chipFullPx: 85, chipCompactPx: 52, titleMinPx: 44 }) === m) return a; return null; };
   ok(first('compact') === 96 && first('full') === 223, `…switching exactly where the rule says: compact from 96 px (52 + 44), full from 223 px (85 + 138) (got ${first('compact')}, ${first('full')})`);
-  ok(TC.TITLE_MIN_CHARS === 6 && TC.MEMBER_SHORT_MAX === 8 && JSON.stringify(TC.CHIP_MODES) === '["full","compact","icon"]' && Object.isFrozen(TC.CHIP_MODES), 'the constants: six title characters, eight-character member names, the three forms widest first (frozen)');
+  ok(TC.TITLE_MIN_CHARS === 6 && TC.MEMBER_SHORT_MAX === 8 && JSON.stringify(TC.CHIP_MODES) === '["full","compact","icon"]' && verdictOf(Object.isFrozen(TC.CHIP_MODES)), 'the constants: six title characters, eight-character member names, the three forms widest first (frozen)');
   const S = TC.memberShortName;
   ok(S('UCI Max') === 'UCI Max' && S('Personal') === 'Personal', 'memberShortName: a name of ≤ 8 characters is kept whole (UCI Max, Personal)');
   ok(S('Northwind Max') === 'Northwi…' && Array.from(S('Northwind Max')).length === 8, `memberShortName: a longer one is cut to 8 characters, the last an ellipsis (${S('Northwind Max')})`);
@@ -115,17 +115,17 @@ console.log('§2 NEGATIVE CONTROLS on patched copies of the rule');
   ok(alwaysFull !== src, 'control (a) patched the rule\'s entry line');
   const MA = await import(MUT.write('src/lib/title-chips.js', alwaysFull, 'always-full'));
   const fa = tableFailures(MA);
-  ok(fa.length >= 6 && fa.some((f) => f.startsWith('the owner\'s tab: 95 px shared ⇒ compact')), `CONTROL (a) — a chip that always shows every word (2.369.177) fails ${fa.length} rows, the owner's tab among them`, fa);
+  ok(fa.length >= 6 && verdictOf(fa.some((f) => f.startsWith('the owner\'s tab: 95 px shared ⇒ compact'))), `CONTROL (a) — a chip that always shows every word (2.369.177) fails ${fa.length} rows, the owner's tab among them`, fa);
   // (b) "the chip keeps its words while ANY of the title shows" — the cut title is exactly the report
   const anyTitle = editAnchor(src, a1, "  if (a - full + EPS >= least) return 'full'; // CONTROL: full while six characters show", "src/lib/title-chips.js");
   const MB = await import(MUT.write('src/lib/title-chips.js', anyTitle, 'any-title'));
   const fb = tableFailures(MB);
-  ok(fb.length >= 1 && fb.some((f) => f.startsWith('ONE px short of the whole title')), `CONTROL (b) — a chip that yields only below six characters (the title still CUT beside every word) fails ${fb.length} rows`, fb);
+  ok(fb.length >= 1 && verdictOf(fb.some((f) => f.startsWith('ONE px short of the whole title'))), `CONTROL (b) — a chip that yields only below six characters (the title still CUT beside every word) fails ${fb.length} rows`, fb);
   // (c) no icon floor: compact whatever the room
   const noIcon = editAnchor(src, "  return 'icon';\n}", "  return 'compact'; // CONTROL: no icon form\n}", "src/lib/title-chips.js");
   const MC = await import(MUT.write('src/lib/title-chips.js', noIcon, 'no-icon'));
   const fc = tableFailures(MC);
-  ok(noIcon !== src && fc.some((f) => f.startsWith('one px under six characters')), `CONTROL (c) — a chip with no icon form fails ${fc.length} rows (the title under six characters)`, fc);
+  ok(noIcon !== src && verdictOf(fc.some((f) => f.startsWith('one px under six characters'))), `CONTROL (c) — a chip with no icon form fails ${fc.length} rows (the title under six characters)`, fc);
 }
 
 console.log('§3 the REAL WindowManager._fitChip over a fake box');
@@ -205,14 +205,14 @@ const judge = (WM) => {
   wm._fitChip(m1.box, m1.label, m1.chip, o1);
   const afterFirst = m1.counts.chipReads;
   wm._fitChip(m1.box, m1.label, m1.chip, o1); wm._fitChip(m1.box, m1.label, m1.chip, o1);
-  ok(afterFirst === 4 && m1.counts.chipReads === afterFirst + 2 && o1._chipFitW && o1._chipFitW.full === 85 && o1._chipFitW.compact === 52 && o1._chipFitW.icon === 20, `the chip's three widths are measured ONCE (${afterFirst} reads: three forms + the room) and kept on the window; later passes read only the room (${m1.counts.chipReads - afterFirst} reads for two passes)`, { afterFirst, total: m1.counts.chipReads, cache: o1._chipFitW });
+  ok(afterFirst === 4 && m1.counts.chipReads === afterFirst + 2 && gateOf(o1._chipFitW) && o1._chipFitW.full === 85 && o1._chipFitW.compact === 52 && o1._chipFitW.icon === 20, `the chip's three widths are measured ONCE (${afterFirst} reads: three forms + the room) and kept on the window; later passes read only the room (${m1.counts.chipReads - afterFirst} reads for two passes)`, { afterFirst, total: m1.counts.chipReads, cache: o1._chipFitW });
   m1.chip.dataset.words = 'pooled\n全部 → Personal Max\nPersona…';
   wm._fitChip(m1.box, m1.label, m1.chip, o1);
   ok(m1.counts.chipReads === afterFirst + 2 + 4, 'new words (the pool moved the session to another member) ⇒ measured again');
   const tabKey = o1._chipFitW.key;
   const barScene = mkScene({ share: 150, title: TITLE, inTab: false }); barScene.chip.dataset.words = m1.chip.dataset.words;
   wm._fitChip(barScene.box, barScene.label, barScene.chip, o1);
-  ok(o1._chipFitW.key !== tabKey && /\nbar$/.test(o1._chipFitW.key) && /\ntab$/.test(tabKey), 'the same words on a standalone title bar are measured apart from the tab\'s (a tab draws the chip smaller)');
+  ok(o1._chipFitW.key !== tabKey && gateOf(/\nbar$/.test(o1._chipFitW.key)) && verdictOf(/\ntab$/.test(tabKey)), 'the same words on a standalone title bar are measured apart from the tab\'s (a tab draws the chip smaller)');
   // a short title: the whole title is its own least
   const sh = mkScene({ share: 75, title: 'Alpha' }); // 30 px; compact leaves 23 < 30; icon leaves 55
   wm._fitChip(sh.box, sh.label, sh.chip, {});
@@ -230,32 +230,32 @@ console.log('§4 wiring pins');
 {
   const wj = read('src/lib/window.js'), tg = read('src/lib/tab-group.js'), css = read('public/style.css');
   const fnBody = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const j = src.indexOf('\n  }\n', i); return src.slice(i, j < 0 ? undefined : j); };
-  ok(/import \{ chipMode, chipWords, titleMinText, CHIP_MODES \} from '\.\/title-chips\.js';/.test(wj) && /const mode = chipMode\(\{ availablePx, titlePx: tw\.full, titleMinPx: tw\.min, chipFullPx: w\.full, chipCompactPx: w\.compact \}\);/.test(wj), 'window.js decides through the PURE rule, from measured widths');
+  ok(gateOf(/import \{ chipMode, chipWords, titleMinText, CHIP_MODES \} from '\.\/title-chips\.js';/.test(wj)) && verdictOf(/const mode = chipMode\(\{ availablePx, titlePx: tw\.full, titleMinPx: tw\.min, chipFullPx: w\.full, chipCompactPx: w\.compact \}\);/.test(wj)), 'window.js decides through the PURE rule, from measured widths');
   const sab = fnBody(wj, '  setAuthBadge(id, auth) {');
-  ok(/words = chipWords\(\{ name: poolName, target: auth\.poolTarget \|\| '' \}\);/.test(sab) && /<span class="wab-short">\$\{escHtml\(words\.short\)\}<\/span>/.test(sab) && /<span class="wab-name">\$\{escHtml\(poolName\)\}<\/span>/.test(sab) && /\$\{tgt \? `<span class="wab-pool-tgt"> → \$\{tgt\}<\/span>` : ''\}/.test(sab) && /const tgt = auth\.poolTarget \? escHtml\(auth\.poolTarget\) : '';/.test(sab), 'the pooled chip carries every form (pool name, → member, the SHORT member) — every string escHtml\'d');
-  ok(/tip = words\.full \+ ' · ' \+ t\('Pooled account'\)/.test(sab) && /el\.dataset\.tip = tip \+ ' · ' \+ t\('Click to switch billing'\);/.test(sab) && /tip = words\.full \+ ' · ' \+ \(auth\.source === 'codex-subscription'/.test(sab), 'the tooltip LEADS with the full words ("全部 → UCI Max"; a login\'s name) — what compact / icon drop is one hover away');
-  ok(/el\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.app\?\.showBillingSwitcher\?\.\(win\.id, el\); \};/.test(sab), 'the click still opens the billing switcher (it names the pool AND its member: "全部 → UCI Max")');
-  ok(/setChipMode\(el, win\._chipMode \|\| 'full'\);/.test(sab) && /this\._fitChipsSoon\(win\);\n    \};/.test(sab), 'a (re)built chip starts in the window\'s LAST form (no flash of every word on a tab-bar rebuild) and is re-decided next frame');
-  ok(/win\.title = t; win\.titleSpan\.textContent = t;[\s\S]{0,420}this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setTitle(id, t) {')), 'setTitle re-decides (a new title may need the chip\'s room or give it back)');
-  ok(/else this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setTitleMeta(id, meta = {}) {')), 'setTitleMeta re-decides a standalone bar (a chain re-renders, which re-applies the chips)');
-  ok(/else if \(win\._ownerBadgeKey !== key\) this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setOwnerBadge(id, badge) {')) && (fnBody(wj, '  _placeInboxBadge(win) {').match(/this\._fitChipsSoon\(win\)/g) || []).length === 2, 'the sibling badges re-decide when they appear, change or go (owner dots, the mini inbox)');
-  ok(/this\._fitChipsSoon\?\.\(hostWin\);/.test(fnBody(tg, '  switchTab(chain, index, { follow = true } = {}) {')), 'a tab switch re-decides the strip (the active label is drawn bolder)');
+  ok(gateOf(/words = chipWords\(\{ name: poolName, target: auth\.poolTarget \|\| '' \}\);/.test(sab)) && gateOf(/<span class="wab-short">\$\{escHtml\(words\.short\)\}<\/span>/.test(sab)) && gateOf(/<span class="wab-name">\$\{escHtml\(poolName\)\}<\/span>/.test(sab)) && gateOf(/\$\{tgt \? `<span class="wab-pool-tgt"> → \$\{tgt\}<\/span>` : ''\}/.test(sab)) && verdictOf(/const tgt = auth\.poolTarget \? escHtml\(auth\.poolTarget\) : '';/.test(sab)), 'the pooled chip carries every form (pool name, → member, the SHORT member) — every string escHtml\'d');
+  ok(gateOf(/tip = words\.full \+ ' · ' \+ t\('Pooled account'\)/.test(sab)) && gateOf(/el\.dataset\.tip = tip \+ ' · ' \+ t\('Click to switch billing'\);/.test(sab)) && verdictOf(/tip = words\.full \+ ' · ' \+ \(auth\.source === 'codex-subscription'/.test(sab)), 'the tooltip LEADS with the full words ("全部 → UCI Max"; a login\'s name) — what compact / icon drop is one hover away');
+  ok(verdictOf(/el\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.app\?\.showBillingSwitcher\?\.\(win\.id, el\); \};/.test(sab)), 'the click still opens the billing switcher (it names the pool AND its member: "全部 → UCI Max")');
+  ok(gateOf(/setChipMode\(el, win\._chipMode \|\| 'full'\);/.test(sab)) && verdictOf(/this\._fitChipsSoon\(win\);\n    \};/.test(sab)), 'a (re)built chip starts in the window\'s LAST form (no flash of every word on a tab-bar rebuild) and is re-decided next frame');
+  ok(verdictOf(/win\.title = t; win\.titleSpan\.textContent = t;[\s\S]{0,420}this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setTitle(id, t) {'))), 'setTitle re-decides (a new title may need the chip\'s room or give it back)');
+  ok(verdictOf(/else this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setTitleMeta(id, meta = {}) {'))), 'setTitleMeta re-decides a standalone bar (a chain re-renders, which re-applies the chips)');
+  ok(gateOf(/else if \(win\._ownerBadgeKey !== key\) this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setOwnerBadge(id, badge) {'))) && (fnBody(wj, '  _placeInboxBadge(win) {').match(/this\._fitChipsSoon\(win\)/g) || []).length === 2, 'the sibling badges re-decide when they appear, change or go (owner dots, the mini inbox)');
+  ok(verdictOf(/this\._fitChipsSoon\?\.\(hostWin\);/.test(fnBody(tg, '  switchTab(chain, index, { follow = true } = {}) {'))), 'a tab switch re-decides the strip (the active label is drawn bolder)');
   const soon = fnBody(wj, '  _fitChipsSoon(win) {');
-  ok(/if \(!host \|\| !host\.titleBar\?\.querySelector\('\.win-auth-badge'\)\) return;/.test(soon), 'a bar with no billing chip is never observed nor measured (file explorers, editors…)');
-  ok(/if \(this\._chipFitRaf\) return;/.test(soon) && /this\._chipFitRaf = requestAnimationFrame\(/.test(soon) && /\(this\._chipFitIds \|\|= new Set\(\)\)\.add\(host\.id\);/.test(soon), 'ONE requestAnimationFrame per burst, keyed by the host bar (rAF-coalesced)');
+  ok(verdictOf(/if \(!host \|\| !host\.titleBar\?\.querySelector\('\.win-auth-badge'\)\) return;/.test(soon)), 'a bar with no billing chip is never observed nor measured (file explorers, editors…)');
+  ok(gateOf(/if \(this\._chipFitRaf\) return;/.test(soon)) && gateOf(/this\._chipFitRaf = requestAnimationFrame\(/.test(soon)) && verdictOf(/\(this\._chipFitIds \|\|= new Set\(\)\)\.add\(host\.id\);/.test(soon)), 'ONE requestAnimationFrame per burst, keyed by the host bar (rAF-coalesced)');
   const obs = fnBody(wj, '  _observeChipBar(host) {');
-  ok(/this\._chipRO = new ResizeObserver\(/.test(obs) && /this\._chipRO\.observe\(host\.titleBar\);/.test(obs) && /host\._listenerCtl\?\.signal\?\.addEventListener\('abort', \(\) => \{ this\._chipRO\.unobserve\(host\.titleBar\);/.test(obs) && (wj.match(/_chipRO = new ResizeObserver\(/g) || []).length === 1 && !/_chipRO = new ResizeObserver[\s\S]*_chipRO = new ResizeObserver/.test(tg), 'ONE ResizeObserver for every host title bar (the strip lives inside it), unobserved when the window\'s AbortController aborts (close)');
-  ok(/if \(!box \|\| !label \|\| !chip \|\| !box\.isConnected \|\| !box\.offsetWidth\) return;/.test(fnBody(wj, '  _fitChip(box, label, chip, owner) {')), 'a bar not laid out (the ≤768 px phone layout, a minimized window) keeps its form');
-  ok(/for \(const tab of host\.titleBar\.querySelectorAll\(':scope > \.tab-bar-tabs \.tab-item'\)\)/.test(fnBody(wj, '  _fitChipsOf(win) {')), 'a chain decides EVERY tab of its strip, each against its own label — a split\'s too (split tabs v2: its tabs sit inside the two strip halves, never direct children of the strip)');
-  ok(/\.win-auth-badge\.wab-compact \.wab-name, \.win-auth-badge\.wab-compact \.wab-pool-tgt,\n\.win-auth-badge\.wab-icon \.wab-name, \.win-auth-badge\.wab-icon \.wab-pool-tgt \{ display: none; \}/.test(css) && /\.win-auth-badge\.wab-compact \.wab-short \{ display: inline; \}/.test(css) && /\.win-auth-badge \.wab-short \{ display: none;/.test(css), 'the CSS draws exactly the picked form (full: name + → member; compact: the short member; icon: the glyph)');
-  ok(/\.win-auth-badge\.sub \.wab-glyph \{ display: none; \}/.test(css) && /\.win-auth-badge\.sub\.wab-icon \.wab-glyph \{ display: inline-flex; \}/.test(css), 'a subscription chip keeps its name-only face and shows its crown only as an icon');
-  ok(/\.win-inbox-badge \{\n  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; flex: none; white-space: nowrap;/.test(css) && /num\.textContent = inboxCountText\(n\);/.test(tg) && /import \{ inboxCountText \} from '\.\/title-chips\.js';/.test(tg), 'the inbox chip keeps its number and never grows past its minimal width (flex: none, 99+)');
-  ok(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)[\s\S]*?\.window-titlebar \{ display: none; \}/.test(css), 'the phone rule is as it was: no title bars ≤ 768 px (the switcher rows keep their own chip)');
+  ok(gateOf(/this\._chipRO = new ResizeObserver\(/.test(obs)) && gateOf(/this\._chipRO\.observe\(host\.titleBar\);/.test(obs)) && gateOf(/host\._listenerCtl\?\.signal\?\.addEventListener\('abort', \(\) => \{ this\._chipRO\.unobserve\(host\.titleBar\);/.test(obs)) && (wj.match(/_chipRO = new ResizeObserver\(/g) || []).length === 1 && !/_chipRO = new ResizeObserver[\s\S]*_chipRO = new ResizeObserver/.test(tg), 'ONE ResizeObserver for every host title bar (the strip lives inside it), unobserved when the window\'s AbortController aborts (close)');
+  ok(verdictOf(/if \(!box \|\| !label \|\| !chip \|\| !box\.isConnected \|\| !box\.offsetWidth\) return;/.test(fnBody(wj, '  _fitChip(box, label, chip, owner) {'))), 'a bar not laid out (the ≤768 px phone layout, a minimized window) keeps its form');
+  ok(verdictOf(/for \(const tab of host\.titleBar\.querySelectorAll\(':scope > \.tab-bar-tabs \.tab-item'\)\)/.test(fnBody(wj, '  _fitChipsOf(win) {'))), 'a chain decides EVERY tab of its strip, each against its own label — a split\'s too (split tabs v2: its tabs sit inside the two strip halves, never direct children of the strip)');
+  ok(gateOf(/\.win-auth-badge\.wab-compact \.wab-name, \.win-auth-badge\.wab-compact \.wab-pool-tgt,\n\.win-auth-badge\.wab-icon \.wab-name, \.win-auth-badge\.wab-icon \.wab-pool-tgt \{ display: none; \}/.test(css)) && gateOf(/\.win-auth-badge\.wab-compact \.wab-short \{ display: inline; \}/.test(css)) && verdictOf(/\.win-auth-badge \.wab-short \{ display: none;/.test(css)), 'the CSS draws exactly the picked form (full: name + → member; compact: the short member; icon: the glyph)');
+  ok(gateOf(/\.win-auth-badge\.sub \.wab-glyph \{ display: none; \}/.test(css)) && verdictOf(/\.win-auth-badge\.sub\.wab-icon \.wab-glyph \{ display: inline-flex; \}/.test(css)), 'a subscription chip keeps its name-only face and shows its crown only as an icon');
+  ok(gateOf(/\.win-inbox-badge \{\n  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; flex: none; white-space: nowrap;/.test(css)) && gateOf(/num\.textContent = inboxCountText\(n\);/.test(tg)) && verdictOf(/import \{ inboxCountText \} from '\.\/title-chips\.js';/.test(tg)), 'the inbox chip keeps its number and never grows past its minimal width (flex: none, 99+)');
+  ok(verdictOf(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)[\s\S]*?\.window-titlebar \{ display: none; \}/.test(css)), 'the phone rule is as it was: no title bars ≤ 768 px (the switcher rows keep their own chip)');
   ok(!/wab-(full|compact|icon)/.test(read('src/lib/session-card.js')) && !/wab-(full|compact|icon)/.test(read('src/lib/mobile-nav.js')), 'the sidebar card and the phone nav are untouched (they have room)');
 }
 
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

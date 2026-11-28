@@ -12,7 +12,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, name, detail = '') => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? ' — ' + detail : ''}`); } };
+const ok = (c, name, detail = '') => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? ' — ' + detail : ''}`); } };
 const Av = require('../src/channel-avatars.js');
 const Att = require('../src/channel-attachments.js');
 const CH = require('../src/channels/index.js');
@@ -37,37 +37,37 @@ console.log('① the memo + the ONE picture order (PURE)');
     ['ours only: an author no record names is refused `not-found`', v({ cached: false, remembered: null }, { owner: false }).code === 'not-found'],
     ['one flight: a second ask joins', v({ cached: false, remembered: null }, { inflight: true }).act === 'join'],
   ];
-  for (const [n, p] of rows) ok(p, n);
+  for (const [n, p] of rows) ok(verdictOf(p), n);
   ok(Av.sniffImage(PNG) === 'image/png' && Av.sniffImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0])) === 'image/jpeg' && Av.sniffImage(Buffer.from('GIF89a\0\0\0\0\0\0')) === 'image/gif' && Av.sniffImage(Buffer.from('RIFF\0\0\0\0WEBPVP8 ')) === 'image/webp', 'sniff: png / jpeg / gif / webp from the BYTES');
   ok(Av.sniffImage(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>')) === null && Av.sniffImage(Buffer.from('<html><body>x</body></html>')) === null && Av.sniffImage(null) === null, 'sniff: svg (script) / html / nothing are no picture');
   const many = Array.from({ length: 90 }, (_, i) => ({ account: 'acc', author: `u${i % 60}` }));
   const w = Av.warmList(many, (k) => k === 'acc\nu0');
   ok(w.length === Av.WARM_MAX && Av.WARM_MAX === 40 && new Set(w.map((x) => x.author)).size === w.length && !w.some((x) => x.author === 'u0'), 'warm-up: ≤ 40 per open, deduped, the answered skipped');
-  ok(!Av.authorOk('../x') && !Av.authorOk('a/b') && !Av.authorOk('') && !Av.authorOk('x'.repeat(129)) && Av.authorOk('ou_abc') && Av.authorOk('U0ADA'), 'an author key is judged before any path is built');
+  ok(!Av.authorOk('../x') && !Av.authorOk('a/b') && !Av.authorOk('') && !Av.authorOk('x'.repeat(129)) && gateOf(Av.authorOk('ou_abc')) && verdictOf(Av.authorOk('U0ADA')), 'an author key is judged before any path is built');
 }
 
 console.log('② the capability row census');
 {
-  ok(lark.caps.avatars === 'fetch' && slack.caps.avatars === 'fetch' && gmail.caps.avatars === null && /Gmail has no profile pictures/.test(gmail.caps.avatarsWhy) && agents.caps.avatars === null && !!agents.caps.avatarsWhy, 'rows: Lark / Slack fetch; Gmail + the built-in Agents null WITH their why');
+  ok(lark.caps.avatars === 'fetch' && slack.caps.avatars === 'fetch' && gmail.caps.avatars === null && gateOf(/Gmail has no profile pictures/.test(gmail.caps.avatarsWhy)) && agents.caps.avatars === null && !!agents.caps.avatarsWhy, 'rows: Lark / Slack fetch; Gmail + the built-in Agents null WITH their why');
   for (const m of [lark, slack, gmail, agents]) ok(CH.validateCaps(m.kind, m.caps) === true, `${m.kind}: the row validates`);
   const reg = CH.createChannelRegistry();
   const base = { ...fake.fakePoll.caps };
   let e1 = null; try { CH.validateCaps('x', { ...base, avatars: 'yes' }); } catch (e) { e1 = e; }
   let e2 = null; try { CH.validateCaps('x', { ...base, avatars: null }); } catch (e) { e2 = e; }
-  ok(e1 && /caps\.avatars must be/.test(e1.message) && e2 && /avatarsWhy/.test(e2.message), 'a row that is neither fetch nor null throws; null without a why throws', `${e1 && e1.message} | ${e2 && e2.message}`);
+  ok(gateOf(e1) && gateOf(/caps\.avatars must be/.test(e1.message)) && gateOf(e2) && verdictOf(/avatarsWhy/.test(e2.message)), 'a row that is neither fetch nor null throws; null without a why throws', `${e1 && e1.message} | ${e2 && e2.message}`);
   reg.register(fake.fakePoll);
   const a = reg.create(fake.fakePoll.kind, { id: 'f1' }, { now: () => NOW });
   ok(typeof a.avatarImage === 'function', 'the fake (fetch row) implements avatarImage');
   const g = reg.register(gmail.adapter || gmail) && reg.create('gmail', { id: 'g1' }, { now: () => NOW, tokens: { read: () => ({ token: null }) }, resolveIntegration: () => ({ source: 'none', values: {}, missing: [] }) });
   let e3 = null; try { await g.avatarImage('x@y.example'); } catch (e) { e3 = e; }
-  ok(e3 && e3.code === 'not-supported', 'an undeclared row: calling avatarImage throws not-supported', e3 && e3.code);
+  ok(gateOf(e3) && e3.code === 'not-supported', 'an undeclared row: calling avatarImage throws not-supported', e3 && e3.code);
   ok(CH.METHOD_GATES.avatarImage({ avatars: 'fetch' }) === true && CH.METHOD_GATES.avatarImage({ avatars: null }) === false, 'METHOD_GATES.avatarImage reads the row');
 }
 
 console.log('③ vendor-shape fixtures (invented, real-shaped — peer bytes through ONE bounded reader)');
 {
   const L = (avatar) => lark.avatarUrlOf({ user: { open_id: 'ou_fixture_ada', name: 'Ada Fixture', avatar } });
-  ok(L({ avatar_72: 'https://s1-imfile.feishucdn.com/static-resource/v1/v2_fixture~?image_size=72x72&cut_type=&quality=&format=png&sticker_format=.webp', avatar_240: 'https://s1-imfile.feishucdn.com/x' }).startsWith('https://s1-imfile.feishucdn.com/'), 'Lark: avatar.avatar_72 on a feishucdn host');
+  ok(verdictOf(L({ avatar_72: 'https://s1-imfile.feishucdn.com/static-resource/v1/v2_fixture~?image_size=72x72&cut_type=&quality=&format=png&sticker_format=.webp', avatar_240: 'https://s1-imfile.feishucdn.com/x' }).startsWith('https://s1-imfile.feishucdn.com/')), 'Lark: avatar.avatar_72 on a feishucdn host');
   ok(L({ avatar_72: 'https://evil.example/a.png' }) === '' && L({ avatar_72: 'http://s1-imfile.feishucdn.com/a' }) === '' && L({ avatar_72: 'https://u:p@s1-imfile.feishucdn.com/a' }) === '' && L({ avatar_72: 'https://feishucdn.com.evil.example/a' }) === '' && L(null) === '' && L({ avatar_72: 'x'.repeat(3000) }) === '', 'Lark: another host / http / credentials / a suffix trick / no avatar / an oversize string = no picture');
   const S = (profile) => slack.avatarUrlOf({ id: 'U0FIXADA', profile });
   ok(S({ is_custom_image: true, image_72: 'https://avatars.slack-edge.com/2026-01-01/1_fixture_72.png' }) !== '' && S({ is_custom_image: false, image_72: 'https://avatars.slack-edge.com/x_72.png' }) === '' && S({ image_72: 'https://secure.gravatar.com/avatar/abc.jpg?s=72&d=https%3A%2F%2Fa.slack-edge.com%2Fdf10d%2Fimg%2Favatars%2Fava_0001-72.png' }) === '', 'Slack: an uploaded profile.image_72 on avatars.slack-edge.com; the default (gravatar / is_custom_image false) = no picture');
@@ -92,13 +92,13 @@ console.log('④ the adapters\' calls under a stub vendor');
   };
   const good = await run(['contact:contact.base:readonly'], PNG);
   const sends = good.log.filter((x) => x.ev === 'send');
-  ok(good.r && Buffer.isBuffer(good.r.data) && good.r.data.equals(PNG) && sends.length === 2, 'Lark: ONE profile read + the bytes = two requests', JSON.stringify(sends));
-  ok(good.log.every((x, i) => x.ev !== 'send' || (good.log[i - 2] && good.log[i - 2].ev === 'pace' && good.log[i - 1].ev === 'meter')), 'Lark: every request is paced, then metered, right before it is sent');
-  ok(!sends[1].auth && /feishucdn\.com/.test(sends[1].url), 'Lark: the picture host gets NO bearer');
+  ok(gateOf(good.r) && gateOf(Buffer.isBuffer(good.r.data)) && gateOf(good.r.data.equals(PNG)) && sends.length === 2, 'Lark: ONE profile read + the bytes = two requests', JSON.stringify(sends));
+  ok(verdictOf(good.log.every((x, i) => x.ev !== 'send' || (good.log[i - 2] && good.log[i - 2].ev === 'pace' && good.log[i - 1].ev === 'meter'))), 'Lark: every request is paced, then metered, right before it is sent');
+  ok(!sends[1].auth && verdictOf(/feishucdn\.com/.test(sends[1].url)), 'Lark: the picture host gets NO bearer');
   const noScope = await run(['im:message'], PNG);
-  ok(noScope.err && noScope.err.code === 'forbidden' && noScope.err.detail.why === 'scope' && /contact:contact\.base:readonly/.test(noScope.err.message) && !noScope.log.some((x) => x.ev === 'send'), 'Lark: a token without the people scope is refused BY NAME, before any request');
+  ok(gateOf(noScope.err) && noScope.err.code === 'forbidden' && noScope.err.detail.why === 'scope' && gateOf(/contact:contact\.base:readonly/.test(noScope.err.message)) && !noScope.log.some((x) => x.ev === 'send'), 'Lark: a token without the people scope is refused BY NAME, before any request');
   const big = await run(['contact:contact.base:readonly'], Buffer.alloc(Av.AVATAR_MAX_BYTES + 10, 1));
-  ok(big.err && big.err.code === 'too-large', 'Lark: bytes past 256 KiB are refused while reading', big.err && big.err.code);
+  ok(gateOf(big.err) && big.err.code === 'too-large', 'Lark: bytes past 256 KiB are refused while reading', big.err && big.err.code);
 }
 
 console.log('⑤ the route + the engine order (a census of the source) and patched copies');
@@ -118,16 +118,16 @@ const census = (engineSrc, routesSrc, larkSrc) => {
 };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
 const engineSrc = read('src/server/channels-engine.js'), routesSrc = read('src/routes/channels.js'), larkSrc = read('src/channels/lark.js');
-for (const [n, p] of census(engineSrc, routesSrc, larkSrc)) ok(p, n);
-ok(/avatarImage\(author\) \{[\s\S]{0,1400}await pace\(1\);\s*meter\(1\);\s*let r;\s*try \{ r = await fetchFn\(url, \{ redirect: 'error'/.test(read('src/channels/slack.js')), 'SLACK: the bytes request is paced + metered, no redirect followed');
+for (const [n, p] of census(engineSrc, routesSrc, larkSrc)) ok(verdictOf(p), n);
+ok(verdictOf(/avatarImage\(author\) \{[\s\S]{0,1400}await pace\(1\);\s*meter\(1\);\s*let r;\s*try \{ r = await fetchFn\(url, \{ redirect: 'error'/.test(read('src/channels/slack.js'))), 'SLACK: the bytes request is paced + metered, no redirect followed');
 {
   const reds = (rows) => rows.filter(([, p]) => !p).map(([n]) => n);
   const rawRoute = routesSrc.replace("const rs = fs.createReadStream(r.file);", "return res.redirect(r.meta.url); const rs = fs.createReadStream(r.file);");
-  ok(rawRoute !== routesSrc && reds(census(engineSrc, rawRoute, larkSrc)).some((n) => /^ROUTE/.test(n)), 'CONTROL: a copy of the route that serves the vendor URL raw is RED');
+  ok(rawRoute !== routesSrc && verdictOf(reds(census(engineSrc, rawRoute, larkSrc)).some((n) => /^ROUTE/.test(n))), 'CONTROL: a copy of the route that serves the vendor URL raw is RED');
   const unpaced = larkSrc.replace("      await pace(1);\n      meter(1);\n      let r;\n      try { r = await fetchFn(url,", "      meter(1);\n      let r;\n      try { r = await fetchFn(url,");
-  ok(unpaced !== larkSrc && reds(census(engineSrc, routesSrc, unpaced)).some((n) => /^LARK/.test(n)), 'CONTROL: a copy of the Lark adapter fetching the bytes without the pace is RED');
+  ok(unpaced !== larkSrc && verdictOf(reds(census(engineSrc, routesSrc, unpaced)).some((n) => /^LARK/.test(n))), 'CONTROL: a copy of the Lark adapter fetching the bytes without the pace is RED');
   const noBudget = engineSrc.replace("backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t, affordable: affordable(rec, e) });\n    switch (v.act) {\n      case 'join': return avatarFlights", "backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t });\n    switch (v.act) {\n      case 'join': return avatarFlights");
-  ok(noBudget !== engineSrc && reds(census(noBudget, routesSrc, larkSrc)).some((n) => /^ENGINE/.test(n)), 'CONTROL: a copy of the engine that skips the budget is RED');
+  ok(noBudget !== engineSrc && verdictOf(reds(census(noBudget, routesSrc, larkSrc)).some((n) => /^ENGINE/.test(n))), 'CONTROL: a copy of the engine that skips the budget is RED');
 }
 console.log(fail ? `\nFAILED ${fail} (passed ${pass})` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

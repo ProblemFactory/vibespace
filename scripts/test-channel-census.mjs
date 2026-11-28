@@ -31,7 +31,7 @@ const CH = require(path.join(REPO, 'src/channels/index.js'));
 const fake = require(path.join(REPO, 'src/channels/fake.js'));
 const { makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -68,13 +68,13 @@ console.log('① the step table (PURE)');
     ['a watch that ended is no watch', { tier: 'cold', seconds: 900, lastPollAt: t, tierUntil: Infinity, watchUntil: t }, { cls: 'cold', due: 0, at: t + 900e3, eq: 1 }],
     ['the due instant ON the tier edge: the due flip (eq) wins', { tier: 'hot', seconds: 30, lastPollAt: t, tierUntil: t + 30e3 }, { cls: 'hot', due: 0, at: t + 30e3, eq: 1 }],
   ];
-  for (const [name, row, want] of rows) { const got = rc(row); ok(eqj(got, want), name, { got, want }); }
-  ok(!C.expired({ at: t, eq: 0 }, t) && C.expired({ at: t, eq: 0 }, t + 1) && C.expired({ at: t, eq: 1 }, t) && !C.expired({ at: t, eq: 1 }, t - 1) && !C.expired({ at: Infinity, eq: 0 }, 1e15), 'expired: an inclusive edge holds AT its instant, a due / watch edge expires AT it, Infinity never');
+  for (const [name, row, want] of rows) { const got = rc(row); ok(verdictOf(eqj(got, want)), name, { got, want }); }
+  ok(!C.expired({ at: t, eq: 0 }, t) && gateOf(C.expired({ at: t, eq: 0 }, t + 1)) && gateOf(C.expired({ at: t, eq: 1 }, t)) && !C.expired({ at: t, eq: 1 }, t - 1) && !C.expired({ at: Infinity, eq: 0 }, 1e15), 'expired: an inclusive edge holds AT its instant, a due / watch edge expires AT it, Infinity never');
   const ord = [{ key: 'b', at: 5, eq: 0 }, { key: 'a', at: 5, eq: 0 }, { key: 'c', at: 5, eq: 1 }, { key: 'd', at: 4, eq: 0 }].sort(C.untilCmp).map((j) => j.key).join('');
   ok(ord === 'dcab', `untilCmp: soonest first, at one instant the eq ones first, then by key (${ord})`);
   const k = C.emptyCounts();
   C.censusStep(k, null, { cls: 'hot', due: 1 }); C.censusStep(k, null, { cls: 'cold', due: 0 }); C.censusStep(k, { cls: 'hot', due: 1 }, { cls: 'warm', due: 0 }); C.censusStep(k, { cls: 'cold', due: 0 }, null); C.censusStep(k, null, { cls: null, due: 0 });
-  ok(eqj(k, { hot: 0, warm: 1, cold: 0, due: 0 }), 'censusStep: born / moved / gone / uncounted move exactly their counters', k);
+  ok(verdictOf(eqj(k, { hot: 0, warm: 1, cold: 0, due: 0 })), 'censusStep: born / moved / gone / uncounted move exactly their counters', k);
   const T = { hotRecentMinutes: 60, warmRecentHours: 24 };
   const tu = (lastAt) => caps.tierUntil({ lastAt }, t, { tiers: T });
   ok(tu(t - 10 * MIN) === t + 50 * MIN && tu(t - 3 * HOUR) === t + 21 * HOUR && tu(t - 2 * DAY) === Infinity && tu(null) === Infinity && tu(t - HOUR) === t, 'caps.tierUntil: the hot / warm window\'s last instant, cold and no message = Infinity');
@@ -190,7 +190,7 @@ const counted = (k) => real.kinds[k] || 0;
 console.log(`    ms: ${JSON.stringify(Object.fromEntries(Object.entries(real.ms).map(([k, v]) => [k, Math.round(v)])))} · setup + walk ${Date.now() - t0} ms`);
 ok(Object.keys(real.H.eng.store.index.live()).length === 10000, `fixture: 10 000 rows over 5 accounts — 4 behind the authoritative feed, 1 on the tiers (${Object.keys(real.H.eng.store.index.live()).length})`);
 ok(real.firstMiss === null && real.steps === 2000, `2 000 steps, ${real.checks} censuses judged — every one equals the walk field for field (${Date.now() - t0} ms)`, real.firstMiss);
-ok(['pass', 'tick', 'edge', 'message', 'override', 'unlist', 'stamp', 'watch', 'settings', 'clock-back', 'mass', 'mark-read'].every((k) => counted(k) > 0), `the walk reached every kind of step: ${JSON.stringify(real.kinds)}`);
+ok(verdictOf(['pass', 'tick', 'edge', 'message', 'override', 'unlist', 'stamp', 'watch', 'settings', 'clock-back', 'mass', 'mark-read'].every((k) => counted(k) > 0)), `the walk reached every kind of step: ${JSON.stringify(real.kinds)}`);
 {
   const s = real.H.eng.censusIndexStats();
   ok(s.builds >= 2 && s.rejudged > 1000, `the index was rebuilt (settings / clock back / a mass write: ${s.builds} builds) and re-judged rows (${s.rejudged})`);
@@ -230,7 +230,7 @@ for (const [name, mod] of controls) {
   const r = await walk(mod, 'ctl-' + name.slice(0, 12).replace(/\W/g, '_'), { rows: 1000 });
   ok(r.firstMiss !== null, `CONTROL: ${name} — red at ${r.firstMiss || 'never'}`);
 }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(verdictOf(r.pass), r.name, r.detail);
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

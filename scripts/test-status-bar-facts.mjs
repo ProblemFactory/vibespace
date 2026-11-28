@@ -25,7 +25,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -54,7 +54,7 @@ ok(OWNER_1.total_tokens === OWNER_1.input_tokens + OWNER_1.output_tokens && OWNE
 ok(J(U.usageOf(OWNER_1)) === J({ input: 545062, output: 172175, thinking: 70363, cacheRead: 6556922, total: 717237 }) && U.usageOf(null) === null && U.usageOf([]) === null && J(U.usageOf({ input_tokens: -3, output_tokens: 'x' })) === J({ input: 0, output: 0, thinking: 0, cacheRead: 0, total: 0 }),
   'usageOf: agy\'s five counters, absent / negative / junk = 0, a non-object = null');
 const tt = U.transcriptTurn(TRANSCRIPT);
-ok(tt.complete && tt.calls === 2 && tt.input === 3538 + 2379 && tt.cacheRead === 10191 + 87849 && tt.output === 169 + 1315 && J(tt.last) === J({ input: 2379, cacheRead: 87849, output: 1315 }),
+ok(gateOf(tt.complete) && tt.calls === 2 && tt.input === 3538 + 2379 && tt.cacheRead === 10191 + 87849 && tt.output === 169 + 1315 && J(tt.last) === J({ input: 2379, cacheRead: 87849, output: 1315 }),
   'transcriptTurn: the CURRENT turn = the model rows after the last USER_INPUT (a checkpoint and a tool row are not calls), its last call = the live context', tt);
 const cut = TRANSCRIPT.slice(TRANSCRIPT.indexOf('"step_index": 5') - 30);
 const tc = U.transcriptTurn(cut);
@@ -85,22 +85,22 @@ const mm = new AcpMessageManager('sid-usage');
 mm.onOp((op) => ops.push(op));
 mm.processLive(REC);
 const um = ops.find((o) => o.op === 'meta' && o.subtype === 'usage');
-ok(um && um.data.input_tokens === 2379 && um.data.cache_read_input_tokens === 87849 && um.data.cache_creation_input_tokens === 0 && um.data.totals.total_tokens === 717237 && um.data.totals.cached_input_tokens === 6556922 && um.data.totals.reasoning_output_tokens === 70363 && um.data.turnMs === 61700 && um.data.turn.calls === 2,
+ok(gateOf(um) && um.data.input_tokens === 2379 && um.data.cache_read_input_tokens === 87849 && um.data.cache_creation_input_tokens === 0 && um.data.totals.total_tokens === 717237 && um.data.totals.cached_input_tokens === 6556922 && um.data.totals.reasoning_output_tokens === 70363 && um.data.turnMs === 61700 && um.data.turn.calls === 2,
   'the usage meta: the LAST call is the context + cache (claude\'s last-message reading), the running total is the odometer (codex\'s totals shape: cached = cache reads, reasoning = thinking), the turn\'s spend + time ride beside', um?.data);
 ok(!ops.some((o) => o.subtype === 'served-model'), 'a model agy was only STARTED with is not announced as served');
 const ops2 = []; const mm2 = new AcpMessageManager('sid-usage2'); mm2.onOp((o) => ops2.push(o));
 mm2.processLive({ ...REC, last: null, modelFrom: 'agy' });
 const um2 = ops2.find((o) => o.subtype === 'usage');
-ok(um2 && um2.data.input_tokens === 0 && um2.data.cache_read_input_tokens === 0 && um2.data.totals.total_tokens === 717237 && ops2.some((o) => o.subtype === 'served-model' && o.data.model === 'gemini-4-argon-high'),
+ok(gateOf(um2) && um2.data.input_tokens === 0 && um2.data.cache_read_input_tokens === 0 && um2.data.totals.total_tokens === 717237 && verdictOf(ops2.some((o) => o.subtype === 'served-model' && o.data.model === 'gemini-4-argon-high')),
   'no last call (no transcript): zero context fields — the bar keeps its reading — the odometer still moves; a model agy NAMED is the served model', um2?.data);
 const BUF = scratchDir('sbf-buf');
 const buffer = [{ type: 'acp', kind: 'session', sessionId: REC.sessionId, cwd: '/w', how: 'new', model: 'gemini-4-argon-high' }, REC].map((r) => J(r)).join('\n') + '\n';
 const st = new AcpSessionMessages({ buffer }, 'sess-x', { buffersDir: BUF }).chatStatus();
-ok(st && st.lastUsage.input_tokens === 2379 && st.lastUsage.cache_read_input_tokens === 87849 && st.totalUsage.total_tokens === 717237 && st.turnMs === 61700 && st.turnUsage.calls === 2,
+ok(gateOf(st) && st.lastUsage.input_tokens === 2379 && st.lastUsage.cache_read_input_tokens === 87849 && st.totalUsage.total_tokens === 717237 && st.turnMs === 61700 && st.turnUsage.calls === 2,
   'chatStatus (attach / reload) replays the journal: the same last call, total, turn and time', st);
 fs.writeFileSync(path.join(BUF, 'sess-old.json'), J({ backend: 'antigravity', model: 'gemini-4-argon-high', usage: { ...OWNER_1, at: 1 } }));
 const old = new AcpSessionMessages({ buffer: buffer.split('\n')[0] + '\n' }, 'sess-old', { buffersDir: BUF }).chatStatus();
-ok(old && old.totalUsage.total_tokens === 717237 && old.totalUsage.cached_input_tokens === 6556922 && old.totalUsage.reasoning_output_tokens === 70363 && old.lastUsage === null,
+ok(gateOf(old) && old.totalUsage.total_tokens === 717237 && old.totalUsage.cached_input_tokens === 6556922 && old.totalUsage.reasoning_output_tokens === 70363 && old.lastUsage === null,
   'a conversation whose wrapper predates the record (dtach keeps it across an update): the odometer from the sidecar\'s own running total — the context stays unknown (no last call)', old);
 fs.writeFileSync(path.join(BUF, 'sess-acp.json'), J({ backend: 'opencode', usage: { used: 5000, size: 128000 } }));
 ok(new AcpSessionMessages({ buffer: buffer.split('\n')[0] + '\n' }, 'sess-acp', { buffersDir: BUF }).chatStatus().totalUsage === null, 'an ACP sidecar\'s {used, size} is no running total (no odometer invented)');
@@ -139,9 +139,9 @@ ok(new AcpSessionMessages({ buffer: buffer.split('\n')[0] + '\n' }, 'sess-acp', 
   } finally { AcpMessageManager.prototype._processRecord = pr; }
   const statusRecs = long.filter((r) => r.kind === 'session' || r.kind === 'usage' || (r.kind === 'update' && /^(?:current_mode|available_commands|session_info)_update$/.test(r.update.sessionUpdate))).length;
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  ok(attach.n === 0 && reload.n === statusRecs && reload.n < long.length / 5 && rel.once && rel.n >= long.length,
+  ok(attach.n === 0 && reload.n === statusRecs && reload.n < long.length / 5 && gateOf(rel.once) && rel.n >= long.length,
     `the status's record handling: the attach ${attach.n} (its rebuild's normalizer answers), a reload ${reload.n} of ${long.length} (the status records only); RED the release's chatStatus: ${rel.n} (the whole history again)`);
-  ok(same(attach.v, rel.v) && same(reload.v, rel.v) && same(require(path.join(REPO, 'src/acp-message-manager.js')).statusOf(long), full.status()) && attach.v.permissionMode === 'default' && attach.v.slashCommands.join() === 'cmd37' && attach.v.lastUsage.input_tokens === 2379,
+  ok(gateOf(same(attach.v, rel.v)) && gateOf(same(reload.v, rel.v)) && gateOf(same(require(path.join(REPO, 'src/acp-message-manager.js')).statusOf(long), full.status())) && attach.v.permissionMode === 'default' && attach.v.slashCommands.join() === 'cmd37' && attach.v.lastUsage.input_tokens === 2379,
     'the answers equal the release\'s full conversion (the mode, the commands, the usage — the last of each)', { attach: attach.v, rel: rel.v });
 }
 
@@ -183,28 +183,28 @@ async function barOf(file) {
 const bar = await barOf(path.join(REPO, 'src/lib/chat-status-bar.js'));
 {
   const a = bar('antigravity', { model: 'gemini-4-argon-high' }, um.data);
-  ok(a.ctx && /9%$/.test(a.ctx.text.replace(/\s+/g, '')) && a.ctx.used === '90k' && a.ctx.total === '1.0m' && /Context: 90k of 1\.0m tokens/.test(a.ctx.title) && /documented window/.test(a.ctx.title),
+  ok(gateOf(a.ctx) && gateOf(/9%$/.test(a.ctx.text.replace(/\s+/g, ''))) && a.ctx.used === '90k' && a.ctx.total === '1.0m' && gateOf(/Context: 90k of 1\.0m tokens/.test(a.ctx.title)) && verdictOf(/documented window/.test(a.ctx.title)),
     'antigravity: context % against the model\'s DOCUMENTED window (9 % of 90k/1.0m — the door\'s face the %, its [used/total] in data-* and its panel) — the title names the table as the window\'s source', a.ctx);
-  ok(a.cache && /97%/.test(a.cache.text) && /\(88k of 90k\)/.test(a.cache.title), 'antigravity: ⚡ the last call\'s cache hit rate (97 %), claude\'s rule', a.cache);
-  ok(a.odometer && a.odometer.text === 'Σ717k' && /in 545k, cached 6\.6m, out 172k, thinking 70k = 10% of the total/.test(a.odometer.title),
+  ok(gateOf(a.cache) && gateOf(/97%/.test(a.cache.text)) && verdictOf(/\(88k of 90k\)/.test(a.cache.title)), 'antigravity: ⚡ the last call\'s cache hit rate (97 %), claude\'s rule', a.cache);
+  ok(gateOf(a.odometer) && a.odometer.text === 'Σ717k' && verdictOf(/in 545k, cached 6\.6m, out 172k, thinking 70k = 10% of the total/.test(a.odometer.title)),
     'antigravity: Σ the odometer = agy\'s running total (717k), its title the split and the THINKING SHARE (10 % of the total)', a.odometer);
-  ok(a['turn-time'] && /1m01s/.test(a['turn-time'].text) && /The last turn took 1m01s · it spent 7k tokens \(in 6k, cached 98k, out 1k\) over 2 model calls/.test(a['turn-time'].title),
+  ok(gateOf(a['turn-time']) && gateOf(/1m01s/.test(a['turn-time'].text)) && verdictOf(/The last turn took 1m01s · it spent 7k tokens \(in 6k, cached 98k, out 1k\) over 2 model calls/.test(a['turn-time'].title)),
     'antigravity: the turn\'s own time (1m01s) and its spend in the title', a['turn-time']);
   ok(!a.unreported, 'antigravity reports all five — no «not reported» chip', a.unreported);
   const u = bar('antigravity', { model: 'gemini-9-ultra-high' }, um.data);
-  ok(u['ctx-unknown'] && u['ctx-unknown'].text === '90k/window unknown' && /window is unknown \(it is not in this harness's window table\)/.test(u['ctx-unknown'].title) && !u.ctx,
+  ok(gateOf(u['ctx-unknown']) && u['ctx-unknown'].text === '90k/window unknown' && gateOf(/window is unknown \(it is not in this harness's window table\)/.test(u['ctx-unknown'].title)) && !u.ctx,
     'a slug NOT in the table: «window unknown» with the token count — never a guessed percentage', u['ctx-unknown']);
   const keep = bar('antigravity', { model: 'gemini-4-argon-high' }, [um.data, um2.data]);
-  ok(keep.ctx && /9%/.test(keep.ctx.text), 'a later reading with no last call (no transcript) keeps the context it had — a sum never becomes a context', keep.ctx);
+  ok(gateOf(keep.ctx) && verdictOf(/9%/.test(keep.ctx.text)), 'a later reading with no last call (no transcript) keeps the context it had — a sum never becomes a context', keep.ctx);
   const c = bar('claude', { model: 'claude-fable-5-1', contextWindow: 200000, lastUsage: { input_tokens: 2000, cache_read_input_tokens: 48000, cache_creation_input_tokens: 0 } }, { input_tokens: 2000, cache_read_input_tokens: 48000, cache_creation_input_tokens: 0, totals: { total_tokens: 99 } });
-  ok(c.ctx && /25%/.test(c.ctx.text) && c.cache && /96%/.test(c.cache.text) && !c.odometer && !c['turn-time'],
+  ok(gateOf(c.ctx) && gateOf(/25%/.test(c.ctx.text)) && gateOf(c.cache) && gateOf(/96%/.test(c.cache.text)) && !c.odometer && !c['turn-time'],
     'claude: context + cache as before; no Σ / time chip even when a feed carries totals (its row declares neither)', c);
-  ok(c.unreported && c.unreported.text === 'not reported' && c.unreported.title === 'Not reported by this harness: token total, turn time', 'claude: ONE «not reported» chip naming what it lacks (token total, turn time) — never a blank', c.unreported);
+  ok(gateOf(c.unreported) && c.unreported.text === 'not reported' && c.unreported.title === 'Not reported by this harness: token total, turn time', 'claude: ONE «not reported» chip naming what it lacks (token total, turn time) — never a blank', c.unreported);
   const o = bar('opencode', { model: 'm' }, { input_tokens: 30000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, contextWindow: 128000, totals: null });
-  ok(o.ctx && /23%/.test(o.ctx.text) && !o.cache && !o['cache-k'], 'opencode (ACP: usage_update has no cache field): context yes, NO ⚡0% (the base drew a cache rate the stream never reported)', o);
-  ok(o.unreported && o.unreported.title === 'Not reported by this harness: cache hit rate, token total, turn time', 'opencode: «not reported» names the cache hit rate, the token total and the turn time', o.unreported);
+  ok(gateOf(o.ctx) && gateOf(/23%/.test(o.ctx.text)) && !o.cache && !o['cache-k'], 'opencode (ACP: usage_update has no cache field): context yes, NO ⚡0% (the base drew a cache rate the stream never reported)', o);
+  ok(gateOf(o.unreported) && o.unreported.title === 'Not reported by this harness: cache hit rate, token total, turn time', 'opencode: «not reported» names the cache hit rate, the token total and the turn time', o.unreported);
   const x = bar('codex', { model: 'gpt-a' }, { input_tokens: 40000, cache_read_input_tokens: 30000, cache_creation_input_tokens: 0, contextWindow: 400000, totals: { total_tokens: 900000, input_tokens: 800000, cached_input_tokens: 500000, output_tokens: 100000, reasoning_output_tokens: 60000 } });
-  ok(x.odometer && x.odometer.text === 'Σ900k' && /thinking 60k = 7% of the total/.test(x.odometer.title) && x.unreported?.title === 'Not reported by this harness: turn time',
+  ok(gateOf(x.odometer) && x.odometer.text === 'Σ900k' && gateOf(/thinking 60k = 7% of the total/.test(x.odometer.title)) && x.unreported?.title === 'Not reported by this harness: turn time',
     'codex: its totals are the same odometer row (Σ900k, reasoning = the thinking share); it lacks only the turn time', x);
 }
 
@@ -213,17 +213,17 @@ const M = mutantCopies('status-bar-facts', REPO);
 {
   const src = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
   const gate = '    if (facts.cache && this._statusLastCacheRead != null && this._statusLastInputTokens) {';
-  ok(src.includes(gate), 'control anchor: the cache chip is gated on the facts row');
+  ok(verdictOf(src.includes(gate)), 'control anchor: the cache chip is gated on the facts row');
   const mbar = await barOf(M.write('src/lib/chat-status-bar.js', editAnchor(src, gate, '    if (this._statusLastCacheRead != null && this._statusLastInputTokens) {', "src/lib/chat-status-bar.js"), 'nogate', { esm: true }));
   const o = mbar('opencode', { model: 'm' }, { input_tokens: 30000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, contextWindow: 128000 });
-  ok(o.cache && /0%/.test(o.cache.text), 'RED (the base shape): without the row gate opencode draws ⚡0% — a cache rate its stream never reported (③ sees it)', o.cache);
+  ok(gateOf(o.cache) && verdictOf(/0%/.test(o.cache.text)), 'RED (the base shape): without the row gate opencode draws ⚡0% — a cache rate its stream never reported (③ sees it)', o.cache);
   const usrc = fs.readFileSync(path.join(REPO, 'src/agy-turn-usage.js'), 'utf8');
   const lastLine = '  const last = transcript && transcript.last ? { ...transcript.last } : null;';
-  ok(usrc.includes(lastLine), 'control anchor: the context is the transcript\'s LAST call');
+  ok(verdictOf(usrc.includes(lastLine)), 'control anchor: the context is the transcript\'s LAST call');
   const MU = M.load('src/agy-turn-usage.js', editAnchor(usrc, lastLine, '  const last = turn ? { input: turn.input, cacheRead: turn.cacheRead, output: turn.output } : null;', "src/agy-turn-usage.js"), 'sum-as-context');
   const bad = MU.turnUsage({ usage: OWNER_1, transcript: { complete: true, calls: 90, input: 545062, output: 172175, cacheRead: 6556922, last: { input: 2379, cacheRead: 87849, output: 1315 } } });
   ok(ctxPct(bad.last) === 677, 'RED: the context taken from the turn\'s SUM reads 677 % of the window on the owner\'s measured turn (① sees 9 %)', ctxPct(bad.last));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

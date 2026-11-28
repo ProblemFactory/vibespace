@@ -24,7 +24,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -58,7 +58,7 @@ const RCLONE_SAMPLES = [
   const tok = obscure('a longer sample value');
   ok(!/[+/=]/.test(tok), '§1 the token is base64url — no +, /, or = padding', tok);
   let threw = false; try { reveal('AAA'); } catch { threw = true; }
-  ok(threw, '§1 a token too short to hold a 16-byte IV throws (never a silent empty reveal)');
+  ok(verdictOf(threw), '§1 a token too short to hold a 16-byte IV throws (never a silent empty reveal)');
 }
 
 // ── §2 REAL BINARY (SKIP by name without rclone) ──────────────────────────────
@@ -85,8 +85,8 @@ const RCLONE_SAMPLES = [
   const passOf = (rec) => mm._rcloneFor(mm._get(mm.add(rec))).env.RCLONE_CONFIG_VS_PASS;
   const dav = passOf({ type: 'webdav', name: 'dav', url: 'https://dav.example/', vendor: 'nextcloud', user: 'u', pass: SECRET });
   const sftp = passOf({ type: 'sftp', name: 'sftp', sshHost: 'h', sshUser: 'u', sshPort: '22', pass: SECRET });
-  ok(dav && reveal(dav) === SECRET && dav !== SECRET, '§3 webdav: RCLONE_CONFIG_VS_PASS is the obscured form (reveals to the secret, is not the plaintext)', JSON.stringify(dav));
-  ok(sftp && reveal(sftp) === SECRET && sftp !== SECRET, '§3 sftp: RCLONE_CONFIG_VS_PASS is the obscured form (reveals to the secret, is not the plaintext)', JSON.stringify(sftp));
+  ok(gateOf(dav) && reveal(dav) === SECRET && dav !== SECRET, '§3 webdav: RCLONE_CONFIG_VS_PASS is the obscured form (reveals to the secret, is not the plaintext)', JSON.stringify(dav));
+  ok(gateOf(sftp) && reveal(sftp) === SECRET && sftp !== SECRET, '§3 sftp: RCLONE_CONFIG_VS_PASS is the obscured form (reveals to the secret, is not the plaintext)', JSON.stringify(sftp));
   ok(typeof mm._obscure('z') === 'string', '§3 _obscure returns a string synchronously (no exec, no Promise — nothing blocks the loop)');
   const env = mm._rcloneFor(mm._get(mm.add({ type: 'webdav', name: 'dav2', url: 'https://d/', user: 'u', pass: SECRET }))).env;
   const leak = Object.entries(env).filter(([, v]) => String(v).includes(SECRET)).map(([k]) => k);
@@ -126,9 +126,9 @@ const RCLONE_SAMPLES = [
   fs.writeFileSync(cap, '');
   runPass(MUT, 'mutant');
   const capMut = fs.readFileSync(cap, 'utf8');
-  ok(capMut.includes(SENT) && capMut.includes('obscure'),
+  ok(gateOf(capMut.includes(SENT)) && verdictOf(capMut.includes('obscure')),
     '§4 MUTANT: the pre-fix `rclone obscure <plain>` child puts the plaintext on its /proc cmdline ⇒ RED (the control catches it)', `sentinel on a cmdline: ${capMut.includes(SENT)}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

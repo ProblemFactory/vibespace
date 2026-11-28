@@ -18,7 +18,7 @@ import { phoneBarFold, PHONE_BAR_NEVER_FOLD } from '../src/lib/title-chips.js';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + JSON.stringify(detail).slice(0, 400) : ''}`); }
 };
@@ -77,17 +77,17 @@ function judgeCss(css) {
 console.log('① the shipped sources');
 const ci = read('src/lib/chat-input.js'), sb = read('src/lib/chat-status-bar.js'), css = read('public/chat.css');
 const jI = judgeInput(ci), jB = judgeBar(sb), jC = judgeCss(css);
-ok('desk: the composer row is the pinned one (image · mic · upload · field · ⤢) — no door, no field box', jI.desk, jI);
-ok('phone: ONE leading + door, then the field — the desk buttons are not beside it', jI.phone, jI);
-ok('the desk order is captured before the phone face exists', jI.deskFirst, jI);
-ok('phone: the mic (and ⤢) live INSIDE the field box', jI.mic, jI);
-ok('the + sheet says what each row opens — 拍照 (the camera door) · 照片 · 文件 · 文件夹, in that order', jI.sheet, jI);
-ok('拍照 = the camera door\'s OWN input (image/*, capture=environment, one shot), its row only on a finger device, the shot on _addImageAttachment', jI.camera, jI);
-ok('照片 = the gallery input: image/*, multiple, no capture', jI.gallery, jI);
-ok('the phone face is gated on the 768 px query (and follows it)', jI.gated, jI);
-ok('the status bar: no ⋯ and no fold at any width — the row break between the strip\'s two rows below ONE_ROW_PX (lane mask-value-shape; was ⋯ on a phone / a desk window under 480 px)', jB.noMore && jB.rowBreak, jB);
-ok('the thinking level sits inside the model door, the output style is a row of «⚙ 对话设置» (was: the model chip\'s phone sheet carried both)', jB.doors, jB);
-ok('chat.css: the phone block is gated — outside the query it only hides the door', jC.block && jC.gated, jC);
+ok('desk: the composer row is the pinned one (image · mic · upload · field · ⤢) — no door, no field box', verdictOf(jI.desk), jI);
+ok('phone: ONE leading + door, then the field — the desk buttons are not beside it', verdictOf(jI.phone), jI);
+ok('the desk order is captured before the phone face exists', verdictOf(jI.deskFirst), jI);
+ok('phone: the mic (and ⤢) live INSIDE the field box', verdictOf(jI.mic), jI);
+ok('the + sheet says what each row opens — 拍照 (the camera door) · 照片 · 文件 · 文件夹, in that order', verdictOf(jI.sheet), jI);
+ok('拍照 = the camera door\'s OWN input (image/*, capture=environment, one shot), its row only on a finger device, the shot on _addImageAttachment', verdictOf(jI.camera), jI);
+ok('照片 = the gallery input: image/*, multiple, no capture', verdictOf(jI.gallery), jI);
+ok('the phone face is gated on the 768 px query (and follows it)', verdictOf(jI.gated), jI);
+ok('the status bar: no ⋯ and no fold at any width — the row break between the strip\'s two rows below ONE_ROW_PX (lane mask-value-shape; was ⋯ on a phone / a desk window under 480 px)', gateOf(jB.noMore) && verdictOf(jB.rowBreak), jB);
+ok('the thinking level sits inside the model door, the output style is a row of «⚙ 对话设置» (was: the model chip\'s phone sheet carried both)', verdictOf(jB.doors), jB);
+ok('chat.css: the phone block is gated — outside the query it only hides the door', gateOf(jC.block) && verdictOf(jC.gated), jC);
 
 console.log('② i18n — the sheet + bar words in zh / ja');
 for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) {
@@ -105,7 +105,7 @@ ok('RED: the camera door taking many shots', !judgeInput(ci.replace("input.setAt
 ok('RED: the shot on another road (the upload)', !judgeInput(ci.replace('cameraDoor((shot) => this._addImageAttachment(shot))', 'cameraDoor((shot) => this.uploadFiles([shot]))')).camera);
 ok('RED: the gallery input gaining capture', !judgeInput(ci.replace('attachInput.multiple = true;', "attachInput.multiple = true; attachInput.setAttribute('capture', 'environment');")).gallery);
 ok('RED: 拍照 opening the gallery input', !judgeInput(ci.replace('        camera.row(),', "        sheetRow(UI_ICONS.camera, t('Take photo'), () => attachInput.click()),")).sheet);
-ok('RED: the ⋯ chip planted back', judgeBar(sb).noMore && !judgeBar(sb.replace("chip('settings', ", "chip('more', 'chat-status-more', '', '\u22EF');\n    chip('settings', ")).noMore);
+ok('RED: the ⋯ chip planted back', gateOf(judgeBar(sb).noMore) && !judgeBar(sb.replace("chip('settings', ", "chip('more', 'chat-status-more', '', '\u22EF');\n    chip('settings', ")).noMore);
 ok('RED: the row break taken out (the rows run together)', !judgeBar(sb.replace('if (!one && firstRow2 > 0) ordered.splice(', 'if (false) ordered.splice(')).rowBreak);
 
 console.log('④ the fold table (PURE phoneBarFold; lane phone-bar-billing-nofold — mirror-262: the runner\'s fonts folded the billing chip)');
@@ -114,22 +114,22 @@ console.log('④ the fold table (PURE phoneBarFold; lane phone-bar-billing-nofol
 const row = (model, bill) => [['search', 36], ['model', model], ['effort', 51], ['goal', 20], ['style', 80], ['autoresume', 20], ['design', 20], ['billing', bill.full], ['perm', 51]]
   .map(([key, w]) => (key === 'billing' ? { key, w, forms: bill } : { key, w }));
 const plan = (fold, model, bill, room = 322) => { const p = fold({ chips: row(model, bill), room, gap: 8 }); return { folded: [...p.folded].join(','), billing: p.billing }; };
-ok('the never-fold set: search · model · turn state · health · the billing chip (who pays) — what waits on you is the window\'s attention dock above the message box, never a bar chip (lane needs-card-tail r10)', ['search', 'model', 'turnstate', 'health', 'billing'].every((k) => PHONE_BAR_NEVER_FOLD.includes(k)) && !PHONE_BAR_NEVER_FOLD.includes('foryou') && PHONE_BAR_NEVER_FOLD.length === 5, PHONE_BAR_NEVER_FOLD);
+ok('the never-fold set: search · model · turn state · health · the billing chip (who pays) — what waits on you is the window\'s attention dock above the message box, never a bar chip (lane needs-card-tail r10)', gateOf(['search', 'model', 'turnstate', 'health', 'billing'].every((k) => PHONE_BAR_NEVER_FOLD.includes(k))) && !PHONE_BAR_NEVER_FOLD.includes('foryou') && PHONE_BAR_NEVER_FOLD.length === 5, PHONE_BAR_NEVER_FOLD);
 const hub = plan(phoneBarFold, 66, { full: 117, compact: 63, icon: 19 }), runner = plan(phoneBarFold, 74, { full: 121, compact: 64, icon: 19 });
 ok('hub fonts: billing full; effort · style · perm fold', hub.billing === 'full' && hub.folded === 'effort,style,perm', hub);
 ok('runner fonts: billing STILL full — design folds instead', runner.billing === 'full' && runner.folded === 'effort,style,design,perm', runner);
 const wide = plan(phoneBarFold, 74, { full: 200, compact: 64, icon: 19 }), narrow = plan(phoneBarFold, 74, { full: 121, compact: 64, icon: 19 }, 150), none = plan(phoneBarFold, 74, { full: 121, compact: 64, icon: 19 }, 60);
 ok('the three forms by the room the other never-fold chips leave: full → compact → icon', wide.billing === 'compact' && narrow.billing === 'icon' && runner.billing === 'full', { wide, narrow });
-ok('no room at all: the icon still draws — the billing chip is never in the folded set', none.billing === 'icon' && !none.folded.split(',').includes('billing') && none.folded.includes('goal'), none);
-ok('effort + style always fold and their width folds nothing else (style 80 px > the room left)', hub.folded.split(',').includes('style') && !hub.folded.includes('autoresume'), hub);
+ok('no room at all: the icon still draws — the billing chip is never in the folded set', none.billing === 'icon' && !none.folded.split(',').includes('billing') && verdictOf(none.folded.includes('goal')), none);
+ok('effort + style always fold and their width folds nothing else (style 80 px > the room left)', gateOf(hub.folded.split(',').includes('style')) && !hub.folded.includes('autoresume'), hub);
 // lane mask-value-shape: the status bar folds nothing any more (its billing chip is a row of «⚙ 对话设置», its full words
 // the row's value) — the PURE table above stays title-chips.js's own; the bar no longer imports it
 ok('wiring: the status bar no longer folds by phoneBarFold (nothing folds; the billing chip is a row of «⚙ 对话设置» whose value is its FULL words)',
-  !/phoneBarFold/.test(sb) && /inDoor\('billing', [^\n]*value: forms\.full \}\);/.test(sb), null);
+  !/phoneBarFold/.test(sb) && verdictOf(/inDoor\('billing', [^\n]*value: forms\.full \}\);/.test(sb)), null);
 { // RED control: the billing chip foldable again (the base's rule) — the runner row folds it
   const tc = read('src/lib/title-chips.js'), f = path.join(os.tmpdir(), `vs-phonebar-red-${process.pid}.mjs`);
   fs.writeFileSync(f, editAnchor(tc, "'turnstate', 'health', 'billing']", "'turnstate', 'health']", "src/lib/title-chips.js"));
-  try { const red = await import(pathToFileURL(f).href), r = plan(red.phoneBarFold, 74, { full: 121, compact: 64, icon: 19 }); ok('RED: billing out of the never-fold set ⇒ the runner row folds it', r.folded.split(',').includes('billing'), r); }
+  try { const red = await import(pathToFileURL(f).href), r = plan(red.phoneBarFold, 74, { full: 121, compact: 64, icon: 19 }); ok('RED: billing out of the never-fold set ⇒ the runner row folds it', verdictOf(r.folded.split(',').includes('billing')), r); }
   finally { fs.rmSync(f, { force: true }); }
 }
 
@@ -160,17 +160,17 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
   // ⑤a the PURE verdicts — the type from the BYTES, then the size as the API measures it (its base64), the sides, the total; no count
   const j = (head, size = 1000, total = 0, limits = CL) => R.judgeImage({ size, head }, { total, limits });
   ok('PNG / JPEG / GIF / WebP taken, each with the type its bytes say (and its sides read from the header)', j(PNG).mediaType === 'image/png' && j(JPEG).mediaType === 'image/jpeg' && j(JPEG).width === 640 && j(JPEG).height === 480 && j(GIF).mediaType === 'image/gif' && j(GIF).width === 320 && j(WEBP).mediaType === 'image/webp' && j(WEBP).width === 8000, [j(PNG), j(JPEG), j(GIF), j(WEBP)]);
-  ok('HEIC / HEIF refused BY NAME (heic, heix, mif1 brands)', [box('heic'), box('heix'), box('mif1', 'heic')].every((h) => j(h).code === 'heic'), [box('heic'), box('mif1', 'heic')].map((h) => j(h)));
+  ok('HEIC / HEIF refused BY NAME (heic, heix, mif1 brands)', verdictOf([box('heic'), box('heix'), box('mif1', 'heic')].every((h) => j(h).code === 'heic')), [box('heic'), box('mif1', 'heic')].map((h) => j(h)));
   ok('an AVIF — even one whose major brand is the generic mif1 — is «not a picture the model reads», never called a HEIC', j(box('avif')).code === 'not_image' && j(box('mif1', 'miaf', 'avif')).code === 'not_image', [j(box('avif')), j(box('mif1', 'miaf', 'avif'))]);
   ok('a text file (whatever the browser declared) is not a picture', j(TXT).code === 'not_image' && j([]).code === 'not_image', [j(TXT), j([])]);
   ok('a 0-byte file is refused as empty (before its missing bytes are judged)', j([], 0).code === 'empty' && j(PNG, 0).code === 'empty');
   ok(`claude's size cap is the API's own measure — the BASE64 of one picture ≤ 5 MiB, i.e. a file ≤ ${R.refusalVars({}, CL).mb} MiB: the largest fitting file taken, one byte more refused`,
-    B64CAP === 5 * 1024 * 1024 && FILECAP === 3932160 && R.refusalVars({}, CL).mb === 3.75 && j(PNG, FILECAP).ok && j(PNG, FILECAP + 1).code === 'too_big' && j(PNG, FILECAP).b64 === B64CAP, [j(PNG, FILECAP), j(PNG, FILECAP + 1)]);
+    B64CAP === 5 * 1024 * 1024 && FILECAP === 3932160 && R.refusalVars({}, CL).mb === 3.75 && gateOf(j(PNG, FILECAP).ok) && j(PNG, FILECAP + 1).code === 'too_big' && j(PNG, FILECAP).b64 === B64CAP, [j(PNG, FILECAP), j(PNG, FILECAP + 1)]);
   ok('a 4.5 MB screenshot (it fits «5 MB» as a file but not as the base64 the API measures) is refused — the row\'s «fails later at the vendor»', j(PNG, 4.5e6).code === 'too_big');
   ok('the type is judged before the size: a 40 MB text file is «not a picture», not «too big»', j(TXT, 40 * 1024 * 1024).code === 'not_image');
   ok(`a side over ${SIDE} px is refused with its sides (PNG, JPEG after its EXIF, WebP); exactly ${SIDE} taken`,
-    j(png(1440, 12000)).code === 'too_wide' && j(png(1440, 12000)).height === 12000 && j(jpeg(9000, 100)).code === 'too_wide' && j(png(8000, 8000)).ok && j(WEBP).ok, [j(png(1440, 12000)), j(jpeg(9000, 100))]);
-  ok('a JPEG whose frame header lies past the head (or a cut header) has no known sides and is judged on the rest', j(jpegDeep(9000, 100).slice(0, R.HEAD_BYTES)).ok && j(jpegDeep(9000, 100)).code === 'too_wide' && j(JPEG.slice(0, 8)).ok);
+    j(png(1440, 12000)).code === 'too_wide' && j(png(1440, 12000)).height === 12000 && j(jpeg(9000, 100)).code === 'too_wide' && gateOf(j(png(8000, 8000)).ok) && verdictOf(j(WEBP).ok), [j(png(1440, 12000)), j(jpeg(9000, 100))]);
+  ok('a JPEG whose frame header lies past the head (or a cut header) has no known sides and is judged on the rest', gateOf(j(jpegDeep(9000, 100).slice(0, R.HEAD_BYTES)).ok) && j(jpegDeep(9000, 100)).code === 'too_wide' && verdictOf(j(JPEG.slice(0, 8)).ok));
   ok(`the message's total: a picture that takes its pictures past ${REQ / 1e6} MB of base64 (the API's request size) is refused; up to it taken`,
     j(PNG, 3e6, REQ - 4e6 + 1).code === 'too_much' && j(PNG, 3e6, REQ - 4e6).ok === true, [j(PNG, 3e6, REQ - 4e6 + 1), j(PNG, 3e6, REQ - 4e6)]);
   ok('NO count cap (主开发 22:55Z): no count in the verdict, no count word', !('maxCount' in R.CAPS) && !Object.keys(R.REFUSAL_WORDS).some((k) => /many|count/.test(k)), Object.keys(R.REFUSAL_WORDS));
@@ -178,9 +178,9 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
   const b64 = (bytes) => Buffer.from(bytes).toString('base64');
   const same = [PNG, JPEG, GIF, WEBP, box('heic'), TXT, png(1440, 12000)].every((h) => JSON.stringify(R.judgeImageBase64(b64(h), { limits: CL })) === JSON.stringify(j(h, h.length)));
   const sizes = [1, 2, 3, 4, 5, 100].every((n) => R.bytesOfBase64(b64(new Array(n).fill(7))) === n);
-  ok('judgeImageBase64 = judgeImage over the same bytes (the JPEG\'s sides found after its EXIF too); bytesOfBase64 exact at padding 0 / 1 / 2', same && sizes && R.judgeImageBase64('').code === 'empty' && R.judgeImageBase64(null).code === 'empty' && R.judgeImageBase64('!!!!' + b64(PNG)).code === 'not_image' && R.judgeImageBase64(b64(jpeg(9000, 100)), { limits: CL }).code === 'too_wide');
+  ok('judgeImageBase64 = judgeImage over the same bytes (the JPEG\'s sides found after its EXIF too); bytesOfBase64 exact at padding 0 / 1 / 2', gateOf(same) && gateOf(sizes) && R.judgeImageBase64('').code === 'empty' && R.judgeImageBase64(null).code === 'empty' && R.judgeImageBase64('!!!!' + b64(PNG)).code === 'not_image' && R.judgeImageBase64(b64(jpeg(9000, 100)), { limits: CL }).code === 'too_wide');
   const sized = (n) => { const b = Buffer.alloc(n); Buffer.from(PNG).copy(b); return b; };
-  ok('a base64 picture one byte over the cap is refused, at the cap taken; the belt sums the total it is given', R.judgeImageBase64(sized(FILECAP + 1).toString('base64'), { limits: CL }).code === 'too_big' && R.judgeImageBase64(sized(FILECAP).toString('base64'), { limits: CL }).ok && R.judgeImageBase64(sized(1000).toString('base64'), { total: REQ, limits: CL }).code === 'too_much');
+  ok('a base64 picture one byte over the cap is refused, at the cap taken; the belt sums the total it is given', R.judgeImageBase64(sized(FILECAP + 1).toString('base64'), { limits: CL }).code === 'too_big' && gateOf(R.judgeImageBase64(sized(FILECAP).toString('base64'), { limits: CL }).ok) && R.judgeImageBase64(sized(1000).toString('base64'), { total: REQ, limits: CL }).code === 'too_much');
   // ⑤c THE DOOR over real File objects: judged on the head, the refused never read whole, ONE refusal call per hand-over
   const runDoor = async (mod, { held = () => 0, extra = [], limits = () => CL } = {}) => {
     const reads = [], added = [], refusals = [];
@@ -243,7 +243,7 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
     };
   };
   const roads = judgeRoads(ci);
-  ok('the paste, the gallery (one hand-over) and the camera shot all ride _addImageAttachment, which asks THE door with the message\'s held total; no raw FileReader road, no declared-type default', Object.values(roads).every(Boolean), roads);
+  ok('the paste, the gallery (one hand-over) and the camera shot all ride _addImageAttachment, which asks THE door with the message\'s held total; no raw FileReader road, no declared-type default', verdictOf(Object.values(roads).every(Boolean)), roads);
   for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) {
     const src = read(f), keys = [...Object.values(R.REFUSAL_WORDS), '{name} — {why}', 'the pasted picture', 'Picture not added: {line}', '{n} pictures not added: {lines}'];
     const miss = keys.filter((k) => !src.includes(`${JSON.stringify(k)}:`));
@@ -253,8 +253,8 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
   // applied to all»): claude's row states the Claude API's three; a harness that states none gets NO numeric cap — the type,
   // the empty file and HEIC stay for everyone
   const ids = Object.keys(BC.BACKEND_CAPS);
-  ok('every shipped harness row DECLARES imageLimits (an object of three numbers, or null = states none)', ids.every((id) => 'imageLimits' in BC.BACKEND_CAPS[id] && (BC.BACKEND_CAPS[id].imageLimits === null || ['b64PerPicture', 'sidePx', 'requestB64'].every((k) => BC.BACKEND_CAPS[id].imageLimits[k] > 0))), ids.map((id) => [id, BC.BACKEND_CAPS[id].imageLimits]));
-  ok('claude states the Claude API\'s limits (5 MiB of base64, 8000 px, 32 MB); every other shipped harness states none; no harness named = none', CL.b64PerPicture === 5 * 1024 * 1024 && CL.sidePx === 8000 && CL.requestB64 === 32e6 && ids.filter((id) => id !== 'claude').every((id) => BC.imageLimitsOf(id) === null) && BC.imageLimitsOf(undefined) === null && BC.imageLimitsOf('') === null);
+  ok('every shipped harness row DECLARES imageLimits (an object of three numbers, or null = states none)', verdictOf(ids.every((id) => 'imageLimits' in BC.BACKEND_CAPS[id] && (BC.BACKEND_CAPS[id].imageLimits === null || ['b64PerPicture', 'sidePx', 'requestB64'].every((k) => BC.BACKEND_CAPS[id].imageLimits[k] > 0)))), ids.map((id) => [id, BC.BACKEND_CAPS[id].imageLimits]));
+  ok('claude states the Claude API\'s limits (5 MiB of base64, 8000 px, 32 MB); every other shipped harness states none; no harness named = none', CL.b64PerPicture === 5 * 1024 * 1024 && CL.sidePx === 8000 && CL.requestB64 === 32e6 && gateOf(ids.filter((id) => id !== 'claude').every((id) => BC.imageLimitsOf(id) === null)) && BC.imageLimitsOf(undefined) === null && BC.imageLimitsOf('') === null);
   const PHOTO = 4.6e6, CX = BC.imageLimitsOf('codex');
   ok('THE SAME 4.6 MB phone JPEG: refused for claude (too_big), TAKEN for codex — and a 1440 × 12000 page and a request past 32 MB likewise', j(JPEG, PHOTO).code === 'too_big' && j(JPEG, PHOTO, 0, CX).ok === true && j(png(1440, 12000), 1000, 0, CX).ok === true && j(PNG, 3e6, 40e6, CX).ok === true, [j(JPEG, PHOTO), j(JPEG, PHOTO, 0, CX)]);
   ok('…the type, the empty file and HEIC stay for every harness', j(box('heic'), 1000, 0, CX).code === 'heic' && j(TXT, 1000, 0, CX).code === 'not_image' && j([], 0, 0, CX).code === 'empty');
@@ -276,8 +276,8 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
   {
     const cvSrc = read('src/lib/chat-view.js'), rpSrc = read('src/lib/reply-pictures.js'), upSrc = read('src/lib/user-todos-panel.js'), iwSrc = read('src/lib/inbox-window.js');
     ok('WIRING: the composer\'s door judges with ITS conversation\'s harness (chat-view hands the backend in); the For-you boxes with the asking conversation\'s (its key, else its live row)',
-      /limits: \(\) => imageLimitsOf\(this\._getBackend\(\)\),/.test(ci) && /getBackend: \(\) => \(this\._getSessionIds\(\) \|\| \{\}\)\.backend \|\| null,/.test(cvSrc)
-      && /limits: \(\) => imageLimitsOf\(typeof backend === 'function' \? backend\(\) : backend\),/.test(rpSrc) && /const key = i\.sessionKey;[^\n]*\n\s+const pics = replyPictures\(\{[^\n]*backend: \(\) => backendOfKey\(key\)/.test(upSrc) && /return backendOfKey\(it && it\.sessionKey\);/.test(iwSrc));
+      gateOf(/limits: \(\) => imageLimitsOf\(this\._getBackend\(\)\),/.test(ci)) && gateOf(/getBackend: \(\) => \(this\._getSessionIds\(\) \|\| \{\}\)\.backend \|\| null,/.test(cvSrc))
+      && gateOf(/limits: \(\) => imageLimitsOf\(typeof backend === 'function' \? backend\(\) : backend\),/.test(rpSrc)) && gateOf(/const key = i\.sessionKey;[^\n]*\n\s+const pics = replyPictures\(\{[^\n]*backend: \(\) => backendOfKey\(key\)/.test(upSrc)) && verdictOf(/return backendOfKey\(it && it\.sessionKey\);/.test(iwSrc)));
     const a = rpSrc.indexOf('export function backendOfKey('), e = rpSrc.indexOf('\n}\n', a);
     const backendOfKey = new Function('harnessOfRecord', `${rpSrc.slice(a + 'export '.length, e + 2)}\nreturn backendOfKey;`)(req('../src/backend-caps.js').harnessOfRecord);   // the ONE rule a row without a harness reads by (cure 2)
     const rows = [{ webuiId: 'sess-9', backend: 'codex' }, { webuiId: 'sess-8' }];
@@ -297,7 +297,7 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
     const noRule = path.join(tmp, 'door-no-rule.mjs');
     fs.writeFileSync(noRule, editAnchor(doorSrc, "const v = judgeImage({ size: file && file.size, head }, { total: (Number(held()) || 0) + inFlight, limits: lim });", "const v = { ok: true, mediaType: file.type || 'image/png', b64: 0 };", "src/lib/image-attach.js"));
     const red = await runDoor(await import(pathToFileURL(noRule).href));
-    ok('RED: a door with no rule takes the HEIC, the empty file, the text, the tall page, and reads the big file whole', red.added.length === 7 && red.reads.includes('big.png') && !red.refusals.length, { added: red.added.length, reads: red.reads });
+    ok('RED: a door with no rule takes the HEIC, the empty file, the text, the tall page, and reads the big file whole', red.added.length === 7 && gateOf(red.reads.includes('big.png')) && !red.refusals.length, { added: red.added.length, reads: red.reads });
     const ruleSrc = read('src/image-attach-rule.js');
     const noCap = path.join(tmp, 'rule-no-cap.cjs'), noTotal = path.join(tmp, 'rule-no-total.cjs');
     const capLine = "  if (perPicture && b64 > perPicture) return { ok: false, code: 'too_big', size: n };\n", totalLine = "  if (request && (Number(total) || 0) + b64 > request) return { ok: false, code: 'too_much', size: n };\n";
@@ -315,4 +315,4 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

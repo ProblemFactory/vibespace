@@ -48,7 +48,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 50) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -93,7 +93,7 @@ else await (async () => {
   let journal = '';
   const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), 'the scratch server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000, 100)), 'the scratch server booted', journal.slice(-800))) return;
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
   const create = async (reqId, name) => { ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: ROOT, cols: 80, rows: 24, reqId, name })); await until(() => msgs.some((m) => m.type === 'created' && m.reqId === reqId), 15000); return msgs.find((m) => m.type === 'created' && m.reqId === reqId)?.sessionId; };
@@ -124,7 +124,7 @@ else await (async () => {
     await send('Emulation.setDeviceMetricsOverride', { width: 1571, height: 854, deviceScaleFactor: 2.2, mobile: false });
     await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
     let booted = false; for (let i = 0; i < 120 && !booted; i++) { try { booted = await ev('if (!window.app || !window.app.ready) return false; return await Promise.race([window.app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 100))]);'); } catch { } if (!booted) await sleep(250); }
-    if (!ok(booted, 'the app booted in headless chrome (1571×854, DPR 2.2, UI scale 90 %)')) return;
+    if (!ok(verdictOf(booted), 'the app booted in headless chrome (1571×854, DPR 2.2, UI scale 90 %)')) return;
     await sleep(1200);
     const S = JSON.stringify;
     const mouse = (type, x, y, extra = {}) => send('Input.dispatchMouseEvent', { type, x, y, ...extra });
@@ -148,12 +148,12 @@ else await (async () => {
     await ev(`const id = dm.createDesktop(); dm.renameDesktop(id, 'Work'); return id;`);
     await ev(`app.settings.set('desktop.dynamicEnabled', true); return true;`);
     await sleep(600);
-    ok(await ev('return !!(st && st.enabled);'), 'the Stage is enabled');
+    ok(verdictOf(await ev('return !!(st && st.enabled);')), 'the Stage is enabled');
     await ev('st.saveSlot({ left: 0.4, top: 0, width: 0.6, height: 0.62 }); await st.enter(); return true;');
     await sleep(500);
     await ev(`app.attachSession(${S(sidM)}, 'Alpha', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
     const heroOk = await until(() => ev(`const h = st._heroWinId && wm.windows.get(st._heroWinId); return !!(h && h.type === 'chat' && (app.sessions.get(h.id) || {}).sessionId === ${S(sidM)});`), 12000);
-    if (!ok(heroOk, 'Alpha materialized as the Stage hero')) return;
+    if (!ok(verdictOf(heroOk), 'Alpha materialized as the Stage hero')) return;
     await until(() => ev('return !!st._heroKey || !!st._sessionKeyFor(wm.windows.get(st._heroWinId));'), 8000);
     const heroId = await ev('return st._heroWinId;');
     // THE LIVE VIEW'S BIRTH, as the incident's ring allows it: the Stage was left and entered again and again (ten
@@ -169,21 +169,21 @@ else await (async () => {
     // agent's browser that starts while the Stage is off screen opens NOTHING in the parked hero's group — a card (the hero's
     // badge). At the release the parked hero stayed the active window (B-2dbe's bug) and the auto-bind took it for «looking».
     const law = await ev(`return { none: !wm.windows.get(${S(liveId)}), active: wm.activeWindowId || null, card: !!wm.windows.get(${S(heroId)})?.element?.classList?.contains('window-arrived') };`);
-    ok(Array.isArray(opened) && opened.length === 0 && law.none && law.active !== heroId && law.card, 'the agent\'s browser starts while the Stage is off screen: NOTHING opens in the parked hero\'s group — the hero is no longer the active window (B-2dbe), a chat the person is not looking at gets a card (agent-window-no-pop)', S({ opened, law }));
+    ok(gateOf(Array.isArray(opened)) && opened.length === 0 && gateOf(law.none) && law.active !== heroId && verdictOf(law.card), 'the agent\'s browser starts while the Stage is off screen: NOTHING opens in the parked hero\'s group — the hero is no longer the active window (B-2dbe), a chat the person is not looking at gets a card (agent-window-no-pop)', S({ opened, law }));
     // THE INCIDENT'S SHAPE (the release's auto-bind wrote it — records from before the law still hold it): built the way that
     // auto-bind built it, with its own call — openBrowserLive into the hero's group as livePlacement places it for a hero in no
     // group (a SPLIT, the browser on the right), quiet, the Stage off screen
     await ev(`app.openBrowserLive({ sessionId: ${S(sidM)}, profileId: 'p-work', syncId: ${S(liveId)}, intoChain: { hostId: ${S(heroId)}, split: true, side: 'right' }, quiet: true }); return true;`);
     await sleep(700);
     const born = await ev(`const h = wm.windows.get(${S(heroId)}), l = wm.windows.get(${S(liveId)}); if (!l) return { none: true }; const ch = h._tabChain; return { chain: !!ch, same: !!(ch && l._tabChain === ch), layout: ch && ch.layout, tabs: ch && ch.tabs, bound: st._boundAux.get(${S(liveId)}) || null, desk: l._desktopId, staged: st.isActive };`);
-    if (!ok(born.chain && born.same && born.tabs.length === 2 && born.desk === '__stage__' && !born.staged, 'the incident\'s shape, built as the release\'s auto-bind built it: the live view INTO the chat\'s (Stage-hidden) group, tagged to the Stage, unbound', S({ opened, born }))) return;
+    if (!ok(gateOf(born.chain) && gateOf(born.same) && born.tabs.length === 2 && born.desk === '__stage__' && !born.staged, 'the incident\'s shape, built as the release\'s auto-bind built it: the live view INTO the chat\'s (Stage-hidden) group, tagged to the Stage, unbound', S({ opened, born }))) return;
     // …and the ring's round trips: enter, leave, enter
     await ev('await st.enter(); return true;'); await sleep(1400);
     await ev('await st.leave(); return true;'); await sleep(900);
     await ev('await st.enter(); return true;'); await sleep(1400);
     const marks = await ev(`const h = wm.windows.get(${S(heroId)}), l = wm.windows.get(${S(liveId)}); return { heroShown: getComputedStyle(h.element).visibility === 'visible' && !h._hiddenByStage, guestHiddenByStage: !!l._hiddenByStage, guestVisibility: l.element.style.visibility || '', guestPE: l.element.style.pointerEvents || '', bound: st._boundAux.get(${S(liveId)}) || null };`);
     console.log('    the guest after the round trips: ' + S(marks));
-    ok(marks.heroShown, 'the hero and its group are on the Stage again after the round trips', S(marks));
+    ok(verdictOf(marks.heroShown), 'the hero and its group are on the Stage again after the round trips', S(marks));
 
     const regroup = async (layout) => {
       await ev(`const h = wm.windows.get(${S(heroId)}), l = wm.windows.get(${S(liveId)}); if (l._tabChain) wm._detachFromChain(l._tabChain, l.id); if (h._tabChain) wm._detachFromChain(h._tabChain, h.id); if (${S(layout)} === 'split') wm.bindSplit(h, l, { side: 'right' }); else wm.createTabChain(h, l); return true;`);
@@ -245,9 +245,9 @@ else await (async () => {
     {
       await ev(`const h = wm.windows.get(${S(heroId)}); if (h._tabChain && h._tabChain.layout === 'split') wm.unbindSplit(h._tabChain); const ch = h._tabChain; if (ch) wm.switchTab(ch, ch.tabs.indexOf(h.id)); return true;`); await sleep(400);
       const g0 = await ev(`const h = wm.windows.get(${S(heroId)}), l = wm.windows.get(${S(liveId)}); const ch = h._tabChain; return { same: !!(ch && l._tabChain === ch), layout: ch && ch.layout, shown: ch && ch.tabs[ch.active] };`);
-      ok(g0.same && g0.layout === 'tabs' && g0.shown === heroId, '0a the hero and its live view are ONE plain tabs group, the hero\'s tab shown (the −74 s bar)', S(g0));
+      ok(gateOf(g0.same) && g0.layout === 'tabs' && g0.shown === heroId, '0a the hero and its live view are ONE plain tabs group, the hero\'s tab shown (the −74 s bar)', S(g0));
       const t1 = await placeTab();
-      ok(t1 && Math.abs(t1.left + t1.width / 2 - 1245.5) < 3 && Math.abs(t1.top + t1.height / 2 - 105) < 3, '0a the live view\'s tab stands where his did (±3 px of (1245, 106))', S(t1));
+      ok(gateOf(t1) && Math.abs(t1.left + t1.width / 2 - 1245.5) < 3 && Math.abs(t1.top + t1.height / 2 - 105) < 3, '0a the live view\'s tab stands where his did (±3 px of (1245, 106))', S(t1));
       await clickAt({ x: 1245, y: 106 }); // −74.0 s: the tab shown
       await snap('0a-before');
       await drag({ x: 1246, y: 104 }, { x: 795, y: 455 }, { steps: 24, shot: '0a-mid' }); // −73.3 s → the drop, the ring's straight line
@@ -255,9 +255,9 @@ else await (async () => {
       await snap('0a-after-drop');
       const x = await afterDrop();
       console.log('    after the ring\'s straight pull: ' + S(x));
-      ok(visibleOk(x), '0a (a) the live view is VISIBLE after the drop — frame displayed, visibility visible, pointer-events on, no Stage / desktop hidden mark, not minimized, inside the viewport, on top, its content shown', S(x));
-      ok(!x.inChain || x.tabShown, '0a (b) if it is still a tab, its tab is rendered', S(x));
-      ok(x.inTaskbar, '0a (c) the taskbar lists it', S(x));
+      ok(verdictOf(visibleOk(x)), '0a (a) the live view is VISIBLE after the drop — frame displayed, visibility visible, pointer-events on, no Stage / desktop hidden mark, not minimized, inside the viewport, on top, its content shown', S(x));
+      ok(!x.inChain || verdictOf(x.tabShown), '0a (b) if it is still a tab, its tab is rendered', S(x));
+      ok(verdictOf(x.inTaskbar), '0a (c) the taskbar lists it', S(x));
       ok(x.at795 === 'live', '0a the ring\'s next press at (795, 455) — the EMPTY workspace in the incident — lands IN the live view: it is where he let it go (2.369.196: a strip reorder, the tab never left)', S(x.at795));
     }
     console.log('— 0b · the same history, a hand\'s pull that starts DOWN (the tab leaves the bar), released at (795, 455)');
@@ -286,15 +286,15 @@ else await (async () => {
       const y = await afterDrop();
       console.log('    after the hand\'s pull: ' + S(y));
       ok(!y.inChain, '0b the tab left the bar (as the owner says it did)', S(y));
-      ok(visibleOk(y), '0b (a) …and the window is VISIBLE — 2.369.196: display back, but the Stage\'s leave-time `visibility:hidden; pointer-events:none` was still on the guest\'s own element (the enter re-showed the hero only): an INVISIBLE window, "然后窗口就消失了"', S(y));
-      ok(y.inTaskbar, '0b (c) the taskbar lists it', S(y));
+      ok(verdictOf(visibleOk(y)), '0b (a) …and the window is VISIBLE — 2.369.196: display back, but the Stage\'s leave-time `visibility:hidden; pointer-events:none` was still on the guest\'s own element (the enter re-showed the hero only): an INVISIBLE window, "然后窗口就消失了"', S(y));
+      ok(verdictOf(y.inTaskbar), '0b (c) the taskbar lists it', S(y));
       ok(y.at795 === 'live', '0b the ring\'s next press at (795, 455) lands IN it (the incident\'s press found the empty workspace)', S(y.at795));
       ok(y.desk === '__stage__' && y.bound != null, '0b …on the Stage, now the hero\'s aux (the frame it left)', S(y));
       // the next round trip: it comes back with the hero (an unbound Stage window was hidden by the leave and never re-shown)
       await ev('await st.leave(); return true;'); await sleep(900);
       await ev('await st.enter(); return true;'); await sleep(1400);
       const z = await afterDrop();
-      ok(!z.inChain && visibleOk(z) && z.inTaskbar, '0b a leave → re-enter later it is still VISIBLE on the Stage', S(z));
+      ok(!z.inChain && gateOf(visibleOk(z)) && verdictOf(z.inTaskbar), '0b a leave → re-enter later it is still VISIBLE on the Stage', S(z));
     }
     console.log('— 0c · the belt: a guest still carrying ANY hider\'s mark (the exact state 2.369.196 left on his) is pulled out ⇒ visible');
     {
@@ -302,7 +302,7 @@ else await (async () => {
       // the marks the Stage's leave writes (stage-manager _hideStage), left on the guest's own element while its host shows
       await ev(`const l = wm.windows.get(${S(liveId)}); l.element.style.visibility = 'hidden'; l.element.style.pointerEvents = 'none'; l._hiddenByStage = true; return true;`);
       const pre = await ev(`const h = wm.windows.get(${S(heroId)}), l = wm.windows.get(${S(liveId)}); return { inChain: !!(l._tabChain && l._tabChain === h._tabChain), heroShown: getComputedStyle(h.element).visibility === 'visible', guestHidden: l.element.style.visibility === 'hidden' && l._hiddenByStage };`);
-      ok(pre.inChain && pre.heroShown && pre.guestHidden, '0c the precondition: a tab of the shown group whose own element carries the Stage\'s hide', S(pre));
+      ok(gateOf(pre.inChain) && gateOf(pre.heroShown) && verdictOf(pre.guestHidden), '0c the precondition: a tab of the shown group whose own element carries the Stage\'s hide', S(pre));
       await placeTab();
       await clickAt({ x: 1245, y: 106 });
       await mouse('mouseMoved', 1246, 104);
@@ -312,7 +312,7 @@ else await (async () => {
       await mouse('mouseReleased', 795, 455, { button: 'left', clickCount: 1 });
       await sleep(1200);
       const c = await afterDrop();
-      ok(!c.inChain && visibleOk(c) && c.at795 === 'live', '0c torn out, it takes its frame\'s visibility: VISIBLE where it was let go (tab-group _matchFrameVisibility — the belt under any hider)', S(c));
+      ok(!c.inChain && gateOf(visibleOk(c)) && c.at795 === 'live', '0c torn out, it takes its frame\'s visibility: VISIBLE where it was let go (tab-group _matchFrameVisibility — the belt under any hider)', S(c));
     }
     await regroup('split'); // the legs below start from the born shape
 
@@ -331,16 +331,16 @@ else await (async () => {
       ok(!after.heroChain && !after.liveChain, 'the tab left the group — neither window is in a chain (b970f16d: the first 8 px were horizontal ⇒ a strip REORDER for the whole drag, never a detach)', S(after));
       ok(after.liveDisp !== 'none' && after.liveVis !== 'hidden', 'the live view is its own window, displayed', S(after));
       ok(Math.abs(after.liveTitle.top + after.liveTitle.height / 2 - to.y) < 40, `it sits where the pointer left it (title bar at y≈${Math.round(to.y)})`, S({ to, title: after.liveTitle }));
-      ok(apartOk(after) && after.staged, 'it is still the hero\'s aux on the Stage and the hero is still the hero', S(after));
+      ok(gateOf(apartOk(after)) && verdictOf(after.staged), 'it is still the hero\'s aux on the Stage and the hero is still the hero', S(after));
       await sleep(1500); // past the stage's 500 ms workspace record
-      ok(apartOk(await apart()), 'it STAYS its own window past the workspace record', S(await apart()));
+      ok(verdictOf(apartOk(await apart())), 'it STAYS its own window past the workspace record', S(await apart()));
       await ev(`st._reconcileWorkspace(st._heroKey); return true;`);
       await sleep(1200);
-      ok(apartOk(await apart()), 'a remote reconcile of the hero\'s record keeps it apart (and replays no second copy)', S(await apart()));
+      ok(verdictOf(apartOk(await apart())), 'a remote reconcile of the hero\'s record keeps it apart (and replays no second copy)', S(await apart()));
       await ev(`await st.leave(); return true;`); await sleep(900);
       await ev(`await st.enter(); return true;`); await sleep(1400);
       const trip = await apart();
-      ok(apartOk(trip) && trip.staged, 'a leave → re-enter round trip keeps it apart and shows it again', S(trip));
+      ok(gateOf(apartOk(trip)) && verdictOf(trip.staged), 'a leave → re-enter round trip keeps it apart and shows it again', S(trip));
     }
 
     // ── 2 · the same gesture on a NORMAL desktop: the cause is the tab drag, not the Stage ──
@@ -368,7 +368,7 @@ else await (async () => {
     console.log('— 3 · a sideways reorder that wobbles near the bar stays a reorder (the split-tabs v2 promise)');
     {
       const g = await regroup('tabs');
-      ok(g.same && g.layout === 'tabs', 'the pair is a tabs group on the Stage', S(g));
+      ok(gateOf(g.same) && g.layout === 'tabs', 'the pair is a tabs group on the Stage', S(g));
       const bar = await barOf(heroId);
       const hTab = await tabOf(heroId), lTab = await tabOf(liveId);
       const from = { x: hTab.left + hTab.width / 2, y: hTab.top + hTab.height / 2 };
@@ -378,26 +378,26 @@ else await (async () => {
       for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', from.x + 20 + ((lTab.right + 12 - from.x - 20) * i) / 6, wobbleY, { button: 'left', buttons: 1 }); await sleep(35); }
       await mouse('mouseReleased', lTab.right + 12, wobbleY, { button: 'left', clickCount: 1 }); await sleep(700);
       const r = await ev(`const h = wm.windows.get(${S(heroId)}), l = wm.windows.get(${S(liveId)}); const ch = h._tabChain; return { same: !!(ch && l._tabChain === ch), order: ch && [...(ch.order || ch.tabs)] };`);
-      ok(r.same && r.order && r.order[r.order.length - 1] === heroId, 'the hero tab was REORDERED to the end of the strip and nothing tore off', S({ r, before: g.order, wobbleY, bar }));
+      ok(gateOf(r.same) && gateOf(r.order) && r.order[r.order.length - 1] === heroId, 'the hero tab was REORDERED to the end of the strip and nothing tore off', S({ r, before: g.order, wobbleY, bar }));
     }
 
     // ── 4 · the incident's other shapes on the Stage ──
     console.log('— 4 · the other shapes on the Stage: a plain TABS group, the HERO\'s own tab, a stage GRID, a pull UP toward the desktop previews');
     {
       let g = await regroup('tabs');
-      ok(g.same && g.layout === 'tabs', '4a the pair is a tabs group', S(g));
+      ok(gateOf(g.same) && g.layout === 'tabs', '4a the pair is a tabs group', S(g));
       let tab = await tabOf(liveId); let gg = gesture(tab);
       await drag(gg.from, gg.to, { steps: 24 }); await sleep(900);
-      ok(apartOk(await apart()), '4a the reporter\'s gesture tears the live view out of a TABS group too', S(await apart()));
+      ok(verdictOf(apartOk(await apart())), '4a the reporter\'s gesture tears the live view out of a TABS group too', S(await apart()));
       g = await regroup('split');
       tab = await tabOf(heroId); gg = gesture(tab);
       await drag(gg.from, gg.to, { steps: 24 }); await sleep(900);
-      ok(apartOk(await apart()), '4b the HERO\'s own tab pulled out of the split: both their own windows, the hero still the hero', S(await apart()));
+      ok(verdictOf(apartOk(await apart())), '4b the HERO\'s own tab pulled out of the split: both their own windows, the hero still the hero', S(await apart()));
       await ev('wm.setGrid(2, 2); return true;'); await sleep(400);
       g = await regroup('split');
       tab = await tabOf(liveId); gg = gesture(tab);
       await drag(gg.from, gg.to, { steps: 24 }); await sleep(900);
-      ok(apartOk(await apart()), '4c on a 2×2 Stage grid: torn off, snapped to a cell, apart', S(await apart()));
+      ok(verdictOf(apartOk(await apart())), '4c on a 2×2 Stage grid: torn off, snapped to a cell, apart', S(await apart()));
       await ev('wm.setGrid(null); return true;'); await sleep(300);
       g = await regroup('split');
       tab = await tabOf(liveId);
@@ -426,22 +426,22 @@ else await (async () => {
       if (ok(!!wp, '5 the "Work" desktop preview is on screen', S(wp))) {
         const seen = await drag({ x: before.title.left + before.title.width / 2, y: before.title.top + before.title.height / 2 }, { x: wp.left + wp.width / 2, y: wp.top + wp.height / 2 }, { steps: 20, probe, shot: '5a-live-over-preview' });
         const workId = await ev(`return dm.desktops.find((x) => x.name === 'Work').id;`);
-        ok(seen && seen.refused === workId && seen.label === 'Windows on the Stage stay on the Stage' && seen.labelShown, '5a over the preview: it is marked refused and the words ride beside the pointer, inside the viewport ("Windows on the Stage stay on the Stage") — b970f16d: no mark, no words', S(seen));
-        ok(seen && !seen.snapShown && !seen.cellLit, '5a …and no snap zone is promised under a refusal (the drop will not snap)', S(seen));
+        ok(gateOf(seen) && seen.refused === workId && seen.label === 'Windows on the Stage stay on the Stage' && verdictOf(seen.labelShown), '5a over the preview: it is marked refused and the words ride beside the pointer, inside the viewport ("Windows on the Stage stay on the Stage") — b970f16d: no mark, no words', S(seen));
+        ok(gateOf(seen) && !seen.snapShown && !seen.cellLit, '5a …and no snap zone is promised under a refusal (the drop will not snap)', S(seen));
         const after = await ev(`const l = wm.windows.get(${S(liveId)}); return { r: rect(l.element), desk: l._desktopId, bound: st._boundAux.get(${S(liveId)}) || null, vis: l.element.style.visibility, marks: document.querySelectorAll('.stage-refuse').length, labels: document.querySelectorAll('.stage-refuse-label').length };`);
         ok(after.desk === '__stage__' && after.bound != null && after.vis !== 'hidden' && Math.abs(after.r.left - before.r.left) <= 2 && Math.abs(after.r.top - before.r.top) <= 2, '5a the drop puts the live view back where the drag began, still on the Stage (±2 px)', S({ before: before.r, after }));
         ok(after.marks === 0 && after.labels === 0, '5a the mark and the words are gone after the drop', S(after));
         const said = await toastWith('Windows on the Stage stay on the Stage');
-        ok(said && /Open it again on the desktop where you want it\./.test(said), '5a …and a toast says why and what to do instead', S(said));
+        ok(gateOf(said) && verdictOf(/Open it again on the desktop where you want it\./.test(said)), '5a …and a toast says why and what to do instead', S(said));
         await clearToasts();
         // the HERO (a session window) by its title bar
         const hb = await ev(`const h = wm.windows.get(${S(heroId)}); if (h._tabChain) wm._detachFromChain(h._tabChain, h.id); wm.focusWindow(h.id); const t = h.titleSpan.getBoundingClientRect(); const hit = document.elementFromPoint(t.left + Math.min(t.width / 2, 60), t.top + t.height / 2); return { r: rect(h.element), title: rect(h.titleSpan), hitsHero: !!(hit && h.element.contains(hit)) };`);
-        ok(hb.hitsHero, '5b the hero\'s title bar is on top where it will be pressed', S(hb));
+        ok(verdictOf(hb.hitsHero), '5b the hero\'s title bar is on top where it will be pressed', S(hb));
         const seenH = await drag({ x: hb.title.left + Math.min(hb.title.width / 2, 60), y: hb.title.top + hb.title.height / 2 }, { x: wp.left + wp.width / 2, y: wp.top + wp.height / 2 }, { steps: 20, probe, shot: '5b-hero-over-preview' });
-        ok(seenH && seenH.label === 'The conversation stays on the Stage', '5b the hero over the preview: "The conversation stays on the Stage"', S(seenH));
+        ok(gateOf(seenH) && seenH.label === 'The conversation stays on the Stage', '5b the hero over the preview: "The conversation stays on the Stage"', S(seenH));
         const hAfter = await ev(`const h = wm.windows.get(${S(heroId)}); return { r: rect(h.element), hero: st._heroWinId, onStage: !!h._onStage || h._desktopId === '__stage__' };`);
-        ok(hAfter.hero === heroId && hAfter.onStage && Math.abs(hAfter.r.left - hb.r.left) <= 2 && Math.abs(hAfter.r.top - hb.r.top) <= 2, '5b the hero is back on its slot, still the hero', S({ before: hb.r, hAfter }));
-        ok(/open the session again on that desktop/.test((await toastWith('The conversation stays on the Stage')) || ''), '5b …and the toast names the way: open the session again on that desktop');
+        ok(hAfter.hero === heroId && gateOf(hAfter.onStage) && Math.abs(hAfter.r.left - hb.r.left) <= 2 && Math.abs(hAfter.r.top - hb.r.top) <= 2, '5b the hero is back on its slot, still the hero', S({ before: hb.r, hAfter }));
+        ok(verdictOf(/open the session again on that desktop/.test((await toastWith('The conversation stays on the Stage')) || '')), '5b …and the toast names the way: open the session again on that desktop');
         await clearToasts();
       }
       // the window menu: "Move to Desktop ▸" holds the reason row, never the desktop names
@@ -451,7 +451,7 @@ else await (async () => {
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: title.left + 20, y: title.top + title.height / 2, button: 'right', clickCount: 1 });
       await sleep(300);
       const menu = await ev(`const m = document.querySelector('.taskbar-context-menu'); if (!m) return null; const row = [...m.querySelectorAll(':scope > .taskbar-context-menu-item')].find((el) => /Move to Desktop/.test(el.textContent)); if (!row) return { rows: [...m.querySelectorAll(':scope > .taskbar-context-menu-item')].map((x) => x.textContent) }; const sub = [...row.querySelectorAll('.taskbar-context-menu-item')].map((x) => ({ text: x.textContent, disabled: x.classList.contains('disabled') })); return { sub };`);
-      ok(menu && menu.sub && menu.sub.length === 1 && /^Windows on the Stage stay on the Stage — /.test(menu.sub[0].text) && !menu.sub[0].disabled && !menu.sub.some((r) => /Work|Desktop 1/.test(r.text)), '5c the window menu\'s "Move to Desktop ▸" holds ONE row that says why (no desktop names that do nothing, never greyed)', S(menu));
+      ok(gateOf(menu) && gateOf(menu.sub) && menu.sub.length === 1 && gateOf(/^Windows on the Stage stay on the Stage — /.test(menu.sub[0].text)) && !menu.sub[0].disabled && !menu.sub.some((r) => /Work|Desktop 1/.test(r.text)), '5c the window menu\'s "Move to Desktop ▸" holds ONE row that says why (no desktop names that do nothing, never greyed)', S(menu));
       await clearToasts();
       // the other direction, on a normal desktop: a file explorer onto the STAGE preview
       await ev(`await st.leave(); return true;`); await sleep(900);
@@ -461,10 +461,10 @@ else await (async () => {
       const sp = await ev(`const p = document.querySelector('.desktop-preview.stage-preview'); return p ? rect(p) : null;`);
       if (ok(!!sp, '5d the Stage preview is on screen while on a normal desktop', S(sp))) {
         const seenS = await drag({ x: fb.title.left + fb.title.width / 2, y: fb.title.top + fb.title.height / 2 }, { x: sp.left + sp.width / 2, y: sp.top + sp.height / 2 }, { steps: 20, probe, shot: '5d-onto-stage' });
-        ok(seenS && seenS.refused === 'stage' && seenS.label === 'Windows can’t be moved onto the Stage', '5d a desktop window over the Stage preview: marked, "Windows can’t be moved onto the Stage"', S(seenS));
+        ok(gateOf(seenS) && seenS.refused === 'stage' && seenS.label === 'Windows can’t be moved onto the Stage', '5d a desktop window over the Stage preview: marked, "Windows can’t be moved onto the Stage"', S(seenS));
         const fa = await ev(`const w = wm.windows.get(${S(fx)}); return { r: rect(w.element), desk: w._desktopId };`);
         ok(fa.desk === fb.desk && Math.abs(fa.r.left - fb.r.left) <= 2 && Math.abs(fa.r.top - fb.r.top) <= 2, '5d the drop puts it back on its desktop, where it began', S({ fb, fa }));
-        ok(/click a session/.test((await toastWith('Windows can’t be moved onto the Stage')) || ''), '5d …and the toast says what to do instead');
+        ok(verdictOf(/click a session/.test((await toastWith('Windows can’t be moved onto the Stage')) || '')), '5d …and the toast says what to do instead');
       }
       await ev(`if (wm.windows.get(${S(fx)})) wm.closeWindow(${S(fx)}); return true;`);
       await clearToasts();
@@ -514,7 +514,7 @@ else await (async () => {
       await ev(`await dm.switchTo(${S(desks.fin)}); return true;`); await sleep(1100);
       W.fin1 = await open('fin1', 'Fin-1');
       await sleep(1200);
-      ok(Object.values(W).every(Boolean), '6 four read-only chats open: three on Scra (Majordomo among them), one on Fin', S(W));
+      ok(verdictOf(Object.values(W).every(Boolean)), '6 four read-only chats open: three on Scra (Majordomo among them), one on Fin', S(W));
       await ev(`window.__pd6 = []; if (!window.__pd6On) { window.__pd6On = true; document.addEventListener('pointerdown', (e) => { const t = e.target; window.__pd6.push({ inTitlebar: !!(t.closest && t.closest('.window-titlebar')), bareWindow: !!(t.classList && t.classList.contains('window')), win: t.closest && t.closest('.window') ? (t.closest('.window').dataset.winId || t.closest('.window').id || '?') : null, tag: t.tagName + '.' + String(t.className || '').split(' ').slice(0, 2).join('.') }); }, { capture: true }); } return true;`);
       /** what is on screen for a window: computed marks, what a click would hit, how many in-view messages the browser draws */
       const probe6 = (winId) => ev(`const w = wm.windows.get(${S(winId)}); if (!w) return { missing: true };
@@ -551,23 +551,23 @@ else await (async () => {
       {
         const p = await probe6(W.fin1); const c = await colours(p.rect, '6-C0-control');
         console.log('    C0 ' + S({ ...p, colours: c }));
-        ok(drawnOk(p, c), `6 C0 control — a plain desktop switch to Fin: its window is drawn (content-visibility visible, the title bar hit, ${p.rendered}/${p.inView} in-view messages rendered, ${c} colours)`, S({ ...p, colours: c }));
+        ok(verdictOf(drawnOk(p, c)), `6 C0 control — a plain desktop switch to Fin: its window is drawn (content-visibility visible, the title bar hit, ${p.rendered}/${p.inView} in-view messages rendered, ${c} colours)`, S({ ...p, colours: c }));
       }
       // A — on Fin, a real click on the Stage preview, then go to Majordomo (a Scra window) — the reporter at 04:10:21
       {
         const sp = await stagePreview();
         if (ok(!!sp, '6 A the Stage preview is on screen', S(sp))) await clickRect(sp);
         await sleep(1200);
-        ok(await ev('return st.isActive && dm.activeDesktopId === "__stage__";'), '6 A the click entered the Stage');
+        ok(verdictOf(await ev('return st.isActive && dm.activeDesktopId === "__stage__";')), '6 A the click entered the Stage');
         await ev(`app.goToWinId(${S(W.maj)}); return true;`);
         await sleep(1800);
         const p = await probe6(W.maj); const c = await colours(p.rect, '6-A-hero-after-goto');
         console.log('    A ' + S({ ...p, colours: c }));
-        ok(p.hero && p.onStage, '6 A Majordomo is the Stage\'s hero', S(p));
-        ok(drawnOk(p, c), `6 A THE HERO IS DRAWN — content-visibility ${p.cv}, aria-hidden ${p.aria}, the title bar rendered and hit, ${p.rendered}/${p.inView} in-view messages rendered, ${c} colours (2.369.196/.198: hidden, true, the bare div.window, 0/9, 64)`, S({ ...p, colours: c }));
-        ok(p.suspended === false && p.reasons && p.reasons.length === 0, '6 A …its ChatView runs (no hider reason, not suspended — paging and pinning live)', S(p));
+        ok(gateOf(p.hero) && verdictOf(p.onStage), '6 A Majordomo is the Stage\'s hero', S(p));
+        ok(verdictOf(drawnOk(p, c)), `6 A THE HERO IS DRAWN — content-visibility ${p.cv}, aria-hidden ${p.aria}, the title bar rendered and hit, ${p.rendered}/${p.inView} in-view messages rendered, ${c} colours (2.369.196/.198: hidden, true, the bare div.window, 0/9, 64)`, S({ ...p, colours: c }));
+        ok(p.suspended === false && gateOf(p.reasons) && p.reasons.length === 0, '6 A …its ChatView runs (no hider reason, not suspended — paging and pinning live)', S(p));
         const pd = await realClickTitle(p);
-        ok(pd && pd.inTitlebar && !pd.bareWindow, '6 A a REAL click on its title row lands IN the title bar (the incident: the bare div.window)', S(pd));
+        ok(gateOf(pd) && gateOf(pd.inTitlebar) && !pd.bareWindow, '6 A a REAL click on its title row lands IN the title bar (the incident: the bare div.window)', S(pd));
       }
       // B — leave by a real click on Fin's preview, then a real click on the Stage preview — the reporter at 23:40
       {
@@ -577,16 +577,16 @@ else await (async () => {
         const left = await ev(`return { staged: st.isActive, active: dm.activeDesktopId };`);
         ok(!left.staged && left.active === desks.fin, '6 B the click left the Stage for Fin', S(left));
         const hb = await probe6(W.maj);
-        ok(hb.hiddenByDesktop && hb.cv === 'hidden' && hb.aria === 'true' && hb.suspended === true, '6 B …where Majordomo is its desktop\'s again: hidden, unrendered, out of the AX tree, suspended (the desktop\'s hiding, derived)', S(hb));
+        ok(gateOf(hb.hiddenByDesktop) && hb.cv === 'hidden' && hb.aria === 'true' && hb.suspended === true, '6 B …where Majordomo is its desktop\'s again: hidden, unrendered, out of the AX tree, suspended (the desktop\'s hiding, derived)', S(hb));
         const sp = await stagePreview(); if (sp) await clickRect(sp);
         await sleep(1800);
         const p = await probe6(W.maj); const c = await colours(p.rect, '6-B-hero-after-reenter');
         console.log('    B ' + S({ ...p, colours: c }));
-        ok(p.hero && p.staged, '6 B the Stage entered again: Majordomo is the hero again', S(p));
-        ok(drawnOk(p, c), `6 B THE RE-BORROWED HERO IS DRAWN — content-visibility ${p.cv}, ${p.rendered}/${p.inView} rendered, ${c} colours (2.369.196/.198: blank)`, S({ ...p, colours: c }));
+        ok(gateOf(p.hero) && verdictOf(p.staged), '6 B the Stage entered again: Majordomo is the hero again', S(p));
+        ok(verdictOf(drawnOk(p, c)), `6 B THE RE-BORROWED HERO IS DRAWN — content-visibility ${p.cv}, ${p.rendered}/${p.inView} rendered, ${c} colours (2.369.196/.198: blank)`, S({ ...p, colours: c }));
         await clickAt({ x: p.rect.x + p.rect.w / 2, y: p.rect.y + p.rect.h / 2 });
         const pd = await ev('return window.__pd6[window.__pd6.length - 1] || null;');
-        ok(pd && !pd.bareWindow && pd.win != null, '6 B a real click in its middle lands in its content (the incident: the bare div.window)', S(pd));
+        ok(gateOf(pd) && !pd.bareWindow && pd.win != null, '6 B a real click in its middle lands in its content (the incident: the bare div.window)', S(pd));
       }
       // C — while on the Stage, resume the stopped conversation whose window lives on Scra (the resume bar's path:
       //     the read-only window is its row, RE-OPENED AS ITSELF — lane phone-resume-keeps-layout: the resumed window takes
@@ -604,11 +604,11 @@ else await (async () => {
         const p = rid ? await probe6(rid) : { missing: true }; const c = p.missing ? -1 : await colours(p.rect, '6-C-resumed-on-stage');
         const place = await ev(`const w = wm.windows.get(${S(rid)}); const slot = st.slotBounds(); const gb = w && w.gridBounds; return { sameRow: ${S(rid)} === ${S(W.res)}, desk: w && w._desktopId, onStage: !!(w && w._onStage), hero: st._heroWinId === ${S(rid)}, atSlot: !!(gb && ['left', 'top', 'width', 'height'].every((k) => Math.abs((gb[k] ?? 0) - (slot[k] ?? 0)) < 0.01)), gb, slot, ops: (window.__vsOps ? window.__vsOps().filter((o) => o.op === 'resume-place').slice(-1) : null) };`);
         console.log('    C ' + S({ ...p, colours: c, place }));
-        ok(!!rid && live, '6 C the resume created a LIVE window for the conversation (the read-only one replaced)', S({ rid, live, place }));
-        ok(place.hero && place.onStage && place.desk === desks.scra, '6 C …it is the Stage\'s hero, BORROWED from its home desktop Scra (the Stage is a view, not an owner — 2.369.198: stage-born, its home lost)', S(place));
-        ok(place.atSlot, '6 C …IN THE SLOT like every hero (2.369.198: the resume re-applied its old desktop box over the slot — now that box is its HOME, kept for the hand-back)', S(place));
-        ok(drawnOk(p, c), `6 C THE RESUMED HERO IS DRAWN — content-visibility ${p.cv}, ${p.rendered}/${p.inView} rendered, ${c} colours`, S({ ...p, colours: c }));
-        if (p.title) { const pd = await realClickTitle(p); ok(pd && pd.inTitlebar, '6 C a real click on its title row lands in the title bar', S(pd)); }
+        ok(!!rid && verdictOf(live), '6 C the resume created a LIVE window for the conversation (the read-only one replaced)', S({ rid, live, place }));
+        ok(gateOf(place.hero) && gateOf(place.onStage) && place.desk === desks.scra, '6 C …it is the Stage\'s hero, BORROWED from its home desktop Scra (the Stage is a view, not an owner — 2.369.198: stage-born, its home lost)', S(place));
+        ok(verdictOf(place.atSlot), '6 C …IN THE SLOT like every hero (2.369.198: the resume re-applied its old desktop box over the slot — now that box is its HOME, kept for the hand-back)', S(place));
+        ok(verdictOf(drawnOk(p, c)), `6 C THE RESUMED HERO IS DRAWN — content-visibility ${p.cv}, ${p.rendered}/${p.inView} rendered, ${c} colours`, S({ ...p, colours: c }));
+        if (p.title) { const pd = await realClickTitle(p); ok(gateOf(pd) && verdictOf(pd.inTitlebar), '6 C a real click on its title row lands in the title bar', S(pd)); }
         W.resLive = rid;
       }
       // C2 — a NEW session started on the Stage (the reporter: "开新的 session")
@@ -621,7 +621,7 @@ else await (async () => {
         await sleep(1500);
         const p = nid ? await probe6(nid) : { missing: true };
         console.log('    C2 ' + S(p));
-        ok(!!nid && p.hero && p.cv === 'visible' && p.aria === null && p.titleRendered && p.titleHit && p.titleHit.inTitlebar && p.suspended === false, '6 C2 a NEW session on the Stage is its hero, drawn, its title bar hit, its view running', S(p));
+        ok(!!nid && gateOf(p.hero) && p.cv === 'visible' && p.aria === null && gateOf(p.titleRendered) && gateOf(p.titleHit) && gateOf(p.titleHit.inTitlebar) && p.suspended === false, '6 C2 a NEW session on the Stage is its hero, drawn, its title bar hit, its view running', S(p));
         W.fresh = nid;
       }
       // C3 — leave for Scra (a real click on its preview): the resumed conversation goes HOME — its old desktop, its old
@@ -635,9 +635,9 @@ else await (async () => {
         console.log('    C3 ' + S({ back, ...p, colours: c }));
         const near = (a, b) => !!(a && b) && ['left', 'top', 'width', 'height'].every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < 0.01);
         ok(!back.staged && back.active === desks.scra && back.desk === desks.scra, '6 C3 the resumed conversation is on Scra again (handed back to its home, like every borrowed hero)', S(back));
-        ok(near(back.gb, resHome), '6 C3 …at its old box (the geometry the resume carried is its HOME)', S({ gb: back.gb, resHome }));
-        ok(drawnOk(p, c), `6 C3 …and drawn there (${p.rendered}/${p.inView} rendered, ${c} colours)`, S({ ...p, colours: c }));
-        ok(back.freshDesk === '__stage__' && back.freshHidden, '6 C3 the session born on the Stage stays the Stage\'s (parked while the Stage is off screen)', S(back));
+        ok(verdictOf(near(back.gb, resHome)), '6 C3 …at its old box (the geometry the resume carried is its HOME)', S({ gb: back.gb, resHome }));
+        ok(verdictOf(drawnOk(p, c)), `6 C3 …and drawn there (${p.rendered}/${p.inView} rendered, ${c} colours)`, S({ ...p, colours: c }));
+        ok(back.freshDesk === '__stage__' && verdictOf(back.freshHidden), '6 C3 the session born on the Stage stays the Stage\'s (parked while the Stage is off screen)', S(back));
         W.resLive = back.id || W.resLive;
       }
       // C4 — THE HERO'S OWN RESUME (verify r1 V4): Scra-1 (read-only) is the hero; its bar's Resume re-opens it as itself (its id —
@@ -649,7 +649,7 @@ else await (async () => {
         await clickRect(await stagePreview()); await sleep(1200);
         await ev(`app.goToWinId(${S(W.scra1)}); return true;`); await sleep(1500);
         const h = await ev(`const w = wm.windows.get(${S(W.scra1)}); return { hero: st._heroWinId === w.id, home: w._stageHomeBounds || null, gb: w.gridBounds, slot: st.slotBounds() };`);
-        ok(h.hero && h.home && !near6(h.home, h.slot) && near6(h.gb, h.slot), '6 C4 Scra-1 is the hero at the slot, its home box remembered', S(h));
+        ok(gateOf(h.hero) && gateOf(h.home) && !near6(h.home, h.slot) && verdictOf(near6(h.gb, h.slot)), '6 C4 Scra-1 is the hero at the slot, its home box remembered', S(h));
         const before = await ev('return [...wm.windows.keys()];');
         await ev(`app.resumeSession(${S(SIDS.scra1)}, ${S(CWD6)}, 'Scra-1', { mode: 'chat', backend: 'claude', backendSessionId: ${S(SIDS.scra1)} }); return true;`);
         let rid = null;
@@ -659,11 +659,11 @@ else await (async () => {
         await sleep(1200);
         const r = await ev(`const w = wm.windows.get(${S(rid)}); return w ? { hero: st._heroWinId === w.id, desk: w._desktopId, home: w._stageHomeBounds || null, gb: w.gridBounds } : null;`);
         console.log('    C4 ' + S({ live, r, old: h.home, slot: h.slot }));
-        ok(live && r && r.hero && r.desk === desks.scra, '6 C4 the resumed conversation is the hero, home Scra', S(r));
-        ok(r && near6(r.home, h.home), `6 C4 …the home it carries is the OLD box ${S(r && r.home)} (the slot ${S(h.slot)} is the Stage's, never the window's)`, S({ r, old: h.home, slot: h.slot }));
+        ok(gateOf(live) && gateOf(r) && gateOf(r.hero) && r.desk === desks.scra, '6 C4 the resumed conversation is the hero, home Scra', S(r));
+        ok(gateOf(r) && verdictOf(near6(r.home, h.home)), `6 C4 …the home it carries is the OLD box ${S(r && r.home)} (the slot ${S(h.slot)} is the Stage's, never the window's)`, S({ r, old: h.home, slot: h.slot }));
         await clickRect(await deskPreview(desks.scra)); await sleep(1500);
         const a = await ev(`const w = wm.windows.get(${S(rid)}); return w ? { desk: w._desktopId, gb: w.gridBounds, staged: st.isActive } : null;`);
-        ok(a && !a.staged && a.desk === desks.scra && near6(a.gb, h.home), `6 C4 leaving to Scra lands it at its old box ${S(a && a.gb)}, not the slot`, S({ a, old: h.home, slot: h.slot }));
+        ok(gateOf(a) && !a.staged && a.desk === desks.scra && verdictOf(near6(a.gb, h.home)), `6 C4 leaving to Scra lands it at its old box ${S(a && a.gb)}, not the slot`, S({ a, old: h.home, slot: h.slot }));
         W.scra1Live = rid;
       }
       // T1 — THE HERO TEARS ITS OWN TAB OFF ITS GROUP (verify r1 V2): on Scra Majordomo joins the resumed Scra-1 as a tab; on
@@ -677,25 +677,25 @@ else await (async () => {
         await ev(`app.goToWinId(${S(W.scra1Live)}); return true;`); await sleep(1500);
         const tab = await ev(`const h = wm.windows.get(${S(W.scra1Live)}); const t = h.titleBar.querySelector('.tab-item[data-win-id="' + h.id + '"]'); return t ? rect(t) : null;`);
         const pre = await probe6(W.scra1Live);
-        if (ok(!!tab && pre.hero && pre.cv === 'visible', '6 T1 the group is the hero\'s frame on the Stage, the hero\'s tab on the strip', S({ tab, pre }))) {
+        if (ok(!!tab && gateOf(pre.hero) && pre.cv === 'visible', '6 T1 the group is the hero\'s frame on the Stage, the hero\'s tab on the strip', S({ tab, pre }))) {
           await drag({ x: tab.left + tab.width / 2, y: tab.top + tab.height / 2 }, { x: tab.left + tab.width / 2 - 200, y: tab.top + tab.height / 2 + 350 });
           await sleep(600);
           const hh = await probe6(W.scra1Live), gg = await probe6(W.maj);
           const chains = await ev(`return { h: !!wm.windows.get(${S(W.scra1Live)})._tabChain, g: !!wm.windows.get(${S(W.maj)})._tabChain, stageVisible: st._isStageVisible(wm.windows.get(${S(W.maj)})) };`);
           console.log('    T1 ' + S({ chains, hero: hh.hero, heroCv: hh.cv, maj: { cv: gg.cv, aria: gg.aria, hbd: gg.hiddenByDesktop, hbs: gg.hiddenByStage, susp: gg.suspended } }));
-          ok(!chains.h && !chains.g && hh.hero && hh.cv === 'visible', '6 T1 the drag split the group; the hero stays the hero, drawn', S({ chains, hh }));
-          ok(gg.hiddenByDesktop && gg.cv === 'hidden' && gg.aria === 'true' && gg.suspended === true && !chains.stageVisible, '6 T1 the promoted Majordomo — a session that is not the hero — is hidden its way (its desktop\'s), not a free window on the Stage', S(gg));
+          ok(!chains.h && !chains.g && gateOf(hh.hero) && hh.cv === 'visible', '6 T1 the drag split the group; the hero stays the hero, drawn', S({ chains, hh }));
+          ok(gateOf(gg.hiddenByDesktop) && gg.cv === 'hidden' && gg.aria === 'true' && gg.suspended === true && !chains.stageVisible, '6 T1 the promoted Majordomo — a session that is not the hero — is hidden its way (its desktop\'s), not a free window on the Stage', S(gg));
           await clickRect(await deskPreview(desks.fin)); await sleep(1400);
           const onFin = await probe6(W.maj);
-          ok(!onFin.staged && onFin.desk === desks.scra && onFin.cv === 'hidden' && onFin.hiddenByDesktop, '6 T1 leaving to Fin: Majordomo (home Scra) is NOT on Fin', S(onFin));
+          ok(!onFin.staged && onFin.desk === desks.scra && onFin.cv === 'hidden' && verdictOf(onFin.hiddenByDesktop), '6 T1 leaving to Fin: Majordomo (home Scra) is NOT on Fin', S(onFin));
           await clickRect(await deskPreview(desks.scra)); await sleep(1400);
           const onScra = await probe6(W.maj); const c = await colours(onScra.rect, '6-T1-maj-home');
           // verify r2: the torn-off hero lands BESIDE the group's home (PURE tornOffBox — an off-Stage tear-off drops the torn
           // window beside its frame), so the survivor is reachable by its title (the standard cascade), its middle under the hero
           const reachableOk = (p, cc) => p && !p.missing && p.cv === 'visible' && p.aria === null && p.visibility === 'visible' && p.pe !== 'none' && p.titleRendered === true && p.titleHit && p.titleHit.inTitlebar && p.titleHit.inWin && !p.titleHit.bareWindow && p.inView > 0 && p.rendered === p.inView && cc >= COLOUR_FLOOR;
-          ok(reachableOk(onScra, c), `6 T1 …and on Scra it is drawn where the group stood, its title reachable (the torn-off hero sits one cascade step beside it — never exactly on top, never at the slot; ${onScra.rendered}/${onScra.inView} rendered, ${c} colours)`, S({ ...onScra, colours: c }));
+          ok(verdictOf(reachableOk(onScra, c)), `6 T1 …and on Scra it is drawn where the group stood, its title reachable (the torn-off hero sits one cascade step beside it — never exactly on top, never at the slot; ${onScra.rendered}/${onScra.inView} rendered, ${c} colours)`, S({ ...onScra, colours: c }));
           const heroScra = await probe6(W.scra1Live);
-          ok(heroScra && !heroScra.missing && heroScra.rect && onScra.rect && (Math.abs(heroScra.rect.x - onScra.rect.x) > 8 || Math.abs(heroScra.rect.y - onScra.rect.y) > 8), `6 T1 …and the torn-off hero is NOT exactly on top of it (hero at ${S(heroScra && heroScra.rect)}, survivor at ${S(onScra.rect)})`, S({ hero: heroScra && heroScra.rect, maj: onScra.rect }));
+          ok(gateOf(heroScra) && !heroScra.missing && gateOf(heroScra.rect) && gateOf(onScra.rect) && (Math.abs(heroScra.rect.x - onScra.rect.x) > 8 || Math.abs(heroScra.rect.y - onScra.rect.y) > 8), `6 T1 …and the torn-off hero is NOT exactly on top of it (hero at ${S(heroScra && heroScra.rect)}, survivor at ${S(onScra.rect)})`, S({ hero: heroScra && heroScra.rect, maj: onScra.rect }));
         }
       }
       // M1 — A MAXIMIZE ON THE STAGE IS A SLOT EDIT (verify r3): the hero maximized ON the Stage (the real toggleMaximize);
@@ -707,16 +707,16 @@ else await (async () => {
         await clickRect(await stagePreview()); await sleep(1200);
         await ev(`app.goToWinId(${S(W.maj)}); return true;`); await sleep(1500);
         const h = await ev(`const w = wm.windows.get(${S(W.maj)}); return { hero: st._heroWinId === w.id, home: w._stageHomeBounds || null, max: !!w.isMaximized };`);
-        if (ok(h.hero && h.home && !h.max, '6 M1 Majordomo is the hero, un-maximized, its home remembered', S(h))) {
+        if (ok(gateOf(h.hero) && gateOf(h.home) && !h.max, '6 M1 Majordomo is the hero, un-maximized, its home remembered', S(h))) {
           await ev(`wm.toggleMaximize(${S(W.maj)}); return true;`); await sleep(400);
           const m = await ev(`const w = wm.windows.get(${S(W.maj)}); const r = w.element.getBoundingClientRect(); const ws = document.getElementById('workspace').getBoundingClientRect(); return { max: !!w.isMaximized, fills: Math.abs(r.width - ws.width) < 4 && Math.abs(r.height - ws.height) < 4 };`);
-          ok(m.max && m.fills, '6 M1 maximized on the Stage: it fills the workspace', S(m));
+          ok(gateOf(m.max) && verdictOf(m.fills), '6 M1 maximized on the Stage: it fills the workspace', S(m));
           await clickRect(await deskPreview(desks.scra)); await sleep(1500);
           const a0 = await ev(`const w = wm.windows.get(${S(W.maj)}); return { max: !!w.isMaximized, gb: w.gridBounds, prev: w.prevBounds || null, staged: st.isActive };`);
           if (a0.max) { await ev(`wm.toggleMaximize(${S(W.maj)}); return true;`); await sleep(400); }
           const a = await ev(`const w = wm.windows.get(${S(W.maj)}); const ws = document.getElementById('workspace').getBoundingClientRect(); const r = w.element.getBoundingClientRect(); return { max: !!w.isMaximized, gb: w.gridBounds, fr: { left: (r.left - ws.left) / ws.width, top: (r.top - ws.top) / ws.height, width: r.width / ws.width, height: r.height / ws.height } };`);
           console.log('    M1 ' + S({ afterLeave: a0, now: a, home: h.home }));
-          ok(!a.max && near6(a.gb, h.home) && near6(a.fr, h.home) && !near6(a.gb, SLOT6), `6 M1 on Scra, un-maximized, Majordomo is at its HOME ${S(h.home)} — never the slot (f5635f9d: ${S(a.gb)})`, S({ a, home: h.home }));
+          ok(!a.max && gateOf(near6(a.gb, h.home)) && gateOf(near6(a.fr, h.home)) && !near6(a.gb, SLOT6), `6 M1 on Scra, un-maximized, Majordomo is at its HOME ${S(h.home)} — never the slot (f5635f9d: ${S(a.gb)})`, S({ a, home: h.home }));
           await ev(`st.saveSlot(${S(SLOT6)}); return true;`);
         }
       }
@@ -739,7 +739,7 @@ else await (async () => {
           const hh = await probe6(W.scra1Live), gg = await probe6(W.maj);
           const boxes = await ev(`return { h: wm.windows.get(${S(W.scra1Live)}).gridBounds, g: wm.windows.get(${S(W.maj)}).gridBounds };`);
           console.log('    C1 ' + S({ boxes, h: { rect: hh.rect, title: hh.titleHit }, g: { rect: gg.rect } }));
-          ok(hh.rect && gg.rect && (Math.abs(hh.rect.x - gg.rect.x) > 8 || Math.abs(hh.rect.y - gg.rect.y) > 8), `6 C1 on Scra the torn-off Majordomo is NOT exactly on Scra-1 (${S(gg.rect)} vs ${S(hh.rect)}) — a corner home steps the other way (f5635f9d: the same box)`, S({ boxes, h: hh.rect, g: gg.rect }));
+          ok(gateOf(hh.rect) && gateOf(gg.rect) && (Math.abs(hh.rect.x - gg.rect.x) > 8 || Math.abs(hh.rect.y - gg.rect.y) > 8), `6 C1 on Scra the torn-off Majordomo is NOT exactly on Scra-1 (${S(gg.rect)} vs ${S(hh.rect)}) — a corner home steps the other way (f5635f9d: the same box)`, S({ boxes, h: hh.rect, g: gg.rect }));
           // a bottom-edge home has room only UP: the torn-off half (on top — the active window) covers the frame's title bar except
           // its far-right strip, which is what a title-bar probe from the right finds (an interior home's frame peeks out above it)
           const reach = await ev(`const w = wm.windows.get(${S(W.scra1Live)}); const tb = w.element.querySelector(':scope > .window-titlebar').getBoundingClientRect(); const hits = []; for (let x = tb.right - 8; x > tb.left; x -= 10) { const h = document.elementFromPoint(x, tb.top + tb.height / 2); if (h && w.element.contains(h)) hits.push(Math.round(x - tb.left)); } return { hits: hits.length, probes: Math.ceil(tb.width / 10), width: Math.round(tb.width) };`);
@@ -756,14 +756,14 @@ else await (async () => {
         const X = { left: 0.55, top: 0.45, width: 0.4, height: 0.5 }, homeH = { left: 0.05, top: 0.1, width: 0.4, height: 0.5 };
         await ev(`const h = wm.windows.get(${S(W.scra1Live)}), g = wm.windows.get(${S(W.maj)}); for (const w of [h, g]) { if (w._tabChain) wm._detachFromChain(w._tabChain, w.id); if (w.isMaximized) wm.toggleMaximize(w.id); } h.gridBounds = ${S(homeH)}; wm._applyGridBounds(h); wm._captureGridBounds(h); wm.createTabChain(h, g); wm.switchTab(h._tabChain, 0); wm._captureGridBounds(h); if (app.layoutManager._heldChainActs) app.layoutManager._heldChainActs.clear(); return true;`); await sleep(500); // a group made LONG AGO (a fresh scene): § 6 C1's real tear-off of these two windows is a user act held for a minute (verify r5), and a record that disagrees with the page's chain for them would be refused while it stands
         const b0 = await ev(`const g = wm.windows.get(${S(W.maj)}); return { chain: g._tabChain ? g._tabChain.tabs : null, gb: g.gridBounds };`);
-        ok(b0.chain && b0.chain.length === 2, '7 this page holds the group [Scra-1 host, Majordomo]', S(b0));
+        ok(gateOf(b0.chain) && b0.chain.length === 2, '7 this page holds the group [Scra-1 host, Majordomo]', S(b0));
         const state = await ev(`const s = app.layoutManager.captureState(); for (const rw of s.windows) { const id = rw.winId || rw.id; if (id === ${S(W.maj)}) { rw.gridBounds = ${S(X)}; delete rw.tabChain; delete rw.isTabGuest; } if (id === ${S(W.scra1Live)}) delete rw.tabChain; } return s;`);
         await ev(`app.layoutManager._applyRemoteState(${S(state)}); return true;`); await sleep(1200);
         const b1 = await ev(`const g = wm.windows.get(${S(W.maj)}), h = wm.windows.get(${S(W.scra1Live)}); const ws = document.getElementById('workspace').getBoundingClientRect(); const r = g.element.getBoundingClientRect(); return { chain: g._tabChain ? g._tabChain.tabs : null, gb: g.gridBounds, fr: { left: (r.left - ws.left) / ws.width, top: (r.top - ws.top) / ws.height, width: r.width / ws.width, height: r.height / ws.height }, host: h.gridBounds };`);
         const nearB = (a, b, eps) => !!(a && b) && ['left', 'top', 'width', 'height'].every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < eps);
         ok(!b1.chain, '7 the record broke the group here', S(b1));
-        ok(nearB(b1.gb, X, 0.02) && nearB(b1.fr, X, 0.03), `7 Majordomo stands at X ${S(X)} as the record says (got ${S(b1.gb)}, drawn at ${S(b1.fr)}${nearB(b1.gb, b1.host, 0.02) ? ' — ON ITS OLD HOST' : ''})`, S(b1));
-        ok(nearB(b1.host, homeH, 0.02), '7 …and the host keeps its own box', S(b1));
+        ok(gateOf(nearB(b1.gb, X, 0.02)) && verdictOf(nearB(b1.fr, X, 0.03)), `7 Majordomo stands at X ${S(X)} as the record says (got ${S(b1.gb)}, drawn at ${S(b1.fr)}${nearB(b1.gb, b1.host, 0.02) ? ' — ON ITS OLD HOST' : ''})`, S(b1));
+        ok(verdictOf(nearB(b1.host, homeH, 0.02)), '7 …and the host keeps its own box', S(b1));
       }
       // ═══ 8 THE HELD CHAIN ACT (stage-blank verify r5, found on the merged tree with lane desktop-move — no Stage involved): this
       //     page holds [Scra-1 host, Majordomo]; the user TEARS Majordomo off with a real tab drag while a record that still names
@@ -790,13 +790,13 @@ else await (async () => {
         // (a) the record deferred under the drag
         {
           const { stale, tab } = await group8();
-          if (ok(!!tab && stale.windows.some((w) => w.tabChain && !w.isTabGuest), '8 (a) this page holds the group [Scra-1 host, Majordomo]; the stale record names it', S({ tab, chains: stale.windows.filter((w) => w.tabChain && !w.isTabGuest).length }))) {
+          if (ok(!!tab && verdictOf(stale.windows.some((w) => w.tabChain && !w.isTabGuest)), '8 (a) this page holds the group [Scra-1 host, Majordomo]; the stale record names it', S({ tab, chains: stale.windows.filter((w) => w.tabChain && !w.isTabGuest).length }))) {
             await sendsTap();
             const from = { x: tab.left + tab.width / 2, y: tab.top + tab.height / 2 }, to = { x: Math.min(tab.left + tab.width / 2 + 420, 1500), y: tab.top + tab.height / 2 + 300 };
             await mouse('mouseMoved', from.x, from.y); await mouse('mousePressed', from.x, from.y, { button: 'left', clickCount: 1 });
             for (let i = 1; i <= 12; i++) { await mouse('mouseMoved', from.x + (to.x - from.x) * (i / 12), from.y + (to.y - from.y) * (i / 12), { button: 'left', buttons: 1 }); await sleep(35); }
             const mid = await ev(`const g = wm.windows.get(${S(W.maj)}); const ws = document.getElementById('workspace').getBoundingClientRect(); const r = g.element.getBoundingClientRect(); return { chain: !!g._tabChain, down: !!app.layoutManager._pointerDown, fr: { left: (r.left - ws.left) / ws.width, top: (r.top - ws.top) / ws.height, width: r.width / ws.width, height: r.height / ws.height } };`);
-            ok(!mid.chain && mid.down, '8 (a) mid-drag: the tab is out under the held button', S(mid));
+            ok(!mid.chain && verdictOf(mid.down), '8 (a) mid-drag: the tab is out under the held button', S(mid));
             ws.send(staleOf(stale)); await sleep(1000); // the other device's record lands under the pointer
             const pend = await ev(`const p = app.layoutManager._pendingRemote; return p ? (p.size !== undefined ? p.size : 1) : 0;`);
             ok(pend >= 1, '8 (a) the record is deferred under the drag (§6b guard 3)', S({ pend }));
@@ -806,11 +806,11 @@ else await (async () => {
             const a = await after8();
             console.log('    8 (a) ' + S({ chain: a.chain, gb: a.gb, fr: a.fr, held: a.held }));
             ok(!a.chain && !a.hostChain, '8 (a) Majordomo stays TORN OFF — the deferred record never re-forms the group (the tear is held until a record agrees)', S(a));
-            ok(nearB8(a.gb, mid.fr, 0.04) && nearB8(a.fr, mid.fr, 0.04) && !nearB8(a.gb, a.host, 0.02), `8 (a) …and stands where it was dropped (${S(mid.fr)}; got ${S(a.gb)}${nearB8(a.gb, a.host, 0.02) ? ' — ON ITS OLD HOST' : ''})`, S(a));
+            ok(gateOf(nearB8(a.gb, mid.fr, 0.04)) && gateOf(nearB8(a.fr, mid.fr, 0.04)) && !nearB8(a.gb, a.host, 0.02), `8 (a) …and stands where it was dropped (${S(mid.fr)}; got ${S(a.gb)}${nearB8(a.gb, a.host, 0.02) ? ' — ON ITS OLD HOST' : ''})`, S(a));
             await until(() => ev(`return (window.__ls8 || []).some((s) => s.chains.length === 0);`), 5000, 200);
             const b = await after8();
-            ok(b.sends.some((x) => x.chains.length === 0) && !b.sends.some((x, i) => i > 0 && x.chains.length > 0 && b.sends[i - 1].chains.length === 0), `8 (a) …the page's next save carries the tear (${b.sends.length} save(s): ${S(b.sends.map((x) => x.chains))}) and never the re-formed group after it`, S(b.sends));
-            ok(b.sends.length > 0 && nearB8(b.sends[0].bGb, mid.fr, 0.04), `8 (a) …and the FIRST save after the drop carries Majordomo at the drop (${S(b.sends[0] && b.sends[0].bGb)}), never its old host's box (verify r5 ⑤)`, S(b.sends));
+            ok(gateOf(b.sends.some((x) => x.chains.length === 0)) && !b.sends.some((x, i) => i > 0 && x.chains.length > 0 && b.sends[i - 1].chains.length === 0), `8 (a) …the page's next save carries the tear (${b.sends.length} save(s): ${S(b.sends.map((x) => x.chains))}) and never the re-formed group after it`, S(b.sends));
+            ok(b.sends.length > 0 && verdictOf(nearB8(b.sends[0].bGb, mid.fr, 0.04)), `8 (a) …and the FIRST save after the drop carries Majordomo at the drop (${S(b.sends[0] && b.sends[0].bGb)}), never its old host's box (verify r5 ⑤)`, S(b.sends));
           }
         }
         // (b) the record right after the drop, before the tear's save leaves
@@ -824,15 +824,15 @@ else await (async () => {
             ws.send(staleOf(stale)); await sleep(2000); // lands before the tear's save (the debounce) — the measured T2
             const a = await after8();
             console.log('    8 (b) ' + S({ chain: a.chain, gb: a.gb, fr: a.fr, held: a.held, sends: a.sends.map((x) => x.chains) }));
-            ok(!a.chain && !a.hostChain && nearB8(a.fr, dropped.fr, 0.04), `8 (b) a record landing between the drop and its save does not re-form the group; Majordomo stays at the drop (${S(dropped.fr)}; got ${S(a.fr)})`, S(a));
+            ok(!a.chain && !a.hostChain && verdictOf(nearB8(a.fr, dropped.fr, 0.04)), `8 (b) a record landing between the drop and its save does not re-form the group; Majordomo stays at the drop (${S(dropped.fr)}; got ${S(a.fr)})`, S(a));
             await until(() => ev(`return (window.__ls8 || []).length > 0;`), 4000, 150);
             const b2 = await after8();
-            ok(b2.sends.length > 0 && nearB8(b2.sends[0].bGb, dropped.fr, 0.04), `8 (b) …a QUICK tear (released before the debounce fired) — its first save still carries the drop (${S(b2.sends[0] && b2.sends[0].bGb)}), never the old host's box (verify r5 ⑤: the drop tells the save to wait for its capture)`, S(b2.sends));
+            ok(b2.sends.length > 0 && verdictOf(nearB8(b2.sends[0].bGb, dropped.fr, 0.04)), `8 (b) …a QUICK tear (released before the debounce fired) — its first save still carries the drop (${S(b2.sends[0] && b2.sends[0].bGb)}), never the old host's box (verify r5 ⑤: the drop tells the save to wait for its capture)`, S(b2.sends));
             // the agreeing record: another device received the tear (Majordomo alone) — applied whole, the hold released
             const agreeing = await ev(`const s = app.layoutManager.captureState(); for (const rw of s.windows) { if ((rw.winId || rw.id) === ${S(W.maj)}) rw.gridBounds = { left: 0.55, top: 0.45, width: 0.4, height: 0.5 }; } return s;`);
             ws.send(staleOf(agreeing)); await sleep(1500);
             const c = await after8();
-            ok(!c.chain && nearB8(c.gb, { left: 0.55, top: 0.45, width: 0.4, height: 0.5 }, 0.02) && c.held.length === 0, '8 (b) a record that AGREES with the tear (Majordomo alone, moved there) is applied whole and releases the hold', S({ chain: c.chain, gb: c.gb, held: c.held }));
+            ok(!c.chain && gateOf(nearB8(c.gb, { left: 0.55, top: 0.45, width: 0.4, height: 0.5 }, 0.02)) && c.held.length === 0, '8 (b) a record that AGREES with the tear (Majordomo alone, moved there) is applied whole and releases the hold', S({ chain: c.chain, gb: c.gb, held: c.held }));
           }
         }
       }
@@ -853,4 +853,4 @@ else await (async () => {
 })();
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} pass, ${fail} fail${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

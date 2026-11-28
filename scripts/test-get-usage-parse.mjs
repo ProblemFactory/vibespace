@@ -5,9 +5,9 @@ import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { ClaudeCodeAdapter } = require('../src/adapters/claude-code.js');
-let pass=0,fail=0; const ck=(n,c)=>{if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n)}};
+let pass=0,fail=0; const ck=(n,c)=>{ if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n)}};
 const req = ClaudeCodeAdapter.buildGetUsage();
-ck('builder shape', req.type==='control_request' && req.request.subtype==='get_usage' && req.request_id.startsWith('vsu-'));
+ck('builder shape', req.type==='control_request' && req.request.subtype==='get_usage' && verdictOf(req.request_id.startsWith('vsu-')));
 const payload = { subscription_type:'max', rate_limits_available:true, rate_limits:{
   five_hour:{used_percentage:42, resets_at:'2026-08-08T05:00:00.000Z'},
   seven_day:{used_percentage:71, resets_at:'2026-08-12T00:00:00.000Z'},
@@ -16,8 +16,8 @@ const payload = { subscription_type:'max', rate_limits_available:true, rate_limi
 const out = ClaudeCodeAdapter.parseGetUsageResponse(payload);
 ck('fiveHour 0.42', Math.abs(out.fiveHour.utilization-0.42)<1e-3);
 ck('sevenDay 0.71', Math.abs(out.sevenDay.utilization-0.71)<1e-3);
-ck('scoped Fable 0.33', out.scopedWeekly.some(w=>w.name==='Claude Fable'&&Math.abs(w.utilization-0.33)<1e-3));
-ck('scoped Opus 0-1 kept', out.scopedWeekly.some(w=>w.name==='Claude Opus'&&Math.abs(w.utilization-0.12)<1e-3));
+ck('scoped Fable 0.33', verdictOf(out.scopedWeekly.some(w=>w.name==='Claude Fable'&&Math.abs(w.utilization-0.33)<1e-3)));
+ck('scoped Opus 0-1 kept', verdictOf(out.scopedWeekly.some(w=>w.name==='Claude Opus'&&Math.abs(w.utilization-0.12)<1e-3)));
 ck('source=control', out.source==='control');
 ck('null on garbage', ClaudeCodeAdapter.parseGetUsageResponse(null)===null && ClaudeCodeAdapter.parseGetUsageResponse({})===null);
 // ── REAL live envelope (captured 2026-08-09 on a 2.1.x session): utilization
@@ -35,7 +35,7 @@ const lv = ClaudeCodeAdapter.parseGetUsageResponse(live);
 ck('LIVE: 0-100 int utilization normalized (34 → 0.34)', Math.abs(lv.fiveHour.utilization-0.34)<1e-3);
 ck('LIVE: sevenDay 0.39', Math.abs(lv.sevenDay.utilization-0.39)<1e-3);
 ck('LIVE: ISO resets_at → epoch seconds', lv.sevenDay.resetsAt === Math.floor(Date.parse('2026-08-11T16:59:59.753043+00:00')/1000));
-ck('LIVE: named scoped field picked up (seven_day_sonnet → Sonnet)', lv.scopedWeekly.some(w=>/Sonnet/i.test(w.name)&&Math.abs(w.utilization-0.12)<1e-3));
+ck('LIVE: named scoped field picked up (seven_day_sonnet → Sonnet)', verdictOf(lv.scopedWeekly.some(w=>/Sonnet/i.test(w.name)&&Math.abs(w.utilization-0.12)<1e-3)));
 // A BUCKET WITHOUT A RESET IS STILL A BUCKET (r6). This used to assert the
 // opposite ('codename bucket without resets_at skipped', because it had "no
 // usable deadline") — but a deadline and a claim are two different questions,
@@ -47,7 +47,7 @@ ck('LIVE: named scoped field picked up (seven_day_sonnet → Sonnet)', lv.scoped
 // parser has always accepted reset-less entries, so this was also one parser
 // giving two answers for one payload shape.
 ck('LIVE: codename bucket without resets_at is KEPT (a stated spend counts; only the DEADLINE needs a reset)',
-  lv.scopedWeekly.some(w=>/nimbus/i.test(w.name)&&w.utilization===0&&!w.resetsAt));
+  verdictOf(lv.scopedWeekly.some(w=>/nimbus/i.test(w.name)&&w.utilization===0&&!w.resetsAt)));
 ck('LIVE: null buckets skipped, extra_usage not a scoped entry', !lv.scopedWeekly.some(w=>/extra|oauth/i.test(w.name)));
 // …and the parse still says it ENUMERATED, because a `null` field is the vendor
 // stating there is no such limit, not a bucket we failed to read (r6: only a
@@ -64,7 +64,7 @@ ck('LIVE: null buckets skipped, extra_usage not a scoped entry', !lv.scopedWeekl
 const pb = ClaudeCodeAdapter.parseLimitBanner;
 ck("banner: 5-hour", pb("You've reached your 5-hour limit.").kind==='fiveHour');
 ck('banner: weekly', pb("You've reached your weekly limit.").kind==='sevenDay');
-ck('banner: model-scoped weekly', (()=>{const r=pb("You've reached your Fable weekly limit."); return r.kind==='scoped'&&r.name==='Fable';})());
+ck('banner: model-scoped weekly', verdictOf((()=>{const r=pb("You've reached your Fable weekly limit."); return r.kind==='scoped'&&r.name==='Fable';})()));
 ck('banner: unknown wording → fiveHour (shortest self-heal)', pb("You've reached your usage limit for now.").kind==='fiveHour');
 ck('banner: non-banner text → null', pb('Normal assistant reply about limits')===null);
 // the REAL 2026-08-09 incident wording (workflow agent failure strings) — the
@@ -73,7 +73,7 @@ ck('banner: non-banner text → null', pb('Normal assistant reply about limits')
 ck("banner: 'hit your session limit' (workflow failure wording) → fiveHour", pb("You've hit your session limit · resets 3am (America/Los_Angeles)").kind==='fiveHour');
 ck('banner: phrase mid-blob (task-notification carrier) still matches', pb("[verify:x] failed: You've hit your session limit · resets 3am").kind==='fiveHour');
 // incident #2 wording (same day): model-scoped WITHOUT the word "weekly"
-ck("banner: 'Fable 5 limit' (no week word) → scoped Fable", (()=>{const r=pb("You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."); return r.kind==='scoped'&&r.name==='Fable';})());
+ck("banner: 'Fable 5 limit' (no week word) → scoped Fable", verdictOf((()=>{const r=pb("You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."); return r.kind==='scoped'&&r.name==='Fable';})()));
 
 
 // ── OPUS-INVISIBLE regression (inc-msof8i22, 2.305.0) ──────────────────────
@@ -95,7 +95,7 @@ ck("banner: 'Fable 5 limit' (no week word) → scoped Fable", (()=>{const r=pb("
   ck('array AND named scoped buckets are MERGED (Fable + Opus + Sonnet)',
     names.join(',') === 'Fable,Opus,Sonnet', names.join(','));
   const opus = r.scopedWeekly.find((x) => x.name === 'Opus');
-  ck('the exhausted Opus bucket survives with utilization 1', opus && opus.utilization === 1);
+  ck('the exhausted Opus bucket survives with utilization 1', gateOf(opus) && opus.utilization === 1);
   ck('a named bucket never overrides the array entry of the same model',
     r.scopedWeekly.filter((x) => x.name === 'Fable').length === 1);
 }
@@ -135,4 +135,4 @@ ck("banner: 'Fable 5 limit' (no week word) → scoped Fable", (()=>{const r=pb("
 }
 
 console.log(fail?`${fail} FAILED`:`ALL PASS (${pass})`);
-process.exit(fail?1:0);
+process.exit(fail?1:0); import { verdictOf, gateOf } from './lib/check.mjs';

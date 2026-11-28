@@ -17,7 +17,7 @@ const REG = require(path.join(REPO, 'src/server/artifact-registry.js'));
 const { harnessOf, harnessIds } = require(path.join(REPO, 'src/harnesses/index.js'));
 const M = mutantCopies('artifacts', REPO);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -51,12 +51,12 @@ ok(!kBad.length, `kindOf over ${Object.keys(K).length} paths through the ONE ext
 { // lane artifacts-e2e: a project's scaffolding touched by an EDIT is code; WRITTEN by the conversation it is the deliverable
   const born = (path, op) => AF.apply({}, { path, op, by: 'agent', at: 1 }).row;
   const r1 = born('/p/README.md', 'edit'), r2 = born('/p/README.md', 'write'), r3 = born('/p/docs/CHANGELOG.md', 'edit'), r4 = born('/p/readme-notes.md', 'edit'), r5 = born('/p/LICENSE', 'edit');
-  ok(r1.kind === 'code' && !AF.cardWorthy(r1) && r2.kind === 'doc' && AF.cardWorthy(r2) && r3.kind === 'code' && r4.kind === 'doc' && r5.kind === 'code' && AF.kindOf('/p/README.md') === 'doc',
+  ok(r1.kind === 'code' && !AF.cardWorthy(r1) && r2.kind === 'doc' && gateOf(AF.cardWorthy(r2)) && r3.kind === 'code' && r4.kind === 'doc' && r5.kind === 'code' && AF.kindOf('/p/README.md') === 'doc',
     'README / CHANGELOG / LICENSE born by an EDIT ⇒ code (no card, behind Code (n)); README WRITTEN ⇒ doc; readme-notes.md stays doc', [r1, r2, r3, r4, r5].map((r) => r.kind));
   const later = AF.apply(AF.apply({}, { path: '/p/README.md', op: 'edit', by: 'agent', at: 1 }).rows, { path: '/p/README.md', op: 'write', by: 'agent', at: 2 }).row;
   ok(later.kind === 'code', 'the kind is the BIRTH\'s: a later write of an edit-born README stays code (a rebuild derives the same)', later);
 }
-ok(AF.KINDS.every((k) => ['en', 'zh', 'ja'].every((l) => AF.kindWord(k, l))) && AF.kindWord('doc', 'zh') === '文档', 'every kind has its en/zh/ja word');
+ok(gateOf(AF.KINDS.every((k) => ['en', 'zh', 'ja'].every((l) => AF.kindWord(k, l)))) && AF.kindWord('doc', 'zh') === '文档', 'every kind has its en/zh/ja word');
 
 console.log('② the hook: claude / codex / ACP shapes');
 const ops1 = AO.claude(W1.rec);
@@ -76,13 +76,13 @@ console.log('③ the reducer (the ONE fold) — write births, edit bumps, same p
 let rows = {};
 for (const r of TRANSCRIPT) for (const o of AO.claude(r)) rows = AF.fold(rows, { ...o, at: Date.parse(r.timestamp) });
 const brief = rows[':' + CWD + '/docs/BRIEF.md'];
-ok(Object.keys(rows).length === 5 && brief && brief.writes === 1 && brief.edits === 1 && brief.lastOp === 'edit' && brief.kind === 'doc' && brief.by === 'agent', '6 calls over 5 paths → 5 rows; BRIEF.md = 1 write + 1 edit', brief);
+ok(Object.keys(rows).length === 5 && gateOf(brief) && brief.writes === 1 && brief.edits === 1 && brief.lastOp === 'edit' && brief.kind === 'doc' && brief.by === 'agent', '6 calls over 5 paths → 5 rows; BRIEF.md = 1 write + 1 edit', brief);
 const again = AF.apply(rows, { ...AO.claude(E1.rec)[0], at: 1 });
 ok(again.skipped === 'seen' && again.rows === rows, 'the SAME call twice (parse + device feed) moves the row once');
 const rel = AF.apply({}, { path: 'docs/a.md', op: 'write', cwd: '/w/p/' });
-ok(rel.row.path === '/w/p/docs/a.md' && rel.born, 'a relative path is made absolute against the cwd');
+ok(rel.row.path === '/w/p/docs/a.md' && verdictOf(rel.born), 'a relative path is made absolute against the cwd');
 const orphan = AF.apply({}, { path: '/x/never-written.md', op: 'edit' });
-ok(orphan.born && orphan.row.edits === 1 && orphan.row.writes === 0 && orphan.row.by === 'agent', 'an edit on a path never written here is still a row (by: agent)');
+ok(gateOf(orphan.born) && orphan.row.edits === 1 && orphan.row.writes === 0 && orphan.row.by === 'agent', 'an edit on a path never written here is still a row (by: agent)');
 ok(AF.apply({}, { op: 'write' }).skipped === 'no-path' && AF.apply({}, { path: '/a', op: 'delete' }).skipped === 'bad-op', 'an unreadable op is skipped with a reason, never a throw');
 
 console.log('④ bounds + the view');
@@ -98,23 +98,23 @@ for (let i = 470; i < 472; i++) big = AF.fold(big, { path: `/d/d${i}.md`, op: 'w
 const over = AF.apply(big, { path: '/d/last.md', op: 'write', at: 9999 });
 ok(Object.keys(over.rows).length === AF.MAX_ROWS && over.evicted.length === 1 && over.evicted[0] === ':/c/m2.py' && !big[':/c/m0.py'] && !big[':/c/m1.py'] && !!big[':/c/m2.py'] && Object.keys(big).length === AF.MAX_ROWS, `≤ ${AF.MAX_ROWS} rows: the oldest CODE row goes first and is returned`, over.evicted);
 const v = AF.view(rows);
-ok(v.items.map((r) => r.name).join(',') === 'cover.png,part1.md,BRIEF.md' && v.items.every((r) => AF.intentOf(r) === 'made') && v.codeCount === 2 && v.count === 3, 'view (lane artifacts-by-intent): the three the agent wrote read in ONE band (made here), newest change first — the kind no longer splits them; code folded behind a count', v.items.map((r) => r.name));
+ok(v.items.map((r) => r.name).join(',') === 'cover.png,part1.md,BRIEF.md' && gateOf(v.items.every((r) => AF.intentOf(r) === 'made')) && v.codeCount === 2 && v.count === 3, 'view (lane artifacts-by-intent): the three the agent wrote read in ONE band (made here), newest change first — the kind no longer splits them; code folded behind a count', v.items.map((r) => r.name));
 ok(AF.view(over.rows).full === true, 'a full list says so');
 
 console.log('⑤ the replay — a transcript with 3 deliverable writes ⇒ the rows + one card each after a rebuild');
 const opts = N.artifactDeriveOpts({ backend: 'claude', cwd: CWD });
-ok(opts && opts.artifactsOf === harnessOf('claude').artifactsOf && N.artifactDeriveOpts({ backend: 'shell' }) === null, 'deriveOpts asks the DESCRIPTOR (shell declares null = no derivation)');
+ok(gateOf(opts) && opts.artifactsOf === harnessOf('claude').artifactsOf && N.artifactDeriveOpts({ backend: 'shell' }) === null, 'deriveOpts asks the DESCRIPTOR (shell declares null = no derivation)');
 const mm = N.createMessageManager('claude', 's1');
 await N.convertWithCards(mm, TRANSCRIPT, [], { artifacts: opts });
 const cards = mm.messages.filter((m) => m.noticeKind === 'artifact');
 ok(cards.length === 3 && Object.keys(mm.derivedArtifacts || {}).length === 5, 'three deliverable cards (BRIEF.md, part1.md, cover.png) — CLAUDE.md and app.py stay code', cards.map((c) => c.content[0].name));
 const bc = cards.find((c) => c.content[0].name === 'BRIEF.md');
 const wIdx = mm.messages.findIndex((m) => m.toolCallId === W1.id || (m.content || []).some((b) => b.id === W1.id));
-ok(bc && bc.content[0].edits === 1 && bc.content[0].writes === 1 && mm.messages.indexOf(bc) > wIdx && wIdx >= 0, 'BRIEF.md\'s ONE card sits after its Write and says 1 write + 1 edit (patched, not re-placed)', { wIdx, at: mm.messages.indexOf(bc) });
+ok(gateOf(bc) && bc.content[0].edits === 1 && bc.content[0].writes === 1 && mm.messages.indexOf(bc) > wIdx && wIdx >= 0, 'BRIEF.md\'s ONE card sits after its Write and says 1 write + 1 edit (patched, not re-placed)', { wIdx, at: mm.messages.indexOf(bc) });
 const ids = new Set(cards.map((c) => c.id));
 const mm2 = N.createMessageManager('claude', 's1');
 await N.convertWithCards(mm2, TRANSCRIPT, [], { artifacts: opts });
-ok(mm2.messages.filter((m) => m.noticeKind === 'artifact').every((c) => ids.has(c.id)), 'a second rebuild names the SAME card ids (keyed by the row key)');
+ok(verdictOf(mm2.messages.filter((m) => m.noticeKind === 'artifact').every((c) => ids.has(c.id))), 'a second rebuild names the SAME card ids (keyed by the row key)');
 // the restart: the persisted rows carry the user's own save (live only) — rebuildHistory merges, the card says it
 const persisted = { ...mm.derivedArtifacts };
 const bk = ':' + CWD + '/docs/BRIEF.md';
@@ -147,11 +147,11 @@ console.log('⑦ the doc-window contract — ownerOf / noteEdit / the user\'s sa
 const older = { backend: 'claude', cwd: CWD, claudeSessionId: 'c-old', backendSessionId: 'c-old', _artifacts: { [bk]: { ...brief, lastAt: 1 } } };
 REG.configure({ activeSessions: () => new Map([['s0', older], ['s2', live]]) });
 const own = REG.ownerOf({ host: '', path: CWD + '/docs/BRIEF.md' });
-ok(own && own.sessionId === 's2' && own.row.key === bk && REG.ownerOf({ host: '', path: '/nope.md' }) === null, 'ownerOf → the NEWEST conversation holding the path; an unknown path → null', own && own.sessionId);
+ok(gateOf(own) && own.sessionId === 's2' && own.row.key === bk && REG.ownerOf({ host: '', path: '/nope.md' }) === null, 'ownerOf → the NEWEST conversation holding the path; an unknown path → null', own && own.sessionId);
 live.claudeSessionId = live.backendSessionId = 'c-2';
 const t = REG.touch({ sessionId: 's2', host: 'local', path: CWD + '/docs/BRIEF.md', summary: AF.lineDelta('a\nb\n', 'a\nc\nd\n').text });
 const lastEdit = emitted.filter((o) => o.op === 'edit').pop();
-ok(t.ok && t.row.by === 'user' && t.row.edits === 2 && lastEdit.fields.content[0].by === 'user', 'the user\'s save (artifact-touch) → by: user, edits+1, the card patched in place', t.row);
+ok(gateOf(t.ok) && t.row.by === 'user' && t.row.edits === 2 && lastEdit.fields.content[0].by === 'user', 'the user\'s save (artifact-touch) → by: user, edits+1, the card patched in place', t.row);
 ok(stashed.length === 1 && stashed[0].env.kind === 'peer' && stashed[0].env.source === 'doc-edit' && stashed[0].env.text === `[Doc edit] ${CWD}/docs/BRIEF.md: +2 −1 lines` && !!stashed[0].cid, 'ONE next-turn note through the stash ("[Doc edit] <path>: +a −b lines") — never a wake', stashed[0]);
 ok(REG.touch({ sessionId: 'nope', path: '/a.md' }).ok === false && REG.touch({ sessionId: 's2', path: 'rel.md' }).ok === false, 'an unknown conversation or a relative path is refused');
 ok(AF.editNoteText({ path: '/a.md', summary: 'x'.repeat(900) }).length < 330, 'the note is bounded (the summary is the editor\'s words, never file content)');
@@ -163,7 +163,7 @@ rr = AF.fold(AF.fold(rr, AF.pageOp(PG)), AF.pageOp({ ...PG, updatedAt: Date.pars
 const pk = ':' + CWD + '/site/index.html';
 ok(Object.keys(rr).length === 1 && rr[pk].kind === 'page' && rr[pk].url === '/p/pg1' && rr[pk].state === 'published' && rr[pk].writes === 1 && rr[pk].edits === 0, 'a page the agent wrote, published twice = ONE row (its source file, the /p/ link, published; a publish never counts as a write)', rr[pk]);
 rr = AF.fold(rr, AF.pageOp({ ...PG, removed: true }));
-ok(rr[pk] && rr[pk].state === 'unpublished' && rr[pk].url === '/p/pg1' && AF.cardBlock(rr[pk]).state === 'unpublished', 'unpublish ⇒ the row SAYS so (never deleted; the card block carries the state)', rr[pk]);
+ok(gateOf(rr[pk]) && rr[pk].state === 'unpublished' && rr[pk].url === '/p/pg1' && AF.cardBlock(rr[pk]).state === 'unpublished', 'unpublish ⇒ the row SAYS so (never deleted; the card block carries the state)', rr[pk]);
 ok(AF.pageOp({ ...PG, srcKey: 'box:/srv/a.html', srcPath: '/srv/a.html' }).host === 'box' && AF.pageOp({ ...PG, srcKey: 'conv-9:/srv/a.html', srcPath: '/srv/b.html' }).host === '', 'a page\'s machine = its srcKey prefix only when the key IS <host>:<srcPath> (a namespaced key names none)');
 const DS = { id: 'd1', sessionId: 's5', host: null, dir: CWD + '/designs/landing', title: 'Landing', openedAt: Date.parse(T(50)) };
 let dr = AF.fold({}, AF.designOp(DS));
@@ -200,22 +200,22 @@ await N.rebuildHistory(s6, 's6', TRANSCRIPT);
 const k6 = s6._normalizer.messages.filter((m) => m.noticeKind === 'artifact').map((m) => m.content[0].kind).sort().join(',');
 ok(k6 === 'doc,doc,media,design,page,upload'.split(',').sort().join(',') && s6._artifacts[pk].url === '/p/pg1', 'a rebuild = transcript ∪ persisted ∪ the stores: the 3 written + page + design + upload cards', k6);
 console.log('⑨ every harness declares the hook; patched-copy controls');
-ok(harnessIds().every((id) => 'artifactsOf' in harnessOf(id) && (harnessOf(id).artifactsOf === null || typeof harnessOf(id).artifactsOf === 'function')), 'every registered harness declares artifactsOf (a reader or null)', harnessIds());
+ok(verdictOf(harnessIds().every((id) => 'artifactsOf' in harnessOf(id) && (harnessOf(id).artifactsOf === null || typeof harnessOf(id).artifactsOf === 'function'))), 'every registered harness declares artifactsOf (a reader or null)', harnessIds());
 const src = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
 const noSeen = "  if (prev && o.id && prev.lastId === o.id) return { rows: cur, row: prev, born: false, evicted: [], skipped: 'seen' };\n";
-ok(src.includes(noSeen), 'control anchor: the seen-call guard is in the reducer');
+ok(verdictOf(src.includes(noSeen)), 'control anchor: the seen-call guard is in the reducer');
 const MUT = M.load('src/artifacts.js', editAnchor(src, noSeen, '\n', "src/artifacts.js"), 'noseen');
 let mr = {}; for (const r of [W1.rec, W1.rec]) for (const o of AO.claude(r)) mr = MUT.fold(mr, o);
 ok(mr[bk].writes === 2, 'CONTROL: without the seen-call guard the double feed counts 2 writes (the ③ assert sees it)', mr[bk].writes);
 const cfg = "  if (AGENT_CONFIG_NAMES.has(baseName(p).toLowerCase()) || AGENT_CONFIG_DIR.test(p)) return 'code';\n";
-ok(src.includes(cfg) && M.load('src/artifacts.js', editAnchor(src, cfg, '\n', "src/artifacts.js"), 'nocfg').kindOf('/p/CLAUDE.md') === 'doc', 'CONTROL: without the agent-config rule CLAUDE.md becomes a doc card (the ① assert sees it)');
+ok(gateOf(src.includes(cfg)) && M.load('src/artifacts.js', editAnchor(src, cfg, '\n', "src/artifacts.js"), 'nocfg').kindOf('/p/CLAUDE.md') === 'doc', 'CONTROL: without the agent-config rule CLAUDE.md becomes a doc card (the ① assert sees it)');
 // lane artifacts-registries: the kind rank and the rebuild's third input are each load-bearing
 const rank = " && !outranks(row.kind, o.kind)) row.kind = o.kind;";
 const MR = src.includes(rank) ? M.load('src/artifacts.js', editAnchor(src, rank, ') row.kind = o.kind;', "src/artifacts.js"), 'norank') : null;
-ok(MR && MR.fold(MR.fold({}, MR.designOp(DS)), MR.pageOp({ id: 'pg2', srcKey: 'local:' + DS.dir, srcPath: DS.dir, path: '/p/pg2', updatedAt: 1 }))[dk].kind === 'page', 'CONTROL: without the kind rank a published design turns into a page (the ⑧ assert sees it)');
+ok(gateOf(MR) && MR.fold(MR.fold({}, MR.designOp(DS)), MR.pageOp({ id: 'pg2', srcKey: 'local:' + DS.dir, srcPath: DS.dir, path: '/p/pg2', updatedAt: 1 }))[dk].kind === 'page', 'CONTROL: without the kind rank a published design turns into a page (the ⑧ assert sees it)');
 const regOnly = "  if (REG_OPS.includes(o.op)) {";
 const MC = src.includes(regOnly) ? M.load('src/artifacts.js', editAnchor(src, regOnly, '  if (false) {', "src/artifacts.js"), 'regcount') : null;
-ok(MC && MC.fold(MC.fold({}, MC.pageOp(PG)), MC.pageOp({ ...PG, updatedAt: 9 }))[pk].edits === 2, 'CONTROL: without the registry-op branch every publish counts as an edit (the ⑧ "never counts" assert sees it)');
+ok(gateOf(MC) && MC.fold(MC.fold({}, MC.pageOp(PG)), MC.pageOp({ ...PG, updatedAt: 9 }))[pk].edits === 2, 'CONTROL: without the registry-op branch every publish counts as an edit (the ⑧ "never counts" assert sees it)');
 const nsrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
 const third = 'AF.merge(AF.merge(mm.derivedArtifacts || {}, session._artifacts || {}), artifactStoreRows(session, sessionId))';
 const MN = nsrc.includes(third) ? M.load('src/normalizers.js', editAnchor(nsrc, third, 'AF.merge(mm.derivedArtifacts || {}, session._artifacts || {})', "src/normalizers.js"), 'nostore') : null;
@@ -223,7 +223,7 @@ if (MN) MN.setArtifactStoreSource(REG.storeRowsOf);
 const s7 = { backend: 'claude', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
 STORE.pages = [{ ...PG, sessionId: 's7' }];
 if (MN) await MN.rebuildHistory(s7, 's7', TRANSCRIPT);
-ok(MN && !s7._artifacts[pk] && REG.storeRowsOf(null, 's7')[pk], 'CONTROL: a rebuild without the store merge loses the published page (the ⑧ replay assert sees it)');
+ok(gateOf(MN) && !s7._artifacts[pk] && verdictOf(REG.storeRowsOf(null, 's7')[pk]), 'CONTROL: a rebuild without the store merge loses the published page (the ⑧ replay assert sees it)');
 
 console.log('⑩ a rebuild\'s card lands at ITS time inside the loaded slab or nowhere (lane artifacts-settle-position)');
 // the PURE rule + the splice point
@@ -267,7 +267,7 @@ ok(c8.length === 2 && iNew > 0 && textOf(list8[iNew - 1]) === 'before the page' 
   'the page published 10 min into the slab: ONE card at its time — between the message before it and the one after, never at the tail', { cards: c8.map(keyOfCard), at: iNew, of: list8.length, prev: textOf(list8[iNew - 1]), next: textOf(list8[iNew + 1]) });
 ok(textOf(list8[list8.length - 1]) === 'later still', 'the last message of the slab is still the last thing in the chat (no card after it)', textOf(list8[list8.length - 1]));
 const chip8 = AF.view(AF.merge(s8._artifacts, SVC)).items.map((r) => r.key);
-ok([oldDocKey, pgOldKey, pgNewKey, svcKey].every((k) => chip8.includes(k)), 'the chip still lists every row — the two old ones, the old service and the in-slab page (the chip is their home)', chip8);
+ok(verdictOf([oldDocKey, pgOldKey, pgNewKey, svcKey].every((k) => chip8.includes(k))), 'the chip still lists every row — the two old ones, the old service and the in-slab page (the chip is their home)', chip8);
 // a card queued behind a running rebuild (the ports door re-feeds the old service; a page published mid-slab; a new write)
 const em8 = []; s8._normalizer.onOp((o) => em8.push(JSON.parse(JSON.stringify(o))));
 const p8 = N.rebuildHistory(s8, 's8', SLAB_RECS);
@@ -288,7 +288,7 @@ const oldEdit = { ...persisted8[oldDocKey], edits: 1, lastAt: T0 + 41 * MIN, las
 const before8 = em8.length;
 N.feedArtifactCard(s8, AF.cardBlock(liveRow));
 const l8c = s8._normalizer.messages;
-ok(keyOfCard(l8c[l8c.length - 1]) === liveRow.key && em8.slice(before8).some((o) => o.op === 'create' && o.message.content[0].key === liveRow.key), 'a LIVE write ⇒ its card at the tail + a create op (unchanged)');
+ok(keyOfCard(l8c[l8c.length - 1]) === liveRow.key && verdictOf(em8.slice(before8).some((o) => o.op === 'create' && o.message.content[0].key === liveRow.key)), 'a LIVE write ⇒ its card at the tail + a create op (unchanged)');
 N.feedArtifactCard(s8, AF.cardBlock(oldEdit));
 ok(keyOfCard(s8._normalizer.messages[s8._normalizer.messages.length - 1]) === oldDocKey, 'a LIVE edit of a file written before the slab ⇒ its card is born at the tail (a live birth — the agent just touched it)');
 s8._artifacts = AF.merge(s8._artifacts, { [freshRow.key]: freshRow, [midRow.key]: midRow, [liveRow.key]: liveRow });
@@ -301,23 +301,23 @@ ok(ids1.join() === ids2.join() && new Set(ids2).size === ids2.length && !cardsOf
 // patched-copy controls: the old push-at-tail in settle; the store rows placed without the range check
 const nsrc8 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
 const settleCall = 'if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b, { rebuilt: true });';
-ok(nsrc8.includes(settleCall), 'control anchor: settle places a REBUILT card');
+ok(verdictOf(nsrc8.includes(settleCall)), 'control anchor: settle places a REBUILT card');
 const MT = M.load('src/normalizers.js', editAnchor(nsrc8, settleCall, 'if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b);', "src/normalizers.js"), 'tailsettle');
 MT.setArtifactStoreSource(REG.storeRowsOf); MT.setArtifactServiceSource((s) => (s && s.svcFixture ? SVC : {}));
 const s9 = { backend: 'claude', cwd: CWD, host: '', svcFixture: true, _artifacts: { ...persisted8 }, _normalizer: null };
 await MT.rebuildHistory(s9, 's8', SLAB_RECS);
 const l9 = s9._normalizer.messages, last9 = l9.findIndex((m) => textOf(m) === 'later still');
 const tail9 = l9.slice(last9 + 1).map((m) => (m.noticeKind === 'artifact' ? keyOfCard(m) : textOf(m)));
-ok(last9 > 0 && [oldDocKey, pgOldKey, svcKey].every((k) => tail9.includes(k)), 'CONTROL: with the old push-at-tail in settle the three stale cards sit after the last message (the ⑩ "no card" assert sees it)', tail9);
+ok(last9 > 0 && verdictOf([oldDocKey, pgOldKey, svcKey].every((k) => tail9.includes(k))), 'CONTROL: with the old push-at-tail in settle the three stale cards sit after the last message (the ⑩ "no card" assert sees it)', tail9);
 const asrc8 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
 const range = '  if (at < slabFirstAt) return \'none\';\n';
-ok(asrc8.includes(range), 'control anchor: the slab range check is in cardPlacement');
+ok(verdictOf(asrc8.includes(range)), 'control anchor: the slab range check is in cardPlacement');
 const afNoRange = M.write('src/artifacts.js', editAnchor(asrc8, range, '\n', "src/artifacts.js"), 'norange');
 const MR8 = M.load('src/normalizers.js', editAnchor(nsrc8, "require('./artifacts.js')", 'require(' + JSON.stringify(afNoRange) + ')', "src/normalizers.js"), 'norange');
 MR8.setArtifactStoreSource(REG.storeRowsOf); MR8.setArtifactServiceSource(() => ({}));
 const s10 = { backend: 'claude', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
 await MR8.rebuildHistory(s10, 's8', SLAB_RECS);
-ok(s10._normalizer.messages.some((m) => m.noticeKind === 'artifact' && keyOfCard(m) === pgOldKey), 'CONTROL: the store rows placed without the range check draw the page published before the slab (the ⑩ "no card" assert sees it)');
+ok(verdictOf(s10._normalizer.messages.some((m) => m.noticeKind === 'artifact' && keyOfCard(m) === pgOldKey)), 'CONTROL: the store rows placed without the range check draw the page published before the slab (the ⑩ "no card" assert sees it)');
 N.setArtifactServiceSource(REG.servicesOf);
 
 console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id> link, is a presented page row (lane pages-chip-groups, B-aa28)');
@@ -325,7 +325,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   const HOOK = require(path.join(REPO, 'src/harnesses/artifacts-of.js'));
   const PID = (c) => 'pg' + String(c).repeat(10).slice(0, 10); // the store's id shape: 'pg' + 10 of [a-z0-9]
   const ppSrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/server/published-pages.js'), 'utf8');
-  ok(/const mintId = \(\) => 'pg' \+ Array\.from\(\{ length: 10 \}, \(\) => 'abcdefghijklmnopqrstuvwxyz0123456789'\[/.test(ppSrc) && AF.PAGE_LINK.source.includes('pg[a-z0-9]{10}'), 'the witness reads the pages store\'s OWN id shape (published-pages mintId: pg + 10 of [a-z0-9])');
+  ok(gateOf(/const mintId = \(\) => 'pg' \+ Array\.from\(\{ length: 10 \}, \(\) => 'abcdefghijklmnopqrstuvwxyz0123456789'\[/.test(ppSrc)) && verdictOf(AF.PAGE_LINK.source.includes('pg[a-z0-9]{10}')), 'the witness reads the pages store\'s OWN id shape (published-pages mintId: pg + 10 of [a-z0-9])');
   const sayAt = (text, s) => ({ type: 'assistant', uuid: 'p' + s, timestamp: T(s), cwd: CWD, sessionId: 'c-pa', message: { id: 'msg_p' + s, role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }] } });
   const userAt = (content, s) => ({ type: 'user', uuid: 'u' + s, timestamp: T(s), cwd: CWD, sessionId: 'c-pa', message: { role: 'user', content } });
   const links = AF.pageLinksIn(`a /p/${PID('a')} b (/p/${PID('b')}) https://vs.example.com:3456/p/${PID('c')}/ /home/u/p/${PID('d')} x/p/${PID('e')} /p/${PID('f')}0 /p/${PID('a')}`);
@@ -365,12 +365,12 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   told.length = 0;
   REG.notePage({ ...OTHER, removed: true }, { removed: true });
   PSTORE.pages = PSTORE.pages.filter((p) => p.id !== OTHER.id); PSTORE.gone.push(OTHER.id);
-  ok(told.some((m) => m.type === 'artifacts-changed' && m.sid === 'sA') && REG.listFor('sA').items.find((b) => b.page === OTHER.id)?.gone === true, 'the publisher unpublishes later ⇒ the showing conversation hears artifacts-changed and its row reads gone');
+  ok(gateOf(told.some((m) => m.type === 'artifacts-changed' && m.sid === 'sA')) && REG.listFor('sA').items.find((b) => b.page === OTHER.id)?.gone === true, 'the publisher unpublishes later ⇒ the showing conversation hears artifacts-changed and its row reads gone');
   // the cap: 55 distinct links ⇒ the newest 50 kept
   const sC = { backend: 'claude', sockName: 'sC', cwd: CWD, host: '', _artifacts: {} };
   for (let i = 0; i < 55; i++) REG.observe(sC, sayAt(`/p/pg${String(i).padStart(10, '0')}`, 30 + i));
   const kept = Object.values(sC._artifacts).filter((r) => r.presented).map((r) => r.page);
-  ok(kept.length === AF.MAX_PRESENTED && AF.MAX_PRESENTED === 50 && !kept.includes('pg0000000000') && kept.includes('pg0000000054'), `the cap: ≤ ${AF.MAX_PRESENTED} presented rows per conversation, the newest-mentioned kept`, kept.length);
+  ok(kept.length === AF.MAX_PRESENTED && AF.MAX_PRESENTED === 50 && !kept.includes('pg0000000000') && verdictOf(kept.includes('pg0000000054')), `the cap: ≤ ${AF.MAX_PRESENTED} presented rows per conversation, the newest-mentioned kept`, kept.length);
   // the rebuild path: the same rows from the transcript
   const sR = { backend: 'claude', sockName: 'sR', claudeSessionId: 'c-pr', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
   await N.rebuildHistory(sR, 'sR', [sayAt(`replayed /p/${PID('r')}`, 40)]);
@@ -389,21 +389,21 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   REG.configure(regCfg([['sD', sD]]));
   for (const r of DOOR) REG.observe(sD, r);
   const liveD = Object.fromEntries(REG.listFor('sD').items.filter((b) => b.presented).map((b) => [b.page, b.intent]));
-  ok(doorsRight(liveD), 'LIVE door (observe → listFor): a peer\'s vibespace-msg send with a /p/ link ⇒ «for you»; the person\'s own paste ⇒ «made here»', liveD);
+  ok(verdictOf(doorsRight(liveD)), 'LIVE door (observe → listFor): a peer\'s vibespace-msg send with a /p/ link ⇒ «for you»; the person\'s own paste ⇒ «made here»', liveD);
   const sDr = { backend: 'claude', sockName: 'sDr', claudeSessionId: 'c-pdr', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
   await N.rebuildHistory(sDr, 'sDr', DOOR);
-  ok(doorsRight(bandsOf(sDr._artifacts)), 'REBUILD door (the transcript\'s derivation): the same two verdicts', bandsOf(sDr._artifacts));
+  ok(verdictOf(doorsRight(bandsOf(sDr._artifacts))), 'REBUILD door (the transcript\'s derivation): the same two verdicts', bandsOf(sDr._artifacts));
   {
     const fsD = await import('node:fs'), rsrc = fsD.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), nsrcD = fsD.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
     const liveDoor = 'noteOp(session, { ...o, by: AF.opAuthor(o) })', rbDoor = "by: AF.opAuthor(o) }); // the person's own page link";
     const M4e = rsrc.includes(liveDoor) ? M.load('src/server/artifact-registry.js', editAnchor(rsrc, liveDoor, "noteOp(session, { ...o, by: 'agent' })", "src/server/artifact-registry.js"), 'liveagent') : null;
     const sE = { backend: 'claude', sockName: 'sE', claudeSessionId: 'c-pe', cwd: CWD, host: '', _artifacts: {} };
     if (M4e) { M4e.configure(regCfg([['sE', sE]])); for (const r of DOOR) M4e.observe(sE, r); REG.configure(regCfg()); } // the copy's configure pointed the rebuild's helper seam at itself — the real one again
-    ok(M4e && bandsOf(sE._artifacts)[PASTEP.id] === 'foryou', 'CONTROL the live door forcing «agent» (r1 — the acceptor\'s M4e) ⇒ the person\'s paste reads «for you» — RED', M4e && bandsOf(sE._artifacts));
+    ok(gateOf(M4e) && bandsOf(sE._artifacts)[PASTEP.id] === 'foryou', 'CONTROL the live door forcing «agent» (r1 — the acceptor\'s M4e) ⇒ the person\'s paste reads «for you» — RED', M4e && bandsOf(sE._artifacts));
     const M4f = nsrcD.includes(rbDoor) ? M.load('src/normalizers.js', editAnchor(nsrcD, rbDoor, "by: 'agent' }); // control", "src/normalizers.js"), 'rebuildagent') : null;
     const sF = { backend: 'claude', sockName: 'sF', claudeSessionId: 'c-pf', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
     if (M4f) await M4f.rebuildHistory(sF, 'sF', DOOR);
-    ok(M4f && bandsOf(sF._artifacts)[PASTEP.id] === 'foryou', 'CONTROL the rebuild forcing «agent» (r1 — the acceptor\'s M4f) ⇒ RED', M4f && bandsOf(sF._artifacts));
+    ok(gateOf(M4f) && bandsOf(sF._artifacts)[PASTEP.id] === 'foryou', 'CONTROL the rebuild forcing «agent» (r1 — the acceptor\'s M4f) ⇒ RED', M4f && bandsOf(sF._artifacts));
   }
   // r4 (W1): a For-you TRAY ANSWER is ONE message with TWO authors — composeReply quotes the ask (its text + up to
   // DETAIL_QUOTE_CAP chars of its detail: the AGENT's words) above the person's answer. The r3 acceptance's three measured
@@ -417,7 +417,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     const ASK = { id: 'ut-0123456789', text: `Please review the referee report /p/${ASKP.id} before I merge`, detail: `Also see /p/${DIFFP.id} for the diff\n${'x'.repeat(IR.DETAIL_QUOTE_CAP - 46)} /p/${CUTP.id}`, createdAt: Date.parse(T(70)), urgency: 'normal' };
     const reply = IR.composeReply(ASK, `Looks fine, merge it — my own notes: /p/${MINEP.id}`, { now: Date.parse(T(80)) });
     const cutAt = reply.indexOf('/p/' + CUTP.id.slice(0, 4));
-    ok(IR.parseReply(reply) && cutAt > 0 && !reply.includes('/p/' + CUTP.id), 'the fixture: composeReply\'s own reply (the parser reads it back); the detail\'s last link cut at the cap MID-ID (' + JSON.stringify(reply.slice(cutAt, cutAt + 12)) + ')');
+    ok(gateOf(IR.parseReply(reply)) && cutAt > 0 && !reply.includes('/p/' + CUTP.id), 'the fixture: composeReply\'s own reply (the parser reads it back); the detail\'s last link cut at the cap MID-ID (' + JSON.stringify(reply.slice(cutAt, cutAt + 12)) + ')');
     const RECS3 = {
       'claude JSONL (sdk)': { type: 'user', uuid: 'tr1', timestamp: T(80), cwd: CWD, sessionId: 'c-pt', promptSource: 'sdk', message: { role: 'user', content: reply } },
       'claude live (_fromWebui)': { type: 'user', _fromWebui: true, msgId: 'm-tray', uuid: 'tr2', timestamp: T(80), cwd: CWD, sessionId: 'c-pt', message: { role: 'user', content: [{ type: 'text', text: reply }] } },
@@ -433,8 +433,8 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
       await N.rebuildHistory(sR3, sR3.sockName, [rec]); rebuilt[k] = bandsOf(sR3._normalizer && sR3._normalizer.derivedArtifacts); // the transcript's derivation (the store's own copy of the ask is storeRows' — below)
     }
     REG.configure({ ...regCfg(), asks: () => [] });
-    ok(['claude JSONL (sdk)', 'claude live (_fromWebui)'].every((k) => trayRight(live[k])), 'LIVE door (observe → listFor), a tray answer: the ask\'s pages (its text, its detail) «for you»; the person\'s own link in the answer «made»; nothing from the cut link', live);
-    ok(Object.keys(RECS3).every((k) => trayRight(rebuilt[k])), 'REBUILD door (the transcript\'s derivation): the same verdicts for claude JSONL, the live record and codex input_text', rebuilt);
+    ok(verdictOf(['claude JSONL (sdk)', 'claude live (_fromWebui)'].every((k) => trayRight(live[k]))), 'LIVE door (observe → listFor), a tray answer: the ask\'s pages (its text, its detail) «for you»; the person\'s own link in the answer «made»; nothing from the cut link', live);
+    ok(verdictOf(Object.keys(RECS3).every((k) => trayRight(rebuilt[k]))), 'REBUILD door (the transcript\'s derivation): the same verdicts for claude JSONL, the live record and codex input_text', rebuilt);
     // door (a): THE ASK — presentAsk folds every /p/ link in the ask's text and WHOLE detail (the cut one too) as the agent's
     const sQ = sess('sQ');
     REG.configure(regCfg([['sQ', sQ]]));
@@ -447,13 +447,13 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     const fsT = await import('node:fs'), osrc = fsT.readFileSync(path.join(REPO, 'src/harnesses/artifacts-of.js'), 'utf8'), rsrcT = fsT.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
     const splitLine = (/^ {2}for \(const s of texts\) \{ const rp = parseReply\(s\); if \(rp\) out\.push\(.*$/m.exec(osrc) || [''])[0]; // the reader's split line (r4's or r5's words)
     const WM = splitLine ? M.load('src/harnesses/artifacts-of.js', editAnchor(osrc, splitLine, '  out.push(...presentOps(texts, by));', "src/harnesses/artifacts-of.js"), 'wholemsg') : null;
-    if (ok(WM, 'CONTROL needle present: the reader\'s split of a tray answer (r4) — a tree without it has nothing to patch')) {
+    if (ok(verdictOf(WM), 'CONTROL needle present: the reader\'s split of a tray answer (r4) — a tree without it has nothing to patch')) {
       const wmB = bandsOf(AF.resolvePresented(WM.claude(RECS3['claude JSONL (sdk)']).reduce((rows, o) => AF.apply(rows, { cwd: CWD, at: 1, ...o, by: AF.opAuthor(o) }).rows, {}), { pageOf: (id) => ({ page: { ...ASKP, id } }) }));
       ok(wmB[ASKP.id] === 'made', 'CONTROL r3\'s whole-message rule (a tray answer\'s every line the person\'s) ⇒ the ask\'s page reads «made here» — RED', wmB);
     }
     const askLine = 'for (const op of AF.askOps({ artifacts, id, at, said }))'; // r6: the ONE reader of an ask (AF.askOps)
     const PA = rsrcT.includes(askLine) ? M.load('src/server/artifact-registry.js', editAnchor(rsrcT, askLine, 'for (const op of AF.askOps({ artifacts, id, at }))', "src/server/artifact-registry.js"), 'askattachonly') : null;
-    if (ok(PA, 'CONTROL needle present: presentAsk\'s fold of the ask\'s words (r4) — a tree without it has nothing to patch')) {
+    if (ok(verdictOf(PA), 'CONTROL needle present: presentAsk\'s fold of the ask\'s words (r4) — a tree without it has nothing to patch')) {
       const sQ2 = sess('sQ2');
       PA.configure(regCfg([['sQ2', sQ2]])); PA.presentAsk(sQ2, null, { id: ASK.id, said: [ASK.text, ASK.detail] }); REG.configure(regCfg());
       ok(!Object.keys(sQ2._artifacts).length, 'CONTROL r3\'s presentAsk (the attachments only) ⇒ an ask naming a page in its words shows none — RED', Object.keys(sQ2._artifacts));
@@ -469,9 +469,9 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     ok(atCap.whole.join() === AT + ':agent' && atCap.before.join() === AT + ':agent', 'a link ending at the cap in a detail of exactly the cap (whole) ⇒ read, the agent\'s; a link ending one before the cap (a space at the cut) ⇒ read', atCap);
     const uncutLine = 'presentOps([uncut(rp)])'; // the quote's reading (r5's words; r10 names the quoted item after it)
     const UC = osrc.includes(uncutLine) ? M.load('src/harnesses/artifacts-of.js', editAnchor(osrc, uncutLine, 'presentOps([rp.quote])', "src/harnesses/artifacts-of.js"), 'quotewhole') : null;
-    if (ok(UC, 'CONTROL needle present: the reader\'s drop of the token the cap cut (r5) — a tree without it has nothing to patch')) {
+    if (ok(verdictOf(UC), 'CONTROL needle present: the reader\'s drop of the token the cap cut (r5) — a tree without it has nothing to patch')) {
       const ucPh = UC.claude({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: IR.composeReply({ ...ASK, detail: pad + PH + 'z and more' }, 'ok', { now: Date.parse(T(80)) }) } }).map((o) => o.page);
-      ok(ucPh.includes(PH), 'CONTROL r4\'s reader (the quote read whole) ⇒ the cut token births a phantom row «' + PH + '» — RED', ucPh);
+      ok(verdictOf(ucPh.includes(PH)), 'CONTROL r4\'s reader (the quote read whole) ⇒ the cut token births a phantom row «' + PH + '» — RED', ucPh);
     }
     // r6 (U1): A TOKEN CUT AT ANY CAP IS NO LINK — ONE rule for every cap. The store keeps an ask's words to TEXT_MAX /
     // DETAIL_MAX through the grammar's ONE cut (`clip`: the kept words end in the cut mark — test-user-todos-layout ⑫ pins
@@ -481,7 +481,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     const RT = require(path.join(REPO, 'src/inbox-reply-text.js'));
     const utSrc = fsT.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
     const TM = +(/^const TEXT_MAX = (\d+);$/m.exec(utSrc) || [])[1], DM = +(/^const DETAIL_MAX = (\d+);$/m.exec(utSrc) || [])[1];
-    ok(TM === 500 && DM === 8000 && /\btext = clip\(rawText, TEXT_MAX\);/.test(utSrc) && /\bdetail = rawDetail \? clip\(rawDetail, DETAIL_MAX\) : null;/.test(utSrc) && typeof RT.clip === 'function',
+    ok(TM === 500 && DM === 8000 && gateOf(/\btext = clip\(rawText, TEXT_MAX\);/.test(utSrc)) && gateOf(/\bdetail = rawDetail \? clip\(rawDetail, DETAIL_MAX\) : null;/.test(utSrc)) && typeof RT.clip === 'function',
       'census: the store keeps an ask\'s text to TEXT_MAX 500 and its detail to DETAIL_MAX 8 000 through the grammar\'s ONE cut (`clip` — the cut mark where the cut is made)');
     const clipT = typeof RT.clip === 'function' ? RT.clip : (s, cap) => s.slice(0, cap), sliceT = (s, cap) => s.slice(0, cap); // sliceT: r5's store
     const P11 = PID('7') + '7', W10 = PID('8'); // a 13-char token (pg + 11: no page id) · a page id
@@ -534,12 +534,12 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     ok(g.bd[3] === 'touched' && g.bd[5] === 'foryou' && g.tl[3] === 1 && g.tl[5] === 1, 'a code row: born by an Edit ⇒ told +1; an ask attaching it ⇒ told +1, «touched» → «for you»', g);
     ok(g.tl[2] === 0 && g.tl[4] === 0 && g.tl[6] === 0 && g.tl[7] === 0, 'an op that moves nothing tells nothing — a second ask on a row already «for you», a second Edit, the same op twice, an Edit after the ask (no storm)', g.tl);
     const csrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
-    ok(/msg\.type === 'artifacts-changed' && msg\.sessionId === sessionId\) \{\s*this\._refreshArtifacts\(\);/.test(csrc) && /_refreshArtifacts\(\) \{[\s\S]{0,400}fetch\(`\/api\/artifacts\?sessionId=[\s\S]{0,200}setArtifacts\(v\); publishArtifacts\(this\.sessionId, v\)/.test(csrc),
+    ok(gateOf(/msg\.type === 'artifacts-changed' && msg\.sessionId === sessionId\) \{\s*this\._refreshArtifacts\(\);/.test(csrc)) && verdictOf(/_refreshArtifacts\(\) \{[\s\S]{0,400}fetch\(`\/api\/artifacts\?sessionId=[\s\S]{0,200}setArtifacts\(v\); publishArtifacts\(this\.sessionId, v\)/.test(csrc)),
       'census: the client hears it — chat-view re-reads GET /api/artifacts on artifacts-changed; the chip and an open Artifacts window (publishArtifacts) draw the answer');
     const rsrcV = (await import('node:fs')).readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
     const oneRule = "  if (r.born || AF.intentOf(before[r.row.key]) !== AF.intentOf(r.row)) tellChanged(session);";
     const B4 = rsrcV.includes(oneRule) ? M.load('src/server/artifact-registry.js', editAnchor(rsrcV, oneRule, '  if (r.row.presented && r.born) tellChanged(session);', "src/server/artifact-registry.js"), 'tellborn') : null;
-    if (ok(B4, 'CONTROL needle present: noteOp\'s one tell rule (r5) — a tree without it has nothing to patch')) {
+    if (ok(verdictOf(B4), 'CONTROL needle present: noteOp\'s one tell rule (r5) — a tree without it has nothing to patch')) {
       const g4 = run(B4);
       REG.configure(regCfg()); // the copy's configure re-pointed the normalizers' seams — the real one again
       ok(g4.bd[1] === 'foryou' && g4.tl[1] === 0 && g4.tl[5] === 0, 'CONTROL r4\'s rule (told only at a presented birth) ⇒ the pasted page moves to «for you» and the code file too with nothing told — the open list keeps the old band — RED', g4.tl);
@@ -559,7 +559,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     ok(lv.host === HID && JSON.stringify(lv.hostNames) === JSON.stringify({ [HID]: 'gpu1', 'host-2b3c4d5e': 'gpu2' }), 'listFor names the machines its view mentions by the hosts registry\'s name (the conversation\'s own included; the hub\'s own and a machine gone from the list: none — the model says «Local» / the id)', lv.hostNames);
     const hsrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), hdoor = ', hostNames: hostNamesOf([host, ...v.items.map((r) => r.host), ...v.code.map((r) => r.host)]) }';
     const MH = hsrc.includes(hdoor) ? M.load('src/server/artifact-registry.js', editAnchor(hsrc, hdoor, ' }', "src/server/artifact-registry.js"), 'nohostnames') : null;
-    if (ok(MH, 'CONTROL needle present: listFor\'s machine names (r4) — a tree without it has nothing to patch')) {
+    if (ok(verdictOf(MH), 'CONTROL needle present: listFor\'s machine names (r4) — a tree without it has nothing to patch')) {
       const mhv = (MH.configure(cfgH), MH.listFor('sH'));
       REG.configure(regCfg()); // the copy's configure re-pointed the normalizers' seams — the real one again
       ok(!mhv.hostNames, 'CONTROL r3\'s listFor (no names) ⇒ the list reads the internal id — RED');
@@ -608,7 +608,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     const held = (rung, legacy = IO.legacyAsk) => { const items = OLD.map((i) => (rung && typeof legacy === 'function' && legacy(i, producerOf) ? { ...i, via: IO.ASK_VIA } : i)).concat(NEW); return { idsWhere: (p) => items.filter(p).map((i) => i.id), get: (id) => items.find((i) => i.id === id) || null }; }; // UserTodoManager's own read
     const B = held(true), BR = held(false), B7 = held(true, (i, p) => i.origin === 'agent' && typeof IO.legacyAsk === 'function' && IO.legacyAsk(i, p)), B8 = held(true, (i, p) => !!i && (i.origin === 'agent' || (i.origin == null && !['Spending', 'Channels'].includes(i.sessionName) && i.jobId == null)) && i.via == null && i.i18n == null && (i.action == null || p(i.action.type) === IO.ASK_FILER)); // … · r8's rung, its expression as it was (no browser census) // what this tree's load holds · a load without the rung · r7's rung (origin `agent` only)
     const fixture = { marked: OLD.map((i) => (B.get(i.id).via || '-')).join(), named: [...OLD.slice(3, 6), NEW[1]].every((i, k) => i.detail.includes(PGQ[k])) };
-    ok(fixture.marked === 'ask,ask,ask,-,-,-,ask,-,-' && fixture.named, 'fixture: the store\'s load rung (IO.legacyAsk) marks the older tree\'s asks — answered, another conversation\'s, a --grant ask, one filed before the origin field — and none of the producers\' records (the browser\'s .168 ones too), each of which names its page', fixture);
+    ok(fixture.marked === 'ask,ask,ask,-,-,-,ask,-,-' && verdictOf(fixture.named), 'fixture: the store\'s load rung (IO.legacyAsk) marks the older tree\'s asks — answered, another conversation\'s, a --grant ask, one filed before the origin field — and none of the producers\' records (the browser\'s .168 ones too), each of which names its page', fixture);
     const metas = {}, writes = {}, META = { readSessionMeta: (k) => metas[k] || null, writeSessionMeta: (k, v) => { writes[k] = (writes[k] || 0) + 1; metas[k] = JSON.parse(JSON.stringify(v)); } };
     const recsP = [tool('Write', { file_path: RPT, content: 'r' }, 55).rec, tool('Edit', { file_path: RPT, old_string: 'r', new_string: 's' }, 65).rec];
     const keyFn = /^function sessionStatusKey\(session, id\) \{\n[^\n]*\n[^\n]*\n\}$/m.exec(srvSrc), statusKey = keyFn ? new Function(`return (${keyFn[0]});`)() : null;
@@ -637,7 +637,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     const stMut = (a, b, tag) => (stSrc.includes(a) ? M.load('src/agent-routes/status.js', editAnchor(stSrc, a, b, "src/agent-routes/status.js"), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(a).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
     const S6 = stMut(ISASK, "store.idsWhere((i) => i.origin === 'agent' && keys.has(i.sessionKey))", 'r6origin'), S0 = stMut(ISASK, 'store.idsWhere((i) => keys.has(i.sessionKey))', 'nofilter');
     const SK = stMut(FORKKEY, '  const key = sessionStatusKey(s, id);', 'r6key'), SP = stMut(PLACE, 'const keys = new Set([askKey(s, id, sessionStatusKey)]);', 'noplaceholder');
-    ok(S6 && S0 && SK && SP, 'CONTROL needles present: asksOf\'s filter, askKey\'s fork guard, the placeholder key (r7) — a tree without them has nothing to patch');
+    ok(gateOf(S6) && gateOf(S0) && gateOf(SK) && verdictOf(SP), 'CONTROL needles present: asksOf\'s filter, askKey\'s fork guard, the placeholder key (r7) — a tree without them has nothing to patch');
     const viaCopy = (S, store = B) => (s, id) => (S && typeof S.asksOf === 'function' ? S.asksOf(store, s, id, statusKey) : []);
     const g7 = await rebuild('sP7', W7), g5 = await rebuild('sP5', asksVia(srvSrc.replace(' asks: ' + ASKS + ',', ''), B)), gS = await rebuild('sPS', W7, { sink: false });
     const again = await rebuild('sP7', W7, { rows: JSON.parse(JSON.stringify(g7.rows)) }); // r7 (T5 · M3): the same conversation rebuilt from what it holds (a restart's persisted rows)
@@ -654,10 +654,10 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     REG.configure({ ...regCfg(), asks: () => [] }); // the registry's own sink back on the real normalizers
     await new Promise((r) => setTimeout(r, 1)); // persistSoon(…, 0) is an earlier timer of the same 1 ms list
     const [p7, p5, pS, pN] = [g7, g5, gS, gN].map(persisted);
-    ok(p7.rpt === 'foryou' && p7.pgg === 'foryou' && p7.pga === 'foryou' && !p7.theirs && p7.persisted, 'r6 (U2 + U3) through server.js\'s own wiring: the older tree\'s row of a file its ask attached (answered since) that the agent then edited + the transcript intact ⇒ «for you» after the rebuild (its --grant ask\'s page too, this tree\'s ask\'s page too); another conversation\'s ask adds nothing; the stamp is in the session meta at the next tick — no op needed', p7);
+    ok(p7.rpt === 'foryou' && p7.pgg === 'foryou' && p7.pga === 'foryou' && !p7.theirs && verdictOf(p7.persisted), 'r6 (U2 + U3) through server.js\'s own wiring: the older tree\'s row of a file its ask attached (answered since) that the agent then edited + the transcript intact ⇒ «for you» after the rebuild (its --grant ask\'s page too, this tree\'s ask\'s page too); another conversation\'s ask adds nothing; the stamp is in the session meta at the next tick — no op needed', p7);
     ok(p7.pgq === 0, 'r7 (T1) a parked WebFetch permission, a helper\'s Bash approval, an unexpected exit — an older tree\'s and this tree\'s, each naming a /p/ page, filed under the conversation\'s key with origin `agent` ⇒ no row (the witness is what the agent ASKED the person to look at, never a producer\'s record of a tool call)', p7);
-    ok(c6 && c6.pgq === 4 && c6.rpt === 'foryou', 'CONTROL r6\'s reader (origin `agent`) ⇒ the four pages only the producers\' records name are rows, stamped «for you» — RED', c6);
-    ok(c0 && c0.pgq === 4 && !c0.theirs, 'CONTROL the reader with no filter but the key ⇒ the same four phantom rows — RED', c0);
+    ok(gateOf(c6) && c6.pgq === 4 && c6.rpt === 'foryou', 'CONTROL r6\'s reader (origin `agent`) ⇒ the four pages only the producers\' records name are rows, stamped «for you» — RED', c6);
+    ok(gateOf(c0) && c0.pgq === 4 && !c0.theirs, 'CONTROL the reader with no filter but the key ⇒ the same four phantom rows — RED', c0);
     ok(p7.pgo === 'foryou', 'r8 (X2) an ask filed before the origin field (≤ 2.369.168: no origin — the tray reads it as the agent\'s) still in the store, naming a page whose row an older tree kept (no `shown`, no `ask:` id) ⇒ «for you» at the rebuild', p7);
     ok(p7.pgh === 'made', 'r9 (Y3) the browser\'s .168 records under the same key (a lapsed takeover naming the page it left open, a backend switch proposal naming it too) ⇒ no ask: the page an older tree kept reads «made» — a producer\'s record is never a witness', p7);
     ok(c8.pgh === 'foryou' && c8.pgo === 'foryou', 'CONTROL r8\'s rung (every origin-less item the tray files under Agents) ⇒ the takeover\'s page a phantom «for you» — RED', c8);
@@ -669,21 +669,21 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     const liveQ = (asks, recs = [TREC, AREC]) => { const s = { backend: 'claude', sockName: 'sQL' + (++nQL), claudeSessionId: 'c-pr', cwd: CWD, host: '', name: 'Reporter', _artifacts: {}, _normalizer: null }; REG.configure({ ...regCfg([[s.sockName, s]]), asks }); for (const r of recs) REG.observe(s, r); const v = REG.listFor(s.sockName); REG.configure({ ...regCfg(), asks: () => [] }); return Object.fromEntries(v.items.filter((b) => b.presented).map((b) => [b.page, b.intent])); };
     const qShape = { item: TKI.origin + ' · ' + TKI.text.slice(0, 22) + '… · ' + TKI.detail.slice(0, 22) + '…', quoted: IRq.composeReply(TKI, 'ok').includes('/p/' + PGT), verdict: IRq.replyVerdict({ item: TKI, session: { live: true, mode: 'chat' } }).ok, ask: IO.isAsk(TKI) };
     const qLive = liveQ(W7), qMeta = Object.values((metas.sPQ || {}).artifacts || {});
-    ok(qShape.quoted && qShape.verdict === true && qShape.ask === false, 'fixture: the browser\'s lapsed takeover (origin `browser`, its own builder\'s words) names the page it left open, the tray lets the person answer it, and it is no ask', qShape);
+    ok(gateOf(qShape.quoted) && qShape.verdict === true && qShape.ask === false, 'fixture: the browser\'s lapsed takeover (origin `browser`, its own builder\'s words) names the page it left open, the tray lets the person answer it, and it is no ask', qShape);
     ok(!(PGT in qLive) && gQ.pgt === null && !(PGT in gQ.derived) && !qMeta.some((r) => r.page === PGT), 'r10 (F1) the person answers «ok» from the tray to the browser\'s lapsed takeover ⇒ the page its quote names is NO row — live (observe), at the rebuild (the transcript\'s derivation and the merge), nothing persisted: a producer\'s quoted words are nobody\'s showing', { live: qLive, rebuilt: gQ.pgt, derived: gQ.derived, persisted: qMeta.map((r) => r.page) });
     ok(qLive[PGA] === 'foryou' && gQ.derived[PGA] === 'foryou' && gQ.pga === 'foryou' && liveQ(() => [], [AREC])[PGA] === undefined, 'r10 (F1) the same «ok» to the conversation\'s OWN ask (the route\'s, via `ask`) ⇒ its page «for you» from the quote — live and in the derivation; the ask unknown to this conversation (asksOf: none) ⇒ no row from the quote', { live: qLive, derived: gQ.derived });
     { // CONTROL r9's reader: the same ops, the quoted item unnamed (its said() pushed presentOps([uncut(rp)]) as they are)
       const isA = (id) => STR.asksOf(B, { backend: 'claude', claudeSessionId: 'c-pr' }, 'sPQ', statusKey).some((i) => i.id === id), r9ops = HOOK.claude(TREC).map(({ quote, ...o }) => o);
       const r9b = bandsOf(AF.resolvePresented(AF.quotedOps(r9ops, isA).reduce((rows, o) => AF.apply(rows, { cwd: CWD, at: 1, ...o, by: AF.opAuthor(o) }).rows, {}), { pageOf: (id) => ({ page: { id, name: id, path: '/p/' + id } }) }));
-      ok(HOOK.claude(TREC).some((o) => o.page === PGT && o.quote === TKI.id) && r9b[PGT] === 'foryou', 'CONTROL r9\'s reader (the quote\'s ops name no item: every quoted link the agent\'s) ⇒ the takeover\'s page a phantom «for you» — RED', r9b);
+      ok(gateOf(HOOK.claude(TREC).some((o) => o.page === PGT && o.quote === TKI.id)) && r9b[PGT] === 'foryou', 'CONTROL r9\'s reader (the quote\'s ops name no item: every quoted link the agent\'s) ⇒ the takeover\'s page a phantom «for you» — RED', r9b);
     }
     ok(cR.rpt === 'made' && cR.pgg === null, 'CONTROL a load without the rung (an older tree\'s asks unmarked) ⇒ its ask is no witness: «made», its --grant page no row — RED', cR);
     const keyOf = typeof STR.askKey === 'function' ? STR.askKey : () => null, route = { pending: keyOf({ backend: 'claude', claudeSessionId: 'c-par', ...FORK }, 'sF', statusKey), landed: keyOf({ backend: 'claude', claudeSessionId: 'c-fk', ...FORK }, 'sF', statusKey) };
     ok(JSON.stringify(route) === JSON.stringify({ pending: 'webui:sF', landed: 'claude:c-fk' }) && fkP.po === null && fkP.fo === null && fkL.fo === 'foryou' && fkL.po === null,
       'r7 (T2) a pending fork (its claudeSessionId still the parent\'s) ⇒ the parent\'s ask rows are absent at its rebuild — the route\'s ONE key rule (askKey: the placeholder `webui:<id>` while pending, the route files and lists under it too); after the fork lands ⇒ its own asks only', { route, pending: fkP.po, landed: [fkL.fo, fkL.po] });
-    ok(cK && cK.po === 'foryou', 'CONTROL r6\'s key (the status key, no fork guard) ⇒ the pending fork folds the PARENT\'s ask «for you» — RED', cK);
+    ok(gateOf(cK) && cK.po === 'foryou', 'CONTROL r6\'s key (the status key, no fork guard) ⇒ the pending fork folds the PARENT\'s ask «for you» — RED', cK);
     ok(gE.eo === 'foryou', 'r7 (T5 · M2) an early ask filed under the placeholder `webui:<id>` (before the conversation had its id; the route re-keys it at the next ask) ⇒ «for you» at the rebuild', gE);
-    ok(cP && cP.eo === null, 'CONTROL the reader without the placeholder key ⇒ the early ask is no witness — RED', cP);
+    ok(gateOf(cP) && cP.eo === null, 'CONTROL the reader without the placeholder key ⇒ the early ask is no witness — RED', cP);
     ok(p5.rpt === 'made' && !p5.persisted, 'CONTROL the ask store unwired (r5: the `ask:` id read on page rows only) ⇒ «made», nothing persisted — RED', p5);
     ok(pS.rpt === 'foryou' && !pS.persisted, 'CONTROL r5\'s rebuild (no persist at the rebuild) ⇒ «for you» in memory, the meta still without the stamp at the next tick — a restart before the next op loses it — RED', pS);
     ok(again.rpt === 'foryou' && p7.writes === 1 && pN.writes === 0 && spy.tree === 0, 'r7 (T5 · M3) a rebuild that gains no stamp writes nothing — the same conversation rebuilt from what it holds (a restart\'s persisted rows): still «for you», ONE write in all (the first rebuild\'s); a conversation with no ask: none; the persist seam (persistSoon) never asked', { again: again.rpt, writes, spy });
@@ -693,15 +693,15 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   const asrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
   const cw = " && !row.presented); // lane pages-chip-groups";
   const MW = asrc.includes(cw) ? M.load('src/artifacts.js', editAnchor(asrc, cw, '); // control', "src/artifacts.js"), 'cardpresented') : null;
-  ok(MW && MW.cardWorthy(MW.fold({}, MW.presentOp({ id: OTHER.id }))[keyO]), 'CONTROL: without the presented guard a shown link draws a second chat card (the card assert sees it)');
+  ok(gateOf(MW) && verdictOf(MW.cardWorthy(MW.fold({}, MW.presentOp({ id: OTHER.id }))[keyO])), 'CONTROL: without the presented guard a shown link draws a second chat card (the card assert sees it)');
   const ownDrop = '    if (page && own(page)) continue;\n';
   const MO = asrc.includes(ownDrop) ? M.load('src/artifacts.js', editAnchor(asrc, ownDrop, '\n', "src/artifacts.js"), 'owndrop') : null;
-  ok(MO && MO.resolvePresented(MO.fold({}, MO.presentOp({ id: MINE.id })), { pageOf: () => ({ page: MINE }), own: () => true })[AF.keyOf('', '/p/' + MINE.id)], 'CONTROL: without the own drop this conversation\'s page shows twice (own + shown here — the own assert sees it)');
+  ok(gateOf(MO) && verdictOf(MO.resolvePresented(MO.fold({}, MO.presentOp({ id: MINE.id })), { pageOf: () => ({ page: MINE }), own: () => true })[AF.keyOf('', '/p/' + MINE.id)]), 'CONTROL: without the own drop this conversation\'s page shows twice (own + shown here — the own assert sees it)');
   const capLine = 'evictOver(next, key).concat(row.presented ? evictPresented(next, key) : [])';
   const MP = asrc.includes(capLine) ? M.load('src/artifacts.js', editAnchor(asrc, capLine, 'evictOver(next, key)', "src/artifacts.js"), 'nocap') : null;
   let capRows = {};
   if (MP) for (let i = 0; i < 55; i++) capRows = MP.fold(capRows, { ...MP.presentOp({ id: `pg${String(i).padStart(10, '0')}` }), at: i + 1 });
-  ok(MP && Object.keys(capRows).length === 55, 'CONTROL: without the cap 55 links keep 55 rows (the cap assert sees it)');
+  ok(gateOf(MP) && Object.keys(capRows).length === 55, 'CONTROL: without the cap 55 links keep 55 rows (the cap assert sees it)');
 }
 
 console.log('ASK ATTACHMENTS (lane foryou-attachments) — vibespace-ask --artifact → a `present` op through THE ONE reducer');
@@ -709,17 +709,17 @@ console.log('ASK ATTACHMENTS (lane foryou-attachments) — vibespace-ask --artif
   const f = AF.askOp({ kind: 'file', host: '', path: '/tmp/x/repo/report.md', name: 'report.md' }, { at: 9, id: 'ask:ut-1:0' });
   let rows = AF.fold({}, f);
   const r = rows[':/tmp/x/repo/report.md'];
-  ok(f.op === 'present' && r && r.lastOp === 'present' && !r.presented && r.kind === 'doc' && r.writes === 0 && r.edits === 0 && r.name === 'report.md', 'a file an ask attaches is a NAMED row (a `present` op: never counted, never a presented page)', r);
+  ok(f.op === 'present' && gateOf(r) && r.lastOp === 'present' && !r.presented && r.kind === 'doc' && r.writes === 0 && r.edits === 0 && r.name === 'report.md', 'a file an ask attaches is a NAMED row (a `present` op: never counted, never a presented page)', r);
   rows = AF.fold(rows, AF.askOp({ kind: 'page', page: 'pgabcdefghij', name: 'Plan' }, { at: 10 }));
-  ok(rows[':/p/pgabcdefghij'] && rows[':/p/pgabcdefghij'].presented === true && rows[':/p/pgabcdefghij'].page === 'pgabcdefghij', 'a page an ask attaches is a PRESENTED row (resolved against the pages store at every read)');
+  ok(gateOf(rows[':/p/pgabcdefghij']) && rows[':/p/pgabcdefghij'].presented === true && rows[':/p/pgabcdefghij'].page === 'pgabcdefghij', 'a page an ask attaches is a PRESENTED row (resolved against the pages store at every read)');
   const d = AF.fold({}, AF.askOp({ kind: 'design', host: 'h1', path: '/srv/d', name: 'd' }, { at: 3 }));
-  ok(d['h1:/srv/d'] && d['h1:/srv/d'].kind === 'design', 'a design keeps its kind on its host');
+  ok(gateOf(d['h1:/srv/d']) && d['h1:/srv/d'].kind === 'design', 'a design keeps its kind on its host');
   ok(AF.apply(rows, f).skipped === 'seen', 'the same ask re-filed folds nothing twice (its op id)');
   const own = AF.fold({ ':/tmp/x/repo/report.md': { ...r, lastOp: 'write', writes: 2 } }, { ...f, id: 'ask:ut-2:0' })[':/tmp/x/repo/report.md'];
   ok(own.writes === 2 && !own.presented, 'a file the conversation wrote keeps its counts when an ask attaches it');
   ok(AF.askOp({ kind: 'exe', path: '/x' }) === null && AF.askOp({ kind: 'file' }) === null, 'a malformed attachment is no op');
   const rs = require('node:fs').readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
-  ok(/require\('\.\.\/server\/artifact-registry\.js'\)\.presentAsk\(s, item\.artifacts, \{ id: item\.id, said: \[item\.text, item\.detail\] \}\)/.test(rs) && !/_artifacts/.test(rs), 'THE ONE WRITER: the ask route hands its attachments AND its words to the registry (presentAsk → noteOp), never the rows itself');
+  ok(gateOf(/require\('\.\.\/server\/artifact-registry\.js'\)\.presentAsk\(s, item\.artifacts, \{ id: item\.id, said: \[item\.text, item\.detail\] \}\)/.test(rs)) && !/_artifacts/.test(rs), 'THE ONE WRITER: the ask route hands its attachments AND its words to the registry (presentAsk → noteOp), never the rows itself');
 }
 
 console.log('ANTIGRAVITY (lane agy-status-bar-facts) — agy\'s own write / edit calls are rows (the owner\'s shapes, names replaced)');
@@ -734,7 +734,7 @@ console.log('ANTIGRAVITY (lane agy-status-bar-facts) — agy\'s own write / edit
     .map((l) => JSON.parse(l.replaceAll('/CWD', ACWD).replaceAll('/HOME', HOME)));
   const ag = harnessOf('antigravity');
   const viaDoor = J.map((r) => JSON.stringify(ag.artifactsOf(r))).join() === J.map((r) => JSON.stringify(AO.antigravity(r))).join(); // directly, or a door that delegates to it
-  ok((ag.artifactsOf === AO.antigravity || viaDoor) && JSON.stringify(ag.artifactTools) === '["write_to_file","replace_file_content","multi_replace_file_content"]',
+  ok((ag.artifactsOf === AO.antigravity || gateOf(viaDoor)) && JSON.stringify(ag.artifactTools) === '["write_to_file","replace_file_content","multi_replace_file_content"]',
     'the antigravity descriptor reads the journal with agy\'s own reader; the tools it names to the agent are agy\'s model-facing ones (init.tools)');
   let ar = {};
   const seen = [];
@@ -752,14 +752,14 @@ console.log('ANTIGRAVITY (lane agy-status-bar-facts) — agy\'s own write / edit
     'the model-facing names too; a file: URI is percent-decoded to its path; a relative path is the conversation cwd\'s');
   ok(AO.antigravity(tcRec('write_file', { Path: 'file://other-host/x.md' })).length === 0 && AO.antigravity(tcRec('write_file', {})).length === 0 && AO.antigravity(tcRec('write_file', null)).length === 0 && AO.antigravity(tcRec('write_file', { Path: '  ' })).length === 0,
     'no path, a blank path, a file: URI of ANOTHER host ⇒ nothing (never a guessed path)');
-  ok(AO.antigravity({ kind: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'see /p/pgagy0000001' } } }).some((o) => o.page === 'pgagy0000001'), 'a text chunk still goes through the ACP reader (a page link shown here)');
+  ok(verdictOf(AO.antigravity({ kind: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'see /p/pgagy0000001' } } }).some((o) => o.page === 'pgagy0000001')), 'a text chunk still goes through the ACP reader (a page link shown here)');
   ok(AO.antigravity({ kind: 'update', update: { sessionUpdate: 'tool_call', toolCallId: 'd:1', title: 'write_to_file', content: [{ type: 'diff', path: '/home/u/proj/d.md', oldText: null, newText: 'x' }] } })[0]?.path === '/home/u/proj/d.md', 'a call carrying an ACP diff (a record built from agy\'s own transcript) still reads as ACP\'s');
   // the LIVE door: the wrapper's records through the ONE writer, the call seen twice moves its row once
   const live = { backend: 'antigravity', cwd: ACWD, host: '', sockName: null };
   REG.configure({ activeSessions: () => new Map([['sa', live]]), log: { log() {}, warn() {} } });
   for (const r of J) REG.observe(live, r);
   REG.observe(live, J.filter((r) => r.update.title === 'write_file').pop()); // the same call fed again (the parse + a replay)
-  ok(Object.keys(live._artifacts || {}).length === 6 && Object.values(live._artifacts).every((r) => r.by === 'agent') && live._artifacts[':' + B + '/review_notes.md'].writes === 1,
+  ok(Object.keys(live._artifacts || {}).length === 6 && gateOf(Object.values(live._artifacts).every((r) => r.by === 'agent')) && live._artifacts[':' + B + '/review_notes.md'].writes === 1,
     'the live registry (observe — what acp-events hands it): the same six rows, and a record seen twice moves its row once', Object.keys(live._artifacts || {}));
   const base = AO.acp; let none = 0; for (const r of J) none += base(r).length;
   ok(none === 0, 'CONTROL (the base): the ACP reader produces NOTHING from these records — why the owner saw no chip');
@@ -785,7 +785,7 @@ console.log('⑫ an ACP / agy rebuild reads its records\' own `ts` — an old ca
   const iMid12 = k12.indexOf(midKey);
   ok(iMid12 > 0 && k12[iMid12 - 1] === 'agy before the doc' && k12[iMid12 + 1] === 'agy after the doc' && k12[k12.length - 1] === 'agy later still' && !k12.includes(oldKey),
     'the doc written 10 min into the slab: its card at ITS time (between the two messages), the doc older than the slab: no card (the chip is its home), nothing after the last message', k12);
-  ok(['at', 'none'].every((w, i) => AF.cardPlacement([rows12[midKey], rows12[oldKey]][i], s12._normalizer.artifactSlab) === w), 'cardPlacement over the agy slab: the mid doc ⇒ at, the old doc ⇒ none (never tail)');
+  ok(verdictOf(['at', 'none'].every((w, i) => AF.cardPlacement([rows12[midKey], rows12[oldKey]][i], s12._normalizer.artifactSlab) === w)), 'cardPlacement over the agy slab: the mid doc ⇒ at, the old doc ⇒ none (never tail)');
   // a ms-number `ts` reads the same; a claude record carrying BOTH reads its `timestamp` (claude / codex unchanged)
   const s12n = { backend: 'antigravity', cwd: ACWD, host: '', _artifacts: {}, _normalizer: null };
   await N.rebuildHistory(s12n, 's12n', RECS.map((r) => ({ ...r, ts: Date.parse(r.ts) })));
@@ -796,16 +796,16 @@ console.log('⑫ an ACP / agy rebuild reads its records\' own `ts` — an old ca
   // CONTROL: the old timestamp-only recordAt ⇒ the agy slab is clockless ⇒ BOTH old cards pile after the last message
   const nsrc12 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
   const readTs = "  const v = typeof raw.timestamp === 'string' ? raw.timestamp : raw.ts;\n";
-  ok(nsrc12.includes(readTs), 'control anchor: recordAt falls back to the record\'s `ts`');
+  ok(verdictOf(nsrc12.includes(readTs)), 'control anchor: recordAt falls back to the record\'s `ts`');
   const MB = M.load('src/normalizers.js', editAnchor(nsrc12, readTs, "  const v = raw.timestamp;\n", "src/normalizers.js"), 'tsblind');
   MB.setArtifactStoreSource(REG.storeRowsOf); MB.setArtifactServiceSource(() => ({}));
   const s12b = { backend: 'antigravity', cwd: ACWD, host: '', _artifacts: { ...rows12 }, _normalizer: null };
   await MB.rebuildHistory(s12b, 's12', RECS);
   const k12b = s12b._normalizer.messages.map((m) => (m.noticeKind === 'artifact' ? keyOfCard(m) : textOf(m)));
   const last12b = k12b.indexOf('agy later still');
-  ok(s12b._normalizer.artifactSlab.slabFirstAt === 0 && [oldKey, midKey].every((k) => k12b.indexOf(k) > last12b), 'CONTROL: reading only `timestamp` — the agy slab is clockless and BOTH cards pile after the last message (the owner\'s bug; the ⑫ asserts see it)', k12b);
+  ok(s12b._normalizer.artifactSlab.slabFirstAt === 0 && verdictOf([oldKey, midKey].every((k) => k12b.indexOf(k) > last12b)), 'CONTROL: reading only `timestamp` — the agy slab is clockless and BOTH cards pile after the last message (the owner\'s bug; the ⑫ asserts see it)', k12b);
   N.setArtifactServiceSource(REG.servicesOf);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -37,7 +37,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const MUT = mutantCopies('browser-switcher-model', repo);
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -137,14 +137,14 @@ function judgeStates(Mm, V) {
   const bad = judgeStates(M, V);
   ok(bad.length === 0, `every state's card = the spec's sentences + control, verbatim (${Object.keys(EXPECT).length} visible fixtures, ${Object.keys(HIDDEN_FIXTURE).length} hidden)`, bad.join('\n    '));
   const drv = M.switcherModel(V.driven, { t: tEn, sessionOf: (k) => (k === 'bk-0000a001' ? 'w1' : null) }).targets[0];
-  ok(drv.state === 'in-use-by-hand' && drivenActs(M), 'driven + a listed session holding the driver key ⇒ "Hand it back to your agent" with THAT session — the act itself, never a trip behind the modal');
+  ok(drv.state === 'in-use-by-hand' && verdictOf(drivenActs(M)), 'driven + a listed session holding the driver key ⇒ "Hand it back to your agent" with THAT session — the act itself, never a trip behind the modal');
   ok(M.switcherModel(V.driven, { t: tEn }).targets[0].action === null, '…and with no listed session ⇒ no button (the sentence already says what happens)');
   const nl = M.switcherModel(V['not-live'], { t: tEn }).targets[0];
-  ok(/isn't open right now/.test(nl.sentences[0].text) && !nl.sentences.some((s) => /conversations use/.test(s.text)), 'not live ⇒ "isn\'t open right now", never the count line');
+  ok(gateOf(/isn't open right now/.test(nl.sentences[0].text)) && !nl.sentences.some((s) => /conversations use/.test(s.text)), 'not live ⇒ "isn\'t open right now", never the count line');
   const sw = M.switcherModel(V.switching, { t: tEn });
   ok(sw.switching === true && sw.targets.length === 0 && sw.notice === null && sw.empty === null && sw.now.text === 'Switching to Fixture Browser… You can close this window; the switch goes on.' && sw.now.blurb === null, 'view.switching ⇒ the now line alone (the keeper has already committed the provider it switches to)', sw);
   const rc = M.switcherModel(V['ready-confirm'], { t: tEn }).targets[0].action.confirm;
-  ok(rc && rc.title === 'Switch to Fixture Browser?' && rc.confirmText === 'Switch anyway' && rc.danger === true && /can't check/.test(rc.message), 'ready-confirm: the click asks ONE question (the house confirm, "Switch anyway")');
+  ok(gateOf(rc) && rc.title === 'Switch to Fixture Browser?' && rc.confirmText === 'Switch anyway' && rc.danger === true && verdictOf(/can't check/.test(rc.message)), 'ready-confirm: the click asks ONE question (the house confirm, "Switch anyway")');
   const m1 = M.switcherModel(V.ready, { t: tEn });
   ok(m1.title === 'Browser for “shopping”' && m1.now.text === "Your agent's browser: Chromium" && m1.now.blurb === "VibeSpace's default browser (the open-source version of Chrome).", 'the title names the profile; the now line says whose browser it is and what it is');
 }
@@ -212,35 +212,35 @@ console.log('§3 hidden rows, the empty line, the notice');
   for (const [name, view] of Object.entries(all)) for (const tg of M.switcherModel(view, { t: tEn }).targets) if (tg.id === 'cdp' || tg.id === 'local-window' || /^cloud:/.test(tg.id)) leaked.push(`${name}: ${tg.id}`);
   ok(leaked.length === 0 && Object.keys(all).length >= 25, `cdp / local-window (consent off AND on) / every cloud:* never draw a card in any of ${Object.keys(all).length} fixtures`, leaked.join(', '));
   const w1 = M.switcherModel(V.w1, { t: tEn });
-  ok(w1.targets.length === 0 && w1.notice === null && w1.empty && w1.empty.text === "There's no other browser for “shopping” yet. If a site blocks your agent, take over in the live view and get past the check yourself.", 'W1 (this build): no card, no notice, the empty line (a)', w1);
+  ok(w1.targets.length === 0 && w1.notice === null && gateOf(w1.empty) && w1.empty.text === "There's no other browser for “shopping” yet. If a site blocks your agent, take over in the live view and get past the check yourself.", 'W1 (this build): no card, no notice, the empty line (a)', w1);
   const w1p = M.switcherModel(V.w1, { t: tEn, preselect: F.FIXTURE_ID });
-  ok(w1p.notice && w1p.notice.text === "Fixture Browser isn't part of this version of VibeSpace." && w1p.empty, 'W1 with the fixture row preselected (a stale client\'s banner): the not-in-this-version notice, then the empty line');
+  ok(gateOf(w1p.notice) && w1p.notice.text === "Fixture Browser isn't part of this version of VibeSpace." && verdictOf(w1p.empty), 'W1 with the fixture row preselected (a stale client\'s banner): the not-in-this-version notice, then the empty line');
   const hp = M.switcherModel(V['host-profile'], { t: tEn, preselect: F.FIXTURE_ID, hostNameOf: (id) => (id === 'dev-1' ? 'Dev box' : id) });
-  ok(hp.targets.length === 0 && hp.notice === null && hp.empty && hp.empty.text === '“shopping” is saved on another computer (Dev box); Fixture Browser only works on the computer VibeSpace runs on.', 'a paired machine\'s profile: the empty line (b) naming the MACHINE (its name, not its id) — no notice even preselected', hp);
+  ok(hp.targets.length === 0 && hp.notice === null && gateOf(hp.empty) && hp.empty.text === '“shopping” is saved on another computer (Dev box); Fixture Browser only works on the computer VibeSpace runs on.', 'a paired machine\'s profile: the empty line (b) naming the MACHINE (its name, not its id) — no notice even preselected', hp);
   const hpId = M.switcherModel(V['host-profile'], { t: tEn });
-  ok(/another computer \(dev-1\)/.test(hpId.empty.text), '…the id only when the client lists no such machine');
+  ok(verdictOf(/another computer \(dev-1\)/.test(hpId.empty.text)), '…the id only when the client lists no such machine');
   for (const [name, why] of [['current-cdp', "VibeSpace didn't start this browser, only connected to it, so it can't be switched from here."], ['current-cloud', "Its saved logins live with Browserbase, so it can't be switched to another browser."], ['current-local-window', "This is a window on your own desktop, not a browser VibeSpace started, so it can't be switched from here."]]) {
     const m = M.switcherModel(V[name], { t: tEn });
     ok(m.targets.length === 0 && m.empty === null && m.now.blurb === why, `${name}: no card, no empty line — the now line's blurb says why ("${m.now.text}")`, m);
   }
   const cdpPre = M.switcherModel(V['current-cdp'], { t: tEn, preselect: F.FIXTURE_ID });
-  ok(cdpPre.notice && cdpPre.notice.text === "“shopping” can't be switched to Fixture Browser.", 'a preselected row that is not a switch of this profile ⇒ the not-a-switch notice');
+  ok(gateOf(cdpPre.notice) && cdpPre.notice.text === "“shopping” can't be switched to Fixture Browser.", 'a preselected row that is not a switch of this profile ⇒ the not-a-switch notice');
   const cc = M.switcherModel(V['current-fixture'], { t: tEn });
   ok(cc.now.text === "Your agent's browser: Fixture Browser" && cc.targets.length === 1 && cc.targets[0].id === 'chromium' && cc.targets[0].action.label === 'Switch to Chromium', 'on Fixture Browser: the card is Chromium (switching back)');
   // BROWSE YOURSELF (B-6ae8): nothing runs ⇒ the empty line opens it for the user (ONE button); the user browsing it himself
   // ⇒ in-use-by-hand whose ONE button closes his browsing (a switch would restart the browser under his page)
   // the SHIPPED table (no in-place target since lane engine-spi-egress L3): no card at all — the line + its ONE button
   const w1off = M.switcherModel(F.viewOf({ world: F.shipped, key: { source: 'none', whyCode: 'no-values' }, live: false }), { t: tEn });
-  ok(w1off.targets.length === 0 && w1off.empty && w1off.empty.text === "The browser isn't open right now. If a site blocks your agent, open “shopping” yourself and get past the check." && w1off.empty.action && w1off.empty.action.kind === 'browse-yourself' && w1off.empty.action.label === 'Open it yourself' && w1off.empty.action.profileId === F.PROFILE_ID,
+  ok(w1off.targets.length === 0 && gateOf(w1off.empty) && w1off.empty.text === "The browser isn't open right now. If a site blocks your agent, open “shopping” yourself and get past the check." && gateOf(w1off.empty.action) && w1off.empty.action.kind === 'browse-yourself' && w1off.empty.action.label === 'Open it yourself' && w1off.empty.action.profileId === F.PROFILE_ID,
     'not running, on this computer, the shipped table: no card, the empty line opens it for the user (ONE button)', w1off);
   const w1none = M.switcherModel({ ...F.viewOf({ live: false }), rows: [] }, { t: tEn });
-  ok(w1none.targets.length === 0 && w1none.empty && w1none.empty.action && w1none.empty.action.kind === 'browse-yourself', '…and the same line + button over a world whose rows are empty', w1none.empty);
+  ok(w1none.targets.length === 0 && gateOf(w1none.empty) && gateOf(w1none.empty.action) && w1none.empty.action.kind === 'browse-yourself', '…and the same line + button over a world whose rows are empty', w1none.empty);
   ok(!(w1.empty && w1.empty.action) && !(hp.empty && hp.empty.action), '…a LIVE browser keeps the take-over sentence (no button), a paired machine\'s profile gets none');
   const HU = 'hu-' + F.PROFILE_ID.slice(3);
   const byHand = F.viewOf({ leases: [], humans: [], inputs: {} });
   const selfRows = SW.switcherRows({ profile: byHand.profile, providerIds: F.wired.ids(), rowOf: F.wired.row, controlOf: F.wired.control, capabilityRefusalOf: B.capabilityRefusal, sources: () => ({ source: 'user' }), now: F.NOW, majors: { [F.FIXTURE_ID]: { major: 146, at: F.NOW } }, leases: [], inputs: { [`${HU}|${F.PROFILE_ID}`]: { input: 'user' } }, humans: [{ profileId: F.PROFILE_ID, browserKey: HU }] });
   const selfCard = M.switcherModel({ ...byHand, rows: selfRows }, { t: tEn, sessionOf: () => 'never-a-session' }).targets.find((x) => x.id === F.FIXTURE_ID);
-  ok(selfCard && selfCard.state === 'in-use-by-hand' && selfCard.sentences[0].text === "You're browsing “shopping” yourself. Close your browsing first, then switch." && selfCard.action && selfCard.action.kind === 'close-browsing' && selfCard.action.key === HU && selfCard.action.label === 'Close my browsing', 'the USER browsing it himself (his holder row, no lease) ⇒ in-use-by-hand, "Close your browsing first" + ONE button that closes it — never a session\'s hand-back', selfCard);
+  ok(gateOf(selfCard) && selfCard.state === 'in-use-by-hand' && selfCard.sentences[0].text === "You're browsing “shopping” yourself. Close your browsing first, then switch." && gateOf(selfCard.action) && selfCard.action.kind === 'close-browsing' && selfCard.action.key === HU && selfCard.action.label === 'Close my browsing', 'the USER browsing it himself (his holder row, no lease) ⇒ in-use-by-hand, "Close your browsing first" + ONE button that closes it — never a session\'s hand-back', selfCard);
   const noSelf = SW.switcherRows({ profile: byHand.profile, providerIds: F.wired.ids(), rowOf: F.wired.row, controlOf: F.wired.control, capabilityRefusalOf: B.capabilityRefusal, sources: () => ({ source: 'user' }), now: F.NOW, majors: { [F.FIXTURE_ID]: { major: 146, at: F.NOW } }, leases: [], inputs: { [`${HU}|${F.PROFILE_ID}`]: { input: 'user' } }, humans: [] }).find((r) => r.id === F.FIXTURE_ID);
   ok(noSelf.state === 'ready' && SW.switchVerdict({ profile: byHand.profile, target: F.FIXTURE_ID, rowOf: F.wired.row, controlOf: F.wired.control, resolveKey: () => ({ source: 'user' }), now: F.NOW, majors: { [F.FIXTURE_ID]: { major: 146, at: F.NOW } }, leases: [], inputs: { [`${HU}|${F.PROFILE_ID}`]: { input: 'user' } }, humans: [{ profileId: F.PROFILE_ID, browserKey: HU }] }).mode === 'proposal', 'CONTROL: without the human rows the same world reads `ready` (a switch would stop the Chrome under his page); with them the switch itself is a PROPOSAL');
 }
@@ -276,7 +276,7 @@ console.log('§5 the click\'s own overlay');
 {
   const V = F.views();
   const s = M.switcherModel(V.ready, { t: tEn, pending: { state: 'switching', to: F.FIXTURE_ID } });
-  ok(s.switching && s.targets.length === 0 && s.now.text === 'Switching to Fixture Browser… You can close this window; the switch goes on.', 'pending switching ⇒ the now line alone, naming the target');
+  ok(gateOf(s.switching) && s.targets.length === 0 && s.now.text === 'Switching to Fixture Browser… You can close this window; the switch goes on.', 'pending switching ⇒ the now line alone, naming the target');
 }
 // ── §6 i18n ──
 console.log('§6 i18n: zh + ja, no param left, ja quotes, the retired keys');
@@ -335,26 +335,26 @@ console.log('§7 wiring pins');
   const dom = libTexts['browser-switcher.js'], lw = libTexts['browser-live-window.js'], pk = libTexts['browser-profile-picker.js'], ma = libTexts['manage-agents.js'], su = libTexts['settings-ui.js'];
   const sw = read('src/browser-switch.js'), kp = read('src/server/browser-keeper.js'), rt = read('src/routes/browser.js');
   const code = (s) => s.replace(/\/\/.*$/gm, '');
-  ok(/from '\.\/browser-switcher-model\.js'/.test(dom) && !/file-tool-btn/.test(dom), 'the DOM half imports the model and never the 24 px icon class');
+  ok(gateOf(/from '\.\/browser-switcher-model\.js'/.test(dom)) && !/file-tool-btn/.test(dom), 'the DOM half imports the model and never the 24 px icon class');
   const writes = [...code(dom).matchAll(/(?:textContent\s*=\s*|\bel\([^,]*,[^,]*,\s*)([^;\n)]*)/g)].map((m) => m[1]);
   ok(writes.length >= 8 && !writes.some((w) => /\.reason\b|\.error\b|iv\.error|whyCode/.test(w)), `no server sentence (.reason / .error / iv.error / whyCode) reaches a textContent or el() (${writes.length} writes read)`);
-  ok(!/makeDefault/.test(dom) && /dialog\.appendChild\(footer\)/.test(dom) && /footer\.className = 'dialog-footer'/.test(dom) && /reconcileKeyed\(body,/.test(dom), 'no makeDefault; the footer (Close) is appended to the dialog outside the body; the body is a keyed patch');
-  ok(/app\.ws\?\.onGlobal\?\.\(onGlobal\)/.test(dom) && /onClose: \(\) => \{[^}]*app\.ws\?\.offGlobal\?\.\(onGlobal\)/.test(dom), 'the broadcast handler is removed BY NAME in onClose');
-  ok(/a\.kind === 'switch-confirm'\) \{ if \(await showConfirmDialog\(\{ \.\.\.a\.confirm \}\)\)/.test(dom) && !/a\.kind === 'install'/.test(dom),   // ONE options object (the approval census §1b, the .197 integration)
+  ok(!/makeDefault/.test(dom) && gateOf(/dialog\.appendChild\(footer\)/.test(dom)) && gateOf(/footer\.className = 'dialog-footer'/.test(dom)) && verdictOf(/reconcileKeyed\(body,/.test(dom)), 'no makeDefault; the footer (Close) is appended to the dialog outside the body; the body is a keyed patch');
+  ok(gateOf(/app\.ws\?\.onGlobal\?\.\(onGlobal\)/.test(dom)) && verdictOf(/onClose: \(\) => \{[^}]*app\.ws\?\.offGlobal\?\.\(onGlobal\)/.test(dom)), 'the broadcast handler is removed BY NAME in onClose');
+  ok(gateOf(/a\.kind === 'switch-confirm'\) \{ if \(await showConfirmDialog\(\{ \.\.\.a\.confirm \}\)\)/.test(dom)) && !/a\.kind === 'install'/.test(dom),   // ONE options object (the approval census §1b, the .197 integration)
      'the downgrade goes through the house showConfirmDialog; no install act is left (lane engine-spi-egress L3)');
-  ok(/if \(gen !== st\.gen \|\| st\.closed\) return;/.test(dom) && /const gen = \+\+st\.gen;/.test(dom), 'a slower fetch never paints over a newer one (st.gen)');
+  ok(gateOf(/if \(gen !== st\.gen \|\| st\.closed\) return;/.test(dom)) && verdictOf(/const gen = \+\+st\.gen;/.test(dom)), 'a slower fetch never paints over a newer one (st.gen)');
   const pri = /export const LIVE_BAR_PRIORITY = Object\.freeze\((\{[^}]*\})\)/.exec(lw);
-  ok(pri && /backendLabel: 4/.test(pri[1]) && !/LIVE_BAR_PRIORITY\.\w+\s*=/.test(lw) && /className = 'browser-live-backend-label browser-chip'/.test(lw) && /backendLabel: backendLabelEl/.test(lw) && /key === 'backendLabel'\) rows\.push\(\{ caption: t\("Your agent's browser: \{name\}", \{ name: backendLabelEl\.textContent \}\) \}\)/.test(lw) && /key === 'backend'\) rows\.push\(\{ label: t\('Switch browser \(now \{name\}\)…'/.test(lw), 'the live bar: the plain-label span, `backendLabel: 4` INSIDE the frozen literal; folded, the name says what it is (an info row "Your agent\'s browser: …", or "Switch browser (now …)…")');
+  ok(gateOf(pri) && gateOf(/backendLabel: 4/.test(pri[1])) && !/LIVE_BAR_PRIORITY\.\w+\s*=/.test(lw) && gateOf(/className = 'browser-live-backend-label browser-chip'/.test(lw)) && gateOf(/backendLabel: backendLabelEl/.test(lw)) && gateOf(/key === 'backendLabel'\) rows\.push\(\{ caption: t\("Your agent's browser: \{name\}", \{ name: backendLabelEl\.textContent \}\) \}\)/.test(lw)) && verdictOf(/key === 'backend'\) rows\.push\(\{ label: t\('Switch browser \(now \{name\}\)…'/.test(lw)), 'the live bar: the plain-label span, `backendLabel: 4` INSIDE the frozen literal; folded, the name says what it is (an info row "Your agent\'s browser: …", or "Switch browser (now …)…")');
   const banner = lw.slice(lw.indexOf('const claims = app.browserBlockedFor'), lw.indexOf('backendBtn.onclick = () =>'));
-  ok(/tc\('browser', 'Dismiss'\)/.test(banner) && /dismissOutcomeWords\(r, t\)/.test(banner) && /claimWords\(b, t[,)]/.test(banner) && /if \(pid && choices\.length\)/.test(banner) && !/Open with Fixture Browser|it suggests tier/.test(lw), 'the banner: the claim\'s words, a switch button only with a choice, Dismiss contexted and its answer worded');
-  ok(/pid && choices\.length \? w\.text : `\$\{w\.text\} \$\{t\('Take over to get past the check yourself\.'\)\}`/.test(banner) && /if \(w\.detail\)/.test(banner) && /st\.claimOpen/.test(banner) && !/file-tool-btn/.test(banner) && (banner.match(/textBtn\(/g) || []).length === 3, 'the banner (2026-09-28): no switch ⇒ it says the way out (take over), the agent\'s evidence behind a Details fold that survives a rebuild, every button the house text button');
-  ok(/export function pickerItems\(\{[^\n]*choicesOf = \(\) => \[\] \}\)/.test(pk) && /choicesOf: \(id\) => \(this\.browserChoicesFor/.test(pk) && /this\.browserChipFor\(p\.id\)/.test(pk), 'the picker takes choicesOf (defaulted) and every chip site reads browserChipFor');
+  ok(gateOf(/tc\('browser', 'Dismiss'\)/.test(banner)) && gateOf(/dismissOutcomeWords\(r, t\)/.test(banner)) && gateOf(/claimWords\(b, t[,)]/.test(banner)) && gateOf(/if \(pid && choices\.length\)/.test(banner)) && !/Open with Fixture Browser|it suggests tier/.test(lw), 'the banner: the claim\'s words, a switch button only with a choice, Dismiss contexted and its answer worded');
+  ok(gateOf(/pid && choices\.length \? w\.text : `\$\{w\.text\} \$\{t\('Take over to get past the check yourself\.'\)\}`/.test(banner)) && gateOf(/if \(w\.detail\)/.test(banner)) && gateOf(/st\.claimOpen/.test(banner)) && !/file-tool-btn/.test(banner) && (banner.match(/textBtn\(/g) || []).length === 3, 'the banner (2026-09-28): no switch ⇒ it says the way out (take over), the agent\'s evidence behind a Details fold that survives a rebuild, every button the house text button');
+  ok(gateOf(/export function pickerItems\(\{[^\n]*choicesOf = \(\) => \[\] \}\)/.test(pk)) && gateOf(/choicesOf: \(id\) => \(this\.browserChoicesFor/.test(pk)) && verdictOf(/this\.browserChipFor\(p\.id\)/.test(pk)), 'the picker takes choicesOf (defaulted) and every chip site reads browserChipFor');
   ok(!/'browser backend'/.test(ma) && !/\/api\/browser\/install\b/.test(ma) && !/installVerdictWords|installConfirmWords|installOutcomeWords/.test(ma), 'Manage Agents: no "browser backend", and no anti-bot install row or door any more (lane engine-spi-egress L3)');
-  ok(/open\(\{ syncId, search(, category)?(, focusKey)? \} = \{\}\)/.test(su), 'SettingsUI.open destructures `search` (and `category` — lane plugin-settings-p0; and `focusKey` — lane setting-doors pick 1)');
+  ok(verdictOf(/open\(\{ syncId, search(, category)?(, focusKey)? \} = \{\}\)/.test(su)), 'SettingsUI.open destructures `search` (and `category` — lane plugin-settings-p0; and `focusKey` — lane setting-doors pick 1)');
   const rows = sw.slice(sw.indexOf('function switcherRows('), sw.indexOf('function switchChoices('));
-  ok(/leases = \[\], inputs = \{\}, keyRequiredOf = keyRequiredFor, humans = \[\] \} = \{\}\)/.test(rows) && !/fingerprintChange|binaryOf|sitesOf/.test(rows), 'switcherRows: the new inputs defaulted (browse yourself: + humans, the user\'s own holder rows — the .197 integration spells cloak\'s + browse-yourself\'s together); fingerprintChange outside any `v.ok ?`');
-  ok(/why: 'switch rolled back'/.test(kp) && /backends: Object\.fromEntries\(named\(\)\.map\(\(p\) => \[p\.id, backendFactFor\(p\)\]\)\)/.test(kp), 'the keeper: the start-failure rollback, installVerdict = installFacts (the cloak install row\'s file, rv-browser F7), the digest\'s backends');
-  ok(/typeof e\?\.restored === 'boolean' \? \{ restored: e\.restored, from: e\.from \|\| null, to: e\.to \|\| null \}/.test(rt) && /k\.choicesFor\(profileId\)/.test(rt), 'routes: fail() spreads restored / from / to; the blocked `next` reads the profile\'s choices');
+  ok(gateOf(/leases = \[\], inputs = \{\}, keyRequiredOf = keyRequiredFor, humans = \[\] \} = \{\}\)/.test(rows)) && !/fingerprintChange|binaryOf|sitesOf/.test(rows), 'switcherRows: the new inputs defaulted (browse yourself: + humans, the user\'s own holder rows — the .197 integration spells cloak\'s + browse-yourself\'s together); fingerprintChange outside any `v.ok ?`');
+  ok(gateOf(/why: 'switch rolled back'/.test(kp)) && verdictOf(/backends: Object\.fromEntries\(named\(\)\.map\(\(p\) => \[p\.id, backendFactFor\(p\)\]\)\)/.test(kp)), 'the keeper: the start-failure rollback, installVerdict = installFacts (the cloak install row\'s file, rv-browser F7), the digest\'s backends');
+  ok(gateOf(/typeof e\?\.restored === 'boolean' \? \{ restored: e\.restored, from: e\.from \|\| null, to: e\.to \|\| null \}/.test(rt)) && verdictOf(/k\.choicesFor\(profileId\)/.test(rt)), 'routes: fail() spreads restored / from / to; the blocked `next` reads the profile\'s choices');
   ok(!/^import /m.test(libTexts['browser-switcher-model.js']) && !/\bdocument\b|\bwindow\./.test(code(libTexts['browser-switcher-model.js'])), 'the model is PURE (imports nothing, no DOM)');
 }
 
@@ -377,15 +377,15 @@ console.log('NEGATIVE CONTROLS (patched copies in the scratch dir)');
   const SWc = MUT.load('src/browser-switch.js', cSrc, 'nocontrol');
   const SWd = MUT.load('src/browser-switch.js', dSrc, 'keyfirst');
   const a1 = judgeStates(Ma, F.views()), a2 = judgeClosed(Ma, SW);
-  ok(a1.length >= 10 && a2.some((x) => /developer word/.test(x)), `NEGATIVE CONTROL (a): a model echoing the server's sentence fails §1 (${a1.length}) AND §2's developer-word census (${a2.filter((x) => /developer word/.test(x)).length})`);
+  ok(a1.length >= 10 && verdictOf(a2.some((x) => /developer word/.test(x))), `NEGATIVE CONTROL (a): a model echoing the server's sentence fails §1 (${a1.length}) AND §2's developer-word census (${a2.filter((x) => /developer word/.test(x)).length})`);
   const b = judgeClosed(M, SWb);
-  ok(b.some((x) => /ROW_STATES ≠/.test(x)), `NEGATIVE CONTROL (b): a switch module missing 'older-browser' fails §2 (${b[0]})`);
+  ok(verdictOf(b.some((x) => /ROW_STATES ≠/.test(x))), `NEGATIVE CONTROL (b): a switch module missing 'older-browser' fails §2 (${b[0]})`);
   const c = judgeDigest(SWc, M);
-  ok(c.some((x) => /^unwired/.test(x)), `NEGATIVE CONTROL (c): switchChoices ignoring control.ok answers [the fixture row] where it is not wired — §4 red (${c[0]})`);
+  ok(verdictOf(c.some((x) => /^unwired/.test(x))), `NEGATIVE CONTROL (c): switchChoices ignoring control.ok answers [the fixture row] where it is not wired — §4 red (${c[0]})`);
   const d = judgeStates(M, F.views(SWd));
-  ok(d.some((x) => /^needs-key/.test(x)), `NEGATIVE CONTROL (d): rowState without its key rule fails §1 on needs-key (${d.find((x) => /^needs-key/.test(x))})`);
+  ok(verdictOf(d.some((x) => /^needs-key/.test(x))), `NEGATIVE CONTROL (d): rowState without its key rule fails §1 on needs-key (${d.find((x) => /^needs-key/.test(x))})`);
   const e = judgeClosed(Me, SW);
-  ok(e.some((x) => /backend_no_key\+restored/.test(x)), `NEGATIVE CONTROL (e): switchOutcomeWords reading the code before restored fails §2 (${e.find((x) => /restored/.test(x))})`);
+  ok(verdictOf(e.some((x) => /backend_no_key\+restored/.test(x))), `NEGATIVE CONTROL (e): switchOutcomeWords reading the code before restored fails §2 (${e.find((x) => /restored/.test(x))})`);
   // (f) the needs-key card's pre-fix filter (every code but `no-values` explained) — the plain instance's `no-preset`
   const fSrc = editAnchor(msrc, "if (k && KEY_UNUSABLE.has(String(k.whyCode || '')) && typeof c.credentialWhy === 'function') {", "if (k && k.whyCode && k.whyCode !== 'no-values' && typeof c.credentialWhy === 'function') {", "src/lib/browser-switcher-model.js");
   // (g) the driven card's pre-fix act (a trip to the live view, behind the modal)
@@ -393,10 +393,10 @@ console.log('NEGATIVE CONTROLS (patched copies in the scratch dir)');
   ok(fSrc !== msrc && gSrc !== msrc, 'NEGATIVE CONTROL: (f) + (g) applied to their copies (the anchors exist)');
   const Mf = await import(pathToFileURL(MUT.write('src/lib/browser-switcher-model.js', fSrc, 'keyfilter', { esm: true })).href);
   const f = judgeStates(Mf, F.views());
-  ok(f.some((x) => /^needs-key-no-preset/.test(x)) && f.some((x) => /^needs-key-own-missing/.test(x)), `NEGATIVE CONTROL (f): the pre-fix needs-key filter explains "nothing configured" as a saved key that can't be used — §1 red (${f.find((x) => /no-preset/.test(x))})`);
+  ok(gateOf(f.some((x) => /^needs-key-no-preset/.test(x))) && verdictOf(f.some((x) => /^needs-key-own-missing/.test(x))), `NEGATIVE CONTROL (f): the pre-fix needs-key filter explains "nothing configured" as a saved key that can't be used — §1 red (${f.find((x) => /no-preset/.test(x))})`);
   const Mg = await import(pathToFileURL(MUT.write('src/lib/browser-switcher-model.js', gSrc, 'liveview', { esm: true })).href);
   ok(!drivenActs(Mg), 'NEGATIVE CONTROL (g): the pre-fix driven card (a trip to the live view, behind the modal) fails the §1 handback pin');
 }
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 7 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 7 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

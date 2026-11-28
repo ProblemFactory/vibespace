@@ -43,7 +43,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -68,7 +68,7 @@ console.log('§1 THE SLICE — at most ' + STEP + ' pairs a turn; the first slic
   const perTurn = []; while (S.q.length) { calls = pairs(); S.turn(); perTurn.push(pairs() - calls); }
   const landed = w.est._rateCache.get('email:a@x'), lines = w.est.lines('email:a@x');
   const sync = EST.learnRates(lines, { priors: w.est.priorsFor('email:a@x'), costFn: w.est._costFn(w.est.accountIdsFor('email:a@x')) });
-  ok(first === cached && inAsk <= STEP && perTurn.length >= 3 && perTurn.every((n) => n <= STEP) && landed && !landed.stale && same(landed.rates, sync),
+  ok(first === cached && inAsk <= STEP && perTurn.length >= 3 && gateOf(perTurn.every((n) => n <= STEP)) && gateOf(landed) && !landed.stale && verdictOf(same(landed.rates, sync)),
     `THE SLICE (a slice a turn, after ONE walk of the identity's lines before the first — the bound, measured by 主开发's panel: 6.7–8.5 ms at 11 286 lines, 37–62 ms at 200 000, 256–333 ms at 700 000): a relearn of ${lines.length} anchor lines — the ask folded ${inAsk} pairs and answered the CACHED rates; ${perTurn.length} more turns of ${perTurn.join(' / ')} pairs (each ≤ ${STEP}); the landed rates are the synchronous fold's, bit for bit`, { inAsk, perTurn });
   rmWorld(w);
 }
@@ -76,7 +76,7 @@ console.log('§1 THE SLICE — at most ' + STEP + ' pairs a turn; the first slic
   // RED: the slice back at Infinity — commit B's road: ONE synchronous fold of every pair inside the ask
   const M = mutantCopies('usage-relearn-stepped', REPO), src = read('src/usage-estimator.js');
   const from = 'const RELEARN_STEP_LINES = 2000;';
-  ok(src.includes(from), 'the slice patch site exists');
+  ok(verdictOf(src.includes(from)), 'the slice patch site exists');
   const EM = require(M.write('src/usage-estimator.js', editAnchor(src, from, 'const RELEARN_STEP_LINES = Infinity;', "src/usage-estimator.js"), 'one-fold'));
   const w = world(REPO, { seed: 51, rows: 2000, pairs: [7000, 300, 120, 400], steps: [2, 30, 60, 20] });
   const est = new EM.UsageEstimator({ anchorsDir: w.adir, usageHistory: w.uh, resolveIdentity: w.est.resolveIdentity, lagS: 20 });
@@ -101,7 +101,7 @@ console.log('§1 THE SLICE — at most ' + STEP + ' pairs a turn; the first slic
     return { inHandler, perTurn, landed };
   };
   const fx = run(null);
-  ok(fx.inHandler <= STEP && fx.perTurn.every((n) => n <= STEP) && fx.landed, `ONE BUDGET A TURN: every identity stale (an anchor sweep's invalidation), one handler asks all four (10 000 pairs) — it folds ${fx.inHandler} pairs (≤ ${STEP}) and answers the cached rates; the rest folds ${fx.perTurn.length} later turns of ≤ ${STEP} (${fx.perTurn.join(' / ')}), all four land`, fx);
+  ok(fx.inHandler <= STEP && gateOf(fx.perTurn.every((n) => n <= STEP)) && verdictOf(fx.landed), `ONE BUDGET A TURN: every identity stale (an anchor sweep's invalidation), one handler asks all four (10 000 pairs) — it folds ${fx.inHandler} pairs (≤ ${STEP}) and answers the cached rates; the rest folds ${fx.perTurn.length} later turns of ≤ ${STEP} (${fx.perTurn.join(' / ')}), all four land`, fx);
   const M = mutantCopies('usage-relearn-stepped-turn', REPO), src = read('src/usage-estimator.js'), from = '    if (this._turnLeft === undefined) this._turnLeft = step;';
   const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    this._turnLeft = step;', "src/usage-estimator.js"), 'budget-an-ask')) : null;
   const rd = EM ? run(EM) : null;
@@ -182,8 +182,8 @@ console.log('§3 ONE EPOCH — a fold is of one price table, one ledger, one set
   const M = mutantCopies('usage-relearn-stepped-epoch', REPO), src = read('src/usage-estimator.js'), from = '        if (f.chunks && f.moved()) {';
   const blind = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '        if (false) {', "src/usage-estimator.js"), 'fold-blind')) : null;
   const red = []; if (blind) for (const m of ['pricing', 'lines-quiet']) red.push(await scene(m, blind));
-  ok(res.every((x) => x.abandoned === 1 && x.equal), `ONE EPOCH: a pricing edit / a rebuilt ledger / new anchor lines mid-fold ⇒ the fold ABANDONED at its next turn (${res.map((x) => x.abandoned).join(' / ')}), the next ask folded again, and the landed rates equal the synchronous fold of the NEW price table / ledger / lines`, res);
-  ok(!!blind && red.every((x) => !x.equal), `RED: a fold blind to its epoch and lines (the turn's judge removed) ⇒ it lands a fold over two price tables / the old line set as fresh (an append with an invalidate heals at the next ask: the landing is stale): ${red.map((x) => `${x.mover} equal=${x.equal}`).join(', ')}`, red);
+  ok(verdictOf(res.every((x) => x.abandoned === 1 && x.equal)), `ONE EPOCH: a pricing edit / a rebuilt ledger / new anchor lines mid-fold ⇒ the fold ABANDONED at its next turn (${res.map((x) => x.abandoned).join(' / ')}), the next ask folded again, and the landed rates equal the synchronous fold of the NEW price table / ledger / lines`, res);
+  ok(!!blind && verdictOf(red.every((x) => !x.equal)), `RED: a fold blind to its epoch and lines (the turn's judge removed) ⇒ it lands a fold over two price tables / the old line set as fresh (an append with an invalidate heals at the next ask: the landing is stale): ${red.map((x) => `${x.mover} equal=${x.equal}`).join(', ')}`, red);
 }
 
 console.log('§4 ONE FOLD — asks while it runs join it');
@@ -268,12 +268,12 @@ console.log('§6 THE ROADS');
     const text = realRead(f, 'utf8'); fs.writeFileSync(f + '.tmp', text.split('\n').slice(0, -3).join('\n') + '\n'); fs.renameSync(f + '.tmp', f); // a repair's rewrite
     reads = 0; const a3 = w.est.lines(key); r.rewrite = reads; r.eq3 = same(a3, whole());
   } finally { fs.readFileSync = realRead; }
-  ok(r.tail === 0 && r.eq1 && r.tail2 === 0 && r.eq2 && r.rewrite === 1 && r.eq3, `THE ANCHOR LINES BY THEIR TAIL: a grown anchor file read by its new bytes only (${r.tail} whole reads), the array equal to a whole read's (also with a record that sorts before the last: ${r.eq2}); a repair's rewrite (a new inode) read whole (${r.rewrite})`, r);
+  ok(r.tail === 0 && gateOf(r.eq1) && r.tail2 === 0 && gateOf(r.eq2) && r.rewrite === 1 && verdictOf(r.eq3), `THE ANCHOR LINES BY THEIR TAIL: a grown anchor file read by its new bytes only (${r.tail} whole reads), the array equal to a whole read's (also with a record that sorts before the last: ${r.eq2}); a repair's rewrite (a new inode) read whole (${r.rewrite})`, r);
   rmWorld(w);
 }
 {
   const callers = execFileSync('git', ['-C', REPO, 'grep', '-n', '\\.learnNow(', '--', 'src', 'server.js'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-  ok(callers.length === 1 && /ledger-slot-backfill\.js/.test(callers[0]), `the synchronous learn (learnNow) has ONE caller — the boot migration (${callers.map((c) => c.split(':')[0]).join(', ')}); every other learner goes through ratesFor's slices`, callers);
+  ok(callers.length === 1 && verdictOf(/ledger-slot-backfill\.js/.test(callers[0])), `the synchronous learn (learnNow) has ONE caller — the boot migration (${callers.map((c) => c.split(':')[0]).join(', ')}); every other learner goes through ratesFor's slices`, callers);
 }
 console.log('§7 THE TAIL READ ONLY ON PROVEN BYTES (round 2, MUST 1)');
 {
@@ -308,20 +308,20 @@ console.log('§7 THE TAIL READ ONLY ON PROVEN BYTES (round 2, MUST 1)');
     return out;
   };
   const r = run(EST.UsageEstimator);
-  ok(r.every((x) => x.equal && x.after), `THE TAIL READ ONLY ON PROVEN BYTES: ${r.length} rewrite scenes (${r.filter((x) => x.sameIno).length} kept or got back the inode) — the cached lines equal a fresh read in each, and after the next append too: ${r.map((x) => `${x.name} ${x.equal && x.after ? '=' : '≠ ' + x.n.join('/')}`).join(' · ')}`, r);
+  ok(verdictOf(r.every((x) => x.equal && x.after)), `THE TAIL READ ONLY ON PROVEN BYTES: ${r.length} rewrite scenes (${r.filter((x) => x.sameIno).length} kept or got back the inode) — the cached lines equal a fresh read in each, and after the next append too: ${r.map((x) => `${x.name} ${x.equal && x.after ? '=' : '≠ ' + x.n.join('/')}`).join(' · ')}`, r);
   {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rls-tail-')), e = new EST.UsageEstimator({ anchorsDir: dir, usageHistory: null, resolveIdentity: () => null, lagS: 0 }), fp = e._file(KEY);
     fs.writeFileSync(fp, txt(base)); e.lines(KEY); const w0 = e.wholeReads || 0, t0 = e.tailReads || 0;
     for (let k = 0; k < 5; k++) { fs.appendFileSync(fp, txt([mk(3000 + k)])); e.invalidate(KEY); e.lines(KEY); }
     const fresh = new EST.UsageEstimator({ anchorsDir: dir, usageHistory: null, resolveIdentity: () => null, lagS: 0 }).lines(KEY);
-    ok((e.wholeReads || 0) === w0 && (e.tailReads || 0) - t0 === 5 && same(e.lines(KEY), fresh), `…a plain append is still read by its tail: 5 appends ⇒ ${(e.tailReads || 0) - t0} tail reads, ${(e.wholeReads || 0) - w0} whole reads, the lines a fresh read's`);
+    ok((e.wholeReads || 0) === w0 && (e.tailReads || 0) - t0 === 5 && verdictOf(same(e.lines(KEY), fresh)), `…a plain append is still read by its tail: 5 appends ⇒ ${(e.tailReads || 0) - t0} tail reads, ${(e.wholeReads || 0) - w0} whole reads, the lines a fresh read's`);
     fs.rmSync(dir, { recursive: true, force: true });
   }
   const M = mutantCopies('usage-relearn-stepped-splice', REPO), src = read('src/usage-estimator.js');
   const a = "    if (c && c.wins && c.ino === st.ino && (c.btime || 0) === (st.birthtimeMs || 0) && st.size > c.size && c.endsNl) {", b = '        for (const [off, want] of c.wins) {';
   const EM = src.includes(a) && src.includes(b) ? require(M.write('src/usage-estimator.js', editAnchor(editAnchor(src, a, '    if (c && c.wins && c.ino === st.ino && st.size > c.size && c.endsNl) {', "src/usage-estimator.js"), b, '        for (const [off, want] of []) {', "src/usage-estimator.js"), 'splice')) : null;
   const R = EM ? run(EM.UsageEstimator) : null;
-  ok(!!R && R.some((x) => !x.equal || !x.after), `RED: the round-1 rule (the same inode + a larger size = appended) splices: ${R && R.filter((x) => !x.equal || !x.after).map((x) => x.name + ' ' + x.n.join('/')).join(' · ')}`, R);
+  ok(!!R && verdictOf(R.some((x) => !x.equal || !x.after)), `RED: the round-1 rule (the same inode + a larger size = appended) splices: ${R && R.filter((x) => !x.equal || !x.after).map((x) => x.name + ' ' + x.n.join('/')).join(' · ')}`, R);
 }
 
 console.log('§8 THE ESTIMATES GO WHEN NEWER RATES LAND (round 2, MUST 2)');
@@ -360,7 +360,7 @@ console.log('§8 THE ESTIMATES GO WHEN NEWER RATES LAND (round 2, MUST 2)');
   };
   const a = restart(null), b = behind(null);
   ok(a.nullFirst === 4 && a.equalB === 4, `A RESTART: 4 identities of 2 100 lines — the first pass «still learning» (${a.nullFirst} of 4 null), the first pass after their landing (${a.turns} turns) = commit B's estimates (${a.equalB} of 4)`, a);
-  ok(b.moved && b.equalB, `AFTER A SWEEP: a 300-line identity behind a 1 750-line one — built on its old rates inside the fold (7-day ${b.seven[0]}), the first pass after its landing = commit B's (${b.seven[1]} = ${b.seven[2]})`, b);
+  ok(gateOf(b.moved) && verdictOf(b.equalB), `AFTER A SWEEP: a 300-line identity behind a 1 750-line one — built on its old rates inside the fold (7-day ${b.seven[0]}), the first pass after its landing = commit B's (${b.seven[1]} = ${b.seven[2]})`, b);
   const M = mutantCopies('usage-relearn-stepped-memo', REPO), src = read('src/usage-estimator.js'), from = " && (!m.ik || this._ratesVerOf(m.ik) === m.rv)) return ownEstimate(m.est, rawCache);";
   const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, ') return ownEstimate(m.est, rawCache);', "src/usage-estimator.js"), 'memo-kept')) : null;
   const ra = EM ? restart(EM.UsageEstimator) : null, rb = EM ? behind(EM.UsageEstimator) : null;
@@ -389,9 +389,9 @@ console.log('§9 A FOLD IS ABANDONED ONLY WHEN ITS OWN INPUTS MOVED (round 2, MU
   };
   const sizes = process.env.RLS_SIZES === 'full' ? [20000, 200000, 700000] : [8000];
   const rs = sizes.map((n) => scene(n));
-  ok(rs.every((x) => x.abandoned === 0 && x.landed && x.added > 0), `A DEVICE PUSHING between every two turns (each batch adds rows and invalidates every identity): ${rs.map((x) => `${x.lines} lines — ${x.pushes} pushes, ${x.abandoned} folds abandoned, the rates landed in ${x.turns} turns (${x.ms} ms of folding and pushing)`).join(' · ')}`, rs);
+  ok(verdictOf(rs.every((x) => x.abandoned === 0 && x.landed && x.added > 0)), `A DEVICE PUSHING between every two turns (each batch adds rows and invalidates every identity): ${rs.map((x) => `${x.lines} lines — ${x.pushes} pushes, ${x.abandoned} folds abandoned, the rates landed in ${x.turns} turns (${x.ms} ms of folding and pushing)`).join(' · ')}`, rs);
   const ra = scene(8000, null, true);
-  ok(ra.abandoned === 1 && ra.landed, `…a real anchor append mid-fold still abandons it once (${ra.abandoned}), and the refold lands`, ra);
+  ok(ra.abandoned === 1 && verdictOf(ra.landed), `…a real anchor append mid-fold still abandons it once (${ra.abandoned}), and the refold lands`, ra);
   const M = mutantCopies('usage-relearn-stepped-livelock', REPO), src = read('src/usage-estimator.js'), from = '    f.moved = () => this._folds.get(identityKey) !== f || (!loading && epochNow() !== f.ep) || this._sigNow(identityKey) !== f.file;';
   const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    f.moved = () => this._folds.get(identityKey) !== f || (!loading && epochNow() !== f.ep) || this._sigNow(identityKey) !== f.file || f.dirty;', "src/usage-estimator.js"), 'by-invalidate')) : null;
   const R = EM ? scene(8000, EM.UsageEstimator) : null;
@@ -418,11 +418,11 @@ console.log('§10 THE REAL SCHEDULER — the event loop makes a pass between eve
     return { landed, turns: at.length, minGap: gaps.length ? Math.min(...gaps) : -1, gaps: gaps.join(',') };
   };
   const r = await scene(null), want = Math.ceil(8000 / STEP);
-  ok(r.landed && r.turns >= want && r.minGap >= 1, `ON COUNTED TURNS (the default setImmediate scheduler): an 8 000-line fold landed in ${r.turns} turns (≥ ${want} = 8 000 ÷ ${STEP}); between every two of them the loop made ≥ ${r.minGap} pass (gaps ${r.gaps}) — no clock in the row`, r);
+  ok(gateOf(r.landed) && r.turns >= want && r.minGap >= 1, `ON COUNTED TURNS (the default setImmediate scheduler): an 8 000-line fold landed in ${r.turns} turns (≥ ${want} = 8 000 ÷ ${STEP}); between every two of them the loop made ≥ ${r.minGap} pass (gaps ${r.gaps}) — no clock in the row`, r);
   const M = mutantCopies('usage-relearn-stepped-nexttick', REPO), src = read('src/usage-estimator.js'), from = '    const next = this.relearnNext || ((fn) => setImmediate(fn));';
   const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    const next = this.relearnNext || ((fn) => process.nextTick(fn));', "src/usage-estimator.js"), 'nexttick')) : null;
   const R = EM ? await scene(EM.UsageEstimator) : null;
-  ok(!!R && R.landed && R.minGap === 0, `RED: a process.nextTick scheduler ⇒ the fold's ${R && R.turns} turns run with no loop pass between them (gaps ${R && R.gaps})`, R);
+  ok(!!R && gateOf(R.landed) && R.minGap === 0, `RED: a process.nextTick scheduler ⇒ the fold's ${R && R.turns} turns run with no loop pass between them (gaps ${R && R.gaps})`, R);
 }
 
 console.log('§11 THE RATES MEANWHILE = commit B\'s at the instant before the move; the landed = B\'s after it (round 2, small 2)');
@@ -437,7 +437,7 @@ console.log('§11 THE RATES MEANWHILE = commit B\'s at the instant before the mo
   while (S.q.length) S.turn();
   const landed = w.est.ratesFor(key);
   const gap = (x, y) => Math.abs(((x && x.sevenDay && x.sevenDay.impliedFullUsd) || 0) - ((y && y.sevenDay && y.sevenDay.impliedFullUsd) || 0));
-  ok(inFold && same(meanwhile, bBefore) && !same(bBefore, bAfter) && same(landed, bAfter), `inside the fold the served rates are B's at the instant BEFORE the ledger moved (a true earlier state; B's own answer then differs by $${gap(bBefore, bAfter).toFixed(2)} on the 7-day implied full spend), and the landed rates are B's after it`, { inFold });
+  ok(gateOf(inFold) && gateOf(same(meanwhile, bBefore)) && !same(bBefore, bAfter) && verdictOf(same(landed, bAfter)), `inside the fold the served rates are B's at the instant BEFORE the ledger moved (a true earlier state; B's own answer then differs by $${gap(bBefore, bAfter).toFixed(2)} on the 7-day implied full spend), and the landed rates are B's after it`, { inFold });
   rmWorld(w);
 }
 
@@ -458,7 +458,7 @@ console.log('§12 A FOLD THAT THROWS · AN ESTIMATOR LET GO · THE SMALLEST FIRS
     w.est._foldFail.get(key).retryAt = 0; w.est.ratesFor(key); while (S.q.length) S.turn(); after = w.est.foldsStarted - started;
   } finally { console.warn = cw; }
   const said = warns.filter((l) => /the relearn of email:a@x failed \(.+\) — its last rates are served; it is tried again after 5 s, then doubling to ≤ 5 min/.test(l));
-  ok(said.length === 1 && warns.length === 1 && inBackoff.folds === 0 && inBackoff.served && after === 1 && w.est._foldFail.get(key).n === 2, `A FOLD THAT THROWS (a malformed record): said ONCE by name («${(said[0] || '').slice(0, 110)}»); 6 asks inside the backoff start ${inBackoff.folds} folds and serve the last rates; the next try after it: ${after} fold (the second failure counted, not said)`, { warns, inBackoff, after });
+  ok(said.length === 1 && warns.length === 1 && inBackoff.folds === 0 && gateOf(inBackoff.served) && after === 1 && w.est._foldFail.get(key).n === 2, `A FOLD THAT THROWS (a malformed record): said ONCE by name («${(said[0] || '').slice(0, 110)}»); 6 asks inside the backoff start ${inBackoff.folds} folds and serve the last rates; the next try after it: ${after} fold (the second failure counted, not said)`, { warns, inBackoff, after });
   rmWorld(w);
 }
 {
@@ -477,7 +477,7 @@ console.log('§12 A FOLD THAT THROWS · AN ESTIMATOR LET GO · THE SMALLEST FIRS
   const after = { folds: w.est._folds.size, asks: w.est.ratesFor(key) === w.est._rateCache.get(key).rates, started: w.est.foldsStarted };
   w.est.invalidate(key); w.est.ratesFor(key); const noNew = w.est._folds.size === 0 && w.est.foldsStarted === after.started;
   const bf = read('src/ledger-slot-backfill.js'), closes = /\n {8}est\.flushRates\(\);[^\n]*\n {8}est\.close\(\);/.test(bf);   // the re-learn sits in its own function since line 828's follow (r4125)
-  ok(inFlight === 1 && after.folds === 0 && after.asks && noNew && same(disk.buckets, r2) && closes, `AN ESTIMATOR LET GO: close() ends its fold in flight (${inFlight} → ${after.folds}), it serves what it has and folds nothing more (${noNew}); rates.json keeps its successor's learning (${same(disk.buckets, r2)}); the slot backfill closes its own after its flush (${closes})`, { inFlight, after, noNew, closes });
+  ok(inFlight === 1 && after.folds === 0 && gateOf(after.asks) && gateOf(noNew) && gateOf(same(disk.buckets, r2)) && verdictOf(closes), `AN ESTIMATOR LET GO: close() ends its fold in flight (${inFlight} → ${after.folds}), it serves what it has and folds nothing more (${noNew}); rates.json keeps its successor's learning (${same(disk.buckets, r2)}); the slot backfill closes its own after its flush (${closes})`, { inFlight, after, noNew, closes });
   rmWorld(w);
 }
 {
@@ -500,4 +500,4 @@ console.log('§12 A FOLD THAT THROWS · AN ESTIMATOR LET GO · THE SMALLEST FIRS
   ok(small !== null && small <= 2 && fc !== null && fc > small + 2, `THE SMALLEST FIRST: asked after a 6 000- and a 3 000-line identity, the 120-line one lands at turn ${small} — the first turn with a budget (the handler's turn spent it); RED first-come: turn ${fc}`, { small, fc });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

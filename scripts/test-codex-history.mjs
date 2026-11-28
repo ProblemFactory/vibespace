@@ -12,7 +12,7 @@ const path = await import('node:path');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { CodexMessageManager } = require(REPO + '/src/codex-message-manager.js');
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
 // ── custom_tool_call + its output twin (the stuck-card fix) ──
 {
@@ -22,7 +22,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     { type: 'response_item', payload: { type: 'custom_tool_call_output', id: 'ctco_1', call_id: 'call_A', output: [{ type: 'input_text', text: 'Script completed\n' }, { type: 'input_text', text: 'status set: done\n' }] } },
   ]);
   const tool = msgs.find((m) => m.role === 'tool');
-  ok('custom_tool_call_output is ROUTED (52 cards stuck pending in one real session)', tool && tool.status === 'complete', JSON.stringify(tool?.status));
+  ok('custom_tool_call_output is ROUTED (52 cards stuck pending in one real session)', gateOf(tool) && tool.status === 'complete', JSON.stringify(tool?.status));
   ok('array-of-blocks output is flattened to text, not a JSON blob', tool?.content?.[0]?.output === 'Script completed\nstatus set: done\n', JSON.stringify(tool?.content?.[0]?.output));
 }
 
@@ -38,7 +38,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   // a task chip — since the merge its content is one-line collab ACTIVITY rows,
   // and consecutive rows coalesce into that ONE message.
   const lines = msgs.filter((m) => m.role === 'tool' && m.toolName === 'Sub-agent');
-  ok('a sub-agent spawn is announced (it was fully invisible)', lines.length === 1 && /paper_analysis/.test(JSON.stringify(lines[0].content)) && lines[0].collapseKind === 'agent' && lines[0].status === 'complete');
+  ok('a sub-agent spawn is announced (it was fully invisible)', lines.length === 1 && gateOf(/paper_analysis/.test(JSON.stringify(lines[0].content))) && lines[0].collapseKind === 'agent' && lines[0].status === 'complete');
   ok("'interacted' churn does not spam extra messages (both kinds coalesce into the one card, one row each)", lines.length === 1 && (lines[0].collab?.rows || []).length === 2 && !msgs.some((m) => m.role === 'system'));
 }
 
@@ -50,7 +50,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   mm.processLive({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 16371, cached_input_tokens: 11008, cache_write_input_tokens: 0, output_tokens: 125, reasoning_output_tokens: 104, total_tokens: 16496 }, last_token_usage: { input_tokens: 16371, cached_input_tokens: 11008, cache_write_input_tokens: 0, output_tokens: 125, reasoning_output_tokens: 104, total_tokens: 16496 }, model_context_window: 828400 } } });
   ok('usage meta carries contextWindow (live context% showed "?" until re-attach)', metas.length === 1 && metas[0].contextWindow === 828400, JSON.stringify(metas[0]));
   const sb = require('node:fs').readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8');
-  ok('…and the status bar consumes it in updateUsage', /updateUsage\(usageData\)[\s\S]{0,1400}u\.contextWindow\) this\._statusContextWindow = u\.contextWindow/.test(sb));
+  ok('…and the status bar consumes it in updateUsage', verdictOf(/updateUsage\(usageData\)[\s\S]{0,1400}u\.contextWindow\) this\._statusContextWindow = u\.contextWindow/.test(sb)));
 }
 
 // ── encrypted reasoning: silently absent, never a broken card ──
@@ -74,22 +74,22 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   for (const r of seq) mm.processLive(r, false);
   const asst = mm.messages.filter((m) => m.role === 'assistant');
   ok('interleaved deltas accumulate into exactly TWO streams, not per-run fragments', asst.length === 2, JSON.stringify(asst.map((m) => m.content[0].text)));
-  ok('…each stream reads as continuous text', asst.some((m) => m.content[0].text === '推断 AA 边界') && asst.some((m) => m.content[0].text === '最终审计'), JSON.stringify(asst.map((m) => m.content[0].text)));
+  ok('…each stream reads as continuous text', gateOf(asst.some((m) => m.content[0].text === '推断 AA 边界')) && verdictOf(asst.some((m) => m.content[0].text === '最终审计')), JSON.stringify(asst.map((m) => m.content[0].text)));
   // the full response_item still finalizes ITS stream by key
   mm.processLive({ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'A', content: [{ type: 'output_text', text: '推断 AA 边界(定稿)' }] } }, false);
   const a = mm.messages.filter((m) => m.role === 'assistant').find((m) => /定稿/.test(m.content[0].text));
-  ok('the finalizing response_item replaces its OWN stream in place (no duplicate)', a && a.status === 'complete' && mm.messages.filter((m) => m.role === 'assistant').length === 2);
+  ok('the finalizing response_item replaces its OWN stream in place (no duplicate)', gateOf(a) && a.status === 'complete' && mm.messages.filter((m) => m.role === 'assistant').length === 2);
 }
 
 // ── the account surfaces name the ChatGPT login, never the claude CLI's ──
 {
   const fs2 = require('node:fs');
   const sl = fs2.readFileSync(REPO + '/src/lib/session-lifecycle.js', 'utf8');
-  ok("billing switcher's global row is backend-aware (ChatGPT login for codex)", /const globalLoginName = t\(bill\.cliLogin\)/.test(sl) && /cliLogin: 'ChatGPT login'/.test(fs2.readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8')));
+  ok("billing switcher's global row is backend-aware (ChatGPT login for codex)", gateOf(/const globalLoginName = t\(bill\.cliLogin\)/.test(sl)) && verdictOf(/cliLogin: 'ChatGPT login'/.test(fs2.readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8'))));
   // 2.369.21: the codex row shows the CODEX quota (__global_codex__), never the claude machine quota
-  ok('…and the CLAUDE machine quota chips never dress the codex row (it shows the codex quota instead)', /!bill\.machineUsage \? \(rHostId \? '' : usageHint\(accountUsageStore\(this, backend\)\?\.\[bill\.globalUsageKey\], this\._usageEstimates\?\.\[bill\.globalUsageKey\]\)\) : usageHint\(rHostId \? this\._hostOwnUsage/.test(sl) && /globalUsageKey: '__global_codex__'/.test(fs2.readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8')));
+  ok('…and the CLAUDE machine quota chips never dress the codex row (it shows the codex quota instead)', gateOf(/!bill\.machineUsage \? \(rHostId \? '' : usageHint\(accountUsageStore\(this, backend\)\?\.\[bill\.globalUsageKey\], this\._usageEstimates\?\.\[bill\.globalUsageKey\]\)\) : usageHint\(rHostId \? this\._hostOwnUsage/.test(sl)) && verdictOf(/globalUsageKey: '__global_codex__'/.test(fs2.readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8'))));
   const sb = fs2.readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8');
-  ok('status-bar billing chip is backend-aware too', /const glogin = t\(billingRow\(this\._backend\)\.cliLogin\)/.test(sb));
+  ok('status-bar billing chip is backend-aware too', verdictOf(/const glogin = t\(billingRow\(this\._backend\)\.cliLogin\)/.test(sb)));
 }
 
 // ── Track B: semantic collapse kinds (owner: codex的exec卡片/agent wait/send
@@ -122,12 +122,12 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   // (a pin that greps a file the code has left is a dead pin, not a guard).
   const rs = require('node:fs').readFileSync(REPO + '/src/lib/chat-run-summary.js', 'utf8');
   const cv = require('node:fs').readFileSync(REPO + '/src/lib/chat-view.js', 'utf8');
-  ok('the classifier consumes the semantic hint FIRST (name map = legacy fallback)', /const ck = m\?\.collapseKind;[\s\S]{0,220}return ck;/.test(rs));
-  ok("claude Agent/Task cards join the 'agent' kind via the fallback map", /tn === 'Agent' \|\| tn === 'Task'\) return 'agent'/.test(rs));
-  ok('…and the chat view folds THROUGH that one classifier (no second name map left behind)', /messageKind\(el\._rawMsg, \{ toolCard:/.test(cv) && !/tn === 'Bash'\) return 'bash'/.test(cv));
+  ok('the classifier consumes the semantic hint FIRST (name map = legacy fallback)', verdictOf(/const ck = m\?\.collapseKind;[\s\S]{0,220}return ck;/.test(rs)));
+  ok("claude Agent/Task cards join the 'agent' kind via the fallback map", verdictOf(/tn === 'Agent' \|\| tn === 'Task'\) return 'agent'/.test(rs)));
+  ok('…and the chat view folds THROUGH that one classifier (no second name map left behind)', gateOf(/messageKind\(el\._rawMsg, \{ toolCard:/.test(cv)) && !/tn === 'Bash'\) return 'bash'/.test(cv));
   const ss = require('node:fs').readFileSync(REPO + '/src/lib/settings-schema.js', 'utf8');
-  ok("the settings checkboxes are SEMANTIC (one global set; 'agent' kind exists and defaults on)", /value: 'agent', label: t\('Sub-agent orchestration/.test(ss) && /'skill', 'agent', 'search', 'image'(?:, 'note')?\]/.test(ss));
-  ok('per-backend fallback model list lives on BACKEND_META (codex never lists claude models offline)', /fallbackModels: \['gpt-/.test(require('node:fs').readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8')) && /getBackendMeta\(backend\)\?\.fallbackModels/.test(require('node:fs').readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8')));
+  ok("the settings checkboxes are SEMANTIC (one global set; 'agent' kind exists and defaults on)", gateOf(/value: 'agent', label: t\('Sub-agent orchestration/.test(ss)) && verdictOf(/'skill', 'agent', 'search', 'image'(?:, 'note')?\]/.test(ss)));
+  ok('per-backend fallback model list lives on BACKEND_META (codex never lists claude models offline)', gateOf(/fallbackModels: \['gpt-/.test(require('node:fs').readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8'))) && verdictOf(/getBackendMeta\(backend\)\?\.fallbackModels/.test(require('node:fs').readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8'))));
 }
 
 // ── apply_patch file names (owner: "codex里的writes和read似乎不展示文件名") —
@@ -139,7 +139,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     { type: 'response_item', payload: { type: 'custom_tool_call', id: 'c1', call_id: 'k1', name: 'apply_patch', input: patch } },
   ]);
   const inp = msgs.find((m) => m.role === 'tool')?.content?.[0]?.input || {};
-  ok('patch envelope files are parsed into input.files (+file_path)', Array.isArray(inp.files) && inp.files.join(',') === 'src/app/views.js,docs/report.md' && inp.file_path === 'src/app/views.js', JSON.stringify(inp.files));
+  ok('patch envelope files are parsed into input.files (+file_path)', gateOf(Array.isArray(inp.files)) && inp.files.join(',') === 'src/app/views.js,docs/report.md' && inp.file_path === 'src/app/views.js', JSON.stringify(inp.files));
   // the LIVE channel's shape (real buffer record): apply_patch arrives as a
   // FUNCTION_CALL whose arguments are structured JSON {reason, changes} — the
   // first fix parsed only the custom_tool_call envelope and live sessions
@@ -150,7 +150,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     { type: 'response_item', payload: { type: 'function_call', id: 'f1', call_id: 'kf1', name: 'apply_patch', arguments: JSON.stringify({ reason: '', changes: [{ path: '/home/u/services/app/src/views.js', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-a\n+b' }] }) } },
   ]);
   const inp2 = msgs2.find((m) => m.role === 'tool')?.content?.[0]?.input || {};
-  ok('function_call JSON {changes[].path} shape yields files + a synthesized patch text', inp2.files?.[0] === '/home/u/services/app/src/views.js' && /\*\*\* Update File: \/home\/u\/services\/app\/src\/views\.js/.test(inp2.patch || ''), JSON.stringify({ files: inp2.files, head: (inp2.patch || '').slice(0, 40) }));
+  ok('function_call JSON {changes[].path} shape yields files + a synthesized patch text', inp2.files?.[0] === '/home/u/services/app/src/views.js' && verdictOf(/\*\*\* Update File: \/home\/u\/services\/app\/src\/views\.js/.test(inp2.patch || '')), JSON.stringify({ files: inp2.files, head: (inp2.patch || '').slice(0, 40) }));
   ok("…and the card stamps collapseKind 'write' via the function_call path too", msgs2.find((m) => m.role === 'tool')?.collapseKind === 'write');
   // unknown external/dynamic tools fold as 'mcp' instead of BREAKING runs
   const mm3 = new CodexMessageManager('t7c');
@@ -159,12 +159,12 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     { type: 'response_item', payload: { type: 'dynamic_tool_call', id: 'd1', call_id: 'kd1', name: 'some_plugin_tool', input: '{}' } },
     { type: 'response_item', payload: { type: 'dynamic_tool_call_output', id: 'd2', call_id: 'kd1', output: [{ type: 'input_text', text: 'done' }] } },
   ]);
-  ok("unknown tool names classify as 'mcp' (external-tool kind) — they used to break every surrounding fold", msgs3.filter((m) => m.role === 'tool').every((m) => m.collapseKind === 'mcp'), JSON.stringify(msgs3.map((m) => m.collapseKind)));
+  ok("unknown tool names classify as 'mcp' (external-tool kind) — they used to break every surrounding fold", verdictOf(msgs3.filter((m) => m.role === 'tool').every((m) => m.collapseKind === 'mcp')), JSON.stringify(msgs3.map((m) => m.collapseKind)));
   ok('dynamic_tool_call/output are routed like custom tools (were unrouted)', msgs3.find((m) => m.toolCallId === 'kd1')?.status === 'complete');
-  ok('the pre-agent-kind settings migration exists in the registry', /2026-08-collapse-kinds-agent-default/.test(require('node:fs').readFileSync(REPO + '/src/server/migrations.js', 'utf8')));
+  ok('the pre-agent-kind settings migration exists in the registry', verdictOf(/2026-08-collapse-kinds-agent-default/.test(require('node:fs').readFileSync(REPO + '/src/server/migrations.js', 'utf8'))));
   const cv = require('node:fs').readFileSync(REPO + '/src/lib/chat-view.js', 'utf8');
-  ok('fold summaries list ALL of a patch\'s files (fileLabelsOf over input.files)', /fileLabelsOf = \(el\)[\s\S]{0,300}Array\.isArray\(inp\.files\)/.test(cv) && /for \(const fl of fileLabelsOf\(el\)\)/.test(cv));
-  ok('…and the ✎ write mark keys on the semantic hint too', /el\._rawMsg\?\.collapseKind === 'write' \|\| tn === 'Write'/.test(cv));
+  ok('fold summaries list ALL of a patch\'s files (fileLabelsOf over input.files)', gateOf(/fileLabelsOf = \(el\)[\s\S]{0,300}Array\.isArray\(inp\.files\)/.test(cv)) && verdictOf(/for \(const fl of fileLabelsOf\(el\)\)/.test(cv)));
+  ok('…and the ✎ write mark keys on the semantic hint too', verdictOf(/el\._rawMsg\?\.collapseKind === 'write' \|\| tn === 'Write'/.test(cv)));
 }
 
 // ── Per-message metadata (owner 2026-09-06: "codex会话是不是依然看不到每条消息的
@@ -214,7 +214,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok('model + effort ride the meta from the turn_context (gpt-6-astra / ultra)', callA?.meta?.model === 'gpt-6-astra' && callA.meta.effort === 'ultra');
   ok('the SECOND response (a tool card whose output arrived between token_usage_record and token_count) gets ITS OWN meta — the first is not overwritten', callB?.meta?.requestId === `cx:${TID}:60318` && callB.meta.msgId === 'resp_B' && callB.meta.usage.input_tokens === 30071 - 29824 && callB.meta.usage.output_tokens === 188 && callA.meta.msgId === 'resp_A', JSON.stringify(callB?.meta));
   ok('the final assistant text carries the third response (reasoning tokens 227 of 267 output)', text?.meta?.requestId === `cx:${TID}:178376` && text.meta.msgId === 'resp_C' && text.meta.usage.reasoning_output_tokens === 227 && text.meta.usage.output_tokens === 267, JSON.stringify(text?.meta));
-  ok('user records carry no meta (a response usage never belongs to the prompt)', user && user.meta == null);
+  ok('user records carry no meta (a response usage never belongs to the prompt)', gateOf(user) && user.meta == null);
   // a collab ROW is a message like any other: it carries the SAME per-response
   // meta, so the popup's billing row resolves for multi-agent orchestration too
   const collabRowMsg = msgs.find((m) => m.collab && !m.collab.report);
@@ -231,7 +231,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const walk = runUsageWalk({ home, codexSessionsDir: path.join(home, '.codex', 'sessions'), cursorFile: path.join(home, 'cursor.json') });
   const evs = walk.events.map((l) => JSON.parse(l));
   ok('the ledger walker emits exactly the three responses with UNCHANGED rids (the dedup key already in permanent ledgers)', evs.length === 3 && evs.map((e) => e.rid).join(',') === [30059, 60318, 178376].map((n) => `cx:${TID}:${n}`).join(','), evs.map((e) => e.rid).join(','));
-  ok('normalizer requestId === walker rid, normalizer msgId === walker mid, for every response', [callA, callB, text].every((m, i) => m.meta.requestId === evs[i].rid && m.meta.msgId === evs[i].mid) && evs.every((e) => e.effort === 'ultra' && e.model === 'gpt-6-astra'), JSON.stringify(evs.map((e) => [e.rid, e.mid, e.effort])));
+  ok('normalizer requestId === walker rid, normalizer msgId === walker mid, for every response', gateOf([callA, callB, text].every((m, i) => m.meta.requestId === evs[i].rid && m.meta.msgId === evs[i].mid)) && verdictOf(evs.every((e) => e.effort === 'ultra' && e.model === 'gpt-6-astra')), JSON.stringify(evs.map((e) => [e.rid, e.mid, e.effort])));
   ok('walker fresh-input matches the meta (i = input − cached; cr = cached)', evs[0].i === callA.meta.usage.input_tokens && evs[0].cr === callA.meta.usage.cache_read_input_tokens && evs[2].o === text.meta.usage.output_tokens);
   fs.rmSync(home, { recursive: true, force: true });
 
@@ -253,21 +253,21 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok('no token_usage_record live ⇒ msgId is null (never an invented id), kind null', am?.meta?.msgId === null && am.meta.msgIdKind === null);
   const editOp = ops.find((o) => o.op === 'edit' && o.id === am?.id && o.fields?.meta);
   ok("the live path emits claude's 'edit' op with fields.meta so an open window's popup refreshes", !!editOp && editOp.fields.meta.requestId === `cx:${TID}:3357139`);
-  ok('the init system card never gets response meta', live.messages.filter((m) => m.role === 'system').every((m) => m.meta == null));
+  ok('the init system card never gets response meta', verdictOf(live.messages.filter((m) => m.role === 'system').every((m) => m.meta == null)));
   // a heartbeat token_count (info:null / empty usage) neither attaches nor advances anything
   live.processLive({ type: 'event_msg', payload: { type: 'agent_message_delta', item_id: 'it-2', delta: 'next' } });
   live.processLive({ type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: { primary: { used_percent: 12 } } } });
   const am2 = live.messages.filter((m) => m.role === 'assistant')[1];
-  ok('a rate-limit heartbeat token_count attaches nothing (the next real one will)', am2 && am2.meta == null);
+  ok('a rate-limit heartbeat token_count attaches nothing (the next real one will)', gateOf(am2) && am2.meta == null);
 
   // WIRING PINS (the 2.355.0 lesson: a normalizer fix with no consumer is dead):
   const cv = fs.readFileSync(REPO + '/src/lib/chat-view.js', 'utf8');
-  ok('popup labels the ledger key honestly + shows the response id, reasoning tokens, effort, codex cache write', /requestIdKind === 'ledger' \? t\('Ledger request key'\) : t\('Request ID'\)/.test(cv) && /msgIdKind === 'response' \? t\('Response ID'\) : t\('Message ID'\)/.test(cv) && /t\('Reasoning tokens'\)/.test(cv) && /if \(meta\.effort\) add\(t\('Effort'\)/.test(cv) && /\|\| \(u\.cache_write_input_tokens \|\| 0\)/.test(cv));
-  ok("popup's session-level fallback reads the REAL auth shape (source: codex-subscription / codex-cli / pooled / subscription / api-*)", /a\.source === 'codex-subscription'/.test(cv) && /a\.source === 'codex-cli'/.test(cv) && /a\.source === 'pooled'/.test(cv) && !/a\.accountName \|\| \(a\.kind ===/.test(cv));
-  ok('global-bucket billing row names the ChatGPT login for codex events (route returns be)', /t\(billingRow\(r\.be\)\.cliLogin\)/.test(cv) && /be: ev\.be \|\| 'claude', model: ev\.model \|\| null, effort: ev\.effort \|\| null/.test(fs.readFileSync(REPO + '/src/server/account-usage-routes.js', 'utf8')));
+  ok('popup labels the ledger key honestly + shows the response id, reasoning tokens, effort, codex cache write', gateOf(/requestIdKind === 'ledger' \? t\('Ledger request key'\) : t\('Request ID'\)/.test(cv)) && gateOf(/msgIdKind === 'response' \? t\('Response ID'\) : t\('Message ID'\)/.test(cv)) && gateOf(/t\('Reasoning tokens'\)/.test(cv)) && gateOf(/if \(meta\.effort\) add\(t\('Effort'\)/.test(cv)) && verdictOf(/\|\| \(u\.cache_write_input_tokens \|\| 0\)/.test(cv)));
+  ok("popup's session-level fallback reads the REAL auth shape (source: codex-subscription / codex-cli / pooled / subscription / api-*)", gateOf(/a\.source === 'codex-subscription'/.test(cv)) && gateOf(/a\.source === 'codex-cli'/.test(cv)) && gateOf(/a\.source === 'pooled'/.test(cv)) && !/a\.accountName \|\| \(a\.kind ===/.test(cv));
+  ok('global-bucket billing row names the ChatGPT login for codex events (route returns be)', gateOf(/t\(billingRow\(r\.be\)\.cliLogin\)/.test(cv)) && verdictOf(/be: ev\.be \|\| 'claude', model: ev\.model \|\| null, effort: ev\.effort \|\| null/.test(fs.readFileSync(REPO + '/src/server/account-usage-routes.js', 'utf8'))));
   for (const dict of ['i18n-zh.js', 'i18n-ja.js']) {
     const d = fs.readFileSync(REPO + '/src/lib/' + dict, 'utf8');
-    ok(`${dict} carries the new popup keys`, ['"Reasoning tokens"', '"Ledger request key"', '"Response ID"'].every((k) => d.includes(k)));
+    ok(`${dict} carries the new popup keys`, verdictOf(['"Reasoning tokens"', '"Ledger request key"', '"Response ID"'].every((k) => d.includes(k))));
   }
 }
 
@@ -315,7 +315,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   // bare replay of the file (what the corpus smoke below and the walker see)
   const bare = new CodexMessageManager('t10').convertHistory(subagentHead);
   const reply = bare.find((m) => m.role === 'assistant');
-  ok('sub-agent rollout: the FIRST session_meta (the file\'s own id) keys every meta — the parent\'s line-1 session_meta never overwrites it (was cx:<parent>:…)', reply?.meta?.requestId === `cx:${CHILD}:16496` && ridsOf(bare).every((r) => r.startsWith(`cx:${CHILD}:`)), JSON.stringify(ridsOf(bare)));
+  ok('sub-agent rollout: the FIRST session_meta (the file\'s own id) keys every meta — the parent\'s line-1 session_meta never overwrites it (was cx:<parent>:…)', reply?.meta?.requestId === `cx:${CHILD}:16496` && verdictOf(ridsOf(bare).every((r) => r.startsWith(`cx:${CHILD}:`))), JSON.stringify(ridsOf(bare)));
   ok('…no token_usage_record in a 0.149 file ⇒ msgId null (never invented)', reply?.meta?.msgId === null && reply.meta.msgIdKind === null);
   // the walker keys the same file by its NAME uuid — the join must hold
   const { runUsageWalk } = require(REPO + '/src/usage-walker.js');
@@ -410,16 +410,16 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     ok('walker: the same cumulative total in two files is TWO rids (cx:<old>:4242, cx:<new>:4242) — the set the re-pointed normalizer minted', evs.map((e) => e.rid).sort().join(',') === [`cx:${OLD}:4242`, `cx:${NEW}:4242`].sort().join(','), JSON.stringify(evs.map((e) => e.rid)));
     fs.rmSync(home, { recursive: true, force: true });
     const ce = fs.readFileSync(REPO + '/src/server/stdout/codex-events.js', 'utf8');
-    ok('WIRING: codex-events re-points session.backendSessionId on wrapper_meta.threadId and hands the SAME record to feedLive (the normalizer follows it in stream order — no direct re-pin from the consumer)', /msg\.type === 'wrapper_meta'\s*\?\s*payload\.threadId/.test(ce) && /session\.backendSessionId = nextThreadId/.test(ce) && /feedLive\(session, msg\)/.test(ce) && !/_normalizer\._threadId/.test(ce));
+    ok('WIRING: codex-events re-points session.backendSessionId on wrapper_meta.threadId and hands the SAME record to feedLive (the normalizer follows it in stream order — no direct re-pin from the consumer)', gateOf(/msg\.type === 'wrapper_meta'\s*\?\s*payload\.threadId/.test(ce)) && gateOf(/session\.backendSessionId = nextThreadId/.test(ce)) && gateOf(/feedLive\(session, msg\)/.test(ce)) && !/_normalizer\._threadId/.test(ce));
   }
   // WIRING: every reader that has the thread id passes it (a normalizer fix
   // with no consumer is dead — 2.355.0)
   const nz = fs.readFileSync(REPO + '/src/normalizers.js', 'utf8');
-  ok('createMessageManager forwards opts to the normalizer ctor; rebuildHistory pins the session\'s backend thread id', /function createMessageManager\(backend, sessionId, opts\)[\s\S]{0,300}new Ctor\(sessionId, opts\)/.test(nz) && /createMessageManager\(session\.backend \|\| 'claude', sessionId, \{ threadId: session\.backendSessionId \|\| session\.claudeSessionId \|\| null \}\)/.test(nz));
+  ok('createMessageManager forwards opts to the normalizer ctor; rebuildHistory pins the session\'s backend thread id', gateOf(/function createMessageManager\(backend, sessionId, opts\)[\s\S]{0,300}new Ctor\(sessionId, opts\)/.test(nz)) && verdictOf(/createMessageManager\(session\.backend \|\| 'claude', sessionId, \{ threadId: session\.backendSessionId \|\| session\.claudeSessionId \|\| null \}\)/.test(nz)));
   const wsh = fs.readFileSync(REPO + '/src/ws-handler.js', 'utf8');
-  ok('the view-only (dead session) attach pins the thread id', /createMessageManager\(data\.backend \|\| 'claude', data\.sessionId \|\| 'view', \{ threadId: backendSessionId \}\)/.test(wsh));
+  ok('the view-only (dead session) attach pins the thread id', verdictOf(/createMessageManager\(data\.backend \|\| 'claude', data\.sessionId \|\| 'view', \{ threadId: backendSessionId \}\)/.test(wsh)));
   const tsv = fs.readFileSync(REPO + '/src/transcript-service.js', 'utf8');
-  ok('transcript-service view() + gapSlab() pin the thread id (gap slabs carry no session_meta)', /createMessageManager\(r\.backend, 'api', \{ threadId: r\.sessionId \}\)/.test(tsv) && /createMessageManager\(r\.backend, 'gap', \{ threadId: r\.sessionId \}\)/.test(tsv));
+  ok('transcript-service view() + gapSlab() pin the thread id (gap slabs carry no session_meta)', gateOf(/createMessageManager\(r\.backend, 'api', \{ threadId: r\.sessionId \}\)/.test(tsv)) && verdictOf(/createMessageManager\(r\.backend, 'gap', \{ threadId: r\.sessionId \}\)/.test(tsv)));
 }
 
 // ── DUPLICATE token_count (verifier, real data: 394/8513 = 4.6% across 79
@@ -469,7 +469,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok('the exec card (output landed before the first token_count) carries response A: cx:…:405135 / resp_A', exec?.meta?.requestId === `cx:${TID}:405135` && exec.meta.msgId === RESP_A && exec.meta.usage.output_tokens === 233, JSON.stringify(exec?.meta));
   ok('the assistant reply created AFTER token_count A is NOT stamped by the DUPLICATE token_count — it gets response B: cx:…:452465, resp_B, input 47299−46848 fresh / 46848 cached / output 31', reply?.meta?.requestId === `cx:${TID}:452465` && reply.meta.msgId === RESP_B && reply.meta.usage.input_tokens === 47299 - 46848 && reply.meta.usage.cache_read_input_tokens === 46848 && reply.meta.usage.output_tokens === 31 && reply.meta.usage.reasoning_output_tokens === 0, JSON.stringify(reply?.meta));
   ok('…and the wait row of the same response shares it (the duplicate advanced no mark)', wait?.meta?.requestId === `cx:${TID}:452465` && wait.meta.msgId === RESP_B, JSON.stringify(wait?.meta));
-  ok('every stamped message keys to one of the TWO real responses (never a third phantom)', msgs.filter((m) => m.meta).every((m) => [405135, 452465].some((n) => m.meta.requestId === `cx:${TID}:${n}`)), JSON.stringify(msgs.map((m) => m.meta?.requestId)));
+  ok('every stamped message keys to one of the TWO real responses (never a third phantom)', verdictOf(msgs.filter((m) => m.meta).every((m) => [405135, 452465].some((n) => m.meta.requestId === `cx:${TID}:${n}`))), JSON.stringify(msgs.map((m) => m.meta?.requestId)));
   // walker on the same window: two events, deduped identically
   const { runUsageWalk } = require(REPO + '/src/usage-walker.js');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxdup-'));
@@ -483,9 +483,9 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const live = new CodexMessageManager('t11b'); const ops = []; live.onOp((o) => ops.push(o));
   for (const r of window.slice(0, 10)) live.processLive(r); // through the duplicate (ordinal 120)
   const liveReply = live.messages.find((m) => m.role === 'assistant' && m.content[0]?.type === 'text');
-  ok('live: after the duplicate the reply is still unstamped (no phantom edit op)', liveReply && liveReply.meta == null && !ops.some((o) => o.op === 'edit' && o.id === liveReply.id && o.fields?.meta));
+  ok('live: after the duplicate the reply is still unstamped (no phantom edit op)', gateOf(liveReply) && liveReply.meta == null && !ops.some((o) => o.op === 'edit' && o.id === liveReply.id && o.fields?.meta));
   for (const r of window.slice(10)) live.processLive(r);
-  ok('live: the NEXT real token_count stamps it with response B and emits the edit', liveReply.meta?.requestId === `cx:${TID}:452465` && ops.some((o) => o.op === 'edit' && o.id === liveReply.id && o.fields?.meta?.msgId === RESP_B));
+  ok('live: the NEXT real token_count stamps it with response B and emits the edit', liveReply.meta?.requestId === `cx:${TID}:452465` && verdictOf(ops.some((o) => o.op === 'edit' && o.id === liveReply.id && o.fields?.meta?.msgId === RESP_B)));
 }
 
 // ── rid-info model/effort CONSUMER (verifier item 3): the route returns the
@@ -497,7 +497,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   // delegation MODE and the popup names the level the model really reasons at)
   // — the FALLBACK this pin is about is unchanged: ledger value when the
   // record's own meta carries none.
-  ok('popup appends Model / Effort from the ledger event when meta.model / meta.effort are empty', /if \(!meta\.model && r\.model\) addAsyncRow\(t\('Model'\), r\.model\)/.test(cv) && /if \(!meta\.effort && r\.effort\) addAsyncRow\(t\('Effort'\), effortDisplay\(.*r\.effort/.test(cv));
+  ok('popup appends Model / Effort from the ledger event when meta.model / meta.effort are empty', gateOf(/if \(!meta\.model && r\.model\) addAsyncRow\(t\('Model'\), r\.model\)/.test(cv)) && verdictOf(/if \(!meta\.effort && r\.effort\) addAsyncRow\(t\('Effort'\), effortDisplay\(.*r\.effort/.test(cv)));
 }
 
 // ── MERGED READ = per-RECORD file provenance (round-3 verifier, real data):
@@ -567,20 +567,20 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   };
   // ① the native fork — no session state at all, the reader resolves the ancestry from the files
   const nf = drive({ backend: 'codex', backendSessionId: CHILD, buffer: '' }, 'nf', CHILD);
-  ok('every merged record carries its FILE as provenance (parent-half tagged PARENT, child-half CHILD; nothing untagged; the tag is non-enumerable — never serialized)', nf.s.untagged === 0 && nf.recs.some((r) => ST.recordThreadOf(r) === PARENT) && nf.recs.some((r) => ST.recordThreadOf(r) === CHILD) && nf.recs.every((r) => !Object.keys(r).includes('__threadId')) && !JSON.stringify(nf.recs).includes('__threadId'), JSON.stringify(nf.s));
+  ok('every merged record carries its FILE as provenance (parent-half tagged PARENT, child-half CHILD; nothing untagged; the tag is non-enumerable — never serialized)', nf.s.untagged === 0 && gateOf(nf.recs.some((r) => ST.recordThreadOf(r) === PARENT)) && gateOf(nf.recs.some((r) => ST.recordThreadOf(r) === CHILD)) && gateOf(nf.recs.every((r) => !Object.keys(r).includes('__threadId'))) && !JSON.stringify(nf.recs).includes('__threadId'), JSON.stringify(nf.s));
   ok(`native fork: EVERY parent-half message keys to a PARENT-file ledger event — parentCorrect ${nf.s.parentCorrect}/${nf.s.parentMsgs} (the absolute pin: 0/N), zero parent→child collisions, zero nowhere`, nf.s.parentMsgs > 0 && nf.s.parentCorrect === nf.s.parentMsgs && nf.s.parentToChild === 0 && nf.s.parentNowhere === 0, JSON.stringify(nf.s));
   ok(`native fork: every child-half message keys to a CHILD-file ledger event — ${nf.s.childCorrect}/${nf.s.childMsgs}`, nf.s.childMsgs > 0 && nf.s.childCorrect === nf.s.childMsgs && nf.s.childBad === 0, JSON.stringify(nf.s));
   ok('native fork: parent-half MINTED keys ⊆ walker rids of the parent file = exactly the three below the boundary (the parent\'s post-fork response 2994636 is never minted — the parent\'s alone)', sorted(nf.minted(PARENT)) === sorted(P_RIDS.slice(0, 3)), JSON.stringify(nf.minted(PARENT)));
   ok('native fork: child-half MINTED keys == walker rids of the child file (whole file); 6 keys minted, each once', sorted(nf.minted(CHILD)) === sorted(C_RIDS) && nf.mm._ledgerKeys.length === 6, JSON.stringify(nf.minted(CHILD)));
-  ok('native fork: every stamped message key is a minted key; no key under any third thread id', nf.mm.messages.filter((m) => m.meta?.requestId).every((m) => nf.mm._ledgerKeys.some((k) => k.rid === m.meta.requestId)) && nf.mm._ledgerKeys.every((k) => k.tid === PARENT || k.tid === CHILD));
+  ok('native fork: every stamped message key is a minted key; no key under any third thread id', gateOf(nf.mm.messages.filter((m) => m.meta?.requestId).every((m) => nf.mm._ledgerKeys.some((k) => k.rid === m.meta.requestId))) && verdictOf(nf.mm._ledgerKeys.every((k) => k.tid === PARENT || k.tid === CHILD)));
   // ② the wrapper-chain shape (session.forkedFrom names a superseded incarnation, merged WHOLE):
   //    the same two files with the roles swapped so the ancestor carries NO native boundary
   const wc = drive({ backend: 'codex', backendSessionId: PARENT, forkedFrom: [CHILD], buffer: '' }, 'wc', PARENT);
-  ok('wrapper chain (whole-file ancestor): ancestor-half minted keys == the walker\'s rids for the ancestor file; own-half == own file; 7 keys, every stamped key minted, no cross-file key', sorted(wc.minted(CHILD)) === sorted(C_RIDS) && sorted(wc.minted(PARENT)) === sorted(P_RIDS) && wc.mm._ledgerKeys.length === 7 && wc.mm.messages.filter((m) => m.meta?.requestId).every((m) => wc.mm._ledgerKeys.some((k) => k.rid === m.meta.requestId)), JSON.stringify({ c: wc.minted(CHILD), p: wc.minted(PARENT), s: wc.s }));
+  ok('wrapper chain (whole-file ancestor): ancestor-half minted keys == the walker\'s rids for the ancestor file; own-half == own file; 7 keys, every stamped key minted, no cross-file key', sorted(wc.minted(CHILD)) === sorted(C_RIDS) && sorted(wc.minted(PARENT)) === sorted(P_RIDS) && wc.mm._ledgerKeys.length === 7 && verdictOf(wc.mm.messages.filter((m) => m.meta?.requestId).every((m) => wc.mm._ledgerKeys.some((k) => k.rid === m.meta.requestId))), JSON.stringify({ c: wc.minted(CHILD), p: wc.minted(PARENT), s: wc.s }));
   // ③ a gap slab / tail-only read of the child file ALONE (no provenance tags — the reader's id is the default)
   const bareChild = new CodexMessageManager('gap', { threadId: CHILD });
   for (const line of fs.readFileSync(path.join(cxDir, fs.readdirSync(cxDir).find((f) => f.includes(CHILD))), 'utf8').split('\n')) { if (line) bareChild._processRecord(JSON.parse(line), false); }
-  ok('provenance-less records (gap slab / tail-only read) key by the reader\'s default id — the child file alone mints exactly the walker\'s child rids', sorted(bareChild._ledgerKeys.map((k) => k.rid)) === sorted(C_RIDS) && bareChild._ledgerKeys.every((k) => k.tid === CHILD), JSON.stringify(bareChild._ledgerKeys));
+  ok('provenance-less records (gap slab / tail-only read) key by the reader\'s default id — the child file alone mints exactly the walker\'s child rids', sorted(bareChild._ledgerKeys.map((k) => k.rid)) === sorted(C_RIDS) && verdictOf(bareChild._ledgerKeys.every((k) => k.tid === CHILD)), JSON.stringify(bareChild._ledgerKeys));
   fs.rmSync(home, { recursive: true, force: true });
 }
 
@@ -663,7 +663,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     { timestamp: '2026-04-14T10:22:36.550Z', type: 'event_msg', payload: { type: 'web_search_end', call_id: 'ws_0a7dc088f2d154ff0169de156303b4819aab594cfac5296bc7', query: "'JSON output' in https://developers.example.org/cli", action: { type: 'find_in_page', url: 'https://developers.example.org/cli', pattern: 'JSON output' } } },
   ]);
   const cards = msgs.filter((m) => m.role === 'tool');
-  ok('a rollout with web_search_end ONLY (0.153) rebuilds every search as a card (it rendered none)', cards.length === 3 && cards.every((m) => m.collapseKind === 'search' && m.status === 'complete' && m.toolStatus === 'ok'), JSON.stringify(cards.map((m) => [m.collapseKind, m.status])));
+  ok('a rollout with web_search_end ONLY (0.153) rebuilds every search as a card (it rendered none)', cards.length === 3 && verdictOf(cards.every((m) => m.collapseKind === 'search' && m.status === 'complete' && m.toolStatus === 'ok')), JSON.stringify(cards.map((m) => [m.collapseKind, m.status])));
   const s0 = cards[0]?.content?.[0];
   ok('search card input carries the final query + action', s0?.input?.query === 'site:example.org interactive learning math' && s0?.input?.action?.type === 'search' && s0.input.action.queries.length === 2, JSON.stringify(s0?.input));
   ok('results render as "title — url\\nsnippet" blocks (whitespace collapsed), not raw JSON', s0?.output === 'What are Course and Unit Mastery? – Help Center — https://support.example.org/hc/en-us/articles/1\nThe overall fraction of mastery points for that course that you have achieved. ... We hope\n\nHow do Course Levels work? – Help Center — https://support.example.org/hc/en-us/articles/2\nLearn more about Mastery and Proficiency here.', JSON.stringify(s0?.output));
@@ -682,8 +682,8 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   live.processLive({ timestamp: '2026-09-06T00:00:01.050Z', type: 'event_msg', payload: { ...end } });
   const liveCards = live.messages.filter((m) => m.role === 'tool');
   const lb = liveCards[0]?.content?.[0];
-  ok('live: web_search_end (wrapper) + its rollout twin = still ONE card, complete, query merged into the input, results rendered', liveCards.length === 1 && liveCards[0].status === 'complete' && lb?.input?.query === 'vibespace acp' && lb?.input?.action?.type === 'search' && /Help Center — https:/.test(lb?.output || ''), JSON.stringify([liveCards.length, lb?.input, lb?.output]));
-  ok('live: ops = one create + edits on the SAME id (never a second create)', ops.filter((o) => o.op === 'create').length === 1 && ops.filter((o) => o.op === 'edit').every((o) => o.id === liveCards[0].id), JSON.stringify(ops.map((o) => o.op + ':' + o.id)));
+  ok('live: web_search_end (wrapper) + its rollout twin = still ONE card, complete, query merged into the input, results rendered', liveCards.length === 1 && liveCards[0].status === 'complete' && lb?.input?.query === 'vibespace acp' && lb?.input?.action?.type === 'search' && verdictOf(/Help Center — https:/.test(lb?.output || '')), JSON.stringify([liveCards.length, lb?.input, lb?.output]));
+  ok('live: ops = one create + edits on the SAME id (never a second create)', ops.filter((o) => o.op === 'create').length === 1 && verdictOf(ops.filter((o) => o.op === 'edit').every((o) => o.id === liveCards[0].id)), JSON.stringify(ops.map((o) => o.op + ':' + o.id)));
   // begin (not persisted by codex; live-stream tolerance): unknown call → pending card; known → query patch, still pending
   const beg = new CodexMessageManager('ws3');
   beg.processLive({ timestamp: '2026-09-06T00:00:00.000Z', type: 'event_msg', payload: { type: 'web_search_begin', call_id: 'exec-9', query: 'early q' } });
@@ -719,7 +719,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok('…and in the reverse order: the end adopts the call\'s card (one card, results rendered)', rc.length === 1 && rc[0].content[0].output === 'opened https://x.example/p\n\nP — https://x.example/p\nbody', JSON.stringify(rc.map((m) => m.content[0].output)));
   // wrapper: the completion path is codex's OWN shape; the empty-stub started record is the pending card
   const wr = require('node:fs').readFileSync(REPO + '/data/bin/codex-chat-wrapper.js', 'utf8');
-  ok("wrapper records item/completed webSearch as event_msg web_search_end {call_id, query, action, results} — never a function_call_output of raw JSON", /if \(type === 'webSearch'\) \{[\s\S]{0,1400}emitTaskEvent\('web_search_end', ev\)/.test(wr) && !/type === 'mcpToolCall' \|\| type === 'dynamicToolCall' \|\| type === 'webSearch'/.test(wr));
+  ok("wrapper records item/completed webSearch as event_msg web_search_end {call_id, query, action, results} — never a function_call_output of raw JSON", gateOf(/if \(type === 'webSearch'\) \{[\s\S]{0,1400}emitTaskEvent\('web_search_end', ev\)/.test(wr)) && !/type === 'mcpToolCall' \|\| type === 'dynamicToolCall' \|\| type === 'webSearch'/.test(wr));
 }
 
 // ── ④ the INSTALLED CLI (0.153.4) writes NONE of the above: a search persists
@@ -744,13 +744,13 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const mm = new CodexMessageManager('ws0153');
   const msgs = mm.convertHistory([F.search, F.other, F.openPage, F.findInPage, F.empty]);
   const cards = msgs.filter((m) => m.role === 'tool');
-  ok('0.153.4: every Extension web.search item_completed rebuilds as a complete search card (it rendered NONE)', cards.length === 5 && cards.every((m) => m.collapseKind === 'search' && m.status === 'complete' && m.toolStatus === 'ok'), JSON.stringify(cards.map((m) => [m.collapseKind, m.status])));
+  ok('0.153.4: every Extension web.search item_completed rebuilds as a complete search card (it rendered NONE)', cards.length === 5 && verdictOf(cards.every((m) => m.collapseKind === 'search' && m.status === 'complete' && m.toolStatus === 'ok')), JSON.stringify(cards.map((m) => [m.collapseKind, m.status])));
   const c0 = cards[0]?.content?.[0];
-  ok('the card is keyed by the Extension item id (exec-…) with the final query + the v2 action OBJECT in its input', c0?.toolCallId === 'exec-56d2e923-6249-4d3e-8b7b-705f745169ab' && c0.input.query.startsWith('site:www.example1.org technical') && c0.input.action?.type === 'search' && c0.input.action.queries.length === 4, JSON.stringify(c0?.input));
-  ok('results render as title — url / snippet blocks', c0?.output.startsWith('eSprinter | Mercedes-Benz Vans — https://www.example5.org/en/esprinter\non a 2025 eSprinter Cargo Van. ... Whether') && c0.output.split('\n\n').length === 3, JSON.stringify(c0?.output));
-  ok("action {type:'other'} (query '', real record): no head, the page results still render", cards[1]?.content?.[0]?.output.startsWith('EV Range & Batteries | Ram Electric — https://www.example7.org/electric/range-and-batteries.html\nTotal lines: 99'), JSON.stringify(cards[1]?.content?.[0]?.output));
+  ok('the card is keyed by the Extension item id (exec-…) with the final query + the v2 action OBJECT in its input', c0?.toolCallId === 'exec-56d2e923-6249-4d3e-8b7b-705f745169ab' && gateOf(c0.input.query.startsWith('site:www.example1.org technical')) && c0.input.action?.type === 'search' && c0.input.action.queries.length === 4, JSON.stringify(c0?.input));
+  ok('results render as title — url / snippet blocks', gateOf(c0?.output.startsWith('eSprinter | Mercedes-Benz Vans — https://www.example5.org/en/esprinter\non a 2025 eSprinter Cargo Van. ... Whether')) && c0.output.split('\n\n').length === 3, JSON.stringify(c0?.output));
+  ok("action {type:'other'} (query '', real record): no head, the page results still render", verdictOf(cards[1]?.content?.[0]?.output.startsWith('EV Range & Batteries | Ram Electric — https://www.example7.org/electric/range-and-batteries.html\nTotal lines: 99')), JSON.stringify(cards[1]?.content?.[0]?.output));
   ok("v2 camelCase openPage → 'opened <url>' head + results", cards[2]?.content?.[0]?.output === 'opened https://www.example9.org/shop\n\nShop Infinity Showers — The Infinity Shower — https://www.example9.org/shop\nTotal lines: 217\n\nResource Center — The Infinity Shower — https://www.example9.org/care\nTotal lines: 273', JSON.stringify(cards[2]?.content?.[0]?.output));
-  ok("v2 findInPage with url:null → \"found '<pattern>'\" (no fake location) + results", cards[3]?.content?.[0]?.output.startsWith("found 'openable window'\n\nwww.example10.org — https://www.example10.org/documents/"), JSON.stringify(cards[3]?.content?.[0]?.output));
+  ok("v2 findInPage with url:null → \"found '<pattern>'\" (no fake location) + results", verdictOf(cards[3]?.content?.[0]?.output.startsWith("found 'openable window'\n\nwww.example10.org — https://www.example10.org/documents/")), JSON.stringify(cards[3]?.content?.[0]?.output));
   ok("results: [] (real record) → 'no results' — the ONLY shape that supports the claim", cards[4]?.content?.[0]?.output === 'no results', JSON.stringify(cards[4]?.content?.[0]?.output));
   ok('no system card / no unknown-record path for the handled kinds', !msgs.some((m) => m.role === 'system'));
   // live + rollout = ONE card under the SAME exec-… id: wrapper function_call at item/started (empty stub),
@@ -763,7 +763,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   live.processLive({ timestamp: '2026-09-05T17:58:19.544Z', type: 'event_msg', payload: { type: 'web_search_end', call_id: oid, query: F.openPage.payload.item.query, action: F.openPage.payload.item.action, results: F.openPage.payload.item.results } });
   live.processLive(F.openPage);
   const lc = live.messages.filter((m) => m.role === 'tool');
-  ok('live wrapper end + the rollout Extension copy = ONE complete card (one create, edits on the same id), opened-head rendered', lc.length === 1 && lc[0].status === 'complete' && lc[0].content[0].output.startsWith('opened https://www.example9.org/shop') && ops.filter((o) => o.op === 'create').length === 1 && ops.filter((o) => o.op === 'edit').every((o) => o.id === lc[0].id), JSON.stringify([lc.length, ops.map((o) => o.op)]));
+  ok('live wrapper end + the rollout Extension copy = ONE complete card (one create, edits on the same id), opened-head rendered', lc.length === 1 && lc[0].status === 'complete' && gateOf(lc[0].content[0].output.startsWith('opened https://www.example9.org/shop')) && ops.filter((o) => o.op === 'create').length === 1 && verdictOf(ops.filter((o) => o.op === 'edit').every((o) => o.id === lc[0].id)), JSON.stringify([lc.length, ops.map((o) => o.op)]));
   // unknown Extension kinds: telemetry ONCE per kind (the generic skip swallowed them silently); known kinds never.
   // 'web.sleep' is SYNTHETIC — the census of all 25 local 0.153.4 rollouts has exactly TWO Extension kinds
   // (web.search 245, image_gen.generation 3), so an unseen kind is the negative control for the next one upstream adds.
@@ -775,9 +775,9 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   // 2.369.120: an unknown kind is the fall-back "Unknown event" card (owner: 未知事件作为兜底) — one card PER RECORD (two web.sleep records ⇒ two cards), telemetry still ONCE per kind
   ok("an unknown Extension kind fires 'codex-unknown-record:item_completed:Extension:<kind>' ONCE per kind and renders one Unknown event card per record; web.search / image_gen / ImageView never fire it", names.filter((n) => n === 'codex-unknown-record:item_completed:Extension:web.sleep').length === 1 && !names.some((n) => /web\.search|image_gen|ImageView/.test(n)) && u.messages.filter((m) => m.role === 'system' && m.noticeKind === 'unknown-record').length === 2 && u.messages.filter((m) => m.role === 'system').length === 2, JSON.stringify([names, u.messages.map((m) => m.role)]));
   const ig = u.messages.find((m) => m.content?.[0]?.toolCallId === F.imageGen.payload.item.id);
-  ok("Extension image_gen.generation (0.153.4 persists it nowhere else) → the image_gen card: prompt in, status + saved path out, the 3 MB base64 NEVER copied", ig && ig.status === 'complete' && ig.collapseKind === null && ig.content[0].input.prompt.startsWith('Use case: stylized-concept') && ig.content[0].output === 'status: completed\nsaved /home/user/.codex/generated_images/01a0aaaa-0000-7000-8000-000000000001/exec-187fe7b0-73fc-493a-95f8-0c4a10c9d6e4.png' && !JSON.stringify(ig).includes('base64'), JSON.stringify(ig?.content));
+  ok("Extension image_gen.generation (0.153.4 persists it nowhere else) → the image_gen card: prompt in, status + saved path out, the 3 MB base64 NEVER copied", gateOf(ig) && ig.status === 'complete' && ig.collapseKind === null && gateOf(ig.content[0].input.prompt.startsWith('Use case: stylized-concept')) && ig.content[0].output === 'status: completed\nsaved /home/user/.codex/generated_images/01a0aaaa-0000-7000-8000-000000000001/exec-187fe7b0-73fc-493a-95f8-0c4a10c9d6e4.png' && !JSON.stringify(ig).includes('base64'), JSON.stringify(ig?.content));
   const iv = u.messages.find((m) => m.content?.[0]?.toolCallId === F.imageView.payload.item.id);
-  ok("ImageView item_completed (no view_image function_call in any 0.153.4 rollout) → the view_image card path, file:// stripped", iv && iv.status === 'complete' && iv.collapseKind === 'image' && iv.content[0].output === 'viewed /home/user/workspace/project/orbiter-preview.png' && iv.content[0].input.path === '/home/user/workspace/project/orbiter-preview.png', JSON.stringify(iv?.content));
+  ok("ImageView item_completed (no view_image function_call in any 0.153.4 rollout) → the view_image card path, file:// stripped", gateOf(iv) && iv.status === 'complete' && iv.collapseKind === 'image' && iv.content[0].output === 'viewed /home/user/workspace/project/orbiter-preview.png' && iv.content[0].input.path === '/home/user/workspace/project/orbiter-preview.png', JSON.stringify(iv?.content));
   // ── SubAgentActivity: 258 records in the same 25 rollouts (started 18 ·
   // interacted 214 · completed 32, snapshot 2026-09-06). 232 of them carry the
   // id of the CALL that caused them (started → spawn_agent, interacted →
@@ -805,8 +805,8 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok('0.153.4: the TWINNED sub-agent records (started ↔ spawn_agent, interacted ↔ send_message) add NO row of their own — their call is the row', saRows.filter((r) => r.dir === 'spawn').length === 1 && saRows.filter((r) => r.dir === 'out').length === 1 && !saRows.some((r) => r.dir === 'activity' && (r.kind === 'started' || r.kind === 'interacted')), JSON.stringify(saRows));
   ok('…yet both taught the map: status().subagents holds BOTH children (click-through never depends on drawing a row)', sa.status().subagents['/root/platform_geometry'] === '01a072b1-186b-7711-8176-817d3f6d0fee' && sa.status().subagents['/root/water_waste'] === '01a072b1-3025-79c2-b6d3-fa4acfa9f71a', JSON.stringify(sa.status().subagents));
   const doneRow = saRows.find((r) => r.dir === 'activity');
-  ok("…and the kind:'completed' record (id `subagent-completed-<uuid>`, twinning NOTHING) renders the one lifecycle row it used to be silent about", doneRow && doneRow.kind === 'completed' && doneRow.agentName === 'platform_geometry' && doneRow.threadId === '01a072b1-186b-7711-8176-817d3f6d0fee', JSON.stringify(doneRow));
-  ok("every collab message folds under 'agent' and NO standalone Sub-agent card survives the merge", saTools.length > 0 && saTools.every((m) => m.collapseKind === 'agent' && m.collab) && !saTools.some((m) => String(m.content[0].toolCallId || '').startsWith('subagent:')), JSON.stringify(saTools.map((m) => [m.toolName, m.content[0].toolCallId, m.collapseKind])));
+  ok("…and the kind:'completed' record (id `subagent-completed-<uuid>`, twinning NOTHING) renders the one lifecycle row it used to be silent about", gateOf(doneRow) && doneRow.kind === 'completed' && doneRow.agentName === 'platform_geometry' && doneRow.threadId === '01a072b1-186b-7711-8176-817d3f6d0fee', JSON.stringify(doneRow));
+  ok("every collab message folds under 'agent' and NO standalone Sub-agent card survives the merge", saTools.length > 0 && gateOf(saTools.every((m) => m.collapseKind === 'agent' && m.collab)) && !saTools.some((m) => String(m.content[0].toolCallId || '').startsWith('subagent:')), JSON.stringify(saTools.map((m) => [m.toolName, m.content[0].toolCallId, m.collapseKind])));
   // 0.149.1 persists the SAME facts as standalone sub_agent_activity events.
   // SYNTHETIC repetition (the 0.149.1 corpus has 79 (file, thread) pairs and NOT
   // ONE repeated 'started' — an old-vs-new replay of all 15 rollouts is
@@ -818,7 +818,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const repRows = repm.flatMap((m) => m.collab?.rows || []);
   // 0.149.1 has no collab function_call for these ids in this cut, so each KIND
   // draws its row — but a REPEATED kind never does (the (thread, kind) key).
-  ok("a repeated 'started' for one sub-agent thread is idempotent: one row per (thread, kind), coalesced into ONE message", repm.length === 1 && repRows.length === 3 && repRows.every((r) => r.dir === 'activity') && repRows.map((r) => r.kind).join(',') === 'started,interacted,interrupted', JSON.stringify(repRows));
+  ok("a repeated 'started' for one sub-agent thread is idempotent: one row per (thread, kind), coalesced into ONE message", repm.length === 1 && repRows.length === 3 && gateOf(repRows.every((r) => r.dir === 'activity')) && repRows.map((r) => r.kind).join(',') === 'started,interacted,interrupted', JSON.stringify(repRows));
   // an unrecognised TOP-LEVEL item.type: a breadcrumb, ONCE per type — never a
   // silent skip (the whole reason 245 searches were invisible). 'FutureThing' is
   // SYNTHETIC: the corpus has exactly the 10 types in the census comment.
@@ -832,10 +832,10 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ]);
   global.__vsEvent = prevEv2;
   ok("an unknown TOP-LEVEL item.type fires 'codex-unknown-record:item_completed:<type>' ONCE per type and renders one Unknown event card per record (2.369.120 — a silent default here was the invisible-record class)", names2.filter((n) => n === 'codex-unknown-record:item_completed:FutureThing').length === 1 && !unm.some((m) => m.role === 'tool') && unm.filter((m) => m.role === 'system' && m.noticeKind === 'unknown-record').length === 2 && unm.filter((m) => m.role === 'system').length === 2, JSON.stringify([names2, unm.map((m) => m.role)]));
-  ok('…and an ALLOWLISTED type (rendered from its own record, or ContextCompaction) is silent WITHOUT telemetry — the breadcrumb means "never seen", not "not carded"', !names2.some((n) => /ContextCompaction|CommandExecution/.test(n)) && CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES.has('ContextCompaction') && CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES.has('CommandExecution'), JSON.stringify(names2));
+  ok('…and an ALLOWLISTED type (rendered from its own record, or ContextCompaction) is silent WITHOUT telemetry — the breadcrumb means "never seen", not "not carded"', !names2.some((n) => /ContextCompaction|CommandExecution/.test(n)) && gateOf(CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES.has('ContextCompaction')) && verdictOf(CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES.has('CommandExecution')), JSON.stringify(names2));
   ok('the skip allowlist is exactly the census list (a new twin type must be added deliberately)', JSON.stringify([...CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES].sort()) === JSON.stringify(['AgentMessage', 'CollabAgentToolCall', 'CommandExecution', 'ContextCompaction', 'FileChange', 'Reasoning', 'UserMessage']), JSON.stringify([...CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES]));
   const cm = require('node:fs').readFileSync(REPO + '/src/codex-message-manager.js', 'utf8');
-  ok('item_completed stays in the exported generic skip set (test-codex-0153 audit) but is DISPATCHED before it', CodexMessageManager.SKIPPED_EVENT_TYPES.has('item_completed') && /if \(type === 'item_completed'\) return this\._processItemCompleted\(event, emit\);[\s\S]*if \(SKIPPED_EVENT_TYPES\.has\(type\)\) return;/.test(cm));
+  ok('item_completed stays in the exported generic skip set (test-codex-0153 audit) but is DISPATCHED before it', gateOf(CodexMessageManager.SKIPPED_EVENT_TYPES.has('item_completed')) && verdictOf(/if \(type === 'item_completed'\) return this\._processItemCompleted\(event, emit\);[\s\S]*if \(SKIPPED_EVENT_TYPES\.has\(type\)\) return;/.test(cm)));
 }
 
 // ── ⑤ 0.120.0 / 0.125.0 twin pairing on REAL sequences (verifier: base 59 cards,
@@ -857,8 +857,8 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     { timestamp: '2026-04-14T23:13:50.402Z', type: 'response_item', payload: { type: 'web_search_call', status: 'completed' } },
   ]);
   const tc = tm.filter((m) => m.role === 'tool');
-  ok("0.120.0: an end with action {type:'other'} + its action-less web_search_call twin = ONE card each (3 pairs → 3 cards, not 6)", tc.length === 3 && tc.every((m) => m.status === 'complete' && m.collapseKind === 'search' && m.content[0].toolCallId.startsWith('ws_0b4984ba')), JSON.stringify(tc.map((m) => [m.content[0].toolCallId, m.content[0].input, m.content[0].output])));
-  ok("…and none of them claims 'no results' or renders the owner's empty {\"query\":\"\",\"action\":null} card", tc.every((m) => m.content[0].output === 'status: completed' && m.content[0].input.action?.type === 'other'), JSON.stringify(tc.map((m) => m.content[0].output)));
+  ok("0.120.0: an end with action {type:'other'} + its action-less web_search_call twin = ONE card each (3 pairs → 3 cards, not 6)", tc.length === 3 && verdictOf(tc.every((m) => m.status === 'complete' && m.collapseKind === 'search' && m.content[0].toolCallId.startsWith('ws_0b4984ba'))), JSON.stringify(tc.map((m) => [m.content[0].toolCallId, m.content[0].input, m.content[0].output])));
+  ok("…and none of them claims 'no results' or renders the owner's empty {\"query\":\"\",\"action\":null} card", verdictOf(tc.every((m) => m.content[0].output === 'status: completed' && m.content[0].input.action?.type === 'other')), JSON.stringify(tc.map((m) => m.content[0].output)));
   // an orphan action-less call with NO end on the previous line still renders (rollout-2026-04-14T17-37-37 line 598, 0.120.0)
   const orphan = new CodexMessageManager('ws0120o');
   const om = orphan.convertHistory([
@@ -890,9 +890,9 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     const m = new CodexMessageManager('ws' + r.cli_version);
     const c = m.convertHistory(recs).filter((x) => x.role === 'tool');
     ok(`${r.file.slice(0, 27)} (cli_version ${r.cli_version}): ${r.ends} ends + ${r.calls} calls, ${r.adjacentTwins} adjacent twins → ${r.expectedCards} cards`, r.tokens.length === r.ends + r.calls && c.length === r.expectedCards, `${c.length} cards from ${recs.length} records`);
-    ok(`…no card on that file claims 'no results' (0.120-0.130 never persist results) and every card is a complete search`, !c.some((x) => x.content[0].output === 'no results') && c.every((x) => x.status === 'complete' && x.collapseKind === 'search'), JSON.stringify(c.filter((x) => x.content[0].output === 'no results').length));
+    ok(`…no card on that file claims 'no results' (0.120-0.130 never persist results) and every card is a complete search`, !c.some((x) => x.content[0].output === 'no results') && verdictOf(c.every((x) => x.status === 'complete' && x.collapseKind === 'search')), JSON.stringify(c.filter((x) => x.content[0].output === 'no results').length));
   }
-  ok('the 0.125.0 pattern is the hard one: 96 ORPHAN calls first (some identical in a row), then 104 end+call twins', pat.rollouts[1].tokens.slice(0, 96).every((t) => t.startsWith('C')) && pat.rollouts[1].tokens[96].startsWith('E'));
+  ok('the 0.125.0 pattern is the hard one: 96 ORPHAN calls first (some identical in a row), then 104 end+call twins', gateOf(pat.rollouts[1].tokens.slice(0, 96).every((t) => t.startsWith('C'))) && verdictOf(pat.rollouts[1].tokens[96].startsWith('E')));
   // 0.130.0 is the mirror shape — 12 ORPHAN ENDS inside the window (an end whose next
   // search record is another end): the slot must be overwritten, never left to pair a
   // later call with a stale end (whole file: 1524 ends + 1324 calls ⇒ 1524 cards)
@@ -917,7 +917,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const tools = msgs.filter((m) => m.role === 'tool');
   ok('the rollout triple (call + engine event + output) is ONE complete view_image card in the image fold kind', tools.filter((m) => m.toolCallId === 'call_C9Wp').length === 1 && tools[0].status === 'complete' && tools[0].collapseKind === 'image' && tools[0].content[0].input.path === '/w/artifacts/bench.png', JSON.stringify(tools.map((m) => [m.toolCallId, m.status])));
   ok('the input_image output block is lifted to {mediaType, bytes} — no base64 in the card (2.369.35 law, codex twin)', tools[0].content[0].images?.[0]?.mediaType === 'image/png' && tools[0].content[0].images[0].bytes === 9000 && !JSON.stringify(tools[0]).includes(b64.slice(0, 32)) && tools[0].content[0].output === '[image image/png · 9 KB]', tools[0].content[0].output);
-  ok('an engine event with no call pair (history without the wrapper stub) still becomes a complete card', tools.some((m) => m.toolCallId === 'call_orphan' && m.status === 'complete' && m.content[0].input.path === '/w/orphan.png'));
+  ok('an engine event with no call pair (history without the wrapper stub) still becomes a complete card', verdictOf(tools.some((m) => m.toolCallId === 'call_orphan' && m.status === 'complete' && m.content[0].input.path === '/w/orphan.png')));
   ok('view_image_tool_call is routed, not skipped', !CodexMessageManager.SKIPPED_EVENT_TYPES.has('view_image_tool_call'));}
 
 // ── thread_rolled_back: a rollback made from the codex TUI (design §2.10/§3.2)
@@ -961,10 +961,10 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     JSON.stringify(after.turnMap().map((e) => e.preview)));
   ok('…and NOTHING was spliced: the messages are still there, marked (the virtual window’s indices are load-bearing)',
     after.total === after.messages.length && after.messages.filter((m) => m.rewound === 'rollback').length >= 2
-    && JSON.stringify(after.messages).includes('question 3'), String(after.messages.filter((m) => m.rewound).length));
+    && verdictOf(JSON.stringify(after.messages).includes('question 3')), String(after.messages.filter((m) => m.rewound).length));
   const notice = after.messages.find((m) => m.noticeKind === 'rewound');
   ok('…the transcript SAYS it happened, with the numbers the renderer localizes from',
-    notice && notice.role === 'system' && notice.content[0].rewindData.numTurns === 1 && notice.content[0].rewindData.harness === 'codex' && /Rolled back 1 turn\b/.test(notice.content[0].text), JSON.stringify(notice?.content?.[0]));
+    gateOf(notice) && notice.role === 'system' && notice.content[0].rewindData.numTurns === 1 && notice.content[0].rewindData.harness === 'codex' && verdictOf(/Rolled back 1 turn\b/.test(notice.content[0].text)), JSON.stringify(notice?.content?.[0]));
 
   // LIVE stream = the same handler (the record has one shape, not two).
   const liveMM = new CodexMessageManager('t-rb-live');
@@ -997,4 +997,4 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

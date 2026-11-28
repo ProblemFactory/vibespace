@@ -21,7 +21,7 @@ const IA = require(REPO + '/src/installed-apps.js');
 const MD = require(REPO + '/src/machine-desktop-model.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const J = (o) => JSON.stringify(o);
 
@@ -47,7 +47,7 @@ try { w = IA.parseWindowsListing(WIN_DUMP, { now: 1000 }); ok(true, 'a dump with
 const byName = (n) => w.rows.filter((r) => r.name === n);
 const jasp = byName('JASP');
 ok(jasp.length === 1 && jasp[0].launch === 'start "" "C:\\Program Files\\JASP\\JASP.exe"' && jasp[0].source === 'start-menu' && jasp[0].seenAt === 1000, 'JASP: ONE row from its Start Menu shortcut, launch `start "" "C:\\Program Files\\JASP\\JASP.exe"` (its Uninstall key names the same exe — deduplicated)', jasp);
-ok(MD.desktopRunPlan('win32', jasp[0] && jasp[0].launch).ok, 'the run door (desktopRunPlan) accepts JASP\'s launch line as is');
+ok(verdictOf(MD.desktopRunPlan('win32', jasp[0] && jasp[0].launch).ok), 'the run door (desktopRunPlan) accepts JASP\'s launch line as is');
 ok(!w.rows.some((r) => /JASP 0\.98/.test(r.name)), 'the Uninstall key of a program the Start Menu lists adds no second row');
 const work = byName('Chrome (Work)');
 ok(work.length === 1 && work[0].launch === 'start "" "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --profile-directory="Profile 1"', 'a .lnk WITH arguments keeps them in its launch line (another program than the plain shortcut)', work);
@@ -80,12 +80,12 @@ const mac = IA.parseMacListing([
   { path: '/Applications/notes.txt', plist: null }, null, { path: 5 }, { path: '/Applications/JASP.app/', plist: null },
 ], { now: 7 });
 const mj = mac.rows.filter((r) => r.name === 'JASP');
-ok(mj.length === 2 && mj.some((r) => r.launch === 'open -a "JASP"') && mj.some((r) => r.launch === 'open -a "/Users/m/Applications/JASP.app"') && mj.every((r) => r.source === 'applications' && r.seenAt === 7), 'JASP.app ⇒ `open -a "JASP"`; a second bundle of the same name opens by its path; the same bundle twice lists once', mj);
+ok(mj.length === 2 && gateOf(mj.some((r) => r.launch === 'open -a "JASP"')) && gateOf(mj.some((r) => r.launch === 'open -a "/Users/m/Applications/JASP.app"')) && verdictOf(mj.every((r) => r.source === 'applications' && r.seenAt === 7)), 'JASP.app ⇒ `open -a "JASP"`; a second bundle of the same name opens by its path; the same bundle twice lists once', mj);
 const q = mac.rows.find((r) => r.name === quoted);
-ok(q && MD.desktopRunPlan('darwin', q.launch).ok, 'a name with quotes, $, a backquote and a backslash is offered (the run door accepts it)', q);
+ok(gateOf(q) && verdictOf(MD.desktopRunPlan('darwin', q.launch).ok), 'a name with quotes, $, a backquote and a backslash is offered (the run door accepts it)', q);
 const echoed = q ? spawnSync('/bin/sh', ['-c', q.launch.replace(/^open -a /, 'printf %s ')], { encoding: 'utf8' }).stdout : null;
 ok(echoed === quoted, 'a REAL sh reads the quoted name back character for character (nothing expands, nothing splits)', { echoed });
-ok(!mac.rows.some((r) => r.name === 'Helper Agent') && mac.rows.some((r) => r.name === 'Binary') && !mac.rows.some((r) => /notes/.test(r.name)), 'a background-only bundle is not an app; a binary Info.plist still lists by its name; a non-bundle is skipped');
+ok(!mac.rows.some((r) => r.name === 'Helper Agent') && gateOf(mac.rows.some((r) => r.name === 'Binary')) && !mac.rows.some((r) => /notes/.test(r.name)), 'a background-only bundle is not an app; a binary Info.plist still lists by its name; a non-bundle is skipped');
 ok(IA.plistValue(plist('X', '<key>CFBundleName</key><string>A &amp; B</string>'), 'CFBundleName') === 'A & B' && IA.plistValue('bplist00', 'CFBundleName') === null, 'plistValue reads an XML plist, answers null for a binary one');
 
 console.log('§3 the device lister (bounded; one encoded script on Windows; a real walk on a Mac-shaped home)');
@@ -95,13 +95,13 @@ console.log('§3 the device lister (bounded; one encoded script on Windows; a re
   const r = await IA.listInstalled({ platform: 'win32', execFile: fakeExec, env: { PATH: 'x' }, now: () => 5000 });
   const enc = seen[0] && seen[0].args[seen[0].args.length - 1];
   const script = enc ? Buffer.from(enc, 'base64').toString('utf16le') : '';
-  ok(r.ok && r.platform === 'win32' && r.rows.some((x) => x.name === 'JASP') && r.listedAt === 5000, 'win32: the rows of the script\'s output', { ok: r.ok, n: r.rows && r.rows.length });
-  ok(seen.length === 1 && seen[0].file === 'powershell.exe' && seen[0].args.includes('-EncodedCommand') && seen[0].opts.timeout === IA.LIST_BUDGET_MS && seen[0].opts.maxBuffer === IA.LIST_MAX_BYTES && seen[0].opts.windowsHide === true && seen[0].opts.env.PATH === 'x', 'ONE PowerShell, -EncodedCommand, killed at the 20 s budget, stdout bounded, no console window, the daemon\'s spawn env');
-  ok(script === IA.WIN_LIST_SCRIPT && /CommonStartMenu/.test(script) && /'StartMenu'/.test(script) && /WScript\.Shell/.test(script) && (script.match(/\\Uninstall\\\*/g) || []).length === 3 && /WOW6432Node/.test(script) && /HKCU:/.test(script), 'the script reads both Start Menus (.lnk through WScript.Shell) and the three Uninstall keys');
+  ok(gateOf(r.ok) && r.platform === 'win32' && gateOf(r.rows.some((x) => x.name === 'JASP')) && r.listedAt === 5000, 'win32: the rows of the script\'s output', { ok: r.ok, n: r.rows && r.rows.length });
+  ok(seen.length === 1 && seen[0].file === 'powershell.exe' && gateOf(seen[0].args.includes('-EncodedCommand')) && seen[0].opts.timeout === IA.LIST_BUDGET_MS && seen[0].opts.maxBuffer === IA.LIST_MAX_BYTES && seen[0].opts.windowsHide === true && seen[0].opts.env.PATH === 'x', 'ONE PowerShell, -EncodedCommand, killed at the 20 s budget, stdout bounded, no console window, the daemon\'s spawn env');
+  ok(script === IA.WIN_LIST_SCRIPT && gateOf(/CommonStartMenu/.test(script)) && gateOf(/'StartMenu'/.test(script)) && gateOf(/WScript\.Shell/.test(script)) && (script.match(/\\Uninstall\\\*/g) || []).length === 3 && gateOf(/WOW6432Node/.test(script)) && verdictOf(/HKCU:/.test(script)), 'the script reads both Start Menus (.lnk through WScript.Shell) and the three Uninstall keys');
   const slow = await IA.listInstalled({ platform: 'win32', execFile: (f, a, o, cb) => setImmediate(() => cb(Object.assign(new Error('killed'), { killed: true, signal: 'SIGTERM' }), WIN_DUMP.split('\r\n').slice(0, 1).join('\n'), '')) });
-  ok(slow.ok && slow.timedOut === true && slow.rows.length === 1, 'a script past its budget: what it printed is listed, `timedOut` says so');
+  ok(gateOf(slow.ok) && slow.timedOut === true && slow.rows.length === 1, 'a script past its budget: what it printed is listed, `timedOut` says so');
   const dead = await IA.listInstalled({ platform: 'win32', execFile: (f, a, o, cb) => setImmediate(() => cb(new Error('spawn powershell.exe ENOENT'), '', '')) });
-  ok(!dead.ok && dead.code === 'list_failed' && /ENOENT/.test(dead.error), 'no PowerShell ⇒ list_failed by name');
+  ok(!dead.ok && dead.code === 'list_failed' && verdictOf(/ENOENT/.test(dead.error)), 'no PowerShell ⇒ list_failed by name');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iapps-'));
   for (const [rel, exe] of [['Applications/JASP.app', 'JASP'], ['Applications/Utilities/Console Tool.app', 'ct'], ['Applications/Vendor Suite/Vendor Editor.app', 've']]) {
     fs.mkdirSync(path.join(home, rel, 'Contents'), { recursive: true });
@@ -109,7 +109,7 @@ console.log('§3 the device lister (bounded; one encoded script on Windows; a re
   }
   fs.mkdirSync(path.join(home, 'Applications/.hidden.app'), { recursive: true });
   const m = await IA.listInstalled({ platform: 'darwin', home });
-  ok(m.ok && J(m.rows.map((x) => x.name)) === J(['Console Tool', 'JASP', 'Vendor Editor']), 'darwin: ~/Applications walked one folder deep (a vendor folder, Utilities), a dot-folder skipped', m.rows && m.rows.map((x) => x.name));
+  ok(gateOf(m.ok) && J(m.rows.map((x) => x.name)) === J(['Console Tool', 'JASP', 'Vendor Editor']), 'darwin: ~/Applications walked one folder deep (a vendor folder, Utilities), a dot-folder skipped', m.rows && m.rows.map((x) => x.name));
   fs.rmSync(home, { recursive: true, force: true });
   const lin = await IA.listInstalled({ platform: 'linux' });
   ok(!lin.ok && lin.code === 'not_desktop_machine', 'any other platform ⇒ not_desktop_machine by name');
@@ -118,9 +118,9 @@ console.log('§3 the device lister (bounded; one encoded script on Windows; a re
 console.log('§4 the refresh rules + the hub judges the device\'s rows again');
 {
   const T = 1e9, at = (ms) => ({ listedAt: T - ms, rows: [] });
-  ok(IA.listDue(null, 'open', T) && !IA.listDue(at(60e3), 'open', T) && IA.listDue(at(IA.LIST_REFRESH_MS), 'open', T), 'open: never listed or 10 min old ⇒ list; a fresh list is served');
-  ok(IA.listDue(at(1), 'recheck', T) && IA.listDue(at(1), 'install', T), 'Check again / an install through our door ⇒ always listed');
-  ok(!IA.listDue(at(30e3), 'hello', T) && IA.listDue(at(IA.HELLO_FLOOR_MS), 'hello', T) && IA.listDue(null, 'hello', T), 'the daemon\'s hello ⇒ listed unless it listed within a minute (a flapping link)');
+  ok(gateOf(IA.listDue(null, 'open', T)) && !IA.listDue(at(60e3), 'open', T) && verdictOf(IA.listDue(at(IA.LIST_REFRESH_MS), 'open', T)), 'open: never listed or 10 min old ⇒ list; a fresh list is served');
+  ok(gateOf(IA.listDue(at(1), 'recheck', T)) && verdictOf(IA.listDue(at(1), 'install', T)), 'Check again / an install through our door ⇒ always listed');
+  ok(!IA.listDue(at(30e3), 'hello', T) && gateOf(IA.listDue(at(IA.HELLO_FLOOR_MS), 'hello', T)) && verdictOf(IA.listDue(null, 'hello', T)), 'the daemon\'s hello ⇒ listed unless it listed within a minute (a flapping link)');
   const rows = IA.rowsFromDevice('win32', [{ name: 'JASP', launch: 'start "" "C:\\J\\JASP.exe"', source: 'start-menu', seenAt: 1 }, { name: 'Two', launch: 'a\nb', source: 'start-menu' }, { name: 'Odd', launch: 'x', source: 'elsewhere' }, { name: 5, launch: 'x', source: 'uninstall' }, null, { name: 'x'.repeat(400), launch: 'start "" "C:\\x.exe"', source: 'uninstall' }], 77);
   ok(rows.length === 2 && rows[0].seenAt === 77 && rows[1].name.length === 200, 'a device row keeps a string name (≤ 200), a launch the run door accepts, a known source; seenAt = the hub\'s time', rows);
   ok(IA.rowsFromDevice('win32', Array.from({ length: 600 }, (_, i) => ({ name: 'a' + i, launch: `start "" "C:\\a${i}.exe"`, source: 'start-menu' }))).length === IA.INSTALLED_MAX, 'the hub keeps at most 500 rows whatever the device sends');
@@ -131,16 +131,16 @@ const agentdSrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8
 const clientSrc = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
 {
   const caps = (agentdSrc.match(/capabilities: \[([^\]]*)\]/) || [])[1] || '';
-  ok(/'desktop-apps-list'/.test(caps), 'the hello-ack names desktop-apps-list (found by content)');
-  ok(/if \(msg\.op === 'desktop-apps-list'\) \{[\s\S]{0,900}IA\.listInstalled\(\{ platform: process\.platform[\s\S]{0,300}op: 'desktop-apps-list-result', id: msg\.id/.test(agentdSrc), 'the daemon\'s handler runs THE shared lister and answers with the op on the reply');
-  ok(/m\.op === 'desktop-apps-list-result'/.test(clientSrc), 'the client routes the reply by id (the op is in the routing set)');
+  ok(verdictOf(/'desktop-apps-list'/.test(caps)), 'the hello-ack names desktop-apps-list (found by content)');
+  ok(verdictOf(/if \(msg\.op === 'desktop-apps-list'\) \{[\s\S]{0,900}IA\.listInstalled\(\{ platform: process\.platform[\s\S]{0,300}op: 'desktop-apps-list-result', id: msg\.id/.test(agentdSrc)), 'the daemon\'s handler runs THE shared lister and answers with the op on the reply');
+  ok(verdictOf(/m\.op === 'desktop-apps-list-result'/.test(clientSrc)), 'the client routes the reply by id (the op is in the routing set)');
   const methodOf = (src) => { const i = src.indexOf('  async desktopAppsList('); const j = src.indexOf('\n  }\n', i); return i < 0 || j < 0 ? null : (0, eval)(`(${src.slice(i, j + 4).trim().replace(/^async desktopAppsList\(/, 'async function desktopAppsList(')})`); };
   const run = async (fn, caps2) => { const sent = []; const fake = { connect: async () => ({ info: { capabilities: caps2 } }), _request: async (m) => { sent.push(m); return { op: 'desktop-apps-list-result', result: { ok: true, rows: [] } }; } }; let err = null, r = null; try { r = await fn.call(fake, {}); } catch (e) { err = e; } return { sent, err, r }; };
   const real = methodOf(clientSrc);
   const oldA = await run(real, ['probe', 'sysinfo']);
-  ok(oldA.err && oldA.err.code === 'host_needs_daemon' && oldA.sent.length === 0, 'an agent without desktop-apps-list is NEVER asked: host_needs_daemon, no request sent');
+  ok(gateOf(oldA.err) && oldA.err.code === 'host_needs_daemon' && oldA.sent.length === 0, 'an agent without desktop-apps-list is NEVER asked: host_needs_daemon, no request sent');
   const newA = await run(real, ['desktop-apps-list']);
-  ok(!newA.err && newA.sent.length === 1 && newA.sent[0].op === 'desktop-apps-list' && newA.r.ok, 'an agent with it is asked once');
+  ok(!newA.err && newA.sent.length === 1 && newA.sent[0].op === 'desktop-apps-list' && verdictOf(newA.r.ok), 'an agent with it is asked once');
   const noGate = methodOf(clientSrc.replace("if (!conn.info?.capabilities?.includes?.('desktop-apps-list')) { const e = new Error('daemon lacks desktop-apps-list (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }", ''));
   const red = await run(noGate, ['probe']);
   ok(red.sent.length === 1, 'RED CONTROL: the gate removed ⇒ the old agent IS sent the op (an unknown op would hang it)', { sent: red.sent.length });
@@ -166,7 +166,7 @@ const ACC = require(REPO + '/src/server/desktop-access.js');
   const quiet = { log() { }, warn() { } };
   const acc = ACC.create({ hosts, install: false, log: quiet, installedStore: () => store, helloListMs: 0 });
   const a1 = await acc.installedApps('win-a', { why: 'open' });
-  ok(calls === 1 && a1.rows.length === 1 && a1.rows[0].name === 'JASP' && a1.platform === 'win32' && Number.isFinite(a1.listedAt) && store.data['win-a'].rows.length === 1, 'the first open lists the machine; the hub keeps the rows the run door accepts (the bad one dropped) with listedAt', a1);
+  ok(calls === 1 && a1.rows.length === 1 && a1.rows[0].name === 'JASP' && a1.platform === 'win32' && gateOf(Number.isFinite(a1.listedAt)) && store.data['win-a'].rows.length === 1, 'the first open lists the machine; the hub keeps the rows the run door accepts (the bad one dropped) with listedAt', a1);
   await acc.installedApps('win-a', { why: 'open' });
   ok(calls === 1, 'a second open within 10 min is served from the kept list (nothing sent)');
   let release; gate = new Promise((r) => { release = r; });
@@ -184,7 +184,7 @@ const ACC = require(REPO + '/src/server/desktop-access.js');
   const before = calls;
   acc.installedNow('win-a', 'TightVNC Server 2.8.85');
   const pend = store.data['win-a'].rows[0];
-  ok(pend && pend.name === 'TightVNC Server 2.8.85' && pend.pending === true && pend.launch === null && pend.source === 'install', 'an install through our door is on the list AT ONCE (pending, nothing to press)', pend);
+  ok(gateOf(pend) && pend.name === 'TightVNC Server 2.8.85' && pend.pending === true && pend.launch === null && pend.source === 'install', 'an install through our door is on the list AT ONCE (pending, nothing to press)', pend);
   await new Promise((r) => setTimeout(r, 20));
   ok(calls === before + 1 && !store.data['win-a'].rows.some((r) => r.pending), 'then the machine is listed and its own records replace the pending row');
   store.data['win-old'] = { platform: 'win32', rows: [{ name: 'Kept', launch: 'start "" "C:\\k.exe"', source: 'uninstall', seenAt: 1 }], total: 1, truncated: false, listedAt: 1 };
@@ -192,13 +192,13 @@ const ACC = require(REPO + '/src/server/desktop-access.js');
   const old = await acc.installedApps('win-old', { why: 'recheck' });
   ok(old.code === 'host_needs_daemon' && calls === c0 && old.rows.length === 1 && old.rows[0].name === 'Kept', 'an old agent: code host_needs_daemon, NOTHING sent, the list as it was', old);
   const lin = await acc.installedApps('lin-a', { why: 'open' }).then(() => null, (e) => e);
-  ok(lin && lin.code === 'not_desktop_machine' && calls === c0, 'a Linux machine is refused by name (its apps are the launcher\'s), nothing sent');
+  ok(gateOf(lin) && lin.code === 'not_desktop_machine' && calls === c0, 'a Linux machine is refused by name (its apps are the launcher\'s), nothing sent');
   hook('lin-a'); await new Promise((r) => setTimeout(r, 20));
   ok(calls === c0, 'a Linux machine\'s hello lists nothing');
   const gone = await acc.installedApps('nope', { why: 'open' }).then(() => null, (e) => e);
-  ok(gone && gone.code === 'unsupported-host', 'an unknown machine ⇒ unsupported-host by name');
+  ok(gateOf(gone) && gone.code === 'unsupported-host', 'an unknown machine ⇒ unsupported-host by name');
   const loc = await acc.installedApps('local').then(() => null, (e) => e);
-  ok(loc && loc.code === 'not_desktop_machine', 'this machine ⇒ not_desktop_machine (the Apps launcher lists it)');
+  ok(gateOf(loc) && loc.code === 'not_desktop_machine', 'this machine ⇒ not_desktop_machine (the Apps launcher lists it)');
 
   console.log('§6b the keeper keeps the lists in data/desktop-apps-hosts.json (beside the host records)');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iapps-data-'));
@@ -207,11 +207,11 @@ const ACC = require(REPO + '/src/server/desktop-access.js');
   let k = null;
   try { k = K.create({ dataDir, env: () => ({}), broadcast() { }, log: quiet, tickMs: 3600e3 }); } catch (e) { ok(false, 'a keeper on a scratch data dir', e.message); }
   if (k) {
-    ok(k.installedOf('win-a') && k.installedOf('win-a').rows[0].name === 'JASP' && k.installedOf('lin-x') === null, 'a restarted hub reads the kept list back (and a host record is not a list)');
+    ok(gateOf(k.installedOf('win-a')) && k.installedOf('win-a').rows[0].name === 'JASP' && k.installedOf('lin-x') === null, 'a restarted hub reads the kept list back (and a host record is not a list)');
     k.noteInstalled('mac-b', { platform: 'darwin', rows: [], total: 0, truncated: false, listedAt: 9 });
     await k.whenRemoteWritten();   // B-0248 unit 3: the file is the store writer's (off the loop) — on disk once its owed write lands
     const onDisk = JSON.parse(fs.readFileSync(path.join(dataDir, K.REMOTE_FILE), 'utf8'));
-    ok(onDisk.installed['mac-b'].listedAt === 9 && onDisk.installed['win-a'] && onDisk.hosts['lin-x'] && !onDisk.hosts['mac-b'], 'noteInstalled writes the file: the list beside the host records, never a host row');
+    ok(onDisk.installed['mac-b'].listedAt === 9 && gateOf(onDisk.installed['win-a']) && gateOf(onDisk.hosts['lin-x']) && !onDisk.hosts['mac-b'], 'noteInstalled writes the file: the list beside the host records, never a host row');
     try { k.shutdown?.(); k.stopTimers?.(); } catch { /* none */ }
   }
   fs.rmSync(dataDir, { recursive: true, force: true });
@@ -297,7 +297,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   const before = [winB && winB.className, runB && runB.className];
   jaspNode.onclick();
   const input = body.find('machine-desktop-cmd')[0];
-  ok(input.value === JR.launch && input.focused, 'a press fills the command box with the row\'s launch line (the run door judges it on Run…)');
+  ok(input.value === JR.launch && verdictOf(input.focused), 'a press fills the command box with the row\'s launch line (the run door judges it on Run…)');
   // int251 (with machine-app-crop): a press on an installed row picks the run's default the way a preset chip does — JASP's
   // `start "" …` line names a GUI app, so "Run as its own window…" becomes the filled button (an empty box: Run…)
   ok(J(before) === J(['file-tool-btn', 'btn-create']) && winB.className === 'btn-create' && runB.className === 'file-tool-btn', 'a press on an installed row makes "Run as its own window…" the default for its GUI line (as a preset chip does)', [before, winB && winB.className, runB && runB.className]);
@@ -305,7 +305,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   filter.value = 'jas'; filter.oninput();
   ok(rowsNow().length === 1 && rowsNow()[0] === jaspNode, 'the filter narrows by name (the same node)');
   filter.value = 'zzz'; filter.oninput();
-  ok(body.find('machine-apps-list')[0].hidden && body.find('machine-apps-note')[0].textContent === 'Nothing matches “zzz”', 'a filter that matches nothing says so');
+  ok(gateOf(body.find('machine-apps-list')[0].hidden) && body.find('machine-apps-note')[0].textContent === 'Nothing matches “zzz”', 'a filter that matches nothing says so');
   filter.value = ''; filter.oninput();
   ok(rowsNow().length === 2 && rowsNow()[1] === jaspNode, 'clearing the filter brings back the SAME nodes (a filtered-out row is detached, never rebuilt)');
   const groups = body.find('machine-apps-group').map((g) => g.textContent);
@@ -313,24 +313,24 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   answer = { hostId: 'win-a', platform: 'win32', rows: [{ name: 'Blender', launch: 'start "" "C:\\B\\blender.exe"', source: 'start-menu', seenAt: 2 }, ZR, JR], total: 3, truncated: false, listedAt: 2 };
   const checkBtn = body.find('file-tool-btn').find((b) => b.textContent === 'Check again');
   const acts = body.find('desktop-install-actions')[0];
-  ok(acts && J(acts.children.map((b) => b.textContent)) === J(['Stream one window…', 'Install TightVNC Server…', 'Check again', 'RemoteApp settings…']), 'the action row: (a Windows machine, lane stream-p2w-build) Stream one window…, Install…, Check again and (lane remoteapp-r1b) RemoteApp settings… — the CSS rule below keeps each whole');
+  ok(gateOf(acts) && J(acts.children.map((b) => b.textContent)) === J(['Stream one window…', 'Install TightVNC Server…', 'Check again', 'RemoteApp settings…']), 'the action row: (a Windows machine, lane stream-p2w-build) Stream one window…, Install…, Check again and (lane remoteapp-r1b) RemoteApp settings… — the CSS rule below keeps each whole');
   await checkBtn.onclick(); await tick();
   const sinceCheck = asked.slice(asked.lastIndexOf('/api/desktop/machine-desktop/apps?host=win-a&fresh=1'));
-  ok(sinceCheck[0] === '/api/desktop/machine-desktop/apps?host=win-a&fresh=1' && rechecks === 1 && sinceCheck.includes('/api/desktop/machine-desktop/stream/facts?host=win-a&machine=1'), 'Check again re-reads the machine row AND lists its apps again (fresh) — and (lane machine-needs-at-pairing pick 2) reads its ffmpeg again', sinceCheck);
+  ok(sinceCheck[0] === '/api/desktop/machine-desktop/apps?host=win-a&fresh=1' && rechecks === 1 && verdictOf(sinceCheck.includes('/api/desktop/machine-desktop/stream/facts?host=win-a&machine=1')), 'Check again re-reads the machine row AND lists its apps again (fresh) — and (lane machine-needs-at-pairing pick 2) reads its ffmpeg again', sinceCheck);
   ok(J(rowsNow().map((b) => b.firstChild.textContent)) === J(['Blender', '7-Zip', 'JASP']) && rowsNow()[2] === jaspNode, 'a re-list moves the existing row nodes (keyed by the launch line), never rebuilds them');
   answer = { hostId: 'win-a', platform: 'win32', rows: [ZR], total: 1, truncated: false, listedAt: 2, code: 'host_needs_daemon', error: 'x' };
   await checkBtn.onclick(); await tick();
   const note = body.find('machine-apps-note')[0];
-  ok(note.textContent === 'The list needs WIN-DESK1’s VibeSpace agent updated (it updates itself; check again in a minute)' && note.classList.contains('is-bad') && rowsNow().length === 1 && !jaspNode.parent, 'an old agent: the update words, the list as it was; a row gone from the list is removed');
+  ok(note.textContent === 'The list needs WIN-DESK1’s VibeSpace agent updated (it updates itself; check again in a minute)' && gateOf(note.classList.contains('is-bad')) && rowsNow().length === 1 && !jaspNode.parent, 'an old agent: the update words, the list as it was; a row gone from the list is removed');
   const doorSlot = body.find('machine-apps-door')[0], doorBtn = doorSlot && doorSlot.children[0];
-  ok(!!doorBtn && doorBtn.textContent === 'Update its agent…' && String(doorBtn.className).includes('agent-update-door') && doorSlot.parent === note.parent, 'B-bd27 X1: an old agent\'s list draws «Update its agent…» in its own slot beside the note (the note keeps its words)', doorSlot && doorSlot.textContent);
+  ok(!!doorBtn && doorBtn.textContent === 'Update its agent…' && gateOf(String(doorBtn.className).includes('agent-update-door')) && doorSlot.parent === note.parent, 'B-bd27 X1: an old agent\'s list draws «Update its agent…» in its own slot beside the note (the note keeps its words)', doorSlot && doorSlot.textContent);
   answer = { hostId: 'win-a', platform: 'win32', rows: Array.from({ length: 500 }, (_, i) => ({ name: 'A' + i, launch: `start "" "C:\\a${i}.exe"`, source: 'start-menu', seenAt: 3 })), total: 812, truncated: true, listedAt: 3 };
   await checkBtn.onclick(); await tick();
   ok(note.textContent === 'WIN-DESK1 has 812 apps — the first 500 are listed; filter to find one', 'a machine past the cap says how many it has');
-  ok(doorSlot && doorSlot.children.length === 0, 'B-bd27 X1: …and the door leaves with the old agent (the next list)');
+  ok(gateOf(doorSlot) && doorSlot.children.length === 0, 'B-bd27 X1: …and the door leaves with the old agent (the next list)');
   answer = { hostId: 'win-a', platform: 'win32', rows: [{ name: 'TightVNC Server 2.8.85', launch: null, source: 'install', pending: true, seenAt: 4 }], total: 1, truncated: false, listedAt: 4 };
   await checkBtn.onclick(); await tick();
-  ok(rowsNow().length === 1 && rowsNow()[0].disabled && rowsNow()[0].lastChild.textContent === 'just installed — being listed', 'a just-installed (pending) row shows, greyed, until the machine lists it');
+  ok(rowsNow().length === 1 && gateOf(rowsNow()[0].disabled) && rowsNow()[0].lastChild.textContent === 'just installed — being listed', 'a just-installed (pending) row shows, greyed, until the machine lists it');
 
   // lane machine-needs-at-pairing (the owner 2026-11-13: «设置一次：在 dev-… 上安装 TightVNC Server», and no button — the Desktop
   // picker opened this dialog without the `install` callback the Apps dialog handed it). THE OPENERS, derived from the tree: every
@@ -341,8 +341,8 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   const openers = [];
   const walkSrc = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkSrc(p); else if (/\.js$/.test(e.name)) for (const line of fs.readFileSync(path.join(REPO, p), 'utf8').split('\n')) { const mm = /showMachineDesktopDialog\(\w+, \w+, \{(.*)$/.exec(line); if (mm && !/^\s*export function/.test(line)) openers.push({ file: p, text: mm[1], keys: optNames.filter((k) => new RegExp(`\\b${k}:`).test(mm[1])) }); } } };
   walkSrc('src/lib');
-  ok(J(openers.map((o) => o.file).sort()) === J(['src/lib/desktop-app-launcher.js', 'src/lib/desktop-picker.js']) && optNames.length && !optNames.includes('install'), `THE OPENERS (derived): ${openers.map((o) => `${o.file} {${o.keys.join(', ')}}`).join(' · ')} — the dialog takes no install door (its options: ${optNames.join(', ')})`, { openers, optNames });
-  ok(openers.every((o) => !/\binstall:/.test(o.text)), 'no opener hands the dialog an install door — the door is the dialog\'s own');
+  ok(J(openers.map((o) => o.file).sort()) === J(['src/lib/desktop-app-launcher.js', 'src/lib/desktop-picker.js']) && gateOf(optNames.length) && !optNames.includes('install'), `THE OPENERS (derived): ${openers.map((o) => `${o.file} {${o.keys.join(', ')}}`).join(' · ')} — the dialog takes no install door (its options: ${optNames.join(', ')})`, { openers, optNames });
+  ok(verdictOf(openers.every((o) => !/\binstall:/.test(o.text))), 'no opener hands the dialog an install door — the door is the dialog\'s own');
   for (const o of openers) {
     const opts = Object.fromEntries(o.keys.map((k) => [k, k === 'recheck' ? async () => m : () => { }]));
     globalThis.__installs = [];
@@ -353,7 +353,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
     const row = b.find('desktop-install-actions')[0];
     const tv = row && row.children.find((x) => x.textContent === 'Install TightVNC Server…'), mi = b.find('machine-mic-install')[0];
     if (tv) await tv.onclick(); if (mi) await mi.onclick(); await tick(); await tick();
-    ok(tv && mi && J(globalThis.__installs) === J([{ host: 'win-a', what: 'tightvnc' }, { host: 'win-a', what: 'virtual-mic' }]), `opened as ${o.file} opens it: the TightVNC line has «Install TightVNC Server…» and the microphone card «Install a virtual microphone…», each opening the launcher's install dialog`, { tv: !!tv, mi: !!mi, installs: globalThis.__installs, row: row && row.children.map((x) => x.textContent) });
+    ok(gateOf(tv) && gateOf(mi) && J(globalThis.__installs) === J([{ host: 'win-a', what: 'tightvnc' }, { host: 'win-a', what: 'virtual-mic' }]), `opened as ${o.file} opens it: the TightVNC line has «Install TightVNC Server…» and the microphone card «Install a virtual microphone…», each opening the launcher's install dialog`, { tv: !!tv, mi: !!mi, installs: globalThis.__installs, row: row && row.children.map((x) => x.textContent) });
   }
 
   // lane machine-needs-at-pairing pick 2: THE DIALOG'S FFMPEG LINE (read when it opens) — the door only when no ffmpeg passes (主开发's
@@ -365,8 +365,8 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
     const bf = ROOT.children[ROOT.children.length - 1];
     await tick(); await tick(); await tick();
     const line = bf.find('machine-ffmpeg-need')[0], get = line && line.find('machine-ffmpeg-get')[0];
-    if (passes) ok(line && line.style.display === 'none' && !get, 'Q6: a machine whose own ffmpeg passes gets NO ffmpeg line — nothing offered, nothing fetched', line && line.style.display);
-    else ok(line && line.style.display === 'flex' && get && get.textContent === 'Get FFmpeg 9.0.2 (gyan.dev, 115 MB)' && /no publisher signs ffmpeg/i.test(get.title || '') && /none that does/.test(line.textContent), 'no ffmpeg that passes ⇒ the dialog says so, with «Get FFmpeg 9.0.2 (gyan.dev, 115 MB)» on the same line (its title: no publisher signs it; two fixed SHA-256)', line && { d: line.style.display, t: line.textContent });
+    if (passes) ok(gateOf(line) && line.style.display === 'none' && !get, 'Q6: a machine whose own ffmpeg passes gets NO ffmpeg line — nothing offered, nothing fetched', line && line.style.display);
+    else ok(gateOf(line) && line.style.display === 'flex' && gateOf(get) && get.textContent === 'Get FFmpeg 9.0.2 (gyan.dev, 115 MB)' && gateOf(/no publisher signs ffmpeg/i.test(get.title || '')) && verdictOf(/none that does/.test(line.textContent)), 'no ffmpeg that passes ⇒ the dialog says so, with «Get FFmpeg 9.0.2 (gyan.dev, 115 MB)» on the same line (its title: no publisher signs it; two fixed SHA-256)', line && { d: line.style.display, t: line.textContent });
   }
   {
     const mac = { hostId: 'mac-a', label: 'Mac-mini', code: 'no_vnc', setup: 'darwin', desktop: 'vnc-native', selectable: true };
@@ -375,14 +375,14 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
     const bm = ROOT.children[ROOT.children.length - 1];
     await tick(); await tick();
     const sharing = bm.find('machine-settings-open').find((x) => x.dataset.pane === 'sharing');
-    ok(sharing && sharing.textContent === 'Open System Settings' && /General › Sharing/.test(sharing.title), 'a Mac\'s «Set up once … turn on Screen Sharing» line has «Open System Settings» (General › Sharing) on its action row', bm.find('desktop-install-actions')[0] && bm.find('desktop-install-actions')[0].children.map((x) => x.textContent));
+    ok(gateOf(sharing) && sharing.textContent === 'Open System Settings' && verdictOf(/General › Sharing/.test(sharing.title)), 'a Mac\'s «Set up once … turn on Screen Sharing» line has «Open System Settings» (General › Sharing) on its action row', bm.find('desktop-install-actions')[0] && bm.find('desktop-install-actions')[0].children.map((x) => x.textContent));
   }
 
   const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
   const rule = (src) => { const row = /\.desktop-install-actions \{([^}]*)\}/.exec(src); const btn = /\.desktop-install-actions > button \{([^}]*)\}/.exec(src); const icon = /\.desktop-install-actions > \.file-tool-btn \{([^}]*)\}/.exec(src); return !!(row && /flex-wrap:\s*wrap/.test(row[1]) && btn && /flex:\s*none/.test(btn[1]) && /white-space:\s*nowrap/.test(btn[1]) && icon && /width:\s*auto/.test(icon[1])); };
-  ok(rule(css), 'the action row wraps and a button is never narrower than its words (flex: none; white-space: nowrap; the 24 px icon-button class sized by its words there)');
+  ok(verdictOf(rule(css)), 'the action row wraps and a button is never narrower than its words (flex: none; white-space: nowrap; the 24 px icon-button class sized by its words there)');
   ok(!rule('.desktop-install-actions { display: flex; gap: 8px; justify-content: flex-end; }'), 'RED CONTROL: the base rule (no wrap, shrinkable buttons — the owner\'s column of characters) fails it');
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? ', ' + fail + ' failed' : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

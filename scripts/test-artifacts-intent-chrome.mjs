@@ -49,7 +49,7 @@ const BRIEF = path.join(CWD, 'docs/BRIEF.md');
 const REFP = '/var/tmp/vibespace-lanes/wt-referee/out/review.md'; // round 2: a REALISTIC helper's folder (outside the cwd, no home) — the row reads «referee · …/out · 文档»
 const LIVE_SID = '5c3a0000-0000-4000-8000-0000000af0a1';
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -193,8 +193,8 @@ const ROUND2 = `handed: (() => { const x = rows.find((r) => r._afRow && r._afRow
         root: (heads.find((h) => h.dataset.group === ${JSON.stringify('f:i:made::' + CWD)}) || {}).textContent || ''`; // r3: a head is keyed by its DIRECTORY
 const round2 = (lang, p, w) => {
   const docW = lang === 'zh' ? '文档' : 'Document';
-  check(`${lang} ${w}: the hand-over from a helper's folder reads «referee · …/out · ${docW}» — WHO and WHERE, nothing clipped; the whole path on its title (long-press / hover)`, !!p && !!p.handed && p.handed.meta === `referee · …/out · ${docW}` && !p.handed.clipped && p.handed.title.startsWith('\u200e' + REFP), p && p.handed);
-  check(`${lang} ${w}: each README.md sits under the head naming its folder — the BARE name, the meta line without the folder (its helper in view)`, !!p && README.every((n) => p.readmeF.some((x) => x.inFolder && x.name === 'README.md' && x.head.startsWith(n.replace(/\/README\.md$/, '') + ' · ') && x.meta.startsWith(docW + ' · ') && !x.clipped)), p && p.readmeF);
+  check(`${lang} ${w}: the hand-over from a helper's folder reads «referee · …/out · ${docW}» — WHO and WHERE, nothing clipped; the whole path on its title (long-press / hover)`, !!p && !!p.handed && p.handed.meta === `referee · …/out · ${docW}` && !p.handed.clipped && verdictOf(p.handed.title.startsWith('\u200e' + REFP)), p && p.handed);
+  check(`${lang} ${w}: each README.md sits under the head naming its folder — the BARE name, the meta line without the folder (its helper in view)`, !!p && verdictOf(README.every((n) => p.readmeF.some((x) => x.inFolder && x.name === 'README.md' && x.head.startsWith(n.replace(/\/README\.md$/, '') + ' · ') && x.meta.startsWith(docW + ' · ') && !x.clipped))), p && p.readmeF);
   check(`${lang} ${w}: the root folder's head says the cwd's own name («proj · 1»), never «./»`, !!p && p.root === 'proj · 1', p && p.root);
 };
 // round 3 (z2): the popover header BY MEASURE — `w` forces the panel's width (a chat window's clamp); the count's words
@@ -212,12 +212,12 @@ const COUNT_WORDS = { en: '43 artifacts · 174 code files', zh: '43 项产出 ·
 const headLeg = async (lang) => {
   await openPanel(OWNER_BIG); await sleep(250);
   const drawn = await evalJs(HEADM(0));
-  check(`${lang} 1280 as drawn (${drawn && drawn.width} px): «${drawn && drawn.count}» whole, by measure`, headWhole(drawn) && byMeasure(drawn) && drawn.count === COUNT_WORDS[lang], drawn);
+  check(`${lang} 1280 as drawn (${drawn && drawn.width} px): «${drawn && drawn.count}» whole, by measure`, gateOf(headWhole(drawn)) && gateOf(byMeasure(drawn)) && drawn.count === COUNT_WORDS[lang], drawn);
   const wide = await evalJs(HEADM(420));
-  check(`${lang} 420 px: the header by measure — ${wide && (wide.ownLine ? 'the words need ' + wide.need + ' px of ' + wide.room + ': the count on its own line' : 'one line (' + wide.need + ' of ' + wide.room + ' px)')}, «${wide && wide.count}» whole`, headWhole(wide) && byMeasure(wide) && wide.count === COUNT_WORDS[lang] && (lang === 'ja' || !wide.ownLine), wide);
+  check(`${lang} 420 px: the header by measure — ${wide && (wide.ownLine ? 'the words need ' + wide.need + ' px of ' + wide.room + ': the count on its own line' : 'one line (' + wide.need + ' of ' + wide.room + ' px)')}, «${wide && wide.count}» whole`, gateOf(headWhole(wide)) && gateOf(byMeasure(wide)) && wide.count === COUNT_WORDS[lang] && (lang === 'ja' || !wide.ownLine), wide);
   for (const w of [328, 300]) {
     const m = await evalJs(HEADM(w));
-    check(`${lang} ${w} px (a chat window's clamp): the count takes its own line, WHOLE («${m && m.count}») — nothing cut mid-word; each picker on one line`, headWhole(m) && byMeasure(m) && m.ownLine && m.count === COUNT_WORDS[lang], m);
+    check(`${lang} ${w} px (a chat window's clamp): the count takes its own line, WHOLE («${m && m.count}») — nothing cut mid-word; each picker on one line`, gateOf(headWhole(m)) && gateOf(byMeasure(m)) && gateOf(m.ownLine) && m.count === COUNT_WORDS[lang], m);
     if (w === 328) await shot(`1280-popover-328-${lang}`);
   }
 };
@@ -238,23 +238,23 @@ try {
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; app.settings.set('artifacts.autoOpenDocs', false); true`); // the tap below is the only open
   await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000); await sleep(600);
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Write me a brief' }));
-  check('turn 1 (Write docs/BRIEF.md) ⇒ its card + the Artifacts chip', await waitFor(`!!document.querySelector('.chat-artifact-card') && !!document.querySelector('.chat-status-artifacts')`, 20000));
+  check('turn 1 (Write docs/BRIEF.md) ⇒ its card + the Artifacts chip', verdictOf(await waitFor(`!!document.querySelector('.chat-artifact-card') && !!document.querySelector('.chat-status-artifacts')`, 20000)));
 
   console.log('② the DESKTOP (1280): the popover\'s bands; the ⤢ window\'s rail opens with the three bands');
   await openPanel();
   const d1 = await evalJs(`(() => { const p = ${PANEL}; const heads = [...p.querySelectorAll('.chat-artifact-head')].map((h) => h.dataset.group + '|' + h.textContent); return { heads, count: p.querySelector('.af-count')?.textContent || '' }; })()`);
-  check('desktop popover: the bands in order (for you · made here + its folders · touched folded), the count line «30 artifacts · 41 code files»', d1.heads[0] === 'i:foryou|For you · 4' && d1.heads.some((h) => h.startsWith('i:made|Made here · 26')) && d1.heads.at(-1) === 'i:touched|Touched 41 code files' && /30 artifacts · 41 code files/.test(d1.count), d1);
+  check('desktop popover: the bands in order (for you · made here + its folders · touched folded), the count line «30 artifacts · 41 code files»', d1.heads[0] === 'i:foryou|For you · 4' && gateOf(d1.heads.some((h) => h.startsWith('i:made|Made here · 26'))) && d1.heads.at(-1) === 'i:touched|Touched 41 code files' && verdictOf(/30 artifacts · 41 code files/.test(d1.count)), d1);
   const pickLines = `[...${PANEL}.querySelectorAll('.af-pick')].map((b) => { const w = b.querySelector('.af-pick-word'), r = document.createRange(); r.selectNodeContents(w); return { t: w.textContent, lines: r.getClientRects().length, h: Math.round(b.getBoundingClientRect().height) }; })`;
   const pk = await evalJs(pickLines);
-  check('desktop 1280: each ▾ picker on ONE line («For you first» · «Recently changed»)', pk.length === 2 && pk.every((x) => x.lines === 1 && x.h <= 24), pk);
+  check('desktop 1280: each ▾ picker on ONE line («For you first» · «Recently changed»)', pk.length === 2 && verdictOf(pk.every((x) => x.lines === 1 && x.h <= 24)), pk);
   await shot('1280-popover-en');
   const asIs = await evalJs(HEADM(0));
-  check(`desktop 1280 as drawn (${asIs && asIs.width} px — the chat window's clamp): «${asIs && asIs.count}» whole, the pickers on one line, by measure`, headWhole(asIs) && byMeasure(asIs), asIs);
+  check(`desktop 1280 as drawn (${asIs && asIs.width} px — the chat window's clamp): «${asIs && asIs.count}» whole, the pickers on one line, by measure`, gateOf(headWhole(asIs)) && verdictOf(byMeasure(asIs)), asIs);
   console.log('  round 3: the header BY MEASURE (the owner\'s 43 + 174)');
   await headLeg('en');
   await evalJs(`(() => { const s = document.createElement('style'); s.id = 'r2-head'; s.textContent = '.af-ctl { flex-wrap: nowrap !important; } .af-count { max-width: none !important; overflow: visible !important; }'; document.head.appendChild(s); return true; })()`);
   const r2h = await evalJs(HEADM(328));
-  check('CONTROL r2\'s header (the row never wraps — the pickers nowrap beside the count) at 328 px ⇒ the count runs past the panel — RED', !!r2h && !headWhole(r2h) && r2h.countOut, r2h);
+  check('CONTROL r2\'s header (the row never wraps — the pickers nowrap beside the count) at 328 px ⇒ the count runs past the panel — RED', !!r2h && !headWhole(r2h) && verdictOf(r2h.countOut), r2h);
   await evalJs(`document.getElementById('r2-head')?.remove(); true`);
   await openPanel(); await sleep(200);
   await evalJs(stubFetch); await evalJs(`${PANEL}?.querySelector('.af-expand')?.click(); true`);
@@ -268,7 +268,7 @@ try {
   await shot('1280-window-en');
   await evalJs(`document.querySelector('.af-window .af-th[data-col="path"]').click(); true`); await sleep(150);
   const w3 = await evalJs(`(() => { const p = [...document.querySelectorAll('.af-window .af-trow')].map((r) => r.querySelector('.af-c-path').textContent.replace(/\u200e/g, '')); return { bands: document.querySelectorAll('.af-window .af-tband').length, sorted: p.every((x, i) => i === 0 || p[i - 1].localeCompare(x, undefined, { numeric: true, sensitivity: 'base' }) <= 0), some: p.filter((x, i) => i === 0 || x !== p[i - 1]).slice(0, 8) }; })()`);
-  check('Path ▲ sorts by the folder the column SHOWS; the band rows go while a column sorts', w3.bands === 0 && w3.sorted, w3);
+  check('Path ▲ sorts by the folder the column SHOWS; the band rows go while a column sorts', w3.bands === 0 && verdictOf(w3.sorted), w3);
   await evalJs(`document.querySelector('.af-window .af-rail-item[data-rail="all"]').click(); true`); await sleep(150);
   const w4 = await evalJs(`({ bands: ${bandRows}, first4: [...document.querySelectorAll('.af-window .af-trow')].slice(0, 4).map((r) => r.dataset.kind) })`);
   check('the rail\'s All after a column sort ⇒ the bands\' order and their rows again (one gesture)', w4.bands.join() === w2.join() && w4.first4.slice().sort().join() === 'doc,page,page,service', w4);
@@ -312,11 +312,11 @@ try {
         count: p.querySelector('.af-count')?.textContent || '' }; })()`);
     check(`${lang}: a FULL-HEIGHT sheet — the whole window area under the phone's own top bar (top ${p?.top} = the area's ${p?.cb}, bottom ${p?.bottom} of ${p?.h}, width ${p?.width})`, !!p && Math.abs(p.top - p.cb) <= 1 && p.top <= 64 && Math.abs(p.bottom - p.h) <= 2 && p.left === 0 && p.width === p.w, p);
     const fyWord = lang === 'zh' ? '给你看的 · 4' : 'For you · 4', tWord = lang === 'zh' ? '顺带改了 41 个代码文件' : 'Touched 41 code files';
-    check(`${lang}: the first section is «${fyWord}» and its four rows are on the FIRST SCREEN (the attention list)`, !!p && p.first === 'i:foryou|' + fyWord && p.foryouOnFirstScreen, p && { first: p.first, onScreen: p.foryouOnFirstScreen });
-    check(`${lang}: «${tWord}» folded — no code row drawn`, !!p && p.touched === tWord && p.touchedShut && p.codeRows === 0, p && { touched: p.touched, shut: p.touchedShut, code: p.codeRows });
-    check(`${lang}: every visible row ≥ 44 px (min ${p?.minRowH}), every head ≥ 44 px (min ${p?.minHeadH}); ⋯ ✕ ⤢ 44 × 44`, !!p && p.minRowH >= 44 && p.minHeadH >= 44 && p.btns.every((b) => / 44×44$/.test(b)), p && { rows: p.minRowH, heads: p.minHeadH, btns: p.btns });
+    check(`${lang}: the first section is «${fyWord}» and its four rows are on the FIRST SCREEN (the attention list)`, !!p && p.first === 'i:foryou|' + fyWord && verdictOf(p.foryouOnFirstScreen), p && { first: p.first, onScreen: p.foryouOnFirstScreen });
+    check(`${lang}: «${tWord}» folded — no code row drawn`, !!p && p.touched === tWord && gateOf(p.touchedShut) && p.codeRows === 0, p && { touched: p.touched, shut: p.touchedShut, code: p.codeRows });
+    check(`${lang}: every visible row ≥ 44 px (min ${p?.minRowH}), every head ≥ 44 px (min ${p?.minHeadH}); ⋯ ✕ ⤢ 44 × 44`, !!p && p.minRowH >= 44 && p.minHeadH >= 44 && verdictOf(p.btns.every((b) => / 44×44$/.test(b))), p && { rows: p.minRowH, heads: p.minHeadH, btns: p.btns });
     check(`${lang}: the names and the field 16 px, the meta line ≥ 14 px (${p?.nameFont} / ${p?.fieldFont} / ${p?.metaFont})`, !!p && p.nameFont >= 16 && p.fieldFont >= 16 && p.metaFont >= 14, p && [p.nameFont, p.fieldFont, p.metaFont]);
-    check(`${lang}: the auto-open switch left the header for the ⋯ menu`, !!p && !p.autoShown && p.menuShown, p && { auto: p.autoShown, menu: p.menuShown });
+    check(`${lang}: the auto-open switch left the header for the ⋯ menu`, !!p && !p.autoShown && verdictOf(p.menuShown), p && { auto: p.autoShown, menu: p.menuShown });
     round2(lang, p, '360');
     await shot(`360-${lang}`);
     const scrollTo = async (sel, tag) => { await evalJs(`(() => { const l = ${PANEL}.querySelector('.af-list'); const h = [...${PANEL}.querySelectorAll('.chat-artifact-head')].find((x) => x.dataset.group === ${JSON.stringify(sel)}); if (h) l.scrollTop += h.getBoundingClientRect().top - l.getBoundingClientRect().top; return true; })()`); await sleep(200); await shot(tag); };
@@ -324,7 +324,7 @@ try {
     await scrollTo('f:i:made::' + CWD, `360-${lang}-root`); // the root head by the cwd's own name
     await evalJs(`${PANEL}.querySelector('.af-list').scrollTop = 0; true`);
     const pin = await evalJs(`(() => { const p = ${PANEL}; const f = p.querySelector('.af-filter'), l = p.querySelector('.af-list'); const t0 = f.getBoundingClientRect().top; l.scrollTop = l.scrollHeight; return new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => res({ t0: Math.round(t0), t1: Math.round(f.getBoundingClientRect().top), scrolled: l.scrollTop > 0, inView: f.getBoundingClientRect().bottom <= innerHeight && f.getBoundingClientRect().top >= 0 })))); })()`);
-    check(`${lang}: the search is PINNED — the list scrolled ${pin.scrolled ? 'to its end' : '(did not scroll)'}, the field stayed at ${pin.t1} px`, pin.scrolled && pin.t0 === pin.t1 && pin.inView, pin);
+    check(`${lang}: the search is PINNED — the list scrolled ${pin.scrolled ? 'to its end' : '(did not scroll)'}, the field stayed at ${pin.t1} px`, gateOf(pin.scrolled) && pin.t0 === pin.t1 && verdictOf(pin.inView), pin);
     await shot(`360-${lang}-scrolled`);
     if (lang === 'zh') {
       console.log('  320 × 700 (zh): the narrowest phone — the same words, nothing clipped');
@@ -359,7 +359,7 @@ try {
   await cdp('Page.reload', {}); await waitApp(); await sleep(1000);
   await reattach(); await openPanel(); await sleep(300);
   const pz = await evalJs(pickLines);
-  check('desktop 1280 zh: each ▾ picker on ONE line («给你看的优先» · «最近修改»)', pz.length === 2 && pz.every((x) => x.lines === 1 && x.h <= 24) && pz[0].t === '给你看的优先', pz);
+  check('desktop 1280 zh: each ▾ picker on ONE line («给你看的优先» · «最近修改»)', pz.length === 2 && gateOf(pz.every((x) => x.lines === 1 && x.h <= 24)) && pz[0].t === '给你看的优先', pz);
   await shot('1280-popover-zh');
   await headLeg('zh');
   console.log('  round 3: a page a PEER sent reads in «给你看的»; the person\'s own paste in «做出来的»');
@@ -395,9 +395,9 @@ try {
   const R3_LAZY = "const lazy = (p) => { let m = null; return () => m || (m = require(p)); };\nconst MM = lazy('../message-manager.js'), CMM = lazy('../codex-message-manager.js'), NOTE = lazy('../assistant-note.js');";
   const lazyAt = OFSRC.indexOf('const lazy = (load)'), lazyEnd = OFSRC.indexOf('\n', OFSRC.indexOf("NOTE = lazy(", lazyAt));
   const r3B = lazyAt >= 0 && lazyEnd > lazyAt ? bundleOf(OFSRC.slice(0, lazyAt) + R3_LAZY + OFSRC.slice(lazyEnd), 'r3') : null;
-  check(`CONTROL r3's variable require (lazy(p)) ⇒ the bundled copy cannot resolve it (${r3B ? runTray(r3B) : 'needle missing'}) — RED`, !!r3B && unresolved(fs.readFileSync(r3B, 'utf8')).length > 0 && runTray(r3B).startsWith('threw'), r3B && runTray(r3B));
+  check(`CONTROL r3's variable require (lazy(p)) ⇒ the bundled copy cannot resolve it (${r3B ? runTray(r3B) : 'needle missing'}) — RED`, !!r3B && unresolved(fs.readFileSync(r3B, 'utf8')).length > 0 && verdictOf(runTray(r3B).startsWith('threw')), r3B && runTray(r3B));
 } catch (e) {
   failed++; console.error('✗ the walk threw: ' + (e && e.stack || e));
 }
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -28,7 +28,7 @@ if (!CHROME) { console.log('SKIP: no chrome for the client'); process.exit(0); }
 const SHADOW = ['/usr/bin/claude', '/bin/claude'].filter((p) => fs.existsSync(p));
 if (SHADOW.length) { console.log(`SKIP: a claude sits in the scratch shell's own PATH (${SHADOW.join(', ')}) — the "not found" create cannot be made here`); process.exit(0); }
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const J = JSON.stringify;
@@ -78,7 +78,7 @@ try {
   const up = await until(async () => { if (srv.exitCode !== null) return 'dead'; await fetch(`http://127.0.0.1:${PORT}/api/home`); return 'up'; }, 120000, 250);
   check('the scratch hub answers (its SHELL a scratch login shell)', up === 'up', srvLog.join('').slice(-600));
   if (up !== 'up') throw new Error('no server');
-  check('boot resolved claude to the hub\'s own PATH (the provisional answer — the shell is never asked at boot)', srvLog.join('').includes(`claude: ${path.join(HUBONLY, 'claude')}`) && !srvLog.join('').includes('(login shell)'), (srvLog.join('').match(/claude: \S+/) || [''])[0]);
+  check('boot resolved claude to the hub\'s own PATH (the provisional answer — the shell is never asked at boot)', gateOf(srvLog.join('').includes(`claude: ${path.join(HUBONLY, 'claude')}`)) && !srvLog.join('').includes('(login shell)'), (srvLog.join('').match(/claude: \S+/) || [''])[0]);
 
   const ver = await until(async () => (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json(), 30000);
   const cdp = new WebSocket(ver.webSocketDebuggerUrl);
@@ -122,12 +122,12 @@ try {
     const ranBefore = fs.existsSync(MARK) ? fs.readFileSync(MARK, 'utf8').length : 0;
     await pg.ev(`(() => { window.__nativeDialogs = 0; for (const k of ['alert', 'confirm', 'prompt']) { const o = window[k]; window[k] = (...a) => { window.__nativeDialogs++; return o ? undefined : undefined; }; } app.createSession({ backend: 'claude', cwd: ${J(CWD)}, mode: 'chat', name: 'cli-missing ${lang}' }); return true; })()`);
     const ans = await until(() => pg.ev("(window.__answers || []).find((a) => a.type === 'error' || a.type === 'created') || null"), 30000);
-    check(`${lang}: the create answers cli-missing by name (cli claude, the shell named, the hub's path as the hint) — and nothing ran`, ans && ans.type === 'error' && ans.code === 'cli-missing' && ans.cli === 'claude' && ans.shell === 'login-shell' && ans.hubPath === hubClaude && (fs.existsSync(MARK) ? fs.readFileSync(MARK, 'utf8').length : 0) === ranBefore, ans);
+    check(`${lang}: the create answers cli-missing by name (cli claude, the shell named, the hub's path as the hint) — and nothing ran`, gateOf(ans) && ans.type === 'error' && ans.code === 'cli-missing' && ans.cli === 'claude' && ans.shell === 'login-shell' && ans.hubPath === hubClaude && (fs.existsSync(MARK) ? fs.readFileSync(MARK, 'utf8').length : 0) === ranBefore, ans);
     const d = await until(() => pg.ev(DIALOG), 10000);
     const w = WORDS[lang];
-    check(`${lang}: THE DIALOG «${d && d.title}» says what was asked, the sentence and the hint`, !!d && d.title === w.title && d.asked.includes(w.asked) && d.what.startsWith(w.what) && d.what.includes('claude') && d.hint.includes(hubClaude), d);
+    check(`${lang}: THE DIALOG «${d && d.title}» says what was asked, the sentence and the hint`, !!d && d.title === w.title && gateOf(d.asked.includes(w.asked)) && gateOf(d.what.startsWith(w.what)) && gateOf(d.what.includes('claude')) && verdictOf(d.hint.includes(hubClaude)), d);
     check(`${lang}: its two doors — «${w.manage}» and «${w.docs}»`, !!d && d.manage === w.manage && d.docs === w.docs, d);
-    check(`${lang}: the hub's path (with <b> in it) is TEXT — no <b> element, no native dialog, no toast`, !!d && d.bTags === 0 && d.hint.includes('<b>') && d.native === 0 && ((await pg.ev('window.__toasts.length')) || 0) === 0, { d, toasts: await pg.ev('window.__toasts') });
+    check(`${lang}: the hub's path (with <b> in it) is TEXT — no <b> element, no native dialog, no toast`, !!d && d.bTags === 0 && gateOf(d.hint.includes('<b>')) && d.native === 0 && ((await pg.ev('window.__toasts.length')) || 0) === 0, { d, toasts: await pg.ev('window.__toasts') });
     await pg.shot(`dialog-${lang}.png`);
     if (lang === 'en') enPage = pg; else await pg.close();
   }
@@ -141,7 +141,7 @@ try {
     check('«Open Manage agents» closes the dialog and opens Manage agents', !!gone && !!rows, rows);
     const cx = rows && rows['Codex'], cl = rows && rows['Claude Code'];
     check(`the Codex row: «${cx && cx.text}» (found by the login shell, the path it named)`, !!cx && cx.text === `found by your login-shell at ${path.join(BIN, 'codex')}` && !cx.warn, cx);
-    check(`the Claude Code row: «${cl && cl.text}» (not found by the shell; the hub's path a hint, as text)`, !!cl && cl.text === `not found by your login-shell · the hub’s PATH has ${hubClaude}` && cl.warn && cl.bTags === 0, cl);
+    check(`the Claude Code row: «${cl && cl.text}» (not found by the shell; the hub's path a hint, as text)`, !!cl && cl.text === `not found by your login-shell · the hub’s PATH has ${hubClaude}` && gateOf(cl.warn) && cl.bTags === 0, cl);
     const st = await (await fetch(`http://127.0.0.1:${PORT}/api/backend-status`)).json();
     check('/api/backend-status: claude NOT installed (the shell is the truth), codex installed at the shell\'s path — each with its provenance', st.claude?.installed === false && st.claude?.answer === 'none' && st.claude?.hubPath === hubClaude && st.codex?.installed === true && st.codex?.provenance === 'shell' && st.codex?.cmdPath === path.join(BIN, 'codex'), { claude: st.claude, codex: st.codex });
     await pg.shot('census-en.png');
@@ -154,4 +154,4 @@ try {
   console.log(`\n${failed ? failed + ' FAILED (' + passed + ' passed)' : 'ALL PASS (' + passed + ')'}`);
   cleanup();
   process.exit(failed ? 1 : 0);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

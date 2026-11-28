@@ -33,7 +33,7 @@ const RT = path.join(home, 'xrt'); fs.mkdirSync(RT, { recursive: true, mode: 0o7
 const TRIG = path.join(home, 'trig'); fs.mkdirSync(TRIG, { recursive: true });
 const PNG = process.env.VS_NOTIFY_PNG || path.join(home, 'toast.png');
 let pass = 0, failed = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
 
@@ -86,7 +86,7 @@ const id = launched && launched.id;
 check('the fake app launches (POST /api/desktop/apps, the vnc-display rung, desktop.appPortal = all)', !!id, launched);
 await evalJs(`(window.app.openDesktopApp(${JSON.stringify(id)}), true)`);
 const rec = await until(async () => { const r = await api(`/api/desktop/apps/${id}`); return r && r.state === 'ready' && r.notify ? r : null; }, 30000, 300);
-check('the record is ready with portal on + notify on (the sink is part of its private bus)', rec && rec.portal === 'on' && rec.notify === 'on', rec && { state: rec.state, portal: rec.portal, notify: rec.notify });
+check('the record is ready with portal on + notify on (the sink is part of its private bus)', gateOf(rec) && rec.portal === 'on' && rec.notify === 'on', rec && { state: rec.state, portal: rec.portal, notify: rec.notify });
 const winSel = `[...window.app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)} && !w._desktopSatelliteWid)`;
 await until(() => evalJs(`(() => { const w = ${winSel}; return !!(w && w.element.querySelector('canvas')); })()`), 20000, 250);
 await until(async () => { const v = await api(`/api/desktop/apps/${id}/viewers`); return v && (v.active || (v.viewers || []).length); }, 15000, 250);
@@ -99,7 +99,7 @@ send(1, { summary: 'Export finished', body: 'results.omv saved to Documents', ur
 const toast = await until(() => evalJs(`(() => { const w = ${winSel}; const el = w && w.element.querySelector('.desktop-app-note'); if (!el) return null; const r = el.getBoundingClientRect(), wr = w.element.getBoundingClientRect();
   return { app: el.querySelector('.desktop-app-note-app')?.textContent, sum: el.querySelector('.desktop-app-note-summary')?.textContent, body: el.querySelector('.desktop-app-note-body')?.textContent, svg: !!el.querySelector('svg path'),
     inside: r.left >= wr.left && r.right <= wr.right && r.top >= wr.top && r.bottom <= wr.bottom && r.width > 80, global: !!document.querySelector('#global-toasts .desktop-app-note') }; })()`), 15000, 100);
-check('the toast is inside the app\'s window: the app\'s name, the summary, the body, the bell (SVG)', toast && toast.inside && toast.app === 'JASP' && toast.sum === 'Export finished' && toast.body === 'results.omv saved to Documents' && toast.svg && !toast.global, toast);
+check('the toast is inside the app\'s window: the app\'s name, the summary, the body, the bell (SVG)', gateOf(toast) && gateOf(toast.inside) && toast.app === 'JASP' && toast.sum === 'Export finished' && toast.body === 'results.omv saved to Documents' && gateOf(toast.svg) && !toast.global, toast);
 if (toast) { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(PNG, Buffer.from(r.data, 'base64')); console.log(`    PNG ${PNG}`); }
 check('a normal notification on a window in front files NO For-you item', (await forYouOf()).length === 0);
 const gone = await until(() => evalJs(`(() => { const w = ${winSel}; return w && !w.element.querySelector('.desktop-app-note'); })()`), 9000, 200);
@@ -113,23 +113,23 @@ send(3, { summary: 'Analysis done again', body: '', urgency: 2 });
 await until(() => fs.existsSync(path.join(TRIG, '3.json.sent')), 10000, 100);
 await sleep(1500);
 const open = (await forYouOf()).filter((t) => t.status === 'open');
-check('ONE open For-you item "JASP: Analysis done" (the second critical folds into it)', items && open.length === 1 && open[0].text === 'JASP: Analysis done' && open[0].urgency === 'high', open.map((t) => ({ text: t.text, status: t.status, urgency: t.urgency })));
+check('ONE open For-you item "JASP: Analysis done" (the second critical folds into it)', gateOf(items) && open.length === 1 && open[0].text === 'JASP: Analysis done' && open[0].urgency === 'high', open.map((t) => ({ text: t.text, status: t.status, urgency: t.urgency })));
 
 console.log('C  the person raises the window and presses it ⇒ the item resolves');
 const bar = await evalJs(`(() => { const w = ${winSel}; window.app.wm.revealWindow(w.id); const tb = w.element.querySelector('.window-titlebar'); const r = (tb || w.element).getBoundingClientRect(); return { x: r.left + Math.min(60, r.width / 3), y: r.top + Math.min(12, r.height / 2) }; })()`);
 await sleep(400);
 await click(bar.x, bar.y);
 const resolved = await until(async () => { const f = await forYouOf(); return f.length && f.every((t) => t.status !== 'open') ? f : null; }, 10000, 250);
-check('raised + pressed ⇒ the For-you item is resolved (done)', resolved && resolved[0].status === 'done', resolved && resolved.map((t) => t.status));
+check('raised + pressed ⇒ the For-you item is resolved (done)', gateOf(resolved) && resolved[0].status === 'done', resolved && resolved.map((t) => t.status));
 
 console.log('D  the ring and the window\'s ⋯');
 const ring = await api(`/api/desktop/apps/${id}/notifications`);
-check('GET …/notifications: the three, newest last, with their urgency', ring && ring.notify === 'on' && ring.notes.map((n) => n.summary).join('|') === 'Export finished|Analysis done|Analysis done again' && ring.notes[1].urgency === 'critical', ring);
+check('GET …/notifications: the three, newest last, with their urgency', gateOf(ring) && ring.notify === 'on' && ring.notes.map((n) => n.summary).join('|') === 'Export finished|Analysis done|Analysis done again' && ring.notes[1].urgency === 'critical', ring);
 const more = await evalJs(`(() => { const w = ${winSel}; const b = w.element.querySelector('.desktop-app-more'); if (!b) return null; b.click(); return true; })()`); // the ⋯'s own handler (folded or not)
 await sleep(300);
 const menu = more && await evalJs(`[...document.querySelectorAll('.context-menu')].map((m) => m.textContent).join(' | ')`);
-check('the window\'s ⋯ offers Notifications', /Notifications/.test(menu || ''), menu);
+check('the window\'s ⋯ offers Notifications', verdictOf(/Notifications/.test(menu || '')), menu);
 
 console.log(`\ntest-desktop-app-notify: ${pass} passed, ${failed} failed`);
 if (!failed) console.log(`ALL PASS (${pass})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

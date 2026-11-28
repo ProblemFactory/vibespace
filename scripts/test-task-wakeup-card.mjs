@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const { MessageManager } = require('../src/message-manager.js');
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 const norm = (raw) => {
   const mm = new MessageManager('claude', 't1');
   const ops = [];
@@ -24,19 +24,19 @@ const WAKEUP_TEXT = '<task-notification>\n<task-id>by51cmm12</task-id>\n<status>
 
 // real JSONL shape (origin.kind present + promptSource:"sdk")
 let m = norm({ type: 'user', message: { role: 'user', content: WAKEUP_TEXT }, origin: { kind: 'task-notification' }, promptSource: 'sdk', uuid: 'w1', timestamp: new Date().toISOString() });
-check('origin.kind wakeup → originKind set, NOT typed', m && m.originKind === 'task-notification' && !m.typed, JSON.stringify({ typed: m?.typed, originKind: m?.originKind }));
+check('origin.kind wakeup → originKind set, NOT typed', gateOf(m) && m.originKind === 'task-notification' && !m.typed, JSON.stringify({ typed: m?.typed, originKind: m?.originKind }));
 
 // transport without origin (text-shape fallback) still classified
 m = norm({ type: 'user', message: { role: 'user', content: WAKEUP_TEXT }, promptSource: 'sdk', uuid: 'w2', timestamp: new Date().toISOString() });
-check('origin-less wakeup (text shape) → originKind set, NOT typed', m && m.originKind === 'task-notification' && !m.typed);
+check('origin-less wakeup (text shape) → originKind set, NOT typed', gateOf(m) && m.originKind === 'task-notification' && !m.typed);
 
 // a REAL typed user message keeps its protection (the 2.88.0 guarantee)
 m = norm({ type: 'user', message: { role: 'user', content: 'Stop hook feedback: I literally typed this' }, promptSource: 'sdk', uuid: 'w3', timestamp: new Date().toISOString() });
-check('genuine typed message stays typed', m && m.typed === true && !m.originKind);
+check('genuine typed message stays typed', gateOf(m) && m.typed === true && !m.originKind);
 
 // a user who PASTES xml-ish text mid-sentence is not demoted
 m = norm({ type: 'user', message: { role: 'user', content: 'look at this: <task-notification> weird' }, promptSource: 'sdk', uuid: 'w4', timestamp: new Date().toISOString() });
-check('mid-text mention does not classify as wakeup', m && m.typed === true && !m.originKind);
+check('mid-text mention does not classify as wakeup', gateOf(m) && m.typed === true && !m.originKind);
 
 // ── task lifecycle closure (2.233.0): the wakeup COMPLETES its tracked task
 // (in the current harness no system/task_notification ever arrives for
@@ -82,4 +82,4 @@ check('mid-text mention does not classify as wakeup', m && m.typed === true && !
 }
 
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { gateOf } from './lib/check.mjs';

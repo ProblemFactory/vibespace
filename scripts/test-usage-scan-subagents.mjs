@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const { UsageHistory } = require(path.resolve('src/usage-history.js'));
 
 let pass = 0, fail = 0;
-const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-uh-home-'));
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-uh-data-'));
@@ -38,20 +38,20 @@ const uh = new UsageHistory({ dataDir, homeDir: home });
 await uh.scan({ force: true });
 const events = [...uh.rows(0, Date.now() + 1e9)].filter((e) => e.be === 'claude');
 const rids = events.map((e) => e.rid).sort();
-ck('workflow agent requests mined (req_wf1/req_wf2)', rids.includes('req_wf1') && rids.includes('req_wf2'));
-ck('subagent file requests mined (req_agent1)', rids.includes('req_agent1'));
-ck('parent requests still mined', rids.includes('req_parent'));
+ck('workflow agent requests mined (req_wf1/req_wf2)', gateOf(rids.includes('req_wf1')) && verdictOf(rids.includes('req_wf2')));
+ck('subagent file requests mined (req_agent1)', verdictOf(rids.includes('req_agent1')));
+ck('parent requests still mined', verdictOf(rids.includes('req_parent')));
 ck('parent/agent duplicate deduped by requestId', rids.filter((r) => r === 'req_shared').length === 1);
 ck('journal.jsonl NOT mined as usage', events.length === 5);
-ck('agent events attribute to the PARENT session id', events.filter((e) => e.rid.startsWith('req_wf')).every((e) => e.sid === SID));
+ck('agent events attribute to the PARENT session id', verdictOf(events.filter((e) => e.rid.startsWith('req_wf')).every((e) => e.sid === SID)));
 
 // incremental: appending to a workflow file picks up only the delta
 fs.appendFileSync(path.join(wfDir, 'agent-bbb.jsonl'), rec('req_wf3'));
 uh._lastScan = 0; await uh.scan({ force: true });
 const events2 = [...uh.rows(0, Date.now() + 1e9)].filter((e) => e.be === 'claude');
-ck('incremental append picked up (cursor per file)', events2.some((e) => e.rid === 'req_wf3') && events2.length === 6);
+ck('incremental append picked up (cursor per file)', gateOf(events2.some((e) => e.rid === 'req_wf3')) && events2.length === 6);
 
 fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

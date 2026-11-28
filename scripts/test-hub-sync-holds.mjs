@@ -21,7 +21,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
@@ -76,9 +76,9 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
   const t0 = Date.now(); const st = typeof pm.refreshStatus === 'function' ? await pm.refreshStatus('acme-stuck') : null; const took = Date.now() - t0;
   clearInterval(hold);
   await sleep(600);
-  ok('§13 a refresh that NEVER answers ends at its bound: the kept answer stands, said as stale (statusError with its time and why) — and nothing retries it by itself (no timer: the next ask does)', !!st && took >= 280 && st.kept === 'the last answer' && st.statusError && /took over 300 ms/.test(st.statusError.why) && calls === 1, { took, st, calls });
+  ok('§13 a refresh that NEVER answers ends at its bound: the kept answer stands, said as stale (statusError with its time and why) — and nothing retries it by itself (no timer: the next ask does)', !!st && took >= 280 && st.kept === 'the last answer' && gateOf(st.statusError) && gateOf(/took over 300 ms/.test(st.statusError.why)) && calls === 1, { took, st, calls });
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8');
-  ok('§13 the panel says «Checking…» on a row the server has not read yet — its switch and Install wait (never «not installed» / «stopped» by default) — and the OPEN panel redraws when `plugins-updated` arrives (the listener ends with the panel)', /chip = p\.checking \? \(p\.statusError \? t\('Status unknown — it could not be read'\) : t\('Checking…'\)\)/.test(UI) && /swDisabled = \(!!p\.checking && !p\.statusError\) \|\|/.test(UI) && /if \(!p\.checking && !p\.installed/.test(UI) && /this\.ws\?\.onGlobal\?\.\(\(msg\) => \{\s*\n\s*if \(!body\.isConnected\) \{ offWs\?\.\(\); return; \}\s*\n\s*if \(msg && msg\.type === 'plugins-updated'\)/.test(UI));
+  ok('§13 the panel says «Checking…» on a row the server has not read yet — its switch and Install wait (never «not installed» / «stopped» by default) — and the OPEN panel redraws when `plugins-updated` arrives (the listener ends with the panel)', gateOf(/chip = p\.checking \? \(p\.statusError \? t\('Status unknown — it could not be read'\) : t\('Checking…'\)\)/.test(UI)) && gateOf(/swDisabled = \(!!p\.checking && !p\.statusError\) \|\|/.test(UI)) && gateOf(/if \(!p\.checking && !p\.installed/.test(UI)) && verdictOf(/this\.ws\?\.onGlobal\?\.\(\(msg\) => \{\s*\n\s*if \(!body\.isConnected\) \{ offWs\?\.\(\); return; \}\s*\n\s*if \(msg && msg\.type === 'plugins-updated'\)/.test(UI)));
 }
 
 { // §13 a decision that ACTS reads a fresh answer: the boot's install-or-start (frp, relay default-on) with a frpc on PATH only
@@ -101,7 +101,7 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
   pm.bootReplay();
   for (let i = 0; i < 100 && !fs.existsSync(RAN) && !fetched.length; i++) await sleep(50);
   globalThis.fetch = fetchWas; process.env.PATH = pathWas;
-  ok('§13 a decision that acts reads a FRESH `which` (the kept answer is empty before its first read): the boot\'s install-or-start STARTS the frpc on PATH and downloads nothing', fetched.length === 0 && fs.existsSync(RAN), { fetched, ran: fs.existsSync(RAN) });
+  ok('§13 a decision that acts reads a FRESH `which` (the kept answer is empty before its first read): the boot\'s install-or-start STARTS the frpc on PATH and downloads nothing', fetched.length === 0 && verdictOf(fs.existsSync(RAN)), { fetched, ran: fs.existsSync(RAN) });
 }
 
 { // §13 round 2 — the acceptance panel's three moderates on rank 13, on the REAL tailscale / frp plugins
@@ -130,7 +130,7 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
     const t0 = Date.now(); const st = await pm.refreshStatus('tailscale'); const took = Date.now() - t0;
     await sleep(Math.max(0, 1400 - (Date.now() - t0))); clearInterval(hold); delete process.env.HSH_PGREP_SLEEP;
     const after = pm.status('tailscale'); const log = standLog();
-    ok('§13 an ask abandoned at its bound STARTS NOTHING MORE and WRITES NOTHING: ended at 300 ms (statusError), and 1.4 s on its 1 s pgrep was the last child it ever started (no sudo after it) and the row is still the pre-answer one (checking), not a late write', !!st.statusError && /took over 300 ms/.test(st.statusError.why) && log.filter((l) => l === 'pgrep').length === 1 && !log.includes('sudo') && after.checking === true, { took, statusError: st.statusError, log, checking: after.checking });
+    ok('§13 an ask abandoned at its bound STARTS NOTHING MORE and WRITES NOTHING: ended at 300 ms (statusError), and 1.4 s on its 1 s pgrep was the last child it ever started (no sudo after it) and the row is still the pre-answer one (checking), not a late write', !!st.statusError && gateOf(/took over 300 ms/.test(st.statusError.why)) && log.filter((l) => l === 'pgrep').length === 1 && !log.includes('sudo') && after.checking === true, { took, statusError: st.statusError, log, checking: after.checking });
   }
   { // 3. frp before its first `which`: «Checking…», never «not installed» + Install over the PATH's frpc
     const FBIN3 = path.join(tmp, 'frp-path-3'); fs.mkdirSync(FBIN3); fs.writeFileSync(path.join(FBIN3, 'frpc'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
@@ -172,11 +172,11 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
     const now = callers();
     const pl = fs.readFileSync(path.join(REPO, 'src/plugins.js'), 'utf8');
     const planted = callers({ 'src/plugins.js': pl.replace('  bootReplay() {\n', '  bootReplay() {\n    setInterval(() => {\n      this.refreshAll();\n    }, 60000);\n') });
-    ok('§13 NEVER refreshed by a timer — on the syntax tree, the manager\'s refresh callers are exactly: its own event (h.notify), refreshAll\'s loop, bootReplay, an act\'s fresh read (_act), GET /api/plugins, GET …/status — none inside a timer\'s callback (a planted setInterval → refreshAll, the call on its own line, is RED)', JSON.stringify(now) === JSON.stringify(want) && planted.some((r) => /bootReplay\|refreshAll\|TIMER$/.test(r)), { now, planted: planted.filter((r) => /TIMER/.test(r)) });
+    ok('§13 NEVER refreshed by a timer — on the syntax tree, the manager\'s refresh callers are exactly: its own event (h.notify), refreshAll\'s loop, bootReplay, an act\'s fresh read (_act), GET /api/plugins, GET …/status — none inside a timer\'s callback (a planted setInterval → refreshAll, the call on its own line, is RED)', JSON.stringify(now) === JSON.stringify(want) && verdictOf(planted.some((r) => /bootReplay\|refreshAll\|TIMER$/.test(r))), { now, planted: planted.filter((r) => /TIMER/.test(r)) });
   }
 
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8');
-  ok('§13 the panel: a first answer that FAILED says «Status unknown» and frees the switch (a running daemon can always be stopped); the stale mark is a visible line on the row, not only a hover title; no tailscale command ⇒ its own words, no «Log in…»', /p\.checking \? \(p\.statusError \? t\('Status unknown — it could not be read'\) : t\('Checking…'\)\)/.test(UI) && /swDisabled = \(!!p\.checking && !p\.statusError\) \|\| p\.mode === 'system' \|\| \(!p\.installed && !running && !p\.statusError\)/.test(UI) && /if \(p\.statusError\) \{\n\s+const stale = Object\.assign\(document\.createElement\('div'\), \{ className: 'plugin-row-fact', textContent: t\('Not read again just now \(\{why\}\)/.test(UI) && /p\.backendState !== 'Running' && p\.cli !== false/.test(UI));
+  ok('§13 the panel: a first answer that FAILED says «Status unknown» and frees the switch (a running daemon can always be stopped); the stale mark is a visible line on the row, not only a hover title; no tailscale command ⇒ its own words, no «Log in…»', gateOf(/p\.checking \? \(p\.statusError \? t\('Status unknown — it could not be read'\) : t\('Checking…'\)\)/.test(UI)) && gateOf(/swDisabled = \(!!p\.checking && !p\.statusError\) \|\| p\.mode === 'system' \|\| \(!p\.installed && !running && !p\.statusError\)/.test(UI)) && gateOf(/if \(p\.statusError\) \{\n\s+const stale = Object\.assign\(document\.createElement\('div'\), \{ className: 'plugin-row-fact', textContent: t\('Not read again just now \(\{why\}\)/.test(UI)) && verdictOf(/p\.backendState !== 'Running' && p\.cli !== false/.test(UI)));
 }
 
 { // §13 round 3 — the accepted round's small items, each pinned
@@ -188,7 +188,7 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
     const FAIL = { id: 'acme-fail', label: 'Fail', description: 'x', provides: [], create: () => ({ install() { }, start() { }, stop() { }, status() { return { kept: true }; }, statusAsync() { calls++; return Promise.reject(new Error('probe failed')); } }) };
     const pm = new PluginManager({ dataDir: fs.mkdtempSync(path.join(tmp, 'fail-')), plugins: [FAIL], broadcast: (m) => sent.push(m.type) });
     const a = await pm.refreshStatus('acme-fail'); await sleep(5); const b = await pm.refreshStatus('acme-fail'); await sleep(5); const c = await pm.refreshStatus('acme-fail'); // asks ms apart: a stamp that moved would differ
-    ok('§13 (a) a status that keeps FAILING the same way keeps its stamp: three asks, ONE broadcast (the first) — no panel loop of redraw → GET → refresh', calls === 3 && sent.filter((t) => t === 'plugins-updated').length === 1 && a.statusError && c.statusError && a.statusError.at === c.statusError.at, { calls, sent, at: [a.statusError && a.statusError.at, c.statusError && c.statusError.at] });
+    ok('§13 (a) a status that keeps FAILING the same way keeps its stamp: three asks, ONE broadcast (the first) — no panel loop of redraw → GET → refresh', calls === 3 && sent.filter((t) => t === 'plugins-updated').length === 1 && gateOf(a.statusError) && gateOf(c.statusError) && a.statusError.at === c.statusError.at, { calls, sent, at: [a.statusError && a.statusError.at, c.statusError && c.statusError.at] });
   }
   { // (b) an ACT supersedes the refresh in flight: a Stop pressed while a refresh reads the old state
     const st = { running: true }; let keptRow = { running: true };
@@ -226,14 +226,14 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
     const dr = await require(path.join(REPO, 'src/server/child-starter.js')).childStarter().run(DEAF, [], { timeoutMs: 400 });
     const dpid = (() => { try { return Number(fs.readFileSync(DPID, 'utf8')); } catch { return 0; } })();
     const gone = !!dr && dr.timedOut === true && dpid > 0 && await until(() => !fs.existsSync(`/proc/${dpid}`), 2000);
-    ok(`§13 (c) an aborted ask stops waiting at once (${ms} ms) and records nothing (the name stays unknown); its \`which\` — one that IGNORES SIGTERM — is the STARTER's child (B-323e), never a child of the hub — and a DEAF child the starter holds is gone at its bound (400 ms, SIGKILL)`, got === null && !WK.whichKnown('vs-no-such-cmd-c') && ms < WK.TIMEOUT_MS && !!starterPid && ppid === starterPid && ppid !== process.pid && gone, { pid, ppid, starterPid, got, gone, known: WK.whichKnown('vs-no-such-cmd-c'), ms });
+    ok(`§13 (c) an aborted ask stops waiting at once (${ms} ms) and records nothing (the name stays unknown); its \`which\` — one that IGNORES SIGTERM — is the STARTER's child (B-323e), never a child of the hub — and a DEAF child the starter holds is gone at its bound (400 ms, SIGKILL)`, got === null && !WK.whichKnown('vs-no-such-cmd-c') && ms < WK.TIMEOUT_MS && !!starterPid && ppid === starterPid && ppid !== process.pid && verdictOf(gone), { pid, ppid, starterPid, got, gone, known: WK.whichKnown('vs-no-such-cmd-c'), ms });
   }
   { // (d) a `which` that cannot be SPAWNED: no unhandled rejection, the name not poisoned — the next ask answers
     let unhandled = 0; const onU = () => { unhandled++; }; process.on('unhandledRejection', onU);
     const real = WK._seam.get(); WK._seam.set(() => { throw Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' }); });
     const first = await WK.whichNow('node'); const kept = WK.whichKept('node'); await sleep(50);
     WK._seam.set(real); const second = await WK.whichNow('node'); await sleep(20); process.off('unhandledRejection', onU);
-    ok('§13 (d) a `which` that could not be SPAWNED answers null with NO unhandled rejection and leaves the name unknown — the next ask (the spawn working again) answers the real path', first === null && unhandled === 0 && !!second && /node$/.test(second) && WK.whichKnown('node'), { first, kept, second, unhandled });
+    ok('§13 (d) a `which` that could not be SPAWNED answers null with NO unhandled rejection and leaves the name unknown — the next ask (the spawn working again) answers the real path', first === null && unhandled === 0 && !!second && gateOf(/node$/.test(second)) && verdictOf(WK.whichKnown('node')), { first, kept, second, unhandled });
   }
 }
 
@@ -291,7 +291,7 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir);
       const again = await until(() => onDisk(dir).length === 30 && w.state === 'idle');
       gs.stop('e');
-      ok('§16 a folder EMPTIED to sync again (rm -rf + mkdir, its state file gone, the worker running): the next pass downloads all 30 again and the count follows — the folder is the index, nothing kept contradicts it', seeded && again && total(b) === 60 && w.count === 30, { seeded, again, downloads: total(b), onDisk: onDisk(dir).length, count: w.count });
+      ok('§16 a folder EMPTIED to sync again (rm -rf + mkdir, its state file gone, the worker running): the next pass downloads all 30 again and the count follows — the folder is the index, nothing kept contradicts it', gateOf(seeded) && gateOf(again) && total(b) === 60 && w.count === 30, { seeded, again, downloads: total(b), onDisk: onDisk(dir).length, count: w.count });
     }
     { // a walk that does not finish: the root unreadable, then a subfolder — and from the very first pass
       const dir = path.join(tmp, 'mail-fail'), b = box([]);
@@ -310,14 +310,14 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       const subCount = w.count; fs.chmodSync(sub, 0o755);
       const subHealed = await until(() => w.state === 'idle' && w.count === 40);
       gs.stop('f');
-      ok('§16 a walk that did NOT finish is never an answer: the root unreadable ⇒ the pass fails before any download, the mount\'s state names the folder, the count stays 40 (never 0 over 40 files) and the next pass (the loop\'s own backoff) reads it again — 40, nothing downloaded; the same for an unreadable SUBfolder', first && failed && /could not be read \(EACCES\)/.test(said) && said.includes(dir) && countWhileFailed === 40 && stillFailing && healed && subFailed && subCount === 40 && subHealed && total(b) === 0, { first, failed, said, countWhileFailed, stillFailing, healed, subFailed, subCount, subHealed, downloads: total(b) });
+      ok('§16 a walk that did NOT finish is never an answer: the root unreadable ⇒ the pass fails before any download, the mount\'s state names the folder, the count stays 40 (never 0 over 40 files) and the next pass (the loop\'s own backoff) reads it again — 40, nothing downloaded; the same for an unreadable SUBfolder', gateOf(first) && gateOf(failed) && gateOf(/could not be read \(EACCES\)/.test(said)) && gateOf(said.includes(dir)) && countWhileFailed === 40 && gateOf(stillFailing) && gateOf(healed) && gateOf(subFailed) && subCount === 40 && gateOf(subHealed) && total(b) === 0, { first, failed, said, countWhileFailed, stillFailing, healed, subFailed, subCount, subHealed, downloads: total(b) });
       const dir2 = path.join(tmp, 'mail-fail-first'); plant(dir2, ids.slice(0, 5)); stateOf(dir2, { historyId: '900' }); fs.chmodSync(dir2, 0o000); locked.push(dir2);
       const gs2 = new GmailSync({}); gs2._api = api(b); const w2 = gs2.start(cfgOf('f2', dir2));
       const firstFailed = await until(() => w2.state === 'error'); const st2 = gs2.status('f2');
       fs.chmodSync(dir2, 0o755);
       const firstHealed = await until(() => w2.state === 'idle' && w2.count === 5);
       gs2.stop('f2');
-      ok('§16 …and when the FIRST walk fails, the count is unknown (null — the sidebar says the failure, never «0 emails»), then 5 once the folder reads', firstFailed && st2.count === null && st2.state === 'error' && firstHealed && total(b) === 0, { firstFailed, status: st2, firstHealed, downloads: total(b) });
+      ok('§16 …and when the FIRST walk fails, the count is unknown (null — the sidebar says the failure, never «0 emails»), then 5 once the folder reads', gateOf(firstFailed) && st2.count === null && st2.state === 'error' && gateOf(firstHealed) && total(b) === 0, { firstFailed, status: st2, firstHealed, downloads: total(b) });
     }
     { // the retry is never LATER than a normal pass: pollSeconds 0.3, the long waits PARKED (a fixed 120 s backoff would never come)
       GAP = 60000;
@@ -328,7 +328,7 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       fs.chmodSync(dir, 0o755);
       const healed = await until(() => w.state === 'idle' && w.count === 6, 3000);
       gs.stop('s'); GAP = 30;
-      ok('§16 a failed pass is tried again no LATER than a normal pass would come (pollSeconds 0.3 ⇒ healed within a second; the mounts\' 300 s ⇒ 120 s)', failed && healed && total(b) === 0, { failed, healed, downloads: total(b) });
+      ok('§16 a failed pass is tried again no LATER than a normal pass would come (pollSeconds 0.3 ⇒ healed within a second; the mounts\' 300 s ⇒ 120 s)', gateOf(failed) && gateOf(healed) && total(b) === 0, { failed, healed, downloads: total(b) });
     }
     { // a file deleted on disk, a file added by another process — each seen within one pass
       const dir = path.join(tmp, 'mail-change'), ids = Array.from({ length: 10 }, (_, i) => hex(0xc0000000, i)), b = box([]);
@@ -340,7 +340,7 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       const byHand = hex(0xc1000000, 0); fs.writeFileSync(path.join(dir, `byhand_${byHand}.eml`), ''); b.history.push(byHand);
       const counted = await until(() => b.history.length === 0 && w.state === 'idle' && w.count === 11);
       gs.stop('c');
-      ok('§16 a file DELETED on disk is downloaded again when Gmail lists it (one pass); a file ADDED by another process is counted and never fetched a second time', first && refetched && counted && !b.got[byHand] && onDisk(dir).filter((n) => n.endsWith(`_${byHand}.eml`)).length === 1, { first, refetched, counted, gotByHand: b.got[byHand] || 0, count: w.count });
+      ok('§16 a file DELETED on disk is downloaded again when Gmail lists it (one pass); a file ADDED by another process is counted and never fetched a second time', gateOf(first) && gateOf(refetched) && gateOf(counted) && !b.got[byHand] && onDisk(dir).filter((n) => n.endsWith(`_${byHand}.eml`)).length === 1, { first, refetched, counted, gotByHand: b.got[byHand] || 0, count: w.count });
     }
     { // the folder missing at the first walk, its mail arriving after
       const dir = path.join(tmp, 'mail-missing', 'not-yet'), b = box([]);
@@ -349,7 +349,7 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       const ids = Array.from({ length: 10 }, (_, i) => hex(0xd0000000, i)); plant(dir, ids, 'ext'); b.history.push(...ids);
       const counted = await until(() => b.history.length === 0 && w.state === 'idle' && w.count === 10);
       gs.stop('x');
-      ok('§16 the folder MISSING at the first walk: mail another process puts there afterwards is counted at the next pass and never downloaded again', seeded && counted && total(b) === 0, { seeded, counted, downloads: total(b), count: w.count });
+      ok('§16 the folder MISSING at the first walk: mail another process puts there afterwards is counted at the next pass and never downloaded again', gateOf(seeded) && gateOf(counted) && total(b) === 0, { seeded, counted, downloads: total(b), count: w.count });
     }
     { // within a pass the set grows by what the sync writes: one id listed twice on a seed page is fetched once
       const dir = path.join(tmp, 'mail-twice'), A = hex(0xe0000000, 1), B = hex(0xe0000000, 2), b = box([A, B]);
@@ -357,7 +357,7 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       const gs = new GmailSync({}); gs._api = api(b); const w = gs.start(cfgOf('t', dir));
       const done = await until(() => w.state === 'idle' && b.got[A] && b.got[B]);
       gs.stop('t');
-      ok('§16 within a pass the set grows by what the sync writes: an id listed twice on one seed page is downloaded ONCE', done && b.got[A] === 1 && b.got[B] === 1 && w.count === 2, { done, got: b.got, count: w.count });
+      ok('§16 within a pass the set grows by what the sync writes: an id listed twice on one seed page is downloaded ONCE', gateOf(done) && b.got[A] === 1 && b.got[B] === 1 && w.count === 2, { done, got: b.got, count: w.count });
     }
     { // round 3 (a): a pass that ENDS IN ERROR, and the one that HEALS it, are PUSHED at once — an open panel never keeps «Checking…»
       const dir = path.join(tmp, 'mail-push'), b = box([]); plant(dir, [hex(0xb9000000, 0)]); stateOf(dir, { historyId: '900', email: 'stand-in@example.invalid' });
@@ -369,7 +369,7 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       fs.chmodSync(dir, 0o755);
       const healed = await until(() => w.state === 'idle'); await sleep(100); const afterHeal = pushes.slice(before);
       gs.stop('p');
-      ok('§16 (round 3) a pass that ENDS IN ERROR is pushed at once (mounts-updated — an open panel says «Sync stopped»), repeated failures with the same words push nothing more, and the pass that HEALS it is pushed', first && failed && healed && atError.filter((x) => x === 'error').length === 1 && afterHeal.filter((x) => x === 'error').length === 1 && afterHeal.slice(atError.length).includes('idle'), { atError, afterHeal });
+      ok('§16 (round 3) a pass that ENDS IN ERROR is pushed at once (mounts-updated — an open panel says «Sync stopped»), repeated failures with the same words push nothing more, and the pass that HEALS it is pushed', gateOf(first) && gateOf(failed) && gateOf(healed) && atError.filter((x) => x === 'error').length === 1 && afterHeal.filter((x) => x === 'error').length === 1 && verdictOf(afterHeal.slice(atError.length).includes('idle')), { atError, afterHeal });
     }
     { // round 3 (b): an id history.list names twice is fetched ONCE on the incremental road too
       const dir = path.join(tmp, 'mail-dup-inc'), b = box([]); plant(dir, [hex(0xba000000, 0)]); stateOf(dir, { historyId: '900', email: 'stand-in@example.invalid' });
@@ -378,7 +378,7 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       const X = hex(0xba000000, 9); b.history.push(X, X);
       const done = await until(() => b.history.length === 0 && w.state === 'idle' && w.count === 2);
       gs.stop('d');
-      ok('§16 (round 3) an id history.list names TWICE is fetched once on the incremental road (the seed page was already so)', first && done && b.got[X] === 1, { first, done, got: b.got[X] });
+      ok('§16 (round 3) an id history.list names TWICE is fetched once on the incremental road (the seed page was already so)', gateOf(first) && gateOf(done) && b.got[X] === 1, { first, done, got: b.got[X] });
     }
     { // ONE walk at a time: start() walks nothing of its own; the first pass walks once; two asks in flight share one walk
       GAP = 60000; // the loop parked after its first pass
@@ -392,14 +392,14 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
         const p = gs._seenIds(w), q = gs._seenIds(w); shared = p === q; await p; afterTwo = rootReads;
         gs.stop('o');
       } finally { fs.promises.readdir = ra; GAP = 30; }
-      ok('§16 ONE walk at a time: start() + its first pass read the folder ONCE; two asks while a walk runs share it (one more read, not two)', afterFirst === 1 && shared && afterTwo === 2, { afterFirst, shared, afterTwo });
+      ok('§16 ONE walk at a time: start() + its first pass read the folder ONCE; two asks while a walk runs share it (one more read, not two)', afterFirst === 1 && gateOf(shared) && afterTwo === 2, { afterFirst, shared, afterTwo });
     }
   } finally {
     globalThis.setTimeout = ST;
     for (const d of locked) { try { fs.chmodSync(d, 0o755); } catch { } }
   }
   const SB = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-  ok('§16 the sidebar SAYS a failed pass («Sync stopped: … — it tries again in 2 minutes», the server\'s words) — never «Synced — N emails» over a failure', /m\.gmailState === 'error'\) \{[\s\S]{0,400}tr\('Sync stopped: \{error\} — it tries again in 2 minutes', \{ error: m\.gmailError/.test(SB) && SB.indexOf("m.gmailState === 'error'") < SB.indexOf("tr('Synced — {n} emails'"));
+  ok('§16 the sidebar SAYS a failed pass («Sync stopped: … — it tries again in 2 minutes», the server\'s words) — never «Synced — N emails» over a failure', gateOf(/m\.gmailState === 'error'\) \{[\s\S]{0,400}tr\('Sync stopped: \{error\} — it tries again in 2 minutes', \{ error: m\.gmailError/.test(SB)) && SB.indexOf("m.gmailState === 'error'") < SB.indexOf("tr('Synced — {n} emails'"));
 }
 
 console.log('§12a rank 12a — a boot with the update switch on (no NO_AUTO_UPDATE) runs no update before its first loop turn');
@@ -410,7 +410,7 @@ console.log('§12a rank 12a — a boot with the update switch on (no NO_AUTO_UPD
   const pull = /autoUpdate\(|'git',\s*\[[^\]]*'pull'|'npm',\s*\['(?:install|ci|run)'/.exec(boot);
   ok('§12a server.js runs NO update before it listens — no autoUpdate(), no `git pull`, no npm install / build: a restart (systemd\'s, a crash, update.sh\'s own) serves at once; the update\'s one road is scripts/update.sh', boot.length > 1000 && !pull, pull && pull[0]);
   const US = fs.readFileSync(path.join(REPO, 'scripts/update.sh'), 'utf8');
-  ok('§12a …and the update road still pulls, installs, builds and THEN restarts (scripts/update.sh), so nothing is lost by the boot not pulling', /git pull --ff-only/.test(US) && /npm install --no-audit --no-fund/.test(US) && /npm run build/.test(US) && US.indexOf('npm run build') < US.indexOf('systemctl --user restart vibespace'));
+  ok('§12a …and the update road still pulls, installs, builds and THEN restarts (scripts/update.sh), so nothing is lost by the boot not pulling', gateOf(/git pull --ff-only/.test(US)) && gateOf(/npm install --no-audit --no-fund/.test(US)) && gateOf(/npm run build/.test(US)) && US.indexOf('npm run build') < US.indexOf('systemctl --user restart vibespace'));
 }
 
 { // B-574d (lane nl-journals, 主开发 r4939): THE POLL'S CURSOR THROUGH THE STORE WRITER — a pass whose cursor did not move hands NOTHING; one
@@ -435,7 +435,7 @@ console.log('§12a rank 12a — a boot with the update switch on (no NO_AUTO_UPD
   };
   const g = await cursorScene('real');
   ok('B-574d a Gmail pass whose cursor did NOT move (100 → 100, only its lastSyncAt) hands nothing — no write when nothing changed', g.a === 0, g);
-  ok('B-574d …a pass that moved it (100 → 101) hands ONE write under its row (gmail-state.write), nothing written on the hub\'s loop', g.b === 1 && g.name === 'gmail-state.write' && g.moved && g.loop === '', g);
+  ok('B-574d …a pass that moved it (100 → 101) hands ONE write under its row (gmail-state.write), nothing written on the hub\'s loop', g.b === 1 && g.name === 'gmail-state.write' && gateOf(g.moved) && g.loop === '', g);
   ok('B-574d …and the next pass reads the writer\'s OWED bytes (the file on disk still says 100): its cursor 101 is no move — nothing handed again', g.c === 1 && g.onDisk === '100', g);
   const r1 = await cursorScene('red-every', (gs, rec) => { gs._saveState = function (w, state) { rec.dirty(this._statePath(w), { name: 'gmail-state.write', produce: () => JSON.stringify(state) }); return Promise.resolve(true); }; });
   ok('RED B-574d a save that hands every pass (the release wrote at every pass, lastSyncAt alone): the unmoved cursor is written', r1.a === 1, r1);
@@ -458,10 +458,10 @@ console.log('§12a rank 12a — a boot with the update switch on (no NO_AUTO_UPD
     return { before, after: done, handed: owed !== null };
   };
   const wt = await waitScene('real');
-  ok('B-574d …a pass that moved its cursor is NOT done until the cursor LANDED (it waits off the loop) — the release\'s order', wt.handed && wt.before === false && wt.after === true, wt);
+  ok('B-574d …a pass that moved its cursor is NOT done until the cursor LANDED (it waits off the loop) — the release\'s order', gateOf(wt.handed) && wt.before === false && wt.after === true, wt);
   const wr = await waitScene('red-nowait', (gs) => { const orig = gs._saveState; gs._saveState = function (w, state) { orig.call(this, w, state); return undefined; }; });
   ok('RED B-574d a save whose landing nobody waits for: the pass is done while its cursor is still owed', wr.before === true, wr);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

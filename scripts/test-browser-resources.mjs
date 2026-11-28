@@ -59,7 +59,7 @@ const BE = require('../src/server/browser-env.js');
 const B = require('../src/browser-profiles.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const done = () => {
   console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);
@@ -303,7 +303,7 @@ console.log('\nⓐ two sessions, one machine (I1 + I2)');
 
     ab(Bv.env, ['close', '--all']);
     const after = String(ab(A.env, ['get', 'title']).stdout || '').trim();
-    ok(after.includes(tA), `A survives B's \`close --all\` (the command a tidying agent reaches for first) — A still on "${after}"`);
+    ok(verdictOf(after.includes(tA)), `A survives B's \`close --all\` (the command a tidying agent reaches for first) — A still on "${after}"`);
   }
 
   // PRE-FIX CONTROL — today's shape, reproduced inside our OWN namespace so it
@@ -329,7 +329,7 @@ console.log('\nⓐ two sessions, one machine (I1 + I2)');
   const uA = `VSCA${TAG}`, uB = `VSCB${TAG}`;
   open(cA, page(uA)); open(cB, page(uB));
   const cListA = String(ab(cA, ['tab', 'list']).stdout || '');
-  ok(cListA.includes(uB) && !cListA.includes(uA),
+  ok(gateOf(cListA.includes(uB)) && !cListA.includes(uA),
     'PRE-FIX CONTROL: with no session name, the second agent TOOK OVER the first\'s tab (the reported symptom)');
   ab(cB, ['close', '--all']);
   const cAfter = String(ab(cA, ['get', 'title']).stdout || '').trim();
@@ -490,10 +490,10 @@ console.log('\nⓒ two real sessions on a real server (the exit criterion)');
     await new Promise((r) => setTimeout(r, 3000));
     const e1 = envOf(sids[0]), e2 = envOf(sids[1]);
     if (ok(!!e1 && !!e2, 'both spawned processes are readable in /proc (the control: we are reading the real thing)')) {
-      ok(/^vs-bk-[0-9a-f]{8}$/.test(e1.AGENT_BROWSER_SESSION || ''), `session 1 really got AGENT_BROWSER_SESSION=${e1.AGENT_BROWSER_SESSION}`);
+      ok(verdictOf(/^vs-bk-[0-9a-f]{8}$/.test(e1.AGENT_BROWSER_SESSION || '')), `session 1 really got AGENT_BROWSER_SESSION=${e1.AGENT_BROWSER_SESSION}`);
       ok(e1.AGENT_BROWSER_NAMESPACE === e1.AGENT_BROWSER_SESSION, 'and the matching namespace (§3.2.4: context AND daemon socket)');
       ok(Number(e1.AGENT_BROWSER_IDLE_TIMEOUT_MS) > 0, `and an EXPLICIT idle timeout (${e1.AGENT_BROWSER_IDLE_TIMEOUT_MS} ms)`);
-      ok(!!e1.AGENT_BROWSER_CONFIG && fs.existsSync(e1.AGENT_BROWSER_CONFIG), 'and a generated config that EXISTS on disk');
+      ok(!!e1.AGENT_BROWSER_CONFIG && verdictOf(fs.existsSync(e1.AGENT_BROWSER_CONFIG)), 'and a generated config that EXISTS on disk');
       // lane browser-resume (§3.9): rung D's user-data-dir is the conversation's OWN kept directory (named by its key)
       ok(JSON.parse(fs.readFileSync(e1.AGENT_BROWSER_CONFIG, 'utf8')).profile === path.join(wt, 'data', 'browser-profiles', String(e1.AGENT_BROWSER_SESSION).replace(/^vs-/, '')), '…whose user-data-dir is the conversation\'s OWN kept directory (data/browser-profiles/<key>, variant D — lane browser-resume §3.9)');
       ok(e1.AGENT_BROWSER_SESSION !== e2.AGENT_BROWSER_SESSION,
@@ -505,7 +505,7 @@ console.log('\nⓒ two real sessions on a real server (the exit criterion)');
         .map((f) => { try { return JSON.parse(fs.readFileSync(path.join(metaDir, f), 'utf8')).browserKey; } catch { return null; } })
         .filter(Boolean);
       ok(keys.length === 2 && new Set(keys).size === 2, `both browser keys are RECORDED in session-meta (${keys.join(', ')}) — a resume has something to find`);
-      ok(keys.every((k) => `vs-${k}` === e1.AGENT_BROWSER_SESSION || `vs-${k}` === e2.AGENT_BROWSER_SESSION),
+      ok(verdictOf(keys.every((k) => `vs-${k}` === e1.AGENT_BROWSER_SESSION || `vs-${k}` === e2.AGENT_BROWSER_SESSION)),
         'and the recorded keys are the ones the processes actually got');
     }
     try { ws.close(); } catch { }
@@ -552,14 +552,14 @@ console.log('\nⓔ a project-level agent-browser.json fence survives the generat
   });
   // ARM A — today
   const a = await openAt(baseEnv('vs-arm-a'));
-  ok(REFUSED.test(a), `ARM A (today, no VibeSpace env, cwd = the project): the project fence REFUSES the navigation — "${a.trim().split('\n').pop().slice(0, 90)}"`);
+  ok(verdictOf(REFUSED.test(a)), `ARM A (today, no VibeSpace env, cwd = the project): the project fence REFUSES the navigation — "${a.trim().split('\n').pop().slice(0, 90)}"`);
   // ARM B — the product's resolver, handed the session's cwd
   const withPairs = (env, pairs) => { const e = { ...env }; for (const p of pairs) { const i = p.indexOf('='); const k = p.slice(0, i); if (k === 'AGENT_BROWSER_SESSION' || k === 'AGENT_BROWSER_NAMESPACE') continue; e[k] = p.slice(i + 1); } return e; };
   const resE = BE.create({ dataDir: DATA_E, homeDir: HOME_E, socketDirBase: path.join(HB, 'sb'), log: { warn() { }, log() { } } });
   const rb = resE.envFor({ browserKey: 'bk-e0e0e001', integrationOn: true, cwd: PROJ_E });
-  ok(rb.variant === 'D' && rb.projectConfig && rb.projectConfig.path === path.join(PROJ_E, 'agent-browser.json'), 'setup: the resolver landed on D and reports the project file it layered');
+  ok(rb.variant === 'D' && gateOf(rb.projectConfig) && rb.projectConfig.path === path.join(PROJ_E, 'agent-browser.json'), 'setup: the resolver landed on D and reports the project file it layered');
   const b = await openAt(withPairs(baseEnv('vs-arm-b'), rb.pairs));
-  ok(REFUSED.test(b), `ARM B (the product resolver at the same cwd): STILL refused — the fence rode into the generated config — "${b.trim().split('\n').pop().slice(0, 90)}"`);
+  ok(verdictOf(REFUSED.test(b)), `ARM B (the product resolver at the same cwd): STILL refused — the fence rode into the generated config — "${b.trim().split('\n').pop().slice(0, 90)}"`);
   // PRE-FIX CONTROL — round 2's resolver, one replacement, same cwd, same files
   const pre = mutantBE([[
     '    const eff = effectiveConfig(cwd);\n    const user = eff.config;',
@@ -569,7 +569,7 @@ console.log('\nⓔ a project-level agent-browser.json fence survives the generat
     const preR = pre.mod.create({ dataDir: path.join(ROOT, 'data-e-pre'), homeDir: HOME_E, socketDirBase: path.join(HB, 'sb'), log: { warn() { }, log() { } } });
     const rp = preR.envFor({ browserKey: 'bk-e0e0e002', integrationOn: true, cwd: PROJ_E });
     const c = await openAt(withPairs(baseEnv('vs-arm-pre'), rp.pairs));
-    ok(/FENCE PROBE PAGE/.test(c) && !REFUSED.test(c), `PRE-FIX CONTROL (round 2's user-only layering, same cwd): the navigation SUCCEEDS — the project fence was silently gone — "${c.trim().split('\n').pop().slice(0, 60)}"`);
+    ok(gateOf(/FENCE PROBE PAGE/.test(c)) && !REFUSED.test(c), `PRE-FIX CONTROL (round 2's user-only layering, same cwd): the navigation SUCCEEDS — the project fence was silently gone — "${c.trim().split('\n').pop().slice(0, 60)}"`);
     ok((rp.dropped || []).length === 0, '…and round 2 reported `dropped: []`, so nothing reached the journal about it');
     spawnSync('agent-browser', ['close', '--all'], { env: withPairs(baseEnv('vs-arm-pre'), rp.pairs), encoding: 'utf8', timeout: 60000 });
   }
@@ -614,18 +614,18 @@ console.log('\nⓖ a fenced session whose generated config cannot be written (r4
   const rg = mkG(BE, 'data-g').envFor({ browserKey: 'bk-e0e0e0f1', integrationOn: true });
   ok(rg.variant === 'N' && !rg.pairs.some((p) => p.startsWith('AGENT_BROWSER_PROFILE=')), `THE FIX: generated config unwritable + a FENCED config ⇒ variant N, no PROFILE pair (got ${rg.variant})`);
   const g = await openWith(envOf(rg.pairs));
-  ok(/FENCE C PROBE/.test(g) && !/not supported with --profile/.test(g), `THE FIX: the fenced session's browser WORKS on rung N — "${g.trim().split('\n').pop().slice(0, 70)}"`);
+  ok(gateOf(/FENCE C PROBE/.test(g)) && !/not supported with --profile/.test(g), `THE FIX: the fenced session's browser WORKS on rung N — "${g.trim().split('\n').pop().slice(0, 70)}"`);
   // PRE-FIX CONTROL: round 3's resolver — the fence not an input of the C rung
   const pre = mutantBE([['    const fenced = !!fence;', '    const fenced = false;']]);
   if (ok(!pre.err && pre.hits === 1, `PRE-FIX CONTROL is a patched copy of the real module with exactly ONE replacement ${pre.err || ''}`)) {
     const rp = mkG(pre.mod, 'data-g-pre').envFor({ browserKey: 'bk-e0e0e0f2', integrationOn: true });
-    ok(rp.variant === 'C' && rp.pairs.some((p) => p.startsWith('AGENT_BROWSER_PROFILE=')), 'PRE-FIX CONTROL: round 3 lands on C and exports AGENT_BROWSER_PROFILE beside the fence');
+    ok(rp.variant === 'C' && verdictOf(rp.pairs.some((p) => p.startsWith('AGENT_BROWSER_PROFILE='))), 'PRE-FIX CONTROL: round 3 lands on C and exports AGENT_BROWSER_PROFILE beside the fence');
     const c = await openWith(envOf(rp.pairs));
-    ok(/not supported with --profile/.test(c), `PRE-FIX CONTROL: …and the CLI refuses the command — "${c.trim().split('\n').pop().slice(0, 100)}"`);
+    ok(verdictOf(/not supported with --profile/.test(c)), `PRE-FIX CONTROL: …and the CLI refuses the command — "${c.trim().split('\n').pop().slice(0, 100)}"`);
   }
   // BOUND: the bare CLI on the same HOME works (fenced, so the local page is allowed)
   const b = await openWith(envOf([], false));
-  ok(/FENCE C PROBE/.test(b), `BOUND (bare CLI, same HOME): "${b.trim().split('\n').pop().slice(0, 60)}"`);
+  ok(verdictOf(/FENCE C PROBE/.test(b)), `BOUND (bare CLI, same HOME): "${b.trim().split('\n').pop().slice(0, 60)}"`);
   srv.close();
 }
 
@@ -661,14 +661,14 @@ console.log('\nⓗ a mid-task pin: the next command relaunches the browser (r4)'
     return { variant: r.variant, opened: String(opened.stdout || ''), chromeBefore, pr, chromeMid, url, title, chromeAfter };
   };
   const ctl = arm('bk-e0e0e0a1', null);
-  ok(ctl.variant === 'D' && ctl.chromeBefore && ctl.chromeAfter && ctl.chromeBefore.pid === ctl.chromeAfter.pid && /PIN PROBE PAGE/.test(ctl.title),
+  ok(ctl.variant === 'D' && gateOf(ctl.chromeBefore) && gateOf(ctl.chromeAfter) && ctl.chromeBefore.pid === ctl.chromeAfter.pid && verdictOf(/PIN PROBE PAGE/.test(ctl.title)),
     `CONTROL (no pin): the next command answers the open page on the SAME chromium (pid ${ctl.chromeBefore && ctl.chromeBefore.pid}, title "${ctl.title}")`);
   const pin = arm('bk-e0e0e0a2', path.join(HOME_H, '.agent-browser', 'vs-bp-pinned'));
-  ok(pin.pr && pin.pr.ok && pin.pr.appliesFrom === B.PIN_APPLIES_FROM, 'the pin applied, and its answer names the measured moment');
-  ok(pin.chromeMid && pin.chromeBefore && pin.chromeMid.pid === pin.chromeBefore.pid && pin.chromeMid.dir === pin.chromeBefore.dir,
+  ok(gateOf(pin.pr) && gateOf(pin.pr.ok) && pin.pr.appliesFrom === B.PIN_APPLIES_FROM, 'the pin applied, and its answer names the measured moment');
+  ok(gateOf(pin.chromeMid) && gateOf(pin.chromeBefore) && pin.chromeMid.pid === pin.chromeBefore.pid && pin.chromeMid.dir === pin.chromeBefore.dir,
     `right after the pin, with no command sent, the running chromium is UNTOUCHED (pid ${pin.chromeBefore && pin.chromeBefore.pid}, ephemeral dir)`);
   ok(pin.url === 'about:blank' && pin.title === '', `the NEXT command answers about:blank with an empty title — the open page is GONE (url "${pin.url}", title "${pin.title}")`);
-  ok(pin.chromeAfter && pin.chromeBefore && pin.chromeAfter.pid !== pin.chromeBefore.pid && pin.chromeAfter.dir === pin.pr.target,
+  ok(gateOf(pin.chromeAfter) && gateOf(pin.chromeBefore) && pin.chromeAfter.pid !== pin.chromeBefore.pid && pin.chromeAfter.dir === pin.pr.target,
     `…because the CLI RELAUNCHED chromium (pid ${pin.chromeBefore && pin.chromeBefore.pid} → ${pin.chromeAfter && pin.chromeAfter.pid}) onto the pinned directory`);
   ok(!/next browser launch/.test(String(pin.pr && pin.pr.appliesFrom)), 'the retired sentence ("next browser launch, never a running browser") is not what the route returns');
 }
@@ -703,21 +703,21 @@ console.log('\nⓘ HOME 38 vs 39: the fifth variable launches where round 3 was 
   ok(r38.variant === 'D' && !r38.pairs.some((p) => p.startsWith('AGENT_BROWSER_SOCKET_DIR=')), 'a 38-char HOME gets four pairs — the CLI\'s own root fits at exactly 103 bytes');
   const e38 = envOf(H38, r38.pairs);
   const t38 = tabList(e38);
-  ok(t38.status === 0 && /\[t1\]/.test(t38.out), `HOME 38: \`tab list\` launches and answers (${t38.out.split('\n').pop().slice(0, 50)})`);
+  ok(t38.status === 0 && verdictOf(/\[t1\]/.test(t38.out)), `HOME 38: \`tab list\` launches and answers (${t38.out.split('\n').pop().slice(0, 50)})`);
   closeAll(e38);
   const r39 = mkR(H39).envFor({ browserKey: 'bk-e0e0e0b2', integrationOn: true });
   const p39 = Object.fromEntries(r39.pairs.map((p) => [p.slice(0, p.indexOf('=')), p.slice(p.indexOf('=') + 1)]));
-  ok(p39.AGENT_BROWSER_SOCKET_DIR === sdir && r39.socket && r39.socket.bytes === 104, `a 39-char HOME gets the FIFTH pair (the CLI's own root would be ${r39.socket && r39.socket.bytes} bytes)`);
+  ok(p39.AGENT_BROWSER_SOCKET_DIR === sdir && gateOf(r39.socket) && r39.socket.bytes === 104, `a 39-char HOME gets the FIFTH pair (the CLI's own root would be ${r39.socket && r39.socket.bytes} bytes)`);
   const e39 = envOf(H39, r39.pairs);
   const t39 = tabList(e39);
-  ok(t39.status === 0 && /\[t1\]/.test(t39.out), `THE FIX: HOME 39 + AGENT_BROWSER_SOCKET_DIR — \`tab list\` launches and answers (${t39.out.split('\n').pop().slice(0, 50)})`);
+  ok(t39.status === 0 && verdictOf(/\[t1\]/.test(t39.out)), `THE FIX: HOME 39 + AGENT_BROWSER_SOCKET_DIR — \`tab list\` launches and answers (${t39.out.split('\n').pop().slice(0, 50)})`);
   let info = null; try { info = JSON.parse(String(spawnSync('agent-browser', ['session', 'info', '--json'], { env: e39, encoding: 'utf8', timeout: 30000 }).stdout || '')).data; } catch { }
-  ok(!!info && info.active === true && String(info.socketDir).startsWith(sdir + '/'), `…and its live daemon's socket really sits under our directory (${info && info.socketDir})`);
+  ok(!!info && info.active === true && verdictOf(String(info.socketDir).startsWith(sdir + '/')), `…and its live daemon's socket really sits under our directory (${info && info.socketDir})`);
   closeAll(e39);
   const pre = tabList(envOf(H39, r39.pairs, ['AGENT_BROWSER_SOCKET_DIR']));
-  ok(/is too long/.test(pre.out) && /104 bytes \(max 103\)/.test(pre.out), `PRE-FIX CONTROL: the same session WITHOUT the fifth variable is refused at its first command — "${pre.out.split('\n')[0].slice(0, 90)}" (round 3's regression)`);
+  ok(gateOf(/is too long/.test(pre.out)) && verdictOf(/104 bytes \(max 103\)/.test(pre.out)), `PRE-FIX CONTROL: the same session WITHOUT the fifth variable is refused at its first command — "${pre.out.split('\n')[0].slice(0, 90)}" (round 3's regression)`);
   const bare = tabList({ PATH: process.env.PATH, HOME: H39, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(B.DEFAULT_IDLE_TIMEOUT_MS) });
-  ok(bare.status === 0 && /\[t1\]/.test(bare.out), `BOUND: the bare CLI's \`default\` name still works at 39 (${bare.out.split('\n').pop().slice(0, 50)}) — the shape round 3 regressed from`);
+  ok(bare.status === 0 && verdictOf(/\[t1\]/.test(bare.out)), `BOUND: the bare CLI's \`default\` name still works at 39 (${bare.out.split('\n').pop().slice(0, 50)}) — the shape round 3 regressed from`);
   closeAll({ PATH: process.env.PATH, HOME: H39 });
 }
 
@@ -749,25 +749,25 @@ console.log('\nⓕ two remote-shaped sessions on a host whose config names a pro
   const closeAll = (pairs) => { const env = { PATH: process.env.PATH, HOME: HOME_F }; for (const p of pairs) { const i = p.indexOf('='); env[p.slice(0, i)] = p.slice(i + 1); } spawnSync('agent-browser', ['close', '--all'], { env, encoding: 'utf8', timeout: 60000 }); };
   const KA = 'bk-f0f0f0a1', KB = 'bk-f0f0f0b2';
   const A = lineFor(KA, page('REMOTE-A')), Bl = lineFor(KB, page('REMOTE-B'));
-  ok(A.variant === 'H' && A.prelude.includes('AGENT_BROWSER_PROFILE=') && /-name 'vs-bk-\*'/.test(A.line), 'setup: the resolver answered H and the real composition carries the host-decision fragment');
+  ok(A.variant === 'H' && gateOf(A.prelude.includes('AGENT_BROWSER_PROFILE=')) && verdictOf(/-name 'vs-bk-\*'/.test(A.line)), 'setup: the resolver answered H and the real composition carries the host-decision fragment');
   const OWNEDbefore = new Set(OWNED);
   const ra = runLine(A.line), rbb = runLine(Bl.line);
-  ok(ra.status === 0 && /REMOTE-A/.test(ra.out), `THE FIX: session A launches (${ra.out.split('\n').pop().slice(0, 80)})`);
-  ok(rbb.status === 0 && /REMOTE-B/.test(rbb.out) && !/SingletonLock/.test(rbb.out), `THE FIX: session B launches TOO on the same profile-naming host (${rbb.out.split('\n').pop().slice(0, 80)})`);
+  ok(ra.status === 0 && verdictOf(/REMOTE-A/.test(ra.out)), `THE FIX: session A launches (${ra.out.split('\n').pop().slice(0, 80)})`);
+  ok(rbb.status === 0 && gateOf(/REMOTE-B/.test(rbb.out)) && !/SingletonLock/.test(rbb.out), `THE FIX: session B launches TOO on the same profile-naming host (${rbb.out.split('\n').pop().slice(0, 80)})`);
   const newDirs = [...OWNED].filter((d) => !OWNEDbefore.has(d));
   const scratch = path.join(HOME_F, '.vibespace', 'browser-profiles');
-  ok(newDirs.length === 2 && newDirs.every((d) => d.startsWith(scratch + '/vs-bk-')),
+  ok(newDirs.length === 2 && verdictOf(newDirs.every((d) => d.startsWith(scratch + '/vs-bk-'))),
     `both chromiums resolved a PER-KEY dir under ~/.vibespace/browser-profiles (${newDirs.map((d) => path.basename(d)).join(', ')}) — rung C, decided on the "host"`);
-  ok(fs.existsSync(path.join(scratch, 'vs-' + KA)) && fs.existsSync(path.join(scratch, 'vs-' + KB)), 'and the CLI created those directories itself (nothing of ours pre-created them)');
+  ok(gateOf(fs.existsSync(path.join(scratch, 'vs-' + KA))) && verdictOf(fs.existsSync(path.join(scratch, 'vs-' + KB))), 'and the CLI created those directories itself (nothing of ours pre-created them)');
   const lockA = path.join(scratch, 'vs-' + KA, 'SingletonLock');
-  ok(fs.lstatSync(lockA).isSymbolicLink() && !fs.existsSync(lockA), 'while a browser runs its SingletonLock is a DANGLING symlink — the shape the sweep tests with -L');
+  ok(gateOf(fs.lstatSync(lockA).isSymbolicLink()) && !fs.existsSync(lockA), 'while a browser runs its SingletonLock is a DANGLING symlink — the shape the sweep tests with -L');
   closeAll(A.pairs); closeAll(Bl.pairs);
   // PRE-FIX CONTROL — round 2's line: the same composition with no fragment
   const A0 = lineFor('bk-f0f0f0c3', page('R2-A'), { fragment: false }), B0 = lineFor('bk-f0f0f0d4', page('R2-B'), { fragment: false });
-  ok(!A0.line.includes('AGENT_BROWSER_PROFILE') && A0.line.includes('AGENT_BROWSER_NAMESPACE='), 'PRE-FIX CONTROL: round 2\'s line — the three names, no host decision');
+  ok(!A0.line.includes('AGENT_BROWSER_PROFILE') && verdictOf(A0.line.includes('AGENT_BROWSER_NAMESPACE=')), 'PRE-FIX CONTROL: round 2\'s line — the three names, no host decision');
   const c1 = runLine(A0.line), c2 = runLine(B0.line);
-  ok(c1.status === 0 && /R2-A/.test(c1.out), `PRE-FIX CONTROL: the first session launches (${c1.out.split('\n').pop().slice(0, 60)})`);
-  ok(c2.status !== 0 && /SingletonLock|ProcessSingleton|exited early/.test(c2.out),
+  ok(c1.status === 0 && verdictOf(/R2-A/.test(c1.out)), `PRE-FIX CONTROL: the first session launches (${c1.out.split('\n').pop().slice(0, 60)})`);
+  ok(c2.status !== 0 && verdictOf(/SingletonLock|ProcessSingleton|exited early/.test(c2.out)),
     `PRE-FIX CONTROL: the SECOND fails to launch — ${(c2.out.match(/SingletonLock[^\n]{0,60}|ProcessSingleton[^\n]{0,40}/) || ['<no singleton error>'])[0]}`);
   closeAll(A0.pairs); closeAll(B0.pairs);
   // TODAY'S SHAPE — no VibeSpace env at all: both launch in one shared daemon
@@ -781,7 +781,7 @@ console.log('\nⓕ two remote-shaped sessions on a host whose config names a pro
   const ownedN = new Set(OWNED);
   const n1 = runLine(N1.line), n2 = runLine(N2.line);
   const ephemeral = [...OWNED].filter((d) => !ownedN.has(d));
-  ok(n1.status === 0 && n2.status === 0 && ephemeral.length === 2 && ephemeral.every((d) => !d.startsWith(scratch)),
+  ok(n1.status === 0 && n2.status === 0 && ephemeral.length === 2 && verdictOf(ephemeral.every((d) => !d.startsWith(scratch))),
     `BOUND (no profile named): the fragment exports nothing and both browsers launch on the CLI's own ephemeral dirs (${ephemeral.map((d) => d.replace(/^\/tmp\//, '').slice(0, 28)).join(', ')})`);
   closeAll(N1.pairs); closeAll(N2.pairs);
 }
@@ -834,7 +834,7 @@ WATCHDOG.clear();
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\nⓙ the patched copies never touch the tree');
-for (const r of copiesCensus(MUTBR.files, MUTBR.dir, REPO_DIR, { minCopies: 2 })) ok(r.pass, 'ⓙ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTBR.files, MUTBR.dir, REPO_DIR, { minCopies: 2 })) ok(verdictOf(r.pass), 'ⓙ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`\n  · reaped ${reap()} further process(es) this suite started`);
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

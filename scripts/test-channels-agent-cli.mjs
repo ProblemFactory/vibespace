@@ -20,11 +20,11 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const CLI = path.join(REPO, 'data/bin/vibespace-channels');
-ok(fs.existsSync(CLI) && (fs.statSync(CLI).mode & 0o111) !== 0, 'data/bin/vibespace-channels exists and is executable');
-ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vibespace-channels'), 'it is in HostManager.AGENT_TOOLS (ships to remote hosts with the other tools)');
-ok(fs.existsSync(path.join(REPO, 'docs/agent/channels-manual.md')) && require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.channels === 'channels-manual.md', 'the manual exists and the docs route knows the topic');
+ok(gateOf(fs.existsSync(CLI)) && (fs.statSync(CLI).mode & 0o111) !== 0, 'data/bin/vibespace-channels exists and is executable');
+ok(verdictOf(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vibespace-channels')), 'it is in HostManager.AGENT_TOOLS (ships to remote hosts with the other tools)');
+ok(gateOf(fs.existsSync(path.join(REPO, 'docs/agent/channels-manual.md'))) && require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.channels === 'channels-manual.md', 'the manual exists and the docs route knows the topic');
 
 // ── r7: THE REFUSED-SET CENSUS ────────────────────────────────────────────
 // The CLI's `refresh` treats a closed set of codes as a REFUSAL (exit 4, "not
@@ -59,11 +59,11 @@ const cliRefused = cliSetM ? [...cliSetM[1].matchAll(/'([^']+)'/g)].map((m) => m
 ok(ROUTE_STATUS.size >= 8 && routeRetryable.length >= 7, `CENSUS setup: the agent route's STATUS table parsed — ${ROUTE_STATUS.size} codes, ${routeRetryable.length} retry-able (429/409/503): ${routeRetryable.join(', ')}`);
 const esrc = engineSource(REPO);
 const requestSetRegion = esrc.slice(esrc.indexOf('async function pass(adapterId'), esrc.indexOf('async function watch(adapterId'));
-ok(REPLY_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`)) && REPLY_ONLY.every((c) => asrc.includes(`'${c}'`) || esrc.includes(`'${c}'`)), `CENSUS: the retry-able codes excepted as reply / compose only (${REPLY_ONLY.join(', ')}) are never spelled in the engine's pass / request-set region and are spelled by the reply path`);
-ok(GRANT_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`) && ROUTE_STATUS.get(c) === 409), `CENSUS: the grant row's refusals (${GRANT_ONLY.join(', ')}) are 409 on the agent route and never spelled in the engine's pass / request-set region (the watch verb's alone — lane held-except-doors r2)`, GRANT_ONLY.map((c) => `${c}:${ROUTE_STATUS.get(c)}`).join(' '));
+ok(gateOf(REPLY_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`))) && verdictOf(REPLY_ONLY.every((c) => asrc.includes(`'${c}'`) || esrc.includes(`'${c}'`))), `CENSUS: the retry-able codes excepted as reply / compose only (${REPLY_ONLY.join(', ')}) are never spelled in the engine's pass / request-set region and are spelled by the reply path`);
+ok(verdictOf(GRANT_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`) && ROUTE_STATUS.get(c) === 409)), `CENSUS: the grant row's refusals (${GRANT_ONLY.join(', ')}) are 409 on the agent route and never spelled in the engine's pass / request-set region (the watch verb's alone — lane held-except-doors r2)`, GRANT_ONLY.map((c) => `${c}:${ROUTE_STATUS.get(c)}`).join(' '));
 ok(cliRefused.length > 0 && JSON.stringify(cliRefused) === JSON.stringify(expectedRefused), `CENSUS: the CLI's REFRESH_REFUSED set == the route's retry-able refresh codes — [${cliRefused.join(', ')}]`, `cli [${cliRefused.join(', ')}] vs route [${expectedRefused.join(', ')}]`);
 const words = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
-ok(cliRefused.every((c) => words.includes(`case '${c}'`)), 'CENSUS: every refused code has its own words in channel-words.js (the panel says it in the device\'s language)', cliRefused.filter((c) => !words.includes(`case '${c}'`)).join(', '));
+ok(verdictOf(cliRefused.every((c) => words.includes(`case '${c}'`))), 'CENSUS: every refused code has its own words in channel-words.js (the panel says it in the device\'s language)', cliRefused.filter((c) => !words.includes(`case '${c}'`)).join(', '));
 // one fixture per refused code: the route's status, the engine's own sentence (verbatim from the engine's refusal builders / the route), the wait where the engine gives one
 const REFUSAL_FIXTURES = {
   'refresh-floor': { error: 'this conversation was refreshed 8 s ago (floor 20 s) — read it now, or refresh again in 12 s', retryAfterSec: 12 },
@@ -82,13 +82,13 @@ ok(JSON.stringify(Object.keys(REFUSAL_FIXTURES).sort()) === JSON.stringify(expec
   const twin = fs.existsSync(path.join(REPO, twinRel)) ? fs.readFileSync(path.join(REPO, twinRel), 'utf-8') : '';
   const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const MOVED = ['// ── the verbs ─', '// ── 2026-09-26: the agent', '// ── 2026-09-27: WITHDRAW and --replaces ──', '// ── lane channel-threads (spec §5)', '// ── lane channel-attach-read (B-d6b9)', '// ── ⑳ design 008 S6 (lane channels-followups)', '// ── ㉑ lane channels-proposals-recall', '// ── ㉒ lane channels-search-says-hidden', '㉓ lane judged-watch-state (B-f42e)', '// ── ㉔ lane channel-reauth-visible'];
-  ok(MOVED.every((h) => twin.includes(h)) && MOVED.every((h) => here.split(h).length === 2) && !/http\.createServer\(|execFile\(|await run\(/.test(here),
+  ok(gateOf(MOVED.every((h) => twin.includes(h))) && gateOf(MOVED.every((h) => here.split(h).length === 2)) && !/http\.createServer\(|execFile\(|await run\(/.test(here),
     `§T the heavy twin holds the ${MOVED.length} sections that run the CLI as a child (the verbs … ㉔), and this file runs none of them`);
   const fixturesOf = (t) => { const a = t.indexOf('const REFUSAL_FIXTURES = {'); const b = a < 0 ? -1 : t.indexOf('\n', t.indexOf('REFUSAL_FIXTURES[c].status = ', a)); return a >= 0 && b > a ? t.slice(a, b) : null; };
   ok(fixturesOf(here) !== null && fixturesOf(here) === fixturesOf(twin), '§T the twin serves THIS file\'s refusal fixtures, byte for byte (the ones the census above judged)');
   const ci = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
-  ok(/\{ name: 'test-channels-agent-cli-verbs', tier: 'heavy',/.test(ci), '§T the twin is a HEAVY row of the tier');
+  ok(verdictOf(/\{ name: 'test-channels-agent-cli-verbs', tier: 'heavy',/.test(ci)), '§T the twin is a HEAVY row of the tier');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -55,7 +55,7 @@ import { filesOf, sitesOf, walk, scopeOf } from './sync-fs-census.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? wholeDetail(d) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? wholeDetail(d) : '')); } };
 
 // channel-store-off-loop (commit 1): THE CENSUS LEARNS WHAT IT MISSED — a directory made (mkdirSync), a file opened for
 // write or append (openSync whose flags are not a read's), a tree or a file removed (rmSync, unlinkSync) hold the loop on a
@@ -433,19 +433,19 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
   const doorMiss = doors.filter(([fn]) => doorBad(fn, bodyOf(fn))).map(([fn]) => fn);
   {   // the census can go red: a door given a synchronous wait «for durability» (the sequence the verifier named)
     const b = bodyOf('adaptersUpdate'), waited = b.replace('return paced ? run', 'writeNow(adaptersFile);\n    return paced ? run');
-    ok(b !== waited && !doorBad('adaptersUpdate', b) && doorBad('adaptersUpdate', waited), 'NEGATIVE CONTROL (cure r1, C3): adaptersUpdate given a synchronous writeNow(adaptersFile) is a door that WAITS — red by name');
+    ok(b !== waited && !doorBad('adaptersUpdate', b) && verdictOfGuard(doorBad('adaptersUpdate', waited)), 'NEGATIVE CONTROL (cure r1, C3): adaptersUpdate given a synchronous writeNow(adaptersFile) is a door that WAITS — red by name');
     const oweB = bodyOf('owe'), landedB = bodyOf('landed');
-    ok((oweB.match(/writeNow\(/g) || []).length === 1 && /\n    if \(closed\) writeNow\(file\);/.test(oweB) && /async function landed\(/.test(cs) && landedB && !WAITS_RE.test(landedB),
+    ok((oweB.match(/writeNow\(/g) || []).length === 1 && gateOf(/\n    if \(closed\) writeNow\(file\);/.test(oweB)) && gateOf(/async function landed\(/.test(cs)) && gateOf(landedB) && !WAITS_RE.test(landedB),
       'owe() writes through the writer synchronously ONLY after close() (`if (closed) writeNow(file)` — its one wait), and a durable door\'s landed() is ASYNC (no synchronous wait inside it)', { oweB, landedB: landedB.slice(0, 300) });
   }
-  ok(!doorMiss.length && /if \(!e \|\| e\.code !== 'ENOENT' \|\| !m\.makeDir\) throw e;\n\s*fs\.mkdirSync\(path\.dirname\(m\.file\), \{ recursive: true/.test(src('src/store-writer-worker.js')), `the channel store's moved doors (${doors.map(([fn]) => fn).join(', ')}) hand their bytes to the writer by name, with no synchronous call AND no synchronous wait of their own; the writer's thread makes a missing parent directory ONLY for a write that asks (makeDir — the people door)`, doorMiss);
-  ok(/W\(\)\.dirty\(indexFile, \{ name: 'channels-index\.write'/.test(cs) && !/writeBuffersAtomic\(indexFile/.test(cs), 'the channels index: markDirty / flush hand it to the store writer — no writeBuffersAtomic(indexFile …) left on the main thread');
-  ok(/storeWriter\(\)\.dirty\(fp, \{ name: 'session-meta\.write'/.test(ss) && /const firstVersion = !sync && !knownOnDisk\(META_DIR, fp\);/.test(ss), 'session-meta: its UPDATES through the writer; only a meta that does not exist ON DISK yet (a socket being born — round 3, law 3) is written synchronously (the durable row)');
-  ok(/storeWriter\(\)\.dirty\(this\.cursorsFile, \{ name: 'usage-cursors\.write'/.test(uh) && !/timedSync\('usage-cursors\.write', \(\) => this\._writeAtomic/.test(uh), 'the usage cursors through the writer');
-  ok(/storeWriter\(\)\.dirty\(fp, \{ name: 'usage-rates\.write'/.test(ue) && !/fs\.renameSync\(fp \+ '\.tmp', fp\)/.test(ue), 'the estimator\'s rates through the writer');
+  ok(!doorMiss.length && verdictOfGuard(/if \(!e \|\| e\.code !== 'ENOENT' \|\| !m\.makeDir\) throw e;\n\s*fs\.mkdirSync\(path\.dirname\(m\.file\), \{ recursive: true/.test(src('src/store-writer-worker.js'))), `the channel store's moved doors (${doors.map(([fn]) => fn).join(', ')}) hand their bytes to the writer by name, with no synchronous call AND no synchronous wait of their own; the writer's thread makes a missing parent directory ONLY for a write that asks (makeDir — the people door)`, doorMiss);
+  ok(gateOf(/W\(\)\.dirty\(indexFile, \{ name: 'channels-index\.write'/.test(cs)) && !/writeBuffersAtomic\(indexFile/.test(cs), 'the channels index: markDirty / flush hand it to the store writer — no writeBuffersAtomic(indexFile …) left on the main thread');
+  ok(gateOf(/storeWriter\(\)\.dirty\(fp, \{ name: 'session-meta\.write'/.test(ss)) && verdictOfGuard(/const firstVersion = !sync && !knownOnDisk\(META_DIR, fp\);/.test(ss)), 'session-meta: its UPDATES through the writer; only a meta that does not exist ON DISK yet (a socket being born — round 3, law 3) is written synchronously (the durable row)');
+  ok(gateOf(/storeWriter\(\)\.dirty\(this\.cursorsFile, \{ name: 'usage-cursors\.write'/.test(uh)) && !/timedSync\('usage-cursors\.write', \(\) => this\._writeAtomic/.test(uh), 'the usage cursors through the writer');
+  ok(gateOf(/storeWriter\(\)\.dirty\(fp, \{ name: 'usage-rates\.write'/.test(ue)) && !/fs\.renameSync\(fp \+ '\.tmp', fp\)/.test(ue), 'the estimator\'s rates through the writer');
   // lane job-logs-sweep: the job-logs catch-up's record was born on the writer (paced — the hub's bookkeeping; a lost last write
   // costs at most one repeated «catch-up» start line, the next boot counting again what is left)
-  ok(/storeWriter\(\)\.dirty\(this\.logsSweepFile, \{ name: 'jobs-logs-sweep\.write'/.test(jb) && !/(writeJsonAtomic|writeFileSync|renameSync)\(this\.logsSweepFile/.test(jb), 'the job-logs catch-up record through the writer — never a synchronous write of it');
+  ok(gateOf(/storeWriter\(\)\.dirty\(this\.logsSweepFile, \{ name: 'jobs-logs-sweep\.write'/.test(jb)) && !/(writeJsonAtomic|writeFileSync|renameSync)\(this\.logsSweepFile/.test(jb), 'the job-logs catch-up record through the writer — never a synchronous write of it');
   // lane lg-store-writes U1 (B-0248): the decision engine's memo (paced) and day's counter (an act: rank 0; the judge call
   // that changed it answers once its durable() resolves) hand their bytes to the writer by name — no synchronous write of either
   const de = src('src/server/decision-engine.js');
@@ -453,26 +453,26 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
     return /W\(\)\.dirty\(F\.memo, \{ name: 'decision-memo\.write'/.test(t) && /W\(\)\.dirty\(F\.usage, \{ name: 'decision-usage\.write', rank: 0/.test(t)
       && /return W\(\)\.durable\(F\.usage\)/.test(t) && /if \(call\.counted\) await call\.counted;/.test(t) && !/writeJsonAtomic\(/.test(t) && w.length === 0
       && /W\(\)\.dirty\(F\.journal, \{ name: 'decision-journal\.write', rank: 0, urgent: true/.test(t); };   // B-0248's next part (r2417): the journal too
-  ok(deMoved(de), 'the decision memo (paced), the day\'s counter (an act: rank 0 — the CALL that changed it waits for its durable(), the loop never) and the journal (rank 0, urgent — a call\'s reservation lands before its ask) through the writer — no synchronous write left in the file');
+  ok(verdictOfGuard(deMoved(de)), 'the decision memo (paced), the day\'s counter (an act: rank 0 — the CALL that changed it waits for its durable(), the loop never) and the journal (rank 0, urgent — a call\'s reservation lands before its ask) through the writer — no synchronous write left in the file');
   ok(!deMoved(de.replace("W().dirty(F.memo, { name: 'decision-memo.write'", "fs.writeFileSync(F.memo, { name: 'decision-memo.write'")), 'NEGATIVE CONTROL (lg-store-writes U1): the memo written synchronously again is red');
   // lane lg-store-writes U2 (B-0248): the outstanding-deliveries table (src/turn-carry.js) — a mark an act (rank 0 +
   // durable()), the rest paced — hands its bytes to the writer by name; no synchronous write of it is left
   const tc = src('src/turn-carry.js');
   const tcMoved = (t) => /W\(\)\.dirty\(file, \{ name: 'turn-carry-outstanding\.write', \.\.\.\(act \? \{ rank: 0 \} : \{\}\)/.test(t) && /if \(act\) W\(\)\.durable\(file\)/.test(t)
     && /mark\(key, info\) \{ if \(!key\) return true; rows\[key\] = info; return save\(\{ act: true \}\); \}/.test(t) && !/fs\.(writeFileSync|renameSync)\(/.test(t);
-  ok(tcMoved(tc), 'the outstanding-deliveries table through the writer (a mark an act, rank 0 + durable(); a clear paced) — no writeFileSync / renameSync left in src/turn-carry.js');
+  ok(verdictOfGuard(tcMoved(tc)), 'the outstanding-deliveries table through the writer (a mark an act, rank 0 + durable(); a clear paced) — no writeFileSync / renameSync left in src/turn-carry.js');
   ok(!tcMoved(tc.replace("return JSON.stringify(rows); },", "return JSON.stringify(rows); }, x: fs.writeFileSync(file + '.tmp', ''),")), 'NEGATIVE CONTROL (lg-store-writes U2): a synchronous write of the table put back is red');
   // lane lg-store-writes U4 (B-0248): the jobs store's save — jobs.json and job-notifications.json by name; a direct save is an
   // act (rank 0 + durable()), the 2 s tick paced; no writeJsonAtomic of either file left
   const jbMoved = (t) => /W\.dirty\(this\.file, \{ name: 'jobs\.write', \.\.\.\(paced \? \{\} : \{ rank: 0, urgent: true \}\)/.test(t) && /W\.dirty\(this\.notifsFile, \{ name: 'jobs-notifs\.write'/.test(t)
     && /setInterval\(\(\) => \{ if \(this\._dirty\) this\._save\(\{ paced: true \}\); \}, 2000\)/.test(t) && !/writeJsonAtomic\(this\.(file|notifsFile)\b/.test(t);
-  ok(jbMoved(jb), 'the jobs store (jobs.json + job-notifications.json) through the writer — a direct save an act, the 2 s tick paced; no synchronous write of either left');
+  ok(verdictOfGuard(jbMoved(jb)), 'the jobs store (jobs.json + job-notifications.json) through the writer — a direct save an act, the 2 s tick paced; no synchronous write of either left');
   ok(!jbMoved(jb.replace("W.dirty(this.file, { name: 'jobs.write',", "writeJsonAtomic(this.file, []); W.dirty(this.file, { name: 'jobs.write',")), 'NEGATIVE CONTROL (lg-store-writes U4): a synchronous write of jobs.json put back is red');
   // lane lg-store-writes U5 (B-0248): the Task Groups' store — task-groups.json by name, an act (rank 0 + durable()); no
   // synchronous write of it left
   const tgs = src('src/task-groups.js');
   const tgMoved = (t) => /W\.dirty\(this\._file, \{ name: 'task-groups\.write', rank: 0/.test(t) && !/fs\.(writeFileSync|renameSync)\(tmp, this\._file\)/.test(t) && !/timedSync\('task-groups\.write'/.test(t);   // stale-pins: kept — a deliberate absence check: the old synchronous write of task-groups.json must be gone
-  ok(tgMoved(tgs), 'the Task Groups\' store (task-groups.json) through the writer — an act, its routes answer once on disk; no synchronous write of it left');
+  ok(verdictOfGuard(tgMoved(tgs)), 'the Task Groups\' store (task-groups.json) through the writer — an act, its routes answer once on disk; no synchronous write of it left');
   ok(!tgMoved(tgs.replace("W.dirty(this._file, { name: 'task-groups.write',", "fs.writeFileSync(tmp, this._file); W.dirty(this._file, { name: 'task-groups.write',")), 'NEGATIVE CONTROL (lg-store-writes U5): a synchronous write of task-groups.json put back is red');
   // lane lg-store-writes, the U4/U5 cure (主开发's as-if-musts): EVERY route that waits on its store's write answers on the
   // writer's SYNCHRONOUS road — persisted(answer), called inside the writer's settle, so an answer still waiting at the hub's
@@ -493,7 +493,7 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
     && /    answerOnDisk\(res, \{\n      success: true,\n      backlog: sortBacklog\(/.test(t.ar) && /return answerOnDisk\(res, \{ success: true, group: brief\(tasks\.view\(bind\.id\)\) \}\)/.test(t.ar)
     && cnt(t.rcr, /answer: \(r\) => \{ try \{/g) === 2 && /  announce\(job, text\) \{[\s\S]{0,1600}?this\._save\(stashed \? \{\} : \{ paced: true \}\);/.test(t.jb)
     && ![t.ar, t.jw, t.tw, t.rcr].some((x) => /persisted\(\)\.then\(/.test(x));
-  ok(cureAnswers(cureT), 'the U4/U5 cure: every waiting route answers on the writer\'s synchronous road (jobs 4 + 5, the Task Group panel\'s 7, the record clear\'s 2); a group-admin unbind / update / create / bind and every writing backlog verb wait (the deferred-save census: create and bind too; the census cure: a backlog add, done, drop, edit and unclaim too); announce paced (urgent only when its owner copy was only stashed — the moved2 cure 2); no persisted().then( left');
+  ok(verdictOfGuard(cureAnswers(cureT)), 'the U4/U5 cure: every waiting route answers on the writer\'s synchronous road (jobs 4 + 5, the Task Group panel\'s 7, the record clear\'s 2); a group-admin unbind / update / create / bind and every writing backlog verb wait (the deferred-save census: create and bind too; the census cure: a backlog add, done, drop, edit and unclaim too); announce paced (urgent only when its owner copy was only stashed — the moved2 cure 2); no persisted().then( left');
   ok(!cureAnswers({ ...cureT, jw: cureT.jw.replace('jm.persisted((saved) => {', 'jm.persisted().then((saved) => {') }), 'NEGATIVE CONTROL (the U4/U5 cure): one jobs route back on the promise road is red');   // stale-pins: kept — a negative control: the route as it was before the cure
   {   // the census cure (主开发 2026-11-19 08:56Z, the hunt's finding 2): EVERY writing backlog verb answers once on disk — RED (anchored): the run's own answer
     const { anchored } = await import('./scratch.mjs');
@@ -507,7 +507,7 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
   // (a store with an unrelated save queued before the run, then reshaped by a migration, lands too); the old «owed before» set is gone
   const mg = src('src/server/migrations.js');
   const landByVersion = (t) => /before = new Map\(SWm\.stats\(\)\.map\(\(s\) => \[s\.file, s\.version\]\)\)/.test(t) && /\(s\.dirty \|\| s\.inflight\) && s\.file && s\.version !== before\.get\(s\.file\)/.test(t) && !/owedBefore/.test(t);   // stale-pins: kept — a deliberate absence check: the old «owed before» set must not come back
-  ok(landByVersion(mg) && /version: s\.version,/.test(src('src/store-writer.js')), 'the U4/U5 cure: the boot\'s migrations land the stores whose change count moved while they ran (the writer\'s stats() carries it)');
+  ok(gateOf(landByVersion(mg)) && verdictOfGuard(/version: s\.version,/.test(src('src/store-writer.js'))), 'the U4/U5 cure: the boot\'s migrations land the stores whose change count moved while they ran (the writer\'s stats() carries it)');
   ok(!landByVersion(mg.replace('s.version !== before.get(s.file)', '!before.has(s.file)')), 'NEGATIVE CONTROL (the U4/U5 cure): «not owed before the run» back in place of the change count is red');
   // the U4/U5 cure (as-if-must 3): «not on disk» reaches the PERSON — the page's two fetch doors (fetchJson, api()) and the
   // two helpers that fetch on their own (the Task Groups' _taskApi, the import button) say an answer's notOnDisk in the
@@ -516,25 +516,25 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
     && /export async function fetchJson\(url, opts\) \{[\s\S]{0,300}?sayNotOnDisk\(body\);/.test(u) && /export async function api\(url, opts\) \{[\s\S]{0,900}?sayNotOnDisk\(body\);\s*return body;/.test(u)
     && /if \(res\.ok\) sayNotOnDisk\(data\);/.test(s2) && /sayNotOnDisk\(d\);/.test(t2);
   const pg = [src('src/lib/utils.js'), src('src/lib/sidebar-tasks.js'), src('src/lib/task-detail.js')];
-  ok(pageSays(...pg), 'the U4/U5 cure: the page says an answer\'s notOnDisk — fetchJson, api(), the Task Groups\' _taskApi and the import button, in the release\'s own sentence');
+  ok(verdictOfGuard(pageSays(...pg)), 'the U4/U5 cure: the page says an answer\'s notOnDisk — fetchJson, api(), the Task Groups\' _taskApi and the import button, in the release\'s own sentence');
   ok(!pageSays(pg[0].replace('    sayNotOnDisk(body);\n    return body;\n  } catch { return null; }', '    return body;\n  } catch { return null; }'), pg[1], pg[2]), 'NEGATIVE CONTROL (the U4/U5 cure): fetchJson without the saying is red');
   // lane lg-store-writes U5b (B-0248): the browser keeper's registry — browser-profiles.json by name, an act; browser-env's
   // reader of the same file lands the keeper's owed write first; no synchronous write of the registry left
   const bk = src('src/server/browser-keeper.js'), be = src('src/server/browser-env.js');
   const bkMoved = (t, e) => /W\.dirty\(storeKey, \{ name: 'browser-profiles\.write', rank: 0, mode: FILE_MODE, makeDir: true,/.test(t) && /\n\s+W\.durable\(storeKey\)\.catch\(/.test(t) && !/writeJsonAtomic\(storeFile\b/.test(t) && /if \(!saveNow\(\)\) \{ reg\.dirHosts = before;/.test(t)   // stale-pins: kept — a deliberate absence check (no synchronous write of the registry left)
     && /path\.resolve\(dataDir, PROFILE_REGISTRY_FILE\), W = require\('\.\.\/store-writer\.js'\)\.storeWriter\(\); if \(W\.pending\(f\)\) \{ const r = W\.flushSync\(\[f\]\); if \(r\.deferred \|\| \(r\.left \|\| \[\]\)\.some\(\(x\) => x\.file === f\)\) return null; \}/.test(e);
-  ok(bkMoved(bk, be), 'the browser keeper\'s registry (browser-profiles.json) through the writer — an ACT (rank 0 + durable()), its folder made by the writer; a lineage move waits for it; browser-env\'s sweep reads it only after the keeper\'s owed write lands, and fails CLOSED when it did not');
+  ok(verdictOfGuard(bkMoved(bk, be)), 'the browser keeper\'s registry (browser-profiles.json) through the writer — an ACT (rank 0 + durable()), its folder made by the writer; a lineage move waits for it; browser-env\'s sweep reads it only after the keeper\'s owed write lands, and fails CLOSED when it did not');
   ok(!bkMoved(bk, be.replace('if (W.pending(f)) { const r = W.flushSync([f]); if (r.deferred || (r.left || []).some((x) => x.file === f)) return null; }', '')), 'NEGATIVE CONTROL (lg-store-writes U5b): browser-env reading the registry without landing the owed write first is red');
   ok(!bkMoved(bk, be.replace('if (r.deferred || (r.left || []).some((x) => x.file === f)) return null; ', '')), 'NEGATIVE CONTROL (U5b, the cure): browser-env reading an older registry when the owed write did not land (not failing closed) is red');
   ok(!bkMoved(bk.replace('      W.durable(storeKey).catch(() => { });\n', ''), be), 'NEGATIVE CONTROL (U5b, the cure): the registry no longer an act (no durable() — a paced store, up to 30 s late) is red');
   // the migrations' road (U5b, found at its line): a reshape is ON DISK before the next migration reads the file
   const reshapeLands = (t) => /reshapeStore: \(fn\) => \{ ensureLoaded\(\); (?:refuseIfHeld\('a migration of the profile registry'\); )?const r = fn\(reg\); commit\(\); landedOrThrow\(\); return r; \}/.test(t) && /function saveNow\(\) \{ return save\(\) && landNow\(\); \}/.test(t)
     && /const landedOrThrow = \(\) => \{ if \(!landNow\(\)\) throw /.test(t) && /return !r\.deferred && !r\.left\.some\(\(x\) => x\.file === storeKey\)/.test(t);
-  ok(reshapeLands(bk), 'the browser keeper\'s reshapeStore (migrations only) lands the registry before it returns, else THROWS by name — the boot\'s next migration (grants-unify) reads the FILE; an exit-deferred flush is not «landed»');
+  ok(verdictOfGuard(reshapeLands(bk)), 'the browser keeper\'s reshapeStore (migrations only) lands the registry before it returns, else THROWS by name — the boot\'s next migration (grants-unify) reads the FILE; an exit-deferred flush is not «landed»');
   ok(!reshapeLands(bk.replace('commit(); landedOrThrow(); return r; }', 'commit(); return r; }')), 'NEGATIVE CONTROL (lg-store-writes U5b): a reshape left owed when the next migration reads the file is red');   // stale-pins: kept — a negative control
   ok(!reshapeLands(bk.replace('return !r.deferred && !r.left.some(', 'return !r.left.some(')), 'NEGATIVE CONTROL (U5b, the cure): a flush DEFERRED by the exit read as landed is red');   // stale-pins: kept — a negative control
   const TS = require(path.join(REPO, 'src/timed-sync.js'));
-  ok(['channels-index.write', 'session-meta.write', 'usage-cursors.write', 'usage-rates.write', 'jobs-logs-sweep.write', 'decision-memo.write', 'decision-usage.write', 'turn-carry-outstanding.write', 'channels-wake-pace.write', 'channels-dispatch.write', 'jobs.write', 'jobs-notifs.write', 'task-groups.write', 'browser-profiles.write'].every((n) => TS.STORES[n] && TS.STORES[n].kind === 'write'), 'each moved store keeps its store-timing row (the writer records its write\'s own time under it)');
+  ok(verdictOfGuard(['channels-index.write', 'session-meta.write', 'usage-cursors.write', 'usage-rates.write', 'jobs-logs-sweep.write', 'decision-memo.write', 'decision-usage.write', 'turn-carry-outstanding.write', 'channels-wake-pace.write', 'channels-dispatch.write', 'jobs.write', 'jobs-notifs.write', 'task-groups.write', 'browser-profiles.write'].every((n) => TS.STORES[n] && TS.STORES[n].kind === 'write')), 'each moved store keeps its store-timing row (the writer records its write\'s own time under it)');
 }
 
 // ── ROUND 4 (item 7): THE WAITS THAT REMAIN — every synchronous FLUSH the main thread waits on while the writer's thread
@@ -580,28 +580,28 @@ console.log('② the synchronous flushes the main thread waits on — named debt
   const bad = [];
   for (const [f, n] of got) { const r = WAITS.find((w) => w[0] === f); if (!r) bad.push(`UNNAMED: ${f} waits on the main thread (${n} synchronous flush${n === 1 ? '' : 'es'}) — name it with its caller and its cost`); else if (r[1] !== n) bad.push(`${f}: ${n} synchronous flushes, the table says ${r[1]}`); }
   for (const w of WAITS) if (!got.has(w[0])) bad.push(`DEAD: ${w[0]} no longer waits — remove its row`);
-  ok(!bad.length && WAITS.every((w) => w[2].length >= 40), `the ${WAITS.length} synchronous flushes the main thread still WAITS on are named, each with its caller and its cost (${WAITS.map((w) => w[0].replace(/^src\//, '')).join(', ')})`, bad);
+  ok(!bad.length && verdictOfGuard(WAITS.every((w) => w[2].length >= 40)), `the ${WAITS.length} synchronous flushes the main thread still WAITS on are named, each with its caller and its cost (${WAITS.map((w) => w[0].replace(/^src\//, '')).join(', ')})`, bad);
   const planted = new Map(got); planted.set('src/zz-new-wait.js', 1);
-  ok([...planted].some(([f]) => !WAITS.find((w) => w[0] === f)), 'CONTROL: a new synchronous flush in a file with no row is red by name (UNNAMED: src/zz-new-wait.js)');
+  ok(verdictOfGuard([...planted].some(([f]) => !WAITS.find((w) => w[0] === f))), 'CONTROL: a new synchronous flush in a file with no row is red by name (UNNAMED: src/zz-new-wait.js)');
 }
 
 console.log('③ red controls');
 {
   const base = sites;   // the scan above (one scan a run: the tier rule's seconds)
   const plus = (s) => judge([...base, s], ROWS, DEBT_MAX);
-  ok(plus({ file: 'src/zz-new-store.js', scope: '*', what: 'src/zz-new-store.js:1 writeFileSync' }).problems.some((p) => /^UNCLAIMED: src\/zz-new-store\.js:1/.test(p)), 'a synchronous write in a NEW file is red by name');
+  ok(verdictOfGuard(plus({ file: 'src/zz-new-store.js', scope: '*', what: 'src/zz-new-store.js:1 writeFileSync' }).problems.some((p) => /^UNCLAIMED: src\/zz-new-store\.js:1/.test(p))), 'a synchronous write in a NEW file is red by name');
   // ROUND 4 (true words 3): the two places round 3's plants passed — now scanned, a plant in each is red by name
   for (const rel of ['src/server/stdout/claude-stream-json.js', 'src/agentd/mux.js']) {
     const scanned = censusFiles(REPO).includes(rel);
     const r = fileSites(fs.readFileSync(path.join(REPO, rel), 'utf8') + "\nfunction zzPlant(p) { require('fs').writeFileSync(p, 'x'); }\n", rel);
     const s0 = r.sites.find((x) => /zzPlant/.test(x.scope));
     const j = s0 ? plus({ file: rel, scope: '*', what: `${rel}:${s0.line} «${s0.scope}» ${s0.fn}` }) : null;
-    ok(scanned && !!s0 && j.problems.some((p) => p.startsWith(`UNCLAIMED: ${rel}:`)), `true words 3: ${rel} is scanned — a synchronous write planted in it is red by name`, { scanned, site: s0 || null });
+    ok(gateOf(scanned) && !!s0 && verdictOfGuard(j.problems.some((p) => p.startsWith(`UNCLAIMED: ${rel}:`))), `true words 3: ${rel} is scanned — a synchronous write planted in it is red by name`, { scanned, site: s0 || null });
   }
   const debtRow = ROWS.find((r) => r[3] === 'debt');
-  ok(plus({ file: debtRow[0], scope: debtRow[1], what: 'one more' }).problems.some((p) => p.startsWith(`MOVED COUNT: ${debtRow[0]}`)), 'one more site in a covered row is red (its count is exact)');
-  ok(judge(base, ROWS.map((r) => (r === debtRow ? [...r.slice(0, 3), 'later'] .concat(r.slice(4)) : r)), DEBT_MAX).problems.some((p) => p.startsWith('UNKNOWN CLASS')), 'an unknown class is red');
-  ok(judge(base, ROWS, DEBT_MAX - 1).problems.some((p) => p.startsWith('THE DEBT ROSE')), 'the debt ratchet: a sum above DEBT_MAX is red');
+  ok(verdictOfGuard(plus({ file: debtRow[0], scope: debtRow[1], what: 'one more' }).problems.some((p) => p.startsWith(`MOVED COUNT: ${debtRow[0]}`))), 'one more site in a covered row is red (its count is exact)');
+  ok(verdictOfGuard(judge(base, ROWS.map((r) => (r === debtRow ? [...r.slice(0, 3), 'later'] .concat(r.slice(4)) : r)), DEBT_MAX).problems.some((p) => p.startsWith('UNKNOWN CLASS'))), 'an unknown class is red');
+  ok(verdictOfGuard(judge(base, ROWS, DEBT_MAX - 1).problems.some((p) => p.startsWith('THE DEBT ROSE'))), 'the debt ratchet: a sum above DEBT_MAX is red');
 }
 
 console.log('④ the pace (PURE src/store-pace.js)');
@@ -615,15 +615,15 @@ console.log('④ the pace (PURE src/store-pace.js)');
   const G = (v, k) => P.stopGraceOf({ ...(v === undefined ? {} : { VIBESPACE_STOP_GRACE_S: v }), ...(k ? { KUBERNETES_SERVICE_HOST: '10.0.0.1' } : {}) });
   const sys = G(), pod = G(undefined, true), stated = G('60', true), tiny = G('0.001'), huge = G('1e9'), bad = ['0', '-5', 'abc', '1e400'].map((v) => G(v)), blank = G('');
   ok(sys.graceMs === 90000 && !sys.refused && pod.graceMs === 30000 && !pod.refused && stated.graceMs === 60000 && !stated.refused && blank.graceMs === 90000 && !blank.refused
-    && tiny.graceMs === 1000 && /VIBESPACE_STOP_GRACE_S=0\.001 is outside 1 s … 24 h — 1 s is used/.test(tiny.refused || '') && huge.graceMs === 86400000 && /86400 s is used/.test(huge.refused || '')
-    && bad.every((x) => x.graceMs === 90000 && /is not a grace \(a number of seconds above 0\) — systemd \(TimeoutStopSec 90 s\) is used/.test(x.refused || ''))
+    && tiny.graceMs === 1000 && gateOf(/VIBESPACE_STOP_GRACE_S=0\.001 is outside 1 s … 24 h — 1 s is used/.test(tiny.refused || '')) && huge.graceMs === 86400000 && gateOf(/86400 s is used/.test(huge.refused || ''))
+    && gateOf(bad.every((x) => x.graceMs === 90000 && /is not a grace \(a number of seconds above 0\) — systemd \(TimeoutStopSec 90 s\) is used/.test(x.refused || '')))
     && P.keeperStopAtMs(9000) === 8100 && P.keeperStopAtMs(30000) === 28000 && P.keeperStopAtMs(90000) === 88000 && P.keeperCrashMs(90000) === 90000 && P.keeperCrashMs(30000) === 30000 && P.syncBoundMs(90000) === 30000,
     'THE STOP GRACE: systemd\'s 90 s, a pod\'s 30 s, a stated 60 s — the keeper speaks at 88 / 28 s after a stop and, after a crash with no stop asked, ends it ONE FULL GRACE later (90 / 30 s); 0.001 s clamped to 1 s, 1e9 s to 24 h, 0 / -5 / abc / Infinity not used — each SAID', [sys, pod, stated, tiny, huge, bad[0]]);
   const ord = P.exitOrder([{ name: 'a', rank: 1, dirtySince: 1 }, { name: 'b', rank: 0, dirtySince: 9 }, { name: 'c', dirtySince: 5 }, { name: 'd', rank: 0, dirtySince: 2 }]).map((x) => x.name).join('');
   ok(ord === 'dbac', `the exit flush's ORDER: what cannot be re-derived first (rank 0 — a person's act, a decision), then by the oldest change (${ord})`);
   const el = P.exitLine({ written: ['session-meta.write'], left: [{ name: 'channels-index.write', why: 'the write failed (1 attempt)' }], ms: 2001, debtMs: 900, rank0: 1 }), ec = P.exitLine({ written: ['a'], ms: 40, debtMs: 10, rank0: 1, crash: true });
-  ok(/^\[store-write\] exit: 1 store written in 2001 ms \(session-meta\.write\); the first 1 before the shutdown's unmoved stores \(census debt\), which took 900 ms; NOT written: channels-index\.write — the write failed \(1 attempt\) — their last changes are lost; the files hold their previous whole version$/.test(el)
-    && !/bound/.test(el) && /^\[store-write\] exit after the crash: 1 store written in 40 ms \(a\); the first 1 before the crash road's own unmoved stores \(census debt\), which took 10 ms$/.test(ec) && !/signal|shutdown's/.test(ec),
+  ok(gateOf(/^\[store-write\] exit: 1 store written in 2001 ms \(session-meta\.write\); the first 1 before the shutdown's unmoved stores \(census debt\), which took 900 ms; NOT written: channels-index\.write — the write failed \(1 attempt\) — their last changes are lost; the files hold their previous whole version$/.test(el))
+    && !/bound/.test(el) && gateOf(/^\[store-write\] exit after the crash: 1 store written in 40 ms \(a\); the first 1 before the crash road's own unmoved stores \(census debt\), which took 10 ms$/.test(ec)) && !/signal|shutdown's/.test(ec),
     'the exit line names what it WROTE and a write that FAILED — never a bound of ours; the crash road says «after the crash», never «the signal» or «the shutdown\'s»', [el, ec]);
 }
 
@@ -708,15 +708,15 @@ console.log('⑤ the channels index in two columns: a person\'s act / a decision
     const esrc0 = fs.readFileSync(path.join(REPO, E), 'utf8'), AW = 'if (!known(adapterId, convId)) return false;\n    let changed = false, found = false;\n    await store.index.update(';
     const n0 = unawaited.length; if (esrc0.split(AW).length === 2) ixSites({ [E]: esrc0.split(AW).join(AW.replace('await store.index.update(', 'store.index.update(')) });
     const added = unawaited.slice(n0); unawaited.length = n0;
-    ok(esrc0.split(AW).length === 2 && added.some((x) => /«create > markRead»/.test(x)), `CONTROL: markRead's update without its await (the flag kept) is red by name (${added.join(', ') || 'nothing flagged'})`);
+    ok(esrc0.split(AW).length === 2 && verdictOfGuard(added.some((x) => /«create > markRead»/.test(x))), `CONTROL: markRead's update without its await (the flag kept) is red by name (${added.join(', ') || 'nothing flagged'})`);
   }
   ok(!pr.length, `${got.size} scopes: ${sum(2)} index updates durable before the answer (acts, decisions, billing / delivery records) · ${sum(3)} paced (re-derived)`, pr);
   const esrc = fs.readFileSync(path.join(REPO, E), 'utf8');
   const MR = esrc.match(/async function markRead\([\s\S]*?\n  \}/);
-  ok(!!MR && /, \{ durable: true \}\)/.test(MR[0]), 'CONTROL setup: markRead\'s update is spelled durable once');
+  ok(!!MR && verdictOfGuard(/, \{ durable: true \}\)/.test(MR[0])), 'CONTROL setup: markRead\'s update is spelled durable once');
   const cut = MR ? ixJudge(ixSites({ [E]: esrc.replace(MR[0], MR[0].replace(', { durable: true })', ')')) })) : [];
-  ok(cut.some((p) => p.startsWith(`MOVED: ${E}|create > markRead`)), 'CONTROL: markRead without `durable` (the read mark at the index\'s pace — 11 s on a 22 MB index) is red by name', cut);
-  ok(ixJudge(ixSites({ [O]: fs.readFileSync(path.join(REPO, O), 'utf8') + '\nasync function zzNewAct(store) { await store.index.update(() => {}); }\n' })).some((p) => p.startsWith(`UNCLASSED: ${O}|zzNewAct`)), 'CONTROL: a new update scope is red by name until it is classed');
+  ok(verdictOfGuard(cut.some((p) => p.startsWith(`MOVED: ${E}|create > markRead`))), 'CONTROL: markRead without `durable` (the read mark at the index\'s pace — 11 s on a 22 MB index) is red by name', cut);
+  ok(verdictOfGuard(ixJudge(ixSites({ [O]: fs.readFileSync(path.join(REPO, O), 'utf8') + '\nasync function zzNewAct(store) { await store.index.update(() => {}); }\n' })).some((p) => p.startsWith(`UNCLASSED: ${O}|zzNewAct`))), 'CONTROL: a new update scope is red by name until it is classed');
 
   // the live leg: a store over its own writer (its own thread) — A PERSON'S ACT LIVES IN A SMALL FILE OF ITS OWN: its
   // promise resolves when its journal line is on disk; the 22 MB index keeps its pace; a store started over the same
@@ -739,12 +739,12 @@ console.log('⑤ the channels index in two columns: a person\'s act / a decision
     const st2 = CS.createChannelStore({ dir, log: { warn() {}, log() {} }, writer: w2 });
     const back = st2.index.peek('a/c1'), lost = st2.index.peek('a/c2');
     try { st2.close(); } catch { } w2.stop();
-    ok(inJournal && !inIndex && !pacedAnywhere && back && back.title === 'act-one' && !lost,
+    ok(gateOf(inJournal) && !inIndex && !pacedAnywhere && gateOf(back) && back.title === 'act-one' && !lost,
       `an act's promise resolves with its LINE on disk (${actMs.toFixed(0)} ms, the writer's thread) — the index keeps its pace; a store started over the same directory replays it; the paced change is lost to the kill (re-derived)`, { inJournal, inIndex, pacedAnywhere, back: back && back.title, lost: !!lost });
     // the index written: its acts leave the journal, and the load skips a line the index already holds
     st.index.flush();
     const held = JSON.parse(read(st.indexFile)).actsSeq;
-    ok(held >= 1 && read(st.indexFile).includes('act-one'), `a written index holds its acts (actsSeq ${held}) — the load replays only the lines past it`);
+    ok(held >= 1 && verdictOfGuard(read(st.indexFile).includes('act-one')), `a written index holds its acts (actsSeq ${held}) — the load replays only the lines past it`);
   } finally { try { st.close(); } catch { } w.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -898,17 +898,17 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
   { const WH0 = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), PICK = "modelOrigin: s2._modelOrigin || null }, { durable: true }).then(";
     dropped = []; if (WH0.includes(PICK)) metaSites({ 'src/ws-handler.js': WH0.replace(PICK, "modelOrigin: s2._modelOrigin || null }, { durable: true }), void 0, (").replace("\u0000", "") });
     const ctl = dropped.slice(); dropped = [];
-    ok(WH0.includes(PICK) && ctl.some((x) => /^src\/ws-handler\.js:/.test(x)), `CONTROL: the model pick's write with its promise dropped is red by name (${ctl.find((x) => /^src\/ws-handler\.js:/.test(x)) || 'nothing flagged'})`);
+    ok(gateOf(WH0.includes(PICK)) && verdictOfGuard(ctl.some((x) => /^src\/ws-handler\.js:/.test(x))), `CONTROL: the model pick's write with its promise dropped is red by name (${ctl.find((x) => /^src\/ws-handler\.js:/.test(x)) || 'nothing flagged'})`);
     // ROUND 4 (true words 2): ROUND 2'S OWN MUTANT — the lock's durable write handed to Promise.resolve as its SECOND
     // argument (never kept): `Promise.resolve(void 0, writeSessionMeta(…))` — green in round 3, red by name now
     const LOCK = "Promise.resolve(session.sockName ? writeSessionMeta(";
     dropped = []; if (WH0.includes(LOCK)) metaSites({ 'src/ws-handler.js': WH0.replace(LOCK, "Promise.resolve(void 0, session.sockName ? writeSessionMeta(") });
     const ctl3 = dropped.slice(); dropped = [];
-    ok(WH0.includes(LOCK) && ctl3.some((x) => /^src\/ws-handler\.js:/.test(x)), `CONTROL (round 2's own mutant): the lock's durable write passed as an ARGUMENT nobody keeps is red by name (${ctl3.find((x) => /^src\/ws-handler\.js:/.test(x)) || 'nothing flagged'})`);
+    ok(gateOf(WH0.includes(LOCK)) && verdictOfGuard(ctl3.some((x) => /^src\/ws-handler\.js:/.test(x))), `CONTROL (round 2's own mutant): the lock's durable write passed as an ARGUMENT nobody keeps is red by name (${ctl3.find((x) => /^src\/ws-handler\.js:/.test(x)) || 'nothing flagged'})`);
     // ROUND 5 (smaller 1): a binding nobody reads, and an EMPTY .catch after the answer was sent, both drop the promise
     dropped = []; metaSites({ 'src/ws-handler.js': WH0 + "\nfunction zzUnusedBinding(sock, m) { const _unused = writeSessionMeta(sock, m, { durable: true }); }\nfunction zzEmptyCatch(sock, m, ws) { ws.send('{}'); writeSessionMeta(sock, m, { durable: true }).catch(() => {}); }\n" });
     const ctl5 = dropped.slice(); dropped = [];
-    ok(ctl5.some((x) => /«zzUnusedBinding»/.test(x)) && ctl5.some((x) => /«zzEmptyCatch»/.test(x)), `CONTROL (round 5): \`const _unused = writeSessionMeta(…, {durable: true})\` and \`….catch(() => {})\` after the answer are red by name (${ctl5.filter((x) => /zz/.test(x)).join(', ') || 'nothing flagged'})`);
+    ok(gateOf(ctl5.some((x) => /«zzUnusedBinding»/.test(x))) && verdictOfGuard(ctl5.some((x) => /«zzEmptyCatch»/.test(x))), `CONTROL (round 5): \`const _unused = writeSessionMeta(…, {durable: true})\` and \`….catch(() => {})\` after the answer are red by name (${ctl5.filter((x) => /zz/.test(x)).join(', ') || 'nothing flagged'})`);
     // ROUND 6 (smaller 3): the verifier's plants — an empty .then, a .then that answers without reading the value, a
     // .catch(() => null) — and its mutant M1 inside the classed handleMessage scope (the pick's `.then((ok) => {` made
     // `.then(() => {}, (ok) => {`: the person never hears ok === false) are each red by name
@@ -917,16 +917,16 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
     const M1 = "modelOrigin: s2._modelOrigin || null }, { durable: true }).then((ok) => {";
     dropped = []; if (WH0.includes(M1)) metaSites({ 'src/ws-handler.js': WH0.replace(M1, "modelOrigin: s2._modelOrigin || null }, { durable: true }).then(() => {}, (ok) => {") });
     const ctlM1 = dropped.slice(); dropped = [];
-    ok(['zzEmptyThen', 'zzThenIgnores', 'zzCatchNull', 'zzThenPass', 'zzFinally', 'zzThenRest'].every((n) => ctl6.some((x) => x.includes(`«${n}»`))) && !ctl6.some((x) => /«zzThenReads»|«zzThenPassKept»/.test(x)) && WH0.includes(M1) && ctlM1.some((x) => /«registerWsHandler > handleMessage»/.test(x)),
+    ok(gateOf(['zzEmptyThen', 'zzThenIgnores', 'zzCatchNull', 'zzThenPass', 'zzFinally', 'zzThenRest'].every((n) => ctl6.some((x) => x.includes(`«${n}»`)))) && !ctl6.some((x) => /«zzThenReads»|«zzThenPassKept»/.test(x)) && gateOf(WH0.includes(M1)) && verdictOfGuard(ctlM1.some((x) => /«registerWsHandler > handleMessage»/.test(x))),
       `CONTROL (round 6 + its amend): \`.then(() => {})\`, \`.then(() => res.json(…))\`, \`.catch(() => null)\`, \`.then((ok) => ok);\` dropped, a \`.finally\` with a body, \`.then((...ok) => {})\` and the verifier's M1 in handleMessage (\`.then(() => {}, (ok) => …)\`) are red by name — a .then that READS the value and \`return ….then((ok) => ok)\` are not (${[...ctl6, ...ctlM1].filter((x) => /zz|handleMessage/.test(x)).join(', ') || 'nothing flagged'})`); }
   const sumM = (i) => M.reduce((n, r) => n + r[i], 0);
   ok(!pm.length, `session-meta: ${gm.size} scopes — ${sumM(2)} writes durable before the answer (bindings, a person's acts), ${sumM(3)} paced (stamps, caches, rings, a first version written synchronously)`, pm);
   const WH = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   const lockW = "modelLocked: session._modelLocked, lockedModel: session._lockedModel, lockedContext: session._lockedContext }, { durable: true })";   // B-6c55: the fact rides the same durable write
-  ok(WH.includes(lockW) && judgeM(metaSites({ 'src/ws-handler.js': WH.replace(lockW, "modelLocked: session._modelLocked, lockedModel: session._lockedModel, lockedContext: session._lockedContext })") })).some((x) => x.startsWith('MOVED: src/ws-handler.js|registerWsHandler > handleMessage')),
+  ok(gateOf(WH.includes(lockW)) && verdictOfGuard(judgeM(metaSites({ 'src/ws-handler.js': WH.replace(lockW, "modelLocked: session._modelLocked, lockedModel: session._lockedModel, lockedContext: session._lockedContext })") })).some((x) => x.startsWith('MOVED: src/ws-handler.js|registerWsHandler > handleMessage'))),
     'CONTROL: the model lock without `durable` (a person\'s act paced) is red by name');
   const SS = fs.readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
-  ok((SS.match(/sessionStatus\.persisted\(\)/g) || []).length === 2 && /persisted\(\) \{/.test(fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8')),
+  ok((SS.match(/sessionStatus\.persisted\(\)/g) || []).length === 2 && verdictOfGuard(/persisted\(\) \{/.test(fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8'))),
     'session-status: the person\'s override / clear and the agent\'s own report are on disk before their routes answer (persisted() — the writer\'s next write); notices, history and rekeys stay paced');
 }
 
@@ -971,7 +971,7 @@ const err = (code) => Object.assign(new Error(code + ': stand-in'), { code });
   const s = SR.afterSetAside(c, 'jobs.json.corrupt-17');
   ok(s.state === 'missing' && s.setAside === 'jobs.json.corrupt-17' && s.writable === true && s.why === 'did not parse', 'set aside (a name) ⇒ missing: start empty, the name said', s);
   const n = SR.afterSetAside(c, null);
-  ok(n.state === 'unreadable' && n.code === 'not set aside' && n.writable === false && /could not be set aside/.test(n.why), 'NOT set aside ⇒ unreadable: the live file is the bytes\' only copy — never written over', n);
+  ok(n.state === 'unreadable' && n.code === 'not set aside' && n.writable === false && verdictOfGuard(/could not be set aside/.test(n.why)), 'NOT set aside ⇒ unreadable: the live file is the bytes\' only copy — never written over', n);
   const d = SR.storeAnswer({ text: '[]' });
   ok(SR.afterSetAside(d, null) === d && SR.afterSetAside(SR.storeAnswer({ error: err('EIO') }), 'x').state === 'unreadable', 'any other answer passes through (a failed read is never «set aside»)');
 }
@@ -1172,16 +1172,16 @@ const T = treeTexts();
 const files = setAsideFiles(T).map(([f]) => f);
 console.log('  the table (' + STORE_READS.length + ' rows, ' + STORE_READS.filter((r) => r.state === 'debt').length + ' debt of cap ' + READ_DEBT_CAP + '):');
 for (const r of STORE_READS) console.log(`    ${r.state.padEnd(6)} ${r.file} · ${r.store}${r.why ? ' — ' + r.why : ''}`);
-ok(files.length === Object.keys(SITES).length && files.includes('src/jobs.js') && files.includes('src/server/writes-lost.js') && !files.includes('src/store-read.js'), `the scan sees the set-aside names in code (${files.length} files, \`.corrupt-\` and \`.unreadable-\`), never a comment`, files);
+ok(files.length === Object.keys(SITES).length && gateOf(files.includes('src/jobs.js')) && gateOf(files.includes('src/server/writes-lost.js')) && !files.includes('src/store-read.js'), `the scan sees the set-aside names in code (${files.length} files, \`.corrupt-\` and \`.unreadable-\`), never a comment`, files);
 const now = census(T);
 ok(now.length === 0, 'THE CENSUS over the tree: every store with a set-aside has its row, every row\'s mark holds, debt = its cap', now);
 // CONTROLS: the same census over patched copies of the texts (in memory)
 const withFile = new Map(T); withFile.set('src/server/new-store.js', "'use strict';\nconst fs = require('fs');\nfunction load(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { try { fs.renameSync(f, f + '.corrupt-' + 1); } catch { } return {}; } }\nmodule.exports = { load };\n");
 const c1 = census(withFile);
-ok(c1.length === 1 && /^src\/server\/new-store\.js: sets bytes aside/.test(c1[0]), 'CONTROL: a NEW store with the old shape (any failure set aside, then empty) is red by its name', c1);
+ok(c1.length === 1 && verdictOfGuard(/^src\/server\/new-store\.js: sets bytes aside/.test(c1[0])), 'CONTROL: a NEW store with the old shape (any failure set aside, then empty) is red by its name', c1);
 const second = new Map(T); second.set('src/jobs.js', T.get('src/jobs.js') + "\nfunction zzSecondStore(f) { try { return JSON.parse(require('fs').readFileSync(f, 'utf8')); } catch { require('fs').renameSync(f, f + '.corrupt-' + 1); return []; } }\n");
 const c0 = census(second);
-ok(c0.length === 1 && c0[0].startsWith(`src/jobs.js: ${SITES['src/jobs.js'] + 1} set-aside name(s) in its code, ${SITES['src/jobs.js']} counted`), 'CONTROL: a SECOND store with the old shape in a file that already has rows is red by its count', c0);   // B-f276 s1126: the count from the file's own row (a pinned «4 … 3» went red at every row the file gained)
+ok(c0.length === 1 && verdictOfGuard(c0[0].startsWith(`src/jobs.js: ${SITES['src/jobs.js'] + 1} set-aside name(s) in its code, ${SITES['src/jobs.js']} counted`)), 'CONTROL: a SECOND store with the old shape in a file that already has rows is red by its count', c0);   // B-f276 s1126: the count from the file's own row (a pinned «4 … 3» went red at every row the file gained)
 const commented = new Map(T); commented.set('src/server/notes.js', "// a store's bytes go to <name>.corrupt-<ts>\n/* '.corrupt-' */\nmodule.exports = {};\n");
 ok(census(commented).length === 0, 'CONTROL: a set-aside name in a COMMENT is no store');
 // the control's store is DERIVED (the last debt row): each conversion of the remainder moves it on by itself (a hard-coded store
@@ -1196,16 +1196,16 @@ const LAST_DEBT = REAL_DEBT || PLANTED_DEBT, lastText = LAST_DEBT && T_D.get(LAS
 ok(!!lastHit, `control setup: the anchor of the control «converted» (the marked read line of the last debt row${LAST_DEBT ? ', ' + LAST_DEBT.file + ' ' + LAST_DEBT.store : ' — there is none'}) is in the source`);
 const converted = new Map(T_D); if (lastHit) converted.set(LAST_DEBT.file, lastText.replace(lastHit[0], PLANTED_DEBT ? 'let raw = null;   // reworded' : 'const a = SR.storeAnswer(read);'));
 const c2 = census(converted, ROWS_D, CAP_D), reEsc = (x) => String(x).replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-ok(c2.length === 1 && !!LAST_DEBT && new RegExp(`^${reEsc(LAST_DEBT.file + ' ' + LAST_DEBT.store)}: its marked read line is not there — if the line was only REWORDED, re-pin the row's mark to the new text \\(nothing else\\); only if the store reads through storeAnswer now, flip the row to 'answer'.*lower READ_DEBT_CAP`).test(c2[0]), 'CONTROL: a debt row whose marked line changed is red — its words say RE-PIN first (a reword), flip + lower the cap only for a converted store', c2);
+ok(c2.length === 1 && !!LAST_DEBT && verdictOfGuard(new RegExp(`^${reEsc(LAST_DEBT.file + ' ' + LAST_DEBT.store)}: its marked read line is not there — if the line was only REWORDED, re-pin the row's mark to the new text \\(nothing else\\); only if the store reads through storeAnswer now, flip the row to 'answer'.*lower READ_DEBT_CAP`).test(c2[0])), 'CONTROL: a debt row whose marked line changed is red — its words say RE-PIN first (a reword), flip + lower the cap only for a converted store', c2);
 const lost = new Map(T); lost.set('src/jobs.js', T.get('src/jobs.js').replace('this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));', 'this._loadAnswer(JSON.parse(read.text));'));
 const c3 = census(lost);
-ok(c3.length === 1 && /^src\/jobs\.js jobs\.json: its storeAnswer call is no longer there/.test(c3[0]), 'CONTROL: a converted store that stops reading through storeAnswer is red', c3);
+ok(c3.length === 1 && verdictOfGuard(/^src\/jobs\.js jobs\.json: its storeAnswer call is no longer there/.test(c3[0])), 'CONTROL: a converted store that stops reading through storeAnswer is red', c3);
 const more = [...STORE_READS, { file: 'src/hosts.js', store: 'hosts-extra.json', state: 'debt', why: 'x', mark: /./ }];
 const c4 = census(T, more);
 const DEBT_NOW = STORE_READS.filter((r) => r.state === 'debt').length;   // derived: the remainder lowers the cap row by row
-ok(c4.length === 1 && c4[0].startsWith(`DEBT: ${DEBT_NOW + 1} debt rows against READ_DEBT_CAP ${READ_DEBT_CAP}`) && census(T, more, READ_DEBT_AT_BIRTH + 1).some((p) => p.includes(`above the census's first count ${READ_DEBT_AT_BIRTH}`)), 'CONTROL: a NEW debt row is refused, and so is raising the cap past its first count', c4);
+ok(c4.length === 1 && gateOf(c4[0].startsWith(`DEBT: ${DEBT_NOW + 1} debt rows against READ_DEBT_CAP ${READ_DEBT_CAP}`)) && verdictOfGuard(census(T, more, READ_DEBT_AT_BIRTH + 1).some((p) => p.includes(`above the census's first count ${READ_DEBT_AT_BIRTH}`))), 'CONTROL: a NEW debt row is refused, and so is raising the cap past its first count', c4);
 const noReq = new Map(T); noReq.set('src/jobs.js', T.get('src/jobs.js').replace(/require\('\.\/store-read\.js'\)/, "require('./store-reader.js')"));
-ok(census(noReq).some((p) => /^src\/jobs\.js jobs\.json: an 'answer' row whose file does not require src\/store-read\.js/.test(p)), 'CONTROL: an answer row\'s file must require the helper');
+ok(verdictOfGuard(census(noReq).some((p) => /^src\/jobs\.js jobs\.json: an 'answer' row whose file does not require src\/store-read\.js/.test(p))), 'CONTROL: an answer row\'s file must require the helper');
 
 }
 
@@ -1239,9 +1239,9 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       ok(!!u && u.file === 'task-groups.json' && u.code === 'EIO' && m.list().length === 0 && Buffer.compare(bytes(w.file), seed) === 0, '⑨ a read that FAILED at the boot (EIO): the store is HELD — not shown, its bytes IDENTICAL after the boot (the release saved an empty store over it)', { u, groups: m.list().length });
       const refusals = [tried(() => m.addProgress('T-a1', { note: 'lost?' })), tried(() => m.update('T-a1', { backlog: [] })), tried(() => m.create({ title: 'New' })), tried(() => m.unbind('T-a1', 'claude:x')), tried(() => m.remove('T-a1'))];
       const saved = m._save();
-      ok(refusals.every((r) => r && r.code === 'TASK_GROUPS_UNREAD' && /task-groups\.json/.test(r.message) && /\(EIO\)/.test(r.message) && /was refused/.test(r.message) && /nothing is recorded/.test(r.message)) && /an activity-log line/.test(refusals[0].message) && /a backlog row/.test(refusals[1].message) && saved === false && Buffer.compare(bytes(w.file), seed) === 0, '⑨ …every act that would record something is REFUSED BY NAME (code TASK_GROUPS_UNREAD: the file, the error, the act — a progress line, a parked row, a new group, an unbind, a delete) and the save writes NOTHING: the bytes identical', refusals.map((r) => r && r.message.slice(0, 90)));
-      ok(said.length === 1 && /task-groups\.json/.test(said[0].text) && /\(EIO\)/.test(said[0].text) && said[0].i18n && said[0].i18n.text && said[0].i18n.text.params.file === 'task-groups.json', '⑨ …the person is told ONCE (one For-you notice naming the file and the error, its words through i18n) — not again for each refusal', said.map((x) => x.text));
-      ok(JS(m.noteArchived(['claude:gone'])) === '[]' && typeof m.unreadRefusal('this request') === 'string' && /this request was refused/.test(m.unreadRefusal('this request')), '⑨ …a background road (an archive list) consumes nothing while held, and the agent routes\' words are the same refusal');
+      ok(gateOf(refusals.every((r) => r && r.code === 'TASK_GROUPS_UNREAD' && /task-groups\.json/.test(r.message) && /\(EIO\)/.test(r.message) && /was refused/.test(r.message) && /nothing is recorded/.test(r.message))) && gateOf(/an activity-log line/.test(refusals[0].message)) && gateOf(/a backlog row/.test(refusals[1].message)) && saved === false && Buffer.compare(bytes(w.file), seed) === 0, '⑨ …every act that would record something is REFUSED BY NAME (code TASK_GROUPS_UNREAD: the file, the error, the act — a progress line, a parked row, a new group, an unbind, a delete) and the save writes NOTHING: the bytes identical', refusals.map((r) => r && r.message.slice(0, 90)));
+      ok(said.length === 1 && gateOf(/task-groups\.json/.test(said[0].text)) && gateOf(/\(EIO\)/.test(said[0].text)) && gateOf(said[0].i18n) && gateOf(said[0].i18n.text) && said[0].i18n.text.params.file === 'task-groups.json', '⑨ …the person is told ONCE (one For-you notice naming the file and the error, its words through i18n) — not again for each refusal', said.map((x) => x.text));
+      ok(JS(m.noteArchived(['claude:gone'])) === '[]' && typeof m.unreadRefusal('this request') === 'string' && verdictOfGuard(/this request was refused/.test(m.unreadRefusal('this request'))), '⑨ …a background road (an archive list) consumes nothing while held, and the agent routes\' words are the same refusal');
       // the read again while the storage still fails: STILL HELD — bytes identical, the notice not filed again
       const again = await (async () => { const rp = fs.promises.readFile; fs.promises.readFile = async function (f, ...a) { if (String(f) === w.file) { const e = new Error('EIO: a stand-in'); e.code = 'EIO'; throw e; } return rp.call(this, f, ...a); }; try { return await m.readAgain(); } finally { fs.promises.readFile = rp; } })();
       ok(again === false && !!m.unreadState() && Buffer.compare(bytes(w.file), seed) === 0 && said.length === 1, '⑨ …a read again that still fails: STILL HELD, the bytes identical, the person not told twice', { again, said: said.length });
@@ -1250,33 +1250,33 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const broken = await m.readAgain(); m._afterLoad = al;
       ok(broken === false && !!m.unreadState() && m.list().length === 0 && Buffer.compare(bytes(w.file), seed) === 0 && lifted.length === 0, '⑨ …a read that answers but whose LOAD throws: held again (never an empty store left standing, the notice not lifted)', { broken, lifted });
       const ex = tried(() => m.exportBundle());
-      ok(!!ex && ex.code === 'TASK_GROUPS_UNREAD' && /a backup of Task Groups was refused/.test(ex.message), '⑨ …a backup of Task Groups while held is REFUSED BY NAME (never a backup file that silently holds no groups)', ex);
+      ok(!!ex && ex.code === 'TASK_GROUPS_UNREAD' && verdictOfGuard(/a backup of Task Groups was refused/.test(ex.message)), '⑨ …a backup of Task Groups while held is REFUSED BY NAME (never a backup file that silently holds no groups)', ex);
       const back = await m.readAgain();
       ok(back === true && !m.unreadState() && m.list().length === 1 && m.list()[0].title === 'Alpha' && JS(lifted) === JS(['n1']), '⑨ …the read TRIED AGAIN answers: the hold lifts, the groups are back (Alpha, its row and its line), the notice is lifted', { back, groups: m.list().map((g) => g.title), lifted });
       m.addProgress('T-a1', { note: 'after the hold' });
       { const lw = require('../src/store-writer.js').storeWriter().flushSync(); if (lw.left && lw.left.length) throw new Error(`the store writer left owed writes: ${JSON.stringify(lw.left)}`); }   // lane lg-store-writes (U5 met this leg): the act's write is the store writer's — landed before the file is read, LOUDLY
       const doc = JSON.parse(fs.readFileSync(w.file, 'utf8'));
-      ok(doc.tasks['T-a1'].progress.some((p) => p.note === 'kept line') && doc.tasks['T-a1'].progress.some((p) => p.note === 'after the hold') && doc.tasks['T-a1'].backlog.some((b) => b.text === 'kept row'), '⑨ …and recording works again ON the store as it was (its old line and row kept, the new line written)', doc.tasks['T-a1'].progress.map((p) => p.note));
+      ok(gateOf(doc.tasks['T-a1'].progress.some((p) => p.note === 'kept line')) && gateOf(doc.tasks['T-a1'].progress.some((p) => p.note === 'after the hold')) && verdictOfGuard(doc.tasks['T-a1'].backlog.some((b) => b.text === 'kept row')), '⑨ …and recording works again ON the store as it was (its old line and row kept, the new line written)', doc.tasks['T-a1'].progress.map((p) => p.note));
     }
     // (b) bytes that do NOT PARSE and (c) bytes NOT OF THE STORE'S SHAPE: held the same way, the bytes untouched
     for (const [name, text, why] of [['torn', '{"version":1,"tasks":{"T-a1":{', 'did not parse'], ['shape', '{"version":1}', 'not the expected shape'], ['array', '[]', 'not the expected shape']]) {
       const w = world(name); const raw = Buffer.from(text); fs.writeFileSync(w.file, raw);
       const { m, said } = make(fresh(), w.dd);
       const r = tried(() => m.addProgress('T-a1', { note: 'x' })), r2 = tried(() => m.create({ title: 'x' }));
-      ok(!!m.unreadState() && m.unreadState().why === why && Buffer.compare(bytes(w.file), raw) === 0 && r && r.code === 'TASK_GROUPS_UNREAD' && r2 && r2.code === 'TASK_GROUPS_UNREAD' && said.length === 1, `⑨ bytes that ${why === 'did not parse' ? 'do NOT PARSE' : `are NOT the store's shape (${text})`}: HELD the same way — the bytes untouched by the boot and the refused acts, one notice`, { u: m.unreadState(), said: said.length });
+      ok(!!m.unreadState() && m.unreadState().why === why && Buffer.compare(bytes(w.file), raw) === 0 && gateOf(r) && r.code === 'TASK_GROUPS_UNREAD' && gateOf(r2) && r2.code === 'TASK_GROUPS_UNREAD' && said.length === 1, `⑨ bytes that ${why === 'did not parse' ? 'do NOT PARSE' : `are NOT the store's shape (${text})`}: HELD the same way — the bytes untouched by the boot and the refused acts, one notice`, { u: m.unreadState(), said: said.length });
     }
     // (d) an ABSENT file with the old tasks.json beside it still migrates forward; (e) an absent file alone starts empty
     {
       const w = world('legacy'); fs.writeFileSync(w.legacy, JSON.stringify(SEED));
       const { m } = make(fresh(), w.dd);
       const doc = fs.existsSync(w.file) ? JSON.parse(fs.readFileSync(w.file, 'utf8')) : null;
-      ok(!m.unreadState() && m.list().length === 1 && !!doc && !!doc.tasks['T-a1'] && fs.existsSync(w.legacy), '⑨ an ABSENT task-groups.json with the old tasks.json beside it: migrated forward (the new file written, the old left in place)', { groups: m.list().length });
+      ok(!m.unreadState() && m.list().length === 1 && !!doc && !!doc.tasks['T-a1'] && verdictOfGuard(fs.existsSync(w.legacy)), '⑨ an ABSENT task-groups.json with the old tasks.json beside it: migrated forward (the new file written, the old left in place)', { groups: m.list().length });
       const w2 = world('absent');
       const { m: m2 } = make(fresh(), w2.dd);
-      ok(!m2.unreadState() && m2.list().length === 0 && fs.existsSync(w2.file) && JS(Object.keys(JSON.parse(fs.readFileSync(w2.file, 'utf8')).tasks)) === '[]', '⑨ an ABSENT file alone: an empty store, written (nothing was there to keep)');
+      ok(!m2.unreadState() && m2.list().length === 0 && gateOf(fs.existsSync(w2.file)) && JS(Object.keys(JSON.parse(fs.readFileSync(w2.file, 'utf8')).tasks)) === '[]', '⑨ an ABSENT file alone: an empty store, written (nothing was there to keep)');
     }
     // the agent routes ask the hold FIRST (never «no Task Group» for a store that is held, not empty)
-    ok(/function resolveAgentGroup\(hit, req, res\) \{[\s\S]{0,400}?tasks\.unreadRefusal\('this request'\)[\s\S]{0,200}?res\.status\(503\)\.json\(\{ error: held, code: 'TASK_GROUPS_UNREAD' \}\); return null; \}/.test(readSrc('src/agent-routes.js')), '⑨ the agent routes\' group resolution answers a held store BY NAME (503, TASK_GROUPS_UNREAD) before it looks for the group');
+    ok(verdictOfGuard(/function resolveAgentGroup\(hit, req, res\) \{[\s\S]{0,400}?tasks\.unreadRefusal\('this request'\)[\s\S]{0,200}?res\.status\(503\)\.json\(\{ error: held, code: 'TASK_GROUPS_UNREAD' \}\); return null; \}/.test(readSrc('src/agent-routes.js'))), '⑨ the agent routes\' group resolution answers a held store BY NAME (503, TASK_GROUPS_UNREAD) before it looks for the group');
     // THE MOVED LINE'S MUST 1 (主开发 2026-11-19 22:38Z): a write QUEUED before the hold came back never lands the held, EMPTY store.
     // The legacy hold (task-groups.json absent, tasks.json unreadable at the boot): a read again answers the old file, its migration
     // forward QUEUES a save, then the load throws — the catch restores the hold and empties the state. The writer then lands what
@@ -1304,7 +1304,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
         return { held0, broken, heldAgain, absent, refusedByName, back, groups, after };
       };
       const q = await queuedScene(fresh(), 'queued-legacy');
-      ok(q.held0 && q.broken === false && q.heldAgain && q.absent && q.refusedByName && q.back === true && q.groups === 'Alpha' && q.after === 'T-a1', '⑨ must 1: a read again of the LEGACY hold whose load throws after its migration QUEUED a save — the writer lands nothing (refused while held, by name): task-groups.json still ABSENT, the old file read at the next try (Alpha back, then written)', q);
+      ok(gateOf(q.held0) && q.broken === false && gateOf(q.heldAgain) && gateOf(q.absent) && gateOf(q.refusedByName) && q.back === true && q.groups === 'Alpha' && q.after === 'T-a1', '⑨ must 1: a read again of the LEGACY hold whose load throws after its migration QUEUED a save — the writer lands nothing (refused while held, by name): task-groups.json still ABSENT, the old file read at the next try (Alpha back, then written)', q);
       const MTG = mutantCopies('tg-queued-hold', REPO).load('src/task-groups.js', anchored(readSrc('src/task-groups.js'), GUARD, "produce: () => { if (false) throw Object.assign(new Error('task-groups.json is held", 'tg-no-produce-guard'), 'no-produce-guard').TaskGroupManager;
       const qx = await queuedScene(MTG, 'queued-legacy-mut');
       ok(!qx.absent && qx.back === true && qx.groups === '', 'CONTROL (the producer\'s guard cut, in a copy): the queued save lands the EMPTY store over the held file — the next read again lifts with ZERO groups, the old file never read again — RED', qx);
@@ -1333,16 +1333,16 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const mf = path.join(w.dd, 'task-groups-archive', 'T-a1', '2026-01.ndjson'); fs.mkdirSync(path.dirname(mf), { recursive: true }); fs.writeFileSync(mf, '');
       const sx = failing(mf, 'EIO', () => tried(() => m._monthEntries('T-a1', '2026-01.ndjson', { strict: true })));
       const plain = failing(mf, 'EIO', () => m._monthEntries('T-a1', '2026-01.ndjson'));
-      ok(!!sx && sx.code === 'TASK_GROUPS_UNREAD' && /an import was refused/.test(sx.message) && JS(plain) === '[]', '⑨ an archived month that could not be read: the import\'s strict read REFUSES by name (never rewritten); a plain read stays empty', sx);
+      ok(!!sx && sx.code === 'TASK_GROUPS_UNREAD' && gateOf(/an import was refused/.test(sx.message)) && JS(plain) === '[]', '⑨ an archived month that could not be read: the import\'s strict read REFUSES by name (never rewritten); a plain read stays empty', sx);
     }
     // the roads around the store ask the hold FIRST (source pins: the routes, the migrations, the conversation binds, the backup)
     {
       const WR = readSrc('src/server/task-groups-wiring.js'), PS = readSrc('src/routes/persistence.js'), CO = readSrc('src/server/conversation-ops.js'), MG = readSrc('src/server/migrations.js'), AR = readSrc('src/agent-routes.js');
-      ok(/app\.use\('\/api\/tasks', \(req, res, next\) => \{[^\n]*tasks\.unreadRefusal\?\.\('this request'\)[^\n]*res\.status\(503\)/.test(WR) && /unread \? \{ unread \} : \{\}/.test(WR), '⑨ every Task Groups route but the list answers a held store BY NAME (503) before it reads a group; the list says `unread`');
+      ok(gateOf(/app\.use\('\/api\/tasks', \(req, res, next\) => \{[^\n]*tasks\.unreadRefusal\?\.\('this request'\)[^\n]*res\.status\(503\)/.test(WR)) && verdictOfGuard(/unread \? \{ unread \} : \{\}/.test(WR)), '⑨ every Task Groups route but the list answers a held store BY NAME (503) before it reads a group; the list says `unread`');
       ok((PS.match(/unreadRefusal\?\.\('a backup of Task Groups'\)|unreadRefusal\?\.\('an import of Task Groups'\)/g) || []).length === 2, '⑨ the backup\'s export and import ask the hold before anything (an import refused WHOLE, before any section is applied)');
-      ok(/if \(D\(\)\.tasks\.unreadState\?\.\(\)\) return 0;/.test(CO) && /O\(\)\.tasksUnread\('adding a conversation to a Task Group'\)/.test(CO) && /const tasksUnread = \(act\) => \{ const t = D\(\)\.tasks;/.test(CO), '⑨ the birth binds WAIT for the lift (never consumed); the automation bind answers the hold by its name');
+      ok(gateOf(/if \(D\(\)\.tasks\.unreadState\?\.\(\)\) return 0;/.test(CO)) && gateOf(/O\(\)\.tasksUnread\('adding a conversation to a Task Group'\)/.test(CO)) && verdictOfGuard(/const tasksUnread = \(act\) => \{ const t = D\(\)\.tasks;/.test(CO)), '⑨ the birth binds WAIT for the lift (never consumed); the automation bind answers the hold by its name');
       ok((MG.match(/unreadRefusal\('this migration'\) : null; if \(held\) throw new Error\(held\);/g) || []).length === 2, '⑨ the two migrations that touch the store refuse while it is held (never marked done over an empty or held store)');
-      ok(/app\.post\('\/api\/agent\/group-admin'[\s\S]{0,200}?tasks\.unreadRefusal\('this request'\)/.test(AR), '⑨ group-admin answers a held store by its name (never an empty list)');
+      ok(verdictOfGuard(/app\.post\('\/api\/agent\/group-admin'[\s\S]{0,200}?tasks\.unreadRefusal\('this request'\)/.test(AR)), '⑨ group-admin answers a held store by its name (never an empty list)');
     }
     // ── THE CURE (主开发's verdict «NOT TAKEN YET»: three musts + the smalls) — the readers of a held store answer UNKNOWN ──
     const { anchored } = await import('./scratch.mjs');
@@ -1364,13 +1364,13 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const EXCEPT_G = { door: 'automation-key-use', resource: 'K-1', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-a1' }] };
       const ONLY_G = { door: 'browser-profile', resource: 'bp-00000001', to: [{ kind: 'group', id: 'T-a1' }], except: [] };
       const c = cure(held);
-      ok(c.unreadable && c.code === 'TASK_GROUPS_UNREAD' && JS(held.groupsForSession({ sessionKey: KEY })) === '[]' && JS(cure(read).ids) === '["T-a1"]', '⑨ cure MUST 1: over a HELD store groupIdsForGrant THROWS by name (TASK_GROUPS_UNREAD) and the reader answers UNREADABLE; groupsForSession itself stays non-throwing; a store that reads answers the groups', c);
+      ok(gateOf(c.unreadable) && c.code === 'TASK_GROUPS_UNREAD' && JS(held.groupsForSession({ sessionKey: KEY })) === '[]' && JS(cure(read).ids) === '["T-a1"]', '⑨ cure MUST 1: over a HELD store groupIdsForGrant THROWS by name (TASK_GROUPS_UNREAD) and the reader answers UNREADABLE; groupsForSession itself stays non-throwing; a store that reads answers the groups', c);
       const vEx = GM.admits([EXCEPT_G], facts(c)), vExRead = GM.admits([EXCEPT_G], facts(cure(read))), vExRel = GM.admits([EXCEPT_G], facts(release(held)));
       ok(vEx.ok === false && vEx.code === 'groups_unreadable' && vExRead.ok === false && vExRead.code === 'excepted', '⑨ …a row «All agents, except Task Group G» REFUSES G\'s conversation as unreadable while held (once the store reads: excepted — the row\'s own words)', { held: vEx.code, read: vExRead.code });
       ok(vExRel.ok === true, '⑨ CONTROL — the release\'s reader (the held list\'s [] as «in no group»): the same row ADMITS G\'s conversation, a grant wider than its words', vExRel);
       const vG = GM.admits([ONLY_G], facts(c)), vGRel = GM.admits([ONLY_G], facts(release(held)));
       const keeps = /if \(may\.code === 'groups_unreadable'\) \{ out\.undecided\.push\(l\.browserKey\);/.test(readSrc('src/server/browser-keeper.js'));
-      ok(vG.ok === false && vG.code === 'groups_unreadable' && keeps, '⑨ …a lease kept to «only Task Group G» meets a held store: groups_unreadable — the keeper KEEPS it (rejudgeLeases\' undecided rule, read from browser-keeper.js), never detached', { code: vG.code, keeps });
+      ok(vG.ok === false && vG.code === 'groups_unreadable' && verdictOfGuard(keeps), '⑨ …a lease kept to «only Task Group G» meets a held store: groups_unreadable — the keeper KEEPS it (rejudgeLeases\' undecided rule, read from browser-keeper.js), never detached', { code: vG.code, keeps });
       ok(vGRel.ok === false && vGRel.code === 'not_granted', '⑨ CONTROL — the release\'s reader: not_granted, the lease DETACHED (its tab closed) for a store that only could not be read', vGRel);
       const grant = { principal: { kind: 'everyone', id: '*' }, except: [{ kind: 'group', id: 'T-a1' }], scope: { kind: 'adapter', id: 'a1' }, level: 'visible' };
       // THE HUB'S FACT (src/server/groups-hold.js — 主开发's follow: a pure model holds no settable state): the doors hand it in
@@ -1387,9 +1387,9 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       // name, its first throw of a hold marked per reader), else the train's memberIds (with the machine, B-55dc's flag) — server.js inline ×2
       // (readers 'exit' / 'window'), mounts-plugins-wiring through ONE helper ×4 + the may-use hook + the key-only fifth
       ok((SJ.match(/groupsOf: \(s, id\) => \{ const a = \{ sessionKey: sessionStatusKey\(s, id\), cwd: s\.cwd, hostId: s\.host \|\| null, [^}]*\}; return tasks\.isHeldUnread\(\) \? tasks\.groupIdsForGrant\(a, '(?:exit|window)'\) : tasks\.memberIds\(a\); \}/g) || []).length === 2 && !/groupsOf: \(s, id\) => tasks\.groupsForSession\(/.test(SJ)   // stale-pins: kept — a deliberate absence check (the release's reader must not come back)
-        && /^const grantMemberIds = \(tasks, a, reader\) => \(typeof tasks\.isHeldUnread === 'function' && tasks\.isHeldUnread\(\) \? tasks\.groupIdsForGrant\(a, reader\) : tasks\.memberIds\(a\)\);$/m.test(MP) && (MP.match(/grantMemberIds\(tasks, \{/g) || []).length === 4 && (MP.match(/tasks\.groupIdsForGrant\(\{/g) || []).length === 1
-        && /groupsOf: \(\{ sessionKey, cwd, hostId = null, initialGroupId, initialGroupIds \} = \{\}\) => \{[^\n]*const ids = grantMemberIds\(tasks, a\); if \(ids\.unread\) throw new Error\([^\n]*return tasks\.groupsForSession\(a\); \}/.test(MP)
-        && /require\('\.\/groups-hold\.js'\)\.setHeld\(\(\) => tasks\.isHeldUnread\(\)\);/.test(TW),
+        && gateOf(/^const grantMemberIds = \(tasks, a, reader\) => \(typeof tasks\.isHeldUnread === 'function' && tasks\.isHeldUnread\(\) \? tasks\.groupIdsForGrant\(a, reader\) : tasks\.memberIds\(a\)\);$/m.test(MP)) && (MP.match(/grantMemberIds\(tasks, \{/g) || []).length === 4 && (MP.match(/tasks\.groupIdsForGrant\(\{/g) || []).length === 1
+        && gateOf(/groupsOf: \(\{ sessionKey, cwd, hostId = null, initialGroupId, initialGroupIds \} = \{\}\) => \{[^\n]*const ids = grantMemberIds\(tasks, a\); if \(ids\.unread\) throw new Error\([^\n]*return tasks\.groupsForSession\(a\); \}/.test(MP))
+        && verdictOfGuard(/require\('\.\/groups-hold\.js'\)\.setHeld\(\(\) => tasks\.isHeldUnread\(\)\);/.test(TW)),
         '⑨ …the readers that feed a grant: server.js groupsOf ×2 + the five in mounts-plugins-wiring ask groupIdsForGrant while held (the seam: ×4 through grantMemberIds, the may-use hook, the key-only fifth direct); the store sets the HUB\'s fact at boot (groups-hold)');
       const GMsrc = readSrc('src/grant-model.js'), FACT = /require\('\.\/groups-hold\.js'\)\.fact\(\)/g, FACT_AR = /require\('\.\/server\/groups-hold\.js'\)\.fact\(\)/g;
       const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');   // code only — a comment naming the hub's module is no read of it
@@ -1397,7 +1397,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       ok(!/\bsetGroupsHeld\b|\bgroupsHeld\b|groups-hold/.test(GMsrc) && !/^let /m.test(GMsrc) && !['src/channel-acl.js', 'src/channel-filter.js', 'src/automation-keys.js'].some((f) => /groupsHeld|groups-hold/.test(code(readSrc(f)))),
         '⑨ the PURE models read only their arguments: src/grant-model.js holds no module-level setter or state (the device bundle\'s module is the release\'s), nor do channel-acl, channel-filter and automation-keys ask any hold');
       ok(cnt('src/server/channels-access.js', FACT) === 3 && cnt('src/server/channels-engine.js', FACT) === 2 && cnt('src/server/channels-outbound.js', FACT) === 2 && cnt('src/server/conversation-ops.js', FACT) === 6 && cnt('src/server/delivery-wake.js', FACT) === 1 && cnt('src/server/end-proposals.js', FACT) === 1 && cnt('src/agent-routes.js', FACT_AR) === 2
-        && /function wakeAdmits\(res, principal, \{ cid, groups = \[\], inherited = \[\], groupsUnreadable = false \} = \{\}\)/.test(readSrc('src/server/channels-grants.js')),
+        && verdictOfGuard(/function wakeAdmits\(res, principal, \{ cid, groups = \[\], inherited = \[\], groupsUnreadable = false \} = \{\}\)/.test(readSrc('src/server/channels-grants.js'))),
         '⑨ …the hub\'s doors that judge a live agent from the roster HAND the fact: the channel principals (channelPrincipal ×2, the engine\'s hear / wake ctx ×2, outbound ×2, access ×1), the two watch wakes, the automation reach\'s targets (conversation-ops ×6: the shared reached() — status, rename, bind, end — and the archive\'s, and — login-request-card\'s cure on .413 checkpoint 2 — the list, the resume of a live and of an ended target, and — piece 6 re-landed — the stop\'s holders; the wake grant\'s owner ×1, the proposal card\'s targets ×1)');
       // (2) THE PRINCIPAL BUILDERS (主开发 05:42Z (2) — the doors were pinned by COUNT, so a future door that builds an agent
       // principal from the roster's groups and forgets the fact stayed green; the follow-owed read: a ONE-LINE regex missed
@@ -1537,7 +1537,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           return { problems, sites: all.reduce((k, o) => k + o.n, 0), facts: all.reduce((k, o) => k + o.fact, 0) };
         };
         const BF = bfiles(), bc = bcensus(BF, BROWS);
-        ok(!bc.problems.length && BROWS.every((r) => WHY[r[3]] && r[2] > 0), `⑨ follow (2) THE PRINCIPAL BUILDERS: ${bc.sites} object literals with Task Group ids in ${BF.size} hub files — ${bc.facts} hand the hold's fact, ${BROWS.reduce((k, r) => k + r[2], 0)} more each a row saying why none is needed (${Object.keys(WHY).map((c) => `${c} ${BROWS.filter((r) => r[3] === c).reduce((k, r) => k + r[2], 0)}`).join(' · ')})${bc.problems.length ? `\n  ${bc.problems.join('\n  ')}` : ''}`);
+        ok(!bc.problems.length && verdictOfGuard(BROWS.every((r) => WHY[r[3]] && r[2] > 0)), `⑨ follow (2) THE PRINCIPAL BUILDERS: ${bc.sites} object literals with Task Group ids in ${BF.size} hub files — ${bc.facts} hand the hold's fact, ${BROWS.reduce((k, r) => k + r[2], 0)} more each a row saying why none is needed (${Object.keys(WHY).map((c) => `${c} ${BROWS.filter((r) => r[3] === c).reduce((k, r) => k + r[2], 0)}`).join(' · ')})${bc.problems.length ? `\n  ${bc.problems.join('\n  ')}` : ''}`);
         // CONTROLS — one per shape the read named (each planted alone in a new file, the fact left out ⇒ a row is owed), the same
         // shapes WITH the fact (no row owed: a spread, a key, an Object.assign — never a comment), and two real doors that LOSE it
         const SHAPES = [
@@ -1555,9 +1555,9 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           "const p = Object.assign({ kind: 'agent', id: cid, name: null, groups: g }, require('./groups-hold.js').fact());",
         ];
         const loses = (f, from, to) => { const t = BF.get(f), t2 = t.replace(from, to); return t2 !== t && bcensus(new Map([[f, t2]]), BROWS.filter((r) => r[0] === f)).problems.some((p) => p.startsWith(`${f}: NO ROW`)); };
-        ok(SHAPES.every((s) => owed(s) === 1) && WITH.every((s) => owed(s) === 0) && owed("const p = { kind: 'agent', id: cid, groups: [g /* ...require('./groups-hold.js').fact() */] };") === 1 && owed("const p = { kind: 'agent', id: cid, groups: g, groupsUnreadable: false };") === 1
-          && loses('src/server/channels-outbound.js', "...((!live && a.groupsUnreadable === true) || (live && (live.inherited === null || live.groupsUnread === true)) ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' };", "msgLevelFor: () => 'none' };")
-          && loses('src/agent-routes.js', "groups: myGroups, inheritedGroups, ...(require('./server/groups-hold.js').fact()),", 'groups: myGroups, inheritedGroups,'),   // lane lg-group-parents (restack 415): the principal's lineage beside its groups
+        ok(gateOf(SHAPES.every((s) => owed(s) === 1)) && gateOf(WITH.every((s) => owed(s) === 0)) && owed("const p = { kind: 'agent', id: cid, groups: [g /* ...require('./groups-hold.js').fact() */] };") === 1 && owed("const p = { kind: 'agent', id: cid, groups: g, groupsUnreadable: false };") === 1
+          && gateOf(loses('src/server/channels-outbound.js', "...((!live && a.groupsUnreadable === true) || (live && (live.inherited === null || live.groupsUnread === true)) ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' };", "msgLevelFor: () => 'none' };"))
+          && verdictOfGuard(loses('src/agent-routes.js', "groups: myGroups, inheritedGroups, ...(require('./server/groups-hold.js').fact()),", 'groups: myGroups, inheritedGroups,')),   // lane lg-group-parents (restack 415): the principal's lineage beside its groups
           `CONTROL: each of the ${SHAPES.length} shapes (a principal, a mayAttach's taskIds, a { cid, groups } watch, a reach target, a principal over seven lines, a caller re-built for a use door) planted with no fact is RED by name; with the fact (a spread, a key, an Object.assign) it owes nothing; a fact named only in a comment, or a literal false, is RED; channels-outbound's stash-gate principal and agent-routes' multi-line one that LOSE the fact are RED`);
       }
       {
@@ -1578,10 +1578,10 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           const kept = n && n.caps && n.caps[K];
           ok(!!kept && kept.waiting === true && JSON.stringify(kept.facts) === '{"sessionKey":"claude:x","cwd":"/w","hostId":"h1","initialGroupIds":["T-1"]}' && Object.keys(n.caps).length === 1, '⑨ follow-owed: a cap WAITING for Task Groups survives a restart — the registry keeps its mark and the create\'s facts (bounded keys only); an entry with nothing in it is still dropped', n && n.caps); }
         const KP = readSrc('src/server/browser-keeper.js'), WC = readSrc('src/ws-create.js'), MPW = readSrc('src/server/mounts-plugins-wiring.js'), TGW = readSrc('src/server/task-groups-wiring.js');
-        ok(/catch \(e\) \{ if \(e && e\.code === 'TASK_GROUPS_UNREAD'\) return undefined;/.test(KP) && /if \(e && e\.code === 'TASK_GROUPS_UNREAD'\) \{ capWaiting\.set\(bk, facts \|\| \{\}\);/.test(KP)
-          && /const offCapLift = require\('\.\/groups-hold\.js'\)\.onStoreChange\(\(\) => \{ if \(loaded\) retryWaitingCaps\(\); \}\);/.test(KP) && /function retryWaitingCaps\(\) \{ if \(!capWaiting\.size\) return; for \(const \[k, f\] of \[\.\.\.capWaiting\]\) \{ capWaiting\.delete\(k\); try \{ stampGroupCap\(k, f\);/.test(KP) && /loaded = true;\n\s*for \(const \[k, v\] of Object\.entries\(reg\.caps \|\| \{\}\)\) if \(v && v\.waiting === true\) capWaiting\.set\(k, v\.facts \|\| \{\}\);\n\s*if \(capWaiting\.size\) Promise\.resolve\(\)\.then\(\(\) => retryWaitingCaps\(\)\)/.test(KP) && /capWaiting\.set\(bk, facts \|\| \{\}\); if \(!\(v && v\.waiting === true\)\) \{ reg\.caps\[bk\] = \{ cap: v && Number\.isInteger\(v\.cap\) \? v\.cap : null, group: null, at: now\(\), waiting: true, facts: facts \|\| \{\} \}; commit\(\); \}/.test(KP) && /function shutdown\(\) \{ try \{ offCapLift\(\); \} catch \{ \}/.test(KP)
-          && /spawnPinWitness\.cap = c0 === undefined \? 'unread' : c0;/.test(WC) && /if \(c === undefined\) c = 'unread';/.test(WC)
-          && /const a = \{ sessionKey, cwd, hostId, initialGroupId, initialGroupIds \};\n\s*const ids = grantMemberIds\(tasks, a\);[^\n]*\n\s*if \(ids\.unread\) throw Object\.assign\(new Error\('the Task Group list is still being read'\), \{ code: 'TASK_GROUPS_UNREAD' \}\);/.test(MPW) && /onChange: \(ch\) => \{\n[^\n]*taskFanout\.note\(ch && ch\.ids\);[^\n]*\n\s*try \{ exitProxy\(\)\.rejudgeAll\('task-groups'\); \}[^\n]*\n\s*try \{ require\('\.\/groups-hold\.js'\)\.noteChange\(\); \} catch \{ \}/.test(TGW),
+        ok(gateOf(/catch \(e\) \{ if \(e && e\.code === 'TASK_GROUPS_UNREAD'\) return undefined;/.test(KP)) && gateOf(/if \(e && e\.code === 'TASK_GROUPS_UNREAD'\) \{ capWaiting\.set\(bk, facts \|\| \{\}\);/.test(KP))
+          && gateOf(/const offCapLift = require\('\.\/groups-hold\.js'\)\.onStoreChange\(\(\) => \{ if \(loaded\) retryWaitingCaps\(\); \}\);/.test(KP)) && gateOf(/function retryWaitingCaps\(\) \{ if \(!capWaiting\.size\) return; for \(const \[k, f\] of \[\.\.\.capWaiting\]\) \{ capWaiting\.delete\(k\); try \{ stampGroupCap\(k, f\);/.test(KP)) && gateOf(/loaded = true;\n\s*for \(const \[k, v\] of Object\.entries\(reg\.caps \|\| \{\}\)\) if \(v && v\.waiting === true\) capWaiting\.set\(k, v\.facts \|\| \{\}\);\n\s*if \(capWaiting\.size\) Promise\.resolve\(\)\.then\(\(\) => retryWaitingCaps\(\)\)/.test(KP)) && gateOf(/capWaiting\.set\(bk, facts \|\| \{\}\); if \(!\(v && v\.waiting === true\)\) \{ reg\.caps\[bk\] = \{ cap: v && Number\.isInteger\(v\.cap\) \? v\.cap : null, group: null, at: now\(\), waiting: true, facts: facts \|\| \{\} \}; commit\(\); \}/.test(KP)) && gateOf(/function shutdown\(\) \{ try \{ offCapLift\(\); \} catch \{ \}/.test(KP))
+          && gateOf(/spawnPinWitness\.cap = c0 === undefined \? 'unread' : c0;/.test(WC)) && gateOf(/if \(c === undefined\) c = 'unread';/.test(WC))
+          && gateOf(/const a = \{ sessionKey, cwd, hostId, initialGroupId, initialGroupIds \};\n\s*const ids = grantMemberIds\(tasks, a\);[^\n]*\n\s*if \(ids\.unread\) throw Object\.assign\(new Error\('the Task Group list is still being read'\), \{ code: 'TASK_GROUPS_UNREAD' \}\);/.test(MPW)) && verdictOfGuard(/onChange: \(ch\) => \{\n[^\n]*taskFanout\.note\(ch && ch\.ids\);[^\n]*\n\s*try \{ exitProxy\(\)\.rejudgeAll\('task-groups'\); \}[^\n]*\n\s*try \{ require\('\.\/groups-hold\.js'\)\.noteChange\(\); \} catch \{ \}/.test(TGW)),
           '⑨ follow-owed: the cap road — the reader throws by name while held (through the seam\'s helper), the keeper answers UNKNOWN and keeps the key WAITING, stamped at the lift (and lets go at its shutdown); ws-create witnesses \'unread\'; the store signals the lift');
         // THE SECOND ROW — the group's DEFAULT browser profile at a create (a REMAINDER, stated in the kb): the real reader (its source)
         // throws by name while held (the keeper's taskGroupDefaultFor answers '' with its one warning — test-browser-handles), and
@@ -1597,17 +1597,17 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
         // (1) the lost wake said where the person looks; (4) the create dialog's who refusal in the page's words; (3)/(card) the recorded lists
         const TGS = readSrc('src/task-groups.js'), CLAUSE = ' A channel watch by a Task Group, or one that leaves a Task Group out, wakes nobody until it reads; what arrives meanwhile stays in its channel.';
         const rows = ['zh', 'ja'].map((l) => (readSrc(`src/lib/i18n-${l}.js`).match(/A channel watch by a Task Group, or one that leaves a Task Group out, wakes nobody until it reads; what arrives meanwhile stays in its channel\./g) || []).length);
-        ok((TGS.match(/A channel watch by a Task Group, or one that leaves a Task Group out, wakes nobody until it reads; what arrives meanwhile stays in its channel\."/g) || []).length === 2 && TGS.includes(CLAUSE) && JSON.stringify(rows) === '[2,2]',
+        ok((TGS.match(/A channel watch by a Task Group, or one that leaves a Task Group out, wakes nobody until it reads; what arrives meanwhile stays in its channel\."/g) || []).length === 2 && gateOf(TGS.includes(CLAUSE)) && JSON.stringify(rows) === '[2,2]',
           '⑨ follow-owed (1): the hold\'s For-you item says the lost wake — both detail sentences, their zh / ja rows', rows);
-        ok(/say\(pw \|\| createRefusalWords\(r, t\) \|\| buildRefusalWords\(r, t\) \|\| whoRefusalWords\(r, t\) \|\|/.test(readSrc('src/lib/browser-new-profile.js')) && /case 'TASK_GROUPS_UNREAD': return t\(/.test(readSrc('src/lib/browser-who-model.js')),
+        ok(gateOf(/say\(pw \|\| createRefusalWords\(r, t\) \|\| buildRefusalWords\(r, t\) \|\| whoRefusalWords\(r, t\) \|\|/.test(readSrc('src/lib/browser-new-profile.js'))) && verdictOfGuard(/case 'TASK_GROUPS_UNREAD': return t\(/.test(readSrc('src/lib/browser-who-model.js'))),
           '⑨ follow-owed (4): the create dialog words the who list\'s refusals — the hold among them — in the page\'s words (zh / ja rows), never the server\'s English');
-        ok(/if \(require\('\.\/groups-hold\.js'\)\.held\(\) \|\| \(p\.principal && p\.principal\.groupsUnreadable === true\)\) return null;   \/\/ Task Groups held unread, or the card filed while they were/.test(readSrc('src/server/channel-api-cards.js')) && /groups: p\.principal\.groups \|\| \[\], inheritedGroups: p\.principal\.inheritedGroups === null \? null : \(p\.principal\.inheritedGroups \|\| \[\]\), \.\.\.\(p\.principal\.groupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\) \}\);/.test(readSrc('src/server/channel-api-cards.js')),
+        ok(gateOf(/if \(require\('\.\/groups-hold\.js'\)\.held\(\) \|\| \(p\.principal && p\.principal\.groupsUnreadable === true\)\) return null;   \/\/ Task Groups held unread, or the card filed while they were/.test(readSrc('src/server/channel-api-cards.js'))) && verdictOfGuard(/groups: p\.principal\.groups \|\| \[\], inheritedGroups: p\.principal\.inheritedGroups === null \? null : \(p\.principal\.inheritedGroups \|\| \[\]\), \.\.\.\(p\.principal\.groupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\) \}\);/.test(readSrc('src/server/channel-api-cards.js'))),
           '⑨ follow-owed (3): a recorded proposal\'s card never ENDS «withdrawn» on an unread tier — its liveness answers null while held AND for a card filed while held (its principal\'s own mark rides ctxOf too)');
         { const CO = readSrc('src/server/channels-outbound.js'), WT = readSrc('src/server/window-targets-engine.js');
-          ok(/const drafterGroupsOf = \(ctx\) => [^\n]*\.\.\.\(ctx\.groupsUnreadable === true \? \{ drafterGroupsUnreadable: true \} : \{\}\)/.test(CO) && /\.\.\.\(\(!live && p\.drafterGroupsUnreadable === true\) \|\| \(live && \(live\.inherited === null \|\| live\.groupsUnread === true\)\) \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\)/.test(CO) && !/groupsOfSession\(String\(d\.id\)\)/.test(CO)
-            && /const unread = groupsUnreadable === true \|\| \(!Array\.isArray\(g\) && require\('\.\/groups-hold\.js'\)\.held\(\)\);/.test(CO) && /groupsUnreadable: !live && cur\.drafterGroupsUnreadable === true \}\)/.test(CO)
-            && /\.\.\.\(\(!live && a\.groupsUnreadable === true\) \|\| \(live && \(live\.inherited === null \|\| live\.groupsUnread === true\)\) \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\)/.test(CO) && /if \(!sees && ctx\.groupsUnreadable === true && !\(entry\.source === 'channel-receipt' && entry\.ref\)\) return \{ text: HELD_STASH_TEXT \};/.test(CO) && /const gk = `\$\{ctx\.groupsUnreadable === true \? '\?' : ''\}/.test(CO)
-            && /const needGroups = row\.principal\.kind === 'group' \|\| one\.except\.some\(\(e\) => e && e\.kind === 'group'\);/.test(WT) && /const c = needGroups \? ctxOf\(\{ sessionId: id, session: s \}\)/.test(WT),
+          ok(gateOf(/const drafterGroupsOf = \(ctx\) => [^\n]*\.\.\.\(ctx\.groupsUnreadable === true \? \{ drafterGroupsUnreadable: true \} : \{\}\)/.test(CO)) && gateOf(/\.\.\.\(\(!live && p\.drafterGroupsUnreadable === true\) \|\| \(live && \(live\.inherited === null \|\| live\.groupsUnread === true\)\) \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\)/.test(CO)) && !/groupsOfSession\(String\(d\.id\)\)/.test(CO)
+            && gateOf(/const unread = groupsUnreadable === true \|\| \(!Array\.isArray\(g\) && require\('\.\/groups-hold\.js'\)\.held\(\)\);/.test(CO)) && gateOf(/groupsUnreadable: !live && cur\.drafterGroupsUnreadable === true \}\)/.test(CO))
+            && gateOf(/\.\.\.\(\(!live && a\.groupsUnreadable === true\) \|\| \(live && \(live\.inherited === null \|\| live\.groupsUnread === true\)\) \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\)/.test(CO)) && gateOf(/if \(!sees && ctx\.groupsUnreadable === true && !\(entry\.source === 'channel-receipt' && entry\.ref\)\) return \{ text: HELD_STASH_TEXT \};/.test(CO)) && gateOf(/const gk = `\$\{ctx\.groupsUnreadable === true \? '\?' : ''\}/.test(CO))
+            && gateOf(/const needGroups = row\.principal\.kind === 'group' \|\| one\.except\.some\(\(e\) => e && e\.kind === 'group'\);/.test(WT)) && verdictOfGuard(/const c = needGroups \? ctxOf\(\{ sessionId: id, session: s \}\)/.test(WT)),
             '⑨ follow-owed (the read\'s MUST + shoulds): a drafter\'s groups and a stash entry\'s `about` read while held carry their OWN mark, judged while the conversation is STOPPED (a stopped one\'s membership cannot be read: groupsOfSession answers [] for it — never «read again» into «no group»); with the groups unknown, a refused stash entry is said as HELD BACK (its words withheld — a receipt keeps its fate line), never dropped in silence; the memo keys the mark; a window share that leaves a Task Group out reads every session\'s groups (a session / everyone row listed G\'s members as reached)'); }
         { // BEHAVIOUR (the delta reads): drafterSees and stashGate RUN from channels-outbound's source over a REAL grant row «All agents,
           // except Task Group G» (grant-model admits), marked / unmarked × stopped / live × held / read
@@ -1660,7 +1660,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const akHeld = reachOf(ghFacts[0]), cfHeld = CF.rowNames(ROW, { kind: 'agent', id: CID, groups: [], ...ghFacts[0] }), uHeld = useOf(rHeld ? rHeld.unreadable : false);
       const uRel = useOf(rRel ? rRel.unreadable : false);
       ok(uHeld.ok === false && uHeld.code === 'groups_unreadable' && uRel.ok === true, '⑨ …an automation key\'s USE «All agents, except G» (the real useVerdict, handed what the REAL automationGroupsRead said): refused as groups_unreadable while held; CONTROL — the release\'s reader: admitted', { held: uHeld.code, rel: uRel.ok });
-      ok(/return GM\.admits\(\[\{ door: DOORS\.watch, resource: String\(res\), to: own, except: exceptFor\(own\[0\], r\.except\) \}\], \{ conversationKey: String\(cid\), groupIds: groups, inheritedGroupIds: Array\.isArray\(inherited\) \? inherited : \[\], \.\.\.\(groupsUnreadable === true \|\| inherited === null \? \{ groupsUnreadable: true \} : \{\}\) \}\)\.ok;/.test(readSrc('src/server/channels-grants.js')), '⑨ …channels-grants wakeAdmits puts the hold IN the facts its admits judges (the call site — its store is not cheap to stand up here)');
+      ok(verdictOfGuard(/return GM\.admits\(\[\{ door: DOORS\.watch, resource: String\(res\), to: own, except: exceptFor\(own\[0\], r\.except\) \}\], \{ conversationKey: String\(cid\), groupIds: groups, inheritedGroupIds: Array\.isArray\(inherited\) \? inherited : \[\], \.\.\.\(groupsUnreadable === true \|\| inherited === null \? \{ groupsUnreadable: true \} : \{\}\) \}\)\.ok;/.test(readSrc('src/server/channels-grants.js'))), '⑨ …channels-grants wakeAdmits puts the hold IN the facts its admits judges (the call site — its store is not cheap to stand up here)');
       const akRel = reachOf(), cfRel = CF.rowNames(ROW, { kind: 'agent', id: CID, groups: [] });   // the release: no fact handed
       ok(akHeld.ok === false && cfHeld === false && akRel.ok === true && cfRel === true, '⑨ …an automation key\'s reach «whole VibeSpace except G» and a channel row «All agents except G» (channel-filter rowNames) do not name G\'s conversation while held; CONTROL — no hold handed (the release): both name it', { akHeld: akHeld.code || akHeld.ok, cfHeld, akRel: akRel.ok, cfRel });
     }
@@ -1733,9 +1733,9 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       C.sb._fetchTasks(); await C.answer({ tasks: [], epoch: 2, seq: 0, unread: UNREAD });
       ok(C.sb._tasksLoaded === true && verdictOf(C.sb) === 'gone', '⑨ CONTROL — _fetchTasks without the held branch (the release): loaded-and-EMPTY, the open Task Group window\'s verdict «gone» (closed as «deleted elsewhere»)', { loaded: C.sb._tasksLoaded, v: verdictOf(C.sb) });
       const DT = readSrc('src/lib/task-detail.js'), TL = readSrc('src/lib/task-log.js');
-      ok(/const v = windowVerdict\(task, \{ loaded: sidebar\._tasksLoaded, unread: sidebar\._tasksUnread \}\);[^\n]*\n *if \(v !== 'gone'\) \{ body\.innerHTML/.test(DT) && /const v = windowVerdict\(task, \{ loaded: sidebar\._tasksLoaded, unread: sidebar\._tasksUnread \}\);[^\n]*\n *if \(v !== 'gone'\) \{ root\.innerHTML/.test(TL)
-        && /if \(!task && sidebar\._tasksLoaded\) \{ showToast\(t\('Task Group not found'\)/.test(DT) && /if \(this\._tasksUnread\) \{ const hold = document\.createElement\('div'\); hold\.className = 'empty-hint task-board-unread';[^\n]*\n *else this\.listEl\.appendChild\(addRow\);/.test(ST)
-        && /if \(data && data\.code === 'TASK_GROUPS_UNREAD'\) \{ showToast\(tr\("Task Groups cannot be read right now — nothing was recorded\. For you says why and what to do\."\)/.test(ST),
+      ok(gateOf(/const v = windowVerdict\(task, \{ loaded: sidebar\._tasksLoaded, unread: sidebar\._tasksUnread \}\);[^\n]*\n *if \(v !== 'gone'\) \{ body\.innerHTML/.test(DT)) && gateOf(/const v = windowVerdict\(task, \{ loaded: sidebar\._tasksLoaded, unread: sidebar\._tasksUnread \}\);[^\n]*\n *if \(v !== 'gone'\) \{ root\.innerHTML/.test(TL))
+        && gateOf(/if \(!task && sidebar\._tasksLoaded\) \{ showToast\(t\('Task Group not found'\)/.test(DT)) && gateOf(/if \(this\._tasksUnread\) \{ const hold = document\.createElement\('div'\); hold\.className = 'empty-hint task-board-unread';[^\n]*\n *else this\.listEl\.appendChild\(addRow\);/.test(ST))
+        && verdictOfGuard(/if \(data && data\.code === 'TASK_GROUPS_UNREAD'\) \{ showToast\(tr\("Task Groups cannot be read right now — nothing was recorded\. For you says why and what to do\."\)/.test(ST)),
         '⑨ …the windows draw the verdict (Task Group + Task log); the open refuses «not found» only over a LOADED mirror; the board says the hold in place of the create row; a refusal is worded by the PAGE from its code (zh / ja rows)');
     }
     // (h) THE DEDUPE: the real wiring's notice (createStore) into a real For-you store — a second held start files NO second item
@@ -1752,7 +1752,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
         fs.writeFileSync(w.file, '{"version":1,"tasks":{"T-');
         const t2 = start();   // the second: damaged bytes — OTHER words (a words-match would file a second item; the producer identity does not)
         const two = items();
-        ok(one.length === 1 && /\(EIO\)/.test(one[0]) && !!t1.unreadState() && !!t2.unreadState() && two.length === 1 && two[0].by === 'system' && /is damaged/.test(two[0].text) && !/did not parse/.test(two[0].text) && /move it aside and restart/.test(two[0].detail || ''), '⑨ (h) a second held start files NO second notice: ONE item per (task-groups-unread, store) — the For-you store\'s producer identity (itemKey); filed by the system; a damaged file\'s words name the door, no English why inside', two.map((i) => ({ text: i.text, by: i.by })));
+        ok(one.length === 1 && gateOf(/\(EIO\)/.test(one[0])) && !!t1.unreadState() && !!t2.unreadState() && two.length === 1 && two[0].by === 'system' && gateOf(/is damaged/.test(two[0].text)) && !/did not parse/.test(two[0].text) && verdictOfGuard(/move it aside and restart/.test(two[0].detail || '')), '⑨ (h) a second held start files NO second notice: ONE item per (task-groups-unread, store) — the For-you store\'s producer identity (itemKey); filed by the system; a damaged file\'s words name the door, no English why inside', two.map((i) => ({ text: i.text, by: i.by })));
         fs.writeFileSync(w.file, JSON.stringify(SEED));
         const t3 = start();
         await new Promise((r) => setImmediate(r));
@@ -1763,9 +1763,9 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
     {
       const held = heldOver('hook', MEMBER), read = readOver('hook-read', MEMBER);
       const line = held.unreadHookLine();
-      ok(typeof line === 'string' && /UNKNOWN, not empty/.test(line) && /task-groups\.json/.test(line) && read.unreadHookLine() === null
-        && /let context = \(typeof tasks\.unreadHookLine === 'function' && tasks\.unreadHookLine\(\)\) \|\| '';/.test(readSrc('src/agent-routes.js'))
-        && /if \(heldLine\) tailHeld \+= B\(heldLine\) \+ 2;\n *const committed = \(\) => [^\n]*\+ tailHeld;/.test(readSrc('src/agent-routes.js')) && /if \(heldLine\) outParts\.unshift\(heldLine\);[^\n]*\n(?:[^\n]*\n){0,40}?[^\n]*const used = Buffer\.byteLength\(outParts\.join/.test(readSrc('src/agent-routes.js')),
+      ok(typeof line === 'string' && gateOf(/UNKNOWN, not empty/.test(line)) && gateOf(/task-groups\.json/.test(line)) && read.unreadHookLine() === null
+        && gateOf(/let context = \(typeof tasks\.unreadHookLine === 'function' && tasks\.unreadHookLine\(\)\) \|\| '';/.test(readSrc('src/agent-routes.js')))
+        && gateOf(/if \(heldLine\) tailHeld \+= B\(heldLine\) \+ 2;\n *const committed = \(\) => [^\n]*\+ tailHeld;/.test(readSrc('src/agent-routes.js'))) && verdictOfGuard(/if \(heldLine\) outParts\.unshift\(heldLine\);[^\n]*\n(?:[^\n]*\n){0,40}?[^\n]*const used = Buffer\.byteLength\(outParts\.join/.test(readSrc('src/agent-routes.js'))),
         '⑨ (b) while held the hook injection says ONE line (the groups UNKNOWN, not empty — the file named) and every fit test COUNTS it (the start\'s context begins with it; the prompt holds its room in tailHeld and the report\'s fit includes it); a store that reads says none', line);
       const TWO = JSON.stringify({ version: 1, tasks: { 'T-a1': SEED.tasks['T-a1'], 'T-b2': { ...SEED.tasks['T-a1'], id: 'T-b2', title: 'Beta' } } });
       const w = world('import'); fs.writeFileSync(w.file, TWO);
@@ -1784,7 +1784,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const r2 = failing(mf2, 'EIO', () => tried(() => m2.importBundle(bundle)));
       ok(!!r2 && m2.get('T-a1').title === 'Alpha IMPORTED', '⑨ CONTROL — without the pre-pass: the import refused HALF-WAY, the first group already applied', { r2: r2 && r2.code, a1: m2.get('T-a1').title });
       const BK = readSrc('src/server/browser-keeper.js'), RC = readSrc('src/server/record-clear.js'), MP = readSrc('src/server/mounts-plugins-wiring.js');
-      ok(/const heldTaskWords = /.test(BK) && (BK.match(/knownTask: knownTaskOrHeld/g) || []).length === 2 && /TASK_GROUPS_UNREAD[^\n]*RC\.refuse\('unavailable'\)[^\n]*why: String\(e\.message\)/.test(RC) && /taskInfo: \(id\) => \{[\s\S]{0,500}?unreadRefusal\('a Task Group row'\)/.test(MP),
+      ok(gateOf(/const heldTaskWords = /.test(BK)) && (BK.match(/knownTask: knownTaskOrHeld/g) || []).length === 2 && gateOf(/TASK_GROUPS_UNREAD[^\n]*RC\.refuse\('unavailable'\)[^\n]*why: String\(e\.message\)/.test(RC)) && verdictOfGuard(/taskInfo: \(id\) => \{[\s\S]{0,500}?unreadRefusal\('a Task Group row'\)/.test(MP)),
         '⑨ (f) a browser profile\'s group row and record-clear answer with the hold\'s words (never «that group no longer exists» / a generic failure)');
       const root = scratchDir('tg-unread-mig'); roots.push(root); const dd = path.join(root, 'data'); fs.mkdirSync(dd, { recursive: true });
       const mh = path.join(dd, 'task-groups.json'); fs.writeFileSync(mh, MEMBER);
@@ -1794,8 +1794,8 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const res = require(path.join(REPO, 'src/server/migrations.js')).create({ rootDir: root, homeDir: home, serverNotice: () => { }, tasks: mg }).runLocalMigrations();
       const two = ['2026-08-archive-dormant-task-plans', '2026-10-task-group-archived-members', '2026-10-task-group-context-rows'].map((id) => res.find((x) => x.id === id));
       const ledger = (() => { try { return JSON.parse(fs.readFileSync(path.join(dd, 'migrations.json'), 'utf8')).applied || {}; } catch { return {}; } })();
-      ok(two.slice(0, 2).every((x) => x && x.status === 'failed' && /this migration was refused/.test(x.error)) && !!two[2] && two[2].status === 'failed' && /migration was refused/.test(two[2].error)
-        && two.every((x) => !ledger[x.id]) && fs.readFileSync(mh, 'utf8') === MEMBER,
+      ok(gateOf(two.slice(0, 2).every((x) => x && x.status === 'failed' && /this migration was refused/.test(x.error))) && !!two[2] && two[2].status === 'failed' && gateOf(/migration was refused/.test(two[2].error))
+        && gateOf(two.every((x) => !ledger[x.id])) && fs.readFileSync(mh, 'utf8') === MEMBER,
         '⑨ (g) the two migrations the hold guards (dormant plans, archived members — given an archive list) over a HELD real store REFUSE by name — failed, NOT in the ledger (tried again next boot), the store\'s bytes untouched; the Context rows\' migration refuses in its own words', two);
     }
     // (g) the routes' guard over a held real store, on a real express app (in-process, loopback): the list says `unread`, a write 503s
@@ -1825,7 +1825,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const firstOfNew = flagOf(h2, 'exit');
       const logs = ['src/exit-proxy.js', 'src/server/window-targets-engine.js', 'src/server/mounts-plugins-wiring.js', 'src/routes/browser.js'].map((f) => (readSrc(f).match(/if \(!\(e && e\.code === 'TASK_GROUPS_UNREAD'\) \|\| e\.firstOfHold\) /g) || []).length);
       const names = (readSrc('server.js').match(/tasks\.groupIdsForGrant\(a, '(exit|window)'\)/g) || []).length === 2 && /initialGroupIds: hit\._initialGroupIds \}, 'browser-key'\)/.test(readSrc('src/server/mounts-plugins-wiring.js')) && /initialGroupIds: s\._initialGroupIds \}, 'browser'\);/.test(readSrc('src/server/mounts-plugins-wiring.js'));
-      ok(JS(seq) === '[true,false,true,false,true,true,true,false]' && firstOfNew === true && JS(logs) === '[1,1,1,1]' && names, '⑨ follow (3): the grant refusal is thrown at every call but only the FIRST of a hold is marked firstOfHold, PER READER (a silent reader never takes the exit\'s / window\'s / browser\'s one line; another hold marks its own); the four readers that logged at every call name themselves and log that one', { seq, firstOfNew, logs, names });
+      ok(JS(seq) === '[true,false,true,false,true,true,true,false]' && firstOfNew === true && JS(logs) === '[1,1,1,1]' && verdictOfGuard(names), '⑨ follow (3): the grant refusal is thrown at every call but only the FIRST of a hold is marked firstOfHold, PER READER (a silent reader never takes the exit\'s / window\'s / browser\'s one line; another hold marks its own); the four readers that logged at every call name themselves and log that one', { seq, firstOfNew, logs, names });
       // (4) the who-dialog's pure verdict RETURNS the hold as a refusal value (never a throw out of its callback)
       const B = require(path.join(REPO, 'src/browser-profiles.js'));
       const prof = { id: 'bp-00000001', label: 'Desk', grantUse: { to: [{ kind: 'everyone' }], except: [] } };
@@ -1834,7 +1834,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const vGone = B.usePatchVerdict({ profile: prof, use, knownTask: () => false, knownKey: () => false, conversationOf: () => null });
       const vObj = B.usePatchVerdict({ profile: prof, use, knownTask: () => ({ something: true }), knownKey: () => false, conversationOf: () => null });
       const vOk = B.usePatchVerdict({ profile: prof, use, knownTask: () => ({ refusal: { ok: true, code: 'TASK_GROUPS_UNREAD', error: 'x' } }), knownKey: () => false, conversationOf: () => null });
-      ok(vHold.ok === false && vHold.code === 'TASK_GROUPS_UNREAD' && vHold.error === 'Task Groups: held (test)' && vGone.code === 'unknown_task' && vObj.code === 'unknown_task' && vOk.ok === false && /return \{ refusal: \{ code: 'TASK_GROUPS_UNREAD', error: w \} \}/.test(readSrc('src/server/browser-keeper.js')), '⑨ follow (4): the profile\'s «who may use» verdict answers the hold as a refusal VALUE (the keeper\'s knownTask hands it); a group the store does not list stays unknown_task', { vHold, vGone: vGone.code });
+      ok(vHold.ok === false && vHold.code === 'TASK_GROUPS_UNREAD' && vHold.error === 'Task Groups: held (test)' && vGone.code === 'unknown_task' && vObj.code === 'unknown_task' && vOk.ok === false && verdictOfGuard(/return \{ refusal: \{ code: 'TASK_GROUPS_UNREAD', error: w \} \}/.test(readSrc('src/server/browser-keeper.js'))), '⑨ follow (4): the profile\'s «who may use» verdict answers the hold as a refusal VALUE (the keeper\'s knownTask hands it); a group the store does not list stays unknown_task', { vHold, vGone: vGone.code });
       // (2) a held viewer's line gets its OWN kind and words (journal, strip, tail) — never «a conversation that is not running»
       const JMm = require(path.join(REPO, 'src/job-model.js'));
       const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
@@ -1846,8 +1846,8 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const owedH = eh.retryOwed(CID, entry), memoH = eh._retryVerdicts.get('pk-1');
       const en = eng(null); const owedN = en.retryOwed(CID, entry), memoN = en._retryVerdicts.get('pk-1');
       const tail = JMm.notifTailSentence([{ held: { kind: 'groups-unread' } }]);
-      ok(owedH === false && memoH === 'groups-unread' && JS(stashed.map((x) => x.kind)) === '["groups-unread","not-running"]' && /Task Groups store cannot be read/.test(stashed[0].why) && owedN === false && memoN === 'unknown'
-        && JMm.HELD_KINDS.includes('groups-unread') && /could not read its Task Groups/.test(tail) && /kind === 'groups-unread'\) why = tr\("VibeSpace cannot read its Task Groups right now/.test(readSrc('src/lib/jobs-layout.js')),
+      ok(owedH === false && memoH === 'groups-unread' && JS(stashed.map((x) => x.kind)) === '["groups-unread","not-running"]' && gateOf(/Task Groups store cannot be read/.test(stashed[0].why)) && owedN === false && memoN === 'unknown'
+        && gateOf(JMm.HELD_KINDS.includes('groups-unread')) && gateOf(/could not read its Task Groups/.test(tail)) && verdictOfGuard(/kind === 'groups-unread'\) why = tr\("VibeSpace cannot read its Task Groups right now/.test(readSrc('src/lib/jobs-layout.js'))),
         '⑨ follow (2): a held viewer\'s parked line is held under its OWN kind (groups-unread: the journal, the tail, the strip say the Task Groups store); CONTROL — no record of the conversation: still «not-running»', { stashed, memoH, memoN, tail });
       // …and THE PUSH ROAD (where most held lines are born): _notifyOwner's subscriber copy under a held view ⇒ groups-unread;
       // CONTROL: a view of no record that is not held ⇒ not-running, as on the release
@@ -1856,17 +1856,17 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       engP({ live: false, held: true, conversationId: CID, groups: new Set() })._notifyOwner({ ...J, kind: 'command', state: 'done' }, { what: 'done' });
       engP({ live: false, conversationId: CID, groups: new Set() })._notifyOwner({ ...J, kind: 'command', state: 'done' }, { what: 'done' });
       const subKinds = pushStash.filter((x) => x.cid === CID).map((x) => x.kind);
-      ok(JS(subKinds) === '["groups-unread","not-running"]' && /Task Groups store cannot be read/.test((pushStash.find((x) => x.kind === 'groups-unread') || {}).why || ''), '⑨ follow (2): the PUSH road — a subscriber\'s copy under a held view is stashed under groups-unread; CONTROL: a view of no record that is not held is still not-running', pushStash);
+      ok(JS(subKinds) === '["groups-unread","not-running"]' && verdictOfGuard(/Task Groups store cannot be read/.test((pushStash.find((x) => x.kind === 'groups-unread') || {}).why || '')), '⑨ follow (2): the PUSH road — a subscriber\'s copy under a held view is stashed under groups-unread; CONTROL: a view of no record that is not held is still not-running', pushStash);
       // (1) the backup dialog: the hold as a LINE with no checkbox (the owner's rule: no greyed control with a hint)
       const APP = readSrc('src/lib/app.js'), heldRow = (APP.split('\n').find((l) => l.includes("s.tasks?.unread ? (() => {")) || '');
-      ok(/className = 'cfg-row cfg-row-held'/.test(heldRow) && !/<input|disabled/.test(heldRow) && /so this backup leaves them out/.test(heldRow) && /div\.cfg-row-held \{ display: flex;/.test(readSrc('public/style.css')) && /div\.cfg-row-held:hover \{ background: none; \}/.test(readSrc('public/style.css')), '⑨ follow (1): the backup dialog says the hold as a line (no checkbox, nothing greyed, set with the rows\' text, never pressable) — and the export sends no tasks section (no data-sec box)');
+      ok(gateOf(/className = 'cfg-row cfg-row-held'/.test(heldRow)) && !/<input|disabled/.test(heldRow) && gateOf(/so this backup leaves them out/.test(heldRow)) && gateOf(/div\.cfg-row-held \{ display: flex;/.test(readSrc('public/style.css'))) && verdictOfGuard(/div\.cfg-row-held:hover \{ background: none; \}/.test(readSrc('public/style.css'))), '⑨ follow (1): the backup dialog says the hold as a line (no checkbox, nothing greyed, set with the rows\' text, never pressable) — and the export sends no tasks section (no data-sec box)');
     }
     // RED CONTROL — the release's own _load (its catch read every failure as «no file»), its PLANT PROVEN FIRST
     {
       const src = readSrc('src/task-groups.js');
       const RELEASE_LOAD = "  _load() {\n    for (const [f, legacy] of [[this._file, false], [this._legacyFile, true]]) {\n      let parsed;\n      try { parsed = timedSync('task-groups.read', () => JSON.parse(fs.readFileSync(f, 'utf-8'))); } catch { continue; }\n      if (!parsed || typeof parsed.tasks !== 'object') continue;\n      this._state = parsed;\n      if (legacy) this._save(); // migrate tasks.json → task-groups.json\n      return true;\n    }\n    this._state = { version: 1, tasks: {} };\n    return false;\n  }\n\n";
       const mut = anchored(src, /  _load\(\) \{\n[\s\S]*?(?=  \/\/ ── THE STORE HELD UNREAD \(see STORE_SHAPE above\) ──)/, () => RELEASE_LOAD, 'the release _load');   // B-0d3e's one door: exactly once, by name
-      ok(!!mut && mut.includes("} catch { continue; }") && !mut.includes('const a = SR.storeAnswer(read(this._file)'), '⑨ RED CONTROL proves its plant first: the copy carries the release\'s _load (its catch-continue) and not the store read');
+      ok(!!mut && gateOf(mut.includes("} catch { continue; }")) && !mut.includes('const a = SR.storeAnswer(read(this._file)'), '⑨ RED CONTROL proves its plant first: the copy carries the release\'s _load (its catch-continue) and not the store read');
       const w = world('red'); const seed = Buffer.from(JSON.stringify(SEED)); fs.writeFileSync(w.file, seed);
       const M = mutantCopies('tg-unread', REPO);
       const TGM0 = mut ? M.load('src/task-groups.js', mut, 'r0').TaskGroupManager : null;
@@ -1882,7 +1882,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
 console.log('⑩ the measured holds after 2.369.412: the pin over the tree\'s text (its legs run in the heavy twin)');
 {
   const readSrc = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-      ok(/writer: writer === undefined \? require\('\.\.\/store-writer\.js'\)\.storeWriter\(\) : writer,/.test(readSrc('src/server/desktop-app-keeper.js')), '⑩a the hub\'s keeper hands the process\'s store writer to the machine half (a suite may hand its own)');
+      ok(verdictOfGuard(/writer: writer === undefined \? require\('\.\.\/store-writer\.js'\)\.storeWriter\(\) : writer,/.test(readSrc('src/server/desktop-app-keeper.js'))), '⑩a the hub\'s keeper hands the process\'s store writer to the machine half (a suite may hand its own)');
 }
 
 // ── ⑤ U6 (lane lg-store-writes, B-0248 — 主开发 02:59Z, R1 + R2): NO READ OF THE READINGS FOLDER BYPASSES THE CACHE MODULE ──
@@ -1989,15 +1989,15 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
   ok(!RC0.got.has('src/usage-routes.js'), 'usage-routes reads the readings folder ONLY through the cache module (U6.1)');
   const CE = fs.readFileSync(path.join(REPO, 'src/server/cli-env.js'), 'utf8'), WS = fs.readFileSync(path.join(REPO, 'src/window-stamp.js'), 'utf8'), UR = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
   const c1 = readingsCensus({ 'src/zz-readings-plant.js': "const fs = require('fs'); const usageWrite = require('./usage-cache-write.js');\nfunction zz(USAGE_CACHE_DIR) { return fs.readFileSync(path.join(USAGE_CACHE_DIR, 'a.json')); }\n" });
-  ok(c1.bad.some((x) => /^UNNAMED: src\/zz-readings-plant\.js /.test(x)), 'NEGATIVE CONTROL: a NEW file reading the folder raw is red by name', c1.bad);
+  ok(verdictOfGuard(c1.bad.some((x) => /^UNNAMED: src\/zz-readings-plant\.js /.test(x))), 'NEGATIVE CONTROL: a NEW file reading the folder raw is red by name', c1.bad);
   const c2 = readingsCensus({ 'src/server/cli-env.js': CE + "\nfunction zzLocal() { const f9 = path.join(USAGE_CACHE_DIR, 'y.json'); return fs.readFileSync(f9, 'utf-8'); }\n" });
-  ok(c2.bad.some((x) => /src\/server\/cli-env\.js/.test(x)), 'NEGATIVE CONTROL: a raw read through a LOCAL built from the folder path (a plain pattern misses it) is red by name (whether its file has a row or not)', c2.bad);
+  ok(verdictOfGuard(c2.bad.some((x) => /src\/server\/cli-env\.js/.test(x))), 'NEGATIVE CONTROL: a raw read through a LOCAL built from the folder path (a plain pattern misses it) is red by name (whether its file has a row or not)', c2.bad);
   const c3 = readingsCensus({ 'src/window-stamp.js': WS + "\nfunction zzRd(p) { return fs.readFileSync(p, 'utf8'); }\nfunction zzUse(cacheDir) { return zzRd(path.join(cacheDir, 'z.json')); }\n" });
-  ok(c3.bad.some((x) => /src\/window-stamp\.js/.test(x) && /\bzzRd\b/.test(x)), 'NEGATIVE CONTROL: a raw read through a same-file HELPER that reads its parameter is red by name (the helper named — whether its file has a row or not)', c3.bad);
+  ok(verdictOfGuard(c3.bad.some((x) => /src\/window-stamp\.js/.test(x) && /\bzzRd\b/.test(x))), 'NEGATIVE CONTROL: a raw read through a same-file HELPER that reads its parameter is red by name (the helper named — whether its file has a row or not)', c3.bad);
   const c4 = readingsCensus({ 'src/server/cli-env.js': CE + "\n// fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'))\nconst zzS = \"fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'))\";\n" });
   ok(!c4.bad.length, '…while the same read in a comment and in a string adds nothing', c4.bad);
   const c5 = readingsCensus({ 'src/usage-routes.js': UR + "\nfunction zzBack() { return fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'), 'utf-8'); }\n" });
-  ok(c5.bad.some((x) => /^UNNAMED: src\/usage-routes\.js /.test(x)), 'NEGATIVE CONTROL: a raw read put back in usage-routes (U6.1 moved them all) is red by name', c5.bad);
+  ok(verdictOfGuard(c5.bad.some((x) => /^UNNAMED: src\/usage-routes\.js /.test(x))), 'NEGATIVE CONTROL: a raw read put back in usage-routes (U6.1 moved them all) is red by name', c5.bad);
 }
 
 // ── ⑫ THE WRITER'S forget IS THE FILE OWNER'S REMOVAL, NEVER A DROP (主开发 r286) ──────────────────────────────────────────────
@@ -2059,14 +2059,14 @@ console.log('⑫ the writer\'s forget is the file owner\'s removal — a step ri
   // never the table's (ordered text read red at train423 with the SAME counts, file for file, only listed in another order)
   const byFile = (o) => JSON.stringify(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
   const sameCallers = (a, b) => byFile(a) === byFile(b);
-  ok(sameCallers(fc, FORGET_CALLERS), `⑫ the census: the product calls the writer's forget ONLY where a file's owner removes the file (${Object.entries(fc).map(([f, n]) => `${f} ${n}`).join(', ') || 'none'}) — never as a drop`, fc);
+  ok(verdictOfGuard(sameCallers(fc, FORGET_CALLERS)), `⑫ the census: the product calls the writer's forget ONLY where a file's owner removes the file (${Object.entries(fc).map(([f, n]) => `${f} ${n}`).join(', ') || 'none'}) — never as a drop`, fc);
   const UH = files.get('src/usage-history.js') || '';
   const durables = (UH.match(/\.durable\(this\.cursorsFile\)/g) || []).length, caughtOnly = (UH.match(/\.durable\(this\.cursorsFile\)\.catch\(\(\) => \{ \}\)/g) || []).length;
   ok(!/afterLanding\(|\bride\(|whenDurable\(/.test(UH) && durables === caughtOnly, '⑫ …the usage cursors\' drop (settleCursors) is safe by construction: NOTHING rides _cursors.json\'s landing — no step, no wait whose answer is read (its one durable() is only caught) — a step there would run as «landed» over bytes the drop never wrote', { durables, caughtOnly });
   const SSF = files.get('src/server/session-stdout.js') || '', BRF = files.get('src/server/boot-restore.js') || '';
-  ok(SSF.includes('if (ok) { try { if (W.owed(tombPath) === null) W.forget(tombPath); } catch { } return; }') && BRF.includes('if (ok) { try { if (W.owed(file) === null) W.forget(file); } catch { } return; }')
-    && /function unlinkKept\(sockFile, file, done = null\) \{\n  try \{ storeWriter\(\)\.forget\(file\); \} catch \{ \}\n  fs\.unlink\(file, /.test(BRF)
-    && BRF.includes("if (!landed) { try { storeWriter().forget(file); } catch { } console.warn(`[end] ${sockFile}: its ended record could not be written"),
+  ok(gateOf(SSF.includes('if (ok) { try { if (W.owed(tombPath) === null) W.forget(tombPath); } catch { } return; }')) && gateOf(BRF.includes('if (ok) { try { if (W.owed(file) === null) W.forget(file); } catch { } return; }'))
+    && gateOf(/function unlinkKept\(sockFile, file, done = null\) \{\n  try \{ storeWriter\(\)\.forget\(file\); \} catch \{ \}\n  fs\.unlink\(file, /.test(BRF))
+    && verdictOfGuard(BRF.includes("if (!landed) { try { storeWriter().forget(file); } catch { } console.warn(`[end] ${sockFile}: its ended record could not be written")),
     '⑫ …B-574d\'s five calls are each of a lawful kind: a record\'s entry released only once its write LANDED with nothing newer owed (keepTomb, keepCopy), a kept copy\'s removal by its owner (unlinkKept: forget, then its unlink), an end\'s record told «kept nothing» (keepEnded)');
   const planted = new Map(files); planted.set('src/server/browser-keeper.js', files.get('src/server/browser-keeper.js') + '\nfunction zzDrop() { const W = writerOf(); W.forget(storeKey); }\n');
   const pc = forgetCensus(planted);
@@ -2077,7 +2077,7 @@ console.log('⑫ the writer\'s forget is the file owner\'s removal — a step ri
   ok(!sameCallers({ ...FORGET_CALLERS, [k0]: FORGET_CALLERS[k0] + 1 }, FORGET_CALLERS), `CONTROL (computed): a count one off in one file (${k0}) is red`);
   ok(!sameCallers({ ...FORGET_CALLERS, 'src/zz-made-up-caller.js': 1 }, FORGET_CALLERS), 'CONTROL (computed): a file in the census with no row is red');
   ok(!sameCallers(others, FORGET_CALLERS), `CONTROL (computed): a row with no file in the census (${k0}) is red`);
-  ok(sameCallers(Object.fromEntries(Object.entries(FORGET_CALLERS).reverse()), FORGET_CALLERS) && JSON.stringify(Object.fromEntries(Object.entries(FORGET_CALLERS).reverse())) !== JSON.stringify(FORGET_CALLERS), '⑫ the same counts listed in another order are the same census (the comparison is order-free; as ordered text they differ)');
+  ok(gateOf(sameCallers(Object.fromEntries(Object.entries(FORGET_CALLERS).reverse()), FORGET_CALLERS)) && JSON.stringify(Object.fromEntries(Object.entries(FORGET_CALLERS).reverse())) !== JSON.stringify(FORGET_CALLERS), '⑫ the same counts listed in another order are the same census (the comparison is order-free; as ordered text they differ)');
 }
 
 // ── ⑬ EVERY REGISTRY SAVE OF THE BROWSER KEEPER HAS ITS SIDE (主开发's round w4izmdrbq, its should 3 — r284's point 3 as a census) ──
@@ -2121,7 +2121,7 @@ console.log('⑬ every registry save of the browser keeper has its side (lands /
   const kx = judge(KSRC + '\n  function zzNewAct(id) { reg.zz = id; commit(); }\n');
   ok(JSON.stringify(kx.unnamed) === JSON.stringify(['zzNewAct']), 'CONTROL (planted in a copy\'s text): a NEW keeper save without a stated side is red by name', kx.unnamed);
   const kl = judge(KSRC.replace(/^(  function setCap\([^\n]*\n)([\s\S]*?)\bcommitSync\(\)/m, '$1$2commit()'));
-  ok(kl.notLanding.includes('setCap'), 'CONTROL (planted): a «lands» act whose landing became a plain commit() is red by name', kl.notLanding);
+  ok(verdictOfGuard(kl.notLanding.includes('setCap')), 'CONTROL (planted): a «lands» act whose landing became a plain commit() is red by name', kl.notLanding);
 }
 
 // ── ⑪ THE STORE HOLD (lane lg-store-writes, B-225b — 主开发's shape of 2026-11-20 04:37Z, R1–R13): src/store-hold.js, the helper the
@@ -2144,11 +2144,11 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
   try {
     // (B-7e49, r2522) the two pins over the tree's text stay here; (a)–(g), (i) and (m) run in the heavy twin scripts/test-store-write-census-scenes.mjs
       const WSRC = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-      ok((WSRC.match(/const layoutData = layoutsOrHeld\(ws, data\); if \(!layoutData\) (?:break|return);/g) || []).length === 5 && !/\n {10}const layoutData = readLayouts\(\);/.test(WSRC) && /type: 'layout-held', op: /.test(WSRC), '⑪ (e) the five ws layout doors (layout-sync, desktop-create / -delete / -rename / -reorder) read the desktops through ONE guard: held ⇒ `layout-held` by name to the sender, nothing applied (a pin)');
+      ok((WSRC.match(/const layoutData = layoutsOrHeld\(ws, data\); if \(!layoutData\) (?:break|return);/g) || []).length === 5 && !/\n {10}const layoutData = readLayouts\(\);/.test(WSRC) && verdictOfGuard(/type: 'layout-held', op: /.test(WSRC)), '⑪ (e) the five ws layout doors (layout-sync, desktop-create / -delete / -rename / -reorder) read the desktops through ONE guard: held ⇒ `layout-held` by name to the sender, nothing applied (a pin)');
       // the judge and the text-model client (pins: their refusal comes BEFORE any reservation)
       const DE = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8'), TM = fs.readFileSync(path.join(REPO, 'src/server/text-model-client.js'), 'utf8'), MW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
       const jc = DE.slice(DE.indexOf('async function judgeCall('), DE.indexOf('reserve(use,', DE.indexOf('async function judgeCall(')));
-      ok(/if \(settingsUnread\(\)\) return quiet\(use, 'settings-unread'\);/.test(jc) && /ledger\.settingsUnread\(\)\) \{ ledger\.journal\(\{ use, model: null, outcome: 'refused', why: 'settings-unread'/.test(TM) && /decision-engine\.js'\)\.create\(\{[^\n]*settingsHeld: \(\) => \(persistenceRouter && typeof persistenceRouter\.settingsHeld === 'function'/.test(MW),
+      ok(gateOf(/if \(settingsUnread\(\)\) return quiet\(use, 'settings-unread'\);/.test(jc)) && gateOf(/ledger\.settingsUnread\(\)\) \{ ledger\.journal\(\{ use, model: null, outcome: 'refused', why: 'settings-unread'/.test(TM)) && verdictOfGuard(/decision-engine\.js'\)\.create\(\{[^\n]*settingsHeld: \(\) => \(persistenceRouter && typeof persistenceRouter\.settingsHeld === 'function'/.test(MW)),
         '⑪ (f) the judge (before its reservation) and the text-model client refuse NOT NOW by name while the settings are held — the owner\'s daily cap is never judged on its default (pins; the hub hands the hold in)');
     // (j) WHILE THE SETTINGS ARE HELD, THE STRICT SIDE (round wyzvr7567's MUST 2, by rule R3 — «never a default acted on»): every row
     // that guards MONEY, a SAFETY ask, a VENDOR CALL or a WRITE TO A PERSON'S OWN FILE takes its strict side in the held view
@@ -2167,7 +2167,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const sv = ST.strictValues();
       const four = sv['permissions.bypassAnswersAsks'] === false && sv['antigravity.autoUsageReads'] === 'off' && sv['pool.avoidOverageMembers'] === true && !!ST.NO_WRITE_WHILE_HELD['agents.vibespaceIntegration'] && sv['agents.vibespaceIntegration'] === false;
       const defaults = { bypass: SCH['permissions.bypassAnswersAsks'] && SCH['permissions.bypassAnswersAsks'].default, avoid: SCH['pool.avoidOverageMembers'] && SCH['pool.avoidOverageMembers'].default };
-      ok(c.unnamed.length === 0 && c.caught.length >= 25 && four && Object.keys(ST.STRICT_WHILE_HELD).every((k) => rows.some((r) => r.key === k)) && defaults.bypass === true && defaults.avoid === false,
+      ok(c.unnamed.length === 0 && c.caught.length >= 25 && gateOf(four) && gateOf(Object.keys(ST.STRICT_WHILE_HELD).every((k) => rows.some((r) => r.key === k))) && defaults.bypass === true && defaults.avoid === false,
         `⑪ (j) WHILE THE SETTINGS ARE HELD every row that guards money, a safety ask, a vendor call or a person's own file takes its STRICT side — ${c.caught.length} rows of ${rows.length} caught by the census, every one named (the auto-allow of the CLI's safety asks OFF though its default is on, the vendor's automatic reads OFF, avoid overage ON though its default is off, the hooks never written); every strict row is a real row`, c);
       const pc = ST.census([...rows, { key: 'permissions.autoAllowEverything', cliConfig: false }]);
       ok(JSON.stringify(pc.unnamed) === JSON.stringify(['permissions.autoAllowEverything']), 'CONTROL (planted): a NEW row of these kinds with no strict side is red BY NAME', pc.unnamed);
@@ -2177,13 +2177,13 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       let cliHomes = 0;
       const syncRun = async (M) => { const lines = []; const m = M.create({ serverSetting: (k) => (k === SYMH ? { kind: 'unreadable', code: 'EIO' } : undefined), harnesses: { list: () => [], get: () => null }, adapterRegistry: new Map(), activeSessions: new Map(), hookRegistrationSafe: () => false, home: (() => { const d = scratchDir('swc-cli-home-' + (++cliHomes)); roots.push(d); return d; })(), log: (l) => lines.push(String(l)), warn: (l) => lines.push(String(l)) }); let r; try { r = await m.syncCliConfig({ reason: 'boot' }); } catch (e) { r = { threw: e.message }; } return { r, lines }; };   // B-ddf3 unit 2 line 1: the sync answers a Promise
       const sr = await syncRun(require(path.join(REPO, HCREL)));
-      ok(!!sr.r && sr.r.skipped === true && !!sr.r.settingsHeld && sr.r.settingsHeld.kind === 'unreadable' && sr.lines.some((l) => /no CLI config is written until they read/.test(l)),
+      ok(!!sr.r && sr.r.skipped === true && !!sr.r.settingsHeld && sr.r.settingsHeld.kind === 'unreadable' && verdictOfGuard(sr.lines.some((l) => /no CLI config is written until they read/.test(l))),
         '⑪ (j) the CLI-config sync writes NOTHING while the settings are held (said once in the journal) — the person\'s own CLI files are never written on values that are not theirs', sr);
       const HC_A = "    if (held) { log(`[cli-config] skipped (${reason}): the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — no CLI config is written until they read`); return Promise.resolve({ skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }); }";
       const srx = await syncRun(mutantCopies('swc-cli-held', REPO).load(HCREL, anchored(HCSRC, HC_A, '', 'cli-held-cut'), 'cli-held-cut'));
       ok(!!srx.r && !srx.r.settingsHeld && !!srx.r.refused, 'CONTROL (the sync\'s held guard cut, in a copy): the sync goes PAST the hold to its next gate (here the copy\'s own refusal stops it before any file; a hub would write the CLI configs on rows that are not the person\'s) — red', srx.r);
       const AG = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8');
-      ok(/const held = settingsHeldNow\(\);\n  if \(held\) \{ replayAtLift\(\); return Promise\.resolve\(\{ skipped: true, settingsHeld:/.test(AG) && /function stripAgentHookEntries\(\{ ifOptedOut = false \} = \{\}\) \{\n[^\n]*\n  \{ const r = refuseOwnerWrite\(\); if \(r\) return Promise\.resolve\(\{ ok: false, skipped: true, refused: r,[^\n]*\n  \{ const held = settingsHeldNow\(\); if \(held\) return Promise\.resolve\(\{ ok: false, skipped: true, settingsHeld: \{ kind: held\.kind,/.test(AG),
+      ok(gateOf(/const held = settingsHeldNow\(\);\n  if \(held\) \{ replayAtLift\(\); return Promise\.resolve\(\{ skipped: true, settingsHeld:/.test(AG)) && verdictOfGuard(/function stripAgentHookEntries\(\{ ifOptedOut = false \} = \{\}\) \{\n[^\n]*\n  \{ const r = refuseOwnerWrite\(\); if \(r\) return Promise\.resolve\(\{ ok: false, skipped: true, refused: r,[^\n]*\n  \{ const held = settingsHeldNow\(\); if \(held\) return Promise\.resolve\(\{ ok: false, skipped: true, settingsHeld: \{ kind: held\.kind,/.test(AG)),
         '⑪ (j) the hooks: neither registered nor stripped while the settings are held (the person\'s ~/.claude and ~/.codex configs untouched), the registration replayed at the lift by the person\'s own switch (a pin: the writers need a real home)');
       // (k) A PERSON'S REFUSED ACT IS SAID AT THE PRESS (主开发 r552): while the settings are held Manage Agents' «Apply» (POST
       // /api/cli-config/apply, src/server/hooks-late.js — DRIVEN, both readings of the switch) and «Install» (POST
@@ -2210,10 +2210,10 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         const heldAnswer = (a) => a.status === 503 && !!a.body && a.body.code === 'store_unread' && !!a.body.held && a.body.held.file === 'settings.json' && a.body.held.kind === 'unreadable' && a.body.held.code === 'EIO' && /could not be read \(unreadable, EIO\) — the CLI config was not applied; nothing was written/.test(a.body.error) && a.body.ok !== true;
         const HLM = require(path.join(REPO, HLREL));
         const ap1 = await applyDoor(HLM, { on: true }), ap0 = await applyDoor(HLM, { on: false });
-        ok(heldAnswer(ap1) && ap1.hookCalls === 1 && heldAnswer(ap0) && ap0.hookCalls === 0,
+        ok(gateOf(heldAnswer(ap1)) && ap1.hookCalls === 1 && gateOf(heldAnswer(ap0)) && ap0.hookCalls === 0,
           '⑪ (k) «Apply» while the settings are held answers the hold BY NAME — 503 store_unread with the held fact (settings.json, unreadable, EIO), «nothing was written» — with the switch read on (the hooks\' skip) AND off (the strict side: the sync\'s skip); never «applied»', { on: ap1, off: ap0 });
         const XAP = await applyDoor(mutantCopies('swc-apply-held', REPO).load(HLREL, anchored(HLSRC, /^ {6}if \(held\) return res\.status\(503\)\.json\([^\n]*\n/m, '', 'apply-held-cut'), 'apply-held-cut'), { on: true });
-        ok(XAP.status === 200 && XAP.body && XAP.body.ok === true && !XAP.body.code, 'CONTROL (the Apply door\'s hold answer cut, in a copy): the route says ok — «applied» over a sync and a registration that wrote nothing (red)', XAP);
+        ok(XAP.status === 200 && gateOf(XAP.body) && XAP.body.ok === true && !XAP.body.code, 'CONTROL (the Apply door\'s hold answer cut, in a copy): the route says ok — «applied» over a sync and a registration that wrote nothing (red)', XAP);
         // «Install» (server.js — no line added there; the hold is asked FIRST: its strict side reads the switch off) + the health check
         const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
         const inst = SV.slice(SV.indexOf("app.post('/api/agent-hooks/install'"), SV.indexOf("app.post('/api/agent-hooks/install'") + 2400);
@@ -2221,7 +2221,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         const INST_SKIP = /if \(results\.skipped && results\.settingsHeld\) return res\.status\(503\)\.json\(\{ error: 'the settings could not be read — the hooks were not installed; nothing was written', code: 'store_unread', held: \{ file: 'settings\.json', kind: results\.settingsHeld\.kind/;
         const HEAL = /Promise\.resolve\(ensureAgentHooks\(\{ auto: true \}\)\)\.then\(\(healed\) => \{[^\n]*\n\s*if \(!\(healed && healed\.skipped\) && !\(healed && healed\[key\] && healed\[key\]\.ok === false\) && !hookRootWatch\.saidRecoveryInstead\(info, scriptMissing\)\) serverNotice\(`hook-health-\$\{key\}`,/;   // B-ddf3 unit 2 line 1: the heal lands later (the shipped helper)
         const instPin = (t) => INST_HOLD.test(t) && INST_SKIP.test(t);
-        ok(instPin(inst) && inst.search(INST_HOLD) < inst.indexOf('createHookHelper();') && HEAL.test(SV),
+        ok(gateOf(instPin(inst)) && inst.search(INST_HOLD) < inst.indexOf('createHookHelper();') && verdictOfGuard(HEAL.test(SV)),
           '⑪ (k) «Install» while the settings are held answers the hold BY NAME (503 store_unread, the held fact) BEFORE the switch\'s own refusal and before any write; a skip the writer reports is the same answer; the hook health check reads the skip — no «has been repaired» over a write that never ran (pins: server.js is not loaded here)');
         const oldInst = inst.replace(INST_HOLD, "if (!integrationEnabled()) return res.status(400)");
         const oldHeal = SV.replace(HEAL, "ensureAgentHooks({ auto: true }); // self-heal the registration in place\n        if (!hookRootWatch.saidRecoveryInstead(info, scriptMissing)) serverNotice(`hook-health-${key}`,");   // stale-pins: kept (the OLD line, rebuilt for the pin's red control)
@@ -2231,7 +2231,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         const PAGE_INST = /const r = await fetchJson\('\/api\/agent-hooks\/install', \{ method: 'POST' \}\);\n(?:[^\n]*\n){2} {18}if \(!r \|\| typeof r\.error === 'string'\) showToast\(\[r \? r\.error : t\('Install failed'\), rowsSaid\]\.filter\(Boolean\)\.join\(' — '\), \{ type: 'error' \}\);[^\n]*\n {18}else if \(rowsSaid\)/;   // r3064 (7): the refusal first, a refused row of the same run beside it
         const PAGE_APPLY = /const r = await fetchJson\('\/api\/cli-config\/apply', \{ method: 'POST' \}\);\n {18}if \(!r \|\| r\.error \|\| r\.ok === false\) showToast\(t\('Could not apply the CLI config — \{reason\}', \{ reason: \(r && r\.error\) \|\| t\('server unreachable'\) \}\), \{ type: 'error' \}\);/;
         const MAP = /if \(body && typeof body === 'object' && body\.code === 'store_unread'\) return \{ \.\.\.body, said: body\.error, error: storeHeldWords\(body\.held\) \};/;
-        ok(PAGE_INST.test(MA) && PAGE_APPLY.test(MA) && MAP.test(UT) && /return body;\n  \} catch \{ return null; \}/.test(UT.slice(UT.indexOf('export async function fetchJson'), UT.indexOf('export async function fetchJson') + 400)),
+        ok(gateOf(PAGE_INST.test(MA)) && gateOf(PAGE_APPLY.test(MA)) && gateOf(MAP.test(UT)) && verdictOfGuard(/return body;\n  \} catch \{ return null; \}/.test(UT.slice(UT.indexOf('export async function fetchJson'), UT.indexOf('export async function fetchJson') + 400))),
           '⑪ (k) the page says the hold\'s words at both doors: fetchJson turns a store_unread answer into storeHeldWords(held); «Apply» shows it in «Could not apply the CLI config — …», «Install» shows the refusal itself (the hold, the switch off, a refused write) — never «installed» (pins)');
         const oldPage = MA.replace(/ {18}if \(!r \|\| typeof r\.error === 'string'\) showToast\([^\n]*\n {18}else if \(rowsSaid\)/, '                  if (rowsSaid)');   // stale-pins: kept (the OLD line, rebuilt for the pin's red control)
         ok(oldPage !== MA && !PAGE_INST.test(oldPage), 'CONTROL (the pin over the old Install toast): the page that reads only the per-CLI results is red (it said «installed» for a refusal)');
@@ -2245,7 +2245,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
           return { memoKept: fs.existsSync(memo), said: w._state.said, armed: timers.length, attempt: w._state.attempt };
         };
         const rw = await watchSkip(require(path.join(REPO, RWREL)));
-        ok(rw.memoKept && rw.said === false && rw.armed === 1 && rw.attempt === 4, '⑪ (k) the hook-root watch reads a held skip as NOTHING registered: no recovery (the memo kept, no «registered after an earlier read error»), its backoff armed to read again', rw);
+        ok(gateOf(rw.memoKept) && rw.said === false && rw.armed === 1 && rw.attempt === 4, '⑪ (k) the hook-root watch reads a held skip as NOTHING registered: no recovery (the memo kept, no «registered after an earlier read error»), its backoff armed to read again', rw);
         const RW_A = /^ {6}else if \(r && r\.skipped && \(r\.settingsHeld \|\| r\.optOutUnread\)\) arm\(\);[^\n]*\n/m;   // B-f276 (s1126): the line also reads an unread opt-out mark
         const xrw = await watchSkip(mutantCopies('swc-root-watch-skip', REPO).load(RWREL, anchored(RWSRC, RW_A, '', 'root-watch-skip'), 'root-watch-skip'));
         ok(xrw.armed === 0 && xrw.attempt === 3, 'CONTROL (the watch\'s skip read cut, in a copy): a held skip is never read again — no backoff armed, the attempt never moves (red; since B-ddf3 unit 2 the recovery itself is read by landing-answer notLanded, which never takes a held skip for one)', xrw);
@@ -2258,19 +2258,19 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
           return { bootSkipped: !!(boot && boot.skipped && boot.settingsHeld), replays: lines.filter((l) => /^\[cli-config\] skipped \(the settings read again\): /.test(l)).length, lines };
         };
         const rp = await replay(require(path.join(REPO, HCREL)));
-        ok(rp.bootSkipped && rp.replays === 1, '⑪ (k) THE LIFT REPLAYS the CLI-config sync the hold skipped — with every row at its default (no row differs from an empty «before») it runs ONCE at the lift (here to its own next gate, the copy\'s refusal — never a file), and not again on the next unchanged write', rp);
+        ok(gateOf(rp.bootSkipped) && rp.replays === 1, '⑪ (k) THE LIFT REPLAYS the CLI-config sync the hold skipped — with every row at its default (no row differs from an empty «before») it runs ONCE at the lift (here to its own next gate, the copy\'s refusal — never a file), and not again on the next unchanged write', rp);
         const REPLAY_A = /^ {4}if \(heldSkipped\) landing = syncCliConfig\(\{ reason: 'the settings read again' \}\);[^\n]*\n {4}else /m;
         const xrp = await replay(mutantCopies('swc-cli-replay', REPO).load(HCREL, anchored(HCSRC, REPLAY_A, '    ', 'cli-replay-cut'), 'cli-replay-cut'));
-        ok(xrp.bootSkipped && xrp.replays === 0, 'CONTROL (the replay cut, in a copy): the lift with every row at its default never syncs — the boot\'s skipped sync is never replayed (red)', xrp);
+        ok(gateOf(xrp.bootSkipped) && xrp.replays === 0, 'CONTROL (the replay cut, in a copy): the lift with every row at its default never syncs — the boot\'s skipped sync is never replayed (red)', xrp);
         // the integration switch: OFF in the held view (the strict table; persistence's heldSettingsView spreads strictValues)
         const SHREL = 'src/settings-held-strict.js', SHSRC = fs.readFileSync(path.join(REPO, SHREL), 'utf8');
         const PV = fs.readFileSync(path.join(REPO, 'src/routes/persistence.js'), 'utf8');
         const ivRow = ST.STRICT_WHILE_HELD['agents.vibespaceIntegration'];
-        ok(!!ivRow && ivRow.kind === 'person-file' && ivRow.strict === false && /NEW spawn/.test(ivRow.why) && /running conversations' context deliveries/.test(ivRow.why) && c.caught.includes('agents.vibespaceIntegration')
-          && /const heldSettingsView = \(h\) => Object\.freeze\(Object\.defineProperty\(\{ \.\.\.require\('\.\.\/settings-held-strict\.js'\)\.strictValues\(\) \}/.test(PV) && /function integrationEnabled\(\) \{\n  try \{ return serverSetting\('agents\.vibespaceIntegration'\) !== false; \}/.test(SV),
+        ok(!!ivRow && ivRow.kind === 'person-file' && ivRow.strict === false && gateOf(/NEW spawn/.test(ivRow.why)) && gateOf(/running conversations' context deliveries/.test(ivRow.why)) && gateOf(c.caught.includes('agents.vibespaceIntegration'))
+          && gateOf(/const heldSettingsView = \(h\) => Object\.freeze\(Object\.defineProperty\(\{ \.\.\.require\('\.\.\/settings-held-strict\.js'\)\.strictValues\(\) \}/.test(PV)) && verdictOfGuard(/function integrationEnabled\(\) \{\n  try \{ return serverSetting\('agents\.vibespaceIntegration'\) !== false; \}/.test(SV)),
           '⑪ (k) the integration switch reads OFF while the settings are held (the strict table — a person-file row: no NEW spawn gets the context delivery or the agent tools, the running conversations\' deliveries answer as with it off; ONE reading, integrationEnabled) — a person who turned it off is never overridden by the default ON', ivRow);
         const XST = mutantCopies('swc-strict-iv', REPO).load(SHREL, anchored(SHSRC, /^ {2}'agents\.vibespaceIntegration': row\('person-file', false, [^\n]*\n/m, '', 'strict-iv-cut'), 'strict-iv-cut');
-        ok(XST.strictValues()['agents.vibespaceIntegration'] === undefined && SCH['agents.vibespaceIntegration'] && SCH['agents.vibespaceIntegration'].default !== false, 'CONTROL (the strict row cut, in a copy): the held view has no value for the switch — it reads the default ON (new spawns get the context and the tools of a person who turned them off) — red', { def: SCH['agents.vibespaceIntegration'] && SCH['agents.vibespaceIntegration'].default });
+        ok(XST.strictValues()['agents.vibespaceIntegration'] === undefined && gateOf(SCH['agents.vibespaceIntegration']) && SCH['agents.vibespaceIntegration'].default !== false, 'CONTROL (the strict row cut, in a copy): the held view has no value for the switch — it reads the default ON (new spawns get the context and the tools of a person who turned them off) — red', { def: SCH['agents.vibespaceIntegration'] && SCH['agents.vibespaceIntegration'].default });
         // (主开发 r565) THE ARCHIVE VERB WHILE THE LIST IS HELD: the reach verdict FIRST, the held refusal after it — the held refusal's
         // label is the target's NAME (more than the caller's own reference), so a held list never tells a caller about a conversation
         // it may not see: a caller the key does not reach gets the reach refusal and the list is not asked; a caller it reaches gets
@@ -2288,7 +2288,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
           return { no: { code: no.code, why: no.why }, askedForNo, yes: { code: yes.code, noticeName: yes.noticeName, why: yes.why }, archived: archived.length };
         };
         const ha = await heldArchive(require(path.join(REPO, COREL)));
-        ok(ha.no.code === 'not_granted' && ha.askedForNo === 0 && ha.yes.code === 'store_unread' && ha.yes.noticeName === 'a private name' && /nothing was ended or archived/.test(ha.yes.why) && ha.archived === 0,
+        ok(ha.no.code === 'not_granted' && ha.askedForNo === 0 && ha.yes.code === 'store_unread' && ha.yes.noticeName === 'a private name' && gateOf(/nothing was ended or archived/.test(ha.yes.why)) && ha.archived === 0,
           '⑪ (k) (主开发 r565) the archive verb while the conversation list is held: the REACH verdict first — a caller the key does not reach gets the reach refusal and the held list is never asked; a caller it reaches gets the hold BY NAME (store_unread, the target named) — nothing ended or archived', ha);
         const HELD_BLOCK = /^ {6}\/\/ B-225b R3: the archived list HELD[^\n]*\n {6}\/\/[^\n]*\n {6}\/\/[^\n]*\n( {6}if \(isArchived\(f\.sessionKey\) === null\) return \{ ok: false, code: 'store_unread'[^\n]*\n)/m;
         const heldLine = (COSRC.match(HELD_BLOCK) || [])[1] || '';
@@ -2348,7 +2348,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const p1 = plant('    fs.writeFileSync(LAYOUTS_FILE, JSON.stringify(_layoutsCache));\n', 'swc-h-direct');
       const p2 = plant('    layoutsHold.write(_layoutsCache);\n', 'swc-h-second');
       const p3 = plant('    writeJsonAtomic(SETTINGS_FILE, {});\n', 'swc-h-atomic');
-      ok(p1.some((b) => /fs\.writeFileSync\(LAYOUTS_FILE\)/.test(b)) && p2.some((b) => /layoutsHold\.write × 2/.test(b)) && p3.some((b) => /writeJsonAtomic\(SETTINGS_FILE\)/.test(b)),
+      ok(gateOf(p1.some((b) => /fs\.writeFileSync\(LAYOUTS_FILE\)/.test(b))) && gateOf(p2.some((b) => /layoutsHold\.write × 2/.test(b))) && verdictOfGuard(p3.some((b) => /writeJsonAtomic\(SETTINGS_FILE\)/.test(b))),
         '⑪ (h) CONTROLS (planted in a copy\'s text): a direct write of layouts.json, a SECOND write door of the desktops, the atomic writer aimed at settings.json — each red by name', { p1, p2, p3 });
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
@@ -2366,8 +2366,8 @@ console.log('§T the heavy twin holds the moved legs');
   const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const MOVED = ['// ── ⑩ THE MEASURED HOLDS AFTER 2.369.412', 'desktop-apps.json that could not be read (EIO): HELD', 'the unreadable journal shows a $0 month', 'const scene = (Mod, name, code, bytes = SEED) =>', 'a conversation list the start could NOT read: every door answers 503', '// (m) B-225b', 'the restore answers SUCCESS over a write the storage refused', '// ⑭ B-0248 (c) (lane bl-loop-b, 主开发 r912)', 'const XE = await stopScene(', 'the stop lands nothing of it — the rename is lost'];
   const holds = (t) => MOVED.every((h) => t.includes(h));
-  ok(holds(twin) && MOVED.every((h) => here.split(h).length === 2), `§T the heavy twin holds ⑩'s legs, ⑪'s driven legs and ⑭ — their headings, their first and last marks — and this file runs none of them`);
-  ok(/\{ name: 'test-store-write-census-scenes', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8')), '§T the twin is a HEAVY row of the tier');
+  ok(gateOf(holds(twin)) && verdictOfGuard(MOVED.every((h) => here.split(h).length === 2)), `§T the heavy twin holds ⑩'s legs, ⑪'s driven legs and ⑭ — their headings, their first and last marks — and this file runs none of them`);
+  ok(verdictOfGuard(/\{ name: 'test-store-write-census-scenes', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8'))), '§T the twin is a HEAVY row of the tier');
   ok(!holds(twin.replace(MOVED[7], '// ⑭ (gone)')), 'RED CONTROL — a twin whose ⑭ heading is gone is no longer the moved legs: §T goes red');
 }
 
@@ -2452,4 +2452,4 @@ console.log('⑮ the synced rename\'s hub callers, by name');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf as verdictOfGuard, gateOf } from './lib/check.mjs';

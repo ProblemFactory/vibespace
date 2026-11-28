@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } };
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
 const read = (files) => files.map((f) => ({ file: path.relative(ROOT, f), text: fs.readFileSync(f, 'utf8') }));
 const PREFIX_RE = /^\/api\/(desktop|agent)\//;
@@ -103,19 +103,19 @@ console.log(`the census — ${rows.length} client calls into /api/desktop/ + /ap
 for (const r of rows) console.log(`  ${r.servedBy ? '·' : 'RED'} ${r.method} ${r.path}  ← ${r.file}:${r.line}${r.servedBy ? `  → ${r.servedBy}` : `  — ${r.why}`}`);
 ok(rows.length >= 20, `the scanner reads the client tree (${rows.length} calls ≥ 20 — a parser that finds nothing proves nothing)`);
 const owner = ['GET /api/desktop/apps/adopt-prefill', 'POST /api/desktop/apps/:id/remove', 'POST /api/desktop/apps/:id/forget', 'POST /api/desktop/apps/:id/stop'];
-for (const k of owner) ok(rows.some((r) => `${r.method} ${r.path}` === k), `the scanner finds the launcher's ${k}`);
+for (const k of owner) ok(verdictOf(rows.some((r) => `${r.method} ${r.path}` === k)), `the scanner finds the launcher's ${k}`);
 const red = rows.filter((r) => !r.servedBy);
 ok(!red.length, `every path the client calls is served by a router (${rows.length - red.length}/${rows.length})`, red.map((r) => `${r.method} ${r.path} ← ${r.file}:${r.line} — ${r.why}`));
 // CONTROL 1: the pre-fix router — the three owner routes commented out ⇒ RED by name
 const mut = routeFiles.map((f) => (f.file.endsWith('desktop-apps.js') ? { ...f, text: f.text.replace(/^(router\.(get|post)\('\/api\/desktop\/apps\/(adopt-prefill|:id\/remove|:id\/forget)')/gm, '// $1') } : f));
 const redMut = census(client, routesOf(mut)).filter((r) => !r.servedBy).map((r) => `${r.method} ${r.path}`);
-ok(['GET /api/desktop/apps/adopt-prefill', 'POST /api/desktop/apps/:id/remove', 'POST /api/desktop/apps/:id/forget'].every((k) => redMut.includes(k)), `CONTROL: the .254 router (owner routes commented out) is RED by name (${redMut.join(', ')})`);
+ok(verdictOf(['GET /api/desktop/apps/adopt-prefill', 'POST /api/desktop/apps/:id/remove', 'POST /api/desktop/apps/:id/forget'].every((k) => redMut.includes(k))), `CONTROL: the .254 router (owner routes commented out) is RED by name (${redMut.join(', ')})`);
 // CONTROL 2: adopt-prefill registered AFTER GET …/apps/:id is swallowed by it (the verify's 404 "no desktop app adopt-prefill")
 const late = routesOf(routeFiles).map((r) => (r.path === '/api/desktop/apps/adopt-prefill' ? { ...r, order: 1e9 } : r)).sort((a, b) => a.order - b.order);
 const sw = census(client, late).find((r) => r.path === '/api/desktop/apps/adopt-prefill');
-ok(sw && !sw.servedBy && /swallowed by GET \/api\/desktop\/apps\/:id/.test(sw.why), `CONTROL: a literal route registered after \`:id\` is RED (${sw && sw.why})`);
+ok(gateOf(sw) && !sw.servedBy && verdictOf(/swallowed by GET \/api\/desktop\/apps\/:id/.test(sw.why)), `CONTROL: a literal route registered after \`:id\` is RED (${sw && sw.why})`);
 // the normaliser itself
 ok(JSON.stringify(pathsOf("/api/desktop/apps/${encodeURIComponent(row.id)}/${forget ? 'forget' : 'remove'}")) === JSON.stringify(['/api/desktop/apps/:id/forget', '/api/desktop/apps/:id/remove']) && JSON.stringify(pathsOf('/api/desktop/apps${q ? `?${q}` : \'\'}')) === JSON.stringify(['/api/desktop/apps']), 'the normaliser: a param segment = :id, a two-word ternary = both words, a query builder dropped');
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

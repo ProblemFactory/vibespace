@@ -25,7 +25,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const P = require(path.join(REPO, 'src/channel-policy.js'));
 const OF = require(path.join(REPO, 'src/channel-outbox-files.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
@@ -110,7 +110,7 @@ function pureLegs(Pm, tag = '') {
   r.push(['THE RECEIPT lists each file: name, size, sha256', /with 2 attachments: shot\.png 1\.2 MB sha256 aaaaaaaaaaaa, r\.pdf 340 KB sha256 cccccccccccc/.test(blk), blk]);
   return r.map(([n, p, d]) => [tag + n, p, d]);
 }
-for (const [n, p, d] of pureLegs(P)) ok(p, n, d);
+for (const [n, p, d] of pureLegs(P)) ok(verdictOf(p), n, d);
 
 // ═══ ② the engine ═══════════════════════════════════════════════════════════
 console.log('② the engine: propose → approve → send, the bytes the person saw');
@@ -227,7 +227,7 @@ async function engineLegs(R, tag = '') {
 }
 const R1 = await rig('main');
 const E1 = await engineLegs(R1);
-for (const [n, p, d] of E1.legs) ok(p, n, d);
+for (const [n, p, d] of E1.legs) ok(verdictOf(p), n, d);
 
 // ═══ ③ retention ═══════════════════════════════════════════════════════════
 console.log('③ retention: an unsent end at once, a sent one after 7 days, orphans, stages, a pruned record');
@@ -254,7 +254,7 @@ async function retentionLegs(R, ids) {
   r.push(['the sweep past 7 days: the sent and the failed proposals\' files are removed, the records keep the facts', gone.includes(ids.sent) && gone.includes(ids.failed) && !fs.existsSync(path.join(R.filesDir, ids.sent)) && !!qs.attachmentsGoneAt && qs.attachments.length === 2, JSON.stringify(gone)]);
   return r;
 }
-for (const [n, p, d] of await retentionLegs(R1, E1.ids)) ok(p, n, d);
+for (const [n, p, d] of await retentionLegs(R1, E1.ids)) ok(verdictOf(p), n, d);
 {
   const dir = path.join(ROOT, 'prune');
   const st = STORE.createChannelStore({ dir, now: () => clock, log: quiet });
@@ -282,7 +282,7 @@ async function routeLegs(R) {
   r.push(['an index the proposal does not have ⇒ 404', c.status === 404, String(c.status)]);
   return r;
 }
-for (const [n, p, d] of await routeLegs(R1)) ok(p, n, d);
+for (const [n, p, d] of await routeLegs(R1)) ok(verdictOf(p), n, d);
 
 // ═══ ⑤ the registry row ═══════════════════════════════════════════════════
 console.log('⑤ the registry: the row validated at registration; an undeclared row refuses attachments by name');
@@ -296,7 +296,7 @@ function registryLegs(CHm) {
   r.push(['a malformed row, a row on a read-only adapter, an empty reason are refused at registration', !missed.length, JSON.stringify(missed)]);
   return r;
 }
-for (const [n, p, d] of registryLegs(CH)) ok(p, n, d);
+for (const [n, p, d] of registryLegs(CH)) ok(verdictOf(p), n, d);
 {
   const reg = CH.createChannelRegistry();
   const { mod } = sendWorld('bare', { row: null });
@@ -305,8 +305,8 @@ for (const [n, p, d] of registryLegs(CH)) ok(p, n, d);
   let e1 = null, e2 = null;
   try { await ad.send('c', { text: 'x', attachments: [{ name: 'a', data: PNG }] }); } catch (e) { e1 = e; }
   try { await ad.compose({ to: ['a@x.com'], text: 'x', attachments: [{ name: 'a', data: PNG }] }); } catch (e) { e2 = e; }
-  ok(e1 && e1.code === 'not-supported' && e2 && e2.code === 'not-supported', 'an adapter without the row handed attachments: send and compose throw not-supported (the module never runs)', JSON.stringify([e1 && e1.message, e2 && e2.message]));
-  ok(GM.caps.sendAttachments && GM.caps.sendAttachments.maxCount === 10 && ['lark.js', 'slack.js'].every((f) => { const r = require(path.join(REPO, 'src/channels', f)).caps; return r.sendAttachments && r.sendAttachments.maxCount === 10 && r.sendAttachments.maxTotalBytes === 25e6 && r.sendAttachments.withText === true && r.sendAttachmentsWhy === null; }) && !require(path.join(REPO, 'src/channels/agents.js')).caps.sendAttachments, 'the rows: Gmail 10 files / 25 MB with text; Lark and Slack the same bounds (lane channel-send-files: sent in parts — test-channel-send-files); the Agents adapter none');
+  ok(gateOf(e1) && e1.code === 'not-supported' && gateOf(e2) && e2.code === 'not-supported', 'an adapter without the row handed attachments: send and compose throw not-supported (the module never runs)', JSON.stringify([e1 && e1.message, e2 && e2.message]));
+  ok(gateOf(GM.caps.sendAttachments) && GM.caps.sendAttachments.maxCount === 10 && gateOf(['lark.js', 'slack.js'].every((f) => { const r = require(path.join(REPO, 'src/channels', f)).caps; return r.sendAttachments && r.sendAttachments.maxCount === 10 && r.sendAttachments.maxTotalBytes === 25e6 && r.sendAttachments.withText === true && r.sendAttachmentsWhy === null; })) && !require(path.join(REPO, 'src/channels/agents.js')).caps.sendAttachments, 'the rows: Gmail 10 files / 25 MB with text; Lark and Slack the same bounds (lane channel-send-files: sent in parts — test-channel-send-files); the Agents adapter none');
 }
 
 // ═══ ⑥ Gmail ═══════════════════════════════════════════════════════════════
@@ -334,7 +334,7 @@ function gmailLegs(build) {
   r.push(['without files the message is text/plain as before', /Content-Type: text\/plain; charset="UTF-8"/.test(build({ to: 'a@x.com', text: 'x' })) && !/multipart/.test(build({ to: 'a@x.com', text: 'x', attachments: [] })), '']);
   return r;
 }
-for (const [n, p, d] of gmailLegs(GM.buildMime)) ok(p, n, d);
+for (const [n, p, d] of gmailLegs(GM.buildMime)) ok(verdictOf(p), n, d);
 {
   const small = GM.rawRequest('/drafts', 'abc', { draft: true, threadId: 't1' });
   const plain = GM.rawRequest('/messages/send', 'abc');
@@ -343,9 +343,9 @@ for (const [n, p, d] of gmailLegs(GM.buildMime)) ok(p, n, d);
   const bigSend = GM.rawRequest('/messages/send', bigRaw);
   const body = big[1].raw ? big[1].raw.body.toString('latin1') : '';
   ok(small[0] === '/drafts' && small[1].json.message.raw === 'abc' && small[1].json.message.threadId === 't1' && plain[0] === '/messages/send' && plain[1].json.raw === 'abc' && !plain[1].json.message, 'a message under JSON_RAW_MAX keeps the JSON form: a draft {message: {threadId, raw}}, a send {raw} (as before)', JSON.stringify([small, plain]));
-  ok(bigSend[0] === '/messages/send?uploadType=multipart' && bigSend[1].raw.body.toString('latin1').includes('\r\n\r\n{}\r\n'), 'a new message past it uploads with empty metadata');
-  ok(big[0] === '/drafts?uploadType=multipart' && big[1].upload === true && /^multipart\/related; boundary=/.test(big[1].raw.type) && body.includes('{"message":{"threadId":"t1"}}') && body.includes('Content-Type: message/rfc822') && big[1].raw.body.length > Buffer.from(bigRaw, 'base64url').length, 'past it: the upload form — JSON metadata (the thread) + the message/rfc822 bytes, on the upload path');
-  ok(GM.unitsFor('/drafts?uploadType=multipart', 'POST') === 10 && GM.unitsFor('/messages/send?uploadType=multipart', 'POST') === 100 && GM.UPLOAD_API.startsWith('https://gmail.googleapis.com/') && GM.EGRESS.includes('gmail.googleapis.com'), 'the upload form is metered like the JSON one and goes to a declared host');
+  ok(bigSend[0] === '/messages/send?uploadType=multipart' && verdictOf(bigSend[1].raw.body.toString('latin1').includes('\r\n\r\n{}\r\n')), 'a new message past it uploads with empty metadata');
+  ok(big[0] === '/drafts?uploadType=multipart' && big[1].upload === true && gateOf(/^multipart\/related; boundary=/.test(big[1].raw.type)) && gateOf(body.includes('{"message":{"threadId":"t1"}}')) && gateOf(body.includes('Content-Type: message/rfc822')) && big[1].raw.body.length > Buffer.from(bigRaw, 'base64url').length, 'past it: the upload form — JSON metadata (the thread) + the message/rfc822 bytes, on the upload path');
+  ok(GM.unitsFor('/drafts?uploadType=multipart', 'POST') === 10 && GM.unitsFor('/messages/send?uploadType=multipart', 'POST') === 100 && gateOf(GM.UPLOAD_API.startsWith('https://gmail.googleapis.com/')) && verdictOf(GM.EGRESS.includes('gmail.googleapis.com')), 'the upload form is metered like the JSON one and goes to a declared host');
 }
 
 // ═══ ⑦ the CLI ═════════════════════════════════════════════════════════════
@@ -389,7 +389,7 @@ async function cliLegs(cliPath) {
   srv.close();
   return r;
 }
-for (const [n, p, d] of await cliLegs(path.join(REPO, 'data/bin/vibespace-channels'))) ok(p, n, d);
+for (const [n, p, d] of await cliLegs(path.join(REPO, 'data/bin/vibespace-channels'))) ok(verdictOf(p), n, d);
 
 // ═══ ⑧ censuses ════════════════════════════════════════════════════════════
 console.log('⑧ censuses: no agent route serves an outbox file; the server opens no path an agent names');
@@ -410,25 +410,25 @@ console.log('⑨ controls: each rule removed in a copy turns its leg red');
 const POL = SRC('src/channel-policy.js');
 function polCopy(tag, from, to) { if (!POL.includes(from)) throw new Error(`control ${tag}: anchor missing`); return M.load('src/channel-policy.js', POL.replace(from, to), tag); }
 const legRed = (rows, rx) => rows.filter(([n]) => rx.test(n)).some(([, p]) => !p);
-ok(legRed(pureLegs(polCopy('no-count', 'if (v.length > ATTACH_MAX_COUNT)', 'if (false)'), 'C '), /eleven files/), 'control: without the count bound eleven files pass');
-ok(legRed(pureLegs(polCopy('no-sep', "if (/[/\\\\]/.test(name) || name === '.' || name === '..')", 'if (false)'), 'C '), /a path ⇒/), 'control: without the separator rule `../x` is a name');
-ok(legRed(pureLegs(polCopy('no-hidden', 'const hid = hiddenCharsOf(name, { joiners: true });', 'const hid = [];'), 'C '), /RTL override/), 'control: without the hidden-character rule an RTL override passes');
-ok(legRed(pureLegs(polCopy('no-digest', '...(storedAttachments(q).length ? [storedAttachments(q).map', '...(false ? [storedAttachments(q).map'), 'C '), /THE DIGEST/), 'control: a digest without the files approves other bytes');
+ok(verdictOf(legRed(pureLegs(polCopy('no-count', 'if (v.length > ATTACH_MAX_COUNT)', 'if (false)'), 'C '), /eleven files/)), 'control: without the count bound eleven files pass');
+ok(verdictOf(legRed(pureLegs(polCopy('no-sep', "if (/[/\\\\]/.test(name) || name === '.' || name === '..')", 'if (false)'), 'C '), /a path ⇒/)), 'control: without the separator rule `../x` is a name');
+ok(verdictOf(legRed(pureLegs(polCopy('no-hidden', 'const hid = hiddenCharsOf(name, { joiners: true });', 'const hid = [];'), 'C '), /RTL override/)), 'control: without the hidden-character rule an RTL override passes');
+ok(verdictOf(legRed(pureLegs(polCopy('no-digest', '...(storedAttachments(q).length ? [storedAttachments(q).map', '...(false ? [storedAttachments(q).map'), 'C '), /THE DIGEST/)), 'control: a digest without the files approves other bytes');
 const ENGSRC = engineSource(REPO);
 function engCopy(tag, from, to) { if (!ENGSRC.includes(from)) throw new Error(`control ${tag}: anchor missing`); return M.load('src/server/channels-engine.js', ENGSRC.replace(from, to), tag); }
 {
   const Rv = await rig('ctl-noverify', { engineMod: engCopy('no-verify', 'const fv = !targetWhy && stored.length ? await OF.verify(store.dir, p.id, stored) : null;', 'const fv = null;') });
   const legs = (await engineLegs(Rv, 'C ')).legs;
-  ok(legRed(legs, /V1:/), 'control: an engine that does not re-hash at the send sends a rewritten file (V1 red)');
-  ok(legRed(legs, /T1 \(B-574d\)/), 'control (B-574d): an engine that does not re-hash at the send sends a TORN file\'s partial bytes (T1 red)');
+  ok(verdictOf(legRed(legs, /V1:/)), 'control: an engine that does not re-hash at the send sends a rewritten file (V1 red)');
+  ok(verdictOf(legRed(legs, /T1 \(B-574d\)/)), 'control (B-574d): an engine that does not re-hash at the send sends a TORN file\'s partial bytes (T1 red)');
   Rv.server.close();
   const Rr = await rig('ctl-noremove', { engineMod: engCopy('no-remove', "if (verdict.ok && OF.UNSENT_ENDS.includes(to)) { try { OF.remove(store.dir, id); }", 'if (false) { try { OF.remove(store.dir, id); }') });
   const E = await engineLegs(Rr, 'C ');
-  ok(legRed(await retentionLegs(Rr, E.ids), /reject ⇒/), 'control: an engine whose transitions keep the files leaves a rejected proposal\'s folder');
+  ok(verdictOf(legRed(await retentionLegs(Rr, E.ids), /reject ⇒/)), 'control: an engine whose transitions keep the files leaves a rejected proposal\'s folder');
   Rr.server.close();
   const Rs = await rig('ctl-stage-refused', { engineMod: engCopy('stage-refused', "    if (!att.ok) return att.answer;\n", "    if (!att.ok) { OF.stage(store.dir, OF.prepare(v.proposal.attachments)); return att.answer; }\n") });
   const Es = (await engineLegs(Rs, 'C ')).legs;
-  ok(legRed(Es, /NOTHING on disk/), 'control: an engine that writes the files of a REFUSED proposal is caught by the refusal leg (nothing on disk)');
+  ok(verdictOf(legRed(Es, /NOTHING on disk/)), 'control: an engine that writes the files of a REFUSED proposal is caught by the refusal leg (nothing on disk)');
   Rs.server.close();
 }
 {
@@ -437,7 +437,7 @@ function engCopy(tag, from, to) { if (!ENGSRC.includes(from)) throw new Error(`c
   if (!RSRC.includes(from)) throw new Error('route control anchor');
   const rp = M.write('src/routes/channels.js', RSRC.replace(from, "    const raster = true;\n    const inline = raster && String(req.query.inline || '') === '1';\n    const name = String(r.meta.name"), 'inline-all');
   const Rx = await rig('ctl-inline', { routesPath: rp });
-  ok(legRed(await routeLegs(Rx), /V4:/), 'control: a route that trusts any type draws an HTML page named .png inline');
+  ok(verdictOf(legRed(await routeLegs(Rx), /V4:/)), 'control: a route that trusts any type draws an HTML page named .png inline');
   Rx.server.close();
 }
 {
@@ -445,7 +445,7 @@ function engCopy(tag, from, to) { if (!ENGSRC.includes(from)) throw new Error(`c
   const from = ".replace(/\\p{Cc}+/gu, ' ')";
   if (!GSRC.includes(from)) throw new Error('gmail control anchor');
   const G2 = M.load('src/channels/gmail.js', GSRC.replace(from, '').replace("/^[a-z0-9][a-z0-9.+-]*\\/[a-z0-9][a-z0-9.+-]*$/.test(String(f.mime || ''))", 'true'), 'crlf');
-  ok(legRed(gmailLegs(G2.buildMime), /V3:/), 'control: a MIME builder that keeps CR/LF in a name or a type lets a Bcc header through');
+  ok(verdictOf(legRed(gmailLegs(G2.buildMime), /V3:/)), 'control: a MIME builder that keeps CR/LF in a name or a type lets a Bcc header through');
   const CSRC = SRC('src/channels/index.js');
   const cf = 'if (Array.isArray(o.attachments) && o.attachments.length && !caps.sendAttachments) throw';
   if (!CSRC.includes(cf)) throw new Error('registry control anchor');
@@ -471,7 +471,7 @@ function r1PureLegs(Pm, tag = '') {
   r.push(['C4: ONE drafter\'s undecided proposals hold at most 100 MB (60 + 40 ok, 60 + 41 ⇒ attachments-held); sent / rejected / files-gone ones and other drafters do not count', hOk.ok && !hNo.ok && hNo.why === 'attachments-held' && /withdraw/.test(hNo.error || '') && hOther.ok && hUser.ok, JSON.stringify([hOk, hNo.why, hOther, hUser])]);
   return r.map(([n, p, d]) => [tag + n, p, d]);
 }
-for (const [n, p, d] of r1PureLegs(P)) ok(p, n, d);
+for (const [n, p, d] of r1PureLegs(P)) ok(verdictOf(p), n, d);
 async function r1EngineLegs(R, tag = '', { held = true } = {}) {
   const r = [];
   const C = R.pick('acc');
@@ -504,7 +504,7 @@ async function r1EngineLegs(R, tag = '', { held = true } = {}) {
   if (again.ok) await R.eng.withdrawProposal({ proposalId: again.proposal.id, by: AG });
   return r.map(([n, pp, d]) => [tag + n, pp, d]);
 }
-for (const [n, p, d] of await r1EngineLegs(R1)) ok(p, n, d);
+for (const [n, p, d] of await r1EngineLegs(R1)) ok(verdictOf(p), n, d);
 // D4: the CLI reads what it looked at — a preload swaps the file for a FIFO right after the CLI's first look (stat or open)
 async function r1CliLeg(cliPath, tag = '') {
   const dir = path.join(ROOT, `race-${tag ? 'c' : 'h'}`);
@@ -524,7 +524,7 @@ for (const k of ['statSync', 'lstatSync', 'openSync']) { const o = fs[k]; fs[k] 
   });
   return [[`${tag}D4: a FIFO swapped in between the CLI's look and its read never hangs it (it reads the file it looked at)`, res.sig !== 'SIGKILL' && /server unreachable/.test(res.err), JSON.stringify(res).slice(0, 200)]];
 }
-for (const [n, p, d] of await r1CliLeg(path.join(REPO, 'data/bin/vibespace-channels'))) ok(p, n, d);
+for (const [n, p, d] of await r1CliLeg(path.join(REPO, 'data/bin/vibespace-channels'))) ok(verdictOf(p), n, d);
 // V10, pinned three ways: the outbox-files module's every fs path, the agent's two doors, the engine's attachment functions
 const fsFirstArgs = (src) => [...src.matchAll(/\bfs(?:\.promises)?\.(\w+)\(/g)].map((m) => { let i = m.index + m[0].length, d = 0, s = ''; for (; i < src.length; i++) { const ch = src[i]; if ((ch === ',' || ch === ')') && d === 0) break; if ('([{'.includes(ch)) d++; if (')]}'.includes(ch)) d--; s += ch; } return `${m[1]}(${s.trim()})`; });
 const OF_PATHS = ['rmSync(dir)', 'mkdirSync(filesRoot(root))', "mkdtempSync(path.join(filesRoot(root), '.stage-'))", 'writeFileSync(path.join(dir, String(f.n)))', 'renameSync(dir)', 'statSync(f)', 'readFile(f)', 'existsSync(dir)', 'readdirSync(filesRoot(root))', 'statSync(full)'];
@@ -542,31 +542,31 @@ const engReading = (src) => ['attachPrepare', 'outboxAttachment', 'filesSweep'].
   ok(ofOdd(OFS.replace("const data = Buffer.from(String(a.data), 'base64');", "const data = a.path ? fs.readFileSync(String(a.path)) : Buffer.from(String(a.data), 'base64');")).length === 1, 'control: an outbox-files module that reads a path the proposal names is red');
   const rd = "app.post('/api/agent/channels/reply', async (req, res) => {\n";
   anchor(ARS, rd, 'door');
-  ok(doorsReading(ARS.replace(rd, `${rd}  const peek = require('fs').readFileSync(String((req.body || {}).path));\n`)).includes('/api/agent/channels/reply'), 'control: a reply door that opens a path from the body is red');
+  ok(verdictOf(doorsReading(ARS.replace(rd, `${rd}  const peek = require('fs').readFileSync(String((req.body || {}).path));\n`)).includes('/api/agent/channels/reply')), 'control: a reply door that opens a path from the body is red');
   const ap = '  function attachPrepare(rec, proposal, ctx = null, cc = null) {\n';
   anchor(ENS, ap, 'eng');
-  ok(engReading(ENS.replace(ap, `${ap}    const extra = fs.readFileSync(String(proposal.path));\n`)).includes('attachPrepare'), 'control: an attachPrepare that opens a named path is red');
+  ok(verdictOf(engReading(ENS.replace(ap, `${ap}    const extra = fs.readFileSync(String(proposal.path));\n`)).includes('attachPrepare')), 'control: an attachPrepare that opens a named path is red');
 }
 // controls: each r1 rule removed in a copy turns its leg red
-ok(legRed(r1PureLegs(polCopy('no-surrogate', "  if (/\\p{Cs}/u.test(name)) return no(", '  if (false) return no('), 'C '), /C10:/), 'control: without the surrogate rule a lone surrogate is a name');
-ok(legRed(r1PureLegs(polCopy('no-held', '  if (held + adding <= ATTACH_HELD_MAX) return { ok: true, held };', '  return { ok: true, held };'), 'C '), /C4:/), 'control: without the held bound a drafter holds any amount');
+ok(verdictOf(legRed(r1PureLegs(polCopy('no-surrogate', "  if (/\\p{Cs}/u.test(name)) return no(", '  if (false) return no('), 'C '), /C10:/)), 'control: without the surrogate rule a lone surrogate is a name');
+ok(verdictOf(legRed(r1PureLegs(polCopy('no-held', '  if (held + adding <= ATTACH_HELD_MAX) return { ok: true, held };', '  return { ok: true, held };'), 'C '), /C4:/)), 'control: without the held bound a drafter holds any amount');
 {
   const R2 = await rig('ctl-r1-edit', { engineMod: engCopy('r1-edit', '      const v = P.validateProposal({ ...p0, text, attachments: undefined });', '      const v = P.validateProposal({ ...p0, text });') });
-  ok(legRed(await r1EngineLegs(R2, 'C ', { held: false }), /C1:/), 'control: an approve that re-validates the STORED files refuses the owner\'s edit (C1 red)');
+  ok(verdictOf(legRed(await r1EngineLegs(R2, 'C ', { held: false }), /C1:/)), 'control: an approve that re-validates the STORED files refuses the owner\'s edit (C1 red)');
   R2.server.close();
   const R3 = await rig('ctl-r1-card', { engineMod: engCopy('r1-card', '    const v = await OF.verify(store.dir, p.id, [m]);\n', "    const v = { ok: true, files: [{ data: require('fs').readFileSync(file) }] };\n") });
-  ok(legRed(await r1EngineLegs(R3, 'C ', { held: false }), /C2:/), 'control: a card route that serves the file without re-hashing it draws a rewritten file (C2 red)');
+  ok(verdictOf(legRed(await r1EngineLegs(R3, 'C ', { held: false }), /C2:/)), 'control: a card route that serves the file without re-hashing it draws a rewritten file (C2 red)');
   R3.server.close();
   const RSRC2 = SRC('src/routes/channels.js');
   const bf = "    if (isAgentBearer(req)) return res.status(403).json({ error: 'the user\\'s view — not an agent route', code: 'agent_forbidden' });\n    forHost(req);\n    const r = await engine().outboxAttachment(";
   if (!RSRC2.includes(bf)) throw new Error('r1 bearer control anchor');
   const R4 = await rig('ctl-r1-bearer', { routesPath: M.write('src/routes/channels.js', RSRC2.replace(bf, '    forHost(req);\n    const r = await engine().outboxAttachment('), 'r1-bearer') });
-  ok(legRed(await r1EngineLegs(R4, 'C ', { held: false }), /C3:/), 'control: a file route without the bearer refusal serves an agent token (C3 red)');
+  ok(verdictOf(legRed(await r1EngineLegs(R4, 'C ', { held: false }), /C3:/)), 'control: a file route without the bearer refusal serves an agent token (C3 red)');
   R4.server.close();
   const CLISRC = SRC('data/bin/vibespace-channels');
   const cf = '    const data = Buffer.alloc(size);\n    let got = 0;\n    while (got < size) { const n = fs.readSync(fd, data, got, size - got, got); if (!n) break; got += n; }\n';
   if (!CLISRC.includes(cf)) throw new Error('r1 CLI control anchor');
-  ok(legRed(await r1CliLeg(M.write('data/bin/vibespace-channels', CLISRC.replace(cf, '    const data = fs.readFileSync(p);\n    const got = data.length;\n'), 'r1-cli-path'), 'C '), /D4:/), 'control: a CLI that reads the PATH after looking hangs on a FIFO swapped in (D4 red)');
+  ok(verdictOf(legRed(await r1CliLeg(M.write('data/bin/vibespace-channels', CLISRC.replace(cf, '    const data = fs.readFileSync(p);\n    const got = data.length;\n'), 'r1-cli-path'), 'C '), /D4:/)), 'control: a CLI that reads the PATH after looking hangs on a FIFO swapped in (D4 red)');
 }
 // ═══ ⑪ lane lark-upload-preflight ═══════════════════════════════════════════
 // userW inc-muxsy69b-mjg1 (MEASURED 2026-10-07, a fleet pod on 2.369.226): a Lark proposal carried ONE .md; the owner saw
@@ -658,16 +658,16 @@ async function lupLegs(R) {
 }
 {
   const RL = await lupRig('lup');
-  for (const [n, p, d] of await lupLegs(RL)) ok(p, n, d);
+  for (const [n, p, d] of await lupLegs(RL)) ok(verdictOf(p), n, d);
   ok(CC0.offers({ sendAttachments: { maxCount: 1 } }, { read: 'yes', sendAs: ['user'], at: Date.now(), files: BLOCKED }, 'send-attachment').why === 'attachments-not-sendable', 'the send-attachment offer: a files row that cannot send ⇒ attachments-not-sendable');
   // controls: each rule removed in a patched copy turns its leg red
   const C1 = await lupRig('lup-c1', engCopy('lup-propose', "    if (fb) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'attachments-not-sendable'", "    if (false) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'attachments-not-sendable'"));
-  ok(legRed(await lupLegs(C1), /propose refused by name/), 'control: an engine whose propose does not refuse the file is red (propose not refused)');
+  ok(verdictOf(legRed(await lupLegs(C1), /propose refused by name/)), 'control: an engine whose propose does not refuse the file is red (propose not refused)');
   const C2 = await lupRig('lup-c2', engCopy('lup-card', '        if (fb) return { filesBlocked: fb };', '        if (false) return { filesBlocked: fb };'));
-  ok(legRed(await lupLegs(C2), /approve card: the files row turned/), 'control: an approve card without the warning is red');
+  ok(verdictOf(legRed(await lupLegs(C2), /approve card: the files row turned/)), 'control: an approve card without the warning is red');
   const C3 = await lupRig('lup-c3', engCopy('lup-foryou', "    if (to === 'sent') await speakPartial(p1);\n", ''));
-  ok(legRed(await lupLegs(C3), /ONE For-you item/), 'control: a partial send without the For-you item is red');
+  ok(verdictOf(legRed(await lupLegs(C3), /ONE For-you item/)), 'control: a partial send without the For-you item is red');
 }
 R1.server.close();
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

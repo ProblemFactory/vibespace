@@ -107,7 +107,7 @@ const PM = await import(new URL('../src/lib/principal-picker-model.js', import.m
 
 let pass = 0, fail = 0;
 let TAG = '', KIND = 'cluster';   // r8: the door's instance kind of this pass — every leg name says it
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n + TAG); } else { fail++; console.error('  ✗ ' + n + TAG + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n + TAG); } else { fail++; console.error('  ✗ ' + n + TAG + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function leg(name, fn) { try { await fn(); } catch (e) { fail++; console.error(`  ✗ ${name}${TAG} — threw: ${String(e && e.stack || e).split('\n').slice(0, 3).join(' | ')}`); } }
 
@@ -337,7 +337,7 @@ for (const K of ['local', 'cluster']) {
     const f = drawn && drawn.facts && drawn.facts.window;
     ok(!!(drawn && drawn.action.window === true && f && f.offered === true && Math.abs(Number(f.until) - (w.now() + WINDOW_MS)) < 5 * MIN && drawn.facts.always && drawn.facts.always.offered === false), 'Ⓐa a `bash -c \'… curl … $T …\'` run (no hosts «Always»: where it sends the key cannot be read) files its card with `action.window` + `facts.window` {offered, until ≈ the draw + 1 h}', drawn && { action: drawn.action, window: f, always: drawn.facts && drawn.facts.always });
     const html = drawnHtml(drawn, tZH), v = drawn && FA.runCardOf(drawn, { t: tZH });
-    ok(answersIn(html).join() === 'once,window,deny' && /允许一次/.test(textOf(html)) && /允许 1 小时/.test(textOf(html)) && /拒绝/.test(textOf(html)), 'Ⓐb the tray / chat row (中文) draws THREE answers — 允许一次 · 允许 1 小时 · 拒绝', { answers: answersIn(html), text: textOf(html).slice(0, 400) });
+    ok(answersIn(html).join() === 'once,window,deny' && gateOf(/允许一次/.test(textOf(html))) && gateOf(/允许 1 小时/.test(textOf(html))) && verdictOf(/拒绝/.test(textOf(html))), 'Ⓐb the tray / chat row (中文) draws THREE answers — 允许一次 · 允许 1 小时 · 拒绝', { answers: answersIn(html), text: textOf(html).slice(0, 400) });
     const row = changeRowIn(html);
     ok(!!(row && clockRe`「允许 1 小时」：到 ${f.until} 为止，这个对话可以在任何运行中使用“TTS API key”。`.test(row) && textOf(html).includes('1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。') && v && v.window && v.window.offered === true), 'Ⓐc its OWN row above the answers says what the press writes («到 HH:MM 为止 … 在任何运行中使用“TTS API key”»), the words beside it («1 小时内 … 每次使用都会弹一条提示（不进「待你处理」）…») — and the base\'s «No «Always»: why» stays', { row, text: textOf(html).slice(0, 600) });
     const lay = LAYOUT && LAYOUT.itemView ? LAYOUT.itemView(drawn, {}) : null;
@@ -379,7 +379,7 @@ for (const K of ['local', 'cluster']) {
     const [e0, e1] = tZH('ended {time}', { time: '\u0001' }).split('\u0001'), endedIs = clockIs([`已允许这个对话 1 小时 · ${e0}`, e1], T + WINDOW_MS);
     ok(!!(ended && endedIs.test(ended.text) && ended.ended === 'ended'), `Ⓑf past its hour the record says it ended — «${endedWant}» (its grant's life — never «until» a time gone)`, ended);
     const au = auditOf(w, 'vault-run-window');
-    ok(au.length === 1 && au[0].until === T + WINDOW_MS && au[0].conv === CID && Array.isArray(au[0].grants) && /^vg-/.test(au[0].grants[0]) && !JSON.stringify(au).includes(VALUE), 'Ⓑg ONE audit line `vault-run-window` {by, conv, shapeId, until, grants, changes} — never a value', au);
+    ok(au.length === 1 && au[0].until === T + WINDOW_MS && au[0].conv === CID && gateOf(Array.isArray(au[0].grants)) && gateOf(/^vg-/.test(au[0].grants[0])) && !JSON.stringify(au).includes(VALUE), 'Ⓑg ONE audit line `vault-run-window` {by, conv, shapeId, until, grants, changes} — never a value', au);
     // B-81c4 (int377 seam) THE FROZEN CLOCK: a press at 23:30 on this clock (23:30Z on a UTC runner — master CI's 23:44Z push)
     // whose hour ends 00:30 the NEXT day. The record rightly says «至 M/D 00:30»; the old bare «至 HH:MM» reds on it by name, the
     // shared pattern holds — and the pattern is clockWords' own two spellings (every half hour of the day, now the same day or the next)
@@ -406,7 +406,7 @@ for (const K of ['local', 'cluster']) {
     ok(!!(u1.r.ok && !u1.card && u2.r.ok && !u2.card && u1.r.by === 'grant' && u2.r.by === 'grant' && itemsOf(w) === n0), 'Ⓒb two OTHER commands inside the hour (another shell, a script) run with NO card — For you +0 items (no action, no notice filed)', { u1: { ok: u1.r.ok, by: u1.r.by, code: u1.r.code, card: !!u1.card }, u2: { ok: u2.r.ok, by: u2.r.by, code: u2.r.code, card: !!u2.card }, items: [n0, itemsOf(w)] });
     const runs = auditOf(w, 'vault-run').filter((l) => l.outcome === 'ran' && l.scope === 'window');
     const uses = auditOf(w, 'vault-use').filter((l) => l.door === 'run' && l.outcome === 'ok').slice(-2);
-    ok(runs.length === 2 && runs[0].windowLeft === 60 && runs[1].windowLeft === 30 && runs.every((l) => Array.isArray(l.grants) && /^vg-/.test(l.grants[0])) && uses.length === 2 && uses.every((l) => /^vg-[0-9a-f]{8}$/.test(String(l.grant)) && /1-hour approval · \d+ min left/.test(String(l.purpose))) && !JSON.stringify([runs, uses]).includes(VALUE), 'Ⓒc each use: its run line says scope window + the minutes left (60, 30), its use line names the grant and says «under the 1-hour approval · N min left» (the use line\'s keys stay closed)', { runs: runs.map((l) => ({ scope: l.scope, left: l.windowLeft, grants: l.grants })), uses: uses.map((l) => ({ grant: l.grant, purpose: l.purpose })) });
+    ok(runs.length === 2 && runs[0].windowLeft === 60 && runs[1].windowLeft === 30 && gateOf(runs.every((l) => Array.isArray(l.grants) && /^vg-/.test(l.grants[0]))) && uses.length === 2 && gateOf(uses.every((l) => /^vg-[0-9a-f]{8}$/.test(String(l.grant)) && /1-hour approval · \d+ min left/.test(String(l.purpose)))) && !JSON.stringify([runs, uses]).includes(VALUE), 'Ⓒc each use: its run line says scope window + the minutes left (60, 30), its use line names the grant and says «under the 1-hour approval · N min left» (the use line\'s keys stay closed)', { runs: runs.map((l) => ({ scope: l.scope, left: l.windowLeft, grants: l.grants })), uses: uses.map((l) => ({ grant: l.grant, purpose: l.purpose })) });
     const ns = w.notices;
     const R1 = runs[0] && runs[0].receipt, R2 = runs[1] && runs[1].receipt;
     ok(ns.length === 2 && ns[0].key === `vault-window-use:${R1}` && ns[1].key === `vault-window-use:${R2}` && R1 !== R2, 'Ⓓa two uses ⇒ TWO notices, each keyed by its own run (`vault-window-use:<receipt>`) — the road de-dupes by key, so a reused key would silence the second', ns.map((n) => n.key));
@@ -910,7 +910,7 @@ for (const K of ['local', 'cluster']) {
     let ctl = null;
     try { await import(pathToFileURL(path.join(ROOT, 'vault-use-row.bundle.mjs')).href + '?ctl=' + Date.now()); } catch (e) { ctl = String((e && e.message) || e); }
     globalThis.__vurPage = keep;
-    ok(/t is not a function/.test(String(ctl)), 'RED control (ckpt61): with the page edge a clock only, the same bundle does NOT load — by name («t is not a function»)', ctl);
+    ok(verdictOf(/t is not a function/.test(String(ctl))), 'RED control (ckpt61): with the page edge a clock only, the same bundle does NOT load — by name («t is not a function»)', ctl);
   }
   // bl-vault-ckpt61-hosted-cure (主开发's read, the MUST): THE DIALOG OPENS — drawn to its end on the road every dialog leg below
   // takes (the judge off: need-line's line with its words, then the footer's Save the open draws LAST); a dialog that fails to
@@ -1038,7 +1038,7 @@ await leg('Ⓢ the chip', async () => {
     const HELD_ROW = "The vault's run settings cannot be read right now, so every entry is closed for runs. VibeSpace reads them again by itself";
     const use9 = () => ({ ...w9.useGrants.publicFor(w9.e.id), entryHosts: [], used: { uses: 0, convs: 0 } });
     const hy = heldLines({ held: true, paused: true, use: use9() }), hn = heldLines({ use: use9() });
-    ok(hy.includes(HELD_ROW) && !hn.includes(HELD_ROW), 'Ⓢe (r3384) the run store HELD is said in place on the row — heldRowWords through the page\'s own words; a row that is not held says nothing of it', { hy, hn });
+    ok(gateOf(hy.includes(HELD_ROW)) && !hn.includes(HELD_ROW), 'Ⓢe (r3384) the run store HELD is said in place on the row — heldRowWords through the page\'s own words; a row that is not held says nothing of it', { hy, hn });
   });
 });
 
@@ -1088,4 +1088,4 @@ await leg('Ⓩ the dialog\'s rules', async () => {
 });
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

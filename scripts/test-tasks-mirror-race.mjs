@@ -57,7 +57,7 @@ const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { re
 const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('tasks-mirror-chrome');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway worktree + WORKING-TREE overlay (a pre-commit run tests what is about to ship) ──
@@ -76,7 +76,7 @@ const cleanup = () => {
 };
 process.on('exit', cleanup);
 const waitServer = () => hub.ready();
-ok(await waitServer(), 'the worktree server booted');
+ok(verdictOf(await waitServer()), 'the worktree server booted');
 
 // ── CDP ──
 const WebSocket = require('ws');
@@ -162,10 +162,10 @@ console.log(`① the stale answers released AFTER the broadcast — ${CONSTRUCTE
 {
   const out = [];
   for (let i = 1; i <= CONSTRUCTED; i++) out.push(await constructed(i, 'Held'));
-  ok(out.every((r) => r.held && r.frameHeld && !r.early && r.seen && r.released >= 1 && r.answered >= 2), `FIXTURE: every trial held BOTH boot callers' answers of /api/tasks — their shared read held (${out.map((r) => r.gated).join(' / ')}), both answers landing after the frame (${out.map((r) => r.answered).join('/')}), saw the group's frame HELD (not applied over an unloaded mirror), then released them and saw the group in (${out.map((r) => r.sets).join(' ; ')})`, JSON.stringify(out));
-  ok(out.every((r) => r.still), `the group stays in the mirror after the stale answers land — ${out.filter((r) => r.still).length}/${CONSTRUCTED} (a fetch issued before a broadcast never overwrites it)`, JSON.stringify(out));
+  ok(verdictOf(out.every((r) => r.held && r.frameHeld && !r.early && r.seen && r.released >= 1 && r.answered >= 2)), `FIXTURE: every trial held BOTH boot callers' answers of /api/tasks — their shared read held (${out.map((r) => r.gated).join(' / ')}), both answers landing after the frame (${out.map((r) => r.answered).join('/')}), saw the group's frame HELD (not applied over an unloaded mirror), then released them and saw the group in (${out.map((r) => r.sets).join(' ; ')})`, JSON.stringify(out));
+  ok(verdictOf(out.every((r) => r.still)), `the group stays in the mirror after the stale answers land — ${out.filter((r) => r.still).length}/${CONSTRUCTED} (a fetch issued before a broadcast never overwrites it)`, JSON.stringify(out));
   const roster = await (async () => { const gid = await mkGroup('Roster check'); await waitMirror(gid); await evaljs('window.__releaseTasks(), 1'); const r = await rosterHas('Roster check'); await rmGroup(gid); return r; })();
-  ok(roster, 'and the Grant access… roster names it');
+  ok(verdictOf(roster), 'and the Grant access… roster names it');
 }
 
 // ── ③ THE NATURAL RACE at CPU ×THROTTLE on the shipped bundle ──
@@ -193,7 +193,7 @@ console.log(`③ ${TRIALS} page loads at CPU ×${THROTTLE}: the group is in the 
   const r = await rosterHas('Roster under load');
   await cdp('Emulation.setCPUThrottlingRate', { rate: 1 });
   await rmGroup(gid);
-  ok(r, 'the Grant access… roster names the group under the throttle too');
+  ok(verdictOf(r), 'the Grant access… roster names the group under the throttle too');
 }
 
 // ── ② CONTROL: the guard removed, rebuilt into the scratch bundle ⇒ the constructed trials MISS ──
@@ -202,14 +202,14 @@ console.log('② CONTROL: the pre-fix mirror (no generation guard) rebuilt into 
   const MOD = path.join(wt, 'src/lib/sidebar-tasks.js');
   const src = fs.readFileSync(MOD, 'utf8');
   const GUARD = "      if ((this._tasksGen || 0) !== gen && fetchVerdict(this._tasksMark, data) === 'drop') { this._tasksLoaded = true; this._tasksLoadErr = null; return; }\n";
-  ok(src.includes(GUARD), 'the guard is spelled where the control removes it');
+  ok(verdictOf(src.includes(GUARD)), 'the guard is spelled where the control removes it');
   fs.writeFileSync(MOD, src.replace(GUARD, ''));
   bundle();
   const out = [];
   for (let i = 1; i <= CONSTRUCTED; i++) out.push(await constructed(i, 'Ctl'));
-  ok(out.every((r) => r.held && r.frameHeld && r.released >= 1 && r.answered >= 2) && out.every((r) => !r.still), `CONTROL: without the guard the same interleaving EMPTIES the mirror on every trial — ${out.filter((r) => !r.still).length}/${CONSTRUCTED} (${out.map((r) => r.sets).join(' ; ')}) — leg ① would go red`, JSON.stringify(out));
+  ok(gateOf(out.every((r) => r.held && r.frameHeld && r.released >= 1 && r.answered >= 2)) && verdictOf(out.every((r) => !r.still)), `CONTROL: without the guard the same interleaving EMPTIES the mirror on every trial — ${out.filter((r) => !r.still).length}/${CONSTRUCTED} (${out.map((r) => r.sets).join(' ; ')}) — leg ① would go red`, JSON.stringify(out));
   fs.writeFileSync(MOD, src);
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

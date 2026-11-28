@@ -36,7 +36,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (!CHROME) { console.log('SKIP: no chrome binary on this machine (looked in /usr/bin/google-chrome{,-stable}, /usr/bin/chromium{,-browser})'); process.exit(0); }
 const TOKEN = ['sk', '-ant-oat01-UIdummy_'].join('') + 'Zx9Yw8Vu7Ts6'.repeat(7) + '-q';
@@ -161,43 +161,43 @@ window.wsReady = () => sock.readyState === 1;`;
 
   console.log('§1 press → the link, the dialog stays open (zh, desk 1100)');
   await A.ev('openOat()');
-  ok(await A.waitFor('document.querySelector("#oat-run")?.textContent === "开始：在浏览器里登录"'), 'the start button reads 开始：在浏览器里登录');
+  ok(verdictOf(await A.waitFor('document.querySelector("#oat-run")?.textContent === "开始：在浏览器里登录"')), 'the start button reads 开始：在浏览器里登录');
   await A.ev('document.querySelector("#oat-run").click()');
-  ok(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "waiting-code"'), 'phase waiting-code reached', await phase(A));
-  ok(await A.ev('!!document.querySelector("#oat-dialog")'), 'the dialog is STILL OPEN (no terminal, no close)');
+  ok(verdictOf(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "waiting-code"')), 'phase waiting-code reached', await phase(A));
+  ok(verdictOf(await A.ev('!!document.querySelector("#oat-dialog")')), 'the dialog is STILL OPEN (no terminal, no close)');
   const href = await A.ev('document.querySelector("#oat-open")?.href');
-  ok(/^https:\/\/claude\.example\/cai\/oauth\/authorize\?/.test(href || '') && await A.ev('document.querySelector("#oat-open").target === "_blank"'), 'the sign-in link opens the CLI\'s URL in a new tab', href);
+  ok(gateOf(/^https:\/\/claude\.example\/cai\/oauth\/authorize\?/.test(href || '')) && verdictOf(await A.ev('document.querySelector("#oat-open").target === "_blank"')), 'the sign-in link opens the CLI\'s URL in a new tab', href);
   ok(await A.ev('document.querySelector(".oat-who")?.textContent') === '请以“Work Max”身份登录', 'the bold who-line: 请以“Work Max”身份登录');
   ok(await A.ev('document.querySelector("label.oat-code-label")?.textContent') === '如果页面给了你一串登录码，粘到这里', 'the code field: 如果页面给了你一串登录码，粘到这里');
-  ok(await A.waitFor('!document.querySelector("#oat-hub-row")?.hidden && /Personal/.test(document.querySelector("#oat-hub-row").textContent)'), 'a hub browser profile exists ⇒ 在 VibeSpace 的浏览器里登录, naming the profile');
-  ok(await A.ev('!document.querySelector(".oat-manual").open'), 'the manual paste is collapsed (另一种方式)');
+  ok(verdictOf(await A.waitFor('!document.querySelector("#oat-hub-row")?.hidden && /Personal/.test(document.querySelector("#oat-hub-row").textContent)')), 'a hub browser profile exists ⇒ 在 VibeSpace 的浏览器里登录, naming the profile');
+  ok(verdictOf(await A.ev('!document.querySelector(".oat-manual").open')), 'the manual paste is collapsed (另一种方式)');
   await A.shot('link.png');
 
   console.log('§2 a second page follows the same mint');
   await B.ev('openOat()');
-  ok(await B.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "waiting-code"'), 'a dialog opened on another page shows the LIVE phase (waiting-code)', await phase(B));
+  ok(verdictOf(await B.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "waiting-code"')), 'a dialog opened on another page shows the LIVE phase (waiting-code)', await phase(B));
 
   console.log('§3 paste the code → 已保存 → the Active line');
   await A.ev('(() => { const i = document.querySelector("#oat-code"); i.value = "fakecode123#FAKESTATE"; i.dispatchEvent(new Event("input")); })()');
   await A.shot('code.png');
   await B.ev('window.__phases.length = 0');
   await A.ev('document.querySelector("#oat-send").click()');
-  ok(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "saved"'), 'phase saved', await phase(A));
+  ok(verdictOf(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "saved"')), 'phase saved', await phase(A));
   ok(await A.ev('document.querySelector(".oat-saved")?.textContent') === '✓ 已保存 · 有效 1 年', 'the words: ✓ 已保存 · 有效 1 年');
   await A.shot('saved.png');
   // B's own paints, recorded since before the send: its dialog closes itself 2 s after 已保存, and A's screenshot just
   // above can take longer than that on a loaded runner (the mirror's red) — the record keeps what B showed
-  ok(await B.waitFor('window.__phases.some(([p, w]) => p === "saved" && w.includes("已保存"))'), 'the second page shows 已保存 too (WS oat-mint)', await B.ev('window.__phases'));
-  ok(await B.waitFor('!document.querySelector("#oat-dialog")', 4000) && !(await B.ev('document.querySelector("#oat-mint")?.dataset.phase === "saved"')) && (await B.ev('window.__phases')).some(([p]) => p === 'saved'),
+  ok(verdictOf(await B.waitFor('window.__phases.some(([p, w]) => p === "saved" && w.includes("已保存"))')), 'the second page shows 已保存 too (WS oat-mint)', await B.ev('window.__phases'));
+  ok(gateOf(await B.waitFor('!document.querySelector("#oat-dialog")', 4000)) && !(await B.ev('document.querySelector("#oat-mint")?.dataset.phase === "saved"')) && verdictOf((await B.ev('window.__phases')).some(([p]) => p === 'saved')),
     'RED CONTROL (the old wait): looked at once its dialog closed itself, the second page no longer says 已保存 — only the record armed before the send holds it');
   ok(am.getOat(acct) === TOKEN, 'the token is in the store');
-  ok(fakeFacts().some((f) => f.code === 'fakecode123#FAKESTATE'), 'the code reached the CLI');
+  ok(verdictOf(fakeFacts().some((f) => f.code === 'fakecode123#FAKESTATE')), 'the code reached the CLI');
   ok(await A.ev('window.__refreshes') >= 1, 'the roster refresh ran');
-  ok(await A.waitFor('!document.querySelector("#oat-dialog")', 4000), 'the dialog closed itself (2 s)');
+  ok(verdictOf(await A.waitFor('!document.querySelector("#oat-dialog")', 4000)), 'the dialog closed itself (2 s)');
   const casts = JSON.stringify(await A.ev('window.__casts'));
   ok(!casts.includes(TOKEN.slice(13, 40)) && !(await A.ev('document.documentElement.outerHTML')).includes(TOKEN.slice(13, 40)), 'the token never reached the page (WS frames + DOM)');
   await A.ev('openOat()');
-  ok(await A.waitFor('/365/.test(document.querySelector("#oat-active")?.textContent || "")'), 'reopened: the Active line (365 days)', await A.ev('document.querySelector("#oat-active")?.textContent'));
+  ok(verdictOf(await A.waitFor('/365/.test(document.querySelector("#oat-active")?.textContent || "")')), 'reopened: the Active line (365 days)', await A.ev('document.querySelector("#oat-active")?.textContent'));
   await A.ev('document.querySelector("#oat-dialog .dialog-close")?.click()');
 
   console.log('§3b the late answer: POST …/code answers AFTER the push of the save (held on the hub)');
@@ -218,12 +218,12 @@ window.wsReady = () => sock.readyState === 1;`;
     return { waiting, pushed, held, consumed, seq, stored: am.getOat(acct) === TOKEN };
   };
   const late = await lateAnswer(A);
-  ok(late.waiting && late.pushed && late.held === 1 && late.consumed && late.stored && late.seq[late.seq.length - 1] === 'saved' && !late.seq.slice(late.seq.indexOf('saved')).includes('minting'),
+  ok(gateOf(late.waiting) && gateOf(late.pushed) && late.held === 1 && gateOf(late.consumed) && gateOf(late.stored) && late.seq[late.seq.length - 1] === 'saved' && !late.seq.slice(late.seq.indexOf('saved')).includes('minting'),
     'the late answer (minting, an older revision) never repaints over the push: the dialog stays 已保存 (mintShowVerdict → stale)', late);
   const tC = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json/new?about:blank', { method: 'PUT' })).json();
   const C = await connect(tC, '/prefix.html');
   const lateC = await lateAnswer(C);
-  ok(lateC.waiting && lateC.pushed && lateC.held === 1 && lateC.consumed && lateC.seq.slice(lateC.seq.indexOf('saved')).includes('minting'),
+  ok(gateOf(lateC.waiting) && gateOf(lateC.pushed) && lateC.held === 1 && gateOf(lateC.consumed) && verdictOf(lateC.seq.slice(lateC.seq.indexOf('saved')).includes('minting')),
     'RED CONTROL: the pre-fix guard (an older run\'s echo only) draws the late answer back over the push — 已保存 → minting', lateC);
   C.close();
 
@@ -234,16 +234,16 @@ window.wsReady = () => sock.readyState === 1;`;
   await A.ev('document.querySelector("#oat-hub").click()');
   await A.waitFor('window.__browsed.length > 0');
   const live = mint.forAccount(acct);
-  ok(navs.length === 1 && navs[0].key === 'hu-ab12' && navs[0].url === live.localUrl && /redirect_uri=http%3A%2F%2Flocalhost/.test(live.localUrl), 'the profile\'s tab is pointed at the $BROWSER URL (localhost callback on the hub)', navs);
+  ok(navs.length === 1 && navs[0].key === 'hu-ab12' && navs[0].url === live.localUrl && verdictOf(/redirect_uri=http%3A%2F%2Flocalhost/.test(live.localUrl)), 'the profile\'s tab is pointed at the $BROWSER URL (localhost callback on the hub)', navs);
   ok((await A.ev('window.__browsed'))[0]?.pid === 'bp-ab12', 'the live view of that profile opens');
 
   console.log('§5 Esc on a running sign-in asks, then cancels');
   const pid = fakeFacts().filter((f) => !f.code).pop().pid;
   await A.ev('document.querySelector("#oat-dialog").closest(".modal-overlay, .dialog-overlay")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })) ?? document.querySelector("#oat-dialog").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
-  ok(await A.waitFor('[...document.querySelectorAll(".btn-create.danger")].some((b) => !b.closest("#oat-dialog"))'), 'Esc asks first (取消登录？)');
+  ok(verdictOf(await A.waitFor('[...document.querySelectorAll(".btn-create.danger")].some((b) => !b.closest("#oat-dialog"))')), 'Esc asks first (取消登录？)');
   ok(mint.forAccount(acct).phase === 'waiting-code', '… nothing cancelled before the answer');
   await A.ev('[...document.querySelectorAll(".btn-create.danger")].filter((b) => !b.closest("#oat-dialog")).pop().click()');
-  ok(await A.waitFor('!document.querySelector("#oat-dialog")'), 'confirmed → the dialog closes');
+  ok(verdictOf(await A.waitFor('!document.querySelector("#oat-dialog")')), 'confirmed → the dialog closes');
   await sleep(300);
   let alive = true; try { process.kill(pid, 0); } catch { alive = false; }
   ok(mint.forAccount(acct).phase === 'cancelled' && !alive, 'the mint is cancelled and the CLI is gone', { phase: mint.forAccount(acct).phase, alive });
@@ -259,7 +259,7 @@ window.wsReady = () => sock.readyState === 1;`;
   am.clearOat(acct);
   fs.writeFileSync(identFile, ''); // CLI 2.1.296: setup-token leaves no identity
   await mintTo('pickcode#S1');
-  ok(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "confirm"'), 'no proof ⇒ phase confirm (nothing saved)', await phase(A));
+  ok(verdictOf(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "confirm"')), 'no proof ⇒ phase confirm (nothing saved)', await phase(A));
   ok(await A.ev('document.querySelector(".oat-confirm-q")?.textContent') === 'CLI 的 setup-token 不记录登录的是哪个账号，无法自动核对。你刚在浏览器里登录的是哪个账号？', 'the ruling\'s sentence: CLI 的 setup-token 不记录登录的是哪个账号…');
   const opts = await A.ev('[...document.querySelectorAll("#oat-pick option")].map((o) => [o.textContent, o.selected])');
   ok(JSON.stringify(opts) === JSON.stringify([['Work Max', true], ['Home Pro', false]]), 'the picker lists the subscription rows, the dialog\'s row preselected', opts);
@@ -268,12 +268,12 @@ window.wsReady = () => sock.readyState === 1;`;
   await toFront(A);
   await A.shot('confirm.png');
   await A.ev('document.querySelector("#oat-keep").click()');
-  ok(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "saved"') && am.getOat(acct) === TOKEN, '保存 ⇒ saved under the picked row');
+  ok(gateOf(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "saved"')) && am.getOat(acct) === TOKEN, '保存 ⇒ saved under the picked row');
   await A.waitFor('!document.querySelector("#oat-dialog")', 4000);
   am.clearOat(acct);
   fs.writeFileSync(identFile, JSON.stringify({ emailAddress: 'someone-else@example.com' }));
   await mintTo('othercode#S2');
-  ok(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "failed"'), "another account's sign-in ⇒ failed", await phase(A));
+  ok(verdictOf(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "failed"')), "another account's sign-in ⇒ failed", await phase(A));
   ok(await A.ev('document.querySelector(".oat-failed")?.textContent') === '这把 token 属于 someone-else@example.com，不是 Work Max；没有保存' && !am.getOat(acct), 'the words: 这把 token 属于 someone-else@example.com，不是 Work Max；没有保存 — nothing stored', await A.ev('document.querySelector(".oat-failed")?.textContent'));
   await A.shot('mismatch.png');
   await A.ev('document.querySelector("#oat-dialog .dialog-close")?.click()');
@@ -301,4 +301,4 @@ finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 console.log(`\ntest-oat-mint-ui: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

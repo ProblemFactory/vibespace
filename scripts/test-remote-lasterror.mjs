@@ -15,7 +15,7 @@ const buf = path.join(dir, 't.buf');
 const metaPath = path.join(dir, 't.json');
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) console.log(`  ✓ ${name}`);
   else { failed++; console.error(`  ✗ ${name}${extra ? ' — ' + extra : ''}`); }
 };
@@ -38,12 +38,12 @@ let meta = {};
 try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch {}
 check('meta.remote.state is reconnecting', meta.remote?.state === 'reconnecting', JSON.stringify(meta.remote));
 check('meta.remote.lastError carries the stderr line',
-  /Connection timed out/.test(meta.remote?.lastError || ''), meta.remote?.lastError);
+  verdictOf(/Connection timed out/.test(meta.remote?.lastError || '')), meta.remote?.lastError);
 const stateLines = stdout.split('\n').filter((l) => l.includes('"_remote_state"'));
 const last = stateLines.length ? JSON.parse(stateLines[stateLines.length - 1]) : null;
-check('_remote_state line carries lastError', /Connection timed out/.test(last?.lastError || ''), JSON.stringify(last));
+check('_remote_state line carries lastError', verdictOf(/Connection timed out/.test(last?.lastError || '')), JSON.stringify(last));
 check('attempts increment', (last?.attempts || 0) >= 1);
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

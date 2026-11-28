@@ -33,7 +33,7 @@ const STUB = require(path.join(repo, 'scripts/fixtures/apps-stub.cjs'));
 const CLI = path.join(repo, 'data/bin/vibespace-app');
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 2000) : ''}`); } return !!c; };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 2000) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -105,7 +105,7 @@ await leg('§1', async () => {
   const P = D.parseRequest;
   const codes = ['{', '[]', '{"op":"refresh"}', '{"v":2,"op":"refresh"}', '{"v":1,"op":"install","packages":["gimp"]}', '{"v":1,"op":"remove"}', '{"v":1,"op":"exec","argv":["sh"]}', '{"v":1,"op":"refresh","apply":"yes"}'].map((l) => P(l).code);
   ok(JSON.stringify(codes) === JSON.stringify(['bad-request', 'bad-request', 'bad-version', 'bad-version', 'bad-op', 'bad-op', 'bad-op', 'bad-request']), `refused by name: ${codes.join(' · ')}`, codes);
-  ok(P('{"v":1,"op":"refresh"}').ok && P('{"v":1,"op":"refresh"}').apply === false && P('{"v":1,"op":"refresh","apply":true}').apply === true && JSON.stringify(D.OPS) === '["refresh"]', 'the ONE op: refresh (apply false = the plan, true = the run)');
+  ok(gateOf(P('{"v":1,"op":"refresh"}').ok) && P('{"v":1,"op":"refresh"}').apply === false && P('{"v":1,"op":"refresh","apply":true}').apply === true && JSON.stringify(D.OPS) === '["refresh"]', 'the ONE op: refresh (apply false = the plan, true = the run)');
   const v = D.planView({ ok: true, canRun: true, layer: 'sys', updates: [{ package: 'hello', from: '1', to: '2', origin: 'x', extra: 'y' }], skippedHost: [{ id: 'gimp', label: 'L' }] });
   ok(v.layer === 'sys' && v.count === 1 && JSON.stringify(v.updates[0]) === '{"package":"hello","from":"1","to":"2"}' && JSON.stringify(v.skippedHost) === '["gimp"]' && D.planView({}).layer === 'host', 'planView: the layer, each update (package / from / to), the host apps left alone — by id, never a label');
 });
@@ -117,28 +117,28 @@ await leg('§2', async () => {
   const sock = D.socketPath(home);
   ok(!fs.existsSync(sock) && door.state().open === false, 'created: nothing listens yet (the wiring opens it after listen)');
   const st = await door.open();
-  ok(st.open === true && fs.lstatSync(sock).isSocket() && mode(sock) === 0o600 && mode(path.dirname(sock)) === 0o700 && fs.lstatSync(path.dirname(sock)).uid === process.getuid() && lines.some((l) => l.startsWith('[apps] operator door: ')), `open: ${path.relative(home, sock)} — the socket 0600 in a 0700 directory of this account (only this account and root connect)`, { st, sock: mode(sock).toString(8), dir: mode(path.dirname(sock)).toString(8) });
+  ok(st.open === true && gateOf(fs.lstatSync(sock).isSocket()) && mode(sock) === 0o600 && mode(path.dirname(sock)) === 0o700 && fs.lstatSync(path.dirname(sock)).uid === process.getuid() && verdictOf(lines.some((l) => l.startsWith('[apps] operator door: '))), `open: ${path.relative(home, sock)} — the socket 0600 in a 0700 directory of this account (only this account and root connect)`, { st, sock: mode(sock).toString(8), dir: mode(path.dirname(sock)).toString(8) });
   const p = await cli(home, ['refresh']);
-  ok(p.code === 0 && /^2 known update\(s\) in the app system:$/m.test(p.stdout) && /^ {2}hello 2\.10-2 → 2\.10-3$/m.test(p.stdout) && /not upgraded by this Refresh .*: gimp$/m.test(p.stdout) && w.runs.length === 0, '`refresh` (no session): the plan — 2 updates in the app system, the host app it leaves alone; nothing ran', p);
+  ok(p.code === 0 && gateOf(/^2 known update\(s\) in the app system:$/m.test(p.stdout)) && gateOf(/^ {2}hello 2\.10-2 → 2\.10-3$/m.test(p.stdout)) && gateOf(/not upgraded by this Refresh .*: gimp$/m.test(p.stdout)) && w.runs.length === 0, '`refresh` (no session): the plan — 2 updates in the app system, the host app it leaves alone; nothing ran', p);
   const a = await cli(home, ['refresh', '--all']);
-  ok(a.code === 0 && /^\+ apt-get update$/m.test(a.stdout) && /^refreshed the app system: /m.test(a.stdout), '`refresh --all`: the run\'s log streamed, then "refreshed the app system"', a);
-  ok(w.runs.length === 1 && w.runs[0].what === 'app:refresh:refresh' && w.runs[0].kind === 'refresh' && /^[0-9a-f]{16,}$/.test(String(w.runs[0].digest)), 'it went through THE package slot as the user\'s Refresh does: what app:refresh:refresh, the plan\'s digest named (the plan run is the plan just taken)', w.runs);
+  ok(a.code === 0 && gateOf(/^\+ apt-get update$/m.test(a.stdout)) && verdictOf(/^refreshed the app system: /m.test(a.stdout)), '`refresh --all`: the run\'s log streamed, then "refreshed the app system"', a);
+  ok(w.runs.length === 1 && w.runs[0].what === 'app:refresh:refresh' && w.runs[0].kind === 'refresh' && verdictOf(/^[0-9a-f]{16,}$/.test(String(w.runs[0].digest))), 'it went through THE package slot as the user\'s Refresh does: what app:refresh:refresh, the plan\'s digest named (the plan run is the plan just taken)', w.runs);
   const stt = await w.access.call('local', 'app-status', {});
-  ok(stt.status && stt.status.state && stt.status.state.refreshedAt > T0 && lines.some((l) => /^\[apps\] operator door: refresh — 2 known update\(s\) in the app system, through the package slot$/.test(l)) && lines.some((l) => /^\[apps\] operator door: refresh done — ok/.test(l)), 'recorded (last refreshed now) and journaled — who asked: the operator door', { state: stt.status && stt.status.state, lines });
+  ok(gateOf(stt.status) && gateOf(stt.status.state) && stt.status.state.refreshedAt > T0 && gateOf(lines.some((l) => /^\[apps\] operator door: refresh — 2 known update\(s\) in the app system, through the package slot$/.test(l))) && verdictOf(lines.some((l) => /^\[apps\] operator door: refresh done — ok/.test(l))), 'recorded (last refreshed now) and journaled — who asked: the operator door', { state: stt.status && stt.status.state, lines });
   const j = await cli(home, ['refresh', '--all', '--json']);
   let jj = null; try { jj = JSON.parse(j.stdout); } catch { /* not json */ }
-  ok(j.code === 0 && jj && jj.ok === true && jj.done === true && jj.layer === 'sys', '--json: the final answer as JSON (the fleet script reads it)', j);
+  ok(j.code === 0 && gateOf(jj) && jj.ok === true && jj.done === true && jj.layer === 'sys', '--json: the final answer as JSON (the fleet script reads it)', j);
   w.access.installBusy = () => ({ pid: 4242, since: Date.now() - 5000 });
   const b = await cli(home, ['refresh', '--all']);
   w.access.installBusy = () => null;
-  ok(b.code === 75 && /the package slot is running another install .*\[busy\]/.test(b.stderr) && w.runs.length === 2, 'a busy slot: exit 75 (EX_TEMPFAIL — the script retries), nothing started', { b, runs: w.runs.length });
+  ok(b.code === 75 && gateOf(/the package slot is running another install .*\[busy\]/.test(b.stderr)) && w.runs.length === 2, 'a busy slot: exit 75 (EX_TEMPFAIL — the script retries), nothing started', { b, runs: w.runs.length });
   const n0 = w.runs.length, l0 = lines.length;
   const conv = await cli(home, ['refresh', '--all'], { VIBESPACE_API: 'http://127.0.0.1:9', VIBESPACE_SESSION_TOKEN: CONV_TOKEN });
-  ok(conv.code === 2 && /the machine OPERATOR's verb .* not a conversation's/.test(conv.stderr) && w.runs.length === n0 && lines.length === l0, 'inside a conversation (a session token): refused before any connection — the rule says the user\'s Refresh', conv);
+  ok(conv.code === 2 && gateOf(/the machine OPERATOR's verb .* not a conversation's/.test(conv.stderr)) && w.runs.length === n0 && lines.length === l0, 'inside a conversation (a session token): refused before any connection — the rule says the user\'s Refresh', conv);
   const nod = await cli(path.join(root, 'nobody-home'), ['refresh']);
-  ok(nod.code === 3 && nod.stderr.includes(path.join(root, 'nobody-home', '.vibespace', 'apps', 'operator', 'ops.sock')), 'no VibeSpace for this account: exit 3, the path named', nod);
+  ok(nod.code === 3 && verdictOf(nod.stderr.includes(path.join(root, 'nobody-home', '.vibespace', 'apps', 'operator', 'ops.sock'))), 'no VibeSpace for this account: exit 3, the path named', nod);
   const bad = await cli(home, ['refresh', '--everything']);
-  ok(bad.code === 2 && /usage: vibespace-app refresh \[--all\] \[--json\]/.test(bad.stderr), 'an unknown flag: usage, exit 2', bad);
+  ok(bad.code === 2 && verdictOf(/usage: vibespace-app refresh \[--all\] \[--json\]/.test(bad.stderr)), 'an unknown flag: usage, exit 2', bad);
   const r1 = await raw(sock, '{"v":1,"op":"install","packages":["gimp"]}\n');
   const r2 = await raw(sock, 'x'.repeat(5000));
   const r3 = await raw(sock, 'not json\n');
@@ -160,7 +160,7 @@ await leg('§3', async () => {
     const door = D.create({ engine: w.engine, access: w.access, home, log: quiet });
     const st = await door.open();
     const r = await raw(sock, '{"v":1,"op":"refresh"}\n');
-    ok(was && st.open === true && r.lines.some((x) => x && x.ok === true && x.plan), 'a stale socket (its server SIGKILLed) is replaced — the door answers', { was, st, r });
+    ok(gateOf(was) && st.open === true && verdictOf(r.lines.some((x) => x && x.ok === true && x.plan)), 'a stale socket (its server SIGKILLed) is replaced — the door answers', { was, st, r });
     await door.close();
   }
   { // a LIVE socket of another server
@@ -173,9 +173,9 @@ await leg('§3', async () => {
     const door = D.create({ engine: w.engine, access: w.access, home, log: seen });
     const st = await door.open();
     const r = await raw(sock, '{"v":1,"op":"refresh"}\n');
-    ok(st.open === false && st.why === 'in-use' && r.lines[0] === 'other' && lines.slice(l0).some((l) => /operator door: off — another VibeSpace answers on /.test(l)), 'a LIVE door of another server: left alone (it still answers), this door off by name', { st, r, said: lines.slice(l0) });
+    ok(st.open === false && st.why === 'in-use' && r.lines[0] === 'other' && verdictOf(lines.slice(l0).some((l) => /operator door: off — another VibeSpace answers on /.test(l))), 'a LIVE door of another server: left alone (it still answers), this door off by name', { st, r, said: lines.slice(l0) });
     await door.close();
-    ok(fs.existsSync(sock), 'close() of the door that never opened leaves the other server\'s socket');
+    ok(verdictOf(fs.existsSync(sock)), 'close() of the door that never opened leaves the other server\'s socket');
     await new Promise((r) => other.close(r));
   }
   { // a HOME so long the socket path passes the platform's bound
@@ -204,12 +204,12 @@ await leg('§4', async () => {
   process.env.HOME = home;
   let a;
   try { a = W.install({ app: { use() { } }, access: STUB.create({ log: quiet, delayMs: 5 }), dataDir: path.join(root, 'wiring'), log: quiet, throwawayRoot: false, env: {} }); } finally { process.env.HOME = prev; }
-  ok(a.door && a.door.path === sock && !fs.existsSync(sock), 'install() (server.js runs it BEFORE listen): the door exists, nothing listens');
+  ok(gateOf(a.door) && a.door.path === sock && !fs.existsSync(sock), 'install() (server.js runs it BEFORE listen): the door exists, nothing listens');
   // afterListen() STARTS the door's open and resolves with the replay, not with the door (src/server/apps-wiring.js): the law is the
   // ORDER (after afterListen the door opens), so the leg waits for the door's own state, bounded, and names it at the bound
   await a.afterListen();
   const got = await untilOpen(a.door, sock, 10000);
-  ok(got.open, `afterListen(): the operator door is open (server.js calls it 2.5 s after listen)${got.open ? '' : ` — NOT OPEN within 10 s: ${JSON.stringify(got.state)}, a socket at the path: ${isSock(sock)}`}`);
+  ok(verdictOf(got.open), `afterListen(): the operator door is open (server.js calls it 2.5 s after listen)${got.open ? '' : ` — NOT OPEN within 10 s: ${JSON.stringify(got.state)}, a socket at the path: ${isSock(sock)}`}`);
   await a.door.close();
   // RED CONTROL (主开发 r2827): the door's open HELD (a placed stall the test releases, not a duration). The release's read — a fixed
   // 50 ms, then the state — says NOT open while the hold stands; the bounded wait sees the door open once the hold is released.
@@ -227,11 +227,11 @@ await leg('§4', async () => {
     const releaseRead = b.door.state().open === true && isSock(sock2);   // the release's form: a fixed sleep, then the read
     release();
     const waited = await untilOpen(b.door, sock2, 10000);
-    ok(held === 1 && !releaseRead && waited.open, `RED CONTROL: with the door's open held, the release's fixed 50 ms read says NOT open (${releaseRead ? 'it said open' : 'not open'}); once the hold is released, the bounded wait sees it open (${waited.open ? `in ${waited.waitedMs} ms` : 'NOT OPEN within 10 s'})`);
+    ok(held === 1 && !releaseRead && verdictOf(waited.open), `RED CONTROL: with the door's open held, the release's fixed 50 ms read says NOT open (${releaseRead ? 'it said open' : 'not open'}); once the hold is released, the bounded wait sees it open (${waited.open ? `in ${waited.waitedMs} ms` : 'NOT OPEN within 10 s'})`);
     await b.door.close();
   }
   const srv = fs.readFileSync(path.join(repo, 'server.js'), 'utf8');
-  ok(/setTimeout\(\(\) => appsWiring\.afterListen\(\), 2500\)/.test(srv) && !/apps-ops-door/.test(srv), 'server.js unchanged: the door rides the apps wiring\'s afterListen (no second boot-path line)');
+  ok(gateOf(/setTimeout\(\(\) => appsWiring\.afterListen\(\), 2500\)/.test(srv)) && !/apps-ops-door/.test(srv), 'server.js unchanged: the door rides the apps wiring\'s afterListen (no second boot-path line)');
 });
 
 await leg('§5', async () => {
@@ -259,4 +259,4 @@ await leg('§5', async () => {
 });
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

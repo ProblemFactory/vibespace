@@ -66,7 +66,7 @@ const judged = (x) => !!x.first && x.first.act === 'freeze' && x.origin >= x.las
 const termsText = (x) => x.first ? `the window ${sec(x.idle)} s + ${sec(x.toFirst)} s to the first sweep past it (sweeps ${sec(x.gap)} s apart in this run, TICK_MS ${x.tickMs}; the one before at ${sec(x.prevSince)} s) + ${x.work} ms of freeze work` : `no sweep past the ${sec(x.idle)} s window among the ${x.sweeps} seen since the last verb`;
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const done = () => { console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed, ${skipped} skipped)` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`); process.exit(fail ? 1 : 0); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -191,7 +191,7 @@ try {
   let r = await A(['open', U('/a')]); const rb = await B(['open', U('/b')]);
   const rec = kk.browserOf(prof.id);
   if (!rec || !rec.cdpUrl) { skip(`the keeper could not launch the browser here: ${JSON.stringify({ r: r.err.slice(-300), rec })}`); throw new Error('no browser'); }
-  ok(r.code === 0 && rb.code === 0 && rec.display && rec.display.fallback && rec.display.fallback.rung === 'hidden-window' && BI.unseenRung(rec.display), 'both conversations browse on the hidden-window rung (no desktop: the CLI\'s own Xvfb)', { a: r.err.slice(-300), b: rb.err.slice(-300), display: rec.display });
+  ok(r.code === 0 && rb.code === 0 && gateOf(rec.display) && gateOf(rec.display.fallback) && rec.display.fallback.rung === 'hidden-window' && verdictOf(BI.unseenRung(rec.display)), 'both conversations browse on the hidden-window rung (no desktop: the CLI\'s own Xvfb)', { a: r.err.slice(-300), b: rb.err.slice(-300), display: rec.display });
   spy = await cdpClient(rec.cdpUrl);
   const p0 = await pagesNow(rec);
   const tA = p0.find((t) => /HP-A/.test(t.title)), tB = p0.find((t) => /HP-B/.test(t.title));
@@ -216,7 +216,7 @@ try {
   const fz1At = fz1 ? frozenLines()[0].at : 0;
   const g1 = fz1 ? await gpuPct(spy, 5) : { pct: NaN };
   const ta = freezeTerms(lastA, BI.IDLE_PAINT_MS, fz1At);
-  ok(!!fz1 && judged(ta) && g1.pct <= 3 && busy.pct >= 20, `a: the keeper's journal says it stopped drawing ${sec(ta.since)} s after the last verb = ${termsText(ta)} (the GPU sample's own clock started ${sec(tIdle - lastA)} s late); the GPU process over 5 s: ${g1.pct} % (was ${busy.pct} %)`, { terms: ta, journal: journal.slice(-4), facts: facts() });
+  ok(!!fz1 && gateOf(judged(ta)) && g1.pct <= 3 && busy.pct >= 20, `a: the keeper's journal says it stopped drawing ${sec(ta.since)} s after the last verb = ${termsText(ta)} (the GPU sample's own clock started ${sec(tIdle - lastA)} s late); the GPU process over 5 s: ${g1.pct} % (was ${busy.pct} %)`, { terms: ta, journal: journal.slice(-4), facts: facts() });
 
   // ── b ──
   console.log('— b: the next verb (a screenshot) thaws before it runs');
@@ -229,12 +229,12 @@ try {
   r = await A(['screenshot', shot]);
   const rv = resolves[rMark] || {};
   let png = null; try { png = pngCensus(fs.readFileSync(shot)); } catch { png = null; }
-  ok(r.code === 0 && png && png.colors >= 8 && png.nonWhitePct > 1 && png.nonWhitePct < 99, `b: \`vibespace-browser screenshot\` on the frozen page — its picture is NOT blank (${png ? `${png.w}×${png.h}, ${png.nonWhitePct} % non-white, ${png.colors} colours` : 'no PNG'})`, { r: r.out.slice(-300) + r.err.slice(-300), png });
+  ok(r.code === 0 && gateOf(png) && png.colors >= 8 && png.nonWhitePct > 1 && png.nonWhitePct < 99, `b: \`vibespace-browser screenshot\` on the frozen page — its picture is NOT blank (${png ? `${png.w}×${png.h}, ${png.nonWhitePct} % non-white, ${png.colors} colours` : 'no PNG'})`, { r: r.out.slice(-300) + r.err.slice(-300), png });
   const ev = await A(['eval', 'JSON.stringify(window.__ticks.slice(-3000))']);
   const ticks = (String(ev.out).match(/1\d{12}/g) || []).map(Number);
   const during = ticks.filter((x) => x > fz1At + 250 && x < (rv.at || 0));
   const first = ticks.find((x) => x >= (rv.at || Infinity));
-  ok(ev.code === 0 && rv.done && during.length === 0 && first != null && first - rv.done <= 17, `b: no frame while frozen (${during.length} rAF between the freeze and the verb); the first frame ${first != null && rv.done ? first - rv.done : '?'} ms after the /resolve answered (thaw ${rv.done - rv.at} ms) — within one frame`, { rv, first, ticks: ticks.length, during: during.slice(0, 5) });
+  ok(ev.code === 0 && gateOf(rv.done) && during.length === 0 && first != null && first - rv.done <= 17, `b: no frame while frozen (${during.length} rAF between the freeze and the verb); the first frame ${first != null && rv.done ? first - rv.done : '?'} ms after the /resolve answered (thaw ${rv.done - rv.at} ms) — within one frame`, { rv, first, ticks: ticks.length, during: during.slice(0, 5) });
   const bornAfterB = spy.born.slice(bornB);
 
   // ── c ──
@@ -258,7 +258,7 @@ try {
   const oMark = opens.length, rMark2 = resolves.length, bornD = spy.born.length;
   r = await A(['click', '#b']);
   const od = opens.slice(oMark).find((x) => x.type === 'alert'); const rd = resolves[rMark2] || {};
-  ok(!!fz3 && r.code === 0 && od && od.at - rd.at < 1000 && /\(a page alert was auto-accepted: "hello from a frozen page"\)/.test(r.err + r.out) && !/dialog is blocking the page/.test(r.out + r.err), `d: frozen again; the agent's click raises an alert — the watch ${od ? `has it (${od.kind}${od.by ? ` by ${od.by}` : ''})` : 'never had it'} ${od && rd.at ? od.at - rd.at : '?'} ms after the verb's /resolve (bound 1 s), and the verb says it in the watch's words (CONTROL never frozen: ${JSON.stringify(dCtl.watch.map((x) => `${x.kind}${x.by ? ':' + x.by : ''}`))}, the daemon's own line ${dCtl.daemonLine})`, { r: r.out.slice(-300) + r.err.slice(-400), od, opens: opens.length, dCtl });
+  ok(!!fz3 && r.code === 0 && gateOf(od) && od.at - rd.at < 1000 && gateOf(/\(a page alert was auto-accepted: "hello from a frozen page"\)/.test(r.err + r.out)) && !/dialog is blocking the page/.test(r.out + r.err), `d: frozen again; the agent's click raises an alert — the watch ${od ? `has it (${od.kind}${od.by ? ` by ${od.by}` : ''})` : 'never had it'} ${od && rd.at ? od.at - rd.at : '?'} ms after the verb's /resolve (bound 1 s), and the verb says it in the watch's words (CONTROL never frozen: ${JSON.stringify(dCtl.watch.map((x) => `${x.kind}${x.by ? ':' + x.by : ''}`))}, the daemon's own line ${dCtl.daemonLine})`, { r: r.out.slice(-300) + r.err.slice(-400), od, opens: opens.length, dCtl });
   if (/dialog is blocking the page/.test(r.out + r.err)) await A(['dialog', 'accept']);
   const bornAfterD = spy.born.slice(bornD);
 
@@ -274,9 +274,9 @@ try {
   const tabsA1 = tabUrls(await A(['tab', 'list'])), tabsB1 = tabUrls(await B(['tab', 'list']));
   const tb = await B(['get', 'title']);
   const ids = (ps) => ps.map((t) => t.targetId).sort().join(',');
-  ok(ids(p1) === ids(p0) && WIN.multiWindowHolders(census).length === 0 && census.A && census.B, `e: no stray — Chrome's page targets are the very same ${p0.length} before and after the thaws (the keeper's own blank tabs included), one window per holder`, { census, p0: p0.map((t) => t.url), p1: p1.map((t) => t.url) });
+  ok(ids(p1) === ids(p0) && WIN.multiWindowHolders(census).length === 0 && gateOf(census.A) && verdictOf(census.B), `e: no stray — Chrome's page targets are the very same ${p0.length} before and after the thaws (the keeper's own blank tabs included), one window per holder`, { census, p0: p0.map((t) => t.url), p1: p1.map((t) => t.url) });
   const visB = tB ? await vis(tB) : null;
-  ok(JSON.stringify(tabsA1) === JSON.stringify(tabsA0) && JSON.stringify(tabsB1) === JSON.stringify(tabsB0) && tb.code === 0 && /HP-B ledger/.test(tb.out) && visB === 'visible', `e: each conversation's own \`tab list\` is what it was before the thaws; B's next verb runs on B's page and shows it again in B's window (${visB})`, { tabsA0, tabsA1, tabsB0, tabsB1, tb: tb.out.slice(-200) + tb.err.slice(-200), warn: journal.filter((x) => /thaw's blank/.test(x.m)) });
+  ok(JSON.stringify(tabsA1) === JSON.stringify(tabsA0) && JSON.stringify(tabsB1) === JSON.stringify(tabsB0) && tb.code === 0 && gateOf(/HP-B ledger/.test(tb.out)) && visB === 'visible', `e: each conversation's own \`tab list\` is what it was before the thaws; B's next verb runs on B's page and shows it again in B's window (${visB})`, { tabsA0, tabsA1, tabsB0, tabsB1, tb: tb.out.slice(-200) + tb.err.slice(-200), warn: journal.filter((x) => /thaw's blank/.test(x.m)) });
 
   // ── a2 ── B-1542 RED CONTROL: the window shortened (two ticks) — the measured stop moves with the window it is derived from
   const CTL_IDLE = 2 * K.TICK_MS;
@@ -291,7 +291,7 @@ try {
   idleCtl = null;
   const tA2 = freezeTerms(lastA2, CTL_IDLE, atA2);
   const literal = tA2.since >= BI.IDLE_PAINT_MS - 1000; // the old literal bound (30 s − 1 s), judged on the same numbers
-  ok(!!fzA2 && judged(tA2) && tA2.since < BI.IDLE_PAINT_MS && !literal, `a2: RED CONTROL — with the window at ${sec(CTL_IDLE)} s it stopped drawing ${sec(tA2.since)} s after the last verb = ${termsText(tA2)}; the old literal "≥ ${sec(BI.IDLE_PAINT_MS - 1000)} s" is ${literal ? 'GREEN (it would not see the change)' : 'RED'} on these numbers`, tA2);
+  ok(!!fzA2 && gateOf(judged(tA2)) && tA2.since < BI.IDLE_PAINT_MS && !literal, `a2: RED CONTROL — with the window at ${sec(CTL_IDLE)} s it stopped drawing ${sec(tA2.since)} s after the last verb = ${termsText(tA2)}; the old literal "≥ ${sec(BI.IDLE_PAINT_MS - 1000)} s" is ${literal ? 'GREEN (it would not see the change)' : 'RED'} on these numbers`, tA2);
 
   // ── f ──
   console.log('— f: CONTROL — the switch OFF on the same browser');
@@ -300,7 +300,7 @@ try {
   await A(['get', 'title']); // the last verb (and a thaw if anything was frozen)
   await sleep(55000);
   const gF = await gpuPct(spy, 5);
-  ok(frozenLines().length === nF && facts() && !facts().frozen && gF.pct >= 20, `f: 60 s with nobody and the switch OFF ⇒ never frozen (the keeper reads it at each sweep); the GPU still draws at ${gF.pct} %`, { lines: frozenLines().length - nF, facts: facts() });
+  ok(frozenLines().length === nF && gateOf(facts()) && !facts().frozen && gF.pct >= 20, `f: 60 s with nobody and the switch OFF ⇒ never frozen (the keeper reads it at each sweep); the GPU still draws at ${gF.pct} %`, { lines: frozenLines().length - nF, facts: facts() });
 
   // ── g ── rows B-98f5 / B-bcf8 (lane bl-browser-a, box rows 715-725): THE THAW'S FLIP TAB IS ONE NO DRIVER TAKES. A driver that sees
   // every tab (this keeper has no mediator: the raw road, as a conversation's own browser runs) takes every page tab it is told of —
@@ -366,8 +366,8 @@ try {
   const notVisG = gRuns.filter((x) => x.shown !== 1 && x.aVis !== 'visible').map((x) => ({ i: x.i, froze: x.froze, shown: x.shown, bornFlip: x.bornFlip, aVis: x.aVis }));
   const unshownG = gRuns.filter((x) => x.shown !== 1).length;
   const gWhy = { flips: flipsG, froze: frozeG.length, of: G_FLIPS, refused: refusedG, flippedBySweep: bySweepG, notVisible: notVisG.slice(0, 8), odd: oddG.slice(0, 8), births: [...new Set(flipBirths)], birthCount: flipBirths.length, u: { agentIndex: iAg, secondIndex: iSg, counter: { before: maxU0, probe: noU } }, a: { counter: { before: maxA0, probe: noA }, tabs: { before: aBefore.length, after: aAfter.length, same: JSON.stringify(aBefore) === JSON.stringify(aAfter), flipListed: aFlipListed } } };
-  ok(frozeG.length >= G_FLOOR && flipsG === frozeG.length && notVisG.length === 0 && flipBirths.length >= flipsG && flipBirths.every((u) => u === BI.FLIP_TAB_URL), `g: every freeze that froze was flipped back (${flipsG} of ${frozeG.length} froze, of ${G_FLIPS}; refused by reason ${JSON.stringify(refusedG)}; ${bySweepG.length} flipped by the keeper's own sweep, not the leg's thaw), A's page read «visible» after each of the ${unshownG} samples the leg's own thaw did not show exactly one, every flip tab born at ${BI.FLIP_TAB_URL} (the address no driver takes)`, gWhy);
-  ok(iAg >= 0 && iSg > iAg && gRuns.every((x) => x.uOwn) && gRuns.every((x) => x.aOwn), `g: after every flip the UNPINNED session (a second tab after A's in its list) and the agent read their own page — the moved tab of today's blank flip never happens`, { ...gWhy, notOwn: gRuns.map((x, i) => (!x.uOwn || !x.aOwn ? i + 1 : null)).filter(Boolean) });
+  ok(frozeG.length >= G_FLOOR && flipsG === frozeG.length && notVisG.length === 0 && flipBirths.length >= flipsG && verdictOf(flipBirths.every((u) => u === BI.FLIP_TAB_URL)), `g: every freeze that froze was flipped back (${flipsG} of ${frozeG.length} froze, of ${G_FLIPS}; refused by reason ${JSON.stringify(refusedG)}; ${bySweepG.length} flipped by the keeper's own sweep, not the leg's thaw), A's page read «visible» after each of the ${unshownG} samples the leg's own thaw did not show exactly one, every flip tab born at ${BI.FLIP_TAB_URL} (the address no driver takes)`, gWhy);
+  ok(iAg >= 0 && iSg > iAg && gateOf(gRuns.every((x) => x.uOwn)) && verdictOf(gRuns.every((x) => x.aOwn)), `g: after every flip the UNPINNED session (a second tab after A's in its list) and the agent read their own page — the moved tab of today's blank flip never happens`, { ...gWhy, notOwn: gRuns.map((x, i) => (!x.uOwn || !x.aOwn ? i + 1 : null)).filter(Boolean) });
   ok(slowG.length === 0, `g: no command over 2 s in ${G_FLIPS} flips (the 30 s hold of the blank a driver prepared and lost)`, { slow: slowG.slice(0, 4) });
   // RED for a flip tab a driver takes (probe 10 row 725's control: the about:blank flip was registered by the unpinned session — its
   // ACTIVE tab moved — in 35 of 100 thaws, so 30 blank flips leave U's own counter still in about 0.65^30 ≈ 2.5e-6 of runs): U is
@@ -536,7 +536,7 @@ try {
   const cNav = await C(['open', U('/c')]);
   const hC = [await relaunchOf(prof2, C, leaseC), await relaunchOf(prof2, C, leaseC), await relaunchOf(prof2, C, leaseC)];
   const aloneMade = (x) => !!x && x.post.carriers === 1 && x.post.mates === 0 && x.post.unread === 0; // ONE carrier, alone in its window, every window read
-  if (sceneMade(cNav.code === 0 && hC.every(aloneMade), 'ALONE', hC.map((x) => ({ pre: x.pre, post: x.post })))) ok(hC.every((x) => x.ok && x.own.includes(U('/c')) && x.pages === x.before && x.takeBack && x.takeBack.verdict === 'take' && x.takeBack.ownWindow === true),
+  if (sceneMade(cNav.code === 0 && hC.every(aloneMade), 'ALONE', hC.map((x) => ({ pre: x.pre, post: x.post })))) ok(verdictOf(hC.every((x) => x.ok && x.own.includes(U('/c')) && x.pages === x.before && x.takeBack && x.takeBack.verdict === 'take' && x.takeBack.ownWindow === true)),
     `h ALONE: after each relaunch with Chrome's restore C is on ITS OWN page again — taken back, alone in its window — and the page count stays FLAT (${hC.map((x) => `${x.before} → ${x.pages}`).join(' · ')}; probe 12 grew by one a start)`, hC.map((x) => ({ own: x.own.slice(0, 80), before: x.before, pages: x.pages, tb: x.takeBack })));
   // the page never reads its mark: its own address, its referrer, its history's length — none carries it
   const tC1 = await pageOf(hC[2].recN, '/c');
@@ -546,7 +546,7 @@ try {
   // the person navigated C's tab by hand before the restart ⇒ still C's: taken back on that page
   const navd = tC1 ? await pageNavH(hC[2].recN.cdpUrl, tC1.targetId, U('/c2')) : false;
   const hC2 = navd ? await relaunchOf(prof2, C, leaseC) : null;
-  if (sceneMade(navd && aloneMade(hC2), 'ALONE (by hand)', hC2 && { pre: hC2.pre, post: hC2.post })) ok(!!hC2 && hC2.own.includes(U('/c2')) && hC2.pages === hC2.before && hC2.takeBack && hC2.takeBack.verdict === 'take', 'h ALONE: the person navigated C\'s tab by hand before the restart — still C\'s: taken back on that page, no page more', { navd, own: hC2 && hC2.own.slice(0, 80), before: hC2 && hC2.before, pages: hC2 && hC2.pages });
+  if (sceneMade(navd && aloneMade(hC2), 'ALONE (by hand)', hC2 && { pre: hC2.pre, post: hC2.post })) ok(!!hC2 && gateOf(hC2.own.includes(U('/c2'))) && hC2.pages === hC2.before && gateOf(hC2.takeBack) && hC2.takeBack.verdict === 'take', 'h ALONE: the person navigated C\'s tab by hand before the restart — still C\'s: taken back on that page, no page more', { navd, own: hC2 && hC2.own.slice(0, 80), before: hC2 && hC2.before, pages: hC2 && hC2.pages });
   // RED as today: a lease with NO mark (a record from before this unit) ⇒ nothing to take back ⇒ one more page at the start
   const lC = leaseC(); const markWasC = lC ? lC.ownMark : null; if (lC) delete lC.ownMark;
   const hC4 = await relaunchOf(prof2, C, null, markWasC); // its old carrier, read by the mark it had: alone, so only the missing mark keeps it
@@ -570,7 +570,7 @@ try {
   const hS = await relaunchOf(prof, A, leaseA);
   const carrierS = hS.recN ? await pageOf(hS.recN, '/s') : null;
   const sharedMade = !!hMarkA && sNav.code === 0 && popped === true && hS.pre.carriers === 1 && hS.pre.mates >= 1 && hS.post.carriers === 1 && hS.post.mates >= 1 && hS.post.unread === 0;
-  if (sceneMade(sharedMade, 'SHARED', { popped, pre: hS.pre, post: hS.post })) ok(hS.ok && !!hS.takeBack && ['shared', 'unknown'].includes(hS.takeBack.verdict) && hS.takeBack.remint === true && !hS.own.includes(U('/s')) && hS.pages === hS.before + 1 && !!carrierS,
+  if (sceneMade(sharedMade, 'SHARED', { popped, pre: hS.pre, post: hS.post })) ok(gateOf(hS.ok) && !!hS.takeBack && gateOf(['shared', 'unknown'].includes(hS.takeBack.verdict)) && hS.takeBack.remint === true && !hS.own.includes(U('/s')) && hS.pages === hS.before + 1 && !!carrierS,
     `h SHARED: A's carrier sits beside its own pop-up (${hS.post.mates} other page(s) in its window, by Chrome's list) — NOT taken back (verdict «${hS.takeBack ? hS.takeBack.verdict : '-'}»): it stands where it was, A gets a tab of its own (one page more: ${hS.before} → ${hS.pages}) under a new mark — today's behaviour`, { own: hS.own.slice(0, 80), tb: hS.takeBack, carrier: !!carrierS });
   // a copy of A's tab (a person's duplicate copies its history) ⇒ two carriers ⇒ none taken
   const markS = leaseA() && leaseA().ownMark;
@@ -578,7 +578,7 @@ try {
   if (markS && hS.recN) { const cc = await cdpClient(hS.recN.cdpUrl); try { const c = await cc.send('Target.createTarget', { url: `about:blank#vs-own-${markS}` }); const did = c && c.result ? c.result.targetId : null; await sleep(500); dup = !!(did && await pageNavH(hS.recN.cdpUrl, did, U('/b'))); } finally { try { cc.close(); } catch { /* */ } } }
   if (dup) { const tS = (await pagesNow(hS.recN)).find((t) => /^about:blank#vs-own-/.test(String(t.url || ''))) || null; if (tS) await pageNavH(hS.recN.cdpUrl, tS.targetId, U('/a2')); }
   const h3 = dup ? await relaunchOf(prof, A, leaseA) : null;
-  if (sceneMade(dup && !!h3 && h3.post.carriers >= 2, 'MANY', h3 && { pre: h3.pre, post: h3.post })) ok(!!h3 && h3.ok && !h3.own.includes(U('/a2')) && h3.pages === h3.before + 1 && h3.takeBack && h3.takeBack.verdict === 'many', 'h SHARED: two restored pages carry the same mark (a copy of A\'s tab): NONE is taken back — a tab of its own (never the copy), one page more', { dup, own: h3 && h3.own.slice(0, 80), before: h3 && h3.before, pages: h3 && h3.pages, tb: h3 && h3.takeBack });
+  if (sceneMade(dup && !!h3 && h3.post.carriers >= 2, 'MANY', h3 && { pre: h3.pre, post: h3.post })) ok(!!h3 && gateOf(h3.ok) && !h3.own.includes(U('/a2')) && h3.pages === h3.before + 1 && gateOf(h3.takeBack) && h3.takeBack.verdict === 'many', 'h SHARED: two restored pages carry the same mark (a copy of A\'s tab): NONE is taken back — a tab of its own (never the copy), one page more', { dup, own: h3 && h3.own.slice(0, 80), before: h3 && h3.before, pages: h3 && h3.pages, tb: h3 && h3.takeBack });
   // 主开发 r4282 (a MEASURE, printed, never judged): ONE relaunch with ≥ 20 restored pages, most opened in the background and never
   // brought to front — does every restored page answer the history read inside its bound, or is the verdict «unknown» (today's
   // behaviour: a new tab)? A gets a fresh mark carried by ONE new page (navigated on); under law A its windows decide the take
@@ -645,15 +645,15 @@ try {
   const I_UNMADE = 'scene not made — B\'s attach sent the driver no new-tab command (the rebind road did not run), so the law\'s line is not judged';
   const iNow = await rebindLeg(K, 'now');
   if (!iSceneOf(iNow)) ok(false, `i REBIND: ${I_UNMADE}`, iNow);
-  else ok(judgeI(iNow) && iNow.b === 'new', 'i REBIND ON THE REAL DRIVER: B\'s rebind sends exactly one new-tab command, at its OWN marked blank (the 24-hex form) — the real driver takes it, and Chrome\'s own list shows the made tab at that address, the mark its first history entry, B\'s only root', iNow);
+  else ok(gateOf(judgeI(iNow)) && iNow.b === 'new', 'i REBIND ON THE REAL DRIVER: B\'s rebind sends exactly one new-tab command, at its OWN marked blank (the 24-hex form) — the real driver takes it, and Chrome\'s own list shows the made tab at that address, the mark its first history entry, B\'s only root', iNow);
   const MI = mutantCopies('browser-hidden-paint-i', REPO);
   let bareSrc = null; try { bareSrc = anchored(fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), "[...pin, 'tab', 'new', ...(birth ? [birth] : [])], o)", "[...pin, 'tab', 'new'], o) /* CONTROL: the bare tab new, as at the release */", 'i the rebind\'s new tab'); } catch (e) { ok(false, `i CONTROL setup: the rebind's new-tab anchor — ${String(e && e.message).slice(0, 200)}`); }
   if (bareSrc) {
     const iBare = await rebindLeg(MI.load('src/server/browser-keeper.js', bareSrc, 'bare-tab-new'), 'bare');
     if (!iSceneOf(iBare)) ok(false, `i CONTROL: ${I_UNMADE}`, iBare);
     else ok(!judgeI(iBare) && iBare.news.length === 1 && iBare.news[0].replace(/^--pin-tab /, '') === 'tab new' && !(iBare.made && iBare.made.url === iBare.at), 'i CONTROL (the bare `tab new`, the release\'s text): the made tab stands at a plain blank, not at its own mark — the leg\'s judge goes red', iBare);
-    for (const r of copiesCensus(MI.files, MI.dir, REPO, { minCopies: 1, label: 'i ' })) ok(r.pass, r.name, r.detail);
+    for (const r of copiesCensus(MI.files, MI.dir, REPO, { minCopies: 1, label: 'i ' })) ok(verdictOf(r.pass), r.name, r.detail);
   }
 } catch (e) { if (!/^no browser$/.test(String(e && e.message))) ok(false, 'the run threw', String(e && e.stack)); }
 finally { try { spy?.close(); } catch { /* */ } try { dialogs.shutdown(); kk.shutdown(); } catch { /* */ } srv.close(); pages.close(); cleanup(); }
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

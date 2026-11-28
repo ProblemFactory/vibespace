@@ -35,7 +35,7 @@ import { writeFakeMic, winFacts, macFacts, toneRatio, writeFakeDecoder, pcmPages
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(40); } return false; };
 const SM = require(path.join(REPO, 'src/stream-model.js'));
@@ -121,9 +121,9 @@ setFacts(winFacts());
 const dm = deviceOn(home, BUNDLE, { VIBESPACE_MIC_HELPER: FAKE, PATH: DEC.dir + path.delimiter + PATH0 }); // lane ci-339-reds: the fake decoder first
 const conn = await dm.connect();
 delete process.env.VIBESPACE_MIC_HELPER; process.env.PATH = PATH0;
-ok(conn.info.capabilities.includes('stream-mic') && capsOf(bundleText).includes('"stream-mic"') && /stream-mic-result/.test(bundleText) && /function createMic\(/.test(bundleText), 'the hello-ack names stream-mic; the bundle answers stream-mic-result and carries src/desktop-mic.js (run `npm run build:agentd` after a change)');
+ok(gateOf(conn.info.capabilities.includes('stream-mic')) && gateOf(capsOf(bundleText).includes('"stream-mic"')) && gateOf(/stream-mic-result/.test(bundleText)) && verdictOf(/function createMic\(/.test(bundleText)), 'the hello-ack names stream-mic; the bundle answers stream-mic-result and carries src/desktop-mic.js (run `npm run build:agentd` after a change)');
 const f1 = await dm.streamMic();
-ok(f1.ok && f1.platform === 'win32' && f1.state.state === 'installed' && f1.state.mic.name === 'CABLE Output (VB-Audio Virtual Cable)' && f1.state.render.id === 'cab-in' && f1.state.micIsDefault === false && f1.installedAt === null && f1.previous === null, 'stream-mic ⇒ the facts + the PURE verdict: VB-CABLE installed, the agent writes CABLE Input, apps pick CABLE Output', f1.state);
+ok(gateOf(f1.ok) && f1.platform === 'win32' && f1.state.state === 'installed' && f1.state.mic.name === 'CABLE Output (VB-Audio Virtual Cable)' && f1.state.render.id === 'cab-in' && f1.state.micIsDefault === false && f1.installedAt === null && f1.previous === null, 'stream-mic ⇒ the facts + the PURE verdict: VB-CABLE installed, the agent writes CABLE Input, apps pick CABLE Output', f1.state);
 const local = DMIC.createMic({ platform: 'linux', spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: { PATH: process.env.PATH, HOME: home }, lookupEnv: process.env, home, helperPath: FAKE });
 const f1b = await local.facts();
 ok(JSON.stringify({ e: f1.endpoints, d: f1.defaults, s: f1.state }) === JSON.stringify({ e: f1b.endpoints, d: f1b.defaults, s: f1b.state }), 'PARITY: the op\'s answer = src/desktop-mic.js run in-process over the same machine (one implementation where the facts live)');
@@ -133,29 +133,29 @@ console.log('§2 THE WINDOWS ROAD: Opus → Ogg pages → ffmpeg (the fake decod
 {
   const s0 = await micStream(dm);
   const sdp = s0.off.offer.sdp;
-  ok(s0.off.ok && s0.off.mic === true && /m=audio [\s\S]*a=recvonly/.test(sdp) && /a=rtpmap:\d+ opus\/48000\/2/i.test(sdp) && /a=group:BUNDLE 0 1 2/.test(sdp), 'a stream asked `mic` offers an audio m-line the agent RECEIVES on (recvonly, Opus 48 kHz) inside the one BUNDLE', sdp.split(/\r?\n/).filter((l) => /^m=|recvonly|opus|BUNDLE/i.test(l)));
-  ok(s0.ans.ok && s0.connected && s0.tr, 'the stand-in answered it SENDONLY and connected');
+  ok(gateOf(s0.off.ok) && s0.off.mic === true && gateOf(/m=audio [\s\S]*a=recvonly/.test(sdp)) && gateOf(/a=rtpmap:\d+ opus\/48000\/2/i.test(sdp)) && verdictOf(/a=group:BUNDLE 0 1 2/.test(sdp)), 'a stream asked `mic` offers an audio m-line the agent RECEIVES on (recvonly, Opus 48 kHz) inside the one BUNDLE', sdp.split(/\r?\n/).filter((l) => /^m=|recvonly|opus|BUNDLE/i.test(l)));
+  ok(gateOf(s0.ans.ok) && gateOf(s0.connected) && verdictOf(s0.tr), 'the stand-in answered it SENDONLY and connected');
   ok(PACKETS.length >= 55, `the voice: ${PACKETS.length} Opus packets of 20 ms (${REAL_FF ? 'libopus' : 'framed — no encoder on this box'})`);
   await s0.send(PACKETS.slice(0, 50));
   const started = await until(() => renders().length === 1, 5000);
   const r1 = renders()[0] || {};
-  ok(started && r1.device === 'cab-in' && r1.speakers === false && JSON.stringify(r1.argv) === '["render"]', 'the first packets started ONE render with VS_MIC_DEVICE = «CABLE Input»\'s id — the argv names nothing', r1);
+  ok(gateOf(started) && r1.device === 'cab-in' && r1.speakers === false && JSON.stringify(r1.argv) === '["render"]', 'the first packets started ONE render with VS_MIC_DEVICE = «CABLE Input»\'s id — the argv names nothing', r1);
   const live = await until(() => { const m = s0.micStats(); return m && m.state === 'live'; }, 4000);
   const ms = s0.micStats() || {};
-  ok(live && ms.to === 'virtual' && ms.mic && ms.mic.name === 'CABLE Output (VB-Audio Virtual Cable)' && ms.device.name === 'CABLE Input (VB-Audio Virtual Cable)' && ms.packets > 0, 'the stream\'s numbers say where the voice IS going: the virtual microphone «CABLE Output» (the page says it)', ms);
-  ok(await until(() => { const m = s0.micStats(); return m && m.packets === 50 && m.dropped === 0; }, 4000), 'every packet sent was counted, none dropped (50)', s0.micStats());
+  ok(gateOf(live) && ms.to === 'virtual' && gateOf(ms.mic) && ms.mic.name === 'CABLE Output (VB-Audio Virtual Cable)' && ms.device.name === 'CABLE Input (VB-Audio Virtual Cable)' && ms.packets > 0, 'the stream\'s numbers say where the voice IS going: the virtual microphone «CABLE Output» (the page says it)', ms);
+  ok(verdictOf(await until(() => { const m = s0.micStats(); return m && m.packets === 50 && m.dropped === 0; }, 4000)), 'every packet sent was counted, none dropped (50)', s0.micStats());
   const closed = await until(() => ended(1), MM.MIC_LIMITS.idleMs + 4000);
   const pcm = binOf(1), runs = pcmPages(pcm), dec = DEC.decodes()[0] || {};
-  ok(closed && pcm.length === 50 * 960 * 4 && runs.length === 50 && runs.every((r, i) => r.seq === i + 2 && r.frames === 960) && dec.head && dec.tags && dec.packets === 50 && !dec.bad && JSON.stringify(dec.argv) === JSON.stringify(MM.DECODER_ARGS), `no packet for ${MM.MIC_LIMITS.idleMs} ms ⇒ the helper's stdin closed; it got ${(pcm.length / 4 / 48000).toFixed(2)} s of s16le 48 kHz stereo PCM — the decoder (the fake, asked with the receiver's own DECODER_ARGS) read OpusHead + OpusTags, then Ogg pages 2…51 IN ORDER, each packet's 20 ms reaching the helper (none lost)`, { bytes: pcm.length, runs: runs.slice(0, 4), dec: { ...dec, seqs: (dec.seqs || []).length } });
+  ok(gateOf(closed) && pcm.length === 50 * 960 * 4 && runs.length === 50 && gateOf(runs.every((r, i) => r.seq === i + 2 && r.frames === 960)) && gateOf(dec.head) && gateOf(dec.tags) && dec.packets === 50 && !dec.bad && JSON.stringify(dec.argv) === JSON.stringify(MM.DECODER_ARGS), `no packet for ${MM.MIC_LIMITS.idleMs} ms ⇒ the helper's stdin closed; it got ${(pcm.length / 4 / 48000).toFixed(2)} s of s16le 48 kHz stereo PCM — the decoder (the fake, asked with the receiver's own DECODER_ARGS) read OpusHead + OpusTags, then Ogg pages 2…51 IN ORDER, each packet's 20 ms reaching the helper (none lost)`, { bytes: pcm.length, runs: runs.slice(0, 4), dec: { ...dec, seqs: (dec.seqs || []).length } });
   const idle = await until(() => { const m = s0.micStats(); return m && m.state === 'idle' && m.ended && m.ended.why === 'idle'; }, 3000);
-  ok(idle, 'the numbers say the road went idle (why: idle) — the stream itself plays on', s0.micStats());
+  ok(verdictOf(idle), 'the numbers say the road went idle (why: idle) — the stream itself plays on', s0.micStats());
   await s0.send(PACKETS.slice(0, 10));
-  ok(await until(() => renders().length === 2, 5000) && renders()[1].device === 'cab-in', 'the next packet starts the road again (a second run)');
+  ok(gateOf(await until(() => renders().length === 2, 5000)) && renders()[1].device === 'cab-in', 'the next packet starts the road again (a second run)');
   await dm.streamStop(s0.off.sid, { why: 'closed' });
-  ok(await until(() => ended(2), 4000), 'the stream\'s end ends the road (the helper\'s stdin closed)');
+  ok(verdictOf(await until(() => ended(2), 4000)), 'the stream\'s end ends the road (the helper\'s stdin closed)');
   s0.pc.close();
   const plain = await micStream(dm, { mic: false });
-  ok(plain.off.ok && !/m=audio/.test(plain.off.offer.sdp) && plain.off.mic === undefined && !plain.tr, 'a stream NOT asked `mic` (an older page) has no m=audio at all');
+  ok(gateOf(plain.off.ok) && !/m=audio/.test(plain.off.offer.sdp) && plain.off.mic === undefined && !plain.tr, 'a stream NOT asked `mic` (an older page) has no m=audio at all');
   await dm.streamStop(plain.off.sid); plain.pc.close();
 }
 
@@ -168,7 +168,7 @@ else {
   await s.send(PACKETS.slice(0, 50));
   const closed = await until(() => renders().length === n0 + 1 && ended(n0 + 1), MM.MIC_LIMITS.idleMs + 6000);
   const pcm = binOf(n0 + 1), ratio = toneRatio(pcm), dec = DEC.decodes().pop() || {};
-  ok(closed && dec.real === REAL_FF && pcm.length >= 0.7 * 48000 * 4 && ratio > 50, `the real ffmpeg (${REAL_FF}) decoded the stand-in's libopus: the helper got ${(pcm.length / 4 / 48000).toFixed(2)} s of PCM with the 1 kHz tone in it (1 kHz / 3 kHz energy ${ratio.toFixed(0)}×)`, { bytes: pcm.length, ratio, real: dec.real });
+  ok(gateOf(closed) && dec.real === REAL_FF && pcm.length >= 0.7 * 48000 * 4 && ratio > 50, `the real ffmpeg (${REAL_FF}) decoded the stand-in's libopus: the helper got ${(pcm.length / 4 / 48000).toFixed(2)} s of PCM with the 1 kHz tone in it (1 kHz / 3 kHz energy ${ratio.toFixed(0)}×)`, { bytes: pcm.length, ratio, real: dec.real });
   await dm.streamStop(s.off.sid); s.pc.close();
   DEC.useReal(null);
 }
@@ -188,9 +188,9 @@ console.log('§2c NO DECODER: a machine with no ffmpeg ⇒ said by name — the 
   const m = s.micStats() || {};
   await sleep(300);
   const again = await dmN.streamMic();
-  ok(said && /no ffmpeg/.test(m.error || '') && renders().length === n0 && DEC.decodes().length === d0 && again.ok === true && s.pc.connectionState === 'connected', `no ffmpeg on the machine ⇒ the stream's numbers say no_ffmpeg («${m.error}») — the strip's words (MM.micRoadWords): no helper started, nothing decoded, the agent answers on and the picture plays`, { m, renders: renders().length - n0, decodes: DEC.decodes().length - d0, again: again.ok });
+  ok(gateOf(said) && gateOf(/no ffmpeg/.test(m.error || '')) && renders().length === n0 && DEC.decodes().length === d0 && again.ok === true && s.pc.connectionState === 'connected', `no ffmpeg on the machine ⇒ the stream's numbers say no_ffmpeg («${m.error}») — the strip's words (MM.micRoadWords): no helper started, nothing decoded, the agent answers on and the picture plays`, { m, renders: renders().length - n0, decodes: DEC.decodes().length - d0, again: again.ok });
   const w = MM.micRoadWords(again.state, { state: m.state, code: m.code, to: m.to });
-  ok(w.road === null && w.refused === 'no_ffmpeg' && /ffmpeg/.test(w.key) && w.params.dir === '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin', 'the strip says it by name (micRoadWords: the machine has no ffmpeg — where to put one), never the facts\' road (the virtual microphone it never reached)', w);
+  ok(w.road === null && w.refused === 'no_ffmpeg' && gateOf(/ffmpeg/.test(w.key)) && w.params.dir === '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin', 'the strip says it by name (micRoadWords: the machine has no ffmpeg — where to put one), never the facts\' road (the virtual microphone it never reached)', w);
   await dmN.streamStop(s.off.sid); s.pc.close();
 }
 
@@ -200,10 +200,10 @@ console.log('§3 THE SPEAKERS ROAD: no virtual microphone ⇒ the default speake
   const n0 = renders().length;
   const s = await micStream(dm);
   await s.send(PACKETS.slice(0, 15));
-  ok(await until(() => renders().length === n0 + 1, 5000), 'one render started');
+  ok(verdictOf(await until(() => renders().length === n0 + 1, 5000)), 'one render started');
   const r = renders()[n0];
-  ok(r && r.speakers === true && r.device === null, 'render with VS_MIC_SPEAKERS=1 — the default speaker, no device named', r);
-  ok(await until(() => { const m = s.micStats(); return m && m.state === 'live' && m.to === 'speakers' && m.device.name === 'Speakers (Sound Blaster X3)' && m.mic === null; }, 4000), 'the numbers say the speakers (the strip says 「对方电脑会从扬声器播放你的声音」)', s.micStats());
+  ok(gateOf(r) && r.speakers === true && r.device === null, 'render with VS_MIC_SPEAKERS=1 — the default speaker, no device named', r);
+  ok(verdictOf(await until(() => { const m = s.micStats(); return m && m.state === 'live' && m.to === 'speakers' && m.device.name === 'Speakers (Sound Blaster X3)' && m.mic === null; }, 4000)), 'the numbers say the speakers (the strip says 「对方电脑会从扬声器播放你的声音」)', s.micStats());
   ok(FK.setdefaults().length === 0, 'no default device was changed (setdefault never ran)');
   await dm.streamStop(s.off.sid); s.pc.close();
 }
@@ -211,29 +211,29 @@ console.log('§3 THE SPEAKERS ROAD: no virtual microphone ⇒ the default speake
 console.log('§4 THE MAC ROAD: the Opus packets themselves, length-framed');
 {
   setFacts(macFacts()); const mf = await dm.streamMic({ force: true });
-  ok(mf.ok && mf.platform === 'darwin' && mf.state.which === 'vibespace-mic' && mf.state.render.uid === 'VibeSpaceMic_UID', 'a Mac-shaped machine: «VibeSpace Microphone» installed (by its UID)', mf.state);
+  ok(gateOf(mf.ok) && mf.platform === 'darwin' && mf.state.which === 'vibespace-mic' && mf.state.render.uid === 'VibeSpaceMic_UID', 'a Mac-shaped machine: «VibeSpace Microphone» installed (by its UID)', mf.state);
   const n0 = renders().length;
   const s = await micStream(dm);
   const sent = PACKETS.slice(0, 25);
   await s.send(sent);
-  ok(await until(() => renders().length === n0 + 1, 5000) && renders()[n0].device === 'VibeSpaceMic_UID', 'render with VS_MIC_DEVICE = the plug-in\'s UID');
+  ok(gateOf(await until(() => renders().length === n0 + 1, 5000)) && renders()[n0].device === 'VibeSpaceMic_UID', 'render with VS_MIC_DEVICE = the plug-in\'s UID');
   await dm.streamStop(s.off.sid); s.pc.close();
-  ok(await until(() => ended(n0 + 1), 4000), 'its stdin closed with the stream');
+  ok(verdictOf(await until(() => ended(n0 + 1), 4000)), 'its stdin closed with the stream');
   const bin = binOf(n0 + 1), got = [];
   for (let i = 0; i + 4 <= bin.length;) { const len = bin.readUInt32LE(i); got.push(bin.subarray(i + 4, i + 4 + len)); i += 4 + len; }
-  ok(got.length === sent.length && got.every((p, i) => Buffer.compare(p, sent[i]) === 0), `the helper got the ${sent.length} Opus packets byte for byte, each behind its u32 length (AudioToolbox decodes them there — no ffmpeg on a Mac)`, { got: got.length });
+  ok(got.length === sent.length && verdictOf(got.every((p, i) => Buffer.compare(p, sent[i]) === 0)), `the helper got the ${sent.length} Opus packets byte for byte, each behind its u32 length (AudioToolbox decodes them there — no ffmpeg on a Mac)`, { got: got.length });
 }
 
 console.log('§5 THE DEFAULT PAIR');
 {
   setFacts(winFacts()); await dm.streamMic({ force: true });
   const r1 = await dm.streamMic({ action: 'default', to: 'virtual', by: 'system:test-stream-mic-op' });
-  ok(r1.ok && r1.to === 'virtual' && r1.device.name === 'CABLE Output (VB-Audio Virtual Cable)' && r1.facts.state.micIsDefault === true && r1.facts.previous && r1.facts.previous.id === 'mic-1', '「设为默认麦克风」: CABLE Output is the default microphone; the device remembers what it replaced', r1.facts && { st: r1.facts.state, prev: r1.facts.previous });
+  ok(gateOf(r1.ok) && r1.to === 'virtual' && r1.device.name === 'CABLE Output (VB-Audio Virtual Cable)' && r1.facts.state.micIsDefault === true && gateOf(r1.facts.previous) && r1.facts.previous.id === 'mic-1', '「设为默认麦克风」: CABLE Output is the default microphone; the device remembers what it replaced', r1.facts && { st: r1.facts.state, prev: r1.facts.previous });
   ok(FK.setdefaults().pop() === 'cab-out' && JSON.parse(fs.readFileSync(path.join(home, '.vibespace', 'mic-default.json'), 'utf8')).previous.id === 'mic-1', 'the helper was handed CABLE Output\'s id on its env; ~/.vibespace/mic-default.json holds the previous one');
   const again = await dm.streamMic({ action: 'default', to: 'virtual', by: 'system:test-stream-mic-op' });
   ok(!again.ok && again.code === 'already_default', 'asked twice ⇒ already_default by name');
   const r2 = await dm.streamMic({ action: 'default', to: 'restore', by: 'system:test-stream-mic-op' });
-  ok(r2.ok && r2.device.name === 'Mic (Sound Blaster X3)' && r2.facts.state.micIsDefault === false && r2.facts.previous === null && !fs.existsSync(path.join(home, '.vibespace', 'mic-default.json')), '「改回」: the owner\'s microphone is the default again; the record is gone');
+  ok(gateOf(r2.ok) && r2.device.name === 'Mic (Sound Blaster X3)' && r2.facts.state.micIsDefault === false && r2.facts.previous === null && !fs.existsSync(path.join(home, '.vibespace', 'mic-default.json')), '「改回」: the owner\'s microphone is the default again; the record is gone');
   const r3 = await dm.streamMic({ action: 'default', to: 'restore', by: 'system:test-stream-mic-op' });
   ok(!r3.ok && r3.code === 'nothing_to_restore' && (await dm.streamMic({ action: 'default', to: 'bogus', by: 'system:test-stream-mic-op' })).code === 'bad_request', 'nothing to put back ⇒ nothing_to_restore; a bad `to` ⇒ bad_request');
 }
@@ -244,7 +244,7 @@ console.log('§6 NO ROAD');
   const n0 = renders().length;
   const s = await micStream(dm);
   await s.send(PACKETS.slice(0, 15));
-  ok(await until(() => { const m = s.micStats(); return m && m.state === 'no_target' && m.code === 'no_target' && m.packets > 0; }, 4000) && renders().length === n0, 'no cable and no speaker ⇒ no_target, said in the numbers — no helper started', s.micStats());
+  ok(gateOf(await until(() => { const m = s.micStats(); return m && m.state === 'no_target' && m.code === 'no_target' && m.packets > 0; }, 4000)) && renders().length === n0, 'no cable and no speaker ⇒ no_target, said in the numbers — no helper started', s.micStats());
   await dm.streamStop(s.off.sid); s.pc.close();
   setFacts(winFacts());
 }
@@ -252,7 +252,7 @@ console.log('§6 NO ROAD');
 console.log('§7 THE CAPABILITY GATE');
 {
   const oldText = bundleText.replace(CAP_LIST, (all, inner) => `capabilities: [${inner.split(',').map((x) => x.trim()).filter((x) => x && x !== '"stream-mic"').join(', ')}]`).replace('if (msg.op === "stream-mic") {', 'if (false) {').replace('const wantMic = msg.mic === true && typeof mic === "function";', 'const wantMic = false;');
-  ok(capsOf(oldText).length === capsOf(bundleText).length - 1 && oldText.includes('const wantMic = false;'), 'the old copy lacks stream-mic (by content), its handler and the m-line');
+  ok(capsOf(oldText).length === capsOf(bundleText).length - 1 && verdictOf(oldText.includes('const wantMic = false;')), 'the old copy lacks stream-mic (by content), its handler and the m-line');
   const oldBundle = path.join(work, 'old', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(oldBundle), { recursive: true }); fs.writeFileSync(oldBundle, oldText);
   const dmo = deviceOn(homeOld, oldBundle);
   const co = await dmo.connect();
@@ -260,12 +260,12 @@ console.log('§7 THE CAPABILITY GATE');
   const send0 = dmo._request.bind(dmo);
   dmo._request = (msg) => { sent.push(msg); return send0(msg); };
   const e1 = await dmo.streamMic().then(() => null, (x) => x);
-  ok(e1 && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) — NO request went to it');
+  ok(gateOf(e1) && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) — NO request went to it');
   const s = await dmo.streamOffer({ sourceKind: 'fake', sourceId: FIXTURE, mic: true });
-  ok(s.ok && sent.length === 1 && sent[0].op === 'stream-offer' && !('mic' in sent[0]) && !/m=audio/.test(s.offer.sdp), 'its stream is offered WITHOUT asking `mic` (the hub never sends it to an older agent) — no m=audio, the picture as before');
+  ok(gateOf(s.ok) && sent.length === 1 && sent[0].op === 'stream-offer' && !('mic' in sent[0]) && !/m=audio/.test(s.offer.sdp), 'its stream is offered WITHOUT asking `mic` (the hub never sends it to an older agent) — no m=audio, the picture as before');
   await dmo.streamStop(s.sid);
   const raw = await send0({ op: 'stream-mic', action: 'facts', timeoutMs: 1500 }).then((r) => ({ answered: r }), (x) => ({ error: String(x && x.message) }));
-  ok(!raw.answered && /time(?:d)? ?out/i.test(raw.error || ''), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);
+  ok(!raw.answered && verdictOf(/time(?:d)? ?out/i.test(raw.error || '')), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);
   dmo.stop(); endDaemonsOf(rootOf(homeOld));
 }
 
@@ -277,31 +277,31 @@ console.log('§8 THE HUB: desktop-access over this daemon');
   const mf = await acc.micFacts('win-m', { force: true });
   ok(mf.state.state === 'installed' && mf.doors.make === true && mf.doors.restore === false && mf.words.road === 'virtual', 'micFacts: the state, the 「设为默认麦克风」 door, the words — over the real agent');
   let loc = null; try { await acc.micFacts('local'); } catch (e) { loc = e; }
-  ok(loc && loc.code === 'not_desktop_machine', 'this machine itself is refused by name');
+  ok(gateOf(loc) && loc.code === 'not_desktop_machine', 'this machine itself is refused by name');
   const md = await acc.micDefault('win-m', 'virtual');
   ok(md.state.micIsDefault === true && md.doors.restore === true, 'micDefault: the default moved, 「改回」 offered');
   await acc.micDefault('win-m', 'restore');
   setFacts(winFacts({ cable: false })); await dm.streamMic({ force: true });
   const pl = await acc.installPlan('win-m', 'virtual-mic');
-  ok(pl.plan.ok && pl.plan.which === 'vbcable' && pl.digest && pl.mic && pl.mic.state.state === 'absent', 'the 「安装虚拟麦克风」 plan is planned from the agent\'s stream-mic facts (absent ⇒ VB-CABLE), with its digest');
+  ok(gateOf(pl.plan.ok) && pl.plan.which === 'vbcable' && gateOf(pl.digest) && gateOf(pl.mic) && pl.mic.state.state === 'absent', 'the 「安装虚拟麦克风」 plan is planned from the agent\'s stream-mic facts (absent ⇒ VB-CABLE), with its digest');
   const accNo = mk({ 'win-m': as('win32', { runStream: async (cmd, args, o) => { o.onData?.(Buffer.from('Windows granted no administrator rights - nothing was installed\n')); return { code: MD.MIC_NO_ADMIN_EXIT }; } }) });
   let na = null; try { await accNo.installPackage('win-m', { what: 'virtual-mic', expectDigest: pl.digest }); } catch (e) { na = e; }
-  ok(na && na.code === 'no_admin' && /Windows/.test(na.message) && na.plan && !accNo.installBusy('win-m'), 'nobody clicked Yes ⇒ no_admin by name, the plan handed back, the slot free', na && na.code);
+  ok(gateOf(na) && na.code === 'no_admin' && gateOf(/Windows/.test(na.message)) && gateOf(na.plan) && !accNo.installBusy('win-m'), 'nobody clicked Yes ⇒ no_admin by name, the plan handed back, the slot free', na && na.code);
   setFacts(macFacts()); await dm.streamMic({ force: true });
   setFacts({ ...macFacts(), devices: macFacts().devices.slice(0, 2) }); await dm.streamMic({ force: true });
   let envSeen = null;
   const accMac = mk({ 'mac-m': as('darwin', { runStream: async (cmd, args, o) => { envSeen = { cmd, args, env: o.env }; return { code: MD.MIC_NO_PASSWORD_EXIT }; } }) });
   const mpl = await accMac.installPlan('mac-m', 'virtual-mic', { lang: 'zh' });
-  ok(mpl.plan.ok && mpl.plan.which === 'blackhole' && /no plug-in|fake helper/.test(mpl.plan.fallbackWhy || ''), 'a Mac whose plug-in was not staged ⇒ BlackHole 2ch (the reason said)', mpl.plan.fallbackWhy);
+  ok(gateOf(mpl.plan.ok) && mpl.plan.which === 'blackhole' && verdictOf(/no plug-in|fake helper/.test(mpl.plan.fallbackWhy || '')), 'a Mac whose plug-in was not staged ⇒ BlackHole 2ch (the reason said)', mpl.plan.fallbackWhy);
   let np = null; try { await accMac.installPackage('mac-m', { what: 'virtual-mic', expectDigest: mpl.digest, planOpts: { lang: 'zh' } }); } catch (e) { np = e; }
-  ok(np && np.code === 'no_password' && envSeen && envSeen.cmd === '/bin/sh' && envSeen.env && envSeen.env.VS_MIC_WHAT === 'blackhole' && envSeen.env.VS_MIC_PROMPT === MD.MIC_PROMPTS.zh.blackhole && !JSON.stringify(envSeen.args).includes(envSeen.env.VS_MIC_PROMPT), 'the Mac\'s dialog withdrawn after its wait ⇒ no_password by name; every name rode the run\'s ENV (the prompt in the page\'s language), none its argv', np && np.code);
+  ok(gateOf(np) && np.code === 'no_password' && gateOf(envSeen) && envSeen.cmd === '/bin/sh' && gateOf(envSeen.env) && envSeen.env.VS_MIC_WHAT === 'blackhole' && envSeen.env.VS_MIC_PROMPT === MD.MIC_PROMPTS.zh.blackhole && !JSON.stringify(envSeen.args).includes(envSeen.env.VS_MIC_PROMPT), 'the Mac\'s dialog withdrawn after its wait ⇒ no_password by name; every name rode the run\'s ENV (the prompt in the page\'s language), none its argv', np && np.code);
   setFacts(winFacts({ cable: false })); await dm.streamMic({ force: true });
   const accOk = mk({ 'win-m': as('win32', { runStream: async () => { setFacts(winFacts({ cable: true })); return { code: 0 }; } }) }); // the install puts the cable there
   const okPl = await accOk.installPlan('win-m', 'virtual-mic');
   const done = await accOk.installPackage('win-m', { what: 'virtual-mic', expectDigest: okPl.digest });
-  ok(done.ok && done.after && done.after.state && done.after.state.state === 'installed', 'the install exits 0 ⇒ the machine\'s microphone facts are read again (installed — the route\'s done)', done.after && done.after.state);
+  ok(gateOf(done.ok) && gateOf(done.after) && gateOf(done.after.state) && done.after.state.state === 'installed', 'the install exits 0 ⇒ the machine\'s microphone facts are read again (installed — the route\'s done)', done.after && done.after.state);
 }
 
 dm.stop(); endDaemonsOf(rootOf(home));
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

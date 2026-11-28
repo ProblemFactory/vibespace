@@ -69,7 +69,7 @@ const chromeDir = scratch('mobile-back-chrome'); // its own registered scratch r
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const PREV = 'data:text/html,<title>prev</title><h1>the page before VibeSpace</h1>';
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (no rebuild: overlays the built public/) ──
@@ -310,55 +310,55 @@ try {
   await phone(); await boot();
   const env = await evalJs(`({ mobile: app.isMobile, touch: app.isTouch, state: history.state, osb: getComputedStyle(document.documentElement).overscrollBehaviorY, osbx: getComputedStyle(document.body).overscrollBehaviorX })`);
   const n0 = await nav();
-  check('A0 app.isMobile + isTouch; ONE sentinel ({vs:1}) above the page\'s entry; html/body overscroll-behavior none on a coarse pointer', env.mobile && env.touch && env.state?.vs === 1 && env.osb === 'none' && env.osbx === 'none', { env, n0 });
+  check('A0 app.isMobile + isTouch; ONE sentinel ({vs:1}) above the page\'s entry; html/body overscroll-behavior none on a coarse pointer', gateOf(env.mobile) && gateOf(env.touch) && env.state?.vs === 1 && env.osb === 'none' && env.osbx === 'none', { env, n0 });
   const tapped = await touchOnce();
   await tap('#mobile-nav-title'); await sleep(300);
   const swOpen = await evalJs(`!!document.querySelector('.mobile-win-switcher')`);
   await browserBack();
   let n = await nav();
-  check('A1 the window switcher open → the browser\'s back closes it; same URL, same history length, back on the sentinel', swOpen && !(await evalJs(`!!document.querySelector('.mobile-win-switcher')`)) && onApp(n) && n.len === n0.len && (await state()) === '{"vs":1}', { swOpen, n, n0, tapped });
+  check('A1 the window switcher open → the browser\'s back closes it; same URL, same history length, back on the sentinel', gateOf(swOpen) && !(await evalJs(`!!document.querySelector('.mobile-win-switcher')`)) && gateOf(onApp(n)) && n.len === n0.len && (await state()) === '{"vs":1}', { swOpen, n, n0, tapped });
   await longPress('#mobile-nav-new'); // the "+" long-press create sheet (a [data-popover] context menu)
   const sheetOpen = await evalJs(`!!document.querySelector('.mobile-sheet[data-popover]')`);
   const before = await evalJs('({ href: location.href, len: history.length })');
   await jsBack();
   const after = await evalJs('({ href: location.href, len: history.length, pop: !!document.querySelector("[data-popover]"), st: history.state })');
-  check('A2 the "+" sheet open → history.back() closes it; location.href and history.length unchanged', sheetOpen && !after.pop && after.href === before.href && after.len === before.len && after.st?.vs === 1, { sheetOpen, before, after });
+  check('A2 the "+" sheet open → history.back() closes it; location.href and history.length unchanged', gateOf(sheetOpen) && !after.pop && after.href === before.href && after.len === before.len && after.st?.vs === 1, { sheetOpen, before, after });
   await evalJs('app.showNewSessionDialog(); true'); await sleep(300);
   const dlgOpen = await evalJs(`!document.getElementById('dialog-overlay').classList.contains('hidden')`);
   await browserBack();
   n = await nav();
-  check('A3 the New Session dialog → one back hides it (app.hideDialogs), still on VibeSpace', dlgOpen && (await evalJs(`document.getElementById('dialog-overlay').classList.contains('hidden')`)) && onApp(n) && n.len === n0.len, { dlgOpen, n });
+  check('A3 the New Session dialog → one back hides it (app.hideDialogs), still on VibeSpace', gateOf(dlgOpen) && (gateOf(await evalJs(`document.getElementById('dialog-overlay').classList.contains('hidden')`))) && gateOf(onApp(n)) && n.len === n0.len, { dlgOpen, n });
   await tap('#mobile-nav-todos'); await sleep(400);
   const fyOpen = await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`);
   await browserBack();
   n = await nav();
-  check('A4 the For-you tray → one back closes it (through its own hidePopup), still on VibeSpace', fyOpen && (await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)) && onApp(n) && n.len === n0.len, { fyOpen, n });
+  check('A4 the For-you tray → one back closes it (through its own hidePopup), still on VibeSpace', gateOf(fyOpen) && (gateOf(await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`))) && gateOf(onApp(n)) && n.len === n0.len, { fyOpen, n });
   await evalJs('app.openFileExplorer(); true'); await sleep(900);
   const win = await evalJs('({ n: app.wm.windows.size, sb: app.sidebar.isOpen })');
   await browserBack();
   const win2 = await evalJs('({ n: app.wm.windows.size, sb: app.sidebar.isOpen })');
   n = await nav();
-  check('A5 a window on show → one back yields it to the sidebar (home); the window is NOT closed', win.n >= 1 && !win.sb && win2.sb && win2.n === win.n && onApp(n) && n.len === n0.len, { win, win2, n });
+  check('A5 a window on show → one back yields it to the sidebar (home); the window is NOT closed', win.n >= 1 && !win.sb && gateOf(win2.sb) && win2.n === win.n && gateOf(onApp(n)) && n.len === n0.len, { win, win2, n });
   await tap('.sidebar-tab[data-tab="tasks"]'); await sleep(500);
   await waitFor(`[...document.querySelectorAll('#sidebar .mobile-folder-card')].some((c) => c.textContent.includes('Back guard group'))`, 8000);
   await evalJs(`[...document.querySelectorAll('#sidebar .mobile-folder-card')].find((c) => c.textContent.includes('Back guard group')).click(); true`); await sleep(400);
   const dd = await evalJs(`({ back: !!document.querySelector('#sidebar .mobile-folder-back'), dd: !!app.sidebar._mobileDrilldown })`);
   await browserBack();
   const dd2 = await evalJs(`({ back: !!document.querySelector('#sidebar .mobile-folder-back'), dd: !!app.sidebar._mobileDrilldown, sb: app.sidebar.isOpen })`);
-  check('A6 the Task Groups drill-down → one back returns to the list (its ‹ row), the sidebar stays open', dd.back && dd.dd && !dd2.back && !dd2.dd && dd2.sb, { dd, dd2 });
+  check('A6 the Task Groups drill-down → one back returns to the list (its ‹ row), the sidebar stays open', gateOf(dd.back) && gateOf(dd.dd) && !dd2.back && !dd2.dd && verdictOf(dd2.sb), { dd, dd2 });
   await browserBack(300);
   const t1 = await toasts(); const st1 = await state(); n = await nav();
   const hist = await evalJs(`(JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]')[0]) || null`);
-  check('A7 at home → the toast "Press back again to exit"; VibeSpace stays (on its own entry for the window)', t1.includes('Press back again to exit') && onApp(n) && st1 === 'null', { t1, st1, n });
+  check('A7 at home → the toast "Press back again to exit"; VibeSpace stays (on its own entry for the window)', gateOf(t1.includes('Press back again to exit')) && gateOf(onApp(n)) && st1 === 'null', { t1, st1, n });
   check('A7b the toast is the person\'s own act — recorded seen, never an unread notification', hist?.m === 'Press back again to exit' && hist?.seen === true, hist);
   await sleep(2400);
   const st2 = await state(); n = await nav();
-  check('A8 after 2 s the page stands on the sentinel again (no new entry)', st2 === '{"vs":1}' && n.len === n0.len && onApp(n), { st2, n, n0 });
+  check('A8 after 2 s the page stands on the sentinel again (no new entry)', st2 === '{"vs":1}' && n.len === n0.len && verdictOf(onApp(n)), { st2, n, n0 });
   await browserBack(300);
   const t2 = await toasts();
   await browserBack(900);
   n = await nav();
-  check('A9 the next back re-arms (the toast again); a second back 0.3 s later leaves to the previous page', t2.includes('Press back again to exit') && n.url.startsWith('data:'), { t2, n });
+  check('A9 the next back re-arms (the toast again); a second back 0.3 s later leaves to the previous page', gateOf(t2.includes('Press back again to exit')) && verdictOf(n.url.startsWith('data:')), { t2, n });
 
   // ── B: an untouched page; a reload on the sentinel ──
   console.log('B  an untouched page; a reload standing on the sentinel');
@@ -370,7 +370,7 @@ try {
   // Chrome MAY skip an entry a page pushed before any tap (its back-button intervention — measured both ways on cold
   // pages; the app's boot push was kept 4 of 4) — either way the person is never stranded:
   console.log(`  · untouched page, one browser back: ${n.url.startsWith('data:') ? 'left to the previous page (Chrome skipped the entry)' : 'stayed — one layer closed, back on the sentinel'}`);
-  check('B1 never touched: one browser back either leaves (Chrome\'s skip) or closes one layer and stands on the sentinel — never stranded', bs === '{"vs":1}' && (n.url.startsWith('data:') || stood), { bs, n });
+  check('B1 never touched: one browser back either leaves (Chrome\'s skip) or closes one layer and stands on the sentinel — never stranded', bs === '{"vs":1}' && (verdictOf(n.url.startsWith('data:')) || verdictOf(stood)), { bs, n });
   await boot(); await touchOnce();
   const nb = await nav();
   await afterNavigation(cdp, () => cdp('Page.reload'), { bootMs: 20000, what: 'after Page.reload' }); await sleep(1500);
@@ -380,13 +380,13 @@ try {
   const pop2 = await evalJs(`!!document.querySelector('[data-popover]')`);
   await browserBack();
   n = await nav();
-  check('B3 after the reload a back still closes the open sheet and stays (the entry below stayed same-document)', pop2 && !(await evalJs(`!!document.querySelector('[data-popover]')`)) && onApp(n) && n.len === nb.len, { pop2, n });
+  check('B3 after the reload a back still closes the open sheet and stays (the entry below stayed same-document)', gateOf(pop2) && !(await evalJs(`!!document.querySelector('[data-popover]')`)) && gateOf(onApp(n)) && n.len === nb.len, { pop2, n });
   await longPress('#mobile-nav-new');
   await evalJs("location.hash = 'install'; true"); await sleep(400); // a same-document #fragment navigation (a link in rendered markdown)
   const f1 = await evalJs(`({ pop: !!document.querySelector('[data-popover]'), st: history.state, hash: location.hash, sb: app.sidebar.isOpen })`);
   await browserBack();
   const f2 = await evalJs(`({ pop: !!document.querySelector('[data-popover]'), st: history.state, hash: location.hash })`); n = await nav();
-  check('B4 a #fragment navigation is no back: the sheet stays open, a sentinel stands above it; the next back closes the sheet and stays', f1.pop && f1.st?.vs === 1 && f1.hash === '#install' && !f2.pop && f2.st?.vs === 1 && onApp(n), { f1, f2, n });
+  check('B4 a #fragment navigation is no back: the sheet stays open, a sentinel stands above it; the next back closes the sheet and stays', gateOf(f1.pop) && f1.st?.vs === 1 && f1.hash === '#install' && !f2.pop && f2.st?.vs === 1 && verdictOf(onApp(n)), { f1, f2, n });
 
   // ── C: a `?` deep link, in zh ──
   console.log('C  a deep link (?…) in zh');
@@ -396,10 +396,10 @@ try {
   const c0 = await evalJs('({ n: app.wm.windows.size, sb: app.sidebar.isOpen })');
   await browserBack(300);
   const c1 = await evalJs('({ n: app.wm.windows.size, sb: app.sidebar.isOpen })'); const tz = await toasts();
-  check('C1 the first back after a `?` link closes no window: it arms — 再返回一次退出', c0.n >= 1 && !c0.sb && !c1.sb && c1.n === c0.n && tz.includes('再返回一次退出'), { c0, c1, tz });
+  check('C1 the first back after a `?` link closes no window: it arms — 再返回一次退出', c0.n >= 1 && !c0.sb && !c1.sb && c1.n === c0.n && verdictOf(tz.includes('再返回一次退出')), { c0, c1, tz });
   await sleep(2400); await browserBack();
   const c2 = await evalJs('({ n: app.wm.windows.size, sb: app.sidebar.isOpen })');
-  check('C2 then the same rule: the next back (after the window) yields the window to the sidebar', c2.sb && c2.n === c0.n, c2);
+  check('C2 then the same rule: the next back (after the window) yields the window to the sidebar', gateOf(c2.sb) && c2.n === c0.n, c2);
   await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: zh.identifier });
   await evalJs("localStorage.removeItem('vibespace.lang'); true");
 
@@ -412,25 +412,25 @@ try {
   const F_pageOn = () => evalJs(`!document.getElementById('phone-home').classList.contains('hidden')`);
   const F_exitToasts = async () => (await toasts()).filter((x) => x.includes('Press back again to exit')).length;
   const F_f0 = await evalJs(`({ page: !document.getElementById('phone-home').classList.contains('hidden'), rows: document.querySelectorAll('#phone-home .ut-item').length, sb: app.sidebar.isOpen, state: history.state })`);
-  check('F0 asks open: the boot lands on the attention page (home) — 3 rows, the sidebar shut, ONE sentinel above the page\'s entry', F_f0.page && F_f0.rows === 3 && !F_f0.sb && F_f0.state?.vs === 1, { ...F_f0, F_at, F_act });
+  check('F0 asks open: the boot lands on the attention page (home) — 3 rows, the sidebar shut, ONE sentinel above the page\'s entry', gateOf(F_f0.page) && F_f0.rows === 3 && !F_f0.sb && F_f0.state?.vs === 1, { ...F_f0, F_at, F_act });
   await browserBack(300);
   const F_fa = await toasts(); let F_fn = await nav();
-  check('F1 at home on the page: one back arms the exit toast; the page stays, VibeSpace stays', F_fa.includes('Press back again to exit') && (await F_pageOn()) && onApp(F_fn), { F_fa, F_fn });
+  check('F1 at home on the page: one back arms the exit toast; the page stays, VibeSpace stays', gateOf(F_fa.includes('Press back again to exit')) && (gateOf(await F_pageOn())) && verdictOf(onApp(F_fn)), { F_fa, F_fn });
   await sleep(2400);
   await tap('#mobile-nav-menu'); await sleep(300);
   const F_sbOpen = await evalJs('app.sidebar.isOpen'); const F_tb = await F_exitToasts();
   await browserBack();
   const F_f2 = await evalJs(`({ sb: app.sidebar.isOpen, page: !document.getElementById('phone-home').classList.contains('hidden') })`); F_fn = await nav();
-  check('F2 ☰ over the page, then one back: the sidebar closes — back on the page, no exit toast', F_sbOpen && !F_f2.sb && F_f2.page && (await F_exitToasts()) === F_tb && onApp(F_fn), { F_sbOpen, F_f2, F_tb, F_fn });
+  check('F2 ☰ over the page, then one back: the sidebar closes — back on the page, no exit toast', gateOf(F_sbOpen) && !F_f2.sb && gateOf(F_f2.page) && (await F_exitToasts()) === F_tb && verdictOf(onApp(F_fn)), { F_sbOpen, F_f2, F_tb, F_fn });
   await evalJs('app.openFileExplorer(); true'); await sleep(900);
   const F_f3a = await evalJs(`({ n: app.wm.windows.size, page: !document.getElementById('phone-home').classList.contains('hidden'), sb: app.sidebar.isOpen })`);
   await browserBack();
   const F_f3b = await evalJs(`({ n: app.wm.windows.size, page: !document.getElementById('phone-home').classList.contains('hidden'), sb: app.sidebar.isOpen })`); F_fn = await nav();
-  check('F3 a window opened over the page hides it (the central yield); one back returns to the PAGE — the window kept, the sidebar shut', F_f3a.n >= 1 && !F_f3a.page && F_f3b.page && !F_f3b.sb && F_f3b.n === F_f3a.n && onApp(F_fn), { F_f3a, F_f3b, F_fn });
+  check('F3 a window opened over the page hides it (the central yield); one back returns to the PAGE — the window kept, the sidebar shut', F_f3a.n >= 1 && !F_f3a.page && gateOf(F_f3b.page) && !F_f3b.sb && F_f3b.n === F_f3a.n && verdictOf(onApp(F_fn)), { F_f3a, F_f3b, F_fn });
   await tap('#mobile-nav-todos'); await sleep(400);
   const F_fy = await evalJs(`({ page: !document.getElementById('phone-home').classList.contains('hidden'), sheet: !document.getElementById('user-todos-popup').classList.contains('hidden'), type: app.wm.windows.get(app.wm.activeWindowId)?.type || null })`);
   await browserBack();
-  check('F4 the badge on the page TOGGLES it (lane foryou-honest: one surface — never the sheet over the page): the page steps aside for the window it covered; one back returns to the page', !F_fy.page && !F_fy.sheet && F_fy.type === 'files' && (await F_pageOn()) && (await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)) && onApp(await nav()), { F_fy });
+  check('F4 the badge on the page TOGGLES it (lane foryou-honest: one surface — never the sheet over the page): the page steps aside for the window it covered; one back returns to the page', !F_fy.page && !F_fy.sheet && F_fy.type === 'files' && (gateOf(await F_pageOn())) && (gateOf(await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`))) && verdictOf(onApp(await nav())), { F_fy });
 
   // ── D: the Mobile setting off ──
   console.log('D  the Mobile setting off');
@@ -439,7 +439,7 @@ try {
   await longPress('#mobile-nav-new');
   await browserBack(1000);
   n = await nav();
-  check('D1 setting off: one browser back leaves VibeSpace at once (a sheet open or not)', n.url.startsWith('data:'), n);
+  check('D1 setting off: one browser back leaves VibeSpace at once (a sheet open or not)', verdictOf(n.url.startsWith('data:')), n);
   await boot(); await evalJs("app.settings.set('mobile.backGuard', undefined); true"); await sleep(1500); // the settings save is debounced 500 ms: navigating sooner lost the restore and left the guard off for every later phone leg (G)
 
   // ── E: a desktop ──
@@ -449,7 +449,7 @@ try {
   const ne = await nav();
   await browserBack(900);
   const ne2 = await nav();
-  check('E1 a desktop pushes no sentinel, keeps overscroll-behavior auto, and one back leaves', e0.mobile === false && e0.state === null && e0.osb === 'auto' && ne2.url.startsWith('data:') && ne2.index === ne.index - 1, { e0, ne, ne2 });
+  check('E1 a desktop pushes no sentinel, keeps overscroll-behavior auto, and one back leaves', e0.mobile === false && e0.state === null && e0.osb === 'auto' && gateOf(ne2.url.startsWith('data:')) && ne2.index === ne.index - 1, { e0, ne, ne2 });
 
   // ── G: a back never costs a load (lane phone-back-reload) ──
   console.log('G  a back never costs a load — 382×580, back/forward cache off; each road on the PRE-FIX wiring (RED) then the shipped one');
@@ -460,7 +460,7 @@ try {
   await restartWith([]); // F's asks off the server: home is the conversation list again, as the roads below assume
   await phone(...DIMS); await boot();
   const guardOn = await evalJs(`app.settings.get('mobile.backGuard') !== false && !app.phoneHome?.hasRows?.()`);
-  check('G0b the Mobile back guard is ON for G (D\'s restore landed on the server) and home is the conversation list (no asks open)', guardOn);
+  check('G0b the Mobile back guard is ON for G (D\'s restore landed on the server) and home is the conversation list (no asks open)', verdictOf(guardOn));
   const useBundle = (buf) => fs.writeFileSync(bundleFile, buf); // the index route stamps ?v=<mtime> per request: the next load runs it
   const roads = async (tag) => {
     const R = {};
@@ -518,12 +518,12 @@ try {
   // pre-fix back must stay same-document with no cost row and no incident (and the shipped wiring is judged below either way)
   const keptDoc = !!RED && /\bdiscarded\b/.test(RED.discard.disc.row || '') && !/\bunloaded\b/.test(RED.discard.disc.row || '') && /\bloaded\b/.test(RED.discard.disc.row || '');
   if (RED) console.log(`  · G1 RED's discard on this Chrome: ${keptDoc ? 'it KEEPS the document (row «loaded» — Chrome 156+): the pre-fix back has no dead entry to load' : 'it UNLOADS the document (row «unloaded»): the pre-fix back loads the dead entry'}`);
-  check('G1 RED (the pre-fix wiring): a discarded tab shown again — where Chrome\'s discard unloads the document, its FIRST back (a window on show) LOADS the page (the owner\'s splash) and the diary\'s cost row + ONE automatic incident in the back\'s own words say so; where it keeps the document, the back stays same-document, no cost row, no incident', !!RED && RED.discard.disc.discarded && RED.discard.disc.loaded && (keptDoc ? !RED.discard.back.loaded && RED.discard.back.onApp && RED.discard.cost === 0 && RED.discard.incidents === 0 : RED.discard.back.loaded && RED.discard.cost >= 1 && RED.discard.incidents === 1 && RED.discard.said >= 1), RED?.discard);
-  check('G1 the shipped wiring: the discarded tab\'s boot REBUILDS (diary: back_forward, rebuild, disc 1) and its first back closes the window — same document, back on the sentinel, no incident', GREEN.discard.disc.discarded && GREEN.discard.disc.loaded && GREEN.discard.boot?.type === 'back_forward' && GREEN.discard.boot?.step === 'rebuild' && GREEN.discard.boot?.disc === 1 && !GREEN.discard.back.loaded && GREEN.discard.back.onApp && GREEN.discard.after.st?.vs === 1 && GREEN.discard.after.sb && GREEN.discard.incidents === 0, GREEN.discard);
-  check('G2 RED: a renderer killed + reloaded (diary: reload, push, state null) — the 「再返回一次退出」 exit LOADS the older VibeSpace entry', !!RED && RED.crash.boot?.type === 'reload' && RED.crash.boot?.st === 'null' && RED.crash.armed && RED.crash.exit.loaded && RED.crash.exit.onApp, RED?.crash);
-  check('G2 the shipped wiring: the window back stays same-document; the exit lands on the page before VibeSpace — no VibeSpace load', GREEN.crash.boot?.st === 'null' && !GREEN.crash.window.loaded && GREEN.crash.window.onApp && GREEN.crash.armed && !GREEN.crash.exit.onApp && GREEN.crash.exit.url.startsWith('data:'), GREEN.crash);
-  check('G3 RED: a second load of the app in the tab (a `?` link over an older document) — the exit LOADS the older document', !!RED && RED.second.armed && RED.second.exit.loaded && RED.second.exit.onApp, RED?.second);
-  check('G3 the shipped wiring: the exit skips every older entry in ONE traversal onto the page before VibeSpace', GREEN.second.armed && !GREEN.second.exit.onApp && GREEN.second.exit.url.startsWith('data:'), GREEN.second);
+  check('G1 RED (the pre-fix wiring): a discarded tab shown again — where Chrome\'s discard unloads the document, its FIRST back (a window on show) LOADS the page (the owner\'s splash) and the diary\'s cost row + ONE automatic incident in the back\'s own words say so; where it keeps the document, the back stays same-document, no cost row, no incident', !!RED && gateOf(RED.discard.disc.discarded) && gateOf(RED.discard.disc.loaded) && (keptDoc ? !RED.discard.back.loaded && gateOf(RED.discard.back.onApp) && RED.discard.cost === 0 && RED.discard.incidents === 0 : gateOf(RED.discard.back.loaded) && RED.discard.cost >= 1 && RED.discard.incidents === 1 && RED.discard.said >= 1), RED?.discard);
+  check('G1 the shipped wiring: the discarded tab\'s boot REBUILDS (diary: back_forward, rebuild, disc 1) and its first back closes the window — same document, back on the sentinel, no incident', gateOf(GREEN.discard.disc.discarded) && gateOf(GREEN.discard.disc.loaded) && GREEN.discard.boot?.type === 'back_forward' && GREEN.discard.boot?.step === 'rebuild' && GREEN.discard.boot?.disc === 1 && !GREEN.discard.back.loaded && gateOf(GREEN.discard.back.onApp) && GREEN.discard.after.st?.vs === 1 && gateOf(GREEN.discard.after.sb) && GREEN.discard.incidents === 0, GREEN.discard);
+  check('G2 RED: a renderer killed + reloaded (diary: reload, push, state null) — the 「再返回一次退出」 exit LOADS the older VibeSpace entry', !!RED && RED.crash.boot?.type === 'reload' && RED.crash.boot?.st === 'null' && gateOf(RED.crash.armed) && gateOf(RED.crash.exit.loaded) && verdictOf(RED.crash.exit.onApp), RED?.crash);
+  check('G2 the shipped wiring: the window back stays same-document; the exit lands on the page before VibeSpace — no VibeSpace load', GREEN.crash.boot?.st === 'null' && !GREEN.crash.window.loaded && gateOf(GREEN.crash.window.onApp) && gateOf(GREEN.crash.armed) && !GREEN.crash.exit.onApp && verdictOf(GREEN.crash.exit.url.startsWith('data:')), GREEN.crash);
+  check('G3 RED: a second load of the app in the tab (a `?` link over an older document) — the exit LOADS the older document', !!RED && gateOf(RED.second.armed) && gateOf(RED.second.exit.loaded) && verdictOf(RED.second.exit.onApp), RED?.second);
+  check('G3 the shipped wiring: the exit skips every older entry in ONE traversal onto the page before VibeSpace', gateOf(GREEN.second.armed) && !GREEN.second.exit.onApp && verdictOf(GREEN.second.exit.url.startsWith('data:')), GREEN.second);
   { // ACCEPTANCE ROUND 2 — each road on round 1's wiring (RED) then the shipped one
     const round1 = await buildRound1Bundle();
     check('G7·G8 round 1\'s wiring rebuilds from the tree\'s own mobile-back.js (its two anchors found)', !!round1);
@@ -559,10 +559,10 @@ try {
     const G7 = await iframeRoad(), G8 = await forwardRoad();
     console.log('  · round 1 ' + JSON.stringify({ R7, R8 }).slice(0, 700));
     console.log('  · shipped ' + JSON.stringify({ G7, G8 }).slice(0, 700));
-    check('G7 RED (round 1): one iframe link inside the older document — the exit\'s go() LANDS on that document, which boots and stays (a load: the owner\'s symptom)', !!R7 && R7.step === 1 && R7.armed && R7.exit.onApp && R7.loads === 1, R7);
-    check('G7 the shipped wiring: the exit ends on the page before VibeSpace — ONE extra load, the older document never boots the app (its diary row: hop 1, then gone)', G7.step === 1 && G7.armed && !G7.exit.onApp && G7.exit.url.startsWith('data:') && G7.loads === 1 && G7.hops.length === 1 && G7.hops[0].n === 1 && !G7.booted, G7);
-    check('G8 RED (round 1): the stay arm\'s exit, then a FORWARD press inside 5 s — «a back press cost a page load» is filed (the diary\'s cost row)', !!R8 && R8.left && R8.back && R8.cost === 1, R8);
-    check('G8 the shipped wiring: the same forward press files nothing — the boot row says came other (from another site\'s page)', G8.left && G8.back && G8.cost === 0 && G8.incidents === 0 && G8.boot?.came === 'other', G8);
+    check('G7 RED (round 1): one iframe link inside the older document — the exit\'s go() LANDS on that document, which boots and stays (a load: the owner\'s symptom)', !!R7 && R7.step === 1 && gateOf(R7.armed) && gateOf(R7.exit.onApp) && R7.loads === 1, R7);
+    check('G7 the shipped wiring: the exit ends on the page before VibeSpace — ONE extra load, the older document never boots the app (its diary row: hop 1, then gone)', G7.step === 1 && gateOf(G7.armed) && !G7.exit.onApp && gateOf(G7.exit.url.startsWith('data:')) && G7.loads === 1 && G7.hops.length === 1 && G7.hops[0].n === 1 && !G7.booted, G7);
+    check('G8 RED (round 1): the stay arm\'s exit, then a FORWARD press inside 5 s — «a back press cost a page load» is filed (the diary\'s cost row)', !!R8 && gateOf(R8.left) && gateOf(R8.back) && R8.cost === 1, R8);
+    check('G8 the shipped wiring: the same forward press files nothing — the boot row says came other (from another site\'s page)', gateOf(G8.left) && gateOf(G8.back) && G8.cost === 0 && G8.incidents === 0 && G8.boot?.came === 'other', G8);
   }
   { // the reload roads + a cross-site previous entry (shipped wiring): location.reload() (the stale-tab path) then two browser reloads
     await cdp('Page.navigate', { url: OTHER }); await sleep(500); await loadPage(cdp, ORIGIN + '/', { bootMs: 25000 }); await afterBoot(); await touch382();
@@ -572,7 +572,7 @@ try {
     await evalJs('if (app.sidebar.isOpen) app.sidebar.toggle(false); app.openFileExplorer(); true'); await sleep(900);
     const r1 = await backAndSee(); await atHome(); const r2 = await backAndSee(300); const r3 = await backAndSee(1500);
     const go1 = (await diary().catch(() => [])).filter((r) => r.k === 'go1');
-    check('G4 a cross-site previous entry, location.reload() + two browser reloads (diary: reload/keep ×3): the window back stays same-document, the exit lands on the OTHER site — never a VibeSpace load', boots.length === 3 && boots.every((b) => b.type === 'reload' && b.step === 'keep') && !r1.loaded && r1.onApp && r2.onApp && !r2.loaded && r3.url.startsWith(OTHER.slice(0, 20)), { boots, r1, r2, r3 });
+    check('G4 a cross-site previous entry, location.reload() + two browser reloads (diary: reload/keep ×3): the window back stays same-document, the exit lands on the OTHER site — never a VibeSpace load', boots.length === 3 && gateOf(boots.every((b) => b.type === 'reload' && b.step === 'keep')) && !r1.loaded && gateOf(r1.onApp) && gateOf(r2.onApp) && !r2.loaded && verdictOf(r3.url.startsWith(OTHER.slice(0, 20))), { boots, r1, r2, r3 });
     void go1;
   }
   { // the re-arm lands (go1 rows with their ms); the DROPPED go(1) mutant (hypothesis 2) — RED control: the diary says landed 0 + the push
@@ -585,7 +585,7 @@ try {
     const mutRows = (await diary()).filter((r) => r.k === 'go1').slice(-1);
     await evalJs("sessionStorage.removeItem('vs-test-drop-go1'); true");
     const landed = (rows) => rows.length === 1 && rows[0].ms >= 0 && rows[0].ms < 500;
-    check('G5 the re-arm go(1) lands — the diary\'s go1 row carries its ms (< 500, never the belt)', landed(okRows), okRows);
+    check('G5 the re-arm go(1) lands — the diary\'s go1 row carries its ms (< 500, never the belt)', verdictOf(landed(okRows)), okRows);
     check('G5 CONTROL: a DROPPED go(1) is red on that judge — the diary says landed 0 + the 500 ms push', !landed(mutRows) && mutRows[0]?.landed === 0 && mutRows[0]?.push === 1, mutRows);
   }
   { // the whole tab VibeSpace's (a tab opened straight onto it, then a `?` link): the exit's ONE named load, no incident for it
@@ -600,7 +600,7 @@ try {
     await sleep(1200);
     const rows = await diary();
     const leave = rows.filter((r) => r.k === 'leave').at(-1), next = rows.find((r) => r.k === 'boot' && r.t > (leave?.t || 0));
-    check('G6 the whole tab VibeSpace\'s: the exit goes to the tab\'s first entry (the next boot stands on it: entries *…) — ONE load, named in the diary (leave load 1) — and files NO incident', w2.loaded && w2.onApp && leave?.load === 1 && leave?.skip === 2 && next?.type === 'back_forward' && /^\*/.test(next?.ents || '') && !rows.some((r) => r.k === 'cost' && r.t > (leave?.t || 0)) && (await incidents()).length === i0, { w2, leave, tail: rows.slice(-3) });
+    check('G6 the whole tab VibeSpace\'s: the exit goes to the tab\'s first entry (the next boot stands on it: entries *…) — ONE load, named in the diary (leave load 1) — and files NO incident', gateOf(w2.loaded) && gateOf(w2.onApp) && leave?.load === 1 && leave?.skip === 2 && next?.type === 'back_forward' && gateOf(/^\*/.test(next?.ents || '')) && !rows.some((r) => r.k === 'cost' && r.t > (leave?.t || 0)) && (await incidents()).length === i0, { w2, leave, tail: rows.slice(-3) });
     await B.call('Target.activateTarget', { targetId: home }); await B.call('Target.closeTarget', { targetId: t3.targetId }); B.close();
     await attachTo(home); await sleep(500);
   }
@@ -627,7 +627,7 @@ try {
     const stale = rows.filter((r) => r.k === 'stale').map((r) => r.d2).join();
     const bootTypes = rows.filter((r) => r.k === 'boot').map((r) => r.type).join();
     const notes = (await evalJs(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').map((x) => x.m)`)).filter((m) => /still runs VibeSpace/.test(m));
-    check('H1 a bundle that never matches the server: ONE reload, ONE notice («still runs VibeSpace …»), then quiet across two reconnects — the diary\'s stale rows say reload, notice (a prefilled box nobody typed in never holds it)', await evalJs(`!!document.querySelector('textarea.task-detail-objective')`) && stale === 'reload,notice' && bootTypes.split(',').filter((x) => x === 'reload').length === 1 && notes.length === 1, { stale, bootTypes, notes });
+    check('H1 a bundle that never matches the server: ONE reload, ONE notice («still runs VibeSpace …»), then quiet across two reconnects — the diary\'s stale rows say reload, notice (a prefilled box nobody typed in never holds it)', gateOf(await evalJs(`!!document.querySelector('textarea.task-detail-objective')`)) && stale === 'reload,notice' && bootTypes.split(',').filter((x) => x === 'reload').length === 1 && notes.length === 1, { stale, bootTypes, notes });
     // round 2: two reconnects 300 ms apart — both inside the reload's 800 ms — on a tab with no stamps yet
     await evalJs(`Object.keys(sessionStorage).filter((k) => /^vibespace\\.(reloaded-for|stale-said)\\./.test(k)).forEach((k) => sessionStorage.removeItem(k)); true`);
     const t2 = Date.now();
@@ -650,12 +650,12 @@ try {
     const rows3 = (await diary()).filter((r) => r.t >= t3 && (r.k === 'stale' || r.k === 'boot'));
     const held3 = await evalJs(`(() => { const n = document.querySelector('.global-toast-pinned'); return { why: (n && n.dataset.why) || null, pinned: document.querySelectorAll('.global-toast-pinned').length, text: (document.querySelector('textarea.task-detail-objective') || {}).value || '' }; })()`);
     check('H3 words the person TYPED (CDP Input.insertText into the prefilled box, the box then left) HOLD the reload: the diary says hold (unsaved), ONE pinned notice, no reload',
-      rows3.filter((r) => r.k === 'stale').map((r) => `${r.d2}:${r.why || ''}`).join() === 'hold:unsaved' && !rows3.some((r) => r.k === 'boot') && held3.pinned === 1 && held3.why === 'unsaved' && /one rule more$/.test(held3.text), { rows3, held3 });
+      rows3.filter((r) => r.k === 'stale').map((r) => `${r.d2}:${r.why || ''}`).join() === 'hold:unsaved' && !rows3.some((r) => r.k === 'boot') && held3.pinned === 1 && held3.why === 'unsaved' && verdictOf(/one rule more$/.test(held3.text)), { rows3, held3 });
     const t4 = Date.now();
     await evalJs(`(() => { document.querySelector('textarea.task-detail-objective').value = ''; app._checkBundleFreshness(); return true; })()`);
     await sleep(9000); await settle();
     const rows4 = (await diary()).filter((r) => r.t >= t4 && (r.k === 'stale' || r.k === 'boot'));
-    check('H3b the typed box EMPTIED: the next look reloads (the hold was the words, never the box)', rows4.some((r) => r.k === 'stale' && r.d2 === 'reload') && rows4.some((r) => r.k === 'boot' && r.type === 'reload'), { rows4 });
+    check('H3b the typed box EMPTIED: the next look reloads (the hold was the words, never the box)', gateOf(rows4.some((r) => r.k === 'stale' && r.d2 === 'reload')) && verdictOf(rows4.some((r) => r.k === 'boot' && r.type === 'reload')), { rows4 });
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: savedBox });
     fs.writeFileSync(pj, pjSrc);
   }
@@ -669,4 +669,4 @@ try { sock.close(); } catch { }
 if (chrome.exitCode === null) { const gone = new Promise((r) => chrome.once('exit', r)); chrome.kill('SIGKILL'); await Promise.race([gone, sleep(3000)]); }
 try { endRootedProcesses(chromeDir); } catch { }
 await sleep(300);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

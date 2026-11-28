@@ -14,7 +14,7 @@ const MODEL = 'src/channel-authors.js';
 const SRC = fs.readFileSync(path.join(REPO, MODEL), 'utf8');
 const A = require(path.join(REPO, MODEL));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } return !!c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } return !!c; };
 const usern = { id: 'ou_usern', name: 'userN', alt: { nickname: 'Ada', department: 'Marketing', jobTitle: 'GTM lead', enName: 'userN' } };
 
 function legRules(M, tag = '') {
@@ -28,7 +28,7 @@ function legRules(M, tag = '') {
   const same = M.authorView({ id: 'ou_s', name: 'S' }, { selfTenant: 'tn_own', tenant: 'tn_own' });
   const unk = M.authorView({ id: 'ou_u', name: 'U' }, { selfTenant: null, tenant: 'tn_other' });
   const bot = M.authorView({ id: 'cli_b', name: 'Bot b', isBot: true }, { selfTenant: 'tn_own', tenant: 'tn_other' });
-  r.n4 = ok(ex.external === true && !same.external && !unk.external && !bot.external && M.authorView({ id: 'x', name: 'x', external: true }, {}).external === true && M.titleFacts(ex).external, `${tag}N4 external = the sender's organization is not the account's (both known); unknown ⇒ never guessed; a bot is not a person of an organization`, [ex.external, same.external, unk.external]);
+  r.n4 = ok(ex.external === true && !same.external && !unk.external && !bot.external && M.authorView({ id: 'x', name: 'x', external: true }, {}).external === true && verdictOf(M.titleFacts(ex).external), `${tag}N4 external = the sender's organization is not the account's (both known); unknown ⇒ never guessed; a bot is not a person of an organization`, [ex.external, same.external, unk.external]);
   const big = M.authorView({ id: 'i'.repeat(9999), name: 'n'.repeat(9999), alt: { nickname: '<b>' + 'k'.repeat(9999), department: 'd'.repeat(9999) } }, { alias: 'a'.repeat(9999), field: 'department' });
   r.n5 = ok(big.alias.length <= M.ALIAS_MAX && big.display.length <= M.DISPLAY_MAX && big.alt.nickname.length <= 200 && M.cleanAlias('  x‮​ ') === 'x' && M.cleanAlias(null) === '' && M.cleanAlias('​') === '' && M.cleanAlias('\u200c\u200d') === '' && M.authorView({ id: 'ou_j', name: '\u200c', alt: { nickname: '\u200d\u200c' } }, {}).display === 'ou_j' && M.authorView({ id: 'ou_p', name: 'می\u200cخواهم' }, {}).display === 'می\u200cخواهم', `${tag}N5 bounded through the name door: an alias ≤ ${M.ALIAS_MAX}, a display ≤ ${M.DISPLAY_MAX}, every alternative ≤ 200; invisible / bidi characters dropped; nothing visible ⇒ no name (verify r2 ⑥: a name of JOINERS alone is no name — the head falls to the id — while a word that needs its ZWNJ keeps it)`, { a: big.alias.length, d: big.display.length });
   r.alt = ok(JSON.stringify(M.cleanAlt({ nickname: '', enName: 'E', junk: 'x' })) === JSON.stringify({ enName: 'E' }) && M.cleanAlt({}) === null && M.cleanAlt('x') === null && JSON.stringify(M.NAME_FIELDS) === JSON.stringify(['none', 'department', 'jobTitle']), `${tag}the alternatives: only the declared keys, only non-empty; the closed set of fields`);
@@ -53,10 +53,10 @@ const quiet = (fn) => { const P = pass, F = fail; const saved = console.log, sav
 console.log('③ verify r3 (T2 ④): a vendor id is never a name — the avatar of an id-only author');
 {
   const win = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf8');
-  ok(/avatar\(\{ name: a\.display \|\| a\.name \|\| '', key: authorKey\(rec\), self: !!a\.isSelf(?:, pic)? \}, null, 'chanmsg-av'\)/.test(win) && !/avatar\(\{ name: [^}]*\|\| a\.id\b/.test(win), 'WIRING: the window\'s avatar is drawn from the display / vendor name only — never from `a.id` (an `ou_…` id drew the initial "O", a `cli_…` id "C", as if they were names; the id stays the head\'s text)');
+  ok(gateOf(/avatar\(\{ name: a\.display \|\| a\.name \|\| '', key: authorKey\(rec\), self: !!a\.isSelf(?:, pic)? \}, null, 'chanmsg-av'\)/.test(win)) && !/avatar\(\{ name: [^}]*\|\| a\.id\b/.test(win), 'WIRING: the window\'s avatar is drawn from the display / vendor name only — never from `a.id` (an `ou_…` id drew the initial "O", a `cli_…` id "C", as if they were names; the id stays the head\'s text)');
   const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
   ok(AV.initialsOf('ou_ff8c53730c347e160493771728962528') === 'O' && AV.initialsOf('cli_a5ed0d009') === 'C' && AV.initialsOf('') === '?' && AV.avatarOf({ name: '', key: 'ou_ff8c' }).text === '?' && AV.avatarOf({ name: '', key: 'ou_ff8c' }).hue === AV.avatarOf({ name: 'userN', key: 'ou_ff8c' }).hue, 'the PURE fact that makes the wiring matter: initialsOf takes the first letter of ANY string (an id included), so the name must be empty for the "?" — the hue stays the author key\'s (stable across a later naming)');
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'chan-authors: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'chan-authors: ' })) ok(verdictOf(c.pass), c.name, c.pass ? undefined : c.detail);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

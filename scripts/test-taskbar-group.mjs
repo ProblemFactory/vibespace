@@ -65,7 +65,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 
 const MODREL = 'src/lib/taskbar-group.js';
 const modSrc = read(MODREL);
@@ -99,7 +99,7 @@ console.log('§1 the PURE module');
 {
   const code = modSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   ok(!/\bimport\s|\brequire\s*\(|\bdocument\b|\bwindow\b/.test(code), 'src/lib/taskbar-group.js imports nothing and touches no DOM');
-  ok(['groupClickVerdict', 'hoverVerdict', 'groupKeyVerdict', 'inFrontOf', 'GROUP_HOVER_INTENT_MS', 'GROUP_HOVER_LEAVE_MS'].every((k) => k in real), 'it exports the four verdicts and the two timings');
+  ok(verdictOf(['groupClickVerdict', 'hoverVerdict', 'groupKeyVerdict', 'inFrontOf', 'GROUP_HOVER_INTENT_MS', 'GROUP_HOVER_LEAVE_MS'].every((k) => k in real)), 'it exports the four verdicts and the two timings');
   ok(real.GROUP_HOVER_INTENT_MS >= 250 && real.GROUP_HOVER_INTENT_MS <= 400, `hover intent is a deliberate pause, not a flyout's (${real.GROUP_HOVER_INTENT_MS} ms, ~300)`);
   ok(real.GROUP_HOVER_LEAVE_MS >= 150 && real.GROUP_HOVER_LEAVE_MS <= 400, `the leave grace covers the gap between button and chooser (${real.GROUP_HOVER_LEAVE_MS} ms, ~250)`);
 }
@@ -133,23 +133,23 @@ console.log('§5 the KEY table');
   const k = (key, inFront) => real.groupKeyVerdict({ key, inFront });
   ok(k('Enter', false) === 'activate' && k(' ', false) === 'activate' && k('Enter', true) === 'chooser' && k(' ', true) === 'chooser', 'Enter / Space = the click rule');
   ok(k('ArrowUp', false) === 'chooser' && k('ArrowUp', true) === 'chooser', 'ArrowUp = the chooser, in front or not');
-  ok([k('ArrowDown', false), k('Escape', true), k('a', false), k('Tab', true)].every((v) => v === null), 'every other key is not the button\'s (null)');
+  ok(verdictOf([k('ArrowDown', false), k('Escape', true), k('a', false), k('Tab', true)].every((v) => v === null)), 'every other key is not the button\'s (null)');
 }
 
 console.log('§6 NEGATIVE CONTROLS (patched copies judged by the same rows)');
 const MUT = mutantCopies('taskbar-group', repo);
 {
   const OLD = "return inFront ? 'chooser' : 'activate';";
-  ok(modSrc.includes(OLD), 'the click rule is spelled where the control patches it');
+  ok(verdictOf(modSrc.includes(OLD)), 'the click rule is spelled where the control patches it');
   const f = MUT.write(MODREL, modSrc.replace(OLD, "return 'chooser';"), 'always-chooser');
   const m = await import(pathToFileURL(f).href);
   const r = clickRows(m);
-  ok(r.bad.length === 8 && r.bad.every((b) => b.want === 'activate' && b.got === 'chooser' && !b.dragging), `CONTROL: the old always-chooser click fails exactly the 8 "behind" clicks (every pointer, hover chooser or not) (${r.bad.length})`, r.bad.slice(0, 2));
+  ok(r.bad.length === 8 && verdictOf(r.bad.every((b) => b.want === 'activate' && b.got === 'chooser' && !b.dragging)), `CONTROL: the old always-chooser click fails exactly the 8 "behind" clicks (every pointer, hover chooser or not) (${r.bad.length})`, r.bad.slice(0, 2));
   const HOV = 'if (!pointerFine || touch || dragging || popoverOpen) return \'never\';';
-  ok(modSrc.includes(HOV), 'the hover gate is spelled where the control patches it');
+  ok(verdictOf(modSrc.includes(HOV)), 'the hover gate is spelled where the control patches it');
   const g = MUT.write(MODREL, modSrc.replace(HOV, 'if (!pointerFine || dragging || popoverOpen) return \'never\';'), 'hover-on-touch');
   const h = hoverRows(await import(pathToFileURL(g).href));
-  ok(h.bad.length > 0 && h.bad.every((b) => b.touch && b.pointerFine && !b.dragging && !b.popoverOpen), `CONTROL: a hover that forgets touch fails the fine+touch rows (${h.bad.length})`, h.bad.slice(0, 2));
+  ok(h.bad.length > 0 && verdictOf(h.bad.every((b) => b.touch && b.pointerFine && !b.dragging && !b.popoverOpen)), `CONTROL: a hover that forgets touch fails the fine+touch rows (${h.bad.length})`, h.bad.slice(0, 2));
 }
 
 console.log('§7 wiring pins (comment-stripped taskbar.js)');
@@ -170,41 +170,41 @@ console.log('§7 wiring pins (comment-stripped taskbar.js)');
   const tb = strip(read('src/lib/taskbar.js'));
   const body = (name) => { const a = tb.indexOf(`function ${name}(`); if (a < 0) return ''; const b = tb.indexOf('\nfunction ', a + 10), c = tb.indexOf('\nexport function ', a + 10); return tb.slice(a, Math.min(...[b, c].filter((x) => x > 0), tb.length)); };
   const group = body('_buildGroupItem'), single = body('_rebuildTaskbarItems'), chooser = body('showTabGroupList');
-  ok(/import \{[^}]*\bgroupClickVerdict\b[^}]*\bhoverVerdict\b[^}]*\bgroupKeyVerdict\b[^}]*\binFrontOf\b[^}]*\} from '\.\/taskbar-group\.js';/.test(tb), 'taskbar.js imports the verdicts from the PURE module');
+  ok(verdictOf(/import \{[^}]*\bgroupClickVerdict\b[^}]*\bhoverVerdict\b[^}]*\bgroupKeyVerdict\b[^}]*\binFrontOf\b[^}]*\} from '\.\/taskbar-group\.js';/.test(tb)), 'taskbar.js imports the verdicts from the PURE module');
   ok(group.length > 500 && single.length > 500 && chooser.length > 500, 'the three bodies were found (non-vacuous)');
-  ok(/addEventListener\('click',[\s\S]*?groupClickVerdict\(\{ inFront: _groupInFront\(app, hostId\)/.test(group), 'the grouped button\'s click asks groupClickVerdict with the live in-front fact');
+  ok(verdictOf(/addEventListener\('click',[\s\S]*?groupClickVerdict\(\{ inFront: _groupInFront\(app, hostId\)/.test(group)), 'the grouped button\'s click asks groupClickVerdict with the live in-front fact');
   ok(!/addEventListener\('click', \(\) => showTabGroupList/.test(group) && !/'click'[^\n]*showTabGroupList\(app, item, group\.chain\)/.test(group), 'the old always-chooser click spelling is gone');
-  ok(/verdict === 'activate'\) \{[^}]*activateWindow\(app, activeTabOf\(chain\)\)/.test(group), '"activate" = the ONE activation path, on the group\'s ACTIVE tab');
-  ok(/addEventListener\('pointerenter'/.test(group) && /hoverVerdict\(\{ pointerFine: fine, touch: !!app\.isTouch, dragging: _dragInProgress\(app, lastButtons\), popoverOpen: _otherPopoverOpen\(\), intentMs \}\)/.test(group) && /setTimeout\(fire, GROUP_HOVER_INTENT_MS\)/.test(group), 'hover arms through hoverVerdict (fine pointer, touch device, drag, other popover) and waits GROUP_HOVER_INTENT_MS');
+  ok(verdictOf(/verdict === 'activate'\) \{[^}]*activateWindow\(app, activeTabOf\(chain\)\)/.test(group)), '"activate" = the ONE activation path, on the group\'s ACTIVE tab');
+  ok(gateOf(/addEventListener\('pointerenter'/.test(group)) && gateOf(/hoverVerdict\(\{ pointerFine: fine, touch: !!app\.isTouch, dragging: _dragInProgress\(app, lastButtons\), popoverOpen: _otherPopoverOpen\(\), intentMs \}\)/.test(group)) && verdictOf(/setTimeout\(fire, GROUP_HOVER_INTENT_MS\)/.test(group)), 'hover arms through hoverVerdict (fine pointer, touch device, drag, other popover) and waits GROUP_HOVER_INTENT_MS');
   {
     const line = (group.match(/\bfine = [^;\n]*pointerType[^;\n]*;/) || [''])[0];
-    ok(/fine = \(e\.pointerType === 'mouse' \|\| e\.pointerType === 'pen'\) && _finePointer\(\);/.test(line) && !/touch/.test(line), `a hover is a MOUSE or a PEN on a fine-pointer device, never touch (verify r1: a pen got only the click rule) — ${line}`);
+    ok(gateOf(/fine = \(e\.pointerType === 'mouse' \|\| e\.pointerType === 'pen'\) && _finePointer\(\);/.test(line)) && !/touch/.test(line), `a hover is a MOUSE or a PEN on a fine-pointer device, never touch (verify r1: a pen got only the click rule) — ${line}`);
   }
-  ok(/const v = hoverNow\(elapsed\);/.test(group), 'the intent is RE-JUDGED when it fires (a drag or a menu may have begun)');
-  ok(/addEventListener\('pointerleave', \(\) => \{ step\('leave'\);/.test(group) && /addEventListener\('pointerdown', \(\) => step\('press'\)\)/.test(group) && /addEventListener\('dragstart', \(e\) => \{\s*step\('press'\);/.test(group) && /addEventListener\('contextmenu', \(e\) => \{\s*e\.preventDefault\(\);\s*step\('press'\);/.test(group) && /if \(r\.act === 'cancel'\) cancelIntent\(\);/.test(group), 'leaving, pressing, dragging and the window menu go through hoverStep (leave ends the visit, a press spends it) and cancel the intent');
+  ok(verdictOf(/const v = hoverNow\(elapsed\);/.test(group)), 'the intent is RE-JUDGED when it fires (a drag or a menu may have begun)');
+  ok(gateOf(/addEventListener\('pointerleave', \(\) => \{ step\('leave'\);/.test(group)) && gateOf(/addEventListener\('pointerdown', \(\) => step\('press'\)\)/.test(group)) && gateOf(/addEventListener\('dragstart', \(e\) => \{\s*step\('press'\);/.test(group)) && gateOf(/addEventListener\('contextmenu', \(e\) => \{\s*e\.preventDefault\(\);\s*step\('press'\);/.test(group)) && verdictOf(/if \(r\.act === 'cancel'\) cancelIntent\(\);/.test(group)), 'leaving, pressing, dragging and the window menu go through hoverStep (leave ends the visit, a press spends it) and cancel the intent');
   // 2026-09-26 (the load construction of the 2.369.183 pen red): the visit is the GROUP's, enter AND move ask hoverStep, only its 'arm' arms
-  ok(/^const _hoverSpent = new Set\(\);$/m.test(tb) && /const r = hoverStep\(\{ spent: _hoverSpent\.has\(hostId\) \}, ev\);\s*if \(r\.spent\) _hoverSpent\.add\(hostId\); else _hoverSpent\.delete\(hostId\);/.test(group), 'the hover VISIT is kept per GROUP (a module-level set of host ids), never in one button element\'s closure — a rebuilt button inherits it');
-  ok(/addEventListener\('pointerenter', \(e\) => \{[^}]*\}\);/.test(group) && /addEventListener\('pointerenter', \(e\) => \{[\s\S]*?if \(step\('enter'\) === 'arm' && !_chooserOf\(hostId\)\) armFrom\(e\);\s*\}\);/.test(group) && /addEventListener\('pointermove', \(e\) => \{\s*lastButtons = e\.buttons;\s*if \(step\('move'\) === 'arm' && !_chooserOf\(hostId\)\) armFrom\(e\);/.test(group) && (group.match(/setTimeout\(fire, GROUP_HOVER_INTENT_MS\)/g) || []).length === 1 && /const armFrom = \(e\) => \{\s*cancelIntent\(\);/.test(group), 'pointerenter and pointermove both ask hoverStep; the ONE arming (armFrom) runs only on its "arm"');
-  ok(/function _watchHoverVisits\(\) \{[\s\S]*?document\.addEventListener\('pointermove', \(e\) => \{[\s\S]*?closest\?\.\('\.taskbar-group'\)\?\.dataset\.winId;[\s\S]*?hoverStep\(\{ spent: true \}, 'away'\)[\s\S]*?\{ capture: true, passive: true \}\);/.test(tb) && /_watchHoverVisits\(\);\s*const step = /.test(group) && /if \(_visitWatch\) return;/.test(tb), 'ONE app-lifetime capture pointermove ends a spent visit when the pointer moves anywhere but that group\'s button (hoverStep \'away\'), installed once');
-  ok(/for \(const id of _hoverSpent\) if \(!entries\.some\(\(e\) => e\.id === id && e\.group\)\) _hoverSpent\.delete\(id\);/.test(tb), 'a group gone from the taskbar ends its visit (the set never grows past the live groups)');
-  ok(/addEventListener\('keydown',[\s\S]*?groupKeyVerdict\(\{ key: e\.key, inFront: _groupInFront\(app, hostId\) \}\)/.test(group) && /item\.tabIndex = 0;/.test(group), 'the button is focusable and its keys go through groupKeyVerdict');
-  ok(/addEventListener\('contextmenu',[\s\S]*?showWindowContextMenu\(app, hostId, e\.clientX, e\.clientY, \{ closeLabel: '\\u2715 ' \+ t\('Close group'\), group: true \}\)/.test(group), 'right-click keeps the group\'s window menu (a GROUP menu: its Close ends every tab, asked first — B-a67c, test-tab-close-confirm)');
-  ok(!/groupClickVerdict|hoverVerdict|pointerenter|showTabGroupList/.test(single) && /activateWindow\(app, id\)/.test(single) && /app\.wm\.minimize\(id\)/.test(single), 'the SINGLE button asks none of it: its click is today\'s (minimize when focused, else the same activation), no hover');
-  ok(/const leave|leave\(\) \{[\s\S]*?setTimeout\([\s\S]*?GROUP_HOVER_LEAVE_MS\)/.test(chooser) && /pop\.addEventListener\('pointerleave', \(\) => state\.leave\(\)\)/.test(chooser), 'a hover chooser closes GROUP_HOVER_LEAVE_MS after the pointer leaves it (and the button)');
-  ok(/document\.addEventListener\('keydown',[^\n]*\{ capture: true, signal: ctl\.signal \}\)/.test(chooser) && /ctl\.abort\(\)/.test(chooser), 'its document Esc listener rides an AbortController aborted on removal');
-  ok(/\/ Z\) \+ 'px'/.test(chooser) && /const Z = uiScale\(\);/.test(chooser), 'placed in LAYOUT px (viewport ÷ the UI scale)');
-  ok(/if \(!hover\) existing\._chooser\.pin\(\{ keyboard \}\)/.test(chooser), 'a click / key on an open hover chooser PINS it (never re-created)');
+  ok(gateOf(/^const _hoverSpent = new Set\(\);$/m.test(tb)) && verdictOf(/const r = hoverStep\(\{ spent: _hoverSpent\.has\(hostId\) \}, ev\);\s*if \(r\.spent\) _hoverSpent\.add\(hostId\); else _hoverSpent\.delete\(hostId\);/.test(group)), 'the hover VISIT is kept per GROUP (a module-level set of host ids), never in one button element\'s closure — a rebuilt button inherits it');
+  ok(gateOf(/addEventListener\('pointerenter', \(e\) => \{[^}]*\}\);/.test(group)) && gateOf(/addEventListener\('pointerenter', \(e\) => \{[\s\S]*?if \(step\('enter'\) === 'arm' && !_chooserOf\(hostId\)\) armFrom\(e\);\s*\}\);/.test(group)) && gateOf(/addEventListener\('pointermove', \(e\) => \{\s*lastButtons = e\.buttons;\s*if \(step\('move'\) === 'arm' && !_chooserOf\(hostId\)\) armFrom\(e\);/.test(group)) && (group.match(/setTimeout\(fire, GROUP_HOVER_INTENT_MS\)/g) || []).length === 1 && verdictOf(/const armFrom = \(e\) => \{\s*cancelIntent\(\);/.test(group)), 'pointerenter and pointermove both ask hoverStep; the ONE arming (armFrom) runs only on its "arm"');
+  ok(gateOf(/function _watchHoverVisits\(\) \{[\s\S]*?document\.addEventListener\('pointermove', \(e\) => \{[\s\S]*?closest\?\.\('\.taskbar-group'\)\?\.dataset\.winId;[\s\S]*?hoverStep\(\{ spent: true \}, 'away'\)[\s\S]*?\{ capture: true, passive: true \}\);/.test(tb)) && gateOf(/_watchHoverVisits\(\);\s*const step = /.test(group)) && verdictOf(/if \(_visitWatch\) return;/.test(tb)), 'ONE app-lifetime capture pointermove ends a spent visit when the pointer moves anywhere but that group\'s button (hoverStep \'away\'), installed once');
+  ok(verdictOf(/for \(const id of _hoverSpent\) if \(!entries\.some\(\(e\) => e\.id === id && e\.group\)\) _hoverSpent\.delete\(id\);/.test(tb)), 'a group gone from the taskbar ends its visit (the set never grows past the live groups)');
+  ok(gateOf(/addEventListener\('keydown',[\s\S]*?groupKeyVerdict\(\{ key: e\.key, inFront: _groupInFront\(app, hostId\) \}\)/.test(group)) && verdictOf(/item\.tabIndex = 0;/.test(group)), 'the button is focusable and its keys go through groupKeyVerdict');
+  ok(verdictOf(/addEventListener\('contextmenu',[\s\S]*?showWindowContextMenu\(app, hostId, e\.clientX, e\.clientY, \{ closeLabel: '\\u2715 ' \+ t\('Close group'\), group: true \}\)/.test(group)), 'right-click keeps the group\'s window menu (a GROUP menu: its Close ends every tab, asked first — B-a67c, test-tab-close-confirm)');
+  ok(!/groupClickVerdict|hoverVerdict|pointerenter|showTabGroupList/.test(single) && gateOf(/activateWindow\(app, id\)/.test(single)) && verdictOf(/app\.wm\.minimize\(id\)/.test(single)), 'the SINGLE button asks none of it: its click is today\'s (minimize when focused, else the same activation), no hover');
+  ok(gateOf(/const leave|leave\(\) \{[\s\S]*?setTimeout\([\s\S]*?GROUP_HOVER_LEAVE_MS\)/.test(chooser)) && verdictOf(/pop\.addEventListener\('pointerleave', \(\) => state\.leave\(\)\)/.test(chooser)), 'a hover chooser closes GROUP_HOVER_LEAVE_MS after the pointer leaves it (and the button)');
+  ok(gateOf(/document\.addEventListener\('keydown',[^\n]*\{ capture: true, signal: ctl\.signal \}\)/.test(chooser)) && verdictOf(/ctl\.abort\(\)/.test(chooser)), 'its document Esc listener rides an AbortController aborted on removal');
+  ok(gateOf(/\/ Z\) \+ 'px'/.test(chooser)) && verdictOf(/const Z = uiScale\(\);/.test(chooser)), 'placed in LAYOUT px (viewport ÷ the UI scale)');
+  ok(verdictOf(/if \(!hover\) existing\._chooser\.pin\(\{ keyboard \}\)/.test(chooser)), 'a click / key on an open hover chooser PINS it (never re-created)');
   // ── lane K verify r1 (2026-09-25) ──
-  ok(/mo\.disconnect\(\); ctl\.abort\(\); pop\._closeCtl\?\.abort\(\);/.test(chooser), 'the chooser\'s ONE cleanup also disposes createPopover\'s outside-click close (a hover chooser opens and closes with no click: 3 → 33 listeners over 30 hovers)');
+  ok(verdictOf(/mo\.disconnect\(\); ctl\.abort\(\); pop\._closeCtl\?\.abort\(\);/.test(chooser)), 'the chooser\'s ONE cleanup also disposes createPopover\'s outside-click close (a hover chooser opens and closes with no click: 3 → 33 listeners over 30 hovers)');
   // ── the five verify-r1 lows (2026-09-25) ──
-  ok(/_chooserOf\(hostId\)\?\._chooser\.reanchor\(item\);/.test(group) && /reanchor\(el\) \{ state\.anchor = el; el\.setAttribute\?\.\('aria-expanded', 'true'\); pop\._closeExclude\?\.push\(el\); \}/.test(chooser), 'a REBUILT grouped button under an open chooser re-anchors it (aria-expanded, the outside-click exclusion)');
-  ok(/pop\.remove\(\); state\.anchor\.focus\?\.\(\);/.test(chooser) && /state\.anchor\.setAttribute\?\.\('aria-expanded', 'false'\)/.test(chooser) && /const rect = state\.anchor\.getBoundingClientRect\(\)/.test(chooser) && !/[^.]\banchor\.focus|[^.]\banchor\.setAttribute\?\.\('aria-expanded', 'false'\)|[^.]\banchor\.getBoundingClientRect/.test(chooser), 'Esc focus, the aria-expanded reset and the placement read the LIVE anchor (state.anchor), never the one captured at open');
-  ok(/item\.addEventListener\('contextmenu', \(e\) => \{\s*e\.preventDefault\(\);\s*state\.pin\(\);\s*showWindowContextMenu\(app, win\.id, e\.clientX, e\.clientY,/.test(chooser), 'right-click on a chooser row = THAT tab\'s window menu (preventDefault, the chooser pinned beneath)');
-  ok(/onAction: \(kind\) => \{ if \(pop\.isConnected\) \(kind === 'move' \? pop\.remove\(\) : state\.relist\(\)\); \}/.test(chooser) && /relist\(\) \{[\s\S]*?app\.wm\.windows\.get\(state\.hostId\)\?\._tabChain[\s\S]*?showTabGroupList\(app, el, live\)/.test(chooser), '…and the chooser re-lists from the LIVE chain after the action (a Move closes it)');
+  ok(gateOf(/_chooserOf\(hostId\)\?\._chooser\.reanchor\(item\);/.test(group)) && verdictOf(/reanchor\(el\) \{ state\.anchor = el; el\.setAttribute\?\.\('aria-expanded', 'true'\); pop\._closeExclude\?\.push\(el\); \}/.test(chooser)), 'a REBUILT grouped button under an open chooser re-anchors it (aria-expanded, the outside-click exclusion)');
+  ok(gateOf(/pop\.remove\(\); state\.anchor\.focus\?\.\(\);/.test(chooser)) && gateOf(/state\.anchor\.setAttribute\?\.\('aria-expanded', 'false'\)/.test(chooser)) && gateOf(/const rect = state\.anchor\.getBoundingClientRect\(\)/.test(chooser)) && !/[^.]\banchor\.focus|[^.]\banchor\.setAttribute\?\.\('aria-expanded', 'false'\)|[^.]\banchor\.getBoundingClientRect/.test(chooser), 'Esc focus, the aria-expanded reset and the placement read the LIVE anchor (state.anchor), never the one captured at open');
+  ok(verdictOf(/item\.addEventListener\('contextmenu', \(e\) => \{\s*e\.preventDefault\(\);\s*state\.pin\(\);\s*showWindowContextMenu\(app, win\.id, e\.clientX, e\.clientY,/.test(chooser)), 'right-click on a chooser row = THAT tab\'s window menu (preventDefault, the chooser pinned beneath)');
+  ok(gateOf(/onAction: \(kind\) => \{ if \(pop\.isConnected\) \(kind === 'move' \? pop\.remove\(\) : state\.relist\(\)\); \}/.test(chooser)) && verdictOf(/relist\(\) \{[\s\S]*?app\.wm\.windows\.get\(state\.hostId\)\?\._tabChain[\s\S]*?showTabGroupList\(app, el, live\)/.test(chooser)), '…and the chooser re-lists from the LIVE chain after the action (a Move closes it)');
   {
     const tg = strip(read('src/lib/tab-group.js'));
     const a = tg.indexOf('restoreTabChain(tabIds'), rb = a < 0 ? '' : tg.slice(a, tg.indexOf('\n  },', a));
-    ok(rb.length > 200 && /this\._renderTabBar\(chain\);\s*this\._notify\(\);\s*$/.test(rb), 'restoreTabChain ends with _notify() like every other chain mutation — a reload shows the restored group as ONE grouped button with no input');
+    ok(rb.length > 200 && verdictOf(/this\._renderTabBar\(chain\);\s*this\._notify\(\);\s*$/.test(rb)), 'restoreTabChain ends with _notify() like every other chain mutation — a reload shows the restored group as ONE grouped button with no input');
   }
   // THE PRODUCER CENSUS: every class the two "another popover is open" guards
   // query — _otherPopoverOpen (taskbar.js) and the autohide taskbar's conceal
@@ -234,7 +234,7 @@ console.log('§7 wiring pins (comment-stripped taskbar.js)');
       const deadPre = namedIn(pre).filter((c) => !produced(c));
       ok(deadPre.length === 1 && deadPre[0] === 'taskbar-window-list', `CONTROL: ${where}'s pre-fix spelling is caught — ".${deadPre.join(', .')}" is a name nothing produces`);
     }
-    ok(produced('overlap-switcher') && produced('usage-popup') && produced('taskbar-group-chooser') && !produced('taskbar-window-list'), 'the census\'s own oracle: the window list / quota popup / chooser classes are produced, the dead name is not');
+    ok(gateOf(produced('overlap-switcher')) && gateOf(produced('usage-popup')) && gateOf(produced('taskbar-group-chooser')) && !produced('taskbar-window-list'), 'the census\'s own oracle: the window list / quota popup / chooser classes are produced, the dead name is not');
   }
 }
 
@@ -316,8 +316,8 @@ console.log('§9 attachPopoverClose OWNS its listener (behaviour, in node over a
   ok(srcNow.length > 200, 'attachPopoverClose read out of utils.js (non-vacuous)');
   const now = harness(srcNow), old = harness(srcOld), minor = harness(srcMinor);
   for (const [k, v] of Object.entries(now)) ok(v === true, `now: ${k}`);
-  ok(!old.disposeAfterArm && !old.disposeBeforeArm && !old.goneSelfHeals && !old.liveExclusion && old.outsideCloses && old.insideAndChildKeep && old.anchorExcluded, 'CONTROL: the pre-fix function fails exactly the ownership cases (no disposer, no self-heal, no live exclusion) and keeps the three it always had', old);
-  ok(Object.entries(minor).every(([k, v]) => (k === 'liveExclusion' ? v === false : v === true)), 'CONTROL: the r1-minor function fails ONLY the live exclusion (a rebuilt anchor\'s mousedown closed its chooser as "elsewhere")', minor);
+  ok(!old.disposeAfterArm && !old.disposeBeforeArm && !old.goneSelfHeals && !old.liveExclusion && gateOf(old.outsideCloses) && gateOf(old.insideAndChildKeep) && verdictOf(old.anchorExcluded), 'CONTROL: the pre-fix function fails exactly the ownership cases (no disposer, no self-heal, no live exclusion) and keeps the three it always had', old);
+  ok(verdictOf(Object.entries(minor).every(([k, v]) => (k === 'liveExclusion' ? v === false : v === true))), 'CONTROL: the r1-minor function fails ONLY the live exclusion (a rebuilt anchor\'s mousedown closed its chooser as "elsewhere")', minor);
 }
 
 console.log('§10 WHO OPENED THE HOVER CHOOSER — the pen leg\'s judge over a fake clock (the 2.369.183 mirror red)');
@@ -380,7 +380,7 @@ console.log('§10 WHO OPENED THE HOVER CHOOSER — the pen leg\'s judge over a f
   ok(settled.length >= 40 && fixBad.length === 0, `① the judge credits the PEN in all ${settled.length} settled interleavings (frame period 16–200 ms, timer late 0–60 ms, recompute at frame 1/2, the sample 0–160 ms after the open)`, fixBad.slice(0, 2).map((x) => ({ g: x.g, v: J.judgeHoverOpen(x.rec) })));
   const lost = settled.filter((x) => x.recomputeBeforeSample), won = settled.filter((x) => !x.recomputeBeforeSample);
   const preRed = settled.filter((x) => pre.judgeHoverOpen(x.rec).verdict !== 'opened');
-  ok(lost.length > 0 && won.length > 0 && preRed.length === lost.length && preRed.every((x) => x.recomputeBeforeSample), `CONTROL: the pre-fix last-enter slot is red on EXACTLY the ${lost.length} interleavings where Chrome's recompute beat the sample and green on the ${won.length} where the sample won — a race (green standalone, red on a slow runner)`, { preRed: preRed.length, lost: lost.length, won: won.length });
+  ok(lost.length > 0 && won.length > 0 && preRed.length === lost.length && verdictOf(preRed.every((x) => x.recomputeBeforeSample)), `CONTROL: the pre-fix last-enter slot is red on EXACTLY the ${lost.length} interleavings where Chrome's recompute beat the sample and green on the ${won.length} where the sample won — a race (green standalone, red on a slow runner)`, { preRed: preRed.length, lost: lost.length, won: won.length });
   // measured on chrome (--only l): the recompute lands +31 ms after the open at 60 Hz (the 2nd frame), +30–50 ms at CPU ×20,
   // and the original leg was red 0/20 at ×1 and ×6, 9/20 at ×10, 17/20 at ×20 — the model agrees: at the measured frame a
   // 60 Hz page sampled within 10 ms of the open never loses; the slow pages do
@@ -388,26 +388,26 @@ console.log('§10 WHO OPENED THE HOVER CHOOSER — the pen leg\'s judge over a f
   ok(fastLost === 0 && slowLost > 0, `…the losing order is the SLOW page's: at the measured recompute frame a 60 Hz page sampled within 10 ms of the open never loses (${fastLost}); 100–200 ms frames do (${slowLost})`);
   // ② the heavy leg's construction: it WAITS for the recompute before sampling ⇒ the race is in every record
   const waited = grid.map((g) => trial({ ...g, waitRecompute: true }));
-  ok(waited.every((x) => J.judgeHoverOpen(x.rec).verdict === 'opened' && J.judgeHoverOpen(x.rec).recompute.length === 1) && waited.every((x) => pre.judgeHoverOpen(x.rec).verdict !== 'opened'), `② waiting for the recompute (the heavy leg's construction): the judge credits the pen and reports the recompute in all ${waited.length}; the pre-fix slot is red in all ${waited.length} (its control is deterministic, not a race)`);
+  ok(gateOf(waited.every((x) => J.judgeHoverOpen(x.rec).verdict === 'opened' && J.judgeHoverOpen(x.rec).recompute.length === 1)) && verdictOf(waited.every((x) => pre.judgeHoverOpen(x.rec).verdict !== 'opened')), `② waiting for the recompute (the heavy leg's construction): the judge credits the pen and reports the recompute in all ${waited.length}; the pre-fix slot is red in all ${waited.length} (its control is deterministic, not a race)`);
   // ③ a layout PENDING at the pen's arrival: Chrome's mouse enter comes before the open — the judge never assumes which
   //    enters the product arms on: 'premise' (the leg retries by name), never 'opened', never a false failure verdict;
   //    and the PRODUCT does not restart the pen's intent on it (hoverStep: an enter is not an arrival)
   const pend = grid.map((g) => ({ g, ...trial({ ...g, pending: true }) }));
   const pendV = pend.map((x) => J.judgeHoverOpen(x.rec).verdict);
-  ok(pendV.every((v) => v === 'premise') && pend.every((x) => x.open && x.open.at === settled.find((y) => y.g === x.g)?.open?.at), `③ a layout pending when the pen arrives (Chrome's mouse enter BEFORE the open): 'premise' in all ${pend.length} — never credited to the pen, never judged a failure (${[...new Set(pendV)].join(', ')}); the product opened at the pen's own intent in every one (not restarted by the re-target)`);
+  ok(gateOf(pendV.every((v) => v === 'premise')) && verdictOf(pend.every((x) => x.open && x.open.at === settled.find((y) => y.g === x.g)?.open?.at)), `③ a layout pending when the pen arrives (Chrome's mouse enter BEFORE the open): 'premise' in all ${pend.length} — never credited to the pen, never judged a failure (${[...new Set(pendV)].join(', ')}); the product opened at the pen's own intent in every one (not restarted by the re-target)`);
   // ④ CONTROL 2's mouse-only product: a settled page gives the pen nothing ('no-open'); with a pending layout Chrome's
   //    mouse enter is in the record before the sample — 'premise', never credited to the pen
   const mo = grid.map((g) => trial({ ...g, penArms: false })).map((x) => J.judgeHoverOpen(x.rec).verdict);
   const moPend = grid.map((g) => trial({ ...g, penArms: false, pending: true })).map((x) => J.judgeHoverOpen(x.rec).verdict);
-  ok(mo.every((v) => v === 'no-open') && moPend.every((v) => v === 'premise'), `④ the mouse-only product: 'no-open' on a settled page (${mo.length}), 'premise' when Chrome's mouse entered before the sample (${moPend.length}) — the pen is never credited for Chrome's mouse`);
+  ok(gateOf(mo.every((v) => v === 'no-open')) && verdictOf(moPend.every((v) => v === 'premise')), `④ the mouse-only product: 'no-open' on a settled page (${mo.length}), 'premise' when Chrome's mouse entered before the sample (${moPend.length}) — the pen is never credited for Chrome's mouse`);
   // ⑤ the judge's other rows
   const E = (type, id, at) => ({ type, id, at });
   ok(J.judgeHoverOpen({ enters: [], opens: [], sampledAt: 900 }).verdict === 'premise' && J.judgeHoverOpen({ enters: [E('pen', 2, 0)], opens: [{ at: 120, mode: 'hover' }], sampledAt: 200 }).verdict === 'early' && J.judgeHoverOpen({ enters: [E('pen', 2, 0)], opens: [{ at: 320, mode: 'click' }], sampledAt: 400 }).verdict === 'wrong-mode' && J.judgeHoverOpen({ enters: [E('mouse', 1, 0)], opens: [{ at: 300, mode: 'hover' }], sampledAt: 400 }).verdict === 'premise', '⑤ no enter / an open before the intent / a click-mode open / a mouse first ⇒ premise / early / wrong-mode / premise');
   // ⑥ wiring: the heavy suite judges (l) through the module, records TYPED enters, never a last-type slot, runs the ×20 leg; the
   //    model's assumption about the product (a pointerenter with nothing open re-arms) is still the product's
   const ui = read('scripts/test-taskbar-group-ui.mjs');
-  ok(/import \{ judgeHoverOpen \} from '\.\/pen-hover-judge\.mjs';/.test(ui) && /R\.enters\.push\(\{ type: e\.pointerType, id: e\.pointerId, at: R\.enterG \}\)/.test(ui) && !/enterType/.test(ui) && /const v = judgeHoverOpen\(rec, \{ type: 'pen' \}\);/.test(ui), '⑥ test-taskbar-group-ui records every enter TYPED (no last-type slot left) and judges the pen leg through judgeHoverOpen');
-  ok(/Emulation\.setCPUThrottlingRate', \{ rate: 20 \}\)/.test(ui) && /l2\.every\(\(x\) => x\.v\.recompute\.length > 0 && x\.pre\.verdict !== 'opened'\)/.test(ui) && /await evalJs\(FRAMES\(3\)\);/.test(ui), '…settles frames before the pen moves, and keeps the ×20 leg with its in-record control');
+  ok(gateOf(/import \{ judgeHoverOpen \} from '\.\/pen-hover-judge\.mjs';/.test(ui)) && gateOf(/R\.enters\.push\(\{ type: e\.pointerType, id: e\.pointerId, at: R\.enterG \}\)/.test(ui)) && !/enterType/.test(ui) && verdictOf(/const v = judgeHoverOpen\(rec, \{ type: 'pen' \}\);/.test(ui)), '⑥ test-taskbar-group-ui records every enter TYPED (no last-type slot left) and judges the pen leg through judgeHoverOpen');
+  ok(gateOf(/Emulation\.setCPUThrottlingRate', \{ rate: 20 \}\)/.test(ui)) && gateOf(/l2\.every\(\(x\) => x\.v\.recompute\.length > 0 && x\.pre\.verdict !== 'opened'\)/.test(ui)) && verdictOf(/await evalJs\(FRAMES\(3\)\);/.test(ui)), '…settles frames before the pen moves, and keeps the ×20 leg with its in-record control');
 }
 
 console.log('§11 THE HOVER VISIT over a fake clock — a rebuild under a RESTING pointer is not an arrival (found by the load construction)');
@@ -460,22 +460,22 @@ console.log('§11 THE HOVER VISIT over a fake clock — a rebuild under a RESTIN
   const judge = (mod) => rows.map((r) => { const o = sim(mod, r.script); return { r, o, good: o.length === r.want && (r.opensAt === undefined || o[0] === r.opensAt) }; });
   const now = judge(real), pre = judge(preMod);
   const by = (res, k) => res.filter((x) => x.r.kind === k);
-  ok(rows.length >= 40 && now.every((x) => x.good), `the product's hoverStep: in all ${rows.length} timed scripts — a click then a rebuild (${by(now, 'click').length}), a wiggle on the rebuilt button (${by(now, 'wiggle').length}): nothing grows; Esc then a rebuild: nothing comes back (${by(now, 'esc').length}); a genuine leave + return opens at its own intent (${by(now, 'return').length}), and so does a return after the pointer moved AWAY during the rebuild (no leave reached the live button) (${by(now, 'away').length}); a pen re-targeted before its open opens at the PEN's intent, not restarted (${by(now, 'pen-retarget').length})`, now.filter((x) => !x.good).slice(0, 2).map((x) => ({ kind: x.r.kind, opens: x.o })));
+  ok(rows.length >= 40 && verdictOf(now.every((x) => x.good)), `the product's hoverStep: in all ${rows.length} timed scripts — a click then a rebuild (${by(now, 'click').length}), a wiggle on the rebuilt button (${by(now, 'wiggle').length}): nothing grows; Esc then a rebuild: nothing comes back (${by(now, 'esc').length}); a genuine leave + return opens at its own intent (${by(now, 'return').length}), and so does a return after the pointer moved AWAY during the rebuild (no leave reached the live button) (${by(now, 'away').length}); a pen re-targeted before its open opens at the PEN's intent, not restarted (${by(now, 'pen-retarget').length})`, now.filter((x) => !x.good).slice(0, 2).map((x) => ({ kind: x.r.kind, opens: x.o })));
   const preBad = (k) => by(pre, k).filter((x) => !x.good).length;
   const AW = "  if (event === 'away') return { spent: false, act: null };";
   ok(modSrc.split(AW).length === 2, 'the away row is spelled once, where its control patches it');
   const staleMod = await import(pathToFileURL(MUT.write(MODREL, modSrc.replace(AW, "  if (event === 'away') return { spent: !!spent, act: null };"), 'away-ignored')).href);
   const stale = judge(staleMod);
-  ok(by(stale, 'away').every((x) => !x.good && x.o.length === 0) && stale.filter((x) => x.r.kind !== 'away').every((x) => x.good), `CONTROL (a patched copy that ignores 'away' — the visit kept per group but never ended off the button): every return after the pointer left during a rebuild MISSES its hover (${by(stale, 'away').filter((x) => !x.good).length}/${by(stale, 'away').length}); every other script unchanged`);
+  ok(gateOf(by(stale, 'away').every((x) => !x.good && x.o.length === 0)) && verdictOf(stale.filter((x) => x.r.kind !== 'away').every((x) => x.good)), `CONTROL (a patched copy that ignores 'away' — the visit kept per group but never ended off the button): every return after the pointer left during a rebuild MISSES its hover (${by(stale, 'away').filter((x) => !x.good).length}/${by(stale, 'away').length}); every other script unchanged`);
   ok(preBad('click') === by(pre, 'click').length && preBad('esc') === by(pre, 'esc').length && preBad('pen-retarget') === by(pre, 'pen-retarget').filter((x) => x.r.script[3].at < T).length && preBad('return') === 0, `CONTROL (a patched copy: every pointerenter is an arrival — the pre-fix hover): a chooser grows under the pointer that clicked in ${preBad('click')}/${by(pre, 'click').length}, the Esc-dismissed one comes back in ${preBad('esc')}/${by(pre, 'esc').length}, the pen's intent restarts whenever the re-target came before the open (${preBad('pen-retarget')}/${by(pre, 'pen-retarget').length}); a genuine return is unchanged (${preBad('return')} red)`);
 }
 
 console.log('§8 words + tree');
 {
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  for (const k of ['{n} windows grouped', 'Windows in this group']) ok(zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'), `"${k}" has zh + ja`);
-  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 5 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const k of ['{n} windows grouped', 'Windows in this group']) ok(gateOf(zh.includes(JSON.stringify(k) + ':')) && verdictOf(ja.includes(JSON.stringify(k) + ':')), `"${k}" has zh + ja`);
+  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 5 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

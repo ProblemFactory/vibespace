@@ -35,7 +35,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } return !!c; };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 8000, step = 50) => { const t0 = Date.now(); for (;;) { let v = null; try { v = await fn(); } catch { } if (v) return v; if (Date.now() - t0 > ms) return v; await sleep(step); } };
 
@@ -80,7 +80,7 @@ const srv = spawn(process.execPath, ['server.js'], { cwd: INST, env: { ...env, .
 procs.add(srv);
 srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
 const BASE = `http://127.0.0.1:${PORT}`;
-if (!ok(await until(() => journal.includes('Ready.'), 60000, 100), 'the scratch server booted (its own data/ with three seeded reports)', journal.slice(-800))) process.exit(1);
+if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 100)), 'the scratch server booted (its own data/ with three seeded reports)', journal.slice(-800))) process.exit(1);
 
 // ── Chrome: one browser, two page targets (client A, client B) ──
 const REAL_MOUSE = '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4';
@@ -131,37 +131,37 @@ let A, B;
 try {
   A = await page('A'); B = await page('B');
   console.log('— ① the gear row and the sheet (client A)');
-  ok(await openSystem(A), '(setup) ⚙ → System ▸ opens its flyout');
+  ok(verdictOf(await openSystem(A)), '(setup) ⚙ → System ▸ opens its flyout');
   const sys = await A.js(SYS_ROWS);
   const iFb = sys.findIndex((t) => /^Agent feedback…/.test(t));
-  ok(iFb > 0 && /^Diagnostics report…/.test(sys[iFb - 1]), `System holds "Agent feedback…" right after Diagnostics report… (${sys.join(' / ')})`);
+  ok(iFb > 0 && verdictOf(/^Diagnostics report…/.test(sys[iFb - 1])), `System holds "Agent feedback…" right after Diagnostics report… (${sys.join(' / ')})`);
   const count = await until(() => A.js(`(() => { const n = document.querySelector('${POP} [data-id="agent-feedback"] .gs-count'); return n && n.textContent; })()`), 4000);
   ok(count === '2', `…wearing the OPEN count: 2 (three reports, one handled) — got ${JSON.stringify(count)}`);
-  ok(await A.js(`!!document.querySelector('${POP} [data-id="agent-feedback"] .gs-menu-icon svg')`), '…with an SVG icon like its neighbours');
+  ok(verdictOf(await A.js(`!!document.querySelector('${POP} [data-id="agent-feedback"] .gs-menu-icon svg')`)), '…with an SVG icon like its neighbours');
   await A.shot('gear-system-agent-feedback.png');
   await A.click(`${POP} [data-id="agent-feedback"]`);
   const opened = await until(() => A.js(`document.querySelectorAll('#feedback-sheet .fb-row').length === 2 && !document.querySelector('${POP}')`), 5000);
-  ok(opened, 'a click closes the popover and opens the sheet with the 2 OPEN reports');
+  ok(verdictOf(opened), 'a click closes the popover and opens the sheet with the 2 OPEN reports');
   // lane dialog-yield: on the desktop the sheet is a createModalShell FORM — a small window titled «Agent feedback» (no backdrop,
   // no data-popover: a press elsewhere leaves it, an Escape from inside it closes it — below); the phone keeps the data-popover sheet
-  ok(await A.js(`(() => { const s = document.querySelector('#feedback-sheet'), w = s && s.closest('.window.window-form'); return !!w && s.classList.contains('dialog-form') && !s.dataset.popover && !!s.querySelector('.dialog.fb-dialog .dialog-header h3') && s.querySelector('.dialog-header h3').textContent === 'Agent feedback' && w.querySelector('.window-title').textContent === 'Agent feedback'; })()`), 'a createModalShell FORM titled "Agent feedback" (a window of its own, no backdrop)');
+  ok(verdictOf(await A.js(`(() => { const s = document.querySelector('#feedback-sheet'), w = s && s.closest('.window.window-form'); return !!w && s.classList.contains('dialog-form') && !s.dataset.popover && !!s.querySelector('.dialog.fb-dialog .dialog-header h3') && s.querySelector('.dialog-header h3').textContent === 'Agent feedback' && w.querySelector('.window-title').textContent === 'Agent feedback'; })()`)), 'a createModalShell FORM titled "Agent feedback" (a window of its own, no backdrop)');
   let rows = await A.js(ROW_TEXTS);
   ok(rows.map((r) => r.id).join(' ') === 'fb-0000000003 fb-0000000001', `newest REPORT first: the plant (1 min ago), then alpha's (last repeated 10 min ago) — ${rows.map((r) => r.id).join(' ')}`);
   const alpha = rows.find((r) => r.id === 'fb-0000000001');
-  ok(alpha && alpha.who === 'lane alpha' && alpha.group === 'VibeSpace 车道' && alpha.chips.join(',') === 'cli,vibespace-task' && alpha.count === '×3' && alpha.act === 'Mark handled', `a row: the conversation, its Task Group, kind / about chips, ×3, Mark handled (${JSON.stringify(alpha)})`);
+  ok(gateOf(alpha) && alpha.who === 'lane alpha' && alpha.group === 'VibeSpace 车道' && alpha.chips.join(',') === 'cli,vibespace-task' && alpha.count === '×3' && alpha.act === 'Mark handled', `a row: the conversation, its Task Group, kind / about chips, ×3, Mark handled (${JSON.stringify(alpha)})`);
   ok(await A.js(TABS) === 'Open (2)* | Handled (1) | All (3)', `the filter: ${await A.js(TABS)}`);
 
   console.log('— ② the XSS plant is text');
   const plant = rows.find((r) => r.id === 'fb-0000000003');
   await sleep(300);
-  ok(plant && plant.text === XSS && plant.chips.join(',') === 'docs,<b>bold</b>', 'the text and the about chip read back exactly as the agent typed them');
-  ok(await A.js(`!document.querySelector('#feedback-sheet img') && !document.querySelector('#feedback-sheet b') && window.__xss === undefined`), 'no <img>, no <b> in the sheet; the onerror never ran (window.__xss undefined)');
+  ok(gateOf(plant) && plant.text === XSS && plant.chips.join(',') === 'docs,<b>bold</b>', 'the text and the about chip read back exactly as the agent typed them');
+  ok(verdictOf(await A.js(`!document.querySelector('#feedback-sheet img') && !document.querySelector('#feedback-sheet b') && window.__xss === undefined`)), 'no <img>, no <b> in the sheet; the onerror never ran (window.__xss undefined)');
 
   console.log('— ③ two lines until a click');
   const h0 = await A.js(`document.querySelector('#feedback-sheet .fb-row[data-id="fb-0000000001"] .fb-text').getBoundingClientRect().height`);
   await A.click('#feedback-sheet .fb-row[data-id="fb-0000000001"] .fb-text');
   const h1 = await A.js(`document.querySelector('#feedback-sheet .fb-row[data-id="fb-0000000001"] .fb-text').getBoundingClientRect().height`);
-  ok(h1 > h0 * 1.8 && await A.js(`document.querySelector('#feedback-sheet .fb-row[data-id="fb-0000000001"]').classList.contains('fb-open')`), `a long report is two lines (${Math.round(h0)} px) until a click opens all four (${Math.round(h1)} px)`);
+  ok(h1 > h0 * 1.8 && verdictOf(await A.js(`document.querySelector('#feedback-sheet .fb-row[data-id="fb-0000000001"]').classList.contains('fb-open')`)), `a long report is two lines (${Math.round(h0)} px) until a click opens all four (${Math.round(h1)} px)`);
   await A.shot('sheet-open-filter.png');
 
   console.log('— ④ Mark handled on A; B sees it live');
@@ -169,14 +169,14 @@ try {
   await B.js(`document.querySelector('${POP}')?.remove(); document.getElementById('btn-global-settings').click(); true`);
   await until(() => B.js(`!!document.querySelector('${POP} [data-id="agent-feedback"]')`), 3000);
   await B.js(`document.querySelector('${POP} [data-id="agent-feedback"]').click(); true`);
-  ok(await until(() => B.js(`document.querySelectorAll('#feedback-sheet .fb-row').length === 2`), 5000), '(setup) client B has the sheet open too (2 open rows)');
+  ok(verdictOf(await until(() => B.js(`document.querySelectorAll('#feedback-sheet .fb-row').length === 2`), 5000)), '(setup) client B has the sheet open too (2 open rows)');
   await A.front();
   await A.click('#feedback-sheet .fb-row[data-id="fb-0000000001"] .fb-act');
   const goneA = await until(() => A.js(`!document.querySelector('#feedback-sheet .fb-row[data-id="fb-0000000001"]')`), 3000);
-  ok(goneA && await A.js(TABS) === 'Open (1)* | Handled (2) | All (3)', `A: the row leaves the Open list, the tabs recount (${await A.js(TABS)})`);
+  ok(gateOf(goneA) && await A.js(TABS) === 'Open (1)* | Handled (2) | All (3)', `A: the row leaves the Open list, the tabs recount (${await A.js(TABS)})`);
   const t0 = Date.now();
   const goneB = await until(() => B.js(`!document.querySelector('#feedback-sheet .fb-row[data-id="fb-0000000001"]')`), 5000);
-  ok(goneB, `B: the same row leaves B's Open list LIVE (${Date.now() - t0} ms after A's answer)`);
+  ok(verdictOf(goneB), `B: the same row leaves B's Open list LIVE (${Date.now() - t0} ms after A's answer)`);
   const server = await (await fetch(BASE + '/api/feedback')).json();
   ok(server.reports.find((r) => r.id === 'fb-0000000001').status === 'handled' && server.open === 1, 'the server says handled (open 1)');
 
@@ -190,7 +190,7 @@ try {
   const senv = {}; for (const line of fs.readFileSync(path.join(ENVS, envFile), 'utf8').split('\n')) { const i = line.indexOf('='); if (i > 0) senv[line.slice(0, i)] = line.slice(i + 1); }
   const NEW = 'vibespace-feedback itself: the For you tray is called the inbox in one manual line';
   const cli = await new Promise((resolve) => execFile(process.execPath, [path.join(INST, 'data/bin/vibespace-feedback'), NEW, '--about', 'vibespace-ask', '--kind', 'docs'], { env: { PATH: env.PATH, VIBESPACE_API: senv.VIBESPACE_API, VIBESPACE_SESSION_TOKEN: senv.VIBESPACE_SESSION_TOKEN }, timeout: 20000 }, (err, out, e) => resolve({ code: err ? err.code : 0, out, err: e })));
-  ok(cli.code === 0 && /sent to the maintainers \(fb-[0-9a-f]{10}\)/.test(cli.out), `the REAL CLI with that session's token files it (${cli.out.trim().split('\n')[0]})`, cli);
+  ok(cli.code === 0 && verdictOf(/sent to the maintainers \(fb-[0-9a-f]{10}\)/.test(cli.out)), `the REAL CLI with that session's token files it (${cli.out.trim().split('\n')[0]})`, cli);
   const newId = (/\((fb-[0-9a-f]{10})\)/.exec(cli.out) || [])[1];
   const t1 = Date.now();
   const onA = await until(() => A.js(`(() => { const r = document.querySelector('#feedback-sheet .fb-list .fb-row'); return r && r.dataset.id === ${JSON.stringify(newId)} ? r.querySelector('.fb-who').textContent : null; })()`), 6000);
@@ -199,10 +199,10 @@ try {
   ok(await A.js(TABS) === 'Open (2)* | Handled (2) | All (4)' && await B.js(TABS) === 'Open (2)* | Handled (2) | All (4)', `both recount: ${await A.js(TABS)}`);
   await A.click('#feedback-sheet .fb-tab[data-filter="handled"]');
   rows = await A.js(ROW_TEXTS);
-  ok(rows.length === 2 && rows.every((r) => r.status === 'handled' && r.act === 'Reopen') && rows[0].id === 'fb-0000000001', `the Handled filter: the two handled, each with Reopen (${rows.map((r) => r.id).join(' ')})`);
+  ok(rows.length === 2 && gateOf(rows.every((r) => r.status === 'handled' && r.act === 'Reopen')) && rows[0].id === 'fb-0000000001', `the Handled filter: the two handled, each with Reopen (${rows.map((r) => r.id).join(' ')})`);
   // lane feedback-handled-verb: the maintainer's mark names the release and the conversation, the note under it; the owner's own click is unchanged
   const byAgent = rows.find((r) => r.id === 'fb-0000000002') || {}, byOwner = rows.find((r) => r.id === 'fb-0000000001') || {};
-  ok(/ · handled in 2\.369\.330 by VibeSpace 主开发, /.test(byAgent.meta) && byAgent.note === 'the composer rides above the keyboard now' && / · handled /.test(byOwner.meta) && !/handled in/.test(byOwner.meta) && byOwner.note === null,
+  ok(gateOf(/ · handled in 2\.369\.330 by VibeSpace 主开发, /.test(byAgent.meta)) && byAgent.note === 'the composer rides above the keyboard now' && gateOf(/ · handled /.test(byOwner.meta)) && !/handled in/.test(byOwner.meta) && byOwner.note === null,
     `«handled in 2.369.330 by VibeSpace 主开发» + the note on the maintainer's mark; the owner's own click says «handled <when>» (${byAgent.meta} | ${byOwner.meta})`);
   await A.shot('sheet-handled-filter.png');
   await A.click('#feedback-sheet .fb-tab[data-filter="all"]');
@@ -210,62 +210,62 @@ try {
   await A.click('#feedback-sheet .fb-tab[data-filter="open"]');
   await A.shot('sheet-live-new-report.png');
   await A.key('Escape', 27);
-  ok(await until(() => A.js(`!document.querySelector('#feedback-sheet')`), 2000), 'Esc closes the sheet');
-  ok(await openSystem(A), '(setup) System ▸ again');
-  ok(await until(() => A.js(`document.querySelector('${POP} [data-id="agent-feedback"] .gs-count')?.textContent === '2'`), 3000), 'the gear row\'s count follows: 2 open');
+  ok(verdictOf(await until(() => A.js(`!document.querySelector('#feedback-sheet')`), 2000)), 'Esc closes the sheet');
+  ok(verdictOf(await openSystem(A)), '(setup) System ▸ again');
+  ok(verdictOf(await until(() => A.js(`document.querySelector('${POP} [data-id="agent-feedback"] .gs-count')?.textContent === '2'`), 3000)), 'the gear row\'s count follows: 2 open');
   wsMain.close();
 
   console.log('— ⑥ zh');
   const Z = await page('Z', { lang: 'zh' });
-  ok(await openSystem(Z), '(setup) ⚙ → 系统 ▸');
+  ok(verdictOf(await openSystem(Z)), '(setup) ⚙ → 系统 ▸');
   const zsys = await Z.js(SYS_ROWS);
-  ok(zsys.some((t) => /^Agent 反馈…2$/.test(t)), `系统 holds 「Agent 反馈…」 with its count (${zsys.join(' / ')})`);
+  ok(verdictOf(zsys.some((t) => /^Agent 反馈…2$/.test(t))), `系统 holds 「Agent 反馈…」 with its count (${zsys.join(' / ')})`);
   await Z.shot('zh-gear-system-agent-feedback.png');
   await Z.click(`${POP} [data-id="agent-feedback"]`);
   await until(() => Z.js(`document.querySelectorAll('#feedback-sheet .fb-row').length === 2`), 5000);
-  ok(await Z.js(`document.querySelector('#feedback-sheet .dialog-header h3').textContent === 'Agent 反馈' && /未处理（2）/.test(document.querySelector('#feedback-sheet .fb-tab').textContent) && document.querySelector('#feedback-sheet .fb-act').textContent === '已处理'`), 'the sheet in zh: 「Agent 反馈」, 未处理（2）, 已处理');
+  ok(verdictOf(await Z.js(`document.querySelector('#feedback-sheet .dialog-header h3').textContent === 'Agent 反馈' && /未处理（2）/.test(document.querySelector('#feedback-sheet .fb-tab').textContent) && document.querySelector('#feedback-sheet .fb-act').textContent === '已处理'`)), 'the sheet in zh: 「Agent 反馈」, 未处理（2）, 已处理');
   await Z.shot('zh-sheet.png');
   await Z.click('#feedback-sheet .fb-tab[data-filter="handled"]');
   const zMeta = await until(() => Z.js(`document.querySelector('#feedback-sheet .fb-row[data-id="fb-0000000002"] .fb-meta')?.textContent || null`), 3000);
-  ok(/ · VibeSpace 主开发 于 .+ 标为已处理（2\.369\.330 修复）$/.test(String(zMeta)), `zh: 「VibeSpace 主开发 于 … 标为已处理（2.369.330 修复）」 (${zMeta})`);
+  ok(verdictOf(/ · VibeSpace 主开发 于 .+ 标为已处理（2\.369\.330 修复）$/.test(String(zMeta))), `zh: 「VibeSpace 主开发 于 … 标为已处理（2.369.330 修复）」 (${zMeta})`);
   await Z.shot('zh-sheet-handled-by-agent.png');
   Z.close();
 
   console.log('— ⑦ the fake pod\'s maintainer: the real CLI with the key, no session (lane fleet-feedback-marks)');
   const mcli = (args, extra) => new Promise((resolve) => execFile(process.execPath, [path.join(INST, 'data/bin/vibespace-feedback'), ...args], { env: { PATH: env.PATH, PORT: String(PORT), ...extra }, timeout: 20000 }, (err, out, e) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(e) })));
   const ml = await mcli(['list', '--open'], { VIBESPACE_MAINTAINER_KEY: MKEY });
-  ok(ml.code === 0 && /^2 open reports on this instance:\n/.test(ml.out) && ml.out.includes(newId) && ml.out.includes('fb-0000000003') && ml.out.includes('the sheet must show this as text'), `\`vibespace-feedback list --open\` on the instance's shell (the key, the instance's own PORT, no session): the two open reports with their ids and words (a terminal prints the planted tag as text) (${ml.out.split('\n')[0]})`, ml);
+  ok(ml.code === 0 && gateOf(/^2 open reports on this instance:\n/.test(ml.out)) && gateOf(ml.out.includes(newId)) && gateOf(ml.out.includes('fb-0000000003')) && verdictOf(ml.out.includes('the sheet must show this as text')), `\`vibespace-feedback list --open\` on the instance's shell (the key, the instance's own PORT, no session): the two open reports with their ids and words (a terminal prints the planted tag as text) (${ml.out.split('\n')[0]})`, ml);
   const mbad = await mcli(['list', '--open'], { VIBESPACE_MAINTAINER_KEY: 'vsmk_' + 'A'.repeat(43) });
-  ok(mbad.code === 1 && /this instance does not know that maintainer key/.test(mbad.err), 'a wrong key ⇒ exit 1, «this instance does not know that maintainer key»', mbad);
+  ok(mbad.code === 1 && verdictOf(/this instance does not know that maintainer key/.test(mbad.err)), 'a wrong key ⇒ exit 1, «this instance does not know that maintainer key»', mbad);
   const scope = await fetch(BASE + '/api/agent/automation/conversations.open', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + MKEY }, body: JSON.stringify({ cwd: CWD }) });
   const sj = await scope.json().catch(() => ({}));
   ok(scope.status === 403 && sj.code === 'maintainer_key_scope', 'the key asking conversations.open on the real door ⇒ 403 maintainer_key_scope', sj);
   const NOTE7 = 'the manual says For you now';
   const mh = await mcli(['handled', newId, '--version', '2.369.346', '--note', NOTE7], { VIBESPACE_MAINTAINER_KEY: MKEY });
-  ok(mh.code === 0 && mh.out.includes(`marked handled: ${newId} in 2.369.346 (by the maintainer key)`), `\`vibespace-feedback handled ${newId} --version 2.369.346 --note …\`: exit 0 (${mh.out.trim()})`, mh);
+  ok(mh.code === 0 && verdictOf(mh.out.includes(`marked handled: ${newId} in 2.369.346 (by the maintainer key)`)), `\`vibespace-feedback handled ${newId} --version 2.369.346 --note …\`: exit 0 (${mh.out.trim()})`, mh);
   const goneOnB = await until(() => B.js(`!document.querySelector('#feedback-sheet .fb-list .fb-row[data-id="${newId}"]')`), 6000);
-  ok(goneOnB, 'B: the marked report leaves its Open list LIVE (the same store call, the same mirror)');
-  ok(await openSystem(A), '(setup) A: System ▸');
+  ok(verdictOf(goneOnB), 'B: the marked report leaves its Open list LIVE (the same store call, the same mirror)');
+  ok(verdictOf(await openSystem(A)), '(setup) A: System ▸');
   await A.click(`${POP} [data-id="agent-feedback"]`);
   await until(() => A.js(`!!document.querySelector('#feedback-sheet .fb-tab[data-filter="handled"]')`), 5000);
   await A.click('#feedback-sheet .fb-tab[data-filter="handled"]');
   const mrow = await until(async () => (await A.js(ROW_TEXTS)).find((r) => r.id === newId), 5000) || {};
-  ok(/ · handled in 2\.369\.346 by the maintainers, /.test(String(mrow.meta)) && mrow.note === NOTE7 && mrow.act === 'Reopen', `the sheet: «handled in 2.369.346 by the maintainers» + the note under it, like a hub record (${mrow.meta} | ${mrow.note})`, mrow);
+  ok(gateOf(/ · handled in 2\.369\.346 by the maintainers, /.test(String(mrow.meta))) && mrow.note === NOTE7 && mrow.act === 'Reopen', `the sheet: «handled in 2.369.346 by the maintainers» + the note under it, like a hub record (${mrow.meta} | ${mrow.note})`, mrow);
   await A.shot('sheet-handled-by-maintainers.png');
   const Z2 = await page('Z2', { lang: 'zh' });
-  ok(await openSystem(Z2), '(setup) zh: ⚙ → 系统 ▸');
+  ok(verdictOf(await openSystem(Z2)), '(setup) zh: ⚙ → 系统 ▸');
   await Z2.click(`${POP} [data-id="agent-feedback"]`);
   await until(() => Z2.js(`!!document.querySelector('#feedback-sheet .fb-tab[data-filter="handled"]')`), 5000);
   await Z2.click('#feedback-sheet .fb-tab[data-filter="handled"]');
   const zm = await until(() => Z2.js(`document.querySelector('#feedback-sheet .fb-row[data-id="${newId}"] .fb-meta')?.textContent || null`), 3000);
-  ok(/ · 维护者 于 .+ 标为已处理（2\.369\.346 修复）$/.test(String(zm)), `zh: 「维护者 于 … 标为已处理（2.369.346 修复）」 (${zm})`);
+  ok(verdictOf(/ · 维护者 于 .+ 标为已处理（2\.369\.346 修复）$/.test(String(zm))), `zh: 「维护者 于 … 标为已处理（2.369.346 修复）」 (${zm})`);
   await Z2.shot('zh-sheet-handled-by-maintainers.png');
   Z2.close();
   // THE FILER IS TOLD: its next prompt — the real injection route with its own session token — carries the sentence, once
   const pc = async () => { const r = await fetch(BASE + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + senv.VIBESPACE_SESSION_TOKEN } }); return r.ok ? String((await r.json()).context || '') : `HTTP ${r.status}`; };
   const SAID = `Your feedback report ${newId} (about vibespace-ask) was handled in 2.369.346: ${NOTE7}`;
   const c1 = await pc(), c2 = await pc();
-  ok(c1.includes(`<system-reminder>\n${SAID}\n</system-reminder>`) && !c2.includes(SAID), `the FILING session's next prompt-context carries «${SAID}» — once (the next prompt does not repeat it)`, { c1: c1.slice(-600), c2: c2.slice(-300) });
+  ok(gateOf(c1.includes(`<system-reminder>\n${SAID}\n</system-reminder>`)) && !c2.includes(SAID), `the FILING session's next prompt-context carries «${SAID}» — once (the next prompt does not repeat it)`, { c1: c1.slice(-600), c2: c2.slice(-300) });
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);
 } finally {
@@ -273,4 +273,4 @@ try {
 }
 console.log(`  (PNGs: ${SHOTS})`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

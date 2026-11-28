@@ -23,7 +23,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const PM = require('../src/peer-messaging.js');
 const { findPeer, postToPeer } = PM;
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -57,7 +57,7 @@ await new Promise((r) => server.listen(sockPath, r));
 
 // 1. registry scan
 const peer = findPeer(SID, dir);
-ok(peer && peer.socketPath === sockPath && peer.key === KEY && peer.name === 'test-peer', 'findPeer resolves live record + reads the published key file');
+ok(gateOf(peer) && peer.socketPath === sockPath && peer.key === KEY && peer.name === 'test-peer', 'findPeer resolves live record + reads the published key file');
 ok(findPeer('dead-conv', dir) === null, 'dead-pid registry record treated as absent');
 ok(findPeer('no-such-conversation', dir) === null, 'NEGATIVE CONTROL: unknown conversation → null');
 ok(findPeer(SID, path.join(dir, 'nope')) === null, 'missing registry dir → null, never throws');
@@ -67,12 +67,12 @@ const r1 = await postToPeer(peer, 'job done: test message');
 ok(r1.ok === true, 'postToPeer resolves ok against a listening inbox', r1.reason);
 await new Promise((r) => setTimeout(r, 100));
 ok(frames.length === 2 && frames[0].type === 'auth' && frames[0].token === KEY, 'first frame = auth with the published key');
-ok(frames[1] && frames[1].type === 'user' && frames[1].message && frames[1].message.role === 'user' && frames[1].message.content === 'job done: test message', 'second frame = the documented user-message injection shape');
+ok(gateOf(frames[1]) && frames[1].type === 'user' && gateOf(frames[1].message) && frames[1].message.role === 'user' && frames[1].message.content === 'job done: test message', 'second frame = the documented user-message injection shape');
 server.close();
 
 // 3. dead socket honesty
 const r2 = await postToPeer({ socketPath: path.join(dir, 'gone.sock'), key: null }, 'x');
-ok(r2.ok === false && /socket error|timeout/.test(r2.reason || ''), 'dead socket → {ok:false, reason}, never throws');
+ok(r2.ok === false && verdictOf(/socket error|timeout/.test(r2.reason || '')), 'dead socket → {ok:false, reason}, never throws');
 
 // §4 THE PROCESS IDENTITY (lane peer-registry-identity). Shapes measured on the hub 2026-10-14 (ids, pids and start
 // times invented): the CLI writes `procStart` as a STRING (/proc/<pid>/stat field 22) and `startedAt` in ms; after the
@@ -93,7 +93,7 @@ const HAS_PROC = fs.existsSync('/proc/self/stat');
   const v3 = PM.registryIdentityOk(rec, probe({ starttime: () => null }));
   ok(v3.ok === false && v3.reasons.join() === 'pid-gone', 'PURE: no /proc/<pid>/stat for the pid ⇒ pid-gone', JSON.stringify(v3));
   const v4 = PM.registryIdentityOk({ pid: 15622, messagingSocketPath: '/x.sock' }, probe({ starttime: () => { throw new Error('never asked'); } }));
-  ok(v4.ok === true && /^pid-only/.test(v4.identity) && /no procStart/.test(v4.identity), 'PURE: a record without procStart (an older CLI) falls back to the pid alone — and the verdict says so', JSON.stringify(v4));
+  ok(v4.ok === true && gateOf(/^pid-only/.test(v4.identity)) && verdictOf(/no procStart/.test(v4.identity)), 'PURE: a record without procStart (an older CLI) falls back to the pid alone — and the verdict says so', JSON.stringify(v4));
   const v5 = PM.registryIdentityOk(rec, probe({ hasProc: false, starttime: () => { throw new Error('never asked'); } }));
   ok(v5.ok === true && v5.identity === 'pid-only (no /proc on this machine)', 'PURE: no /proc on this machine (macOS) ⇒ pid-only, said in the result', JSON.stringify(v5));
   const v6 = PM.registryIdentityOk({ ...rec, procStart: undefined }, probe({ alive: () => false }));
@@ -121,9 +121,9 @@ fs.writeFileSync(path.join(hub, `${process.pid}.0123abcd.key`), KEY + '\n');
   writeHub(hub, [[STALE_F, staleRec], [LIVE_F, liveRec]]);
   ok(jsonOrder(hub)[0] === STALE_F, 'precondition: the scan meets the STALE record first (the hub\'s readdir order)', JSON.stringify(jsonOrder(hub)));
   const L = PM.lookupPeer(HSID, hub);
-  ok(HAS_PROC && L.peer && L.peer.socketPath === liveSock && L.peer.key === KEY && L.peer.identity === 'pid+start', 'the hub\'s shape: two records for one session ⇒ the LIVE one is chosen (its socket, its key, identity pid+start)', JSON.stringify(L));
-  ok(L.candidates === 2 && L.stale === 1 && L.why === 'candidates: 2, stale: 1 (pid-reused: 1, socket-absent: 1)' && L.peer && L.peer.why === L.why, 'the verdict carries the why for the journal: candidates 2, stale 1 (pid-reused 1, socket-absent 1)', L.why);
-  ok(findPeer(HSID, hub) && findPeer(HSID, hub).socketPath === liveSock, 'findPeer answers the same record (the ladder\'s and agentd\'s call)');
+  ok(gateOf(HAS_PROC) && gateOf(L.peer) && L.peer.socketPath === liveSock && L.peer.key === KEY && L.peer.identity === 'pid+start', 'the hub\'s shape: two records for one session ⇒ the LIVE one is chosen (its socket, its key, identity pid+start)', JSON.stringify(L));
+  ok(L.candidates === 2 && L.stale === 1 && L.why === 'candidates: 2, stale: 1 (pid-reused: 1, socket-absent: 1)' && gateOf(L.peer) && L.peer.why === L.why, 'the verdict carries the why for the journal: candidates 2, stale 1 (pid-reused 1, socket-absent 1)', L.why);
+  ok(gateOf(findPeer(HSID, hub)) && findPeer(HSID, hub).socketPath === liveSock, 'findPeer answers the same record (the ladder\'s and agentd\'s call)');
   const r = await postToPeer(L.peer, 'reaches the live inbox');
   ok(r.ok === true, 'the chosen record\'s socket takes the post', JSON.stringify(r));
 }
@@ -132,7 +132,7 @@ fs.writeFileSync(path.join(hub, `${process.pid}.0123abcd.key`), KEY + '\n');
   writeHub(hub, [[`1${process.pid}.json`, liveRec], [`9${process.pid}.json`, staleRec]]);
   ok(jsonOrder(hub)[0] === `1${process.pid}.json`, 'precondition (mirror): the scan meets the LIVE record first');
   const L = PM.lookupPeer(HSID, hub);
-  ok(L.peer && L.peer.socketPath === liveSock && L.why === 'candidates: 2, stale: 1 (pid-reused: 1, socket-absent: 1)', 'the mirror (live record first) ⇒ the same live record, the same why', JSON.stringify(L));
+  ok(gateOf(L.peer) && L.peer.socketPath === liveSock && L.why === 'candidates: 2, stale: 1 (pid-reused: 1, socket-absent: 1)', 'the mirror (live record first) ⇒ the same live record, the same why', JSON.stringify(L));
 }
 {
   // two LIVE records (a CLI restarted while the old process still serves): the newest startedAt wins, whatever the order
@@ -144,7 +144,7 @@ fs.writeFileSync(path.join(hub, `${process.pid}.0123abcd.key`), KEY + '\n');
   const a = PM.lookupPeer(HSID, hub);
   writeHub(hub, [[STALE_F, liveRec], [LIVE_F, older]]);
   const b = PM.lookupPeer(HSID, hub);
-  ok(a.peer && b.peer && a.peer.socketPath === liveSock && b.peer.socketPath === liveSock && a.why === 'candidates: 2, stale: 0', 'two passing records ⇒ the newest startedAt wins in either order', JSON.stringify([a.why, a.peer && a.peer.socketPath, b.peer && b.peer.socketPath]));
+  ok(gateOf(a.peer) && gateOf(b.peer) && a.peer.socketPath === liveSock && b.peer.socketPath === liveSock && a.why === 'candidates: 2, stale: 0', 'two passing records ⇒ the newest startedAt wins in either order', JSON.stringify([a.why, a.peer && a.peer.socketPath, b.peer && b.peer.socketPath]));
   srv2.close();
 }
 {
@@ -152,7 +152,7 @@ fs.writeFileSync(path.join(hub, `${process.pid}.0123abcd.key`), KEY + '\n');
   writeHub(hub, [[STALE_F, staleRec]]);
   const L = PM.lookupPeer(HSID, hub);
   ok(L.peer === null && findPeer(HSID, hub) === null && L.candidates === 1 && L.stale === 1 && L.why === 'candidates: 1, stale: 1 (pid-reused: 1, socket-absent: 1)', 'a single stale record ⇒ null + the why', JSON.stringify(L));
-  ok(fs.existsSync(path.join(hub, STALE_F)), '…and the stale record is never cleaned (the CLI owns the directory)');
+  ok(verdictOf(fs.existsSync(path.join(hub, STALE_F))), '…and the stale record is never cleaned (the CLI owns the directory)');
   const gone = { ...staleRec, pid: 99999999, procStart: '131014' };
   writeHub(hub, [[STALE_F, gone]]);
   ok(PM.lookupPeer(HSID, hub).why === 'candidates: 1, stale: 1 (pid-gone: 1, socket-absent: 1)', 'a dead pid counts as pid-gone (the other seven hub twins)', PM.lookupPeer(HSID, hub).why);
@@ -172,7 +172,7 @@ fs.writeFileSync(path.join(hub, `${process.pid}.0123abcd.key`), KEY + '\n');
   const Old = M.load('src/peer-messaging.js', editAnchor(editAnchor(src, RULE, PID_ONLY, "src/peer-messaging.js"), CHOICE, FIRST, "src/peer-messaging.js"), 'pidonly');
   writeHub(hub, [[STALE_F, staleRec], [LIVE_F, liveRec]]);
   const p = Old.findPeer(HSID, hub);
-  ok(p && p.socketPath === staleRec.messagingSocketPath, 'RED CONTROL: the pid-only first-record rule picks the STALE record (its socket absent) on the hub\'s shape', JSON.stringify(p));
+  ok(gateOf(p) && p.socketPath === staleRec.messagingSocketPath, 'RED CONTROL: the pid-only first-record rule picks the STALE record (its socket absent) on the hub\'s shape', JSON.stringify(p));
   const r = p ? await postToPeer(p, 'x', { timeoutMs: 500 }) : { ok: true };
   ok(r.ok === false && r.transient === false, '…and its post fails as "not served" (ENOENT) — the 34 stashed posts', JSON.stringify(r));
 }
@@ -181,4 +181,4 @@ fs.rmSync(hub, { recursive: true, force: true });
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

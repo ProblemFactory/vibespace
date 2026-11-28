@@ -19,7 +19,7 @@ import { engineSource } from './channels-engine-src.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -45,21 +45,21 @@ const F = (now, extra = {}) => ({ setting: 3000, minUnit: 40, now, ...extra });
 console.log('① the PURE table');
 {
   let r = B.budgetStep(null, 'boot', F(T0));
-  ok(r.state.ceiling === 3000 && r.full && B.EVENTS.join() === 'refused,quiet-minute,setting-changed,boot', 'boot with nothing persisted = the setting (the closed events: refused, quiet-minute, setting-changed, boot)');
+  ok(r.state.ceiling === 3000 && gateOf(r.full) && B.EVENTS.join() === 'refused,quiet-minute,setting-changed,boot', 'boot with nothing persisted = the setting (the closed events: refused, quiet-minute, setting-changed, boot)');
   r = B.budgetStep(r.state, 'refused', F(T0));
-  ok(r.halved && r.state.ceiling === 1500 && r.state.wall === 3000 && !r.loud, 'a burst\'s first strike HALVES the ceiling (3 000 → 1 500) and remembers the refused 3 000 as the wall');
+  ok(gateOf(r.halved) && r.state.ceiling === 1500 && r.state.wall === 3000 && !r.loud, 'a burst\'s first strike HALVES the ceiling (3 000 → 1 500) and remembers the refused 3 000 as the wall');
   const r2 = B.budgetStep(r.state, 'refused', F(T0 + 20e3, { burstStart: false }));
   ok(!r2.halved && r2.state.ceiling === 1500 && r2.state.refusedAt === T0 + 20e3, 'the burst\'s later strikes do not halve again — they restart the quiet clock');
   const r3 = B.budgetStep(r2.state, 'refused', F(T0 + 30 * 60e3));
-  ok(r3.halved && r3.loud && r3.state.halvesToday === 2 && !B.budgetStep(r3.state, 'refused', F(T0 + 40 * 60e3)).loud, 'the day\'s SECOND halving is loud (the one "For you" item); the third is not');
+  ok(gateOf(r3.halved) && gateOf(r3.loud) && r3.state.halvesToday === 2 && !B.budgetStep(r3.state, 'refused', F(T0 + 40 * 60e3)).loud, 'the day\'s SECOND halving is loud (the one "For you" item); the third is not');
   let s = r.state; for (let i = 0; i < 12; i++) s = B.budgetStep(s, 'refused', F(T0 + i * 120e3)).state;
   ok(s.ceiling === 300 && B.floorOf(3000, 40) === 300 && B.floorOf(100, 40) === 40 && B.floorOf(30, 40) === 30, 'the floor: 10 % of the setting (300 of 3 000), never below one read (40 of a 100 setting), never above the setting');
   const q1 = B.budgetStep(r.state, 'quiet-minute', F(T0 + 59e3)); const q2 = B.budgetStep(r.state, 'quiet-minute', F(T0 + 60e3));
-  ok(!q1.changed && q2.crept && q2.state.ceiling === 1800, 'a quiet MINUTE creeps by a tenth of the setting (1 500 → 1 800); 59 s is not a minute');
+  ok(!q1.changed && gateOf(q2.crept) && q2.state.ceiling === 1800, 'a quiet MINUTE creeps by a tenth of the setting (1 500 → 1 800); 59 s is not a minute');
   const q3 = B.budgetStep(r.state, 'quiet-minute', F(T0 + 30 * 60e3));
   ok(q3.state.ceiling === 2700, 'while the wall stands (an hour) the creep stops ONE step under the refused ceiling (2 700, not 3 000)');
   const q4 = B.budgetStep(q3.state, 'quiet-minute', F(T0 + 60.5 * 60e3)); const q5 = B.budgetStep(q4.state, 'quiet-minute', F(T0 + 62 * 60e3));
-  ok(q4.state.ceiling === 2700 && q4.state.wall === null && q5.state.ceiling === 3000 && q5.full, 'the wall falls after the hour; the minutes under it do not bank — the next quiet minute brings the setting back');
+  ok(q4.state.ceiling === 2700 && q4.state.wall === null && q5.state.ceiling === 3000 && verdictOf(q5.full), 'the wall falls after the hour; the minutes under it do not bank — the next quiet minute brings the setting back');
   const sc = B.budgetStep(r.state, 'setting-changed', F(T0, { setting: 6000 }));
   ok(sc.state.ceiling === 3000 && sc.state.setting === 6000 && sc.state.wall === 6000, 'setting-changed keeps the learned FRACTION (half of 6 000) — the setting stays the cap');
   const bt = B.budgetStep({ ceiling: 99999, setting: 3000, day: '2026-10-04', halvesToday: 2 }, 'boot', F(T0));
@@ -125,11 +125,11 @@ const real = await pair(ENG, { minutes: 60 });
   const late = real.refusals.filter((r) => r.at - T0 > 10 * 60e3);
   ok(real.refusals.length >= 1 && bursts(real.refusals, 'A') <= 2 && bursts(real.refusals, 'B') <= 2 && late.length === 0, `the measured shape (2 × 3 000 over a 6 000 bucket): ${real.refusals.length} refusal(s), ${bursts(real.refusals, 'A')}+${bursts(real.refusals, 'B')} burst(s), then NEITHER trips again within the hour`, JSON.stringify(real.refusals.map((r) => [r.who, (r.at - T0) / 1e3])));
   const lb = real.budgets.find((b) => b.learned);
-  ok(lb && lb.limit === 2700 && lb.learned.setting === 3000 && lb.learned.refusedAt === real.refusals[0].at && lb.learned.fullAt > T0 + 60 * 60e3, `the refused instance polls at 2 700 of 3 000 (one step under the wall) and says when it is back (${lb && JSON.stringify(lb.learned)})`);
+  ok(gateOf(lb) && lb.limit === 2700 && lb.learned.setting === 3000 && lb.learned.refusedAt === real.refusals[0].at && lb.learned.fullAt > T0 + 60 * 60e3, `the refused instance polls at 2 700 of 3 000 (one step under the wall) and says when it is back (${lb && JSON.stringify(lb.learned)})`);
 }
 console.log('④ the ceiling survives a restart');
 const rs = await pair(ENG, { minutes: 30, restartAt: 15 });
-ok(rs.atRestart && rs.atRestart.limit < 3000 && rs.refusals.every((r) => r.at - T0 < 15 * 60e3) && rs.disk && rs.disk.ceiling === rs.atRestart.limit, `restarted at minute 15, B boots at its persisted ${rs.atRestart && rs.atRestart.limit} (adapters.json, beside the account) and nothing trips after the restart`, JSON.stringify(rs.refusals.map((r) => [r.who, (r.at - T0) / 1e3])));
+ok(gateOf(rs.atRestart) && rs.atRestart.limit < 3000 && gateOf(rs.refusals.every((r) => r.at - T0 < 15 * 60e3)) && gateOf(rs.disk) && rs.disk.ceiling === rs.atRestart.limit, `restarted at minute 15, B boots at its persisted ${rs.atRestart && rs.atRestart.limit} (adapters.json, beside the account) and nothing trips after the restart`, JSON.stringify(rs.refusals.map((r) => [r.who, (r.at - T0) / 1e3])));
 
 console.log('⑤ the words');
 {
@@ -175,7 +175,7 @@ const engOver = (bsrc, tag) => { const bp = M.write('src/channel-budget.js', bsr
 const HALVE = '      s.ceiling = Math.max(floor, Math.floor(s.ceiling / 2));\n';
 const CREEP = '      const next = Math.min(cap, s.ceiling + k * step);\n';
 const WALL = '      const walled = !!(s.wall && s.wallUntil > t);\n';
-ok(ESRC.includes(REQ) && [HALVE, CREEP, WALL].every((a) => BSRC.split(a).length === 2), 'CONTROL anchors are in the files');
+ok(gateOf(ESRC.includes(REQ)) && verdictOf([HALVE, CREEP, WALL].every((a) => BSRC.split(a).length === 2)), 'CONTROL anchors are in the files');
 {
   const c = await pair(engOver(BSRC.replace(HALVE, ''), 'nohalve'), { minutes: 20 });
   ok(c.refusals.length >= 10, `CONTROL no halve: the refused instance trips every pass (${c.refusals.length} refusals in 20 min) — RED`);
@@ -183,15 +183,15 @@ ok(ESRC.includes(REQ) && [HALVE, CREEP, WALL].every((a) => BSRC.split(a).length 
   let s = null; for (let i = 0; i < 5; i++) s = Bc.budgetStep(s, 'refused', F(T0 + i * 120e3)).state; for (let i = 1; i <= 180; i++) s = Bc.budgetStep(s, 'quiet-minute', F(T0 + 600e3 + i * 60e3)).state;
   ok(s.ceiling === 300, `CONTROL no creep: three quiet hours later the ceiling is still the floor (${s.ceiling}) — RED`);
   const nw = await pair(engOver(BSRC.replace(WALL, '      const walled = false;\n'), 'nowall'), { minutes: 60 });
-  ok(nw.refusals.some((r) => r.at - T0 > 10 * 60e3), `CONTROL no wall: the creep returns to the refused ceiling and trips again within the hour (${nw.refusals.length} refusals) — RED`);
+  ok(verdictOf(nw.refusals.some((r) => r.at - T0 > 10 * 60e3)), `CONTROL no wall: the creep returns to the refused ceiling and trips again within the hour (${nw.refusals.length} refusals) — RED`);
   const mem = (tag) => M.load('src/server/channels-engine.js', ESRC.replace(REQ, `${REQ}\nconst MEMK = Symbol('learned');`).replaceAll('rec.budgetLearned', 'rec[MEMK]'), tag);   // on the record in memory, never in its JSON
   const np = await pair(mem('eng-mem-1'), { minutes: 30, restartAt: 15, EngAfter: mem('eng-mem-2') });
-  ok(np.atRestart && np.atRestart.limit === 3000 && np.refusals.some((r) => r.at - T0 >= 15 * 60e3), `CONTROL ceiling not persisted: the restarted instance boots at 3 000 and trips again (${np.refusals.length} refusals) — RED`);
+  ok(gateOf(np.atRestart) && np.atRestart.limit === 3000 && verdictOf(np.refusals.some((r) => r.at - T0 >= 15 * 60e3)), `CONTROL ceiling not persisted: the restarted instance boots at 3 000 and trips again (${np.refusals.length} refusals) — RED`);
   const KEEP = '        const keep = !m && named(id);\n';
   const g = await gmailPages(M.load('src/channels/gmail.js', editAnchor(GSRC, KEEP, '        const keep = false;\n', "src/channels/gmail.js"), 'gmail-reread'));
-  ok(GSRC.includes(KEEP) && g.again === 210, `CONTROL discovery re-reads a named thread: the re-listing meters ${g.again} units, not 10 — RED`);
+  ok(gateOf(GSRC.includes(KEEP)) && g.again === 210, `CONTROL discovery re-reads a named thread: the re-listing meters ${g.again} units, not 10 — RED`);
 }
 const cc = copiesCensus(M.files, M.dir, REPO, { minCopies: 6, label: 'test-channel-budget' });
-for (const c of cc) ok(c.pass, c.name, c.detail);
+for (const c of cc) ok(verdictOf(c.pass), c.name, c.detail);
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

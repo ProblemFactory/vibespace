@@ -79,7 +79,7 @@ const S = require(path.join(REPO, 'src/server/desktop-stream.js'));
 const http = require('http');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 400) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 400) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -146,7 +146,7 @@ function hostsFor(map) {
 
 console.log('§0 the built bundle carries the op');
 const bundleText = fs.existsSync(BUNDLE) ? fs.readFileSync(BUNDLE, 'utf8') : '';
-ok(/capabilities: \[[^\]]*["']desktop-serve["'][^\]]*\]/.test(bundleText) && /desktop-serve-result/.test(bundleText) && /runDesktopServeOp/.test(bundleText), 'data/bin/vibespace-agentd.js advertises desktop-serve and bundles runDesktopServeOp (run `npm run build:agentd` when this is red)');
+ok(gateOf(/capabilities: \[[^\]]*["']desktop-serve["'][^\]]*\]/.test(bundleText)) && gateOf(/desktop-serve-result/.test(bundleText)) && verdictOf(/runDesktopServeOp/.test(bundleText)), 'data/bin/vibespace-agentd.js advertises desktop-serve and bundles runDesktopServeOp (run `npm run build:agentd` when this is red)');
 if (!bundleText) { console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
 
 const dm = deviceOn(home);
@@ -154,10 +154,10 @@ const conn = await dm.connect();
 const acc = ACC.create({ hosts: hostsFor({ 'dev-a': dm, 'ssh-only': {} }), install: false, log: { log() { }, warn() { } } });
 
 console.log('§1 the capability and the device\'s own facts');
-ok(conn.info?.capabilities?.includes?.('desktop-serve'), 'the daemon\'s hello-ack names desktop-serve (the client asks only such a daemon)');
+ok(verdictOf(conn.info?.capabilities?.includes?.('desktop-serve')), 'the daemon\'s hello-ack names desktop-serve (the client asks only such a daemon)');
 const facts = (await acc.call('dev-a', 'facts', { fresh: true })).facts;
 const bins = facts.bins || {};
-ok(facts && typeof bins === 'object' && 'xpra' in bins && 'Xvfb' in bins, 'facts answer through the op: the device\'s own binaries (xpra / Xvfb / …)', Object.keys(bins));
+ok(gateOf(facts) && typeof bins === 'object' && 'xpra' in bins && 'Xvfb' in bins, 'facts answer through the op: the device\'s own binaries (xpra / Xvfb / …)', Object.keys(bins));
 const XTERM = D.binOnPath('xterm', { env: process.env });
 const WWW = bins.xpra ? D.xpraWwwDir({ binPath: bins.xpra, env: process.env }) : null;
 const canRun = !!(bins.xpra && bins.Xvfb && bins.xauth && XTERM && WWW && fs.existsSync(path.join(WWW, 'js/lib/rencode.js')));
@@ -171,23 +171,23 @@ else {
 
   console.log('§2 launch on the device');
   const list = await acc.call('dev-a', 'list', { settings });
-  ok(list.availability && list.availability.backend === 'xpra' && list.availability.stream === 'xpra', `the device's ladder resolves the xpra rung (${list.availability && list.availability.backend})`, list.availability);
+  ok(gateOf(list.availability) && list.availability.backend === 'xpra' && list.availability.stream === 'xpra', `the device's ladder resolves the xpra rung (${list.availability && list.availability.backend})`, list.availability);
   const out = path.join(work, 'typed.txt');
   const t0 = Date.now();
   const L = await acc.call('dev-a', 'launch', { settings, body: { exec: XTERM, args: ['-geometry', '80x24', '-T', 'vs-remote', '-e', 'sh', '-c', `stty -icanon; cat > ${out}`], label: 'remote xterm' } });
   const app = L.app; ids.add(app.id);
-  ok(app && app.state === 'launching' && app.backend === 'xpra' && app.hostId === 'local', 'launch answers a launching record on xpra — hostId "local" is the DEVICE\'s view of itself (the hub re-labels it)', app && { state: app.state, backend: app.backend, hostId: app.hostId });
+  ok(gateOf(app) && app.state === 'launching' && app.backend === 'xpra' && app.hostId === 'local', 'launch answers a launching record on xpra — hostId "local" is the DEVICE\'s view of itself (the hub re-labels it)', app && { state: app.state, backend: app.backend, hostId: app.hostId });
   const ready = await until(async () => { const s = (await acc.call('dev-a', 'status', { id: app.id })).app; if (s.state === 'failed' || s.state === 'exited') return s; return s.state === 'ready' ? s : null; }, 30000, 250);
-  ok(ready && ready.state === 'ready' && ready.port > 0 && ready.pids.app > 0, `ready ${Date.now() - t0} ms after the launch op: port ${ready && ready.port}, display ${ready && ready.display}`, ready && { state: ready.state, lastError: ready.lastError });
+  ok(gateOf(ready) && ready.state === 'ready' && ready.port > 0 && ready.pids.app > 0, `ready ${Date.now() - t0} ms after the launch op: port ${ready && ready.port}, display ${ready && ready.display}`, ready && { state: ready.state, lastError: ready.lastError });
   const devStore = path.join(home, '.vibespace', 'desktop-apps.json');
   const onDisk = (() => { try { return JSON.parse(fs.readFileSync(devStore, 'utf8')).apps[app.id]; } catch { return null; } })();
-  ok(onDisk && onDisk.state === 'ready' && onDisk.pids.app === ready.pids.app, 'the record is the DEVICE\'s own (~/.vibespace/desktop-apps.json under its HOME — D8: the device holds it, the hub is a registry)');
-  ok(fs.existsSync(path.join(home, '.vibespace', 'desktop-apps', app.id, 'app.log')), 'the session\'s logs and Xauthority live in the device\'s own per-app dir');
+  ok(gateOf(onDisk) && onDisk.state === 'ready' && onDisk.pids.app === ready.pids.app, 'the record is the DEVICE\'s own (~/.vibespace/desktop-apps.json under its HOME — D8: the device holds it, the hub is a registry)');
+  ok(verdictOf(fs.existsSync(path.join(home, '.vibespace', 'desktop-apps', app.id, 'app.log'))), 'the session\'s logs and Xauthority live in the device\'s own per-app dir');
 
   if (ready && ready.state === 'ready') {
     console.log('§3 the picture forward + a real xpra hello + typing');
     const fwd = await acc.forwardPort('dev-a', ready.port);
-    ok(fwd && fwd.localPort > 0 && !fwd.local && acc.forwards().length === 1, `forwardPort opened a hub loopback listener 127.0.0.1:${fwd.localPort} → dev-a:${ready.port}`, acc.forwards());
+    ok(gateOf(fwd) && fwd.localPort > 0 && !fwd.local && acc.forwards().length === 1, `forwardPort opened a hub loopback listener 127.0.0.1:${fwd.localPort} → dev-a:${ready.port}`, acc.forwards());
     const tHello = Date.now();
     const ws = new WebSocket(`ws://127.0.0.1:${fwd.localPort}/`, ['binary']);
     const back = []; ws.on('message', (m) => back.push(Buffer.from(m)));
@@ -216,29 +216,29 @@ else {
 
     console.log('§4 windows / keep-alive / status, then the daemon dies and a new one adopts');
     const win = await acc.call('dev-a', 'windows', { id: app.id });
-    ok(Array.isArray(win.windows) && win.windows.some((w) => /vs-remote/.test(String(w.title || ''))), `windows answers the app's own rows on the device (${win.windows.map((w) => w.title).join(' | ')})`);
+    ok(gateOf(Array.isArray(win.windows)) && verdictOf(win.windows.some((w) => /vs-remote/.test(String(w.title || '')))), `windows answers the app's own rows on the device (${win.windows.map((w) => w.title).join(' | ')})`);
     const ka = await acc.call('dev-a', 'keep-alive', { id: app.id });
-    ok(ka.app && ka.app.idleTimeoutMs === 0, 'keep-alive sets the record\'s idle timeout to never (the hub\'s policy, held on the device record)');
+    ok(gateOf(ka.app) && ka.app.idleTimeoutMs === 0, 'keep-alive sets the record\'s idle timeout to never (the hub\'s policy, held on the device record)');
     const st = await acc.call('dev-a', 'status', {});
-    ok(Array.isArray(st.apps) && st.apps.some((a) => a.id === app.id), 'status without an id lists the device\'s records (+ the latest samples the hub judges)');
+    ok(gateOf(Array.isArray(st.apps)) && verdictOf(st.apps.some((a) => a.id === app.id)), 'status without an id lists the device\'s records (+ the latest samples the hub judges)');
     const oldPid = killDaemon(home);
     await sleep(500);
-    ok(oldPid > 0 && !D.pidAlive(oldPid) && D.pidAlive(ready.pids.app), `the daemon (pid ${oldPid}) is SIGKILLed — the app (pid ${ready.pids.app}) keeps running (sessions never belong to a connection)`);
+    ok(oldPid > 0 && !D.pidAlive(oldPid) && verdictOf(D.pidAlive(ready.pids.app)), `the daemon (pid ${oldPid}) is SIGKILLed — the app (pid ${ready.pids.app}) keeps running (sessions never belong to a connection)`);
     dm.stop();
     const dm2 = deviceOn(home);
     await dm2.connect();
     const acc2 = ACC.create({ hosts: hostsFor({ 'dev-a': dm2 }), install: false, log: { log() { }, warn() { } } });
     const adopted = await until(async () => { const s = (await acc2.call('dev-a', 'status', { id: app.id })).app; return s && s.adoptedAt ? s : null; }, 15000, 250);
-    ok(adopted && adopted.state === 'ready' && adopted.adoptedAt > 0, 'a NEW daemon on the same HOME adopted the live record at boot (pid + starttime re-proved — the device-held record outlived its daemon)', adopted && { state: adopted.state, adoptedAt: adopted.adoptedAt, lastError: adopted.lastError });
+    ok(gateOf(adopted) && adopted.state === 'ready' && adopted.adoptedAt > 0, 'a NEW daemon on the same HOME adopted the live record at boot (pid + starttime re-proved — the device-held record outlived its daemon)', adopted && { state: adopted.state, adoptedAt: adopted.adoptedAt, lastError: adopted.lastError });
 
     console.log('§5 stop');
     const s = await acc2.call('dev-a', 'stop', { id: app.id });
-    ok(s.app && s.app.state === 'exited' && s.app.stoppedBy === 'user', 'stop answers exited / user, verified on the device', s.app && { state: s.app.state, lastError: s.app.lastError });
+    ok(gateOf(s.app) && s.app.state === 'exited' && s.app.stoppedBy === 'user', 'stop answers exited / user, verified on the device', s.app && { state: s.app.state, lastError: s.app.lastError });
     await sleep(500);
     ok(markerPids(app.id).length === 0, `nothing carries VIBESPACE_DESKTOP_APP=${app.id} after the stop`, markerPids(app.id));
     ok(acc.closeForward(`dev-a:${ready.port}`) === true && acc.forwards().length === 0, 'the forward\'s last reference released ⇒ its listener is closed');
     const bad = await acc2.call('dev-a', 'stop', { id: 'da-nope' }).then(() => null, (e) => e);
-    ok(bad && bad.code === 'not-found', 'an op on a record the device does not hold is refused by code (not-found), thrown hub-side as ONE shape', bad && bad.message);
+    ok(gateOf(bad) && bad.code === 'not-found', 'an op on a record the device does not hold is refused by code (not-found), thrown hub-side as ONE shape', bad && bad.message);
     dm2.stop();
   }
 }
@@ -253,10 +253,10 @@ console.log('§6 the capability gate');
   const capsOf = (txt) => { const m = CAP_LIST.exec(txt); return m ? m[1].split(',').map((x) => x.trim()).filter(Boolean) : null; };
   const dropCap = (txt) => txt.replace(CAP_LIST, (all, inner) => `capabilities: [${inner.split(',').map((x) => x.trim()).filter((x) => x && x !== '"desktop-serve"').join(', ')}]`);
   const capsNow = capsOf(bundleText);
-  ok(capsNow && capsNow.includes('"desktop-serve"') && (bundleText.match(/capabilities: \[/g) || []).length === 1, 'the bundle has ONE hello-ack capability list and it names desktop-serve (the copy removes exactly it)', capsNow);
+  ok(gateOf(capsNow) && gateOf(capsNow.includes('"desktop-serve"')) && (bundleText.match(/capabilities: \[/g) || []).length === 1, 'the bundle has ONE hello-ack capability list and it names desktop-serve (the copy removes exactly it)', capsNow);
   const oldText = dropCap(bundleText);
   const capsOld = capsOf(oldText);
-  ok(capsOld && !capsOld.includes('"desktop-serve"') && capsOld.length === capsNow.length - 1 && capsNow.filter((c) => c !== '"desktop-serve"').join() === capsOld.join(), 'the old-daemon copy\'s list lacks desktop-serve and keeps every other capability in order', capsOld);
+  ok(gateOf(capsOld) && !capsOld.includes('"desktop-serve"') && capsOld.length === capsNow.length - 1 && capsNow.filter((c) => c !== '"desktop-serve"').join() === capsOld.join(), 'the old-daemon copy\'s list lacks desktop-serve and keeps every other capability in order', capsOld);
   const oldBundle = path.join(copyDir, 'vibespace-agentd.js');
   fs.writeFileSync(oldBundle, oldText);
   const dmOld = deviceOn(home2, oldBundle);
@@ -266,13 +266,13 @@ console.log('§6 the capability gate');
   const t1 = Date.now();
   const e1 = await accOld.call('dev-old', 'facts', {}).then(() => null, (e) => e);
   const ms1 = Date.now() - t1;
-  ok(e1 && e1.code === 'host_needs_daemon' && ms1 < 1000, `an old daemon is NEVER asked: host_needs_daemon in ${ms1} ms (< 1 s), never a hang`, e1 && { code: e1.code, message: e1.message });
+  ok(gateOf(e1) && e1.code === 'host_needs_daemon' && ms1 < 1000, `an old daemon is NEVER asked: host_needs_daemon in ${ms1} ms (< 1 s), never a hang`, e1 && { code: e1.code, message: e1.message });
   // lane C2: the same gate through the HUB keeper's launch (the route's path) — refused by name, nothing registered
   const kOld = K.create({ dataDir: path.join(hubDir, 'k-old'), env: () => ({ PATH: process.env.PATH, HOME: realHome }), broadcast: () => { }, display: D, log: { log() { }, warn() { } }, access: () => accOld });
   const tk = Date.now();
   const ek = await kOld.launch({ exec: 'xterm' }, { host: 'dev-old' }).then(() => null, (e) => e);
   const msk = Date.now() - tk;
-  ok(ek && ek.code === 'host_needs_daemon' && msk < 1000 && kOld.listApps().length === 0, `the hub keeper's launch on that agent ⇒ host_needs_daemon in ${msk} ms, nothing registered (C2)`, ek && ek.code);
+  ok(gateOf(ek) && ek.code === 'host_needs_daemon' && msk < 1000 && kOld.listApps().length === 0, `the hub keeper's launch on that agent ⇒ host_needs_daemon in ${msk} ms, nothing registered (C2)`, ek && ek.code);
   kOld.shutdown();
   // CONTROL — why the gate exists: the same old daemon asked anyway (a raw request past the gate) answers nothing
   fs.writeFileSync(oldBundle, oldText.replace('if (msg.op === "desktop-serve") {', 'if (false) {'));
@@ -289,11 +289,11 @@ console.log('§6 the capability gate');
   ok(!raw.answered && Date.now() - t2 >= 1400, `CONTROL: a daemon that does not know the op answers NOTHING to it (${raw.error || 'answered'} after ${Date.now() - t2} ms) — the hang the capability gate prevents`, raw);
   dmOld2.stop(); killDaemon(home2);
   const e2 = await accOld.call('ssh-only', 'facts', {}).then(() => null, (e) => e);
-  ok(e2 && e2.code === 'host_needs_daemon' && /no VibeSpace agent/.test(e2.message), 'a machine handle with no desktopServe (stand-in) is refused BY NAME (host_needs_daemon) — never a silent local run', e2 && e2.message);
+  ok(gateOf(e2) && e2.code === 'host_needs_daemon' && verdictOf(/no VibeSpace agent/.test(e2.message)), 'a machine handle with no desktopServe (stand-in) is refused BY NAME (host_needs_daemon) — never a silent local run', e2 && e2.message);
   const e3 = await accOld.call('nowhere', 'facts', {}).then(() => null, (e) => e);
-  ok(e3 && e3.code === 'unsupported-host', 'an unknown host is refused by name (unsupported-host)', e3 && e3.message);
+  ok(gateOf(e3) && e3.code === 'unsupported-host', 'an unknown host is refused by name (unsupported-host)', e3 && e3.message);
   const e4 = await accOld.forwardPort('ssh-only', 1234).then(() => null, (e) => e);
-  ok(e4 && e4.code === 'host_needs_daemon' && accOld.forwards().length === 0, 'forwardPort to that handle is refused the same way, no listener left', e4 && e4.code);
+  ok(gateOf(e4) && e4.code === 'host_needs_daemon' && accOld.forwards().length === 0, 'forwardPort to that handle is refused the same way, no listener left', e4 && e4.code);
 }
 
 if (canRunAll()) {
@@ -313,13 +313,13 @@ if (canRunAll()) {
   const t0 = Date.now();
   const L = await hub.launch({ exec: XTERM_ALL, args: ['-geometry', '80x24', '-T', 'vs-remote-hub', '-e', 'sh', '-c', `stty -icanon; cat > ${out}`], label: 'hub xterm' }, { host: 'dev-a' });
   ids.add(L.id);
-  ok(L && L.hostId === 'dev-a' && L.hostLabel === 'Test device' && L.state === 'launching', 'the hub keeper\'s launch with host runs on the device and answers the record re-labelled (hostId + label)', L && { hostId: L.hostId, state: L.state });
+  ok(gateOf(L) && L.hostId === 'dev-a' && L.hostLabel === 'Test device' && L.state === 'launching', 'the hub keeper\'s launch with host runs on the device and answers the record re-labelled (hostId + label)', L && { hostId: L.hostId, state: L.state });
   const ready = await until(() => { const r = hub.get(L.id); return r && (r.state === 'ready' || r.state === 'failed' || r.state === 'exited') ? r : null; }, 30000, 100);
   const readyMs = Date.now() - t0;
-  ok(ready && ready.state === 'ready' && ready.hostId === 'dev-a', `the launch is FOLLOWED to ready (${readyMs} ms; the launch dialog's window never waits a whole tick)`, ready && { state: ready.state, lastError: ready.lastError });
-  ok(bc.some((m) => m.type === 'desktop-apps-updated' && m.apps.some((a) => a.id === L.id && a.state === 'ready' && a.hostLabel === 'Test device')), 'every client hears it (desktop-apps-updated carries the paired machine\'s record)');
+  ok(gateOf(ready) && ready.state === 'ready' && ready.hostId === 'dev-a', `the launch is FOLLOWED to ready (${readyMs} ms; the launch dialog's window never waits a whole tick)`, ready && { state: ready.state, lastError: ready.lastError });
+  ok(verdictOf(bc.some((m) => m.type === 'desktop-apps-updated' && m.apps.some((a) => a.id === L.id && a.state === 'ready' && a.hostLabel === 'Test device'))), 'every client hears it (desktop-apps-updated carries the paired machine\'s record)');
   const st = hub.streamTarget(L.id);
-  ok(st && st.kind === 'xpra' && st.hostId === 'dev-a' && st.port === ready.port, 'the bridge\'s target names the DEVICE\'s picture port and its host', st);
+  ok(gateOf(st) && st.kind === 'xpra' && st.hostId === 'dev-a' && st.port === ready.port, 'the bridge\'s target names the DEVICE\'s picture port and its host', st);
   // the REAL bridge, the production resolveTarget + forwardPort wiring (window-live-wiring's two lines)
   const bridge = S.create({ auth: { requestAuthed: () => true }, resolveTarget: (id) => hub.streamTarget(id), forwardPort: (h, p) => acc3.forwardPort(h, p), log: { log() { }, warn() { } } });
   const srv = http.createServer((q, r) => { r.writeHead(404); r.end(); });
@@ -332,7 +332,7 @@ if (canRunAll()) {
   ws.on('message', (m) => { buf = Buffer.concat([buf, Buffer.from(m)]); while (buf.length >= 8 && buf[0] === 0x50) { const size = buf.readUInt32BE(4); if (buf.length < 8 + size) break; const one = buf.subarray(0, 8 + size); buf = buf.subarray(8 + size); if (one[3] === 0) pk.push([Date.now(), one]); } });
   const opened = await new Promise((r) => { ws.once('open', () => r(true)); ws.once('error', () => r(false)); ws.once('unexpected-response', () => r(false)); });
   const openMs = Date.now() - tOpen;
-  ok(opened && acc3.forwards().length === 1 && acc3.forwards()[0].remotePort === ready.port, `the bridge's upgrade resolved the target through streamEndpointFor to a hub forward (ws open ${openMs} ms, forward 127.0.0.1:${acc3.forwards()[0] && acc3.forwards()[0].localPort} → dev-a:${ready.port})`, acc3.forwards());
+  ok(gateOf(opened) && acc3.forwards().length === 1 && acc3.forwards()[0].remotePort === ready.port, `the bridge's upgrade resolved the target through streamEndpointFor to a hub forward (ws open ${openMs} ms, forward 127.0.0.1:${acc3.forwards()[0] && acc3.forwards()[0].localPort} → dev-a:${ready.port})`, acc3.forwards());
   if (opened) {
     const tHello = Date.now();
     ws.send(frame(['hello', { ...P.helloCaps({ width: 800, height: 600, dpi: 96, uuid: `vs-remote-hub-${process.pid}`, layout: 'us' }), lz4: false, brotli: false, compression_level: 0 }]));
@@ -356,20 +356,20 @@ if (canRunAll()) {
     console.log(`  §8-7 (loopback device, through the hub bridge): launch→ready ${readyMs} ms, ws open ${openMs} ms, hello ${h ? h[0] - tHello : '—'} ms, ping RTT ${rtts.join('/')} ms, keystrokes→file ${keyMs} ms`);
     ws.close();
     const released = await until(() => (acc3.forwards().length === 0 ? true : null), 3000, 20);
-    ok(released, 'the socket closed ⇒ the bridge released its forward reference (the listener is gone)', acc3.forwards());
+    ok(verdictOf(released), 'the socket closed ⇒ the bridge released its forward reference (the listener is gone)', acc3.forwards());
   }
   // the machine stops answering ⇒ kept as unknown-host-offline, the bridge refuses (never a local connect)
   devUp = false;
   await hub.syncHost('dev-a');
   const off = hub.get(L.id);
-  ok(off && off.state === 'unknown-host-offline' && off.lastKnownState === 'ready', 'the device stops answering ⇒ the record is KEPT as unknown-host-offline (the app runs on)', off && off.state);
+  ok(gateOf(off) && off.state === 'unknown-host-offline' && off.lastKnownState === 'ready', 'the device stops answering ⇒ the record is KEPT as unknown-host-offline (the app runs on)', off && off.state);
   const code = await new Promise((r) => { const w2 = new WebSocket(url, ['binary']); w2.once('unexpected-response', (_q, res) => r(res.statusCode)); w2.once('open', () => { w2.close(); r('open'); }); w2.once('error', () => r('error')); });
   ok(code === 404, `the bridge refuses an offline machine's stream (${code}) — never a connect to the device's port number on THIS machine`);
   devUp = true;
   await hub.syncHost('dev-a');
   ok(hub.get(L.id).state === 'ready', 'the device answers again ⇒ ready (re-asked, never re-launched)');
   const sp = await hub.stop(L.id, { why: 'user' });
-  ok(sp && sp.state === 'exited' && sp.stoppedBy === 'user' && sp.hostId === 'dev-a', 'stop through the hub keeper ⇒ exited on the device');
+  ok(gateOf(sp) && sp.state === 'exited' && sp.stoppedBy === 'user' && sp.hostId === 'dev-a', 'stop through the hub keeper ⇒ exited on the device');
   await sleep(400);
   ok(markerPids(L.id).length === 0, 'nothing carries the session marker after the stop');
   // lane D (b): the app's default scale (the launch dialog's `scaleChoice`) rides the `launch` op INSIDE `body` — the op's
@@ -416,9 +416,9 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   await dm4.connect();
   const acc4 = ACC.create({ hosts: hostsFor({ 'dev-m': dm4 }), install: false, log: { log() { }, warn() { } } });
   const warm = await acc4.call('dev-m', 'facts', {}).then((r) => r.ok, () => false);
-  ok(warm, 'a healthy desktop-serve op answers first (the leg starts from a working link)');
+  ok(verdictOf(warm), 'a healthy desktop-serve op answers first (the leg starts from a working link)');
   const r1 = await midOp(dm4, () => acc4.call('dev-m', 'windows', { id: 'da-nope' }));
-  ok(r1.pendingBefore === 1 && r1.e && r1.e.code === 'host_unavailable' && /device link lost/.test(r1.e.message) && r1.ms < 2000, `a per-click op in flight when the device's link dies ⇒ host_unavailable in ${r1.ms} ms (was: the op's own 60 s timeout), naming the lost link`, r1.e && { code: r1.e.code, message: r1.e.message, pendingBefore: r1.pendingBefore });
+  ok(r1.pendingBefore === 1 && gateOf(r1.e) && r1.e.code === 'host_unavailable' && gateOf(/device link lost/.test(r1.e.message)) && r1.ms < 2000, `a per-click op in flight when the device's link dies ⇒ host_unavailable in ${r1.ms} ms (was: the op's own 60 s timeout), naming the lost link`, r1.e && { code: r1.e.code, message: r1.e.message, pendingBefore: r1.pendingBefore });
   ok(!dm4._conn || dm4._conn.pending.size === 0, 'nothing is left pending on the dead connection');
   dm4.stop();
   // CONTROL: the pre-fix client (mux.onDead left conn.pending alone) waits out the request's own timeout — bounded here
@@ -429,7 +429,7 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   process.env.HOME = home3; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home3);
   const dmPre = new DMpre({ dataDir: path.join(home3, 'hub-data'), bundlePath: BUNDLE, version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
   const rc = await midOp(dmPre, () => dmPre._request({ op: 'desktop-serve', action: 'windows', params: { id: 'da-nope' }, timeoutMs: 2500 }));
-  ok(rc.pendingBefore === 1 && rc.e && /timeout/.test(rc.e.message) && rc.ms >= 2400, `CONTROL: the pre-fix client answers only at the request's own timeout (${rc.ms} ms for a 2.5 s timeout; the product's is 60 s)`, rc.e && rc.e.message);
+  ok(rc.pendingBefore === 1 && gateOf(rc.e) && gateOf(/timeout/.test(rc.e.message)) && rc.ms >= 2400, `CONTROL: the pre-fix client answers only at the request's own timeout (${rc.ms} ms for a 2.5 s timeout; the product's is 60 s)`, rc.e && rc.e.message);
   dmPre.stop();
   // the run-stream belt is PER OP now, and the install rung's run outlives its own deadline (findings 3 + 4)
   const dm5 = deviceOn(home3);
@@ -437,7 +437,7 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   const tb = Date.now();
   const belt = await dm5.runStream('sh', ['-c', 'exec sleep 3'], { by: 'system:test', timeoutMs: 700 });
   const beltMs = Date.now() - tb;
-  ok(belt && belt.timedOut === true && belt.code == null && beltMs < 2000, `run-stream honours the caller's timeoutMs over the real daemon (settled timedOut after ${beltMs} ms for 700 ms — the 120 s constant is only the default)`, belt);
+  ok(gateOf(belt) && belt.timedOut === true && belt.code == null && beltMs < 2000, `run-stream honours the caller's timeoutMs over the real daemon (settled timedOut after ${beltMs} ms for 700 ms — the 120 s constant is only the default)`, belt);
   const acc5 = ACC.create({ hosts: hostsFor({ 'dev-m': dm5 }), install: false, log: { log() { }, warn() { } }, installMs: 1000, holdMs: 15000 });
   const pidf = path.join(work, 'install-child.pid');
   const got = [];
@@ -445,16 +445,16 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   const e5 = await acc5.runArgv('dev-m', ['sh', '-c', `echo $$ > '${pidf}'; echo started; exec sleep 3`], { onData: (d) => got.push(String(d)) }).then(() => null, (e) => e);
   const ms5 = Date.now() - t5;
   const cpid = Number(fs.readFileSync(pidf, 'utf8'));
-  ok(e5 && e5.code === 'install_timeout' && !/exited/.test(e5.message) && ms5 < 2500 && got.join('').includes('started'), `a paired machine's run past installMs ⇒ install_timeout in ${ms5} ms, the log streamed until then — never "the install exited 1" at 120 s`, e5 && { code: e5.code, message: e5.message });
-  ok(D.pidAlive(cpid), 'the child on the device is not killed (apt is waited out, never interrupted)');
+  ok(gateOf(e5) && e5.code === 'install_timeout' && !/exited/.test(e5.message) && ms5 < 2500 && verdictOf(got.join('').includes('started')), `a paired machine's run past installMs ⇒ install_timeout in ${ms5} ms, the log streamed until then — never "the install exited 1" at 120 s`, e5 && { code: e5.code, message: e5.message });
+  ok(verdictOf(D.pidAlive(cpid)), 'the child on the device is not killed (apt is waited out, never interrupted)');
   // (verify r2 F3/F4) the DEVICE's facts carry the slot: its state dir (the machine keeper's ~/.vibespace), the
   // detached install `installing` while it lives, its recorded exit once it ended — the real installState over the op
   const fr = (await acc5.call('dev-m', 'facts', { install: true })).install;
-  ok(fr && fr.stateDir === path.join(home3, '.vibespace') && fr.installing && fr.installing.pid > 0 && fs.existsSync(path.join(home3, '.vibespace', 'xpra-install.log')), `the device's facts report the install running (installing {pid ${fr && fr.installing && fr.installing.pid}}) from ITS state dir, the log beside it`, fr && { stateDir: fr.stateDir, installing: fr.installing });
+  ok(gateOf(fr) && fr.stateDir === path.join(home3, '.vibespace') && gateOf(fr.installing) && fr.installing.pid > 0 && verdictOf(fs.existsSync(path.join(home3, '.vibespace', 'xpra-install.log'))), `the device's facts report the install running (installing {pid ${fr && fr.installing && fr.installing.pid}}) from ITS state dir, the log beside it`, fr && { stateDir: fr.stateDir, installing: fr.installing });
   const lockHeld = (K) => { try { require('child_process').execFileSync('flock', ['-n', K, 'true'], { stdio: 'ignore' }); return false; } catch { return true; } };
-  ok(fr && fr.installing && typeof fr.installing.lock === 'string' && fr.installing.lock === lockPathOf(path.join(home3, '.vibespace')) && path.dirname(fr.installing.lock) === LOCKROOT && !fr.installing.lock.startsWith(XDG) && !fr.installing.lock.startsWith(home3) && lockHeld(fr.installing.lock), `(verify r4 + r5 L3) the device's install holds its lock on LOCAL storage, in the directory named by the daemon's UID — never under its $XDG_RUNTIME_DIR (a scratch dir here), never its state dir (installing.lock ${fr && fr.installing && fr.installing.lock}), held while it runs`, fr && fr.installing);
+  ok(gateOf(fr) && gateOf(fr.installing) && typeof fr.installing.lock === 'string' && fr.installing.lock === lockPathOf(path.join(home3, '.vibespace')) && path.dirname(fr.installing.lock) === LOCKROOT && !fr.installing.lock.startsWith(XDG) && !fr.installing.lock.startsWith(home3) && verdictOf(lockHeld(fr.installing.lock)), `(verify r4 + r5 L3) the device's install holds its lock on LOCAL storage, in the directory named by the daemon's UID — never under its $XDG_RUNTIME_DIR (a scratch dir here), never its state dir (installing.lock ${fr && fr.installing && fr.installing.lock}), held while it runs`, fr && fr.installing);
   const fe = await until(async () => { const x = (await acc5.call('dev-m', 'facts', { install: true })).install; return x && x.installing === null && x.lastInstall ? x : null; }, 6000, 200);
-  ok(fe && fe.lastInstall.code === 0 && !D.pidAlive(cpid), 'it ends on its own; the device\'s facts then say gone, its exit recorded (0) — the evidence a held slot waits for', fe && fe.lastInstall);
+  ok(gateOf(fe) && fe.lastInstall.code === 0 && !D.pidAlive(cpid), 'it ends on its own; the device\'s facts then say gone, its exit recorded (0) — the evidence a held slot waits for', fe && fe.lastInstall);
   // (verify r2 F4) THE DAEMON DIES MID-INSTALL (its re-exec on every hub update, a machine restart of the agent): the
   // follower on the daemon's pipe goes with it — the install, detached, runs to its end; CONTROL: the pre-fix rung
   const daemonDies = async (accX, tag) => {
@@ -467,9 +467,9 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
     return { code: r6 && (r6.code || (r6.message && r6.message.slice(0, 80))), landed: !!landed };
   };
   const d6 = await daemonDies(acc5, 'fix');
-  ok(d6.code === 'install_link_lost' && d6.landed, `the device's daemon is SIGKILLed mid-install ⇒ install_link_lost for the follower, and the install runs to its END on the device (its marker landed)`, d6);
+  ok(d6.code === 'install_link_lost' && verdictOf(d6.landed), `the device's daemon is SIGKILLed mid-install ⇒ install_link_lost for the follower, and the install runs to its END on the device (its marker landed)`, d6);
   const fd = (await acc5.call('dev-m', 'facts', { install: true })).install; // the reconnect spawned a new daemon
-  ok(fd && fd.installing === null && fd.lastInstall && fd.lastInstall.code === 0, 'the NEW daemon\'s facts report the install gone with its exit recorded (0) — what a held slot waits for', fd && { installing: fd.installing, lastInstall: fd.lastInstall });
+  ok(gateOf(fd) && fd.installing === null && gateOf(fd.lastInstall) && fd.lastInstall.code === 0, 'the NEW daemon\'s facts report the install gone with its exit recorded (0) — what a held slot waits for', fd && { installing: fd.installing, lastInstall: fd.lastInstall });
   const accSrc5 = fs.readFileSync(path.join(REPO, 'src/server/desktop-access.js'), 'utf8');
   const launchLine5 = '    const launch = SLOT.installLauncherArgv(argv, { stateDir, mode });\n'; // lane dc-apps-rows: the slot's own module
   ok(accSrc5.split(launchLine5).length === 2, 'CONTROL setup: the launcher wrap is spelled once');
@@ -508,21 +508,21 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
     return { settled, gotAtCut, landed: !!landed, ms: Date.now() - tCut, pid, alive: D.pidAlive(pid), line, logBytes: logText ? Buffer.byteLength(logText) : 0, logText, logEnds: !!(logText && /ended: exit 0\s*$/.test(logText)), logHead: !!(logText && /the hub's link was lost/.test(logText)) };
   };
   const o1 = await orphanLeg(dm5, home3, 'fix');
-  ok(o1.settled && o1.settled.error === 'device link lost' && o1.gotAtCut > 0 && o1.gotAtCut < 4096000, `the link died MID-stream (the hub had ${o1.gotAtCut} of 4 096 000 bytes; the stream settled "${o1.settled && o1.settled.error}")`, o1);
-  ok(o1.landed && !o1.alive, `the orphaned producer runs to its END: its marker landed ${o1.ms} ms after the cut (≤ 10 s), the process gone`, o1);
-  ok(o1.logHead && o1.logEnds && o1.logBytes > 1000000, `the rest of its output is in ~/.vibespace/run-stream/<pid>.log (${o1.logBytes} bytes, a header naming the lost link, the exit at its end)`, { logBytes: o1.logBytes, logHead: o1.logHead, logEnds: o1.logEnds });
+  ok(gateOf(o1.settled) && o1.settled.error === 'device link lost' && o1.gotAtCut > 0 && o1.gotAtCut < 4096000, `the link died MID-stream (the hub had ${o1.gotAtCut} of 4 096 000 bytes; the stream settled "${o1.settled && o1.settled.error}")`, o1);
+  ok(gateOf(o1.landed) && !o1.alive, `the orphaned producer runs to its END: its marker landed ${o1.ms} ms after the cut (≤ 10 s), the process gone`, o1);
+  ok(gateOf(o1.logHead) && gateOf(o1.logEnds) && o1.logBytes > 1000000, `the rest of its output is in ~/.vibespace/run-stream/<pid>.log (${o1.logBytes} bytes, a header naming the lost link, the exit at its end)`, { logBytes: o1.logBytes, logHead: o1.logHead, logEnds: o1.logEnds });
   // (verify r3 M2) THE LOG CANNOT BE WRITTEN and the child is PAUSED at the cut (the hub's consumer stalled): a Writable
   // that errors never emits 'drain' — the child paused on it stayed paused for good. <pid>.log planted as a symlink to
   // /dev/full (ENOSPC on the first write): the child must still run to its end.
   const devFull = (logf) => fs.symlinkSync('/dev/full', logf);
   const m2 = await orphanLeg(dm5, home3, 'fix-enospc', { stall: true, plant: devFull, lines: 4000, fast: true });
-  ok(m2.landed && !m2.alive && m2.line === 4000 && m2.ms <= 10000, `the log cannot be written (<pid>.log → /dev/full) and the child was paused at the cut ⇒ it still runs to its END: marker ${m2.ms} ms after the cut, line ${m2.line} of 4000, the process gone`, { landed: m2.landed, ms: m2.ms, line: m2.line, alive: m2.alive });
+  ok(gateOf(m2.landed) && !m2.alive && m2.line === 4000 && m2.ms <= 10000, `the log cannot be written (<pid>.log → /dev/full) and the child was paused at the cut ⇒ it still runs to its END: marker ${m2.ms} ms after the cut, line ${m2.line} of 4000, the process gone`, { landed: m2.landed, ms: m2.ms, line: m2.line, alive: m2.alive });
   // (verify r3 L6) THE CAP IS PER FILE: a pid wrap appends to an existing <pid>.log — a full one (8 MiB + its two marker
   // lines, a previous process's) takes only this orphan's marker lines, never another 8 MiB
   const fullLog = (logf) => { fs.writeFileSync(logf, Buffer.alloc(8 * 1024 * 1024, 0x79)); fs.appendFileSync(logf, '\n[vibespace-agentd 2026-09-24T00:00:00.000Z] log capped at 8388608 bytes — output past this point is dropped\n[vibespace-agentd 2026-09-24T00:00:01.000Z] pid 1 ended: exit 0\n'); };
   const plantedBytes = 8 * 1024 * 1024 + Buffer.byteLength('\n[vibespace-agentd 2026-09-24T00:00:00.000Z] log capped at 8388608 bytes — output past this point is dropped\n[vibespace-agentd 2026-09-24T00:00:01.000Z] pid 1 ended: exit 0\n');
   const l6 = await orphanLeg(dm5, home3, 'fix-full', { plant: fullLog, lines: 2000 });
-  ok(l6.landed && l6.logBytes > plantedBytes && l6.logBytes - plantedBytes < 1024 && !/x{64}/.test(l6.logText || '') && /this file is at its 8388608-byte cap/.test(l6.logText || '') && l6.logEnds, `a full <pid>.log from a previous process (pid wrap) ⇒ the orphan adds only its marker lines (+${l6.logBytes - plantedBytes} bytes on ${plantedBytes}, none of its output), saying the file is at its cap; the child still ran to its end`, { landed: l6.landed, logBytes: l6.logBytes, plantedBytes });
+  ok(gateOf(l6.landed) && l6.logBytes > plantedBytes && l6.logBytes - plantedBytes < 1024 && !/x{64}/.test(l6.logText || '') && gateOf(/this file is at its 8388608-byte cap/.test(l6.logText || '')) && verdictOf(l6.logEnds), `a full <pid>.log from a previous process (pid wrap) ⇒ the orphan adds only its marker lines (+${l6.logBytes - plantedBytes} bytes on ${plantedBytes}, none of its output), saying the file is at its cap; the child still ran to its end`, { landed: l6.landed, logBytes: l6.logBytes, plantedBytes });
   dm5.stop(); killDaemon(home3);
   // CONTROL: the pre-fix daemon (the bundle without the orphan resume) leaves the same producer PAUSED for good
   const bText = fs.readFileSync(BUNDLE, 'utf8');
@@ -535,7 +535,7 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   const o2 = await orphanLeg(dmPre2, home4, 'pre');
   const line2 = o2.line; await sleep(600);
   const line3 = (() => { try { return Number(fs.readFileSync(path.join(work, 'pre-progress'), 'utf8').trim()); } catch { return null; } })();
-  ok(!o2.landed && o2.alive && line2 != null && line2 < 1000 && line3 === line2 && o2.logBytes === 0, `CONTROL: the pre-fix daemon leaves the producer PAUSED — alive, its marker absent 3 s after the cut, frozen at line ${line2} of 1000 (still ${line3} later), no log`, o2);
+  ok(!o2.landed && gateOf(o2.alive) && line2 != null && line2 < 1000 && line3 === line2 && o2.logBytes === 0, `CONTROL: the pre-fix daemon leaves the producer PAUSED — alive, its marker absent 3 s after the cut, frozen at line ${line2} of 1000 (still ${line3} later), no log`, o2);
   dmPre2.stop(); killDaemon(home4);
   // (verify r3) the two new controls — pre-fix bundles written through scripts/mutant-copy.mjs (`selfPath`: the daemon
   // copy keeps its own __filename; only `require` resolves beside the real bundle)
@@ -544,18 +544,18 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   const m2Err = '\nout.on("error", () => {\nout = null;\nresumeChild();\n});\n';
   const m2Arm = '\nw.on("error", go);\nw.on("close", go);\n';
   const l6Seed = '\ntry {\nconst st0 = fs.statSync(file);\nif (st0.isFile()) written = st0.size;\n} catch {\n}\n';
-  ok([m2Err, m2Arm, l6Seed].every((x) => bText.split(x).length === 2), 'CONTROL setup: the bundle spells the errored-log resume, the drain/error/close arming and the per-file seed once each');
+  ok(verdictOf([m2Err, m2Arm, l6Seed].every((x) => bText.split(x).length === 2)), 'CONTROL setup: the bundle spells the errored-log resume, the drain/error/close arming and the per-file seed once each');
   const preM2 = MUT.write('data/bin/vibespace-agentd.js', bText.replace(m2Err, '\nout.on("error", () => {\nout = null;\n});\n').replace(m2Arm, '\n'), 'prem2', { selfPath: true });
   const dmPre5 = deviceOn(home5, preM2);
   const c2 = await orphanLeg(dmPre5, home5, 'pre-enospc', { stall: true, plant: devFull, lines: 4000, fast: true, waitMs: 6000 });
-  ok(!c2.landed && c2.alive && c2.line != null && c2.line < 4000, `CONTROL: the pre-fix bundle (resume on 'drain' only, an errored log never resumes) leaves the child FROZEN — alive, marker absent 6 s after the cut, stuck at line ${c2.line} of 4000`, { landed: c2.landed, alive: c2.alive, line: c2.line });
+  ok(!c2.landed && gateOf(c2.alive) && c2.line != null && c2.line < 4000, `CONTROL: the pre-fix bundle (resume on 'drain' only, an errored log never resumes) leaves the child FROZEN — alive, marker absent 6 s after the cut, stuck at line ${c2.line} of 4000`, { landed: c2.landed, alive: c2.alive, line: c2.line });
   dmPre5.stop(); killDaemon(home5);
   const preL6 = MUT.write('data/bin/vibespace-agentd.js', bText.replace(l6Seed, '\n'), 'prel6', { selfPath: true });
   const dmPre6 = deviceOn(home6, preL6);
   const c6 = await orphanLeg(dmPre6, home6, 'pre-full', { plant: fullLog, lines: 2000, waitMs: 10000 });
-  ok(c6.landed && c6.logBytes - plantedBytes > 1024 * 1024, `CONTROL: the pre-fix bundle (the cap per orphan event) appends up to another 8 MiB to a full <pid>.log (+${c6.logBytes - plantedBytes} bytes on ${plantedBytes})`, { landed: c6.landed, logBytes: c6.logBytes });
+  ok(gateOf(c6.landed) && c6.logBytes - plantedBytes > 1024 * 1024, `CONTROL: the pre-fix bundle (the cap per orphan event) appends up to another 8 MiB to a full <pid>.log (+${c6.logBytes - plantedBytes} bytes on ${plantedBytes})`, { landed: c6.landed, logBytes: c6.logBytes });
   dmPre6.stop(); killDaemon(home6);
-  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3 })) ok(verdictOf(r.pass), '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 // ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP over a REAL agent. The daemon
 // is this Linux box's; a handle that REPORTS darwin / win32 (its status only — every op is the real daemon's) stands in
@@ -581,11 +581,11 @@ console.log('§D014 the whole desktop over a real agent: the probe through its t
   const rows = await accR.machines();
   const macRow = rows.find((r) => r.hostId === 'mac-r'), linRow = rows.find((r) => r.hostId === 'lin-r');
   const brief = (x) => x && { code: x.code, auth: x.auth, vnc: x.vnc, platform: x.platform };
-  ok(macRow && macRow.code === 'desktop_ready' && macRow.auth === 'ard' && macRow.vnc.server === '003.889' && linRow && linRow.code === 'ready' && !('vnc' in linRow), 'the probe rides the REAL agent\'s tcp-connect: the Mac row is desktop_ready (ARD), the Linux row unchanged', { mac: brief(macRow), lin: brief(linRow) });
-  ok(vncConns.length === 2 && await until(() => vncConns.every((s) => s.destroyed || s.readableEnded), 3000), 'ONE probe connection per Windows / macOS row (the Mac, the Windows box — the Linux row none), each closed before any sign-in', vncConns.length);
+  ok(gateOf(macRow) && macRow.code === 'desktop_ready' && macRow.auth === 'ard' && macRow.vnc.server === '003.889' && gateOf(linRow) && linRow.code === 'ready' && !('vnc' in linRow), 'the probe rides the REAL agent\'s tcp-connect: the Mac row is desktop_ready (ARD), the Linux row unchanged', { mac: brief(macRow), lin: brief(linRow) });
+  ok(vncConns.length === 2 && verdictOf(await until(() => vncConns.every((s) => s.destroyed || s.readableEnded), 3000)), 'ONE probe connection per Windows / macOS row (the Mac, the Windows box — the Linux row none), each closed before any sign-in', vncConns.length);
   const accDead = mk({ 'mac-r': as('darwin') }, { vncPort: 9 });
   let dead = null; try { await accDead.openMachineDesktop('mac-r'); } catch (e) { dead = e; }
-  ok(dead && dead.code === 'no_vnc' && dead.vnc.code === 'no_listener', 'nothing on the machine\'s port ⇒ no_vnc / no_listener through the real agent', dead && dead.vnc);
+  ok(gateOf(dead) && dead.code === 'no_vnc' && dead.vnc.code === 'no_listener', 'nothing on the machine\'s port ⇒ no_vnc / no_listener through the real agent', dead && dead.vnc);
   ok(JSON.stringify(real.status().info.capabilities) === JSON.stringify(['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'producer-bounds' /* B-5278 unit 2: each producer bounded by construction — the hub lowers its caps for this agent (answer-caps BOUNDED_CAPS) */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'dir-collect' /* r1636: the folder field's facts collected HERE (src/dir-collect.js; the hub plans and shapes) — an agent without it is asked nothing (the hub keeps the sh road) */, 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'left-behind-end' /* B-69a7 (b): a person's press on that line, ended HERE (each row re-proven) */, 'settings-merge' /* B-e7c0: a subscription pick's merge of the person's own settings file, made HERE */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'browser-stop-facts' /* B-e799: the stop answers its outcome in fields */, 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'sent-rows' /* B-9a2e: a transcript op's params may carry {id: rows} — what VibeSpace sent, held for that op's reads */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio']), 'no new device op: the agent\'s hello names (+ dc-twins design-fs, the Design window\'s folder op) the capabilities it named at ed1e0b83 + the two this release\'s other lanes added (remote-profile-start browser-remove, windows-device-fs fs-portable — the 2.369.204 integration) + exit-transfer\'s fs-write-stream (a push, 2.369.205) + machine-desktop-apps\' desktop-apps-list (the installed-apps LIST, 2.369.252 — not the rung) + machine-app-crop\'s window-track / window-pin (one app\'s own window — route ② of B-bb0b, its own ops); lane remoteapp-r1b\'s remoteapp-facts (the RemoteApp settings card\'s read-only facts, not the rung); lane stream-p1a-transport\'s stream-offer / input-events (the WebRTC stream rung\'s own ops + THE injector — beside the VNC picture, never instead of its doors); lane stream-p1b-screen\'s stream-facts / stream-screen (the screen source\'s facts op + the capability that the agent captures its own screen — the stream rung\'s, not the VNC rung\'s); lane stream-p3m-build\'s stream-mac (a Mac\'s screen helper) + stream-window (ONE window as the stream — a Mac\'s or a Windows machine\'s, lane stream-p2w-build); stream-windows (its picker op\'s own word — int304); lane stream-mac-stall\'s settings-open (「打开系统设置」 shows the pane ON the Mac — the strip\'s door, not a rung); lane desktop-handover\'s desktop-grab / desktop-input (ops on a live stream session — an agent the owner handed the desktop to, not a rung); lane ledger-dedup-law\'s usage-scan-hub-cursor (2.369.362 — the hub keeps the usage cursor: a FLAG of the usage-scan op, its cursor on stdin; the three touches: its answer is usage-scan\'s own channel stream (no reply op added), no unsolicited push, no watch to re-arm); the whole-desktop VNC rung still rides tcp-connect + run-cmd', real.status().info.capabilities);
 
   // RUN ON ITS DESKTOP — the darwin argv runs for real (the agent's run-cmd; /bin/sh exists here too)
@@ -594,16 +594,16 @@ console.log('§D014 the whole desktop over a real agent: the probe through its t
   const t0 = Date.now();
   const r = await accR.runOnDesktop('mac-r', line);
   const took = Date.now() - t0;
-  ok(r.ok && r.shown === line && took < 1800, `the answer comes at once (${took} ms — the command is DETACHED: its sleep 2 still runs) and shows the command as itself`, { r, took });
-  ok(await until(() => fs.existsSync(out) && fs.readFileSync(out, 'utf8') === 'a', 1500), 'the first half ran…');
-  ok(await until(() => fs.existsSync(out) && fs.readFileSync(out, 'utf8') === 'ab', 5000), '…and the `&&` half after it: the line ran WHOLE, as ONE command');
+  ok(gateOf(r.ok) && r.shown === line && took < 1800, `the answer comes at once (${took} ms — the command is DETACHED: its sleep 2 still runs) and shows the command as itself`, { r, took });
+  ok(verdictOf(await until(() => fs.existsSync(out) && fs.readFileSync(out, 'utf8') === 'a', 1500)), 'the first half ran…');
+  ok(verdictOf(await until(() => fs.existsSync(out) && fs.readFileSync(out, 'utf8') === 'ab', 5000)), '…and the `&&` half after it: the line ran WHOLE, as ONE command');
   const hid = path.join(work, 'd014-hidden.txt');
   let e1 = null; try { await accR.runOnDesktop('mac-r', `touch '${hid}'${String.fromCodePoint(0x202e)}`); } catch (e) { e1 = e; }
   let e2 = null; try { await accR.runOnDesktop('mac-r', `touch '${hid}'\ntouch '${hid}2'`); } catch (e) { e2 = e; }
   await sleep(300);
-  ok(e1 && e1.code === 'hidden_chars' && /U\+202E/.test(e1.message) && e2 && e2.code === 'multi_line' && !fs.existsSync(hid) && !fs.existsSync(hid + '2'), 'a hidden character / a line break is refused BY NAME before anything runs (nothing was created)', [e1 && e1.code, e2 && e2.code]);
+  ok(gateOf(e1) && e1.code === 'hidden_chars' && gateOf(/U\+202E/.test(e1.message)) && gateOf(e2) && e2.code === 'multi_line' && !fs.existsSync(hid) && !fs.existsSync(hid + '2'), 'a hidden character / a line break is refused BY NAME before anything runs (nothing was created)', [e1 && e1.code, e2 && e2.code]);
   let e3 = null; try { await accR.runOnDesktop('lin-r', 'xterm'); } catch (e) { e3 = e; }
-  ok(e3 && e3.code === 'not_desktop_machine', 'a Linux machine is refused not_desktop_machine (its apps keep their own windows)', e3 && e3.code);
+  ok(gateOf(e3) && e3.code === 'not_desktop_machine', 'a Linux machine is refused not_desktop_machine (its apps keep their own windows)', e3 && e3.code);
   ok(!logs.some((l) => l.includes('printf a')), 'the hub log says a command ran (its length), never its text', logs.filter((l) => /started on/.test(l)));
   // verify r1 F4: audited like an exit run — ONE line of the exit proxy's audit per run / refused line, a row of the owner's
   // "Commands run on {machine}" list (exit-reach runRow), no conversation key (an agent's `vibespace-exit runs` never lists it)
@@ -611,33 +611,33 @@ console.log('§D014 the whole desktop over a real agent: the probe through its t
     const okLine = `printf c > '${path.join(work, 'd014-audit.txt')}'`;
     await accA.runOnDesktop('mac-r', okLine); let ref = null; try { await accA.runOnDesktop('mac-r', `echo a${String.fromCodePoint(0xe0041)}`); } catch (e) { ref = e; }
     const rows = aud.map((l) => ER.runRow({ ...l, at: 1, id: 'x' }));
-    ok(aud.length === 2 && aud[0].cmd === okLine && aud[0].by === 'user' && aud[0].ok === true && aud[0].code === 0 && aud[0].sessionKey === null && rows[0] && rows[0].outcome === 'ran' && ref && ref.code === 'hidden_chars' && aud[1].refusal === 'hidden_chars' && rows[1] && rows[1].outcome === 'refused', 'every run and every refused line is ONE exit-audit line, a row of the owner\'s Commands list (verify r1 F4)', aud);
+    ok(aud.length === 2 && aud[0].cmd === okLine && aud[0].by === 'user' && aud[0].ok === true && aud[0].code === 0 && aud[0].sessionKey === null && gateOf(rows[0]) && rows[0].outcome === 'ran' && gateOf(ref) && ref.code === 'hidden_chars' && aud[1].refusal === 'hidden_chars' && gateOf(rows[1]) && rows[1].outcome === 'refused', 'every run and every refused line is ONE exit-audit line, a row of the owner\'s Commands list (verify r1 F4)', aud);
     const srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-    ok(/desktop-access\.js'\)\.create\(\{[^\n]*audit: \(line\) => \{ try \{ return exitProxy\.audit\(line\);/.test(srvSrc), 'server.js hands the access layer the exit proxy\'s ONE audit writer'); }
+    ok(verdictOf(/desktop-access\.js'\)\.create\(\{[^\n]*audit: \(line\) => \{ try \{ return exitProxy\.audit\(line\);/.test(srvSrc)), 'server.js hands the access layer the exit proxy\'s ONE audit writer'); }
 
   // THE TIGHTVNC INSTALL: the plan from the agent's hello, the frozen flags, the ONE slot, no_admin, done = the probe
   const plan = await accR.installPlan('win-r', 'tightvnc');
   const starter = Buffer.from(plan.plan.argv[plan.plan.argv.length - 1], 'base64').toString('utf16le');
   const inner = Buffer.from(/'-EncodedCommand','([^']+)'/.exec(starter)[1], 'base64').toString('utf16le');
-  ok(plan.plan.ok && plan.plan.flags.join(' ') === A.TIGHTVNC.flags.join(' ') && inner.includes(`/qn /norestart ${A.TIGHTVNC.flags.join(' ')} VALUE_OF_PASSWORD="' + $p + '"`) && inner === plan.plan.commands.join('\n') && plan.digest, 'the plan names the frozen flags, and what Windows runs elevated IS the shown commands');
+  ok(gateOf(plan.plan.ok) && plan.plan.flags.join(' ') === A.TIGHTVNC.flags.join(' ') && gateOf(inner.includes(`/qn /norestart ${A.TIGHTVNC.flags.join(' ')} VALUE_OF_PASSWORD="' + $p + '"`)) && inner === plan.plan.commands.join('\n') && verdictOf(plan.digest), 'the plan names the frozen flags, and what Windows runs elevated IS the shown commands');
   let macPlan = null; try { macPlan = (await accR.installPlan('mac-r', 'tightvnc')).plan; } catch (e) { macPlan = { code: e.code }; }
-  ok(macPlan && macPlan.code === 'not_windows', 'a Mac is planned not_windows (it switches Screen Sharing on instead)', macPlan);
+  ok(gateOf(macPlan) && macPlan.code === 'not_windows', 'a Mac is planned not_windows (it switches Screen Sharing on instead)', macPlan);
   let release = null; const runs = [];
   const accI = mk({ 'win-r': as('win32', { runStream: (cmd, args, o) => { runs.push([cmd, args.length]); o.onData?.(Buffer.from('Windows granted no administrator rights: The operation was canceled by the user.\n')); return new Promise((res) => { release = res; }); } }) });
   const first = accI.installPackage('win-r', { what: 'tightvnc', expectDigest: plan.digest });
   await until(() => !!release, 3000);
   let busy = null; try { await accI.installPackage('win-r', { what: 'tightvnc' }); } catch (e) { busy = e; }
-  ok(busy && busy.code === 'busy' && accI.installBusy('win-r'), 'ONE install per machine: a second press while Windows waits for its Yes is busy', busy && busy.code);
+  ok(gateOf(busy) && busy.code === 'busy' && verdictOf(accI.installBusy('win-r')), 'ONE install per machine: a second press while Windows waits for its Yes is busy', busy && busy.code);
   release({ code: A.TIGHTVNC_NO_ADMIN_EXIT });
   let na = null; try { await first; } catch (e) { na = e; }
-  ok(na && na.code === 'no_admin' && na.plan && na.plan.commands && !accI.installBusy('win-r') && runs.length === 1 && runs[0][0] === 'powershell.exe', 'nobody clicked Yes there ⇒ no_admin by name, the plan handed back (its commands for an administrator PowerShell), the slot free', na && na.code);
+  ok(gateOf(na) && na.code === 'no_admin' && gateOf(na.plan) && gateOf(na.plan.commands) && !accI.installBusy('win-r') && runs.length === 1 && runs[0][0] === 'powershell.exe', 'nobody clicked Yes there ⇒ no_admin by name, the plan handed back (its commands for an administrator PowerShell), the slot free', na && na.code);
   let pc = null; try { await accI.installPackage('win-r', { what: 'tightvnc', expectDigest: 'not-the-shown-plan' }); } catch (e) { pc = e; }
-  ok(pc && pc.code === 'plan_changed' && runs.length === 1, 'a press naming another plan than the one shown ⇒ plan_changed, nothing run', pc && pc.code);
+  ok(gateOf(pc) && pc.code === 'plan_changed' && runs.length === 1, 'a press naming another plan than the one shown ⇒ plan_changed, nothing run', pc && pc.code);
   const accOk = mk({ 'win-r': as('win32', { runStream: async () => ({ code: 0 }) }) });
   const done = await accOk.installPackage('win-r', { what: 'tightvnc', expectDigest: plan.digest });
-  ok(done.ok && done.after && done.after.ok && done.after.auth === 'ard', 'the install exits 0 ⇒ done is judged by the 5900 probe afterwards (through the real agent)', done.after);
+  ok(gateOf(done.ok) && gateOf(done.after) && gateOf(done.after.ok) && done.after.auth === 'ard', 'the install exits 0 ⇒ done is judged by the 5900 probe afterwards (through the real agent)', done.after);
   const everything = JSON.stringify(logs);
-  ok(!/VALUE_OF_PASSWORD="?[^"' ]/.test(everything) && logs.some((l) => /Windows asks for administrator rights on that machine's screen/.test(l)), 'the hub log names the install and the UAC step — no password anywhere (it is typed on that machine)');
+  ok(!/VALUE_OF_PASSWORD="?[^"' ]/.test(everything) && verdictOf(logs.some((l) => /Windows asks for administrator rights on that machine's screen/.test(l))), 'the hub log names the install and the UAC step — no password anywhere (it is typed on that machine)');
   // (lane mirror-green-212) A SERVER THAT SPEAKS FIRST over the real agent's tcp-connect, the hub's loop STALLED 150 ms
   // between the ask and the resume — a loaded runner: the 2.369.212 Actions mirror lost the greeting twice ("silent").
   // The fake RFB server is ANOTHER process, so it accepts and speaks while this one stalls: the agent's tcp-open and the
@@ -682,7 +682,7 @@ console.log('§D014 the whole desktop over a real agent: the probe through its t
     await dmPre.connect();
     const pre = await stalledProbes(dmPre, 10, 500);
     ok(pre.early >= 1 && pre.seen === pre.n - pre.early, `CONTROL: the pre-fix handle (onData null until the caller resumes) LOSES every greeting that came before its consumer — ${pre.n - pre.seen} of ${pre.n} lost, ${pre.early} arrived early`, pre);
-    for (const r of copiesCensus(MT.files, MT.dir, REPO, { minCopies: 1 })) ok(r.pass, '§tree (tcp control) ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+    for (const r of copiesCensus(MT.files, MT.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), '§tree (tcp control) ' + r.name + (r.pass ? '' : ' — ' + r.detail));
     dmPre.stop(); killDaemon(home8); kid.kill('SIGKILL');
   }
   for (const s of vncConns) s.destroy();
@@ -692,4 +692,4 @@ console.log('§D014 the whole desktop over a real agent: the probe through its t
 process.env.HOME = realHome;
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skipped} skipped)` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

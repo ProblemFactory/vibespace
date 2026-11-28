@@ -56,7 +56,7 @@ import { anchored } from './scratch.mjs';   // (mutant-copy.mjs imports scratch.
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -105,7 +105,7 @@ console.log('§1 composeReply / parseReply');
   const base = { id: 'ut-3f9a1c2b7d', text: 'Approve the migration plan before I continue', urgency: 'high', createdAt: Date.parse('2026-09-23T06:02:00Z') };
   const plain = R.composeReply({ ...base, detail: null }, 'yes, go', { now });
   const L = plain.split('\n');
-  ok(L[0] === '[For you reply #ut-3f9a1c2b7d]' && R.REPLY_MARKER_RE.test(L[0]), 'line 1 is the verbatim marker `[For you reply #<id>]`', L[0]);
+  ok(L[0] === '[For you reply #ut-3f9a1c2b7d]' && verdictOf(R.REPLY_MARKER_RE.test(L[0])), 'line 1 is the verbatim marker `[For you reply #<id>]`', L[0]);
   ok(L[1] === '> filed 12 min ago (2026-09-23 06:02 UTC) · urgency high', 'quote line 1 = filed relative + absolute UTC · urgency', L[1]);
   ok(L[2] === '> Approve the migration plan before I continue' && L[3] === '' && L[4] === 'yes, go' && L.length === 5, 'no detail ⇒ text, one blank line, the reply — no detail: / cut line', L);
   ok(!/detail|cut at/.test(plain), 'no detail ⇒ neither `detail:` nor a cut line');
@@ -116,56 +116,56 @@ console.log('§1 composeReply / parseReply');
   const dStart = p.quote.indexOf('detail:\n') + 'detail:\n'.length;
   const quotedDetail = p.quote.slice(dStart, p.quote.indexOf('\n… (detail cut'));
   ok(long.length === 1987 && quotedDetail === long.slice(0, 1500), 'a 1987-char detail quotes exactly its first 1500 chars', quotedDetail.length);
-  ok(cut.includes('> … (detail cut at 1500 of 1987 chars — `vibespace-ask show ut-3f9a1c2b7d` prints the whole item)'), 'the cut line names 1500 of 1987 and where the whole item is');
+  ok(verdictOf(cut.includes('> … (detail cut at 1500 of 1987 chars — `vibespace-ask show ut-3f9a1c2b7d` prints the whole item)')), 'the cut line names 1500 of 1987 and where the whole item is');
   const short = R.composeReply({ ...base, detail: 'short detail' }, 'ok', { now });
-  ok(short.includes('> detail:\n> short detail\n') && !short.includes('cut at'), 'a detail under the cap is quoted whole with NO cut line');
+  ok(gateOf(short.includes('> detail:\n> short detail\n')) && !short.includes('cut at'), 'a detail under the cap is quoted whole with NO cut line');
   const exact = R.composeReply({ ...base, detail: 'z'.repeat(1500) }, 'ok', { now });
   ok(!exact.includes('cut at'), 'a detail of exactly 1500 chars is not "cut"');
   const cutOpts = R.parseReply(R.composeReply({ ...base, detail: long, options: ['run now', 'wait'] }, 'ok', { now }));
   const forged = typeof R.cutLine === 'function' ? R.parseReply(R.composeReply({ ...base, detail: 'abc\n' + R.cutLine(1500, 2000, 'ut-0000000000') }, 'ok', { now })) : { cutAt: 'no cutLine' };
-  ok(p.cutAt === p.quote.indexOf('\n… (detail cut') && p.quote.slice(0, p.cutAt).endsWith('\n' + 'y'.repeat(99)) && cutOpts.cutAt === cutOpts.quote.indexOf('\n… (detail cut') && R.parseReply(short).cutAt === -1 && R.parseReply(exact).cutAt === -1 && forged.cutAt === -1 && R.parseReply(plain).cutAt === -1,
+  ok(p.cutAt === p.quote.indexOf('\n… (detail cut') && gateOf(p.quote.slice(0, p.cutAt).endsWith('\n' + 'y'.repeat(99))) && cutOpts.cutAt === cutOpts.quote.indexOf('\n… (detail cut') && R.parseReply(short).cutAt === -1 && R.parseReply(exact).cutAt === -1 && forged.cutAt === -1 && R.parseReply(plain).cutAt === -1,
     'parseReply reads the cut back (`cutAt` = where the cut detail ends — before an options line too); a whole detail, one of exactly the cap, or a cut line naming another item ⇒ -1 (lane artifacts-by-intent r5: the reader drops the token the cap cut)', { p: p.cutAt, cutOpts: cutOpts.cutAt, forged: forged.cutAt });
   // r6 (lane artifacts-by-intent U1): THE CUT MARK — ONE marker for every cap that may split a token: the store's `clip`
   // keeps cap − 1 chars + CUT_MARK (the kept length the cap), the reply's cut line opens with it; `uncut` drops the word run
   // each cut went through — before a mark that ends a line or the text, and at parseReply's `cutAt`
   const RT = require(path.join(REPO, 'src/inbox-reply-text.js'));
   const hasMark = typeof RT.clip === 'function' && typeof RT.uncut === 'function', L6 = 'a /p/pgabcdefghij';
-  ok(hasMark && RT.CUT_MARK === '…' && RT.clip('x'.repeat(501), 500) === 'x'.repeat(499) + '…' && RT.clip('x'.repeat(500), 500) === 'x'.repeat(500) && R.cutLine(1500, 2000, 'ut-0000000000').startsWith(RT.CUT_MARK + ' ('),
+  ok(gateOf(hasMark) && RT.CUT_MARK === '…' && RT.clip('x'.repeat(501), 500) === 'x'.repeat(499) + '…' && RT.clip('x'.repeat(500), 500) === 'x'.repeat(500) && verdictOf(R.cutLine(1500, 2000, 'ut-0000000000').startsWith(RT.CUT_MARK + ' (')),
     'clip: past the cap ⇒ cap − 1 chars + the mark (the kept length IS the cap); at the cap ⇒ whole, unmarked; the reply\'s cut line opens with the same mark');
-  ok(hasMark && RT.uncut(L6 + '…') === 'a /p/…' && RT.uncut(L6 + '…\nnext') === 'a /p/…\nnext' && RT.uncut(L6 + '… more') === L6 + '… more' && RT.uncut(L6) === L6 && RT.uncut('x\n' + L6 + '\n> … (cut)', 2 + L6.length) === 'x\na /p/\n> … (cut)' && RT.uncut(null) === '',
+  ok(gateOf(hasMark) && RT.uncut(L6 + '…') === 'a /p/…' && RT.uncut(L6 + '…\nnext') === 'a /p/…\nnext' && RT.uncut(L6 + '… more') === L6 + '… more' && RT.uncut(L6) === L6 && RT.uncut('x\n' + L6 + '\n> … (cut)', 2 + L6.length) === 'x\na /p/\n> … (cut)' && RT.uncut(null) === '',
     'uncut: the word run before a mark that ENDS the text or a line is dropped (a link cut there is no link); a mark inside a line drops nothing; `cutAt` drops the run before it; no cut ⇒ the text as it is');
   // r7 (T4): ONE surrogate-safe cut — an emoji at cap − 1 is dropped whole (never a lone high surrogate before the mark), one at
   // cap − 2 kept whole; r7 (T3): the same words across the upgrade (an older tree's plain slice vs the marked cut); r7 (T6): the
   // runs a cut went through are ONE rule (cutRuns) — uncut drops them, the tray's links read them
   const E = '\u{1F600}', r6clip = (x, cap) => (x.length > cap ? x.slice(0, cap - 1) + '…' : x), clipT = hasMark ? RT.clip : (x, cap) => x.slice(0, cap), loneHi = (t) => /[\ud800-\udbff](?![\udc00-\udfff])/.test(t);
   const at1 = 'x'.repeat(498) + E + 'tail', at2 = 'x'.repeat(497) + E + 'tail';
-  ok(hasMark && RT.clip(at1, 500) === 'x'.repeat(498) + '…' && RT.clip(at2, 500) === 'x'.repeat(497) + E + '…' && !loneHi(RT.clip(at1, 500)) && !loneHi(RT.clip(at2, 500)),
+  ok(gateOf(hasMark) && RT.clip(at1, 500) === 'x'.repeat(498) + '…' && RT.clip(at2, 500) === 'x'.repeat(497) + E + '…' && !loneHi(RT.clip(at1, 500)) && !loneHi(RT.clip(at2, 500)),
     'r7 (T4) clip is surrogate-safe: an emoji at cap − 1 ⇒ dropped whole, the mark after 498 chars; at cap − 2 ⇒ kept whole before the mark');
-  ok(loneHi(r6clip(at1, 500)), 'CONTROL r6\'s clip (cap − 1 units, no pair guard) ⇒ «x\\ud83d…», a lone high surrogate before the mark — RED');
+  ok(verdictOf(loneHi(r6clip(at1, 500))), 'CONTROL r6\'s clip (cap − 1 units, no pair guard) ⇒ «x\\ud83d…», a lone high surrogate before the mark — RED');
   const sw = typeof RT.sameWords === 'function' ? RT.sameWords : (a, b) => a === b, D9 = 'L'.repeat(8999) + E;
-  ok(sw(clipT(D9, 8000), D9.slice(0, 8000), 8000) && sw(clipT('q'.repeat(9000), 8000), r6clip('q'.repeat(9000), 8000), 8000) && sw('same', 'same', 8000) && !sw(clipT('q'.repeat(9000), 8000), 'r'.repeat(8000), 8000) && !sw('Hello…', 'Hello' + 'q'.repeat(7995), 8000) && !sw(clipT('q'.repeat(9000), 8000), 'q'.repeat(7999), 8000),
+  ok(gateOf(sw(clipT(D9, 8000), D9.slice(0, 8000), 8000)) && gateOf(sw(clipT('q'.repeat(9000), 8000), r6clip('q'.repeat(9000), 8000), 8000)) && gateOf(sw('same', 'same', 8000)) && !sw(clipT('q'.repeat(9000), 8000), 'r'.repeat(8000), 8000) && !sw('Hello…', 'Hello' + 'q'.repeat(7995), 8000) && !sw(clipT('q'.repeat(9000), 8000), 'q'.repeat(7999), 8000),
     'r7 (T3) sameWords: the marked cut and an older tree\'s plain cap-unit slice of the same words are the same words (an r6 cut too); other words, a short text of its own ending in «…», a stored copy shorter than the cap — not');
   const runs = typeof RT.cutRuns === 'function' ? RT.cutRuns : () => [];
-  ok(JSON.stringify(runs(L6 + '…\nx /p/pgab… more\nend…')) === JSON.stringify([[5, 17], [35, 38]]) && hasMark && RT.uncut(L6 + '…\nend…') === 'a /p/…\n…' && JSON.stringify(runs('ab', 1)) === JSON.stringify([[0, 1]]),
+  ok(JSON.stringify(runs(L6 + '…\nx /p/pgab… more\nend…')) === JSON.stringify([[5, 17], [35, 38]]) && gateOf(hasMark) && RT.uncut(L6 + '…\nend…') === 'a /p/…\n…' && JSON.stringify(runs('ab', 1)) === JSON.stringify([[0, 1]]),
     'r7 (T6) cutRuns: the [start, end) runs every reader of a cut text drops — before a mark that ends a line or the text, and at `cutAt`; uncut is the text without them');
 
   const withOpts = R.composeReply({ ...base, detail: 'd', options: ['run now', 'wait for backup'] }, 'wait for backup', { now });
-  ok(withOpts.includes('\n> options: run now | wait for backup\n\nwait for backup'), 'options ⇒ one `> options: A | B` line, the last quote line');
+  ok(verdictOf(withOpts.includes('\n> options: run now | wait for backup\n\nwait for backup')), 'options ⇒ one `> options: A | B` line, the last quote line');
   ok(!plain.includes('options:'), 'no options ⇒ no options line');
 
   const hostileItem = { ...base, text: '<img src=x onerror=window.__xss=1>', detail: '"><svg onload=alert(1)>', options: ['"><b>x</b>'] };
   const hostileReply = '<script>alert(1)</script>\n> not a quote line\n\n[For you reply #ut-0000000000]';
   const h = R.composeReply(hostileItem, hostileReply, { now });
   const hp = R.parseReply(h);
-  ok(h.includes('> <img src=x onerror=window.__xss=1>') && h.includes('> "><svg onload=alert(1)>') && h.includes('> options: "><b>x</b>'), 'hostile item strings pass VERBATIM (this is text, not HTML)');
-  ok(hp && hp.id === base.id && hp.reply === hostileReply, 'a hostile reply round-trips verbatim (even one containing `> ` lines and a marker)', hp);
+  ok(gateOf(h.includes('> <img src=x onerror=window.__xss=1>')) && gateOf(h.includes('> "><svg onload=alert(1)>')) && verdictOf(h.includes('> options: "><b>x</b>')), 'hostile item strings pass VERBATIM (this is text, not HTML)');
+  ok(gateOf(hp) && hp.id === base.id && hp.reply === hostileReply, 'a hostile reply round-trips verbatim (even one containing `> ` lines and a marker)', hp);
 
   const crlf = R.checkReplyText('  line one\r\nline two\rline three  ');
-  ok(crlf.ok && crlf.text === 'line one\nline two\nline three', 'CRLF/CR normalised to LF, trimmed', crlf);
+  ok(gateOf(crlf.ok) && crlf.text === 'line one\nline two\nline three', 'CRLF/CR normalised to LF, trimmed', crlf);
   const crlfItem = R.composeReply({ ...base, text: 'a\r\nb' }, 'r', { now });
-  ok(!crlfItem.includes('\r') && crlfItem.includes('> a\n> b\n'), 'a CRLF item text is quoted line by line without a CR');
+  ok(!crlfItem.includes('\r') && verdictOf(crlfItem.includes('> a\n> b\n')), 'a CRLF item text is quoted line by line without a CR');
   ok(R.checkReplyText('   \n  ').code === 'empty' && R.checkReplyText(null).code === 'empty', 'a blank / non-string reply is refused `empty`');
-  ok(R.checkReplyText('a'.repeat(4000)).ok && R.checkReplyText('a'.repeat(4001)).code === 'too_long', 'REPLY_MAX = 4000: 4000 ok, 4001 refused `too_long`');
+  ok(gateOf(R.checkReplyText('a'.repeat(4000)).ok) && R.checkReplyText('a'.repeat(4001)).code === 'too_long', 'REPLY_MAX = 4000: 4000 ok, 4001 refused `too_long`');
 
   // the round-trip TABLE
   const table = [
@@ -193,7 +193,7 @@ console.log('§2 replyVerdict');
   ok(unreach.code === 'host_unreachable' && unreach.why === 'Host unreachable — reconnect, then reply', 'unreachable host ⇒ host_unreachable', unreach);
   ok(idle.ok === true && mid.ok === true, 'live idle ⇒ ok; live MID-TURN ⇒ ok too (the session queues it)');
   ok(v(idle, { ...item, sessionKey: 'accounts' }).code === 'no_session' && v(idle, { ...item, sessionKey: 'jobs' }).code === 'no_session' && v(idle, { ...item, jobId: 'j1' }).code === 'job_item', 'accounts/jobs keys ⇒ no_session; a job item ⇒ job_item (those two are HIDDEN, not disabled)');
-  ok(R.REPLY_HIDDEN_CODES.includes('no_session') && R.REPLY_HIDDEN_CODES.includes('job_item') && R.REPLY_HIDDEN_CODES.includes('card_item') && R.REPLY_HIDDEN_CODES.includes('exit_ask') && R.REPLY_HIDDEN_CODES.length === 4, 'REPLY_HIDDEN_CODES = exactly the four no-surface codes');
+  ok(gateOf(R.REPLY_HIDDEN_CODES.includes('no_session')) && gateOf(R.REPLY_HIDDEN_CODES.includes('job_item')) && gateOf(R.REPLY_HIDDEN_CODES.includes('card_item')) && gateOf(R.REPLY_HIDDEN_CODES.includes('exit_ask')) && R.REPLY_HIDDEN_CODES.length === 4, 'REPLY_HIDDEN_CODES = exactly the four no-surface codes');
   // lane S1 verify r2 (M1): a helper's permission ask is answered on ITS CARD — a typed reply
   // can never approve it (a control_response on stdin is the only answer), and it used to
   // resolve the item while the helper still waited
@@ -201,7 +201,7 @@ console.log('§2 replyVerdict');
   const liveChat = { live: true, mode: 'chat', remoteState: null };
   const c1 = v(liveChat, helperItem), c2 = v(null, helperItem), c3 = v({ ...liveChat, turn: 'running' }, helperItem);
   ok(c1.code === 'card_item' && c1.why === 'Answered on the conversation’s card — open the conversation to answer it' && c2.code === 'card_item' && c3.code === 'card_item', 'a helper-ask item ⇒ card_item on a live, a dead and a mid-turn session alike (the card is the surface, never a typed reply)', [c1, c2, c3]);
-  ok(R.REPLY_HIDDEN_CODES.includes('card_item') && R.CARD_ACTION_TYPES.includes('helper-ask') && R.CARD_ACTION_TYPES.includes('main-ask') && R.CARD_ACTION_TYPES.length === 2, 'card_item is HIDDEN (no Reply button drawn) and helper-ask + main-ask (lane parked-ask-inbox: a conversation\'s own ask) are the card action kinds');
+  ok(gateOf(R.REPLY_HIDDEN_CODES.includes('card_item')) && gateOf(R.CARD_ACTION_TYPES.includes('helper-ask')) && gateOf(R.CARD_ACTION_TYPES.includes('main-ask')) && R.CARD_ACTION_TYPES.length === 2, 'card_item is HIDDEN (no Reply button drawn) and helper-ask + main-ask (lane parked-ask-inbox: a conversation\'s own ask) are the card action kinds');
   ok(v(liveChat, { ...item, action: { type: 'open-window', winId: 'w1' } }).ok === true && v(liveChat, { ...item, action: null }).ok === true, 'an item with another action kind (or none) still replies');
   ok(v(liveChat, { ...item, jobId: 'j1', action: { type: 'helper-ask', requestId: 'r' } }).code === 'job_item', 'a job item stays job_item (the earlier rung wins)');
   // lane-pairing verify-r4 F5: an agent's "run this command on <machine>?" is answered by Allow / Deny on the item — a
@@ -209,7 +209,7 @@ console.log('§2 replyVerdict');
   const exitItem = { ...item, action: { type: 'exit-run-ask', askId: 'a'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', cmd: 'id' } };
   const e1 = v(liveChat, exitItem), e2 = v({ ...liveChat, turn: 'running' }, exitItem), e3 = v(null, exitItem);
   ok(e1.code === 'exit_ask' && e1.why === 'Answer it with Allow or Deny — a typed reply does not answer it' && e2.code === 'exit_ask' && e3.code === 'exit_ask', 'F5: an exit ask ⇒ exit_ask on a live, a mid-turn and a dead session alike (Allow / Deny is the answer, never a typed reply)', [e1, e2, e3]);
-    ok(R.REPLY_HIDDEN_CODES.includes('exit_ask') && R.ANSWER_ACTION_TYPES.includes('exit-run-ask') && R.ANSWER_ACTION_TYPES.includes('hub-act-ask') && R.ANSWER_ACTION_TYPES.includes('automation-ask') && R.ANSWER_ACTION_TYPES.includes('pool-cross-provider') && R.ANSWER_ACTION_TYPES.includes('vault-run-ask') && R.ANSWER_ACTION_TYPES.includes('vault-grant-ask') && R.ANSWER_ACTION_TYPES.includes('secret-request') && R.ANSWER_ACTION_TYPES.includes('channel-held-digest') && R.ANSWER_ACTION_TYPES.includes('vault-words-ask') && R.ANSWER_ACTION_TYPES.includes('vault-job-ask') && R.ANSWER_ACTION_TYPES.includes('messages-waiting') && R.ANSWER_ACTION_TYPES.includes('channel-connect') && R.ANSWER_ACTION_TYPES.includes('job-secrets-retired') && R.ANSWER_ACTION_TYPES.includes('end-proposal') && R.ANSWER_ACTION_TYPES.length === 14 /* B-ef1b: the retired job-secrets notice's two declared buttons; lane login-request-card piece 3b: the proposal card (Terminate selected / Keep all, Allow the ticked ones / Keep all as they are); lane queued-is-not-woke (Shape B): messages that have waited an hour — its one declared door, Open the conversation; lane bl-mail (B-8edd): a landed sign-in's one door, Finish connecting; design q-046: a held automation call; q-053 P0b: a pool's cross-provider card; lane vault-run-door: a held run; lane vault-manual-and-lock: an agent's request; lane wake-approve-card r6: a held digest's Deliver / Discard */, 'F5: exit_ask is HIDDEN (no Reply button, no option chips); the answer-by-buttons kinds are exit-run-ask and (lane hub-act-ask) a held hub act, (q-046) a held automation call, (q-053 P0b) a pool cross-provider card, (lane vault-run-door) a held vault run, (lane vault-manual-and-lock) an agent\'s request for a stored secret, (lane vault-paste-request) an agent\'s request for a secret the owner pastes, (lane vault-entry-description) an agent\'s proposal of an entry\'s words, (lane bl-mail) a landed sign-in\'s Finish connecting');
+    ok(gateOf(R.REPLY_HIDDEN_CODES.includes('exit_ask')) && gateOf(R.ANSWER_ACTION_TYPES.includes('exit-run-ask')) && gateOf(R.ANSWER_ACTION_TYPES.includes('hub-act-ask')) && gateOf(R.ANSWER_ACTION_TYPES.includes('automation-ask')) && gateOf(R.ANSWER_ACTION_TYPES.includes('pool-cross-provider')) && gateOf(R.ANSWER_ACTION_TYPES.includes('vault-run-ask')) && gateOf(R.ANSWER_ACTION_TYPES.includes('vault-grant-ask')) && gateOf(R.ANSWER_ACTION_TYPES.includes('secret-request')) && gateOf(R.ANSWER_ACTION_TYPES.includes('channel-held-digest')) && gateOf(R.ANSWER_ACTION_TYPES.includes('vault-words-ask')) && gateOf(R.ANSWER_ACTION_TYPES.includes('vault-job-ask')) && gateOf(R.ANSWER_ACTION_TYPES.includes('messages-waiting')) && gateOf(R.ANSWER_ACTION_TYPES.includes('channel-connect')) && gateOf(R.ANSWER_ACTION_TYPES.includes('job-secrets-retired')) && gateOf(R.ANSWER_ACTION_TYPES.includes('end-proposal')) && R.ANSWER_ACTION_TYPES.length === 14 /* B-ef1b: the retired job-secrets notice's two declared buttons; lane login-request-card piece 3b: the proposal card (Terminate selected / Keep all, Allow the ticked ones / Keep all as they are); lane queued-is-not-woke (Shape B): messages that have waited an hour — its one declared door, Open the conversation; lane bl-mail (B-8edd): a landed sign-in's one door, Finish connecting; design q-046: a held automation call; q-053 P0b: a pool's cross-provider card; lane vault-run-door: a held run; lane vault-manual-and-lock: an agent's request; lane wake-approve-card r6: a held digest's Deliver / Discard */, 'F5: exit_ask is HIDDEN (no Reply button, no option chips); the answer-by-buttons kinds are exit-run-ask and (lane hub-act-ask) a held hub act, (q-046) a held automation call, (q-053 P0b) a pool cross-provider card, (lane vault-run-door) a held vault run, (lane vault-manual-and-lock) an agent\'s request for a stored secret, (lane vault-paste-request) an agent\'s request for a secret the owner pastes, (lane vault-entry-description) an agent\'s proposal of an entry\'s words, (lane bl-mail) a landed sign-in\'s Finish connecting');
   const hubItem = { ...item, action: { type: 'hub-act-ask', askId: 'b'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', kind: 'run' } };
   ok(v(liveChat, hubItem).code === 'exit_ask' && v(null, hubItem).code === 'exit_ask', 'lane hub-act-ask: a held hub act\'s card is answered by its buttons too — a typed reply never answers it');
 }
@@ -263,8 +263,8 @@ function mkStore() {
   // the agent side after a reply
   ok(m.resolveByAgent('claude:s', it.id).id === it.id, "the agent's `resolve <id>` on a reply-resolved item is an idempotent no-op (no throw)");
   let other = null; try { m.resolveByAgent('claude:other', it.id); } catch (e) { other = e.message; }
-  ok(/no open item/.test(other || ''), "…but never across sessions (another session's id still refuses)");
-  ok(m.getForSession(['claude:s'], it.id)?.reply?.text && m.getForSession(['claude:other'], it.id) === null, '`show <id>` reads one item of the OWN session only, any status');
+  ok(verdictOf(/no open item/.test(other || '')), "…but never across sessions (another session's id still refuses)");
+  ok(gateOf(m.getForSession(['claude:s'], it.id)?.reply?.text) && m.getForSession(['claude:other'], it.id) === null, '`show <id>` reads one item of the OWN session only, any status');
   // re-file after a reply clears it
   m.add('claude:s', { origin: 'agent', text: 'open one' });
   ok(m.get(it.id).status === 'open' && m.get(it.id).reply === null, 'a re-filed (reopened) ask drops the old reply');
@@ -321,8 +321,8 @@ const userTextOf = (line) => { const f = JSON.parse(line); return f.message.cont
   const item = H.userTodos.add('claude:sid-sess-1', { origin: 'agent', text: 'Which branch?', detail: 'main or dev', options: ['main', 'dev'], urgency: 'high' });
   const n0 = H.calls.length;
   const r = await H.call(item.id, { text: 'dev\r\nand rebase first  ' });
-  ok(r.status === 200 && r.json.ok === true && typeof r.json.msgId === 'string' && /-reply$/.test(r.json.msgId), 'idle ⇒ 200 {ok, msgId}', r);
-  ok(wrote.length === 1 && wrote[0].endsWith('\n'), 'exactly ONE frame written to the pty', wrote.length);
+  ok(r.status === 200 && r.json.ok === true && typeof r.json.msgId === 'string' && verdictOf(/-reply$/.test(r.json.msgId)), 'idle ⇒ 200 {ok, msgId}', r);
+  ok(wrote.length === 1 && verdictOf(wrote[0].endsWith('\n')), 'exactly ONE frame written to the pty', wrote.length);
   const expected = R.composeReply({ ...item, status: 'open' }, 'dev\nand rebase first', { now: H.NOW });
   ok(wrote.length === 1 && userTextOf(wrote[0]) === expected, "the frame's user text === composeReply(item, reply)", wrote[0] && userTextOf(wrote[0]).slice(0, 120));
   ok(typeof s._userInputAt === 'number' && s._isStreaming === true, '_userInputAt stamped (the owner\'s own turn), _isStreaming true');
@@ -331,13 +331,13 @@ const userTextOf = (line) => { const f = JSON.parse(line); return f.message.cont
   const after = H.userTodos.get(item.id);
   ok(after.status === 'done' && after.resolvedBy === 'reply' && after.reply.text === 'dev\nand rebase first' && r.json.item.id === item.id, 'the item is done / resolvedBy reply / the reply kept, and answered back');
   ok(H.calls.length === n0 + 1, 'ONE store broadcast for the whole reply', H.calls.length - n0);
-  ok(!s.buffer.includes('\n\n\n') && s.buffer.includes('For you reply'), 'the user message is appended to the session buffer');
+  ok(!s.buffer.includes('\n\n\n') && verdictOf(s.buffer.includes('For you reply')), 'the user message is appended to the session buffer');
 
   // a hostile reply that IS a stream-json user frame is still wrapped as text (the marker line comes first)
   const it2 = H.userTodos.add('claude:sid-sess-1', { origin: 'agent', text: 'another' });
   const frame = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'INJECTED' }] } });
   await H.call(it2.id, { text: frame });
-  ok(wrote.length === 2 && userTextOf(wrote[1]).startsWith('[For you reply #' + it2.id + ']') && userTextOf(wrote[1]).endsWith(frame), 'a reply that is itself a JSON user frame is sent as TEXT under the marker, never as a raw frame');
+  ok(wrote.length === 2 && gateOf(userTextOf(wrote[1]).startsWith('[For you reply #' + it2.id + ']')) && verdictOf(userTextOf(wrote[1]).endsWith(frame)), 'a reply that is itself a JSON user frame is sent as TEXT under the marker, never as a raw frame');
 
   // mid-turn: still written, still resolved
   const mid = H.addSession('sess-2', { _isStreaming: true });
@@ -402,7 +402,7 @@ const userTextOf = (line) => { const f = JSON.parse(line); return f.message.cont
   const it12 = H.userTodos.add('claude:sid-broken-1', { origin: 'agent', text: 'broken' });
   const r12 = await H.call(it12.id, { text: 'x' });
   cases.push(['pty.write throwing ⇒ 500 send_failed, the item still open', r12.status === 500 && r12.json.code === 'send_failed' && /EPIPE/.test(r12.json.error) && H.userTodos.get(it12.id).status === 'open']);
-  for (const [n, c] of cases) ok(c, n);
+  for (const [n, c] of cases) ok(verdictOf(c), n);
   void broken;
   H.userTodos.stop(); H.userTodos.flush();
 }
@@ -417,7 +417,7 @@ const userTextOf = (line) => { const f = JSON.parse(line); return f.message.cont
   activeSessions.set('c', s);
   const sender2 = createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR: tmpdir(), broadcastToSession: (x, id, m) => bc.push(m), feedLive: () => { }, autoResume: null, reattachLocalPty: () => { }, ptyQuietSince: () => false, log: () => { } });
   const r = sender2.send('c', '/compact please', { msgId: 'm1' });
-  ok(r.ok && r.msgId === 'm1' && s._interruptTimer === null && s._streamingKind === 'compacting' && bc[0]?.kind === 'compacting', 'sender keeps the case\'s behaviours: given msgId, interrupt timer cleared, the /compact label broadcast');
+  ok(gateOf(r.ok) && r.msgId === 'm1' && s._interruptTimer === null && s._streamingKind === 'compacting' && bc[0]?.kind === 'compacting', 'sender keeps the case\'s behaviours: given msgId, interrupt timer cleared, the /compact label broadcast');
 }
 
 // ── §5 turn facts + wiring pins ─────────────────────────────────────────────
@@ -431,24 +431,24 @@ console.log('§5 turn facts + wiring');
 
   const ws = read('src/ws-handler.js');
   const cm = ws.match(/case 'chat-input': \{([\s\S]*?)\n {8}\}\n/);
-  ok(!!cm && !/formatChatInput\s*\(/.test(cm[1]) && /sendUserInput\(data\.sessionId, data\.text/.test(cm[1]), "ws-handler's chat-input case spells no formatChatInput( and calls sendUserInput(", cm && cm[1].slice(0, 200));
-  ok(!!cm && /r\.code === 'input_rejected' \|\| r\.code === 'too_large'/.test(cm[1]) && /code: 'input-rejected'/.test(cm[1]), "…and maps ONLY input_rejected/too_large to the existing input-rejected frame");
+  ok(!!cm && !/formatChatInput\s*\(/.test(cm[1]) && verdictOf(/sendUserInput\(data\.sessionId, data\.text/.test(cm[1])), "ws-handler's chat-input case spells no formatChatInput( and calls sendUserInput(", cm && cm[1].slice(0, 200));
+  ok(!!cm && gateOf(/r\.code === 'input_rejected' \|\| r\.code === 'too_large'/.test(cm[1])) && verdictOf(/code: 'input-rejected'/.test(cm[1])), "…and maps ONLY input_rejected/too_large to the existing input-rejected frame");
   ok((ws.match(/formatChatInput\s*\(/g) || []).length === 0, 'ws-handler holds no formatChatInput at all any more');
   ok((read('src/server/user-input.js').match(/formatChatInput\s*\(/g) || []).length === 1, 'src/server/user-input.js holds exactly ONE formatChatInput');
   ok(!/formatChatInput\s*\(/.test(read('src/routes/user-todos-reply.js')) && !/deliverToConversation|authorizeSpend|spendGuard/.test(read('src/routes/user-todos-reply.js')), 'the route composes no frame and touches neither the ladder nor the authorizer');
   const sp = read('scripts/test-spend-paths.mjs');
-  ok(/\{ file: 'src\/server\/user-input\.js', prim: 'user-frame'/.test(sp) && !/\{ file: 'src\/ws-handler\.js', prim: 'user-frame'/.test(sp), 'the spend ALLOW row names src/server/user-input.js#user-frame (re-pointed, not duplicated)');
+  ok(gateOf(/\{ file: 'src\/server\/user-input\.js', prim: 'user-frame'/.test(sp)) && !/\{ file: 'src\/ws-handler\.js', prim: 'user-frame'/.test(sp), 'the spend ALLOW row names src/server/user-input.js#user-frame (re-pointed, not duplicated)');
   const srv = read('server.js');
-  ok(/createUserInputSender\(\{[^}]*\}\)\.send;/.test(srv) && /registerUserTodoReplyRoutes\(app, \{ userTodos, activeSessions, sendUserInput, sessionStatusKey, reopen: \(item, o\) => inboxReopen\.reopen\(item, o\) \}\)/.test(srv), 'server.js constructs the ONE sender and hands it to the reply route');
-  ok(/registerWsHandler\(wss, \{[\s\S]*?\bsendUserInput,[\s\S]*?\n\}\);/.test(srv), '…and to the ws handler through ctx');
-  ok(/turn: require\('\.\/src\/server\/turn-facts\.js'\)\.turnOf\(s\)/.test(srv) && /turnDigest\(activeSessions\)/.test(srv) && /\}, 1000\)\.unref\(\)/.test(srv), 'the payload carries `turn`, re-broadcast by ONE unref\'d 1 s digest');
+  ok(gateOf(/createUserInputSender\(\{[^}]*\}\)\.send;/.test(srv)) && verdictOf(/registerUserTodoReplyRoutes\(app, \{ userTodos, activeSessions, sendUserInput, sessionStatusKey, reopen: \(item, o\) => inboxReopen\.reopen\(item, o\) \}\)/.test(srv)), 'server.js constructs the ONE sender and hands it to the reply route');
+  ok(verdictOf(/registerWsHandler\(wss, \{[\s\S]*?\bsendUserInput,[\s\S]*?\n\}\);/.test(srv)), '…and to the ws handler through ctx');
+  ok(gateOf(/turn: require\('\.\/src\/server\/turn-facts\.js'\)\.turnOf\(s\)/.test(srv)) && gateOf(/turnDigest\(activeSessions\)/.test(srv)) && verdictOf(/\}, 1000\)\.unref\(\)/.test(srv)), 'the payload carries `turn`, re-broadcast by ONE unref\'d 1 s digest');
   const { SPEND_REASONS } = require(path.join(REPO, 'src/spend-authorizer.js'));
   ok(Array.isArray(SPEND_REASONS) ? !SPEND_REASONS.some((x) => /reply|inbox/.test(String(x))) : !Object.keys(SPEND_REASONS || {}).some((x) => /reply|inbox/.test(x)), 'no spend reason for a reply (a per-occurrence owner action is not an unattended turn)');
   const ag = read('src/agent-routes.js') + read('src/agent-routes/status.js'); // + the status / todos family (lane dc-seams-server)
-  ok(/options: add\.options == null \? null : add\.options/.test(ag) && ag.includes('[--options "A|B|C"]') && ag.includes('`[For you reply #<id>]`'), 'agent route forwards add.options; the teaching block names --options and the reply shape');
+  ok(gateOf(/options: add\.options == null \? null : add\.options/.test(ag)) && gateOf(ag.includes('[--options "A|B|C"]')) && verdictOf(ag.includes('`[For you reply #<id>]`')), 'agent route forwards add.options; the teaching block names --options and the reply shape');
   const cli = read('data/bin/vibespace-ask');
-  ok(/opt\('options'\)/.test(cli) && /split\('\|'\)/.test(cli) && /options: ' \+ i\.options\.join/.test(cli) && /cmd === 'show'/.test(cli), "vibespace-ask: --options split on '|', list prints options, a show verb");
-  ok(/## Replies from the inbox/.test(read('docs/agent/ask-manual.md')), 'the ask manual documents the reply shape');
+  ok(gateOf(/opt\('options'\)/.test(cli)) && gateOf(/split\('\|'\)/.test(cli)) && gateOf(/options: ' \+ i\.options\.join/.test(cli)) && verdictOf(/cmd === 'show'/.test(cli)), "vibespace-ask: --options split on '|', list prints options, a show verb");
+  ok(verdictOf(/## Replies from the inbox/.test(read('docs/agent/ask-manual.md'))), 'the ask manual documents the reply shape');
 }
 
 // ── §5b the CLI's --options against a recording route running the STORE's own rule ──
@@ -458,9 +458,9 @@ console.log('§5b vibespace-ask --options: the CLI passes the labels as typed, t
 {
   const { good, bad, bodies } = await CLI5B; // started at the top (the two CLI processes ran beside the in-process sections)
   const bodyOf = (o) => bodies.find((b) => JSON.stringify(b?.add?.options) === o);
-  ok(good.code === 0 && bodies.length === 2 && bodyOf('["Run now","Wait"]') && /options: Run now \| Wait/.test(good.stdout), '"A|B" ⇒ two labels, trimmed, echoed', { good, bodies });
-  ok(bodyOf('["Run now","","Wait"]'), '"A||B" reaches the route AS TYPED (the empty label is not silently dropped)', bodies);
-  ok(bad.code === 1 && /options\[1\] is empty/.test(bad.stderr), '…and the CLI exits 1 printing the store\'s refusal BY NAME', bad);
+  ok(good.code === 0 && bodies.length === 2 && gateOf(bodyOf('["Run now","Wait"]')) && verdictOf(/options: Run now \| Wait/.test(good.stdout)), '"A|B" ⇒ two labels, trimmed, echoed', { good, bodies });
+  ok(verdictOf(bodyOf('["Run now","","Wait"]')), '"A||B" reaches the route AS TYPED (the empty label is not silently dropped)', bodies);
+  ok(bad.code === 1 && verdictOf(/options\[1\] is empty/.test(bad.stderr)), '…and the CLI exits 1 printing the store\'s refusal BY NAME', bad);
 }
 
 // ── §4b (lane S1 verify r2, M1) the route: a helper-ask item is refused by name — nothing written, nothing resolved ──
@@ -470,7 +470,7 @@ console.log('§4b POST /api/user-todos/:id/reply on a helper-ask item');
   const { wrote } = H.addSession('sess-h');
   const item = H.userTodos.add('claude:sid-sess-h', { origin: 'agent', kind: 'action', urgency: 'high', text: 'Helper “Fetch title of example.com” needs your approval to use WebFetch', action: { type: 'helper-ask', requestId: '2e19e852-98d5-4094-be1b-5fc1ccc2a3c7', sessionId: 'sess-h' } });
   const r = await H.call(item.id, { text: 'yes, allow it' });
-  ok(r.status === 409 && r.json.code === 'card_item' && /conversation’s card/.test(r.json.error), 'a typed reply to a helper-ask item ⇒ 409 card_item with the sentence', r);
+  ok(r.status === 409 && r.json.code === 'card_item' && verdictOf(/conversation’s card/.test(r.json.error)), 'a typed reply to a helper-ask item ⇒ 409 card_item with the sentence', r);
   ok(wrote.length === 0 && H.rec.feed.length === 0, 'NOTHING was written to the pty and nothing fed (a typed line can never be a control_response)', wrote.length);
   ok(H.userTodos.get(item.id).status === 'open', 'the item stays OPEN — the pointer to the waiting card is kept', H.userTodos.get(item.id).status);
   H.userTodos.stop(); H.userTodos.flush();
@@ -485,7 +485,7 @@ console.log('§4c POST /api/user-todos/:id/reply on an exit ask (verify-r4 F5)')
   H.userTodos.onStatus(() => { settled++; }); // exit-proxy's one-state hook: an item leaving 'open' settles the ask DENIED
   const item = H.userTodos.add('claude:sid-sess-x', { origin: 'machines', kind: 'action', urgency: 'high', text: 'Allow "ops" to run a command on mac?', detail: 'id', action: { type: 'exit-run-ask', askId: 'b'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', cmd: 'id' } });
   const r = await H.call(item.id, { text: '可以，允许它运行 (yes, allow it)' });
-  ok(r.status === 409 && r.json.code === 'exit_ask' && /Allow or Deny/.test(r.json.error), 'F5: a typed reply to an exit ask ⇒ 409 exit_ask with the sentence (pre-fix: 200 — the item resolved and the ask was DENIED)', r);
+  ok(r.status === 409 && r.json.code === 'exit_ask' && verdictOf(/Allow or Deny/.test(r.json.error)), 'F5: a typed reply to an exit ask ⇒ 409 exit_ask with the sentence (pre-fix: 200 — the item resolved and the ask was DENIED)', r);
   ok(wrote.length === 0 && H.rec.feed.length === 0, 'F5: nothing reached the agent (it was not a message to it)', wrote.length);
   ok(H.userTodos.get(item.id).status === 'open' && settled === 0, 'F5: the item stays OPEN — no status move, so the ask is NOT settled (Allow / Deny still answer it)', { status: H.userTodos.get(item.id).status, settled });
   H.userTodos.stop(); H.userTodos.flush();
@@ -497,12 +497,12 @@ console.log('§6 negative control');
   const rel = 'src/routes/user-todos-reply.js';
   const src = read(rel);
   const needle = "      if (isAgentBearer(req)) return fail(res, 'agent_forbidden',";
-  ok(src.includes(needle), 'control needle exists (a control that cannot be built proves nothing)');
+  ok(verdictOf(src.includes(needle)), 'control needle exists (a control that cannot be built proves nothing)');
   // the patched copy lives OUTSIDE the checkout (scripts/mutant-copy.mjs, test-architecture §51):
   // its relative requires still reach the real modules, its line numbers stay the original's
   const MUT = mutantCopies('inbox-reply', REPO);
   const mut = MUT.write(rel, src.split('\n').map((l) => (l.startsWith(needle) ? '' : l)).join('\n'), 'no-agent-bearer');
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6 ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6 ' })) ok(verdictOf(row.pass), row.name, row.detail);
   const H = harness(mut);
   const { wrote } = H.addSession('ctl-1');
   const it = H.userTodos.add('claude:sid-ctl-1', { origin: 'agent', text: 'control' });
@@ -517,13 +517,13 @@ console.log('§6b negative control: replyVerdict without the card_item rung');
   const rel = 'src/inbox-reply.js';
   const src = read(rel);
   const needle = "  if (it.action && typeof it.action === 'object' && CARD_ACTION_TYPES.includes(it.action.type) && cardReplyRefused()) return no('card_item');\n"; // lane S1 verify r3: the rung asks the ask table's `reply` row
-  ok(src.includes(needle), '§6b control needle exists');
+  ok(verdictOf(src.includes(needle)), '§6b control needle exists');
   const MUT = mutantCopies('inbox-reply-card', REPO);
   const Mut = MUT.load(rel, src.replace(needle, ''), 'no-card-item');
   const helperItem = { id: 'ut-aaaaaaaaaa', sessionKey: 'claude:sid', text: 'q', action: { type: 'helper-ask', requestId: 'r1' } };
   const v = Mut.replyVerdict({ item: helperItem, session: { live: true, mode: 'chat', remoteState: null } });
   ok(v.ok === true, '§6b CONTROL: without the rung a helper-ask item is offered a typed reply (the F3 symptom: the item resolved, the helper still waiting) — the §2/§4b legs can go red', v);
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6b ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6b ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 // ── §6c negative control (verify-r4 F5): the PURE verdict without its exit_ask rung ──
@@ -532,12 +532,12 @@ console.log('§6c negative control: replyVerdict without the exit_ask rung');
   const rel = 'src/inbox-reply.js';
   const src = read(rel);
   const needle = "  if (it.action && typeof it.action === 'object' && ANSWER_ACTION_TYPES.includes(it.action.type)) return no('exit_ask');\n";
-  ok(src.includes(needle), '§6c control needle exists');
+  ok(verdictOf(src.includes(needle)), '§6c control needle exists');
   const MUT = mutantCopies('inbox-reply-exit', REPO);
   const Mut = MUT.load(rel, src.replace(needle, ''), 'no-exit-ask');
   const v = Mut.replyVerdict({ item: { id: 'ut-aaaaaaaaaa', sessionKey: 'claude:sid', text: 'q', action: { type: 'exit-run-ask', askId: 'c'.repeat(32) } }, session: { live: true, mode: 'chat', remoteState: null } });
   ok(v.ok === true, '§6c CONTROL: without the rung an exit ask is offered a typed reply (the F5 symptom: "yes" resolved the item and DENIED the command) — the §2/§4c legs go red', v);
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6c ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6c ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 // ── §6d lane vault-job-approval (round w6tezed7d): a Background job's approval card carries its jobId (the Clear content cascade)
@@ -549,14 +549,14 @@ console.log('§6d a Background job\'s approval card (jobId + vault-job-ask) ⇒ 
   const card = { id: 'ut-bbbbbbbbbb', sessionKey: 'claude:sid', text: 'q', jobId: 'jb-0000aaaa', action: { type: 'vault-job-ask', askId: 'vj-' + '0'.repeat(16), jobId: 'jb-0000aaaa' } };
   const live = { live: true, mode: 'chat', remoteState: null };
   const r0 = R.replyVerdict({ item: card, session: live });
-  ok(R.ANSWER_ACTION_TYPES.includes('vault-job-ask') && r0.code === 'exit_ask' && /Allow or Deny/.test(String(r0.why)), '§6d: a vault job card (jobId + vault-job-ask) ⇒ exit_ask «Answer it with Allow or Deny» — never «answer it in the job panel»', r0);
+  ok(gateOf(R.ANSWER_ACTION_TYPES.includes('vault-job-ask')) && r0.code === 'exit_ask' && verdictOf(/Allow or Deny/.test(String(r0.why))), '§6d: a vault job card (jobId + vault-job-ask) ⇒ exit_ask «Answer it with Allow or Deny» — never «answer it in the job panel»', r0);
   const MUT = mutantCopies('inbox-reply-jobcard', REPO);
   const RUNG = "  if (it.action && typeof it.action === 'object' && ANSWER_ACTION_TYPES.includes(it.action.type)) return no('exit_ask');\n", JOBR = "  if (it.jobId) return no('job_item');\n";
   let Mut = null, why = null;
   try { Mut = MUT.load(rel, anchored(anchored(src, JOBR, '', 'the job rung lifted'), RUNG, JOBR + RUNG, 'the job rung above the answer rung'), 'job-rung-first'); } catch (e) { why = e.message; }
   const r1 = Mut ? Mut.replyVerdict({ item: card, session: live }) : null;
   ok(!!r1 && r1.code === 'job_item', '§6d CONTROL — the release\'s order (the job rung first): the card says job_item — RED on the copy', r1 || why);
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6d ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6d ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 // ── §7 chunk 4: setStatusMany + POST /api/user-todos/resolve-many ─────────────
@@ -568,12 +568,12 @@ console.log('§7 setStatusMany + resolve-many (chunk 4: "Mark all seen")');
   m.setStatus(c.id, 'done', 'user');
   const n0 = calls.length;
   let r = null; try { r = m.setStatusMany([a.id, 'ut-nope000000', b.id, c.id, a.id], 'dismissed', 'user'); } catch (e) { r = { threw: e.message }; }
-  ok(r && Array.isArray(r.changed) && r.changed.length === 3 && [a.id, b.id, c.id].every((id) => r.changed.includes(id)), 'mixed ids ⇒ every KNOWN id changed (a duplicate counted once; an already-done id counts, changed to dismissed)', r);
-  ok(r && Array.isArray(r.unknown) && r.unknown.length === 1 && r.unknown[0] === 'ut-nope000000', '…the unknown id is NAMED', r);
+  ok(gateOf(r) && gateOf(Array.isArray(r.changed)) && r.changed.length === 3 && verdictOf([a.id, b.id, c.id].every((id) => r.changed.includes(id))), 'mixed ids ⇒ every KNOWN id changed (a duplicate counted once; an already-done id counts, changed to dismissed)', r);
+  ok(gateOf(r) && gateOf(Array.isArray(r.unknown)) && r.unknown.length === 1 && r.unknown[0] === 'ut-nope000000', '…the unknown id is NAMED', r);
   ok(calls.length === n0 + 1, 'ONE onChange (one broadcast) for the whole batch', calls.length - n0);
-  ok([a, b, c].every((x) => { const g = m.get(x.id); return g.status === 'dismissed' && g.resolvedBy === 'user' && typeof g.resolvedAt === 'number'; }), 'each is dismissed, resolvedBy user, stamped');
+  ok(verdictOf([a, b, c].every((x) => { const g = m.get(x.id); return g.status === 'dismissed' && g.resolvedBy === 'user' && typeof g.resolvedAt === 'number'; })), 'each is dismissed, resolvedBy user, stamped');
   let threw = null; try { m.setStatusMany([a.id], 'gone', 'user'); } catch (e) { threw = e.message; }
-  ok(threw && /status must be one of open\/done\/dismissed/.test(threw), 'an invalid status THROWS by name', threw);
+  ok(gateOf(threw) && verdictOf(/status must be one of open\/done\/dismissed/.test(threw)), 'an invalid status THROWS by name', threw);
   const n1 = calls.length;
   const r2 = m.setStatusMany(['ut-nope000001'], 'done', 'user');
   ok(r2.changed.length === 0 && r2.unknown.length === 1 && calls.length === n1, 'nothing known ⇒ nothing written, no broadcast');
@@ -590,7 +590,7 @@ console.log('§7 setStatusMany + resolve-many (chunk 4: "Mark all seen")');
   for (let k = 0; k < 20; k++) { const x = m.add('claude:older', { origin: 'agent', text: 'older ' + k }); m.setStatus(x.id, 'done', 'user'); m.get(x.id).resolvedAt = Date.now() - 3 * 3600e3 - k; }
   m.setStatusMany(ids, 'dismissed', 'user');
   const snap = m.snapshot();
-  ok(ids.every((id) => snap.resolved.some((i) => i.id === id)), 'after a 30-id batch the snapshot lists all 30 resolved items (not the old flat 15)', snap.resolved.length);
+  ok(verdictOf(ids.every((id) => snap.resolved.some((i) => i.id === id))), 'after a 30-id batch the snapshot lists all 30 resolved items (not the old flat 15)', snap.resolved.length);
   ok(!snap.resolved.some((i) => i.id === old.id) && snap.resolved.length === 30, '…while an item resolved hours ago beyond the newest 15 is not carried', snap.resolved.length);
   const { RESOLVED_TAIL, RESOLVED_SNAPSHOT_MAX } = require(path.join(REPO, 'src/user-todos.js'));
   ok(RESOLVED_TAIL === 15 && RESOLVED_SNAPSHOT_MAX >= 200, 'the tail keeps its newest 15 and is capped (≥ one resolve-many batch)');
@@ -614,18 +614,18 @@ console.log('§7 setStatusMany + resolve-many (chunk 4: "Mark all seen")');
   H.m.setStatus(ids[2], 'done', 'user');
   const many = Array.from({ length: 201 }, (_, k) => 'ut-' + String(k).padStart(10, '0'));
   const r201 = await H.call({ ids: many, status: 'dismissed' });
-  ok(r201.status === 400 && r201.json && r201.json.code === 'too_many', '201 ids ⇒ 400 too_many', r201);
+  ok(r201.status === 400 && gateOf(r201.json) && r201.json.code === 'too_many', '201 ids ⇒ 400 too_many', r201);
   const n0 = H.calls.length;
   const rv = await H.call({ ids, status: 'dismissed' }, { authorization: 'Bearer vsst_abc' });
   const rj = await H.call({ ids, status: 'dismissed' }, { authorization: 'Bearer jbt_abc' });
   ok(rv.status === 403 && rv.json.code === 'agent_forbidden' && rj.status === 403 && rj.json.code === 'agent_forbidden', 'vsst_ / jbt_ ⇒ 403 agent_forbidden', [rv, rj]);
-  ok(H.calls.length === n0 && ids.slice(0, 2).every((id) => H.m.get(id).status === 'open'), '…and nothing changed, nothing broadcast');
+  ok(H.calls.length === n0 && verdictOf(ids.slice(0, 2).every((id) => H.m.get(id).status === 'open')), '…and nothing changed, nothing broadcast');
   const bad = [[{ ids: [], status: 'dismissed' }, 'bad_ids'], [{ ids: 'x', status: 'dismissed' }, 'bad_ids'], [{ ids: [7], status: 'dismissed' }, 'bad_ids'], [{ ids, status: 'open' }, 'bad_status'], [{ ids }, 'bad_status']];
-  ok((await Promise.all(bad.map(async ([body, code]) => { const r = await H.call(body); return r.status === 400 && r.json.code === code; }))).every(Boolean), 'empty / non-array / non-string ids ⇒ 400 bad_ids; a status other than dismissed|done (incl. a reopen) ⇒ 400 bad_status');
+  ok(verdictOf((await Promise.all(bad.map(async ([body, code]) => { const r = await H.call(body); return r.status === 400 && r.json.code === code; }))).every(Boolean)), 'empty / non-array / non-string ids ⇒ 400 bad_ids; a status other than dismissed|done (incl. a reopen) ⇒ 400 bad_status');
   const r3 = await H.call({ ids, status: 'dismissed' });
-  ok(r3.status === 200 && r3.json && r3.json.ok === true && r3.json.changed === 3 && Array.isArray(r3.json.unknown) && r3.json.unknown.length === 0, 'a 3-id dismiss ⇒ {ok, changed:3, unknown:[]} (the already-done id counts as changed-to-dismissed)', r3);
+  ok(r3.status === 200 && gateOf(r3.json) && r3.json.ok === true && r3.json.changed === 3 && gateOf(Array.isArray(r3.json.unknown)) && r3.json.unknown.length === 0, 'a 3-id dismiss ⇒ {ok, changed:3, unknown:[]} (the already-done id counts as changed-to-dismissed)', r3);
   ok(H.calls.length === n0 + 1, 'ONE broadcast recorded', H.calls.length - n0);
-  ok(ids.every((id) => H.m.get(id).status === 'dismissed' && H.m.get(id).resolvedBy === 'user'), 'every item dismissed by the user');
+  ok(verdictOf(ids.every((id) => H.m.get(id).status === 'dismissed' && H.m.get(id).resolvedBy === 'user')), 'every item dismissed by the user');
   const r4 = await H.call({ ids: [ids[0], 'ut-gone000000'], status: 'done' });
   ok(r4.status === 200 && r4.json.changed === 1 && r4.json.unknown[0] === 'ut-gone000000', 'a partial batch answers the unknown id by name', r4);
   H.m.stop(); H.m.flush();
@@ -636,7 +636,7 @@ console.log('§7 setStatusMany + resolve-many (chunk 4: "Mark all seen")');
   ok(iMany > 0 && iId > 0 && iMany < iId, 'server.js registers resolve-many BEFORE the /api/user-todos/:id route', { iMany, iId });
   const rsrc = read('src/routes/user-todos-reply.js');
   const body = (rsrc.match(/function registerResolveManyRoute[\s\S]*?\n\}\n/) || [''])[0];
-  ok(/if \(isAgentBearer\(req\)\) return fail\(403, 'agent_forbidden'/.test(body) && /userTodos\.setStatusMany\(/.test(body) && /RESOLVE_MANY_MAX/.test(body), 'the route refuses agent tokens first and writes through setStatusMany under the 200 cap');
+  ok(gateOf(/if \(isAgentBearer\(req\)\) return fail\(403, 'agent_forbidden'/.test(body)) && gateOf(/userTodos\.setStatusMany\(/.test(body)) && verdictOf(/RESOLVE_MANY_MAX/.test(body)), 'the route refuses agent tokens first and writes through setStatusMany under the 200 cap');
 }
 
 // ── §8 A REPLY TO A CONVERSATION THAT ENDED REOPENS IT (lane inbox-reply-dead-session) ──────────────
@@ -647,22 +647,22 @@ const RO = require(path.join(REPO, 'src/inbox-reopen.js'));
   const a = RO.reopenCreate({ key: 'claude:c-1', entry: { cwd: '/home/u/proj', name: 'disc name' }, cfg, defaults: { permission: 'default', extraArgs: '--verbose' }, name: 'My lane', taskId: 'T-1', reqId: 'reopen-x' });
   const want = { type: 'create', backend: 'claude', mode: 'chat', cwd: '/home/u/proj', sessionName: 'My lane', model: 'claude-opus-4', permissionMode: 'plan', effort: 'high', outputStyle: 'Explanatory', autoResume: false, extraArgs: '--verbose', worktree: true, spawnOriginHint: { model: 'chosen', effort: 'chosen' }, resume: true, resumeId: 'c-1', cols: 120, rows: 30, reqId: 'reopen-x', taskId: 'T-1', accountId: 'acct-1', modelLock: true, lockModel: 'claude-opus-4', poolPin: { memberId: 'm-1', at: 7, poolId: 'pool-a' } };
   const clean = (o) => JSON.parse(JSON.stringify(o));
-  ok(a.ok && JSON.stringify(clean(a.data)) === JSON.stringify(want), 'a config that states everything ⇒ the create the page sends: resume of c-1 in chat mode, the conversation\'s own model / permission / effort / style / account / lock / pool pin, the harness\'s extra args, its first Task Group', clean(a.data));
-  ok(a.conversation && a.conversation.backend === 'claude' && a.conversation.backendSessionId === 'c-1' && a.conversation.cwd === '/home/u/proj' && a.conversation.hostId === null, '…and names the conversation it reopens (backend, id, cwd, no host)', a.conversation);
+  ok(gateOf(a.ok) && JSON.stringify(clean(a.data)) === JSON.stringify(want), 'a config that states everything ⇒ the create the page sends: resume of c-1 in chat mode, the conversation\'s own model / permission / effort / style / account / lock / pool pin, the harness\'s extra args, its first Task Group', clean(a.data));
+  ok(gateOf(a.conversation) && a.conversation.backend === 'claude' && a.conversation.backendSessionId === 'c-1' && a.conversation.cwd === '/home/u/proj' && a.conversation.hostId === null, '…and names the conversation it reopens (backend, id, cwd, no host)', a.conversation);
   const b = RO.reopenCreate({ key: 'codex:t-9', entry: { cwd: 'box: /srv/x', host: 'h-1' }, cfg: null, defaults: { permission: 'default' }, name: '' });
-  ok(b.ok && b.data.backend === 'codex' && b.data.hostId === 'h-1' && b.data.cwd === '/srv/x' && b.data.model === undefined && b.data.effort === undefined && b.data.spawnOriginHint.model === 'harness' && b.data.permissionMode === 'default' && b.data.accountId === undefined && b.data.poolPin === undefined && b.data.sessionName === undefined,
+  ok(gateOf(b.ok) && b.data.backend === 'codex' && b.data.hostId === 'h-1' && b.data.cwd === '/srv/x' && b.data.model === undefined && b.data.effort === undefined && b.data.spawnOriginHint.model === 'harness' && b.data.permissionMode === 'default' && b.data.accountId === undefined && b.data.poolPin === undefined && b.data.sessionName === undefined,
     'no config ⇒ model / effort NOT sent (the server\'s continuity ladder reads the conversation\'s own), the instance permission default filled in, a merged record\'s "host: /path" cut to the path, the host carried', clean(b.data));
   const c = RO.reopenCreate({ key: 'claude:c-2', entry: { cwd: '/p' }, cfg: { permission: '' }, defaults: { permission: 'acceptEdits' } });
-  ok(c.ok && c.data.permissionMode === undefined, 'a STATED empty permission beats the default (createSession: `permission !== undefined ? permission : default`, then `|| undefined`)', clean(c.data));
+  ok(gateOf(c.ok) && c.data.permissionMode === undefined, 'a STATED empty permission beats the default (createSession: `permission !== undefined ? permission : default`, then `|| undefined`)', clean(c.data));
   const d = RO.reopenCreate({ key: 'claude:c-3', entry: null, item: { cwd: '/far', hostId: 'h-2' } });
-  ok(d.ok && d.data.hostId === 'h-2' && d.data.cwd === '/far', 'not in this machine\'s discovery but the ask names its host ⇒ the remote resume on that host (the create judges the transcript there)', clean(d.data));
+  ok(gateOf(d.ok) && d.data.hostId === 'h-2' && d.data.cwd === '/far', 'not in this machine\'s discovery but the ask names its host ⇒ the remote resume on that host (the create judges the transcript there)', clean(d.data));
   const refusals = [
     [RO.reopenCreate({ key: 'webui:abc', entry: { cwd: '/p' } }), /filed before its conversation had an id/],
     [RO.reopenCreate({ key: 'claude:c-4', entry: null, item: { cwd: '/p' } }), /no transcript of this conversation was found on this machine/],
     [RO.reopenCreate({ key: 'claude:c-5', entry: { cwd: '' }, item: {} }), /folder this conversation ran in is not known/],
     [RO.reopenCreate({ key: 'accounts' }), /filed before its conversation had an id/],
   ];
-  ok(refusals.every(([r, re]) => r.ok === false && re.test(r.why)), 'a webui: key, a LOCAL conversation discovery does not list (no transcript — never guessed), an unknown folder, a producer key ⇒ refused BY NAME', refusals.map(([r]) => r.why));
+  ok(verdictOf(refusals.every(([r, re]) => r.ok === false && re.test(r.why))), 'a webui: key, a LOCAL conversation discovery does not list (no transcript — never guessed), an unknown folder, a producer key ⇒ refused BY NAME', refusals.map(([r]) => r.why));
   // THE MIRROR CENSUS: the page's resume road reads these config fields and sends these keys — a new one reds HERE
   const life = read('src/lib/session-lifecycle.js');
   const resumeBody = (life.match(/\n  resumeSession\(sessionId, cwd, sessionName[\s\S]*?\n  \},\n/) || [''])[0];
@@ -673,7 +673,7 @@ const RO = require(path.join(REPO, 'src/inbox-reopen.js'));
   const notInClient = sentKeys.filter((k) => !new RegExp(`[{,\\s]${k}[:,]`).test(createMsg));
   ok(createMsg.length > 500 && notInClient.length === 0, `every key reopenCreate sends is a key of the page's createMsg (${sentKeys.length} keys)`, notInClient);
   const jumpSrc = read('src/lib/user-todos-actions.js');
-  ok(/else if \(s\.status === 'stopped'\) (?:\{ )?app\.resumeSession\(s\.sessionId, s\.cwd, displayName\(s\), \{ backend: s\.backend, hostId: s\.hostId \|\| s\.host \|\| undefined \}\);/.test(jumpSrc), 'the For-you\'s own "open the session" door is that resume (jump: resumeSession(id, cwd, name, {backend, hostId}) — no mode, no model: what reopenCreate mirrors)'); // (lane needs-card-tail: a block now — the resume, then the landing on the filing record)
+  ok(verdictOf(/else if \(s\.status === 'stopped'\) (?:\{ )?app\.resumeSession\(s\.sessionId, s\.cwd, displayName\(s\), \{ backend: s\.backend, hostId: s\.hostId \|\| s\.host \|\| undefined \}\);/.test(jumpSrc)), 'the For-you\'s own "open the session" door is that resume (jump: resumeSession(id, cwd, name, {backend, hostId}) — no mode, no model: what reopenCreate mirrors)'); // (lane needs-card-tail: a block now — the resume, then the landing on the filing record)
 }
 console.log('§8a PURE replyBoxView — the box both surfaces draw, never disabled');
 {
@@ -682,10 +682,10 @@ console.log('§8a PURE replyBoxView — the box both surfaces draw, never disabl
   const term = R.replyBoxView({ show: true, enabled: false, why: R.REPLY_WHY.not_chat, code: 'not_chat' });
   const failedRe = R.replyBoxView({ show: true, enabled: false, why: R.REPLY_WHY.no_live_session, code: 'no_live_session' }, { code: 'resume_failed', why: 'claude is not installed on this machine' });
   const failedSend = R.replyBoxView({ show: true, enabled: true, code: null }, { code: 'send_failed', why: 'EPIPE' });
-  ok(stopped.reopen && stopped.note.key === R.REPLY_WHY.no_live_session && stopped.send === 'Reopen and send' && /Reopen the conversation/.test(stopped.sendTitle), 'an ended conversation ⇒ reopen, the note says it ends + the send reopens it, the send reads "Reopen and send"', stopped);
+  ok(gateOf(stopped.reopen) && stopped.note.key === R.REPLY_WHY.no_live_session && stopped.send === 'Reopen and send' && verdictOf(/Reopen the conversation/.test(stopped.sendTitle)), 'an ended conversation ⇒ reopen, the note says it ends + the send reopens it, the send reads "Reopen and send"', stopped);
   ok(!live.reopen && live.note === null && live.send === 'Reply' && live.sendTitle === 'Send reply (Enter) · newline (Shift+Enter)', 'a live chat ⇒ no note, "Reply" with its old title (the live box is unchanged)', live);
   ok(!term.reopen && term.note.key === R.REPLY_WHY.not_chat && term.send === 'Reply', 'a live terminal ⇒ its fact said in the note, nothing reopened (a send is answered by name)', term);
-  ok(failedRe.note.key === 'Could not reopen the conversation: {why}' && failedRe.note.why === 'claude is not installed on this machine' && failedRe.reopen, 'a failed reopen ⇒ the note says it with the resume\'s own reason (never silent)', failedRe);
+  ok(failedRe.note.key === 'Could not reopen the conversation: {why}' && failedRe.note.why === 'claude is not installed on this machine' && verdictOf(failedRe.reopen), 'a failed reopen ⇒ the note says it with the resume\'s own reason (never silent)', failedRe);
   ok(failedSend.note.key === 'Could not reply: {why}' && failedSend.note.why === 'EPIPE', 'any other refused send ⇒ "Could not reply: …" in the note', failedSend);
   ok(!Object.keys(stopped).some((k) => /disabled|enabled/i.test(k)), 'the box view has NO enabled/disabled field — nothing in it can grey a box out', Object.keys(stopped));
   // the words, en / zh / ja — the brief's own zh sentence and button
@@ -694,7 +694,7 @@ console.log('§8a PURE replyBoxView — the box both surfaces draw, never disabl
   const WORDS = [R.REPLY_WHY.no_live_session, 'Reopen and send', 'Reopen the conversation and send this reply (Enter) · newline (Shift+Enter)', 'Reopen and send "{label}"', 'Reopened the conversation and sent your reply', 'Could not reopen the conversation: {why}', 'Could not open the conversation: {why}'];
   ok(pair(zh, R.REPLY_WHY.no_live_session) === '这个对话已结束；发送会重新打开它并把这条回复作为第一条消息' && pair(zh, 'Reopen and send') === '重新打开并发送', 'zh: 「这个对话已结束；发送会重新打开它并把这条回复作为第一条消息」 + 「重新打开并发送」 (the brief\'s words)', [pair(zh, R.REPLY_WHY.no_live_session), pair(zh, 'Reopen and send')]);
   ok(pair(ja, R.REPLY_WHY.no_live_session) === 'この会話は終了しています。送信すると会話を再開し、この返信を最初のメッセージとして送ります' && pair(ja, 'Reopen and send') === '再開して送信', 'ja: the note + 「再開して送信」', [pair(ja, R.REPLY_WHY.no_live_session), pair(ja, 'Reopen and send')]);
-  ok(WORDS.every((k) => pair(zh, k) && pair(ja, k)) && !zh.includes('Agent not running — open the session, then reply') && !ja.includes('Agent not running — open the session, then reply'), `every new word has zh + ja (${WORDS.length}); the retired "open the session, then reply" key is gone from both`, WORDS.filter((k) => !pair(zh, k) || !pair(ja, k)));
+  ok(gateOf(WORDS.every((k) => pair(zh, k) && pair(ja, k))) && !zh.includes('Agent not running — open the session, then reply') && !ja.includes('Agent not running — open the session, then reply'), `every new word has zh + ja (${WORDS.length}); the retired "open the session, then reply" key is gone from both`, WORDS.filter((k) => !pair(zh, k) || !pair(ja, k)));
 }
 console.log('§8b the ROUTE with a reopen dep');
 {
@@ -705,16 +705,16 @@ console.log('§8b the ROUTE with a reopen dep');
   const n0 = H.calls.length;
   const r = await H.callAsync(dead.id, { text: 'yes — ship after the tests' });
   const made = H8.made[0];
-  ok(r.status === 200 && r.json.ok === true && r.json.reopened === true && r.json.sessionId === 'reo-ended-1' && r.json.conversation && r.json.conversation.backendSessionId === 'ended-1' && /-reply$/.test(r.json.msgId), 'an ENDED conversation ⇒ 200 {ok, reopened:true, sessionId, conversation, msgId}', r.json);
-  ok(H.reopened.length === 1 && H.reopened[0][0] === dead.id && H.reopened[0][1] && H.reopened[0][1].by === 'human:local', 'the route asked for ONE reopen of that item, naming who pressed (device-audit byOfReq)', H.reopened);
-  ok(made && made.wrote.length === 1 && userTextOf(made.wrote[0]) === R.composeReply({ ...dead, status: 'open' }, 'yes — ship after the tests', { now: H.NOW }), 'the reply is the reopened session\'s FIRST input — exactly ONE frame, its text === composeReply(item, reply)', made && made.wrote.map((w) => userTextOf(w).slice(0, 80)));
-  ok(made && typeof made.s._userInputAt === 'number' && !made.s._machineInputAt, '…typed as the PERSON\'s turn (_userInputAt — never the machine-turn mark)');
+  ok(r.status === 200 && r.json.ok === true && r.json.reopened === true && r.json.sessionId === 'reo-ended-1' && gateOf(r.json.conversation) && r.json.conversation.backendSessionId === 'ended-1' && verdictOf(/-reply$/.test(r.json.msgId)), 'an ENDED conversation ⇒ 200 {ok, reopened:true, sessionId, conversation, msgId}', r.json);
+  ok(H.reopened.length === 1 && H.reopened[0][0] === dead.id && gateOf(H.reopened[0][1]) && H.reopened[0][1].by === 'human:local', 'the route asked for ONE reopen of that item, naming who pressed (device-audit byOfReq)', H.reopened);
+  ok(gateOf(made) && made.wrote.length === 1 && userTextOf(made.wrote[0]) === R.composeReply({ ...dead, status: 'open' }, 'yes — ship after the tests', { now: H.NOW }), 'the reply is the reopened session\'s FIRST input — exactly ONE frame, its text === composeReply(item, reply)', made && made.wrote.map((w) => userTextOf(w).slice(0, 80)));
+  ok(gateOf(made) && typeof made.s._userInputAt === 'number' && !made.s._machineInputAt, '…typed as the PERSON\'s turn (_userInputAt — never the machine-turn mark)');
   const after = H.userTodos.get(dead.id);
   ok(after.status === 'done' && after.resolvedBy === 'reply' && after.reply.text === 'yes — ship after the tests' && r.json.item.id === dead.id && H.calls.length === n0 + 1, 'the item resolved by the reply (ONE store broadcast)', after);
   // a chip on an ended conversation = the same reopen (its label is the whole reply)
   const deadChip = H.userTodos.add('claude:ended-2', { origin: 'agent', text: 'Pick', options: ['left', 'right'] });
   const rc = await H.callAsync(deadChip.id, { text: 'right' });
-  ok(rc.status === 200 && rc.json.reopened && H8.made[1] && H8.made[1].wrote.length === 1 && userTextOf(H8.made[1].wrote[0]).endsWith('\n\nright'), 'an option chip on an ended conversation reopens it the same way (the label is its first message)', rc.json);
+  ok(rc.status === 200 && gateOf(rc.json.reopened) && gateOf(H8.made[1]) && H8.made[1].wrote.length === 1 && verdictOf(userTextOf(H8.made[1].wrote[0]).endsWith('\n\nright')), 'an option chip on an ended conversation reopens it the same way (the label is its first message)', rc.json);
   // live / terminal / agent bearer: never a reopen
   const nRe = H.reopened.length;
   const { wrote: lw } = H.addSession('live-8');
@@ -753,7 +753,7 @@ console.log('§8b the ROUTE with a reopen dep');
   const throwing = harness(undefined, { reopen: async () => { throw new Error('spawn EACCES'); } });
   const it2 = throwing.userTodos.add('claude:ended-10', { origin: 'agent', text: 'q' });
   const r2 = await throwing.callAsync(it2.id, { text: 'answer' });
-  ok(r2.status === 409 && r2.json.code === 'resume_failed' && /spawn EACCES/.test(r2.json.error) && throwing.userTodos.get(it2.id).status === 'open', 'a reopen that THROWS ⇒ 409 resume_failed naming the error', r2.json);
+  ok(r2.status === 409 && r2.json.code === 'resume_failed' && gateOf(/spawn EACCES/.test(r2.json.error)) && throwing.userTodos.get(it2.id).status === 'open', 'a reopen that THROWS ⇒ 409 resume_failed naming the error', r2.json);
   throwing.userTodos.stop(); throwing.userTodos.flush();
   const H = harness(undefined, { reopen: async (item, o, { addSession }) => { addSession('reo-term', { mode: 'terminal' }); return { ok: true, sessionId: 'reo-term', conversation: { backend: 'claude', backendSessionId: 'ended-11' } }; } });
   const it3 = H.userTodos.add('claude:ended-11', { origin: 'agent', text: 'q' });
@@ -789,62 +789,62 @@ console.log('§8c the ORCH reopener over a recording create');
   const A = mk({ us });
   const r = await A.R2.reopen({ id: 'ut-1', sessionKey: 'claude:c-1', sessionName: 'frozen' }, { by: 'human:me' });
   const sent = A.creates[0];
-  ok(r.ok && r.sessionId === 'w-new' && A.creates.length === 1, 'reopen ⇒ ONE create through the handed create case ⇒ {ok, sessionId}', r);
-  ok(sent && sent.data.resume === true && sent.data.resumeId === 'c-1' && sent.data.mode === 'chat' && sent.data.cwd === '/home/u/proj' && sent.data.model === 'claude-opus-4' && sent.data.accountId === 'acct-9' && sent.data.permissionMode === 'default' && sent.data.taskId === 'T-7' && sent.data.sessionName === 'Named by the owner' && /^reopen-/.test(sent.data.reqId),
+  ok(gateOf(r.ok) && r.sessionId === 'w-new' && A.creates.length === 1, 'reopen ⇒ ONE create through the handed create case ⇒ {ok, sessionId}', r);
+  ok(gateOf(sent) && sent.data.resume === true && sent.data.resumeId === 'c-1' && sent.data.mode === 'chat' && sent.data.cwd === '/home/u/proj' && sent.data.model === 'claude-opus-4' && sent.data.accountId === 'acct-9' && sent.data.permissionMode === 'default' && sent.data.taskId === 'T-7' && sent.data.sessionName === 'Named by the owner' && verdictOf(/^reopen-/.test(sent.data.reqId)),
     'the create = the resume of c-1 with the conversation\'s user-state config, the owner\'s custom name (a legacy bare-id key), its Task Group, the harness default permission', sent && sent.data);
-  ok(sent && sent.ws._headless === true && sent.ws._actBy === 'human:me' && sent.ws.readyState === 1 && sent.attached instanceof Set, 'the creator is a HEADLESS socket naming who pressed (its own attached set)', sent && { h: sent.ws._headless, by: sent.ws._actBy });
+  ok(gateOf(sent) && sent.ws._headless === true && sent.ws._actBy === 'human:me' && sent.ws.readyState === 1 && sent.attached instanceof Set, 'the creator is a HEADLESS socket naming who pressed (its own attached set)', sent && { h: sent.ws._headless, by: sent.ws._actBy });
   ok(A.opens.length === 1 && A.opens[0].by.kind === 'human' && A.opens[0].by.actBy === 'human:me' && A.opens[0].o.ws === sent.ws && A.opens[0].o.attachedSessions === sent.attached && A.opens[0].spec === sent.data,
     'int322: the reopen goes through THE SEAM (conversation-ops openConversation, by: human, its creator socket) and the seam ran the create case with the very message and socket — byte-identical', A.opens[0] && A.opens[0].by);
   ok(!A.activeSessions.get('w-new').clients.has(sent.ws) && A.activeSessions.get('w-new').clients.size === 0, '…and it LEFT the session\'s clients the moment the create answered (the window the page opens attaches like any other)');
-  ok(r.conversation && r.conversation.name === 'Resumed name' && r.conversation.backendSessionId === 'c-1' && r.conversation.cwd === '/home/u/proj', 'the answer names the conversation (the create\'s own name for it)', r.conversation);
+  ok(gateOf(r.conversation) && r.conversation.name === 'Resumed name' && r.conversation.backendSessionId === 'c-1' && r.conversation.cwd === '/home/u/proj', 'the answer names the conversation (the create\'s own name for it)', r.conversation);
   const E = mk({ answer: 'error' });
   const re = await E.R2.reopen({ sessionKey: 'claude:c-2' });
-  ok(!re.ok && re.why === 'Account error: the account cannot serve' && E.logs.some((l) => /the resume failed — Account error/.test(l)), 'a create that answers an ERROR ⇒ {ok:false, why: its own words} (+ one journal line)', re);
+  ok(!re.ok && re.why === 'Account error: the account cannot serve' && verdictOf(E.logs.some((l) => /the resume failed — Account error/.test(l))), 'a create that answers an ERROR ⇒ {ok:false, why: its own words} (+ one journal line)', re);
   const L2 = mk({ answer: 'already' });
   const ra = await L2.R2.reopen({ sessionKey: 'claude:c-3' });
-  ok(ra.ok && ra.sessionId === 'w-old' && ra.already === true, 'resume-already-live (a page resumed it a moment ago) ⇒ THAT session carries the reply', ra);
+  ok(gateOf(ra.ok) && ra.sessionId === 'w-old' && ra.already === true, 'resume-already-live (a page resumed it a moment ago) ⇒ THAT session carries the reply', ra);
   const N = mk({ answer: 'none' });
   const rn = await N.R2.reopen({ sessionKey: 'claude:c-4' });
-  ok(!rn.ok && /did not start/.test(rn.why), 'a create that answered nothing ⇒ said ("did not start"), never a silent ok', rn);
+  ok(!rn.ok && verdictOf(/did not start/.test(rn.why)), 'a create that answered nothing ⇒ said ("did not start"), never a silent ok', rn);
   const T = mk({ answer: 'throw' });
   const rt = await T.R2.reopen({ sessionKey: 'claude:c-5' });
-  ok(!rt.ok && /did not start: boom/.test(rt.why), 'a create that THROWS ⇒ said with its message', rt);
+  ok(!rt.ok && verdictOf(/did not start: boom/.test(rt.why)), 'a create that THROWS ⇒ said with its message', rt);
   const S = mk({ delay: 1 }); // the create held in flight (reopen() sets its in-flight entry synchronously — the two presses share it whatever the hold; lane artifacts-by-intent r6: 30 ms → 1 ms of the suite's wall)
   const [p1, p2] = await Promise.all([S.R2.reopen({ sessionKey: 'claude:c-6' }), S.R2.reopen({ sessionKey: 'claude:c-6' })]);
-  ok(S.creates.length === 1 && p1.ok && p2.ok && p1.sessionId === p2.sessionId && S.R2.inflightCount() === 0, 'two replies at once (a double press, a second device) ⇒ ONE create, both answered with the same session', { creates: S.creates.length });
+  ok(S.creates.length === 1 && gateOf(p1.ok) && gateOf(p2.ok) && p1.sessionId === p2.sessionId && S.R2.inflightCount() === 0, 'two replies at once (a double press, a second device) ⇒ ONE create, both answered with the same session', { creates: S.creates.length });
   const W2 = mk();
   const rw = await W2.R2.reopen({ sessionKey: 'webui:abc' });
   const U = mk({ discovered: null });
   const ru = await U.R2.reopen({ sessionKey: 'claude:c-7', cwd: '/p' });
   const B = mk({ getHandle: false });
   const rbt = await B.R2.reopen({ sessionKey: 'claude:c-8' });
-  ok(!rw.ok && /before its conversation had an id/.test(rw.why) && !ru.ok && /no transcript/.test(ru.why) && !rbt.ok && /still booting/.test(rbt.why) && W2.creates.length + U.creates.length + B.creates.length === 0, 'a webui key / a local conversation neither discovery nor the harness store knows / no create case yet ⇒ refused BY NAME, no create sent', [rw.why, ru.why, rbt.why]);
+  ok(!rw.ok && gateOf(/before its conversation had an id/.test(rw.why)) && !ru.ok && gateOf(/no transcript/.test(ru.why)) && !rbt.ok && gateOf(/still booting/.test(rbt.why)) && W2.creates.length + U.creates.length + B.creates.length === 0, 'a webui key / a local conversation neither discovery nor the harness store knows / no create case yet ⇒ refused BY NAME, no create sent', [rw.why, ru.why, rbt.why]);
   ok(U.locates.length === 1 && U.locates[0][0] === 'claude' && U.locates[0][1] === 'c-7' && U.locates[0][2] === '/p', '…the harness store WAS asked first (backend, id, the ask\'s folder)', U.locates);
   const Lc = mk({ discovered: null, located: '/home/u/.claude/projects/-p/c-9.jsonl' });
   const rl = await Lc.R2.reopen({ sessionKey: 'claude:c-9', cwd: '/p' });
-  ok(rl.ok && Lc.creates.length === 1 && Lc.creates[0].data.cwd === '/p' && Lc.creates[0].data.hostId === undefined && Lc.creates[0].data.resumeId === 'c-9', 'not discovered but the HARNESS STORE locates its transcript ⇒ resumed here, in the folder the ask was filed from', Lc.creates[0] && Lc.creates[0].data);
+  ok(gateOf(rl.ok) && Lc.creates.length === 1 && Lc.creates[0].data.cwd === '/p' && Lc.creates[0].data.hostId === undefined && Lc.creates[0].data.resumeId === 'c-9', 'not discovered but the HARNESS STORE locates its transcript ⇒ resumed here, in the folder the ask was filed from', Lc.creates[0] && Lc.creates[0].data);
   const Rc = mk({ discovered: null, located: '/srv/vibespace/data/remote-jsonl/h-1/c-10.jsonl' });
   const rr = await Rc.R2.reopen({ sessionKey: 'claude:c-10', cwd: '/p' });
-  ok(!rr.ok && /no transcript/.test(rr.why) && Rc.creates.length === 0, 'a REMOTE copy cached here is no evidence (it would resume another machine\'s conversation locally) ⇒ refused by name', rr);
+  ok(!rr.ok && gateOf(/no transcript/.test(rr.why)) && Rc.creates.length === 0, 'a REMOTE copy cached here is no evidence (it would resume another machine\'s conversation locally) ⇒ refused by name', rr);
   const Hc = mk({ discovered: null, located: '/never' });
   const rh = await Hc.R2.reopen({ sessionKey: 'claude:c-11', cwd: '/far', hostId: 'h-2' });
-  ok(rh.ok && Hc.locates.length === 0 && Hc.creates[0].data.hostId === 'h-2' && Hc.creates[0].data.cwd === '/far', 'an ask filed from ANOTHER machine ⇒ resumed on that host (never located here)', Hc.creates[0] && Hc.creates[0].data);
+  ok(gateOf(rh.ok) && Hc.locates.length === 0 && Hc.creates[0].data.hostId === 'h-2' && Hc.creates[0].data.cwd === '/far', 'an ask filed from ANOTHER machine ⇒ resumed on that host (never located here)', Hc.creates[0] && Hc.creates[0].data);
 }
 console.log('§8d wiring pins + RED CONTROL');
 {
   const srv = read('server.js'), wsh = read('src/ws-handler.js'), rsrc = read('src/routes/user-todos-reply.js');
-  ok(/const wsApi = registerWsHandler\(wss, \{/.test(srv) && /\n  return \{ convOps \}; \/\/ [^\n]*\n\}\n/.test(wsh), 'ws-handler hands its conversation seams back (return { convOps } — int322: never the raw create case) and server.js keeps them (wsApi)');
-  ok(/const inboxReopen = require\('\.\/src\/server\/inbox-reopen\.js'\)\.create\(\{ getOpenConversation: \(\) => wsApi && wsApi\.convOps && wsApi\.convOps\.openConversation, activeSessions, readUserState: \(\) => persistenceRouter\.readUserStatePending\(\), discover: async \(key\) => require\('\.\/src\/routes\/sessions'\)\.sessionRow\(key\)/.test(srv) /* B-891e: one row, asked of the sweep's worker */, 'server.js builds the reopener over the conversation seam (int322), user-state and the discovery sweep the sidebar lists');
-  ok(/if \(!v\.ok && v\.code === 'no_live_session' && typeof reopen === 'function'\) return reopenAndSend\(req, res, item, t\.text, frame, pics\.blocks\.length\);\n      if \(!v\.ok\) return fail\(res, v\.code, v\.why\);/.test(rsrc), 'the route reopens ONLY on no_live_session, right before the refusal it replaces');
-  ok(/NOT AN UNATTENDED SPEND: this first turn is the PERSON's/.test(rsrc) && (rsrc.match(/\bsendUserInput\s*\(/g) || []).length === 2, 'the reopened first turn is commented at its call as the PERSON\'s typed turn, and rides THE typing path (the file\'s 2 sendUserInput calls — the spend census\'s typed-send ALLOW row)');
+  ok(gateOf(/const wsApi = registerWsHandler\(wss, \{/.test(srv)) && verdictOf(/\n  return \{ convOps \}; \/\/ [^\n]*\n\}\n/.test(wsh)), 'ws-handler hands its conversation seams back (return { convOps } — int322: never the raw create case) and server.js keeps them (wsApi)');
+  ok(verdictOf(/const inboxReopen = require\('\.\/src\/server\/inbox-reopen\.js'\)\.create\(\{ getOpenConversation: \(\) => wsApi && wsApi\.convOps && wsApi\.convOps\.openConversation, activeSessions, readUserState: \(\) => persistenceRouter\.readUserStatePending\(\), discover: async \(key\) => require\('\.\/src\/routes\/sessions'\)\.sessionRow\(key\)/.test(srv)) /* B-891e: one row, asked of the sweep's worker */, 'server.js builds the reopener over the conversation seam (int322), user-state and the discovery sweep the sidebar lists');
+  ok(verdictOf(/if \(!v\.ok && v\.code === 'no_live_session' && typeof reopen === 'function'\) return reopenAndSend\(req, res, item, t\.text, frame, pics\.blocks\.length\);\n      if \(!v\.ok\) return fail\(res, v\.code, v\.why\);/.test(rsrc)), 'the route reopens ONLY on no_live_session, right before the refusal it replaces');
+  ok(gateOf(/NOT AN UNATTENDED SPEND: this first turn is the PERSON's/.test(rsrc)) && (rsrc.match(/\bsendUserInput\s*\(/g) || []).length === 2, 'the reopened first turn is commented at its call as the PERSON\'s typed turn, and rides THE typing path (the file\'s 2 sendUserInput calls — the spend census\'s typed-send ALLOW row)');
   ok(!/formatChatInput|deliverToConversation|authorizeSpend|sendToSession/.test(read('src/server/inbox-reopen.js')) && !/formatChatInput|deliverToConversation|authorizeSpend|sendToSession|sendUserInput/.test(read('src/inbox-reopen.js')), 'the reopener sends nothing into a conversation (no frame, no ladder, no typing) — a resume bills no turn');
   // RED CONTROL: the route WITHOUT its reopen line = the pre-lane answer
   const rel = 'src/routes/user-todos-reply.js';
   const needle = "      if (!v.ok && v.code === 'no_live_session' && typeof reopen === 'function') return reopenAndSend(req, res, item, t.text, frame, pics.blocks.length);";   // B-51dd: the reopen carries the frame (its pictures) and their count
-  ok(rsrc.includes(needle), '§8d control needle exists');
+  ok(verdictOf(rsrc.includes(needle)), '§8d control needle exists');
   const MUT = mutantCopies('inbox-reply-reopen', REPO);
   const mut = MUT.write(rel, rsrc.split('\n').map((l) => (l === needle ? '' : l)).join('\n'), 'no-reopen');
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§8d ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§8d ' })) ok(verdictOf(row.pass), row.name, row.detail);
   const H = harness(mut, { reopen: async () => ({ ok: true, sessionId: 'never' }) });
   const it = H.userTodos.add('claude:ended-ctl', { origin: 'agent', text: 'control' });
   const r = await H.callAsync(it.id, { text: 'answer' });
@@ -871,15 +871,15 @@ console.log('§9 readNotices + POST /api/user-todos/notices/read-all · unread (
   const ids = [...notes.map((x) => x.id), timed.id, ask.id, seen.id, 'ut-nope00000a', notes[0].id];
   const n0 = calls.length;
   const r = m.readNotices ? m.readNotices(ids, true, 'user') : null;
-  ok(r && r.changed.length === N + 1 && [...notes, timed].every((x) => r.changed.includes(x.id)), `${N + 1} open notices (a duplicate id once) ⇒ every one changed`, r);
-  ok(r && r.already.length === 1 && r.already[0] === seen.id && m.get(seen.id).resolvedAt === seenAt, '…a notice already read is left EXACTLY as it was (idempotent: its stamp untouched)', r && r.already);
-  ok(r && r.refused.length === 1 && r.refused[0] === ask.id && m.get(ask.id).status === 'open', '…an ASK among the ids is refused by id and stays open (only what asks nothing is read in bulk)', r && r.refused);
-  ok(r && r.unknown.length === 1 && r.unknown[0] === 'ut-nope00000a', '…an unknown id is named', r && r.unknown);
+  ok(gateOf(r) && r.changed.length === N + 1 && verdictOf([...notes, timed].every((x) => r.changed.includes(x.id))), `${N + 1} open notices (a duplicate id once) ⇒ every one changed`, r);
+  ok(gateOf(r) && r.already.length === 1 && r.already[0] === seen.id && m.get(seen.id).resolvedAt === seenAt, '…a notice already read is left EXACTLY as it was (idempotent: its stamp untouched)', r && r.already);
+  ok(gateOf(r) && r.refused.length === 1 && r.refused[0] === ask.id && m.get(ask.id).status === 'open', '…an ASK among the ids is refused by id and stays open (only what asks nothing is read in bulk)', r && r.refused);
+  ok(gateOf(r) && r.unknown.length === 1 && r.unknown[0] === 'ut-nope00000a', '…an unknown id is named', r && r.unknown);
   ok(calls.length === n0 + 1, `THE CENSUS: ${N + 1} notices read ⇒ ONE broadcast (never one per item)`, calls.length - n0);
-  ok([...notes, timed].every((x) => { const g = m.get(x.id); return g.status === 'done' && g.resolvedBy === 'user' && g.resolvedAt === m.get(notes[0].id).resolvedAt; }), 'each is done, by the user, under ONE stamp');
-  ok(heard.length === N + 1 && heard.every(([, st, by, batch]) => st === 'done' && by === 'user' && batch), 'the status listeners hear the press as a BATCH (a plugin whose ✓ applies something never acts on it)', heard.slice(0, 3));
+  ok(verdictOf([...notes, timed].every((x) => { const g = m.get(x.id); return g.status === 'done' && g.resolvedBy === 'user' && g.resolvedAt === m.get(notes[0].id).resolvedAt; })), 'each is done, by the user, under ONE stamp');
+  ok(heard.length === N + 1 && verdictOf(heard.every(([, st, by, batch]) => st === 'done' && by === 'user' && batch)), 'the status listeners hear the press as a BATCH (a plugin whose ✓ applies something never acts on it)', heard.slice(0, 3));
   const snap = calls[calls.length - 1];
-  ok(snap && !snap.open.some((i) => i.kind === 'notice') && snap.open.some((i) => i.id === ask.id), 'the ONE broadcast carries no open notice (every count reads 0 from it) and the ask still open');
+  ok(gateOf(snap) && !snap.open.some((i) => i.kind === 'notice') && verdictOf(snap.open.some((i) => i.id === ask.id)), 'the ONE broadcast carries no open notice (every count reads 0 from it) and the ask still open');
   const n1 = calls.length;
   const again = m.readNotices([...notes.map((x) => x.id), timed.id], true, 'user');
   ok(again.changed.length === 0 && again.already.length === N + 1 && calls.length === n1, 'pressed again ⇒ nothing changed, NO broadcast (idempotent)', { again, b: calls.length - n1 });
@@ -888,11 +888,11 @@ console.log('§9 readNotices + POST /api/user-todos/notices/read-all · unread (
   m.get(notes[5].id).resolvedBy = 'expired'; // the expiry sweep took it during the 5 s
   const n2 = calls.length; heard.length = 0;
   const u = m.readNotices(r.changed, false, 'user');
-  ok(u.changed.length === N && !u.changed.includes(notes[5].id) && u.already.includes(notes[5].id), 'Undo ⇒ the read notices back open; the one the expiry took meanwhile stays resolved', u);
+  ok(u.changed.length === N && !u.changed.includes(notes[5].id) && verdictOf(u.already.includes(notes[5].id)), 'Undo ⇒ the read notices back open; the one the expiry took meanwhile stays resolved', u);
   ok(calls.length === n2 + 1, 'THE CENSUS: the Undo is ONE broadcast too', calls.length - n2);
   const t2 = m.get(timed.id);
-  ok(t2.status === 'open' && t2.resolvedAt === null && t2.resolvedBy === null && typeof t2.expiresAt === 'number' && t2.judged && t2.judged.v === 1, '…back AS IT WAS: open, no resolution stamp, its expiry and judgement kept', t2);
-  ok(heard.length === N && heard.every(([, st, , batch]) => st === 'open' && batch), '…and the listeners hear the reopen (a batch)', heard.length);
+  ok(t2.status === 'open' && t2.resolvedAt === null && t2.resolvedBy === null && typeof t2.expiresAt === 'number' && gateOf(t2.judged) && t2.judged.v === 1, '…back AS IT WAS: open, no resolution stamp, its expiry and judgement kept', t2);
+  ok(heard.length === N && verdictOf(heard.every(([, st, , batch]) => st === 'open' && batch)), '…and the listeners hear the reopen (a batch)', heard.length);
   const n3 = calls.length;
   const u2 = m.readNotices([notes[0].id, ask.id, seen.id], false, 'user');
   ok(u2.changed.length === 1 && u2.changed[0] === seen.id && u2.refused[0] === ask.id && u2.already[0] === notes[0].id && calls.length === n3 + 1, 'unread is notice-only too (an ask refused, an open notice already); a notice read by the user is reopened', u2);
@@ -912,9 +912,9 @@ console.log('§9 readNotices + POST /api/user-todos/notices/read-all · unread (
   const n0 = calls.length;
   const rv = await call('read-all', { ids: notes }, { authorization: 'Bearer vsst_abc' });
   const rj = await call('unread', { ids: notes }, { authorization: 'Bearer jbt_abc' });
-  ok(rv.status === 403 && rv.json.code === 'agent_forbidden' && rj.status === 403 && rj.json.code === 'agent_forbidden' && calls.length === n0 && notes.every((id) => m.get(id).status === 'open'), 'vsst_ / jbt_ ⇒ 403 agent_forbidden, nothing changed, nothing broadcast', [rv, rj]);
+  ok(rv.status === 403 && rv.json.code === 'agent_forbidden' && rj.status === 403 && rj.json.code === 'agent_forbidden' && calls.length === n0 && verdictOf(notes.every((id) => m.get(id).status === 'open')), 'vsst_ / jbt_ ⇒ 403 agent_forbidden, nothing changed, nothing broadcast', [rv, rj]);
   const bad = [{ ids: [] }, { ids: 'x' }, { ids: [7] }, {}, { ids: [''] }];
-  ok((await Promise.all(bad.map(async (b) => { const r = await call('read-all', b); return r.status === 400 && r.json.code === 'bad_ids'; }))).every(Boolean), 'empty / non-array / non-string ids ⇒ 400 bad_ids');
+  ok(verdictOf((await Promise.all(bad.map(async (b) => { const r = await call('read-all', b); return r.status === 400 && r.json.code === 'bad_ids'; }))).every(Boolean)), 'empty / non-array / non-string ids ⇒ 400 bad_ids');
   const r1001 = await call('read-all', { ids: Array.from({ length: 1001 }, (_, k) => 'ut-' + String(k).padStart(10, '0')) });
   ok(r1001.status === 400 && r1001.json.code === 'too_many' && calls.length === n0, '1001 ids ⇒ 400 too_many, nothing written', r1001);
   const r = await call('read-all', { ids: [...notes, ask] });
@@ -923,12 +923,12 @@ console.log('§9 readNotices + POST /api/user-todos/notices/read-all · unread (
   const r2 = await call('read-all', { ids: notes });
   ok(r2.status === 200 && r2.json.changed.length === 0 && r2.json.already === 7 && calls.length === n0 + 1, 'the same press again ⇒ 200, nothing changed, no broadcast (idempotent)', r2.json);
   const u = await call('unread', { ids: r.json.changed });
-  ok(u.status === 200 && u.json.changed.length === 7 && notes.every((id) => m.get(id).status === 'open') && calls.length === n0 + 2, 'the Undo with the answer\'s ids ⇒ the 7 back open in ONE broadcast', u.json);
+  ok(u.status === 200 && u.json.changed.length === 7 && gateOf(notes.every((id) => m.get(id).status === 'open')) && calls.length === n0 + 2, 'the Undo with the answer\'s ids ⇒ the 7 back open in ONE broadcast', u.json);
   m.stop(); m.flush();
   const rsrc = read('src/routes/user-todos-reply.js');
   const body = (rsrc.match(/function registerResolveManyRoute[\s\S]*?\n\}\n/) || [''])[0];
-  ok(/const noticesDoor = \(read\) => \(req, res\) => \{\n {4}const fail[^\n]*\n {4}try \{\n {6}if \(isAgentBearer\(req\)\) return fail\(403, 'agent_forbidden'/.test(body) && /userTodos\.readNotices\(ids, read, 'user'\)/.test(body)
-    && /app\.post\('\/api\/user-todos\/notices\/read-all', noticesDoor\(true\)\);/.test(body) && /app\.post\('\/api\/user-todos\/notices\/unread', noticesDoor\(false\)\);/.test(body), 'wiring: both doors refuse an agent token FIRST and write through the store\'s ONE readNotices');
+  ok(gateOf(/const noticesDoor = \(read\) => \(req, res\) => \{\n {4}const fail[^\n]*\n {4}try \{\n {6}if \(isAgentBearer\(req\)\) return fail\(403, 'agent_forbidden'/.test(body)) && gateOf(/userTodos\.readNotices\(ids, read, 'user'\)/.test(body))
+    && gateOf(/app\.post\('\/api\/user-todos\/notices\/read-all', noticesDoor\(true\)\);/.test(body)) && verdictOf(/app\.post\('\/api\/user-todos\/notices\/unread', noticesDoor\(false\)\);/.test(body)), 'wiring: both doors refuse an agent token FIRST and write through the store\'s ONE readNotices');
 }
 
 // ── §10 A REPLY TAKES A PICTURE (B-51dd — the owner, answering an ask that wanted a screenshot: the reply box could not send one) ──
@@ -950,7 +950,7 @@ console.log('§10 POST /api/user-todos/:id/reply with pictures (B-51dd)');
   ok(r.status === 200 && r.json.ok === true && wrote.length === 1, 'a reply with two pictures ⇒ 200, ONE frame', r.json);
   ok(c.length === 3 && c[0].type === 'image' && c[0].source.type === 'base64' && c[0].source.media_type === 'image/jpeg' && c[0].source.data === JPEG.toString('base64') && c[1].source.media_type === 'image/png',
     'the frame = the composer\'s image blocks, each typed by its BYTES (the JPEG the page called image/png is image/jpeg)', c.map((b) => b.type + ':' + (b.source ? b.source.media_type : '')));
-  ok(c[2] && c[2].type === 'text' && c[2].text === R.composeReply({ ...it, status: 'open' }, 'here it is', { now: H.NOW }), '…then the quoted reply text — composeReply, exactly as a text reply', c[2] && c[2].text.slice(0, 80));
+  ok(gateOf(c[2]) && c[2].type === 'text' && c[2].text === R.composeReply({ ...it, status: 'open' }, 'here it is', { now: H.NOW }), '…then the quoted reply text — composeReply, exactly as a text reply', c[2] && c[2].text.slice(0, 80));
   ok(H.userTodos.get(it.id).status === 'done' && H.userTodos.get(it.id).reply.text === 'here it is' && H.userTodos.get(it.id).reply.pictures === 2, 'the item resolved by the reply, its text kept AND how many pictures it carried (reply.pictures = 2)');
   const alone = H.userTodos.add('claude:sid-pic-1', { origin: 'agent', text: 'Just the screenshot' });
   const ra = await H.call(alone.id, { text: '   ', images: [pic(PNG, 'only.png')] });
@@ -969,24 +969,24 @@ console.log('§10 POST /api/user-todos/:id/reply with pictures (B-51dd)');
   let bcasts = 0;   // store broadcasts caused by the refused CALLS (the item's own add is not one of them)
   const refuse = async (images, label) => { const x = H.userTodos.add('claude:sid-pic-1', { origin: 'agent', text: label }); const c0 = H.calls.length; const rr = await H.call(x.id, { text: 'with it', images }); bcasts += H.calls.length - c0; return { rr, open: H.userTodos.get(x.id).status === 'open' }; };
   const heic = await refuse([pic(PNG, 'fine.png'), pic(HEIC, 'IMG_0001.HEIC', 'image/heif')], 'heic');
-  ok(heic.rr.status === 400 && heic.rr.json.code === 'bad_image' && heic.rr.json.picture && heic.rr.json.picture.name === 'IMG_0001.HEIC' && heic.rr.json.picture.code === 'heic' && /HEIC/.test(heic.rr.json.error) && heic.open,
+  ok(heic.rr.status === 400 && heic.rr.json.code === 'bad_image' && gateOf(heic.rr.json.picture) && heic.rr.json.picture.name === 'IMG_0001.HEIC' && heic.rr.json.picture.code === 'heic' && gateOf(/HEIC/.test(heic.rr.json.error)) && verdictOf(heic.open),
     'a HEIC among good pictures ⇒ 400 bad_image naming the file and the code; the item still open', heic.rr.json);
   const big = await refuse([pic(Buffer.concat([PNG, Buffer.alloc(4.5e6)]), 'huge.png')], 'big');
-  ok(big.rr.status === 400 && big.rr.json.picture.code === 'too_big' && big.rr.json.picture.size === 4500020 && /4\.29 MB — larger than 3\.75 MB/.test(big.rr.json.error) && big.open,
+  ok(big.rr.status === 400 && big.rr.json.picture.code === 'too_big' && big.rr.json.picture.size === 4500020 && gateOf(/4\.29 MB — larger than 3\.75 MB/.test(big.rr.json.error)) && verdictOf(big.open),
     'a 4.5 MB picture (its base64 over the API\'s 5 MiB) ⇒ bad_image too_big, said with ITS size and the cap', big.rr.json);
   const be32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
   const tall = await refuse([pic(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, ...be32(1440), ...be32(12000), 8, 6, 0, 0, 0]), 'page.png')], 'tall');
-  ok(tall.rr.json.picture && tall.rr.json.picture.code === 'too_wide' && /1440 × 12000 pixels — the model takes at most 8000 pixels on a side/.test(tall.rr.json.error), 'a full-page capture over 8000 px ⇒ too_wide, with its sides', tall.rr.json);
+  ok(gateOf(tall.rr.json.picture) && tall.rr.json.picture.code === 'too_wide' && verdictOf(/1440 × 12000 pixels — the model takes at most 8000 pixels on a side/.test(tall.rr.json.error)), 'a full-page capture over 8000 px ⇒ too_wide, with its sides', tall.rr.json);
   const many3 = Array.from({ length: 9 }, (_, i) => pic(Buffer.concat([PNG, Buffer.alloc(3.5e6)]), `big${i}.png`));
   const tooMuch = await refuse(many3, 'total');
-  ok(tooMuch.rr.json.picture && tooMuch.rr.json.picture.code === 'too_much' && tooMuch.rr.json.picture.name === 'big6.png' && /pass 32 MB/.test(tooMuch.rr.json.error) && tooMuch.open,
+  ok(gateOf(tooMuch.rr.json.picture) && tooMuch.rr.json.picture.code === 'too_much' && tooMuch.rr.json.picture.name === 'big6.png' && gateOf(/pass 32 MB/.test(tooMuch.rr.json.error)) && verdictOf(tooMuch.open),
     'nine 3.5 MB pictures: the seventh takes the reply past the API\'s 32 MB request ⇒ too_much, named — nothing sent', tooMuch.rr.json && tooMuch.rr.json.picture);
   // batch 20 cure (主开发 08:44Z): THE NUMBERS ARE THE RECEIVING HARNESS'S — the same 4.6 MB phone JPEG is refused for a claude
   // conversation (claude's row: the Claude API's 5 MiB of base64) and TAKEN for a codex one (its row states none): judged before
   // the send, so the codex reply goes on to the conversation (none is live here: no_live_session, never bad_image)
   const PHOTO = pic(Buffer.concat([JPEG, Buffer.alloc(4.6e6)]), 'IMG_2041.jpg', 'image/jpeg');
   const clPhoto = await refuse([PHOTO], 'claude-photo');
-  ok(clPhoto.rr.status === 400 && clPhoto.rr.json.picture.code === 'too_big' && clPhoto.rr.json.picture.limits && clPhoto.rr.json.picture.limits.b64PerPicture === 5 * 1024 * 1024 && /4\.39 MB — larger than 3\.75 MB/.test(clPhoto.rr.json.error) && clPhoto.open,
+  ok(clPhoto.rr.status === 400 && clPhoto.rr.json.picture.code === 'too_big' && gateOf(clPhoto.rr.json.picture.limits) && clPhoto.rr.json.picture.limits.b64PerPicture === 5 * 1024 * 1024 && gateOf(/4\.39 MB — larger than 3\.75 MB/.test(clPhoto.rr.json.error)) && verdictOf(clPhoto.open),
     'a claude conversation: the 4.6 MB photo ⇒ bad_image too_big, worded with CLAUDE\'s numbers, which the refusal carries (the page words it with them)', clPhoto.rr.json);
   const cxItem = H.userTodos.add('codex:th-photo', { origin: 'agent', text: 'Send me a photo of the screen' });
   const cxPhoto = await H.call(cxItem.id, { text: 'here', images: [PHOTO] });
@@ -995,7 +995,7 @@ console.log('§10 POST /api/user-todos/:id/reply with pictures (B-51dd)');
   // are refused by name as VibeSpace's limit, never the hub's raw 413 that the page read as «server unreachable»
   const nine = Array.from({ length: 9 }, (_, i) => pic(Buffer.concat([JPEG, Buffer.alloc(4.6e6)]), `IMG_${2050 + i}.jpg`, 'image/jpeg'));
   const cxNine = await H.call(H.userTodos.add('codex:th-nine', { origin: 'agent', text: 'Photos of every screen' }).id, { text: 'all of them', images: nine });
-  ok(cxNine.status === 400 && cxNine.json.code === 'bad_image' && cxNine.json.picture && cxNine.json.picture.code === 'too_much_here' && /the most VibeSpace carries in one message/.test(cxNine.json.error),
+  ok(cxNine.status === 400 && cxNine.json.code === 'bad_image' && gateOf(cxNine.json.picture) && cxNine.json.picture.code === 'too_much_here' && verdictOf(/the most VibeSpace carries in one message/.test(cxNine.json.error)),
     'a codex reply with nine 4.6 MB photos (≈ 55 MB of base64) ⇒ bad_image too_much_here, VibeSpace\'s own ceiling by name', cxNine.json);
   const txt = await refuse([pic(Buffer.from('just some text, not a picture'), 'notes.txt', 'text/plain')], 'txt');
   const shape = await refuse([{ base64: PNG.toString('base64').slice(0, -1), name: 'cut.png' }], 'shape');
@@ -1034,7 +1034,7 @@ const endedPhoto = async (routeFile) => {
 };
 {
   const e = await endedPhoto(undefined);
-  ok(e.r.status === 400 && e.r.json.code === 'bad_image' && e.r.json.picture && e.r.json.picture.code === 'too_big' && e.reopened === 0 && e.open,
+  ok(e.r.status === 400 && e.r.json.code === 'bad_image' && gateOf(e.r.json.picture) && e.r.json.picture.code === 'too_big' && e.reopened === 0 && verdictOf(e.open),
     'an ENDED claude conversation: the 4.6 MB photo is judged with claude\'s row (its key) and refused BEFORE the reopen — nothing reopened, nothing sent', { status: e.r.status, json: e.r.json, reopened: e.reopened });
   // RED CONTROL: a route that reads only the LIVE session's harness judges the ended conversation with no numbers — it reopens and sends
   const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
@@ -1042,7 +1042,7 @@ const endedPhoto = async (routeFile) => {
   ok(rsrc.split(needle).length === 2, '§10 reopen-key control needle exists');
   const MUT = mutantCopies('inbox-reply-reopen-key', REPO);
   const mut = MUT.write(rel, editAnchor(rsrc, needle, '      const rec = s || null;', "src/routes/user-todos-reply.js", 'join'), 'live-only');
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 reopen key ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 reopen key ' })) ok(verdictOf(row.pass), row.name, row.detail);
   const red = await endedPhoto(mut);
   ok(red.r.json.code !== 'bad_image' && red.reopened === 1, 'RED CONTROL: without the key\'s harness the ended conversation is reopened with a photo claude refuses — the leg above can go red', { json: red.r.json, reopened: red.reopened });
 }
@@ -1067,30 +1067,30 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   const ok1 = await reopenBig(undefined, 150);
   const line = ok1.w[0] ? JSON.parse(ok1.w[0]) : null;
   const filed = line && line.type === '_frame_file' && fs.existsSync(line.path) ? JSON.parse(fs.readFileSync(line.path, 'utf8')) : null;
-  ok(ok1.r.status === 200 && ok1.r.json.reopened === true && ok1.w.length === 1 && filed && filed.message.content[0].type === 'image' && ok1.ms >= 150,
+  ok(ok1.r.status === 200 && ok1.r.json.reopened === true && ok1.w.length === 1 && gateOf(filed) && filed.message.content[0].type === 'image' && ok1.ms >= 150,
     'a 2 MB frame right after the reopen: the route waits for the fresh wrapper\'s frame-file report (150 ms here) and sends ONCE, through the frame file', { status: ok1.r.status, wrote: ok1.w.length, ms: ok1.ms, line: line && line.type });
   // RED CONTROL: the route without the wait — the same reply is refused too_large, the item still open
   const rsrc = read('src/routes/user-todos-reply.js'), needle = "      while (!ready(sessionId) && Date.now() < until) await new Promise((ok) => setTimeout(ok, CAPS_POLL_MS));";
-  ok(rsrc.includes(needle), '§10 reopen-wait control needle exists');
+  ok(verdictOf(rsrc.includes(needle)), '§10 reopen-wait control needle exists');
   const MUT = mutantCopies('inbox-reply-capswait', REPO);
   const mut = MUT.write('src/routes/user-todos-reply.js', editAnchor(rsrc, needle, '', "src/routes/user-todos-reply.js", 'join'), 'no-caps-wait');
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 wait ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 wait ' })) ok(verdictOf(row.pass), row.name, row.detail);
   const red = await reopenBig(mut, 150);
-  ok(red.r.status === 400 && red.r.json.code === 'too_large' && red.w.length === 0 && red.open, 'RED CONTROL: without the wait the reopened reply with a real screenshot is refused too_large — the leg above can go red', red.r.json);
+  ok(red.r.status === 400 && red.r.json.code === 'too_large' && red.w.length === 0 && verdictOf(red.open), 'RED CONTROL: without the wait the reopened reply with a real screenshot is refused too_large — the leg above can go red', red.r.json);
   // batch 20 cure: that refusal is ALSO a key the page words in its language (the sender's English carries the size, so t(error) found no row)
   const RW = require(path.join(REPO, 'src/image-attach-rule.js')).REPLY_WORDS;
-  ok(red.r.json.words && red.r.json.words.key === RW.reopenTooLarge && /^\d+\.\d$/.test(String(red.r.json.words.params && red.r.json.words.params.mb)) && ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes(JSON.stringify(RW.reopenTooLarge) + ':'))
-    && /r && r\.words && r\.words\.key \? t\(r\.words\.key, r\.words\.params \|\| \{\}\)/.test(read('src/lib/user-todos-actions.js')),
+  ok(gateOf(red.r.json.words) && red.r.json.words.key === RW.reopenTooLarge && gateOf(/^\d+\.\d$/.test(String(red.r.json.words.params && red.r.json.words.params.mb))) && gateOf(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes(JSON.stringify(RW.reopenTooLarge) + ':')))
+    && verdictOf(/r && r\.words && r\.words\.key \? t\(r\.words\.key, r\.words\.params \|\| \{\}\)/.test(read('src/lib/user-todos-actions.js'))),
     'the reopen road\'s too_large answer carries its words as a key + the size; zh and ja word it; the page says the key, never the English', red.r.json.words);
 }
 {
   // RED CONTROL: the route with no picture rule (every picture taken as the page typed it) — the §10 refusals can go red
   const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
   const needle = '    const v = judgeImageBase64(p && p.base64, { total, limits });';
-  ok(rsrc.includes(needle), '§10 control needle exists');
+  ok(verdictOf(rsrc.includes(needle)), '§10 control needle exists');
   const MUT = mutantCopies('inbox-reply-pictures', REPO);
   const mut = MUT.write(rel, editAnchor(rsrc, needle, "    const v = { ok: true, mediaType: (p && p.mediaType) || 'image/png' };", "src/routes/user-todos-reply.js", 'join'), 'no-picture-rule');
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 ' })) ok(verdictOf(row.pass), row.name, row.detail);
   const H = harness(mut);
   const { wrote } = H.addSession('pic-red');
   const it = H.userTodos.add('claude:sid-pic-red', { origin: 'agent', text: 'control' });
@@ -1103,15 +1103,15 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   // RED CONTROL (batch 20 cure): a route that judges every reply with claude's numbers refuses the codex photo the leg above takes
   const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
   const needle = '      const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf(backend) });';
-  ok(rsrc.includes(needle), '§10 per-harness control needle exists');
+  ok(verdictOf(rsrc.includes(needle)), '§10 per-harness control needle exists');
   const MUT = mutantCopies('inbox-reply-harness', REPO);
   const mut = MUT.write(rel, editAnchor(rsrc, needle, "      const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf('claude') });", "src/routes/user-todos-reply.js", 'join'), 'claude-for-all');
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 harness ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 harness ' })) ok(verdictOf(row.pass), row.name, row.detail);
   const H = harness(mut);
   const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
   const it = H.userTodos.add('codex:th-photo-red', { origin: 'agent', text: 'control' });
   const r = await H.call(it.id, { text: 'here', images: [{ base64: Buffer.concat([JPEG, Buffer.alloc(4.6e6)]).toString('base64'), name: 'IMG_2041.jpg' }] });
-  ok(r.status === 400 && r.json.code === 'bad_image' && r.json.picture && r.json.picture.code === 'too_big', 'RED CONTROL: one vendor\'s numbers for every harness refuse the codex photo — the per-harness leg can go red', r.json);
+  ok(r.status === 400 && r.json.code === 'bad_image' && gateOf(r.json.picture) && r.json.picture.code === 'too_big', 'RED CONTROL: one vendor\'s numbers for every harness refuse the codex photo — the per-harness leg can go red', r.json);
   H.userTodos.stop(); H.userTodos.flush();
 }
 {
@@ -1130,14 +1130,14 @@ const reopenBig = async (routeFile, capsAfterMs) => {
     return { r, wrote };
   };
   const now = await drive();
-  ok(now.r.status === 400 && now.r.json.code === 'bad_image' && now.r.json.picture && now.r.json.picture.code === 'too_big' && now.r.json.picture.limits && now.r.json.picture.limits.b64PerPicture === 5 * 1024 * 1024 && now.wrote.length === 0,
+  ok(now.r.status === 400 && now.r.json.code === 'bad_image' && gateOf(now.r.json.picture) && now.r.json.picture.code === 'too_big' && gateOf(now.r.json.picture.limits) && now.r.json.picture.limits.b64PerPicture === 5 * 1024 * 1024 && now.wrote.length === 0,
     '§10 cure 2: a live conversation with NO harness field (page-only key webui:…) ⇒ judged with claude\'s row — the 4.6 MB photo refused before the send, nothing written', now.r.json);
   const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
   const NOW_L = '      const rec = s || conversationOfKey(item.sessionKey) || null;\n      const backend = rec ? harnessOfRecord(rec) : null;';
   ok(rsrc.split(NOW_L).length === 2, '§10 cure 2: the route reads the harness in ONE place (the control edits it)');
   const MUT = mutantCopies('inbox-reply-noharness', REPO);
   const mut = MUT.write(rel, editAnchor(rsrc, NOW_L, '      const backend = (s && s.backend) || (conversationOfKey(item.sessionKey) || {}).backend || null;   // stale-pins: kept — the cure 1 line the RED control re-plants', "src/routes/user-todos-reply.js"), 'no-harness-null');
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 cure 2 ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 cure 2 ' })) ok(verdictOf(row.pass), row.name, row.detail);
   const red = await drive(mut);
   // (the stand-in sender has no adapter for a session that names no harness, so the photo the old route let through fails at the SEND —
   // what matters is that it was NOT refused by any picture rule before it)
@@ -1174,7 +1174,7 @@ console.log('§10b the reply boxes take a picture (wiring census, both surfaces 
     words: /const said = replyWords\(i\.reply, t, REPLY_SNIPPET\);/.test(row) && /Number\(i\.reply\.pictures\) > 0 \? t\('\{n\} picture\(s\)'/.test(lay),
   });
   const live = judge(src);
-  ok(Object.values(live).every(Boolean), 'both reply surfaces carry the strip (button + camera on a finger device, paste of a FILE — text stays text —, drop), both sends carry the item\'s pictures (a chip says it left them), the model posts them and removes exactly those, every box of the item redraws, a ✕ removes its own picture, no markup from a picture, the chat\'s card draws them, the readers word a picture-only reply', live);
+  ok(verdictOf(Object.values(live).every(Boolean)), 'both reply surfaces carry the strip (button + camera on a finger device, paste of a FILE — text stays text —, drop), both sends carry the item\'s pictures (a chip says it left them), the model posts them and removes exactly those, every box of the item redraws, a ✕ removes its own picture, no markup from a picture, the chat\'s card draws them, the readers word a picture-only reply', live);
   {
     // the readers' words, functional (PURE inbox-window-layout is DOM-free; replyWords is the row's)
     const { pathToFileURL } = await import('node:url');
@@ -1342,13 +1342,13 @@ console.log('§10c a reply box that LEAVES the page leaves the picture registry 
     ok(L.sweepFrees === true, 'the second belt at a draw: the next draw (a box of another item) sweeps a box that left without its owner\'s word — collected', L);
     ok(L.releaseFrees === true && L.keptListening === true, 'the tray\'s road: releaseBoxesIn(the row) before it leaves, releaseBoxesIn(the box) at the fold — both collected; a box that stays on the page still redraws', L);
     ok(L.liveRedraw === true && L.disposedQuiet === true, 'what stays keeps listening: the item\'s two boxes redraw on a change, a box placed in the turn that made it survives a sweep before its placement; a disposed box draws no more', L);
-    for (const v of all.filter((x) => x.red)) ok(v.red(v.s.out), `RED CONTROL: ${v.name} — the leg goes red where it should, and only there`, v.s.out);
+    for (const v of all.filter((x) => x.red)) ok(verdictOf(v.red(v.s.out)), `RED CONTROL: ${v.name} — the leg goes red where it should, and only there`, v.s.out);
     const C = all.find((x) => x.name === 'checkpoint');
-    if (C) ok(!C.s.out.disposeFrees && !C.s.out.sweepFrees && !C.s.out.releaseFrees && C.s.out.heldUntilADraw, 'RED: the checkpoint c671a1fc5\'s module (the hosted red) keeps a dropped pane reachable — no dispose, no sweep, no release', C.s.out);
+    if (C) ok(!C.s.out.disposeFrees && !C.s.out.sweepFrees && !C.s.out.releaseFrees && verdictOf(C.s.out.heldUntilADraw), 'RED: the checkpoint c671a1fc5\'s module (the hosted red) keeps a dropped pane reachable — no dispose, no sweep, no release', C.s.out);
   } finally {
     if (hadDoc) globalThis.document = docWas; else delete globalThis.document;
   }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

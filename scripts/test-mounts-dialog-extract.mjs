@@ -49,7 +49,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const BASE_SHA = '348aa226';
 const FIXTURE = path.join(REPO, 'scripts/fixtures/mounts-dialog-baseline/baseline.js');
 let pass = 0, fail = 0, skip = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -249,7 +249,7 @@ fs.writeFileSync(path.join(D, 't.html'), '<!doctype html><html data-theme="dark"
 const D2_MARKER = 'const sw = patch.token === undefined ? this._mountClientSwitch(';
 const smSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf-8');
 const d2MarkerFound = smSrc.includes(D2_MARKER);
-ok(d2MarkerFound, '§3 the D2 decision is where the control neuters it (sidebar-mounts.js carries the marker)');
+ok(verdictOf(d2MarkerFound), '§3 the D2 decision is where the control neuters it (sidebar-mounts.js carries the marker)');
 const oldCopy = path.join(D, 'sidebar-mounts.old.js');
 fs.writeFileSync(oldCopy, editAnchor(smSrc, D2_MARKER, 'const sw = false ? this._mountClientSwitch(', "src/lib/sidebar-mounts.js")
   .replace(/from '\.\/([^']+)'/g, (m0, f) => `from ${JSON.stringify(path.join(REPO, 'src/lib', f))}`)
@@ -328,10 +328,10 @@ for (const sc of SCENARIOS) {
   const good = A.st && A.st.html && B.st && B.st.html;
   ok(!!good, `${sc}: both variants rendered the dialog`, JSON.stringify({ A: A.st && (A.st.error || !!A.st.html), B: B.st && (B.st.error || !!B.st.html) }).slice(0, 400));
   if (!good) continue;
-  if (sc === 'reauth-drive') ok(A.st.html.includes('mounts-oauth-link') && A.st.html.includes('127.0.0.1:53682') && A.st.html.includes('Sign in with Google'), `${sc}: the re-authorize consent is in flight — the sign-in button, the cross-browser link row and the paste-back box are drawn`);
-  if (sc === 'connect-onedrive-consent') ok(A.st.html.includes('mounts-oauth-link') && A.st.html.includes('127.0.0.1:53682'), `${sc}: the consent is in flight — the cross-browser link row and the paste-back box are drawn`);
+  if (sc === 'reauth-drive') ok(gateOf(A.st.html.includes('mounts-oauth-link')) && gateOf(A.st.html.includes('127.0.0.1:53682')) && verdictOf(A.st.html.includes('Sign in with Google')), `${sc}: the re-authorize consent is in flight — the sign-in button, the cross-browser link row and the paste-back box are drawn`);
+  if (sc === 'connect-onedrive-consent') ok(gateOf(A.st.html.includes('mounts-oauth-link')) && verdictOf(A.st.html.includes('127.0.0.1:53682')), `${sc}: the consent is in flight — the cross-browser link row and the paste-back box are drawn`);
   ok(A.st.html === B.st.html, `${sc}: the dialog's outerHTML is identical (${A.st.html.length} chars)`);
-  if (sc === 'connect-s3-advanced') ok(A.st.pathInputs >= 1 && A.st.pathInputs === B.st.pathInputs && A.st.fieldDrawn, `${sc}: lane path-field — the advanced «Where to put it» row is THE path field in A, the old completion in B (${A.st.pathInputs} / ${B.st.pathInputs} path inputs)`);
+  if (sc === 'connect-s3-advanced') ok(A.st.pathInputs >= 1 && A.st.pathInputs === B.st.pathInputs && verdictOf(A.st.fieldDrawn), `${sc}: lane path-field — the advanced «Where to put it» row is THE path field in A, the old completion in B (${A.st.pathInputs} / ${B.st.pathInputs} path inputs)`);
   const pa = decodePng(A.png), pb = decodePng(B.png), pc = decodePng(C.png);
   const dAB = diffPixels(pa, pb), dAC = diffPixels(pa, pc);
   if (dAB) { fs.writeFileSync(path.join(keep, `${sc}.A.png`), A.png); fs.writeFileSync(path.join(keep, `${sc}.B.png`), B.png); }
@@ -349,7 +349,7 @@ console.log('\n§3 D2 — the storage Edit dialog: switching the OAuth client op
   const dA = await render('A', 'edit-drive-draw'), dO = await render('O', 'edit-drive-draw');
   ok(!!(dA.st?.html && dO.st?.html), 'edit-drive-draw: the storage Edit dialog rendered (real + control copy)', JSON.stringify({ A: dA.st?.error, O: dO.st?.error }).slice(0, 300));
   if (dA.st?.html && dO.st?.html) {
-    ok(dA.st.html === dO.st.html && /Preset: Research Lab/.test(dA.st.html), `edit-drive-draw: the Edit dialog's outerHTML is identical to the control's (${dA.st.html.length} chars) — D2 draws nothing new`);
+    ok(dA.st.html === dO.st.html && verdictOf(/Preset: Research Lab/.test(dA.st.html)), `edit-drive-draw: the Edit dialog's outerHTML is identical to the control's (${dA.st.html.length} chars) — D2 draws nothing new`);
     const dd = diffPixels(decodePng(dA.png), decodePng(dO.png));
     ok(dd === 0, `edit-drive-draw: …and pixel-identical (${dd} differing pixels)`);
   }
@@ -360,7 +360,7 @@ console.log('\n§3 D2 — the storage Edit dialog: switching the OAuth client op
   ok(p1.length === 1 && p1[0].body.driveFolder === 'Docs2' && !('clientPreset' in p1[0].body) && !('token' in p1[0].body),
     'edit-switch-drive: Save stores the NON-client fields only (driveFolder), never the new client beside the old token', JSON.stringify(p1));
   ok(af?.reauth === true && af?.editOpen === false, 'edit-switch-drive: …then the Edit dialog closes and Re-authorize opens', JSON.stringify({ reauth: af?.reauth, editOpen: af?.editOpen }));
-  ok(/Preset: Research Lab/.test(af?.reauthHtml || '') && /mounts-oauth-link/.test(af?.reauthHtml || '') && /Sign in with Google/.test(af?.reauthHtml || ''),
+  ok(gateOf(/Preset: Research Lab/.test(af?.reauthHtml || '')) && gateOf(/mounts-oauth-link/.test(af?.reauthHtml || '')) && verdictOf(/Sign in with Google/.test(af?.reauthHtml || '')),
     'edit-switch-drive: the re-authorize dialog names the NEW client, and its consent is the storage block (Sign in with Google, the cross-browser link row)');
   const st1 = call(sw.st, /\/gdrive-auth\/start$/, 'POST');
   ok(st1.length === 1 && st1[0].body.clientPreset === 'lab' && !st1[0].body.mountId,
@@ -384,7 +384,7 @@ console.log('\n§3 D2 — the storage Edit dialog: switching the OAuth client op
   ok(fin3.length === 1 && fin3[0].body.client?.clientId === 'cid-9.apps.example.test' && fin3[0].body.client?.clientSecret === 'sec-9',
     'edit-switch-drive-custom: …and lands the custom client with the token', JSON.stringify(fin3));
   const ns = await render('A', 'edit-custom-nosecret');
-  ok(ns.st?.after?.editOpen === true && /secret/i.test(ns.st?.after?.editErr || '') && !call(ns.st, /-auth\/start$/).length && !saveCall(ns.st?.after, /\/api\/mounts\/m1$/, 'PATCH').length,
+  ok(ns.st?.after?.editOpen === true && gateOf(/secret/i.test(ns.st?.after?.editErr || '')) && !call(ns.st, /-auth\/start$/).length && !saveCall(ns.st?.after, /\/api\/mounts\/m1$/, 'PATCH').length,
     'edit-custom-nosecret: a custom client without its secret is refused inline, before any save or consent (a consent under rclone\'s built-in client would be wasted)', JSON.stringify(ns.st?.after && { editOpen: ns.st.after.editOpen, editErr: ns.st.after.editErr }));
   const un = await render('A', 'edit-unsaved');
   ok(un.st?.after?.cleanClosed === true && un.st.after.sheet === true && un.st.after.words.join('|') === 'Keep editing|Discard|Save' && un.st.after.gone === true && !saveCall(un.st.after, /\/api\/mounts\/m1$/, 'PATCH').length,
@@ -394,7 +394,7 @@ console.log('\n§3 D2 — the storage Edit dialog: switching the OAuth client op
   const stg = call(gm.st, /\/gmail-auth\/start$/, 'POST');
   const fing = call(gm.st, /\/api\/mounts\/g1$/, 'PATCH').filter((c) => c.body?.token);
   ok(pg.length === 1 && pg[0].body.query === 'is:starred' && !('clientPreset' in pg[0].body), 'edit-switch-gmail: Save stores the non-client fields only', JSON.stringify(pg));
-  ok(gm.st?.after?.reauth === true && /Sign in with Google/.test(gm.st?.after?.reauthHtml || '') && stg.length === 1 && stg[0].body.clientPreset === 'lab',
+  ok(gm.st?.after?.reauth === true && gateOf(/Sign in with Google/.test(gm.st?.after?.reauthHtml || '')) && stg.length === 1 && stg[0].body.clientPreset === 'lab',
     'edit-switch-gmail: Re-authorize opens and Gmail\'s own consent starts under the new preset', JSON.stringify(stg));
   ok(fing.length === 1 && fing[0].body.clientPreset === 'lab' && fing[0].body.token === '{"access_token":"NEW"}',
     'edit-switch-gmail: the token lands with the preset in ONE PATCH', JSON.stringify(fing));
@@ -402,7 +402,7 @@ console.log('\n§3 D2 — the storage Edit dialog: switching the OAuth client op
   // classes, the consent in flight), only the hint's words differ
   const inf = await render('A', 'edit-switch-drive-inflight'), plain = await render('A', 'reauth-drive');
   const skel = (h) => String(h || '').replace(/>[^<]*</g, '><');
-  ok(!!inf.st?.html && /mounts-oauth-link/.test(inf.st.html) && skel(inf.st.html) === skel(plain.st?.html),
+  ok(!!inf.st?.html && gateOf(/mounts-oauth-link/.test(inf.st.html)) && skel(inf.st.html) === skel(plain.st?.html),
     'edit-switch-drive-inflight: the switch dialog has the plain re-authorize dialog\'s exact skeleton (same shared component; only the hint names the new client)');
   if (process.env.MDLG_SHOT_DIR) for (const [n, r] of [['edit-drive', dA], ['switch-reauth', inf], ['switch-landed', sw]]) fs.writeFileSync(path.join(process.env.MDLG_SHOT_DIR, `d2-${n}.png`), r.png);
 }
@@ -421,4 +421,4 @@ for (const dir of [PROFILE, D]) {
 }
 ok(!fs.existsSync(PROFILE) && !fs.existsSync(D), 'teardown: the scratch bundle dir and the chrome profile are gone');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

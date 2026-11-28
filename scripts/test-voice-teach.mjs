@@ -29,7 +29,7 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
@@ -83,7 +83,7 @@ console.log('① the PURE schedule');
     { role: 'user', content: [{ type: 'text', text: 'tell jane.doe my_private_plan99 about `userSpanWord` and src/user/path.js' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'Sure: `src/lib/foo.ts` and\n```js\nconst parseConfig = loadIt();\n```\nalso bareCamelWord, see lib/bar.mjs' }] }] });
   const want = ['a-file.js', 'foo.ts', 'parseConfig', 'loadIt', 'bar.mjs'], never = ['b-file.js', 'c-file.js', 'jane.doe', 'my_private_plan99', 'userSpanWord', 'path.js', 'bareCamelWord'];
-  ok('autoSourcesOf: project files under cwd, AGENT code-span identifiers, AGENT-named paths — never the person\'s words (prose, spans or paths) nor agent prose words (voice-verify F2)', want.every((w) => AS.includes(w)) && !never.some((w) => AS.includes(w)), AS);
+  ok('autoSourcesOf: project files under cwd, AGENT code-span identifiers, AGENT-named paths — never the person\'s words (prose, spans or paths) nor agent prose words (voice-verify F2)', gateOf(want.every((w) => AS.includes(w))) && !never.some((w) => AS.includes(w)), AS);
   ok('context OFF ⇒ none', T.contextVerdict(s0, { conv: 'c1', hash: 'h1', now, settings: { context: false } }).why === 'context-off');
   ok('context: the FIRST send of a conversation is a PREVIEW', T.contextVerdict(s0, { conv: 'c1', hash: 'h1', now, settings: ON }).act === 'preview');
   const s6 = { ...s0, ctxSent: { c1: { at: now, hash: 'h1' } } };
@@ -141,8 +141,8 @@ let proposalCheck, previewCheck;
   const out = await r.E.seen(seenArgs());
   const p = out.proposal;
   proposalCheck = (rr, o) => !!o.proposal && rr.writes().length === 0;
-  ok('teach ON ⇒ a PROPOSAL (card) + ONE For-you item with 加入词库 / 忽略 — and NO /v1/terms', proposalCheck(r, out) && r.items.length === 1 && r.items[0].options.join() === '加入词库,忽略' && r.items[0].text.startsWith('Dropline 建议加入词库：') && r.items[0].origin === 'plugin' && r.items[0].plugin === 'voice-input' && r.items[0].open?.kind === 'plugin-settings', { calls: r.calls, items: r.items });
-  ok('the proposal = this conversation\'s identifiers + file names, minus the dictionary; never a tool call\'s argument', p && p.terms.includes('commentsBatches') && p.terms.includes('doc-window-ui.js') && p.terms.includes('doc-model.js') && !p.terms.includes('tool_only_name.js') && !p.terms.includes('VibeSpace'), p && p.terms);
+  ok('teach ON ⇒ a PROPOSAL (card) + ONE For-you item with 加入词库 / 忽略 — and NO /v1/terms', gateOf(proposalCheck(r, out)) && r.items.length === 1 && r.items[0].options.join() === '加入词库,忽略' && gateOf(r.items[0].text.startsWith('Dropline 建议加入词库：')) && r.items[0].origin === 'plugin' && r.items[0].plugin === 'voice-input' && r.items[0].open?.kind === 'plugin-settings', { calls: r.calls, items: r.items });
+  ok('the proposal = this conversation\'s identifiers + file names, minus the dictionary; never a tool call\'s argument', gateOf(p) && gateOf(p.terms.includes('commentsBatches')) && gateOf(p.terms.includes('doc-window-ui.js')) && gateOf(p.terms.includes('doc-model.js')) && !p.terms.includes('tool_only_name.js') && !p.terms.includes('VibeSpace'), p && p.terms);
   ok('the dictionary was READ (no confirmation needed for a read) once', r.calls.filter((c) => c[0] === 'vocabulary').length === 1);
   const pick = ['commentsBatches', 'doc-window-ui.js'];
   const res = await r.E.confirm(p.id, [...pick, 'notInTheProposal']);
@@ -151,7 +151,7 @@ let proposalCheck, previewCheck;
   ok('…the card is gone, its For-you item closed, the journal row says terms · title · chars · added', r.E.view().proposals.length === 0 && r.items[0].status === 'done' && r.E.view().journal[0].kind === 'terms' && r.E.view().journal[0].added === 2 && r.E.view().journal[0].title === 'Doc comments');
   r.tick(61 * MIN);
   const again = await r.E.seen(seenArgs());
-  ok('an hour later the unticked words come back as a new proposal (only a press sent the two)', again.proposal && again.proposal.terms.includes('doc-model.js') && r.writes().length === 1);
+  ok('an hour later the unticked words come back as a new proposal (only a press sent the two)', gateOf(again.proposal) && gateOf(again.proposal.terms.includes('doc-model.js')) && r.writes().length === 1);
   await r.E.ignore(again.proposal.id);
   r.tick(61 * MIN);
   const third = await r.E.seen(seenArgs());
@@ -162,7 +162,7 @@ let proposalCheck, previewCheck;
   const out = await r.E.seen(seenArgs({ uiLang: 'en' }));
   r.userTodos.reply(out.proposal.itemId, 'Add to dictionary');
   await new Promise((res) => setTimeout(res, 20));
-  ok('the For-you chip IS the press: "Add to dictionary" ⇒ ONE /v1/terms with the preselected words it shows', r.writes().length === 1 && r.writes()[0][1].join() === out.proposal.pick.join() && r.items[0].text.endsWith(out.proposal.pick.join(', ')), r.writes());
+  ok('the For-you chip IS the press: "Add to dictionary" ⇒ ONE /v1/terms with the preselected words it shows', r.writes().length === 1 && r.writes()[0][1].join() === out.proposal.pick.join() && verdictOf(r.items[0].text.endsWith(out.proposal.pick.join(', '))), r.writes());
 }
 {
   const r = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
@@ -177,13 +177,13 @@ let proposalCheck, previewCheck;
   const r3 = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
   const out3 = await r3.E.seen(seenArgs({ messages: [{ role: 'user', content: [{ type: 'text', text: 'tell jane.doe my_private_plan99 about it' }] }, { role: 'assistant', content: [{ type: 'text', text: 'Sure — see `src/lib/foo.ts`.' }] }] }));
   const w3 = r3.writes();
-  ok('in an automatic folder the person\'s own words go too (jane.doe, my_private_plan99 beside the agent\'s foo.ts) — ONE write, no card', w3.length === 1 && ['foo.ts', 'jane.doe', 'my_private_plan99'].every((x) => w3[0][1].includes(x)) && !out3.proposal, { w3, p: out3.proposal && out3.proposal.terms });
+  ok('in an automatic folder the person\'s own words go too (jane.doe, my_private_plan99 beside the agent\'s foo.ts) — ONE write, no card', w3.length === 1 && gateOf(['foo.ts', 'jane.doe', 'my_private_plan99'].every((x) => w3[0][1].includes(x))) && !out3.proposal, { w3, p: out3.proposal && out3.proposal.terms });
 }
 {
   const r = rig(ENGINE, { settings: { context: true } });
   const out = await r.E.seen(seenArgs());
   previewCheck = (rr, o) => !!o.preview && rr.writes().length === 0;
-  ok('context ON ⇒ the FIRST send is a PREVIEW (title, source VibeSpace, the text) and nothing left', previewCheck(r, out) && out.preview.source === 'VibeSpace' && out.preview.title === 'Doc comments' && out.preview.text.includes('commentsBatches'), { out, calls: r.calls });
+  ok('context ON ⇒ the FIRST send is a PREVIEW (title, source VibeSpace, the text) and nothing left', gateOf(previewCheck(r, out)) && out.preview.source === 'VibeSpace' && out.preview.title === 'Doc comments' && verdictOf(out.preview.text.includes('commentsBatches')), { out, calls: r.calls });
   await r.E.answerPreview(out.preview.id, true);
   const w = r.writes();
   ok('发送 ⇒ ONE POST /v1/context with EXACTLY the previewed text', w.length === 1 && w[0][0] === 'context' && w[0][1].text === out.preview.text && w[0][1].title === out.preview.title, w);
@@ -193,7 +193,7 @@ let proposalCheck, previewCheck;
   ok('within 10 minutes: nothing more', r.writes().length === 1);
   r.tick(6 * MIN);
   const later = await r.E.seen(seenArgs({ messages: msgs2 }));
-  ok('after 10 minutes with changed text: sent WITHOUT the dialog, journaled as memory', r.writes().length === 2 && !later.preview && later.context && r.E.view().journal[0].kind === 'context');
+  ok('after 10 minutes with changed text: sent WITHOUT the dialog, journaled as memory', r.writes().length === 2 && !later.preview && gateOf(later.context) && r.E.view().journal[0].kind === 'context');
   const r2 = rig(ENGINE, { settings: { context: true } });
   const o2 = await r2.E.seen(seenArgs());
   await r2.E.answerPreview(o2.preview.id, false);
@@ -215,7 +215,7 @@ console.log('②b the card\'s batch (lane voice-teach-candidates): ≤ 12, prese
   ok('…a batch with no candidate files no card', T.proposalVerdict(T.stateOf({}), { conv: 'c2', candidates: [], now: 1e12, settings: ON, kindOf: VM.termKind }).propose.length === 0);
   const r = rig(ENGINE, { settings: { teach: true } });
   const out = await r.E.seen(seenArgs({ messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Open Settings, then Settings again.' }] }] }));
-  ok('…a card with nothing preselected files NO For-you item (its chip would add nothing); the card waits in Settings', out.proposal && out.proposal.terms.join() === 'Settings' && !out.proposal.pick.length && r.items.length === 0 && r.writes().length === 0, out.proposal);
+  ok('…a card with nothing preselected files NO For-you item (its chip would add nothing); the card waits in Settings', gateOf(out.proposal) && out.proposal.terms.join() === 'Settings' && !out.proposal.pick.length && r.items.length === 0 && r.writes().length === 0, out.proposal);
 }
 
 console.log('③ RED controls (schedule copies)');
@@ -231,10 +231,10 @@ console.log('③ RED controls (schedule copies)');
     const m1 = require(path.join(dir, 'm1.js')), m2 = require(path.join(dir, 'm2.js'));
     const r1 = rig(ENGINE, { settings: { teach: true }, model: m1 });
     const o1 = await r1.E.seen(seenArgs());
-    ok('CONTROL: a schedule that POSTs /v1/terms without a confirmation ⇒ the "NO /v1/terms before the press" check is RED on it', !proposalCheck(r1, o1) && r1.writes().some((c) => c[0] === 'terms'), r1.writes());
+    ok('CONTROL: a schedule that POSTs /v1/terms without a confirmation ⇒ the "NO /v1/terms before the press" check is RED on it', !proposalCheck(r1, o1) && verdictOf(r1.writes().some((c) => c[0] === 'terms')), r1.writes());
     const r2 = rig(ENGINE, { settings: { context: true }, model: m2 });
     const o2 = await r2.E.seen(seenArgs());
-    ok('CONTROL: a schedule that sends the context without the first-time preview ⇒ the PREVIEW check is RED on it', !previewCheck(r2, o2) && r2.writes().some((c) => c[0] === 'context'), r2.writes());
+    ok('CONTROL: a schedule that sends the context without the first-time preview ⇒ the PREVIEW check is RED on it', !previewCheck(r2, o2) && verdictOf(r2.writes().some((c) => c[0] === 'context')), r2.writes());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -304,7 +304,7 @@ console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion i
     delete require.cache[require.resolve(ENGINE)];
     const E2 = require(ENGINE).create({ client: { connected: () => true, vocabulary: async () => [], terms: async (l) => ({ added: l, skipped: [] }), context: async () => ({}) }, plugin: { peek: () => r.rec, update: (fn) => fn(r.rec), settings: () => r.rec.config || {}, writeSettings() { } }, userTodos: r.ut, now: () => 1e12, log: { warn() { }, log() { } } });
     const now = r.ut.get(old.id), h = r.ut.get(hist.id);
-    ok('BOOT: an OPEN item filed before the door takes origin plugin + its door (this proposal, its words); a RESOLVED one is history and stays as it was', !!E2 && now.origin === 'plugin' && now.plugin === VP.id && now.open && now.open.prefill.proposal === out.proposal.id && h.origin === 'server' && !h.open, { now, h });
+    ok('BOOT: an OPEN item filed before the door takes origin plugin + its door (this proposal, its words); a RESOLVED one is history and stays as it was', !!E2 && now.origin === 'plugin' && now.plugin === VP.id && gateOf(now.open) && now.open.prefill.proposal === out.proposal.id && h.origin === 'server' && !h.open, { now, h });
   }
   {
     // CONTROLS: the pre-fix listener (only a reply was a press) ⇒ the ✓ sends nothing; a listener blind to `batch` ⇒ 「全部标为已看」 sends
@@ -355,28 +355,28 @@ console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion i
     const it1 = r.open()[0];
     const row = AM.rowOf(it1, r.clock);
     ok('two conversations\' batches ⇒ ONE open For-you item: the second MERGED into it in place (the same id), its words joined and deduped (fooBarQux once)',
-      r.open().length === 1 && a.proposal.itemId === it1.id && b.proposal.itemId === it1.id && ['fooBarQux', 'zeta_notes.md', 'quuxFrobnicate', 'gamma_widget.md'].every((w) => has(it1, w)) && it1.text.split('fooBarQux').length === 2, { open: r.open(), a: a.proposal, b: b.proposal });
+      r.open().length === 1 && a.proposal.itemId === it1.id && b.proposal.itemId === it1.id && gateOf(['fooBarQux', 'zeta_notes.md', 'quuxFrobnicate', 'gamma_widget.md'].every((w) => has(it1, w))) && it1.text.split('fooBarQux').length === 2, { open: r.open(), a: a.proposal, b: b.proposal });
     ok('…filed LOW — band 5 with the other asks (never the plugin pin under urgent), no badge, no toast; the sheet still holds both cards', it1.urgency === 'low' && row.band === 5 && !AM.toastWorthy(row) && !AM.badgeRows([row], r.clock).length && r.E.view().proposals.length === 2, { it1, row });
     // B — × CONSUMES the evidence: nothing sent, the cards leave the sheet, the ledger FILE (0600) holds it
     r.ut.setStatus(it1.id, 'dismissed', 'user');
     await settle();
     const disk1 = r.disk();
     ok('× ⇒ nothing sent; the batch\'s cards leave the sheet; the ledger FILE (0600, the plugin\'s own store) holds each word\'s CONSUMED evidence (its count back to 0)',
-      r.writes().length === 0 && r.E.view().proposals.length === 0 && (fs.statSync(r.file).mode & 0o777) === 0o600 && ['foobarqux', 'zeta_notes.md', 'quuxfrobnicate', 'gamma_widget.md'].every((k) => disk1.words[k] && disk1.words[k].consumed.length >= 1 && disk1.words[k].evidence.length === 0), disk1);
+      r.writes().length === 0 && r.E.view().proposals.length === 0 && (fs.statSync(r.file).mode & 0o777) === 0o600 && verdictOf(['foobarqux', 'zeta_notes.md', 'quuxfrobnicate', 'gamma_widget.md'].every((k) => disk1.words[k] && disk1.words[k].consumed.length >= 1 && disk1.words[k].evidence.length === 0)), disk1);
     // C — the pace: within a day of the dismissal no For-you ITEM, even for brand-new words (their card waits on the sheet)
     r.clock += 2 * H;
     const c = await r.seen('conv-c', 'and plinthMarker went into delta_sheet.md, plinthMarker twice');
-    ok('a day after a dismissal: a dictation with NEW words 2 h later files NO For-you item — its card waits on the sheet (the pace: 24 h since the last dismissal on this instance)', !!c.proposal && !c.proposal.itemId && c.proposal.terms.includes('plinthMarker') && r.open().length === 0 && r.E.view().proposals.length === 1, c);
+    ok('a day after a dismissal: a dictation with NEW words 2 h later files NO For-you item — its card waits on the sheet (the pace: 24 h since the last dismissal on this instance)', !!c.proposal && !c.proposal.itemId && gateOf(c.proposal.terms.includes('plinthMarker')) && r.open().length === 0 && r.E.view().proposals.length === 1, c);
     // D — RULE 1: the SAME messages read again never re-earn a dismissed word; a NEW dictation that says it does
     r.clock += 23 * H;
     const d0 = await r.seen('conv-a', A1);
     ok('a day later the SAME conversation read again (no new dictation): the dismissed words are not proposed at all — no card, no item', !d0.proposal && r.open().length === 0, d0);
     const d1 = await r.seen('conv-a', A1, 'and newtonBridge, twice: newtonBridge');
     const it2 = r.open()[0];
-    ok('…a new message with a NEW word: only the new word is filed (the old evidence stays consumed)', !!d1.proposal && has(it2, 'newtonBridge') && !has(it2, 'fooBarQux') && !has(it2, 'zeta_notes.md'), it2);
+    ok('…a new message with a NEW word: only the new word is filed (the old evidence stays consumed)', !!d1.proposal && gateOf(has(it2, 'newtonBridge')) && !has(it2, 'fooBarQux') && !has(it2, 'zeta_notes.md'), it2);
     r.clock += 10 * MIN;
     const d2 = await r.seen('conv-a2', A1, 'and newtonBridge, twice: newtonBridge', 'please open fooBarQux again'); // another conversation (conv-a proposed 10 min ago: its hourly cadence)
-    ok('…a NEW dictation that SAYS fooBarQux re-earns it — merged into the open item; zeta_notes.md (not said again) stays out; never a blacklist', !!d2.proposal && has(r.open()[0], 'fooBarQux') && !has(r.open()[0], 'zeta_notes.md') && r.open().length === 1 && r.disk().words.foobarqux.evidence.length === 1, r.open());
+    ok('…a NEW dictation that SAYS fooBarQux re-earns it — merged into the open item; zeta_notes.md (not said again) stays out; never a blacklist', !!d2.proposal && gateOf(has(r.open()[0], 'fooBarQux')) && !has(r.open()[0], 'zeta_notes.md') && r.open().length === 1 && r.disk().words.foobarqux.evidence.length === 1, r.open());
     // E — 加入 (the chip): EXACTLY the merged words, ONE /v1/terms; they leave the ledger and are KNOWN at once
     const it5 = r.open()[0];
     const words5 = it5.text.slice(it5.text.indexOf(':') + 1).split(',').map((x) => x.trim()).sort();
@@ -386,10 +386,10 @@ console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion i
     ok('加入 on the merged item ⇒ ONE POST /v1/terms with EXACTLY its words (both batches\' preselection), the item done, its cards gone', w5.length === 1 && w5[0][1].slice().sort().join() === words5.join() && r.ut.get(it5.id).status === 'done' && !r.E.view().proposals.some((x) => x.terms.some((t) => words5.includes(t))), { w5, words5 });
     r.clock += 10 * MIN;   // inside the hour the dictionary read is cached (the fake vendor never learns: the engine must)
     const g = await r.seen('conv-g', 'rename fooBarQux in kestrel notes, fooBarQux, and zaraGlide zaraGlide');
-    ok('the added words are KNOWN at once (the hour\'s cached dictionary does not offer them again) and out of the ledger', !!g.proposal && !g.proposal.terms.includes('fooBarQux') && g.proposal.terms.includes('zaraGlide') && !('foobarqux' in r.disk().words), g.proposal);
+    ok('the added words are KNOWN at once (the hour\'s cached dictionary does not offer them again) and out of the ledger', !!g.proposal && !g.proposal.terms.includes('fooBarQux') && gateOf(g.proposal.terms.includes('zaraGlide')) && !('foobarqux' in r.disk().words), g.proposal);
     // F — THE SETTINGS LIST: every word suggested now, each 加入 / 忽略 (the route's engine door)
     const listed = r.E.view().candidates.map((x) => x.term);
-    ok('the settings list (view().candidates) = every word suggested now (the sheet\'s cards and the open item, deduped)', listed.includes('zaraGlide') && listed.includes('plinthMarker') && new Set(listed.map((x) => x.toLowerCase())).size === listed.length, listed);
+    ok('the settings list (view().candidates) = every word suggested now (the sheet\'s cards and the open item, deduped)', gateOf(listed.includes('zaraGlide')) && gateOf(listed.includes('plinthMarker')) && new Set(listed.map((x) => x.toLowerCase())).size === listed.length, listed);
     const before = r.writes().length;
     const vi = await r.E.answerWord('ZARAGLIDE', 'ignore');
     ok('忽略 on one word ⇒ nothing sent; off the list and off its card; its evidence consumed (a new dictation would bring it back)', r.writes().length === before && !vi.candidates.some((x) => x.term === 'zaraGlide') && !r.E.view().proposals.some((x) => x.terms.includes('zaraGlide')) && r.disk().words.zaraglide.consumed.length >= 1, vi.candidates);
@@ -404,13 +404,13 @@ console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion i
     await r.seen('conv-h', 'and orbitLatch, orbitLatch, with tallowMint and tallowMint');
     const ith = r.open()[0];
     await r.E.answerWord('orbitLatch', 'ignore');
-    ok('a word answered in the list leaves the OPEN item too — re-worded in place (the same id), the other word stays', r.open().length === 1 && r.open()[0].id === ith.id && !has(r.open()[0], 'orbitLatch') && has(r.open()[0], 'tallowMint'), r.open());
+    ok('a word answered in the list leaves the OPEN item too — re-worded in place (the same id), the other word stays', r.open().length === 1 && r.open()[0].id === ith.id && !has(r.open()[0], 'orbitLatch') && verdictOf(has(r.open()[0], 'tallowMint')), r.open());
     // G — 「词典建议」 off ⇒ nothing proposed; voice.suggestions.mode settings-only ⇒ the card, never a For-you item
     const h = nagRig({ settings: { teach: true, suggest: false } });
     const ho = await h.seen('conv-h', A1);
     const m = nagRig({ settings: { teach: true, suggestionsMode: 'settings-only' } });
     const mo = await m.seen('conv-m', A1);
-    ok('「词典建议」 OFF (suggest: false) ⇒ nothing is proposed (no card, no item); mode settings-only ⇒ the card and the settings list, NEVER a For-you item; setSettings flips both', !ho.proposal && h.open().length === 0 && !!mo.proposal && !mo.proposal.itemId && m.open().length === 0 && m.E.view().candidates.some((x) => x.term === 'fooBarQux')
+    ok('「词典建议」 OFF (suggest: false) ⇒ nothing is proposed (no card, no item); mode settings-only ⇒ the card and the settings list, NEVER a For-you item; setSettings flips both', !ho.proposal && h.open().length === 0 && !!mo.proposal && !mo.proposal.itemId && m.open().length === 0 && gateOf(m.E.view().candidates.some((x) => x.term === 'fooBarQux'))
       && h.E.setSettings({ suggest: true }).settings.suggest === true && m.E.setSettings({ suggestionsMode: 'item' }).settings.mode === 'item', { ho, mo: mo.proposal });
     // H — a restart: the ledger FILE is read (consumed stays consumed) and an open item an older engine filed normal is unpinned
     const k = nagRig();
@@ -431,7 +431,7 @@ console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion i
     x.ut.setStatus(x.open()[0].id, 'dismissed', 'user'); await settle();
     x.clock += 25 * H;
     const xo = await x.seen('conv-x', A1);
-    ok('CONTROL RED: the pre-fix listener (× unheard) ⇒ the SAME messages offer the dismissed words again the next day — the checks above fail on it', !!xo.proposal && xo.proposal.terms.includes('fooBarQux'), xo.proposal);
+    ok('CONTROL RED: the pre-fix listener (× unheard) ⇒ the SAME messages offer the dismissed words again the next day — the checks above fail on it', !!xo.proposal && verdictOf(xo.proposal.terms.includes('fooBarQux')), xo.proposal);
   }
 }
 
@@ -452,7 +452,7 @@ console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «�
   const cands = [{ term: 'varnokin', seen: 2, pick: true }, { term: 'Kestrel Bay', seen: 2, pick: true }, { term: 'zephyrGrid', seen: 2, pick: true }];
   const vs = T.proposalVerdict(sk, { conv: 'c1', candidates: cands, now: now + H, settings: { teach: true }, kindOf: VM.termKind });
   const vs31 = T.proposalVerdict(T.prune(sk, now + 31 * D), { conv: 'c1', candidates: cands, now: now + 31 * D, settings: { teach: true }, kindOf: VM.termKind });
-  ok('a word the vendor SKIPPED is remembered with its reason and never proposed for 30 days (any case); after 30 days it may be asked again', T.skippedNow(sk, 'VARNOKIN', now + 29 * D) && sk.skipped.varnokin.reason === 'review' && vs.propose.join() === 'zephyrGrid' && vs31.propose.length === 3 && !('varnokin' in T.prune(sk, now + 31 * D).skipped), { vs, vs31 });
+  ok('a word the vendor SKIPPED is remembered with its reason and never proposed for 30 days (any case); after 30 days it may be asked again', gateOf(T.skippedNow(sk, 'VARNOKIN', now + 29 * D)) && sk.skipped.varnokin.reason === 'review' && vs.propose.join() === 'zephyrGrid' && vs31.propose.length === 3 && !('varnokin' in T.prune(sk, now + 31 * D).skipped), { vs, vs31 });
   let capped = T.stateOf({}); for (let i = 0; i < 6; i++) capped = T.recordCall(capped, 'terms', now - i * MIN);
   const vc = T.proposalVerdict(capped, { conv: 'c1', candidates: cands, now, settings: { teach: true }, kindOf: VM.termKind });
   ok('this hour\'s terms calls spent ⇒ NO proposal (why cap) — an ask is filed only for an act that can succeed; the hour after, the card comes', vc.why === 'cap' && !vc.propose.length && T.proposalVerdict(capped, { conv: 'c1', candidates: cands, now: now + H, settings: { teach: true }, kindOf: VM.termKind }).propose.length === 3, vc);
@@ -472,7 +472,7 @@ console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «�
   const k4 = T.skipStreak(st5);
   st5 = T.journalAdd(T.journalAdd(st5, { at: now + 5, kind: 'context', chars: 9 }), { at: now + 6, kind: 'terms', added: 0, skipped: 1, skips: [{ term: 'a', reason: 'review' }] });
   const k5 = T.skipStreak(st5);
-  ok('the streak: FIVE terms writes in a row that added nothing (a context row between them does not count) — the pre-lane rows\' skips are «unstated»; one add breaks it', k4 === null && k5 && k5.writes === 5 && k5.skipped === 9 && k5.reasons.unstated === 8 && k5.reasons.review === 1 && T.skipStreak(T.journalAdd(st5, { at: now + 7, kind: 'terms', added: 1, skipped: 0 })) === null, k5);
+  ok('the streak: FIVE terms writes in a row that added nothing (a context row between them does not count) — the pre-lane rows\' skips are «unstated»; one add breaks it', k4 === null && gateOf(k5) && k5.writes === 5 && k5.skipped === 9 && k5.reasons.unstated === 8 && k5.reasons.review === 1 && T.skipStreak(T.journalAdd(st5, { at: now + 7, kind: 'terms', added: 1, skipped: 0 })) === null, k5);
 
   // ⑤b THE ENGINE over a fake vendor answering the DOCUMENTED shapes (https://dropline.fish.audio/docs §5.2: «review means
   // Dropline did not need the word. refused means the dictionary did not take it»), parsed by THE client's skipOf
@@ -514,7 +514,7 @@ console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «�
   {
     const { r, a, res, b } = await ownerLeg();
     const row = r.E.view().journal[0];
-    ok('加入 on a card the vendor skips whole: the answer carries EVERY skipped entry with its reason (review / refused) and the vendor\'s other fields', !!res && res.added.length === 0 && res.skips.length === a.proposal.terms.length && res.skips.every((x) => ['review', 'refused'].includes(x.reason) && x.fields && x.fields.confidence === 0.97), res);
+    ok('加入 on a card the vendor skips whole: the answer carries EVERY skipped entry with its reason (review / refused) and the vendor\'s other fields', !!res && res.added.length === 0 && res.skips.length === a.proposal.terms.length && verdictOf(res.skips.every((x) => ['review', 'refused'].includes(x.reason) && x.fields && x.fields.confidence === 0.97)), res);
     ok('…the journal row keeps the words, the skipped entries and the reasons counted (the base kept «added 0 · skipped 3» only)', row.kind === 'terms' && row.words.join() === a.proposal.terms.join() && row.skips.length === row.skipped && row.reasons.review === 2 && row.reasons.refused === 1, row);
     ok('…a skip leaves the card AND is never asked again: an hour later the same conversation (and more) proposes none of the skipped words — no card, no item', !b.proposal && r.items.filter((x) => x.status === 'open' && x.text.startsWith('Dropline 建议')).length === 0, { b: b.proposal, items: r.items });
   }
@@ -523,14 +523,14 @@ console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «�
     const logs = [];
     const cl = C.create({ integrations: () => ({ resolveIntegration: () => ({ values: { apiKey: 'dl_' + 'k'.repeat(24) }, source: 'own' }) }), fetchImpl: async () => ({ ok: true, json: async () => ({ added: ['zephyrGrid'], skipped: [{ term: 'Varnokin', reason: 'review' }, 'Ostrevia'], dictionary_version: 3, request_id: 'tr_9' }) }), log: { log: (m) => logs.push(String(m)), warn: (m) => logs.push(String(m)) } });
     const out = await cl.terms(['zephyrGrid', 'Varnokin', 'Ostrevia']);
-    ok('THE CLIENT: a skipped entry keeps its reason (a bare string entry = no reason, never thrown away) and ONE server log line names the words, the reasons and the request id — no key', out.skips[0].reason === 'review' && out.skips[1].term === 'Ostrevia' && out.skips[1].reason === null && out.added.join() === 'zephyrGrid' && logs.length === 1 && /skipped 2/.test(logs[0]) && logs[0].includes('"reason":"review"') && logs[0].includes('tr_9') && !/dl_k|Bearer/.test(logs[0]), { out, logs });
+    ok('THE CLIENT: a skipped entry keeps its reason (a bare string entry = no reason, never thrown away) and ONE server log line names the words, the reasons and the request id — no key', out.skips[0].reason === 'review' && out.skips[1].term === 'Ostrevia' && out.skips[1].reason === null && out.added.join() === 'zephyrGrid' && logs.length === 1 && gateOf(/skipped 2/.test(logs[0])) && gateOf(logs[0].includes('"reason":"review"')) && gateOf(logs[0].includes('tr_9')) && !/dl_k|Bearer/.test(logs[0]), { out, logs });
   }
   {
     // the known words: the dictionary read is subtracted before asking (any case), read per ACCOUNT, a day, again after each write
     let acct = { tier: 'oauth', name: 'Ana', team: 'Lab' };
     const r = skipRig({ vocab: ['varnokin'], account: () => acct });
     const a = await r.seen('conv-k', SAY);
-    ok('a word already in the dictionary (GET /v1/vocabulary, any case) is never proposed', !!a.proposal && !a.proposal.terms.some((x) => x.toLowerCase() === 'varnokin') && a.proposal.terms.includes('Ostrevia'), a.proposal);
+    ok('a word already in the dictionary (GET /v1/vocabulary, any case) is never proposed', !!a.proposal && !a.proposal.terms.some((x) => x.toLowerCase() === 'varnokin') && verdictOf(a.proposal.terms.includes('Ostrevia')), a.proposal);
     r.clock += 2 * H;
     await r.seen('conv-k2', 'nothing new here');
     const n1 = r.reads();
@@ -546,7 +546,7 @@ console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «�
     const r = skipRig();
     for (let i = 0; i < 6; i++) { const o = await r.seen('conv-s' + i, `we met Quillon${'abcdef'[i]} and Quillon${'abcdef'[i]} about verbaMint${i}, verbaMint${i}`); if (o.proposal) await r.E.confirm(o.proposal.id, o.proposal.terms); r.clock += 2 * MIN; }
     const streak = r.items.filter((x) => x.text.startsWith('Dropline 一直跳过'));
-    ok('five writes in a row that added nothing ⇒ ONE low For-you item that names the reasons («已能写对 … · 词典不收 …»); the sixth files no second', r.writes().length === 6 && streak.length === 1 && streak[0].urgency === 'low' && /已能写对 5 · 词典不收 5/.test(streak[0].text) && streak[0].options.join() === '停止发词,知道了' && streak[0].open && streak[0].open.panel === 'teach', { w: r.writes().length, items: r.items.map((x) => x.text), j: (r.rec.teach.journal || []).map((x) => [x.added, x.skipped]), streak: r.rec.teach.streak, lang: r.rec.teach.lang });
+    ok('five writes in a row that added nothing ⇒ ONE low For-you item that names the reasons («已能写对 … · 词典不收 …»); the sixth files no second', r.writes().length === 6 && streak.length === 1 && streak[0].urgency === 'low' && gateOf(/已能写对 5 · 词典不收 5/.test(streak[0].text)) && streak[0].options.join() === '停止发词,知道了' && gateOf(streak[0].open) && streak[0].open.panel === 'teach', { w: r.writes().length, items: r.items.map((x) => x.text), j: (r.rec.teach.journal || []).map((x) => [x.added, x.skipped]), streak: r.rec.teach.streak, lang: r.rec.teach.lang });
     const item = streak[0];
     item.reply = { text: '停止发词' }; item.status = 'resolved';
     for (const f of r.listeners) f(item, { status: 'resolved' });
@@ -573,11 +573,11 @@ console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «�
     const r = skipRig({ settings: { teach: true, autoProjects: ['/w/vibespace'] }, answer: (l) => ({ added: l, skipped: [] }) });
     const o = await r.seen('conv-a', SAY, { cwd: '/w/vibespace/src/lib' });
     const row = r.E.view().journal[0];
-    ok('a SUBFOLDER of an automatic folder: every word goes in ONE write, no card, no item; the journal row says automatic, the folder and the words', r.writes().length === 1 && !o.proposal && r.items.length === 0 && row.auto === true && row.folder === '/w/vibespace' && row.words.includes('Varnokin') && o.auto.folder === '/w/vibespace', { o, row });
+    ok('a SUBFOLDER of an automatic folder: every word goes in ONE write, no card, no item; the journal row says automatic, the folder and the words', r.writes().length === 1 && !o.proposal && r.items.length === 0 && row.auto === true && row.folder === '/w/vibespace' && gateOf(row.words.includes('Varnokin')) && o.auto.folder === '/w/vibespace', { o, row });
     r.rec.teach = T.recordAuto(r.rec.teach, 49 - r.rec.teach.autoSent.reduce((n, x) => n + x.n, 0), r.clock);   // 49 of this hour's 50 sent
     const o2 = await r.seen('conv-b', 'Quillon and Quillon met verbaMint and Tarragona, Tarragona, verbaMint', { cwd: '/w/vibespace' });
     const v = r.E.view();
-    ok('over this hour\'s room (49 of 50 sent): ONE word goes, the rest WAIT (out.queued — the toast «本小时额度已用完，N 个词稍后自动发»), no card', !o2.proposal && o2.auto.terms.length === 1 && o2.queued.n === 2 && v.pending.length === 2 && v.pending.every((x) => x.folder === '/w/vibespace'), { o2, pending: v.pending });
+    ok('over this hour\'s room (49 of 50 sent): ONE word goes, the rest WAIT (out.queued — the toast «本小时额度已用完，N 个词稍后自动发»), no card', !o2.proposal && o2.auto.terms.length === 1 && o2.queued.n === 2 && v.pending.length === 2 && verdictOf(v.pending.every((x) => x.folder === '/w/vibespace')), { o2, pending: v.pending });
     const before = r.writes().length;
     ok('…the tick inside the hour sends nothing', (await r.E.flush()).waiting === 2 && r.writes().length === before);
     r.clock += H + MIN;
@@ -593,17 +593,17 @@ console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «�
     const r = skipRig();
     await r.seen('conv-w', SAY);
     const v = await r.E.answerWord('Ostrevia', 'add');
-    ok('the settings list\'s 加入 answers the outcome with the list: skipped, its reason', v.result && v.result.added.length === 0 && v.result.skips[0].term === 'Ostrevia' && v.result.skips[0].reason === 'review' && Array.isArray(v.candidates), v.result);
+    ok('the settings list\'s 加入 answers the outcome with the list: skipped, its reason', gateOf(v.result) && v.result.added.length === 0 && v.result.skips[0].term === 'Ostrevia' && v.result.skips[0].reason === 'review' && verdictOf(Array.isArray(v.candidates)), v.result);
   }
   // ⑤c RED CONTROLS — the base's three rules, one at a time, in a schedule copy: each check above goes red on it
   const SRC = fs.readFileSync(path.join(REPO, 'src/voice-teach.js'), 'utf8');
   const n1 = '  const gone = (t) => ignoredNow(state, t, now) || skippedNow(state, t, now);';
   const n2 = "  if (capLeft(state, 'terms', now) <= 0) return { ...none, why: 'cap' };\n";
   const n3 = '  const folder = cwd ? folderOf(set.autoProjects, cwd) : null;';
-  ok('the controls\' needles occur exactly once', [n1, n2, n3].every((n) => SRC.split(n).length === 2));
+  ok('the controls\' needles occur exactly once', verdictOf([n1, n2, n3].every((n) => SRC.split(n).length === 2)));
   const noMemory = require(MC.write('src/voice-teach.js', editAnchor(SRC, n1, '  const gone = (t) => ignoredNow(state, t, now);', "src/voice-teach.js"), 'nomemory'));
   const c1 = await ownerLeg({ model: noMemory });
-  ok('CONTROL RED: a schedule without the skip memory (the base) ⇒ an hour later the skipped words are ASKED AGAIN', !!c1.b.proposal && c1.b.proposal.terms.includes('Varnokin'), c1.b.proposal);
+  ok('CONTROL RED: a schedule without the skip memory (the base) ⇒ an hour later the skipped words are ASKED AGAIN', !!c1.b.proposal && verdictOf(c1.b.proposal.terms.includes('Varnokin')), c1.b.proposal);
   const askCapped = require(MC.write('src/voice-teach.js', editAnchor(SRC, n2, '', "src/voice-teach.js"), 'askcapped'));
   const rc = skipRig({ model: askCapped });
   for (let i = 0; i < 6; i++) rc.rec.teach = T.recordCall(rc.rec.teach || {}, 'terms', now - i * MIN);
@@ -616,4 +616,4 @@ console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «�
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

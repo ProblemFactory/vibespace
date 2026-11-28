@@ -32,7 +32,7 @@ const PM = require(path.join(ROOT, 'src/server/provider-models.js'));
 const FIX = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/provider-models/catalogs.json'), 'utf-8'));
 const ANS = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/provider-models/models-answers.json'), 'utf-8'));
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ── the loopback fake of a provider's list: every request recorded; `mode` picks its answer ──
@@ -90,7 +90,7 @@ ok(ku.code === 'key-unreadable' && hits.length === 0 && fs.readFileSync(store.fi
 clock += 61000; // that refused attempt counted toward the minute (an attempt is an attempt)
 const r1 = await press('pv-or');
 const d1 = disk();
-ok(owners.length >= 1 && owners.every((o) => o === 'pv-or'), 'THE OWNER CHECK ON THE ONE REAL CALL: the refresh reads a key only FOR its own record — every read names pv-or (vaultKeyOf then refuses a reference to another record\'s entry, test-model-providers ⑭)', owners);
+ok(owners.length >= 1 && verdictOf(owners.every((o) => o === 'pv-or')), 'THE OWNER CHECK ON THE ONE REAL CALL: the refresh reads a key only FOR its own record — every read names pv-or (vaultKeyOf then refuses a reference to another record\'s entry, test-model-providers ⑭)', owners);
 {
   const PMF = path.join(ROOT, 'src/server/provider-models.js');
   const src = fs.readFileSync(PMF, 'utf-8');
@@ -105,8 +105,8 @@ ok(owners.length >= 1 && owners.every((o) => o === 'pv-or'), 'THE OWNER CHECK ON
   ok(x.code === 'key-unreadable' && seen.length === 1 && seen[0] === undefined, 'CONTROL: a refresh that reads the key without its record\'s id (the first cut) skips the owner check ⇒ the owner leg goes RED', seen);
 }
 const mode1 = (fs.statSync(store.file).mode & 0o777).toString(8);
-ok(r1.ok && r1.listed === 3 && r1.skipped === 3 && hits.length === 1 && hits[0].url === '/api/v1/models' && hits[0].method === 'GET' && hits[0].auth === 'Bearer sk-or-v1-lane', 'a person\'s press, the vault open ⇒ ONE GET of <base>/models carrying the vault\'s key as its bearer; 3 rows listed, 3 refused rows skipped', { r1: { ...r1, provider: undefined }, hits });
-ok(d1.modelsSource === 'listed' && d1.listedBy === 'provider-api' && d1.fetchedAt === clock && eq(d1.models.map((m) => m.id), ['deepseek/deepseek-chat-v3.1', 'anthropic/claude-sonnet-4.5', 'qwen/qwen3-coder:free']) && eq(d1.models[1].caps, ['tools', 'vision', 'reasoning', '1m']) && mode1 === '600', 'THE CACHE: the rows (with context + caps) and fetchedAt kept in data/providers.json (0600) before the answer', { d1, mode1 });
+ok(gateOf(r1.ok) && r1.listed === 3 && r1.skipped === 3 && hits.length === 1 && hits[0].url === '/api/v1/models' && hits[0].method === 'GET' && hits[0].auth === 'Bearer sk-or-v1-lane', 'a person\'s press, the vault open ⇒ ONE GET of <base>/models carrying the vault\'s key as its bearer; 3 rows listed, 3 refused rows skipped', { r1: { ...r1, provider: undefined }, hits });
+ok(d1.modelsSource === 'listed' && d1.listedBy === 'provider-api' && d1.fetchedAt === clock && gateOf(eq(d1.models.map((m) => m.id), ['deepseek/deepseek-chat-v3.1', 'anthropic/claude-sonnet-4.5', 'qwen/qwen3-coder:free'])) && gateOf(eq(d1.models[1].caps, ['tools', 'vision', 'reasoning', '1m'])) && mode1 === '600', 'THE CACHE: the rows (with context + caps) and fetchedAt kept in data/providers.json (0600) before the answer', { d1, mode1 });
 clock += 30000;
 const r2 = await press('pv-or');
 ok(r2.code === 'cooldown' && r2.retryAfterMs === 30000 && hits.length === 1, 'THE THROTTLE: a second press 30 s later ⇒ cooldown (30 s left) — the provider NOT asked again', r2);
@@ -114,10 +114,10 @@ clock += 30000;
 mode = 'openai';
 const p1 = press('pv-or'), p2 = press('pv-or');
 const [a1, a2] = await Promise.all([p1, p2]);
-ok(a1.ok && a2.code === 'in-flight' && hits.length === 2, 'past the minute ⇒ asked again; a second press while that one is out ⇒ in-flight (one request)', { a2 });
-ok(eq(disk().models.map((m) => m.id), ['gpt-5.5', 'gpt-5.5-mini']), 'an OpenAI-compatible answer replaces the list (the cache is the last answer, whole)');
+ok(gateOf(a1.ok) && a2.code === 'in-flight' && hits.length === 2, 'past the minute ⇒ asked again; a second press while that one is out ⇒ in-flight (one request)', { a2 });
+ok(verdictOf(eq(disk().models.map((m) => m.id), ['gpt-5.5', 'gpt-5.5-mini'])), 'an OpenAI-compatible answer replaces the list (the cache is the last answer, whole)');
 const rl = await press('pv-local');
-ok(rl.ok && hits[2].url === '/v1/models' && hits[2].auth === null && hits[2].xkey === null, 'a keyless self-hosted record (keyRef none) asks with no credential at all');
+ok(gateOf(rl.ok) && hits[2].url === '/v1/models' && hits[2].auth === null && hits[2].xkey === null, 'a keyless self-hosted record (keyRef none) asks with no credential at all');
 
 // ── ② the answer's bounds ────────────────────────────────────────────────────────────────────────────────────
 console.log('② the answer\'s bounds — each refused, NOTHING kept');
@@ -140,7 +140,7 @@ ok(!fs.readFileSync(path.join(ROOT, 'src/server/provider-models.js'), 'utf-8').r
 console.log('③ the store\'s write (setListed)');
 put({ ...store.get('pv-or'), aliases: { mini: 'gpt-5.5-mini', big: 'gpt-5.5' }, defaultModel: 'gpt-5.5' });
 const w1 = store.setListed('pv-or', [{ id: 'gpt-5.5-mini', label: 'mini', context: null, caps: [] }], clock);
-ok(w1.ok && eq(w1.provider.aliases, { mini: 'gpt-5.5-mini' }) && eq(w1.droppedAliases, ['big']) && w1.provider.defaultModel === '', 'an alias whose row left the list is DROPPED by name (never left dangling); a default that left it is cleared', w1);
+ok(gateOf(w1.ok) && gateOf(eq(w1.provider.aliases, { mini: 'gpt-5.5-mini' })) && gateOf(eq(w1.droppedAliases, ['big'])) && w1.provider.defaultModel === '', 'an alias whose row left the list is DROPPED by name (never left dangling); a default that left it is cleared', w1);
 ok(store.setListed('pv-ds', [], clock).code === 'not-listed' && store.setListed('pv-anthropic-api', [], clock).code === 'not-listed' && store.setListed('pv-x', [], clock).code === 'unknown', 'only a provider-listed record takes a list (configured, a built-in ⇒ not-listed)');
 
 // ── ④ the routes ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -180,15 +180,15 @@ try {
   const [, n1] = await get('?backend=claude&account=');
   const [, n2] = await get(`?backend=claude&account=${sub}`);
   const [, n3] = await get(`?backend=claude&account=${key}`);
-  ok(n1.provider.id === 'pv-anthropic-subscription' && n1.account === null && n2.provider.id === 'pv-anthropic-subscription' && n2.account.id === sub && n3.provider.id === 'pv-anthropic-api' && [n1, n2, n3].every((a) => a.open && !a.empty && eq(ids(a), FIX.harness.claude.map((m) => m.id))) && refreshed === 3, 'a NEW conversation: the machine\'s login, a subscription, a Console key ⇒ claude\'s own catalog (Default first, Custom… stays) under the provider each names');
+  ok(n1.provider.id === 'pv-anthropic-subscription' && n1.account === null && n2.provider.id === 'pv-anthropic-subscription' && n2.account.id === sub && n3.provider.id === 'pv-anthropic-api' && gateOf([n1, n2, n3].every((a) => a.open && !a.empty && eq(ids(a), FIX.harness.claude.map((m) => m.id)))) && refreshed === 3, 'a NEW conversation: the machine\'s login, a subscription, a Console key ⇒ claude\'s own catalog (Default first, Custom… stays) under the provider each names');
   const [, n4] = await get(`?backend=claude&account=${ds}`);
-  ok(n4.provider.id === 'pv-ds' && !n4.open && !n4.empty && eq(ids(n4), ['deepseek-chat', 'deepseek-reasoner']) && n4.defaultId === 'deepseek-reasoner' && n4.models[0].label === 'DeepSeek Chat' && n4.models[0].context === 128000, 'a third-party account (providerId → a configured record) ⇒ EXACTLY its entered rows (closed), its default named — the account switch\'s redraw', n4);
+  ok(n4.provider.id === 'pv-ds' && !n4.open && !n4.empty && gateOf(eq(ids(n4), ['deepseek-chat', 'deepseek-reasoner'])) && n4.defaultId === 'deepseek-reasoner' && n4.models[0].label === 'DeepSeek Chat' && n4.models[0].context === 128000, 'a third-party account (providerId → a configured record) ⇒ EXACTLY its entered rows (closed), its default named — the account switch\'s redraw', n4);
   const [, n5] = await get(`?backend=claude&account=${em}`);
   ok(n5.empty === true && n5.models.length === 0 && n5.provider.id === 'pv-empty' && n5.account.id === em && n5.account.name === 'Empty key', 'an account whose provider has none ⇒ empty, with the account the one line\'s door opens');
   const [, n6] = await get(`?backend=claude&account=${orAcct}`);
   const [, n7] = await get('?backend=claude&account=pv-ds');
   const [s8] = await get('?backend=claude&account=acct-nobody');
-  ok(n6.refreshable === true && n6.provider.fetchedAt > 0 && eq(ids(n6), ['gpt-5.5-mini']) && n7.provider.id === 'pv-ds' && n7.account.type === 'provider' && s8 === 404, 'a provider-listed account ⇒ its CACHED rows (refreshable, fetchedAt); a projected pv- row ⇒ its record; an unknown account ⇒ 404');
+  ok(n6.refreshable === true && n6.provider.fetchedAt > 0 && gateOf(eq(ids(n6), ['gpt-5.5-mini'])) && n7.provider.id === 'pv-ds' && n7.account.type === 'provider' && s8 === 404, 'a provider-listed account ⇒ its CACHED rows (refreshable, fetchedAt); a projected pv- row ⇒ its record; an unknown account ⇒ 404');
   const leak = JSON.stringify([n1, n2, n3, n4, n5, n6, n7]);
   ok(!/keyRef|baseUrl|sk-or-v1|sk-ant-api03|integrations:/.test(leak), 'no menu answer names where a key lives, its value, or the provider\'s address');
   const [, r1m] = await get('?session=s-machine');
@@ -198,9 +198,9 @@ try {
   const [, r5m] = await get('?session=s-codex');
   const [, r6m] = await get('?session=s-oc');
   const [s7m] = await get('?session=s-gone');
-  ok(r1m.session === 's-machine' && r1m.provider.id === 'pv-anthropic-subscription' && r1m.open && r2m.provider.id === 'pv-ds' && eq(ids(r2m), ['deepseek-chat', 'deepseek-reasoner']), 'a RUNNING conversation, per session: on the machine\'s login ⇒ claude\'s list; on the DeepSeek account ⇒ exactly its rows (the badge lists differ by session)');
+  ok(r1m.session === 's-machine' && r1m.provider.id === 'pv-anthropic-subscription' && gateOf(r1m.open) && r2m.provider.id === 'pv-ds' && verdictOf(eq(ids(r2m), ['deepseek-chat', 'deepseek-reasoner'])), 'a RUNNING conversation, per session: on the machine\'s login ⇒ claude\'s list; on the DeepSeek account ⇒ exactly its rows (the badge lists differ by session)');
   ok(r3m.provider.id === 'pv-ds' && r3m.account.id === ds && r4m.empty === true, 'a pooled conversation ⇒ the provider of the MEMBER it bills now (poolMemberOfSession); one on an empty provider ⇒ empty');
-  ok(r5m.provider.id === 'pv-openai-chatgpt' && eq(ids(r5m), FIX.harness.codex.map((m) => m.id)) && r6m.provider === null && r6m.open && eq(ids(r6m), ['', 'oc/a']) && s7m === 404, 'a codex conversation ⇒ the ChatGPT login\'s (codex\'s catalog); opencode (no account table) ⇒ its harness\'s list as before; no such session ⇒ 404');
+  ok(r5m.provider.id === 'pv-openai-chatgpt' && gateOf(eq(ids(r5m), FIX.harness.codex.map((m) => m.id))) && r6m.provider === null && gateOf(r6m.open) && gateOf(eq(ids(r6m), ['', 'oc/a'])) && s7m === 404, 'a codex conversation ⇒ the ChatGPT login\'s (codex\'s catalog); opencode (no account table) ⇒ its harness\'s list as before; no such session ⇒ 404');
   // the refresh door
   clock += 61000; mode = 'openrouter';
   const n0 = hits.length, c0 = routeFake.n;
@@ -215,7 +215,7 @@ try {
   const [d6s, d6] = await post('pv-or', { Origin: base });
   const [d7s, d7, ra] = await post('pv-or', { 'Sec-Fetch-Site': 'same-origin' });
   const [d8s, d8] = await post('pv-ds', { Origin: base });
-  ok(d5s === 423 && d5.code === 'vault_locked' && /Unlock the vault/.test(d5.error) && d6s === 200 && d6.ok && d6.listed === 3 && d7s === 429 && d7.code === 'cooldown' && ra === '60' && /try again in 60 s/.test(d7.error) && d8s === 409 && d8.code === 'not-listed' && hits.length === n0 + 1, 'a person on the page: the vault locked ⇒ 423; open ⇒ 200 (asked once); again at once ⇒ 429 Retry-After 60; a configured record ⇒ 409 not-listed', { d5, d6: { ...d6, provider: undefined }, d7, ra, d8 });
+  ok(d5s === 423 && d5.code === 'vault_locked' && gateOf(/Unlock the vault/.test(d5.error)) && d6s === 200 && gateOf(d6.ok) && d6.listed === 3 && d7s === 429 && d7.code === 'cooldown' && ra === '60' && gateOf(/try again in 60 s/.test(d7.error)) && d8s === 409 && d8.code === 'not-listed' && hits.length === n0 + 1, 'a person on the page: the vault locked ⇒ 423; open ⇒ 200 (asked once); again at once ⇒ 429 Retry-After 60; a configured record ⇒ 409 not-listed', { d5, d6: { ...d6, provider: undefined }, d7, ra, d8 });
   // THE CACHE'S WRITE FAILED (U1 cure): the refresh says write-failed by name (500 at the route, its own words) — never ok
   {
     const wdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pmwf-'));
@@ -224,11 +224,11 @@ try {
     mode = 'openrouter';
     const wr = PM.create({ providers: wst, vaultState: () => 'unlocked', keyOf, now: () => clock, log: () => { } });
     const x = await wr.refreshListedModels('pv-wf', { by: 'human' });
-    ok(x.code === 'write-failed' && typeof M.REFRESH_WORDS['write-failed'] === 'string' && fs.readFileSync(path.join(ROOT, 'src/routes/provider-models.js'), 'utf-8').includes("'write-failed': 500"), 'the listed cache could not be written ⇒ write-failed by name (its own words, 500 at the door) — never an ok the disk never got', x);
+    ok(x.code === 'write-failed' && typeof M.REFRESH_WORDS['write-failed'] === 'string' && verdictOf(fs.readFileSync(path.join(ROOT, 'src/routes/provider-models.js'), 'utf-8').includes("'write-failed': 500")), 'the listed cache could not be written ⇒ write-failed by name (its own words, 500 at the door) — never an ok the disk never got', x);
     fs.rmSync(wdir, { recursive: true, force: true });
   }
 } finally { srv.close(); fake.close(); }
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -19,7 +19,7 @@ const { MessageManager } = require('../src/message-manager.js');
 const { CodexMessageManager } = require('../src/codex-message-manager.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 const mk = () => new MessageManager('S');
 
 const PLACEHOLDER = 'aaaaaaaa-bbbb-cccc-dddd-000000000001';
@@ -57,7 +57,7 @@ const a = mk(); a.convertHistory(stdoutStream);
 const b = mk(); b.convertHistory(stdoutStream);
 ok(JSON.stringify(a.messages.map((m) => m.id)) === JSON.stringify(b.messages.map((m) => m.id)),
   'same stream twice → identical id sequence (restart stops renumbering)');
-ok(a.messages.every((m) => !/^S:\d+$/.test(m.id)), 'no message carries a bare counter id');
+ok(verdictOf(a.messages.every((m) => !/^S:\d+$/.test(m.id))), 'no message carries a bare counter id');
 
 // ── 2. cross-transport join ──
 const j = mk(); j.convertHistory(jsonlStream);
@@ -67,14 +67,14 @@ const toolJ = idsBy(j, (m) => m.role === 'tool')[0];
 ok(toolA === 'S:t:toolu_T1' && toolJ === toolA, `tool message keys on toolCallId on BOTH transports (${toolA})`);
 const textA = a.messages.find((m) => m.role === 'assistant' && m.content[0]?.type === 'text')?.id;
 const textJ = j.messages.find((m) => m.role === 'assistant' && m.content[0]?.type === 'text')?.id;
-ok(textA && textA === textJ, `assistant text derives the SAME id from stdout and JSONL copies (${textA})`);
+ok(gateOf(textA) && textA === textJ, `assistant text derives the SAME id from stdout and JSONL copies (${textA})`);
 const thinkA = a.messages.find((m) => m.content[0]?.type === 'thinking')?.id;
 const thinkJ = j.messages.find((m) => m.content[0]?.type === 'thinking')?.id;
-ok(thinkA && thinkA === thinkJ, `thinking block joins too (${thinkA})`);
+ok(gateOf(thinkA) && thinkA === thinkJ, `thinking block joins too (${thinkA})`);
 ok(textA !== thinkA, 'sibling blocks of one API message get DISTINCT ids (per-key counter)');
 const userA = a.messages.find((m) => m.role === 'user')?.id;
 const userJ = j.messages.find((m) => m.role === 'user')?.id;
-ok(userA === userJ && userA.includes('u:u1-'), 'user records key on their (real) uuid');
+ok(userA === userJ && verdictOf(userA.includes('u:u1-')), 'user records key on their (real) uuid');
 
 // ── 3. replay overlap collapses ──
 const c = mk(); c.convertHistory([...stdoutStream, stdoutStream[2]]); // tool_use record replayed
@@ -121,4 +121,4 @@ ok(JSON.stringify(cx1.messages.map((m) => m.id)) === JSON.stringify(cx2.messages
   'codex: buffer copy (item_id) and rollout copy (id) derive IDENTICAL ids (volatile fields stripped)');
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -48,7 +48,7 @@ import { createRequire } from 'node:module';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf-8');
 const J = (v) => JSON.stringify(v);
 const throws = (fn) => { try { fn(); return false; } catch (e) { return String(e.message || e); } };
@@ -66,7 +66,7 @@ ok(typeof document === 'undefined' && typeof window === 'undefined', 'harness ha
 const C = await import('../src/lib/contributions.js');
 const { registerCommand, runCommand, hasCommand, getCommand, commandTitle, listCommands, registerMenuItem, unregisterMenuItem, menuItems, listMenus, listMenuItems,
   registerKeybinding, resolveKeybinding, installKeybindings, parseKey, keyMatches, listKeybindings } = C;
-ok([registerCommand, runCommand, registerMenuItem, menuItems, registerKeybinding, installKeybindings, parseKey, keyMatches].every((f) => typeof f === 'function'), 'module exports the registry API');
+ok(verdictOf([registerCommand, runCommand, registerMenuItem, menuItems, registerKeybinding, installKeybindings, parseKey, keyMatches].every((f) => typeof f === 'function')), 'module exports the registry API');
 ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().length === 0, 'a bare import registers nothing (core registers in its owning modules, not here)');
 
 // ── commands ──
@@ -75,23 +75,23 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   const dispose = registerCommand({ id: 'x.a', title: 'A', run: (ctx) => { calls.push(ctx.v); return 'ran'; } });
   ok(typeof dispose === 'function', 'registerCommand returns dispose()');
   ok(runCommand('x.a', { v: 1 }) === 'ran' && J(calls) === J([1]), 'runCommand passes ctx and returns the run result');
-  ok(/duplicate command 'x.a'/.test(throws(() => registerCommand({ id: 'x.a', run() {} }))), 'duplicate command id THROWS (no silent override)');
-  ok(/run/.test(throws(() => registerCommand({ id: 'x.b' }))), 'registerCommand without run() THROWS');
-  ok(/id/.test(throws(() => registerCommand({ run() {} }))), 'registerCommand without id THROWS');
-  ok(/when/.test(throws(() => registerCommand({ id: 'x.c', run() {}, when: 'nope' }))), 'non-function when THROWS');
-  ok(/title/.test(throws(() => registerCommand({ id: 'x.d', run() {}, title: 42 }))), 'non-string/function title THROWS');
+  ok(verdictOf(/duplicate command 'x.a'/.test(throws(() => registerCommand({ id: 'x.a', run() {} })))), 'duplicate command id THROWS (no silent override)');
+  ok(verdictOf(/run/.test(throws(() => registerCommand({ id: 'x.b' })))), 'registerCommand without run() THROWS');
+  ok(verdictOf(/id/.test(throws(() => registerCommand({ run() {} })))), 'registerCommand without id THROWS');
+  ok(verdictOf(/when/.test(throws(() => registerCommand({ id: 'x.c', run() {}, when: 'nope' })))), 'non-function when THROWS');
+  ok(verdictOf(/title/.test(throws(() => registerCommand({ id: 'x.d', run() {}, title: 42 })))), 'non-string/function title THROWS');
   const msg = throws(() => runCommand('nope.missing'));
-  ok(/unknown command 'nope.missing'/.test(msg) && /x\.a/.test(msg), 'runCommand of an unknown id THROWS and names what IS registered (loud, never a fallthrough)');
+  ok(gateOf(/unknown command 'nope.missing'/.test(msg)) && verdictOf(/x\.a/.test(msg)), 'runCommand of an unknown id THROWS and names what IS registered (loud, never a fallthrough)');
   registerCommand({ id: 'x.t', title: (c) => 'T for ' + c.who, run() {}, when: (c) => !!c.on });
   ok(commandTitle('x.t', { who: 'q' }) === 'T for q' && commandTitle('x.a') === 'A' && commandTitle('zzz') === '', 'commandTitle resolves string + fn(ctx) titles');
-  ok(getCommand('x.t')?.id === 'x.t' && getCommand('nope') === null && hasCommand('x.a'), 'getCommand / hasCommand');
+  ok(getCommand('x.t')?.id === 'x.t' && getCommand('nope') === null && verdictOf(hasCommand('x.a')), 'getCommand / hasCommand');
   calls.length = 0; runCommand('x.t', { on: false });
   ok(true, 'runCommand does NOT consult `when` (VS Code semantics: when gates surfaces, executeCommand runs)');
   dispose();
   ok(!hasCommand('x.a'), 'dispose() removes the command');
   const ac = new AbortController();
   registerCommand({ id: 'x.sig', run() {}, signal: ac.signal });
-  ok(hasCommand('x.sig'), 'signal-scoped command registered');
+  ok(verdictOf(hasCommand('x.sig')), 'signal-scoped command registered');
   ac.abort();
   ok(!hasCommand('x.sig'), 'aborting the signal unregisters the command (plugin deactivate)');
   registerCommand({ id: 'x.dead', run() {}, signal: AbortSignal.abort() });
@@ -112,11 +112,11 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   registerMenuItem({ menu: 'm', label: 'no-group', run() {} });                            // group '' sorts before '1_mid' but after navigation
   const labels = menuItems('m', { who: 'q' }).map((i) => (i.separator ? '|' : i.label));
   ok(J(labels) === J(['nav-1', 'nav-2', 'no-group', 'C for q', 'seq-a', 'A', 'B']), 'sorted by group (navigation first, then lexicographic), order, then registration seq', J(labels));
-  ok(menuItems('m').every((i) => typeof i.action === 'function' && typeof i.id === 'string'), 'every rendered item has an action and an id');
+  ok(verdictOf(menuItems('m').every((i) => typeof i.action === 'function' && typeof i.id === 'string')), 'every rendered item has an action and an id');
   ok(J(listMenuItems('m').slice(0, 2)) === J(['m/m.b', 'm/m.a']), 'item id defaults to `${menu}/${command}`');
-  ok(/duplicate menu item 'm\/m\.b'/.test(throws(() => registerMenuItem({ menu: 'm', command: 'm.b' }))), 'a second item for the same command without an explicit id THROWS');
+  ok(verdictOf(/duplicate menu item 'm\/m\.b'/.test(throws(() => registerMenuItem({ menu: 'm', command: 'm.b' })))), 'a second item for the same command without an explicit id THROWS');
   registerMenuItem({ menu: 'm', command: 'm.b', id: 'm/b-again', group: '3' });
-  ok(listMenuItems('m').includes('m/b-again'), '…and registers with an explicit id');
+  ok(verdictOf(listMenuItems('m').includes('m/b-again')), '…and registers with an explicit id');
   ok(menuItems('nope').length === 0, 'unknown menu → []');
 }
 
@@ -129,7 +129,7 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   let w0, warns;
   warns = captureWarns(() => { w0 = menuItems('w', { n: 0 }); menuItems('w', { n: 0 }); });
   ok(w0.length === 0, 'when=false (item) and command.when=false items are hidden; a throwing when() hides', J(w0));
-  ok(warns.length === 1 && /when\(\) threw: boom/.test(warns[0]), 'a throwing when() warns ONCE (never crashes the menu)', J(warns));
+  ok(warns.length === 1 && verdictOf(/when\(\) threw: boom/.test(warns[0])), 'a throwing when() warns ONCE (never crashes the menu)', J(warns));
   const w1 = menuItems('w', { n: 7, showHidden: true });
   ok(J(w1.map((i) => [i.label, i.disabled, i.title])) === J([['H', undefined, undefined], ['lbl-7', true, 'tip7']]), 'command.when=true shows it; lazy label/disabled/tooltip evaluate per ctx', J(w1));
   ok(w1[1].style === 'color:red' && w1[1].icon === '<svg/>' && w1[1].danger === true && w1[1].kind === 'k' && w1[1].keepOpen === true && typeof w1[1].decorate === 'function' && w1[1].labelHtml === '<b>7</b>', 'style/icon/danger/kind/keepOpen/decorate/labelHtml pass through to the rendered item');
@@ -159,7 +159,7 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   registerMenuItem({ menu: 's', label: 'tail-hidden', group: '1', order: 2, when: () => false, run() {} });
   const sl = menuItems('s').map((i) => (i.separator ? '|' : i.label));
   ok(J(sl) === J(['a', '|', 'b']), 'separators are explicit contributions; leading/doubled/trailing collapse', J(sl));
-  ok(/separator/.test(throws(() => registerMenuItem({ menu: 's', separator: true, command: 'm.a' }))), 'a separator with a command THROWS');
+  ok(verdictOf(/separator/.test(throws(() => registerMenuItem({ menu: 's', separator: true, command: 'm.a' })))), 'a separator with a command THROWS');
 
   // children (submenu): fn or array; EMPTY → item dropped (VS Code hides empty submenus)
   registerMenuItem({ menu: 'c', label: 'parent', children: (c) => c.kids.map((k) => ({ label: k, action() {} })) });
@@ -178,11 +178,11 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   ok(J(menuItems('e', { rows: [] }).map((i) => (i.separator ? '|' : i.label))) === J(['head', '|', 'tail']), 'an empty expand leaves ONE rule (doubled separators collapse)');
 
   // inline run item / validation
-  ok(/label/.test(throws(() => registerMenuItem({ menu: 'v', run() {} }))), 'an inline item without a label THROWS');
-  ok(/OR/.test(throws(() => registerMenuItem({ menu: 'v', command: 'm.a', run() {}, id: 'v/x' }))), 'command + run together THROWS');
-  ok(/needs a/.test(throws(() => registerMenuItem({ menu: 'v', label: 'nothing' }))), 'an item with no command/run/children/expand/separator THROWS');
-  ok(/menu/.test(throws(() => registerMenuItem({ command: 'm.a' }))), 'missing menu THROWS');
-  ok(/order/.test(throws(() => registerMenuItem({ menu: 'v', command: 'm.a', order: 'x', id: 'v/o' }))), 'non-numeric order THROWS');
+  ok(verdictOf(/label/.test(throws(() => registerMenuItem({ menu: 'v', run() {} })))), 'an inline item without a label THROWS');
+  ok(verdictOf(/OR/.test(throws(() => registerMenuItem({ menu: 'v', command: 'm.a', run() {}, id: 'v/x' })))), 'command + run together THROWS');
+  ok(verdictOf(/needs a/.test(throws(() => registerMenuItem({ menu: 'v', label: 'nothing' })))), 'an item with no command/run/children/expand/separator THROWS');
+  ok(verdictOf(/menu/.test(throws(() => registerMenuItem({ command: 'm.a' })))), 'missing menu THROWS');
+  ok(verdictOf(/order/.test(throws(() => registerMenuItem({ menu: 'v', command: 'm.a', order: 'x', id: 'v/o' })))), 'non-numeric order THROWS');
 
   // unknown command reference → dropped, warned once, telemetry
   registerMenuItem({ menu: 'u', command: 'ghost.cmd' });
@@ -190,7 +190,7 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   let u1, u2;
   const uw = captureWarns(() => { u1 = menuItems('u'); u2 = menuItems('u'); });
   ok(u1.length === 1 && u2.length === 1 && u1[0].label === 'real', 'an item naming an unknown command is DROPPED (not rendered dead)');
-  ok(uw.filter((m) => /unknown command 'ghost\.cmd'/.test(m)).length === 1 && /registered:/.test(uw[0]), '…and reported once, naming what IS registered', J(uw));
+  ok(uw.filter((m) => /unknown command 'ghost\.cmd'/.test(m)).length === 1 && verdictOf(/registered:/.test(uw[0])), '…and reported once, naming what IS registered', J(uw));
 
   // dispose + unregister + signal
   const d = registerMenuItem({ menu: 'd', label: 'x', run() {} });
@@ -207,28 +207,28 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
 // ── menus: the TREE — submenu heads + parent (2.369.124, docs/design-gear-menu-hierarchy.md §2c) ──
 {
   // registration is LOUD wherever the chain is already known
-  ok(/explicit `id`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, label: 'H' }))), 'a submenu head without an explicit id THROWS');
-  ok(/needs a `label`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h0' }))), 'a head without a label THROWS');
-  ok(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h1', label: 'H', run() {} }))), 'a head with an inline run THROWS');
-  ok(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h2', label: 'H', command: 'm.a' }))), 'a head with a command THROWS');
-  ok(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h3', label: 'H', expand: () => [] }))), 'a head with expand THROWS');
-  ok(/children/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h4', label: 'H', children: [] }))), 'a head with static children THROWS (members come through parent)');
-  ok(/separator/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h5', label: 'H', separator: true }))), 'a separator head THROWS');
-  ok(/`submenu` must be a boolean/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: 'yes', id: 'tree/h6', label: 'H' }))), 'a non-boolean submenu THROWS');
-  ok(/`parent` must be a head id string/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, parent: 42 }))), 'a non-string parent THROWS');
-  ok(/own parent/.test(throws(() => registerMenuItem({ menu: 'tree', id: 'tree/self', label: 'x', run() {}, parent: 'tree/self' }))), 'an item that is its own parent THROWS');
-  ok(/`panel` must be a function/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h7', label: 'H', panel: 'x' }))) && /`caption`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h8', label: 'H', caption: 1 }))) && /`checked`/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, checked: 'y' }))), 'panel / caption / checked hints are validated');
+  ok(verdictOf(/explicit `id`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, label: 'H' })))), 'a submenu head without an explicit id THROWS');
+  ok(verdictOf(/needs a `label`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h0' })))), 'a head without a label THROWS');
+  ok(verdictOf(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h1', label: 'H', run() {} })))), 'a head with an inline run THROWS');
+  ok(verdictOf(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h2', label: 'H', command: 'm.a' })))), 'a head with a command THROWS');
+  ok(verdictOf(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h3', label: 'H', expand: () => [] })))), 'a head with expand THROWS');
+  ok(verdictOf(/children/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h4', label: 'H', children: [] })))), 'a head with static children THROWS (members come through parent)');
+  ok(verdictOf(/separator/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h5', label: 'H', separator: true })))), 'a separator head THROWS');
+  ok(verdictOf(/`submenu` must be a boolean/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: 'yes', id: 'tree/h6', label: 'H' })))), 'a non-boolean submenu THROWS');
+  ok(verdictOf(/`parent` must be a head id string/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, parent: 42 })))), 'a non-string parent THROWS');
+  ok(verdictOf(/own parent/.test(throws(() => registerMenuItem({ menu: 'tree', id: 'tree/self', label: 'x', run() {}, parent: 'tree/self' })))), 'an item that is its own parent THROWS');
+  ok(gateOf(/`panel` must be a function/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h7', label: 'H', panel: 'x' })))) && gateOf(/`caption`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h8', label: 'H', caption: 1 })))) && verdictOf(/`checked`/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, checked: 'y' })))), 'panel / caption / checked hints are validated');
   registerMenuItem({ menu: 'tree', id: 'tree/plain', label: 'plain', run() {}, order: 1 });
-  ok(/not a `submenu:true` head/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, parent: 'tree/plain' }))), 'a parent that is a registered NON-head THROWS at registration (the chain is known — loud)');
+  ok(verdictOf(/not a `submenu:true` head/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, parent: 'tree/plain' })))), 'a parent that is a registered NON-head THROWS at registration (the chain is known — loud)');
   registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/A', label: 'A', order: 10 });
   registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/B', label: 'B', parent: 'tree/A', order: 3 });
-  ok(/two levels/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/C', label: 'C', parent: 'tree/B' }))), 'a head under a head under a head THROWS (two levels at most)');
+  ok(verdictOf(/two levels/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/C', label: 'C', parent: 'tree/B' })))), 'a head under a head under a head THROWS (two levels at most)');
   registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/E', label: 'E', parent: 'tree/D' }); // D is registered LATER (lazy) …
-  ok(/two levels/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/D', label: 'D', parent: 'tree/A' }))), '…and the ceiling is checked from BELOW too: filing D under A while E already sits under D THROWS');
+  ok(verdictOf(/two levels/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/D', label: 'D', parent: 'tree/A' })))), '…and the ceiling is checked from BELOW too: filing D under A while E already sits under D THROWS');
   registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/D', label: 'D', order: 20 });
-  ok(/is in menu 'tree', not 'other'/.test(throws(() => registerMenuItem({ menu: 'other', label: 'x', run() {}, parent: 'tree/A' }))), 'a parent from ANOTHER menu THROWS');
+  ok(verdictOf(/is in menu 'tree', not 'other'/.test(throws(() => registerMenuItem({ menu: 'other', label: 'x', run() {}, parent: 'tree/A' })))), 'a parent from ANOTHER menu THROWS');
   registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/F', label: 'F', parent: 'tree/G', order: 30 });
-  ok(/cycle/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/G', label: 'G', parent: 'tree/F' }))), 'a parent cycle THROWS when the edge that closes it is registered');
+  ok(verdictOf(/cycle/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/G', label: 'G', parent: 'tree/F' })))), 'a parent cycle THROWS when the edge that closes it is registered');
 
   // resolution is LAZY and never drops a row
   registerMenuItem({ menu: 'tree', label: 'a1', run() {}, parent: 'tree/A', order: 2 });
@@ -251,9 +251,9 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   ok(J(flat(tr)) === J(['plain', 'A', '>a0', '>a1', '>B', '>>b0', '>|', '>p1', 'D', '>E', '>>e0', 'F', '>f0', 'orphan', 'h0', 'PH', '>plug']),
     'members land in their head (sorted, separators collapsed, expand spliced INTO the head, two levels), an unknown / hidden parent surfaces the row at TOP LEVEL (never dropped), an EMPTY head drops itself, a plugin-style head id works', J(flat(tr)));
   ok(J(flat(tr0)) === J(['plain', 'A', '>a0', '>a1', '>B', '>>b0', 'D', '>E', '>>e0', 'F', '>f0', 'orphan', 'h0', 'PH', '>plug']), 'an empty expand inside a head leaves no trailing rule', J(flat(tr0)));
-  ok(tw.filter((m) => /names parent/.test(m)).length === 3 && tw.some((m) => /'tree\/F' names parent 'tree\/G' which is not registered/.test(m)) && tw.some((m) => /'orphan'.*not registered/.test(m) || /names parent 'tree\/nope' which is not registered/.test(m)) && tw.some((m) => /parent 'tree\/hidden' which is hidden or not a head/.test(m)),
+  ok(tw.filter((m) => /names parent/.test(m)).length === 3 && gateOf(tw.some((m) => /'tree\/F' names parent 'tree\/G' which is not registered/.test(m))) && gateOf(tw.some((m) => /'orphan'.*not registered/.test(m) || /names parent 'tree\/nope' which is not registered/.test(m))) && verdictOf(tw.some((m) => /parent 'tree\/hidden' which is hidden or not a head/.test(m))),
     'each unresolved parent is reported ONCE per process (three rows, three warnings over three builds), naming the row, the parent and why', J(tw));
-  ok(tr.filter((i) => i.submenu).every((i) => !i.action && Array.isArray(i.children)) && tr.find((i) => i.label === 'A').children.find((k) => k.label === 'B').submenu === true, 'heads carry submenu:true + children and NO action; a nested head is a head');
+  ok(gateOf(tr.filter((i) => i.submenu).every((i) => !i.action && Array.isArray(i.children))) && tr.find((i) => i.label === 'A').children.find((k) => k.label === 'B').submenu === true, 'heads carry submenu:true + children and NO action; a nested head is a head');
   ok(J(listMenuItems('tree').filter((i) => i === 'tree/A' || i === 'tree/B')) === J(['tree/A', 'tree/B']), 'heads are ordinary registrations (listMenuItems, dispose, signal all apply)');
   // renderer hints on heads / choice rows pass through; a panel head survives with no members
   const panelFn = () => ({ el: true });
@@ -270,32 +270,32 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   ok(typeof t2[0].captionOf === 'function' && t2[0].captionOf({ n: 7 }) === 'cap7' && t2[0].caption === 'cap2', 'a FUNCTION caption ALSO rides through as `captionOf` (re-evaluable by the renderer) beside its resolved string');
   registerMenuItem({ menu: 'tree2', submenu: true, id: 'tree2/s', label: 'S', panel: panelFn, caption: 'static' });
   const t2s = menuItems('tree2', { n: 2 }).find((i) => i.id === 'tree2/s');
-  ok(t2s && t2s.caption === 'static' && !('captionOf' in t2s), 'a STRING caption carries no captionOf (nothing to re-evaluate)');
+  ok(gateOf(t2s) && t2s.caption === 'static' && !('captionOf' in t2s), 'a STRING caption carries no captionOf (nothing to re-evaluate)');
   // dispose of a head: its members surface at top level on the next build (reported once)
   unregisterMenuItem('tree/A');
   let trA; const twA = captureWarns(() => { trA = menuItems('tree', { rows: [] }); });
-  ok(J(flat(trA).slice(0, 5)) === J(['plain', 'a0', 'a1', 'B', '>b0']) && twA.some((m) => /'tree\/B' names parent 'tree\/A' which is not registered/.test(m)), 'unregistering a head surfaces its members at the top level (never lost)', J(flat(trA)));
+  ok(J(flat(trA).slice(0, 5)) === J(['plain', 'a0', 'a1', 'B', '>b0']) && verdictOf(twA.some((m) => /'tree\/B' names parent 'tree\/A' which is not registered/.test(m))), 'unregistering a head surfaces its members at the top level (never lost)', J(flat(trA)));
 }
 
 // ── keybindings ──
 {
   ok(J(parseKey('Ctrl+Shift+K')) === J({ ctrl: true, alt: false, shift: true, meta: false, mod: false, key: 'k' }), 'parseKey: ctrl+shift+k');
-  ok(parseKey('cmd+esc').meta && parseKey('cmd+esc').key === 'escape' && parseKey('alt+ArrowLeft').key === 'arrowleft' && parseKey('alt+left').key === 'arrowleft' && parseKey('ctrl++').key === '+' && parseKey('+').key === '+' && parseKey('mod+k').mod, 'parseKey: aliases (cmd→meta, esc→escape, left→arrowleft, ctrl++ → plus, mod)');
-  ok(/unknown modifier 'hyper'/.test(throws(() => parseKey('hyper+k'))) && /key/.test(throws(() => parseKey('ctrl+'))) && /key/.test(throws(() => parseKey('ctrl'))) && throws(() => parseKey('')), 'parseKey: unknown modifier / trailing + / modifier-only / empty THROW');
+  ok(gateOf(parseKey('cmd+esc').meta) && parseKey('cmd+esc').key === 'escape' && parseKey('alt+ArrowLeft').key === 'arrowleft' && parseKey('alt+left').key === 'arrowleft' && parseKey('ctrl++').key === '+' && parseKey('+').key === '+' && verdictOf(parseKey('mod+k').mod), 'parseKey: aliases (cmd→meta, esc→escape, left→arrowleft, ctrl++ → plus, mod)');
+  ok(gateOf(/unknown modifier 'hyper'/.test(throws(() => parseKey('hyper+k')))) && gateOf(/key/.test(throws(() => parseKey('ctrl+')))) && gateOf(/key/.test(throws(() => parseKey('ctrl')))) && verdictOf(throws(() => parseKey(''))), 'parseKey: unknown modifier / trailing + / modifier-only / empty THROW');
   const ev = (o) => ({ key: 'k', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, isComposing: false, target: { closest: () => null }, prevented: 0, stopped: 0, preventDefault() { this.prevented++; }, stopPropagation() { this.stopped++; }, ...o });
   const ck = parseKey('ctrl+k');
-  ok(keyMatches(ck, ev({ ctrlKey: true })) && !keyMatches(ck, ev({ ctrlKey: true, shiftKey: true })) && !keyMatches(ck, ev({ ctrlKey: true, altKey: true })) && !keyMatches(ck, ev({ metaKey: true })) && !keyMatches(ck, ev({})) && keyMatches(ck, ev({ ctrlKey: true, key: 'K' })),
+  ok(gateOf(keyMatches(ck, ev({ ctrlKey: true }))) && !keyMatches(ck, ev({ ctrlKey: true, shiftKey: true })) && !keyMatches(ck, ev({ ctrlKey: true, altKey: true })) && !keyMatches(ck, ev({ metaKey: true })) && !keyMatches(ck, ev({})) && verdictOf(keyMatches(ck, ev({ ctrlKey: true, key: 'K' }))),
     'keyMatches is STRICT: ctrl+k matches only ctrl+k (not ctrl+shift+k / ctrl+alt+k / meta+k / plain k); case-insensitive key');
   const mk = parseKey('mod+k');
-  ok(keyMatches(mk, ev({ ctrlKey: true })) && keyMatches(mk, ev({ metaKey: true })) && keyMatches(mk, ev({ ctrlKey: true, metaKey: true })) && !keyMatches(mk, ev({})) && !keyMatches(mk, ev({ ctrlKey: true, shiftKey: true })), 'mod = ctrl OR meta (the app\'s `(e.ctrlKey || e.metaKey)` convention), other modifiers still exact');
+  ok(gateOf(keyMatches(mk, ev({ ctrlKey: true }))) && gateOf(keyMatches(mk, ev({ metaKey: true }))) && gateOf(keyMatches(mk, ev({ ctrlKey: true, metaKey: true }))) && !keyMatches(mk, ev({})) && !keyMatches(mk, ev({ ctrlKey: true, shiftKey: true })), 'mod = ctrl OR meta (the app\'s `(e.ctrlKey || e.metaKey)` convention), other modifiers still exact');
 
   const fired = [];
   registerCommand({ id: 'kb.one', run: (ctx) => fired.push(['one', ctx.tag, ctx.event?.key]) });
   registerCommand({ id: 'kb.two', run: () => fired.push(['two']) });
   registerCommand({ id: 'kb.gated', run: () => fired.push(['gated']), when: (c) => !!c.allow });
-  ok(/command/.test(throws(() => registerKeybinding({ key: 'ctrl+k' }))) && /key/.test(throws(() => registerKeybinding({ key: 'ctrl+', command: 'kb.one' }))), 'registerKeybinding without a command / with a malformed key THROWS at registration');
+  ok(gateOf(/command/.test(throws(() => registerKeybinding({ key: 'ctrl+k' })))) && verdictOf(/key/.test(throws(() => registerKeybinding({ key: 'ctrl+', command: 'kb.one' })))), 'registerKeybinding without a command / with a malformed key THROWS at registration');
   const b1 = registerKeybinding({ key: 'ctrl+k', command: 'kb.one' });
-  ok(/duplicate binding/.test(throws(() => registerKeybinding({ key: 'Ctrl+K', command: 'kb.one' }))), 'duplicate key→command pair THROWS');
+  ok(verdictOf(/duplicate binding/.test(throws(() => registerKeybinding({ key: 'Ctrl+K', command: 'kb.one' })))), 'duplicate key→command pair THROWS');
   ok(resolveKeybinding(ev({ ctrlKey: true }), { tag: 't' })?.command === 'kb.one', 'resolveKeybinding finds the binding');
   ok(resolveKeybinding(ev({ ctrlKey: true, shiftKey: true }), {}) === null && resolveKeybinding(ev({ ctrlKey: true, isComposing: true }), {}) === null && resolveKeybinding(ev({ ctrlKey: true, keyCode: 229 }), {}) === null, 'non-matching chord / IME composition → null');
   registerKeybinding({ key: 'ctrl+k', command: 'kb.two' });
@@ -310,9 +310,9 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   ok(resolveKeybinding(inTerm(), {})?.command === 'kb.two', 'inTerminal:true opts a binding into terminal events');
   const unknownRef = registerKeybinding({ key: 'ctrl+j', command: 'kb.missing' });
   let r; const kw = captureWarns(() => { r = resolveKeybinding(ev({ ctrlKey: true, key: 'j' }), {}); resolveKeybinding(ev({ ctrlKey: true, key: 'j' }), {}); });
-  ok(r === null && kw.length === 1 && /kb\.missing/.test(kw[0]), 'a binding to an unknown command never fires and is reported once', J(kw));
+  ok(r === null && kw.length === 1 && verdictOf(/kb\.missing/.test(kw[0])), 'a binding to an unknown command never fires and is reported once', J(kw));
   unknownRef();
-  ok(!listKeybindings().some((b) => b.command === 'kb.missing') && listKeybindings().some((b) => b.key === 'ctrl+k' && b.command === 'kb.two'), 'dispose() removes the binding; listKeybindings reports registrations');
+  ok(!listKeybindings().some((b) => b.command === 'kb.missing') && verdictOf(listKeybindings().some((b) => b.key === 'ctrl+k' && b.command === 'kb.two')), 'dispose() removes the binding; listKeybindings reports registrations');
   b1();
 
   // installKeybindings on a real EventTarget under an AbortSignal (bubble phase, defaultPrevented respected)
@@ -324,23 +324,23 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   const target = new EventTarget();
   const ac = new AbortController();
   const mkEvt = (key, o = {}) => Object.assign(new Event('keydown', { cancelable: true }), { key, ctrlKey: true, shiftKey: true, altKey: false, metaKey: false, ...o });
-  ok(/EventTarget/.test(throws(() => installKeybindings(null))) && /getCtx/.test(throws(() => installKeybindings(target, { getCtx: 1 }))), 'installKeybindings validates target + getCtx');
+  ok(gateOf(/EventTarget/.test(throws(() => installKeybindings(null)))) && verdictOf(/getCtx/.test(throws(() => installKeybindings(target, { getCtx: 1 })))), 'installKeybindings validates target + getCtx');
   const uninstall = installKeybindings(target, { signal: ac.signal, getCtx: () => ({ from: 'doc' }) });
   const de1 = mkEvt('P'); target.dispatchEvent(de1);
-  ok(J(hits) === J([['doc', 'keydown']]) && de1.defaultPrevented, 'ONE listener routes keydown → registry (getCtx supplies ctx, event rides along, default prevented)');
+  ok(J(hits) === J([['doc', 'keydown']]) && verdictOf(de1.defaultPrevented), 'ONE listener routes keydown → registry (getCtx supplies ctx, event rides along, default prevented)');
   const de2 = mkEvt('P'); de2.preventDefault(); target.dispatchEvent(de2);
   ok(hits.length === 1, 'an already-consumed key (defaultPrevented — an element\'s own shortcut) is left alone');
   const errs = []; const oe = console.error; console.error = (...a) => errs.push(a.map(String).join(' '));
   const de3 = mkEvt('B'); target.dispatchEvent(de3);
   console.error = oe;
-  ok(de3.defaultPrevented && errs.some((m) => /d\.boom.*failed/.test(m)), 'a throwing command is logged, never propagated into the event loop');
+  ok(gateOf(de3.defaultPrevented) && verdictOf(errs.some((m) => /d\.boom.*failed/.test(m))), 'a throwing command is logged, never propagated into the event loop');
   ac.abort();
   const de4 = mkEvt('P'); target.dispatchEvent(de4);
   ok(hits.length === 1 && !de4.defaultPrevented, 'aborting the signal removes the dispatcher (app-lifetime AbortController)');
   ok(typeof uninstall === 'function', 'installKeybindings returns an uninstall()');
   const pac = new AbortController();
   registerKeybinding({ key: 'ctrl+shift+q', command: 'd.cmd', signal: pac.signal });
-  ok(listKeybindings().some((b) => b.key === 'ctrl+shift+q'), 'signal-scoped binding registered');
+  ok(verdictOf(listKeybindings().some((b) => b.key === 'ctrl+shift+q')), 'signal-scoped binding registered');
   pac.abort();
   ok(!listKeybindings().some((b) => b.key === 'ctrl+shift+q'), 'aborting the signal removes the binding (plugin deactivate)');
 }
@@ -373,7 +373,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const copyCalls = [];
   new Function('registerCommand', 'registerMenuItem', 'tr', 'backendFeatureCaps', 'copyText', 'showConfirmDialog', extract('src/lib/session-card.js', 'registerSessionCardMenu'))(
     registerCommand, registerMenuItem, id, backendFeatureCaps, (t) => copyCalls.push(t), async () => false);
-  ok(listMenuItems('session-card').length >= 20 && hasCommand('session.restart') && hasCommand('session.properties') && hasCommand('session.locate'), 'session-card block registers the session.* commands + the card menu');
+  ok(listMenuItems('session-card').length >= 20 && gateOf(hasCommand('session.restart')) && gateOf(hasCommand('session.properties')) && verdictOf(hasCommand('session.locate')), 'session-card block registers the session.* commands + the card menu');
   // VERBATIM legacy builder (pre-registry session-card.js contextmenu handler, 2.369.37), projected
   const legacy = (s, state, app) => {
     const tr = id; const items = [];
@@ -461,7 +461,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const ti = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : s);
   const { windowWords } = await import('../src/lib/window-types.js'); // lane ui-plain-words: the menu names a window through it
   new Function('registerCommand', 'registerMenuItem', 't', 'switchWindowItems', 'windowWords', extract('src/lib/taskbar.js', 'registerWindowMenu'))(registerCommand, registerMenuItem, ti, switchWindowItems, windowWords);
-  ok(hasCommand('window.close') && hasCommand('window.move') && hasCommand('window.terminateSession'), 'taskbar block registers the window.* commands + the window menu');
+  ok(gateOf(hasCommand('window.close')) && gateOf(hasCommand('window.move')) && verdictOf(hasCommand('window.terminateSession')), 'taskbar block registers the window.* commands + the window menu');
   // VERBATIM legacy builder (pre-registry taskbar.js showWindowContextMenu, 2.369.37), labels + act kinds
   const legacy = (app, id_, win, sess, { closeLabel = null, switchSubmenu = false } = {}) => {
     const t = id;
@@ -563,7 +563,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     const its = (s, app = appB) => menuItems('window', { app, id: 'win-1', win: app.wm.windows.get('win-1'), s, switchSubmenu: false, closeLabel: '✕ Close' });
     const ROW = 'Agent browser — live view';
     const has = (s, app) => its(s, app).some((i) => i.label === ROW);
-    ok(has({ ...base, browserProfileActive: '' }) && has({ ...base, browserInput: 'agent' }) && has({ ...base, browserProfileActive: 'bp-00000001' }) && has({ ...base, browserInput: 'user' }),
+    ok(gateOf(has({ ...base, browserProfileActive: '' })) && gateOf(has({ ...base, browserInput: 'agent' })) && gateOf(has({ ...base, browserProfileActive: 'bp-00000001' })) && verdictOf(has({ ...base, browserInput: 'user' })),
       'the window menu offers "Agent browser — live view" for a live local session whose conversation HAS a browser (used: the ephemeral \'\' or a profile id; running: browserInput agent / user)');
     ok(!has(base) && !has({ ...base, browserProfileActive: '', status: 'stopped' }) && !has({ ...base, browserProfileActive: '', host: 'h1' }) && !has({ ...base, browserProfileActive: '', browserKey: null }) && !has({ ...base, browserProfileActive: '' }, { ...appB, _browserProfiles: null }) && !has(null),
       '…and NOT for one that never browsed, a stopped one, a remote one, one without a browser key, a client without the profile digest, or a non-session window');
@@ -588,12 +588,12 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     const sub = its.find((i) => i.label === 'Show side by side');
     ok(J(labelsOf(its)) === J(['✥ Move', '– Minimize', 'Show side by side', '✕ Close']), 'a ≥2-tab tabs chain: the window menu gains ONE "Show side by side" submenu after the window block (no Unsplit / Swap)', J(labelsOf(its)));
     ok(!!sub && J((sub.children || []).map((k) => k.label)) === J(['Beside Beta (on the right)', 'Beside Gamma (on the right)']), 'its children: one "Beside {name} (on the right)" per OTHER tab, named by the title\'s name part, in chain order', sub && J(sub.children.map((k) => k.label)));
-    ok(sub && sub.kind === 'split', 'the submenu carries kind "split" (the window list refreshes after it)');
+    ok(gateOf(sub) && sub.kind === 'split', 'the submenu carries kind "split" (the window list refreshes after it)');
     splitCalls.length = 0; sub.children[1].action();
     ok(splitCalls.length === 1 && splitCalls[0][0] === 'bindSplit' && splitCalls[0][1] === wins.get('w1') && splitCalls[0][2] === wins.get('w3') && J(splitCalls[0][3]) === J({ side: 'right', announce: true, focus: 'anchor' }),
       'a child calls wm.bindSplit(thisWin, thatWin, {side:"right", announce:true, focus:"anchor"}) — this window on the left, the named one on the right, undoable, the focus staying on the window right-clicked (split r1)', J(splitCalls.map((c) => [c[0], c[1]?.id, c[2]?.id, c[3]])));
     const g = menuItems('window', { app, id: 'w2', win: wins.get('w2'), s: null, switchSubmenu: false, closeLabel: '✕ Close' }).find((i) => i.label === 'Show side by side');
-    ok(g && J(g.children.map((k) => k.label)) === J(['Beside Alpha (on the right)', 'Beside Gamma (on the right)']), 'from a guest tab (a tab\'s right-click opens its OWN window menu) the children name every tab but itself', g && J(g.children.map((k) => k.label)));
+    ok(gateOf(g) && J(g.children.map((k) => k.label)) === J(['Beside Alpha (on the right)', 'Beside Gamma (on the right)']), 'from a guest tab (a tab\'s right-click opens its OWN window menu) the children name every tab but itself', g && J(g.children.map((k) => k.label)));
     const phone = menuItems('window', { app: { ...app, isMobile: true }, id: 'w1', win: wins.get('w1'), s: null, switchSubmenu: false, closeLabel: '✕ Close' });
     ok(!labelsOf(phone).includes('Show side by side'), 'a phone (one pane shown, R6) is not offered "Show side by side"', J(labelsOf(phone)));
   }
@@ -645,8 +645,8 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     'the seven external owners file under comm / system / tools / the top level with DISTINCT orders (Integrations… under System at 55, between Backup & migrate… and the password — lane integrations-menu-home, owner 2026-10-13: a key store is a system thing; Designs… = the Design window\'s home, ungated — lane design-systems-home; the two order-45 twins are gone; Apps… — a top-level row since design 009 §B6 — and Agent browser stay gated on their digests, Channels is ungated since 2.369.125 — its window fallback; For you… leads Communication)', J(owners));
   // the three browser faces (design-browser-faces direction B): the agent's face wears the browser-live glyph, defined once in icons.js — the globe is the web view's alone
   { const tv = read('src/lib/browser-trace-view.js'); const i = tv.indexOf("menu: 'gear'"); const blk = tv.slice(tv.lastIndexOf('registerMenuItem({', i), tv.indexOf('});', i));
-    ok(/\bicon: UI_ICONS\.browserLive\b/.test(blk) && !/UI_ICONS\.(globe|web)\b/.test(blk), 'the ⚙ Agent browser… row wears UI_ICONS.browserLive (the window with a dot), never a globe', blk.slice(0, 200)); }
-  ok(owners.every((o) => !o.group || (!o.parent && o.file === 'src/lib/desktop-app-launcher.js' && o.group === '1_admin')), 'owner rows inside a head carry no `group` — group sorts BEFORE order, so a grouped member would sink below every ungrouped core row (the one top-level owner, Apps…, rides the core rows\' group 1_admin)');
+    ok(gateOf(/\bicon: UI_ICONS\.browserLive\b/.test(blk)) && !/UI_ICONS\.(globe|web)\b/.test(blk), 'the ⚙ Agent browser… row wears UI_ICONS.browserLive (the window with a dot), never a globe', blk.slice(0, 200)); }
+  ok(verdictOf(owners.every((o) => !o.group || (!o.parent && o.file === 'src/lib/desktop-app-launcher.js' && o.group === '1_admin'))), 'owner rows inside a head carry no `group` — group sorts BEFORE order, so a grouped member would sink below every ungrouped core row (the one top-level owner, Apps…, rides the core rows\' group 1_admin)');
   for (const o of owners) registerMenuItem({ menu: 'gear', id: 'owner/' + o.label, parent: o.parent, ...(o.group ? { group: o.group } : {}), order: o.order, label: o.label,
     when: o.gated ? ((c) => (o.label === 'Apps…' ? !!c.app._desktopAppsAvailable : o.label === 'Agent browser…' ? !!c.app._browserProfiles : !!c.app._railEl)) : undefined, run: (c) => c.app['owner:' + o.label]?.() });
 
@@ -719,7 +719,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   ok(J(Object.keys(heads)) === J(['appearance', 'tools', 'comm', 'system', 'help']), 'the five heads carry the ids plugins may name in `parent` (plugin-client CORE_MENU_HEADS)', J(Object.keys(heads)));
   ok(typeof heads.appearance.panel === 'function' && heads.appearance.keepOpen === true && heads.appearance.caption === 'cap:14', 'the Appearance head is a PANEL head (panel + keepOpen + live caption)');
   const language = heads.appearance.children.find((k) => k.submenu);
-  ok(language && language.id === 'language' && language.children.length === 4 && language.children.filter((k) => k.checked).length === 1 && language.children.find((k) => k.checked).label === '中文' && !language.decorate,
+  ok(gateOf(language) && language.id === 'language' && language.children.length === 4 && language.children.filter((k) => k.checked).length === 1 && language.children.find((k) => k.checked).label === '中文' && !language.decorate,
     'Language is a nested head (the two-level ceiling) with four choice rows, ✓ via `checked` on the current one — the legacy decorate/showContextMenu detour is gone');
   ok(typeof rows.find((r) => r.label === 'Update VibeSpace…').decorate === 'function' && !rows.find((r) => r.label === 'Update VibeSpace…').submenu, 'Update stays a DIRECT row with decorate() (its two-line version label is the update indicator)');
   ok(rows.find((r) => r.label === 'Sign out').danger === true && rows.filter((r) => r.danger).length === 1, 'Sign out is the only top-level danger row');
@@ -730,11 +730,11 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   for (const l of ['Customize UI…', 'Auto (system)', 'English', '中文', '日本語', 'Manage agents…', 'Usage…', 'Background Work…', 'Apps…', 'Agent browser…', 'Plugins…', 'PW', 'For you…', 'Channels…', 'Outbox…', 'Integrations…', 'Report a problem…', 'Diagnostics report…', 'Restore a previous layout…', 'Backup & migrate…', 'Set password…', 'Update VibeSpace…', 'Welcome tour', 'All Settings...']) r2.find((i) => i.label === l).action();
   ok(J(calls) === J([['customize'], ['setLang', 'auto'], ['setLang', 'en'], ['setLang', 'zh'], ['setLang', 'ja'], ['_showAgentsDialog'], ['openUsage'], ['openJobs'], ['owner:Apps…'], ['owner:Agent browser…'], ['openPluginsDialog'], ['pluginOpen', 'p', 'w'], ['owner:For you…'], ['owner:Channels…'], ['owner:Outbox…'], ['owner:Integrations…'], ['captureIncident'], ['_openDiagnostics'], ['_showLayoutHistory'], ['_showTransferDialog'], ['_showPasswordDialog'], ['_showUpdateConfirmDialog'], ['_showOnboarding', true], ['settingsOpen']]),
     'every leaf of the tree calls the same app method the legacy row did (+ the four Language choices → setLang, All Settings → _settingsUI.open)', J(calls));
-  ok(r2.every((i) => typeof i.action === 'function') && menuItems('gear', { app, pop: {} }).filter((i) => i.submenu).every((i) => !i.action), 'every leaf has an action; no head has one');
+  ok(gateOf(r2.every((i) => typeof i.action === 'function')) && verdictOf(menuItems('gear', { app, pop: {} }).filter((i) => i.submenu).every((i) => !i.action)), 'every leaf has an action; no head has one');
   const gm = read('src/lib/gear-menu.js');
-  ok(gm.includes(`globe: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c-1.8 1.8-2.7 4-2.7 6.5S6.2 12.7 8 14.5c1.8-1.8 2.7-4 2.7-6.5S9.8 3.3 8 1.5z"/></svg>'`), 'the globe icon is the legacy I_globe SVG verbatim');
+  ok(verdictOf(gm.includes(`globe: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c-1.8 1.8-2.7 4-2.7 6.5S6.2 12.7 8 14.5c1.8-1.8 2.7-4 2.7-6.5S9.8 3.3 8 1.5z"/></svg>'`)), 'the globe icon is the legacy I_globe SVG verbatim');
   ok(!/showContextMenu\(/.test(gm) && !/import \{[^}]*\bshowContextMenu\b[^}]*\} from '\.\/utils\.js'/.test(gm) && !/\(pref === code \? '✓ ' : '  '\)/.test(gm), 'the Language showContextMenu detour + its ✓ / figure-space glyph pad are retired (the renderer draws the check from `checked`)');
-  ok(/checked: \(\) => getLangPref\(\) === code/.test(gm) && /run: \(\) => setLang\(code\)/.test(gm), 'each Language choice row reads its ✓ from getLangPref() and switches through setLang()');
+  ok(gateOf(/checked: \(\) => getLangPref\(\) === code/.test(gm)) && verdictOf(/run: \(\) => setLang\(code\)/.test(gm)), 'each Language choice row reads its ✓ from getLangPref() and switches through setLang()');
 }
 
 // B4. command-mode commands + palette command
@@ -744,10 +744,10 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const tcm = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : s);
   new Function('registerCommand', 'showInputDialog', 'showToast', 't', extract('src/lib/command-mode.js', 'registerCommandModeCommands'))(registerCommand, (o) => { dialogs.push(o); return Promise.resolve('3x2'); }, (msg, o) => toasts.push([msg, o || null]), tcm);
   const want = ['commandMode.toggle', 'activeWindow.snapLeft', 'activeWindow.snapRight', 'activeWindow.snapTop', 'activeWindow.snapBottom', 'activeWindow.toggleMaximize', 'activeWindow.close', 'activeWindow.cycle', 'layout.freeform', 'layout.customGrid', 'session.new', 'sidebar.toggle', 'browser.open', 'explorer.open', 'desktop.next', 'desktop.previous', 'activeWindow.moveToNextDesktop', 'activeWindow.moveToPreviousDesktop'];
-  ok(want.every((w) => hasCommand(w)), 'command-mode registers every single-key action as a command', want.filter((w) => !hasCommand(w)).join(','));
+  ok(verdictOf(want.every((w) => hasCommand(w))), 'command-mode registers every single-key action as a command', want.filter((w) => !hasCommand(w)).join(','));
   const cm = read('src/lib/command-mode.js');
   const routed = want.filter((w) => w !== 'commandMode.toggle').filter((w) => !new RegExp(`case '[^']+': (?:this\\.exit\\(\\); )?runCommand\\('${w.replace('.', '\\.')}'`).test(cm));
-  ok(routed.length === 0 && /runCommand\('commandMode\.toggle', cctx\)/.test(cm) && /runCommand\(e\.key === 'ArrowRight' \? 'desktop\.next' : 'desktop\.previous', cctx\)/.test(cm), 'every command-mode switch case + Ctrl+\\ + Ctrl+Alt+arrows route through runCommand (no inline twin of a registered command)', routed.join(','));
+  ok(routed.length === 0 && gateOf(/runCommand\('commandMode\.toggle', cctx\)/.test(cm)) && verdictOf(/runCommand\(e\.key === 'ArrowRight' \? 'desktop\.next' : 'desktop\.previous', cctx\)/.test(cm)), 'every command-mode switch case + Ctrl+\\ + Ctrl+Alt+arrows route through runCommand (no inline twin of a registered command)', routed.join(','));
   const calls = [];
   const wm = { activeWindowId: 'w1', windows: new Map([['w1', { id: 'w1' }], ['w2', { id: 'w2', isMinimized: true }]]), snapToHalf: (...a) => calls.push(['snap', ...a]), toggleMaximize: (i) => calls.push(['max', i]), closeWindow: (i) => calls.push(['close', i]), requestClose: (i) => calls.push(['close', i]) /* round 3 A2: a user's close asks the veto point */, applyLayout: (l) => calls.push(['layout', l]), setGrid: (a, b) => calls.push(['grid', a, b]), restore: (i) => calls.push(['restore', i]), focusWindow: (i) => calls.push(['focus', i]) };
   const dm = { desktops: [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }], activeDesktopId: 'd3', switchTo: (d) => calls.push(['switch', d]), moveWindowToDesktop: (w, d) => calls.push(['move', w, d]) };
@@ -766,9 +766,9 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
 
   // ── split UX chunk 2: the side-by-side verbs in command mode (v / V) + two unkeyed commands ──
   const splitCmds = ['chain.toggleSplit', 'chain.swapSides', 'chain.unsplit', 'chain.splitBeside'];
-  ok(splitCmds.every((w) => hasCommand(w)), 'command-mode registers chain.toggleSplit / swapSides / unsplit / splitBeside', splitCmds.filter((w) => !hasCommand(w)).join(','));
-  ok(/case 'v': runCommand\('chain\.toggleSplit', cctx\)/.test(cm) && /case 'V': runCommand\('chain\.swapSides', cctx\)/.test(cm), "'v' routes to chain.toggleSplit and 'V' to chain.swapSides through runCommand");
-  ok(/\[CMD\][^']*· v split/.test(cm), 'the armed [CMD] hint line lists "v split"');
+  ok(verdictOf(splitCmds.every((w) => hasCommand(w))), 'command-mode registers chain.toggleSplit / swapSides / unsplit / splitBeside', splitCmds.filter((w) => !hasCommand(w)).join(','));
+  ok(gateOf(/case 'v': runCommand\('chain\.toggleSplit', cctx\)/.test(cm)) && verdictOf(/case 'V': runCommand\('chain\.swapSides', cctx\)/.test(cm)), "'v' routes to chain.toggleSplit and 'V' to chain.swapSides through runCommand");
+  ok(verdictOf(/\[CMD\][^']*· v split/.test(cm)), 'the armed [CMD] hint line lists "v split"');
   const sc = [];
   const w1 = { id: 'w1', title: 'Alpha' }, w2 = { id: 'w2', title: 'Beta' }, w3 = { id: 'w3', title: 'Gamma' };
   const chain = { tabs: ['w1', 'w2', 'w3'], active: 0, layout: 'tabs' };
@@ -787,7 +787,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   sc.length = 0; toasts.length = 0;
   for (const w of [w1, w2, w3]) delete w._tabChain;
   runCommand('chain.toggleSplit', { app: sapp }); runCommand('chain.swapSides', { app: sapp }); runCommand('chain.unsplit', { app: sapp });
-  ok(sc.length === 0 && toasts.length === 3 && toasts.every(([m]) => m === 'Group two windows first'), "no chain: 'v' / 'V' / unsplit say 'Group two windows first' (never silent) and touch nothing", J([shape(), toasts]));
+  ok(sc.length === 0 && toasts.length === 3 && verdictOf(toasts.every(([m]) => m === 'Group two windows first')), "no chain: 'v' / 'V' / unsplit say 'Group two windows first' (never silent) and touch nothing", J([shape(), toasts]));
   toasts.length = 0; w1._tabChain = { tabs: ['w1'], active: 0, layout: 'tabs' };
   runCommand('chain.toggleSplit', { app: sapp });
   ok(sc.length === 0 && toasts.length === 1 && toasts[0][0] === 'Group two windows first', "a one-tab chain is not a group: 'v' says so too");
@@ -799,9 +799,9 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   toasts.length = 0; swm.activeWindowId = null; runCommand('chain.toggleSplit', { app: sapp });
   ok(sc.length === 0 && toasts.length === 1, "'v' with no active window is never silent either");
   // ── split tabs v2 (docs/design-split-ux.zh.md §8): move the active tab within its list ──
-  ok(hasCommand('chain.moveTabLeft') && hasCommand('chain.moveTabRight'), 'command-mode registers chain.moveTabLeft / chain.moveTabRight (the verbs the Ctrl+Shift+PageUp / PageDown chords run)');
-  ok(/case '\{': runCommand\('chain\.moveTabLeft', cctx\); break;/.test(cm) && /case '\}': runCommand\('chain\.moveTabRight', cctx\); break;/.test(cm), "'{' / '}' route to chain.moveTabLeft / chain.moveTabRight through runCommand and STAY in command mode (a tab often moves several places)");
-  ok(/\[CMD\][^']*· \{\} move tab/.test(cm), 'the armed [CMD] hint line lists "{} move tab"');
+  ok(gateOf(hasCommand('chain.moveTabLeft')) && verdictOf(hasCommand('chain.moveTabRight')), 'command-mode registers chain.moveTabLeft / chain.moveTabRight (the verbs the Ctrl+Shift+PageUp / PageDown chords run)');
+  ok(gateOf(/case '\{': runCommand\('chain\.moveTabLeft', cctx\); break;/.test(cm)) && verdictOf(/case '\}': runCommand\('chain\.moveTabRight', cctx\); break;/.test(cm)), "'{' / '}' route to chain.moveTabLeft / chain.moveTabRight through runCommand and STAY in command mode (a tab often moves several places)");
+  ok(verdictOf(/\[CMD\][^']*· \{\} move tab/.test(cm)), 'the armed [CMD] hint line lists "{} move tab"');
   sc.length = 0; toasts.length = 0; swm.activeWindowId = 'w2'; swm.moveActiveTab = (d) => sc.push(['moveActiveTab', d]);
   runCommand('chain.moveTabLeft', { app: sapp }); runCommand('chain.moveTabRight', { app: sapp });
   ok(J(shape()) === J([['moveActiveTab', -1], ['moveActiveTab', 1]]) && toasts.length === 0, 'in a group: chain.moveTabLeft / Right → wm.moveActiveTab(-1 / +1) (the ONE mutation path lives in the window manager)', J([shape(), toasts]));
@@ -814,7 +814,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
 console.log('contributions — C. ws-handler unknown-type default');
 {
   const { registerWsHandler, WS_CTX_CONTRACT } = require(path.join(repo, 'src/ws-handler.js'));
-  ok(WS_CTX_CONTRACT.includes('telemetry'), "'telemetry' is in WS_CTX_CONTRACT (the default case counts through it)");
+  ok(verdictOf(WS_CTX_CONTRACT.includes('telemetry')), "'telemetry' is in WS_CTX_CONTRACT (the default case counts through it)");
   const recorded = [];
   const telemetry = { record: (ev) => recorded.push(ev) };
   const ctx = new Proxy({ telemetry, activeSessionsPayload: () => [], serverNotice: () => {} }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
@@ -832,13 +832,13 @@ console.log('contributions — C. ws-handler unknown-type default');
   await wsHandlers.message(JSON.stringify({ nope: 1 }));
   const warns = warned.stop();
   const replies = sent.filter((m) => m.type === 'error');
-  ok(replies.length === 4 && replies.every((r) => r.code === 'unknown-type'), 'unknown type → {type:error, code:unknown-type} reply to the sender (4/4)', J(replies));
-  ok(replies.every((r) => !('sessionId' in r)), 'the reply NEVER carries sessionId (a session-scoped error frame flips a live window read-only / exited)', J(replies));
+  ok(replies.length === 4 && verdictOf(replies.every((r) => r.code === 'unknown-type')), 'unknown type → {type:error, code:unknown-type} reply to the sender (4/4)', J(replies));
+  ok(verdictOf(replies.every((r) => !('sessionId' in r))), 'the reply NEVER carries sessionId (a session-scoped error frame flips a live window read-only / exited)', J(replies));
   ok(replies[0].reqId === 'r1' && !('reqId' in replies[1]), 'reqId is echoed when present (ws.request callers fail fast instead of hanging)');
-  ok(/Unknown message type: totally-bogus/.test(replies[0].message) && replies[0].unknownType === 'totally-bogus' && replies[3].unknownType === 'undefined', 'message names the type (capped) and unknownType is machine-readable');
+  ok(gateOf(/Unknown message type: totally-bogus/.test(replies[0].message)) && replies[0].unknownType === 'totally-bogus' && replies[3].unknownType === 'undefined', 'message names the type (capped) and unknownType is machine-readable');
   ok(recorded.filter((e) => e.name === 'ws-unknown-type').length === 4 && recorded[0].detail === 'totally-bogus' && recorded[0].kind === 'event', "telemetry counts every occurrence as event 'ws-unknown-type' with the type as detail");
   ok(warns.filter((m) => /"totally-bogus"/.test(m)).length === 1 && warns.filter((m) => /"another-bogus"/.test(m)).length === 1, 'log is rate-limited: one line per type per 10 minutes, not per message', J(warns));
-  ok(replies.every((r) => !/Internal error/.test(r.message)), 'the reply is a proper protocol error (the Internal-error catch path is not what answered)');
+  ok(verdictOf(replies.every((r) => !/Internal error/.test(r.message))), 'the reply is a proper protocol error (the Internal-error catch path is not what answered)');
   ok(sent[0].type === 'active-sessions', 'the connection still opens normally (active-sessions first)');
 }
 function captureWarnsAsync() { const out = []; const o = console.warn; console.warn = (...a) => out.push(a.map(String).join(' ')); return { stop: () => { console.warn = o; return out; } }; }
@@ -858,79 +858,79 @@ console.log('contributions — E. MULTIVIEW: the Agent browser window\'s fold-ba
   const main = liveWin('win-blive-s1', 's1', { ref: 'bp-00000001' }), pop = liveWin('win-pop1', 's1', { ref: 'bk-0000000a.1' }), lone = liveWin('win-s2', 's2', { ref: 'bp-00000002' });
   const app = mkApp([pop, main, lone]);
   const rows = (win) => menuItems('window', { app, id: win.id, win }).map((i) => i.label);
-  ok(rows(pop).includes('Fold back into the Agent browser window') && rows(pop).includes('Snap beside it'), 'a POPPED-OUT window\'s own menu offers "Fold back into the Agent browser window" (beside bind)', J(rows(pop)));
-  ok(!rows(lone).includes('Fold back into the Agent browser window') && rows(lone).includes('Snap beside it'), 'a session with ONE live window has no fold-back row');
+  ok(gateOf(rows(pop).includes('Fold back into the Agent browser window')) && verdictOf(rows(pop).includes('Snap beside it')), 'a POPPED-OUT window\'s own menu offers "Fold back into the Agent browser window" (beside bind)', J(rows(pop)));
+  ok(!rows(lone).includes('Fold back into the Agent browser window') && verdictOf(rows(lone).includes('Snap beside it')), 'a session with ONE live window has no fold-back row');
   ok(LW.otherLiveWindow(app, 's1', 'win-pop1') === main && LW.otherLiveWindow(app, 's1', 'win-blive-s1') === pop && LW.otherLiveWindow(app, 's2', 'win-s2') === null, 'the MAIN window is the deterministic win-blive-<session> when open, else the oldest other — the last one standing is the main one');
   await menuItems('window', { app, id: pop.id, win: pop }).find((i) => i.label === 'Fold back into the Agent browser window').action();
   ok(J(folds) === J(['win-pop1']) && main.switched === 'bk-0000000a.1' && J(app.closed) === J(['win-pop1']) && J(app.focused) === J(['win-blive-s1']) && pop.sent.length === 0, 'running it: the main window SELECTS the folded tab (helper 1\'s browser), the popped-out window closes, the main one is focused (nothing driven ⇒ nothing passed)');
   const drivingMain = liveWin('win-blive-s3', 's3', { ref: 'bp-00000003', mode: 'takeover', mine: true }), pop3 = liveWin('win-pop3', 's3', { ref: '~ephemeral' });
   const app3 = mkApp([drivingMain, pop3]);
-  ok((await LW.foldBackLive(app3, pop3)) === true && drivingMain.switched === null && J(app3.closed) === J(['win-pop3']) && /keeps the browser you are driving/.test(toasts[toasts.length - 1] || ''), 'folding into a window where YOU DRIVE never switches it away (a takeover is never taken away) — said in plain words; the folded one stays in its strip');
-  ok((await LW.foldBackLive(mkApp([lone]), lone)) === false && /no other Agent browser window/.test(toasts[toasts.length - 1] || ''), 'nothing to fold into ⇒ said, never a silent no-op');
+  ok((await LW.foldBackLive(app3, pop3)) === true && drivingMain.switched === null && J(app3.closed) === J(['win-pop3']) && verdictOf(/keeps the browser you are driving/.test(toasts[toasts.length - 1] || '')), 'folding into a window where YOU DRIVE never switches it away (a takeover is never taken away) — said in plain words; the folded one stays in its strip');
+  ok((await LW.foldBackLive(mkApp([lone]), lone)) === false && verdictOf(/no other Agent browser window/.test(toasts[toasts.length - 1] || '')), 'nothing to fold into ⇒ said, never a silent no-op');
   // lane P verify (finding 3): a popped-out window the user DRIVES carries its control — `pass` to the main window's
   // viewer on that browser (its NEW viewer id, after the switch's hello), and only then does it close
   const main4 = liveWin('win-blive-s4', 's4', { ref: 'bp-00000004', you: 7 }), pop4 = liveWin('win-pop4', 's4', { ref: 'bk-0000000d.1', mode: 'takeover', mine: true, you: 9 });
   pop4.passTo = main4;
   const app4 = mkApp([main4, pop4]);
   const f4 = await LW.foldBackLive(app4, pop4);
-  ok(f4 === true && main4.switched === 'bk-0000000d.1' && J(pop4.sent) === J([{ type: 'pass', to: 107 }]) && main4.s.mine && main4.s.mode === 'takeover' && J(app4.closed) === J(['win-pop4']) && /still driving/.test(toasts[toasts.length - 1] || ''), 'folding back the window you DRIVE: the main one switches, the pop-out PASSES its control to the main one\'s new view, THEN closes — you are still driving', J({ sent: pop4.sent, main: main4.s, closed: app4.closed }));
+  ok(f4 === true && main4.switched === 'bk-0000000d.1' && J(pop4.sent) === J([{ type: 'pass', to: 107 }]) && gateOf(main4.s.mine) && main4.s.mode === 'takeover' && J(app4.closed) === J(['win-pop4']) && verdictOf(/still driving/.test(toasts[toasts.length - 1] || '')), 'folding back the window you DRIVE: the main one switches, the pop-out PASSES its control to the main one\'s new view, THEN closes — you are still driving', J({ sent: pop4.sent, main: main4.s, closed: app4.closed }));
   const main5 = liveWin('win-blive-s5', 's5', { ref: 'bp-00000005', mode: 'takeover', mine: true }), pop5 = liveWin('win-pop5', 's5', { ref: 'bp-00000006', mode: 'takeover', mine: true });
   const app5 = mkApp([main5, pop5]);
-  ok((await LW.foldBackLive(app5, pop5)) === false && app5.closed.length === 0 && main5.switched === null && pop5.sent.length === 0 && /driving in both windows/.test(toasts[toasts.length - 1] || ''), 'driving in BOTH windows: refused in words — nothing switches, nothing closes (one takeover would be lost)');
+  ok((await LW.foldBackLive(app5, pop5)) === false && app5.closed.length === 0 && main5.switched === null && pop5.sent.length === 0 && verdictOf(/driving in both windows/.test(toasts[toasts.length - 1] || '')), 'driving in BOTH windows: refused in words — nothing switches, nothing closes (one takeover would be lost)');
   // the strip tab's own context menu: "Open in new window" = openBrowserLive with THAT tab's ref (a normal window, its own selection)
   // 2.369.183: `popOut: true` — since lane H (naive study 2 finding 2) a plain openBrowserLive FOCUSES the session's view; the pop-out is the one deliberate second window
-  ok(/\{ label: t\('Open in new window'\), action: \(\) => app\.openBrowserLive\(\{ sessionId, profileId: r\.ref, popOut: true \}\) \}/.test(lw) && /b\.oncontextmenu = \(e\) => \{ e\.preventDefault\(\); e\.stopPropagation\(\); stripMenu\(r, e\.clientX, e\.clientY\); \};/.test(lw), 'WIRING PIN: a strip tab\'s right-click offers "Open in new window" = app.openBrowserLive({ sessionId, profileId: <that tab\'s ref>, popOut: true })');
-  ok(/if \(r\.ref === curRef\(\) && otherLiveWindow\(app, sessionId, winInfo\.id\)\) items\.push\(\{ label: t\('Fold back into the Agent browser window'\), action: \(\) => foldBackLive\(app, winInfo\) \}\)/.test(lw), 'WIRING PIN: …and on the tab a popped-out window is showing, the same fold-back');
+  ok(gateOf(/\{ label: t\('Open in new window'\), action: \(\) => app\.openBrowserLive\(\{ sessionId, profileId: r\.ref, popOut: true \}\) \}/.test(lw)) && verdictOf(/b\.oncontextmenu = \(e\) => \{ e\.preventDefault\(\); e\.stopPropagation\(\); stripMenu\(r, e\.clientX, e\.clientY\); \};/.test(lw)), 'WIRING PIN: a strip tab\'s right-click offers "Open in new window" = app.openBrowserLive({ sessionId, profileId: <that tab\'s ref>, popOut: true })');
+  ok(verdictOf(/if \(r\.ref === curRef\(\) && otherLiveWindow\(app, sessionId, winInfo\.id\)\) items\.push\(\{ label: t\('Fold back into the Agent browser window'\), action: \(\) => foldBackLive\(app, winInfo\) \}\)/.test(lw)), 'WIRING PIN: …and on the tab a popped-out window is showing, the same fold-back');
   // the ONE drag exception folds back (tab-group.js _mergeDrop asks the PURE rule first)
   const tg = read('src/lib/tab-group.js');
   const md = tg.slice(tg.indexOf('  _mergeDrop(targetWin, win, {'), tg.indexOf('  _mergeDrop(targetWin, win, {') + 900);
-  ok(/const fold = this\._liveFoldTarget\(targetWin, win\);\s*\n\s*if \(fold && this\._app\?\.foldBackLive\) \{ this\._app\.foldBackLive\(win, fold\); return; \}/.test(md) && md.indexOf('_liveFoldTarget') < md.indexOf('addToTabChain'), 'WIRING PIN: the merge drop asks the PURE fold-back rule BEFORE it chains (two live views of one session fold back, never a chain of them)');
-  ok(/foldBackTarget\(facts\(win\), members\.map\(facts\)\)/.test(tg) && /App\.prototype\.foldBackLive = function \(win, into\) \{ return foldBackLive\(this, win, into\); \};/.test(lw), 'WIRING PIN: _liveFoldTarget = chain-layout.foldBackTarget over the target (and its group), App.foldBackLive = the menu row\'s act');
+  ok(gateOf(/const fold = this\._liveFoldTarget\(targetWin, win\);\s*\n\s*if \(fold && this\._app\?\.foldBackLive\) \{ this\._app\.foldBackLive\(win, fold\); return; \}/.test(md)) && md.indexOf('_liveFoldTarget') < md.indexOf('addToTabChain'), 'WIRING PIN: the merge drop asks the PURE fold-back rule BEFORE it chains (two live views of one session fold back, never a chain of them)');
+  ok(gateOf(/foldBackTarget\(facts\(win\), members\.map\(facts\)\)/.test(tg)) && verdictOf(/App\.prototype\.foldBackLive = function \(win, into\) \{ return foldBackLive\(this, win, into\); \};/.test(lw)), 'WIRING PIN: _liveFoldTarget = chain-layout.foldBackTarget over the target (and its group), App.foldBackLive = the menu row\'s act');
 }
 
 // ── D. wiring pins ──
 console.log('contributions — D. wiring pins');
 {
   const sc = read('src/lib/session-card.js');
-  ok(/showContextMenu\(e\.clientX, e\.clientY, menuItems\('session-card', ctx\)\)/.test(sc), "session-card right-click renders menuItems('session-card', ctx)");
+  ok(verdictOf(/showContextMenu\(e\.clientX, e\.clientY, menuItems\('session-card', ctx\)\)/.test(sc)), "session-card right-click renders menuItems('session-card', ctx)");
   ok(!/items\.push\(\{ label: tr\('Focus window'\)/.test(sc) && !/items\.push\(\{ label: tr\('Terminate'\)/.test(sc), 'session-card legacy items.push builder is gone');
-  ok(/^registerSessionCardMenu\(\);/m.test(sc) && /from '\.\/contributions\.js'/.test(sc), 'session-card registers at module load and imports the registry');
+  ok(gateOf(/^registerSessionCardMenu\(\);/m.test(sc)) && verdictOf(/from '\.\/contributions\.js'/.test(sc)), 'session-card registers at module load and imports the registry');
   const tb = read('src/lib/taskbar.js');
-  ok(/contribMenuItems\('window', ctx\)\.map\(\(it\) => wrapAct\(it\)\)/.test(tb) && /onAction\?\.\(kind\)/.test(tb) && /item\.children\.map\(\(ch\) => wrapAct\(ch, kind\)\)/.test(tb), "window menu renders contribMenuItems('window', ctx); wrapAct fires onAction(kind) for items AND submenu children");
-  ok(!/menuItems\.push\(\s*\{ label: '\\u2725 ' \+ t\('Move'\)/.test(tb) && !/menuItems\.push\(\{ label: t\('Locate in sidebar'\)/.test(tb) && /^registerWindowMenu\(\);/m.test(tb), 'window menu legacy builder is gone; registers at module load');
-  ok((tb.match(/showWindowContextMenu\(app, /g) || []).length >= 3 && /showWindowContextMenu\(this\._app, winInfo\.id/.test(read('src/lib/window.js')), 'all four window-menu entry points (taskbar item, group, window list, title bar) still go through showWindowContextMenu');
+  ok(gateOf(/contribMenuItems\('window', ctx\)\.map\(\(it\) => wrapAct\(it\)\)/.test(tb)) && gateOf(/onAction\?\.\(kind\)/.test(tb)) && verdictOf(/item\.children\.map\(\(ch\) => wrapAct\(ch, kind\)\)/.test(tb)), "window menu renders contribMenuItems('window', ctx); wrapAct fires onAction(kind) for items AND submenu children");
+  ok(!/menuItems\.push\(\s*\{ label: '\\u2725 ' \+ t\('Move'\)/.test(tb) && !/menuItems\.push\(\{ label: t\('Locate in sidebar'\)/.test(tb) && verdictOf(/^registerWindowMenu\(\);/m.test(tb)), 'window menu legacy builder is gone; registers at module load');
+  ok((tb.match(/showWindowContextMenu\(app, /g) || []).length >= 3 && verdictOf(/showWindowContextMenu\(this\._app, winInfo\.id/.test(read('src/lib/window.js'))), 'all four window-menu entry points (taskbar item, group, window list, title bar) still go through showWindowContextMenu');
   const ap = read('src/lib/app.js');
-  ok(/pop\.append\(buildGearMenu\(this, pop\)\);/.test(ap) && !/item\(I\.key, t\('Manage agents/.test(ap) && !/menu\.className = 'gs-menu'/.test(ap), 'gear menu renders via buildGearMenu(this, pop) (app.js inline row list gone)');
+  ok(gateOf(/pop\.append\(buildGearMenu\(this, pop\)\);/.test(ap)) && !/item\(I\.key, t\('Manage agents/.test(ap) && !/menu\.className = 'gs-menu'/.test(ap), 'gear menu renders via buildGearMenu(this, pop) (app.js inline row list gone)');
   // 2.369.124: the quick prefs left app.js for appearance-panel.js and are the Appearance head's panel
   const apn = read('src/lib/appearance-panel.js');
-  ok(!/themeSel\.id = 'global-theme-select'|settings-all-link|font-size-ctrl|mkPctRow/.test(ap) && /themeSel\.id = 'global-theme-select'/.test(apn) && !/settings-all-link/.test(apn) && /const mkPctRow = /.test(apn) && /export function buildAppearancePanel\(app, pop\)/.test(apn) && /export function appearanceCaption\(app\)/.test(apn),
+  ok(!/themeSel\.id = 'global-theme-select'|settings-all-link|font-size-ctrl|mkPctRow/.test(ap) && gateOf(/themeSel\.id = 'global-theme-select'/.test(apn)) && !/settings-all-link/.test(apn) && gateOf(/const mkPctRow = /.test(apn)) && gateOf(/export function buildAppearancePanel\(app, pop\)/.test(apn)) && verdictOf(/export function appearanceCaption\(app\)/.test(apn)),
     'the ten quick-pref elements live in appearance-panel.js (buildAppearancePanel + appearanceCaption; the All Settings link left it in 2.369.131), none remain inline in _showGlobalSettings');
-  ok(/localStorage\.setItem\('termFontSize', app\._fontSize\)/.test(apn) && /session\.applyOverride\('fontSize', null\)/.test(apn) && /if \(fontSel\.selectedIndex === -1\)/.test(apn) && /id: 'all-settings'[^\n]*run: \(c\) => c\.app\._settingsUI\.open\(\)/.test(read('src/lib/gear-menu.js')),
+  ok(gateOf(/localStorage\.setItem\('termFontSize', app\._fontSize\)/.test(apn)) && gateOf(/session\.applyOverride\('fontSize', null\)/.test(apn)) && gateOf(/if \(fontSel\.selectedIndex === -1\)/.test(apn)) && verdictOf(/id: 'all-settings'[^\n]*run: \(c\) => c\.app\._settingsUI\.open\(\)/.test(read('src/lib/gear-menu.js'))),
     'the moved builders kept their invariants verbatim (font size through applyOverride; the stale-font select rescue) and All Settings is a direct ⚙ row that opens the settings window');
   const gmSrc = read('src/lib/gear-menu.js');
-  ok(/import \{ buildAppearancePanel, appearanceCaption \} from '\.\/appearance-panel\.js'/.test(gmSrc) && /panel: \(c\) => buildAppearancePanel\(c\.app, c\.pop\)/.test(gmSrc) && /caption: \(c\) => appearanceCaption\(c\.app\)/.test(gmSrc), 'gear-menu wires the panel + caption onto the Appearance head');
-  ok(/sub\.dataset\.popover = '1'/.test(gmSrc) && /e\.preventDefault\(\); e\.stopPropagation\(\);/.test(gmSrc) && /if \(!open\.length\) return;/.test(gmSrc) && /matchMedia\('\(hover: none\)'\)/.test(gmSrc) && /HOVER_INTENT_MS = 120/.test(gmSrc),
+  ok(gateOf(/import \{ buildAppearancePanel, appearanceCaption \} from '\.\/appearance-panel\.js'/.test(gmSrc)) && gateOf(/panel: \(c\) => buildAppearancePanel\(c\.app, c\.pop\)/.test(gmSrc)) && verdictOf(/caption: \(c\) => appearanceCaption\(c\.app\)/.test(gmSrc)), 'gear-menu wires the panel + caption onto the Appearance head');
+  ok(gateOf(/sub\.dataset\.popover = '1'/.test(gmSrc)) && gateOf(/e\.preventDefault\(\); e\.stopPropagation\(\);/.test(gmSrc)) && gateOf(/if \(!open\.length\) return;/.test(gmSrc)) && gateOf(/matchMedia\('\(hover: none\)'\)/.test(gmSrc)) && verdictOf(/HOVER_INTENT_MS = 120/.test(gmSrc)),
     'renderer protocol pins: a flyout carries data-popover (outside-click child rule), Esc is popover-local with stopPropagation ONLY while a flyout is open, the mode switch reads hover:none, hover intent is 120 ms');
-  ok(/for \(const ev of \['click', 'change', 'input'\]\) sub\.addEventListener\(ev, refreshCaption\)/.test(gmSrc) && /cap\.textContent = String\(v \?\? ''\)/.test(gmSrc) && /if \(isFn\(reg\.caption\)\) item\.captionOf = reg\.caption;/.test(read('src/lib/contributions.js')),
+  ok(gateOf(/for \(const ev of \['click', 'change', 'input'\]\) sub\.addEventListener\(ev, refreshCaption\)/.test(gmSrc)) && gateOf(/cap\.textContent = String\(v \?\? ''\)/.test(gmSrc)) && verdictOf(/if \(isFn\(reg\.caption\)\) item\.captionOf = reg\.caption;/.test(read('src/lib/contributions.js'))),
     'WIRING PIN (verifier r2): the registry hands a function caption through as captionOf AND the renderer re-evaluates it on click/change/input bubbling out of the head\'s members — the LIVE caption (a pure pass-through with no consumer is the 2.355.0 unstaged-wiring class)');
   const pcs = read('src/lib/plugin-client.js');
-  ok(/export const CORE_MENU_HEADS = \['appearance', 'tools', 'comm', 'system', 'help'\]/.test(pcs) && /const parent = spec\.parent === undefined \|\| spec\.parent === null \? undefined : pluginParentId\(spec\.parent\)/.test(pcs) && /return registerMenuItem\(\{ \.\.\.spec, command, id: itemId, parent, signal: ctl\.signal \}\)/.test(pcs),
+  ok(gateOf(/export const CORE_MENU_HEADS = \['appearance', 'tools', 'comm', 'system', 'help'\]/.test(pcs)) && gateOf(/const parent = spec\.parent === undefined \|\| spec\.parent === null \? undefined : pluginParentId\(spec\.parent\)/.test(pcs)) && verdictOf(/return registerMenuItem\(\{ \.\.\.spec, command, id: itemId, parent, signal: ctl\.signal \}\)/.test(pcs)),
     'plugin-client passes parent/submenu through under the namespace rule (a core head or one of the plugin\'s own prefixed heads)');
-  ok(/if \(spec\.submenu && \(typeof spec\.id !== 'string' \|\| !\/\^\[a-z0-9-\]\+\$\/\.test\(spec\.id\)\)\) throw new Error\('api\.registerMenuItem: a `submenu:true` head needs an explicit `id` slug/.test(pcs)
+  ok(gateOf(/if \(spec\.submenu && \(typeof spec\.id !== 'string' \|\| !\/\^\[a-z0-9-\]\+\$\/\.test\(spec\.id\)\)\) throw new Error\('api\.registerMenuItem: a `submenu:true` head needs an explicit `id` slug/.test(pcs))
     && pcs.indexOf('head needs an explicit `id` slug') < pcs.indexOf("const itemId = `plugin:${id}:${spec.id || spec.command || 'item-' + (++pluginItemSeq)}`"),
     'plugin-client REFUSES a `submenu:true` head without an explicit id slug BEFORE the host\'s generated item-N id can smuggle it past the registry\'s explicit-id rule (verifier r2 nit)');
   const css = read('public/style.css');
-  ok(/\.gs-flyout \{[^}]*right: 100%/.test(css) && /\.gs-acc \.gs-sub \{[^}]*padding-left: 22px/.test(css) && /@media \(hover: none\) \{[\s\S]*\.gs-menu-item \{ min-height: 44px;/.test(css) && !/\.gs-flyout \{[^}]*#[0-9a-f]{3}/i.test(css),
+  ok(gateOf(/\.gs-flyout \{[^}]*right: 100%/.test(css)) && gateOf(/\.gs-acc \.gs-sub \{[^}]*padding-left: 22px/.test(css)) && gateOf(/@media \(hover: none\) \{[\s\S]*\.gs-menu-item \{ min-height: 44px;/.test(css)) && !/\.gs-flyout \{[^}]*#[0-9a-f]{3}/i.test(css),
     'CSS: the flyout opens LEFT, the accordion indents + borders its members, touch rows are ≥ 44 px, theme vars only');
-  ok(/app\._pressGlobalSettings\(gear\)/.test(read('src/lib/mobile-nav.js')) && /_pressGlobalSettings\(anchor\) \{ unlockFirst\(\(\) => this\._showGlobalSettings\(anchor\)\); \}/.test(read('src/lib/app.js')), 'mobile gear shares the same menu (mobile-nav → _pressGlobalSettings → _showGlobalSettings; lane vault-locked-loud: a locked vault unlocks first)');
-  ok(/this\._contribCtl = new AbortController\(\);/.test(ap) && /installKeybindings\(document, \{ signal: this\._contribCtl\.signal, getCtx: \(\) => \(\{ app: this \}\) \}\)/.test(ap), 'app installs ONE keybinding dispatcher under an app-lifetime AbortController');
+  ok(gateOf(/app\._pressGlobalSettings\(gear\)/.test(read('src/lib/mobile-nav.js'))) && verdictOf(/_pressGlobalSettings\(anchor\) \{ unlockFirst\(\(\) => this\._showGlobalSettings\(anchor\)\); \}/.test(read('src/lib/app.js'))), 'mobile gear shares the same menu (mobile-nav → _pressGlobalSettings → _showGlobalSettings; lane vault-locked-loud: a locked vault unlocks first)');
+  ok(gateOf(/this\._contribCtl = new AbortController\(\);/.test(ap)) && verdictOf(/installKeybindings\(document, \{ signal: this\._contribCtl\.signal, getCtx: \(\) => \(\{ app: this \}\) \}\)/.test(ap)), 'app installs ONE keybinding dispatcher under an app-lifetime AbortController');
   const gm = read('src/lib/gear-menu.js');
-  ok(/^registerGearMenu\(\);/m.test(gm) && /el\.innerHTML = `<span class="gs-menu-icon">\$\{svg\}<\/span><span>\$\{escHtml\(label\)\}<\/span>`/.test(gm), 'gear-menu registers at module load; the row label is escHtml()ed (plugin window titles reach it)');
+  ok(gateOf(/^registerGearMenu\(\);/m.test(gm)) && verdictOf(/el\.innerHTML = `<span class="gs-menu-icon">\$\{svg\}<\/span><span>\$\{escHtml\(label\)\}<\/span>`/.test(gm)), 'gear-menu registers at module load; the row label is escHtml()ed (plugin window titles reach it)');
   const pal = read('src/lib/session-palette.js');
-  ok(/registerCommand\(\{ id: 'session\.palette'/.test(pal) && /\(e\.ctrlKey \|\| e\.metaKey\) && e\.key\.toLowerCase\(\) === 'k' && !e\.target\.closest\?\.\('\.xterm, \[data-own-mod-k\]'\)/.test(pal) && /runCommand\('session\.palette', \{ app \}\)/.test(pal) && /\}, true\);/.test(pal),
+  ok(gateOf(/registerCommand\(\{ id: 'session\.palette'/.test(pal)) && gateOf(/\(e\.ctrlKey \|\| e\.metaKey\) && e\.key\.toLowerCase\(\) === 'k' && !e\.target\.closest\?\.\('\.xterm, \[data-own-mod-k\]'\)/.test(pal)) && gateOf(/runCommand\('session\.palette', \{ app \}\)/.test(pal)) && verdictOf(/\}, true\);/.test(pal)),
     "palette registers command 'session.palette'; the lenient capture-phase Ctrl+K check stays byte-identical (its exclusions: a terminal, and since lane doc-link-bubble an editor that claims the chord — [data-own-mod-k], the Doc window's text) and routes through runCommand");
   const cm = read('src/lib/command-mode.js');
-  ok(/\}, true\); \/\/ capture phase/.test(cm) && /toggle\(\) \{ if \(this\._cmdMode\) this\.exit\(\); else this\.enter\(\); \}/.test(cm) && /^registerCommandModeCommands\(\);/m.test(cm), 'command-mode keeps its capture-phase prefix dispatch (listener order is load-bearing) and exposes toggle()');
+  ok(gateOf(/\}, true\); \/\/ capture phase/.test(cm)) && gateOf(/toggle\(\) \{ if \(this\._cmdMode\) this\.exit\(\); else this\.enter\(\); \}/.test(cm)) && verdictOf(/^registerCommandModeCommands\(\);/m.test(cm)), 'command-mode keeps its capture-phase prefix dispatch (listener order is load-bearing) and exposes toggle()');
   ok(!/registerKeybinding\(/.test(cm) && !/registerKeybinding\(/.test(pal), 'core key chords are NOT registerKeybinding chords (modifier-lenient checks + capture order would change behaviour) — commands only');
   // …but a NEW core chord does use the registry, and chat-view.js is the first
   // (2026-09-07, the Alt+Enter steer chord). It is the pattern a future one
@@ -940,19 +940,19 @@ console.log('contributions — D. wiring pins');
   // `when` that scopes the chord — which is also what makes N simultaneous
   // registrations of one chord legal.
   const cvv = read('src/lib/chat-view.js');
-  ok(/registerKeybinding\(\{\s*\n\s*key: 'alt\+enter',\s*\n\s*command: STEER_NOW_COMMAND,/.test(cvv) && /if \(!hasCommand\(STEER_NOW_COMMAND\)\) \{/.test(cvv) && /signal: winInfo\?\._listenerCtl\?\.signal,/.test(cvv) && /when: \(ctx\) => steerTargetView\(ctx\) === this/.test(cvv),
+  ok(gateOf(/registerKeybinding\(\{\s*\n\s*key: 'alt\+enter',\s*\n\s*command: STEER_NOW_COMMAND,/.test(cvv)) && gateOf(/if \(!hasCommand\(STEER_NOW_COMMAND\)\) \{/.test(cvv)) && gateOf(/signal: winInfo\?\._listenerCtl\?\.signal,/.test(cvv)) && verdictOf(/when: \(ctx\) => steerTargetView\(ctx\) === this/.test(cvv)),
     "chat-view registers the FIRST core registry chord: command once at module scope, keybinding per view (signal + when)");
-  ok(/export const STEER_NOW_COMMAND = 'chat\.steerNow';/.test(cvv) && /onSteerChord: \(\) => runCommand\(STEER_NOW_COMMAND, \{ view: this \}\)/.test(cvv),
+  ok(gateOf(/export const STEER_NOW_COMMAND = 'chat\.steerNow';/.test(cvv)) && verdictOf(/onSteerChord: \(\) => runCommand\(STEER_NOW_COMMAND, \{ view: this \}\)/.test(cvv)),
     "…and its in-app caller routes through runCommand with the same id (keyboard, button and plugin run ONE verb)");
-  ok(/### contributions\.js/.test(read('docs/kb-file-structure.md')) && /THE FIRST CORE `registerKeybinding` CHORD/.test(read('docs/kb-file-structure.md')),
+  ok(gateOf(/### contributions\.js/.test(read('docs/kb-file-structure.md'))) && verdictOf(/THE FIRST CORE `registerKeybinding` CHORD/.test(read('docs/kb-file-structure.md'))),
     'the kb essay records that pattern where the next author will look for it');
   const wsh = read('src/ws-handler.js');
   const defIdx = wsh.indexOf('        default: {');
   const def = wsh.slice(defIdx, defIdx + 1600);
-  ok(defIdx > 0 && def.includes("code: 'unknown-type'") && def.includes('noteUnknownWsType(telemetry, data?.type)'), 'handleMessage switch has a default case that replies code:unknown-type');
+  ok(defIdx > 0 && gateOf(def.includes("code: 'unknown-type'")) && verdictOf(def.includes('noteUnknownWsType(telemetry, data?.type)')), 'handleMessage switch has a default case that replies code:unknown-type');
   const sendIdx = def.indexOf('ws.send(');
   ok(sendIdx > 0 && !/sessionId/.test(def.slice(sendIdx, sendIdx + 260)), 'the default reply object literal has no sessionId key');
-  ok(/registerWsHandler\(wss, \{[\s\S]*?\btelemetry\b[\s\S]*?\n\}\);/.test(read('server.js')), 'server.js passes telemetry into registerWsHandler');
+  ok(verdictOf(/registerWsHandler\(wss, \{[\s\S]*?\btelemetry\b[\s\S]*?\n\}\);/.test(read('server.js'))), 'server.js passes telemetry into registerWsHandler');
   // client: every ws `error` consumer is id-gated, so a sessionId-less error can never flip a window
   const cv = read('src/lib/chat-view.js');
   const cvLines = cv.split('\n');
@@ -961,7 +961,7 @@ console.log('contributions — D. wiring pins');
   // return within the three lines above (the view-only rescue handler's
   // `if (msg.sessionId !== viewId) return;`)
   const gated = ({ l, i }) => /msg\.sessionId === /.test(l) || cvLines.slice(Math.max(0, i - 3), i).some((p) => /if \(msg\.sessionId !== \w+\) return;/.test(p));
-  ok(cvErr.length >= 3 && cvErr.every(gated), 'chat-view error branches are sessionId-gated (attach-failed / rescue paths unreachable by a bare error frame)', J(cvErr.filter((x) => !gated(x)).map((x) => x.l)));
+  ok(cvErr.length >= 3 && verdictOf(cvErr.every(gated)), 'chat-view error branches are sessionId-gated (attach-failed / rescue paths unreachable by a bare error frame)', J(cvErr.filter((x) => !gated(x)).map((x) => x.l)));
   const term = read('src/lib/terminal.js');
   const onIdx = term.indexOf('this.ws.on(sessionId, (msg) => {'), errIdx = term.indexOf("msg.type === 'error' && !winInfo.exited");
   ok(onIdx > 0 && errIdx > onIdx && !term.slice(onIdx, errIdx).includes('onGlobal('), "terminal's error branch lives inside the PER-SESSION ws.on(sessionId) handler (never sees a sessionId-less frame)");
@@ -972,27 +972,27 @@ console.log('contributions — D. wiring pins');
   // it rescues, closes and binds nothing, and the request stays armed; since lane resume-all-paced (L1) it names its end
   // (`settled('error', msg)` — createSession's onCreateEnd tells a bulk resume the create ended, so the next one may go)
   const RELEASE = /^msg\.type === 'error' && !msg\.reqId && !msg\.sessionId\) settled\('error', msg\);$/;
-  ok(slErr.length >= 4 && slErr.every((l) => /msg\.(reqId|sessionId) === /.test(l) || RELEASE.test(l)) && slErr.filter((l) => RELEASE.test(l)).length <= 1, 'session-lifecycle error handlers are reqId/sessionId/viewId/virtualId-gated (one declared release of a pending resume\'s wait)', J(slErr));
-  ok(/if \(d\.sessionId\) \[\.\.\.\(this\.handlers\.get\(d\.sessionId\)/.test(read('src/lib/ws.js')), 'ws.js routes session-scoped handlers by d.sessionId only');
+  ok(slErr.length >= 4 && gateOf(slErr.every((l) => /msg\.(reqId|sessionId) === /.test(l) || RELEASE.test(l))) && slErr.filter((l) => RELEASE.test(l)).length <= 1, 'session-lifecycle error handlers are reqId/sessionId/viewId/virtualId-gated (one declared release of a pending resume\'s wait)', J(slErr));
+  ok(verdictOf(/if \(d\.sessionId\) \[\.\.\.\(this\.handlers\.get\(d\.sessionId\)/.test(read('src/lib/ws.js'))), 'ws.js routes session-scoped handlers by d.sessionId only');
   // plugin host API
   const pc = read('src/lib/plugin-client.js');
-  ok(/registerCommand: \(\{ id: slug, title, run, when, icon \} = \{\}\) =>/.test(pc) && /id: `plugin:\$\{id\}:\$\{slug\}`, title, run, when, icon, signal: ctl\.signal/.test(pc), 'host api.registerCommand namespaces the id and binds it to the plugin signal');
-  ok(/registerMenuItem: \(spec = \{\}\) =>/.test(pc) && /registerMenuItem\(\{ \.\.\.spec, command, id: itemId, parent, signal: ctl\.signal \}\)/.test(pc) && /registerKeybinding: \(\{ key, command, when, inTerminal \} = \{\}\) => registerKeybinding\(\{ key, command: pluginCommandId\(command\), when, inTerminal, signal: ctl\.signal \}\)/.test(pc),
+  ok(gateOf(/registerCommand: \(\{ id: slug, title, run, when, icon \} = \{\}\) =>/.test(pc)) && verdictOf(/id: `plugin:\$\{id\}:\$\{slug\}`, title, run, when, icon, signal: ctl\.signal/.test(pc)), 'host api.registerCommand namespaces the id and binds it to the plugin signal');
+  ok(gateOf(/registerMenuItem: \(spec = \{\}\) =>/.test(pc)) && gateOf(/registerMenuItem\(\{ \.\.\.spec, command, id: itemId, parent, signal: ctl\.signal \}\)/.test(pc)) && verdictOf(/registerKeybinding: \(\{ key, command, when, inTerminal \} = \{\}\) => registerKeybinding\(\{ key, command: pluginCommandId\(command\), when, inTerminal, signal: ctl\.signal \}\)/.test(pc)),
     'host api.registerMenuItem / api.registerKeybinding are plugin-scoped (namespaced id, signal-bound)');
-  ok(/runCommand: \(cid, ctx\) => runCommand\(pluginCommandId\(cid\), ctx\)/.test(pc) && /from '\.\/contributions\.js'/.test(pc), 'host api.runCommand resolves own slugs vs full ids');
+  ok(gateOf(/runCommand: \(cid, ctx\) => runCommand\(pluginCommandId\(cid\), ctx\)/.test(pc)) && verdictOf(/from '\.\/contributions\.js'/.test(pc)), 'host api.runCommand resolves own slugs vs full ids');
   const contrib = read('src/lib/contributions.js');
   const imports = [...contrib.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
   ok(J(imports) === J(['./telemetry-client.js']), `contributions.js imports only telemetry-client (DOM-free at import) — got ${imports.join(',')}`);
-  ok(/track\('event', 'command-unknown'/.test(contrib) && /track\('event', 'menu-unknown-command'/.test(contrib) && /track\('event', 'keybinding-unknown-command'/.test(contrib) && /track\('event', 'command-failed'/.test(contrib), 'every unknown/failed path is telemetered');
+  ok(gateOf(/track\('event', 'command-unknown'/.test(contrib)) && gateOf(/track\('event', 'menu-unknown-command'/.test(contrib)) && gateOf(/track\('event', 'keybinding-unknown-command'/.test(contrib)) && verdictOf(/track\('event', 'command-failed'/.test(contrib)), 'every unknown/failed path is telemetered');
   const libFiles = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js') && f !== 'contributions.js' && f !== 'build-version.js');
   const users = libFiles.filter((f) => /\b(registerCommand|registerMenuItem|registerKeybinding|menuItems|runCommand|installKeybindings)\(/.test(read('src/lib/' + f)));
-  ok(users.length >= 6 && users.every((f) => /from '\.\/contributions\.js'/.test(read('src/lib/' + f))), `every module calling the registry imports contributions.js (${users.join(', ')}) — a bare call is the 2.330.1 free-variable class`, users.filter((f) => !/from '\.\/contributions\.js'/.test(read('src/lib/' + f))).join(','));
-  ok(/'test-contributions'/.test(read('scripts/ci.mjs')), 'ci.mjs SUITES carries this suite');
-  ok(/api\.registerCommand/.test(read('docs/plugins.md')) && /api\.registerMenuItem/.test(read('docs/plugins.md')) && /api\.registerKeybinding/.test(read('docs/plugins.md')), 'docs/plugins.md documents the three Ph1 host API calls');
-  ok(/### contributions\.js/.test(read('docs/kb-file-structure.md')), 'kb-file-structure.md carries the contributions.js essay');
-  ok(/unknown-type/.test(read('docs/kb-api.md')), 'kb-api.md documents the unknown-type error reply');
+  ok(users.length >= 6 && verdictOf(users.every((f) => /from '\.\/contributions\.js'/.test(read('src/lib/' + f)))), `every module calling the registry imports contributions.js (${users.join(', ')}) — a bare call is the 2.330.1 free-variable class`, users.filter((f) => !/from '\.\/contributions\.js'/.test(read('src/lib/' + f))).join(','));
+  ok(verdictOf(/'test-contributions'/.test(read('scripts/ci.mjs'))), 'ci.mjs SUITES carries this suite');
+  ok(gateOf(/api\.registerCommand/.test(read('docs/plugins.md'))) && gateOf(/api\.registerMenuItem/.test(read('docs/plugins.md'))) && verdictOf(/api\.registerKeybinding/.test(read('docs/plugins.md'))), 'docs/plugins.md documents the three Ph1 host API calls');
+  ok(verdictOf(/### contributions\.js/.test(read('docs/kb-file-structure.md'))), 'kb-file-structure.md carries the contributions.js essay');
+  ok(verdictOf(/unknown-type/.test(read('docs/kb-api.md'))), 'kb-api.md documents the unknown-type error reply');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
 // telemetry-client armed a flush timer on the unknown-command events — exit explicitly
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

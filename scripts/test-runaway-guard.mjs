@@ -39,7 +39,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUT = mutantCopies('runaway-guard', repo);
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + JSON.stringify(d) : '')); } return !!c; };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + JSON.stringify(d) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -85,7 +85,7 @@ console.log('① the verdict');
   let v = RG.resourceVerdict({ cpuTicks: 200, memBytes: 1, memMetric: 'pss' }, { at: t0, cpuTicks: 0 }, 0, t0 + 1000, { limits: lim });
   ok(Math.round(v.cpuPct) === 200 && v.hotSince === t0 + 1000 && v.over === null, '200 % over one second ⇒ hot starts, not over yet', v);
   v = RG.resourceVerdict({ cpuTicks: 400, memBytes: 1, memMetric: 'pss' }, { at: t0 + 1000, cpuTicks: 200 }, t0 + 1000, t0 + 2000, { limits: lim });
-  ok(/^200% CPU sustained for \d+ min \(limit 150%\)$/.test(v.over || '') && v.overKind === 'cpu', 'sustained past the limit ⇒ over, the sentence names the numbers', v);
+  ok(gateOf(/^200% CPU sustained for \d+ min \(limit 150%\)$/.test(v.over || '')) && v.overKind === 'cpu', 'sustained past the limit ⇒ over, the sentence names the numbers', v);
   v = RG.resourceVerdict({ cpuTicks: 410, memBytes: 1, memMetric: 'pss' }, { at: t0 + 2000, cpuTicks: 400 }, t0 + 1000, t0 + 3000, { limits: lim });
   ok(v.hotSince === 0 && v.over === null, 'CPU drops ⇒ hot resets (a spike is not sustained)');
   // the 2026-09-14 reaped-ticks rule: a set counts own + reaped work, so a burner child that exited between two
@@ -126,7 +126,7 @@ console.log('② the report level');
   ok(RG.reportTransition(undefined, over).fire === true && RG.reportTransition(undefined, undefined).fire === false, 'a fresh state fires on the first over; no verdict never fires');
   // DELIVERY: server.js latches a notice key only when a client received it (returns 0 otherwise)
   let a = RG.reportTransition(null, over, { now: 0 });
-  ok(a.fire && a.notify, 'a new crossing asks for the notice (fire + notify)');
+  ok(gateOf(a.fire) && verdictOf(a.notify), 'a new crossing asks for the notice (fire + notify)');
   let d = RG.reportDelivery(a.state, 0);
   ok(d.pending === true && d.reported === true && d.crossings === 1, 'serverNotice → 0 (nobody connected) ⇒ pending, the crossing stays counted');
   let b2 = RG.reportTransition(d, over, { now: 60e3 });
@@ -177,14 +177,14 @@ console.log('⑤ negative controls (patched copies in scratch)');
   const m4 = MUT.load('src/runaway-guard.js', editAnchor(src, 'pending: delivered === 0', 'pending: false', "src/runaway-guard.js"), 'no-delivery');
   const undelivered = (mod) => { const a = mod.reportTransition(null, { over: 'x', memGuard: 'pss', clear: false }, { now: 0 }); return mod.reportTransition(mod.reportDelivery(a.state, 0), { over: 'x', memGuard: 'pss', clear: false }, { now: 60e3 }).notify; };
   ok(undelivered(m4) === false && undelivered(RG) === true, 'CONTROL: a copy that latches an undelivered notice as said never re-sends it — the shipped level re-sends the same key');
-  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4, label: '⑤ ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4, label: '⑤ ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 // lane browser-swiftshader-cpu: the report NAMES the page an unseen browser draws, and the cores (report only, Stop as today)
 { const v = { overKind: 'cpu', cpuPct: 980, hotMin: 6 };
   const t = RG.resourceNoticeText({ who: 'The agent browser of "pay"', where: 'Browser panel', verdict: v, sample: {}, gpuPct: 938, drawing: { hidden: true, title: 'Mercury – Payments', who: 'The hidden browser of "pay"' } });
   const plain = RG.resourceNoticeText({ who: 'The agent browser of "pay"', where: 'Browser panel', verdict: v, sample: {}, gpuPct: 938 });
-  ok(t.startsWith('The hidden browser of "pay" is drawing "Mercury – Payments" at 9.4 cores') && /Stop it from the Browser panel/.test(t) && !/is drawing/.test(plain), 'lane browser-swiftshader-cpu: an unseen browser over on CPU is named by the page it draws at N cores; a seen one keeps the GPU line', { t, plain }); }
+  ok(gateOf(t.startsWith('The hidden browser of "pay" is drawing "Mercury – Payments" at 9.4 cores')) && gateOf(/Stop it from the Browser panel/.test(t)) && !/is drawing/.test(plain), 'lane browser-swiftshader-cpu: an unseen browser over on CPU is named by the page it draws at N cores; a seen one keeps the GPU line', { t, plain }); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

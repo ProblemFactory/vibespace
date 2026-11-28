@@ -61,7 +61,7 @@ import { ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET, handedCli } from './scrat
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skipped = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 const skip = (n, why) => { skipped++; console.log(`  SKIP ${n} — ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -153,14 +153,14 @@ if (!claudeBin || !fs.existsSync(claudeBin)) {
   } else {
     const missing = CONSUMED.filter((f) => !win.includes(f + ':'));
     ok(`every consumed init field is in the installed CLI's zod schema (${path.basename(claudeBin)})`, missing.length === 0, missing.join(', '));
-    ok('…the fixture invents no field the schema does not declare', Object.keys(FRAME).filter((k) => !k.startsWith('_') && !['type', 'subtype', 'uuid', 'session_id'].includes(k)).every((k) => win.includes(k + ':')),
+    ok('…the fixture invents no field the schema does not declare', verdictOf(Object.keys(FRAME).filter((k) => !k.startsWith('_') && !['type', 'subtype', 'uuid', 'session_id'].includes(k)).every((k) => win.includes(k + ':'))),
       Object.keys(FRAME).filter((k) => !k.startsWith('_') && !win.includes(k + ':')).join(', '));
     ok('…NEGATIVE CONTROL: an invented field name is NOT in the schema window', !win.includes('memory_dirs:') && !win.includes('mcp_status:'));
-    ok('…`terminal_slash_commands` carries upstream\'s own "Phone/remote UIs should hide these" reason (that is WHY we filter)', /Phone\/remote UIs should hide these/.test(win));
-    ok('…`memory_paths` carries upstream\'s own "classify Read/Write/Edit tool calls on these paths as memory operations" reason', /classify Read\/Write\/Edit tool calls on these paths as memory operations/.test(win));
+    ok('…`terminal_slash_commands` carries upstream\'s own "Phone/remote UIs should hide these" reason (that is WHY we filter)', verdictOf(/Phone\/remote UIs should hide these/.test(win)));
+    ok('…`memory_paths` carries upstream\'s own "classify Read/Write/Edit tool calls on these paths as memory operations" reason', verdictOf(/classify Read\/Write\/Edit tool calls on these paths as memory operations/.test(win)));
   }
   const cc = binWindow(claudeBin, 'commands_changed"),commands:', 600);
-  ok('`commands_changed` is a full-list REPLACE push in the CLI\'s own words ("Clients should REPLACE their cached command list")', /REPLACE their cached command list/.test(cc), cc.slice(0, 200));
+  ok('`commands_changed` is a full-list REPLACE push in the CLI\'s own words ("Clients should REPLACE their cached command list")', verdictOf(/REPLACE their cached command list/.test(cc)), cc.slice(0, 200));
 }
 
 // ── 1b. WHICH KEYS ARE REQUIRED — the fact that makes "the card renders only
@@ -195,9 +195,9 @@ console.log('— required vs optional (the gate is not a version test)');
     if (!seen.length) skip('the widened init keys are REQUIRED in every installed CLI', `no init schema window in ${rows.map((r) => r[0]).join(', ')} (upstream reshaped it — re-dump)`);
     else {
       ok(`tools/mcp_servers/skills/plugins/output_style/claude_code_version are NON-optional in every installed CLI (${seen.map((r) => r[0]).join(', ')}) — so "carries a widened key" is NOT evidence of a new CLI`,
-        seen.every((r) => r[1].wrongReq.length === 0), seen.map((r) => `${r[0]}: ${r[1].wrongReq.join(',')}`).join(' | '));
+        verdictOf(seen.every((r) => r[1].wrongReq.length === 0)), seen.map((r) => `${r[0]}: ${r[1].wrongReq.join(',')}`).join(' | '));
       ok('…NEGATIVE CONTROL for the reader itself: agents/betas/terminal_slash_commands/plugin_errors/plugin_warnings/mcp_server_errors/memory_paths ARE `.optional()` (a checker that answered "required" for everything would fail here)',
-        seen.every((r) => r[1].wrongOpt.length === 0), seen.map((r) => `${r[0]}: ${r[1].wrongOpt.join(',')}`).join(' | '));
+        verdictOf(seen.every((r) => r[1].wrongOpt.length === 0)), seen.map((r) => `${r[0]}: ${r[1].wrongOpt.join(',')}`).join(' | '));
       ok('…and a field the schema does not declare reads as ABSENT, not as required', zodOptional(binWindow(seen.length ? bins[0] : claudeBin, INIT_SCHEMA_RE, INIT_SCHEMA_WIN), 'memory_dirs') === null);
       // The consequence, measured on the pure predicate the card gates on: a
       // frame built from ONLY the required keys already renders.
@@ -231,16 +231,16 @@ const runLive = (records) => {
     && f.mcpServers.length === 3 && f.mcpServers[1].status === 'failed'
     && f.pluginErrors[0].plugin === 'old-helper' && f.mcpServerErrors[0].name === 'notes' && f.pluginWarnings[0].plugin === 'commit-commands'
     && f.outputStyle === 'Explanatory' && f.version === '2.1.257' && f.betas[0] === 'context-1m'
-    && f.memoryPaths.auto.endsWith('/memory') && f.memoryPaths.team.endsWith('/team-memory')
+    && gateOf(f.memoryPaths.auto.endsWith('/memory')) && gateOf(f.memoryPaths.team.endsWith('/team-memory'))
     && f.terminalSlashCommands.join(',') === 'doctor,color', JSON.stringify(f).slice(0, 400));
   const meta = ops.filter((o) => o.op === 'meta' && o.subtype === 'slash-commands');
   ok('…the command list rides ONE meta op (the shape a mid-session push reuses), carrying the terminal subset', meta.length === 1
     && meta[0].data.commands.join(',') === FRAME.slash_commands.join(',') && meta[0].data.terminal.join(',') === 'doctor,color', JSON.stringify(meta[0]?.data));
   ok('…the card itself is unchanged for consumers that only read text/id (no id churn, status complete)', init.role === 'system' && init.status === 'complete' && init.content[0].text === 'Model: claude-fable-5');
-  ok('history rebuild (convertHistory) keeps the same widened frame — the buffer replay a restarted window reads', (() => {
+  ok('history rebuild (convertHistory) keeps the same widened frame — the buffer replay a restarted window reads', verdictOf((() => {
     const msgs = new MessageManager('sess-init').convertHistory([FRAME]);
     return msgs[0]?.content?.[0]?.initData?.frame?.mcpServers?.[1]?.status === 'failed';
-  })());
+  })()));
 }
 {
   // ABSENT ≠ EMPTY — a PROPERTY of initFrameFacts over a record that omits the
@@ -253,7 +253,7 @@ const runLive = (records) => {
   ok('DEGRADE: a record that omits the widened keys yields only what it said (slashCommands) — absent keys stay ABSENT, never empty arrays that would read as "zero skills"',
     Object.keys(f).join(',') === 'slashCommands' && !('skills' in f) && !('mcpServers' in f) && !('memoryPaths' in f), JSON.stringify(f));
   ok('…and its command list still reaches the composer, with an EMPTY terminal subset (filters nothing)',
-    ops.some((o) => o.op === 'meta' && o.subtype === 'slash-commands' && o.data.commands.join() === 'compact' && o.data.terminal.length === 0));
+    verdictOf(ops.some((o) => o.op === 'meta' && o.subtype === 'slash-commands' && o.data.commands.join() === 'compact' && o.data.terminal.length === 0)));
 }
 {
   // commands_changed: REPLACE, not append.
@@ -274,16 +274,16 @@ const runLive = (records) => {
   ok('…the terminal subset survives (the push does not re-send it) but is INTERSECTED with the new list — "color" is gone upstream, so it is gone here',
     metas[1].data.terminal.join(',') === 'doctor', JSON.stringify(metas[1].data.terminal));
   ok('…and the init CARD is patched in place, so a window that rebuilds history sees the current list',
-    ops.some((o) => o.op === 'edit') && mm.messages[0].content[0].initData.slashCommands.includes('skill-just-discovered'));
+    gateOf(ops.some((o) => o.op === 'edit')) && verdictOf(mm.messages[0].content[0].initData.slashCommands.includes('skill-just-discovered')));
   ok('rich rows are read by NAME (the payload is {name,description,argumentHint,aliases?}, not strings like init\'s slash_commands)',
     commandNames(changed.commands).join(',') === 'compact,doctor,skill-just-discovered');
   ok('…a bare-string payload is still read (a producer that ever sends strings is not dropped), and a payload with NO array does nothing',
     commandNames(['a', 'b']).join(',') === 'a,b' && commandNames(undefined) === null && commandNames({}) === null);
-  ok('an EMPTY commands array is a real answer (every command gone), not "say nothing"', (() => {
+  ok('an EMPTY commands array is a real answer (every command gone), not "say nothing"', verdictOf((() => {
     const r = runLive([FRAME, { ...changed, commands: [] }]);
     const m = r.ops.filter((o) => o.op === 'meta' && o.subtype === 'slash-commands');
     return m.length === 2 && m[1].data.commands.length === 0;
-  })());
+  })()));
 }
 {
   // The breadcrumb must NOT fire for a subtype we now handle (2.227.5 rule).
@@ -294,7 +294,7 @@ const runLive = (records) => {
   global.__vsEvent = prev;
   ok('commands_changed is a HANDLED subtype (no unknown-subtype breadcrumb), while a genuinely new subtype still trips it',
     !seen.some(([k, d]) => k === 'cli-unknown-system-subtype' && d === 'commands_changed')
-    && seen.some(([k, d]) => k === 'cli-unknown-system-subtype' && d === 'brand_new_thing'), JSON.stringify(seen));
+    && verdictOf(seen.some(([k, d]) => k === 'cli-unknown-system-subtype' && d === 'brand_new_thing')), JSON.stringify(seen));
 }
 
 // ── 2b. ONE CARD PER DISTINCT FRAME (round 2) ──────────────────────────────
@@ -353,16 +353,16 @@ console.log('— pure client rules');
   const f = initFrameFacts(FRAME);
   const list = AM.slashCompletionList(f.slashCommands, f.terminalSlashCommands);
   ok('terminal-bound commands are FILTERED OUT of the composer completion (/doctor, /color are terminal UX — upstream says hide them)',
-    !list.includes('/doctor') && !list.includes('/color') && list.includes('/compact') && list.includes('/model') && list.length === FRAME.slash_commands.length - 2, list.join(' '));
+    !list.includes('/doctor') && !list.includes('/color') && gateOf(list.includes('/compact')) && gateOf(list.includes('/model')) && list.length === FRAME.slash_commands.length - 2, list.join(' '));
   ok('…every entry carries its slash exactly once, whichever spelling the caller passes',
     AM.slashCompletionList(['/compact', 'model'], []).join(',') === '/compact,/model');
   ok('…NEGATIVE CONTROL: with no terminal subset (old CLI / codex / ACP) nothing is filtered',
-    AM.slashCompletionList(f.slashCommands, null).length === FRAME.slash_commands.length && AM.slashCompletionList(f.slashCommands, []).includes('/doctor'));
+    AM.slashCompletionList(f.slashCommands, null).length === FRAME.slash_commands.length && verdictOf(AM.slashCompletionList(f.slashCommands, []).includes('/doctor')));
 
   const issues = AM.initHealthIssues(f);
   ok('the health strip names every server that is NOT connected, plus skipped configs and demoted plugins (3 here: failed + needs-auth + a config error + a plugin error)',
     issues.length === 4 && issues.filter((i) => i.kind === 'mcp-server').map((i) => `${i.name}/${i.detail}`).join(',') === 'github/failed,drive/needs-auth'
-    && issues.some((i) => i.kind === 'mcp-config' && i.name === 'notes') && issues.some((i) => i.kind === 'plugin' && i.name === 'old-helper'), JSON.stringify(issues));
+    && gateOf(issues.some((i) => i.kind === 'mcp-config' && i.name === 'notes')) && verdictOf(issues.some((i) => i.kind === 'plugin' && i.name === 'old-helper')), JSON.stringify(issues));
   ok('…the status vocabulary is OPEN: an unknown status is reported verbatim, never mapped away',
     AM.initHealthIssues({ mcpServers: [{ name: 'x', status: 'reconnecting-v2' }] })[0]?.detail === 'reconnecting-v2');
   ok('…NEGATIVE CONTROL: an all-connected frame with no error keys has NOTHING to report (and we never claim "all healthy" — an absent key is not a clean load)',
@@ -371,12 +371,12 @@ console.log('— pure client rules');
   AM._resetMemoryPaths();
   const custom = '/w/store/agent-memory/NOTES.md';
   ok('memory classification BEFORE the frame speaks: the hardcoded regex only (today\'s behaviour)',
-    AM.isAgentMemoryPath('/h/.claude/projects/p/memory/M.md') && !AM.isAgentMemoryPath(custom));
+    gateOf(AM.isAgentMemoryPath('/h/.claude/projects/p/memory/M.md')) && !AM.isAgentMemoryPath(custom));
   AM.noteMemoryPaths({ auto: '/w/store/agent-memory', team: '/w/proj/.claude/team-memory' });
   ok('…AFTER it: a directory the CLI NAMED classifies as memory (the regex could never know it), and the regex still covers the default dirs',
-    AM.isAgentMemoryPath(custom) && AM.isAgentMemoryPath('/w/proj/.claude/team-memory/T.md') && AM.isAgentMemoryPath('/h/.claude/projects/p/memory/M.md'));
+    gateOf(AM.isAgentMemoryPath(custom)) && gateOf(AM.isAgentMemoryPath('/w/proj/.claude/team-memory/T.md')) && verdictOf(AM.isAgentMemoryPath('/h/.claude/projects/p/memory/M.md')));
   ok('…a declared dir matches as a PATH PREFIX, not a string prefix (…/agent-memory must not swallow …/agent-memory-backup)',
-    !AM.isAgentMemoryPath('/w/store/agent-memory-backup/N.md') && AM.isAgentMemoryPath('/w/store/agent-memory/sub/N.md'));
+    !AM.isAgentMemoryPath('/w/store/agent-memory-backup/N.md') && verdictOf(AM.isAgentMemoryPath('/w/store/agent-memory/sub/N.md')));
   AM._resetMemoryPaths();
 }
 
@@ -425,9 +425,9 @@ console.log('— chatStatus twin (attach path)');
 
   const st = twin([INIT, PUSH]);
   ok('a window that ATTACHES (or reloads) gets the same two facts as one that watched the push live: the CURRENT list + the terminal subset',
-    st && st.slashCommands.join(',') === 'compact,doctor,newly-found' && st.initFrame?.terminalSlashCommands.join(',') === 'doctor', JSON.stringify({ sc: st?.slashCommands, tf: st?.initFrame?.terminalSlashCommands }));
+    gateOf(st) && st.slashCommands.join(',') === 'compact,doctor,newly-found' && st.initFrame?.terminalSlashCommands.join(',') === 'doctor', JSON.stringify({ sc: st?.slashCommands, tf: st?.initFrame?.terminalSlashCommands }));
   ok('…and the memory dirs + health facts, so a window whose init card is outside the loaded tail still classifies memory writes and can be told what is broken',
-    st.initFrame?.memoryPaths?.auto?.endsWith('/memory') && AM.initHealthIssues(st.initFrame).length === 4, JSON.stringify(st.initFrame?.memoryPaths));
+    gateOf(st.initFrame?.memoryPaths?.auto?.endsWith('/memory')) && AM.initHealthIssues(st.initFrame).length === 4, JSON.stringify(st.initFrame?.memoryPaths));
   ok('…the completion the composer would build from the attach payload hides the terminal commands too (ONE rule, both paths)',
     !AM.slashCompletionList(st.slashCommands, st.initFrame.terminalSlashCommands).includes('/doctor'));
 
@@ -576,7 +576,7 @@ console.log('— health facts on the attach path (round 4)');
   const issues = AM.initHealthIssues(stH?.initFrame);
   ok('the row label is ONE pure function shared by the card and the chip (initHealthLabel), and it shows the protocol detail VERBATIM',
     typeof AM.initHealthLabel === 'function' && AM.initHealthLabel(issues.find((i) => i.name === 'github')) === 'MCP github — failed'
-    && AM.initHealthLabel(issues.find((i) => i.kind === 'plugin')).startsWith('plugin old-helper — unsatisfied_dependency')
+    && gateOf(AM.initHealthLabel(issues.find((i) => i.kind === 'plugin')).startsWith('plugin old-helper — unsatisfied_dependency'))
     && AM.initHealthLabel(null) === '', issues.map((i) => AM.initHealthLabel(i)));
 
   // (round 4/5 the health chip's wiring pins — MOVED to the fast scripts/test-init-frame-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -757,13 +757,13 @@ if (!CHROME) {
       return JSON.stringify(msgs[0]);
     };
     const r1 = await render(norm(FRAME));
-    ok('the widened frame renders a card (it used to render nothing at all)', r1.rendered, JSON.stringify(r1).slice(0, 300));
+    ok('the widened frame renders a card (it used to render nothing at all)', verdictOf(r1.rendered), JSON.stringify(r1).slice(0, 300));
     ok('the HEALTH STRIP is in the always-visible summary and VISIBLE while the card is still collapsed — a dead MCP server behind a click would not fix the invisibility this exists for',
-      r1.warnInSummary && r1.warnVisible && r1.detailsOpen === false && /4/.test(r1.warnText), JSON.stringify({ warn: r1.warnText, vis: r1.warnVisible, open: r1.detailsOpen }));
-    ok('…its icon is an inline SVG from icons.js (never an emoji)', r1.svgInWarn && !/[\u{1F300}-\u{1FAFF}]/u.test(r1.rawHtml));
-    ok('the summary answers "what is this session" at a glance: skills count + output style', /Session start/.test(r1.summaryText) && /3 skills/.test(r1.summaryText) && /Explanatory/.test(r1.summaryText), r1.summaryText);
+      gateOf(r1.warnInSummary) && gateOf(r1.warnVisible) && r1.detailsOpen === false && verdictOf(/4/.test(r1.warnText)), JSON.stringify({ warn: r1.warnText, vis: r1.warnVisible, open: r1.detailsOpen }));
+    ok('…its icon is an inline SVG from icons.js (never an emoji)', gateOf(r1.svgInWarn) && !/[\u{1F300}-\u{1FAFF}]/u.test(r1.rawHtml));
+    ok('the summary answers "what is this session" at a glance: skills count + output style', gateOf(/Session start/.test(r1.summaryText)) && gateOf(/3 skills/.test(r1.summaryText)) && verdictOf(/Explanatory/.test(r1.summaryText)), r1.summaryText);
     ok('the collapsed body is not taking vertical space, and holds the inventory + the per-issue detail lines', r1.bodyHeight === 0
-      && /github \(failed\)/.test(r1.bodyText) && /dataviz/.test(r1.bodyText) && /commit-commands 1\.2\.0/.test(r1.bodyText) && /old-helper/.test(r1.bodyText) && /2\.1\.257/.test(r1.bodyText), JSON.stringify({ h: r1.bodyHeight, t: r1.bodyText.slice(0, 200) }));
+      && gateOf(/github \(failed\)/.test(r1.bodyText)) && gateOf(/dataviz/.test(r1.bodyText)) && gateOf(/commit-commands 1\.2\.0/.test(r1.bodyText)) && gateOf(/old-helper/.test(r1.bodyText)) && verdictOf(/2\.1\.257/.test(r1.bodyText)), JSON.stringify({ h: r1.bodyHeight, t: r1.bodyText.slice(0, 200) }));
     ok('the card\'s side effect still carries model/mode/commands, plus the terminal subset and the memory dirs the client needs',
       r1.sideEffect.model === 'claude-fable-5' && r1.sideEffect.permMode === 'default'
       && r1.sideEffect.terminalSlashCommands.join(',') === 'doctor,color' && !!r1.sideEffect.memoryPaths.auto, JSON.stringify(r1.sideEffect).slice(0, 300));
@@ -772,7 +772,7 @@ if (!CHROME) {
     const nasty = { ...FRAME, skills: ['<img src=x onerror=window.__pwned=1>'], plugins: [{ name: '"><script>window.__pwned=1</script>', path: '/p', source: 's' }] };
     const r2 = await render(norm(nasty));
     ok('XSS: frame text is escaped, never markup (a plugin/skill name syncs to every client)',
-      (await evaljs('!window.__pwned')) && !/<img src=x/.test(r2.rawHtml) && /&lt;img src=x/.test(r2.rawHtml), r2.rawHtml.slice(0, 200));
+      (gateOf(await evaljs('!window.__pwned'))) && !/<img src=x/.test(r2.rawHtml) && verdictOf(/&lt;img src=x/.test(r2.rawHtml)), r2.rawHtml.slice(0, 200));
 
     // NEGATIVE CONTROLS — the round-1 leg used a hand-made 3-key claude record
     // that no CLI has ever emitted, so it green-lit the claim "an old claude
@@ -803,12 +803,12 @@ if (!CHROME) {
     const preWiden = { type: 'system', subtype: 'init', model: 'claude-opus-4', permissionMode: 'default', cwd: '/w', tools: ['Bash', 'Read', 'Write'], mcp_servers: [{ name: 'a', status: 'connected' }], slash_commands: ['compact'], output_style: 'default', skills: [], plugins: [], claude_code_version: '2.1.238', apiKeySource: 'none', uuid: 'u-238', session_id: 's' };
     const r3 = await render(norm(preWiden));
     ok('a frame with ONLY the schema-REQUIRED keys (2.1.238 keyset, all healthy) renders a card and NO health strip — the gate is "has facts", not "is a new CLI"',
-      r3.rendered === true && !r3.warnText && /3/.test(r3.bodyText) && r3.sideEffect.model === 'claude-opus-4', JSON.stringify({ r: r3.rendered, w: r3.warnText, b: r3.bodyText.slice(0, 120) }));
+      r3.rendered === true && !r3.warnText && gateOf(/3/.test(r3.bodyText)) && r3.sideEffect.model === 'claude-opus-4', JSON.stringify({ r: r3.rendered, w: r3.warnText, b: r3.bodyText.slice(0, 120) }));
 
     const healthy = { ...FRAME, mcp_servers: [{ name: 'a', status: 'connected' }], plugin_errors: undefined, mcp_server_errors: undefined };
     const r4 = await render(norm(healthy));
     ok('a healthy session gets the card WITHOUT a health strip (and no "all good" claim — an absent error key is not a clean load)',
-      r4.rendered && !r4.warnText, JSON.stringify({ w: r4.warnText }));
+      gateOf(r4.rendered) && !r4.warnText, JSON.stringify({ w: r4.warnText }));
 
     // THE REPEAT, end to end: 33 identical spawns → ONE card in the document.
     const repeats = (() => {
@@ -852,7 +852,7 @@ if (!CHROME) {
       return { before, after };
     })()`);
     ok('a Write into a directory only the FRAME names renders as an ordinary Write until the classifier is told, and as a Memory update once it is — which is why loadHistory must learn the dirs before it renders the slab',
-      /Write/.test(rMem.before) && !/Memory update/.test(rMem.before) && /Memory update/.test(rMem.after) && /notes\.md/.test(rMem.after), JSON.stringify(rMem).slice(0, 300));
+      gateOf(/Write/.test(rMem.before)) && !/Memory update/.test(rMem.before) && gateOf(/Memory update/.test(rMem.after)) && verdictOf(/notes\.md/.test(rMem.after)), JSON.stringify(rMem).slice(0, 300));
 
     // ── ROUND 4: the SAME slab that draws no card must still SPEAK ──
     // The consequence measured end to end in a real document: a window whose
@@ -918,8 +918,8 @@ if (!CHROME) {
     ok(`THE FIX, held off the strip: the same window's bar HOLDS the ${hBroken.rows.length} rows for Session Properties' «At its start» (the position-free home — page §4), and draws no strip mark for them`,
       hBroken.rows.length === 4 && !hBroken.onStrip, hBroken);
     ok('…every row VERBATIM (the protocol status is never translated or mapped)',
-      /MCP github — failed/.test(hBroken.rows.join('\n')) && /MCP drive — needs-auth/.test(hBroken.rows.join('\n'))
-      && /MCP notes — url_missing_type/.test(hBroken.rows.join('\n')) && /plugin old-helper — unsatisfied_dependency/.test(hBroken.rows.join('\n')), hBroken.rows);
+      gateOf(/MCP github — failed/.test(hBroken.rows.join('\n'))) && gateOf(/MCP drive — needs-auth/.test(hBroken.rows.join('\n')))
+      && gateOf(/MCP notes — url_missing_type/.test(hBroken.rows.join('\n'))) && verdictOf(/plugin old-helper — unsatisfied_dependency/.test(hBroken.rows.join('\n'))), hBroken.rows);
     const hClean = await chipProbe(cleanFrameJson);
     ok('NEGATIVE CONTROL: an all-connected frame holds NO row (a gauge that cannot fall is not a gauge) — same code path, same slab, only the frame changed',
       hClean.rows.length === 0 && hClean.cards === 0, hClean);
@@ -939,7 +939,7 @@ if (!CHROME) {
       window.__bar.render();
       return { had, still: window.__bar.initHealthRows().length > 0 };
     })()`);
-    ok('a later status carrying NO frame leaves the rows standing (ABSENT ≠ CLEAN — an attach that cannot see the frame must not silently declare the session healthy)', hKeep.had && hKeep.still, hKeep);
+    ok('a later status carrying NO frame leaves the rows standing (ABSENT ≠ CLEAN — an attach that cannot see the frame must not silently declare the session healthy)', gateOf(hKeep.had) && verdictOf(hKeep.still), hKeep);
     // Touch has no hover: the rows are READ in words where a person opens them — Session Properties, told by the bar's event
     const hClick = await evaljs(`(() => {
       const frame = ${frameJson};
@@ -950,7 +950,7 @@ if (!CHROME) {
       return { rows: window.__bar.initHealthRows(), told };
     })()`);
     ok(`the bar TELLS an open Properties window when its rows change ('vs-start-facts', this conversation's id) — touch has no hover, so the rows live where a person reads them in words`,
-      hClick.rows.length === 4 && /MCP github — failed/.test(hClick.rows.join(' | ')) && hClick.told.length === 1 && !!hClick.told[0], hClick);
+      hClick.rows.length === 4 && gateOf(/MCP github — failed/.test(hClick.rows.join(' | '))) && hClick.told.length === 1 && !!hClick.told[0], hClick);
 
     // ── ≤768px (375×667): the standing rule ──
     await setViewport(375, 667);
@@ -1070,7 +1070,7 @@ if (!CHROME) {
     ok(`NEGATIVE CONTROL: forcing the rows back to the cascade's PRE-FIX value (white-space: nowrap) clips them again by ${ddH.clipped && ddH.clipped.worstOverflow}px inside the same CLAMPED overflow:hidden panel (${ddH.clipped && ddH.clipped.width}px wide) — so the assert above measures the cascade, not the text`,
       !!ddH.clipped && ddH.clipped.worstOverflow > 20, ddH.clipped);
     ok(`375×667: the panel stays fully ON SCREEN with the clamp's own 8px gap (left ${ddH.after && ddH.after.left} → right ${ddH.after && ddH.after.right} ≤ ${ddH.vw} − 8) — and it has to, because the page itself does not scroll sideways (documentElement scrollWidth ${ddH.docScrollW} === clientWidth ${ddH.docClientW}), so anything past the edge is UNREACHABLE, not merely ugly. The gap is asserted, not just "fits": with wrapping restored the pre-fix placement lands EXACTLY on the edge, so a leg that only checked \u2264 innerWidth would stay green with the clamp deleted`,
-      !!ddH.after && ddH.after.fits && ddH.after.right <= ddH.vw - 7.5 && ddH.docScrollW === ddH.docClientW, ddH.after);
+      !!ddH.after && gateOf(ddH.after.fits) && ddH.after.right <= ddH.vw - 7.5 && ddH.docScrollW === ddH.docClientW, ddH.after);
     ok(`NEGATIVE CONTROL: restoring the WHOLE pre-fix state (raw anchor offset + the nowrap the cascade computed) puts the same panel at right ${ddH.preFix && ddH.preFix.right} — ${ddH.preFix && Math.round(ddH.preFix.right - ddH.vw)}px off a ${ddH.vw}px screen, unreachable. The two halves are not independent: with wrapping restored but the clamp removed the panel lands exactly ON the edge (right ${ddH.unclamped && ddH.unclamped.right}), which is why the fix is BOTH the cascade and the placement`,
       !!ddH.preFix && ddH.preFix.right > ddH.vw + 5 && !!ddH.unclamped && ddH.unclamped.right >= ddH.vw - 0.5, { preFix: ddH.preFix, unclamped: ddH.unclamped });
     // ── ROUND 5 r2: THE CENSUS. "The clamp is a belt for EVERY status-bar
@@ -1154,12 +1154,12 @@ if (!CHROME) {
       const d = await censusProbe(sel, extra);
       census.push([name, d]);
       ok(`375×667 CENSUS — the ${name} panel opens and lands fully on screen (left ${d.left} → right ${d.right} ≤ ${d.vw} − 8, ${d.width}px wide over ${d.rows} row(s))`,
-        !d.missing && !d.noDropdown && !d.noRow && d.fits && d.docScrollW === d.docClientW, { sel, ...d });
+        !d.missing && !d.noDropdown && !d.noRow && gateOf(d.fits) && d.docScrollW === d.docClientW, { sel, ...d });
       ok(`375×667 CENSUS — …and nothing in the ${name} panel is CLIPPED by the squeeze (worst row ${d.worst ? d.worst.o : 0}px over ${d.rows} row(s), panel content ${d.panelOverflow}px, inside an ${d.overflow} box${d.worst ? `, longest "${d.worst.t}"` : ''}) — the panel has no scroller of its own, so anything wider than it is content nobody can read`,
         !d.missing && !d.noDropdown && (!d.worst || d.worst.o <= 1) && d.panelOverflow <= 1, { sel, worst: d.worst, panelOverflow: d.panelOverflow, width: d.width });
     }
     ok(`the census covered every chip that opens a panel (${census.length}) — the three that state a width INTENT (design / active goal / set-a-goal) are IN it, which is the whole point: they are exactly the ones the old two-entry belt loop could not have caught`,
-      census.length === CENSUS.length && census.every(([, d]) => !d.missing && !d.noDropdown && !d.noRow),
+      census.length === CENSUS.length && verdictOf(census.every(([, d]) => !d.missing && !d.noDropdown && !d.noRow)),
       census.map(([n, d]) => `${n}:${d.right}`).join(' '));
 
     // NEGATIVE CONTROL ① — the DEFECT, replayed whole. The pre-fix path is
@@ -1195,7 +1195,7 @@ if (!CHROME) {
     const dsn = census.find(([n]) => n === 'design')[1];
     const sg = census.find(([n]) => n === 'set-a-goal')[1];   // (lane mask-value-shape) the right-end door is «⚙ 对话设置» now — 产出, the design's, is row 2's FIRST
     ok(`…and the intent is not merely swallowed: on this 375px container the design panel still got its full 300px (min-width ${dsn.styleMinW}, max-width ${dsn.styleMaxW}, on screen), and the set-a-goal panel its 280px (min-width ${sg.styleMinW}) — the clamp spent that intent by moving the panel LEFT of its door (${sg.left}px < ${sg.aLeft}px: «⚙ 对话设置» sits at the right end of the bar), which is what the caller actually asked for`,
-      parseFloat(dsn.styleMinW) === 300 && dsn.width >= 300 - 0.5 && dsn.fits && parseFloat(sg.styleMinW) === 280 && sg.width >= 280 - 0.5 && sg.left < sg.aLeft, { dsn, sg });
+      parseFloat(dsn.styleMinW) === 300 && dsn.width >= 300 - 0.5 && gateOf(dsn.fits) && parseFloat(sg.styleMinW) === 280 && sg.width >= 280 - 0.5 && sg.left < sg.aLeft, { dsn, sg });
 
     // A container with NO measurable width is the one place a clamp can do
     // more harm than the thing it prevents: bounds computed off a zero rect
@@ -1246,4 +1246,4 @@ if (!CHROME) {
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

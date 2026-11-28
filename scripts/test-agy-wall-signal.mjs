@@ -28,7 +28,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 
 const AW = require(path.join(REPO, 'src/harnesses/antigravity-wall.js'));
@@ -52,20 +52,20 @@ const MODEL = { model: 'gemini-4-argon-high' };
 console.log('① the three record shapes → one signal each (or none)');
 {
   const n = AW.signalFromStream(NOTICE, MODEL), e = AW.signalFromStream(PEND, MODEL);
-  ok('the notice → the Gemini group\'s WEEKLY window, 100 %, resetsAt = ts + 90h39m34s (the re-check\'s own reset, to the second), source stream', n && n.kind === 'exhausted' && n.source === 'stream' && n.limitId === G && n.window === '7d' && n.usedPct === 100 && n.resetsAt === RESET && n.measuredAt === T, JSON.stringify(n));
-  ok('…the prompt_end → the same wall (its promptId kept)', e && e.limitId === G && e.window === '7d' && e.resetsAt === RESET && e.promptId === 'p39-3287287', JSON.stringify(e));
-  ok('the usage record, an ordinary turn end, another notice kind, a non-quota error → null', [USAGE, { ...PEND, stopReason: 'end_turn', error: null }, { ...NOTICE, noticeKind: 'agy-system' }, { ...NOTICE, text: 'Antigravity: UNAVAILABLE (code 503): try again. Resets in 5m.' }, { ...PEND, error: { message: 'stream disconnected' } }, null, {}].every((r) => AW.signalFromStream(r, MODEL) === null));
-  ok('the descriptor carries it: antigravity\'s quota.signalFromStream IS the parser (not NULL_QUOTA\'s)', harnesses.get('antigravity').quota.signalFromStream === AW.signalFromStream && harnesses.hasLimitSignal(harnesses.get('antigravity').quota));
+  ok('the notice → the Gemini group\'s WEEKLY window, 100 %, resetsAt = ts + 90h39m34s (the re-check\'s own reset, to the second), source stream', gateOf(n) && n.kind === 'exhausted' && n.source === 'stream' && n.limitId === G && n.window === '7d' && n.usedPct === 100 && n.resetsAt === RESET && n.measuredAt === T, JSON.stringify(n));
+  ok('…the prompt_end → the same wall (its promptId kept)', gateOf(e) && e.limitId === G && e.window === '7d' && e.resetsAt === RESET && e.promptId === 'p39-3287287', JSON.stringify(e));
+  ok('the usage record, an ordinary turn end, another notice kind, a non-quota error → null', verdictOf([USAGE, { ...PEND, stopReason: 'end_turn', error: null }, { ...NOTICE, noticeKind: 'agy-system' }, { ...NOTICE, text: 'Antigravity: UNAVAILABLE (code 503): try again. Resets in 5m.' }, { ...PEND, error: { message: 'stream disconnected' } }, null, {}].every((r) => AW.signalFromStream(r, MODEL) === null)));
+  ok('the descriptor carries it: antigravity\'s quota.signalFromStream IS the parser (not NULL_QUOTA\'s)', harnesses.get('antigravity').quota.signalFromStream === AW.signalFromStream && verdictOf(harnesses.hasLimitSignal(harnesses.get('antigravity').quota)));
 }
 
 console.log('② the duration grammar');
 {
   const pins = { '90h39m34s': 326374, '4h12m': 15120, '59s': 59, '1d2h': 93600, '90h39m34s.': 326374 };
-  ok('pinned spellings parse exactly', Object.entries(pins).every(([k, v]) => AW.parseResetDuration(k) === v), JSON.stringify(Object.fromEntries(Object.keys(pins).map((k) => [k, AW.parseResetDuration(k)]))));
+  ok('pinned spellings parse exactly', verdictOf(Object.entries(pins).every(([k, v]) => AW.parseResetDuration(k) === v)), JSON.stringify(Object.fromEntries(Object.keys(pins).map((k) => [k, AW.parseResetDuration(k)]))));
   const bad = ['', 'soon', '90h39m34', '1.5h', '90 h', 'h', '-5s', '5x', '2h1d', 'tomorrow', '3600'];
-  ok('every other spelling → null (never a guess)', bad.every((s) => AW.parseResetDuration(s) === null), JSON.stringify(bad.map((s) => AW.parseResetDuration(s))));
+  ok('every other spelling → null (never a guess)', verdictOf(bad.every((s) => AW.parseResetDuration(s) === null)), JSON.stringify(bad.map((s) => AW.parseResetDuration(s))));
   const u = AW.signalFromStream({ ...NOTICE, text: 'Antigravity: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in a while.' }, MODEL);
-  ok('a wall whose countdown is unreadable → kind unread (why duration), no limit, no reset', u && u.kind === 'unread' && u.why === 'duration' && !('resetsAt' in u), JSON.stringify(u));
+  ok('a wall whose countdown is unreadable → kind unread (why duration), no limit, no reset', gateOf(u) && u.kind === 'unread' && u.why === 'duration' && !('resetsAt' in u), JSON.stringify(u));
 }
 
 console.log('③ the model group');
@@ -73,9 +73,9 @@ console.log('③ the model group');
   ok('gemini-* ⇒ Gemini Models; claude-* / gpt-* ⇒ Claude and GPT models (the names the on-demand reading uses)', AW.modelGroupOf('gemini-4-argon-high') === G && AW.modelGroupOf('Gemini-3.1-pro') === G && AW.modelGroupOf('claude-sonnet-4-6') === C && AW.modelGroupOf('gpt-oss-120b') === C);
   const fx = JSON.parse(read('scripts/fixtures/antigravity-usage-1.4.3.json'));
   ok('…both names are the capture\'s own group names', JSON.stringify(fx.envelope.command.data.groups.map((g) => g.name)) === JSON.stringify([G, C]));
-  ok('an unknown model / none ⇒ null', [null, '', 'default', 'llama-3', 'models/gemini-x', 'agemini-x'].every((m) => AW.modelGroupOf(m) === null));
+  ok('an unknown model / none ⇒ null', verdictOf([null, '', 'default', 'llama-3', 'models/gemini-x', 'agemini-x'].every((m) => AW.modelGroupOf(m) === null)));
   const u = AW.signalFromStream(NOTICE, { model: 'llama-3' }), v = AW.signalFromStream(NOTICE, {});
-  ok('…and the wall is then NO signal (why model) — never the wrong bucket', u && u.kind === 'unread' && u.why === 'model' && v && v.why === 'model', JSON.stringify([u, v]));
+  ok('…and the wall is then NO signal (why model) — never the wrong bucket', gateOf(u) && u.kind === 'unread' && u.why === 'model' && gateOf(v) && v.why === 'model', JSON.stringify([u, v]));
 }
 
 console.log('④ the window rule: a reset more than 5 h away is the weekly window');
@@ -88,10 +88,10 @@ console.log('④ the window rule: a reset more than 5 h away is the weekly windo
 console.log('⑤ one wall, said twice');
 {
   const n = AW.signalFromStream(NOTICE, MODEL), e = AW.signalFromStream(PEND, MODEL);
-  ok('the notice and its prompt_end (2 ms apart) are ONE wall', SW.sameWall(n, e));
+  ok('the notice and its prompt_end (2 ms apart) are ONE wall', verdictOf(SW.sameWall(n, e)));
   const later = AW.signalFromStream({ ...NOTICE, ts: new Date(T + 3000).toISOString() }, MODEL);
   ok('3 s apart with no shared prompt → two walls; another window → two walls', !SW.sameWall(n, later) && !SW.sameWall(n, { ...e, window: '5h' }));
-  ok('the same prompt id → one wall whatever the gap', SW.sameWall({ ...e, measuredAt: T + 60000 }, e));
+  ok('the same prompt id → one wall whatever the gap', verdictOf(SW.sameWall({ ...e, measuredAt: T + 60000 }, e)));
 }
 
 // ── the world for ⑥ – ⑨: a real accounts store, the real door, the fake agy ──
@@ -149,14 +149,14 @@ console.log('⑥ THE WRITE: the walled window, nothing else');
   const r = road.onRecord(s, NOTICE, { modelOf: modelOf(s) });
   const after = disk(A.id);
   const g7 = win(after, G, '7d');
-  ok('the Gemini weekly window: 100 %, its reset the one agy named, measured at the wall', g7 && g7.usedPct === 100 && g7.resetsAt === RESET && g7.measuredAt === T && g7.state === 'running', JSON.stringify(g7));
+  ok('the Gemini weekly window: 100 %, its reset the one agy named, measured at the wall', gateOf(g7) && g7.usedPct === 100 && g7.resetsAt === RESET && g7.measuredAt === T && g7.state === 'running', JSON.stringify(g7));
   ok('…the Gemini 5h window UNTOUCHED (the merge is per window)', JSON.stringify(win(after, G, '5h')) === JSON.stringify(win(before, G, '5h')));
   ok('…the Claude and GPT limit UNTOUCHED (the merge is per limit)', JSON.stringify(lim(after, C)) === JSON.stringify(lim(before, C)));
   ok('…the Gemini limit says who measured it last (stream) and the file keeps the backend + agy\'s window names', lim(after, G).source === 'stream' && after.backend === 'antigravity' && after.windowNames?.['Gemini Models/7d'] === 'Weekly Limit Remaining' && after.source === 'stream');
   // THE AGE RULE (r2): the row's age label is the file's fetchedAt — a wall never moves it (it stamps only its own window)
   const MA0 = await import(path.join(REPO, 'src/lib/manage-agents.js'));
   ok('…the file\'s fetchedAt (the row\'s age label) stays the STALE reading\'s — the untouched windows keep their age; the walled window carries the wall\'s own measuredAt', after.fetchedAt === before.fetchedAt && after.fetchedAt === EARLIER && MA0.onDemandUsageView({ limits: after.limits, fetchedAt: after.fetchedAt }).fetchedAt === EARLIER, JSON.stringify([before.fetchedAt, after.fetchedAt]));
-  ok('the answer names the room (the other group\'s weekly window read at 0 %)', r && r.wallRoom && r.wallRoom.name === C && r.wallRoom.usedPct === 0, JSON.stringify(r && r.wallRoom));
+  ok('the answer names the room (the other group\'s weekly window read at 0 %)', gateOf(r) && gateOf(r.wallRoom) && r.wallRoom.name === C && r.wallRoom.usedPct === 0, JSON.stringify(r && r.wallRoom));
   const mid = fs.readFileSync(W.cacheFileFor(CACHE, A.id), 'utf8');
   ok('the prompt_end of the same wall writes nothing more', road.onRecord(s, PEND, { modelOf: modelOf(s) }) === null && fs.readFileSync(W.cacheFileFor(CACHE, A.id), 'utf8') === mid);
   // the machine's own login: no account row reads it
@@ -187,7 +187,7 @@ console.log('⑥b provenance: the newest measurement wins, a late wall changes n
   const b = fs.readFileSync(W.cacheFileFor(CACHE, A.id), 'utf8');
   const r = road.onRecord(sess(A), { ...NOTICE, ts: new Date(T + 1000).toISOString() }, { modelOf: () => 'gemini-4-argon-high' });
   const g = win(disk(A.id), G, '7d');
-  ok('a wall stamped BEFORE the stored reading never overwrites it (and says so)', r === null && g.usedPct === 99.22 && g.measuredAt === T + 5000 && logs.some((l) => /a newer reading of Gemini Models 7d stands/.test(l)), JSON.stringify(g));
+  ok('a wall stamped BEFORE the stored reading never overwrites it (and says so)', r === null && g.usedPct === 99.22 && g.measuredAt === T + 5000 && verdictOf(logs.some((l) => /a newer reading of Gemini Models 7d stands/.test(l))), JSON.stringify(g));
   ok('…the file\'s other limits are as they were', JSON.stringify(lim(disk(A.id), C)) === JSON.stringify(lim(JSON.parse(b), C)));
   // a wall whose reset already passed says nothing about now
   clock.t = T + 3600e3; // read an hour after a wall that lifted 59 s after it
@@ -211,14 +211,14 @@ console.log('⑦ the room sentence');
   mm._processNotice({ ...NOTICE }, false);
   const all = [...(mm.messages || mm._messages || mm.getMessages?.() || [])];
   const [c1, c2, c3] = all.slice(-3);
-  ok('the wall notice card keeps its words and carries { name, usedPct } — and nothing for a malformed or absent room', c1 && c1.noticeKind === 'agy-error' && c1.status === 'error' && c1.content[0].text === 'Error: ' + NOTICE.text && JSON.stringify(c1.content[0].wallRoom) === JSON.stringify({ name: C, usedPct: 0 }) && c2 && !('wallRoom' in c2.content[0]) && c3 && !('wallRoom' in c3.content[0]), JSON.stringify(all.slice(-3).map((m) => m && m.content)));
+  ok('the wall notice card keeps its words and carries { name, usedPct } — and nothing for a malformed or absent room', gateOf(c1) && c1.noticeKind === 'agy-error' && c1.status === 'error' && c1.content[0].text === 'Error: ' + NOTICE.text && JSON.stringify(c1.content[0].wallRoom) === JSON.stringify({ name: C, usedPct: 0 }) && gateOf(c2) && !('wallRoom' in c2.content[0]) && gateOf(c3) && !('wallRoom' in c3.content[0]), JSON.stringify(all.slice(-3).map((m) => m && m.content)));
   // the words: en literal = the zh / ja key; both translated
   const KEY = '{name}: weekly limit {pct} % used — switch this conversation’s model to continue';
   const CR = read('src/lib/chat-renderers.js');
-  ok('the client says it through t() with the one key (beside the wall notice and as its own line)', CR.includes(`t('${KEY}'`) && /const room = msg\.content\?\.\[0\]\?\.wallRoom;/.test(CR) && /msg\.noticeKind === 'usage-wall-room' && msg\.content\?\.\[0\]\?\.wallRoom/.test(CR));
+  ok('the client says it through t() with the one key (beside the wall notice and as its own line)', gateOf(CR.includes(`t('${KEY}'`)) && gateOf(/const room = msg\.content\?\.\[0\]\?\.wallRoom;/.test(CR)) && verdictOf(/msg\.noticeKind === 'usage-wall-room' && msg\.content\?\.\[0\]\?\.wallRoom/.test(CR)));
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const zt = zh && zh[KEY], jt = ja && ja[KEY];
-  ok('en / zh / ja keys load, each with both placeholders', typeof zt === 'string' && typeof jt === 'string' && [zt, jt].every((s) => s.includes('{name}') && s.includes('{pct}')), JSON.stringify([zt, jt]));
+  ok('en / zh / ja keys load, each with both placeholders', typeof zt === 'string' && typeof jt === 'string' && verdictOf([zt, jt].every((s) => s.includes('{name}') && s.includes('{pct}'))), JSON.stringify([zt, jt]));
   const rn = SW.roomNotice({ name: C, usedPct: 0 });
   ok('the after-read line is a notice record the journal shape knows (info, usage-wall-room) with the brief\'s English', rn.type === 'acp' && rn.kind === 'notice' && rn.level === 'info' && rn.noticeKind === 'usage-wall-room' && rn.text === "Claude and GPT models: weekly limit 0 % used — switch this conversation's model to continue");
 }
@@ -240,23 +240,23 @@ console.log('⑧ THE ONE-SHOT (owner\'s ruling A): one read per account per wall
   ok('…the notice\'s prompt_end fires nothing more', r2 === null);
   const g7 = win(disk(A.id), G, '7d'), g5 = win(disk(A.id), G, '5h');
   ok('…the reading REPLACES the stream\'s 100 % — every window as agy says (Gemini weekly 99.22 %, 5h 27.51 %, the same reset)', g7.usedPct === 99.22 && g7.resetsAt === RESET && g5.usedPct === 27.51 && lim(disk(A.id), G).source === 'cli-usage', JSON.stringify([g7, g5]));
-  ok('…the room was known at the wall, so the notice carries it and no second line is said', r1.wallRoom && r1.wallRoom.name === C && said.length === 0);
+  ok('…the room was known at the wall, so the notice carries it and no second line is said', gateOf(r1.wallRoom) && r1.wallRoom.name === C && said.length === 0);
   // a retry hitting the SAME wall later (agy counts down: the same reset instant, ±1 s) — nothing
   clock.t = T + 10 * 60e3;
   const retry = road.onRecord(s, { ...NOTICE, ts: new Date(T + 10 * 60e3).toISOString(), text: 'Antigravity: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 90h29m35s.' }, { modelOf: modelOf(s) });
   await (retry && retry.oneShot);
-  ok('a retry on the SAME wall (same reset) ⇒ the wall rewritten, NO second spawn', runs().length === 1 && retry && !retry.oneShot && win(disk(A.id), G, '7d').usedPct === 100, JSON.stringify(runs().length));
+  ok('a retry on the SAME wall (same reset) ⇒ the wall rewritten, NO second spawn', runs().length === 1 && gateOf(retry) && !retry.oneShot && win(disk(A.id), G, '7d').usedPct === 100, JSON.stringify(runs().length));
   // a SECOND window (the Gemini 5h wall) — another wall ⇒ a second spawn (the door's minute has passed)
   clock.t = T + 12 * 60e3;
   const w5 = road.onRecord(s, { ...NOTICE, ts: new Date(clock.t).toISOString(), text: 'Antigravity: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 2h48m.' }, { modelOf: modelOf(s) });
   await (w5 && w5.oneShot);
-  ok('a SECOND window (the 5h wall) ⇒ a second spawn', runs().length === 2 && w5 && !!w5.oneShot, String(runs().length));
+  ok('a SECOND window (the 5h wall) ⇒ a second spawn', runs().length === 2 && gateOf(w5) && !!w5.oneShot, String(runs().length));
   // the room unknown at the wall, known after the read ⇒ ONE line said into the chat
   const s2 = sess(B), said2 = [];
   clock.t = T + 50;
   const rb = road.onRecord(s2, NOTICE, { modelOf: modelOf(s2), say: (x) => said2.push(x) });
   await (rb && rb.oneShot);
-  ok('an account with NO earlier reading: no room at the wall; the one-shot reads it and ONE room line is said (the 0 % group)', rb && rb.wallRoom === null && said2.length === 1 && said2[0].noticeKind === 'usage-wall-room' && said2[0].wallRoom.name === C && said2[0].wallRoom.usedPct === 0 && runs().length === 3, JSON.stringify(said2));
+  ok('an account with NO earlier reading: no room at the wall; the one-shot reads it and ONE room line is said (the 0 % group)', gateOf(rb) && rb.wallRoom === null && said2.length === 1 && said2[0].noticeKind === 'usage-wall-room' && said2[0].wallRoom.name === C && said2[0].wallRoom.usedPct === 0 && runs().length === 3, JSON.stringify(said2));
 }
 
 console.log('⑧b the judge\'s STOP, a refusal, the capability row, no timer, no replay');
@@ -269,10 +269,10 @@ console.log('⑧b the judge\'s STOP, a refusal, the capability row, no timer, no
   const r = road.onRecord(s, NOTICE, { modelOf: modelOf(s) });
   const before = fs.readFileSync(W.cacheFileFor(CACHE, Cc.id), 'utf8');
   await (r && r.oneShot);
-  ok('a turn-shaped answer ⇒ the stream\'s wall stands (nothing more written) and the road says STOP / DISARMED', runs().length === 4 && fs.readFileSync(W.cacheFileFor(CACHE, Cc.id), 'utf8') === before && logs.some((l) => /STOP — the wall re-check is DISARMED until the hub restarts/.test(l)));
+  ok('a turn-shaped answer ⇒ the stream\'s wall stands (nothing more written) and the road says STOP / DISARMED', runs().length === 4 && fs.readFileSync(W.cacheFileFor(CACHE, Cc.id), 'utf8') === before && verdictOf(logs.some((l) => /STOP — the wall re-check is DISARMED until the hub restarts/.test(l))));
   clock.t = T + 30 * 60e3;
   const r2 = road.onRecord(s, { ...NOTICE, ts: new Date(clock.t).toISOString(), text: 'Antigravity: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 3h.' }, { modelOf: modelOf(s) });
-  ok('…a NEW wall on that account still writes, but fires NOTHING (disarmed until the hub restarts)', r2 && r2.oneShot === null && runs().length === 4 && win(disk(Cc.id), G, '5h')?.usedPct === 100);
+  ok('…a NEW wall on that account still writes, but fires NOTHING (disarmed until the hub restarts)', gateOf(r2) && r2.oneShot === null && runs().length === 4 && win(disk(Cc.id), G, '5h')?.usedPct === 100);
   // 'auth-required' ⇒ nothing, one line, no retry; a later wall may try again
   usageMode = 'auth';
   const s4 = sess(D);
@@ -284,7 +284,7 @@ console.log('⑧b the judge\'s STOP, a refusal, the capability row, no timer, no
   ok('agy says not signed in ⇒ nothing written beyond the wall, ONE line naming it', runs().length === 5 && logs.slice(n0).filter((l) => /re-check read nothing \(login-needed/.test(l)).length === 1, logs.slice(n0).join(' | '));
   clock.t = T + 5 * 60e3;
   const a2 = road.onRecord(s4, { ...NOTICE, ts: new Date(clock.t).toISOString(), text: 'Antigravity: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 90h34m36s.' }, { modelOf: modelOf(s4) });
-  ok('…the same wall again ⇒ NO retry', a2 && a2.oneShot === null && runs().length === 5);
+  ok('…the same wall again ⇒ NO retry', gateOf(a2) && a2.oneShot === null && runs().length === 5);
   usageMode = 'file:' + ENV_FILE;
   clock.t = T + 20 * 60e3;
   const a3 = road.onRecord(s4, { ...NOTICE, ts: new Date(clock.t).toISOString(), text: 'Antigravity: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 4h.' }, { modelOf: modelOf(s4) });
@@ -296,10 +296,10 @@ console.log('⑧b the judge\'s STOP, a refusal, the capability row, no timer, no
   const road2 = mkRoad({ harnessOf: (id) => (id === 'fake-wall' ? fake : harnesses.get(id)) });
   clock.t = T + 50;
   const f1 = road2.onRecord({ backend: 'fake-wall', _accountId: fakeAcct.id }, NOTICE, { modelOf: () => 'gemini-4-argon-high' });
-  ok('a harness whose onDemand does NOT declare onWallSignal: the wall written, ZERO spawns (the capability row, never a name)', f1 && f1.oneShot === null && win(disk(fakeAcct.id), G, '7d')?.usedPct === 100 && runs().length === 6);
+  ok('a harness whose onDemand does NOT declare onWallSignal: the wall written, ZERO spawns (the capability row, never a name)', gateOf(f1) && f1.oneShot === null && win(disk(fakeAcct.id), G, '7d')?.usedPct === 100 && runs().length === 6);
   // claude / codex accounts: their signal never reads an agy-shaped record; the door refuses a wall read for them
   const claudeRoad = mkRoad();
-  ok('a claude or codex session fed the same records: no signal, nothing written, nothing spawned', ['claude', 'codex'].every((be) => claudeRoad.onRecord({ backend: be, _accountId: 'acct-' + be }, NOTICE, { modelOf: () => 'gemini-4-argon-high' }) === null && claudeRoad.onRecord({ backend: be, _accountId: 'acct-' + be }, PEND, {}) === null && disk('acct-' + be) === null) && runs().length === 6);
+  ok('a claude or codex session fed the same records: no signal, nothing written, nothing spawned', gateOf(['claude', 'codex'].every((be) => claudeRoad.onRecord({ backend: be, _accountId: 'acct-' + be }, NOTICE, { modelOf: () => 'gemini-4-argon-high' }) === null && claudeRoad.onRecord({ backend: be, _accountId: 'acct-' + be }, PEND, {}) === null && disk('acct-' + be) === null)) && runs().length === 6);
   const doorNo = mkDoor((id) => (id === 'antigravity' ? fake : harnesses.get(id)));
   clock.t = T + 3 * 3600e3;
   const dn = await doorNo.read(A.id, { wall: true });
@@ -312,14 +312,14 @@ console.log('⑧b the judge\'s STOP, a refusal, the capability row, no timer, no
   const answers = [];
   for (let h = 0; h < 24; h++) { clock.t = T + 4 * 3600e3 + h * 3600e3; answers.push(road3.onRecord(s5, { ...USAGE, ts: new Date(clock.t).toISOString() }, {}), road3.onRecord(s5, { ...PEND, ts: new Date(clock.t).toISOString(), stopReason: 'end_turn', error: null }, {})); }
   await new Promise((r) => setImmediate(r));
-  ok('a fake clock advanced 24 h with no wall ⇒ ZERO spawns (48 records, no answer, no read); the road and the door hold no interval / no timer of their own', answers.every((x) => x === null) && runs().length === 6 && !/setInterval|setTimeout/.test(read('src/server/stream-wall.js')) && !/setInterval/.test(read('src/server/cli-usage-door.js')));
+  ok('a fake clock advanced 24 h with no wall ⇒ ZERO spawns (48 records, no answer, no read); the road and the door hold no interval / no timer of their own', gateOf(answers.every((x) => x === null)) && runs().length === 6 && !/setInterval|setTimeout/.test(read('src/server/stream-wall.js')) && !/setInterval/.test(read('src/server/cli-usage-door.js')));
   // a REPLAYED wall (stamped long ago, its reset still ahead): written, never a trigger
   fs.rmSync(W.cacheFileFor(CACHE, B.id), { force: true });
   const s6 = sess(B);
   const road4 = mkRoad();
   clock.t = T + 6 * 60e3;
   const old = road4.onRecord(s6, NOTICE, { modelOf: modelOf(s6) });
-  ok('a wall record stamped longer ago than the live bound (a replay) ⇒ written, NO spawn', old && old.oneShot === null && win(disk(B.id), G, '7d')?.usedPct === 100 && runs().length === 6, JSON.stringify(old));
+  ok('a wall record stamped longer ago than the live bound (a replay) ⇒ written, NO spawn', gateOf(old) && old.oneShot === null && win(disk(B.id), G, '7d')?.usedPct === 100 && runs().length === 6, JSON.stringify(old));
 }
 
 console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine literal');
@@ -333,7 +333,7 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   const KEYS = [...new Set((srv.slice(j + 9, k).replace(/\/\/.*$/gm, '').match(/[A-Za-z_$][\w$]*/g) || []))];
   const LADDER = (s) => (s._modelLocked && s._lockedModel) || s._pickedModel || s._spawnModel || null;
   const engineOf = (keys) => Object.fromEntries(keys.map((n) => [n, n === 'sessionModelFor' ? LADDER : () => { }]));
-  ok('server.js\'s session-stdout literal parsed (' + KEYS.length + ' keys) and it CARRIES sessionModelFor', KEYS.length > 20 && KEYS.includes('sessionModelFor') && KEYS.includes('noteTurnEnd'), KEYS.join(','));
+  ok('server.js\'s session-stdout literal parsed (' + KEYS.length + ' keys) and it CARRIES sessionModelFor', KEYS.length > 20 && gateOf(KEYS.includes('sessionModelFor')) && verdictOf(KEYS.includes('noteTurnEnd')), KEYS.join(','));
   const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
   const AE = require(path.join(REPO, 'src/server/stdout/acp-events.js'));
   const drive = (s, recs, keys = KEYS) => {
@@ -351,9 +351,9 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   fs.rmSync(W.cacheFileFor(CACHE, A.id), { force: true }); seed(A.id, EARLIER, BEFORE);
   const fed = drive(fresh(A, { _spawnModel: 'gemini-4-argon-high' }), [NOTICE, PEND, USAGE]);
   const g7 = win(disk(A.id), G, '7d');
-  ok('THE FIRST WALL of a session (notice → prompt_end → usage: no usage record yet) is WRITTEN — the session\'s own model names the group', g7 && g7.usedPct === 100 && g7.resetsAt === RESET, JSON.stringify(g7));
+  ok('THE FIRST WALL of a session (notice → prompt_end → usage: no usage record yet) is WRITTEN — the session\'s own model names the group', gateOf(g7) && g7.usedPct === 100 && g7.resetsAt === RESET, JSON.stringify(g7));
   const n = fed.find((m) => m.kind === 'notice');
-  ok('…the three records all reach the normalizer; the notice keeps its words and carries the room facts', fed.length === 3 && n && n.text === NOTICE.text && n.wallRoom && n.wallRoom.name === C && n.wallRoom.usedPct === 0, JSON.stringify(fed.map((m) => m.kind)));
+  ok('…the three records all reach the normalizer; the notice keeps its words and carries the room facts', fed.length === 3 && gateOf(n) && n.text === NOTICE.text && gateOf(n.wallRoom) && n.wallRoom.name === C && n.wallRoom.usedPct === 0, JSON.stringify(fed.map((m) => m.kind)));
   ok('…EXACTLY ONE room line through the real normalizer (notice first)', rooms(fed).length === 1);
   // the same, without the engine key at all: the session record itself is read (a missing key never drops a wall)
   fs.rmSync(W.cacheFileFor(CACHE, B.id), { force: true });
@@ -363,7 +363,7 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   fs.rmSync(W.cacheFileFor(CACHE, Cc.id), { force: true }); seed(Cc.id, EARLIER, BEFORE);
   const fed2 = drive(fresh(Cc, { _spawnModel: 'gemini-4-argon-high' }), [PEND, NOTICE, USAGE]);
   const pe = fed2.find((m) => m.kind === 'prompt_end');
-  ok('PROMPT_END FIRST: the prompt_end carries the room, the later notice none — EXACTLY ONE room line through the real normalizer', pe && pe.wallRoom && pe.wallRoom.name === C && !fed2.find((m) => m.kind === 'notice').wallRoom && rooms(fed2).length === 1, JSON.stringify(rooms(fed2).map((m) => m.content[0])));
+  ok('PROMPT_END FIRST: the prompt_end carries the room, the later notice none — EXACTLY ONE room line through the real normalizer', gateOf(pe) && gateOf(pe.wallRoom) && pe.wallRoom.name === C && !fed2.find((m) => m.kind === 'notice').wallRoom && rooms(fed2).length === 1, JSON.stringify(rooms(fed2).map((m) => m.content[0])));
   // a MODEL SWITCH before the wall: the NEW model\'s group (never the group the last usage record named)
   fs.rmSync(W.cacheFileFor(CACHE, D.id), { force: true });
   const s4 = fresh(D, { _spawnModel: 'claude-sonnet-4-6' });
@@ -395,7 +395,7 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   sidecars['w-old-wrapper'] = { agy: { model: 'gemini-4-argon-high' } };   // the model the old wrapper's agy init named
   drive(s6, [NOTICE, PEND]);
   ok('r3: an OLDER wrapper (no servedModel) — the wrapper\'s sidecar agy.model is the witness, ahead of the session\'s pick (Gemini written)', win(disk(Cc.id), G, '7d')?.usedPct === 100 && !lim(disk(Cc.id), C));
-  ok('r3: the hub\'s sidecar dir is server.js\'s BUFFERS_DIR (data/session-buffers)', /const BUFFERS_DIR = path\.join\(__dirname, 'data', 'session-buffers'\);/.test(read('server.js')));
+  ok('r3: the hub\'s sidecar dir is server.js\'s BUFFERS_DIR (data/session-buffers)', verdictOf(/const BUFFERS_DIR = path\.join\(__dirname, 'data', 'session-buffers'\);/.test(read('server.js'))));
   // r4: THE SIDECAR IS READ FOR A WALL RECORD ONLY, ONCE PER WALL — and bounded, local-only
   let reads = 0;
   SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l), wrapperMetaOf: (x) => { reads++; return sidecars[x._webuiId] || null; } });
@@ -412,15 +412,15 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
     const small = SW.readWrapperSidecar(dirS, { _webuiId: 'w-small' }, { log: (l) => said.push(l) });
     const big = SW.readWrapperSidecar(dirS, { _webuiId: 'w-big' }, { log: (l) => said.push(l) });
     const out = SW.readWrapperSidecar(dirS, { _webuiId: '../sidecars-escape' }, { log: (l) => said.push(l) });
-    ok('r4: the reader — a small sidecar parsed; a 1 MB one SKIPPED by name (over the 256 KB cap); an id that resolves outside the dir refused', small?.agy?.model === 'gemini-4-argon-high' && big === null && out === null && said.some((l) => /w-big\.json is \d+ bytes — over the 262144-byte cap, not read/.test(l)) && said.some((l) => /resolves outside .* — not read/.test(l)), JSON.stringify(said));
-    ok('r4: the hub configures THAT reader (bounded, local-only) over data/session-buffers', /wrapperMetaOf: \(s\) => require\('\.\/stream-wall\.js'\)\.readWrapperSidecar\(path\.join\(rootDir, 'data', 'session-buffers'\), s\)/.test(read('src/server/account-usage-routes.js')) && !/readFileSync\(path\.join\(rootDir, 'data', 'session-buffers'/.test(read('src/server/account-usage-routes.js')));
+    ok('r4: the reader — a small sidecar parsed; a 1 MB one SKIPPED by name (over the 256 KB cap); an id that resolves outside the dir refused', small?.agy?.model === 'gemini-4-argon-high' && big === null && out === null && gateOf(said.some((l) => /w-big\.json is \d+ bytes — over the 262144-byte cap, not read/.test(l))) && verdictOf(said.some((l) => /resolves outside .* — not read/.test(l))), JSON.stringify(said));
+    ok('r4: the hub configures THAT reader (bounded, local-only) over data/session-buffers', gateOf(/wrapperMetaOf: \(s\) => require\('\.\/stream-wall\.js'\)\.readWrapperSidecar\(path\.join\(rootDir, 'data', 'session-buffers'\), s\)/.test(read('src/server/account-usage-routes.js'))) && !/readFileSync\(path\.join\(rootDir, 'data', 'session-buffers'/.test(read('src/server/account-usage-routes.js')));
   }
   SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l) });
   // no model fact anywhere ⇒ still no signal, said
   const n0 = logs.length;
   const fake = { ...A, id: 'agy-no-model-acct' };
   drive(fresh(fake), [NOTICE, PEND]);
-  ok('a session that names NO model anywhere (no lock, pick, spawn or usage record) ⇒ no signal, the line — never a guess', disk(fake.id) === null && logs.slice(n0).some((l) => /not read \(model\)/.test(l)), logs.slice(n0).join(' | '));
+  ok('a session that names NO model anywhere (no lock, pick, spawn or usage record) ⇒ no signal, the line — never a guess', disk(fake.id) === null && verdictOf(logs.slice(n0).some((l) => /not read \(model\)/.test(l))), logs.slice(n0).join(' | '));
 }
 
 console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026-11-16, looking at the quota row: «fable是antigravity吗？»)');
@@ -434,11 +434,11 @@ console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026
   // law 1: Claude's row says Claude, and only Claude
   ok('law 1: Claude\'s row is titled for Claude, its four choices are Claude\'s (⟳ · the popup · the CLI · off — «Off (never contact Anthropic)» kept as it was)',
     C.label === 'Claude usage refresh (model-scoped limits like Fable)' && JSON.stringify(C.options.map((o) => o.label)) === JSON.stringify(['Manual (⟳ button)', 'Auto on popup open (when >30 min stale)', 'Auto via the CLI (burn-aware background refresh)', 'Off (never contact Anthropic)']) && C.default === 'manual', JSON.stringify(C.options));
-  ok('…and NO word of Antigravity in it — title, choices or description — in English, Chinese or Japanese', inAll(C, /Antigravity/).every((x) => !x) && words(C).every((w) => !!zh[w] && !!ja[w]), JSON.stringify(inAll(C, /Antigravity/)));
+  ok('…and NO word of Antigravity in it — title, choices or description — in English, Chinese or Japanese', gateOf(inAll(C, /Antigravity/).every((x) => !x)) && verdictOf(words(C).every((w) => !!zh[w] && !!ja[w])), JSON.stringify(inAll(C, /Antigravity/)));
   // law 2: Antigravity's two reads have their own row, where Antigravity's settings are
-  ok('law 2: Antigravity\'s row sits in its own section (Antigravity CLI), on / off, on by default', A && A.category === S.SETTINGS_SCHEMA['antigravity.defaultModel'].category && A.default === 'on' && JSON.stringify(A.options.map((o) => [o.value, o.label])) === JSON.stringify([['on', 'Automatically'], ['off', 'Only when I press Re-check']]), JSON.stringify(A && { cat: A.category, opts: A.options }));
+  ok('law 2: Antigravity\'s row sits in its own section (Antigravity CLI), on / off, on by default', gateOf(A) && A.category === S.SETTINGS_SCHEMA['antigravity.defaultModel'].category && A.default === 'on' && JSON.stringify(A.options.map((o) => [o.value, o.label])) === JSON.stringify([['on', 'Automatically'], ['off', 'Only when I press Re-check']]), JSON.stringify(A && { cat: A.category, opts: A.options }));
   ok('…its description says when each read fires and its bounds — a usage wall; a stretch of work + 5 minutes; once per account per 30 minutes; never during a turn; never idle — and that Re-check reads either way, the row deciding only the reads that happen by themselves (U1), in three languages',
-    /usage wall/.test(A.description) && /a turn ends and 5 minutes pass with no new turn on the account/.test(A.description) && /at most once per account per 30 minutes/.test(A.description) && /never during a turn/.test(A.description) && /never for an idle account/.test(A.description) && /Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves\./.test(A.description) && words(A).every((w) => !!zh[w] && !!ja[w]), A.description);
+    gateOf(/usage wall/.test(A.description)) && gateOf(/a turn ends and 5 minutes pass with no new turn on the account/.test(A.description)) && gateOf(/at most once per account per 30 minutes/.test(A.description)) && gateOf(/never during a turn/.test(A.description)) && gateOf(/never for an idle account/.test(A.description)) && gateOf(/Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves\./.test(A.description)) && verdictOf(words(A).every((w) => !!zh[w] && !!ja[w])), A.description);
   // U3 (主开发's bounded check, 2026-11-16): A ROW PROMISES ONLY WHAT THE CODE DOES — the thirty minutes bound only the read after a
   // stretch of work (after-turn-read.js PACE_MS); the wall read is once per wall (stream-wall.js's ledger). The clause sits on the
   // read it bounds, naming it («that read» / «这一次» / «後者は»), after the stretch-of-work read; the wall's clause says once per wall
@@ -450,14 +450,14 @@ console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026
   const bounds = (d, w) => { d = String(d); const a = d.indexOf(w.wall), b = d.indexOf(w.work), c = d.indexOf(w.bound), e = d.indexOf(w.each); return a >= 0 && e >= 0 && b > a && c > b && !d.slice(0, b).includes('30'); };
   const descOf = { en: A.description, zh: zh[A.description], ja: ja[A.description] };
   ok('U3: the thirty minutes bound only the read after a stretch of work — the clause comes after that read and names it; the wall read is once each time a wall is hit; no «30» before the stretch of work — in English, Chinese and Japanese',
-    ['en', 'zh', 'ja'].every((l) => bounds(descOf[l], U3[l])), JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(descOf[l], U3[l])]))));
+    verdictOf(['en', 'zh', 'ja'].every((l) => bounds(descOf[l], U3[l]))), JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(descOf[l], U3[l])]))));
   // its RED: the words this round replaced (the clause after both reads, bounding the wall read too), as they shipped in the row
   const BEFORE_U3 = {
     en: "Automatically: an account's usage is read once when a conversation hits a usage wall, and once when its stretch of work ends and 5 minutes pass with no new turn — at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself; Re-check in the account's menu still reads it.",
     zh: '自动：对话撞到用量上限时读一次；一段工作结束且 5 分钟内没有新一轮时再读一次——每账号每 30 分钟最多一次，轮次进行中不读，闲置账号不读。仅在我按「重新检查」时：不会自己读；账号菜单里的「重新检查」仍然可以读。',
     ja: '自動：会話が使用量の上限に達した時に 1 回、作業の区切りが来て 5 分間新しいターンがない時に 1 回読み取ります——アカウントごとに 30 分に最大 1 回、ターン中は読まず、アイドルのアカウントも読みません。「再チェック」を押した時だけ：自動では読みません。アカウントのメニューの「再チェック」ではいつでも読めます。',
   };
-  ok('CONTROL (U3): the words before this round fail that leg in every language — the leg goes RED on a clause that bounds both reads', ['en', 'zh', 'ja'].every((l) => !bounds(BEFORE_U3[l], U3[l])) && !zh[BEFORE_U3.en] && !ja[BEFORE_U3.en], JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(BEFORE_U3[l], U3[l])]))));
+  ok('CONTROL (U3): the words before this round fail that leg in every language — the leg goes RED on a clause that bounds both reads', gateOf(['en', 'zh', 'ja'].every((l) => !bounds(BEFORE_U3[l], U3[l]))) && !zh[BEFORE_U3.en] && !ja[BEFORE_U3.en], JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(BEFORE_U3[l], U3[l])]))));
   // 主开发 2026-11-17 03:25Z: THE NOTE UNDER THE ROW IS IN THE PERSON'S LANGUAGE — the apply note (advanced mode, and the head's
   // tooltip) said engineers' English on a Chinese screen («the CLI usage door — the wall read and the after-turn read»). It now says
   // WHO and WHEN in the description's own words, through the dictionary; a module's name never reaches the screen
@@ -470,55 +470,55 @@ console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026
   };
   const note1 = noteOf(A.apply, applyHead);
   ok('the note under Antigravity\'s row (advanced mode, and the head\'s tooltip) says who reads and when in the description\'s own words — «Read by VibeSpace · when a conversation hits a usage wall, and after a stretch of work» — and on a Chinese or Japanese screen it is that language alone (no English word but VibeSpace), no module\'s name',
-    note1.ok && !!zh[A.apply.how] && !!ja[A.apply.how] && /head\.title = t\(schema\.apply\.how\)/.test(read('src/lib/settings-ui.js')), JSON.stringify(note1));
+    gateOf(note1.ok) && !!zh[A.apply.how] && !!ja[A.apply.how] && verdictOf(/head\.title = t\(schema\.apply\.how\)/.test(read('src/lib/settings-ui.js'))), JSON.stringify(note1));
   // its REDs: the words before this fix; the chip that draws the note without the dictionary (an in-memory copy of cli-config-chips.js)
   const note2 = noteOf({ ...A.apply, how: 'the CLI usage door — the wall read and the after-turn read' }, applyHead);
   const CHIPS = read('src/lib/cli-config-chips.js'), DICT_LINE = "const how = apply.how ? t(apply.how) : '';";
   const headNoDict = (await import('data:text/javascript;base64,' + Buffer.from(CHIPS.split(DICT_LINE).join("const how = apply.how || '';")).toString('base64'))).applyHead;
   const note3 = noteOf(A.apply, headNoDict);
   ok('RED (the note): the words before this fix fail that leg (a module\'s name; English on the zh and ja screens), and so does the chip that draws the note without the dictionary',
-    CHIPS.includes(DICT_LINE) && !note2.ok && !note3.ok && /when a conversation hits a usage wall/.test(note3.zh), JSON.stringify({ before: note2, noDict: note3.zh }));
+    gateOf(CHIPS.includes(DICT_LINE)) && !note2.ok && !note3.ok && verdictOf(/when a conversation hits a usage wall/.test(note3.zh)), JSON.stringify({ before: note2, noDict: note3.zh }));
   // law 6: the words — what each choice DOES, one sentence each, a few lines
   ok('law 6: each description opens a sentence per choice with the choice\'s own words, and stays a few lines (≤ 560 characters)',
-    ['Manual:', 'Auto on popup open:', 'Auto via the CLI:', 'Off:'].every((c) => C.description.includes(c)) && ['Automatically:', 'Only when I press Re-check:'].every((c) => A.description.includes(c)) && C.description.length <= 560 && A.description.length <= 560, JSON.stringify([C.description.length, A.description.length]));
+    gateOf(['Manual:', 'Auto on popup open:', 'Auto via the CLI:', 'Off:'].every((c) => C.description.includes(c))) && gateOf(['Automatically:', 'Only when I press Re-check:'].every((c) => A.description.includes(c))) && C.description.length <= 560 && A.description.length <= 560, JSON.stringify([C.description.length, A.description.length]));
   // THE WORDS NAME THE CONTROL THE PERSON WILL FIND (主开发 2026-11-16 09:46Z): an Antigravity account's row draws no ⟳ — its own
   // read is its menu's «Re-check» (manage-agents' home rows: doRecheck, the sign-in check then the usage read through the door).
   // The row says that word, and in each language it is the menu item's OWN dictionary word, so the two cannot drift apart
   const MA_SRC = read('src/lib/manage-agents.js');
   const offW = A.options.find((o) => o.value === 'off').label;
   ok('…the Antigravity row names the control the person will find: «Re-check» in the account\'s menu — the menu item\'s own word in English, Chinese and Japanese (its off choice and its description)',
-    MA_SRC.includes("{ label: t('Re-check'), action: doRecheck },") && !/⟳/.test(offW) && !/⟳/.test(A.description)
-      && [[(x) => x, 'Re-check'], [(x) => zh[x], zh['Re-check']], [(x) => ja[x], ja['Re-check']]].every(([tr, word]) => !!word && String(tr(offW)).includes(word) && String(tr(A.description)).includes(word)),
+    gateOf(MA_SRC.includes("{ label: t('Re-check'), action: doRecheck },")) && !/⟳/.test(offW) && !/⟳/.test(A.description)
+      && verdictOf([[(x) => x, 'Re-check'], [(x) => zh[x], zh['Re-check']], [(x) => ja[x], ja['Re-check']]].every(([tr, word]) => !!word && String(tr(offW)).includes(word) && String(tr(A.description)).includes(word))),
     JSON.stringify({ zh: [zh['Re-check'], zh[offW]], ja: [ja['Re-check'], ja[offW]] }));
   // …and Claude's Off sentence says what is true in BOTH places: the popup hides its ⟳; the Agents panel keeps «Refresh all», which
   // answers Off with a toast naming the row by its title
   ok('…Claude\'s «Off» sentence is true in both places: the popup hides its ⟳ under Off, and «Refresh all» stays and says it is off (its toast names «Claude usage refresh») — the button\'s own word in each language',
-    C.description.includes('Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.') && /const refreshBtn = odMode === 'off' \? '' :/.test(read('src/lib/usage-meter.js'))
-      && MA_SRC.includes("showToast(t('Claude usage refresh is off'), { type: 'error', action: settingsDoor(this, 'accounts.onDemandQuotaRefresh', { label: t('Turn on…') }) || undefined });") && MA_SRC.includes("refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;")
-      && String(zh[C.description]).includes(zh['Refresh all']) && String(ja[C.description]).includes(ja['Refresh all']) && !!zh['Claude usage refresh is off'] && !!ja['Claude usage refresh is off'],
+    gateOf(C.description.includes('Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.')) && gateOf(/const refreshBtn = odMode === 'off' \? '' :/.test(read('src/lib/usage-meter.js')))
+      && gateOf(MA_SRC.includes("showToast(t('Claude usage refresh is off'), { type: 'error', action: settingsDoor(this, 'accounts.onDemandQuotaRefresh', { label: t('Turn on…') }) || undefined });")) && gateOf(MA_SRC.includes("refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;"))
+      && gateOf(String(zh[C.description]).includes(zh['Refresh all'])) && gateOf(String(ja[C.description]).includes(ja['Refresh all'])) && !!zh['Claude usage refresh is off'] && !!ja['Claude usage refresh is off'],
     JSON.stringify([zh['Refresh all'], ja['Refresh all']]));
   ok('…and no word anywhere names the old title «On-demand quota refresh» (the explainer, the toast, the pool\'s notice name «Claude usage refresh»)',
-    ['src/lib/usage-meter.js', 'src/lib/manage-agents.js', 'src/server/usage-pool-engine.js'].every((f) => !/On-demand quota refresh/.test(read(f).replace(/\/\/[^\n]*/g, ''))) && Object.keys(zh).every((k) => !/On-demand quota refresh/.test(k)));
+    gateOf(['src/lib/usage-meter.js', 'src/lib/manage-agents.js', 'src/server/usage-pool-engine.js'].every((f) => !/On-demand quota refresh/.test(read(f).replace(/\/\/[^\n]*/g, '')))) && verdictOf(Object.keys(zh).every((k) => !/On-demand quota refresh/.test(k))));
   // the select's width: every option of both rows no wider than the release's manual option (which fit the 390 phone)
   const wu = (t) => [...String(t)].reduce((n, c) => n + (/[　-鿿＀-￯]/.test(c) ? 2 : 1), 0);   // width units: a full-width character counts two
   const REL = { en: wu('Manual (⟳ button) — plus ONE automatic read after a usage wall'), zh: wu('手动（⟳ 按钮）— 另外在撞到用量上限后自动读一次'), ja: wu('手動（⟳ ボタン）— 使用量の上限に達した後に 1 回だけ自動で読み取り') };
   const opts = [...C.options, ...A.options].map((o) => o.label);
   const widest = { en: Math.max(...opts.map(wu)), zh: Math.max(...opts.map((o) => wu(zh[o]))), ja: Math.max(...opts.map((o) => wu(ja[o]))) };
-  ok('…every choice of both rows is no wider than the release\'s manual option in English, Chinese and Japanese (a select is as wide as its longest option)', ['en', 'zh', 'ja'].every((l) => widest[l] <= REL[l]), JSON.stringify({ widest, release: REL }));
+  ok('…every choice of both rows is no wider than the release\'s manual option in English, Chinese and Japanese (a select is as wide as its longest option)', verdictOf(['en', 'zh', 'ja'].every((l) => widest[l] <= REL[l])), JSON.stringify({ widest, release: REL }));
   const LONG = { en: wu('Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work'), zh: wu('手动（⟳ 按钮）— 另外 Antigravity 自己读：撞到用量上限后、一段工作结束后'), ja: wu('手動（⟳ ボタン）— さらに Antigravity は自動で：上限到達後、作業の区切り後') };
-  ok('CONTROL: the words of the hosted heavy run\'s red (the option that overflowed the 390 phone) are wider than the release\'s in every language — the leg above goes RED on them', ['en', 'zh', 'ja'].every((l) => LONG[l] > REL[l]), JSON.stringify({ long: LONG, release: REL }));
+  ok('CONTROL: the words of the hosted heavy run\'s red (the option that overflowed the 390 phone) are wider than the release\'s in every language — the leg above goes RED on them', verdictOf(['en', 'zh', 'ja'].every((l) => LONG[l] > REL[l])), JSON.stringify({ long: LONG, release: REL }));
   ok('…the door asks the row of the vendor whose account it is (test-agy-after-turn-read ⑭ drives it): Claude\'s Off still refuses there for an account on Claude\'s row, and Antigravity\'s automatic reads are refused under their own row\'s Off',
-    /if \(mode === 'off'\) return \{ ok: false, status: 403, code: 'refresh-off'/.test(read('src/server/cli-usage-door.js')) && /code: 'auto-reads-off'/.test(read('src/server/cli-usage-door.js')) && /code: 'no-auto-reads-row'/.test(read('src/server/cli-usage-door.js')) && !src.includes('plus Antigravity’s own reads'));
+    gateOf(/if \(mode === 'off'\) return \{ ok: false, status: 403, code: 'refresh-off'/.test(read('src/server/cli-usage-door.js'))) && gateOf(/code: 'auto-reads-off'/.test(read('src/server/cli-usage-door.js'))) && gateOf(/code: 'no-auto-reads-row'/.test(read('src/server/cli-usage-door.js'))) && !src.includes('plus Antigravity’s own reads'));
 }
 
 console.log('⑩ the gauge law on the account row');
 {
   const MA = await import(path.join(REPO, 'src/lib/manage-agents.js'));
   const v = MA.onDemandUsageView({ limits: [{ limitId: G, name: G, windows: [{ kind: '7d', minutes: 10080, usedPct: null, resetsAt: RESET, measuredAt: T }, { kind: '5h', minutes: 300, usedPct: 27.51, resetsAt: sec(T) + 3600, measuredAt: T }] }] });
-  ok('a window that states no spend draws NO donut (Number(null) is 0 — it drew a 0 % one); a stated one still draws', v && v.windows.length === 1 && v.windows[0].kind === 'fiveHour', JSON.stringify(v));
+  ok('a window that states no spend draws NO donut (Number(null) is 0 — it drew a 0 % one); a stated one still draws', gateOf(v) && v.windows.length === 1 && v.windows[0].kind === 'fiveHour', JSON.stringify(v));
   const w = MA.onDemandUsageView({ limits: [{ limitId: G, name: G, windows: [{ kind: '7d', minutes: 10080, usedPct: 100, resetsAt: RESET, measuredAt: T }] }] });
-  ok('the wall as the ring draws it: 100 % with its reset', w && w.windows[0].utilization === 1 && w.windows[0].resetsAt === RESET);
+  ok('the wall as the ring draws it: 100 % with its reset', gateOf(w) && w.windows[0].utilization === 1 && w.windows[0].resetsAt === RESET);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -15,7 +15,7 @@ const require = createRequire(path.join(REPO, 'package.json'));
 const HB = require(path.join(REPO, 'src/server/ws-heartbeat.js'));
 const N = Number(process.env.VS_BOUND_N || 10000);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const ALLOW = 4194304;
 const MiB = 1048576;
 function sim(HB, { T, S, wakeFrac = 1 / 3, dt = 0.05, maxS = 1800, seed = 0, P, R, forcePong = false, kernelFull = true, logs = null, events = null, onTick = null }) {
@@ -142,11 +142,11 @@ console.log('THE LIMIT, declared: a deep (4.4 MB) send buffer at 30 s rounds, 8 
   const slow = v(160, 0.5);
   ok('≤ 160 kbit/s is cut on its second round: the kernel takes its bursts further apart than the grace (as on 8b3fdb6ab)', slow.cutS === 60 && !slow.outrun, slow);
   const mid = [200, 300, 427, 560].map((k) => v(k, 0.3));
-  ok('200–560 kbit/s is kept through its drain (a cut, if any, comes after the queue is empty: the kernel\'s 4 MB ahead of the ping)', mid.every((x) => !x.outrun && x.drained != null && (x.cutS == null || x.cutS > x.drained)), mid);
+  ok('200–560 kbit/s is kept through its drain (a cut, if any, comes after the queue is empty: the kernel\'s 4 MB ahead of the ping)', verdictOf(mid.every((x) => !x.outrun && x.drained != null && (x.cutS == null || x.cutS > x.drained))), mid);
   const fast = [650, 1000, 3200].map((k) => v(k, 0.3));
-  ok('from 650 kbit/s kept', fast.every((x) => x.cutS == null), fast);
+  ok('from 650 kbit/s kept', verdictOf(fast.every((x) => x.cutS == null)), fast);
   const shallow = [160, 300, 560].map((k) => v(k, 0.3, 1048576));
-  ok('a 1 MiB send buffer: kept at every rate tried from 160 kbit/s', shallow.every((x) => x.cutS == null), shallow);
+  ok('a 1 MiB send buffer: kept at every rate tried from 160 kbit/s', verdictOf(shallow.every((x) => x.cutS == null)), shallow);
 }
 console.log(fail ? `\nFAILED: ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

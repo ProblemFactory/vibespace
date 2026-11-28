@@ -108,7 +108,7 @@ import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const run = (bin, args, env = process.env, timeout = 8000) => new Promise((res) => execFile(bin, args, { env, timeout, encoding: 'utf8' }, (err, stdout, stderr) => res({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
@@ -141,12 +141,12 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { clean
 console.log('§1 PURE verdicts');
 {
   let threw = null; try { WT.refuse('nope', 'x'); } catch (e) { threw = e; }
-  ok(threw && /unknown refusal code/.test(threw.message), 'the refusal set is CLOSED — an unknown code throws instead of leaking');
+  ok(gateOf(threw) && verdictOf(/unknown refusal code/.test(threw.message)), 'the refusal set is CLOSED — an unknown code throws instead of leaking');
 }
 {
   const c = WT.parseChord('ctrl+s');
-  ok(c.ok && c.xdotool === 'ctrl+s' && c.hasModifier && c.key === 's', 'ctrl+s → the xdotool spelling');
-  ok(WT.parseChord('Return').ok && WT.parseChord('Return').xdotool === 'Return' && !WT.parseChord('Return').hasModifier, 'a bare named key');
+  ok(gateOf(c.ok) && c.xdotool === 'ctrl+s' && gateOf(c.hasModifier) && c.key === 's', 'ctrl+s → the xdotool spelling');
+  ok(gateOf(WT.parseChord('Return').ok) && WT.parseChord('Return').xdotool === 'Return' && !WT.parseChord('Return').hasModifier, 'a bare named key');
   ok(WT.parseChord('alt+F4').xdotool === 'alt+F4' && WT.parseChord('CTRL+Shift+T').xdotool === 'ctrl+shift+t', 'named keys and case-insensitive modifiers');
   ok(WT.parseChord('ctrl++').xdotool === 'ctrl+plus', '"ctrl++" is ctrl and the plus key');
   ok(WT.parseChord('super+Page_Down').xdotool === 'super+Page_Down' && WT.parseChord('meta+pageup').xdotool === 'meta+Page_Up', 'aliases resolve to one spelling');
@@ -161,8 +161,8 @@ console.log('§1 PURE verdicts');
 {
   ok(WT.pickAction(['showContextMenu', 'clickAncestor', 'press']).name === 'press', 'Chromium\'s per-node showContextMenu/clickAncestor are never picked over press');
   const only = WT.pickAction(['showContextMenu']);
-  ok(!only.ok && only.code === 'action_unknown' && /--action/.test(only.why), 'a node whose ONLY action is showContextMenu is not clicked by default — the refusal says to name it');
-  ok(WT.pickAction(['showContextMenu'], 'showContextMenu').ok && WT.pickAction(['showContextMenu'], 'showContextMenu').index === 0, 'named explicitly ⇒ picked');
+  ok(!only.ok && only.code === 'action_unknown' && verdictOf(/--action/.test(only.why)), 'a node whose ONLY action is showContextMenu is not clicked by default — the refusal says to name it');
+  ok(gateOf(WT.pickAction(['showContextMenu'], 'showContextMenu').ok) && WT.pickAction(['showContextMenu'], 'showContextMenu').index === 0, 'named explicitly ⇒ picked');
   ok(WT.pickAction(['click', 'activate']).name === 'click' && WT.pickAction(['activate', 'click']).name === 'click', 'preference order, not declaration order');
   ok(WT.pickAction(['a', 'b'], '1').name === 'b' && WT.pickAction(['a', 'b'], '5').code === 'action_unknown' && WT.pickAction(['a'], 'zzz').code === 'action_unknown', 'an index or a name; out of range / unknown are named');
   ok(WT.pickAction([]).code === 'node_has_no_action' && WT.pickAction(null).code === 'node_has_no_action', 'no actions ⇒ node_has_no_action');
@@ -171,25 +171,25 @@ console.log('§1 PURE verdicts');
 {
   const none = { rows: [{ backend: 'xtest', available: false, wired: true, why: 'xdotool not on PATH' }, { backend: 'portal', available: 'consent', wired: false, why: 'RemoteDesktop present' }, { backend: 'uinput', available: false, wired: false, why: '/dev/uinput absent' }], injection: null, ours: true };
   const v = WT.verbVerdicts({ a11y: { ok: true }, backends: none });
-  ok(!v.key.ok && !v['click-at'].ok && /no injection backend/.test(v.key.why) && /xdotool not on PATH/.test(v.key.why) && /consent/.test(v['click-at'].why), 'key and click --at are refused WITH the probe rows when no wired backend exists');
-  ok(v.click.ok && v.type.ok && v.snapshot.ok, 'click @ref / type / snapshot ride the tree — never gated by injection');
-  ok(v.click.note && /never degraded/.test(v.click.note), 'the click verdict states the per-node rule');
+  ok(!v.key.ok && !v['click-at'].ok && gateOf(/no injection backend/.test(v.key.why)) && gateOf(/xdotool not on PATH/.test(v.key.why)) && verdictOf(/consent/.test(v['click-at'].why)), 'key and click --at are refused WITH the probe rows when no wired backend exists');
+  ok(gateOf(v.click.ok) && gateOf(v.type.ok) && verdictOf(v.snapshot.ok), 'click @ref / type / snapshot ride the tree — never gated by injection');
+  ok(gateOf(v.click.note) && verdictOf(/never degraded/.test(v.click.note)), 'the click verdict states the per-node rule');
   const some = { ...none, injection: { backend: 'xtest', available: true, wired: true } };
   const v2 = WT.verbVerdicts({ a11y: { ok: true }, backends: some });
-  ok(v2.key.ok && v2.key.backend === 'xtest' && v2['click-at'].ok, 'a wired backend ⇒ both injection verbs allowed and named');
+  ok(gateOf(v2.key.ok) && v2.key.backend === 'xtest' && verdictOf(v2['click-at'].ok), 'a wired backend ⇒ both injection verbs allowed and named');
   const v3 = WT.verbVerdicts({ a11y: { ok: false, why: 'no bus' }, backends: some });
-  ok(!v3.snapshot.ok && !v3.click.ok && !v3.type.ok && /no bus/.test(v3.click.why) && v3.key.ok, 'no accessibility tree ⇒ the tree verbs refuse; injection verbs are independent of it');
+  ok(!v3.snapshot.ok && !v3.click.ok && !v3.type.ok && gateOf(/no bus/.test(v3.click.why)) && verdictOf(v3.key.ok), 'no accessibility tree ⇒ the tree verbs refuse; injection verbs are independent of it');
   const v4 = WT.verbVerdicts({ a11y: { ok: true }, backends: { ...some, ours: false } });
-  ok(!v4.screenshot.ok && /D27/.test(v4.screenshot.why), 'pixels only from our own display (D27 (a))');
+  ok(!v4.screenshot.ok && verdictOf(/D27/.test(v4.screenshot.why)), 'pixels only from our own display (D27 (a))');
   // a present-but-unwired rung never counts as injection (the consent portal, a writable uinput)
   const unwired = { rows: [{ backend: 'uinput', available: true, wired: false, why: 'not wired' }], injection: null, ours: true };
-  ok(!WT.verbVerdicts({ backends: unwired }).key.ok && /present, not wired/.test(WT.verbVerdicts({ backends: unwired }).probe), 'an available-but-unwired rung is spelled "present, not wired" and does not enable a verb');
+  ok(!WT.verbVerdicts({ backends: unwired }).key.ok && verdictOf(/present, not wired/.test(WT.verbVerdicts({ backends: unwired }).probe)), 'an available-but-unwired rung is spelled "present, not wired" and does not enable a verb');
 }
 {
   const snap = { nodes: [{ ref: '@e1', pid: 7, path: [], role: 'application', name: 'x', depth: 0 }, { ref: '@e2', pid: 7, path: [0], role: 'frame', name: 'Win', bounds: { x: 0, y: 0, w: 10, h: 10 }, text: 'secret body', depth: 1, parent: '@e1' }, { ref: '@e3', pid: 7, path: [0, 1], role: 'button', name: 'Go', actions: ['click'], depth: 2, states: ['focused', 'enabled', 'weird'] }] };
   const t = WT.refTableOf(snap);
   ok(t.size === 3 && t.get('@e2').pid === 7 && t.get('@e2').path.join() === '0' && t.get('@e2').role === 'frame' && t.get('@e2').text === undefined, 'the ref table is identity only (pid, path, role, name, bounds, actions) — never the text');
-  ok(WT.resolveRef(t, '@e3').ok && WT.resolveRef(t, '@e3').entry.actions[0] === 'click', 'a ref resolves to its entry');
+  ok(gateOf(WT.resolveRef(t, '@e3').ok) && WT.resolveRef(t, '@e3').entry.actions[0] === 'click', 'a ref resolves to its entry');
   ok(WT.resolveRef(t, '@e99').code === 'ref_unknown' && WT.resolveRef(t, 'e2').code === 'ref_unknown' && WT.resolveRef(null, '@e1').code === 'ref_unknown', 'unknown / malformed / no table ⇒ ref_unknown');
   const v = WT.nodeView(snap.nodes[2]);
   ok(v.ref === '@e3' && v.path === undefined && v.actions[0] === 'click' && v.states.join() === 'focused' && !('text' in v), 'nodeView drops the path, keeps the ref/role/name/actions, filters states to the meaningful ones');
@@ -199,10 +199,10 @@ console.log('§1 PURE verdicts');
 {
   const apps = [{ id: 'da-1', label: 'A', state: 'ready', display: ':9', pids: { app: 11, x: 12 }, exec: 'a', backend: 'vnc-display', startedAt: 1 }, { id: 'da-2', label: 'B', state: 'exited', pids: { app: 21 } }, { id: 'da-3', label: 'C', state: 'launching', pids: { app: 31 }, appId: 'gedit' }];
   const rows = WT.targetRows(apps, { a11yApps: [{ pid: 11, name: 'a', children: 1 }, { pid: 99, name: 'other' }] });
-  ok(rows.length === 2 && rows[0].handle === 'da-1' && rows[1].handle === 'da-3' && rows.every((r) => r.origin === 'vibespace'), 'rows = the LIVE keeper records, handle = the record id, every row origin:vibespace (D27 (a))');
-  ok(rows[0].a11y && rows[0].a11y.pid === 11 && rows[1].a11y === null && rows[1].appId === 'gedit', 'the a11y presence is matched by pid; a launching app without a tree says so');
+  ok(rows.length === 2 && rows[0].handle === 'da-1' && rows[1].handle === 'da-3' && verdictOf(rows.every((r) => r.origin === 'vibespace')), 'rows = the LIVE keeper records, handle = the record id, every row origin:vibespace (D27 (a))');
+  ok(gateOf(rows[0].a11y) && rows[0].a11y.pid === 11 && rows[1].a11y === null && rows[1].appId === 'gedit', 'the a11y presence is matched by pid; a launching app without a tree says so');
   const viaSession = WT.targetRows(apps, { a11yApps: [{ pid: 555, name: 'child' }], sessionPids: (rec) => [...Object.values(rec.pids), 555] });
-  ok(viaSession[0].a11y && viaSession[0].a11y.pid === 555, 'the session census (a launcher whose work is in a child) is what the tree is matched against');
+  ok(gateOf(viaSession[0].a11y) && viaSession[0].a11y.pid === 555, 'the session census (a launcher whose work is in a child) is what the tree is matched against');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,7 +221,7 @@ console.log('§2 the bounded subprocess (fake helpers driven by node as the "int
   ok(!alive, 'the hung child is DEAD after the refusal (SIGKILL, not a dangling traversal)');
   const garbage = fake('garbage.js', `process.stdout.write('this is not json\\n'); process.stderr.write('boom\\n');`);
   const g = await WT.runHelper({ op: 'probe' }, { python: process.execPath, helper: garbage, wallMs: 3000 });
-  ok(!g.ok && g.code === 'helper_error' && /nothing parseable/.test(g.why) && /boom/.test(g.why), 'garbage on stdout ⇒ helper_error carrying the stderr tail', g);
+  ok(!g.ok && g.code === 'helper_error' && gateOf(/nothing parseable/.test(g.why)) && verdictOf(/boom/.test(g.why)), 'garbage on stdout ⇒ helper_error carrying the stderr tail', g);
   const unavailable = fake('unavail.js', `process.stdout.write(JSON.stringify({ok:false, code:'a11y_unavailable', why:'no gi'}) + '\\n'); process.exit(3);`);
   const u = await WT.runHelper({ op: 'probe' }, { python: process.execPath, helper: unavailable, wallMs: 3000 });
   ok(!u.ok && u.code === 'a11y_unavailable' && u.why === 'no gi', 'the helper\'s own typed refusal (exit 3) passes through');
@@ -230,12 +230,12 @@ console.log('§2 the bounded subprocess (fake helpers driven by node as the "int
   ok(!k.ok && k.code === 'helper_error' && k.helperCode === 'something_new', 'a code outside the closed set is mapped to helper_error (with the original beside it) — routes never see an unknown code');
   const echo = fake('echo.js', `let s=''; process.stdin.on('data', d => s += d).on('end', () => process.stdout.write(JSON.stringify({ok:true, got: JSON.parse(s)}) + '\\n'));`);
   const e = await WT.runHelper({ op: 'snapshot', pids: [1, 2], budget: 5 }, { python: process.execPath, helper: echo, wallMs: 3000 });
-  ok(e.ok && e.got.op === 'snapshot' && e.got.pids.join() === '1,2' && e.got.budget === 5 && typeof e.wallMs === 'number', 'the request reaches the helper on stdin as one JSON object; the reply carries the wall time');
+  ok(gateOf(e.ok) && e.got.op === 'snapshot' && e.got.pids.join() === '1,2' && e.got.budget === 5 && typeof e.wallMs === 'number', 'the request reaches the helper on stdin as one JSON object; the reply carries the wall time');
   const m = await WT.runHelper({ op: 'probe' }, { python: '/nonexistent/python3', helper: echo, wallMs: 3000 });
-  ok(!m.ok && m.code === 'python3_missing' && /python3-gi/.test(m.why), 'a missing interpreter ⇒ python3_missing naming the packages');
+  ok(!m.ok && m.code === 'python3_missing' && verdictOf(/python3-gi/.test(m.why)), 'a missing interpreter ⇒ python3_missing naming the packages');
   const h = await WT.runHelper({ op: 'probe' }, { python: process.execPath, helper: path.join(dir, 'nope.py'), wallMs: 3000 });
   ok(!h.ok && h.code === 'helper_missing', 'a missing helper file ⇒ helper_missing');
-  ok(fs.existsSync(WT.HELPER_PATH) && /Atspi\.set_timeout/.test(fs.readFileSync(WT.HELPER_PATH, 'utf8')) && /budget/.test(fs.readFileSync(WT.HELPER_PATH, 'utf8')), 'the shipped helper sets libatspi\'s per-call timeout and walks under a node budget (grep pin)');
+  ok(gateOf(fs.existsSync(WT.HELPER_PATH)) && gateOf(/Atspi\.set_timeout/.test(fs.readFileSync(WT.HELPER_PATH, 'utf8'))) && verdictOf(/budget/.test(fs.readFileSync(WT.HELPER_PATH, 'utf8'))), 'the shipped helper sets libatspi\'s per-call timeout and walks under a node budget (grep pin)');
   ok(WT.TRAVERSAL_LIMITS.WALL_MS > WT.TRAVERSAL_LIMITS.CALL_TIMEOUT_MS && WT.TRAVERSAL_LIMITS.SNAPSHOT_MAX_BUDGET >= WT.TRAVERSAL_LIMITS.NODE_BUDGET, 'the wall outlives one call; the ceiling is above the default budget');
   // MIRROR RED ON 2.369.181 (a) — a remembered YES belongs to the ENVIRONMENT it was asked in: the memo was keyed 'a11y'
   // alone, so once this box's real bus answered, a caller asking from the runner's shape (§4r) heard that YES
@@ -244,12 +244,12 @@ console.log('§2 the bounded subprocess (fake helpers driven by node as the "int
     const withBus = { PATH: path.join(dir, 'no-bin'), DBUS_SESSION_BUS_ADDRESS: 'unix:path=/nonexistent/vs-bus' }, noBus = { PATH: path.join(dir, 'no-bin') };
     const probeBoth = async (W) => { W.resetProbeMemo(); const y = await W.probeA11y({ env: withBus, python: process.execPath, helper: busHelper }); const n = await W.probeA11y({ env: noBus, python: process.execPath, helper: busHelper }); W.resetProbeMemo(); return { y, n }; };
     const { y, n } = await probeBoth(WT);
-    ok(y.ok && !n.ok && n.code === 'a11y_unavailable', `a YES remembered in one environment is never the answer in another (with a bus: ${y.ok ? 'YES' : y.code}, then without one: ${n.ok ? 'YES (the memo)' : n.code})`);
+    ok(gateOf(y.ok) && !n.ok && n.code === 'a11y_unavailable', `a YES remembered in one environment is never the answer in another (with a bus: ${y.ok ? 'YES' : y.code}, then without one: ${n.ok ? 'YES (the memo)' : n.code})`);
     const srcW = fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8');
     const flat = srcW.replace(/const key = `a11y[^\n]*;/, "const key = 'a11y';");
     ok(flat !== srcW, 'control: the patch applies (the pre-fix memo key — no environment in it)');
     const c = await probeBoth(require(MUTW.write('src/window-targets.js', flat, 'flatmemo')));
-    ok(c.y.ok && c.n.ok === true, `NEGATIVE CONTROL: the memo keyed by nothing hands the bus-less caller the other environment's YES (${c.n.ok ? 'YES' : c.n.code}) — the leg above is what catches it`);
+    ok(gateOf(c.y.ok) && c.n.ok === true, `NEGATIVE CONTROL: the memo keyed by nothing hands the bus-less caller the other environment's YES (${c.n.ok ? 'YES' : c.n.code}) — the leg above is what catches it`);
   }
   // MIRROR RED ON 2.369.181 (b) — THE CENSUS of "this machine cannot read a tree": every refusal runHelper itself answers
   // (interpreter, helper file, wall, garbage) + the helper's own import refusal (no gi binding) must be in
@@ -264,8 +264,8 @@ console.log('§2 the bounded subprocess (fake helpers driven by node as the "int
     const imp = pySrc.slice(pySrc.indexOf('    import gi'), pySrc.indexOf('sys.exit(3)'));
     const fromImport = [...imp.matchAll(/"code": "([a-z0-9_-]+)"/g)].map((m) => m[1]);
     console.log(`    runHelper's own refusals (grep-derived): ${fromRunner.join(', ')}; the helper's import refusal: ${fromImport.join(', ')}; TREE_UNREACHABLE = ${WT.TREE_UNREACHABLE.join(', ')}`);
-    ok(fromRunner.length >= 4 && fromImport.length === 1 && [...fromRunner, ...fromImport].every((c) => WT.TREE_UNREACHABLE.includes(c)), 'every way the helper can fail to REACH a tree is in TREE_UNREACHABLE (the census found them — a census that finds none judges nothing)');
-    ok(WT.TREE_UNREACHABLE.every((c) => WT.REFUSALS.includes(c)) && !WT.TREE_UNREACHABLE.includes('bad-request') && !WT.TREE_UNREACHABLE.includes('ref_stale'), 'TREE_UNREACHABLE ⊆ the closed refusal set, and a caller\'s error (bad-request) or a stale ref is never read as "no tree here"');
+    ok(fromRunner.length >= 4 && fromImport.length === 1 && verdictOf([...fromRunner, ...fromImport].every((c) => WT.TREE_UNREACHABLE.includes(c))), 'every way the helper can fail to REACH a tree is in TREE_UNREACHABLE (the census found them — a census that finds none judges nothing)');
+    ok(gateOf(WT.TREE_UNREACHABLE.every((c) => WT.REFUSALS.includes(c))) && !WT.TREE_UNREACHABLE.includes('bad-request') && !WT.TREE_UNREACHABLE.includes('ref_stale'), 'TREE_UNREACHABLE ⊆ the closed refusal set, and a caller\'s error (bad-request) or a stale ref is never read as "no tree here"');
   }
 }
 
@@ -275,10 +275,10 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
   // L5's budget: a max-length type must be able to FINISH inside its own timeout (the old 4000 × 12 ms against a fixed
   // 20 s never could — killed after ~1,600 characters); the timeout scales with the text, twice the nominal rate
   const typeBudgetOk = (W) => W.TYPE_MAX * W.TYPE_DELAY_MS * 2 <= W.typeTimeoutMs(W.TYPE_MAX) && W.TYPE_MAX * 12.5 < W.typeTimeoutMs(W.TYPE_MAX);
-  ok(WT.TYPE_MAX === 1500 && typeBudgetOk(WT), `TYPE_MAX × delay ≤ the timeout: ${WT.TYPE_MAX} × ${WT.TYPE_DELAY_MS} ms (measured 12.5 ms a character) fits typeTimeoutMs = ${WT.typeTimeoutMs(WT.TYPE_MAX)} ms with a 2× margin`);
-  ok(/const tmo = Number\(timeout\) > 0 \? Number\(timeout\) : typeTimeoutMs\(s\.length\)/.test(fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8')), 'injectType\'s default timeout IS typeTimeoutMs(text length) (source pin)');
+  ok(WT.TYPE_MAX === 1500 && verdictOf(typeBudgetOk(WT)), `TYPE_MAX × delay ≤ the timeout: ${WT.TYPE_MAX} × ${WT.TYPE_DELAY_MS} ms (measured 12.5 ms a character) fits typeTimeoutMs = ${WT.typeTimeoutMs(WT.TYPE_MAX)} ms with a 2× margin`);
+  ok(verdictOf(/const tmo = Number\(timeout\) > 0 \? Number\(timeout\) : typeTimeoutMs\(s\.length\)/.test(fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8'))), 'injectType\'s default timeout IS typeTimeoutMs(text length) (source pin)');
   const tooLong = await WT.injectType({ bins: { xdotool: '/bin/true' }, xenv: {}, text: 'x'.repeat(WT.TYPE_MAX + 1) });
-  ok(tooLong.code === 'bad-request' && /at most 1500 characters/.test(tooLong.why) && /split/.test(tooLong.why), 'a longer text is refused by name, telling the agent to split it');
+  ok(tooLong.code === 'bad-request' && gateOf(/at most 1500 characters/.test(tooLong.why)) && verdictOf(/split/.test(tooLong.why)), 'a longer text is refused by name, telling the agent to split it');
   const srcW = fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8');
   const oldBudget = srcW.replace('const TYPE_MAX = 1500;', 'const TYPE_MAX = 4000;').replace('const typeTimeoutMs = (n) => 5000 + 2 * TYPE_DELAY_MS * Math.max(0, Number(n) || 0);', 'const typeTimeoutMs = () => 20000;');
   ok(oldBudget !== srcW && !typeBudgetOk(MUTW.load('src/window-targets.js', oldBudget, 'oldbudget')), 'control: the pre-r2 pair (4000 characters, a fixed 20 s) FAILS the budget pin');
@@ -302,19 +302,19 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
   let typeAlive = true; try { process.kill(typePid, 0); } catch { typeAlive = false; }
   let decoyAlive = true; try { process.kill(decoy.pid, 0); } catch { decoyAlive = false; }
   ok(!r.ok && r.code === 'inject_failed' && r.cancelled === true && r.partial === true && ms < 1500, `an aborted type answers at once (${ms} ms, not the child's 5 s): inject_failed {cancelled, partial}`, r);
-  ok(typePid > 0 && !typeAlive && decoyAlive, `the cancel killed THE child the lease owned (pid ${typePid} gone) and nothing else — the same-named decoy (pid ${decoy.pid}) still runs`);
+  ok(typePid > 0 && !typeAlive && verdictOf(decoyAlive), `the cancel killed THE child the lease owned (pid ${typePid} gone) and nothing else — the same-named decoy (pid ${decoy.pid}) still runs`);
   const keyup = lines.find((l) => / keyup /.test(l)) || '';
-  ok(r.released && r.released.via === 'xdotool' && /\bU0068\b/.test(keyup) && /\bU0057\b/.test(keyup) && /\bReturn\b/.test(keyup) && /\bShift_L\b/.test(keyup), `…then the release pass: no display for XTEST here, so \`xdotool keyup\` of every key the text could hold (${keyup.split(' ').slice(2, 9).join(' ')} …)`);
+  ok(gateOf(r.released) && r.released.via === 'xdotool' && gateOf(/\bU0068\b/.test(keyup)) && gateOf(/\bU0057\b/.test(keyup)) && gateOf(/\bReturn\b/.test(keyup)) && verdictOf(/\bShift_L\b/.test(keyup)), `…then the release pass: no display for XTEST here, so \`xdotool keyup\` of every key the text could hold (${keyup.split(' ').slice(2, 9).join(' ')} …)`);
   try { process.kill(decoy.pid, 'SIGKILL'); } catch { }
   // the TIMEOUT kill releases too (the old fixed timeout killed a long type mid-text and left the key held)
   fs.writeFileSync(log, '');
   const k = await WT.injectKey({ bins: { xdotool: fake }, xenv: xenv0, chord: WT.parseChord('ctrl+s'), timeout: 200 });
   const kl = fs.readFileSync(log, 'utf8');
-  ok(k.code === 'inject_failed' && /did not finish within 200 ms/.test(k.why) && !k.cancelled && k.released && /keyup Control_L Control_R s/.test(kl), 'a chord killed by its TIMEOUT releases ctrl and s (the keys a kill mid-chord leaves down)', { k, kl });
+  ok(k.code === 'inject_failed' && gateOf(/did not finish within 200 ms/.test(k.why)) && !k.cancelled && gateOf(k.released) && verdictOf(/keyup Control_L Control_R s/.test(kl)), 'a chord killed by its TIMEOUT releases ctrl and s (the keys a kill mid-chord leaves down)', { k, kl });
   fs.writeFileSync(log, '');
   const ac2 = new AbortController(); setTimeout(() => ac2.abort('revoke (test)'), 100);
   const c = await WT.injectClick({ bins: { xdotool: fake }, xenv: xenv0, x: 1, y: 1, button: 3, signal: ac2.signal });
-  ok(c.cancelled && /mouseup 3/.test(fs.readFileSync(log, 'utf8')), 'a cancelled click releases its button (mouseup 3)');
+  ok(gateOf(c.cancelled) && verdictOf(/mouseup 3/.test(fs.readFileSync(log, 'utf8'))), 'a cancelled click releases its button (mouseup 3)');
   ok(!/\bpkill\b|\bkillall\b|process\.kill\(-/.test(srcW), 'window-targets.js never kills by name or by group (grep pin: no pkill / killall / negative-pid kill)');
   // LANE E VERIFY R3 (F3): xdotool decodes a typed text through the LOCALE — measured: with no UTF-8 locale it refuses
   // "Invalid multi-byte sequence encountered", and a mixed text LANDED its ASCII part first, then failed. So a text
@@ -332,20 +332,20 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
     const bare = { PATH: process.env.PATH }; // a fleet pod's env: no LANG, no LC_*
     fs.writeFileSync(xlog, '');
     const refusedU = await WT.injectType({ bins: { xdotool: recXdo, locale: noUtf8 }, xenv: bare, text: 'ab中文' });
-    ok(refusedU.code === 'no_utf8_locale' && refusedU.why.includes('"中"') && /U\+4E2D/.test(refusedU.why) && /character 3\b/.test(refusedU.why) && /nothing was typed/.test(refusedU.why) && fs.readFileSync(xlog, 'utf8') === '', `r3 F3: no UTF-8 locale loads ⇒ \`type "ab中文"\` is refused no_utf8_locale naming the first non-ASCII character BEFORE anything is typed — not even "ab" (${refusedU.code}: ${String(refusedU.why).slice(0, 140)})`);
-    ok(WT.REFUSALS.includes('no_utf8_locale'), 'r3 F3: no_utf8_locale is a closed refusal code (the route census gives it a status)');
+    ok(refusedU.code === 'no_utf8_locale' && gateOf(refusedU.why.includes('"中"')) && gateOf(/U\+4E2D/.test(refusedU.why)) && gateOf(/character 3\b/.test(refusedU.why)) && gateOf(/nothing was typed/.test(refusedU.why)) && fs.readFileSync(xlog, 'utf8') === '', `r3 F3: no UTF-8 locale loads ⇒ \`type "ab中文"\` is refused no_utf8_locale naming the first non-ASCII character BEFORE anything is typed — not even "ab" (${refusedU.code}: ${String(refusedU.why).slice(0, 140)})`);
+    ok(verdictOf(WT.REFUSALS.includes('no_utf8_locale')), 'r3 F3: no_utf8_locale is a closed refusal code (the route census gives it a status)');
     fs.writeFileSync(xlog, '');
     const asciiU = await WT.injectType({ bins: { xdotool: recXdo, locale: noUtf8 }, xenv: bare, text: 'plain ASCII\n' });
-    ok(asciiU.ok === true && /^LC_ALL= LANG= /.test(fs.readFileSync(xlog, 'utf8')), 'r3 F3: an ASCII text is never refused and its env is untouched (C carries ASCII)');
+    ok(asciiU.ok === true && verdictOf(/^LC_ALL= LANG= /.test(fs.readFileSync(xlog, 'utf8'))), 'r3 F3: an ASCII text is never refused and its env is untouched (C carries ASCII)');
     fs.writeFileSync(xlog, '');
     const cU = await WT.injectType({ bins: { xdotool: recXdo, locale: cUtf8 }, xenv: bare, text: 'ab中文' });
-    ok(cU.ok === true && /^LC_ALL=C\.UTF-8 LANG= /.test(fs.readFileSync(xlog, 'utf8')), `r3 F3: with no locale in the env, the text runs under LC_ALL=C.UTF-8 (xwininfo's rule) (${fs.readFileSync(xlog, 'utf8').trim().slice(0, 60)})`);
+    ok(cU.ok === true && verdictOf(/^LC_ALL=C\.UTF-8 LANG= /.test(fs.readFileSync(xlog, 'utf8'))), `r3 F3: with no locale in the env, the text runs under LC_ALL=C.UTF-8 (xwininfo's rule) (${fs.readFileSync(xlog, 'utf8').trim().slice(0, 60)})`);
     fs.writeFileSync(xlog, '');
     const enU = await WT.injectType({ bins: { xdotool: recXdo, locale: enOnly }, xenv: { ...bare, LANG: 'en_US.UTF-8' }, text: 'é' });
-    ok(enU.ok === true && /^LC_ALL= LANG=en_US\.UTF-8 /.test(fs.readFileSync(xlog, 'utf8')), 'r3 F3: a machine without C.UTF-8 but with the env\'s own UTF-8 locale types under that one');
+    ok(enU.ok === true && verdictOf(/^LC_ALL= LANG=en_US\.UTF-8 /.test(fs.readFileSync(xlog, 'utf8'))), 'r3 F3: a machine without C.UTF-8 but with the env\'s own UTF-8 locale types under that one');
     fs.writeFileSync(xlog, '');
     const enNo = await WT.injectType({ bins: { xdotool: recXdo, locale: enOnly }, xenv: bare, text: 'é' });
-    ok(enNo.code === 'no_utf8_locale' && /"é" \(U\+00E9, character 1\)/.test(enNo.why) && fs.readFileSync(xlog, 'utf8') === '', 'r3 F3: …the same machine with no locale in the env refuses by name (Latin-1 is non-ASCII too), nothing typed');
+    ok(enNo.code === 'no_utf8_locale' && gateOf(/"é" \(U\+00E9, character 1\)/.test(enNo.why)) && fs.readFileSync(xlog, 'utf8') === '', 'r3 F3: …the same machine with no locale in the env refuses by name (Latin-1 is non-ASCII too), nothing typed');
   }
   // B-f18a (2026-10-03, lane E verify r4 O1–O4, the injection leftovers): ① an injection killed by a signal nobody here
   // sent releases what it held (it skipped the release: `err.killed` is node's own kill only); ② a machine without
@@ -369,7 +369,7 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
       return { r, pid, keyup: fs.readFileSync(klog, 'utf8').split('\n').find((l) => / keyup /.test(l)) || '' };
     };
     const o1 = await killOutside(WT);
-    ok(o1.pid > 0 && o1.r.code === 'inject_failed' && o1.r.partial === true && !o1.r.cancelled && /killed part-way by SIGTERM \(not by VibeSpace\)/.test(o1.r.why) && o1.r.released && o1.r.released.via === 'xdotool' && /\bU0068\b/.test(o1.keyup) && /\bU0057\b/.test(o1.keyup) && /\bShift_L\b/.test(o1.keyup), `B-f18a ①: a type killed from OUTSIDE (SIGTERM to pid ${o1.pid}) runs the release pass — keyup of every key the text could hold — and says who killed it (${o1.r.why})`);
+    ok(o1.pid > 0 && o1.r.code === 'inject_failed' && o1.r.partial === true && !o1.r.cancelled && gateOf(/killed part-way by SIGTERM \(not by VibeSpace\)/.test(o1.r.why)) && gateOf(o1.r.released) && o1.r.released.via === 'xdotool' && gateOf(/\bU0068\b/.test(o1.keyup)) && gateOf(/\bU0057\b/.test(o1.keyup)) && verdictOf(/\bShift_L\b/.test(o1.keyup)), `B-f18a ①: a type killed from OUTSIDE (SIGTERM to pid ${o1.pid}) runs the release pass — keyup of every key the text could hold — and says who killed it (${o1.r.why})`);
     const noOutside = srcWf.replace('killed: cancelled || !!(err && err.killed) || outside, outside,', 'killed: cancelled || !!(err && err.killed), outside,');
     ok(noOutside !== srcWf, 'B-f18a ① control: the patch applies (`killed` = cancelled || err.killed, the pre-fix rule)');
     const c1 = await killOutside(MUTW.load('src/window-targets.js', noOutside, 'f18a-nooutside'));
@@ -383,9 +383,9 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
     fs.writeFileSync(llog, ''); fs.writeFileSync(xrec, '');
     const t2 = await WT.injectType({ bins: { xdotool: xdoRec, locale: locA }, xenv: { PATH: process.env.PATH }, text: 'é中' });
     const asked = fs.readFileSync(llog, 'utf8').trim().split('\n');
-    ok(t2.ok === true && /^LC_ALL=en_US\.utf8 type/.test(fs.readFileSync(xrec, 'utf8')) && asked.includes('-a LC_ALL=') && !asked.some((l) => /de_DE/.test(l)), `B-f18a ②: no C.UTF-8 and an env naming no locale ⇒ the text is typed under the UTF-8 locale \`locale -a\` lists (en_US first; asked: ${asked.join(' | ')})`);
+    ok(t2.ok === true && gateOf(/^LC_ALL=en_US\.utf8 type/.test(fs.readFileSync(xrec, 'utf8'))) && gateOf(asked.includes('-a LC_ALL=')) && !asked.some((l) => /de_DE/.test(l)), `B-f18a ②: no C.UTF-8 and an env naming no locale ⇒ the text is typed under the UTF-8 locale \`locale -a\` lists (en_US first; asked: ${asked.join(' | ')})`);
     const n2 = await D.utf8LocaleEnv({ PATH: process.env.PATH }, { bins: { locale: locNone } });
-    ok(!n2.ok && /locale -a. lists no other UTF-8 locale/.test(n2.why), `B-f18a ②: a machine whose \`locale -a\` lists no UTF-8 locale is still refused, and says so (${n2.why})`);
+    ok(!n2.ok && verdictOf(/locale -a. lists no other UTF-8 locale/.test(n2.why)), `B-f18a ②: a machine whose \`locale -a\` lists no UTF-8 locale is still refused, and says so (${n2.why})`);
     const noLocaleA = srcDf.replace('  const listed = await utf8LocalesOf(tool, base, { now });', '  const listed = { names: [], hung: false }; // CONTROL');
     ok(noLocaleA !== srcDf, 'B-f18a ② control: the patch applies (no `locale -a` tier)');
     const c2 = await MUTW.load('src/desktop-display.js', noLocaleA, 'f18a-nolocalea').utf8LocaleEnv({ PATH: process.env.PATH }, { bins: { locale: locA } });
@@ -394,12 +394,12 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
     const echoXdo = fx('xdo-echo', 'echo "+ xdotool $*" >&2\necho "Invalid multi-byte sequence encountered" >&2\necho "xdo_enter_text_window reported an error" >&2\nexit 1');
     const secret = 'my secret passphrase 42';
     const t3 = await WT.injectType({ bins: { xdotool: echoXdo }, xenv: { PATH: process.env.PATH }, text: secret });
-    ok(t3.code === 'inject_failed' && !t3.why.includes('secret') && /Invalid multi-byte sequence encountered; xdo_enter_text_window reported an error; 1 other line withheld/.test(t3.why), `B-f18a ③: a failed type quotes only xdotool's known lines and counts the rest — the echoed text never reaches the refusal (${t3.why})`);
+    ok(t3.code === 'inject_failed' && !t3.why.includes('secret') && verdictOf(/Invalid multi-byte sequence encountered; xdo_enter_text_window reported an error; 1 other line withheld/.test(t3.why)), `B-f18a ③: a failed type quotes only xdotool's known lines and counts the rest — the echoed text never reaches the refusal (${t3.why})`);
     ok(WT.xdoStderr("Error: Can't open display: (null)\nFailed creating new xdo instance") === "Error: Can't open display: (null); Failed creating new xdo instance" && WT.xdoStderr("Error: Can't open display: hunter2") === '1 other line withheld' && WT.xdoStderr('') === 'no message', 'B-f18a ③: the closed set — the measured no-display lines pass, a display "name" carrying anything else is withheld');
     const oldQuote = srcWf.replace('${xdoStderr(r.stderr).slice(0, 200)}', "${([...new Set(String(r.stderr || '').split('\\n').map((l) => l.trim()).filter(Boolean))].join('; ') || 'no message').slice(0, 200)}");
     ok(oldQuote !== srcWf, 'B-f18a ③ control: the patch applies (stderr quoted raw)');
     const c3 = await MUTW.load('src/window-targets.js', oldQuote, 'f18a-rawstderr').injectType({ bins: { xdotool: echoXdo }, xenv: { PATH: process.env.PATH }, text: secret });
-    ok(c3.why.includes(secret), `B-f18a ③ CONTROL: the raw quote hands the typed text back in the refusal (${String(c3.why).slice(0, 110)})`);
+    ok(verdictOf(c3.why.includes(secret)), `B-f18a ③ CONTROL: the raw quote hands the typed text back in the refusal (${String(c3.why).slice(0, 110)})`);
     // ④ a `locale` that hangs — TIME-SCALED copies (LOCALE_PROBE_MS 3000 → 250, nothing else changed) so the leg costs < 1 s
     const scaled = srcDf.replace('const LOCALE_PROBE_MS = 3000;', 'const LOCALE_PROBE_MS = 250;');
     ok(scaled !== srcDf && scaled.replace('const LOCALE_PROBE_MS = 250;', 'const LOCALE_PROBE_MS = 3000;') === srcDf, 'B-f18a ④: the scaled copy differs from the shipped file in the probe limit only');
@@ -414,7 +414,7 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
       return { v1, v2, ms1, ms2, n1, n2: n2b };
     };
     const o4 = await hangRun(MUTW.load('src/desktop-display.js', scaled, 'f18a-scaled'));
-    ok(!o4.v1.ok && /did not answer within 250 ms/.test(o4.v1.why) && o4.n1 === 1 && o4.n2 === 0 && o4.ms2 < 100, `B-f18a ④: a hanging \`locale\` is asked ONCE (${o4.n1} call, ${o4.ms1} ms) and the NO is remembered (next verdict: ${o4.n2} calls, ${o4.ms2} ms) — ${o4.v1.why}`);
+    ok(!o4.v1.ok && gateOf(/did not answer within 250 ms/.test(o4.v1.why)) && o4.n1 === 1 && o4.n2 === 0 && o4.ms2 < 100, `B-f18a ④: a hanging \`locale\` is asked ONCE (${o4.n1} call, ${o4.ms1} ms) and the NO is remembered (next verdict: ${o4.n2} calls, ${o4.ms2} ms) — ${o4.v1.why}`);
     const noStop = scaled.split('if (v.hung) return hung();').join('').replace('  if (listed.hung) return hung();\n', '');
     ok(noStop !== scaled, 'B-f18a ④ control: the patch applies (the walk no longer stops at a hang)');
     const c4 = await hangRun(MUTW.load('src/desktop-display.js', noStop, 'f18a-nostop'));
@@ -460,7 +460,7 @@ const ownBus = await (async () => {
   catch (e) { return { ok: false, why: `the suite's own session bus did not start: ${(e && e.message) || e}` }; }
 })();
 if (ownBus.ok) base.DBUS_SESSION_BUS_ADDRESS = ownBus.address;
-ok(busMissingWhy(['at-spi-bus-launcher']).startsWith('at-spi-bus-launcher not found on this machine (at-spi2-core)') && busMissingWhy(['dbus-daemon']).includes('session bus'), 'r3097: a machine without an accessibility program skips NAMING it (never a silent count)');
+ok(gateOf(busMissingWhy(['at-spi-bus-launcher']).startsWith('at-spi-bus-launcher not found on this machine (at-spi2-core)')) && verdictOf(busMissingWhy(['dbus-daemon']).includes('session bus')), 'r3097: a machine without an accessibility program skips NAMING it (never a silent count)');
 console.log(`  the suite's own buses: ${ownBus.ok ? `session bus ${ownBus.address} (pid ${ownBus.pid})` : ownBus.why}; runtime folder ${busRT} (${(fs.statSync(busRT).mode & 0o777).toString(8)})`);
 const py = await run('python3', ['-c', "import gi; gi.require_version('Atspi','2.0'); gi.require_version('Gtk','3.0'); from gi.repository import Atspi, Gtk; print('ok')"], base, 20000);
 const xvfbBin = D.binOnPath('Xvfb', { env: base });
@@ -499,9 +499,9 @@ else {
       // wait for the app on the a11y bus
       let onBus = false;
       for (let i = 0; i < 40 && !onBus; i++) { const r = await WT.runHelper({ op: 'apps' }, { env: base, wallMs: 8000 }); onBus = !!(r.ok && (r.apps || []).some((a) => a.pid === pid)); if (!onBus) await sleep(250); }
-      ok(onBus, `the fixture (pid ${pid}) registered on the suite\'s OWN accessibility bus from OUR display ${display}`);
+      ok(verdictOf(onBus), `the fixture (pid ${pid}) registered on the suite\'s OWN accessibility bus from OUR display ${display}`);
       const snapRes = await WT.snapshotTarget({ pids: [pid], env: base });
-      ok(snapRes.ok, 'snapshotTarget answers', snapRes);
+      ok(verdictOf(snapRes.ok), 'snapshotTarget answers', snapRes);
       if (snapRes.ok) {
         const s = snapRes.snapshot; const refs = snapRes.refs;
         const c = s.census;
@@ -512,10 +512,10 @@ else {
         const frame = byRole('frame');
         const fake = byName('label', 'Fake button (no Action)');
         const entry = [...refs.values()].find((e) => e.editable);
-        ok(frame && frame.bounds && frame.bounds.w > 0 && /^@e\d+$/.test(frame.ref), `the frame is a ref with bounds (${frame && frame.ref} ${frame && JSON.stringify(frame.bounds)})`);
-        ok(btn && btn.actions && btn.actions.includes('click'), `the Count button declares \`click\` (${btn && btn.ref} ${btn && JSON.stringify(btn.actions)})`);
-        ok(fake && (!fake.actions || fake.actions.length === 0) && fake.bounds, 'the label-drawn "button" exports NO Action (the negative-control node)');
-        ok(entry && entry.editable, `an editable node exists (${entry && entry.ref} ${entry && entry.role})`);
+        ok(gateOf(frame) && gateOf(frame.bounds) && frame.bounds.w > 0 && verdictOf(/^@e\d+$/.test(frame.ref)), `the frame is a ref with bounds (${frame && frame.ref} ${frame && JSON.stringify(frame.bounds)})`);
+        ok(gateOf(btn) && gateOf(btn.actions) && verdictOf(btn.actions.includes('click')), `the Count button declares \`click\` (${btn && btn.ref} ${btn && JSON.stringify(btn.actions)})`);
+        ok(gateOf(fake) && (!fake.actions || fake.actions.length === 0) && verdictOf(fake.bounds), 'the label-drawn "button" exports NO Action (the negative-control node)');
+        ok(gateOf(entry) && verdictOf(entry.editable), `an editable node exists (${entry && entry.ref} ${entry && entry.role})`);
         ok(c.nodes > 0 && c.action >= 2 && c.editableText >= 1 && s.truncated === false, 'the census counts the interfaces and the walk was not truncated');
         const nodesOf = (snap) => snap.snapshot.nodes;
         const labelText = (snap, prefix) => (nodesOf(snap).find((n) => n.role === 'label' && String(n.name).startsWith(prefix)) || {}).name;
@@ -523,53 +523,53 @@ else {
         // click @ref through the tree
         const pick = WT.pickAction(btn.actions);
         const clicked = await WT.actOnNode({ entry: btn, verb: 'do_action', action: pick.index, env: base });
-        ok(clicked.ok && clicked.did.action === 'click', `do_action(click) on the Count button answered in ${clicked.ms} ms`, clicked);
+        ok(gateOf(clicked.ok) && clicked.did.action === 'click', `do_action(click) on the Count button answered in ${clicked.ms} ms`, clicked);
         const after = await WT.snapshotTarget({ pids: [pid], env: base });
-        ok(after.ok && labelText(after, 'count ') === 'count 1', 'the app\'s OWN tree reports count 1 — the state change is read back from the tree, not from pixels', after.ok && labelText(after, 'count '));
+        ok(gateOf(after.ok) && labelText(after, 'count ') === 'count 1', 'the app\'s OWN tree reports count 1 — the state change is read back from the tree, not from pixels', after.ok && labelText(after, 'count '));
         // the node without Action: the helper refuses, never degrades
         const noact = await WT.actOnNode({ entry: fake, verb: 'do_action', env: base });
-        ok(!noact.ok && noact.code === 'node_has_no_action' && /never degraded/.test(noact.why), 'do_action on the label-drawn button is refused node_has_no_action by the helper itself');
+        ok(!noact.ok && noact.code === 'node_has_no_action' && verdictOf(/never degraded/.test(noact.why)), 'do_action on the label-drawn button is refused node_has_no_action by the helper itself');
         const still = await WT.snapshotTarget({ pids: [pid], env: base });
-        ok(still.ok && labelText(still, 'canvas') === 'canvas none' && labelText(still, 'count ') === 'count 1', 'and nothing was clicked at its coordinates (the canvas witness is untouched)');
+        ok(gateOf(still.ok) && labelText(still, 'canvas') === 'canvas none' && labelText(still, 'count ') === 'count 1', 'and nothing was clicked at its coordinates (the canvas witness is untouched)');
         // type through EditableText
         const typed = await WT.actOnNode({ entry: entry, verb: 'insert_text', text: 'hello tree', env: base });
-        ok(typed.ok && typed.did.chars === 10, 'insert_text into the entry answered', typed);
+        ok(gateOf(typed.ok) && typed.did.chars === 10, 'insert_text into the entry answered', typed);
         const echoed = await WT.snapshotTarget({ pids: [pid], env: base });
-        ok(echoed.ok && labelText(echoed, 'entry ') === "entry 'hello tree'", 'the app echoes the typed text (its own tree)', echoed.ok && labelText(echoed, 'entry '));
+        ok(gateOf(echoed.ok) && labelText(echoed, 'entry ') === "entry 'hello tree'", 'the app echoes the typed text (its own tree)', echoed.ok && labelText(echoed, 'entry '));
         const replaced = await WT.actOnNode({ entry: entry, verb: 'set_text', text: 'x', env: base });
         const echoed2 = await WT.snapshotTarget({ pids: [pid], env: base });
-        ok(replaced.ok && echoed2.ok && labelText(echoed2, 'entry ') === "entry 'x'", 'set_text replaces the content');
+        ok(gateOf(replaced.ok) && gateOf(echoed2.ok) && labelText(echoed2, 'entry ') === "entry 'x'", 'set_text replaces the content');
         const notEditable = await WT.actOnNode({ entry: frame, verb: 'insert_text', text: 'no', env: base });
         ok(!notEditable.ok && notEditable.code === 'node_not_editable', 'type on a non-editable node is refused node_not_editable');
         // a stale ref: the recorded identity no longer matches the node at that path
         const stale = await WT.actOnNode({ entry: { ...btn, name: 'Count (renamed)' }, verb: 'do_action', env: base });
-        ok(!stale.ok && stale.code === 'ref_stale' && /new snapshot/.test(stale.why), 'a ref whose node changed is ref_stale, never acted on');
+        ok(!stale.ok && stale.code === 'ref_stale' && verdictOf(/new snapshot/.test(stale.why)), 'a ref whose node changed is ref_stale, never acted on');
         const gone = await WT.actOnNode({ entry: { ...btn, pid: 999999 }, verb: 'do_action', env: base });
         ok(!gone.ok && gone.code === 'app_gone', 'a pid no longer on the bus ⇒ app_gone');
         // the budget truncates
         const tiny = await WT.snapshotTarget({ pids: [pid], budget: 3, env: base });
-        ok(tiny.ok && tiny.snapshot.nodes.length === 3 && tiny.snapshot.truncated === true, 'a 3-node budget yields 3 nodes and says TRUNCATED');
+        ok(gateOf(tiny.ok) && tiny.snapshot.nodes.length === 3 && tiny.snapshot.truncated === true, 'a 3-node budget yields 3 nodes and says TRUNCATED');
         ok((await WT.snapshotTarget({ pids: [pid], budget: 999999, env: base })).snapshot.budget === WT.TRAVERSAL_LIMITS.SNAPSHOT_MAX_BUDGET, 'the budget is clamped to the ceiling');
         // the focused node (whatever it is) is answered, never guessed
         const foc = await WT.focusedNode({ pids: [pid], env: base });
-        ok(foc.ok && (foc.node === null || typeof foc.node.ref === 'string'), `focusedNode answers (${foc.node ? foc.node.role + ' ' + JSON.stringify(foc.node.name) : 'nothing focused'})`);
+        ok(gateOf(foc.ok) && (foc.node === null || typeof foc.node.ref === 'string'), `focusedNode answers (${foc.node ? foc.node.role + ' ' + JSON.stringify(foc.node.name) : 'nothing focused'})`);
         // injection: the probe, then the two verbs — on OUR display, with and without xdotool
         const probe = await WT.probeInputBackends({ env: xenv, ours: true });
         console.log(`  input-backend probe on ${display}: ${probe.rows.map((r) => `${r.backend}=${r.available}${r.wired ? '' : '(unwired)'}${r.why ? ' [' + r.why + ']' : ''}`).join(' · ')}`);
         ok(probe.rows.length === 3 && probe.rows.map((r) => r.backend).join() === 'xtest,portal,uinput', 'the ladder has its three rungs in order');
         const without = await WT.probeInputBackends({ env: xenv, ours: true, bins: { xdotool: null, gdbus: null } });
-        ok(without.injection === null && /xdotool not on PATH/.test(without.rows[0].why), 'without xdotool there is NO wired injection backend (the probe says why)');
+        ok(without.injection === null && verdictOf(/xdotool not on PATH/.test(without.rows[0].why)), 'without xdotool there is NO wired injection backend (the probe says why)');
         const foreign = await WT.probeInputBackends({ env: xenv, ours: false, bins: { xdotool: '/usr/bin/xdotool', gdbus: null } });
-        ok(foreign.injection === null && /D27/.test(foreign.rows[0].why), 'a display that is not ours gets no injection even with xdotool present (D27 (a))');
+        ok(foreign.injection === null && verdictOf(/D27/.test(foreign.rows[0].why)), 'a display that is not ours gets no injection even with xdotool present (D27 (a))');
         const noInj = WT.verbVerdicts({ a11y, backends: without });
-        ok(!noInj.key.ok && !noInj['click-at'].ok && /xdotool not on PATH/.test(noInj.key.why), 'key and click --at are refused with that probe');
+        ok(!noInj.key.ok && !noInj['click-at'].ok && verdictOf(/xdotool not on PATH/.test(noInj.key.why)), 'key and click --at are refused with that probe');
         const inj = await WT.injectKey({ bins: { xdotool: null }, xenv, chord: WT.parseChord('ctrl+s') });
         ok(!inj.ok && inj.code === 'no_injection_backend', 'injectKey without a backend is a typed refusal, not a spawn');
         if (!probe.injection) skip(`xdotool absent — the live injection legs (ctrl+s, canvas point click) cannot run here (probe: ${probe.rows[0].why})`);
         else {
           const centre = { x: frame.bounds.x + frame.bounds.w / 2, y: frame.bounds.y + 20 };
           const key = await WT.injectKey({ bins: { xdotool: probe.injection.bin }, xenv, chord: WT.parseChord('ctrl+s'), focus: centre });
-          ok(key.ok && key.did.chord === 'ctrl+s' && key.did.backend === 'xtest', 'ctrl+s injected through xtest on our display', key);
+          ok(gateOf(key.ok) && key.did.chord === 'ctrl+s' && key.did.backend === 'xtest', 'ctrl+s injected through xtest on our display', key);
           let keyLabel = null;
           for (let i = 0; i < 20 && keyLabel !== 'key ctrl+s'; i++) { const k = await WT.snapshotTarget({ pids: [pid], env: base }); keyLabel = k.ok ? labelText(k, 'key ') : null; if (keyLabel !== 'key ctrl+s') await sleep(150); }
           ok(keyLabel === 'key ctrl+s', `the app\'s key witness reads "key ctrl+s" (got ${JSON.stringify(keyLabel)})`);
@@ -579,10 +579,10 @@ else {
           const target = cb ? { x: cb.x + cb.w / 2, y: cb.y + cb.h / 2 } : null;
           if (target) {
             const clickAt = await WT.injectClick({ bins: { xdotool: probe.injection.bin }, xenv, x: target.x, y: target.y });
-            ok(clickAt.ok && clickAt.did.by === 'point', 'a point click injected through xtest', clickAt);
+            ok(gateOf(clickAt.ok) && clickAt.did.by === 'point', 'a point click injected through xtest', clickAt);
             let cv = null;
             for (let i = 0; i < 20 && !/^canvas click 1 at/.test(cv || ''); i++) { const k = await WT.snapshotTarget({ pids: [pid], env: base }); cv = k.ok ? labelText(k, 'canvas') : null; if (!/^canvas click 1/.test(cv || '')) await sleep(150); }
-            ok(/^canvas click 1 at \d+,\d+$/.test(cv || ''), `the canvas witness reports the click (${JSON.stringify(cv)})`);
+            ok(verdictOf(/^canvas click 1 at \d+,\d+$/.test(cv || '')), `the canvas witness reports the click (${JSON.stringify(cv)})`);
           }
           // L5 (lane E verify r2) ON THIS REAL DISPLAY: a type CANCELLED between a key's press and its release. Measured:
           // a bare SIGKILL there leaves the key HELD and the X server autorepeats it into the window the user just took
@@ -600,11 +600,11 @@ else {
             return { r, text: a.ok ? labelText(a, 'entry ') : null };
           };
           const rel = await cancelType(WT);
-          ok(rel.r.cancelled === true && rel.r.released && rel.r.released.ok && rel.text === "entry 'q'", `a type cancelled mid-key on the real display: the pressed key was RELEASED (${rel.r.released && rel.r.released.via}) — the entry holds exactly ${JSON.stringify(rel.text)}, no autorepeat`, rel.r);
+          ok(rel.r.cancelled === true && gateOf(rel.r.released) && gateOf(rel.r.released.ok) && rel.text === "entry 'q'", `a type cancelled mid-key on the real display: the pressed key was RELEASED (${rel.r.released && rel.r.released.via}) — the entry holds exactly ${JSON.stringify(rel.text)}, no autorepeat`, rel.r);
           const noRel = fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8').replace('function releaseHeld({', "function releaseHeld() { return Promise.resolve({ ok: false, via: null, why: 'CONTROL: no release' }); }\nfunction releaseHeldUnused({");
           const Wn = MUTW.load('src/window-targets.js', noRel, 'norelease');
           const ctl = await cancelType(Wn);
-          ok(/^entry 'q{4,}'$/.test(ctl.text || ''), `control: the cancel WITHOUT the release pass leaves "q" held and the server autorepeats it into the window (${JSON.stringify((ctl.text || '').slice(0, 40))}…)`);
+          ok(verdictOf(/^entry 'q{4,}'$/.test(ctl.text || '')), `control: the cancel WITHOUT the release pass leaves "q" held and the server autorepeats it into the window (${JSON.stringify((ctl.text || '').slice(0, 40))}…)`);
           await WT.releaseHeld({ bins: { xdotool: probe.injection.bin }, xenv, keysyms: WT.keysymsOfText('qwerty') }); // un-stick the control's key
           await WT.actOnNode({ entry, verb: 'set_text', text: '', env: base });
           // LANE E VERIFY R3 (F3) ON THIS REAL DISPLAY, with LANG / LANGUAGE / LC_* stripped — a fleet pod's env (the
@@ -624,7 +624,7 @@ else {
           };
           const mixed = 'ab中文é';
           const u8 = await typeInto(WT, mixed);
-          ok(!Object.keys(bareX).some((k) => /^(LANG|LC_)/.test(k)) && u8.r.ok && u8.echo === `entry '${mixed}'`, `r3 F3: with NO LANG / LC_* in the env a mixed text lands WHOLE on the real display (${JSON.stringify(u8.echo)})`, u8.r);
+          ok(!Object.keys(bareX).some((k) => /^(LANG|LC_)/.test(k)) && gateOf(u8.r.ok) && u8.echo === `entry '${mixed}'`, `r3 F3: with NO LANG / LC_* in the env a mixed text lands WHOLE on the real display (${JSON.stringify(u8.echo)})`, u8.r);
           const srcW3 = fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8');
           const noRule = srcW3.replace('await display.utf8LocaleEnv(xenv, { bins })', '{ ok: true, env: xenv }');
           ok(noRule !== srcW3, 'control (F3): the patch applies (no locale rule — the display env as the keeper built it)');
@@ -635,7 +635,7 @@ else {
           const u8r = await typeInto(WT, mixed, { xdotool: probe.injection.bin, locale: noLoc3 });
           await sleep(300);
           const after3 = await WT.snapshotTarget({ pids: [pid], env: base });
-          ok(u8r.r.code === 'no_utf8_locale' && u8r.r.why.includes('"中"') && after3.ok && labelText(after3, 'entry ') === "entry ''", `r3 F3: when no UTF-8 locale loads the type is refused BY NAME and NOTHING lands — not even "ab" (${u8r.r.code}; the entry reads ${JSON.stringify(after3.ok && labelText(after3, 'entry '))})`);
+          ok(u8r.r.code === 'no_utf8_locale' && gateOf(u8r.r.why.includes('"中"')) && gateOf(after3.ok) && labelText(after3, 'entry ') === "entry ''", `r3 F3: when no UTF-8 locale loads the type is refused BY NAME and NOTHING lands — not even "ab" (${u8r.r.code}; the entry reads ${JSON.stringify(after3.ok && labelText(after3, 'entry '))})`);
           await WT.actOnNode({ entry, verb: 'set_text', text: '', env: base });
         }
         // pixels: the fallback
@@ -644,7 +644,7 @@ else {
         if (!sh.ok && sh.code === 'screenshot_unavailable') skip(`screenshot: ${sh.why}`);
         else {
           const magic = sh.ok ? fs.readFileSync(shot).slice(0, 8).toString('hex') : '';
-          ok(sh.ok && magic === '89504e470d0a1a0a' && sh.w === frame.bounds.w && sh.h === frame.bounds.h, `a PNG of the frame (${sh.w}x${sh.h}, ${sh.bytes} bytes)`, sh);
+          ok(gateOf(sh.ok) && magic === '89504e470d0a1a0a' && sh.w === frame.bounds.w && sh.h === frame.bounds.h, `a PNG of the frame (${sh.w}x${sh.h}, ${sh.bytes} bytes)`, sh);
         }
         real = { pid, xenv, display, refs, bins: probe.injection ? { xdotool: probe.injection.bin, gdbus: null } : { xdotool: null, gdbus: null }, hasInjection: !!probe.injection };
       }
@@ -677,56 +677,56 @@ console.log('§4 the engine over a fake keeper + the routes');
   const procExeOwned = (pid) => { if (!ownedPids.has(pid)) return null; try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return null; } };
   const engine = ENGINE.create({ keeper, dataDir: dir, env: () => base, activeSessions: sessions, wt, bins: real ? real.bins : { xdotool: null, gdbus: null }, log: { warn() { } }, procExe: procExeOwned });
   const f1 = engine.factsForToken('vsst_aaaa'), f2 = engine.factsForToken('vsst_bbbb');
-  ok(f1 && f1.sessionId === 's1' && f1.browserKey === 'bk-11111111' && engine.factsForToken('vsst_zzzz') === null && engine.factsForToken('cookie') === null, 'a vsst_ token resolves to its session; anything else to nothing');
+  ok(gateOf(f1) && f1.sessionId === 's1' && f1.browserKey === 'bk-11111111' && engine.factsForToken('vsst_zzzz') === null && engine.factsForToken('cookie') === null, 'a vsst_ token resolves to its session; anything else to nothing');
   const err = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
   // LANE E (D1): every window is HIDDEN until the user shares it — nothing listed, every verb refused by name, no lease
   {
     const hidden = await engine.list(f1);
-    ok(hidden.targets.length === 0 && /no window is shared with you/.test(hidden.note) && hidden.scope === 'shared with you', 'D1: `list` shows NOTHING the user did not share (the note says where sharing happens)', hidden.note);
+    ok(hidden.targets.length === 0 && gateOf(/no window is shared with you/.test(hidden.note)) && hidden.scope === 'shared with you', 'D1: `list` shows NOTHING the user did not share (the note says where sharing happens)', hidden.note);
     const codes = [await err(() => engine.attach('da-one', f1)), await err(() => engine.snapshot('da-one', f1)), await err(() => engine.act('da-one', f1, { verb: 'click', ref: '@e1' })), await err(() => engine.screenshot('da-one', f1)), await err(() => engine.watch('da-one', f1)), await err(() => engine.detach('da-one', f1))].map((e) => e && e.code);
-    ok(codes.every((c) => c === 'not_exposed') && !engine.leaseOf('da-one'), `attach / snapshot / act / screenshot / watch / detach on an UNSHARED window ⇒ not_exposed by name, no lease taken (${codes.join(', ')})`);
+    ok(gateOf(codes.every((c) => c === 'not_exposed')) && !engine.leaseOf('da-one'), `attach / snapshot / act / screenshot / watch / detach on an UNSHARED window ⇒ not_exposed by name, no lease taken (${codes.join(', ')})`);
     const ne = await err(() => engine.attach('da-one', f1));
-    ok(/not shared with this session/.test(ne.message) && ne.message.includes(RE.NOT_EXPOSED_SENTENCE), 'the refusal names the remedy (the user shares it from the window\'s ⋯ menu)');
+    ok(gateOf(/not shared with this session/.test(ne.message)) && verdictOf(ne.message.includes(RE.NOT_EXPOSED_SENTENCE)), 'the refusal names the remedy (the user shares it from the window\'s ⋯ menu)');
     const g = engine.grantReach('da-one', { kind: 'session', id: 's1' });
     engine.grantReach('da-one', { kind: 'session', id: 's2' });
     ok(g.rows.length === 1 && g.rows[0].principal.id === 'webui:s1' && g.rows[0].by === 'user' && g.granted.changed === true, 'the user shares it with a live session BY ITS ID — stored under its durable key (webui:<id> before a conversation exists)');
     // lane grants-unify: the share's ROWS are the ONE grants store's (data/grants.json, door `window`), its mode window-reach.json's
     const stored = JSON.parse(fs.readFileSync(path.join(dir, 'grants.json'), 'utf8'));
     const srow = stored.rows.find((r) => r.door === 'window' && r.resource === 'da-one');
-    ok(stored.v === 1 && srow && srow.to.length === 2 && srow.to.every((e) => e.kind === 'conversation' && e.origin === 'user') && (fs.statSync(path.join(dir, 'grants.json')).mode & 0o777) === 0o600, 'the share is PERSISTED (data/grants.json — one row, door window, each entry its origin — v1, 0600)');
+    ok(stored.v === 1 && gateOf(srow) && srow.to.length === 2 && gateOf(srow.to.every((e) => e.kind === 'conversation' && e.origin === 'user')) && (fs.statSync(path.join(dir, 'grants.json')).mode & 0o777) === 0o600, 'the share is PERSISTED (data/grants.json — one row, door window, each entry its origin — v1, 0600)');
   }
   const list = await engine.list(f1);
-  ok(list.targets.length === 1 && list.targets[0].handle === 'da-one' && list.targets[0].lease === null && list.targets[0].via === 'session' && list.targets[0].mode === 'auto' && list.scope === 'shared with you' && list.verbs && typeof list.a11y.ok === 'boolean', 'shared: list = the live record with no lease, how it reaches me (session) and its mode, the scope named, the verbs and the a11y probe beside it');
+  ok(list.targets.length === 1 && list.targets[0].handle === 'da-one' && list.targets[0].lease === null && list.targets[0].via === 'session' && list.targets[0].mode === 'auto' && list.scope === 'shared with you' && gateOf(list.verbs) && typeof list.a11y.ok === 'boolean', 'shared: list = the live record with no lease, how it reaches me (session) and its mode, the scope named, the verbs and the a11y probe beside it');
   ok((await err(() => engine.snapshot('da-one', f1))).code === 'not_attached', 'snapshot without a lease ⇒ not_attached');
   ok((await err(() => engine.act('da-one', f1, { verb: 'click', ref: '@e1' }))).code === 'not_attached', 'act without a lease ⇒ not_attached');
   ok((await err(() => engine.attach('da-dead', f1))).code === 'not-found' && (await err(() => engine.attach('nope', f1))).code === 'not-found', 'an exited or unknown record is not-found');
   const a2 = engine.attach('da-one', f2);
   ok(a2.handle === 'da-one' && a2.resumed === false && a2.lease.sessionId === 's2', 'session 2 attaches');
   const leased = await err(() => engine.attach('da-one', f1));
-  ok(leased && leased.code === 'window_leased' && leased.holder === 's2' && /beta/.test(leased.message), 'one holder per window: session 1 is refused window_leased naming the holder');
+  ok(gateOf(leased) && leased.code === 'window_leased' && leased.holder === 's2' && verdictOf(/beta/.test(leased.message)), 'one holder per window: session 1 is refused window_leased naming the holder');
   ok((await err(() => engine.detach('da-one', f1))).code === 'not_attached', 'a non-holder cannot detach');
   ok(engine.detach('da-one', f2).detached === true, 'the holder detaches');
   ok(engine.attach('da-one', f1).resumed === false && engine.attach('da-one', f1).resumed === true, 'attach is idempotent for the holder (resumed)');
-  ok(engine.list && (await engine.list(f1)).targets[0].mine === true, 'list marks my lease');
+  ok(gateOf(engine.list) && (await engine.list(f1)).targets[0].mine === true, 'list marks my lease');
   const opened = await engine.open({ appId: 'gedit', label: 'Notes' }, f2);
-  ok(launched === 1 && opened.handle === 'da-new' && opened.attached && opened.lease.sessionId === 's2', 'open launches through the keeper and attaches the opener');
+  ok(launched === 1 && opened.handle === 'da-new' && gateOf(opened.attached) && opened.lease.sessionId === 's2', 'open launches through the keeper and attaches the opener');
   ok(engine.reachOf('da-new').rows.length === 1 && engine.reachOf('da-new').rows[0].by === 'self-open' && engine.reachOf('da-new').rows[0].principal.id === 'webui:s2' && (await err(() => engine.attach('da-new', f1))).code === 'not_exposed', 'D1\'s ONE exception: the window an agent opened is shared with ITS session (self-open) — and with nobody else');
   // AN EXEC IS A HUMAN'S (design-desktop-apps §5 / design §5.1.1; 2026-09-21): refused BY NAME before the keeper is asked
   const ex = await err(() => engine.open({ exec: '/usr/bin/xterm', args: ['-e', 'sh'] }, f2));
-  ok(ex && ex.code === 'exec_is_human' && /registry app/i.test(ex.message) && /vibespace-window list/.test(ex.message) && Array.isArray(ex.apps) && launched === 1, 'open with an exec is refused exec_is_human naming the remedy (registry ids via `list`) — the keeper never launched it');
+  ok(gateOf(ex) && ex.code === 'exec_is_human' && gateOf(/registry app/i.test(ex.message)) && gateOf(/vibespace-window list/.test(ex.message)) && gateOf(Array.isArray(ex.apps)) && launched === 1, 'open with an exec is refused exec_is_human naming the remedy (registry ids via `list`) — the keeper never launched it');
   ok((await err(() => engine.open({ appId: 'gedit', cwd: '/tmp' }, f2))).code === 'exec_is_human' && (await err(() => engine.open({ appId: 'gedit', args: [] }, f2))).code === 'exec_is_human' && launched === 1, '…and so are args / cwd beside an appId (the whole exec triple is the user\'s)');
-  ok(Array.isArray((await engine.list(f1)).apps), 'list carries the registry ids an agent may open (the refusal\'s remedy is real)');
+  ok(verdictOf(Array.isArray((await engine.list(f1)).apps)), 'list carries the registry ids an agent may open (the refusal\'s remedy is real)');
   // A BROWSER ROW IS A HUMAN'S (B-bfe6, design-desktop-apps §7.7; the 2026-09-23 verifier's probe1 §E launched a real
   // browser from the agent route with the agent's url/keepProfile silently dropped): refused BY NAME before the keeper
   {
     const br = await err(() => engine.open({ appId: 'chromium' }, f2));
-    ok(br && br.code === 'browser_is_human' && /vibespace-browser/.test(br.message) && /Google Chrome/.test(br.message) && launched === 1, 'open {appId:chromium} is refused browser_is_human naming the agent browser (`vibespace-browser`) — the keeper never launched it');
+    ok(gateOf(br) && br.code === 'browser_is_human' && gateOf(/vibespace-browser/.test(br.message)) && gateOf(/Google Chrome/.test(br.message)) && launched === 1, 'open {appId:chromium} is refused browser_is_human naming the agent browser (`vibespace-browser`) — the keeper never launched it');
     ok((await err(() => engine.open({ appId: 'vs-browser' }, f2))).code === 'browser_is_human' && (await err(() => engine.open({ app: 'chromium' }, f2))).code === 'browser_is_human' && launched === 1, '…any row carrying `browser` (a custom id too), by either spelling of the id');
     const u = await err(() => engine.open({ appId: 'gedit', url: 'https://agent.example/' }, f2));
     const kp = await err(() => engine.open({ appId: 'gedit', keepProfile: false }, f2));
-    ok(u && u.code === 'browser_is_human' && /^url/.test(u.message) && kp && kp.code === 'browser_is_human' && /^keepProfile/.test(kp.message) && launched === 1, '`url` / `keepProfile` in the agent body are refused by name, never silently dropped');
+    ok(gateOf(u) && u.code === 'browser_is_human' && gateOf(/^url/.test(u.message)) && gateOf(kp) && kp.code === 'browser_is_human' && gateOf(/^keepProfile/.test(kp.message)) && launched === 1, '`url` / `keepProfile` in the agent body are refused by name, never silently dropped');
     const apps = (await engine.list(f1)).apps.map((a) => a.id);
-    ok(apps.includes('gedit') && !apps.includes('chromium') && !apps.includes('vs-browser'), `list's "apps you may open" leaves the browser rows out (${apps.join(', ')})`);
+    ok(gateOf(apps.includes('gedit')) && !apps.includes('chromium') && !apps.includes('vs-browser'), `list's "apps you may open" leaves the browser rows out (${apps.join(', ')})`);
     const plain = await engine.open({ appId: 'gedit' }, f2);
     ok(plain.handle === 'da-new' && plain.lease.sessionId === 's2' && launched === 2, 'a non-browser registry row still opens through the keeper');
     ok(ROUTES.STATUS.browser_is_human === 403, 'the route maps browser_is_human to 403');
@@ -740,11 +740,11 @@ console.log('§4 the engine over a fake keeper + the routes');
       const e2 = M2.create({ keeper, dataDir: path.join(dir, 'mut'), env: () => base, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, log: { warn() { } } });
       const prevNew = records.get('da-new');   // the fake keeper mints ONE id — the control's launch overwrites the gedit record
       const o2 = await e2.open({ appId: 'chromium', url: 'https://agent.example/' }, f2);
-      ok(o2 && o2.handle && launched === 3, 'negative control: without the refusal the agent route LAUNCHES the browser row (and drops its url) — the leg above is what stops it');
+      ok(gateOf(o2) && gateOf(o2.handle) && launched === 3, 'negative control: without the refusal the agent route LAUNCHES the browser row (and drops its url) — the leg above is what stops it');
       records.set('da-new', prevNew);   // the browser the control launched is not a fixture of the legs below (a launched browser is the human's: T6 omits it from `list`)
     }
     // the tree is never written (B-0220): measured while the copy still exists
-    for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 })) ok(r.pass, '§4 tree: ' + r.name, r.pass ? undefined : r.detail);
+    for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 })) ok(verdictOf(r.pass), '§4 tree: ' + r.name, r.pass ? undefined : r.detail);
   }
   ok((await err(() => engine.act('da-one', f1, { verb: 'key', chord: 'ctrl+s; x' }))).code === 'bad_chord', 'a bad chord is refused before any backend is consulted');
   ok((await err(() => engine.act('da-one', f1, { verb: 'click' }))).code === 'bad-request' && (await err(() => engine.act('da-one', f1, { verb: 'dance' }))).code === 'bad-request', 'click without a ref or --at, or an unknown verb ⇒ bad-request');
@@ -754,68 +754,68 @@ console.log('§4 the engine over a fake keeper + the routes');
     const p0 = probeCalls;
     const rc = await err(() => engine.act('da-one', f1, { verb: 'click', ref: '@e1' }));
     const rt = await err(() => engine.act('da-one', f1, { verb: 'type', ref: '@e1', text: 'x' }));
-    ok(rc && rc.code === 'ref_unknown' && rt && rt.code === 'ref_unknown' && probeCalls === p0 && /no snapshot yet/.test(rc.message), `a ref before any snapshot ⇒ ref_unknown (snapshot first) — click and type, BEFORE any probe (${rc && rc.code} / ${rt && rt.code}, probes spawned: ${probeCalls - p0})`);
+    ok(gateOf(rc) && rc.code === 'ref_unknown' && gateOf(rt) && rt.code === 'ref_unknown' && probeCalls === p0 && verdictOf(/no snapshot yet/.test(rc.message)), `a ref before any snapshot ⇒ ref_unknown (snapshot first) — click and type, BEFORE any probe (${rc && rc.code} / ${rt && rt.code}, probes spawned: ${probeCalls - p0})`);
   }
   const w = engine.watch('da-one', f1);
-  ok(w.openSpec.action === 'openDesktopApp' && w.openSpec.id === 'da-one' && /Desktop-app window/.test(w.note), 'watch names the Desktop-app window (the whole private display) honestly');
+  ok(w.openSpec.action === 'openDesktopApp' && w.openSpec.id === 'da-one' && verdictOf(/Desktop-app window/.test(w.note)), 'watch names the Desktop-app window (the whole private display) honestly');
   ok(engine.dropSession('s2') === 1 && engine.leases().length === 1, 'the kill path drops a session\'s leases');
 
   if (!real) skip(`no real display/tree — the engine's tree legs (snapshot / click / type / injection / audit content) need §3's fixture, and here: ${realMissing}`);
   else {
     const snap = await engine.snapshot('da-one', f1);
-    ok(snap.nodes.length > 0 && snap.census && snap.nodes.every((n) => n.path === undefined), 'engine.snapshot returns agent views (no paths) with the census');
+    ok(snap.nodes.length > 0 && gateOf(snap.census) && verdictOf(snap.nodes.every((n) => n.path === undefined)), 'engine.snapshot returns agent views (no paths) with the census');
     const btn = snap.nodes.find((n) => (n.role === 'button' || n.role === 'push button') && n.name === 'Count');
     const fake = snap.nodes.find((n) => n.role === 'label' && n.name === 'Fake button (no Action)');
     const entry = snap.nodes.find((n) => n.editable);
     const before = helperCalls;
     const r = await engine.act('da-one', f1, { verb: 'click', ref: btn.ref });
-    ok(r.ok && r.did.by === 'node' && r.did.action === 'click' && helperCalls === before + 1, 'click @ref acts on the node through the helper');
+    ok(gateOf(r.ok) && r.did.by === 'node' && r.did.action === 'click' && helperCalls === before + 1, 'click @ref acts on the node through the helper');
     const noact = await err(() => engine.act('da-one', f1, { verb: 'click', ref: fake.ref }));
-    ok(noact && noact.code === 'node_has_no_action' && helperCalls === before + 1 && /never degraded/.test(noact.message) && /--at/.test(noact.message), 'THE LAW: a node without Action is refused by the ENGINE before any helper call — the refusal names the bounds and the audited point path as the agent\'s own decision');
+    ok(gateOf(noact) && noact.code === 'node_has_no_action' && helperCalls === before + 1 && gateOf(/never degraded/.test(noact.message)) && verdictOf(/--at/.test(noact.message)), 'THE LAW: a node without Action is refused by the ENGINE before any helper call — the refusal names the bounds and the audited point path as the agent\'s own decision');
     // mirror red on 2.369.181 (never a silent pass): the "WITH a backend" half is asserted only where one exists, else SKIPPED by name
     if (real.hasInjection) ok(noact.code === 'node_has_no_action', 'negative control: the refusal holds WITH an injection backend present (xdotool)');
     else skip('xdotool not on PATH — the "refusal holds WITH an injection backend present" control needs one (the rule itself is asserted just above)');
     const typed = await engine.act('da-one', f1, { verb: 'type', ref: entry.ref, text: 'engine text' });
-    ok(typed.ok && typed.did.chars === 11 && typed.did.ref === entry.ref, 'type @ref inserts through EditableText');
+    ok(gateOf(typed.ok) && typed.did.chars === 11 && typed.did.ref === entry.ref, 'type @ref inserts through EditableText');
     const bad = await err(() => engine.act('da-one', f1, { verb: 'type', ref: fake.ref, text: 'x' }));
-    ok(bad && bad.code === 'node_not_editable', 'type on a non-editable ref is refused');
+    ok(gateOf(bad) && bad.code === 'node_not_editable', 'type on a non-editable ref is refused');
     const stale = await err(() => engine.act('da-one', f1, { verb: 'click', ref: '@e9999' }));
-    ok(stale && stale.code === 'ref_unknown', 'a ref not in the last snapshot ⇒ ref_unknown');
+    ok(gateOf(stale) && stale.code === 'ref_unknown', 'a ref not in the last snapshot ⇒ ref_unknown');
     // injection through the engine: refused without a backend, allowed with one
     // P9b: the lease PERSISTS — a second engine over the SAME data dir is a restart and session 1 still holds da-one
     { ENGINE.landedIn(dir);   // B-574d browser-stores: the writes on disk before the restart reads them
       const again = ENGINE.create({ keeper, dataDir: dir, env: () => base, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, log: { warn() { } } });
       const l = again.leaseOf('da-one');
-      ok(l && l.sessionId === 's1' && l.origin === 'vibespace' && l.input === 'agent', 'a new engine over the same data dir still says session 1 holds da-one (persisted lease, input side fresh = agent)');
+      ok(gateOf(l) && l.sessionId === 's1' && l.origin === 'vibespace' && l.input === 'agent', 'a new engine over the same data dir still says session 1 holds da-one (persisted lease, input side fresh = agent)');
       ok((await err(() => again.attach('da-one', f2))).code === 'window_leased', 'and refuses session 2 exactly as before the restart'); }
     const noBins = ENGINE.create({ keeper, dataDir: path.join(dir, 'nobins'), env: () => base, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, log: { warn() { } } });
     noBins.grantReach('da-one', { kind: 'session', id: 's2' }); // lane E: its own data dir holds no share — the user shares it here
     noBins.attach('da-one', f2);
     const k = await err(() => noBins.act('da-one', f2, { verb: 'key', chord: 'ctrl+s' }));
-    ok(k && k.code === 'no_injection_backend' && Array.isArray(k.backends) && /xdotool not on PATH/.test(k.message), 'key without a wired backend ⇒ no_injection_backend carrying the probe rows');
+    ok(gateOf(k) && k.code === 'no_injection_backend' && gateOf(Array.isArray(k.backends)) && verdictOf(/xdotool not on PATH/.test(k.message)), 'key without a wired backend ⇒ no_injection_backend carrying the probe rows');
     const at = await err(() => noBins.act('da-one', f2, { verb: 'click', at: '10,10' }));
-    ok(at && at.code === 'no_injection_backend', 'click --at without a wired backend ⇒ the same refusal');
+    ok(gateOf(at) && at.code === 'no_injection_backend', 'click --at without a wired backend ⇒ the same refusal');
     ok((await err(() => noBins.act('da-one', f2, { verb: 'click', at: 'x,y' }))).code === 'bad-request', '--at wants integers');
     noBins.detach('da-one', f2);
     if (real.hasInjection) {
       const kk = await engine.act('da-one', f1, { verb: 'key', chord: 'ctrl+s' });
-      ok(kk.ok && kk.did.backend === 'xtest', 'key through the engine with xdotool present');
+      ok(gateOf(kk.ok) && kk.did.backend === 'xtest', 'key through the engine with xdotool present');
       const frame = snap.nodes.find((n) => n.role === 'frame');
       const pt = await engine.act('da-one', f1, { verb: 'click', at: `${frame.bounds.x + 5},${frame.bounds.y + 5}` });
-      ok(pt.ok && pt.did.by === 'point', 'a point click through the engine is by:point');
+      ok(gateOf(pt.ok) && pt.did.by === 'point', 'a point click through the engine is by:point');
     }
     const shot = await engine.screenshot('da-one', f1);
-    ok(shot.file && fs.existsSync(shot.file) && shot.cropped === true && shot.w > 0, 'engine.screenshot writes a PNG of the frame (cropped to the last snapshot\'s frame)');
+    ok(gateOf(shot.file) && gateOf(fs.existsSync(shot.file)) && shot.cropped === true && shot.w > 0, 'engine.screenshot writes a PNG of the frame (cropped to the last snapshot\'s frame)');
     try { fs.unlinkSync(shot.file); } catch { }
     // the audit stream
     const lines = fs.readFileSync(engine.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const clickLine = lines.find((l) => l.verb === 'click' && l.by === 'node' && l.ok);
     const typeLine = lines.find((l) => l.verb === 'type' && l.ok);
     const refusedLine = lines.find((l) => l.verb === 'click' && l.ok === false && l.code === 'node_has_no_action');
-    ok(clickLine && clickLine.node.role && clickLine.node.name === 'Count' && clickLine.node.action === 'click' && clickLine.sessionId === 's1' && clickLine.browserKey === 'bk-11111111', 'the audit line for a tree click names the node and its action ("clicked the button named Count")');
-    ok(typeLine && typeLine.chars === 11 && !('text' in typeLine) && !JSON.stringify(typeLine).includes('engine text'), 'the audit line for type records the length and NEVER the text');
-    ok(refusedLine && refusedLine.node.name === 'Fake button (no Action)', 'a refused act is audited with its code');
-    if (real.hasInjection) { const pl = lines.find((l) => l.verb === 'click' && l.by === 'point'); ok(pl && pl.at && typeof pl.at.x === 'number', 'a point click is audited by:point with its coordinates'); }
+    ok(gateOf(clickLine) && gateOf(clickLine.node.role) && clickLine.node.name === 'Count' && clickLine.node.action === 'click' && clickLine.sessionId === 's1' && clickLine.browserKey === 'bk-11111111', 'the audit line for a tree click names the node and its action ("clicked the button named Count")');
+    ok(gateOf(typeLine) && typeLine.chars === 11 && !('text' in typeLine) && !JSON.stringify(typeLine).includes('engine text'), 'the audit line for type records the length and NEVER the text');
+    ok(gateOf(refusedLine) && refusedLine.node.name === 'Fake button (no Action)', 'a refused act is audited with its code');
+    if (real.hasInjection) { const pl = lines.find((l) => l.verb === 'click' && l.by === 'point'); ok(gateOf(pl) && gateOf(pl.at) && typeof pl.at.x === 'number', 'a point click is audited by:point with its coordinates'); }
   }
 
   // takeover C3 (T6, design-browser-takeover §8) → LANE E (D4): a desktop-app BROWSER window is CLASSIFIED (the mark),
@@ -823,19 +823,19 @@ console.log('§4 the engine over a fake keeper + the routes');
   records.set('da-web', mk('da-web', { label: 'Firefox (yours)', browser: true }));            // lane-desk's record shape
   records.set('da-web2', mk('da-web2', { label: 'Chromium app', appId: 'chromium-app' }));    // the registry-row shape
   keeper.registry = () => [{ id: 'chromium-app', label: 'Chromium', browser: true, available: true }, { id: 'gedit', label: 'Text editor', available: true }];
-  ok(engine.isHumanBrowser(records.get('da-web')) && engine.isHumanBrowser(records.get('da-web2')) && !engine.isHumanBrowser(records.get('da-one')), 'isHumanBrowser holds for BOTH shapes (a record carrying `browser`, a record whose registry row carries it) and not for an ordinary app');
+  ok(gateOf(engine.isHumanBrowser(records.get('da-web'))) && gateOf(engine.isHumanBrowser(records.get('da-web2'))) && !engine.isHumanBrowser(records.get('da-one')), 'isHumanBrowser holds for BOTH shapes (a record carrying `browser`, a record whose registry row carries it) and not for an ordinary app');
   const hb = await err(() => engine.attach('da-web', f1));
-  ok(hb && hb.code === 'not_exposed' && !engine.leaseOf('da-web'), 'attach on an UNSHARED desktop-app browser ⇒ not_exposed (D1: hidden like every window) — no lease taken', hb && hb.message);
+  ok(gateOf(hb) && hb.code === 'not_exposed' && !engine.leaseOf('da-web'), 'attach on an UNSHARED desktop-app browser ⇒ not_exposed (D1: hidden like every window) — no lease taken', hb && hb.message);
   ok((await err(() => engine.attach('da-web2', f1))).code === 'not_exposed', '…and the registry-row shape the same');
   ok((await err(() => engine.snapshot('da-web', f1))).code === 'not_exposed' && (await err(() => engine.act('da-web2', f1, { verb: 'click', ref: '@e1' }))).code === 'not_exposed' && (await err(() => engine.screenshot('da-web', f1))).code === 'not_exposed' && (await err(() => engine.watch('da-web', f1))).code === 'not_exposed', 'snapshot / act / screenshot / watch on a guessed handle refuse the same (before any lease check)');
   const lw = await engine.list(f1);
-  ok(!lw.targets.some((r) => r.handle === 'da-web' || r.handle === 'da-web2') && lw.targets.some((r) => r.handle === 'da-one') && !lw.apps.some((a) => a.id === 'chromium-app') && lw.apps.some((a) => a.id === 'gedit'), '`list` omits them (not shared), and a browser registry row is not an id an agent may open (the user starts their own browser)');
+  ok(!lw.targets.some((r) => r.handle === 'da-web' || r.handle === 'da-web2') && gateOf(lw.targets.some((r) => r.handle === 'da-one')) && !lw.apps.some((a) => a.id === 'chromium-app') && verdictOf(lw.apps.some((a) => a.id === 'gedit')), '`list` omits them (not shared), and a browser registry row is not an id an agent may open (the user starts their own browser)');
   // D4 (the owner: "浏览器窗口不是也应该能给agent操作吗？"): SHARED, the user's browser is a target like any app — marked
   engine.grantReach('da-web', { kind: 'session', id: 's1' });
   const sw = engine.attach('da-web', f1);
-  ok(sw.handle === 'da-web' && sw.browser === true && /vibespace-browser/.test(sw.browserNote) && engine.leaseOf('da-web').sessionId === 's1', 'D4: once SHARED, the user\'s desktop-app browser attaches like any app — marked `browser`, with the note that the agent\'s own web work is `vibespace-browser`');
+  ok(sw.handle === 'da-web' && sw.browser === true && gateOf(/vibespace-browser/.test(sw.browserNote)) && engine.leaseOf('da-web').sessionId === 's1', 'D4: once SHARED, the user\'s desktop-app browser attaches like any app — marked `browser`, with the note that the agent\'s own web work is `vibespace-browser`');
   const lw2 = await engine.list(f1);
-  ok(lw2.targets.some((r) => r.handle === 'da-web' && r.browser === true && /the user's own browser/.test(r.note)) && !lw2.targets.some((r) => r.handle === 'da-web2'), '…and `list` shows it (marked) while the unshared one stays out');
+  ok(gateOf(lw2.targets.some((r) => r.handle === 'da-web' && r.browser === true && /the user's own browser/.test(r.note))) && !lw2.targets.some((r) => r.handle === 'da-web2'), '…and `list` shows it (marked) while the unshared one stays out');
   engine.detach('da-web', f1);
   ok(engine.attach('da-one', f1).handle === 'da-one', 'CONTROL: the same engine attaches an ordinary shared app (no `browser`) as before');
   // r1 (finding 3): the REAL registry — spread the way desktop-app-keeper.registry() spreads it, records
@@ -850,18 +850,18 @@ console.log('§4 the engine over a fake keeper + the routes');
     const saved = keeper.registry;
     keeper.registry = () => REAL.map((row) => ({ ...row, args: [...row.args], available: true, path: '/usr/bin/' + row.exec, reason: null, parkedUntil: null }));
     const browserRows = REAL.filter((r) => r.category === 'browser').map((r) => r.id);
-    ok(browserRows.length >= 2 && (shape === 'real rows' || REAL.every((r) => !('browser' in r))), `[${shape}] the leg's registry has its browser rows (${browserRows.join(', ')}) in the shape it names`);
+    ok(browserRows.length >= 2 && (shape === 'real rows' || verdictOf(REAL.every((r) => !('browser' in r)))), `[${shape}] the leg's registry has its browser rows (${browserRows.join(', ')}) in the shape it names`);
     for (const id of browserRows) records.set('da-real-' + id, mk('da-real-' + id, { label: REAL.find((r) => r.id === id).label, appId: id, exec: REAL.find((r) => r.id === id).exec }));
     records.set('da-real-gedit', mk('da-real-gedit', { label: 'gedit', appId: 'gedit', exec: 'gedit' }));
     records.set('da-real-adhoc', mk('da-real-adhoc', { label: 'chromium (ad hoc)', exec: '/usr/bin/chromium' }));
     for (const id of browserRows) {
       const e = await err(() => engine.attach('da-real-' + id, f1));
-      ok(engine.isHumanBrowser(records.get('da-real-' + id)) && e && e.code === 'not_exposed' && !engine.leaseOf('da-real-' + id), `[${shape}] the real \`${id}\` row's launch record is classified a browser — and, unshared, not_exposed, no lease taken`, e && (e.code + ' ' + e.message));
+      ok(gateOf(engine.isHumanBrowser(records.get('da-real-' + id))) && gateOf(e) && e.code === 'not_exposed' && !engine.leaseOf('da-real-' + id), `[${shape}] the real \`${id}\` row's launch record is classified a browser — and, unshared, not_exposed, no lease taken`, e && (e.code + ' ' + e.message));
     }
-    ok(engine.isHumanBrowser(records.get('da-real-adhoc')), `[${shape}] an AD-HOC launch of a registry browser's executable is the human's too (the exec names it)`);
+    ok(verdictOf(engine.isHumanBrowser(records.get('da-real-adhoc'))), `[${shape}] an AD-HOC launch of a registry browser's executable is the human's too (the exec names it)`);
     engine.grantReach('da-real-gedit', { kind: 'session', id: 's1' });
     const lr = await engine.list(f1);
-    ok(!lr.targets.some((r) => /^da-real-(?!gedit)/.test(r.handle)) && lr.targets.some((r) => r.handle === 'da-real-gedit') && !lr.apps.some((a) => browserRows.includes(a.id)) && lr.apps.some((a) => a.id === 'gedit'), `[${shape}] \`list\` omits them and \`open\` is never offered a browser row of the real registry`, JSON.stringify({ t: lr.targets.map((r) => r.handle), a: lr.apps.map((a) => a.id) }));
+    ok(!lr.targets.some((r) => /^da-real-(?!gedit)/.test(r.handle)) && gateOf(lr.targets.some((r) => r.handle === 'da-real-gedit')) && !lr.apps.some((a) => browserRows.includes(a.id)) && verdictOf(lr.apps.some((a) => a.id === 'gedit')), `[${shape}] \`list\` omits them and \`open\` is never offered a browser row of the real registry`, JSON.stringify({ t: lr.targets.map((r) => r.handle), a: lr.apps.map((a) => a.id) }));
     ok(!engine.isHumanBrowser(records.get('da-real-gedit')) && engine.attach('da-real-gedit', f1).handle === 'da-real-gedit', `[${shape}] CONTROL: the real \`gedit\` row, shared, attaches as before (and is not classified a browser)`);
     engine.detach('da-real-gedit', f1);
     for (const id of [...browserRows.map((x) => 'da-real-' + x), 'da-real-gedit', 'da-real-adhoc']) records.delete(id);
@@ -884,7 +884,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     const missedL = FX.launchers.filter((l) => !engine.isHumanBrowser(adhoc(l.exec, l.args)));
     ok(FX.launchers.length >= 5 && missedL.length === 0, `r2: …through a launcher too — flatpak run / snap run / env (allowed: ${missedL.map((l) => [l.exec, ...l.args].join(' ')).join('; ') || 'none'})`);
     const exes = [...new Set(FX.present.map((r) => r.exe).filter(Boolean))];
-    ok(exes.length >= 3 && exes.every((x) => require('../src/desktop-apps.js').browserLaunchVerdict({ exec: '/home/u/bin/web', exe: x }).by === 'process'), `r2: the RUNNING binaries a wrapper execs into are browsers by process (${exes.map((x) => x.split('/').pop()).join(', ')})`);
+    ok(exes.length >= 3 && verdictOf(exes.every((x) => require('../src/desktop-apps.js').browserLaunchVerdict({ exec: '/home/u/bin/web', exe: x }).by === 'process')), `r2: the RUNNING binaries a wrapper execs into are browsers by process (${exes.map((x) => x.split('/').pop()).join(', ')})`);
     const wrong = FX.controls.filter((c) => engine.isHumanBrowser(adhoc(c.exec, c.args)));
     ok(FX.controls.length >= 10 && wrong.length === 0, `r2 CONTROL: real non-browsers stay attachable — gedit, xterm, chromium-thumbnailer, infobrowser (GNU info), flatpak Thunderbird… (refused: ${wrong.map((c) => c.exec).join(', ') || 'none'})`);
     // r3 (browser finding 4): the verifier's ~80-shape sweep found niche bare-exec browsers and `env` with a
@@ -909,15 +909,15 @@ console.log('§4 the engine over a fake keeper + the routes');
     // the machine's own present browsers, live (SKIP with evidence where the box has none of them)
     const here = FX.present.filter((r) => r.exec.startsWith('/usr/') || r.exec.startsWith('/opt/') || r.exec.startsWith('/snap/')).filter((r) => fs.existsSync(r.exec));
     if (!here.length) skip(`r2: none of the fixture's browsers is installed here (${FX.present.map((r) => r.exec).join(', ')})`);
-    else ok(here.every((r) => engine.isHumanBrowser(adhoc(r.exec))), `r2: this machine's installed browsers (${here.map((r) => r.exec).join(', ')}) are refused by the exec the human would type`);
+    else ok(verdictOf(here.every((r) => engine.isHumanBrowser(adhoc(r.exec)))), `r2: this machine's installed browsers (${here.map((r) => r.exec).join(', ')}) are refused by the exec the human would type`);
     // the verifier's first repro, end to end — lane E: unshared it is refused and unlisted; shared it is a MARKED target
     records.set('da-r2-chrome', mk('da-r2-chrome', { label: 'google-chrome', exec: '/usr/bin/google-chrome', pids: { app: 4242, x: null, server: null, wm: null } }));
     const ec = await err(() => engine.attach('da-r2-chrome', f1));
     const lc = await engine.list(f1);
-    ok(ec && ec.code === 'not_exposed' && !engine.leaseOf('da-r2-chrome') && !lc.targets.some((r) => r.handle === 'da-r2-chrome'), 'r2: `vibespace-window attach` on an unshared dialog-launched google-chrome ⇒ not_exposed, no lease, not listed', ec && ec.message);
+    ok(gateOf(ec) && ec.code === 'not_exposed' && !engine.leaseOf('da-r2-chrome') && !lc.targets.some((r) => r.handle === 'da-r2-chrome'), 'r2: `vibespace-window attach` on an unshared dialog-launched google-chrome ⇒ not_exposed, no lease, not listed', ec && ec.message);
     engine.grantReach('da-r2-chrome', { kind: 'session', id: 's1' });
     const lc2 = await engine.list(f1);
-    ok(lc2.targets.some((r) => r.handle === 'da-r2-chrome' && r.browser === true) && engine.attach('da-r2-chrome', f1).browser === true, 'r2 → D4: shared, the same google-chrome is listed and attached, marked as the user\'s browser (the classification decides the MARK now)');
+    ok(gateOf(lc2.targets.some((r) => r.handle === 'da-r2-chrome' && r.browser === true)) && engine.attach('da-r2-chrome', f1).browser === true, 'r2 → D4: shared, the same google-chrome is listed and attached, marked as the user\'s browser (the classification decides the MARK now)');
     engine.detach('da-r2-chrome', f1);
     // the RUNNING process decides a wrapper nobody can name: a copy of the system shell named `chrome` (what
     // /opt/google/chrome/google-chrome execs into) behind an exec called `my-web` — and `gedit` the control.
@@ -930,11 +930,11 @@ console.log('§4 the engine over a fake keeper + the routes');
     try {
       const chromePid = runAs('chrome'), geditPid = runAs('gedit');
       for (let i = 0; i < 40 && !((procExeOwned(chromePid) || '').endsWith('/chrome') && (procExeOwned(geditPid) || '').endsWith('/gedit')); i++) await new Promise((r) => setTimeout(r, 25));
-      ok((procExeOwned(chromePid) || '').endsWith('/r2-proc/chrome'), 'r2: (the fixture process runs, /proc/<pid>/exe names it `chrome`)', procExeOwned(chromePid));
+      ok(verdictOf((procExeOwned(chromePid) || '').endsWith('/r2-proc/chrome')), 'r2: (the fixture process runs, /proc/<pid>/exe names it `chrome`)', procExeOwned(chromePid));
       records.set('da-r2-wrap', mk('da-r2-wrap', { label: 'my-web', exec: path.join(PD, 'my-web'), args: ['--profile', 'mine'], pids: { app: chromePid, x: null, server: null, wm: null } }));
       records.set('da-r2-sh', mk('da-r2-sh', { label: 'sh', exec: 'sh', args: ['-c', `exec ${path.join(PD, 'chrome')} 600`], pids: { app: chromePid, x: null, server: null, wm: null } }));
       records.set('da-r2-ctl', mk('da-r2-ctl', { label: 'my-editor', exec: path.join(PD, 'my-editor'), pids: { app: geditPid, x: null, server: null, wm: null } }));
-      ok(engine.isHumanBrowser(records.get('da-r2-wrap')) && engine.isHumanBrowser(records.get('da-r2-sh')), 'r2: a wrapper the human typed (`my-web`, `sh -c "exec …/chrome"`) is classified by the binary its RUNNING app process is (/proc/<pid>/exe)');
+      ok(gateOf(engine.isHumanBrowser(records.get('da-r2-wrap'))) && verdictOf(engine.isHumanBrowser(records.get('da-r2-sh'))), 'r2: a wrapper the human typed (`my-web`, `sh -c "exec …/chrome"`) is classified by the binary its RUNNING app process is (/proc/<pid>/exe)');
       engine.grantReach('da-r2-ctl', { kind: 'session', id: 's1' });
       ok(!engine.isHumanBrowser(records.get('da-r2-ctl')) && engine.attach('da-r2-ctl', f1).handle === 'da-r2-ctl', 'r2 CONTROL: the same wrapper shape running a non-browser (`gedit`) is not classified a browser (and, shared, attaches)');
       engine.detach('da-r2-ctl', f1);
@@ -947,7 +947,7 @@ console.log('§4 the engine over a fake keeper + the routes');
       const m = { exports: {} };
       new Function('module', 'exports', 'require', '__dirname', '__filename', r1src)(m, m.exports, require('module').createRequire(ep), path.dirname(ep), ep);
       const e1 = m.exports.create({ keeper, dataDir: path.join(dir, 'r1-engine'), env: () => base, activeSessions: sessions, wt, bins: { xdotool: null, gdbus: null }, log: { warn() { } }, procExe: () => null });
-      ok(r1src !== src && !e1.isHumanBrowser(adhoc('/usr/bin/google-chrome')) && !e1.isHumanBrowser(adhoc('flatpak', ['run', 'org.chromium.Chromium'])) && e1.isHumanBrowser(adhoc('/usr/bin/chromium')), 'r2 NEGATIVE CONTROL: the r1 rule (patched copy) allows google-chrome and a flatpak Chromium — only a registry row\'s own exec was caught');
+      ok(r1src !== src && !e1.isHumanBrowser(adhoc('/usr/bin/google-chrome')) && !e1.isHumanBrowser(adhoc('flatpak', ['run', 'org.chromium.Chromium'])) && verdictOf(e1.isHumanBrowser(adhoc('/usr/bin/chromium'))), 'r2 NEGATIVE CONTROL: the r1 rule (patched copy) allows google-chrome and a flatpak Chromium — only a registry row\'s own exec was caught');
     }
     for (const id of ['da-r2-chrome', 'da-r2-wrap', 'da-r2-sh', 'da-r2-ctl']) records.delete(id);
     keeper.registry = saved;
@@ -1006,35 +1006,35 @@ console.log('§4 the engine over a fake keeper + the routes');
       ok(!pr.ok && pr.code === sh.code, `shape "${sh.name}": evidence — the probe, asked in this environment, answers ${pr.ok ? 'YES' : pr.code} (${String(pr.why || '').slice(0, 110)})`);
       const o = await runShape(ENGINE, sh, sh.code);
       outs.push(o);
-      ok(o.click && o.click.code === 'ref_unknown' && o.type && o.type.code === 'ref_unknown' && o.preSpawns === 0, `  ${sh.code}: click @e1 / type @e3 before any snapshot ⇒ ref_unknown with NO probe spawned (${o.click && o.click.code} / ${o.type && o.type.code}, spawns ${o.preSpawns})`);
-      ok(o.snap && o.snap.code === 'mode_pixels' && o.snap.resolvedMode === 'pixels' && o.snap.reason && o.snap.reason.code === sh.code && String(o.snap.message).includes(`unreachable here (${sh.code}:`) && o.mi.resolved === 'pixels' && o.mi.why.includes(sh.code), `  ${sh.code}: the auto snapshot ⇒ mode_pixels naming the reason it saw, the resolution recorded (${o.snap && o.snap.code}: ${o.snap && String(o.snap.message).slice(0, 120)})`);
-      ok(o.am.mode.resolved === 'pixels' && o.am.mode.why.includes(`(${sh.code}:`) && /^vibespace-window screenshot /.test(o.am.next), `  ${sh.code}: attach resolves auto to pixels naming the reason, and points at screenshot (${o.am.mode.why.slice(0, 110)})`);
-      ok(o.typeBefore && o.typeBefore.code === 'no_injection_backend' && o.typeAfter && o.typeAfter.code === 'no_injection_backend' && o.miAfter.resolved === 'pixels' && o.miAfter.why.includes(`(${sh.code}:`), `  ${sh.code}: B-a38d — \`type\` with no ref after a RESTART acts as the resolved mode (pixels ⇒ keys; no xdotool here), exactly as before it (${o.typeBefore && o.typeBefore.code} → ${o.typeAfter && o.typeAfter.code}; re-resolved: ${o.miAfter.resolved})`);
+      ok(gateOf(o.click) && o.click.code === 'ref_unknown' && gateOf(o.type) && o.type.code === 'ref_unknown' && o.preSpawns === 0, `  ${sh.code}: click @e1 / type @e3 before any snapshot ⇒ ref_unknown with NO probe spawned (${o.click && o.click.code} / ${o.type && o.type.code}, spawns ${o.preSpawns})`);
+      ok(gateOf(o.snap) && o.snap.code === 'mode_pixels' && o.snap.resolvedMode === 'pixels' && gateOf(o.snap.reason) && o.snap.reason.code === sh.code && gateOf(String(o.snap.message).includes(`unreachable here (${sh.code}:`)) && o.mi.resolved === 'pixels' && verdictOf(o.mi.why.includes(sh.code)), `  ${sh.code}: the auto snapshot ⇒ mode_pixels naming the reason it saw, the resolution recorded (${o.snap && o.snap.code}: ${o.snap && String(o.snap.message).slice(0, 120)})`);
+      ok(o.am.mode.resolved === 'pixels' && gateOf(o.am.mode.why.includes(`(${sh.code}:`)) && verdictOf(/^vibespace-window screenshot /.test(o.am.next)), `  ${sh.code}: attach resolves auto to pixels naming the reason, and points at screenshot (${o.am.mode.why.slice(0, 110)})`);
+      ok(gateOf(o.typeBefore) && o.typeBefore.code === 'no_injection_backend' && gateOf(o.typeAfter) && o.typeAfter.code === 'no_injection_backend' && o.miAfter.resolved === 'pixels' && verdictOf(o.miAfter.why.includes(`(${sh.code}:`)), `  ${sh.code}: B-a38d — \`type\` with no ref after a RESTART acts as the resolved mode (pixels ⇒ keys; no xdotool here), exactly as before it (${o.typeBefore && o.typeBefore.code} → ${o.typeAfter && o.typeAfter.code}; re-resolved: ${o.miAfter.resolved})`);
     }
     const restartCodes = new Set(outs.map((o) => o.typeAfter && o.typeAfter.code));
-    ok(restartCodes.size === 1 && restartCodes.has('no_injection_backend'), `B-a38d THE LAW after a restart: ${SHAPES.length} missing capabilities, ONE code for \`type\` with no ref (${[...restartCodes].join(', ')})`);
+    ok(restartCodes.size === 1 && verdictOf(restartCodes.has('no_injection_backend')), `B-a38d THE LAW after a restart: ${SHAPES.length} missing capabilities, ONE code for \`type\` with no ref (${[...restartCodes].join(', ')})`);
     const codes = new Set(outs.flatMap((o) => [o.click && o.click.code, o.type && o.type.code, o.snap && o.snap.code]));
     const reasons = new Set(outs.map((o) => o.snap && o.snap.reason && o.snap.reason.code));
-    ok(codes.size === 2 && codes.has('ref_unknown') && codes.has('mode_pixels') && reasons.size === SHAPES.length, `THE LAW: ${SHAPES.length} different missing capabilities, ONE code per call (${[...codes].join(', ')}); the reasons differ (${[...reasons].join(', ')})`);
+    ok(codes.size === 2 && gateOf(codes.has('ref_unknown')) && gateOf(codes.has('mode_pixels')) && reasons.size === SHAPES.length, `THE LAW: ${SHAPES.length} different missing capabilities, ONE code per call (${[...codes].join(', ')}); the reasons differ (${[...reasons].join(', ')})`);
     // a caller's error is never folded: a helper answering bad-request under auto passes its own code through
     {
       const badReq = fakeR('rs-badreq.js', `process.stdout.write(JSON.stringify({ ok: false, code: 'bad-request', why: 'constructed caller error' }) + '\\n');`);
       const eB = ENGINE.create({ keeper, dataDir: path.join(dir, 'runner-shape-badreq'), env: () => runnerEnv, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, python: process.execPath, helper: badReq, log: { warn() { }, log() { } }, modeProbeMs: 0 });
       eB.grantReach('da-rs', { kind: 'session', id: 's1' }); eB.attach('da-rs', f1);
       const bq = await err(() => eB.snapshot('da-rs', f1));
-      ok(bq && bq.code === 'bad-request', `the fold is bounded to TREE_UNREACHABLE: a helper's bad-request under auto stays bad-request (${bq && bq.code})`);
+      ok(gateOf(bq) && bq.code === 'bad-request', `the fold is bounded to TREE_UNREACHABLE: a helper's bad-request under auto stays bad-request (${bq && bq.code})`);
       eB.shutdown();
     }
     // NEGATIVE CONTROL: the pre-fix order in a patched copy (outside the tree) answers the MACHINE in the same shapes
     {
       const srcE = fs.readFileSync(require.resolve('../src/server/window-targets-engine.js'), 'utf8');
       const pre = srcE.replace(/\n[^\n]*refEntry\(\); \/\/ PRECONDITION-BEFORE-PROBE\n/, '\n').replace("reachRecord(rec.id).mode === 'auto' && WT.treeUnreachable(r)) {", "reachRecord(rec.id).mode === 'auto' && false) {");
-      ok(pre !== srcE && !/PRECONDITION-BEFORE-PROBE/.test(pre) && /mode === 'auto' && false\) \{/.test(pre), 'control: the patch applies (the ref check back after the probe, the helper\'s code passed through)');
+      ok(pre !== srcE && !/PRECONDITION-BEFORE-PROBE/.test(pre) && verdictOf(/mode === 'auto' && false\) \{/.test(pre)), 'control: the patch applies (the ref check back after the probe, the helper\'s code passed through)');
       const Mpre = require(MUTW.write('src/server/window-targets-engine.js', pre, 'prefix-order'));
       const ctl = [];
       for (const sh of SHAPES) ctl.push({ sh, o: await runShape(Mpre, sh, `ctl-${sh.code}`) });
       const said = ctl.map(({ sh, o }) => `${sh.code}: click ${o.click && o.click.code} (spawns ${o.preSpawns}), snapshot ${o.snap && o.snap.code}`).join('; ');
-      ok(ctl.every(({ o }) => o.click && o.click.code === 'mode_pixels' && o.preSpawns > 0) && ctl.every(({ sh, o }) => o.snap && o.snap.code === sh.code), `NEGATIVE CONTROL: the pre-fix order answers the machine — the mirror's red reproduced (${said})`);
+      ok(gateOf(ctl.every(({ o }) => o.click && o.click.code === 'mode_pixels' && o.preSpawns > 0)) && verdictOf(ctl.every(({ sh, o }) => o.snap && o.snap.code === sh.code)), `NEGATIVE CONTROL: the pre-fix order answers the machine — the mirror's red reproduced (${said})`);
     }
     // B-a38d NEGATIVE CONTROL: without the pre-road probe, `type` with no ref after the restart asks the tree and answers the MACHINE
     {
@@ -1044,7 +1044,7 @@ console.log('§4 the engine over a fake keeper + the routes');
       const Mnp = require(MUTW.write('src/server/window-targets-engine.js', noProbe, 'a38d-noprobe'));
       const ctl = [];
       for (const sh of SHAPES) ctl.push({ sh, o: await runShape(Mnp, sh, `a38d-${sh.code}`) });
-      ok(ctl.every(({ sh, o }) => o.typeAfter && o.typeAfter.code === sh.code), `B-a38d NEGATIVE CONTROL: without the probe the restarted type answers the machine (${ctl.map(({ sh, o }) => `${sh.code} → ${o.typeAfter && o.typeAfter.code}`).join('; ')})`);
+      ok(verdictOf(ctl.every(({ sh, o }) => o.typeAfter && o.typeAfter.code === sh.code)), `B-a38d NEGATIVE CONTROL: without the probe the restarted type answers the machine (${ctl.map(({ sh, o }) => `${sh.code} → ${o.typeAfter && o.typeAfter.code}`).join('; ')})`);
     }
     for (const id of ['da-rs', 'da-rs2']) records.delete(id);
   }
@@ -1068,36 +1068,36 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok((await err(() => e5.attach('da-e1', b))).code === 'not_exposed', 'a group row: a session NOT in the group is refused not_exposed');
     groupsOfMap.s2 = ['task-ops'];
     const lb = await e5.list(b);
-    ok(lb.targets.some((r) => r.handle === 'da-e1' && r.via === 'group') && e5.attach('da-e1', b).handle === 'da-e1', 'the moment the session joins the group it lists (via group) and attaches — "every session of the group, live now or later"');
-    ok(bc5.some((m) => m.type === 'window-reach-updated' && m.reach.some((v) => v.handle === 'da-e1' && v.rows[0].principal.kind === 'group')), 'every share change is broadcast (window-reach-updated) — the multi-client law');
+    ok(gateOf(lb.targets.some((r) => r.handle === 'da-e1' && r.via === 'group')) && e5.attach('da-e1', b).handle === 'da-e1', 'the moment the session joins the group it lists (via group) and attaches — "every session of the group, live now or later"');
+    ok(verdictOf(bc5.some((m) => m.type === 'window-reach-updated' && m.reach.some((v) => v.handle === 'da-e1' && v.rows[0].principal.kind === 'group'))), 'every share change is broadcast (window-reach-updated) — the multi-client law');
     // revoke mid-lease: the holder loses its lease NOW, its next verb is not_exposed, the audit names it
     groupsOfMap.s2 = [];
     ok((await err(() => e5.snapshot('da-e1', b))).code === 'not_exposed' && !e5.leaseOf('da-e1'), 'leaving the group mid-lease: the next verb answers not_exposed and the lease is dropped there');
     e5.grantReach('da-e1', { kind: 'session', id: 's2' });
     e5.attach('da-e1', b);
     const rv = e5.revokeReach('da-e1', { kind: 'session', id: 'codex:conv-b' });
-    ok(rv.revoked.changed && rv.revoked.leaseDropped === true && !e5.leaseOf('da-e1') && rv.rows.length === 1 && rv.rows[0].principal.kind === 'group', 'REVOKE while it holds the lease: its row goes, its lease goes AT ONCE (the group row stays — only its own row)');
+    ok(gateOf(rv.revoked.changed) && rv.revoked.leaseDropped === true && !e5.leaseOf('da-e1') && rv.rows.length === 1 && rv.rows[0].principal.kind === 'group', 'REVOKE while it holds the lease: its row goes, its lease goes AT ONCE (the group row stays — only its own row)');
     const afterRevoke = await err(() => e5.act('da-e1', b, { verb: 'key', chord: 'Return' }));
-    ok(afterRevoke && afterRevoke.code === 'not_exposed', 'the holder\'s next verb: not_exposed');
+    ok(gateOf(afterRevoke) && afterRevoke.code === 'not_exposed', 'the holder\'s next verb: not_exposed');
     const aud5 = () => fs.readFileSync(e5.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    ok(aud5().some((l) => l.verb === 'lease-dropped' && l.by === 'user' && /revoked/.test(l.why)) && aud5().some((l) => l.verb === 'reach-revoke' && l.by === 'user'), 'the audit names the revoke and the dropped lease (by:user)');
+    ok(gateOf(aud5().some((l) => l.verb === 'lease-dropped' && l.by === 'user' && /revoked/.test(l.why))) && verdictOf(aud5().some((l) => l.verb === 'reach-revoke' && l.by === 'user')), 'the audit names the revoke and the dropped lease (by:user)');
     // lane grants-unify — «除了»: the window shared with the group, one member LEFT OUT while it holds the lease
     {
       groupsOfMap.s2 = ['task-ops'];
       e5.attach('da-e1', b);
       const ex = e5.setReachExcept('da-e1', [{ kind: 'session', id: 's2' }]);
-      ok(ex.excepted.changed && ex.excepted.leaseDropped === true && !e5.leaseOf('da-e1') && ex.except.length === 1 && ex.except[0].id === 'conv-b', '«除了»: leaving a group member OUT while it holds the lease drops the lease AT ONCE (a narrowing is a revoke); the exception is stored under its conversation key');
+      ok(gateOf(ex.excepted.changed) && ex.excepted.leaseDropped === true && !e5.leaseOf('da-e1') && ex.except.length === 1 && ex.except[0].id === 'conv-b', '«除了»: leaving a group member OUT while it holds the lease drops the lease AT ONCE (a narrowing is a revoke); the exception is stored under its conversation key');
       const xe = await err(() => e5.attach('da-e1', b));
-      ok(xe && xe.code === 'excepted' && xe.message.includes(RE.EXCEPTED_SENTENCE), 'the member left out is refused `excepted` BY NAME — the exception and where the user lifts it');
+      ok(gateOf(xe) && xe.code === 'excepted' && verdictOf(xe.message.includes(RE.EXCEPTED_SENTENCE)), 'the member left out is refused `excepted` BY NAME — the exception and where the user lifts it');
       ok(!(await e5.list(b)).targets.some((r) => r.handle === 'da-e1'), '…and the window is not listed to it');
       const own = e5.grantReach('da-e1', { kind: 'session', id: 's2' });
       ok(own.except.length === 0 && e5.attach('da-e1', b).handle === 'da-e1', 'sharing with the member BY NAME lifts its exception (its own row counts; it cannot be both)');
       e5.detach('da-e1', b);
       const conflict = await err(() => e5.setReachExcept('da-e1', [{ kind: 'session', id: 's2' }]));
-      ok(conflict && conflict.code === 'except_conflicts', 'a member shared with by name cannot also be left out (except_conflicts)');
+      ok(gateOf(conflict) && conflict.code === 'except_conflicts', 'a member shared with by name cannot also be left out (except_conflicts)');
       e5.revokeReach('da-e1', { kind: 'session', id: 's2' });
       const row = e5.reachOf('da-e1').rows.find((r) => r.principal.kind === 'group');
-      ok(row && row.live.some((x) => x.sessionId === 's2'), '(the group row reaches s2 again once nothing leaves it out)');
+      ok(gateOf(row) && verdictOf(row.live.some((x) => x.sessionId === 's2')), '(the group row reaches s2 again once nothing leaves it out)');
       groupsOfMap.s2 = [];
     }
     // the opener exception in the engine, D6 in the engine: two sessions, two windows, both acting, a cross act refused
@@ -1106,7 +1106,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     e5.grantReach('da-e1', { kind: 'session', id: 's2' }); e5.grantReach('da-e2', { kind: 'session', id: 's1' }); // both agents reach both windows — the LEASE is what separates them
     e5.attach('da-e1', a); e5.attach('da-e2', b);
     const cross = await err(() => e5.act('da-e1', b, { verb: 'click', at: '1,1' }));
-    ok(cross && cross.code === 'not_attached' && e5.leaseOf('da-e1').sessionId === 's1' && e5.leaseOf('da-e2').sessionId === 's2', 'D6: two agents hold two windows at once; one acting on the OTHER\'s window is not_attached (one holder per window)');
+    ok(gateOf(cross) && cross.code === 'not_attached' && e5.leaseOf('da-e1').sessionId === 's1' && e5.leaseOf('da-e2').sessionId === 's2', 'D6: two agents hold two windows at once; one acting on the OTHER\'s window is not_attached (one holder per window)');
     // THE MODE TABLE at the engine (D7)
     e5.setShareMode('da-e1', 'pixels');
     const snapPx = await err(() => e5.snapshot('da-e1', a));
@@ -1115,28 +1115,28 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok(snapPx.code === 'mode_pixels' && snapPx.message === RE.PIXELS_SENTENCE && refPx.code === 'mode_pixels' && typePx.code === 'mode_pixels', 'a PIXEL share refuses snapshot / click @ref / type @ref by the owner\'s sentence — before any helper call');
     const keyPx = await err(() => e5.act('da-e1', a, { verb: 'key', chord: 'Return' }));
     ok(keyPx === null || keyPx.code !== 'mode_pixels', `…while the pixel verbs pass the mode gate (key: ${keyPx ? keyPx.code : 'ok'})`);
-    ok(aud5().some((l) => l.verb === 'mode-changed' && l.from === 'auto' && l.to === 'pixels' && l.by === 'user' && l.sessionId === 's1'), 'the switch took effect at the holder\'s NEXT verb, audited mode-changed auto → pixels (by:user)');
+    ok(verdictOf(aud5().some((l) => l.verb === 'mode-changed' && l.from === 'auto' && l.to === 'pixels' && l.by === 'user' && l.sessionId === 's1')), 'the switch took effect at the holder\'s NEXT verb, audited mode-changed auto → pixels (by:user)');
     e5.setShareMode('da-e1', 'auto');
     const am = await e5.attachWithMode('da-e2', b);
     const e2resolved = am.mode.resolved;
-    ok(am.mode.mode === 'auto' && e2resolved === 'pixels' && /no accessibility tree|unreachable here/.test(am.mode.why), `attach resolves AUTO by a probe of the app's tree and says why (${e2resolved}: ${am.mode.why})`);
+    ok(am.mode.mode === 'auto' && e2resolved === 'pixels' && verdictOf(/no accessibility tree|unreachable here/.test(am.mode.why)), `attach resolves AUTO by a probe of the app's tree and says why (${e2resolved}: ${am.mode.why})`);
     // mirror red on 2.369.181: this leg ran only without §3's fixture, and there the helper's own code leaked through
     // (a11y_unavailable on the runner). It runs on EVERY box now: the reason differs (no app on this bus / the tree
     // unreachable there), the code does not
     const sn2 = await err(() => e5.snapshot('da-e2', b));
-    ok(sn2 && sn2.code === 'mode_pixels' && sn2.resolvedMode === 'pixels' && String(sn2.message).startsWith(e5.modeInfo('da-e2').why) && /no accessibility tree|unreachable here/.test(sn2.message), `an auto window with no tree: the snapshot (the probe) is refused mode_pixels naming why (${sn2 && sn2.code}: ${sn2 && String(sn2.message).slice(0, 160)})`);
+    ok(gateOf(sn2) && sn2.code === 'mode_pixels' && sn2.resolvedMode === 'pixels' && gateOf(String(sn2.message).startsWith(e5.modeInfo('da-e2').why)) && verdictOf(/no accessibility tree|unreachable here/.test(sn2.message)), `an auto window with no tree: the snapshot (the probe) is refused mode_pixels naming why (${sn2 && sn2.code}: ${sn2 && String(sn2.message).slice(0, 160)})`);
     // the scroll verb's refusals (no backend here, or a bad direction)
     const sc = await err(() => e5.act('da-e2', b, { verb: 'scroll', direction: 'sideways' }));
-    ok(sc && ['bad-request', 'no_injection_backend'].includes(sc.code), `scroll: a bad direction / no backend is refused by name (${sc && sc.code})`);
-    ok(await WT.injectClick({ bins: { xdotool: '/bin/true' }, xenv: {}, x: 1, y: 1, button: 4 }).then((r) => r.code === 'bad-request' && /the wheel is/.test(r.why)), 'click --button 4 is refused by name (M8: a coerced wheel button became a LEFT click)');
+    ok(gateOf(sc) && verdictOf(['bad-request', 'no_injection_backend'].includes(sc.code)), `scroll: a bad direction / no backend is refused by name (${sc && sc.code})`);
+    ok(verdictOf(await WT.injectClick({ bins: { xdotool: '/bin/true' }, xenv: {}, x: 1, y: 1, button: 4 }).then((r) => r.code === 'bad-request' && /the wheel is/.test(r.why))), 'click --button 4 is refused by name (M8: a coerced wheel button became a LEFT click)');
     ok((await WT.injectClick({ bins: { xdotool: '/bin/true' }, xenv: {}, x: 1, y: 1, button: 4 })).code === 'bad-request' && (await WT.injectScroll({ bins: { xdotool: '/bin/true' }, xenv: {}, direction: 'down', by: 99 })).code === 'bad-request' && (await WT.injectType({ bins: { xdotool: '/bin/true' }, xenv: {}, text: '' })).code === 'bad-request', 'the pixel road refuses a wheel button on click, > 20 notches, an empty type — by name');
     const stubArgs = [];
     const fakeBin = path.join(dir, 'fake-xdotool.sh'); fs.writeFileSync(fakeBin, `#!/bin/sh\nprintf '%s\\n' "$@" >> ${JSON.stringify(path.join(dir, 'xdotool.args'))}\n`); fs.chmodSync(fakeBin, 0o755);
     await WT.injectClick({ bins: { xdotool: fakeBin }, xenv: {}, x: 5, y: 6 }); await WT.injectKey({ bins: { xdotool: fakeBin }, xenv: {}, chord: WT.parseChord('Return'), focus: { x: 1, y: 2 } }); await WT.injectType({ bins: { xdotool: fakeBin }, xenv: {}, text: '--help me', replace: true }); await WT.injectScroll({ bins: { xdotool: fakeBin }, xenv: {}, x: 3, y: 4, direction: 'down', by: 2 });
     const argv = fs.readFileSync(path.join(dir, 'xdotool.args'), 'utf8').split('\n');
     stubArgs.push(...argv);
-    ok(!argv.includes('--sync') && argv.join(' ').includes('mousemove 5 6 click 1') && argv.join(' ').includes('mousemove 1 2 key --clearmodifiers Return'), 'M9: no `--sync` on any pointer move (a move to the CURRENT point waited 7 s, and the second key in a row failed)');
-    ok(argv.join(' ').includes('key --clearmodifiers ctrl+a type --clearmodifiers --delay 12 -- --help me') && argv.join(' ').includes('mousemove 3 4 click --repeat 2 --delay 20 5'), 'type is ONE argv item after `--` (never read as an option), --replace selects first; scroll = button 5 × N at the point');
+    ok(!argv.includes('--sync') && gateOf(argv.join(' ').includes('mousemove 5 6 click 1')) && verdictOf(argv.join(' ').includes('mousemove 1 2 key --clearmodifiers Return')), 'M9: no `--sync` on any pointer move (a move to the CURRENT point waited 7 s, and the second key in a row failed)');
+    ok(gateOf(argv.join(' ').includes('key --clearmodifiers ctrl+a type --clearmodifiers --delay 12 -- --help me')) && verdictOf(argv.join(' ').includes('mousemove 3 4 click --repeat 2 --delay 20 5')), 'type is ONE argv item after `--` (never read as an option), --replace selects first; scroll = button 5 × N at the point');
     // the pixel road on the REAL fixture window: a keeper that names its windows ⇒ screenshot in WINDOW coordinates, --at mapped
     if (!real) skip(`the pixel-road legs on a real window need §3's fixture display, and here: ${realMissing}`);
     else {
@@ -1162,10 +1162,10 @@ console.log('§4 the engine over a fake keeper + the routes');
           const pc = await ePx.act('da-one', a, { verb: 'click', at });
           let after = before;
           for (let i = 0; i < 20 && after === before; i++) { await sleep(150); const s2 = await WT.snapshotTarget({ pids: [real.pid], env: base }); after = s2.ok ? labelOf(s2) : after; }
-          ok(pc.did.coords === 'window' && after !== before && /^canvas click \d+ at/.test(after || ''), `a PIXEL-mode click --at ${at} (a pixel of the screenshot) is mapped through the origin and lands on the canvas (${before} → ${after})`);
+          ok(pc.did.coords === 'window' && after !== before && verdictOf(/^canvas click \d+ at/.test(after || '')), `a PIXEL-mode click --at ${at} (a pixel of the screenshot) is mapped through the origin and lands on the canvas (${before} → ${after})`);
         }
         const out = await err(() => ePx.act('da-one', a, { verb: 'click', at: `${plan.w + 5},1` }));
-        ok(out && out.code === 'outside_window', 'a point outside the window\'s image ⇒ outside_window (never clamped)');
+        ok(gateOf(out) && out.code === 'outside_window', 'a point outside the window\'s image ⇒ outside_window (never clamped)');
       }
       ePx.shutdown();
     }
@@ -1176,11 +1176,11 @@ console.log('§4 the engine over a fake keeper + the routes');
     records.set('da-rel1', { ...records.get('da-rel1'), state: 'exited', replacedBy: 'da-rel2' });
     records.set('da-rel2', mk('da-rel2', { label: 'Relaunched', startedAt: 2 }));
     const carried = e5.reachOf('da-rel2');
-    ok(carried && carried.mode === 'pixels' && carried.rows.length === 1 && carried.rows[0].principal.id === 'conv-a' && aud5().some((l) => l.verb === 'reach-carried' && l.from === 'da-rel1' && l.handle === 'da-rel2'), 'a relaunched window KEEPS its share: the record follows `replacedBy` to the successor (mode and rows), audited reach-carried');
+    ok(gateOf(carried) && carried.mode === 'pixels' && carried.rows.length === 1 && carried.rows[0].principal.id === 'conv-a' && verdictOf(aud5().some((l) => l.verb === 'reach-carried' && l.from === 'da-rel1' && l.handle === 'da-rel2')), 'a relaunched window KEEPS its share: the record follows `replacedBy` to the successor (mode and rows), audited reach-carried');
     records.set('da-rel3', mk('da-rel3', { label: 'Gone' })); e5.grantReach('da-rel3', { kind: 'session', id: 's1' }); records.set('da-rel3', { ...records.get('da-rel3'), state: 'exited' });
     const rc = e5.reconcile({ graceMs: 60000 });
     e5.storesLanded();   // B-574d browser-stores: the pruned share on disk before the file is read
-    ok(rc.pruned >= 1 && !JSON.parse(fs.readFileSync(e5.reachFile, 'utf8')).windows['da-rel3'] && JSON.parse(fs.readFileSync(e5.reachFile, 'utf8')).windows['da-rel2'], 'a share lives as long as its window: reconcile prunes the ended one (the carried one stays)');
+    ok(rc.pruned >= 1 && !JSON.parse(fs.readFileSync(e5.reachFile, 'utf8')).windows['da-rel3'] && verdictOf(JSON.parse(fs.readFileSync(e5.reachFile, 'utf8')).windows['da-rel2']), 'a share lives as long as its window: reconcile prunes the ended one (the carried one stays)');
     for (const id of ['da-rel1', 'da-rel2', 'da-rel3']) records.delete(id);
     // LANE E VERIFY (2026-09-25, the verifier's minor — a reach leak across an await) + VERIFY R2 (2026-09-25, M1 / L4 /
     // L5): a revoke / a group left / a takeover / the tier-3 switch going off that lands WHILE a verb awaits (a probe, the
@@ -1316,16 +1316,16 @@ console.log('§4 the engine over a fake keeper + the routes');
       }
       // the REAL engine: every leg green
       const Er = enginesOf(ENGINE, 'real');
-      for (const leg of LEGS) { const o = await runLeg(Er, leg); ok(o.pass, leg.name, { code: o.code, acts: o.acts, killed: o.killed, did: o.did, ms: o.ms, fired: o.fired, shots: [o.shotsBefore, o.shotsAfter], threw: o.threw }); }
+      for (const leg of LEGS) { const o = await runLeg(Er, leg); ok(verdictOf(o.pass), leg.name, { code: o.code, acts: o.acts, killed: o.killed, did: o.did, ms: o.ms, fired: o.fired, shots: [o.shotsBefore, o.shotsAfter], threw: o.threw }); }
       const aud = fs.readFileSync(Er.plain.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
       ok(aud.filter((l) => l.code === 'not_exposed' && l.by === 'reach').length >= 8, 'every stopped verb is audited by:reach not_exposed');
-      ok(aud.some((l) => l.cancelled === true && l.partial === true && l.by === 'inject' && l.code === 'window_paused') && aud.some((l) => l.cancelled === true && l.partial === true && l.code === 'not_exposed'), 'L5: a cancelled injection is audited by:inject {cancelled, partial} with the refusal that stopped it');
+      ok(gateOf(aud.some((l) => l.cancelled === true && l.partial === true && l.by === 'inject' && l.code === 'window_paused')) && verdictOf(aud.some((l) => l.cancelled === true && l.partial === true && l.code === 'not_exposed')), 'L5: a cancelled injection is audited by:inject {cancelled, partial} with the refusal that stopped it');
       // the linearization's other side: a tree act whose synchronous part ran before the revoke finishes (it ran before the revoke);
       // r1623: the app's own handle's door answers synchronously, so no await stands in front of that part
       await prep(Er.plain, { mode: 'tree', refs: true });
       const pre = Er.plain.act('da-race', fD, { verb: 'click', ref: '@e1' }); Er.plain.revokeReach('da-race', P);
       const preR = await pre.then((r) => r, (e) => ({ code: e.code }));
-      ok(preR.ok === true && acts.includes('do_action') && !Er.plain.leaseOf('da-race'), 'an act that RAN before the revoke stands — a tree act\'s synchronous part (its re-check and its call) runs wholly before a revoke made in the same tick (r1623: linearized, never across) — and the lease is gone for the next verb');
+      ok(preR.ok === true && gateOf(acts.includes('do_action')) && !Er.plain.leaseOf('da-race'), 'an act that RAN before the revoke stands — a tree act\'s synchronous part (its re-check and its call) runs wholly before a revoke made in the same tick (r1623: linearized, never across) — and the lease is gone for the next verb');
       // L4 (r2): the Task Group store THROWS while a group row holds the window — the verb is refused BY NAME, the lease is KEPT
       const l4 = async (E) => {
         await prep(E, { mode: 'tree', via: 'group' });
@@ -1340,21 +1340,21 @@ console.log('§4 the engine over a fake keeper + the routes');
         return { code, kept, keptAfterRevoke: !!E.leaseOf('da-race') && rv.revoked.leaseDropped === false, byStore: a.some((l) => l.code === 'reach_unreadable' && l.by === 'store'), byUser: a.some((l) => l.verb === 'lease-dropped' && l.by === 'user' && /revoked/.test(l.why)) };
       };
       const u = await l4(Er.plain);
-      ok(u.code === 'reach_unreadable' && u.kept && u.byStore && !u.byUser, `L4: a THROWING group store ⇒ the verb refused reach_unreadable (by name), the lease KEPT, audited by:store — never "exposure revoked by the user" (${JSON.stringify(u)})`);
-      ok(u.keptAfterRevoke, 'L4: a revoke of an UNRELATED principal during the fault leaves the group-held lease alone');
+      ok(u.code === 'reach_unreadable' && gateOf(u.kept) && gateOf(u.byStore) && !u.byUser, `L4: a THROWING group store ⇒ the verb refused reach_unreadable (by name), the lease KEPT, audited by:store — never "exposure revoked by the user" (${JSON.stringify(u)})`);
+      ok(verdictOf(u.keptAfterRevoke), 'L4: a revoke of an UNRELATED principal during the fault leaves the group-held lease alone');
       await prep(Er.plain, { mode: 'tree', via: 'group' });
       groupsThrow = true;
       const lst = await Er.plain.list(fD);
       groupsThrow = false;
-      ok(lst.reachUnreadable === 1 && /could not be read/.test(lst.note) && !lst.targets.some((r) => r.handle === 'da-race'), `L4: \`list\` during the fault counts the undecidable window and says so, never lists it (${lst.reachUnreadable}; ${lst.note.slice(0, 90)}…)`);
+      ok(lst.reachUnreadable === 1 && gateOf(/could not be read/.test(lst.note)) && !lst.targets.some((r) => r.handle === 'da-race'), `L4: \`list\` during the fault counts the undecidable window and says so, never lists it (${lst.reachUnreadable}; ${lst.note.slice(0, 90)}…)`);
       let det = null; groupsThrow = true; try { det = Er.plain.detach('da-race', fD); } catch (e) { det = { code: e.code }; } groupsThrow = false;
-      ok(det && det.detached === true, 'L4: giving a window up (detach) never waits on the store');
+      ok(gateOf(det) && det.detached === true, 'L4: giving a window up (detach) never waits on the store');
       // r3 F2: an injection its own TIMEOUT killed carries its progress like a cancelled one — `did` {partial, released}
       // on the thrown refusal AND on the audit line (the route / CLI read `did`); forced through the REAL primitive
       const lastAudit = (E) => { const ls = fs.readFileSync(E.auditFile, 'utf8').trim().split('\n'); return JSON.parse(ls[ls.length - 1]); };
       const F2LEG = { name: 'r3 F2: an injection killed by its TIMEOUT (the real primitive, a forced 150 ms limit) answers inject_failed WITH did {partial, released} and the audit line says partial — never a bare error', prep: { mode: 'pixels' }, injectMode: 'timeout', at: 'type-keys', user: 'none', run: (E) => E.act('da-race', fD, { verb: 'type', text: 'a text its limit cuts short' }),
         want: (o, E) => { const l = lastAudit(E); return o.code === 'inject_failed' && !!o.did && o.did.partial === true && !o.did.cancelled && o.did.verb === 'type' && !!o.did.released && o.did.released.ok === true && l.by === 'inject' && l.code === 'inject_failed' && l.partial === true && !!l.released && l.released.ok === true; } };
-      { const o = await runLeg(Er, F2LEG); ok(o.pass, F2LEG.name, { code: o.code, did: o.did, ms: o.ms, last: lastAudit(Er.plain) }); }
+      { const o = await runLeg(Er, F2LEG); ok(verdictOf(o.pass), F2LEG.name, { code: o.code, did: o.did, ms: o.ms, last: lastAudit(Er.plain) }); }
       // r3 F5: the launch audit during a store fault — a Task Group row nobody was FOUND in while a membership read threw is
       // UNDECIDED, never "unmatched" (the r2 fold counted the very group the store could not read as nobody's)
       const f5 = async (E) => {
@@ -1370,7 +1370,7 @@ console.log('§4 the engine over a fake keeper + the routes');
         return { during: { unmatched: during.unmatched, undecided: during.undecided }, clear: { unmatched: clear.unmatched, undecided: clear.undecided }, groupRowUndecided: !!(gRow && gRow.undecided) };
       };
       const f5r = await f5(Er.plain);
-      ok(f5r.during.unmatched === 1 && f5r.during.undecided === 1 && f5r.groupRowUndecided && f5r.clear.unmatched === 2 && f5r.clear.undecided === 0, `r3 F5: during a store fault the launch audit counts the group row UNDECIDED (1) and only the ended session unmatched (1); the share view marks the row undecided; with the store back the same (empty) group is unmatched (${JSON.stringify(f5r)})`);
+      ok(f5r.during.unmatched === 1 && f5r.during.undecided === 1 && gateOf(f5r.groupRowUndecided) && f5r.clear.unmatched === 2 && f5r.clear.undecided === 0, `r3 F5: during a store fault the launch audit counts the group row UNDECIDED (1) and only the ended session unmatched (1); the share view marks the row undecided; with the store back the same (empty) group is unmatched (${JSON.stringify(f5r)})`);
       // THROUGH THE ROUTE AND THE CLI (r2): a cancelled act answers its refusal WITH `did.partial` and the CLI says it
       // stopped part-way; reach_unreadable is a 503 and the CLI's wording table has its line
       {
@@ -1383,20 +1383,20 @@ console.log('§4 the engine over a fake keeper + the routes');
         trigger = { at: 'type-keys', fire: USER.takeover(Er.plain), delayMs: 100, fired: false };
         const raw = await fetch(`${base0}/api/agent/window/act`, { method: 'POST', headers: { Authorization: 'Bearer vsst_race', 'Content-Type': 'application/json' }, body: JSON.stringify({ handle: 'da-race', verb: 'type', text: 'a long text' }) });
         const rj = await raw.json();
-        ok(raw.status === 409 && rj.code === 'window_paused' && rj.did && rj.did.partial === true && rj.did.verb === 'type', `the route answers a cancelled type 409 window_paused WITH did.partial (${raw.status} ${JSON.stringify(rj.did)})`);
+        ok(raw.status === 409 && rj.code === 'window_paused' && gateOf(rj.did) && rj.did.partial === true && rj.did.verb === 'type', `the route answers a cancelled type 409 window_paused WITH did.partial (${raw.status} ${JSON.stringify(rj.did)})`);
         await prep(Er.plain, { mode: 'pixels' }); injectMs = 400;
         trigger = { at: 'type-keys', fire: USER.takeover(Er.plain), delayMs: 100, fired: false };
         const c1 = await cliR('type', 'da-race', 'a long text');
-        ok(c1.status === 1 && /\[window_paused\]/.test(c1.stderr) && /STOPPED PART-WAY/.test(c1.stderr) && /after the handback/.test(c1.stderr), '`vibespace-window type` cut short by a takeover prints [window_paused] and that it STOPPED PART-WAY (look again after the handback)', c1.stderr);
+        ok(c1.status === 1 && gateOf(/\[window_paused\]/.test(c1.stderr)) && gateOf(/STOPPED PART-WAY/.test(c1.stderr)) && verdictOf(/after the handback/.test(c1.stderr)), '`vibespace-window type` cut short by a takeover prints [window_paused] and that it STOPPED PART-WAY (look again after the handback)', c1.stderr);
         trigger = null; injectMs = 2;
         // r3 F2 through the route and the CLI: a type its TIMEOUT killed answers 502 inject_failed WITH did.partial
         await prep(Er.plain, { mode: 'pixels' }); injectMode = 'timeout';
         const rawT = await fetch(`${base0}/api/agent/window/act`, { method: 'POST', headers: { Authorization: 'Bearer vsst_race', 'Content-Type': 'application/json' }, body: JSON.stringify({ handle: 'da-race', verb: 'type', text: 'a text its limit cuts short' }) });
         const rjT = await rawT.json();
-        ok(rawT.status === 502 && rjT.code === 'inject_failed' && rjT.did && rjT.did.partial === true && !rjT.did.cancelled && rjT.did.released && rjT.did.released.ok === true, `r3 F2: the route answers a TIMEOUT-killed type 502 inject_failed WITH did {partial, released} (${rawT.status} ${JSON.stringify(rjT.did)})`);
+        ok(rawT.status === 502 && rjT.code === 'inject_failed' && gateOf(rjT.did) && rjT.did.partial === true && !rjT.did.cancelled && gateOf(rjT.did.released) && rjT.did.released.ok === true, `r3 F2: the route answers a TIMEOUT-killed type 502 inject_failed WITH did {partial, released} (${rawT.status} ${JSON.stringify(rjT.did)})`);
         await prep(Er.plain, { mode: 'pixels' }); injectMode = 'timeout';
         const c3 = await cliR('type', 'da-race', 'a text its limit cuts short');
-        ok(c3.status === 1 && /\[inject_failed\]/.test(c3.stderr) && /STOPPED PART-WAY/.test(c3.stderr) && /keys it held were released/.test(c3.stderr), '`vibespace-window type` killed by its time limit prints [inject_failed] and that it STOPPED PART-WAY (the keys it held released)', c3.stderr);
+        ok(c3.status === 1 && gateOf(/\[inject_failed\]/.test(c3.stderr)) && gateOf(/STOPPED PART-WAY/.test(c3.stderr)) && verdictOf(/keys it held were released/.test(c3.stderr)), '`vibespace-window type` killed by its time limit prints [inject_failed] and that it STOPPED PART-WAY (the keys it held released)', c3.stderr);
         injectMode = null;
         await prep(Er.plain, { mode: 'tree', via: 'group' });
         groupsThrow = true;
@@ -1404,8 +1404,8 @@ console.log('§4 the engine over a fake keeper + the routes');
         const uj = await u503.json();
         const c2 = await cliR('snapshot', 'da-race');
         groupsThrow = false;
-        ok(u503.status === 503 && uj.code === 'reach_unreadable' && uj.error.includes(RE.REACH_UNREADABLE_SENTENCE) && !!Er.plain.leaseOf('da-race'), `reach_unreadable through the route: 503, the sentence, the lease kept (${u503.status} ${uj.code})`);
-        ok(c2.status === 1 && /\[reach_unreadable\]/.test(c2.stderr) && /could not be read — try again in a moment; nothing was done and your lease \(if you hold one\) is kept/.test(c2.stderr), '`vibespace-window snapshot` prints [reach_unreadable] and its remedy line', c2.stderr);
+        ok(u503.status === 503 && uj.code === 'reach_unreadable' && gateOf(uj.error.includes(RE.REACH_UNREADABLE_SENTENCE)) && !!Er.plain.leaseOf('da-race'), `reach_unreadable through the route: 503, the sentence, the lease kept (${u503.status} ${uj.code})`);
+        ok(c2.status === 1 && gateOf(/\[reach_unreadable\]/.test(c2.stderr)) && verdictOf(/could not be read — try again in a moment; nothing was done and your lease \(if you hold one\) is kept/.test(c2.stderr)), '`vibespace-window snapshot` prints [reach_unreadable] and its remedy line', c2.stderr);
         srvR.close();
       }
       for (const E of [Er.plain, Er.win, Er.desk]) E.shutdown();
@@ -1437,7 +1437,7 @@ console.log('§4 the engine over a fake keeper + the routes');
       console.log(`    re-check sites in the engine (grep-derived): ${sites.map((s0) => `L${s0.line} ${s0.text.replace(/rec, facts, /, '…')}${s0.annotated ? ' [no-await-before]' : ''}`).join(' · ')}; definitions skipped: ${defs.join(', ')}`);
       console.log(`    the store-read holds' own checks (on ${[...HOLD_NAMES].join(', ') || 'none'}; counted apart, never mutated here — test-window-stores-held owns their law): ${holdChecks.join(' · ') || 'none'}`);
       ok(HOLD_NAMES.size === 2 && holdChecks.length === 5, `the store-read holds' own checks are counted APART from the lease re-check sites: ${holdChecks.length} on ${[...HOLD_NAMES].join(', ')} (pinned: a new one is said here, never mutated as a lease re-check)`, holdChecks);
-      ok(sites.length >= 15 && sites.some((x) => x.neuter === 'first'), `the census found the re-check sites (${sites.length}, list's own among them — r3 F4) — a census that finds none judges nothing`);
+      ok(sites.length >= 15 && verdictOf(sites.some((x) => x.neuter === 'first')), `the census found the re-check sites (${sites.length}, list's own among them — r3 F4) — a census that finds none judges nothing`);
       for (const s0 of sites.filter((x) => x.annotated)) {
         // the claim: no `await` between the nearest preceding re-check and this one (definitions do not count)
         const prev = sites.filter((x) => x.index < s0.index).pop();
@@ -1481,7 +1481,7 @@ console.log('§4 the engine over a fake keeper + the routes');
         ok(!co.pass && co.code === null && co.killed.length === 0 && co.ms >= 380, `control (F1) FAILS "${leg.name.slice(0, 70)}…": the object-keyed act runs to its end through the takeover (answered ${co.code || 'ok'} after ${co.ms} ms, killed ${co.killed.length})`);
       }
       const co0 = await runLeg(Eo, LEGS.find((l) => /TAKEOVER 100 ms into a running type/.test(l.name)));
-      ok(co0.pass, 'control (F1): …while the r2 leg without a re-attach still passes on it (the control differs ONLY in which object holds the act)');
+      ok(verdictOf(co0.pass), 'control (F1): …while the r2 leg without a re-attach still passes on it (the control differs ONLY in which object holds the act)');
       for (const E of [Eo.plain, Eo.win, Eo.desk]) E.shutdown();
       // r3 F2 control: the pre-r3 fromHelper (a helper refusal thrown WITHOUT `did`)
       const noDid = srcE.replace('const cut = cutOf(r);', 'const cut = null;');
@@ -1500,7 +1500,7 @@ console.log('§4 the engine over a fake keeper + the routes');
       ok(!(cu.during.unmatched === 1 && cu.during.undecided === 1 && cu.groupRowUndecided), `control (F5) FAILS: the fault is counted as nobody (${JSON.stringify(cu.during)})`);
       for (const E of [Eu.plain, Eu.win, Eu.desk]) E.shutdown();
       try { process.kill(sleeper.pid, 'SIGKILL'); } catch { }
-      for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 + sites.filter((x) => !x.annotated).length + 5 })) ok(r.pass, '§5 tree: ' + r.name, r.pass ? undefined : r.detail);
+      for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 + sites.filter((x) => !x.annotated).length + 5 })) ok(verdictOf(r.pass), '§5 tree: ' + r.name, r.pass ? undefined : r.detail);
     }
     // THE REQUEST (D3) over a stub ladder
     const REQ = require('../src/server/window-request.js');
@@ -1511,8 +1511,8 @@ console.log('§4 the engine over a fake keeper + the routes');
     const rq = REQ.create({ engine: e5, deliver, activeSessions: sess5, now: () => clock, log: { log() { } } });
     records.set('da-e3', mk('da-e3', { label: 'Calculator E', startedAt: 1 }));
     const free = await rq.request({ handle: 'da-e3', sessionId: 's1', note: 'add 7 and 8' });
-    ok(free.delivered === 'next-turn' && free.granted && stash.length === 1 && stash[0].cid === 'conv-a' && stash[0].source === 'window-request' && stash[0].fromName === REQ.FROM_NAME && /handle da-e3/.test(stash[0].text) && /"add 7 and 8"/.test(stash[0].text) && delivered.length === 0, 'FREE (default): the request GRANTS the window to that agent (by:request) and rides its NEXT turn — the stash, nothing delivered, nothing billed');
-    ok(e5.reachOf('da-e3').rows.some((r) => r.by === 'request' && r.principal.id === 'conv-a'), '…the grant is written with its origin (the dialog says "you asked it to take control")');
+    ok(free.delivered === 'next-turn' && gateOf(free.granted) && stash.length === 1 && stash[0].cid === 'conv-a' && stash[0].source === 'window-request' && stash[0].fromName === REQ.FROM_NAME && gateOf(/handle da-e3/.test(stash[0].text)) && gateOf(/"add 7 and 8"/.test(stash[0].text)) && delivered.length === 0, 'FREE (default): the request GRANTS the window to that agent (by:request) and rides its NEXT turn — the stash, nothing delivered, nothing billed');
+    ok(verdictOf(e5.reachOf('da-e3').rows.some((r) => r.by === 'request' && r.principal.id === 'conv-a')), '…the grant is written with its origin (the dialog says "you asked it to take control")');
     const woke = await rq.request({ handle: 'da-e3', sessionId: 's1', wake: true, pressed: PRESS });
     ok(woke.delivered === 'woken' && delivered.length === 1 && delivered[0].opts.spendReason === 'window-share-request' && delivered[0].opts.kind === 'peer' && delivered[0].opts.fromName === REQ.FROM_NAME, 'WAKE: through the gated ladder under the declared reason window-share-request, kind peer (the user\'s words)');
     const paced = await rq.request({ handle: 'da-e3', sessionId: 's1', wake: true, pressed: PRESS });
@@ -1523,13 +1523,13 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok(np.delivered === 'next-turn' && np.whyCode === 'not_pressed' && delivered.length === 1 && stash.length === 3, 'r2: a wake-now with NO press (a request with no page) never wakes — it rides the next turn, said by name (not_pressed)', JSON.stringify(np));
     ladder = async () => ({ ok: false, refused: 'spend', why: 'hour-cap', reason: 'spend budget: hour-cap' });
     const spent = await rq.request({ handle: 'da-e3', sessionId: 's1', wake: true, pressed: PRESS });
-    ok(spent.delivered === 'next-turn' && spent.whyCode === 'spend' && /budget/.test(spent.why) && stash.length === 4, 'the spend ceiling refused the wake (fail closed): the words ride the next turn and the answer says why');
+    ok(spent.delivered === 'next-turn' && spent.whyCode === 'spend' && gateOf(/budget/.test(spent.why)) && stash.length === 4, 'the spend ceiling refused the wake (fail closed): the words ride the next turn and the answer says why');
     ok((await err(() => rq.request({ handle: 'da-e3', sessionId: 'nobody' }))).code === 'not_live' && (await err(() => rq.request({ handle: 'da-e3', sessionId: 's3' }))).code === 'no_conversation' && (await err(() => rq.request({ handle: 'da-e3', sessionId: 'sh' }))).code === 'not_live' && (await err(() => rq.request({ handle: 'da-gone', sessionId: 's1' }))).code === 'not-found', 'refused by name: a session that is gone (not_live), one with no conversation yet (no_conversation), a shell terminal (no agent), a window that is not live');
     ladder = async (cid, text, opts) => { delivered.push({ cid, text, opts }); return { ok: true }; };
     e5.grantReach('da-e3', { kind: 'session', id: 's2' });
     e5.attach('da-e3', b);
     const ended = await rq.request({ handle: 'da-e3', sessionId: 's1', endHold: true });
-    ok(ended.endedHold === true && !e5.leaseOf('da-e3') && aud5().some((l) => l.verb === 'lease-dropped' && l.handle === 'da-e3' && /asked alpha to take control/.test(l.why)), 'endHold: the other agent\'s hold ENDS (by:user, audited "the user asked alpha to take control") so the asked agent can attach');
+    ok(ended.endedHold === true && !e5.leaseOf('da-e3') && verdictOf(aud5().some((l) => l.verb === 'lease-dropped' && l.handle === 'da-e3' && /asked alpha to take control/.test(l.why))), 'endHold: the other agent\'s hold ENDS (by:user, audited "the user asked alpha to take control") so the asked agent can attach');
     // THE HUMAN ROUTES (src/routes/desktop-apps.js)
     const DROUTES = require('../src/routes/desktop-apps.js');
     records.set('da-remote', mk('da-remote', { label: 'On the box', hostId: 'box', hostLabel: 'Box' }));
@@ -1543,9 +1543,9 @@ console.log('§4 the engine over a fake keeper + the routes');
     const srv2 = await new Promise((res) => { const s = app2.listen(0, '127.0.0.1', () => res(s)); });
     const hapi = async (method, p, body, token = null) => { const r = await fetch(`http://127.0.0.1:${srv2.address().port}${p}`, { method, headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };
     const g0 = await hapi('GET', '/api/desktop/apps/da-e3/reach');
-    ok(g0.status === 200 && g0.j.handle === 'da-e3' && Array.isArray(g0.j.rows) && g0.j.rows.every((r) => Array.isArray(r.live)) && g0.j.modeInfo && 'lease' in g0.j, 'GET …/reach answers the rows (with who each reaches NOW), the mode, the lease');
+    ok(g0.status === 200 && g0.j.handle === 'da-e3' && gateOf(Array.isArray(g0.j.rows)) && gateOf(g0.j.rows.every((r) => Array.isArray(r.live))) && gateOf(g0.j.modeInfo) && 'lease' in g0.j, 'GET …/reach answers the rows (with who each reaches NOW), the mode, the lease');
     const post = await hapi('POST', '/api/desktop/apps/da-e3/reach', { principal: { kind: 'group', id: 'task-ops', name: 'Ops' } });
-    ok(post.status === 200 && post.j.rows.some((r) => r.principal.kind === 'group' && r.by === 'user'), 'POST …/reach grants (a Task Group by its id)');
+    ok(post.status === 200 && verdictOf(post.j.rows.some((r) => r.principal.kind === 'group' && r.by === 'user')), 'POST …/reach grants (a Task Group by its id)');
     const del = await hapi('DELETE', '/api/desktop/apps/da-e3/reach', { principal: { kind: 'group', id: 'task-ops' } });
     ok(del.status === 200 && !del.j.rows.some((r) => r.principal.kind === 'group'), 'DELETE …/reach revokes that principal\'s row');
     const put = await hapi('PUT', '/api/desktop/apps/da-e3/reach/mode', { mode: 'pixels' });
@@ -1554,16 +1554,16 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok(req2.status === 200 && req2.j.delivered === 'next-turn', 'POST …/reach/request asks the agent (free: its next turn)');
     ok((await hapi('POST', '/api/desktop/apps/da-e3/reach/request', { sessionId: 'nobody' })).status === 404 && (await hapi('POST', '/api/desktop/apps/da-e3/reach/request', { sessionId: 's3' })).j.code === 'no_conversation' && (await hapi('POST', '/api/desktop/apps/da-e3/reach/request', {})).status === 400, 'the request\'s refusals by status: not_live 404, no_conversation 409, no sessionId 400');
     const agentCodes = await Promise.all([['GET', '/api/desktop/apps/da-e3/reach'], ['POST', '/api/desktop/apps/da-e3/reach', { principal: { kind: 'session', id: 's1' } }], ['DELETE', '/api/desktop/apps/da-e3/reach', { principal: { kind: 'session', id: 's1' } }], ['PUT', '/api/desktop/apps/da-e3/reach/mode', { mode: 'tree' }], ['POST', '/api/desktop/apps/da-e3/reach/request', { sessionId: 's1' }], ['POST', '/api/desktop/apps', { appId: 'gedit', share: { principals: [{ kind: 'session', id: 'claude:conv-a' }] } }]].map(([m, p, bd]) => hapi(m, p, bd, 'vsst_aaaa')));
-    ok(agentCodes.every((r) => r.status === 403 && r.j.code === 'agent_forbidden'), `HUMAN-ONLY: every share route (and a launch carrying a share) refuses an agent's session token 403 agent_forbidden (${agentCodes.map((r) => r.status).join(',')})`);
+    ok(verdictOf(agentCodes.every((r) => r.status === 403 && r.j.code === 'agent_forbidden')), `HUMAN-ONLY: every share route (and a launch carrying a share) refuses an agent's session token 403 agent_forbidden (${agentCodes.map((r) => r.status).join(',')})`);
     ok((await hapi('GET', '/api/desktop/apps/da-e3/reach', null, 'jbt_x')).j.code === 'agent_forbidden', '…a job token too');
     const rem = await hapi('GET', '/api/desktop/apps/da-remote/reach');
-    ok(rem.status === 400 && rem.j.code === 'share_local_only' && /Box/.test(rem.j.error), 'a window on a PAIRED machine ⇒ 400 share_local_only (agents address this machine\'s windows only)');
+    ok(rem.status === 400 && rem.j.code === 'share_local_only' && verdictOf(/Box/.test(rem.j.error)), 'a window on a PAIRED machine ⇒ 400 share_local_only (agents address this machine\'s windows only)');
     ok((await hapi('GET', '/api/desktop/apps/da-nope/reach')).status === 404, 'an unknown window ⇒ 404');
     const lnch = await hapi('POST', '/api/desktop/apps', { appId: 'gedit', share: { principals: [{ kind: 'session', id: 'codex:conv-b', name: 'beta' }], mode: 'tree' } });
     if (lnch.status !== 200 || !lnch.j.reach) console.log('    launch answered', lnch.status, JSON.stringify(lnch.j).slice(0, 400));
-    ok(lnch.status === 200 && lnch.j.id === 'da-launched' && !('share' in hubLaunches[0].body) && lnch.j.reach && lnch.j.reach.mode === 'tree' && lnch.j.reach.rows.some((r) => r.principal.id === 'conv-b'), 'D2 before launch: the launch\'s share is stripped from the keeper\'s body and applied to the NEW window (mode tree, beta by its key)');
+    ok(lnch.status === 200 && lnch.j.id === 'da-launched' && !('share' in hubLaunches[0].body) && gateOf(lnch.j.reach) && lnch.j.reach.mode === 'tree' && verdictOf(lnch.j.reach.rows.some((r) => r.principal.id === 'conv-b')), 'D2 before launch: the launch\'s share is stripped from the keeper\'s body and applied to the NEW window (mode tree, beta by its key)');
     const launchAud = () => aud5().filter((l) => l.verb === 'reach-launch').pop();
-    ok(launchAud() && launchAud().unmatched === 0, 'r2 (M2): the launch\'s audit counts the rows nobody answers to now — 0 for a live agent');
+    ok(gateOf(launchAud()) && launchAud().unmatched === 0, 'r2 (M2): the launch\'s audit counts the rows nobody answers to now — 0 for a live agent');
     const lnchGone = await hapi('POST', '/api/desktop/apps', { appId: 'gedit', share: { principals: [{ kind: 'session', id: 'claude:conv-ended', name: 'gone' }, { kind: 'group', id: 'task-deleted', name: 'Old group' }], mode: 'pixels' } });
     ok(lnchGone.status === 200 && launchAud().unmatched === 2 && launchAud().principals === 2, `…and ${launchAud() && launchAud().unmatched} for a remembered session that ended + a Task Group nobody is in (the rows are still written — the launcher said so in words)`);
     const lr = await hapi('POST', '/api/desktop/apps', { appId: 'gedit', host: 'box', share: { principals: [{ kind: 'session', id: 's2' }] } });
@@ -1584,7 +1584,7 @@ console.log('§4 the engine over a fake keeper + the routes');
   const api = async (method, p, body, token = 'vsst_aaaa') => { const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };
   ok((await api('GET', '/api/agent/window/targets', null, null)).status === 401 && (await api('GET', '/api/agent/window/targets', null, 'vsst_nope')).status === 401, 'no / unknown token ⇒ 401');
   const t = await api('GET', '/api/agent/window/targets');
-  ok(t.status === 200 && t.j.targets.length === 2 && t.j.targets.some((r) => r.handle === 'da-one') && t.j.targets.some((r) => r.handle === 'da-web' && r.browser === true), 'GET targets answers the rows SHARED with me (da-one, the shared browser da-web — marked)', JSON.stringify((t.j.targets || []).map((r) => r.handle)));
+  ok(t.status === 200 && t.j.targets.length === 2 && gateOf(t.j.targets.some((r) => r.handle === 'da-one')) && verdictOf(t.j.targets.some((r) => r.handle === 'da-web' && r.browser === true)), 'GET targets answers the rows SHARED with me (da-one, the shared browser da-web — marked)', JSON.stringify((t.j.targets || []).map((r) => r.handle)));
   ok((await api('GET', '/api/agent/window/targets?host=other')).status === 400 && (await api('POST', '/api/agent/window/attach', { handle: 'da-one', host: 'box' })).j.code === 'unsupported-host', 'a non-local host is refused by name');
   ok((await api('POST', '/api/agent/window/attach', { handle: 'nope' })).status === 404 && (await api('POST', '/api/agent/window/attach', {})).status === 400, 'attach: unknown ⇒ 404, no handle ⇒ 400');
   ok((await api('POST', '/api/agent/window/act', { handle: 'da-one', verb: 'key', chord: 'x;y' })).status === 400, 'a bad chord ⇒ 400');
@@ -1597,7 +1597,7 @@ console.log('§4 the engine over a fake keeper + the routes');
   ok(hr.status === 403 && hr.j.code === 'not_exposed' && hr.j.handle === 'da-web2', 'the route maps not_exposed to 403 (an unshared window)');
   ok((await api('POST', '/api/agent/window/snapshot', { handle: 'da-web2' })).j.code === 'not_exposed', '…snapshot through the route too');
   const hs = await api('POST', '/api/agent/window/attach', { handle: 'da-web' });
-  ok(hs.status === 200 && hs.j.browser === true && hs.j.mode && hs.j.mode.mode === 'auto' && typeof hs.j.mode.why === 'string', 'the route\'s attach answers the share\'s MODE (auto resolved at attach, why) — a shared browser attaches (D4)');
+  ok(hs.status === 200 && hs.j.browser === true && gateOf(hs.j.mode) && hs.j.mode.mode === 'auto' && typeof hs.j.mode.why === 'string', 'the route\'s attach answers the share\'s MODE (auto resolved at attach, why) — a shared browser attaches (D4)');
   await api('POST', '/api/agent/window/detach', { handle: 'da-web' });
   ok(ROUTES.STATUS.browser_is_human === 403 && (await api('POST', '/api/agent/window/open', { appId: 'chromium-app' })).j.code === 'browser_is_human', '`open` of a browser row stays browser_is_human (403) — the user starts their own browser');
   { // the shipped CLI prints the refusal and its remedy line
@@ -1605,11 +1605,11 @@ console.log('§4 the engine over a fake keeper + the routes');
     const CLI = path.join(new URL('..', import.meta.url).pathname, 'data/bin/vibespace-window');
     const cli = (...a) => new Promise((resolve) => execFile(process.execPath, [CLI, ...a], { env: { PATH: process.env.PATH, HOME: dir, VIBESPACE_API: `http://127.0.0.1:${port}`, VIBESPACE_SESSION_TOKEN: 'vsst_aaaa' }, encoding: 'utf8', timeout: 20000 }, (e, stdout, stderr) => resolve({ status: e ? e.code : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })));
     const r = await cli('attach', 'da-web2');
-    ok(r.status === 1 && /\[not_exposed\]/.test(r.stderr) && r.stderr.includes('the user has not shared this window with you — ask them (they can share it from the window\'s ⋯ menu)'), '`vibespace-window attach <unshared window>` prints [not_exposed] and the remedy line', r.stderr);
+    ok(r.status === 1 && gateOf(/\[not_exposed\]/.test(r.stderr)) && verdictOf(r.stderr.includes('the user has not shared this window with you — ask them (they can share it from the window\'s ⋯ menu)')), '`vibespace-window attach <unshared window>` prints [not_exposed] and the remedy line', r.stderr);
     const ro = await cli('open', 'chromium-app');
-    ok(ro.status === 1 && /\[browser_is_human\]/.test(ro.stderr) && /the user starts their own browser and can share it with you/.test(ro.stderr), '`vibespace-window open <browser row>` prints [browser_is_human] — "the user starts their own browser and can share it with you"', ro.stderr);
+    ok(ro.status === 1 && gateOf(/\[browser_is_human\]/.test(ro.stderr)) && verdictOf(/the user starts their own browser and can share it with you/.test(ro.stderr)), '`vibespace-window open <browser row>` prints [browser_is_human] — "the user starts their own browser and can share it with you"', ro.stderr);
     const rl = await cli('list');
-    ok(rl.status === 0 && /mode: auto/.test(rl.stdout) && /\[the user's browser\]/.test(rl.stdout) && /only windows the user shared with you/.test(rl.stdout), '`list` prints each row\'s mode and marks the user\'s shared browser', rl.stdout.slice(0, 600));
+    ok(rl.status === 0 && gateOf(/mode: auto/.test(rl.stdout)) && gateOf(/\[the user's browser\]/.test(rl.stdout)) && verdictOf(/only windows the user shared with you/.test(rl.stdout)), '`list` prints each row\'s mode and marks the user\'s shared browser', rl.stdout.slice(0, 600));
   }
   const uncovered = [...WT.REFUSALS, ...RE.REFUSALS].filter((c) => !(c in ROUTES.STATUS));
   ok(uncovered.length === 0, `every typed refusal has a status (${uncovered.join(', ') || 'none uncovered'}) — a 500 for a typed refusal would be a silent failure`);
@@ -1658,31 +1658,31 @@ console.log('§4 the engine over a fake keeper + the routes');
   const a = await cli6(CLI6, ['screenshot', 'da-shot']);
   const aPath = a.stdout.split(' (')[0].trim();
   const aMode = (() => { try { return fs.statSync(shotDir6).mode & 0o777; } catch { return null; } })();
-  ok(a.status === 0 && path.dirname(aPath) === shotDir6 && /^da-shot-\d+\.png$/.test(path.basename(aPath)) && isPng(aPath) && /the window's own pixels/.test(a.stdout), `no --out ⇒ the PNG lands under <tmpdir>/vibespace-window-<uid>/ and its path is printed (${a.stdout.trim().slice(0, 140)})`, a.stderr);
+  ok(a.status === 0 && path.dirname(aPath) === shotDir6 && gateOf(/^da-shot-\d+\.png$/.test(path.basename(aPath))) && gateOf(isPng(aPath)) && verdictOf(/the window's own pixels/.test(a.stdout)), `no --out ⇒ the PNG lands under <tmpdir>/vibespace-window-<uid>/ and its path is printed (${a.stdout.trim().slice(0, 140)})`, a.stderr);
   ok(aMode === 0o700, `…the directory is made private (0700; got ${aMode == null ? 'none' : aMode.toString(8)})`);
   ok(JSON.stringify(ls(cwd6)) === '[]', `…and the shell's cwd gains NO file (${JSON.stringify(ls(cwd6))})`);
 
   const b = await cli6(CLI6, ['screenshot', 'da-shot', '--out', 'shots/b.png'], { VIBESPACE_SESSION_CWD: proj6 });
-  ok(b.status === 0 && isPng(path.join(proj6, 'shots', 'b.png')) && b.stdout.startsWith(path.join(proj6, 'shots', 'b.png') + ' (') && JSON.stringify(ls(cwd6)) === '[]', 'a relative --out with VIBESPACE_SESSION_CWD set lands under the SESSION\'s directory (never the shell\'s cwd)', b.stdout + b.stderr);
+  ok(b.status === 0 && gateOf(isPng(path.join(proj6, 'shots', 'b.png'))) && gateOf(b.stdout.startsWith(path.join(proj6, 'shots', 'b.png') + ' (')) && JSON.stringify(ls(cwd6)) === '[]', 'a relative --out with VIBESPACE_SESSION_CWD set lands under the SESSION\'s directory (never the shell\'s cwd)', b.stdout + b.stderr);
   const c = await cli6(CLI6, ['screenshot', 'da-shot', '--out', 'c.png']);
-  ok(c.status === 0 && isPng(path.join(shotDir6, 'c.png')) && !fs.existsSync(path.join(cwd6, 'c.png')), 'a relative --out with NO session directory lands in the temp screenshot directory, not the shell\'s cwd', c.stdout + c.stderr);
+  ok(c.status === 0 && gateOf(isPng(path.join(shotDir6, 'c.png'))) && !fs.existsSync(path.join(cwd6, 'c.png')), 'a relative --out with NO session directory lands in the temp screenshot directory, not the shell\'s cwd', c.stdout + c.stderr);
   const abs = path.join(root6, 'abs.png');
   const d0 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', abs]);
-  ok(d0.status === 0 && isPng(abs), 'an absolute --out outside every store is written as named', d0.stdout + d0.stderr);
+  ok(d0.status === 0 && verdictOf(isPng(abs)), 'an absolute --out outside every store is written as named', d0.stdout + d0.stderr);
 
   const before = shots;
   const r1 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', '~/.ssh/x.png']);
-  ok(r1.status === 1 && /\[write_path_refused\]/.test(r1.stderr) && r1.stderr.includes('is under ~/.ssh') && !fs.existsSync(path.join(home6, '.ssh', 'x.png')), '`--out ~/.ssh/x.png` is refused BY NAME (write_path_refused, "under ~/.ssh") and nothing lands there', r1.stderr);
+  ok(r1.status === 1 && gateOf(/\[write_path_refused\]/.test(r1.stderr)) && gateOf(r1.stderr.includes('is under ~/.ssh')) && !fs.existsSync(path.join(home6, '.ssh', 'x.png')), '`--out ~/.ssh/x.png` is refused BY NAME (write_path_refused, "under ~/.ssh") and nothing lands there', r1.stderr);
   const r2 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', path.join(home6, '.bashrc')]);
-  ok(r2.status === 1 && r2.stderr.includes('is under ~/.bashrc') && !fs.existsSync(path.join(home6, '.bashrc')), 'an absolute --out on a home dot-entry (~/.bashrc) is refused by name', r2.stderr);
+  ok(r2.status === 1 && gateOf(r2.stderr.includes('is under ~/.bashrc')) && !fs.existsSync(path.join(home6, '.bashrc')), 'an absolute --out on a home dot-entry (~/.bashrc) is refused by name', r2.stderr);
   const r3 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', 'cfg/../x.png'], { VIBESPACE_SESSION_CWD: proj6 });
-  ok(r3.status === 1 && r3.stderr.includes('is under ~/.config') && !fs.existsSync(path.join(home6, '.config', 'x.png')) && !fs.existsSync(path.join(proj6, 'x.png')), '`cfg/../x.png` (cfg → ~/.config/app) is judged PHYSICALLY: ~/.config, refused — the lexical <project>/x.png would have passed', r3.stderr);
+  ok(r3.status === 1 && gateOf(r3.stderr.includes('is under ~/.config')) && !fs.existsSync(path.join(home6, '.config', 'x.png')) && !fs.existsSync(path.join(proj6, 'x.png')), '`cfg/../x.png` (cfg → ~/.config/app) is judged PHYSICALLY: ~/.config, refused — the lexical <project>/x.png would have passed', r3.stderr);
   const r4 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', 'link.png'], { VIBESPACE_SESSION_CWD: proj6 });
-  ok(r4.status === 1 && /\[out_unusable\]/.test(r4.stderr) && /symbolic link/.test(r4.stderr) && fs.readFileSync(path.join(home6, '.ssh', 'authorized_keys'), 'utf8') === 'ssh-ed25519 AAAA keep-me\n', 'a final-component symlink (link.png → ~/.ssh/authorized_keys) is refused and its target is untouched', r4.stderr);
+  ok(r4.status === 1 && gateOf(/\[out_unusable\]/.test(r4.stderr)) && gateOf(/symbolic link/.test(r4.stderr)) && fs.readFileSync(path.join(home6, '.ssh', 'authorized_keys'), 'utf8') === 'ssh-ed25519 AAAA keep-me\n', 'a final-component symlink (link.png → ~/.ssh/authorized_keys) is refused and its target is untouched', r4.stderr);
   const dataProbe = path.join(repo, 'data', `vs-shot-probe-${process.pid}.png`);
   try {
     const r5 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', dataProbe]);
-    ok(r5.status === 1 && r5.stderr.includes('is under <VibeSpace data>') && !fs.existsSync(dataProbe), 'an --out inside VibeSpace\'s own data directory (its tools run in every session) is refused by name', r5.stderr);
+    ok(r5.status === 1 && gateOf(r5.stderr.includes('is under <VibeSpace data>')) && !fs.existsSync(dataProbe), 'an --out inside VibeSpace\'s own data directory (its tools run in every session) is refused by name', r5.stderr);
   } finally { try { fs.rmSync(dataProbe, { force: true }); } catch { } }
   ok(shots === before, `every refused --out was decided BEFORE the request — nothing was captured (${shots - before} request(s))`);
   ok(JSON.stringify(ls(cwd6)) === '[]', 'after every leg the shell\'s cwd is still empty');
@@ -1692,13 +1692,13 @@ console.log('§4 the engine over a fake keeper + the routes');
   const NEW_DEFAULT = "if (want === undefined) { const sd = ensureShotDir(); return sd.code ? sd : { path: path.join(sd.dir, stamp), fresh: true }; }";
   const OLD_DEFAULT = "if (want === undefined) return { path: path.join(process.cwd(), `window-${h}-${Date.now()}.png`), fresh: false };";
   const patched6 = src6.replace(NEW_DEFAULT, OLD_DEFAULT);
-  ok(src6.includes(NEW_DEFAULT) && patched6 !== src6, 'control: the default line is found and patched back to the old one');
+  ok(gateOf(src6.includes(NEW_DEFAULT)) && patched6 !== src6, 'control: the default line is found and patched back to the old one');
   const cwdC = path.join(root6, 'cwd-control'); fs.mkdirSync(cwdC, { recursive: true });
   const mutC = MUTW.write('data/bin/vibespace-window', patched6, 'oldshotdefault');
   const k = await cli6(mutC, ['screenshot', 'da-shot'], {}, cwdC);
   const leaked = (ls(cwdC) || []).filter((f) => /^window-da-shot-\d+\.png$/.test(f));
-  ok(k.status === 0 && leaked.length === 1 && isPng(path.join(cwdC, leaked[0])), `control: the old default writes window-<h>-<ts>.png INTO the shell's cwd (${JSON.stringify(ls(cwdC))}) — the §6 "cwd gains no file" pin is not vacuous`, k.stdout + k.stderr);
-  for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 })) ok(r.pass, '§6 tree: ' + r.name, r.pass ? undefined : r.detail);
+  ok(k.status === 0 && leaked.length === 1 && verdictOf(isPng(path.join(cwdC, leaked[0]))), `control: the old default writes window-<h>-<ts>.png INTO the shell's cwd (${JSON.stringify(ls(cwdC))}) — the §6 "cwd gains no file" pin is not vacuous`, k.stdout + k.stderr);
+  for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 })) ok(verdictOf(r.pass), '§6 tree: ' + r.name, r.pass ? undefined : r.detail);
   stub.close();
 }
 
@@ -1715,7 +1715,7 @@ console.log('§DLG an app\'s dialog is part of its window — the plan, the snap
   const shown = parse('xpra-gtk-open-shown.tree.txt').map((w) => ({ ...w, mapped: w.id === 0x400384 || w.id === 0x400004 }));
   const unshown = parse('xpra-gtk-open-unshown.tree.txt').map((w) => ({ ...w, mapped: w.id === 0x400004 }));
   const dlgRow = shown.find((w) => w.title === 'Open'), mainRow = shown.find((w) => w.title === 'vs dialog fixture');
-  ok(dlgRow && mainRow && shown.indexOf(dlgRow) < shown.indexOf(mainRow) && dlgRow.frame === 0x20000c, 'fixture: the captured tree lists the dialog (on top) BEFORE its main window, the dialog inside corral 0x20000c', shown);
+  ok(gateOf(dlgRow) && gateOf(mainRow) && shown.indexOf(dlgRow) < shown.indexOf(mainRow) && dlgRow.frame === 0x20000c, 'fixture: the captured tree lists the dialog (on top) BEFORE its main window, the dialog inside corral 0x20000c', shown);
   const pS = R.pixelPlan(shown);
   ok(pS.members.length === 2 && pS.members[pS.members.length - 1].id === 0x400384 && pS.members[0].id === 0x400004, 'pixelPlan composes bottom→top: the main window first, its dialog LAST (drawn over it)', pS.members);
   const pU = R.pixelPlan(unshown);
@@ -1727,7 +1727,7 @@ console.log('§DLG an app\'s dialog is part of its window — the plan, the snap
   const pL = R.pixelPlan(lu);
   ok(pL.origin.x === 40 && pL.origin.y === 10 && pL.w === 460 && pL.h === 340 && pL.members.map((m) => m.id).join() === '1,2', 'a dialog left of / above the main: origin = the union\'s top-left (40,10), 460x340, the dialog drawn last', pL);
   const mp = R.mapPoint(pL, { x: 5, y: 5 });
-  ok(mp.ok && mp.x === 45 && mp.y === 15, '--at 5,5 of that image is display 45,15 (a pixel over the dialog lands on the dialog)', mp);
+  ok(gateOf(mp.ok) && mp.x === 45 && mp.y === 15, '--at 5,5 of that image is display 45,15 (a pixel over the dialog lands on the dialog)', mp);
   const pPin = R.pixelPlan(lu, { pin: { w: 400, h: 300 } });
   ok(pPin.origin.x === 100 && pPin.w === 400 && pPin.h === 300, 'a PINNED window keeps the pin\'s box at the main\'s origin (lane e2b, unchanged)', pPin);
   ok(R.pixelPlan([{ id: 1, title: 'M', cls: 'a', x: 0, y: 0, w: 300, h: 200, mapped: true }, { id: 3, title: 'off', cls: 'a', x: -100, y: -100, w: 50, h: 50, mapped: true }]).origin.x === 0, 'a member left of the DISPLAY never moves the origin below 0');
@@ -1738,7 +1738,7 @@ console.log('§DLG an app\'s dialog is part of its window — the plan, the snap
   const N = (ref, parent, depth, role, name, extra = {}) => ({ ref, parent, depth, role, name, path: extra.path || [], states: extra.states || ['showing', 'visible'], bounds: extra.bounds || { x: 0, y: 0, w: 100, h: 50 }, ...(extra.editable ? { editable: true } : {}) });
   const jasp = [N('@e1', null, 0, 'application', 'JASP'), N('@e10', '@e1', 1, 'frame', 'JASP', { path: [0] }), N('@e11', '@e10', 2, 'dialog', 'Open', { path: [0, 3], states: ['showing', 'visible'], bounds: { x: 62, y: 0, w: 640, h: 480 } }), N('@e154', '@e10', 2, 'document web', '', { path: [0, 4], states: ['focused', 'showing'] }), N('@e12', '@e11', 3, 'label', 'Recent Folders', { path: [0, 3, 0] }), N('@e15', '@e11', 3, 'text', '', { path: [0, 3, 2], editable: true, states: ['editable', 'focusable', 'showing'], bounds: { x: 77, y: 28, w: 300, h: 20 } })];
   const df = WT.dialogFirst(jasp);
-  ok(df.dialog && df.dialog.ref === '@e11' && df.dialog.field && df.dialog.field.ref === '@e15' && df.nodes.map((n) => n.ref).join() === '@e11,@e12,@e15,@e1,@e10,@e154', 'dialogFirst: the showing dialog\'s subtree comes FIRST (refs unchanged), its text field named', df.nodes.map((n) => n.ref));
+  ok(gateOf(df.dialog) && df.dialog.ref === '@e11' && gateOf(df.dialog.field) && df.dialog.field.ref === '@e15' && df.nodes.map((n) => n.ref).join() === '@e11,@e12,@e15,@e1,@e10,@e154', 'dialogFirst: the showing dialog\'s subtree comes FIRST (refs unchanged), its text field named', df.nodes.map((n) => n.ref));
   ok(WT.dialogHead(df.dialog) === 'a dialog is up: "Open" (@e11) — act on it first; its text field: @e15 (its subtree is listed first; to dismiss it, click its button by ref or key Escape)', 'the head line names the dialog and its field', WT.dialogHead(df.dialog));
   ok(WT.dialogFirst(jasp.filter((n) => n.ref !== '@e11' && n.parent !== '@e11')).dialog === null && WT.dialogFirst(jasp.map((n) => (n.ref === '@e11' ? { ...n, states: ['visible'] } : n))).dialog === null, 'no dialog (or one not showing) ⇒ no head, order unchanged');
   const gtk = [N('@e1', null, 0, 'application', 'dialog-app.py'), N('@e2', '@e1', 1, 'frame', 'vs dialog fixture'), N('@e3', '@e1', 1, 'file chooser', 'Save as', { states: ['active', 'modal', 'showing', 'visible'] }), N('@e15', '@e3', 2, 'file chooser', 'File Chooser Widget'), N('@e27', '@e15', 3, 'text', '', { editable: true, states: ['editable'], bounds: { x: -2147483648, y: -2147483648, w: 1, h: 1 } }), N('@e60', '@e15', 3, 'text', '', { editable: true, states: ['editable', 'focused', 'showing'], bounds: { x: 63, y: 10, w: 1023, h: 34 } })];
@@ -1778,16 +1778,16 @@ console.log('§DLG an app\'s dialog is part of its window — the plan, the snap
     const s3 = await EX.screenshot('da-dlg', fX);
     ok(JSON.stringify(shown2) === '[13]' && s3.windows === 2 && JSON.stringify(shots[2]) === '[1,19]', 'an UNSHOWN dialog (corral unmapped, the main mapped) ⇒ the engine maps its corral and composes it (the owner\'s windows:1 case)', { shown2, shots });
     const snap = await EX.snapshot('da-dlg', fX);
-    ok(snap.head && snap.head.startsWith('a dialog is up: "Open" (@e11)') && snap.nodes[0].ref === '@e11' && snap.dialog.field.ref === '@e15', 'snapshot: the head line names the dialog, its subtree first', { head: snap.head, first: snap.nodes[0] });
+    ok(gateOf(snap.head) && gateOf(snap.head.startsWith('a dialog is up: "Open" (@e11)')) && snap.nodes[0].ref === '@e11' && snap.dialog.field.ref === '@e15', 'snapshot: the head line names the dialog, its subtree first', { head: snap.head, first: snap.nodes[0] });
     await EX.act('da-dlg', fX, { verb: 'type', text: '/tmp/data.csv' });
     ok(typed.join() === '@e15', 'type WITHOUT a ref under the dialog lands in the dialog\'s field (@e15) — never JASP\'s focused `document web` (node_not_editable before)', typed);
     await EX.act('da-dlg', fX, { verb: 'key', chord: 'Escape' });
     ok(keys.length === 1 && keys[0].window === 19 && keys[0].focus.x === 62 + 320 && keys[0].focus.y === 240, 'key: X focus to the DIALOG\'s window (windowOfNode) and the pointer inside it — not the main window under it', keys);
     const audit = fs.readFileSync(EX.auditFile, 'utf8');
-    ok(/"verb":"show-window"[^\n]*"ok":true/.test(audit) && /"verb":"key"[^\n]*"focusedBy":"window"/.test(audit), 'audited: show-window (by window) and the key focusedBy:window', audit.split('\n').filter((l) => /show-window|"key"/.test(l)));
+    ok(gateOf(/"verb":"show-window"[^\n]*"ok":true/.test(audit)) && verdictOf(/"verb":"key"[^\n]*"focusedBy":"window"/.test(audit)), 'audited: show-window (by window) and the key focusedBy:window', audit.split('\n').filter((l) => /show-window|"key"/.test(l)));
   } catch (e) { fail++; console.error('  ✗ §DLG engine threw:', e.stack || e.message); }
 }
 
 console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
 cleanup();
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

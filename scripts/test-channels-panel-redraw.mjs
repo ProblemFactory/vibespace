@@ -51,7 +51,7 @@ const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { re
 const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('chan-panel-redraw-chrome');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 /** The redraw bound: measured 2–4 ms here after the fix (90–115 before), ×10 slack for a loaded runner. */
@@ -97,7 +97,7 @@ const cleanup = () => {
 };
 process.on('exit', cleanup);
 const waitServer = () => hub.ready();
-ok(await waitServer(), 'the worktree server booted on the seeded store');
+ok(verdictOf(await waitServer()), 'the worktree server booted on the seeded store');
 const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch {} return { status: r.status, json: j }; };
 // lane channels-fold-default: the account card starts folded (nothing in it needs the person) — the person opened it
 await api('PATCH', '/api/user-state', { channelsPanelFolds: { 'acct:lark': false } });
@@ -202,14 +202,14 @@ async function clickAcrossBroadcast(p, d) {
 // ═══ ① ② ③ the fixed panel ═══
 console.log('① ② ③ the panel over 879 conversations: a digest naming every row and one naming one, redrawn in place, the storm');
 const p1 = await newPage();
-ok(await p1.load(), 'the page loaded');
+ok(verdictOf(await p1.load()), 'the page loaded');
 const O = await p1.evaljs(OPEN);
 ok(O.grows >= N && O.rows >= N && O.more === 0, `FIXTURE: every list read to its end by scrolling its end into view — the first screen (${O.grows} rows) and the account card (${O.rows} rows), ${O.clicks} scrolls, no button`, J(O));
 ok(O.kept === true, '① design 008: a page append KEEPS every row already drawn (the same elements, the new rows after them)', J(O));
 const M = await p1.evaljs(MEASURE(digest));
 console.log(`    (measured: whole ${M.whole.join(' / ')} ms (median ${median(M.whole)}) · partial ${M.partial.join(' / ')} ms (median ${median(M.partial)}) · storm ${M.storm.busyMs} ms busy of ${M.storm.wallMs} = ${M.storm.share} %, long frames ${M.storm.longGaps}, p95 ${M.storm.p95} ms)`);
-ok(redrawJudged(M.whole) && redrawJudged(M.partial), `② a partial digest naming EVERY row (design 008: the first read is bounded; a broadcast names changed rows) and one naming ONE row each redraw the 1 758-row panel in < ${BOUND_MS} ms by the median of five, no sample at the pre-fix ${PRE_FIX_MS} ms (whole ${M.whole.join(' / ')} → ${median(M.whole)}, partial ${M.partial.join(' / ')} → ${median(M.partial)} — 90–115 ms before the fix)`, J(M));
-ok(M.sameGrows && M.sameRows && M.sameBox && M.sameList && M.samePart && M.sameSec, '② every row, the rows box, the group list, the Accounts part and the account section are the SAME elements after the redraws (kept and reconciled, never rebuilt)', J(M));
+ok(gateOf(redrawJudged(M.whole)) && verdictOf(redrawJudged(M.partial)), `② a partial digest naming EVERY row (design 008: the first read is bounded; a broadcast names changed rows) and one naming ONE row each redraw the 1 758-row panel in < ${BOUND_MS} ms by the median of five, no sample at the pre-fix ${PRE_FIX_MS} ms (whole ${M.whole.join(' / ')} → ${median(M.whole)}, partial ${M.partial.join(' / ')} → ${median(M.partial)} — 90–115 ms before the fix)`, J(M));
+ok(gateOf(M.sameGrows) && gateOf(M.sameRows) && gateOf(M.sameBox) && gateOf(M.sameList) && gateOf(M.samePart) && verdictOf(M.sameSec), '② every row, the rows box, the group list, the Accounts part and the account section are the SAME elements after the redraws (kept and reconciled, never rebuilt)', J(M));
 ok(M.storm.n === 20 && M.storm.share < 15, `③ twenty broadcasts 250 ms apart keep the handler's share of the main thread under 15 % (${M.storm.share} % — 37 % before the fix)`, J(M.storm));
 // ═══ ④ the trusted click across a broadcast ═══
 console.log('④ a trusted click on a row with a broadcast between the press and the release');
@@ -236,8 +236,8 @@ const F = await p1.evaljs(`(async () => {
   fire(d); await new Promise((r) => setTimeout(r, 50));
   return { folded0, folded1, same: sec === sec1, left, back, rows: document.querySelectorAll('.chan-row').length };
 })()`);
-ok(F.folded0 && F.folded1 && F.same, '⑤ a collapsed account section stays collapsed across a redraw (the same element, its class kept)', J(F));
-ok(F.left && F.back === N - 1 && F.rows === N, '⑤ a conversation the vendor stopped listing leaves both lists; listed again, it is back (the lists were read whole: it sorts inside them)', J(F));
+ok(gateOf(F.folded0) && gateOf(F.folded1) && verdictOf(F.same), '⑤ a collapsed account section stays collapsed across a redraw (the same element, its class kept)', J(F));
+ok(gateOf(F.left) && F.back === N - 1 && F.rows === N, '⑤ a conversation the vendor stopped listing leaves both lists; listed again, it is back (the lists were read whole: it sorts inside them)', J(F));
 // ═══ ⑤b THE SIGNATURE NAMES WHAT THE ROW PRINTS (verify round 5, 2026-09-27) ═══
 // round 4 signed `assignment` (the first watcher / access row) but line 3 prints the WHOLE access + watchers lists:
 // a second principal granted access never reached the memoised row (reproduced against the live route)
@@ -259,8 +259,8 @@ const ACC = await p1.evaljs(`(async () => {
   fire(d); await new Promise((r) => setTimeout(r, 50));
   return { one, two, three, rebuilt: r1 !== r2 && r2 !== r3, kept: r3 === again, after: line() };
 })()`);
-ok(/Alpha/.test(ACC.one || '') && !/Beta/.test(ACC.one || '') && /Alpha/.test(ACC.two || '') && /Beta/.test(ACC.two || '') && /Gamma/.test(ACC.three || ''), `⑤b line 3 follows the access list — one, two, three principals in turn (the assignment — the FIRST row — never changed; round 4's signature kept "Alpha" for ever): ${J([ACC.one, ACC.two, ACC.three])}`, J(ACC));
-ok(ACC.rebuilt && ACC.kept && ACC.after === null, '⑤b …the row is rebuilt when its facts change and KEPT when they do not (the same digest again = the same element); the plain digest takes line 3 away', J(ACC));
+ok(gateOf(/Alpha/.test(ACC.one || '')) && !/Beta/.test(ACC.one || '') && gateOf(/Alpha/.test(ACC.two || '')) && gateOf(/Beta/.test(ACC.two || '')) && verdictOf(/Gamma/.test(ACC.three || '')), `⑤b line 3 follows the access list — one, two, three principals in turn (the assignment — the FIRST row — never changed; round 4's signature kept "Alpha" for ever): ${J([ACC.one, ACC.two, ACC.three])}`, J(ACC));
+ok(gateOf(ACC.rebuilt) && gateOf(ACC.kept) && ACC.after === null, '⑤b …the row is rebuilt when its facts change and KEPT when they do not (the same digest again = the same element); the plain digest takes line 3 away', J(ACC));
 // ═══ ⑤c THE ACCOUNT HEAD SURVIVES A BROADCAST TOO (verify round 5) ═══
 // the rows were memoised in round 4, but the section HEAD (the fold, ⋯), the grain lines and "Show all" were rebuilt
 // per draw — a trusted click on ⋯ across a broadcast opened no menu, a click on the head toggled no fold (reproduced)
@@ -285,9 +285,9 @@ async function clickHeadAcross(p, d, sel, bc) {
 const H0 = await clickHeadAcross(p1, digest, '.chan-sec.chan-account .chan-sec-more', false);
 const H1 = await clickHeadAcross(p1, digest, '.chan-sec.chan-account .chan-sec-more', true);
 const H2 = await clickHeadAcross(p1, digest, '.chan-sec.chan-account .chan-sec-name', true);
-ok(H0.found && H0.menus === 1, 'FIXTURE (⑤c): a plain trusted click on the account head\'s ⋯ opens its menu', J(H0));
-ok(H1.found && H1.menus === 1 && H1.sameHead && J(H1.at) === J(H0.at) && H0.at && H0.at[1] > 20, `⑤c the ⋯ click ACROSS a broadcast opens the menu — the head rebuilt the same is the same element (reconcile keeps an equal node, handlers refreshed), and the menu opens UNDER the button (${J(H1.at)} = the plain click's ${J(H0.at)}; an adopted handler anchored on its fresh, detached button would open it at the corner)`, J([H0, H1]));
-ok(H2.found && H2.toggled && H2.sameHead, '⑤c the head click ACROSS a broadcast toggles the fold', J(H2));
+ok(gateOf(H0.found) && H0.menus === 1, 'FIXTURE (⑤c): a plain trusted click on the account head\'s ⋯ opens its menu', J(H0));
+ok(gateOf(H1.found) && H1.menus === 1 && gateOf(H1.sameHead) && J(H1.at) === J(H0.at) && gateOf(H0.at) && H0.at[1] > 20, `⑤c the ⋯ click ACROSS a broadcast opens the menu — the head rebuilt the same is the same element (reconcile keeps an equal node, handlers refreshed), and the menu opens UNDER the button (${J(H1.at)} = the plain click's ${J(H0.at)}; an adopted handler anchored on its fresh, detached button would open it at the corner)`, J([H0, H1]));
+ok(gateOf(H2.found) && gateOf(H2.toggled) && verdictOf(H2.sameHead), '⑤c the head click ACROSS a broadcast toggles the fold', J(H2));
 // ⑤d THE HEAD IS A KEPT NODE, PATCHED IN PLACE (verify round 6, 2026-09-27): a broadcast that CHANGES the count's title
 // (a conversation's unread +1 — every message a pass brings on a busy account) made round 5's rebuilt head UNEQUAL, so it
 // was replaced and a trusted 300 ms press on ⋯ across it was lost (3/3 reproduced; 10 % of presses at a message every
@@ -300,9 +300,9 @@ ok(H2.found && H2.toggled && H2.sameHead, '⑤c the head click ACROSS a broadcas
 console.log('⑤d a trusted click on ⋯ across a broadcast that CHANGES the head\'s count lands, the title patched in place');
 const H4 = await clickHeadAcross(p1, digest, '.chan-sec.chan-account .chan-sec-more', 'unread');
 const T4 = await p1.evaljs(`(() => document.querySelector('.chan-sec.chan-account .chan-sec-count').title)()`);
-ok(H4.found && H4.landed && H4.menus === 1 && H4.sameHead && J(H4.at) === J(H0.at) && /未读|unread/.test(T4), `⑤d the ⋯ click across an unread-changing broadcast opens the menu under the button — the SAME head element, its count title now "${T4}"`, J([H4, T4]));
+ok(gateOf(H4.found) && gateOf(H4.landed) && H4.menus === 1 && gateOf(H4.sameHead) && J(H4.at) === J(H0.at) && verdictOf(/未读|unread/.test(T4)), `⑤d the ⋯ click across an unread-changing broadcast opens the menu under the button — the SAME head element, its count title now "${T4}"`, J([H4, T4]));
 const H5 = await clickHeadAcross(p1, digest, '.chan-sec.chan-account .chan-sec-name', 'unread');
-ok(H5.found && H5.toggled && H5.sameHead, '⑤d the head click across an unread-changing broadcast toggles the fold', J(H5));
+ok(gateOf(H5.found) && gateOf(H5.toggled) && verdictOf(H5.sameHead), '⑤d the head click across an unread-changing broadcast toggles the fold', J(H5));
 p1.close();
 
 // ═══ ⑤d SEAMLESS LISTS (owner 2026-10-03: no "Show more" — the list's end loads itself) ═══
@@ -324,7 +324,7 @@ const scrollerOf = `(() => { for (let n = document.querySelector('.chan-groups')
 {
   const p5 = await newPage();
   await p5.cdp('Emulation.setFocusEmulationEnabled', { enabled: true });   // a background headless page defers focus events
-  ok(await p5.load(), 'the page loaded');
+  ok(verdictOf(await p5.load()), 'the page loaded');
   await p5.evaljs(`window.__hold = 600; 1`);
   const s0 = await p5.evaljs(SEAMLESS);
   const S = await p5.evaljs(`(async () => {
@@ -359,7 +359,7 @@ const scrollerOf = `(() => { for (let n = document.querySelector('.chan-groups')
     return out;
   })()`);
   ok(S.buttons === 0, '⑤d no "Show more" / "Show all" button anywhere in the panel', J(S));
-  ok(!!S.skel && S.skel.role === 'status' && S.skel.busy === 'true' && /加载更多会话/.test(S.skel.label || '') && S.skel.h >= 20 && !S.skel.button, `⑤d while the next page is read a SKELETON ROW stands at the end (role=status, "${S.skel && S.skel.label}", ${S.skel && S.skel.h} px) — not a button`, J(S.skel));
+  ok(!!S.skel && S.skel.role === 'status' && S.skel.busy === 'true' && gateOf(/加载更多会话/.test(S.skel.label || '')) && S.skel.h >= 20 && !S.skel.button, `⑤d while the next page is read a SKELETON ROW stands at the end (role=status, "${S.skel && S.skel.label}", ${S.skel && S.skel.h} px) — not a button`, J(S.skel));
   ok(S.g0 >= 60 && S.g1 > S.g0, `⑤d the end coming into view reads the next page — row 61 appears (${S.g0} → ${S.g1} rows)`, J(S));
   ok(S.g2 > S.g2a && S.focusTop < 50, `⑤d keyboard / a screen reader: focus reaching the end reads on with no scroll at all (${S.g2a} → ${S.g2} rows, scrollTop ${S.focusTop})`, J(S));
   ok(S.g3 > 200 && S.g4mid >= S.g3 && S.g4 >= S.g3 && Math.abs(S.top4 - S.top3) <= 2, `⑤d a WHOLE broadcast keeps the range read (${S.g3} rows → ${S.g4mid} at once → ${S.g4} after the re-read, past one 200-row page) and the scroll (${S.top3} → ${S.top4} px) — never back to the top`, J(S));
@@ -368,7 +368,7 @@ const scrollerOf = `(() => { for (let n = document.querySelector('.chan-groups')
   // a TALL screen the first page does not fill reads on by itself — within a bound; a resize storm does not chain reads
   const p6 = await newPage();
   await p6.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 3200, deviceScaleFactor: 1, mobile: false });
-  ok(await p6.load(), 'the tall page loaded');
+  ok(verdictOf(await p6.load()), 'the tall page loaded');
   await p6.evaljs(`window.__settle = 3000; 1`);
   const T6 = await p6.evaljs(SEAMLESS);
   for (let k = 0; k < 12; k++) { await p6.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: k % 2 ? 3200 : 500, deviceScaleFactor: 1, mobile: false }); await sleep(120); }
@@ -386,11 +386,11 @@ console.log('⑥ CONTROL: the scratch bundle rebuilt with reconcile = replaceChi
   const src = fs.readFileSync(path.join(wt, rel), 'utf-8');
   const from = `  for (const k of [...kids]) if (!want.has(k)) k.remove();
   for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) parent.insertBefore(out[i], kids[i] || null);`;
-  ok(src.includes(from), 'CONTROL setup: the in-place reconcile is spelled once');
+  ok(verdictOf(src.includes(from)), 'CONTROL setup: the in-place reconcile is spelled once');
   fs.writeFileSync(path.join(wt, rel), src.replace(from, '  parent.replaceChildren(...out);'));   // the SCRATCH copy only — never the checkout
   bundle();
   const p2 = await newPage();
-  ok(await p2.load(), 'the control page loaded');
+  ok(verdictOf(await p2.load()), 'the control page loaded');
   const O2 = await p2.evaljs(OPEN);
   const M2 = await p2.evaljs(MEASURE(digest));
   console.log(`    (control: whole ${M2.whole.join(' / ')} ms · partial ${M2.partial.join(' / ')} ms · storm ${M2.storm.share} %, long frames ${M2.storm.longGaps}, p95 ${M2.storm.p95} ms)`);
@@ -410,11 +410,11 @@ console.log('⑦ CONTROL: the scratch bundle rebuilt as round 4 left it (no equa
   // round 6 keeps the head by KEY (a layer above the equal-node keep): the round-5 shape builds it fresh per draw
   const headKeep = "const h = keep('head:' + a.id, () => {";
   const headFresh = "const h = ((k, make) => make())('head:' + a.id, () => {";
-  ok(keep.test(src) && src.includes(sigLine) && src.includes(headKeep), 'CONTROL setup (round 5): the equal-node keep, the access + watchers signature entries and the round-6 kept head are spelled once');
+  ok(gateOf(keep.test(src)) && gateOf(src.includes(sigLine)) && verdictOf(src.includes(headKeep)), 'CONTROL setup (round 5): the equal-node keep, the access + watchers signature entries and the round-6 kept head are spelled once');
   fs.writeFileSync(path.join(wt, rel), src.replace(keep, '').replace(sigLine, 'conv.assignment, conv.held]);').replace(headKeep, headFresh));   // the SCRATCH copy only
   bundle();
   const p3 = await newPage();
-  ok(await p3.load(), 'the round-4 control page loaded');
+  ok(verdictOf(await p3.load()), 'the round-4 control page loaded');
   await p3.evaljs(OPEN);
   const ACC3 = await p3.evaljs(`(async () => {
     const fire = (dd) => { ${relayBroadcastJs("{ type: 'channels-updated', digest: dd, partial: !!dd.partial }")} };
@@ -424,9 +424,9 @@ console.log('⑦ CONTROL: the scratch bundle rebuilt as round 4 left it (no equa
     fire(${J(withAccess(digest, ['Alpha', 'Beta']))}); await new Promise((r) => setTimeout(r, 50));
     return { one, two: line() };
   })()`);
-  ok(/Alpha/.test(ACC3.one || '') && !/Beta/.test(ACC3.two || ''), `CONTROL (round 5): with round 4's signature the row still says "${ACC3.two}" after [Alpha, Beta] was saved — ⑤b would redden`, J(ACC3));
+  ok(gateOf(/Alpha/.test(ACC3.one || '')) && !/Beta/.test(ACC3.two || ''), `CONTROL (round 5): with round 4's signature the row still says "${ACC3.two}" after [Alpha, Beta] was saved — ⑤b would redden`, J(ACC3));
   const H3 = await clickHeadAcross(p3, digest, '.chan-sec.chan-account .chan-sec-more', true);
-  ok(H3.found && H3.menus === 0 && !H3.sameHead, 'CONTROL (round 5): without the equal-node keep the ⋯ click across a broadcast opens NO menu (the head was detached) — ⑤c would redden', J(H3));
+  ok(gateOf(H3.found) && H3.menus === 0 && !H3.sameHead, 'CONTROL (round 5): without the equal-node keep the ⋯ click across a broadcast opens NO menu (the head was detached) — ⑤c would redden', J(H3));
   p3.close();
 }
 // ═══ ⑧ CONTROL (round 6): the ROUND-5 panel — the equal-node keep present, the head built fresh per draw ═══
@@ -435,16 +435,16 @@ console.log('⑧ CONTROL: the scratch bundle rebuilt as round 5 left it (the hea
   const rel = 'src/lib/channels-panel.js';
   const src = fs.readFileSync(path.join(repo, rel), 'utf-8');
   const headKeep = "const h = keep('head:' + a.id, () => {";
-  ok(src.includes(headKeep), 'CONTROL setup (round 6): the kept head is spelled once');
+  ok(verdictOf(src.includes(headKeep)), 'CONTROL setup (round 6): the kept head is spelled once');
   fs.writeFileSync(path.join(wt, rel), src.replace(headKeep, "const h = ((k, make) => make())('head:' + a.id, () => {"));   // the SCRATCH copy only
   bundle();
   const p4 = await newPage();
-  ok(await p4.load(), 'the round-5 control page loaded');
+  ok(verdictOf(await p4.load()), 'the round-5 control page loaded');
   await p4.evaljs(OPEN);
   const H6 = await clickHeadAcross(p4, digest, '.chan-sec.chan-account .chan-sec-more', true);
   const H7 = await clickHeadAcross(p4, digest, '.chan-sec.chan-account .chan-sec-more', 'unread');
-  ok(H6.found && H6.menus === 1 && H6.sameHead, 'CONTROL (round 6) setup: round 5\'s own leg still holds on its copy — a same-row broadcast keeps the equal head', J(H6));
-  ok(H7.found && H7.menus === 0 && !H7.sameHead, 'CONTROL (round 6): with the head built fresh per draw an unread-changing broadcast REPLACES it and the ⋯ click across it opens NO menu — ⑤d would redden', J(H7));
+  ok(gateOf(H6.found) && H6.menus === 1 && verdictOf(H6.sameHead), 'CONTROL (round 6) setup: round 5\'s own leg still holds on its copy — a same-row broadcast keeps the equal head', J(H6));
+  ok(gateOf(H7.found) && H7.menus === 0 && !H7.sameHead, 'CONTROL (round 6): with the head built fresh per draw an unread-changing broadcast REPLACES it and the ⋯ click across it opens NO menu — ⑤d would redden', J(H7));
   p4.close();
 }
 
@@ -458,7 +458,7 @@ console.log('⑨ CONTROL: the scratch bundle rebuilt with endOfList answering nu
   fs.writeFileSync(path.join(wt, rel), src.replace(from, from + '    return null;   // CONTROL: no sentinel\n'));   // the SCRATCH copy only
   bundle();
   const p9 = await newPage();
-  ok(await p9.load(), 'the control page loaded');
+  ok(verdictOf(await p9.load()), 'the control page loaded');
   const c0 = await p9.evaljs(SEAMLESS);
   const C9 = await p9.evaljs(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -472,4 +472,4 @@ console.log('⑨ CONTROL: the scratch bundle rebuilt with endOfList answering nu
 
 console.log(`\n(${Math.round((Date.now() - T0) / 1000)} s)`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

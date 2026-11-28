@@ -23,7 +23,7 @@ const REPO = new URL('..', import.meta.url).pathname;
 const I = require('../src/input-inject.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -51,8 +51,8 @@ const ROWS = [
   [{ windowClass: '', elevated: true, allow: null }, true, 'allowed'],                                  // class unknown (GetClassName failed) ⇒ allowed (secure desktop is OS-isolated)
 ];
 for (const [inp, okWant, whyWant] of ROWS) { const r = I.injectAllowed(inp); ok(r.ok === okWant && r.why === whyWant, `${inp.windowClass || '(empty)'} elev=${inp.elevated} allow=${inp.allow ? inp.allow.length : '∅'} ⇒ ${okWant ? 'ok' : 'deny'}/${whyWant}`, r); }
-ok(same(I.INJECT_DENY_CLASSES.slice().sort(), ['$$$Secure UAP Background Dialog', 'Consent', 'Credential Dialog Xaml Host', 'UACBackgroundWindowClass']), 'the deny set is the UAC consent UI + the secure desktop, by class', I.INJECT_DENY_CLASSES);
-ok(I.injectAllowed() && I.injectAllowed().ok === true, 'no args ⇒ a safe allow (unelevated default), never a throw');
+ok(verdictOf(same(I.INJECT_DENY_CLASSES.slice().sort(), ['$$$Secure UAP Background Dialog', 'Consent', 'Credential Dialog Xaml Host', 'UACBackgroundWindowClass'])), 'the deny set is the UAC consent UI + the secure desktop, by class', I.INJECT_DENY_CLASSES);
+ok(gateOf(I.injectAllowed()) && I.injectAllowed().ok === true, 'no args ⇒ a safe allow (unelevated default), never a throw');
 
 // ── ② the client's capability gate (an old daemon has no `elevated`)
 console.log('② the client gate: info.elevated === true');
@@ -84,7 +84,7 @@ function winInjectorWith(state, elevated) { return I.createInjector({ platform: 
   const inj = winInjector(st);
   const r = await inj.inject([{ t: 'md', x: 5, y: 6, b: 0 }, { t: 'kd', c: 'KeyA' }]);
   inj.close();
-  ok(r.ok && r.n === 2 && same(st.lines, ['E 1', 'F', 'M 5 6', 'D 0', 'K 30 0 0']), 'elevated + a normal window: E 1 told the script, F read the window, then the move/press/key all went in', { r, lines: st.lines });
+  ok(gateOf(r.ok) && r.n === 2 && verdictOf(same(st.lines, ['E 1', 'F', 'M 5 6', 'D 0', 'K 30 0 0'])), 'elevated + a normal window: E 1 told the script, F read the window, then the move/press/key all went in', { r, lines: st.lines });
   ok(st.audits.length === 1 && st.audits[0].ok === true && st.audits[0].why === 'allowed' && st.audits[0].windowClass === 'Chrome_WidgetWin_1' && st.audits[0].windowTitle === 'Untitled - Notepad' && st.audits[0].clicks === 1 && st.audits[0].keys === 1, 'one audit line: ok, the window class + title, the keys/clicks count', st.audits);
 }
 { // denied: the UAC consent UI ⇒ NOT ONE press is sent, one audit line (deny)
@@ -92,8 +92,8 @@ function winInjectorWith(state, elevated) { return I.createInjector({ platform: 
   const inj = winInjector(st);
   const r = await inj.inject([{ t: 'md', x: 5, y: 6, b: 0 }, { t: 'kd', c: 'KeyA' }]);
   inj.close();
-  ok(!r.ok && r.code === 'inject_not_allowed' && r.n === 0 && r.refused.length === 2 && r.refused.every((x) => x.code === 'inject_not_allowed' && x.detail === 'consent-ui'), 'elevated + the UAC consent UI: the whole batch is refused by name', r);
-  ok(same(st.lines, ['E 1', 'F']) && !st.lines.some((l) => l.startsWith('D') || l.startsWith('K') || l.startsWith('M')), 'NOT ONE press reached the script — the fence refused before the first SendInput', st.lines);
+  ok(!r.ok && r.code === 'inject_not_allowed' && r.n === 0 && r.refused.length === 2 && verdictOf(r.refused.every((x) => x.code === 'inject_not_allowed' && x.detail === 'consent-ui')), 'elevated + the UAC consent UI: the whole batch is refused by name', r);
+  ok(gateOf(same(st.lines, ['E 1', 'F'])) && !st.lines.some((l) => l.startsWith('D') || l.startsWith('K') || l.startsWith('M')), 'NOT ONE press reached the script — the fence refused before the first SendInput', st.lines);
   ok(st.audits.length === 1 && st.audits[0].ok === false && st.audits[0].why === 'consent-ui' && st.audits[0].windowClass === 'Credential Dialog Xaml Host', 'one audit line: the refused attempt on the consent UI is recorded', st.audits);
 }
 { // allow-list narrowing: a window not in the owner's list ⇒ refused
@@ -101,14 +101,14 @@ function winInjectorWith(state, elevated) { return I.createInjector({ platform: 
   const inj = winInjector(st);
   const r = await inj.inject([{ t: 'md', x: 1, y: 1, b: 0 }]);
   inj.close();
-  ok(!r.ok && r.refused[0].detail === 'not-in-allow' && same(st.lines, ['E 1', 'F']), 'an owner allow-list that omits this window class refuses it (nothing sent)', { r, lines: st.lines });
+  ok(!r.ok && r.refused[0].detail === 'not-in-allow' && verdictOf(same(st.lines, ['E 1', 'F'])), 'an owner allow-list that omits this window class refuses it (nothing sent)', { r, lines: st.lines });
 }
 { // NOT elevated ⇒ the fence is skipped entirely (the resident script keeps its own UIPI short-circuit); no E/F, no audit
   const st = { lines: [], audits: [], frontClass: 'Credential Dialog Xaml Host', frontTitle: 'x', allow: null };
   const inj = winInjectorWith(st, false); // elevated: false
   const r = await inj.inject([{ t: 'md', x: 2, y: 3, b: 0 }]);
   inj.close();
-  ok(r.ok && same(st.lines, ['M 2 3', 'D 0']) && st.audits.length === 0, 'an UNELEVATED injector never sends E/F and never audits — the resident script keeps the UIPI short-circuit', { lines: st.lines, audits: st.audits });
+  ok(gateOf(r.ok) && gateOf(same(st.lines, ['M 2 3', 'D 0'])) && st.audits.length === 0, 'an UNELEVATED injector never sends E/F and never audits — the resident script keeps the UIPI short-circuit', { lines: st.lines, audits: st.audits });
 }
 
 // ── ④ MUTANT controls
@@ -117,15 +117,15 @@ const M = mutantCopies('inject-allow', REPO);
 {
   const src = fs.readFileSync(path.join(REPO, 'src/input-inject.js'), 'utf8');
   const denyCut = "  if (Object.prototype.hasOwnProperty.call(INJECT_DENY, cls)) return { ok: false, why: INJECT_DENY[cls] };\n";
-  ok(src.includes(denyCut), 'the hard-deny line is where the control cuts it');
+  ok(verdictOf(src.includes(denyCut)), 'the hard-deny line is where the control cuts it');
   const Im = M.load('src/input-inject.js', editAnchor(src, denyCut, '', "src/input-inject.js"), 'no-deny');
   ok(Im.injectAllowed({ windowClass: 'Credential Dialog Xaml Host', elevated: true }).ok === true, 'CONTROL: a copy WITHOUT the hard-deny allows the UAC consent UI — the consent-ui row above would be RED', Im.injectAllowed({ windowClass: 'Credential Dialog Xaml Host', elevated: true }));
   const allowCut = "  if (list && list.length && !list.includes(cls)) return { ok: false, why: 'not-in-allow' };\n";
-  ok(src.includes(allowCut), 'the allow-list narrowing is where the control cuts it');
+  ok(verdictOf(src.includes(allowCut)), 'the allow-list narrowing is where the control cuts it');
   const Im2 = M.load('src/input-inject.js', editAnchor(src, allowCut, '', "src/input-inject.js"), 'no-allow');
   ok(Im2.injectAllowed({ windowClass: 'Notepad', elevated: true, allow: ['Chrome_WidgetWin_1'] }).ok === true, 'CONTROL: a copy WITHOUT the allow-list narrowing allows a window not in the list — the not-in-allow row above would be RED');
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(verdictOf(c.pass), c.name, c.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

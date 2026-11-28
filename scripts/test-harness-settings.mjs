@@ -29,7 +29,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const root = scratch('harness-settings');
 fs.rmSync(root, { recursive: true, force: true });
 fs.mkdirSync(root, { recursive: true });
@@ -47,7 +47,7 @@ console.log('§1 checkTable refusals');
 {
   const row = (over = {}) => ({ key: 'k', type: 'boolean', default: false, label: 'L', description: '', apply: { kind: 'spawn', how: 'x' }, ...over });
   const tbl = (over = {}) => ({ prefix: 'zed', category: 'Zed', files: {}, rows: [row()], ...over });
-  const refuses = (name, table, ctx, re) => { const errs = checkTable(table, ctx); ok(name, errs.some((e) => re.test(e)), errs); };
+  const refuses = (name, table, ctx, re) => { const errs = checkTable(table, ctx); ok(name, verdictOf(errs.some((e) => re.test(e))), errs); };
   ok('a sound table passes', checkTable(tbl()).length === 0, checkTable(tbl()));
   // B-82b8: a built-in table's words live in src/harness-settings-words.js — the table JOINED to them is whole, and the bare table is
   // whole with its words apart (the device's road: src/harnesses/index.js)
@@ -115,22 +115,22 @@ console.log('§2 derived schema rows vs the 2.369.120 snapshot');
   ok('claude.autoResumeOnLimit stays a hand-written row (generic feature, legacy key) — category Spending since 2.369.202 (it starts billed turns)', schemaMod.SETTINGS_SCHEMA['claude.autoResumeOnLimit']?.category === 'Spending' && !schemaMod.SETTINGS_SCHEMA['claude.autoResumeOnLimit'].harness);
   ok('GENERIC_LEGACY_KEYS names that exact key', GENERIC_LEGACY_KEYS.autoResumeOnLimit === 'claude.autoResumeOnLimit');
   const hp = schemaMod.SETTINGS_SCHEMA['codex.historyPersistence'];
-  ok('the NEW codex.historyPersistence row is derived (enum, default save-all, cli-config → history.persistence, category Codex)', hp && hp.type === 'enum' && hp.default === 'save-all' && hp.apply.kind === 'cli-config' && hp.apply.path.join('.') === 'history.persistence' && hp.category === 'Codex' && hp.options.some((o) => o.value === 'none') && hp.options.some((o) => o.value === ''));
+  ok('the NEW codex.historyPersistence row is derived (enum, default save-all, cli-config → history.persistence, category Codex)', gateOf(hp) && hp.type === 'enum' && hp.default === 'save-all' && hp.apply.kind === 'cli-config' && hp.apply.path.join('.') === 'history.persistence' && hp.category === 'Codex' && gateOf(hp.options.some((o) => o.value === 'none')) && verdictOf(hp.options.some((o) => o.value === '')));
   ok('harnessSectionFor(Claude) names ~/.claude/settings.json; a non-harness category is null', schemaMod.harnessSectionFor('Claude')?.files?.[0]?.rel === '~/.claude/settings.json' && schemaMod.harnessSectionFor('Chat') === null);
   ok('harnessFileRel resolves the display path', schemaMod.harnessFileRel('codex', 'config') === '~/.codex/config.toml' && schemaMod.harnessFileRel('codex', 'nope') === null);
-  ok('SETTINGS_CATEGORIES still lists Claude/Codex/OpenCode', ['Claude', 'Codex', 'OpenCode'].every((c) => schemaMod.SETTINGS_CATEGORIES.includes(c)));
+  ok('SETTINGS_CATEGORIES still lists Claude/Codex/OpenCode', verdictOf(['Claude', 'Codex', 'OpenCode'].every((c) => schemaMod.SETTINGS_CATEGORIES.includes(c))));
   // §7 registerHarnessSettings — the contributor rules on the CLIENT side
   const zed = { prefix: 'zed', category: 'Zed Agent', files: {}, rows: [{ key: 'defaultModel', type: 'string', default: '', label: 'Model', description: 'd', apply: { kind: 'spawn', how: '--model', via: 'model' } }] };
   let threw = '';
   try { schemaMod.registerHarnessSettings('zed', { ...zed, prefix: 'claude' }); } catch (e) { threw = e.message; }
-  ok('registerHarnessSettings refuses a built-in prefix', /built-in harness namespace|only own its own namespace/.test(threw), threw);
+  ok('registerHarnessSettings refuses a built-in prefix', verdictOf(/built-in harness namespace|only own its own namespace/.test(threw)), threw);
   try { threw = ''; schemaMod.registerHarnessSettings('zed', { ...zed, prefix: 'other' }); } catch (e) { threw = e.message; }
-  ok('…and a prefix that is not the harness id', /only own its own namespace/.test(threw), threw);
+  ok('…and a prefix that is not the harness id', verdictOf(/only own its own namespace/.test(threw)), threw);
   const paths = schemaMod.registerHarnessSettings('zed', zed);
-  ok('a sound contributed table derives its rows + category', paths.length === 1 && schemaMod.SETTINGS_SCHEMA['zed.defaultModel']?.harness === 'zed' && schemaMod.SETTINGS_CATEGORIES.includes('Zed Agent') && schemaMod.harnessSectionFor('Zed Agent')?.prefix === 'zed');
+  ok('a sound contributed table derives its rows + category', paths.length === 1 && schemaMod.SETTINGS_SCHEMA['zed.defaultModel']?.harness === 'zed' && gateOf(schemaMod.SETTINGS_CATEGORIES.includes('Zed Agent')) && schemaMod.harnessSectionFor('Zed Agent')?.prefix === 'zed');
   ok('unregisterHarnessSettings removes rows + the empty category', schemaMod.unregisterHarnessSettings('zed') === true && !schemaMod.SETTINGS_SCHEMA['zed.defaultModel'] && !schemaMod.SETTINGS_CATEGORIES.includes('Zed Agent'));
   try { threw = ''; schemaMod.unregisterHarnessSettings('claude'); } catch (e) { threw = e.message; }
-  ok('a built-in table cannot be unregistered', /built-in/.test(threw));
+  ok('a built-in table cannot be unregistered', verdictOf(/built-in/.test(threw)));
 }
 
 // ── §3 harnessSetting / harnessDeclares / harnessSpawnSettings (ORCH accessors) ──
@@ -160,7 +160,7 @@ console.log('§3 the typed accessors');
   ok('…the row lists exactly off | ask | auto with off the default, and the schema derives the same options',
     JSON.stringify(lrcRow.options.map((o) => o.value)) === '["off","ask","auto"]' && lrcRow.default === 'off'
     && JSON.stringify(schemaMod.SETTINGS_SCHEMA['codex.limitResetCredit'].options.map((o) => o.value)) === '["off","ask","auto"]');
-  ok('…and its description names BOTH vendors\' mechanics (a re-opened window vs a refill in place)', /starts a NEW window/.test(lrcRow.description) && /refills in place/.test(lrcRow.description));
+  ok('…and its description names BOTH vendors\' mechanics (a re-opened window vs a refill in place)', gateOf(/starts a NEW window/.test(lrcRow.description)) && verdictOf(/refills in place/.test(lrcRow.description)));
   // NEGATIVE CONTROL: the 2.369.120 snapshot's vocabulary would refuse `ask`
   const oldRow = { ...lrcRow, options: fx['codex.limitResetCredit'].options };
   ok('NEGATIVE CONTROL: the snapshot\'s off|auto row refuses `ask` (the new value is what this leg sees)', HS.refusedValue(oldRow, 'ask') === 'ask' && HS.refusedValue(lrcRow, 'ask') === null);
@@ -177,10 +177,10 @@ console.log('§3 the typed accessors');
   ok('a listed value passes unchanged', sync.harnessSetting('claude', 'defaultPermissionMode') === 'plan');
   delete store['claude.defaultPermissionMode']; delete store['claude.defaultModel']; delete store['codex.historyPersistence'];
   let threw = ''; try { sync.harnessSetting('claude', 'limitResetCredit'); } catch (e) { threw = e.message; }
-  ok('an undeclared key THROWS (claude has no limitResetCredit)', /declares no setting/.test(threw), threw);
+  ok('an undeclared key THROWS (claude has no limitResetCredit)', verdictOf(/declares no setting/.test(threw)), threw);
   try { threw = ''; sync.harnessSetting('gemini', 'brief'); } catch (e) { threw = e.message; }
-  ok('an unknown harness throws (never a claude fallback)', /unknown harness/.test(threw), threw);
-  ok('harnessDeclares answers per harness', sync.harnessDeclares('codex', 'limitResetCredit') && !sync.harnessDeclares('claude', 'limitResetCredit') && !sync.harnessDeclares('shell', 'defaultModel') && !sync.harnessDeclares('gemini', 'x'));
+  ok('an unknown harness throws (never a claude fallback)', verdictOf(/unknown harness/.test(threw)), threw);
+  ok('harnessDeclares answers per harness', gateOf(sync.harnessDeclares('codex', 'limitResetCredit')) && !sync.harnessDeclares('claude', 'limitResetCredit') && !sync.harnessDeclares('shell', 'defaultModel') && !sync.harnessDeclares('gemini', 'x'));
   store['claude.brief'] = true; store['claude.autocompact'] = '200k';
   const bag = sync.harnessSpawnSettings('claude');
   ok('harnessSpawnSettings = every spawn row, typed (brief true, autocompact 200k, tuiRenderer default)', bag.brief === true && bag.autocompact === '200k' && bag.tuiRenderer === '' && bag.disableModelFallback === false && !('transcriptRetentionDays' in bag) && 'defaultModel' in bag);
@@ -189,7 +189,7 @@ console.log('§3 the typed accessors');
   {
     const row = HS.rowOf(HSW.withWords(HS.HARNESS_SETTINGS.claude), 'autoContinueAtUsageLimit');
     ok('claude declares autoContinueAtUsageLimit: boolean, default false, apply kind SPAWN (inline --settings — the CLI reads policy > --settings > user; never cli-config, which would change the user\'s OWN non-VibeSpace sessions)',
-      !!row && row.type === 'boolean' && row.default === false && row.apply.kind === 'spawn' && /Claude Code's own continue at a usage limit/.test(row.apply.how) && !row.apply.mode && !row.apply.via);   // stale-pins: kept (the row is read through the words' join — the note lives in harness-settings-words.js, B-82b8)
+      !!row && row.type === 'boolean' && row.default === false && row.apply.kind === 'spawn' && gateOf(/Claude Code's own continue at a usage limit/.test(row.apply.how)) && !row.apply.mode && !row.apply.via);   // stale-pins: kept (the row is read through the words' join — the note lives in harness-settings-words.js, B-82b8)
     ok('…and it is NOT a cli-config row (NEGATIVE CONTROL: the ~/.claude/settings.json plan never names it)', !HS.rowsOfKind(HS.HARNESS_SETTINGS.claude, 'cli-config').some((r) => r.key === 'autoContinueAtUsageLimit'));
     ok('unset ⇒ the bag says false (default off)', sync.harnessSpawnSettings('claude').autoContinueAtUsageLimit === false);
     store['claude.autoContinueAtUsageLimit'] = 'true';
@@ -212,20 +212,20 @@ console.log('§4 the plan');
   const codexCfg = plan.files.find((f) => f.harness === 'codex' && f.id === 'config');
   const codexHooks = plan.files.find((f) => f.harness === 'codex' && f.id === 'hooks');
   ok('plan v1 with claude settings.json (hooks + cleanupPeriodDays=36500), codex config.toml ([history] persistence=save-all), codex hooks.json (hooks only)',
-    plan.v === 1 && claude && claude.hooks?.events?.includes('Stop') && claude.set.length === 1 && claude.set[0].path.join('.') === 'cleanupPeriodDays' && claude.set[0].value === 36500 && claude.createIfMissing === 'dir-exists'
-    && codexCfg && codexCfg.format === 'toml' && codexCfg.set[0].path.join('.') === 'history.persistence' && codexCfg.set[0].value === 'save-all' && !codexCfg.hooks
-    && codexHooks && codexHooks.hooks?.events?.includes('SessionStart') && codexHooks.set.length === 0 && codexHooks.createIfMissing === 'dir-exists', JSON.stringify(plan)); // lane hooks-create: the create rule rides by name (claude settings.json is created when ~/.claude exists)
+    plan.v === 1 && gateOf(claude) && gateOf(claude.hooks?.events?.includes('Stop')) && claude.set.length === 1 && claude.set[0].path.join('.') === 'cleanupPeriodDays' && claude.set[0].value === 36500 && claude.createIfMissing === 'dir-exists'
+    && gateOf(codexCfg) && codexCfg.format === 'toml' && codexCfg.set[0].path.join('.') === 'history.persistence' && codexCfg.set[0].value === 'save-all' && !codexCfg.hooks
+    && gateOf(codexHooks) && gateOf(codexHooks.hooks?.events?.includes('SessionStart')) && codexHooks.set.length === 0 && codexHooks.createIfMissing === 'dir-exists', JSON.stringify(plan)); // lane hooks-create: the create rule rides by name (claude settings.json is created when ~/.claude exists)
   store['claude.transcriptRetentionDays'] = 0; store['codex.historyPersistence'] = '';
   const off = sync.cliConfigPlan();
   ok('an OFF value is NOT in the plan (never written, never deleted) — the claude file stays for its hooks, the codex toml drops out', off.files.find((f) => f.id === 'settings').set.length === 0 && !off.files.find((f) => f.id === 'config'));
   const hooksOnly = sync.cliConfigPlan({ hooksOnly: true });
-  ok('hooksOnly plan carries no managed keys', hooksOnly.files.every((f) => f.set.length === 0) && hooksOnly.files.some((f) => f.hooks));
+  ok('hooksOnly plan carries no managed keys', gateOf(hooksOnly.files.every((f) => f.set.length === 0)) && verdictOf(hooksOnly.files.some((f) => f.hooks)));
   ok('a plan is plain JSON (round-trips)', JSON.stringify(JSON.parse(JSON.stringify(plan))) === JSON.stringify(plan));
   const b64 = sync.cliConfigPlanB64();
-  ok('cliConfigPlanB64 is shell-safe base64 that decodes to the plan', /^[A-Za-z0-9+/=]+$/.test(b64) && JSON.stringify(HC.decodePlan(b64)) === JSON.stringify(off));
+  ok('cliConfigPlanB64 is shell-safe base64 that decodes to the plan', gateOf(/^[A-Za-z0-9+/=]+$/.test(b64)) && JSON.stringify(HC.decodePlan(b64)) === JSON.stringify(off));
   ok('decodePlan refuses garbage / a foreign version', HC.decodePlan('') === null && HC.decodePlan('!!!') === null && HC.decodePlan(Buffer.from('{"v":2,"files":[]}').toString('base64')) === null);
   ok('contributedTables lists no built-in', sync.contributedTables().length === 0);
-  ok('cliConfigStatus lists the off rows apart and reports safe=false for an unsafe server', await (async () => { const st = await sync.cliConfigStatus(); return st.safe === false && st.off.some((o) => o.harness === 'claude' && o.key === 'transcriptRetentionDays') && st.lastWrite === null; })());
+  ok('cliConfigStatus lists the off rows apart and reports safe=false for an unsafe server', verdictOf(await (async () => { const st = await sync.cliConfigStatus(); return st.safe === false && st.off.some((o) => o.harness === 'claude' && o.key === 'transcriptRetentionDays') && st.lastWrite === null; })()));
   store['codex.historyPersistence'] = 'bogus';
   ok('an out-of-vocabulary enum never reaches the plan as itself — the default rides (codex 0.154.0 refuses to load `persistence = "bogus"`)', sync.cliConfigPlan().files.find((f) => f.id === 'config')?.set[0].value === 'save-all');
   store['codex.historyPersistence'] = 'save-all"\nmodel = "evil';
@@ -248,7 +248,7 @@ console.log('§5 applyConfigPlan (scratch HOME)');
   ]);
   let r = HC.applyConfigPlan(plan(36500), { home });
   let j = JSON.parse(fs.readFileSync(sf, 'utf8'));
-  ok('JSON: 36500 written, everything else untouched, receipt applied', j.cleanupPeriodDays === 36500 && j.permissions.allow[0] === 'Bash(ls:*)' && Array.isArray(j.hooks.Stop) && r.receipts.find((x) => x.key === 'transcriptRetentionDays')?.state === 'applied');
+  ok('JSON: 36500 written, everything else untouched, receipt applied', j.cleanupPeriodDays === 36500 && j.permissions.allow[0] === 'Bash(ls:*)' && gateOf(Array.isArray(j.hooks.Stop)) && r.receipts.find((x) => x.key === 'transcriptRetentionDays')?.state === 'applied');
   ok('JSON: no hookCmd ⇒ hook entries NOT registered by the local path (ensureAgentHooks owns that with its opt-out)', j.hooks.Stop.length === 0);
   r = HC.applyConfigPlan(plan(36500), { home });
   ok('JSON: idempotent (unchanged receipt, file not rewritten)', r.receipts.find((x) => x.key === 'transcriptRetentionDays')?.state === 'unchanged' && r.files.find((f) => f.id === 'settings')?.written === false);
@@ -280,7 +280,7 @@ console.log('§5 applyConfigPlan (scratch HOME)');
     fs.writeFileSync(cf, text);
     const rr = HC.applyConfigPlan(plan(36500), { home });
     const x = rr.receipts.find((y) => y.key === 'historyPersistence');
-    ok(`TOML refuses by name: ${name}`, x && x.state === 'refused' && re.test(x.reason) && fs.readFileSync(cf, 'utf8') === text, x);
+    ok(`TOML refuses by name: ${name}`, gateOf(x) && x.state === 'refused' && gateOf(re.test(x.reason)) && fs.readFileSync(cf, 'utf8') === text, x);
   };
   refuse('inline table', 'history = { persistence = "none" }\n', /inline table/);
   refuse('array of tables', '[[history]]\npersistence = "none"\n', /array of tables/);
@@ -299,17 +299,17 @@ console.log('§5 applyConfigPlan (scratch HOME)');
   ok('JSON: a missing settings.json is reported (missing), not created (the CLI creates its own)', r.receipts.find((x) => x.key === 'transcriptRetentionDays')?.state === 'missing' && !fs.existsSync(sf));
   fs.rmSync(path.join(home, '.codex'), { recursive: true, force: true });
   r = HC.applyConfigPlan(plan(36500), { home });
-  ok('TOML: createIfMissing creates the FILE but never the CLI dir (~/.codex absent ⇒ missing, by name)', r.receipts.find((x) => x.key === 'historyPersistence')?.state === 'missing' && /the CLI has not run on this machine; nothing is created/.test(r.receipts.find((x) => x.key === 'historyPersistence').reason) && r.receipts.find((x) => x.key === 'historyPersistence').missing === 'no-dir' && !fs.existsSync(path.join(home, '.codex')));
+  ok('TOML: createIfMissing creates the FILE but never the CLI dir (~/.codex absent ⇒ missing, by name)', r.receipts.find((x) => x.key === 'historyPersistence')?.state === 'missing' && gateOf(/the CLI has not run on this machine; nothing is created/.test(r.receipts.find((x) => x.key === 'historyPersistence').reason)) && r.receipts.find((x) => x.key === 'historyPersistence').missing === 'no-dir' && !fs.existsSync(path.join(home, '.codex')));
   // hookCmd (the remote helper's path): hooks registered beside the managed key; uninstall strips only hooks
   fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
   fs.writeFileSync(sf, JSON.stringify({ cleanupPeriodDays: 30, permissions: { allow: ['Read'] } }, null, 2));
   r = HC.applyConfigPlan(plan(36500), { home, hookCmd: '/usr/bin/node /x/vibespace-hook.mjs' });
   j = JSON.parse(fs.readFileSync(sf, 'utf8'));
   const ch = JSON.parse(fs.readFileSync(path.join(home, '.codex', 'hooks.json'), 'utf8'));
-  ok('with hookCmd: our hook entries registered in BOTH hook files + cleanupPeriodDays set, permissions untouched, codex hooks.json created (createIfMissing)', j.cleanupPeriodDays === 36500 && j.hooks.Stop[0].hooks[0].command === '/usr/bin/node /x/vibespace-hook.mjs' && j.permissions.allow[0] === 'Read' && ch.hooks.SessionStart[0].hooks[0].command.includes('vibespace-hook.mjs') && !ch.hooks.Stop && !('cleanupPeriodDays' in ch), { j, ch });
+  ok('with hookCmd: our hook entries registered in BOTH hook files + cleanupPeriodDays set, permissions untouched, codex hooks.json created (createIfMissing)', j.cleanupPeriodDays === 36500 && j.hooks.Stop[0].hooks[0].command === '/usr/bin/node /x/vibespace-hook.mjs' && j.permissions.allow[0] === 'Read' && gateOf(ch.hooks.SessionStart[0].hooks[0].command.includes('vibespace-hook.mjs')) && !ch.hooks.Stop && !('cleanupPeriodDays' in ch), { j, ch });
   r = HC.applyConfigPlan(plan(36500), { home, hookCmd: '/usr/bin/node /x/vibespace-hook.mjs', uninstall: true });
   j = JSON.parse(fs.readFileSync(sf, 'utf8'));
-  ok('uninstall strips ONLY our hook entries; the managed key survives; nothing else changes', j.cleanupPeriodDays === 36500 && !(j.hooks.Stop && j.hooks.Stop.length) && j.permissions.allow[0] === 'Read' && r.files.find((f) => f.id === 'settings').hooks === 'stripped' && fs.readFileSync(cf, 'utf8').includes('persistence = "save-all"'));
+  ok('uninstall strips ONLY our hook entries; the managed key survives; nothing else changes', j.cleanupPeriodDays === 36500 && !(j.hooks.Stop && j.hooks.Stop.length) && j.permissions.allow[0] === 'Read' && r.files.find((f) => f.id === 'settings').hooks === 'stripped' && verdictOf(fs.readFileSync(cf, 'utf8').includes('persistence = "save-all"')));
   ok('ensureCliConfig is the named alias', HC.ensureCliConfig({ plan: plan(36500), home }).receipts.length === 2);
 }
 
@@ -335,19 +335,19 @@ console.log('§5b symlinked configs (dotfiles), file modes, unreadable files');
   ok('control: a tmp+rename on the link path replaces the link with a regular file and leaves the dotfile target untouched', !fs.lstatSync(ctl).isSymbolicLink() && fs.readFileSync(ct, 'utf8') === 'model = "x"\n');
   fs.rmSync(ctl);
   let r = HC.applyConfigPlan(fullPlan(36500), { home });
-  ok('both receipts applied', r.receipts.length === 2 && r.receipts.every((x) => x.state === 'applied'), r.receipts);
-  ok('~/.claude/settings.json and ~/.codex/config.toml are STILL symlinks', fs.lstatSync(sf).isSymbolicLink() && fs.lstatSync(cf).isSymbolicLink());
+  ok('both receipts applied', r.receipts.length === 2 && verdictOf(r.receipts.every((x) => x.state === 'applied')), r.receipts);
+  ok('~/.claude/settings.json and ~/.codex/config.toml are STILL symlinks', gateOf(fs.lstatSync(sf).isSymbolicLink()) && verdictOf(fs.lstatSync(cf).isSymbolicLink()));
   ok('the link TARGETS carry the keys (the dotfile keeps governing)', JSON.parse(fs.readFileSync(cj, 'utf8')).cleanupPeriodDays === 36500 && fs.readFileSync(ct, 'utf8') === 'model = "x"\n\n[history]\npersistence = "save-all"\n', fs.readFileSync(ct, 'utf8'));
-  ok('the same bytes read back through the links', JSON.parse(fs.readFileSync(sf, 'utf8')).cleanupPeriodDays === 36500 && fs.readFileSync(cf, 'utf8').includes('persistence = "save-all"'));
+  ok('the same bytes read back through the links', JSON.parse(fs.readFileSync(sf, 'utf8')).cleanupPeriodDays === 36500 && verdictOf(fs.readFileSync(cf, 'utf8').includes('persistence = "save-all"')));
   ok('no .tmp left beside the link or the target', ![sf, cf, cj, ct].some((f) => fs.existsSync(f + '.tmp')) && fs.readdirSync(dot).length === 2, fs.readdirSync(dot));
   ok('a 0600 config stays 0600 after the write (both writers; the umask does not decide)', (fs.statSync(cj).mode & 0o777) === 0o600 && (fs.statSync(ct).mode & 0o777) === 0o600);
-  ok('readConfigPlan reads through the links: applied', HC.readConfigPlan(fullPlan(36500), { home }).every((x) => x.state === 'applied'));
+  ok('readConfigPlan reads through the links: applied', verdictOf(HC.readConfigPlan(fullPlan(36500), { home }).every((x) => x.state === 'applied')));
   // a symlinked CLI DIRECTORY (~/.codex → dotfiles/codex/) with a regular file inside
   const home2 = path.join(root, 'home-dotdir'), dotdir = path.join(root, 'dotfiles-codex');
   fs.mkdirSync(home2, { recursive: true }); fs.mkdirSync(dotdir, { recursive: true });
   fs.symlinkSync(dotdir, path.join(home2, '.codex'));
   r = HC.applyConfigPlan(fullPlan(0), { home: home2 });
-  ok('a symlinked CLI dir: the file is created inside the real dir, the dir link survives', r.receipts[0]?.state === 'applied' && fs.lstatSync(path.join(home2, '.codex')).isSymbolicLink() && fs.readFileSync(path.join(dotdir, 'config.toml'), 'utf8') === '[history]\npersistence = "save-all"\n', r.receipts);
+  ok('a symlinked CLI dir: the file is created inside the real dir, the dir link survives', r.receipts[0]?.state === 'applied' && gateOf(fs.lstatSync(path.join(home2, '.codex')).isSymbolicLink()) && fs.readFileSync(path.join(dotdir, 'config.toml'), 'utf8') === '[history]\npersistence = "save-all"\n', r.receipts);
   // modes on REGULAR files too
   const home3 = path.join(root, 'home-mode'); fs.mkdirSync(path.join(home3, '.claude'), { recursive: true }); fs.mkdirSync(path.join(home3, '.codex'), { recursive: true });
   const sf3 = path.join(home3, '.claude', 'settings.json'), cf3 = path.join(home3, '.codex', 'config.toml');
@@ -358,7 +358,7 @@ console.log('§5b symlinked configs (dotfiles), file modes, unreadable files');
   fs.rmSync(ct);
   r = HC.applyConfigPlan(fullPlan(36500), { home });
   const dg = r.receipts.find((x) => x.key === 'historyPersistence');
-  ok('a dangling symlink is refused by name — never replaced by a regular file', dg?.state === 'refused' && /symlink whose target does not exist/.test(dg.reason) && fs.lstatSync(cf).isSymbolicLink() && !fs.existsSync(ct), r.receipts);
+  ok('a dangling symlink is refused by name — never replaced by a regular file', dg?.state === 'refused' && gateOf(/symlink whose target does not exist/.test(dg.reason)) && gateOf(fs.lstatSync(cf).isSymbolicLink()) && !fs.existsSync(ct), r.receipts);
   // B-ddf3 unit 2 (r3064, its round w9xxaxn8a's (d)): a link to nowhere is THERE and cannot be read — the reader says so by its own
   // name («a link to nowhere»: the chip words it «… is a link to nowhere — not touched»), never «missing», whose chip offers «will be
   // created — or press Apply» while Apply refuses it by name (the leg above). The release's «missing» is the red below.
@@ -373,7 +373,7 @@ console.log('§5b symlinked configs (dotfiles), file modes, unreadable files');
   // a directory where the file should be: refused, not "created over"
   const home4 = path.join(root, 'home-dir'); fs.mkdirSync(path.join(home4, '.codex', 'config.toml'), { recursive: true });
   r = HC.applyConfigPlan(fullPlan(0), { home: home4 });
-  ok('an existing-but-unreadable path (a directory) is refused by name, not written over', r.receipts[0]?.state === 'refused' && /could not be read/.test(r.receipts[0].reason) && fs.statSync(path.join(home4, '.codex', 'config.toml')).isDirectory(), r.receipts);
+  ok('an existing-but-unreadable path (a directory) is refused by name, not written over', r.receipts[0]?.state === 'refused' && gateOf(/could not be read/.test(r.receipts[0].reason)) && verdictOf(fs.statSync(path.join(home4, '.codex', 'config.toml')).isDirectory()), r.receipts);
 }
 
 // ── §5c WHAT CODEX ITSELF LOADS: the writer never produces a duplicate-key file; every shape it produces loads in the real binary ──
@@ -384,7 +384,7 @@ console.log('§5c the TOML shapes codex refuses (root scalar / dotted root + hea
   const apply = () => HC.applyConfigPlan(fullPlan(0), { home }).receipts[0];
   fs.writeFileSync(cf, 'history = 5\n');
   let x = apply();
-  ok('a root scalar named like the section is refused by name (a [history] header after it is a duplicate key), file untouched', x.state === 'refused' && /already a value/.test(x.reason) && fs.readFileSync(cf, 'utf8') === 'history = 5\n', x);
+  ok('a root scalar named like the section is refused by name (a [history] header after it is a duplicate key), file untouched', x.state === 'refused' && gateOf(/already a value/.test(x.reason)) && fs.readFileSync(cf, 'utf8') === 'history = 5\n', x);
   fs.writeFileSync(cf, 'history.max_bytes = 5\nmodel = "x"\n');
   x = apply();
   const dotted = fs.readFileSync(cf, 'utf8');
@@ -392,7 +392,7 @@ console.log('§5c the TOML shapes codex refuses (root scalar / dotted root + hea
   ok('…reads back as applied and a re-apply is byte-identical', HC.readConfigPlan(fullPlan(0), { home })[0].state === 'applied' && apply().state === 'unchanged' && fs.readFileSync(cf, 'utf8') === dotted);
   fs.writeFileSync(cf, 'history.max_bytes = 5\n\n[history]\nx = 1\n');
   x = apply();
-  ok('dotted keys AND a [history] header (already invalid TOML) are refused by name, never reported applied', x.state === 'refused' && /defined both/.test(x.reason) && HC.readConfigPlan(fullPlan(0), { home })[0].state === 'unreadable', x);
+  ok('dotted keys AND a [history] header (already invalid TOML) are refused by name, never reported applied', x.state === 'refused' && gateOf(/defined both/.test(x.reason)) && HC.readConfigPlan(fullPlan(0), { home })[0].state === 'unreadable', x);
   // the real binary: every shape the writer produces must LOAD; two hand-made broken shapes are the controls
   const which = process.env.VS_NO_REAL_CLI === '1' ? '' : spawnSync('sh', ['-c', 'command -v codex'], { encoding: 'utf8' }).stdout.trim();   // B-ddb9: not under the flag
   const ver = which ? (spawnSync(which, ['--version'], { encoding: 'utf8', timeout: 15000 }).stdout || '').trim() : '';
@@ -416,9 +416,9 @@ console.log('§5c the TOML shapes codex refuses (root scalar / dotted root + hea
     } else {
       for (const [name, text] of shapes) { const l = load(text); ok(`codex ${ver} loads the writer's "${name}" file (rc 0)`, l.rc === 0, l.err.trim().slice(-300)); }
       const dup = load('history = 5\n[history]\npersistence = "save-all"\n');
-      ok('control: the pre-fix duplicate-key shape is refused by codex itself', dup.rc !== 0 && /duplicate key/.test(dup.err), dup.err.slice(-300));
+      ok('control: the pre-fix duplicate-key shape is refused by codex itself', dup.rc !== 0 && verdictOf(/duplicate key/.test(dup.err)), dup.err.slice(-300));
       const bogus = load('[history]\npersistence = "bogus"\n');
-      ok('control: an out-of-vocabulary value is refused by codex itself (unknown variant) — what coerce now never lets through', bogus.rc !== 0 && /unknown variant/.test(bogus.err), bogus.err.slice(-300));
+      ok('control: an out-of-vocabulary value is refused by codex itself (unknown variant) — what coerce now never lets through', bogus.rc !== 0 && verdictOf(/unknown variant/.test(bogus.err)), bogus.err.slice(-300));
     }
   }
 }
@@ -441,7 +441,7 @@ console.log('§6 readConfigPlan');
   fs.writeFileSync(sf, JSON.stringify({ cleanupPeriodDays: 36500 })); fs.writeFileSync(cf, '# c\n[history]\npersistence = "save-all" # yes\n');
   ok('matching values ⇒ applied', st().transcriptRetentionDays.state === 'applied' && st().historyPersistence.state === 'applied');
   fs.writeFileSync(sf, '{ broken'); fs.writeFileSync(cf, 'history = { persistence = "x" }\n');
-  ok('unparsable / unhandled shapes ⇒ unreadable with a reason', st().transcriptRetentionDays.state === 'unreadable' && st().historyPersistence.state === 'unreadable' && /inline table/.test(st().historyPersistence.reason));
+  ok('unparsable / unhandled shapes ⇒ unreadable with a reason', st().transcriptRetentionDays.state === 'unreadable' && st().historyPersistence.state === 'unreadable' && verdictOf(/inline table/.test(st().historyPersistence.reason)));
   fs.writeFileSync(cf, '[sandbox]\nx = 1\n');
   ok('key absent in a readable toml ⇒ differs (current null)', st().historyPersistence.state === 'differs' && st().historyPersistence.current === null);
   ok('readConfigPlan never writes', fs.readFileSync(sf, 'utf8') === '{ broken' && fs.readFileSync(cf, 'utf8') === '[sandbox]\nx = 1\n');
@@ -455,7 +455,7 @@ console.log('§6b rel re-check at apply / read / decode');
   const bad = [['..', 'esc-outside', 'pwned.toml'], ['..', '..', '..', '..', '..', 'tmp', 'vs-pwned.toml'], ['/etc/pwned.toml'], ['~', 'x.toml'], ['.', 'x.toml'], ['a\\b'], [''], [], 'not-an-array', undefined];
   for (const rel of bad) {
     const a = HC.applyConfigPlan(esc(rel), { home });
-    ok(`apply refuses rel ${JSON.stringify(rel)} by name (receipt refused, file error, nothing joined under HOME)`, a.receipts[0]?.state === 'refused' && /rel/.test(a.receipts[0].reason) && !!a.files[0]?.error && a.files[0].file === null, a);
+    ok(`apply refuses rel ${JSON.stringify(rel)} by name (receipt refused, file error, nothing joined under HOME)`, a.receipts[0]?.state === 'refused' && gateOf(/rel/.test(a.receipts[0].reason)) && !!a.files[0]?.error && a.files[0].file === null, a);
     ok('…read refuses it too', HC.readConfigPlan(esc(rel), { home })[0]?.state === 'refused');
     ok('…decodePlan drops the whole plan', HC.decodePlan(HC.encodePlan(esc(rel))) === null);
   }
@@ -464,7 +464,7 @@ console.log('§6b rel re-check at apply / read / decode');
   fs.mkdirSync(path.join(home, '.zed'), { recursive: true });
   ok('a sound rel still decodes + applies', HC.decodePlan(HC.encodePlan(sound)) !== null && HC.applyConfigPlan(sound, { home }).receipts[0].state === 'applied');
   const both = [...bad, ['.codex', 'config.toml'], ['x']];
-  ok('the two spellings of the rel rule agree on every fixture (harness-settings.checkRel = harness-config.checkRel — the helper cannot require the PURE one)', both.every((r) => HS.checkRel(r) === HC.checkRel(r)) && HS.checkRel(['x']) === null);
+  ok('the two spellings of the rel rule agree on every fixture (harness-settings.checkRel = harness-config.checkRel — the helper cannot require the PURE one)', gateOf(both.every((r) => HS.checkRel(r) === HC.checkRel(r))) && HS.checkRel(['x']) === null);
   ok('…and the two function texts are identical (drift guard)', HS.checkRel.toString() === HC.checkRel.toString());
 }
 
@@ -473,9 +473,9 @@ console.log('§7 receipt lines');
 {
   const rs = [{ harness: 'codex', key: 'historyPersistence', state: 'differs', current: 'a|b\nc', want: 'save-all', reason: null }, { harness: 'claude', key: 'transcriptRetentionDays', state: 'applied', current: 36500, want: 36500 }];
   const text = HC.formatReceiptLines(rs);
-  ok('one line per receipt, pipes/newlines in values cannot shear a line', text.split('\n').length === 2 && text.startsWith('CFG|codex|historyPersistence|differs|'));
+  ok('one line per receipt, pipes/newlines in values cannot shear a line', text.split('\n').length === 2 && verdictOf(text.startsWith('CFG|codex|historyPersistence|differs|')));
   const back = HC.parseReceiptLines(text + '\nT|x|\nCFG|*|*|unknown\nCFG|*|*|no-node\njunk');
-  ok('parse round-trips values and understands the gate markers', back[0].current === 'a|b\nc' && back[0].want === 'save-all' && back[1].current === 36500 && back[2].state === 'unknown' && /predates/.test(back[2].reason) && back[3].reason === 'no-node' && back.length === 4, back);
+  ok('parse round-trips values and understands the gate markers', back[0].current === 'a|b\nc' && back[0].want === 'save-all' && back[1].current === 36500 && back[2].state === 'unknown' && gateOf(/predates/.test(back[2].reason)) && back[3].reason === 'no-node' && back.length === 4, back);
 }
 
 // ── §8 the receipt WORDING (one function for every surface) ──
@@ -485,32 +485,32 @@ console.log('§8 receipt wording');
   const t = T;
   const r = { rel: '.claude/settings.json', path: 'cleanupPeriodDays', want: 36500 };
   const line = (state, extra = {}, opts = {}) => chips.receiptLine({ ...r, state, ...extra }, { t, where: 'this machine', ...opts });
-  ok('applied → ok tone, names file → key = value', line('applied').tone === 'ok' && /✓ this machine: ~\/.claude\/settings.json → cleanupPeriodDays = 36500/.test(line('applied').text));
-  ok('applied with a local write receipt says when', /written 3 min ago/.test(line('applied', {}, { lastWriteAt: Date.now() - 3 * 60000 }).text));
-  ok('differs → warn, names current vs wanted, local wording', line('differs', { current: 30 }).tone === 'warn' && /is 30 \(wanted 36500\)/.test(line('differs', { current: 30 }).text) && /next start or setting change/.test(line('differs', { current: 30 }).text));
-  ok('differs on a remote host says next install/spawn', /next tool install or session start on that machine/.test(line('differs', { current: 30 }, { remote: true, where: 'userW-mac' }).text));
+  ok('applied → ok tone, names file → key = value', line('applied').tone === 'ok' && verdictOf(/✓ this machine: ~\/.claude\/settings.json → cleanupPeriodDays = 36500/.test(line('applied').text)));
+  ok('applied with a local write receipt says when', verdictOf(/written 3 min ago/.test(line('applied', {}, { lastWriteAt: Date.now() - 3 * 60000 }).text)));
+  ok('differs → warn, names current vs wanted, local wording', line('differs', { current: 30 }).tone === 'warn' && gateOf(/is 30 \(wanted 36500\)/.test(line('differs', { current: 30 }).text)) && verdictOf(/next start or setting change/.test(line('differs', { current: 30 }).text)));
+  ok('differs on a remote host says next install/spawn', verdictOf(/next tool install or session start on that machine/.test(line('differs', { current: 30 }, { remote: true, where: 'userW-mac' }).text)));
   // lane hooks-create: a missing file says what is TRUE now, by why it is missing (the receipt's `missing`, or the reason
   // code a remote helper's CFG line carries) — the CLI never writes settings.json on its own, so "start the CLI once"
   // was false for a chat-only user and is retired everywhere (census below)
   const wc = line('missing', { missing: 'will-create', reason: 'will-create' });
-  ok('missing + will-create (local) → warn "will be created at the next start — or press Apply" + apply:true (the surface draws the Apply button)', wc.tone === 'warn' && /~\/.claude\/settings.json will be created at the next start — or press Apply/.test(wc.text) && wc.apply === true, wc);
+  ok('missing + will-create (local) → warn "will be created at the next start — or press Apply" + apply:true (the surface draws the Apply button)', wc.tone === 'warn' && gateOf(/~\/.claude\/settings.json will be created at the next start — or press Apply/.test(wc.text)) && wc.apply === true, wc);
   const wcr = line('missing', { reason: 'will-create' }, { remote: true, where: 'userW-mac' });
-  ok('missing + will-create on a remote host (the CFG reason code alone) → next install/session start, NO Apply (no button there)', /userW-mac: ~\/.claude\/settings.json will be created at the next tool install or session start on that machine/.test(wcr.text) && !wcr.apply, wcr);
+  ok('missing + will-create on a remote host (the CFG reason code alone) → next install/session start, NO Apply (no button there)', gateOf(/userW-mac: ~\/.claude\/settings.json will be created at the next tool install or session start on that machine/.test(wcr.text)) && !wcr.apply, wcr);
   const nd = line('missing', { missing: 'no-dir', reason: 'no-dir' });
-  ok('missing + no-dir → dim "~/.claude not found — the CLI has not run on this machine, so nothing is written", no Apply', nd.tone === 'dim' && /\? this machine: ~\/.claude not found — the CLI has not run on this machine, so nothing is written/.test(nd.text) && !nd.apply, nd);
+  ok('missing + no-dir → dim "~/.claude not found — the CLI has not run on this machine, so nothing is written", no Apply', nd.tone === 'dim' && gateOf(/\? this machine: ~\/.claude not found — the CLI has not run on this machine, so nothing is written/.test(nd.text)) && !nd.apply, nd);
   const lg = line('missing');
-  ok('missing with no reason (an older helper) → "not found", no promise, no Apply', lg.tone === 'warn' && /~\/.claude\/settings.json not found$/.test(lg.text) && !lg.apply, lg);
+  ok('missing with no reason (an older helper) → "not found", no promise, no Apply', lg.tone === 'warn' && gateOf(/~\/.claude\/settings.json not found$/.test(lg.text)) && !lg.apply, lg);
   const retired = /start the CLI once|run the CLI once/;
   const censusFiles = [...fs.readdirSync(path.join(repo, 'src'), { recursive: true }).filter((f) => /\.(js|mjs)$/.test(f)).map((f) => 'src/' + f), 'server.js', 'data/bin/vibespace-hook-register.mjs'];
   const hits = censusFiles.filter((f) => retired.test(fs.readFileSync(path.join(repo, f), 'utf8')));
   ok(`the retired "start the CLI once" / "run the CLI once" sentence is in no source file, dictionary (zh/ja) or the shipped helper (census over ${censusFiles.length} files)`, censusFiles.length > 300 && hits.length === 0, hits);
-  ok('unreadable/refused → bad "not valid after a hand edit — not touched"', line('unreadable').tone === 'bad' && /not valid after a hand edit — not touched/.test(line('refused', { reason: 'x' }).text));
-  ok('unknown → dim "not checked — reinstall"', line('unknown').tone === 'dim' && /not checked — reinstall the agent tools/.test(line('unknown').text));
+  ok('unreadable/refused → bad "not valid after a hand edit — not touched"', line('unreadable').tone === 'bad' && verdictOf(/not valid after a hand edit — not touched/.test(line('refused', { reason: 'x' }).text)));
+  ok('unknown → dim "not checked — reinstall"', line('unknown').tone === 'dim' && verdictOf(/not checked — reinstall the agent tools/.test(line('unknown').text)));
   ok('no-node marker → bad', line('unknown', { reason: 'no-node' }).tone === 'bad');
-  ok('offLine says the CLI value is left alone', /Leaving the CLI's own value alone \(~\/.codex\/config.toml → history.persistence\)/.test(chips.offLine({ t, rel: '.codex/config.toml', path: 'history.persistence' }).text));
+  ok('offLine says the CLI value is left alone', verdictOf(/Leaving the CLI's own value alone \(~\/.codex\/config.toml → history.persistence\)/.test(chips.offLine({ t, rel: '.codex/config.toml', path: 'history.persistence' }).text)));
   // lane ui-language: the person's head says WHEN; `how` (flags, an engine's rung) joins it in advanced mode only
   ok('applyHead: the plain head carries no `how`', chips.applyHead({ kind: 'server', how: 'pool engine — the codex reset-credit rung' }, { t }) === 'Read by VibeSpace' && !/--brief/.test(chips.applyHead({ kind: 'spawn', how: '--brief' }, { t })));
-  ok('applyHead per kind', /Applies to new sessions · --brief/.test(chips.applyHead({ kind: 'spawn', how: '--brief' }, { t, advanced: true })) && /terminal mode/.test(chips.applyHead({ kind: 'spawn', how: 'x', mode: 'terminal' }, { t, advanced: true })) && /running chat sessions follow/.test(chips.applyHead({ kind: 'spawn', how: 'x', live: 'v' }, { t, advanced: true })) && /Read by VibeSpace · pool/.test(chips.applyHead({ kind: 'server', how: 'pool' }, { t, advanced: true })) && /Written into the CLI config/.test(chips.applyHead({ kind: 'cli-config' }, { t, advanced: true })) && chips.applyHead(null, { t }) === null);
+  ok('applyHead per kind', gateOf(/Applies to new sessions · --brief/.test(chips.applyHead({ kind: 'spawn', how: '--brief' }, { t, advanced: true }))) && gateOf(/terminal mode/.test(chips.applyHead({ kind: 'spawn', how: 'x', mode: 'terminal' }, { t, advanced: true }))) && gateOf(/running chat sessions follow/.test(chips.applyHead({ kind: 'spawn', how: 'x', live: 'v' }, { t, advanced: true }))) && gateOf(/Read by VibeSpace · pool/.test(chips.applyHead({ kind: 'server', how: 'pool' }, { t, advanced: true }))) && gateOf(/Written into the CLI config/.test(chips.applyHead({ kind: 'cli-config' }, { t, advanced: true }))) && chips.applyHead(null, { t }) === null);
 }
 
 // ── §9 onSettingsWrite: cli-config diff ⇒ sync; live verb ⇒ every running chat session of THAT harness whose adapter has it ──
@@ -546,7 +546,7 @@ console.log('§9 onSettingsWrite');
   store['codex.historyPersistence'] = 'bogus';
   const noisy = createSync({ serverSetting: (k) => store[k], harnesses, adapterRegistry, activeSessions, hookRegistrationSafe: () => false, home, log: () => {}, warn: (m) => warns.push(m) });
   noisy.syncCliConfig({ reason: 'boot' });
-  ok('a refused enum value is named at every sync (even on an unsafe server): harness.key = "bogus" is not one of … — the default rides instead', warns.length === 1 && /codex\.historyPersistence = "bogus" is not one of ""\|"save-all"\|"none"/.test(warns[0]) && /default "save-all" rides instead/.test(warns[0]), warns);
+  ok('a refused enum value is named at every sync (even on an unsafe server): harness.key = "bogus" is not one of … — the default rides instead', warns.length === 1 && gateOf(/codex\.historyPersistence = "bogus" is not one of ""\|"save-all"\|"none"/.test(warns[0])) && verdictOf(/default "save-all" rides instead/.test(warns[0])), warns);
   delete store['codex.historyPersistence'];
   warns.length = 0; noisy.syncCliConfig({ reason: 'boot' });
   ok('a listed value warns nothing', warns.length === 0, warns);
@@ -561,11 +561,11 @@ console.log('§10 the shipped helper');
   const helper = fs.readFileSync(path.join(gen, 'data', 'bin', 'vibespace-hook-register.mjs'), 'utf8');
   const m = /const DEFAULT_PLAN = (\{.*?\});\n/.exec(helper);
   const dp = m && JSON.parse(m[1]);
-  ok('DEFAULT_PLAN is a v1 plan whose files carry hooks and ZERO managed keys', dp && dp.v === 1 && dp.files.length >= 2 && dp.files.every((f) => f.set.length === 0 && f.hooks), m && m[1].slice(0, 200));
-  ok('the helper embeds the applier from the module FILE TEXT (its head comment), never Function.toString', helper.includes('THE SHARED CLI-CONFIG APPLIER') && helper.includes('function tomlSet(') && !/\.toString\(\)/.test(helper.replace(/toString\(16\)/g, '')));
-  ok('the helper mints require with createRequire (ESM host, CJS applier)', /const require = createRequire\(import\.meta\.url\)/.test(helper));
+  ok('DEFAULT_PLAN is a v1 plan whose files carry hooks and ZERO managed keys', gateOf(dp) && dp.v === 1 && dp.files.length >= 2 && verdictOf(dp.files.every((f) => f.set.length === 0 && f.hooks)), m && m[1].slice(0, 200));
+  ok('the helper embeds the applier from the module FILE TEXT (its head comment), never Function.toString', gateOf(helper.includes('THE SHARED CLI-CONFIG APPLIER')) && gateOf(helper.includes('function tomlSet(')) && !/\.toString\(\)/.test(helper.replace(/toString\(16\)/g, '')));
+  ok('the helper mints require with createRequire (ESM host, CJS applier)', verdictOf(/const require = createRequire\(import\.meta\.url\)/.test(helper)));
 }
 
 fs.rmSync(root, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

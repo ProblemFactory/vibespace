@@ -30,7 +30,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const root = mintRoot('scroll-smoke'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -172,7 +172,7 @@ for (const dpr of [1, 2]) {
     await sleep(300);
     rows = await evaljs(`[...document.querySelectorAll('.backend-filter-menu .status-filter-item .backend-icon[data-backend]')].map((e) => ({ id: e.dataset.backend, mark: !!e.querySelector('.backend-icon-mark'), label: e.closest('.status-filter-item').textContent.trim() }))`);
   }
-  check(`${dpr}×: the 后端 popover, opened by a real click, lists one row per marked backend`, MARKED.every((m) => rows.some((r) => r.id === m.id && r.mark)), JSON.stringify(rows));
+  check(`${dpr}×: the 后端 popover, opened by a real click, lists one row per marked backend`, verdictOf(MARKED.every((m) => rows.some((r) => r.id === m.id && r.mark))), JSON.stringify(rows));
   const px = {};
   for (let t = 0; t < 20; t++) {   // the masks fetch on first paint: settle on evidence, not a fixed sleep
     for (const m of MARKED) if (!(px[m.id] > 0)) px[m.id] = await painted(m.id);
@@ -196,4 +196,4 @@ await cdp('Emulation.clearDeviceMetricsOverride');
 
 ws.close();
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

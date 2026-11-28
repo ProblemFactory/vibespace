@@ -62,7 +62,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // at 600 s); the sweep is test-ci-gate §9d's subject, on fixtures — the stubs (and the --heavy-launch legs) run with it off
 const GIT_ENV = { ...gitEnvFrom(process.env), VIBESPACE_CI_DIR_SWEEP: 'off' };
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 const head = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], { encoding: 'utf-8', env: GIT_ENV });
 if (head.status !== 0) { console.log('SKIP: not a git checkout (no HEAD to name a marker after)'); process.exit(0); }
@@ -129,7 +129,7 @@ function stubGateRepo(tag, { ciSource, suites, commits = 1 }) {
 const worktreesBefore = spawnSync('git', ['-C', REPO, 'worktree', 'list'], { encoding: 'utf-8', env: GIT_ENV }).stdout || '';
 
 try {
-  ok(SUITES.some((s) => s.name === SLICE && s.tier === 'heavy'), `${SLICE} is in the heavy tier (this suite runs it through the launcher)`);
+  ok(verdictOf(SUITES.some((s) => s.name === SLICE && s.tier === 'heavy')), `${SLICE} is in the heavy tier (this suite runs it through the launcher)`);
   const sliceFixtures = machineGlobalFixtures(fs.readFileSync(path.join(REPO, 'scripts', SLICE + '.mjs'), 'utf-8'));
   ok(!sliceFixtures.ports.length && !sliceFixtures.paths.length,
     `${SLICE} claims no machine-global port or /tmp path (${[...sliceFixtures.ports, ...sliceFixtures.paths].join(', ') || 'clean'})`);
@@ -141,10 +141,10 @@ try {
   ok(Date.now() - t0 < 20000, `…and it does NOT wait for the run (${Date.now() - t0}ms — the hook must not stall the push)`);
 
   const pidFile = path.join(dir, `${SHA}.pid`);
-  ok(fs.existsSync(pidFile), 'a pid file names the detached child while it runs');
+  ok(verdictOf(fs.existsSync(pidFile)), 'a pid file names the detached child while it runs');
   const pidRec = JSON.parse(fs.readFileSync(pidFile, 'utf-8'));
   ok(pidRec.pid > 0 && pidRec.pid !== process.pid, `the run is a SEPARATE process (pid ${pidRec.pid})`);
-  ok(fs.existsSync(path.join(dir, `${SHA}.log`)), 'its output goes to <sha>.log');
+  ok(verdictOf(fs.existsSync(path.join(dir, `${SHA}.log`))), 'its output goes to <sha>.log');
 
   // Wait for a verdict. The child does: worktree add → npm run build → one
   // heavy suite. Generous, because this box also runs other agents' gates.
@@ -158,12 +158,12 @@ try {
     const rec = JSON.parse(fs.readFileSync(found, 'utf-8'));
     ok(rec.sha === SHA, 'the marker names the sha it was launched for');
     ok(rec.isolated === true, 'the run was ISOLATED (a marker that names a commit must have tested that commit)');
-    ok(Array.isArray(rec.partial) && rec.partial.join() === SLICE, `the record says which slice ran (${(rec.partial || []).join()})`);
+    ok(gateOf(Array.isArray(rec.partial)) && rec.partial.join() === SLICE, `the record says which slice ran (${(rec.partial || []).join()})`);
     ok(rec.result === (rec.failed.length ? 'red' : 'green'), 'green/red matches the recorded failure list');
-    ok(typeof rec.ms === 'number' && rec.ms > 0 && Array.isArray(rec.timings), 'the record carries a duration and per-suite timings');
+    ok(typeof rec.ms === 'number' && rec.ms > 0 && verdictOf(Array.isArray(rec.timings)), 'the record carries a duration and per-suite timings');
     ok(rec.result === 'green', `the slice passed inside the isolated worktree (${rec.failed.join(', ') || 'no failures'})`);
     const log = fs.readFileSync(path.join(dir, `${SHA}.log`), 'utf-8');
-    ok(log.includes('HEAVY tier') && log.includes(SLICE), 'the log records what ran');
+    ok(gateOf(log.includes('HEAVY tier')) && verdictOf(log.includes(SLICE)), 'the log records what ran');
   }
   // "THE RUN FINISHED" AND "THE RUN HAS TIDIED UP" ARE TWO MOMENTS (round 4).
   // The marker is written inside heavyGate's `try` and `cleanup()` is its
@@ -197,13 +197,13 @@ try {
   });
   ok(wtGoneMs !== null,
     `the isolated worktree is cleaned up (${ourWt}: no registration, no directory; ${wtGoneMs === null ? '>30000' : wtGoneMs}ms after the marker)`);
-  ok(worktreesBefore.includes(REPO) || worktreesBefore.length > 0, 'the before/after worktree listing was readable (the assert above is non-vacuous)');
+  ok(verdictOf(worktreesBefore.includes(REPO)) || worktreesBefore.length > 0, 'the before/after worktree listing was readable (the assert above is non-vacuous)');
 
   // A second launch for a sha that is already running must not start a twin.
   fs.writeFileSync(pidFile, JSON.stringify({ sha: SHA, pid: process.pid, startedAt: Date.now() }));
   const twin = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy-launch', SHA, '--markers=' + dir, '--only=' + SLICE, ...lockArgs],
     { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
-  ok(/already running/.test(twin.stderr || ''), 'a second launch for an in-flight sha is refused, out loud');
+  ok(verdictOf(/already running/.test(twin.stderr || '')), 'a second launch for an in-flight sha is refused, out loud');
   fs.unlinkSync(pidFile);
 
   // ── ONE HEAVY TIER PER MACHINE (2026-09-07 round 2) ────────────────────
@@ -278,9 +278,9 @@ try {
       spawnSync('git', ['-C', REPO, 'update-ref', remoteRef, REMOTE], { env: GIT_ENV });
       try {   // r5113: the two refs are removed in a finally, whatever a leg below throws
       const refsContaining = (s) => (spawnSync('git', ['-C', REPO, 'for-each-ref', '--contains', s, 'refs/heads/', 'refs/remotes/'], { encoding: 'utf-8', env: GIT_ENV }).stdout || '').trim();
-      ok(refsContaining(NOTANC).includes(liveRef) && refsContaining(ABANDONED) === '',
+      ok(gateOf(refsContaining(NOTANC).includes(liveRef)) && refsContaining(ABANDONED) === '',
         `the live control is the tip of a local branch (${liveRef.slice(11)}) and the abandoned control is on NO branch (${ABANDONED.slice(0, 8)}) — the two shapes the launcher must tell apart`);
-      ok(refsContaining(REMOTE).includes(remoteRef) && !refsContaining(REMOTE).includes('refs/heads/') && !/refs\/remotes\/origin\/master/.test(refsContaining(REMOTE)),
+      ok(gateOf(refsContaining(REMOTE).includes(remoteRef)) && !refsContaining(REMOTE).includes('refs/heads/') && !/refs\/remotes\/origin\/master/.test(refsContaining(REMOTE)),
         `the remote-only control is reachable from ${remoteRef.slice(13)} and from no local branch and not origin/master (${REMOTE.slice(0, 8)})`);
       ok(spawnSync('git', ['-C', REPO, 'merge-base', '--is-ancestor', NOTANC, SHA], { env: GIT_ENV }).status !== 0
         && spawnSync('git', ['-C', REPO, 'cat-file', '-e', NOTANC + '^{commit}'], { env: GIT_ENV }).status === 0,
@@ -293,7 +293,7 @@ try {
       // The parked runs must actually BE parked heavy runs before we judge them.
       const reads = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').replace(/\0/g, ' '); } catch { return ''; } };
       for (let i = 0; i < 100 && !(reads(vpid).includes('ci.mjs') && reads(opid).includes('ci.mjs') && reads(apid).includes('ci.mjs') && reads(rpid).includes('ci.mjs')); i++) await sleep(50);
-      ok(reads(vpid).includes('--heavy') && reads(opid).includes('--heavy') && reads(apid).includes('--heavy') && reads(rpid).includes('--heavy'),
+      ok(gateOf(reads(vpid).includes('--heavy')) && gateOf(reads(opid).includes('--heavy')) && gateOf(reads(apid).includes('--heavy')) && verdictOf(reads(rpid).includes('--heavy')),
         'the supersede fixtures are REAL parked `ci.mjs --heavy` processes (the predicate reads /proc)');
       ok(!reads(spid).includes('ci.mjs'), '…and the sleeper fixture deliberately is not one');
       for (const [s, p] of [[OLD, vpid], [NOTANC, opid], [ABANDONED, apid], [REMOTE, rpid], [OLD2, spid]]) {
@@ -302,23 +302,23 @@ try {
       const sup = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy-launch', SHA, '--markers=' + dir, '--only=' + SLICE, ...lockArgs],
         { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
       const serr = sup.stderr || '';
-      ok(/superseded the run for/.test(serr), `an in-flight run for an ANCESTOR is superseded, out loud (${serr.trim().split('\n').find((l) => /superseded/.test(l)) || 'silent'})`);
+      ok(verdictOf(/superseded the run for/.test(serr)), `an in-flight run for an ANCESTOR is superseded, out loud (${serr.trim().split('\n').find((l) => /superseded/.test(l)) || 'silent'})`);
       ok(!fs.existsSync(path.join(dir, `${OLD}.pid`)), '…its pid file is removed (it is no longer in flight)');
       let dead = false;
       for (let i = 0; i < 100 && !dead; i++) { try { process.kill(vpid, 0); await sleep(50); } catch { dead = true; } }
-      ok(dead, `…and the process it named is gone (pid ${vpid})`);
+      ok(verdictOf(dead), `…and the process it named is gone (pid ${vpid})`);
       let oAlive = false; try { process.kill(opid, 0); oAlive = true; } catch { }
-      ok(oAlive && fs.existsSync(path.join(dir, `${NOTANC}.pid`)),
+      ok(gateOf(oAlive) && verdictOf(fs.existsSync(path.join(dir, `${NOTANC}.pid`))),
         'NEG: the SAME launch leaves the run for a NON-ancestor that is a LIVE branch tip alone (pid alive, pid file kept) — two branches may be pushed');
       let aDead = false;
       for (let i = 0; i < 100 && !aDead; i++) { try { process.kill(apid, 0); await sleep(50); } catch { aDead = true; } }
-      ok(aDead && !fs.existsSync(path.join(dir, `${ABANDONED}.pid`)) && /on no local branch/.test(serr),
+      ok(gateOf(aDead) && !fs.existsSync(path.join(dir, `${ABANDONED}.pid`)) && verdictOf(/on no local branch/.test(serr)),
         `…and SUPERSEDES the run for a sha on NO branch, saying why (pid ${apid} gone, pid file removed) — the 40-minute wait behind an amended-away sha`);
       let sAlive = false; try { process.kill(spid, 0); sAlive = true; } catch { }
-      ok(sAlive && /NOT superseding/.test(serr),
+      ok(gateOf(sAlive) && verdictOf(/NOT superseding/.test(serr)),
         'NEG: …and refuses to kill an ANCESTOR whose pid does not read as a heavy run, out loud (queues instead)');
       let rAlive = false; try { process.kill(rpid, 0); rAlive = true; } catch { }
-      ok(rAlive && fs.existsSync(path.join(dir, `${REMOTE}.pid`)),
+      ok(gateOf(rAlive) && verdictOf(fs.existsSync(path.join(dir, `${REMOTE}.pid`))),
         `NEG (2026-09-16): the SAME launch leaves the run for a sha reachable ONLY from a remote-tracking ref alone (pid ${rpid} alive, pid file kept) — pushed, local branch deleted, verdict still wanted`);
       for (const p of [opid, apid, rpid, spid, parkHolder]) { try { process.kill(-p, 'SIGKILL'); } catch { try { process.kill(p, 'SIGKILL'); } catch { } } }
       for (const s of [NOTANC, ABANDONED, REMOTE, OLD2]) { try { fs.unlinkSync(path.join(dir, `${s}.pid`)); } catch { } }
@@ -361,11 +361,11 @@ try {
         for (let i = 0; i < 200 && !gone; i++) { try { process.kill(dead, 0); await sleep(25); } catch { gone = true; } }
         if (!gone) ok(false, `HARNESS: the stopped run (pid ${dead}) was still there after 5 s — the sweep leg cannot judge`);
         const has = (r) => g(['rev-parse', '-q', '--verify', r]).status === 0;
-        ok(gone && [...DEAD, ...LEGACY].every(has), 'a run stopped mid-way (killed before its finally) LEAVES its refs — the state the next start must clear');
+        ok(gateOf(gone) && verdictOf([...DEAD, ...LEGACY].every(has)), 'a run stopped mid-way (killed before its finally) LEAVES its refs — the state the next start must clear');
         const sw = sweepStaleLaunchRefs(sr);
-        ok(gone && ![...DEAD, ...LEGACY, ...REUSED].some(has) && [...sw.swept].sort().join(',') === [...DEAD, ...LEGACY, ...REUSED].sort().join(','),
+        ok(gateOf(gone) && ![...DEAD, ...LEGACY, ...REUSED].some(has) && [...sw.swept].sort().join(',') === [...DEAD, ...LEGACY, ...REUSED].sort().join(','),
           `the next start's sweep removes the stopped run's refs, the mark-less legacy one and a REUSED pid's (same pid, another start mark) — exactly those (${sw.swept.length})`, );
-        ok(LIVE.every(has) && FOREIGN.every(has) && LIVE.every((r) => sw.kept.includes(r)),
+        ok(gateOf(LIVE.every(has)) && gateOf(FOREIGN.every(has)) && verdictOf(LIVE.every((r) => sw.kept.includes(r))),
           'NEG: a RUNNING run\'s refs stay (its pid runs with its own mark), and every other name — a look-alike, another prefix, another remote — is never touched');
       } finally {
         for (const p of [dead, live]) { try { process.kill(-p, 'SIGKILL'); } catch { try { process.kill(p, 'SIGKILL'); } catch { } } }
@@ -401,18 +401,18 @@ try {
       // handlers off ⇒ all three left behind.)
       let appeared = false;
       for (let i = 0; i < 400 && !appeared; i++) { try { fs.lstatSync(path.join(wtPath, 'node_modules')); appeared = true; } catch { await sleep(50); } }
-      ok(appeared, `a running heavy child really has an isolated checkout to leak, past \`worktree add\` (${wtName})`);
+      ok(verdictOf(appeared), `a running heavy child really has an isolated checkout to leak, past \`worktree add\` (${wtName})`);
       if (appeared) {
-        ok(fs.existsSync(klock), '…and really holds the machine lock while it runs');
+        ok(verdictOf(fs.existsSync(klock)), '…and really holds the machine lock while it runs');
         try { process.kill(-kpid, 'SIGTERM'); } catch { try { process.kill(kpid, 'SIGTERM'); } catch { } }
         let gone = false;
         for (let i = 0; i < 200 && !gone; i++) { gone = !fs.existsSync(wtPath); if (!gone) await sleep(50); }
-        ok(gone, '…and on SIGTERM (this is what superseding does) it removes that checkout');
+        ok(verdictOf(gone), '…and on SIGTERM (this is what superseding does) it removes that checkout');
         const wlist = spawnSync('git', ['-C', REPO, 'worktree', 'list'], { encoding: 'utf-8', env: GIT_ENV }).stdout || '';
         ok(!wlist.includes(wtName), '…leaves no registration behind in `git worktree list`');
         let lockGone = false;
         for (let i = 0; i < 100 && !lockGone; i++) { lockGone = !fs.existsSync(klock); if (!lockGone) await sleep(50); }
-        ok(lockGone, '…and releases the machine lock (a killed run must not block the tier forever)');
+        ok(verdictOf(lockGone), '…and releases the machine lock (a killed run must not block the tier forever)');
         ok(!fs.readdirSync(kdir).some((f) => /\.(green|red)$/.test(f)), '…and writes NO verdict (it never finished)');
       }
       try { fs.rmSync(kdir, { recursive: true, force: true }); } catch { }
@@ -431,7 +431,7 @@ try {
       spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy-launch', SHA, '--markers=' + sdir, '--only=' + SLICE, '--lock=' + slock, '--lock-wait-ms=5000'],
         { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
       const spidFile = path.join(sdir, `${SHA}.pid`);
-      ok(fs.existsSync(spidFile), 'a launched run has a pid file — the thing superseding removes');
+      ok(verdictOf(fs.existsSync(spidFile)), 'a launched run has a pid file — the thing superseding removes');
       // Remove it while the run is still working (its build alone takes ~2 s).
       try { fs.unlinkSync(spidFile); } catch { }
       // Wait for the run to CLOSE. `/HEAVY/` alone matches its own opening
@@ -440,12 +440,12 @@ try {
       let done = false;
       for (let i = 0; i < 600 && !done; i++) { done = /HEAVY (GATE|TIER) (GREEN|RED|ABORTED|SKIPPED)/.test(readLog()); if (!done) await sleep(50); }
       const slog = readLog();
-      ok(done, `the superseded run reached its closing line (${(slog.trim().split('\n').pop() || '(no output)').slice(0, 90)})`);
-      ok(/stopping: superseded by a newer push/.test(slog), `…and removing it makes the run STOP, saying why (${(slog.match(/stopping: [^\n]*/) || ['(never said)'])[0]})`);
+      ok(verdictOf(done), `the superseded run reached its closing line (${(slog.trim().split('\n').pop() || '(no output)').slice(0, 90)})`);
+      ok(verdictOf(/stopping: superseded by a newer push/.test(slog)), `…and removing it makes the run STOP, saying why (${(slog.match(/stopping: [^\n]*/) || ['(never said)'])[0]})`);
       ok(!fs.readdirSync(sdir).some((f) => /\.(green|red)$/.test(f)),
         `…and it writes NO verdict for a commit whose run it did not finish (${fs.readdirSync(sdir).join(' ')})`);
-      ok(/NO VERDICT WRITTEN/.test(slog), '…and its closing line says so');
-      ok(/HEAVY TIER ABORTED/.test(slog) && !/HEAVY (GATE|TIER) GREEN/.test(slog),
+      ok(verdictOf(/NO VERDICT WRITTEN/.test(slog)), '…and its closing line says so');
+      ok(gateOf(/HEAVY TIER ABORTED/.test(slog)) && !/HEAVY (GATE|TIER) GREEN/.test(slog),
         '…and calls itself ABORTED, never GREEN — a tier that ran zero suites did not pass, and "HEAVY TIER GREEN" is quotable out of context');
       try { fs.rmSync(sdir, { recursive: true, force: true }); } catch { }
     }
@@ -470,7 +470,7 @@ try {
       const CI_SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
       const GUARD = /\n\s*abandonedWhy = abandoned\(\);\n\s*if \(abandonedWhy\) \{ console\.log\(`\\n\[ci:heavy\] stopping: \$\{abandonedWhy\}`\); break; \}\n(\s*\/\/ RETRY ONCE)/;
       const preFix = CI_SRC.replace(GUARD, '\n$1');
-      ok(!!SLOW && GUARD.test(CI_SRC) && preFix !== CI_SRC,
+      ok(!!SLOW && gateOf(GUARD.test(CI_SRC)) && preFix !== CI_SRC,
         `the ask-before-retry guard is present and the control's patch applies (slow slice: ${SLOW})`);
 
       const stubRepo = (ciSource) => {
@@ -523,19 +523,19 @@ try {
       };
 
       const good = await arm(CI_SRC);
-      ok(good.started && /superseded the run for/.test(good.sup), 'the sleeping suite was really running when the newer push superseded it');
+      ok(gateOf(good.started) && verdictOf(/superseded the run for/.test(good.sup)), 'the sleeping suite was really running when the newer push superseded it');
       ok(!/retrying once/.test(good.log), '…and the superseded run does NOT re-run the suite our own SIGTERM just killed');
-      ok(good.closed && /stopping: /.test(good.log), `…it stops instead, saying why (${(good.log.match(/stopping: [^\n]*/) || ['(never said)'])[0]})`);
+      ok(gateOf(good.closed) && verdictOf(/stopping: /.test(good.log)), `…it stops instead, saying why (${(good.log.match(/stopping: [^\n]*/) || ['(never said)'])[0]})`);
       ok(!good.markers.some((f) => new RegExp(`^${good.A}\\.(green|red)$`).test(f)), '…and still claims nothing for the commit it did not finish');
-      ok(good.bDone, '…and the MACHINE IS FREED: the superseding run gets the lock and finishes (this is what supersession is for)');
+      ok(verdictOf(good.bDone), '…and the MACHINE IS FREED: the superseding run gets the lock and finishes (this is what supersession is for)');
       try { fs.rmSync(good.root, { recursive: true, force: true }); } catch { }
 
       // NEGATIVE CONTROL: the same fixture against the REAL module with this
       // one guard reverted — it must re-run the killed suite and sit on the
       // lock while the newer run waits, or the assertions above prove nothing.
       const bad = await arm(preFix, 40);  // 2 s: long enough to catch the retry, far short of the 10 s suite
-      ok(bad.started, 'NEG: the pre-fix arm reached the same starting point');
-      ok(/retrying once/.test(bad.log), 'NEG: without the guard the superseded run RETRIES the suite it was killed in');
+      ok(verdictOf(bad.started), 'NEG: the pre-fix arm reached the same starting point');
+      ok(verdictOf(/retrying once/.test(bad.log)), 'NEG: without the guard the superseded run RETRIES the suite it was killed in');
       ok(!bad.bDone && bad.lockHolder === bad.aPid,
         `NEG: …and holds the machine lock meanwhile, so the newer run waits (holder pid ${bad.lockHolder}, superseded pid ${bad.aPid})`);
       try { fs.rmSync(bad.root, { recursive: true, force: true }); } catch { }
@@ -560,17 +560,17 @@ try {
         '--only=' + SLOW, '--lock=' + path.join(root, 'lock'), '--lock-wait-ms=20000'],
         { cwd: root, encoding: 'utf-8', env: { ...GIT_ENV, VS_FLAKY_MARKER: path.join(root, 'flaky-marker') }, timeout: 120000 });
       const out = (r.stdout || '') + (r.stderr || '');
-      ok(/retrying once/.test(out), 'a suite that fails on its OWN is still retried (the guard added in (1d) does not swallow the flaky path)');
+      ok(verdictOf(/retrying once/.test(out)), 'a suite that fails on its OWN is still retried (the guard added in (1d) does not swallow the flaky path)');
       const marker = (() => { try { return JSON.parse(fs.readFileSync(path.join(root, 'data', 'ci-heavy', `${sha}.green`), 'utf-8')); } catch { return null; } })();
       ok(!!marker && r.status === 0, `…and a pass on the second try is a GREEN verdict, not a red (exit ${r.status})`);
-      ok(!!marker && (marker.flaky || []).includes(SLOW), `…recorded as FLAKY, never laundered into a plain green (${marker && JSON.stringify(marker.flaky)})`);
+      ok(!!marker && verdictOf((marker.flaky || []).includes(SLOW)), `…recorded as FLAKY, never laundered into a plain green (${marker && JSON.stringify(marker.flaky)})`);
       // THE RERUN LEDGER + THE LOAD STAMP (lane ci-aidev-desktop-batch, q-038 ④): the rerun is one ledger line beside the
       // markers (both outcomes, both loads, the first run's ✗ lines) and said in the log; every suite line carries its load
       const ledger = (() => { try { return fs.readFileSync(path.join(root, 'data', 'ci-heavy', 'reruns.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } })();
-      ok(ledger.length === 1 && ledger[0].suite === SLOW && ledger[0].again.ok === true && Array.isArray(ledger[0].first.load) && ledger[0].first.load.length === 2 && ledger[0].sha === sha,
+      ok(ledger.length === 1 && ledger[0].suite === SLOW && ledger[0].again.ok === true && gateOf(Array.isArray(ledger[0].first.load)) && ledger[0].first.load.length === 2 && ledger[0].sha === sha,
         `…and ONE line in data/ci-heavy/reruns.jsonl: the suite, red → green, both loads (${JSON.stringify(ledger[0] || null).slice(0, 160)})`);
-      ok(new RegExp(`RERUN LEDGER ${SLOW}: red \\(load [\\d.]+→[\\d.]+\\) → GREEN — FLAKY, counted`).test(out), '…said in the log, never silent');
-      ok(new RegExp(`✓ ${SLOW} \\(\\d+ms\\) \\[lane \\w+\\] load [\\d.]+→[\\d.]+ — ALL PASS`).test(out) && new RegExp(`✗ ${SLOW} FAILED \\(\\d+ms\\) \\[lane \\w+\\] load [\\d.]+→[\\d.]+`).test(out),
+      ok(verdictOf(new RegExp(`RERUN LEDGER ${SLOW}: red \\(load [\\d.]+→[\\d.]+\\) → GREEN — FLAKY, counted`).test(out)), '…said in the log, never silent');
+      ok(gateOf(new RegExp(`✓ ${SLOW} \\(\\d+ms\\) \\[lane \\w+\\] load [\\d.]+→[\\d.]+ — ALL PASS`).test(out)) && verdictOf(new RegExp(`✗ ${SLOW} FAILED \\(\\d+ms\\) \\[lane \\w+\\] load [\\d.]+→[\\d.]+`).test(out)),
         'every suite line (✓ and ✗) carries the box\'s 1-min loadavg at its start → end');
       try { fs.rmSync(root, { recursive: true, force: true }); } catch { }
     }
@@ -602,18 +602,18 @@ try {
       };
       const LR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ci-lanes-'));
       const ov = arm(['--serial-overlap=1'], LR);
-      ok(ov.status === 0 && ov.ser && ov.parEnd && ov.ser < ov.parEnd && /serial lane starts at \d+s beside 1 parallel suite\(s\) still in flight \(--serial-overlap=1\)/.test(ov.out),
+      ok(ov.status === 0 && gateOf(ov.ser) && gateOf(ov.parEnd) && ov.ser < ov.parEnd && verdictOf(/serial lane starts at \d+s beside 1 parallel suite\(s\) still in flight \(--serial-overlap=1\)/.test(ov.out)),
         `--serial-overlap=1: the serial lane (${SER}) started BESIDE the last parallel suite, ${ov.parEnd && ov.ser ? ov.parEnd - ov.ser : '?'} ms before it ended — and says so`);
       const p = ov.rows.find((x) => x.who === 'par') || {}, sr = ov.rows.find((x) => x.who === 'ser') || {};
       let mode = 0; try { mode = fs.statSync(p.run).mode & 0o777; } catch { }
       ok(p.home === path.join(LR, 'lane-1', 'home') && p.run === path.join(LR, 'lane-1', 'run') && mode === 0o700 && p.display === null && sr.home === path.join(LR, 'lane-S', 'home'),
         `VIBESPACE_CI_LANE_ROOT: each lane's suites run with its own HOME + XDG_RUNTIME_DIR (0700) and no DISPLAY (lane 1: ${p.home}; the serial lane: ${sr.home})`);
       const haveDbus = spawnSync('sh', ['-c', 'command -v dbus-daemon'], { encoding: 'utf-8' }).status === 0;
-      ok(!haveDbus || (p.bus === 'unix:path=' + path.join(LR, 'lane-1', 'run', 'bus') && /lane env: a private HOME \+ XDG_RUNTIME_DIR \+ session bus per lane under .* \(2 of 2 buses up\)/.test(ov.out)),
+      ok(!haveDbus || (p.bus === 'unix:path=' + path.join(LR, 'lane-1', 'run', 'bus') && verdictOf(/lane env: a private HOME \+ XDG_RUNTIME_DIR \+ session bus per lane under .* \(2 of 2 buses up\)/.test(ov.out))),
         `…and its own session bus, started for the lanes and ended after them (${haveDbus ? p.bus : 'SKIP: no dbus-daemon on this box'})`);
       fs.rmSync(LR, { recursive: true, force: true });
       const ctl = arm([], null);
-      ok(ctl.status === 0 && ctl.ser && ctl.parEnd && ctl.ser >= ctl.parEnd && new RegExp(`parallel lanes drained in \\d+s — serial lane: ${SER}`).test(ctl.out),
+      ok(ctl.status === 0 && gateOf(ctl.ser) && gateOf(ctl.parEnd) && ctl.ser >= ctl.parEnd && verdictOf(new RegExp(`parallel lanes drained in \\d+s — serial lane: ${SER}`).test(ctl.out)),
         'CONTROL: without --serial-overlap the serial lane runs AFTER the parallel lanes drain (alone, as measured)');
       ok((ctl.rows.find((x) => x.who === 'par') || {}).display === ':77', `CONTROL: with no lane root the suite inherits the caller's env (DISPLAY :77 here; the caller's own run ${GIT_ENV.VIBESPACE_CI_LANE_ROOT ? 'HAS a lane root, not handed on' : 'has no lane root'})`);
     }
@@ -640,7 +640,7 @@ try {
       const WIDE = "export const killedFromOutside = (r) => !!(r && r.signal && !(r.error && r.error.code === 'ETIMEDOUT'));";
       const ABORT_EXIT = '    if (abandonedWhy) return 4;\n';
       const preFix = CI_SRC.replace(NARROW, WIDE).replace(ABORT_EXIT, '');
-      ok(!!OOM && !!RED && CI_SRC.includes(NARROW) && CI_SRC.includes(ABORT_EXIT)
+      ok(!!OOM && !!RED && gateOf(CI_SRC.includes(NARROW)) && gateOf(CI_SRC.includes(ABORT_EXIT))
         && preFix !== CI_SRC && !preFix.includes(NARROW) && !preFix.includes(ABORT_EXIT),
         `both round-4 guards are present and the pre-fix control's patch applies (crashing slice: ${OOM}, red slice: ${RED})`);
 
@@ -666,9 +666,9 @@ try {
       };
 
       const crash = crashArm(CI_SRC);
-      ok(/SIGABRT/.test(crash.out), `the crashing suite really died on a signal (${(crash.out.match(/✗ [^\n]*SIG[^\n]*/) || ['NO SIGNAL — this leg is vacuous'])[0].trim()})`);
+      ok(verdictOf(/SIGABRT/.test(crash.out)), `the crashing suite really died on a signal (${(crash.out.match(/✗ [^\n]*SIG[^\n]*/) || ['NO SIGNAL — this leg is vacuous'])[0].trim()})`);
       ok(!!crash.rec, 'a CRASHED suite is a fact about the code under test: the tier writes a RED marker');
-      ok(!!crash.rec && crash.rec.failed.includes(OOM) && crash.rec.failed.includes(RED),
+      ok(!!crash.rec && gateOf(crash.rec.failed.includes(OOM)) && verdictOf(crash.rec.failed.includes(RED)),
         `…naming BOTH — the crash no longer abandons the tier before the next suite runs (${JSON.stringify((crash.rec || {}).failed)})`);
       ok(crash.status === 1, `…and the run exits 1 = RED (got ${crash.status})`);
       try { fs.rmSync(crash.root, { recursive: true, force: true }); } catch { }
@@ -676,7 +676,7 @@ try {
       const preCrash = crashArm(preFix);
       ok(!preCrash.markers.some((f) => /\.(green|red)$/.test(f)),
         `NEG: reading ANY signal as "outside" abandons the tier at the crash and writes no verdict (${preCrash.markers.join(' ') || 'no markers'})`);
-      ok(/stopping: this run was terminated from outside/.test(preCrash.out) && /ABORTED/.test(preCrash.out),
+      ok(gateOf(/stopping: this run was terminated from outside/.test(preCrash.out)) && verdictOf(/ABORTED/.test(preCrash.out)),
         'NEG: …it calls a crash a termination and stops there');
       ok(!new RegExp(`✓ ${RED}|✗ ${RED} FAILED`).test(preCrash.out), `NEG: …so ${RED} never runs at all`);
       ok(preCrash.status === 0,
@@ -697,7 +697,7 @@ try {
         return { status: r.status, out, markers: s.markers() };
       };
       const aborted = abortArm(CI_SRC);
-      ok(/HEAVY TIER ABORTED/.test(aborted.out) && !aborted.markers.some((f) => /\.(green|red)$/.test(f)),
+      ok(gateOf(/HEAVY TIER ABORTED/.test(aborted.out)) && !aborted.markers.some((f) => /\.(green|red)$/.test(f)),
         'a superseded run stops, says ABORTED and writes no verdict');
       ok(aborted.status === 4, `…and exits 4 = ABORTED, never 0 (got ${aborted.status}) — Actions cannot show a green tick for it`);
       const preAborted = abortArm(CI_SRC.replace(ABORT_EXIT, ''));
@@ -716,10 +716,10 @@ try {
       { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 120000 });
     const bout = (blocked.stdout || '') + (blocked.stderr || '');
     ok(blocked.status === 3, `a heavy run that never gets the machine lock exits 3 = did not run (got ${blocked.status})`);
-    ok(/HEAVY TIER SKIPPED/.test(bout) && /NO VERDICT WRITTEN/.test(bout), '…and says SKIPPED / NO VERDICT WRITTEN, never "GATE GREEN"');
+    ok(gateOf(/HEAVY TIER SKIPPED/.test(bout)) && verdictOf(/NO VERDICT WRITTEN/.test(bout)), '…and says SKIPPED / NO VERDICT WRITTEN, never "GATE GREEN"');
     ok(!fs.existsSync(path.join(waitDir, `${SHA}.green`)) && !fs.existsSync(path.join(waitDir, `${SHA}.red`)),
       '…and writes NO green/red marker (a run that did not happen claims nothing)');
-    ok(fs.existsSync(path.join(waitDir, `${SHA}.skipped`)), '…but leaves a `skipped` note so ci:status can say the commit has no verdict');
+    ok(verdictOf(fs.existsSync(path.join(waitDir, `${SHA}.skipped`))), '…but leaves a `skipped` note so ci:status can say the commit has no verdict');
     ok(Date.now() - t2 >= 2000, `…after actually waiting for its budget (${Date.now() - t2}ms ≥ 2000)`);
     try { process.kill(-hpid, 'SIGKILL'); } catch { try { process.kill(hpid, 'SIGKILL'); } catch { } }
     // NEGATIVE CONTROL: the same command with a DEAD holder steals the stale
@@ -727,7 +727,7 @@ try {
     fs.writeFileSync(heldLock, JSON.stringify({ pid: hpid, sha: 'f'.repeat(40), cmd: 'ci.mjs', startedAt: Date.now() }));
     const stolen = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + SHA, '--isolate', '--markers=' + waitDir, '--only=' + SLICE, '--lock=' + heldLock, '--lock-wait-ms=2000'],
       { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 300000 });
-    ok(stolen.status === 0 && fs.existsSync(path.join(waitDir, `${SHA}.green`)),
+    ok(stolen.status === 0 && verdictOf(fs.existsSync(path.join(waitDir, `${SHA}.green`))),
       `NEG: a lock whose holder is DEAD is stolen and the tier runs (exit ${stolen.status})`);
     ok(!fs.existsSync(path.join(waitDir, `${SHA}.skipped`)), '…and the green verdict replaces the earlier skipped note');
     ok(!fs.existsSync(heldLock), 'the machine lock is released when the run ends');
@@ -771,22 +771,22 @@ try {
     ok(iso.status === 0 && !!iso.probe, `the fast tier runs with --isolate --sha (exit ${iso.status})`);
     ok(!!iso.probe && iso.probe.sawMarkerB === false && iso.probe.cwd !== iso.root,
       `…in a scratch worktree AT that commit: the suites ran in ${iso.probe ? path.basename(iso.probe.cwd) : '?'} and did NOT see the file HEAD adds`);
-    ok(/ALL GREEN[^\n]*isolated worktree at the commit being pushed/.test(iso.out),
+    ok(verdictOf(/ALL GREEN[^\n]*isolated worktree at the commit being pushed/.test(iso.out)),
       '…and the closing line NAMES its subject, so "ALL GREEN" is never about a tree nobody is publishing');
-    ok(!iso.marked && /green marker not written/.test(iso.out),
+    ok(!iso.marked && verdictOf(/green marker not written/.test(iso.out)),
       '…and it writes NO .git/ci-green: it did not gate the tree the marker would let the next push skip');
     // The in-place run is the control: same module, same repo, no --isolate.
     const inplace = fastArm(CI_SRC_F, []);
     ok(inplace.status === 0 && !!inplace.probe && inplace.probe.sawMarkerB === true && inplace.probe.cwd === inplace.root,
       'CONTROL: without --isolate the same module runs in the working tree (it sees the file HEAD adds)');
-    ok(inplace.marked && /ALL GREEN[^\n]*\(this working tree\)/.test(inplace.out),
+    ok(gateOf(inplace.marked) && verdictOf(/ALL GREEN[^\n]*\(this working tree\)/.test(inplace.out)),
       '…names THAT subject instead, and earns the green marker');
     // NEGATIVE CONTROL: the real module with the one line that isolates removed
     // — the hook would still pass --isolate --sha and the tier would still gate
     // the working tree, silently.
     const NEUTER = ["    if (isolate) { wt = addScratchWorktree(sha, 'fast'); runRoot = wt; }",
       "    if (false) { wt = addScratchWorktree(sha, 'fast'); runRoot = wt; }"];
-    ok(CI_SRC_F.includes(NEUTER[0]), 'the pre-fix control patches a line that is really in ci.mjs (otherwise it proves nothing)');
+    ok(verdictOf(CI_SRC_F.includes(NEUTER[0])), 'the pre-fix control patches a line that is really in ci.mjs (otherwise it proves nothing)');
     const neutered = fastArm(CI_SRC_F.replace(...NEUTER), ['--isolate', '--sha=%SHA%']);
     ok(!!neutered.probe && neutered.probe.sawMarkerB === true,
       'NEG: with that one line removed, --isolate --sha runs the tier against the WORKING TREE again (the defect)');
@@ -830,43 +830,43 @@ try {
     const present = fastNames.filter((n) => n !== ABSENT);
     const gap = runFast(fastStub('absent', { ciSource: CI_SRC_A, present }), ['--isolate', '--sha=%SHA%']);
     ok(gap.status === 0, `an isolated run whose commit is missing a suite this table names is GREEN, not a blocked push (exit ${gap.status})`);
-    ok(new RegExp(`⊘ ${ABSENT} — SKIPPED: not present at`).test(gap.out) && new RegExp(`SKIPPED \\(absent at [0-9a-f]{8}[^\\n]*\\): ${ABSENT}`).test(gap.out),
+    ok(gateOf(new RegExp(`⊘ ${ABSENT} — SKIPPED: not present at`).test(gap.out)) && verdictOf(new RegExp(`SKIPPED \\(absent at [0-9a-f]{8}[^\\n]*\\): ${ABSENT}`).test(gap.out)),
       `…and it NAMES the suite it did not run, twice: at the moment it skipped it and in the closing summary (${ABSENT})`);
-    ok(/ALL GREEN[^\n]*— \d+ of \d+ suites ran; 1 not present at that commit/.test(gap.out),
+    ok(verdictOf(/ALL GREEN[^\n]*— \d+ of \d+ suites ran; 1 not present at that commit/.test(gap.out)),
       `…and "ALL GREEN" carries the count, so it is never a sentence about ${fastNames.length} suites when ${fastNames.length - 1} ran`);
     // SCOPING CONTROL: the same missing file with NO --isolate is still a RED.
     // In place the table and the tree come from one checkout, so a missing file
     // means this tree disagrees with its own table — the skip must not reach it.
     const inplaceGap = runFast(fastStub('absent-inplace', { ciSource: CI_SRC_A, present }), []);
-    ok(inplaceGap.status === 1 && /release gate is RED/.test(inplaceGap.out),
+    ok(inplaceGap.status === 1 && verdictOf(/release gate is RED/.test(inplaceGap.out)),
       `CONTROL: the same absent suite in an IN-PLACE run is still RED (exit ${inplaceGap.status}) — a tree that disagrees with its own table is a defect, not an absence`);
     // CONTROL: a suite that EXISTS at the target and fails is still a RED —
     // the fix must not turn "isolated" into "lenient".
     const isoRed = runFast(fastStub('absent-red', { ciSource: CI_SRC_A, present: fastNames, failing: fastNames[0] }), ['--isolate', '--sha=%SHA%']);
-    ok(isoRed.status === 1 && new RegExp(`✗ ${fastNames[0]} — release gate is RED`).test(isoRed.out),
+    ok(isoRed.status === 1 && verdictOf(new RegExp(`✗ ${fastNames[0]} — release gate is RED`).test(isoRed.out)),
       `CONTROL: a suite that EXISTS at the gated commit and FAILS is still RED under --isolate (exit ${isoRed.status})`);
     // …and a commit that contains NONE of them claims nothing (an old tag).
     // Measured for real: `--isolate --sha=<v2.30.0>` ⇒ 73 of 73 absent, 0.8 s.
     const allGone = runFast(fastStub('absent-all', { ciSource: CI_SRC_A, present: [] }), ['--isolate', '--sha=%SHA%']);
-    ok(allGone.status === 0 && /NO VERDICT — the fast tier could not gate/.test(allGone.out) && !/ALL GREEN/.test(allGone.out),
+    ok(allGone.status === 0 && gateOf(/NO VERDICT — the fast tier could not gate/.test(allGone.out)) && !/ALL GREEN/.test(allGone.out),
       `a commit containing NONE of the suites gets NO VERDICT, never a vacuous ALL GREEN — and is not blocked (exit ${allGone.status})`);
     // (lane claude-steer-inject r7c) …and so under VS_NO_REAL_CLI=1, which every acceptance / integration run sets: the
     // by-name skip of the real-turn row applies only to a suite PRESENT at the commit (r6 skipped it before the absence
     // check, so an all-absent commit counted one skip and claimed ALL GREEN) — and a skip by name never counts as a run
     const allGoneNoCli = runFast(fastStub('absent-all-nocli', { ciSource: CI_SRC_A, present: [] }), ['--isolate', '--sha=%SHA%'], { VS_NO_REAL_CLI: '1' });
-    ok(allGoneNoCli.status === 0 && /NO VERDICT — the fast tier could not gate[^\n]*none of its/.test(allGoneNoCli.out) && !/ALL GREEN/.test(allGoneNoCli.out) && !/○ SKIPPED test-chat-e2e/.test(allGoneNoCli.out),
+    ok(allGoneNoCli.status === 0 && gateOf(/NO VERDICT — the fast tier could not gate[^\n]*none of its/.test(allGoneNoCli.out)) && !/ALL GREEN/.test(allGoneNoCli.out) && !/○ SKIPPED test-chat-e2e/.test(allGoneNoCli.out),
       `(r7c) under VS_NO_REAL_CLI=1 a commit containing NONE of the suites is still NO VERDICT — the absent real-turn row stays absent, never a by-name skip (exit ${allGoneNoCli.status})`);
     if (fastNames.includes('test-chat-e2e')) {
       const onlyE2e = runFast(fastStub('only-e2e-nocli', { ciSource: CI_SRC_A, present: ['test-chat-e2e'] }), ['--isolate', '--sha=%SHA%'], { VS_NO_REAL_CLI: '1' });
-      ok(onlyE2e.status === 0 && /○ SKIPPED test-chat-e2e — VS_NO_REAL_CLI=1/.test(onlyE2e.out) && /NO VERDICT — [^\n]*SKIPPED by name/.test(onlyE2e.out) && !/ALL GREEN/.test(onlyE2e.out),
+      ok(onlyE2e.status === 0 && gateOf(/○ SKIPPED test-chat-e2e — VS_NO_REAL_CLI=1/.test(onlyE2e.out)) && gateOf(/NO VERDICT — [^\n]*SKIPPED by name/.test(onlyE2e.out)) && !/ALL GREEN/.test(onlyE2e.out),
         `(r7c) …and a commit whose ONLY present suite is the real-turn row, skipped by name: nothing ran ⇒ NO VERDICT, never «ALL GREEN — 1 of N ran» (exit ${onlyE2e.status})`);
     }
     // NEGATIVE CONTROL: the real module with the existence check removed.
     const NEUTER_A = ["  if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {",
       '  if (false) {'];
-    ok(CI_SRC_A.includes(NEUTER_A[0]), 'the pre-fix control patches a line that is really in ci.mjs (otherwise it proves nothing)');
+    ok(verdictOf(CI_SRC_A.includes(NEUTER_A[0])), 'the pre-fix control patches a line that is really in ci.mjs (otherwise it proves nothing)');
     const preAbsent = runFast(fastStub('absent-neg', { ciSource: CI_SRC_A.replace(...NEUTER_A), present }), ['--isolate', '--sha=%SHA%']);
-    ok(preAbsent.status === 1 && /MODULE_NOT_FOUND|Cannot find module/.test(preAbsent.out),
+    ok(preAbsent.status === 1 && verdictOf(/MODULE_NOT_FOUND|Cannot find module/.test(preAbsent.out)),
       `NEG: without the check the same push is RED with MODULE_NOT_FOUND (exit ${preAbsent.status}) — the defect, hard-blocking every older ref`);
 
     // …AND THE HEAVY TIER, WHICH IS ISOLATED ON EVERY RUN.
@@ -886,11 +886,11 @@ try {
     const hGap = runHeavy(stubGateRepo('absent-heavy', { ciSource: CI_SRC_A, suites: { [H_PRESENT]: PASS_STUB }, commits: 1 }), `${H_PRESENT},${H_ABSENT}`);
     ok(hGap.status === 0 && !!hGap.rec && hGap.rec.result === 'green',
       `the heavy tier also skips a suite absent at the sha instead of stamping a RED for it (exit ${hGap.status}, marker ${hGap.rec && hGap.rec.result})`);
-    ok(!!hGap.rec && (hGap.rec.absent || []).join() === H_ABSENT && (hGap.rec.timings || []).every((t) => t.name !== H_ABSENT),
+    ok(!!hGap.rec && (hGap.rec.absent || []).join() === H_ABSENT && verdictOf((hGap.rec.timings || []).every((t) => t.name !== H_ABSENT)),
       `…and the MARKER says which ones (absent: ${hGap.rec && JSON.stringify(hGap.rec.absent)}), so "N suites" is not a claim about a suite that was never there`);
-    ok(/HEAVY GATE GREEN[^\n]*1 of 2 suites ran; 1 not present at that commit/.test(hGap.out), '…as does the closing line the operator reads');
+    ok(verdictOf(/HEAVY GATE GREEN[^\n]*1 of 2 suites ran; 1 not present at that commit/.test(hGap.out)), '…as does the closing line the operator reads');
     const hAllGone = runHeavy(stubGateRepo('absent-heavy-all', { ciSource: CI_SRC_A, suites: { [H_PRESENT]: PASS_STUB }, commits: 1 }), H_ABSENT);
-    ok(!hAllGone.rec && /every suite in this run is absent/.test(hAllGone.out) && /NO VERDICT WRITTEN/.test(hAllGone.out),
+    ok(!hAllGone.rec && gateOf(/every suite in this run is absent/.test(hAllGone.out)) && verdictOf(/NO VERDICT WRITTEN/.test(hAllGone.out)),
       'a heavy run in which EVERY suite was absent writes NO marker and says so (a green for zero suites is the vacuous verdict `--only` already refuses on a typo)');
   }
 
@@ -921,8 +921,8 @@ try {
     ok(par.status === 0 && !!par.rec && par.rec.lanes === 3, `three 1.5 s stubs over 3 lanes: GREEN, marker says lanes: 3 (exit ${par.status})`);
     ok(!!par.rec && new Set((par.rec.timings || []).map((t) => t.lane)).size === 3 && (par.rec.timings || []).length === 3,
       `…and every suite's timing names its lane (${JSON.stringify((par.rec && par.rec.timings || []).map((t) => t.lane))})`);
-    ok(/\[lane [123]\]/.test(par.out) && /3 parallel lane\(s\)/.test(par.out), 'the log tags each suite line with its lane and announces the lane count');
-    ok(seq.status === 0 && !!seq.rec && seq.rec.lanes === 1 && (seq.rec.timings || []).every((t) => t.lane === '1'), 'CONTROL: VIBESPACE_CI_LANES=1 is the sequential tier (every suite on lane 1)');
+    ok(gateOf(/\[lane [123]\]/.test(par.out)) && verdictOf(/3 parallel lane\(s\)/.test(par.out)), 'the log tags each suite line with its lane and announces the lane count');
+    ok(seq.status === 0 && !!seq.rec && seq.rec.lanes === 1 && verdictOf((seq.rec.timings || []).every((t) => t.lane === '1')), 'CONTROL: VIBESPACE_CI_LANES=1 is the sequential tier (every suite on lane 1)');
     ok(par.suitesMs !== null && seq.suitesMs !== null && par.suitesMs <= 3000 && seq.suitesMs >= 4000,
       `the parallel suites' wall is one stub, the sequential one is three (parallel ${par.suitesMs}ms, sequential ${seq.suitesMs}ms)`);
   }
@@ -974,9 +974,9 @@ console.log('ALL PASS (1)');
     ok(r.status === 0 && !!o && o.gone > 0 && o.kept > 0, `the stub tier ran GREEN over the lanes and left two detached processes behind (exit ${r.status})`);
     // verify r2 (R2, 2026-09-29): a test seam LISTS and never signals — the lanes JUDGE the leak between suites and print it
     // with its evidence; the real process the stub left is still alive (this suite ends it below, by pid + starttime)
-    ok(!!o && alive(o.gone) && /\[ci\] scratch reaper: 1 victim\(s\) listed under the test seam, none signalled/.test(out), `the orphan whose scratch dir is GONE (30 min old) is judged by the lanes between suites and printed — and NOT signalled: a seam is dry (pid ${o && o.gone} alive)`);
-    ok(/\[ci\] reaping 1 scratch orphan process\(es\) from 1 finished scratch dir\(s\): \/tmp\/vs-reapstub-gone-/.test(out), '…and the log says so, naming the dir (the sync runner\'s exact line)');
-    ok(!!o && alive(o.kept), `CONTROL: the detached process whose scratch dir STAYS (young, a possible run in flight) is spared (pid ${o && o.kept})`);
+    ok(!!o && gateOf(alive(o.gone)) && verdictOf(/\[ci\] scratch reaper: 1 victim\(s\) listed under the test seam, none signalled/.test(out)), `the orphan whose scratch dir is GONE (30 min old) is judged by the lanes between suites and printed — and NOT signalled: a seam is dry (pid ${o && o.gone} alive)`);
+    ok(verdictOf(/\[ci\] reaping 1 scratch orphan process\(es\) from 1 finished scratch dir\(s\): \/tmp\/vs-reapstub-gone-/.test(out)), '…and the log says so, naming the dir (the sync runner\'s exact line)');
+    ok(!!o && verdictOf(alive(o.kept)), `CONTROL: the detached process whose scratch dir STAYS (young, a possible run in flight) is spared (pid ${o && o.kept})`);
     // end what the stub planted — by pid AND the starttime it recorded (a recycled number is somebody else's)
     const startOf = (pid) => { try { const t = fs.readFileSync(`/proc/${pid}/stat`, 'latin1'); return Number(t.slice(t.lastIndexOf(')') + 2).split(' ')[19]); } catch { return 0; } };
     if (o) { for (const [pid, st0] of [[o.kept, o.keptStart], [o.gone, o.goneStart]]) { if (pid > 0 && st0 && startOf(pid) === st0) { try { process.kill(pid, 'SIGKILL'); } catch { } } } try { fs.rmSync(o.keptDir, { recursive: true, force: true }); } catch { } }
@@ -1012,9 +1012,9 @@ console.log('ALL PASS (1)');
     const out = (r.stdout || '') + (r.stderr || '');
     let rec = null; try { rec = JSON.parse(fs.readFileSync(path.join(s.root, 'data', 'ci-heavy', `${c2}.green`), 'utf-8')); } catch { }
     ok(r.status === 0 && !!rec && rec.scope === 'affected', `the affected tier for c2, run from the base checkout, is GREEN with scope: affected (exit ${r.status}, ${rec && rec.scope})`);
-    ok(!!rec && (rec.selected || []).includes(X1) && !(rec.selected || []).includes(X2),
+    ok(!!rec && gateOf((rec.selected || []).includes(X1)) && !(rec.selected || []).includes(X2),
       `…and it selected the suite that reads src/b.js AT c2 and not its sibling — the graph is the gated commit's, not the checkout's (selected: ${rec && (rec.selected || []).join(', ')})`);
-    ok(new RegExp(`· ${X1} ← loads src/b\\.js`).test(out) && out.indexOf('impact scope') > out.indexOf('release gate — HEAVY tier'),
+    ok(gateOf(new RegExp(`· ${X1} ← loads src/b\\.js`).test(out)) && out.indexOf('impact scope') > out.indexOf('release gate — HEAVY tier'),
       'the log says why, and says it after the header (the selection is made after checkout, not up front)');
     try { spawnSync('git', ['-C', s.root, 'worktree', 'prune'], { env: GIT_ENV }); } catch { }
     try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
@@ -1061,18 +1061,18 @@ console.log('ALL PASS (1)');
     const gf = plant('green', {}, t0);
     const before = fs.readFileSync(gf, 'utf-8');
     const r1 = launchG();
-    ok(r1.status === 0 && new RegExp(`heavy already GREEN for ${s.sha.slice(0, 8)} \\(\\d+ min old\\), not relaunching`).test(r1.stderr || ''),
+    ok(r1.status === 0 && verdictOf(new RegExp(`heavy already GREEN for ${s.sha.slice(0, 8)} \\(\\d+ min old\\), not relaunching`).test(r1.stderr || '')),
       `a fresh FULL green for exactly this sha: "heavy already GREEN for ${s.sha.slice(0, 8)} (<age>), not relaunching", exit 0 (exit ${r1.status}: ${(r1.stderr || '').trim().split('\n').pop()})`);
     ok(!fs.existsSync(path.join(md, `${s.sha}.pid`)) && !fs.existsSync(path.join(md, `${s.sha}.log`)) && !/launched the/.test(r1.stderr || ''),
       '…and NO child was spawned (no pid file, no log, no "launched" line)');
-    ok(fs.existsSync(gf) && fs.readFileSync(gf, 'utf-8') === before, '…and the green marker is left exactly as it was');
+    ok(gateOf(fs.existsSync(gf)) && fs.readFileSync(gf, 'utf-8') === before, '…and the green marker is left exactly as it was');
     await settle();
 
     // STALE GREEN (older than the commit it names) ⇒ launches.
     plant('green', {}, ctMs - 3600 * 1000);
     const r2 = launchG();
     const p2 = pidOf();
-    ok(r2.status === 0 && /launched the FULL tier/.test(r2.stderr || '') && p2 > 0 && !/already GREEN/.test(r2.stderr || ''),
+    ok(r2.status === 0 && gateOf(/launched the FULL tier/.test(r2.stderr || '')) && p2 > 0 && !/already GREEN/.test(r2.stderr || ''),
       `a STALE green (mtime an hour before the commit) is not evidence: the launcher starts a run (pid ${p2})`);
     await settle();
 
@@ -1080,14 +1080,14 @@ console.log('ALL PASS (1)');
     plant('red', {}, t0);
     const r3 = launchG();
     const p3 = pidOf();
-    ok(r3.status === 0 && /launched the FULL tier/.test(r3.stderr || '') && p3 > 0, `a fresh RED marker still relaunches (pid ${p3})`);
+    ok(r3.status === 0 && gateOf(/launched the FULL tier/.test(r3.stderr || '')) && p3 > 0, `a fresh RED marker still relaunches (pid ${p3})`);
     await settle();
 
     // FRESH PARTIAL GREEN ⇒ launches.
     plant('green', { partial: [SLICE] }, t0);
     const r4 = launchG();
     const p4 = pidOf();
-    ok(r4.status === 0 && /launched the FULL tier/.test(r4.stderr || '') && p4 > 0, `a fresh PARTIAL green (--only) still relaunches (pid ${p4})`);
+    ok(r4.status === 0 && gateOf(/launched the FULL tier/.test(r4.stderr || '')) && p4 > 0, `a fresh PARTIAL green (--only) still relaunches (pid ${p4})`);
     await settle();
     try { spawnSync('git', ['-C', s.root, 'worktree', 'prune'], { env: GIT_ENV }); } catch { }
     try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
@@ -1118,17 +1118,17 @@ console.log('ALL PASS (1)');
   // An unknown commit is refused rather than stamped.
   const bogus = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy-launch', 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', '--markers=' + dir],
     { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
-  ok(/unknown commit/.test(bogus.stderr || ''), 'launching for a commit this repo does not know is refused, out loud');
+  ok(verdictOf(/unknown commit/.test(bogus.stderr || '')), 'launching for a commit this repo does not know is refused, out loud');
 
   // --only with a name that is not a heavy suite must be LOUD: silently
   // running zero suites and stamping a GREEN marker is the worst outcome.
   const typo = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + SHA, '--markers=' + dir, '--only=test-typo-not-a-suite'],
     { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
-  ok(typo.status === 2 && /not a heavy suite/.test(typo.stderr || ''), 'a typo in --only exits loudly instead of stamping a vacuous green');
+  ok(typo.status === 2 && verdictOf(/not a heavy suite/.test(typo.stderr || '')), 'a typo in --only exits loudly instead of stamping a vacuous green');
 } finally {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   try { spawnSync('git', ['-C', REPO, 'worktree', 'prune'], { env: GIT_ENV }); } catch {}
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -1907,8 +1907,8 @@ const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Numb
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
-const print = (title, rows) => { console.log(title); for (const [c, n, e, judged] of rows) { ok(c, n, e); if (Array.isArray(judged)) { console.log(`      judged (${judged.length} line(s)):`); for (const l of judged.slice(0, 12)) console.log('        ' + String(l).slice(0, 240)); } } };   // a leg that judges journal / audit lines prints them
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const print = (title, rows) => { console.log(title); for (const [c, n, e, judged] of rows) { ok(verdictOf(c), n, e); if (Array.isArray(judged)) { console.log(`      judged (${judged.length} line(s)):`); for (const l of judged.slice(0, 12)) console.log('        ' + String(l).slice(0, 240)); } } };   // a leg that judges journal / audit lines prints them
 print('① HANDED, NEVER LEFT LYING', handed);
 print('①b A VALUE IN TWO PIECES WITH A QUIET BETWEEN THEM (F10 of stage L3, 主开发 r2524)', pieces);
 ok(!!QUIET_FLUSH && piecesMut.quietHalf === true && piecesMut.whole === true, 'CONTROL — the release\'s quiet flush (every 400 ms quiet ends the masker): the first piece is written at the quiet and the value lands WHOLE in the log — RED on the copy', QUIET_FLUSH ? { quietHalf: piecesMut.quietHalf, whole: piecesMut.whole } : 'the copy could not be built (its anchor is missing)');
@@ -1921,7 +1921,7 @@ ok(!!SETTLE_OLD && settleOldMut.a === false && settleOldMut.b === false && settl
 ok(!!UNTIL_NOCARRY && noCarryMut.half === true && noCarryMut.d === false, 'CONTROL — the until scan without its carry: a marker in two pieces of one line never fires — RED on the copy', UNTIL_NOCARRY ? { half: noCarryMut.half, d: noCarryMut.d } : 'the copy could not be built (its anchor is missing)');
 ok(!!QUIET_FLUSH && pieces64Mut.masked === false, 'CONTROL — the release\'s quiet flush: the base64 spelling split by the quiet lands whole — RED on the copy', QUIET_FLUSH ? { masked: pieces64Mut.masked } : 'the copy could not be built');
 print('①f NO BYTE OF THE JOB\'S OWN WORDS IS LOST (主开发 r2773 (1))', bytesRows);
-ok(!!SETTLE_DROPS && !!bytesMut.scenes && Object.values(bytesMut.scenes).some((x) => !x.words || !x.bytes), 'CONTROL — a settle that DROPS the run it keeps: a job\'s own words go missing from its log — RED on the copy', SETTLE_DROPS ? bytesMut.scenes : 'the copy could not be built (its anchor is missing)');
+ok(!!SETTLE_DROPS && !!bytesMut.scenes && verdictOf(Object.values(bytesMut.scenes).some((x) => !x.words || !x.bytes)), 'CONTROL — a settle that DROPS the run it keeps: a job\'s own words go missing from its log — RED on the copy', SETTLE_DROPS ? bytesMut.scenes : 'the copy could not be built (its anchor is missing)');
 // r3732 / r3735 law 3: THE WRAPPER's OWN LINES never stand inside a line of the job, never between the pieces of a value the masker holds.
 // PLACED, never load: a copy of the REAL wrapper whose escapee scan starts past its 250 ms (the cut said at once), and scenes a, b whose job
 // ends right after its last word (the drain's scan meets a masker that still holds). The job's words whole and in order (judged as ①f
@@ -2024,8 +2024,8 @@ const roadRows = [
   [!!roadM.mask && !!roadM.mask.masker && roadM.mask.masker.said && !roadM.mask.masker.apart, 'CONTROL — the release\'s return of it as the job\'s bytes (in a copy): inside the job\'s open line — RED on the copy', roadM.mask ? (roadM.mask.threw || roadM.mask.masker) : NO_COPY],
 ];
 const [ownLines, ownLinesMut] = await Promise.all([WRAP_CUT ? legOwnLines(WRAP_CUT, 'ownlines') : null, WRAP_DIRECT ? legOwnLines(WRAP_DIRECT, 'ownlinesm') : null]);
-ok(!!ownLines && ownLines.ended && ['a', 'b', 'ac', 'bc'].every((k) => ownLines.out[k]) && Object.values(ownLines.out).every((x) => x.cutSaid && x.ownApart && x.after && x.bytes && x.noValue), 'r3732 — THE WRAPPER\'S OWN LINES: the scan\'s cut placed in scenes a and b (the job ends while the masker still holds) and in ac and bc (r3942: their LAST piece a child\'s of the group, written at the drain\'s signal) — the job\'s words whole and in order, each wrapper line on a line of its own, the cut\'s notice AFTER the job\'s words, no value', ownLines ? ownLines.out : 'the copy could not be built (its anchor is missing)');
-ok(!!ownLinesMut && ['ac', 'bc'].every((k) => ownLinesMut.out[k] && ownLinesMut.out[k].cutSaid && !ownLinesMut.out[k].after), 'CONTROL (r3942: by a PLACED seam, never the pipes\' race) — today\'s direct write (in a copy): in ac and bc the cut\'s notice stands BEFORE the job\'s last piece, written after it at the drain\'s signal — RED on the copy', ownLinesMut ? ownLinesMut.out : 'the copy could not be built (its anchor is missing)');
+ok(!!ownLines && gateOf(ownLines.ended) && gateOf(['a', 'b', 'ac', 'bc'].every((k) => ownLines.out[k])) && verdictOf(Object.values(ownLines.out).every((x) => x.cutSaid && x.ownApart && x.after && x.bytes && x.noValue)), 'r3732 — THE WRAPPER\'S OWN LINES: the scan\'s cut placed in scenes a and b (the job ends while the masker still holds) and in ac and bc (r3942: their LAST piece a child\'s of the group, written at the drain\'s signal) — the job\'s words whole and in order, each wrapper line on a line of its own, the cut\'s notice AFTER the job\'s words, no value', ownLines ? ownLines.out : 'the copy could not be built (its anchor is missing)');
+ok(!!ownLinesMut && verdictOf(['ac', 'bc'].every((k) => ownLinesMut.out[k] && ownLinesMut.out[k].cutSaid && !ownLinesMut.out[k].after)), 'CONTROL (r3942: by a PLACED seam, never the pipes\' race) — today\'s direct write (in a copy): in ac and bc the cut\'s notice stands BEFORE the job\'s last piece, written after it at the drain\'s signal — RED on the copy', ownLinesMut ? ownLinesMut.out : 'the copy could not be built (its anchor is missing)');
 print('r3942 — THE OWN LINES\' ROAD, IN-PROCESS (the wrapper\'s own definitions in a scope of stand-ins: a counted log, a masker whose holding the pin sets, a hand clock)', roadRows);
 console.log(`      7e1674a83's settle (a copy) over the same scenes: ${JSON.stringify(SETTLE_OLD ? Object.fromEntries(Object.entries(bytesOldMut.scenes || {}).map(([k, x]) => [k, { words: x.words, bytes: x.bytes, log: x.log }])) : 'no copy')}`);
 ok(!!SETTLE_NOFLAG && noFlagMut.a === false && noFlagMut.b === false && noFlagMut.c === true, 'CONTROL — MUST ONE cut ALONE (the last line still searched alone, every view\'s first trigger an end): the coloured and the ampersand last lines are NOT whole in the log in time, the completed line still is — RED on the copy', SETTLE_NOFLAG ? { a: noFlagMut.a, b: noFlagMut.b, c: noFlagMut.c } : 'the copy could not be built (its anchor is missing)');
@@ -2039,8 +2039,8 @@ if (roadsFailRows.length === 1 && roadsFailRows[0][0] === '__nocopy__') ok(false
 print('② LOCKED = WAIT', locked);
 print('③ THE CRASH LOOP', crash);
 console.log('④ A LOCKED BOOT WAITS (the frp class)');
-ok(boot.waited, 'a service whose run ended, a new engine over its data dir, the vault locked: the boot replay starts NOTHING (waiting for the vault)');
-ok(boot.after, 'the unlock starts it — with its value');
+ok(verdictOf(boot.waited), 'a service whose run ended, a new engine over its data dir, the vault locked: the boot replay starts NOTHING (waiting for the vault)');
+ok(verdictOf(boot.after), 'the unlock starts it — with its value');
 print('⑤ AN APPROVAL', approval);
 print('⑥ NO MASKER, NO START', noMasker);
 print('⑥b A STOPPED SCHEDULE STARTS NOTHING', cronStopped);
@@ -2051,7 +2051,7 @@ print('⑨d ONE CARD A JOB (stage L3\'s F1, 主开发 r2528) — its entries nam
 ok(!!MUT_HALF && !!fullHalfMut.half && fullHalfMut.half.tok === 1, 'CONTROL — the half-written press NOT taken back (the door\'s rollback cut): the first row stays written while the press is refused — RED on the copy', MUT_HALF ? fullHalfMut.half : 'the copy could not be built (its anchor is missing)');
 print('⑨d2 ANY CHANGE OF THE SET, AND THE TAKE-BACK OF EVERY ROW (主开发 r2666)', [...setMoves, ...takeRows]);
 ok(!!MUT_GROWONLY && !!setMovesMut.gone && setMovesMut.gone.rev === 1 && !!setMovesMut.swap && setMovesMut.swap.revs[2] === 2, 'CONTROL — the card drawn again on a GROWTH only (the early return when nothing is new): «B gone» keeps its rev 1 naming B, «C instead of B» stops at rev 2 naming B — RED on the copy', MUT_GROWONLY ? { gone: setMovesMut.gone, swap: setMovesMut.swap } : 'the copy could not be built (its anchor is missing)');
-ok(!!MUT_DECLARED && Array.isArray(takeRowsMut.left) && takeRowsMut.left.includes(E_T3), 'CONTROL — the take-back of the DECLARED entries only: the row of the entry the job dropped still names it — RED on the copy', MUT_DECLARED ? takeRowsMut.left : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_DECLARED && gateOf(Array.isArray(takeRowsMut.left)) && verdictOf(takeRowsMut.left.includes(E_T3)), 'CONTROL — the take-back of the DECLARED entries only: the row of the entry the job dropped still names it — RED on the copy', MUT_DECLARED ? takeRowsMut.left : 'the copy could not be built (its anchor is missing)');
 print('⑨e THE WAIT\'S AUDIT LINE (stage L3\'s F3)', waitLine);
 print('⑨f THE ROAD\'S WORDS (stage L3\'s F4, F12, F5, F8 — 主开发 r2570)', words);
 ok(!!MUT_NOWAIT && noWaitMut.first === 0, 'CONTROL — the door that writes no wait line: a start waiting for the locked vault leaves NO line — RED on the copy', MUT_NOWAIT ? { first: noWaitMut.first } : 'the copy could not be built (its anchor is missing)');
@@ -2086,7 +2086,7 @@ print('⑩d FOR YOU HELD UNREAD (B-44f3) — the job waits, the answer is refuse
 ok(!!MUT_HELD && heldMut.state === 'failed', 'CONTROL — the door filing over a held tray (its held branch removed): the add is refused, the job is FAILED for it — RED on the copy', MUT_HELD ? heldMut.state : 'the copy could not be built (its anchor is missing)');
 console.log('⑫ THE FOLLOW (主开发 r850 — round w6tezed7d)');
 { const o = offLoop || {}, p = o.p || {};
-  ok(p.program && p.program.unread === true && p.script && p.script.unread === true && o.sync === 0 && o.answeredThen === 0,
+  ok(gateOf(p.program) && p.program.unread === true && gateOf(p.script) && p.script.unread === true && o.sync === 0 && o.answeredThen === 0,
     'THE CARD\'S FILE FACTS OFF THE LOOP: a PLACED stall in every read — the facts come back at the BOUND, before any stalled read answered, with NO synchronous read on the loop\'s thread, and the facts it could not read are said «could not be read» (program and script)', { answeredThen: o.answeredThen, sync: o.sync, program: p.program, script: p.script });
   console.log(`      judged: stalled reads answered when the facts came back ${o.answeredThen} · synchronous reads ${o.sync} (said, not judged: took ${o.took} ms, the loop's longest gap ${o.gap} ms)`); }
 ok(!!MUT_NOBOUND && !!offNoBound && offNoBound.answeredThen > 0, 'CONTROL — the bound removed: the facts come back only after the stall itself answered — RED on the copy', MUT_NOBOUND ? offNoBound && { answeredThen: offNoBound.answeredThen, took: offNoBound.took } : 'the copy could not be built (its anchor is missing)');
@@ -2104,11 +2104,11 @@ print('⑪ WHAT THE OWNER SEES (L2) — the Vault row\'s jobs, a job\'s uses, th
 ok(!!MUT_STARTS && surfacesMut.starts === 0, 'CONTROL — the Vault row\'s starts never counted (the door\'s tally removed): «started 0×» for a job that started — RED on the copy', MUT_STARTS ? surfacesMut.starts : 'the copy could not be built (its anchor is missing)');
 console.log('⑦ MUTANTS');
 ok(!bootMut.waited, 'CONTROL — a locked boot starts it (the gate skipped at the replay): RED on the copy');
-ok(mutLock[0], mutLock[1]);
+ok(verdictOf(mutLock[0]), mutLock[1]);
 ok(!!cronMut.started, 'CONTROL — a stopped schedule\'s waiting run is still started at the unlock (its two guards removed): RED on the copy');
-for (const [c, n, e] of muts) ok(c, n, e);
+for (const [c, n, e] of muts) ok(verdictOf(c), n, e);
 ok(noMaskerMut.okLines > 0, 'CONTROL — r1\'s use line (written as the frame was queued): an `ok` line for the run the wrapper refused — RED on the copy', QUEUED ? { okLines: noMaskerMut.okLines } : 'the copy could not be built (its anchor is missing)');
-ok(startMut[0], startMut[1], startMut[2]);
+ok(verdictOf(startMut[0]), startMut[1], startMut[2]);
 ok(stopDrainMut.okLines > 0, 'CONTROL — a wrapper that ACKs before it reads the stop: an `ok` line for a job that never ran — RED on the copy', EARLY_ACK ? { okLines: stopDrainMut.okLines } : 'the copy could not be built (its anchor is missing)');
 // THE SCRATCH: the jobs this suite started have ended (each leg waits for its end or stops it); a wrapper still booting could make
 // its run dir again — swept twice, 300 ms apart, and what is left is counted
@@ -2116,4 +2116,4 @@ let left = sweepRoots(); await nap(300); left = sweepRoots();
 ok(left === 0, `every scratch root this run made (${ROOTS.size} registered; ${PREFIX}* counted in the tmp dir, registered or not) is removed`, { left });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 console.log(`scratch roots left: ${left}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

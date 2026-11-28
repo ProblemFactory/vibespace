@@ -31,7 +31,7 @@ const EH = require(path.join(REPO, 'src/server/exit-hook.js'));
 const children = [];
 armWatchdog({ capMs: 120e3, exit: (code) => { for (const c of children) { try { c.kill('SIGKILL'); } catch { } } process.exit(code); } });
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -71,7 +71,7 @@ console.log('§2 the mechanics the judge reads: /proc/self/task while the main t
   const before2 = EH.threadsNow();
   const blocked = new Worker(`require('fs').readFileSync(${JSON.stringify(fifo)})`, { eval: true });
   const blockedTid = EH.threadAdded(before2);
-  ok(busyTid && blockedTid && busyTid !== blockedTid, `the diff around each constructor names its thread (${busyTid}, ${blockedTid})`);
+  ok(gateOf(busyTid) && gateOf(blockedTid) && busyTid !== blockedTid, `the diff around each constructor names its thread (${busyTid}, ${blockedTid})`);
   const wchan = (t) => { try { return fs.readFileSync(`/proc/self/task/${t}/wchan`, 'utf8'); } catch (e) { return e.code; } };
   await until(() => wchan(blockedTid) === 'wait_for_partner', 5000, 'the blocked worker to sleep in the fifo open');
   busy.terminate(); blocked.terminate();
@@ -85,7 +85,7 @@ console.log('§2 the mechanics the judge reads: /proc/self/task while the main t
     try { const fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); try { fs.writeSync(fd, 'x'); } catch { } fs.closeSync(fd); } catch { }
     return EH.threadsLeft([blockedTid], 0).length === 0;
   }, 5000, 'the knocked worker to leave');
-  ok(gone, 'knocked loose: its thread left (the suite\'s own exit joins nothing asleep)');
+  ok(verdictOf(gone), 'knocked loose: its thread left (the suite\'s own exit joins nothing asleep)');
 }
 
 console.log('§3 the real UsageHistory in a child server: SIGTERM with a fold worker asleep in a read');
@@ -152,7 +152,7 @@ const legs = {
 };
 const all = Object.values(legs);
 const up = await until(() => all.every((c) => /READY/.test(c.out) && (c.name.includes('busy') || c.name.includes('every') || asleep(c))), 20000, 'every child to be READY (a blocked fold asleep in its fifo open)');
-ok(up, `six child servers up: ${all.map((c) => c.name + ' ' + ((c.out.match(/READY (.*)/) || [])[1] || c.out.slice(-80) + c.err.slice(-200))).join(' · ')}`);
+ok(verdictOf(up), `six child servers up: ${all.map((c) => c.name + ' ' + ((c.out.match(/READY (.*)/) || [])[1] || c.out.slice(-80) + c.err.slice(-200))).join(' · ')}`);
 // (B-1217 member 17, unit 2) THE SCENE IS PLACED: each busy fold's worker writes «spin.<its process>» in the SAME synchronous step as
 // the loop it spins in, and the SIGTERM waits for every busy child's mark — never a 200 ms hope (a fold not yet spinning is judged
 // on a worker that is not busy)
@@ -167,28 +167,28 @@ const took = (k) => (res[k] ? Math.round(res[k].at - t) : '>8000');
 const order = (c) => { const a = c.err.indexOf('FLUSH'), b = c.err.indexOf('LATER EXIT LISTENER'), l = c.err.search(LINE); return a >= 0 && b > a && l > b; };
 {
   const r = res.stuck, c = legs.stuck;
-  ok(r && r.signal === 'SIGTERM' && r.at - t < BOUND + 1000 && r.at - t >= BOUND - 100 && LINE.test(c.err),
+  ok(gateOf(r) && r.signal === 'SIGTERM' && r.at - t < BOUND + 1000 && r.at - t >= BOUND - 100 && verdictOf(LINE.test(c.err)),
     `STUCK (the census row counts 1): SIGTERM ⇒ gone in ${took('stuck')} ms — the bound ${BOUND} ms given, then the re-raise (${r && r.signal}), within the bound + 1 s; the line said`, c.err.slice(-400));
-  ok(order(c), 'the server\'s flush and a store\'s exit listener registered AFTER the fold spawned ran first, then the line (flush order unchanged)', c.err);
+  ok(verdictOf(order(c)), 'the server\'s flush and a store\'s exit listener registered AFTER the fold spawned ran first, then the line (flush order unchanged)', c.err);
 }
 {
   const r = res.inflight, c = legs.inflight;
-  ok(r && r.signal === 'SIGTERM' && r.at - t < BOUND + 1000 && LINE.test(c.err) && order(c),
+  ok(gateOf(r) && r.signal === 'SIGTERM' && r.at - t < BOUND + 1000 && gateOf(LINE.test(c.err)) && verdictOf(order(c)),
     `a fold IN FLIGHT asleep in its read (not stuck yet: its deadline is 10 min off) ⇒ terminated at the join, still listed after the bound ⇒ gone in ${took('inflight')} ms (within the bound + 1 s) with the line`, c.err.slice(-400));
 }
 {
   const r = res.busy, c = legs.busy;
-  ok(r && r.code === 0 && !r.signal && r.at - t < BOUND && !/\[usage\]/.test(c.err),
+  ok(gateOf(r) && r.code === 0 && !r.signal && r.at - t < BOUND && !/\[usage\]/.test(c.err),
     `a fold merely busy ⇒ terminated normally: exit ${r && r.code} in ${took('busy')} ms, no line`, c.err.slice(-400));
 }
-ok(res.ctlNoHook === null && /LATER EXIT LISTENER/.test(legs.ctlNoHook.err) && asleep(legs.ctlNoHook),
+ok(res.ctlNoHook === null && gateOf(/LATER EXIT LISTENER/.test(legs.ctlNoHook.err)) && verdictOf(asleep(legs.ctlNoHook)),
   `CONTROL (the hook's registration cut): the same STUCK child is still alive at 8 s — process.exit() joining a fold worker asleep in its read ⇒ RED${res.ctlNoHook ? ' (it exited: ' + JSON.stringify(res.ctlNoHook) + ')' : ''}`);
-ok(res.ctlEvery && res.ctlEvery.signal === 'SIGTERM' && LINE.test(legs.ctlEvery.err),
+ok(gateOf(res.ctlEvery) && res.ctlEvery.signal === 'SIGTERM' && verdictOf(LINE.test(legs.ctlEvery.err)),
   `CONTROL (a judge that counts every live worker, no bound): the merely busy fold's exit becomes a re-raise (${res.ctlEvery && res.ctlEvery.signal}) ⇒ RED`);
-ok(res.ctlListener && res.ctlListener.signal === 'SIGTERM' && !/LATER EXIT LISTENER/.test(legs.ctlListener.err),
+ok(gateOf(res.ctlListener) && res.ctlListener.signal === 'SIGTERM' && !/LATER EXIT LISTENER/.test(legs.ctlListener.err),
   'CONTROL (the judge as an \'exit\' listener — the index owners\' shape): the process ends before a store\'s exit listener registered after it runs ⇒ RED', legs.ctlListener.err.slice(-300));
 for (const c of all) { try { c.kill('SIGKILL'); } catch { } }
 await Promise.all(all.map((c) => c.done));
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

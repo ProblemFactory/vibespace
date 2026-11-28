@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let LS = null; try { LS = require(path.join(ROOT, 'src/job-logs-sweep.js')); } catch { /* the release: no remover — its legs are red by name */ }
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -40,7 +40,7 @@ try {
     [{ startMs: 1, newestMs: 1, alive: false }, 'remove', 'unlisted, past the retention by its newest file, its wrapper gone ⇒ removed'],
   ];
   const table = (V) => ROWS.map(([r, want]) => V({ cutoff: 100, ...r }) === want);
-  if (LS) ROWS.forEach(([, want, name], i) => ok(table(LS.runVerdict)[i], `verdict: ${name} (${want})`));
+  if (LS) ROWS.forEach(([, want, name], i) => ok(verdictOf(table(LS.runVerdict)[i]), `verdict: ${name} (${want})`));
   if (LS) {
     let thunks = 0; LS.runVerdict({ cutoff: 100, startMs: 200, newestMs: () => { thunks++; return 1; }, alive: () => { thunks++; return false; } });
     LS.runVerdict({ cutoff: 100, listed: true, startMs: 1, newestMs: () => { thunks++; return 1; }, alive: () => { thunks++; return false; } });
@@ -48,9 +48,9 @@ try {
     // MUTANT COPIES: the module text patched, compiled at a scratch path, the same table RED
     const src = fs.readFileSync(path.join(ROOT, 'src/job-logs-sweep.js'), 'utf8');
     const mutant = (label, from, to) => {
-      ok(src.includes(from), `mutant «${label}»: its anchor is in the module`);
+      ok(verdictOf(src.includes(from)), `mutant «${label}»: its anchor is in the module`);
       const f = path.join(tmp, `mut-${label.replace(/\W+/g, '-')}.cjs`); fs.writeFileSync(f, editAnchor(src, from, to, "src/job-logs-sweep.js").replace(/require\('\.\//g, `require('${ROOT}/src/`));
-      const V = require(f).runVerdict; ok(table(V).some((x) => !x), `CONTROL: the verdict with «${label}» fails the table`);
+      const V = require(f).runVerdict; ok(verdictOf(table(V).some((x) => !x)), `CONTROL: the verdict with «${label}» fails the table`);
     };
     mutant('alive ignored', "if (alive === true) return 'alive';", '');
     mutant('age by the start', "if (!(Number(newest) < r.cutoff)) return 'young';", '');
@@ -66,7 +66,7 @@ try {
     let threw = null; try { LS.keepSetOf({ jobs: 'nope', archive: { a: 1 }, held: null }); } catch (e) { threw = e; }
     ok(!threw, 'keepSetOf never throws on a shape it cannot read');
     const st = LS.words.start({ counted: 600, max: 500, gapMs: 30000 }), dn = LS.words.done({ removed: 540, entries: 2160, jobDirs: 3, kept: 60, passes: 2, startedAt: 'not a time' });
-    ok(/^\[jobs\] job-logs catch-up: 600 run dir\(s\) that started more than 14 days ago and no record lists/.test(st) && /540 run dir\(s\) removed \(2,160 entries\) and 3 job dir\(s\) no record names; 60 kept/.test(dn) && /since an earlier boot$/.test(dn), 'the words: the start counts by name, the done line names the same run dirs (removed + kept) and tolerates an odd start instant');
+    ok(gateOf(/^\[jobs\] job-logs catch-up: 600 run dir\(s\) that started more than 14 days ago and no record lists/.test(st)) && gateOf(/540 run dir\(s\) removed \(2,160 entries\) and 3 job dir\(s\) no record names; 60 kept/.test(dn)) && verdictOf(/since an earlier boot$/.test(dn)), 'the words: the start counts by name, the done line names the same run dirs (removed + kept) and tolerates an odd start instant');
   } else ok(false, 'the keep set and the words (no remover on this tree)');
   // ── THE STATIC CENSUS OF jobs.js ───────────────────────────────────────────────────────────────────────────────────────
   lap('§S static');
@@ -76,11 +76,11 @@ try {
   ok(wholeSites === 4, 'the whole-dir verdicts reach the remover at exactly four sites (the gc\'s two legs, the archive cap, the ✕, the boot collapse)', wholeSites);
   const WW = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8'), AR = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), CLI = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8'), PANEL = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf8');
   const ROUTE = '.then((v) => res.json({ success: true, ok: true, ...(v.gone ? {} : v.kept && v.kept !== \'pending\' ? { logsKept: v.kept } : { logsPending: true }) }))';   // B-0248 step 3: answered at the removal's landing
-  ok(WW.includes('jm.logsGone(rec.id)' + ROUTE) && AR.includes('a.jm.logsGone(arc.id)' + ROUTE), 'both ✕ routes (the owner\'s and the agent\'s) answer after logsGone: gone, or what stays and why (`logsKept`), or `logsPending`');
-  ok(/if \(rmAns && rmAns\.logsPending\) \{[^\n]*\n\s*console\.log\('removed — its log files are still being deleted in the background'\);/.test(CLI) && /rmAns\.logsKept === 'running'\) \{[^\n]*\n\s*console\.log\('removed — one of its runs is still running; its log files are deleted 14 days after it ends'\);/.test(CLI) && /logsKept === 'unjudgeable'\) showToast/.test(PANEL) && /act === 'rm' && r\?\.logsPending\) showToast\(t\('Removed\. Its log files are still being deleted in the background\.'\)\)/.test(PANEL), 'what the person reads past the bound: the panel\'s toast «Removed. Its log files are still being deleted in the background.», the CLI\'s «removed — its log files are still being deleted in the background»');
-  ok(!/_loadArchive\(/.test((JS.match(/async _logsPass\([\s\S]*?\n  \}\n/) || [''])[0]) && /async _logsPass\(/.test(JS), 'the pass never calls _loadArchive (its synchronous read): the archive from memory, or the worker reads it');
+  ok(gateOf(WW.includes('jm.logsGone(rec.id)' + ROUTE)) && verdictOf(AR.includes('a.jm.logsGone(arc.id)' + ROUTE)), 'both ✕ routes (the owner\'s and the agent\'s) answer after logsGone: gone, or what stays and why (`logsKept`), or `logsPending`');
+  ok(gateOf(/if \(rmAns && rmAns\.logsPending\) \{[^\n]*\n\s*console\.log\('removed — its log files are still being deleted in the background'\);/.test(CLI)) && gateOf(/rmAns\.logsKept === 'running'\) \{[^\n]*\n\s*console\.log\('removed — one of its runs is still running; its log files are deleted 14 days after it ends'\);/.test(CLI)) && gateOf(/logsKept === 'unjudgeable'\) showToast/.test(PANEL)) && verdictOf(/act === 'rm' && r\?\.logsPending\) showToast\(t\('Removed\. Its log files are still being deleted in the background\.'\)\)/.test(PANEL)), 'what the person reads past the bound: the panel\'s toast «Removed. Its log files are still being deleted in the background.», the CLI\'s «removed — its log files are still being deleted in the background»');
+  ok(!/_loadArchive\(/.test((JS.match(/async _logsPass\([\s\S]*?\n  \}\n/) || [''])[0]) && verdictOf(/async _logsPass\(/.test(JS)), 'the pass never calls _loadArchive (its synchronous read): the archive from memory, or the worker reads it');
   const WK = (() => { try { return fs.readFileSync(path.join(ROOT, 'src/job-logs-sweep-worker.js'), 'utf8'); } catch { return ''; } })();
-  ok(/if \(process\.argv\[4\] !== '--once'\) throw/.test(WK) && /lstatSync/.test(WK) && !/statSync\(/.test(WK.replace(/lstatSync|fstatSync/g, '')) && /O_NOFOLLOW/.test(WK), 'the remover\'s child throws without --once (B-323e: one batch a child, started by the starter — never in the hub\'s process) and calls no stat that follows a link (B-323e: its bounded reads fstat an fd opened O_NOFOLLOW) (that a link is never FOLLOWED is §G\'s legs, driven)');
+  ok(gateOf(/if \(process\.argv\[4\] !== '--once'\) throw/.test(WK)) && gateOf(/lstatSync/.test(WK)) && !/statSync\(/.test(WK.replace(/lstatSync|fstatSync/g, '')) && verdictOf(/O_NOFOLLOW/.test(WK)), 'the remover\'s child throws without --once (B-323e: one batch a child, started by the starter — never in the hub\'s process) and calls no stat that follows a link (B-323e: its bounded reads fstat an fd opened O_NOFOLLOW) (that a link is never FOLLOWED is §G\'s legs, driven)');
 
 
   // the static census, stronger (round 2 §4f)
@@ -93,26 +93,26 @@ try {
     ok(removals.length === 9 && !strangers.length, `jobs.js's removal calls are exactly the listed nine (the set-aside renames of a store — at boot and in the late load —, the atomic writes' renames, the spill files, a failed spawn's own spec, a failed start's own spec, the lock, the lifted note's rename) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);
     ok(!/=\s*fs\.(?:unlink|rm|rmdir|rename|write\w*|append\w*)Sync\b(?!\s*\()/.test(JS4) && !/=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\.promises\b(?!\s*\.)/.test(JS4) && !/\{[^}]*\b(?:unlinkSync|rmSync|rmdirSync|renameSync)\b[^}]*\}\s*=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\b/.test(JS4), 'no alias of a removing or writing fs call in jobs.js (nor of fs.promises — its renames would leave the count above)');
     const saveBody = (JS4.match(/  _logsSave\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
-    ok(saveBody && !/\bfs\.|writeJsonAtomic/.test(saveBody) && !/(?:writeJsonAtomic|writeFileSync|appendFileSync|renameSync|copyFileSync)\([^)]*logsSweepFile/.test(JS4), 'the catch-up record is written by the store writer alone: _logsSave holds no fs call, and no write anywhere names its file');
+    ok(gateOf(saveBody) && !/\bfs\.|writeJsonAtomic/.test(saveBody) && !/(?:writeJsonAtomic|writeFileSync|appendFileSync|renameSync|copyFileSync)\([^)]*logsSweepFile/.test(JS4), 'the catch-up record is written by the store writer alone: _logsSave holds no fs call, and no write anywhere names its file');
   }
   // the pause: one schema row and its reader
   {
     const SCH = fs.readFileSync(path.join(ROOT, 'src/lib/settings-schema.js'), 'utf8'), WIR = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8');
-    ok(/'jobs\.logsSweep': \{\n\s*type: 'boolean', default: true,/.test(SCH) && /logsSweepOn: \(\) => \{ try \{ return serverSetting\('jobs\.logsSweep'\) !== false; \}/.test(WIR), 'the pause is ONE schema row (boolean, default on) and its reader in jobs-wiring');
+    ok(gateOf(/'jobs\.logsSweep': \{\n\s*type: 'boolean', default: true,/.test(SCH)) && verdictOf(/logsSweepOn: \(\) => \{ try \{ return serverSetting\('jobs\.logsSweep'\) !== false; \}/.test(WIR)), 'the pause is ONE schema row (boolean, default on) and its reader in jobs-wiring');
     ok(!/4 \* cfg\.timeoutMs/.test(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8')), 'the counting pass has the normal timeout (past B it reads directories only)');
   }
   // round 4
   {
     const JS5 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
     const held = (JS5.match(/  _logsHeldFile\(file, e, what, exists, pre = null\) \{[\s\S]*?\n  \}\n/) || [''])[0];   // bl-jobs B-f276 cure r2: `pre` (a set-aside made off the loop)
-    ok(held && !/readdirSync|writeFileSync|existsSync|statSync/.test(held) && /this\._logsNoteOwed\[what\] = /.test(held), 'round 4 §3: a failed load\'s branch on the MAIN THREAD lists nothing, writes no note and checks no existence a second time — the hold is set there, the note is the child\'s');
+    ok(gateOf(held) && !/readdirSync|writeFileSync|existsSync|statSync/.test(held) && verdictOf(/this\._logsNoteOwed\[what\] = /.test(held)), 'round 4 §3: a failed load\'s branch on the MAIN THREAD lists nothing, writes no note and checks no existence a second time — the hold is set there, the note is the child\'s');
     const pass = (JS5.match(/  async _logsPass\(at, why\) \{[\s\S]*?\n  \}\n/) || [''])[0];
     const iHold = pass.indexOf('return this._logsHeldUnnoted(cfg)'), iOwed = pass.indexOf('await this._logsWhole([...this._logsOwed])'), iWalk = pass.indexOf('this._logsRemover().sweep(');
     ok(iHold > 0 && iOwed > iHold && iWalk > iHold, 'round 4 §1: the pass answers HELD for a note not on disk BEFORE the owed re-send and before the walk');
     if (LS) {
       const fw = (op, requeued) => LS.words.failed({ op, error: 'no answer in 2 s', requeued });
-      ok(/queued again$/.test(fw('whole', true)) && !/queued again/.test(fw('sweep', false)) && /not repeated before the pass's rest/.test(fw('sweep', false)) && !/queued again/.test(fw('state', false)) && !/queued again/.test(fw('whole', false)), 'round 4 §3: «queued again» only for a whole-dir batch that IS queued again; a cut sweep waits for its pass\'s rest');
-      ok(!!LS.NOTE_NAME && typeof LS.whenOf === 'function' && LS.NOTE_NAME.test('jobs.json.corrupt-unread') && LS.NOTE_NAME.test('jobs-archive.json.corrupt-unread') && !LS.NOTE_NAME.test('jobs.json.corrupt-unread-1700000000000') && !LS.NOTE_NAME.test('../jobs.json.corrupt-unread') && /^\d{4}-\d\d-\d\d \d\d:\d\d UTC$/.test(LS.whenOf(1794500000000)), 'round 4 §2: ONE note name per store (`<store>.corrupt-unread`, no moment in it, no path), and the failure\'s moment in words that need no translation');
+      ok(gateOf(/queued again$/.test(fw('whole', true))) && !/queued again/.test(fw('sweep', false)) && gateOf(/not repeated before the pass's rest/.test(fw('sweep', false))) && !/queued again/.test(fw('state', false)) && !/queued again/.test(fw('whole', false)), 'round 4 §3: «queued again» only for a whole-dir batch that IS queued again; a cut sweep waits for its pass\'s rest');
+      ok(!!LS.NOTE_NAME && typeof LS.whenOf === 'function' && gateOf(LS.NOTE_NAME.test('jobs.json.corrupt-unread')) && gateOf(LS.NOTE_NAME.test('jobs-archive.json.corrupt-unread')) && !LS.NOTE_NAME.test('jobs.json.corrupt-unread-1700000000000') && !LS.NOTE_NAME.test('../jobs.json.corrupt-unread') && verdictOf(/^\d{4}-\d\d-\d\d \d\d:\d\d UTC$/.test(LS.whenOf(1794500000000))), 'round 4 §2: ONE note name per store (`<store>.corrupt-unread`, no moment in it, no path), and the failure\'s moment in words that need no translation');
     }
   }
   // .399 K7 + K10 (the .398 merged-tip read): the words that lift a hold say what the lift lets the clean-up remove; the notices put
@@ -122,7 +122,7 @@ try {
     const zhT = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), jaT = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
     const rowOf = (txt, k) => { const m = txt.match(new RegExp('^  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': (".*"),$', 'm')); return m ? JSON.parse(m[1]) : null; };
     const lift = ['store-corrupt', 'records-held', 'records-unread', 'set-aside-other'].map((k) => [k, M.forYouCopy(null, k, { file: 'jobs.json.corrupt-1', store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'EIO', when: 1794500000000 })]);
-    ok(lift.every(([, c]) => c.words && /removed 14 days after their newest file/.test(c.words.key)), 'K7: every item that tells a person to move a held file says what moving it lets the clean-up remove (14 days after the newest file)', lift.filter(([, c]) => !/removed 14 days/.test(c.words.key)).map(([k]) => k));
+    ok(verdictOf(lift.every(([, c]) => c.words && /removed 14 days after their newest file/.test(c.words.key))), 'K7: every item that tells a person to move a held file says what moving it lets the clean-up remove (14 days after the newest file)', lift.filter(([, c]) => !/removed 14 days/.test(c.words.key)).map(([k]) => k));
     const ru = M.forYouCopy(null, 'records-unread', { store: 'jobs.json', note: 'n', error: 'ETIMEDOUT', when: 1794500000000 }).words.params;
     const ru0 = M.forYouCopy(null, 'records-unread', { store: 'jobs.json', note: 'n', error: 'see the note', when: null }).words.params;
     const odd = M.forYouCopy(null, 'records-unread-unnoted', { store: 'jobs.json', error: 'EWHATEVER', when: 5 }).words.params;
@@ -133,7 +133,7 @@ try {
     ok(!missing.length, `K10: every key those notices say (${keys.length}) has its zh and its ja row`, missing);
     const say = (txt, w) => String(rowOf(txt, w.key) || w.key).replace(/\{(\w+)\}/g, (m, k) => { const v = w.params && w.params[k]; return v === undefined ? m : v && typeof v === 'object' ? (typeof v.key === 'string' ? say(txt, v) : '11-12 14:03') : String(v); });
     const zh = ['records-unread', 'records-unread-unnoted'].flatMap((k) => [say(zhT, M.forYouCopy(null, k, { store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'EIO', when: 1794500000000 }).words), say(zhT, M.forYouCopy(null, k, { store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'see the note', when: null }).words)]);
-    ok(zh.every((x) => !/\b(?:earlier|UTC|unknown|error|note|could|read|the)\b/i.test(x)), 'K10: said in zh, those notices hold no English word — only the file names and the code in its words\' parentheses', zh.filter((x) => /\b(?:earlier|UTC|unknown|error|note|could|read|the)\b/i.test(x)));
+    ok(verdictOf(zh.every((x) => !/\b(?:earlier|UTC|unknown|error|note|could|read|the)\b/i.test(x))), 'K10: said in zh, those notices hold no English word — only the file names and the code in its words\' parentheses', zh.filter((x) => /\b(?:earlier|UTC|unknown|error|note|could|read|the)\b/i.test(x)));
     // K7's cure (主开发 09:05Z): an item a 2.369.398 hub FILED keeps the old template as its key (filed once — heldSaid); each old key
     // keeps its zh / ja row, so that open item never turns English after the update. The items as the release built them (params strings)
     const LEG = M.FOR_YOU_WORDS_LEGACY || {};
@@ -143,7 +143,7 @@ try {
       const w = LEG[k] ? { key: LEG[k].key, params: relParams } : null;
       return { k, rows: !!(w && rowOf(zhT, w.key) && rowOf(jaT, w.key)), zh: w ? say(zhT, w) : '', ja: w ? say(jaT, w) : '', reworded: !!(w && w.key !== M.FOR_YOU_WORDS[k]) };
     });
-    ok(legacy.every((x) => x.rows && x.reworded && x.zh && x.ja && !sentence.test(x.zh) && !sentence.test(x.ja)), 'K7\'s cure: each of the four templates K7 reworded stays a NAMED legacy key (the release it left in) with its zh and ja rows — an item a 2.369.398 hub filed renders in zh and ja with no English sentence after the update', legacy.filter((x) => !(x.rows && x.reworded && !sentence.test(x.zh) && !sentence.test(x.ja))).map((x) => ({ k: x.k, rows: x.rows, zh: x.zh.slice(0, 60) })));
+    ok(verdictOf(legacy.every((x) => x.rows && x.reworded && x.zh && x.ja && !sentence.test(x.zh) && !sentence.test(x.ja))), 'K7\'s cure: each of the four templates K7 reworded stays a NAMED legacy key (the release it left in) with its zh and ja rows — an item a 2.369.398 hub filed renders in zh and ja with no English sentence after the update', legacy.filter((x) => !(x.rows && x.reworded && !sentence.test(x.zh) && !sentence.test(x.ja))).map((x) => ({ k: x.k, rows: x.rows, zh: x.zh.slice(0, 60) })));
     const { fillWords } = require(path.join(ROOT, 'src/user-todos.js'));
     ok(typeof fillWords === 'function' && fillWords({ key: 'read ({when}: {error})', params: { when: { at: Date.UTC(2026, 10, 12, 14, 3) }, error: { key: 'an error ({code})', params: { code: 'EX' } } } }) === 'read (2026-11-12 14:03 UTC: an error (EX))', 'K10: the store\'s English text says an INSTANT as a UTC stamp (it said «undefined») and fills a WORDS param\'s own params');
   }
@@ -153,4 +153,4 @@ try {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 }
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

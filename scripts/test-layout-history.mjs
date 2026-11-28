@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's stores land at the call here (the release's timing; the off-loop road is test-store-write-census-scenes ⑭'s)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-let pass=0, fail=0; const ok=(c,n,e)=>{if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
+let pass=0, fail=0; const ok=(c,n,e)=>{ if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lh-'));
 const { router, setup } = require(REPO + '/src/routes/persistence.js');
@@ -83,7 +83,7 @@ ok(listLayoutHistory().length <= 40, `history is bounded (${listLayoutHistory().
   const oldest = all[all.length - 1];
   const raw0 = JSON.parse(fs.readFileSync(path.join(dataDir, 'layout-history', oldest.id), 'utf8'));
   const ids0 = Object.values(raw0.layouts.desktops || {}).flatMap((v) => (v.autoSave.windows || []).map((w) => w.winId));
-  ok(ids0.some((i) => /^w\d/.test(i)), 'the PRE-storm rollback point survived a 45-change burst (tiered retention, not flat newest-N)');
+  ok(verdictOf(ids0.some((i) => /^w\d/.test(i))), 'the PRE-storm rollback point survived a 45-change burst (tiered retention, not flat newest-N)');
 }
 ok(listLayoutHistory()[0].at >= listLayoutHistory()[listLayoutHistory().length - 1].at, 'newest first');
 
@@ -148,8 +148,8 @@ ok(legacy.totalWindows === 2, `legacy top-level layout counted in the rollback p
   W3(m1); await tick();
   const h1 = R3.listLayoutHistory()[0];
   const meta1 = JSON.parse(fs.readFileSync(path.join(dd, 'layout-history', h1.id.replace(/\.json$/, '.meta.json')), 'utf8'));
-  ok(h1.writer && h1.writer.wrote === 'work' && h1.writer.viewport === 'desktop' && h1.writer.evidence.unbuilt === 5 && h1.writer.base === 1000 && typeof h1.writer.at === 'number' && JSON.stringify(meta1.writer) === JSON.stringify(h1.writer), 'a point\'s meta names the WRITE that made it — the desktop, the writer\'s viewport, its evidence by reason (unbuilt 5), its base — in the sidecar and the listing', JSON.stringify(h1.writer));
-  ok(Array.isArray(h1.refused) && h1.refused.length === 2 && h1.refused[0].refused === 'stale' && h1.refused[0].viewport === 'phone' && h1.refused[1].refused === 'shrink-without-close' && h1.refused[1].live === 5, '…and the REFUSALS since the last point (the stale phone write, the belt\'s live-unbuilt refusal) with their viewport', JSON.stringify(h1.refused));
+  ok(gateOf(h1.writer) && h1.writer.wrote === 'work' && h1.writer.viewport === 'desktop' && h1.writer.evidence.unbuilt === 5 && h1.writer.base === 1000 && typeof h1.writer.at === 'number' && JSON.stringify(meta1.writer) === JSON.stringify(h1.writer), 'a point\'s meta names the WRITE that made it — the desktop, the writer\'s viewport, its evidence by reason (unbuilt 5), its base — in the sidecar and the listing', JSON.stringify(h1.writer));
+  ok(gateOf(Array.isArray(h1.refused)) && h1.refused.length === 2 && h1.refused[0].refused === 'stale' && h1.refused[0].viewport === 'phone' && h1.refused[1].refused === 'shrink-without-close' && h1.refused[1].live === 5, '…and the REFUSALS since the last point (the stale phone write, the belt\'s live-unbuilt refusal) with their viewport', JSON.stringify(h1.refused));
   const m2 = R3.readLayouts(); m2.desktops.work.autoSave.windows = [{ winId: 'k9' }]; W3(m2); await tick();
   const h2 = R3.listLayoutHistory()[0];
   ok(h2.id !== h1.id && !h2.writer && !h2.refused, '…a write that noted nothing (a preset, an import) names nobody, and the refusals are told once', JSON.stringify(h2));
@@ -161,14 +161,14 @@ ok(legacy.totalWindows === 2, `legacy top-level layout counted in the rollback p
   await route.route.stack[0].handle({ params: { id: target.id } }, { json: (j) => { answer = j; }, status: () => ({ json: (j) => { answer = j; } }) });
   await tick();
   const back = R3.readLayouts();
-  ok(answer && answer.success && (back.desktops.work.autoSave.windows || []).length === 5, 'the restore door puts 工作\'s five back', JSON.stringify(answer));
+  ok(gateOf(answer) && gateOf(answer.success) && (back.desktops.work.autoSave.windows || []).length === 5, 'the restore door puts 工作\'s five back', JSON.stringify(answer));
   ok(back.desktops.work.autoSave.updatedAt >= t0 && back.desktops.work.autoSave.updatedAt > before && back.desktops.res.autoSave.updatedAt >= t0, `A RESTORE OUTRANKS EVERY LIVE CLIENT: each restored record is stamped NOW (${back.desktops.work.autoSave.updatedAt} ≥ ${t0}, above the replaced ${before}) — the point's own stamp (1000) never comes back`, JSON.stringify({ work: back.desktops.work.autoSave.updatedAt, res: back.desktops.res.autoSave.updatedAt }));
   const points = R3.listLayoutHistory().slice(0, 2);
-  ok(points.length === 2 && points.every((p) => p.writer && p.writer.via === 'restore' && p.writer.from === target.id), 'the restore\'s points (the forced one and its write\'s) name the restore and the point it came from', JSON.stringify(points.map((p) => p.writer)));
-  ok(heard.some((m) => m.type === 'layout-restored'), 'every client is told (layout-restored)');
+  ok(points.length === 2 && verdictOf(points.every((p) => p.writer && p.writer.via === 'restore' && p.writer.from === target.id)), 'the restore\'s points (the forced one and its write\'s) name the restore and the point it came from', JSON.stringify(points.map((p) => p.writer)));
+  ok(verdictOf(heard.some((m) => m.type === 'layout-restored')), 'every client is told (layout-restored)');
   // lane phone-dock-restore r2 (P4): THE BROADCAST NAMES THE RESTORE — the asker's `rid` echoed (its page tells its own restore
   // from another device's); none sent / a malformed one ⇒ none told
-  ok(heard.filter((m) => m.type === 'layout-restored').every((m) => !('rid' in m)), '…a restore that names no rid is told with none', JSON.stringify(heard));
+  ok(verdictOf(heard.filter((m) => m.type === 'layout-restored').every((m) => !('rid' in m))), '…a restore that names no rid is told with none', JSON.stringify(heard));
   heard.length = 0;
   const sink = { json: () => {}, status: () => ({ json: () => {} }) };
   await route.route.stack[0].handle({ params: { id: target.id }, body: { rid: 'rk3x9_a-1' } }, sink);
@@ -182,4 +182,4 @@ ok(legacy.totalWindows === 2, `legacy top-level layout counted in the rollback p
 
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail?1:0);
+process.exit(fail?1:0); import { verdictOf, gateOf } from './lib/check.mjs';

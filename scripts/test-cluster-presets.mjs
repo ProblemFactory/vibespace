@@ -58,7 +58,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -107,14 +107,14 @@ console.log('§1 PURE preset-layers');
   ok(m.entries[1].clientSecret === SECRET_U && m.layerOf.org2 === 'release' && m.layerOf.org1 === 'cluster' && m.layerOf.extra === 'release', 'the replaced entry is the release\'s, and layerOf names where each came from');
   ok(PL.mergeLayers('gdrive', {}) === null && PL.mergeLayers('gdrive', { cluster: null, release: null }) === null, 'both layers absent ⇒ null — the directory says nothing, the caller falls back to the env');
   const empty = PL.mergeLayers('gdrive', { cluster: [] });
-  ok(empty && empty.entries.length === 0, 'a PRESENT [] is an answer (no presets), never the env fallback');
+  ok(gateOf(empty) && empty.entries.length === 0, 'a PRESENT [] is an answer (no presets), never the env fallback');
   ok(PL.mergeLayers('gdrive', { release: rel }).entries.length === 2, 'a release layer alone (no cluster Secret yet) still serves');
   const dup = PL.mergeLayers('gdrive', { cluster: [g('a', '1'), g('a', '2')] });
   ok(dup.entries.length === 1 && dup.entries[0].clientSecret === '1', 'within one layer the FIRST entry of a key wins (what find() over the env list always answered)');
   const im = PL.mergeLayers('integrations', { cluster: PL.parseIntegrations([{ id: 'lark', values: { appId: 'a', appSecret: 'x' } }, { id: 'cloud:browserbase', values: { apiKey: 'cb_1' } }]), release: PL.parseIntegrations([{ id: 'lark', values: { appId: 'b', appSecret: 'y' } }]) });
   ok(im.entries.length === 2 && im.entries[0].values.appId === 'b' && im.entries[1].id === 'cloud:browserbase', 'integrations: the identity is row id + preset key — the release\'s lark/default replaces the cluster\'s, cloak/default (same key, another row) stays');
   let threwKind = false; try { PL.mergeLayers('nope', {}); } catch { threwKind = true; }
-  ok(threwKind, 'an unknown kind throws (never a silent null)');
+  ok(verdictOf(threwKind), 'an unknown kind throws (never a silent null)');
 
   // the three-rung chain with the registry's OWN precedence: user > release > cluster
   const lark = R.rowById('lark');
@@ -130,20 +130,20 @@ console.log('§1 PURE preset-layers');
   const d = PL.diffEntries('gdrive', [g('org1', SECRET_A), g('gone', SECRET_A), g('lbl', SECRET_A, 'Old')], [g('org1', SECRET_B), g('new', SECRET_B), g('lbl', SECRET_A, 'New')]);
   ok(d.added.join() === 'new' && d.removed.join() === 'gone' && d.rotated.join() === 'org1' && d.relabeled.join() === 'lbl', `diffEntries: added / removed / rotated / relabeled by key (${JSON.stringify(d)})`);
   const words = PL.diffWords('gdrive', d) + PL.diffWords('integrations', PL.diffEntries('integrations', PL.parseIntegrations([{ id: 'lark', key: 'j', values: { appSecret: LARK_S } }]), PL.parseIntegrations([{ id: 'lark', key: 'j', values: { appSecret: LARK_S + 'x' } }])));
-  ok(!words.includes(SECRET_A) && !words.includes(SECRET_B) && !words.includes(LARK_S) && /rotated org1/.test(words) && /rotated lark\/j/.test(words), `the journal words carry keys and never a value: "${words}"`);
-  ok(PL.diffEmpty(PL.diffEntries('gdrive', [g('a', '1')], [g('a', '1')])) && PL.diffWords('gdrive', PL.diffEntries('gdrive', [], [])) === '', 'equal lists diff to nothing, and say nothing');
+  ok(!words.includes(SECRET_A) && !words.includes(SECRET_B) && !words.includes(LARK_S) && gateOf(/rotated org1/.test(words)) && verdictOf(/rotated lark\/j/.test(words)), `the journal words carry keys and never a value: "${words}"`);
+  ok(gateOf(PL.diffEmpty(PL.diffEntries('gdrive', [g('a', '1')], [g('a', '1')]))) && PL.diffWords('gdrive', PL.diffEntries('gdrive', [], [])) === '', 'equal lists diff to nothing, and say nothing');
 
   // the line (P3)
   const t = (s, p) => String(s).replace(/\{(\w+)\}/g, (m0, k) => (p && p[k] !== undefined ? String(p[k]) : m0));
   const ago = (ms) => `${Math.round(ms / 60000)} min ago`;
   const none = PL.presetsLine(PL.summarize({}), { t, ago });
-  ok(none.none && none.text === 'Company presets: none.', `no presets ⇒ "${none.text}"`);
+  ok(gateOf(none.none) && none.text === 'Company presets: none.', `no presets ⇒ "${none.text}"`);
   const sum = PL.summarize({ dir: '/etc/vibespace/presets', updatedAt: 1000, items: [{ kind: 'gdrive', source: 'cluster', n: 3 }, { kind: 'lark', source: 'cluster', n: 1 }, { kind: 'gdrive', source: 'release', n: 1 }, { kind: 'cloud:browserbase', source: 'env', n: 1 }, { kind: 'lark', source: 'release', n: 0 }] });
   const line = PL.presetsLine(sum, { t, ago, now: 1000 + 120000 });
   ok(line.text === 'Company presets: 3 Google clients, 1 Lark app — from the cluster, updated 2 min ago; 1 Google client — from this release’s own values, updated 2 min ago; Browserbase (cloud browser) key — from the environment (a restart is needed to change them)', `the brief's sentence, per source: "${line.text}"`);
   ok(sum.groups.map((x) => x.source).join() === 'cluster,release,env' && !sum.groups.some((x) => x.items.some((i) => i.n === 0)), 'summarize keeps the source order and drops zero counts');
   const errs = PL.presetsLine(PL.summarize({ items: [{ kind: 'gdrive', source: 'cluster', n: 1 }], errors: [{ layer: 'release', file: 'integrations.json', code: 'unparseable', kept: true }, { layer: 'cluster', file: 'gdrive-clients.json', code: 'too-large', kept: false }] }), { t });
-  ok(errs.errors.length === 2 && /override\/integrations\.json.*previous presets are kept/.test(errs.errors[0]) && /gdrive-clients\.json.*no presets until it is fixed/.test(errs.errors[1]), 'an unreadable file is SAID — kept (it had presets) or offering none (it never read)');
+  ok(errs.errors.length === 2 && gateOf(/override\/integrations\.json.*previous presets are kept/.test(errs.errors[0])) && verdictOf(/gdrive-clients\.json.*no presets until it is fixed/.test(errs.errors[1])), 'an unreadable file is SAID — kept (it had presets) or offering none (it never read)');
   ok(PL.itemWords({ kind: 'cloud:browserbase', n: 2 }, { t }) === `2 ${R.rowById('cloud:browserbase').label} keys`, 'a browser key row is worded by its registry label');
 
   // CONTROLS: the per-key merge is the property — a whole-file override and a wrong layer order are both red
@@ -179,7 +179,7 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   const cap = capture();
   const r = CP.create({ dir, log: cap.log, debounceMs: 30, pollMs: 250 });
   ok(r.entries('gdrive').map((e) => e.key).join() === 'org1,channels' && r.entries('integrations')[0].key === 'jarvis', 'boot read (sync): the cluster files through the symlinks into ..data');
-  ok(cap.lines.length === 1 && /integrations 1, Google clients 2/.test(cap.lines[0]) && !cap.lines.join().includes(SECRET_A), `boot says what it found, value-free: ${cap.lines[0]}`);
+  ok(cap.lines.length === 1 && gateOf(/integrations 1, Google clients 2/.test(cap.lines[0])) && !cap.lines.join().includes(SECRET_A), `boot says what it found, value-free: ${cap.lines[0]}`);
   const copy = r.entries('gdrive'); copy[0].clientSecret = 'mutated';
   ok(r.entries('gdrive')[0].clientSecret === SECRET_A, 'entries() hands out copies — a consumer cannot mutate the snapshot');
   const changes = []; r.onChange((c) => changes.push(c));
@@ -192,10 +192,10 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   ok(ms >= 0 && changes.length === 1, `the swap is seen ONCE (${ms} ms after the rename; the watch, not the 250 ms poll, carries it when < 250)`);
   ok(r.entries('gdrive').find((e) => e.key === 'org1').clientSecret === SECRET_B && r.entries('gdrive').find((e) => e.key === 'channels').clientSecret === SECRET_U && r.entries('gdrive').length === 3, 'the snapshot follows: org1 rotated, channels from the release override, org2 added');
   const changed = cap.lines.filter((l) => /\[presets\] changed/.test(l));
-  ok(changed.length === 1 && /added org2/.test(changed[0]) && /rotated org1, channels/.test(changed[0]) && !cap.lines.join('\n').includes(SECRET_A) && !cap.lines.join('\n').includes(SECRET_B) && !cap.lines.join('\n').includes(SECRET_U), `ONE journal line naming what changed, never a secret: ${changed[0]}`);
+  ok(changed.length === 1 && gateOf(/added org2/.test(changed[0])) && gateOf(/rotated org1, channels/.test(changed[0])) && !cap.lines.join('\n').includes(SECRET_A) && !cap.lines.join('\n').includes(SECRET_B) && !cap.lines.join('\n').includes(SECRET_U), `ONE journal line naming what changed, never a secret: ${changed[0]}`);
   ok(changes[0].kinds.join() === 'gdrive', 'the change names its kinds (integrations did not move)');
   const st = r.status();
-  ok(st.items.some((i) => i.kind === 'gdrive' && i.source === 'release' && i.n === 1) && st.items.some((i) => i.kind === 'gdrive' && i.source === 'cluster' && i.n === 2) && Number.isInteger(st.updatedAt), `status(): counted by layer, updatedAt = the files' mtime (${JSON.stringify(st.items)})`);
+  ok(gateOf(st.items.some((i) => i.kind === 'gdrive' && i.source === 'release' && i.n === 1)) && gateOf(st.items.some((i) => i.kind === 'gdrive' && i.source === 'cluster' && i.n === 2)) && verdictOf(Number.isInteger(st.updatedAt)), `status(): counted by layer, updatedAt = the files' mtime (${JSON.stringify(st.items)})`);
 
   // a swap that changes nothing fires nothing
   await r.reload();   // (line 1021's round, a should) no reload in flight when the mark is taken: a late one cannot move it over the old tree
@@ -209,9 +209,9 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   const leak = `[{"key":"org1","clientId":"c","clientSecret":"${SECRET_B}"},]`;
   project(dir, { 'gdrive-clients.json': leak, 'integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_x', appSecret: LARK_S } }], 'override/gdrive-clients.json': [g('channels', SECRET_U, 'Mine')] });
   await until(() => cap.lines.some((l) => /could not be read/.test(l)), 3000);
-  ok(r.entries('gdrive').length === 3 && r.entries('gdrive').find((e) => e.key === 'org2'), 'a malformed cluster file: the PREVIOUS presets stay in effect');
+  ok(r.entries('gdrive').length === 3 && verdictOf(r.entries('gdrive').find((e) => e.key === 'org2')), 'a malformed cluster file: the PREVIOUS presets stay in effect');
   const errLines = cap.lines.filter((l) => /could not be read/.test(l));
-  ok(errLines.length === 1 && /unparseable/.test(errLines[0]) && /keeping the previous presets/.test(errLines[0]) && !errLines[0].includes(SECRET_B.slice(-6)), `ONE line, position only (no bytes of the secret): ${errLines[0]}`);
+  ok(errLines.length === 1 && gateOf(/unparseable/.test(errLines[0])) && gateOf(/keeping the previous presets/.test(errLines[0])) && !errLines[0].includes(SECRET_B.slice(-6)), `ONE line, position only (no bytes of the secret): ${errLines[0]}`);
   ok(r.status().errors.length === 1 && r.status().errors[0].kept === true && r.status().errors[0].code === 'unparseable', 'status() carries the typed error (kept: true)');
   ok(changes[changes.length - 1].kinds.length === 0, 'the error transition still notifies (kinds []) — the summary line must say it');
   // persisting malformed + another swap: no second line
@@ -223,12 +223,12 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   // fixed
   project(dir, { 'gdrive-clients.json': [g('org1', SECRET_B, 'Org')], 'integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_x', appSecret: LARK_S } }] });
   await until(() => cap.lines.some((l) => /reads again/.test(l)), 3000);
-  ok(cap.lines.some((l) => /gdrive-clients\.json reads again/.test(l)) && r.status().errors.length === 0 && r.entries('gdrive').map((e) => e.key).join() === 'org1', 'fixed: "reads again", the new presets in effect, the error gone');
+  ok(gateOf(cap.lines.some((l) => /gdrive-clients\.json reads again/.test(l))) && r.status().errors.length === 0 && r.entries('gdrive').map((e) => e.key).join() === 'org1', 'fixed: "reads again", the new presets in effect, the error gone');
   // too large
   cap.lines.length = 0;
   project(dir, { 'gdrive-clients.json': JSON.stringify([g('org1', SECRET_B)]) + ' '.repeat(CP.MAX_BYTES), 'integrations.json': '[]' });
   await until(() => cap.lines.some((l) => /too-large/.test(l)), 3000);
-  ok(cap.lines.some((l) => /too-large/.test(l)) && r.entries('gdrive').length === 1, `a file over ${CP.MAX_BYTES} bytes is refused before it is read; the previous presets stay`);
+  ok(gateOf(cap.lines.some((l) => /too-large/.test(l))) && r.entries('gdrive').length === 1, `a file over ${CP.MAX_BYTES} bytes is refused before it is read; the previous presets stay`);
   ok(r.entries('integrations').length === 0, 'a present [] is the answer for integrations (lark withdrawn)');
   // a key removed from the Secret: the kind falls back to the env
   project(dir, { 'integrations.json': '[]' });
@@ -267,7 +267,7 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   // CONTROL: the failure path that DROPS the previous presets
   const srcR = fs.readFileSync(path.join(REPO, 'src/server/cluster-presets.js'), 'utf-8');
   const anchor = "      slot.error = { layer: slot.layer, file: FILES[slot.kind], code: out.error.code, kept: !!slot.list };";
-  ok(srcR.includes(anchor), 'the control\'s anchor exists in the reader');
+  ok(verdictOf(srcR.includes(anchor)), 'the control\'s anchor exists in the reader');
   // r4456: the copy also takes the leg's own HOLD (opt-in, `hold`) before a slot's re-read — the place the control's late fact is made
   const aHold1 = 'function create({ dir = null, log = console, now = () => Date.now(), pollMs = POLL_MS, debounceMs = DEBOUNCE_MS } = {}) {';
   const aHold2 = "    try { text = await fs.promises.readFile(f, 'utf-8'); }";
@@ -298,7 +298,7 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   release();
   await untilFact(() => capH.lines.some((l) => /could not be read/.test(l)), 'the held copy READ the malformed file once released (its own line)');
   const after3 = dH.entries('gdrive');
-  ok(Array.isArray(oldRead) && oldRead.length === 1 && !saidHeld && after3 === null, 'PLACED (r4456): while the copy\'s re-read is HELD, the control\'s old fixed 500 ms reads the OLD presets (a red with nothing wrong); the wait on the copy\'s own line reads the drop once the held read lands', JSON.stringify({ oldRead: oldRead && oldRead.length, saidHeld, after: after3 }));
+  ok(gateOf(Array.isArray(oldRead)) && oldRead.length === 1 && !saidHeld && after3 === null, 'PLACED (r4456): while the copy\'s re-read is HELD, the control\'s old fixed 500 ms reads the OLD presets (a red with nothing wrong); the wait on the copy\'s own line reads the drop once the held read lands', JSON.stringify({ oldRead: oldRead && oldRead.length, saidHeld, after: after3 }));
   dH.stop();
 }
 
@@ -391,12 +391,12 @@ for (const c of STATES) for (const r of STATES) {
   const expErrs = []; for (const layer of P3.LAYERS) for (const kind of P3.KINDS) if (ERR_CODE[{ cluster: c, release: r }[layer]]) expErrs.push({ layer, file: CP.FILES[kind], code: ERR_CODE[{ cluster: c, release: r }[layer]] });
   const gotErrs = st.errors.map((x) => ({ layer: x.layer, file: x.file, code: x.code }));
   const errLines = cap.lines.filter((l) => /could not be read/.test(l));
-  ok(JSON.stringify(gotErrs.sort((a, b) => (a.layer + a.file).localeCompare(b.layer + b.file))) === JSON.stringify(expErrs.sort((a, b) => (a.layer + a.file).localeCompare(b.layer + b.file))) && st.errors.every((x) => x.kept === false) && errLines.length === expErrs.length && expErrs.every((x) => errLines.some((l) => l.includes((x.layer === 'release' ? 'override/' : '') + x.file) && l.includes(x.code) && /no presets from it until it is fixed/.test(l))),
+  ok(JSON.stringify(gotErrs.sort((a, b) => (a.layer + a.file).localeCompare(b.layer + b.file))) === JSON.stringify(expErrs.sort((a, b) => (a.layer + a.file).localeCompare(b.layer + b.file))) && gateOf(st.errors.every((x) => x.kept === false)) && errLines.length === expErrs.length && verdictOf(expErrs.every((x) => errLines.some((l) => l.includes((x.layer === 'release' ? 'override/' : '') + x.file) && l.includes(x.code) && /no presets from it until it is fixed/.test(l)))),
     `${name}: ${expErrs.length} typed error row(s) (kept:false) + ${expErrs.length} line(s) naming file + code${expErrs.length ? '' : ' — none'}`);
   // the words
   const wantCluster = P3.KINDS.some((k) => expectKind(k, c, r).from === 'cluster'), wantRelease = P3.KINDS.some((k) => expectKind(k, c, r).from === 'release');
   const okWords = anyEntry ? (!line.none && /from the cluster/.test(line.text) === wantCluster && /from this release/.test(line.text) === wantRelease && !/from the environment/.test(line.text)) : (line.none && /^Company presets: none\.$/.test(line.text));
-  ok(okWords && line.errors.length === expErrs.length && line.errors.every((s) => /offers no presets until it is fixed/.test(s)), `${name}: the line says it — "${line.text}"${line.errors.length ? ' + ' + line.errors.length + ' error sentence(s)' : ''}`);
+  ok(gateOf(okWords) && line.errors.length === expErrs.length && verdictOf(line.errors.every((s) => /offers no presets until it is fixed/.test(s))), `${name}: the line says it — "${line.text}"${line.errors.length ? ' + ' + line.errors.length + ' error sentence(s)' : ''}`);
   // never a value
   const leaked = leaks([cap.lines, st, sum, line]);
   ok(!leaked.length, `${name}: no value in any line / status / summary / words${leaked.length ? ' — LEAKED ' + leaked.join(', ') : ''}`);
@@ -429,7 +429,7 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   ok(a.d.length === 0 && a.res.source === 'none' && a.res.whyCode === 'no-preset', 'env=absent, directory silent: no Google client, the row says no-preset (the dialogs: your own client)');
   const m = envCell('malformed');
   console.error = prevErr;                      // the captures are over — ok()'s own ✗ goes to stderr again
-  ok(m.d.length === 0 && m.res.source === 'none' && m.errs.length === 1 && m.lines.some((l) => /unparseable|not valid JSON/.test(l)) && !leaks([m.errs, m.lines]).length, 'env=malformed: [] / none, ONE line each, no bytes of the secret');
+  ok(m.d.length === 0 && m.res.source === 'none' && m.errs.length === 1 && gateOf(m.lines.some((l) => /unparseable|not valid JSON/.test(l))) && !leaks([m.errs, m.lines]).length, 'env=malformed: [] / none, ONE line each, no bytes of the secret');
   // the directory ANSWERS ⇒ the env is not consulted, even when it speaks
   process.env.VIBESPACE_GDRIVE_CLIENTS = JSON.stringify([g('ek', SENT.env.gdrive)]);
   const spoken = CP.create({ dir: cellDir({ cluster: 'present', release: 'absent' }), log: quiet.log });
@@ -441,9 +441,9 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   // THE USER'S OWN KEY WINS — AT THE CONSUMER
   const own = MountManager._driveClient({ clientId: 'mine.apps.googleusercontent.com', clientPreset: 'k' });
   const preset = MountManager._driveClient({ clientPreset: 'k' });
-  ok(own === null && preset && preset.clientSecret === SENT.cluster.gdrive, 'Drive: a record with its OWN client id gets no preset (null = its own is used) while the same preset key resolves for a record without one');
+  ok(own === null && gateOf(preset) && preset.clientSecret === SENT.cluster.gdrive, 'Drive: a record with its OWN client id gets no preset (null = its own is used) while the same preset key resolves for a record without one');
   const msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf-8');
-  ok(msrc.includes("let cid = clientId, csec = clientSecret;\n      if (!cid) { const pc = MountManager.pickerClient(this, tok, clientPreset);") && msrc.includes("const pc = MountManager._driveClient({ clientPreset: clientPreset || null });\n    const si = MountManager.signInOf(x, tok);") && msrc.includes('if (m.clientId) return null; // custom client on the record itself'), 'WIRING: the Drive connect path asks the preset (_driveClient, through B-e40d\'s pickerClient — its sign-in\'s client only after a swap) only without an own client id, and _driveClient yields to a record\'s own id');
+  ok(gateOf(msrc.includes("let cid = clientId, csec = clientSecret;\n      if (!cid) { const pc = MountManager.pickerClient(this, tok, clientPreset);")) && gateOf(msrc.includes("const pc = MountManager._driveClient({ clientPreset: clientPreset || null });\n    const si = MountManager.signInOf(x, tok);")) && verdictOf(msrc.includes('if (m.clientId) return null; // custom client on the record itself')), 'WIRING: the Drive connect path asks the preset (_driveClient, through B-e40d\'s pickerClient — its sign-in\'s client only after a swap) only without an own client id, and _driveClient yields to a record\'s own id');
   st2.setIntegration('cloud:browserless', { apiKey: 'MINE-OWN-browserless-key-0000' });
   const spokenB = CP.create({ dir: cellDir({ cluster: 'absent', release: 'present' }, { 'integrations.json': JSON.stringify([{ id: 'cloud:browserless', values: { apiKey: SENT.cluster.integrations } }]) }), log: quiet.log });   // the cluster file is the extra one (a present cluster state would overwrite it)
   const st3 = IS.create({ dataDir: path.join(ROOT, 'cell-env-spoken'), env: {}, presets: spokenB, log: quiet.log });
@@ -459,7 +459,7 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   const dir = cellDir({ cluster: 'present', release: 'absent' }, { 'browser-keys.json': '[]', 'override/lark.json': '{}' });
   const rd = CP.create({ dir, log: cap.log });
   const stray = cap.lines.filter((l) => /ignored/.test(l));
-  ok(stray.length === 1 && /ignored browser-keys\.json, override\/lark\.json/.test(stray[0]) && /the files read are integrations\.json, gdrive-clients\.json/.test(stray[0]) && rd.entries('gdrive').length === 1 && rd.entries('integrations').length === 1 && rd.status().errors.length === 0, `a future / mistyped file: ONE line names it, the known files unaffected — ${stray[0]}`);
+  ok(stray.length === 1 && gateOf(/ignored browser-keys\.json, override\/lark\.json/.test(stray[0])) && gateOf(/the files read are integrations\.json, gdrive-clients\.json/.test(stray[0])) && rd.entries('gdrive').length === 1 && rd.entries('integrations').length === 1 && rd.status().errors.length === 0, `a future / mistyped file: ONE line names it, the known files unaffected — ${stray[0]}`);
   // the torn read: a ..data swap landing BETWEEN two slot reads of one reload is never published
   const tdir = cellDir({ cluster: 'present', release: 'absent' });
   const tcap = capture();
@@ -488,7 +488,7 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   await wr.start(); fs.watch = realWatch;
   project(wdir, { 'gdrive-clients.json': [g('k', NEWG, 'K')] });
   const wms = await until(() => wseen.length > 0, 4000);
-  ok(wcap.lines.some((l) => /cannot watch .* \(EMFILE\) — polling every/.test(l)) && wms >= 0 && wr.entries('gdrive')[0].clientSecret === NEWG, `the watch refused (EMFILE) is said once and the poll carries the swap (${wms} ms at a 120 ms poll) — the presets never freeze`);
+  ok(gateOf(wcap.lines.some((l) => /cannot watch .* \(EMFILE\) — polling every/.test(l))) && wms >= 0 && wr.entries('gdrive')[0].clientSecret === NEWG, `the watch refused (EMFILE) is said once and the poll carries the swap (${wms} ms at a 120 ms poll) — the presets never freeze`);
   wr.stop();
   // a swap STORM (an admin applying many times) ⇒ coalesced, the final state right and in order
   const sdir = cellDir({ cluster: 'present', release: 'absent' });
@@ -498,7 +498,7 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   const N = 40;
   for (let i = 1; i <= N; i++) { project(sdir, { 'gdrive-clients.json': [g('k', `GOCSPX-storm-${String(i).padStart(3, '0')}`, 'K')] }); await sleep(3); }
   await until(() => sseen.length && sseen[sseen.length - 1].endsWith('-040'), 4000); await sleep(200);
-  ok(sseen.length >= 1 && sseen.length <= 8 && sseen[sseen.length - 1].endsWith('-040') && sseen.every((s, i) => i === 0 || s > sseen[i - 1]), `${N} swaps in ~${N * 3} ms ⇒ ${sseen.length} notification(s) (debounced, single-flight), the last state in effect, in order`);
+  ok(sseen.length >= 1 && sseen.length <= 8 && gateOf(sseen[sseen.length - 1].endsWith('-040')) && verdictOf(sseen.every((s, i) => i === 0 || s > sseen[i - 1])), `${N} swaps in ~${N * 3} ms ⇒ ${sseen.length} notification(s) (debounced, single-flight), the last state in effect, in order`);
   sr.stop();
 }
 
@@ -507,13 +507,13 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   const srcR = fs.readFileSync(path.join(REPO, 'src/server/cluster-presets.js'), 'utf-8');
   // a value in a line: the pre-describeJsonError shape (V8 quotes the bytes around a JSON error)
   const a1 = "try { parsed = JSON.parse(text); } catch (e) { return { error: { code: 'unparseable', detail: describeJsonError(e) } }; }";
-  ok(srcR.includes(a1), 'control anchor: the JSON error is described by position');
+  ok(verdictOf(srcR.includes(a1)), 'control anchor: the JSON error is described by position');
   const leaky = M.load('src/server/cluster-presets.js', editAnchor(srcR, a1, "try { parsed = JSON.parse(text); } catch (e) { return { error: { code: 'unparseable', detail: e.message } }; }", "src/server/cluster-presets.js"), 'leaky');
   const lcap = capture(); leaky.create({ dir: cellDir({ cluster: 'malformed', release: 'absent' }), log: lcap.log });   // the table's `},]` bytes: V8 quotes the 10 bytes before the token
   ok(leaks(lcap.lines).length > 0, 'CONTROL: a copy that logs e.message prints the secret\'s bytes — the never-a-value assert is red on it');
   // a torn read published: no post-read re-check
   const a2 = "      if (after === sig) { outs = read; break; }";
-  ok(srcR.includes(a2), 'control anchor: the post-read signature re-check');
+  ok(verdictOf(srcR.includes(a2)), 'control anchor: the post-read signature re-check');
   const torn = M.load('src/server/cluster-presets.js', editAnchor(srcR, a2, "      outs = read; break;", "src/server/cluster-presets.js"), 'torn');
   const tdir = cellDir({ cluster: 'present', release: 'absent' });
   const tr = torn.create({ dir: tdir, log: capture().log, debounceMs: 20, pollMs: 100000 });
@@ -525,22 +525,22 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   ok(pub.length === 1 && pub[0][0] === SENT.cluster.gdrive && pub[0][1] === NEWL, 'CONTROL: a copy without the post-read re-check PUBLISHES a torn snapshot (gdrive from the old tree, integrations from the new) — the torn-read assert is red on it');
   // a stray file unsaid
   const a3 = "    if (key && key !== saidStrays) log.warn(";
-  ok(srcR.includes(a3), 'control anchor: the stray-file line');
+  ok(verdictOf(srcR.includes(a3)), 'control anchor: the stray-file line');
   const mute = M.load('src/server/cluster-presets.js', editAnchor(srcR, a3, "    if (false) log.warn(", "src/server/cluster-presets.js"), 'mute');
   const mcap = capture(); mute.create({ dir: cellDir({ cluster: 'present', release: 'absent' }, { 'browser-keys.json': '[]' }), log: mcap.log });
   ok(!mcap.lines.some((l) => /ignored/.test(l)), 'CONTROL: a copy that never says a stray file ignores browser-keys.json in silence — the future-key assert is red on it');
   // the consumer substituting a preset for the user's own client
   const msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf-8');
   const a4 = "    if (m.clientId) return null; // custom client on the record itself\n";
-  ok(msrc.includes(a4), 'control anchor: _driveClient yields to the record\'s own client');
+  ok(verdictOf(msrc.includes(a4)), 'control anchor: _driveClient yields to the record\'s own client');
   const subst = M.load('src/mounts.js', editAnchor(msrc, a4, '', "src/mounts.js"), 'subst');
   const prevShared = CP.setSharedPresets(CP.create({ dir: cellDir({ cluster: 'present', release: 'absent' }), log: capture().log }));
   const got = subst.MountManager._driveClient({ clientId: 'mine.apps.googleusercontent.com', clientPreset: 'k' });
   CP.setSharedPresets(prevShared);
-  ok(got && got.clientSecret === SENT.cluster.gdrive, 'CONTROL: a _driveClient without the own-client rule hands the PRESET to a record that has its own client — the user-wins assert is red on it');
+  ok(gateOf(got) && got.clientSecret === SENT.cluster.gdrive, 'CONTROL: a _driveClient without the own-client rule hands the PRESET to a record that has its own client — the user-wins assert is red on it');
   // the watch's failure freezing the presets: no poll after a refused watch
   const a5 = "    } catch (e) { log.warn(`[presets] cannot watch ${dir} (${e && e.code}) — polling every ${Math.round(pollMs / 1000)} s`); }\n    poll = setInterval(() => { reload(); }, pollMs);";
-  ok(srcR.includes(a5), 'control anchor: the poll starts whatever the watch did');
+  ok(verdictOf(srcR.includes(a5)), 'control anchor: the poll starts whatever the watch did');
   const frozen = M.load('src/server/cluster-presets.js', editAnchor(srcR, a5, "    } catch (e) { log.warn(`[presets] cannot watch ${dir} (${e && e.code})`); return; }\n    poll = setInterval(() => { reload(); }, pollMs);", "src/server/cluster-presets.js"), 'frozen');
   const fdir = cellDir({ cluster: 'present', release: 'absent' });
   const realWatch = fs.watch; fs.watch = () => { const e = new Error('EMFILE'); e.code = 'EMFILE'; throw e; };
@@ -593,14 +593,14 @@ console.log('§4 a key changes layer with identical values (B-8145)');
   const m = await migrate(CP, 'fix');
   ok(m.boot === 'release:gdrive=3+lark=1' && m.quiet === 0, `boot: every key from the release's override (${m.boot}); a re-read of the same tree fires nothing`);
   ok(m.after === 'cluster:gdrive=3+lark=1' && m.pushed === m.after, `the override gone, values identical ⇒ the summary AND the cluster-presets-updated push say "from the cluster" (${m.after} · pushed ${m.pushed})`);
-  ok(m.change && m.change.kinds.length === 0 && m.change.sources.join() === 'integrations,gdrive', `the change names no value kind and both moved sources (kinds [${m.change && m.change.kinds}] · sources [${m.change && m.change.sources}])`);
+  ok(gateOf(m.change) && m.change.kinds.length === 0 && m.change.sources.join() === 'integrations,gdrive', `the change names no value kind and both moved sources (kinds [${m.change && m.change.kinds}] · sources [${m.change && m.change.sources}])`);
   ok(!m.lines.some((l) => /\[presets\] changed/.test(l)) && m.cards === 0 && m.secret === SECRET_A, 'no journal line (nothing was added, removed or rotated) and no card re-derive — the same values stay in effect');
-  ok(m.back === 'cluster:lark=1 release:gdrive=3' && m.same, `an equal override returning moves the summary back (${m.back}); the same tree again fires nothing`);
+  ok(m.back === 'cluster:lark=1 release:gdrive=3' && verdictOf(m.same), `an equal override returning moves the summary back (${m.back}); the same tree again fires nothing`);
   ok(m.shadowed === SECRET_A && m.rotated === SECRET_B, 'a cluster rotation of org1 is SHADOWED while the equal override is projected (the field symptom) and in effect once the override is gone');
   // CONTROL: the reader before B-8145 — the values compared, the layers not
   const srcR = fs.readFileSync(path.join(REPO, 'src/server/cluster-presets.js'), 'utf-8');
   const a6 = '    const sources = [...P.KINDS, FLEET].filter((k) => attributionOf(merged[k]) !== attributionOf(next[k]));';
-  ok(srcR.includes(a6), 'control anchor: the attribution comparison');
+  ok(verdictOf(srcR.includes(a6)), 'control anchor: the attribution comparison');
   const valuesOnly = M.load('src/server/cluster-presets.js', editAnchor(srcR, a6, '    const sources = [];', "src/server/cluster-presets.js"), 'valuesonly');
   const c = await migrate(valuesOnly, 'ctl');
   ok(c.after === 'release:gdrive=3+lark=1' && c.pushed === null, `CONTROL: a copy that compares the values only keeps the summary on "release" after the override is gone and pushes nothing (${c.after}) — the asserts above are red on it`);
@@ -631,7 +631,7 @@ console.log('§4 a key changes layer with identical values (B-8145)');
   const NEW = { VIBESPACE_INTEGRATION_LLM_PROVIDER: 'openrouter', VIBESPACE_INTEGRATION_LLM_APIKEY: KEY_NEW, VIBESPACE_INTEGRATION_LLM_MODEL: 'typesafe/jev-router' };
   const OLD = { VIBESPACE_INTEGRATION_DECISION_API_PROVIDER: 'openai', VIBESPACE_INTEGRATION_DECISION_API_APIKEY: KEY_OLD, VIBESPACE_INTEGRATION_DECISION_API_MODEL: 'gpt-6-luna-mini' };
   const a = mk(NEW), s1 = a.eng.status(), res = a.st.resolveIntegration('llm');
-  ok(res.source === 'cluster' && s1.configured && s1.provider === 'openrouter' && s1.model === 'typesafe/jev-router' && s1.keySource === 'cluster' && !JSON.stringify(s1).includes(KEY_NEW), `the new prefix resolves as the cluster default and the engine reads it through the store — the preset's MODEL is the judging model while the cluster's key is in use, the key never in its status (${res.source}, ${s1.provider}, ${s1.model})`);
+  ok(res.source === 'cluster' && gateOf(s1.configured) && s1.provider === 'openrouter' && s1.model === 'typesafe/jev-router' && s1.keySource === 'cluster' && !JSON.stringify(s1).includes(KEY_NEW), `the new prefix resolves as the cluster default and the engine reads it through the store — the preset's MODEL is the judging model while the cluster's key is in use, the key never in its status (${res.source}, ${s1.provider}, ${s1.model})`);
   ok(!a.st.publicView('llm').fields.some((f) => f.key === 'model') && a.st.publicView('llm').values.model === undefined, 'the card shows provider + key only — the preset\'s model never reaches the card');
   const b = mk(OLD), s2 = b.eng.status(), r2 = b.st.resolveIntegration('llm');
   ok(r2.source === 'cluster' && r2.values.apiKey === KEY_OLD && s2.provider === 'openai' && s2.model === 'gpt-6-luna-mini', `LEGACY: the OLD prefix alone still resolves the row (the fleet's presets keep working) — provider, key and the model it chose (${r2.source}, ${s2.provider}, ${s2.model})`);
@@ -674,9 +674,9 @@ console.log('§5 fleet.json — the fleet\'s relay page rides the presets');
   ok(mC.facts.relayUrl === RELAY1 && mC.layerOf.relayUrl === 'cluster' && mR.facts.relayUrl === MINE && mR.layerOf.relayUrl === 'release' && mE.facts.relayUrl === RELAY1 && mE.layerOf.relayUrl === 'cluster' && mB.facts.relayUrl === '' && mB.layerOf.relayUrl === 'release',
     'mergeFleet per FIELD: the release\'s field wins (its "" = none), a release file naming no field keeps the cluster\'s');
   const mN = PL.mergeFleet({ cluster: {}, release: null });
-  ok(mN && !('relayUrl' in mN.facts), 'a present fleet.json naming no relayUrl: the field is ABSENT (not "")');
+  ok(gateOf(mN) && !('relayUrl' in mN.facts), 'a present fleet.json naming no relayUrl: the field is ABSENT (not "")');
   ok(PL.diffFleet(mC, PL.mergeFleet({ cluster: { relayUrl: RELAY1 } })).length === 0 && PL.diffFleet(mC, mR).join() === 'relayUrl' && PL.diffFleet(mN, mB).join() === 'relayUrl' && PL.diffFleet(null, mC).join() === 'relayUrl', 'diffFleet: equal ⇒ [], a moved value / absent vs "" / null vs set ⇒ the field');
-  ok(PL.fleetWords(['relayUrl'], mR) === `relay page changed (now ${MINE})` && PL.fleetWords(['relayUrl'], mB) === 'relay page changed (now none)' && /unset — the environment is the fallback/.test(PL.fleetWords(['relayUrl'], null)), 'fleetWords: «relay page changed (now <page> | none | unset — the environment is the fallback)»');
+  ok(PL.fleetWords(['relayUrl'], mR) === `relay page changed (now ${MINE})` && PL.fleetWords(['relayUrl'], mB) === 'relay page changed (now none)' && verdictOf(/unset — the environment is the fallback/.test(PL.fleetWords(['relayUrl'], null))), 'fleetWords: «relay page changed (now <page> | none | unset — the environment is the fallback)»');
 
   // ORCH over the kubelet's shape
   const dir = path.join(ROOT, 'fleet');
@@ -685,7 +685,7 @@ console.log('§5 fleet.json — the fleet\'s relay page rides the presets');
   const cap = capture();
   const r = CP.create({ dir, log: cap.log, debounceMs: 30, pollMs: 250 });
   ok(JSON.stringify(r.fleet()) === JSON.stringify({ relayUrl: RELAY1 }) && r.status().present.fleet === true, 'boot read: fleet() = the cluster\'s facts (a copy), status().present.fleet');
-  ok(cap.lines.length === 1 && cap.lines[0].includes(`relay page ${RELAY1}`) && !cap.lines.some((l) => /ignored/.test(l)), `boot says the relay page beside the rows; fleet.json is NOT a stray: ${cap.lines[0]}`);
+  ok(cap.lines.length === 1 && gateOf(cap.lines[0].includes(`relay page ${RELAY1}`)) && !cap.lines.some((l) => /ignored/.test(l)), `boot says the relay page beside the rows; fleet.json is NOT a stray: ${cap.lines[0]}`);
   const f0 = r.fleet(); f0.relayUrl = 'mutated';
   ok(r.fleet().relayUrl === RELAY1, 'fleet() hands out a copy');
   const changes = []; r.onChange((c) => changes.push(c));
@@ -694,10 +694,10 @@ console.log('§5 fleet.json — the fleet\'s relay page rides the presets');
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY2 } });
   await until(() => changes.length >= 1, 3000);
   const ln = cap.lines.filter((l) => /\[presets\] changed/.test(l));
-  ok(changes.length === 1 && changes[0].kinds.join() === 'fleet' && r.fleet().relayUrl === RELAY2 && ln.length === 1 && ln[0].endsWith(`relay page changed (now ${RELAY2})`), `a Secret edit of fleet.json is seen ONCE, the change names kind fleet, ONE journal line: ${ln[0]}`);
+  ok(changes.length === 1 && changes[0].kinds.join() === 'fleet' && r.fleet().relayUrl === RELAY2 && ln.length === 1 && verdictOf(ln[0].endsWith(`relay page changed (now ${RELAY2})`)), `a Secret edit of fleet.json is seen ONCE, the change names kind fleet, ONE journal line: ${ln[0]}`);
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY2 }, 'override/fleet.json': { relayUrl: MINE } });
   await until(() => changes.length >= 2, 3000);
-  ok(r.fleet().relayUrl === MINE && changes[1].kinds.join() === 'fleet' && changes[1].sources.includes('fleet'), 'the release\'s override/fleet.json wins over the cluster\'s (like the rows)');
+  ok(r.fleet().relayUrl === MINE && changes[1].kinds.join() === 'fleet' && verdictOf(changes[1].sources.includes('fleet')), 'the release\'s override/fleet.json wins over the cluster\'s (like the rows)');
   const n2 = changes.length;
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY2 }, 'override/fleet.json': { relayUrl: MINE } });
   await r.reload();                                   // single flight: answers once the swapped tree has been read
@@ -705,11 +705,11 @@ console.log('§5 fleet.json — the fleet\'s relay page rides the presets');
   cap.lines.length = 0;
   project(dir, { ...ROWS, 'fleet.json': '{"relayUrl": "https://x/",', 'override/fleet.json': { relayUrl: MINE } });
   await until(() => cap.lines.some((l) => /could not be read/.test(l)), 3000);
-  ok(r.fleet().relayUrl === MINE && cap.lines.filter((l) => /fleet\.json could not be read \(unparseable/.test(l)).length === 1 && r.status().errors.some((e) => e.file === 'fleet.json' && e.kept === true), 'a malformed fleet.json keeps the previous facts, ONE line, the typed error (kept)');
+  ok(r.fleet().relayUrl === MINE && cap.lines.filter((l) => /fleet\.json could not be read \(unparseable/.test(l)).length === 1 && verdictOf(r.status().errors.some((e) => e.file === 'fleet.json' && e.kept === true)), 'a malformed fleet.json keeps the previous facts, ONE line, the typed error (kept)');
   cap.lines.length = 0;
   project(dir, { ...ROWS, 'fleet.json': '[]' });
   await until(() => cap.lines.some((l) => /not-an-object/.test(l)), 3000);
-  ok(cap.lines.some((l) => /fleet\.json could not be read \(not-an-object: the top level must be a JSON object\)/.test(l)), 'a fleet.json whose top level is not an object: named not-an-object');
+  ok(verdictOf(cap.lines.some((l) => /fleet\.json could not be read \(not-an-object: the top level must be a JSON object\)/.test(l))), 'a fleet.json whose top level is not an object: named not-an-object');
   cap.lines.length = 0;
   const BAD = 'http://admin.fleet.example.test/relay/?k=SECRETISH';
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: BAD } });
@@ -717,18 +717,18 @@ console.log('§5 fleet.json — the fleet\'s relay page rides the presets');
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: BAD }, 'integrations.json': '[]' });
   await r.reload();
   const badL = cap.lines.filter((l) => /not a relay page address/.test(l));
-  ok(badL.length === 1 && !badL[0].includes('SECRETISH') && /\[presets\] fleet\.json: relayUrl is not a relay page address/.test(badL[0]), `a relayUrl that is no relay page address is said ONCE across swaps, never its value: ${badL[0]}`);
+  ok(badL.length === 1 && !badL[0].includes('SECRETISH') && verdictOf(/\[presets\] fleet\.json: relayUrl is not a relay page address/.test(badL[0])), `a relayUrl that is no relay page address is said ONCE across swaps, never its value: ${badL[0]}`);
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY1 } });
   await until(() => r.fleet() && r.fleet().relayUrl === RELAY1, 3000);
   cap.lines.length = 0;
   project(dir, { ...ROWS });
   await until(() => r.fleet() === null, 3000);
-  ok(r.fleet() === null && r.status().present.fleet === false && cap.lines.some((l) => /relay page changed \(now unset — the environment is the fallback\)/.test(l)), 'the Secret lost its fleet key ⇒ fleet() null (the caller\'s fallback), said');
+  ok(r.fleet() === null && r.status().present.fleet === false && verdictOf(cap.lines.some((l) => /relay page changed \(now unset — the environment is the fallback\)/.test(l))), 'the Secret lost its fleet key ⇒ fleet() null (the caller\'s fallback), said');
   r.stop();
   // CONTROL: a merge reading the layers in the wrong order — the cluster wins over the release
   const srcP = fs.readFileSync(path.join(REPO, 'src/preset-layers.js'), 'utf-8');
   const a5 = "    for (const k of FLEET_FIELDS) if (fleetValueOk(k, f[k])) { facts[k] = k === 'browserEngine' ? parseBrowserEngineFact(f[k]) : f[k]; layerOf[k] = layer; }"; // lane engine-plugin: the write per field, + the engine fact
-  ok(srcP.includes(a5), 'control anchor: the per-field write');
+  ok(verdictOf(srcP.includes(a5)), 'control anchor: the per-field write');
   const rev = M.load('src/preset-layers.js', editAnchor(srcP, a5, "    for (const k of FLEET_FIELDS) if (fleetValueOk(k, f[k]) && !(k in facts)) { facts[k] = k === 'browserEngine' ? parseBrowserEngineFact(f[k]) : f[k]; layerOf[k] = layer; }", "src/preset-layers.js"), 'fleet-first-wins');
   ok(rev.mergeFleet({ cluster: { relayUrl: RELAY1 }, release: { relayUrl: MINE } }).facts.relayUrl === RELAY1, 'CONTROL: a merge where the first layer read keeps its field lets the CLUSTER win — the override assert above is red on it');
 }
@@ -739,11 +739,11 @@ console.log('§6 fleet.json browserEngine — the fleet\'s custom browser kernel
   const EID = 'vibespace.custom-browser', SHA = 'cd'.repeat(32);
   const full = { plugin: EID, default: true, source: { git: 'git@git.example.test:fleet/k.git', ref: 'main' }, kernel: { url: 'https://dl.example.test/k.tar.zst', sha256: SHA.toUpperCase() } };
   const p = PL.parseFleet({ browserEngine: full, relayUrl: ' https://admin.fleet.example.test/relay/ ' });
-  ok(p.browserEngine && p.browserEngine.plugin === EID && p.browserEngine.default === true && p.browserEngine.kernel.sha256 === SHA && p.relayUrl === 'https://admin.fleet.example.test/relay/', 'parseFleet: browserEngine normalized beside relayUrl (the sha256 lower-cased)', p);
+  ok(gateOf(p.browserEngine) && p.browserEngine.plugin === EID && p.browserEngine.default === true && p.browserEngine.kernel.sha256 === SHA && p.relayUrl === 'https://admin.fleet.example.test/relay/', 'parseFleet: browserEngine normalized beside relayUrl (the sha256 lower-cased)', p);
   const bad = [PL.parseFleet({ browserEngine: { plugin: 'Not An Id', default: true } }), PL.parseFleet({ browserEngine: 'yes' }), PL.parseFleet({ browserEngine: { default: true } })];
   const odd = PL.parseFleet({ browserEngine: { plugin: EID, default: 'true', kernel: { sha256: 'xyz' }, source: 7 } }).browserEngine;
   const long = PL.parseFleet({ browserEngine: { plugin: EID, kernel: { sha256: 'a'.repeat(65), url: 7 } } }).browserEngine;
-  ok(bad.every((x) => !('browserEngine' in x)) && odd.default === false && odd.kernel.sha256 === 'xyz' && odd.source.git === '' && long.kernel.sha256 === 'a'.repeat(65) && long.kernel.url === '7',
+  ok(gateOf(bad.every((x) => !('browserEngine' in x))) && odd.default === false && odd.kernel.sha256 === 'xyz' && odd.source.git === '' && long.kernel.sha256 === 'a'.repeat(65) && long.kernel.url === '7',
     'a value of another shape is not named (no plugin id ⇒ no fact); default only when true; a malformed source reads empty — the KERNEL fields are kept AS NAMED (engine-distribution round 3): a malformed sha256 is the install\'s refusal by name (engine_sha_malformed), never blanked into the package\'s, nor clipped to 64 into a valid-looking pin', { bad, odd, long });
   const mC = PL.mergeFleet({ cluster: { browserEngine: p.browserEngine }, release: null });
   const mR = PL.mergeFleet({ cluster: { browserEngine: p.browserEngine }, release: PL.parseFleet({ browserEngine: { plugin: EID, default: false } }) });
@@ -756,14 +756,14 @@ console.log('§6 fleet.json browserEngine — the fleet\'s custom browser kernel
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: 'https://admin.fleet.example.test/relay/', browserEngine: full } });
   const cap = capture();
   const r = CP.create({ dir, log: cap.log, debounceMs: 30, pollMs: 250 });
-  ok(r.fleet() && r.fleet().browserEngine && r.fleet().browserEngine.default === true && cap.lines.some((l) => l.includes(`browser engine ${EID} (the default of new browsers)`)) && !cap.lines.some((l) => /git@|dl\.example/.test(l)), `boot read: fleet() carries the engine fact; the boot line names it (never its addresses): ${cap.lines[0]}`);
+  ok(gateOf(r.fleet()) && gateOf(r.fleet().browserEngine) && r.fleet().browserEngine.default === true && gateOf(cap.lines.some((l) => l.includes(`browser engine ${EID} (the default of new browsers)`))) && !cap.lines.some((l) => /git@|dl\.example/.test(l)), `boot read: fleet() carries the engine fact; the boot line names it (never its addresses): ${cap.lines[0]}`);
   const changes = []; r.onChange((c) => changes.push(c));
   await r.start();
   cap.lines.length = 0;
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: 'https://admin.fleet.example.test/relay/', browserEngine: { ...full, default: false } } });
   await until(() => changes.length >= 1, 3000);
   const ln = cap.lines.filter((l) => /\[presets\] changed/.test(l));
-  ok(changes.length === 1 && r.fleet().browserEngine.default === false && ln.length === 1 && ln[0].endsWith(`browser engine changed (now ${EID}, not the default)`), 'a flip of the Secret is seen ONCE, live (no restart), said by plugin id + whether it is the default', ln);
+  ok(changes.length === 1 && r.fleet().browserEngine.default === false && ln.length === 1 && verdictOf(ln[0].endsWith(`browser engine changed (now ${EID}, not the default)`)), 'a flip of the Secret is seen ONCE, live (no restart), said by plugin id + whether it is the default', ln);
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: 'https://admin.fleet.example.test/relay/' } });
   await until(() => changes.length >= 2, 3000);
   ok(!('browserEngine' in r.fleet()) && r.fleet().relayUrl === 'https://admin.fleet.example.test/relay/', 'the key dropped ⇒ the fact absent (the policy falls back to the user\'s value or the default), the relay page untouched');
@@ -814,11 +814,11 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY, browserEngine: pin(S2) } });
   await until(() => changes.length >= 1, 3000);
   const ln = cap.lines.filter((l) => /\[presets\] changed/.test(l));
-  ok(changes.length === 1 && changes[0].kinds.join() === 'fleet' && r.fleet().browserEngine.source.ref === S2 && ln.length === 1 && ln[0].endsWith(`browser engine changed (now ${EID}, the default of new browsers)`) && !/git\.fleet|a1a1|b2b2/.test(ln[0]),
+  ok(changes.length === 1 && changes[0].kinds.join() === 'fleet' && r.fleet().browserEngine.source.ref === S2 && ln.length === 1 && gateOf(ln[0].endsWith(`browser engine changed (now ${EID}, the default of new browsers)`)) && !/git\.fleet|a1a1|b2b2/.test(ln[0]),
     'the admin\'s new pin in the cluster Secret is ONE change event (kind fleet), live, the field named «browser engine changed» — never its address or sha in the journal', ln);
   project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY, browserEngine: pin(S2) }, 'override/fleet.json': { browserEngine: pin(S2) } });
   await until(() => changes.length >= 2, 3000);
-  ok(changes.length === 2 && changes[1].kinds.length === 0 && changes[1].sources.includes('fleet') && !cap.lines.some((l, i) => i > 0 && /\[presets\] changed/.test(l) && l !== ln[0]),
+  ok(changes.length === 2 && changes[1].kinds.length === 0 && gateOf(changes[1].sources.includes('fleet')) && !cap.lines.some((l, i) => i > 0 && /\[presets\] changed/.test(l) && l !== ln[0]),
     'an override equal to the cluster\'s pin moves only the layer (sources: fleet, no kind) — no «changed» line, so the engine job sees no new pin', { kinds: changes[1] && changes[1].kinds, sources: changes[1] && changes[1].sources });
   r.stop();
 }
@@ -844,7 +844,7 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   mixedStore.setIntegration('dropline', { relayUrl: OWN });
   const onePair = (q) => q.clientId === '' && q.preset === false && q.relayUrl === OWN && q.via === 'own-https' && /^https:\/\/hub\.example\.ts\.net\//.test(q.redirectUri || '');
   const m = planOf(mixedStore);
-  ok(onePair(m), 'B-e0d1: ONE PAIR, NEVER MIXED — the person\'s own relay page beside a preset gives the person\'s values alone: no preset client id, preset false', JSON.stringify(m));
+  ok(verdictOf(onePair(m)), 'B-e0d1: ONE PAIR, NEVER MIXED — the person\'s own relay page beside a preset gives the person\'s values alone: no preset client id, preset false', JSON.stringify(m));
   ok(!onePair({ ...m, clientId: CID, preset: true }), 'CONTROL: a mixed answer (the preset\'s client id beside the person\'s page — a per-field merge) fails that leg');
   // B-1e9a (1): AN apiKey-ONLY PRESET KEEPS ITS KEY THROUGH CONNECT — the first Connect self-registers a client; written as the
   // person's row it outranked the WHOLE preset (resolvePrecedence: one pair, never merged) and the cluster's key stopped resolving.
@@ -864,7 +864,7 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
     return { started: s1.ok && s2.ok, regs: w.regs(), kept: (w.tok() || {}).registeredClientId || null, before: before.source + ':' + !!(before.values || {}).apiKey, after: after.source + ':' + ((after.values || {}).apiKey === KEY) };
   };
   const ka = await keyAfter(DO, 'keyonly');
-  ok(ka.started && ka.before === 'cluster:true' && ka.after === 'cluster:true' && ka.regs === 1 && /^selfregClient01$/.test(ka.kept || ''),
+  ok(gateOf(ka.started) && ka.before === 'cluster:true' && ka.after === 'cluster:true' && ka.regs === 1 && verdictOf(/^selfregClient01$/.test(ka.kept || '')),
     'B-1e9a: an apiKey-only cluster preset — two Connects: ONE registration, the hub\'s client kept beside the tokens, and the cluster\'s key STILL resolves (never the person\'s row over the preset)', ka);
   const DOSRC = fs.readFileSync(path.join(REPO, 'src/server/dropline-oauth.js'), 'utf8');
   const oldWrite = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "        if (plan.source !== 'cluster' && st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });", "        if (st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });", 'B-1e9a: the person\'s row written over a preset'), 'dl-oldwrite');   // stale-pins: kept — a RED control: the old road (the person's row written over a preset) restored on purpose
@@ -878,7 +878,7 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
     return { via: plan.via, redirectUri: plan.redirectUri, why, ok: r.ok, code: r.connectWhy || null, routeCode: r.why || null, message: r.message || '', regs: w.regs() };
   };
   const rl = await relayLess(DO, 'norelay');
-  ok(rl.via === null && rl.redirectUri === null && rl.why === 'preset-no-relay' && rl.ok === false && rl.code === 'preset-no-relay' && rl.routeCode === 'preset-no-relay' && /Dropline preset a relayUrl \(or the fleet a relay page\)/.test(rl.message) && rl.regs === 0,
+  ok(rl.via === null && rl.redirectUri === null && rl.why === 'preset-no-relay' && rl.ok === false && rl.code === 'preset-no-relay' && rl.routeCode === 'preset-no-relay' && gateOf(/Dropline preset a relayUrl \(or the fleet a relay page\)/.test(rl.message)) && rl.regs === 0,
     'B-1e9a: a fleet preset with a client id and NO relay page (none of its own, none of the fleet\'s) ⇒ no Connect (never the pod\'s own https for the fleet\'s client), nothing registered, the reason «preset-no-relay» names the preset\'s relayUrl (or the fleet\'s page) — words true on every deploy road', rl);
   // …the FLEET's sign-in relay page (fleet.json relayUrl; here the chart's last-release env form) serves a preset that names none
   const FR = 'https://fleet-relay.example.test/relay/';
@@ -903,7 +903,7 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   ok(hf.via === null && hf.redirectUri === null && hf.ok === false && hf.code === 'preset-no-relay' && hf.regs === 0, 'B-1e9a cure: a PLAIN-HTTP fleet relay page is no page by the owning rule — the Connect refuses by name (preset-no-relay), nothing registered, never http handed to the vendor', hf);
   const rawFleet = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "      ? relayPick({ fleet: String(safeCall(() => (st && typeof st.fleetRelayUrl === 'function' ? st.fleetRelayUrl() : ''), '') || ''), preset: String(preset.relayUrl || '') }).url\n", "      ? (String(preset.relayUrl || '') || String(safeCall(() => st.fleetRelayUrl(), '') || ''))\n", 'B-1e9a cure: the fleet page read raw (a second copy of the rule)'), 'dl-rawfleet');   // stale-pins: kept — a RED control: the raw read restored on purpose
   const hfr = await httpFleet(rawFleet, 'httpfleet-red');
-  ok(hfr.via === 'relay' && /^http:\/\//.test(hfr.redirectUri || ''), 'RED control: the fleet page read RAW (a second copy of the rule) hands the vendor a plain-http redirect', hfr);
+  ok(hfr.via === 'relay' && verdictOf(/^http:\/\//.test(hfr.redirectUri || '')), 'RED control: the fleet page read RAW (a second copy of the rule) hands the vendor a plain-http redirect', hfr);
   // B-1e9a cure: a LOCKED vault at Connect over an apiKey-only preset — the sealed tokens file is read by start(): refused BY NAME
   // (vault-locked) — the parent answered an unnamed 500 with the store's raw sentence (the RED below)
   const lockedAt = async (mod, tag) => {
@@ -995,7 +995,7 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   const keptOf = (mod) => mod.create({ client: {}, flows: {}, integrations: () => keptSt, instanceUrl: () => '', tokens: {} }).presetChoices();
   ok(keptOf(DO) === null, 'B-1e9a cure 3: several settings but a default the store can give (a saved choice still provided) ⇒ no choices — the one press heals it', { kept: keptOf(DO) });
   const anyMany = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "v && !v.clusterAvailable && Array.isArray(v.clusterOptions)", "v && Array.isArray(v.clusterOptions)", 'B-1e9a cure 3: choices whenever several'), 'dl-anymany');
-  ok(Array.isArray(keptOf(anyMany)) && keptOf(anyMany).length === 2, 'RED control: choices whenever there are several would draw a picker where the one press works', { kept: keptOf(anyMany) });
+  ok(gateOf(Array.isArray(keptOf(anyMany))) && keptOf(anyMany).length === 2, 'RED control: choices whenever there are several would draw a picker where the one press works', { kept: keptOf(anyMany) });
   // cure 3 (the read): on the person's road a lock landing DURING the register still keeps the registered client id — the
   // person's row (it needs no vault) is written before the sealed record is read again; the refusal is by name
   const ownLockMid = async (mod, tag) => {
@@ -1040,7 +1040,7 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   const ld = lockedDisc(DC);
   ok(ld.code === 'vault-locked' && ld.cleared === 0 && ld.wrote === 0, 'B-1e9a cure: a Disconnect while the vault is locked ⇒ refused by name (vault-locked) — the sealed sign-in and the kept registration untouched', ld);
   const cy = await carry(DC);
-  ok(cy.afterSignIn.access && cy.afterSignIn.kept === 'selfregClient01' && !cy.afterDisconnect.access && cy.afterDisconnect.kept === 'selfregClient01' && cy.afterDisconnect.connected === false,
+  ok(gateOf(cy.afterSignIn.access) && cy.afterSignIn.kept === 'selfregClient01' && !cy.afterDisconnect.access && cy.afterDisconnect.kept === 'selfregClient01' && cy.afterDisconnect.connected === false,
     'B-1e9a: the real client — the sign-in keeps the hub\'s registered client beside the pair; Disconnect forgets the sign-in (not connected) and keeps the registration', cy);
   const DCSRC = fs.readFileSync(path.join(REPO, 'src/server/dropline-client.js'), 'utf8');
   const noCarry = M.load('src/server/dropline-client.js', anchored(DCSRC, ", registeredClientId: (pairNow() || {}).registeredClientId || null });", " });", 'B-1e9a: the sign-in drops the registration'), 'dl-nocarry');
@@ -1069,6 +1069,6 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   quiet.lines.length = 0; empty.stop?.();
 }
 
-for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(verdictOf(row.pass), row.name, row.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

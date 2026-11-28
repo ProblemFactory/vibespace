@@ -24,7 +24,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AR = require(path.join(REPO, 'src/agent-routes.js'));
 const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 const B = (t) => Buffer.byteLength(String(t || ''), 'utf-8');
 const norm = (t) => String(t).replace(/\s+/g, ' ').trim();
 
@@ -41,7 +41,7 @@ function judge(c) {
 console.log('— ① the census (bytes per block)');
 const c = census();
 print(c, (l) => console.log('    ' + l));
-ok(c.shapes.length === 3 && c.shapes.every((s) => s.blocks.every(([, b]) => b > 0)), 'three shapes, every block rendered (non-vacuous)');
+ok(c.shapes.length === 3 && verdictOf(c.shapes.every((s) => s.blocks.every(([, b]) => b > 0))), 'three shapes, every block rendered (non-vacuous)');
 
 console.log('— ② the tools intro ≤ 4 096 B in every variant');
 const T = { status: true, ask: true, task: true, jobs: true };
@@ -57,7 +57,7 @@ for (const reach of ['read', 'request']) {
   const cr = census({ channels: reach });
   print(cr, (l) => console.log('    ' + l));
   const crBad = judge(cr);
-  ok(crBad.length === 0 && cr.shapes.every((s, i) => s.total > c.shapes[i].total || s.name === 'no Task Group') && cr.reminder.one > 0 && cr.reminder.multi < cr.cap, `channels reach '${reach}': every shape still fits whole with ≥ ${ROOM_MIN} B room (the paragraph rides the group shapes), the reminder ${cr.reminder.one} B${crBad.length ? ' — ' + crBad.join('; ') : ''}`);
+  ok(crBad.length === 0 && gateOf(cr.shapes.every((s, i) => s.total > c.shapes[i].total || s.name === 'no Task Group')) && cr.reminder.one > 0 && cr.reminder.multi < cr.cap, `channels reach '${reach}': every shape still fits whole with ≥ ${ROOM_MIN} B room (the paragraph rides the group shapes), the reminder ${cr.reminder.one} B${crBad.length ? ' — ' + crBad.join('; ') : ''}`);
 }
 
 console.log('— ③b the budget is the same wherever the scratch dir is (B-52fa)');
@@ -73,7 +73,7 @@ console.log('— ③b the budget is the same wherever the scratch dir is (B-52fa
   const totals = (x) => x.shapes.map((s) => s.total).join(' / ');
   // a long real path may make the planner step a row down (it budgets on the real head) — the measured shape can then only SHRINK:
   // the law is «the budget never reds by where the scratch dir is», never «byte-identical»
-  ok(FIXTURE_ROOT.length === 28 && longDir.length > 80 && judge(atLong).length === 0 && atLong.shapes.every((s, i) => s.total <= c.shapes[i].total),
+  ok(FIXTURE_ROOT.length === 28 && longDir.length > 80 && judge(atLong).length === 0 && verdictOf(atLong.shapes.every((s, i) => s.total <= c.shapes[i].total)),
     `with TMPDIR ${longDir.length} chars long every shape still fits whole and none measures more than the default's (${totals(atLong)} vs ${totals(c)}) — the fixture dir is ONE fixed-length stand-in`);
   ok(rawLong.shapes[2].total > rawHere.shapes[2].total,
     `CONTROL: measured on the REAL paths the three groups grow with the scratch dir's length (${rawHere.shapes[2].total} → ${rawLong.shapes[2].total} B) — what made a long TMPDIR red`);
@@ -122,11 +122,11 @@ console.log('— ③c a LONG real path steps a Context row down — and the row 
   const saysOwn = (line) => !!(DEPTH_WORDS[lv] && saysAs(line, lv) && othersIn(line).length === 0);
   // control: the same line with another level's words in place of its own is refused (a pin that cannot tell them apart pins nothing)
   const wrongLv = lv === 'index' ? 'names' : 'index', wrong = DEPTH_WORDS[lv] ? lLine.replace(`— told as ${DEPTH_WORDS[lv]} instead`, `— told as ${DEPTH_WORDS[wrongLv]} instead`) : '';
-  ok(saysOwn(lLine) && wrong !== lLine && !saysOwn(wrong),
+  ok(gateOf(saysOwn(lLine)) && wrong !== lLine && !saysOwn(wrong),
     `③c the line says «told as ${DEPTH_WORDS[lv] || '?'} instead» — the words of the row's own level («${lv || '?'}»), no other level's (${othersIn(lLine).join(' ') || 'none'}); control: the line with «${DEPTH_WORDS[wrongLv]}» in their place is refused`);
   // …and the level itself: below «file names» there is only «the path and note only» (the adversarial read: the words agreeing with
   // rows[0].level did not pin the level — only the byte bound kept an upward step out), and that step names the door to every file
-  ok(lv === 'note' && lLine.includes('told as the path and note only instead; `vibespace-task show --full` lists every file]'),
+  ok(lv === 'note' && verdictOf(lLine.includes('told as the path and note only instead; `vibespace-task show --full` lists every file]')),
     `③c the step is DOWN to «the path and note only» (level «${lv || '?'}»), and its line names the door to every file (\`vibespace-task show --full\`)`);
 }
 
@@ -136,10 +136,10 @@ const section = TaskGroupManager.prototype._toolsSectionParts.call({}, '', false
 const chSection = ['read', 'request'].map((reach) => TaskGroupManager.prototype._toolsSectionParts.call({}, '', false, { ...T, channels: reach }).join('\n')).join('\n');
 const pointers = [...(intro + '\n' + section + '\n' + chSection + '\n' + AR.perTurnToolsLine({ ...T, channels: 'read' })).matchAll(/vibespace-docs ([a-z]+)/g)].map((m) => m[1]);
 const topics = Object.keys(AR.AGENT_DOC_TOPICS || {});
-ok(topics.length >= 10 && pointers.length >= 10 && pointers.every((t) => topics.includes(t)), `${pointers.length} pointers, each a topic vibespace-docs serves (${[...new Set(pointers)].join(' ')})`);
+ok(topics.length >= 10 && pointers.length >= 10 && verdictOf(pointers.every((t) => topics.includes(t))), `${pointers.length} pointers, each a topic vibespace-docs serves (${[...new Set(pointers)].join(' ')})`);
 const surfaces = ['status', 'ask', 'jobs', 'msg', 'browser', 'window', 'design', 'pages', 'exit', 'task', 'channels'];
-ok(surfaces.every((t) => pointers.includes(t)), `every surface has its pointer (${surfaces.filter((t) => !pointers.includes(t)).join(' ') || 'none missing'})`);
-ok(['status', 'ask', 'jobs', 'msg', 'task'].every((t) => new RegExp('vibespace-docs ' + t).test(section)), 'the group Reporting-back section points at task / status / ask / jobs / msg');
+ok(verdictOf(surfaces.every((t) => pointers.includes(t))), `every surface has its pointer (${surfaces.filter((t) => !pointers.includes(t)).join(' ') || 'none missing'})`);
+ok(verdictOf(['status', 'ask', 'jobs', 'msg', 'task'].every((t) => new RegExp('vibespace-docs ' + t).test(section))), 'the group Reporting-back section points at task / status / ask / jobs / msg');
 
 console.log('— ⑤ every dropped line lives in its manual');
 const FX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/prompt-budget-moved.json'), 'utf-8'));
@@ -147,24 +147,24 @@ const manual = (t) => [].concat(AR.AGENT_DOC_TOPICS[t]).map((f) => fs.readFileSy
 const lost = FX.moved.filter((m) => !norm(manual(m.topic)).includes(m.text));
 ok(FX.moved.length >= 30 && lost.length === 0, `${FX.moved.length} dropped lines, each found in its manual${lost.length ? ' — missing: ' + lost.map((m) => `${m.topic}: ${m.text.slice(0, 60)}`).join(' | ') : ''}`);
 const allIntros = norm(variants.map((f) => AR.sessionToolsIntro(T, f)).join('\n') + '\n' + section + '\n' + chSection);
-ok(FX.moved.every((m) => !allIntros.includes(m.text)), 'none of them rides the intro or the section any more');
+ok(verdictOf(FX.moved.every((m) => !allIntros.includes(m.text))), 'none of them rides the intro or the section any more');
 
 console.log('— ⑥ CONTROL: the intro\'s dropped lines put back ⇒ the judge is red');
 const restored = (Tx, f) => AR.sessionToolsIntro(Tx, f).replace('\n</vibespace-session-tools>', '\n' + FX.moved.filter((m) => m.from === 'intro').map((m) => m.text).join('\n') + '\n</vibespace-session-tools>');
 const cc = census({ intro: restored });
 const cbad = judge(cc);
-ok(cc.introBytes > INTRO_MAX && cbad.some((b) => /^no Task Group/.test(b)), `the old-size intro (${cc.introBytes} B) fails the same judge: ${cbad.join('; ')}`);
+ok(cc.introBytes > INTRO_MAX && verdictOf(cbad.some((b) => /^no Task Group/.test(b))), `the old-size intro (${cc.introBytes} B) fails the same judge: ${cbad.join('; ')}`);
 
 console.log('— ⑦ a busy group\'s update: the digest and the others\'-backlog line inside the 9 600 B law (lane injection-relevance)');
 const ups = updateShapes();
 for (const u of ups) console.log(`    ${u.name.padEnd(32)} ${String(u.bytes).padStart(5)} B`);
 const [p90, burst, three] = ups;
-ok(ups.length === 3 && ups.every((u) => /- New activity \(/.test(u.text) && /- Backlog: 3 parked \(1 HIGH \[B-[0-9a-f]+\]\) by others since your last update/.test(u.text)), 'three update shapes, each with its activity section and the others\'-backlog line (non-vacuous)');
-ok(/ logged \d+ more/.test(burst.text) && /… \d+ more from \d+ other sessions/.test(burst.text) && /, \d+ of them yours — not repeated\)/.test(burst.text) && !/more lines —/.test(burst.text), 'the burst names the sessions it leaves out (≤ 6 + the overflow), counts the member\'s own lines, and pops nothing');
+ok(ups.length === 3 && verdictOf(ups.every((u) => /- New activity \(/.test(u.text) && /- Backlog: 3 parked \(1 HIGH \[B-[0-9a-f]+\]\) by others since your last update/.test(u.text))), 'three update shapes, each with its activity section and the others\'-backlog line (non-vacuous)');
+ok(gateOf(/ logged \d+ more/.test(burst.text)) && gateOf(/… \d+ more from \d+ other sessions/.test(burst.text)) && gateOf(/, \d+ of them yours — not repeated\)/.test(burst.text)) && !/more lines —/.test(burst.text), 'the burst names the sessions it leaves out (≤ 6 + the overflow), counts the member\'s own lines, and pops nothing');
 ok(p90.bytes <= UPDATE_MAX && burst.bytes <= UPDATE_MAX, `one group's update ≤ ${UPDATE_MAX} B (the p90 ${p90.bytes} B, a 460-line burst ${burst.bytes} B)`);
 const extra = 500 + '<vibespace-reminder></vibespace-reminder>'.length, rem = c.reminder;
-ok(three.bytes <= 6500 && !/truncated —/.test(three.text) && [p90.bytes + rem.one, burst.bytes + rem.one, three.bytes + rem.multi].every((b) => b + extra + 4 <= AR.INLINE_CAP - ROOM_MIN),
+ok(three.bytes <= 6500 && !/truncated —/.test(three.text) && verdictOf([p90.bytes + rem.one, burst.bytes + rem.one, three.bytes + rem.multi].every((b) => b + extra + 4 <= AR.INLINE_CAP - ROOM_MIN)),
   `three groups bursting ${three.bytes} B ≤ 6 500 B, uncut; each shape + the per-turn reminder + a 500 B extra leaves ≥ ${ROOM_MIN} B under ${AR.INLINE_CAP} B (${[p90.bytes + rem.one, burst.bytes + rem.one, three.bytes + rem.multi].map((b) => b + extra + 4).join(' / ')} B)`);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -27,7 +27,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -102,18 +102,18 @@ function judgeRungs(VV) {
   const C = V.cliChoiceOf;
   ok(C('').mode === 'path' && C('path').mode === 'path' && C('pinned').mode === 'pinned' && C('pinned').version === V.TABLE_VERSION && C(V.TABLE_VERSION).mode === 'pinned' && C('0.39.2').mode === 'version' && C('0.39.2').version === '0.39.2' && C('latest').mode === 'path' && C('latest').invalid === 'latest' && C('1.2').mode === 'path',
     'the setting: path (as before) · pinned (= the measured version) · a version you name · anything else ⇒ path, said (`invalid`)');
-  ok(V.CLI_PIN_RECORD.version === V.TABLE_VERSION && V.CLI_PIN_RECORD.registryHost === 'registry.npmjs.org' && V.CLI_PIN_RECORD.tarballBytes > 1e7 && V.CLI_PIN_RECORD.unpackedBytes > V.CLI_PIN_RECORD.tarballBytes && /^\d{4}-\d{2}-\d{2}$/.test(V.CLI_PIN_RECORD.measured),
+  ok(V.CLI_PIN_RECORD.version === V.TABLE_VERSION && V.CLI_PIN_RECORD.registryHost === 'registry.npmjs.org' && V.CLI_PIN_RECORD.tarballBytes > 1e7 && V.CLI_PIN_RECORD.unpackedBytes > V.CLI_PIN_RECORD.tarballBytes && verdictOf(/^\d{4}-\d{2}-\d{2}$/.test(V.CLI_PIN_RECORD.measured)),
     'the measured package record names THE version the flag table was measured on, the ONE host, its sizes, its date');
   ok(V.cliNativeName({ platform: 'linux', arch: 'x64' }) === 'agent-browser-linux-x64' && V.cliNativeName({ platform: 'linux', arch: 'arm64', musl: true }) === 'agent-browser-linux-musl-arm64' && V.cliNativeName({ platform: 'darwin', arch: 'arm64' }) === 'agent-browser-darwin-arm64'
     && V.cliNativeName({ platform: 'win32', arch: 'arm64' }) === 'agent-browser-win32-x64.exe' && V.cliNativeName({ platform: 'aix', arch: 'x64' }) === null, 'the native binary is named as the package\'s own launcher names it (0.38.1 bin/agent-browser.js, mirrored)');
   const IV = (o) => V.cliInstallVerdict(o);
   ok(IV({ version: 'x' }).code === 'bad-request' && IV({ host: 'mac' }).code === 'install_local_only' && IV({ running: true }).code === 'install_running' && IV({ installed: { ok: true, version: V.TABLE_VERSION, path: '/x' } }).code === 'already_installed' && IV({ npm: false }).code === 'install_unavailable'
-    && IV({}).ok && IV({}).spec === 'agent-browser@' + V.TABLE_VERSION && IV({}).record === V.CLI_PIN_RECORD && IV({ version: '0.39.2' }).record === null, 'the install verdict, in its order (version · this machine · the slot · already there · npm); the measured numbers ride only the measured version');
+    && gateOf(IV({}).ok) && IV({}).spec === 'agent-browser@' + V.TABLE_VERSION && IV({}).record === V.CLI_PIN_RECORD && IV({ version: '0.39.2' }).record === null, 'the install verdict, in its order (version · this machine · the slot · already there · npm); the measured numbers ride only the measured version');
   ok(V.cliPinVerdict({ path: '/d/browser-tools/agent-browser-0.38.1/node_modules/agent-browser/bin/x' }, { toolsDir: '/d/browser-tools' }) !== null && V.cliPinVerdict({ path: '/usr/bin/agent-browser' }, { toolsDir: '/d/browser-tools' }) === null
     && V.cliPinVerdict({ path: '/d/browser-tools/../evil' }, { toolsDir: '/d/browser-tools' }) === null && V.cliPinVerdict(null, { toolsDir: '/d/browser-tools' }) === null && V.cliPinVerdict({ path: '/d/browser-tools/x' }, {}) === null,
   'the pin file names a program INSIDE the tools directory only (anything else — another program, `..` — is no pin)');
   ok(judgeRungs(V).length === 0, 'THE RESOLVE RUNG ORDER: the pinned install FIRST; a missing / shim / relative pin skipped (PATH answers); no pin = PATH as before', judgeRungs(V));
-  ok(V.LAUNCH_FLAGS.includes('--executable-path') && V.REFUSED_VERBS.install && V.REFUSED_VERBS.install.code === 'verb_not_offered' && V.REFUSED_VERBS.upgrade, 'the agent side is unchanged: --executable-path a refused launch flag, `install` / `upgrade` not offered');
+  ok(gateOf(V.LAUNCH_FLAGS.includes('--executable-path')) && gateOf(V.REFUSED_VERBS.install) && V.REFUSED_VERBS.install.code === 'verb_not_offered' && verdictOf(V.REFUSED_VERBS.upgrade), 'the agent side is unchanged: --executable-path a refused launch flag, `install` / `upgrade` not offered');
 }
 
 // ═══ ② the REAL keeper ════════════════════════════════════════════════════════
@@ -131,27 +131,27 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   ok(f.table === V.TABLE_VERSION && f.choice.mode === 'path' && f.pinned === null && f.onPath.version === '0.38.1' && f.inUse.pinned === false && !fs.existsSync(pinFile), 'the default (no setting): PATH — the fake on PATH says 0.38.1; no pin file', f);
   settings['browser.cli'] = 'pinned';
   f = await k.cliFacts();
-  ok(f.choice.mode === 'pinned' && f.pinned && f.pinned.installed === false && f.inUse.pinned === false && !fs.existsSync(pinFile), '"pinned" before any install: chosen, NOT installed — the one on PATH is used (said, never silent), no pin file', f.pinned);
+  ok(f.choice.mode === 'pinned' && gateOf(f.pinned) && f.pinned.installed === false && f.inUse.pinned === false && !fs.existsSync(pinFile), '"pinned" before any install: chosen, NOT installed — the one on PATH is used (said, never silent), no pin file', f.pinned);
   const nNpm = npmCalls().length;
   const r = k.installCli({ version: V.TABLE_VERSION });
   await waitFor(() => npmCalls().length > nNpm, 5000); // the fake npm logs from its own process
   const call = npmCalls().at(-1);
-  ok(r.ok && r.started && call && JSON.stringify(call.argv) === JSON.stringify(['install', '--prefix', path.join(TOOLS, 'agent-browser-' + V.TABLE_VERSION), '--no-audit', '--no-fund', '--no-save', 'agent-browser@' + V.TABLE_VERSION, '--ignore-scripts']),
+  ok(gateOf(r.ok) && gateOf(r.started) && gateOf(call) && JSON.stringify(call.argv) === JSON.stringify(['install', '--prefix', path.join(TOOLS, 'agent-browser-' + V.TABLE_VERSION), '--no-audit', '--no-fund', '--no-save', 'agent-browser@' + V.TABLE_VERSION, '--ignore-scripts']),
     'ONE npm install into its own prefix under data/browser-tools, pinned to the version, --no-save, --ignore-scripts (the registry only: no package script runs)', call);
   const e2 = (() => { try { k.installCli({ version: '0.39.2' }); return null; } catch (e) { return e; } })();
   const iv = k.installProgress();
-  ok(e2 && e2.code === 'install_running' && iv.running === true, 'THE slot is ONE: a second CLI install is refused install_running while it runs', { e2: e2 && e2.code, iv: { running: iv.running, step: iv.step } });
+  ok(gateOf(e2) && e2.code === 'install_running' && iv.running === true, 'THE slot is ONE: a second CLI install is refused install_running while it runs', { e2: e2 && e2.code, iv: { running: iv.running, step: iv.step } });
   if (typeof k._recordsLanded === 'function') k._recordsLanded();   // B-574d browser-stores 8/8: the marker on the store writer, on disk once it landed
-  ok(fs.existsSync(path.join(TOOLS, 'install-running.json')), 'the running install is named in its marker (a restart re-attaches)');
-  ok(await waitFor(async () => !(await k.cliFacts()).install.running, 10000), 'the install finishes');
+  ok(verdictOf(fs.existsSync(path.join(TOOLS, 'install-running.json'))), 'the running install is named in its marker (a restart re-attaches)');
+  ok(verdictOf(await waitFor(async () => !(await k.cliFacts()).install.running, 10000)), 'the install finishes');
   f = await k.cliFacts();
   const pin = JSON.parse(fs.readFileSync(pinFile, 'utf8'));
-  ok(f.pinned.installed && f.inUse.pinned && f.inUse.path === pin.path && pin.path.endsWith(path.join('node_modules', 'agent-browser', 'bin', NATIVE)) && !fs.existsSync(path.join(TOOLS, 'install-running.json')),
+  ok(gateOf(f.pinned.installed) && gateOf(f.inUse.pinned) && f.inUse.path === pin.path && gateOf(pin.path.endsWith(path.join('node_modules', 'agent-browser', 'bin', NATIVE))) && !fs.existsSync(path.join(TOOLS, 'install-running.json')),
     'verified (its package.json + its own --version) ⇒ the pin file names the NATIVE binary, the one in use is the pinned one, the marker is gone', { inUse: f.inUse, pin });
   const p = k.createProfile({ label: 'Pinned CLI' });
   const n0 = pinnedCalls().length;
   await k.start(p.id, { why: 'test' });
-  ok(pinnedCalls().length > n0 && pinnedCalls().slice(n0).some((a) => a[0] === 'open'), 'the keeper\'s runtime RUNS the pinned binary (its open went through it)', pinnedCalls().slice(n0));
+  ok(pinnedCalls().length > n0 && verdictOf(pinnedCalls().slice(n0).some((a) => a[0] === 'open')), 'the keeper\'s runtime RUNS the pinned binary (its open went through it)', pinnedCalls().slice(n0));
   await k.stop(p.id, { why: 'user' });
   settings['browser.cli'] = 'path';
   f = await k.cliFacts();
@@ -163,7 +163,7 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   await k.stop(p.id, { why: 'user' });
   settings['browser.cli'] = 'pinned';
   const e3 = (() => { try { k.installCli({ version: V.TABLE_VERSION }); return null; } catch (e) { return e; } })();
-  ok(e3 && e3.code === 'already_installed', 'installing the same version again ⇒ already_installed (no second download)');
+  ok(gateOf(e3) && e3.code === 'already_installed', 'installing the same version again ⇒ already_installed (no second download)');
 }
 // verify r1 (F2): a HALF-WRITTEN install is never resolved — the panel sets `browser.cli` right after the POST, while npm
 // still extracts; the pin must not name the launcher of a package whose binaries are still landing
@@ -172,18 +172,18 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   const ke = mkKeeper(D2e, { FAKE_NPM_EARLY: '1', FAKE_NPM_DELAY_MS: '1500' });
   settings['browser.cli'] = 'path';
   ke.installCli({ version: '0.40.0' });
-  ok(await waitFor(() => fs.existsSync(path.join(T2e, 'agent-browser-0.40.0', 'node_modules', 'agent-browser', 'bin', 'agent-browser.js')), 4000), 'the fake npm left package.json + the launcher early (the install still running)');
+  ok(verdictOf(await waitFor(() => fs.existsSync(path.join(T2e, 'agent-browser-0.40.0', 'node_modules', 'agent-browser', 'bin', 'agent-browser.js')), 4000)), 'the fake npm left package.json + the launcher early (the install still running)');
   settings['browser.cli'] = '0.40.0'; // what the panel does right after the POST (src/lib/browser-trace-view.js)
   let fe = await ke.cliFacts();
-  ok(fe.install.running && fe.pinned && fe.pinned.installed === false && /not verified/.test(fe.pinned.why) && fe.inUse.pinned === false && !fs.existsSync(path.join(T2e, 'cli-pin.json')),
+  ok(gateOf(fe.install.running) && gateOf(fe.pinned) && fe.pinned.installed === false && gateOf(/not verified/.test(fe.pinned.why)) && fe.inUse.pinned === false && !fs.existsSync(path.join(T2e, 'cli-pin.json')),
     'mid-install the pin says NOT installed (no witness yet): the one on PATH stays in use, no pin file — a half-written package is never run', { install: fe.install, pinned: fe.pinned, inUse: fe.inUse });
-  ok(await waitFor(async () => !(await ke.cliFacts()).install.running, 8000), 'the install finishes');
+  ok(verdictOf(await waitFor(async () => !(await ke.cliFacts()).install.running, 8000)), 'the install finishes');
   fe = await ke.cliFacts();
-  ok(!fe.install.failed && fe.pinned.installed === true && fe.pinned.path.endsWith(NATIVE) && fe.inUse.pinned === true && fs.existsSync(path.join(T2e, 'cli-pin.json')), '…verified (the program said 0.40.0) ⇒ the witness written, the NATIVE binary pinned, the pin file written only now', { install: fe.install, pinned: fe.pinned });
+  ok(!fe.install.failed && fe.pinned.installed === true && gateOf(fe.pinned.path.endsWith(NATIVE)) && fe.inUse.pinned === true && verdictOf(fs.existsSync(path.join(T2e, 'cli-pin.json'))), '…verified (the program said 0.40.0) ⇒ the witness written, the NATIVE binary pinned, the pin file written only now', { install: fe.install, pinned: fe.pinned });
   // verify r1 (F4): the pinned install VANISHES (data/browser-tools wiped) ⇒ said at once, PATH answers — never "installed" off the memo
   fs.rmSync(path.join(T2e, 'agent-browser-0.40.0'), { recursive: true, force: true });
   fe = await ke.cliFacts();
-  ok(fe.pinned.installed === false && /not installed/.test(fe.pinned.why) && fe.inUse.pinned === false && fe.inUse.version === '0.38.1' && !fs.existsSync(path.join(T2e, 'cli-pin.json')), 'the pinned install gone ⇒ the facts say NOT installed at once, the pin file removed, the one on PATH in use (said, not silent)', { pinned: fe.pinned, inUse: fe.inUse });
+  ok(fe.pinned.installed === false && gateOf(/not installed/.test(fe.pinned.why)) && fe.inUse.pinned === false && fe.inUse.version === '0.38.1' && !fs.existsSync(path.join(T2e, 'cli-pin.json')), 'the pinned install gone ⇒ the facts say NOT installed at once, the pin file removed, the one on PATH in use (said, not silent)', { pinned: fe.pinned, inUse: fe.inUse });
   settings['browser.cli'] = 'pinned';
 }
 // a failing / lying install
@@ -192,9 +192,9 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   const kf = mkKeeper(D2, { FAKE_NPM_SAYS: '0.37.0' });
   settings['browser.cli'] = '0.39.2';
   kf.installCli({ version: '0.39.2' });
-  ok(await waitFor(async () => !(await kf.cliFacts()).install.running, 10000), 'a second keeper\'s install of 0.39.2 finishes');
+  ok(verdictOf(await waitFor(async () => !(await kf.cliFacts()).install.running, 10000)), 'a second keeper\'s install of 0.39.2 finishes');
   const f = await kf.cliFacts();
-  ok(f.install.failed && /says 0\.37\.0, not 0\.39\.2/.test(f.install.error) && f.pinned.installed === false && /not verified/.test(f.pinned.why) && !fs.existsSync(path.join(D2, 'browser-tools', 'cli-pin.json')) && !fs.existsSync(path.join(D2, 'browser-tools', 'agent-browser-0.39.2', 'verified.json')),
+  ok(gateOf(f.install.failed) && gateOf(/says 0\.37\.0, not 0\.39\.2/.test(f.install.error)) && f.pinned.installed === false && gateOf(/not verified/.test(f.pinned.why)) && !fs.existsSync(path.join(D2, 'browser-tools', 'cli-pin.json')) && !fs.existsSync(path.join(D2, 'browser-tools', 'agent-browser-0.39.2', 'verified.json')),
     'a program that does not SAY the version it was installed as ⇒ the install is reported failed by name AND its folder is not an install (verify r1 F2: no witness ⇒ not pinned, no pin file — the folder alone is not the proof)', { install: f.install, pinned: f.pinned });
   settings['browser.cli'] = 'pinned';
 }
@@ -210,11 +210,11 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   const k3 = mkKeeper(D3);
   ok(k3._reattached() === 'running' && k3.installProgress().running === true, 'a restart mid-install RE-ATTACHES to the running npm (the slot stays busy)');
   const e = (() => { try { k3.installCli({}); return null; } catch (x) { return x; } })();
-  ok(e && e.code === 'install_running' && npmCalls().length === n0, '…so no second install starts (zero npm calls)');
+  ok(gateOf(e) && e.code === 'install_running' && npmCalls().length === n0, '…so no second install starts (zero npm calls)');
   // the "npm" ends without having installed anything ⇒ verified: failed, said
-  ok(await waitFor(async () => !(await k3.cliFacts()).install.running, 6000), 'when the re-attached pid ends, the result is verified');
+  ok(verdictOf(await waitFor(async () => !(await k3.cliFacts()).install.running, 6000)), 'when the re-attached pid ends, the result is verified');
   const f3 = await k3.cliFacts();
-  ok(f3.install.failed && /not usable after the install/.test(f3.install.error) && !fs.existsSync(path.join(T3, 'install-running.json')), 'an install that left nothing ⇒ failed by name; the marker is gone', f3.install);
+  ok(gateOf(f3.install.failed) && gateOf(/not usable after the install/.test(f3.install.error)) && !fs.existsSync(path.join(T3, 'install-running.json')), 'an install that left nothing ⇒ failed by name; the marker is gone', f3.install);
   // a marker naming a pid that is gone, with the package in place (npm finished while the server was down) ⇒ verified OK
   const D4 = path.join(ROOT, 'data-4');
   const T4 = path.join(D4, 'browser-tools');
@@ -223,15 +223,15 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   fs.writeFileSync(path.join(T4, 'install-running.json'), JSON.stringify({ kind: 'cli', spec: 'agent-browser@' + V.TABLE_VERSION, version: V.TABLE_VERSION, pid: 2147483000, starttime: 1, startedAt: Date.now() }));
   const k4 = mkKeeper(D4);
   ok(k4._reattached() === 'ended', 'a marker naming a pid that is gone ⇒ its result is checked now');
-  ok(await waitFor(async () => { const x = await k4.cliFacts(); return !x.install.running && x.pinned && x.pinned.installed; }, 6000) && fs.existsSync(path.join(T4, 'cli-pin.json')), '…the package npm left (it finished while VibeSpace was down) is verified and pinned');
+  ok(gateOf(await waitFor(async () => { const x = await k4.cliFacts(); return !x.install.running && x.pinned && x.pinned.installed; }, 6000)) && verdictOf(fs.existsSync(path.join(T4, 'cli-pin.json'))), '…the package npm left (it finished while VibeSpace was down) is verified and pinned');
   // (lane engine-spi-egress L3: the anti-bot backend's install re-attach legs left with its installer — a marker of a kind
   // no row registers is ended by identity at the restart: test-browser-orphans ⑧'s retired-kind legs)
   // verify r1 (F8): THE SLOT IS BOUNDED — a step that never ends (a stalled registry) is stopped at the wall clock, in-process
   // AND after a restart (the re-attach waited on the pid for ever: both installs refused for as long as npm lived)
   const f8 = await slotBoundLeg(K);
-  ok(f8.inProcess.ended && /npm ran past/.test(f8.inProcess.error || '') && !f8.inProcess.npmAlive && f8.inProcess.slotFree, 'a CLI install whose npm never ends is STOPPED at the step\'s wall clock (the npm group), failed by name, the slot free again', f8.inProcess);
-  ok(f8.reattach.re === 'running' && f8.reattach.ended && !f8.reattach.stepAlive && /ran past/.test(f8.reattach.error || '') && f8.reattach.slotFree, 'a step RE-ATTACHED after a restart keeps its deadline (the marker\'s stepAt): stopped when it is provably the marker\'s, said, the slot free', f8.reattach);
-  ok(f8.stranger.ended && f8.stranger.stepAlive && /could not be proven/.test(f8.stranger.error || '') && f8.stranger.slotFree, 'a re-attached pid that cannot be proven the marker\'s (no starttime) is LET GO at the deadline — the slot released and said, the process never signalled', f8.stranger);
+  ok(gateOf(f8.inProcess.ended) && gateOf(/npm ran past/.test(f8.inProcess.error || '')) && !f8.inProcess.npmAlive && verdictOf(f8.inProcess.slotFree), 'a CLI install whose npm never ends is STOPPED at the step\'s wall clock (the npm group), failed by name, the slot free again', f8.inProcess);
+  ok(f8.reattach.re === 'running' && gateOf(f8.reattach.ended) && !f8.reattach.stepAlive && gateOf(/ran past/.test(f8.reattach.error || '')) && verdictOf(f8.reattach.slotFree), 'a step RE-ATTACHED after a restart keeps its deadline (the marker\'s stepAt): stopped when it is provably the marker\'s, said, the slot free', f8.reattach);
+  ok(gateOf(f8.stranger.ended) && gateOf(f8.stranger.stepAlive) && gateOf(/could not be proven/.test(f8.stranger.error || '')) && verdictOf(f8.stranger.slotFree), 'a re-attached pid that cannot be proven the marker\'s (no starttime) is LET GO at the deadline — the slot released and said, the process never signalled', f8.stranger);
 }
 /** verify r1 (F8): the slot's bound, over a keeper module (`KK` = the real one or a patched copy). → what each leg saw. */
 async function slotBoundLeg(KK) {
@@ -273,7 +273,7 @@ console.log('— ③ the agent\'s CLI reads the pin beside itself; browser-env\'
     && /\n  const startsNothing = Boolean\(\(isVaultFill && vaultFillArgs\) \|\| cls\.ours\);\n/.test(src)
     && /\n  let bin = startsNothing \? \{ ok: true, path: '' \} : realBinary\(\);\n/.test(src)
     && /const toolsDir = path\.join\(__dirname, '\.\.', 'browser-tools'\);/.test(src) && /V\.cliPinVerdict\(JSON\.parse\(fs\.readFileSync\(path\.join\(toolsDir, 'cli-pin\.json'\)/.test(src);
-  ok(pinLaw(cli), 'data/bin/vibespace-browser resolves the real binary with the pin read BESIDE itself (data/browser-tools/cli-pin.json; a remote machine has none ⇒ PATH) for every command that starts the program; only a vault fill and a verb of our own (they start nothing) get none');
+  ok(verdictOf(pinLaw(cli)), 'data/bin/vibespace-browser resolves the real binary with the pin read BESIDE itself (data/browser-tools/cli-pin.json; a remote machine has none ⇒ PATH) for every command that starts the program; only a vault fill and a verb of our own (they start nothing) get none');
   // …and it CAN STILL FAIL: a copy that hands a program-starting verb an empty program, one that calls every command one
   // that starts nothing, one that widens «starts nothing» past its two kinds, and one that drops the pin — each is red
   const pinMutants = [
@@ -282,7 +282,7 @@ console.log('— ③ the agent\'s CLI reads the pin beside itself; browser-env\'
     ['«starts nothing» widened to every fill', cli.replace('  const startsNothing = Boolean((isVaultFill && vaultFillArgs) || cls.ours);', "  const startsNothing = Boolean(cls.verb === 'fill' || cls.ours);")],
     ['the pin dropped', cli.replace('pinned: pinned ? pinnedCli() : null', 'pinned: null')],
   ];
-  ok(pinMutants.every(([, src]) => src !== cli && !pinLaw(src)), 'CONTROL: each mutant of that law is RED — an empty program for a verb that starts it, every command or every fill «starts nothing», the pin dropped', pinMutants.map(([n, src]) => ({ n, applied: src !== cli, law: pinLaw(src) })));
+  ok(verdictOf(pinMutants.every(([, src]) => src !== cli && !pinLaw(src))), 'CONTROL: each mutant of that law is RED — an empty program for a verb that starts it, every command or every fill «starts nothing», the pin dropped', pinMutants.map(([n, src]) => ({ n, applied: src !== cli, law: pinLaw(src) })));
   const m = /\nfunction pinnedCli\(\) \{[\s\S]*?\n\}\n/.exec(cli);
   const fakeDir = path.join(ROOT, 'clihome', 'data', 'bin'); fs.mkdirSync(fakeDir, { recursive: true });
   const tools = path.join(ROOT, 'clihome', 'data', 'browser-tools'); fs.mkdirSync(tools, { recursive: true });
@@ -313,7 +313,7 @@ console.log('— ④ the routes: GET /api/browser/cli · POST /api/browser/cli/i
   const API = `http://127.0.0.1:${srv.address().port}`;
   const j = async (method, p, body, headers = {}) => { const res = await fetch(API + p, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   let r = await j('GET', '/api/browser/cli');
-  ok(r.status === 200 && r.json.table === V.TABLE_VERSION && r.json.record && r.json.record.registryHost === 'registry.npmjs.org' && 'onPath' in r.json && 'inUse' in r.json, 'GET /api/browser/cli: the facts the row says (measured version + its numbers, PATH, in use)');
+  ok(r.status === 200 && r.json.table === V.TABLE_VERSION && gateOf(r.json.record) && r.json.record.registryHost === 'registry.npmjs.org' && 'onPath' in r.json && 'inUse' in r.json, 'GET /api/browser/cli: the facts the row says (measured version + its numbers, PATH, in use)');
   const n0 = npmCalls().length;
   for (const tok of [TOKEN, 'jbt_' + 'd'.repeat(24)]) {
     r = await j('POST', '/api/browser/cli/install', { version: V.TABLE_VERSION }, { Authorization: 'Bearer ' + tok });
@@ -341,7 +341,7 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
   const driftLaw = ({ r, keys }) => !!r && r.text === 'Browser driver: 0.38.1, tested with VibeSpace · Installed: 0.39.2 — not the tested one' && DRIFT_KEYS.every((k2) => keys.includes(k2))
     && r.text.includes('0.38.1') && r.text.includes('0.39.2') && r.warn === true && r.offer === 'install' && r.version === '0.38.1';
   const driftRow = rowOf('0.39.2'); const drift = driftRow.r;
-  ok(driftLaw(driftRow) && W.cliOfferLabel('install', t) === 'Install the measured version…', 'the row: "Browser driver: 0.38.1, tested with VibeSpace · Installed: 0.39.2 — not the tested one" (its two keys emitted) — it names the tested version and the installed one, warns, its one act is install: Install the measured version…', { drift, keys: driftRow.keys });
+  ok(gateOf(driftLaw(driftRow)) && W.cliOfferLabel('install', t) === 'Install the measured version…', 'the row: "Browser driver: 0.38.1, tested with VibeSpace · Installed: 0.39.2 — not the tested one" (its two keys emitted) — it names the tested version and the installed one, warns, its one act is install: Install the measured version…', { drift, keys: driftRow.keys });
   // RED CONTROLS: the same law on a row that does NOT drift (PATH = the tested version), and on the row drawn in the retired
   // words (a t that says the keys as 2.369.411 did) — each fails it
   const OLD = { 'Browser driver: {version}, tested with VibeSpace': 'agent-browser: {version} (measured)', 'Installed: {version} — not the tested one': 'on PATH: {version} — drifts' };
@@ -349,7 +349,7 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
   ok(!driftLaw(same) && same.r.warn === false && same.r.offer === null && !driftLaw(old) && old.r.text === 'agent-browser: 0.38.1 (measured) · on PATH: 0.39.2 — drifts', 'CONTROL: the law fails a row that does not drift (no warning, no act) and the row in the retired words — RED for both', { same: same.r, old: old.r.text });
   ok(W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.38.1' } }, t).offer === null && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, installedTable: true }, t).offer === 'use-pinned'
     && W.cliRowWords({ ...base, choice: { mode: 'pinned', version: '0.38.1' }, pinned: { version: '0.38.1', installed: true }, onPath: { version: '0.39.2' } }, t).offer === 'use-path'
-    && W.cliRowWords({ ...base, choice: { mode: 'pinned' }, pinned: { version: '0.38.1', installed: false }, onPath: { version: '0.39.2' } }, t).warn
+    && gateOf(W.cliRowWords({ ...base, choice: { mode: 'pinned' }, pinned: { version: '0.38.1', installed: false }, onPath: { version: '0.39.2' } }, t).warn)
     && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { running: true } }, t).offer === null
     && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, npm: false }, t).offer === null
     && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { other: 'chrome-build' } }, t).offer === null,
@@ -359,10 +359,10 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
   const named0 = W.cliRowWords({ ...base, choice: { mode: 'version', version: '0.39.2' }, pinned: { version: '0.39.2', installed: false }, onPath: { version: '0.38.1' } }, t);
   const named1 = W.cliRowWords({ ...base, choice: { mode: 'version', version: '0.39.2' }, pinned: { version: '0.39.2', installed: true }, onPath: { version: '0.38.1' } }, t);
   ok(named0.offer === 'install' && named0.version === '0.39.2' && W.cliOfferLabel(named0.offer, t, { version: named0.version, table: base.table }) === 'Install agent-browser 0.39.2…' && W.cliOfferLabel('install', t, { version: '0.38.1', table: '0.38.1' }) === 'Install the measured version…'
-    && /0\.39\.2 \(your choice\) — drifts/.test(named1.text) && named1.warn, 'a version the user named: Install… says its number ("the measured version" only for the measured one) and, in use, the row says it drifts and warns', { named0, named1 });
+    && gateOf(/0\.39\.2 \(your choice\) — drifts/.test(named1.text)) && verdictOf(named1.warn), 'a version the user named: Install… says its number ("the measured version" only for the measured one) and, in use, the row says it drifts and warns', { named0, named1 });
   // (the panel's offer-label pin: MOVED to the fast scripts/test-browser-cli-pin-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   const cw = W.cliConfirmWords({ ...base, table: V.TABLE_VERSION }, t); // lane browser-stderr-pipe: the confirm of THE pin (its record's sizes)
-  ok(/53 MB/.test(cw.message) && /registry\.npmjs\.org/.test(cw.message) && /118 MB/.test(cw.message) && /no script of the package runs/.test(cw.message) && cw.title === 'Install agent-browser 0.38.2?', 'the download confirm names the package, the host, the measured sizes and that no package script runs', cw);
+  ok(gateOf(/53 MB/.test(cw.message)) && gateOf(/registry\.npmjs\.org/.test(cw.message)) && gateOf(/118 MB/.test(cw.message)) && gateOf(/no script of the package runs/.test(cw.message)) && cw.title === 'Install agent-browser 0.38.2?', 'the download confirm names the package, the host, the measured sizes and that no package script runs', cw);
   const said = new Set(); const rec = (k2) => { said.add(k2); return k2; };
   for (const x of [{ choice: { mode: 'path' }, onPath: { version: '0.39.2' } }, { choice: { mode: 'path' }, onPath: null }, { choice: { mode: 'pinned' }, pinned: { version: '0.38.1', installed: true }, onPath: { version: '0.39.2' } }, { choice: { mode: 'version' }, pinned: { version: '0.39.2', installed: true } }, { choice: { mode: 'pinned' }, pinned: { version: '0.38.1', installed: false }, onPath: { version: '0.39.2' } }, { choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { running: true } }, { choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { failed: true } }, { choice: { mode: 'path' }, onPath: { version: '0.39.2' }, npm: false }]) W.cliRowWords({ ...base, ...x }, rec);
   for (const o of ['install', 'install-again', 'use-pinned', 'use-path']) W.cliOfferLabel(o, rec);
@@ -496,34 +496,34 @@ async function sameVersionLeg(KK, RR, tag) {
 const F0 = require('../src/browser-facts.js');
 const h1 = await h1Leg(K, 'real');
 {
-  ok(h1.installed && h1.launch.cli === '0.38.0' && h1.launch.v === '0.38.0', 'the conversation\'s browser launched under the pinned 0.38.0 (the record names the CLI it runs)', h1.launch);
+  ok(gateOf(h1.installed) && h1.launch.cli === '0.38.0' && h1.launch.v === '0.38.0', 'the conversation\'s browser launched under the pinned 0.38.0 (the record names the CLI it runs)', h1.launch);
   ok(h1.facts.previous === 1 && h1.facts.gone === 0 && h1.facts.versions.join() === '0.38.0', 'after the switch to PATH (0.38.1) the panel row counts it: 1 browser still on the previous CLI (0.38.0)', h1.facts);
-  ok(h1.streamCalls.length > 0 && h1.streamCalls.every((v) => v === '0.38.0'), 'the keeper\'s own call on it (a live view\'s stream port) runs 0.38.0 — the version its daemon runs', h1.streamCalls);
-  ok(h1.nextCalls.some((c) => c.verb === 'get title' && c.v === '0.38.0') && !h1.nextCalls.some((c) => c.verb === 'get title' && c.v !== '0.38.0'), 'the conversation\'s NEXT command (the shipped CLI over the real /resolve) runs 0.38.0 — VibeSpace\'s verified install of the version its browser runs', { next: h1.nextCalls, se: h1.next.se.slice(-300) });
+  ok(h1.streamCalls.length > 0 && verdictOf(h1.streamCalls.every((v) => v === '0.38.0')), 'the keeper\'s own call on it (a live view\'s stream port) runs 0.38.0 — the version its daemon runs', h1.streamCalls);
+  ok(gateOf(h1.nextCalls.some((c) => c.verb === 'get title' && c.v === '0.38.0')) && !h1.nextCalls.some((c) => c.verb === 'get title' && c.v !== '0.38.0'), 'the conversation\'s NEXT command (the shipped CLI over the real /resolve) runs 0.38.0 — VibeSpace\'s verified install of the version its browser runs', { next: h1.nextCalls, se: h1.next.se.slice(-300) });
   ok(h1.restarts.length === 0 && h1.pidAfter === h1.launch.pid && !/version mismatch/i.test(h1.next.se), 'no "Daemon version mismatch, restarting…": the daemon (and the Chrome it owns) is the one it launched', { restarts: h1.restarts, pid: [h1.launch.pid, h1.pidAfter] });
   ok(h1.newLaunch.cli === '0.38.1' && h1.newLaunch.v === '0.38.1', 'a NEW launch after the switch runs the current CLI (0.38.1)', h1.newLaunch);
   ok(h1.facts2.gone === 1 && h1.facts2.previous === 0, 'the pinned 0.38.0 removed while its browser runs: the row (a view) counts it as on a CLI no longer installed once the keeper\'s own pass has judged it (B-7a30: before it, the row reads the last judgment — within the 10 s pass; `before` is printed, never asserted: a pass may land first)', { before: h1.factsBefore, after: h1.facts2 });
-  ok(h1.stream2 && h1.stream2.ok === false && /browser_cli_gone/.test(String(h1.stream2.error)) && /restart it to use the current CLI/.test(String(h1.stream2.error)), '…the keeper\'s calls on it are refused BY NAME (browser_cli_gone, "restart it to use the current CLI")', h1.stream2);
-  ok(h1.gone.code === 1 && /\[browser_cli_gone\]/.test(h1.gone.se) && /restart it to use the current CLI/.test(h1.gone.se) && /remedy: ask the user to restart this browser/.test(h1.gone.se), '…the agent\'s command too: [browser_cli_gone] with its way out', h1.gone.se.slice(-400));
-  ok(h1.goneCalls.length === 0 && h1.restarts2.length === 0 && h1.daemonAlive, '…and NOTHING ran (no silent fall to PATH): its daemon untouched', { goneCalls: h1.goneCalls, restarts: h1.restarts2 });
+  ok(gateOf(h1.stream2) && h1.stream2.ok === false && gateOf(/browser_cli_gone/.test(String(h1.stream2.error))) && verdictOf(/restart it to use the current CLI/.test(String(h1.stream2.error))), '…the keeper\'s calls on it are refused BY NAME (browser_cli_gone, "restart it to use the current CLI")', h1.stream2);
+  ok(h1.gone.code === 1 && gateOf(/\[browser_cli_gone\]/.test(h1.gone.se)) && gateOf(/restart it to use the current CLI/.test(h1.gone.se)) && verdictOf(/remedy: ask the user to restart this browser/.test(h1.gone.se)), '…the agent\'s command too: [browser_cli_gone] with its way out', h1.gone.se.slice(-400));
+  ok(h1.goneCalls.length === 0 && h1.restarts2.length === 0 && verdictOf(h1.daemonAlive), '…and NOTHING ran (no silent fall to PATH): its daemon untouched', { goneCalls: h1.goneCalls, restarts: h1.restarts2 });
   // verify r3 (Y1): the same version put back at the same path (a new identity) — asked before any refusal, never "gone"
   const sv = await sameVersionLeg(K, require('../src/routes/browser.js'), 'real');
-  ok(sv.launch.cli === '0.38.1' && sv.stream && sv.stream.code !== 'browser_cli_gone' && sv.streamCalls.length > 0 && sv.streamCalls.every((v) => v === '0.38.1') && sv.row.gone === 0 && sv.row.previous === 0,
+  ok(sv.launch.cli === '0.38.1' && gateOf(sv.stream) && sv.stream.code !== 'browser_cli_gone' && sv.streamCalls.length > 0 && gateOf(sv.streamCalls.every((v) => v === '0.38.1')) && sv.row.gone === 0 && sv.row.previous === 0,
     'the same 0.38.1 re-installed at the same path while its browser runs: the keeper\'s next call ASKS the new file its version and runs it — never browser_cli_gone, the row counts nobody gone', { stream: sv.stream && sv.stream.code, calls: sv.streamCalls, row: sv.row });
   // verify r3 (Y1): the launch's journal line names the CLI it runs (the record's version changes at a relaunch after a
   // daemon's death — the trace said "started … daemon pid N" and nothing of the CLI)
-  ok(sv.launch.journal.some((l) => /started \(.*\): daemon pid \d+.*, agent-browser 0\.38\.1$/.test(l)) && (read('src/server/browser-keeper.js').match(/\$\{rec\.cli && rec\.cli\.version \? ', ' \+ VERBS\.CLI_PACKAGE \+ ' ' \+ rec\.cli\.version : ''\}`\);/g) || []).length === 2,
+  ok(gateOf(sv.launch.journal.some((l) => /started \(.*\): daemon pid \d+.*, agent-browser 0\.38\.1$/.test(l))) && (read('src/server/browser-keeper.js').match(/\$\{rec\.cli && rec\.cli\.version \? ', ' \+ VERBS\.CLI_PACKAGE \+ ' ' \+ rec\.cli\.version : ''\}`\);/g) || []).length === 2,
     'the launch journal line names the CLI the daemon runs ("…daemon pid N, agent-browser 0.38.1") — the ephemeral line and the profile line both', sv.launch.journal);
-  ok(!/\[browser_cli_gone\]/.test(sv.next.se) && sv.nextCalls.some((c) => c.verb === 'get title' && c.v === '0.38.1') && sv.restarts.length === 0,
+  ok(!/\[browser_cli_gone\]/.test(sv.next.se) && gateOf(sv.nextCalls.some((c) => c.verb === 'get title' && c.v === '0.38.1')) && sv.restarts.length === 0,
     '…and the conversation\'s next command (the shipped CLI over the real /resolve, the binary re-installed again) runs 0.38.1 — no refusal, no restart', { se: sv.next.se.slice(-300), calls: sv.nextCalls, restarts: sv.restarts });
   const W = await import('../src/lib/browser-cli-model.js');
   const t = (k2, p) => String(k2).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m));
   const base = { table: '0.38.1', record: V.CLI_PIN_RECORD, npm: true, install: {}, choice: { mode: 'path' }, onPath: { version: '0.38.1' } };
   const w1 = W.cliRowWords({ ...base, running: { previous: 1, gone: 0 } }, t), w2 = W.cliRowWords({ ...base, running: { previous: 3, gone: 0 } }, t), w3 = W.cliRowWords({ ...base, running: { previous: 0, gone: 2 } }, t);
-  ok(/1 browser still on the previous CLI — it switches when it stops/.test(w1.text) && !w1.warn && /3 browsers still on the previous CLI — they switch when they stop/.test(w2.text) && /2 browsers run on a CLI that is no longer installed — restart them to use the current one/.test(w3.text) && w3.warn, 'the row\'s words: "N browsers still on the previous CLI — they switch when they stop" (a fact, no warning) · "… no longer installed — restart …" (a warning)', [w1.text, w2.text, w3.text]);
+  ok(gateOf(/1 browser still on the previous CLI — it switches when it stops/.test(w1.text)) && !w1.warn && gateOf(/3 browsers still on the previous CLI — they switch when they stop/.test(w2.text)) && gateOf(/2 browsers run on a CLI that is no longer installed — restart them to use the current one/.test(w3.text)) && verdictOf(w3.warn), 'the row\'s words: "N browsers still on the previous CLI — they switch when they stop" (a fact, no warning) · "… no longer installed — restart …" (a warning)', [w1.text, w2.text, w3.text]);
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const keys = ['1 browser still on the previous CLI — it switches when it stops', '{n} browsers still on the previous CLI — they switch when they stop', '1 browser runs on a CLI that is no longer installed — restart it to use the current one', '{n} browsers run on a CLI that is no longer installed — restart them to use the current one'];
-  ok(keys.every((k2) => zh[k2] && ja[k2]), 'the four sentences have zh + ja entries');
+  ok(verdictOf(keys.every((k2) => zh[k2] && ja[k2])), 'the four sentences have zh + ja entries');
   // (the route's cli-body pin: MOVED to the fast scripts/test-browser-cli-pin-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
@@ -562,7 +562,7 @@ console.log('— ⑥ controls');
   await waitFor(() => fs.existsSync(path.join(Dw, 'browser-tools', 'agent-browser-0.40.0', 'node_modules', 'agent-browser', 'bin', 'agent-browser.js')), 4000);
   sw['browser.cli'] = '0.40.0';
   const fw = await kw.cliFacts();
-  ok(fw.install.running && fw.pinned.installed === true && fw.pinned.path.endsWith('agent-browser.js') && fs.existsSync(path.join(Dw, 'browser-tools', 'cli-pin.json')), 'control (c): …the half-written package\'s LAUNCHER was pinned while npm still ran (the pin file written) — exactly what ②\'s mid-install leg catches', { install: fw.install, pinned: fw.pinned });
+  ok(gateOf(fw.install.running) && fw.pinned.installed === true && gateOf(fw.pinned.path.endsWith('agent-browser.js')) && verdictOf(fs.existsSync(path.join(Dw, 'browser-tools', 'cli-pin.json'))), 'control (c): …the half-written package\'s LAUNCHER was pinned while npm still ran (the pin file written) — exactly what ②\'s mid-install leg catches', { install: fw.install, pinned: fw.pinned });
   await waitFor(async () => !(await kw.cliFacts()).install.running, 6000);
   // verify r1 (F4): a pin served off the memo alone ⇒ a wiped install still reads "installed"
   const memoOnly = editAnchor(ks, "      if (!cliMemo.pin.path || usableExe(cliMemo.pin.path)) return cliMemo.pin;\n      cliGen++;", "      return cliMemo.pin;", "src/server/browser-keeper.js");
@@ -575,7 +575,7 @@ console.log('— ⑥ controls');
   await waitFor(async () => { const x = await km.cliFacts(); return !x.install.running && x.pinned.installed; }, 6000);
   fs.rmSync(path.join(Dm, 'browser-tools', 'agent-browser-0.40.0'), { recursive: true, force: true });
   const fm = await km.cliFacts();
-  ok(fm.pinned.installed === true && fs.existsSync(path.join(Dm, 'browser-tools', 'cli-pin.json')), 'control (e): …the wiped install still read "installed", the pin file still named it — exactly what ②\'s vanished-pin leg catches', fm.pinned);
+  ok(fm.pinned.installed === true && verdictOf(fs.existsSync(path.join(Dm, 'browser-tools', 'cli-pin.json'))), 'control (e): …the wiped install still read "installed", the pin file still named it — exactly what ②\'s vanished-pin leg catches', fm.pinned);
   // verify r1 (F10): the words of the pre-fix model — every install button "the measured version", a named version in use never drifts
   const ms = read('src/lib/browser-cli-model.js');
   const oldWords = editAnchor(editAnchor(ms, "    case 'install': return named ? t(i18nKey('Install agent-browser {version}…'), { version: String(version) }) : t(i18nKey('Install the measured version…'));", "    case 'install': return t(i18nKey('Install the measured version…'));", "src/lib/browser-cli-model.js"),
@@ -596,20 +596,20 @@ console.log('— ⑥ controls');
   const noKeep = editAnchor(ks, "      const c = await cliOptReady(browserRecordForCall(ns, opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {}));", "      const c = null;", "src/server/browser-keeper.js");
   ok(noKeep !== ks, 'control (h): the patch (every keeper call on the current CLI) applies');
   const hk = await h1Leg(MUT.load('src/server/browser-keeper.js', noKeep, 'no-keep'), 'no-keep');
-  ok(hk.streamCalls.some((v) => v === '0.38.1') && hk.restarts.length > 0 && !(hk.stream2 && /browser_cli_gone/.test(String(hk.stream2.error))), 'control (h): …the keeper\'s stream call ran 0.38.1 and the daemon RESTARTED; the removed install was not refused — exactly what ⑤b\'s keeper legs catch', { streamCalls: hk.streamCalls, restarts: hk.restarts.length, stream2: hk.stream2 });
+  ok(gateOf(hk.streamCalls.some((v) => v === '0.38.1')) && hk.restarts.length > 0 && !(hk.stream2 && /browser_cli_gone/.test(String(hk.stream2.error))), 'control (h): …the keeper\'s stream call ran 0.38.1 and the daemon RESTARTED; the removed install was not refused — exactly what ⑤b\'s keeper legs catch', { streamCalls: hk.streamCalls, restarts: hk.restarts.length, stream2: hk.stream2 });
   // …and the agent's CLI without the rule (the pre-ruling copy: the current pin / PATH, whatever the browser runs)
   const cs = read('data/bin/vibespace-browser');
   const noPick = cs.replace("  if (wantCli && wantCli !== binVersion && typeof V.cliForBrowser === 'function') {", "  if (false) {");
   ok(noPick !== cs, 'control (i): the patch (the CLI ignores the version its browser runs) applies');
   const hc = await h1Leg(K, 'no-pick', { cliSrc: noPick });
-  ok(hc.nextCalls.some((c) => c.verb === 'get title' && c.v === '0.38.1') && hc.restarts.length > 0 && /version mismatch/i.test(hc.next.se), 'control (i): …the conversation\'s next command ran 0.38.1 and printed "Daemon version mismatch detected, restarting..." — exactly what ⑤b\'s next-command leg catches', { next: hc.nextCalls, restarts: hc.restarts.length });
+  ok(gateOf(hc.nextCalls.some((c) => c.verb === 'get title' && c.v === '0.38.1')) && hc.restarts.length > 0 && verdictOf(/version mismatch/i.test(hc.next.se)), 'control (i): …the conversation\'s next command ran 0.38.1 and printed "Daemon version mismatch detected, restarting..." — exactly what ⑤b\'s next-command leg catches', { next: hc.nextCalls, restarts: hc.restarts.length });
   // verify r3 (Y1): a keeper whose doors judge off the sync reading (a never-asked binary = "gone") ⇒ the same version put
   // back at the same path is refused once
   // (B-7a30: the asking moved into the ONE async judge — the cut is its line there)
   const noAsk = editAnchor(ks, "    for (const x of cands) if (x.version == null && x.path) x.version = await cliVersionAt(x.path).catch(() => null);\n", "", "src/server/browser-keeper.js");
   ok(noAsk !== ks, 'control (j): the patch (the doors refuse an unasked binary instead of asking it) applies');
   const hj = await sameVersionLeg(MUT.load('src/server/browser-keeper.js', noAsk, 'no-ask'), require('../src/routes/browser.js'), 'no-ask');
-  ok(hj.stream && hj.stream.code === 'browser_cli_gone' && hj.streamCalls.length === 0, 'control (j): …the keeper\'s call on a browser whose binary was re-installed (the same version) was refused browser_cli_gone — exactly what the r3 (Y1) leg catches', { stream: hj.stream && hj.stream.code, calls: hj.streamCalls });
+  ok(gateOf(hj.stream) && hj.stream.code === 'browser_cli_gone' && hj.streamCalls.length === 0, 'control (j): …the keeper\'s call on a browser whose binary was re-installed (the same version) was refused browser_cli_gone — exactly what the r3 (Y1) leg catches', { stream: hj.stream && hj.stream.code, calls: hj.streamCalls });
 }
 
 console.log('— ⑦ lane dc-browser-providers (rv-browser F8): ONE agent-browser version row — every spelling reads it or is pinned to it');
@@ -627,7 +627,7 @@ console.log('— ⑦ lane dc-browser-providers (rv-browser F8): ONE agent-browse
   const off = (docker, pkg) => spellings(docker, pkg).filter((s) => s.v !== V.AGENT_BROWSER_CLI[s.want]);
   const dock = read('deploy/docker/Dockerfile'), pkg = read('package.json');
   const all = spellings(dock, pkg);
-  ok(all.filter((s) => s.where === 'deploy/docker/Dockerfile').length >= 2 && all.some((s) => s.where === 'package.json install'), 'the census finds the image\'s install + its --version check and package.json\'s install hint', JSON.stringify(all));
+  ok(all.filter((s) => s.where === 'deploy/docker/Dockerfile').length >= 2 && verdictOf(all.some((s) => s.where === 'package.json install')), 'the census finds the image\'s install + its --version check and package.json\'s install hint', JSON.stringify(all));
   ok(off(dock, pkg).length === 0, `every spelling is the row's: table ${V.AGENT_BROWSER_CLI.table}, floor ${V.AGENT_BROWSER_CLI.floor}`, JSON.stringify(off(dock, pkg)));
   const B = require('../src/browser-profiles.js'), TR = require('../src/browser-trace.js'), W = require('../src/browser-windows.js');
   ok(V.TABLE_VERSION === V.AGENT_BROWSER_CLI.table && V.CLI_PIN_RECORD.version === V.AGENT_BROWSER_CLI.table && B.FLOOR_VERSION === V.AGENT_BROWSER_CLI.floor && TR.RECORDING_FLOOR === V.AGENT_BROWSER_CLI.recordingFloor && W.WINDOWS_PROOF.agentBrowser === V.AGENT_BROWSER_CLI.table, 'the code spellings READ the row (table, pin record, floor, recording floor, windows proof)');
@@ -635,4 +635,4 @@ console.log('— ⑦ lane dc-browser-providers (rv-browser F8): ONE agent-browse
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

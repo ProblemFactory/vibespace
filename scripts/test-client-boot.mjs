@@ -30,7 +30,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const PORT = await freePort(), CDP_PORT = await freePort();
 const wt = `/tmp/vs-client-boot-${process.pid}`;
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -117,9 +117,9 @@ async function bootProbe(cacheBust) {
 }
 
 const good = await bootProbe();
-check('app.ready resolves and the workspace renders', good.ready);
-check('loading screen is gone (the 2.330.x symptom)', good.splashGone);
-check('client websocket is OPEN', good.wsOpen);
+check('app.ready resolves and the workspace renders', verdictOf(good.ready));
+check('loading screen is gone (the 2.330.x symptom)', verdictOf(good.splashGone));
+check('client websocket is OPEN', verdictOf(good.wsOpen));
 check('zero uncaught exceptions during boot', good.errors.length === 0, good.errors.slice(0, 3).join(' | '));
 
 // ── phase 2: NEGATIVE CONTROL — ship the 2.330.0 shape, probe must go RED ──
@@ -128,9 +128,9 @@ const orig = fs.readFileSync(bundlePath);
 fs.writeFileSync(bundlePath, 'someUndefinedBootSymbol();\n' + orig);
 const bad = await bootProbe(Date.now());
 check('NEGATIVE CONTROL: broken bundle → app never becomes ready', !bad.ready);
-check('NEGATIVE CONTROL: the boot crash is captured as an exception', bad.errors.some((e) => /someUndefinedBootSymbol/.test(e)), bad.errors.join(' | ').slice(0, 200));
+check('NEGATIVE CONTROL: the boot crash is captured as an exception', verdictOf(bad.errors.some((e) => /someUndefinedBootSymbol/.test(e))), bad.errors.join(' | ').slice(0, 200));
 fs.writeFileSync(bundlePath, orig);
 
 ws.close();
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS (6)');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

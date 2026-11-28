@@ -47,7 +47,7 @@ let ATT = path.join(CWD, 'attach.pdf');
 const TEMP_ROOTS = [...new Set([require('os').tmpdir(), '/tmp', '/var/tmp'].map((d) => path.resolve(d)))];
 const LIVE_SID = '5c3a0000-0000-4000-8000-0000000af001';
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -185,7 +185,7 @@ try {
   check('a live claude chat session is created through the page\'s own createSession (the creator path, never attached; stub CLI behind the real wrapper)', !!sid);
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; true`);
   if (sid && TEMP_ROOTS.some((r) => path.resolve(CWD).startsWith(r + path.sep))) ATT = path.join(wt, 'data', 'chat-attachments', sid, 'files', 'attach.pdf');   // lane chat-attachments-persist
-  check('the live chat window attaches', await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000));
+  check('the live chat window attaches', verdictOf(await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000)));
   await sleep(600);
 
   console.log('① the Write ⇒ one card, the chip, the document opens beside the chat (setting on) — QUIETLY, while the owner types');
@@ -195,32 +195,32 @@ try {
   await evalJs(`${TA}.focus(); true`);
   await cdp('Input.insertText', { text: 'hello ' });
   const chatWin = await evalJs(`(${VIEW}).winInfo.id`);
-  check('turn 1 played', await turn('Write me a brief', /Brief written/));
+  check('turn 1 played', verdictOf(await turn('Write me a brief', /Brief written/)));
   await waitFor(`(${CARDS}).length >= 1 && !!document.querySelector('.chat-status-artifacts') && ${wins(BRIEF)} >= 1`, 8000);
   await waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'doc' && !!w.content.querySelector('.ProseMirror, .doc-window *'))`, 8000); await sleep(600); // the lazy editor mounted
   const q1 = await evalJs(`(() => { const d = [...app.wm.windows.values()].find((w) => w.type === 'doc'); const ch = d && d._tabChain; return { activeIsComposer: document.activeElement === ${TA}, activeTag: document.activeElement && (document.activeElement.className || document.activeElement.tagName), wmActive: app.wm.activeWindowId, split: !!ch && ch.layout === 'split' && ch.tabs.includes(${JSON.stringify(chatWin)}), docShown: !!d && !d.content.classList.contains('tab-hidden') && d.content.getBoundingClientRect().width > 100, chatShown: !(${VIEW}).winInfo.content.classList.contains('tab-hidden'), toasts: [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent), taught: localStorage.getItem('vs-auto-open-taught') }; })()`);
-  check('the doc opened BESIDE the chat (a split of the two, both shown)', q1.split && q1.docShown && q1.chatShown, q1);
-  check('…and took NOTHING: document.activeElement is still the composer, the chat is still the active window', q1.activeIsComposer && q1.wmActive === chatWin, q1);
+  check('the doc opened BESIDE the chat (a split of the two, both shown)', gateOf(q1.split) && gateOf(q1.docShown) && verdictOf(q1.chatShown), q1);
+  check('…and took NOTHING: document.activeElement is still the composer, the chat is still the active window', gateOf(q1.activeIsComposer) && q1.wmActive === chatWin, q1);
   await cdp('Input.insertText', { text: 'world' });
   const typed = await evalJs(`${TA}.value`);
   check('the next keys continue INTO the composer ("hello " + "world")', typed === 'hello world', typed);
-  check('ONE toast says it and offers "Turn off"; this device is marked taught (vs-auto-open-taught)', q1.toasts.length === 1 && /A document the agent wrote opened beside the chat/.test(q1.toasts[0]) && /Turn off/.test(q1.toasts[0]) && q1.taught === '1', q1.toasts);
+  check('ONE toast says it and offers "Turn off"; this device is marked taught (vs-auto-open-taught)', q1.toasts.length === 1 && gateOf(/A document the agent wrote opened beside the chat/.test(q1.toasts[0])) && gateOf(/Turn off/.test(q1.toasts[0])) && q1.taught === '1', q1.toasts);
   if (process.env.VS_AUTO_OPEN_PNG) { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(process.env.VS_AUTO_OPEN_PNG, Buffer.from(r.data, 'base64')); }
   await evalJs(`(() => { const ta = ${TA}; ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   const s1 = await state();
   check('ONE card for docs/BRIEF.md', s1.cards.length === 1 && s1.cards[0].name === 'BRIEF.md' && s1.cards[0].key === ':' + BRIEF, s1);
   check('the chip reads "Artifacts · 1"', s1.chip === 'Artifacts · 1', s1.chip);
   { const p = await evalJs(`(() => { const e = (${CARDS})[0]?.querySelector('.chat-artifact-path'); return e ? { text: e.textContent, lrm: e.textContent.charCodeAt(0) === 0x200e } : null; })()`);
-    check('the card\'s path keeps its leading "/" at the START under the rtl front-truncate (an LRM opens the text — lane artifacts-e2e)', !!p && p.lrm && p.text.slice(1) === BRIEF, p); }
+    check('the card\'s path keeps its leading "/" at the START under the rtl front-truncate (an LRM opens the text — lane artifacts-e2e)', !!p && gateOf(p.lrm) && p.text.slice(1) === BRIEF, p); }
   check('the new document opened beside the chat by itself (artifacts.autoOpenDocs default on)', s1.brief === 1, s1);
   await evalJs(`(${CARDS})[0].__afMark = 'born'; true`);
 
   console.log('② the Edit ⇒ the SAME card patched in place, no second window');
-  check('turn 2 played', await turn('Tighten it', /Brief edited/));
+  check('turn 2 played', verdictOf(await turn('Tighten it', /Brief edited/)));
   await waitFor(`/Changed 1 times/.test((${CARDS})[0]?.querySelector('.chat-artifact-meta')?.textContent || '')`, 8000);
   const s2 = await state();
   check('still ONE card node and it is the SAME element (the mark set at birth survives — patched, never re-created)', s2.cards.length === 1 && s2.cards[0].mark === 'born', s2.cards);
-  check('its words say the change ("Changed 1 times")', /Changed 1 times/.test(s2.cards[0]?.meta || ''), s2.cards[0]?.meta);
+  check('its words say the change ("Changed 1 times")', verdictOf(/Changed 1 times/.test(s2.cards[0]?.meta || '')), s2.cards[0]?.meta);
   check('an edit never re-opens (still one window for BRIEF.md)', s2.brief === 1, s2);
 
   console.log('③ the setting OFF ⇒ a new document is a card only; one click opens it');
@@ -230,15 +230,15 @@ try {
   const cb0 = await evalJs(`(() => { const c = document.querySelector('.chat-artifacts-panel .af-auto-cb'); return { checked: c.checked, words: c.parentElement.textContent }; })()`);
   check('the chip\'s popover has the row "Open new documents automatically", checked while the setting is on', cb0.checked === true && cb0.words === 'Open new documents automatically', cb0);
   await evalJs(`document.querySelector('.chat-artifacts-panel .af-auto-cb').click(); true`);
-  check('unticking it turns artifacts.autoOpenDocs off (the synced setting)', await waitFor(`app.settings.get('artifacts.autoOpenDocs') === false`, 3000));
+  check('unticking it turns artifacts.autoOpenDocs off (the synced setting)', verdictOf(await waitFor(`app.settings.get('artifacts.autoOpenDocs') === false`, 3000)));
   await evalJs(`document.body.click(); document.querySelector('.chat-artifacts-panel')?.remove(); true`);
-  check('turn 3 played', await turn('Write notes', /Notes written/));
+  check('turn 3 played', verdictOf(await turn('Write notes', /Notes written/)));
   await waitFor(`(${CARDS}).length >= 2 && /Artifacts · 2/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 8000);
   await sleep(800);
   const s3 = await state();
   check('a second card, the chip reads "Artifacts · 2", and nothing opened for NOTES.md', s3.cards.length === 2 && s3.chip === 'Artifacts · 2' && s3.notes === 0, s3);
   await evalJs(`(${CARDS}).find((e) => e.dataset.key === ${JSON.stringify(':' + NOTES)}).click(); true`);
-  check('one click on the card opens NOTES.md beside the chat', await waitFor(`${wins(NOTES)} >= 1`, 8000), await state());
+  check('one click on the card opens NOTES.md beside the chat', verdictOf(await waitFor(`${wins(NOTES)} >= 1`, 8000)), await state());
 
   console.log('④ a reload shows the same cards');
   await cdp('Page.reload', {});
@@ -247,8 +247,8 @@ try {
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
   await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 2`, 20000);
   const s4 = await state();
-  check('after a reload the chip reads "Artifacts · 2" (the server\'s registry, read when the view is built — not only on a live birth)', await waitFor(`/Artifacts · 2/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 8000), await state());
-  check('after a reload: the same two cards, BRIEF.md still says its change', s4.cards.length === 2 && s4.cards.map((c) => c.key).sort().join() === [':' + BRIEF, ':' + NOTES].sort().join() && /Changed 1 times/.test(s4.cards.find((c) => c.name === 'BRIEF.md')?.meta || ''), s4);
+  check('after a reload the chip reads "Artifacts · 2" (the server\'s registry, read when the view is built — not only on a live birth)', verdictOf(await waitFor(`/Artifacts · 2/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 8000)), await state());
+  check('after a reload: the same two cards, BRIEF.md still says its change', s4.cards.length === 2 && s4.cards.map((c) => c.key).sort().join() === [':' + BRIEF, ':' + NOTES].sort().join() && verdictOf(/Changed 1 times/.test(s4.cards.find((c) => c.name === 'BRIEF.md')?.meta || '')), s4);
   // lane artifacts-e2e: a zh UI names the kind in zh (the house language — the real-Opus zh run read "Document")
   await evalJs(`localStorage.setItem('vibespace.lang', 'zh'); true`);
   await cdp('Page.reload', {});
@@ -257,7 +257,7 @@ try {
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
   await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 2`, 20000);
   const kinds = await evalJs(`(${CARDS}).map((e) => e.querySelector('.chat-artifact-kind')?.textContent)`);
-  check('a zh UI: each document card names its kind 文档 (never the English word)', kinds.length === 2 && kinds.every((k) => k === '文档'), kinds);
+  check('a zh UI: each document card names its kind 文档 (never the English word)', kinds.length === 2 && verdictOf(kinds.every((k) => k === '文档')), kinds);
   await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
   console.log('⑤ lane artifacts-registries — a published page, a design, an attached file ⇒ their cards; a reload replays all three');
   await cdp('Page.reload', {});
@@ -265,7 +265,7 @@ try {
   await sleep(1000);
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
   await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 2`, 20000);
-  check('turn 4 played (Write site.html, then the real vibespace-page publish + vibespace-design new)', await turn('Publish a site and start a design', /Published and designed/));
+  check('turn 4 played (Write site.html, then the real vibespace-page publish + vibespace-design new)', verdictOf(await turn('Publish a site and start a design', /Published and designed/)));
   await waitFor(`(${CARDS}).length >= 4`, 10000);
   await evalJs(`(${VIEW})._chatInput.uploadFiles([new File(['attached\\n'], 'attach.pdf', { type: 'application/pdf' })]); true`);
   await waitFor(`(${CARDS}).length >= 5 && /Artifacts · 5/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 10000);
@@ -273,41 +273,41 @@ try {
   const c5 = await five();
   let cli = ''; try { cli = fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8'); } catch {}
   const pc = c5.filter((c) => c.key === ':' + SITE);
-  check('ONE page card on site.html — its Write and its publish are one row — saying "Published"', pc.length === 1 && pc[0].kind === 'page' && /^Published/.test(pc[0].meta || ''), { c5, cli });
-  check('a design card on the design folder, named by its title', c5.some((c) => c.key === ':' + LANDING && c.kind === 'design' && c.name === 'Landing'), { c5, cli });
-  check('an upload card on the attached file, "Attached by you"', c5.some((c) => c.key === ':' + ATT && c.kind === 'upload' && /^Attached by you/.test(c.meta || '')), c5);
-  check('the chip reads "Artifacts · 5"', /Artifacts · 5/.test(await evalJs(`document.querySelector('.chat-status-artifacts')?.textContent || ''`)));
+  check('ONE page card on site.html — its Write and its publish are one row — saying "Published"', pc.length === 1 && pc[0].kind === 'page' && verdictOf(/^Published/.test(pc[0].meta || '')), { c5, cli });
+  check('a design card on the design folder, named by its title', verdictOf(c5.some((c) => c.key === ':' + LANDING && c.kind === 'design' && c.name === 'Landing')), { c5, cli });
+  check('an upload card on the attached file, "Attached by you"', verdictOf(c5.some((c) => c.key === ':' + ATT && c.kind === 'upload' && /^Attached by you/.test(c.meta || ''))), c5);
+  check('the chip reads "Artifacts · 5"', verdictOf(/Artifacts · 5/.test(await evalJs(`document.querySelector('.chat-status-artifacts')?.textContent || ''`))));
   await evalJs(`window.__af = []; app.openBrowser = (u) => window.__af.push(['browser', u]); app.openDesign = (o) => window.__af.push(['design', o.dir, o.sessionId]); true`); // the doors, spied (the Design window / browser windows have their own suites)
   for (const k of [SITE, LANDING, ATT]) await evalJs(`(${CARDS}).find((e) => e.dataset.key === ${JSON.stringify(':' + k)})?.click(); true`);
   const doors = await evalJs('window.__af');
-  check('each card opens its own door: the page its /p/ link, the design the Design window (this chat), the upload the file', doors.length === 2 && doors[0][0] === 'browser' && /\/p\/pg/.test(doors[0][1]) && doors[1][0] === 'design' && doors[1][1] === LANDING && doors[1][2] === sid && await waitFor(`${wins(ATT)} >= 1`, 8000), doors);
+  check('each card opens its own door: the page its /p/ link, the design the Design window (this chat), the upload the file', doors.length === 2 && doors[0][0] === 'browser' && gateOf(/\/p\/pg/.test(doors[0][1])) && doors[1][0] === 'design' && doors[1][1] === LANDING && doors[1][2] === sid && verdictOf(await waitFor(`${wins(ATT)} >= 1`, 8000)), doors);
   await cdp('Page.reload', {});
   await waitApp();
   await sleep(1000);
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
   await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 5`, 20000);
   const r5 = await five();
-  check('after a reload all three replay (page · design · upload beside the two documents)', r5.length === 5 && ['page', 'design', 'upload'].every((k) => r5.some((c) => c.kind === k)), r5);
+  check('after a reload all three replay (page · design · upload beside the two documents)', r5.length === 5 && verdictOf(['page', 'design', 'upload'].every((k) => r5.some((c) => c.kind === k))), r5);
 
   console.log('⑥ lane artifacts-services — a job the conversation runs that listens ⇒ a service card + the Services head; zh 390 px opens it in the Web view');
-  check('turn 5 played (the REAL vibespace-job run of a page server)', await turn('Serve the site', /Site served/));
+  check('turn 5 played (the REAL vibespace-job run of a page server)', verdictOf(await turn('Serve the site', /Site served/)));
   const SVC = `(${CARDS}).filter((e) => e.dataset.kind === 'service')`;
   const born6 = await waitFor(`${SVC}.length === 1`, 45000); // the engine's 5 s tick + its ≤ 30 s listen read
   const CARD6 = `(() => { const e = ${SVC}[0]; if (!e) return null; const box = e.querySelector('.chat-artifact-path'), h = e.querySelector('.chat-artifact-href'), tn = h && h.firstChild; let firstLeft = null; if (tn && tn.length > 2) { const r = document.createRange(); r.setStart(tn, 0); r.setEnd(tn, 1); const a = r.getBoundingClientRect().left; r.setStart(tn, tn.length - 1); r.setEnd(tn, tn.length); firstLeft = a < r.getBoundingClientRect().left; } return { name: e.querySelector('.chat-artifact-name')?.textContent, kind: e.querySelector('.chat-artifact-kind')?.textContent, href: h?.textContent, via: e.querySelector('.chat-artifact-via')?.textContent, dir: box && getComputedStyle(box).direction, firstLeft, meta: e.querySelector('.chat-artifact-meta')?.textContent, state: e.dataset.state, w: Math.round(e.getBoundingClientRect().width), vw: innerWidth, n: ${SVC}.length }; })()`;
   const c6 = await evalJs(CARD6);
   const href = String((c6 && c6.href) || '');
   const PROXIED = new RegExp(`^http://127\\.0\\.0\\.1:${PORT}/proxy/http://127\\.0\\.0\\.1:(\\d+)/$`);
-  check('ONE service card names the job and links it THROUGH this instance\'s /proxy/ (never a raw host:port), printed LTR — its "h" painted left of its trailing "/"', born6 && c6.name === 'house-web' && PROXIED.test(href) && c6.via === 'Through this VibeSpace' && c6.dir === 'ltr' && c6.firstLeft === true && c6.state === 'running' && /Running/.test(c6.meta), { c6, cli: (() => { try { return fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8').slice(-600); } catch { return ''; } })() });
+  check('ONE service card names the job and links it THROUGH this instance\'s /proxy/ (never a raw host:port), printed LTR — its "h" painted left of its trailing "/"', gateOf(born6) && c6.name === 'house-web' && gateOf(PROXIED.test(href)) && c6.via === 'Through this VibeSpace' && c6.dir === 'ltr' && c6.firstLeft === true && c6.state === 'running' && verdictOf(/Running/.test(c6.meta)), { c6, cli: (() => { try { return fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8').slice(-600); } catch { return ''; } })() });
   const svcPort = Number((PROXIED.exec(href) || [])[1]) || 0;
   const served = await fetch(href).then((r) => r.text()).catch((e) => 'ERR ' + e.message);
-  check('the link answers with the served page (through the instance\'s proxy)', /House 3D viewer/.test(served), served.slice(0, 200));
+  check('the link answers with the served page (through the instance\'s proxy)', verdictOf(/House 3D viewer/.test(served)), served.slice(0, 200));
   await waitFor(`/Artifacts · 6/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 5000); // the chip re-reads on the card's live birth (debounced)
   await evalJs(`document.querySelector('.chat-status-artifacts')?.click(); true`);
   await waitFor(`!!document.querySelector('.chat-artifact-head')`, 5000);
   const list6 = await evalJs(`[...document.querySelectorAll('.chat-artifact-head, .chat-artifact-row')].filter((e) => !e.closest('.chat-artifact-code')).map((e) => e.classList.contains('chat-artifact-head') ? 'HEAD:' + e.textContent : e.dataset.kind)`);
   const fyI = list6.findIndex((k) => /^HEAD:For you · \d+$/.test(k)), mdI = list6.findIndex((k) => /^HEAD:Made here · \d+$/.test(k)); // lane artifacts-by-intent: the bands are the default heads
   const kindHeads = list6.filter((k) => k.startsWith('HEAD:')).map((k) => k.slice(5).replace(/ · \d+.*$/, '')) /* a kind's head also SAYS its press («Only this kind») after the count */, ORDER6 = ['Designs', 'Published pages', 'Documents', 'Images', 'Services', 'Other files'], at6 = kindHeads.map((w) => ORDER6.indexOf(w));
-  check('the chip\'s list opens on its KINDS in the owner\'s order (2026-11-14: designs · published pages · documents · images · services · other files), each head with its count — the opened design, the published page, the running service and the documents each under its own', kindHeads[0] === 'Designs' && at6.every((x) => x >= 0) && at6.every((x, k) => k === 0 || at6[k - 1] < x) && ['Designs', 'Published pages', 'Documents', 'Services'].every((w) => kindHeads.includes(w)), { kindHeads, list6, api: await fetch(`http://127.0.0.1:${PORT}/api/artifacts?sessionId=${encodeURIComponent(sid)}`).then((r) => r.json()).then((v) => v.items.map((b) => b.kind)).catch((e) => e.message) });
+  check('the chip\'s list opens on its KINDS in the owner\'s order (2026-11-14: designs · published pages · documents · images · services · other files), each head with its count — the opened design, the published page, the running service and the documents each under its own', kindHeads[0] === 'Designs' && gateOf(at6.every((x) => x >= 0)) && gateOf(at6.every((x, k) => k === 0 || at6[k - 1] < x)) && verdictOf(['Designs', 'Published pages', 'Documents', 'Services'].every((w) => kindHeads.includes(w))), { kindHeads, list6, api: await fetch(`http://127.0.0.1:${PORT}/api/artifacts?sessionId=${encodeURIComponent(sid)}`).then((r) => r.json()).then((v) => v.items.map((b) => b.kind)).catch((e) => e.message) });
 
   // ── lane artifacts-list-scale: THE LIST AT SCALE over the owner's 217 rows (43 + 174) — bounded at 1280, a filter, a
   //    group switch, 代码 opened, the ⤢ window + a column sort, the window replayed after a reload (ja); the review
@@ -339,17 +339,17 @@ try {
   await evalJs(`document.documentElement.setAttribute('data-theme', 'light'); true`);
   await afOpen();
   const a1 = await afRect();
-  check('AT SCALE (217 rows, 1280): the popover is BOUNDED — its top and bottom inside the viewport — and its list scrolls', a1 && a1.top >= 0 && a1.bottom <= a1.h && a1.scrolls && a1.rows > 5 && /43 artifacts · 174 code files/.test(a1.count), a1);
+  check('AT SCALE (217 rows, 1280): the popover is BOUNDED — its top and bottom inside the viewport — and its list scrolls', gateOf(a1) && a1.top >= 0 && a1.bottom <= a1.h && gateOf(a1.scrolls) && a1.rows > 5 && verdictOf(/43 artifacts · 174 code files/.test(a1.count)), a1);
   await afShot('A-1280-light-en');
   await evalJs(`document.documentElement.setAttribute('data-theme', 'dark'); true`); await sleep(150); await afShot('A-1280-dark-en');
   await afType('sec10');
   const a2 = await afRect();
-  check('a filter typed ("sec10"): one row, the band hidden, the count says the matches', a2 && a2.rows === 1 && /^1 match/.test(a2.count) && !(await evalJs(`!!${AF_PANEL}.querySelector('.af-head-recent')`)), a2);
+  check('a filter typed ("sec10"): one row, the band hidden, the count says the matches', gateOf(a2) && a2.rows === 1 && gateOf(/^1 match/.test(a2.count)) && !(await evalJs(`!!${AF_PANEL}.querySelector('.af-head-recent')`)), a2);
   await afShot('A-1280-dark-en-filter');
   await afType('');
   const g1 = await afMenu('.af-group', 'By helper');
   const heads1 = await evalJs(`[...${AF_PANEL}.querySelectorAll('.chat-artifact-head')].map((h) => h.dataset.group)`);
-  check('group switched to "By helper" through the ▾ menu: every head is a helper (or, past 8 rows, a folder head inside one)', g1 && heads1.length > 2 && heads1.filter((k) => k !== 'recent').every((k) => k.startsWith('h:') || k.startsWith('f:h:')), heads1);
+  check('group switched to "By helper" through the ▾ menu: every head is a helper (or, past 8 rows, a folder head inside one)', gateOf(g1) && heads1.length > 2 && verdictOf(heads1.filter((k) => k !== 'recent').every((k) => k.startsWith('h:') || k.startsWith('f:h:'))), heads1);
   await afShot('A-1280-dark-en-by-helper');
   await afMenu('.af-group', 'By kind');
   await evalJs(`${AF_PANEL}.querySelector('.chat-artifact-head[data-group="k:code"]').click(); true`);
@@ -361,7 +361,7 @@ try {
   await waitFor(`document.querySelectorAll('.af-window .af-trow').length === 217`, 8000);
   await evalJs(`[...document.querySelectorAll('.af-window .af-th')].find((h) => h.dataset.col === 'name').click(); true`);
   const w1 = await evalJs(`(() => { const rows = [...document.querySelectorAll('.af-window .af-trow')].map((r) => r.querySelector('.chat-artifact-name').textContent); const rail = [...document.querySelectorAll('.af-window .af-rail-item')].map((r) => r.dataset.rail + ' ' + r.querySelector('.af-rail-n').textContent); return { n: rows.length, first: rows.slice(0, 3), sorted: rows.every((x, i) => i === 0 || rows[i - 1].localeCompare(x, undefined, { numeric: true, sensitivity: 'base' }) <= 0), rail, panelGone: !${AF_PANEL} }; })()`);
-  check('the ⤢ opens the Artifacts WINDOW: the rail (kinds + helpers with counts) and 217 rows; a click on "Name" sorts the table', w1 && w1.n === 217 && w1.sorted && w1.rail.includes('all 217') && w1.rail.includes('k:code 174') && w1.panelGone, w1);
+  check('the ⤢ opens the Artifacts WINDOW: the rail (kinds + helpers with counts) and 217 rows; a click on "Name" sorts the table', gateOf(w1) && w1.n === 217 && gateOf(w1.sorted) && gateOf(w1.rail.includes('all 217')) && gateOf(w1.rail.includes('k:code 174')) && verdictOf(w1.panelGone), w1);
   await afShot('B-1280-light-en');
   await evalJs('app.layoutManager._doAutoSave(); true'); await sleep(800);
   const afSaved = await evalJs(`(() => { try { return JSON.stringify(app.layoutManager.captureState()).includes('openArtifacts'); } catch (e) { return 'ERR ' + e.message; } })()`);
@@ -371,13 +371,13 @@ try {
   // this harness restores no window on a reload (the suite re-attaches its chat by hand), so the layout's captured openSpec is replayed through its action's door
   await evalJs(`app.openArtifacts(${JSON.stringify(afSpec)}); true`);
   const replayed = await waitFor(`document.querySelectorAll('.af-window .af-trow').length > 0`, 15000);
-  check('the window REPLAYS after a reload: the layout captured its openSpec {action: openArtifacts, sessionId, name} and the spec alone re-opens it with the conversation\'s rows', afSaved === true && afSpec && afSpec.action === 'openArtifacts' && afSpec.sessionId && replayed, { afSaved, afSpec, rows: await evalJs(`document.querySelectorAll('.af-window .af-trow').length`) });
+  check('the window REPLAYS after a reload: the layout captured its openSpec {action: openArtifacts, sessionId, name} and the spec alone re-opens it with the conversation\'s rows', afSaved === true && gateOf(afSpec) && afSpec.action === 'openArtifacts' && gateOf(afSpec.sessionId) && verdictOf(replayed), { afSaved, afSpec, rows: await evalJs(`document.querySelectorAll('.af-window .af-trow').length`) });
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); document.documentElement.setAttribute('data-theme', 'dark'); true`);
   await waitFor(`!!(${VIEW})`, 20000); await sleep(800);
   await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'artifacts') app.wm.closeWindow(w.id); true`);
   await sleep(300); await afOpen();
   const a3 = await afRect();
-  check('ja: the popover\'s words are Japanese (the count line)', a3 && /成果物 43 件/.test(a3.count), a3);
+  check('ja: the popover\'s words are Japanese (the count line)', gateOf(a3) && verdictOf(/成果物 43 件/.test(a3.count)), a3);
   await afShot('A-1280-dark-ja');
   await evalJs(afStubFetch); await evalJs(`${AF_PANEL}.querySelector('.af-expand').click(); true`);
   await waitFor(`document.querySelectorAll('.af-window .af-trow').length === 217`, 8000); await afShot('B-1280-dark-ja');
@@ -393,7 +393,7 @@ try {
   await evalJs(`document.documentElement.setAttribute('data-theme', 'light'); true`);
   await afOpen();
   const p1 = await afRect();
-  check('phone 390 (zh): the Artifacts popover is a FULL-HEIGHT sheet (lane artifacts-by-intent) — full width, from under the phone\'s top bar to the bottom — and scrolls; the words are Chinese', p1 && p1.left === 0 && p1.width === p1.w && Math.abs(p1.bottom - p1.h) <= 2 && p1.top <= 64 && p1.scrolls && /43 项产出/.test(p1.count), p1);
+  check('phone 390 (zh): the Artifacts popover is a FULL-HEIGHT sheet (lane artifacts-by-intent) — full width, from under the phone\'s top bar to the bottom — and scrolls; the words are Chinese', gateOf(p1) && p1.left === 0 && p1.width === p1.w && Math.abs(p1.bottom - p1.h) <= 2 && p1.top <= 64 && gateOf(p1.scrolls) && verdictOf(/43 项产出/.test(p1.count)), p1);
   await afShot('A-390-light-zh');
   await evalJs(`document.documentElement.setAttribute('data-theme', 'dark'); true`); await sleep(150); await afShot('A-390-dark-zh');
   await evalJs(afStubFetch); await evalJs(`${AF_PANEL}.querySelector('.af-expand').click(); true`);
@@ -404,11 +404,11 @@ try {
   await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'artifacts') app.wm.closeWindow(w.id); document.documentElement.setAttribute('data-theme', 'dark'); (${VIEW})._refreshArtifacts(); true`);
   await sleep(600);
   const z6 = await evalJs(CARD6);
-  check('zh at 390 px: the service card says 服务 · 运行中 · 经本实例代理, its url LTR, inside the viewport', z6 && z6.kind === '服务' && /运行中/.test(z6.meta) && z6.via === '经本实例代理' && z6.dir === 'ltr' && z6.firstLeft === true && z6.w > 0 && z6.w <= z6.vw, z6);
+  check('zh at 390 px: the service card says 服务 · 运行中 · 经本实例代理, its url LTR, inside the viewport', gateOf(z6) && z6.kind === '服务' && gateOf(/运行中/.test(z6.meta)) && z6.via === '经本实例代理' && z6.dir === 'ltr' && z6.firstLeft === true && z6.w > 0 && z6.w <= z6.vw, z6);
   await evalJs(`${SVC}[0].scrollIntoView(); ${SVC}[0].click(); true`);
   const webOk = await waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'browser' && w.content?.querySelector('iframe')?.src === ${JSON.stringify(href)})`, 10000);
   const pmode = await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'browser').map((w) => ({ input: w.content?.querySelector('input.file-path-input')?.value, proxy: w._openSpec && w._openSpec.proxy }))`);
-  check('one click opens the link in the Web view (a browser window, never a new tab) in PROXY mode on the service\'s target', webOk && pmode.some((w) => w.proxy === true && w.input === `http://127.0.0.1:${svcPort}/`), pmode);
+  check('one click opens the link in the Web view (a browser window, never a new tab) in PROXY mode on the service\'s target', gateOf(webOk) && verdictOf(pmode.some((w) => w.proxy === true && w.input === `http://127.0.0.1:${svcPort}/`)), pmode);
   let frameText = '';
   for (let i = 0; i < 40 && !/House 3D viewer/.test(frameText); i++) {
     try {
@@ -419,16 +419,16 @@ try {
     } catch { }
     if (!/House 3D viewer/.test(frameText)) await sleep(250);
   }
-  check('the Web view shows the served page', /House 3D viewer/.test(frameText), frameText.slice(0, 200));
+  check('the Web view shows the served page', verdictOf(/House 3D viewer/.test(frameText)), frameText.slice(0, 200));
   // lane artifacts-services-url: a (scratch) publish of the port ⇒ the SAME card is patched to the public URL + 已发布; unpublish ⇒ back
   const J6 = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
   const fw6 = await fetch(`http://127.0.0.1:${PORT}/api/hosts/__local__/port-forward`, { ...J6, body: JSON.stringify({ port: svcPort, label: 'service: house-web' }) }).then((r) => r.json()).catch((e) => ({ error: e.message }));
   const pub6 = fw6 && fw6.id ? await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(fw6.id)}/publish`, { ...J6, body: '{}' }).then((r) => r.json()).catch((e) => ({ error: e.message })) : null;
   const pubOk = await waitFor(`(() => { const c = ${CARD6}; return !!c && c.n === 1 && c.href === 'https://house-web.relay.example.test/' && c.via === '已发布'; })()`, 10000);
-  check('after a scratch publish the SAME card links the published address + 已发布 (patched in place by the forwards broadcast)', pubOk, { fw6, pub6, card: await evalJs(CARD6) });
+  check('after a scratch publish the SAME card links the published address + 已发布 (patched in place by the forwards broadcast)', verdictOf(pubOk), { fw6, pub6, card: await evalJs(CARD6) });
   if (fw6 && fw6.id) await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(fw6.id)}/publish`, { method: 'DELETE' }).catch(() => null);
   const backOk = await waitFor(`(() => { const c = ${CARD6}; return !!c && c.n === 1 && c.href === ${JSON.stringify(href)} && c.via === '经本实例代理'; })()`, 10000);
-  check('unpublish ⇒ the card is back on the proxy url + 经本实例代理', backOk, await evalJs(CARD6));
+  check('unpublish ⇒ the card is back on the proxy url + 经本实例代理', verdictOf(backOk), await evalJs(CARD6));
   await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
   // ── int232 (the integration brief): THE REAL LAYOUT RESTORE of the Artifacts window — the ⑦ replay above re-opens the
   //    window from its captured openSpec by hand, because nothing in this suite is a user's input (the autosave keeps no
@@ -475,7 +475,7 @@ try {
   const back8 = await waitFor(`${AFW}.length > 0 && ${AFW}[0].content.querySelectorAll('.af-trow').length > 0`, 20000);
   await sleep(1500);
   const r8 = await afBox();
-  check('after a reload the window comes back BY ITSELF (nothing re-opened by hand): ONE Artifacts window for this conversation, its rows drawn, at the position it was dragged to (±2 px) — not where a fresh one opens', back8 && r8.n === 1 && r8.sid === sid && r8.rows > 0 && Math.abs(r8.l - d8.l) <= 2 && Math.abs(r8.t - d8.t) <= 2 && Math.abs(r8.w - d8.w) <= 2 && Math.abs(r8.h - d8.h) <= 2, { d8, r8 });
+  check('after a reload the window comes back BY ITSELF (nothing re-opened by hand): ONE Artifacts window for this conversation, its rows drawn, at the position it was dragged to (±2 px) — not where a fresh one opens', gateOf(back8) && r8.n === 1 && r8.sid === sid && r8.rows > 0 && Math.abs(r8.l - d8.l) <= 2 && Math.abs(r8.t - d8.t) <= 2 && Math.abs(r8.w - d8.w) <= 2 && Math.abs(r8.h - d8.h) <= 2, { d8, r8 });
   await afShot('R-1400-restored');
 
   console.log('⑨ lane artifacts-auto-open-quiet — the phone (390 px): an automatic open opens nothing (the card + the chip only); the screen stays');
@@ -485,7 +485,7 @@ try {
   await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 2`, 20000);
   await evalJs(`(app.settings.set('artifacts.autoOpenDocs', true), app.wm.focusWindow((${VIEW}).winInfo.id), true)`); await sleep(400); // the setting back ON after the reload (a set just before a reload can lose its save)
   const b9 = await evalJs(`({ active: app.wm.activeWindowId, n: app.wm.windows.size, on: app.settings.get('artifacts.autoOpenDocs') })`);
-  check('turn 6 played (Write docs/PHONE.md)', await turn('Write phone notes', /Phone notes written/));
+  check('turn 6 played (Write docs/PHONE.md)', verdictOf(await turn('Write phone notes', /Phone notes written/)));
   await waitFor(`(${CARDS}).some((e) => e.dataset.key === ${JSON.stringify(':' + PHONE)})`, 8000); await sleep(1500);
   const a9 = await evalJs(`({ active: app.wm.activeWindowId, n: app.wm.windows.size, phone: ${wins(PHONE)} })`);
   check('the phone: PHONE.md\'s card is drawn, NO window opened for it, the chat stays the screen (setting on)', b9.on === true && a9.phone === 0 && a9.active === b9.active && a9.n === b9.n, { b9, a9 });
@@ -495,4 +495,4 @@ try {
 }
 console.log(`\n${passed} passed, ${failed} failed`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

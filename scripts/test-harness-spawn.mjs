@@ -26,7 +26,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -68,16 +68,16 @@ console.log('— ① the ONE registration line');
 H.register(acme('acme', { pool: true }));
 H.register(acme('acme-nopool', { pool: false }));
 H.register(acme('acme-perseat', { pool: false, spawnForm: 'isolated-home' })); // lane antigravity-harness: named accounts, no pool
-ok(H.has('acme') && !H.isBuiltin('acme'), 'register() is the whole wiring: acme is a contributed harness');
+ok(gateOf(H.has('acme')) && !H.isBuiltin('acme'), 'register() is the whole wiring: acme is a contributed harness');
 ok(capsOf('acme').pool === true && capsOf('acme-nopool').pool === false && capsOf('acme').fork === false,
   'capsOf answers the DECLARED row of a contributed harness (missing keys read the all-false row)');
 const prodRegistry = createAdapterRegistry({ ptyWrapper: '/stub/pty-wrapper.js' });
 ok(prodRegistry.get('acme') instanceof AcmeAdapter && prodRegistry.get('acme') === prodRegistry.get('acme'),
   'the PRODUCTION adapter registry (built before the register) resolves acme from its descriptor, once');
 let threw = null; try { H.register({ id: 'acme-typo', quota: NULL_QUOTA, spawn: { otelExprot: true } }); } catch (e) { threw = e.message; }
-ok(/spawn\.otelExprot is not a declared spawn row/.test(String(threw)), 'a misspelt spawn row THROWS at registration (never a silent "no")', threw);
+ok(verdictOf(/spawn\.otelExprot is not a declared spawn row/.test(String(threw))), 'a misspelt spawn row THROWS at registration (never a silent "no")', threw);
 threw = null; try { H.register({ id: 'acme-type', quota: NULL_QUOTA, spawn: { localPipe: 'yes' } }); } catch (e) { threw = e.message; }
-ok(/spawn\.localPipe must be a boolean/.test(String(threw)), '…and so does a row of the wrong type', threw);
+ok(verdictOf(/spawn\.localPipe must be a boolean/.test(String(threw))), '…and so does a row of the wrong type', threw);
 ok(!/\bacme\b/i.test(read('src/ws-create.js')) && !/\bacme\b/i.test(read('server.js')), 'src/ws-create.js and server.js never name the fake (zero core edits)');
 
 // ── ② a create through the REAL handler, down to the (stub) pty spawn
@@ -125,20 +125,20 @@ const r = await drive(wsCreate, { backend: 'acme' });
 const created = r.sent.find((m) => m.type === 'created');
 ok(!!created && !r.sent.some((m) => m.type === 'error'), 'the create answers `created` — no refusal, no throw', r.sent.map((m) => m.type + (m.message ? ':' + m.message : '')));
 const sp = r.spawned[0];
-ok(r.spawned.length === 1 && sp.cmd === '/stub/dtach' && sp.args.includes('acme-cli') && sp.args.includes('--acme') && !sp.args.includes('claude-must-not-run'),
+ok(r.spawned.length === 1 && sp.cmd === '/stub/dtach' && gateOf(sp.args.includes('acme-cli')) && gateOf(sp.args.includes('--acme')) && !sp.args.includes('claude-must-not-run'),
   'ONE pty spawn, under dtach, running the ADAPTER\'s command + args (never a claude fallthrough)', sp && sp.args.slice(-4));
-ok(!!sp && sp.env && sp.env.ACME_HOME === '/acme-home' && !sp.args.some((a) => /^[A-Z_][A-Z0-9_]*=/.test(a)),
+ok(!!sp && gateOf(sp.env) && sp.env.ACME_HOME === '/acme-home' && !sp.args.some((a) => /^[A-Z_][A-Z0-9_]*=/.test(a)),
   'the adapter\'s spawn env rides the spawn\'s ENV — the line carries no NAME=value word (lane antigravity-spawn-argv)', sp && sp.args.filter((a) => /=/.test(a)).slice(-3));
-ok(r.session && r.session.backend === 'acme' && r.session.mode === 'terminal', 'the live session is an acme terminal');
-ok(r.session && r.session._authAtSpawn === 'acme-global', 'its global-login guess is the DECLARED spawn.authAtSpawn row', r.session && r.session._authAtSpawn);
-ok(!!sp && sp.args.includes('--acme-status') && sp.args.includes('/stub/vibespace-usage'), 'the terminal statusline goes through the DECLARED spawn.statusline hook', sp && sp.args.slice(-4));
+ok(gateOf(r.session) && r.session.backend === 'acme' && r.session.mode === 'terminal', 'the live session is an acme terminal');
+ok(gateOf(r.session) && r.session._authAtSpawn === 'acme-global', 'its global-login guess is the DECLARED spawn.authAtSpawn row', r.session && r.session._authAtSpawn);
+ok(!!sp && gateOf(sp.args.includes('--acme-status')) && verdictOf(sp.args.includes('/stub/vibespace-usage')), 'the terminal statusline goes through the DECLARED spawn.statusline hook', sp && sp.args.slice(-4));
 ok(r.resolved.join() === 'acme', 'caps.pool:true + managed creds ⇒ the pool/billing gate asks resolveForSpawn for acme', r.resolved);
 const rn = await drive(wsCreate, { backend: 'acme-nopool' });
-ok(rn.sent.some((m) => m.type === 'created') && rn.resolved.length === 0, '…and caps.pool:false skips it (the gate is the ROW, not the id)', rn.resolved);
+ok(gateOf(rn.sent.some((m) => m.type === 'created')) && rn.resolved.length === 0, '…and caps.pool:false skips it (the gate is the ROW, not the id)', rn.resolved);
 const rps = await drive(wsCreate, { backend: 'acme-perseat' });
-ok(rps.sent.some((m) => m.type === 'created') && rps.resolved.join() === 'acme-perseat', '…but caps.pool:false WITH a declared creds.spawnForm (per-session named accounts — antigravity) still asks resolveForSpawn', rps.resolved);
+ok(gateOf(rps.sent.some((m) => m.type === 'created')) && rps.resolved.join() === 'acme-perseat', '…but caps.pool:false WITH a declared creds.spawnForm (per-session named accounts — antigravity) still asks resolveForSpawn', rps.resolved);
 const rr = await drive(wsCreate, { backend: 'acme', resume: true, resumeId: 'acme-conv-1', ignoreNoConvo: true });
-ok(rr.session && rr.session._resumeSpawn === true && rr.spawned[0]?.args.includes('acme-conv-1'), 'a resume carries the DECLARED spawn.resumeMayFork marker', rr.session && rr.session._resumeSpawn);
+ok(gateOf(rr.session) && rr.session._resumeSpawn === true && verdictOf(rr.spawned[0]?.args.includes('acme-conv-1')), 'a resume carries the DECLARED spawn.resumeMayFork marker', rr.session && rr.session._resumeSpawn);
 
 // ── ③ the controls: ONE literal-id branch restored in a patched copy ⇒ the row is lost
 console.log('— ③ mutation controls (one id branch restored, from the product source)');
@@ -165,10 +165,10 @@ const closedWorld = (file, patched, tag) => {
 for (const [name, line, old, judge, file = 'src/ws-create.js'] of CONTROLS) {
   const fsrc = read(file);
   ok(fsrc.split(line).length === 2, `control ${name}: the gate is one identifiable line in the product source (${file})`);
-  ok(judge(r), `control ${name}: the shipped gate passes the fake's row`);
+  ok(verdictOf(judge(r)), `control ${name}: the shipped gate passes the fake's row`);
   const mut = file === 'src/ws-create.js' ? M.load(file, editAnchor(src, line, old, "src/ws-create.js"), name.replace(/\W+/g, '-')) : closedWorld(file, fsrc.replace(line, old), name.replace(/\W+/g, '-'));
   const x = await drive(mut, { backend: 'acme' });
-  ok(x.sent.some((m) => m.type === 'created') && !judge(x), `control ${name}: with the id branch restored the fake's declared row is LOST (the leg above can go red)`);
+  ok(gateOf(x.sent.some((m) => m.type === 'created')) && !judge(x), `control ${name}: with the id branch restored the fake's declared row is LOST (the leg above can go red)`);
 }
 
 // ── ④ THE SPAWN-LADDER SEAM (lane dc-seams-server, decoupling wave 2b): a machine transport = src/spawn/<id>.js +
@@ -183,11 +183,11 @@ console.log('— ④ the spawn-ladder seam: a fake transport through ONE registr
     'spawnFor: no host ⇒ the hostless member; a record naming no (or an unknown) transport ⇒ the hostDefault member (the old else-branch); a declared one ⇒ itself');
   const throws = (list) => { try { SPW.check(list); return false; } catch { return true; } };
   const stub = { terminal() { }, chat() { } };
-  ok(throws([...SPW.TRANSPORTS, { id: 'x2', hostless: true, ...stub }]) && throws([...SPW.TRANSPORTS, { id: 'x3', terminal() { } }])
-    && throws([...SPW.TRANSPORTS, { ...SPW.TRANSPORTS[1] }]) && !throws(SPW.TRANSPORTS),
+  ok(gateOf(throws([...SPW.TRANSPORTS, { id: 'x2', hostless: true, ...stub }])) && gateOf(throws([...SPW.TRANSPORTS, { id: 'x3', terminal() { } }]))
+    && gateOf(throws([...SPW.TRANSPORTS, { ...SPW.TRANSPORTS[1] }])) && !throws(SPW.TRANSPORTS),
     'NEGATIVE CONTROL: the registry refuses a second hostless member, a member without chat(c), a duplicate id');
   const wsc = read('src/ws-create.js');
-  ok(!/\.transport\s*[!=]==?/.test(wsc) && /spawnFor\(h\)\.terminal\(/.test(wsc) && /spawnFor\(h\)\.chat\(/.test(wsc) && /spawnFor\(null\)\[sessionMode\]\(/.test(wsc),
+  ok(!/\.transport\s*[!=]==?/.test(wsc) && gateOf(/spawnFor\(h\)\.terminal\(/.test(wsc)) && gateOf(/spawnFor\(h\)\.chat\(/.test(wsc)) && verdictOf(/spawnFor\(null\)\[sessionMode\]\(/.test(wsc)),
     'ws-create names no transport: every ladder is asked through spawnFor (terminal, chat, this machine; the pool facts\' transport = the member id)');
   globalThis.__acmeLinkCalls = [];
   const ACME_LINK = `module.exports = {
@@ -213,9 +213,9 @@ console.log('— ④ the spawn-ladder seam: a fake transport through ONE registr
   const sp0 = x.spawned[0];
   ok(globalThis.__acmeLinkCalls.length === 1 && globalThis.__acmeLinkCalls[0].mode === 'terminal' && globalThis.__acmeLinkCalls[0].host === 'host-acme-1',
     'a terminal create on an acme-link host runs the acme-link ladder (once, with the host record)', globalThis.__acmeLinkCalls);
-  ok(x.sent.some((m) => m.type === 'created') && !!sp0 && sp0.cmd === '/stub/dtach' && sp0.args.includes('acme-link-cli') && sp0.args.includes('host-acme-1'),
+  ok(gateOf(x.sent.some((m) => m.type === 'created')) && !!sp0 && sp0.cmd === '/stub/dtach' && gateOf(sp0.args.includes('acme-link-cli')) && verdictOf(sp0.args.includes('host-acme-1')),
     'its spawn line is what the SHARED tail spawns (dtach → the wrapper → acme-link-cli --to <host>), and the create answers created', sp0 && sp0.args.slice(-6));
-  ok(x.session && x.session.host === 'host-acme-1', 'the live session is on the acme-link host');
+  ok(gateOf(x.session) && x.session.host === 'host-acme-1', 'the live session is on the acme-link host');
   const y = await drive(mod, { backend: 'claude', hostId: 'host-acme-1', mode: 'chat' }, { hosts: hostsStub }); // a chat needs a normalizer: the real claude one
   ok(globalThis.__acmeLinkCalls.length === 2 && globalThis.__acmeLinkCalls[1].mode === 'chat' && y.spawned.length === 0 && !y.session,
     'a chat create asks the same member\'s chat(c); its "answered the socket" (nothing) ends the create with NO spawn', { calls: globalThis.__acmeLinkCalls.length, spawned: y.spawned.length });
@@ -257,9 +257,9 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
 
   const c1 = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am }, AMBIENT);
   const e1 = (c1.spawned[0] || {}).env || {};
-  ok(c1.sent.some((m) => m.type === 'created') && c1.spawned.length === 1 && c1.session && c1.session._accountId === ds.id, 'claude + DeepSeek: the create answers created, ONE spawn, the session bills the provider row', c1.sent.map((m) => m.type + (m.message ? ':' + m.message : '')));
+  ok(gateOf(c1.sent.some((m) => m.type === 'created')) && c1.spawned.length === 1 && gateOf(c1.session) && c1.session._accountId === ds.id, 'claude + DeepSeek: the create answers created, ONE spawn, the session bills the provider row', c1.sent.map((m) => m.type + (m.message ? ':' + m.message : '')));
   ok(e1.ANTHROPIC_BASE_URL === 'https://api.deepseek.com/anthropic' && e1.ANTHROPIC_AUTH_TOKEN === KEY && e1.ANTHROPIC_MODEL === 'deepseek-chat' && e1.ANTHROPIC_DEFAULT_OPUS_MODEL === 'deepseek-chat' && e1.ANTHROPIC_SMALL_FAST_MODEL === 'deepseek-chat', 'the CLI\'s env: the provider\'s address, its key under the variable its auth names, every alias the CLI resolves itself on the provider\'s model (D7)', { base: e1.ANTHROPIC_BASE_URL, model: e1.ANTHROPIC_MODEL });
-  ok(!('CLAUDE_CODE_OAUTH_TOKEN' in e1) && !e1.ANTHROPIC_API_KEY && e1.CLAUDE_SECURESTORAGE_CONFIG_DIR === homeC && fs.statSync(homeC).isDirectory() && fs.readdirSync(homeC).length === 0 && (fs.statSync(homeC).mode & 0o777) === 0o700, 'NO OTHER LOGIN rides along: the ambient OAuth token and Console key are gone, the secret store is the provider\'s OWN EMPTY dir (0700) — the machine\'s subscription is not reachable from this child', { store: e1.CLAUDE_SECURESTORAGE_CONFIG_DIR });
+  ok(!('CLAUDE_CODE_OAUTH_TOKEN' in e1) && !e1.ANTHROPIC_API_KEY && e1.CLAUDE_SECURESTORAGE_CONFIG_DIR === homeC && gateOf(fs.statSync(homeC).isDirectory()) && fs.readdirSync(homeC).length === 0 && (fs.statSync(homeC).mode & 0o777) === 0o700, 'NO OTHER LOGIN rides along: the ambient OAuth token and Console key are gone, the secret store is the provider\'s OWN EMPTY dir (0700) — the machine\'s subscription is not reachable from this child', { store: e1.CLAUDE_SECURESTORAGE_CONFIG_DIR });
   ok(!c1.spawned[0].args.some((a) => String(a).includes(KEY)) && !JSON.stringify(c1.sent).includes(KEY) && filesHold(KEY).length === 0, 'the key is in NO argv word, NO frame the create sent, NO file it wrote (sockets / buffers / meta)', filesHold(KEY));
 
   const c2 = await drive(wsCreate, { backend: 'codex', mode: 'chat', accountId: lab.id }, { accounts: am }, AMBIENT);
@@ -267,8 +267,8 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const ai = s2.args.indexOf('app-server');
   const cItems = s2.args.slice(0, ai).filter((a, i, all) => all[i - 1] === '-c');
   const homeX = PSP.homeOf(DATA, lab.id, 'codex');
-  ok(c2.sent.some((m) => m.type === 'created') && c2.spawned.length === 1 && ai > 0 && cItems.includes(`model_providers.pv_${lab.id.slice(3)}.base_url="http://127.0.0.1:9/v1"`) && cItems.includes(`model_providers.pv_${lab.id.slice(3)}.env_key="VIBESPACE_PROVIDER_KEY"`) && cItems.includes(`model_providers.pv_${lab.id.slice(3)}.wire_api="responses"`) && cItems.includes(`model_provider="pv_${lab.id.slice(3)}"`) && cItems.includes('model="qwen3-coder"'), 'codex + a self-hosted provider (chat): its -c table rides AHEAD of app-server (the provider, its address, the VARIABLE its key is in, Responses, the default model)', s2.args.slice(Math.max(0, ai - 6), ai + 1));
-  ok(s2.env.VIBESPACE_PROVIDER_KEY === KEY && s2.env.CODEX_HOME === homeX && fs.lstatSync(path.join(homeX, 'sessions')).isSymbolicLink() && !fs.existsSync(path.join(homeX, 'auth.json')) && !s2.args.some((a) => String(a).includes(KEY)) && filesHold(KEY).length === 0, 'its key rides the env only (VIBESPACE_PROVIDER_KEY — the ambient copy replaced), CODEX_HOME = the provider\'s own home (sessions shared, NO auth.json: the ChatGPT login cannot ride along), nothing in argv or a file', { home: s2.env.CODEX_HOME });
+  ok(gateOf(c2.sent.some((m) => m.type === 'created')) && c2.spawned.length === 1 && ai > 0 && gateOf(cItems.includes(`model_providers.pv_${lab.id.slice(3)}.base_url="http://127.0.0.1:9/v1"`)) && gateOf(cItems.includes(`model_providers.pv_${lab.id.slice(3)}.env_key="VIBESPACE_PROVIDER_KEY"`)) && gateOf(cItems.includes(`model_providers.pv_${lab.id.slice(3)}.wire_api="responses"`)) && gateOf(cItems.includes(`model_provider="pv_${lab.id.slice(3)}"`)) && verdictOf(cItems.includes('model="qwen3-coder"')), 'codex + a self-hosted provider (chat): its -c table rides AHEAD of app-server (the provider, its address, the VARIABLE its key is in, Responses, the default model)', s2.args.slice(Math.max(0, ai - 6), ai + 1));
+  ok(s2.env.VIBESPACE_PROVIDER_KEY === KEY && s2.env.CODEX_HOME === homeX && gateOf(fs.lstatSync(path.join(homeX, 'sessions')).isSymbolicLink()) && !fs.existsSync(path.join(homeX, 'auth.json')) && !s2.args.some((a) => String(a).includes(KEY)) && filesHold(KEY).length === 0, 'its key rides the env only (VIBESPACE_PROVIDER_KEY — the ambient copy replaced), CODEX_HOME = the provider\'s own home (sessions shared, NO auth.json: the ChatGPT login cannot ride along), nothing in argv or a file', { home: s2.env.CODEX_HOME });
 
   const plain = await drive(wsCreate, { backend: 'claude' }, { accounts: am }, () => ({}));
   ok(plain.spawned.length === 1 && !('ANTHROPIC_BASE_URL' in plain.spawned[0].env) && !('ANTHROPIC_AUTH_TOKEN' in plain.spawned[0].env), 'the other direction: a conversation on the machine\'s own login carries no provider address and no provider key');
@@ -315,13 +315,13 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const HUBARG = ", undefined, process.env)) delete env[n];";
   if (src.split(HUBARG).length !== 2) throw new Error('the anchor of the control «the hub env\'s fingerprint» is not in the source once');
   const md0 = await viaHub(M.load('src/ws-create.js', anchored(src, HUBARG, ')) delete env[n];', 'the hub env\'s fingerprint'), 'pv-nohubfp'));
-  ok(md0.spawned.length === 1 && carried(md0, PLAN_C).includes('ANTHROPIC_BASE_URL') && carried(md0, PLAN_C).includes('ANTHROPIC_AUTH_TOKEN'), 'CONTROL (R1): the strip reading the start\'s env alone never sees the fingerprint on the real road ⇒ the third party\'s address and key reach the start ⇒ the leg goes RED', carried(md0, PLAN_C));
+  ok(md0.spawned.length === 1 && gateOf(carried(md0, PLAN_C).includes('ANTHROPIC_BASE_URL')) && verdictOf(carried(md0, PLAN_C).includes('ANTHROPIC_AUTH_TOKEN')), 'CONTROL (R1): the strip reading the start\'s env alone never sees the fingerprint on the real road ⇒ the third party\'s address and key reach the start ⇒ the leg goes RED', carried(md0, PLAN_C));
   const stripLine = src.split('\n').find((l) => l.includes("require('./server/provider-spawn.js').ambientPlanNames(backend, env"));
   if (!stripLine) throw new Error('the anchor of the control «the spawn line\'s plan strip» is not in the source');
   const kM = await drive(M.load('src/ws-create.js', anchored(src, stripLine + '\n', '', 'the spawn line\'s plan strip'), 'pv-nostrip'), { backend: 'claude' }, { accounts: am }, SEEDED);
   const kMx = await drive(M.load('src/ws-create.js', anchored(src, stripLine + '\n', '', 'the spawn line\'s plan strip'), 'pv-nostrip-codex'), { backend: 'codex', mode: 'chat' }, { accounts: am }, SEEDED);
-  ok(kMx.spawned.length === 1 && carried(kMx, PLAN_X).includes('VIBESPACE_PROVIDER_KEY') && carried(kMx, PLAN_X).includes('CODEX_HOME'), 'CONTROL (the must, codex): without the strip a machine-login codex start gets the provider\'s key and home ⇒ the codex leg goes RED', carried(kMx, PLAN_X));
-  ok(kM.spawned.length === 1 && carried(kM, PLAN_C).includes('ANTHROPIC_BASE_URL') && carried(kM, PLAN_C).includes('ANTHROPIC_AUTH_TOKEN'), 'CONTROL (the must): the spawn line without its plan strip hands the machine-login conversation the THIRD PARTY\'S ADDRESS AND KEY ⇒ the must\'s leg goes RED', carried(kM, PLAN_C));
+  ok(kMx.spawned.length === 1 && gateOf(carried(kMx, PLAN_X).includes('VIBESPACE_PROVIDER_KEY')) && verdictOf(carried(kMx, PLAN_X).includes('CODEX_HOME')), 'CONTROL (the must, codex): without the strip a machine-login codex start gets the provider\'s key and home ⇒ the codex leg goes RED', carried(kMx, PLAN_X));
+  ok(kM.spawned.length === 1 && gateOf(carried(kM, PLAN_C).includes('ANTHROPIC_BASE_URL')) && verdictOf(carried(kM, PLAN_C).includes('ANTHROPIC_AUTH_TOKEN')), 'CONTROL (the must): the spawn line without its plan strip hands the machine-login conversation the THIRD PARTY\'S ADDRESS AND KEY ⇒ the must\'s leg goes RED', carried(kM, PLAN_C));
   // …and the hub's own start sanitiser (server.js — inside a Claude Code conversation): run ITS OWN lines over that environment
   const SJ = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const SAN = 'if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION';
@@ -367,14 +367,14 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const ACCTS = { get: (id) => (id === 'acct-w1' ? { name: 'Work', tail: 'ab12' } : null), nameShownOf: (id) => (id === 'acct-w1' ? 'Work' : null), providerRecordOf: (id) => (id === 'pv-ds1' ? { label: 'DeepSeek', tail: '7c2e' } : null) };
   const live = acctOf(ACCT_LINES);
   const rows = ['pv-ds1', 'acct-w1', 'acct-gone', null].map((id) => live({ _accountId: id }, ACCTS));
-  ok(eq(rows, [{ accountName: 'DeepSeek', accountTail: null }, { accountName: 'Work', accountTail: null }, { accountName: 'API key', accountTail: null }, { accountName: null, accountTail: null }]), 'the live payload names a provider conversation by its record (DeepSeek — and NO key tail, B-ba7d: the page lays the person\'s read on), an account by its own name, an id that is gone by the fallback word — both meanings of the meeting kept, in that order', rows);
+  ok(verdictOf(eq(rows, [{ accountName: 'DeepSeek', accountTail: null }, { accountName: 'Work', accountTail: null }, { accountName: 'API key', accountTail: null }, { accountName: null, accountTail: null }])), 'the live payload names a provider conversation by its record (DeepSeek — and NO key tail, B-ba7d: the page lays the person\'s read on), an account by its own name, an id that is gone by the fallback word — both meanings of the meeting kept, in that order', rows);
   // …and its SECOND copy (GET /api/active — src/routes/sessions.js, read by any credential): its own two lines, run as they stand
   // (B-ee0a smalls — the B-ba7d fix had no leg): the same names, NO key tail
   const ACCT_LINES2 = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8').split('\n').filter((l) => /^\s*account(Name: s\._accountId \?|Tail: )/.test(l));
   if (ACCT_LINES2.length !== 2) throw new Error('the anchor of the second account-name leg (GET /api/active: accountName / accountTail) is not in the source as two lines');
   const live2 = new Function('s', 'ctx', 'return {\n' + ACCT_LINES2.join('\n') + '\n};');   // each line's own comment ends at its newline
   const rows2 = ['pv-ds1', 'acct-w1', 'acct-gone', null].map((id) => live2({ _accountId: id }, { accounts: ACCTS }));
-  ok(eq(rows2, rows), 'GET /api/active\'s copy says the same: a provider by its record, an account by its shown name, the fallback word, nothing for none — and NO key tail', rows2);
+  ok(verdictOf(eq(rows2, rows)), 'GET /api/active\'s copy says the same: a provider by its record, an account by its shown name, the fallback word, nothing for none — and NO key tail', rows2);
   const OLD_NAME = "accounts.nameShownOf(s._accountId) || accounts.providerRecordOf?.(s._accountId)?.label || 'API key'";
   if (ACCT_LINES[0].split(OLD_NAME).length !== 2) throw new Error('the anchor of the account-name control is not in the source once');
   const rows0 = acctOf([ACCT_LINES[0].replace(OLD_NAME, "accounts.nameShownOf(s._accountId) || 'API key'"), ACCT_LINES[1]])({ _accountId: 'pv-ds1' }, ACCTS);   // stale-pins: kept — the control's REPLACEMENT is the checkpoint's line, gone from the product on purpose
@@ -398,11 +398,11 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // the two session lists' names
   const AUR = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8'), PRR = fs.readFileSync(path.join(REPO, 'src/server/permission-rules.js'), 'utf8');
   const SESR = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
-  ok(AUR.includes("(id, be, model) => require('./provider-spawn.js').modelFor(providers, id, model, be));") && PRR.includes("if (typeof accounts?.get === 'function' && !accounts.get(accountId)) return Promise.resolve({ ok: false, reason: 'account', detail: 'unknown account' });") && SESR.includes("ctx.accounts?.providerRecordOf?.(s._accountId)?.label || 'API key'") && SJ.includes("accounts.providerRecordOf?.(s._accountId)?.label || 'API key'"), 'the hub\'s own wiring: its fence asks with the harness (the fit refusal is on), the permission oracle reads an account\'s login only, and BOTH session lists (REST and the live payload) name a provider conversation by its record');
-  ok(eq([...MP.SPAWN_HARNESSES].sort(), H.list().filter((d) => d && d.creds && typeof d.creds.providerSpawn === 'function').map((d) => d.id).sort()), 'THE CAPABILITY ROW: the harnesses a third party may fit (model-providers SPAWN_HARNESSES — a PURE module, it cannot ask the registry) are EXACTLY the descriptors that declare a plan (creds.providerSpawn) — a harness that gains or loses one without the list is red here', MP.SPAWN_HARNESSES);
-  ok(eq(PSP.planNamesOf(H.get('claude')).homes, ['CLAUDE_SECURESTORAGE_CONFIG_DIR']) && PSP.planNamesOf(H.get('claude')).names.includes('ANTHROPIC_SMALL_FAST_MODEL') && eq(PSP.planNamesOf(H.get('codex')), { names: ['VIBESPACE_PROVIDER_KEY'], homes: ['CODEX_HOME'] }) && eq(PSP.planNamesOf(H.get('opencode')), { names: [], homes: [] }), 'the names are ASKED OF EACH PLAN (a name the plan learns joins by construction); a harness with no plan strips nothing (an OpenCode agent keeps its own ANTHROPIC_* login)', PSP.planNamesOf(H.get('claude')));
+  ok(gateOf(AUR.includes("(id, be, model) => require('./provider-spawn.js').modelFor(providers, id, model, be));")) && gateOf(PRR.includes("if (typeof accounts?.get === 'function' && !accounts.get(accountId)) return Promise.resolve({ ok: false, reason: 'account', detail: 'unknown account' });")) && gateOf(SESR.includes("ctx.accounts?.providerRecordOf?.(s._accountId)?.label || 'API key'")) && verdictOf(SJ.includes("accounts.providerRecordOf?.(s._accountId)?.label || 'API key'")), 'the hub\'s own wiring: its fence asks with the harness (the fit refusal is on), the permission oracle reads an account\'s login only, and BOTH session lists (REST and the live payload) name a provider conversation by its record');
+  ok(verdictOf(eq([...MP.SPAWN_HARNESSES].sort(), H.list().filter((d) => d && d.creds && typeof d.creds.providerSpawn === 'function').map((d) => d.id).sort())), 'THE CAPABILITY ROW: the harnesses a third party may fit (model-providers SPAWN_HARNESSES — a PURE module, it cannot ask the registry) are EXACTLY the descriptors that declare a plan (creds.providerSpawn) — a harness that gains or loses one without the list is red here', MP.SPAWN_HARNESSES);
+  ok(gateOf(eq(PSP.planNamesOf(H.get('claude')).homes, ['CLAUDE_SECURESTORAGE_CONFIG_DIR'])) && gateOf(PSP.planNamesOf(H.get('claude')).names.includes('ANTHROPIC_SMALL_FAST_MODEL')) && gateOf(eq(PSP.planNamesOf(H.get('codex')), { names: ['VIBESPACE_PROVIDER_KEY'], homes: ['CODEX_HOME'] })) && verdictOf(eq(PSP.planNamesOf(H.get('opencode')), { names: [], homes: [] })), 'the names are ASKED OF EACH PLAN (a name the plan learns joins by construction); a harness with no plan strips nothing (an OpenCode agent keeps its own ANTHROPIC_* login)', PSP.planNamesOf(H.get('claude')));
 
-  const refused = async (what, data, re, code) => { const x = await drive(wsCreate, data, { accounts: am }); const err = x.sent.find((m) => m.type === 'error'); ok(x.spawned.length === 0 && !!err && re.test(err.message) && (!code || err.code === code), `REFUSED BY NAME, nothing spawned — ${what}`, err && { message: err.message, code: err.code }); };
+  const refused = async (what, data, re, code) => { const x = await drive(wsCreate, data, { accounts: am }); const err = x.sent.find((m) => m.type === 'error'); ok(x.spawned.length === 0 && !!err && gateOf(re.test(err.message)) && (!code || err.code === code), `REFUSED BY NAME, nothing spawned — ${what}`, err && { message: err.message, code: err.code }); };
   vault.lock('door');
   await refused('the vault locked (the key cannot be read: it never runs without it) — the frame carries its code (the page\'s unlock door)', { backend: 'claude', accountId: ds.id }, /^the vault is locked — unlock it to start a conversation on DeepSeek/, 'vault_locked');
   await vault.unlock(PW, {});
@@ -426,9 +426,9 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const ca = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'opus', spawnOriginHint: { model: 'instance' } }, { accounts: am });
   const caModel = (() => { const a = (ca.spawned[0] || { args: [] }).args; const i = a.indexOf('--model'); return i >= 0 ? a[i + 1] : null; })();
   store.setModels(ds.id, { models: dsRows, aliases: dsWas.aliases || {}, defaultModel: dsWas.defaultModel }); await store.durable();   // what it found, put back (the read, R13)
-  ok(setA.ok && ca.spawned.length === 1 && caModel === 'deepseek-reasoner', 'an instance default the provider serves through ITS aliases (opus ⇒ deepseek-reasoner) is resolved as before; only an id it does not serve falls to its own default', { caModel, setA: setA.ok });
+  ok(gateOf(setA.ok) && ca.spawned.length === 1 && caModel === 'deepseek-reasoner', 'an instance default the provider serves through ITS aliases (opus ⇒ deepseek-reasoner) is resolved as before; only an id it does not serve falls to its own default', { caModel, setA: setA.ok });
   const ci = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'opus', spawnOriginHint: { model: 'instance' } }, { accounts: am });
-  ok(ci.spawned.length === 1 && (() => { const a = ci.spawned[0].args; const i = a.indexOf('--model'); return i >= 0 && a[i + 1] === 'deepseek-chat'; })(), 'the INSTANCE\'S default (claude.defaultModel = opus, the client says it is no pick) at a third party is no pick: the provider\'s own default, never a refusal of «opus» (U2 cure)', ci.sent.map((m) => m.type + (m.code ? ':' + m.code : '')));
+  ok(ci.spawned.length === 1 && verdictOf((() => { const a = ci.spawned[0].args; const i = a.indexOf('--model'); return i >= 0 && a[i + 1] === 'deepseek-chat'; })()), 'the INSTANCE\'S default (claude.defaultModel = opus, the client says it is no pick) at a third party is no pick: the provider\'s own default, never a refusal of «opus» (U2 cure)', ci.sent.map((m) => m.type + (m.code ? ':' + m.code : '')));
   // «opus[1m]» as the INSTANCE DEFAULT meets the provider's «opus» alias (the coordinator's accepted note); an «opus[1m]» the
   // PERSON picked is still refused by name — a third party's row has no long context to give it, never silently a short one
   const dsA = store.get(ds.id);
@@ -442,23 +442,23 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   if (src.split(BARE).length !== 2) throw new Error('the anchor of the control «the instance default\'s [1m] retry» is not in the source once');
   const d1m0 = await drive(M.load('src/ws-create.js', anchored(src, BARE, "const bare = String(data.model || '');", 'the instance default\'s [1m] retry'), 'pv-no1m'), { backend: 'claude', accountId: ds.id, model: 'opus[1m]', spawnOriginHint: { model: 'instance' } }, { accounts: am });
   store.setModels(ds.id, { models: dsRowsA, aliases: dsA.aliases || {}, defaultModel: dsA.defaultModel }); await store.durable();
-  ok(argModel(d1m) === 'deepseek-reasoner' && c1m.spawned.length === 0 && !!e1m && e1m.code === 'model-not-served' && /opus\[1m\]/.test(e1m.message), 'an instance default «opus[1m]» meets the provider\'s «opus» alias (deepseek-reasoner); the SAME pick made by the person is refused by name (never a silent short context)', { d1m: argModel(d1m), c1m: e1m && e1m.code });
+  ok(argModel(d1m) === 'deepseek-reasoner' && c1m.spawned.length === 0 && !!e1m && e1m.code === 'model-not-served' && verdictOf(/opus\[1m\]/.test(e1m.message)), 'an instance default «opus[1m]» meets the provider\'s «opus» alias (deepseek-reasoner); the SAME pick made by the person is refused by name (never a silent short context)', { d1m: argModel(d1m), c1m: e1m && e1m.code });
   ok(argModel(d1m0) === 'deepseek-chat', 'CONTROL: without the instance default\'s [1m] retry «opus[1m]» falls to the provider\'s default ⇒ the leg goes RED', argModel(d1m0));
-  ok(PSP.modelFor(store, ds.id, '', 'opencode').code === 'provider-unfit' && /DeepSeek does not offer what OpenCode needs/.test(PSP.modelFor(store, ds.id, '', 'opencode').message) && PSP.modelFor(store, ds.id, '', 'claude').ok && PSP.modelFor(store, ds.id, '').ok, 'the fence refuses a harness the provider does not serve (a hand-made create on OpenCode: no spawn road — never its row id on the machine\'s own login)', PSP.modelFor(store, ds.id, '', 'opencode'));
+  ok(PSP.modelFor(store, ds.id, '', 'opencode').code === 'provider-unfit' && gateOf(/DeepSeek does not offer what OpenCode needs/.test(PSP.modelFor(store, ds.id, '', 'opencode').message)) && gateOf(PSP.modelFor(store, ds.id, '', 'claude').ok) && verdictOf(PSP.modelFor(store, ds.id, '').ok), 'the fence refuses a harness the provider does not serve (a hand-made create on OpenCode: no spawn road — never its row id on the machine\'s own login)', PSP.modelFor(store, ds.id, '', 'opencode'));
   const cm = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'deepseek-reasoner' }, { accounts: am });
   const cd = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am });
   const argsOf = (x) => (x.spawned[0] || { args: [] }).args;
   const modelOf = (x) => { const a = argsOf(x); const i = a.indexOf('--model'); return i >= 0 ? a[i + 1] : null; };
-  ok(modelOf(cm) === 'deepseek-reasoner' && modelOf(cd) === 'deepseek-chat' && argsOf(cd).some((a) => String(a).includes('"apiKeyHelper":""')), 'a served pick is spawned as asked; NO pick ⇒ the provider\'s default (never the instance\'s claude-* default); a machine-wide apiKeyHelper is neutralized (--settings apiKeyHelper:"") — it would outrank the provider\'s key', { picked: modelOf(cm), none: modelOf(cd) });
+  ok(modelOf(cm) === 'deepseek-reasoner' && modelOf(cd) === 'deepseek-chat' && verdictOf(argsOf(cd).some((a) => String(a).includes('"apiKeyHelper":""'))), 'a served pick is spawned as asked; NO pick ⇒ the provider\'s default (never the instance\'s claude-* default); a machine-wide apiKeyHelper is neutralized (--settings apiKeyHelper:"") — it would outrank the provider\'s key', { picked: modelOf(cm), none: modelOf(cd) });
   // THE MEETING OF LOGIC (主开发 22:14Z, with lane bl-chat-b's billing half): ONE variable sets the machine's key helper aside —
   // the billing pick's verdict OR a conversation on a third-party provider. The provider side: its spawn carries the emptied helper
   // setting (a helper named in the machine's Claude settings would outrank the provider's own key); that half reverted is RED
-  ok(cd.spawned.length === 1 && argsOf(cd).some((a) => String(a).includes('"apiKeyHelper":""')), 'the ONE helper variable, its provider side: a provider conversation\'s spawn carries the emptied key helper setting', argsOf(cd));
+  ok(cd.spawned.length === 1 && verdictOf(argsOf(cd).some((a) => String(a).includes('"apiKeyHelper":""'))), 'the ONE helper variable, its provider side: a provider conversation\'s spawn carries the emptied key helper setting', argsOf(cd));
   // the rule answers both halves (src/billing-pick.js: the resolved account's kind 'provider', behind the harness's keyHelper row
   // — a harness whose login no helper outranks sets nothing aside, a Codex provider neither); CONTROL: the rule without its
   // provider line, swapped into the real create, starts a provider conversation with the machine's helper in force
   const BP = require(path.join(REPO, 'src/billing-pick.js')), SFW = require(path.join(REPO, 'src/settings-file-words.js'));
-  ok(BP.setsHelperAside({ creds: H.get('claude').creds, account: { id: ds.id, kind: 'provider' } }) && !BP.setsHelperAside({ creds: H.get('codex').creds || null, account: { id: lab.id, kind: 'provider' } }),
+  ok(gateOf(BP.setsHelperAside({ creds: H.get('claude').creds, account: { id: ds.id, kind: 'provider' } })) && !BP.setsHelperAside({ creds: H.get('codex').creds || null, account: { id: lab.id, kind: 'provider' } }),
     'the rule: a Claude Code conversation on a provider sets the helper aside; a Codex one has no helper to set aside (nothing flagged)');
   const BPSRC = fs.readFileSync(path.join(REPO, 'src/billing-pick.js'), 'utf8');
   const PVLINE = "  if (!!account && typeof account === 'object' && account.kind === 'provider') return true;   // a third-party provider (the meeting, 22:14Z)\n";
@@ -485,12 +485,12 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   helperNamed(true);
   const nh = await noticed(wsCreate, {});
   const hn = nh.notes.filter((n) => n.key.startsWith('billing-pick-helper-'));
-  ok(hn.length === 1 && hn[0].key === `billing-pick-helper-${ds.id}-local` && hn[0].i18n && hn[0].i18n.key === BP.HELPER_SET_ASIDE.provider && hn[0].i18n.params.account === 'DeepSeek'
-    && / runs on DeepSeek, a third-party provider paid by use with your own key/.test(hn[0].text) && !/subscription|CLI login/.test(hn[0].text),
+  ok(hn.length === 1 && hn[0].key === `billing-pick-helper-${ds.id}-local` && gateOf(hn[0].i18n) && hn[0].i18n.key === BP.HELPER_SET_ASIDE.provider && hn[0].i18n.params.account === 'DeepSeek'
+    && gateOf(/ runs on DeepSeek, a third-party provider paid by use with your own key/.test(hn[0].text)) && !/subscription|CLI login/.test(hn[0].text),
     'the machine names a helper: a provider conversation is told ONCE, in a provider\'s words (paid by use, never «the subscription you picked», no «CLI login» door), the provider by its name', hn);
   const nf = await noticed(wsCreate, { extraArgs: ['--settings', PFILE] });
   const fileNote = nf.notes.find((n) => n.key.startsWith('settings-file-'));
-  ok(settingsArg(nf.x) !== PFILE && /"apiKeyHelper":""/.test(settingsArg(nf.x) || '') && fileNote && fileNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billing && !/subscription|CLI login/.test(fileNote.text),
+  ok(settingsArg(nf.x) !== PFILE && gateOf(/"apiKeyHelper":""/.test(settingsArg(nf.x) || '')) && gateOf(fileNote) && fileNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billing && !/subscription|CLI login/.test(fileNote.text),
     'with the person\'s own --settings file: the file is set aside (the helper must not outrank the key) and the provider\'s file words are said — never «bills the subscription chosen for it»', { arg: settingsArg(nf.x), fileNote });
   helperNamed(false);
   const nn = await noticed(wsCreate, { extraArgs: ['--settings', PFILE] }, false);
@@ -500,14 +500,14 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   helperNamed('garbled');
   const nu = await noticed(wsCreate, { extraArgs: ['--settings', PFILE] }, false);
   const unreadNote = nu.notes.find((n) => n.key.startsWith('settings-file-'));
-  ok(settingsArg(nu.x) !== PFILE && unreadNote && unreadNote.key.startsWith('settings-file-billingUnread-') && unreadNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billingUnread && !/subscription|CLI login/.test(unreadNote.text),
+  ok(settingsArg(nu.x) !== PFILE && gateOf(unreadNote) && gateOf(unreadNote.key.startsWith('settings-file-billingUnread-')) && unreadNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billingUnread && !/subscription|CLI login/.test(unreadNote.text),
     'the fact cannot be read: the file is set aside (billing wins) and the provider\'s UNREAD words are said', { arg: settingsArg(nu.x), unreadNote });
   helperNamed(false);
   const OWNF = path.join(CFG, 'mine-helper.json');
   fs.writeFileSync(OWNF, JSON.stringify({ apiKeyHelper: '/usr/local/bin/own-helper', permissions: { deny: ['Bash(rm:*)'] } }));
   const no = await noticed(wsCreate, { extraArgs: ['--settings', OWNF] });
   const ownNote = no.notes.find((n) => n.key.startsWith('settings-file-'));
-  ok(settingsArg(no.x) !== OWNF && ownNote && ownNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billing && /or your file itself/.test(ownNote.text),
+  ok(settingsArg(no.x) !== OWNF && gateOf(ownNote) && ownNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billing && verdictOf(/or your file itself/.test(ownNote.text)),
     'a helper named ONLY in the person\'s own file: the file is set aside and the words name that place (never only «this machine\'s settings»)', { arg: settingsArg(no.x), ownNote });
   helperNamed(true);
   const LABEL = ' || accounts?.providerRecordOf?.(acctId)?.label';
@@ -521,10 +521,10 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   helperNamed(true);
   const wn = await noticed(M.load('src/ws-create.js', anchored(src, NWORDS, 'hostId: data.hostId || null,', 'the notice without the provider\'s form'), 'pv-subwords'), { extraArgs: ['--settings', PFILE] });
   const wh = wn.notes.find((n) => n.key.startsWith('billing-pick-helper-'));
-  ok(!!wh && wh.i18n.key === BP.HELPER_SET_ASIDE.local && /the subscription you picked/.test(wh.text), 'CONTROL: the notice without the provider\'s form tells a DeepSeek conversation «the subscription you picked» ⇒ the provider-words leg goes RED', wh && wh.text);
+  ok(!!wh && wh.i18n.key === BP.HELPER_SET_ASIDE.local && verdictOf(/the subscription you picked/.test(wh.text)), 'CONTROL: the notice without the provider\'s form tells a DeepSeek conversation «the subscription you picked» ⇒ the provider-words leg goes RED', wh && wh.text);
   const wf = await noticed(M.load('src/ws-create.js', anchored(src, FWORDS, 'const w = SFW.SETTINGS_FILE_WORDS[k], name', 'the file words without the provider\'s form'), 'pv-subfilewords'), { extraArgs: ['--settings', PFILE] });
   const wfn = wf.notes.find((n) => n.key.startsWith('settings-file-'));
-  ok(!!wfn && wfn.i18n.key === SFW.SETTINGS_FILE_WORDS.billing && /bills the subscription chosen for it/.test(wfn.text), 'CONTROL: the settings-file loop without the provider\'s words says «bills the subscription chosen for it» ⇒ the file-words leg goes RED', wfn && wfn.text);
+  ok(!!wfn && wfn.i18n.key === SFW.SETTINGS_FILE_WORDS.billing && verdictOf(/bills the subscription chosen for it/.test(wfn.text)), 'CONTROL: the settings-file loop without the provider\'s words says «bills the subscription chosen for it» ⇒ the file-words leg goes RED', wfn && wfn.text);
   // A MACHINE WHOSE MANAGED CLAUDE SETTINGS NAME A KEY HELPER (主开发 23:45Z, as if a must; the fact read from the CLI 2.1.322's own
   // bundle: the managed source merges after --settings and the credential helpers come from the highest source only — the inline
   // override cannot set it aside, and the provider's start would send the organisation's credential to the provider's address).
@@ -534,14 +534,14 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const HELPER = JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' });
   const mstart = async (dir, data = { backend: 'claude', accountId: ds.id }, mod = wsCreate) => { const x = await drive(mod, data, { accounts: am, managedClaudeDir: dir }); return { x, err: x.sent.find((m) => m.type === 'error') || null }; };
   const mNamed = await mstart(mdir({ 'managed-settings.json': HELPER }));
-  ok(mNamed.x.spawned.length === 0 && mNamed.err && mNamed.err.code === 'provider-managed-helper' && mNamed.err.i18n && mNamed.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.named && mNamed.err.i18n.params.provider === 'DeepSeek' && /Ask the administrator/.test(mNamed.err.message),
+  ok(mNamed.x.spawned.length === 0 && gateOf(mNamed.err) && mNamed.err.code === 'provider-managed-helper' && gateOf(mNamed.err.i18n) && mNamed.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.named && mNamed.err.i18n.params.provider === 'DeepSeek' && verdictOf(/Ask the administrator/.test(mNamed.err.message)),
     'the managed settings name a key helper: a DeepSeek start is REFUSED BY NAME (provider-managed-helper) with its door, and NOTHING spawns', mNamed.err);
   const mDrop = await mstart(mdir({ 'managed-settings.d/20-org.json': HELPER }));
   const mGarb = await mstart(mdir({ 'managed-settings.json': '{ "apiKeyHelper": ' }));
   const mPol = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ policyHelper: { path: '/opt/org/policy' } }) }));
-  ok(mDrop.x.spawned.length === 0 && mDrop.err && mDrop.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.named
-    && mGarb.x.spawned.length === 0 && mGarb.err && mGarb.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.unread
-    && mPol.x.spawned.length === 0 && mPol.err && mPol.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.unread,
+  ok(mDrop.x.spawned.length === 0 && gateOf(mDrop.err) && mDrop.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.named
+    && mGarb.x.spawned.length === 0 && gateOf(mGarb.err) && mGarb.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.unread
+    && mPol.x.spawned.length === 0 && gateOf(mPol.err) && mPol.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.unread,
     'a helper named in a drop-in (managed-settings.d) refuses the same; a managed file that cannot be read, or one that names a policy helper (it computes settings at startup), refuses as «could not be read» — the credential wins', [mDrop.err && mDrop.err.code, mGarb.err && mGarb.err.code, mPol.err && mPol.err.code]);
   const mNone = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ permissions: { deny: ['Bash(rm:*)'] } }) }));
   const mAbsent = await mstart(path.join(scratchDir('hspawn-managed-gone'), 'no-such-folder'));
@@ -569,9 +569,9 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const pOk = await pstart(path.join(scratchDir('hspawn-pool-d'), 'no-managed'));
   ok(pOk.x.spawned.length === 1 && !pOk.err && pModel(pOk.x) === 'deepseek-chat', 'POOL UNIT (d): a POOLED create the store placed on the DeepSeek member re-resolves the instance\'s default (opus, no pick) against THE MEMBER: DeepSeek\'s own default (deepseek-chat), never the pool\'s «opus»', { err: pOk.err, model: pModel(pOk.x) });
   const pPick = await pstart(path.join(scratchDir('hspawn-pool-d2'), 'no-managed'), wsCreate, { backend: 'claude', accountId: POOLID, model: 'sonnet' });
-  ok(pPick.x.spawned.length === 0 && pPick.err && pPick.err.code === 'model-not-served' && /DeepSeek/.test(pPick.err.message), 'POOL UNIT (d): …a model the PERSON picked that the member does not serve (sonnet) is REFUSED BY NAME against the member (model-not-served, DeepSeek), nothing spawns', pPick.err);
+  ok(pPick.x.spawned.length === 0 && gateOf(pPick.err) && pPick.err.code === 'model-not-served' && verdictOf(/DeepSeek/.test(pPick.err.message)), 'POOL UNIT (d): …a model the PERSON picked that the member does not serve (sonnet) is REFUSED BY NAME against the member (model-not-served, DeepSeek), nothing spawns', pPick.err);
   const pRef = await pstart(mdir({ 'managed-settings.json': HELPER }));
-  ok(pRef.x.spawned.length === 0 && pRef.err && pRef.err.code === 'provider-managed-helper' && pRef.err.i18n && pRef.err.i18n.params.provider === 'DeepSeek', 'POOL UNIT (d): …and when the managed settings name a key helper that pooled start is REFUSED BY NAME (provider-managed-helper, DeepSeek), nothing spawns', pRef.err);
+  ok(pRef.x.spawned.length === 0 && gateOf(pRef.err) && pRef.err.code === 'provider-managed-helper' && gateOf(pRef.err.i18n) && pRef.err.i18n.params.provider === 'DeepSeek', 'POOL UNIT (d): …and when the managed settings name a key helper that pooled start is REFUSED BY NAME (provider-managed-helper, DeepSeek), nothing spawns', pRef.err);
   const pCut = await pstart(mdir({ 'managed-settings.json': HELPER }), M.load('src/ws-create.js', anchored(src, '            if (pooledPv) {', '            if (false) {', 'the create before pool unit (d)'), 'pool-d-cut'));
   ok(pCut.x.spawned.length === 1 && !pCut.err, 'CONTROL: the create before pool unit (d) spawns that pooled DeepSeek start under the managed helper (the organisation\'s credential toward the provider\'s address): the refusal leg goes RED', pCut.err);
   // THE REAL ROAD (B-d578, the fallback member F1 + F2 — 主开发 r2858: bl-keys-misc's not-kept legs as the acceptance): the stand-in
@@ -595,7 +595,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const chooserReal = (pid, o = {}) => { asked.push(o.carryRecord ? 'record' : o.fallbackOnly ? 'peek' : 'ordinary'); return o.carryRecord ? REC : o.fallbackOnly ? ds.id : null; };
   const pRes = await drive(wsCreate, { backend: 'claude', accountId: realPool, resume: true, resumeId: 'conv-moved-1', ignoreNoConvo: true }, { accounts: am, managedClaudeDir: path.join(scratchDir('hspawn-pool-real-r'), 'no-managed'), poolChooser: chooserReal, writeSessionMeta: (k, m) => { metaWrites.push(m); return Promise.resolve(true); } });
   const firstMeta = metaWrites[0] || {};
-  ok(pRes.spawned.length === 1 && !!pRes.session && pRes.session._heldPoolMember === ds.id && asked.includes('peek') && asked.includes('record') && !asked.includes('ordinary') && !!firstMeta.poolFallback && firstMeta.poolFallback.fromModel === 'sonnet' && firstMeta.poolFallback.provider === ds.id && firstMeta.heldPoolMember === ds.id,
+  ok(pRes.spawned.length === 1 && !!pRes.session && pRes.session._heldPoolMember === ds.id && gateOf(asked.includes('peek')) && gateOf(asked.includes('record')) && !asked.includes('ordinary') && !!firstMeta.poolFallback && firstMeta.poolFallback.fromModel === 'sonnet' && firstMeta.poolFallback.provider === ds.id && firstMeta.heldPoolMember === ds.id,
     'THE RESUME the pool moved (r2939 (1)): the PEEK names DeepSeek, the resume lands there, and the move\'s record is in the create\'s FIRST meta write beside the held member — never only in a carry held in memory',
     { spawned: pRes.spawned.length, held: pRes.session && pRes.session._heldPoolMember, asked, first: firstMeta.poolFallback || null, writes: metaWrites.length, err: (pRes.sent || []).filter((m) => m.type === 'error').map((m) => m.message) });
   // THE MANAGED ENV BLOCK (its reader's MUST): the CLI copies a managed `env` over the spawn's own — an Anthropic credential there
@@ -604,8 +604,8 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const mEnvTok = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: ORG_TOKEN } }) }));
   const mEnvUrl = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://gateway.example.test' } }) }));
   const mEnvOther = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ env: { DISABLE_TELEMETRY: '1' } }) }));
-  ok(mEnvTok.x.spawned.length === 0 && mEnvTok.err && mEnvTok.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.named && /managed-settings\.json/.test(mEnvTok.err.i18n.params.where)
-    && mEnvUrl.x.spawned.length === 0 && mEnvUrl.err && mEnvUrl.err.code === 'provider-managed-helper' && mEnvOther.x.spawned.length === 1,
+  ok(mEnvTok.x.spawned.length === 0 && gateOf(mEnvTok.err) && mEnvTok.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.named && gateOf(/managed-settings\.json/.test(mEnvTok.err.i18n.params.where))
+    && mEnvUrl.x.spawned.length === 0 && gateOf(mEnvUrl.err) && mEnvUrl.err.code === 'provider-managed-helper' && mEnvOther.x.spawned.length === 1,
     'a managed env that sets an Anthropic credential (or an address) refuses the provider start by name, the file named; an env of other names does not', [mEnvTok.err && mEnvTok.err.i18n.params, mEnvUrl.err && mEnvUrl.err.code, mEnvOther.x.spawned.length]);
   const ENVLINE = "  if (env && envHit(env)) return { named: true, cause: 'env' };\n";
   const MSRC = fs.readFileSync(path.join(REPO, 'src/managed-claude-settings.js'), 'utf8');
@@ -616,11 +616,11 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // start runs; a cloud switch ON is a route
   const mModel = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ env: { ANTHROPIC_MODEL: 'claude-org-pinned', ANTHROPIC_LOG: 'debug', CLAUDE_CODE_USE_BEDROCK: '0' } }) }));
   const mSwitch = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ env: { CLAUDE_CODE_USE_VERTEX: '1' } }) }));
-  ok(mModel.x.spawned.length === 1 && !mModel.err && mSwitch.x.spawned.length === 0 && mSwitch.err && mSwitch.err.code === 'provider-managed-helper' && MANAGED.envHit({ ANTHROPIC_MODEL: 'x' }) === null && MANAGED.envHit({ CLAUDE_CODE_USE_BEDROCK: 'false' }) === null && MANAGED.envHit({ ANTHROPIC_CUSTOM_HEADERS: 'x' }) === 'ANTHROPIC_CUSTOM_HEADERS' && MANAGED.envHit({ CLAUDE_CODE_USE_MANTLE: '1' }) === 'CLAUDE_CODE_USE_MANTLE' && MANAGED.envHit({ ANTHROPIC_UNIX_SOCKET: '/run/x.sock' }) === 'ANTHROPIC_UNIX_SOCKET',
+  ok(mModel.x.spawned.length === 1 && !mModel.err && mSwitch.x.spawned.length === 0 && gateOf(mSwitch.err) && mSwitch.err.code === 'provider-managed-helper' && MANAGED.envHit({ ANTHROPIC_MODEL: 'x' }) === null && MANAGED.envHit({ CLAUDE_CODE_USE_BEDROCK: 'false' }) === null && MANAGED.envHit({ ANTHROPIC_CUSTOM_HEADERS: 'x' }) === 'ANTHROPIC_CUSTOM_HEADERS' && MANAGED.envHit({ CLAUDE_CODE_USE_MANTLE: '1' }) === 'CLAUDE_CODE_USE_MANTLE' && MANAGED.envHit({ ANTHROPIC_UNIX_SOCKET: '/run/x.sock' }) === 'ANTHROPIC_UNIX_SOCKET',
     'the env rule names only credentials and routes: a managed model name, a log switch or a cloud switch set to 0 does not refuse; a cloud switch ON does', [mModel.x.spawned.length, mSwitch.err && mSwitch.err.code]);
   // A PROVIDER START AIMED AT A PAIRED MACHINE answers «this machine only for now» — never the hub's own managed check (主开发 00:42Z)
   const mRemote = await mstart(mdir({ 'managed-settings.json': HELPER }), { backend: 'claude', accountId: ds.id, hostId: 'host-box-1' });
-  ok(mRemote.x.spawned.length === 0 && mRemote.err && mRemote.err.code !== 'provider-managed-helper' && /runs on this machine only/.test(mRemote.err.message), 'a provider start aimed at a paired machine is refused by ITS reason (this machine only for now), not by the hub\'s managed settings', mRemote.err);
+  ok(mRemote.x.spawned.length === 0 && gateOf(mRemote.err) && mRemote.err.code !== 'provider-managed-helper' && verdictOf(/runs on this machine only/.test(mRemote.err.message)), 'a provider start aimed at a paired machine is refused by ITS reason (this machine only for now), not by the hub\'s managed settings', mRemote.err);
   // THE WINDOWS POLICY (主开发 00:42Z, WSL — a native Windows hub judged the same): ONE read-only query per key through the Windows
   // helper by the CLI's own ABSOLUTE path — a STAND-IN reg.exe handed by its full path here (never the real one): no policy ⇒ runs; a
   // policy setting a helper ⇒ refused naming the Windows policy; the helper absent, failing or over its bound ⇒ refused in ITS OWN words
@@ -642,16 +642,16 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // HKCU on WSL: the CLI's DOUBLE opt-in — the admin chain armed (HKLM's own opt-in, nothing else set there) AND HKCU's own true
   const wCuBoth = await winFact('linux', policy(JSON.stringify({ wslInheritsWindowsSettings: true }), JSON.stringify({ wslInheritsWindowsSettings: true, env: { ANTHROPIC_AUTH_TOKEN: ['org', 'cu', 'token'].join('-') } })));
   const wDrv = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: mdir({ 'managed-settings.json': OPT_HELPER }), reg: { regExe: path.join(regNone, 'reg.exe'), env: {}, boundMs: 400 } });
-  ok(wSet.named === true && /HKLM/.test(wSet.where) && wNoOpt.named === false && wNative.named === true && wNone.named === false && wLower.named === true
-    && wCuOwn.named === false && wCuBoth.named === true && /HKCU/.test(wCuBoth.where) && wCuNoOpt.named === false
+  ok(wSet.named === true && gateOf(/HKLM/.test(wSet.where)) && wNoOpt.named === false && wNative.named === true && wNone.named === false && wLower.named === true
+    && wCuOwn.named === false && wCuBoth.named === true && gateOf(/HKCU/.test(wCuBoth.where)) && wCuNoOpt.named === false
     && wFail.named === null && wFail.cause === 'windows-unread' && wFail.why === 'error' && wSlow.named === null && wSlow.why === 'timeout' && wAbsent.named === null && wAbsent.why === 'absent'
-    && wDrv.named === true && /managed-settings\.json$/.test(wDrv.where),
+    && wDrv.named === true && verdictOf(/managed-settings\.json$/.test(wDrv.where)),
     'the Windows policy as the CLI applies it: on WSL HKLM / the DrvFs folder only when one opts in (wslInheritsWindowsSettings), HKCU only with that admin opt-in AND its own (its own alone ⇒ runs), the value name in any case; a native Windows hub applies them all; failing / over its bound / absent ⇒ «cannot read the Windows policy»',
     { wSet: wSet.named, wNoOpt: wNoOpt.named, wNative: wNative.named, wLower: wLower.named, wCuOwn: wCuOwn.named, wCuBoth: wCuBoth.named, wCuNoOpt: wCuNoOpt.named, wFail: wFail.why, wSlow: wSlow.why, wAbsent: wAbsent.why, wDrv: wDrv.named });
   const wWords = MANAGED.refusalOf(wFail, 'DeepSeek');
   const dicts = ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8'));
-  ok(wWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsUnread && /could not read the Windows policy/.test(wWords.message) && !/administrator/i.test(wWords.message) && /HKLM/.test(wWords.i18n.params.where)
-    && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsUnread) + ':')),
+  ok(wWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsUnread && gateOf(/could not read the Windows policy/.test(wWords.message)) && !/administrator/i.test(wWords.message) && gateOf(/HKLM/.test(wWords.i18n.params.where))
+    && verdictOf(dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsUnread) + ':'))),
     'the Windows helper failing is said in ITS OWN words — VibeSpace could not read the Windows policy (named), no administrator door — in en, zh and ja', wWords.message);
   // (主开发 01:46Z) THE OPT-IN AS THE CLI ARMS IT (gGs + ix, read from the bundle): an admin value that is neither absent nor false —
   // «yes», a number — is «unreadable» and ARMS the chain (the CLI fails closed); "false" disarms; HKCU needs its own true (and the admin's)
@@ -670,7 +670,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // file that does not parse — never «try again» (retrying never mends it)
   const regBad = policy(JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }).slice(0, -1) + ',}');
   const wBad = await winFact('linux', regBad), wBadWords = MANAGED.refusalOf(wBad, 'DeepSeek');
-  ok(wBad.named === null && wBad.cause === 'unreadable' && /HKLM/.test(wBad.where) && wBadWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.unread && !/try again/i.test(wBadWords.message),
+  ok(wBad.named === null && wBad.cause === 'unreadable' && gateOf(/HKLM/.test(wBad.where)) && wBadWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.unread && !/try again/i.test(wBadWords.message),
     'a policy value whose JSON does not parse ⇒ the administrator\'s words (cannot tell, HKLM named), never a retry', { cause: wBad.cause, where: wBad.where });
   // the helper ABSENT: its own words — no retry promised (it does not appear by waiting)
   const wAbsentWords = MANAGED.refusalOf(wAbsent, 'DeepSeek');
@@ -680,9 +680,9 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(wNoExec.named === null && wNoExec.cause === 'windows-absent' && wNoExec.why === 'cannot-start', 'the Windows helper unable to start (not executable) ⇒ the absent words (no retry), never «try again»', wNoExec);
   // …BY PLATFORM (主开发 03:35Z): on WSL the advice is WSL's (let it run Windows programs); a native Windows hub's is reg.exe's own
   const wAbsentNative = await winFact('win32', mdir({})), wAbsentNativeWords = MANAGED.refusalOf(wAbsentNative, 'DeepSeek');
-  ok(wAbsent.cause === 'windows-absent' && wAbsent.onWsl === true && wAbsentWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsent && !/try again/i.test(wAbsentWords.message) && !/administrator/i.test(wAbsentWords.message) && /in WSL \(interop\)/.test(wAbsentWords.message)
-    && wAbsentNative.cause === 'windows-absent' && wAbsentNative.onWsl === false && wAbsentNativeWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsentNative && !/WSL/.test(wAbsentNativeWords.message) && /reg\.exe \(in System32\)/.test(wAbsentNativeWords.message)
-    && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsent) + ':') && d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsentNative) + ':')),
+  ok(wAbsent.cause === 'windows-absent' && wAbsent.onWsl === true && wAbsentWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsent && !/try again/i.test(wAbsentWords.message) && !/administrator/i.test(wAbsentWords.message) && gateOf(/in WSL \(interop\)/.test(wAbsentWords.message))
+    && wAbsentNative.cause === 'windows-absent' && wAbsentNative.onWsl === false && wAbsentNativeWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsentNative && !/WSL/.test(wAbsentNativeWords.message) && gateOf(/reg\.exe \(in System32\)/.test(wAbsentNativeWords.message))
+    && verdictOf(dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsent) + ':') && d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsentNative) + ':'))),
     'the Windows helper ABSENT is said in its own words — what a person can do BY PLATFORM (on WSL: turn on running Windows programs; on Windows: reg.exe itself, no word of WSL), no bare retry, no administrator (en, zh, ja)', { wsl: wAbsentWords.message.slice(-120), native: wAbsentNativeWords.message.slice(-120) });
   // THE OUTER BOUND ending while the Windows read is pending is THAT read's verdict — never the administrator's words for the Linux folder.
   // The clock is PLACED (lane bl-release, 主开发 r1154 — the row read ~5.8 s against its 184 ms, 3.0 s of it these two waits on a real
@@ -702,7 +702,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // …and NAMES what it waited on: the DrvFs folder hanging (its stat never answers) after both keys answered
   const DRV_HANG = '/stand-in/hang-drvfs/managed';
   const wHang = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: '/stand-in/hang/managed', drvfsDir: DRV_HANG, fsp: emptyLocal(DRV_HANG), boundMs: OUTER_MS, reg: { exec: answersNone, regExe: '/stand-in/hang/reg.exe', env: {}, boundMs: 4000 } });
-  ok(wOuter.named === null && wOuter.cause === 'windows-unread' && wOuter.why === 'timeout' && /HKLM/.test(wOuter.where) && wHang.named === null && wHang.cause === 'windows-unread' && wHang.where === DRV_HANG,
+  ok(wOuter.named === null && wOuter.cause === 'windows-unread' && wOuter.why === 'timeout' && gateOf(/HKLM/.test(wOuter.where)) && wHang.named === null && wHang.cause === 'windows-unread' && wHang.where === DRV_HANG,
     'the outer bound ending inside the Windows read answers «could not read the Windows policy» (its own verdict), naming what it waited on — a key, or the DrvFs folder', { wOuter, wHang });
   // (C) THE ENV RULE IS THE CLI'S OWN LIST, WHOLE (the cure2 read, S2/S3): its connection names (`lu` — 138 once its spreads are
   // written out) count but the four named with a reason, plus its other lists' four; the seven switches only when ON. npm's three
@@ -712,12 +712,12 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const CL = MANAGED.CLI_CONNECTION_NAMES, NC = Object.keys(MANAGED.ENV_NOT_COUNTED);
   const hits = ['HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'CLAUDE_CODE_CERT_STORE', 'CLAUDE_CODE_CLIENT_CERT', '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL', 'ANTHROPIC_PROFILE', 'ANTHROPIC_CONFIG_DIR',
     'ANTHROPIC_FEDERATION_RULE_ID', 'ANTHROPIC_ORGANIZATION_ID', 'CLAUDE_CONFIG_DIR', 'HOME', 'CLAUDE_CODE_SESSION_ACCESS_TOKEN', 'CLAUDE_CODE_HTTPS_PROXY'].filter((n) => MANAGED.envHit({ [n]: 'x' }) !== n);
-  ok(CL.length === 138 && new Set(CL).size === 138 && MANAGED.ENV_NAMES.size === 131 && NC.length === 4 && !NC.some((n) => /^NPM_CONFIG_/.test(n)) && NC.every((n) => CL.includes(n)) && [...MANAGED.ENV_SWITCHES].every((n) => CL.includes(n))
-    && CL.every((n) => MANAGED.ENV_NAMES.has(n) || NC.includes(n) || MANAGED.ENV_SWITCHES.has(n)) && hits.length === 0
+  ok(CL.length === 138 && new Set(CL).size === 138 && MANAGED.ENV_NAMES.size === 131 && NC.length === 4 && !NC.some((n) => /^NPM_CONFIG_/.test(n)) && gateOf(NC.every((n) => CL.includes(n))) && gateOf([...MANAGED.ENV_SWITCHES].every((n) => CL.includes(n)))
+    && gateOf(CL.every((n) => MANAGED.ENV_NAMES.has(n) || NC.includes(n) || MANAGED.ENV_SWITCHES.has(n))) && hits.length === 0
     && MANAGED.envHit({ NODE_TLS_REJECT_UNAUTHORIZED: '0' }) === 'NODE_TLS_REJECT_UNAUTHORIZED' && MANAGED.envHit({ https_proxy: 'http://p.example.test' }) === 'https_proxy'
     && MANAGED.envHit({ anthropic_base_url: 'https://gw.example.test' }) === 'anthropic_base_url' && MANAGED.envHit({ Https_Proxy: 'http://p.example.test' }) === 'Https_Proxy'
     && MANAGED.envHit({ ANTHROPIC_AUTH_TOKEN: '' }) === 'ANTHROPIC_AUTH_TOKEN' && MANAGED.envHit({ ANTHROPIC_BASE_URL: '' }) === 'ANTHROPIC_BASE_URL' && MANAGED.envHit({ CLAUDE_CODE_USE_VERTEX: '' }) === null
-    && ['NPM_CONFIG_HTTPS_PROXY', 'NPM_CONFIG_HTTP_PROXY', 'NPM_CONFIG_PROXY', 'npm_config_https_proxy'].every((n) => MANAGED.envHit({ [n]: 'http://npm.example.test' }) === n)
+    && gateOf(['NPM_CONFIG_HTTPS_PROXY', 'NPM_CONFIG_HTTP_PROXY', 'NPM_CONFIG_PROXY', 'npm_config_https_proxy'].every((n) => MANAGED.envHit({ [n]: 'http://npm.example.test' }) === n))
     && MANAGED.envHit({ NO_PROXY: 'localhost', API_FORCE_IDLE_TIMEOUT: '30000', ANTHROPIC_MODEL: 'x', DISABLE_TELEMETRY: '1' }) === null,
     'the env rule is the CLI\'s own list of connection names, whole: 138 names, every one counted but the four named with their reasons and the switches (ON only); a proxy (npm\'s three too), a CA, TLS checks off, the client certificate, the first-party switch, the federation profile, a login folder refuse — in any case, an EMPTY value too; NO_PROXY, a timing, a model name do not',
     { hits, len: CL.length, nc: NC.length });
@@ -730,7 +730,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const calls = { stat: 0, statfs: 0, readdir: 0 };
   const slowFsp = { stat: async () => { calls.stat++; await new Promise((r) => setTimeout(r, 40)); return { isDirectory: () => true }; }, statfs: async () => { calls.statfs++; return { type: 0xef53 }; }, readdir: async () => { calls.readdir++; return []; }, open: async () => { const e = new Error('none'); e.code = 'ENOENT'; throw e; } };
   const both = await Promise.all([MANAGED.managedHelperFact({ platform: 'linux', wsl: false, dir: '/stand-in/managed', fsp: slowFsp }), MANAGED.managedHelperFact({ platform: 'linux', wsl: false, dir: '/stand-in/managed', fsp: slowFsp })]);
-  ok(both.every((f) => f.named === false) && calls.stat === 1 && calls.statfs === 1 && calls.readdir === 1, 'two starts at once: the managed folder\'s stat, statfs and listing run ONCE (one in flight each)', calls);
+  ok(gateOf(both.every((f) => f.named === false)) && calls.stat === 1 && calls.statfs === 1 && calls.readdir === 1, 'two starts at once: the managed folder\'s stat, statfs and listing run ONCE (one in flight each)', calls);
   // CONTROL ON THE NON-BLOCKING OPEN: the reader opening a FIFO drop-in WITHOUT O_NONBLOCK hangs until its bound (then the pipe is
   // released by a writer here, so no thread is left holding it)
   const BLOCKING = anchored(MSRC, 'fh = await fsp.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);', 'fh = await fsp.open(file, fs.constants.O_RDONLY);', 'the reader without its non-blocking open');
@@ -741,7 +741,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const blocked = await MANAGED_BLOCKING.managedHelperFact({ dir: pipeDir, wsl: false, boundMs: 300 });
   let released = false;   // release the hung open: a writer opens once the blocked reader is there (ENXIO until then) — no thread left holding the pipe
   for (let i = 0; i < 100 && !released; i++) { try { fs.closeSync(fs.openSync(pipe, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK)); released = true; } catch { await new Promise((r) => setTimeout(r, 20)); } }
-  ok(released && blocked.named === null && blocked.cause === 'timeout', 'CONTROL: the reader without its non-blocking open hangs on a FIFO drop-in until its bound ⇒ the FIFO leg (an answer at once) goes RED', blocked);
+  ok(gateOf(released) && blocked.named === null && blocked.cause === 'timeout', 'CONTROL: the reader without its non-blocking open hangs on a FIFO drop-in until its bound ⇒ the FIFO leg (an answer at once) goes RED', blocked);
   // THE READER IS BOUNDED (its reader's S1): a FIFO drop-in never holds a start (opened non-blocking, not a regular file), a file over
   // 1 MiB is not read, the whole answer within its bound; a NETWORK or FUSE filesystem is never read — a local mount is
   const fifoDir = mdir({ 'managed-settings.json': JSON.stringify({ permissions: {} }) });
@@ -754,7 +754,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const nfs = await MANAGED.managedHelperFact({ dir: '/stand-in/nfs', platform: 'linux', wsl: false, fsp: fsOf(0x6969) });
   const local = await MANAGED.managedHelperFact({ dir: '/stand-in/local', platform: 'linux', wsl: false, fsp: fsOf(0x794c7630 /* overlay */) });
   clearInterval(alive);   // the never-answering reads above held nothing; from here every leg holds its own handle
-  ok(fifo.named === null && fifo.cause === 'unreadable' && /10-pipe\.json$/.test(String(fifo.where)) && big.named === null && hang.named === null && hang.cause === 'timeout' && nfs.named === null && nfs.cause === 'network-mount' && local.named === false,
+  ok(fifo.named === null && fifo.cause === 'unreadable' && gateOf(/10-pipe\.json$/.test(String(fifo.where))) && big.named === null && hang.named === null && hang.cause === 'timeout' && nfs.named === null && nfs.cause === 'network-mount' && local.named === false,
     'the reader: a FIFO drop-in answers «cannot tell» as NOT A REGULAR FILE (the open never blocked — its code is never the bound\'s «timeout»), a file over 1 MiB too, a stuck read at its bound; a network filesystem is not read, a local mount is', { fifo: fifo.cause, fifoWhere: fifo.where, big: big.cause, hang: hang.cause, nfs: nfs.cause, local: local.named });
   // macOS: the CLI's own managed-preferences file cannot be told (not parsed here) — Claude Desktop's is not the CLI's; WSL: the
   // Windows policy keys the CLI reads through reg.exe cannot be told either
@@ -762,10 +762,10 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const desk = fs.mkdtempSync(path.join(scratchDir('hspawn-macprefs-desktop'), 'd-')); fs.writeFileSync(path.join(desk, 'com.anthropic.claudefordesktop.plist'), 'x');
   const macHit = await MANAGED.managedHelperFact({ platform: 'darwin', dir: path.join(prefs, 'no-managed-dir'), macPrefs: prefs });
   const macDesk = await MANAGED.managedHelperFact({ platform: 'darwin', dir: path.join(prefs, 'no-managed-dir'), macPrefs: desk });
-  ok(macHit.named === null && /com\.anthropic\.claudecode\.plist$/.test(macHit.where) && macDesk.named === false
+  ok(macHit.named === null && gateOf(/com\.anthropic\.claudecode\.plist$/.test(macHit.where)) && macDesk.named === false
     && MANAGED.DIRS.linux === '/etc/claude-code' && MANAGED.DIRS.darwin === '/Library/Application Support/ClaudeCode' && MANAGED.DIRS.win32 === 'C:\\Program Files\\ClaudeCode',
     'macOS: the CLI\'s managed-preferences file cannot be told, Claude Desktop\'s is not the CLI\'s; the CLI\'s own folders (WSL: the Windows policy legs above)', { macHit: macHit.named, macDesk: macDesk.named });
-  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = fs.readFileSync(path.join(REPO, f), 'utf8'); ok([BP.HELPER_SET_ASIDE.provider, ...Object.values(SFW.PROVIDER_BILLING_WORDS)].every((w) => d.includes(JSON.stringify(w) + ':')), `${path.basename(f)}: a provider's three helper sentences have their rows`); }
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = fs.readFileSync(path.join(REPO, f), 'utf8'); ok(verdictOf([BP.HELPER_SET_ASIDE.provider, ...Object.values(SFW.PROVIDER_BILLING_WORDS)].every((w) => d.includes(JSON.stringify(w) + ':'))), `${path.basename(f)}: a provider's three helper sentences have their rows`); }
   // THE POOL QUESTION (the coordinator's 21:50Z, for the remove confirm that names the conversations on a provider): can a
   // provider be a MEMBER of a pool — would a conversation billed through a pool run on it and go unnamed? NO, and this leg keeps
   // it so: a pool's members are the ACCOUNTS store's same-harness subscriptions (poolMembership / poolMembers / poolRoster /
@@ -784,15 +784,15 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const tried = (fn) => { try { fn(); return 'taken'; } catch (e) { return String(e && e.message); } };
   const pq = poolOf(AccountManager, 'real');
   const pqTarget = tried(() => pq.a.setPoolTarget('pool-t1', ds.id)), pqPri = tried(() => pq.a.updatePool('pool-t1', { priority: [ds.id] })), pqLink = tried(() => pq.a.ensureSessionPoolLink('pool-t1', 'claude:sess-1', ds.id));
-  ok(eq(pq.a.poolMembership('pool-t1'), [pq.sub]) && !pq.a.poolRoster('pool-t1').some((r) => r.id === ds.id)
-    && /not a claude subscription/.test(pqTarget) && /not a member of this pool/.test(pqPri) && /not a subscription/.test(pqLink) && pq.a.get(ds.id) == null,
+  ok(gateOf(eq(pq.a.poolMembership('pool-t1'), [pq.sub])) && !pq.a.poolRoster('pool-t1').some((r) => r.id === ds.id)
+    && gateOf(/not a claude subscription/.test(pqTarget)) && gateOf(/not a member of this pool/.test(pqPri)) && gateOf(/not a subscription/.test(pqLink)) && pq.a.get(ds.id) == null,
     'a third-party provider is never a pool member: a pool whose member list NAMES it lists, offers, targets and links a conversation to only its subscriptions (the provider is no account of the accounts store) — no conversation billed through a pool runs on a provider',
     { membership: pq.a.poolMembership('pool-t1'), pqTarget, pqPri, pqLink });
   const ACC = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
   const TRUST = '    const wanted = Array.isArray(a.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;\n    return wanted.map((x) => x.id);';
   if (ACC.split(TRUST).length !== 2) throw new Error('the anchor of the control «a pool trusts its member list» is not in the source once');
   const px = poolOf(M.load('src/accounts.js', anchored(ACC, TRUST, '    return Array.isArray(a.members) && a.members.length ? a.members.slice() : all.map((x) => x.id);', 'a pool trusts its member list'), 'pool-trusts-list').AccountManager, 'mut');
-  ok(px.a.poolMembership('pool-t1').includes(ds.id), 'CONTROL: a pool that trusts its member list as given counts the provider a member ⇒ the leg above goes RED', px.a.poolMembership('pool-t1'));
+  ok(verdictOf(px.a.poolMembership('pool-t1').includes(ds.id)), 'CONTROL: a pool that trusts its member list as given counts the provider a member ⇒ the leg above goes RED', px.a.poolMembership('pool-t1'));
   // (MAJOR 3) the badge names the provider, billed by use — never «API key» / «ChatGPT»
   const badgeC = H.get('claude').billingIdentity({ _accountId: ds.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
   const badgeX = H.get('codex').billingIdentity({ _accountId: lab.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
@@ -813,7 +813,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   fs.mkdirSync(path.join(homeX, 'sessions')); fs.writeFileSync(path.join(homeX, 'sessions', 'rollout-kept.jsonl'), '{}');
   fs.writeFileSync(path.join(homeX, 'auth.json'), '{"planted":true}');
   const c3 = await drive(wsCreate, { backend: 'codex', mode: 'chat', accountId: lab.id }, { accounts: am });
-  ok(c3.spawned.length === 1 && fs.existsSync(path.join(homeX, 'sessions', 'rollout-kept.jsonl')) && !fs.existsSync(path.join(homeX, 'auth.json')), 'a later spawn never re-seeds the home: a real sessions folder keeps its transcripts; a login file found there IS removed before the spawn');
+  ok(c3.spawned.length === 1 && gateOf(fs.existsSync(path.join(homeX, 'sessions', 'rollout-kept.jsonl'))) && !fs.existsSync(path.join(homeX, 'auth.json')), 'a later spawn never re-seeds the home: a real sessions folder keeps its transcripts; a login file found there IS removed before the spawn');
   const xk = H.get('claude').creds.providerSpawn({ provider: { auth: 'x-api-key', baseUrl: 'https://llm.example.test', models: [{ id: 'm' }], defaultModel: 'm' }, key: KEY, home: '/h' });
   ok(xk.localEnv.ANTHROPIC_API_KEY === KEY && xk.localEnv.ANTHROPIC_AUTH_TOKEN === '' && xk.localEnv.CLAUDE_CODE_USE_BEDROCK === '' && xk.localEnv.CLAUDE_CODE_USE_VERTEX === '', 'an x-api-key provider: the key in ANTHROPIC_API_KEY and the OTHER variable emptied (an ambient ANTHROPIC_AUTH_TOKEN would outrank it), the cloud switches off');
   console.log('— ⑤ RED controls');
@@ -822,7 +822,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const cxBad = patched(CX, '`model_providers.${t}.env_key=${q(PROVIDER_KEY_VAR)}`', '`model_providers.${t}.experimental_bearer_token=${q(key)}`');
   wire((b) => (b === 'codex' ? cxBad : H.get(b)));
   const k1 = await drive(wsCreate, { backend: 'codex', mode: 'chat', accountId: lab.id }, { accounts: am });
-  ok(k1.spawned.length === 1 && k1.spawned[0].args.some((a) => String(a).includes(KEY)), 'CONTROL: a codex plan that puts the key in its -c table (experimental_bearer_token) puts it on the COMMAND LINE ⇒ the argv leg above goes RED');
+  ok(k1.spawned.length === 1 && verdictOf(k1.spawned[0].args.some((a) => String(a).includes(KEY))), 'CONTROL: a codex plan that puts the key in its -c table (experimental_bearer_token) puts it on the COMMAND LINE ⇒ the argv leg above goes RED');
   const clBad = patched(CLD, '  if (home) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = home;\n', '');
   wire((b) => (b === 'claude' ? clBad : H.get(b)));
   const k2 = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am }, AMBIENT);
@@ -838,7 +838,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(k4.spawned.length === 1 && modelOf(k4) === 'gpt-5.5', 'CONTROL: the create without the model fence sends gpt-5.5 to DeepSeek ⇒ the not-served leg goes RED');
   const k5 = await drive(M.load('src/ws-create.js', anchored(src, fenceLine, '', 'the create without the model fence'), 'pv-nofence-resume'), { backend: 'claude', accountId: gone.id, resume: true, resumeId: 'conv-gone-2', ignoreNoConvo: true }, { accounts: am });
   const e5 = k5.sent.find((m) => m.type === 'error');
-  ok(k5.spawned.length === 0 && !!e5 && e5.code === 'provider-unknown' && /unknown model provider/.test(e5.message), 'past the fence (taken out), a removed provider on a RESUME is refused BY resolveForSpawn itself — provider-unknown with its code, nothing spawned, never rescued onto the machine\'s own login', e5);
+  ok(k5.spawned.length === 0 && !!e5 && e5.code === 'provider-unknown' && verdictOf(/unknown model provider/.test(e5.message)), 'past the fence (taken out), a removed provider on a RESUME is refused BY resolveForSpawn itself — provider-unknown with its code, nothing spawned, never rescued onto the machine\'s own login', e5);
   const PSF = PSP.create({ providers: store, dataDir: DATA });
   store.put({ id: 'pv-noaddr2', kind: 'self-hosted', label: 'NoAddr', preset: 'other', baseUrl: null, keyRef: MP.keyRefOf('pv-noaddr2'), wire: 'anthropic-messages', modelsSource: 'configured', models: [{ id: 'm-1' }] });
   vault.secretPut(MP.keyEntryOf('pv-noaddr2'), KEY);
@@ -850,7 +850,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const bstore = PS.create({ dataDir: scratchDir('hspawn-pv-bad'), vault: () => ({ state: () => 'unlocked', secretGet: () => ({ ok: false, code: 'key-malformed' }), secretNames: () => [] }), log: () => {} });
   bstore.put({ id: 'pv-bad1', kind: 'self-hosted', label: 'Bad', preset: 'other', baseUrl: 'https://llm.example.test/v1', keyRef: MP.keyRefOf('pv-bad1'), wire: 'anthropic-messages', modelsSource: 'configured', models: [{ id: 'm-1' }] });
   const r3 = [threw(() => PSF('pv-noaddr2', 'claude')), threw(() => PSP.create({ providers: nstore, dataDir: nvDir })('pv-unset1', 'claude')), threw(() => PSP.create({ providers: bstore, dataDir: DATA })('pv-bad1', 'claude'))];
-  ok(eq(r3, ['provider-no-address', 'vault_not_set_up', 'key-unreadable']), 'the three refusals that had no leg, BY NAME before anything spawns: no address · the vault not set up · the key unreadable (a vault answer that is neither locked nor unset)', r3);
+  ok(verdictOf(eq(r3, ['provider-no-address', 'vault_not_set_up', 'key-unreadable'])), 'the three refusals that had no leg, BY NAME before anything spawns: no address · the vault not set up · the key unreadable (a vault answer that is neither locked nor unset)', r3);
   // the session's META never holds the key (the premise the key-nowhere leg could not see: drive()'s writeSessionMeta was a noop)
   const metas = [];
   const cmeta = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am, writeSessionMeta: (...a) => { metas.push(JSON.stringify(a)); } });
@@ -861,7 +861,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const ct = await drive(wsCreate, { backend: 'codex', accountId: lab.id }, { accounts: am });
   const ta = (ct.spawned[0] || { args: [] }).args;
   const tIdx = ta.findIndex((a) => String(a).startsWith(`model_providers.pv_${lab.id.slice(3)}.base_url=`));
-  ok(ct.spawned.length === 1 && tIdx > 0 && ta[tIdx - 1] === '-c' && ta.includes(`model_provider="pv_${lab.id.slice(3)}"`) && !ta.some((a) => String(a).includes(KEY)), 'codex in a TERMINAL: the provider\'s -c table rides its command line too (each item after its -c), the key never', ta.slice(-14));
+  ok(ct.spawned.length === 1 && tIdx > 0 && ta[tIdx - 1] === '-c' && gateOf(ta.includes(`model_provider="pv_${lab.id.slice(3)}"`)) && !ta.some((a) => String(a).includes(KEY)), 'codex in a TERMINAL: the provider\'s -c table rides its command line too (each item after its -c), the key never', ta.slice(-14));
   const PSRC = fs.readFileSync(path.join(REPO, 'src/server/provider-spawn.js'), 'utf8');
   const seedGuard = "{ let fresh = true; try { fs.lstatSync(path.join(home, 'sessions')); fresh = false; } catch { } if (fresh) h.creds.seedDir(home); }";
   const PSPm = M.load('src/server/provider-spawn.js', anchored(PSRC, seedGuard, 'h.creds.seedDir(home);', 'the provider home seeded every start'), 'pv-seed-always');
@@ -903,10 +903,10 @@ console.log('P1-a OpenCode: the one file from the published pages, the key\'s na
     for (const m of Object.values(e.models)) { for (const k of Object.keys(m)) if (!DOC_FIELDS.model.includes(k)) undocumented.push('models.*.' + k); for (const k of Object.keys(m.limit || {})) if (!DOC_FIELDS.limit.includes(k)) undocumented.push('limit.' + k); }
   }
   console.log('    judged file: ' + JSON.stringify(c.doc));
-  ok(c.ok && c.doc.$schema === 'https://opencode.ai/config.json' && c.doc.model === `${lab.id}/qwen3-coder` && e.package === '@opencode/ai/providers/openai-compatible' && e.settings.baseURL === 'http://127.0.0.1:9/v1' && JSON.stringify(e.env) === '["VIBESPACE_PROVIDER_KEY"]' && e.models['qwen3-coder'] && !undocumented.length,
+  ok(gateOf(c.ok) && c.doc.$schema === 'https://opencode.ai/config.json' && c.doc.model === `${lab.id}/qwen3-coder` && e.package === '@opencode/ai/providers/openai-compatible' && e.settings.baseURL === 'http://127.0.0.1:9/v1' && JSON.stringify(e.env) === '["VIBESPACE_PROVIDER_KEY"]' && gateOf(e.models['qwen3-coder']) && !undocumented.length,
     'the one file (providers page + config page): providers.<pv id> {name, env: [the key\'s VARIABLE], package openai-compatible, settings.baseURL, models} and model «<pv id>/<model>» — every key a documented one', undocumented);
   const ca = OC.configOf(ant), cr = OC.configOf(resp);
-  ok(ca.ok && ca.doc.providers[ant.id].package === '@opencode/ai/providers/anthropic-compatible' && !cr.ok && cr.code === 'wire-undocumented' && /published pages name a runtime for Anthropic-compatible and OpenAI-compatible/.test(cr.message),
+  ok(gateOf(ca.ok) && ca.doc.providers[ant.id].package === '@opencode/ai/providers/anthropic-compatible' && !cr.ok && cr.code === 'wire-undocumented' && verdictOf(/published pages name a runtime for Anthropic-compatible and OpenAI-compatible/.test(cr.message)),
     '…an Anthropic-compatible record takes the anthropic-compatible runtime; a Responses-API record is REFUSED by name (no runtime for it on the pages)', cr);
   // THE ROAD IS NOT OFFERED — no picker row: fitsHarness says no (code «later»), the product's spawn road refuses it
   const fit = MP.fits(lab).opencode;
@@ -914,13 +914,13 @@ console.log('P1-a OpenCode: the one file from the published pages, the key\'s na
   let refused = null; try { plain(lab.id, 'opencode'); } catch (x) { refused = x.code; }
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), wiring = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
   const createCalls = wiring.split('\n').filter((l) => l.includes("require('./provider-spawn.js').create("));
-  ok(fit && fit.code === 'later' && !MP.fitsHarness(lab, 'opencode') && !MP.SPAWN_HARNESSES.includes('opencode') && refused === 'provider-unfit' && createCalls.length === 1 && createCalls.every((l) => !l.includes('probeRoads')),
+  ok(gateOf(fit) && fit.code === 'later' && !MP.fitsHarness(lab, 'opencode') && !MP.SPAWN_HARNESSES.includes('opencode') && refused === 'provider-unfit' && createCalls.length === 1 && verdictOf(createCalls.every((l) => !l.includes('probeRoads'))),
     'NOT OFFERED: opencode is no spawn harness (fits «later» — no picker row), the product\'s road refuses it (provider-unfit), and the product\'s ONE create (src/server/account-usage-routes.js) hands no probeRoads', { fit, refused, createCalls: createCalls.length });
   const PSRC = fs.readFileSync(path.join(REPO, 'src/server/provider-spawn.js'), 'utf8');
   // every file that builds or hands the spawn road (the server tree, the account manager, the create) — read, not walked
   const roadFiles = [...fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /\.js$/.test(f)).map((f) => 'server/' + f), 'accounts.js', 'ws-create.js'];
   const switchUsers = roadFiles.filter((f) => fs.readFileSync(path.join(REPO, 'src', f), 'utf8').includes('probeRoads'));
-  ok(JSON.stringify(switchUsers) === JSON.stringify(['server/provider-spawn.js']) && !srv.includes('probeRoads') && PSRC.includes("const probe = probeRoads && PROBE_ROADS.includes(backend) && typeof probeRoads[backend] === 'function' && (MP.fits(p)[backend] || {}).code === 'later' ? probeRoads[backend] : null;") && PSRC.includes("const PROBE_ROADS = Object.freeze(['opencode']);"),
+  ok(JSON.stringify(switchUsers) === JSON.stringify(['server/provider-spawn.js']) && !srv.includes('probeRoads') && gateOf(PSRC.includes("const probe = probeRoads && PROBE_ROADS.includes(backend) && typeof probeRoads[backend] === 'function' && (MP.fits(p)[backend] || {}).code === 'later' ? probeRoads[backend] : null;")) && verdictOf(PSRC.includes("const PROBE_ROADS = Object.freeze(['opencode']);")),
     'ONE switch: `probeRoads` is read in src/server/provider-spawn.js only (src/server, accounts.js, ws-create.js and server.js read), opens OpenCode BY NAME (PROBE_ROADS) and only while model-providers marks it «later», and no product file hands it', switchUsers);
   // THE SWITCH TURNED (the probe's fixture): the plan runs, the file is written under the provider's own home, 0600, no value in it
   const probe = PSP.create({ providers: store, dataDir: DATA, probeRoads: { opencode: OC.opencodeProviderSpawn } });
@@ -928,8 +928,8 @@ console.log('P1-a OpenCode: the one file from the published pages, the key\'s na
   const home = path.join(DATA, 'provider-homes', lab.id, 'opencode'), file = path.join(home, OC.CONFIG_REL);
   const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const mode = fs.existsSync(file) ? (fs.statSync(file).mode & 0o777) : null;
-  ok(text && JSON.parse(text).model === `${lab.id}/qwen3-coder` && mode === 0o600 && !text.includes(KEY) && text.includes('VIBESPACE_PROVIDER_KEY') && sp.argv.length === 0 && !JSON.stringify(sp.argv).includes(KEY) && sp.localEnv.VIBESPACE_PROVIDER_KEY === KEY && sp.localEnv.HOME === home && sp.secret.var === 'VIBESPACE_PROVIDER_KEY'
-    && Object.entries(OC.XDG).every(([k, rel]) => sp.localEnv[k] === `${home}/${rel}` && sp.plainEnv[k] === `${home}/${rel}`) && !Object.values(sp.plainEnv).includes(KEY),
+  ok(gateOf(text) && JSON.parse(text).model === `${lab.id}/qwen3-coder` && mode === 0o600 && !text.includes(KEY) && gateOf(text.includes('VIBESPACE_PROVIDER_KEY')) && sp.argv.length === 0 && !JSON.stringify(sp.argv).includes(KEY) && sp.localEnv.VIBESPACE_PROVIDER_KEY === KEY && sp.localEnv.HOME === home && sp.secret.var === 'VIBESPACE_PROVIDER_KEY'
+    && gateOf(Object.entries(OC.XDG).every(([k, rel]) => sp.localEnv[k] === `${home}/${rel}` && sp.plainEnv[k] === `${home}/${rel}`)) && !Object.values(sp.plainEnv).includes(KEY),
     'the switch turned: the file lands under the provider\'s own home (0600) naming the key\'s VARIABLE only; the value rides the env (the secret channel), no argv; HOME and the XDG config / data / state / cache folders all under that home (r1159 item 2)', { mode: mode && mode.toString(8), argv: sp.argv });
   let outside = null; const bad = PSP.create({ providers: store, dataDir: DATA, probeRoads: { opencode: () => ({ localEnv: {}, argv: [], secret: null, plainEnv: {}, files: [{ rel: '../../escape.json', text: '{}' }] }) } });
   try { bad(lab.id, 'opencode'); } catch (x) { outside = x.code; }
@@ -950,7 +950,7 @@ console.log('P1-a OpenCode: the one file from the published pages, the key\'s na
   const MPS = mutantCopies('hspawn-oc', REPO);
   const direct = MPS.load('src/server/provider-spawn.js', anchored(PSRC2, "  try { fs.writeFileSync(tmp, String((f && f.text) || ''), { mode: 0o600 }); fs.renameSync(tmp, abs); }\n", "  try { fs.writeFileSync(abs, String((f && f.text) || ''), { mode: 0o600 }); }\n", 'the plan file written directly'), 'oc-direct');
   const w2 = watch(() => direct.create({ providers: store, dataDir: DATA, probeRoads: { opencode: OC.opencodeProviderSpawn } })(lab.id, 'opencode'));
-  ok(!w1.err && tmpOk(w1.calls) && !w2.err && !tmpOk(w2.calls), 'the plan\'s file is written to a temp name and RENAMED onto its place (never written in place) — CONTROL: a copy writing it directly fails this check', { real: w1.calls.slice(-2).map((c) => c.map((x) => path.relative(DATA, x) || x)), direct: w2.calls.slice(-1).map((c) => c.map((x) => path.relative(DATA, x) || x)) });
+  ok(!w1.err && gateOf(tmpOk(w1.calls)) && !w2.err && !tmpOk(w2.calls), 'the plan\'s file is written to a temp name and RENAMED onto its place (never written in place) — CONTROL: a copy writing it directly fails this check', { real: w1.calls.slice(-2).map((c) => c.map((x) => path.relative(DATA, x) || x)), direct: w2.calls.slice(-1).map((c) => c.map((x) => path.relative(DATA, x) || x)) });
   fs.rmSync(file, { force: true }); fs.mkdirSync(file, { recursive: true });   // a folder where the file goes ⇒ the rename fails
   let wf = null; try { probe(lab.id, 'opencode'); } catch (x) { wf = x.code; }
   const tmpsLeft = fs.readdirSync(path.dirname(file)).filter((n) => n.includes('.tmp-'));
@@ -974,15 +974,15 @@ console.log('P1-a OpenCode: the one file from the published pages, the key\'s na
   const run = spawnSync(process.execPath, [STAND, 'acp'], { cwd: CWDO, env: { PATH: process.env.PATH, ...sp.localEnv, STANDIN_RECORD: REC }, timeout: 15000 });
   const rec = fs.existsSync(REC) ? JSON.parse(fs.readFileSync(REC, 'utf8')) : null;
   console.log('    judged stand-in record: ' + JSON.stringify(rec));
-  ok(run.status === 0 && rec && rec.found && rec.home === home && JSON.stringify(rec.argv) === '["acp"]' && rec.cwd === CWDO && rec.model === `${lab.id}/qwen3-coder` && rec.baseURL === 'http://127.0.0.1:9/v1' && rec.keyVar === 'VIBESPACE_PROVIDER_KEY' && rec.keyDigest === crypto.createHash('sha256').update(KEY).digest('hex'),
+  ok(run.status === 0 && gateOf(rec) && gateOf(rec.found) && rec.home === home && JSON.stringify(rec.argv) === '["acp"]' && rec.cwd === CWDO && rec.model === `${lab.id}/qwen3-coder` && rec.baseURL === 'http://127.0.0.1:9/v1' && rec.keyVar === 'VIBESPACE_PROVIDER_KEY' && rec.keyDigest === crypto.createHash('sha256').update(KEY).digest('hex'),
     'the stand-in, run with what the PLAN gives (its env, the argv «acp», a cwd this leg picks — not the ACP road\'s own spawn, which the road being unoffered does not build): what the plan hands a program is enough to find the one file at ~/.config/opencode under the provider\'s HOME, its provider at the loopback address, the key through the named variable', rec);
   // THE MODEL PER CONVERSATION — ACP's documented option (configId «model», «provider/model»): the wrapper's own initial-model road
   const ACPW = fs.readFileSync(path.join(REPO, 'data/bin/acp-wrapper.js'), 'utf8');
   const planOf = OC.opencodeProviderSpawn({ provider: lab, key: KEY, home });   // the plan itself (the spawn account carries no function)
-  ok(planOf.modelRef() === `${lab.id}/qwen3-coder` && planOf.modelRef('qwen3-coder-plus') === `${lab.id}/qwen3-coder-plus` && OC.modelRefOf(ant, 'glm-4.6') === `${ant.id}/glm-4.6` && ACPW.includes("request('session/set_config_option', { sessionId: meta.sessionId, configId, value }"),
+  ok(planOf.modelRef() === `${lab.id}/qwen3-coder` && planOf.modelRef('qwen3-coder-plus') === `${lab.id}/qwen3-coder-plus` && OC.modelRefOf(ant, 'glm-4.6') === `${ant.id}/glm-4.6` && verdictOf(ACPW.includes("request('session/set_config_option', { sessionId: meta.sessionId, configId, value }")),
     'the model per conversation is «<pv id>/<model>» — what ACP\'s session/set_config_option `model` takes (acp page) and the ACP wrapper already sends for ACP_WEBUI_MODEL');
   console.log('    UNPROVEN until the probe (the owner\'s word — no OpenCode on this box): ' + OC.UNPROVEN.map((u, i) => `(${i + 1}) ${u}`).join(' · '));
-  ok(OC.UNPROVEN.length === 7 && /INSTALLED OpenCode build accepts this shape/.test(OC.UNPROVEN[0]) && /XDG/.test(OC.UNPROVEN[6]) && Object.values(OC.PAGES).every((u) => /^https:\/\/opencode\.ai\/docs\//.test(u)), 'what the real program does is SAID UNPROVEN by name (7 facts — first, that the INSTALLED build accepts this shape; last, its use of HOME or XDG unread), and every page the file is built from is named');
+  ok(OC.UNPROVEN.length === 7 && gateOf(/INSTALLED OpenCode build accepts this shape/.test(OC.UNPROVEN[0])) && gateOf(/XDG/.test(OC.UNPROVEN[6])) && verdictOf(Object.values(OC.PAGES).every((u) => /^https:\/\/opencode\.ai\/docs\//.test(u))), 'what the real program does is SAID UNPROVEN by name (7 facts — first, that the INSTALLED build accepts this shape; last, its use of HOME or XDG unread), and every page the file is built from is named');
   try { fs.rmSync(DATA, { recursive: true, force: true }); fs.rmSync(BIN, { recursive: true, force: true }); fs.rmSync(CWDO, { recursive: true, force: true }); } catch { }
 }
 
@@ -990,4 +990,4 @@ H.unregister('acme'); H.unregister('acme-nopool'); H.unregister('acme-perseat');
 for (const d of [SOCK, BUF, CWD]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 ok(capsOf('acme').pool === false && !H.has('acme'), 'unregister() takes the contributed caps row with it');
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

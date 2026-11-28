@@ -19,7 +19,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -127,7 +127,7 @@ const PAYLOAD = (recs) => ({
   ok((await ingest.observedOrgForRid('req_011TESTTRUTH000000000001')) === 'sub-true', 'rid → resolved observed org (DIAGNOSTIC since 2026-09-07 — the map is kept, it just decides nothing)');
   ok((await ingest.observedOrgForRid('req_unknown')) === undefined, 'no observation → undefined');
   ok(attribCalls.length === 0, 'REFUTED AND REMOVED: a mismatch writes NO corrective attribution record — organization.id is the identity the CLI cached at SPAWN, so the correction booked a hot-switched session\'s spend to the account it started on forever', JSON.stringify(attribCalls));
-  ok((() => { const r0 = JSON.parse(fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n')[0]); return r0.labelMatchesSlot === false && !('agreed' in r0); })(), 'the stash row RECORDS the label beside the walk\'s slot (`labelMatchesSlot` — a coincidence metric; the old `agreed` read as identity) instead of acting on it');
+  ok(verdictOf((() => { const r0 = JSON.parse(fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n')[0]); return r0.labelMatchesSlot === false && !('agreed' in r0); })()), 'the stash row RECORDS the label beside the walk\'s slot (`labelMatchesSlot` — a coincidence metric; the old `agreed` read as identity) instead of acting on it');
   await post(PAYLOAD([REC()]));
   ok(attribCalls.length === 0, 'duplicate rid → still nothing written, no re-append');
   const stash = fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n');
@@ -223,18 +223,18 @@ const PAYLOAD = (recs) => ({
   };
   { // (1) THE KEEP RULE FOLLOWS THE STASH'S READERS (主开发 r738 Q1): the ledger backfill not recorded as run ⇒ kept WHOLE, said once
     const st1 = fs.statSync(stash3), k = await start3();
-    ok(!k.owed && fs.statSync(stash3).ino === st1.ino && fs.statSync(stash3).size === st1.size && fs.readFileSync(stash3, 'utf8').includes('req_oldpad') && k.said.filter((l) => l.includes('kept WHOLE')).length === 1,
+    ok(!k.owed && fs.statSync(stash3).ino === st1.ino && fs.statSync(stash3).size === st1.size && gateOf(fs.readFileSync(stash3, 'utf8').includes('req_oldpad')) && k.said.filter((l) => l.includes('kept WHOLE')).length === 1,
       'row B-360d: the ledger backfill migration NOT recorded as run ⇒ a stash with rows past the horizon is kept WHOLE (that migration reads every old row), said once', k.said.join(' | '));
   }
   // (2) recorded ⇒ the rows past the horizon, MORE than what it keeps, are trimmed by the stash's writer: a new file renamed in
   fs.writeFileSync(ledger3, ran3);
   const st0 = fs.statSync(stash3); await mk3().replayed; for (let k = 0; k < 50 && fs.statSync(stash3).ino === st0.ino; k++) await new Promise((r) => setTimeout(r, 50));
-  ok(fs.statSync(stash3).ino !== st0.ino && !fs.readFileSync(stash3, 'utf8').includes('req_oldpad') && fs.readFileSync(stash3, 'utf8').includes('req_011TESTTRUTH000000000001') && fs.readFileSync(stash3, 'utf8').includes('req_pad'), 'B-1319 / B-360d: rows past the 30-day horizon — more than what it keeps — are trimmed by the stash\'s writer (a new file renamed in), the fresh rows kept');
+  ok(fs.statSync(stash3).ino !== st0.ino && !fs.readFileSync(stash3, 'utf8').includes('req_oldpad') && gateOf(fs.readFileSync(stash3, 'utf8').includes('req_011TESTTRUTH000000000001')) && verdictOf(fs.readFileSync(stash3, 'utf8').includes('req_pad')), 'B-1319 / B-360d: rows past the 30-day horizon — more than what it keeps — are trimmed by the stash\'s writer (a new file renamed in), the fresh rows kept');
   { // (3) THE THRESHOLD (主开发 r915 1; B-1319's «nothing to trim» is its case of 0): a 12 MB+ stash whose droppable rows are fewer than
     // what it keeps is NOT rewritten — a start then reads at most about twice the kept set, never a rewrite at every start
     fs.appendFileSync(stash3, big.repeat(Math.ceil(6.5 * 1048576 / big.length)) + JSON.stringify({ rid: 'req_old', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
     const st2 = fs.statSync(stash3), k = await start3();
-    ok(st2.size > 12 * 1048576 && !k.owed && fs.statSync(stash3).ino === st2.ino && fs.statSync(stash3).size === st2.size && fs.readFileSync(stash3, 'utf8').includes('req_old"'), `B-1319 / B-360d: a ${st2.size}-byte stash with one row past the horizon (it would drop less than it keeps) is NOT rewritten`, k.said.join(' | '));
+    ok(st2.size > 12 * 1048576 && !k.owed && fs.statSync(stash3).ino === st2.ino && fs.statSync(stash3).size === st2.size && verdictOf(fs.readFileSync(stash3, 'utf8').includes('req_old"')), `B-1319 / B-360d: a ${st2.size}-byte stash with one row past the horizon (it would drop less than it keeps) is NOT rewritten`, k.said.join(' | '));
   }
 
   // lane ci-351-reds — THE REPLAY IN TIME SLICES IS THE SAME REPLAY. Its 20 000-line slice took 31 ms on the measured boot
@@ -282,7 +282,7 @@ const PAYLOAD = (recs) => ({
       return out;
     };
     const S = await replayOn(require(REPO + '/src/server/otel-ingest.js'), 's'), O = await replayOn(OnePass, 'o');
-    ok(body.length > 12 * 1048576 && S.rewritten && O.rewritten && S.stats === O.stats && S.map === O.map && S.bytes === O.bytes && !S.bytes.includes('req_torn') && S.bytes.length < body.length,
+    ok(body.length > 12 * 1048576 && gateOf(S.rewritten) && gateOf(O.rewritten) && S.stats === O.stats && S.map === O.map && S.bytes === O.bytes && !S.bytes.includes('req_torn') && S.bytes.length < body.length,
       `SLICED REPLAY: the same observation map (${S.stats}), the same counts and the same trimmed stash, byte for byte (${(S.bytes.length / 1048576).toFixed(1)} of ${(body.length / 1048576).toFixed(1)} MB kept) as the one-pass replay`);
     ok(S.parsed === 90000 && S.turns >= 4 && S.perTurnMax * 4 <= S.parsed && O.parsed === 90000 && O.turns === 1 && O.perTurnMax === O.parsed,
       `SLICED REPLAY: it hands the loop back — on the driven slice clock its 90 000 rows are parsed over ${S.turns} loop turns, at most ${S.perTurnMax} in one (≤ a quarter); the one-pass control parses all ${O.perTurnMax} in ONE turn (counted, not timed — the real loop gaps read ${S.maxGap} vs ${O.maxGap} ms)`, JSON.stringify({ S: { turns: S.turns, max: S.perTurnMax, parsed: S.parsed }, O: { turns: O.turns, max: O.perTurnMax, parsed: O.parsed } }));
@@ -309,7 +309,7 @@ const PAYLOAD = (recs) => ({
     const settle = async (d, f, ok0) => { for (let k = 0; k < 200 && !ok0(); k++) { await new Promise((r) => setTimeout(r, 10)); await SW.durable(path.join(d, 'usage-history', f)).catch(() => false); } };
     let o4 = null; const d4 = mkDir4('a'); o4 = mk4(d4);
     const a = midPost(o4, PAYLOAD([REC({ request_id: { stringValue: 'req_u4new' } }), REC({ request_id: { stringValue: 'req_u4old39990' } })])); // a replayed rid near the stash's END: the post waits for the WHOLE replay
-    ok(a.bytes === 0 && a.out && typeof a.out.then === 'function' && o4.stats().rids < 40000, `U4 a post mid-replay reads ${a.bytes} stash bytes on the loop and waits behind the replay (${o4.stats().rids} rows replayed when it came)`);
+    ok(a.bytes === 0 && gateOf(a.out) && typeof a.out.then === 'function' && o4.stats().rids < 40000, `U4 a post mid-replay reads ${a.bytes} stash bytes on the loop and waits behind the replay (${o4.stats().rids} rows replayed when it came)`);
     for (let k = 0; k < 2000 && !spillBytes.length; k++) await new Promise((r) => setImmediate(r));
     SW.dirty = dirty0;
     const w0 = spillBytes[0] || { text: '', rows: -1 };
@@ -356,7 +356,7 @@ const PAYLOAD = (recs) => ({
       const s8 = hold8 ? await sliced(hold8, 'hold') : null;
       ok(!!s8 && !!s8.reached && s8.reached.rids > 0 && s8.reached.rids < 40000, `U4 setup: the replay HELD between two slices (${s8 && s8.reached ? s8.reached.rids : 'never reached'} of 40 000 rows replayed) — a seam of the suite: a copy of the ingest whose replay, after a slice that did not end the stash, waits on this leg's hold`, JSON.stringify(s8));
       const mid = s8 ? s8.mid : -1, right = s8 ? s8.right : -1;
-      ok(!!s8 && mid > 0 && mid < 40000 && right === mid && s8.bytes === 0 && s8.waits && s8.kept === 1 && s8.org === 'sub-true', `U4 a post during the replay's slices (${mid} of 40 000 rows replayed) waits: the map unmoved in its tick (${right}), 0 stash bytes read on the loop, taken after the replay`, JSON.stringify(s8));
+      ok(!!s8 && mid > 0 && mid < 40000 && right === mid && s8.bytes === 0 && gateOf(s8.waits) && s8.kept === 1 && s8.org === 'sub-true', `U4 a post during the replay's slices (${mid} of 40 000 rows replayed) waits: the map unmoved in its tick (${right}), 0 stash bytes read on the loop, taken after the replay`, JSON.stringify(s8));
       // CONTROL, red for its own reason: the same placed race over a copy whose post is TAKEN AT ONCE over the half-replayed map (row
       // B-360d: the release's finishReplay — the road that finished the replay in the post's tick — is removed) — the map moves in
       // the post's tick and the post does not wait
@@ -370,7 +370,7 @@ const PAYLOAD = (recs) => ({
       let prod = null; const dz = SW.dirty; SW.dirty = function (f, o) { if (String(f).endsWith('otel-truth.ndjson') && o && typeof o.produce === 'function') prod = o.produce; return dz.call(this, f, o); };
       try { o9._ingest(PAYLOAD([REC({ request_id: { stringValue: 'req_u4again' } })])); } finally { SW.dirty = dz; }
       const first = prod && prod(), second = prod && prod(); // no onWritten between them: the writer never confirmed the first
-      ok(first && second && countIn(String(first.append), 'req_u4again') === 1 && countIn(String(second.append), 'req_u4again') === 1 && String(second.append).startsWith('\n'), 'U4 a stash write the writer never confirmed is offered again (on a new line: a torn tail never glues the next row to it)');
+      ok(gateOf(first) && gateOf(second) && countIn(String(first.append), 'req_u4again') === 1 && countIn(String(second.append), 'req_u4again') === 1 && verdictOf(String(second.append).startsWith('\n')), 'U4 a stash write the writer never confirmed is offered again (on a new line: a torn tail never glues the next row to it)');
       try { await SW.durable(path.join(d9, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d9, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d9, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d9, { recursive: true, force: true });
     }
     { // a stop between the stash append and the spill's rewrite: the record is in BOTH — the next boot stashes it no second time
@@ -403,14 +403,14 @@ const PAYLOAD = (recs) => ({
       const RS = mutantCopies('otel-truth-cure-split', REPO).load('src/server/otel-ingest.js', editAnchor(srcS, SPLIT, () => "        if (!onDisk) return res.status(503)", "src/server/otel-ingest.js"), 'no-split');   // stale-pins: kept (2b202b257's door, planted back as the RED control)
       const dS = mkDir4('j'), oS = mk4(dS, RS); await oS.replayed;
       try { g4 = await callLogs(oH, dH, 'req_cure_failing'); g4red = await callLogs(oS, dS, 'req_cure_failing_red'); } finally { SW.durable = realDurable; SW.whyNotDurable = realWhy; }
-      ok(srcS.split(SPLIT).length === 2 && g4 && g4.code === 200 && (await oH.observedOrgForRid('req_cure_failing')) === 'sub-true' && g4red && g4red.code === 503,
+      ok(srcS.split(SPLIT).length === 2 && gateOf(g4) && g4.code === 200 && (await oH.observedOrgForRid('req_cure_failing')) === 'sub-true' && gateOf(g4red) && g4red.code === 503,
         `a FAILING storage (its back-off past the exporter's retries): the post answered 200, its record held (${g4 && g4.code}); RED (no split): ${g4red && g4red.code} — the exporter would drop a batch the hub already holds`, { g4, g4red });
       try { await SW.durable(path.join(dS, 'usage-history', 'otel-truth.ndjson')).catch(() => false); SW.forget(path.join(dS, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(dS, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(dS, { recursive: true, force: true });
       const srcC = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8'), WAIT = "      if (stashOwed.length || stashWriting) {\n";
       const RC = mutantCopies('otel-truth-cure', REPO).load('src/server/otel-ingest.js', editAnchor(srcC, WAIT, () => "      if (false) {\n", "src/server/otel-ingest.js"), 'answer-at-once');
       const dR = mkDir4('i'), oR = mk4(dR, RC); await oR.replayed;
       const r1 = await callLogs(oR, dR, 'req_cure_red');
-      ok(srcC.split(WAIT).length === 2 && g1.code === 200 && g1.onDisk === 1 && g2 && g2.code === 503 && g2.retryAfter === '1' && /again/.test(String(g2.body && g2.body.error)) && g3.code === 200 && g3.onDisk === 1,
+      ok(srcC.split(WAIT).length === 2 && g1.code === 200 && g1.onDisk === 1 && gateOf(g2) && g2.code === 503 && g2.retryAfter === '1' && gateOf(/again/.test(String(g2.body && g2.body.error))) && g3.code === 200 && g3.onDisk === 1,
         `the stash is on disk BEFORE the answer: a post's 200 came with its line written (${g1.onDisk}); a write past the bound answers 503 «retry» (${g2 && g2.code}), and the resend comes back 200 with the row stashed ONCE (${g3.onDisk})`, { g1, g2, g3 });
       ok(r1.code === 200 && r1.onDisk === 0, `RED CONTROL (acad2351a: the answer at once): the 200 went out with its line not on disk (${r1.onDisk}) — a kill there loses a row the exporter never sends again`, r1);
       for (const d of [dH, dR]) { try { await SW.durable(path.join(d, 'usage-history', 'otel-truth.ndjson')).catch(() => false); SW.forget(path.join(d, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d, { recursive: true, force: true }); }
@@ -456,7 +456,7 @@ const PAYLOAD = (recs) => ({
   const evs = shards.flatMap((f) => fs.readFileSync(path.join(dataDir, 'usage-history', f), 'utf-8').trim().split('\n').map((l) => JSON.parse(l)));
   const ev = evs.find((e) => e.rid === 'req_bake1');
   ok(!!ev, 'scan baked the transcript event', JSON.stringify(shards));
-  ok(ev && ev.acct === 'sub-true' && ev.atype === 'subscription', 'the setTruthLookup seam still overrides the walk at bake time when something IS wired into it', JSON.stringify(ev));
+  ok(gateOf(ev) && ev.acct === 'sub-true' && ev.atype === 'subscription', 'the setTruthLookup seam still overrides the walk at bake time when something IS wired into it', JSON.stringify(ev));
   ok(uh.attribAt(sid, Date.now()).acct === 'sub-configured', 'attribAt exposes the walk — and with NOTHING wired (production since 2026-09-07) the walk is what bakes');
   // negative control for the unwiring: same instance, no lookup ⇒ the walk wins
   const uh2 = new UsageHistory({ dataDir, homeDir: home, resolveAccount: () => null });
@@ -468,37 +468,37 @@ const PAYLOAD = (recs) => ({
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
   const wc = read('src/ws-create.js');
   { const H = require(path.join(REPO, 'src/harnesses'));
-    ok(/!session\.host && SP\.otelExport && typeof otelEnv === 'function'/.test(wc) && H.ids().filter((id) => H.spawnOf(id).otelExport === true).join() === 'claude',
+    ok(gateOf(/!session\.host && SP\.otelExport && typeof otelEnv === 'function'/.test(wc)) && H.ids().filter((id) => H.spawnOf(id).otelExport === true).join() === 'claude',
       'ws-create: OTEL env injection gated local-only on the declared spawn.otelExport row (claude alone declares it)'); }
-  ok(read('src/ws-handler.js').includes("'otelEnv',"), 'ws contract carries otelEnv');
-  ok(/p\.startsWith\('\/otel\/'\)/.test(read('src/door.js')), 'the door class (src/door.js, lifted out of the auth middleware by B3a) exempts /otel/ (module gate is the only door)');
+  ok(verdictOf(read('src/ws-handler.js').includes("'otelEnv',")), 'ws contract carries otelEnv');
+  ok(verdictOf(/p\.startsWith\('\/otel\/'\)/.test(read('src/door.js'))), 'the door class (src/door.js, lifted out of the auth middleware by B3a) exempts /otel/ (module gate is the only door)');
   const sv = read('server.js');
   const oi0 = read('src/server/otel-ingest.js');
-  ok(sv.includes('otelIngest.registerRoutes(app)') && sv.includes('otelEnv: otelIngest.envFor'), 'server.js wires routes + spawn env');
+  ok(gateOf(sv.includes('otelIngest.registerRoutes(app)')) && verdictOf(sv.includes('otelEnv: otelIngest.envFor')), 'server.js wires routes + spawn env');
   // THE SOURCE PIN (2026-09-07): the observation may never key an attribution
   // again. A re-wire has to defeat this line on purpose.
   // Comments are ALLOWED to name the refuted wiring (the record must survive);
   // only executable lines are pinned, so strip line comments first.
   const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   ok(!/setTruthLookup\s*\(/.test(code('server.js')), 'server.js EXECUTES no setTruthLookup call at all — the OTel map may never key an attribution again (it names the SPAWN-time identity)');
-  ok(!/\btruthLookup\b/.test(code('src/server/otel-ingest.js')) && /observedOrgForRid\(rid\)/.test(oi0), 'the ingest exports the map under a name that says what it is (observedOrgForRid), so a re-wire cannot be a copy-paste');
+  ok(!/\btruthLookup\b/.test(code('src/server/otel-ingest.js')) && verdictOf(/observedOrgForRid\(rid\)/.test(oi0)), 'the ingest exports the map under a name that says what it is (observedOrgForRid), so a re-wire cannot be a copy-paste');
   { // row B-360d (moved from the heavy test-otel-replay-slices, r915's round): the source census, on every build
     const strip = (t) => t.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l.replace(/(^|\s)\/\/.*$/, '$1'))).join('\n');
     const SYNC = /\bfs\.(?:readFileSync|readSync|existsSync|statSync|renameSync)\(\s*file\b|\bfinishReplay\b/g;
     const cur = strip(fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8')), rel = strip(fs.readFileSync(path.join(REPO, 'scripts/fixtures/otel-replay/otel-ingest-944de13f9.js.frozen'), 'utf8'));
     ok(!(cur.match(SYNC) || []).length && (rel.match(SYNC) || []).length >= 4, `row B-360d: no synchronous read of the stash left in the ingest (the release frozen beside it had ${(rel.match(SYNC) || []).length}: finishReplay, its existsSync + readFileSync, the trim's statSync + renameSync)`, cur.match(SYNC));
     const ID = '2026-09-backfill-ledger-by-slot', MIG = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf8'), at = MIG.indexOf(`id: '${ID}'`), row = at < 0 ? '' : MIG.slice(at, MIG.indexOf('const pass = backfillLedgerBySlot(', at) + 1);   // the call is `const pass =` since line 828's follow (r4125: a pass may be stepped)
-    ok(at > 0 && row.length > 1 && !/\btry\s*\{/.test(row.slice(row.indexOf('run() {'))) && cur.includes(`const BACKFILL_ID = '${ID}';`), 'row B-360d: the hub\'s backfill row runs the backfill with no catch of its own (a failed read reaches the runner), and the ingest\'s keep rule names that migration');
+    ok(at > 0 && row.length > 1 && !/\btry\s*\{/.test(row.slice(row.indexOf('run() {'))) && verdictOf(cur.includes(`const BACKFILL_ID = '${ID}';`)), 'row B-360d: the hub\'s backfill row runs the backfill with no catch of its own (a failed read reaches the runner), and the ingest\'s keep rule names that migration');
   }
   const oi = read('src/server/otel-ingest.js');
-  ok(/registerRoutes\(app\)\s*\{[\s\S]*?\/otel\/v1\/logs[\s\S]*?\/otel\/v1\/metrics[\s\S]*?\/otel\/v1\/traces/.test(oi), 'the module registers all three OTLP signals itself');
+  ok(verdictOf(/registerRoutes\(app\)\s*\{[\s\S]*?\/otel\/v1\/logs[\s\S]*?\/otel\/v1\/metrics[\s\S]*?\/otel\/v1\/traces/.test(oi)), 'the module registers all three OTLP signals itself');
   // arrival counters (2.367.1): "the CLI exported nothing" and "we dropped what
   // it sent" must be distinguishable — the chat E2E's OTel check failed on
   // EVERY GitHub Actions push from 2.361.0 and there was no way to tell which.
-  ok(oi.includes('arrivals.posts++') && oi.includes('arrivals.rejected++') && /stats\(\)\s*\{ return \{[^}]*\.\.\.arrivals/.test(oi), 'ingest counts posts/rejects/kept separately from truth rids');
-  ok(oi.includes('arrivals.noRid++') && oi.includes('arrivals.noOrg++') && oi.includes('arrivals.stashed++'), 'and counts WHY a parsed record was dropped (a quiet truth channel was undiagnosable)');
-  ok(oi.includes("app.get('/api/otel-stats'"), 'stats are readable over HTTP (the CI gate reads them to classify a miss)');
-  ok(/this\._truthLookup \? this\._truthLookup\(ev\.rid\)/.test(read('src/usage-history.js')), 'the bake-time seam survives in usage-history (unwired, not deleted — a real per-request identity channel would be strictly better than the walk)');
+  ok(gateOf(oi.includes('arrivals.posts++')) && gateOf(oi.includes('arrivals.rejected++')) && verdictOf(/stats\(\)\s*\{ return \{[^}]*\.\.\.arrivals/.test(oi)), 'ingest counts posts/rejects/kept separately from truth rids');
+  ok(gateOf(oi.includes('arrivals.noRid++')) && gateOf(oi.includes('arrivals.noOrg++')) && verdictOf(oi.includes('arrivals.stashed++')), 'and counts WHY a parsed record was dropped (a quiet truth channel was undiagnosable)');
+  ok(verdictOf(oi.includes("app.get('/api/otel-stats'")), 'stats are readable over HTTP (the CI gate reads them to classify a miss)');
+  ok(verdictOf(/this\._truthLookup \? this\._truthLookup\(ev\.rid\)/.test(read('src/usage-history.js'))), 'the bake-time seam survives in usage-history (unwired, not deleted — a real per-request identity channel would be strictly better than the walk)');
 }
 
 // ── 5. the writer's thread: the stash's trim (rewriteJob) keeps B-f276 1b's laws (主开发 r1939, round w5daqaxxs) ──
@@ -526,15 +526,15 @@ const PAYLOAD = (recs) => ({
     return out;
   };
   const head = wkRun(require(path.join(REPO, 'src/store-writer-worker.js')), 'head');
-  ok(head.first === 'written' && head.linked && head.rewrite === 'ETEMPLINKED' && head.whole, 'the stash\'s trim refuses a temp that is still a second name of the store (its removal failed after an exclusive write\'s link): ETEMPLINKED, the store whole', JSON.stringify(head));
-  ok(head.ownGone && head.appended, 'an append store\'s first append in a thread\'s life removes the road\'s OWN temp an earlier life of the thread left (the sweep is handed it)', JSON.stringify(head));
+  ok(head.first === 'written' && gateOf(head.linked) && head.rewrite === 'ETEMPLINKED' && verdictOf(head.whole), 'the stash\'s trim refuses a temp that is still a second name of the store (its removal failed after an exclusive write\'s link): ETEMPLINKED, the store whole', JSON.stringify(head));
+  ok(gateOf(head.ownGone) && verdictOf(head.appended), 'an append store\'s first append in a thread\'s life removes the road\'s OWN temp an earlier life of the thread left (the sweep is handed it)', JSON.stringify(head));
   const cutR = editAnchor(WSRC, "  if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) {   // B-f276 1b's law on the rewrite road too", "  if (false) {   // B-f276 1b's law on the rewrite road too", 'src/store-writer-worker.js');
   const cutA = editAnchor(WSRC, "    sweepTemps(fs, m.file, m.tmp);   // row B-360d", "    sweepTemps(fs, m.file);   // row B-360d", 'src/store-writer-worker.js');   // stale-pins: kept — the line before 主开发 r1939 (2), planted back as the RED control
   const r = wkRun(mutantCopies('otel-truth-wk-linked', REPO).load('src/store-writer-worker.js', cutR, 'rewrite-opens-second-name'), 'cut-r');
   const a = wkRun(mutantCopies('otel-truth-wk-sweep', REPO).load('src/store-writer-worker.js', cutA, 'append-sweep-no-own'), 'cut-a');
-  ok(r.linked && r.rewrite !== 'ETEMPLINKED' && !r.whole, `CONTROL (the rewrite road's check cut): the trim opens the second name for a write and truncates the live store through the shared inode (${r.rewrite}) — red`, JSON.stringify(r));
-  ok(a.appended && !a.ownGone, 'CONTROL (the append road\'s sweep not handed its own temp, the moved form\'s line): the earlier life\'s temp stays — red', JSON.stringify(a));
+  ok(gateOf(r.linked) && r.rewrite !== 'ETEMPLINKED' && !r.whole, `CONTROL (the rewrite road's check cut): the trim opens the second name for a write and truncates the live store through the shared inode (${r.rewrite}) — red`, JSON.stringify(r));
+  ok(gateOf(a.appended) && !a.ownGone, 'CONTROL (the append road\'s sweep not handed its own temp, the moved form\'s line): the earlier life\'s temp stays — red', JSON.stringify(a));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

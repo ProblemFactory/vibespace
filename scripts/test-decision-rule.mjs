@@ -39,7 +39,7 @@ const DE = require(path.join(repo, 'src/server/decision-engine.js'));
 const { PluginManager } = require(path.join(repo, 'src/plugins.js'));
 const DP = require(path.join(repo, 'src/plugins/llm.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -162,22 +162,22 @@ console.log('A one call per record carrying both questions; the predicate wakes,
 const R1 = 'Invoice 42 is overdue and the server is down — please pay the hosting bill today.';
 {
   const w = await world('a', { watchers: [W(AG3, [PRED]), W(GA, [ROUTE]), W(GB, [ROUTE])] });
-  ok(w.set.a.ok && w.set.s.ok && w.set.s.watchers.length === 3, 'setup: three access rows, three watchers (agent 3: the predicate; groups A and B: the same route rule)', w.set.s);
+  ok(gateOf(w.set.a.ok) && gateOf(w.set.s.ok) && w.set.s.watchers.length === 3, 'setup: three access rows, three watchers (agent 3: the predicate; groups A and B: the same route rule)', w.set.s);
   await w.ingest('dr-1', R1);
   const q = got[got.length - 1];
   ok(got.length === 1 && q.body.questions.length === 2 && q.body.questions.map((x) => x.type).join() === 'predicate,choice', `ONE call for the record with BOTH questions (the route rule on two rows = one question): ${got.length} call, ${q && q.body.questions.length} questions`, got.map((g) => g.body && g.body.questions.map((x) => x.name)));
   const ch = q.body.questions.find((x) => x.type === 'choice');
-  ok(ch && ch.choices.map((c) => c.value).join() === 'billing,tech,none' && /money, invoices/.test(ch.choices[0].description) && q.body.questions[0].instructions.includes(PRED.condition), 'the questions carry the conditions; the choice offers billing / tech / none with the person\'s descriptions', ch);
-  ok(!q.raw.includes(SECRET) && q.body.input.includes('body: Invoice 42 is overdue') && !q.body.input.includes(PRED.condition), 'the input = the record (the condition rides the question, paid once); no key in the body');
+  ok(gateOf(ch) && ch.choices.map((c) => c.value).join() === 'billing,tech,none' && gateOf(/money, invoices/.test(ch.choices[0].description)) && verdictOf(q.body.questions[0].instructions.includes(PRED.condition)), 'the questions carry the conditions; the choice offers billing / tech / none with the person\'s descriptions', ch);
+  ok(!q.raw.includes(SECRET) && gateOf(q.body.input.includes('body: Invoice 42 is overdue')) && !q.body.input.includes(PRED.condition), 'the input = the record (the condition rides the question, paid once); no key in the body');
   const c3 = callsTo(w, 'agent-3'), c2 = callsTo(w, 'agent-2'), c1 = callsTo(w, 'agent-1');
-  ok(c3.length === 1 && c3[0].text.includes('decision: the sender asks me to pay an invoice → 0.90'), 'the predicate hit (p 0.90 ≥ 0.70) wakes agent 3 — the wake block names the condition and the probability', c3.map((c) => c.text.slice(0, 600)));
-  ok(c2.length === 1 && c2[0].text.includes('decision: which desk should take this message → Tech desk 0.85') && c1.length === 0, 'the ROUTE hands the record to group B\'s member (agent 2) — group A\'s member (agent 1) gets nothing', { c1: c1.length, c2: c2.map((c) => c.text.slice(0, 400)) });
-  ok(w.ladder.calls.every((c) => c.opts && c.opts.spendReason === 'channel-message'), 'every wake rides the ladder\'s existing money door (spendReason channel-message — no new spend reason)');
+  ok(c3.length === 1 && verdictOf(c3[0].text.includes('decision: the sender asks me to pay an invoice → 0.90')), 'the predicate hit (p 0.90 ≥ 0.70) wakes agent 3 — the wake block names the condition and the probability', c3.map((c) => c.text.slice(0, 600)));
+  ok(c2.length === 1 && gateOf(c2[0].text.includes('decision: which desk should take this message → Tech desk 0.85')) && c1.length === 0, 'the ROUTE hands the record to group B\'s member (agent 2) — group A\'s member (agent 1) gets nothing', { c1: c1.length, c2: c2.map((c) => c.text.slice(0, 400)) });
+  ok(verdictOf(w.ladder.calls.every((c) => c.opts && c.opts.spendReason === 'channel-message')), 'every wake rides the ladder\'s existing money door (spendReason channel-message — no new spend reason)');
   await w.ingest('dr-2', 'Could you refund the duplicate charge on my card?');
   const q2 = got[got.length - 1];
-  ok(got.length === 2 && q2.body.questions.length === 2 && callsTo(w, 'agent-1').length === 1 && callsTo(w, 'agent-1')[0].text.includes('→ Billing desk 0.80') && callsTo(w, 'agent-3').length === 1 && callsTo(w, 'agent-2').length === 1, 'the next record: one more call; billing ⇒ group A\'s member is woken, the predicate (p 0.10) wakes nobody');
+  ok(got.length === 2 && q2.body.questions.length === 2 && callsTo(w, 'agent-1').length === 1 && gateOf(callsTo(w, 'agent-1')[0].text.includes('→ Billing desk 0.80')) && callsTo(w, 'agent-3').length === 1 && callsTo(w, 'agent-2').length === 1, 'the next record: one more call; billing ⇒ group A\'s member is woken, the predicate (p 0.10) wakes nobody');
   const st = D.eng.status().today.byUse;
-  ok(st.routing && st.routing.calls === 2 && !st.rule, 'D1 counts the two calls under `routing` (a call that carries a route is the routing use)', st);
+  ok(gateOf(st.routing) && st.routing.calls === 2 && !st.rule, 'D1 counts the two calls under `routing` (a call that carries a route is the routing use)', st);
   w.stop();
 }
 
@@ -204,7 +204,7 @@ console.log('C the rule\'s hour cap spent ⇒ no call + ONE journal line');
   ok(said.length === 1, `ONE journal line for the spent hour, not one per record (${said.length})`, w.lines);
   const hl = w.ladder.stash.filter((s) => s.cid === 'agent-3' && /matched nothing today/.test(s.text));
   const hr = w.e.judgedRoadFor({ match: 'any', rules: [P1] }, { cid: 'agent-3' });
-  ok(hl.length === 1 && /^1 message matched nothing today because your judged rules could not run: the rule used its judgments for this hour\./.test(hl[0].text) && hr && hr.state.why === 'hour-cap' && /\(1 an hour\) — the rule is saved and starts in the next hour \(the rule's own --per-hour cap\) — 2 messages matched nothing today because of it$/.test(hr.line),
+  ok(hl.length === 1 && gateOf(/^1 message matched nothing today because your judged rules could not run: the rule used its judgments for this hour\./.test(hl[0].text)) && gateOf(hr) && hr.state.why === 'hour-cap' && verdictOf(/\(1 an hour\) — the rule is saved and starts in the next hour \(the rule's own --per-hour cap\) — 2 messages matched nothing today because of it$/.test(hr.line)),
     'lane judged-watch-state: the hour cap is SAID — agent 3 gets ONE not-a-hit line (the second skip counted, not said); the door reads hour-cap with today\'s 2', { hl: hl.map((s) => s.text), hr });
   w.stop();
 }
@@ -223,7 +223,7 @@ console.log('C2 THE DAY EDGE, PLACED (主开发 r5556 / r5560): section C\'s wor
   await w.ingest('dr-e3', 'Invoice 19 is due Tuesday.');
   const hl = w.ladder.stash.filter((s) => s.cid === 'agent-3' && /matched nothing today/.test(s.text));
   const hr = w.e.judgedRoadFor({ match: 'any', rules: [P1] }, { cid: 'agent-3' });
-  ok(hl.length === 2 && hr && hr.state.why === 'hour-cap' && /— 1 message matched nothing today because of it$/.test(hr.line),
+  ok(hl.length === 2 && gateOf(hr) && hr.state.why === 'hour-cap' && verdictOf(/— 1 message matched nothing today because of it$/.test(hr.line)),
     `C2 CONTROL, THE DAY EDGE PLACED: a world whose clock crosses its local midnight inside section C's three records — the stash holds ${hl.length} not-a-hit lines and the door reads «1 message matched nothing today»: section C's two wants both broken, red by name`, { hl: hl.map((s) => s.text), hr });
   w.stop();
 }
@@ -241,7 +241,7 @@ console.log('D the plugin off ⇒ no call; the routing switch off ⇒ only the p
   D.pm.setConfig('llm', { routing: false });
   await w.ingest('dr-d3', 'Invoice 13 — the server is down for good.');
   const q = got[got.length - 1];
-  ok(got.length === n + 1 && q.body.questions.length === 1 && q.body.questions[0].type === 'predicate' && callsTo(w, 'agent-3').length === 1 && !callsTo(w, 'agent-2').length && w.lines.some((l) => /not judged — feature-off/.test(l)), 'routing off: the call carries ONLY the predicate (rules on); the route is said feature-off and routes nothing');
+  ok(got.length === n + 1 && q.body.questions.length === 1 && q.body.questions[0].type === 'predicate' && callsTo(w, 'agent-3').length === 1 && !callsTo(w, 'agent-2').length && verdictOf(w.lines.some((l) => /not judged — feature-off/.test(l))), 'routing off: the call carries ONLY the predicate (rules on); the route is said feature-off and routes nothing');
   D.pm.setConfig('llm', { routing: true });
   w.stop();
 }
@@ -259,23 +259,23 @@ console.log('G a judged rule that cannot run is SAID and never a "no" (lane judg
   await w.ingest('dr-g2', 'Invoice 22 is overdue too.');
   const told = w.ladder.stash.filter((s) => s.cid === 'agent-3' && /matched nothing today/.test(s.text));
   ok(got.length === n && !w.ladder.calls.length, 'the Rules switch off: 0 calls, no wake');
-  ok(told.length === 1 && /^1 message matched nothing today because your judged rules could not run: the LLM plugin's Rules switch is off\./.test(told[0].text) && told[0].kind === 'notification' && /not a "no"/.test(told[0].text),
+  ok(told.length === 1 && gateOf(/^1 message matched nothing today because your judged rules could not run: the LLM plugin's Rules switch is off\./.test(told[0].text)) && told[0].kind === 'notification' && verdictOf(/not a "no"/.test(told[0].text)),
     'the agent that armed the rule gets ONE line through its next-turn stash (never a wake); the second skip the same day is counted, not said again', w.ladder.stash.map((s) => s.text));
   ok(told[0].source === 'channel' && JSON.stringify(told[0].about && told[0].about.keys) === JSON.stringify(['dr/ops']) && w.ladder.gate('agent-3', told[0]) === null,
     'lane ci-337-reds: the line files `about` like the engine\'s other stash producers — the conversation its count came from (dr/ops) — and the stash gate keeps it while agent 3 still sees ops', told[0].about);
   const rd = w.e.judgedRoadFor({ match: 'any', rules: [PRED] }, { cid: 'agent-3' });
-  ok(rd && !rd.state.live && rd.state.why === 'rules-off' && /— 2 messages matched nothing today because of it$/.test(rd.line), 'the door reads the same road: rules-off, with today\'s 2 skips', rd);
+  ok(gateOf(rd) && !rd.state.live && rd.state.why === 'rules-off' && verdictOf(/— 2 messages matched nothing today because of it$/.test(rd.line)), 'the door reads the same road: rules-off, with today\'s 2 skips', rd);
   ok(!todos.openItems().some((i) => i.plugin === 'llm'), 'a switch the owner turned off is no budget pause: nothing in For you');
   D.pm.setConfig('llm', { rules: true });
   const handed = await w.e.owedPass(); await w.e.settleWakes();
   const c3 = callsTo(w, 'agent-3');
-  ok(handed === 2 && got.length === n + 2 && c3.some((c) => /Invoice 21/.test(c.text)) && c3.some((c) => /Invoice 22/.test(c.text)), `the switch on ⇒ the owed look judges BOTH skipped messages (${got.length - n} calls) and their hits wake agent 3 — a skip was never a "no"`, { handed, c3: c3.map((c) => c.text.slice(0, 300)) });
+  ok(handed === 2 && got.length === n + 2 && gateOf(c3.some((c) => /Invoice 21/.test(c.text))) && verdictOf(c3.some((c) => /Invoice 22/.test(c.text))), `the switch on ⇒ the owed look judges BOTH skipped messages (${got.length - n} calls) and their hits wake agent 3 — a skip was never a "no"`, { handed, c3: c3.map((c) => c.text.slice(0, 300)) });
   const again = await w.e.owedPass();
-  ok(again === 0 && got.length === n + 2 && w.e.judgedRoadFor({ rules: [PRED] }).state.live, 'nothing is owed twice (0 handed back, 0 calls); the road reads live');
+  ok(again === 0 && got.length === n + 2 && verdictOf(w.e.judgedRoadFor({ rules: [PRED] }).state.live), 'nothing is owed twice (0 handed back, 0 calls); the road reads live');
   // lane ci-337-reds: the owner removes agent 3 from ops before its next turn ⇒ the waiting line is withheld (the gate reads `about`)
   const rv = await w.e.setAccess('dr', { kind: 'conversation', convId: 'ops' }, [{ principal: GA, authority: 'draft' }, { principal: GB, authority: 'draft' }]);
   const gone = w.ladder.gate('agent-3', told[0]);
-  ok(rv && rv.ok && gone && gone.drop === true, 'agent 3\'s access to ops removed ⇒ the stash gate withholds its waiting judged-rules line (the count of a conversation it no longer sees)', { rv: rv && rv.ok, gone });
+  ok(gateOf(rv) && gateOf(rv.ok) && gateOf(gone) && gone.drop === true, 'agent 3\'s access to ops removed ⇒ the stash gate withholds its waiting judged-rules line (the count of a conversation it no longer sees)', { rv: rv && rv.ok, gone });
   ok(w.ladder.gate('agent-3', { ...told[0], about: undefined }) === null, 'RED CONTROL (the cut 4da1464c): the same line without `about` is KEPT by the gate — the revoked agent would read it on its next turn');
   w.stop();
   // the day's budget spent: the judge refuses (its journal line), the agent is told once, the owner ONCE in For you
@@ -285,9 +285,9 @@ console.log('G a judged rule that cannot run is SAID and never a "no" (lane judg
   await w2.ingest('dr-g3', 'Invoice 31 — the server is down.');
   await w2.ingest('dr-g4', 'Invoice 32 — the server is still down.');
   const items = todos.openItems().filter((i) => i.plugin === 'llm');
-  ok(got.length === n2 && items.length === 1 && /Paused today: Ledger, Tech desk\./.test(items[0].detail) && items[0].urgency === 'low' && items[0].origin === 'plugin', 'the budget spent: 0 calls, ONE For-you item for the owner naming whose rules paused (agent 3, group B) — two batches, one item', items.map((i) => [i.text, i.detail]));
+  ok(got.length === n2 && items.length === 1 && gateOf(/Paused today: Ledger, Tech desk\./.test(items[0].detail)) && items[0].urgency === 'low' && items[0].origin === 'plugin', 'the budget spent: 0 calls, ONE For-you item for the owner naming whose rules paused (agent 3, group B) — two batches, one item', items.map((i) => [i.text, i.detail]));
   const bl = w2.ladder.stash.filter((s) => s.cid === 'agent-3' && /today's LLM budget is spent/.test(s.text));
-  ok(bl.length === 1 && !w2.ladder.calls.length && w2.lines.some((l) => /not judged — daily-budget/.test(l)), 'agent 3 is told once (the budget) and nobody is woken — the judge\'s own refusal is journalled as before', w2.ladder.stash.map((s) => s.text));
+  ok(bl.length === 1 && !w2.ladder.calls.length && verdictOf(w2.lines.some((l) => /not judged — daily-budget/.test(l))), 'agent 3 is told once (the budget) and nobody is woken — the judge\'s own refusal is journalled as before', w2.ladder.stash.map((s) => s.text));
   D.pm.setConfig('llm', { dailyBudgetCents: 100 });
   w2.stop();
   // RED CONTROL = the base: without the skip's doors a rule armed with its switch off answers nothing, the skip is silent
@@ -371,32 +371,32 @@ const ROW = `(() => {
   await pg.until(`/judgments\\/day/.test(document.querySelector('.chan-dec-cost')?.textContent || '')`);
   const R = await pg.ev(ROW);
   const [p, c] = R;
-  ok(p && p.cond === PRED.condition && p.q === 'predicate' && p.th === '0.70' && p.ph === '20' && !p.opts.length, 'desk (en): the predicate row — the condition, yes/no, threshold 0.70, 20 an hour', p);
-  ok(c && c.q === 'choice' && c.th === '0.60' && c.opts.join() === 'billing>group:T-a,tech>group:T-b', 'desk: the route row — one of billing → group A, tech → group B', c);
+  ok(gateOf(p) && p.cond === PRED.condition && p.q === 'predicate' && p.th === '0.70' && p.ph === '20' && !p.opts.length, 'desk (en): the predicate row — the condition, yes/no, threshold 0.70, 20 an hour', p);
+  ok(gateOf(c) && c.q === 'choice' && c.th === '0.60' && c.opts.join() === 'billing>group:T-a,tech>group:T-b', 'desk: the route row — one of billing → group A, tech → group B', c);
   const est = F.estimate({ rules: [PRED] }, HIST, { now: Date.now() });
   const want = F.decisionCost({ recordsPerDay: est.decision.judgedPerDay, perHour: 20, tokensPerCall: 1500, pricePerMtok: 0.1, budgetCents: 100 });
-  ok(new RegExp(`^≈ ${want.judgmentsPerDay} judgments/day ≈ \\$${want.usdPerDay.toFixed(4).replace('.', '\\.')} at the current price — within your \\$1\\.00 daily budget\\. How often`).test(p.cost) && /known only once it runs/.test(p.cost), `desk: the COST LINE from the server's estimate × D1's ceiling × the price ("${p.cost}")`, { want, cost: p.cost });
+  ok(gateOf(new RegExp(`^≈ ${want.judgmentsPerDay} judgments/day ≈ \\$${want.usdPerDay.toFixed(4).replace('.', '\\.')} at the current price — within your \\$1\\.00 daily budget\\. How often`).test(p.cost)) && verdictOf(/known only once it runs/.test(p.cost)), `desk: the COST LINE from the server's estimate × D1's ceiling × the price ("${p.cost}")`, { want, cost: p.cost });
   ok(!p.off && !c.off && !p.disabled && !c.disabled, 'desk: the plugin on with a key and both switches ⇒ no off line; nothing greyed');
-  ok(p.chip && p.chip[0] === 'live' && p.chip[1] === 'judged: live' && c.chip && c.chip[0] === 'live', 'lane judged-watch-state: the road\'s chip beside each judged row — «judged: live» (rule and route)', [p.chip, c.chip]);
+  ok(gateOf(p.chip) && p.chip[0] === 'live' && p.chip[1] === 'judged: live' && gateOf(c.chip) && c.chip[0] === 'live', 'lane judged-watch-state: the road\'s chip beside each judged row — «judged: live» (rule and route)', [p.chip, c.chip]);
   await pg.shot('editor.png', '.chan-af-list');
   await pg.ev(`(() => { const r = document.querySelectorAll('.chan-dec-th')[1]; r.value = '0.8'; r.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const saveSel = await pg.ev(`(() => { const b = [...document.querySelectorAll('#chan-notify-dialog button, .chan-notify button')].find((x) => /^Save/.test(x.textContent.trim())); if (b) b.setAttribute('data-test-save', '1'); return !!b; })()`);
-  ok(saveSel && await pg.press('[data-test-save]') && await pg.until(`true`, 6) && saved.length === 1, 'desk: Save sends the watchers', saved.length);
+  ok(gateOf(saveSel) && gateOf(await pg.press('[data-test-save]')) && gateOf(await pg.until(`true`, 6)) && saved.length === 1, 'desk: Save sends the watchers', saved.length);
   const sw = saved[0] && saved[0].watchers && saved[0].watchers[0];
   const sr = sw && sw.filter && sw.filter.rules;
-  ok(sr && sr.length === 2 && sr[1].kind === 'decision' && sr[1].threshold === 0.8 && sr[1].choices.map((o) => `${o.value}>${o.to.kind}:${o.to.id}`).join() === 'billing>group:T-a,tech>group:T-b' && F.validateFilter(sw.filter).ok, 'desk: the saved row carries the moved threshold (0.80) and both routes — and passes the server\'s validator', sw);
+  ok(gateOf(sr) && sr.length === 2 && sr[1].kind === 'decision' && sr[1].threshold === 0.8 && sr[1].choices.map((o) => `${o.value}>${o.to.kind}:${o.to.id}`).join() === 'billing>group:T-a,tech>group:T-b' && verdictOf(F.validateFilter(sw.filter).ok), 'desk: the saved row carries the moved threshold (0.80) and both routes — and passes the server\'s validator', sw);
   pg.close();
   // lane judged-watch-state: the chip follows THE verdict over the plugin row — the day's budget spent, then the Rules switch off
   D.pm.setConfig('llm', { dailyBudgetCents: 0 });
   const pb = await page(1100, 1000, 'en', `!!document.querySelector('.chan-road-chip:not([hidden])')`);
   const B = await pb.ev(ROW);
-  ok(B[0].chip && B[0].chip[0] === 'budget-spent' && B[0].chip[1] === 'paused: budget spent' && B[1].chip && B[1].chip[0] === 'budget-spent', 'the day\'s budget spent ⇒ «paused: budget spent» on both judged rows', [B[0].chip, B[1].chip]);
+  ok(gateOf(B[0].chip) && B[0].chip[0] === 'budget-spent' && B[0].chip[1] === 'paused: budget spent' && gateOf(B[1].chip) && B[1].chip[0] === 'budget-spent', 'the day\'s budget spent ⇒ «paused: budget spent» on both judged rows', [B[0].chip, B[1].chip]);
   await pb.shot('chip-budget.png', '.chan-af-decision');
   pb.close();
   D.pm.setConfig('llm', { dailyBudgetCents: 100, rules: false });
   const pr = await page(1100, 1000, 'en', `!!document.querySelector('.chan-road-chip:not([hidden])')`);
   const Rr = await pr.ev(ROW);
-  ok(Rr[0].chip && Rr[0].chip[0] === 'rules-off' && Rr[0].chip[1] === 'off: rules switch' && Rr[1].chip && Rr[1].chip[0] === 'live', 'the Rules switch off ⇒ «off: rules switch» on the yes/no rule; the route rule rides Routing and stays «judged: live»', [Rr[0].chip, Rr[1].chip]);
+  ok(gateOf(Rr[0].chip) && Rr[0].chip[0] === 'rules-off' && Rr[0].chip[1] === 'off: rules switch' && gateOf(Rr[1].chip) && Rr[1].chip[0] === 'live', 'the Rules switch off ⇒ «off: rules switch» on the yes/no rule; the route rule rides Routing and stays «judged: live»', [Rr[0].chip, Rr[1].chip]);
   pr.close();
   D.pm.setConfig('llm', { rules: true });
   D.pm.setEnabled('llm', false);
@@ -404,10 +404,10 @@ const ROW = `(() => {
   await ph.until(`!!document.querySelector('.chan-dec-off')`);
   const Z = await ph.ev(ROW);
   const fit = Z[Z.length - 1];
-  ok(Z[0].off && /LLM 插件已关闭/.test(Z[0].off) && Z[1].off && !Z[0].disabled && !Z[1].disabled, `phone (zh): the plugin OFF is said on the row ("${Z[0].off}") — the controls stay live, never greyed`, Z);
+  ok(gateOf(Z[0].off) && gateOf(/LLM 插件已关闭/.test(Z[0].off)) && gateOf(Z[1].off) && !Z[0].disabled && !Z[1].disabled, `phone (zh): the plugin OFF is said on the row ("${Z[0].off}") — the controls stay live, never greyed`, Z);
   ok(fit.sw <= fit.vw + 1, `phone 390: the dialog fits (scrollWidth ${fit.sw} ≤ ${fit.vw})`, fit);
-  ok(Z[0].chip && Z[0].chip[0] === 'plugin-off' && Z[0].chip[1] === '未生效：LLM 插件没开', `phone (zh): the chip says the plugin is off in Chinese ("${Z[0].chip && Z[0].chip[1]}")`, Z[0].chip);
-  ok(await ph.press('.chan-dec-open') && await ph.until(`window.__plugins === 1`, 10), 'phone: Open Plugins on the row opens the Plugins card (app.openPluginsDialog)');
+  ok(gateOf(Z[0].chip) && Z[0].chip[0] === 'plugin-off' && Z[0].chip[1] === '未生效：LLM 插件没开', `phone (zh): the chip says the plugin is off in Chinese ("${Z[0].chip && Z[0].chip[1]}")`, Z[0].chip);
+  ok(gateOf(await ph.press('.chan-dec-open')) && verdictOf(await ph.until(`window.__plugins === 1`, 10)), 'phone: Open Plugins on the row opens the Plugins card (app.openPluginsDialog)');
   await ph.shot('phone.png', '.chan-af-decision');
   ph.close();
   D.pm.setEnabled('llm', true);
@@ -423,7 +423,7 @@ const ROW = `(() => {
   convRules = [{ kind: 'reply-to-sent' }];
   const pg = await page(1100, 1000, 'en', `!!document.querySelector('.chan-af-infer')`);
   const r0 = await pg.ev(INFER);
-  ok(r0 && !r0.on && /Also judge plain replies \(LLM plugin\)/.test(r0.label) && r0.note === null && !r0.off, 'F desk (en): the reply rule\'s row carries the box — OFF by default, its note folded, nothing said about the plugin', r0);
+  ok(gateOf(r0) && !r0.on && gateOf(/Also judge plain replies \(LLM plugin\)/.test(r0.label)) && r0.note === null && !r0.off, 'F desk (en): the reply rule\'s row carries the box — OFF by default, its note folded, nothing said about the plugin', r0);
   await pg.press('.chan-af-infer-tick');
   await pg.until(`document.querySelector('.chan-af-infer-tick').checked`, 10);
   const r1 = await pg.ev(INFER);
@@ -433,32 +433,32 @@ const ROW = `(() => {
   // words say what is judged and that it is judged once, with no menu path; the window is reached through that door, and a REAL
   // press opens Settings at that setting. RED CONTROLS: the same rule over the note without its door, and over the old menu-path words.
   const legF = (r) => !!r && r.on && /judged once: is it an answer to it\?/.test(r.words || '') && !/Settings ›/.test(r.note || '') && !!r.door && r.door.label === 'How long after…' && !!r.door.title && !r.off;
-  ok(legF(r1), 'F desk: ticked ⇒ the note says what is judged, once — no menu path in its words — and its own line carries the «How long after…» door to the window\'s setting; the plugin on ⇒ no off line', r1);
+  ok(verdictOf(legF(r1)), 'F desk: ticked ⇒ the note says what is judged, once — no menu path in its words — and its own line carries the «How long after…» door to the window\'s setting; the plugin on ⇒ no off line', r1);
   const pressed = await pg.press('.chan-af-infer-note .need-doors [data-door="settings:channels.replyInferHours"]');
   const landed = await pg.until(`(window.__settingsOpened || []).length > 0`, 20);
   const opened = await pg.ev(`(window.__settingsOpened || []).slice(-1)[0] || null`);
-  ok(pressed !== null && pressed !== false && landed, 'F desk: the door was found and pressed, and Settings was asked to open', { pressed, landed });
+  ok(pressed !== null && pressed !== false && verdictOf(landed), 'F desk: the door was found and pressed, and Settings was asked to open', { pressed, landed });
   ok(!!opened && opened.search === 'Judge a plain reply to an agent\'s message for (hours)' && opened.search === r1.door.title, 'F desk: a REAL press on that door opens Settings searched for the setting\'s own label («Judge a plain reply to an agent\'s message for (hours)»)', opened);
-  ok(legF(r1) && !legF({ ...r1, door: null }) && !legF({ ...r1, note: r1.note + ' How long after the agent\'s message: Settings › Channels.' }), 'F desk RED CONTROLS: the rule fails on the note without its door (a page with no Settings door — the hosted red) and on the old words with the menu path');
-  ok(!r0.chip && r1.chip && r1.chip[0] === 'live' && r1.chip[1] === 'judged: live', 'lane judged-watch-state: unticked ⇒ no chip; ticked ⇒ «judged: live»', [r0.chip, r1.chip]);
+  ok(gateOf(legF(r1)) && !legF({ ...r1, door: null }) && !legF({ ...r1, note: r1.note + ' How long after the agent\'s message: Settings › Channels.' }), 'F desk RED CONTROLS: the rule fails on the note without its door (a page with no Settings door — the hosted red) and on the old words with the menu path');
+  ok(!r0.chip && gateOf(r1.chip) && r1.chip[0] === 'live' && r1.chip[1] === 'judged: live', 'lane judged-watch-state: unticked ⇒ no chip; ticked ⇒ «judged: live»', [r0.chip, r1.chip]);
   await pg.shot('infer.png', '.chan-af-list');
-  ok(await saveNow(pg) && await pg.until('true', 6) && saved.length === n0 + 1, 'F desk: Save sends the row', saved.length - n0);
+  ok(gateOf(await saveNow(pg)) && gateOf(await pg.until('true', 6)) && saved.length === n0 + 1, 'F desk: Save sends the row', saved.length - n0);
   const sr = saved[n0] && saved[n0].watchers && saved[n0].watchers[0] && saved[n0].watchers[0].filter;
-  ok(sr && JSON.stringify(sr.rules) === JSON.stringify([{ kind: 'reply-to-sent', infer: true }]) && F.validateFilter(sr).ok, 'F desk: the saved rule is `{kind: reply-to-sent, infer: true}` — the one grammar the CLI\'s --infer writes', sr);
+  ok(gateOf(sr) && JSON.stringify(sr.rules) === JSON.stringify([{ kind: 'reply-to-sent', infer: true }]) && verdictOf(F.validateFilter(sr).ok), 'F desk: the saved rule is `{kind: reply-to-sent, infer: true}` — the one grammar the CLI\'s --infer writes', sr);
   pg.close();
   convRules = [{ kind: 'reply-to-sent', infer: true }];
   const p2 = await page(1100, 1000, 'en', `!!document.querySelector('.chan-af-infer')`);
   const r2 = await p2.ev(INFER);
   await p2.press('.chan-af-infer-tick');
   await p2.until(`!document.querySelector('.chan-af-infer-tick').checked`, 10);
-  ok(r2 && r2.on && await saveNow(p2) && await p2.until('true', 6) && saved.length === n0 + 2 && JSON.stringify(saved[n0 + 1].watchers[0].filter.rules) === JSON.stringify([{ kind: 'reply-to-sent' }]), 'F desk: a stored `infer: true` draws ticked; unticked and saved ⇒ the rule is `{kind}` alone again (the marker-only row, byte for byte)', saved[n0 + 1] && saved[n0 + 1].watchers[0].filter);
+  ok(gateOf(r2) && gateOf(r2.on) && gateOf(await saveNow(p2)) && gateOf(await p2.until('true', 6)) && saved.length === n0 + 2 && JSON.stringify(saved[n0 + 1].watchers[0].filter.rules) === JSON.stringify([{ kind: 'reply-to-sent' }]), 'F desk: a stored `infer: true` draws ticked; unticked and saved ⇒ the rule is `{kind}` alone again (the marker-only row, byte for byte)', saved[n0 + 1] && saved[n0 + 1].watchers[0].filter);
   p2.close();
   D.pm.setEnabled('llm', false);
   const p3 = await page(390, 844, 'zh', `!!document.querySelector('.chan-af-infer .chan-dec-off')`);
   const r3 = await p3.ev(INFER);
-  ok(r3 && r3.chip && r3.chip[0] === 'plugin-off' && /也判定普通回复/.test(r3.label) && !/未生效/.test(r3.label), 'F phone (zh): the ticked box\'s chip says the plugin is off — beside the label, never inside it', r3 && r3.chip);
-  ok(r3 && r3.on && /也判定普通回复/.test(r3.label) && /LLM 插件已关闭/.test(r3.off || '') && /引用和话题里的回复照常通知/.test(r3.off || '') && r3.sw <= r3.vw + 1, `F phone 390 (zh): the plugin OFF is said on the ticked box ("${r3 && r3.off}") — quotes and topic replies still notify; the dialog fits`, r3);
-  ok(await p3.press('.chan-af-infer .chan-dec-open') && await p3.until('window.__plugins >= 1', 10), 'F phone: Open Plugins on the box opens the Plugins card');
+  ok(gateOf(r3) && gateOf(r3.chip) && r3.chip[0] === 'plugin-off' && gateOf(/也判定普通回复/.test(r3.label)) && !/未生效/.test(r3.label), 'F phone (zh): the ticked box\'s chip says the plugin is off — beside the label, never inside it', r3 && r3.chip);
+  ok(gateOf(r3) && gateOf(r3.on) && gateOf(/也判定普通回复/.test(r3.label)) && gateOf(/LLM 插件已关闭/.test(r3.off || '')) && gateOf(/引用和话题里的回复照常通知/.test(r3.off || '')) && r3.sw <= r3.vw + 1, `F phone 390 (zh): the plugin OFF is said on the ticked box ("${r3 && r3.off}") — quotes and topic replies still notify; the dialog fits`, r3);
+  ok(gateOf(await p3.press('.chan-af-infer .chan-dec-open')) && verdictOf(await p3.until('window.__plugins >= 1', 10)), 'F phone: Open Plugins on the box opens the Plugins card');
   await p3.shot('infer-phone.png', '.chan-af-infer');
   p3.close();
   D.pm.setEnabled('llm', true);
@@ -469,4 +469,4 @@ finish();
 function finish() {
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
   process.exit(fail ? 1 : 0);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

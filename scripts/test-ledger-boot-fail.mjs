@@ -24,7 +24,7 @@ const require = createRequire(import.meta.url);
 const { UsageHistory } = require('../src/usage-history.js');
 const EST = require('../src/usage-estimator.js');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; if (process.env.VERBOSE) console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; if (process.env.VERBOSE) console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 const tmp = scratchDir('ledger-boot-fail');
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
 const UH_REL = 'src/usage-history.js', uhSrc = fs.readFileSync(path.join(REPO, UH_REL), 'utf8');
@@ -91,14 +91,14 @@ async function failRoute(UH, { routes = 3, heal = true } = {}) {
 }
 {
   const r = await failRoute(UsageHistory), R = r.routes, loadingWords = (x) => x && x.code === 'LOADING' && /the usage ledger is still loading — its first load in the fold worker failed \(planted: the shard could not be read\); it is tried again (in|at the next ask after) \d+ s/.test(x.msg || '');
-  ok(R.length === 3 && R.every((x) => x.route !== 'pending' && loadingWords(x.route) && x.rid !== 'pending' && x.rid.code === 'LOADING'), `⑦ a worker that throws on every try: GET /api/usage-stats's sequence answers LOADING with the reason and the next try, three times (${R.map((x) => x.ms).join(' / ')} ms — never pending past a try), the rid lookup LOADING too`);
-  ok(r.boot0 && R.every((x) => x.landed && !x.scanning), `⑦ the hub's own turns reach the ledger while the load fails: the boot scan's row and each new local turn appended (${R.filter((x) => x.landed).length} of 3), no scan left pending`);
-  ok(r.healed && r.equal && r.loadingAfter === null && r.turnRows === 5 && r.rows === r.refRows, `⑦ the worker heals: the next try lands (${r.healMs} ms) and the route answers figures equal to the release's road (${r.totals} requests, ${r.rows} rows = ${r.refRows}); all 5 local turns in it once`);
+  ok(R.length === 3 && verdictOf(R.every((x) => x.route !== 'pending' && loadingWords(x.route) && x.rid !== 'pending' && x.rid.code === 'LOADING')), `⑦ a worker that throws on every try: GET /api/usage-stats's sequence answers LOADING with the reason and the next try, three times (${R.map((x) => x.ms).join(' / ')} ms — never pending past a try), the rid lookup LOADING too`);
+  ok(gateOf(r.boot0) && verdictOf(R.every((x) => x.landed && !x.scanning)), `⑦ the hub's own turns reach the ledger while the load fails: the boot scan's row and each new local turn appended (${R.filter((x) => x.landed).length} of 3), no scan left pending`);
+  ok(gateOf(r.healed) && gateOf(r.equal) && r.loadingAfter === null && r.turnRows === 5 && r.rows === r.refRows, `⑦ the worker heals: the next try lands (${r.healMs} ms) and the route answers figures equal to the release's road (${r.totals} requests, ${r.rows} rows = ${r.refRows}); all 5 local turns in it once`);
   // RED: the wait unbounded again (round 1: the scan waits for whenWarm, which resolved only when a try LANDED)
   const unb = uhSrc.replace("try { if (this._booting()) { const b = this._boot; if (b && b.job) await this._withinTry(b.job, () => null, b); } else await this.whenWarm(); } catch { }", 'try { await this.whenWarm(); } catch { }')
     .replace("    if (b.job) return this._withinTry(b.job, () => null); // never rejects: its two handlers return (follow-up: a hung try is waited for BOOT_READER_WAIT_MS at most)\n    this._bootRearm(b);\n    return b.next || (b.next = new Promise((r) => { b.nextR = r; }));\n", '    this._bootRearm(b); return b.done;\n');
   const RR = unb !== uhSrc ? await failRoute(M.load(UH_REL, unb, 'unbounded').UsageHistory, { routes: 1, heal: false }) : null;
-  ok(!!RR && RR.routes.length === 1 && RR.routes.every((x) => x.route === 'pending'), `control (the wait unbounded again — round 1): the route ${RR && RR.routes.map((x) => x.route === 'pending' ? 'pending' : x.route.code).join(' / ')} past 0.7 s ⇒ RED`);
+  ok(!!RR && RR.routes.length === 1 && verdictOf(RR.routes.every((x) => x.route === 'pending')), `control (the wait unbounded again — round 1): the route ${RR && RR.routes.map((x) => x.route === 'pending' ? 'pending' : x.route.code).join(' / ')} past 0.7 s ⇒ RED`);
 }
 
 // ── ⑧ THE FAILING LOAD'S EDGES (the follow-up, 主开发 09:36Z) ─────────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ async function hung(UH) {
 }
 {
   const h = await hung(UsageHistory), b = h.r && h.r.body;
-  ok(h.r !== 'pending' && h.r.status === 503 && b.code === 'LOADING' && b.running === true && Number.isFinite(b.nextTryAt) && /the usage ledger is still loading — its first load in the fold worker has run \d+ s and goes on; ask again at \d\d:\d\d:\d\dZ/.test(b.error) && h.tryOn && h.turn && !h.scanning, `⑧ a try that HANGS: the real route answers LOADING at the TRY'S deadline while the try goes on — the scan's wait and the reader's share ONE budget (${h.ms} ms with 100 of 400 ms left; «${b && b.error}»); the scan not held — the new local turn in the ledger, no scan pending`);
+  ok(h.r !== 'pending' && h.r.status === 503 && b.code === 'LOADING' && b.running === true && gateOf(Number.isFinite(b.nextTryAt)) && gateOf(/the usage ledger is still loading — its first load in the fold worker has run \d+ s and goes on; ask again at \d\d:\d\d:\d\dZ/.test(b.error)) && gateOf(h.tryOn) && gateOf(h.turn) && !h.scanning, `⑧ a try that HANGS: the real route answers LOADING at the TRY'S deadline while the try goes on — the scan's wait and the reader's share ONE budget (${h.ms} ms with 100 of 400 ms left; «${b && b.error}»); the scan not held — the new local turn in the ledger, no scan pending`);
   const unb = uhSrc.replace("  _withinTry(p, onLate, b = null) {\n", "  _withinTry(p, onLate, b = null) { return p;\n");
   const H = unb !== uhSrc ? await hung(M.load(UH_REL, unb, 'hang-unbounded').UsageHistory) : null;
   ok(!!H && H.r === 'pending', `control (a reader waits for the hung try itself — bounded by the fold deadline only): the route ${H && (H.r === 'pending' ? 'pending' : H.r.status)} past 0.6 s ⇒ RED`);
@@ -155,8 +155,8 @@ async function attended(UH, viaRoute) {
 }
 {
   const a = await attended(UsageHistory, false), r = await attended(UsageHistory, true);
-  ok(a.backoff > 4000 && a.started === true && a.landed && a.ms < a.backoff, `⑧ A PERSON'S RETRY inside the ${Math.round(a.backoff / 1000)} s backoff tries NOW (a try under way at the press) and lands (${a.ms} ms) — never the unattended backoff`);
-  ok(r.r && r.r.status === 200 && r.r.body && r.r.body.totals && r.landed, `⑧ through the route: GET /api/usage-stats?retry=1 inside the backoff tries now and answers the figures (${r.r && r.r.body && r.r.body.totals && r.r.body.totals.requests} requests) — the press was attended`);
+  ok(a.backoff > 4000 && a.started === true && gateOf(a.landed) && a.ms < a.backoff, `⑧ A PERSON'S RETRY inside the ${Math.round(a.backoff / 1000)} s backoff tries NOW (a try under way at the press) and lands (${a.ms} ms) — never the unattended backoff`);
+  ok(gateOf(r.r) && r.r.status === 200 && gateOf(r.r.body) && gateOf(r.r.body.totals) && verdictOf(r.landed), `⑧ through the route: GET /api/usage-stats?retry=1 inside the backoff tries now and answers the figures (${r.r && r.r.body && r.r.body.totals && r.r.body.totals.requests} requests) — the press was attended`);
   const lazy = uhSrc.replace("    const b = this._boot; if (b && !b.job) { b.retryAt = Date.now(); if (b.timer) { clearTimeout(b.timer); b.timer = null; } } // the press REPLACES the re-arm timer (its failure arms the next at the doubled backoff)\n", "    const b = this._boot;\n");
   const A = lazy !== uhSrc ? await attended(M.load(UH_REL, lazy, 'retry-unattended').UsageHistory, false) : null;
   ok(!!A && A.started === false && !A.landed, `control (the press answered with the unattended backoff): no try at the press, not landed in 0.7 s ⇒ RED`);
@@ -178,19 +178,19 @@ async function pressTimer(UH) {
 }
 {
   const pt = await pressTimer(UsageHistory);
-  ok(pt.hadTimer && pt.started && pt.oldCleared && pt.newTimer && pt.backoff2 > 9000, `⑧ the press REPLACES the re-arm timer: the old one (set for the first backoff's end) cleared at the press, the press's own failure arms the next at the doubled backoff (${Math.round(pt.backoff2 / 1000)} s) — no unattended try at the old time`);
+  ok(gateOf(pt.hadTimer) && gateOf(pt.started) && gateOf(pt.oldCleared) && gateOf(pt.newTimer) && pt.backoff2 > 9000, `⑧ the press REPLACES the re-arm timer: the old one (set for the first backoff's end) cleared at the press, the press's own failure arms the next at the doubled backoff (${Math.round(pt.backoff2 / 1000)} s) — no unattended try at the old time`);
   const keep = uhSrc.replace(" if (b.timer) { clearTimeout(b.timer); b.timer = null; } } // the press REPLACES the re-arm timer", " } // the press REPLACES the re-arm timer");
   const PT = keep !== uhSrc ? await pressTimer(M.load(UH_REL, keep, 'press-keeps-timer').UsageHistory) : null;
-  ok(!!PT && PT.started && !PT.oldCleared, `control (the press leaves the old timer): it still fires at its old time — one unattended try before the doubled backoff ⇒ RED`);
+  ok(!!PT && gateOf(PT.started) && !PT.oldCleared, `control (the press leaves the old timer): it still fires at its old time — one unattended try before the doubled backoff ⇒ RED`);
 }
 { // (3) THE WINDOW: LOADING is a state — its words, its time, its own re-ask; the Retry a person's; no error toast
   const N = await import('../src/lib/usage-ledger-note.js'), now = Date.UTC(2026, 10, 12, 9, 0, 0);
   const s = N.ledgerLoadingOf({ error: 'x', code: 'LOADING', nextTryAt: now + 7000 }, now), rn = N.ledgerLoadingOf({ error: 'x', code: 'LOADING', nextTryAt: now + 10000, running: true }, now);
   const hm = (ms) => { const x = new Date(ms); return [x.getHours(), x.getMinutes(), x.getSeconds()].map((v) => String(v).padStart(2, '0')).join(':'); };
-  ok(s && s.words === 'The usage ledger is still loading — next try at {time}' && s.vars.time === hm(now + 7000) && s.reaskInMs === 7000 && rn && rn.words === 'The usage ledger is still loading — its first load is running; asked again at {time}' && rn.reaskInMs === 10000 && N.ledgerLoadingOf({ error: 'usage summary failed — boom; retry', code: 'BUSY' }, now) === null, `⑧ the window's LOADING state: «${s && s.words.replace('{time}', s.vars.time)}», asked again in ${s && s.reaskInMs} ms (running: «${rn && rn.words.replace('{time}', rn.vars.time)}»); a real failure stays a failure`);
+  ok(gateOf(s) && s.words === 'The usage ledger is still loading — next try at {time}' && s.vars.time === hm(now + 7000) && s.reaskInMs === 7000 && gateOf(rn) && rn.words === 'The usage ledger is still loading — its first load is running; asked again at {time}' && rn.reaskInMs === 10000 && N.ledgerLoadingOf({ error: 'usage summary failed — boom; retry', code: 'BUSY' }, now) === null, `⑧ the window's LOADING state: «${s && s.words.replace('{time}', s.vars.time)}», asked again in ${s && s.reaskInMs} ms (running: «${rn && rn.words.replace('{time}', rn.vars.time)}»); a real failure stays a failure`);
   const W = fs.readFileSync(path.join(REPO, 'src/lib/usage-window.js'), 'utf8'), zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const loadAt = W.indexOf('const ldg = ledgerLoadingOf(got);'), toastAt = W.indexOf("showToast(t('Could not load usage: {msg}'");
-  ok(loadAt > 0 && toastAt > loadAt && /if \(ldg\) \{ state\.data = null; state\.reaskT = setTimeout\(\(\) => \{ state\.reaskT = null; if \(alive\(\) && state\.ledgerLoading\) load\(\); \}, ldg\.reaskInMs\); \}\n\s+else if \(!got \|\| got\.error\) \{/.test(W) && /const load = async \(\) => \{\n\s+if \(!alive\(\)\) return;/.test(W) && /const got = await fetchJson\('\/api\/usage-stats\?' \+ qs\.toString\(\)\);\n\s+if \(!alive\(\)\) return;/.test(W) && /winInfo\.onClose = \(\) => \{ closed = true;/.test(W) && /body: '\{\}' \}\)\.then\(\(r\) => \{\n\s+if \(!alive\(\)\) return;/.test(W) && (W.match(/again\.onclick = \(\) => \{ state\.attendedRetry = true; load\(\); \};/g) || []).length === 2 && /if \(state\.attendedRetry\) \{ state\.attendedRetry = false; qs\.set\('retry', '1'\); \}/.test(W) && /winInfo\.onClose = \(\) => \{ closed = true; clearTimeout\(state\.reaskT\);/.test(W) && [zh, ja].every((x) => x.includes('"The usage ledger is still loading — next try at {time}"') && x.includes('"The usage ledger is still loading — its first load is running; asked again at {time}"')), `⑧ the window: a LOADING answer is the state (never the error toast — that branch is its else), the re-ask set at its time and cleared at close, the Retry sends retry=1; nothing a closed window awaited asks, arms or draws (alive() after the await, in the re-ask, in the harvest's reply — closed first in onClose; the real page's leg: test-usage-window-pivots §7); zh + ja carry both sentences`);
+  ok(loadAt > 0 && toastAt > loadAt && gateOf(/if \(ldg\) \{ state\.data = null; state\.reaskT = setTimeout\(\(\) => \{ state\.reaskT = null; if \(alive\(\) && state\.ledgerLoading\) load\(\); \}, ldg\.reaskInMs\); \}\n\s+else if \(!got \|\| got\.error\) \{/.test(W)) && gateOf(/const load = async \(\) => \{\n\s+if \(!alive\(\)\) return;/.test(W)) && gateOf(/const got = await fetchJson\('\/api\/usage-stats\?' \+ qs\.toString\(\)\);\n\s+if \(!alive\(\)\) return;/.test(W)) && gateOf(/winInfo\.onClose = \(\) => \{ closed = true;/.test(W)) && gateOf(/body: '\{\}' \}\)\.then\(\(r\) => \{\n\s+if \(!alive\(\)\) return;/.test(W)) && (W.match(/again\.onclick = \(\) => \{ state\.attendedRetry = true; load\(\); \};/g) || []).length === 2 && gateOf(/if \(state\.attendedRetry\) \{ state\.attendedRetry = false; qs\.set\('retry', '1'\); \}/.test(W)) && gateOf(/winInfo\.onClose = \(\) => \{ closed = true; clearTimeout\(state\.reaskT\);/.test(W)) && verdictOf([zh, ja].every((x) => x.includes('"The usage ledger is still loading — next try at {time}"') && x.includes('"The usage ledger is still loading — its first load is running; asked again at {time}"'))), `⑧ the window: a LOADING answer is the state (never the error toast — that branch is its else), the re-ask set at its time and cleared at close, the Retry sends retry=1; nothing a closed window awaited asks, arms or draws (alive() after the await, in the re-ask, in the harvest's reply — closed first in onClose; the real page's leg: test-usage-window-pivots §7); zh + ja carry both sentences`);
 }
 async function gateWords(mutate) {
   const d = copyOf(), u = hub(UsageHistory, d, { rebuildWorkerFile: DIES.throws.file() }), said = [], o = { wholes: 0, sweeps: 0 };
@@ -206,10 +206,10 @@ async function gateWords(mutate) {
 }
 {
   const g = await gateWords(null), failLines = g.said.filter((l) => /^the usage ledger's first load is failing \(planted: the shard could not be read; 1 try\) — the automatic pool decisions stay skipped and the anchor sweep waits until it lands; next try at \d\d:\d\d:\d\dZ$/.test(l)), healLines = g.said.filter((l) => /first load landed after its failures — the automatic pool decisions and the anchor sweep resume/.test(l));
-  ok(g.held && failLines.length === 1 && healLines.length === 1 && g.sweeps === 1 && g.wholes === 1, `⑧ the gate says the failure ONCE with its cause («${failLines[0] || '—'}») and the heal once; the sweep then runs once and every auto pool is decided again once`);
+  ok(gateOf(g.held) && failLines.length === 1 && healLines.length === 1 && g.sweeps === 1 && g.wholes === 1, `⑧ the gate says the failure ONCE with its cause («${failLines[0] || '—'}») and the heal once; the sweep then runs once and every auto pool is decided again once`);
   const G = await gateWords(["    if (l && l.failed && !failSaid) {", "    if (false) {"]);
   ok(!G.said.some((l) => /first load is failing/.test(l)), `control (the gate's words without the failure): the log says only «${(G.said[0] || '').slice(0, 60)}…» while it fails ⇒ RED`);
 }
 
 console.log(fail ? `\n✗ ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

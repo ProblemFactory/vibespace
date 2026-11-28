@@ -56,7 +56,7 @@ const { setupAgentRoutes } = require(path.join(ROOT, 'src/agent-routes.js'));
 const L = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-layout.js')).href);
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const J = JSON.stringify;
 const MARK = 'FINANCE-MAILBOX-7f3a'; // the planted "unrelated mailbox" words — must vanish everywhere
 const has = (x) => (typeof x === 'string' ? x : J(x) || '').includes(MARK);
@@ -174,7 +174,7 @@ const W = 'T-260928-work';
 console.log('§1 the Task Group Activity log');
 {
   const legacy = tasks.get(W).progress;
-  ok(legacy.length === 2 && legacy.every((p) => /^P-[0-9a-f]{6}$/.test(p.id)) && legacy[0].id !== legacy[1].id, 'a legacy entry with no id gets its stable P- id once at load (the backlog-id precedent)', legacy);
+  ok(legacy.length === 2 && gateOf(legacy.every((p) => /^P-[0-9a-f]{6}$/.test(p.id))) && legacy[0].id !== legacy[1].id, 'a legacy entry with no id gets its stable P- id once at load (the backlog-id precedent)', legacy);
   const again = new TaskGroupManager({ dataDir: DATA, onChange: () => {} });
   ok(J(again.get(W).progress.map((p) => p.id)) === J(legacy.map((p) => p.id)), '…persisted: a reload keeps the same ids');
   // the planted entries: three by THIS agent (one with the marker only in its detail), one by another, one from the UI
@@ -185,45 +185,45 @@ console.log('§1 the Task Group Activity log');
   tasks.addProgress(W, { note: 'an unrelated entry', session: ME });
   tasks.addProgress('T-260928-side', { note: `side group ${MARK}`, session: ME });
   const prog = tasks.get(W).progress;
-  ok(prog.every((p) => /^P-[0-9a-f]{6}$/.test(p.id)) && new Set(prog.map((p) => p.id)).size === prog.length, 'addProgress mints a unique P- id for every new entry');
+  ok(gateOf(prog.every((p) => /^P-[0-9a-f]{6}$/.test(p.id))) && new Set(prog.map((p) => p.id)).size === prog.length, 'addProgress mints a unique P- id for every new entry');
   await tasks.mirrorIdle();   // lane cli-call-timeouts: TASK.md is mirrored OFF the store write (queued, bounded) — wait for the copy to land
   const md0 = fs.readFileSync(path.join(CTX, '.vibespace', 'TASK.md'), 'utf8');
-  ok(has(md0), 'setup: TASK.md in the context folder carries the marker before the clear');
+  ok(verdictOf(has(md0)), 'setup: TASK.md in the context folder carries the marker before the clear');
   // a session's injection snapshot taken BEFORE the clear (what `_groupSnap` holds)
   const snapBefore = tasks.snapshotForDiff(W);
   const tc0 = await AG.call('GET', '/api/agent/task-context', { headers: asAgent('vsst_me') });
-  ok(tc0.status === 200 && has(tc0.body.context), 'setup: the real task-context route injects the marker before the clear', tc0.status);
+  ok(tc0.status === 200 && verdictOf(has(tc0.body.context)), 'setup: the real task-context route injects the marker before the clear', tc0.status);
   ok(!has(sessMe._groupSnap || {}), 'the injection\'s cached snapshot (`_groupSnap`) never holds activity words at all (lastProgressAt only)', sessMe._groupSnap);
 
   // THE OWNER clears every entry the Find box matches (the window's batch)
   const hits = prog.filter((p) => has(p.note) || has(p.detail));
   const before = { broadcasts: tasksBroadcasts, order: prog.map((p) => p.id), meta: prog.map((p) => [p.id, p.at, p.session]) };
   const r = await OWNER_APP.call('POST', '/api/records/clear-many', { body: { items: hits.map((p) => ({ kind: 'activity', groupId: W, id: p.id })) } });
-  ok(r.status === 200 && r.body.ok && r.body.cleared === hits.length && !r.body.refused.length && !r.body.unknown.length, `the owner's batch clears all ${hits.length} entries Find matches (one request)`, r.body);
+  ok(r.status === 200 && gateOf(r.body.ok) && r.body.cleared === hits.length && !r.body.refused.length && !r.body.unknown.length, `the owner's batch clears all ${hits.length} entries Find matches (one request)`, r.body);
   ok(tasksBroadcasts === before.broadcasts + 1, 'ONE tasks-updated broadcast for the whole batch (one atomic save)', tasksBroadcasts - before.broadcasts);
   const after = tasks.get(W).progress;
   ok(J(after.map((p) => [p.id, p.at, p.session])) === J(before.meta), 'every entry keeps its id, its time, its author and its POSITION');
-  ok(after.filter((p) => hits.some((h) => h.id === p.id)).every((p) => p.note === CT && !p.detail && p.clearedBy === 'owner' && Number.isFinite(p.clearedAt)), 'a cleared entry reads the ONE sentence, its detail is gone, clearedAt + clearedBy owner');
-  ok(after.find((p) => p.note === 'an unrelated entry') && !after.find((p) => p.note === 'an unrelated entry').clearedAt, 'an entry nobody named is untouched');
+  ok(verdictOf(after.filter((p) => hits.some((h) => h.id === p.id)).every((p) => p.note === CT && !p.detail && p.clearedBy === 'owner' && Number.isFinite(p.clearedAt))), 'a cleared entry reads the ONE sentence, its detail is gone, clearedAt + clearedBy owner');
+  ok(gateOf(after.find((p) => p.note === 'an unrelated entry')) && !after.find((p) => p.note === 'an unrelated entry').clearedAt, 'an entry nobody named is untouched');
   ok(!has(after), 'the Task Group\'s activity no longer carries the marker anywhere');
   const onDisk = fs.readFileSync(path.join(DATA, 'task-groups.json'), 'utf8');
-  ok(!onDisk.includes(`filed the ${MARK}`) && !onDisk.includes(`summary of ${MARK}`) && onDisk.includes(`side group ${MARK}`), 'data/task-groups.json on disk: the cleared entries\' words are gone (the other group\'s own entry is not this group\'s)');
+  ok(!onDisk.includes(`filed the ${MARK}`) && !onDisk.includes(`summary of ${MARK}`) && verdictOf(onDisk.includes(`side group ${MARK}`)), 'data/task-groups.json on disk: the cleared entries\' words are gone (the other group\'s own entry is not this group\'s)');
   await tasks.mirrorIdle();
   const md1 = fs.readFileSync(path.join(CTX, '.vibespace', 'TASK.md'), 'utf8');
-  ok(!has(md1) && md1.includes(CT), 'TASK.md (the context folder\'s mirror) is regenerated through the same save: the sentence, no marker');
+  ok(!has(md1) && verdictOf(md1.includes(CT)), 'TASK.md (the context folder\'s mirror) is regenerated through the same save: the sentence, no marker');
   ok(!has(tasks.renderTaskMd(tasks.get(W))) && !has(tasks.renderContext(W, { sessionKey: ME })), 'renderTaskMd + renderContext (the injected single-group context) carry no marker');
   const multi = tasks.renderMultiContext([W, 'T-260928-side'], { sessionKey: ME });
-  ok(!multi.includes(`summary of ${MARK}`) && !multi.includes(`filed the ${MARK}`) && multi.includes(CT), 'renderMultiContext (a session in two groups) shows the sentence, never the cleared words');
+  ok(!multi.includes(`summary of ${MARK}`) && !multi.includes(`filed the ${MARK}`) && verdictOf(multi.includes(CT)), 'renderMultiContext (a session in two groups) shows the sentence, never the cleared words');
   const diff = tasks.diffChanges(W, snapBefore, { sessionKey: ME });
-  ok(diff && !diff.lines.length && !has(diff), 'a diff from the PRE-clear snapshot has no lines: a clear is not news to a member agent (no "New activity"), and carries no marker', diff);
+  ok(gateOf(diff) && !diff.lines.length && !has(diff), 'a diff from the PRE-clear snapshot has no lines: a clear is not news to a member agent (no "New activity"), and carries no marker', diff);
   ok(!has(tasks.snapshotForDiff(W)) && tasks.snapshotForDiff(W).lastProgressAt === snapBefore.lastProgressAt, 'the recomputed diff snapshot carries no marker and the same lastProgressAt');
   const tc1 = await AG.call('GET', '/api/agent/task-context', { headers: asAgent('vsst_me') });
-  ok(tc1.status === 200 && !tc1.body.context.includes(`filed the ${MARK}`) && !tc1.body.context.includes(`summary of ${MARK}`) && tc1.body.context.includes(CT), 'the real task-context route after the clear: the sentence, never the cleared words');
+  ok(tc1.status === 200 && !tc1.body.context.includes(`filed the ${MARK}`) && !tc1.body.context.includes(`summary of ${MARK}`) && verdictOf(tc1.body.context.includes(CT)), 'the real task-context route after the clear: the sentence, never the cleared words');
   ok(!has(sessMe._groupSnap || {}), '…and the session\'s `_groupSnap` it recomputed carries none');
   const pc = await AG.call('GET', '/api/agent/prompt-context', { headers: asAgent('vsst_me'), query: {} });
   ok(pc.status === 200 && !J(pc.body).includes(`filed the ${MARK}`) && !J(pc.body).includes(`summary of ${MARK}`), 'the per-turn prompt-context injection after the clear carries none of the cleared words', pc.status);
   const show = await AG.call('GET', '/api/agent/task', { headers: asAgent('vsst_me'), query: { group: W } });
-  ok(show.status === 200 && !show.body.task.progress.some((p) => has(p.note)) && show.body.task.progress.some((p) => p.note === CT), '`vibespace-task show` (GET /api/agent/task) reads the sentence');
+  ok(show.status === 200 && !show.body.task.progress.some((p) => has(p.note)) && verdictOf(show.body.task.progress.some((p) => p.note === CT)), '`vibespace-task show` (GET /api/agent/task) reads the sentence');
   ok((await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'activity', groupId: W, id: hits[0].id } })).body.already === 1, 'a second clear of the same entry is an idempotent "already"');
   ok((await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'activity', groupId: W, id: 'P-ffffff' } })).status === 404, 'an unknown entry id is 404 not_found');
   ok((await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'activity', groupId: 'T-nope', id: hits[0].id } })).status === 404, 'an unknown Task Group is 404 not_found');
@@ -245,7 +245,7 @@ console.log('§1 the Task Group Activity log');
   const byAt = await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_me'), body: { ref: String(p3[1].at), group: W } });
   ok(byAt.status === 200 && byAt.body.cleared === 1, '…and by the entry\'s time in ms', byAt.body);
   const foreign = await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_me'), body: { ref: p3[2].id, group: W } });
-  ok(foreign.status === 403 && foreign.body.code === 'not_yours' && has(tasks.get(W).progress.find((p) => p.id === p3[2].id).note), 'ANOTHER session\'s entry is refused by name (403 not_yours) and stays as it was', foreign.body);
+  ok(foreign.status === 403 && foreign.body.code === 'not_yours' && verdictOf(has(tasks.get(W).progress.find((p) => p.id === p3[2].id).note)), 'ANOTHER session\'s entry is refused by name (403 not_yours) and stays as it was', foreign.body);
   const fork = await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_fork'), body: { ref: p3[2].id, group: W } });
   const fork2 = await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_fork'), body: { ref: before.order[before.order.length - 1], group: W } });
   ok(fork.status === 409 && fork.body.code === 'pending_fork' && fork2.status === 409 && fork2.body.code === 'pending_fork', 'a FORK still borrowing its parent\'s id is refused by name (409 pending_fork) — even for an entry its parent wrote', [fork.body, fork2.body]);
@@ -258,7 +258,7 @@ console.log('§1 the Task Group Activity log');
     const { liveForkPending } = require(path.join(ROOT, 'src/claude-lock-capture.js'));
     const adopted = { agentToken: 'vsst_cxfork', backend: 'codex', backendSessionId: 'thr-own', claudeSessionId: null, cwd: DIR, name: 'codex fork (adopted)', _forkRequested: true, _forkSourceId: 'thr-parent', forkedFrom: ['thr-parent'] };
     const pending = { agentToken: 'vsst_cxpend', backend: 'codex', backendSessionId: 'thr-parent', claudeSessionId: null, cwd: DIR, name: 'codex fork (pending)', _forkRequested: true, _forkSourceId: 'thr-parent', forkedFrom: [] };
-    ok(!liveForkPending(adopted) && liveForkPending(pending), 'setup: master\'s predicate says the adopted codex fork is its own, the pending one still borrows');
+    ok(!liveForkPending(adopted) && verdictOf(liveForkPending(pending)), 'setup: master\'s predicate says the adopted codex fork is its own, the pending one still borrows');
     activeSessions.set('cw-cxfork', adopted); activeSessions.set('cw-cxpend', pending);
     tasks.bind(W, 'codex:thr-own'); tasks.bind(W, 'codex:thr-parent');
     tasks.addProgress(W, { note: `codex fork wrote ${MARK}`, session: 'codex:thr-own' }); await tick();
@@ -267,7 +267,7 @@ console.log('§1 the Task Group Activity log');
     const r1 = await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_cxfork'), body: { ref: own.id, group: W } });
     ok(r1.status === 200 && r1.body.cleared === 1 && tasks.get(W).progress.find((p) => p.id === own.id).note === CT, 'a codex fork that adopted its own thread clears ITS OWN entry (200) — the raw flag would have said pending_fork for ever', r1.body);
     const r2 = await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_cxpend'), body: { ref: parents.id, group: W } });
-    ok(r2.status === 409 && r2.body.code === 'pending_fork' && has(parents.note), 'a codex fork still on its parent\'s thread is refused pending_fork (its key is its parent\'s) and the parent\'s entry stays', r2.body);
+    ok(r2.status === 409 && r2.body.code === 'pending_fork' && verdictOf(has(parents.note)), 'a codex fork still on its parent\'s thread is refused pending_fork (its key is its parent\'s) and the parent\'s entry stays', r2.body);
     const AR_REL = 'src/agent-routes.js', AR_SRC = fs.readFileSync(path.join(ROOT, AR_REL), 'utf8');
     const NEW_FORK = 'conversationId: addressableId(s), pendingFork: liveForkPending(s) };';
     ok(AR_SRC.split(NEW_FORK).length === 2, 'the caller reads the fork fact through the ONE predicate, once (the control swaps exactly it)');
@@ -277,7 +277,7 @@ console.log('§1 the Task Group Activity log');
     tasks.addProgress(W, { note: `codex fork wrote ${MARK} again`, session: 'codex:thr-own' }); await tick();
     const own2 = tasks.get(W).progress.slice(-1)[0];
     const c = await AG2.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_cxfork'), body: { ref: own2.id, group: W } });
-    ok(c.status === 409 && c.body.code === 'pending_fork' && has(own2.note), 'NEGATIVE CONTROL: the raw `_forkRequested` caller refuses the adopted codex fork\'s own entry as pending_fork', c.body);
+    ok(c.status === 409 && c.body.code === 'pending_fork' && verdictOf(has(own2.note)), 'NEGATIVE CONTROL: the raw `_forkRequested` caller refuses the adopted codex fork\'s own entry as pending_fork', c.body);
     await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_cxfork'), body: { ref: own2.id, group: W } });
   }
   // two entries in ONE millisecond: a time names neither — refused by name, the id works
@@ -286,13 +286,13 @@ console.log('§1 the Task Group Activity log');
   tasks.addProgress(W, { note: `twin one ${MARK}`, session: ME }); tasks.addProgress(W, { note: `twin two ${MARK}`, session: ME });
   const twins = twin.progress.slice(-2); twins[0].at = at0; twins[1].at = at0;
   const amb = await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_me'), body: { ref: String(at0), group: W } });
-  ok(amb.status === 409 && amb.body.code === 'ambiguous' && twins.every((p) => has(p.note)), 'two entries of ONE millisecond: the time is refused by name (409 ambiguous), nothing cleared', amb.body);
+  ok(amb.status === 409 && amb.body.code === 'ambiguous' && verdictOf(twins.every((p) => has(p.note))), 'two entries of ONE millisecond: the time is refused by name (409 ambiguous), nothing cleared', amb.body);
   for (const p of twins) await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_me'), body: { ref: p.id, group: W } });
-  ok(twins.every((p) => p.note === CT), '…their ids clear each one');
+  ok(verdictOf(twins.every((p) => p.note === CT)), '…their ids clear each one');
   const unknown = await AG.call('POST', '/api/agent/task/progress-redact', { headers: asAgent('vsst_me'), body: { ref: 'P-000000', group: W } });
   ok(unknown.status === 404 && unknown.body.code === 'not_found', 'an unknown id is 404 not_found', unknown.body);
   const added = await AG.call('POST', '/api/agent/task-progress', { headers: asAgent('vsst_me'), body: { note: 'echo me', group: W } });
-  ok(added.status === 200 && added.body.entry && /^P-[0-9a-f]{6}$/.test(added.body.entry.id) && added.body.entry.note === 'echo me', 'task-progress answers with the entry it wrote (its id is what progress-redact names)', added.body);
+  ok(added.status === 200 && gateOf(added.body.entry) && gateOf(/^P-[0-9a-f]{6}$/.test(added.body.entry.id)) && added.body.entry.note === 'echo me', 'task-progress answers with the entry it wrote (its id is what progress-redact names)', added.body);
 }
 
 // ── the REAL CLIs against a stub server that forwards to the same route handlers ──
@@ -325,16 +325,16 @@ const runCli = (bin, args, api, tok) => new Promise((resolve) => {
     const id = (/\[(P-[0-9a-f]{6})\]/.exec(p.out) || [])[1];
     ok(p.code === 0 && !!id, '`progress` echoes the new entry\'s id ("progress recorded as [P-…]")', p.out + p.err);
     const sh = await runCli('vibespace-task', ['--group', W, 'show'], S.url, 'vsst_me');
-    ok(sh.code === 0 && sh.out.includes(`[${id}]`) && !sh.out.includes(`[${tasks.get(W).progress.find((x) => x.session === OTHER && !x.clearedAt).id}]`), '`show` prints the id of the caller\'s OWN entries only', sh.out.slice(-600));
+    ok(sh.code === 0 && gateOf(sh.out.includes(`[${id}]`)) && !sh.out.includes(`[${tasks.get(W).progress.find((x) => x.session === OTHER && !x.clearedAt).id}]`), '`show` prints the id of the caller\'s OWN entries only', sh.out.slice(-600));
     const rd = await runCli('vibespace-task', ['--group', W, 'progress-redact', id], S.url, 'vsst_me');
-    ok(rd.code === 0 && /cleared/.test(rd.out) && tasks.get(W).progress.find((x) => x.id === id).note === CT, '`progress-redact <id>` clears it and says so', rd.out + rd.err);
+    ok(rd.code === 0 && gateOf(/cleared/.test(rd.out)) && tasks.get(W).progress.find((x) => x.id === id).note === CT, '`progress-redact <id>` clears it and says so', rd.out + rd.err);
     const other = tasks.get(W).progress.find((x) => x.session === OTHER && !x.clearedAt);
     const rf = await runCli('vibespace-task', ['--group', W, 'progress-redact', other.id], S.url, 'vsst_me');
-    ok(rf.code === 1 && /only what its own session wrote/.test(rf.err), 'another session\'s entry: exit 1 with the refusal\'s sentence', rf.err);
+    ok(rf.code === 1 && verdictOf(/only what its own session wrote/.test(rf.err)), 'another session\'s entry: exit 1 with the refusal\'s sentence', rf.err);
     const help = await runCli('vibespace-task', ['--help'], S.url, 'vsst_me');
-    ok(/progress-redact <P-id>/.test(help.out) && /\[cleared at the user's request\]/.test(help.out), 'the usage names progress-redact and the sentence', help.out.slice(0, 200));
+    ok(gateOf(/progress-redact <P-id>/.test(help.out)) && verdictOf(/\[cleared at the user's request\]/.test(help.out)), 'the usage names progress-redact and the sentence', help.out.slice(0, 200));
     const man = fs.readFileSync(path.join(ROOT, 'docs/agent/task-manual.md'), 'utf8');
-    ok(/progress-redact/.test(man), 'docs/agent/task-manual.md documents progress-redact');
+    ok(verdictOf(/progress-redact/.test(man)), 'docs/agent/task-manual.md documents progress-redact');
   } finally { await S.close(); }
 }
 
@@ -350,7 +350,7 @@ console.log('§2 For-you items');
   const othersItem = userTodos.add(OTHER, { text: `the other agent asks about ${MARK}`, origin: 'agent' });
   const snap0 = userTodos.snapshot();
   const prevRes = snap0.resolved.find((i) => i.id === resolved.id);
-  ok(prevRes && prevRes.detailTruncated && has(prevRes.detail), 'setup: the snapshot previews the resolved item\'s detail (300 chars, with the marker)');
+  ok(gateOf(prevRes) && gateOf(prevRes.detailTruncated) && verdictOf(has(prevRes.detail)), 'setup: the snapshot previews the resolved item\'s detail (300 chars, with the marker)');
   const fullById = new Map([[resolved.id, LONG], [mineItem.id, LONG]]); // what a client kept whole
   const n0 = todosBroadcasts;
   const r = await OWNER_APP.call('POST', '/api/records/clear-many', { body: { items: [{ kind: 'todo', id: mineItem.id }, { kind: 'todo', id: resolved.id }] } });
@@ -358,7 +358,7 @@ console.log('§2 For-you items');
   const s1 = lastTodos;
   const o = [...s1.open, ...s1.resolved].find((i) => i.id === mineItem.id), rr = s1.resolved.find((i) => i.id === resolved.id);
   ok(o.text === CT && o.detail === null && o.options === null && o.reply === null && o.status === 'done' && o.resolvedBy === 'reply' && o.createdAt === mineItem.createdAt, 'the item: the sentence, no detail, no chips, no reply — its status, time and resolver kept', o);
-  ok(rr && rr.text === CT && !rr.detailTruncated && rr.detail === null, 'the RESOLVED item\'s 300-char preview is gone with its detail', rr);
+  ok(gateOf(rr) && rr.text === CT && !rr.detailTruncated && rr.detail === null, 'the RESOLVED item\'s 300-char preview is gone with its detail', rr);
   ok(!has(s1.open.concat(s1.resolved).filter((i) => i.id !== othersItem.id)), '…every copy the broadcast carries of the cleared items is clean');
   const rd = L.restoreDetails(s1, fullById);
   ok(!has([...rd.todos.open, ...rd.todos.resolved].filter((i) => i.id !== othersItem.id)) && !rd.fullById.has(resolved.id) && !rd.fullById.has(mineItem.id), 'restoreDetails: a whole detail a client kept is NOT put back into a cleared item, and the client\'s map forgets it');
@@ -378,9 +378,9 @@ console.log('§2 For-you items');
   try {
     const x = userTodos.add(ME, { text: `cli item ${MARK}`, origin: 'agent' });
     const c = await runCli('vibespace-ask', ['clear', x.id], S.url, 'vsst_me');
-    ok(c.code === 0 && /cleared/.test(c.out) && userTodos.get(x.id).text === CT, 'the REAL `vibespace-ask clear <id>`', c.out + c.err);
+    ok(c.code === 0 && gateOf(/cleared/.test(c.out)) && userTodos.get(x.id).text === CT, 'the REAL `vibespace-ask clear <id>`', c.out + c.err);
     const h = await runCli('vibespace-ask', ['--help'], S.url, 'vsst_me');
-    ok(/vibespace-ask clear <id>/.test(h.out), 'its usage names the verb');
+    ok(verdictOf(/vibespace-ask clear <id>/.test(h.out)), 'its usage names the verb');
   } finally { await S.close(); }
 }
 
@@ -393,7 +393,7 @@ console.log('§3 session-status history');
   sessionStatus.setByAgent(ME, { state: 'blocked', reason: `still ${MARK}`, detail: `the ${MARK} mail again` }); await tick();
   const hist = sessionStatus.history(ME);
   const targets = hist.filter((h) => has(h.reason));
-  ok(targets.length === 2 && has(sessionStatus.get(ME)) && sessionStatus.pendingNotices(ME).some((n) => has(n.agent && n.agent.reason)), 'setup: two history entries, the current record and a queued override notice carry the marker');
+  ok(targets.length === 2 && gateOf(has(sessionStatus.get(ME))) && verdictOf(sessionStatus.pendingNotices(ME).some((n) => has(n.agent && n.agent.reason))), 'setup: two history entries, the current record and a queued override notice carry the marker');
   const hr = await AG.call('GET', '/api/session-status/history', { query: { sessionKey: `${ME},webui:cw-me` } });
   ok(hr.body.key === ME && hr.body.history.length === hist.length, 'the history route names the key its entries sit under (a clear addresses an entry by key + time)', hr.body.key);
   const n0 = statusBroadcasts;
@@ -402,12 +402,12 @@ console.log('§3 session-status history');
   // verify r5 (reproduced in chrome): the broadcast NAMES what the clear touched — ids only — because its statuses map can be
   // exactly what every client already holds (a cleared entry that is not the current status), which a client's change guard drops
   // lane task-group-fanout: + `sync` (the frame's place in the order: {removed, epoch, base, seq}) — numbers and keys, no word
-  ok(lastStatusExtra && J(lastStatusExtra.cleared) === J([{ key: ME, ats: targets.map((h) => h.at) }]) && J(Object.keys(lastStatusExtra).sort()) === J(['cleared', 'sync']) && lastStatusExtra.sync.seq === lastStatusExtra.sync.base + 1 && !has(lastStatusExtra), 'the broadcast carries `cleared: [{key, ats}]` (ids only — no word): the entries it touched, whatever the current record did', lastStatusExtra);
+  ok(gateOf(lastStatusExtra) && J(lastStatusExtra.cleared) === J([{ key: ME, ats: targets.map((h) => h.at) }]) && J(Object.keys(lastStatusExtra).sort()) === J(['cleared', 'sync']) && lastStatusExtra.sync.seq === lastStatusExtra.sync.base + 1 && !has(lastStatusExtra), 'the broadcast carries `cleared: [{key, ats}]` (ids only — no word): the entries it touched, whatever the current record did', lastStatusExtra);
   const h2 = sessionStatus.history(ME);
   ok(!has(h2) && h2.filter((h) => h.clearedAt).length === 2 && h2.length === hist.length && J(h2.map((h) => [h.state, h.at, h.setBy])) === J(hist.map((h) => [h.state, h.at, h.setBy])), 'the history keeps every entry, its state, time and setter; the words are the sentence');
-  ok(!has(sessionStatus.get(ME)) && sessionStatus.get(ME).reason === CT && sessionStatus.get(ME).clearedAt, 'the CURRENT record (the card chips, "Now", vibespace-msg list) no longer says it');
+  ok(!has(sessionStatus.get(ME)) && sessionStatus.get(ME).reason === CT && verdictOf(sessionStatus.get(ME).clearedAt), 'the CURRENT record (the card chips, "Now", vibespace-msg list) no longer says it');
   const rendered = SessionStatusManager.renderNotices(sessionStatus.pendingNotices(ME));
-  ok(!has(rendered) && rendered.includes(CT), 'the queued override notice — injected into the agent\'s next turn — quotes the sentence, never the words', rendered.slice(0, 200));
+  ok(!has(rendered) && verdictOf(rendered.includes(CT)), 'the queued override notice — injected into the agent\'s next turn — quotes the sentence, never the words', rendered.slice(0, 200));
   sessionStatus.flush();
   ok(!fs.readFileSync(path.join(DATA, 'session-status.json'), 'utf8').includes(MARK), 'data/session-status.json on disk holds no marker');
   ok((await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'status', sessionKey: ME, id: '123' } })).status === 404, 'an entry at an unknown time is 404');
@@ -415,10 +415,10 @@ console.log('§3 session-status history');
   // history entry was cleared, the CURRENT record kept its detail (the "Now" row's expander, GET /api/session-status)
   sessionStatus.setByAgent(ME, { state: 'blocked', detail: `only a detail: ${MARK}` }); await tick();
   const dOnly = sessionStatus.history(ME).find((h) => !h.reason && has(h.detail));
-  ok(dOnly && has(sessionStatus.get(ME).detail) && !sessionStatus.get(ME).reason, 'setup: a detail-only entry; the current record repeats its detail and has no reason');
+  ok(gateOf(dOnly) && gateOf(has(sessionStatus.get(ME).detail)) && !sessionStatus.get(ME).reason, 'setup: a detail-only entry; the current record repeats its detail and has no reason');
   const rd = await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'status', sessionKey: ME, id: String(dOnly.at) } });
   const cur = sessionStatus.get(ME);
-  ok(rd.status === 200 && rd.body.cleared === 1 && !has(cur) && cur.detail === null && cur.clearedAt && cur.state === 'blocked', 'a detail-only entry: the CURRENT record\'s detail goes with it (its reason OR its detail repeats the entry — verify r1)', cur);
+  ok(rd.status === 200 && rd.body.cleared === 1 && !has(cur) && cur.detail === null && gateOf(cur.clearedAt) && cur.state === 'blocked', 'a detail-only entry: the CURRENT record\'s detail goes with it (its reason OR its detail repeats the entry — verify r1)', cur);
   // NEGATIVE CONTROL: the door with the reason-only match (the pre-fix rule) leaves the current detail
   const SS_REL = 'src/session-status.js', SS_SRC = fs.readFileSync(path.join(ROOT, SS_REL), 'utf8');
   const NEW_RULE = "if (rec && ((oldReason && rec.reason === oldReason) || (oldDetail && rec.detail === oldDetail))) applyClear(rec, { kind: 'status', by, at });";
@@ -430,7 +430,7 @@ console.log('§3 session-status history');
   pre.setByAgent(ME, { state: 'blocked', detail: `only a detail: ${MARK}` });
   const preAt = pre.history(ME)[0].at;
   const preOut = pre.clearHistory(ME, [preAt], { by: 'owner', at: Date.now() });
-  ok(preOut.cleared.length === 1 && !has(pre.history(ME)) && has(pre.get(ME).detail), 'NEGATIVE CONTROL: with the reason-only match the history entry is cleared but the CURRENT record keeps the marker — the leg above would go red', pre.get(ME));
+  ok(preOut.cleared.length === 1 && !has(pre.history(ME)) && verdictOf(has(pre.get(ME).detail)), 'NEGATIVE CONTROL: with the reason-only match the history entry is cleared but the CURRENT record keeps the marker — the leg above would go red', pre.get(ME));
 }
 
 // ── §3b verify r4 (time and order): a clear is ON DISK before the owner is told ──
@@ -479,41 +479,41 @@ console.log('§3b a clear is on disk before the broadcast (For-you + status, ver
   const real = drive({ UserTodoManager }, { SessionStatusManager }, 'real');
   ok(real.todo.cleared.length === 1 && !has(real.todoDisk) && real.todoDiskAtBroadcast !== undefined && !has(real.todoDiskAtBroadcast),
     'For-you: when clearItems answers, data/user-todos.json already holds no marker — and it held none at the broadcast instant', real.todoDisk.slice(0, 200));
-  ok(real.todoAfterKill && real.todoAfterKill.text === CT && real.todoAfterKill.detail === null && real.todoAfterKill.clearedAt, 'For-you: a SIGKILL right after the answer — the next boot reads the sentence, never the words', real.todoAfterKill);
+  ok(gateOf(real.todoAfterKill) && real.todoAfterKill.text === CT && real.todoAfterKill.detail === null && verdictOf(real.todoAfterKill.clearedAt), 'For-you: a SIGKILL right after the answer — the next boot reads the sentence, never the words', real.todoAfterKill);
   ok(real.status.cleared.length === 1 && !has(real.statusDisk) && real.statusDiskAtBroadcast !== undefined && !has(real.statusDiskAtBroadcast),
     'status: when clearHistory answers, data/session-status.json already holds no marker — and it held none at the broadcast instant', real.statusDisk.slice(0, 200));
-  ok(real.statusAfterKill && real.statusAfterKill.reason === CT && real.statusAfterKill.clearedAt, 'status: a SIGKILL right after the answer — the next boot reads the sentence', real.statusAfterKill);
+  ok(gateOf(real.statusAfterKill) && real.statusAfterKill.reason === CT && verdictOf(real.statusAfterKill.clearedAt), 'status: a SIGKILL right after the answer — the next boot reads the sentence', real.statusAfterKill);
   ok(UT_SRC.split(NEW_WRITE).length === 2 && SS_SRC.split(NEW_WRITE_SS).length === 2, 'each door writes synchronously once (the control swaps exactly it)');
   // NEGATIVE CONTROL: the door with the debounced write only (the pre-r4 rule) — the words are on disk at the answer and come back
   const PRE_UT = MUT.load(UT_REL, UT_SRC.replace(NEW_WRITE, OLD_WRITE), 'todo-clear-debounced');
   const PRE_SS = MUT.load(SS_REL, SS_SRC.replace(NEW_WRITE_SS, OLD_WRITE_SS), 'status-clear-debounced');
   const pre = drive(PRE_UT, PRE_SS, 'pre');
-  ok(has(pre.todoDisk) && has(pre.todoAfterKill) && has(pre.statusDisk) && has(pre.statusAfterKill),
+  ok(gateOf(has(pre.todoDisk)) && gateOf(has(pre.todoAfterKill)) && gateOf(has(pre.statusDisk)) && verdictOf(has(pre.statusAfterKill)),
     'NEGATIVE CONTROL: with the debounced write only, both files still hold the marker when the door answers and a kill brings the words back — the legs above would go red', { todo: pre.todoAfterKill && pre.todoAfterKill.text, status: pre.statusAfterKill && pre.statusAfterKill.reason });
 }
 
 // ── §4 JOBS ──
 console.log('§4 Background Work');
 {
-  ok(jm.ready && jm.jobs.has(PARENT) && jm.jobs.has(CHILD) && jm.archivedById(ARCHIVED), 'setup: the engine loaded a cron family (parent + run) and an ARCHIVED run');
+  ok(gateOf(jm.ready) && gateOf(jm.jobs.has(PARENT)) && gateOf(jm.jobs.has(CHILD)) && verdictOf(jm.archivedById(ARCHIVED)), 'setup: the engine loaded a cron family (parent + run) and an ARCHIVED run');
   jm.announce(jm.jobs.get(PARENT), `the ${MARK} digest found 3 mails`);
-  ok(jm.events.some((e) => has(e)), 'setup: the viewers\' event ring holds the marker (an announce)');
+  ok(verdictOf(jm.events.some((e) => has(e))), 'setup: the viewers\' event ring holds the marker (an announce)');
   // verify r1: the `--notify` cron's own path — _notifyOwner(job, {what: a.text || job.name}) — holds the
   // action's OWN words as the notification's text (no `announced:` prefix); the §1 task-context call
   // drained the seeded stash, so this entry is planted here, through the engine
   jm._notifyOwner(jm.jobs.get(PARENT), { what: jm.jobs.get(PARENT).action.text }); await new Promise((r) => setTimeout(r, 30));
-  ok([...(jm.pendingNotifs.get(ME_CID) || [])].some((n) => n.jobId === PARENT && !String(n.text).startsWith('announced:') && has(n.text)), 'setup: a held notification whose text is the notify action\'s own words', jm.pendingNotifs.get(ME_CID));
+  ok(verdictOf([...(jm.pendingNotifs.get(ME_CID) || [])].some((n) => n.jobId === PARENT && !String(n.text).startsWith('announced:') && has(n.text))), 'setup: a held notification whose text is the notify action\'s own words', jm.pendingNotifs.get(ME_CID));
   // a For-you item the jobs producer filed (the job's name in its words and its label)
   jm._forYou(jm.jobs.get(CHILD), jobModel.forYouCopy(jm.jobs.get(CHILD), 'ask'));   // the engine's ONE door (lane job-notify-user r6: `jm.d.notifyUser` is the STRAY door — it files the stray copy, never the shape)
   const jobItem = [...userTodos.snapshot().open].find((i) => i.jobId === CHILD);
-  ok(jobItem && has(jobItem.sessionName) && jobItem.origin === 'jobs', 'setup: a Background Work For-you item names the job (text + label)');
+  ok(gateOf(jobItem) && gateOf(has(jobItem.sessionName)) && jobItem.origin === 'jobs', 'setup: a Background Work For-you item names the job (text + label)');
   const viewer = { isUser: false, conversationId: ME_CID, sessionId: 'cw-me', groups: new Set(['T-260928-work']) };
-  ok(has(jm.digestFor(viewer, 0)) || has(jm.updatesFor(viewer, 0)), 'setup: the digest / updates injected to a viewer carry the marker');
+  ok(verdictOf(has(jm.digestFor(viewer, 0))) || verdictOf(has(jm.updatesFor(viewer, 0))), 'setup: the digest / updates injected to a viewer carry the marker');
   // ARCHIVE FIRST: a failed archive write changes nothing anywhere
   const real = jm._writeArchive.bind(jm);
   jm._writeArchive = () => ({ ok: false, error: 'EROFS (planted)' });
   const failed = await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'job', id: PARENT } });
-  ok(failed.status === 500 && failed.body.code === 'failed' && has(jm.jobs.get(PARENT).name) && has(jm.archivedById(ARCHIVED)), 'ARCHIVE FIRST: when the archive write fails the clear is refused (500 failed) and NOTHING changed — registry, archive, ring', failed.body);
+  ok(failed.status === 500 && failed.body.code === 'failed' && gateOf(has(jm.jobs.get(PARENT).name)) && verdictOf(has(jm.archivedById(ARCHIVED))), 'ARCHIVE FIRST: when the archive write fails the clear is refused (500 failed) and NOTHING changed — registry, archive, ring', failed.body);
   jm._writeArchive = real;
   const n0 = jobsBroadcasts.length;
   const r = await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'job', id: PARENT } });
@@ -526,13 +526,13 @@ console.log('§4 Background Work');
   ok(!jm.events.some((e) => e.jobId === PARENT && has(e)) && !has(jm.updatesFor(viewer, 0)) && !has(jm.digestFor(viewer, 0)), 'the viewers\' event ring, the updates block and the digest injected to agents carry no marker');
   ok(!has([...jm.pendingNotifs.values()]), 'the conversation\'s held notification stash (drained into its next turn) carries no marker');
   const held = [...jm.pendingNotifs.values()].flat().filter((n) => n.jobId === PARENT);
-  ok(held.length === 2 && held.every((n) => n.text === CT && n.jobName === CT), 'EVERY held notification of the cleared job reads the sentence — the announce AND the notify action\'s own words (verify r1: only the announced prefix was rewritten before)', held);
+  ok(held.length === 2 && verdictOf(held.every((n) => n.text === CT && n.jobName === CT)), 'EVERY held notification of the cleared job reads the sentence — the announce AND the notify action\'s own words (verify r1: only the announced prefix was rewritten before)', held);
   const stashText = jobModel.renderNotifStash([...jm.pendingNotifs.get(ME_CID)]);
-  ok(!has(stashText) && stashText.includes(CT), 'the block the owner conversation is injected with on its next turn (renderNotifStash) carries no marker', stashText);
+  ok(!has(stashText) && verdictOf(stashText.includes(CT)), 'the block the owner conversation is injected with on its next turn (renderNotifStash) carries no marker', stashText);
   const spill = fs.readFileSync(SPILL, 'utf8');
-  ok(!has(spill) && spill.includes(`${PARENT} ${CT}`) && spill.includes(`${FOREIGN} someone else's job: done`), 'the drained-notification spill file: the job\'s lines keep time + id and lose their words; another job\'s line untouched', spill);
+  ok(!has(spill) && gateOf(spill.includes(`${PARENT} ${CT}`)) && verdictOf(spill.includes(`${FOREIGN} someone else's job: done`)), 'the drained-notification spill file: the job\'s lines keep time + id and lose their words; another job\'s line untouched', spill);
   const snap = await (async () => { const g = fakeApp(); jobsWiring.create; return jm.snapshot(C, { tail: 5 }); })();
-  ok(snap.logTail === '' && snap.name === CT && snap.clearedAt && !has(snap), 'a cleared job\'s snapshot serves NO log tail (the run\'s log file keeps the process\'s own output, like a transcript)', snap.logTail);
+  ok(snap.logTail === '' && snap.name === CT && gateOf(snap.clearedAt) && !has(snap), 'a cleared job\'s snapshot serves NO log tail (the run\'s log file keeps the process\'s own output, like a transcript)', snap.logTail);
   ok(snap.logWithheld === true, 'verify r2: …and SAYS it withheld it (`logWithheld`) — an empty tail read as "(no log)", as if the run printed nothing', snap);
   {
     // the REAL `vibespace-job` CLI prints the withheld log as withheld (a stub server answering with the engine's own snapshot)
@@ -547,9 +547,9 @@ console.log('§4 Background Work');
     await new Promise((r) => srv.listen(port, '127.0.0.1', r));
     const url = `http://127.0.0.1:${port}`;
     const logs = await runCli('vibespace-job', ['logs', CHILD], url, 'vsst_me');
-    ok(logs.code === 0 && /log withheld — this job's content was cleared/.test(logs.out) && !/\(no log\)/.test(logs.out) && !has(logs.out), '`vibespace-job logs` on a cleared job: "(log withheld — this job\'s content was cleared …)", never "(no log)", no marker', logs.out + logs.err);
+    ok(logs.code === 0 && gateOf(/log withheld — this job's content was cleared/.test(logs.out)) && !/\(no log\)/.test(logs.out) && !has(logs.out), '`vibespace-job logs` on a cleared job: "(log withheld — this job\'s content was cleared …)", never "(no log)", no marker', logs.out + logs.err);
     const poll = await runCli('vibespace-job', ['poll', CHILD], url, 'vsst_me');
-    ok(poll.code === 0 && /log tail: \(withheld/.test(poll.out) && !has(poll.out), '`vibespace-job poll` says the tail is withheld too', poll.out + poll.err);
+    ok(poll.code === 0 && gateOf(/log tail: \(withheld/.test(poll.out)) && !has(poll.out), '`vibespace-job poll` says the tail is withheld too', poll.out + poll.err);
     // a run that STARTED after the clear is new output: served (a cron cleared once keeps its later logs)
     const C2 = jm.jobs.get(CHILD);
     const later = C2.clearedAt + 5;
@@ -558,9 +558,9 @@ console.log('§4 Background Work');
     fs.writeFileSync(path.join(dir2, 'current.log'), 'a later run: fresh output\n');
     C2.runs.push({ startedAt: later, trigger: 'cron', log: path.join(dir2, 'current.log'), endedAt: later + 10, exit: 0, cause: 'exit', lastLine: 'fresh output' });
     const snap2 = jm.snapshot(C2, { tail: 5 });
-    ok(/fresh output/.test(snap2.logTail) && !snap2.logWithheld && !has(snap2), 'a run that started AFTER the clear serves its own log (new words, not the cleared ones)', snap2);
+    ok(gateOf(/fresh output/.test(snap2.logTail)) && !snap2.logWithheld && !has(snap2), 'a run that started AFTER the clear serves its own log (new words, not the cleared ones)', snap2);
     const logs2 = await runCli('vibespace-job', ['logs', CHILD], url, 'vsst_me');
-    ok(logs2.code === 0 && /fresh output/.test(logs2.out) && !/withheld/.test(logs2.out), '…and `vibespace-job logs` prints it', logs2.out + logs2.err);
+    ok(logs2.code === 0 && gateOf(/fresh output/.test(logs2.out)) && !/withheld/.test(logs2.out), '…and `vibespace-job logs` prints it', logs2.out + logs2.err);
     // NEGATIVE CONTROL: the pre-fix snapshot rule (any clearedAt ⇒ an empty tail, no flag) — driven on a
     // bare instance of the patched class over the same records: withheld unsaid, and the later run's log hidden
     const JB_REL2 = 'src/jobs.js', JB_SRC2 = fs.readFileSync(path.join(ROOT, JB_REL2), 'utf8');
@@ -605,7 +605,7 @@ console.log('§4 Background Work');
   { // the bare maker's law (stated once above): it carries every field the constructor gives — the unread marks clearJobs reads among them
     const RM = require(path.join(ROOT, JB_REL)), fresh = new RM.JobManager({ dataDir: DATA, broadcast() { }, log() { } }), b = bareManager(RM), proto = Object.create(RM.JobManager.prototype);
     const own = Object.keys(fresh);
-    ok(own.length > 20 && own.every((k) => Object.prototype.hasOwnProperty.call(b, k)) && b._unread && b._unread.archive === null, `the bare manager carries every field the constructor gives (${own.length}) — the unread marks clearJobs reads among them`);
+    ok(own.length > 20 && gateOf(own.every((k) => Object.prototype.hasOwnProperty.call(b, k))) && gateOf(b._unread) && b._unread.archive === null, `the bare manager carries every field the constructor gives (${own.length}) — the unread marks clearJobs reads among them`);
     ok(!Object.prototype.hasOwnProperty.call(proto, '_unread'), 'CONTROL (the manager made from the prototype alone, the train\'s red): it has no unread marks — clearJobs threw on them');
   }
   { // B-20b6: the REAL clearJobs with its archive HELD, through the REAL seam — the flag reaches the clear's answer (the dialog says it)
@@ -616,11 +616,11 @@ console.log('§4 Background Work');
     b.jobs.set('jb-0000dd02', jobRec('jb-0000dd02', { name: 'nightly report' }));
     const seam = ORCH.create({ getJobs: () => b, log: () => {} });
     const r = await seam.clear({ kind: 'job', id: 'jb-0000dd02' }, { caller: { role: 'owner' } });
-    ok(r.ok && r.cleared === 1 && r.archiveUnread === true, 'B-20b6: the REAL clearJobs with its archive held answers through the REAL seam that archived records were not reached (archiveUnread) — the key the dialog reads', r);
+    ok(gateOf(r.ok) && r.cleared === 1 && r.archiveUnread === true, 'B-20b6: the REAL clearJobs with its archive held answers through the REAL seam that archived records were not reached (archiveUnread) — the key the dialog reads', r);
   }
   ok(realBare.out.cleared.length === 1 && realBare.stash[0].text === CT, 'the same bare drive on the REAL module: the notify reminder\'s held text is the sentence (the control\'s baseline)', realBare.stash);
   const preBare = bare(PRE);
-  ok(preBare.out.cleared.length === 1 && has(preBare.stash[0].text) && preBare.stash[0].jobName === CT, 'NEGATIVE CONTROL: with the announced-only rewrite the held notification keeps the marker (the name went, the words stayed) — the stash leg above would go red', preBare.stash);
+  ok(preBare.out.cleared.length === 1 && gateOf(has(preBare.stash[0].text)) && preBare.stash[0].jobName === CT, 'NEGATIVE CONTROL: with the announced-only rewrite the held notification keeps the marker (the name went, the words stayed) — the stash leg above would go red', preBare.stash);
 }
 
 // ── §4b verify r3 (the reader-census round): six derived copies the walk found still holding words ──
@@ -641,7 +641,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
   jm.jobs.set(ASK, jobRec(ASK, { name: 'asker', state: 'awaiting-user', interaction: { pending: { panel: { title: `About ${MARK}`, blocks: [{ type: 'markdown', text: `the ${MARK} thread asks: which quarter?` }, { type: 'buttons', options: ['ok'] }] }, version: 1, postedAt: JT, timeoutS: 1800 }, answers: [] } }));
   jm._forYou(jm.jobs.get(ASK), jobModel.forYouCopy(jm.jobs.get(ASK), 'ask'));   // the engine's ONE door (r6)
   const askItem = [...userTodos.snapshot().open].find((i) => i.jobId === ASK);
-  ok(!!askItem && has(J(jm.jobs.get(ASK).interaction.pending)), 'setup: a job parked awaiting-user on a panel that carries the marker, and its open For-you ask');
+  ok(!!askItem && verdictOf(has(J(jm.jobs.get(ASK).interaction.pending))), 'setup: a job parked awaiting-user on a panel that carries the marker, and its open For-you ask');
   const ra = await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'job', id: ASK } });
   const askJob = jm.jobs.get(ASK), askAfter = userTodos.get(askItem.id);
   ok(ra.status === 200 && askJob.interaction.pending === null && askJob.state === 'up' && !has(J(askJob)), 'the clear withdraws the ASK: `interaction.pending` gone, the job back to `up` (it may ask again), no marker anywhere in the record', { pending: askJob.interaction.pending, state: askJob.state });
@@ -652,7 +652,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     const PRE = MUT.load(RCM_REL, RCM_SRC.replace(NEW_SHAPE, "['interaction.answers', 'empty']]"), 'panel-kept');
     const rec = jobRec('jb-0000ee02', { name: 'asker2', state: 'awaiting-user', interaction: { pending: { panel: { title: `About ${MARK}`, blocks: [] }, version: 1 }, answers: [] } });
     const r = PRE.applyClear(rec, { kind: 'job', by: 'owner', at: Date.now() });
-    ok(r.changed && has(J(rec.interaction.pending)), 'NEGATIVE CONTROL: the pre-r3 shape clears the name and keeps the panel\'s words — the leg above would go red', rec.interaction.pending);
+    ok(gateOf(r.changed) && verdictOf(has(J(rec.interaction.pending))), 'NEGATIVE CONTROL: the pre-r3 shape clears the name and keeps the panel\'s words — the leg above would go red', rec.interaction.pending);
   }
   // (b) a run the clear COVERED that ends after it: its finalize must not re-stamp the withheld log's last line
   const FIN = 'jb-0000ee03';
@@ -670,13 +670,13 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     return { out, run: job.runs[0], snap: jmx.snapshot(job, { tail: 5 }) };
   };
   const finReal = drive(require(path.join(ROOT, JB_REL)));
-  ok(finReal.out.cleared.length === 1 && finReal.run.endedAt && finReal.run.lastLine === null && finReal.snap.logWithheld === true && !has(finReal.snap), 'a run started before the clear and ended after it (a forced stop: the process\'s own last line) keeps NO last line — the withheld log stays withheld in every snapshot', { run: finReal.run, snap: finReal.snap.run });
+  ok(finReal.out.cleared.length === 1 && gateOf(finReal.run.endedAt) && finReal.run.lastLine === null && finReal.snap.logWithheld === true && !has(finReal.snap), 'a run started before the clear and ended after it (a forced stop: the process\'s own last line) keeps NO last line — the withheld log stays withheld in every snapshot', { run: finReal.run, snap: finReal.snap.run });
   {
     const NEW_FIN = "run.lastLine = job.clearedAt && !((run.startedAt || 0) > job.clearedAt) ? null : this._lastLogLine(job, run);";
     ok(JB_SRC.split(NEW_FIN).length === 2, 'the finalize rule is present once (the control swaps exactly it)');
     const PRE = MUT.load(JB_REL, JB_SRC.replace(NEW_FIN, 'run.lastLine = this._lastLogLine(job, run);'), 'finalize-restamps');
     const pre = drive(PRE);
-    ok(pre.out.cleared.length === 1 && has(pre.run.lastLine) && has(pre.snap), 'NEGATIVE CONTROL: the pre-r3 finalize re-publishes the withheld log\'s last line into the snapshot — the leg above would go red', pre.run.lastLine);
+    ok(pre.out.cleared.length === 1 && gateOf(has(pre.run.lastLine)) && verdictOf(has(pre.snap)), 'NEGATIVE CONTROL: the pre-r3 finalize re-publishes the withheld log\'s last line into the snapshot — the leg above would go red', pre.run.lastLine);
   }
   // (c) THE SPILL: a multi-line notification (an announce with newlines) — written on ONE line now; a legacy file's
   // continuation lines go with the entry they belong to
@@ -685,10 +685,10 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
   fs.writeFileSync(legacy, `\n## drained 2026-09-28T00:00:00.000Z\n- 2026-09-28T00:00:00.000Z ${SP} digest: announced: first line\nsecond line quotes ${MARK}\nthird line too ${MARK}\n- 2026-09-28T00:00:01.000Z ${FOREIGN} someone else's job: done\n`);
   jm._rewriteSpills(new Set([SP]));
   const legacyAfter = fs.readFileSync(legacy, 'utf8');
-  ok(!has(legacyAfter) && legacyAfter.includes(`${SP} ${CT}`) && legacyAfter.includes(`${FOREIGN} someone else's job: done`), 'a legacy spill entry whose text ran over several lines loses every line of it; the next entry is untouched', legacyAfter);
+  ok(!has(legacyAfter) && gateOf(legacyAfter.includes(`${SP} ${CT}`)) && verdictOf(legacyAfter.includes(`${FOREIGN} someone else's job: done`)), 'a legacy spill entry whose text ran over several lines loses every line of it; the next entry is untouched', legacyAfter);
   const spilled = jm.spillNotifs('one-line-cid', [{ ts: JT, jobId: SP, jobName: 'digest', text: `announced: line one\nline two ${MARK}\nline three` }]);
   const spillLines = fs.readFileSync(spilled, 'utf8').split('\n').filter((l) => l.includes(SP));
-  ok(spillLines.length === 1 && spillLines[0].includes('⏎') && has(spillLines[0]), 'the spill writes a multi-line notification on ONE line (⏎ marks the breaks), so a later clear\'s line rewrite takes all of it');
+  ok(spillLines.length === 1 && gateOf(spillLines[0].includes('⏎')) && verdictOf(has(spillLines[0])), 'the spill writes a multi-line notification on ONE line (⏎ marks the breaks), so a later clear\'s line rewrite takes all of it');
   jm._rewriteSpills(new Set([SP]));
   ok(!has(fs.readFileSync(spilled, 'utf8')), '…and that clear does take it');
   {
@@ -698,7 +698,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     fs.writeFileSync(legacy, `- 2026-09-28T00:00:00.000Z ${SP} digest: announced: first line\nsecond line quotes ${MARK}\n`);
     const jmx = bareJm(PRE);
     jmx._rewriteSpills(new Set([SP]));
-    ok(has(fs.readFileSync(legacy, 'utf8')), 'NEGATIVE CONTROL: the pre-r3 line rewrite keeps the continuation line\'s words — the leg above would go red');
+    ok(verdictOf(has(fs.readFileSync(legacy, 'utf8'))), 'NEGATIVE CONTROL: the pre-r3 line rewrite keeps the continuation line\'s words — the leg above would go red');
   }
   // (d) A SECOND CLEAR of a job whose record was already cleared (it announced afterwards: the words live in the
   // ring / the stash / the spill, never in the record) still takes those words
@@ -720,7 +720,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     ok(JB_SRC.split(NEW_EARLY).length === 2, 'the early return is present once (the control swaps exactly it)');
     const PRE = MUT.load(JB_REL, JB_SRC.replace(NEW_EARLY, 'if (!out.cleared.length) return out;'), 'second-clear-skips-copies');
     const pre2 = drive2(PRE);
-    ok(pre2.out.already.length === 1 && has(pre2.ring) && has(pre2.stash), 'NEGATIVE CONTROL: the pre-r3 door returns before the derived copies on `already` — the ring and the stash keep the words', { ring: pre2.ring });
+    ok(pre2.out.already.length === 1 && gateOf(has(pre2.ring)) && verdictOf(has(pre2.stash)), 'NEGATIVE CONTROL: the pre-r3 door returns before the derived copies on `already` — the ring and the stash keep the words', { ring: pre2.ring });
   }
   // (e) a delivery IN FLIGHT when the owner cleared the job stashes afterwards with the words it captured
   {
@@ -738,7 +738,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     ok(JB_SRC.split(NEW_STALE).length === 2, 'the stale rule is present once (the control swaps exactly it)');
     const PRE = MUT.load(JB_REL, JB_SRC.replace(NEW_STALE, 'const stale = false;'), 'in-flight-stash-raw');
     const pre = drive3(PRE);
-    ok(has(pre[0].text), 'NEGATIVE CONTROL: without the rule the in-flight delivery stashes the pre-clear words', pre[0]);
+    ok(verdictOf(has(pre[0].text)), 'NEGATIVE CONTROL: without the rule the in-flight delivery stashes the pre-clear words', pre[0]);
   }
   // (f) THE LADDER'S OWN STASH (data/msg-stash.json): a codex owner conversation's wrapper hands a notification / a
   // group wake it could not queue back to the ladder WHOLE; a clear of the job / the message reaches that file
@@ -765,7 +765,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     const PRE = MUT.load(JB_REL, JB_SRC.replace(NEW_LADDER, 'try { if (false) this.d.redactStash('), 'ladder-stash-kept');
     ladder.stashFor('codex-owner', { source: 'agent', kind: 'notification', fromName: `Background Work · ledger ${MARK}`, text: `announced: ${MARK} again` });
     drive4(PRE);
-    ok(has(ladder.drainStash('codex-owner')), 'NEGATIVE CONTROL: without the rewrite the ladder\'s stash keeps the job\'s words');
+    ok(verdictOf(has(ladder.drainStash('codex-owner'))), 'NEGATIVE CONTROL: without the rewrite the ladder\'s stash keeps the job\'s words');
     // …and a GROUP WAKE handed back: every line of the held report that repeats a cleared record's words
     const gStore2 = createChannelStore({ dir: path.join(DATA, 'channels2') });
     let gt2 = Date.now() - 300e3;
@@ -775,11 +775,11 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     const p1 = await g2.post({ group: made.group.id, from: ME_CID, text: `the ${MARK} sheet:   totals   attached` });
     await g2.post({ group: made.group.id, from: ME_CID, text: 'and a plain line' });
     const report = G.reportFor(gStore2.groups.live().groups[made.group.id], gStore2.readTail('groups', made.group.id, { limit: 50 }), OTHER_CID, { budget: 4096, lead: 'You were @mentioned' });
-    ok(report && has(report.text) && report.text.includes('and a plain line'), 'setup: a wake report (the text a codex wrapper would hand back) carries the marker');
+    ok(gateOf(report) && gateOf(has(report.text)) && verdictOf(report.text.includes('and a plain line')), 'setup: a wake report (the text a codex wrapper would hand back) carries the marker');
     ladder.stashFor(OTHER_CID, { source: 'agent', kind: 'peer', fromName: `me · wake`, text: report.text });
     const rc = await g2.clearMessages({ group: made.group.id, ids: [p1.message.vendorId], by: G.OWNER });
     const held = ladder.drainStash(OTHER_CID);
-    ok(rc.ok && rc.cleared.length === 1 && held.length === 1 && !has(held[0].text) && held[0].text.includes(CT) && held[0].text.includes('and a plain line') && held[0].text.includes(`(${made.group.id})`), 'the held report: the cleared record\'s line reads the sentence, the other record\'s line and the head stay', held[0] && held[0].text);
+    ok(gateOf(rc.ok) && rc.cleared.length === 1 && held.length === 1 && !has(held[0].text) && gateOf(held[0].text.includes(CT)) && gateOf(held[0].text.includes('and a plain line')) && verdictOf(held[0].text.includes(`(${made.group.id})`)), 'the held report: the cleared record\'s line reads the sentence, the other record\'s line and the head stay', held[0] && held[0].text);
     const GE_REL = 'src/server/groups-engine.js', GE_SRC = fs.readFileSync(path.join(ROOT, GE_REL), 'utf8');
     const NEW_GL = "try { if (deliver && typeof deliver.redactStash === 'function') deliver.redactStash(";
     ok(GE_SRC.split(NEW_GL).length === 2, 'the groups door\'s ladder rewrite is present once (the control removes exactly it)');
@@ -791,9 +791,9 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     const p3 = await g3.post({ group: made.group.id, from: ME_CID, text: `still ${MARK} here` });
     const report3 = G.reportFor(gStore2.groups.live().groups[made.group.id], gStore2.readTail('groups', made.group.id, { limit: 50 }), OTHER_CID, { budget: 4096, lead: 'You were @mentioned' });
     ladder.stashFor(OTHER_CID, { source: 'agent', kind: 'peer', fromName: `me · wake`, text: report3.text });
-    ok(has(ladder.stashEntries(OTHER_CID)), 'setup: a report stashed while its record is whole carries the words');
+    ok(verdictOf(has(ladder.stashEntries(OTHER_CID))), 'setup: a report stashed while its record is whole carries the words');
     await g3.clearMessages({ group: made.group.id, ids: [p3.message.vendorId], by: G.OWNER });
-    ok(has(ladder.drainStash(OTHER_CID)), 'NEGATIVE CONTROL: without the rewrite a held report keeps the cleared record\'s words');
+    ok(verdictOf(has(ladder.drainStash(OTHER_CID))), 'NEGATIVE CONTROL: without the rewrite a held report keeps the cleared record\'s words');
     gStore2.close();
   }
   // (f3) THE STASH HAND-OVER'S MEMORY (the lane-redact merge onto 2.369.196; data/stash-handover.json): a delivered
@@ -841,7 +841,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     };
     const r = drive('real');
     ok(r.out.cleared.length === 1 && !has(r.disk), 'a job clear reaches the hand-over memory on disk: no record, original or frame there still carries the cleared job\'s words', r.disk.slice(0, 400));
-    ok(!('text' in r.mem['ho-aaaa-0001']) && /^[0-9a-f]{64}$/.test(r.mem['ho-aaaa-0001'].textSha) && r.mem['ho-aaaa-0001'].jobs[0].text === CT && r.mem['ho-aaaa-0001'].jobs[0].jobName === CT && r.mem['ho-aaaa-0001'].jobs[1].text === 'announced: other totals',
+    ok(!('text' in r.mem['ho-aaaa-0001']) && gateOf(/^[0-9a-f]{64}$/.test(r.mem['ho-aaaa-0001'].textSha)) && r.mem['ho-aaaa-0001'].jobs[0].text === CT && r.mem['ho-aaaa-0001'].jobs[0].jobName === CT && r.mem['ho-aaaa-0001'].jobs[1].text === 'announced: other totals',
       'the live record: its cleared job\'s original reads the sentence, another job\'s original keeps its words, the frame is kept as its DIGEST only', r.mem['ho-aaaa-0001']);
     ok(!('text' in r.mem['ho-aaaa-0002']) && typeof r.mem['ho-aaaa-0002'].textSha === 'string' && typeof r.mem['ho-aaaa-0003'].text === 'string' && r.mem['ho-aaaa-0003'].text === r.frames.other,
       'a SPENT record (originals already restored) is judged by its frame: it names the cleared job, so only its digest stays; an untouched record keeps its exact frame (master\'s rule)');
@@ -852,13 +852,13 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     ok(CD_SRC.split(NEW_PASS).length === 2, 'the ladder asks its registered holders once (the control removes exactly it)');
     const PRE_CD = MUT.load(CD_REL, CD_SRC.replace(NEW_PASS, "for (const fn of []) { try { fn(match, scope || {}); }"), 'handover-memory-unasked');
     const c1 = drive('ctl-unasked', { cdMod: PRE_CD });
-    ok(has(c1.disk) && c1.restored.some((x) => has(x.text)), 'NEGATIVE CONTROL: without the holders\' pass the hand-over memory keeps the cleared job\'s words on disk and a returned frame restores them', c1.disk.slice(0, 200));
+    ok(gateOf(has(c1.disk)) && verdictOf(c1.restored.some((x) => has(x.text))), 'NEGATIVE CONTROL: without the holders\' pass the hand-over memory keeps the cleared job\'s words on disk and a returned frame restores them', c1.disk.slice(0, 200));
     // CONTROL ②: the jobs door without its ids — a ladder match never sees a jobs-store original
     const NEW_SCOPE = ", { jobIds: [...gone] }); } catch (e) { this.d.log('[jobs] ladder stash rewrite failed:'";
     ok(JB_SRC3.split(NEW_SCOPE).length === 2, 'the jobs door names its ids to the ladder once (the control removes exactly it)');
     const PRE_JB = MUT.load(JB_REL3, JB_SRC3.replace(NEW_SCOPE, "); } catch (e) { this.d.log('[jobs] ladder stash rewrite failed:'"), 'handover-no-job-ids');
     const c2 = drive('ctl-no-ids', { jbMod: PRE_JB });
-    ok(has(c2.disk), 'NEGATIVE CONTROL: without the job ids the memory\'s jobs originals keep the words', c2.disk.slice(0, 200));
+    ok(verdictOf(has(c2.disk)), 'NEGATIVE CONTROL: without the job ids the memory\'s jobs originals keep the words', c2.disk.slice(0, 200));
     // (f3b) A CLEAR RACING A HAND-OVER IN FLIGHT (verify r3 of lane-redact, reproduced): the owner clears while the post
     // is on its way — both doors rewrite the claimed entries in their stores, `redactDelivered` finds no record yet, and
     // the record written after the delivery carried the PRE-CLEAR frame (the words, on disk, for 24 h). Now an entry that
@@ -897,10 +897,10 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       return { out, r, disk, rec, said, sent, k, back: ladder.stashEntries(ME_CID), jobsBack: jmx.pendingNotifs.get(ME_CID) || [] };
     };
     const rr = await race('real');
-    ok(rr.out.cleared.length === 1 && rr.r.ok && rr.r.delivered === 2 && has(rr.sent), 'setup: the clear landed while the hand-over awaited its post (the frame on its way carried the words); the post then delivered both entries', { out: rr.out, r: rr.r });
-    ok(!has(rr.disk) && !('text' in rr.rec) && /^[0-9a-f]{64}$/.test(rr.rec.textSha) && rr.rec.msg[0].text === CT && rr.rec.jobs[0].text === CT,
+    ok(rr.out.cleared.length === 1 && gateOf(rr.r.ok) && rr.r.delivered === 2 && verdictOf(has(rr.sent)), 'setup: the clear landed while the hand-over awaited its post (the frame on its way carried the words); the post then delivered both entries', { out: rr.out, r: rr.r });
+    ok(!has(rr.disk) && !('text' in rr.rec) && gateOf(/^[0-9a-f]{64}$/.test(rr.rec.textSha)) && rr.rec.msg[0].text === CT && rr.rec.jobs[0].text === CT,
       'the record written after the delivery holds NO word: the frame is its digest only, the originals read the sentence', { rec: rr.rec, words: rr.disk.slice(0, 200) });
-    ok(rr.said.some((l) => /on its way when a clear reached its entries/.test(l)), 'the log says the hand-over was cleared mid-flight and why the frame is a digest', rr.said);
+    ok(verdictOf(rr.said.some((l) => /on its way when a clear reached its entries/.test(l))), 'the log says the hand-over was cleared mid-flight and why the frame is a digest', rr.said);
     ok(rr.k === 2 && rr.back.length === 1 && rr.back[0].text === CT && rr.jobsBack.length === 1 && rr.jobsBack[0].text === CT && !has(rr.back) && !has(rr.jobsBack),
       'the wrapper handing that frame back is still recognised by the digest and restores both originals AS THE SENTENCE', { k: rr.k, back: rr.back, jobsBack: rr.jobsBack });
     {
@@ -908,7 +908,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       ok(SH_SRC.split(NEW_RACE).length === 2, 'the mid-flight judge is present once (the control swaps exactly it)');
       const PRE_SH = MUT.load(SH_REL, SH_SRC.replace(NEW_RACE, 'if (false) {'), 'handover-race-unjudged');
       const c3 = await race('ctl', { shMod: PRE_SH });
-      ok(c3.out.cleared.length === 1 && has(c3.disk) && typeof c3.rec.text === 'string' && has(c3.rec.text), 'NEGATIVE CONTROL: without the judge the record keeps the pre-clear frame with the words on disk', c3.disk.slice(0, 200));
+      ok(c3.out.cleared.length === 1 && gateOf(has(c3.disk)) && typeof c3.rec.text === 'string' && verdictOf(has(c3.rec.text)), 'NEGATIVE CONTROL: without the judge the record keeps the pre-clear frame with the words on disk', c3.disk.slice(0, 200));
     }
     // (f3c) A SPENT RECORD WHOSE FRAME CARRIED THE LADDER FORM (verify r3 on the merged tree, reproduced): the frame judge
     // looked for ` <jobId> ` — the jobs-store line form (renderNotifStash) — but a job notification a codex wrapper handed
@@ -938,14 +938,14 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
         return { out, frame, disk, rec: JSON.parse(disk)[`ho-spent-${tag}`], echo: view.restoreHandedOver(ME_CID, frame, {}) };
       };
       const sp = spentLadder('real');
-      ok(has(sp.frame) && /\(jb-0000ee14\):/.test(sp.frame) && !/ jb-0000ee14 /.test(sp.frame), 'setup: the spent record\'s frame carries the LADDER form of the job\'s notification — the id in parentheses, never between spaces');
-      ok(sp.out.cleared.length === 1 && !has(sp.disk) && !('text' in sp.rec) && /^[0-9a-f]{64}$/.test(sp.rec.textSha), 'the clear reaches a spent record whose frame carried the ladder form: the frame is its digest only, no word on disk', sp.disk.slice(0, 300));
+      ok(gateOf(has(sp.frame)) && gateOf(/\(jb-0000ee14\):/.test(sp.frame)) && !/ jb-0000ee14 /.test(sp.frame), 'setup: the spent record\'s frame carries the LADDER form of the job\'s notification — the id in parentheses, never between spaces');
+      ok(sp.out.cleared.length === 1 && !has(sp.disk) && !('text' in sp.rec) && verdictOf(/^[0-9a-f]{64}$/.test(sp.rec.textSha)), 'the clear reaches a spent record whose frame carried the ladder form: the frame is its digest only, no word on disk', sp.disk.slice(0, 300));
       ok(sp.echo === 1 || sp.echo === -1, 'the echo of that frame is still recognised by the digest (a spent record answers its restored count)', sp.echo);
       const NEW_NAMES = 'else for (const id of ids) if (namesJob(rec.text, id)) { hit = true; break; }';
       ok(SH_SRC.split(NEW_NAMES).length === 2, 'the whole-token judge is present once (the control swaps exactly it)');
       const PRE_SPENT = MUT.load(SH_REL, SH_SRC.replace(NEW_NAMES, "else for (const id of ids) if (rec.text.includes(' ' + id + ' ')) { hit = true; break; }"), 'handover-spent-space-judge');
       const c4 = spentLadder('ctl', { shMod: PRE_SPENT });
-      ok(c4.out.cleared.length === 1 && has(c4.disk) && typeof c4.rec.text === 'string', 'NEGATIVE CONTROL: the ` <id> ` judge misses the ladder form — the spent record keeps the job\'s name and words on disk', c4.disk.slice(0, 200));
+      ok(c4.out.cleared.length === 1 && gateOf(has(c4.disk)) && typeof c4.rec.text === 'string', 'NEGATIVE CONTROL: the ` <id> ` judge misses the ladder form — the spent record keeps the job\'s name and words on disk', c4.disk.slice(0, 200));
     }
     // (f3d) THE GROUP-MESSAGE PATH OF THE HAND-OVER MEMORY (the forward-port's own open note): a wake a codex wrapper handed
     // back (the report, one line per record) waits in the ladder's stash, the user hands it over (delivered ⇒ the memory
@@ -992,21 +992,21 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
         return { gid: made.group.id, ho, before, rc, rj, disk, k, back, jobsBack };
       };
       const gm = await groupMemory('real');
-      ok(gm.ho.ok && gm.ho.delivered === 2 && has(gm.before), 'setup: the hand-over delivered the wake report and the job notification; the memory held both with their words');
-      ok(gm.rc.ok && gm.rc.cleared.length === 1 && gm.rj.cleared.length === 1 && !has(gm.disk), 'the owner clears the message and the job: no word remains in the memory on disk (the report\'s original line, the job\'s original, both frames)', gm.disk.slice(0, 300));
+      ok(gateOf(gm.ho.ok) && gm.ho.delivered === 2 && verdictOf(has(gm.before)), 'setup: the hand-over delivered the wake report and the job notification; the memory held both with their words');
+      ok(gateOf(gm.rc.ok) && gm.rc.cleared.length === 1 && gm.rj.cleared.length === 1 && !has(gm.disk), 'the owner clears the message and the job: no word remains in the memory on disk (the report\'s original line, the job\'s original, both frames)', gm.disk.slice(0, 300));
       const rep = gm.back.find((e) => e.kind === 'peer');
-      ok(gm.k === 2 && !!rep && !has(rep.text) && rep.text.includes(`- ${CT}`) && rep.text.includes('and a plain line') && rep.text.includes(`(${gm.gid})`),
+      ok(gm.k === 2 && !!rep && !has(rep.text) && gateOf(rep.text.includes(`- ${CT}`)) && gateOf(rep.text.includes('and a plain line')) && verdictOf(rep.text.includes(`(${gm.gid})`)),
         'the frame handed back restores the report AS THE SENTENCE on the cleared record\'s line — the head and the other record\'s line kept', rep && rep.text);
       ok(gm.jobsBack.length === 1 && gm.jobsBack[0].text === CT && gm.jobsBack[0].jobName === CT, '…and the job notification as the sentence (name and text)', gm.jobsBack);
       // (f3e) the preview rule over every entry the doors touched: no first line carries a word; a job row's label is the sentence
       const previews = [...gm.back.map((e) => ({ kind: 'msg', head: previewHead(e.text), label: e.fromName })), ...gm.jobsBack.map((n) => ({ kind: 'job', head: previewHead(n.text), label: n.jobName }))];
-      ok(previews.length === 2 && previews.every((p) => !has(p.head) && !has(p.label)) && previews.find((p) => p.kind === 'job').label === CT && previews.find((p) => p.kind === 'job').head === CT && /^You were @mentioned/.test(previews.find((p) => p.kind === 'msg').head),
+      ok(previews.length === 2 && gateOf(previews.every((p) => !has(p.head) && !has(p.label))) && previews.find((p) => p.kind === 'job').label === CT && previews.find((p) => p.kind === 'job').head === CT && verdictOf(/^You were @mentioned/.test(previews.find((p) => p.kind === 'msg').head)),
         'lane-stash-detail\'s preview rule over the restored entries: a job row reads the sentence (label + head), the report row\'s head is its lead line — no preview carries a word', previews);
       const NEW_GL2 = "try { if (deliver && typeof deliver.redactStash === 'function') deliver.redactStash(";
       ok(GE_SRC.split(NEW_GL2).length === 2, 'the groups door\'s ladder rewrite is present once (the control removes exactly it)');
       const PRE_G2 = MUT.load(GE_REL, GE_SRC.replace(NEW_GL2, "try { if (false) deliver.redactStash("), 'group-memory-unreached');
       const c5 = await groupMemory('ctl', { geMod: PRE_G2 });
-      ok(c5.rc.cleared.length === 1 && has(c5.disk), 'NEGATIVE CONTROL: without the groups door\'s ladder rewrite the memory keeps the report\'s words on disk', c5.disk.slice(0, 200));
+      ok(c5.rc.cleared.length === 1 && verdictOf(has(c5.disk)), 'NEGATIVE CONTROL: without the groups door\'s ladder rewrite the memory keeps the report\'s words on disk', c5.disk.slice(0, 200));
       // …and the returned frame restores them only when the SECOND wall is down too (verify r4: a restore is a write, judged
       // by the groups engine's held-entry judge against the group's `cleared` index — stripped from this control's copy)
       const NEW_GJ2 = "if (deliver && typeof deliver.registerStashJudge === 'function') deliver.registerStashJudge(judgeHeldEntry);";
@@ -1014,7 +1014,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       const PRE_G3 = MUT.load(GE_REL, GE_SRC.replace(NEW_GL2, "try { if (false) deliver.redactStash(").replace(NEW_GJ2, 'if (false) deliver.registerStashJudge(judgeHeldEntry);'), 'group-memory-unreached-unjudged');
       const c6 = await groupMemory('ctl2', { geMod: PRE_G3 });
       const repC = c6.back.find((e) => e.kind === 'peer');
-      ok(c6.rc.cleared.length === 1 && has(c6.disk) && !!repC && has(repC.text), 'NEGATIVE CONTROL: without the door\'s rewrite AND the judge, the returned frame restores the report\'s words', repC && repC.text.slice(0, 200));
+      ok(c6.rc.cleared.length === 1 && gateOf(has(c6.disk)) && !!repC && verdictOf(has(repC.text)), 'NEGATIVE CONTROL: without the door\'s rewrite AND the judge, the returned frame restores the report\'s words', repC && repC.text.slice(0, 200));
       const c5rep = c5.back.find((e) => e.kind === 'peer');
       ok(!!c5rep && !has(c5rep.text), 'the judge alone (the door\'s rewrite off) still restores the returned frame as the sentence — the two walls are independent', c5rep && c5rep.text.slice(0, 200));
     }
@@ -1076,11 +1076,11 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       return r;
     };
     const hb = await handBack('real');
-    ok(hb.out.cleared.length === 1 && hb.rc.cleared.length === 1 && hb.queued === 0 && has(hb.jobFrame) && has(hb.wakeFrame), 'setup: both delivered (queued in the wrapper) with the words, both cleared while the ladder\'s queue was EMPTY');
+    ok(hb.out.cleared.length === 1 && hb.rc.cleared.length === 1 && hb.queued === 0 && gateOf(has(hb.jobFrame)) && verdictOf(has(hb.wakeFrame)), 'setup: both delivered (queued in the wrapper) with the words, both cleared while the ladder\'s queue was EMPTY');
     ok(hb.k1 === 0 && hb.k2 === 0 && hb.mine.length === 2 && hb.mine[0].text === CT && hb.mine[0].fromName === 'Background Work · ' + CT,
       'the job notification handed back after the clear is held AS THE SENTENCE (text and label) — it named a cleared job and did not read the sentence', hb.mine[0]);
-    ok(hb.mine[1].text.includes('announced: fresh output') && hb.mine[1].text.includes(CT), 'a notification rendered AFTER the clear (its name the sentence, new output) is held as itself', hb.mine[1] && hb.mine[1].text);
-    ok(hb.theirs.length === 1 && !has(hb.theirs[0].text) && hb.theirs[0].text.includes(`- ${CT}`) && hb.theirs[0].text.includes('and a plain line') && hb.theirs[0].text.includes(`(${hb.gid})`),
+    ok(gateOf(hb.mine[1].text.includes('announced: fresh output')) && verdictOf(hb.mine[1].text.includes(CT)), 'a notification rendered AFTER the clear (its name the sentence, new output) is held as itself', hb.mine[1] && hb.mine[1].text);
+    ok(hb.theirs.length === 1 && !has(hb.theirs[0].text) && gateOf(hb.theirs[0].text.includes(`- ${CT}`)) && gateOf(hb.theirs[0].text.includes('and a plain line')) && verdictOf(hb.theirs[0].text.includes(`(${hb.gid})`)),
       'the wake report handed back after the clear: the cleared record\'s line reads the sentence, the other line and the head stay', hb.theirs[0] && hb.theirs[0].text);
     ok(!has(hb.disk), 'no word reached data/msg-stash.json', hb.disk.slice(0, 300));
     const hb2 = await handBack('restart', { restart: true });
@@ -1089,17 +1089,17 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     const NEW_JUDGE = 'if (judgeEntry(entry)) log(';
     ok(CD_SRC.split(NEW_JUDGE).length === 2, 'the ladder judges an entry at its write once (the control removes exactly it)');
     const c1 = await handBack('ctl-unjudged', { cdMod: MUT.load(CD_REL, CD_SRC.replace(NEW_JUDGE, 'if (false) log('), 'handback-unjudged') });
-    ok(has(c1.mine[0]) && has(c1.theirs[0].text) && has(c1.disk), 'NEGATIVE CONTROL: without the judge at the write, both hand-backs put the cleared words back in the queue and on disk', c1.disk.slice(0, 200));
+    ok(gateOf(has(c1.mine[0])) && gateOf(has(c1.theirs[0].text)) && verdictOf(has(c1.disk)), 'NEGATIVE CONTROL: without the judge at the write, both hand-backs put the cleared words back in the queue and on disk', c1.disk.slice(0, 200));
     // CONTROL ②: the jobs judge blind to `clearedAt` — the job frame comes back with its words, the wake is still judged
     const NEW_JJ = 'if (j && j.clearedAt && (!reads || j.reclearedAt)) { cleared = true; break; }';
     ok(JB_SRC.split(NEW_JJ).length === 2, 'the jobs judge reads clearedAt once (the control blinds exactly it)');
     const c2 = await handBack('ctl-jobs-blind', { jbMod: MUT.load(JB_REL, JB_SRC.replace(NEW_JJ, 'if (false) { cleared = true; break; }'), 'handback-jobs-blind') });
-    ok(has(c2.mine[0].text) && !has(c2.theirs[0].text), 'NEGATIVE CONTROL: a jobs judge blind to the clear keeps the job\'s words; the groups judge still takes the wake\'s', c2.mine[0].text.slice(0, 120));
+    ok(gateOf(has(c2.mine[0].text)) && !has(c2.theirs[0].text), 'NEGATIVE CONTROL: a jobs judge blind to the clear keeps the job\'s words; the groups judge still takes the wake\'s', c2.mine[0].text.slice(0, 120));
     // CONTROL ③: the groups engine that never registers its judge — the wake comes back with its words
     const NEW_GJ = "if (deliver && typeof deliver.registerStashJudge === 'function') deliver.registerStashJudge(judgeHeldEntry);";
     ok(GE_SRC.split(NEW_GJ).length === 2, 'the groups engine registers its judge once (the control removes exactly it)');
     const c3 = await handBack('ctl-groups-unreg', { geMod: MUT.load(GE_REL, GE_SRC.replace(NEW_GJ, 'if (false) deliver.registerStashJudge(judgeHeldEntry);'), 'handback-groups-unregistered') });
-    ok(has(c3.theirs[0].text) && !has(c3.mine[0].text), 'NEGATIVE CONTROL: a groups engine without its judge lets the wake\'s words back; the jobs judge still takes the notification\'s', c3.theirs[0].text.slice(0, 120));
+    ok(gateOf(has(c3.theirs[0].text)) && !has(c3.mine[0].text), 'NEGATIVE CONTROL: a groups engine without its judge lets the wake\'s words back; the jobs judge still takes the notification\'s', c3.theirs[0].text.slice(0, 120));
   }
   // (f4b) A JOB CLEARED TWICE (lane-redact verify r4, reproduced): a recurring job keeps announcing after its first clear —
   // what it says BETWEEN the clears reads the sentence as its name yet carries words the second clear takes. f4's judge kept
@@ -1139,20 +1139,20 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       })();
     };
     const tw = await twice(require(path.join(ROOT, JB_REL)));
-    ok(tw.c1.cleared.length === 2 && tw.c2.already.length === 1 && tw.rec.reclearedAt === JT + 10 && tw.rec.clearedAt === JT && has2(tw.between) && tw.between.includes(CT),
+    ok(tw.c1.cleared.length === 2 && tw.c2.already.length === 1 && tw.rec.reclearedAt === JT + 10 && tw.rec.clearedAt === JT && gateOf(has2(tw.between)) && verdictOf(tw.between.includes(CT)),
       'setup: the cron cleared, a between-the-clears frame (its name the sentence, new words) queued, the cron cleared AGAIN (`already`, reclearedAt stamped, clearedAt the first)', { c2: tw.c2, reclearedAt: tw.rec.reclearedAt });
     ok(tw.q.length === 2 && tw.q[0].text === CT && tw.q[0].fromName === 'Background Work · ' + CT && !has2(tw.disk),
       'the between-the-clears frame handed back after the second clear is held as the sentence — nothing of the second round on disk', tw.q[0]);
-    ok(tw.q[1].text.includes('announced: fresh output'), 'a job cleared ONCE keeps f4\'s rule: its sentence-reading frame (new output) is held as itself', tw.q[1] && tw.q[1].text);
+    ok(verdictOf(tw.q[1].text.includes('announced: fresh output')), 'a job cleared ONCE keeps f4\'s rule: its sentence-reading frame (new output) is held as itself', tw.q[1] && tw.q[1].text);
     ok(tw.held.length === 2 && tw.held[0].text === CT && tw.held[1].text === 'announced: after both clears', 'the in-flight rule compares with the LATEST clear: an event born between the clears is held as the sentence, one born after both keeps its words', tw.held);
     // CONTROLS: the pre-r4 judge (a sentence-reading frame always kept), the door without the stamp (both judges blind)
     const NEW_JJ2 = 'if (j && j.clearedAt && (!reads || j.reclearedAt)) { cleared = true; break; }';
     const NEW_STAMP = 'if (j.clearedAt) { j.reclearedAt = at; liveChanged = true; }';
     ok(JB_SRC.split(NEW_JJ2).length === 2 && JB_SRC.split(NEW_STAMP).length === 2, 'the judge\'s re-clear clause and the stamp are present once (the controls swap exactly them)');
     const k1 = await twice(MUT.load(JB_REL, JB_SRC.replace(NEW_JJ2, 'if (j && j.clearedAt && !reads) { cleared = true; break; }'), 'reclear-judge-keeps-sentence-frames'));
-    ok(has2(k1.q[0].text) && has2(k1.disk) && k1.held[0].text === CT, 'NEGATIVE CONTROL: a judge that keeps every sentence-reading frame puts the second round back in the queue and on disk', k1.q[0] && k1.q[0].text.slice(0, 120));
+    ok(gateOf(has2(k1.q[0].text)) && gateOf(has2(k1.disk)) && k1.held[0].text === CT, 'NEGATIVE CONTROL: a judge that keeps every sentence-reading frame puts the second round back in the queue and on disk', k1.q[0] && k1.q[0].text.slice(0, 120));
     const k2 = await twice(MUT.load(JB_REL, JB_SRC.replace(NEW_STAMP, 'if (false) { j.reclearedAt = at; liveChanged = true; }'), 'reclear-unstamped'));
-    ok(has2(k2.q[0].text) && has2(k2.held[0].text), 'NEGATIVE CONTROL: without the stamp both late copies of the second round come back whole (the judge and the in-flight rule)', { q: k2.q[0] && k2.q[0].text.slice(0, 80), held: k2.held[0] });
+    ok(gateOf(has2(k2.q[0].text)) && verdictOf(has2(k2.held[0].text)), 'NEGATIVE CONTROL: without the stamp both late copies of the second round come back whole (the judge and the in-flight rule)', { q: k2.q[0] && k2.q[0].text.slice(0, 80), held: k2.held[0] });
   }
   // (f2) a PUBLISHED service's port forward is labelled with its name — relabelled through the ports door it came from
   {
@@ -1203,7 +1203,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       return { out, labels: labels.sort(), bName: jmx.jobs.get(b.id).name };
     };
     const rs = driveSame(require(path.join(ROOT, JB_REL)));
-    ok(rs.out.cleared.length === 1 && has(rs.bName) && J(rs.labels) === J([`__local__:8080 service: ${CT}`, `__local__:8282 service: ${CT}`]), 'verify r9: the cleared service\'s forward goes, an ORPHAN forward with its name goes (fail closed) — and a second, NOT cleared service of the SAME name keeps its own forward\'s label (its port is its)', rs.labels);
+    ok(rs.out.cleared.length === 1 && gateOf(has(rs.bName)) && J(rs.labels) === J([`__local__:8080 service: ${CT}`, `__local__:8282 service: ${CT}`]), 'verify r9: the cleared service\'s forward goes, an ORPHAN forward with its name goes (fail closed) — and a second, NOT cleared service of the SAME name keeps its own forward\'s label (its port is its)', rs.labels);
     const NEW_KEEP = 'if (sameNameLive(rec)) continue;';
     ok(JB_SRC.split(NEW_KEEP).length === 2, 'the same-name keep rule is present once (the control drops exactly it)');
     const PREK = MUT.load(JB_REL, JB_SRC.replace(NEW_KEEP, ''), 'forward-label-same-name');
@@ -1231,11 +1231,11 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       return ladder.drainStash('codex-owner').map((e) => e.text);
     };
     const q = driveLadder(require(path.join(ROOT, JB_REL)));
-    ok(q.length === 3 && q[0] === CT && /\(jb-0000ee32\): announced: the other one$/.test(q[1]) && q[2] === CT, 'verify r9: the cleared job\'s held entry goes, an entry naming no job goes (fail closed) — and a NOT cleared job of the SAME name keeps its undelivered notification', q);
+    ok(q.length === 3 && q[0] === CT && gateOf(/\(jb-0000ee32\): announced: the other one$/.test(q[1])) && q[2] === CT, 'verify r9: the cleared job\'s held entry goes, an entry naming no job goes (fail closed) — and a NOT cleared job of the SAME name keeps its undelivered notification', q);
     const NEW_OTHER = ' && !otherJobsOnly(e) ?';
     ok(JB_SRC.split(NEW_OTHER).length === 2, 'the other-jobs keep rule is present once (the control drops exactly it)');
     const PREL = MUT.load(JB_REL, JB_SRC.replace(NEW_OTHER, ' ?'), 'ladder-stash-same-name');
-    ok(driveLadder(PREL).every((t) => t === CT), 'NEGATIVE CONTROL (verify r9): the name-only rule replaces the uncleared same-name job\'s notification with the sentence too');
+    ok(verdictOf(driveLadder(PREL).every((t) => t === CT)), 'NEGATIVE CONTROL (verify r9): the name-only rule replaces the uncleared same-name job\'s notification with the sentence too');
   }
   // (f5) A JOB'S NAME IN A CHANNEL WITHDRAWAL (lane-redact verify r9, the alias pass): a Background Work job (jbt_) may withdraw
   // its owner conversation's draft; with that conversation NOT running the route built the withdrawing principal as
@@ -1257,14 +1257,14 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       return { r, by: seen[0] && seen[0].by };
     };
     const w = await drive(require(path.join(ROOT, 'src/agent-routes.js')));
-    ok(w.r.status === 200 && w.by && w.by.kind === 'agent' && w.by.id === ME_CID && !has(J(w.by)), 'verify r9: a job withdrawing its (not running) owner conversation\'s draft speaks as that conversation — its id, never the job\'s NAME (the engine stores the principal on the outbox proposal: a copy of the job\'s words no clear reaches)', { status: w.r.status, by: w.by && { kind: w.by.kind, id: w.by.id, name: w.by.name } });
+    ok(w.r.status === 200 && gateOf(w.by) && w.by.kind === 'agent' && w.by.id === ME_CID && !has(J(w.by)), 'verify r9: a job withdrawing its (not running) owner conversation\'s draft speaks as that conversation — its id, never the job\'s NAME (the engine stores the principal on the outbox proposal: a copy of the job\'s words no clear reaches)', { status: w.r.status, by: w.by && { kind: w.by.kind, id: w.by.id, name: w.by.name } });
     const AR_REL = 'src/agent-routes.js', AR_SRC = fs.readFileSync(path.join(ROOT, AR_REL), 'utf8');
     // lane lg-group-parents U3c: the principal also carries the caller's lineage (`inheritedGroups`) after its own groups
     const NEW_BY = "{ kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [], inheritedGroups: ";
     ok(AR_SRC.split(NEW_BY).length === 2, 'the job caller\'s principal is built once, nameless (the control swaps exactly it)');
     const PRE = MUT.load(AR_REL, AR_SRC.replace(NEW_BY, "{ kind: 'agent', id: who.cid, name: (who.job && who.job.name) || null, groups: who.myGroups || [], inheritedGroups: "), 'withdraw-names-job');
     const c = await drive(PRE);
-    ok(c.r.status === 200 && c.by && has(String(c.by.name || '')), 'NEGATIVE CONTROL (verify r9): the pre-fix route hands the engine the job\'s name as the withdrawing principal\'s', c.by && c.by.name);
+    ok(c.r.status === 200 && gateOf(c.by) && verdictOf(has(String(c.by.name || ''))), 'NEGATIVE CONTROL (verify r9): the pre-fix route hands the engine the job\'s name as the withdrawing principal\'s', c.by && c.by.name);
     jm.jobs.delete(WD);
   }
   // (g) the job's ask lifecycle closes a CLEARED ask item too (resolveByJob told the ask apart by its words)
@@ -1290,12 +1290,12 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
 console.log('§5 agent-group messages');
 {
   const made = await groups.create({ by: G.OWNER, name: 'finance', members: [ME_CID, OTHER_CID], quiet: true, consent: () => ({ ok: true }) });
-  ok(made.ok, 'setup: a group of two agents + the owner', made);
+  ok(verdictOf(made.ok), 'setup: a group of two agents + the owner', made);
   const gid = made.group.id;
   const m1 = await groups.post({ group: gid, from: ME_CID, text: `pasting ${MARK}: the CFO wrote …` });
   const m2 = await groups.post({ group: gid, from: OTHER_CID, text: 'thanks, noted' });
   const m3 = await groups.post({ group: gid, from: ME_CID, text: `and the attachment of ${MARK}` });
-  ok(m1.ok && m2.ok && m3.ok, 'setup: three messages (two carry the marker; the newest is one of them)');
+  ok(gateOf(m1.ok) && gateOf(m2.ok) && verdictOf(m3.ok), 'setup: three messages (two carry the marker; the newest is one of them)');
   const unreadBefore = groups.list().find((g) => g.id === gid).unread;
   const logPath = gStore.logPath('groups', gid);
   const lines0 = fs.readFileSync(logPath, 'utf8').trim().split('\n').length;
@@ -1305,37 +1305,37 @@ console.log('§5 agent-group messages');
   ok(r.status === 200 && r.body.cleared === 2, 'the owner clears both messages', r.body);
   const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const repl = lines.slice(lines0);
-  ok(repl.length === 2 && repl.every((x) => x.raw.kind === 'cleared' && vids.includes(x.raw.of) && x.raw.by === 'owner' && x.text === '' && /^gx-/.test(x.vendorId)), 'the APPEND-ONLY log gains one REPLACEMENT record per clear ({kind:"cleared", of, by}) — nothing rewritten', repl);
-  ok(lines.slice(0, lines0).some((x) => has(x.text)), 'THE ORIGINAL LINE STAYS ON DISK: a group log is never rolled or trimmed, so no compaction runs — every reader applies the replacement (documented, not hidden)');
+  ok(repl.length === 2 && verdictOf(repl.every((x) => x.raw.kind === 'cleared' && vids.includes(x.raw.of) && x.raw.by === 'owner' && x.text === '' && /^gx-/.test(x.vendorId))), 'the APPEND-ONLY log gains one REPLACEMENT record per clear ({kind:"cleared", of, by}) — nothing rewritten', repl);
+  ok(verdictOf(lines.slice(0, lines0).some((x) => has(x.text))), 'THE ORIGINAL LINE STAYS ON DISK: a group log is never rolled or trimmed, so no compaction runs — every reader applies the replacement (documented, not hidden)');
   const gr = gStore.groups.live().groups[gid];
-  ok(gr.cleared && gr.cleared[m1.message.vendorId] && gr.cleared[m3.message.vendorId] && gr.lastText === CT && gr.lastCleared === true && gr.lastAt === m3.message.at, 'groups.json: the cleared INDEX, lastText = the sentence (the newest was cleared), lastAt unmoved (a clear is not activity)');
+  ok(gateOf(gr.cleared) && gateOf(gr.cleared[m1.message.vendorId]) && gateOf(gr.cleared[m3.message.vendorId]) && gr.lastText === CT && gr.lastCleared === true && gr.lastAt === m3.message.at, 'groups.json: the cleared INDEX, lastText = the sentence (the newest was cleared), lastAt unmoved (a clear is not activity)');
   const read = groups.read({ by: G.OWNER, group: gid, limit: 50 });
-  ok(read.ok && !has(read.records) && read.records.filter((x) => x.clearedAt).length === 2 && !read.records.some((x) => x.raw && x.raw.kind === 'cleared') && J(read.records.map((x) => x.vendorId)) === J(lines.slice(0, lines0).map((x) => x.vendorId)), 'read (the owner\'s window, `vibespace-msg read`): the records cleared in place, the replacements never shown, the order kept');
+  ok(gateOf(read.ok) && !has(read.records) && read.records.filter((x) => x.clearedAt).length === 2 && !read.records.some((x) => x.raw && x.raw.kind === 'cleared') && J(read.records.map((x) => x.vendorId)) === J(lines.slice(0, lines0).map((x) => x.vendorId)), 'read (the owner\'s window, `vibespace-msg read`): the records cleared in place, the replacements never shown, the order kept');
   const page = groups.read({ by: G.OWNER, group: gid, limit: 50, before: m3.message.at });
-  ok(page.ok && !has(page.records) && page.records.find((x) => x.vendorId === m1.message.vendorId).clearedAt, 'a PAGE that does not reach the replacement records still shows the clear (the index)');
+  ok(gateOf(page.ok) && !has(page.records) && verdictOf(page.records.find((x) => x.vendorId === m1.message.vendorId).clearedAt), 'a PAGE that does not reach the replacement records still shows the clear (the index)');
   const via = await AG.call('GET', '/api/agent/msg/read', { headers: asAgent('vsst_other'), query: { group: gid } });
   ok(via.status === 200 ? !has(via.body) : true, 'the agents\' read route carries no marker', via.status);
   ok(groups.list().find((g) => g.id === gid).unread === unreadBefore, 'the owner\'s unread count is unchanged (a replacement record is not a message)');
   const rep = groups.reportsForTurn(OTHER_CID, { budget: 4096 });
-  ok(!has(rep.text) && (rep.text === '' || rep.text.includes(CT)), 'the next-turn report to the other member carries no marker', rep.text.slice(0, 300));
+  ok(!has(rep.text) && (rep.text === '' || verdictOf(rep.text.includes(CT))), 'the next-turn report to the other member carries no marker', rep.text.slice(0, 300));
   const bc = gBroadcasts.slice(nB).filter((m) => m.type === 'channel-groups-updated' && Array.isArray(m.cleared));
-  ok(bc.length === 1 && bc[0].cleared.length === 2 && bc[0].cleared.every((c) => c.groupId === gid && c.record.clearedAt && !has(c.record)) && !has(bc[0].groups), 'ONE broadcast carrying the cleared records (a window patches its rows in place) and the group list without the marker', bc.map((m) => m.cleared));
+  ok(bc.length === 1 && bc[0].cleared.length === 2 && gateOf(bc[0].cleared.every((c) => c.groupId === gid && c.record.clearedAt && !has(c.record))) && !has(bc[0].groups), 'ONE broadcast carrying the cleared records (a window patches its rows in place) and the group list without the marker', bc.map((m) => m.cleared));
   const audit = gStore.auditTail({ limit: 20 }).filter((a) => a.kind === 'clear');
   ok(audit.length === 1 && J(audit[0].recordIds.slice().sort()) === J(vids.slice().sort()) && !has(audit[0]), 'the channels audit log gains ONE clear row — ids and who, no words', audit);
   const m4 = await groups.post({ group: gid, from: OTHER_CID, text: `other agent quoting ${MARK}` });
   const own = await recordClear.clear({ kind: 'group-message', groupId: gid, id: m2.message.vendorId }, { caller: { role: 'agent', keys: [OTHER], conversationId: OTHER_CID, by: OTHER } });
   const notOwn = await recordClear.clear({ kind: 'group-message', groupId: gid, id: m4.message.vendorId }, { caller: { role: 'agent', keys: [ME], conversationId: ME_CID, by: ME } });
-  ok(own.ok && own.cleared === 1 && !notOwn.ok && notOwn.code === 'not_yours', 'through the ONE entry point an agent clears its own message and is refused another member\'s', [own, notOwn]);
+  ok(gateOf(own.ok) && own.cleared === 1 && !notOwn.ok && notOwn.code === 'not_yours', 'through the ONE entry point an agent clears its own message and is refused another member\'s', [own, notOwn]);
   ok(!(await recordClear.clear({ kind: 'group-message', groupId: gid, id: 'gm-nope' }, { caller: { role: 'owner' } })).ok, 'an unknown vendorId is not_found');
   const lastRec = await groups.post({ group: gid, from: ME_CID, text: 'a new line' });
-  ok(lastRec.ok && !gStore.groups.live().groups[gid].lastCleared && gStore.groups.live().groups[gid].lastText === 'a new line', 'a new message takes the last line back (lastCleared goes)');
+  ok(gateOf(lastRec.ok) && !gStore.groups.live().groups[gid].lastCleared && gStore.groups.live().groups[gid].lastText === 'a new line', 'a new message takes the last line back (lastCleared goes)');
   // A PAGE OF 50 STAYS 50 under 60 clears (the replacement records never eat a page)
   const big = await groups.create({ by: G.OWNER, name: 'busy', members: [ME_CID, OTHER_CID], quiet: true, consent: () => ({ ok: true }) });
   const bvids = [];
   for (let k = 0; k < 70; k++) { const p = await groups.post({ group: big.group.id, from: ME_CID, text: `m${k} ${MARK}` }); bvids.push(p.message.vendorId); }
   const r60 = await OWNER_APP.call('POST', '/api/records/clear-many', { body: { items: bvids.slice(10).map((v) => ({ kind: 'group-message', groupId: big.group.id, id: v })) } });
   const p50 = groups.read({ by: G.OWNER, group: big.group.id, limit: 50 });
-  ok(r60.body.cleared === 60 && p50.records.length === 50 && p50.records.every((x) => x.clearedAt) && p50.records.every((x) => !x.raw || x.raw.kind !== 'cleared'), 'a batch of 60 in one request (the log read once), and the newest page is still FIFTY records, all cleared — no replacement ate a slot', { cleared: r60.body.cleared, n: p50.records.length });
+  ok(r60.body.cleared === 60 && p50.records.length === 50 && gateOf(p50.records.every((x) => x.clearedAt)) && verdictOf(p50.records.every((x) => !x.raw || x.raw.kind !== 'cleared')), 'a batch of 60 in one request (the log read once), and the newest page is still FIFTY records, all cleared — no replacement ate a slot', { cleared: r60.body.cleared, n: p50.records.length });
 }
 
 // ── §5b A LAYOUT RECORD KEEPS NO RECORD'S WORDS (verify r5, reproduced in chrome by test-record-clear-client) ──
@@ -1378,14 +1378,14 @@ console.log('§5b a layout record keeps no record\'s words (the Job input window
   const real = await drive(PM, 'real');
   ok(!has(real.read), 'the FIRST READ of a file an older build wrote serves no word — GET /api/layouts reads this (the active desktop, another desktop, a named preset)', real.read.slice(0, 300));
   ok(!has(real.relayed), 'the relayed layout-sync frame (what every other client receives and caches per desktop) carries the generic title', real.relayed);
-  ok(!has(real.disk) && real.titles.filter((x) => x === 'Job input').length === 3 && real.titles.includes('census — Log'), 'data/layouts.json on disk: every Job input window keeps the generic title "Job input"; another window\'s title untouched', real.titles);
+  ok(!has(real.disk) && real.titles.filter((x) => x === 'Job input').length === 3 && verdictOf(real.titles.includes('census — Log')), 'data/layouts.json on disk: every Job input window keeps the generic title "Job input"; another window\'s title untouched', real.titles);
   ok(real.historyCount >= 1 && !has(real.history), `a rollback point (${real.historyCount}) — here written from the older file on disk, the choke point's disk belt — holds no word`, real.history.slice(0, 200));
   ok(J(PM.WORDLESS_TITLES) === J({ openJobInteract: 'Job input' }) && PM.wordlessTitles({ a: [{ title: 'x', openSpec: { action: 'constructor' } }] }) === 0 && PM.wordlessTitles(null) === 0, 'WORDLESS_TITLES names the one window whose title carries a record\'s words; a prototype key or a non-tree is never touched');
   // NEGATIVE CONTROL: the choke point as it was before r5 (no strip) — the words go to disk, to the relayed frame and to the first read
   const PRE_SRC = P_SRC.replace('    wordlessTitles(data);\n    try {', '    try {').replace("    if (wordlessTitles(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }\n", '').replace('      wordlessTitles(snap); // a rollback point is a layout record too (the disk belt above may read what an older build wrote)\n', '');
   ok(PRE_SRC !== P_SRC && (PRE_SRC.match(/wordlessTitles\(/g) || []).length === 3, 'the control removes exactly the three calls (the helper stays defined)');
   const pre = await drive(MUT.load(P_REL, PRE_SRC, 'layout-titles-keep-words'), 'pre');
-  ok(has(pre.read) && has(pre.relayed) && has(pre.disk) && has(pre.history), 'NEGATIVE CONTROL: the pre-r5 choke point serves the words on the first read, relays them, writes them to disk and into a rollback point — the legs above would go red', { read: has(pre.read), relayed: has(pre.relayed), disk: has(pre.disk), history: has(pre.history) });
+  ok(gateOf(has(pre.read)) && gateOf(has(pre.relayed)) && gateOf(has(pre.disk)) && verdictOf(has(pre.history)), 'NEGATIVE CONTROL: the pre-r5 choke point serves the words on the first read, relays them, writes them to disk and into a rollback point — the legs above would go red', { read: has(pre.read), relayed: has(pre.relayed), disk: has(pre.disk), history: has(pre.history) });
 }
 
 // ── §6 THE JOURNAL ──
@@ -1393,7 +1393,7 @@ console.log('§6 the journal');
 {
   const lines = journal.filter((l) => l.startsWith('[clear]'));
   const receipts = lines.filter((l) => !/ — FAILED/.test(l));
-  ok(receipts.length >= 8 && receipts.every((l) => / — \d+ cleared by (owner|claude:|codex:)/.test(l)) && lines.some((l) => / — FAILED/.test(l)), `every clear wrote its journal line (${receipts.length}): the kind, the container, the count, who (the owner, or the agent's session key — claude: / codex:) — and the planted archive failure its FAILED line`, lines.filter((l) => !/ — \d+ cleared by (owner|claude:|codex:)/.test(l)));
+  ok(receipts.length >= 8 && gateOf(receipts.every((l) => / — \d+ cleared by (owner|claude:|codex:)/.test(l))) && verdictOf(lines.some((l) => / — FAILED/.test(l))), `every clear wrote its journal line (${receipts.length}): the kind, the container, the count, who (the owner, or the agent's session key — claude: / codex:) — and the planted archive failure its FAILED line`, lines.filter((l) => !/ — \d+ cleared by (owner|claude:|codex:)/.test(l)));
   ok(!lines.some(has) && !journal.some((l) => l.startsWith('[clear]') && l.includes(CT)), 'NO journal line carries a word of what was cleared (ids and counts only)', lines.filter(has));
 }
 
@@ -1406,20 +1406,20 @@ console.log('§7 wiring pins');
   const cut = (l) => { let q = null; for (let i = 0; i < l.length; i++) { const c = l[i]; if (q) { if (c === '\\') i++; else if (c === q) q = null; continue; } if (c === '"' || c === "'" || c === '`') q = c; else if (c === '/' && l[i + 1] === '/') return l.slice(0, i); } return l; };
   const strip = (s) => s.split('\n').map(cut).join('\n');
   const server = strip(read('server.js'));
-  ok(/require\('\.\/src\/server\/record-clear\.js'\)\.create\(\{ tasks, userTodos, sessionStatus, getJobs: jobsWiring\.getJobs, getGroups: \(\) => channelsWiring\.groups, getChannels: \(\) => channelsWiring\.channels \}\)/.test(server) && /registerRecordClearRoutes\(app, \{ recordClear \}\)/.test(server) && /getRecordClear: \(\) => recordClear[, ][^\n]*\}\)/.test(server), 'server.js builds the ONE entry point over the five stores, registers the owner routes and hands it to the agent routes');
+  ok(gateOf(/require\('\.\/src\/server\/record-clear\.js'\)\.create\(\{ tasks, userTodos, sessionStatus, getJobs: jobsWiring\.getJobs, getGroups: \(\) => channelsWiring\.groups, getChannels: \(\) => channelsWiring\.channels \}\)/.test(server)) && gateOf(/registerRecordClearRoutes\(app, \{ recordClear \}\)/.test(server)) && verdictOf(/getRecordClear: \(\) => recordClear[, ][^\n]*\}\)/.test(server)), 'server.js builds the ONE entry point over the five stores, registers the owner routes and hands it to the agent routes');
   const routes = strip(read('src/routes/records-clear.js'));
   ok((routes.match(/if \(isAgentBearer\(req\)\) return fail\(res, RC\.refuse\('agent_forbidden'\)\);/g) || []).length === 2, 'both owner routes refuse an agent token FIRST');
   for (const [f, re] of [
     ['src/task-groups.js', /applyClear\(p, \{ kind: 'activity', by, at \}\)/], ['src/user-todos.js', /applyClear\(item, \{ kind: 'todo', by, at \}\)/],
     ['src/session-status.js', /applyClear\(h, \{ kind: 'status', by, at \}\)/], ['src/jobs.js', /applyClear\(j, \{ kind: 'job', by, at \}\)/],
     ['src/server/groups-engine.js', /RC\.foldClears\(store\.readTail\(A, gid/],
-  ]) ok(re.test(strip(read(f))), `${f}: its door goes through the PURE module`);
+  ]) ok(verdictOf(re.test(strip(read(f)))), `${f}: its door goes through the PURE module`);
   for (const [f, re] of [
     ['src/lib/task-log.js', /clearRecords\(rows\)/], ['src/lib/user-todos-panel.js', /model\.menuFor\(row\.dataset\.id\)/], ['src/lib/inbox-window.js', /model\.menuFor\(id\)/],
     ['src/lib/session-props.js', /kind: 'status', sessionKey: histKey/], ['src/lib/jobs-panel.js', /kind: 'job', id: j\.id/], ['src/lib/channel-window.js', /kind: 'group-message', groupId, id: rec\.vendorId/],
-  ]) ok(re.test(strip(read(f))), `${f}: offers "Clear content…" through the ONE client path`);
+  ]) ok(verdictOf(re.test(strip(read(f)))), `${f}: offers "Clear content…" through the ONE client path`);
   const ui = strip(read('src/lib/record-clear-ui.js'));
-  ok(/createModalShell\(/.test(ui) && !/\bconfirm\(/.test(ui.replace(/confirmClear|confirm-/g, '')) && /textContent = w \?/.test(ui), 'the ONE confirm dialog: createModalShell, no native confirm, the record\'s words as TEXT');
+  ok(gateOf(/createModalShell\(/.test(ui)) && !/\bconfirm\(/.test(ui.replace(/confirmClear|confirm-/g, '')) && verdictOf(/textContent = w \?/.test(ui)), 'the ONE confirm dialog: createModalShell, no native confirm, the record\'s words as TEXT');
 }
 
 // ── lane lg-store-writes, the U4/U5 cure: THE CLEAR WAITS ONCE FOR THE STORES IT TOUCHED, ITS ANSWER RIDES THE STORE'S OWN SETTLE ──
@@ -1447,9 +1447,9 @@ console.log('U4/U5 cure: a clear waits ONCE for its stores; its answer goes out 
   };
   const u = await sceneU({ registerRecordClearRoutes });
   ok(u.waits.length === 1 && u.before === null, 'a clear-many over THREE Task Groups waits ONCE for the store (never one write per group, one after another) — and is not answered while it is owed', { waits: u.waits, before: u.before });
-  ok(u.inRun && u.inRun.ok === true && u.inRun.cleared === 3 && u.inRun.notOnDisk === true, 'its answer goes out INSIDE the store\'s settle (the exit\'s flush answers it before the process leaves) and carries notOnDisk — the page says it', u.inRun);
+  ok(gateOf(u.inRun) && u.inRun.ok === true && u.inRun.cleared === 3 && u.inRun.notOnDisk === true, 'its answer goes out INSIDE the store\'s settle (the exit\'s flush answers it before the process leaves) and carries notOnDisk — the page says it', u.inRun);
   const u1 = await sceneU({ registerRecordClearRoutes }, '/api/records/clear');
-  ok(u1.waits.length === 1 && u1.before === null && u1.inRun && u1.inRun.ok === true && u1.inRun.cleared === 1 && u1.inRun.notOnDisk === true, 'the ONE-record clear (/api/records/clear) rides the same road: not answered while owed, answered inside the settle with notOnDisk (the route dropped it before the cure)', { waits: u1.waits, before: u1.before, inRun: u1.inRun });
+  ok(u1.waits.length === 1 && u1.before === null && gateOf(u1.inRun) && u1.inRun.ok === true && u1.inRun.cleared === 1 && u1.inRun.notOnDisk === true, 'the ONE-record clear (/api/records/clear) rides the same road: not answered while owed, answered inside the settle with notOnDisk (the route dropped it before the cure)', { waits: u1.waits, before: u1.before, inRun: u1.inRun });
   const RSRC = fs.readFileSync(path.join(ROOT, 'src/routes/records-clear.js'), 'utf8');
   const aNew = "      await recordClear.clearMany(Array.isArray(items) ? items.map(itemOf) : items, { caller: OWNER, answer: (r) => { try {\n        if (!r.ok) return void fail(res, r);\n";
   const iEnd = RSRC.indexOf("      } catch { } } });   // the same road as /api/records/clear (the U4/U5 cure)\n");
@@ -1457,15 +1457,15 @@ console.log('U4/U5 cure: a clear waits ONCE for its stores; its answer goes out 
   const resLine = RSRC.slice(RSRC.indexOf(aNew) + aNew.length, iEnd).trim();
   const oldRoad = RSRC.slice(0, RSRC.indexOf(aNew)) + "      const r = await recordClear.clearMany(Array.isArray(items) ? items.map(itemOf) : items, { caller: OWNER });\n      if (!r.ok) return fail(res, r);\n      " + resLine + "\n" + RSRC.slice(iEnd + "      } catch { } } });   // the same road as /api/records/clear (the U4/U5 cure)\n".length);   // stale-pins: kept — the negative control rebuilds the route as it was before the cure (the await road)
   const v = await sceneU(MUT.load('src/routes/records-clear.js', oldRoad, 'clear-await-road'));
-  ok(v.inRun === null && v.later && v.later.notOnDisk === true, 'U4/U5 cure CONTROL: the route on the AWAIT road (a mutant copy) is answered a microtask LATER — not in the settle\'s run: at the hub\'s stop it never answers', { inRun: v.inRun, later: !!v.later });
+  ok(v.inRun === null && gateOf(v.later) && v.later.notOnDisk === true, 'U4/U5 cure CONTROL: the route on the AWAIT road (a mutant copy) is answered a microtask LATER — not in the settle\'s run: at the hub\'s stop it never answers', { inRun: v.inRun, later: !!v.later });
 }
 
 console.log('tree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 2 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 2 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 try { J_W.shutdown(); } catch { }
 try { gStore.close(); } catch { }
 userTodos.stop();
 sessionStatus.flush();
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -87,7 +87,7 @@ const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 const LIVE_SID = '5c3a0000-0000-4000-8000-00000000b2db';
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (overlays the built public/ + the working src/) ──
@@ -200,11 +200,11 @@ try {
   for (let i = 0; i < 80 && !sid; i++) { const f = frames.find((m) => m?.type === 'created'); if (f) sid = f.sessionId; else await sleep(250); }
   check('a live claude chat session is created through the real spawn path (stub CLI behind the real wrapper)', !!sid, frames.slice(-3).map((f) => JSON.stringify(f).slice(0, 200)).join('\n'));
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; app.attachSession(${JSON.stringify(sid)}, 'page-link', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
-  check('the live chat window attaches', await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000));
+  check('the live chat window attaches', verdictOf(await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000)));
   await sleep(600);
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Where is the prototype page?' }));
   const PAGE_LINK = `(${VIEW})._messageList.querySelector('.chat-msg .chat-link[data-href$="/p/${PAGE_ID}"]')`;
-  check('the stub\'s answer rendered live with a page link in it', await waitFor(`!!${PAGE_LINK}`, 20000), await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerHTML.slice(-900) : 'no view'; })()`));
+  check('the stub\'s answer rendered live with a page link in it', verdictOf(await waitFor(`!!${PAGE_LINK}`, 20000)), await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerHTML.slice(-900) : 'no view'; })()`));
   await sleep(500);
   // record what the handlers do: the clipboard, the file probe; window.open is the REAL one (a tab must appear)
   await evalJs(`(() => { window.__copied = []; navigator.clipboard.writeText = (s) => { window.__copied.push(s); return Promise.resolve(); };
@@ -234,7 +234,7 @@ try {
   await sleep(400);
   const f3 = await flashes(PAGE_LINK);
   const p3 = await evalJs('window.__probes.slice()');
-  check(`a new tab opens on ${ORIGIN}/p/${PAGE_ID}`, tabs3.length === tabs0 + 1 && tabs3.some((t) => t.url === `${ORIGIN}/p/${PAGE_ID}`), tabs3.map((t) => t.url));
+  check(`a new tab opens on ${ORIGIN}/p/${PAGE_ID}`, tabs3.length === tabs0 + 1 && verdictOf(tabs3.some((t) => t.url === `${ORIGIN}/p/${PAGE_ID}`)), tabs3.map((t) => t.url));
   check('no "Not found" flash, and the file probe was never asked', !f3.some((x) => /Not found/.test(x)) && p3.length === 0, { f3, p3 });
   for (const t of tabs3) { try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t.id}`); } catch {} }
 
@@ -256,7 +256,7 @@ try {
   const n5 = await evalJs(`(${VIEW})._messageList.querySelectorAll('.vs-control .chat-link .chat-link').length`);
   check(`the pre-fix rule nests links again (${n5} inner spans)`, n5 >= 2, n5);
   const a5 = await aim(CTRL);
-  check('…the pointer lands on the INNER path span', a5?.own === false && /chat-link-path/.test(a5?.hit || ''), a5);
+  check('…the pointer lands on the INNER path span', a5?.own === false && verdictOf(/chat-link-path/.test(a5?.hit || '')), a5);
   await click(a5.x, a5.y);
   await waitFor('window.__copied.length > 0', 3000);
   const c5 = await evalJs('window.__copied.slice()');
@@ -266,7 +266,7 @@ try {
   const sawNotFound = await waitFor(`[...(${CTRL}).querySelectorAll('.chat-link-tooltip')].some((e) => /Not found/.test(e.textContent)) || [...document.querySelectorAll('#global-toasts .global-toast-body')].some((e) => e.textContent.includes('/p/${PAGE_ID}'))`, 4000);
   const tabs5 = (await pageTabs()).length;
   const p5 = await evalJs('window.__probes.slice()');
-  check('…Cmd+click asks the file probe, says "not found" (the 1.2 s flash then, a toast naming /p/<id> now) and opens no tab (the incident)', sawNotFound && p5.some((u) => u.includes(encodeURIComponent(`/p/${PAGE_ID}`))) && tabs5 === tabs5a, { sawNotFound, p5, tabs5, tabs5a });
+  check('…Cmd+click asks the file probe, says "not found" (the 1.2 s flash then, a toast naming /p/<id> now) and opens no tab (the incident)', gateOf(sawNotFound) && gateOf(p5.some((u) => u.includes(encodeURIComponent(`/p/${PAGE_ID}`)))) && tabs5 === tabs5a, { sawNotFound, p5, tabs5, tabs5a });
   console.log('⑥ a path that does not exist is SAID (lane path-link-not-found, userW inc-mv1tlrix-eklc)');
   const OUT = path.join(CWD, 'out');
   fs.mkdirSync(OUT, { recursive: true });
@@ -283,18 +283,18 @@ try {
   const a6 = await aim(MISS_LINK);
   check('the missing path renders as ONE path link under the pointer', a6?.own === true, a6);
   await click(a6.x, a6.y, 4);
-  check('a REAL Cmd+click on it ⇒ a toast naming the full path', await waitFor(`!!${TOAST}`, 5000));
+  check('a REAL Cmd+click on it ⇒ a toast naming the full path', verdictOf(await waitFor(`!!${TOAST}`, 5000)));
   const tSeen = Date.now();
   const t6 = await evalJs(`(() => { const e = ${TOAST}; const acts = [...e.querySelectorAll('.global-toast-action')]; const r = e.getBoundingClientRect(); const a = acts[0].getBoundingClientRect(); const hit = document.elementFromPoint(a.left + a.width / 2, a.top + a.height / 2);
     return { body: e.querySelector('.global-toast-body').textContent, acts: acts.map((x) => x.textContent), cls: e.className, r: [r.left, r.top, r.right, r.bottom].map(Math.round), vw: innerWidth, vh: innerHeight, hitOwn: !!hit && e.contains(hit), flash: document.querySelectorAll('.vs-missing .chat-link-tooltip').length }; })()`);
   check('…in words: "No such file on this machine: <path> — the agent may have written it elsewhere or removed it"', t6.body === `No such file on this machine: ${MISSING} — the agent may have written it elsewhere or removed it`, t6);
   check('…with Copy path · Search by name · Open the nearest folder', JSON.stringify(t6.acts) === JSON.stringify(['Copy path', 'Search by name', 'Open the nearest folder']), t6.acts);
-  check('…on screen and on top (its first action takes the pointer), no 1.2 s flash instead', t6.r[0] >= 0 && t6.r[2] <= t6.vw && t6.r[1] >= 0 && t6.r[3] <= t6.vh && t6.hitOwn && t6.flash === 0, t6);
+  check('…on screen and on top (its first action takes the pointer), no 1.2 s flash instead', t6.r[0] >= 0 && t6.r[2] <= t6.vw && t6.r[1] >= 0 && t6.r[3] <= t6.vh && gateOf(t6.hitOwn) && t6.flash === 0, t6);
   const ops6 = await evalJs('window.__ops.filter((o) => o.n === "link-open")');
   check('…and ONE op-ring row: path · not-found · the basename + the length, never the path', ops6.length === 1 && ops6[0].kind === 'path' && ops6[0].outcome === 'not-found' && ops6[0].base === 'report.md' && ops6[0].len === MISSING.length && !JSON.stringify(ops6).includes('/'), ops6);
   if (process.env.VS_PNG_DIR) fs.writeFileSync(path.join(process.env.VS_PNG_DIR, 'desk.png'), Buffer.from((await cdp('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
   await sleep(Math.max(0, 6200 - (Date.now() - tSeen)));
-  check('…still showing after 6 s', await evalJs(`(() => { const e = ${TOAST}; return !!e && !e.classList.contains('global-toast-out') && getComputedStyle(e).opacity === '1'; })()`));
+  check('…still showing after 6 s', verdictOf(await evalJs(`(() => { const e = ${TOAST}; return !!e && !e.classList.contains('global-toast-out') && getComputedStyle(e).opacity === '1'; })()`)));
   const b1 = await btn('Copy path');
   await click(b1.x, b1.y);
   await waitFor('window.__copied.length > 0', 3000);
@@ -308,14 +308,14 @@ try {
   await click(b3.x, b3.y);
   const feOk = await waitFor(`window.__fe.length > 0 && document.querySelectorAll('.file-explorer').length > ${nFe}`, 8000);
   const fe6 = await evalJs('window.__fe.slice()');
-  check('Open the nearest folder walks up (gone/ is missing too) and opens the explorer at the first folder that exists', feOk && fe6.length === 1 && fe6[0] === OUT, { feOk, fe6, OUT });
+  check('Open the nearest folder walks up (gone/ is missing too) and opens the explorer at the first folder that exists', gateOf(feOk) && fe6.length === 1 && fe6[0] === OUT, { feOk, fe6, OUT });
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await sleep(800);
   await evalJs(`(() => { document.getElementById('global-toasts')?.remove(); const v = ${VIEW}; return v._renderers._openLinkTarget(${MISS_LINK}, null, ${JSON.stringify(MISSING)}).then(() => true); })()`);
   await waitFor(`!!${TOAST}`, 5000);
   const t7 = await evalJs(`(() => { const e = ${TOAST}; const r = e.getBoundingClientRect(); const b = e.querySelector('.global-toast-body').getBoundingClientRect(); const acts = [...e.querySelectorAll('.global-toast-action')].map((x) => x.getBoundingClientRect());
     const x = e.querySelector('.global-toast-x').getBoundingClientRect(); return { r: [r.left, r.right].map(Math.round), bw: Math.round(b.width), vw: innerWidth, actsIn: acts.every((a) => a.left >= 0 && a.right <= innerWidth), below: acts.every((a) => a.top >= b.bottom - 1), xBeside: x.top < b.bottom && x.left >= b.right - 1 }; })()`);
-  check('the phone (390 px): the toast fits, the words keep their width with the ✕ beside them, the actions sit under them', t7.r[0] >= 0 && t7.r[1] <= t7.vw && t7.bw >= 250 && t7.actsIn && t7.below && t7.xBeside, t7);
+  check('the phone (390 px): the toast fits, the words keep their width with the ✕ beside them, the actions sit under them', t7.r[0] >= 0 && t7.r[1] <= t7.vw && t7.bw >= 250 && gateOf(t7.actsIn) && gateOf(t7.below) && verdictOf(t7.xBeside), t7);
   await sleep(400); // past the toast's fade-in
   if (process.env.VS_PNG_DIR) fs.writeFileSync(path.join(process.env.VS_PNG_DIR, 'phone.png'), Buffer.from((await cdp('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
 
@@ -349,7 +349,7 @@ try {
   check('…no file: href anywhere in the chat\'s DOM', d7.fileHrefs === 0, d7);
   check('…the CJK-first relative path in a code span is a .chat-link-rel', JSON.stringify(d7.rel) === JSON.stringify([['标书研究/方案.md', '标书研究/方案.md']]), d7.rel);
   check('…a link whose decoded path carries markup is a path span holding it as TEXT (no <img>, nothing ran); a javascript: link keeps no href',
-    JSON.stringify(d7.ps[3]) === JSON.stringify([XSS_PATH, 'x', T7, 0]) && d7.imgs === 0 && d7.xss === 'undefined' && d7.js === 0 && d7.anchors.includes('<a>y</a>'), d7);
+    JSON.stringify(d7.ps[3]) === JSON.stringify([XSS_PATH, 'x', T7, 0]) && d7.imgs === 0 && d7.xss === 'undefined' && d7.js === 0 && verdictOf(d7.anchors.includes('<a>y</a>')), d7);
   check(`PIN (lane agy-subagent-cards owns conversation://): [x](conversation://id) is a .chat-sub-link SPAN (data-sub, <code> inner), not an <a>; this id names no card in this page ⇒ chat-sub-unknown + the «unknown subagent» chip`, d7.subLinks.length === 1 && d7.subLinks[0][0] === 'SPAN' && d7.subLinks[0][1] === UUID && d7.subLinks[0][2] === true && d7.subLinks[0][3] === UUID && d7.subLinks[0][4] === true && !d7.anchors.some((a) => a.includes(UUID)), { subLinks: d7.subLinks, anchors: d7.anchors });
   const SKILL_LINK = `(${VIEW})._messageList.querySelector('.vs-agy .chat-link-path[data-path=' + JSON.stringify(${JSON.stringify(SKILL)}) + ']')`;
   const a7 = await aim(SKILL_LINK);
@@ -361,7 +361,7 @@ try {
   await click(a7.x, a7.y, 4);
   await waitFor('window.__of.length > 0', 5000);
   const o7 = await evalJs('({ of: window.__of.slice(), probes: window.__probes.slice() })');
-  check('a REAL Cmd+click asks the file probe for the decoded path and opens it in the viewer', o7.probes.some((u) => u.includes('path=' + encodeURIComponent(SKILL))) && JSON.stringify(o7.of) === JSON.stringify([[SKILL, 'SKILL.md', null]]), o7);
+  check('a REAL Cmd+click asks the file probe for the decoded path and opens it in the viewer', gateOf(o7.probes.some((u) => u.includes('path=' + encodeURIComponent(SKILL)))) && JSON.stringify(o7.of) === JSON.stringify([[SKILL, 'SKILL.md', null]]), o7);
   await evalJs('window.__of.length = 0; true');
   const a7b = await aim(`(${VIEW})._messageList.querySelector('.vs-agy .chat-link-path[data-path$="a.js:12"]')`);
   await click(a7b.x, a7b.y, 4);
@@ -377,7 +377,7 @@ try {
   await render7('vs-agy-base', true);
   await evalJs('window.__of.length = 0; window.__copied.length = 0; window.__probes.length = 0; true');
   const b7 = await evalJs(`(() => { const box = (${VIEW})._messageList.querySelector('.vs-agy-base'); return { anchors: [...box.querySelectorAll('a')].map((a) => a.outerHTML), paths: box.querySelectorAll('.chat-link-path:not(.chat-link-rel)').length }; })()`);
-  check('CONTROL (the base: the two steps off on the live renderer): the real sanitizer leaves each file: link a bare <a> with no href, no path span', b7.paths === 0 && ['<a>SKILL.md</a>', '<a>方案</a>', '<a>a.js</a>'].every((x) => b7.anchors.includes(x)), b7);
+  check('CONTROL (the base: the two steps off on the live renderer): the real sanitizer leaves each file: link a bare <a> with no href, no path span', b7.paths === 0 && verdictOf(['<a>SKILL.md</a>', '<a>方案</a>', '<a>a.js</a>'].every((x) => b7.anchors.includes(x))), b7);
   const a7d = await aim(`[...(${VIEW})._messageList.querySelectorAll('.vs-agy-base a')].find((a) => a.textContent === 'SKILL.md')`);
   await click(a7d.x, a7d.y);
   await click(a7d.x, a7d.y, 4);
@@ -410,21 +410,21 @@ try {
   };
   const v1 = await openFromLink();
   check('a REAL Cmd+click on the .html path opens it (the real chat link-open + app.openFile) — and it shows the PREVIEW, the source hidden, the toggle saying «Source»',
-    v1 && v1.type === 'editor' && v1.action === 'openFile' && v1.preview === true && v1.editor === false && v1.btn === 'Source', v1);
+    gateOf(v1) && v1.type === 'editor' && v1.action === 'openFile' && v1.preview === true && v1.editor === false && v1.btn === 'Source', v1);
   check('…the preview is the frame host\'s opaque frame: sandbox="allow-scripts", the host\'s preview address, the page handed in — never a srcdoc',
-    v1?.frame?.sandbox === 'allow-scripts' && /^\/frame-host\?kind=preview&base=/.test(v1.frame.src || '') && v1.frame.srcdoc === false && v1.frame.doc === true, v1?.frame);
+    v1?.frame?.sandbox === 'allow-scripts' && gateOf(/^\/frame-host\?kind=preview&base=/.test(v1.frame.src || '')) && v1.frame.srcdoc === false && v1.frame.doc === true, v1?.frame);
   const base1 = v1?.frame?.src ? new URLSearchParams(v1.frame.src.split('?')[1] || '').get('base') : null;
   check('…its folder door is the page\'s OWN folder, never a parent — the sandbox, not a press, is the fence (DECIDED, r2)', base1 === path.dirname(HTML), { base1, want: path.dirname(HTML) });
   const pressed1 = await RC('[data-fpm="1"] .editor-preview-toggle');
   await sleep(500);
   const v2 = await htmlView();
-  check('a REAL press on «Source» shows the source (the preview hidden, the toggle saying «Preview»)', pressed1 && v2?.editor === true && v2.preview === false && v2.btn === 'Preview', { pressed1, miss: RC.lastMiss, v2 });
+  check('a REAL press on «Source» shows the source (the preview hidden, the toggle saying «Preview»)', gateOf(pressed1) && v2?.editor === true && v2.preview === false && v2.btn === 'Preview', { pressed1, miss: RC.lastMiss, v2 });
   const v3 = await openFromLink();
   check('closed and opened again from the link: it opens as SOURCE — the last mode chosen for the file', v3?.editor === true && v3.preview === false && v3.btn === 'Preview', v3);
   const pressed3 = await RC('[data-fpm="1"] .editor-preview-toggle');
   await sleep(500);
   const v4 = await openFromLink();
-  check('«Preview» pressed, then opened again: the preview again', pressed3 && v4?.preview === true && v4.editor === false && v4.btn === 'Source', { pressed3, v4 });
+  check('«Preview» pressed, then opened again: the preview again', gateOf(pressed3) && v4?.preview === true && v4.editor === false && v4.btn === 'Source', { pressed3, v4 });
   await closeHtml(); await sleep(300);
   await evalJs(`(() => { app.openEditor(${JSON.stringify(HTML)}, '季度看板.html'); return true; })()`);
   await waitFor(`(() => { const w = ${HWIN}; return !!(w && (w.content || w.element).querySelector('.cm-content')); })()`, 15000);
@@ -476,7 +476,7 @@ try {
   await sleep(400);
   const k60b = await cutView();
   check('…a REAL press on the second sheet\'s tab: its own cut said — the first 256 columns (of 300)',
-    pressed9b && k60b?.active === 'S1' && k60b.cols === 256 && k60b.note === 'Showing part of this workbook: the first 256 columns · the first 50 of 60 sheets', { pressed9b, miss: RC.lastMiss, k60b });
+    gateOf(pressed9b) && k60b?.active === 'S1' && k60b.cols === 256 && k60b.note === 'Showing part of this workbook: the first 256 columns · the first 50 of 60 sheets', { pressed9b, miss: RC.lastMiss, k60b });
   await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w._filePath === ${JSON.stringify(BOOK60)}) app.wm.closeWindow(w.id); return true; })()`);
 
   console.log('⑩ a path:line link to a page OPEN as its preview leaves the preview, then jumps (r2 — the line rule holds for an open window too)');
@@ -540,11 +540,11 @@ try {
   const e2 = await evalJs(`(() => { const w = ${TWIN}; return (w.content || w.element).querySelector('.save-indicator')?.textContent || null; })()`);
   await unstub();
   // B-23e5's save law (主开发 r1378 (3), line 262): the words name WHERE it is not saved — the file first — and keep the route's own words as the why
-  check('a REAL press on Save the guard refused: the file named, then the write route\'s own words — never the preview\'s sentence', pressed11 && e2 === '✕ notes.txt is not saved — refused: a synchronous fs call on a storage mount from the main thread', { pressed11, miss: RC.lastMiss, e2 });
+  check('a REAL press on Save the guard refused: the file named, then the write route\'s own words — never the preview\'s sentence', gateOf(pressed11) && e2 === '✕ notes.txt is not saved — refused: a synchronous fs call on a storage mount from the main thread', { pressed11, miss: RC.lastMiss, e2 });
   await closeTxt();
   check('no page errors', pageErrors.length === 0, pageErrors);
 } catch (e) {
   failed++; console.error('  ✗ the leg threw: ' + (e.stack || e.message));
 }
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

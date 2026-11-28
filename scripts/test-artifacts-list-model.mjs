@@ -14,7 +14,7 @@ import { judgeInChild, LINEAR_BOUND } from './work-meter.mjs';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const M = await import(pathToFileURL(path.join(REPO, 'src/lib/artifacts-list-model.js')).href);
 let pass = 0, fail = 0;
-const ok = (c, msg, why = '') => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (why ? ' — ' + why : '')); } };
+const ok = (c, msg, why = '') => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (why ? ' — ' + why : '')); } };
 const T0 = Date.UTC(2026, 9, 7, 12, 0, 0);
 const H = 3600e3;
 
@@ -44,9 +44,9 @@ const keys = (rs) => rs.map((r) => r.key);
 const f1 = M.filterRows(ROWS, 'SEC10');
 ok(f1.rows.length === 1 && f1.rows[0].name === 'sec10_tail.md' && f1.matchedCode === 0, `"SEC10" (case-folded) finds sec10_tail.md only (${f1.rows.length})`);
 const f2 = M.filterRows(ROWS, 'pkg3/');
-ok(f2.rows.length > 0 && f2.rows.every((r) => r.kind === 'code' && r.path.includes('/pkg3/')) && f2.matchedCode === f2.rows.length, `a path-tail query ("pkg3/") matches code by its directory (${f2.rows.length}, matchedCode ${f2.matchedCode})`);
+ok(f2.rows.length > 0 && gateOf(f2.rows.every((r) => r.kind === 'code' && r.path.includes('/pkg3/'))) && f2.matchedCode === f2.rows.length, `a path-tail query ("pkg3/") matches code by its directory (${f2.rows.length}, matchedCode ${f2.matchedCode})`);
 const f3 = M.filterRows(ROWS, 'pt2:FIX');
-ok(f3.rows.length > 0 && f3.rows.every((r) => M.helperOf(r) === 'pt2:fix'), `a helper label ("pt2:FIX") matches that helper's rows (${f3.rows.length})`);
+ok(f3.rows.length > 0 && verdictOf(f3.rows.every((r) => M.helperOf(r) === 'pt2:fix')), `a helper label ("pt2:FIX") matches that helper's rows (${f3.rows.length})`);
 const f4 = M.filterRows(ROWS, '设计');
 ok(f4.rows.length === 1 && f4.rows[0].name === '设计说明.md', 'CJK as typed: "设计" finds 设计说明.md');
 const f5 = M.filterRows(ROWS, 'house3d', { cwd: V.cwd });
@@ -65,29 +65,29 @@ for (const group of M.GROUPS) for (const sort of M.SORTS) {
   const a = M.orderRows(ROWS, { group, sort }), b = M.orderRows(shuffled, { group, sort });
   const flat = (gs) => gs.map((g) => g.head.key + '|' + keys(g.rows).join(',')).join('\n');
   const n = a.reduce((s, g) => s + g.rows.length, 0);
-  ok(flat(a) === flat(b) && n === ROWS.length && a.every((g) => g.head.count === g.rows.length), `${group} × ${sort}: ${a.length} groups, ${n} rows, the same order from any input order`);
+  ok(flat(a) === flat(b) && n === ROWS.length && verdictOf(a.every((g) => g.head.count === g.rows.length)), `${group} × ${sort}: ${a.length} groups, ${n} rows, the same order from any input order`);
 }
 const byKind = M.orderRows(ROWS, { group: 'kind', sort: 'changed' }).map((g) => g.head.label);
 ok(JSON.stringify(byKind) === JSON.stringify(['page', 'doc', 'service', 'file', 'code']), `kind groups in the owner's DELIVERABLE_ORDER (2026-11-14: designs · published pages · documents · images · services · files), code last (${byKind.join(' ')})`);
 const byHelper = M.orderRows(ROWS, { group: 'helper' });
-ok(byHelper[byHelper.length - 1].head.label === '' && byHelper.slice(0, -1).every((g, i, a) => i === 0 || a[i - 1].head.count >= g.head.count), 'helper groups: most rows first, the main conversation ("") last');
+ok(byHelper[byHelper.length - 1].head.label === '' && verdictOf(byHelper.slice(0, -1).every((g, i, a) => i === 0 || a[i - 1].head.count >= g.head.count)), 'helper groups: most rows first, the main conversation ("") last');
 const byDay = M.orderRows(ROWS, { group: 'day' }).map((g) => g.head.label);
-ok(byDay.every((d, i) => i === 0 || byDay[i - 1] > d), `day groups newest first (${byDay.join(' ')})`);
+ok(verdictOf(byDay.every((d, i) => i === 0 || byDay[i - 1] > d)), `day groups newest first (${byDay.join(' ')})`);
 const sorted = (rs, cmp) => rs.every((r, i) => i === 0 || cmp(rs[i - 1], r) <= 0);
 const docs = (sort) => M.orderRows(ROWS, { group: 'kind', sort }).find((g) => g.head.label === 'doc').rows; // the documents' group (the owner's order puts the published page first)
-ok(sorted(docs('changed'), (a, b) => b.lastAt - a.lastAt), 'changed: newest change first');
-ok(sorted(docs('name'), (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })) && docs('name').findIndex((r) => r.name === 'notes 9.md') < docs('name').findIndex((r) => r.name === 'notes 10.md'), 'name: numeric collation ("notes 9" before "notes 10")');
-ok(sorted(docs('edits'), (a, b) => ((b.edits + b.writes) - (a.edits + a.writes))), 'edits: most touches (edits + writes) first');
+ok(verdictOf(sorted(docs('changed'), (a, b) => b.lastAt - a.lastAt)), 'changed: newest change first');
+ok(gateOf(sorted(docs('name'), (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))) && docs('name').findIndex((r) => r.name === 'notes 9.md') < docs('name').findIndex((r) => r.name === 'notes 10.md'), 'name: numeric collation ("notes 9" before "notes 10")');
+ok(verdictOf(sorted(docs('edits'), (a, b) => ((b.edits + b.writes) - (a.edits + a.writes)))), 'edits: most touches (edits + writes) first');
 const tie = [{ key: 'b', name: 'same', lastAt: 5, edits: 1, writes: 1, kind: 'doc' }, { key: 'a', name: 'same', lastAt: 5, edits: 1, writes: 1, kind: 'doc' }];
-ok(M.SORTS.every((s) => keys(M.orderRows(tie, { group: 'kind', sort: s })[0].rows).join() === 'a,b'), 'full ties fall to the key — the same order every time');
+ok(verdictOf(M.SORTS.every((s) => keys(M.orderRows(tie, { group: 'kind', sort: s })[0].rows).join() === 'a,b')), 'full ties fall to the key — the same order every time');
 ok(M.orderRows(ROWS, { group: 'nope', sort: 'nope' })[0].head.key === 'i:made' && M.orderRows(ROWS, { group: 'nope', sort: 'nope' }).at(-1).head.key === 'i:touched', 'an unknown group / sort reads as the intent default / changed (a block without the server\'s verdict: code ⇒ touched, the rest ⇒ made here)');
 
 console.log('③ recentOf + the band rule');
 const rec = M.recentOf(ROWS);
 const newest = ROWS.slice().sort((a, b) => b.lastAt - a.lastAt || (a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })) || (a.key < b.key ? -1 : 1)).slice(0, 5);
 ok(rec.length === 5 && keys(rec).join() === keys(newest).join(), 'the 5 newest touches, any kind');
-ok(M.recentOf(code.concat(items.map((r) => ({ ...r, lastAt: 1 })))).every((r) => r.kind === 'code'), 'code is in the band when it is newest');
-ok(M.recentShown({ total: 217 }) && !M.recentShown({ total: 217, filtering: true }) && !M.recentShown({ total: 7 }) && M.recentShown({ total: 8 }), 'the band: shown at ≥ 8 rows, hidden while filtering or < 8');
+ok(verdictOf(M.recentOf(code.concat(items.map((r) => ({ ...r, lastAt: 1 })))).every((r) => r.kind === 'code')), 'code is in the band when it is newest');
+ok(gateOf(M.recentShown({ total: 217 })) && !M.recentShown({ total: 217, filtering: true }) && !M.recentShown({ total: 7 }) && verdictOf(M.recentShown({ total: 8 })), 'the band: shown at ≥ 8 rows, hidden while filtering or < 8');
 
 console.log('④ rowWords per kind · countLine (zh / ja / en through t)');
 const zh = { 'Changed {n} times': '已改 {n} 次', Running: '运行中', Stopped: '已停止', '{items} artifacts · {code} code files': '{items} 项产出 · {code} 个代码文件', '{n} matches · {m} code': '匹配 {n} 项 · 其中代码 {m}', '{n} matches': '匹配 {n} 项', '{n} artifacts': '{n} 项产出' };
@@ -112,12 +112,12 @@ for (const col of M.COLUMNS) {
 ok(keys(M.sortRows(items, { col: 'name' })).join() === keys(M.orderRows(items, { group: 'kind', sort: 'name' }).flatMap((g) => g.rows).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) || b.lastAt - a.lastAt || (a.key < b.key ? -1 : 1))).join(), 'the window\'s name sort = the popover\'s name comparator');
 const R = M.railOf(ROWS);
 ok(R.total === 217 && R.kinds.map((k) => k.key).join() === 'k:page,k:doc,k:service,k:file,k:code' && R.kinds.find((k) => k.key === 'k:code').count === 174, `the rail: all ${R.total}, kinds with counts (${R.kinds.map((k) => k.label + ' ' + k.count).join(', ')})`);
-ok(R.helpers.length && R.helpers.every((h) => h.label) && M.railRows(ROWS, R.helpers[0].key).length === R.helpers[0].count, `the rail's helpers (${R.helpers.map((h) => h.label + ' ' + h.count).join(', ')}) — a click selects exactly its count`);
+ok(gateOf(R.helpers.length) && gateOf(R.helpers.every((h) => h.label)) && M.railRows(ROWS, R.helpers[0].key).length === R.helpers[0].count, `the rail's helpers (${R.helpers.map((h) => h.label + ' ' + h.count).join(', ')}) — a click selects exactly its count`);
 ok(M.railRows(ROWS, 'k:code').length === 174 && M.railRows(ROWS, 'recent').length === 5 && M.railRows(ROWS, 'all').length === 217, 'railRows: a kind · recent · all');
 
 console.log('⑥ listPlan (the popover) + viewFrom (the device-kept view)');
 const p0 = M.listPlan(V, { group: 'kind', collapsed: M.DEFAULT_VIEW.collapsed.kind });
-ok(p0.sections[0].key === 'recent' && p0.sections[0].rows.every((r) => r.kind === 'code') && p0.sections.find((s) => s.key === 'k:code').open === false && p0.sections.find((s) => s.key === 'k:doc').open === true, 'by kind: the 最近 band first — only what no open group shows (the folded code); 代码 collapsed; documents open');
+ok(p0.sections[0].key === 'recent' && gateOf(p0.sections[0].rows.every((r) => r.kind === 'code')) && p0.sections.find((s) => s.key === 'k:code').open === false && p0.sections.find((s) => s.key === 'k:doc').open === true, 'by kind: the 最近 band first — only what no open group shows (the folded code); 代码 collapsed; documents open');
 const p1 = M.listPlan(V, { q: 'pkg3/', group: 'kind', collapsed: ['k:code'] });
 ok(!p1.sections.some((s) => s.key === 'recent') && p1.sections.find((s) => s.key === 'k:code').open === true, 'filtering: the band hides; a collapsed group with matches opens');
 ok(M.listPlan(V, { q: 'zzzz' }).empty === true, 'zero matches ⇒ the empty note');
@@ -143,16 +143,16 @@ const LP = {
     + "writes: i % 4, edits: i % 5, via: i % 5 === 4 ? null : { kind: 'subagent', name: 'pt2:h' + (i % 7) } }; }); "
     + "return { items: rows.filter((r) => r.kind !== 'code'), code: rows.filter((r) => r.kind === 'code') }; }",
 };
-for (const n of [250, 500]) { const v = judgeInChild({ ...LP, n }); ok(v.ok, `listPlan is LINEAR in WORK over ${n} → ${2 * n} rows (×${(v.r || 0).toFixed(2)} ≤ ${LINEAR_BOUND}: ${v.w1} → ${v.w2} ops)`, v.err || ''); }
+for (const n of [250, 500]) { const v = judgeInChild({ ...LP, n }); ok(verdictOf(v.ok), `listPlan is LINEAR in WORK over ${n} → ${2 * n} rows (×${(v.r || 0).toFixed(2)} ≤ ${LINEAR_BOUND}: ${v.w1} → ${v.w2} ops)`, v.err || ''); }
 { // CONTROL: a quadratic listPlan copy (a findIndex dedupe over every row) must read red
   const s7 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-alm7-'));
   try {
     const src7 = fs.readFileSync(LP.module, 'utf8'), needle7 = '  const all = alone ? railRows([...items, ...code], alone) : [...items, ...code];\n';
     fs.writeFileSync(path.join(s7, 'artifacts-list-model.mjs'), src7.replace(needle7, '  const all = (alone ? railRows([...items, ...code], alone) : [...items, ...code]).filter((r, i, a) => a.findIndex((x) => x.key === r.key) === i);\n'));
     const q7 = judgeInChild({ ...LP, module: path.join(s7, 'artifacts-list-model.mjs'), n: 250 });
-    ok(src7.includes(needle7) && !q7.ok && q7.r > LINEAR_BOUND, `CONTROL: a quadratic listPlan copy reads ×${(q7.r || 0).toFixed(2)} over 250 → 500 rows — red`, q7.err || '');
+    ok(gateOf(src7.includes(needle7)) && !q7.ok && q7.r > LINEAR_BOUND, `CONTROL: a quadratic listPlan copy reads ×${(q7.r || 0).toFixed(2)} over 250 → 500 rows — red`, q7.err || '');
   } finally { fs.rmSync(s7, { recursive: true, force: true }); }
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASSED'} (${pass} passed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

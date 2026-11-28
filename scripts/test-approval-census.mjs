@@ -50,7 +50,7 @@ import { scratch } from './scratch.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
 const tracked = (...globs) => execFileSync('git', ['ls-files', ...globs], { cwd: REPO, encoding: 'utf8', env: gitEnvFrom(process.env) }).trim().split('\n').filter(Boolean);
 const readRepo = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // comment lines blanked (line numbers kept), a trailing ` // …` dropped — a pin never matches words in a comment
@@ -108,9 +108,9 @@ const LIB = tracked('src/lib').filter((f) => f.endsWith('.js') && !/\/i18n-[a-z]
   ok(c.hits.length === 0, 'CAPTURE: no dialog-gated action reads the explorer\'s folder / machine, the sidebar\'s machine list or the system panel\'s machine AFTER the dialog — each is captured before it opens', c.hits);
   ok(c.dead.length === 0, `CAPTURE: every exemption (${CAPTURE_EXEMPT.length}) still names a live read it excuses — a stale exemption is a hole`, c.dead);
   const rail = readRepo('src/lib/sidebar-rail.js');
-  ok(/const host = dataHost, pid = p\.pid;\s*if \(sig === 'TERM' \|\| sig === 'KILL'\) \{/.test(rail) && /body: JSON\.stringify\(\{ host, pid, sig \}\)/.test(rail) && /data = r \|\| \{ error: tr\('Machine unreachable'\) \};\s*dataHost = hostId;/.test(rail), 'S1: a process row\'s Terminate / Force kill goes to the machine THAT listing came from and the pid it shows, both captured before the confirm');
+  ok(gateOf(/const host = dataHost, pid = p\.pid;\s*if \(sig === 'TERM' \|\| sig === 'KILL'\) \{/.test(rail)) && gateOf(/body: JSON\.stringify\(\{ host, pid, sig \}\)/.test(rail)) && verdictOf(/data = r \|\| \{ error: tr\('Machine unreachable'\) \};\s*dataHost = hostId;/.test(rail)), 'S1: a process row\'s Terminate / Force kill goes to the machine THAT listing came from and the pid it shows, both captured before the confirm');
   const ex = readRepo('src/lib/file-explorer.js');
-  ok(/_here\(\) \{\s*const dir = this\.currentPath, host = this\._host \|\| '';/.test(ex), 'E1: the explorer has ONE snapshot of where an op acts (`_here()` — the folder and the machine, frozen)');
+  ok(verdictOf(/_here\(\) \{\s*const dir = this\.currentPath, host = this\._host \|\| '';/.test(ex)), 'E1: the explorer has ONE snapshot of where an op acts (`_here()` — the folder and the machine, frozen)');
   const ops = readRepo('src/lib/file-explorer-ops.js');
   const opsHere = ['async createFile()', 'async createDir()', 'async _paste()', 'async _compressSelection(names)', 'async _extractArchive(name, here)', 'async _deleteSelection()', 'async _rename(oldName)', 'async _delete(name, isDir)'];
   const missing = opsHere.filter((sig) => { const i = ops.indexOf(sig); if (i < 0) return true; const body = ops.slice(i, ops.indexOf('\n  },', i)); const a = body.search(/await\s+show(Confirm|Input)Dialog\(/); const h = body.indexOf('this._here()'); return !(h >= 0 && (a < 0 || h < a)); });
@@ -143,7 +143,7 @@ console.log('§1b THE CONFIRM SHOWS WHAT IT CONFIRMS — one options object at e
   const c = confirmShapeCensus(readRepo, LIB);
   ok(c.n >= 50 && c.bad.length === 0, `every showConfirmDialog call (${c.n}) passes its title / message / button as ONE options object — never positional strings (the blank "Confirm / OK" dialog)`, c.bad);
   const u = readRepo('src/lib/utils.js');
-  ok(/export function showConfirmDialog\(opts = \{\}, legacyMessage\) \{\s*(\/\/[^\n]*\n\s*)*if \(typeof opts === 'string'\) opts = \{ title: opts, message: typeof legacyMessage === 'string' \? legacyMessage : '' \};/.test(u), 'D1: the function reads a string first argument as the (title, message) pair — a missed call still shows what OK does');
+  ok(verdictOf(/export function showConfirmDialog\(opts = \{\}, legacyMessage\) \{\s*(\/\/[^\n]*\n\s*)*if \(typeof opts === 'string'\) opts = \{ title: opts, message: typeof legacyMessage === 'string' \? legacyMessage : '' \};/.test(u)), 'D1: the function reads a string first argument as the (title, message) pair — a missed call still shows what OK does');
 }
 
 // ── §1c A PRESS COUNTS ONLY ON WHAT SAT STILL WHERE IT WAS READ (verify-r6 V1) ──────────────────────────────────────
@@ -169,11 +169,11 @@ console.log('§1c A PRESS COUNTS ONLY ON WHAT SAT STILL WHERE IT WAS READ (verif
   // lane chat-needs-you-card (round 4, #3): the tray's row passes stamp as before (`arm` defaults on); the chat's needs cards
   // stamp THEIR list once, after a pass that changed a card (`{ arm: false }` on their reconcile)
   const cardSrc = readRepo('src/lib/chat-needs-card.js');
-  ok(/reconcileKeyed\(container, entries, \{[\s\S]{0,260}\}\);\s*if \(arm\) armExitButtons\(\);/.test(panel) && /const reconcileRows = \(container, entries, head = null, ctx = rowCtx, \{ arm = true \} = \{\}\) => \{/.test(panel) && /this\.app\.foryouRows\?\.arm\?\.\(view\._messageList\);/.test(cardSrc) && /const armExitButtons = \(root = document\) => \{\n\s+const now = performance\.now\(\);\n\s+for \(const b of root\.querySelectorAll\('(\.ut-action-endprop, )?\.ut-action-exit\.ut-exit-allow(, \.ut-action-proposal\.ut-proposal-approve)?(, \.ut-action-app\.ut-app-install)?(, \.ut-action-grant)?, \.ut-action-setting'\)\)/.test(panel) && /if \(exitBtn && (exitBtn\.dataset\.answer === 'allow'|\(exitBtn\.dataset\.answer === 'allow' \|\| exitBtn\.classList\.contains\('ut-exit-allow'\)\))\) \{[\s\S]{0,400}const pv = pressVerdict\(\{ since: exitBtn\._armSince \?\? null, now: performance\.now\(\) \}\);\s*if \(!pv\.ok\) \{/.test(panel), 'V1 WIRING (popup + mini inbox): every Allow re-stamped after each row pass; a press on one that appeared or moved within ARM_MS does nothing and says so');
-  ok(/anchorFixedPopup\(popup, anchor\);\s*(\/\/[^\n]*\n\s*)*if \(!popup\.classList\.contains\('hidden'\)\) armExitButtons\(\);/.test(panel), 'V1 WIRING (lane browser-propose verify r1): the popup samples its Allow / Approve buttons AGAIN after the anchor placed it — sampled before, the first press after every open read as "moved under the pointer" (reproduced in chrome; gate test-browser-propose-chrome ⑦)');
+  ok(gateOf(/reconcileKeyed\(container, entries, \{[\s\S]{0,260}\}\);\s*if \(arm\) armExitButtons\(\);/.test(panel)) && gateOf(/const reconcileRows = \(container, entries, head = null, ctx = rowCtx, \{ arm = true \} = \{\}\) => \{/.test(panel)) && gateOf(/this\.app\.foryouRows\?\.arm\?\.\(view\._messageList\);/.test(cardSrc)) && gateOf(/const armExitButtons = \(root = document\) => \{\n\s+const now = performance\.now\(\);\n\s+for \(const b of root\.querySelectorAll\('(\.ut-action-endprop, )?\.ut-action-exit\.ut-exit-allow(, \.ut-action-proposal\.ut-proposal-approve)?(, \.ut-action-app\.ut-app-install)?(, \.ut-action-grant)?, \.ut-action-setting'\)\)/.test(panel)) && verdictOf(/if \(exitBtn && (exitBtn\.dataset\.answer === 'allow'|\(exitBtn\.dataset\.answer === 'allow' \|\| exitBtn\.classList\.contains\('ut-exit-allow'\)\))\) \{[\s\S]{0,400}const pv = pressVerdict\(\{ since: exitBtn\._armSince \?\? null, now: performance\.now\(\) \}\);\s*if \(!pv\.ok\) \{/.test(panel)), 'V1 WIRING (popup + mini inbox): every Allow re-stamped after each row pass; a press on one that appeared or moved within ARM_MS does nothing and says so');
+  ok(verdictOf(/anchorFixedPopup\(popup, anchor\);\s*(\/\/[^\n]*\n\s*)*if \(!popup\.classList\.contains\('hidden'\)\) armExitButtons\(\);/.test(panel)), 'V1 WIRING (lane browser-propose verify r1): the popup samples its Allow / Approve buttons AGAIN after the anchor placed it — sampled before, the first press after every open read as "moved under the pointer" (reproduced in chrome; gate test-browser-propose-chrome ⑦)');
   const cvSrc = readRepo('src/lib/chat-view.js'); // B-ef04: a row in a chat that opens another conversation — the press arm's moved-under-a-still-pointer refusal
-  ok(/import \{ pressVerdict \} from '\.\/press-arm\.js';/.test(cvSrc) && /return !pressVerdict\(\{ since: moved, now \}\)\.ok;/.test(cvSrc) && /const row = e\.detail === 0 \? null : e\.target\?\.closest\?\.\(MOVED_PRESS_ROWS\);\n\s+if \(row && this\._reaimT\) \{ clearTimeout\(this\._reaimT\); this\._reaimT = 0; this\._reaim\(\); \}[^\n]*\n\s+if \(!row \|\| !this\._pressMovedUnder\(pressKeyOf\(row\)\)\) return;/.test(cvSrc), 'V1 WIRING (B-ef04): the transcript\'s rows that open a conversation (a channel card\'s row, a peer\'s name) refuse a mouse press on a row the list moved BY ITSELF under a still pointer within ARM_MS, by the row\'s key (chat-view _pressMovedUnder over pressVerdict)');
-  ok(/if \(st\.selected !== st\.armId\) \{ st\.armId = st\.selected; st\.armAt = performance\.now\(\); \}/.test(win) && /if \(a === 'exit-allow'\) \{ const pv = pressVerdict\(\{ since: st\.armId === id \? st\.armAt : null, now: performance\.now\(\) \}\); if \(!pv\.ok\)/.test(win), 'V1 WIRING (the For-you window): the pane is stamped when its item changes; an Allow pressed within ARM_MS of the advance does nothing and says so');
+  ok(gateOf(/import \{ pressVerdict \} from '\.\/press-arm\.js';/.test(cvSrc)) && gateOf(/return !pressVerdict\(\{ since: moved, now \}\)\.ok;/.test(cvSrc)) && verdictOf(/const row = e\.detail === 0 \? null : e\.target\?\.closest\?\.\(MOVED_PRESS_ROWS\);\n\s+if \(row && this\._reaimT\) \{ clearTimeout\(this\._reaimT\); this\._reaimT = 0; this\._reaim\(\); \}[^\n]*\n\s+if \(!row \|\| !this\._pressMovedUnder\(pressKeyOf\(row\)\)\) return;/.test(cvSrc)), 'V1 WIRING (B-ef04): the transcript\'s rows that open a conversation (a channel card\'s row, a peer\'s name) refuse a mouse press on a row the list moved BY ITSELF under a still pointer within ARM_MS, by the row\'s key (chat-view _pressMovedUnder over pressVerdict)');
+  ok(gateOf(/if \(st\.selected !== st\.armId\) \{ st\.armId = st\.selected; st\.armAt = performance\.now\(\); \}/.test(win)) && verdictOf(/if \(a === 'exit-allow'\) \{ const pv = pressVerdict\(\{ since: st\.armId === id \? st\.armAt : null, now: performance\.now\(\) \}\); if \(!pv\.ok\)/.test(win)), 'V1 WIRING (the For-you window): the pane is stamped when its item changes; an Allow pressed within ARM_MS of the advance does nothing and says so');
 }
 
 // ── §1d THE ONE HIDDEN-CHARACTER DOOR (verify-r6 Z2) ──────────────────────────────────────────────────────────────────
@@ -695,7 +695,7 @@ const TodosReal = REQ(path.join(REPO, 'src/user-todos.js')).UserTodoManager;
 const MgrReal = REQ(path.join(REPO, 'src/exit-proxy.js')).ExitProxyManager;
 {
   const o = mergeCell(TodosReal);
-  ok(mergeOk(o), 'THE MERGE CELL: an agent\'s filing of a producer item\'s own text is filed BESIDE it for every producer (exit ask, helper ask, reset credit) — the item\'s shown detail never becomes the agent\'s; an identity-keyed producer\'s next question is its own item', o);
+  ok(verdictOf(mergeOk(o)), 'THE MERGE CELL: an agent\'s filing of a producer item\'s own text is filed BESIDE it for every producer (exit ask, helper ask, reset credit) — the item\'s shown detail never becomes the agent\'s; an identity-keyed producer\'s next question is its own item', o);
   const c = await recheckCell(MgrReal, TodosReal);
   ok(c.answer === 'ask_changed' && c.call === 'ask_changed' && c.runs === 0, 'THE RE-CHECK CELL: Allow on an exit ask whose item changed after it was shown ⇒ ask_changed, the waiting call hears ask_changed (never "the user did not allow"), NOTHING ran', c);
 }
@@ -711,7 +711,7 @@ console.log('controls (patched copies)');
   ok(mut !== src, 'CONTROL (e1): the patch applies');
   const copy = M.write(rel, mut, 'e1');
   const c = captureCensus((f) => (f === rel ? fs.readFileSync(copy, 'utf8') : readRepo(f)), LIB);
-  ok(c.hits.length === 1 && /file-explorer-ops\.js:\d+: reads this\.currentPath, this\._hp\( after the dialog/.test(c.hits[0]), 'CONTROL (e1): the pre-fix Delete (the folder and the machine read after the confirm) turns THE CAPTURE RULE red', c.hits);
+  ok(c.hits.length === 1 && verdictOf(/file-explorer-ops\.js:\d+: reads this\.currentPath, this\._hp\( after the dialog/.test(c.hits[0])), 'CONTROL (e1): the pre-fix Delete (the folder and the machine read after the confirm) turns THE CAPTURE RULE red', c.hits);
   // CONTROL (s1): the pre-fix force kill — the panel's machine re-read after the confirm
   {
     const rrel = 'src/lib/sidebar-rail.js', rsrc = readRepo(rrel);
@@ -719,7 +719,7 @@ console.log('controls (patched copies)');
     ok(rmut !== rsrc, 'CONTROL (s1): the patch applies');
     const rcopy = M.write(rrel, rmut, 's1');
     const cs = captureCensus((f) => (f === rrel ? fs.readFileSync(rcopy, 'utf8') : readRepo(f)), LIB);
-    ok(cs.hits.length === 1 && /sidebar-rail\.js:\d+: reads getHostId\( after the dialog/.test(cs.hits[0]), 'CONTROL (s1): the pre-fix Force kill (the machine read after the confirm) turns THE CAPTURE RULE red', cs.hits);
+    ok(cs.hits.length === 1 && verdictOf(/sidebar-rail\.js:\d+: reads getHostId\( after the dialog/.test(cs.hits[0])), 'CONTROL (s1): the pre-fix Force kill (the machine read after the confirm) turns THE CAPTURE RULE red', cs.hits);
   }
   // CONTROL (v1): a verdict that lets every press through (the pre-fix behaviour)
   {
@@ -737,13 +737,13 @@ console.log('controls (patched copies)');
     ok(pmut !== psrc, 'CONTROL (z2a): the patch applies');
     const pcopy = M.write(prel, pmut, 'z2a');
     const cz = hiddenDoorCensus((f) => (f === prel ? fs.readFileSync(pcopy, 'utf8') : readRepo(f)));
-    ok(cz.own.length === 1 && /channel-policy\.js: spells its own set/.test(cz.own[0]), 'CONTROL (z2a): a surface spelling its own set turns §1d red', cz.own);
+    ok(cz.own.length === 1 && verdictOf(/channel-policy\.js: spells its own set/.test(cz.own[0])), 'CONTROL (z2a): a surface spelling its own set turns §1d red', cz.own);
     const rrel = 'src/exit-reach.js', rsrc = readRepo(rrel);
     const rmut = rsrc.replace('// verify-r6 Z2: THE SET is src/hidden-chars.js', '// verify-r6 Z2: THE SET is src/hidden-chars.js' + String.fromCharCode(0x202e));
     ok(rmut !== rsrc, 'CONTROL (z2b): the patch applies');
     const rcopy = M.write(rrel, rmut, 'z2b');
     const cr = hiddenDoorCensus((f) => (f === rrel ? fs.readFileSync(rcopy, 'utf8') : readRepo(f)));
-    ok(cr.raw.length === 1 && /^src\/exit-reach\.js: U\+202E/.test(cr.raw[0]), 'CONTROL (z2b): a RAW direction control in a product file turns §1d red', cr.raw);
+    ok(cr.raw.length === 1 && verdictOf(/^src\/exit-reach\.js: U\+202E/.test(cr.raw[0])), 'CONTROL (z2b): a RAW direction control in a product file turns §1d red', cr.raw);
   }
   // CONTROL (α): a store that re-enables TEXT-keyed merge for ONE producer (the reset-credit item) — the agent's
   // filing lands on it and its shown detail becomes the agent's
@@ -769,9 +769,9 @@ console.log('controls (patched copies)');
     ok(pmut !== psrc, 'CONTROL (d1): the patch applies');
     const pcopy = M.write(prel, pmut, 'd1');
     const c1 = confirmShapeCensus((f) => (f === prel ? fs.readFileSync(pcopy, 'utf8') : readRepo(f)), LIB);
-    ok(c1.bad.length === 1 && /^src\/lib\/plugins-ui\.js:\d+: showConfirmDialog\(t\('Stop/.test(c1.bad[0]), 'CONTROL (d1): the pre-fix Stop frp / Tailscale confirm (positional strings) turns §1b red', c1.bad);
+    ok(c1.bad.length === 1 && verdictOf(/^src\/lib\/plugins-ui\.js:\d+: showConfirmDialog\(t\('Stop/.test(c1.bad[0])), 'CONTROL (d1): the pre-fix Stop frp / Tailscale confirm (positional strings) turns §1b red', c1.bad);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 8, label: 'mutant-copy (approval census): ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 8, label: 'mutant-copy (approval census): ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 // ── §2 AGENT HTML NEVER RESTYLES AN APPROVAL ────────────────────────────────────────────────────────────────────────
@@ -883,7 +883,7 @@ console.log('§3c THE INSTALL ROW HOLDS WHAT RUNS — 「取得 FFmpeg」\'s BYT
   ok(got === FFMPEG_PLAN_ARGV_SHA256, 'the ffmpeg plan\'s BYTES (its encoded argv — what PowerShell runs) are the ones this census holds', { got, held: FFMPEG_PLAN_ARGV_SHA256 });
   const moved = FFI.FFMPEG_BUILDS.map((b) => ({ ...b, sha256: b.sha256.replace(/^./, (c) => (c === '7' ? '8' : '7')) }));
   const script = (rows) => rows.map((b) => `${b.url}|${b.sha256}|${b.member}|${b.memberSha256}`).join('\n');
-  ok(script(moved) !== script(FFI.FFMPEG_BUILDS) && plan.commands.join('\n').includes(FFI.FFMPEG.sha256.toUpperCase()) && plan.commands.join('\n').includes(FFI.FFMPEG.url) && plan.commands.join('\n').includes(FFI.FFMPEG.member), 'CONTROL: the script carries each build\'s address, its SHA-256 and its member — one hex character moved moves the bytes the census holds');
+  ok(script(moved) !== script(FFI.FFMPEG_BUILDS) && gateOf(plan.commands.join('\n').includes(FFI.FFMPEG.sha256.toUpperCase())) && gateOf(plan.commands.join('\n').includes(FFI.FFMPEG.url)) && verdictOf(plan.commands.join('\n').includes(FFI.FFMPEG.member)), 'CONTROL: the script carries each build\'s address, its SHA-256 and its member — one hex character moved moves the bytes the census holds');
 }
 const SRC_FILES = tracked('src').filter((f) => /\.(m?js|cjs)$/.test(f) && !/\/i18n-[a-z]+\.js$/.test(f));
 const CSS_CLASSES = [...new Set(tracked('public').filter((f) => f.endsWith('.css')).flatMap((f) => [...readRepo(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/url\([^)]*\)/g, '').matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1])))];
@@ -893,7 +893,7 @@ const SH = await import(pathToFileURL(path.join(REPO, SAFE)).href);
   const c = sanitizerCensus(readRepo, SRC_FILES);
   ok(c.sites.length >= 4, `SITES: the grep finds every markdown parse in src/ (${c.sites.length}: ${c.sites.join(' ')})`, c.sites);
   ok(c.hits.length === 0, `CENSUS: over ${SRC_FILES.length} tracked src files, DOMPurify lives only in ${SAFE} (and the ${Object.keys(DOMPURIFY_DECLARED).length} declared sandboxed-frame sink) and every markdown parse is handed to sanitizeHtml( on its line`, c.hits);
-  { const dp = declaredDomPurifyProblems(readRepo); ok(!dp.length && Object.values(DOMPURIFY_DECLARED).every((d) => d.why.length >= 40), `DECLARED: each sandboxed-frame DOMPurify sink (${Object.keys(DOMPURIFY_DECLARED).join(', ')}) still feeds only a sandbox="allow-scripts" srcdoc, per-call config, never a shared hook / setConfig, never allow-same-origin`, dp);
+  { const dp = declaredDomPurifyProblems(readRepo); ok(!dp.length && verdictOf(Object.values(DOMPURIFY_DECLARED).every((d) => d.why.length >= 40)), `DECLARED: each sandboxed-frame DOMPurify sink (${Object.keys(DOMPURIFY_DECLARED).join(', ')}) still feeds only a sandbox="allow-scripts" srcdoc, per-call config, never a shared hook / setConfig, never allow-same-origin`, dp);
     const mfSrc = readRepo('src/lib/channel-mail-frame.js');
     const opened = mfSrc.replace("f.setAttribute('sandbox', 'allow-scripts');", "f.setAttribute('sandbox', 'allow-scripts allow-same-origin');");
     const hooked = mfSrc.replace('const clean = DOMPurify.sanitize(', "DOMPurify.addHook('afterSanitizeAttributes', () => {}); const clean = DOMPurify.sanitize(");
@@ -938,14 +938,14 @@ const SH = await import(pathToFileURL(path.join(REPO, SAFE)).href);
   const patch = (from, to) => { const m = typeof from === 'string' ? SRC.split(from).join(to) : SRC.replace(from, to); return m; };
   // CONTROL (h1): DOMPurify's default config — the lists gone
   const h1 = patch(/export const SAFE_HTML_CONFIG = Object\.freeze\(\{[\s\S]*?\n\}\);/, 'export const SAFE_HTML_CONFIG = Object.freeze({});');
-  ok(h1 !== SRC && configProblems(await load(h1, 'h1')).some((p) => p === 'FORBID_TAGS lacks style'), 'CONTROL (h1): the default config (FORBID lists removed) turns CONFIG red', configProblems(await load(h1, 'h1b')).slice(0, 3));
+  ok(h1 !== SRC && verdictOf(configProblems(await load(h1, 'h1')).some((p) => p === 'FORBID_TAGS lacks style')), 'CONTROL (h1): the default config (FORBID lists removed) turns CONFIG red', configProblems(await load(h1, 'h1b')).slice(0, 3));
   // CONTROL (h2): one tag short — <style> allowed again
   const h2 = patch("'style', 'link',", "'link',");
   ok(h2 !== SRC && JSON.stringify(configProblems(await load(h2, 'h2'))) === '["FORBID_TAGS lacks style"]', 'CONTROL (h2): a list one tag short (style) is named by CONFIG');
   // CONTROL (h3): the class hook keeps every value
   const h3 = patch("  if (!CLASS_TAGS.has(String(tag || '').toLowerCase())) return '';\n  return String(value || '').split(/\\s+/).filter((c) => CLASS_TOKEN.test(c)).join(' ');", "  return String(value || '');");
   const m3 = await load(h3, 'h3');
-  ok(h3 !== SRC && classOf(m3, 'div', 'ut-exit-cmd') === 'ut-exit-cmd' && CLASS_CASES.some(([tag, v, want]) => classOf(m3, tag, v) !== want), 'CONTROL (h3): a class hook that keeps every value turns CLASS red (ut-exit-cmd survives)');
+  ok(h3 !== SRC && classOf(m3, 'div', 'ut-exit-cmd') === 'ut-exit-cmd' && verdictOf(CLASS_CASES.some(([tag, v, want]) => classOf(m3, tag, v) !== want)), 'CONTROL (h3): a class hook that keeps every value turns CLASS red (ut-exit-cmd survives)');
   // CONTROL (h4): the fail-closed door removed — DOMPurify's own fail-open comes through
   const h4 = patch('if (!p || p.isSupported !== true || typeof p.sanitize !== \'function\') throw', 'if (!p || typeof p.sanitize !== \'function\') throw');
   ok(h4 !== SRC && failClosed(await load(h4, 'h4')).halfDom === 'returned the input unsanitized' && wiringProblems(h4).length === 1, 'CONTROL (h4): without the isSupported check the half DOM returns the attack unsanitized, and WIRING names it', failClosed(await load(h4, 'h4b')));
@@ -957,9 +957,9 @@ const SH = await import(pathToFileURL(path.join(REPO, SAFE)).href);
   const h6 = cr.replace("import { sanitizeHtml } from './safe-html.js';", "import DOMPurify from 'dompurify';").replace("let html = sanitizeHtml(this._fileHrefs(marked.parse(text || '')));", "let html = DOMPurify.sanitize(this._fileHrefs(marked.parse(text || '')));");
   const copy = M.write(rel, h6, 'h6');
   const c6 = sanitizerCensus((f) => (f === rel ? fs.readFileSync(copy, 'utf8') : readRepo(f)), SRC_FILES);
-  ok(h6 !== cr && c6.hits.length === 3 && c6.hits.every((h) => h.startsWith(rel + ':')), 'CONTROL (h6): the pre-fix renderMarkdown (DOMPurify defaults) turns the CENSUS red — the import, the sanitize, the unsanitized parse', c6.hits);
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6, label: 'mutant-copy (safe-html): ' })) ok(r.pass, r.name, r.detail);
+  ok(h6 !== cr && c6.hits.length === 3 && verdictOf(c6.hits.every((h) => h.startsWith(rel + ':'))), 'CONTROL (h6): the pre-fix renderMarkdown (DOMPurify defaults) turns the CENSUS red — the import, the sanitize, the unsanitized parse', c6.hits);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6, label: 'mutant-copy (safe-html): ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log(fail ? `\nFAILED: ${fail} of ${pass + fail}` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

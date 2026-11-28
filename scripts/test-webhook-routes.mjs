@@ -23,7 +23,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WA = require(path.join(repo, 'src/webhook-auth.js'));
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms = 20000, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch { } await sleep(step); } return null; };
 try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); } catch (e) { if (e.code === 'ENOENT') { console.log('SKIP: no dtach on PATH (the stub agent session is a dtach session)'); process.exit(0); } }
@@ -90,29 +90,29 @@ try {
   ok(!!COOKIE, 'FIXTURE: the owner logs in');
   let roster = null;
   for (let i = 0; i < 60; i++) { roster = await owner('GET', '/api/channel-groups/roster'); if (roster.j && Array.isArray(roster.j.sessions) && roster.j.sessions.some((x) => x.cid === AG.cid)) break; await sleep(500); }
-  ok(roster.j && roster.j.sessions.some((x) => x.cid === AG.cid), 'FIXTURE: the server adopted the stub agent session (alpha)');
+  ok(gateOf(roster.j) && verdictOf(roster.j.sessions.some((x) => x.cid === AG.cid)), 'FIXTURE: the server adopted the stub agent session (alpha)');
   const mk = await owner('POST', '/api/channels/webhook/paths', { slug: 'ci', title: 'CI', textPath: 'text', senderKey: 'who', facts: [{ key: 'env', path: 'env' }], wakesPerHour: 2 });
   const A = await owner('POST', '/api/channels/webhook/paths/ci/callers', { name: 'deploy-bot', auth: 'bearer', delivery: { mode: 'poll' } });
   const B = await owner('POST', '/api/channels/webhook/paths/ci/callers', { name: 'monitor', auth: 'hmac', delivery: { mode: 'reply-url', replyUrl: `http://127.0.0.1:${stub.address().port}/in` } });
-  ok(mk.status === 200 && A.j && A.j.token && B.j && B.j.token, 'FIXTURE: the owner makes path ci and registers a Bearer caller (poll) and an HMAC caller (reply URL)', [mk.status, A.status, B.status]);
+  ok(mk.status === 200 && gateOf(A.j) && gateOf(A.j.token) && gateOf(B.j) && verdictOf(B.j.token), 'FIXTURE: the owner makes path ci and registers a Bearer caller (poll) and an HMAC caller (reply URL)', [mk.status, A.status, B.status]);
   const TA = A.j.token, TB = B.j.token, IDA = A.j.caller.id, IDB = B.j.caller.id;
 
   console.log('§1 the JSON skip, proven');
   const bad = await raw('POST', '/hook/ci', { headers: { Authorization: 'Bearer vswh_' + '0'.repeat(48), 'Content-Type': 'application/json' }, body: '{"broken": ' });
   const ctl = await owner('PUT', '/api/channels/webhook/paths/ci', '{"broken": ');
-  ok(bad.status === 401 && bad.j && bad.j.error === 'unauthorized' && ctl.status === 400, `a malformed JSON body to /hook with a bad token is the door's 401 — the global parser never saw it (control: the same body to an owner route is the parser's ${ctl.status})`, [bad.status, bad.t.slice(0, 80), ctl.status]);
+  ok(bad.status === 401 && gateOf(bad.j) && bad.j.error === 'unauthorized' && ctl.status === 400, `a malformed JSON body to /hook with a bad token is the door's 401 — the global parser never saw it (control: the same body to an owner route is the parser's ${ctl.status})`, [bad.status, bad.t.slice(0, 80), ctl.status]);
 
   console.log('§2 an agent bearer on every owner verb ⇒ 403');
   const verbs = [['GET', '/api/channels/webhook/paths'], ['POST', '/api/channels/webhook/paths', { slug: 'evil' }], ['PUT', '/api/channels/webhook/paths/ci', { title: 'x' }], ['POST', '/api/channels/webhook/paths/ci/callers', { name: 'mine' }], ['POST', `/api/channels/webhook/paths/ci/callers/${IDA}/rotate`, {}], ['POST', `/api/channels/webhook/paths/ci/callers/${IDA}/revoke`, {}], ['POST', `/api/channels/webhook/paths/ci/callers/${IDA}/delivery`, { delivery: { mode: 'none' } }]];
   const vr = [], vc = [];
   for (const [m, p, b] of verbs) vr.push(await agent(m, p, b === undefined ? null : b));
   for (const [m, p, b] of verbs) vc.push(await raw(m, p, { headers: { Cookie: `vs_token=${COOKIE}`, Authorization: 'Bearer ' + AG.token }, body: b === undefined ? null : b }));
-  ok(vr.every((x) => x.status === 401), `sign-in ON: an agent's vsst_ bearer alone never passes the cookie gate on an owner verb (${verbs.length} × 401)`, vr.map((x) => x.status));
-  ok(vc.every((x) => x.status === 403 && x.j && x.j.code === 'agent-forbidden'), `…and a SELF-IDENTIFYING agent bearer is refused by the route itself, even beside a cookie: every owner verb (${verbs.length}) ⇒ 403 agent-forbidden`, vc.map((x) => x.status));
+  ok(verdictOf(vr.every((x) => x.status === 401)), `sign-in ON: an agent's vsst_ bearer alone never passes the cookie gate on an owner verb (${verbs.length} × 401)`, vr.map((x) => x.status));
+  ok(verdictOf(vc.every((x) => x.status === 403 && x.j && x.j.code === 'agent-forbidden')), `…and a SELF-IDENTIFYING agent bearer is refused by the route itself, even beside a cookie: every owner verb (${verbs.length}) ⇒ 403 agent-forbidden`, vc.map((x) => x.status));
   const jb = await raw('POST', '/api/channels/webhook/paths', { headers: { Authorization: 'Bearer jbt_' + 'x'.repeat(24) }, body: { slug: 'evil2' } });
   ok(jb.status === 403 || jb.status === 401, 'a job token (jbt_) is refused too', jb.status);
   const still = await owner('GET', '/api/channels/webhook/paths');
-  ok(still.j && still.j.paths.length === 1 && still.j.paths[0].callers.length === 2 && !still.t.includes('vswh_') && !still.t.includes('tokenHash') && !still.t.includes('tokenEnc'), 'nothing changed; the owner\'s own list shows no token, no hash, no ciphertext');
+  ok(gateOf(still.j) && still.j.paths.length === 1 && still.j.paths[0].callers.length === 2 && !still.t.includes('vswh_') && !still.t.includes('tokenHash') && !still.t.includes('tokenEnc'), 'nothing changed; the owner\'s own list shows no token, no hash, no ciphertext');
 
   console.log('§3 receipts: opaque per caller');
   const rc = [];
@@ -121,8 +121,8 @@ try {
   const lcp = (x, y) => { let k = 0; while (k < x.length && x[k] === y[k]) k++; return k; };
   const cross = ids.filter((_, i) => rc[i][0] === 'A').flatMap((a) => ids.filter((_, i) => rc[i][0] === 'B').map((b) => lcp(a, b)));
   const diffs = (x, y) => [...x].filter((ch, i) => ch !== y[i]).length;
-  ok(ids.every((x) => /^[0-9a-f]{16}$/.test(x || '')) && new Set(ids).size === 4 && Math.max(...cross) < 4, `four receipts, 16 hex each, distinct; the two callers' share no prefix (longest common ${Math.max(...cross)})`, ids);
-  ok(diffs(ids[0], ids[2]) >= 8 && diffs(ids[1], ids[3]) >= 8 && rc.every(([, j]) => j && JSON.stringify(Object.keys(j)) === JSON.stringify(['ok', 'receiptId', 'path', 'reply'])), 'no monotonic counter: a caller\'s consecutive receipts differ in ≥ 8 of 16 places; the receipt is {ok, receiptId, path, reply} only');
+  ok(gateOf(ids.every((x) => /^[0-9a-f]{16}$/.test(x || ''))) && new Set(ids).size === 4 && Math.max(...cross) < 4, `four receipts, 16 hex each, distinct; the two callers' share no prefix (longest common ${Math.max(...cross)})`, ids);
+  ok(diffs(ids[0], ids[2]) >= 8 && diffs(ids[1], ids[3]) >= 8 && verdictOf(rc.every(([, j]) => j && JSON.stringify(Object.keys(j)) === JSON.stringify(['ok', 'receiptId', 'path', 'reply']))), 'no monotonic counter: a caller\'s consecutive receipts differ in ≥ 8 of 16 places; the receipt is {ok, receiptId, path, reply} only');
 
   console.log('§4 the end to end: call ⇒ record ⇒ fact rule ⇒ ONE wake ⇒ reply --to ⇒ the signed POST ⇒ sent');
   const acc = await owner('PUT', '/api/channels/webhook/ci/access', { access: [{ principal: { kind: 'agent', id: AG.cid, name: AG.name }, authority: 'send' }] });
@@ -136,7 +136,7 @@ try {
   const woke = await waitFor(() => frames().length > f0, 20000);
   await sleep(1500);
   const fr = frames().slice(f0);
-  ok(pc.status === 200 && woke && fr.length === 1 && JSON.stringify(fr[0]).includes('PROD deploy failed'), `the env=prod call woke alpha ONCE (the staging call none): ${fr.length} frame(s)`, fr.map((x) => JSON.stringify(x).slice(0, 160)));
+  ok(pc.status === 200 && gateOf(woke) && fr.length === 1 && verdictOf(JSON.stringify(fr[0]).includes('PROD deploy failed')), `the env=prod call woke alpha ONCE (the staging call none): ${fr.length} frame(s)`, fr.map((x) => JSON.stringify(x).slice(0, 160)));
   const recId = `${IDB}:prod-1`;
   const rep = await agent('POST', '/api/agent/channels/reply', { conv: 'webhook/ci', text: 'on it — rolling back db1', replyTo: recId });
   const got = await waitFor(() => received.find((x) => x.body.includes('rolling back')), 15000);
@@ -144,10 +144,10 @@ try {
   if (got) {
     const ts = got.headers['x-webhook-timestamp'];
     const body = JSON.parse(got.body);
-    ok(got.headers['x-webhook-signature'] === 'v1=' + hmacHex(TB, WA.signatureBase(ts, '/in', got.body)) && body.from.name === 'VibeSpace' && body.path === 'ci' && /^[0-9a-f]{16}$/.test(body.inReplyTo) && body.replyId.startsWith(IDB + ':') && /^c-[0-9a-f]{8}:[0-9a-f]{16}$/.test(body.replyId) && !/\bp-[0-9a-z]{6,}-[0-9a-z]+\b/.test(got.body) && !got.body.includes(AG.name), 'the caller\'s URL got ONE signed POST (v1 = HMAC(its token, ts.POST./in.body)), from the path\'s replyName — never the agent, inReplyTo = the caller\'s own receipt id', body);
+    ok(got.headers['x-webhook-signature'] === 'v1=' + hmacHex(TB, WA.signatureBase(ts, '/in', got.body)) && body.from.name === 'VibeSpace' && body.path === 'ci' && gateOf(/^[0-9a-f]{16}$/.test(body.inReplyTo)) && gateOf(body.replyId.startsWith(IDB + ':')) && gateOf(/^c-[0-9a-f]{8}:[0-9a-f]{16}$/.test(body.replyId)) && !/\bp-[0-9a-z]{6,}-[0-9a-z]+\b/.test(got.body) && !got.body.includes(AG.name), 'the caller\'s URL got ONE signed POST (v1 = HMAC(its token, ts.POST./in.body)), from the path\'s replyName — never the agent, inReplyTo = the caller\'s own receipt id', body);
     const recs = await owner('GET', '/api/channels/proposals');
     const prop = await waitFor(async () => { const o = await owner('GET', '/api/channels/outbox'); const ps = (o.j && (o.j.proposals || o.j.items)) || []; return ps.find((p) => p.adapterId === 'webhook' && p.state === 'sent') || null; }, 8000);
-    ok(!!prop || (rep.j && rep.j.proposal && rep.j.proposal.state === 'sent'), 'the receipt says `sent`', (rep.j && rep.j.proposal && rep.j.proposal.state) || recs.status);
+    ok(!!prop || (gateOf(rep.j) && gateOf(rep.j.proposal) && rep.j.proposal.state === 'sent'), 'the receipt says `sent`', (rep.j && rep.j.proposal && rep.j.proposal.state) || recs.status);
   }
 
   console.log('§5 a long-poll ended by a revoke ⇒ 401');
@@ -170,8 +170,8 @@ try {
   // are bounded by ITS rate (60 / min here), and a stranger's bad tokens meet the gate's same-shape 429
   const sc = [];
   for (let i = 0; i < 31; i++) sc.push((await raw('POST', '/hook/ci', { headers: { Authorization: 'Bearer vswh_' + '0'.repeat(48), 'Content-Type': 'application/json' }, body: '{}' })).status);
-  ok(codes.every((c) => c === 200) && sc.every((c) => c === 401 || c === 429) && sc[30] === 429, `the flood: a proven caller's 34 calls all land (its own rate, not the stranger gate); a stranger's bad tokens meet the gate (${sc.filter((c) => c === 429).length} × 429 of ${sc.length})`, { proven: codes.join(','), stranger: sc.join(',') });
+  ok(gateOf(codes.every((c) => c === 200)) && gateOf(sc.every((c) => c === 401 || c === 429)) && sc[30] === 429, `the flood: a proven caller's 34 calls all land (its own rate, not the stranger gate); a stranger's bad tokens meet the gate (${sc.filter((c) => c === 429).length} × 429 of ${sc.length})`, { proven: codes.join(','), stranger: sc.join(',') });
   ok(wakes <= 1, `the flood's prod calls woke alpha at most once more — the path's budget (2 / hour, one spent above) holds the rest (${wakes})`, wakes);
 } catch (e) { fail++; console.error('  ✗ threw:', e.stack || e.message); }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

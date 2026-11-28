@@ -7,7 +7,7 @@
 import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import { scanStoppedInDesktopStates } from '../src/lib/layout.js';
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -44,9 +44,9 @@ const ALL = [
 const out = scanStoppedInDesktopStates(DATA, 'd1', LIVE, ALL, (id) => id === 'aaaa-1111' ? '自定义名' : null);
 const ids = out.map((d) => d.opts.backendSessionId);
 ok(!ids.includes('on-active-desktop'), 'ACTIVE desktop is excluded (restoreState already collected it)');
-ok(ids.includes('aaaa-1111') && ids.includes('bbbb-2222'), 'dead local chat + terminal on other desktops are collected', ids);
+ok(gateOf(ids.includes('aaaa-1111')) && verdictOf(ids.includes('bbbb-2222')), 'dead local chat + terminal on other desktops are collected', ids);
 ok(!ids.includes('cccc-3333'), 'a LIVE session is never offered');
-ok(ids.includes('rrrr-7777'), 'a dead REMOTE window (no local stoppedMatch) is collected from its openSpec identity');
+ok(verdictOf(ids.includes('rrrr-7777')), 'a dead REMOTE window (no local stoppedMatch) is collected from its openSpec identity');
 const a = out.find((d) => d.opts.backendSessionId === 'aaaa-1111');
 ok(a.name === '自定义名', 'custom name wins over discovery name');
 ok(a.opts.winBounds.desktopId === 'd2' || a.opts.winBounds.desktopId === 'd3',
@@ -67,7 +67,7 @@ import fs from 'node:fs';
 const laySrc = fs.readFileSync(new URL('../src/lib/layout.js', import.meta.url), 'utf-8');
 const callCount = laySrc.split('scanStoppedInDesktopStates(').length - 1;
 ok(callCount >= 2, `layout.js CALLS the scanner, not just defines it (${callCount} occurrences)`);
-ok(/scanStoppedInDesktopStates\([\s\S]{0,200}_bootStoppedSessions\.push|_bootStoppedSessions\.push[\s\S]{0,600}scanStoppedInDesktopStates\(|scanStoppedInDesktopStates\(data, activeId/.test(laySrc),
+ok(verdictOf(/scanStoppedInDesktopStates\([\s\S]{0,200}_bootStoppedSessions\.push|_bootStoppedSessions\.push[\s\S]{0,600}scanStoppedInDesktopStates\(|scanStoppedInDesktopStates\(data, activeId/.test(laySrc)),
   'the call feeds the resume-all collector');
 
 // ── B-ddc0 (lane chat-residuals): a restored window's NAME is the session's name, never its title ──
@@ -93,7 +93,7 @@ ok(/scanStoppedInDesktopStates\([\s\S]{0,200}_bootStoppedSessions\.push|_bootSto
     return names;
   };
   const names = reloads(scanStoppedInDesktopStates);
-  ok(names.length === 8 && names.every((x) => x === 'agentic-search'), 'B-ddc0 a REMOTE view-only window keeps its name across 8 reloads (the title is never read back as the name)', names.slice(-1));
+  ok(names.length === 8 && verdictOf(names.every((x) => x === 'agentic-search')), 'B-ddc0 a REMOTE view-only window keeps its name across 8 reloads (the title is never read back as the name)', names.slice(-1));
   ok(savedWindowName({ cwd, title: `agentic-search — ${cwd} — ${cwd} — ${cwd}`, openSpec: { name: `agentic-search — ${cwd} — ${cwd}` } }) === 'agentic-search', 'B-ddc0 an already-grown saved name heals (every trailing " — <cwd>" is the title\'s suffix)');
   ok(savedWindowName({ cwd, title: `agentic-search — ${cwd}` }) === 'agentic-search' && savedWindowName({ title: 'T' }) === 'T' && savedWindowName({ cwd, title: cwd, openSpec: {} }) === cwd, 'B-ddc0 an old record without openSpec.name: the title minus its suffix (a bare title stays as it is)');
   const lay = fs.readFileSync(path.join(repo, 'src/lib/layout.js'), 'utf8');
@@ -104,7 +104,7 @@ ok(/scanStoppedInDesktopStates\([\s\S]{0,200}_bootStoppedSessions\.push|_bootSto
   const P = await import(pathToFileURL(M.write('src/lib/layout.js', pre, 'pre-ddc0')).href);
   const pn = reloads(P.scanStoppedInDesktopStates);
   ok((pn[7].match(/ — /g) || []).length === 8, `B-ddc0 NEGATIVE CONTROL: the pre-fix rule grows the name to 8 × " — <cwd>" in 8 reloads (the incident's shape)`, pn[7]);
-  for (const r of copiesCensus(M.files, M.dir, repo, { minCopies: 1, label: 'B-ddc0 ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, repo, { minCopies: 1, label: 'B-ddc0 ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -33,7 +33,7 @@ const REPO = new URL('..', import.meta.url).pathname;
 const B = require('../src/browser-profiles.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -105,10 +105,10 @@ function mkEnv(settings, userCfg) {
   const { be } = mkEnv({}, { args: '--no-sandbox' });
   const r = be.envFor({ browserKey: K1 });
   const cfg = r.configPath ? JSON.parse(fs.readFileSync(r.configPath, 'utf8')) : null;
-  ok(r.variant === B.VARIANTS.D && cfg && argList(cfg.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${K1}` && r.automationFlag === 'added', 'DEFAULT (no setting stored): the spawn config carries the flag, the user\'s own args kept, the mark last', cfg);
+  ok(r.variant === B.VARIANTS.D && gateOf(cfg) && argList(cfg.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${K1}` && r.automationFlag === 'added', 'DEFAULT (no setting stored): the spawn config carries the flag, the user\'s own args kept, the mark last', cfg);
   const child = be.childConfigFor(K1 + '.1');
   const cc = child.path ? JSON.parse(fs.readFileSync(child.path, 'utf8')) : null;
-  ok(cc && argList(cc.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${K1}.1`, 'a sub-agent\'s own config inherits the flag, with ITS OWN mark last', cc);
+  ok(gateOf(cc) && argList(cc.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${K1}.1`, 'a sub-agent\'s own config inherits the flag, with ITS OWN mark last', cc);
   const { be: beOff } = mkEnv({ 'browser.automationFlag': false }, { args: '--no-sandbox' });
   const rOff = beOff.envFor({ browserKey: 'bk-00000e02' });
   const cOff = JSON.parse(fs.readFileSync(rOff.configPath, 'utf8'));
@@ -118,7 +118,7 @@ function mkEnv(settings, userCfg) {
   const cT = JSON.parse(fs.readFileSync(rT.configPath, 'utf8'));
   beT.envFor({ browserKey: 'bk-00000e04' });
   const said = lines.filter((l) => /does not add --disable-blink-features=AutomationControlled/.test(l));
-  ok(argList(cT.args).join(' ') === '--no-sandbox --disable-blink-features=Foo --disable-logging --log-level=3 --vibespace-keeper=bk-00000e03' && said.length === 1 && /drop yours/.test(said[0]), 'a --disable-blink-features switch of the user\'s is theirs: never overridden, and the journal says why ONCE (two spawns, one line)', { cT, said });
+  ok(argList(cT.args).join(' ') === '--no-sandbox --disable-blink-features=Foo --disable-logging --log-level=3 --vibespace-keeper=bk-00000e03' && said.length === 1 && verdictOf(/drop yours/.test(said[0])), 'a --disable-blink-features switch of the user\'s is theirs: never overridden, and the journal says why ONCE (two spawns, one line)', { cT, said });
 }
 // B-1789 (a sub-agent's child browser stopped answering ~20–25 s after its start): the spawn file — and the helper's copy — carry
 // lane browser-stderr-pipe's quiet log switches, by THE LAUNCH TAIL every launch road passes (B.launchTail; the census of roads
@@ -129,7 +129,7 @@ function mkEnv(settings, userCfg) {
   const { be: beQ } = mkEnv({}, { args: '--no-sandbox,--v=1' });
   const rQ = beQ.envFor({ browserKey: 'bk-00000e05' });
   const cQ = JSON.parse(fs.readFileSync(rQ.configPath, 'utf8'));
-  ok(quietOf(cQ.args) === 0 && argList(cQ.args).includes('--v=1'), 'B-1789: a user\'s own logging switch (--v=1) is theirs — the spawn file adds no quiet switch beside it', cQ.args);
+  ok(quietOf(cQ.args) === 0 && verdictOf(argList(cQ.args).includes('--v=1')), 'B-1789: a user\'s own logging switch (--v=1) is theirs — the spawn file adds no quiet switch beside it', cQ.args);
   // B-1789 cure (its readers: «the second fix has no leg» — a parent file written BEFORE the switches): a helper's copy of such a
   // parent still starts a quiet Chrome, its own mark last
   const KP = 'bk-00000e07';
@@ -139,7 +139,7 @@ function mkEnv(settings, userCfg) {
   fs.writeFileSync(rP.configPath, JSON.stringify(old, null, 2));
   const childOf = (be0) => { const c = be0.childConfigFor(KP + '.1'); return c.path ? JSON.parse(fs.readFileSync(c.path, 'utf8')) : null; };
   const cP = childOf(beP);
-  ok(cP && argList(cP.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${KP}.1`, 'B-1789 cure: a helper of a conversation whose spawn file was written BEFORE the switches gets them in its own copy (its mark last)', cP && cP.args);
+  ok(gateOf(cP) && argList(cP.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${KP}.1`, 'B-1789 cure: a helper of a conversation whose spawn file was written BEFORE the switches gets them in its own copy (its mark last)', cP && cP.args);
   // CONTROLS — the composer's tail without the switches (every road reads it: the spawn file is then loud), and the helper's
   // line put back to the release's (a mark only: the old parent's helper is then loud)
   const MQ = mutantCopies('b1789-env', REPO);
@@ -159,9 +159,9 @@ function mkEnv(settings, userCfg) {
     const BEc = MQ.load('src/server/browser-env.js', editAnchor(esrc, CANCH, '    out.args = B.withKeeperMark(out.args, childKey);', "src/server/browser-env.js"), 'b1789-child-mark-only'); // stale-pins: kept — the release's helper line
     const bc = BEc.create({ dataDir: path.join(dP, 'data'), homeDir: path.join(dP, 'home'), serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, env: {}, socketDirBase: path.join(dP, 'sock'), facts: { floor: async () => ({ state: 'ok' }) } }); // the SAME data dir: it reads the old parent file above
     const cc0 = childOf(bc);
-    ok(cc0 && quietOf(cc0.args) === 0, 'CONTROL (B-1789 cure, the release\'s helper line): the old parent\'s helper launches with Chrome\'s logging on — the leg above is RED on it', cc0 && cc0.args);
+    ok(gateOf(cc0) && quietOf(cc0.args) === 0, 'CONTROL (B-1789 cure, the release\'s helper line): the old parent\'s helper launches with Chrome\'s logging on — the leg above is RED on it', cc0 && cc0.args);
   }
-  for (const r of copiesCensus(MQ.files, MQ.dir, REPO, { label: 'B-1789 CONTROL: ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(MQ.files, MQ.dir, REPO, { label: 'B-1789 CONTROL: ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log('— ②b lane hooks-create H5: the window preference on a machine with no desktop (resolved at the LAUNCH, never baked at the spawn)');
@@ -192,7 +192,7 @@ console.log('— ②b lane hooks-create H5: the window preference on a machine w
   const fP = await dP.factFor({ baseFile: rU.configPath, mode: 'auto', preference: null });
   const fileP = dP.fileFor(rU.configPath, fP);
   const cP = JSON.parse(fs.readFileSync(fileP, 'utf8'));
-  ok(fP.wanted.byDefault === true && fP.fallback.rung === 'hidden-window' && fileP !== rU.configPath && cP.headed === true && argList(cP.args).includes('--ozone-platform=x11') && argList(cP.args).includes(FLAG) && argList(cP.args).includes('--vibespace-keeper=bk-00000e51'), 'H5 the keeper\'s LAUNCH config for that spawn file on a no-desktop + Xvfb machine, setting unset: headed:true (x11 pinned; the flag and the mark kept)', { fP, cP });
+  ok(fP.wanted.byDefault === true && fP.fallback.rung === 'hidden-window' && fileP !== rU.configPath && cP.headed === true && gateOf(argList(cP.args).includes('--ozone-platform=x11')) && gateOf(argList(cP.args).includes(FLAG)) && verdictOf(argList(cP.args).includes('--vibespace-keeper=bk-00000e51')), 'H5 the keeper\'s LAUNCH config for that spawn file on a no-desktop + Xvfb machine, setting unset: headed:true (x11 pinned; the flag and the mark kept)', { fP, cP });
   const dD = mkDisp(desk);
   const fD = await dD.factFor({ baseFile: rU.configPath, mode: 'auto', preference: null });
   ok(!fD.wanted.byDefault && !fD.fallback && dD.fileFor(rU.configPath, fD) === rU.configPath, 'H5 …the same spawn file on a machine WITH a desktop: unset keeps today\'s meaning (the base file, no window asked)', fD);
@@ -226,26 +226,26 @@ fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringif
   const p = k.createProfile({ label: 'Plain' }, { owner: { kind: 'instance', id: null } });
   await k.start(p.id, { why: 'test' });
   const L1 = fake.launches().at(-1);
-  ok(L1 && L1.config && argList(L1.config.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${p.id}` && !L1.args && k._reg().browsers[p.id].automationFlag === true && k._reg().browsers[p.id].quietLog === true, 'a named chromium profile\'s launch ran with the flag + the quiet log switches (lane browser-stderr-pipe) (the user\'s args kept, the mark last) and its record is stamped', L1);
+  ok(gateOf(L1) && gateOf(L1.config) && argList(L1.config.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${p.id}` && !L1.args && k._reg().browsers[p.id].automationFlag === true && k._reg().browsers[p.id].quietLog === true, 'a named chromium profile\'s launch ran with the flag + the quiet log switches (lane browser-stderr-pipe) (the user\'s args kept, the mark last) and its record is stamped', L1);
   const pc = k.createProfile({ label: 'Other build', provider: FIXTURE_ID }, { owner: { kind: 'instance', id: null } });
   await k.start(pc.id, { why: 'test' });
   const L2 = fake.launches().at(-1);
-  ok(L2 && L2 !== L1 && !argList(L2.config && L2.config.args).includes(FLAG) && !argList(L2.args).includes(FLAG) && k._reg().browsers[pc.id].automationFlag === false, 'a row whose launch is not ours to stamp (its automationFlag cell false) is untouched: no flag in its config, none in its env list', L2);
+  ok(gateOf(L2) && L2 !== L1 && !argList(L2.config && L2.config.args).includes(FLAG) && !argList(L2.args).includes(FLAG) && k._reg().browsers[pc.id].automationFlag === false, 'a row whose launch is not ours to stamp (its automationFlag cell false) is untouched: no flag in its config, none in its env list', L2);
   await k.stop(p.id, { why: 'test' }); await k.stop(pc.id, { why: 'test' });
   // a browser launched BEFORE the change keeps its file: a record without the stamp names the file without the flag
   const rec = k._reg().browsers[p.id];
   const stamped = argList(JSON.parse(fs.readFileSync(k.machineConfigFile('machine', p.id), 'utf8')).args).includes(FLAG);
   delete rec.automationFlag;
   const before = JSON.parse(fs.readFileSync(k.machineConfigFile('machine', p.id), 'utf8'));
-  ok(stamped && !argList(before.args).includes(FLAG) && argList(before.args).at(-1) === `--vibespace-keeper=${p.id}`, 'the file follows the RECORD\'s stamp: a browser launched before the change (no stamp) keeps its file without the flag — a different launch config would relaunch its Chrome (the holdDialogs precedent)', before);
+  ok(gateOf(stamped) && !argList(before.args).includes(FLAG) && argList(before.args).at(-1) === `--vibespace-keeper=${p.id}`, 'the file follows the RECORD\'s stamp: a browser launched before the change (no stamp) keeps its file without the flag — a different launch config would relaunch its Chrome (the holdDialogs precedent)', before);
   const file = k.configFileFor({ ephemeral: false, pairs: null });
-  ok(file && !argList(JSON.parse(fs.readFileSync(file, 'utf8')).args).includes(FLAG), 'a lease session\'s machine.json (it never launches) carries no flag', file);
+  ok(gateOf(file) && !argList(JSON.parse(fs.readFileSync(file, 'utf8')).args).includes(FLAG), 'a lease session\'s machine.json (it never launches) carries no flag', file);
   settings['browser.automationFlag'] = false;
   const k2 = mkKeeper(path.join(ROOT, 'data-k2'), settings);
   const p2 = k2.createProfile({ label: 'Off' }, { owner: { kind: 'instance', id: null } });
   await k2.start(p2.id, { why: 'test' });
   const L3 = fake.launches().at(-1);
-  ok(L3 && !argList(L3.config.args).includes(FLAG) && argList(L3.config.args).at(-1) === `--vibespace-keeper=${p2.id}` && k2._reg().browsers[p2.id].automationFlag === false, '`browser.automationFlag: false` ⇒ the keeper\'s launch carries no flag (the mark still last)', L3);
+  ok(gateOf(L3) && !argList(L3.config.args).includes(FLAG) && argList(L3.config.args).at(-1) === `--vibespace-keeper=${p2.id}` && k2._reg().browsers[p2.id].automationFlag === false, '`browser.automationFlag: false` ⇒ the keeper\'s launch carries no flag (the mark still last)', L3);
   await k2.stop(p2.id, { why: 'test' });
 }
 
@@ -257,7 +257,7 @@ fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringif
   const { SETTINGS_SCHEMA } = await import('../src/lib/settings-schema.js');
   const row = SETTINGS_SCHEMA['browser.automationFlag'];
   const readers = ['src/server/browser-env.js', 'src/server/browser-keeper.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8'));
-  ok(row && row.type === 'boolean' && row.default === true && readers.every((src) => /setting\('browser\.automationFlag', true\) !== false/.test(src)), 'the Settings row\'s default (on) is the server\'s own fallback in both readers — what the row shows is what the launch does (verify r1 V7)', row && row.default);
+  ok(gateOf(row) && row.type === 'boolean' && row.default === true && verdictOf(readers.every((src) => /setting\('browser\.automationFlag', true\) !== false/.test(src))), 'the Settings row\'s default (on) is the server\'s own fallback in both readers — what the row shows is what the launch does (verify r1 V7)', row && row.default);
 }
 
 console.log('— ④ controls: patched copies judged by the rows above');
@@ -265,22 +265,22 @@ const M = mutantCopies('bprop-env', REPO);
 {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
   const cut = "  if (list.some((x) => /AutomationControlled/.test(x))) return { add: false, why: 'theirs' };\n";
-  ok(src.includes(cut), 'the theirs rule is where the control cuts it');
+  ok(verdictOf(src.includes(cut)), 'the theirs rule is where the control cuts it');
   const Bm = M.load('src/browser-profiles.js', editAnchor(src, cut, '', "src/browser-profiles.js"), 'no-theirs');
   const r = Bm.generatedConfigParts({ userConfig: { args: '--enable-blink-features=AutomationControlled' }, automationFlag: true });
-  ok(argList(r.config.args).includes(FLAG), 'CONTROL: a verdict that ignores the user\'s own value adds a second, contradicting flag — the theirs row above would be red', r.config.args);
+  ok(verdictOf(argList(r.config.args).includes(FLAG)), 'CONTROL: a verdict that ignores the user\'s own value adds a second, contradicting flag — the theirs row above would be red', r.config.args);
 }
 {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
   const cut = ', automationFlag: automationFlagOn() });';
-  ok(src.includes(cut), 'browser-env passes the setting where the control cuts it');
+  ok(verdictOf(src.includes(cut)), 'browser-env passes the setting where the control cuts it');
   const BEm = M.load('src/server/browser-env.js', editAnchor(src, cut, ' });', "src/server/browser-env.js"), 'no-setting');
   const d = fs.mkdtempSync(path.join(ROOT, 'env-mut-'));
   const be = BEm.create({ dataDir: path.join(d, 'data'), homeDir: HOME, serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, env: {}, socketDirBase: path.join(d, 'sock'), facts: { floor: async () => ({ state: 'ok' }) } });
   const r = be.envFor({ browserKey: 'bk-00000e09' });
-  ok(r.configPath && !argList(JSON.parse(fs.readFileSync(r.configPath, 'utf8')).args).includes(FLAG), 'CONTROL: a browser-env that never passes the setting spawns WITHOUT the flag — the DEFAULT row above would be red');
+  ok(gateOf(r.configPath) && !argList(JSON.parse(fs.readFileSync(r.configPath, 'utf8')).args).includes(FLAG), 'CONTROL: a browser-env that never passes the setting spawns WITHOUT the flag — the DEFAULT row above would be red');
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(verdictOf(c.pass), c.name, c.detail);
 
 
 // ═══ ⑤ WHICH HOME EACH CHILD SEES (lane profile-lock-roll verify r8, T2 ⑦) ════════════════════════════════════════════════
@@ -295,12 +295,12 @@ for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass,
 console.log('— ⑤ which HOME each child sees: the daemon the keeper\'s, the CLI the account\'s (passwd), the socket root the keeper\'s');
 {
   const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
-  ok(/function accountHome\(\)[\s\S]*os\.userInfo\(\)\.homedir/.test(cliSrc) && /const HOMES = accountHome\(\);/.test(cliSrc), '⑤ the CLI reads the ACCOUNT\'s home off the passwd entry (accountHome → the getpwuid answer), never $HOME, for the machine\'s own things');
-  ok(/path\.join\(HOMES\.home, '\.agent-browser', 'config\.json'\)/.test(cliSrc) && /path\.join\(HOMES\.home, '\.vibespace', 'browser-config'\)/.test(cliSrc), '⑤ the account home is where the CLI reads config.json and pins a composed config (the two writes/reads a bare suite could reach — read-only unless an `open` through the real binary composes a config)');
+  ok(gateOf(/function accountHome\(\)[\s\S]*os\.userInfo\(\)\.homedir/.test(cliSrc)) && verdictOf(/const HOMES = accountHome\(\);/.test(cliSrc)), '⑤ the CLI reads the ACCOUNT\'s home off the passwd entry (accountHome → the getpwuid answer), never $HOME, for the machine\'s own things');
+  ok(gateOf(/path\.join\(HOMES\.home, '\.agent-browser', 'config\.json'\)/.test(cliSrc)) && verdictOf(/path\.join\(HOMES\.home, '\.vibespace', 'browser-config'\)/.test(cliSrc)), '⑤ the account home is where the CLI reads config.json and pins a composed config (the two writes/reads a bare suite could reach — read-only unless an `open` through the real binary composes a config)');
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/require\('\.\/browser-keeper'\)\.create\(\{[\s\S]{0,400}env: \(\) => agentEnv\(\)/.test(wiring), '⑤ the keeper is wired with env: () => agentEnv() — the daemon\'s HOME is the server\'s (the keeper\'s homeDir), the suites\' scratch HOME here');
+  ok(verdictOf(/require\('\.\/browser-keeper'\)\.create\(\{[\s\S]{0,400}env: \(\) => agentEnv\(\)/.test(wiring)), '⑤ the keeper is wired with env: () => agentEnv() — the daemon\'s HOME is the server\'s (the keeper\'s homeDir), the suites\' scratch HOME here');
   const verbs = fs.readFileSync(path.join(REPO, 'scripts/test-browser-verbs.mjs'), 'utf8');
-  ok(/PASSWD_PRELOAD/.test(verbs) && /os\.userInfo = \(o\) => \(\{ \.\.\.real\(o\), homedir: /.test(verbs), '⑤ the ONE way a suite redirects the CLI\'s account home is test-browser-verbs\' passwd preload (os.userInfo faked onto the scratch HOME) — a suite without it reaches the real passwd home read-only');
+  ok(gateOf(/PASSWD_PRELOAD/.test(verbs)) && verdictOf(/os\.userInfo = \(o\) => \(\{ \.\.\.real\(o\), homedir: /.test(verbs)), '⑤ the ONE way a suite redirects the CLI\'s account home is test-browser-verbs\' passwd preload (os.userInfo faked onto the scratch HOME) — a suite without it reaches the real passwd home read-only');
 }
 
 // ── B-574d «browser-stores» 7/8 (lane nl-migrations, 主开发 r5101 / r5128 (b)): the generated configs are DERIVED — their read-side check
@@ -320,7 +320,7 @@ console.log('— B-574d browser-stores 7/8: a generated config read back, or wri
   // 主开发 r5135 law 1: judged only when the product wrote through the plant (a torn write made: its witness); else a NAMED SKIP
   const skip7 = (name) => console.log(`  SKIP ${name}: the product never wrote through the placed torn write — its plant was never read (主开发 r5135 law 1): not judged`);
   const R1 = readBack(BE, 'once', 1), R2 = readBack(BE, 'always', 99);
-  if (!R1.tore) skip7('7/8 (torn once)'); else ok(R1.variant === 'D' && R1.named && R1.writes === 2 && R1.said === 0, 'B-574d browser-stores 7/8: a generated config whose write tore ONCE is written again at once — the conversation keeps rung D, its config named, nothing said', R1);
+  if (!R1.tore) skip7('7/8 (torn once)'); else ok(R1.variant === 'D' && gateOf(R1.named) && R1.writes === 2 && R1.said === 0, 'B-574d browser-stores 7/8: a generated config whose write tore ONCE is written again at once — the conversation keeps rung D, its config named, nothing said', R1);
   if (!R2.tore) skip7('7/8 (torn always)'); else ok(R2.variant === 'C' && !R2.named && R2.said === 1, '…one that still does not read after the second write falls back as before (rung C, never named) and is SAID once by name', R2);
   const esrc7 = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
   const BE1 = mutantCopies('bs7-env', REPO).load('src/server/browser-env.js', editAnchor(esrc7, '    for (let i = 0; i < 2; i++) {\n      writeJson(p, obj);\n', '    for (let i = 0; i < 1; i++) {\n      writeJson(p, obj);\n', 'src/server/browser-env.js'), 'bs7-one-write');
@@ -329,4 +329,4 @@ console.log('— B-574d browser-stores 7/8: a generated config read back, or wri
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? ` passed, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

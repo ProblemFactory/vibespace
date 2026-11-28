@@ -33,7 +33,7 @@ const PREFIX = process.env.IRL_PREFIX || 'after';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the bundle: the REAL panel of the tree (patch = {from, to} rewrites channels-panel.js for the control)
@@ -128,18 +128,18 @@ const LOOK = `(() => { /* stale-pins: kept — the page probe's own DOM walk (fi
 })()`;
 const judge = (L, label) => {
   const inner = L.rows.filter((r) => r.key.startsWith('groups/') || r.internal), outer = L.rows.filter((r) => !inner.includes(r));
-  ok(L.band && L.headFirst && L.bandKids.filter((k) => k === 'chan-grow').length === 7 && inner.length === 7 && inner.every((r) => r.inBand) && outer.every((r) => !r.inBand),
+  ok(gateOf(L.band) && gateOf(L.headFirst) && L.bandKids.filter((k) => k === 'chan-grow').length === 7 && inner.length === 7 && gateOf(inner.every((r) => r.inBand)) && verdictOf(outer.every((r) => !r.inBand)),
     `${label} ① the block is ONE band: the head first, the seven internal rows inside it, the three external rows outside`, JSON.stringify({ band: L.band, kids: L.bandKids, inner: inner.map((r) => [r.key, r.inBand]) }));
-  ok(inner.every((r) => r.vs && r.hue === null && r.svg && !r.badge && r.avChroma !== null && r.avChroma < 12),
+  ok(verdictOf(inner.every((r) => r.vs && r.hue === null && r.svg && !r.badge && r.avChroma !== null && r.avChroma < 12)),
     `${label} ① every internal row (the group and the six pairs) wears the VibeSpace mark on an achromatic disc — no hue, no corner badge`, JSON.stringify(inner.map((r) => [r.key, r.vs, r.hue, r.svg, r.badge, r.avChroma])));
-  ok(inner.every((r) => r.chip && r.chip.includes('chan-src-chip-internal') && /rgba\(0, 0, 0, 0\)|transparent/.test(r.chipBg)) && L.headBadgeChroma !== null && L.headBadgeChroma < 12,
+  ok(gateOf(inner.every((r) => r.chip && r.chip.includes('chan-src-chip-internal') && /rgba\(0, 0, 0, 0\)|transparent/.test(r.chipBg))) && L.headBadgeChroma !== null && L.headBadgeChroma < 12,
     `${label} ① the internal kind chips are the muted variant (no fill) and the head's mark is muted too`, JSON.stringify({ chips: inner.map((r) => [r.chip, r.chipBg]), head: L.headBadgeChroma }));
-  ok(/inset/.test(L.bandRule || '') && L.bandBg && !/rgba\(0, 0, 0, 0\)/.test(L.bandBg) && L.bandRadius === '8px',
+  ok(gateOf(/inset/.test(L.bandRule || '')) && gateOf(L.bandBg) && !/rgba\(0, 0, 0, 0\)/.test(L.bandBg) && L.bandRadius === '8px',
     `${label} ② the band has a fill, the --radius corners and the 2 px inset left rule`, JSON.stringify({ bg: L.bandBg, rule: L.bandRule, radius: L.bandRadius }));
   const lark = outer.find((r) => r.key === 'lark:a/oc_dana'), gm = outer.find((r) => r.key === 'gmail:a/t1'), sl = outer.find((r) => r.key === 'slack:a/C1');
-  ok(lark && lark.hue !== null && lark.pic && lark.badge && lark.mark === 'lark' && gm && gm.hue !== null && gm.mark === 'gmail' && gm.avChroma > 20 && sl && sl.hue !== null && sl.mark === 'slack' && outer.every((r) => !r.vs),
+  ok(gateOf(lark) && lark.hue !== null && gateOf(lark.pic) && gateOf(lark.badge) && lark.mark === 'lark' && gateOf(gm) && gm.hue !== null && gm.mark === 'gmail' && gm.avChroma > 20 && gateOf(sl) && sl.hue !== null && sl.mark === 'slack' && verdictOf(outer.every((r) => !r.vs)),
     `${label} ② people and vendors keep their look: Dana's picture + the Lark mark, the Gmail thread and the Slack channel on coloured discs with their vendor marks`, JSON.stringify(outer));
-  ok(L.sw <= L.vw && L.bandRight <= L.vw && L.rows.every((r) => r.right <= L.vw), `${label} nothing wider than the screen`, JSON.stringify({ vw: L.vw, sw: L.sw, band: L.bandRight }));
+  ok(L.sw <= L.vw && L.bandRight <= L.vw && verdictOf(L.rows.every((r) => r.right <= L.vw)), `${label} nothing wider than the screen`, JSON.stringify({ vw: L.vw, sw: L.sw, band: L.bandRight }));
 };
 const KEEP = (b) => `(async () => {
   const before = { band: document.querySelector('.chan-iband'), head: document.querySelector('.chan-ihead'), pair: document.querySelector('.chan-grow[data-grow="groups/g-pair3"]'), lanes: document.querySelector('.chan-grow[data-grow="groups/g-lanes"]') };
@@ -156,14 +156,14 @@ judge(await d.ev(LOOK), 'desk');
 await d.shot(`${PREFIX}.png`);
 console.log('§2 a broadcast redraws in place; the head folds');
 const K = await d.ev(KEEP());
-ok(K && K.band && K.head && K.pair && K.redrawn && K.inBand, '③ a group broadcast redraws IN PLACE: the band, the head and an unchanged pair row are the SAME nodes; the changed row redrew inside the kept band', JSON.stringify(K));
+ok(gateOf(K) && gateOf(K.band) && gateOf(K.head) && gateOf(K.pair) && gateOf(K.redrawn) && verdictOf(K.inBand), '③ a group broadcast redraws IN PLACE: the band, the head and an unchanged pair row are the SAME nodes; the changed row redrew inside the kept band', JSON.stringify(K));
 const F = await d.ev(`(async () => { const band = document.querySelector('.chan-iband'); document.querySelector('.chan-ihead').click(); await new Promise((r) => setTimeout(r, 150));
   const f = { same: document.querySelector('.chan-iband') === band, kids: band.children.length, head: !!band.querySelector(':scope > .chan-ihead.chan-ihead-folded'), rows: document.querySelectorAll('.chan-groups .chan-grow').length };
   return f; })()`);
-ok(F && F.same && F.kids === 1 && F.head && F.rows === 3, '④ folded: the head alone on the SAME band; the three external rows stay', JSON.stringify(F));
+ok(gateOf(F) && gateOf(F.same) && F.kids === 1 && gateOf(F.head) && F.rows === 3, '④ folded: the head alone on the SAME band; the three external rows stay', JSON.stringify(F));
 await d.shot(`${PREFIX}-folded.png`);
 const U = await d.ev(`(async () => { const band = document.querySelector('.chan-iband'); document.querySelector('.chan-ihead').click(); await new Promise((r) => setTimeout(r, 150)); return { same: document.querySelector('.chan-iband') === band, kids: band.children.length }; })()`);
-ok(U && U.same && U.kids === 8, '④ unfolded again: the head + seven rows back in the same band', JSON.stringify(U));
+ok(gateOf(U) && gateOf(U.same) && U.kids === 8, '④ unfolded again: the head + seven rows back in the same band', JSON.stringify(U));
 d.close();
 console.log('§3 phone (390 px)');
 const ph = await page(390, 844, 'b=after.js&w=100%25');
@@ -174,7 +174,7 @@ console.log('§4 CONTROL: the band made fresh at every draw');
 if (fs.existsSync(path.join(dir, 'control.js'))) {
   const cp = await page(1100, 900, 'b=control.js');
   const K0 = await cp.ev(KEEP());
-  ok(K0 && !K0.band && K0.head, 'CONTROL: with keep() bypassed for the band, the same broadcast REPLACES the band (the head itself is still kept) — leg ③ would be red', JSON.stringify(K0));
+  ok(gateOf(K0) && !K0.band && verdictOf(K0.head), 'CONTROL: with keep() bypassed for the band, the same broadcast REPLACES the band (the head itself is still kept) — leg ③ would be red', JSON.stringify(K0));
   cp.close();
 }
 console.log('§5 THE FIRST SCREEN SPLITS (lane attention-predicate-shared): 15 standing groups + tag rows on a fresh user state');
@@ -207,10 +207,10 @@ console.log('§5 THE FIRST SCREEN SPLITS (lane attention-predicate-shared): 15 s
   })()`;
   const p5 = await page(1100, 900, 'b=after.js', READY);
   const A1 = await p5.ev(S);
-  ok(A1.needs === 6 && A1.bands.length === 2 && A1.bands[0][0] === 2 && A1.bands[0][1] === '8' && A1.bands[1][0] === 4 && A1.bands[1][1] === '3' && A1.keys.every((k) => /\/dm\d$/.test(k)), `「需要我」 holds ${A1.needs} rows on the first screen (≤ cap 6) — the 6 longest-waiting of the 8 direct chats (band 2), the three decisions (band 4) behind their fold`, JSON.stringify(A1));
+  ok(A1.needs === 6 && A1.bands.length === 2 && A1.bands[0][0] === 2 && A1.bands[0][1] === '8' && A1.bands[1][0] === 4 && A1.bands[1][1] === '3' && verdictOf(A1.keys.every((k) => /\/dm\d$/.test(k))), `「需要我」 holds ${A1.needs} rows on the first screen (≤ cap 6) — the 6 longest-waiting of the 8 direct chats (band 2), the three decisions (band 4) behind their fold`, JSON.stringify(A1));
   ok(JSON.stringify(A1.bands.map(([b, , f]) => [b, f && (f.match(/\d+/) || [null])[0]])) === JSON.stringify([[2, '2'], [4, '3']]), `…the rest folded BY BAND, ONE toggle on each band's head: 2 more people waiting, 3 more decisions (${JSON.stringify(A1.bands)})`);
-  ok(A1.relFolded && A1.relCount === '(22)' && A1.after === 0 && A1.groupsShown === 0, `「相关」 is FOLDED on a fresh user state — its head counts the 15 standing groups + 7 context rows (3 read, 2 replied, 2 handed over) (${A1.relCount}), no row of it drawn`, JSON.stringify(A1));
-  ok(A1.fits, `the whole first screen — 「需要我」, its folds and the 「相关」 head — fits the 900 px window without a scroll (the 相关 head ends at ${A1.relBottom} px of ${A1.winH})`, JSON.stringify(A1));
+  ok(gateOf(A1.relFolded) && A1.relCount === '(22)' && A1.after === 0 && A1.groupsShown === 0, `「相关」 is FOLDED on a fresh user state — its head counts the 15 standing groups + 7 context rows (3 read, 2 replied, 2 handed over) (${A1.relCount}), no row of it drawn`, JSON.stringify(A1));
+  ok(verdictOf(A1.fits), `the whole first screen — 「需要我」, its folds and the 「相关」 head — fits the 900 px window without a scroll (the 相关 head ends at ${A1.relBottom} px of ${A1.winH})`, JSON.stringify(A1));
   await p5.shot(`${PREFIX}-split.png`);
   // the band's toggle keeps its slot (the tray's rule): 展开 ⇄ 收起 in the same rect
   const T = await p5.ev(`(async () => { const sel = '.chan-attn-band[data-band="2"] .chan-attn-fold'; const r = () => { const q = document.querySelector(sel).getBoundingClientRect(); return [Math.round(q.left), Math.round(q.top), Math.round(q.width), Math.round(q.height)]; };
@@ -218,11 +218,11 @@ console.log('§5 THE FIRST SCREEN SPLITS (lane attention-predicate-shared): 15 s
     const after = r(); const t1 = document.querySelector(sel).textContent; const rows = [...document.querySelectorAll('.chan-groups > .chan-grow')].filter((e) => /\\/dm\\d$/.test(e.dataset.grow || '')).length;
     document.querySelector(sel).click(); await new Promise((x) => setTimeout(x, 150));
     return { before, after, again: r(), t0, t1, t2: document.querySelector(sel).textContent, rows, rows2: [...document.querySelectorAll('.chan-groups > .chan-grow')].filter((e) => /\\/dm\\d$/.test(e.dataset.grow || '')).length }; })()`);
-  ok(T && JSON.stringify(T.before) === JSON.stringify(T.after) && JSON.stringify(T.after) === JSON.stringify(T.again) && T.t1 === '收起' && T.t2 === T.t0 && T.rows === 8 && T.rows2 === 6, `the band's fold is a TOGGLE in a fixed slot: 「${T && T.t0}」 ⇄ 「收起」, the same rect before / after / again; 8 rows open, 6 folded back`, JSON.stringify(T));
+  ok(gateOf(T) && JSON.stringify(T.before) === JSON.stringify(T.after) && JSON.stringify(T.after) === JSON.stringify(T.again) && T.t1 === '收起' && T.t2 === T.t0 && T.rows === 8 && T.rows2 === 6, `the band's fold is a TOGGLE in a fixed slot: 「${T && T.t0}」 ⇄ 「收起」, the same rect before / after / again; 8 rows open, 6 folded back`, JSON.stringify(T));
   // 「相关」 opens on a press (the person's choice, written to user state)
   const O = await p5.ev(`(async () => { document.querySelector('.chan-attn-head[data-attn-section="related"]').click(); await new Promise((x) => setTimeout(x, 150)); const L = document.querySelector('.chan-groups');
     return { open: L.querySelector('.chan-attn-head[data-attn-section="related"]').getAttribute('aria-expanded'), groups: L.querySelectorAll('.chan-iband .chan-grow').length, rows: L.querySelectorAll('.chan-grow').length }; })()`);
-  ok(O && O.open === 'true' && O.groups === 15 && O.rows === 6 + 22, `opened, 「相关」 draws its 22 rows — the 15 standing groups inside the VibeSpace band (${JSON.stringify(O)})`);
+  ok(gateOf(O) && O.open === 'true' && O.groups === 15 && O.rows === 6 + 22, `opened, 「相关」 draws its 22 rows — the 15 standing groups inside the VibeSpace band (${JSON.stringify(O)})`);
   p5.close();
   const c5 = await page(1100, 900, 'b=nosplit.js', `document.querySelectorAll('.chan-groups .chan-grow').length >= 10`);
   const C5 = await c5.ev(`(() => ({ rows: document.querySelectorAll('.chan-groups .chan-grow').length, heads: document.querySelectorAll('.chan-attn-head').length }))()`);
@@ -230,4 +230,4 @@ console.log('§5 THE FIRST SCREEN SPLITS (lane attention-predicate-shared): 15 s
   c5.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

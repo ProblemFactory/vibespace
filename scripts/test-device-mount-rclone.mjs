@@ -25,7 +25,7 @@ process.env.VIBESPACE_AGENTD_ROOT = path.join(tmp, 'agentd');
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const share = path.join(tmp, 'share'); fs.mkdirSync(path.join(share, 'sub'), { recursive: true });
@@ -74,7 +74,7 @@ try {
     c.on('error', (e) => { clearTimeout(t); reject(e); });
   });
   const ls = (await run('ls', [mountpoint])).toString('utf8');
-  check('root lists the device files', ls.includes('hello.txt') && ls.includes('sub'), JSON.stringify(ls));
+  check('root lists the device files', gateOf(ls.includes('hello.txt')) && verdictOf(ls.includes('sub')), JSON.stringify(ls));
   const t0 = Date.now();
   const cat = (await run('cat', [path.join(mountpoint, 'hello.txt')])).toString('utf8');
   const readMs = Date.now() - t0;
@@ -83,7 +83,7 @@ try {
   const nested = (await run('cat', [path.join(mountpoint, 'sub', 'nested.txt')])).toString('utf8');
   check('nested subdirectory file readable', nested === 'nested-content-ok', JSON.stringify(nested));
   const mb = (await run('ls', [mountpoint])).toString('utf8');
-  check('multibyte filename listed', mb.includes('多字节.md'), JSON.stringify(mb));
+  check('multibyte filename listed', verdictOf(mb.includes('多字节.md')), JSON.stringify(mb));
   // partial read (VFS seeks mid-file)
   const seek = (await run('dd', [`if=${path.join(mountpoint, 'hello.txt')}`, 'bs=1', 'skip=100', 'count=10', 'status=none'])).toString('utf8');
   check('mid-file seek read correct', seek === CONTENT.slice(100, 110), JSON.stringify(seek));
@@ -146,4 +146,4 @@ try {
 }
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\ndevice-folder-mount rclone last-mile passed — a device folder is readable via a real mount');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

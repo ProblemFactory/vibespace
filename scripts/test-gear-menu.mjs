@@ -108,7 +108,7 @@ const root = mintRoot('gear-menu-smoke'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const PROFILE = scratch('gear-menu-chrome');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // until-style polling (verifier r2): a fixed sleep from node raced the page's
 // own 120 ms timer on a starved lane — poll the page (up to 2 s) and let the
@@ -218,14 +218,14 @@ try {
   console.log('gear-menu — desktop 1280×800 (flyout mode)');
   const opened = await openGear();
   const facts = await evalJs(`({ isMobile: app.isMobile, hoverNone: matchMedia('(hover: none)').matches, w: innerWidth, cls: document.querySelector('${POP} .gs-menu')?.className })`);
-  check(`⚙ opens the popover in FLYOUT mode (${JSON.stringify(facts)})`, opened && /\bgs-fly\b/.test(facts.cls || ''));
+  check(`⚙ opens the popover in FLYOUT mode (${JSON.stringify(facts)})`, gateOf(opened) && verdictOf(/\bgs-fly\b/.test(facts.cls || '')));
   const top = await evalJs(`[...document.querySelectorAll('${POP} .gs-menu > .gs-menu-item')].map((r) => r.dataset.id || r.textContent.trim())`);
   check(`top level stays inside the budget (${top.length} rows ≤ 9: ${top.join(' / ')})`, top.length >= 6 && top.length <= 9);
-  check('the five heads are present, in order, marked as menu heads', await evalJs(`(() => { const ids = [...document.querySelectorAll('${POP} .gs-menu > .gs-menu-item.has-sub')].map((r) => r.dataset.id); return JSON.stringify(ids) === JSON.stringify(['appearance','tools','comm','system','help']) && ids.every((id) => { const el = document.querySelector('${POP} .gs-menu-item[data-id="' + id + '"]'); return el.getAttribute('role') === 'menuitem' && el.getAttribute('aria-haspopup') === 'true' && el.getAttribute('aria-expanded') === 'false'; }); })()`));
-  check('Manage agents is a direct row right under Appearance', await evalJs(`(() => { const rows = [...document.querySelectorAll('${POP} .gs-menu > .gs-menu-item')]; return rows[0].dataset.id === 'appearance' && /Manage agents/.test(rows[1].textContent) && !rows[1].classList.contains('has-sub'); })()`));
-  check('no quick-pref control sits at the top level any more (they are the Appearance panel)', await evalJs(`!document.querySelector('${POP} > label, ${POP} > select, ${POP} > .settings-all-link')`));
-  check('roving tabindex: exactly one row is tabbable and it holds focus', await evalJs(`[...document.querySelectorAll('${POP} .gs-menu-item')].filter((r) => r.tabIndex === 0).length === 1 && document.activeElement?.classList.contains('gs-menu-item')`));
-  check('every flyout is closed until asked', await evalJs(`!document.querySelector('${POP} .gs-flyout.open')`));
+  check('the five heads are present, in order, marked as menu heads', verdictOf(await evalJs(`(() => { const ids = [...document.querySelectorAll('${POP} .gs-menu > .gs-menu-item.has-sub')].map((r) => r.dataset.id); return JSON.stringify(ids) === JSON.stringify(['appearance','tools','comm','system','help']) && ids.every((id) => { const el = document.querySelector('${POP} .gs-menu-item[data-id="' + id + '"]'); return el.getAttribute('role') === 'menuitem' && el.getAttribute('aria-haspopup') === 'true' && el.getAttribute('aria-expanded') === 'false'; }); })()`)));
+  check('Manage agents is a direct row right under Appearance', verdictOf(await evalJs(`(() => { const rows = [...document.querySelectorAll('${POP} .gs-menu > .gs-menu-item')]; return rows[0].dataset.id === 'appearance' && /Manage agents/.test(rows[1].textContent) && !rows[1].classList.contains('has-sub'); })()`)));
+  check('no quick-pref control sits at the top level any more (they are the Appearance panel)', verdictOf(await evalJs(`!document.querySelector('${POP} > label, ${POP} > select, ${POP} > .settings-all-link')`)));
+  check('roving tabindex: exactly one row is tabbable and it holds focus', verdictOf(await evalJs(`[...document.querySelectorAll('${POP} .gs-menu-item')].filter((r) => r.tabIndex === 0).length === 1 && document.activeElement?.classList.contains('gs-menu-item')`)));
+  check('every flyout is closed until asked', verdictOf(await evalJs(`!document.querySelector('${POP} .gs-flyout.open')`)));
 
   // hover intent — measured on the PAGE's clock: a test-installed mouseenter
   // listener stamps the entry, a MutationObserver stamps the aria-expanded
@@ -237,33 +237,33 @@ try {
   const hi = await evalJs('window.__hi');
   check(`…and no earlier than the hover intent, on the page's own clock (mouseenter → aria-expanded ${Math.round(hi.open - hi.enter)} ms, expected ≥ 100)`, hi.enter > 0 && hi.open > 0 && hi.open - hi.enter >= 100 && hi.open - hi.enter <= 2000);
   const fly = await evalJs(`(() => { const h = document.querySelector('${POP} [data-id="tools"]'); const s = h.querySelector('.gs-flyout'); const r = s.getBoundingClientRect(); const hr = h.getBoundingClientRect(); return { open: s.classList.contains('open'), l: r.left, t: r.top, rgt: r.right, b: r.bottom, w: r.width, vw: innerWidth, vh: innerHeight, headLeft: hr.left, popover: s.dataset.popover, role: s.getAttribute('role'), rows: [...s.querySelectorAll('.gs-menu-item')].map((x) => x.textContent.trim()) }; })()`);
-  check('…and open after it', fly.open);
+  check('…and open after it', verdictOf(fly.open));
   check(`the flyout is fully on screen (l ${Math.round(fly.l)} t ${Math.round(fly.t)} r ${Math.round(fly.rgt)}/${fly.vw} b ${Math.round(fly.b)}/${fly.vh})`, fly.w > 0 && fly.l >= 0 && fly.t >= 0 && fly.rgt <= fly.vw && fly.b <= fly.vh);
   check('…opens to the LEFT of its head (the popover is right-anchored)', fly.rgt <= fly.headLeft + 2);
   check('…carries data-popover + role=menu (a child popover for the outside-click rule)', fly.popover === '1' && fly.role === 'menu');
   await shot('desktop-tools-flyout.png');
-  check(`Tools holds Usage / Background Work / Plugins (${fly.rows.join(' / ')})`, fly.rows.some((r) => /Usage/.test(r)) && fly.rows.some((r) => /Background Work/.test(r)) && fly.rows.some((r) => /Plugins/.test(r)));
+  check(`Tools holds Usage / Background Work / Plugins (${fly.rows.join(' / ')})`, gateOf(fly.rows.some((r) => /Usage/.test(r))) && gateOf(fly.rows.some((r) => /Background Work/.test(r))) && verdictOf(fly.rows.some((r) => /Plugins/.test(r))));
   await hover(`${POP} .gs-menu > .gs-menu-item[data-id="comm"]`);
   const commOpen = !!(await until(isOpen('comm')));
-  check('hovering Communication swaps the open flyout (one per level at a time)', commOpen && !(await evalJs(isOpen('tools'))));
+  check('hovering Communication swaps the open flyout (one per level at a time)', gateOf(commOpen) && !(await evalJs(isOpen('tools'))));
   const commRows = await evalJs(`[...document.querySelectorAll('${POP} [data-id="comm"] .gs-flyout .gs-menu-item')].map((x) => x.textContent.trim())`);
   // lane integrations-menu-home (owner 2026-10-13): Integrations… left Communication for System ▸ — the window holds browser and plugin keys too
-  check(`Communication holds For you / Channels / Outbox and no Integrations… (${commRows.join(' / ')})`, commRows.some((r) => /For you/.test(r)) && commRows.some((r) => /Channels/.test(r)) && commRows.some((r) => /Outbox/.test(r)) && !commRows.some((r) => /Integrations/.test(r)));
+  check(`Communication holds For you / Channels / Outbox and no Integrations… (${commRows.join(' / ')})`, gateOf(commRows.some((r) => /For you/.test(r))) && gateOf(commRows.some((r) => /Channels/.test(r))) && gateOf(commRows.some((r) => /Outbox/.test(r))) && !commRows.some((r) => /Integrations/.test(r)));
 
   // keyboard
   await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="appearance"]').focus(); true`);
   // design 009 §B6: "Apps…" is a TOP-LEVEL row between All Settings and Tools whenever the desktop-apps probe found a backend
   const downs = 5 + (await evalJs(`!!app._desktopAppsAvailable`) ? 1 : 0);
   for (let i = 0; i < downs; i++) await key('ArrowDown'); // Manage agents → All Settings (2.369.131) → [Apps…] → Tools → Communication → System
-  check(`ArrowDown ×${downs} from Appearance lands on System (Manage agents → All Settings → ${downs === 6 ? 'Apps… → ' : ''}Tools → Communication → System)`, await evalJs(`document.activeElement?.dataset?.id === 'system'`));
+  check(`ArrowDown ×${downs} from Appearance lands on System (Manage agents → All Settings → ${downs === 6 ? 'Apps… → ' : ''}Tools → Communication → System)`, verdictOf(await evalJs(`document.activeElement?.dataset?.id === 'system'`)));
   await key('ArrowLeft');
-  check('ArrowLeft opens the System flyout, swaps out the hover-opened one, focus on its first member (Report a problem…)', await evalJs(isOpen('system')) && !(await evalJs(isOpen('comm'))) && await evalJs(`/Report a problem/.test(document.activeElement?.textContent || '')`));
+  check('ArrowLeft opens the System flyout, swaps out the hover-opened one, focus on its first member (Report a problem…)', gateOf(await evalJs(isOpen('system'))) && !(await evalJs(isOpen('comm'))) && verdictOf(await evalJs(`/Report a problem/.test(document.activeElement?.textContent || '')`)));
   await key('ArrowDown');
-  check('ArrowDown inside the flyout moves to Diagnostics report…', await evalJs(`/Diagnostics report/.test(document.activeElement?.textContent || '') && document.activeElement.closest('.gs-flyout') !== null`));
+  check('ArrowDown inside the flyout moves to Diagnostics report…', verdictOf(await evalJs(`/Diagnostics report/.test(document.activeElement?.textContent || '') && document.activeElement.closest('.gs-flyout') !== null`)));
   await evalJs(`window.__diag = 0; app._openDiagnostics = () => { window.__diag++; }; true`);
   await key('Enter');
   await sleep(150);
-  check('Enter runs the row action (stubbed _openDiagnostics once) and closes the popover', await evalJs(`window.__diag === 1 && !document.querySelector('${POP}')`));
+  check('Enter runs the row action (stubbed _openDiagnostics once) and closes the popover', verdictOf(await evalJs(`window.__diag === 1 && !document.querySelector('${POP}')`)));
 
   // Esc layers. The pointer is PARKED off the menu first: the hover legs left
   // the real mouse over the Communication head, and a stationary pointer over
@@ -279,12 +279,12 @@ try {
   await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="appearance"]').focus(); true`);
   for (let i = 0; i < downs; i++) await key('ArrowDown'); // Manage agents → All Settings (2.369.131) → [Apps…] → Tools → Communication → System
   await key('ArrowLeft');
-  check(`(setup) System flyout open by keyboard (${await escState()})`, await evalJs(isOpen('system')));
+  check(`(setup) System flyout open by keyboard (${await escState()})`, verdictOf(await evalJs(isOpen('system'))));
   await shot('esc-0-before.png');
   await key('Escape');
   const esc1 = await escState();
   await shot('esc-1-after-first.png');
-  check(`Esc closes ONLY the flyout — the popover stays and focus returns to the System head (${esc1})`, await evalJs(`!!document.querySelector('${POP}')`) && !(await evalJs(isOpen('system'))) && await evalJs(`document.activeElement?.dataset?.id === 'system'`), esc1);
+  check(`Esc closes ONLY the flyout — the popover stays and focus returns to the System head (${esc1})`, gateOf(await evalJs(`!!document.querySelector('${POP}')`)) && !(await evalJs(isOpen('system'))) && verdictOf(await evalJs(`document.activeElement?.dataset?.id === 'system'`)), esc1);
   await key('Escape');
   const esc2 = await escState();
   await shot('esc-2-after-second.png');
@@ -304,12 +304,12 @@ try {
   await openGear();
   await click(`${POP} .gs-menu > .gs-menu-item[data-id="appearance"]`);
   const ap = await evalJs(`(() => { const s = document.querySelector('${POP} [data-id="appearance"] .gs-flyout'); const r = s.getBoundingClientRect(); return { open: s.classList.contains('open'), labels: [...s.querySelectorAll('label')].map((l) => l.textContent), hasLang: !!s.querySelector('.gs-menu-item[data-id="language"]'), hasAll: !!s.querySelector('.settings-all-link'), caption: document.querySelector('${POP} [data-id="appearance"] .gs-head-caption')?.textContent, onScreen: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight }; })()`);
-  check(`click opens the Appearance PANEL flyout: five quick-pref controls (${ap.labels.join(' / ')}) + Language ▸ — and NO All Settings link (2.369.131: it is a direct ⚙ row)`, ap.open && ap.labels.length === 5 && ap.hasLang && !ap.hasAll);
-  check('All Settings… is a direct top-level row right after Manage agents…', await evalJs(`(() => { const rows = [...document.querySelectorAll('${POP} .gs-menu > .gs-menu-item')]; const i = rows.findIndex((r) => /Manage agents/.test(r.textContent)); return i >= 0 && rows[i + 1] && rows[i + 1].dataset.id === 'all-settings'; })()`));
-  check(`the Appearance head shows a live caption "${ap.caption}"`, /px/.test(ap.caption || '') && /%/.test(ap.caption || ''));
-  check('the panel flyout is fully on screen', ap.onScreen);
+  check(`click opens the Appearance PANEL flyout: five quick-pref controls (${ap.labels.join(' / ')}) + Language ▸ — and NO All Settings link (2.369.131: it is a direct ⚙ row)`, gateOf(ap.open) && ap.labels.length === 5 && gateOf(ap.hasLang) && !ap.hasAll);
+  check('All Settings… is a direct top-level row right after Manage agents…', verdictOf(await evalJs(`(() => { const rows = [...document.querySelectorAll('${POP} .gs-menu > .gs-menu-item')]; const i = rows.findIndex((r) => /Manage agents/.test(r.textContent)); return i >= 0 && rows[i + 1] && rows[i + 1].dataset.id === 'all-settings'; })()`)));
+  check(`the Appearance head shows a live caption "${ap.caption}"`, gateOf(/px/.test(ap.caption || '')) && verdictOf(/%/.test(ap.caption || '')));
+  check('the panel flyout is fully on screen', verdictOf(ap.onScreen));
   await click(`${POP} .gs-menu > .gs-menu-item[data-id="appearance"]`);
-  check('a second click on the head does NOT toggle it closed (open only, the tap-emulation lesson)', await evalJs(isOpen('appearance')));
+  check('a second click on the head does NOT toggle it closed (open only, the tap-emulation lesson)', verdictOf(await evalJs(isOpen('appearance'))));
   const before = await evalJs(`app._fontSize`);
   // THE TERMINAL FONT SIZE'S STEPS, FOUND BY THEIR ROLE (checkpoint 61's hosted red: the plain-words chain drew the three size rows'
   // steps as the same − / + — src/lib/appearance-panel.js — and the glyph find 'A+' came back empty and THREW): the row is the one
@@ -331,27 +331,27 @@ try {
   const capSel = `document.querySelector('${POP} [data-id="appearance"] .gs-head-caption')?.textContent`;
   if (steps.ok) {
     await click('#gs-smoke-size-up');
-    check(`a click on the terminal font size's increase changes termFontSize by exactly one (${before} → ${before + 1}) and KEEPS the popover + panel open`, await evalJs(`app._fontSize === ${before + 1} && localStorage.getItem('termFontSize') === '${before + 1}' && !!document.querySelector('${POP}')`) && await evalJs(isOpen('appearance')));
+    check(`a click on the terminal font size's increase changes termFontSize by exactly one (${before} → ${before + 1}) and KEEPS the popover + panel open`, gateOf(await evalJs(`app._fontSize === ${before + 1} && localStorage.getItem('termFontSize') === '${before + 1}' && !!document.querySelector('${POP}')`)) && verdictOf(await evalJs(isOpen('appearance'))));
     const capAfter = await evalJs(capSel);
-    check(`the Appearance head's caption follows the change made in its own panel ("${ap.caption}" → "${capAfter}")`, new RegExp('(^|\\D)' + (before + 1) + 'px(\\D|$)').test(capAfter || '') && capAfter !== ap.caption);
+    check(`the Appearance head's caption follows the change made in its own panel ("${ap.caption}" → "${capAfter}")`, gateOf(new RegExp('(^|\\D)' + (before + 1) + 'px(\\D|$)').test(capAfter || '')) && capAfter !== ap.caption);
     await click('#gs-smoke-size-down');
-    check('(restore) the terminal font size\'s decrease puts the size back', await evalJs(`app._fontSize === ${before}`));
+    check('(restore) the terminal font size\'s decrease puts the size back', verdictOf(await evalJs(`app._fontSize === ${before}`)));
     check(`…and the caption back to "${ap.caption}"`, (await evalJs(capSel)) === ap.caption);
   }
   // CONTROLS — the finder can fail: pointed at ANOTHER size row (the UI font size: the same − / + glyphs) the role check refuses it;
   // the base's glyph find ('A+') on this page comes back EMPTY — said by name here (on the hosted runner it threw)
   const other = await evalJs(SIZE_STEPS('UI font size'));
-  check(`CONTROL: the finder pointed at another size row (UI font size, the same glyphs) is refused by the role check (${other.why})`, !other.ok && /is not the terminal font size/.test(other.why || ''), JSON.stringify(other));
+  check(`CONTROL: the finder pointed at another size row (UI font size, the same glyphs) is refused by the role check (${other.why})`, !other.ok && verdictOf(/is not the terminal font size/.test(other.why || '')), JSON.stringify(other));
   const glyph = await evalJs(`[...document.querySelectorAll('${POP} [data-id="appearance"] .gs-flyout .font-size-ctrl button')].some((b) => b.textContent === 'A+') ? 'found' : 'empty'`);
   check(`CONTROL: the base's glyph find ('A+') on this page comes back ${glyph} — the row's role, not a glyph, is what finds the step`, glyph === 'empty', glyph);
   // Language ▸ — the nested head
   await click(`${POP} [data-id="language"]`);
   const lang = await evalJs(`(() => { const s = document.querySelector('${POP} [data-id="language"] .gs-flyout'); const rows = [...s.querySelectorAll('.gs-menu-item')]; const r = s.getBoundingClientRect(); return { open: s.classList.contains('open'), n: rows.length, checked: rows.filter((x) => x.getAttribute('aria-checked') === 'true').map((x) => x.textContent.trim()), parentOpen: document.querySelector('${POP} [data-id="appearance"] .gs-flyout').classList.contains('open'), onScreen: r.left >= 0 && r.right <= innerWidth }; })()`);
-  check(`Language ▸ (a nested head) opens a second-level flyout with four choices, exactly one checked (${lang.checked.join(',')}), the Appearance panel still open`, lang.open && lang.n === 4 && lang.checked.length === 1 && lang.parentOpen && lang.onScreen);
+  check(`Language ▸ (a nested head) opens a second-level flyout with four choices, exactly one checked (${lang.checked.join(',')}), the Appearance panel still open`, gateOf(lang.open) && lang.n === 4 && lang.checked.length === 1 && gateOf(lang.parentOpen) && verdictOf(lang.onScreen));
   await shot('desktop-appearance-language.png');
   await evalJs(`document.querySelector('${POP} [data-id="language"]').focus(); true`);
   await key('Escape');
-  check('Esc closes the nested flyout first; the Appearance panel and the popover stay', !(await evalJs(isOpen('language'))) && await evalJs(isOpen('appearance')) && await evalJs(`!!document.querySelector('${POP}')`));
+  check('Esc closes the nested flyout first; the Appearance panel and the popover stay', !(await evalJs(isOpen('language'))) && gateOf(await evalJs(isOpen('appearance'))) && verdictOf(await evalJs(`!!document.querySelector('${POP}')`)));
   await evalJs(`document.querySelector('${POP}')?.remove(); true`);
 
   // ── lane integrations-menu-home: Integrations… sits under System ▸ between Backup & migrate… and the password (keys
@@ -361,8 +361,8 @@ try {
   check('(setup) the System flyout opens on hover', !!(await until(isOpen('system'))));
   const sysRows = await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].map((x) => x.textContent.trim())`);
   const iInteg = sysRows.indexOf('Integrations…');
-  check(`System holds Integrations… right after Backup & migrate… and right before the password row (${sysRows.join(' / ')})`, iInteg > 0 && sysRows[iInteg - 1] === 'Backup & migrate…' && /password/.test(sysRows[iInteg + 1] || ''));
-  check('…wearing the key icon (an SVG, like its neighbours)', await evalJs(`(() => { const r = [...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === 'Integrations…'); return !!(r && r.querySelector('svg')); })()`));
+  check(`System holds Integrations… right after Backup & migrate… and right before the password row (${sysRows.join(' / ')})`, iInteg > 0 && sysRows[iInteg - 1] === 'Backup & migrate…' && verdictOf(/password/.test(sysRows[iInteg + 1] || '')));
+  check('…wearing the key icon (an SVG, like its neighbours)', verdictOf(await evalJs(`(() => { const r = [...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === 'Integrations…'); return !!(r && r.querySelector('svg')); })()`)));
   await shot('desktop-system-integrations.png');
   await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === 'Integrations…').id = 'gs-smoke-integ'; true`);
   await click('#gs-smoke-integ');
@@ -377,11 +377,11 @@ try {
   await until(`document.querySelectorAll('.integ-win .integ-card, .integ-win .integ-setup-card').length >= ${nCards}`, { timeout: 10000, step: 100 });
   const groupsGot = await evalJs(`[...document.querySelectorAll('.integ-win .integ-body > .integ-group')].map((s) => ({ g: s.dataset.group, head: s.querySelector(':scope > .integ-group-head')?.textContent, ids: [...s.children].filter((c) => c.matches('${CARD}')).map((c) => c.dataset.integ || 'setup:' + c.dataset.integSetup) }))`);
   check(`…and opens THE window with its cards in groups, in order, by what uses the key (${groupsGot.map((x) => x.head + ': ' + x.ids.join(',')).join(' | ')})`, JSON.stringify(groupsGot) === JSON.stringify(groupsWant), JSON.stringify(groupsWant));
-  check(`no card sits outside a group, and no head stands over nothing — Communication holds the ${setupOf('communication').length} setup cards (${setupOf('communication').join(', ')})`, setupOf('communication').length > 0 && await evalJs(GROUPED), groupsGot);
+  check(`no card sits outside a group, and no head stands over nothing — Communication holds the ${setupOf('communication').length} setup cards (${setupOf('communication').join(', ')})`, setupOf('communication').length > 0 && verdictOf(await evalJs(GROUPED)), groupsGot);
   const ctlOut = await evalJs(`(() => { const c = document.querySelector('.integ-win .integ-setup-card'); if (!c) return null; const home = c.parentElement, next = c.nextSibling; c.closest('.integ-body').appendChild(c); const v = ${GROUPED}; home.insertBefore(c, next); return v; })()`);
   const ctlBare = await evalJs(`(() => { const s = document.createElement('div'); s.className = 'integ-group'; document.querySelector('.integ-win .integ-body').appendChild(s); const v = ${GROUPED}; s.remove(); return v; })()`);
-  check('CONTROL: a setup card moved outside every group is RED on the same judge, and so is a head over nothing — both put back, green again', ctlOut === false && ctlBare === false && await evalJs(GROUPED), { ctlOut, ctlBare });
-  check('the window is still the one singleton', await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'integrations').length === 1`));
+  check('CONTROL: a setup card moved outside every group is RED on the same judge, and so is a head over nothing — both put back, green again', ctlOut === false && ctlBare === false && verdictOf(await evalJs(GROUPED)), { ctlOut, ctlBare });
+  check('the window is still the one singleton', verdictOf(await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'integrations').length === 1`)));
   await shot('desktop-integrations-window.png');
   await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'integrations') app.wm.closeWindow(w.id); true`);
 
@@ -406,34 +406,34 @@ try {
   await sleep(1500);
   await evalJs(POLL_APP);
   await sleep(600);
-  check('phone viewport: app.isMobile + hover:none', await evalJs(`app.isMobile === true && matchMedia('(hover: none)').matches`));
+  check('phone viewport: app.isMobile + hover:none', verdictOf(await evalJs(`app.isMobile === true && matchMedia('(hover: none)').matches`)));
   await tap('#mobile-nav-gear');
-  check('the phone ⚙ opens the SAME menu in ACCORDION mode', await evalJs(`!!document.querySelector('${POP} .gs-menu.gs-acc')`));
-  check('no flyout element exists in accordion mode', await evalJs(`!document.querySelector('${POP} .gs-flyout')`));
-  check('every head is collapsed until tapped', await evalJs(`!document.querySelector('${POP} .gs-sub.open')`));
-  check('the popover fits the phone width', await evalJs(`(() => { const r = document.querySelector('${POP}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`));
+  check('the phone ⚙ opens the SAME menu in ACCORDION mode', verdictOf(await evalJs(`!!document.querySelector('${POP} .gs-menu.gs-acc')`)));
+  check('no flyout element exists in accordion mode', verdictOf(await evalJs(`!document.querySelector('${POP} .gs-flyout')`)));
+  check('every head is collapsed until tapped', verdictOf(await evalJs(`!document.querySelector('${POP} .gs-sub.open')`)));
+  check('the popover fits the phone width', verdictOf(await evalJs(`(() => { const r = document.querySelector('${POP}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)));
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="tools"]`);
-  check('tapping Tools expands its members INLINE (.gs-sub.open as the next sibling, aria-expanded)', await evalJs(isOpen('tools')) && await evalJs(`(() => { const h = document.querySelector('${POP} [data-id="tools"]'); return h.nextElementSibling.classList.contains('gs-sub') && h.nextElementSibling.querySelectorAll('.gs-menu-item').length >= 3 && h.nextElementSibling.querySelector('.gs-menu-item').getBoundingClientRect().left > h.getBoundingClientRect().left; })()`));
+  check('tapping Tools expands its members INLINE (.gs-sub.open as the next sibling, aria-expanded)', gateOf(await evalJs(isOpen('tools'))) && verdictOf(await evalJs(`(() => { const h = document.querySelector('${POP} [data-id="tools"]'); return h.nextElementSibling.classList.contains('gs-sub') && h.nextElementSibling.querySelectorAll('.gs-menu-item').length >= 3 && h.nextElementSibling.querySelector('.gs-menu-item').getBoundingClientRect().left > h.getBoundingClientRect().left; })()`)));
   await shot('phone-accordion-tools.png');
   const heights = await evalJs(`[...document.querySelectorAll('${POP} .gs-menu-item')].filter((r) => r.getClientRects().length).map((r) => Math.round(r.getBoundingClientRect().height))`);
-  check(`every visible row is ≥ 44 px tall on touch (min ${Math.min(...heights)} px over ${heights.length} rows, members included)`, heights.length > 8 && heights.every((h) => h >= 44));
+  check(`every visible row is ≥ 44 px tall on touch (min ${Math.min(...heights)} px over ${heights.length} rows, members included)`, heights.length > 8 && verdictOf(heights.every((h) => h >= 44)));
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
-  check('tapping another head swaps (one open per level)', !(await evalJs(isOpen('tools'))) && await evalJs(isOpen('system')));
+  check('tapping another head swaps (one open per level)', !(await evalJs(isOpen('tools'))) && verdictOf(await evalJs(isOpen('system'))));
   const phoneSys = await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] + .gs-sub .gs-menu-item')].filter((r) => r.getClientRects().length).map((r) => ({ t: r.textContent.trim(), h: Math.round(r.getBoundingClientRect().height), in: r.getBoundingClientRect().bottom <= innerHeight }))`);
   const pInteg = phoneSys.find((r) => r.t === 'Integrations…');
-  check(`the phone reaches Integrations… under System, a ≥ 44 px row on screen (${phoneSys.map((r) => r.t).join(' / ')})`, !!pInteg && pInteg.h >= 44 && pInteg.in);
+  check(`the phone reaches Integrations… under System, a ≥ 44 px row on screen (${phoneSys.map((r) => r.t).join(' / ')})`, !!pInteg && pInteg.h >= 44 && verdictOf(pInteg.in));
   await shot('phone-accordion-system.png');
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
   check('tapping the open head again collapses it', !(await evalJs(isOpen('system'))));
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="appearance"]`);
-  check('the Appearance panel renders INLINE in the accordion (labels + steppers under the head)', await evalJs(isOpen('appearance')) && await evalJs(`(() => { const s = document.querySelector('${POP} [data-id="appearance"]').nextElementSibling; return !!s.querySelector('.gs-appearance label') && s.querySelectorAll('.font-size-ctrl button').length >= 6 && !!s.querySelector('.gs-menu-item[data-id="language"]'); })()`));
+  check('the Appearance panel renders INLINE in the accordion (labels + steppers under the head)', gateOf(await evalJs(isOpen('appearance'))) && verdictOf(await evalJs(`(() => { const s = document.querySelector('${POP} [data-id="appearance"]').nextElementSibling; return !!s.querySelector('.gs-appearance label') && s.querySelectorAll('.font-size-ctrl button').length >= 6 && !!s.querySelector('.gs-menu-item[data-id="language"]'); })()`)));
   await shot('phone-accordion-appearance.png');
-  check('the touch steppers grew to 32 px', await evalJs(`Math.round(document.querySelector('${POP} .gs-appearance .font-size-ctrl button').getBoundingClientRect().height) >= 32`));
+  check('the touch steppers grew to 32 px', verdictOf(await evalJs(`Math.round(document.querySelector('${POP} .gs-appearance .font-size-ctrl button').getBoundingClientRect().height) >= 32`)));
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="tools"]`);
   const usageRow = await evalJs(`(() => { window.__usage = 0; app.openUsage = () => { window.__usage++; }; const r = [...document.querySelectorAll('${POP} [data-id="tools"] + .gs-sub .gs-menu-item')].find((x) => /Usage/.test(x.textContent)); if (!r) return false; r.id = 'gs-smoke-usage'; return true; })()`);
   check('the Tools group shows its Usage row (an empty find is a named red, never a throw)', usageRow === true);
   if (usageRow) await tap('#gs-smoke-usage');
-  check('a tap on a member row runs the action (stubbed openUsage once) and closes the popover — no hover was dispatched in this leg', await evalJs(`window.__usage === 1 && !document.querySelector('${POP}')`));
+  check('a tap on a member row runs the action (stubbed openUsage once) and closes the popover — no hover was dispatched in this leg', verdictOf(await evalJs(`window.__usage === 1 && !document.querySelector('${POP}')`)));
 } catch (e) {
   failed++;
   console.error('  ✗ smoke crashed: ' + e.message);
@@ -450,35 +450,35 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
 await sleep(400);
 const sw = await evalJs(`(() => { const nav = document.querySelector('.settings-window .settings-nav'); if (!nav) return null; const groups = [...nav.querySelectorAll('.settings-nav-group')].map((g) => ({ id: g.dataset.group, head: g.querySelector('.settings-nav-group-head span')?.textContent, items: [...g.querySelectorAll('.settings-nav-item')].map((i) => i.textContent), folded: g.classList.contains('is-folded') })); const blocksOf = (cat) => { const sec = document.querySelector('.settings-window .settings-section[data-category="' + cat + '"]'); return sec ? [...sec.querySelectorAll('.settings-subsection-title')].map((b) => ({ kind: b.dataset.applyKind, text: b.textContent.slice(0, 60), rows: (() => { let n = 0; for (let e = b.nextElementSibling; e && !e.classList.contains('settings-subsection-title'); e = e.nextElementSibling) if (e.classList.contains('settings-row')) n++; return n; })() })) : null; }; const blocks = blocksOf('Claude'); const perHarness = Object.fromEntries(${JSON.stringify(HARNESS_ROWS)}.map((c) => [c, blocksOf(c)])); const sections = [...document.querySelectorAll('.settings-window .settings-section')].map((x) => x.dataset.category); return { groups, blocks, perHarness, sections }; })()`);
 // int263 seam (i): plugin-settings-p0 derives each plugin's table into All Settings 「插件 › <名>」 — the nav's sixth group, last
-check(`the nav is six groups in order (${sw && sw.groups.map((g) => g.id + ':' + g.items.length).join(' ')})`, !!sw && sw.groups.map((g) => g.id).join(',') === 'appearance,sessions,harness,services,spending,plugins' && sw.groups.every((g) => g.items.length >= 1 && g.head), sw && sw.groups);
+check(`the nav is six groups in order (${sw && sw.groups.map((g) => g.id + ':' + g.items.length).join(' ')})`, !!sw && sw.groups.map((g) => g.id).join(',') === 'appearance,sessions,harness,services,spending,plugins' && verdictOf(sw.groups.every((g) => g.items.length >= 1 && g.head)), sw && sw.groups);
 check(`the Harnesses group holds every registered harness with a settings table, in the nav's order (${HARNESS_ROWS.join(' / ')} — read off the registry); Appearance & layout holds Toolbar & Layout / Window / Sidebar / Session Card / Mobile (lane mobile-back-guard)`, !!sw && HARNESS_ROWS.length >= 1 && sw.groups.find((g) => g.id === 'harness').items.join('|') === HARNESS_ROWS.join('|') && sw.groups.find((g) => g.id === 'appearance').items.join('|') === 'Toolbar & Layout|Window|Sidebar|Session Card|Mobile', sw && sw.groups);
 check('the sections follow the same order as the nav (groups, then categories)', !!sw && sw.sections.join('|') === sw.groups.flatMap((g) => g.items).join('|'), sw && sw.sections);
-check(`the Claude section is sub-blocks by apply kind — global cli-config first, then per-session spawn (${sw && sw.blocks && sw.blocks.map((b) => b.kind + ':' + b.rows).join(' ')})`, !!sw && !!sw.blocks && sw.blocks.map((b) => b.kind).join(',') === 'cli-config,spawn' && sw.blocks.every((b) => b.rows >= 1) && /Global/.test(sw.blocks[0].text) && /Per session/.test(sw.blocks[1].text), sw && sw.blocks);
+check(`the Claude section is sub-blocks by apply kind — global cli-config first, then per-session spawn (${sw && sw.blocks && sw.blocks.map((b) => b.kind + ':' + b.rows).join(' ')})`, !!sw && !!sw.blocks && sw.blocks.map((b) => b.kind).join(',') === 'cli-config,spawn' && gateOf(sw.blocks.every((b) => b.rows >= 1)) && gateOf(/Global/.test(sw.blocks[0].text)) && verdictOf(/Per session/.test(sw.blocks[1].text)), sw && sw.blocks);
 const ORDER = ['cli-config', 'spawn', 'server'];
-check(`every harness section's blocks follow global → per-session → server, only the kinds it has, ≥ 1 row each; at least one section carries a VibeSpace server block (${sw && Object.entries(sw.perHarness).map(([k, v]) => k + '=' + (v || []).map((b) => b.kind).join('+')).join(' ')})`, !!sw && Object.values(sw.perHarness).every((v) => v && v.length && v.every((b) => b.rows >= 1) && v.map((b) => ORDER.indexOf(b.kind)).every((x, i, arr) => x >= 0 && (i === 0 || x > arr[i - 1]))) && Object.values(sw.perHarness).some((v) => v.some((b) => b.kind === 'server')), sw && sw.perHarness);
+check(`every harness section's blocks follow global → per-session → server, only the kinds it has, ≥ 1 row each; at least one section carries a VibeSpace server block (${sw && Object.entries(sw.perHarness).map(([k, v]) => k + '=' + (v || []).map((b) => b.kind).join('+')).join(' ')})`, !!sw && gateOf(Object.values(sw.perHarness).every((v) => v && v.length && v.every((b) => b.rows >= 1) && v.map((b) => ORDER.indexOf(b.kind)).every((x, i, arr) => x >= 0 && (i === 0 || x > arr[i - 1])))) && verdictOf(Object.values(sw.perHarness).some((v) => v.some((b) => b.kind === 'server'))), sw && sw.perHarness);
 // fold a group: its items hide, the fold persists per device, a search shows everything again
 await evalJs(`document.querySelector('.settings-window .settings-nav-group[data-group="services"] .settings-nav-group-head').click(); true`);
 await sleep(150);
 const folded = await evalJs(`(() => { const g = document.querySelector('.settings-window .settings-nav-group[data-group="services"]'); const it = g.querySelector('.settings-nav-item'); return { folded: g.classList.contains('is-folded'), itemHidden: getComputedStyle(it).display === 'none', saved: localStorage.getItem('vibespace.settingsNavFolds') }; })()`);
-check(`folding Services hides its categories and persists the fold (${folded && folded.saved})`, !!folded && folded.folded && folded.itemHidden && /services/.test(folded.saved || ''), folded);
+check(`folding Services hides its categories and persists the fold (${folded && folded.saved})`, !!folded && gateOf(folded.folded) && gateOf(folded.itemHidden) && verdictOf(/services/.test(folded.saved || '')), folded);
 await evalJs(`(() => { const i = document.querySelector('.settings-window .settings-search'); i.value = 'channel'; i.dispatchEvent(new Event('input')); return true; })()`);
 await sleep(300);
 const searched = await evalJs(`(() => { const g = document.querySelector('.settings-window .settings-nav-group[data-group="services"]'); return { present: !!g, folded: g ? g.classList.contains('is-folded') : null, items: g ? [...g.querySelectorAll('.settings-nav-item')].map((i) => i.textContent) : [] }; })()`);
-check('a search shows every matching category even inside a folded group (the fold is not a filter)', !!searched && searched.present && searched.folded === false && searched.items.includes('Channels'), searched);
+check('a search shows every matching category even inside a folded group (the fold is not a filter)', !!searched && gateOf(searched.present) && searched.folded === false && verdictOf(searched.items.includes('Channels')), searched);
 await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorage.removeItem('vibespace.settingsAdvanced'); document.querySelector('.settings-window')?.remove(); true`);
 
 // ── 2.369.137 the freeze probe: an automatic capture carries the GPU/canvas inventory ──
 {
   const id = await evalJs(`app.autoCaptureIncident('probe', 'suite')`);
-  check(`autoCaptureIncident answers an incident id (${id})`, typeof id === 'string' && /^inc-/.test(id), id);
+  check(`autoCaptureIncident answers an incident id (${id})`, typeof id === 'string' && verdictOf(/^inc-/.test(id)), id);
   const second = await evalJs(`app.autoCaptureIncident('probe', 'again')`);
   check('a second auto capture inside 10 minutes is refused (rate limit)', second === null, second);
   let bundle = null;
   try { bundle = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'incidents', String(id), 'bundle.json'), 'utf8')); } catch (e) { bundle = { error: String(e.message) }; }
   const inv = bundle && bundle.client && bundle.client.snapshot && bundle.client.snapshot.inventory;
-  check('the bundle note names the freeze and the snapshot carries the inventory (canvases, webgl, domNodes, screen, memory, visibility)', !!inv && typeof inv.canvases === 'number' && 'webgl' in inv && typeof inv.domNodes === 'number' && inv.screen && typeof inv.screen.dpr === 'number' && 'memory' in inv && typeof inv.visibility === 'string' && /^auto: probe — suite/.test(bundle.note || ''), JSON.stringify({ note: bundle && bundle.note, inv }).slice(0, 400));
+  check('the bundle note names the freeze and the snapshot carries the inventory (canvases, webgl, domNodes, screen, memory, visibility)', !!inv && typeof inv.canvases === 'number' && 'webgl' in inv && typeof inv.domNodes === 'number' && gateOf(inv.screen) && typeof inv.screen.dpr === 'number' && 'memory' in inv && typeof inv.visibility === 'string' && verdictOf(/^auto: probe — suite/.test(bundle.note || '')), JSON.stringify({ note: bundle && bundle.note, inv }).slice(0, 400));
   const toast = await evalJs(`[...document.querySelectorAll('#global-toasts *')].map((e) => e.textContent).join(' | ')`);
-  check('the capture is not silent: a toast names the incident id', new RegExp(String(id)).test(toast), toast);
+  check('the capture is not silent: a toast names the incident id', verdictOf(new RegExp(String(id)).test(toast)), toast);
 }
 // ── lane integrations-menu-home: the owner's words (zh) — ⚙ → 系统 ▸ 集成与密钥…, the window's heads, the phone ──
 {
@@ -497,7 +497,7 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
     const zSys = await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].map((x) => x.textContent.trim())`);
     const zHead = await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="system"]').textContent.trim()`);
     const zComm = await evalJs(`(() => { const h = document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="comm"]'); return h ? h.textContent.trim() : ''; })()`);
-    check(`zh: 系统 holds 集成与密钥… after 备份与迁移… (${zHead} ▸ ${zSys.join(' / ')}; 通讯 = ${zComm})`, /系统/.test(zHead) && zSys.indexOf('集成与密钥…') > 0 && zSys[zSys.indexOf('集成与密钥…') - 1] === '备份与迁移…');
+    check(`zh: 系统 holds 集成与密钥… after 备份与迁移… (${zHead} ▸ ${zSys.join(' / ')}; 通讯 = ${zComm})`, gateOf(/系统/.test(zHead)) && zSys.indexOf('集成与密钥…') > 0 && zSys[zSys.indexOf('集成与密钥…') - 1] === '备份与迁移…');
     const zVault = zSys.filter((r) => /^保险库/.test(r));
     check(`zh: 系统 holds ONE vault row, 「保险库…」 (${zVault.join(' / ')})`, zVault.length === 1 && zVault[0] === '保险库…');
     await shot('zh-desktop-system-integrations.png');
@@ -521,11 +521,11 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
     await tap('#mobile-nav-gear');
     await tap(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
     await evalJs(`(() => { const r = [...document.querySelectorAll('${POP} [data-id="system"] + .gs-sub .gs-menu-item')].find((x) => x.textContent.trim() === '集成与密钥…'); if (r) r.id = 'gs-smoke-integ-phone'; return !!r; })()`);
-    check('zh phone: 系统 expands with 集成与密钥… among its rows', await evalJs(`!!document.getElementById('gs-smoke-integ-phone')`));
+    check('zh phone: 系统 expands with 集成与密钥… among its rows', verdictOf(await evalJs(`!!document.getElementById('gs-smoke-integ-phone')`)));
     await shot('zh-phone-system-integrations.png');
     await tap('#gs-smoke-integ-phone');
     await until(`document.querySelectorAll('.integ-win .integ-card').length >= 8`, { timeout: 10000, step: 100 });
-    check('zh phone: the tap opens the window, grouped as on the desktop (通讯 / 浏览器 / 插件, every card in a group)', await evalJs(`!document.querySelector('${POP}') && [...document.querySelectorAll('.integ-win .integ-group-head')].map((h) => h.textContent).join('/') === '通讯/浏览器/插件' && ${GROUPED}`));
+    check('zh phone: the tap opens the window, grouped as on the desktop (通讯 / 浏览器 / 插件, every card in a group)', verdictOf(await evalJs(`!document.querySelector('${POP}') && [...document.querySelectorAll('.integ-win .integ-group-head')].map((h) => h.textContent).join('/') === '通讯/浏览器/插件' && ${GROUPED}`)));
     await shot('zh-phone-integrations-window.png');
     await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'integrations') app.wm.closeWindow(w.id); true`);
   } catch (e) {
@@ -536,4 +536,4 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
 console.log(`screenshots: ${SHOTS}`);
 failed += censusFailed;
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -47,7 +47,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 15000) => { const end = Date.now() + ms; for (;;) { let v; try { v = await fn(); } catch { v = null; } if (v || Date.now() > end) return v; await sleep(150); } };
 
@@ -66,7 +66,7 @@ const build = (out) => buildClientBundle({ repo, root: wt, outFile: path.join(wt
 // THE CONTROL BUNDLE first: the card's Approve answers without the frozen digest it was drawn from
 const CV = path.join(wt, 'src/lib/channel-api-card-view.js'), cvSrc = fs.readFileSync(CV, 'utf-8');
 const APPROVE = "answerApiProposal(m.id, 'approve', { shown: rec.digest })";
-ok(cvSrc.includes(APPROVE), 'the card\'s Approve names the frozen digest it was drawn from (the control has a line to cut)');
+ok(verdictOf(cvSrc.includes(APPROVE)), 'the card\'s Approve names the frozen digest it was drawn from (the control has a line to cut)');
 fs.writeFileSync(CV, cvSrc.replace(APPROVE, "answerApiProposal(m.id, 'approve', { shown: null })"));
 build('public/bundle-control.js');
 fs.writeFileSync(CV, cvSrc);
@@ -125,14 +125,14 @@ process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 
 const api = async (method, p, body) => { const r = await fetch(BASE + p, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); let json = null; try { json = await r.json(); } catch {} return { status: r.status, json }; };
-ok(await until(async () => (await fetch(`${BASE}/api/home`)).ok, 40000), 'the scratch server booted (vendor stub preloaded)');
+ok(verdictOf(await until(async () => (await fetch(`${BASE}/api/home`)).ok, 40000)), 'the scratch server booted (vendor stub preloaded)');
 
 // THE ACCOUNT: a Slack account through the product's own paste-back, answered by the recorded fake
 const SV = require(path.join(repo, 'scripts/fixtures/slack-vendor.cjs'));
 const con = await api('POST', '/api/channels/adapters/slack/connect', {});
 const credId = con.json && con.json.adapter && con.json.adapter.id;
 const fin = credId ? await api('POST', `/api/channels/adapters/${encodeURIComponent(credId)}/auth/finish`, { url: SV.TOKEN }) : null;
-ok(credId && fin && fin.status === 200, `a Slack account is connected through the paste-back (stub vendor) — ${credId}`, { con, fin });
+ok(gateOf(credId) && gateOf(fin) && fin.status === 200, `a Slack account is connected through the paste-back (stub vendor) — ${credId}`, { con, fin });
 
 // THE AGENT: a chat session on the fake claude, granted "Read + write, ask each" on the account
 const WebSocket = require('ws');
@@ -143,7 +143,7 @@ wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cw
 const created = await until(() => msgs.find((m) => m.type === 'created' && m.reqId === 'r1'), 20000);
 const sessionId = created && created.sessionId;
 const sid = await until(() => { try { return fs.readFileSync(path.join(FAKE, 'sid'), 'utf-8'); } catch { return null; } }, 20000);
-ok(sessionId && sid, 'a chat session runs on the fake agent', srvLog.join('').slice(-800));
+ok(gateOf(sessionId) && verdictOf(sid), 'a chat session runs on the fake agent', srvLog.join('').slice(-800));
 const grant = await api('PUT', `/api/channels/api/${encodeURIComponent(credId)}/grants`, { grants: [{ principal: { kind: 'agent', id: sid, name: 'api-agent' }, tier: 'write-ask' }] });
 ok(grant.status === 200, 'the agent is granted "Read + write, ask each" on the account', grant);
 
@@ -206,30 +206,30 @@ const outboxRows = (p) => p.evaljs(`[...document.querySelectorAll('.chan-api-out
 const forYou = (p) => p.evaljs(`(async () => { try { const r = await fetch('/api/user-todos'); const j = await r.json(); const s = j.todos; const list = Array.isArray(s) ? s : [].concat(...Object.values(s || {}).filter(Array.isArray)); return list.filter((i) => i && i.action && i.action.type === 'channel-api-proposal').map((i) => ({ id: i.action.id, status: i.status, state: i.state, resolved: !!(i.resolvedAt || i.doneAt || i.status === 'done' || i.status === 'resolved'), outcome: i.outcome || i.resolution || null, title: i.title })); } catch (e) { return String(e); } })()`);
 
 const p1 = await newPage({ lang: 'zh' });
-ok(p1.loaded, 'page 1 (zh, 1400 px) loaded the app');
-ok(await openChat(p1), 'the agent\'s chat window opens');
+ok(verdictOf(p1.loaded), 'page 1 (zh, 1400 px) loaded the app');
+ok(verdictOf(await openChat(p1)), 'the agent\'s chat window opens');
 await p1.evaljs('app.openChannelOutbox(); 1');
 
 // ② a write-ask call ⇒ ONE card under the call row, ONE Outbox row, ONE For-you item
 const c1 = await agentCalls('POST', '/api/chat.postMessage', { channel: 'C0VIBE', text: 'hello from the API' });
 const pid1 = c1.json && c1.json.proposal && c1.json.proposal.id;
-ok(c1.status === 202 && c1.json && c1.json.code === 'api_pending' && pid1, `a write under "ask each" is a proposal (202 api_pending ${pid1})`, c1.raw);
+ok(c1.status === 202 && gateOf(c1.json) && c1.json.code === 'api_pending' && verdictOf(pid1), `a write under "ask each" is a proposal (202 api_pending ${pid1})`, c1.raw);
 // (lane dialog-yield r2: the card's frame lands a beat before its words — read it once its text is drawn; the empty-text red, base 2/4, was that race)
 const seen1 = await until(async () => { const cc = await chatCards(p1), ob = await outboxRows(p1); return cc.length === 1 && String(cc[0].text || '').trim() && ob.filter((r) => r.id === pid1).length === 1 ? { cc, ob } : null; }, 20000);
-ok(seen1 && seen1.cc[0].id === pid1 && seen1.cc[0].fate === 'pending' && seen1.cc[0].underCall, 'ONE card in the chat, keyed by the proposal, right under the call row\'s touch box', seen1 || await chatCards(p1));
-ok(seen1 && seen1.ob.length === 1 && seen1.ob[0].fate === 'pending', 'ONE Outbox "API calls" row for it (pending)', seen1 && seen1.ob);
+ok(gateOf(seen1) && seen1.cc[0].id === pid1 && seen1.cc[0].fate === 'pending' && verdictOf(seen1.cc[0].underCall), 'ONE card in the chat, keyed by the proposal, right under the call row\'s touch box', seen1 || await chatCards(p1));
+ok(gateOf(seen1) && seen1.ob.length === 1 && seen1.ob[0].fate === 'pending', 'ONE Outbox "API calls" row for it (pending)', seen1 && seen1.ob);
 const fy1 = await until(async () => { const f = await forYou(p1); return Array.isArray(f) && f.filter((i) => i.id === pid1).length === 1 ? f : null; });
-ok(fy1, 'ONE For-you item names the proposal', await forYou(p1));
-ok(seen1 && seen1.cc[0].always && /以后不再问|never ask again/.test(seen1.cc[0].alwaysText) && !/chat\.postMessage|POST /.test(seen1.cc[0].alwaysText) && /chat\.postMessage/.test(seen1.cc[0].tech) && /以后放行|Allowed from then on/.test(seen1.cc[0].tech), 'a non-sensitive write card offers "Run and never ask again (<phrase>)"; the shape it allows + the frozen request sit in the 技术细节 fold', seen1 && seen1.cc[0]);
-ok(await p1.shot('api-card-chat-zh.png', '.chat-api-cards'), 'api-card-chat-zh.png');
+ok(verdictOf(fy1), 'ONE For-you item names the proposal', await forYou(p1));
+ok(gateOf(seen1) && gateOf(seen1.cc[0].always) && gateOf(/以后不再问|never ask again/.test(seen1.cc[0].alwaysText)) && !/chat\.postMessage|POST /.test(seen1.cc[0].alwaysText) && gateOf(/chat\.postMessage/.test(seen1.cc[0].tech)) && verdictOf(/以后放行|Allowed from then on/.test(seen1.cc[0].tech)), 'a non-sensitive write card offers "Run and never ask again (<phrase>)"; the shape it allows + the frozen request sit in the 技术细节 fold', seen1 && seen1.cc[0]);
+ok(verdictOf(await p1.shot('api-card-chat-zh.png', '.chat-api-cards')), 'api-card-chat-zh.png');
 
 // ③ Approve in the chat ⇒ the Outbox row and the For-you item resolve in place
 await p1.evaljs(`(() => { const b = document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid1)}] .chan-api-approve'); b.click(); return 1; })()`);
 const ran1 = await until(async () => { const ob = await outboxRows(p1), cc = await chatCards(p1); return ob.find((r) => r.id === pid1 && r.fate === 'ran') && cc.find((c) => c.id === pid1 && c.fate === 'ran') ? { ob, cc } : null; }, 20000);
-ok(ran1 && /^已执行$/.test(ran1.ob.find((r) => r.id === pid1).out) && !/\b200\b/.test(ran1.ob.find((r) => r.id === pid1).text) && !ran1.cc.find((c) => c.id === pid1).approve, 'Approve in the chat ⇒ the Outbox row says «已执行» (lane outbox-window-scroll-filter: the short status — HTTP 200 sits in its card\'s fold), the chat card lost its buttons (patched in place)', ran1 || { ob: await outboxRows(p1), cc: await chatCards(p1), ans: await p1.evaljs('window.__answers') });
+ok(gateOf(ran1) && gateOf(/^已执行$/.test(ran1.ob.find((r) => r.id === pid1).out)) && !/\b200\b/.test(ran1.ob.find((r) => r.id === pid1).text) && !ran1.cc.find((c) => c.id === pid1).approve, 'Approve in the chat ⇒ the Outbox row says «已执行» (lane outbox-window-scroll-filter: the short status — HTTP 200 sits in its card\'s fold), the chat card lost its buttons (patched in place)', ran1 || { ob: await outboxRows(p1), cc: await chatCards(p1), ans: await p1.evaljs('window.__answers') });
 const fyRan = await until(async () => { const f = await forYou(p1); const it = Array.isArray(f) && f.find((i) => i.id === pid1); return it && it.status !== 'open' && it.status !== 'pending' ? it : null; });
-ok(fyRan, 'the For-you item resolved in place', await forYou(p1));
-ok(fs.readFileSync(path.join(STUB, 'calls.ndjson'), 'utf-8').split('\n').some((l) => /"host":"slack.com","path":"\/api\/chat\.postMessage"/.test(l)), 'the approved call reached the STUB vendor (slack.com answered by the fake)');
+ok(verdictOf(fyRan), 'the For-you item resolved in place', await forYou(p1));
+ok(verdictOf(fs.readFileSync(path.join(STUB, 'calls.ndjson'), 'utf-8').split('\n').some((l) => /"host":"slack.com","path":"\/api\/chat\.postMessage"/.test(l))), 'the approved call reached the STUB vendor (slack.com answered by the fake)');
 
 // ④ Reject from the For-you tray ⇒ the chat card says "Rejected by you"
 const c2 = await agentCalls('POST', '/api/chat.postMessage', { channel: 'C0VIBE', text: 'second' });
@@ -238,19 +238,19 @@ await until(async () => (await chatCards(p1)).some((c) => c.id === pid2));
 // card grammar (lane card-grammar-exceptions): the row says the CARD's title (the object C0VIBE named — never the method or
 // the path), the call itself sits in ONE collapsed 技术细节 fold above Approve; the row is found by its words, then pressed
 const tray = await p1.evaljs(`(async () => { const tb = document.getElementById('taskbar-user-todos'); if (tb && !(document.getElementById('user-todos-popup') || {}).offsetWidth) tb.click(); for (let i = 0; i < 60; i++) { const it = [...document.querySelectorAll('.ut-item')].find((r) => /C0VIBE/.test(r.innerText) && [...r.querySelectorAll('button')].some((b) => /拒绝|Reject/.test(b.textContent))); if (it) { const f = [...it.querySelectorAll('[data-fold="tech"]')], ap = it.querySelector('.ut-proposal-approve'); return { id: it.dataset.id, text: it.innerText, folds: f.length, open: f.length ? f[0].open : null, tech: f.length ? f[0].textContent : '', above: f.length && ap ? !!(f[0].compareDocumentPosition(ap) & Node.DOCUMENT_POSITION_FOLLOWING) : false }; } await new Promise((r) => setTimeout(r, 250)); } return [...document.querySelectorAll('.ut-item')].map((r) => r.innerText.slice(0, 120)); })()`);
-ok(tray && tray.id && !/chat\.postMessage|https?:\/\/|sha256|\/api\//.test(tray.text) && tray.folds === 1 && tray.open === false && tray.above && /POST https:\/\/slack\.com\/api\/chat\.postMessage/.test(tray.tech) && /sha256 [0-9a-f]{64}/.test(tray.tech),
+ok(gateOf(tray) && gateOf(tray.id) && !/chat\.postMessage|https?:\/\/|sha256|\/api\//.test(tray.text) && tray.folds === 1 && tray.open === false && gateOf(tray.above) && gateOf(/POST https:\/\/slack\.com\/api\/chat\.postMessage/.test(tray.tech)) && verdictOf(/sha256 [0-9a-f]{64}/.test(tray.tech)),
   'the For-you row says the card\'s title (no method, path or sha256 on its face); the call + its sha256 sit in ONE collapsed 技术细节 fold above Approve', tray);
-ok(await p1.shot('foryou-api-row-zh.png', `.ut-item[data-id=${JSON.stringify(String((tray && tray.id) || 'none'))}]`), 'foryou-api-row-zh.png');
+ok(verdictOf(await p1.shot('foryou-api-row-zh.png', `.ut-item[data-id=${JSON.stringify(String((tray && tray.id) || 'none'))}]`)), 'foryou-api-row-zh.png');
 const pressed = tray && tray.id ? await p1.evaljs(`(() => { const it = document.querySelector('.ut-item[data-id=${JSON.stringify(String(tray.id))}]'); const b = it && [...it.querySelectorAll('button')].find((x) => /拒绝|Reject/.test(x.textContent)); if (!b) return false; b.click(); return true; })()`) : false;
 ok(pressed === true, 'the For-you tray shows the item with a Reject button, pressed', tray);
 const rej = await until(async () => (await chatCards(p1)).find((c) => c.id === pid2 && c.fate === 'rejected'), 15000);
-ok(rej && /被你拒绝|Rejected by you/.test(rej.text), 'the chat card says it was rejected by you (zh)', rej || await chatCards(p1));
+ok(gateOf(rej) && verdictOf(/被你拒绝|Rejected by you/.test(rej.text)), 'the chat card says it was rejected by you (zh)', rej || await chatCards(p1));
 
 // ⑤ a sensitive card has NO "Run and always allow"
 const c3 = await agentCalls('POST', '/api/chat.delete', { channel: 'C0VIBE', ts: '1.2' });
 const pid3 = c3.json && c3.json.proposal && c3.json.proposal.id;
 const sens = await until(async () => (await chatCards(p1)).find((c) => c.id === pid3));
-ok(sens && sens.approve && !sens.always, 'a SENSITIVE card (chat.delete) has Approve but no "Run and always allow"', sens);
+ok(gateOf(sens) && gateOf(sens.approve) && !sens.always, 'a SENSITIVE card (chat.delete) has Approve but no "Run and always allow"', sens);
 await api('POST', `/api/channels/api/proposals/${pid3}/reject`, {});
 
 // ⑥ "Run and always allow <shape>" ⇒ the next same-shape call runs without a card; the dialog lists the shape + Revoke
@@ -258,11 +258,11 @@ const c4 = await agentCalls('POST', '/api/reactions.add', { channel: 'C0VIBE', n
 const pid4 = c4.json && c4.json.proposal && c4.json.proposal.id;
 await until(async () => (await chatCards(p1)).find((c) => c.id === pid4 && c.always));
 await p1.evaljs(`(() => { document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid4)}] .chan-api-always').click(); return 1; })()`);
-ok(await until(async () => (await cards()).find((r) => r.id === pid4 && C_ran(r))), '"Run and always allow" ran the call', (await cards()).find((r) => r.id === pid4));
+ok(verdictOf(await until(async () => (await cards()).find((r) => r.id === pid4 && C_ran(r)))), '"Run and always allow" ran the call', (await cards()).find((r) => r.id === pid4));
 function C_ran(r) { return r.status === 'ran' || r.status === 'done' || (r.outcome && r.outcome.status === 200); }
 const before = (await cards()).length;
 const c5 = await agentCalls('POST', '/api/reactions.add', { channel: 'C0VIBE', name: 'eyes', timestamp: '1.3' });
-ok(c5.status === 200 && c5.json && c5.json.ok && (await cards()).length === before, 'the next same-shape call RUNS with no new card (200, no proposal)', c5.raw);
+ok(c5.status === 200 && gateOf(c5.json) && gateOf(c5.json.ok) && (await cards()).length === before, 'the next same-shape call RUNS with no new card (200, no proposal)', c5.raw);
 await sleep(800);
 ok((await chatCards(p1)).length === 4, 'the chat holds exactly the four proposals\' cards — none for the always-allowed call', await chatCards(p1));
 // open the dialog the user's way: the account card's ⋯ menu → "API access…" (falls back to the call row's click)
@@ -272,13 +272,13 @@ const opened = await p1.evaljs(`(async () => {
   return false; })()`);
 ok(!!opened, `the API access… dialog opens (${opened})`);
 const dlg = await until(() => p1.evaljs(`(() => { const d = document.getElementById('chan-api-dialog'); if (!d || !d.querySelector('.chan-api-logrow')) return null; return { text: d.innerText, cred: [...d.querySelectorAll('.chan-api-cred option')].map((o) => o.textContent), tiers: [...d.querySelectorAll('.chan-api-row')].map((r) => ({ key: r.dataset.key, tier: r.querySelector('.chan-api-tier').value })), shapes: [...d.querySelectorAll('.chan-api-shape')].map((s) => ({ text: s.innerText, revoke: !!s.querySelector('button') })), sens: (d.querySelector('.chan-api-sensitive') || {}).textContent || '', logs: d.querySelectorAll('.chan-api-logrow').length }; })()`), 15000);
-ok(dlg && dlg.cred.length === 1 && /^Channels|^频道/.test(dlg.cred[0]), 'the dialog: ONE credential picker labelled by its source', dlg && dlg.cred);
-ok(/档位：读写，每次询问|所在档位：读/.test(seen1 && seen1.cc[0].text || '') || /所在档位：(?!write)/.test(seen1 && seen1.cc[0].text || ''), 'the card words its tier as the dialog does (not the raw id)', seen1 && seen1.cc[0].text);
-ok(dlg && dlg.tiers.length === 1 && dlg.tiers[0].key === `agent:${sid}` && dlg.tiers[0].tier === 'write-ask', 'the dialog: the agent\'s row at "Read + write, ask each"', dlg && dlg.tiers);
-ok(dlg && /delete/.test(dlg.sens) && !/\\\/|\^/.test(dlg.sens), 'the dialog: the vendor\'s sensitive list, worded (no regex source)', dlg && dlg.sens);
-ok(dlg && dlg.shapes.length === 1 && /reactions\.add/.test(dlg.shapes[0].text) && dlg.shapes[0].revoke, 'the dialog: the always-allowed shape with its Revoke', dlg && dlg.shapes);
-ok(dlg && dlg.logs >= 2, `the dialog: the API log (${dlg && dlg.logs} rows)`);
-ok(await p1.shot('api-dialog-zh.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'api-dialog-zh.png');
+ok(gateOf(dlg) && dlg.cred.length === 1 && verdictOf(/^Channels|^频道/.test(dlg.cred[0])), 'the dialog: ONE credential picker labelled by its source', dlg && dlg.cred);
+ok(verdictOf(/档位：读写，每次询问|所在档位：读/.test(seen1 && seen1.cc[0].text || '')) || verdictOf(/所在档位：(?!write)/.test(seen1 && seen1.cc[0].text || '')), 'the card words its tier as the dialog does (not the raw id)', seen1 && seen1.cc[0].text);
+ok(gateOf(dlg) && dlg.tiers.length === 1 && dlg.tiers[0].key === `agent:${sid}` && dlg.tiers[0].tier === 'write-ask', 'the dialog: the agent\'s row at "Read + write, ask each"', dlg && dlg.tiers);
+ok(gateOf(dlg) && gateOf(/delete/.test(dlg.sens)) && !/\\\/|\^/.test(dlg.sens), 'the dialog: the vendor\'s sensitive list, worded (no regex source)', dlg && dlg.sens);
+ok(gateOf(dlg) && dlg.shapes.length === 1 && gateOf(/reactions\.add/.test(dlg.shapes[0].text)) && verdictOf(dlg.shapes[0].revoke), 'the dialog: the always-allowed shape with its Revoke', dlg && dlg.shapes);
+ok(gateOf(dlg) && dlg.logs >= 2, `the dialog: the API log (${dlg && dlg.logs} rows)`);
+ok(verdictOf(await p1.shot('api-dialog-zh.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *')), 'api-dialog-zh.png');
 const zhLeft = dlg ? ['API access', 'Credential', 'Always allowed', 'Waiting for you', 'API log', 'Revoke', ' · proposed', ' · ok', ' · approved'].filter((w) => dlg.text.includes(w)) : ['no dialog'];
 ok(!zhLeft.length, 'zh: no English label left in the dialog', zhLeft);
 p1.close();
@@ -291,7 +291,7 @@ for (const lang of ['en', 'ja']) {
   // lane dialog-yield: API access… is a FORM window on the desktop — its title is drawn in the window's title bar (the dialog's head is hidden)
   const tx = await until(() => p.evaljs(`(() => { const d = document.getElementById('chan-api-dialog'); if (!d || !d.querySelector('.chan-api-shape')) return null; const w = d.closest('.window'); return (w ? w.querySelector('.window-title').textContent + '\\n' : '') + d.innerText; })()`), 15000);
   const want = lang === 'en' ? /API access[\s\S]*Always allowed[\s\S]*Revoke/ : /常に許可|取り消/;
-  ok(tx && want.test(tx) && (lang === 'en' || !/Always allowed|Waiting for you/.test(tx)), `${lang}: the dialog speaks ${lang}`, tx && tx.slice(0, 400));
+  ok(gateOf(tx) && gateOf(want.test(tx)) && (lang === 'en' || !/Always allowed|Waiting for you/.test(tx)), `${lang}: the dialog speaks ${lang}`, tx && tx.slice(0, 400));
   p.close();
 }
 
@@ -306,9 +306,9 @@ await openChat(p3);
 await p3.evaljs('app.ready.then(() => new Promise((r) => setTimeout(r, 800)))');
 await openChat(p3);
 const phone = await until(() => p3.evaljs(`(() => { const c = document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid6)}]'); if (!c || !c.offsetWidth) return null; c.scrollIntoView({ block: 'center' }); const off = [...c.querySelectorAll('*')].filter((e) => e.offsetWidth && (e.getBoundingClientRect().right > innerWidth + 0.5 || e.getBoundingClientRect().left < -0.5)).map((e) => e.className + ' ' + Math.round(e.getBoundingClientRect().right)); const btns = [...c.querySelectorAll('.chan-api-actions > *')].map((b) => Math.round(b.getBoundingClientRect().top)); const r = c.getBoundingClientRect(), top = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + Math.min(r.height, innerHeight) / 2)); return top && c.contains(top) ? { off, rows: new Set(btns).size, w: Math.round(r.width) } : null; })()`), 30000);
-ok(phone && !phone.off.length, `390 px: the card is on top (no overlay) and nothing of it is off-screen (card ${phone && phone.w} px)`, phone);
-ok(phone && phone.rows >= 2, `390 px: the action row wraps (${phone && phone.rows} lines)`, phone);
-ok(await p3.shot('api-card-phone-zh.png', `.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid6)}]`), 'api-card-phone-zh.png');
+ok(gateOf(phone) && !phone.off.length, `390 px: the card is on top (no overlay) and nothing of it is off-screen (card ${phone && phone.w} px)`, phone);
+ok(gateOf(phone) && phone.rows >= 2, `390 px: the action row wraps (${phone && phone.rows} lines)`, phone);
+ok(verdictOf(await p3.shot('api-card-phone-zh.png', `.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid6)}]`)), 'api-card-phone-zh.png');
 p3.close();
 
 // ⑧ CONTROL: the card without the frozen digest ⇒ Approve answers 409, nothing runs
@@ -317,14 +317,14 @@ await openChat(pc);
 await until(() => pc.evaljs(`!!document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid6)}] .chan-api-approve')`), 20000);
 await pc.evaljs(`(() => { document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid6)}] .chan-api-approve').click(); return 1; })()`);
 const ctl = await until(() => pc.evaljs('window.__answers.find((a) => /approve/.test(a.u))'), 10000);
-ok(ctl && ctl.status === 409 && (await cards()).find((r) => r.id === pid6).status === 'pending', 'CONTROL: a card that answers without its frozen digest gets 409 — the proposal still waits, nothing ran (RED for that card)', ctl);
+ok(gateOf(ctl) && ctl.status === 409 && (await cards()).find((r) => r.id === pid6).status === 'pending', 'CONTROL: a card that answers without its frozen digest gets 409 — the proposal still waits, nothing ran (RED for that card)', ctl);
 pc.close();
 const p4 = await newPage({ lang: 'zh' });
 await openChat(p4);
 await until(() => p4.evaljs(`!!document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid6)}] .chan-api-approve')`), 20000);
 await p4.evaljs(`(() => { document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid6)}] .chan-api-approve').click(); return 1; })()`);
 const real = await until(() => p4.evaljs('window.__answers.find((a) => /approve/.test(a.u))'), 10000);
-ok(real && real.status === 200, '…and the real bundle\'s Approve on the same card answers 200', real);
+ok(gateOf(real) && real.status === 200, '…and the real bundle\'s Approve on the same card answers 200', real);
 p4.close();
 
 // ⑨ 完全信任 (write-all)
@@ -339,13 +339,13 @@ const gl = (await logOf()).filter((l) => l.verdict === 'granted');
 ok(gl.length === 1 && gl[0].tier === 'write-all' && gl[0].principal.id === sid && gl[0].by === 'user' && gl[0].at > 0 && gl[0].cred === credId, 'the grant writes ONE audit line: who holds it, when, by whom, on which credential', gl);
 const nCards = (await cards()).length;
 const c9 = await agentCalls('POST', '/api/chat.delete', { channel: 'C0VIBE', ts: '1.9' });
-ok(c9.json && c9.json.code !== 'api_pending' && !(c9.json && c9.json.proposal) && (await cards()).length === nCards, 'a SENSITIVE call (chat.delete) under 完全信任 RUNS — no proposal, no card', c9.raw);
+ok(gateOf(c9.json) && c9.json.code !== 'api_pending' && !(c9.json && c9.json.proposal) && (await cards()).length === nCards, 'a SENSITIVE call (chat.delete) under 完全信任 RUNS — no proposal, no card', c9.raw);
 const tl = (await logOf()).filter((l) => l.path === '/api/chat.delete' && l.trust === 'write-all');
-ok(tl.length === 1 && tl[0].sensitive && tl[0].verdict !== 'proposed', `its API log line says it ran under 完全信任 (sensitive: ${tl[0] && tl[0].sensitive}, ${tl[0] && tl[0].verdict})`, (await logOf()).slice(-3));
+ok(tl.length === 1 && gateOf(tl[0].sensitive) && tl[0].verdict !== 'proposed', `its API log line says it ran under 完全信任 (sensitive: ${tl[0] && tl[0].sensitive}, ${tl[0] && tl[0].verdict})`, (await logOf()).slice(-3));
 const p9 = await newPage({ lang: 'zh' });
 await openChat(p9);
 const row9 = await until(() => p9.evaljs(`(() => { const r = [...document.querySelectorAll('.chat-channel-touches .chat-channel-touch')].find((x) => /完全信任 · 敏感/.test(x.innerText)); return r ? r.innerText : null; })()`), 15000);
-ok(row9, 'the chat\'s API call row says 完全信任 · 敏感', row9);
+ok(verdictOf(row9), 'the chat\'s API call row says 完全信任 · 敏感', row9);
 const dialogOf = (p) => until(() => p.evaljs(`(async () => {
   if (!document.getElementById('chan-api-dialog')) { const row = document.querySelector('.chat-channel-touches .chat-channel-touch'); if (row) row.click(); return null; }
   const d = document.getElementById('chan-api-dialog'); if (![...d.querySelectorAll('.chan-api-logrow')].some((r) => /你授予了完全信任/.test(r.innerText))) return null;
@@ -355,18 +355,18 @@ const dialogOf = (p) => until(() => p.evaljs(`(async () => {
 })()`), 20000);
 const d9 = await dialogOf(p9);
 const me = d9 && d9.rows.find((r) => r.key === `agent:${sid}`), all = d9 && d9.rows.find((r) => r.key === 'everyone:*');
-ok(me && me.tier === 'write-all' && me.opt === '完全信任 — 写和删除等敏感操作都不再问你' && me.warn && me.color !== (all && all.color), `the dialog: the agent's row at 「${me && me.opt}」 in the warning colour (${me && me.color})`, d9);
-ok(d9 && d9.note === '只给你完全信任的 agent；仍会记日志，每日上限照旧' && d9.noteColor === (me && me.color), 'the dialog: its second line says who it is for, that it is still logged and capped', d9 && d9.note);
-ok(all && all.tier === 'read' && all.disabled === true && all.opt === '完全信任只能给单个 agent 或对话；岗位、规则和“所有 agent”最高到“读 + 写，自动”', `the dialog: the All agents row's 完全信任 is refused, saying why — one agent only (tier-verify M1) (「${all && all.opt}」)`, all);
-ok(d9 && d9.logs.some((l) => /你授予了完全信任/.test(l)) && d9.logs.some((l) => /chat\.delete[\s\S]*完全信任 · 敏感/.test(l)), 'the dialog\'s API log: the grant line + the sensitive call that ran, in the warning colour', d9 && d9.logs);
-{ const f9 = await formInFront(p9); ok(f9 && f9.window && f9.active && f9.onTop, 'the API access form stands IN FRONT on the desktop (its window active, nothing over it) — dialog-desk.png is the form', f9); }
-ok(await p9.shot('dialog-desk.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'dialog-desk.png');
+ok(gateOf(me) && me.tier === 'write-all' && me.opt === '完全信任 — 写和删除等敏感操作都不再问你' && gateOf(me.warn) && me.color !== (all && all.color), `the dialog: the agent's row at 「${me && me.opt}」 in the warning colour (${me && me.color})`, d9);
+ok(gateOf(d9) && d9.note === '只给你完全信任的 agent；仍会记日志，每日上限照旧' && d9.noteColor === (me && me.color), 'the dialog: its second line says who it is for, that it is still logged and capped', d9 && d9.note);
+ok(gateOf(all) && all.tier === 'read' && all.disabled === true && all.opt === '完全信任只能给单个 agent 或对话；岗位、规则和“所有 agent”最高到“读 + 写，自动”', `the dialog: the All agents row's 完全信任 is refused, saying why — one agent only (tier-verify M1) (「${all && all.opt}」)`, all);
+ok(gateOf(d9) && gateOf(d9.logs.some((l) => /你授予了完全信任/.test(l))) && verdictOf(d9.logs.some((l) => /chat\.delete[\s\S]*完全信任 · 敏感/.test(l))), 'the dialog\'s API log: the grant line + the sensitive call that ran, in the warning colour', d9 && d9.logs);
+{ const f9 = await formInFront(p9); ok(gateOf(f9) && gateOf(f9.window) && gateOf(f9.active) && verdictOf(f9.onTop), 'the API access form stands IN FRONT on the desktop (its window active, nothing over it) — dialog-desk.png is the form', f9); }
+ok(verdictOf(await p9.shot('dialog-desk.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *')), 'dialog-desk.png');
 p9.close();
 const p10 = await newPage({ lang: 'zh', width: 390, height: 844 });
 await openChat(p10);
 const d10 = await dialogOf(p10);
-ok(d10 && d10.note && d10.noteRight <= d10.vw + 0.5, `390 px: the 完全信任 row and its note fit (note right ${d10 && Math.round(d10.noteRight)} ≤ ${d10 && d10.vw})`, d10);
-ok(await p10.shot('dialog-phone.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'dialog-phone.png');
+ok(gateOf(d10) && gateOf(d10.note) && d10.noteRight <= d10.vw + 0.5, `390 px: the 完全信任 row and its note fit (note right ${d10 && Math.round(d10.noteRight)} ≤ ${d10 && d10.vw})`, d10);
+ok(verdictOf(await p10.shot('dialog-phone.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *')), 'dialog-phone.png');
 p10.close();
 ok(!fs.readFileSync(path.join(STUB, 'calls.ndjson'), 'utf-8').split('\n').filter(Boolean).some((l) => !/"host":"slack.com"/.test(l)), 'every intercepted vendor call went to the stub (slack.com only)');
 
@@ -393,18 +393,18 @@ console.log('⑩ the API log is never blank: the hub\'s shape under a full roste
   const pH = await newPage({ lang: 'zh', width: 1400, height: 900 });
   const hub = await openLog(pH);
   const vis = await pH.evaljs(`(async () => { const r = document.querySelector('#chan-api-dialog .chan-api-logrow'); if (!r) return null; r.scrollIntoView({ block: 'center' }); await new Promise((q) => setTimeout(q, 300)); const b = r.getBoundingClientRect(), hit = document.elementFromPoint(Math.round(b.left + Math.min(b.width, 200) / 2), Math.round(b.top + b.height / 2)); return { onTop: !!(hit && (hit === r || r.contains(hit))), h: Math.round(b.height) }; })()`);
-  ok(hub && hub.listH >= 250, `the owner's roster: the picker's list sits at its cap (${hub && hub.listH} px)`, hub);
-  ok(hub && hub.rows === 20 && /api\/conversations\.history\/151 · 200 · 已执行/.test(hub.first) && !hub.note, `the log shows the hub's last 20 lines, newest first (${hub && hub.rows} rows)`, hub);
-  ok(hub && hub.h >= Math.min(hub.sh, 170), `· measured: the log box keeps its height in the dialog's column — ${hub && hub.h} px of ${hub && hub.sh} (never squeezed to 0 by the roster above it)`, hub);
-  ok(vis && vis.onTop && vis.h > 0, 'scrolled to, the newest line is on screen and on top (nothing covers it)', vis);
-  { const fH = await formInFront(pH); ok(fH && fH.window && fH.active && fH.onTop, 'the API access form stands IN FRONT (its window active, nothing over it) — api-log-hub-shape.png is the form', fH); }
-  ok(await pH.shot('api-log-hub-shape.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'api-log-hub-shape.png');
+  ok(gateOf(hub) && hub.listH >= 250, `the owner's roster: the picker's list sits at its cap (${hub && hub.listH} px)`, hub);
+  ok(gateOf(hub) && hub.rows === 20 && gateOf(/api\/conversations\.history\/151 · 200 · 已执行/.test(hub.first)) && !hub.note, `the log shows the hub's last 20 lines, newest first (${hub && hub.rows} rows)`, hub);
+  ok(gateOf(hub) && hub.h >= Math.min(hub.sh, 170), `· measured: the log box keeps its height in the dialog's column — ${hub && hub.h} px of ${hub && hub.sh} (never squeezed to 0 by the roster above it)`, hub);
+  ok(gateOf(vis) && gateOf(vis.onTop) && vis.h > 0, 'scrolled to, the newest line is on screen and on top (nothing covers it)', vis);
+  { const fH = await formInFront(pH); ok(gateOf(fH) && gateOf(fH.window) && gateOf(fH.active) && verdictOf(fH.onTop), 'the API access form stands IN FRONT (its window active, nothing over it) — api-log-hub-shape.png is the form', fH); }
+  ok(verdictOf(await pH.shot('api-log-hub-shape.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *')), 'api-log-hub-shape.png');
   // KEYED: a re-draw (the credential picked again) patches the rows in place — a new line lands on top, the rest are the same nodes
   await pH.evaljs(`(() => { document.querySelector('#chan-api-dialog .chan-api-logrow').__vsMark = 1; return 1; })()`);
   fs.appendFileSync(logFile, JSON.stringify({ ...shape[shape.length - 1], at: Date.now(), path: '/api/conversations.history/new', proposal: null }) + '\n');
   await pH.evaljs(`(() => { const s = document.querySelector('#chan-api-dialog .chan-api-cred'); s.dispatchEvent(new Event('change')); return 1; })()`);
   const re = await until(async () => { const v = await look(pH); return v && /history\/new/.test(v.first || '') ? v : null; }, 10000);
-  ok(re && re.rows === 20 && re.markedAt === 1, `a re-draw patches the keyed rows in place: the new line on top, the old newest row is the same node one below (at ${re && re.markedAt})`, re || await look(pH));
+  ok(gateOf(re) && re.rows === 20 && re.markedAt === 1, `a re-draw patches the keyed rows in place: the new line on top, the old newest row is the same node one below (at ${re && re.markedAt})`, re || await look(pH));
   pH.close();
   // «Loading…» at once, while the read is held; then the lines
   const pL = await newPage({ lang: 'zh', width: 1400, height: 900 });
@@ -414,10 +414,10 @@ console.log('⑩ the API log is never blank: the hub\'s shape under a full roste
   const wait = await openLog(pL, false);
   await until(() => held.length > 0, 10000);
   const during = await look(pL);
-  ok(held.length > 0 && during && during.note === '加载中…' && during.rows === 0, `while the read is held the log says 「${during && during.note}」 (never a blank box)`, during);
+  ok(held.length > 0 && gateOf(during) && during.note === '加载中…' && during.rows === 0, `while the read is held the log says 「${during && during.note}」 (never a blank box)`, during);
   for (const id of held.splice(0)) await pL.cdp('Fetch.continueRequest', { requestId: id });
   const after = await until(async () => { const v = await look(pL); return v && v.rows === 20 ? v : null; }, 10000);
-  ok(after && !after.note, '…then the lines, the «Loading…» line gone', after || await look(pL));
+  ok(gateOf(after) && !after.note, '…then the lines, the «Loading…» line gone', after || await look(pL));
   pL.close();
   // ONE error line: a 500, a failed fetch, a line that cannot be worded
   const errCase = async (name, answer) => {
@@ -431,21 +431,21 @@ console.log('⑩ the API log is never blank: the hub\'s shape under a full roste
   };
   const j64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64');
   const e500 = await errCase('500', (p, id) => p.cdp('Fetch.fulfillRequest', { requestId: id, responseCode: 500, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: j64({ ok: false, error: 'the ring could not be read' }) }));
-  ok(e500 && e500.err && e500.note === '无法读取 API 日志：the ring could not be read' && e500.rows === 0 && !/还没有调用/.test(e500.text), `a 500 ⇒ ONE error line saying why (「${e500 && e500.note}」), never «No calls yet»`, e500);
+  ok(gateOf(e500) && gateOf(e500.err) && e500.note === '无法读取 API 日志：the ring could not be read' && e500.rows === 0 && !/还没有调用/.test(e500.text), `a 500 ⇒ ONE error line saying why (「${e500 && e500.note}」), never «No calls yet»`, e500);
   const eNet = await errCase('net', (p, id) => p.cdp('Fetch.failRequest', { requestId: id, errorReason: 'ConnectionRefused' }));
-  ok(eNet && eNet.err && /^无法读取 API 日志：/.test(eNet.note) && eNet.rows === 0, `a failed fetch ⇒ ONE error line (「${eNet && eNet.note}」)`, eNet);
+  ok(gateOf(eNet) && gateOf(eNet.err) && gateOf(/^无法读取 API 日志：/.test(eNet.note)) && eNet.rows === 0, `a failed fetch ⇒ ONE error line (「${eNet && eNet.note}」)`, eNet);
   const good = (i) => ({ ...shape[i], at: shape[i].at });
   const eBad = await errCase('bad', (p, id) => p.cdp('Fetch.fulfillRequest', { requestId: id, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: j64({ ok: true, lines: [good(0), null, good(1)] }) }));
-  ok(eBad && eBad.err && /^无法读取 API 日志：/.test(eBad.note) && eBad.rows === 2, `a line that cannot be worded ⇒ the lines that can + ONE error line (${eBad && eBad.rows} rows, 「${eBad && eBad.note}」)`, eBad);
+  ok(gateOf(eBad) && gateOf(eBad.err) && gateOf(/^无法读取 API 日志：/.test(eBad.note)) && eBad.rows === 2, `a line that cannot be worded ⇒ the lines that can + ONE error line (${eBad && eBad.rows} rows, 「${eBad && eBad.note}」)`, eBad);
   // the empty state
   fs.writeFileSync(logFile, '');
   const pE = await newPage({ lang: 'zh', width: 1400, height: 900 });
   await openLog(pE, false);
   const empty = await until(async () => { const v = await look(pE); return v && v.text.trim() && v.text.trim() !== '加载中…' ? v : null; }, 10000);
-  ok(empty && empty.text.trim() === '还没有调用' && !empty.err && empty.rows === 0, `a credential with no calls says 「${empty && empty.text.trim()}」`, empty);
+  ok(gateOf(empty) && empty.text.trim() === '还没有调用' && !empty.err && empty.rows === 0, `a credential with no calls says 「${empty && empty.text.trim()}」`, empty);
   pE.close();
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
 if (fail && process.env.API_CHROME_DEBUG) console.error(srvLog.join('').slice(-3000));
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

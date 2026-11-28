@@ -19,7 +19,7 @@ const { mergeCodexRecords } = require('../src/codex-session-store.js');
 const { createMessageManager, feedPeerCard, rebuildHistory } = require('../src/normalizers.js');
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -48,7 +48,7 @@ const peerCards = (mm) => mm.messages.filter((m) => m.originKind === 'peer-messa
   check('live stream (no user record) → ONE peer card mined from result.origin', cards.length === 1, `got ${cards.length}`);
   check('card carries sender name', cards[0]?.peerFrom === 'Coordinator', cards[0]?.peerFrom);
   check('card carries the message body', (cards[0]?.content || []).map((b) => b.text).join('') === BODY);
-  check('card emitted as a live create op', ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message'));
+  check('card emitted as a live create op', verdictOf(ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message')));
 }
 
 // ── 2. JSONL rebuild: user record renders the card; the result must NOT double it ──
@@ -98,7 +98,7 @@ const peerCards = (mm) => mm.messages.filter((m) => m.originKind === 'peer-messa
   mm.processLive(RESULT);
   mm.processLive({ ...RESULT, uuid: 'r5', origin: { ...ORIGIN, msg_id: 'other-id', body: 'second message' } });
   check('distinct msg_ids → two cards', peerCards(mm).length === 2, `got ${peerCards(mm).length}`);
-  check('turnMap stays consistent (non-throwing, ordered)', Array.isArray(mm.turnMap()));
+  check('turnMap stays consistent (non-throwing, ordered)', verdictOf(Array.isArray(mm.turnMap())));
 }
 
 // ── 8. review-caught negative controls: msg_id is AUTHORITATIVE — the
@@ -126,8 +126,8 @@ const peerCards = (mm) => mm.messages.filter((m) => m.originKind === 'peer-messa
 {
   const { mm, ops } = fresh();
   const c1 = mm.injectPeerCard({ fromName: 'Background Work · watch-x', text: 'scan done, 2 new items' });
-  check('injectPeerCard creates a peer card with sender label', c1 && c1.originKind === 'peer-message' && c1.peerFrom === 'Background Work · watch-x');
-  check('injectPeerCard emits a live create op', ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message'));
+  check('injectPeerCard creates a peer card with sender label', gateOf(c1) && c1.originKind === 'peer-message' && c1.peerFrom === 'Background Work · watch-x');
+  check('injectPeerCard emits a live create op', verdictOf(ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message')));
   // recurring same-body fires are legitimate — no containment veto here either
   mm.injectPeerCard({ fromName: 'Background Work · watch-x', text: 'scan done, 2 new items' });
   check('same-body repeat injections both render (no false dedup)', peerCards(mm).length === 2, `got ${peerCards(mm).length}`);
@@ -168,14 +168,14 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   const mm = new CodexMessageManager('cx1'); const ops = []; mm.onOp((op) => ops.push(op));
   const c = mm.injectPeerCard({ fromName: 'VibeSpace', text: 'Auto-resume armed: will continue at 12:40pm' });
   const k = new MessageManager('k1').injectPeerCard({ fromName: 'VibeSpace', text: 'Auto-resume armed: will continue at 12:40pm' });
-  check('codex injectPeerCard → role user / status complete / originKind peer-message / peerFrom', c && c.role === 'user' && c.status === 'complete' && c.originKind === 'peer-message' && c.peerFrom === 'VibeSpace');
-  check('…field-for-field the claude card (role/status/originKind/peerFrom/content)', ['role', 'status', 'originKind', 'peerFrom'].every((f) => k[f] === c[f]) && JSON.stringify(k.content) === JSON.stringify(c.content));
-  check('…emits a live create op carrying the card', ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message' && o.message?.peerFrom === 'VibeSpace'));
-  check('…id is the s-fallback (no record context) and unique per card', /^cx1:s\d+$/.test(c.id) && mm.injectPeerCard({ fromName: 'x', text: 'y' }).id !== c.id);
+  check('codex injectPeerCard → role user / status complete / originKind peer-message / peerFrom', gateOf(c) && c.role === 'user' && c.status === 'complete' && c.originKind === 'peer-message' && c.peerFrom === 'VibeSpace');
+  check('…field-for-field the claude card (role/status/originKind/peerFrom/content)', gateOf(['role', 'status', 'originKind', 'peerFrom'].every((f) => k[f] === c[f])) && JSON.stringify(k.content) === JSON.stringify(c.content));
+  check('…emits a live create op carrying the card', verdictOf(ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message' && o.message?.peerFrom === 'VibeSpace')));
+  check('…id is the s-fallback (no record context) and unique per card', gateOf(/^cx1:s\d+$/.test(c.id)) && mm.injectPeerCard({ fromName: 'x', text: 'y' }).id !== c.id);
   check('…empty text → null', mm.injectPeerCard({ fromName: 'x', text: '  ' }) === null);
   mm.injectPeerCard({ fromName: 'Background Work · w', text: 'same' }); mm.injectPeerCard({ fromName: 'Background Work · w', text: 'same' });
   check('…same-body repeats both render (containment-free, the 2.362.2 review lesson)', peerCards(mm).length === 4, `got ${peerCards(mm).length}`);
-  check('…turnMap stays consistent', Array.isArray(mm.turnMap()) && mm.turnMap().length === 4);
+  check('…turnMap stays consistent', gateOf(Array.isArray(mm.turnMap())) && mm.turnMap().length === 4);
 }
 
 // ── 12. the gate: feedPeerCard no longer returns false for codex — and the mid-rebuild hold/replay path drains through the codex method ──
@@ -203,7 +203,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   const cards = peerCards(mm);
   check('wrapper record with webui_peer → ONE labelled peer card (was an anonymous "You" bubble)', cards.length === 1 && cards[0].peerFrom === 'scout-7', JSON.stringify(cards.map((c) => c.peerFrom)));
   check('…card body = cardText (raw body, frame stripped — claude live-card parity)', cards[0]?.content?.[0]?.text === 'found the doc you wanted', JSON.stringify(cards[0]?.content));
-  check('…emitted as a live create op with the card fields', ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message' && o.message?.peerFrom === 'scout-7'));
+  check('…emitted as a live create op with the card fields', verdictOf(ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message' && o.message?.peerFrom === 'scout-7')));
   const asst = mm.messages.filter((m) => m.role === 'assistant');
   check('…a queued peer record mid-turn does NOT fragment the active stream (no _finalizeStreaming on peer records)', asst.length === 1 && asst[0].content[0].text === 'working on it' && asst[0].status === 'complete', JSON.stringify(asst.map((m) => [m.content[0].text, m.status])));
   check('…no "You" bubble remains for the frame text', !mm.messages.some((m) => m.role === 'user' && m.originKind !== 'peer-message'));
@@ -216,7 +216,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   mm.injectPeerCard({ fromName: 'VibeSpace', text: 'notice mid-turn' });
   mm.processLive({ timestamp: T(2), type: 'event_msg', payload: { type: 'task_complete' } });
   const th = mm.messages.find((m) => m.content?.[0]?.type === 'thinking');
-  check('the open reasoning stream still closes at task_complete with a card injected after it', th && th.status === 'complete', th?.status);
+  check('the open reasoning stream still closes at task_complete with a card injected after it', gateOf(th) && th.status === 'complete', th?.status);
 }
 
 // ── 15. REBUILD parity from a rollout fixture: the wrapper copy (marker) and codex's rollout copy (text only) of one peer message, merged in BOTH timestamp orders — idle path (rollout first: codex writes at turn/start, the wrapper records after) and queued path (wrapper first: rollout copy appears when the queued turn runs) ──
@@ -259,7 +259,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
 {
   const read = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
   const cd = read('src/server/conversation-deliver.js');
-  check('rpc-queue frame carries fromName + cardText', /type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null/.test(cd));
+  check('rpc-queue frame carries fromName + cardText', verdictOf(/type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null/.test(cd)));
   check('…and that lane still emits NO in-memory card (the wrapper record is the ONE carrier — a card here double-renders live)', !/const rpc = findRpcPeer\(cid\);[\s\S]{0,400}cardOk\(\)/.test(cd));
   const w = read('data/bin/codex-chat-wrapper.js');
   // THREE paths since 2026-09-07 (notifications steer): steered / queued /
@@ -267,14 +267,14 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   // that took the steer lane would render as an anonymous "You" bubble — and
   // each one names the submission (round 3), so the steered card and the
   // app-server's own commit twin cannot become two bubbles.
-  check('wrapper records the peer user message WITH the webui_peer marker (name + body + the frame\'s kind — S3 verify F3) on ALL THREE delivery paths', /webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerChannel \? \{ channel: peerChannel \} : \{\}\))?(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \}/.test(w) && (w.match(/recordPeerMessage\((true|false), /g) || []).length === 3);
+  check('wrapper records the peer user message WITH the webui_peer marker (name + body + the frame\'s kind — S3 verify F3) on ALL THREE delivery paths', gateOf(/webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerChannel \? \{ channel: peerChannel \} : \{\}\))?(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \}/.test(w)) && (w.match(/recordPeerMessage\((true|false), /g) || []).length === 3);
   // WHICH SIDE OF CODEX'S OWN COPY this record lands on is the rebuild's whole
   // question (2026-09-07 round 2): on the IDLE path `turn/start` has already
   // persisted codex's copy when we get here, so ours is the LATE twin and says
   // so; on the queued path nothing is committed yet and ours claims first, and
   // a STEERED notification's commit twin only lands at the next turn boundary.
   check('…and each path declares whether the app-server had already committed the message (idle=true after turn/start, queued=false)',
-    /await startTurn\(text\);\n\s*recordPeerMessage\(true, ''\);/.test(w) && /clientUserMessageId: cid,\n\s*\}, 30000\);\n\s*recordPeerMessage\(false, cid\);/.test(w));
+    gateOf(/await startTurn\(text\);\n\s*recordPeerMessage\(true, ''\);/.test(w)) && verdictOf(/clientUserMessageId: cid,\n\s*\}, 30000\);\n\s*recordPeerMessage\(false, cid\);/.test(w)));
   // ROUND 3: the QUEUED copy also carries the submission id the app-server
   // already minted for it (`webui_queue_id`, the second-class identity an
   // inherited bubble uses — it joins the strip row and does NOT suppress the
@@ -284,7 +284,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   // has no cid to carry (turn/start mints none), which is also why it can never
   // be retracted — it was committed the moment it was sent.
   check('…and the QUEUED peer copy carries the app-server cid as its identity, the idle one carries none',
-    /\.\.\.\(queueCid \? \{ webui_queue_id: queueCid \} : \{\}\),/.test(w) && /recordPeerMessage\(false, cid\);/.test(w) && /recordPeerMessage\(true, ''\);/.test(w));
+    gateOf(/\.\.\.\(queueCid \? \{ webui_queue_id: queueCid \} : \{\}\),/.test(w)) && gateOf(/recordPeerMessage\(false, cid\);/.test(w)) && verdictOf(/recordPeerMessage\(true, ''\);/.test(w)));
   {
     const users = new CodexMessageManager('cx-r3').convertHistory([
       { timestamp: T(1), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: BW_FRAME }], webui_peer: { name: 'beta', body: 'done' }, webui_queue_id: 'peer-1' } },
@@ -292,12 +292,12 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
     check('…and that identity keeps the labelled peer card (a webui_msg_id here would make it an anonymous "You" bubble)',
       users.length === 1 && users[0].originKind === 'peer-message' && users[0].webuiMsgId === 'peer-1', JSON.stringify(users.map((m) => [m.originKind, m.webuiMsgId])));
   }
-  check('…through the ONE reader-facing marker for that fact', /\.\.\.\(afterCommit \? \{ webui_after_commit: true \} : \{\}\)/.test(w));
-  check('…and echoes fromName (and the kind, S3 verify F3) on failure so the re-stash keeps its label and its path', /peer_message_result', \{ ok: false, reason: e\.message, text, fromName, kind: peerKind \}/.test(w));
-  check('stdout/codex-events re-stash carries the echoed fromName (S5 consumer module)', /fromName: msg\.payload\.fromName \|\| null, text: String\(msg\.payload\.text\)/.test(read('src/server/stdout/codex-events.js')));
-  check('mergeCodexRecords fingerprint strips webui_peer', /const \{[^}]*webui_peer[^}]*\.\.\.stablePayload \} = payload;/.test(read('src/codex-session-store.js')));
-  check('codex recordKey strips webui_peer', /const \{[^}]*webui_peer[^}]*\.\.\.stable \} = payload;/.test(read('src/codex-message-manager.js')));
-  check('feedPeerCard gates on method presence (no backend branch) — codex passes it now', /session\?\._normalizer\?\.injectPeerCard\) return false/.test(read('src/normalizers.js')));
+  check('…through the ONE reader-facing marker for that fact', verdictOf(/\.\.\.\(afterCommit \? \{ webui_after_commit: true \} : \{\}\)/.test(w)));
+  check('…and echoes fromName (and the kind, S3 verify F3) on failure so the re-stash keeps its label and its path', verdictOf(/peer_message_result', \{ ok: false, reason: e\.message, text, fromName, kind: peerKind \}/.test(w)));
+  check('stdout/codex-events re-stash carries the echoed fromName (S5 consumer module)', verdictOf(/fromName: msg\.payload\.fromName \|\| null, text: String\(msg\.payload\.text\)/.test(read('src/server/stdout/codex-events.js'))));
+  check('mergeCodexRecords fingerprint strips webui_peer', verdictOf(/const \{[^}]*webui_peer[^}]*\.\.\.stablePayload \} = payload;/.test(read('src/codex-session-store.js'))));
+  check('codex recordKey strips webui_peer', verdictOf(/const \{[^}]*webui_peer[^}]*\.\.\.stable \} = payload;/.test(read('src/codex-message-manager.js'))));
+  check('feedPeerCard gates on method presence (no backend branch) — codex passes it now', verdictOf(/session\?\._normalizer\?\.injectPeerCard\) return false/.test(read('src/normalizers.js'))));
   check('server.js emitPeerCard → feedPeerCard (auto-resume notify + delivery cards reach codex through the same gate)', (read('server.js').match(/feedPeerCard\(s, /g) || []).length >= 2);
 }
 
@@ -343,23 +343,23 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   console.log('B-9fd6 ① readReport: a delivered report read back off its record (PURE group-card)');
   {
     const one = GC.readReport(framed(MENTION, 1, [L('车道 · alpha 建设 (Opus)', W1)]));
-    check('a mention wake: the group, ONE message line, its sender and words', one && one.id === GID && one.name === GNAME && one.lines.length === 1 && one.lines[0].from === '车道 · alpha 建设 (Opus)' && one.lines[0].text === W1, JSON.stringify(one));
+    check('a mention wake: the group, ONE message line, its sender and words', gateOf(one) && one.id === GID && one.name === GNAME && one.lines.length === 1 && one.lines[0].from === '车道 · alpha 建设 (Opus)' && one.lines[0].text === W1, JSON.stringify(one));
     const al = GC.readReport(framed(ALWAYS, 1, [L('beta', 'ok')]));
-    check('…an "always" wake too (any engine lead)', al && al.lines[0].from === 'beta');
+    check('…an "always" wake too (any engine lead)', gateOf(al) && al.lines[0].from === 'beta');
     const inv = GC.readReport(framed(INVITED, 2, ['- [10-03T03:20Z] (create) Lane crew created'], ['You were added by coordinator — context: welcome aboard']));
-    check('an INVITE wake: the inviter + context, a system line (create) is a system line', inv && inv.inviter === 'coordinator' && inv.context === 'welcome aboard' && inv.lines.length === 1 && inv.lines[0].kind === 'create' && inv.lines[0].from === null, JSON.stringify(inv));
+    check('an INVITE wake: the inviter + context, a system line (create) is a system line', gateOf(inv) && inv.inviter === 'coordinator' && inv.context === 'welcome aboard' && inv.lines.length === 1 && inv.lines[0].kind === 'create' && inv.lines[0].from === null, JSON.stringify(inv));
     const tight = GC.readReport(CLI_HEAD + 'You were @mentioned — group mess…\n#### Group "Lane c…" (' + GID + ') — 2 new\n(1 earlier — vibespace-msg read ' + GID + ' --before 17)\n' + L('alpha', 'x'.repeat(80) + '…') + '\n(1 cut — vibespace-msg read ' + GID + ' --before 18 --limit 1)\nReply: vibespace-msg send ' + GID + ' "..."' + CLI_TAIL);
-    check('the TIGHT form (clipped lead, short head, short pointers): read, `more` and `cut` from its pointers', tight && tight.more === 1 && tight.cut === true && tight.lines.length === 1 && tight.lines[0].from === 'alpha', JSON.stringify(tight));
+    check('the TIGHT form (clipped lead, short head, short pointers): read, `more` and `cut` from its pointers', gateOf(tight) && tight.more === 1 && tight.cut === true && tight.lines.length === 1 && tight.lines[0].from === 'alpha', JSON.stringify(tight));
     const env = GC.readReport(CLI_HEAD + '<cross-session-message from="unknown">\n' + [MENTION, `#### Group "${GNAME}" (${GID}) — 1 new`, L('alpha', 'hi'), FOOT].join('\n') + '\n</cross-session-message>' + CLI_TAIL);
-    check('…inside the CLI\'s <cross-session-message> envelope too', env && env.lines[0].from === 'alpha');
+    check('…inside the CLI\'s <cross-session-message> envelope too', gateOf(env) && env.lines[0].from === 'alpha');
     const sm = GC.readReport(framed(MENTION, 1, [L('alpha', '@[lane-beta](c-1234) please look')]));
-    check('a structured mention in the words is words (tolerant of group-chat-ui\'s format)', sm && sm.lines[0].text === '@[lane-beta](c-1234) please look');
+    check('a structured mention in the words is words (tolerant of group-chat-ui\'s format)', gateOf(sm) && sm.lines[0].text === '@[lane-beta](c-1234) please look');
     check('a report QUOTED inside somebody\'s words (not at the start) is never read', GC.readReport(CLI_HEAD + 'look at this:\n' + framed(MENTION, 1, [L('alpha', 'hi')]).slice(CLI_HEAD.length)) === null);
     check('an unknown author ("unknown", the engine\'s placeholder) is no sender', GC.readReport(framed(MENTION, 1, [L('unknown', 'hi')])).lines[0].from === null);
     check('a text over the read bound (64 KiB) is not a report (bounded)', GC.readReport(framed(MENTION, 1, [L('alpha', 'x'.repeat(70000))])) === null);
     const five = GC.cardOfReport(GC.readReport(framed(MENTION, 6, ['a', 'b', 'c', 'd', 'e', 'a'].map((w, i) => L('agent-' + w, 'msg ' + i)))), 1790000000000);
-    check('SIX messages from five senders: the card names THREE (report order) and counts two more; the newest is the sender', five && five.group.authors.map((a) => a.name).join() === 'agent-a,agent-b,agent-c' && five.group.authorsMore === 2 && five.fromName === 'agent-a' && five.group.via === 'wake', JSON.stringify(five && five.group));
-    check('…its words: each message as "<sender>: <words>", a blank line apart, no frame', five && five.text.split('\n\n').length === 6 && five.text.startsWith('agent-a: msg 0') && !/####|vibespace-msg|Another Claude/.test(five.text), five && five.text);
+    check('SIX messages from five senders: the card names THREE (report order) and counts two more; the newest is the sender', gateOf(five) && five.group.authors.map((a) => a.name).join() === 'agent-a,agent-b,agent-c' && five.group.authorsMore === 2 && five.fromName === 'agent-a' && five.group.via === 'wake', JSON.stringify(five && five.group));
+    check('…its words: each message as "<sender>: <words>", a blank line apart, no frame', gateOf(five) && five.text.split('\n\n').length === 6 && gateOf(five.text.startsWith('agent-a: msg 0')) && !/####|vibespace-msg|Another Claude/.test(five.text), five && five.text);
     const solo = GC.reportCardOf([{ from: 'alpha', text: 'one' }, { from: 'alpha', text: 'two' }]);
     check('one sender, two messages: one author, the words a blank line apart (no "alpha:" prefix)', solo.authors.length === 1 && solo.text === 'one\n\ntwo', JSON.stringify(solo));
     check('groupOf keeps `authors` only for a report of two or more senders (a one-sender card is exactly what it was)', !('authors' in GC.groupOf({ id: GID, at: 5, from: 'a', authors: [{ name: 'a' }] })) && GC.groupOf({ id: GID, at: 5, authors: [{ name: 'a' }, { self: true }, { name: '' }], authorsMore: 4 }).authors.length === 2);
@@ -416,7 +416,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
     const named = cardOf(REAL, rec(t, 30, { kind: 'peer', from: 'uds:/tmp/cc-socks/77.sock', name: 'mallory', msg_id: 'pm-77' }))[0] || {};
     check('origin.name "mallory" + a fake report ⇒ "Message from “mallory”", never a group card naming somebody else', !named.peerGroup && named.peerFrom === 'mallory', { from: named.peerFrom, g: named.peerGroup });
     const notice = cardOf(REAL, rec(CLI_HEAD + 'VibeSpace (this workspace, not another agent) reports: …\n' + framed(MENTION, 1, [L('alpha', 'x')]).slice(CLI_HEAD.length), 31))[0] || {};
-    check('our own notice head first ⇒ still the notice (a report never reads behind it)', !notice.peerGroup && NS.isVibespaceNotice(notice.peerFrom, PCM.peerTextOf(notice), notice.peerVia));
+    check('our own notice head first ⇒ still the notice (a report never reads behind it)', !notice.peerGroup && verdictOf(NS.isVibespaceNotice(notice.peerFrom, PCM.peerTextOf(notice), notice.peerVia)));
   }
 
   console.log('B-9fd6 ⑦ the delivery\'s own facts still win; a held card is never drawn twice');
@@ -428,7 +428,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
     feedPeerCard(s, { fromName: 'alpha', text: 'wake up please', recorded, kind: 'peer' });
     await rebuildHistory(s, 'w-sp', [rec(t, 40)]);
     const pm = s._normalizer.messages.filter((m) => m.originKind === 'peer-message');
-    check('held ladder card + the transcript\'s record of the same post ⇒ ONE card (matched by the RECORDED words), named', pm.length === 1 && pm[0].peerGroup && pm[0].peerFrom === 'alpha', pm.map((m) => [m.peerFrom, PCM.peerTextOf(m)]));
+    check('held ladder card + the transcript\'s record of the same post ⇒ ONE card (matched by the RECORDED words), named', pm.length === 1 && gateOf(pm[0].peerGroup) && pm[0].peerFrom === 'alpha', pm.map((m) => [m.peerFrom, PCM.peerTextOf(m)]));
     // the ring's wake card upgrades the record even though the fallback already drew it
     const ring = [{ k: `${GID}:5`, at: 6, card: { fromName: 'alpha', text: 'the ring words', group: { id: GID, name: 'Ring name', at: 5, from: 'alpha', via: 'wake' }, shownAt: 6, recordedHead: GC.recordedHeadOf(recorded) } }];
     const s2 = { claudeSessionId: 'c-sp2', backend: 'claude', mode: 'chat', _groupCards: ring, _normalizer: createMessageManager('claude', 'w-sp2') };
@@ -442,7 +442,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   {
     const MUT = mutantCopies('peer-card-sender', REPO);
     const anchor = 'const report = NOTICE_AT_START_RE.test(s) ? null : readReport(s);';
-    check('CONTROL anchor present (the fallback\'s one read)', MMSRC.includes(anchor));
+    check('CONTROL anchor present (the fallback\'s one read)', verdictOf(MMSRC.includes(anchor)));
     const f = MUT.write('src/message-manager.js', editAnchor(MMSRC, anchor, 'const report = null;', "src/message-manager.js"), 'no-read');
     const M0 = require(f);
     const bad = legs(M0);
@@ -450,7 +450,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
     const rows = [framed(MENTION, 1, [L('alpha', 'hi')])].map((t) => headOf(cardOf(M0, rec(t, 50))[0] || {}));
     check('CONTROL …and the census is red by name: "Message from another session"', rows[0] === 'Message from another session', rows);
     const nAnchor = "if (m && typeof m[PEER_RECORDED] === 'string') return m[PEER_RECORDED]; ";
-    check('CONTROL anchor present (the rebuild matches the recorded words)', NZSRC.includes(nAnchor));
+    check('CONTROL anchor present (the rebuild matches the recorded words)', verdictOf(NZSRC.includes(nAnchor)));
     const fz = MUT.write('src/normalizers.js', editAnchor(NZSRC, nAnchor, '', "src/normalizers.js"), 'no-recorded');
     const NZ0 = require(fz);
     const t = framed(MENTION, 1, [L('alpha', 'wake up please')]);
@@ -463,4 +463,4 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
 }
 
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

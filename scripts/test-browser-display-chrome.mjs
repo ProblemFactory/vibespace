@@ -40,7 +40,7 @@ const B = require('../src/browser-profiles.js');
 const S = require('../src/browser-stream.js');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -186,20 +186,20 @@ console.log('— ① a conversation\'s own browser, no display, the owner\'s con
   let c = await cli(['open', PAGE], cliEnvFor(s));
   const p = ephOf(k, KEY_E);
   const rec = p ? k.browserOf(p.id) : null;
-  ok(c.status === 0 && rec && rec.state === 'ready', '`vibespace-browser open <page>` WORKS with no desktop session (it answered launch_failed before)', { status: c.status, stderr: c.stderr.slice(-600), rec: rec && { state: rec.state, lastError: rec.lastError } });
+  ok(c.status === 0 && gateOf(rec) && rec.state === 'ready', '`vibespace-browser open <page>` WORKS with no desktop session (it answered launch_failed before)', { status: c.status, stderr: c.stderr.slice(-600), rec: rec && { state: rec.state, lastError: rec.lastError } });
   const ch = rec && rec.pid ? chromesOf(rec.pid) : [];
   const argv = ch[0] ? ch[0].argv : [];
-  ok(ch.length === 1 && argv.some((a) => /^--headless/.test(a)) && !argv.some((a) => /^--ozone-platform=wayland$/.test(a)) && argv.includes('--vibespace-keeper=' + KEY_E), 'the Chrome it launched runs --headless, without the Wayland pin, carrying the keeper\'s mark', argv.filter((a) => /headless|ozone|keeper|no-sandbox/.test(a)));
-  ok(/\[browser_headless\]/.test(c.stderr) && rec && rec.display && rec.display.fallback && rec.display.fallback.why === 'no-display', 'the agent is told (the note) and the record carries the fact', { stderr: c.stderr.slice(-400), display: rec && rec.display });
+  ok(ch.length === 1 && gateOf(argv.some((a) => /^--headless/.test(a))) && !argv.some((a) => /^--ozone-platform=wayland$/.test(a)) && verdictOf(argv.includes('--vibespace-keeper=' + KEY_E)), 'the Chrome it launched runs --headless, without the Wayland pin, carrying the keeper\'s mark', argv.filter((a) => /headless|ozone|keeper|no-sandbox/.test(a)));
+  ok(gateOf(/\[browser_headless\]/.test(c.stderr)) && gateOf(rec) && gateOf(rec.display) && gateOf(rec.display.fallback) && rec.display.fallback.why === 'no-display', 'the agent is told (the note) and the record carries the fact', { stderr: c.stderr.slice(-400), display: rec && rec.display });
   const pid0 = rec && rec.pid;
   c = await cli(['get', 'title'], cliEnvFor(s));
   const rec2 = p ? k.browserOf(p.id) : null;
   const ch2 = rec2 && rec2.pid ? chromesOf(rec2.pid) : [];
-  ok(c.status === 0 && /headless-ok/.test(c.stdout) && !/\[browser_headless\]/.test(c.stderr), '`get title` reads the page — no second note', { status: c.status, stdout: c.stdout.slice(0, 300), stderr: c.stderr.slice(-300) });
-  ok(rec2 && rec2.pid === pid0 && ch2.length === 1 && ch[0] && ch2[0].pid === ch[0].pid, 'the SAME daemon and the SAME Chrome served it — its view equals the launch\'s (the planned file reached the agent\'s command; never a relaunch)', { pid0, pid: rec2 && rec2.pid, chrome0: ch[0] && ch[0].pid, chrome: ch2.map((x) => x.pid) });
-  ok(journal.some((j) => /no desktop session on this machine .*launched headless instead of the window its config asks for; dropped --ozone-platform=wayland/.test(j)), 'the journal says what happened, once', journal.filter((j) => /desktop/.test(j)));
+  ok(c.status === 0 && gateOf(/headless-ok/.test(c.stdout)) && !/\[browser_headless\]/.test(c.stderr), '`get title` reads the page — no second note', { status: c.status, stdout: c.stdout.slice(0, 300), stderr: c.stderr.slice(-300) });
+  ok(gateOf(rec2) && rec2.pid === pid0 && ch2.length === 1 && gateOf(ch[0]) && ch2[0].pid === ch[0].pid, 'the SAME daemon and the SAME Chrome served it — its view equals the launch\'s (the planned file reached the agent\'s command; never a relaunch)', { pid0, pid: rec2 && rec2.pid, chrome0: ch[0] && ch[0].pid, chrome: ch2.map((x) => x.pid) });
+  ok(verdictOf(journal.some((j) => /no desktop session on this machine .*launched headless instead of the window its config asks for; dropped --ozone-platform=wayland/.test(j))), 'the journal says what happened, once', journal.filter((j) => /desktop/.test(j)));
   const ua = await cli(['eval', 'navigator.userAgent'], cliEnvFor(s));
-  ok(ua.status === 0 && /HeadlessChrome\/154\./.test(ua.stdout), 'no Xvfb on the launch PATH ⇒ the headless rung: navigator.userAgent through the keeper says HeadlessChrome/154', ua.stdout.slice(0, 300));
+  ok(ua.status === 0 && verdictOf(/HeadlessChrome\/154\./.test(ua.stdout)), 'no Xvfb on the launch PATH ⇒ the headless rung: navigator.userAgent through the keeper says HeadlessChrome/154', ua.stdout.slice(0, 300));
   ok(sha(UCFG) === USER_SHA, 'the user\'s ~/.agent-browser/config.json is byte-identical');
   if (p) await k.stop(p.id, { why: 'user' });
 }
@@ -213,12 +213,12 @@ console.log('— ② a named profile with browser.headed = "Show the window": he
   let c = await cli(['use', 'Work'], cliEnvFor(s));
   const rec = k.browserOf(prof.id);
   const ch = rec && rec.pid ? chromesOf(rec.pid) : [];
-  ok(c.status === 0 && rec && rec.state === 'ready' && rec.launchEnv && rec.launchEnv.AGENT_BROWSER_HEADED === '0' && /\[browser_headless\]/.test(c.stderr), '`use Work` launched it headless (HEADED=0 in its launch view) and said so', { status: c.status, stderr: c.stderr.slice(-500), launchEnv: rec && rec.launchEnv });
-  ok(ch.length === 1 && ch[0].argv.some((a) => /^--headless/.test(a)) && !ch[0].argv.includes('--ozone-platform=wayland') && ch[0].argv.some((a) => a === '--user-data-dir=' + prof.dir), 'ONE Chrome on the profile directory, headless, no Wayland pin', ch.map((x) => x.argv.filter((a) => /headless|ozone|user-data-dir/.test(a))));
+  ok(c.status === 0 && gateOf(rec) && rec.state === 'ready' && gateOf(rec.launchEnv) && rec.launchEnv.AGENT_BROWSER_HEADED === '0' && verdictOf(/\[browser_headless\]/.test(c.stderr)), '`use Work` launched it headless (HEADED=0 in its launch view) and said so', { status: c.status, stderr: c.stderr.slice(-500), launchEnv: rec && rec.launchEnv });
+  ok(ch.length === 1 && gateOf(ch[0].argv.some((a) => /^--headless/.test(a))) && !ch[0].argv.includes('--ozone-platform=wayland') && verdictOf(ch[0].argv.some((a) => a === '--user-data-dir=' + prof.dir)), 'ONE Chrome on the profile directory, headless, no Wayland pin', ch.map((x) => x.argv.filter((a) => /headless|ozone|user-data-dir/.test(a))));
   c = await cli(['open', PAGE], cliEnvFor(s));
   const c2 = await cli(['get', 'title'], cliEnvFor(s));
   const ch2 = rec && rec.pid ? chromesOf(rec.pid) : [];
-  ok(c.status === 0 && c2.status === 0 && /headless-ok/.test(c2.stdout) && ch2.length === 1 && ch2[0].pid === ch[0].pid, 'its commands (over CDP) open and read the page on that one Chrome', { open: c.stderr.slice(-300), title: c2.stdout.slice(0, 200), chromes: ch2.map((x) => x.pid) });
+  ok(c.status === 0 && c2.status === 0 && gateOf(/headless-ok/.test(c2.stdout)) && ch2.length === 1 && ch2[0].pid === ch[0].pid, 'its commands (over CDP) open and read the page on that one Chrome', { open: c.stderr.slice(-300), title: c2.stdout.slice(0, 200), chromes: ch2.map((x) => x.pid) });
   settings['browser.headed'] = '';
   try { await k.detach({ profileId: prof.id, browserKey: KEY_W, by: 'user' }); } catch { /* */ }
   try { await k.stop(prof.id, { why: 'user' }); } catch { /* */ }
@@ -251,10 +251,10 @@ console.log('— ③ a display this machine HAS (a private Xvfb) under a config 
       const rec = p ? k2.browserOf(p.id) : null;
       const ch = rec && rec.pid ? chromesOf(rec.pid) : [];
       const argv = ch[0] ? ch[0].argv : [];
-      ok(c.status === 0 && rec && rec.display && rec.display.kind === 'x11' && rec.display.fallback && rec.display.fallback.why === 'ozone-unavailable' && rec.display.fallback.used === 'x11', 'the fact: X11 is here, Wayland is not — the pin is substituted', { status: c.status, stderr: c.stderr.slice(-400), display: rec && rec.display });
-      ok(ch.length === 1 && !argv.some((a) => /^--headless/.test(a)) && argv.includes('--ozone-platform=x11') && !argv.includes('--ozone-platform=wayland'), 'Chrome runs HEADED (no --headless) on the private X display with --ozone-platform=x11', argv.filter((a) => /headless|ozone/.test(a)));
+      ok(c.status === 0 && gateOf(rec) && gateOf(rec.display) && rec.display.kind === 'x11' && gateOf(rec.display.fallback) && rec.display.fallback.why === 'ozone-unavailable' && rec.display.fallback.used === 'x11', 'the fact: X11 is here, Wayland is not — the pin is substituted', { status: c.status, stderr: c.stderr.slice(-400), display: rec && rec.display });
+      ok(ch.length === 1 && !argv.some((a) => /^--headless/.test(a)) && gateOf(argv.includes('--ozone-platform=x11')) && !argv.includes('--ozone-platform=wayland'), 'Chrome runs HEADED (no --headless) on the private X display with --ozone-platform=x11', argv.filter((a) => /headless|ozone/.test(a)));
       const c2 = await cli(['get', 'title'], cliEnvFor(s, { DISPLAY: D }));
-      ok(c2.status === 0 && /headless-ok/.test(c2.stdout) && /browser_display_substituted/.test(c.stderr), 'it reads the page; the agent was told which display it runs on', { title: c2.stdout.slice(0, 200), note: c.stderr.slice(-300) });
+      ok(c2.status === 0 && gateOf(/headless-ok/.test(c2.stdout)) && verdictOf(/browser_display_substituted/.test(c.stderr)), 'it reads the page; the agent was told which display it runs on', { title: c2.stdout.slice(0, 200), note: c.stderr.slice(-300) });
       if (p) { try { await k2.stop(p.id, { why: 'user' }); } catch { /* */ } }
       setupRoutes(k);
     }
@@ -279,19 +279,19 @@ console.log('— ⑤ Xvfb installed (a private dir on the PATH), a stale DISPLAY
     const ch = rec && rec.pid ? chromesOf(rec.pid) : [];
     const argv = ch[0] ? ch[0].argv : [];
     const xv = rec && rec.pid ? xvfbsOf(rec.pid) : [];
-    ok(c.status === 0 && rec && rec.display && rec.display.fallback && rec.display.fallback.rung === 'hidden-window' && rec.display.xvfb === true && /\[browser_hidden_window\]/.test(c.stderr), '`open` WORKS and says the rung: no desktop, Xvfb installed ⇒ a hidden window', { status: c.status, stderr: c.stderr.slice(-500), display: rec && rec.display });
-    ok(ch.length === 1 && !argv.some((a) => /^--headless/.test(a)) && argv.includes('--ozone-platform=x11') && !argv.includes('--ozone-platform=wayland') && xv.length >= 1, 'Chrome runs a WINDOW (no --headless, --ozone-platform=x11) on the Xvfb the browser CLI started as its own child (the stale DISPLAY cleared for the launch)', { chrome: argv.filter((a) => /headless|ozone/.test(a)), xvfb: xv });
+    ok(c.status === 0 && gateOf(rec) && gateOf(rec.display) && gateOf(rec.display.fallback) && rec.display.fallback.rung === 'hidden-window' && rec.display.xvfb === true && verdictOf(/\[browser_hidden_window\]/.test(c.stderr)), '`open` WORKS and says the rung: no desktop, Xvfb installed ⇒ a hidden window', { status: c.status, stderr: c.stderr.slice(-500), display: rec && rec.display });
+    ok(ch.length === 1 && !argv.some((a) => /^--headless/.test(a)) && gateOf(argv.includes('--ozone-platform=x11')) && !argv.includes('--ozone-platform=wayland') && xv.length >= 1, 'Chrome runs a WINDOW (no --headless, --ozone-platform=x11) on the Xvfb the browser CLI started as its own child (the stale DISPLAY cleared for the launch)', { chrome: argv.filter((a) => /headless|ozone/.test(a)), xvfb: xv });
     c = await cli(['eval', 'navigator.userAgent'], envH);
-    ok(c.status === 0 && /Chrome\/154\./.test(c.stdout) && !/HeadlessChrome/.test(c.stdout), 'navigator.userAgent read through the keeper: Chrome/154 — an ordinary browser to a sign-in page (headless says HeadlessChrome/154)', c.stdout.slice(0, 300));
+    ok(c.status === 0 && gateOf(/Chrome\/154\./.test(c.stdout)) && !/HeadlessChrome/.test(c.stdout), 'navigator.userAgent read through the keeper: Chrome/154 — an ordinary browser to a sign-in page (headless says HeadlessChrome/154)', c.stdout.slice(0, 300));
     // B-cc68 (lane browser-reliability): WebGL in the hidden window — an Xvfb has no GL (measured: NO-WEBGL without the pair,
     // GPU or not), so the rung adds the SwiftShader pair and the launch line says WebGL in software
     c = await cli(['eval', "(() => { const g = document.createElement('canvas').getContext('webgl'); if (!g) return 'NO-WEBGL'; const d = g.getExtension('WEBGL_debug_renderer_info'); return 'webgl: ' + (d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)); })()"], envH);
-    ok(c.status === 0 && /webgl: .*SwiftShader/.test(c.stdout) && argv.includes('--use-angle=swiftshader') && argv.includes('--enable-unsafe-swiftshader') && journal.some((j) => /HIDDEN WINDOW.*WebGL in software/.test(j)), 'B-cc68: the hidden window has WebGL — drawn in software (SwiftShader) — and the launch line says so', c.stdout.slice(0, 300));
+    ok(c.status === 0 && gateOf(/webgl: .*SwiftShader/.test(c.stdout)) && gateOf(argv.includes('--use-angle=swiftshader')) && gateOf(argv.includes('--enable-unsafe-swiftshader')) && verdictOf(journal.some((j) => /HIDDEN WINDOW.*WebGL in software/.test(j))), 'B-cc68: the hidden window has WebGL — drawn in software (SwiftShader) — and the launch line says so', c.stdout.slice(0, 300));
     const c2 = await cli(['get', 'title'], envH);
     const rec2 = p ? kH.browserOf(p.id) : null;
     const ch2 = rec2 && rec2.pid ? chromesOf(rec2.pid) : [];
-    ok(c2.status === 0 && /headless-ok/.test(c2.stdout) && rec2.pid === rec.pid && ch2.length === 1 && ch2[0].pid === ch[0].pid, 'it reads the page on the SAME daemon and Chrome (no relaunch)', { title: c2.stdout.slice(0, 200), pid: [rec.pid, rec2.pid], chrome: [ch[0] && ch[0].pid, ch2.map((x) => x.pid)] });
-    ok(journal.some((j) => /launched in a HIDDEN WINDOW/.test(j)), 'the journal names the rung');
+    ok(c2.status === 0 && gateOf(/headless-ok/.test(c2.stdout)) && rec2.pid === rec.pid && ch2.length === 1 && ch2[0].pid === ch[0].pid, 'it reads the page on the SAME daemon and Chrome (no relaunch)', { title: c2.stdout.slice(0, 200), pid: [rec.pid, rec2.pid], chrome: [ch[0] && ch[0].pid, ch2.map((x) => x.pid)] });
+    ok(verdictOf(journal.some((j) => /launched in a HIDDEN WINDOW/.test(j))), 'the journal names the rung');
     if (p) { try { await kH.stop(p.id, { why: 'user' }); } catch { /* */ } }
     await sleep(500);
     ok(xvfbsOf(rec.pid).length === 0 && !((() => { try { process.kill(xv[0], 0); return true; } catch { return false; } })()), 'Stop ends the browser CLI\'s own Xvfb with it', xv);
@@ -306,7 +306,7 @@ console.log('— ④ CONTROL: a keeper whose launch records no display fact (the
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const factLine = '        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode(), preference: headedSetting() });'; // + H5's preference (lane hooks-create; the 2.369.200 integration re-anchored)
   const envLine = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });';
-  ok(src.includes(factLine) && src.includes(envLine), 'CONTROL setup: the launch\'s fact line is found in the keeper');
+  ok(gateOf(src.includes(factLine)) && verdictOf(src.includes(envLine)), 'CONTROL setup: the launch\'s fact line is found in the keeper');
   const pre = MK.load('src/server/browser-keeper.js', editAnchor(editAnchor(src, factLine, '        rec.display = null;', "src/server/browser-keeper.js"), envLine, '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });', "src/server/browser-keeper.js"), 'no-fact');
   const kPre = mkKeeper(pre, path.join(ROOT, 'd3'));
   setupRoutes(kPre);
@@ -314,12 +314,12 @@ console.log('— ④ CONTROL: a keeper whose launch records no display fact (the
   const c = await cli(['open', PAGE], cliEnvFor(s));
   const p = ephOf(kPre, KEY_C);
   const rec = p ? kPre.browserOf(p.id) : null;
-  ok(c.status !== 0 && /launch_failed/.test(c.stderr) && rec && rec.state === 'failed', 'CONTROL: `open` answers launch_failed on the real binary (the owner\'s incident)', { status: c.status, stderr: c.stderr.slice(-500), rec: rec && { state: rec.state, lastError: rec.lastError } });
+  ok(c.status !== 0 && gateOf(/launch_failed/.test(c.stderr)) && gateOf(rec) && rec.state === 'failed', 'CONTROL: `open` answers launch_failed on the real binary (the owner\'s incident)', { status: c.status, stderr: c.stderr.slice(-500), rec: rec && { state: rec.state, lastError: rec.lastError } });
   // what the real binary says when asked directly under the same config (the words the keeper's sentence does not carry)
   const direct = await new Promise((r) => execFile(REAL, ['open', 'about:blank'], { env: { ...BASE_ENV, HOME, TMPDIR: TMP, XDG_RUNTIME_DIR: XDG, AGENT_BROWSER_CONFIG: UCFG, AGENT_BROWSER_SESSION: 'vs-ctl', AGENT_BROWSER_NAMESPACE: 'vs-ctl', AGENT_BROWSER_SOCKET_DIR: SOCK, AGENT_BROWSER_IDLE_TIMEOUT_MS: '5000', AGENT_BROWSER_JSON: '1' }, cwd: DCWD, timeout: 60000, encoding: 'utf8' }, (err, so, se) => r({ code: err ? err.code : 0, out: String(so || '') + String(se || '') })));
-  ok(direct.code !== 0 && /Failed to connect to Wayland display/.test(direct.out) && /The platform failed to initialize/.test(direct.out), 'the real binary under the owner\'s config with no display: "Failed to connect to Wayland display … The platform failed to initialize" (measured again)', direct.out.slice(0, 400));
-  for (const r of copiesCensus(MK.files, MK.dir, REPO, { label: 'control: ' })) ok(r.pass, r.name, r.detail);
+  ok(direct.code !== 0 && gateOf(/Failed to connect to Wayland display/.test(direct.out)) && verdictOf(/The platform failed to initialize/.test(direct.out)), 'the real binary under the owner\'s config with no display: "Failed to connect to Wayland display … The platform failed to initialize" (measured again)', direct.out.slice(0, 400));
+  for (const r of copiesCensus(MK.files, MK.dir, REPO, { label: 'control: ' })) ok(verdictOf(r.pass), r.name, r.detail);
   setupRoutes(k);
 }
 ok(sha(UCFG) === USER_SHA, 'the user file is byte-identical at the end');
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -3,7 +3,7 @@ import './scratch.mjs';
 import { parseEml } from '../src/lib/eml.js';
 
 let failed = 0;
-function check(name, cond, detail) {
+function check(name, cond, detail) { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) {
     console.log('✓ ' + name);
   } else {
@@ -113,7 +113,7 @@ Content-Transfer-Encoding: base64
   check('nested: attachment mime', att.mime === 'application/pdf', att.mime);
   check('nested: attachment size', att.size === 256, att.size);
   check('nested: content bytes round-trip',
-    att.content instanceof Uint8Array && att.content.length === 256 && att.content.every((b, i) => b === i));
+    att.content instanceof Uint8Array && att.content.length === 256 && verdictOf(att.content.every((b, i) => b === i)));
 });
 
 // ---- 4. quoted-printable UTF-8 body -------------------------------------------
@@ -189,11 +189,11 @@ xyz
   const r = parseEml(eml);
   check('rfc2231: three attachments', r.attachments.length === 3, r.attachments.length);
   const [a0, a1, a2] = r.attachments;
-  check('rfc2231: single-segment extended filename', a0 && a0.filename === '中文 report.txt', a0 && a0.filename);
-  check('rfc2231: passthrough content', a0 && a0.size === 4 && String.fromCharCode(...a0.content) === 'AAAA');
-  check('rfc2231: continuation filename*0*/1*', a1 && a1.filename === '报告.bin', a1 && a1.filename);
-  check('rfc2231: base64 attachment content', a1 && String.fromCharCode(...a1.content) === 'hello');
-  check('rfc2231: RFC2047 word in plain name= param', a2 && a2.filename === '图表.dat', a2 && a2.filename);
+  check('rfc2231: single-segment extended filename', gateOf(a0) && a0.filename === '中文 report.txt', a0 && a0.filename);
+  check('rfc2231: passthrough content', gateOf(a0) && a0.size === 4 && String.fromCharCode(...a0.content) === 'AAAA');
+  check('rfc2231: continuation filename*0*/1*', gateOf(a1) && a1.filename === '报告.bin', a1 && a1.filename);
+  check('rfc2231: base64 attachment content', gateOf(a1) && String.fromCharCode(...a1.content) === 'hello');
+  check('rfc2231: RFC2047 word in plain name= param', gateOf(a2) && a2.filename === '图表.dat', a2 && a2.filename);
   check('rfc2231: textBody still chosen from mixed', r.textBody.trim() === 'body', r.textBody);
 });
 
@@ -248,4 +248,4 @@ if (failed) {
   console.error(failed + ' check(s) failed');
   process.exit(1);
 }
-console.log('all green');
+console.log('all green'); import { verdictOf, gateOf } from './lib/check.mjs';

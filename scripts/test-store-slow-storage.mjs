@@ -69,7 +69,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const ROOT = `/tmp/storeslow-${process.pid}`, BACK = path.join(ROOT, 'back'), MNT = path.join(ROOT, 'mnt'), HOME = path.join(ROOT, 'home'), WORK = path.join(ROOT, 'work'), BIN = path.join(ROOT, 'bin');
 const PRELOAD = path.join(REPO, 'scripts/fixtures/store-slow-preload.cjs');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -267,7 +267,7 @@ const T0 = Date.now();
 VNC = await vncEnv(); PORT = await freePort(); setupStubs();
 execFileSync('bindfs', ['--no-allow-other', BACK, MNT]); mounted = true;
 const fsLine = (fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n').find((l) => l.includes(` ${MNT} `)) || '').split(' - ')[1] || '';
-ok(/^fuse\.bindfs /.test(fsLine), `the scratch data dirs live on a real FUSE mount (${fsLine.split(' ').slice(0, 2).join(' ')})`);
+ok(verdictOf(/^fuse\.bindfs /.test(fsLine)), `the scratch data dirs live on a real FUSE mount (${fsLine.split(' ').slice(0, 2).join(' ')})`);
 const TREE = OTHER || REPO;
 const label = OTHER ? 'other tree' : 'this tree';
 
@@ -294,7 +294,7 @@ if (r5) {
   info(`${label}: ${H ? H.gaps.length : '?'} main-loop holds ≥ 250 ms in the ${Math.round((r5.b.to - r5.b.from) / 1000)} s busy stretch`);
   for (const [k, v] of sum) info(`   ${v.n} × ${k} — ${(v.ms / 1000).toFixed(1)} s in all, max ${v.max} ms`);
   if (!OTHER) {
-    ok(H && movedGaps.length === 0 && H.movedCalls.length === 0, `(a) the four moved stores (channels index, session-meta, usage cursors, rates.json) cause NO main-thread hold ≥ 250 ms at ${DELAY} ms per call`, { movedGaps: movedGaps.slice(0, 4), movedCalls: H && H.movedCalls.slice(0, 4) });
+    ok(gateOf(H) && movedGaps.length === 0 && H.movedCalls.length === 0, `(a) the four moved stores (channels index, session-meta, usage cursors, rates.json) cause NO main-thread hold ≥ 250 ms at ${DELAY} ms per call`, { movedGaps: movedGaps.slice(0, 4), movedCalls: H && H.movedCalls.slice(0, 4) });
     // (f) the boot split at the first loop turn — /api/boot-trace's own numbers: `mainMs` (the main module) + the listen
     //     callback's hold (it ran before the first turn and printed «Ready.»), then the holds AFTER the first turn until the
     //     creates began (hub-relative ms = epoch − startedAt)
@@ -337,15 +337,15 @@ if (r5) {
     const flushMs = +((/written in (\d+) ms/.exec(line) || [])[1] || NaN);
     table.runs.tree500.sigterm = { stopMs, line, readAtOnDisk: row && row.readAt, want: at }; save();
     info(`(c) SIGTERM ${c1 === 200 ? 'right after a mark + a usage walk' : '(the mark answered ' + c1 + ')'}: the hub exited in ${stopMs} ms; ${line || '(no exit line)'}`);
-    ok(c1 === 200 && ((row && row.readAt === at) || /NOT written[^\n]*channels-index/.test(line)), `(c) the last index change is on disk (readAt ${row && row.readAt} = ${at}) — or the exit line names the index`, { line, row: row && { readAt: row.readAt } });
+    ok(c1 === 200 && ((gateOf(row) && row.readAt === at) || verdictOf(/NOT written[^\n]*channels-index/.test(line))), `(c) the last index change is on disk (readAt ${row && row.readAt} = ${at}) — or the exit line names the index`, { line, row: row && { readAt: row.readAt } });
     // round 6 (E1): no bound of ours — the exit writes every store owed and says what it wrote; nothing «NOT written»
-    ok(!/NOT written|bound/.test(line) && !/after the stop signal/.test(log) && (!line || Number.isFinite(flushMs)), `(c) the exit flush leaves nothing and no bound of ours is named (${line || 'no line: under 250 ms and nothing left'}); the hub ended by itself in ${stopMs} ms`);
+    ok(!/NOT written|bound/.test(line) && !/after the stop signal/.test(log) && (!line || verdictOf(Number.isFinite(flushMs))), `(c) the exit flush leaves nothing and no bound of ours is named (${line || 'no line: under 250 ms and nothing left'}); the hub ended by itself in ${stopMs} ms`);
     // LAW D by behaviour: during the shutdown the index reaches its file only through the WRITER — the exit flush (named in its
     // line) or the writer's thread (a write already in flight) — never the store's own flush on the loop, unnamed (what the
     // shutdown did with beginExit() inside a comment: law D's control below)
     const namedD = /\] exit: \d+ stores? written in \d+ ms \([^)]*channels-index\.write/.test(line);
     const ixMainD = (((slowOf(r5.h) || {}).calls) || []).filter((c) => c.at >= sigAt - 50 && /channels\/index\.json/.test(c.file || '') && c.ms >= 250).map((c) => `${c.site} ${c.fn} ${Math.round(c.ms)} ms`);
-    ok(namedD || !ixMainD.length, `(c) LAW D: during the shutdown the index reached its file through the writer — ${namedD ? 'written BY THE EXIT FLUSH (named in its line)' : 'by the writer\'s own thread (no main-thread write of it, none named)'}: ${line.slice(0, 200)}`, { line, ixMainD });
+    ok(verdictOf(namedD) || !ixMainD.length, `(c) LAW D: during the shutdown the index reached its file through the writer — ${namedD ? 'written BY THE EXIT FLUSH (named in its line)' : 'by the writer\'s own thread (no main-thread write of it, none named)'}: ${line.slice(0, 200)}`, { line, ixMainD });
   }
   if (r5.h.hub) await stopHub(r5.h);
 }
@@ -380,9 +380,9 @@ if (!OTHER && leg('d')) {
     const rows = (fam && fam.conversations) || {}, onDisk = (m) => !!rows[`agents/${m.id}`] && rows[`agents/${m.id}`].readAt === m.at;
     const answered = marks.filter((m) => m.code === 200), lost = answered.filter((m) => !onDisk(m)).map((m) => m.id.slice(0, 8));
     const old = fs.readFileSync(path.join(dir, 'index.json')).equals(before), flying = !!seen && onDisk(seen);
-    ok(inFlight, `(d) a JOURNAL append was IN FLIGHT when the hub was killed (${seen ? `a mark's line in index-acts.ndjson, ${seen.grew.from} → ${seen.grew.to} bytes ${seen.grew.afterMs} ms after its POST; the POST unanswered at the kill` : 'no unanswered mark\'s line seen in 60 s'})`, marks.slice(-4));
+    ok(verdictOf(inFlight), `(d) a JOURNAL append was IN FLIGHT when the hub was killed (${seen ? `a mark's line in index-acts.ndjson, ${seen.grew.from} → ${seen.grew.to} bytes ${seen.grew.afterMs} ms after its POST; the POST unanswered at the kill` : 'no unanswered mark\'s line seen in 60 s'})`, marks.slice(-4));
     ok(!!fam && Object.keys(rows).length === CONVS, `(d) after SIGKILL the index family (index.json + its journal, the store's one reader) parses whole — ${Object.keys(rows).length} conversations; the mark in flight ${flying ? 'ON disk (its line whole)' : 'not on disk (the old version)'}; index.json itself ${old ? 'untouched (the journal carried every mark)' : 'rewritten'}`, err);
-    ok(marks.length >= 4 && marks.slice(0, 3).every((m) => m.code === 200), `(d) the three marks before the kill answered 200, one at a time (${marks.slice(0, 3).map((m) => m.code).join(' ') || 'none'})`);
+    ok(marks.length >= 4 && verdictOf(marks.slice(0, 3).every((m) => m.code === 200)), `(d) the three marks before the kill answered 200, one at a time (${marks.slice(0, 3).map((m) => m.code).join(' ') || 'none'})`);
     ok(answered.length >= 3 && !lost.length, `(d) nothing lost at the kill: every mark answered before it is on disk (${answered.length - lost.length} of ${answered.length} answered${lost.length ? '; lost: ' + lost.join(' ') : ''})`, marks.map((m) => ({ id: m.id.slice(0, 8), at: m.at, code: m.code })));
     const words = fs.readFileSync(h.logf, 'utf8').split('\n').filter((l) => /\[(canary|sync-fs)\]/.test(l) && l.includes(h.wt));
     table.runs.tree1100 = { inFlight, seen: seen && seen.grew, marks: marks.length, answered: answered.length, lost: lost.length, flying, indexUntouched: old, words: words.slice(0, 6) }; save();
@@ -409,7 +409,7 @@ if (!OTHER && leg('d')) {
       const rows2 = (fam2 && fam2.conversations) || {}, on2 = (m) => !!rows2[`agents/${m.id}`] && rows2[`agents/${m.id}`].readAt === m.at;
       const all2 = [...answered, ...(m2.code === 200 ? [m2] : [])], lost2 = all2.filter((m) => !on2(m)).map((m) => m.id.slice(0, 8));
       const old2 = fs.readFileSync(path.join(dir, 'index.json')).equals(before2);
-      ok(m2.code === 200 && inWhole, `(d2) restarted over that family, a mark answered (${m2.code}), then a stop: the SIGKILL landed INSIDE the exit's whole index write (${tmp2 || 'no temp file of index.json seen in 60 s — the scene needs the exit to write index.json whole at a stop'})`);
+      ok(m2.code === 200 && verdictOf(inWhole), `(d2) restarted over that family, a mark answered (${m2.code}), then a stop: the SIGKILL landed INSIDE the exit's whole index write (${tmp2 || 'no temp file of index.json seen in 60 s — the scene needs the exit to write index.json whole at a stop'})`);
       ok(!!fam2 && Object.keys(rows2).length === CONVS && !lost2.length, `(d2) after that SIGKILL the family parses whole — index.json the ${old2 ? 'OLD' : 'NEW'} version, ${Object.keys(rows2).length} conversations — and every answered mark is on disk (${all2.length - lost2.length} of ${all2.length}${lost2.length ? '; lost: ' + lost2.join(' ') : ''})`, err2);
       table.runs.tree1100.whole = { inWhole, tmp: tmp2, version: old2 ? 'old' : 'new', lost: lost2.length }; save();
     }
@@ -441,7 +441,7 @@ if (!OTHER && leg('g')) {
       const r = { delayMs, grace: label2, graceMs: bnd.graceMs, mark: c1, stopMs, written, flushMs, left: left ? left[1] : null, markOnDisk: !!(row && row.readAt === at), keeperSaid: keeperSaid || null };
       table.runs.exitBound.push(r); save();
       info(`(g) ${delayMs} ms per call, ${label2} (${bnd.graceMs / 1000} s): exit in ${(stopMs / 1000).toFixed(1)} s; ${line || '(no exit line — under 250 ms, nothing left)'}; the last mark ${r.markOnDisk ? 'ON disk' : 'NOT on disk'}${keeperSaid ? `; the keeper: ${keeperSaid.slice(0, 120)}…` : ''}`);
-      ok(c1 === 200 && r.markOnDisk && !r.left && !/bound/.test(line), `(g) ${label2} at ${delayMs} ms per call: nothing left, the last mark on disk — no bound of ours (exit ${(stopMs / 1000).toFixed(1)} s)`, r);
+      ok(c1 === 200 && gateOf(r.markOnDisk) && !r.left && !/bound/.test(line), `(g) ${label2} at ${delayMs} ms per call: nothing left, the last mark on disk — no bound of ours (exit ${(stopMs / 1000).toFixed(1)} s)`, r);
     }
   }
 }
@@ -519,13 +519,13 @@ if (!OTHER && leg('i')) {
   }
   };
   const r = await crashScene('crash500', true);
-  if (r) ok(r.law, `(i) LAW 2 on the crash path: the act (rank 0) written FIRST — before the crash road's own unmoved stores (${r.debtMs} ms of census debt) — on disk; nothing left, and the process ended BY ITSELF ${r.crashMs} ms after the crash (no keeper: inside the grace)`, { line: r.line, onDisk: r.onDisk, crashMs: r.crashMs });
+  if (r) ok(verdictOf(r.law), `(i) LAW 2 on the crash path: the act (rank 0) written FIRST — before the crash road's own unmoved stores (${r.debtMs} ms of census debt) — on disk; nothing left, and the process ended BY ITSELF ${r.crashMs} ms after the crash (no keeper: inside the grace)`, { line: r.line, onDisk: r.onDisk, crashMs: r.crashMs });
   // ITS CONTROL (the scene, r2248): no first act (the one-lane scene). On the two lanes the probed act's append is IN FLIGHT at the crash
   // (an append fsyncs, at 500 ms a call), so the exit's in-flight pass settles it — a pass the exit line does not count as first — and
   // the ACT is owed for no rank-0 pass: the same check fails here, so the leg above measures an act that IS owed. Another rank-0 store
   // may still go first (box row 349 at d5128b563: the status write, owed at the crash) — the control judges the act, not the count
   const r0 = await crashScene('crash500-unprimed', false);
-  if (r0) ok(!r0.law && r0.onDisk && !r0.names.slice(0, r0.first).includes('channels-acts.write'), `(i) CONTROL (the scene without its first act): the act's append was in flight at the crash and settled by the exit's in-flight pass — the act NOT among the exit's first writes (on disk: ${r0.onDisk}; first ${r0.first}${r0.first ? ': ' + r0.names.slice(0, r0.first).join(', ') : ''}) — the check above fails here, as it must`, { line: r0.line, onDisk: r0.onDisk, first: r0.first });
+  if (r0) ok(!r0.law && gateOf(r0.onDisk) && !r0.names.slice(0, r0.first).includes('channels-acts.write'), `(i) CONTROL (the scene without its first act): the act's append was in flight at the crash and settled by the exit's in-flight pass — the act NOT among the exit's first writes (on disk: ${r0.onDisk}; first ${r0.first}${r0.first ? ': ' + r0.names.slice(0, r0.first).join(', ') : ''}) — the check above fails here, as it must`, { line: r0.line, onDisk: r0.onDisk, first: r0.first });
   // ITS RED (the LAW, r2248): the booted copy's crash road with its rank-0 pass REMOVED, so the owed act is written only by the last pass,
   // after the road's own unmoved stores (the census debt) — the check above must fail on the order itself
   const NO_RANK0 = (wt) => { const f = path.join(wt, 'server.js'), s = fs.readFileSync(f, 'utf8'), a = "w0.beginExit({ crash: true }); w0.exitFlush({ only: 'rank0' }); }"; if (s.split(a).length !== 2) throw new Error('the anchor of the red «no rank-0 pass on the crash road» is not in the booted server.js'); fs.writeFileSync(f, s.replace(a, 'w0.beginExit({ crash: true }); }')); };
@@ -533,7 +533,7 @@ if (!OTHER && leg('i')) {
   // pinned to the line it removes (r2719): the law is a conjunction — it also fails when the hub does not end by itself or the exit
   // line changes — so the red asks that the hub DID end by itself, its exit line there, and the act is NOT among the exit's first writes
   if (rM) { const byItself = rM.crashMs != null && !!rM.line && !/exit after the crash: [\d.]+ s after the crash/.test(rM.log), actFirst = rM.names.slice(0, rM.first).includes('channels-acts.write');
-    ok(!rM.law && byItself && !actFirst && rM.onDisk, `(i) RED (the crash road's rank-0 pass removed: the act written only after the unmoved stores): the check above fails FOR THAT LINE — the hub ended by itself (${rM.crashMs} ms after the crash, its exit line there) and the act is NOT among the exit's first writes (first ${rM.first}${rM.first ? ': ' + rM.names.slice(0, rM.first).join(', ') : ''}; ${rM.line || 'no exit line'})`, { line: rM.line, first: rM.first, crashMs: rM.crashMs }); }
+    ok(!rM.law && gateOf(byItself) && !actFirst && verdictOf(rM.onDisk), `(i) RED (the crash road's rank-0 pass removed: the act written only after the unmoved stores): the check above fails FOR THAT LINE — the hub ended by itself (${rM.crashMs} ms after the crash, its exit line there) and the act is NOT among the exit's first writes (first ${rM.first}${rM.first ? ': ' + rM.names.slice(0, rM.first).join(', ') : ''}; ${rM.line || 'no exit line'})`, { line: rM.line, first: rM.first, crashMs: rM.crashMs }); }
 }
 
 // ── (k) THE KEEPER IS THERE FROM BOOT (round 6, E3 a): the REAL server.js booted (a stated grace of 3 s), then the install
@@ -564,7 +564,7 @@ if (!OTHER && leg('k')) {
     const log = fs.readFileSync(h.logf, 'utf8'), kl = (log.match(/\[store-write\] exit after the crash: [\d.]+ s after the crash[^\n]*/) || [''])[0];
     table.runs.bootKeeper = { crashMs, line: kl, writesBeforeCrash: writes0, threads: threadsAtBoot }; save();
     info(`(k) the crash → gone in ${crashMs != null ? (crashMs / 1000).toFixed(1) + ' s' : '(never, 30 s)'}; the writer had written ${writes0 == null ? '?' : writes0} store write(s) before it; ${kl ? kl.slice(0, 220) + '…' : '(no keeper line)'}`);
-    ok(crashMs != null && crashMs >= 3000 - 100 && crashMs < 3000 + 4000 && /the grace a service manager gives a stop \(3\.0 s, VIBESPACE_STOP_GRACE_S\) is spent/.test(kl) && /the main thread is still in openat on [^ ]*events-\d{4}-\d{2}\.ndjson/.test(kl) && / — the writer's exit keeper ends the process now$/.test(kl) && !/signal|shutdown's/.test(kl),
+    ok(crashMs != null && crashMs >= 3000 - 100 && crashMs < 3000 + 4000 && gateOf(/the grace a service manager gives a stop \(3\.0 s, VIBESPACE_STOP_GRACE_S\) is spent/.test(kl)) && gateOf(/the main thread is still in openat on [^ ]*events-\d{4}-\d{2}\.ndjson/.test(kl)) && gateOf(/ — the writer's exit keeper ends the process now$/.test(kl)) && !/signal|shutdown's/.test(kl),
       `(k) E3 (a): the real server.js, its install tree and data directory hanging, then a crash — the keeper born at the BOOT said «after the crash» (the main thread in openat on the telemetry shard) and ended it ${crashMs} ms after the crash (the grace 3 s)`, { crashMs, kl, tail: log.slice(-600) });
   }
 }
@@ -697,4 +697,4 @@ if (CONTROL && leg('control')) {
 }
 const secs = Math.round((Date.now() - T0) / 1000);
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${fail ? ` passed, ${fail} failed` : ''}) — ${secs} s; table ${path.join(OUT, 'table.json')}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

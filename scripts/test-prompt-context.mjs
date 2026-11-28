@@ -46,7 +46,7 @@ function call() {
 }
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -55,20 +55,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const g1 = tasks.create({ title: 'alpha', objective: 'obj one', folders: [session.cwd] });
 
 const c1 = await call();
-check('first prompt → full context', c1.includes('<vibespace-task-context>') && c1.includes('obj one'), c1.slice(0, 200));
+check('first prompt → full context', gateOf(c1.includes('<vibespace-task-context>')) && verdictOf(c1.includes('obj one')), c1.slice(0, 200));
 check('full context has no checklist teaching (feature removed)', !/plan-check|Checklist/.test(c1), c1);
 const c2 = await call();
-check('no change → reminder only', !c2.includes('task-context') && !c2.includes('task-update') && c2.includes('vibespace-reminder'), c2);
+check('no change → reminder only', !c2.includes('task-context') && !c2.includes('task-update') && verdictOf(c2.includes('vibespace-reminder')), c2);
 
 await sleep(3);
 tasks.addProgress(g1.id, { note: 'made progress here', session: 'codex:elsewhere' });
 tasks.addProgress(g1.id, { note: 'my own step logged', session: 'claude:sess1' });
 tasks.update(g1.id, { objective: 'obj one, refined' });
 const c3 = await call();
-check('change → diff only (no full re-inject)', c3.includes('<vibespace-task-update>') && !c3.includes('<vibespace-task-context>'), c3.slice(0, 300));
-check('diff carries the actual deltas', c3.includes('Objective UPDATED to:') && c3.includes('obj one, refined') && c3.includes('made progress here'), c3);
+check('change → diff only (no full re-inject)', gateOf(c3.includes('<vibespace-task-update>')) && !c3.includes('<vibespace-task-context>'), c3.slice(0, 300));
+check('diff carries the actual deltas', gateOf(c3.includes('Objective UPDATED to:')) && gateOf(c3.includes('obj one, refined')) && verdictOf(c3.includes('made progress here')), c3);
 // lane injection-relevance: the member's OWN line is counted, never repeated back (the route hands diffChanges its key)
-check('…its own line counted, not repeated', c3.includes('- New activity (2, 1 of them yours — not repeated):') && !c3.includes('my own step logged'), c3);
+check('…its own line counted, not repeated', gateOf(c3.includes('- New activity (2, 1 of them yours — not repeated):')) && !c3.includes('my own step logged'), c3);
 check('diff omits the tools teaching (already known)', !c3.includes('Reporting back —'), c3);
 const c4 = await call();
 check('after diff → quiet again', !c4.includes('task-update') && !c4.includes('task-context'), c4);
@@ -79,21 +79,21 @@ await sleep(3);
 tasks.update(g1.id, { backlog: [{ text: 'parked by someone else', status: 'open', addedBy: 'codex:elsewhere', claimedBy: ['codex:elsewhere'], addedAt: Date.now() }] });
 const cBl0 = await call();
 // lane injection-relevance F2: the item's EVENT stays targeted (no text) — the member hears ONE count line of what others parked
-check('unrelated parked item → no event, only the others\' count line (targeted diff + F2)', !cBl0.includes('parked by someone else') && cBl0.includes('- Backlog: 1 parked by others since your last update — `vibespace-task backlog`'), cBl0.slice(0, 400));
+check('unrelated parked item → no event, only the others\' count line (targeted diff + F2)', !cBl0.includes('parked by someone else') && verdictOf(cBl0.includes('- Backlog: 1 parked by others since your last update — `vibespace-task backlog`')), cBl0.slice(0, 400));
 await sleep(3);
 {
   const bl = tasks.get(g1.id).backlog.map((b) => ({ ...b, claimedBy: [...b.claimedBy, 'claude:sess1'] }));
   tasks.update(g1.id, { backlog: bl });
 }
 const cBl1 = await call();
-check('claiming session hears the CLAIMED event', cBl1.includes('<vibespace-task-update>') && cBl1.includes('Backlog CLAIMED') && cBl1.includes('parked by someone else'), cBl1.slice(0, 300));
+check('claiming session hears the CLAIMED event', gateOf(cBl1.includes('<vibespace-task-update>')) && gateOf(cBl1.includes('Backlog CLAIMED')) && verdictOf(cBl1.includes('parked by someone else')), cBl1.slice(0, 300));
 await sleep(3);
 {
   const bl = tasks.get(g1.id).backlog.map((b) => ({ ...b, status: 'done', resolvedBy: 'codex:elsewhere', resolvedAt: Date.now() }));
   tasks.update(g1.id, { backlog: bl });
 }
 const cBl2 = await call();
-check('claimer notified when another session resolves it', cBl2.includes('Backlog RESOLVED') && cBl2.includes('_(by codex:elsewhere)_'), cBl2.slice(0, 300));
+check('claimer notified when another session resolves it', gateOf(cBl2.includes('Backlog RESOLVED')) && verdictOf(cBl2.includes('_(by codex:elsewhere)_')), cBl2.slice(0, 300));
 await sleep(3); // contentUpdatedAt gate is ms-granular — same-ms edits look unseen
 tasks.update(g1.id, { backlog: [] });
 await call(); // consume any removal diff so later sections start clean
@@ -109,7 +109,7 @@ settings['agents.contextUpdateDiffs'] = false;
 await sleep(3);
 tasks.addProgress(g1.id, { note: 'with diffs disabled' });
 const c6 = await call();
-check('toggle off → full re-inject with UPDATED preface', c6.includes('was UPDATED since you last saw it') && c6.includes('<vibespace-task-context>'), c6.slice(0, 300));
+check('toggle off → full re-inject with UPDATED preface', gateOf(c6.includes('was UPDATED since you last saw it')) && verdictOf(c6.includes('<vibespace-task-context>')), c6.slice(0, 300));
 delete settings['agents.contextUpdateDiffs'];
 
 // a SECOND group appears mid-session (bind) while g1 later changes: full for new, diff for old.
@@ -119,22 +119,22 @@ const g2 = tasks.create({ title: 'beta', objective: 'obj two', folders: [session
 await sleep(3);
 tasks.addProgress(g1.id, { note: 'alpha moved again' });
 const c7 = await call();
-check('new group full + old group diff in one delivery', c7.includes('<vibespace-task-context>') && c7.includes('"beta"') && c7.includes('<vibespace-task-update>') && c7.includes('alpha moved again'), c7.slice(0, 400));
+check('new group full + old group diff in one delivery', gateOf(c7.includes('<vibespace-task-context>')) && gateOf(c7.includes('"beta"')) && gateOf(c7.includes('<vibespace-task-update>')) && verdictOf(c7.includes('alpha moved again')), c7.slice(0, 400));
 const c7manifest = c7.slice(0, c7.indexOf('</vibespace-delivery-note>'));
-check('manifest heads the mixed delivery, names EVERY block + rescue', c7.indexOf('<vibespace-delivery-note>') === 0 && c7manifest.includes(`"beta" (${g2.id})`) && c7manifest.includes(`"alpha" (${g1.id})`) && c7manifest.includes('persisted-output'), c7.slice(0, 300));
+check('manifest heads the mixed delivery, names EVERY block + rescue', c7.indexOf('<vibespace-delivery-note>') === 0 && gateOf(c7manifest.includes(`"beta" (${g2.id})`)) && gateOf(c7manifest.includes(`"alpha" (${g1.id})`)) && verdictOf(c7manifest.includes('persisted-output')), c7.slice(0, 300));
 check('diff precedes the full context (small first)', c7.indexOf('<vibespace-task-update>') < c7.indexOf('<vibespace-task-context>'), '');
-check('partial first-delivery avoids the absolute-membership claim', !c7.includes('This session belongs to 1 VibeSpace Task Groups') && c7.includes('MORE THAN ONE Task Group'), c7);
-check('multi mode diff pointer carries --group', c7.includes(`--group ${g1.id} show --full`), c7);
+check('partial first-delivery avoids the absolute-membership claim', !c7.includes('This session belongs to 1 VibeSpace Task Groups') && verdictOf(c7.includes('MORE THAN ONE Task Group')), c7);
+check('multi mode diff pointer carries --group', verdictOf(c7.includes(`--group ${g1.id} show --full`)), c7);
 
 // fresh session, two groups at once → ONE layered multi-context
 const s2 = { agentToken: 'vsst_test', backend: 'codex', cwd: session.cwd, name: 't2' };
 activeSessions.set('sess1', s2);
 const c8 = await call();
-check('fresh multi-group first prompt → single layered context', (c8.match(/<vibespace-task-context>/g) || []).length === 1 && c8.includes('2 VibeSpace Task Groups'), c8.slice(0, 300));
+check('fresh multi-group first prompt → single layered context', (c8.match(/<vibespace-task-context>/g) || []).length === 1 && verdictOf(c8.includes('2 VibeSpace Task Groups')), c8.slice(0, 300));
 await sleep(3);
 tasks.update(g2.id, { objective: 'obj two, refined' });
 const c9 = await call();
-check('then a beta change → beta diff only', c9.includes('<vibespace-task-update>') && c9.includes('"beta"') && c9.includes('obj two, refined') && !c9.includes('<vibespace-task-context>'), c9.slice(0, 300));
+check('then a beta change → beta diff only', gateOf(c9.includes('<vibespace-task-update>')) && gateOf(c9.includes('"beta"')) && gateOf(c9.includes('obj two, refined')) && !c9.includes('<vibespace-task-context>'), c9.slice(0, 300));
 
 // BOTH groups change on one turn → ONE combined block whose HEADER enumerates
 // every changed group (user directive: stacked per-group blocks + the ~2KB
@@ -145,8 +145,8 @@ tasks.addProgress(g2.id, { note: 'beta combined news' });
 const c9b = await call();
 check('two changed groups → ONE combined update block', (c9b.match(/<vibespace-task-update>/g) || []).length === 1 && !c9b.includes('<vibespace-delivery-note>'), c9b.slice(0, 200));
 const c9bHead = c9b.split('\n').slice(0, 2).join('\n');
-check('combined HEADER enumerates both groups with summaries', c9bHead.includes('2 of your Task Groups changed') && c9bHead.includes(`"alpha" (${g1.id}): 1 new activity`) && c9bHead.includes(`"beta" (${g2.id}): 1 new activity`), c9bHead);
-check('per-group sections carry the deltas', c9b.includes(`## "alpha" (${g1.id})`) && c9b.includes('alpha combined news') && c9b.includes(`## "beta" (${g2.id})`) && c9b.includes('beta combined news'), c9b);
+check('combined HEADER enumerates both groups with summaries', gateOf(c9bHead.includes('2 of your Task Groups changed')) && gateOf(c9bHead.includes(`"alpha" (${g1.id}): 1 new activity`)) && verdictOf(c9bHead.includes(`"beta" (${g2.id}): 1 new activity`)), c9bHead);
+check('per-group sections carry the deltas', gateOf(c9b.includes(`## "alpha" (${g1.id})`)) && gateOf(c9b.includes('alpha combined news')) && gateOf(c9b.includes(`## "beta" (${g2.id})`)) && verdictOf(c9b.includes('beta combined news')), c9b);
 
 // flood BOTH groups: the combined block stays bounded, and the enumeration header
 // still names both groups. lane injection-relevance F1: it fits by RE-PICKING the
@@ -162,8 +162,8 @@ for (const g of [g1, g2]) {
 const c10 = await call();
 check('flooded combined block stays bounded (≤ ~6.6KB)', Buffer.byteLength(c10, 'utf-8') <= 6600, `bytes=${Buffer.byteLength(c10, 'utf-8')}`);
 const c10head = c10.split('\n').slice(0, 2).join('\n');
-check('flood: header still names BOTH groups', c10head.includes(`"${'alpha'}" (${g1.id})`) && c10head.includes(`"beta" (${g2.id})`), c10head.slice(0, 300));
-check('flood: fitted by re-picking the activity (no tail truncation; the sessions left out still named)', !c10.includes('truncated — per-group') && /more below by session:\n {2}- unattributed logged \d+ more/.test(c10), c10.slice(-300));
+check('flood: header still names BOTH groups', gateOf(c10head.includes(`"${'alpha'}" (${g1.id})`)) && verdictOf(c10head.includes(`"beta" (${g2.id})`)), c10head.slice(0, 300));
+check('flood: fitted by re-picking the activity (no tail truncation; the sessions left out still named)', !c10.includes('truncated — per-group') && verdictOf(/more below by session:\n {2}- unattributed logged \d+ more/.test(c10)), c10.slice(-300));
 
 // ── backlog agent endpoints (2.122.0) ──
 function hitRoute(method, path, { query = {}, body = {} } = {}) {
@@ -177,7 +177,7 @@ function hitRoute(method, path, { query = {}, body = {} } = {}) {
 {
   const g = g1.id;
   const r1 = await hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, add: 'parked via api', detail: 'the context' } });
-  check('backlog-add → open item, id minted, AUTO-CLAIMED by the caller', r1.code === 200 && r1.out.backlog.length === 1 && /^B-[0-9a-f]{4}$/.test(r1.out.backlog[0].id) && r1.out.backlog[0].addedBy === 'claude:sess1' && r1.out.backlog[0].claimedBy.includes('claude:sess1') && r1.out.backlog[0].detail === 'the context', JSON.stringify(r1.out));
+  check('backlog-add → open item, id minted, AUTO-CLAIMED by the caller', r1.code === 200 && r1.out.backlog.length === 1 && gateOf(/^B-[0-9a-f]{4}$/.test(r1.out.backlog[0].id)) && r1.out.backlog[0].addedBy === 'claude:sess1' && gateOf(r1.out.backlog[0].claimedBy.includes('claude:sess1')) && r1.out.backlog[0].detail === 'the context', JSON.stringify(r1.out));
   const bid = r1.out.backlog[0].id;
   const r2 = await hitRoute('GET', '/api/agent/task', { query: { group: g } });
   check('GET task carries open backlog with id + claims', r2.out.task.backlog.length === 1 && r2.out.task.backlog[0].id === bid && r2.out.task.backlog[0].claimedBy.length === 1, JSON.stringify(r2.out.task.backlog));
@@ -186,7 +186,7 @@ function hitRoute(method, path, { query = {}, body = {} } = {}) {
   // seed a co-claimant so the claim ack must WARN about it (user directive)
   tasks.update(g, { backlog: tasks.get(g).backlog.map((b) => ({ ...b, claimedBy: ['codex:elsewhere'] })) });
   const rC = await hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, claim: bid.toUpperCase() } });
-  check('claim by id (case-insensitive) re-adds the caller', rC.code === 200 && tasks.get(g).backlog[0].claimedBy.includes('claude:sess1'), JSON.stringify(tasks.get(g).backlog[0]));
+  check('claim by id (case-insensitive) re-adds the caller', rC.code === 200 && verdictOf(tasks.get(g).backlog[0].claimedBy.includes('claude:sess1')), JSON.stringify(tasks.get(g).backlog[0]));
   check('claim ack lists CO-CLAIMANTS + item echo', rC.out.others.length === 1 && rC.out.others[0] === 'codex:elsewhere' && rC.out.item.id === bid && rC.out.alreadyMine === false, JSON.stringify(rC.out));
   const rC2 = await hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, claim: bid } });
   check('re-claim is idempotent and says so', rC2.code === 200 && rC2.out.alreadyMine === true && tasks.get(g).backlog[0].claimedBy.filter((k) => k === 'claude:sess1').length === 1, JSON.stringify(rC2.out));
@@ -197,9 +197,9 @@ function hitRoute(method, path, { query = {}, body = {} } = {}) {
   const r4 = await hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, drop: 'no such thing' } });
   check('drop of a non-open/missing item → 400', r4.code === 400, JSON.stringify(r4.out));
   const r6 = await hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, claim: 'B-ffff' } });
-  check('claim of an unknown id → 400 with id in the error', r6.code === 400 && /B-ffff/.test(r6.out.error), JSON.stringify(r6.out));
+  check('claim of an unknown id → 400 with id in the error', r6.code === 400 && verdictOf(/B-ffff/.test(r6.out.error)), JSON.stringify(r6.out));
   const r5 = await hitRoute('POST', '/api/agent/task-plan', { body: { group: g, check: 1 } });
-  check('legacy task-plan still answers 410 with backlog pointer', r5.code === 410 && /backlog-add/.test(r5.out.error), JSON.stringify(r5.out));
+  check('legacy task-plan still answers 410 with backlog pointer', r5.code === 410 && verdictOf(/backlog-add/.test(r5.out.error)), JSON.stringify(r5.out));
 }
 
 // "Clear content…" (2026-09-28): an entry cleared AFTER a session saw it — the next prompt carries NO update
@@ -212,16 +212,16 @@ function hitRoute(method, path, { query = {}, body = {} } = {}) {
   await sleep(3);
   tasks.addProgress(gC.id, { note: 'MAILBOX-WORDS pasted here', detail: 'more MAILBOX-WORDS', session: 'claude:sessC' });
   const first = await callAs('vsst_clear');
-  check('setup: the session\'s first prompt injects the words', first.includes('MAILBOX-WORDS'), first.slice(-300));
+  check('setup: the session\'s first prompt injects the words', verdictOf(first.includes('MAILBOX-WORDS')), first.slice(-300));
   await sleep(3);
   const r = tasks.clearProgress(gC.id, [tasks.get(gC.id).progress[0].id], { by: 'owner' });
   const next = await callAs('vsst_clear');
   check('after the clear the next prompt carries NO update block and no words', r.cleared.length === 1 && !next.includes('task-update') && !next.includes('MAILBOX-WORDS'), next);
   activeSessions.set('sessC2', { agentToken: 'vsst_clear2', backend: 'claude', cwd: sC.cwd, name: 'c2' }); // a session that never saw the group
   const fresh = await callAs('vsst_clear2');
-  check('a fresh session\'s FULL injection shows the cleared sentence, never the words', fresh.includes('<vibespace-task-context>') && fresh.includes("[cleared at the user's request]") && !fresh.includes('MAILBOX-WORDS'), fresh.slice(-400));
+  check('a fresh session\'s FULL injection shows the cleared sentence, never the words', gateOf(fresh.includes('<vibespace-task-context>')) && gateOf(fresh.includes("[cleared at the user's request]")) && !fresh.includes('MAILBOX-WORDS'), fresh.slice(-400));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
-console.log('\nall prompt-context smoke tests passed');
+console.log('\nall prompt-context smoke tests passed'); import { verdictOf, gateOf } from './lib/check.mjs';

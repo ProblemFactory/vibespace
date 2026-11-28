@@ -25,7 +25,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (!CHROME) { console.log('SKIP: no chrome binary on this machine (looked in /usr/bin/google-chrome{,-stable}, /usr/bin/chromium{,-browser})'); process.exit(0); }
 const OAT = ['sk', '-ant-oat01-'].join('') + 'DOORfake_' + 'm4N8'.repeat(12) + '-zz';
@@ -109,18 +109,18 @@ window.ready = true;`;
 
   console.log('§1 a pasted token with no type');
   const t1 = await ev(`chip(${J(acct)})`);
-  ok(/还差订阅类型：登录一次，或自己选/.test(t1) && !/重新登录|已登录/.test(t1) && await ev('!!document.querySelector("#chip [data-oat-shape]")'), 'the row: 「还差订阅类型：登录一次，或自己选」 — never «重新登录» / «已登录» — and its chip carries the guided door', t1);
+  ok(gateOf(/还差订阅类型：登录一次，或自己选/.test(t1)) && !/重新登录|已登录/.test(t1) && verdictOf(await ev('!!document.querySelector("#chip [data-oat-shape]")')), 'the row: 「还差订阅类型：登录一次，或自己选」 — never «重新登录» / «已登录» — and its chip carries the guided door', t1);
   await shotEl('row-no-type.png', '#chip');
   // (b) …and INSIDE A POOL: the real Members dialog (manage-agents _poolMembersDialog over the real /api/accounts)
   await ev(`openMembers(${J(pool)})`);
-  ok(await waitFor('!!document.querySelector("#pool-members-dialog .pool-mem-list")', 8000), 'the pool\'s real Members dialog opens');
+  ok(verdictOf(await waitFor('!!document.querySelector("#pool-members-dialog .pool-mem-list")', 8000)), 'the pool\'s real Members dialog opens');
   const mem = await ev('document.querySelector("#pool-members-dialog .pool-mem-list").textContent');
-  ok(/还没有订阅类型——登录一次，或自己选/.test(mem) && !/重新登录|登录已过期|未登录/.test(mem), 'inside the pool: the member reads «还没有订阅类型——登录一次，或自己选» — never «重新登录» / «登录已过期» / «未登录»', mem.slice(0, 300));
+  ok(gateOf(/还没有订阅类型——登录一次，或自己选/.test(mem)) && !/重新登录|登录已过期|未登录/.test(mem), 'inside the pool: the member reads «还没有订阅类型——登录一次，或自己选» — never «重新登录» / «登录已过期» / «未登录»', mem.slice(0, 300));
   await shot('pool-members-no-type.png');
   await ev('document.querySelector("#pool-members-dialog .dialog-close")?.click()');
   await waitFor('!document.querySelector("#pool-members-dialog")', 4000);
   await ev('document.querySelector("#chip [data-oat-shape]").click()');
-  ok(await waitFor(`!!document.querySelector("${dlg} #oat-shape-pick")`), 'the chip opens the guide with way ② offered');
+  ok(verdictOf(await waitFor(`!!document.querySelector("${dlg} #oat-shape-pick")`)), 'the chip opens the guide with way ② offered');
   await ev(`document.querySelector("${dlg} .dialog-close")?.click()`); await closed();
 
   console.log('§2 the guide');
@@ -132,36 +132,36 @@ window.ready = true;`;
   const L = await ev(labels);
   ok(J(L) === J(['Ultra（原 Max 20x）', 'Max（原 Max 5x）', 'Pro', 'enterprise（Claude Code 的原名）', 'team（Claude Code 的原名）', '不确定 — 先不选 选了类型或登录说明之前，默认用 Sonnet']), 'the choices in order: Ultra（原 Max 20x）, Max（原 Max 5x）, Pro, the CLI\'s own ids said as such (enterprise, team), 「不确定 — 先不选」 last with its default', L);
   const lay = await choiceLayout();
-  ok(lay.length === 6 && lay.every((x) => x.beside && x.sameLine), 'each radio sits BESIDE its words, on their line (never stacked above them)', lay);
+  ok(lay.length === 6 && verdictOf(lay.every((x) => x.beside && x.sameLine)), 'each radio sits BESIDE its words, on their line (never stacked above them)', lay);
   await shot('guide.png');
 
   console.log('§3 «先不选»');
   await ev(`document.querySelector('${dlg} input[value="unsure"]').click()`);
   await ev(`document.querySelector("${dlg} #oat-shape-save").click()`);
-  ok(await closed(), 'saved ⇒ the guide closes');
+  ok(verdictOf(await closed()), 'saved ⇒ the guide closes');
   await waitFor('window.__refreshes >= 1');
   const r3 = await ev(`rowOf(${J(acct)})`), c3 = cred(acct);
   ok(r3.oatShape?.source === 'person' && r3.oatShape?.typeless === true && !!c3 && c3.accessToken === OAT && !('subscriptionType' in c3) && J(c3.scopes) === '["user:inference"]', 'stored as the person\'s typeless choice; the file carries the mint\'s scope and NO type', { shape: r3.oatShape, keys: c3 && Object.keys(c3) });
   const t3 = await ev(`chip(${J(acct)})`);
-  ok(/未选订阅类型 · 默认 Sonnet/.test(t3) && await ev('!!document.querySelector("#chip [data-oat-shape]")'), 'the row: 「未选订阅类型 · 默认 Sonnet」, its chip the door to choose', t3);
+  ok(gateOf(/未选订阅类型 · 默认 Sonnet/.test(t3)) && verdictOf(await ev('!!document.querySelector("#chip [data-oat-shape]")')), 'the row: 「未选订阅类型 · 默认 Sonnet」, its chip the door to choose', t3);
   await shotEl('typeless-row.png', '#chip');
 
   console.log('§4 changed at the row');
   await ev('document.querySelector("#chip [data-oat-shape]").click()'); await waitFor(`!!document.querySelector("${dlg} #oat-shape-pick")`);
   const lead4 = await ev(`document.querySelector("${dlg} .usage-note").textContent`);
-  ok(lead4 === '当前订阅类型：未选订阅类型 · 默认 Sonnet（在这里选的）。' && await ev(`document.querySelector('${dlg} input[value="unsure"]').checked`), 'reopened: the current choice said and checked', lead4);
+  ok(lead4 === '当前订阅类型：未选订阅类型 · 默认 Sonnet（在这里选的）。' && verdictOf(await ev(`document.querySelector('${dlg} input[value="unsure"]').checked`)), 'reopened: the current choice said and checked', lead4);
   await ev(`document.querySelector('${dlg} input[value="ultra"]').click()`); await ev(`document.querySelector("${dlg} #oat-shape-save").click()`); await closed();
   const c4 = cred(acct);
-  ok(c4 && c4.subscriptionType === 'max' && c4.rateLimitTier === 'default_claude_max_20x' && c4.accessToken === OAT, 'Ultra ⇒ the file rewritten: max + default_claude_max_20x', c4 && { t: c4.subscriptionType, r: c4.rateLimitTier });
+  ok(gateOf(c4) && c4.subscriptionType === 'max' && c4.rateLimitTier === 'default_claude_max_20x' && c4.accessToken === OAT, 'Ultra ⇒ the file rewritten: max + default_claude_max_20x', c4 && { t: c4.subscriptionType, r: c4.rateLimitTier });
   await shot('changed.png');
   const t4 = await ev(`chip(${J(acct)})`);
-  ok(/Ultra（原 Max 20x）/.test(t4) && !/· max\b|已登录/.test(t4), 'the row\'s line after the choice: «Ultra（原 Max 20x）» — never «max» (now the other plan\'s name), never «已登录» (it never signed in)', t4);
+  ok(gateOf(/Ultra（原 Max 20x）/.test(t4)) && !/· max\b|已登录/.test(t4), 'the row\'s line after the choice: «Ultra（原 Max 20x）» — never «max» (now the other plan\'s name), never «已登录» (it never signed in)', t4);
   await shotEl('row-ultra.png', '#chip');
 
   console.log('§5 way ①');
   await ev(`openShape(${J(acct)})`); await waitFor(`!!document.querySelector("${dlg} #oat-shape-signin")`);
   await ev(`document.querySelector("${dlg} #oat-shape-signin").click()`);
-  ok(await closed() && await ev('window.__signins') === 1, '「登录一次（推荐）」 closes the guide and calls the row\'s own sign-in');
+  ok(gateOf(await closed()) && await ev('window.__signins') === 1, '「登录一次（推荐）」 closes the guide and calls the row\'s own sign-in');
 
   console.log('§6 a sign-in states the type');
   const H = 3600e3;
@@ -200,4 +200,4 @@ finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 console.log(`\ntest-oat-add-door-chrome: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

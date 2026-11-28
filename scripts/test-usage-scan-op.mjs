@@ -19,7 +19,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-uscan-'));
 process.env.HOME = home; // the daemon child inherits this
@@ -59,16 +59,16 @@ const opCursor = path.join(home, 'op-cursor.json');
 const r1 = await dm.usageScan({ cursorFile: opCursor });
 const opLines = r1.ndjson.split('\n').filter(Boolean);
 ok(opLines.length === 4, `op streamed all 4 events incl. the codex rollout (${opLines.length})`);
-ok(opLines.some((l) => { const e = JSON.parse(l); return e.be === 'codex' && e.rid === 'cx:' + TID + ':1050'; }), 'codex event served through the op');
+ok(verdictOf(opLines.some((l) => { const e = JSON.parse(l); return e.be === 'codex' && e.rid === 'cx:' + TID + ':1050'; })), 'codex event served through the op');
 ok(JSON.stringify(opLines) === JSON.stringify(refLines), 'op events BYTE-IDENTICAL to the shipped scanner over the same fixture');
-ok(r1.cursors && Object.keys(r1.cursors).length === 3, 'cursor manifest covers all walked files (claude + codex)');
+ok(gateOf(r1.cursors) && Object.keys(r1.cursors).length === 3, 'cursor manifest covers all walked files (claude + codex)');
 ok(r1.cursorFile === opCursor, 'manifest names the cursor file');
 ok(!fs.existsSync(opCursor), 'daemon did NOT persist the cursor (two-phase: commit is the server’s move)');
 
 // server-style commit over the device link, then incremental
 await dm.fsWrite(opCursor + '.tmp', JSON.stringify(r1.cursors), { by: 'system:test' });
 await dm.fsRename(opCursor + '.tmp', opCursor, { by: 'system:test' });
-ok(fs.existsSync(opCursor), 'commit landed via fsWrite+fsRename');
+ok(verdictOf(fs.existsSync(opCursor)), 'commit landed via fsWrite+fsRename');
 const r2 = await dm.usageScan({ cursorFile: opCursor });
 ok(r2.ndjson === '', 'committed cursor makes the next op incremental (nothing re-emitted)');
 
@@ -98,7 +98,7 @@ await new Promise((r) => setTimeout(r, 1800));
 ok(dirtyCount > dirtyBase2, `codex rollout growth pushes discovery-dirty too (${dirtyCount - dirtyBase2})`);
 const r4 = await dm.usageScan({ cursorFile: opCursor });
 const r4l = r4.ndjson.split('\n').filter(Boolean);
-ok(r4l.length === 2 && r4l.some((l) => JSON.parse(l).be === 'codex'), 'post-dirty harvest returns exactly the two appended events (claude + codex)');
+ok(r4l.length === 2 && verdictOf(r4l.some((l) => JSON.parse(l).be === 'codex')), 'post-dirty harvest returns exactly the two appended events (claude + codex)');
 
 // ── lane ledger-dedup-law F2: THE HUB KEEPS THE CURSOR. The real daemon walks from the cursor map the hub hands it (stdin),
 // never reads or writes its own cursor file, and says so in the manifest; a daemon without the capability walks from its
@@ -106,7 +106,7 @@ ok(r4l.length === 2 && r4l.some((l) => JSON.parse(l).be === 'codex'), 'post-dirt
 {
   const hubFile = path.join(home, 'hub-never-written.json');
   const conn0 = await dm.connect();
-  ok(conn0.info.capabilities.includes('usage-scan-hub-cursor'), 'the daemon advertises usage-scan-hub-cursor');
+  ok(verdictOf(conn0.info.capabilities.includes('usage-scan-hub-cursor')), 'the daemon advertises usage-scan-hub-cursor');
   const h1 = await dm.usageScan({ cursorFile: hubFile, hubCursor: r4.cursors });
   ok(h1.since === 'hub' && h1.ndjson === '' && !fs.existsSync(hubFile), 'walked from the HUB\'s cursor (r4\'s): nothing new, since hub, the device cursor file neither read nor written');
   fs.appendFileSync(path.join(proj, SID + '.jsonl'), rec());
@@ -130,7 +130,7 @@ conn.info.capabilities = [];
 let gateErr = null;
 try { await dm.usageScan(); } catch (e) { gateErr = e; }
 conn.info.capabilities = realCaps;
-ok(gateErr && /lacks usage-scan/.test(gateErr.message), 'pre-op capability gate throws fast for old daemons (unknown ops would hang)');
+ok(gateOf(gateErr) && verdictOf(/lacks usage-scan/.test(gateErr.message)), 'pre-op capability gate throws fast for old daemons (unknown ops would hang)');
 
 // ── R5 step 1: discovery snapshot runs in a CHILD process — pin that the
 // child-served snapshot equals the inline computation over the same fixture
@@ -142,10 +142,10 @@ const snapChild = await dm.discoverySnapshot();
 const snapInline = await dm._request({ op: 'discovery-snapshot', forceInline: true });
 ok(!snapChild.error && snapChild.jsonls?.length === 1 && snapChild.jsonls[0].file === SID + '.jsonl',
   `snapshot lists exactly the TOP-LEVEL transcript (subagent files are not resumable sessions) (${snapChild.jsonls?.length})`);
-ok(Array.isArray(snapChild.codexRollouts) && snapChild.codexRollouts.length === 1, 'snapshot (child) sees the codex rollout');
+ok(gateOf(Array.isArray(snapChild.codexRollouts)) && snapChild.codexRollouts.length === 1, 'snapshot (child) sees the codex rollout');
 const strip = (r) => JSON.stringify({ locks: r.locks, jsonls: r.jsonls, codexRollouts: r.codexRollouts });
 ok(strip(snapChild) === strip(snapInline), 'child-served snapshot BYTE-IDENTICAL to the inline fallback (same function, two isolation modes)');
-ok(snapChild.jsonls[0].tailIds?.includes(SID), 'tail-id enrichment survives the child hop');
+ok(verdictOf(snapChild.jsonls[0].tailIds?.includes(SID)), 'tail-id enrichment survives the child hop');
 
 // ── R5 step 3: discovery.v2 — the DEVICE interprets its own snapshot into
 // session cards. Byte-identical to the server doing it (same three shared
@@ -155,18 +155,18 @@ ok(snapChild.jsonls[0].tailIds?.includes(SID), 'tail-id enrichment survives the 
   const { claimJsonls } = require(REPO + '/src/session-store.js');
   const viaDevice = await dm.discoveryClaims({ hostId: 'host-t', hostName: 'BoxT' });
   const serverSide = interpretDiscoveryLines(synthesizeDiscoveryLines(snapChild), { hostId: 'host-t', hostName: 'BoxT', claimJsonls });
-  ok(!viaDevice.error && Array.isArray(viaDevice.sessions), 'device answers discovery-claims');
+  ok(!viaDevice.error && verdictOf(Array.isArray(viaDevice.sessions)), 'device answers discovery-claims');
   ok(JSON.stringify(viaDevice.sessions) === JSON.stringify(serverSide),
     `device-computed claims BYTE-IDENTICAL to server-side interpretation (${viaDevice.sessions?.length} cards)`);
-  ok(viaDevice.sessions.some((x) => x.sessionId === SID), 'the fixture transcript appears as a card');
-  ok(viaDevice.sessions.some((x) => x.backend === 'codex'), 'the codex rollout appears as a card');
+  ok(verdictOf(viaDevice.sessions.some((x) => x.sessionId === SID)), 'the fixture transcript appears as a card');
+  ok(verdictOf(viaDevice.sessions.some((x) => x.backend === 'codex')), 'the codex rollout appears as a card');
   const caps = (await dm.connect()).info.capabilities;
   const saved = caps.slice();
   (await dm.connect()).info.capabilities = [];
   let gate = null;
   try { await dm.discoveryClaims({}); } catch (e) { gate = e; }
   (await dm.connect()).info.capabilities = saved;
-  ok(gate && /lacks discovery-claims/.test(gate.message), 'discovery-claims is capability-gated (fast fail on old daemons)');
+  ok(gateOf(gate) && verdictOf(/lacks discovery-claims/.test(gate.message)), 'discovery-claims is capability-gated (fast fail on old daemons)');
 }
 
 // ── forced-fallback smoke (design law: fallbacks rot unless exercised) —
@@ -180,11 +180,11 @@ ok(snapChild.jsonls[0].tailIds?.includes(SID), 'tail-id enrichment survives the 
   const r5 = await dm.runStream(process.execPath, [scanPath], { by: 'system:test', onData: (b) => chunks2.push(b) });
   ok(r5.code === 0 && !r5.error, 'ship-lane fallback: scanner runs via fsWrite+runStream');
   const shipEvs = Buffer.concat(chunks2).toString('utf8').split('\n').filter(Boolean);
-  ok(shipEvs.length >= 5 && shipEvs.some((l) => JSON.parse(l).be === 'codex'), `ship-lane emits the full fixture incl. codex (${shipEvs.length} events, own default cursor)`);
+  ok(shipEvs.length >= 5 && verdictOf(shipEvs.some((l) => JSON.parse(l).be === 'codex')), `ship-lane emits the full fixture incl. codex (${shipEvs.length} events, own default cursor)`);
 }
 
 try { const pid = parseInt(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf-8')); if (pid) process.kill(pid); } catch { }
 fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

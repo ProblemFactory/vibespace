@@ -14,7 +14,7 @@ import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out sa
 
 const { heldRefresher, pullMountArgs, isMountDaemonOf, mountDaemonsOf, killMountDaemons } = require('../src/device-mount.js');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -167,7 +167,7 @@ try {
   const args = pullMountArgs('/m');
   check('no --no-modtime (it pinned every mtime to the mount time)', !args.includes('--no-modtime'), args.join(' '));
   check('no --direct-io (MAP_SHARED mmap fails with ENODEV under it)', !args.includes('--direct-io'));
-  check('read-only, dir-cache 5s, attr-timeout 1s', args.includes('--read-only') && args[args.indexOf('--dir-cache-time') + 1] === '5s' && args[args.indexOf('--attr-timeout') + 1] === '1s');
+  check('read-only, dir-cache 5s, attr-timeout 1s', gateOf(args.includes('--read-only')) && args[args.indexOf('--dir-cache-time') + 1] === '5s' && args[args.indexOf('--attr-timeout') + 1] === '1s');
 
   console.log('§2 an idle mount costs nothing');
   await sleep(200);
@@ -176,7 +176,7 @@ try {
   console.log('§3 a GET finds the held files of THIS mount only');
   r.sawRead(); r.sawRead(); r.sawRead();
   await until(() => r.held.size > 0);
-  check('the held file is found', r.held.has(db), JSON.stringify([...r.held.keys()]));
+  check('the held file is found', verdictOf(r.held.has(db)), JSON.stringify([...r.held.keys()]));
   check('outside files and prefix siblings are not', r.held.size === 1);
   check('three GETs inside the scan gap = one scan', scans === 1, `scans ${scans}`);
   await until(() => inval.length >= 1);
@@ -238,7 +238,7 @@ try {
   check('then it probes slowly (no spinning on an offline machine)', stats2 - sB <= 1, `${stats2 - sB} stats in 200 ms at a 20 ms tick`);
   down2 = false;
   await until(() => logs.some((l) => /answers again/.test(l)), 1500);
-  check('the first answer is said and the tick restored', logs.some((l) => /answers again/.test(l)), JSON.stringify(logs));
+  check('the first answer is said and the tick restored', verdictOf(logs.some((l) => /answers again/.test(l))), JSON.stringify(logs));
   rB.stop();
 
   console.log('§11 five pull mounts read at once share ONE /proc scan (verify r1)');
@@ -249,7 +249,7 @@ try {
   await sleep(100); const sc0 = scans;
   rs.forEach((x) => x.sawRead());
   await until(() => rs.every((x) => x.held.size === 1));
-  check('every mount finds its own held file', rs.every((x, i) => x.held.size === 1 && x.held.has(path.join(tmp, 'mnt-c' + i, 'f.db'))), rs.map((x) => [...x.held.keys()].join()).join(' | '));
+  check('every mount finds its own held file', verdictOf(rs.every((x, i) => x.held.size === 1 && x.held.has(path.join(tmp, 'mnt-c' + i, 'f.db')))), rs.map((x) => [...x.held.keys()].join()).join(' | '));
   check('one /proc scan served all five', scans - sc0 === 1, `${scans - sc0} scans`);
   rs[0].sawRead(); await sleep(150);
   check('a GET after that scan gets a new one (never a scan older than the GET)', scans - sc0 === 2, `${scans - sc0} scans`);
@@ -297,8 +297,8 @@ try {
 
   console.log('§13 wiring: rclone exiting stops the refresher; no sync fs call on the mountpoint (verify r1)');
   const src = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
-  check('rclone exiting stops the refresher and says so', /rc\.on\('exit'[\s\S]{0,200}refresher\.stop\(\)[\s\S]{0,40}log\(/.test(src));
-  check('the mountpoint is resolved asynchronously (never realpathSync on a mountpoint)', !/realpathSync\(mountpoint\)/.test(src) && /await fs\.promises\.realpath\(mountpoint\)/.test(src));
+  check('rclone exiting stops the refresher and says so', verdictOf(/rc\.on\('exit'[\s\S]{0,200}refresher\.stop\(\)[\s\S]{0,40}log\(/.test(src)));
+  check('the mountpoint is resolved asynchronously (never realpathSync on a mountpoint)', !/realpathSync\(mountpoint\)/.test(src) && verdictOf(/await fs\.promises\.realpath\(mountpoint\)/.test(src)));
 
   console.log('§14 B-1ea6: the pre-clean finds a stale daemon by its argv ELEMENTS, off the loop, re-checked at the signal');
   {
@@ -316,7 +316,7 @@ try {
     fake(304, ['/usr/bin/vim', mac + '/notes.txt', 'mount'], 4000);    // not rclone
     fake(305, ['/usr/bin/rclone', 'lsf', mac], 5000);                  // rclone, not a mount
     check('isMountDaemonOf: the exact element only — the prefix sibling, the mount under it, another program and a non-mount rclone are not it',
-      isMountDaemonOf(['/usr/bin/rclone', ...pullMountArgs(mac)], mac) && !isMountDaemonOf(['/usr/bin/rclone', ...pullMountArgs(macbook)], mac)
+      gateOf(isMountDaemonOf(['/usr/bin/rclone', ...pullMountArgs(mac)], mac)) && !isMountDaemonOf(['/usr/bin/rclone', ...pullMountArgs(macbook)], mac)
       && !isMountDaemonOf(['/usr/bin/rclone', ...pullMountArgs(inner)], mac) && !isMountDaemonOf(['/usr/bin/vim', mac, 'mount'], mac)
       && !isMountDaemonOf(['/usr/bin/rclone', 'lsf', mac], mac) && !isMountDaemonOf(null, mac) && !isMountDaemonOf(['rclone', 'mount', ''], ''));
     let syncProc = 0;
@@ -340,7 +340,7 @@ try {
     };
     const sig3 = [], said = [];
     try { await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sig3.push([p, s]), say: (l) => said.push(l) }); } finally { fs.promises.readFile = rp; }
-    check('a pid recycled between the scan and the signal is never signalled (and said once)', sig3.length === 0 && said.length === 1 && /pid-recycled/.test(said[0]), JSON.stringify({ sig3, said }));
+    check('a pid recycled between the scan and the signal is never signalled (and said once)', sig3.length === 0 && said.length === 1 && verdictOf(/pid-recycled/.test(said[0])), JSON.stringify({ sig3, said }));
     fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1000);
     // the command line changed in the window (the same start, another program now): not signalled
     seen = 0;
@@ -358,7 +358,7 @@ try {
     fs.promises.readFile = async function (q, ...a) { if (q === path.join(P, '306', 'cmdline')) dRead++; return rpD.call(this, q, ...a); };
     let foundD, sigD = [];
     try { foundD = await mountDaemonsOf(mac, { procRoot: P }); await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigD.push([p, s]), say: () => {} }); } finally { fs.promises.readFile = rpD; }
-    check('a process asleep in the kernel (D) is skipped — its command line is never read, it is never signalled', JSON.stringify(foundD) === JSON.stringify([{ pid: 301, starttime: 1000 }]) && dRead === 0 && sigD.every(([p]) => p !== 306), JSON.stringify({ foundD, dRead, sigD }));
+    check('a process asleep in the kernel (D) is skipped — its command line is never read, it is never signalled', JSON.stringify(foundD) === JSON.stringify([{ pid: 301, starttime: 1000 }]) && dRead === 0 && verdictOf(sigD.every(([p]) => p !== 306)), JSON.stringify({ foundD, dRead, sigD }));
     // the controls of §14's cures: ONE patched copy of device-mount.js, each cut behind its own flag (one compile — the fast
     // tier's cap); every anchor found exactly once or the control is red by name
     const dsrc0 = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
@@ -380,7 +380,7 @@ try {
     const dcut = async (k, f) => { globalThis.__dmCut = { [k]: true }; try { return await f(); } finally { globalThis.__dmCut = {}; } };
     if (DC) {
       const foundC = await dcut('dskip', () => DC.mountDaemonsOf(mac, { procRoot: P }));
-      check('CONTROL (no D skip): the sleeping process is read and found (red)', foundC.some((x) => x.pid === 306), JSON.stringify(foundC));
+      check('CONTROL (no D skip): the sleeping process is read and found (red)', verdictOf(foundC.some((x) => x.pid === 306)), JSON.stringify(foundC));
     }
     { // cure 2: a process LEFT asleep is SAID once — at the walk (named by its comm, never its command line) and at the re-check
       const asleepLegs = async (K) => {
@@ -432,7 +432,7 @@ try {
     check('no /proc ⇒ nothing found, nothing signalled (the fusermount pass alone)', (await mountDaemonsOf(mac, { procRoot: path.join(tmp, 'no-proc') })).length === 0);
     const dsrc = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
     check('the pre-clean goes through killMountDaemons; no sync /proc walk and no substring match is left in the file',
-/if \(!preCleaned\) await releaseStale\(mountpoint, \{ log, held: heldChild \}\);[^\n]*\n  await fs\.promises\.mkdir\(mountpoint/.test(dsrc) && /if \(\(await lazyUnmount\(mountpoint, \{ say: log, ms, held \}\)\) === 'hung'\) throw [^\n]*\n  return killMountDaemons\(mountpoint/.test(dsrc) && !/readdirSync\('\/proc'\)/.test(dsrc) && !/cmd\.includes\(mountpoint\)/.test(dsrc));
+gateOf(/if \(!preCleaned\) await releaseStale\(mountpoint, \{ log, held: heldChild \}\);[^\n]*\n  await fs\.promises\.mkdir\(mountpoint/.test(dsrc)) && gateOf(/if \(\(await lazyUnmount\(mountpoint, \{ say: log, ms, held \}\)\) === 'hung'\) throw [^\n]*\n  return killMountDaemons\(mountpoint/.test(dsrc)) && !/readdirSync\('\/proc'\)/.test(dsrc) && !/cmd\.includes\(mountpoint\)/.test(dsrc));
     // RED CONTROL: the release's predicate (a substring of the joined command line) in a patched copy — the leg goes red
     const SRC = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
     const body = /function isMountDaemonOf\(argv, mountpoint\) \{\n[\s\S]*?\n\}\n/;
@@ -445,7 +445,7 @@ try {
       const sigC = [];
       await R.killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigC.push([p, s]), say: () => {} });
       const pids = sigC.map((x) => x[0]).sort();
-      check('CONTROL (the release\'s substring rule): healing …/mac ALSO signals …/macbook\'s daemon and the mount under it (red)', pids.includes(302) && pids.includes(303) && pids.includes(301), JSON.stringify(pids));
+      check('CONTROL (the release\'s substring rule): healing …/mac ALSO signals …/macbook\'s daemon and the mount under it (red)', gateOf(pids.includes(302)) && gateOf(pids.includes(303)) && verdictOf(pids.includes(301)), JSON.stringify(pids));
     }
     // RED CONTROL 2: the signal NOT re-checked (the scan's pid killed as read) — the recycled pid is signalled
     const reck = /    let argv; try \{ argv = \(await fs\.promises\.readFile\(`\$\{procRoot\}\/\$\{id\.pid\}\/cmdline`[^\n]*\n    if \(!isMountDaemonOf\(argv, mountpoint\)\) continue;\n    const r = PI\.signalIdentity\(id, 'SIGKILL'[^\n]*\n/;
@@ -466,13 +466,13 @@ try {
   {
     // A) THE REAL CHAIN (started at the suite's top, beside §1–§14's waits): rclone exiting released the mount point
     const ra = await realChain;
-    check('A: the mount came up (the pre-clean\'s lazy unmount ran once)', ra.up, ra.upWhy);
-    check('A: rclone exiting = the mount point lazy-unmounted at once, the owner told, the device\'s folder server released', ra.released, ra.releasedWhy);
-    check('A: the bridge is closed', ra.bridgeShut);
-    check('A: a later teardown releases nothing twice (no second unmount, no second unserve)', ra.once, ra.onceWhy);
-    check('A: releaseStale — a stale daemon of the mount point (argv0 rclone, left by a dead hub) is ended after the lazy unmount', ra.stale, ra.staleWhy);
+    check('A: the mount came up (the pre-clean\'s lazy unmount ran once)', verdictOf(ra.up), ra.upWhy);
+    check('A: rclone exiting = the mount point lazy-unmounted at once, the owner told, the device\'s folder server released', verdictOf(ra.released), ra.releasedWhy);
+    check('A: the bridge is closed', verdictOf(ra.bridgeShut));
+    check('A: a later teardown releases nothing twice (no second unmount, no second unserve)', verdictOf(ra.once), ra.onceWhy);
+    check('A: releaseStale — a stale daemon of the mount point (argv0 rclone, left by a dead hub) is ended after the lazy unmount', verdictOf(ra.stale), ra.staleWhy);
     const dy = await dyingChain;
-    check('A: an rclone that dies while the mount is awaited ⇒ a FAILED mount, its mount point released all the same, its folder server let go, nobody told «gone»', /rclone webdav mount exited/.test(dy.err || '') && dy.fuses === 2 && dy.gone === 0 && JSON.stringify(dy.unserved) === JSON.stringify([4300]), JSON.stringify(dy));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them, unchanged)
+    check('A: an rclone that dies while the mount is awaited ⇒ a FAILED mount, its mount point released all the same, its folder server let go, nobody told «gone»', gateOf(/rclone webdav mount exited/.test(dy.err || '')) && dy.fuses === 2 && dy.gone === 0 && JSON.stringify(dy.unserved) === JSON.stringify([4300]), JSON.stringify(dy));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them, unchanged)
     { // the unmount LADDER (r1 #3): fusermount3 first, fusermount when it is not here, neither said once
       const DM = require('../src/device-mount.js');
       const B2 = path.join(FC, 'bin2'), B0 = path.join(FC, 'bin-empty'); fs.mkdirSync(B2, { recursive: true }); fs.mkdirSync(B0, { recursive: true });
@@ -484,7 +484,7 @@ try {
         process.env.PATH = B2; a2 = await DM.lazyUnmount(path.join(FC, 'mnt-l2'));
         process.env.PATH = B0; a3 = await DM.lazyUnmount(path.join(FC, 'mnt-l0'), { say: (l) => said.push(l) }); await DM.lazyUnmount(path.join(FC, 'mnt-l0b'), { say: (l) => said.push(l) });
       } finally { process.env.PATH = path.join(FC, 'bin') + ':' + PATH0; }
-      check('A: the unmount ladder — fusermount3 when it is here, fusermount when it is not, neither ⇒ said ONCE (never a silent no-op)', a1 === 'ok' && fuses(path.join(FC, 'mnt-l3')) === 1 && a2 === 'ok' && fuses(path.join(FC, 'mnt-l2')) === 1 && a3 === 'missing' && said.length === 1 && /neither fusermount3 nor fusermount is on PATH/.test(said[0]), JSON.stringify({ a1, a2, a3, said }));
+      check('A: the unmount ladder — fusermount3 when it is here, fusermount when it is not, neither ⇒ said ONCE (never a silent no-op)', a1 === 'ok' && fuses(path.join(FC, 'mnt-l3')) === 1 && a2 === 'ok' && fuses(path.join(FC, 'mnt-l2')) === 1 && a3 === 'missing' && said.length === 1 && verdictOf(/neither fusermount3 nor fusermount is on PATH/.test(said[0])), JSON.stringify({ a1, a2, a3, said }));
     }
     { // the cure (the readers' 1): THE UNMOUNT CHILD HAS A BOUND — a hung one is ended at its bound, said once, never waited on.
       // B-323e (lane bl-machines-b): the pair rides THE STARTER — over a STAND-IN starter here, whose killed child LINGERS (asleep in the
@@ -503,7 +503,7 @@ try {
         stuckAfter = DM.unmountStuckOf(mpH);
         try { await DM.releaseStale(path.join(FC, 'mnt-hang2'), { ms: 40, log: () => {} }); } catch (e) { rel = e && e.code; }
         check('A: a hung unmount answers «hung» at its bound, its child ended by the starter, SAID once; while that child lives the mount point gets no second child; a release over it fails BY NAME (unmount_hung)',
-          a1 === 'hung' && a2 === 'hung' && n2 === 1 && asks.every((x) => x.ms === 40) && said.length === 1 && /could not release the folder — its unmount did not answer/.test(said[0]) && stuckAfter === false && rel === 'unmount_hung', JSON.stringify({ a1, a2, n2, said, stuckAfter, rel }));
+          a1 === 'hung' && a2 === 'hung' && n2 === 1 && gateOf(asks.every((x) => x.ms === 40)) && said.length === 1 && gateOf(/could not release the folder — its unmount did not answer/.test(said[0])) && stuckAfter === false && rel === 'unmount_hung', JSON.stringify({ a1, a2, n2, said, stuckAfter, rel }));
       } finally { CS.setChildStarter(S0); }
     }
     const rc0 = await realChainControl;
@@ -635,7 +635,7 @@ try {
           racedF, liveF: !!(f && f.live), fAfter: ev.indexOf('release-hung boot-e') >= 0 && ev.indexOf('mount boot-e again') > ev.indexOf('release-hung boot-e'), wordsE: !!(mm._pullErrors && mm._pullErrors.has('mm-e')), ev };
       };
       const bo = await boot(require('../src/machine-mounts.js').MachineMounts);
-      check('B: at boot the offline machine\'s releases run ONE AFTER ANOTHER; a dial-in meanwhile starts nothing on a record until ITS release has ended (never racing it)', bo.firstOnly && !bo.raced && bo.oneByOne && bo.waited, JSON.stringify(bo));
+      check('B: at boot the offline machine\'s releases run ONE AFTER ANOTHER; a dial-in meanwhile starts nothing on a record until ITS release has ended (never racing it)', gateOf(bo.firstOnly) && !bo.raced && gateOf(bo.oneByOne) && verdictOf(bo.waited), JSON.stringify(bo));
       // cure 3: ONE record, the chain's doors held open by the leg (the cure-2 read #4, #6)
       const mini = (MM, { online, mount, release }) => {
         const dataDir = path.join(tmp, 'fcc7-mini-' + Math.random().toString(36).slice(2)); fs.mkdirSync(dataDir, { recursive: true });
@@ -743,12 +743,12 @@ try {
       const mcut = async (k, f) => { globalThis.__mmCut = { [k]: true }; try { return await f(); } finally { globalThis.__mmCut = {}; } };
       if (MG) {
         const bw = await mcut('wait', () => boot(MG));
-        check('CONTROL (the dial-in does not wait): the heal releases / mounts a record while its boot release still runs (red)', bw.raced, JSON.stringify(bw));
+        check('CONTROL (the dial-in does not wait): the heal releases / mounts a record while its boot release still runs (red)', verdictOf(bw.raced), JSON.stringify(bw));
       }
       const MM3 = require('../src/machine-mounts.js').MachineMounts;
       const br = await boot(MM3, { removeE: true, readd: true, hangE: true });
-      check('B: cure 2 (as if a must) — a pull the person REMOVED while its heal waited for the boot release is never mounted (no rclone, no live entry for a gone record)', !br.mountedE && !br.liveE && br.waited, JSON.stringify(br));
-      check('B: cure 3 (the cure-2 read #3, #6) — the same folder added again meanwhile (a NEW record) waits for the boot\'s step on that folder, then mounts; the removed record\'s hung step leaves no words', !br.racedF && br.liveF && br.fAfter && !br.wordsE, JSON.stringify(br));
+      check('B: cure 2 (as if a must) — a pull the person REMOVED while its heal waited for the boot release is never mounted (no rclone, no live entry for a gone record)', !br.mountedE && !br.liveE && verdictOf(br.waited), JSON.stringify(br));
+      check('B: cure 3 (the cure-2 read #3, #6) — the same folder added again meanwhile (a NEW record) waits for the boot\'s step on that folder, then mounts; the removed record\'s hung step leaves no words', !br.racedF && gateOf(br.liveF) && gateOf(br.fAfter) && !br.wordsE, JSON.stringify(br));
       const lg = await landGone(MM3), wh = await wordsGone(MM3, 'heal'), wb = await wordsGone(MM3, 'boot'), tw = await twin(MM3), twh = await twin(MM3, { copiesHeld: true });
       const ap = await removedAsk(MM3, 'pull'), ar = await removedAsk(MM3, 'remount'), ah = await removedAsk(MM3, 'pull', 'hung'), am = await removedAsk(MM3, 'remount', 'mark');
       check('B: cure 4 (the readers\' should) — the person removes the pull while the mount it asked for waits: mountPull and remount refuse with the removal\'s words (mount_removed), never a 200 with live:false — and nothing of it stays mounted', ap.code === 'mount_removed' && ar.code === 'mount_removed' && !ap.live2 && !ar.live2, JSON.stringify({ ap, ar }));
@@ -781,16 +781,16 @@ try {
     check('B: a heal RELEASES FIRST — before the machine is asked anything — and tells the chain it is pre-cleaned (r1 #2)', o.releaseFirst === true, JSON.stringify(events.slice(0, 8)));
     check('B: an ssh machine that cannot be reached (online by definition) still has its mount point released by the failed heal (r1 #2)', o.sshReleased === true, JSON.stringify(o));
     check('B: the machine\'s link closes ⇒ its live pull is torn down at once (the lazy unmount), the row says offline, the clients told',
-      o.unlinked === 1 && o.offline.live === false && o.offline.online === false && o.offline.torn === 1 && o.offline.told, JSON.stringify(o.offline));
+      o.unlinked === 1 && o.offline.live === false && o.offline.online === false && o.offline.torn === 1 && verdictOf(o.offline.told), JSON.stringify(o.offline));
     check('B: the re-dial mounts it again (a new chain)', o.relinked === true);
     check('B: an OLD chain\'s late exit never drops the newer live chain', o.staleGone.live === true && !o.staleGone.told, JSON.stringify(o.staleGone));
-    check('B: its rclone exiting ⇒ the row is not live at once, the clients told; a chain that died YOUNG keeps the 5-min backoff (r1 #5)', o.rcExit.said && o.rcExit.live === false && o.rcExit.told && o.rcExit.backoff, JSON.stringify(o.rcExit));
+    check('B: its rclone exiting ⇒ the row is not live at once, the clients told; a chain that died YOUNG keeps the 5-min backoff (r1 #5)', gateOf(o.rcExit.said) && o.rcExit.live === false && gateOf(o.rcExit.told) && verdictOf(o.rcExit.backoff), JSON.stringify(o.rcExit));
     check('B: the link closes WHILE the mount is being made ⇒ the mount lets go when it lands, never a live row over a dead link (r1 #4)', o.inflight.unlinked === 0 && o.inflight.live === false && o.inflight.torn === 1, JSON.stringify(o.inflight));
     check('B: the sweep\'s belt — a live pull of a machine found offline is torn down', o.sweep.live === false && o.sweep.torn === 1, JSON.stringify(o.sweep));
-    check('B: a release that HUNG fails the heal by name, is SAID on the row (list().error), and the record leaves the mounting set — the next try mounts and clears the words', o.hung && o.hung.err === 'unmount_hung' && o.hung.mounting === false && /could not release the folder/.test(o.hung.error || '') && o.hung.cleared === true, JSON.stringify(o.hung));
-    check('B: cure 2 — the «could not release» words go once a release SUCCEEDED, even when the mount then fails for another reason; and they go with their record', o.hung && o.hung.afterRelease && /serve-folder refused/.test(o.hung.afterRelease.err2 || '') && o.hung.afterRelease.error === null && o.hung.entryGone === true, JSON.stringify(o.hung));
+    check('B: a release that HUNG fails the heal by name, is SAID on the row (list().error), and the record leaves the mounting set — the next try mounts and clears the words', gateOf(o.hung) && o.hung.err === 'unmount_hung' && o.hung.mounting === false && gateOf(/could not release the folder/.test(o.hung.error || '')) && o.hung.cleared === true, JSON.stringify(o.hung));
+    check('B: cure 2 — the «could not release» words go once a release SUCCEEDED, even when the mount then fails for another reason; and they go with their record', gateOf(o.hung) && gateOf(o.hung.afterRelease) && gateOf(/serve-folder refused/.test(o.hung.afterRelease.err2 || '')) && o.hung.afterRelease.error === null && o.hung.entryGone === true, JSON.stringify(o.hung));
     const dp = fs.readFileSync(new URL('../src/server/dial-pairing.js', import.meta.url), 'utf8');
-    check('B: wiring — the dial link\'s «disconnected» fact unmounts the machine\'s pulls (dial-pairing noteDialEvent)', /if \(event === 'disconnected'\) \{ try \{ machineMounts\.onMachineUnlinked\(hosts\.findByDeviceId\(deviceId\)\?\.id\); \} catch \{ \} \}/.test(dp));
+    check('B: wiring — the dial link\'s «disconnected» fact unmounts the machine\'s pulls (dial-pairing noteDialEvent)', verdictOf(/if \(event === 'disconnected'\) \{ try \{ machineMounts\.onMachineUnlinked\(hosts\.findByDeviceId\(deviceId\)\?\.id\); \} catch \{ \} \}/.test(dp)));
     if (!oc) console.log(`  SKIP test-pull-refresh §15 B CONTROL: the release ${BASE_REF} is not in this checkout (a depth-1 clone)`);
     else check('CONTROL (the release\'s machine-mounts.js): the boot releases nothing, a heal never releases first, an unreachable ssh machine keeps its mount, there is no unlink door, the chain is not told to say its exit, a mount made while the link closed stays live and the sweep skips an offline mount (red)',
       oc.up === true && oc.bootReleased === false && oc.releaseFirst === false && oc.sshReleased === false && oc.unlinked === 'no such door' && oc.offline.live === true && oc.rcExit.said === false && oc.rcExit.live === true && oc.inflight.live === true && oc.sweep.live === true && oc.hung.error == null, JSON.stringify(oc));
@@ -861,7 +861,7 @@ try {
         try { const w = M.shadowedBy(path.join(realMac, 'f.txt'), { writer: true }); return { w, words: w ? MMx.pullShadowBody(w).error : null, asWritten: M.shadowedBy(path.join(linkD, 'mac', 'f.txt'), { writer: true }) }; } finally { M._state.mounts.pop(); M._realMp.delete('mm-lk'); }
       };
       const got = run(mm);
-      check('§16b B-2ca0 follow-up: a record whose mount point was written THROUGH A LINK — a write at its REAL path (WebDAV\'s real-pathed target) is refused by the door\'s words, as one at the path as written', got.w?.id === 'mm-lk' && got.asWritten?.id === 'mm-lk' && /“Studio Mac” is offline/.test(got.words || ''), JSON.stringify({ w: got.w && got.w.id, words: got.words }));
+      check('§16b B-2ca0 follow-up: a record whose mount point was written THROUGH A LINK — a write at its REAL path (WebDAV\'s real-pathed target) is refused by the door\'s words, as one at the path as written', got.w?.id === 'mm-lk' && got.asWritten?.id === 'mm-lk' && verdictOf(/“Studio Mac” is offline/.test(got.words || '')), JSON.stringify({ w: got.w && got.w.id, words: got.words }));
       const SRC0 = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
       const src0 = fs.readFileSync(path.join(SRC0, 'machine-mounts.js'), 'utf8');
       const anchor = "      const mp = this._pullFolders(m0).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // a whole path segment (…/mac is not …/macbook)";
@@ -926,11 +926,11 @@ try {
     try {
       MMx.registerPullDoor(() => mm);
       const off = await ls(mpMac);
-      check('§16 the file window over an offline machine\'s pull folder: 503 machine_offline, the machine by name — never an empty listing', off.status === 503 && off.body.code === 'machine_offline' && off.body.params?.machine === 'Studio Mac' && /“Studio Mac” is offline/.test(off.body.error) && !('items' in off.body), JSON.stringify(off));
+      check('§16 the file window over an offline machine\'s pull folder: 503 machine_offline, the machine by name — never an empty listing', off.status === 503 && off.body.code === 'machine_offline' && off.body.params?.machine === 'Studio Mac' && gateOf(/“Studio Mac” is offline/.test(off.body.error)) && !('items' in off.body), JSON.stringify(off));
       const dn = await ls(path.join(mpMacbook, 'sub'));
       check('§16 …an online machine whose pull is not mounted: 503 machine_folder_down', dn.status === 503 && dn.body.code === 'machine_folder_down' && dn.body.params?.machine === 'Laptop', JSON.stringify(dn));
       const own = await ls(mpOwn);
-      check('§16 …a folder holding files of its own (a person\'s) lists them (200)', own.status === 200 && (own.body.items || []).some((i) => i.name === 'my-notes.txt'), JSON.stringify(own).slice(0, 200));
+      check('§16 …a folder holding files of its own (a person\'s) lists them (200)', own.status === 200 && verdictOf((own.body.items || []).some((i) => i.name === 'my-notes.txt')), JSON.stringify(own).slice(0, 200));
       const wOwnR = await write(path.join(mpOwn, 'added.txt'));
       fs.writeFileSync(path.join(mpOwn, 'stray.txt'), 'left there');
       const del = await fetch(`${at}/api/file?path=${encodeURIComponent(path.join(mpOwn, 'stray.txt'))}`, { method: 'DELETE' });
@@ -954,7 +954,7 @@ try {
       } else {
         console.log(`  · the upload's live drive needs multer's folder ${upDir || '(not found)'} writable — it is not on this machine; the route's order is pinned from its source`);
         const iRef = fjU.indexOf("const pullUp = await require('../machine-mounts.js').pullShadowOfReal(destRoot, { writer: true });"), iMk = fjU.indexOf("await sfs(req).call('mkdir', { path: destRoot });");
-        check('§16 an UPLOAD (source order, where multer\'s folder cannot be written here): the pull refusal comes BEFORE the route makes or writes anything, and its catch answers the refusal\'s own body (B-422c: with the files that landed before it beside it)', iRef > 0 && iMk > iRef && /res\.status\(err\.status \|\| 400\)\.json\(\{ \.\.\.\(err\.pullBody \|\| \{ error: err\.message \}\), \.\.\.landedBody\(landedL, landedDir\) \}\)/.test(fjU), JSON.stringify({ iRef, iMk }));
+        check('§16 an UPLOAD (source order, where multer\'s folder cannot be written here): the pull refusal comes BEFORE the route makes or writes anything, and its catch answers the refusal\'s own body (B-422c: with the files that landed before it beside it)', iRef > 0 && iMk > iRef && verdictOf(/res\.status\(err\.status \|\| 400\)\.json\(\{ \.\.\.\(err\.pullBody \|\| \{ error: err\.message \}\), \.\.\.landedBody\(landedL, landedDir\) \}\)/.test(fjU)), JSON.stringify({ iRef, iMk }));
       }
       const viaDir = await fetch(`${at}/api/no-such-route?dir=${encodeURIComponent(mpMac)}`), viaOld = await post('/api/rename', { oldPath: path.join(mpMac, 'x'), newPath: path.join(tmp, 'fcc7-out-x') }), viaDest = await post('/api/no-such-route', { destDir: path.join(mpMac, 'sub') });
       check('§16 …reached by ?dir=, a rename\'s oldPath and a body destDir alike', viaDir.status === 503 && viaOld.status === 503 && viaDest.status === 503, JSON.stringify([viaDir.status, viaOld.status, viaDest.status]));
@@ -966,19 +966,19 @@ try {
       const neBefore = mm._bare.get('mm-ne');
       const delNE = await fetch(`${at}/api/file?path=${encodeURIComponent(path.join(mpNE, 'stray2.txt'))}`, { method: 'DELETE' });
       const reprobed = await until(() => mm._bare.get('mm-ne') === 'empty', 3000);
-      check('§16 a stray DELETED through the route has its folder probed again at once (not the sweep\'s 90 s): empty, so shadowed again', neBefore === 'not-empty' && delNE.status === 200 && reprobed && sh(mpNE)?.id === 'mm-ne', JSON.stringify({ neBefore, del: delNE.status, reprobed }));
+      check('§16 a stray DELETED through the route has its folder probed again at once (not the sweep\'s 90 s): empty, so shadowed again', neBefore === 'not-empty' && delNE.status === 200 && gateOf(reprobed) && sh(mpNE)?.id === 'mm-ne', JSON.stringify({ neBefore, del: delNE.status, reprobed }));
       for (const n of ['s3.txt', 's4.txt', 's5.txt']) fs.writeFileSync(path.join(mpNE, n), n);
       await mm._probeBare(recOf('mm-ne'));
       const ne2 = mm._bare.get('mm-ne');
       const dels = await Promise.all(['s3.txt', 's4.txt', 's5.txt'].map((n) => fetch(`${at}/api/file?path=${encodeURIComponent(path.join(mpNE, n))}`, { method: 'DELETE' })));
       const emptyAfterDels = await until(() => mm._bare.get('mm-ne') === 'empty' && !mm._probing?.has('mm-ne'), 4000);
-      check('§16 three strays DELETED at once (a multi-select delete): a probe asked while one runs is run again once it ended — the folder reads EMPTY at last, shadowed again', ne2 === 'not-empty' && dels.every((d) => d.status === 200) && emptyAfterDels && sh(mpNE)?.id === 'mm-ne', JSON.stringify({ ne2, d: dels.map((d) => d.status), emptyAfterDels }));
+      check('§16 three strays DELETED at once (a multi-select delete): a probe asked while one runs is run again once it ended — the folder reads EMPTY at last, shadowed again', ne2 === 'not-empty' && gateOf(dels.every((d) => d.status === 200)) && gateOf(emptyAfterDels) && sh(mpNE)?.id === 'mm-ne', JSON.stringify({ ne2, d: dels.map((d) => d.status), emptyAfterDels }));
       fs.writeFileSync(path.join(mpNE, 's6.txt'), 's6'); await mm._probeBare(recOf('mm-ne'));
       const ne3 = mm._bare.get('mm-ne');
       const mv = await post('/api/file/move', { src: path.join(mpNE, 's6.txt'), dest: path.join(tmp, 'fcc7-moved-s6.txt'), progress: 1 });
       const moved = await until(() => !fs.existsSync(path.join(mpNE, 's6.txt')), 3000);
       const emptyAfterMove = await until(() => mm._bare.get('mm-ne') === 'empty', 3000);
-      check('§16 a stray MOVED OUT with progress (cut / paste: the reply comes BEFORE the move) is probed again once the move ENDED: empty', ne3 === 'not-empty' && mv.status === 200 && !!mv.body?.opId && moved && emptyAfterMove, JSON.stringify({ ne3, mv: mv.status, moved, emptyAfterMove }));
+      check('§16 a stray MOVED OUT with progress (cut / paste: the reply comes BEFORE the move) is probed again once the move ENDED: empty', ne3 === 'not-empty' && mv.status === 200 && !!mv.body?.opId && gateOf(moved) && verdictOf(emptyAfterMove), JSON.stringify({ ne3, mv: mv.status, moved, emptyAfterMove }));
       const mk = await post('/api/MKDIR/', { path: path.join(mpOwn, 'made') });
       check('§16 a write route as express matches it (any case, a trailing slash) is a writer: /api/MKDIR/ refused, nothing made', mk.status === 503 && !fs.existsSync(path.join(mpOwn, 'made')), JSON.stringify(mk).slice(0, 160));
       const keep = app.locals.mounts; delete app.locals.mounts;
@@ -987,12 +987,12 @@ try {
       check('§16 its own pass: refused with no storage manager registered too', bare.status === 503 && bare.body.code === 'machine_offline', JSON.stringify(bare));
       live('mm-mac', mpMac);
       const up = await ls(mpMac);
-      check('§16 a mounted pull lists as before (200, its items)', up.status === 200 && Array.isArray(up.body.items), JSON.stringify(up).slice(0, 200));
+      check('§16 a mounted pull lists as before (200, its items)', up.status === 200 && verdictOf(Array.isArray(up.body.items)), JSON.stringify(up).slice(0, 200));
       mm._live.delete('mm-mac');
       MMx.registerPullDoor(null);
       const ctl = await ls(mpMac), ctlW = await write(path.join(mpMac, 'stranded.txt'));
       const landed = fs.existsSync(path.join(mpMac, 'stranded.txt')); try { fs.rmSync(path.join(mpMac, 'stranded.txt'), { force: true }); } catch { }
-      check('CONTROL §16 (no pull door: the release) — the plant first (the record offline, not mounted), then the folder lists EMPTY, a 200, and a write LANDS in the bare folder (red)', sh(mpMac)?.offline === true && ctl.status === 200 && Array.isArray(ctl.body.items) && ctl.body.items.length === 0 && ctlW.status === 200 && landed, JSON.stringify({ ctl, ctlW: ctlW.status, landed }).slice(0, 240));
+      check('CONTROL §16 (no pull door: the release) — the plant first (the record offline, not mounted), then the folder lists EMPTY, a 200, and a write LANDS in the bare folder (red)', sh(mpMac)?.offline === true && ctl.status === 200 && gateOf(Array.isArray(ctl.body.items)) && ctl.body.items.length === 0 && ctlW.status === 200 && verdictOf(landed), JSON.stringify({ ctl, ctlW: ctlW.status, landed }).slice(0, 240));
     } finally { MMx.registerPullDoor(null); await new Promise((res) => server.close(res)); }
     // the words: the client words both codes (en = the server's sentence), zh / ja rows exist; the hub registers the door
     const R = (rel) => fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', rel), 'utf8');
@@ -1001,9 +1001,9 @@ try {
     const enOf = (code) => (mmSrc.match(new RegExp(`error: \`([^\`]*)\`, code: '${code}'`)) || [])[1];
     const keyOf = (code) => (ops.match(new RegExp(`d\\.code === '${code}'\\) return t\\('([^']*)'`)) || [])[1];
     const same = (code) => { const e = enOf(code), k = keyOf(code); return !!e && !!k && e.replace(/\$\{s\.machine\}/g, '{machine}') === k && zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'); };
-    check('§16 the client words machine_offline and machine_folder_down in the reader\'s language: its key = the server\'s English, a zh and a ja row each', same('machine_offline') && same('machine_folder_down'));
+    check('§16 the client words machine_offline and machine_folder_down in the reader\'s language: its key = the server\'s English, a zh and a ja row each', gateOf(same('machine_offline')) && verdictOf(same('machine_folder_down')));
     const iCloud = fj.indexOf('const shadow = mounts.shadowedBy?.(p);'), iPull = fj.search(/const pull = await require\('\.\.\/machine-mounts\.js'\)\.pullShadowOfReal\(p, \{ writer \}\);\n\s+if \(pull\) return res\.status\(503\)\.json\(pullShadowBody\(pull\)\);/);
-    check('§16 wiring: the hub\'s dial wiring registers the ONE pull manager (server.js takes no line); the files router asks it in its own pass, after the cloud storages\' refusal', /require\('\.\.\/machine-mounts\.js'\)\.registerPullDoor\(getMachineMounts\);/.test(dp) && iCloud > 0 && iPull > iCloud && fj.split('pullShadowOfReal(').length === 3 && /pullShadowOfReal\(destRoot, \{ writer: true \}\)/.test(fj) && /onPullLive\(\(\) => \{ try \{ tasks\.syncAllContextMd\(\); \} catch \{ \} \}\)/.test(tgw));
+    check('§16 wiring: the hub\'s dial wiring registers the ONE pull manager (server.js takes no line); the files router asks it in its own pass, after the cloud storages\' refusal', gateOf(/require\('\.\.\/machine-mounts\.js'\)\.registerPullDoor\(getMachineMounts\);/.test(dp)) && iCloud > 0 && iPull > iCloud && fj.split('pullShadowOfReal(').length === 3 && gateOf(/pullShadowOfReal\(destRoot, \{ writer: true \}\)/.test(fj)) && verdictOf(/onPullLive\(\(\) => \{ try \{ tasks\.syncAllContextMd\(\); \} catch \{ \} \}\)/.test(tgw)));
   }
   console.log('§17 B-844b / B-6c4f: one folder holds one machine\'s folder — the same folder or a nested one refused by name; existing pairs held');
   {
@@ -1031,12 +1031,12 @@ try {
       const ask = async (host, rp, mpX) => { try { const r = await mm.mountPull(host, { remotePath: rp, mountpoint: mpX }); return { ok: r.id }; } catch (e) { return { code: e.code, params: e.params || {}, msg: e.message }; } };
       const n0 = mm._state.mounts.length;
       const same = await ask('h2', '/x', mpA), alias = await ask('h2', '/x', mpLink), inside = await ask('h2', '/y', mpInner), over = await ask('h2', '/z', mpOuter);
-      check('§17 a SECOND record on a folder another pull holds is refused by name — «… already the mount point of “Studio Mac”’s /Users/a»', same.code === 'mount_point_in_use' && same.params.machine === 'Studio Mac' && same.params.remotePath === '/Users/a' && same.params.held === false && /already the mount point of “Studio Mac”’s \/Users\/a — pick another folder/.test(same.msg || ''), JSON.stringify(same));
+      check('§17 a SECOND record on a folder another pull holds is refused by name — «… already the mount point of “Studio Mac”’s /Users/a»', same.code === 'mount_point_in_use' && same.params.machine === 'Studio Mac' && same.params.remotePath === '/Users/a' && same.params.held === false && verdictOf(/already the mount point of “Studio Mac”’s \/Users\/a — pick another folder/.test(same.msg || '')), JSON.stringify(same));
       check('§17 …the same folder by ANOTHER NAME (a symlink) is the same folder: its REAL path is compared', alias.code === 'mount_point_in_use' && alias.params.remotePath === '/Users/a', JSON.stringify(alias));
-      check('§17 a folder NESTED in either direction is refused by name — inside another pull\'s mount point, or holding one', inside.code === 'mount_point_nested' && inside.params.kind === 'inside' && inside.params.mountpoint === mpA && over.code === 'mount_point_nested' && over.params.kind === 'over' && over.params.mountpoint === mpB && /unmounting one would take the other with it/.test(over.msg || ''), JSON.stringify({ inside, over }));
+      check('§17 a folder NESTED in either direction is refused by name — inside another pull\'s mount point, or holding one', inside.code === 'mount_point_nested' && inside.params.kind === 'inside' && inside.params.mountpoint === mpA && over.code === 'mount_point_nested' && over.params.kind === 'over' && over.params.mountpoint === mpB && verdictOf(/unmounting one would take the other with it/.test(over.msg || '')), JSON.stringify({ inside, over }));
       check('§17 …nothing was recorded, mounted or released for a refused ask', mm._state.mounts.length === n0 && released.length === 0 && mountsAsked.length === 0, JSON.stringify({ n: mm._state.mounts.length, released, asked: mountsAsked.length }));
       const again = await ask('h1', '/Users/a', mpA), slash = await ask('h1', '/Users/a', mpA + '/'), fresh = await ask('h2', '/f', mpFree);
-      check('§17 the SAME pull asked again is that record (no refusal) — r4 (read 3 #5): by another spelling of its folder too; a folder of its own is mounted', again.ok === 'mm-a' && slash.ok === 'mm-a' && !!fresh.ok && mountsAsked.some((o) => o.mountpoint === mpFree), JSON.stringify({ again, slash, fresh }));
+      check('§17 the SAME pull asked again is that record (no refusal) — r4 (read 3 #5): by another spelling of its folder too; a folder of its own is mounted', again.ok === 'mm-a' && slash.ok === 'mm-a' && !!fresh.ok && verdictOf(mountsAsked.some((o) => o.mountpoint === mpFree)), JSON.stringify({ again, slash, fresh }));
       // ── EXISTING pairs (records from before): the younger HELD, by the elder's name; boot and removal ──
       const mm2 = mkMM('pairs-b', [
         { id: 'mm-old', dir: 'pull', hostId: 'h1', remotePath: '/Users/a', mountpoint: mpA, createdAt: 1 },
@@ -1047,7 +1047,7 @@ try {
       const held = await mm2._recheckPairs();
       const rowOf = (id) => mm2.list().find((r) => r.id === id) || {};
       const ry = rowOf('mm-young'), rn = rowOf('mm-nest');
-      check('§17 EXISTING records on one folder (a symlink too) or nested: the YOUNGER held — its row says why by the elder\'s name, as a code the page words; the elder and a free one are not', held.has('mm-young') && held.has('mm-nest') && !held.has('mm-old') && !held.has('mm-free2') && ry.errorCode === 'mount_point_in_use' && ry.errorParams?.machine === 'Studio Mac' && rn.errorCode === 'mount_point_nested' && rn.errorParams?.kind === 'inside' && /held — /.test(said17.join('\n')), JSON.stringify({ held: [...held.keys()], ry, rn }));
+      check('§17 EXISTING records on one folder (a symlink too) or nested: the YOUNGER held — its row says why by the elder\'s name, as a code the page words; the elder and a free one are not', gateOf(held.has('mm-young')) && gateOf(held.has('mm-nest')) && !held.has('mm-old') && !held.has('mm-free2') && ry.errorCode === 'mount_point_in_use' && ry.errorParams?.machine === 'Studio Mac' && rn.errorCode === 'mount_point_nested' && rn.errorParams?.kind === 'inside' && verdictOf(/held — /.test(said17.join('\n'))), JSON.stringify({ held: [...held.keys()], ry, rn }));
       // ── B-02f6: a WRITE under a HELD outer folder (its inner pair holds the place, live inside it) is refused with the hold ──
       {
         const outerLink = path.join(base, 'outer-link'); fs.symlinkSync(mpOuter, outerLink);   // the held folder written through a link
@@ -1086,8 +1086,8 @@ try {
         const ops3 = R3('src/lib/file-explorer-ops.js'), en3 = (R3('src/machine-mounts.js').match(/error: `([^`]*)`, code: 'machine_folder_held'/) || [])[1], key3 = (ops3.match(/d\.code === 'machine_folder_held'\) return t\('([^']*)'/) || [])[1];
         const zh3 = R3('src/lib/i18n-zh.js'), ja3 = R3('src/lib/i18n-ja.js'), fb3 = 'another pull row holds this folder — remove one of the two rows';
         check('§17 B-02f6: the client words machine_folder_held — its key = the server\'s English, the hold by its own code (mountWords), a zh and a ja row for the key and its fallback',
-          !!en3 && !!key3 && en3.replace('${s.machine}', '{machine}').replace('${s.mountpoint}', '{mountpoint}').replace('${why}', '{why}') === key3 && /why: mountWords\(p\.heldCode, p\.heldParams \|\| \{\}, \{ t, lang: resolveLang\(\) \}\)/.test(ops3)
-            && [key3, fb3].every((k) => zh3.includes(JSON.stringify(k) + ':') && ja3.includes(JSON.stringify(k) + ':')), { en3, key3 });
+          !!en3 && !!key3 && en3.replace('${s.machine}', '{machine}').replace('${s.mountpoint}', '{mountpoint}').replace('${why}', '{why}') === key3 && gateOf(/why: mountWords\(p\.heldCode, p\.heldParams \|\| \{\}, \{ t, lang: resolveLang\(\) \}\)/.test(ops3))
+            && verdictOf([key3, fb3].every((k) => zh3.includes(JSON.stringify(k) + ':') && ja3.includes(JSON.stringify(k) + ':'))), { en3, key3 });
         // RED CONTROLS, each cut alone in a copy: (1) the release's skip planted back (a pair-held record answers nothing) — the write
         // under the held folder is NOT refused; (2) the live-pull check after the pick cut (with it the link mapping) — a write by the link into the live pull is refused
         const src3 = R3('src/machine-mounts.js'), A3 = "      if (!h || (pair && !writer) || (!pair && !writer && this._bare?.get(m.id) !== 'empty')) continue;";
@@ -1217,11 +1217,11 @@ try {
         }
         console.log('    B-02f6 remainder (1), the shape (r1214): ' + JSON.stringify({ slow: { w1: sw1 && sw1.id, asked1: sa1, never: sNever, w2: sw2 && sw2.id, asked2: sa2, fly: sFly }, edited: { w3: sw3 && sw3.id, asked3: sa3 }, sameAdd: { kept: sAddKept, w4: sw4 && sw4.id, asked4: sa4 }, removed: sRmCleared, learned: { w1: lw1 && lw1.id, held: lHeld.get('mm-hout') && lHeld.get('mm-hout').kind, sync: lSync, door: lw2, asked: lAsked }, known: { w: kw, beside: kwBeside && kwBeside.id, asked: kAsked }, starterShapes: shapes }));
         check('§17 B-02f6 remainder (1), r1214: a proof with NO answer inside its bound is never asked again for that record (the write refused, its words — r1274 — saying it heals by itself and what a person can do: machine_folder_unchecked; even past the kept time; it holds no slot) — «never again» ENDS where the truth can change: the record\'s FOLDER edited is asked once more, REMOVED clears it; an Add that finds the same unchanged record ends nothing (no second child on a wedged folder)',
-          sw1?.id === 'mm-hout' && sw1.unchecked === true && MMx.pullShadowBody(sw1).code === 'machine_folder_unchecked' && sa1 === 1 && sNever && sw2?.id === 'mm-hout' && sa2 === 1 && sFly === 0 && sw3?.id === 'mm-hout' && sa3 === 2 && sAddKept && sw4?.id === 'mm-hout' && sa4 === 2 && sRmCleared);
+          sw1?.id === 'mm-hout' && sw1.unchecked === true && MMx.pullShadowBody(sw1).code === 'machine_folder_unchecked' && sa1 === 1 && gateOf(sNever) && sw2?.id === 'mm-hout' && sa2 === 1 && sFly === 0 && sw3?.id === 'mm-hout' && sa3 === 2 && gateOf(sAddKept) && sw4?.id === 'mm-hout' && sa4 === 2 && verdictOf(sRmCleared));
         check('§17 B-02f6 remainder (1), r1214: once the pair check\'s OWN child learns the real folder, the release\'s mapping answers — the write by the link into the live inner goes through (the outer now held, the sync door too), no proof child; learned before the pairs are checked again, the door maps with it (one beside still refused)',
           lw1?.id === 'mm-hout' && lHeld.get('mm-hout')?.kind === 'over' && lSync === null && lw2 === null && lAsked === 1 && kw === null && kwBeside?.id === 'mm-hout' && kAsked === 0);
         check('§17 B-02f6 remainder (1), r1214 (2): the starter\'s answers sorted by the answer alone — ONLY a timeout is SLOW (never asked again); a starter fault\'s «unknown» (r1274: no folder was slow), a start that failed and a throw are answers kept their time; a real line is the real folder (kept their time: no child ran, no bound passed) — no late exit, no child\'s end waited for',
-          shapes.length === 5 && !shapes[0].slow && shapes[0].real === null && shapes[1].slow && !shapes[1].real && !shapes[2].slow && shapes[2].real === '/the/real' && !shapes[3].slow && shapes[3].real === null && !shapes[4].slow && shapes[4].real === null);
+          shapes.length === 5 && !shapes[0].slow && shapes[0].real === null && gateOf(shapes[1].slow) && !shapes[1].real && !shapes[2].slow && shapes[2].real === '/the/real' && !shapes[3].slow && shapes[3].real === null && !shapes[4].slow && shapes[4].real === null);
         // r1274 (2): the refusal after «never again» SAYS it heals by itself and what a person can do — its key = the server's English, a zh
         // and a ja row; RED: the follow's line cut (in a copy) says the not-mounted words (press Remount — which cannot help here)
         const ops4 = R3('src/lib/file-explorer-ops.js'), zh4 = R3('src/lib/i18n-zh.js'), ja4 = R3('src/lib/i18n-ja.js'), mm4 = R3('src/machine-mounts.js');
@@ -1232,9 +1232,9 @@ try {
         if (src3.split(UNCH).length === 2) { const cu = await sceneU(copy3(src3.replace(UNCH, '')), 'pairs-02f6r-words-ctl', SCENES.overLink, { proof: () => Promise.resolve({ real: null, slow: true }) }); unchCut = await cu.m.shadowedByReal(inLink, { writer: true }); }
         console.log('    B-02f6 remainder\'s follow, the words: ' + JSON.stringify({ body: body4, key: key4, cut: unchCut && MMx.pullShadowBody(unchCut).code }));
         check('§17 B-02f6 remainder\'s follow (r1274): refused after «never again», the words say it heals by itself and what a person can do (remove the row and add it again) — the key = the server\'s English, a zh and a ja row; the machine and the folder named',
-          !!en4 && !!key4 && en4.replace('${s.machine}', '{machine}').replace('${s.mountpoint}', '{mountpoint}') === key4 && zh4.includes(JSON.stringify(key4) + ':') && ja4.includes(JSON.stringify(key4) + ':')
-            && body4?.code === 'machine_folder_unchecked' && body4.params.machine === 'Laptop' && body4.params.mountpoint === outerLink && /checks it again by itself/.test(body4.error) && /remove the row and add it again/.test(body4.error));
-        check('RED CONTROL §17 B-02f6 remainder\'s follow: the line cut (in a copy) — the refusal says the not-mounted words (Remount), which cannot help here', unchCut && MMx.pullShadowBody(unchCut).code === 'machine_folder_down', unchCut);
+          !!en4 && !!key4 && en4.replace('${s.machine}', '{machine}').replace('${s.mountpoint}', '{mountpoint}') === key4 && gateOf(zh4.includes(JSON.stringify(key4) + ':')) && gateOf(ja4.includes(JSON.stringify(key4) + ':'))
+            && body4?.code === 'machine_folder_unchecked' && body4.params.machine === 'Laptop' && body4.params.mountpoint === outerLink && gateOf(/checks it again by itself/.test(body4.error)) && verdictOf(/remove the row and add it again/.test(body4.error)));
+        check('RED CONTROL §17 B-02f6 remainder\'s follow: the line cut (in a copy) — the refusal says the not-mounted words (Remount), which cannot help here', gateOf(unchCut) && MMx.pullShadowBody(unchCut).code === 'machine_folder_down', unchCut);
         // the third read's catches: (i) an answer that lands after its record was REMOVED is no one's (nothing kept, no «never»); (ii) the asks
         // in flight keyed by the record AS IT STANDS — an edit while asked gets its own child, the old answer dropped (latent today: no
         // edit road — a false pass the day one exists); (iii) no proof while the pair check's OWN child for the record is alive; (iv) the
@@ -1257,14 +1257,14 @@ try {
         const th1 = await th.m.shadowedByReal(inLink, { writer: true }), thNever = th.m._proofNever.has('mm-hout'); th.m._proofKeepMs = 0; const th2 = await th.m.shadowedByReal(inLink, { writer: true }), thAsked = th.asked.length;
         console.log('    B-02f6 remainder (1), the third read: ' + JSON.stringify({ dropAfterRemove: { res: dRes && dRes.id, dropped }, editInFlight: { asked: eAsked, e1: e1 && e1.id, e2: e2 && e2.id, keptOld: hed.m._proofKept.has('mm-hout'), never: hed.m._proofNever.get('mm-hout') }, pairKidAlive: { w: rkw && rkw.id, asked: rkAsked }, monotonic: { mo1, mo2, asked: moAsked }, thrown: { th1: th1 && th1.id, never: thNever, th2: th2 && th2.id, asked: thAsked } }));
         check('§17 B-02f6 remainder (1), the third read: an answer landing after its record was REMOVED is no one\'s (nothing kept); an EDIT while asked gets its own child and the old answer is dropped (the write by the new link refused, never passed by the old folder); no proof while the pair check\'s own child for the record is alive; the kept time on the monotonic clock (the wall clock an hour back: asked again); a THROW is kept its time, never «never again»',
-          dRes?.id === 'mm-hout' && dropped && eAsked === 2 && e1?.id === 'mm-hout' && e2?.id === 'mm-hout' && !hed.m._proofKept.has('mm-hout') && rkw?.id === 'mm-hout' && rkAsked === 0 && mo1 === null && mo2 === null && moAsked === 2 && th1?.id === 'mm-hout' && !thNever && th2?.id === 'mm-hout' && thAsked === 2);
+          dRes?.id === 'mm-hout' && gateOf(dropped) && eAsked === 2 && e1?.id === 'mm-hout' && e2?.id === 'mm-hout' && !hed.m._proofKept.has('mm-hout') && rkw?.id === 'mm-hout' && rkAsked === 0 && mo1 === null && mo2 === null && moAsked === 2 && th1?.id === 'mm-hout' && !thNever && th2?.id === 'mm-hout' && thAsked === 2);
         const mmSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'machine-mounts.js'), 'utf8');
         const srBody = (mmSrc.match(/async function starterRealpath\([^)]*\) \{\n([\s\S]*?)\n\}\n/) || [])[1] || '';
         console.log('    B-02f6 remainder (1), its bounds: ' + JSON.stringify({ noAnswer: { n1: n1 && n1.id, n2: n2 && n2.id, asked: nAsked, afterTime: { n3: n3 && n3.id, asked: nAgain } }, inFlight: { max: MMx.PROOF_KIDS_MAX, third: f3, size: inFly, asked: flyAsked, shared: f1 === f1b }, keepMs: MMx.PROOF_KEEP_MS, proofMs: MMx.PROOF_MS, viaStarter, real: realM(outerLink) }));
         check('§17 B-02f6 remainder (1), r1178 (a): a proof that ANSWERED no folder is kept as REFUSED its time (one child for two writes), asked again once its time has passed; at most ' + MMx.PROOF_KIDS_MAX + ' asks IN FLIGHT — a third record is refused at once, a second ask for one in flight shares its child',
           n1?.id === 'mm-hout' && n2?.id === 'mm-hout' && nAsked === 1 && n3?.id === 'mm-hout' && nAgain === 2 && MMx.PROOF_KIDS_MAX === 2 && f3 === null && inFly === 2 && flyAsked === 2 && f1 === f1b && MMx.PROOF_KEEP_MS > 0 && MMx.PROOF_MS > 0);
         check('§17 B-02f6 remainder (1), r1178 (b): the proof\'s child is THE STARTER\'s — `realpath -m` through childStarter().run, no spawn of its own; a real run answers the link\'s real folder',
-          /childStarter\(\)\.run\('realpath', \['-m', '--', lex\]/.test(srBody) && !/onLateExit|onTimeout/.test(srBody) && !/\bspawn\(/.test(srBody) && /\(this\._proofRealpath \|\| starterRealpath\)\(rec\.mountpoint\)\)/.test(mmSrc) && !/_proofStuck/.test(mmSrc) && viaStarter?.real === realM(outerLink) && viaStarter.slow === false, { viaStarter });
+          gateOf(/childStarter\(\)\.run\('realpath', \['-m', '--', lex\]/.test(srBody)) && !/onLateExit|onTimeout/.test(srBody) && !/\bspawn\(/.test(srBody) && gateOf(/\(this\._proofRealpath \|\| starterRealpath\)\(rec\.mountpoint\)\)/.test(mmSrc)) && !/_proofStuck/.test(mmSrc) && viaStarter?.real === realM(outerLink) && viaStarter.slow === false, { viaStarter });
         // the doors AWAIT it (r1178: a guard nobody awaits passes everything): every call of the writers' door in src/ is awaited —
         // CONTROL: a planted call with no await is named
         const ROOTX = path.join(path.dirname(new URL(import.meta.url).pathname), '..'), srcFiles = [];
@@ -1316,10 +1316,10 @@ try {
       }
       released.length = 0; mountsAsked.length = 0;
       let threw = ''; try { await mm2._up(mm2._state.mounts.find((m) => m.id === 'mm-young')); } catch (e) { threw = String(e.code || '') + ' ' + e.message; }
-      check('§17 a HELD record is never mounted and never releases its folder (the elder\'s): its heal refuses with its words', /^mount_point_in_use /.test(threw) && released.length === 0 && mountsAsked.length === 0, JSON.stringify({ threw, released, asked: mountsAsked.length }));
+      check('§17 a HELD record is never mounted and never releases its folder (the elder\'s): its heal refuses with its words', gateOf(/^mount_point_in_use /.test(threw)) && released.length === 0 && mountsAsked.length === 0, JSON.stringify({ threw, released, asked: mountsAsked.length }));
       const keepHeld = new Map(mm2._held); mm2._held.clear();   // RED CONTROL: the hold cut
       await mm2._up(mm2._state.mounts.find((m) => m.id === 'mm-young')).catch(() => { });
-      check('CONTROL §17 (the hold cut): the younger\'s heal RELEASES the folder the elder holds — its release would end the elder\'s mount (red)', released.includes(mpLink), JSON.stringify(released));
+      check('CONTROL §17 (the hold cut): the younger\'s heal RELEASES the folder the elder holds — its release would end the elder\'s mount (red)', verdictOf(released.includes(mpLink)), JSON.stringify(released));
       mm2._live.delete('mm-young'); mm2._held = keepHeld; released.length = 0; mountsAsked.length = 0;
       online.d2 = false;   // the younger's machine offline: the boot would release its folder — but it is held, and its holder LIVE
       mm2._live.set('mm-old', { teardown: async () => { }, mountpoint: mpA, at: Date.now() });
@@ -1328,7 +1328,7 @@ try {
       check('§17 the BOOT never releases a held record\'s folder while its holder is LIVE (the elder\'s mount), and marks a folder by its REAL path', !released.includes(mpLink) && !released.includes(mpInner) && mm2._markKey(mm2._state.mounts.find((m) => m.id === 'mm-young')) === fs.realpathSync(mpA), JSON.stringify({ released, key: mm2._markKey(mm2._state.mounts.find((m) => m.id === 'mm-young')) }));
       await mm2.unmount('mm-old');
       const freed = await until(() => !mm2._held.has('mm-young') && !rowOf('mm-young').error, 3000);
-      check('§17 the elder REMOVED: the younger is free (its words go; the sweep may try it at once — no 5-min wait left)', freed && !(mm2._pullRetryAt && mm2._pullRetryAt.has('mm-young')), JSON.stringify({ held: [...mm2._held.keys()], ry: rowOf('mm-young') }));
+      check('§17 the elder REMOVED: the younger is free (its words go; the sweep may try it at once — no 5-min wait left)', gateOf(freed) && !(mm2._pullRetryAt && mm2._pullRetryAt.has('mm-young')), JSON.stringify({ held: [...mm2._held.keys()], ry: rowOf('mm-young') }));
       // THE HOLDER BY RANK (its read): a removed machine's record never holds; a record whose machine is online holds an offline elder's
       const HOSTS3 = { ...HOSTS, h3: { id: 'h3', name: 'Old box', transport: 'dial', deviceId: 'd3' } };
       const hosts3 = { ...hosts, get: (id) => { if (!HOSTS3[id]) throw new Error('host not found'); return HOSTS3[id]; } };
@@ -1344,16 +1344,16 @@ try {
       const held3 = await mm3._recheckPairs();
       online.d1 = true;
       const ro3 = mm3.list().find((r) => r.id === 'mm-orphan') || {};
-      check('§17 THE HOLDER BY RANK: a removed machine\'s row never holds (the edited machine\'s new row is free; the orphan held, named so) and the record live LAST holds after a restart (nothing live yet) — not the elder', !held3.has('mm-new') && held3.has('mm-orphan') && held3.has('mm-off-elder') && !held3.has('mm-on-young') && /also the mount point of “Laptop”’s \/Users\/a — remove one of the two rows/.test(ro3.error || '') && ro3.errorParams?.held === true, JSON.stringify({ held: [...held3.keys()], ro3 }));
+      check('§17 THE HOLDER BY RANK: a removed machine\'s row never holds (the edited machine\'s new row is free; the orphan held, named so) and the record live LAST holds after a restart (nothing live yet) — not the elder', !held3.has('mm-new') && gateOf(held3.has('mm-orphan')) && gateOf(held3.has('mm-off-elder')) && !held3.has('mm-on-young') && gateOf(/also the mount point of “Laptop”’s \/Users\/a — remove one of the two rows/.test(ro3.error || '')) && ro3.errorParams?.held === true, JSON.stringify({ held: [...held3.keys()], ro3 }));
       online.d1 = false; online.d3 = true;   // the elder's DIAL machine redialled first, the last-live one's not yet
       const held3g = await mm3._recheckPairs();   // r4 (read 3 #1a): inside the grace after a start — the mount that worked keeps its folder
       mm3._pairGraceMs = 0;   // the grace over: the one that can mount now holds (a dead holder never empties the folder for good)
       const held3c = await mm3._recheckPairs();
       online.d1 = true; online.d3 = false;
-      check('§17 …r4: INSIDE the grace after a start the record live LAST keeps its folder whichever machine redials first; AFTER it, a DIAL machine whose link is UP holds over one whose link is down (it can mount now; an ssh machine: unless its last try failed — the ssh leg below)', held3g.has('mm-off-elder') && !held3g.has('mm-on-young') && held3c.has('mm-on-young') && !held3c.has('mm-off-elder'), JSON.stringify({ grace: [...held3g.keys()], after: [...held3c.keys()] }));
+      check('§17 …r4: INSIDE the grace after a start the record live LAST keeps its folder whichever machine redials first; AFTER it, a DIAL machine whose link is UP holds over one whose link is down (it can mount now; an ssh machine: unless its last try failed — the ssh leg below)', gateOf(held3g.has('mm-off-elder')) && !held3g.has('mm-on-young') && gateOf(held3c.has('mm-on-young')) && !held3c.has('mm-off-elder'), JSON.stringify({ grace: [...held3g.keys()], after: [...held3c.keys()] }));
       mm3._live.set('mm-off-elder', { teardown: async () => { }, mountpoint: mpB, at: Date.now() });
       const held3b = await mm3._recheckPairs();
-      check('§17 …a LIVE record holds its folder whatever its age or machine (the live elder holds the younger)', held3b.has('mm-on-young') && !held3b.has('mm-off-elder'), JSON.stringify([...held3b.keys()]));
+      check('§17 …a LIVE record holds its folder whatever its age or machine (the live elder holds the younger)', gateOf(held3b.has('mm-on-young')) && !held3b.has('mm-off-elder'), JSON.stringify([...held3b.keys()]));
       // _up refuses at once while another record is live or being mounted on the folder (two dial-ins before the boot's pair check)
       const mm4 = mkMM('pairs-d', [
         { id: 'mm-x', dir: 'pull', hostId: 'h1', remotePath: '/x', mountpoint: mpFree, createdAt: 1 },
@@ -1371,7 +1371,7 @@ try {
       await mm4.restore();
       online.d1 = true; online.d2 = true;
       const ry4 = mm4.list().find((r) => r.id === 'mm-y') || {};
-      check('§17 the BOOT releases a held record\'s folder when its holder is neither live nor mounting (a dead FUSE entry of either is let go): both rows\' steps ran — and the held row KEEPS its words', mm4._held.has('mm-y') && released.filter((x) => x === mpFree).length === 2 && ry4.errorCode === 'mount_point_in_use' && ry4.errorParams?.held === true, JSON.stringify({ held: [...mm4._held.keys()], released, ry4 }));
+      check('§17 the BOOT releases a held record\'s folder when its holder is neither live nor mounting (a dead FUSE entry of either is let go): both rows\' steps ran — and the held row KEEPS its words', gateOf(mm4._held.has('mm-y')) && released.filter((x) => x === mpFree).length === 2 && ry4.errorCode === 'mount_point_in_use' && ry4.errorParams?.held === true, JSON.stringify({ held: [...mm4._held.keys()], released, ry4 }));
       // a held record is never probed (its folder may be its holder's live mount)
       mm4._bare = mm4._bare || new Map(); mm4._bare.set('mm-y', 'sentinel');
       const pv = await mm4._probeBare(mm4._state.mounts.find((m) => m.id === 'mm-y'));
@@ -1384,7 +1384,7 @@ try {
       const upC = mm5._up(mm5._state.mounts[0]);
       const waited = (await quiet(() => mm5._mounting.has('mm-child') || released.length > 0 ? 'moved' : 'held', 2000, 60)) === 'held';
       openP(); await upC.catch(() => { });
-      check('§17 a heal WAITS for a boot release of a folder NESTED with its own (the parent\'s), then mounts', waited && mountsAsked.some((o) => o.mountpoint === mpB), JSON.stringify({ waited, asked: mountsAsked.length }));
+      check('§17 a heal WAITS for a boot release of a folder NESTED with its own (the parent\'s), then mounts', gateOf(waited) && verdictOf(mountsAsked.some((o) => o.mountpoint === mpB)), JSON.stringify({ waited, asked: mountsAsked.length }));
       // a removed record still mounting holds its folder (nested too): a new record's heal refuses; its chain sees the new record
       const mm6 = mkMM('pairs-f', [{ id: 'mm-new6', dir: 'pull', hostId: 'h1', remotePath: '/n', mountpoint: mpB, createdAt: 2 }]);
       mm6._realMp.set('mm-new6', fs.realpathSync(mpB)); mm6._realMp.set('mm-gone6', fs.realpathSync(mpOuter)); mm6._mounting.add('mm-gone6');   // removed, its chain still mounting the PARENT folder
@@ -1398,7 +1398,7 @@ try {
       mm6._mounting.add('mm-gone6');
       mm6._mounting.add('mm-new6'); const sees = mm6._otherHolds({ id: 'mm-gone6', dir: 'pull', mountpoint: mpOuter }); mm6._mounting.delete('mm-new6');
       mm6._mounting.delete('mm-gone6');
-      check('§17 r4 (read 3 #2): a REMOVED record still mounting a folder nested with a new one\'s is WAITED for (bounded), never named as a row: its chain let go ⇒ the new record mounts; still holding past the bound ⇒ refused by its own words (mount_point_releasing), the retry mark cleared; its chain sees the new record nested beneath (canRelease: no)', e6 === 'mount_point_releasing' && /still being let go — it is tried again by itself/.test(w6) && !retry6 && !e6b && mounted6 && sees === true, JSON.stringify({ e6, w6, retry6, e6b, mounted6, sees }));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them)
+      check('§17 r4 (read 3 #2): a REMOVED record still mounting a folder nested with a new one\'s is WAITED for (bounded), never named as a row: its chain let go ⇒ the new record mounts; still holding past the bound ⇒ refused by its own words (mount_point_releasing), the retry mark cleared; its chain sees the new record nested beneath (canRelease: no)', e6 === 'mount_point_releasing' && gateOf(/still being let go — it is tried again by itself/.test(w6)) && !retry6 && !e6b && gateOf(mounted6) && sees === true, JSON.stringify({ e6, w6, retry6, e6b, mounted6, sees }));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them)
       // r4 (read 3 #1a): THE BOOT GATE — two records from before (no lastLiveAt), the YOUNGER's machine redials first, before restore
       const pairOf = (name, mpX) => mkMM(name, [
         { id: 'mm-el', dir: 'pull', hostId: 'h1', remotePath: '/e', mountpoint: mpX, createdAt: 1 },
@@ -1413,13 +1413,13 @@ try {
       const e8 = await upCode(mm8, 'mm-el');
       const sh8 = (mm8.list().find((r) => r.id === 'mm-el') || {}).shares, shY = (mm8.list().find((r) => r.id === 'mm-yo') || {}).shares;
       const gate8 = mountsAsked.filter((o) => o.mountpoint === mpG).length;
-      check('§17 r4/r5 (reads 3 #1a, 4 #1): the FIRST heal of a hub — the younger\'s machine redialled before restore, the elder\'s not yet back — runs the pair check first, and inside the grace the link decides nothing: the elder holds (two records from before have no lastLiveAt), the younger is refused, held; ONE mount of the folder', y8 === 'mount_point_in_use' && e8 === 'up' && gate8 === 1 && mm8._held.has('mm-yo'), JSON.stringify({ y8, e8, gate8 }));
-      check('§17 r5/r6 (reads 4 #8, 5 #2): the HOLDER\'s row says it shares its folder — each waiting row by its machine, folder and which way it nests; the held row does not', Array.isArray(sh8) && sh8.length === 1 && sh8[0].machine === 'Laptop' && sh8[0].remotePath === '/y' && sh8[0].removed === false && sh8[0].kind === 'same' && !shY, JSON.stringify({ sh8, shY }));
+      check('§17 r4/r5 (reads 3 #1a, 4 #1): the FIRST heal of a hub — the younger\'s machine redialled before restore, the elder\'s not yet back — runs the pair check first, and inside the grace the link decides nothing: the elder holds (two records from before have no lastLiveAt), the younger is refused, held; ONE mount of the folder', y8 === 'mount_point_in_use' && e8 === 'up' && gate8 === 1 && verdictOf(mm8._held.has('mm-yo')), JSON.stringify({ y8, e8, gate8 }));
+      check('§17 r5/r6 (reads 4 #8, 5 #2): the HOLDER\'s row says it shares its folder — each waiting row by its machine, folder and which way it nests; the held row does not', gateOf(Array.isArray(sh8)) && sh8.length === 1 && sh8[0].machine === 'Laptop' && sh8[0].remotePath === '/y' && sh8[0].removed === false && sh8[0].kind === 'same' && !shY, JSON.stringify({ sh8, shY }));
       mountsAsked.length = 0;
       const mm8c = pairOf('pairs-h2', mpG); mm8c._pairsOnce = Promise.resolve();   // CONTROL: no gate (the release's order) —
       mm8c._realMp.set('mm-el', fs.realpathSync(mpG)); mm8c._realMp.set('mm-yo', fs.realpathSync(mpG));   // — and no path learned on the road (r7's re-check is a gate too)
       const y8c = await upCode(mm8c, 'mm-yo');
-      check('CONTROL §17 r4 (no gate): the younger that redialled first mounts the folder before any pair check (red)', y8c === 'up' && mountsAsked.some((o) => o.mountpoint === mpG), y8c);
+      check('CONTROL §17 r4 (no gate): the younger that redialled first mounts the folder before any pair check (red)', y8c === 'up' && verdictOf(mountsAsked.some((o) => o.mountpoint === mpG)), y8c);
       for (const m of [mm8, mm8c]) { m._live.clear(); m._mounting.clear(); }
       // r4 (read 3 #1b): A LINK IS A RE-RANK — the grace over, both machines down: the elder holds by age; the younger's machine links
       const relink = async (name, cut) => {
@@ -1437,8 +1437,8 @@ try {
         return out;
       };
       const rl = await relink('pairs-i', false), rlc = await relink('pairs-i2', true);
-      check('§17 r4 (read 3 #1b): the holder DOWN and the held record\'s machine LINKING (the grace over): the link re-ranks — the held record takes the folder and is healed (mounted), the holder held', rl.heldBefore && rl.mounted && !rl.yoHeld && rl.elHeld, JSON.stringify(rl));
-      check('CONTROL §17 r4 (the link re-ranks nothing): the held record stays held and the folder stays empty while its holder is down (red)', rlc.heldBefore && !rlc.mounted && rlc.yoHeld, JSON.stringify(rlc));
+      check('§17 r4 (read 3 #1b): the holder DOWN and the held record\'s machine LINKING (the grace over): the link re-ranks — the held record takes the folder and is healed (mounted), the holder held', gateOf(rl.heldBefore) && gateOf(rl.mounted) && !rl.yoHeld && verdictOf(rl.elHeld), JSON.stringify(rl));
+      check('CONTROL §17 r4 (the link re-ranks nothing): the held record stays held and the folder stays empty while its holder is down (red)', gateOf(rlc.heldBefore) && !rlc.mounted && verdictOf(rlc.yoHeld), JSON.stringify(rlc));
       // r5 (read 4 #3): THE SWEEP re-ranks and heals in the same pass — the grace over, the holder's machine down, the held one's up
       {
         const m = pairOf('pairs-j', mpK); m._pairGraceMs = 0;
@@ -1450,7 +1450,7 @@ try {
         await until(() => mountsAsked.some((o) => o.mountpoint === mpK));
         const out = { before, mounted: mountsAsked.some((o) => o.mountpoint === mpK), yoHeld: m._held.has('mm-yo'), elHeld: m._held.has('mm-el') };
         online.d1 = true; online.d2 = true; m._live.clear(); m._mounting.clear();
-        check('§17 r5 (read 4 #3): the SWEEP re-ranks while a record is held — the holder\'s machine down, the held one\'s up — and heals the freed record in the same pass (mounted)', out.before && out.mounted && !out.yoHeld && out.elHeld, JSON.stringify(out));
+        check('§17 r5 (read 4 #3): the SWEEP re-ranks while a record is held — the holder\'s machine down, the held one\'s up — and heals the freed record in the same pass (mounted)', gateOf(out.before) && gateOf(out.mounted) && !out.yoHeld && verdictOf(out.elHeld), JSON.stringify(out));
       }
       // r5 (read 4 #2): an SSH record can mount unless its last try failed — a held ssh record takes over from a dial holder that is down
       {
@@ -1470,8 +1470,8 @@ try {
         const failed = await m._recheckPairs();    // its try failed: neither can mount now — r6 (read 5 #3): the CURRENT holder stays
         online.d1 = true;
         const linkBack = await m._recheckPairs();   // r8 (read 7 #2): the dial holder's link back, the ssh holder's try failed — the rank READS the mark: the dial one can mount, the ssh one cannot
-        check('§17 r8 (read 7 #2): the rank reads the failed-try mark — the ssh holder whose try failed yields to the dial record whose link came back (without the mark the current holder would stay)', linkBack.has('mm-sshX') && !linkBack.has('mm-dialY'), JSON.stringify([...linkBack.keys()]));
-        check('§17 r5/r6 (reads 4 #2, 5 #3): an SSH record counts as able to mount unless its last try FAILED — inside the grace the one live last holds; after it a held ssh record takes the folder from a dial holder that is down; once its own try failed too, neither can mount and the CURRENT holder stays (no folder passed back and forth)', inGrace.has('mm-sshX') && after.has('mm-dialY') && !after.has('mm-sshX') && failed.has('mm-dialY') && !failed.has('mm-sshX'), JSON.stringify({ inGrace: [...inGrace.keys()], after: [...after.keys()], failed: [...failed.keys()] }));
+        check('§17 r8 (read 7 #2): the rank reads the failed-try mark — the ssh holder whose try failed yields to the dial record whose link came back (without the mark the current holder would stay)', gateOf(linkBack.has('mm-sshX')) && !linkBack.has('mm-dialY'), JSON.stringify([...linkBack.keys()]));
+        check('§17 r5/r6 (reads 4 #2, 5 #3): an SSH record counts as able to mount unless its last try FAILED — inside the grace the one live last holds; after it a held ssh record takes the folder from a dial holder that is down; once its own try failed too, neither can mount and the CURRENT holder stays (no folder passed back and forth)', gateOf(inGrace.has('mm-sshX')) && gateOf(after.has('mm-dialY')) && !after.has('mm-sshX') && gateOf(failed.has('mm-dialY')) && !failed.has('mm-sshX'), JSON.stringify({ inGrace: [...inGrace.keys()], after: [...after.keys()], failed: [...failed.keys()] }));
       }
       // r6 (read 5 #1): a record whose OWN real path is unknown (its child did not answer) is never mounted; the next check asks again
       {
@@ -1493,20 +1493,20 @@ try {
         m._realpath = async (pX, o) => { if (o && o.onExit) o.onExit(); return null; };
         const n0 = m._state.mounts.length;
         let ac = '', aw = ''; try { await m.mountPull('h2', { remotePath: '/z0', mountpoint: mpLink }); } catch (e) { ac = String(e.code || ''); aw = e.message; }
-        check('§17 r7/r8 (reads 6 #2, 7 #1): an add whose folder did not ANSWER (a wedged target) is refused by ITS OWN words — «nothing was added» (nothing is tried again) — and nothing is recorded', ac === 'mount_point_add_unchecked' && /nothing was added/.test(aw) && m._state.mounts.length === n0, JSON.stringify({ ac, aw, n: m._state.mounts.length }));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them)
+        check('§17 r7/r8 (reads 6 #2, 7 #1): an add whose folder did not ANSWER (a wedged target) is refused by ITS OWN words — «nothing was added» (nothing is tried again) — and nothing is recorded', ac === 'mount_point_add_unchecked' && gateOf(/nothing was added/.test(aw)) && m._state.mounts.length === n0, JSON.stringify({ ac, aw, n: m._state.mounts.length }));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them)
         // r7 (read 6 #5): ONE child per record — a record whose child still runs is not asked again
         let calls = 0; m._realpath = async (pX, o) => { calls++; if (o && o.onExit) o.onExit(); return pX; };
         m._realMp.delete('mm-a0'); m._realKids = new Set(['mm-a0']);
         await m._resolveReals();
         const busy = calls; m._realKids.clear(); await m._resolveReals();
-        check('§17 r7 (read 6 #5): a record whose realpath child has not ended is never asked a second time (one child per record); once it has, the next check asks', busy === 0 && calls === 1 && m._realMp.has('mm-a0'), JSON.stringify({ busy, calls }));
+        check('§17 r7 (read 6 #5): a record whose realpath child has not ended is never asked a second time (one child per record); once it has, the next check asks', busy === 0 && calls === 1 && verdictOf(m._realMp.has('mm-a0')), JSON.stringify({ busy, calls }));
       }
       // r7 (read 6 #1): a record whose real path is UNKNOWN cannot mount now — a held record that can takes the folder (the grace over)
       {
         const m = pairOf('pairs-p', mpK); m._pairGraceMs = 0;
         m._realMp.set('mm-yo', fs.realpathSync(mpK)); m._realpath = async (pX, o) => { if (o && o.onExit) o.onExit(); return null; };   // the elder's never answers
         const hp = await m._recheckPairs();
-        check('§17 r7 (read 6 #1): the elder whose real path never answers cannot mount now — the younger that can holds (no «current holder» keeps a folder nobody can mount)', hp.has('mm-el') && !hp.has('mm-yo'), JSON.stringify([...hp.keys()]));
+        check('§17 r7 (read 6 #1): the elder whose real path never answers cannot mount now — the younger that can holds (no «current holder» keeps a folder nobody can mount)', gateOf(hp.has('mm-el')) && !hp.has('mm-yo'), JSON.stringify([...hp.keys()]));
       }
       // r5 (read 4 #5): a re-rank during the let-go wait is read again — a record held meanwhile is never mounted
       {
@@ -1534,7 +1534,7 @@ try {
           DMX.deviceFolderMount = realMount;
           await m._up(recN).catch(() => { });
           const cleared = !m._pullFailedAt.has(recN.id);
-          check('§17 r6: an add refused «releasing» fires NO failure event (the person\'s folder choice); a failed try on another road (here a direct heal) MARKS it — the rank reads it — and a landed mount clears the mark', rc === 'mount_point_releasing' && !evs.includes('machine-mount-pull-failed') && /stand-in/.test(fc) && marked && cleared, JSON.stringify({ rc, evs, fc, marked, cleared }));
+          check('§17 r6: an add refused «releasing» fires NO failure event (the person\'s folder choice); a failed try on another road (here a direct heal) MARKS it — the rank reads it — and a landed mount clears the mark', rc === 'mount_point_releasing' && !evs.includes('machine-mount-pull-failed') && gateOf(/stand-in/.test(fc)) && gateOf(marked) && verdictOf(cleared), JSON.stringify({ rc, evs, fc, marked, cleared }));
           m._live.clear(); m._mounting.clear();
         } finally { global.__vsEvent = ev0; }
       }
@@ -1544,7 +1544,7 @@ try {
         const m = mkMM('pairs-q', [{ id: 'mm-nobin', dir: 'pull', hostId: 'h1', remotePath: '/q', mountpoint: mpG, createdAt: 1 }]);
         const PATH0 = process.env.PATH; process.env.PATH = emptyBin;
         let learnedQ; try { learnedQ = await m._resolveReals(); } finally { process.env.PATH = PATH0; }
-        check('§17 r7/r8 (reads 6 #7, 7 #7): a host with NO realpath binary (the child cannot start: ENOENT) takes the path as written, kept — never «no answer» for ever', m._realMp.get('mm-nobin') === path.resolve(mpG) && Array.isArray(learnedQ) && learnedQ.includes('mm-nobin'), JSON.stringify({ got: m._realMp.get('mm-nobin'), learnedQ }));
+        check('§17 r7/r8 (reads 6 #7, 7 #7): a host with NO realpath binary (the child cannot start: ENOENT) takes the path as written, kept — never «no answer» for ever', m._realMp.get('mm-nobin') === path.resolve(mpG) && gateOf(Array.isArray(learnedQ)) && verdictOf(learnedQ.includes('mm-nobin')), JSON.stringify({ got: m._realMp.get('mm-nobin'), learnedQ }));
       }
       {   // r5/r8c (reads 4 #6, 8 #1): a realpath child that did not ANSWER is no answer — never kept as the path as written; the next check asks again (driven)
         const m = mkMM('pairs-r', [{ id: 'mm-na', dir: 'pull', hostId: 'h1', remotePath: '/na', mountpoint: mpH, createdAt: 1 }]);
@@ -1552,12 +1552,12 @@ try {
         const l1 = await m._resolveReals(); const kept1 = m._realMp.has('mm-na');
         m._realpath = async (pX, o) => { if (o && o.onExit) o.onExit(); return '/the/real/' + path.basename(pX); };
         const l2 = await m._resolveReals();
-        check('§17 r5/r8c (reads 4 #6, 8 #1): a realpath child that did not ANSWER is no answer — nothing kept (never the path as written); the next check asks again and keeps the real answer', !kept1 && l1.length === 0 && m._realMp.get('mm-na') === '/the/real/h' && l2.includes('mm-na') && MMSRC.includes("return S.run('realpath', ['-m', '--', lex], { timeoutMs: ms,") && MMSRC.includes("if (r.timedOut) return null;   // its end comes through onLateExit"), JSON.stringify({ kept1, l1, l2, got: m._realMp.get('mm-na') }));
+        check('§17 r5/r8c (reads 4 #6, 8 #1): a realpath child that did not ANSWER is no answer — nothing kept (never the path as written); the next check asks again and keeps the real answer', !kept1 && l1.length === 0 && m._realMp.get('mm-na') === '/the/real/h' && gateOf(l2.includes('mm-na')) && gateOf(MMSRC.includes("return S.run('realpath', ['-m', '--', lex], { timeoutMs: ms,")) && verdictOf(MMSRC.includes("if (r.timedOut) return null;   // its end comes through onLateExit")), JSON.stringify({ kept1, l1, l2, got: m._realMp.get('mm-na') }));
       }
       // an add refused for a removed machine's row names the right action
       const mm7 = mkMM('pairs-g', [{ id: 'mm-orph7', dir: 'pull', hostId: 'h-removed', remotePath: '/Users/a', mountpoint: mpFree, createdAt: 1 }]);
       let w7 = ''; try { await mm7.mountPull('h2', { remotePath: '/z', mountpoint: mpFree }); } catch (e) { w7 = e.message; }
-      check('§17 an add refused for a REMOVED machine\'s row says to remove that row (or pick another folder)', /already the mount point of a removed machine’s \/Users\/a — remove that row in Mounts, or pick another folder/.test(w7), w7);
+      check('§17 an add refused for a REMOVED machine\'s row says to remove that row (or pick another folder)', verdictOf(/already the mount point of a removed machine’s \/Users\/a — remove that row in Mounts, or pick another folder/.test(w7)), w7);
       // ── B-844b's race guard: a pull removed while mounted and added again on the same folder — the old chain keeps the folder ──
       const oldRec = { id: 'mm-gone-old', dir: 'pull', hostId: 'h1', remotePath: '/Users/a', mountpoint: mpA };
       mm2._realMp.set(oldRec.id, fs.realpathSync(mpA));   // known from when it lived (unmount keeps a removed record's real path)
@@ -1581,7 +1581,7 @@ try {
       const upP = mm2._up(recF);
       const cleared = await until(() => mm2._mounting.has('mm-free2') && !mm2._bare.has('mm-free2'), 2000);
       openM(); await upP.catch(() => { }); mm2._live.delete('mm-free2');
-      check('§17 (small 6) a folder being MOUNTED keeps no old «empty» verdict (cleared when its mount starts)', cleared);
+      check('§17 (small 6) a folder being MOUNTED keeps no old «empty» verdict (cleared when its mount starts)', verdictOf(cleared));
       // (3) an `ls` that could not start: no verdict, and the sweep tears nothing down
       const noLs = path.join(tmp, 'path-no-ls'); fs.mkdirSync(noLs, { recursive: true });
       mm2._bare.set('mm-free2', 'empty');
@@ -1590,7 +1590,7 @@ try {
       let torn = 0; mm2._live.set('mm-free2', { teardown: async () => { torn++; }, mountpoint: mpFree, at: Date.now() });
       await mm2._healthSweep();
       process.env.PATH = PATH1;
-      check('§17 (small 3) an `ls` that could not START gives no verdict (the old one stands), and the sweep tears no live mount down for it', v0 === 'empty' && mm2._bare.get('mm-free2') === 'empty' && torn === 0 && mm2._live.has('mm-free2'), JSON.stringify({ v0, torn, live: mm2._live.has('mm-free2') }));
+      check('§17 (small 3) an `ls` that could not START gives no verdict (the old one stands), and the sweep tears no live mount down for it', v0 === 'empty' && mm2._bare.get('mm-free2') === 'empty' && torn === 0 && verdictOf(mm2._live.has('mm-free2')), JSON.stringify({ v0, torn, live: mm2._live.has('mm-free2') }));
       mm2._live.delete('mm-free2');
       // (3) a probe that HANGS: bounded, its child ended by its handle, the verdict dropped
       const hangLs = path.join(tmp, 'path-hang-ls'); fs.mkdirSync(hangLs, { recursive: true });
@@ -1599,7 +1599,7 @@ try {
       const t0 = Date.now(); const vh = await mm2._probeBare(recF); const tookMs = Date.now() - t0;
       process.env.PATH = PATH1; mm2._probeMs = 0;
       const endedH = await until(() => !mm2._probing.has('mm-free2'), 3000);
-      check('§17 (small 3) a probe that HANGS is bounded: its verdict dropped (shown as before), its child ended by its handle (its stand-in sleeps 30 s)', vh === null && !mm2._bare.has('mm-free2') && endedH, JSON.stringify({ vh, tookMs, endedH }));
+      check('§17 (small 3) a probe that HANGS is bounded: its verdict dropped (shown as before), its child ended by its handle (its stand-in sleeps 30 s)', vh === null && !mm2._bare.has('mm-free2') && verdictOf(endedH), JSON.stringify({ vh, tookMs, endedH }));
       // (2) a probe child that never ends (an `ls` asleep in the kernel outlives its handle's kill): said ONCE in the journal
       const sayN = () => said17.filter((l) => /has not ended in 60 s/.test(l)).length;
       mm2._probing.add('mm-free2'); (mm2._probingAt = mm2._probingAt || new Map()).set('mm-free2', Date.now() - 10000);
@@ -1614,7 +1614,7 @@ try {
       DMX.deviceFolderMount = async ({ mountpoint }) => { throw new Error(`rclone webdav mount exited: Fatal error: directory is not empty: "${mountpoint}"`); };
       await mm2._up(recF).catch(() => { });
       const rf = rowOf('mm-free2');
-      check('§17 (small 5) the row\'s «not empty» words come with their code (the page words them: zh, ja)', rf.errorCode === 'mount_not_empty' && /not empty/.test(rf.error || ''), JSON.stringify(rf));
+      check('§17 (small 5) the row\'s «not empty» words come with their code (the page words them: zh, ja)', rf.errorCode === 'mount_not_empty' && verdictOf(/not empty/.test(rf.error || '')), JSON.stringify(rf));
       // (1) WebDAV: what a request ADDS into a pull folder that is not mounted is refused with the row's state
       const { registerWebdav } = require('../src/webdav.js');
       const express = require('express');
@@ -1628,11 +1628,11 @@ try {
         const mk = await fetch(`${atD}/dav/free/newdir`, { method: 'MKCOL', headers: { authorization: 'Bearer vsmt_x' } });
         const cp = await fetch(`${atD}/dav/here.txt`, { method: 'COPY', headers: { authorization: 'Bearer vsmt_x', destination: `${atD}/dav/free/here.txt` } });
         const putT = await put.text();
-        check('§17 (small 1) WebDAV: a PUT, a MKCOL and a COPY\'s destination into a machine\'s pull folder that is not mounted are refused (503, the row\'s words) — nothing lands', put.status === 503 && /Laptop/.test(putT) && mk.status === 503 && cp.status === 503 && !fs.existsSync(path.join(mpFree, 'up.txt')) && !fs.existsSync(path.join(mpFree, 'newdir')) && !fs.existsSync(path.join(mpFree, 'here.txt')), JSON.stringify({ put: put.status, putT: putT.slice(0, 120), mk: mk.status, cp: cp.status }));
+        check('§17 (small 1) WebDAV: a PUT, a MKCOL and a COPY\'s destination into a machine\'s pull folder that is not mounted are refused (503, the row\'s words) — nothing lands', put.status === 503 && gateOf(/Laptop/.test(putT)) && mk.status === 503 && cp.status === 503 && !fs.existsSync(path.join(mpFree, 'up.txt')) && !fs.existsSync(path.join(mpFree, 'newdir')) && !fs.existsSync(path.join(mpFree, 'here.txt')), JSON.stringify({ put: put.status, putT: putT.slice(0, 120), mk: mk.status, cp: cp.status }));
         MMx.registerPullDoor(null);
         const putC = await fetch(`${atD}/dav/free/up.txt`, { method: 'PUT', headers: { authorization: 'Bearer vsmt_x' }, body: 'y' });
         const landed = fs.existsSync(path.join(mpFree, 'up.txt')); try { fs.rmSync(path.join(mpFree, 'up.txt'), { force: true }); } catch { }
-        check('CONTROL §17 (small 1; no door, the release): the same PUT lands in the bare folder (red)', putC.status >= 200 && putC.status < 300 && landed, String(putC.status));
+        check('CONTROL §17 (small 1; no door, the release): the same PUT lands in the bare folder (red)', putC.status >= 200 && putC.status < 300 && verdictOf(landed), String(putC.status));
       } finally { MMx.registerPullDoor(null); await new Promise((res) => srvD.close(res)); }
       // the page's words for the codes: the client words each, a zh and a ja row each
       const SB = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/lib/sidebar-mounts.js'), 'utf8');
@@ -1640,7 +1640,7 @@ try {
       // B-af94: the words live in ONE table (src/mount-error-words.js) the hub fills in English and the page words through t()
       const MWt = require('../src/mount-error-words.js');
       const keys = [MWt.WORDS.mount_not_empty, ...['who_machine', 'who_removed', 'same_held', 'inside_held', 'over_held'].map((k) => MWt.PARTS[k])];
-      check('§17 (small 5) the pull row words its codes in the reader\'s language (not empty; a held row\'s in use, nested both ways, by a named or a removed machine) — a zh and a ja row each; the dot\'s title reads them', keys.length === 6 && keys.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':')) && /m\.error \? escHtml\(pullErrorText\(m\)\)/.test(SB) && SB.includes('export function pullErrorText(m) { return mountErrorText(m); }'), JSON.stringify(keys));
+      check('§17 (small 5) the pull row words its codes in the reader\'s language (not empty; a held row\'s in use, nested both ways, by a named or a removed machine) — a zh and a ja row each; the dot\'s title reads them', keys.length === 6 && gateOf(keys.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':'))) && gateOf(/m\.error \? escHtml\(pullErrorText\(m\)\)/.test(SB)) && verdictOf(SB.includes('export function pullErrorText(m) { return mountErrorText(m); }')), JSON.stringify(keys));
       // (4) + the guard over the REAL chain
       const rc = await releasedChain;
       check('§17 A (small 4) the REAL chain: released() is nothing before its teardown, then the lazy unmount\'s promise (ok, one fusermount); a chain told another record holds its folder ends its rclone and KEEPS the folder (kept, no fusermount)', !!(rc.own && rc.own.before === null && rc.own.result === 'ok' && rc.own.fuses === 1 && rc.own.rcloneGone && rc.kept && rc.kept.result === 'kept' && rc.kept.fuses === 0 && rc.kept.rcloneGone), JSON.stringify(rc));
@@ -1653,5 +1653,5 @@ try {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 if (failed) { console.error(`\ntest-pull-refresh: ${passed} passed, ${failed} failed`); process.exit(1); }
-console.log(`\ntest-pull-refresh: ALL PASS (${passed})`);
+console.log(`\ntest-pull-refresh: ALL PASS (${passed})`); import { verdictOf, gateOf } from './lib/check.mjs';
 

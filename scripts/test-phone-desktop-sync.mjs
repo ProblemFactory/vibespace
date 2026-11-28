@@ -79,7 +79,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1500) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -259,14 +259,14 @@ else await (async () => {
   const gbEq = (a, b) => !!a && !!b && ['left', 'top', 'width', 'height'].every((k) => Math.abs(a[k] - b[k]) < 0.003);
   const fixLegs = async (S, D, P, D2, red) => {
     const tag = red ? 'BASE ' : '';
-    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS on the base tree`, extra) : ok(c, n, extra));
+    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS on the base tree`, extra) : ok(verdictOf(c), n, extra));
     const rec = (desk = DESK) => JSON.parse(fs.readFileSync(path.join(S.DATA, 'layouts.json'), 'utf8')).desktops?.[desk]?.autoSave || {};
     const entry = (id, desk = DESK) => (rec(desk).windows || []).find((w) => w.winId === id) || null;
     const arrOf = (w) => w && Object.fromEntries(FIELDS.filter((k) => k in w).map((k) => [k, w[k]]));
     const titlePt = (Pg, id, dx = 60) => Pg.ev(`(() => { const w = app.wm.windows.get(${J(id)}); const r = w.element.querySelector('.window-titlebar').getBoundingClientRect(); return { x: r.left + ${dx}, y: r.top + r.height / 2 }; })()`);
     const gbOf = (Pg, id) => Pg.ev(`(() => { const w = app.wm.windows.get(${J(id)}); return w ? w.gridBounds : null; })()`);
     const pz = (id) => P.ev(`parseInt(app.wm.windows.get(${J(id)})?.element.style.zIndex) || 0`);
-    ok(await D.boot(S.PORT) && await P.boot(S.PORT) && (!D2 || await D2.boot(S.PORT)), `${tag}⑩–⑬: D, P${D2 ? ', D2' : ''} booted on a fresh two-desktop record`);
+    ok(gateOf(await D.boot(S.PORT)) && gateOf(await P.boot(S.PORT)) && (!D2 || verdictOf(await D2.boot(S.PORT))), `${tag}⑩–⑬: D, P${D2 ? ', D2' : ''} booted on a fresh two-desktop record`);
 
     if (want(10) && D2) {
       console.log(`— ${tag}⑩ F1: D drags while D2 misses it (an outage), the phone saves, D2 re-reads on reconnect, then saves`);
@@ -283,7 +283,7 @@ else await (async () => {
       const reread = await until(async () => (await D2.ev('window.__resyncs')) > r0, 15000); await sleep(7000);
       const drag = entry('win-pd-bravo')?.gridBounds, onD = await gbOf(D, 'win-pd-bravo'), onD2 = await gbOf(D2, 'win-pd-bravo');
       console.log(`    ${tag}⑩: re-read ${reread}; disk viewport ${rec().viewport}; bravo before ${J(bravo0)} | disk ${J(drag)} | D ${J(onD)} | D2 ${J(onD2)}`);
-      ok(reread && rec().viewport === 'phone' && !gbEq(drag, bravo0) && gbEq(drag, onD), `${tag}⑩: the setup is real — D2 re-read after the outage; the record on disk is the phone's and carries D's drag (belt 1)`);
+      ok(gateOf(reread) && rec().viewport === 'phone' && !gbEq(drag, bravo0) && verdictOf(gbEq(drag, onD)), `${tag}⑩: the setup is real — D2 re-read after the outage; the record on disk is the phone's and carries D's drag (belt 1)`);
       judge(gbEq(onD2, drag), `${tag}⑩ F1: D2's re-read takes the phone-stamped record whole (bravo where D dragged it)`, J({ onD2, drag }));
       const d2s = D2.sent.length;
       await D2.click(await titlePt(D2, 'win-pd-charlie', 200)); await until(() => D2.sent.length > d2s, 5000); await sleep(2500);
@@ -309,7 +309,7 @@ else await (async () => {
       const arr1 = S.diskArr();
       const changed = Object.keys(arr0).filter((id) => J(arr0[id]) !== J(arr1[id])).map((id) => ({ id, before: arr0[id], after: arr1[id] }));
       console.log(`    ${tag}⑪: refused ${refused}, re-sent with the missed window ${reSent}; arrangement changed on disk: ${J(changed)}`);
-      ok(refused && reSent && !!entry('win-nw-two'), `${tag}⑪: the setup is real — the server refused the phone's save (it never built D's new window) and the phone re-sent the reconciled record`);
+      ok(gateOf(refused) && gateOf(reSent) && !!entry('win-nw-two'), `${tag}⑪: the setup is real — the server refused the phone's save (it never built D's new window) and the phone re-sent the reconciled record`);
       judge(!changed.length, `${tag}⑪ F2: the re-send carries NO arrangement of the phone's (every window's z / box / maximize / minimize on disk unchanged)`, J(changed));
       const z0 = zOrder(await D.ev(ARR)); await D.boot(S.PORT); const z1 = zOrder(await D.ev(ARR));
       console.log(`    ${tag}⑪: D before reload ${z0}\n    ${tag}⑪: D after  reload ${z1}`);
@@ -363,8 +363,8 @@ else await (async () => {
   const EMPTY = `(() => { for (const x of [1420, 1390, 1360]) for (const y of [450, 300, 600, 750, 200]) { const el = document.elementFromPoint(x, y); if (el && el.closest('#workspace') && !el.closest('.window, button, input, a, [role="button"]')) return { x, y }; } return null; })()`;
   const f5Legs = async (S, D, P, DW, mode, legsWanted) => {
     const red = mode !== 'fixed', tag = red ? `${mode.toUpperCase()} ` : '';
-    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS on the ${mode} copy`, extra) : ok(c, n, extra));
-    ok(await D.boot(S.PORT) && await P.boot(S.PORT) && await DW.boot(S.PORT), `${tag}⑮: D, P and a second desktop DW booted on a fresh record`);
+    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS on the ${mode} copy`, extra) : ok(verdictOf(c), n, extra));
+    ok(gateOf(await D.boot(S.PORT)) && gateOf(await P.boot(S.PORT)) && verdictOf(await DW.boot(S.PORT)), `${tag}⑮: D, P and a second desktop DW booted on a fresh record`);
     await D.ev(ARRIVALS);
     const idsOf = (Pg) => Pg.ev(`[...app.wm.windows.values()].filter((w) => w._desktopId === app.desktopManager.activeDesktopId).map((w) => w.id).sort()`);
     const gbOf = (Pg, id) => Pg.ev(`(() => { const w = app.wm.windows.get(${J(id)}); return w && w.gridBounds ? { ...w.gridBounds } : null; })()`);
@@ -396,7 +396,7 @@ else await (async () => {
         const dG2 = D.got.length; await openFiles(P); const gotP = await gotPhone(D, dG2); await sleep(400);
         const held = await waiting(), arr = (await arrivals()).slice(a0), still = gbEq(await gbOf(D, 'win-pd-bravo'), b0) && J(await idsOf(D)) === J(ids0);
         console.log(`    ${tag}⑮a: bravo on D ${J(b0)}, DW moved it to ${J(moved)}; D's arrivals under the press ${J(arr)}; waiting ${J(held)}`);
-        ok(gotW && gotP && still && !gbEq(b0, moved) && arr.length >= 2 && arr.every((x) => x.down), `${tag}⑮a: the setup is real — DW's record and then the phone's landed on D under the press, nothing applied yet`, J({ gotW, gotP, still, arr }));
+        ok(gateOf(gotW) && gateOf(gotP) && gateOf(still) && !gbEq(b0, moved) && arr.length >= 2 && verdictOf(arr.every((x) => x.down)), `${tag}⑮a: the setup is real — DW's record and then the phone's landed on D under the press, nothing applied yet`, J({ gotW, gotP, still, arr }));
         await release(pt); await sleep(3500);
         const after = await gbOf(D, 'win-pd-bravo'), born = (await idsOf(D)).filter((id) => !ids0.includes(id));
         console.log(`    ${tag}⑮a: after the release bravo on D ${J(after)}; new on D ${J(born)}`);
@@ -415,11 +415,11 @@ else await (async () => {
         const moved = await dwDrag('win-pd-charlie', -120, 60); const gotW = await gotMove(D, dG2, 'win-pd-charlie', moved); await sleep(400);
         const held = await waiting(), arr = (await arrivals()).slice(a0);
         console.log(`    ${tag}⑮b: charlie on D ${J(c0)}, DW moved it to ${J(moved)}; arrivals ${J(arr)}; waiting ${J(held)}`);
-        ok(gotP && dwHas && gotW && !gbEq(c0, moved) && arr.length >= 2 && arr.every((x) => x.down) && gbEq(await gbOf(D, 'win-pd-charlie'), c0), `${tag}⑮b: the setup is real — the phone's record and then DW's landed on D under the press`, J({ gotP, dwHas, gotW, arr }));
+        ok(gateOf(gotP) && gateOf(dwHas) && gateOf(gotW) && !gbEq(c0, moved) && arr.length >= 2 && gateOf(arr.every((x) => x.down)) && verdictOf(gbEq(await gbOf(D, 'win-pd-charlie'), c0)), `${tag}⑮b: the setup is real — the phone's record and then DW's landed on D under the press`, J({ gotP, dwHas, gotW, arr }));
         await release(pt); await sleep(3500);
         const after = await gbOf(D, 'win-pd-charlie'), born = (await idsOf(D)).filter((id) => !ids0.includes(id));
         console.log(`    ${tag}⑮b: after the release charlie on D ${J(after)}; new on D ${J(born)}`);
-        ok(gbEq(after, moved) && born.length === 1, `${tag}⑮b the mirror: the phone's window AND DW's move land on D${red ? ' (holds on this copy too: DW\'s record is whole and lists the phone\'s window)' : ''}`, J({ c0, moved, after, born }));
+        ok(gateOf(gbEq(after, moved)) && born.length === 1, `${tag}⑮b the mirror: the phone's window AND DW's move land on D${red ? ' (holds on this copy too: DW\'s record is whole and lists the phone\'s window)' : ''}`, J({ c0, moved, after, born }));
       }
     }
     if (legsWanted.includes('c')) {
@@ -437,7 +437,7 @@ else await (async () => {
         const dG2 = D.got.length; await openFiles(P); const gotP = await gotPhone(D, dG2); await sleep(400);
         const held = await waiting(), arr = (await arrivals()).slice(a0);
         console.log(`    ${tag}⑮c: alpha on D ${J(a0box)}, the unstamped record moves it to ${J(gb)}; arrivals ${J(arr)}; waiting ${J(held)}`);
-        ok(gotO && gotP && arr.length >= 2 && arr.every((x) => x.down) && arr[0].vp === null && gbEq(await gbOf(D, 'win-pd-alpha'), a0box), `${tag}⑮c: the setup is real — an UNSTAMPED record and then the phone's landed on D under the press`, J({ gotO, gotP, arr }));
+        ok(gateOf(gotO) && gateOf(gotP) && arr.length >= 2 && gateOf(arr.every((x) => x.down)) && arr[0].vp === null && verdictOf(gbEq(await gbOf(D, 'win-pd-alpha'), a0box)), `${tag}⑮c: the setup is real — an UNSTAMPED record and then the phone's landed on D under the press`, J({ gotO, gotP, arr }));
         await release(pt); await sleep(3500); sock.close();
         const after = await gbOf(D, 'win-pd-alpha'), born = (await idsOf(D)).filter((id) => !ids0.includes(id));
         console.log(`    ${tag}⑮c: after the release alpha on D ${J(after)}; new on D ${J(born)}`);
@@ -459,7 +459,7 @@ else await (async () => {
         await sleep(4000); sock.close();
         const arr = (await arrivals()).slice(a0), late = arr.find((x) => x.vp === 'phone'), refused = S.journal.slice(j0).match(/[^\n]*REFUSED[^\n]*/g) || [];
         console.log(`    ${tag}⑮d: charlie on D ${J(c0)}, DW moved it to ${J(moved)}; arrivals ${J(arr)}${refused.length ? '; the server: ' + refused.join(' | ') : ''}`);
-        ok(gotW && !gbEq(c0, moved) && !!late && !late.down && late.waiting >= 1, `${tag}⑮d: the setup is real — the phone record landed AFTER the release while DW's record still waited (${late ? late.waiting : 0} waiting)`, J({ gotW, arr }));
+        ok(gateOf(gotW) && !gbEq(c0, moved) && !!late && !late.down && late.waiting >= 1, `${tag}⑮d: the setup is real — the phone record landed AFTER the release while DW's record still waited (${late ? late.waiting : 0} waiting)`, J({ gotW, arr }));
         const after = await gbOf(D, 'win-pd-charlie'), hasLate = (await idsOf(D)).includes('win-' + name);
         console.log(`    ${tag}⑮d: after the drain charlie on D ${J(after)}; the phone's window on D ${hasLate}`);
         judge(gbEq(after, moved) && hasLate, `${tag}⑮d: the late phone record JOINS the waiting one — DW's move lands, then the phone's window (never the older record dropped, never one applied backwards)`, J({ moved, after, hasLate }));
@@ -477,7 +477,7 @@ else await (async () => {
   const sbOpen = (s) => !!s && s.open && s.cls && s.onScreen;
   const sbLegs = async (S, D, P, red) => {
     const tag = red ? 'RED COPY ' : '';
-    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS when the phone asks as a desk (the pre-fix apply)`, extra) : ok(c, n, extra));
+    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS when the phone asks as a desk (the pre-fix apply)`, extra) : ok(verdictOf(c), n, extra));
     const png = async (Pg, name) => { if (!PNG_DIR) return; const r = await Pg.cdp('Page.captureScreenshot', { format: 'png' }); const f = path.join(PNG_DIR, (red ? 'red-' : '') + name); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); console.log('    PNG ' + f); };
     const chromeOf = (r) => J({ sidebarOpen: r.sidebarOpen, grid: r.grid, viewport: r.viewport });
     const closeP = async () => { if ((await P.ev(SBSTATE)).open) { await P.tap(`document.getElementById('sidebar-close')`); await sleep(500); } };
@@ -494,10 +494,10 @@ else await (async () => {
     const pSave = async (title) => { const n = P.sent.length; await switchTo(P, title); const sent = await until(() => P.sent.length > n && S.disk().viewport === 'phone', 6000); await sleep(800); return sent ? P.sent.slice(n) : []; };
     const carried = (sends, want) => sends.length > 0 && sends.every((m) => m.state && m.state.sidebarOpen === want && J(m.state.grid) === J({ rows: 1, cols: 3 }));
 
-    ok(await D.boot(S.PORT) && await P.boot(S.PORT), `${tag}⑯: D and P booted on a record whose desk chrome holds the sidebar OPEN and a 1×3 grid`);
+    ok(gateOf(await D.boot(S.PORT)) && verdictOf(await P.boot(S.PORT)), `${tag}⑯: D and P booted on a record whose desk chrome holds the sidebar OPEN and a 1×3 grid`);
     const d0 = await D.ev(SBSTATE), p0 = await P.ev(SBSTATE);
     console.log(`    ${tag}⑯a: disk ${chromeOf(S.disk())}; D ${J(d0)}; P ${J(p0)}`);
-    ok(sbOpen(d0) && J(d0.grid) === '[1,3]', `${tag}⑯ the setup is real — D (a desk) follows the record at boot: its sidebar open, a 1×3 grid`, J(d0));
+    ok(gateOf(sbOpen(d0)) && J(d0.grid) === '[1,3]', `${tag}⑯ the setup is real — D (a desk) follows the record at boot: its sidebar open, a 1×3 grid`, J(d0));
     judge(sbClosed(p0), `${tag}⑯a: P's reload on the desk's record (sidebarOpen true) ⇒ P's sidebar CLOSED`, J(p0));
     judge(p0.grid === null, `${tag}⑯a: …and P set no grid from it (a phone never sets one)`, J(p0));
     await png(P, 'phone-390-after-reload.png'); await png(D, 'desk-1440-unchanged.png');
@@ -521,24 +521,24 @@ else await (async () => {
     await until(async () => !(await P.ev('app.layoutManager._resyncing')), 8000); await sleep(2500);
     const p2 = await P.ev(SBSTATE);
     console.log(`    ${tag}⑯b: re-read ${reread}; disk ${chromeOf(S.disk())}; P ${J(p2)}`);
-    ok(reread, `${tag}⑯b: the setup is real — P's socket dropped and P re-read /api/layouts on reconnect (state-resync → layout-resync)`);
+    ok(verdictOf(reread), `${tag}⑯b: the setup is real — P's socket dropped and P re-read /api/layouts on reconnect (state-resync → layout-resync)`);
     judge(sbClosed(p2), `${tag}⑯b: after the re-read P's sidebar is still CLOSED`, J(p2));
     const dArr1 = await D.ev(ARR), boxZ = (a) => J(Object.entries(a).map(([id, w]) => [id, w.z, w.box, w.max, w.min]));
     ok(Object.keys(dArr0).length === 5 && boxZ(dArr1) === boxZ(dArr0), `${tag}⑯b: D's boxes and z order are byte-identical across P's reloads, P's own save and P's re-read (${zOrder(dArr1)})`, J({ dArr0, dArr1 }));
     await png(P, 'phone-390-after-resync.png');
     await closeP();
     const g0 = await live(true), p2b = await P.ev(SBSTATE);
-    ok(g0, `${tag}⑯b: the setup is real — a live DESK record (sidebarOpen true) reached P and D`);
+    ok(verdictOf(g0), `${tag}⑯b: the setup is real — a live DESK record (sidebarOpen true) reached P and D`);
     judge(sbClosed(p2b), `${tag}⑯b: a live desk record holding the sidebar open leaves P's CLOSED`, J(p2b));
     await closeP();
 
     console.log(`— ${tag}⑯c P's person opens its sidebar; the desk's record closes, then opens, its own`);
     await P.tap(`document.getElementById('mobile-nav-menu')`); await sleep(600);
     const p3 = await P.ev(SBSTATE), nB = P.sent.length;
-    ok(sbOpen(p3), `${tag}⑯c: P's person opened its sidebar (a real tap on ☰)`, J(p3));
+    ok(verdictOf(sbOpen(p3)), `${tag}⑯c: P's person opened its sidebar (a real tap on ☰)`, J(p3));
     const g1 = await live(false), p4 = await P.ev(SBSTATE), d4 = await D.ev(SBSTATE);
     console.log(`    ${tag}⑯c: after the desk record closing its sidebar: P ${J(p4)}; D ${J(d4)}`);
-    ok(g1, `${tag}⑯c: the setup is real — the desk record (sidebarOpen false) reached P and D`);
+    ok(verdictOf(g1), `${tag}⑯c: the setup is real — the desk record (sidebarOpen false) reached P and D`);
     judge(sbOpen(p4), `${tag}⑯c: the desk's record closing its sidebar leaves P's OPEN — as P's person left it`, J(p4));
     await png(P, 'phone-390-own-open-kept.png');
     ok(!d4.open && !d4.cls && !d4.wrap, `${tag}⑯d: D follows the desk record's sidebarOpen false (its sidebar closed)`, J(d4));
@@ -552,24 +552,24 @@ else await (async () => {
     const sendsB = P.sent.slice(nB);
     await closeP();
     const p5 = await P.ev(SBSTATE);
-    ok(sbClosed(p5), `${tag}⑯c: P's person closed its sidebar (a real tap on ✕)`, J(p5));
+    ok(verdictOf(sbClosed(p5)), `${tag}⑯c: P's person closed its sidebar (a real tap on ✕)`, J(p5));
     const g2 = await live(true), p6 = await P.ev(SBSTATE), d6 = await D.ev(SBSTATE);
     console.log(`    ${tag}⑯c: after the desk record opening its sidebar: P ${J(p6)}; D ${J(d6)}`);
-    ok(g2, `${tag}⑯c: the setup is real — the desk record (sidebarOpen true) reached P and D`);
+    ok(verdictOf(g2), `${tag}⑯c: the setup is real — the desk record (sidebarOpen true) reached P and D`);
     judge(sbClosed(p6), `${tag}⑯c: the desk's record opening its sidebar leaves P's CLOSED — as P's person left it`, J(p6));
-    ok(sbOpen(d6), `${tag}⑯d: D follows the desk record's sidebarOpen true (its sidebar open)`, J(d6));
+    ok(verdictOf(sbOpen(d6)), `${tag}⑯d: D follows the desk record's sidebarOpen true (its sidebar open)`, J(d6));
     await closeP();
     const s3 = await pSave('pd-charlie'), r3 = S.disk();
     console.log(`    ${tag}⑯c: P's sends while its sidebar was open over a desk record holding false: ${J(sendsB.map((m) => m.state && m.state.sidebarOpen))}; P's save now (its own closed, the desk's open): ${J(s3.map((m) => m.state && m.state.sidebarOpen))}; disk ${chromeOf(r3)}`);
-    ok(carried(s3, true) && r3.sidebarOpen === true && r3.viewport === 'phone' && (red || sendsB.length >= 1) && sendsB.every((m) => m.state && m.state.sidebarOpen === false), `${tag}⑯c: every save P sends carries the DESK's sidebarOpen byte-identical (true while P's own is closed; false while P's own was open) — never P's own`, J({ s3: s3.length, sendsB: sendsB.length, r3 }));
+    ok(gateOf(carried(s3, true)) && r3.sidebarOpen === true && r3.viewport === 'phone' && (gateOf(red) || sendsB.length >= 1) && verdictOf(sendsB.every((m) => m.state && m.state.sidebarOpen === false)), `${tag}⑯c: every save P sends carries the DESK's sidebarOpen byte-identical (true while P's own is closed; false while P's own was open) — never P's own`, J({ s3: s3.length, sendsB: sendsB.length, r3 }));
 
     console.log(`— ${tag}⑯d the desk's own legs`);
     await D.boot(S.PORT);
     const d7 = await D.ev(SBSTATE);
     console.log(`    ${tag}⑯d: D after a reload on the record the phone wrote last (${chromeOf(S.disk())}): ${J(d7)}`);
-    ok(S.disk().viewport === 'phone' && sbOpen(d7) && J(d7.grid) === '[1,3]', `${tag}⑯d: D's reload on the record the phone wrote last takes it whole — D keeps its sidebar open and its 1×3 grid (belt 1 carried them)`, J(d7));
+    ok(S.disk().viewport === 'phone' && gateOf(sbOpen(d7)) && J(d7.grid) === '[1,3]', `${tag}⑯d: D's reload on the record the phone wrote last takes it whole — D keeps its sidebar open and its 1×3 grid (belt 1 carried them)`, J(d7));
     const g3 = await live(false, 'phone'), d8 = await D.ev(SBSTATE), r3g = liveFrames.find((f) => f.type === 'layout-sync-refused');
-    ok(!g3 && r3g?.reason === 'cross-layer' && (r3g.fields || []).includes('sidebarOpen') && sbOpen(d8), `${tag}⑯d: a live PHONE-stamped record holding sidebarOpen false is REFUSED by the server (the layer gate — cross-layer sidebarOpen): nobody hears it and D's sidebar stays open`, J({ g3, refusal: r3g && { reason: r3g.reason, fields: r3g.fields }, d8 }));
+    ok(!g3 && r3g?.reason === 'cross-layer' && gateOf((r3g.fields || []).includes('sidebarOpen')) && verdictOf(sbOpen(d8)), `${tag}⑯d: a live PHONE-stamped record holding sidebarOpen false is REFUSED by the server (the layer gate — cross-layer sidebarOpen): nobody hears it and D's sidebar stays open`, J({ g3, refusal: r3g && { reason: r3g.reason, fields: r3g.fields }, d8 }));
 
     console.log(`— ${tag}⑯e THE LAYER LAW on the phone: a live desk record moves a box, raises a z, maximizes a window, sets the toolbar scale and minimizes a window P does not show`);
     await P.boot(S.PORT); await sleep(1500);
@@ -587,7 +587,7 @@ else await (async () => {
     const gE = await until(() => seenE(P, gP) && seenE(D, gD), 8000); await sleep(1500); sock.close();
     const da1 = await D.ev(ARR), pa1 = await P.ev(ARR), tbD1 = await D.ev(TB), tbP1 = await P.ev(TB);
     console.log(`    ${tag}⑯e: mover ${mover} maxer ${maxer} hider ${hider} (P shows ${shown}); D ${J({ mover: da1[mover], maxer: da1[maxer]?.max, hider: da1[hider]?.min, tb: tbD1 })}; P before ${J({ mover: pa0[mover], maxer: pa0[maxer]?.max, tb: tbP0 })} after ${J({ mover: pa1[mover], maxer: pa1[maxer]?.max, hider: pa1[hider]?.min, tb: tbP1 })}`);
-    ok(gE && mover && maxer && hider && new Set([mover, maxer, hider]).size === 3, `${tag}⑯e: the setup is real — the live desk record (box, z 999, a maximize, a minimize, toolbar 1.2) reached P and D`, J({ gE, mover, maxer, hider, shown }));
+    ok(gateOf(gE) && gateOf(mover) && gateOf(maxer) && gateOf(hider) && new Set([mover, maxer, hider]).size === 3, `${tag}⑯e: the setup is real — the live desk record (box, z 999, a maximize, a minimize, toolbar 1.2) reached P and D`, J({ gE, mover, maxer, hider, shown }));
     ok(J(da1[mover]?.gb) === J([MOVED.left, MOVED.top, MOVED.width, MOVED.height]) && da1[mover].z >= 999 && da1[maxer]?.max === true && da1[hider]?.min === true && Math.abs(Number(tbD1) - 1.2) < 0.01, `${tag}⑯e: D (a desk) follows the desk record — the box moved, z 999, the maximize, the minimize, the toolbar at 1.2`, J({ da1, tbD1 }));
     judge(J(pa1[mover]?.gb) === J(pa0[mover]?.gb) && pa1[mover]?.z === pa0[mover]?.z && pa1[maxer]?.max === pa0[maxer]?.max && tbP1 === tbP0, `${tag}⑯e: P (a phone) takes none of the desk's arrangement or chrome — ${mover}'s box and z, ${maxer}'s maximize and P's toolbar scale stay P's own`, J({ before: { m: pa0[mover], x: pa0[maxer], tb: tbP0 }, after: { m: pa1[mover], x: pa1[maxer], tb: tbP1 } }));
     ok(pa1[hider]?.min === true && (await P.ev(SHOWN)) === shown, `${tag}⑯e: …but the desk's minimize of ${hider} is the truth on P (§6b guard 5: hidden, listed under Minimized) and P keeps ITS window on show`, J({ hider: pa1[hider], shown }));
@@ -601,8 +601,8 @@ else await (async () => {
   const GATE_FIND = "  if (stamp !== 'phone' || !held", GATE_GONE = '  if (true || !held';
   const gateLegs = async (S, D, P, red) => {
     const tag = red ? 'NO-GATE ' : '';
-    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS with the gate removed`, extra) : ok(c, n, extra));
-    ok(await D.boot(S.PORT) && await P.boot(S.PORT), `${tag}⑰: D and P booted on a fresh record`);
+    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS with the gate removed`, extra) : ok(verdictOf(c), n, extra));
+    ok(gateOf(await D.boot(S.PORT)) && verdictOf(await P.boot(S.PORT)), `${tag}⑰: D and P booted on a fresh record`);
     await tapThrough(P, ['pd-alpha', 'pd-bravo', 'pd-charlie'], 1); await sleep(1500); // P restacks ITS windows (its own z) — none of it reaches the record
     const arr0 = S.diskArr(), d0 = await D.ev(ARR), pS = P.sent.length, pG = P.got.length, j0 = S.journal.length;
     console.log(`    ${tag}⑰: D before ${zOrder(d0)}`);
@@ -616,7 +616,7 @@ else await (async () => {
     console.log(`    ${tag}⑰: the old bundle's save ${old ? 'left' : 'never left'} (z differs from the record on ${J(zMoved)}); refusal ${J(refusal ? { reason: refusal.reason, fields: refusal.fields } : null)}; ${sends.length} phone save(s); charlie off the disk ${gone}`);
     ok((await P.ev('window.__oldFor')) === 1 && !!old && !(old.state?.windows || []).some((w) => w.winId === 'win-pd-charlie') && zMoved.length > 0, `${tag}⑰: the setup is real — P's first save after the close is the OLD bundle's: charlie gone, P's own z on ${zMoved.length} window(s)`, J({ zMoved, ids: (old?.state?.windows || []).map((w) => w.winId) }));
     judge(refusal?.reason === 'cross-layer' && (refusal.fields || []).includes('zIndex') && /REFUSED a phone record of desktop "Main"/.test(S.journal.slice(j0)), `${tag}⑰: the server REFUSES the old bundle's save — cross-layer, the fields named, the journal line`, J({ refusal: refusal && { reason: refusal.reason, fields: refusal.fields }, journal: (S.journal.slice(j0).match(/[^\n]*REFUSED[^\n]*/g) || []) }));
-    ok(gone && (red || sends.length >= 2), `${tag}⑰: the membership change LANDS — charlie is off the record on disk${red ? '' : ' (P re-sent the reconciled record: membership only)'}`, J({ gone, sends: sends.length }));
+    ok(gateOf(gone) && (verdictOf(red) || sends.length >= 2), `${tag}⑰: the membership change LANDS — charlie is off the record on disk${red ? '' : ' (P re-sent the reconciled record: membership only)'}`, J({ gone, sends: sends.length }));
     const arr1 = S.diskArr(); delete arr0['win-pd-charlie'];
     judge(J(arr1) === J(arr0), `${tag}⑰: THE DESK IS UNCHANGED on disk — every remaining window's z / box / maximize / minimize is the desk's`, J({ arr0, arr1 }));
     const d1 = await D.ev(ARR); delete d0['win-pd-charlie'];
@@ -639,18 +639,18 @@ else await (async () => {
   const onDisk = (S, id) => (S.disk().windows || []).some((w) => w.winId === id);
   const staleLegs = async (S, D, P, red) => {
     const tag = red ? 'NO-STALE-GATE ' : '';
-    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS with the staleness gate removed`, extra) : ok(c, n, extra));
-    ok(await D.boot(S.PORT) && await P.boot(S.PORT), `${tag}⑱: D and P booted on a fresh record`);
+    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS with the staleness gate removed`, extra) : ok(verdictOf(c), n, extra));
+    ok(gateOf(await D.boot(S.PORT)) && verdictOf(await P.boot(S.PORT)), `${tag}⑱: D and P booted on a fresh record`);
     await closeOnP(P, 'pd-bravo'); // the shape change: a rollback point holds the five
     const bravoGone = await until(() => !onDisk(S, 'win-pd-bravo'), 10000); await sleep(1500);
     const points = await (await fetch(`http://127.0.0.1:${S.PORT}/api/layout-history`)).json();
     const point = (points.entries || []).find((e) => e.totalWindows === 5);
-    ok(bravoGone && !!point && !(await D.ev(`app.wm.windows.has('win-pd-bravo')`)), `${tag}⑱: P closed bravo (D followed) — the rollback point before it holds the five`, J({ bravoGone, point: point && point.id }));
+    ok(gateOf(bravoGone) && !!point && !(await D.ev(`app.wm.windows.has('win-pd-bravo')`)), `${tag}⑱: P closed bravo (D followed) — the rollback point before it holds the five`, J({ bravoGone, point: point && point.id }));
     await P.ev(SLEEP); await P.ev('window.__asleep = true'); // P sleeps: it hears no record and no restore — its copy stays the four
     const rr = await (await fetch(`http://127.0.0.1:${S.PORT}/api/layout-history/${encodeURIComponent(point.id)}/restore`, { method: 'POST' })).json();
     await sleep(1800); await D.boot(S.PORT); // D reloads on layout-restored (as the restoring page does)
     const held0 = await S.held();
-    ok(rr.success && (held0.windows || []).some((w) => w.winId === 'win-pd-bravo') && (await D.ev(`app.wm.windows.has('win-pd-bravo')`)) && !(await P.ev(`app.wm.windows.has('win-pd-bravo')`)), `${tag}⑱: 恢复布局 put bravo back (on the server and on D); P slept through it (its copy has no bravo)`, J({ rr, ids: (held0.windows || []).map((w) => w.winId) }));
+    ok(gateOf(rr.success) && gateOf((held0.windows || []).some((w) => w.winId === 'win-pd-bravo')) && (gateOf(await D.ev(`app.wm.windows.has('win-pd-bravo')`))) && !(await P.ev(`app.wm.windows.has('win-pd-bravo')`)), `${tag}⑱: 恢复布局 put bravo back (on the server and on D); P slept through it (its copy has no bravo)`, J({ rr, ids: (held0.windows || []).map((w) => w.winId) }));
     await P.ev('window.__asleep = false'); // P wakes; its person closes charlie from the OLD copy
     const pS = P.sent.length, pG = P.got.length, j0 = S.journal.length;
     await closeOnP(P, 'pd-charlie');
@@ -660,7 +660,7 @@ else await (async () => {
     ok(!!first && typeof first.base === 'number' && first.base < held0.updatedAt && !(first.state?.windows || []).some((w) => w.winId === 'win-pd-bravo'), `${tag}⑱: the setup is real — P's first save after its close is from the OLD copy (no bravo) and names the older base it had seen`, J({ base: first?.base, held: held0.updatedAt }));
     judge(refusal?.reason === 'stale' && /REFUSED a phone record of desktop "Main" \(desk-[^)]+\): written from an older base/.test(S.journal.slice(j0)), `${tag}⑱: the server REFUSES P's old copy — stale, the journal line`, J({ refusal, journal: S.journal.slice(j0).split('\n').filter((l) => /layout-sync/.test(l)) }));
     judge(onDisk(S, 'win-pd-bravo') && (await D.ev(`app.wm.windows.has('win-pd-bravo')`)), `${tag}⑱: 恢复布局 HOLDS — bravo stays on disk and on D (2.369.340: one window below the belt, the restore undone by the next phone sync)`, J({ disk: (S.disk().windows || []).map((w) => w.winId) }));
-    ok(charlieGone && !(await D.ev(`app.wm.windows.has('win-pd-charlie')`)), `${tag}⑱: P's own close LANDS (charlie off the record and off D)`, J({ charlieGone }));
+    ok(gateOf(charlieGone) && !(await D.ev(`app.wm.windows.has('win-pd-charlie')`)), `${tag}⑱: P's own close LANDS (charlie off the record and off D)`, J({ charlieGone }));
     judge(await until(() => P.ev(`app.wm.windows.has('win-pd-bravo')`), 5000), `${tag}⑱: P ADOPTED the restored record — it rebuilt bravo`);
   };
 
@@ -670,10 +670,10 @@ else await (async () => {
     // ── THE FIXED TREE ──
     const fixedTree = mkTree('fixed', 'HEAD', true);
     const S = await startServer(fixedTree, 'fixed');
-    if (!ok(S.up, 'the fixed-tree server booted (own data/ under ' + ROOT + ')', S.journal.slice(-600))) return;
-    ok(await D.boot(S.PORT) && await P.boot(S.PORT), 'D and P booted on the same desktop record');
+    if (!ok(verdictOf(S.up), 'the fixed-tree server booted (own data/ under ' + ROOT + ')', S.journal.slice(-600))) return;
+    ok(gateOf(await D.boot(S.PORT)) && verdictOf(await P.boot(S.PORT)), 'D and P booted on the same desktop record');
     const env = await P.ev(`({ mobile: app.isMobile, touch: app.isTouch, nav: !!app._mobileNav })`);
-    ok(env.mobile && env.touch && env.nav && !(await D.ev('app.isMobile')), 'P is a phone (app.isMobile AND app.isTouch, MobileNav), D is not', J(env));
+    ok(gateOf(env.mobile) && gateOf(env.touch) && gateOf(env.nav) && !(await D.ev('app.isMobile')), 'P is a phone (app.isMobile AND app.isTouch, MobileNav), D is not', J(env));
     // a boot restores no maximize (restoreState never did) — D's person maximizes delta by a REAL title-bar double-click,
     // D's save carries it to P (which takes none of a desk's arrangement but the minimize — the layer law): the fixture's
     // maximized window is a real one on D and in the record P holds
@@ -684,7 +684,7 @@ else await (async () => {
     await until(() => P.got.some((m) => m.type === 'layout-sync' && (m.state?.windows || []).some((w) => w.winId === 'win-pd-delta' && w.isMaximized === true)), 5000);
     await sleep(1500);
     const d0 = await D.ev(ARR);
-    ok(Object.keys(d0).length === 5 && d0['win-pd-delta']?.max && d0['win-pd-echo']?.min, 'D shows the 5 windows: 3 freeform + 1 maximized + 1 minimized', J(d0));
+    ok(Object.keys(d0).length === 5 && gateOf(d0['win-pd-delta']?.max) && verdictOf(d0['win-pd-echo']?.min), 'D shows the 5 windows: 3 freeform + 1 maximized + 1 minimized', J(d0));
 
     if (want(1)) {
       console.log('— ① P taps its switcher through every window ×5');
@@ -693,7 +693,7 @@ else await (async () => {
       await sleep(2500);
       const d1 = await D.ev(ARR), disk1 = S.diskArr();
       const pSends = P.sent.slice(pSent0);
-      ok(pSends.length >= 1 && pSends.every((m) => m.viewport === 'phone') && D.got.length > dGot0, `①: P's taps SAVED (${pSends.length} layout-sync, every one stamped viewport:'phone') and D received them (${D.got.length - dGot0}) — the leg is not vacuous`, J(pSends.map((m) => m.viewport)));
+      ok(pSends.length >= 1 && gateOf(pSends.every((m) => m.viewport === 'phone')) && D.got.length > dGot0, `①: P's taps SAVED (${pSends.length} layout-sync, every one stamped viewport:'phone') and D received them (${D.got.length - dGot0}) — the leg is not vacuous`, J(pSends.map((m) => m.viewport)));
       ok(J(d1) === J(d0), `①: D's z order / boxes / maximize / minimize are BYTE-IDENTICAL after 25 real switcher taps (${zOrder(d1)})`, J({ before: d0, after: d1 }));
       ok(J(disk1) === J(disk0), '①: …and so are the arrangement fields of data/layouts.json', J({ before: disk0, after: disk1 }));
       const pz = await P.ev(`Object.fromEntries([...app.wm.windows.values()].map((w) => [w.id, parseInt(w.element.style.zIndex) || 0]))`);
@@ -708,7 +708,7 @@ else await (async () => {
       await openFiles(P);
       bornId = await P.ev(SHOWN);
       ok(!!bornId && !before.has(bornId), `②: P opened a new window by touch (${bornId})`);
-      ok(await until(async () => !!(await D.ev(ARR))[bornId], 8000), '②: D built it (membership flows)');
+      ok(verdictOf(await until(async () => !!(await D.ev(ARR))[bornId], 8000)), '②: D built it (membership flows)');
       await sleep(900);
       const d2 = await D.ev(ARR), born = d2[bornId];
       const others = Object.entries(d2).filter(([id]) => id !== bornId).map(([, a]) => a.z);
@@ -728,11 +728,11 @@ else await (async () => {
       // a confirm (if the window asks) is answered by a tap too
       const confirmBtn = await P.ptOf(`document.querySelector('.dialog-overlay .btn-primary, #dialog-overlay .btn-primary')`);
       if (confirmBtn) await P.touch(confirmBtn);
-      ok(await until(async () => !(await D.ev(ARR))['win-pd-charlie'], 8000), '③: D closed pd-charlie (membership flows from the phone)');
+      ok(verdictOf(await until(async () => !(await D.ev(ARR))['win-pd-charlie'], 8000)), '③: D closed pd-charlie (membership flows from the phone)');
       const ev3 = P.sent.slice(pSent0).flatMap((m) => m.evidence || []);
-      ok(ev3.some((e) => e.id === 'win-pd-charlie' && e.why === 'closed'), '③: P\'s save carried the close evidence', J(ev3));
+      ok(verdictOf(ev3.some((e) => e.id === 'win-pd-charlie' && e.why === 'closed')), '③: P\'s save carried the close evidence', J(ev3));
       ok(!/REFUSED/.test(S.journal.slice(j0)), '③: the shrink belt never refused', (S.journal.slice(j0).match(/[^\n]*REFUSED[^\n]*/g) || []).join('\n'));
-      ok(await until(() => !(S.disk().windows || []).some((w) => w.winId === 'win-pd-charlie'), 4000), '③: the record on disk dropped it', J((S.disk().windows || []).map((w) => w.winId)));
+      ok(verdictOf(await until(() => !(S.disk().windows || []).some((w) => w.winId === 'win-pd-charlie'), 4000)), '③: the record on disk dropped it', J((S.disk().windows || []).map((w) => w.winId)));
     }
 
     if (want(4)) {
@@ -757,7 +757,7 @@ else await (async () => {
       const pick = (w) => w && Object.fromEntries(FIELDS.filter((k) => k in w).map((k) => [k, w[k]]));
       const pB = pRec.find((w) => w.winId === 'win-pd-bravo'), pA = pRec.find((w) => w.winId === 'win-pd-alpha');
       ok(pRec.length > 0 && J(pick(pB)) === J(pick(dBravo)) && J(pick(pA)) === J(pick(dAlpha)) && pA.isMinimized === true, '④: P\'s next user-caused save carries D\'s new box and isMinimized:true VERBATIM (guard 5 by construction)', J({ pB: pick(pB), dB: pick(dBravo), pA: pick(pA) }));
-      ok(await D.ev(`app.wm.windows.get('win-pd-alpha').isMinimized === true`), '④: D\'s alpha stays minimized after the phone\'s save');
+      ok(verdictOf(await D.ev(`app.wm.windows.get('win-pd-alpha').isMinimized === true`)), '④: D\'s alpha stays minimized after the phone\'s save');
     }
 
     if (want(5)) {
@@ -781,7 +781,7 @@ else await (async () => {
       await tapThrough(P, ['pd-alpha', 'pd-bravo', 'pd-delta', 'pd-echo'], 2);
       await sleep(2500);
       const sends = P.sent.slice(pSent0);
-      ok(sends.length >= 1 && sends.every((m) => !('viewport' in m)) && D.got.length > dGot0 && D.got.slice(dGot0).every((m) => !('viewport' in m)), `⑦: P's saves left UNSTAMPED (${sends.length}) and reached D unstamped — belt 2 is off`);
+      ok(sends.length >= 1 && gateOf(sends.every((m) => !('viewport' in m))) && D.got.length > dGot0 && verdictOf(D.got.slice(dGot0).every((m) => !('viewport' in m))), `⑦: P's saves left UNSTAMPED (${sends.length}) and reached D unstamped — belt 2 is off`);
       const after = await D.ev(ARR);
       ok(J(after) === J(before), `⑦: D is unchanged all the same — the phone never wrote arrangement (${zOrder(after)})`, J({ before, after }));
     }
@@ -796,12 +796,12 @@ else await (async () => {
       s.send(J({ type: 'layout-sync', desktopId: DESK, state: { ...rec, windows: scrambled, updatedAt: undefined }, evidence: [], sentAt: Date.now(), viewport: 'phone' }));
       const refused = await until(() => frames.some((f) => f.type === 'layout-sync-refused'), 6000); await sleep(1200);
       const r = frames.find((f) => f.type === 'layout-sync-refused') || {};
-      ok(refused && r.reason === 'cross-layer' && ['zIndex', 'gridBounds', 'isMaximized', 'isMinimized'].every((f) => (r.fields || []).includes(f)) && J(await S.held()) === disk0, `⑥: the server REFUSES it — the layer gate (cross-layer: ${(r.fields || []).join(', ')}), the record on disk unchanged`, J({ reason: r.reason, fields: r.fields }));
+      ok(gateOf(refused) && r.reason === 'cross-layer' && gateOf(['zIndex', 'gridBounds', 'isMaximized', 'isMinimized'].every((f) => (r.fields || []).includes(f))) && J(await S.held()) === disk0, `⑥: the server REFUSES it — the layer gate (cross-layer: ${(r.fields || []).join(', ')}), the record on disk unchanged`, J({ reason: r.reason, fields: r.fields }));
       const mid = await D.ev(ARR);
       ok(!mid['win-pd-foxtrot'] && J(mid) === J(before), '⑥: …D never hears it — no new window, every box and z as it was', J({ before, mid }));
       // BELT 2 on what passes: the held arrangement verbatim + one new window with a full-screen box
       s.send(J({ type: 'layout-sync', desktopId: DESK, state: { ...rec, windows: [...(rec.windows || []), W('pd-foxtrot', { left: 0, top: 0, width: 1, height: 1 }, 9999)], updatedAt: undefined }, evidence: [], sentAt: Date.now(), viewport: 'phone' }));
-      ok(await until(async () => !!(await D.ev(ARR))['win-pd-foxtrot'], 8000), '⑥: the same new window on the HELD arrangement passes — D built it (membership applies)');
+      ok(verdictOf(await until(async () => !!(await D.ev(ARR))['win-pd-foxtrot'], 8000)), '⑥: the same new window on the HELD arrangement passes — D built it (membership applies)');
       await sleep(900);
       const after = await D.ev(ARR);
       const kept = Object.fromEntries(Object.entries(after).filter(([id]) => before[id]));
@@ -819,7 +819,7 @@ else await (async () => {
         const s = await rawSock(S.PORT);
         s.send(J({ type: 'layout-sync', desktopId: DESK, state: { ...rec, windows }, evidence: [], sentAt: Date.now(), ...(stamp ? { viewport: stamp } : {}) }));
         const moved = await until(async () => { const a = (await D.ev(ARR))['win-pd-bravo']; return !!a && Math.abs(a.gb[0] - left) < 0.01; }, 8000);
-        ok(moved, `⑨: a ${label} record moves D's window (bravo → left ${left})`, J((await D.ev(ARR))['win-pd-bravo']));
+        ok(verdictOf(moved), `⑨: a ${label} record moves D's window (bravo → left ${left})`, J((await D.ev(ARR))['win-pd-bravo']));
         s.close(); await sleep(600);
       }
     }
@@ -835,7 +835,7 @@ else await (async () => {
       else {
         const baseTree = mkTree('base', baseRef, false);
         const B = await startServer(baseTree, 'base');
-        if (ok(B.up, `⑧: the BASE-tree server booted (${execFileSync('git', ['-C', repo, 'rev-parse', '--short', baseRef], { encoding: 'utf8' }).trim()})`, B.journal.slice(-600))) {
+        if (ok(verdictOf(B.up), `⑧: the BASE-tree server booted (${execFileSync('git', ['-C', repo, 'rev-parse', '--short', baseRef], { encoding: 'utf8' }).trim()})`, B.journal.slice(-600))) {
           await D.boot(B.PORT); await P.boot(B.PORT);
           const b0 = await D.ev(ARR);
           await tapThrough(P, ['pd-alpha', 'pd-bravo', 'pd-charlie', 'pd-delta'], 1);
@@ -849,7 +849,7 @@ else await (async () => {
           await until(async () => !!(await D.ev(ARR))[nb], 8000); await sleep(1200);
           const bb = (await D.ev(ARR))[nb];
           console.log(`    BASE ②: the phone-born window ${nb} on D: gridBounds ${J(bb?.gb)} box ${J(bb?.box)}`);
-          ok(!ids0.has(nb) && nearFull(bb?.gb), '⑧ RED CONTROL ②: on the base tree the phone-born window lands near {0,0,1,1} on D', J(bb));
+          ok(!ids0.has(nb) && verdictOf(nearFull(bb?.gb)), '⑧ RED CONTROL ②: on the base tree the phone-born window lands near {0,0,1,1} on D', J(bb));
         }
       }
     }
@@ -860,18 +860,18 @@ else await (async () => {
       try {
         await S.stop();
         const S2 = await startServer(fixedTree, 'fixed2', fixture2);
-        if (ok(S2.up, '⑩–⑬: the fixed-tree server re-booted on a fresh two-desktop record', S2.journal.slice(-600))) await fixLegs(S2, D, P, D2, false);
+        if (ok(verdictOf(S2.up), '⑩–⑬: the fixed-tree server re-booted on a fresh two-desktop record', S2.journal.slice(-600))) await fixLegs(S2, D, P, D2, false);
         await S2.stop();
         // B-44c5: the base is THIS tree with F1–F4 taken back (FIX_REVERTS) — it runs on every clone, never skipped for a
         // lane commit the clone lacks; the patch PROVES ITSELF first: each fix's line stood once and is gone from the copy
         console.log(`— ⑩–⑬ RED controls on this tree with the four fixes and the gate over F2 taken back (${FIX_REVERTS.map(([, t]) => t).join(' ')})`);
         const stood = FIX_REVERTS.map(([f, tag, from]) => [tag, fs.readFileSync(path.join(repo, f), 'utf8').split(from).length === 2]);
-        if (ok(stood.every(([, y]) => y), `⑩–⑬ base: each line it takes back stands ONCE in this tree (${stood.map(([t, y]) => `${t} ${y ? 'once' : 'MOVED'}`).join(' · ')})`)) {
+        if (ok(verdictOf(stood.every(([, y]) => y)), `⑩–⑬ base: each line it takes back stands ONCE in this tree (${stood.map(([t, y]) => `${t} ${y ? 'once' : 'MOVED'}`).join(' · ')})`)) {
           const baseTree = mkTree('fixbase', 'HEAD', true, null, fixBasePatches());
           const took = FIX_REVERTS.map(([f, tag, from, to]) => { const t = fs.readFileSync(path.join(baseTree, f), 'utf8'); return [tag, !t.includes(from) && t.includes(to)]; });
-          if (ok(took.every(([, y]) => y), `⑩–⑬ base: …and is taken back in the copy (${took.map(([t, y]) => `${t} ${y ? 'taken back' : 'NOT'}`).join(' · ')})`)) {
+          if (ok(verdictOf(took.every(([, y]) => y)), `⑩–⑬ base: …and is taken back in the copy (${took.map(([t, y]) => `${t} ${y ? 'taken back' : 'NOT'}`).join(' · ')})`)) {
             const B2 = await startServer(baseTree, 'fixbase', fixture2);
-            if (ok(B2.up, '⑩–⑬: the base-tree server booted', B2.journal.slice(-600))) await fixLegs(B2, D, P, D2, true);
+            if (ok(verdictOf(B2.up), '⑩–⑬: the base-tree server booted', B2.journal.slice(-600))) await fixLegs(B2, D, P, D2, true);
             await B2.stop();
           }
         }
@@ -884,14 +884,14 @@ else await (async () => {
         if (ok(!!DW, '⑮: a second desktop chrome (DW, 1440×900) exposed a CDP page target')) {
           await S.stop();
           const S5 = await startServer(fixedTree, 'f5', fixture);
-          if (ok(S5.up, '⑮: the fixed-tree server re-booted on a fresh record', S5.journal.slice(-600))) await f5Legs(S5, D, P, DW, 'fixed', ['a', 'b', 'c', 'd']);
+          if (ok(verdictOf(S5.up), '⑮: the fixed-tree server re-booted on a fresh record', S5.journal.slice(-600))) await f5Legs(S5, D, P, DW, 'fixed', ['a', 'b', 'c', 'd']);
           await S5.stop();
           const LSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'layout.js'), 'utf8');
           for (const r of F5_RED) {
             console.log(`— ⑮ RED control: ${r.mode} (this source with ONE line of src/lib/layout.js patched back)`);
-            if (!ok(LSRC.includes(r.find), `⑮ RED ${r.mode}: the patched line exists in src/lib/layout.js (the control judges this source)`)) continue;
+            if (!ok(verdictOf(LSRC.includes(r.find)), `⑮ RED ${r.mode}: the patched line exists in src/lib/layout.js (the control judges this source)`)) continue;
             const SR = await startServer(mkTree('f5-' + r.mode, 'HEAD', true, (t) => t.replace(r.find, r.repl)), 'f5-' + r.mode, fixture);
-            if (ok(SR.up, `⑮ RED ${r.mode}: its server booted`, SR.journal.slice(-600))) await f5Legs(SR, D, P, DW, r.mode, r.legs);
+            if (ok(verdictOf(SR.up), `⑮ RED ${r.mode}: its server booted`, SR.journal.slice(-600))) await f5Legs(SR, D, P, DW, r.mode, r.legs);
             await SR.stop();
           }
         }
@@ -901,13 +901,13 @@ else await (async () => {
     if (want(16)) {
       await S.stop();
       const SB = await startServer(fixedTree, 'sb', fixtureSB);
-      if (ok(SB.up, '⑯: the fixed-tree server re-booted on the desk-chrome record', SB.journal.slice(-600))) await sbLegs(SB, D, P, false);
+      if (ok(verdictOf(SB.up), '⑯: the fixed-tree server re-booted on the desk-chrome record', SB.journal.slice(-600))) await sbLegs(SB, D, P, false);
       await SB.stop();
       const LSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'layout.js'), 'utf8'), ASK = 'applyForViewport(this._viewport(), ';
       console.log('— ⑯ RED control: this source with every applyForViewport asking as a desk (the phone applies the record\'s chrome and arrangement again)');
       if (ok(LSRC.split(ASK).length - 1 === 6, `⑯ RED: the six asks exist in src/lib/layout.js (the control judges this source; the sixth — the apply's ask over the record the page HELD, lane phone-resume-keeps-layout r4 — is a desk's only: a phone holds none)`)) {
         const SR = await startServer(mkTree('sb-red', 'HEAD', true, (t) => t.split(ASK).join("applyForViewport('desktop', ")), 'sb-red', fixtureSB);
-        if (ok(SR.up, '⑯ RED: its server booted', SR.journal.slice(-600))) await sbLegs(SR, D, P, true);
+        if (ok(verdictOf(SR.up), '⑯ RED: its server booted', SR.journal.slice(-600))) await sbLegs(SR, D, P, true);
         await SR.stop();
       }
     }
@@ -915,13 +915,13 @@ else await (async () => {
     if (want(17)) {
       await S.stop();
       const SG = await startServer(fixedTree, 'gate', fixture);
-      if (ok(SG.up, '⑰: the fixed-tree server re-booted on a fresh record', SG.journal.slice(-600))) await gateLegs(SG, D, P, false);
+      if (ok(verdictOf(SG.up), '⑰: the fixed-tree server re-booted on a fresh record', SG.journal.slice(-600))) await gateLegs(SG, D, P, false);
       await SG.stop();
       const RSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'desktop-record.js'), 'utf8');
       console.log('— ⑰ RED control: this source with the server\'s gate removed (src/lib/desktop-record.js layerGate answers ok)');
       if (ok(RSRC.split(GATE_FIND).length === 2, '⑰ RED: the gate\'s line exists once in src/lib/desktop-record.js (the control judges this source)')) {
         const SR = await startServer(mkTree('gate-red', 'HEAD', true, null, ['src/lib/desktop-record.js', (t) => t.replace(GATE_FIND, GATE_GONE)]), 'gate-red', fixture);
-        if (ok(SR.up, '⑰ RED: its server booted', SR.journal.slice(-600))) await gateLegs(SR, D, P, true);
+        if (ok(verdictOf(SR.up), '⑰ RED: its server booted', SR.journal.slice(-600))) await gateLegs(SR, D, P, true);
         await SR.stop();
       }
     }
@@ -929,13 +929,13 @@ else await (async () => {
     if (want(18)) {
       await S.stop();
       const ST = await startServer(fixedTree, 'stale', fixture);
-      if (ok(ST.up, '⑱: the fixed-tree server re-booted on a fresh record', ST.journal.slice(-600))) await staleLegs(ST, D, P, false);
+      if (ok(verdictOf(ST.up), '⑱: the fixed-tree server re-booted on a fresh record', ST.journal.slice(-600))) await staleLegs(ST, D, P, false);
       await ST.stop();
       const RSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'desktop-record.js'), 'utf8');
       console.log('— ⑱ RED control: this source with the staleness gate removed (src/lib/desktop-record.js staleVerdict answers ok)');
       if (ok(RSRC.split(STALE_FIND).length === 2, '⑱ RED: the gate\'s line exists once in src/lib/desktop-record.js (the control judges this source)')) {
         const SR = await startServer(mkTree('stale-red', 'HEAD', true, null, ['src/lib/desktop-record.js', (t) => t.replace(STALE_FIND, STALE_GONE)]), 'stale-red', fixture);
-        if (ok(SR.up, '⑱ RED: its server booted', SR.journal.slice(-600))) await staleLegs(SR, D, P, true);
+        if (ok(verdictOf(SR.up), '⑱ RED: its server booted', SR.journal.slice(-600))) await staleLegs(SR, D, P, true);
         await SR.stop();
       }
     }
@@ -945,4 +945,4 @@ else await (async () => {
 })();
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

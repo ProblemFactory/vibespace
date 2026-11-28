@@ -15,7 +15,7 @@ import { startWorkMeter, measure } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 300) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 300) : '')); } };
 startWorkMeter(); // BEFORE the modules load — the perf claims are counted in WORK, never the clock (lane-mirror-198)
 const LFILES = ['src/usage-anchors.js', 'src/usage-history.js'];
 const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
@@ -62,7 +62,7 @@ for (const [a, b] of intervals) {
 ok(warmMismatches === 0, '…and the MEMOIZED second reading of those 40 intervals is identical (hit path parity)');
 ok(uh._evCountUpTo(T0 - 1) === 0 && uh._evCountUpTo(T0 + SPAN + 1) === N && uh._evCountUpTo(T0 + SPAN / 2) > 0.4 * N && uh._evCountUpTo(T0 + SPAN / 2) < 0.6 * N, '_evCountUpTo is a correct upper-bound count on the sorted view');
 const gen = [...uh._events(T0 + 86400000, T0 + 2 * 86400000)];
-ok(gen.every((e, i) => i === 0 || e.ts >= gen[i - 1].ts) && gen.every((e) => e.ts >= T0 + 86400000 && e.ts <= T0 + 2 * 86400000) && gen.length === all.filter((e) => e.ts >= T0 + 86400000 && e.ts <= T0 + 2 * 86400000).length, '_events yields exactly the interval, in time order');
+ok(gateOf(gen.every((e, i) => i === 0 || e.ts >= gen[i - 1].ts)) && gateOf(gen.every((e) => e.ts >= T0 + 86400000 && e.ts <= T0 + 2 * 86400000)) && gen.length === all.filter((e) => e.ts >= T0 + 86400000 && e.ts <= T0 + 2 * 86400000).length, '_events yields exactly the interval, in time order');
 
 // WORK, never the clock (lane-mirror-198): 2000 pair-costs (a realistic learn) — a pair costs fewer ops than ONE step
 // per ledger event (the pre-2.369.36 shape walked all 60k events per pair: the brute reference above, measured on ten
@@ -146,13 +146,13 @@ ok(hitRate > 0.4, `a working set 30% past the 20000-entry cap still hits ${(hitR
 
 // wiring: the estimator + the pool sweep still reach the same function
 const ua = fs.readFileSync(path.join(REPO, 'src/usage-anchors.js'), 'utf8');
-ok(/const _costMemos = new WeakMap\(\);/.test(ua) && /const _rowsIn = \(usageHistory, fromMs, toV\) => usageHistory\._evCountUpTo\(toV\) - usageHistory\._evCountUpTo\(\(fromMs \|\| 0\) - 1\);/.test(ua) && /usageHistory\.pricingToken\(\)/.test(ua) && /_memoPut\(memo, memoKey/.test(ua) && /memoKey = `\$\{\[\.\.\.want\]\.sort\(\)\.join\(','\)\}\|\$\{fromMs\}`;/.test(ua),
+ok(gateOf(/const _costMemos = new WeakMap\(\);/.test(ua)) && gateOf(/const _rowsIn = \(usageHistory, fromMs, toV\) => usageHistory\._evCountUpTo\(toV\) - usageHistory\._evCountUpTo\(\(fromMs \|\| 0\) - 1\);/.test(ua)) && gateOf(/usageHistory\.pricingToken\(\)/.test(ua)) && gateOf(/_memoPut\(memo, memoKey/.test(ua)) && verdictOf(/memoKey = `\$\{\[\.\.\.want\]\.sort\(\)\.join\(','\)\}\|\$\{fromMs\}`;/.test(ua)),
   'costBetweenMulti memo is per-ledger, keyed by ids|from and VERSIONED by the rows in [from, to] (hotfix usage-ledger-walk: the interval\'s own version); a pricing edit or a new ledger generation empties it');
-ok(/Math\.floor\(Math\.random\(\) \* m\.keys\.length\)/.test(ua), 'eviction picks a RANDOM victim (a cyclic scan defeats FIFO/LRU completely)');
-ok(/typeof usageHistory\?\.pricingToken === 'function'/.test(ua), 'a ledger that cannot version its prices is NOT memoized at all');
+ok(verdictOf(/Math\.floor\(Math\.random\(\) \* m\.keys\.length\)/.test(ua)), 'eviction picks a RANDOM victim (a cyclic scan defeats FIFO/LRU completely)');
+ok(verdictOf(/typeof usageHistory\?\.pricingToken === 'function'/.test(ua)), 'a ledger that cannot version its prices is NOT memoized at all');
 const uhs = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
-ok(/_sortedEvents\(\) \{/.test(uhs) && /if \(Date\.now\(\) - \(c\.checkedAt \|\| 0\) < 1000\) return c\.events;/.test(uhs) && /if \(to && ev\.ts > to\) break;/.test(uhs), 'usage-history has the sorted view, the 1s throttle and the early break');
-ok(/pricingToken\(\) \{/.test(uhs) && /this\._priceTokFor === this\._pricing/.test(uhs), 'usage-history exposes the price-table token, recomputed only when the table object is REPLACED');
+ok(gateOf(/_sortedEvents\(\) \{/.test(uhs)) && gateOf(/if \(Date\.now\(\) - \(c\.checkedAt \|\| 0\) < 1000\) return c\.events;/.test(uhs)) && verdictOf(/if \(to && ev\.ts > to\) break;/.test(uhs)), 'usage-history has the sorted view, the 1s throttle and the early break');
+ok(gateOf(/pricingToken\(\) \{/.test(uhs)) && verdictOf(/this\._priceTokFor === this\._pricing/.test(uhs)), 'usage-history exposes the price-table token, recomputed only when the table object is REPLACED');
 // The client half of inc-mtox23xw is the post-attach short-view rescue. Its
 // FUNCTIONAL coverage (the corroborated two readings, the harm bound) lives in
 // scripts/test-chat-trim-guard.mjs — the 2.369.36 `rendered < 30` gate was
@@ -161,10 +161,10 @@ ok(/pricingToken\(\) \{/.test(uhs) && /this\._priceTokFor === this\._pricing/.te
 // inc-mtq5bpjt-0o0n it ALSO defers through the desktop-resume settle window —
 // same law, second source of transitional geometry.
 const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
-ok(/_shortViewNeedsFill\(list\) \{/.test(cv) && /if \(rendered > SHORT_FILL_MAX_CARDS\) return false;/.test(cv) && /tryAutoFill\(2\), 700\);/.test(cv) && /autoFill/.test(cv), 'chat-view: the auto-fill page-up after attach waits for heights to settle, corroborates the reading and keeps its harm bound (the largest attach slab, SHORT_FILL_MAX_CARDS — perf lane A re-derived it from the old `rendered + 50 > 150`; never a pinned tall window)');
-ok(/const tryAutoFill = \(retries\) => \{[\s\S]{0,400}this\._resumeSettleUntil \|\| 0\) - Date\.now\(\)/.test(cv), 'chat-view: …and it defers through a desktop-resume settle instead of deciding on transitional geometry (inc-mtq5bpjt-0o0n)');
+ok(gateOf(/_shortViewNeedsFill\(list\) \{/.test(cv)) && gateOf(/if \(rendered > SHORT_FILL_MAX_CARDS\) return false;/.test(cv)) && gateOf(/tryAutoFill\(2\), 700\);/.test(cv)) && verdictOf(/autoFill/.test(cv)), 'chat-view: the auto-fill page-up after attach waits for heights to settle, corroborates the reading and keeps its harm bound (the largest attach slab, SHORT_FILL_MAX_CARDS — perf lane A re-derived it from the old `rendered + 50 > 150`; never a pinned tall window)');
+ok(verdictOf(/const tryAutoFill = \(retries\) => \{[\s\S]{0,400}this\._resumeSettleUntil \|\| 0\) - Date\.now\(\)/.test(cv)), 'chat-view: …and it defers through a desktop-resume settle instead of deciding on transitional geometry (inc-mtq5bpjt-0o0n)');
 fs.rmSync(dataDir, { recursive: true, force: true });
 fs.rmSync(priceDir, { recursive: true, force: true });
 fs.rmSync(otherDir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

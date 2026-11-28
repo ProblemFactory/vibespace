@@ -45,7 +45,7 @@ const say = console.log.bind(console);
 // B-9a24 U1 follow (r5135 law 1): a leg's control whose plant was never in force is a COUNTED SKIP — said, and never ALL PASS over it
 let legSkips = 0;
 const skip = (m) => { legSkips++; say(`  ⚠ SKIP: ${m}`); };
-function ok(c, name, detail) { if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700)}`); } return !!c; }
+function ok(c, name, detail) { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700)}`); } return !!c; }
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -1625,7 +1625,7 @@ const LEGS = {
 const T0 = performance.now(), legMs = {};
 const run = async (name, T) => { const t = performance.now(); try { return await LEGS[name](T); } catch (e) { return { ok: false, detail: `threw: ${(e && e.message) || e}` }; } finally { legMs[name] = (legMs[name] || 0) + (performance.now() - t); } };
 say('this tree');
-for (const leg of Object.keys(LEGS)) { const r = await run(leg, REPO); ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of Object.keys(LEGS)) { const r = await run(leg, REPO); ok(verdictOf(r.ok), `${leg}: ${r.detail}`); }
 const CONTROLS = process.env.RESET_DOOR_CONTROLS === '1';
 // THE RED TREES COME FROM WHAT THE REPOSITORY HAS (r4): master, always; the lane's rounds 1 and 2 only on its own explicit
 // switch (RESET_DOOR_ROUNDS=1 — they are not in any clone but the lane's); a control that cannot run is a COUNTED skip
@@ -1699,4 +1699,4 @@ if (CONTROLS) {
 }
 say(`  [${(performance.now() - T0).toFixed(0)} ms — the slowest legs: ${Object.entries(legMs).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', ')}]`);
 say(failed ? `\n${failed} FAILED (${passed} passed${skipped ? `, ${skipped} skipped` : ''}${legSkips ? `, ${legSkips} control(s) SKIPPED: a plant not in force` : ''})` : legSkips ? `\n${passed} passed, ${legSkips} control(s) SKIPPED (a plant not in force) — not ALL PASS${skipped ? `; ${skipped} red controls SKIPPED — not in this clone` : ''}` : `\nALL PASS (${passed}${skipped ? `; ${skipped} red controls SKIPPED — not in this clone` : ''})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

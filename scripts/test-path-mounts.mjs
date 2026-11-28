@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── fake target service ──
@@ -50,7 +50,7 @@ let r = await get('/svc/app/api/x?q=1');
 let j = await r.json();
 ok(r.status === 200 && j.path === '/api/x?q=1', 'prefix stripped, query preserved', JSON.stringify(j));
 ok(j.prefix === '/svc/app', 'X-Forwarded-Prefix carries the mount');
-ok(String(j.host).startsWith('127.0.0.1:'), 'Host rewritten to the local target');
+ok(verdictOf(String(j.host).startsWith('127.0.0.1:')), 'Host rewritten to the local target');
 // root form
 j = await (await get('/svc/app/')).json();
 ok(j.path === '/', 'mount root maps to target root');
@@ -64,7 +64,7 @@ ok(r.status === 302 && r.headers.get('location') === '/svc/app/login', 'absolute
 r = await get('/svc/nope/');
 ok(r.status === 404, 'unknown mount = 404');
 r = await get('/svc/dead/');
-ok(r.status === 502 && /not active/.test((await r.json()).error || ''), 'mounted-but-down forward = honest 502');
+ok(r.status === 502 && verdictOf(/not active/.test((await r.json()).error || '')), 'mounted-but-down forward = honest 502');
 // per-mount auth (2.359.0): the /svc prefix is middleware-exempt, so these
 // checks ARE the security boundary — pin both sides
 authed = false;
@@ -77,7 +77,7 @@ const wsDenied = await new Promise((resolve) => {
   let buf = ''; sock.on('data', (d) => { buf += d; }); sock.on('close', () => resolve(buf)); sock.on('error', () => resolve(buf));
   setTimeout(() => { sock.destroy(); }, 2000);
 });
-ok(/401/.test(wsDenied), 'PRIVATE mount ws upgrade without a login = 401', wsDenied.slice(0, 40));
+ok(verdictOf(/401/.test(wsDenied)), 'PRIVATE mount ws upgrade without a login = 401', wsDenied.slice(0, 40));
 authed = true;
 // ws upgrade splice
 const wsResp = await new Promise((resolve, reject) => {
@@ -89,7 +89,7 @@ const wsResp = await new Promise((resolve, reject) => {
   sock.on('error', reject);
   setTimeout(() => reject(new Error('ws timeout: ' + buf)), 4000);
 });
-ok(/101 Switching Protocols/.test(wsResp) && wsResp.includes('ECHO:/ws'), 'ws upgrade spliced with the prefix stripped', wsResp.slice(0, 80));
+ok(gateOf(/101 Switching Protocols/.test(wsResp)) && verdictOf(wsResp.includes('ECHO:/ws')), 'ws upgrade spliced with the prefix stripped', wsResp.slice(0, 80));
 
 // setPathMount store rules (validation + uniqueness) on the real manager
 {
@@ -102,13 +102,13 @@ ok(/101 Switching Protocols/.test(wsResp) && wsResp.includes('ECHO:/ws'), 'ws up
   let threw = null; try { pf.setPathMount('pf-b', 'myapp'); } catch (e) { threw = e.message; }
   // lane-redact verify r8 ①: the owner is named by WHERE it points, never by its label (a service's label is a job's name,
   // and this refusal is toasted into every device's toast history — "Clear content…" cannot reach it)
-  ok(/already mounted by the forward of this machine:1234$/.test(threw || '') && !/nightly digest/.test(threw || ''), 'duplicate name refused with the owner named by machine + port (never its label — a job\'s name)', threw);
+  ok(gateOf(/already mounted by the forward of this machine:1234$/.test(threw || '')) && !/nightly digest/.test(threw || ''), 'duplicate name refused with the owner named by machine + port (never its label — a job\'s name)', threw);
   threw = null; try { pf.setPathMount('pf-b', 'Bad_Name'); } catch (e) { threw = e.message; }
-  ok(/lowercase/.test(threw || ''), 'invalid name refused');
+  ok(verdictOf(/lowercase/.test(threw || '')), 'invalid name refused');
   ok(pf.setPathMount('pf-a', null).pathMount === null, 'unmount clears');
   ok(pf.pathMountTarget('myapp') === null, 'cleared mount resolves to null');
 }
 
 target.close(); srv.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

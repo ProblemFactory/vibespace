@@ -33,7 +33,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1800) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1800) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 80) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = await pred(); if (v) return v; } catch { } await sleep(every); } try { return await pred(); } catch { return null; } };
@@ -161,7 +161,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     srv = spawn(process.execPath, ['server.js'], { cwd: WT, env: { ...baseEnv, ...VNC_ENV, PATH: `${FAKE_BIN}:${baseEnv.PATH || '/usr/bin:/bin'}`, PORT: String(PORT), HOME: HOME_DIR, CLAUDE_CMD: STUB, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
     procs.add(srv);
     srv.stdout.on('data', (d) => { journal = (journal + d).slice(-60000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-60000); });
-    return ok(await until(() => journal.includes('Ready.'), 60000, 200), `the scratch server booted (${tag})`, journal.slice(-800));
+    return ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 200)), `the scratch server booted (${tag})`, journal.slice(-800));
   }
   async function stop() {
     const s = srv; srv = null;
@@ -184,12 +184,12 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     return c ? c.sessionId : null;
   };
   const SID = await create('c-a', '网店巡检'), SID_B = await create('c-b', 'Empty chat');
-  if (!ok(SID && SID_B, 'two live chat sessions created through the real path (stub claude behind the real wrapper)', frames.filter((m) => m.type === 'error').slice(-2))) return;
+  if (!ok(gateOf(SID) && verdictOf(SID_B), 'two live chat sessions created through the real path (stub claude behind the real wrapper)', frames.filter((m) => m.type === 'error').slice(-2))) return;
   const keyOf = async (sid) => until(async () => { const a = frames.filter((m) => m.type === 'active-sessions').pop(); const r = a ? a.sessions.find((s) => s.id === sid) : null; return r && /^bk-[0-9a-f]{8}$/.test(String(r.browserKey || '')) ? r.browserKey : null; }, 20000, 150);
   const KA = await keyOf(SID), KB = await keyOf(SID_B);
   const made = await api('POST', '/api/browser/profiles', { label: 'work' });
   const PW = made.json && made.json.profile && made.json.profile.id;
-  if (!ok(KA && KB && PW, 'each conversation carries its browser key; the profile "work" exists', { KA, KB, made: made.json })) return;
+  if (!ok(gateOf(KA) && gateOf(KB) && verdictOf(PW), 'each conversation carries its browser key; the profile "work" exists', { KA, KB, made: made.json })) return;
 
   // ── chrome ──
   const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--force-device-scale-factor=1', '--disable-background-timer-throttling', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,800', 'about:blank'], { stdio: 'ignore' });
@@ -264,7 +264,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const cap = await p1.send('Page.captureScreenshot', { format: 'jpeg', quality: 70, clip: { x: 0, y: 0, width: FW, height: FH, scale: 1 } });
     jpegs.push(Buffer.from(cap.result.data, 'base64'));
   }
-  ok(jpegs.length === 6 && jpegs.every((b) => b[0] === 0xff && b[1] === 0xd8), 'six JPEG frames drawn by chrome (a grid, a number, the click target)');
+  ok(jpegs.length === 6 && verdictOf(jpegs.every((b) => b[0] === 0xff && b[1] === 0xd8)), 'six JPEG frames drawn by chrome (a grid, a number, the click target)');
 
   const CHAT = (sel = '') => `.window .chat-msg.chat-browser-session${sel}`;
   const cardsNow = (p) => p.ev(`[...document.querySelectorAll('.chat-msg.chat-browser-session')].map((e) => ({ s: e.dataset.browserSession, phase: e.dataset.phase, text: e.querySelector('.chat-browser-session-title').textContent, replay: !!e.querySelector('.chat-browser-session-replay'), btn: (e.querySelector('.chat-browser-session-replay') || {}).className || '' }))`);
@@ -276,20 +276,20 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     // ═══ ① LIVE: the user's attach ⇒ the start card; the detach ⇒ the end card with 回放 ═══
     console.log('— ① live: the two cards through the live op');
     await p1.load('zh', 1280, 800);
-    ok(await openChat(p1), '① the conversation\'s chat window is open (zh, 1280×800)');
+    ok(verdictOf(await openChat(p1)), '① the conversation\'s chat window is open (zh, 1280×800)');
     await sleep(1500); // the attach's rebuild settles (a card fed before it is derived from the marker instead — ② proves that path)
     const at = await api('POST', '/api/browser/attach', { sessionId: SID, profile: 'work' });
-    ok(at.status === 200 && at.json.lease && at.json.lease.browserKey === KA, '① the user attaches "work" (the REAL keeper grants the lease)', at.json);
+    ok(at.status === 200 && gateOf(at.json.lease) && at.json.lease.browserKey === KA, '① the user attaches "work" (the REAL keeper grants the lease)', at.json);
     const live1 = await until(async () => { const c = await cardsNow(p1); return c.length >= 1 ? c : null; }, 10000, 120);
     const S1 = live1 && live1[0] ? live1[0].s : null;
-    ok(live1 && live1.length === 1 && live1[0].phase === 'start' && /^VibeSpace · 浏览器会话开始 · work · \d{2}:\d{2}$/.test(live1[0].text) && !live1[0].replay, `① the START card appears in the chat at once, a VibeSpace card: "${live1 && live1[0] && live1[0].text}"`);
-    ok(await p1.ev(`!!document.querySelector('.chat-msg.chat-browser-session.chat-vs-notice.chat-msg-system') && !document.querySelector('.chat-msg.chat-browser-session.chat-msg-assistant, .chat-msg.chat-browser-session.chat-msg-user')`), '① …drawn like the takeover / handback cards (chat-vs-notice), never as agent or user text');
+    ok(gateOf(live1) && live1.length === 1 && live1[0].phase === 'start' && gateOf(/^VibeSpace · 浏览器会话开始 · work · \d{2}:\d{2}$/.test(live1[0].text)) && !live1[0].replay, `① the START card appears in the chat at once, a VibeSpace card: "${live1 && live1[0] && live1[0].text}"`);
+    ok(verdictOf(await p1.ev(`!!document.querySelector('.chat-msg.chat-browser-session.chat-vs-notice.chat-msg-system') && !document.querySelector('.chat-msg.chat-browser-session.chat-msg-assistant, .chat-msg.chat-browser-session.chat-msg-user')`)), '① …drawn like the takeover / handback cards (chat-vs-notice), never as agent or user text');
     await sleep(1200);
     const dt = await api('POST', '/api/browser/detach', { sessionId: SID, profile: 'work' });
     const live2 = await until(async () => { const c = await cardsNow(p1); return c.length >= 2 ? c : null; }, 10000, 120);
     // 2026-09-28 (the naive-user verifier): the end card says WHY it ended, and a session the agent never acted in offers
     // no Replay (its replay could only say "the agent did not act")
-    ok(dt.status === 200 && live2 && live2[1].phase === 'end' && live2[1].s === S1 && /^VibeSpace · 浏览器会话结束 · 用时 \d+ 秒 · 0 步操作 · 对话不再使用这个浏览器$/.test(live2[1].text) && !live2[1].replay, `① the detach ⇒ the END card, same session, its duration, its count and why it ended — 0 actions, so no 回放: "${live2 && live2[1] && live2[1].text}"`);
+    ok(dt.status === 200 && gateOf(live2) && live2[1].phase === 'end' && live2[1].s === S1 && gateOf(/^VibeSpace · 浏览器会话结束 · 用时 \d+ 秒 · 0 步操作 · 对话不再使用这个浏览器$/.test(live2[1].text)) && !live2[1].replay, `① the detach ⇒ the END card, same session, its duration, its count and why it ended — 0 actions, so no 回放: "${live2 && live2[1] && live2[1].text}"`);
     await p1.shot('01-zh-live-cards', '.window:has(.chat-browser-session)');
     const markers = () => { try { return fs.readFileSync(path.join(WT, 'data/browser-trace', PW, BS.MARKERS_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } };
     ok(markers().length === 2 && markers()[0].id === S1 && markers()[1].reason === 'released', '① the recorder wrote the start + end markers on the keeper\'s lease seam (released)', markers());
@@ -343,64 +343,64 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     fs.appendFileSync(path.join(sd, BS.MARKERS_FILE), mks.map(J).join('\n') + '\n');
     if (!await boot('second — the restart')) return;
     await p1.load('zh', 1280, 800);
-    ok(await openChat(p1), '② after the restart the chat window re-attaches (the first attach = the rebuild)');
+    ok(verdictOf(await openChat(p1)), '② after the restart the chat window re-attaches (the first attach = the rebuild)');
     const rebuilt = await until(async () => { const c = await cardsNow(p1); return c.length >= 6 ? c : null; }, 20000, 200);
     const order = (rebuilt || []).map((c) => `${c.s}:${c.phase}`);
-    ok(rebuilt && order.join() === [`${S2}:start`, `${S2}:end`, `${S3}:start`, `${S3}:end`, `${S1}:start`, `${S1}:end`].join(), `② every card is back after the rebuild — the seeded sessions' (only their markers on disk could say them) and the live one, in time order (${order.join(' ')})`);
-    ok(rebuilt && /^VibeSpace · 浏览器会话结束 · 用时 10 分钟 · 6 步操作 · 对话不再使用这个浏览器$/.test(rebuilt[1].text) && /^VibeSpace · 浏览器会话结束 · 用时 5 分钟 · 3 步操作 · 浏览器被停止了$/.test(rebuilt[3].text) && rebuilt[1].replay && rebuilt[3].replay && !rebuilt[5].replay && /\bmounts-btn\b/.test(rebuilt[1].btn), `② the rebuilt end cards say the duration, the actions and why each ended; 回放 (the house text button) where the agent acted, none on the 0-action one ("${rebuilt && rebuilt[1].text}")`);
+    ok(gateOf(rebuilt) && order.join() === [`${S2}:start`, `${S2}:end`, `${S3}:start`, `${S3}:end`, `${S1}:start`, `${S1}:end`].join(), `② every card is back after the rebuild — the seeded sessions' (only their markers on disk could say them) and the live one, in time order (${order.join(' ')})`);
+    ok(gateOf(rebuilt) && gateOf(/^VibeSpace · 浏览器会话结束 · 用时 10 分钟 · 6 步操作 · 对话不再使用这个浏览器$/.test(rebuilt[1].text)) && gateOf(/^VibeSpace · 浏览器会话结束 · 用时 5 分钟 · 3 步操作 · 浏览器被停止了$/.test(rebuilt[3].text)) && gateOf(rebuilt[1].replay) && gateOf(rebuilt[3].replay) && !rebuilt[5].replay && verdictOf(/\bmounts-btn\b/.test(rebuilt[1].btn)), `② the rebuilt end cards say the duration, the actions and why each ended; 回放 (the house text button) where the agent acted, none on the 0-action one ("${rebuilt && rebuilt[1].text}")`);
     ok(await p1.text(`.chat-msg.chat-browser-session[data-browser-session="${S2}"][data-phase="end"] .chat-browser-session-replay`) === '回放', '② the button says 回放');
     await p1.shot('02-zh-rebuilt-cards', '.window:has(.chat-browser-session)');
 
     // ═══ ③ the replay window FROM THE CARD ═══
     console.log('— ③ the replay window from the card: the list, the picture, the keys, the play');
-    ok(await p1.click(`.chat-msg.chat-browser-session[data-browser-session="${S2}"][data-phase="end"] .chat-browser-session-replay`), '③ 回放 on the 6-action session\'s end card (a real mouse)');
+    ok(verdictOf(await p1.click(`.chat-msg.chat-browser-session[data-browser-session="${S2}"][data-phase="end"] .chat-browser-session-replay`)), '③ 回放 on the 6-action session\'s end card (a real mouse)');
     const RP = '.window .brp';
     const rs = () => p1.ev(`(() => { for (const [, w] of window.app.wm.windows) if (w.type === 'browser-replay' && w._browserReplay) return { ...w._browserReplay.state(), title: w.title, wins: [...window.app.wm.windows.values()].filter((x) => x.type === 'browser-replay').length }; return null; })()`);
     const r0 = await until(async () => { const s = await rs(); return s && s.chosen === S2 && s.n === 6 ? s : null; }, 10000, 120);
-    ok(r0 && r0.sessions === 3 && r0.index === 0 && r0.which === 'after' && r0.empty === null, `③ the replay window opened on THAT session: 3 sessions listed, its 6 actions, the first action's after-frame (${J(r0)})`);
-    ok(r0 && /浏览回放 · 网店巡检/.test(String(r0.title || '')), `③ its title: "${r0 && r0.title}"`);
+    ok(gateOf(r0) && r0.sessions === 3 && r0.index === 0 && r0.which === 'after' && r0.empty === null, `③ the replay window opened on THAT session: 3 sessions listed, its 6 actions, the first action's after-frame (${J(r0)})`);
+    ok(gateOf(r0) && verdictOf(/浏览回放 · 网店巡检/.test(String(r0.title || ''))), `③ its title: "${r0 && r0.title}"`);
     const rows = await p1.ev(`[...document.querySelectorAll('${RP} .brp-session')].map((e) => ({ s: e.dataset.session, active: e.classList.contains('active'), text: e.textContent }))`);
-    ok(rows.map((r) => r.s).join() === [S1, S3, S2].join() && rows.find((r) => r.s === S2).active && /6 步操作/.test(rows.find((r) => r.s === S2).text) && /帮手|自己的临时浏览器|work/.test(rows[0].text), `③ the session list, NEWEST first, the chosen one marked (${rows.map((r) => r.text).join(' | ')})`);
+    ok(rows.map((r) => r.s).join() === [S1, S3, S2].join() && gateOf(rows.find((r) => r.s === S2).active) && gateOf(/6 步操作/.test(rows.find((r) => r.s === S2).text)) && verdictOf(/帮手|自己的临时浏览器|work/.test(rows[0].text)), `③ the session list, NEWEST first, the chosen one marked (${rows.map((r) => r.text).join(' | ')})`);
     const acts = await p1.ev(`[...document.querySelectorAll('${RP} .brp-action')].map((e) => ({ id: e.dataset.traceId, img: !!e.querySelector('img'), text: e.textContent }))`);
-    ok(acts.length === 6 && acts.every((a) => a.img) && /(Click|点击|クリック) \(120, 90\)/.test(acts[0].text) /* lane ui-plain-words browser-profiles-20: the step in words (the CLI line is its title) */, `③ its actions: time · verb · where · the after-frame's thumbnail (${acts.length})`);
+    ok(acts.length === 6 && gateOf(acts.every((a) => a.img)) && verdictOf(/(Click|点击|クリック) \(120, 90\)/.test(acts[0].text)) /* lane ui-plain-words browser-profiles-20: the step in words (the CLI line is its title) */, `③ its actions: time · verb · where · the after-frame's thumbnail (${acts.length})`);
     // lane trace-fits (the owner 2026-10-01): the session's 5 page-size changes (2 runs) are thin TICKS between the 6 steps,
     // never steps of their own; the toggle (one per-device preference) makes each run's entry a step, and off again
     const ticks = await p1.ev(`[...document.querySelectorAll('${RP} .brp-tick')].map((e) => ({ id: e.dataset.fitsId, n: e.dataset.fits, text: e.textContent, title: e.title }))`);
     const rT = await rs();
-    ok(ticks.length === 2 && ticks[0].n === '3' && ticks[0].text === '实时视图已适配 ×3 · 1072×907（最后一次）' && ticks[1].n === '2' && /3 次页面尺寸变化/.test(ticks[0].title) && rT && rT.n === 6 && rT.ticks === 2 && rT.entries === 8, `③ the 5 page-size changes are 2 thin ticks between the 6 steps (${ticks.map((x) => x.text).join(' | ')}; steps ${rT && rT.n}, entries ${rT && rT.entries})`, { ticks, rT });
+    ok(ticks.length === 2 && ticks[0].n === '3' && ticks[0].text === '实时视图已适配 ×3 · 1072×907（最后一次）' && ticks[1].n === '2' && gateOf(/3 次页面尺寸变化/.test(ticks[0].title)) && gateOf(rT) && rT.n === 6 && rT.ticks === 2 && rT.entries === 8, `③ the 5 page-size changes are 2 thin ticks between the 6 steps (${ticks.map((x) => x.text).join(' | ')}; steps ${rT && rT.n}, entries ${rT && rT.entries})`, { ticks, rT });
     const tickPos = await p1.ev(`[...document.querySelectorAll('${RP} .brp-actions > *')].map((e) => e.classList.contains('brp-tick') ? 'tick' : 'step').join(',')`);
     ok(tickPos === 'step,step,step,tick,step,step,tick,step', `③ each tick sits where its run happened — after the 3rd and the 5th step (${tickPos})`);
     const togVis = await p1.ev(`(() => { const l = document.querySelector('${RP} .brp-fits-bar .browser-trace-fits-toggle'); return l && getComputedStyle(l).display !== 'none' ? { text: l.textContent.trim(), on: l.querySelector('input').checked, h: l.getBoundingClientRect().height } : null; })()`);
-    ok(togVis && togVis.text === '显示页面尺寸变化' && togVis.on === false && togVis.h > 0, `③ the toggle is there with its words, off by default (${J(togVis)})`);
-    ok(await p1.click(`${RP} .brp-fits-bar .browser-trace-fits-toggle input`), '③ the toggle on (a real mouse)');
+    ok(gateOf(togVis) && togVis.text === '显示页面尺寸变化' && togVis.on === false && togVis.h > 0, `③ the toggle is there with its words, off by default (${J(togVis)})`);
+    ok(verdictOf(await p1.click(`${RP} .brp-fits-bar .browser-trace-fits-toggle input`)), '③ the toggle on (a real mouse)');
     const onS = await until(async () => { const s = await rs(); return s && s.showFits && s.n === 8 && s.ticks === 0 ? s : null; }, 4000, 80);
     const fitRows = await p1.ev(`[...document.querySelectorAll('${RP} .brp-action.fits')].map((e) => e.textContent)`);
-    ok(onS && fitRows.length === 2 && /(Fit the page to the view|让页面适应视图|ページを表示に合わせる) 1072×907 ×3/.test(fitRows[0]) /* lane ui-plain-words browser-profiles-20: the op in words, never «viewer-fit» */ && /×2/.test(fitRows[1]), `③ on: each run's entry is a step of its own saying how many it stands for (8 steps, 0 ticks; "${fitRows[0]}")`, { onS, fitRows });
-    ok(await p1.click(`${RP} .brp-fits-bar .browser-trace-fits-toggle input`), '③ …and off again');
+    ok(gateOf(onS) && fitRows.length === 2 && gateOf(/(Fit the page to the view|让页面适应视图|ページを表示に合わせる) 1072×907 ×3/.test(fitRows[0])) /* lane ui-plain-words browser-profiles-20: the op in words, never «viewer-fit» */ && verdictOf(/×2/.test(fitRows[1])), `③ on: each run's entry is a step of its own saying how many it stands for (8 steps, 0 ticks; "${fitRows[0]}")`, { onS, fitRows });
+    ok(verdictOf(await p1.click(`${RP} .brp-fits-bar .browser-trace-fits-toggle input`)), '③ …and off again');
     const offS = await until(async () => { const s = await rs(); return s && !s.showFits && s.n === 6 && s.ticks === 2 && s.index === 0 ? s : null; }, 4000, 80);
     ok(!!offS, '③ off: 6 steps and 2 ticks again, the first step still showing (the preference is the device\'s — every surface reads it)', offS);
     const pic = async () => p1.ev(`(() => { const img = document.querySelector('${RP} .brp-img'); const dot = document.querySelector('${RP} .brp-pic .browser-trace-overlay.dot'); if (!img || !img.complete || !img.naturalWidth) return null; const ib = img.getBoundingClientRect(); const db = dot ? dot.getBoundingClientRect() : null; return { src: img.getAttribute('src'), w: ib.width, h: ib.height, dx: db ? db.left + db.width / 2 - ib.left : null, dy: db ? db.top + db.height / 2 - ib.top : null }; })()`);
     const g0 = await until(async () => { const g = await pic(); return g && g.dx !== null ? g : null; }, 8000, 100);
     const within = (g, [x, y]) => g && Math.abs(g.dx - x * g.w / FW) <= 3 && Math.abs(g.dy - y * g.h / FH) <= 3;
-    ok(g0 && /\/api\/browser\/actions\/tr-5e55a0020000\/frame\/after$/.test(g0.src) && within(g0, CLICKS[0]), `③ the after-frame at full width with the click DRAWN where the fixture clicked (±3 px): dot at ${g0 && Math.round(g0.dx)},${g0 && Math.round(g0.dy)} of ${g0 && Math.round(g0.w)}×${g0 && Math.round(g0.h)}`);
+    ok(gateOf(g0) && gateOf(/\/api\/browser\/actions\/tr-5e55a0020000\/frame\/after$/.test(g0.src)) && verdictOf(within(g0, CLICKS[0])), `③ the after-frame at full width with the click DRAWN where the fixture clicked (±3 px): dot at ${g0 && Math.round(g0.dx)},${g0 && Math.round(g0.dy)} of ${g0 && Math.round(g0.w)}×${g0 && Math.round(g0.h)}`);
     await p1.shot('03-zh-replay-first', RP);
     await p1.ev(`document.querySelector('${RP}').focus()`);
     await p1.key('ArrowRight', 'ArrowRight', 39);
     const g1 = await until(async () => { const s = await rs(); const g = await pic(); return s && s.index === 1 && g && /0001\/frame\/after$/.test(g.src) && g.dx !== null ? g : null; }, 4000, 80);
-    ok(g1 && within(g1, CLICKS[1]), '③ → = the next action, its click drawn at its own point');
+    ok(gateOf(g1) && verdictOf(within(g1, CLICKS[1])), '③ → = the next action, its click drawn at its own point');
     await p1.key('End', 'End', 35); const sEnd = await rs();
     await p1.key('Home', 'Home', 36); const sHome = await rs();
     await p1.key('ArrowLeft', 'ArrowLeft', 37); const sLeft = await rs();
     ok(sEnd.index === 5 && sHome.index === 0 && sLeft.index === 0, `③ End = the last, Home = the first, ← at the first stays (${sEnd.index} ${sHome.index} ${sLeft.index})`);
-    ok(await p1.click(`${RP} .brp-which:not(.active)`) && (await until(async () => { const g = await pic(); return g && /frame\/before$/.test(g.src) ? g : null; }, 3000, 80)), '③ 操作前 shows the before-frame (the toggle)');
+    ok(gateOf(await p1.click(`${RP} .brp-which:not(.active)`)) && (verdictOf(await until(async () => { const g = await pic(); return g && /frame\/before$/.test(g.src) ? g : null; }, 3000, 80))), '③ 操作前 shows the before-frame (the toggle)');
     await p1.click(`${RP} .brp-which:not(.active)`);
     await p1.ev(`document.querySelector('${RP}').focus()`);
     const t0 = Date.now();
     await p1.key(' ', 'Space', 32);
     const mid = await until(async () => { const s = await rs(); return s && s.playing && s.index >= 2 ? { ...s, ms: Date.now() - t0 } : null; }, 5000, 60);
     const endp = await until(async () => { const s = await rs(); return s && !s.playing && s.index === 5 ? { ...s, ms: Date.now() - t0 } : null; }, 9000, 60);
-    ok(mid && mid.ms >= 1800 && mid.ms <= 3500, `③ Space plays ONE action a second (index 2 after ${mid && mid.ms} ms)`);
-    ok(endp && endp.ms >= 4800 && endp.ms <= 7500, `③ …and stops by itself at the last action (${endp && endp.ms} ms for 5 steps)`);
+    ok(gateOf(mid) && mid.ms >= 1800 && mid.ms <= 3500, `③ Space plays ONE action a second (index 2 after ${mid && mid.ms} ms)`);
+    ok(gateOf(endp) && endp.ms >= 4800 && endp.ms <= 7500, `③ …and stops by itself at the last action (${endp && endp.ms} ms for 5 steps)`);
     await p1.shot('03b-zh-replay-played', RP);
 
     // ═══ ③c a LONG session: the cut is SAID, the rows are KEYED (verifier 2026-09-28) ═══
@@ -408,10 +408,10 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.ev(`window.app.openBrowserReplay({ browserKey: ${J(KC)}, session: ${J(S4)} })`);
     const rsC = () => p1.ev(`(() => { for (const [, w] of window.app.wm.windows) if (w.type === 'browser-replay' && w._browserReplay && w._browserReplay.target().browserKey === ${J(KC)}) return w._browserReplay.state(); return null; })()`);
     const r3c = await until(async () => { const s = await rsC(); return s && s.chosen === S4 && s.n === 1000 ? s : null; }, 12000, 120);
-    ok(r3c && r3c.total === 1200, `③c the window holds the newest 1 000 of 1 200 (n ${r3c && r3c.n}, total ${r3c && r3c.total})`);
+    ok(gateOf(r3c) && r3c.total === 1200, `③c the window holds the newest 1 000 of 1 200 (n ${r3c && r3c.n}, total ${r3c && r3c.total})`);
     const head3c = await p1.ev(`(() => { for (const [, w] of window.app.wm.windows) if (w.type === 'browser-replay' && w._browserReplay && w._browserReplay.target().browserKey === ${J(KC)}) { const h = w.content.querySelector('.brp-actions-head'); return h ? h.textContent.trim() : null; } return null; })()`);
     ok(head3c === '操作（最近 1000 步，共 1200 步）', `③c the head SAYS the cut in the device's words ("${head3c}") — never "操作 (1000)" under a row that says 1200`);
-    ok(/1200 步操作/.test(await p1.text(`.brp-session[data-session="${S4}"]`)), '③c …while the session row keeps saying 1200 actions');
+    ok(verdictOf(/1200 步操作/.test(await p1.text(`.brp-session[data-session="${S4}"]`))), '③c …while the session row keeps saying 1200 actions');
     const k3c = await p1.ev(`(async () => {
       const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-replay' && x._browserReplay && x._browserReplay.target().browserKey === ${J(KC)});
       const list = w.content.querySelector('.brp-actions'); const first = list.firstElementChild, last = list.lastElementChild, n0 = list.childElementCount;
@@ -422,17 +422,17 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       await new Promise((r) => setTimeout(r, 300));
       return { reloaded: fetched() > f0, firstSame: list.firstElementChild === first, lastSame: list.lastElementChild === last, n: list.childElementCount, n0, activeKept: !!list.querySelector('.brp-action.active') };
     })()`);
-    ok(k3c && k3c.reloaded && k3c.firstSame && k3c.lastSame && k3c.n === 1000 && k3c.n0 === 1000 && k3c.activeKept, `③c a trace broadcast for this conversation RELOADS the list (${k3c && k3c.reloaded}) and every row keeps its node — first ${k3c && k3c.firstSame}, last ${k3c && k3c.lastSame}, ${k3c && k3c.n} rows, the active row kept`, k3c);
+    ok(gateOf(k3c) && gateOf(k3c.reloaded) && gateOf(k3c.firstSame) && gateOf(k3c.lastSame) && k3c.n === 1000 && k3c.n0 === 1000 && verdictOf(k3c.activeKept), `③c a trace broadcast for this conversation RELOADS the list (${k3c && k3c.reloaded}) and every row keeps its node — first ${k3c && k3c.firstSame}, last ${k3c && k3c.lastSame}, ${k3c && k3c.n} rows, the active row kept`, k3c);
     await p1.shot('03c-zh-replay-long', RP);
-    ok(await p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-replay' && x._browserReplay && x._browserReplay.target().browserKey === ${J(KC)}); if (!w) return false; window.app.wm.closeWindow(w.id); return true; })()`), '③c the long session\'s window closed (its conversation has no chat here; ④ counts windows)');
+    ok(verdictOf(await p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-replay' && x._browserReplay && x._browserReplay.target().browserKey === ${J(KC)}); if (!w) return false; window.app.wm.closeWindow(w.id); return true; })()`)), '③c the long session\'s window closed (its conversation has no chat here; ④ counts windows)');
 
     // ═══ ④ a session whose frames the size limit took ═══
     console.log('— ④ the swept session: the named empty state, its list kept');
-    ok(await p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'chat'); if (w) window.app.goToWinId(w.id); return true; })()`), '④ back to the chat');
-    ok(await p1.click(`.chat-msg.chat-browser-session[data-browser-session="${S3}"][data-phase="end"] .chat-browser-session-replay`), '④ 回放 on the swept session\'s end card');
+    ok(verdictOf(await p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'chat'); if (w) window.app.goToWinId(w.id); return true; })()`)), '④ back to the chat');
+    ok(verdictOf(await p1.click(`.chat-msg.chat-browser-session[data-browser-session="${S3}"][data-phase="end"] .chat-browser-session-replay`)), '④ 回放 on the swept session\'s end card');
     const r4 = await until(async () => { const s = await rs(); return s && s.chosen === S3 && s.n === 3 && s.empty ? s : null; }, 8000, 100);
     const emptyTxt = await p1.text(`${RP} .brp-empty`);
-    ok(r4 && r4.empty === 'frames-removed' && emptyTxt === tr('zh', 'Frames of this session were removed to stay under the {size} limit; the action list is kept', { size: '1 GB' }) && r4.n === 3 && (await rs()).wins === 1, `④ the SAME window (one per conversation) now on that session: "${emptyTxt}" — and its 3 actions still listed`);
+    ok(gateOf(r4) && r4.empty === 'frames-removed' && emptyTxt === tr('zh', 'Frames of this session were removed to stay under the {size} limit; the action list is kept', { size: '1 GB' }) && r4.n === 3 && (await rs()).wins === 1, `④ the SAME window (one per conversation) now on that session: "${emptyTxt}" — and its 3 actions still listed`);
     ok((await p1.ev(`[...window.app.wm.windows.values()].filter((x) => x.type === 'browser-replay').length`)) === 1, '④ one replay window for the conversation, never two');
     await p1.shot('04-zh-replay-frames-removed', RP);
 
@@ -441,30 +441,30 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.ev(`(() => { for (const [id, w] of window.app.wm.windows) if (w.type === 'browser-replay') window.app.wm.closeWindow(id); return true; })()`);
     await p1.ev(`window.app.openSessionProps((window.app.sidebar._allSessions || []).find((s) => s.webuiId === ${J(SID)}))`);
     const propRow = await until(() => p1.ev(`(() => { const r = document.querySelector('.session-props-browser-sessions'); return r ? r.textContent : null; })()`), 10000, 150);
-    ok(propRow && propRow.startsWith('浏览器会话（3）') && propRow.endsWith('回放'), `⑤ Session properties: "${propRow}"`);
+    ok(gateOf(propRow) && gateOf(propRow.startsWith('浏览器会话（3）')) && verdictOf(propRow.endsWith('回放')), `⑤ Session properties: "${propRow}"`);
     await p1.shot('05-zh-props-row', '.window:has(.session-props-browser-sessions)');
-    ok(await p1.click('.session-props-browser-sessions .session-props-browser-replay'), '⑤ its 回放 (a real mouse)');
+    ok(verdictOf(await p1.click('.session-props-browser-sessions .session-props-browser-replay')), '⑤ its 回放 (a real mouse)');
     const r5 = await until(async () => { const s = await rs(); return s && s.sessions === 3 ? s : null; }, 8000, 100);
-    ok(r5 && r5.chosen === S1, `⑤ …opens the replay window on the conversation's sessions, the newest chosen (${r5 && r5.chosen})`);
+    ok(gateOf(r5) && r5.chosen === S1, `⑤ …opens the replay window on the conversation's sessions, the newest chosen (${r5 && r5.chosen})`);
     await p1.ev(`(() => { for (const [id, w] of window.app.wm.windows) if (w.type === 'browser-replay') window.app.wm.closeWindow(id); return true; })()`);
     await p1.ev('window.app.openBrowserProfiles()');
     await until(() => p1.ev(`!!document.querySelector('.bprof-profile[data-profile-id="${PW}"] .bprof-more')`), 10000, 150);
-    ok(await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-more`), '⑤ the row\'s ⋯ (design 015: one menu for every act but the primary)');
+    ok(verdictOf(await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-more`)), '⑤ the row\'s ⋯ (design 015: one menu for every act but the primary)');
     const rpBtn = await until(() => p1.ev(`(() => { const b = document.querySelector('.context-menu .bprof-replay'); return b ? { text: b.textContent, item: !!b.closest('.context-menu-item') } : null; })()`), 5000, 100);
-    ok(rpBtn && rpBtn.text === '回放…' && rpBtn.item, `⑤ the Agent browser panel's profile row offers "${rpBtn && rpBtn.text}" (a ⋯ menu row)`);
+    ok(gateOf(rpBtn) && rpBtn.text === '回放…' && verdictOf(rpBtn.item), `⑤ the Agent browser panel's profile row offers "${rpBtn && rpBtn.text}" (a ⋯ menu row)`);
     await p1.ev(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
     await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-chev`); // its fold: the records against the limit
     const usedTxt = await p1.text(`.bprof-profile[data-profile-id="${PW}"] .bprof-trace`);
     const usedLine = await p1.text(`.bprof-profile[data-profile-id="${PW}"] .bprof-fold-item[data-key="records"] .bprof-fold-v`);
     const usedFits = await p1.ev(`(() => { const e = document.querySelector('.bprof-profile[data-profile-id="${PW}"] .bprof-fold-item[data-key="records"] .bprof-fold-v'); return !!e && e.clientWidth > 0 && e.scrollWidth <= e.clientWidth + 1; })()`);
-    ok(String(usedTxt).startsWith('1209 个操作') && /* 9 + ③c's 1 200 */ /^1209 个操作 · \d+(\.\d)? (B|KB|MB) \/ 1 GB( · |$)/.test(String(usedLine)) && usedFits, `⑤ the row says its actions; its fold says what its records use against the limit, whole ("${usedTxt}" · "${usedLine}")`);
+    ok(gateOf(String(usedTxt).startsWith('1209 个操作')) && /* 9 + ③c's 1 200 */ gateOf(/^1209 个操作 · \d+(\.\d)? (B|KB|MB) \/ 1 GB( · |$)/.test(String(usedLine))) && verdictOf(usedFits), `⑤ the row says its actions; its fold says what its records use against the limit, whole ("${usedTxt}" · "${usedLine}")`);
     const hint = await p1.text('.bprof-hint');
-    ok(String(hint).startsWith(tr('zh', 'Each profile keeps its records up to {size}; over it, the oldest sessions\' frames are removed first and every action list stays. Recordings are kept {days} days or {mb} MB. Frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { size: '1 GB', days: 7, mb: 200 }).slice(0, 20)) && !/保留 7 天或 200 MB\(以先到者为准\)/.test(String(hint)), '⑤ the panel\'s hint is by size (1 GB), no "7 days or 200 MB, whichever first" for the traces');
+    ok(gateOf(String(hint).startsWith(tr('zh', 'Each profile keeps its records up to {size}; over it, the oldest sessions\' frames are removed first and every action list stays. Recordings are kept {days} days or {mb} MB. Frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { size: '1 GB', days: 7, mb: 200 }).slice(0, 20))) && !/保留 7 天或 200 MB\(以先到者为准\)/.test(String(hint)), '⑤ the panel\'s hint is by size (1 GB), no "7 days or 200 MB, whichever first" for the traces');
     await p1.shot('05b-zh-panel-row', `.bprof-profile[data-profile-id="${PW}"]`);
     await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-chev`);
-    ok(await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-more`) && await until(() => p1.ev(`!!document.querySelector('.context-menu .bprof-replay')`), 5000, 80) && await p1.click('.context-menu .bprof-replay'), '⑤ ⋯ → 回放… clicked');
+    ok(gateOf(await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-more`)) && gateOf(await until(() => p1.ev(`!!document.querySelector('.context-menu .bprof-replay')`), 5000, 80)) && verdictOf(await p1.click('.context-menu .bprof-replay')), '⑤ ⋯ → 回放… clicked');
     const r5b = await until(async () => { const s = await rs(); return s && s.sessions === 4 ? s : null; }, 8000, 100); // the three of KA + ③c's long one
-    ok(r5b && r5b.chosen === S1, '⑤ …the replay window of the PROFILE: every session on it (4)');
+    ok(gateOf(r5b) && r5b.chosen === S1, '⑤ …the replay window of the PROFILE: every session on it (4)');
 
     // ═══ ⑥ the live view of a STOPPED browser ═══
     console.log('— ⑥ the live view of a stopped browser: its Sessions list, the dividers');
@@ -475,22 +475,22 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.ev(`window.app.openBrowserLive({ sessionId: ${J(SID)} })`);
     const lv = await until(() => p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); if (!w) return null; const side = w.element.querySelector('.browser-live-side'); const box = w.element.querySelector('.browser-live-sessions'); if (!side || getComputedStyle(side).display === 'none' || !box || getComputedStyle(box).display === 'none') return null; return { rows: [...box.querySelectorAll('.browser-live-session')].map((r) => ({ text: r.textContent, btn: (r.querySelector('button') || {}).className || '' })), head: box.querySelector('.browser-live-sessions-head').textContent, dividers: [...w.element.querySelectorAll('.browser-live-trace-divider')].map((d) => d.textContent), stopped: w._browserLive.state().stopped, status: (w.element.querySelector('.browser-live-status') || {}).textContent, folds: [...w.element.querySelectorAll('.browser-live-trace-row.fold')].map((r) => ({ n: r.dataset.fits, text: (r.querySelector('.browser-live-trace-label') || {}).textContent, dim: getComputedStyle(r).color })), plainRows: w.element.querySelectorAll('.browser-live-trace-row:not(.fits)').length, toggle: (() => { const l = w.element.querySelector('.browser-live-trace-head .browser-trace-fits-toggle'); return l && getComputedStyle(l).display !== 'none' ? { text: l.textContent.trim(), on: l.querySelector('input').checked } : null; })(), count: (w.element.querySelector('.browser-live-trace-count') || {}).textContent, rowColor: getComputedStyle(w.element.querySelector('.browser-live-trace-row:not(.fits)')).color }; })()`), 15000, 200);
     if (!lv) console.log('    [debug ⑥]', J(await p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); if (!w) return 'no window'; const s = w._browserLive.state(); return { side: getComputedStyle(w.element.querySelector('.browser-live-side')).display, pane: s.sidePane, stopped: s.stopped, error: s.error, status: (w.element.querySelector('.browser-live-status') || {}).textContent, target: s.target, sess: (w.element.querySelector('.browser-live-sessions') || {}).outerHTML?.slice(0, 300) }; })()`)));
-    ok(lv && lv.rows.length === 4 && lv.head === '会话 (4)' && lv.rows.every((r) => /回放$/.test(r.text) && /\bmounts-btn\b/.test(r.btn)), `⑥ the view of the stopped browser opens its Actions pane on the Sessions list by itself — 4 sessions, each with 回放 (${lv && lv.head})`, lv);
-    ok(lv && lv.dividers.length === 2 && /^第 1 次会话 · .+ 开始$/.test(lv.dividers[0]) && /^第 2 次会话 · .+ 开始$/.test(lv.dividers[1]), `⑥ the actions carry a divider where each session begins (${lv && lv.dividers.join(' | ')})`);
+    ok(gateOf(lv) && lv.rows.length === 4 && lv.head === '会话 (4)' && verdictOf(lv.rows.every((r) => /回放$/.test(r.text) && /\bmounts-btn\b/.test(r.btn))), `⑥ the view of the stopped browser opens its Actions pane on the Sessions list by itself — 4 sessions, each with 回放 (${lv && lv.head})`, lv);
+    ok(gateOf(lv) && lv.dividers.length === 2 && gateOf(/^第 1 次会话 · .+ 开始$/.test(lv.dividers[0])) && verdictOf(/^第 2 次会话 · .+ 开始$/.test(lv.dividers[1])), `⑥ the actions carry a divider where each session begins (${lv && lv.dividers.join(' | ')})`);
     // lane trace-fits: the pane's 2 runs are 2 dim fold rows among the 9 agent actions, the count line says both, the toggle expands them
     const wantCount = tr('zh', '{n} action(s)', { n: 9 }) + ' · ' + tr('zh', '{n} page-size change(s)', { n: 5 }) + ' · ' + tr('zh', 'newest last');
-    ok(lv && lv.folds.length === 2 && lv.folds[0].n === '3' && lv.folds[0].text === '实时视图已适配 ×3 · 1072×907（最后一次）' && lv.folds[1].n === '2' && lv.plainRows === 9 && lv.folds[0].dim !== lv.rowColor, `⑥ the Actions pane folds each run into ONE dim row (${lv && lv.folds.map((f) => f.text).join(' | ')}; ${lv && lv.plainRows} agent rows)`, lv && { folds: lv.folds, plainRows: lv.plainRows, rowColor: lv.rowColor });
-    ok(lv && lv.count === wantCount && lv.toggle && lv.toggle.text === '显示页面尺寸变化' && lv.toggle.on === false, `⑥ the count line says the agent's actions with the page-size changes beside ("${lv && lv.count}"), the toggle off`, lv && { count: lv.count, toggle: lv.toggle });
+    ok(gateOf(lv) && lv.folds.length === 2 && lv.folds[0].n === '3' && lv.folds[0].text === '实时视图已适配 ×3 · 1072×907（最后一次）' && lv.folds[1].n === '2' && lv.plainRows === 9 && lv.folds[0].dim !== lv.rowColor, `⑥ the Actions pane folds each run into ONE dim row (${lv && lv.folds.map((f) => f.text).join(' | ')}; ${lv && lv.plainRows} agent rows)`, lv && { folds: lv.folds, plainRows: lv.plainRows, rowColor: lv.rowColor });
+    ok(gateOf(lv) && lv.count === wantCount && gateOf(lv.toggle) && lv.toggle.text === '显示页面尺寸变化' && lv.toggle.on === false, `⑥ the count line says the agent's actions with the page-size changes beside ("${lv && lv.count}"), the toggle off`, lv && { count: lv.count, toggle: lv.toggle });
     await p1.shot('06-zh-live-stopped-sessions', '.window:has(.browser-live)');
-    ok(await p1.click('.browser-live-trace-head .browser-trace-fits-toggle input'), '⑥ the pane\'s toggle on (a real mouse)');
+    ok(verdictOf(await p1.click('.browser-live-trace-head .browser-trace-fits-toggle input')), '⑥ the pane\'s toggle on (a real mouse)');
     const lvOn = await until(() => p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); if (!w) return null; const folds = w.element.querySelectorAll('.browser-live-trace-row.fold').length, fits = [...w.element.querySelectorAll('.browser-live-trace-row.fits:not(.fold)')].map((r) => r.querySelector('.browser-live-trace-label').textContent); return folds === 0 && fits.length === 2 ? { folds, fits, dividers: w.element.querySelectorAll('.browser-live-trace-divider').length } : null; })()`), 4000, 80);
-    ok(lvOn && /viewer-fit 1072×907 ×3/.test(lvOn.fits[0]) && lvOn.dividers === 2, `⑥ on: the runs' entries are rows of their own (${lvOn && lvOn.fits.join(' | ')}), the dividers untouched`, lvOn);
+    ok(gateOf(lvOn) && gateOf(/viewer-fit 1072×907 ×3/.test(lvOn.fits[0])) && lvOn.dividers === 2, `⑥ on: the runs' entries are rows of their own (${lvOn && lvOn.fits.join(' | ')}), the dividers untouched`, lvOn);
     await p1.shot('06b-zh-live-fits-expanded', '.window:has(.browser-live)');
-    ok(await p1.click('.browser-live-trace-head .browser-trace-fits-toggle input'), '⑥ …and off again');
-    ok(await until(() => p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); return w && w.element.querySelectorAll('.browser-live-trace-row.fold').length === 2 && !w.element.querySelector('.browser-live-trace-head .browser-trace-fits-toggle input').checked; })()`), 4000, 80), '⑥ off: the two fold rows again');
-    ok(await p1.click('.browser-live-session:nth-child(3) .browser-live-session-replay'), '⑥ a Sessions row\'s 回放');
+    ok(verdictOf(await p1.click('.browser-live-trace-head .browser-trace-fits-toggle input')), '⑥ …and off again');
+    ok(verdictOf(await until(() => p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); return w && w.element.querySelectorAll('.browser-live-trace-row.fold').length === 2 && !w.element.querySelector('.browser-live-trace-head .browser-trace-fits-toggle input').checked; })()`), 4000, 80)), '⑥ off: the two fold rows again');
+    ok(verdictOf(await p1.click('.browser-live-session:nth-child(3) .browser-live-session-replay')), '⑥ a Sessions row\'s 回放');
     const r6 = await until(async () => { const s = await rs(); return s && s.sessions >= 4 ? s : null; }, 8000, 100);
-    ok(r6 && r6.chosen === S3, `⑥ …opens the replay on THAT session (${r6 && r6.chosen})`);
+    ok(gateOf(r6) && r6.chosen === S3, `⑥ …opens the replay on THAT session (${r6 && r6.chosen})`);
     await api('POST', '/api/browser/detach', { sessionId: SID, profile: 'work' });
 
     // ═══ ⑧ the rect census in zh / ja / en (the chat cards, the replay window) ═══
@@ -501,7 +501,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       await until(async () => (await cardsNow(p1)).length >= 8, 15000, 200);
       const c = await cardsNow(p1);
       const want = tr(lang, 'Browser session ended · {duration} · {n} actions', { duration: tr(lang, '{n} min', { n: 10 }), n: 6 }) + ' · ' + tr(lang, 'the conversation stopped using this browser');
-      ok(c.some((x) => x.text === tr(lang, 'VibeSpace · {what}', { what: want })), `⑧ ${lang}: the end card in the device's words ("${tr(lang, 'VibeSpace · {what}', { what: want })}")`);
+      ok(verdictOf(c.some((x) => x.text === tr(lang, 'VibeSpace · {what}', { what: want }))), `⑧ ${lang}: the end card in the device's words ("${tr(lang, 'VibeSpace · {what}', { what: want })}")`);
       const rc = await p1.rects({ pairs: [['.chat-msg.chat-browser-session', '.chat-vs-notice-title, .chat-browser-session-replay, .chat-browser-session-note', { h: true }]], viewport: true });
       ok(rc.problems.length === 0 && rc.n >= 8, `⑧ ${lang}: the chat cards — every title and button inside its card, nothing clipped (${rc.n} parts)`, rc.problems);
       await p1.shot(`08-${lang}-chat-cards`, '.window:has(.chat-browser-session)');
@@ -525,10 +525,10 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await until(async () => { const s = await rs(); return s && s.chosen === S2 && s.n === 6; }, 10000, 100);
     await p1.frames();
     const ph = await p1.ev(`(() => { const r = document.querySelector('.brp'); const side = r.querySelector('.brp-side').getBoundingClientRect(); const main = r.querySelector('.brp-main').getBoundingClientRect(); return { narrow: r.classList.contains('narrow'), sideBottom: side.bottom, mainTop: main.top }; })()`);
-    ok(ph.narrow && ph.sideBottom <= ph.mainTop + 1, `⑦ the list ABOVE the picture (list bottom ${Math.round(ph.sideBottom)} ≤ picture top ${Math.round(ph.mainTop)})`);
+    ok(gateOf(ph.narrow) && ph.sideBottom <= ph.mainTop + 1, `⑦ the list ABOVE the picture (list bottom ${Math.round(ph.sideBottom)} ≤ picture top ${Math.round(ph.mainTop)})`);
     const pr = await p1.rects({ pairs: [['.brp-bar', '.mounts-btn'], ['.brp-sessions', '.brp-session', { h: true }], ['.brp-actions', '.brp-action', { h: true }]], minHeights: [['.brp-bar .mounts-btn', 44], ['.brp-session', 44], ['.brp-action', 44]], viewport: true });
     ok(pr.problems.length === 0, `⑦ every target ≥ 44 px, nothing past its list or the screen, nothing sideways (${pr.n} parts)`, pr.problems);
-    ok(await p1.tap('.brp-bar .brp-next') && (await until(async () => { const s = await rs(); return s && s.index === 1; }, 3000, 80)), '⑦ a tap on 下一步 steps (a touch, not a click)');
+    ok(gateOf(await p1.tap('.brp-bar .brp-next')) && (verdictOf(await until(async () => { const s = await rs(); return s && s.index === 1; }, 3000, 80))), '⑦ a tap on 下一步 steps (a touch, not a click)');
     await p1.shot('07-zh-phone-replay');
     // ⑦b (the naive-user verifier, 2026-09-28): the chosen session's row is IN VIEW of its list — the oldest one opened
     // from its card sat below the newest three, and the actions shown belonged to a row the user could not see
@@ -538,10 +538,10 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await until(async () => { const s = await rs(); return s && s.chosen === S2 && s.n === 6; }, 8000, 100);
     await p1.frames();
     const sr = await seenRow();
-    ok(sr && sr.s === S2 && sr.inView && sr.overflows && sr.scrolled > 0, `⑦b the OLDEST session opened on the phone: its row is scrolled into view of its own list (${J(sr)})`);
+    ok(gateOf(sr) && sr.s === S2 && gateOf(sr.inView) && gateOf(sr.overflows) && sr.scrolled > 0, `⑦b the OLDEST session opened on the phone: its row is scrolled into view of its own list (${J(sr)})`);
     await p1.ev(`document.querySelector('.brp-sessions').scrollTop = 0`);
     const ctl7 = await seenRow();
-    ok(ctl7 && !ctl7.inView, `CONTROL: the same list scrolled back to the top hides that row — the judge sees the difference (${J(ctl7)})`);
+    ok(gateOf(ctl7) && !ctl7.inView, `CONTROL: the same list scrolled back to the top hides that row — the judge sees the difference (${J(ctl7)})`);
     await p1.shot('07b-zh-phone-replay-oldest');
     // ⑦c: the live view of a STOPPED browser on the phone — the Sessions list takes the width, the status sits above it
     await p1.ev(`(() => { for (const id of [...window.app.wm.windows.keys()]) { try { window.app.wm.closeWindow(id); } catch {} } return true; })()`);
@@ -550,7 +550,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.ev(`window.app.openBrowserLive({ sessionId: ${J(SID)} })`);
     const pastOf = () => p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); if (!w) return null; const root = w.element.querySelector('.browser-live'); const body = w.element.querySelector('.browser-live-body'); const side = w.element.querySelector('.browser-live-side'); const box = w.element.querySelector('.browser-live-sessions'); const st = w.element.querySelector('.browser-live-status'); if (!side || getComputedStyle(side).display === 'none' || !box) return null; const bb = body.getBoundingClientRect(), sb = side.getBoundingClientRect(), tb = st.getBoundingClientRect(); const texts = [...box.querySelectorAll('.browser-live-session-text')]; const rg = document.createRange(); rg.selectNodeContents(st); const tops = new Set([...rg.getClientRects()].map((x) => Math.round(x.top))); return { past: root.classList.contains('side-past'), sideShare: Math.round(sb.width / bb.width * 100) / 100, statusW: Math.round(tb.width), statusLines: tops.size, statusShown: getComputedStyle(st).display !== 'none' && tb.height > 0, statusAbove: tb.bottom <= sb.top + 1, rows: texts.length, cut: texts.filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent) }; })()`);
     const lp = await until(async () => { const x = await pastOf(); return x && x.rows >= 1 ? x : null; }, 15000, 200);
-    ok(lp && lp.past && lp.sideShare >= 0.95 && lp.statusShown && lp.statusLines <= 2 && lp.statusAbove && lp.cut.length === 0, `⑦c the phone's view of a stopped browser: the Sessions list takes the width (${lp && lp.sideShare}), the status above it on ${lp && lp.statusLines} line(s), no row cut`, lp);
+    ok(gateOf(lp) && gateOf(lp.past) && lp.sideShare >= 0.95 && gateOf(lp.statusShown) && lp.statusLines <= 2 && gateOf(lp.statusAbove) && lp.cut.length === 0, `⑦c the phone's view of a stopped browser: the Sessions list takes the width (${lp && lp.sideShare}), the status above it on ${lp && lp.statusLines} line(s), no row cut`, lp);
     await p1.shot('07c-zh-phone-live-stopped');
     const ctl7c = await p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); const root = w.element.querySelector('.browser-live'); root.classList.remove('side-past'); const bb = w.element.querySelector('.browser-live-body').getBoundingClientRect(), sb = w.element.querySelector('.browser-live-side').getBoundingClientRect(); const st = w.element.querySelector('.browser-live-status'); const rg = document.createRange(); rg.selectNodeContents(st); const lines = new Set([...rg.getClientRects()].map((x) => Math.round(x.top))).size; const cut = [...w.element.querySelectorAll('.browser-live-session-text')].filter((e) => e.scrollWidth > e.clientWidth + 1).length; const out = { share: Math.round(sb.width / bb.width * 100) / 100, lines, cut }; root.classList.add('side-past'); return out; })()`);
     // the .196 mirror (2026-09-28): under the runner's font the squeezed status wrapped to 2 lines, not 3 — the control
@@ -564,13 +564,13 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.load('zh', 1280, 800);
     await p1.ev(`window.app.openBrowserReplay({ browserKey: ${J(KB)} })`);
     const e9 = await until(async () => { const s = await rs(); return s && s.empty ? s : null; }, 8000, 100);
-    ok(e9 && e9.empty === 'no-sessions' && (await p1.text('.brp-empty')) === '这个会话还没有浏览记录', `⑨ a conversation with no browser sessions: "${await p1.text('.brp-empty')}"`);
+    ok(gateOf(e9) && e9.empty === 'no-sessions' && (await p1.text('.brp-empty')) === '这个会话还没有浏览记录', `⑨ a conversation with no browser sessions: "${await p1.text('.brp-empty')}"`);
     await p1.shot('09-zh-no-sessions', '.window:has(.brp)');
     await api('PATCH', '/api/settings', { 'browser.actionTrace': false });
     await p1.load('zh', 1280, 800);
     await p1.ev(`window.app.openBrowserReplay({ browserKey: ${J(KB)} })`);
     const e9b = await until(async () => { const s = await rs(); return s && s.empty === 'trace-off' ? s : null; }, 8000, 100);
-    ok(e9b && (await p1.text('.brp-empty')) === '操作记录已关闭 开启…' && await p1.ev(`!!document.querySelector('.brp-empty .need-door')`), `⑨ the trace off: "${await p1.text('.brp-empty')}" — the state, and on its line the door that turns it on (lane ui-needs-a-button pick 5: no menu path)`);
+    ok(gateOf(e9b) && (await p1.text('.brp-empty')) === '操作记录已关闭 开启…' && verdictOf(await p1.ev(`!!document.querySelector('.brp-empty .need-door')`)), `⑨ the trace off: "${await p1.text('.brp-empty')}" — the state, and on its line the door that turns it on (lane ui-needs-a-button pick 5: no menu path)`);
     await p1.shot('09b-zh-trace-off', '.window:has(.brp)');
     await api('PATCH', '/api/settings', { 'browser.actionTrace': null });
     ok(p1.errors.length === 0, `no page exception anywhere (${p1.errors.length})`, p1.errors.slice(0, 3));
@@ -580,4 +580,4 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   }
 })();
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

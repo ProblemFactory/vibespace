@@ -17,7 +17,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 // fixture home: expired machine login + console key + helper + one held sub
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-probes-'));
@@ -39,7 +39,7 @@ delete require.cache[require.resolve(REPO + '/src/machine-probes.js')];
 const probes = require(REPO + '/src/machine-probes.js');
 const creds = await probes.credsFacts();
 ok(creds.subscription.loggedIn === false && creds.subscription.email === 'user@example.com', 'expired machine login: loggedIn=false but identity email read');
-ok(creds.cliKey.present && creds.cliKey.tail === 'TAIL1234', 'console primaryApiKey detected with tail');
+ok(gateOf(creds.cliKey.present) && creds.cliKey.tail === 'TAIL1234', 'console primaryApiKey detected with tail');
 ok(creds.keyHelper === true, 'apiKeyHelper reported as the INDEPENDENT flag (the 2.191.0 class)');
 ok(creds.hostSubs.length === 1 && creds.hostSubs[0] === 'sub-h1', 'held sub dir with a real token counted');
 ok(creds.hostSubEmails['sub-h1'] === 'held@example.com', 'held-dir identity email (the auto-merge anchor)');
@@ -76,4 +76,4 @@ fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(root, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { gateOf } from './lib/check.mjs';

@@ -35,7 +35,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const ROOT = scratch('tcc');
 const wt = path.join(ROOT, 'tree'), PROFILE = path.join(ROOT, 'chrome'), HOME = path.join(ROOT, 'home');
 let passed = 0, failed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // the scratch tree: a copy of what the server serves (no git — nothing registers anywhere)
@@ -62,7 +62,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 const waitServer = async () => { for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-check('the scratch server answers', await waitServer());
+check('the scratch server answers', verdictOf(await waitServer()));
 
 // ── raw CDP ──
 const WebSocket = require('ws');
@@ -158,9 +158,9 @@ try {
   const a0 = await legA();
   const s0 = a0.before, s1 = a0.ask;
   check(`the group is up: 3 tabs, the strip reads ${JSON.stringify(s0.strip)}, tab ${s0.shown} on show, no dialog`, s0.chainSize === 3 && s0.strip.length === 3 && !s0.dialog && s0.open === 'ABC' && s0.shown === 'C', s0);
-  check(`a real click on the frame's ✕ opens the house dialog "${s1.dialog && s1.dialog.title}" with "${s1.dialog && s1.dialog.ok}" / "${s1.dialog && s1.dialog.cancel}"`, !!s1.dialog && s1.dialog.title === 'Close 3 tabs?' && s1.dialog.ok === 'Close 3 tabs' && s1.dialog.cancel === 'Cancel' && s1.dialog.danger, s1.dialog);
+  check(`a real click on the frame's ✕ opens the house dialog "${s1.dialog && s1.dialog.title}" with "${s1.dialog && s1.dialog.ok}" / "${s1.dialog && s1.dialog.cancel}"`, !!s1.dialog && s1.dialog.title === 'Close 3 tabs?' && s1.dialog.ok === 'Close 3 tabs' && s1.dialog.cancel === 'Cancel' && verdictOf(s1.dialog.danger), s1.dialog);
   check(`…naming every tab exactly as the strip shows them (${JSON.stringify(s1.dialog && s1.dialog.list)})`, !!s1.dialog && JSON.stringify(s1.dialog.list) === JSON.stringify(s0.strip), { list: s1.dialog && s1.dialog.list, strip: s0.strip });
-  check('…every tab still open under the question, the confirm button holding the keyboard (Enter)', s1.open === 'ABC' && s1.chainSize === 3 && s1.dialog && s1.dialog.okFocused, s1);
+  check('…every tab still open under the question, the confirm button holding the keyboard (Enter)', s1.open === 'ABC' && s1.chainSize === 3 && gateOf(s1.dialog) && verdictOf(s1.dialog.okFocused), s1);
   await key('Escape');
   const s2 = await state();
   check('Esc = Cancel: the dialog goes, all three tabs stay in their group', !s2.dialog && s2.overlays === 0 && s2.open === 'ABC' && s2.chainSize === 3, s2);
@@ -228,7 +228,7 @@ try {
   await click(barPt, { button: 'right' });
   await until(`!!(${menuRow('/Close group/')})`, { timeout: 1500 });
   const hasGroupRow = await evalJs(`!!(${menuRow('/Close group/')})`);
-  check('the frame\'s own title-bar menu says "Close group"', hasGroupRow);
+  check('the frame\'s own title-bar menu says "Close group"', verdictOf(hasGroupRow));
   if (hasGroupRow) {
     await click(await stableRect(menuRow('/Close group/')));
     await until(`(${STATE}).dialog`, { timeout: 1500 });
@@ -244,7 +244,7 @@ try {
   await click(await stableRect(`${W(ids.A)}?.titleBar.querySelector('.tab-item[data-win-id="${ids.B}"] .tab-label')`), { button: 'right' });
   await until(`!!(${menuRow('/Close/')})`, { timeout: 1500 });
   const tabMenu = await evalJs(`({ group: !!(${menuRow('/Close group/')}), close: !!(${menuRow('/^\\s*✕ Close\\s*$/')}) })`);
-  check(`a TAB's own right-click menu offers the plain "✕ Close" (one window), never "Close group" (${JSON.stringify(tabMenu)})`, tabMenu.close && !tabMenu.group, tabMenu);
+  check(`a TAB's own right-click menu offers the plain "✕ Close" (one window), never "Close group" (${JSON.stringify(tabMenu)})`, gateOf(tabMenu.close) && !tabMenu.group, tabMenu);
   if (tabMenu.close) {
     await click(await stableRect(menuRow('/^\\s*✕ Close\\s*$/')));
     await sleep(500);
@@ -288,4 +288,4 @@ try {
 }
 
 console.log(failed ? `FAILED (${failed}; ${passed} passed)` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

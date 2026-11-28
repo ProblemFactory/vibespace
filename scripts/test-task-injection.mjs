@@ -35,7 +35,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let passed = 0, failed = 0;
-function ok(cond, name, extra) {
+function ok(cond, name, extra) { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
   failed++;
   console.log(`  ✗ ${name}${extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : ''}`);
@@ -97,17 +97,17 @@ console.log('§2 THE tray words (src/tray-words.js)');
   ok(zh.phrase === 'the “待你处理” (For you) tray at the top right' && zh.name === 'the “待你处理” (For you) tray' && ja.label === 'あなた宛て' && xx.label === 'For you' && xx.lang === 'en',
     'the label is the owner\'s language (the English gloss beside it); an unknown language reads English', { zh, ja: ja.label });
   const tableWord = (f) => { const m = /^ {2}"For you": "([^"]+)",/m.exec(read(f)); return m && m[1]; };
-  ok(TW.LABELS.zh === tableWord('src/lib/i18n-zh.js') && TW.LABELS.ja === tableWord('src/lib/i18n-ja.js') && /title: t\('For you'\)/.test(read('src/lib/inbox-window.js')) && /'usage-section-title ut-title', t\('For you'\)/.test(read('src/lib/user-todos-panel.js')),
+  ok(TW.LABELS.zh === tableWord('src/lib/i18n-zh.js') && TW.LABELS.ja === tableWord('src/lib/i18n-ja.js') && gateOf(/title: t\('For you'\)/.test(read('src/lib/inbox-window.js'))) && verdictOf(/'usage-section-title ut-title', t\('For you'\)/.test(read('src/lib/user-todos-panel.js'))),
     'LABELS = the page\'s own \'For you\' words (the popup\'s and the window\'s title) in i18n-zh / -ja', TW.LABELS);
   const row = /\{ id: '([\w-]+)',\s+label: (?:tr\()?'For-you inbox'\)?,[^}]*defaultZone: '([\w-]+)' \}/.exec(read('src/lib/customize-mode.js'));
-  ok(row && row[1] === TW.TRAY_ELEMENT && row[2] === TW.TRAY_DEFAULT_ZONE, 'the element id and its default zone = Customize mode\'s CHROME_ELEMENTS row', row && row.slice(1));
+  ok(gateOf(row) && row[1] === TW.TRAY_ELEMENT && row[2] === TW.TRAY_DEFAULT_ZONE, 'the element id and its default zone = Customize mode\'s CHROME_ELEMENTS row', row && row.slice(1));
   const schema = read('src/lib/settings-schema.js');
-  ok(TW.TRAY_SETTING_KEYS.every((k) => schema.includes(`  '${k}': {`)), 'every setting the place reads is a schema row (a renamed key ⇒ RED)', TW.TRAY_SETTING_KEYS);
+  ok(verdictOf(TW.TRAY_SETTING_KEYS.every((k) => schema.includes(`  '${k}': {`))), 'every setting the place reads is a schema row (a renamed key ⇒ RED)', TW.TRAY_SETTING_KEYS);
   ok(TW.ownerPageDelta({}, { lang: 'en' }) === null && TW.ownerPageDelta({ ownerPage: { lang: 'zh' } }, { lang: 'zh' }) === null
     && JSON.stringify(TW.ownerPageDelta({}, { lang: 'zh' })) === '{"ownerPage":{"lang":"zh","phone":false}}' && JSON.stringify(TW.ownerPageDelta({ ownerPage: { lang: 'zh' } }, { lang: 'zh', phone: true })) === '{"ownerPage":{"lang":"zh","phone":true}}',
     'the page reports {lang, phone} only when user-state does not already say so (an English desktop page on a fresh instance never writes)');
   const page = read('src/lib/owner-facts.js'), store = read('src/lib/sidebar-state.js');
-  ok(/ownerPageDelta\(state, \{ lang: resolveLang\(\), phone: !!phone \}\)/.test(page) && /method: 'PATCH'/.test(page) && /this\._userStateFetched = true;[\s\S]{0,400}reportOwnerPage\(state, \{ phone: !!this\.app\.isMobile \}\);/.test(store),
+  ok(gateOf(/ownerPageDelta\(state, \{ lang: resolveLang\(\), phone: !!phone \}\)/.test(page)) && gateOf(/method: 'PATCH'/.test(page)) && verdictOf(/this\._userStateFetched = true;[\s\S]{0,400}reportOwnerPage\(state, \{ phone: !!this\.app\.isMobile \}\);/.test(store)),
     'the page reports it once user-state is loaded (the sidebar\'s one fetch), merge-only');
 }
 
@@ -117,12 +117,12 @@ console.log('§3 the instance setting');
   const m = /'instance\.timezone': \{\n {4}type: 'string', default: '',\n {4}label: t\('([^']+)'\),\n {4}description: t\('((?:[^'\\]|\\.)+)'\),\n {4}category: t\('Integration'\)/.exec(schema);
   ok(!!m, 'ONE schema row `instance.timezone` (a string, default empty = automatic, in Integration)');
   const label = m && m[1], desc = m && m[2].replace(/\\'/g, '\'');
-  ok(!!m && /Empty = this server's own zone: its TZ setting, else the system's/.test(desc) && /16:16 PT/.test(desc) && /Task Group board/.test(desc), 'its words say what it is used for and the default rule (its TZ, else the system\'s)', desc);
+  ok(!!m && gateOf(/Empty = this server's own zone: its TZ setting, else the system's/.test(desc)) && gateOf(/16:16 PT/.test(desc)) && verdictOf(/Task Group board/.test(desc)), 'its words say what it is used for and the default rule (its TZ, else the system\'s)', desc);
   const jsonKey = (s) => JSON.stringify(s);
-  ok(!!m && ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes(`  ${jsonKey(label)}: `) && read(f).includes(`  ${jsonKey(desc)}: `)), 'its label and description have zh + ja words');
-  ok(/instance\.timezone/.test(read('docs/settings.md')), 'the settings reference lists it (docs/settings.md, generated)');
-  ok(/require\('\.\/src\/server\/owner-facts\.js'\)\.configure\(\{ setting: serverSetting, userState: \(\) => persistenceRouter\.readUserState\(\) \}\);/.test(read('server.js')), 'server.js binds the owner facts to THE server-side settings reader and user-state');
-  ok(/zone: require\('\.\.\/server\/owner-facts\.js'\)\.zone\(\)/.test(read('src/routes/files.js')) && /setHubZone\(d\.zone\);/.test(read('src/lib/app.js')), 'the page learns the zone the hub resolved (/api/home `zone`) — the board prints in it');
+  ok(!!m && verdictOf(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes(`  ${jsonKey(label)}: `) && read(f).includes(`  ${jsonKey(desc)}: `))), 'its label and description have zh + ja words');
+  ok(verdictOf(/instance\.timezone/.test(read('docs/settings.md'))), 'the settings reference lists it (docs/settings.md, generated)');
+  ok(verdictOf(/require\('\.\/src\/server\/owner-facts\.js'\)\.configure\(\{ setting: serverSetting, userState: \(\) => persistenceRouter\.readUserState\(\) \}\);/.test(read('server.js'))), 'server.js binds the owner facts to THE server-side settings reader and user-state');
+  ok(gateOf(/zone: require\('\.\.\/server\/owner-facts\.js'\)\.zone\(\)/.test(read('src/routes/files.js'))) && verdictOf(/setHubZone\(d\.zone\);/.test(read('src/lib/app.js'))), 'the page learns the zone the hub resolved (/api/home `zone`) — the board prints in it');
 }
 
 // ── the fixture: a Task Group whose entries sit at known instants ──
@@ -171,7 +171,7 @@ console.log('§4 THE INJECTION on a PT fixture (instance.timezone = America/Los_
   ok(bad.length === 0, 'the SessionStart paragraph names the zone and EVERY time in it is PT (today\'s rows without the date, the rest with it)', bad);
   ok(!/\bUTC\b/.test(ctx), '…and no UTC anywhere in it');
   const md = mgr.renderTaskMd(mgr.get(id));
-  ok(md.includes('- Updated: 2026-10-20 16:16 PT') && md.includes('- 2026-10-20 16:16 PT NOTE-FIXED') && new RegExp(`^- ${dayIn(Date.now(), 'America/Los_Angeles')} \\d\\d:\\d\\d PT NOTE-NOW`, 'm').test(md) && !/\bUTC\b/.test(md),
+  ok(gateOf(md.includes('- Updated: 2026-10-20 16:16 PT')) && gateOf(md.includes('- 2026-10-20 16:16 PT NOTE-FIXED')) && gateOf(new RegExp(`^- ${dayIn(Date.now(), 'America/Los_Angeles')} \\d\\d:\\d\\d PT NOTE-NOW`, 'm').test(md)) && !/\bUTC\b/.test(md),
     'TASK.md (a file read on later days) keeps EVERY date, in PT', md.split('\n').filter((l) => /NOTE|Updated/.test(l)).join(' | '));
   const two = mk(TaskGroupManager, 'Second');
   const g2 = two.mgr.create({ title: 'Other', objective: 'x' });
@@ -181,7 +181,7 @@ console.log('§4 THE INJECTION on a PT fixture (instance.timezone = America/Los_
   const snap = mgr.snapshotForDiff(id);
   mgr.addProgress(id, { note: 'NOTE-DIFF', session: 'claude:bbb' });
   const diff = mgr.renderContextDiff(id, snap, {}) || '';
-  ok(new RegExp(`- ${dayIn(Date.now(), 'America/Los_Angeles')} \\d\\d:\\d\\d PT NOTE-DIFF`).test(diff), 'a mid-session update block: the new row in PT with its date (it carries no sentence)', diff.slice(-200));
+  ok(verdictOf(new RegExp(`- ${dayIn(Date.now(), 'America/Los_Angeles')} \\d\\d:\\d\\d PT NOTE-DIFF`).test(diff)), 'a mid-session update block: the new row in PT with its date (it carries no sentence)', diff.slice(-200));
   SET['instance.timezone'] = 'UTC';
   const u = mk(TaskGroupManager, 'UTC box');
   const uctx = u.mgr.renderContext(u.id);
@@ -204,15 +204,15 @@ console.log('§5 the other times an agent reads');
 {
   SET['instance.timezone'] = 'America/Los_Angeles';
   const st = AR.renderMsgStash([{ ts: FIXED, fromName: 'Peer one', source: 'agent', text: 'the meeting moved' }]).text;
-  ok(st.includes('[2026-10-20 16:16 PT]') && !/\d\dZ\]/.test(st), 'a drained message stash stamps its entries in PT, the date kept (never «[10-20T23:16Z]»)', st);
+  ok(gateOf(st.includes('[2026-10-20 16:16 PT]')) && !/\d\dZ\]/.test(st), 'a drained message stash stamps its entries in PT, the date kept (never «[10-20T23:16Z]»)', st);
   const { mgr, id } = mk(TaskGroupManager, 'Answers');
   mgr.update(id, { backlog: [{ text: 'decide later', status: 'open', addedBy: 'claude:aaa', claimedBy: [], addedAt: FIXED }] });
   const t = mgr.get(id);
   const show = AR.taskShowAnswer(t, (t.backlog || []).filter((b) => b.status === 'open'));
-  ok(show.progress.every((p) => p.when && p.when.at === W.whenOf(p.at, { zone: 'America/Los_Angeles' })) && show.backlog[0].when && show.backlog[0].when.addedAt === '2026-10-20 16:16 PT',
+  ok(gateOf(show.progress.every((p) => p.when && p.when.at === W.whenOf(p.at, { zone: 'America/Los_Angeles' }))) && gateOf(show.backlog[0].when) && show.backlog[0].when.addedAt === '2026-10-20 16:16 PT',
     'the task answers (show / backlog / progress) carry every instant as the hub\'s words (`when.at`, `when.addedAt`)', show.backlog[0].when);
   const j = AR.jobWhen({ id: 'jb-1', nextFireAt: FIXED, archivedAt: WINTER, run: { startedAt: FIXED } });
-  ok(j.when && j.when.nextFireAt === '2026-10-20 16:16 PT' && j.when.archivedAt === '2026-12-01 12:00 PT' && j.when.runStartedAt === '2026-10-20 16:16 PT' && !('publishSince' in j.when),
+  ok(gateOf(j.when) && j.when.nextFireAt === '2026-10-20 16:16 PT' && j.when.archivedAt === '2026-12-01 12:00 PT' && j.when.runStartedAt === '2026-10-20 16:16 PT' && !('publishSince' in j.when),
     'a job view carries its instants as words (`when.nextFireAt / archivedAt / runStartedAt`)', j.when);
 }
 
@@ -232,9 +232,9 @@ const judgeTray = (text, phrase) => [...(text.includes(phrase) ? [] : ['the hub\
   const intro = AR.sessionToolsIntro({ status: true, ask: true }, {});
   ok(judgeTray(intro, `call it "${TOP_ZH}", never "your inbox"`).length === 0, 'the session-start intro (every harness)');
   const nudge = AR.stopNudgeReason({ ask: true });
-  ok(nudge.includes('the “待你处理” (For you) tray only notifies') && !/bottom[ -]right/i.test(nudge), 'the stop nudge names it by its label', nudge.slice(0, 200));
+  ok(gateOf(nudge.includes('the “待你处理” (For you) tray only notifies')) && !/bottom[ -]right/i.test(nudge), 'the stop nudge names it by its label', nudge.slice(0, 200));
   US = { ownerPage: { lang: 'zh', phone: true } };
-  ok(mgr.renderContext(id).includes('ALSO file it in the “待你处理” (For you) tray at the top of their phone screen'), 'the owner last used a phone ⇒ the phone\'s place');
+  ok(verdictOf(mgr.renderContext(id).includes('ALSO file it in the “待你处理” (For you) tray at the top of their phone screen')), 'the owner last used a phone ⇒ the phone\'s place');
   US = {}; delete SET['taskbar.position'];
   ok(OF.tray().phrase === 'the “For you” tray at the bottom right', 'nothing moved, an English page ⇒ the default place, in English');
 }
@@ -253,19 +253,19 @@ console.log('§7 the CLIs print the HUB\'s words (the real data/bin files over a
   try {
     answers['GET /api/agent/task'] = { success: true, you: 'claude:me', task: { id: 'T-1', title: 'Fleet', backlog: [{ id: 'B-1', text: 'decide', status: 'open', addedBy: 'claude:me', claimedBy: ['claude:me'], addedAt: FIXED, when: { addedAt: '2026-10-20 16:16 PT' } }], progress: [{ id: 'P-1', at: FIXED, note: 'shipped', session: 'claude:me', when: { at: '2026-10-20 16:16 PT' } }] } };
     const ts = await run('vibespace-task', ['show', '--full']);
-    ok(ts.code === 0 && ts.out.includes('  - 2026-10-20 16:16 PT [P-1] shipped') && ts.out.includes('parked by claude:me at 2026-10-20 16:16 PT') && !/23:16/.test(ts.out), 'vibespace-task show: the Activity rows and the backlog\'s "parked at" are the hub\'s words', ts.out.slice(0, 500));
+    ok(ts.code === 0 && gateOf(ts.out.includes('  - 2026-10-20 16:16 PT [P-1] shipped')) && gateOf(ts.out.includes('parked by claude:me at 2026-10-20 16:16 PT')) && !/23:16/.test(ts.out), 'vibespace-task show: the Activity rows and the backlog\'s "parked at" are the hub\'s words', ts.out.slice(0, 500));
     answers['GET /api/agent/task'].task.progress[0].when = undefined;
     const ts0 = await run('vibespace-task', ['show']);
-    ok(ts0.out.includes('  - 2026-10-20T23:16:00.000Z [P-1] shipped') && !/2026-10-20 23:16(?!:)/.test(ts0.out), '…a hub that sends no words ⇒ the full ISO instant (its Z names UTC), never a bare «23:16»', ts0.out.slice(0, 300));
+    ok(gateOf(ts0.out.includes('  - 2026-10-20T23:16:00.000Z [P-1] shipped')) && !/2026-10-20 23:16(?!:)/.test(ts0.out), '…a hub that sends no words ⇒ the full ISO instant (its Z names UTC), never a bare «23:16»', ts0.out.slice(0, 300));
     answers['POST /api/agent/user-todo'] = { success: true, item: { id: 'ut-1', text: 'Which meeting?' }, chars: 14, tray: { name: 'the “待你处理” (For you) tray', phrase: TOP_ZH } };
     const ask = await run('vibespace-ask', ['Which meeting?']);
-    ok(ask.code === 0 && ask.out.includes(`added to ${TOP_ZH}: Which meeting?`) && ask.out.includes(`say "${TOP_ZH}" — never "your inbox"`) && !/bottom[ -]right/i.test(ask.out), 'vibespace-ask: the add answer and its REMINDER say where it landed in the hub\'s words', ask.out.slice(0, 400));
+    ok(ask.code === 0 && gateOf(ask.out.includes(`added to ${TOP_ZH}: Which meeting?`)) && gateOf(ask.out.includes(`say "${TOP_ZH}" — never "your inbox"`)) && !/bottom[ -]right/i.test(ask.out), 'vibespace-ask: the add answer and its REMINDER say where it landed in the hub\'s words', ask.out.slice(0, 400));
     answers['GET /api/agent/vault/state'] = { state: 'locked', lockedSince: FIXED, keys: [], when: { lockedSince: '2026-10-20 16:16 PT' }, tray: 'the “待你处理” (For you) tray' };
     const v = await run('vibespace-vault', ['status']);
-    ok(v.code === 0 && v.out.includes('the user has already been told (the “待你处理” (For you) tray names what is waiting on it)') && v.out.includes('locked since 2026-10-20 16:16 PT'), 'vibespace-vault status: the locked line names the tray and the lock time in the hub\'s words', v.out.slice(0, 400));
+    ok(v.code === 0 && gateOf(v.out.includes('the user has already been told (the “待你处理” (For you) tray names what is waiting on it)')) && verdictOf(v.out.includes('locked since 2026-10-20 16:16 PT')), 'vibespace-vault status: the locked line names the tray and the lock time in the hub\'s words', v.out.slice(0, 400));
     answers['GET /api/agent/jobs'] = { success: true, jobs: [{ id: 'jb-1', kind: 'oneshot', state: 'done', name: 'nightly', archived: true, archivedAt: FIXED, when: { archivedAt: '2026-10-20 16:16 PT' } }] };
     const jl = await run('vibespace-job', ['list']);
-    ok(jl.code === 0 && jl.out.includes('jb-1 [oneshot] done (archived 2026-10-20 16:16 PT)'), 'vibespace-job list: an archived job\'s day is the hub\'s words', jl.out.slice(0, 300));
+    ok(jl.code === 0 && verdictOf(jl.out.includes('jb-1 [oneshot] done (archived 2026-10-20 16:16 PT)')), 'vibespace-job list: an archived job\'s day is the hub\'s words', jl.out.slice(0, 300));
   } finally { srv.close(); }
 }
 
@@ -363,7 +363,7 @@ console.log('§10 RED CONTROLS — the pre-fix renders fail the judges above');
   const { TaskGroupManager: PreTG } = M.load('src/task-groups.js', pre, 'pre-utc');
   const b = mk(PreTG, 'Fleet');
   const bad = judgeInjection(b.mgr.renderContext(b.id), { zone: 'America/Los_Angeles', abbr: 'PT' });
-  ok(bad.length >= 4 && bad.some((x) => /no zone sentence/.test(x)) && bad.some((x) => /without its zone/.test(x)), `the base's UTC strings on a PT fixture fail the injection's judge (${bad.length} problems — the «23:16» an agent relayed)`, bad);
+  ok(bad.length >= 4 && gateOf(bad.some((x) => /no zone sentence/.test(x))) && verdictOf(bad.some((x) => /without its zone/.test(x))), `the base's UTC strings on a PT fixture fail the injection's judge (${bad.length} problems — the «23:16» an agent relayed)`, bad);
   SET['taskbar.position'] = 'top'; US = { ownerPage: { lang: 'zh' } };
   const reg = read('src/agent-cli-registry.js');
   const preReg = editAnchor(reg, "ALSO file it in ${trayOf(tray)} (say that, never \"your inbox\")", 'ALSO file it in their For you tray (bottom right of their screen: say that, never "your inbox")', "src/agent-cli-registry.js");
@@ -376,4 +376,4 @@ console.log('§10 RED CONTROLS — the pre-fix renders fail the judges above');
 }
 
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

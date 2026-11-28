@@ -41,7 +41,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the stub CLI: parks one Bash call on a can_use_tool ask until it is answered ──
@@ -202,10 +202,10 @@ try {
   console.log('P1 the turn parks on a permission ask');
   const sid = await create('parked-1');
   check('a chat session is created (the stub behind the real chat-wrapper)', !!sid);
-  check('the chat window attaches', await attach(sid, 'D-docusign'));
+  check('the chat window attaches', verdictOf(await attach(sid, 'D-docusign')));
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'sign the envelope' }));
-  check('the ask is a permission card with Allow', await waitFor(`!!(${PERM(sid)})`, 20000));
-  check('the chip says "waiting for you"', await waitFor(`!!(${CHIP(sid)})`, 10000));
+  check('the ask is a permission card with Allow', verdictOf(await waitFor(`!!(${PERM(sid)})`, 20000)));
+  check('the chip says "waiting for you"', verdictOf(await waitFor(`!!(${CHIP(sid)})`, 10000)));
 
   console.log('P2 a server restart, a fresh page');
   await sleep(1800);
@@ -213,19 +213,19 @@ try {
   try { srv.kill('SIGKILL'); } catch {}
   await sleep(600);
   startServer();
-  check('the server comes back', await waitServer());
+  check('the server comes back', verdictOf(await waitServer()));
   try { liveWs.close(); } catch {}
   await openWs();
   await cdp('Page.reload', {});
   await waitApp();
   await sleep(500);
   if (!(await waitFor(`!!(${VIEW(sid)})?._messageList`, 6000))) await attach(sid, 'D-docusign');
-  check('the reloaded page shows the conversation from the restarted server (a new normalizer epoch)', await waitFor(`(() => { const e = (${VIEW(sid)})?._normEpoch || 0; return !!e && e !== ${Number(epochBefore) || 0}; })()`, 30000), { epochBefore });
-  check('THE CARD IS BACK: the parked ask has its Allow button after the restart', await waitFor(`!!(${PERM(sid)})`, 30000));
+  check('the reloaded page shows the conversation from the restarted server (a new normalizer epoch)', verdictOf(await waitFor(`(() => { const e = (${VIEW(sid)})?._normEpoch || 0; return !!e && e !== ${Number(epochBefore) || 0}; })()`, 30000)), { epochBefore });
+  check('THE CARD IS BACK: the parked ask has its Allow button after the restart', verdictOf(await waitFor(`!!(${PERM(sid)})`, 30000)));
   const p2 = await evalJs(`(() => { const v = ${VIEW(sid)}; return { turnState: v?._turnState || null, asks: (v?._pendingAsks || []).map((a) => a.requestId), chip: !!(${CHIP(sid)}), typing: ${TYPING(sid)}, typingSince: !!v?._typingSince }; })()`);
   check('the view\'s turn state is requires_action (the ring\'s last word, not a bare streaming:true)', p2.turnState === 'requires_action', p2);
-  check('the chip says "waiting for you" and the asks name the parked request', p2.chip && p2.asks.includes('req-park'), p2);
-  check('the typing line says it waits for the person, never "thinking" — and names the request in words (lane door-healthy-chat: «Waiting for you to allow: delete ds-out · run sign.sh»)', p2.typingSince && /waiting for you/i.test(p2.typing) && !/thinking/i.test(p2.typing) && p2.typing === 'Waiting for you to allow: delete ds-out · run sign.sh', p2);
+  check('the chip says "waiting for you" and the asks name the parked request', gateOf(p2.chip) && verdictOf(p2.asks.includes('req-park')), p2);
+  check('the typing line says it waits for the person, never "thinking" — and names the request in words (lane door-healthy-chat: «Waiting for you to allow: delete ds-out · run sign.sh»)', gateOf(p2.typingSince) && gateOf(/waiting for you/i.test(p2.typing)) && !/thinking/i.test(p2.typing) && p2.typing === 'Waiting for you to allow: delete ds-out · run sign.sh', p2);
   let turn = turnOfList(sid); for (let i = 0; i < 20 && turn !== 'waiting'; i++) { await sleep(250); turn = turnOfList(sid); }
   check('the session list\'s turn fact (the sidebar / For-you dot) is \'waiting\'', turn === 'waiting', turn);
   const stallBefore = stallLines.length;
@@ -241,12 +241,12 @@ try {
   const controlLines = stallLines.length - stallBefore; // the control's own forced re-attach logs its line — the only one allowed
 
   console.log('P3 the answer resumes the tool');
-  check('a real click on Allow', await realClickEl(PERM(sid)));
+  check('a real click on Allow', verdictOf(await realClickEl(PERM(sid))));
   const resp = await waitResponses('req-park');
   check('the answer reaches the CLI\'s stdin with the parked request id (allow)', resp.length === 1 && resp[0].response?.response?.behavior === 'allow', resp);
   let ran = false; for (let i = 0; i < 60 && !ran; i++) { ran = fs.existsSync(RAN); if (!ran) await sleep(250); }
-  check('the tool runs (the stub\'s marker)', ran);
-  check('the result renders and the turn ends (no typing line, no chip)', await waitFor(`(() => { const v = ${VIEW(sid)}; return [...(v?._messageList?.querySelectorAll('.chat-msg') || [])].some((m) => /The envelope is signed/.test(m.textContent)) && !v._typingSince && !(${CHIP(sid)}); })()`, 30000));
+  check('the tool runs (the stub\'s marker)', verdictOf(ran));
+  check('the result renders and the turn ends (no typing line, no chip)', verdictOf(await waitFor(`(() => { const v = ${VIEW(sid)}; return [...(v?._messageList?.querySelectorAll('.chat-msg') || [])].some((m) => /The envelope is signed/.test(m.textContent)) && !v._typingSince && !(${CHIP(sid)}); })()`, 30000)));
   check('no "[chat] delivery stall" line in the whole run but the control\'s own', controlLines === 1 && stallLines.length === 1, stallLines);
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); liveWs.close(); } catch {}
 } catch (e) {
@@ -256,4 +256,4 @@ try {
 if (failed && process.env.PARKED_KEEP_LOG) { try { fs.copyFileSync(SRV_LOG, process.env.PARKED_KEEP_LOG); fs.copyFileSync(STDIN_LOG, process.env.PARKED_KEEP_LOG + '.stdin'); } catch {} }
 console.log(`\n${failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`}`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

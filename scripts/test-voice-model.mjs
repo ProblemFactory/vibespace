@@ -30,7 +30,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AN_CLOSURE = ['assistant-note.js', 'notification-senders.js', 'inbox-reply-text.js'];
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
@@ -55,7 +55,7 @@ console.log('① dictationContext — the clip rules');
   ok('app is always VibeSpace; title ≤ 200; after = head 500; selected ≤ 2 000', c.app === 'VibeSpace' && c.title.length === 200 && c.after === 'A'.repeat(500) && c.selected.length === 2000, { t: c.title.length, a: c.after.length, s: c.selected.length });
   const before = 'old words. '.repeat(150) + 'Now the last sentence here';
   const b = VM.dictationContext({ before }).before;
-  ok('before = the TAIL ≤ 1 000, cut forward to a sentence start when one is near', b.length <= 1000 && b.endsWith('Now the last sentence here') && /^old words\./.test(b), b.slice(0, 40));
+  ok('before = the TAIL ≤ 1 000, cut forward to a sentence start when one is near', b.length <= 1000 && gateOf(b.endsWith('Now the last sentence here')) && verdictOf(/^old words\./.test(b)), b.slice(0, 40));
   ok('a short before is kept whole', VM.dictationContext({ before: 'hello' }).before === 'hello');
   ok('no url key is ever sent (§3: the hub address has no recognition value)', !('url' in VM.dictationContext({ title: 'x', before: 'y' })));
   const empty = VM.dictationContext({});
@@ -77,7 +77,7 @@ console.log('① the owner\'s `text` override — last ≤ 6 user + agent TEXT m
   ok('≤ 20 identifiers', idl.length === 20, idl.length);
   const big = Array.from({ length: 6 }, (_, i) => msg('assistant', txt(`${i} `.repeat(300))));
   const tb = VM.dictationContext({ messages: big, cwd: '/x/proj' }).text;
-  ok('the whole text ≤ 1 500 and the NEWEST message survives the budget', tb.length <= L.textChars && tb.includes('agent: 5 5') && tb.endsWith('proj'), tb.length);
+  ok('the whole text ≤ 1 500 and the NEWEST message survives the budget', tb.length <= L.textChars && gateOf(tb.includes('agent: 5 5')) && verdictOf(tb.endsWith('proj')), tb.length);
 }
 
 console.log('① the 4 KB whole');
@@ -85,7 +85,7 @@ console.log('① the 4 KB whole');
   const cjk = '汉'.repeat(1400);
   const c = VM.dictationContext({ title: cjk, before: cjk, after: cjk, selected: cjk + cjk, messages: [msg('assistant', txt(cjk)), msg('user', txt(cjk))] });
   ok('a CJK-heavy context is ≤ 4 096 bytes (UTF-8, JSON as sent)', bytes(c) <= L.contextBytes && VM.contextBytes(c) === bytes(c), bytes(c));
-  ok('… and still carries every field (shrunk, not dropped)', ['title', 'before', 'after', 'selected', 'text'].every((k) => c[k] && c[k].length > 10), Object.keys(c));
+  ok('… and still carries every field (shrunk, not dropped)', verdictOf(['title', 'before', 'after', 'selected', 'text'].every((k) => c[k] && c[k].length > 10)), Object.keys(c));
   const hub = VM.contextFromClient(JSON.stringify({ title: 'x', before: 'b'.repeat(5000), text: 't'.repeat(9000), url: 'http://h:3456/', apiKey: 'dl_zzzzzzzzzzzz' }));
   ok('the hub re-cut: only §3 keys survive, each clipped again, ≤ 4 KB', !('url' in hub) && !('apiKey' in hub) && hub.text.length <= 1500 && hub.before.length <= 1000 && bytes(hub) <= 4096, Object.keys(hub));
   ok('the hub re-cut: an unparseable ctx is no context at all', JSON.stringify(VM.contextFromClient('{nope')) === '{"app":"VibeSpace"}');
@@ -105,7 +105,7 @@ const neverLeaks = (M) => { const c = M.dictationContext({ messages: NEVER, cwd:
 {
   const r = neverLeaks(VM);
   ok('no tool call / tool result / thinking / system card / hook frame / key / env / e-mail reaches the context', r.leaked.length === 0, r.leaked);
-  ok('… while the real words around them do', /please read\s+the notes/.test(r.c.text) && r.c.text.includes('real words'), r.c.text);
+  ok('… while the real words around them do', gateOf(/please read\s+the notes/.test(r.c.text)) && verdictOf(r.c.text.includes('real words')), r.c.text);
   // the RED control: a mutant that keeps every block (no text-only filter, no frame strip, no scrub) leaks — the check above can fail
   const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
   const cuts = [
@@ -121,8 +121,8 @@ const neverLeaks = (M) => { const c = M.dictationContext({ messages: NEVER, cwd:
     fs.writeFileSync(path.join(dir, 'voice-model.js'), mut);
     const MM = require(path.join(dir, 'voice-model.js'));
     const m = neverLeaks(MM);
-    ok('CONTROL: each never-list cut applies exactly once', applied.every((n) => n === 1), applied);
-    ok('CONTROL: the mutant (tool blocks kept, frames kept, nothing scrubbed) LEAKS every needle ⇒ the check is RED on it', NEEDLES.every((n) => m.leaked.includes(n)), m.leaked);
+    ok('CONTROL: each never-list cut applies exactly once', verdictOf(applied.every((n) => n === 1)), applied);
+    ok('CONTROL: the mutant (tool blocks kept, frames kept, nothing scrubbed) LEAKS every needle ⇒ the check is RED on it', verdictOf(NEEDLES.every((n) => m.leaked.includes(n))), m.leaked);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -136,23 +136,23 @@ const neverLeaks = (M) => { const c = M.dictationContext({ messages: NEVER, cwd:
     return { d, t, terms, leaked: d.includes('COMPACTSUMMARY_9') || t.includes('COMPACTSUMMARY_9') || terms.includes('secretPlanName') };
   };
   const r = sumLeaks(VM);
-  ok('a compaction SUMMARY never enters a dictation context, the teach context or the terms (voice-verify F1)', !r.leaked && r.d.includes('now fix the loader') && r.t.includes('parseConfig'), r);
+  ok('a compaction SUMMARY never enters a dictation context, the teach context or the terms (voice-verify F1)', !r.leaked && gateOf(r.d.includes('now fix the loader')) && verdictOf(r.t.includes('parseConfig')), r);
   const AN = require(path.join(REPO, 'src/assistant-note.js'));
   const vmSrc = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8'), crSrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
-  ok('… by ONE rule: voice-model requires assistant-note\'s isCompactSummaryText, chat-renderers re-exports that same one, neither spells the summary\'s head', AN.isCompactSummaryText(SUMMARY) && /require\('\.\/assistant-note\.js'\)/.test(vmSrc) && /export \{ isCompactSummaryText \} from '\.\.\/assistant-note\.js'/.test(crSrc) && ![vmSrc, crSrc].some((s) => s.includes('continued from a previous conversation')));
+  ok('… by ONE rule: voice-model requires assistant-note\'s isCompactSummaryText, chat-renderers re-exports that same one, neither spells the summary\'s head', gateOf(AN.isCompactSummaryText(SUMMARY)) && gateOf(/require\('\.\/assistant-note\.js'\)/.test(vmSrc)) && gateOf(/export \{ isCompactSummaryText \} from '\.\.\/assistant-note\.js'/.test(crSrc)) && ![vmSrc, crSrc].some((s) => s.includes('continued from a previous conversation')));
   const anchor = "    if (m.role === 'user' && isCompactSummaryText(raw)) continue;\n";
   const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-model-'));
   try {
     for (const f of AN_CLOSURE) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, f));
     fs.writeFileSync(path.join(dir, 'vm-sum.js'), editAnchor(src, anchor, '', "src/voice-model.js"));
-    ok('CONTROL: a copy without the summary skip lets the summary into all three ⇒ the check above is RED on it', src.split(anchor).length === 2 && sumLeaks(require(path.join(dir, 'vm-sum.js'))).leaked);
+    ok('CONTROL: a copy without the summary skip lets the summary into all three ⇒ the check above is RED on it', src.split(anchor).length === 2 && verdictOf(sumLeaks(require(path.join(dir, 'vm-sum.js'))).leaked));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   // voice-verify F8 (low): a JWT and a fine-grained GitHub token are secret shapes too
   // the shapes are joined at run time so the repo's own secret scan never reads a token-shaped literal (int260)
   const JWT8 = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'dozjgNryP4J3jVmNHl0w5N'].join('.'), PAT8 = ['github', 'pat', '11ABCDEFG0123456789', 'abcdefghijklmnop'].join('_');
   const s8 = JSON.stringify(VM.dictationContext({ messages: [msg('user', txt(`use ${JWT8} and ${PAT8} please`))] }));
-  ok('a JWT and a github_pat_ token are scrubbed (voice-verify F8)', !/eyJhbGci|github_pat_11/.test(s8) && s8.includes('please'), s8);
+  ok('a JWT and a github_pat_ token are scrubbed (voice-verify F8)', !/eyJhbGci|github_pat_11/.test(s8) && verdictOf(s8.includes('please')), s8);
 }
 
 console.log('③ voiceWords — every code');
@@ -160,13 +160,13 @@ console.log('③ voiceWords — every code');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
   const ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const need = ['insecure', 'denied', 'not-connected', 'reconnect', 'rate-limited', 'too-long', 'audio-invalid', 'failed', 'raw-inserted', 'offline', 'inserted', 'listening'];
-  ok('§5 rows all present (insecure, denied, not-connected / reconnect, 429, 413/170 s, 422, 5xx, rewrite skipped, offline) + the chip + the placeholder', need.every((c) => VM.VOICE_CODES.includes(c)), need.filter((c) => !VM.VOICE_CODES.includes(c)));
+  ok('§5 rows all present (insecure, denied, not-connected / reconnect, 429, 413/170 s, 422, 5xx, rewrite skipped, offline) + the chip + the placeholder', verdictOf(need.every((c) => VM.VOICE_CODES.includes(c))), need.filter((c) => !VM.VOICE_CODES.includes(c)));
   for (const code of VM.VOICE_CODES) {
     const w = VM.voiceWords(code, { n: 7, url: 'http://localhost:<port>' });
     const key = '  ' + JSON.stringify(w.words) + ':';
-    ok(`${code}: words + zh + ja + a known action`, w.code === code && w.words.length > 5 && zh.includes(key) && ja.includes(key) && [null, 'copy-url', 'open-plugin', 'undo', 'resend', 'unlock'].includes(w.action), { code, zh: zh.includes(key), ja: ja.includes(key) });
+    ok(`${code}: words + zh + ja + a known action`, w.code === code && w.words.length > 5 && gateOf(zh.includes(key)) && gateOf(ja.includes(key)) && verdictOf([null, 'copy-url', 'open-plugin', 'undo', 'resend', 'unlock'].includes(w.action)), { code, zh: zh.includes(key), ja: ja.includes(key) });
   }
-  ok('insecure offers the localhost address to copy; rate-limited names {n}; the not-connected rows open the plugin card', VM.voiceWords('insecure').action === 'copy-url' && VM.voiceWords('insecure').words.includes('{url}') && VM.voiceWords('rate-limited').words.includes('{n}') && VM.voiceWords('not-connected').action === 'open-plugin' && VM.voiceWords('reconnect').action === 'open-plugin');
+  ok('insecure offers the localhost address to copy; rate-limited names {n}; the not-connected rows open the plugin card', VM.voiceWords('insecure').action === 'copy-url' && gateOf(VM.voiceWords('insecure').words.includes('{url}')) && gateOf(VM.voiceWords('rate-limited').words.includes('{n}')) && VM.voiceWords('not-connected').action === 'open-plugin' && VM.voiceWords('reconnect').action === 'open-plugin');
   ok('an unknown code says the generic failure (never silence)', VM.voiceWords('zzz').code === 'failed');
   ok('failureCodeOf: 401/403 ⇒ reconnect, 413 ⇒ too-long, 422 audio_invalid ⇒ audio-invalid, 429 ⇒ rate-limited, 5xx ⇒ failed', VM.failureCodeOf(401) === 'reconnect' && VM.failureCodeOf(403) === 'reconnect' && VM.failureCodeOf(413) === 'too-long' && VM.failureCodeOf(422, 'audio_invalid') === 'audio-invalid' && VM.failureCodeOf(422, 'bad_request') === 'failed' && VM.failureCodeOf(429) === 'rate-limited' && VM.failureCodeOf(503) === 'failed');
 }
@@ -194,13 +194,13 @@ console.log('④ the vendor contract');
     { role: 'system', content: [{ type: 'text', text: 'systemOnlyWord' }] },
   ];
   const terms = VM.termsOf({ messages: MS, files: ['/w/vs/src/lib/chat-input.js'], groupName: 'Voice Lane', known: ['vibespace', 'README.md'] });
-  ok('termsOf: file names (given + named) + identifiers + the Task Group name, minus the dictionary (case-insensitive)', ['chat-input.js', 'doc-window-ui.js', 'commentsBatches', 'doc-model.js', 'dictation_context', 'Voice Lane'].every((t) => terms.includes(t)) && !terms.includes('VibeSpace'), terms);
+  ok('termsOf: file names (given + named) + identifiers + the Task Group name, minus the dictionary (case-insensitive)', gateOf(['chat-input.js', 'doc-window-ui.js', 'commentsBatches', 'doc-model.js', 'dictation_context', 'Voice Lane'].every((t) => terms.includes(t))) && !terms.includes('VibeSpace'), terms);
   const leak = (xs) => xs.filter((t) => /dl_abc|s3cr3t|API_TOKEN|ana@|example\.test|github|hiddenCamelWord|toolOnlyName|systemOnlyWord/.test(t));
   ok('termsOf never-list: no key, env assignment, e-mail, URL host, harness frame, tool argument or system row', !leak(terms).length, leak(terms));
   ok('termsOf ≤ max, distinct', VM.termsOf({ messages: [{ role: 'user', text: Array.from({ length: 80 }, (_, i) => `wordName${i}`).join(' ') }], max: 50 }).length === 50);
   const c = VM.teachContextOf({ title: 'Doc comments', messages: MS, cwd: '/w/vibespace' });
   const LEAK_RE = /dl_abc|s3cr3t|ana@example|hiddenCamelWord|toolOnlyName|systemOnlyWord/;
-  ok('teachContextOf: title, source VibeSpace, the person\'s + the agent\'s text, the working directory, Files: — ≤ 6 000', c.title === 'Doc comments' && c.source === 'VibeSpace' && c.text.includes('commentsBatches') && c.text.includes('Working directory: vibespace') && /Files: .*doc-window-ui\.js/.test(c.text) && c.text.length <= 6000, c);
+  ok('teachContextOf: title, source VibeSpace, the person\'s + the agent\'s text, the working directory, Files: — ≤ 6 000', c.title === 'Doc comments' && c.source === 'VibeSpace' && gateOf(c.text.includes('commentsBatches')) && gateOf(c.text.includes('Working directory: vibespace')) && gateOf(/Files: .*doc-window-ui\.js/.test(c.text)) && c.text.length <= 6000, c);
   ok('teachContextOf never-list: no key, env value, e-mail, frame, tool row or system row', !LEAK_RE.test(c.text), c.text);
   ok('teachContextOf cuts at 6 000', VM.teachContextOf({ messages: [{ role: 'assistant', text: 'x'.repeat(9000) }, { role: 'user', text: 'y '.repeat(5000) }] }).text.length <= 6000);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-model-'));
@@ -210,7 +210,7 @@ console.log('④ the vendor contract');
     const anchor = '  for (const re of SECRET_RES) s = s.replace(re, \'\');';
     fs.writeFileSync(path.join(dir, 'vm.js'), editAnchor(src, anchor, '  // (mutant: the never-list scrub removed)', "src/voice-model.js"));
     const MM = require(path.join(dir, 'vm.js'));
-    ok('CONTROL: a copy with the never-list scrub removed leaks the key into the context AND the terms ⇒ the two checks above are RED on it', src.split(anchor).length === 2 && LEAK_RE.test(MM.teachContextOf({ title: 't', messages: MS }).text));
+    ok('CONTROL: a copy with the never-list scrub removed leaks the key into the context AND the terms ⇒ the two checks above are RED on it', src.split(anchor).length === 2 && verdictOf(LEAK_RE.test(MM.teachContextOf({ title: 't', messages: MS }).text)));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -235,10 +235,10 @@ console.log('⑦ proposalCandidates — words a person SAYS (lane voice-teach-ca
   console.log(`    proposed (${terms.length}): ${c.map((x) => `${x.term} [${x.why} ${x.seen}/${x.byPerson}${x.pick ? ' ✓' : ''}]`).join(', ')}`);
   const OUT = ['cli_aa97b369e938ded2', ['ou', '7565'].join('_'), 'oc_xxx', 'ou_xxx', 'om_xxx'];
   const top = terms.slice(0, 12);
-  ok('the screenshot\'s conversation ⇒ the top-12 chips carry the names AND the identifiers (lark_tool.py, LarkClient, om_id, docx_token, user_access_token — a NAME, not a value)', ['lark_tool.py', 'LarkClient', 'om_id', 'docx_token', 'user_access_token'].every((w) => top.includes(w)), top);
-  ok('…none of the opaque ids / placeholders (cli_aa97…, ou_7565, oc_xxx, ou_xxx, om_xxx); lark_tool.py and LarkClient still rank in the top 3', !OUT.some((b) => terms.includes(b)) && terms.slice(0, 3).includes('lark_tool.py') && terms.slice(0, 3).includes('LarkClient') && terms.includes('Lark'), terms);
+  ok('the screenshot\'s conversation ⇒ the top-12 chips carry the names AND the identifiers (lark_tool.py, LarkClient, om_id, docx_token, user_access_token — a NAME, not a value)', verdictOf(['lark_tool.py', 'LarkClient', 'om_id', 'docx_token', 'user_access_token'].every((w) => top.includes(w))), top);
+  ok('…none of the opaque ids / placeholders (cli_aa97…, ou_7565, oc_xxx, ou_xxx, om_xxx); lark_tool.py and LarkClient still rank in the top 3', !OUT.some((b) => terms.includes(b)) && gateOf(terms.slice(0, 3).includes('lark_tool.py')) && gateOf(terms.slice(0, 3).includes('LarkClient')) && verdictOf(terms.includes('Lark')), terms);
   const base = VM.termsOf({ messages: LARK, cwd: '/w/lark' });
-  ok(`the per-project tier's input (termsOf) is untouched: ${base.length} terms incl. all six`, base.length >= 40 && BAD6.every((b) => base.includes(b)), base.length);
+  ok(`the per-project tier's input (termsOf) is untouched: ${base.length} terms incl. all six`, base.length >= 40 && verdictOf(BAD6.every((b) => base.includes(b))), base.length);
   // the census: every row with a term only it rejects; a copy of voice-model.js without that row lets the term through
   const SK = ['sk', 'ant', 'api03', 'Qh7Kd9mZ2pX4vB8nL1wR6yT3'].join('-');           // built at runtime (no literal key in the tree)
   const ROWS = { secret: SK, placeholder: 'oc_xxx', 'vendor-id': ['ou', '7565'].join('_'), 'url-email-digits': 'feishu.cn' };
@@ -254,7 +254,7 @@ console.log('⑦ proposalCandidates — words a person SAYS (lane voice-teach-ca
       fs.writeFileSync(f, editAnchor(src, anchor, `['${row}', () => false, (w`, "src/voice-model.js"));
       const M = require(f);
       const has = (V) => V.proposalCandidates(said(w)).some((x) => x.term === w);
-      ok(`census ${row}: rejects ${row === 'secret' ? 'an sk-ant-… key' : w} (first row to match) — RED on a copy without the row`, src.split(anchor).length === 2 && VM.exclusionOf(w) === row && !has(VM) && has(M));
+      ok(`census ${row}: rejects ${row === 'secret' ? 'an sk-ant-… key' : w} (first row to match) — RED on a copy without the row`, src.split(anchor).length === 2 && VM.exclusionOf(w) === row && !has(VM) && verdictOf(has(M)));
     }
     // ids allowed: the old field-tail row put back (a copy) drops every *_id / *_token NAME the owner wants proposed
     const f = path.join(dir, 'm-field-tail.js');
@@ -286,22 +286,22 @@ console.log('⑧ the evidence ledger (lane voice-dictionary-nag) — a dismissal
   const OLD = [u('we use CLAUDE.md here'), a('Sure — CLAUDE.md is read first.')];
   const c0 = VM.proposalCandidates({ messages: OLD });
   const cm = c0.find((c) => c.term === 'CLAUDE.md');
-  ok('a candidate carries its occurrences (occ: the message keys, who said it) — the evidence', !!cm && cm.occ.length === 2 && cm.occ.some((o) => o.byPerson) && cm.occ.every((o) => typeof o.key === 'string'), cm);
+  ok('a candidate carries its occurrences (occ: the message keys, who said it) — the evidence', !!cm && cm.occ.length === 2 && gateOf(cm.occ.some((o) => o.byPerson)) && verdictOf(cm.occ.every((o) => typeof o.key === 'string')), cm);
   let L = VM.ledgerSuggested(null, c0, 1000);
   ok('shown ⇒ its occurrences become the word\'s evidence (evidenceOf = the count since the last dismissal)', VM.evidenceOf(L, 'claude.md') === 2);
   L = VM.ledgerDismissed(L, ['CLAUDE.md'], 2000);
   const again = VM.proposalCandidates({ messages: [...OLD, u('and Zorble twice: Zorble')], ledger: L });
-  ok('a DISMISSAL consumes the evidence: the count is 0, and the SAME messages read again (no new dictation) never re-earn it — at any hour, a year later too', VM.evidenceOf(L, 'CLAUDE.md') === 0 && !terms(again).includes('CLAUDE.md') && terms(again).includes('Zorble') && !terms(VM.proposalCandidates({ messages: OLD, ledger: L })).length, terms(again));
+  ok('a DISMISSAL consumes the evidence: the count is 0, and the SAME messages read again (no new dictation) never re-earn it — at any hour, a year later too', VM.evidenceOf(L, 'CLAUDE.md') === 0 && !terms(again).includes('CLAUDE.md') && gateOf(terms(again).includes('Zorble')) && !terms(VM.proposalCandidates({ messages: OLD, ledger: L })).length, terms(again));
   const fresh = VM.proposalCandidates({ messages: [...OLD, u('please open CLAUDE.md again')], ledger: L });
   const cf = fresh.find((c) => c.term === 'CLAUDE.md');
-  ok('a NEW dictation that says it re-earns the word — counted from the new message ONLY (seen 1, byPerson 1), preselected', !!cf && cf.seen === 1 && cf.byPerson === 1 && cf.pick && cf.occ.length === 1, cf);
+  ok('a NEW dictation that says it re-earns the word — counted from the new message ONLY (seen 1, byPerson 1), preselected', !!cf && cf.seen === 1 && cf.byPerson === 1 && gateOf(cf.pick) && cf.occ.length === 1, cf);
   ok('an agent\'s new mention alone (weight 1) does not re-earn it — the same ≥ 2 the first suggestion needed', !terms(VM.proposalCandidates({ messages: [...OLD, a('I touched CLAUDE.md.')], ledger: L })).includes('CLAUDE.md'));
   let L2 = VM.ledgerSuggested(L, fresh, 3000);
   L2 = VM.ledgerDismissed(L2, ['claude.MD'], 4000);
-  ok('dismissed again ⇒ that new evidence is consumed too (case-insensitive) — never a blacklist: a third new mention re-earns it', !terms(VM.proposalCandidates({ messages: [...OLD, u('please open CLAUDE.md again')], ledger: L2 })).includes('CLAUDE.md') && terms(VM.proposalCandidates({ messages: [...OLD, u('CLAUDE.md, third time')], ledger: L2 })).includes('CLAUDE.md'));
+  ok('dismissed again ⇒ that new evidence is consumed too (case-insensitive) — never a blacklist: a third new mention re-earns it', !terms(VM.proposalCandidates({ messages: [...OLD, u('please open CLAUDE.md again')], ledger: L2 })).includes('CLAUDE.md') && verdictOf(terms(VM.proposalCandidates({ messages: [...OLD, u('CLAUDE.md, third time')], ledger: L2 })).includes('CLAUDE.md')));
   ok('加入 (ledgerAdded) takes the words out of the ledger — the vendor\'s dictionary (`known`) holds them from then on', !('claude.md' in VM.ledgerAdded(L2, ['CLAUDE.MD']).words));
   ok('RULE 1 is ONE function: evidenceRule(candidates, ledger) is what proposalCandidates applies — the same answer called directly', JSON.stringify(VM.evidenceRule(VM.proposalCandidates({ messages: [...OLD, u('and Zorble twice: Zorble')] }), L)) === JSON.stringify(again));
-  ok('ledgerOf drops junk (a key that is not its term\'s lower case, a non-object, non-string keys, non-number stamps)', (() => { const j = VM.ledgerOf({ words: { 'claude.md': { term: 'CLAUDE.md', evidence: ['m1', 7, 'm1'], consumed: null, suggestedAt: [1, 'x'] }, wrong: { term: 'Other' }, bad: 7 } }); return Object.keys(j.words).join() === 'claude.md' && j.words['claude.md'].evidence.join() === 'm1' && j.words['claude.md'].suggestedAt.join() === '1'; })());
+  ok('ledgerOf drops junk (a key that is not its term\'s lower case, a non-object, non-string keys, non-number stamps)', verdictOf((() => { const j = VM.ledgerOf({ words: { 'claude.md': { term: 'CLAUDE.md', evidence: ['m1', 7, 'm1'], consumed: null, suggestedAt: [1, 'x'] }, wrong: { term: 'Other' }, bad: 7 } }); return Object.keys(j.words).join() === 'claude.md' && j.words['claude.md'].evidence.join() === 'm1' && j.words['claude.md'].suggestedAt.join() === '1'; })()));
   let big = null;
   for (let i = 0; i < SL.ledgerMax + 5; i++) big = VM.ledgerSuggested(big, ['w' + i + 'x'], 1000 + i);
   ok('the bound: 2 005 words ⇒ 2 000 kept, the least recently touched out', Object.keys(big.words).length === SL.ledgerMax && !('w0x' in big.words) && !('w4x' in big.words) && 'w5x' in big.words && 'w2004x' in big.words);
@@ -335,7 +335,7 @@ console.log('⑧ the evidence ledger (lane voice-dictionary-nag) — a dismissal
   const nb = tally(before);
   ok('the measured fixture reproduces the incident on the shipped rule: 20 items in 8 days (10 on one day, 4 on the last), CLAUDE.md 7× · Claude 5 · Lark 4 · DocuSign 3 · Confidential / Finance / Notion / GitHub 2 — none of them dictated again',
     before.filter((x) => x.length).length === 20 && EV.filter(([h]) => h >= 24 && h < 48).length === 10 && EV.filter(([h]) => h >= 168).length === 4 && Math.floor(EV[EV.length - 1][0] / 24) + 1 === 8
-    && nb['CLAUDE.md'] === 7 && nb.Claude === 5 && nb.Lark === 4 && nb.DocuSign === 3 && ['Confidential', 'Finance', 'Notion', 'GitHub'].every((w) => nb[w] === 2), nb);
+    && nb['CLAUDE.md'] === 7 && nb.Claude === 5 && nb.Lark === 4 && nb.DocuSign === 3 && verdictOf(['Confidential', 'Finance', 'Notion', 'GitHub'].every((w) => nb[w] === 2)), nb);
   // AFTER: the same dictations through the ledger + the pacing; the person dismisses each item 20 minutes after it is filed
   const replay = (V) => {
     const w = windows();
@@ -360,9 +360,9 @@ console.log('⑧ the evidence ledger (lane voice-dictionary-nag) — a dismissal
   const after = replay(VM);
   const REPEATED = ['CLAUDE.md', 'Claude', 'Lark', 'DocuSign', 'Confidential', 'Finance', 'Notion', 'GitHub'];
   ok(`AFTER (the evidence ledger + the pacing, every item dismissed, no new dictation of the words): CLAUDE.md in ${after.n['CLAUDE.md']} item (ONCE); every repeated word at most once; ${after.filed} items in the 8 days (was 20), never two open`,
-    after.n['CLAUDE.md'] === 1 && REPEATED.every((x) => (after.n[x] || 0) <= 1) && after.filed < 20 && after.maxOpen <= 1, after.n);
+    after.n['CLAUDE.md'] === 1 && gateOf(REPEATED.every((x) => (after.n[x] || 0) <= 1)) && after.filed < 20 && after.maxOpen <= 1, after.n);
   const reEarn = VM.proposalCandidates({ messages: [u(CONVS.A), u('open CLAUDE.md again please')], ledger: after.led });
-  ok('…and once the person DICTATES it again (a new message), CLAUDE.md is a candidate again — never a blacklist', terms(reEarn).includes('CLAUDE.md'), terms(reEarn));
+  ok('…and once the person DICTATES it again (a new message), CLAUDE.md is a candidate again — never a blacklist', verdictOf(terms(reEarn).includes('CLAUDE.md')), terms(reEarn));
   // THE MUTANT: a voice-model copy whose candidate rule subtracts only `known` (rule 1 dropped) ⇒ the same replay is RED
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-vm-ledger-'));
   try {
@@ -377,4 +377,4 @@ console.log('⑧ the evidence ledger (lane voice-dictionary-nag) — a dismissal
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

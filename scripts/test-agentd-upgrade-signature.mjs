@@ -36,7 +36,7 @@ const SIG = require('../src/agentd-signature.js');
 const { Mux, PROTO_VERSION } = require('../src/agentd/mux.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -61,12 +61,12 @@ try {
   const B = Buffer.from('/* a bundle */ module.exports = { VERSION: "1.2.3" };\n');
   const good = SIG.sign(K1.privateKeyPem, B, '1.2.3', C);
   const v1 = SIG.verify([row(K1)], B, '1.2.3', good, C);
-  ok(v1.ok && v1.keyId === K1.keyId && v1.viaChain === false && v1.trustAfter === null && v1.sha256 === crypto.createHash('sha256').update(B).digest('hex'), 'good: signed by a trusted key ⇒ ok (no pin change)', v1);
+  ok(gateOf(v1.ok) && v1.keyId === K1.keyId && v1.viaChain === false && v1.trustAfter === null && v1.sha256 === crypto.createHash('sha256').update(B).digest('hex'), 'good: signed by a trusted key ⇒ ok (no pin change)', v1);
   const flipped = Buffer.from(B); flipped[3] ^= 1;
   ok(SIG.verify([row(K1)], flipped, '1.2.3', good, C).code === 'bad-signature', 'one flipped BUNDLE byte ⇒ bad-signature');
   const badSig = { ...good, sig: Buffer.from(Buffer.from(good.sig, 'base64').map((b, i) => (i === 7 ? b ^ 1 : b))).toString('base64') };
   ok(SIG.verify([row(K1)], B, '1.2.3', badSig, C).code === 'bad-signature', 'one flipped SIGNATURE byte ⇒ bad-signature');
-  ok(SIG.verify([row(K1)], B, '1.2.3', { ...good, sha256: '0'.repeat(64) }, C).ok, 'the record\'s own sha256 is never trusted (the digest is computed over the bytes)');
+  ok(verdictOf(SIG.verify([row(K1)], B, '1.2.3', { ...good, sha256: '0'.repeat(64) }, C).ok), 'the record\'s own sha256 is never trusted (the digest is computed over the bytes)');
   ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(KX.privateKeyPem, B, '1.2.3', C), C).code === 'unknown-key', 'signed by a key this device does not trust ⇒ unknown-key');
   ok(SIG.verify([row(K1)], B, '1.2.4', good, C).code === 'version-mismatch', 'signed for 1.2.3, offered as 1.2.4 ⇒ version-mismatch');
   ok(SIG.verify([row(K1)], B, '1.2.3', null, C).code === 'unsigned', 'no record ⇒ unsigned');
@@ -76,20 +76,20 @@ try {
   const L12 = SIG.signLink(K1.privateKeyPem, K2.publicKey, C), L23 = SIG.signLink(K2.privateKeyPem, K3.publicKey, C);
   const byK2 = SIG.sign(K2.privateKeyPem, B, '1.2.3', { ...C, chain: [L12] });
   const v2 = SIG.verify([row(K1)], B, '1.2.3', byK2, C);
-  ok(v2.ok && v2.viaChain === true && JSON.stringify(v2.trustAfter) === JSON.stringify([row(K2), row(K1)]), 'a successor THROUGH the chain (K1 → K2) ⇒ ok, and K2 JOINS the pin — K1 stays (fix r2: a successor adds, it does not replace)', v2);
+  ok(gateOf(v2.ok) && v2.viaChain === true && JSON.stringify(v2.trustAfter) === JSON.stringify([row(K2), row(K1)]), 'a successor THROUGH the chain (K1 → K2) ⇒ ok, and K2 JOINS the pin — K1 stays (fix r2: a successor adds, it does not replace)', v2);
   ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K2.privateKeyPem, B, '1.2.3', C), C).code === 'unknown-key', 'the same successor WITHOUT the chain ⇒ unknown-key');
   ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K2.privateKeyPem, B, '1.2.3', { ...C, chain: [SIG.signLink(KX.privateKeyPem, K2.publicKey, C)] }), C).code === 'unknown-key', 'a successor vouched for by a STRANGER\'s link (KX → K2) ⇒ unknown-key');
   const forged = { ...L12, sig: SIG.signLink(KX.privateKeyPem, K2.publicKey, C).sig };
   ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K2.privateKeyPem, B, '1.2.3', { ...C, chain: [forged] }), C).code === 'bad-signature', 'a link that CLAIMS a trusted signer but does not check ⇒ bad-signature (a forgery is refused, never skipped)');
   const v3 = SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K3.privateKeyPem, B, '1.2.3', { ...C, chain: [L23, L12] }), C);
-  ok(v3.ok && v3.viaChain && v3.trustAfter[0].keyId === K3.keyId, 'two rotations, links out of order (K2→K3, K1→K2) ⇒ ok, pinned to K3');
+  ok(gateOf(v3.ok) && gateOf(v3.viaChain) && v3.trustAfter[0].keyId === K3.keyId, 'two rotations, links out of order (K2→K3, K1→K2) ⇒ ok, pinned to K3');
   ok(SIG.verify([], B, '1.2.3', good, C).code === 'unknown-key', 'an EMPTY trusted set ⇒ unknown-key (no release key yet = nothing lands signed)');
   ok(SIG.verify([{ keyId: KX.keyId, publicKey: K1.publicKey }], B, '1.2.3', good, C).code === 'unknown-key', 'a trusted row whose keyId is not its key\'s id is dropped (never trusted by name)');
   ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K2.privateKeyPem, B, '1.2.3', { ...C, chain: [{ ...L12, keyId: K3.keyId }] }), C).code === 'malformed', 'a link naming another key than it carries ⇒ malformed');
   const linkAsBundle = { ...good, sig: L12.sig };
   ok(SIG.verify([row(K1)], B, '1.2.3', linkAsBundle, C).code === 'bad-signature', 'a link signature replayed as a bundle signature ⇒ bad-signature (domain-separated messages)');
   ok(SIG.manifestMatches(null, { sha256: good.sha256, version: '1.2.3' }).code === 'unsigned-local-build', 'hub: no manifest ⇒ unsigned-local-build');
-  ok(/is not the signed release/.test(SIG.manifestMatches(good, { sha256: 'f'.repeat(64), version: '1.2.3' }).why), 'hub: another build\'s bytes ⇒ unsigned-local-build');
+  ok(verdictOf(/is not the signed release/.test(SIG.manifestMatches(good, { sha256: 'f'.repeat(64), version: '1.2.3' }).why)), 'hub: another build\'s bytes ⇒ unsigned-local-build');
   ok(SIG.manifestMatches(good, { sha256: good.sha256, version: '1.2.4' }).signed === false && SIG.manifestMatches(good, { sha256: good.sha256, version: '1.2.3' }).signed === true, 'hub: the version must match too; these bytes + this version ⇒ signed');
   ok(JSON.stringify(SIG.parseTrust(SIG.trustText([row(K1)], { from: 'bundle', at: 'x' }))) === JSON.stringify([row(K1)]) && SIG.parseTrust('{}') === null && SIG.parseTrust('junk') === null, 'trusted-keys.json round-trips; junk is no pin');
   // ── lane apple-signing: the release's prebuilt Mac screen helper rides the record as a row + its OWN signature (helperSig) ──
@@ -98,15 +98,15 @@ try {
   const hr = SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: HROW });
   const vh = SIG.verify([row(K1)], B, '1.2.3', hr, C);
   const bm = (r) => SIG.bundleMessage('1.2.3', r.sha256, r.keyId, r).toString();
-  ok(vh.ok && JSON.stringify(vh.helper) === JSON.stringify(HROW) && JSON.stringify(hr.helper) === JSON.stringify(HROW) && typeof hr.helperSig === 'string' && hr.sig === good.sig && bm(hr) === bm(good) && !/helper/.test(bm(hr)) && /^vibespace-agentd-helper\/v1\n1\.2\.3\n[0-9a-f]{64}\n[0-9a-f]{16}\nhelper vs-11f32156ba0a c{64} developer-id VSTEAM0001 com\.problemfactory\.vibespace\.screen\n$/.test(SIG.helperMessage('1.2.3', hr.sha256, hr.keyId, hr.helper).toString()), 'lane apple-signing: a record with the helper row verifies and hands the row back; its `sig` is the SAME bytes as the row-less record\'s (the bundle message never names the helper); the row is bound to this release by its own statement — domain, version, digest, key, row — under helperSig', { sig: hr.sig === good.sig, msg: bm(hr) });
+  ok(gateOf(vh.ok) && JSON.stringify(vh.helper) === JSON.stringify(HROW) && JSON.stringify(hr.helper) === JSON.stringify(HROW) && typeof hr.helperSig === 'string' && hr.sig === good.sig && bm(hr) === bm(good) && !/helper/.test(bm(hr)) && verdictOf(/^vibespace-agentd-helper\/v1\n1\.2\.3\n[0-9a-f]{64}\n[0-9a-f]{16}\nhelper vs-11f32156ba0a c{64} developer-id VSTEAM0001 com\.problemfactory\.vibespace\.screen\n$/.test(SIG.helperMessage('1.2.3', hr.sha256, hr.keyId, hr.helper).toString())), 'lane apple-signing: a record with the helper row verifies and hands the row back; its `sig` is the SAME bytes as the row-less record\'s (the bundle message never names the helper); the row is bound to this release by its own statement — domain, version, digest, key, row — under helperSig', { sig: hr.sig === good.sig, msg: bm(hr) });
   const tam = SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, sha256: 'd'.repeat(64) } }, C);
   const addNoSig = SIG.verify([row(K1)], B, '1.2.3', { ...good, helper: HROW }, C), addStranger = SIG.verify([row(K1)], B, '1.2.3', { ...good, helper: HROW, helperSig: SIG.sign(KX.privateKeyPem, B, '1.2.3', { ...C, helper: HROW }).helperSig }, C);
   const moved = SIG.verify([row(K1)], B, '1.2.3', { ...hr, helperSig: SIG.sign(K1.privateKeyPem, Buffer.from('other bytes'), '1.2.3', { ...C, helper: HROW }).helperSig }, C);
-  ok(tam.code === 'bad-signature' && /the Mac screen helper row \(helper vs-11f32156ba0a dddddddddddd… developer-id\) is not what [0-9a-f]{16} signed for this release/.test(tam.why) && addNoSig.code === 'malformed' && /carries no signature/.test(addNoSig.why) && addStranger.code === 'bad-signature' && /helper row/.test(addStranger.why) && moved.code === 'bad-signature', 'a TAMPERED row, a row ADDED without a signature (malformed), one added under a stranger\'s key, or a helperSig moved from another release\'s record (bound to the digest) ⇒ refused BY NAME — the hub is misbuilt or compromised', { tam: tam.why, addNoSig: addNoSig.why, addStranger: addStranger.why, moved: moved.why });
+  ok(tam.code === 'bad-signature' && gateOf(/the Mac screen helper row \(helper vs-11f32156ba0a dddddddddddd… developer-id\) is not what [0-9a-f]{16} signed for this release/.test(tam.why)) && addNoSig.code === 'malformed' && gateOf(/carries no signature/.test(addNoSig.why)) && addStranger.code === 'bad-signature' && gateOf(/helper row/.test(addStranger.why)) && moved.code === 'bad-signature', 'a TAMPERED row, a row ADDED without a signature (malformed), one added under a stranger\'s key, or a helperSig moved from another release\'s record (bound to the digest) ⇒ refused BY NAME — the hub is misbuilt or compromised', { tam: tam.why, addNoSig: addNoSig.why, addStranger: addStranger.why, moved: moved.why });
   const dangling = SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: undefined }, C), stripped = SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: undefined, helperSig: undefined }, C);
-  ok(dangling.code === 'malformed' && /without a helper row/.test(dangling.why) && stripped.ok === true && stripped.helper === null, 'a row REMOVED with its signature left behind ⇒ malformed; the row AND its signature stripped = a record without a helper (THE LAW\'s residue — the old message cannot commit to the row; the hub then pushes nothing: its rule is never to push bytes no record names)', { dangling: dangling.why, stripped });
+  ok(dangling.code === 'malformed' && gateOf(/without a helper row/.test(dangling.why)) && stripped.ok === true && stripped.helper === null, 'a row REMOVED with its signature left behind ⇒ malformed; the row AND its signature stripped = a record without a helper (THE LAW\'s residue — the old message cannot commit to the row; the hub then pushes nothing: its rule is never to push bytes no record names)', { dangling: dangling.why, stripped });
   ok(SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, identity: { kind: 'nope' } } }, C).code === 'malformed' && SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: 'x' }, C).code === 'malformed' && SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, identity: { kind: 'developer-id', teamId: null, identifier: null } } }, C).code === 'malformed', 'a malformed helper row (an unknown kind, not an object, a Developer ID row without its team / identifier) ⇒ malformed');
-  ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: { version: 'vs-x', sha256: 'c'.repeat(64), identity: { kind: 'adhoc' } } }), C).ok && (() => { try { SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: { version: 'v', sha256: 'bad' } }); return false; } catch (e) { return /names no sha256/.test(e.message); } })(), 'an ad-hoc row (no team, no identifier) signs and verifies; sign() refuses a malformed row by name');
+  ok(gateOf(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: { version: 'vs-x', sha256: 'c'.repeat(64), identity: { kind: 'adhoc' } } }), C).ok) && verdictOf((() => { try { SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: { version: 'v', sha256: 'bad' } }); return false; } catch (e) { return /names no sha256/.test(e.message); } })()), 'an ad-hoc row (no team, no identifier) signs and verifies; sign() refuses a malformed row by name');
   // THE CROSS-VERSION LEG (acceptance r1's harness, repro/accept-r1/old-device-vs-helper-row.cjs): an OLD device is the 2.369.361
   // verifier = ed25519 over ITS bundle message (the builder below is that file's, verbatim) under the record's key. It must take
   // r3's record WITH a helper row. Golden: a seed-derived key (no key material in any file), fixed bytes, and the `sig` the base
@@ -128,23 +128,23 @@ try {
   const r1File = path.join(tmp, 'agentd-signature-round1.js'); fs.writeFileSync(r1File, r1Text);
   const SIGR1 = require(r1File);
   const xr1 = SIGR1.sign(KS, XB, '2.369.363', { ...C, keys: null, helper: AROW });
-  ok(r1Text !== SRC_SIG && SRC_SIG.includes(R1_LINE) && SRC_SIG.includes(R1_EXTRA) && xr1.sig !== GOLDEN.sig && oldVerify(xr1) === false && SIGR1.verify([{ keyId: xr1.keyId, publicKey: SIG.publicKeyOf(KS, C) }], XB, '2.369.363', xr1, C).ok === true, 'RED CONTROL: a copy of the module that puts the helper row inside the bundle message (round 1, a0d876c5f) signs a record its OWN verifier takes and the 2.369.361 verifier refuses — the message shape is what bites');
+  ok(r1Text !== SRC_SIG && gateOf(SRC_SIG.includes(R1_LINE)) && gateOf(SRC_SIG.includes(R1_EXTRA)) && xr1.sig !== GOLDEN.sig && oldVerify(xr1) === false && SIGR1.verify([{ keyId: xr1.keyId, publicKey: SIG.publicKeyOf(KS, C) }], XB, '2.369.363', xr1, C).ok === true, 'RED CONTROL: a copy of the module that puts the helper row inside the bundle message (round 1, a0d876c5f) signs a record its OWN verifier takes and the 2.369.361 verifier refuses — the message shape is what bites');
   // ── fix r2: the floor + the signed rollback (RED-1), trust on first use (RED-2), the chain keeps siblings (low ④) ──
   console.log('— ① fix r2: the version floor, the signed rollback, trust on first use, a rotation keeps the siblings —');
   const Fo = (o) => ({ ...C, ...o });
   const dn = SIG.verify([row(K1)], B, '1.2.3', good, Fo({ floor: '1.2.4' }));
   ok(dn.code === 'downgrade' && dn.floor === '1.2.4', 'RED-1: a VALIDLY signed release older than the floor (1.2.3 < 1.2.4) ⇒ downgrade — the replay of an old release', dn);
-  ok(SIG.verify([row(K1)], B, '1.2.3', good, Fo({ floor: '1.2.3' })).ok && SIG.verify([row(K1)], B, '1.2.3', good, Fo({ floor: '1.1.9' })).ok && SIG.verify([row(K1)], B, '1.2.3', good, Fo({ floor: '1.2.10' })).code === 'downgrade', 'the floor itself and older floors pass; the order is numeric (1.2.3 < 1.2.10)');
+  ok(gateOf(SIG.verify([row(K1)], B, '1.2.3', good, Fo({ floor: '1.2.3' })).ok) && gateOf(SIG.verify([row(K1)], B, '1.2.3', good, Fo({ floor: '1.1.9' })).ok) && SIG.verify([row(K1)], B, '1.2.3', good, Fo({ floor: '1.2.10' })).code === 'downgrade', 'the floor itself and older floors pass; the order is numeric (1.2.3 < 1.2.10)');
   const rbR = SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, allowDowngradeTo: '1.2.3' });
   const rbv = SIG.verify([row(K1)], B, '1.2.3', rbR, Fo({ floor: '1.2.4' }));
-  ok(rbv.ok && rbv.rollback === true && rbv.floor === '1.2.4', 'a SIGNED rollback (allowDowngradeTo = its own version, signed by the release key) lands below the floor', rbv);
+  ok(gateOf(rbv.ok) && rbv.rollback === true && rbv.floor === '1.2.4', 'a SIGNED rollback (allowDowngradeTo = its own version, signed by the release key) lands below the floor', rbv);
   ok(SIG.verify([row(K1)], B, '1.2.3', rbR, Fo({ floor: '1.2.4', honoured: [rbv.sha256] })).code === 'downgrade', '…ONCE: the same rollback again (its digest already honoured) ⇒ downgrade');
   ok(SIG.verify([row(K1)], B, '1.2.3', { ...good, allowDowngradeTo: '1.2.3' }, Fo({ floor: '1.2.4' })).code === 'bad-signature', 'a FORGED allowDowngradeTo (added to a real old record) ⇒ bad-signature — the statement is inside the signed message');
   ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(KX.privateKeyPem, B, '1.2.3', { ...C, allowDowngradeTo: '1.2.3' }), Fo({ floor: '1.2.4' })).code === 'unknown-key', 'a rollback signed by the WRONG key ⇒ unknown-key');
   ok(SIG.verify([row(K1)], B, '1.2.3', { ...rbR, allowDowngradeTo: '1.2.2' }, Fo({ floor: '1.2.4' })).code === 'malformed', 'allowDowngradeTo naming another version than the record signs ⇒ malformed');
   const k13 = SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, keys: [row(K1), row(K3)] });
   const tf = SIG.verify([], B, '1.2.3', k13, Fo({ tofu: true }));
-  ok(tf.ok && tf.tofu === true && JSON.stringify(tf.trustAfter) === JSON.stringify([row(K1), row(K3)]), 'RED-2: a device that trusts NO key takes the first validly signed record\'s own SIGNED key set (trust on first use) — both keys', tf);
+  ok(gateOf(tf.ok) && tf.tofu === true && JSON.stringify(tf.trustAfter) === JSON.stringify([row(K1), row(K3)]), 'RED-2: a device that trusts NO key takes the first validly signed record\'s own SIGNED key set (trust on first use) — both keys', tf);
   ok(SIG.verify([], B, '1.2.3', k13, C).code === 'unknown-key', '…only when the device says it trusts nothing (no tofu flag ⇒ unknown-key, as before)');
   ok(SIG.verify([], B, '1.2.3', SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, keys: null }), Fo({ tofu: true })).code === 'unknown-key', 'TOFU: a record that names no key set ⇒ unknown-key');
   ok(SIG.verify([], B, '1.2.3', { ...k13, keys: [row(K1), row(KX)] }, Fo({ tofu: true })).code === 'bad-signature', 'TOFU: a key slipped into the signed set (KX) ⇒ bad-signature — the set is inside the signed message');
@@ -152,14 +152,14 @@ try {
   ok(SIG.verify([], flipped, '1.2.3', k13, Fo({ tofu: true })).code === 'bad-signature', 'TOFU: the signature must still check over the bytes');
   ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(KX.privateKeyPem, B, '1.2.3', C), Fo({ tofu: true })).code === 'unknown-key', 'a device that trusts ANY key never re-TOFUs: a stranger\'s self-consistent record ⇒ unknown-key even with the flag');
   const v13 = SIG.verify([row(K1), row(K3)], B, '1.2.3', byK2, C);
-  ok(v13.ok && v13.trustAfter?.length === 3 && [K2, K1, K3].every((k) => v13.trustAfter.some((x) => x.keyId === k.keyId)), 'low ④: two keys pinned (K1, K3), a successor of one (K1 → K2) arrives ⇒ three pinned', v13.trustAfter);
+  ok(gateOf(v13.ok) && v13.trustAfter?.length === 3 && verdictOf([K2, K1, K3].every((k) => v13.trustAfter.some((x) => x.keyId === k.keyId))), 'low ④: two keys pinned (K1, K3), a successor of one (K1 → K2) arrives ⇒ three pinned', v13.trustAfter);
   const R1 = SIG.signRetire(K1.privateKeyPem, C);
   const vr = SIG.verify([row(K1), row(K3)], B, '1.2.3', SIG.sign(K2.privateKeyPem, B, '1.2.3', { ...C, chain: [L12, R1] }), C);
-  ok(vr.ok && JSON.stringify(vr.trustAfter) === JSON.stringify([row(K2), row(K3)]), '…and a retirement signed by K1 itself ⇒ two (K2, K3)', vr.trustAfter);
+  ok(gateOf(vr.ok) && JSON.stringify(vr.trustAfter) === JSON.stringify([row(K2), row(K3)]), '…and a retirement signed by K1 itself ⇒ two (K2, K3)', vr.trustAfter);
   ok(SIG.verify([row(K1), row(K3)], B, '1.2.3', SIG.sign(K2.privateKeyPem, B, '1.2.3', { ...C, chain: [L12, { retire: K1.keyId, sig: SIG.signRetire(KX.privateKeyPem, C).sig }] }), C).code === 'bad-signature', 'a retirement of K1 NOT signed by K1 ⇒ bad-signature (a forgery)');
   ok(SIG.verify([row(K1), row(K3)], B, '1.2.3', SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, chain: [R1] }), C).code === 'unknown-key', 'a release signed by a key its own chain retires ⇒ unknown-key');
   const rx = SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, chain: [SIG.signRetire(KX.privateKeyPem, C)] }), C);
-  ok(rx.ok && rx.trustAfter === null, 'the retirement of a key this device never trusted is inert');
+  ok(gateOf(rx.ok) && rx.trustAfter === null, 'the retirement of a key this device never trusted is inert');
   ok(JSON.stringify(SIG.parseFloor(SIG.floorText({ floor: '1.2.3', honoured: [rbv.sha256], at: 'x' }))) === JSON.stringify({ floor: '1.2.3', honoured: [rbv.sha256] }) && SIG.parseFloor('junk') === null, 'release-floor.json round-trips; junk is no floor');
 
   // ── ② THE HUB ──
@@ -240,7 +240,7 @@ try {
   const fm = { onControl: () => { }, data: () => { }, control: (m) => { if (m.op === 'upgrade') { fm.line = m; setTimeout(() => fm.onControl({ op: 'upgrade-done' }), 5); } } };
   await new DeviceManager({ dataDir: hb, bundlePath: hubBundle, version: '1.1.1', log: () => {} })._upgrade(fm);
   const proofFile = path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'upgrade-proof');
-  ok(fm.line && /^[0-9a-f]{64}$/.test(fm.line.localProof) && !('sig' in fm.line) && fs.readFileSync(proofFile, 'utf8') === fm.line.localProof && (fs.statSync(proofFile).mode & 0o777) === 0o600, 'its OWN machine\'s daemon gets an unsigned build with the local proof (the same 32 random bytes in <root>/state/upgrade-proof, 0600)');
+  ok(gateOf(fm.line) && gateOf(/^[0-9a-f]{64}$/.test(fm.line.localProof)) && !('sig' in fm.line) && fs.readFileSync(proofFile, 'utf8') === fm.line.localProof && (fs.statSync(proofFile).mode & 0o777) === 0o600, 'its OWN machine\'s daemon gets an unsigned build with the local proof (the same 32 random bytes in <root>/state/upgrade-proof, 0600)');
   // B-574d (lane nl-paired, 主开发 r4752): THE PROOF'S BYTES ARE ON DISK BEFORE ITS NAME (src/fd-close.js renameSynced) — its reader is
   // another process (the daemon's landingVerdict). A sync REFUSED (placed: fs.fsyncSync throws EIO) is a FAILED WRITE: _writeLocalProof
   // throws, the proof on disk stands byte for byte, no temp is left; a file system with no sync at all (EINVAL) lands, said once.
@@ -256,18 +256,18 @@ try {
       return { ...out, now: fs.readFileSync(proofFile, 'utf8'), left, said: said.filter((l) => /^\[agentd\] the local upgrade proof: its file system does not do a sync \(EINVAL\)/.test(l)).length };
     };
     const e = proofScene(DeviceManager, 'EIO'), u = proofScene(DeviceManager, 'EINVAL');
-    ok(e.threw === 'EIO' && e.n === 1 && e.now === 'OLD' && e.left === 0 && /^[0-9a-f]{64}$/.test(u.r || '') && u.now === u.r && u.n === 1 && u.said === 1 && u.left === 0,
+    ok(e.threw === 'EIO' && e.n === 1 && e.now === 'OLD' && e.left === 0 && gateOf(/^[0-9a-f]{64}$/.test(u.r || '')) && u.now === u.r && u.n === 1 && u.said === 1 && u.left === 0,
       'B-574d: the local upgrade proof is SYNCED before its name — a refused sync (EIO, placed) is a failed write (thrown to the upgrade, the old proof stands, no temp left); a file system with no sync (EINVAL) lands, said once in the journal', { e, u });
     const CSRC = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
     const XDM = mutantCopies('sig-proof-unsynced', REPO).load('src/agentd/client.js', anchored(CSRC, "    FC.renameSynced(tmp, file, proof, { mode: 0o600, where: 'the local upgrade proof', say: (l) => this._log(`[agentd] ${l}`) });\n", "    fs.writeFileSync(tmp, proof, { mode: 0o600 }); fs.renameSync(tmp, file);   // MUTANT: the release's unsynced write\n", 'proof-unsynced'), 'proof-unsynced').DeviceManager;
     const x = proofScene(XDM, 'EIO');
-    ok(!x.threw && x.n === 0 && x.now !== 'OLD' && /^[0-9a-f]{64}$/.test(x.now), 'CONTROL (the release\'s unsynced proof, in a copy): no sync asked — the placed refusal is never met and the new proof takes its name unsynced — red', x);
+    ok(!x.threw && x.n === 0 && x.now !== 'OLD' && verdictOf(/^[0-9a-f]{64}$/.test(x.now)), 'CONTROL (the release\'s unsynced proof, in a copy): no sync asked — the placed refusal is never met and the new proof takes its name unsynced — red', x);
     fs.writeFileSync(proofFile, before, { mode: 0o600 });
   }
   fs.writeFileSync(hubManifest, JSON.stringify(SIG.sign(K1.privateKeyPem, fs.readFileSync(hubBundle), '9.9.9', C)));
   const fm2 = { onControl: () => { }, data: () => { }, control: (m) => { if (m.op === 'upgrade') { fm2.line = m; setTimeout(() => fm2.onControl({ op: 'upgrade-done' }), 5); } } };
   await new DeviceManager({ dataDir: hb, bundlePath: hubBundle, version: '1.1.1', log: () => {} })._upgrade(fm2);
-  ok(fm2.line && fm2.line.sig && fm2.line.sig.keyId === K1.keyId && /^[0-9a-f]{64}$/.test(fm2.line.localProof), 'a SIGNED build to its own daemon carries the record AND the local proof (its own daemon never depends on a pin)', fm2.line && Object.keys(fm2.line));
+  ok(gateOf(fm2.line) && gateOf(fm2.line.sig) && fm2.line.sig.keyId === K1.keyId && verdictOf(/^[0-9a-f]{64}$/.test(fm2.line.localProof)), 'a SIGNED build to its own daemon carries the record AND the local proof (its own daemon never depends on a pin)', fm2.line && Object.keys(fm2.line));
   fs.unlinkSync(hubManifest);
   srv.close();
 
@@ -281,7 +281,7 @@ try {
   const KEYS_RE = /\b(const|var|let) RELEASE_KEYS = \[[^\]]*\];/;
   const built = fs.readFileSync(bundle, 'utf8');
   const bsrc = built.replace(KEYS_RE, (_, kw) => `${kw} RELEASE_KEYS = [];`);
-  ok(KEYS_RE.test(built) && /\b(const|var|let) RELEASE_KEYS = \[\];/.test(bsrc), '(the legs\' base: the built bundle with its baked release key set emptied)');
+  ok(gateOf(KEYS_RE.test(built)) && verdictOf(/\b(const|var|let) RELEASE_KEYS = \[\];/.test(bsrc)), '(the legs\' base: the built bundle with its baked release key set emptied)');
   const realVersion = (/\bVERSION\s*:\s*"(\d+\.\d+\.\d+)"/.exec(bsrc) || [])[1];
   // the "next release": a stub that records its own start (the re-exec) and exits — what a landed bundle runs
   const stub = (mark, v) => Buffer.from(`const fs = require('fs'); fs.writeFileSync(${JSON.stringify(mark)} + '.part', JSON.stringify({ argv: process.argv.slice(2), v: process.env.VIBESPACE_AGENTD_VERSION || null })); fs.renameSync(${JSON.stringify(mark)} + '.part', ${JSON.stringify(mark)});\n/* module.exports = { VERSION: "${v}" }; */\n`); // the mark lands by rename: the poll below never reads a half-written file (the .346 branch run 3: "Unexpected end of JSON input" on the runner)
@@ -339,7 +339,7 @@ try {
     const m = await push(a.L, bytes, { version, ...fields });
     const dir = path.join(A.root, String(version));
     const leftovers = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-    ok(m.op === 'upgrade-failed' && m.code === code && leftovers.length === 0 && fs.realpathSync(path.join(A.root, 'current')).endsWith(realVersion) && extra(m), `${what} ⇒ upgrade-failed {code: ${code}}, the temp file deleted (${leftovers.length} files left), current unmoved`, m);
+    ok(m.op === 'upgrade-failed' && m.code === code && leftovers.length === 0 && gateOf(fs.realpathSync(path.join(A.root, 'current')).endsWith(realVersion)) && verdictOf(extra(m)), `${what} ⇒ upgrade-failed {code: ${code}}, the temp file deleted (${leftovers.length} files left), current unmoved`, m);
   };
   const next = stub(path.join(tmp, 'never.json'), '9.9.1');
   await refuse('UNSIGNED (no sig, no proof)', '9.9.1', next, {}, 'unsigned');
@@ -349,7 +349,7 @@ try {
   await refuse('a MALFORMED record', '9.9.1', next, { sig: { v: 1, version: '9.9.1' } }, 'malformed');
   // fix r2 (RED-1): the replay of an OLDER validly signed release, a forged rollback, a rollback by the wrong key
   const flA = SIG.parseFloor(fs.readFileSync(path.join(A.state, 'release-floor.json'), 'utf8'));
-  ok(flA && flA.floor === realVersion && (fs.statSync(path.join(A.state, 'release-floor.json')).mode & 0o777) === 0o600, `the daemon's start wrote its floor = the version it runs (${flA && flA.floor}, 0600)`);
+  ok(gateOf(flA) && flA.floor === realVersion && (fs.statSync(path.join(A.state, 'release-floor.json')).mode & 0o777) === 0o600, `the daemon's start wrote its floor = the version it runs (${flA && flA.floor}, 0600)`);
   const oldRel = stub(path.join(tmp, 'never-old.json'), '1.0.0');
   await refuse(`RED-1: a VALIDLY signed OLDER release (the replay of 1.0.0 onto ${realVersion})`, '1.0.0', oldRel, { sig: SIG.sign(K1.privateKeyPem, oldRel, '1.0.0', C) }, 'downgrade', (m) => m.floor === realVersion);
   await refuse('a FORGED rollback (allowDowngradeTo added to a real old record)', '1.0.0', oldRel, { sig: { ...SIG.sign(K1.privateKeyPem, oldRel, '1.0.0', C), allowDowngradeTo: '1.0.0' } }, 'bad-signature');
@@ -360,23 +360,23 @@ try {
   await refuse('a WRONG local proof (on the machine\'s own socket)', '9.9.1', next, { localProof: 'b'.repeat(64) }, 'unsigned', () => !fs.existsSync(path.join(A.state, 'upgrade-proof')));
   const ping = await (async () => { a.L.mux.control({ op: 'ping-info' }); return a.L.wait((m) => m.op === 'info', 5000); })();
   ok(ping.op === 'info' && ping.version === realVersion, 'after ten refusals the daemon still serves (ping-info answers, same version)');
-  ok(/upgrade to 9\.9\.1 REFUSED — bad-signature: .* the bundle was deleted; still running/.test(A.log()) && /upgrade to 9\.9\.1 REFUSED — unknown-key/.test(A.log()), 'the device log says each refusal in one line (code + why + still running)');
+  ok(gateOf(/upgrade to 9\.9\.1 REFUSED — bad-signature: .* the bundle was deleted; still running/.test(A.log())) && verdictOf(/upgrade to 9\.9\.1 REFUSED — unknown-key/.test(A.log())), 'the device log says each refusal in one line (code + why + still running)');
   // the good one: K2 through the chain K1 → K2 — lands, repoints, re-execs into it (the stub records its start), pins K2
   const markA = path.join(tmp, 'reexec-a.json');
   const relA = stub(markA, '9.9.9');
   const mA = await push(a.L, relA, { version: '9.9.9', sig: SIG.sign(K2.privateKeyPem, relA, '9.9.9', { ...C, chain: [L12] }) });
   try { a.s.destroy(); } catch { } // the hub drops its link at upgrade-done (the hand-over's close waits for open links)
   const seenA = await until(() => readMark(markA), 10000);
-  ok(mA.op === 'upgrade-done' && seenA && seenA.v === '9.9.9', 'a GOOD signature (K2 through the chain K1 → K2) lands, and the daemon re-execs into it (the stub recorded its start as 9.9.9)', { mA, seenA });
-  ok(fs.readFileSync(path.join(A.root, '9.9.9', 'agentd.js')).equals(relA) && fs.realpathSync(path.join(A.root, 'current')) === fs.realpathSync(path.join(A.root, '9.9.9')), 'the landed bytes are the signed ones and `current` points at them');
+  ok(mA.op === 'upgrade-done' && gateOf(seenA) && seenA.v === '9.9.9', 'a GOOD signature (K2 through the chain K1 → K2) lands, and the daemon re-execs into it (the stub recorded its start as 9.9.9)', { mA, seenA });
+  ok(gateOf(fs.readFileSync(path.join(A.root, '9.9.9', 'agentd.js')).equals(relA)) && fs.realpathSync(path.join(A.root, 'current')) === fs.realpathSync(path.join(A.root, '9.9.9')), 'the landed bytes are the signed ones and `current` points at them');
   const pinA = SIG.parseTrust(fs.readFileSync(path.join(A.state, 'trusted-keys.json'), 'utf8'));
   ok(JSON.stringify(pinA) === JSON.stringify([row(K2), row(K1)]) && (fs.statSync(path.join(A.state, 'trusted-keys.json')).mode & 0o777) === 0o600, 'the successor JOINS the pin (trusted-keys.json = [K2, K1], 0600) — K1 stays until a signed retirement (fix r2)', pinA);
-  ok(/release signature ok \(key [0-9a-f]{16}, reached through the key chain\)/.test(A.log()), 'the device log says the signature checked (through the chain)');
+  ok(verdictOf(/release signature ok \(key [0-9a-f]{16}, reached through the key chain\)/.test(A.log())), 'the device log says the signature checked (through the chain)');
   try { a.s.destroy(); } catch { }
 
   // TOFU: a fresh install with NO pin pins the keys IN its bundle at its first start (a bundle carrying K1 as its release key)
   const tPin = await until(() => { try { return SIG.parseTrust(fs.readFileSync(path.join(T.state, 'trusted-keys.json'), 'utf8')); } catch { return null; } }, 8000);
-  ok(JSON.stringify(tPin) === JSON.stringify([row(K1)]) && /release keys pinned: [0-9a-f]{16} \(the first start of this install\)/.test(T.log()), 'TOFU: the first start pins the release keys shipped IN the bundle', tPin);
+  ok(JSON.stringify(tPin) === JSON.stringify([row(K1)]) && verdictOf(/release keys pinned: [0-9a-f]{16} \(the first start of this install\)/.test(T.log())), 'TOFU: the first start pins the release keys shipped IN the bundle', tPin);
   const t = await sockLink(T);
   const relT = stub(path.join(tmp, 'never-t.json'), '9.9.7');
   const mT = await push(t.L, relT, { version: '9.9.7', sig: SIG.sign(KX.privateKeyPem, relT, '9.9.7', C) });
@@ -393,7 +393,7 @@ try {
   dmB.connect().catch(() => { });
   const seenB = await until(() => readMark(markB), 12000);
   dmB.stop();
-  ok(seenB && seenB.v === '9.9.8' && /upgrade to 9\.9\.8: accepted on this machine's own socket \(the local proof\)/.test(Bd.log()) && !fs.existsSync(path.join(Bd.state, 'upgrade-proof')), 'the hub\'s OWN daemon takes an unsigned local build with the local proof (landed, re-exec\'d, the proof deleted)', { seenB, log: Bd.log().split('\n').filter((l) => /upgrade/.test(l)).slice(-3) });
+  ok(gateOf(seenB) && seenB.v === '9.9.8' && gateOf(/upgrade to 9\.9\.8: accepted on this machine's own socket \(the local proof\)/.test(Bd.log())) && !fs.existsSync(path.join(Bd.state, 'upgrade-proof')), 'the hub\'s OWN daemon takes an unsigned local build with the local proof (landed, re-exec\'d, the proof deleted)', { seenB, log: Bd.log().split('\n').filter((l) => /upgrade/.test(l)).slice(-3) });
 
   // THE STUCK SCENARIO: the hub's own daemon once ran an UNSIGNED build (no baked key ⇒ no pin) — a signed release by a key
   // it does not know is refused over the socket WITHOUT the proof, and lands WITH it (the hub owns this machine)
@@ -407,7 +407,7 @@ try {
   const mN2 = await push(n.L, relN, { version: '9.9.4', sig: sigN, localProof: 'd'.repeat(64) });
   try { n.s.destroy(); } catch { } // the hub drops its link at upgrade-done (the hand-over's close waits for open links)
   const seenN = await until(() => fs.existsSync(markN), 8000);
-  ok(mN2.op === 'upgrade-done' && seenN, '…and WITH the proof on its own socket it lands (the hub\'s own daemon never sticks on a pin)', mN2);
+  ok(mN2.op === 'upgrade-done' && verdictOf(seenN), '…and WITH the proof on its own socket it lands (the hub\'s own daemon never sticks on a pin)', mN2);
   try { n.s.destroy(); } catch { }
 
   // fix r2 (RED-2): a daemon that trusts NO key (no pin, nothing baked) TOFUs the FIRST validly signed release — never an
@@ -424,7 +424,7 @@ try {
   try { nt.s.destroy(); } catch { } // the hub drops its link at upgrade-done (the hand-over's close waits for open links)
   const seenNT = await until(() => fs.existsSync(markNT), 10000);
   const pinNT = (() => { try { return JSON.parse(fs.readFileSync(path.join(NT.state, 'trusted-keys.json'), 'utf8')); } catch { return null; } })();
-  ok(mNT2.op === 'upgrade-done' && JSON.stringify(mNT2.tofu) === JSON.stringify([K1.keyId]) && seenNT && pinNT && pinNT.from === 'tofu' && JSON.stringify(SIG.parseTrust(JSON.stringify(pinNT))) === JSON.stringify([row(K1)]) && /TRUSTED ON FIRST USE/.test(NT.log()), 'RED-2: …the FIRST validly signed release lands (re-exec), upgrade-done names the fingerprint for the hub, the pin = its signed key set (from: tofu)', { mNT2, pinNT });
+  ok(mNT2.op === 'upgrade-done' && JSON.stringify(mNT2.tofu) === JSON.stringify([K1.keyId]) && gateOf(seenNT) && gateOf(pinNT) && pinNT.from === 'tofu' && JSON.stringify(SIG.parseTrust(JSON.stringify(pinNT))) === JSON.stringify([row(K1)]) && verdictOf(/TRUSTED ON FIRST USE/.test(NT.log())), 'RED-2: …the FIRST validly signed release lands (re-exec), upgrade-done names the fingerprint for the hub, the pin = its signed key set (from: tofu)', { mNT2, pinNT });
 
   // fix r2 (RED-1): a rollback the release key SIGNED lands below the floor; the floor stays; the rollback is spent
   const rbd = await sockLink(RB);
@@ -435,7 +435,7 @@ try {
   try { rbd.s.destroy(); } catch { }
   const seenRB = await until(() => fs.existsSync(markRB), 10000);
   const flRB = SIG.parseFloor(fs.readFileSync(path.join(RB.state, 'release-floor.json'), 'utf8'));
-  ok(mRB.op === 'upgrade-done' && seenRB && flRB.floor === realVersion && flRB.honoured.includes(sigRB.sha256) && /a SIGNED ROLLBACK below the floor/.test(RB.log()), 'RED-1: the SIGNED rollback (allowDowngradeTo) lands below the floor and re-execs; the floor stays, the rollback is recorded as honoured (once)', { mRB, flRB });
+  ok(mRB.op === 'upgrade-done' && gateOf(seenRB) && flRB.floor === realVersion && gateOf(flRB.honoured.includes(sigRB.sha256)) && verdictOf(/a SIGNED ROLLBACK below the floor/.test(RB.log())), 'RED-1: the SIGNED rollback (allowDowngradeTo) lands below the floor and re-execs; the floor stays, the rollback is recorded as honoured (once)', { mRB, flRB });
 
   // a DIAL link never takes the local proof (the hub on the other end is not this machine)
   const st = await until(() => incoming, 10000);
@@ -457,7 +457,7 @@ try {
   const mM = await push(mm.L, relM, { version: '9.9.5', sig: SIG.sign(K1.privateKeyPem, Buffer.from('other bytes'), '9.9.5', C) });
   try { mm.s.destroy(); } catch { } // the hub drops its link at upgrade-done (the hand-over's close waits for open links)
   const seenM = await until(() => fs.existsSync(markM), 8000);
-  ok(mM.op === 'upgrade-done' && seenM, 'MUTANT CONTROL: without the verdict the BAD signature lands and runs — the refusal legs above are what see it', mM);
+  ok(mM.op === 'upgrade-done' && verdictOf(seenM), 'MUTANT CONTROL: without the verdict the BAD signature lands and runs — the refusal legs above are what see it', mM);
   try { mm.s.destroy(); } catch { }
 
   // ── ③b THE SSH ROAD (fix r2, verify-r1 RED-3): src/hosts.js installAgentd over a fake ssh (the remote step runs in sh with
@@ -490,8 +490,8 @@ try {
   CS3.setChildStarter({ run: (cmd, args, o) => { if (path.basename(String(cmd)) === 'tar') tarAsked.push({ args, o }); return real3.run(cmd, args, o); }, stats: () => real3.stats(), closePipe: () => real3.closePipe() });
   const [sFresh, sU, sS, sT, sL1, sC, sD, sJ] = await Promise.all([ship('fresh', hubU), ship('pinned-u', hubU), ship('pinned-s', hubS), ship('nopin', hubS), ship('legacy', hubU), ship('same', hubU), ship('floor', hubOld), ship('junkpin', hubX)]);
   CPm3.ChildProcess.prototype.spawn = realCpSpawn3; CS3.setChildStarter(real3);
-  ok(tarAsked.length === 8 && tarDirect.length === 0 && tarAsked.every((x) => x.o.timeoutMs === 15000 && JSON.stringify(x.o.envAdd) === '{}' && !x.o.wholeEnv && x.args[0] === '-c' && x.args[1] === '-f'
-    && /\/vs-agentd-stage-[^/]+\/bundle\.tar$/.test(String(x.args[2])) && x.args[3] === '-C' && String(x.args[2]).startsWith(String(x.args[4]) + '/') && x.args.slice(5, 7).join(' ') === 'agentd.js token'),
+  ok(tarAsked.length === 8 && tarDirect.length === 0 && verdictOf(tarAsked.every((x) => x.o.timeoutMs === 15000 && JSON.stringify(x.o.envAdd) === '{}' && !x.o.wholeEnv && x.args[0] === '-c' && x.args[1] === '-f'
+    && /\/vs-agentd-stage-[^/]+\/bundle\.tar$/.test(String(x.args[2])) && x.args[3] === '-C' && String(x.args[2]).startsWith(String(x.args[4]) + '/') && x.args.slice(5, 7).join(' ') === 'agentd.js token')),
     `B-323e's remainder: the eight ships' bundle tars are ASKED of the hub's starter (${tarAsked.length}) — each written into its own stage folder, 15 s, the service env — NONE started from the hub's process (${tarDirect.length})`, { asked: tarAsked.map((x) => x.args), direct: tarDirect });
   {   // RED: a copy of src/hosts.js on the release's road (the tar from the hub's process) — one more fresh host shipped through it
     const HSRC = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
@@ -503,7 +503,7 @@ try {
     CPm3.ChildProcess.prototype.spawn = function (o) { if (path.basename(String((o && o.file) || '')) === 'tar') tarDirect.push((o && o.args) || []); return realCpSpawn3.call(this, o); };
     const askedRed = []; CS3.setChildStarter({ run: (cmd, args, o) => { if (path.basename(String(cmd)) === 'tar') askedRed.push(args); return real3.run(cmd, args, o); }, stats: () => real3.stats(), closePipe: () => real3.closePipe() });
     let sRed; try { sRed = await OLDH.HostManager.prototype.installAgentd.call(fakeHM, 'fresh-red', hubU, '0.0.0', 'vsht_' + crypto.randomBytes(12).toString('hex')).then((r) => r, (e) => ({ error: e.message })); } finally { CPm3.ChildProcess.prototype.spawn = realCpSpawn3; CS3.setChildStarter(real3); }
-    ok(tarDirect.length - d0 === 1 && !askedRed.length && sRed.landed === 'fresh' && cur(rRed) === '9.9.2' && fs.readFileSync(path.join(rRed, '9.9.2', 'agentd.js')).equals(relS),
+    ok(tarDirect.length - d0 === 1 && !askedRed.length && sRed.landed === 'fresh' && cur(rRed) === '9.9.2' && verdictOf(fs.readFileSync(path.join(rRed, '9.9.2', 'agentd.js')).equals(relS)),
       `RED: a copy on the release's road starts the tar from the hub's process (${tarDirect.length - d0}) — and lands the same bundle (the differential)`, sRed);
   }
   {   // r4910 (1)–(3): THE ARCHIVE ON DISK holds the host's token — its stage 0700 and the archive 0600 when it is read back; both gone on
@@ -540,7 +540,7 @@ try {
         `THE ARCHIVE'S MODES: made 0600 BEFORE tar writes it, read back 0600 (a tar that made it 0644 included) inside its 0700 stage; the stage gone after the landing`, { r: good.r, pre: good.pre, reads: good.reads, left: good.left });
       const res = [];
       for (const [i, [what, how, words]] of FAILS.entries()) { try { res.push({ what, words, ...(await shipOne(HM, 'arch-fail-' + i, how)) }); } finally { failRead = false; } }
-      for (const x of res) ok(!!x.r.error && x.words.test(x.r.error) && !x.r.landed && !x.r.refused && !x.left && (/past the bound/.test(x.what) ? !x.reads.length : true) && x.pre === 0o600 && !x.tokSaid,
+      for (const x of res) ok(!!x.r.error && gateOf(x.words.test(x.r.error)) && !x.r.landed && !x.r.refused && !x.left && (/past the bound/.test(x.what) ? !x.reads.length : true) && x.pre === 0o600 && !x.tokSaid,
         `${x.what}: the install fails BY NAME («${String(x.r.error).split('\n').pop()}»), the stage (token and archive) removed${/past the bound/.test(x.what) ? ', the archive never read into memory' : ''}, the host's token in none of its words`, { r: x.r, stage: x.stage, left: x.left, reads: x.reads.length, pre: x.pre });
       const down = await shipOne(HM, 'vs-ssh-down', null);
       const goneHM = { ...fakeHM, sshArgs: () => { throw new Error('the leg: the host went away mid-connect'); } };
@@ -551,7 +551,7 @@ try {
       const HSRC2 = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8'), MCA = mutantCopies('agentd-upgrade-archive', REPO);
       const KEEPS = require(MCA.write('src/hosts.js', anchored(HSRC2, "    } catch (e) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}; throw e; }\n", "    } catch (e) { throw e; }\n", 'archive-stage-kept'), 'archive-stage-kept'));
       const k1 = await shipOne(KEEPS, 'arch-red-keep', FAILS[1][1]);
-      ok(!!k1.r.error && k1.left, 'RED: a copy whose catch keeps the stage — a failed tar leaves the token and its archive on disk', k1);
+      ok(!!k1.r.error && verdictOf(k1.left), 'RED: a copy whose catch keeps the stage — a failed tar leaves the token and its archive on disk', k1);
       if (k1.stage) { try { fs.rmSync(k1.stage, { recursive: true, force: true }); } catch { } }   // the RED's left stage, removed by the suite
       const NOCH = require(MCA.write('src/hosts.js', anchored(HSRC2, "try { await fs.promises.chmod(tarFile, 0o600); size = ", "try { size = ", 'archive-no-chmod'), 'archive-no-chmod'));
       const k2 = await shipOne(NOCH, 'arch-red-mode', born644);
@@ -561,7 +561,7 @@ try {
       ok(k3.reads.length === 1 && !k3.r.landed, `RED: a copy with no size bound reads the ${BIG}-byte archive into memory (${k3.reads.length} read)`, { r: k3.r, reads: k3.reads.length });
       const NOAWAIT = require(MCA.write('src/hosts.js', anchored(HSRC2, '      return await new Promise((resolve, reject) => {   // awaited:', '      return new Promise((resolve, reject) => {   // awaited:', 'archive-not-awaited'), 'archive-not-awaited'));
       const k4 = await shipOne(NOAWAIT, 'arch-red-gone', null, goneHM);
-      ok(!!k4.r.error && k4.left, 'RED: a copy that does not await the ssh promise — a throw inside it leaves the token and its archive on disk', k4);
+      ok(!!k4.r.error && verdictOf(k4.left), 'RED: a copy that does not await the ssh promise — a throw inside it leaves the token and its archive on disk', k4);
       if (k4.stage) { try { fs.rmSync(k4.stage, { recursive: true, force: true }); } catch { } }
       const NOPRE = require(MCA.write('src/hosts.js', anchored(HSRC2, "      try { await fs.promises.writeFile(tarFile, '', { mode: 0o600, flag: 'wx' }); }", '      try { }', 'archive-not-premade'), 'archive-not-premade'));
       const k5 = await shipOne(NOPRE, 'arch-red-pre', born644);
@@ -569,9 +569,9 @@ try {
       ok(HSRC2.split("if (!tr || tr.unknown) { const late = setTimeout(() => { fs.promises.rm(stage, { recursive: true, force: true })").length === 2, 'the starter\'s NO ANSWER removes the stage once more past the tar\'s bound (read from the text: an orphaned tar\'s late write; no leg waits 19 s)');
     } finally { fs.promises.readFile = rf0; CS3.setChildStarter(real3); fake = null; }
   }
-  ok(sFresh.landed === 'fresh' && cur(rFresh) === '9.9.2' && fs.readFileSync(path.join(rFresh, '9.9.2', 'agentd.js')).equals(relS) && (fs.statSync(path.join(rFresh, 'state', 'token')).mode & 0o777) === 0o600, 'a FRESH host (nothing installed): the first install lands as is — the owner\'s add-host act, the installer\'s trust-on-first-use (token 0600)', sFresh);
+  ok(sFresh.landed === 'fresh' && cur(rFresh) === '9.9.2' && gateOf(fs.readFileSync(path.join(rFresh, '9.9.2', 'agentd.js')).equals(relS)) && (fs.statSync(path.join(rFresh, 'state', 'token')).mode & 0o777) === 0o600, 'a FRESH host (nothing installed): the first install lands as is — the owner\'s add-host act, the installer\'s trust-on-first-use (token 0600)', sFresh);
   ok(sU.refused === 'unsigned-local-build' && sU.from === realVersion && cur(rU) === realVersion && !fs.existsSync(path.join(rU, '9.9.2')), 'an INSTALLED host + an UNSIGNED hub build ⇒ refused before anything moves (unsigned-local-build; current unmoved)', sU);
-  ok(sS.landed === 'verified' && cur(rS) === '9.9.2' && fs.readFileSync(path.join(rS, '9.9.2', 'agentd.js')).equals(relS) && /begins — staged over ssh/.test(fs.readFileSync(path.join(rS, 'state', 'agentd.log'), 'utf8')) && /release signature ok \(key [0-9a-f]{16}\)/.test(fs.readFileSync(path.join(rS, 'state', 'agentd.log'), 'utf8')), 'an INSTALLED host + the SIGNED release ⇒ its own agent verified it (--land-upgrade) and landed it', sS);
+  ok(sS.landed === 'verified' && cur(rS) === '9.9.2' && gateOf(fs.readFileSync(path.join(rS, '9.9.2', 'agentd.js')).equals(relS)) && gateOf(/begins — staged over ssh/.test(fs.readFileSync(path.join(rS, 'state', 'agentd.log'), 'utf8'))) && verdictOf(/release signature ok \(key [0-9a-f]{16}\)/.test(fs.readFileSync(path.join(rS, 'state', 'agentd.log'), 'utf8'))), 'an INSTALLED host + the SIGNED release ⇒ its own agent verified it (--land-upgrade) and landed it', sS);
   ok(sT.landed === 'verified' && JSON.stringify(sT.tofu) === JSON.stringify([K1.keyId]) && JSON.parse(fs.readFileSync(path.join(rT, 'state', 'trusted-keys.json'), 'utf8')).from === 'tofu', 'RED-2 over ssh: a host agent that trusts NO key takes the first signed release on first use and says so (tofu=…)', sT);
   ok(sL1.refused === 'unsigned-local-build' && cur(rL) === realVersion, 'a PRE-SIGNING agent on the host (no --land-upgrade) + an unsigned build ⇒ refused too', sL1);
   ok(sC.landed === 'current' && cur(rC) === realVersion, 'the same bytes already run there ⇒ nothing moves', sC);
@@ -586,19 +586,19 @@ try {
   const stgR = path.join(rD, 'state', 'again.js'); fs.writeFileSync(stgR, relRb);
   const mfR = path.join(rD, 'state', 'again.manifest.json'); fs.writeFileSync(mfR, JSON.stringify(SIG.sign(K1.privateKeyPem, relRb, '1.0.2', { ...C, allowDowngradeTo: '1.0.2' })));
   const again = spawnSync(process.execPath, [path.join(rD, realVersion, 'agentd.js'), '--land-upgrade', stgR, '--version', '1.0.2', '--manifest', mfR], { env: { ...process.env, HOME: path.dirname(path.dirname(rD)), VIBESPACE_AGENTD_ROOT: '', VIBESPACE_DEVICE_ROOT: '', VIBESPACE_AGENTD_VERSION: '' }, encoding: 'utf8', timeout: 20000 });
-  ok(again.status === 0 && /^VS-AGENTD-LANDED 1\.0\.2 /.test(again.stdout) && cur(rD) === '1.0.2' && SIG.parseFloor(fs.readFileSync(path.join(rD, 'state', 'release-floor.json'), 'utf8')).honoured.length === 1, 'RED-1: the honoured rollback re-landed onto a `current` that already holds those bytes is NOT a second downgrade (the standing agent catches up; nothing moves)', again.stdout + again.stderr);
+  ok(again.status === 0 && gateOf(/^VS-AGENTD-LANDED 1\.0\.2 /.test(again.stdout)) && cur(rD) === '1.0.2' && SIG.parseFloor(fs.readFileSync(path.join(rD, 'state', 'release-floor.json'), 'utf8')).honoured.length === 1, 'RED-1: the honoured rollback re-landed onto a `current` that already holds those bytes is NOT a second downgrade (the standing agent catches up; nothing moves)', again.stdout + again.stderr);
   fs.unlinkSync(path.join(rD, 'current')); fs.symlinkSync(path.join(rD, realVersion), path.join(rD, 'current')); // back on the real agent
   // a hostile hub skips the hub-side check: the host's agent is the fence (its CLI, a staged file signed over other bytes)
   const stg = path.join(rS, 'state', 'evil.js'); fs.writeFileSync(stg, relS);
   const evilM = path.join(rS, 'state', 'evil.manifest.json'); fs.writeFileSync(evilM, JSON.stringify(SIG.sign(K1.privateKeyPem, Buffer.from('other'), '9.9.5', C)));
   const lrP = new Promise((res) => { const c = spawn(process.execPath, [path.join(rS, realVersion, 'agentd.js'), '--land-upgrade', stg, '--version', '9.9.5', '--manifest', evilM], { env: { ...process.env, HOME: path.dirname(path.dirname(rS)), VIBESPACE_AGENTD_ROOT: '', VIBESPACE_DEVICE_ROOT: '', VIBESPACE_AGENTD_VERSION: '' } }); let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('close', (status) => res({ status, stdout: out, stderr: err })); });
   const [sR2, lr] = await Promise.all([ship('floor', hubRb), lrP]);
-  ok(sR2.refused === 'downgrade' && /honoured once already/.test(sR2.why) && cur(rD) === realVersion, 'RED-1: …the same signed rollback a SECOND time ⇒ downgrade (a statement is spent once)', sR2);
+  ok(sR2.refused === 'downgrade' && gateOf(/honoured once already/.test(sR2.why)) && cur(rD) === realVersion, 'RED-1: …the same signed rollback a SECOND time ⇒ downgrade (a statement is spent once)', sR2);
   const ev = (e, host) => events.filter(([x, f]) => x === e && f.hostKey === host);
   ok(ev('refused', 'pinned-u')[0]?.[1].code === 'unsigned-local-build' && ev('refused', 'floor')[0]?.[1].code === 'downgrade' && ev('refused', 'floor')[0]?.[1].floor === realVersion && ev('refused', 'floor')[0]?.[1].machine === 'floor' && JSON.stringify(ev('trusted', 'nopin')[0]?.[1].keyIds) === JSON.stringify([K1.keyId]) && ev('refused', 'pinned-s').length === 0, 'the ssh road reaches the SAME door: refused (code, floor, machine) and trusted (the fingerprint)', events.map(([e, f]) => [e, f.hostKey, f.code || f.keyIds]));
-  ok(lr.status === 3 && /^VS-AGENTD-REFUSED bad-signature from=\d+\.\d+\.\d+ key=[0-9a-f]{16}: /.test(lr.stdout) && !fs.existsSync(path.join(rS, '9.9.5')) && !fs.existsSync(stg), 'a staged bundle whose signature does not check ⇒ the host\'s agent refuses it (exit 3, one line), nothing made', lr.stdout + lr.stderr);
+  ok(lr.status === 3 && gateOf(/^VS-AGENTD-REFUSED bad-signature from=\d+\.\d+\.\d+ key=[0-9a-f]{16}: /.test(lr.stdout)) && !fs.existsSync(path.join(rS, '9.9.5')) && !fs.existsSync(stg), 'a staged bundle whose signature does not check ⇒ the host\'s agent refuses it (exit 3, one line), nothing made', lr.stdout + lr.stderr);
   const SC = installAgentdScript('9.9.2', true);
-  ok(SC.indexOf('elif [ "$SIGNED" != 1 ]') > SC.indexOf('elif [ ! -e "$D/current" ]') && SC.indexOf('--land-upgrade') > SC.indexOf('elif [ "$SIGNED" != 1 ]') && (SC.match(/ln -sfn/g) || []).length === 2 && /SIGNED=0;/.test(installAgentdScript('9.9.2', false)), 'the remote step moves `current` itself only for a FRESH host or a PRE-SIGNING agent; any other replacement goes through the host\'s agent (--land-upgrade)');
+  ok(SC.indexOf('elif [ "$SIGNED" != 1 ]') > SC.indexOf('elif [ ! -e "$D/current" ]') && SC.indexOf('--land-upgrade') > SC.indexOf('elif [ "$SIGNED" != 1 ]') && (SC.match(/ln -sfn/g) || []).length === 2 && verdictOf(/SIGNED=0;/.test(installAgentdScript('9.9.2', false))), 'the remote step moves `current` itself only for a FRESH host or a PRE-SIGNING agent; any other replacement goes through the host\'s agent (--land-upgrade)');
   const pa = installAgentdAnswer('x\nVS-AGENTD-REFUSED downgrade from=2.0.0 floor=2.0.1 key=0123456789abcdef: older\n');
   ok(pa.refused === 'downgrade' && pa.from === '2.0.0' && pa.floor === '2.0.1' && pa.keyId === '0123456789abcdef' && installAgentdAnswer('VS-AGENTD-LANDED 2.0.2 from=2.0.1 tofu=0123456789abcdef,zz').tofu.length === 1 && installAgentdAnswer('nothing') === null && installAgentdAnswer('VS-AGENTD-FAILED EACCES: x').failed === 'EACCES: x', 'the remote step\'s one line parses (refused / landed + tofu / failed / anything else = unexpected)');
 
@@ -611,8 +611,8 @@ try {
   const w = W.create({ userTodos: todos, dataDir: wd, tickMs: 0 });
   const f1 = w.onAgentUpgrade('refused', { hostKey: 'host-dial-x', machine: 'MacBook', from: '2.369.312', to: '2.369.313', code: 'bad-signature', keyId: K1.keyId, by: 'system:device-upgrade' });
   const f2 = w.onAgentUpgrade('refused', { hostKey: 'host-dial-x', machine: 'MacBook', from: '2.369.312', to: '2.369.313', code: 'bad-signature', keyId: K1.keyId, by: 'system:device-upgrade' });
-  ok(f1.filed && !f2.filed && items.length === 1 && items[0].urgency === 'urgent' && items[0].origin === 'machines', 'a device refusal files ONE URGENT item per (device, version, code)', items);
-  ok(/MacBook REFUSED an agent update \(2\.369\.312 → 2\.369\.313\)/.test(items[0].text) && items[0].detail.includes('bad-signature (key ' + K1.keyId + ')') && /pushed by system:device-upgrade/.test(items[0].detail) && items[0].i18n.detail.length === 2, 'its words name the machine, from → to, the code, the key and who pushed', items[0]);
+  ok(gateOf(f1.filed) && !f2.filed && items.length === 1 && items[0].urgency === 'urgent' && items[0].origin === 'machines', 'a device refusal files ONE URGENT item per (device, version, code)', items);
+  ok(gateOf(/MacBook REFUSED an agent update \(2\.369\.312 → 2\.369\.313\)/.test(items[0].text)) && gateOf(items[0].detail.includes('bad-signature (key ' + K1.keyId + ')')) && gateOf(/pushed by system:device-upgrade/.test(items[0].detail)) && items[0].i18n.detail.length === 2, 'its words name the machine, from → to, the code, the key and who pushed', items[0]);
   ok(w.rowOf('host-dial-x').refused === 'bad-signature', 'the machine row carries `refused` (its line)');
   w.onAgentUpgrade('matched', { hostKey: 'host-dial-x', version: '2.369.313' });
   ok(w.rowOf('host-dial-x') === null && items[0].status === 'open', 'a later match drops the row but NEVER retracts the refusal item (a fact, not a state)');
@@ -620,15 +620,15 @@ try {
   ok(!u0.filed && items.length === 1 && w.rowOf('host-dial-y').unsigned === true, 'this hub\'s own unsigned build: the row\'s line only, no item');
   const fd1 = w.onAgentUpgrade('refused', { hostKey: 'host-dial-z', machine: 'Laptop', from: '2.369.313', to: '2.369.300', code: 'downgrade', floor: '2.369.314', keyId: K1.keyId, by: 'system:device-upgrade' });
   const dItem = items[items.length - 1];
-  ok(fd1.filed && dItem.urgency === 'urgent' && dItem.text === 'Laptop: someone pushed an OLDER agent version (2.369.300) — refused' && /runs 2\.369\.313 and has already run 2\.369\.314/.test(dItem.detail) && /pushed by system:device-upgrade/.test(dItem.detail) && w.rowOf('host-dial-z').refused === 'downgrade', 'RED-1: a downgrade refusal files the same URGENT kind in its own words (someone pushed an older version; who pushed)', dItem);
+  ok(gateOf(fd1.filed) && dItem.urgency === 'urgent' && dItem.text === 'Laptop: someone pushed an OLDER agent version (2.369.300) — refused' && gateOf(/runs 2\.369\.313 and has already run 2\.369\.314/.test(dItem.detail)) && gateOf(/pushed by system:device-upgrade/.test(dItem.detail)) && w.rowOf('host-dial-z').refused === 'downgrade', 'RED-1: a downgrade refusal files the same URGENT kind in its own words (someone pushed an older version; who pushed)', dItem);
   const tr1 = w.onAgentUpgrade('trusted', { hostKey: 'host-dial-t', machine: 'Pi', from: '2.369.312', to: '2.369.313', keyIds: [K1.keyId], by: 'system:device-upgrade' });
   const tr2 = w.onAgentUpgrade('trusted', { hostKey: 'host-dial-t', machine: 'Pi', from: '2.369.312', to: '2.369.313', keyIds: [K1.keyId], by: 'system:device-upgrade' });
   const tItem = items[items.length - 1];
-  ok(tr1.filed && !tr2.filed && tItem.urgency === 'urgent' && tItem.text === `Pi trusted a release key for the first time: ${K1.keyId}` && /re-pair it/.test(tItem.detail) && w.rowOf('host-dial-t') === null, 'RED-2: a first trust files ONE urgent item naming the fingerprint (and how to undo it); the row is untouched', tItem);
-  ok(/if \(u\.refused === 'downgrade'\) return t\('Agent \{from\} — REFUSED \{to\}: an older version than one it already ran; see For you'/.test(fs.readFileSync(path.join(REPO, 'src/lib/exit-access-dialog.js'), 'utf8')), 'the machine row words a downgrade on its own');
+  ok(gateOf(tr1.filed) && !tr2.filed && tItem.urgency === 'urgent' && tItem.text === `Pi trusted a release key for the first time: ${K1.keyId}` && gateOf(/re-pair it/.test(tItem.detail)) && w.rowOf('host-dial-t') === null, 'RED-2: a first trust files ONE urgent item naming the fingerprint (and how to undo it); the row is untouched', tItem);
+  ok(verdictOf(/if \(u\.refused === 'downgrade'\) return t\('Agent \{from\} — REFUSED \{to\}: an older version than one it already ran; see For you'/.test(fs.readFileSync(path.join(REPO, 'src/lib/exit-access-dialog.js'), 'utf8'))), 'the machine row words a downgrade on its own');
   const ED = fs.readFileSync(path.join(REPO, 'src/lib/exit-access-dialog.js'), 'utf8');
-  ok(/if \(u\.refused\) return t\('Agent \{from\} — REFUSED the update to \{to\}/.test(ED) && /if \(u\.unsigned\) return t\("Agent \{from\} — not updated to \{to\}/.test(ED), 'the machine row words both (agentUpgradeText)');
-  for (const lang of ['zh', 'ja']) { const L = fs.readFileSync(path.join(REPO, `src/lib/i18n-${lang}.js`), 'utf8'); ok(L.includes('"{machine} REFUSED an agent update ({from} → {to}): its release signature did not check ({code})"') && L.includes('"Agent {from} — REFUSED the update to {to}: its release signature did not check ({code}); see For you"') && [W.refusedItemOf({ machine: 'm', from: '1.0.1', to: '1.0.0', code: 'downgrade' }), W.trustedItemOf({ machine: 'm', from: '1.0.0', to: '1.0.1', keyIds: [K1.keyId] })].every((x) => L.includes(JSON.stringify(x.i18n.text.key)) && x.i18n.detail.every((d) => L.includes(JSON.stringify(d.key)))) && L.includes('"Agent {from} — REFUSED {to}: an older version than one it already ran; see For you"'), `the words exist in ${lang} (fix r2's two items + the row line too)`); }
+  ok(gateOf(/if \(u\.refused\) return t\('Agent \{from\} — REFUSED the update to \{to\}/.test(ED)) && verdictOf(/if \(u\.unsigned\) return t\("Agent \{from\} — not updated to \{to\}/.test(ED)), 'the machine row words both (agentUpgradeText)');
+  for (const lang of ['zh', 'ja']) { const L = fs.readFileSync(path.join(REPO, `src/lib/i18n-${lang}.js`), 'utf8'); ok(gateOf(L.includes('"{machine} REFUSED an agent update ({from} → {to}): its release signature did not check ({code})"')) && gateOf(L.includes('"Agent {from} — REFUSED the update to {to}: its release signature did not check ({code}); see For you"')) && gateOf([W.refusedItemOf({ machine: 'm', from: '1.0.1', to: '1.0.0', code: 'downgrade' }), W.trustedItemOf({ machine: 'm', from: '1.0.0', to: '1.0.1', keyIds: [K1.keyId] })].every((x) => L.includes(JSON.stringify(x.i18n.text.key)) && x.i18n.detail.every((d) => L.includes(JSON.stringify(d.key))))) && verdictOf(L.includes('"Agent {from} — REFUSED {to}: an older version than one it already ran; see For you"')), `the words exist in ${lang} (fix r2's two items + the row line too)`); }
 
   // ── ⑤ THE RELEASE SCRIPTS ──
   console.log('— ⑤ the release scripts: sign / gen / the build step —');
@@ -645,37 +645,37 @@ try {
   const g = run('gen-release-key.mjs');
   const keyFile = path.join(HOME, '.vibespace-release', 'agentd-ed25519.pem');
   const rowM = /\{ keyId: '([0-9a-f]{16})', publicKey: '([A-Za-z0-9+/=]+)' \},/.exec(g.stdout || '');
-  ok(g.status === 0 && fs.existsSync(keyFile) && (fs.statSync(keyFile).mode & 0o777) === 0o600 && (fs.statSync(path.dirname(keyFile)).mode & 0o777) === 0o700 && !!rowM, 'gen-release-key: the private key at ~/.vibespace-release/agentd-ed25519.pem (0600 in 0700) and the public row printed', g.stdout + g.stderr);
+  ok(g.status === 0 && gateOf(fs.existsSync(keyFile)) && (fs.statSync(keyFile).mode & 0o777) === 0o600 && (fs.statSync(path.dirname(keyFile)).mode & 0o777) === 0o700 && !!rowM, 'gen-release-key: the private key at ~/.vibespace-release/agentd-ed25519.pem (0600 in 0700) and the public row printed', g.stdout + g.stderr);
   const pemBefore = fs.readFileSync(keyFile, 'utf8');
   const g2 = run('gen-release-key.mjs');
-  ok(g2.status === 2 && /exists \(a release key is never overwritten/.test(g2.stderr) && fs.readFileSync(keyFile, 'utf8') === pemBefore, 'gen-release-key never overwrites a release key (exit 2, by name)');
+  ok(g2.status === 2 && gateOf(/exists \(a release key is never overwritten/.test(g2.stderr)) && fs.readFileSync(keyFile, 'utf8') === pemBefore, 'gen-release-key never overwrites a release key (exit 2, by name)');
   const ci = run('sign-agentd.mjs', [], { CI: 'true' });
-  ok(ci.status === 2 && /refused — CI is set/.test(ci.stderr), 'sign-agentd refuses under CI (exit 2, by name)', ci.stderr);
+  ok(ci.status === 2 && verdictOf(/refused — CI is set/.test(ci.stderr)), 'sign-agentd refuses under CI (exit 2, by name)', ci.stderr);
   const ciG = run('gen-release-key.mjs', ['--out', path.join(HOME, 'k2.pem')], { CI: '1' });
-  ok(ciG.status === 2 && /refused — CI is set/.test(ciG.stderr) && !fs.existsSync(path.join(HOME, 'k2.pem')), 'gen-release-key refuses under CI too');
+  ok(ciG.status === 2 && gateOf(/refused — CI is set/.test(ciG.stderr)) && !fs.existsSync(path.join(HOME, 'k2.pem')), 'gen-release-key refuses under CI too');
   const un = run('sign-agentd.mjs');
-  ok(un.status === 2 && /is not in src\/agentd\/release-keys\.js RELEASE_KEYS/.test(un.stderr), 'a key whose public half is not in release-keys.js is refused', un.stderr);
+  ok(un.status === 2 && verdictOf(/is not in src\/agentd\/release-keys\.js RELEASE_KEYS/.test(un.stderr)), 'a key whose public half is not in release-keys.js is refused', un.stderr);
   writeKeys([{ keyId: rowM[1], publicKey: rowM[2] }]);
   fs.writeFileSync(path.join(R, 'data/auth.json'), '{}');
   const hubCo = run('sign-agentd.mjs');
-  ok(hubCo.status === 2 && /data\/auth\.json exists: this checkout belongs to a running VibeSpace/.test(hubCo.stderr), 'a running instance\'s checkout is refused (data/auth.json)', hubCo.stderr);
+  ok(hubCo.status === 2 && verdictOf(/data\/auth\.json exists: this checkout belongs to a running VibeSpace/.test(hubCo.stderr)), 'a running instance\'s checkout is refused (data/auth.json)', hubCo.stderr);
   fs.unlinkSync(path.join(R, 'data/auth.json'));
   const inRepo = path.join(R, 'k.pem'); fs.copyFileSync(keyFile, inRepo); fs.chmodSync(inRepo, 0o600);
   const ir = run('sign-agentd.mjs', ['--key', inRepo]);
-  ok(ir.status === 2 && /is inside the repository/.test(ir.stderr), 'a key inside the repository is refused', ir.stderr);
+  ok(ir.status === 2 && verdictOf(/is inside the repository/.test(ir.stderr)), 'a key inside the repository is refused', ir.stderr);
   fs.unlinkSync(inRepo);
   fs.chmodSync(keyFile, 0o644);
   const loose = run('sign-agentd.mjs');
-  ok(loose.status === 2 && /readable by others \(mode 644\)/.test(loose.stderr), 'a key readable by others is refused', loose.stderr);
+  ok(loose.status === 2 && verdictOf(/readable by others \(mode 644\)/.test(loose.stderr)), 'a key readable by others is refused', loose.stderr);
   fs.chmodSync(keyFile, 0o600);
   const envKey = run('sign-agentd.mjs', [], { HOME: path.join(tmp, 'nohome'), VIBESPACE_RELEASE_KEY: pemBefore, VIBESPACE_AGENTD_SIGNING_KEY: pemBefore, SIGN_KEY: keyFile });
-  ok(envKey.status === 2 && /no release key at/.test(envKey.stderr), 'a key handed in through the ENVIRONMENT is never used (no file ⇒ refused)', envKey.stderr);
+  ok(envKey.status === 2 && verdictOf(/no release key at/.test(envKey.stderr)), 'a key handed in through the ENVIRONMENT is never used (no file ⇒ refused)', envKey.stderr);
   const ss = run('sign-agentd.mjs');
   const man = (() => { try { return JSON.parse(fs.readFileSync(path.join(R, 'release/agentd/manifest.json'), 'utf8')); } catch { return null; } })();
   const rBytes = fs.readFileSync(path.join(R, 'data/bin/vibespace-agentd.js'));
-  ok(ss.status === 0 && man && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', man, C).ok && fs.existsSync(path.join(R, 'data/bin/vibespace-agentd.manifest.json')), 'sign-agentd writes release/agentd/manifest.json that verifies (and the copy beside the bundle)', ss.stdout + ss.stderr);
-  ok(man && JSON.stringify(man.keys) === JSON.stringify([{ keyId: rowM[1], publicKey: rowM[2] }]) && SIG.verify([], rBytes, '3.0.1', man, { ...C, tofu: true }).tofu === true, 'fix r2: the manifest SIGNS the release key set (RELEASE_KEYS) — a device that trusts no key can take it on first use');
-  ok(man && man.helper === undefined, 'lane apple-signing: no prebuilt Mac screen helper in data/bin/helpers ⇒ no helper row (the record as before)');
+  ok(ss.status === 0 && gateOf(man) && gateOf(SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', man, C).ok) && verdictOf(fs.existsSync(path.join(R, 'data/bin/vibespace-agentd.manifest.json'))), 'sign-agentd writes release/agentd/manifest.json that verifies (and the copy beside the bundle)', ss.stdout + ss.stderr);
+  ok(gateOf(man) && JSON.stringify(man.keys) === JSON.stringify([{ keyId: rowM[1], publicKey: rowM[2] }]) && SIG.verify([], rBytes, '3.0.1', man, { ...C, tofu: true }).tofu === true, 'fix r2: the manifest SIGNS the release key set (RELEASE_KEYS) — a device that trusts no key can take it on first use');
+  ok(gateOf(man) && man.helper === undefined, 'lane apple-signing: no prebuilt Mac screen helper in data/bin/helpers ⇒ no helper row (the record as before)');
   { // lane apple-signing: the prebuilt + its identity record in data/bin/helpers ⇒ the row is signed into the record; a record that does not describe the bytes is refused by name
     const hd = path.join(R, 'data/bin/helpers'); fs.mkdirSync(hd, { recursive: true });
     const hbytes = Buffer.from('#!/bin/sh\necho a fake universal helper\n');
@@ -684,54 +684,54 @@ try {
     fs.writeFileSync(path.join(hd, 'vibespace-screen.identity.json'), JSON.stringify({ version: 'vs-11f32156ba0a', sha256: hsha, kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen', notarized: true, at: 'x' }));
     const sh = run('sign-agentd.mjs');
     const manH = (() => { try { return JSON.parse(fs.readFileSync(path.join(R, 'release/agentd/manifest.json'), 'utf8')); } catch { return null; } })();
-    ok(sh.status === 0 && manH && JSON.stringify(manH.helper) === JSON.stringify({ version: 'vs-11f32156ba0a', sha256: hsha, identity: { kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' } }) && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', manH, C).ok && typeof manH.helperSig === 'string' && /helper vs-11f32156ba0a developer-id by team VSTEAM0001/.test(sh.stdout) && /helperSig/.test(sh.stdout), 'sign-agentd signs the helper row (version, sha256, identity — never the notarization flag or the date) from data/bin/helpers into helperSig and says so', sh.stdout + sh.stderr);
+    ok(sh.status === 0 && gateOf(manH) && JSON.stringify(manH.helper) === JSON.stringify({ version: 'vs-11f32156ba0a', sha256: hsha, identity: { kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' } }) && gateOf(SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', manH, C).ok) && typeof manH.helperSig === 'string' && gateOf(/helper vs-11f32156ba0a developer-id by team VSTEAM0001/.test(sh.stdout)) && verdictOf(/helperSig/.test(sh.stdout)), 'sign-agentd signs the helper row (version, sha256, identity — never the notarization flag or the date) from data/bin/helpers into helperSig and says so', sh.stdout + sh.stderr);
     fs.writeFileSync(path.join(hd, 'vibespace-screen.identity.json'), JSON.stringify({ version: 'vs-11f32156ba0a', sha256: 'f'.repeat(64), kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' }));
     const shBad = run('sign-agentd.mjs');
-    ok(shBad.status === 2 && /the helper's identity record describes sha256 ffffffffffff…, the prebuilt is/.test(shBad.stderr), 'an identity record that does not describe the prebuilt (a stale pair) is refused by name — nothing signed', shBad.stderr);
+    ok(shBad.status === 2 && verdictOf(/the helper's identity record describes sha256 ffffffffffff…, the prebuilt is/.test(shBad.stderr)), 'an identity record that does not describe the prebuilt (a stale pair) is refused by name — nothing signed', shBad.stderr);
     fs.rmSync(hd, { recursive: true, force: true });
   }
   const rbBad = run('sign-agentd.mjs', ['--allow-downgrade-to', '3.0.0']);
-  ok(rbBad.status === 2 && /--allow-downgrade-to 3\.0\.0 is not this bundle's version 3\.0\.1/.test(rbBad.stderr), 'sign-agentd --allow-downgrade-to naming another version is refused (exit 2, by name)', rbBad.stderr);
+  ok(rbBad.status === 2 && verdictOf(/--allow-downgrade-to 3\.0\.0 is not this bundle's version 3\.0\.1/.test(rbBad.stderr)), 'sign-agentd --allow-downgrade-to naming another version is refused (exit 2, by name)', rbBad.stderr);
   const rbOk = run('sign-agentd.mjs', ['--allow-downgrade-to', '3.0.1']);
   const manRb = (() => { try { return JSON.parse(fs.readFileSync(path.join(R, 'release/agentd/manifest.json'), 'utf8')); } catch { return null; } })();
-  ok(rbOk.status === 0 && /ROLLBACK devices that already ran a newer agent land 3\.0\.1 once/.test(rbOk.stdout) && manRb?.allowDowngradeTo === '3.0.1' && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', manRb, { ...C, floor: '3.0.2' }).rollback === true, 'fix r2: sign-agentd --allow-downgrade-to <this version> signs a ROLLBACK statement that lands below a floor', rbOk.stdout + rbOk.stderr);
+  ok(rbOk.status === 0 && gateOf(/ROLLBACK devices that already ran a newer agent land 3\.0\.1 once/.test(rbOk.stdout)) && manRb?.allowDowngradeTo === '3.0.1' && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', manRb, { ...C, floor: '3.0.2' }).rollback === true, 'fix r2: sign-agentd --allow-downgrade-to <this version> signs a ROLLBACK statement that lands below a floor', rbOk.stdout + rbOk.stderr);
   for (const f of ['sign-agentd.mjs', 'gen-release-key.mjs', 'release-key-io.mjs']) {
     const envReads = (fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8').match(/process\.env\.[A-Za-z_]+|process\.env\[/g) || []).filter((x) => x !== 'process.env.CI');
     ok(envReads.length === 0, `${f} reads no environment variable but CI (${envReads.join(', ') || 'none'})`);
   }
   const ar = spawnSync(process.execPath, [path.join(R, 'scripts/agentd-release.mjs')], { env: env0, encoding: 'utf8' });
-  ok(ar.status === 0 && /the signed release \(key [0-9a-f]{16}/.test(ar.stdout) && fs.existsSync(path.join(R, 'data/bin/vibespace-agentd.manifest.json')), 'the build step: these bytes ARE the signed release ⇒ the manifest beside the bundle', ar.stdout);
+  ok(ar.status === 0 && gateOf(/the signed release \(key [0-9a-f]{16}/.test(ar.stdout)) && verdictOf(fs.existsSync(path.join(R, 'data/bin/vibespace-agentd.manifest.json'))), 'the build step: these bytes ARE the signed release ⇒ the manifest beside the bundle', ar.stdout);
   fs.writeFileSync(path.join(R, 'data/bin/vibespace-agentd.js'), '/* agent, edited */ module.exports = { VERSION: "3.0.1" };\n');
   const ar2 = spawnSync(process.execPath, [path.join(R, 'scripts/agentd-release.mjs')], { env: env0, encoding: 'utf8' });
-  ok(ar2.status === 0 && /UNSIGNED local build/.test(ar2.stdout) && !fs.existsSync(path.join(R, 'data/bin/vibespace-agentd.manifest.json')), 'a source change without a signing: the build still succeeds, says UNSIGNED, and removes the copy (this hub pushes nothing)', ar2.stdout);
+  ok(ar2.status === 0 && gateOf(/UNSIGNED local build/.test(ar2.stdout)) && !fs.existsSync(path.join(R, 'data/bin/vibespace-agentd.manifest.json')), 'a source change without a signing: the build still succeeds, says UNSIGNED, and removes the copy (this hub pushes nothing)', ar2.stdout);
   const rot = run('gen-release-key.mjs', ['--rotate-from', keyFile, '--out', path.join(HOME, '.vibespace-release', 'agentd-ed25519-2.pem')]);
   const lk = /\{ keyId: '([0-9a-f]{16})', publicKey: '([^']+)', by: '([0-9a-f]{16})', sig: '([^']+)' \},/.exec(rot.stdout || '');
-  ok(rot.status === 0 && lk && lk[3] === rowM[1], 'a rotation prints the KEY_CHAIN link signed by the old key', rot.stdout + rot.stderr);
+  ok(rot.status === 0 && gateOf(lk) && lk[3] === rowM[1], 'a rotation prints the KEY_CHAIN link signed by the old key', rot.stdout + rot.stderr);
   if (lk) {
     const K2pem = fs.readFileSync(path.join(HOME, '.vibespace-release', 'agentd-ed25519-2.pem'), 'utf8');
     const rec = SIG.sign(K2pem, rBytes, '3.0.1', { ...C, chain: [{ keyId: lk[1], publicKey: lk[2], by: lk[3], sig: lk[4] }] });
     ok(SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', rec, C).viaChain === true, '…and a device pinned to the old key follows that link to the new one');
-    ok(/RELEASE_KEYS \(BESIDE the old row — retire the old one later with --retire\)/.test(rot.stdout), 'fix r2: a rotation ADDS the row (the old key stays trusted until a retirement)');
+    ok(verdictOf(/RELEASE_KEYS \(BESIDE the old row — retire the old one later with --retire\)/.test(rot.stdout)), 'fix r2: a rotation ADDS the row (the old key stays trusted until a retirement)');
     const before = fs.readdirSync(path.join(HOME, '.vibespace-release')).sort().join(',');
     const ret = run('gen-release-key.mjs', ['--retire', keyFile]);
     const re = /\{ retire: '([0-9a-f]{16})', sig: '([^']+)' \},/.exec(ret.stdout || '');
     const recR = re && SIG.sign(K2pem, rBytes, '3.0.1', { ...C, chain: [{ keyId: lk[1], publicKey: lk[2], by: lk[3], sig: lk[4] }, { retire: re[1], sig: re[2] }] });
     const vR = recR && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', recR, C);
-    ok(ret.status === 0 && re && re[1] === rowM[1] && vR?.ok && JSON.stringify(vR.trustAfter.map((k) => k.keyId)) === JSON.stringify([lk[1]]) && fs.readdirSync(path.join(HOME, '.vibespace-release')).sort().join(',') === before, 'fix r2: gen-release-key --retire prints a KEY_CHAIN retirement signed by that key (writes nothing); a device drops the key on it', ret.stdout + ret.stderr);
+    ok(ret.status === 0 && gateOf(re) && re[1] === rowM[1] && gateOf(vR?.ok) && JSON.stringify(vR.trustAfter.map((k) => k.keyId)) === JSON.stringify([lk[1]]) && fs.readdirSync(path.join(HOME, '.vibespace-release')).sort().join(',') === before, 'fix r2: gen-release-key --retire prints a KEY_CHAIN retirement signed by that key (writes nothing); a device drops the key on it', ret.stdout + ret.stderr);
   }
   const encOut = path.join(HOME, '.vibespace-release', 'enc.pem');
   const enc = run('gen-release-key.mjs', ['--encrypt', '--out', encOut], {}, 'a passphrase of twenty\n');
   const G = fs.readFileSync(path.join(REPO, 'scripts/gen-release-key.mjs'), 'utf8');
-  ok(enc.status === 0 && /BEGIN ENCRYPTED PRIVATE KEY/.test(fs.readFileSync(encOut, 'utf8')) && /passphrase-encrypted/.test(enc.stdout) && /when stdin is NOT a terminal the FIRST\n\/\/ stdin line is the passphrase and there is no confirmation/.test(G) && /--encrypt \(USE IT on any machine that also runs a VibeSpace or agent sessions/.test(G), 'low ⑤: --encrypt from a non-terminal stdin takes the FIRST line (no confirmation) — and the header says so, and says to use it', enc.stdout + enc.stderr);
+  ok(enc.status === 0 && gateOf(/BEGIN ENCRYPTED PRIVATE KEY/.test(fs.readFileSync(encOut, 'utf8'))) && gateOf(/passphrase-encrypted/.test(enc.stdout)) && gateOf(/when stdin is NOT a terminal the FIRST\n\/\/ stdin line is the passphrase and there is no confirmation/.test(G)) && verdictOf(/--encrypt \(USE IT on any machine that also runs a VibeSpace or agent sessions/.test(G)), 'low ⑤: --encrypt from a non-terminal stdin takes the FIRST line (no confirmation) — and the header says so, and says to use it', enc.stdout + enc.stderr);
   const BUILD = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).scripts;
-  ok(/esbuild src\/agentd\/agentd\.js [^&]*--preserve-symlinks[^&]*--outfile=data\/bin\/\.vibespace-agentd\.raw\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/\.vibespace-agentd\.raw\.js data\/bin\/vibespace-agentd\.js && /.test(BUILD['build:agentd']) && /&& node scripts\/agentd-release\.mjs$/.test(BUILD['build:agentd']) && BUILD['sign:agentd'] === 'npm run build:agentd && node scripts/sign-agentd.mjs', 'package.json: build:agentd builds with --preserve-symlinks (the same bytes in any checkout) to a side name the strip renames into data/bin/vibespace-agentd.js (B-315a), and ends with the release check; sign:agentd exists');
-  ok(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8').includes('\ndata/bin/vibespace-agentd.manifest.json\n'), '.gitignore: the copy beside the bundle is never tracked (a clean seed after the image build)');
+  ok(gateOf(/esbuild src\/agentd\/agentd\.js [^&]*--preserve-symlinks[^&]*--outfile=data\/bin\/\.vibespace-agentd\.raw\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/\.vibespace-agentd\.raw\.js data\/bin\/vibespace-agentd\.js && /.test(BUILD['build:agentd'])) && gateOf(/&& node scripts\/agentd-release\.mjs$/.test(BUILD['build:agentd'])) && BUILD['sign:agentd'] === 'npm run build:agentd && node scripts/sign-agentd.mjs', 'package.json: build:agentd builds with --preserve-symlinks (the same bytes in any checkout) to a side name the strip renames into data/bin/vibespace-agentd.js (B-315a), and ends with the release check; sign:agentd exists');
+  ok(verdictOf(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8').includes('\ndata/bin/vibespace-agentd.manifest.json\n')), '.gitignore: the copy beside the bundle is never tracked (a clean seed after the image build)');
   // B-315a: THE FINAL NAME ONLY EVER HOLDS A WHOLE STRIPPED BUNDLE — esbuild writes a SIDE name, the strip renames its checked
   // text over the final one (esbuild wrote the raw bytes to the final name before; anything that read it in the ~2 s the strip
   // took read them). The release's line (its esbuild outfile the final name) does not pass this pin:
   const BUILD_RE315 = /--outfile=data\/bin\/\.vibespace-agentd\.raw\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/\.vibespace-agentd\.raw\.js data\/bin\/vibespace-agentd\.js && /;
-  ok(BUILD_RE315.test(BUILD['build:agentd']) && !BUILD_RE315.test('--outfile=data/bin/vibespace-agentd.js && node scripts/agentd-bundle-strip.mjs data/bin/vibespace-agentd.js && '), 'B-315a: build:agentd strips the side name INTO the final one — and the release\'s line (esbuild to the final name, stripped in place) fails this pin');
-  ok(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8').includes('\ndata/bin/.vibespace-agentd.raw.js\n'), 'B-315a: .gitignore: the side name is never tracked');
+  ok(gateOf(BUILD_RE315.test(BUILD['build:agentd'])) && !BUILD_RE315.test('--outfile=data/bin/vibespace-agentd.js && node scripts/agentd-bundle-strip.mjs data/bin/vibespace-agentd.js && '), 'B-315a: build:agentd strips the side name INTO the final one — and the release\'s line (esbuild to the final name, stripped in place) fails this pin');
+  ok(verdictOf(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8').includes('\ndata/bin/.vibespace-agentd.raw.js\n')), 'B-315a: .gitignore: the side name is never tracked');
   {
     const SD = path.join(tmp, 'strip-315a'); fs.mkdirSync(SD, { recursive: true });
     const side = path.join(SD, '.vibespace-agentd.raw.js'), fin = path.join(SD, 'vibespace-agentd.js'), man = path.join(SD, 'vibespace-agentd.manifest.json');
@@ -740,18 +740,18 @@ try {
     const ino0 = fs.statSync(fin).ino;
     fs.writeFileSync(side, '// src/a.js\nfunction f() {\n    // an essay\n    return 1;\n}\nmodule.exports = f;\n');
     const s1 = strip(side, fin), got1 = fs.readFileSync(fin, 'utf8');
-    ok(s1.status === 0 && !fs.existsSync(side) && !got1.includes('an essay') && got1.includes('\nreturn 1;\n') && got1.startsWith('// src/a.js\n') && fs.statSync(fin).ino !== ino0,
+    ok(s1.status === 0 && !fs.existsSync(side) && !got1.includes('an essay') && gateOf(got1.includes('\nreturn 1;\n')) && gateOf(got1.startsWith('// src/a.js\n')) && fs.statSync(fin).ino !== ino0,
       'B-315a: the strip reads the side name and RENAMES its checked text over the final one (a new file, never the old one rewritten in place); the side name then goes', { status: s1.status, err: s1.stderr.slice(0, 300), got1 });
     fs.writeFileSync(side, 'function (\n'); fs.writeFileSync(man, '{}');
     const before = fs.readFileSync(fin, 'utf8'), s2 = strip(side, fin);
-    ok(s2.status !== 0 && fs.readFileSync(fin, 'utf8') === before && !fs.existsSync(man) && fs.existsSync(side),
+    ok(s2.status !== 0 && fs.readFileSync(fin, 'utf8') === before && !fs.existsSync(man) && verdictOf(fs.existsSync(side)),
       'B-315a: a strip that fails leaves the final name as it held it (never raw bytes), the signed manifest copy beside it goes (the hub says unsigned, pushes nothing), the side name stays to be read', { status: s2.status });
     fs.writeFileSync(fin, '// src/b.js\nconst x = 1;\n    // gone\nmodule.exports = x;\n');
     const s3 = strip(fin);
     ok(s3.status === 0 && !fs.readFileSync(fin, 'utf8').includes('gone'), 'B-315a: one argument still strips in place (a hand run)', { status: s3.status });
     fs.rmSync(SD, { recursive: true, force: true });
   }
-  ok(/rm -f "\$ROOT\/state\/trusted-keys\.json" "\$ROOT\/state\/release-floor\.json"/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.sh'), 'utf8')) && /Remove-Item \(Join-Path \$root 'state\\trusted-keys\.json'\)/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.ps1'), 'utf8')) && /Remove-Item \(Join-Path \$root 'state\\release-floor\.json'\)/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.ps1'), 'utf8')), 'both installers reset the pin AND the version floor: a (re-)pair is a new trust-on-first-use (the lost-key recovery)');
+  ok(gateOf(/rm -f "\$ROOT\/state\/trusted-keys\.json" "\$ROOT\/state\/release-floor\.json"/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.sh'), 'utf8'))) && gateOf(/Remove-Item \(Join-Path \$root 'state\\trusted-keys\.json'\)/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.ps1'), 'utf8'))) && verdictOf(/Remove-Item \(Join-Path \$root 'state\\release-floor\.json'\)/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.ps1'), 'utf8'))), 'both installers reset the pin AND the version floor: a (re-)pair is a new trust-on-first-use (the lost-key recovery)');
 
   // ── ⑥ THE CENSUS ──
   console.log('— ⑥ the census: the one writer of `current` is behind the verdict —');
@@ -762,20 +762,20 @@ try {
   ok((AD.match(/repointCurrent\(/g) || []).length === 1 && (body.match(/repointCurrent\(fs, \{ root: ROOT, dir \}\);/g) || []).length === 1, 'agentd.js: repointCurrent is called ONCE in the whole daemon, inside landBundle (the ONE landing: the hub\'s stream and the ssh road)');
   const iV = at('const verdict = landingVerdict(fs.readFileSync(tmp), { version, sig, localProof }, { dialed });'), iNo = at('if (!verdict.ok) {'), iRet = body.indexOf('return verdict;', iNo), iRen = at('fs.renameSync(tmp, path.join(dir, selfName));'), iRep = at('repointCurrent(fs, { root: ROOT, dir });');
   ok(iV > 0 && iV < iNo && iNo < iRet && iRet < iRen && iRen < iRep, 'landBundle: the verdict over the bytes ON DISK, then a refusal returns — only after it the rename and the repoint', { iV, iNo, iRet, iRen, iRep });
-  ok(bu.includes('const verdict = landBundle(tmp, dir, version, { sig, localProof }, { dialed });') && bu.indexOf('landBundle(') < bu.indexOf('reExecArgv(path.join(dir,') && bu.indexOf('if (!verdict.ok) {') < bu.indexOf("mux.control({ op: 'upgrade-done'"), 'beginUpgrade lands through landBundle and re-execs only after a yes');
+  ok(gateOf(bu.includes('const verdict = landBundle(tmp, dir, version, { sig, localProof }, { dialed });')) && bu.indexOf('landBundle(') < bu.indexOf('reExecArgv(path.join(dir,') && bu.indexOf('if (!verdict.ok) {') < bu.indexOf("mux.control({ op: 'upgrade-done'"), 'beginUpgrade lands through landBundle and re-execs only after a yes');
   const lu = AD.slice(AD.indexOf("if (process.argv.includes('--land-upgrade')) {"), AD.indexOf("if (!process.argv.includes('--stdio') && !process.argv.includes('--dial-check') && !process.argv.includes('--land-upgrade')) {"));
-  ok(lu.length > 200 && lu.includes('const v = landBundle(tmp, dir, version, { sig }, { dialed: true });') && !/repointCurrent|localProof|acquireSingleton/.test(lu), 'the ssh road\'s --land-upgrade lands through the same landBundle (never a local proof, no writer of its own) and never starts the daemon');
-  ok(/if \(typeof version !== 'string' \|\| !SIG\.VERSION_RE\.test\(version\)\)/.test(bu) && bu.indexOf('SIG.VERSION_RE') < bu.indexOf('fs.mkdirSync(dir') && lu.indexOf('SIG.VERSION_RE.test(version)') < lu.indexOf('fs.mkdirSync(dir'), 'beginUpgrade and --land-upgrade: the version is checked BEFORE a directory is made');
-  ok(AD.includes("serveConnection(ws, { dialed: true, onAuthed: ") && AD.includes("function serveConnection(sock, { dialed = false, onAuthed = null } = {})") && AD.includes("upgrade = beginUpgrade(mux, msg, { dialed });"), 'the dial link is marked: the local proof is never honored on it');
+  ok(lu.length > 200 && gateOf(lu.includes('const v = landBundle(tmp, dir, version, { sig }, { dialed: true });')) && !/repointCurrent|localProof|acquireSingleton/.test(lu), 'the ssh road\'s --land-upgrade lands through the same landBundle (never a local proof, no writer of its own) and never starts the daemon');
+  ok(gateOf(/if \(typeof version !== 'string' \|\| !SIG\.VERSION_RE\.test\(version\)\)/.test(bu)) && bu.indexOf('SIG.VERSION_RE') < bu.indexOf('fs.mkdirSync(dir') && lu.indexOf('SIG.VERSION_RE.test(version)') < lu.indexOf('fs.mkdirSync(dir'), 'beginUpgrade and --land-upgrade: the version is checked BEFORE a directory is made');
+  ok(gateOf(AD.includes("serveConnection(ws, { dialed: true, onAuthed: ")) && gateOf(AD.includes("function serveConnection(sock, { dialed = false, onAuthed = null } = {})")) && verdictOf(AD.includes("upgrade = beginUpgrade(mux, msg, { dialed });")), 'the dial link is marked: the local proof is never honored on it');
   const others = fs.readdirSync(path.join(REPO, 'src/agentd')).filter((f) => f.endsWith('.js') && f !== 'agentd.js' && f !== 'reexec.js' && f !== 'client.js').filter((f) => /repointCurrent\(|'current'\)/.test(fs.readFileSync(path.join(REPO, 'src/agentd', f), 'utf8')));
   ok(others.length === 0, `no other device module touches \`current\` (${others.join(', ') || 'none'}); client.js installLocal is the HUB's own machine`);
   const CL = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
-  ok(/if \(!rel\.signed && this\._transport\.kind !== 'local'\) \{ const e = new Error/.test(CL) && CL.includes("const proof = this._transport.kind === 'local' ? this._writeLocalProof() : null;") && /\.\.\.\(rel\.signed \? \{ sig: rel\.manifest \} : \{\}\), \.\.\.\(proof \? \{ localProof: proof \} : \{\}\)/.test(CL), 'client.js _upgrade: no unsigned bytes to another machine; the record rides the control line, and the hub\'s OWN daemon always gets the local proof');
-  ok(['src/server.js', 'server.js'].some((f) => fs.existsSync(path.join(REPO, f)) && /onUpgradeRefused: \(from, to, info\) => hosts\.onAgentUpgrade\?\.\('refused'/.test(fs.readFileSync(path.join(REPO, f), 'utf8'))) && /onUpgradeRefused: \(from, to, info\) => \{ const h = hosts\.findByDeviceId\(deviceId\); hosts\.onAgentUpgrade\?\.\('refused'/.test(fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8')) && /onUpgradeRefused: \(from, to, info\) => this\.onAgentUpgrade\?\.\('refused'/.test(fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8')), 'WIRING: the local daemon, a dial device and an ssh host pass the refusal to the same door');
-  ok(/onUpgradeTrusted: \(from, to, info\) => \{ const h = hosts\.findByDeviceId\(deviceId\); hosts\.onAgentUpgrade\?\.\('trusted'/.test(fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8')) && /onUpgradeTrusted: \(from, to, info\) => this\.onAgentUpgrade\?\.\('trusted'/.test(fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8')), 'WIRING (fix r2): a dial device and an ssh host pass a first trust to the same door (the local daemon never trusts on first use: it lands by the local proof)');
+  ok(gateOf(/if \(!rel\.signed && this\._transport\.kind !== 'local'\) \{ const e = new Error/.test(CL)) && gateOf(CL.includes("const proof = this._transport.kind === 'local' ? this._writeLocalProof() : null;")) && verdictOf(/\.\.\.\(rel\.signed \? \{ sig: rel\.manifest \} : \{\}\), \.\.\.\(proof \? \{ localProof: proof \} : \{\}\)/.test(CL)), 'client.js _upgrade: no unsigned bytes to another machine; the record rides the control line, and the hub\'s OWN daemon always gets the local proof');
+  ok(gateOf(['src/server.js', 'server.js'].some((f) => fs.existsSync(path.join(REPO, f)) && /onUpgradeRefused: \(from, to, info\) => hosts\.onAgentUpgrade\?\.\('refused'/.test(fs.readFileSync(path.join(REPO, f), 'utf8')))) && gateOf(/onUpgradeRefused: \(from, to, info\) => \{ const h = hosts\.findByDeviceId\(deviceId\); hosts\.onAgentUpgrade\?\.\('refused'/.test(fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8'))) && verdictOf(/onUpgradeRefused: \(from, to, info\) => this\.onAgentUpgrade\?\.\('refused'/.test(fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8'))), 'WIRING: the local daemon, a dial device and an ssh host pass the refusal to the same door');
+  ok(gateOf(/onUpgradeTrusted: \(from, to, info\) => \{ const h = hosts\.findByDeviceId\(deviceId\); hosts\.onAgentUpgrade\?\.\('trusted'/.test(fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8'))) && verdictOf(/onUpgradeTrusted: \(from, to, info\) => this\.onAgentUpgrade\?\.\('trusted'/.test(fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8'))), 'WIRING (fix r2): a dial device and an ssh host pass a first trust to the same door (the local daemon never trusts on first use: it lands by the local proof)');
 } finally {
   for (const r of roots) { try { endDaemonsAndWait(r); } catch { } }
   fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

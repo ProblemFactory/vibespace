@@ -28,7 +28,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, priceAt } = require(path.join(ROOT, 'src/usage-history.js'));
 const FX = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/openai-pricing.json'), 'utf8'));
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const dirs = [];
 const mk = (pricing) => {
   const d = scratch('pricing-openai'); dirs.push(d);
@@ -83,9 +83,9 @@ try {
     const got = judge(planted, FX);
     ok(got.length === 1 && got[0].id === 'gpt-6-astra' && got[0].what === 'long' && got[0].field === 'output', 'CONTROL: a planted wrong price (astra long output $50 for $75) is the ONE mismatch the judge reports', got);
     const missing = JSON.parse(JSON.stringify(DEFAULT_PRICING)); delete missing['gpt-6-astra'];
-    ok(judge(missing, FX).some((x) => x.id === 'gpt-6-astra' && /_default/.test(x.what)), 'CONTROL: the base table\'s miss (no astra row) is reported as a fall to _default');
+    ok(verdictOf(judge(missing, FX).some((x) => x.id === 'gpt-6-astra' && /_default/.test(x.what))), 'CONTROL: the base table\'s miss (no astra row) is reported as a fall to _default');
     const extra = { ...JSON.parse(JSON.stringify(DEFAULT_PRICING)), 'gpt-9-test': { input: 1, output: 1, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.1 } };
-    ok(judge(extra, FX).some((x) => x.id === 'gpt-9-test'), 'CONTROL: a gpt-* row no official model judges is reported (a new row must arrive with its fixture line)');
+    ok(verdictOf(judge(extra, FX).some((x) => x.id === 'gpt-9-test')), 'CONTROL: a gpt-* row no official model judges is reported (a new row must arrive with its fixture line)');
   }
 
   // ── §2 ──
@@ -113,38 +113,38 @@ try {
   const typo = JSON.parse(JSON.stringify(DEFAULT_PRICING)); typo['gpt-5.5'].lnog = typo['gpt-5.5'].long; delete typo['gpt-5.5'].long;
   typo['gpt-5.6-sol'].earlier[0].until = 'soon';
   const te = shapeErrs(typo);
-  ok(te.includes('gpt-5.5.lnog') && te.some((x) => /gpt-5\.6-sol\.earlier\[0\]\.until/.test(x)), 'CONTROL: a misspelt block (`lnog`, silently flat) and an unparseable `until` are named', te);
+  ok(gateOf(te.includes('gpt-5.5.lnog')) && verdictOf(te.some((x) => /gpt-5\.6-sol\.earlier\[0\]\.until/.test(x))), 'CONTROL: a misspelt block (`lnog`, silently flat) and an unparseable `until` are named', te);
 
   // ── §3 ──
   console.log('§3 >272K prices the whole request, decided on the request');
   const ev = (o) => ({ be: 'codex', model: 'gpt-6-astra', acct: null, ts: Date.parse('2026-09-20T00:00:00Z'), i: 0, o: 0, cw5: 0, cw1: 0, cr: 0, ...o });
   const big = ev({ i: 10000, cr: 300000, o: 1000 });
-  ok(near(uh._cost(big), (10000 * 20 + 300000 * 2 + 1000 * 75) / 1e6), 'i 10K + cached 300K > 272K: every token at the long rates ($20 / $2 / $75)', uh._cost(big));
+  ok(verdictOf(near(uh._cost(big), (10000 * 20 + 300000 * 2 + 1000 * 75) / 1e6)), 'i 10K + cached 300K > 272K: every token at the long rates ($20 / $2 / $75)', uh._cost(big));
   const edge = ev({ i: 2000, cr: 270000, o: 1000 });
-  ok(near(uh._cost(edge), (2000 * 10 + 270000 * 1 + 1000 * 50) / 1e6), 'exactly 272,000 prompt tokens is NOT over: short rates', uh._cost(edge));
+  ok(verdictOf(near(uh._cost(edge), (2000 * 10 + 270000 * 1 + 1000 * 50) / 1e6)), 'exactly 272,000 prompt tokens is NOT over: short rates', uh._cost(edge));
   const whole = big.i + big.cr;
   const parts = uh._cost({ ...big, i: 0, o: 0, cr: 0 }, whole) + uh._cost({ ...big, i: 0, o: 0, cw5: 0, cw1: 0 }, whole) + uh._cost({ ...big, cr: 0 }, whole);
-  ok(near(parts, uh._cost(big)), 'the token-class split (cw / cr / rest) priced with the WHOLE prompt adds up to the request', [parts, uh._cost(big)]);
+  ok(verdictOf(near(parts, uh._cost(big))), 'the token-class split (cw / cr / rest) priced with the WHOLE prompt adds up to the request', [parts, uh._cost(big)]);
   const mixed = ev({ i: 100000, cr: 200000, o: 0 });
-  ok(near(uh._cost({ ...mixed, i: 0 }), 200000 * 1 / 1e6) && near(uh._cost({ ...mixed, i: 0 }, 300000), 200000 * 2 / 1e6), 'CONTROL: the 200K cached part of a 300K request priced ALONE takes the SHORT rate ($1) — with the request\'s prompt the long one ($2): the reason _cost takes `prompt`');
-  ok(near(uh._cost({ ...big, model: 'gpt-5.4-mini' }), (10000 * 0.75 + 300000 * 0.075 + 1000 * 4.5) / 1e6), 'a row without `long` stays flat at any size');
+  ok(gateOf(near(uh._cost({ ...mixed, i: 0 }), 200000 * 1 / 1e6)) && verdictOf(near(uh._cost({ ...mixed, i: 0 }, 300000), 200000 * 2 / 1e6)), 'CONTROL: the 200K cached part of a 300K request priced ALONE takes the SHORT rate ($1) — with the request\'s prompt the long one ($2): the reason _cost takes `prompt`');
+  ok(verdictOf(near(uh._cost({ ...big, model: 'gpt-5.4-mini' }), (10000 * 0.75 + 300000 * 0.075 + 1000 * 4.5) / 1e6)), 'a row without `long` stays flat at any size');
 
   // ── §4 ──
   console.log('§4 gpt-5.6-sol: the 2026-08-21 cut is a dated rate');
   const sol = (ts, o) => uh._cost({ ...ev({ model: 'gpt-5.6-sol', ts }), ...o });
   const short = { i: 1000, cr: 9000, o: 100 }, long = { i: 1000, cr: 300000, o: 100 };
-  ok(near(sol(Date.parse('2026-08-20T23:59:59Z'), short), (1000 * 5 + 9000 * 0.5 + 100 * 30) / 1e6), 'a row from 2026-08-20 keeps the old $5 / $0.50 / $30');
-  ok(near(sol(Date.parse('2026-08-21T00:00:00Z'), short), (1000 * 4 + 9000 * 0.4 + 100 * 20) / 1e6), 'from 2026-08-21 00:00 UTC: $4 / $0.40 / $20');
-  ok(near(sol(Date.parse('2026-08-01T00:00:00Z'), long), (1000 * 10 + 300000 * 1 + 100 * 45) / 1e6) && near(sol(Date.parse('2026-09-01T00:00:00Z'), long), (1000 * 8 + 300000 * 0.8 + 100 * 30) / 1e6), 'long requests: $10 / $1 / $45 before the cut, $8 / $0.80 / $30 after');
-  ok(near(uh._cost({ ...ev({ model: 'gpt-5.6-sol' }), ...short, ts: undefined }), (1000 * 4 + 9000 * 0.4 + 100 * 20) / 1e6), 'no ts (the live stdout paths) = now = the current price');
-  ok(near(uh._cost({ ...big, ts: Date.parse('2026-01-01T00:00:00Z') }), uh._cost(big)), 'a row without `earlier` is the same at any date');
+  ok(verdictOf(near(sol(Date.parse('2026-08-20T23:59:59Z'), short), (1000 * 5 + 9000 * 0.5 + 100 * 30) / 1e6)), 'a row from 2026-08-20 keeps the old $5 / $0.50 / $30');
+  ok(verdictOf(near(sol(Date.parse('2026-08-21T00:00:00Z'), short), (1000 * 4 + 9000 * 0.4 + 100 * 20) / 1e6)), 'from 2026-08-21 00:00 UTC: $4 / $0.40 / $20');
+  ok(gateOf(near(sol(Date.parse('2026-08-01T00:00:00Z'), long), (1000 * 10 + 300000 * 1 + 100 * 45) / 1e6)) && verdictOf(near(sol(Date.parse('2026-09-01T00:00:00Z'), long), (1000 * 8 + 300000 * 0.8 + 100 * 30) / 1e6)), 'long requests: $10 / $1 / $45 before the cut, $8 / $0.80 / $30 after');
+  ok(verdictOf(near(uh._cost({ ...ev({ model: 'gpt-5.6-sol' }), ...short, ts: undefined }), (1000 * 4 + 9000 * 0.4 + 100 * 20) / 1e6)), 'no ts (the live stdout paths) = now = the current price');
+  ok(verdictOf(near(uh._cost({ ...big, ts: Date.parse('2026-01-01T00:00:00Z') }), uh._cost(big))), 'a row without `earlier` is the same at any date');
 
   // ── §5 ──
   console.log('§5 per-account pricing over the new shapes');
   const uhD = mk({ version: 2, tiers: {}, accounts: { 'acct-d': { discount: 0.5 }, 'acct-o': { tiers: { 'gpt-6-astra': { input: 1, output: 2, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.1 } } } } });
-  ok(near(uhD._cost({ ...big, acct: 'acct-d' }), uh._cost(big) / 2), 'a 50 % discount halves the LONG rate (the discount scales whichever rate applies)');
-  ok(near(uhD._cost({ ...ev({ model: 'gpt-5.6-sol', ts: Date.parse('2026-08-01T00:00:00Z') }), ...short, acct: 'acct-d' }), sol(Date.parse('2026-08-01T00:00:00Z'), short) / 2), '…and the DATED pre-cut rate');
-  ok(near(uhD._cost({ ...big, acct: 'acct-o' }), (10000 * 1 + 300000 * 0.1 + 1000 * 2) / 1e6), 'an account\'s own override row without `long` is flat — never the shipped row\'s long block');
+  ok(verdictOf(near(uhD._cost({ ...big, acct: 'acct-d' }), uh._cost(big) / 2)), 'a 50 % discount halves the LONG rate (the discount scales whichever rate applies)');
+  ok(verdictOf(near(uhD._cost({ ...ev({ model: 'gpt-5.6-sol', ts: Date.parse('2026-08-01T00:00:00Z') }), ...short, acct: 'acct-d' }), sol(Date.parse('2026-08-01T00:00:00Z'), short) / 2)), '…and the DATED pre-cut rate');
+  ok(verdictOf(near(uhD._cost({ ...big, acct: 'acct-o' }), (10000 * 1 + 300000 * 0.1 + 1000 * 2) / 1e6)), 'an account\'s own override row without `long` is flat — never the shipped row\'s long block');
 
   // ── §6 ──
   console.log('§6 an untouched old shipped row on disk takes the corrected default');
@@ -163,13 +163,13 @@ try {
     const uhW = mk();
     uhW._cost(ev({ model: 'gpt-7-nova', i: 10 })); uhW._cost(ev({ model: 'gpt-7-nova', i: 20 })); uhW._cost(ev({ model: 'GPT-7-NOVA', i: 5 }));
     uhW._cost(ev({ model: 'gpt-6-astra', i: 10 })); uhW._cost({ ...ev({ i: 10 }), be: 'claude', model: 'claude-zz-9' });
-    ok(warns.length === 1 && /gpt-7-nova/.test(warns[0]) && /_default/.test(warns[0]), 'ONE journal line for the unknown codex id across three events', warns);
+    ok(warns.length === 1 && gateOf(/gpt-7-nova/.test(warns[0])) && verdictOf(/_default/.test(warns[0])), 'ONE journal line for the unknown codex id across three events', warns);
     ok(events.length === 1 && events[0][0] === 'usage-unpriced-model' && events[0][1] === 'codex:gpt-7-nova', 'ONE Diagnostics event (usage-unpriced-model, codex:<id>)', events);
     uhW._cost(ev({ model: null, i: 1 })); uhW._cost(ev({ model: null, i: 2 }));
-    ok(warns.length === 2 && /no model id/.test(warns[1]), 'a codex row with NO model id is named once too', warns);
+    ok(warns.length === 2 && verdictOf(/no model id/.test(warns[1])), 'a codex row with NO model id is named once too', warns);
     mk()._cost(ev({ model: 'gpt-7-nova', i: 7 })); // a second instance in the same process (a migration builds one)
     ok(warns.length === 2, 'once per id per PROCESS: a second UsageHistory does not name gpt-7-nova again (verify r1)', warns);
   } finally { console.warn = ow; global.__vsEvent = oe; }
 } finally { for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

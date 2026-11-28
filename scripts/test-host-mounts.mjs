@@ -28,7 +28,7 @@ const publicHost = process.argv[3] || '100.87.42.107';
 if (!hostId) { console.error('usage: test-host-mounts.mjs <hostId> [publicHost]'); process.exit(2); }
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const { MountTokens, registerWebdav } = require('../src/webdav.js');
@@ -74,18 +74,18 @@ try {
   // its own multiplex master; sharing the socket in one process contended.
   const sshBase = hosts.sshArgs(h, { multiplex: false });
   const ls = await sshRun([...sshBase, '--', `ls ${JSON.stringify(r.mountpoint)} 2>&1`]);
-  check('this instance\'s files appear in the remote mountpoint', ls.includes('hello.txt'), JSON.stringify(ls.slice(0, 200)));
+  check('this instance\'s files appear in the remote mountpoint', verdictOf(ls.includes('hello.txt')), JSON.stringify(ls.slice(0, 200)));
   const cat = await sshRun([...sshBase, '--', `cat ${JSON.stringify(r.mountpoint + '/hello.txt')} 2>&1`]);
-  check('remote reads our file content through the mount', cat.includes(MARK), JSON.stringify(cat.slice(0, 120)));
+  check('remote reads our file content through the mount', verdictOf(cat.includes(MARK)), JSON.stringify(cat.slice(0, 120)));
   const cat2 = await sshRun([...sshBase, '--', `cat ${JSON.stringify(r.mountpoint + '/多字节.md')} 2>&1`]);
-  check('multibyte filename + content readable', cat2.includes('互挂云盘'), JSON.stringify(cat2.slice(0, 120)));
+  check('multibyte filename + content readable', verdictOf(cat2.includes('互挂云盘')), JSON.stringify(cat2.slice(0, 120)));
 
   console.log('— unmount cleans up on the remote —');
   await hm.unmount(mountId);
   mountId = null;
   await sleep(1500);
   const gone = await sshRun([...sshBase, '--', `ls ${JSON.stringify(r.mountpoint)} 2>&1; echo "---"; mount 2>/dev/null | grep -c ${JSON.stringify(r.mountpoint)} || true`]);
-  check('mount removed (mountpoint empty / not in mount table)', !gone.includes('hello.txt') || gone.trim().endsWith('0'), JSON.stringify(gone.slice(-80)));
+  check('mount removed (mountpoint empty / not in mount table)', !gone.includes('hello.txt') || verdictOf(gone.trim().endsWith('0')), JSON.stringify(gone.slice(-80)));
 } catch (e) {
   failed++;
   console.error('  ✗ reverse mount threw:', e.message);
@@ -97,4 +97,4 @@ try {
 
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall reverse-mount tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf } from './lib/check.mjs';

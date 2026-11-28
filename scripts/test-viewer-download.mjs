@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + JSON.stringify(extra) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + JSON.stringify(extra) : '')); } return !!c; };
 
 // ── ① census ──
 const FT = await import(path.join(repo, 'src/lib/file-types.js'));
@@ -53,16 +53,16 @@ const SRC = Object.fromEntries(['src/lib/file-viewer.js', 'src/lib/code-editor.j
 const fvMod = SRC['src/lib/file-viewer.js'];
 const rendered = JSON.parse(fvMod.match(/RENDERED_VIEWERS = new Set\((\[[^\]]*\])\)/)[1].replace(/'/g, '"'));
 console.log(`— ① ${exts.length} registered extensions → ${kinds.size} viewer kinds: ${[...kinds].join(', ')}`);
-ok(kinds.size >= 10 && rendered.every((k) => WINDOW_OF[k] === 'viewer'), 'every RENDERED_VIEWERS kind opens the viewer window in this census', rendered);
+ok(kinds.size >= 10 && verdictOf(rendered.every((k) => WINDOW_OF[k] === 'viewer')), 'every RENDERED_VIEWERS kind opens the viewer window in this census', rendered);
 ok(census(SRC, kinds).length === 0, 'every kind the registry routes to (+ text → editor, binary → hex) opens a window that wires the shared Download', census(SRC, kinds));
 const c1 = census({ ...SRC, 'src/lib/hex-viewer.js': SRC['src/lib/hex-viewer.js'].replace(', wireFileDownload(winInfo, { path: filePath, host: this._host })', '') }, kinds);
-ok(c1.some((r) => r.startsWith('(binary)')), 'control: the hex viewer with its Download unwired ⇒ RED', c1);
+ok(verdictOf(c1.some((r) => r.startsWith('(binary)'))), 'control: the hex viewer with its Download unwired ⇒ RED', c1);
 const c0 = census({ ...SRC, 'src/lib/code-editor.js': SRC['src/lib/code-editor.js'].replace('const btnDownload = wireFileDownload(winInfo, ', 'const btnDownload = this._btn(') }, kinds);
-ok(c0.some((r) => r.startsWith('html-editor:')) && c0.some((r) => r.startsWith('(text):')), 'control: the code editor with a Download button not from the helper ⇒ RED', c0);
+ok(gateOf(c0.some((r) => r.startsWith('html-editor:'))) && verdictOf(c0.some((r) => r.startsWith('(text):'))), 'control: the code editor with a Download button not from the helper ⇒ RED', c0);
 const reseat = '      await FileViewer.renderInto(container, filePath, fileName, app, host);\n      FileViewer._seatDownload(container, btnDownload, winInfo.content);\n';
-ok(fvMod.includes(reseat), '(the ⟳ handler re-seats the Download after its re-render)');
+ok(verdictOf(fvMod.includes(reseat)), '(the ⟳ handler re-seats the Download after its re-render)');
 const c2 = census({ ...SRC, 'src/lib/file-viewer.js': fvMod.replace(reseat, '      await FileViewer.renderInto(container, filePath, fileName, app, host);\n') }, kinds);
-ok(c2.some((r) => r.startsWith('docx:')) && c2.some((r) => r.startsWith('image:')), 'control: the viewer without its re-seat after ⟳ (the Download wiped with the old toolbar) ⇒ RED for every viewer kind', c2);
+ok(gateOf(c2.some((r) => r.startsWith('docx:'))) && verdictOf(c2.some((r) => r.startsWith('image:'))), 'control: the viewer without its re-seat after ⟳ (the Download wiped with the old toolbar) ⇒ RED for every viewer kind', c2);
 const c3 = census(SRC, new Set([...kinds, 'epub']));
 ok(c3.length === 1 && c3[0] === 'epub: unlisted', 'control: a registry kind this census does not list ⇒ RED', c3);
 // ①b the URL door (lane outbox-attachment-preview, the int244 integration): FileViewer.openUrl — a viewer window over a file served
@@ -90,8 +90,8 @@ const enc = encodeURIComponent(P);
 ok(M.fileDownloadUrl(P, '') === `/api/download?path=${enc}` && M.fileDownloadUrl(P) === `/api/download?path=${enc}`, 'this machine: /api/download?path=<the file>, no host', M.fileDownloadUrl(P));
 ok(M.fileDownloadUrl(P, 'box') === `/api/download?path=${enc}&host=box`, 'an ssh host: …&host=box', M.fileDownloadUrl(P, 'box'));
 ok(M.fileDownloadUrl('C:\\Users\\me\\a.png', 'dev:WIN-DESK1 #2') === `/api/download?path=${encodeURIComponent('C:\\Users\\me\\a.png')}&host=${encodeURIComponent('dev:WIN-DESK1 #2')}`, 'a paired / Windows device id: the id encoded as given (the route resolves it)', M.fileDownloadUrl('C:\\Users\\me\\a.png', 'dev:WIN-DESK1 #2'));
-ok(/_hp\(\) \{ return hostParam\(this\._host\); \}/.test(read('src/lib/file-explorer.js')), "Files' _hp() IS the helper's hostParam (one host spelling)");
-ok(/label: t\('Download'\), action: \(\) => startFileDownload\(\{ path: fullPath, host: this\._host \|\| '' \}\)/.test(read('src/lib/file-explorer-ops.js')), "Files' row Download starts through the same helper");
+ok(verdictOf(/_hp\(\) \{ return hostParam\(this\._host\); \}/.test(read('src/lib/file-explorer.js'))), "Files' _hp() IS the helper's hostParam (one host spelling)");
+ok(verdictOf(/label: t\('Download'\), action: \(\) => startFileDownload\(\{ path: fullPath, host: this\._host \|\| '' \}\)/.test(read('src/lib/file-explorer-ops.js'))), "Files' row Download starts through the same helper");
 const spell = [];
 const walk = (d) => { for (const e of fs.readdirSync(path.join(repo, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walk(r); else if (r.endsWith('.js') && r !== 'src/lib/file-download.js' && /\/api\/download\?path=/.test(read(r))) spell.push(r); } };
 walk('src/lib');
@@ -109,17 +109,17 @@ ok(r1 === false && anchors.length === 0 && M.toasts.length === 1 && M.toasts[0].
 answer = { status: 200, body: { size: 5 } };
 const r2 = await M.startFileDownload({ path: P, host: '' });
 const a = anchors[0];
-ok(r2 === true && a && a.tag === 'a' && a.href === `/api/download?path=${enc}` && a.download === '' && a.clicked === 1 && a.inBody === false && M.toasts.length === 1, 'a start: one temporary <a download> (the route names the file) clicked and removed, no toast', { r2, a, toasts: M.toasts });
+ok(r2 === true && gateOf(a) && a.tag === 'a' && a.href === `/api/download?path=${enc}` && a.download === '' && a.clicked === 1 && a.inBody === false && M.toasts.length === 1, 'a start: one temporary <a download> (the route names the file) clicked and removed, no toast', { r2, a, toasts: M.toasts });
 await M.startFileDownload({ path: P, host: '', dirty: () => true });
 ok(anchors.length === 2 && anchors[1].clicked === 1 && M.toasts.length === 2 && M.toasts[1].m === 'Downloaded the saved version — unsaved changes are not included', 'a dirty editor: the saved copy downloads and one toast says so', M.toasts);
 
 // ── ④ the title-bar menu ──
 console.log('— ④ the title-bar menu');
 const tb = read('src/lib/taskbar.js');
-ok(/registerCommand\(\{ id: 'window\.download', title: \(\) => t\('Download'\), run: \(c\) => startFileDownload\(c\.win\._fileDownload\) \}\)/.test(tb)
-  && /command: 'window\.download', kind: 'download', when: \(c\) => !!\(c\.win && c\.win\._fileDownload\)/.test(tb)
-  && /import \{ startFileDownload \} from '\.\/file-download\.js'/.test(tb), 'the window menu offers Download on a window carrying a file, through the same helper');
-ok(/winInfo\._fileDownload = target;/.test(dlSrc), 'wireFileDownload puts the target on the window record the menu reads');
+ok(gateOf(/registerCommand\(\{ id: 'window\.download', title: \(\) => t\('Download'\), run: \(c\) => startFileDownload\(c\.win\._fileDownload\) \}\)/.test(tb))
+  && gateOf(/command: 'window\.download', kind: 'download', when: \(c\) => !!\(c\.win && c\.win\._fileDownload\)/.test(tb))
+  && verdictOf(/import \{ startFileDownload \} from '\.\/file-download\.js'/.test(tb)), 'the window menu offers Download on a window carrying a file, through the same helper');
+ok(verdictOf(/winInfo\._fileDownload = target;/.test(dlSrc)), 'wireFileDownload puts the target on the window record the menu reads');
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

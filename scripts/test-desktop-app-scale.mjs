@@ -48,7 +48,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const MUT = mutantCopies('dapp-scale', repo);
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -67,34 +67,34 @@ const SEAM = await import('../src/lib/desktop-seamless.js');
 
 console.log('§1 the explicit scales a person picks — each one spelled exactly by the ceil rule (lane D (a)) and by a browser row\'s dpi rule');
 {
-  ok(same(M.EXPLICIT_SCALES, [1, 1.5, 2, 2.5, 3]) && Object.isFrozen(M.EXPLICIT_SCALES), 'EXPLICIT_SCALES = 1, 1.5, 2, 2.5, 3');
+  ok(gateOf(same(M.EXPLICIT_SCALES, [1, 1.5, 2, 2.5, 3])) && verdictOf(Object.isFrozen(M.EXPLICIT_SCALES)), 'EXPLICIT_SCALES = 1, 1.5, 2, 2.5, 3');
   // the ceil rule written out HERE (lane D (a), the default): GDK_SCALE = ceil(s) at 96 dpi, the picture shown at s ÷ GDK_SCALE
   // — widgets AND text at s; an integer stays 1:1
   const rows = M.EXPLICIT_SCALES.map((s) => { const k = M.scaleKnobs(s); const g = Math.ceil(s); return { s, gdk: k.gdkScale, dpi: k.dpi, pic: k.pictureScale, rule: k.rule, want: [g, 96, Math.round(s / g * 10000) / 10000] }; });
-  ok(rows.every((r) => r.rule === 'ceil' && r.gdk === r.want[0] && r.dpi === r.want[1] && r.pic === r.want[2] && Math.abs(r.gdk * r.pic - r.s) < 1e-3 && M.scaleKnobs(r.s).scale === r.s), `scaleKnobs spells each by the ceil rule (${rows.map((r) => `${r.s} ⇒ GDK_SCALE ${r.gdk} shown at ${r.pic}`).join(', ')})`, rows);
+  ok(verdictOf(rows.every((r) => r.rule === 'ceil' && r.gdk === r.want[0] && r.dpi === r.want[1] && r.pic === r.want[2] && Math.abs(r.gdk * r.pic - r.s) < 1e-3 && M.scaleKnobs(r.s).scale === r.s)), `scaleKnobs spells each by the ceil rule (${rows.map((r) => `${r.s} ⇒ GDK_SCALE ${r.gdk} shown at ${r.pic}`).join(', ')})`, rows);
   // …and a browser row's dpi rule: GDK_SCALE = floor(s), the font dpi = 96 × s / GDK_SCALE — an INTEGER for every row
   const drows = M.EXPLICIT_SCALES.map((s) => { const k = M.scaleKnobs(s, { rule: 'dpi' }); const g = Math.floor(s); return { s, gdk: k.gdkScale, dpi: k.dpi, pic: k.pictureScale, want: [g, 96 * s / g], exact: Number.isInteger(96 * s / g) }; });
-  ok(drows.every((r) => r.gdk === r.want[0] && r.dpi === r.want[1] && r.exact && r.pic === 1), `…and by the dpi rule of a browser row, no rounding needed (${drows.map((r) => `${r.s} ⇒ GDK_SCALE ${r.gdk} + ${r.dpi} dpi`).join(', ')})`, drows);
+  ok(verdictOf(drows.every((r) => r.gdk === r.want[0] && r.dpi === r.want[1] && r.exact && r.pic === 1)), `…and by the dpi rule of a browser row, no rounding needed (${drows.map((r) => `${r.s} ⇒ GDK_SCALE ${r.gdk} + ${r.dpi} dpi`).join(', ')})`, drows);
   ok(M.scaleKnobs(2.5).env.GDK_SCALE === '3' && M.scaleKnobs(2.5).dpi === 96 && M.scaleKnobs(2.5).pictureScale === 0.8333 && M.scaleKnobs(2.5, { rule: 'dpi' }).env.GDK_SCALE === '2' && M.scaleKnobs(2.5, { rule: 'dpi' }).dpi === 120 && M.scaleKnobs(3).env.GDK_SCALE === '3' && M.scaleKnobs(3).dpi === 96 && M.scaleKnobs(3).pictureScale === 1, '2.5× = drawn at GDK_SCALE 3, shown at 0.8333 (a browser: GDK_SCALE 2 + 120 dpi); 3× = GDK_SCALE 3 at 96 dpi, 1:1');
-  ok(same(M.APP_SCALES, [1, 1.5, 2]) && same(M.SCALE_CHOICES, ['auto', 1, 1.5, 2, 2.5, 3]) && Object.isFrozen(M.SCALE_CHOICES), 'the Settings enum stays 1 / 1.5 / 2 (an instance default); the Scale ▸ rows are auto + the explicit set');
+  ok(gateOf(same(M.APP_SCALES, [1, 1.5, 2])) && gateOf(same(M.SCALE_CHOICES, ['auto', 1, 1.5, 2, 2.5, 3])) && verdictOf(Object.isFrozen(M.SCALE_CHOICES)), 'the Settings enum stays 1 / 1.5 / 2 (an instance default); the Scale ▸ rows are auto + the explicit set');
   const P = [['auto', 'auto'], [1, 1], ['1', 1], [1.5, 1.5], ['1.5', 1.5], [2.5, 2.5], ['3', 3], [3, 3], [1.25, null], [4, null], [0, null], ['', null], [null, null], [undefined, null], [true, null], ['x', null], [{}, null], [[2], null], ['Auto', null]];
   const got = P.map(([v]) => M.parseScaleChoice(v));
-  ok(P.every(([, w], i) => got[i] === w), `parseScaleChoice: ${P.map(([v], i) => `${JSON.stringify(v)} ⇒ ${JSON.stringify(got[i])}`).join(', ')}`);
+  ok(verdictOf(P.every(([, w], i) => got[i] === w)), `parseScaleChoice: ${P.map(([v], i) => `${JSON.stringify(v)} ⇒ ${JSON.stringify(got[i])}`).join(', ')}`);
   ok(M.appScaleFor('2.5', 1) === 2.5 && M.appScaleFor('3', 1) === 3 && M.appScaleFor('1.25', 2) === 1 && M.appScaleFor('4', 1) === 1, 'appScaleFor honours every explicit scale (2.5, 3); anything else explicit ⇒ 1');
   const rv = [[{ scale: 2.5 }, 2.5], [{ scale: '3' }, 3], [{ scale: 1.25 }, null], [{ scale: 4 }, null]].map(([b, w]) => [w, M.validateRelaunchRequest(b)]);
-  ok(rv.every(([w, v]) => (w === null ? !v.ok && v.code === 'bad-request' && /2\.5, 3/.test(v.error) : v.ok && v.choice === w)), 'a relaunch accepts 2.5× and 3×, and refuses 1.25 / 4 naming the whole set', rv);
+  ok(verdictOf(rv.every(([w, v]) => (w === null ? !v.ok && v.code === 'bad-request' && /2\.5, 3/.test(v.error) : v.ok && v.choice === w))), 'a relaunch accepts 2.5× and 3×, and refuses 1.25 / 4 naming the whole set', rv);
 }
 
 console.log('§2 the launch request carries the app\'s default scale — or refuses it by name');
 {
   const reg = M.DEFAULT_REGISTRY;
   const a = M.validateLaunchRequest({ appId: 'xterm', scaleChoice: 1.5 }, reg), b = M.validateLaunchRequest({ exec: 'xterm', args: [], scaleChoice: '2.5' }, reg);
-  ok(a.ok && a.launch.scaleChoice === 1.5 && b.ok && b.launch.scaleChoice === 2.5, 'both request shapes carry it (a catalog row by id: 1.5; a typed command: "2.5" read as 2.5)', { a: a.launch && a.launch.scaleChoice, b: b.launch && b.launch.scaleChoice });
+  ok(gateOf(a.ok) && a.launch.scaleChoice === 1.5 && gateOf(b.ok) && b.launch.scaleChoice === 2.5, 'both request shapes carry it (a catalog row by id: 1.5; a typed command: "2.5" read as 2.5)', { a: a.launch && a.launch.scaleChoice, b: b.launch && b.launch.scaleChoice });
   const none = [{ appId: 'xterm' }, { appId: 'xterm', scaleChoice: 'auto' }, { appId: 'xterm', scaleChoice: null }].map((x) => M.validateLaunchRequest(x, reg));
-  ok(none.every((v) => v.ok && v.launch.scaleChoice === null), 'absent / "auto" / null ⇒ null (no app default: the instance default decides)');
+  ok(verdictOf(none.every((v) => v.ok && v.launch.scaleChoice === null)), 'absent / "auto" / null ⇒ null (no app default: the instance default decides)');
   const badV = [1.25, 4, 'x', true, {}, [1.5], ''].map((c) => [c, M.validateLaunchRequest({ appId: 'xterm', scaleChoice: c }, reg)]);
-  ok(badV.every(([, v]) => !v.ok && v.code === 'bad-request' && /^scaleChoice must be one of auto, 1, 1\.5, 2, 2\.5, 3$/.test(v.error)), `every other value is REFUSED by name, never silently dropped (${badV.map(([c]) => JSON.stringify(c)).join(' ')})`, badV.map(([c, v]) => [c, v.error]));
-  ok(same(M.scaleChoiceVerdict({}), { ok: true, scaleChoice: null }) && same(M.scaleChoiceVerdict(null), { ok: true, scaleChoice: null }) && same(M.scaleChoiceVerdict({ scaleChoice: 3 }), { ok: true, scaleChoice: 3 }) && M.scaleChoiceVerdict({ scaleChoice: 9 }).code === 'bad-request', 'scaleChoiceVerdict: the one check (the machine\'s validateLaunchRequest and the hub\'s route both call it)');
+  ok(verdictOf(badV.every(([, v]) => !v.ok && v.code === 'bad-request' && /^scaleChoice must be one of auto, 1, 1\.5, 2, 2\.5, 3$/.test(v.error))), `every other value is REFUSED by name, never silently dropped (${badV.map(([c]) => JSON.stringify(c)).join(' ')})`, badV.map(([c, v]) => [c, v.error]));
+  ok(gateOf(same(M.scaleChoiceVerdict({}), { ok: true, scaleChoice: null })) && gateOf(same(M.scaleChoiceVerdict(null), { ok: true, scaleChoice: null })) && gateOf(same(M.scaleChoiceVerdict({ scaleChoice: 3 }), { ok: true, scaleChoice: 3 })) && M.scaleChoiceVerdict({ scaleChoice: 9 }).code === 'bad-request', 'scaleChoiceVerdict: the one check (the machine\'s validateLaunchRequest and the hub\'s route both call it)');
 }
 
 console.log('§3 the precedence — a window\'s choice > the app\'s default > an explicit Settings value > auto');
@@ -117,37 +117,37 @@ const precedenceTable = (mod) => {
 };
 {
   const rows = precedenceTable(M);
-  ok(rows.every((r) => same(r.got, r.want)), `scalePick over the whole table (${rows.length} rows): ${rows.map((r) => `c=${JSON.stringify(r.choice)} app=${JSON.stringify(r.appDefault)} set=${JSON.stringify(r.setting)} ⇒ ${r.got.join(' ')}`).join('; ')}`, rows.filter((r) => !same(r.got, r.want)));
-  ok(rows.filter((r) => r.got[1] === 'app').every((r) => r.from === null), 'an app default carries no `from` (it was not derived from a screen)');
+  ok(verdictOf(rows.every((r) => same(r.got, r.want))), `scalePick over the whole table (${rows.length} rows): ${rows.map((r) => `c=${JSON.stringify(r.choice)} app=${JSON.stringify(r.appDefault)} set=${JSON.stringify(r.setting)} ⇒ ${r.got.join(' ')}`).join('; ')}`, rows.filter((r) => !same(r.got, r.want)));
+  ok(verdictOf(rows.filter((r) => r.got[1] === 'app').every((r) => r.from === null)), 'an app default carries no `from` (it was not derived from a screen)');
   const rec = M.newRecord({ id: 'da-1', label: 'Calc', exec: '/usr/bin/gnome-calculator', source: 'registry', backend: 'xpra', now: 1, scale: 1.5, dpi: 144, scaleOrigin: 'app' });
   const junk = M.newRecord({ id: 'da-2', label: 'x', exec: '/x', source: 'adhoc', backend: 'xpra', now: 1, scaleOrigin: 'mine' });
-  ok(rec.scaleOrigin === 'app' && rec.scale === 1.5 && junk.scaleOrigin === null && same(M.SCALE_ORIGINS, ['auto', 'setting', 'chosen', 'app']), 'the record keeps origin "app"; an origin outside the closed set is dropped');
+  ok(rec.scaleOrigin === 'app' && rec.scale === 1.5 && junk.scaleOrigin === null && verdictOf(same(M.SCALE_ORIGINS, ['auto', 'setting', 'chosen', 'app'])), 'the record keeps origin "app"; an origin outside the closed set is dropped');
   // CONTROL — a scalePick that never reads the app default (the pre-lane-D pick): the table is a judge, not an echo
   const src = read('src/desktop-fit.js'); // rv-desktop-apps F-S1: the scale family's own file
   const line = "  if (typeof app === 'number') return { scale: app, origin: 'app', from: null };\n";
   ok(src.split(line).length === 2, 'CONTROL: the app-default line is spelled exactly once (the copy removes exactly it)');
   const Mc = MUT.load('src/desktop-fit.js', editAnchor(src, line, '', "src/desktop-fit.js"), 'no-app-default');
   const bad = precedenceTable(Mc).filter((r) => !same(r.got, r.want));
-  ok(bad.length === 3 && bad.every((r) => r.want[1] === 'app'), `CONTROL: without it the table fails on exactly the ${bad.length} app-default rows (they fall to Settings / auto)`, bad.map((r) => [r.appDefault, r.got]));
+  ok(bad.length === 3 && verdictOf(bad.every((r) => r.want[1] === 'app')), `CONTROL: without it the table fails on exactly the ${bad.length} app-default rows (they fall to Settings / auto)`, bad.map((r) => [r.appDefault, r.got]));
   // the window's Scale ▸ model: 2.5× and 3× rows, the app default marked (never current by itself)
   const live = { id: 'da-9', state: 'ready', backend: 'xpra', exec: '/usr/bin/gnome-calculator', args: [], label: 'Calc', source: 'registry', appId: 'gnome-calculator', scale: 1.5, scaleOrigin: 'app' };
   const mm = M.scaleMenuModel(live, { dpr: 1, uiScale: 1, appDefault: 1.5 });
-  ok(same(mm.rows.map((r) => [r.choice, r.current, r.appDefault, r.disabled]), [['auto', false, false, false], [1, false, false, false], [1.5, true, true, true], [2, false, false, false], [2.5, false, false, false], [3, false, false, false]]), 'a window launched AT its app default: that row is current (not offered again) and marked as the default; 2.5× and 3× are rows', mm.rows);
+  ok(verdictOf(same(mm.rows.map((r) => [r.choice, r.current, r.appDefault, r.disabled]), [['auto', false, false, false], [1, false, false, false], [1.5, true, true, true], [2, false, false, false], [2.5, false, false, false], [3, false, false, false]])), 'a window launched AT its app default: that row is current (not offered again) and marked as the default; 2.5× and 3× are rows', mm.rows);
   const mm2 = M.scaleMenuModel({ ...live, scale: 2, scaleOrigin: 'chosen' }, { appDefault: 1.5 });
-  ok(mm2.rows.find((r) => r.choice === 2).current && mm2.rows.find((r) => r.choice === 1.5).appDefault && !mm2.rows.find((r) => r.choice === 1.5).current && M.scaleMenuModel(live, {}).rows.every((r) => !r.appDefault), 'running at another scale: the default row stays marked, the current one is what runs; no default ⇒ nothing marked');
+  ok(gateOf(mm2.rows.find((r) => r.choice === 2).current) && gateOf(mm2.rows.find((r) => r.choice === 1.5).appDefault) && !mm2.rows.find((r) => r.choice === 1.5).current && verdictOf(M.scaleMenuModel(live, {}).rows.every((r) => !r.appDefault)), 'running at another scale: the default row stays marked, the current one is what runs; no default ⇒ nothing marked');
 }
 
 console.log('§4 the client\'s PURE model — one key per app, the map, the launch field, the card\'s menu, "Make n× the default"');
 {
   const K = [[{ appId: 'gnome-calculator' }, 'gnome-calculator'], [{ appId: 'chromium', exec: '/usr/bin/google-chrome' }, 'chromium'], [{ exec: 'xterm' }, 'exec:xterm'], [{ exec: '/usr/bin/xterm' }, 'exec:xterm'], [{}, null], [null, null]];
-  ok(K.every(([x, w]) => S.scaleKeyOf(x) === w && SEAM.frameKeyOf(x) === w), `scaleKeyOf == frameKeyOf (ONE key per app for both per-app choices): ${K.map(([x, w]) => `${JSON.stringify(x)} ⇒ ${w}`).join(', ')}`);
+  ok(verdictOf(K.every(([x, w]) => S.scaleKeyOf(x) === w && SEAM.frameKeyOf(x) === w)), `scaleKeyOf == frameKeyOf (ONE key per app for both per-app choices): ${K.map(([x, w]) => `${JSON.stringify(x)} ⇒ ${w}`).join(', ')}`);
   ok(S.scaleKeyOf({ exec: 'xterm' }) === S.scaleKeyOf({ exec: '/usr/bin/xterm', appId: undefined, source: 'adhoc' }), 'a typed command ("xterm") and the record it becomes (exec resolved to /usr/bin/xterm) share the key — a window\'s "Make default" reaches the next typed launch');
   const m0 = { 'exec:xterm': 2 };
   const m1 = S.setScaleChoice(m0, 'gnome-calculator', 1.5), m2 = S.setScaleChoice(m1, 'exec:xterm', 'auto'), m3 = S.setScaleChoice(m1, 'gnome-calculator', 9), m4 = S.setScaleChoice(m1, null, 2);
-  ok(same(m0, { 'exec:xterm': 2 }) && same(m1, { 'exec:xterm': 2, 'gnome-calculator': 1.5 }) && same(m2, { 'gnome-calculator': 1.5 }) && same(m3, { 'exec:xterm': 2 }) && same(m4, m1), 'setScaleChoice: stores a number; "auto" and junk REMOVE the key (the map never grows by choices that change nothing); no key ⇒ unchanged; the input never mutated');
+  ok(gateOf(same(m0, { 'exec:xterm': 2 })) && gateOf(same(m1, { 'exec:xterm': 2, 'gnome-calculator': 1.5 })) && gateOf(same(m2, { 'gnome-calculator': 1.5 })) && gateOf(same(m3, { 'exec:xterm': 2 })) && verdictOf(same(m4, m1)), 'setScaleChoice: stores a number; "auto" and junk REMOVE the key (the map never grows by choices that change nothing); no key ⇒ unchanged; the input never mutated');
   ok(S.scaleChoiceOf(m1, 'gnome-calculator') === 1.5 && S.scaleChoiceOf(m1, 'nope') === 'auto' && S.scaleChoiceOf({ x: 'weird' }, 'x') === 'auto' && S.scaleChoiceOf(null, 'x') === 'auto' && S.scaleChoiceOf({ x: '2.5' }, 'x') === 2.5, 'scaleChoiceOf: the stored number, else auto (unknown key, junk, no map)');
   ok(S.launchScaleChoice(m1, { appId: 'gnome-calculator' }) === 1.5 && S.launchScaleChoice(m1, { exec: '/usr/bin/xterm', args: ['-T', 'x'] }) === 2 && S.launchScaleChoice(m1, { appId: 'xterm' }) === null && S.launchScaleChoice({}, { appId: 'gnome-calculator' }) === null, 'launchScaleChoice: a card by its id, a typed / recent command by its program; nothing stored ⇒ null (nothing sent)');
-  ok(same(S.scaleDefaultMenuModel(m1, 'gnome-calculator').map((r) => [r.choice, r.current, !!r.disabled]), [['auto', false, false], [1, false, false], [1.5, true, false], [2, false, false], [2.5, false, false], [3, false, false]]) && S.scaleDefaultMenuModel({}, 'x')[0].current, 'the card\'s menu: auto + every explicit scale, the stored one checked — a live ✓ row, never a greyed tick (lane ui-controls-and-bugs: choosing it again changes nothing) (auto when none)');
+  ok(gateOf(same(S.scaleDefaultMenuModel(m1, 'gnome-calculator').map((r) => [r.choice, r.current, !!r.disabled]), [['auto', false, false], [1, false, false], [1.5, true, false], [2, false, false], [2.5, false, false], [3, false, false]])) && verdictOf(S.scaleDefaultMenuModel({}, 'x')[0].current), 'the card\'s menu: auto + every explicit scale, the stored one checked — a live ✓ row, never a greyed tick (lane ui-controls-and-bugs: choosing it again changes nothing) (auto when none)');
   const rec = (o) => ({ appId: 'gnome-calculator', exec: '/usr/bin/gnome-calculator', scale: 1.5, scaleOrigin: 'chosen', ...o });
   const D = [
     [rec({}), {}, { def: 'auto', running: 1.5, make: 1.5, isDefault: false, clear: false }],
@@ -157,7 +157,7 @@ console.log('§4 the client\'s PURE model — one key per app, the map, the laun
     [rec({ scale: 1.25, scaleOrigin: 'auto' }), { 'gnome-calculator': 3 }, { def: 3, running: 'auto', make: null, isDefault: false, clear: true }],
     [rec({ scale: 1.25, scaleOrigin: 'setting' }), {}, { def: 'auto', running: null, make: null, isDefault: false, clear: false }],
   ];
-  ok(D.every(([r, m, w]) => { const g = S.appDefaultModel(r, m); return g && g.key === 'gnome-calculator' && Object.entries(w).every(([k, v]) => g[k] === v); }), `appDefaultModel over ${D.length} rows (chosen 1.5 ⇒ make 1.5; at its default ⇒ isDefault + clear; derived (auto) ⇒ nothing to make — the app default is an explicit scale; a value outside the explicit set ⇒ nothing)`, D.map(([r, m]) => S.appDefaultModel(r, m)));
+  ok(verdictOf(D.every(([r, m, w]) => { const g = S.appDefaultModel(r, m); return g && g.key === 'gnome-calculator' && Object.entries(w).every(([k, v]) => g[k] === v); })), `appDefaultModel over ${D.length} rows (chosen 1.5 ⇒ make 1.5; at its default ⇒ isDefault + clear; derived (auto) ⇒ nothing to make — the app default is an explicit scale; a value outside the explicit set ⇒ nothing)`, D.map(([r, m]) => S.appDefaultModel(r, m)));
   ok(S.appDefaultModel({ scale: 2 }, {}) === null && S.appDefaultModel(null, {}) === null, 'a record nothing names (no app id, no exec) ⇒ no rows');
   // CONTROL — a setScaleChoice that STORES 'auto' (the map grows by choices that change nothing)
   const src = read('src/lib/desktop-app-scale.js');
@@ -175,9 +175,9 @@ console.log('§5 the words — the chip, its tooltip, the rows, the card control
   const X = { stream: 'xpra', caps: M.capsOf({ backend: 'xpra' }), state: 'ready', backend: 'xpra', dpi: 144, scale: 1.5 }; // a VIEW: the cells served on it
   ok(W.scaleChipText({ ...X, scaleOrigin: 'app' }) === 'Larger 1.5×' && W.scaleChipText({ ...X, scaleOrigin: 'chosen' }) === 'Larger 1.5×' && W.scaleChipText({ ...X, scale: 2, scaleOrigin: 'setting' }) === 'Larger 2×' && W.scaleChipText({ ...X, scale: 1, scaleOrigin: 'chosen' }) === 'Actual size' && W.scaleChipText({ ...X, scale: 2.5, scaleOrigin: 'auto' }) === '' && W.scaleChipText({ ...X }) === '', 'design 009 §B2: the chip shows only a scale somebody CHOSE, in words ("Larger 1.5×" / "Actual size" — never "chosen"); automatic (or no origin) ⇒ no chip — it lives under ⋯');
   const tA = W.scaleChipTitle({ ...X, dpi: 96, gdkScale: 2, pictureScale: 0.75, scaleOrigin: 'app' }); // the record a launch writes since the lane-D merge
-  ok(/^Scale 1\.5× — the default you chose for this app — widgets 1\.5×, text at 96 dpi\. Drawn at 2× and shown at 75% — a fractional scale is resampled\. Click to change the scale$/.test(tA), `the app-default tooltip names where it came from, the numbers (lane D (a): widgets 1.5×, drawn at 2× shown at 75%), and that a click changes it: "${tA}"`);
+  ok(verdictOf(/^Scale 1\.5× — the default you chose for this app — widgets 1\.5×, text at 96 dpi\. Drawn at 2× and shown at 75% — a fractional scale is resampled\. Click to change the scale$/.test(tA)), `the app-default tooltip names where it came from, the numbers (lane D (a): widgets 1.5×, drawn at 2× shown at 75%), and that a click changes it: "${tA}"`);
   const tL = W.scaleChipTitle({ ...X, scaleOrigin: 'app' }); // a record from before lane D (no gdkScale): the floor rule, shown 1:1
-  ok(/^Scale 1\.5× — the default you chose for this app — widgets 1×, text at 144 dpi\. Click to change the scale$/.test(tL), `a record from before lane D keeps its own numbers (widgets 1×, 144 dpi, nothing resampled): "${tL}"`);
+  ok(verdictOf(/^Scale 1\.5× — the default you chose for this app — widgets 1×, text at 144 dpi\. Click to change the scale$/.test(tL)), `a record from before lane D keeps its own numbers (widgets 1×, 144 dpi, nothing resampled): "${tL}"`);
   { // lane dc-desktop-caps PROOF: a fake rung ('fakepix' — an rfb picture that SCALES, one picture for the whole display)
     // registered in a COPY of DISPLAY_BACKENDS drives the client window model through the cells its view serves — the
     // window names no rung and no stream kind (a restored `rec.stream !== 'xpra'` hides this chip: the mutant control)
@@ -190,34 +190,34 @@ console.log('§5 the words — the chip, its tooltip, the rows, the card control
   }
   ok(W.scaleChipWhy({ ...X }) === null && W.scaleChipWhy({ ...X, state: 'launching' }) === 'not-ready' && W.scaleChipWhy({ ...X, backend: 'vnc-display', caps: M.capsOf({ backend: 'vnc-display' }) }) === 'not-xpra' && W.scaleChipWhy(null) === 'not-found', 'the chip is a CONTROL exactly when the window can relaunch (a running xpra app); launching / a whole-display rung ⇒ plain');
   const tP = W.scaleChipTitle({ ...X, state: 'launching', scaleOrigin: 'chosen' }, 'not-ready');
-  ok(/Only a running app can be relaunched at another scale$/.test(tP) && !/Click to change/.test(tP), `a plain chip says WHY in its tooltip instead ("…${tP.slice(-60)}")`);
+  ok(gateOf(/Only a running app can be relaunched at another scale$/.test(tP)) && !/Click to change/.test(tP), `a plain chip says WHY in its tooltip instead ("…${tP.slice(-60)}")`);
   ok(W.scaleRowLabel({ choice: 2.5, current: false }) === ' 2.5×' && W.scaleRowLabel({ choice: 1.5, current: true, appDefault: true }) === '✓ 1.5× · App default' && W.scaleRowLabel({ choice: 3 }) === ' 3×' && W.scaleRowLabel({ choice: 'auto', scale: 2, appDefault: false }) === ' Auto (2×)', 'the Scale ▸ rows: plain numbers (a fraction is a real scale since lane D (a) — no GTK caveat), the app\'s default row is marked');
   { // B-b659: a window that cannot relaunch says the scale its app RUNS at — the same words on two clients of other pixel ratios
     const runs = { ...X, scale: 2, scaleOrigin: 'auto' };
     const capOn = (dpr) => W.scaleRunsCaption(M.scaleMenuModel(runs, { dpr, uiScale: 1, seat: 'blocked' }), runs);
     const a = capOn(2), b = capOn(1), mine = (dpr) => { const m = M.scaleMenuModel(runs, { dpr, uiScale: 1, seat: 'blocked' }); return m.rows.filter((r) => r.current).map((r) => W.scaleRowLabel(r)); };
-    ok(M.scaleMenuModel(runs, { dpr: 1, seat: 'blocked' }).why === 'seat' && same(a, [{ caption: '✓ Auto (2×)' }]) && same(b, a) && same(W.scaleRunsCaption(M.scaleMenuModel({ ...X, scale: 1.5, scaleOrigin: 'chosen' }, { dpr: 1, leased: true }), { ...X, scale: 1.5, scaleOrigin: 'chosen' }), [{ caption: '✓ 1.5×' }]) && same(W.scaleRunsCaption({ rows: [{ choice: 1, current: false }] }, X), []),
+    ok(M.scaleMenuModel(runs, { dpr: 1, seat: 'blocked' }).why === 'seat' && gateOf(same(a, [{ caption: '✓ Auto (2×)' }])) && gateOf(same(b, a)) && gateOf(same(W.scaleRunsCaption(M.scaleMenuModel({ ...X, scale: 1.5, scaleOrigin: 'chosen' }, { dpr: 1, leased: true }), { ...X, scale: 1.5, scaleOrigin: 'chosen' }), [{ caption: '✓ 1.5×' }])) && verdictOf(same(W.scaleRunsCaption({ rows: [{ choice: 1, current: false }] }, X), [])),
       'B-b659: a window that cannot relaunch keeps ONE caption — the scale its app RUNS at (an app at Auto 2× reads «✓ Auto (2×)» on a 2× client AND on a 1× one; a chosen 1.5× reads «✓ 1.5×»; no running row ⇒ none)', { a, b });
-    ok(same(mine(1), ['✓ Auto (1×)']) && !same(mine(1).map((c) => ({ caption: c })), a), "MUTANT (the first cut's caption = this client's own derived row): the 1× client names «✓ Auto (1×)», a scale nothing runs at — RED", mine(1));
+    ok(gateOf(same(mine(1), ['✓ Auto (1×)'])) && !same(mine(1).map((c) => ({ caption: c })), a), "MUTANT (the first cut's caption = this client's own derived row): the 1× client names «✓ Auto (1×)», a scale nothing runs at — RED", mine(1));
   }
   const saved = [];
   const items = W.appDefaultItems({ key: 'k', def: 1.5, running: 2, make: 2, isDefault: false, clear: true }, (c) => saved.push(c));
   items.forEach((it) => it.action && it.action());
-  ok(items.length === 2 && items[0].label === 'Make 2× the default for this app' && /border-top/.test(items[0].style || '') && items[1].label === 'Forget this app’s default (1.5×)' && same(saved, [2, 'auto']), '"Make 2× the default for this app" stores 2, "Forget this app\'s default (1.5×)" stores auto (removes); the first row opens the group with a rule', items);
+  ok(items.length === 2 && items[0].label === 'Make 2× the default for this app' && gateOf(/border-top/.test(items[0].style || '')) && items[1].label === 'Forget this app’s default (1.5×)' && verdictOf(same(saved, [2, 'auto'])), '"Make 2× the default for this app" stores 2, "Forget this app\'s default (1.5×)" stores auto (removes); the first row opens the group with a rule', items);
   const at = W.appDefaultItems({ key: 'k', def: 1.5, running: 1.5, make: null, isDefault: true, clear: true }, () => {});
   ok(at.length === 2 && at[0].caption === '1.5× is this app’s default' && !at[0].action && !at[0].disabled && W.appDefaultItems(null, () => {}).length === 0 && W.appDefaultItems({ make: null, isDefault: false, clear: false }, () => {}).length === 0, 'at its default: one status line (a caption — words, not a greyed control) + Forget; nothing to say ⇒ no rows');
-  ok(L.cardScaleText('auto') === '' && L.cardScaleText(2.5) === '2.5×' && /^Default scale for Calc: Auto \(Settings → Desktop app scale\)\. Click to choose the scale it starts at\.$/.test(L.cardScaleTitle('Calc', 'auto')) && /^Default scale for Calc: 1\.5× — it starts at this scale\. Click to change\.$/.test(L.cardScaleTitle('Calc', 1.5)) && L.cardScaleRowLabel({ choice: 'auto', current: true }) === '✓ Auto (Settings → Desktop app scale)' && L.cardScaleRowLabel({ choice: 2.5 }) === ' 2.5×' && L.cardScaleRowLabel({ choice: 1.5 }) === ' 1.5×', 'the card control: the ⋯ glyph (no permanent "Auto" — design 009 §B4) / "2.5×", a tooltip naming the app and what happens, the rows\' words (plain numbers)');
+  ok(L.cardScaleText('auto') === '' && L.cardScaleText(2.5) === '2.5×' && gateOf(/^Default scale for Calc: Auto \(Settings → Desktop app scale\)\. Click to choose the scale it starts at\.$/.test(L.cardScaleTitle('Calc', 'auto'))) && gateOf(/^Default scale for Calc: 1\.5× — it starts at this scale\. Click to change\.$/.test(L.cardScaleTitle('Calc', 1.5))) && L.cardScaleRowLabel({ choice: 'auto', current: true }) === '✓ Auto (Settings → Desktop app scale)' && L.cardScaleRowLabel({ choice: 2.5 }) === ' 2.5×' && L.cardScaleRowLabel({ choice: 1.5 }) === ' 1.5×', 'the card control: the ⋯ glyph (no permanent "Auto" — design 009 §B4) / "2.5×", a tooltip naming the app and what happens, the rows\' words (plain numbers)');
   // every new t() key has zh AND ja (the build's i18n-check warns on parity only — this is the hard pin)
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const KEYS = ['App default', 'Click to change the scale', 'Scale {scale}× — the default you chose for this app — widgets {gdk}×, text at {dpi} dpi.', 'Drawn at {gdk}× and shown at {pct}% — a fractional scale is resampled.', '{scale}× is this app’s default', 'Make {scale}× the default for this app', 'Forget this app’s default ({scale}×)', 'Could not save the app’s default scale', 'Could not save the choice', 'Default scale for {app}', 'Default scale for {app}: Auto (Settings → Desktop app scale). Click to choose the scale it starts at.', 'Default scale for {app}: {scale}× — it starts at this scale. Click to change.', 'Auto (Settings → Desktop app scale)', 'Auto'];
   const miss = KEYS.filter((k) => !zh[k] || !ja[k]);
   ok(miss.length === 0, `zh + ja for every new key (${KEYS.length})`, miss);
   const code = ['src/lib/desktop-app-window.js', 'src/lib/desktop-app-launcher.js', 'src/lib/desktop-app-prefs.js'].map(read).join('\n');
-  ok(KEYS.every((k) => code.includes(`t('${k}'`)), 'each key is a t() literal in the code that says it (extractable)', KEYS.filter((k) => !code.includes(`t('${k}'`)));
+  ok(verdictOf(KEYS.every((k) => code.includes(`t('${k}'`))), 'each key is a t() literal in the code that says it (extractable)', KEYS.filter((k) => !code.includes(`t('${k}'`)));
   ok(!('⋯ → Scale relaunches the app at another scale.' in zh) && !code.includes('⋯ → Scale relaunches'), 'the retired tooltip tail is gone from the code and the dictionaries (the chip itself is the way now)');
   const RETIRED = ['1.5× (text only in GTK apps)', '2.5× (GTK apps: widgets 2×, text 2.5×)']; // the floor rule's caveats — a fraction is a real scale since lane D (a)
   const all = code + read('src/lib/settings-schema.js');
-  ok(RETIRED.every((k) => !(k in zh) && !(k in ja) && !all.includes(k)), 'the floor rule\'s row caveats are gone from the code, Settings and both dictionaries (lane D (a))', RETIRED.filter((k) => k in zh || k in ja || all.includes(k)));
+  ok(verdictOf(RETIRED.every((k) => !(k in zh) && !(k in ja) && !all.includes(k))), 'the floor rule\'s row caveats are gone from the code, Settings and both dictionaries (lane D (a))', RETIRED.filter((k) => k in zh || k in ja || all.includes(k)));
 }
 
 console.log('§6 the route refuses a bad default before any machine is asked; the hub hands a good one over inside the op body');
@@ -236,15 +236,15 @@ console.log('§6 the route refuses a bad default before any machine is asked; th
     return out;
   };
   const r = await drive(require('../src/routes/desktop-apps.js'));
-  ok(r.bad.status === 400 && r.bad.body.code === 'bad-request' && /scaleChoice must be one of/.test(r.bad.body.error) && r.badLocal.status === 400 && !r.seen.some(([b]) => b.scaleChoice === 7 || b.scaleChoice === 'huge'), 'a bad scaleChoice ⇒ 400 bad-request by name, for this machine AND a paired one — the keeper (and so the device) never asked', { bad: r.bad, badLocal: r.badLocal });
+  ok(r.bad.status === 400 && r.bad.body.code === 'bad-request' && gateOf(/scaleChoice must be one of/.test(r.bad.body.error)) && r.badLocal.status === 400 && !r.seen.some(([b]) => b.scaleChoice === 7 || b.scaleChoice === 'huge'), 'a bad scaleChoice ⇒ 400 bad-request by name, for this machine AND a paired one — the keeper (and so the device) never asked', { bad: r.bad, badLocal: r.badLocal });
   const g = r.seen.find(([b]) => b.scaleChoice === 1.5);
-  ok(r.good.status === 200 && !!g && same(g[0], { appId: 'gnome-calculator', scaleChoice: 1.5 }) && g[1] && g[1].host === 'dev-a', 'a good one rides the body unchanged to keeper.launch (host apart, as ever)', g);
+  ok(r.good.status === 200 && !!g && gateOf(same(g[0], { appId: 'gnome-calculator', scaleChoice: 1.5 })) && gateOf(g[1]) && g[1].host === 'dev-a', 'a good one rides the body unchanged to keeper.launch (host apart, as ever)', g);
   // CONTROL — the route without its check: a paired machine whose agent predates the field would silently drop the value
   const rsrc = read('src/routes/desktop-apps.js');
   const lines = "  const sv = scaleChoiceVerdict(req.body);\n  if (!sv.ok) return fail(res, { code: sv.code, message: sv.error });\n";
   ok(rsrc.split(lines).length === 2, 'CONTROL: the route\'s check is spelled exactly once');
   const rc = await drive(MUT.load('src/routes/desktop-apps.js', editAnchor(rsrc, lines, '', "src/routes/desktop-apps.js"), 'no-check'));
-  ok(rc.bad.status === 200 && rc.seen.some(([b, o]) => b.scaleChoice === 7 && o && o.host === 'dev-a'), 'CONTROL: without it the bad value reaches keeper.launch for dev-a (a device\'s own check is the only one left — an old one has none)', rc.bad);
+  ok(rc.bad.status === 200 && verdictOf(rc.seen.some(([b, o]) => b.scaleChoice === 7 && o && o.host === 'dev-a')), 'CONTROL: without it the bad value reaches keeper.launch for dev-a (a device\'s own check is the only one left — an old one has none)', rc.bad);
   // the hub keeper hands the body to a paired machine INSIDE the op's `body` — the op's shape is unchanged apart from it
   const Kp = require('../src/server/desktop-app-keeper.js');
   const Dd = require('../src/desktop-display.js');
@@ -258,33 +258,33 @@ console.log('§6 the route refuses a bad default before any machine is asked; th
   try {
     const rec = await k.launch({ appId: 'gnome-calculator', scaleChoice: 1.5 }, { host: 'dev-a' });
     const lc = calls.find((c) => c.op === 'launch');
-    ok(!!lc && lc.hostId === 'dev-a' && same(Object.keys(lc.p).sort(), ['body', 'settings']) && same(lc.p.body, { appId: 'gnome-calculator', scaleChoice: 1.5 }), 'the `launch` op to a paired machine = {body, settings} as before — `scaleChoice` rides INSIDE body, never as the op\'s own scaleChoice (that one is a relaunch\'s pick, origin chosen)', lc && lc.p);
-    ok(rec && rec.hostId === 'dev-a' && rec.scaleOrigin === 'app', 'the device\'s answer (origin app) comes back as the hub\'s record', rec);
+    ok(!!lc && lc.hostId === 'dev-a' && gateOf(same(Object.keys(lc.p).sort(), ['body', 'settings'])) && verdictOf(same(lc.p.body, { appId: 'gnome-calculator', scaleChoice: 1.5 })), 'the `launch` op to a paired machine = {body, settings} as before — `scaleChoice` rides INSIDE body, never as the op\'s own scaleChoice (that one is a relaunch\'s pick, origin chosen)', lc && lc.p);
+    ok(gateOf(rec) && rec.hostId === 'dev-a' && rec.scaleOrigin === 'app', 'the device\'s answer (origin app) comes back as the hub\'s record', rec);
   } finally { k.shutdown(); }
 }
 
 console.log('§7 wiring pins');
 {
   const serve = read('src/desktop-serve.js'), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), prefs = read('src/lib/desktop-app-prefs.js'), css = read('public/style.css');
-  ok(/const pick = M\.scalePick\(\{ choice: opts\.scaleChoice, appDefault: v\.launch\.scaleChoice, setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(serve), 'WIRING PIN: the machine picks the scale ONCE — a relaunch\'s choice, the body\'s app default, the setting, the launching client\'s dpr × uiScale');
-  ok(/const scaleChoice = launchScaleChoice\(appPrefs\(SCALE_PREF_KEY\), payload\);/.test(launcher) && /\.\.\.\(scaleChoice != null \? \{ scaleChoice \} : \{\}\)/.test(launcher), 'WIRING PIN: every launch POST (a card, a Recent row, a typed command) carries its app\'s stored default as scaleChoice — nothing when none');
+  ok(verdictOf(/const pick = M\.scalePick\(\{ choice: opts\.scaleChoice, appDefault: v\.launch\.scaleChoice, setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(serve)), 'WIRING PIN: the machine picks the scale ONCE — a relaunch\'s choice, the body\'s app default, the setting, the launching client\'s dpr × uiScale');
+  ok(gateOf(/const scaleChoice = launchScaleChoice\(appPrefs\(SCALE_PREF_KEY\), payload\);/.test(launcher)) && verdictOf(/\.\.\.\(scaleChoice != null \? \{ scaleChoice \} : \{\}\)/.test(launcher)), 'WIRING PIN: every launch POST (a card, a Recent row, a typed command) carries its app\'s stored default as scaleChoice — nothing when none');
   const ctl = launcher.slice(launcher.indexOf('const cardScaleControl = (row) => {'), launcher.indexOf('return c;\n  };', launcher.indexOf('const cardScaleControl = (row) => {')));
-  ok(ctl.length > 200 && /c\.type = 'button'/.test(ctl) && /saveAppPrefs\(SCALE_PREF_KEY, \(map\) => setScaleChoice\(map, key, m\.choice\)/.test(ctl) && !/launch\(/.test(ctl) && /e\.stopPropagation\(\)/.test(ctl) && /document\.addEventListener\('keydown', onEsc, true\)/.test(ctl) && /ev\.stopPropagation\(\); ev\.preventDefault\(\); pop\.remove\(\);/.test(ctl), 'WIRING PIN: the card control is its own BUTTON whose menu stores the choice through the shared loader and never launches; Esc (a capture listener) closes the menu, never the dialog');
-  ok(/wrap\.className = 'desktop-launch-card-wrap';\s*wrap\.appendChild\(b\);\s*if \(scales && !unavailable\) \{[^\n]*\n\s*const sc = cardScaleControl\(row\);\s*wrap\.appendChild\(sc\);/.test(launcher) && /const scales = !dead && !!data\?\.availability\?\.caps\?\.scales;/.test(launcher), 'WIRING PIN: the control is a SIBLING of the card button (never nested in it), on a rung that scales apps only');
-  ok(/scaleChip\.setAttribute\('role', 'button'\); scaleChip\.tabIndex = 0;/.test(win) && /e\.key === 'Enter' \|\| e\.key === ' '/.test(win) && /showContextMenu\(r\.left, r\.bottom \+ 2, scaleItems\(\)\)/.test(win) && /scaleChip\.removeAttribute\('role'\)/.test(win), 'WIRING PIN: the chip is role=button + tabindex + Enter / Space while the window can relaunch, and opens the SAME scaleItems() the ⋯ and the window menu show; plain otherwise');
-  ok(/const tail = appDefaultItems\(appDefaultModel\(rec, appPrefs\(SCALE_PREF_KEY\)\)/.test(win) && /appDefault: scaleChoiceOf\(appPrefs\(SCALE_PREF_KEY\), frameKey\(\)\)/.test(win), 'WIRING PIN: Scale ▸ (chip, ⋯, window menu — one function) ends with the app-default rows and marks the default row');
+  ok(ctl.length > 200 && gateOf(/c\.type = 'button'/.test(ctl)) && gateOf(/saveAppPrefs\(SCALE_PREF_KEY, \(map\) => setScaleChoice\(map, key, m\.choice\)/.test(ctl)) && !/launch\(/.test(ctl) && gateOf(/e\.stopPropagation\(\)/.test(ctl)) && gateOf(/document\.addEventListener\('keydown', onEsc, true\)/.test(ctl)) && verdictOf(/ev\.stopPropagation\(\); ev\.preventDefault\(\); pop\.remove\(\);/.test(ctl)), 'WIRING PIN: the card control is its own BUTTON whose menu stores the choice through the shared loader and never launches; Esc (a capture listener) closes the menu, never the dialog');
+  ok(gateOf(/wrap\.className = 'desktop-launch-card-wrap';\s*wrap\.appendChild\(b\);\s*if \(scales && !unavailable\) \{[^\n]*\n\s*const sc = cardScaleControl\(row\);\s*wrap\.appendChild\(sc\);/.test(launcher)) && verdictOf(/const scales = !dead && !!data\?\.availability\?\.caps\?\.scales;/.test(launcher)), 'WIRING PIN: the control is a SIBLING of the card button (never nested in it), on a rung that scales apps only');
+  ok(gateOf(/scaleChip\.setAttribute\('role', 'button'\); scaleChip\.tabIndex = 0;/.test(win)) && gateOf(/e\.key === 'Enter' \|\| e\.key === ' '/.test(win)) && gateOf(/showContextMenu\(r\.left, r\.bottom \+ 2, scaleItems\(\)\)/.test(win)) && verdictOf(/scaleChip\.removeAttribute\('role'\)/.test(win)), 'WIRING PIN: the chip is role=button + tabindex + Enter / Space while the window can relaunch, and opens the SAME scaleItems() the ⋯ and the window menu show; plain otherwise');
+  ok(gateOf(/const tail = appDefaultItems\(appDefaultModel\(rec, appPrefs\(SCALE_PREF_KEY\)\)/.test(win)) && verdictOf(/appDefault: scaleChoiceOf\(appPrefs\(SCALE_PREF_KEY\), frameKey\(\)\)/.test(win)), 'WIRING PIN: Scale ▸ (chip, ⋯, window menu — one function) ends with the app-default rows and marks the default row');
   const lib = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js'));
   const codeOf = (f) => read(`src/lib/${f}`).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1'); // comments out (a comment naming the key is not a writer)
   // a payload naming either map outside the loader would be a second writer (a second cache that drifts)
   const payloads = lib.filter((f) => /\{\s*(?:desktopAppFrame|desktopAppScale|desktopAppSatellite|desktopAppPin|\[SCALE_PREF_KEY\]|\[SATELLITE_PREF_KEY\]|\[PIN_PREF_KEY\])\s*:/.test(codeOf(f))); // + design 016 S2's satellite place; + lane launch-picture-size's picture size
   const savers = lib.filter((f) => /saveAppPrefs\(/.test(codeOf(f)) && f !== 'desktop-app-prefs.js');
-  ok(payloads.length === 0 && /method: 'PATCH', headers: \{ 'Content-Type': 'application\/json' \}, body: JSON\.stringify\(\{ \[key\]: next \}\)/.test(prefs) && /APP_PREF_KEYS = Object\.freeze\(\['desktopAppFrame', 'desktopAppScale', 'desktopAppSatellite', 'desktopAppPin'\]\)/.test(prefs) && same(savers.sort(), ['desktop-app-launcher.js', 'desktop-app-window.js']), `ONE loader writes both per-app maps (desktop-app-prefs.js, merge-only PATCH of its one key) — the window and the dialog save through it (${savers.join(', ')}); no other file builds a payload for either map`, { payloads, savers });
+  ok(payloads.length === 0 && gateOf(/method: 'PATCH', headers: \{ 'Content-Type': 'application\/json' \}, body: JSON\.stringify\(\{ \[key\]: next \}\)/.test(prefs)) && gateOf(/APP_PREF_KEYS = Object\.freeze\(\['desktopAppFrame', 'desktopAppScale', 'desktopAppSatellite', 'desktopAppPin'\]\)/.test(prefs)) && verdictOf(same(savers.sort(), ['desktop-app-launcher.js', 'desktop-app-window.js'])), `ONE loader writes both per-app maps (desktop-app-prefs.js, merge-only PATCH of its one key) — the window and the dialog save through it (${savers.join(', ')}); no other file builds a payload for either map`, { payloads, savers });
   // lane D verify: every save is an EDIT of one app's entry (the loader applies it to the server's current map) — a caller
   // that hands the loader a whole map built from its own copy is the stale-map clobber again
   const calls = savers.flatMap((f) => (codeOf(f).match(/saveAppPrefs\([^\n]*/g) || []).map((c) => [f, c]));
   const bad = calls.filter(([, c]) => !/^saveAppPrefs\((?:SCALE_PREF_KEY|'desktopAppFrame'), \(map\) => set(?:Scale|Frame)Choice\(map, |^saveAppPrefs\(SATELLITE_PREF_KEY, \(map\) => setSatelliteOffset\(map, |^saveAppPrefs\(PIN_PREF_KEY, \(map\) => setPinChoice\(map, /.test(c)); // design 016 S2: a satellite's remembered place; lane launch-picture-size: an app's picture size
   ok(calls.length === 5 && bad.length === 0, `every saveAppPrefs call (${calls.length}) passes an EDIT \`(map) => setXChoice(map, key, …)\` / setSatelliteOffset, never a whole map`, bad);
-  ok(/\.desktop-app-chip-scale\.is-control \{ cursor: pointer; \}/.test(css) && /\.desktop-launch-card-wrap \{ display: flex; min-width: 0; \}/.test(css) && !/#[0-9a-f]{3,6}\b/i.test(css.slice(css.indexOf('.desktop-launch-card-wrap'), css.indexOf('.desktop-launch-card-scale:focus-visible'))), 'CSS: the control chip has a pointer, the card + its control are one split button, theme vars only');
+  ok(gateOf(/\.desktop-app-chip-scale\.is-control \{ cursor: pointer; \}/.test(css)) && gateOf(/\.desktop-launch-card-wrap \{ display: flex; min-width: 0; \}/.test(css)) && !/#[0-9a-f]{3,6}\b/i.test(css.slice(css.indexOf('.desktop-launch-card-wrap'), css.indexOf('.desktop-launch-card-scale:focus-visible'))), 'CSS: the control chip has a pointer, the card + its control are one split button, theme vars only');
 }
 
 console.log('§8 the per-app loader over a fake socket — a reconnect re-reads, a save edits ONE entry of the server\'s map, a refusal rolls back');
@@ -373,11 +373,11 @@ console.log('§8 the per-app loader over a fake socket — a reconnect re-reads,
   for (const key of ['desktopAppScale', 'desktopAppFrame']) {
     const [v1, v2, v3, v4] = VALS[key];
     const o = await run(real, key);
-    ok(o.saveA && same(o.srv1, { xterm: v1 }) && same(o.bDuring, {}), `${key} (1): A stores xterm ${JSON.stringify(v1)} while B's socket is down — the server holds ${JSON.stringify(o.srv1)}, B has not heard it (${JSON.stringify(o.bDuring)})`, o);
-    ok(same(o.bAfter, o.srv1), `${key} (1): after B's reopen its map IS the server's (${JSON.stringify(o.bAfter)}) — a reconnect re-reads`, { bAfter: o.bAfter, srv1: o.srv1 });
-    ok(o.saveB && same(o.srv2, { xterm: v1, 'gnome-calculator': v2 }) && same(o.aAfter, o.srv2), `${key} (1): B's save after the reopen KEEPS A's key (server ${JSON.stringify(o.srv2)}; A hears it: ${JSON.stringify(o.aAfter)})`, { srv2: o.srv2, aAfter: o.aAfter });
-    ok(o.bStale.xterm === v1 && same(o.srv3, { xterm: v3, 'gnome-calculator': v2, 'exec:xclock': v2 }), `${key} (2): B MISSED A's xterm ${JSON.stringify(v3)} (B still reads ${JSON.stringify(o.bStale.xterm)}) and its save still keeps it — the edit is applied to the server's map read now (${JSON.stringify(o.srv3)})`, { bStale: o.bStale, srv3: o.srv3 });
-    ok(o.shownAtOnce.xterm === v4 && o.refused === false && same(o.rolledBack, o.before) && o.told === 2 && o.srvUnchanged && o.toasts.length === 1 && o.toasts[0][0] === 'Could not save: disk full' && o.toasts[0][1] === 'error', `${key} (3): a refused save is shown at once (xterm ${JSON.stringify(o.shownAtOnce.xterm)}), then ROLLED BACK to ${JSON.stringify(o.rolledBack)} — subscribers told ${o.told}×, one toast "${o.toasts[0] && o.toasts[0][0]}", the server untouched`, { shown: o.shownAtOnce, rolled: o.rolledBack, before: o.before, told: o.told, toasts: o.toasts });
+    ok(gateOf(o.saveA) && gateOf(same(o.srv1, { xterm: v1 })) && verdictOf(same(o.bDuring, {})), `${key} (1): A stores xterm ${JSON.stringify(v1)} while B's socket is down — the server holds ${JSON.stringify(o.srv1)}, B has not heard it (${JSON.stringify(o.bDuring)})`, o);
+    ok(verdictOf(same(o.bAfter, o.srv1)), `${key} (1): after B's reopen its map IS the server's (${JSON.stringify(o.bAfter)}) — a reconnect re-reads`, { bAfter: o.bAfter, srv1: o.srv1 });
+    ok(gateOf(o.saveB) && gateOf(same(o.srv2, { xterm: v1, 'gnome-calculator': v2 })) && verdictOf(same(o.aAfter, o.srv2)), `${key} (1): B's save after the reopen KEEPS A's key (server ${JSON.stringify(o.srv2)}; A hears it: ${JSON.stringify(o.aAfter)})`, { srv2: o.srv2, aAfter: o.aAfter });
+    ok(o.bStale.xterm === v1 && verdictOf(same(o.srv3, { xterm: v3, 'gnome-calculator': v2, 'exec:xclock': v2 })), `${key} (2): B MISSED A's xterm ${JSON.stringify(v3)} (B still reads ${JSON.stringify(o.bStale.xterm)}) and its save still keeps it — the edit is applied to the server's map read now (${JSON.stringify(o.srv3)})`, { bStale: o.bStale, srv3: o.srv3 });
+    ok(o.shownAtOnce.xterm === v4 && o.refused === false && gateOf(same(o.rolledBack, o.before)) && o.told === 2 && gateOf(o.srvUnchanged) && o.toasts.length === 1 && o.toasts[0][0] === 'Could not save: disk full' && o.toasts[0][1] === 'error', `${key} (3): a refused save is shown at once (xterm ${JSON.stringify(o.shownAtOnce.xterm)}), then ROLLED BACK to ${JSON.stringify(o.rolledBack)} — subscribers told ${o.told}×, one toast "${o.toasts[0] && o.toasts[0][0]}", the server untouched`, { shown: o.shownAtOnce, rolled: o.rolledBack, before: o.before, told: o.told, toasts: o.toasts });
     ok(o.srv4['exec:xeyes'] === v1 && o.srv4['exec:xlogo'] === v2 && o.srv4.xterm === v3, `${key} (4): two quick saves from one page both land (${JSON.stringify(o.srv4)})`, o.srv4);
     ok(o.toldLanded === 1, `${key} (4b): a save that lands as shown tells subscribers once (${o.toldLanded}) — the settle and the echo re-render nothing`, o.toldLanded);
     ok(o.wholeMap === false && o.wholeMapSent === 0, `${key} (5): a WHOLE map is not an edit — refused, nothing PATCHed`, { wholeMap: o.wholeMap, sent: o.wholeMapSent });
@@ -392,13 +392,13 @@ console.log('§8 the per-app loader over a fake socket — a reconnect re-reads,
   const c1 = await run(await loadCopy(psrc.replace(RECONNECT, ''), 'no-reconnect'), 'desktopAppScale');
   ok(!same(c1.bAfter, c1.srv1), `CONTROL: without the reconnect re-read B keeps its stale map after the reopen (${JSON.stringify(c1.bAfter)} vs the server's ${JSON.stringify(c1.srv1)}) — (1)'s re-read is that line's doing`, c1.bAfter);
   const c2 = await run(await loadCopy(psrc.replace(FRESH, 'const st = { [key]: base[key] }; // the OLD save: this page\'s own map'), 'local-map'), 'desktopAppScale');
-  ok(c2.srv3 && c2.srv3.xterm !== VALS.desktopAppScale[2], `CONTROL: a save that PATCHes this page's own map loses A's xterm ${VALS.desktopAppScale[2]}× (server ${JSON.stringify(c2.srv3)}) — (2) is the fresh read's doing`, c2.srv3);
+  ok(gateOf(c2.srv3) && c2.srv3.xterm !== VALS.desktopAppScale[2], `CONTROL: a save that PATCHes this page's own map loses A's xterm ${VALS.desktopAppScale[2]}× (server ${JSON.stringify(c2.srv3)}) — (2) is the fresh read's doing`, c2.srv3);
   const c3 = await run(await loadCopy(psrc.replace(SETTLE, 'if (done) ' + SETTLE), 'keeps-refused'), 'desktopAppScale');
   ok(!same(c3.rolledBack, c3.before), `CONTROL: a loader that keeps a refused edit still shows xterm ${JSON.stringify(c3.rolledBack.xterm)} after the refusal (${JSON.stringify(c3.rolledBack)}) — (3)'s rollback is the settle line's doing`, c3.rolledBack);
 }
 
 console.log('\n§tree the patched copies never touch the tree');
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 6 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 6 })) ok(verdictOf(r.pass), '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

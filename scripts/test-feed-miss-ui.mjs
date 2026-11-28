@@ -25,7 +25,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SHOTS = process.env.FEED_MISS_SHOTS || scratch('feed-miss-shots');
 fs.mkdirSync(SHOTS, { recursive: true });
@@ -184,21 +184,21 @@ const s2 = await seed(ta, port, s1, NEW, MEMO);
 ok(!!s2, 'the owner\'s measured state is seeded (a feed row + its miss memo) and the server restarted');
 const p1 = await page(port);
 const r1 = await card(p1, 'after.png');
-ok(r1 && r1.text === '新消息：搜索每 30 秒 + 每会话核对（核实中）' && r1.warn === false, `① ONE quiet status line, no warning style: ${JSON.stringify(r1 && r1.text)}`, JSON.stringify(r1));
-ok(r1 && !r1.threadsLine && !r1.notes.some((n) => /检查新话题|搜索漏掉了/.test(n)), '① the topic-check line left the row; no note says the old warning', JSON.stringify(r1 && r1.notes));
+ok(gateOf(r1) && r1.text === '新消息：搜索每 30 秒 + 每会话核对（核实中）' && r1.warn === false, `① ONE quiet status line, no warning style: ${JSON.stringify(r1 && r1.text)}`, JSON.stringify(r1));
+ok(gateOf(r1) && !r1.threadsLine && !r1.notes.some((n) => /检查新话题|搜索漏掉了/.test(n)), '① the topic-check line left the row; no note says the old warning', JSON.stringify(r1 && r1.notes));
 const tipWant = ['实测：搜索漏掉 194 条中的 1 条（0.5%）', '搜索窗口重叠 223 秒', '不计入（搜索不返回这些）：搜索不返回的消息类型 ×6', '搜索最近没找到的消息：', 'post — 索引尚未收录（写入后 90 秒内）', 'system — 搜索不返回的消息类型（system）', '检查新话题 7872 次，发现 159 个'];
-ok(r1 && tipWant.every((x) => r1.title.includes(x)), '① the FACTS are the tooltip: the live numbers, the learned overlap, the classes not counted, the named misses, the topic checks', JSON.stringify(r1 && r1.title));
+ok(gateOf(r1) && verdictOf(tipWant.every((x) => r1.title.includes(x))), '① the FACTS are the tooltip: the live numbers, the learned overlap, the classes not counted, the named misses, the topic checks', JSON.stringify(r1 && r1.title));
 const api = await (await fetch(`http://127.0.0.1:${port}/api/channels/adapters/fake-poll/view`)).json();
 const fv = (api && (api.feed || (api.adapter && api.adapter.feed))) || null;
-ok(fv && Array.isArray(fv.misses) && fv.misses.length === 7 && fv.misses.length <= 20 && fv.misses.every((x) => x.cls && x.id) && fv.misses.filter((x) => x.cls === 'excluded-type').length === 6 && fv.misses.some((x) => x.id === 'om_post1' && x.cls === 'lag' && x.searchAgeSec === 90),
+ok(gateOf(fv) && gateOf(Array.isArray(fv.misses)) && fv.misses.length === 7 && fv.misses.length <= 20 && gateOf(fv.misses.every((x) => x.cls && x.id)) && fv.misses.filter((x) => x.cls === 'excluded-type').length === 6 && verdictOf(fv.misses.some((x) => x.id === 'om_post1' && x.cls === 'lag' && x.searchAgeSec === 90)),
   '② GET /api/channels/adapters/fake-poll/view hands the last ≤ 20 misses, each with its class', JSON.stringify(fv ? fv.misses : Object.keys(api || {})));
 p1.close();
 // ── ③ carrying
 const s3 = await seed(ta, port, s2, (f) => ({ ...f, mode: 'carrying', promotedAt: Date.now() - 600e3, samples: samples(300, 0) }), null);
 const p2 = await page(port);
 const r3 = s3 ? await card(p2, null) : null;
-ok(r3 && r3.text === '新消息：搜索每 30 秒（已核实无漏）' && r3.warn === false, `③ a carrying feed says it once: ${JSON.stringify(r3 && r3.text)}`, JSON.stringify(r3));
+ok(gateOf(r3) && r3.text === '新消息：搜索每 30 秒（已核实无漏）' && r3.warn === false, `③ a carrying feed says it once: ${JSON.stringify(r3 && r3.text)}`, JSON.stringify(r3));
 p2.close();
 console.log(`  PNGs: ${SHOTS}`);
 console.log(`\n${fail ? '✗' : '✓'} test-feed-miss-ui: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

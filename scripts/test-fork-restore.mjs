@@ -44,7 +44,7 @@ const { WebSocket } = require('ws');
 const { scratch, freePort, withoutVendorKeys } = await import(path.join(REPO, 'scripts/scratch.mjs'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const ROOT = scratch('fork-restore');
@@ -173,7 +173,7 @@ async function scenario(tag, wt) {
   fs.writeFileSync(path.join(dFC, '.go'), '');
   const t0 = Date.now(); while (!sidIn(dFC) && Date.now() - t0 < 10000) await sleep(100);
   const sidFC = sidIn(dFC);
-  ok(!!sidFC && locks().some((l) => l.sessionId === sidFC), `[${tag}] FC's init + lock landed while the server was down`, sidFC);
+  ok(!!sidFC && verdictOf(locks().some((l) => l.sessionId === sidFC)), `[${tag}] FC's init + lock landed while the server was down`, sidFC);
 
   srv = await boot();
   c = await connect();
@@ -208,7 +208,7 @@ console.log('① the fixed tree: a SIGKILL-restart beside three pending forks');
 {
   const r = await scenario('fixed', makeTree('wt-fixed'));
   ok(!r.retired && r.socketsGone.length === 0, 'no socket retired — a pending fork\'s borrowed id is not a dedup claim', JSON.stringify({ retired: r.retired, gone: r.socketsGone, lines: r.log.split('\n').filter((l) => /Duplicate/.test(l)) }));
-  ok(r.aAlive && r.bAlive && !!r.aRow && !!r.bRow, 'both parents survive: their CLIs alive, their rows listed with their own ids', JSON.stringify({ aAlive: r.aAlive, bAlive: r.bAlive, aRow: r.aRow, bRow: r.bRow }));
+  ok(gateOf(r.aAlive) && gateOf(r.bAlive) && !!r.aRow && !!r.bRow, 'both parents survive: their CLIs alive, their rows listed with their own ids', JSON.stringify({ aAlive: r.aAlive, bAlive: r.bAlive, aRow: r.aRow, bRow: r.bRow }));
   ok(!!r.sidFT && r.after.FT === r.sidFT, 'the pending TERMINAL fork adopts its own id after the restart (the +2 s sweep arms the pid-witnessed capture)', JSON.stringify({ want: r.sidFT, got: r.after.FT }));
   ok(!!r.sidFC && r.after.FC === r.sidFC, 'the pending CHAT fork whose init landed while the server was DOWN adopts its own id (the capture now covers a chat fork)', JSON.stringify({ want: r.sidFC, got: r.after.FC }));
   ok(!!r.sidFC2 && r.after.FC2 === r.sidFC2, 'the pending CHAT fork whose init is the FIRST line after the re-attach adopts it (no lock: only the parser can — the dtach preamble is stripped)', JSON.stringify({ want: r.sidFC2, got: r.after.FC2 }));
@@ -227,8 +227,8 @@ console.log('② NEGATIVE CONTROL: the pre-fix dedup (every meta with an id is a
     // that own their id too — the pre-fix loop there as well
     { file: 'src/server/boot-restore.js', from: '.filter((r) => r.m && ownsItsId(r.m));', to: '.filter((r) => r.m && r.m.claudeSessionId);   /* the pre-fix feed */' }]);
   const r = await scenario('control', wt);
-  ok(r.retired && r.socketsGone.length > 0 && (!r.aAlive || !r.bAlive), 'control: a parent is retired as the "stale duplicate" of its own pending fork (its socket unlinked, its CLI SIGTERMed) — the reproduced defect', JSON.stringify({ retired: r.retired, gone: r.socketsGone, aAlive: r.aAlive, bAlive: r.bAlive }));
+  ok(gateOf(r.retired) && r.socketsGone.length > 0 && (!r.aAlive || !r.bAlive), 'control: a parent is retired as the "stale duplicate" of its own pending fork (its socket unlinked, its CLI SIGTERMed) — the reproduced defect', JSON.stringify({ retired: r.retired, gone: r.socketsGone, aAlive: r.aAlive, bAlive: r.bAlive }));
 }
 
 console.log(`\ntest-fork-restore: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

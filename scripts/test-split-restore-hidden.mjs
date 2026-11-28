@@ -29,7 +29,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -193,33 +193,33 @@ else await (async () => {
   /** THE OWNER'S STEPS. Returns the verdicts the legs judge (the control judges the same ones). */
   const ownerSteps = async (leg, kind, { secondClient = false, slowMs = 0 } = {}) => {
     const fx = fixture(leg, kind), gid = fx.gid, R = { gid };
-    if (!ok(await serve(fx.layouts), `${leg}: the worktree server booted`, journal.slice(-800))) return R;
+    if (!ok(verdictOf(await serve(fx.layouts)), `${leg}: the worktree server booted`, journal.slice(-800))) return R;
     const C = await openChrome(leg);
     if (!ok(!!C, `${leg}: chrome exposed a CDP page target`)) return R;
     let Q = null;
     try {
       const X = C.P1;
-      if (!ok(await X.boot(['win-a-1']) && await X.visit('desk-b') && await X.built([HOST, gid]), `${leg}: client 1 booted (on A, the first desktop) and its visit to B built the host and its guest`, J(await view(X, gid)))) return R;
+      if (!ok(gateOf(await X.boot(['win-a-1'])) && gateOf(await X.visit('desk-b')) && verdictOf(await X.built([HOST, gid])), `${leg}: client 1 booted (on A, the first desktop) and its visit to B built the host and its guest`, J(await view(X, gid)))) return R;
       // 1. split on B (the window menu's side-by-side door: bindSplit), ratio 0.62, saved as the user's edit
       const bound = await X.ev(`(() => { const h = app.wm.windows.get(${J(HOST)}), g = app.wm.windows.get(${J(gid)}); app.wm.bindSplit(h, g, { side: 'right' }); app.wm.setSplitRatio(h._tabChain, ${RATIO}); return h._tabChain ? h._tabChain.layout : null; })()`);
       await saveNow(X);
-      if (!ok(bound === 'split' && await until(async () => (await record(gid)).split, 8000), `${leg}: the split on B reached the record`, (await record(gid)).flat)) return R;
+      if (!ok(bound === 'split' && verdictOf(await until(async () => (await record(gid)).split, 8000)), `${leg}: the split on B reached the record`, (await record(gid)).flat)) return R;
       if (secondClient) {
         Q = await C.second();
-        if (!ok(!!Q && await Q.boot(['win-a-1']) && await Q.visit('desk-b') && await Q.built([HOST, gid]), `${leg}: a second desktop client booted and went to B`)) return R;
-        if (!ok(await until(async () => sideBySide(await view(Q, gid)), 8000), `${leg}: client 2 shows the pair side by side`, J(await view(Q, gid)))) return R;
+        if (!ok(!!Q && gateOf(await Q.boot(['win-a-1'])) && gateOf(await Q.visit('desk-b')) && verdictOf(await Q.built([HOST, gid])), `${leg}: a second desktop client booted and went to B`)) return R;
+        if (!ok(verdictOf(await until(async () => sideBySide(await view(Q, gid)), 8000)), `${leg}: client 2 shows the pair side by side`, J(await view(Q, gid)))) return R;
       }
       // 2. A → B, then A again and the reload while A is shown
-      ok(await X.visit('desk-a') && await X.visit('desk-b') && await until(async () => sideBySide(await view(X, gid)), 5000), `${leg}: A→B before the reload: side by side`, J(await view(X, gid)));
-      ok(await X.visit('desk-a'), `${leg}: back on A`);
+      ok(gateOf(await X.visit('desk-a')) && gateOf(await X.visit('desk-b')) && verdictOf(await until(async () => sideBySide(await view(X, gid)), 5000)), `${leg}: A→B before the reload: side by side`, J(await view(X, gid)));
+      ok(verdictOf(await X.visit('desk-a')), `${leg}: back on A`);
       await saveNow(X);
-      ok(await X.boot(['win-a-1']), `${leg}: client 1 reloaded`);
+      ok(verdictOf(await X.boot(['win-a-1'])), `${leg}: client 1 reloaded`);
       const before = await view(X, gid);
       if (!ok(before.active === 'desk-a' && !before.host && !before.guest, `${leg}: the reload landed on A and B is not built (its next visit is a first one: _replayMissing)`, J(before))) return R;
       if (slowMs) await X.ev(`(() => { const o = app.replayOpenSpec.bind(app); app.replayOpenSpec = (spec, id) => id === ${J(gid)} ? void setTimeout(() => o(spec, id), ${slowMs}) : o(spec, id); return true; })()`);
       // 3. →B: the pair side by side
       const t0 = Date.now();
-      ok(await X.visit('desk-b'), `${leg}: reload, →B`);
+      ok(verdictOf(await X.visit('desk-b')), `${leg}: reload, →B`);
       if (slowMs) { await sleep(1500); const v = await view(X, gid); R.late = v.host && !v.guest; }
       R.sbs = await until(async () => sideBySide(await view(X, gid)), 10000 + slowMs);
       R.ms = Date.now() - t0; R.v = await view(X, gid);
@@ -239,10 +239,10 @@ else await (async () => {
   };
   const judge = (leg, what, R) => {
     if (!R.v) return;
-    ok(R.sbs, `${leg}: ${what}: after the reload →B the pair is side by side at the record's ratio (±0.02) — ${R.ms} ms`, J(R.v));
-    ok(sideBySide(R.v9) && R.rec9.split, `${leg}: 9 s later still side by side, and the record still carries split + ratio + sides`, J(R.v9) + '\n    record: ' + R.rec9.flat);
-    ok(R.recSaved.split, `${leg}: the client's own capture (written now) carries the split`, R.recSaved.flat);
-    ok(R.again && R.recAgain.split, `${leg}: A→B again: side by side, the record carries the split`, J(R.vAgain) + '\n    record: ' + R.recAgain.flat);
+    ok(verdictOf(R.sbs), `${leg}: ${what}: after the reload →B the pair is side by side at the record's ratio (±0.02) — ${R.ms} ms`, J(R.v));
+    ok(gateOf(sideBySide(R.v9)) && verdictOf(R.rec9.split), `${leg}: 9 s later still side by side, and the record still carries split + ratio + sides`, J(R.v9) + '\n    record: ' + R.rec9.flat);
+    ok(verdictOf(R.recSaved.split), `${leg}: the client's own capture (written now) carries the split`, R.recSaved.flat);
+    ok(gateOf(R.again) && verdictOf(R.recAgain.split), `${leg}: A→B again: side by side, the record carries the split`, J(R.vAgain) + '\n    record: ' + R.recAgain.flat);
   };
 
   console.log('— a · files + files');
@@ -256,14 +256,14 @@ else await (async () => {
     const R = await ownerSteps('d', 'files', { secondClient: true });
     judge('d', 'client 1', R);
     if (R.q9) {
-      ok(sideBySide(R.q9), 'd: client 2 (on B throughout) still shows the pair side by side 9 s after client 1\'s visit', J(R.q9));
-      ok(sideBySide(R.qAgain) && R.recQ.split, 'd: client 2\'s record is not flattened by client 1\'s autosave (its own capture still writes the split)', J(R.qAgain) + '\n    record: ' + R.recQ.flat);
+      ok(verdictOf(sideBySide(R.q9)), 'd: client 2 (on B throughout) still shows the pair side by side 9 s after client 1\'s visit', J(R.q9));
+      ok(gateOf(sideBySide(R.qAgain)) && verdictOf(R.recQ.split), 'd: client 2\'s record is not flattened by client 1\'s autosave (its own capture still writes the split)', J(R.qAgain) + '\n    record: ' + R.recQ.flat);
     }
   }
   console.log('— f · a slow guest (its window lands 3 s after the visit) still joins its chain');
   {
     const R = await ownerSteps('f', 'files', { slowMs: 3000 });
-    if (R.v) ok(R.late, 'f: the guest was not built 1.5 s into the visit (the slow opener held it)');
+    if (R.v) ok(verdictOf(R.late), 'f: the guest was not built 1.5 s into the visit (the slow opener held it)');
     judge('f', 'slow guest', R);
     if (R.v) ok(R.ms >= 3000, `f: the pair joined only once the late guest landed (${R.ms} ms ≥ 3000) — no deadline gave up first`);
   }
@@ -271,9 +271,9 @@ else await (async () => {
   {
     const orig = fs.readFileSync(path.join(repo, 'src/lib/desktop-manager.js'), 'utf8');
     const line = /\n\s*if \(building\.length\) this\.app\.layoutManager\?\.queueRecordChains\?\.\(desktopId, state, \{ naming: building \}\);\n/;   // int214: only the chains this replay builds
-    if (ok(line.test(orig), 'e: the call is where the control removes it')) {
+    if (ok(verdictOf(line.test(orig)), 'e: the call is where the control removes it')) {
       await buildBundle(MUT.write(path.join(wt, 'src/lib/desktop-manager.js'), editAnchor(orig, line, '\n\n', "src/lib/desktop-manager.js"), 'noqueue', { esm: true }));
-      for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(r.pass, 'e: tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+      for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(verdictOf(r.pass), 'e: tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
       const R = await ownerSteps('e', 'files');
       if (R.v) {
         console.log('    control: ' + J(R.v) + '\n    control record at +9 s: ' + R.rec9.flat);
@@ -286,4 +286,4 @@ else await (async () => {
 })().catch((e) => ok(false, 'the chrome leg threw', e && (e.stack || e.message)));
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

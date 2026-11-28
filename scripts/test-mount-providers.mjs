@@ -17,7 +17,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -40,8 +40,8 @@ const MC = mutantCopies('mount-providers', REPO);   // patched copies live outsi
   const idx = read('src/mount-providers/index.js');
   const listed = [...idx.matchAll(/^\s*require\('\.\/([\w-]+\.js)'\),$/gm)].map((m) => m[1]);
   ok(JSON.stringify([...listed].sort()) === JSON.stringify(files), `① index.js lists every provider file exactly once (${listed.length} lines, ${files.length} files)`, JSON.stringify({ listed, files }));
-  ok(PROV.rows.every((r) => r.id + '.js' === listed[PROV.rows.indexOf(r)]) && PROV.rows.filter((r) => r.default).length === 1, '① each row\'s id is its file name; exactly one default row (a record without a type)');
-  ok(PROV.rowOf('constructor') && !PROV.rowOf('constructor').create && PROV.rowOf(undefined) === PROV.defaultRow, '① an unknown type has no row (no prototype keys); no type = the default row');
+  ok(gateOf(PROV.rows.every((r) => r.id + '.js' === listed[PROV.rows.indexOf(r)])) && PROV.rows.filter((r) => r.default).length === 1, '① each row\'s id is its file name; exactly one default row (a record without a type)');
+  ok(gateOf(PROV.rowOf('constructor')) && !PROV.rowOf('constructor').create && PROV.rowOf(undefined) === PROV.defaultRow, '① an unknown type has no row (no prototype keys); no type = the default row');
 }
 
 // ── ② a FAKE provider through ONE registration line drives the real manager ──
@@ -106,9 +106,9 @@ async function drive(MM, tag) {
 const real = await drive(MountManager, 'real');
 ok(real.error === 'unknown mount type: acme', '② CONTROL: the real list (no acme line) refuses the fake type — the line is what admits it', JSON.stringify(real));
 const fake = await drive(withList(mountsSrc, 'acme'), 'acme');
-ok(fake.listed, '② the manager adds and lists it, labelled by its row', JSON.stringify(fake));
-ok(fake.config && fake.env && fake.child, '② its row\'s config / edit / rclone env reach the real lifecycle — a child resolves the parent\'s connection');
-ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth-backed, and its own Google client is offered to a channel account (oauthClientsFor)');
+ok(verdictOf(fake.listed), '② the manager adds and lists it, labelled by its row', JSON.stringify(fake));
+ok(gateOf(fake.config) && gateOf(fake.env) && verdictOf(fake.child), '② its row\'s config / edit / rclone env reach the real lifecycle — a child resolves the parent\'s connection');
+ok(gateOf(fake.oauth) && verdictOf(fake.lent), '② its declared cells reach the OAuth facts: OAuth-backed, and its own Google client is offered to a channel account (oauthClientsFor)');
 
 // ── ④ patched-copy controls: the pre-move ladders restored ⇒ ② red ──
 {
@@ -116,9 +116,9 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
   const VENDOR = 'static OAUTH_CLIENT_VENDOR = Object.freeze(Object.fromEntries(PROVIDERS.rows.filter((r) => r.oauth).map((r) => [r.id, r.oauth])));';
   ok(mountsSrc.split(ENV_LINE).length === 2 && mountsSrc.split(VENDOR).length === 2, '④ control anchors exist once');
   const m1 = await drive(withList(mountsSrc.replace(ENV_LINE, '    remote = PROVIDERS.defaultRow.rclone(m, cfg, P, R, this);'), 'ladder'), 'ladder');
-  ok(m1.listed && !m1.env, '④ NEGATIVE CONTROL: a rclone env that knows only its old arms (default = S3) mounts the fake as S3 — the env assert is red', JSON.stringify(m1));
+  ok(gateOf(m1.listed) && !m1.env, '④ NEGATIVE CONTROL: a rclone env that knows only its old arms (default = S3) mounts the fake as S3 — the env assert is red', JSON.stringify(m1));
   const m2 = await drive(withList(mountsSrc.replace(VENDOR, "static OAUTH_CLIENT_VENDOR = Object.freeze({ drive: 'google', gmail: 'google', onedrive: 'microsoft' });"), 'vendor'), 'vendor');
-  ok(m2.listed && !m2.lent, '④ NEGATIVE CONTROL: the literal vendor map restored never offers the fake\'s client — the borrow assert is red', JSON.stringify(m2));
+  ok(gateOf(m2.listed) && !m2.lent, '④ NEGATIVE CONTROL: the literal vendor map restored never offers the fake\'s client — the borrow assert is red', JSON.stringify(m2));
 }
 
 // ── ③ DIFFERENTIAL: the pre-move manager and this one answer the same for every real provider ──
@@ -213,22 +213,22 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     // lane vfs-cache-local: every list row gains ONE cell, `cache` (where its VFS cache lives) — the named delta, dropped
     // from the tree's answer before comparing (and proven present)
     const CELL = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'mounted' in v && 'cache' in v) ? (({ cache, ...r }) => r)(v) : v));
-    ok(JSON.stringify(after).includes('"cache":{"dir":'), '③ the cache-cell delta is real: list rows carry cache {dir, network, pendingMove, why}');
+    ok(verdictOf(JSON.stringify(after).includes('"cache":{"dir":')), '③ the cache-cell delta is real: list rows carry cache {dir, network, pendingMove, why}');
     after.splice(0, after.length, ...after.map(CELL));
     // B-5ce7 (batch 16): every list row gains ONE cell, `parked` (null unless the mount is kept disconnected) — the named delta,
     // dropped from the tree's answer before comparing (and proven present)
     const PARK = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'mounted' in v && 'parked' in v && v.parked === null) ? (({ parked, ...r }) => r)(v) : v));
-    ok(JSON.stringify(after).includes('"parked":null'), '③ the parked-cell delta is real: list rows carry parked (null unless the mount is kept disconnected)');
+    ok(verdictOf(JSON.stringify(after).includes('"parked":null')), '③ the parked-cell delta is real: list rows carry parked (null unless the mount is kept disconnected)');
     after.splice(0, after.length, ...after.map(PARK));
     // B-323e (主开发 r1501 (8)): every list row gains ONE cell, `disconnecting` (false unless a person's Disconnect runs) — the named
     // delta, dropped from the tree's answer before comparing (and proven present)
     const DISC = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'mounted' in v && 'disconnecting' in v && v.disconnecting === false) ? (({ disconnecting, ...r }) => r)(v) : v));
-    ok(JSON.stringify(after).includes('"disconnecting":false'), '③ the disconnecting-cell delta is real: list rows carry disconnecting (false unless a person\'s Disconnect runs)');
+    ok(verdictOf(JSON.stringify(after).includes('"disconnecting":false')), '③ the disconnecting-cell delta is real: list rows carry disconnecting (false unless a person\'s Disconnect runs)');
     after.splice(0, after.length, ...after.map(DISC));
     let same = 0; const diffs = [];
     before.forEach((b, i) => { if (JSON.stringify(b) === JSON.stringify(after[i])) same++; else diffs.push(`scenario ${i}: ` + firstDiff(b, after[i])); });
     ok(before.length === after.length && diffs.length === 0, `③ every provider answers the same before and after the move (${same}/${before.length} scenarios: add · list · config · child · edit · rclone env · OAuth/share facts · re-auth client · raw-rclone adoption)`, diffs.join('\n    '));
-    ok(before.filter((r) => r.add && !r.add.err).length >= 15 && before.some((r) => r.add && r.add.err), '③ the scenarios reach every row (15+ adds land, the unknown type is refused)');
+    ok(before.filter((r) => r.add && !r.add.err).length >= 15 && verdictOf(before.some((r) => r.add && r.add.err)), '③ the scenarios reach every row (15+ adds land, the unknown type is refused)');
   }
 }
 // ⑤ lane dc-mount-client — the CLIENT half: the same ONE index line carries acme's client cells to GET /api/mounts
@@ -270,14 +270,14 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
   const smSrc = read('src/lib/sidebar-mounts.js');
   const real = await probe(await bundle(smSrc, 'tree'), acmeRows);
   ok(JSON.stringify(real.typeOpts.at(-1)) === '["acme","Acme Cloud"]' && real.typeOpts.length === 10, '⑤ Connect storage: the type list offers acme last (its pick + pickLabel cells)', JSON.stringify(real.typeOpts));
-  ok(real.host && real.host.label === 'Acme host' && real.host.ph === 'acme.example.test' && real.host.mine === true && real.host.other === false, '⑤ …acme\'s own fields render, shown only while acme is picked', JSON.stringify(real.host));
-  ok(real.body && real.body.type === 'acme' && real.body.token === '{"t":1}' && !('acmeToken' in real.body) && real.body.acmeHost === 'h.example.test', '⑤ …and its submit cells shape the POST body (acmeToken → token, the UI key dropped)', JSON.stringify(real.body));
+  ok(gateOf(real.host) && real.host.label === 'Acme host' && real.host.ph === 'acme.example.test' && real.host.mine === true && real.host.other === false, '⑤ …acme\'s own fields render, shown only while acme is picked', JSON.stringify(real.host));
+  ok(gateOf(real.body) && real.body.type === 'acme' && real.body.token === '{"t":1}' && !('acmeToken' in real.body) && real.body.acmeHost === 'h.example.test', '⑤ …and its submit cells shape the POST body (acmeToken → token, the UI key dropped)', JSON.stringify(real.body));
   ok(JSON.stringify(real.edit) === JSON.stringify([['acmeHost', 'Acme host', 'acme.example.test', 'h.example.test'], ['acmeKey', 'Acme key', '', '']]) && JSON.stringify(real.editChild) === '[]', '⑤ the Edit dialog prefills acme\'s edit cells (a child without editChild cells edits nothing)', JSON.stringify(real.edit));
   ok(real.names.product === 'Acme Drive' && real.names.signin === 'Acme' && real.reauth === true && real.signin === 'Acme' && real.row.tag === 'ACME' && real.row.offersChild === true, '⑤ the re-authorize names, the sign-in name, the chip tag and the ＋ come off acme\'s row', JSON.stringify({ names: real.names, signin: real.signin }));
-  ok(!PROV.clientRows().some((r) => r.id === 'acme') && PROV.clientRows().every((r) => r.client === undefined && 'oauth' in r), '⑤ the real providers list publishes no acme row (flat client cells, the oauth cell beside them)');
+  ok(!PROV.clientRows().some((r) => r.id === 'acme') && verdictOf(PROV.clientRows().every((r) => r.client === undefined && 'oauth' in r)), '⑤ the real providers list publishes no acme row (flat client cells, the oauth cell beside them)');
   const old = smSrc.replace(/_signins\(\) \{[^\n]*\},/, "_signins() { return { onedrive: 'Microsoft', drive: 'Google', dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex', jottacloud: 'Jottacloud', hidrive: 'HiDrive' }; },");
   const ctl = old !== smSrc && await probe(await bundle(old, 'old-labels'), acmeRows);
-  ok(ctl && ctl.signin === undefined, '⑤ CONTROL: the old PROVIDER_LABELS literal table back in the client ⇒ acme has no sign-in name (red)', JSON.stringify(ctl && ctl.signin));
+  ok(gateOf(ctl) && ctl.signin === undefined, '⑤ CONTROL: the old PROVIDER_LABELS literal table back in the client ⇒ acme has no sign-in name (red)', JSON.stringify(ctl && ctl.signin));
   const planted = smSrc.replace('    _providerRows() {', "    _plant(m) { if (m.type === 'gmail') return 1; },\n    _providerRows() {");
   const c = census(REPO, { read: (f) => (f === 'src/lib/sidebar-mounts.js' ? planted : fs.readFileSync(path.join(REPO, f), 'utf8')) });
   const base = JSON.parse(read('scripts/fixtures/id-branch-baseline.json'));
@@ -328,7 +328,7 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     globalThis.fetch = async (url, opts) => (String(url).endsWith('/drive-defaults') ? { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ presets: globalThis.__presets }), text: async () => JSON.stringify({ presets: globalThis.__presets }) } : fetch0(url, opts));
     const before = await facts(await bundle(baseSm, 'base')), after = await facts(await bundle(smSrc, 'tree2'));
     const diffs = Object.keys(before).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
-    ok(PROV.clientRows().find((r) => r.id === 'sftp')?.fields?.find?.((f) => f.key === 'keyPath')?.pathKind === 'file' || JSON.stringify(PROV.clientRows()).includes('"key":"keyPath","label":"Private key path (absolute) — or use password","placeholder":"~/.ssh/id_ed25519","autocomplete":"local","pathKind":"file"'), '⑤ lane path-field: sftp\'s key path declares pathKind file (THE path field takes a file there)');
+    ok(PROV.clientRows().find((r) => r.id === 'sftp')?.fields?.find?.((f) => f.key === 'keyPath')?.pathKind === 'file' || verdictOf(JSON.stringify(PROV.clientRows()).includes('"key":"keyPath","label":"Private key path (absolute) — or use password","placeholder":"~/.ssh/id_ed25519","autocomplete":"local","pathKind":"file"')), '⑤ lane path-field: sftp\'s key path declares pathKind file (THE path field takes a file there)');
     ok(diffs.length === 0 && Object.keys(before).length === Object.keys(after).length, `⑤ DIFFERENTIAL: the base client and this tree answer the same over every real provider (${Object.keys(before).length} facts: Connect fields ×2 preset sets, ${TYPES.length * 4} submit bodies, Edit top/child, names, D2)`, diffs.slice(0, 3).map((k) => { const a = [].concat(before[k]), b = [].concat(after[k]); const i = a.findIndex((x, n) => x !== b[n]); return `${k}[${i}]: ${String(a[i]).slice(0, 300)} ≠ ${String(b[i]).slice(0, 300)}`; }).join('\n    '));
   }
 }
@@ -364,13 +364,13 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     const { SERVICE_ENV_KEEP, RCLONE_ENV_KEEP, EGRESS_ENV } = require(path.join(REPO, 'src/agent-env.js'));
     const allowed = new Set([...SERVICE_ENV_KEEP, ...RCLONE_ENV_KEEP, ...EGRESS_ENV]);
     const extra = Object.keys(e).filter((k) => !allowed.has(k) && !/^LC_[A-Z]+$/.test(k) && !k.startsWith('RCLONE_CONFIG_VS_'));
-    ok(Object.keys(PLANT).every((k) => process.env[k] === PLANT[k]), '⑦ the planted names reached the hub (the leg is not vacuous)');
+    ok(verdictOf(Object.keys(PLANT).every((k) => process.env[k] === PLANT[k])), '⑦ the planted names reached the hub (the leg is not vacuous)');
     ok(extra.length === 0 && !Object.values(PLANT).some((v) => Object.values(e).includes(v)), '⑦ the rclone env = the service list + RCLONE_ENV_KEEP + egress + its own RCLONE_CONFIG_VS_*: no planted name or value, no stray RCLONE_CONFIG_ remote', JSON.stringify(extra));
-    ok(e.RCLONE_CONFIG_VS_SECRET_ACCESS_KEY === 'SK7' && Object.keys(KEPT).every((k) => e[k] === KEPT[k]), "⑦ kept: the record's credential, the egress proxy + trust root, SSH_AUTH_SOCK (an sftp remote through ssh-agent), XDG_CACHE_HOME (rclone's default cache)", JSON.stringify(Object.keys(e)));
+    ok(e.RCLONE_CONFIG_VS_SECRET_ACCESS_KEY === 'SK7' && verdictOf(Object.keys(KEPT).every((k) => e[k] === KEPT[k])), "⑦ kept: the record's credential, the egress proxy + trust root, SSH_AUTH_SOCK (an sftp remote through ssh-agent), XDG_CACHE_HOME (rclone's default cache)", JSON.stringify(Object.keys(e)));
     const mSpread = editAnchor(mountsSrc, 'const env = rcloneEnv(cfg);', 'const env = { ...process.env, ...cfg };', "src/mounts.js");
     const b = env7(MC.load('src/mounts.js', mSpread, 'env-spread').MountManager, 'spread');
-    ok(mSpread !== mountsSrc && Object.keys(PLANT).every((k) => b[k] === PLANT[k]), '⑦ CONTROL: the pre-fix `{ ...process.env }` (a patched copy) hands the daemon every planted name ⇒ RED');
+    ok(mSpread !== mountsSrc && verdictOf(Object.keys(PLANT).every((k) => b[k] === PLANT[k])), '⑦ CONTROL: the pre-fix `{ ...process.env }` (a patched copy) hands the daemon every planted name ⇒ RED');
   } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

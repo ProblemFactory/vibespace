@@ -15,7 +15,7 @@ import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp ro
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
 const P = MountManager.prototype;
@@ -23,10 +23,10 @@ const P = MountManager.prototype;
 // ── 1. which mounts count as OAuth-backed ──
 {
   const is = (m) => P._oauthBacked.call({}, m);
-  ok('onedrive is OAuth-backed', is({ type: 'onedrive' }));
-  ok('drive is OAuth-backed', is({ type: 'drive' }));
-  ok('generic cloud is OAuth-backed', is({ type: 'cloud' }));
-  ok('legacy rclone record with an OAuth backend counts', is({ type: 'rclone', rcloneType: 'dropbox' }));
+  ok('onedrive is OAuth-backed', verdictOf(is({ type: 'onedrive' })));
+  ok('drive is OAuth-backed', verdictOf(is({ type: 'drive' })));
+  ok('generic cloud is OAuth-backed', verdictOf(is({ type: 'cloud' })));
+  ok('legacy rclone record with an OAuth backend counts', verdictOf(is({ type: 'rclone', rcloneType: 'dropbox' })));
   ok('s3 is NOT (no token to die)', !is({ type: 's3' }) && !is({ type: 'rclone', rcloneType: 's3' }));
 }
 
@@ -48,8 +48,8 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
 {
   const { self, calls, run } = mk(['denied']);
   const msg = await run(OD, 'ok');
-  ok('HEALTHY mountpoint + dead token ⇒ backend probe runs and surfaces the error', calls.length === 1 && /sign-in has expired|re-authorize/i.test(msg || ''));
-  ok('the message names the FIX, not just the symptom', /re-authorize/i.test(msg || ''));
+  ok('HEALTHY mountpoint + dead token ⇒ backend probe runs and surfaces the error', calls.length === 1 && verdictOf(/sign-in has expired|re-authorize/i.test(msg || '')));
+  ok('the message names the FIX, not just the symptom', verdictOf(/re-authorize/i.test(msg || '')));
   self._errors.set('od1', msg);
   const again = await run(OD, 'ok');
   ok('while the auth error shows, every sweep re-probes (recovery must clear fast)', calls.length === 2);
@@ -69,7 +69,7 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
 {
   const { calls, run } = mk(['denied']);
   const msg = await run(OD, 'error');
-  ok('a failing mountpoint probes immediately regardless of the clock', calls.length === 1 && /re-authorize/i.test(msg || ''));
+  ok('a failing mountpoint probes immediately regardless of the clock', calls.length === 1 && verdictOf(/re-authorize/i.test(msg || '')));
 }
 
 // ── 2b. the 2.368.8 refinement: listing fine ≠ reads fine ──
@@ -80,7 +80,7 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
   const { self, readCalls, run } = mk(['ok'], ['denied']);
   const msg = await run(OD, 'ok');
   ok('lsf-passing mount still gets a 1-byte READ probe', readCalls.length === 1);
-  ok('download-denied while listing works ⇒ its own message (reconnect, NOT re-authorize)', /downloads are rejected/i.test(msg || '') && !/re-authorize/i.test(msg || ''));
+  ok('download-denied while listing works ⇒ its own message (reconnect, NOT re-authorize)', gateOf(/downloads are rejected/i.test(msg || '')) && !/re-authorize/i.test(msg || ''));
   self._errors.set('od1', msg);
   const r2 = await run(OD, 'ok'); // read probe now returns 'ok' (default)
   ok('…and a recovered download clears it', r2 === null);
@@ -96,37 +96,37 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
   const { MountManager: MM } = require(path.join(REPO, 'src/mounts.js'));
   ok('rclone pin is v1.69.3 (1.65.2 fails migrated consumer OneDrive downloads; 1.69.x fixes it AND stays in the Cloudflare-STS-safe 1.63–1.69 range)', MM.RCLONE_PIN === 'v1.69.3');
   const src = read('src/mounts.js');
-  ok('boot self-heal exists and only touches OUR data/bin install (PATH rclone is the user\'s)', /maybeUpgradePinnedRclone\(\)\s*{[\s\S]{0,200}if \(!fs\.existsSync\(local\)\)/.test(src));
+  ok('boot self-heal exists and only touches OUR data/bin install (PATH rclone is the user\'s)', verdictOf(/maybeUpgradePinnedRclone\(\)\s*{[\s\S]{0,200}if \(!fs\.existsSync\(local\)\)/.test(src)));
   // 2.368.9: the binary is untracked from git (a 60MB arch-specific blob in a
   // public repo, growing history on every pin bump; and a boot self-heal that
   // writes a TRACKED file is the dirty-tree-blocks-git-pull class). The update
   // pull therefore DELETES the copy old releases committed — boot must
   // reinstall when a mount needs rclone and the PATH has none.
-  ok('the binary is gitignored (never tracked again)', /^data\/bin\/rclone$/m.test(read('.gitignore')) && /^data\/bin\/rclone-dl\.zip$/m.test(read('.gitignore')));
-  ok('a missing binary is reinstalled at boot when mounts need it (B-323e: asked of the starter; only a NO installs)', /if \(needsRclone\) this\.rcloneAvailable\(\)\.then\(\(has\) => \{[\s\S]{0,400}if \(has !== false\) return;[\s\S]{0,300}installRclone\(\)/.test(src));
-  ok('…and restore() wires it', /async restore\(\)\s*{\s*\n\s*this\.maybeUpgradePinnedRclone\(\)/.test(src));
-  ok('the read probe classifies the OAuth-death phrasings too', /_probeBackendRead[\s\S]{0,1400}401\|403\|Unauthorized\|unauthenticated\|invalid_grant/.test(src));
+  ok('the binary is gitignored (never tracked again)', gateOf(/^data\/bin\/rclone$/m.test(read('.gitignore'))) && verdictOf(/^data\/bin\/rclone-dl\.zip$/m.test(read('.gitignore'))));
+  ok('a missing binary is reinstalled at boot when mounts need it (B-323e: asked of the starter; only a NO installs)', verdictOf(/if \(needsRclone\) this\.rcloneAvailable\(\)\.then\(\(has\) => \{[\s\S]{0,400}if \(has !== false\) return;[\s\S]{0,300}installRclone\(\)/.test(src)));
+  ok('…and restore() wires it', verdictOf(/async restore\(\)\s*{\s*\n\s*this\.maybeUpgradePinnedRclone\(\)/.test(src)));
+  ok('the read probe classifies the OAuth-death phrasings too', verdictOf(/_probeBackendRead[\s\S]{0,1400}401\|403\|Unauthorized\|unauthenticated\|invalid_grant/.test(src)));
 }
 
 // ── 3. phrasing pins across the chain ──
 {
   const src = read('src/mounts.js');
   ok("probe classifies rclone's OAuth-death phrasings as denied (unauthenticated / invalid_grant / InvalidAuthenticationToken)",
-    /401\|403\|Unauthorized\|unauthenticated\|invalid_grant\|InvalidAuthenticationToken/.test(src));
+    verdictOf(/401\|403\|Unauthorized\|unauthenticated\|invalid_grant\|InvalidAuthenticationToken/.test(src)));
   // 2.368.7 (same incident, second half): an EIO-wedged daemon SURVIVES
   // `fusermount -uz`, so the re-auth bounce stacked a fresh daemon on top of
   // the dead-token one and changed nothing (4 leaked daemons found on the
   // box). unmount() must not resolve until the daemon is GONE, and mount()
   // must never spawn onto a path a stale daemon still serves.
   ok('unmount() verifies the daemon died before resolving (kills survivors)',
-    /ensureDaemonGone[\s\S]{0,400}_daemonAlive\(mp, \{ witness: false \}\)[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src));   // B-e783: the teardown road never waits on «can't tell»
+    verdictOf(/ensureDaemonGone[\s\S]{0,400}_daemonAlive\(mp, \{ witness: false \}\)[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src)));   // B-e783: the teardown road never waits on «can't tell»
   ok('…and every fuse unmount path goes through it (3 call sites: fusermount3/fusermount/umount -l)', (src.match(/ensureDaemonGone\(/g) || []).length >= 3);
   ok('mount() kills a stale daemon before spawning (never stack)',
-    /stale daemon still on[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src));
+    verdictOf(/stale daemon still on[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src)));
   const sb = read('src/lib/sidebar-mounts.js');
-  ok('the client Re-authorize button matches the new health message', /invalid_grant\|token expired\|couldn.t fetch token\|unauthenticated\|re-authorize/.test(sb));
+  ok('the client Re-authorize button matches the new health message', verdictOf(/invalid_grant\|token expired\|couldn.t fetch token\|unauthenticated\|re-authorize/.test(sb)));
   // lane dc-mount-client: eligibility is the row's declared client.driveReauth cell, read by _isDriveBacked
-  ok('…and OneDrive rows are eligible for it', /\bdriveReauth: true\b/.test(read('src/mount-providers/onedrive.js')) && /_isDriveBacked\(m\)\s*{[^}]*\.driveReauth\b/.test(sb));
+  ok('…and OneDrive rows are eligible for it', gateOf(/\bdriveReauth: true\b/.test(read('src/mount-providers/onedrive.js'))) && verdictOf(/_isDriveBacked\(m\)\s*{[^}]*\.driveReauth\b/.test(sb)));
 }
 
 // ── 4. D2 (design-integrations-per-account §6): switching a Drive record's
@@ -156,7 +156,7 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
     ok('D2 server: the switch writes the NEW preset and the token minted under it, together',
       rec().clientPreset === 'lab' && mm._dec(rec().tokenEnc) === tok('lab') && !rec().clientId);
     ok('D2 server: …and the children bounce onto the new pair (unmount + mount)',
-      bounces.includes('unmount:' + childId) && bounces.includes('mount:' + childId));
+      gateOf(bounces.includes('unmount:' + childId)) && verdictOf(bounces.includes('mount:' + childId)));
     await mm.applyDriveToken(credId, tok('custom'), { clientId: 'cid-2.apps.example.test', clientSecret: 'sec-2' });
     ok('D2 server: a switch to a custom client stores the id + the sealed secret and drops the preset (custom wins at resolve — a leftover preset would be dead weight)',
       rec().clientId === 'cid-2.apps.example.test' && mm._dec(rec().clientSecretEnc) === 'sec-2' && rec().clientPreset === null && mm._dec(rec().tokenEnc) === tok('custom'));
@@ -168,20 +168,20 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
     ok('D2 server: a plain re-authorize (no client) leaves the client alone', rec().clientPreset === 'acme' && mm._dec(rec().tokenEnc) === tok('plain'));
     let e1 = null; try { await mm.applyDriveToken(credId, tok('x'), { clientId: 'cid-3' }); } catch (e) { e1 = e; }
     ok('D2 server: a custom client without its secret is refused by name, the record untouched',
-      /secret/i.test(e1?.message || '') && rec().clientPreset === 'acme' && mm._dec(rec().tokenEnc) === tok('plain'));
+      gateOf(/secret/i.test(e1?.message || '')) && rec().clientPreset === 'acme' && mm._dec(rec().tokenEnc) === tok('plain'));
     const odId = mm.add({ type: 'onedrive', name: 'od', token: tok('od') });
     let e2 = null; try { await mm.applyDriveToken(odId, tok('od2'), { clientPreset: 'acme' }); } catch (e) { e2 = e; }
     ok('D2 server: a client switch on a non-Drive record is refused by name (the storage switch is Drive + Gmail; Gmail lands through its PATCH)',
-      /Google Drive/.test(e2?.message || '') && mm._dec(mm._get(odId).tokenEnc) === tok('od'));
+      gateOf(/Google Drive/.test(e2?.message || '')) && mm._dec(mm._get(odId).tokenEnc) === tok('od'));
     // Gmail: the switch finishes through PATCH {clientPreset, token} — the
     // existing update() writes both in one save and restarts the sync
     const gmId = mm.add({ type: 'gmail', name: 'inbox', token: tok('gm'), clientPreset: 'acme' });
     mm._get(gmId).desired = 'mounted'; bounces.length = 0;
     await mm.update(gmId, { clientPreset: 'lab', token: tok('gm-lab') });
     ok('D2 server: a Gmail switch lands the preset + its token in ONE update, and the sync restarts',
-      mm._get(gmId).clientPreset === 'lab' && mm._dec(mm._get(gmId).tokenEnc) === tok('gm-lab') && bounces.includes('mount:' + gmId));
+      mm._get(gmId).clientPreset === 'lab' && mm._dec(mm._get(gmId).tokenEnc) === tok('gm-lab') && verdictOf(bounces.includes('mount:' + gmId)));
     const wiring = read('src/server/mounts-plugins-wiring.js');
-    ok('D2 server: the drive-token route hands the body\'s `client` through', /applyDriveToken\(req\.params\.id, req\.body\?\.token, req\.body\?\.client\)/.test(wiring));
+    ok('D2 server: the drive-token route hands the body\'s `client` through', verdictOf(/applyDriveToken\(req\.params\.id, req\.body\?\.token, req\.body\?\.client\)/.test(wiring)));
     // integrations r1 (verifier finding 1): D2 held ONLY in the storage Edit
     // dialog — any other caller (a script, an older bundle, a plugin) could
     // PATCH {clientPreset} and re-point a record beside the token minted
@@ -191,7 +191,7 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
     const drId = mm.add({ type: 'drive', name: 'dr-d2', token: tok('org1'), clientPreset: 'org1' });
     let e3 = null; try { await mm.update(drId, { clientPreset: 'org2' }); } catch (e) { e3 = e; }
     ok('D2 server: a bare PATCH {clientPreset} on a Drive record holding a token is REFUSED by name (client-change-needs-reauth), the record untouched',
-      e3?.code === 'client-change-needs-reauth' && /Re-authorize/.test(e3?.message || '') && mm._get(drId).clientPreset === 'org1' && mm._dec(mm._get(drId).tokenEnc) === tok('org1'), e3 ? `${e3.code}: ${e3.message}` : 'no refusal');
+      e3?.code === 'client-change-needs-reauth' && gateOf(/Re-authorize/.test(e3?.message || '')) && mm._get(drId).clientPreset === 'org1' && mm._dec(mm._get(drId).tokenEnc) === tok('org1'), e3 ? `${e3.code}: ${e3.message}` : 'no refusal');
     let e4 = null; try { await mm.update(drId, { clientId: 'cid-9.apps.example.test', clientSecret: 'sec-9' }); } catch (e) { e4 = e; }
     ok('D2 server: …and so is a bare switch to a custom client id (the custom id wins at resolve)',
       e4?.code === 'client-change-needs-reauth' && !mm._get(drId).clientId && !mm._get(drId).clientSecretEnc, e4 ? e4.code : 'no refusal');
@@ -206,7 +206,7 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
     ok('D2 server: a bare Gmail PATCH {clientPreset} beside its token is refused by name too',
       e7?.code === 'client-change-needs-reauth' && mm._get(gmId).clientPreset === 'lab', e7 ? e7.code : 'no refusal');
     ok('D2 server: the PATCH route answers the refusal 409 with its code (never a 200 over a split record)',
-      /app\.patch\('\/api\/mounts\/:id'[\s\S]{0,400}e\.code === 'client-change-needs-reauth' \? 409/.test(wiring) && /code: e\.code/.test(wiring.slice(wiring.indexOf("app.patch('/api/mounts/:id'"), wiring.indexOf("app.patch('/api/mounts/:id'") + 500)));
+      gateOf(/app\.patch\('\/api\/mounts\/:id'[\s\S]{0,400}e\.code === 'client-change-needs-reauth' \? 409/.test(wiring)) && verdictOf(/code: e\.code/.test(wiring.slice(wiring.indexOf("app.patch('/api/mounts/:id'"), wiring.indexOf("app.patch('/api/mounts/:id'") + 500))));
     // integrations r1 (verifier finding 2): drive-token {client:{}} was read
     // as "built-in" and wiped the record's preset beside a token minted
     // elsewhere — the client must NAME itself
@@ -214,7 +214,7 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
     for (const [label, client] of [['{}', {}], ['{clientSecret} alone', { clientSecret: 'x' }], ['a bare string', 'org1']]) {
       let e8 = null; try { await mm.applyDriveToken(drId, tok('stray'), client); } catch (e) { e8 = e; }
       ok(`D2 server: drive-token with client ${label} is refused by name, the record's client and token untouched`,
-        /must name a preset/.test(e8?.message || '') && mm._get(drId).clientPreset === 'org2' && mm._dec(mm._get(drId).tokenEnc) === tok('org2b'), e8?.message || `clientPreset now ${mm._get(drId).clientPreset}`);
+        gateOf(/must name a preset/.test(e8?.message || '')) && mm._get(drId).clientPreset === 'org2' && mm._dec(mm._get(drId).tokenEnc) === tok('org2b'), e8?.message || `clientPreset now ${mm._get(drId).clientPreset}`);
     }
     await mm.applyDriveToken(drId, tok('builtin'), { clientPreset: '' });
     ok('D2 server: …while {clientPreset: ""} is the explicit built-in choice', mm._get(drId).clientPreset === null && !mm._get(drId).clientId && mm._dec(mm._get(drId).tokenEnc) === tok('builtin'));
@@ -222,4 +222,4 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

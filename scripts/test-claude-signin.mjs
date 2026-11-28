@@ -56,7 +56,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SIGNIN = require(path.join(ROOT, 'src/server/claude-signin.js'));
 const { create, registerSigninRoutes } = SIGNIN;
 let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 400)); } };
+const ok = (c, name, info) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 400)); } };
 // a leg that THROWS (a seam the tree does not have yet) is a failed leg, never a crashed suite
 const leg = async (name, fn) => { try { await fn(); } catch (e) { fail++; console.log('  ✗ ' + name + ' — threw: ' + String((e && e.message) || e).slice(0, 200)); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -100,7 +100,7 @@ function newOrch({ echo = false, ...extra } = {}) {
   const { orch, broadcasts, getFake } = newOrch();
   const r = orch.start({ accountId: 'acc-1' });
   const fake = getFake();
-  ok(r.ok && r.signin.phase === 'starting', '① start ok, phase starting', r);
+  ok(gateOf(r.ok) && r.signin.phase === 'starting', '① start ok, phase starting', r);
   ok(fake.file === '/opt/node' && fake.args[0] === '/opt/helper.mjs' && fake.args[1] === '--config-dir' && fake.args[2] === path.join(accDirs, 'acc-1') && fake.args[3] === '--claude' && fake.args[4] === '/opt/claude', '① spawned the helper with the account dir', { file: fake.file, args: fake.args });
   const env = fake.opts.env;
   ok(env.HOME === fake.opts.cwd && env.CLAUDE_CONFIG_DIR === path.join(accDirs, 'acc-1'), '① env: HOME=scratch, CLAUDE_CONFIG_DIR=account dir', { HOME: env.HOME, CCD: env.CLAUDE_CONFIG_DIR, cwd: fake.opts.cwd });
@@ -113,7 +113,7 @@ function newOrch({ echo = false, ...extra } = {}) {
   ok(!('scratch' in last) && !('dir' in last) && !('pty' in last) && !('parse' in last), '② publicSignin leaks no scratch/dir/pty/parse', Object.keys(last));
 
   const sc = orch.sendCode('acc-1', '  mycode#state  ');
-  ok(sc.ok && sc.signin.phase === 'connecting', '③ sendCode → connecting', sc);
+  ok(gateOf(sc.ok) && sc.signin.phase === 'connecting', '③ sendCode → connecting', sc);
   ok(fake.writes.join('') === 'mycode#state\r', '③ the code (trimmed) + \\r is the ONLY thing written to the PTY', fake.writes);
 
   const cwd = fake.opts.cwd;
@@ -122,8 +122,8 @@ function newOrch({ echo = false, ...extra } = {}) {
   ok(done.phase === 'connected', '④ "credentials saved" → connected', done);
   ok(!fs.existsSync(cwd), '④ the scratch dir is wiped on connected', cwd);
 
-  ok(broadcasts.every((b) => JSON.stringify(b).indexOf('mycode') < 0), '⑨ SPY: the pasted code is in NO broadcast');
-  ok(broadcasts.every((b) => JSON.stringify(b).indexOf('signin-test-') < 0 || JSON.stringify(b).indexOf(cwd) < 0), '⑨ SPY: no scratch path in a broadcast');
+  ok(verdictOf(broadcasts.every((b) => JSON.stringify(b).indexOf('mycode') < 0)), '⑨ SPY: the pasted code is in NO broadcast');
+  ok(verdictOf(broadcasts.every((b) => JSON.stringify(b).indexOf('signin-test-') < 0 || JSON.stringify(b).indexOf(cwd) < 0)), '⑨ SPY: no scratch path in a broadcast');
 }
 
 // ⑤ an error screen
@@ -133,7 +133,7 @@ function newOrch({ echo = false, ...extra } = {}) {
   getFake().emit(S_URL);
   getFake().emit(S_ERR);
   const last = broadcasts[broadcasts.length - 1].signin;
-  ok(last.phase === 'failed' && /OAuth error/.test(last.error || ''), '⑤ error screen → failed with the CLI line', last);
+  ok(last.phase === 'failed' && verdictOf(/OAuth error/.test(last.error || '')), '⑤ error screen → failed with the CLI line', last);
 }
 
 // ⑥ exit-0 + status file backstop (no "saved" line)
@@ -168,7 +168,7 @@ function newOrch({ echo = false, ...extra } = {}) {
   const first = getFake();
   const again = orch.start({ accountId: 'acc-1' });
   // lane signin-card-real-screen: ONE run per account — a second press / card / the tour's terminal road JOINS it
-  ok(again.ok && again.joined === true && again.signin.id === orch.get('acc-1').id && getFake() === first, '⑦ a second start while live JOINS the run (same id, no second helper)', again);
+  ok(gateOf(again.ok) && again.joined === true && again.signin.id === orch.get('acc-1').id && getFake() === first, '⑦ a second start while live JOINS the run (same id, no second helper)', again);
 }
 
 // ⑧ cancel kills the PTY
@@ -178,7 +178,7 @@ function newOrch({ echo = false, ...extra } = {}) {
   const fake = getFake();
   fake.emit(S_URL);
   const c = orch.cancel('acc-1');
-  ok(c.ok && c.signin.phase === 'cancelled' && fake.killed, '⑧ cancel → cancelled + PTY killed', { phase: c.signin.phase, killed: fake.killed });
+  ok(gateOf(c.ok) && c.signin.phase === 'cancelled' && verdictOf(fake.killed), '⑧ cancel → cancelled + PTY killed', { phase: c.signin.phase, killed: fake.killed });
   // unknown account
   ok(orch.start({ accountId: 'nope' }).status === 404, '⑧ unknown account → 404');
 }
@@ -192,7 +192,7 @@ function newOrch({ echo = false, ...extra } = {}) {
   let code = 0, body = null;
   const res = { status: (c) => { code = c; return res; }, json: (b) => { body = b; return res; } };
   routes['POST /api/accounts/:id/signin']({ params: { id: 'acc-1' }, body: {} }, res);
-  ok(code === 403 && body && body.code === 'agent_forbidden', '⑩ an agent bearer is refused by name', { code, body });
+  ok(code === 403 && gateOf(body) && body.code === 'agent_forbidden', '⑩ an agent bearer is refused by name', { code, body });
   ok(typeof routes['POST /api/accounts/:id/signin/code'] === 'function' && typeof routes['DELETE /api/accounts/:id/signin'] === 'function' && typeof routes['GET /api/accounts/:id/signin'] === 'function', '⑩ all four routes registered');
 }
 
@@ -213,7 +213,7 @@ await leg('⑪', async () => {
   ok(!broadcasts.some((b) => carries(b, CODE)), '⑪ CLAIM 2: the pasted code is in NO broadcast after a silent death', { error: last.error });
   ok(!carries(orch.get('acc-1'), CODE), '⑪ CLAIM 2: … nor in the GET answer', orch.get('acc-1'));
   ok(!/paste\s+(?:the\s+)?code/i.test(last.error || ''), '⑪ the published error is not the prompt line', last.error);
-  ok(/ended before Claude confirmed it/.test(last.error || ''), '⑪ it is the fixed sentence («the sign-in ended before Claude confirmed it — try again»)', last.error);
+  ok(verdictOf(/ended before Claude confirmed it/.test(last.error || '')), '⑪ it is the fixed sentence («the sign-in ended before Claude confirmed it — try again»)', last.error);
 });
 await leg('⑪b', async () => {
   // before any code: the screen's last line is the bare prompt — never published as «why»
@@ -222,7 +222,7 @@ await leg('⑪b', async () => {
   getFake().emit(S_URL);
   getFake().exit(1);
   const last = broadcasts[broadcasts.length - 1].signin;
-  ok(last.phase === 'failed' && !/paste\s+(?:the\s+)?code/i.test(last.error || '') && /exit 1/.test(last.error || ''), '⑪b no code sent, a bare prompt last line → the exit sentence, never the prompt (the last line is cut at it)', last);
+  ok(last.phase === 'failed' && !/paste\s+(?:the\s+)?code/i.test(last.error || '') && verdictOf(/exit 1/.test(last.error || '')), '⑪b no code sent, a bare prompt last line → the exit sentence, never the prompt (the last line is cut at it)', last);
   // CONTROL: an unmatched error line before any code IS what the backstop says
   const o2 = newOrch({ echo: true });
   o2.orch.start({ accountId: 'acc-1' });
@@ -230,7 +230,7 @@ await leg('⑪b', async () => {
   o2.getFake().emit('\r\r\nError: fetch failed (ECONNRESET)\r\r\n');
   o2.getFake().exit(1);
   const l2 = o2.broadcasts[o2.broadcasts.length - 1].signin;
-  ok(l2.phase === 'failed' && /fetch failed/.test(l2.error || ''), '⑪b CONTROL: before a code, the CLI’s own last line is still the «why»', l2);
+  ok(l2.phase === 'failed' && verdictOf(/fetch failed/.test(l2.error || '')), '⑪b CONTROL: before a code, the CLI’s own last line is still the «why»', l2);
   // CONTROL: a worded error line after the code is that line (no code)
   const o3 = newOrch({ echo: true });
   o3.orch.start({ accountId: 'acc-1' });
@@ -238,7 +238,7 @@ await leg('⑪b', async () => {
   o3.orch.sendCode('acc-1', CODE);
   o3.getFake().emit(S_ERR);
   const l3 = o3.broadcasts[o3.broadcasts.length - 1].signin;
-  ok(l3.phase === 'failed' && /OAuth error/.test(l3.error || '') && !o3.broadcasts.some((b) => carries(b, CODE)), '⑪b CONTROL: a worded error after the code → that line, no code', l3);
+  ok(l3.phase === 'failed' && gateOf(/OAuth error/.test(l3.error || '')) && !o3.broadcasts.some((b) => carries(b, CODE)), '⑪b CONTROL: a worded error after the code → that line, no code', l3);
 });
 await leg('⑪c', async () => {
   const OM = require(path.join(ROOT, 'src/oat-mint-model.js'));
@@ -266,15 +266,15 @@ await leg('⑫', async () => {
   orch.releaseSocket(other);
   await sleep(80);
   const last = broadcasts[broadcasts.length - 1].signin;
-  ok(last.phase === 'cancelled' && fake.killed, '⑫ CLAIM 4: the last holder’s socket closed, nobody re-held → cancelled + the PTY killed', { phase: last.phase, killed: fake.killed });
+  ok(last.phase === 'cancelled' && verdictOf(fake.killed), '⑫ CLAIM 4: the last holder’s socket closed, nobody re-held → cancelled + the PTY killed', { phase: last.phase, killed: fake.killed });
   // the WS layer's seam reaches the HUB instance
   const h = newOrch({ orphanMs: 0, hub: true });
   h.orch.start({ accountId: 'acc-1' }); h.getFake().emit(S_URL);
   ok(SIGNIN.socketHold(sock, { accountId: 'acc-1', id: h.orch.get('acc-1').id }) === true, '⑫ socketHold (ws-handler `claude-signin-hold`) holds the hub’s run');
   SIGNIN.socketClosed(sock); await sleep(30);
-  ok(h.orch.get('acc-1').phase === 'cancelled' && h.getFake().killed, '⑫ socketClosed (ws-handler close) ends a run nobody holds', h.orch.get('acc-1'));
+  ok(h.orch.get('acc-1').phase === 'cancelled' && verdictOf(h.getFake().killed), '⑫ socketClosed (ws-handler close) ends a run nobody holds', h.orch.get('acc-1'));
   const wsSrc = fs.readFileSync(path.join(ROOT, 'src/ws-handler.js'), 'utf8');
-  ok(/case 'claude-signin-hold':[\s\S]{0,200}socketHold\(ws, data\)/.test(wsSrc) && /ws\.on\('close'[\s\S]{0,400}socketClosed\(ws\)/.test(wsSrc), '⑫ wiring: ws-handler hands the hold and the close to the ORCH');
+  ok(gateOf(/case 'claude-signin-hold':[\s\S]{0,200}socketHold\(ws, data\)/.test(wsSrc)) && verdictOf(/ws\.on\('close'[\s\S]{0,400}socketClosed\(ws\)/.test(wsSrc)), '⑫ wiring: ws-handler hands the hold and the close to the ORCH');
 });
 
 // ⑬ debris: the REAL AccountManager
@@ -300,7 +300,7 @@ await leg('⑬', async () => {
   // a success converts it: finalize with a login clears the mark — the next attempt makes a NEW row
   fs.writeFileSync(path.join(am.subDir(busyId), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'at-x', refreshToken: 'rt', expiresAt: Date.now() + 3600e3, email: 'me@co.example' } }));
   const fin = am.finalizeSubscription(busyId);
-  ok(fin.loggedIn && !am.pendingSignins().some((p) => p.id === busyId), '⑬ a success converts the row (finalize clears the mark — an account now)', am.pendingSignins());
+  ok(gateOf(fin.loggedIn) && !am.pendingSignins().some((p) => p.id === busyId), '⑬ a success converts the row (finalize clears the mark — an account now)', am.pendingSignins());
   ok(am.pendingSignin({ busy: () => false }).id !== busyId, '⑬ … and the next attempt never reuses a signed-in row');
   // the sweep: past the TTL since its mark / its last run, no live run ⇒ removed at the next start; the others stay
   const termRow = am.createSubscription({ name: 'Terminal add' }).id; // the terminal Add flow's row: unmarked
@@ -309,7 +309,7 @@ await leg('⑬', async () => {
   orch.start({ accountId: liveRow }); fake.emit(S_URL); // live ⇒ kept
   const left = new Set(am.list().accounts.map((a) => a.id));
   ok(am.pendingSignins().filter((p) => p.id !== liveRow).length === 0, '⑬ the next start sweeps every marked never-signed-in row past the TTL', am.pendingSignins());
-  ok(left.has(busyId) && left.has(termRow) && left.has(liveRow), '⑬ … never the signed-in row, the terminal-Add row or the row with a live run', [...left]);
+  ok(gateOf(left.has(busyId)) && gateOf(left.has(termRow)) && verdictOf(left.has(liveRow)), '⑬ … never the signed-in row, the terminal-Add row or the row with a live run', [...left]);
   orch.cancel(liveRow);
   // at boot: a marked row past the TTL goes when the ORCH is created
   const old = am.createSubscription({ signinPending: true }).id;
@@ -317,7 +317,7 @@ await leg('⑬', async () => {
   mk();
   ok(!am.get(old), '⑬ at boot (the ORCH’s creation) a marked row past the TTL is swept');
   const routeSrc = fs.readFileSync(path.join(ROOT, 'src/server/account-usage-routes.js'), 'utf8');
-  ok(/req\.body\.signin === true[\s\S]{0,120}accounts\.pendingSignin\(\{ busy: \(aid\) => claudeSignin\.isLive\(aid\) \}\)/.test(routeSrc), '⑬ wiring: POST /api/accounts/subscription {signin:true} → accounts.pendingSignin (busy = a live run)');
+  ok(verdictOf(/req\.body\.signin === true[\s\S]{0,120}accounts\.pendingSignin\(\{ busy: \(aid\) => claudeSignin\.isLive\(aid\) \}\)/.test(routeSrc)), '⑬ wiring: POST /api/accounts/subscription {signin:true} → accounts.pendingSignin (busy = a live run)');
 });
 
 // ⑭ REAL node-pty + the REAL helper + a fake `claude` (sh), observed through /proc
@@ -347,7 +347,7 @@ printf 'Paste code here if prompted > '
     routes['POST /api/accounts/:id/signin']({ params: { id: 'acc-p1' } }, res);
     const s = await waitPhase(bc, 'waiting-code');
     const t = treeOf(o, 'acc-p1');
-    ok(s && s.phase === 'waiting-code' && t.pid && t.kids.length >= 1 && [t.pid, ...t.kids].every((p) => alive(p) === 'alive'), '⑭ (setup) a real pty: the helper + the fake claude are up, the screen read to waiting-code', { phase: s && s.phase, t });
+    ok(gateOf(s) && s.phase === 'waiting-code' && gateOf(t.pid) && t.kids.length >= 1 && verdictOf([t.pid, ...t.kids].every((p) => alive(p) === 'alive')), '⑭ (setup) a real pty: the helper + the fake claude are up, the screen read to waiting-code', { phase: s && s.phase, t });
     routes['DELETE /api/accounts/:id/signin']({ params: { id: 'acc-p1' } }, res);
     const ms = await goneWithin([t.pid, ...t.kids], 1500);
     ok(ms >= 0 && !fs.existsSync(t.scratch), `⑭ CLAIM 4: close (DELETE …/signin) → helper + grandchild gone in ${ms} ms (≤ 1.5 s), the scratch removed`, { ms, scratch: fs.existsSync(t.scratch), states: [t.pid, ...t.kids].map(alive) });
@@ -371,7 +371,7 @@ printf 'Paste code here if prompted > '
     await waitPhase(bc, 'waiting-code');
     o.sendCode('acc-p3', CODE);
     const s = await waitPhase(bc, 'failed');
-    ok(s && s.phase === 'failed' && !bc.some((b) => carries(b, CODE)) && !carries(o.get('acc-p3'), CODE), '⑭ CLAIM 2 on a real tty: the code echoed by the line discipline, a silent exit 1 → failed, no broadcast / GET answer holds the code', { error: s && s.error });
+    ok(gateOf(s) && s.phase === 'failed' && !bc.some((b) => carries(b, CODE)) && !carries(o.get('acc-p3'), CODE), '⑭ CLAIM 2 on a real tty: the code echoed by the line discipline, a silent exit 1 → failed, no broadcast / GET answer holds the code', { error: s && s.error });
   }
 });
 
@@ -385,7 +385,7 @@ await leg('⑮', async () => {
     orch.start({ accountId: 'acc-1' });
     for (let i = 0; i < CAP_SCREEN.length; i += size) getFake().emit(CAP_SCREEN.slice(i, i + size));
     const g = orch.get('acc-1');
-    ok(g.phase === 'waiting-code' && g.url === CAP_URL && broadcasts.some((b) => b.signin.phase === 'waiting-code' && b.signin.url === CAP_URL) && g.rawHint === null, `⑮ the REAL 2.1.308 screen in ${size}-byte chunks → waiting-code with its exact URL, no raw cue (base: «starting», url null, for 10 minutes)`, g);
+    ok(g.phase === 'waiting-code' && g.url === CAP_URL && gateOf(broadcasts.some((b) => b.signin.phase === 'waiting-code' && b.signin.url === CAP_URL)) && g.rawHint === null, `⑮ the REAL 2.1.308 screen in ${size}-byte chunks → waiting-code with its exact URL, no raw cue (base: «starting», url null, for 10 minutes)`, g);
     orch.cancel('acc-1');
   }
 });
@@ -409,14 +409,14 @@ await leg('⑯', async () => {
   const g = orch.get('acc-1');
   ok(g.rawHint === 'stalled' && g.phase === 'starting' && !g.url && atRef === 'unknown', `⑯ no link N (${N} ms) after the CLI's first output → 'stalled' (the raw screen), said after ${Date.now() - t0} ms — never before N (a timer for N − 1 ms set in the same turn found '${atRef}')`, g);
   const scr = orch.screen('acc-1', 0);
-  ok(scr && /never seen/.test(scr.data) && scr.to === scr.data.length && !scr.reset, '⑯ GET …/signin/screen = the bytes the CLI wrote', scr && scr.data.slice(0, 60));
+  ok(gateOf(scr) && gateOf(/never seen/.test(scr.data)) && scr.to === scr.data.length && !scr.reset, '⑯ GET …/signin/screen = the bytes the CLI wrote', scr && scr.data.slice(0, 60));
   const tail = orch.screen('acc-1', scr.to - 7);
   ok(tail.data === scr.data.slice(-7) && tail.from === scr.to - 7, '⑯ …from an offset: only what the page lacks');
-  ok(broadcasts.every((b) => !JSON.stringify(b).includes('never seen')), '⑯ the screen itself is never broadcast — only its cue');
+  ok(verdictOf(broadcasts.every((b) => !JSON.stringify(b).includes('never seen'))), '⑯ the screen itself is never broadcast — only its cue');
   const sc = orch.sendCode('acc-1', CODE);
-  ok(sc.ok && orch.get('acc-1').phase === 'connecting' && getFake().writes.join('') === CODE + '\r', '⑯ the raw screen\'s code box: a code is taken while the reader placed nothing (starting + the cue) and reaches the PTY', sc);
+  ok(gateOf(sc.ok) && orch.get('acc-1').phase === 'connecting' && getFake().writes.join('') === CODE + '\r', '⑯ the raw screen\'s code box: a code is taken while the reader placed nothing (starting + the cue) and reaches the PTY', sc);
   const after = orch.screen('acc-1', 0);
-  ok(!after.data.includes(CODE) && after.data.includes('•'.repeat(CODE.length)), '⑯ the tty echoes the code onto the screen — the raw screen reads it as •', after.data.slice(-60));
+  ok(!after.data.includes(CODE) && verdictOf(after.data.includes('•'.repeat(CODE.length))), '⑯ the tty echoes the code onto the screen — the raw screen reads it as •', after.data.slice(-60));
   getFake().emit(S_OK);
   ok(orch.get('acc-1').phase === 'connected', '⑯ the pasted code still completes the login (connected)', orch.get('acc-1'));
   // flip-back: an unknown line, then the reader recognises the screen ⇒ the cue clears
@@ -431,7 +431,7 @@ await leg('⑯', async () => {
   const routes = {}; registerSigninRoutes({ post: () => { }, get: (p, h) => { routes[p] = h; }, delete: () => { } }, { signin: orch, isAgentBearer: (req) => !!req.agent });
   let code = 0, body = null, hdr = {}; const res = { status: (c) => { code = c; return res; }, json: (b) => { body = b; return res; }, set: (k, v) => { hdr[k] = v; return res; } };
   routes['/api/accounts/:id/signin/screen']({ params: { id: 'acc-1' }, query: { from: '0' } }, res);
-  ok(body && body.screen && hdr['Cache-Control'] === 'no-store', '⑯ GET …/signin/screen answers the page (no-store)');
+  ok(gateOf(body) && gateOf(body.screen) && hdr['Cache-Control'] === 'no-store', '⑯ GET …/signin/screen answers the page (no-store)');
   routes['/api/accounts/:id/signin/screen']({ params: { id: 'acc-1' }, query: {}, agent: true }, res);
   ok(code === 403, '⑯ …an agent token is refused by name (the screen is the person\'s own)');
   ok(!('screen' in orch.get('acc-1')) && !JSON.stringify(orch.get('acc-1')).includes('never'), '⑯ publicSignin never carries the screen');
@@ -472,10 +472,10 @@ process.stdin.on('data', (d) => { buf += d; if (!/[\\r\\n]/.test(buf)) return;
     const { o, bc } = mk(REAL);
     o.start({ accountId: 'acc-r1' });
     const s = await until(() => o.get('acc-r1').phase === 'waiting-code' && o.get('acc-r1'));
-    ok(s && s.url === CAP_URL && s.rawHint === null, '⑰ a REAL tty + the REAL helper over a fake that prints the 2.1.308 capture → waiting-code, the exact URL', o.get('acc-r1'));
+    ok(gateOf(s) && s.url === CAP_URL && s.rawHint === null, '⑰ a REAL tty + the REAL helper over a fake that prints the 2.1.308 capture → waiting-code, the exact URL', o.get('acc-r1'));
     o.sendCode('acc-r1', CODE);
     const c = await until(() => o.get('acc-r1').phase === 'connected' && o.get('acc-r1'));
-    ok(c && c.phase === 'connected' && !bc.some((b) => carries(b, CODE)), '⑰ …the code typed into it → the helper saves the credential → connected (no broadcast holds the code)', o.get('acc-r1'));
+    ok(gateOf(c) && c.phase === 'connected' && !bc.some((b) => carries(b, CODE)), '⑰ …the code typed into it → the helper saves the credential → connected (no broadcast holds the code)', o.get('acc-r1'));
   }
   // an UNKNOWN screen through a REAL tty: the cue within N, the code still logs in
   {
@@ -484,11 +484,11 @@ process.stdin.on('data', (d) => { buf += d; if (!/[\\r\\n]/.test(buf)) return;
     const t0 = Date.now();
     o.start({ accountId: 'acc-r2' });
     const s = await until(() => o.get('acc-r2').rawHint === 'stalled' && o.get('acc-r2'), 5000);
-    ok(s && s.phase === 'starting' && Date.now() - t0 >= N, `⑰ an unknown screen on a real tty → the raw cue ('stalled') ${Date.now() - t0} ms after start (N = ${N} ms after the first output)`, o.get('acc-r2'));
-    ok(/never seen/.test((o.screen('acc-r2', 0) || {}).data || ''), '⑰ …its raw screen holds what the CLI printed');
+    ok(gateOf(s) && s.phase === 'starting' && Date.now() - t0 >= N, `⑰ an unknown screen on a real tty → the raw cue ('stalled') ${Date.now() - t0} ms after start (N = ${N} ms after the first output)`, o.get('acc-r2'));
+    ok(verdictOf(/never seen/.test((o.screen('acc-r2', 0) || {}).data || '')), '⑰ …its raw screen holds what the CLI printed');
     o.sendCode('acc-r2', CODE);
     const c = await until(() => o.get('acc-r2').phase === 'connected' && o.get('acc-r2'));
-    ok(c && c.phase === 'connected', '⑰ …and the code pasted under the raw screen completes the login', o.get('acc-r2'));
+    ok(gateOf(c) && c.phase === 'connected', '⑰ …and the code pasted under the raw screen completes the login', o.get('acc-r2'));
   }
   // ONE run per account + the TTL's scope (主开发's hypothesis for the naive41 dead terminal): a run's TTL kills its OWN
   // helper tree only — a second PTY on the SAME account dir (the tour's terminal road) and another account's run live on
@@ -499,7 +499,7 @@ process.stdin.on('data', (d) => { buf += d; if (!/[\\r\\n]/.test(buf)) return;
     const j = o.start({ accountId: 'acc-t1' });
     other.start({ accountId: 'acc-t2' });
     await until(() => o.get('acc-t1').phase === 'waiting-code' && other.get('acc-t2').phase === 'waiting-code');
-    ok(j.ok && j.joined === true, '⑰ a second start on the live account JOINS (one helper, one PTY)');
+    ok(gateOf(j.ok) && j.joined === true, '⑰ a second start on the live account JOINS (one helper, one PTY)');
     const pty = require('node-pty');
     const twin = pty.spawn(process.execPath, [HELPER, '--config-dir', acc.subDir('acc-t1'), '--claude', HANG], { name: 'xterm-256color', cols: 120, rows: 30, cwd: dir, env: { PATH: process.env.PATH, HOME: dir, LANG: 'C.UTF-8', TERM: 'xterm-256color' } });
     let twinOut = ''; twin.onData((d) => { twinOut += d; });
@@ -510,9 +510,9 @@ process.stdin.on('data', (d) => { buf += d; if (!/[\\r\\n]/.test(buf)) return;
     const seen = new Map([twin.pid, ...twinKids, theirs, ...theirKids].map((q) => [q, comm(q)])); // the names as settled — a red names what went
     await until(() => o.get('acc-t1').phase === 'failed', 3000);
     await sleep(400);
-    ok(o.get('acc-t1').phase === 'failed' && [mine, ...mineKids].every((p) => alive(p) !== 'alive'), '⑰ the TTL ends its own run: its helper + grandchild gone', [mine, ...mineKids].map(alive));
-    ok([twin.pid, ...twinKids].every((p) => alive(p) === 'alive') && twinKids.length >= 1, '⑰ a TTL never kills another PTY on the SAME account dir (the same helper script, the same config dir)', [twin.pid, ...twinKids].map((p) => `${seen.get(p)}:${alive(p)}`));
-    ok([theirs, ...theirKids].every((p) => alive(p) === 'alive') && other.get('acc-t2').phase === 'waiting-code', '⑰ …nor another account\'s run', [theirs, ...theirKids].map((p) => `${seen.get(p)}:${alive(p)}`));
+    ok(o.get('acc-t1').phase === 'failed' && verdictOf([mine, ...mineKids].every((p) => alive(p) !== 'alive')), '⑰ the TTL ends its own run: its helper + grandchild gone', [mine, ...mineKids].map(alive));
+    ok(gateOf([twin.pid, ...twinKids].every((p) => alive(p) === 'alive')) && twinKids.length >= 1, '⑰ a TTL never kills another PTY on the SAME account dir (the same helper script, the same config dir)', [twin.pid, ...twinKids].map((p) => `${seen.get(p)}:${alive(p)}`));
+    ok(gateOf([theirs, ...theirKids].every((p) => alive(p) === 'alive')) && other.get('acc-t2').phase === 'waiting-code', '⑰ …nor another account\'s run', [theirs, ...theirKids].map((p) => `${seen.get(p)}:${alive(p)}`));
     try { twin.kill('SIGKILL'); } catch { }
     other.cancel('acc-t2');
   }
@@ -546,12 +546,12 @@ await leg('⑱', async () => {
     return { ok: !!(r && r.ok), made, mark, gone: !!scratch && !fs.existsSync(scratch) };
   };
   const me = PIm.identityOf(process.pid), od = orderOf(SIGNIN);
-  ok(od.ok && od.made[0] === OMk.OWNER_FILE && od.made.includes('open-url') && od.mark && od.mark.pid === process.pid && me && String(od.mark.starttime) === String(me.starttime) && od.gone,
+  ok(gateOf(od.ok) && od.made[0] === OMk.OWNER_FILE && gateOf(od.made.includes('open-url')) && gateOf(od.mark) && od.mark.pid === process.pid && gateOf(me) && String(od.mark.starttime) === String(me.starttime) && verdictOf(od.gone),
     '⑱ r1213: the scratch folder\'s FIRST file is this hub\'s owner mark (its pid and start), then the opener; the run\'s end removes the folder, the mark with it', od);
   const MK = "    try { OM.writeMark(scratch, ownerId); } catch (e) { OM.removeMarked(scratch); throw e; }", ENV = "    const e = mintEnvOf(agentEnv(env), { home: scratch, configDir: dir, browser: opener });\n";
   const fM = SRC.split(MK).length - 1, fE = SRC.split(ENV).length - 1;
   const odR = fM === 1 && fE === 1 ? orderOf(copyOf(SRC.split(MK).join('').split(ENV).join('    OM.writeMark(scratch, ownerId);\n' + ENV))) : null;
-  ok(!!odR && odR.ok && odR.made[0] !== OMk.OWNER_FILE && odR.made.includes(OMk.OWNER_FILE), '⑱ RED — the mark written after the opener (its anchors found once; the copy\'s run still starts): the folder\'s first file is not the mark — the order leg goes red there', { fM, fE, made: odR && odR.made });
+  ok(!!odR && gateOf(odR.ok) && odR.made[0] !== OMk.OWNER_FILE && verdictOf(odR.made.includes(OMk.OWNER_FILE)), '⑱ RED — the mark written after the opener (its anchors found once; the copy\'s run still starts): the folder\'s first file is not the mark — the order leg goes red there', { fM, fE, made: odR && odR.made });
   // r1275 (3): A MARK THAT FAILS FAILS THE START — written one byte short, or a write that throws: the start throws (its route answers
   // 500, as a failed mkdtemp) and leaves NO folder behind
   const failOf = (mod, mode) => {
@@ -571,7 +571,7 @@ await leg('⑱', async () => {
   const UNCHK = "    if (n !== b.length) throw Object.assign(new Error(`the owner mark was written short (${n} of ${b.length} bytes)`), { code: 'ESHORTMARK' });\n";
   const fU = OMSRC.split(UNCHK).length - 1;
   const fsR = fU === 1 ? withOwnerMark(OMSRC.split(UNCHK).join(''), () => failOf(copyOf(SRC), 'short')) : null;
-  ok(!!fsR && fsR.hit === 1 && fsR.started, '⑱ RED — the mark\'s write unchecked (an owner-mark copy under the sign-in copy; its anchor found once; the plant proves itself: the write was made short): the start GOES over a torn mark — the leg above goes red there', fsR);
+  ok(!!fsR && fsR.hit === 1 && verdictOf(fsR.started), '⑱ RED — the mark\'s write unchecked (an owner-mark copy under the sign-in copy; its anchor found once; the plant proves itself: the write was made short): the start GOES over a torn mark — the leg above goes red there', fsR);
   // the sweep: only a GONE hub's marked folder past the age bar, or an OLDER release's folder its opener proves the product's
   const deadId = JSON.parse(require('child_process').execFileSync(process.execPath, ['-e', `console.log(JSON.stringify(require(${JSON.stringify(path.join(ROOT, 'src/proc-identity.js'))}).identityOf(process.pid)))`], { encoding: 'utf8' }));
   const liveKid = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
@@ -594,7 +594,7 @@ await leg('⑱', async () => {
     const mk = (mod, d, log = () => { }) => mod.create({ accounts, claudeCmd: '/opt/claude', nodeCmd: '/opt/node', helperPath: '/opt/helper.mjs', env: SECRET_ENV, tmpRoot: d.sw, spawnPty: () => makeFake(), log });
     const d = plant('sweep-'), logs = []; mk(SIGNIN, d, (l) => logs.push(l));
     const L = left(d);
-    ok(!!liveId && !L.dead && L.fresh && L.live && L.unmarked && L.other && !L.legacyOld && L.legacyYoung && L.torn && logs.some((l) => /boot sweep: removed 2 /.test(l)),
+    ok(!!liveId && !L.dead && gateOf(L.fresh) && gateOf(L.live) && gateOf(L.unmarked) && gateOf(L.other) && !L.legacyOld && gateOf(L.legacyYoung) && gateOf(L.torn) && verdictOf(logs.some((l) => /boot sweep: removed 2 /.test(l))),
       '⑱ r1213 + r1275 (1): the start sweep removes the folder a GONE hub marked and an OLDER release\'s unmarked folder its opener proves the product\'s, each older than the life + 5 min (their whole trees); a gone hub\'s FRESH folder, a LIVE hub\'s, an unmarked one of another opener, an older release\'s YOUNG one and one with a TORN mark stay; a non-sign-in dir stays', { L, logs });
     // RED (a) — the release's sweep by AGE alone (the mark test cut; its anchor found once): the hour-old UNMARKED folder is removed
     const A = "        if (!OM.sweepable(p, { name: 'open-url', bytes: OPENER })) continue;   // r1275 (1): an older release's unmarked folder, proven by its opener\n        OM.removeMarked(p, { last: 'open-url' }); n++;\n", B = "        fs.rmSync(p, { recursive: true, force: true }); n++;\n";   // stale-pins: kept (B is the release's line, this RED's replacement)
@@ -607,11 +607,11 @@ await leg('⑱', async () => {
     // RED (b) — the mark test ALONE (the age bar cut): the gone hub's FRESH folder is removed
     const dB = plant('sweep-red-mark-'); if (fG === 1) mk(copyOf(SRC.split(AGE).join(NOAGE)), dB);
     const LB = left(dB);
-    ok(fG === 1 && !LB.fresh && LB.unmarked, '⑱ RED (b) — the mark test alone without the age bar (its anchor found once): the gone hub\'s FRESH marked folder is removed (a live run in another pid space would be) — the leg above goes red there', { fG, LB });
+    ok(fG === 1 && !LB.fresh && verdictOf(LB.unmarked), '⑱ RED (b) — the mark test alone without the age bar (its anchor found once): the gone hub\'s FRESH marked folder is removed (a live run in another pid space would be) — the leg above goes red there', { fG, LB });
     // RED (c) — r1213's rule (no proof by the opener): the older release's old folder is KEPT for ever — the leg above goes red there
     const dC = plant('sweep-red-legacy-'); if (fL === 1) mk(copyOf(SRC.split(LEG1).join('OM.sweepable(p, null)')), dC);
     const LC = left(dC);
-    ok(fL === 1 && LC.legacyOld && !LC.dead, '⑱ RED (c) — without the opener\'s proof (its anchor found once; the plant proves itself: the dead-marked one went): the older release\'s hour-old folder is KEPT for ever — the leg above goes red there', { fL, LC });
+    ok(fL === 1 && gateOf(LC.legacyOld) && !LC.dead, '⑱ RED (c) — without the opener\'s proof (its anchor found once; the plant proves itself: the dead-marked one went): the older release\'s hour-old folder is KEPT for ever — the leg above goes red there', { fL, LC });
     // THE TORN MARK, on the helper itself: never judged by contents — RED: an owner-mark copy without that line takes it by its opener
     const TORN = "  try { fs.lstatSync(path.join(dir, OWNER_FILE)); return false; } catch (e) { if (!e || e.code !== 'ENOENT') return false; }   // a mark that does not parse (or cannot be told absent): kept, never judged by contents\n";
     const fT = OMSRC.split(TORN).length - 1, legacy = { name: 'open-url', bytes: SIGNIN.OPENER };
@@ -636,11 +636,11 @@ await leg('⑱', async () => {
     const hf = halfOf(SIGNIN, 'sweep-half-');
     const LASTL = "        OM.removeMarked(p, { last: 'open-url' }); n++;\n", fH = SRC.split(LASTL).length - 1;
     const hfR = fH === 1 ? halfOf(copyOf(SRC.split(LASTL).join("        OM.removeMarked(p); n++;\n")), 'sweep-half-red-') : null;   // stale-pins: kept (the removal without `last`: this RED's replacement)
-    ok(hf.refused === 1 && hf.after1.opener && hf.after1.rest && hf.gone, '⑱ r1275 (its read): an older release\'s folder whose removal was cut short KEEPS its opener (taken second to last), so the next start takes the rest', hf);
-    ok(!!hfR && hfR.refused === 1 && !hfR.after1.opener && hfR.after1.rest && !hfR.gone, '⑱ RED — the removal without `last` (its anchor found once): the opener goes first, the rest is unproven and KEPT for ever — the leg above goes red there', { fH, hfR });
+    ok(hf.refused === 1 && gateOf(hf.after1.opener) && gateOf(hf.after1.rest) && verdictOf(hf.gone), '⑱ r1275 (its read): an older release\'s folder whose removal was cut short KEEPS its opener (taken second to last), so the next start takes the rest', hf);
+    ok(!!hfR && hfR.refused === 1 && !hfR.after1.opener && gateOf(hfR.after1.rest) && !hfR.gone, '⑱ RED — the removal without `last` (its anchor found once): the opener goes first, the rest is unproven and KEPT for ever — the leg above goes red there', { fH, hfR });
   } finally { try { liveKid.kill('SIGKILL'); } catch { } }
 });
 
 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { }
 console.log(`\ntest-claude-signin: ${pass} passed, ${fail} failed (${Date.now() - T_START} ms)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

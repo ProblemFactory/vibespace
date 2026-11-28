@@ -17,8 +17,8 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const express = require(path.join(REPO, 'node_modules/express'));
 
 let pass = 0, fail = 0;
-const okc = (c, n, e) => ok(n, c, e); // condition-first twin for sections 8–9 (review-caught: the first version passed (cond, name) into ok(name, cond) — every assert was vacuous)
-const ok = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+const okc = (c, n, e) => ok(n, verdictOf(c), e); // condition-first twin for sections 8–9 (review-caught: the first version passed (cond, name) into ok(name, cond) — every assert was vacuous)
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pages-'));
 const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pages-src-'));
@@ -38,7 +38,7 @@ const base = `http://127.0.0.1:${srv.address().port}`;
 
 // 1. publish → record + stable URL
 const r1 = pages.publish({ srcPath: srcFile, name: 'Canvas' });
-ok('publish returns a page with /p/ URL', r1.page && /^https:\/\/inst\.example\/p\/pg[a-z0-9]{10}$/.test(r1.page.url), JSON.stringify(r1));
+ok('publish returns a page with /p/ URL', gateOf(r1.page) && verdictOf(/^https:\/\/inst\.example\/p\/pg[a-z0-9]{10}$/.test(r1.page.url)), JSON.stringify(r1));
 const id = r1.page.id;
 
 // 2. PRIVATE by default: unauthed 401, authed 200 + CSP sandbox
@@ -55,34 +55,34 @@ authed = true;
 res = await fetch(`${base}/p/${id}`);
 const shell = await res.text();
 const shellCsp = res.headers.get('content-security-policy') || '';
-ok('authed viewer gets the shell', res.status === 200 && /<iframe[^>]+src="\/p\/pg[a-z0-9]{10}\/raw"/.test(shell), shell.slice(0, 200));
+ok('authed viewer gets the shell', res.status === 200 && verdictOf(/<iframe[^>]+src="\/p\/pg[a-z0-9]{10}\/raw"/.test(shell)), shell.slice(0, 200));
 ok('shell carries NO user content (only the frame)', !shell.includes('window.x=1') && !shell.includes('<title>v1<')); // 'v1' alone false-positives on the SW cache name vibespace-pages-v1
 ok('shell is NOT sandboxed (real origin — that is the whole point)', !/sandbox/.test(shellCsp), shellCsp);
-ok('shell CSP allows only its own frame', /frame-src 'self'/.test(shellCsp) && /default-src 'none'/.test(shellCsp), shellCsp);
+ok('shell CSP allows only its own frame', gateOf(/frame-src 'self'/.test(shellCsp)) && verdictOf(/default-src 'none'/.test(shellCsp)), shellCsp);
 // geo/storage bridge (B-74de, 2.369.7): the shell carries the nonce'd bridge
 // script — OUR content, not the page's; the sandbox stays untouched
-ok('shell ships the geo/storage bridge under a per-request script nonce', /script-src 'nonce-/.test(shellCsp) && /vibeBridge/.test(shell) && /vp_pg[a-z0-9]{10}_/.test(shell));
-ok('…and the bridge verifies the message SOURCE and namespaces storage keys', /e\.source!==f\.contentWindow/.test(shell) && /localStorage\.setItem\(PFX\+String/.test(shell));
-ok('…nonce differs per request (no static nonce)', await (async () => { const r2 = await fetch(`${base}/p/${id}`); await r2.text(); const nonceOf = (csp) => csp.match(/'nonce-([^']+)'/)?.[1]; const n1 = nonceOf(shellCsp); const n2 = nonceOf(r2.headers.get('content-security-policy') || ''); return !!n1 && !!n2 && n1 !== n2; })());
+ok('shell ships the geo/storage bridge under a per-request script nonce', gateOf(/script-src 'nonce-/.test(shellCsp)) && gateOf(/vibeBridge/.test(shell)) && verdictOf(/vp_pg[a-z0-9]{10}_/.test(shell)));
+ok('…and the bridge verifies the message SOURCE and namespaces storage keys', gateOf(/e\.source!==f\.contentWindow/.test(shell)) && verdictOf(/localStorage\.setItem\(PFX\+String/.test(shell)));
+ok('…nonce differs per request (no static nonce)', verdictOf(await (async () => { const r2 = await fetch(`${base}/p/${id}`); await r2.text(); const nonceOf = (csp) => csp.match(/'nonce-([^']+)'/)?.[1]; const n1 = nonceOf(shellCsp); const n2 = nonceOf(r2.headers.get('content-security-policy') || ''); return !!n1 && !!n2 && n1 !== n2; })()));
 // offline support (2.369.11): scope-limited SW + vibeBlob IDB lane
 res = await fetch(`${base}/p/sw.js`);
 const swBody = await res.text();
-ok('/p/sw.js serves the offline worker (scope-limited by location — can never touch the app)', res.status === 200 && /vibespace-pages-v1/.test(swBody) && /pg\[a-z0-9\]\{10\}/.test(swBody.replace(/\\/g, '\\')));
-ok('…network-first with a 4s cache fallback (online keeps auth + freshness; offline serves the last good copy)', /Promise\.race/.test(swBody) && /cache\.match\(e\.request\)/.test(swBody));
-ok('the shell registers the worker and serves vibeBlob (IndexedDB, on-demand get) alongside vibeStore', /serviceWorker' in navigator/.test(shell) && /vibeBlob/.test(shell) && /indexedDB\.open\('vibespace-pages'/.test(shell));
-ok('iframe sandbox attribute grants scripts but NEVER same-origin', /sandbox="[^"]*allow-scripts/.test(shell) && !/allow-same-origin/.test(shell), shell.slice(0, 400));
+ok('/p/sw.js serves the offline worker (scope-limited by location — can never touch the app)', res.status === 200 && gateOf(/vibespace-pages-v1/.test(swBody)) && verdictOf(/pg\[a-z0-9\]\{10\}/.test(swBody.replace(/\\/g, '\\'))));
+ok('…network-first with a 4s cache fallback (online keeps auth + freshness; offline serves the last good copy)', gateOf(/Promise\.race/.test(swBody)) && verdictOf(/cache\.match\(e\.request\)/.test(swBody)));
+ok('the shell registers the worker and serves vibeBlob (IndexedDB, on-demand get) alongside vibeStore', gateOf(/serviceWorker' in navigator/.test(shell)) && gateOf(/vibeBlob/.test(shell)) && verdictOf(/indexedDB\.open\('vibespace-pages'/.test(shell)));
+ok('iframe sandbox attribute grants scripts but NEVER same-origin', gateOf(/sandbox="[^"]*allow-scripts/.test(shell)) && !/allow-same-origin/.test(shell), shell.slice(0, 400));
 res = await fetch(`${base}/p/${id}/raw`);
 const rawBody = await res.text();
 const csp = res.headers.get('content-security-policy') || '';
-ok('authed viewer gets the page content on /raw', res.status === 200 && rawBody.includes('v1'));
-ok('CSP sandbox header present on the CONTENT (opaque origin — the XSS guard)', /sandbox/.test(csp) && /allow-scripts/.test(csp), csp);
+ok('authed viewer gets the page content on /raw', res.status === 200 && verdictOf(rawBody.includes('v1')));
+ok('CSP sandbox header present on the CONTENT (opaque origin — the XSS guard)', gateOf(/sandbox/.test(csp)) && verdictOf(/allow-scripts/.test(csp)), csp);
 ok('sandbox does NOT grant allow-same-origin (cookie isolation)', !/allow-same-origin/.test(csp), csp);
-ok('compat prelude injected BEFORE the page\'s own content', rawBody.includes('function mk()') && rawBody.indexOf('function mk()') < rawBody.indexOf('v1'), rawBody.slice(0, 160));
+ok('compat prelude injected BEFORE the page\'s own content', gateOf(rawBody.includes('function mk()')) && rawBody.indexOf('function mk()') < rawBody.indexOf('v1'), rawBody.slice(0, 160));
 // THE 2.366.1 FIX: crypto.randomUUID exists only in a SECURE CONTEXT, so over
 // plain http on a hostname/LAN IP it is undefined and the canvas editor hangs
 // every artboard forever. Measured on a real LAN origin: without the polyfill
 // 5/5 artboards stuck, with it 0/5. Loopback hid it (127.0.0.1 is trustworthy).
-ok('prelude polyfills crypto.randomUUID (insecure origins have none — the artboards hang without it)', rawBody.includes('randomUUID') && rawBody.includes('getRandomValues'), 'missing randomUUID polyfill');
+ok('prelude polyfills crypto.randomUUID (insecure origins have none — the artboards hang without it)', gateOf(rawBody.includes('randomUUID')) && verdictOf(rawBody.includes('getRandomValues')), 'missing randomUUID polyfill');
 {
   const { COMPAT_PRELUDE } = require(path.join(REPO, 'src/server/published-pages.js'));
   const vm = require('vm');
@@ -90,7 +90,7 @@ ok('prelude polyfills crypto.randomUUID (insecure origins have none — the artb
   ctx.crypto = ctx.window.crypto; ctx.window.window = ctx.window;
   vm.createContext(ctx);
   vm.runInContext(COMPAT_PRELUDE.replace(/^<script>|<\/script>$/g, ''), ctx);
-  ok('the polyfill yields a REAL v4 uuid (getRandomValues, not Math.random)', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(ctx.crypto.randomUUID()), ctx.crypto.randomUUID());
+  ok('the polyfill yields a REAL v4 uuid (getRandomValues, not Math.random)', verdictOf(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(ctx.crypto.randomUUID())), ctx.crypto.randomUUID());
   // and it must NOT replace a browser that already has one (https / loopback)
   const ctx2 = { Object, Uint8Array, window: { crypto: { getRandomValues: () => { }, randomUUID: () => 'native-uuid' } } };
   ctx2.crypto = ctx2.window.crypto; ctx2.window.window = ctx2.window;
@@ -99,15 +99,15 @@ ok('prelude polyfills crypto.randomUUID (insecure origins have none — the artb
 }
 { // and it lands inside <head> when there is one
   const withHead = require(path.join(REPO, 'src/server/published-pages.js')).injectShim(Buffer.from('<!doctype html><html><head><title>t</title></head><body>b</body></html>')).toString();
-  ok('shim lands right after <head…> when the document has one', /<head[^>]*><script>\(function\(\)\{function mk\(\)/.test(withHead) && withHead.includes('<body>b</body>'), withHead.slice(0, 120));
+  ok('shim lands right after <head…> when the document has one', gateOf(/<head[^>]*><script>\(function\(\)\{function mk\(\)/.test(withHead)) && verdictOf(withHead.includes('<body>b</body>')), withHead.slice(0, 120));
 }
 
 // 2b. review-caught belts: browser viewers get the login redirect, private = no-store
 authed = false;
 res = await fetch(`${base}/p/${id}`, { headers: { accept: 'text/html' }, redirect: 'manual' });
-ok('logged-out BROWSER viewer of a private page → /login redirect (no dead-end 401)', res.status === 302 && (res.headers.get('location') || '').includes('/login'), String(res.status));
+ok('logged-out BROWSER viewer of a private page → /login redirect (no dead-end 401)', res.status === 302 && verdictOf((res.headers.get('location') || '').includes('/login')), String(res.status));
 res = await fetch(`${base}/p/${id}/raw`, { headers: { accept: 'text/html' }, redirect: 'manual' });
-ok('the RAW route is gated identically (framing is not the protection)', res.status === 302 && (res.headers.get('location') || '').includes('/login'), String(res.status));
+ok('the RAW route is gated identically (framing is not the protection)', res.status === 302 && verdictOf((res.headers.get('location') || '').includes('/login')), String(res.status));
 authed = true;
 res = await fetch(`${base}/p/${id}`);
 ok('private page is no-store (never cached for shared machines)', (res.headers.get('cache-control') || '') === 'no-store');
@@ -120,7 +120,7 @@ ok('public page serves without login', res.status === 200);
 { // the page NAME reaches the shell's <title> — it is agent-chosen, so it must be escaped
   const r = pages.setFlags(id, { name: '</title><script>alert(1)</script>' });
   const s2 = await (await fetch(`${base}/p/${id}`)).text();
-  ok('shell escapes the page name (agent-chosen string in our own HTML)', !s2.includes('<script>alert(1)') && s2.includes('&lt;/title&gt;'), s2.slice(0, 240));
+  ok('shell escapes the page name (agent-chosen string in our own HTML)', !s2.includes('<script>alert(1)') && verdictOf(s2.includes('&lt;/title&gt;')), s2.slice(0, 240));
   pages.setFlags(id, { name: r.page ? 'Canvas' : 'Canvas' });
 }
 
@@ -129,7 +129,7 @@ fs.writeFileSync(srcFile, '<!doctype html><title>v2</title>');
 const r2 = pages.publish({ srcPath: srcFile });
 ok('re-publish upserts the SAME id (stable share URL)', r2.page.id === id, `${r2.page?.id} vs ${id}`);
 res = await fetch(`${base}/p/${id}/raw`);
-ok('re-publish serves the NEW snapshot', (await res.text()).includes('v2'));
+ok('re-publish serves the NEW snapshot', verdictOf((await res.text()).includes('v2')));
 
 // 5. refusals: non-html, missing file, malformed id (traversal shape)
 ok('non-html refused', !!pages.publish({ srcPath: path.join(REPO, 'package.json') }).error);
@@ -142,7 +142,7 @@ pages.remove(id);
 res = await fetch(`${base}/p/${id}`);
 // B-f694: a page that WAS published answers 410 with a named line (the link is gone, and says so); an id never
 // published stays 404
-ok('deleted page answers 410 "unpublished"', res.status === 410 && /unpublished/.test(await res.text()));
+ok('deleted page answers 410 "unpublished"', res.status === 410 && verdictOf(/unpublished/.test(await res.text())));
 ok('deleted page answers 410 on /raw too', (await fetch(`${base}/p/${id}/raw`)).status === 410);
 ok('store empty after delete', pages.list().length === 0);
 
@@ -261,17 +261,17 @@ ok('a fresh instance reloads the persisted store', pages2.list().length === 1 &&
 
 // 10. wiring pins (the unstaged-wiring class)
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-ok('the door class exempts /p/ (per-page gate doctrine; src/door.js, lifted verbatim out of src/auth.js by B3a)', read('src/door.js').includes("p.startsWith('/p/')"));
-ok('server.js wires create + registerRoutes', read('server.js').includes("published-pages.js').create") && read('server.js').includes('publishedPages.registerRoutes(app)'));
+ok('the door class exempts /p/ (per-page gate doctrine; src/door.js, lifted verbatim out of src/auth.js by B3a)', verdictOf(read('src/door.js').includes("p.startsWith('/p/')")));
+ok('server.js wires create + registerRoutes', gateOf(read('server.js').includes("published-pages.js').create")) && verdictOf(read('server.js').includes('publishedPages.registerRoutes(app)')));
 const fe = read('src/lib/file-explorer-ops.js');
-ok('explorer offers Publish page… for local html', /Publish page(…|\\u2026)/.test(fe) && fe.includes('_publishPageDialog'));
-ok('explorer dialog hits the pages API', fe.includes("'/api/pages/publish'") && fe.includes('/api/pages/by-path'));
+ok('explorer offers Publish page… for local html', gateOf(/Publish page(…|\\u2026)/.test(fe)) && verdictOf(fe.includes('_publishPageDialog')));
+ok('explorer dialog hits the pages API', gateOf(fe.includes("'/api/pages/publish'")) && verdictOf(fe.includes('/api/pages/by-path')));
 // 2.367.3: the dialog no longer joins location.origin ITSELF — utils.absUrl
 // does, preferring the instance's mapped public address (test-public-links
 // owns that behaviour; here we only pin that the dialog delegates).
-ok('dialog delegates link building to the shared helper (mapped instance URL, else browser origin)', fe.includes('absUrlShared') && !/location\.origin\s*\+/.test(fe));
+ok('dialog delegates link building to the shared helper (mapped instance URL, else browser origin)', gateOf(fe.includes('absUrlShared')) && !/location\.origin\s*\+/.test(fe));
 const cr = read('src/lib/chat-renderers.js');
-ok('Background Work sender-click opens the jobs panel (not a session lookup)', cr.includes("^Background Work · ") && cr.includes('openJobs'));
+ok('Background Work sender-click opens the jobs panel (not a session lookup)', gateOf(cr.includes("^Background Work · ")) && verdictOf(cr.includes('openJobs')));
 
 // 11. B-f694 (2026-10-01, 生活方式助手: a public page could only be overwritten by a placeholder — taking one down
 //     lived in the UI): the publishing agent unpublishes its OWN page or flips its visibility. "Own" = the list scope
@@ -421,4 +421,4 @@ srv.close();
 fs.rmSync(dir, { recursive: true, force: true });
 fs.rmSync(srcDir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

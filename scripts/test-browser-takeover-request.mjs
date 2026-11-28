@@ -28,7 +28,7 @@ const require = createRequire(import.meta.url);
 const R = require(path.join(ROOT, 'src/browser-takeover-request.js'));
 const A = require(path.join(ROOT, 'src/attention-model.js'));
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -49,7 +49,7 @@ console.log('① the record');
   eq([r.id, r.state, r.browserKey, r.profileId, r.ephemeral, r.asks, r.at, r.askedAt, r.takenAt, r.doneAt, r.how, r.parked, r.itemId], ['tr-0000aaaa', 'waiting', 'bk-aaaa', 'bp-bank', false, 1, T0, T0, 0, 0, null, false, null], 'a new request waits, one ask, nothing taken or done');
   ok(R.newRequest({ id: 'tr-0000bbbb', browserKey: 'bk-a', text: 'x' }).ephemeral === true, 'a request with no profile is about the conversation\'s OWN browser (ephemeral)');
   const long = R.newRequest({ id: 'tr-0000cccc', browserKey: 'bk-a', text: 'a'.repeat(400) });
-  ok([...long.text].length === R.LIMITS.textChars && long.text.endsWith('…'), `the agent's words are cut at ${R.LIMITS.textChars} code points, the cut said with …`, [...long.text].length);
+  ok([...long.text].length === R.LIMITS.textChars && verdictOf(long.text.endsWith('…')), `the agent's words are cut at ${R.LIMITS.textChars} code points, the cut said with …`, [...long.text].length);
   const cjk = R.newRequest({ id: 'tr-0000dddd', browserKey: 'bk-a', text: '请'.repeat(301) });
   ok([...cjk.text].length === 300, 'the bound counts CODE POINTS (a CJK sentence is cut at 300 characters, not bytes)');
   eq(R.newRequest({ id: 'tr-0000eeee', browserKey: 'bk-a', text: '  log in\n\n  then\tpress   Continue ' }).text, 'log in then press Continue', 'ONE line: line breaks, tabs and runs of spaces become one space');
@@ -57,7 +57,7 @@ console.log('① the record');
   eq([base({ url: 'javascript:alert(1)' }).url !== '', base({ url: 'bank.example/x' }).url, base({ url: 'https://a b' }).url], [true, '', ''], 'a url needs a scheme and no whitespace (a bare host / a spaced string is dropped) — the row draws it as text, never a link');
   ok([...base({ title: 't'.repeat(500) }).title].length === R.LIMITS.titleChars, `the tab title is bounded (${R.LIMITS.titleChars})`);
   eq(R.leaseKeyOf({ browserKey: 'bk-a', profileId: 'bp-x' }) + ' ' + R.leaseKeyOf({ browserKey: 'bk-a' }), 'bk-a|bp-x bk-a|ephemeral', 'the lease key: (browser key, profile) — the conversation\'s own browser is `|ephemeral` (the keeper\'s input key)');
-  ok(R.askVerdict({ text: '   ', lease: { browserKey: 'bk-a' } }).code === 'empty' && R.askVerdict({ text: 'x', lease: null }).code === 'no_browser' && R.askVerdict({ text: 'x', lease: { browserKey: 'bk-a' } }).ok, 'an ask needs words (empty) and a browser (no_browser), else it is filed');
+  ok(R.askVerdict({ text: '   ', lease: { browserKey: 'bk-a' } }).code === 'empty' && R.askVerdict({ text: 'x', lease: null }).code === 'no_browser' && verdictOf(R.askVerdict({ text: 'x', lease: { browserKey: 'bk-a' } }).ok), 'an ask needs words (empty) and a browser (no_browser), else it is filed');
 }
 
 console.log('② the state machine');
@@ -66,16 +66,16 @@ console.log('② the state machine');
   const tk = R.transition(r, 'take', { at: T0 + 1000, viewerId: 7 });
   eq([tk.ok, tk.changed, tk.from, tk.to, tk.rec.takenAt, tk.rec.takenBy], [true, true, 'waiting', 'taken', T0 + 1000, '7'], 'waiting ─take→ taken (when, by which view)');
   const again = R.transition(tk.rec, 'take', { at: T0 + 2000, viewerId: 8 });
-  ok(again.ok && !again.changed && again.rec.takenAt === T0 + 1000, 'a second takeover (another view, a pass) changes nothing — the same cycle');
+  ok(gateOf(again.ok) && !again.changed && again.rec.takenAt === T0 + 1000, 'a second takeover (another view, a pass) changes nothing — the same cycle');
   const hb = R.transition(tk.rec, 'handback', { at: T0 + 5000 });
   eq([hb.to, hb.rec.doneAt, hb.rec.how, hb.rec.takenBy], ['done', T0 + 5000, 'handback', null], 'taken ─handback (the person\'s explicit Hand back)→ done');
   const rel = R.transition(tk.rec, 'release', { at: T0 + 5000 });
   eq([rel.to, rel.rec.doneAt, rel.rec.takenBy], ['waiting', 0, null], 'taken ─release (idle / the view closed / a stop)→ WAITING again — nobody said it is done, it stays listed');
-  ok(R.transition(r, 'release', {}).ok && !R.transition(r, 'release', {}).changed, 'a release of a waiting request changes nothing');
+  ok(gateOf(R.transition(r, 'release', {}).ok) && !R.transition(r, 'release', {}).changed, 'a release of a waiting request changes nothing');
   eq([R.transition(r, 'done', { at: 9 }).to, R.transition(r, 'done', { at: 9 }).rec.how], ['done', 'done'], 'waiting ─done (the person\'s Done, no takeover)→ done');
   eq([R.transition(r, 'withdraw', {}).to, R.transition(tk.rec, 'withdraw', {}).to, R.transition(tk.rec, 'lease-gone', {}).rec.how], ['withdrawn', 'withdrawn', 'lease-gone'], 'waiting | taken ─withdraw / lease-gone→ withdrawn (how says which)');
   const closed = hb.rec;
-  ok(['take', 'handback', 'release', 'done', 'withdraw', 'lease-gone'].every((h) => R.transition(closed, h, {}).code === 'closed'), 'CONTROL: a Done on a request already done is refused closed — and so is every other move (a closed request never moves)');
+  ok(verdictOf(['take', 'handback', 'release', 'done', 'withdraw', 'lease-gone'].every((h) => R.transition(closed, h, {}).code === 'closed')), 'CONTROL: a Done on a request already done is refused closed — and so is every other move (a closed request never moves)');
   ok(R.transition(r, 'resolve', {}).code === 'bad_how', 'an unknown move is refused bad_how');
   eq(['explicit', 'continue', 'idle', 'viewer-left', 'stop', 'detach', 'whatever'].map(R.howOfHandback), ['handback', 'handback', 'release', 'release', 'release', 'release', 'release'], 'a handback the person CHOSE (Hand back, Hand back with a note) ends the request; every other cause releases it');
 }
@@ -107,7 +107,7 @@ console.log('⑤ the queue');
   const e = base({ id: 'tr-0000000e', at: T0 + 2000, browserKey: 'bk-e' });
   const q = R.queueOf([a, b, c, d, e], { viewer: { kind: 'owner' }, leaseHeld: (r) => r.browserKey !== 'bk-e', live: (r) => r.browserKey !== 'bk-b' });
   eq(q.map((x) => x.id), ['tr-0000000c', 'tr-0000000b', 'tr-0000000a'], 'only OPEN requests the viewer may see (the closed one out, the one whose lease is gone out); the driven one first, then the waiting longest-waiting first');
-  ok(q.every((x) => !('takenBy' in x)) && q.find((x) => x.id === 'tr-0000000b').live === false, 'no viewer id leaves the keeper; a conversation not running is marked (live: false)');
+  ok(gateOf(q.every((x) => !('takenBy' in x))) && q.find((x) => x.id === 'tr-0000000b').live === false, 'no viewer id leaves the keeper; a conversation not running is marked (live: false)');
   eq(R.waitingCount(q), 2, 'the count (title, badge) = the WAITING rows — a driven one is being done');
   eq(R.queueOf([a, b], { viewer: { kind: 'agent', browserKey: 'bk-a' } }).map((x) => x.id), ['tr-0000000a'], 'an agent\'s queue is its own request');
 }
@@ -116,18 +116,18 @@ console.log('⑥ the agent\'s words');
 {
   const r = base();
   const ans = R.askAnswer(r, {});
-  ok(/request tr-0000aaaa/.test(ans) && ans.includes('"Log in to the bank and solve the captcha"') && /waits until they hand back or you withdraw/.test(ans) && ans.includes('vibespace-browser ask-human --withdraw') && /end your turn now — the handback arrives as a message/.test(ans), 'the ask\'s answer: the id, the words, where the person sees it, the next verb WAITS, the withdraw, the turn may end');
-  ok(/asked again — the same request tr-0000aaaa \(no second row\)/.test(R.askAnswer(r, { reasserted: true })) && /cut at 300/.test(R.askAnswer(r, { cut: 300 })), 'a re-ask says it is the same request; a cut says so');
+  ok(gateOf(/request tr-0000aaaa/.test(ans)) && gateOf(ans.includes('"Log in to the bank and solve the captcha"')) && gateOf(/waits until they hand back or you withdraw/.test(ans)) && gateOf(ans.includes('vibespace-browser ask-human --withdraw')) && verdictOf(/end your turn now — the handback arrives as a message/.test(ans)), 'the ask\'s answer: the id, the words, where the person sees it, the next verb WAITS, the withdraw, the turn may end');
+  ok(gateOf(/asked again — the same request tr-0000aaaa \(no second row\)/.test(R.askAnswer(r, { reasserted: true }))) && verdictOf(/cut at 300/.test(R.askAnswer(r, { cut: 300 }))), 'a re-ask says it is the same request; a cut says so');
   const h = R.humanAskedRefusal(r, { handles: ['bank'], now: T0 + 120000 });
   eq([h.ok, h.code, h.handles, h.request.id, h.request.state, h.request.waitMs, h.request.pollMs], [false, 'human_asked', ['bank'], 'tr-0000aaaa', 'waiting', R.WAIT_MS, R.POLL_MS], 'human_asked: typed, the handles, the request with the wait\'s budget (the CLI ships without src/ — the server says it)');
-  ok(/your command did NOT run yet/.test(h.error) && /2 min ago/.test(h.error) && /up to 90 s/.test(h.request.waitLine) && /End your turn: their handback arrives as a message/.test(h.request.stillLine) && /Do not retry in a loop/.test(h.request.stillLine), 'the refusal and the wait\'s two lines say what ran (nothing), how long it waits, and what to do after');
+  ok(gateOf(/your command did NOT run yet/.test(h.error)) && gateOf(/2 min ago/.test(h.error)) && gateOf(/up to 90 s/.test(h.request.waitLine)) && gateOf(/End your turn: their handback arrives as a message/.test(h.request.stillLine)) && verdictOf(/Do not retry in a loop/.test(h.request.stillLine)), 'the refusal and the wait\'s two lines say what ran (nothing), how long it waits, and what to do after');
   ok(R.WAIT_MS < 120000 && R.POLL_MS < R.WAIT_MS, 'one verb waits under the agent harness\'s 2-minute tool cap, in long-polls shorter than that');
   const done = R.transition(r, 'handback', {}).rec, mark = R.transition(r, 'done', {}).rec, wd = R.transition(r, 'withdraw', {}).rec, lg = R.transition(r, 'lease-gone', {}).rec;
-  ok(/handed back\) — re-read the page first; your command runs now/.test(R.endedLine(done)) && /marked done without taking over here/.test(R.endedLine(mark)) && /was withdrawn/.test(R.endedLine(wd)) && /ended with your lease/.test(R.endedLine(lg)), 'the wait\'s end says why the verb now runs (handed back · marked done · withdrawn · the lease ended)');
+  ok(gateOf(/handed back\) — re-read the page first; your command runs now/.test(R.endedLine(done))) && gateOf(/marked done without taking over here/.test(R.endedLine(mark))) && gateOf(/was withdrawn/.test(R.endedLine(wd))) && verdictOf(/ended with your lease/.test(R.endedLine(lg))), 'the wait\'s end says why the verb now runs (handed back · marked done · withdrawn · the lease ended)');
   ok(R.handbackLine(done) === 'This answers your request tr-0000aaaa ("Log in to the bank and solve the captcha") — it is done.' && R.handbackLine(null) === '', 'the handback\'s delivery names the request it answers');
-  ok(/marked your browser request tr-0000aaaa .* done from the Agent browser window — they did not take over/.test(R.doneText(r)) && /https:\/\/bank\.example\/login/.test(R.doneText(r)), 'Done without a takeover is told in its own words (the page it was about)');
-  ok(/waiting for a person/.test(R.statusAnswer(r, T0)) && /no request is open/.test(R.statusAnswer(null)) && /the person is driving/.test(R.statusAnswer(R.transition(r, 'take', { at: T0 }).rec, T0)), '--status says the state in words');
-  ok(/withdrew request tr-0000aaaa/.test(R.withdrawAnswer(r)), 'the withdraw\'s answer names it');
+  ok(gateOf(/marked your browser request tr-0000aaaa .* done from the Agent browser window — they did not take over/.test(R.doneText(r))) && verdictOf(/https:\/\/bank\.example\/login/.test(R.doneText(r))), 'Done without a takeover is told in its own words (the page it was about)');
+  ok(gateOf(/waiting for a person/.test(R.statusAnswer(r, T0))) && gateOf(/no request is open/.test(R.statusAnswer(null))) && verdictOf(/the person is driving/.test(R.statusAnswer(R.transition(r, 'take', { at: T0 }).rec, T0))), '--status says the state in words');
+  ok(verdictOf(/withdrew request tr-0000aaaa/.test(R.withdrawAnswer(r))), 'the withdraw\'s answer names it');
 }
 
 console.log('⑦ the For-you item');
@@ -138,9 +138,9 @@ console.log('⑦ the For-you item');
   ok(it.text === it2.text && it.text === 'An assistant needs you in its browser', 'the dedupe TEXT is stable across re-asks (the store reopens / refreshes the SAME item)');
   eq([it.i18n.text.key, it.i18n.text.params.words, it2.i18n.text.params.words], ['Take over the browser: {words}', 'Log in to the bank and solve the captcha', 'Different words now'], 'the words ride the i18n params (each device words them); a re-ask moves them');
   eq(it.action, { type: 'browser-takeover', requestId: 'tr-0000aaaa', profileId: 'bp-bank', browserKey: 'bk-aaaa', ephemeral: false }, 'the action names the request (its identity: src/user-todos.js ACTION_IDENTITY browser-takeover → requestId)');
-  ok(/"Log in to the bank and solve the captcha"/.test(it.detail) && /Page: Sign in — Bank \(https:\/\/bank\.example\/login\)/.test(it.detail), 'the English detail: the words and the page');
+  ok(gateOf(/"Log in to the bank and solve the captcha"/.test(it.detail)) && verdictOf(/Page: Sign in — Bank \(https:\/\/bank\.example\/login\)/.test(it.detail)), 'the English detail: the words and the page');
   const UT = fs.readFileSync(path.join(ROOT, 'src/user-todos.js'), 'utf8');
-  ok(/\{ type: 'browser-takeover', identity: 'requestId',/.test(fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8')) && /const \{ ACTION_IDENTITY \} = require\('\.\/foryou-actions\.js'\);/.test(UT), 'the store merges an item only with a filing of the same request (THE For-you action registry\'s row — the store reads it)');
+  ok(gateOf(/\{ type: 'browser-takeover', identity: 'requestId',/.test(fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'))) && verdictOf(/const \{ ACTION_IDENTITY \} = require\('\.\/foryou-actions\.js'\);/.test(UT)), 'the store merges an item only with a filing of the same request (THE For-you action registry\'s row — the store reads it)');
   eq(['handback', 'done', 'withdraw', 'lease-gone'].map((h) => R.resolvedByOf(R.transition(r, h, {}).rec)), ['handed-back', 'user', 'agent', 'conversation-gone'], 'who resolved the item: the handback · the person · the agent · the lease ended');
 }
 
@@ -173,4 +173,4 @@ console.log('⑨ mutants');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

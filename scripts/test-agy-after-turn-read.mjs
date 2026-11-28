@@ -39,7 +39,7 @@ const Module = require('node:module');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -137,7 +137,7 @@ console.log('① the read count on disk (src/door-reads.js)');
   ok('the sidecar is `.door-reads-<key>` (unsafe characters folded) and NOT a `.json` the usage-cache scanners read', name === '.door-reads-agy-1_x' && !W.isCacheFileName(name));
   const w1 = await DR.bumpDoorRead(dir, 'k', 'person', T0, { writer }), w2 = await DR.bumpDoorRead(dir, 'k', 'person', T0 + 60e3, { writer }), w3 = await DR.bumpDoorRead(dir, 'k', 'wall', T0 + 120e3, { writer });
   const t = DR.todayOf(DR.readDoorReads(dir, 'k'), T0 + 180e3);
-  ok('three runs the same day, each answered DURABLE → by caller (person 2, wall 1, after a stretch 0), total 3, the last run kept', w1 && w2 && w3 && t.person === 2 && t.wall === 1 && t.afterTurn === 0 && t.total === 3 && t.lastAt === T0 + 120e3, JSON.stringify(t));
+  ok('three runs the same day, each answered DURABLE → by caller (person 2, wall 1, after a stretch 0), total 3, the last run kept', gateOf(w1) && gateOf(w2) && gateOf(w3) && t.person === 2 && t.wall === 1 && t.afterTurn === 0 && t.total === 3 && t.lastAt === T0 + 120e3, JSON.stringify(t));
   DR._forget();
   const t1 = DR.todayOf(DR.readDoorReads(dir, 'k'), T0 + 180e3);
   ok('…memory forgotten (a restart): the FILE says the same — written through the writer, on its own turn', t1.total === 3 && t1.lastAt === T0 + 120e3, JSON.stringify(t1));
@@ -152,11 +152,11 @@ console.log('① the read count on disk (src/door-reads.js)');
   const thrown = await DR.bumpDoorRead(dir, 'k', 'afterTurn', next, { writer: { dirty() { throw new Error('made: the writer is gone'); }, durable() { return Promise.resolve(true); } }, log: () => { } });
   ok('a writer that THROWS at dirty() is a failed write too: false, and the count rolled back (nothing counted in memory)', thrown === false && DR.todayOf(DR.readDoorReads(dir, 'k'), next).total === before);
   let threw = null; try { await DR.bumpDoorRead(dir, 'k', 'timer', next, { writer }); } catch (e) { threw = e.message; }
-  ok('an unknown caller is refused by name (a fourth caller has no row)', /unknown caller "timer"/.test(String(threw)), threw);
+  ok('an unknown caller is refused by name (a fourth caller has no row)', verdictOf(/unknown caller "timer"/.test(String(threw))), threw);
   W.writeReading({ cacheDir: dir, key: 'k', set: { ...U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(FIX.envelope), measuredAt: next + 5e3 }).reading, identity: 'k' }, extras: { backend: 'antigravity' }, source: 'cli-usage', backend: 'antigravity' });
   ok('the account\'s last read = the later of its recorded reading (fetchedAt) and the door\'s last run', DR.lastReadAt(dir, 'k') === next + 5e3 && DR.lastReadAt(dir, 'nobody') === 0);
   const others = harnesses.harnessIds().filter((id) => id !== 'antigravity');   // derived from the registry: a new harness is judged too
-  ok(`the descriptor declares it: antigravity's onDemand.afterTurn is true; every other harness (${others.join(', ')}) declares no after-turn read`, harnesses.get('antigravity').quota.onDemand.afterTurn === true && others.length >= 1 && others.every((id) => { const h = harnesses.get(id); return !h || !(h.quota && h.quota.onDemand && h.quota.onDemand.afterTurn); }));
+  ok(`the descriptor declares it: antigravity's onDemand.afterTurn is true; every other harness (${others.join(', ')}) declares no after-turn read`, harnesses.get('antigravity').quota.onDemand.afterTurn === true && others.length >= 1 && verdictOf(others.every((id) => { const h = harnesses.get(id); return !h || !(h.quota && h.quota.onDemand && h.quota.onDemand.afterTurn); })));
 }
 
 console.log('② THE EVENT: a turn ends, 5 quiet minutes pass ⇒ ONE read');
@@ -165,7 +165,7 @@ console.log('② THE EVENT: a turn ends, 5 quiet minutes pass ⇒ ONE read');
   start(road, s);
   await pass_(2 * 60e3);
   const r = end(road, s);
-  ok('the turn\'s end ARMS the account\'s quiet wait (and reads nothing yet)', r && r.armed === true && r.key === A.id && runsOf(A) === 0 && road.waiting().includes(A.id));
+  ok('the turn\'s end ARMS the account\'s quiet wait (and reads nothing yet)', gateOf(r) && r.armed === true && r.key === A.id && runsOf(A) === 0 && verdictOf(road.waiting().includes(A.id)));
   await pass_(QUIET - 1000);
   ok('…4 min 59 s later: still nothing', runsOf(A) === 0);
   await pass_(1000);
@@ -200,7 +200,7 @@ console.log('④ two conversations of one account: no read while either turn run
   ok('…5 minutes later: no read (a turn of the account runs)', runsOf(B) === 0);
   const r = end(road, s2);
   await pass_(QUIET);
-  ok('…the second ends ⇒ armed, and ONE read 5 quiet minutes later', r && r.armed && runsOf(B) === 1);
+  ok('…the second ends ⇒ armed, and ONE read 5 quiet minutes later', gateOf(r) && gateOf(r.armed) && runsOf(B) === 1);
 }
 
 console.log('⑤ THE CEILING: at most one read per account per 30 minutes, counted from its last read');
@@ -211,7 +211,7 @@ console.log('⑤ THE CEILING: at most one read per account per 30 minutes, count
   start(road, s); end(road, s);
   const n0 = logs.length;
   await pass_(QUIET);
-  ok('a stretch ending 5 min after the last read: 10 min since it ⇒ NO read, said by name', runsOf(A) === 2 && logs.slice(n0).some((l) => /read 10 min ago — under the 30-minute ceiling, not read now/.test(l)), logs.slice(n0).join(' | '));
+  ok('a stretch ending 5 min after the last read: 10 min since it ⇒ NO read, said by name', runsOf(A) === 2 && verdictOf(logs.slice(n0).some((l) => /read 10 min ago — under the 30-minute ceiling, not read now/.test(l))), logs.slice(n0).join(' | '));
   clock.t = last + 26 * 60e3; clock.m += 16 * 60e3;
   start(road, s); end(road, s);
   await pass_(QUIET);
@@ -234,7 +234,7 @@ console.log('⑥ AN IDLE ACCOUNT is never read — the scene where only the idle
   start(road, s); end(road, s);
   await pass_(2 * 60e3);
   const pr = await door.read(F6.id, { person: true });
-  ok('a person\'s Re-check 2 min after the stretch ended reads (counted: by you 1)', pr && pr.ok && runsOf(F6) === 1 && today(F6).person === 1, JSON.stringify(pr));
+  ok('a person\'s Re-check 2 min after the stretch ended reads (counted: by you 1)', gateOf(pr) && gateOf(pr.ok) && runsOf(F6) === 1 && today(F6).person === 1, JSON.stringify(pr));
   await pass_(QUIET);
   ok('…the wait runs out 3 min after that press — past this road\'s 1-minute ceiling on both clocks — and the account had no turn since: NO read', runsOf(F6) === 1);
   const road2 = mkRoad(), x = sess(G7);
@@ -269,7 +269,7 @@ console.log('⑦ A RESTART: nothing is caught up; the ceiling stands; a turn run
   restored._isStreaming = false;
   const live = r3.onTurnEnd(restored, { ts: iso(clock.t), kind: 'prompt_end' });
   await pass_(QUIET);
-  ok('…the restored turn ends live ⇒ armed, and ONE read 5 quiet minutes later', live && live.armed && runsOf(H8) === 1);
+  ok('…the restored turn ends live ⇒ armed, and ONE read 5 quiet minutes later', gateOf(live) && gateOf(live.armed) && runsOf(H8) === 1);
   // THE BUSY CHECK AT THE MOMENT OF THE READ (the closure check's S3): armed while nothing ran; then a conversation of the account
   // is running when the wait runs out though the road never heard its start (a turn begun through a road it does not see)
   await pass_(PACE + 60e3);
@@ -277,7 +277,7 @@ console.log('⑦ A RESTART: nothing is caught up; the ceiling stands; a turn run
   start(r4, s4); const armed4 = end(r4, s4);
   await pass_(60e3); unseen._isStreaming = true;   // no onTurnStart: only the conversation's own state says it runs
   await pass_(QUIET);
-  ok('the wait runs out while ANOTHER conversation of the account runs (its start never heard): NO read — «a turn runs» is read at the moment of the read', armed4 && armed4.armed && runsOf(H8) === 1);
+  ok('the wait runs out while ANOTHER conversation of the account runs (its start never heard): NO read — «a turn runs» is read at the moment of the read', gateOf(armed4) && gateOf(armed4.armed) && runsOf(H8) === 1);
   unseen._isStreaming = false;
 }
 
@@ -286,7 +286,7 @@ console.log('⑧ nothing to arm, and the door\'s own refusals');
   const road = mkRoad();
   ok('a conversation on the machine\'s own login (no named account): nothing armed', end(road, sess(null)) === null);
   ok('a PAIRED MACHINE\'s conversation, even naming an account: nothing armed (the road\'s own fence)', end(road, sess(B, 'antigravity', { host: 'h-paired' })) === null && !road.waiting().includes(B.id));
-  ok('a claude or codex conversation with an account: nothing armed (no after-turn read declared)', ['claude', 'codex'].every((be) => end(road, { backend: be, _accountId: 'acct-' + be, _isStreaming: false }) === null));
+  ok('a claude or codex conversation with an account: nothing armed (no after-turn read declared)', verdictOf(['claude', 'codex'].every((be) => end(road, { backend: be, _accountId: 'acct-' + be, _isStreaming: false }) === null)));
   const fake = { id: 'fake-agy', quota: { ...harnesses.get('antigravity').quota, onDemand: { ...harnesses.get('antigravity').quota.onDemand, afterTurn: undefined } } };
   const roadF = mkRoad({ harnessOf: (id) => (id === 'fake-agy' ? fake : harnesses.get(id)) });
   ok('a harness whose onDemand does NOT declare afterTurn: nothing armed (the capability row, never a name)', end(roadF, { backend: 'fake-agy', _accountId: A.id, _isStreaming: false }) === null);
@@ -311,7 +311,7 @@ console.log('⑨ the judge\'s STOP — one stop for every automatic caller; ⑩ 
   usageMode = 'turn';
   const before = fs.existsSync(W.cacheFileFor(CACHE, Cc.id));
   const pr = await door.read(Cc.id, { person: true });
-  ok('a PERSON\'s press answered turn-shaped ⇒ nothing written, the door says STOP', pr && pr.code === 'turn-started' && runsOf(Cc) === 1 && fs.existsSync(W.cacheFileFor(CACHE, Cc.id)) === before && door.stoppedWhy(Cc.id));
+  ok('a PERSON\'s press answered turn-shaped ⇒ nothing written, the door says STOP', gateOf(pr) && pr.code === 'turn-started' && runsOf(Cc) === 1 && fs.existsSync(W.cacheFileFor(CACHE, Cc.id)) === before && verdictOf(door.stoppedWhy(Cc.id)));
   usageMode = 'reading';
   await pass_(PACE + 60e3);
   const road = mkRoad(), s = sess(Cc);
@@ -334,7 +334,7 @@ console.log('⑨ the judge\'s STOP — one stop for every automatic caller; ⑩ 
   const r2b = mkRoad(), sV2 = sess(V0);
   const n1b = logs.length;
   await stretch(r2b, sV2);
-  ok('…the other way: Antigravity\'s own row OFF (antigravity.autoUsageReads = off) ⇒ the door refuses its after-turn read by name (auto-reads-off), nothing spawned', runsOf(V0) === 1 && logs.slice(n1b).some((l) => /read nothing \(auto-reads-off/.test(l)), logs.slice(n1b).join(' | '));
+  ok('…the other way: Antigravity\'s own row OFF (antigravity.autoUsageReads = off) ⇒ the door refuses its after-turn read by name (auto-reads-off), nothing spawned', runsOf(V0) === 1 && verdictOf(logs.slice(n1b).some((l) => /read nothing \(auto-reads-off/.test(l))), logs.slice(n1b).join(' | '));
   agyRow = 'on';
   // THE COUNT FIRST, FAIL CLOSED (law A3 b)
   await pass_(PACE + 60e3);
@@ -342,7 +342,7 @@ console.log('⑨ the judge\'s STOP — one stop for every automatic caller; ⑩ 
   const n2 = logs.length, k0 = today(B).total;
   await stretch(mkRoad(), sess(B));
   failWrites = false;
-  ok('A3: the count\'s write FAILS ⇒ the read is refused by name (count-failed), NOTHING spawned, a log line', runsOf(B) === 1 && logs.slice(n2).some((l) => /the read count could not be written — not read \(afterTurn\)/.test(l)) && logs.slice(n2).some((l) => /read nothing \(count-failed/.test(l)), logs.slice(n2).join(' | '));
+  ok('A3: the count\'s write FAILS ⇒ the read is refused by name (count-failed), NOTHING spawned, a log line', runsOf(B) === 1 && gateOf(logs.slice(n2).some((l) => /the read count could not be written — not read \(afterTurn\)/.test(l))) && verdictOf(logs.slice(n2).some((l) => /read nothing \(count-failed/.test(l))), logs.slice(n2).join(' | '));
   await stretch(mkRoad(), sess(B));
   ok('…the writer heals: the next stretch reads, counted', runsOf(B) === 2 && today(B).total >= k0 + 1);
 }
@@ -355,7 +355,7 @@ console.log('⑩b the steady clock (law A2); a failed read, then three hours; th
   clock.t += 25 * 60e3;   // the WALL clock steps 25 minutes forward; the steady clock does not
   const n0 = logs.length;
   await stretch(road, s);
-  ok('A2: the wall clock steps 25 min forward after a read — 31 min «since» by the wall, 6 by the steady clock ⇒ NO read, said', runsOf(D) === 1 && logs.slice(n0).some((l) => /by the steady clock — under the 30-minute ceiling/.test(l)), logs.slice(n0).join(' | '));
+  ok('A2: the wall clock steps 25 min forward after a read — 31 min «since» by the wall, 6 by the steady clock ⇒ NO read, said', runsOf(D) === 1 && verdictOf(logs.slice(n0).some((l) => /by the steady clock — under the 30-minute ceiling/.test(l))), logs.slice(n0).join(' | '));
   clock.t -= 3 * 3600e3;   // and back: three hours behind the last read
   await pass_(PACE);
   await stretch(road, s);
@@ -378,7 +378,7 @@ console.log('⑩b the steady clock (law A2); a failed read, then three hours; th
   DR._forget();
   const n1 = logs.length;
   const over = await door.read(M7.id, { afterTurn: true });
-  ok(`the ruling's arithmetic: ${DOOR.AFTER_TURN_DAY_MAX} after-turn reads already today ⇒ the next is refused (over-ruling) with a log line naming it a bug, nothing spawned`, over.code === 'over-ruling' && runsOf(M7) === 0 && logs.slice(n1).some((l) => /A BUG — 48 after-turn reads today already, the ruling allows 48/.test(l)), JSON.stringify(over));
+  ok(`the ruling's arithmetic: ${DOOR.AFTER_TURN_DAY_MAX} after-turn reads already today ⇒ the next is refused (over-ruling) with a log line naming it a bug, nothing spawned`, over.code === 'over-ruling' && runsOf(M7) === 0 && verdictOf(logs.slice(n1).some((l) => /A BUG — 48 after-turn reads today already, the ruling allows 48/.test(l))), JSON.stringify(over));
 }
 
 console.log('⑪ THE WALL\'S RESTART RE-READ (the research\'s finding), closed by the rule on disk');
@@ -486,7 +486,7 @@ console.log('⑬ the account row says the day\'s reads — as text, for every ac
   ok('three reads today ⇒ the line «usage read 3× today», its title «Usage read 3× today: 1 by you · 0 after a usage wall · 2 after a stretch of work»', MA.doorReadsNote({ total: 3 }) === 'usage read 3× today' && MA.doorReadsLine({ total: 3, person: 1, wall: 0, afterTurn: 2 }) === 'Usage read 3× today: 1 by you · 0 after a usage wall · 2 after a stretch of work');
   ok('…none today, or no count ⇒ no words', MA.doorReadsNote({ total: 0 }) === '' && MA.doorReadsLine(null) === '' && MA.doorReadsNote(undefined) === '');
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
-  ok('…zh and ja say both, every placeholder kept', [zh[KEY], ja[KEY]].every((s) => typeof s === 'string' && ['{n}', '{person}', '{wall}', '{after}'].every((p) => s.includes(p))) && [zh[NOTE], ja[NOTE]].every((s) => typeof s === 'string' && s.includes('{n}')), JSON.stringify([zh[NOTE], ja[NOTE]]));
+  ok('…zh and ja say both, every placeholder kept', gateOf([zh[KEY], ja[KEY]].every((s) => typeof s === 'string' && ['{n}', '{person}', '{wall}', '{after}'].every((p) => s.includes(p)))) && verdictOf([zh[NOTE], ja[NOTE]].every((s) => typeof s === 'string' && s.includes('{n}'))), JSON.stringify([zh[NOTE], ja[NOTE]]));
   const UR = read('src/usage-routes.js'), MAs = read('src/lib/manage-agents.js');
   // THE FAILED-ONLY ACCOUNT, DRIVEN (the closure check's S5): four reads that all fail, through the real door — no reading on disk,
   // the count on disk; the row /api/usage serves (homeAccountEntry, the route's own call) and the row's words
@@ -496,10 +496,10 @@ console.log('⑬ the account row says the day\'s reads — as text, for every ac
   usageMode = 'reading';
   const readsF = DR.todayOf(DR.readDoorReads(CACHE, J10.id), clock.t), rowF = DR.homeAccountEntry(W.readCacheObject(CACHE, J10.id), readsF);
   ok('an account whose four reads all FAILED: no reading on disk, its count is (4), and /api/usage serves it a row — limits [], the count — that says «usage read 4× today»',
-    !W.readCacheObject(CACHE, J10.id) && readsF.total === 4 && readsF.person === 4 && rowF && Array.isArray(rowF.limits) && rowF.limits.length === 0 && rowF.reads.total === 4 && MA.doorReadsNote(rowF.reads) === 'usage read 4× today' && /4 by you/.test(MA.doorReadsLine(rowF.reads)), { readsF, rowF });
+    !W.readCacheObject(CACHE, J10.id) && readsF.total === 4 && readsF.person === 4 && gateOf(rowF) && gateOf(Array.isArray(rowF.limits)) && rowF.limits.length === 0 && rowF.reads.total === 4 && MA.doorReadsNote(rowF.reads) === 'usage read 4× today' && verdictOf(/4 by you/.test(MA.doorReadsLine(rowF.reads))), { readsF, rowF });
   ok('…an account neither read nor counted today gets no row; one with a reading gets its limits', DR.homeAccountEntry(null, DR.todayOf(null, clock.t)) === null && DR.homeAccountEntry({ limits: [{ limitId: 'x' }], fetchedAt: 5 }, DR.todayOf(null, clock.t)).limits.length === 1);
-  ok('/api/usage builds each on-demand account\'s row through that one helper (doorReads.homeAccountEntry)', /const row = doorReads\.homeAccountEntry\(c, reads\);/.test(UR) && /if \(row\) out\[a\.id\] = row;/.test(UR));
-  ok('…the roster draws the count as TEXT on the identity line (no badge, no colour), its title the split, patched at every poll', MAs.includes('<span class="acct-key-tail">${ident}${readsNote(a.id)}</span>') && MAs.includes("document.querySelectorAll('.acct-reads[data-reads-key]')") && !/acct-reads[^\n]*(badge|color)/.test(MAs));
+  ok('/api/usage builds each on-demand account\'s row through that one helper (doorReads.homeAccountEntry)', gateOf(/const row = doorReads\.homeAccountEntry\(c, reads\);/.test(UR)) && verdictOf(/if \(row\) out\[a\.id\] = row;/.test(UR)));
+  ok('…the roster draws the count as TEXT on the identity line (no badge, no colour), its title the split, patched at every poll', gateOf(MAs.includes('<span class="acct-key-tail">${ident}${readsNote(a.id)}</span>')) && gateOf(MAs.includes("document.querySelectorAll('.acct-reads[data-reads-key]')")) && !/acct-reads[^\n]*(badge|color)/.test(MAs));
 }
 
 console.log('⑭ ONE ROW PER VENDOR (the owner 2026-11-16: «fable是antigravity吗？») — the door asks the row of the vendor whose account it is');
@@ -524,7 +524,7 @@ console.log('⑭ ONE ROW PER VENDOR (the owner 2026-11-16: «fable是antigravity
   ok('(a) an Antigravity account under Claude\'s row OFF: its wall read RUNS — Claude\'s row is not its vendor\'s (law 3)', g1.ok === true && runsOf(V2) === 1, JSON.stringify(g1).slice(0, 160));
   setting = 'manual'; agyRow = 'off'; tick(61e3);
   const g2 = await door.read(V2.id, { wall: true }), g3 = await door.read(V2.id, { afterTurn: true });
-  ok('…its own row OFF: the wall read and the after-turn read are refused BY NAME (auto-reads-off, the row named), nothing spawned', g2.code === 'auto-reads-off' && g3.code === 'auto-reads-off' && runsOf(V2) === 1 && /antigravity\.autoUsageReads/.test(g2.error || ''), JSON.stringify([g2, g3]).slice(0, 300));
+  ok('…its own row OFF: the wall read and the after-turn read are refused BY NAME (auto-reads-off, the row named), nothing spawned', g2.code === 'auto-reads-off' && g3.code === 'auto-reads-off' && runsOf(V2) === 1 && verdictOf(/antigravity\.autoUsageReads/.test(g2.error || '')), JSON.stringify([g2, g3]).slice(0, 300));
   const g4 = await door.read(V2.id, { person: true });
   ok('…and a PERSON\'s press of it READS (law 5: the ⟳ is the person\'s own act — it asks no row)', g4.ok === true && runsOf(V2) === 2, JSON.stringify(g4).slice(0, 160));
   agyRow = 'on';
@@ -532,7 +532,7 @@ console.log('⑭ ONE ROW PER VENDOR (the owner 2026-11-16: «fable是antigravity
   const rowless = { ...AGYH, label: 'A row-less CLI', settings: undefined };
   const dN = mkDoor((id) => (id === 'antigravity' ? rowless : harnesses.get(id)));
   const n1 = await dN.read(V3.id, { wall: true }), n2 = await dN.read(V3.id, { afterTurn: true }), n3 = await dN.read(V3.id, { person: true });
-  ok('(a) a harness that declares a wall / after-turn read with NO row of its own: both refused BY NAME (no-auto-reads-row) — no automatic read without a row; a press still reads', n1.code === 'no-auto-reads-row' && n2.code === 'no-auto-reads-row' && /A row-less CLI has no row of its own/.test(n1.error || '') && n3.ok === true && runsOf(V3) === 1, JSON.stringify([n1.code, n2.code, n3.ok]));
+  ok('(a) a harness that declares a wall / after-turn read with NO row of its own: both refused BY NAME (no-auto-reads-row) — no automatic read without a row; a press still reads', n1.code === 'no-auto-reads-row' && n2.code === 'no-auto-reads-row' && gateOf(/A row-less CLI has no row of its own/.test(n1.error || '')) && n3.ok === true && runsOf(V3) === 1, JSON.stringify([n1.code, n2.code, n3.ok]));
   // (a4) the production road: the TYPED accessor asked with the account's own harness id; an accessor that throws reads as off
   const calls = [];
   const dT = DOOR.createCliUsageDoor({ accounts: am, harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, spawnImpl: fakeSpawn, countWriter: () => writer, mono: () => clock.m,
@@ -547,7 +547,7 @@ console.log('⑭ ONE ROW PER VENDOR (the owner 2026-11-16: «fable是antigravity
   // law 3 by census: the door names neither row's key; no reader of Claude's row names Antigravity's
   const DOORSRC = read('src/server/cli-usage-door.js').replace(/\/\/[^\n]*/g, '');
   const CLAUDE_READERS = ['src/lib/usage-meter.js', 'src/lib/manage-agents.js', 'src/usage-routes.js', 'src/server/auto-cli-loop.js', 'src/server/usage-pool-engine.js'];
-  ok('law 3 by census: the door\'s code names no row key (it asks the vendor\'s: quota.readsRow, or its own table\'s autoUsageReads) and none of Claude\'s readers names Antigravity\'s row', !/accounts\.onDemandQuotaRefresh/.test(DOORSRC) && /h\.quota\.readsRow/.test(DOORSRC) && CLAUDE_READERS.every((f) => !/autoUsageReads/.test(read(f))), CLAUDE_READERS.filter((f) => /autoUsageReads/.test(read(f))));
+  ok('law 3 by census: the door\'s code names no row key (it asks the vendor\'s: quota.readsRow, or its own table\'s autoUsageReads) and none of Claude\'s readers names Antigravity\'s row', !/accounts\.onDemandQuotaRefresh/.test(DOORSRC) && gateOf(/h\.quota\.readsRow/.test(DOORSRC)) && verdictOf(CLAUDE_READERS.every((f) => !/autoUsageReads/.test(read(f)))), CLAUDE_READERS.filter((f) => /autoUsageReads/.test(read(f))));
   // law 4: the migration — THROUGH the live settings store (read / patch: src/routes/persistence.js, the one writer of settings.json)
   const MIG = require(path.join(REPO, 'src/server/migrations.js'));
   const store = (doc) => { const st = { doc: { ...doc }, patches: [] }; return { st, read: () => st.doc, patch: (q) => { st.patches.push(q); st.doc = { ...st.doc, ...q }; } }; };
@@ -557,11 +557,11 @@ console.log('⑭ ONE ROW PER VENDOR (the owner 2026-11-16: «fable是antigravity
   const s5 = store({}), r5 = MIG.agyReadsFollowClaudeOff(s5);
   let r4 = null; try { MIG.agyReadsFollowClaudeOff(null); } catch (e) { r4 = e.message; }
   ok('law 4, the migration: Claude\'s row Off ⇒ ONE patch, antigravity.autoUsageReads = off, nothing else touched; a second run patches nothing', r1.changed === true && JSON.stringify(s1.st.patches) === '[{"antigravity.autoUsageReads":"off"}]' && s1.st.doc['chat.x'] === 1 && r1b.changed === false, JSON.stringify([r1, r1b, s1.st.patches]));
-  ok('…Claude\'s row not Off (or never set) ⇒ no patch (the default on stands); a value of its own is never overwritten; no live store ⇒ it FAILS by name (the runner retries at the next boot) — the registry row asks the disk first: nothing to do there ⇒ done, quietly', !r2.changed && !s2.st.patches.length && !r5.changed && !s5.st.patches.length && !r3.changed && !s3.st.patches.length && /no live settings store/.test(String(r4)), JSON.stringify([r2.why, r3.why, r5.why, r4]));
+  ok('…Claude\'s row not Off (or never set) ⇒ no patch (the default on stands); a value of its own is never overwritten; no live store ⇒ it FAILS by name (the runner retries at the next boot) — the registry row asks the disk first: nothing to do there ⇒ done, quietly', !r2.changed && !s2.st.patches.length && !r5.changed && !s5.st.patches.length && !r3.changed && !s3.st.patches.length && verdictOf(/no live settings store/.test(String(r4))), JSON.stringify([r2.why, r3.why, r5.why, r4]));
   const MIGSRC = read('src/server/migrations.js'), SRV = read('server.js');
   ok('…it is a row of the instance\'s one-shot registry (run once under the ledger; its note and its report are the journal lines), handed the live settings store by server.js',
-    MIG.AGY_READS_MIGRATION_ID === '2026-11-agy-reads-follow-claude-off' && /id: AGY_READS_MIGRATION_ID,\s*\n\s*note: "ONE ROW PER VENDOR/.test(MIGSRC) && MIGSRC.includes("const rep = agyReadsFollowClaudeOff(st);") && MIGSRC.includes("if (!st && !peek('settings.json', (d) => d['accounts.onDemandQuotaRefresh'] === 'off' && d['antigravity.autoUsageReads'] === undefined))")
-    && /usageHistory = null, settings = null,/.test(MIGSRC) && SRV.includes('settings: { read: () => persistenceRouter.readSettings(), patch: (p) => persistenceRouter.patchSettings(p) }'));
+    MIG.AGY_READS_MIGRATION_ID === '2026-11-agy-reads-follow-claude-off' && gateOf(/id: AGY_READS_MIGRATION_ID,\s*\n\s*note: "ONE ROW PER VENDOR/.test(MIGSRC)) && gateOf(MIGSRC.includes("const rep = agyReadsFollowClaudeOff(st);")) && gateOf(MIGSRC.includes("if (!st && !peek('settings.json', (d) => d['accounts.onDemandQuotaRefresh'] === 'off' && d['antigravity.autoUsageReads'] === undefined))"))
+    && gateOf(/usageHistory = null, settings = null,/.test(MIGSRC)) && verdictOf(SRV.includes('settings: { read: () => persistenceRouter.readSettings(), patch: (p) => persistenceRouter.patchSettings(p) }')));
 }
 
 console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026-11-16) — what a press reads is said; an Off the person chose survives a dropped key');
@@ -596,7 +596,7 @@ console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026
   const law1 = (x) => x.a1.ok === true && x.a2.code === 'throttled' && x.a3.code === 'auto-reads-off' && x.runs === 1 && x.counted === 1;
   const p1 = await press(mkAcct('Press one'));
   ok('U1: an instance migrated from the shared row\'s Off (Claude\'s row Off, antigravity.autoUsageReads = off): a person\'s Re-check on an Antigravity account READS — once (one spawn), counted (today\'s person count +1), paced as any press (a second press in the minute: 429 throttled); the row still refuses the wall read',
-    s1.st.doc[KEY] === 'off' && law1(p1), brief(p1));
+    s1.st.doc[KEY] === 'off' && verdictOf(law1(p1)), brief(p1));
   const DOORF = 'src/server/cli-usage-door.js';
   const pm1 = await press(mkAcct('Press two'), mutant(DOORF, "} else if (caller !== 'person') {", '} else {'));
   const pm2 = await press(mkAcct('Press three'), mutant(DOORF, "if (h.quota && typeof h.quota.readsRow === 'string') {\n        let mode = 'manual'; try { mode = setting(h.quota.readsRow) || 'manual'; } catch { }",
@@ -607,11 +607,11 @@ console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026
   const DOORSRC_ALL = read(DOORF), ATRSRC = read('src/server/after-turn-read.js');
   const CL = ['CHANGELOG.md', 'CHANGELOG.zh.md', 'CHANGELOG.ja.md'].map((f) => { const s = read(f); const i = s.indexOf('\n## 2.369.412'); const j = s.indexOf('\n## ', i + 5); return i < 0 ? '' : s.slice(i, j < 0 ? undefined : j); });
   ok('U1 said: the door\'s header says a Re-check on an Antigravity account READS while Claude\'s row is Off and was refused before the split (403 refresh-off), and that Claude declares no on-demand reading (the readsRow branch a fence); the after-turn header names the vendor\'s own row; no header promises «never under accounts.onDemandQuotaRefresh = off»',
-    /a Re-check on an Antigravity\n\/\/ account READS while Claude's row is Off — once, counted, paced as any press; before the split that press was refused\n\/\/ \(403 refresh-off\)/.test(DOORSRC_ALL) && /Claude declares no\n\/\/ on-demand reading today, so that branch is a fence for a later one/.test(DOORSRC_ALL)
-      && /the vendor's own row antigravity\.autoUsageReads — Off refuses\n\/\/ this read and the wall's, never a person's Re-check/.test(ATRSRC) && ![DOORSRC_ALL, ATRSRC].some((s) => /never under `accounts\.onDemandQuotaRefresh = off`|`accounts\.onDemandQuotaRefresh = off`, the judge/.test(s)));
+    gateOf(/a Re-check on an Antigravity\n\/\/ account READS while Claude's row is Off — once, counted, paced as any press; before the split that press was refused\n\/\/ \(403 refresh-off\)/.test(DOORSRC_ALL)) && gateOf(/Claude declares no\n\/\/ on-demand reading today, so that branch is a fence for a later one/.test(DOORSRC_ALL))
+      && gateOf(/the vendor's own row antigravity\.autoUsageReads — Off refuses\n\/\/ this read and the wall's, never a person's Re-check/.test(ATRSRC)) && ![DOORSRC_ALL, ATRSRC].some((s) => /never under `accounts\.onDemandQuotaRefresh = off`|`accounts\.onDemandQuotaRefresh = off`, the judge/.test(s)));
   ok('U1 said to the person: each of the three changelogs\' 2.369.412 sections says, in the screen\'s words, that Re-check on an Antigravity account now reads even while Claude usage refresh is Off, which refused it before',
-    /Re-check on an Antigravity account now reads its usage even while Claude usage refresh is Off \(that press was refused before\)/.test(CL[0]) && /Antigravity 账号的「重新检查」现在即使在 Claude 用量刷新为「关闭」时也会读取用量（以前这一按会被拒绝）/.test(CL[1])
-      && /Antigravity アカウントの「再チェック」は、Claude の使用量の更新が「オフ」でも読み取ります（以前は拒否されていました）/.test(CL[2]), JSON.stringify(CL.map((s) => s.length)));
+    gateOf(/Re-check on an Antigravity account now reads its usage even while Claude usage refresh is Off \(that press was refused before\)/.test(CL[0])) && gateOf(/Antigravity 账号的「重新检查」现在即使在 Claude 用量刷新为「关闭」时也会读取用量（以前这一按会被拒绝）/.test(CL[1]))
+      && verdictOf(/Antigravity アカウントの「再チェック」は、Claude の使用量の更新が「オフ」でも読み取ります（以前は拒否されていました）/.test(CL[2])), JSON.stringify(CL.map((s) => s.length)));
 
   // ── U2: AN OFF THE PERSON CHOSE SURVIVES EVERY ROAD THAT CAN DROP A KEY — the rule holds at the READ
   const reads = async (acct, getDoc, o = {}) => {
@@ -632,7 +632,7 @@ console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026
   const tabSave = { ...s2.st.doc }; delete tabSave[KEY]; s2.st.doc = tabSave;
   const e1 = await reads(mkAcct('Erased one'), () => s2.st.doc), e2 = await reads(mkAcct('Erased two'), () => s2.st.doc, { typed: false });
   ok('U2 (a): the key ERASED after the migration with Claude\'s Off stored (a tab from before the restart saved its whole settings): the wall read and the after-turn read are refused — through the typed accessor and through the door\'s own fallback — and the refusal says the row holds no value and follows Claude\'s Off',
-    !(KEY in s2.st.doc) && s2.st.doc[CLAUDE] === 'off' && law2(e1) && law2(e2), brief([e1.w, e2.t]));
+    !(KEY in s2.st.doc) && s2.st.doc[CLAUDE] === 'off' && gateOf(law2(e1)) && verdictOf(law2(e2)), brief([e1.w, e2.t]));
   const em = await withoutFollow((o) => reads(mkAcct('Erased three'), () => s2.st.doc, o));
   ok('RED (U2 a): readRow without its follow ⇒ the erased key reads as the default «Automatically» — the wall read and the after-turn read RUN', em.w.ok === true && em.t.ok === true && em.runs === 2, brief(em));
   // (b) the import of a config exported before the split — the real settings store (src/routes/persistence.js) and its import route
@@ -648,7 +648,7 @@ console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026
   const afterImp = P.router.readSettings();
   const i1 = await reads(mkAcct('Import one'), () => P.router.readSettings());
   ok('U2 (b): the import of a config exported before the split replaces the settings whole — the row\'s Off is gone from the file, Claude\'s Off came back with the import — and the wall read and the after-turn read are refused',
-    migr.changed === true && wasOff === 'off' && impCode === 200 && !(KEY in afterImp) && afterImp[CLAUDE] === 'off' && afterImp['chat.x'] === 2 && law2(i1), brief({ impCode, impOut, i1 }));
+    migr.changed === true && wasOff === 'off' && impCode === 200 && !(KEY in afterImp) && afterImp[CLAUDE] === 'off' && afterImp['chat.x'] === 2 && verdictOf(law2(i1)), brief({ impCode, impOut, i1 }));
   const im = await withoutFollow((o) => reads(mkAcct('Import two'), () => P.router.readSettings(), o));
   ok('RED (U2 b): readRow without its follow ⇒ after the import both automatic reads RUN', im.w.ok === true && im.t.ok === true && im.runs === 2, brief(im));
   // (c) a person who chose «Automatically» by hand keeps it: the settings store (src/lib/settings.js — what the Settings window
@@ -678,7 +678,7 @@ console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026
   const k1 = await pick(SM0);
   const law2c = (x) => x.saved === 'on' && x.shown === 'on' && x.wall && x.after && x.runs === 2;
   ok('U2 (c): a person who picks «Automatically» by hand while Claude\'s row is Off keeps it — the store keeps \'on\' as a value (storeDefault), the window shows it, the hub reads on: the wall read and the after-turn read RUN',
-    law2c(k1) && JSON.stringify(k1.seen) === '["on"]', brief(k1));
+    gateOf(law2c(k1)) && JSON.stringify(k1.seen) === '["on"]', brief(k1));
   ok('…and a row nobody set shows what the hub reads: Claude\'s Off ⇒ «Only when I press Re-check»; Claude\'s row turned to Manual ⇒ the row redraws to «Automatically» (its follower notified)',
     k1.shownUnset === 'off' && k1.shownUnsetAfter === 'on' && JSON.stringify(k1.redraw) === '[["off","on"]]', brief(k1));
   const km = await pick(await esm([['(!schema.storeDefault && JSON.stringify(value)', '(JSON.stringify(value)']]));
@@ -693,9 +693,9 @@ console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026
   const errsOf = (rows) => HS.checkTable({ ...AGYT, rows }).filter((e) => /storeDefault|unsetFollows/.test(e));
   ok('…the row declares both (storeDefault, unsetFollows → Claude\'s row Off ⇒ off), and checkTable refuses an unsetFollows without storeDefault — by name',
     rowU.storeDefault === true && JSON.stringify(rowU.unsetFollows) === JSON.stringify({ setting: CLAUDE, when: 'off', value: 'off' }) && errsOf(AGYT.rows).length === 0
-      && errsOf(AGYT.rows.map((r) => (r === rowU ? { ...r, storeDefault: undefined } : r))).some((e) => /needs storeDefault: true/.test(e)), JSON.stringify(errsOf(AGYT.rows.map((r) => (r === rowU ? { ...r, storeDefault: undefined } : r)))));
+      && verdictOf(errsOf(AGYT.rows.map((r) => (r === rowU ? { ...r, storeDefault: undefined } : r))).some((e) => /needs storeDefault: true/.test(e))), JSON.stringify(errsOf(AGYT.rows.map((r) => (r === rowU ? { ...r, storeDefault: undefined } : r)))));
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(fail ? `${pass} passed, ${fail} failed` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

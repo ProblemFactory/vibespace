@@ -33,7 +33,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -86,7 +86,7 @@ console.log('⓪ the module');
   ok(CH.validateCaps('slack', slack.caps) === true && CH.validateMethods('slack', slack.caps, slack.create({ id: 'slack' }, {})) === true, 'the declaration validates under the registry contract, and the instance implements exactly what it declares');
   const c = slack.caps;
   ok(c.receive === 'poll' && c.history === 'page' && c.olderHistory === 'page' && c.attachments === 'fetch' && c.render === 'blocks', 'S1 is POLL ONLY, pages history and older history, fetches attachments, renders blocks');
-  ok(c.sendAs.join() === 'user' && c.idempotency === 'none' && c.identityMarking === 'unknown' && c.sendAttachments && c.sendAttachments.maxCount === 10 && c.sendAttachmentsWhy === null, 'sends as the person, idempotency none (D8), identity marking unknown until the first real send (the sendMarker probe), files through the three-request upload (lane channel-send-files)');
+  ok(c.sendAs.join() === 'user' && c.idempotency === 'none' && c.identityMarking === 'unknown' && gateOf(c.sendAttachments) && c.sendAttachments.maxCount === 10 && c.sendAttachmentsWhy === null, 'sends as the person, idempotency none (D8), identity marking unknown until the first real send (the sendMarker probe), files through the three-request upload (lane channel-send-files)');
   ok(c.policyModes.join() === 'review' && c.prepareSend === true && c.retention === 'purge-on-remove', 'policyModes [review] (no "send directly"), prepareSend, purge-on-remove');
   ok(JSON.stringify(c.threads) === JSON.stringify({ read: 'vendor', replyInto: true, listing: 'separate', placements: ['chat', 'thread', 'thread+chat'], filePlacements: ['chat', 'thread'], rootReply: 'thread' }), 'threads: vendor, listed separately, chat / thread / thread+chat, a reply\'s norm is the thread (F3); B-09d2: files only in the chat or a thread');
   ok(c.reactions.read === 'list' && c.reactions.add === true && c.reactions.remove === 'own' && c.reactions.vocabulary === 'names', 'reactions: a per-message list (an inline read would drop them — F4), add, remove own, names');
@@ -95,11 +95,11 @@ console.log('⓪ the module');
   const src = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   ok(!/process\.env/.test(src), 'it never reads process.env');
   const row = R.rowById('slack');
-  ok(row && row.signin === 'paste' && row.bindsPerAccount === true && row.fields.map((f) => `${f.key}${f.secret ? '*' : ''}${f.required ? '!' : ''}`).join() === 'clientId!,clientSecret*!,relayUrl,teamDomain' && !!row.clusterEnv && !row.delegate && !(row.setup && row.setup.callbackUrl) && !R.checkRow(row).length, 'design 018: the row is the paste rung PLUS a workspace client (id, secret, relay page, workspace; a cluster env; no callback literal) — and the registry accepts it');
-  ok(R.checkRow({ ...row, clusterEnv: undefined }).some((e) => /paste/.test(e)) && R.checkRow({ ...row, delegate: { to: 'drive-presets' } }).some((e) => /paste/.test(e)) && R.checkRow({ ...row, fields: [] }).some((e) => /paste/.test(e)), 'NEGATIVE CONTROL: a paste row with a client but no cluster env, with a delegate, or with an env but no fields is refused by name');
+  ok(gateOf(row) && row.signin === 'paste' && row.bindsPerAccount === true && row.fields.map((f) => `${f.key}${f.secret ? '*' : ''}${f.required ? '!' : ''}`).join() === 'clientId!,clientSecret*!,relayUrl,teamDomain' && !!row.clusterEnv && !row.delegate && !(row.setup && row.setup.callbackUrl) && !R.checkRow(row).length, 'design 018: the row is the paste rung PLUS a workspace client (id, secret, relay page, workspace; a cluster env; no callback literal) — and the registry accepts it');
+  ok(gateOf(R.checkRow({ ...row, clusterEnv: undefined }).some((e) => /paste/.test(e))) && gateOf(R.checkRow({ ...row, delegate: { to: 'drive-presets' } }).some((e) => /paste/.test(e))) && verdictOf(R.checkRow({ ...row, fields: [] }).some((e) => /paste/.test(e))), 'NEGATIVE CONTROL: a paste row with a client but no cluster env, with a delegate, or with an env but no fields is refused by name');
   const V = (k, v) => row.fields.find((f) => f.key === k).validate(v).ok;
-  ok(V('clientId', '1234567890.1234567890') && !V('clientId', 'cli_abc') && !V('clientId', '12.34 ') && V('relayUrl', '') && V('relayUrl', 'https://relay.example.test/slack/') && !V('relayUrl', 'http://relay.example.test/') && V('teamDomain', 'acme-ai') && !V('teamDomain', 'acme.slack.com'), 'the client id is <digits>.<digits>; the relay page is https or empty (http refused: Slack redirects only to https); the workspace is a subdomain');
-  ok(Text.SLACK_QUICK.join() === EMOJI.quick.map((x) => x[0]).join() && EMOJI.quick.every(([k, g]) => Text.emojiText(k) === g), 'the picker\'s quick set and its glyphs equal the pinned fixture');
+  ok(gateOf(V('clientId', '1234567890.1234567890')) && !V('clientId', 'cli_abc') && !V('clientId', '12.34 ') && gateOf(V('relayUrl', '')) && gateOf(V('relayUrl', 'https://relay.example.test/slack/')) && !V('relayUrl', 'http://relay.example.test/') && gateOf(V('teamDomain', 'acme-ai')) && !V('teamDomain', 'acme.slack.com'), 'the client id is <digits>.<digits>; the relay page is https or empty (http refused: Slack redirects only to https); the workspace is a subdomain');
+  ok(Text.SLACK_QUICK.join() === EMOJI.quick.map((x) => x[0]).join() && verdictOf(EMOJI.quick.every(([k, g]) => Text.emojiText(k) === g)), 'the picker\'s quick set and its glyphs equal the pinned fixture');
 }
 
 // ── ① the PASTE sign-in ──
@@ -110,22 +110,22 @@ console.log('① the paste sign-in');
   ok(s0.state === 'unknown' && s0.why === 'never-authenticated' && s0.credentialSource === 'paste', 'no token ⇒ unknown / never-authenticated; the credential source is the paste (no client to resolve)');
   const f = await a.auth.begin();
   ok(f.mode === 'paste' && f.listening === false && f.port === null && f.redirectUri === null && f.running === true, 'begin() runs a PASTE flow: nothing listens, no port, no redirect URI');
-  ok(f.consentUrl.startsWith(Manifest.CREATE_URL) && Buffer.byteLength(f.consentUrl) < Manifest.LINK_MAX, `the consent URL is Slack's share-a-manifest link, under ${Manifest.LINK_MAX} bytes (${Buffer.byteLength(f.consentUrl)})`);
+  ok(gateOf(f.consentUrl.startsWith(Manifest.CREATE_URL)) && Buffer.byteLength(f.consentUrl) < Manifest.LINK_MAX, `the consent URL is Slack's share-a-manifest link, under ${Manifest.LINK_MAX} bytes (${Buffer.byteLength(f.consentUrl)})`);
   const man = JSON.parse(decodeURIComponent(f.consentUrl.slice(Manifest.CREATE_URL.length)));
-  ok([...man.display_information.name].length <= 35 && /^VibeSpace \(Mart/.test(man.display_information.name) && !/\u202e/.test(man.display_information.name), `the owner's name rides the app name, bidi controls dropped, ≤ 35 characters (${man.display_information.name})`);
+  ok([...man.display_information.name].length <= 35 && gateOf(/^VibeSpace \(Mart/.test(man.display_information.name)) && !/\u202e/.test(man.display_information.name), `the owner's name rides the app name, bidi controls dropped, ≤ 35 characters (${man.display_information.name})`);
   ok(JSON.stringify(man.oauth_config.scopes.user) === JSON.stringify(Manifest.USER_SCOPES) && !man.oauth_config.scopes.bot && man.settings.token_rotation_enabled === false && man.settings.socket_mode_enabled === false, 'the manifest asks USER scopes only (no bot user), rotation OFF (a pasted token must not expire), no socket mode (S2)');
   const longName = Manifest.createLink(Manifest.manifestFor({ ownerName: '名'.repeat(500) + '&<>"\'' }));
   ok(Buffer.byteLength(longName) < Manifest.LINK_MAX, 'a 500-character owner name still builds a link under the bound (cut, escaped)');
   for (const [paste, shape] of [['xoxb' + '-1234567890-abcdefghij', 'bot'], ['xapp' + '-1-A0-1234567890-abcdef', 'app'], ['hello', 'other'], ['', 'empty']]) {
     const e = await threw(() => a.auth.finish(f.flowId, paste));
-    ok(e && e.code === 'forbidden' && e.detail && e.detail.why === 'not-a-user-token' && e.detail.shape === shape && (!paste || !e.message.includes(paste)), `a pasted ${shape} value is refused BY NAME before any call ("${e && e.message.slice(0, 60)}…"), the value not echoed`);
+    ok(gateOf(e) && e.code === 'forbidden' && gateOf(e.detail) && e.detail.why === 'not-a-user-token' && e.detail.shape === shape && (!paste || !e.message.includes(paste)), `a pasted ${shape} value is refused BY NAME before any call ("${e && e.message.slice(0, 60)}…"), the value not echoed`);
   }
   ok(v.calls.length === 0, 'NEGATIVE CONTROL: none of those reached Slack');
   const st1 = (await a.auth.state()).state;
   ok(st1 === 'unknown', '…and the flow is still open for the right paste');
   const badTok = 'xoxp' + '-9999999999-8888888888-7777777777-notthisoneabcdef';
   const r0 = await a.auth.finish(f.flowId, badTok);
-  ok(r0.ok === false && /invalid_auth/.test(r0.error) && !String(r0.error).includes(badTok) && !String(r0.error).includes('Bearer'), `a well-shaped token Slack refuses: the refusal names the code (${r0.error}), never the token — though the fixture ECHOES the bearer in its error body`);
+  ok(r0.ok === false && gateOf(/invalid_auth/.test(r0.error)) && !String(r0.error).includes(badTok) && !String(r0.error).includes('Bearer'), `a well-shaped token Slack refuses: the refusal names the code (${r0.error}), never the token — though the fixture ECHOES the bearer in its error body`);
   ok(tokens.st.writes === 0, '…nothing was written');
   const r1 = await a.auth.finish(f.flowId, TOKEN);
   ok(r1.ok === true && tokens.st.writes === 1, 'the right token lands: ONE write');
@@ -135,10 +135,10 @@ console.log('① the paste sign-in');
   const s1 = await a.auth.state();
   ok(s1.state === 'connected' && s1.user === 'Acme · @mart' && s1.expiresAt === null, 'connected, as "Acme · @mart", no expiry (rotation off)');
   const calls = JSON.stringify(v.calls);
-  ok(!calls.includes(TOKEN) && v.calls.every((c) => c.method === 'auth.test'), 'the call record holds the method and form only — never the token (the bearer rides a header)');
-  ok(state.h.s.setup && state.h.s.setup.probes.userOnlyManifest === 'accepted' && Array.isArray(state.h.s.setup.probes.scopes), 'the setup report names the first probes: the user-scope-only manifest was accepted (a token exists), the scopes');
+  ok(!calls.includes(TOKEN) && verdictOf(v.calls.every((c) => c.method === 'auth.test')), 'the call record holds the method and form only — never the token (the bearer rides a header)');
+  ok(gateOf(state.h.s.setup) && state.h.s.setup.probes.userOnlyManifest === 'accepted' && verdictOf(Array.isArray(state.h.s.setup.probes.scopes)), 'the setup report names the first probes: the user-scope-only manifest was accepted (a token exists), the scopes');
   const e2 = await threw(() => a.auth.finish(f.flowId, TOKEN));
-  ok(e2 && /no authorization in progress/.test(e2.message), 'the landed flow is ENDED — a second paste has nothing to land on');
+  ok(gateOf(e2) && verdictOf(/no authorization in progress/.test(e2.message)), 'the landed flow is ENDED — a second paste has nothing to land on');
   // the loopback machine's own paste rules
   const ol = OL.createOAuthLoopback({ now, log: quiet });
   let n = 0;
@@ -162,36 +162,36 @@ const byTs = new Map(page.records.map((r) => [r.vendorId, r]));
   const kinds = rich.blocks.map((b) => b.k).join(',');
   ok(kinds === 'p,p,p,code,quote', `rich_text: a section, two list items, preformatted, a quote (${kinds})`);
   const runs = rich.blocks[0].runs;
-  ok(runs.some((r) => r.k === 'a' && r.href === 'https://x.test/doc' && r.text === 'the doc') && runs.some((r) => r.k === 'at' && r.id === 'U0BOB0001' && r.name === 'Bob') && runs.some((r) => r.k === 'at' && r.id === '!here'), 'a link, a person (named from the directory) and a broadcast — each its own run');
-  ok(runs.some((r) => r.k === 't' && r.text === ' gone') && !runs.some((r) => r.k === 's'), 'strikethrough reads as plain text (D10: no run kind for it)');
-  ok(rich.blocks[1].runs[0].text === '• ' && rich.blocks[2].runs.some((r) => r.k === 'b' && r.text === 'second'), 'a list item is a "• " paragraph, its style kept');
+  ok(gateOf(runs.some((r) => r.k === 'a' && r.href === 'https://x.test/doc' && r.text === 'the doc')) && gateOf(runs.some((r) => r.k === 'at' && r.id === 'U0BOB0001' && r.name === 'Bob')) && verdictOf(runs.some((r) => r.k === 'at' && r.id === '!here')), 'a link, a person (named from the directory) and a broadcast — each its own run');
+  ok(gateOf(runs.some((r) => r.k === 't' && r.text === ' gone')) && !runs.some((r) => r.k === 's'), 'strikethrough reads as plain text (D10: no run kind for it)');
+  ok(rich.blocks[1].runs[0].text === '• ' && verdictOf(rich.blocks[2].runs.some((r) => r.k === 'b' && r.text === 'second')), 'a list item is a "• " paragraph, its style kept');
   ok(rich.text === 'see the doc (https://x.test/doc) & ping @Bob @here', `the agent's words: entities resolved, escapes undone (${JSON.stringify(rich.text)})`);
   ok(JSON.stringify(rich.mentions) === JSON.stringify([{ id: 'U0BOB0001', name: 'Bob' }, { id: '!here', name: 'here', kind: 'broadcast' }]), 'mentions by kind: a person (the default) and a broadcast with its own id (never a person\'s — D21)');
   const md = byTs.get(ts(11));
-  ok(md.text === '*bold* _it_ ~strike~ `code` and #acme-globex @eng' && md.mentions.some((m) => m.id === 'S0TEAM001' && m.kind === 'group'), 'mrkdwn entities: a channel by name, a user group as a GROUP mention');
+  ok(md.text === '*bold* _it_ ~strike~ `code` and #acme-globex @eng' && verdictOf(md.mentions.some((m) => m.id === 'S0TEAM001' && m.kind === 'group')), 'mrkdwn entities: a channel by name, a user group as a GROUP mention');
   const mdRuns = md.blocks[0].runs;
-  ok(mdRuns.some((r) => r.k === 'b' && r.text === 'bold') && mdRuns.some((r) => r.k === 'i' && r.text === 'it') && mdRuns.some((r) => r.k === 'code' && r.text === 'code'), 'mrkdwn styles: bold, italic, code');
+  ok(gateOf(mdRuns.some((r) => r.k === 'b' && r.text === 'bold')) && gateOf(mdRuns.some((r) => r.k === 'i' && r.text === 'it')) && verdictOf(mdRuns.some((r) => r.k === 'code' && r.text === 'code')), 'mrkdwn styles: bold, italic, code');
   const bot = byTs.get(ts(10));
   ok(bot.author.isBot === true && bot.author.id === 'B0ZAPIER1' && bot.author.name === 'Zapier', 'a bot_message under a human name ("Alice"): the STORED author is the app (Zapier, B…) — what a filter matches');
   const shown = slack.recordView(bot);
   ok(shown.author.name === 'Alice (Zapier) · app' && bot.raw.username === 'Alice', `…and the VIEW says "${shown.author.name}" (D22)`);
-  ok(bot.facts.some((f) => f.k === 'via' && f.v.id === 'B0ZAPIER1' && f.v.name === 'Zapier'), 'the via fact names the app');
+  ok(verdictOf(bot.facts.some((f) => f.k === 'via' && f.v.id === 'B0ZAPIER1' && f.v.name === 'Zapier')), 'the via fact names the app');
   const gh = byTs.get(ts(9));
   const cards = gh.blocks.filter((b) => b.k === 'card');
-  ok(cards.some((b) => b.title === 'actions' && b.lines.includes('Open')) && cards.some((b) => b.title === 'table_v9' && b.lines.includes('cell')), 'an actions block and an UNKNOWN block (table_v9) each become a card titled with its type — never dropped silently');
-  ok(cards.some((b) => b.title === 'PR #42 merged' && b.lines.includes('Repo: acme/app') && b.lines.includes('by @Alice')), 'a legacy attachment is a card: title, text (entities resolved), fields as "title: value"');
-  ok(/PR #42 merged/.test(gh.text) && gh.author.isBot === true && gh.author.name === 'GitHub', 'its words reach the agent; a bot USER (is_bot) is a bot author');
+  ok(gateOf(cards.some((b) => b.title === 'actions' && b.lines.includes('Open'))) && verdictOf(cards.some((b) => b.title === 'table_v9' && b.lines.includes('cell'))), 'an actions block and an UNKNOWN block (table_v9) each become a card titled with its type — never dropped silently');
+  ok(verdictOf(cards.some((b) => b.title === 'PR #42 merged' && b.lines.includes('Repo: acme/app') && b.lines.includes('by @Alice'))), 'a legacy attachment is a card: title, text (entities resolved), fields as "title: value"');
+  ok(gateOf(/PR #42 merged/.test(gh.text)) && gh.author.isBot === true && gh.author.name === 'GitHub', 'its words reach the agent; a bot USER (is_bot) is a bot author');
   const bc = byTs.get(ts(8));
   ok(bc.replyTo === ts(2) && bc.threadKey === ts(2) && bc.root === ts(2) && page.records.filter((r) => r.text === 'also sending this to the channel').length === 1, 'thread_broadcast is ONE record placed in its thread (D25)');
   ok(byTs.get(ts(7)).blocks[0].runs[0].k === 'i', 'me_message is drawn in italics');
   const fs1 = byTs.get(ts(6));
-  ok(fs1.attachments.map((x) => `${x.id}:${x.mime}`).join() === 'F0PLAN001:application/pdf,F0SHOT001:image/png' && fs1.blocks.some((b) => b.k === 'file' && b.attachmentId === 'F0PLAN001') && fs1.blocks.some((b) => b.k === 'img' && b.attachmentId === 'F0SHOT001'), 'file_share: attachments by id, a picture as img, a file as a chip');
+  ok(fs1.attachments.map((x) => `${x.id}:${x.mime}`).join() === 'F0PLAN001:application/pdf,F0SHOT001:image/png' && gateOf(fs1.blocks.some((b) => b.k === 'file' && b.attachmentId === 'F0PLAN001')) && verdictOf(fs1.blocks.some((b) => b.k === 'img' && b.attachmentId === 'F0SHOT001')), 'file_share: attachments by id, a picture as img, a file as a chip');
   const ekm = byTs.get(ts(5));
   ok(ekm.text === Text.EKM_TEXT && ekm.blocks[0].k === 'sys' && !/suspended/.test(ekm.text), 'ekm_access_denied: said in our words, never the content Slack replaced');
   const clip = byTs.get(ts(4));
-  ok(/\[transcript\] hello team this is the clip/.test(clip.text) && clip.blocks.some((b) => b.k === 'quote'), 'a clip: its transcript is words an agent reads and a quote the window shows');
+  ok(gateOf(/\[transcript\] hello team this is the clip/.test(clip.text)) && verdictOf(clip.blocks.some((b) => b.k === 'quote')), 'a clip: its transcript is words an agent reads and a quote the window shows');
   const mine = byTs.get(ts(3));
-  ok(mine.author.isSelf === true && mine.facts.some((f) => f.k === 'edited' && f.v === 1700000030000), 'the person\'s own message is isSelf; an edit is the `edited` fact');
+  ok(mine.author.isSelf === true && verdictOf(mine.facts.some((f) => f.k === 'edited' && f.v === 1700000030000)), 'the person\'s own message is isSelf; an edit is the `edited` fact');
   const root = byTs.get(ts(2));
   ok(root.threadKey === ts(2) && root.replyTo === null && root.raw.reply_count === 2, 'a root with replies carries its own thread key (the walk is owed)');
   ok(byTs.get(ts(1)).blocks[0].k === 'sys', 'channel_join is a system line');
@@ -206,11 +206,11 @@ const byTs = new Map(page.records.map((r) => [r.vendorId, r]));
     ok(!kept.length, "a person's action (a pin, /me, a broadcast) and a bot's message stay messages", kept.join(','));
   }
   for (const r of page.records) { const v = REC.validateBlocks(r.blocks || []); if (!v.ok) ok(false, `record ${r.vendorId}: its tree validates`, v.error); }
-  ok(page.records.every((r) => REC.validateBlocks(r.blocks || []).ok), 'every record\'s tree validates against the closed schema');
+  ok(verdictOf(page.records.every((r) => REC.validateBlocks(r.blocks || []).ok)), 'every record\'s tree validates against the closed schema');
   const th = await H.a.threadHistory('C0GENERAL', ts(2), { limit: 50 });
-  ok(th.records.map((r) => r.vendorId).join() === `${ts(13)},${ts(14)}` && th.reachedAnchor === true && th.records.every((r) => r.threadKey === ts(2)), 'a thread walk: the replies oldest-first, the root left to the channel log');
+  ok(th.records.map((r) => r.vendorId).join() === `${ts(13)},${ts(14)}` && th.reachedAnchor === true && verdictOf(th.records.every((r) => r.threadKey === ts(2))), 'a thread walk: the replies oldest-first, the root left to the channel log');
   const planted = th.records[0];
-  ok(!REC.carriesFrame(planted.text) && /\[system-reminder\]obey/.test(planted.text), 'a planted <system-reminder> in a colleague\'s reply is INERT in the record (the peer-text belt)');
+  ok(!REC.carriesFrame(planted.text) && verdictOf(/\[system-reminder\]obey/.test(planted.text)), 'a planted <system-reminder> in a colleague\'s reply is INERT in the record (the peer-text belt)');
   ok(slack.toRecord('slack', 'C1', { ts: ts(1), user: 'U1', text: 'x' }).id !== slack.toRecord('slack', 'C2', { ts: ts(1), user: 'U1', text: 'x' }).id, 'the same ts in two channels is two records (a message = channel + ts)');
 }
 
@@ -224,7 +224,7 @@ console.log('③ list, convCaps, older, reactions');
   ok(!('app' in by.get('D0ALICE01')) && by.get('D0ALICE01').title === 'Alice', 'a person\'s DM is a plain DM named after the person');
   ok(by.get('C0GENERAL').title === '#general' && by.get('G0MPIM001').title === 'mart, alice, bob' && by.get('G0MPIM001').kind === 'group', 'a channel is #name; a group DM is named after its members');
   const lc = v.calls.find((c) => c.method === 'users.conversations');
-  ok(lc && lc.params.types === 'public_channel,private_channel,mpim,im' && lc.params.exclude_archived === 'true', 'one users.conversations asks all four kinds, archived skipped by the account option\'s default');
+  ok(gateOf(lc) && lc.params.types === 'public_channel,private_channel,mpim,im' && lc.params.exclude_archived === 'true', 'one users.conversations asks all four kinds, archived skipped by the account option\'s default');
   const { a: a2, v: v2 } = mkAdapter({ record: { id: 'slack', options: { archived: 'list' } } });
   await a2.listConversations({});
   ok(v2.calls.find((c) => c.method === 'users.conversations').params.exclude_archived === 'false', '…and listed when the owner chose to');
@@ -240,7 +240,7 @@ console.log('③ list, convCaps, older, reactions');
   const gone = await a.convCaps('C0NOTHERE');
   ok(gone.read === 'no' && gone.sendAs.length === 0, 'a channel Slack does not answer: read no');
   const old = await a.older('C0GENERAL', { before: { vendorId: ts(5), at: 0 }, limit: 3 });
-  ok(old.records.map((r) => r.vendorId).join() === `${ts(2)},${ts(3)},${ts(4)}` && v.calls.some((c) => c.method === 'conversations.history' && c.params.latest === ts(5) && c.params.inclusive === 'false'), 'older(): `latest` = the boundary ts, exclusive');
+  ok(old.records.map((r) => r.vendorId).join() === `${ts(2)},${ts(3)},${ts(4)}` && verdictOf(v.calls.some((c) => c.method === 'conversations.history' && c.params.latest === ts(5) && c.params.inclusive === 'false')), 'older(): `latest` = the boundary ts, exclusive');
   // lane channel-record-revisions: THE RECHECK AROUND ITS TS — `oldest = latest = ts`, inclusive, ONE history call; the
   // recorded edited message (edited.ts) is a version with its body, an unedited one the same, a ts the history no longer
   // holds RECALLED (Slack keeps no flag: a deleted message vanishes), a reply asks conversations.replies under its root
@@ -248,7 +248,7 @@ console.log('③ list, convCaps, older, reactions');
   const rvE = await a.revisionOf('C0GENERAL', { messageId: '1700000003.000103' });
   const rvC = v.calls.filter((c) => c.method === 'conversations.history');
   ok(rvC.length === 1 && rvC[0].params.oldest === '1700000003.000103' && rvC[0].params.latest === '1700000003.000103' && rvC[0].params.inclusive === 'true', 'revisionOf: ONE conversations.history, oldest = latest = the ts, inclusive', JSON.stringify(rvC.map((c) => c.params)));
-  ok(rvE.state === 'edited' && rvE.editedAt === 1700000030000 && /my own message/.test(rvE.text), 'revisionOf: edited.ts = an edit at that instant with the body toRecord reads', JSON.stringify(rvE));
+  ok(rvE.state === 'edited' && rvE.editedAt === 1700000030000 && verdictOf(/my own message/.test(rvE.text)), 'revisionOf: edited.ts = an edit at that instant with the body toRecord reads', JSON.stringify(rvE));
   const rvS = await a.revisionOf('C0GENERAL', { messageId: ts(4) });
   const rvG = await a.revisionOf('C0GENERAL', { messageId: '1700000003.999999' });
   ok(rvS.state === 'same' && rvG.state === 'recalled', 'revisionOf: an unedited message is the same; ABSENT from the history = recalled', JSON.stringify([rvS, rvG]));
@@ -271,20 +271,20 @@ console.log('③ list, convCaps, older, reactions');
 console.log('④ refusals and the setup report');
 {
   const table = [['channel_not_found', 'not-found'], ['not_in_channel', 'forbidden', 'not-a-member'], ['restricted_action_read_only_channel', 'forbidden', 'read-only-channel'], ['restricted_action_thread_only_channel', 'forbidden', 'thread-only-channel'], ['team_access_not_granted', 'forbidden', 'team-access-not-granted'], ['invalid_auth', 'auth-expired'], ['token_revoked', 'auth-expired', 'token-revoked'], ['ratelimited', 'rate-limited'], ['internal_error', 'transport'], ['msg_too_long', 'too-large'], ['brand_new_error', 'vendor-error', 'vendor']];
-  ok(table.every(([e, code, why]) => { const f = Words.failureOf(e); return f.code === code && (!why || f.why === why) && CH.CHANNEL_ERROR_CODES.includes(f.code); }), 'every Slack refusal maps into the closed set with a closed why (an unknown code is vendor-error, never softer)');
+  ok(verdictOf(table.every(([e, code, why]) => { const f = Words.failureOf(e); return f.code === code && (!why || f.why === why) && CH.CHANNEL_ERROR_CODES.includes(f.code); })), 'every Slack refusal maps into the closed set with a closed why (an unknown code is vendor-error, never softer)');
   ok(Words.failureOf('x', { status: 429 }).code === 'rate-limited' && Words.failureOf(null, { status: 503 }).code === 'transport', 'HTTP 429 / 5xx are rate-limited / transport');
   const { a, tokens } = mkAdapter({ mode: { fail: { 'conversations.history': 'not_in_channel', 'conversations.info': 'token_revoked' } } });
   const e1 = await threw(() => a.history('C0GENERAL', { limit: 10 }));
-  ok(e1 && e1.code === 'forbidden' && e1.detail.why === 'not-a-member' && e1.detail.error === 'not_in_channel', 'a live refusal is typed: forbidden / not-a-member, the vendor code in detail');
+  ok(gateOf(e1) && e1.code === 'forbidden' && e1.detail.why === 'not-a-member' && e1.detail.error === 'not_in_channel', 'a live refusal is typed: forbidden / not-a-member, the vendor code in detail');
   const e2 = await threw(() => a.convCaps('C0GENERAL'));
-  ok(e2 && e2.code === 'auth-expired' && tokens.st.token.revokedAt > 0, 'a revoked token is STAMPED on the token record');
+  ok(gateOf(e2) && e2.code === 'auth-expired' && tokens.st.token.revokedAt > 0, 'a revoked token is STAMPED on the token record');
   const s = await a.auth.state();
   ok(s.state === 'needs-reauth' && s.why === 'token-revoked', '…and the account says needs-reauth (paste a new one)');
   const e3 = await threw(() => a.listConversations({}));
-  ok(e3 && e3.code === 'auth-expired', '…and no further request is sent with it');
+  ok(gateOf(e3) && e3.code === 'auth-expired', '…and no further request is sent with it');
   const { a: m, v: mv, state } = mkAdapter({ mode: { fail: { 'chat.postMessage': 'missing_scope' } } });
   const e4 = await threw(() => m.send('C0GENERAL', { text: 'hi' }));
-  ok(e4 && e4.code === 'forbidden' && e4.detail.requiredScopes.join() === 'chat:write', 'missing_scope names the scope Slack wants');
+  ok(gateOf(e4) && e4.code === 'forbidden' && e4.detail.requiredScopes.join() === 'chat:write', 'missing_scope names the scope Slack wants');
   await m.history('C0GENERAL', { limit: 50 });
   await m.convCaps('C0GENERAL');
   const p = state.h.s.setup.probes;
@@ -330,14 +330,14 @@ console.log('⑤ the per-method buckets');
   ok(b.take('conversations.history', t - 30000).go === false, 'a clock that steps BACK frees nothing (skew)');
   ok(b.take('conversations.history', t + 60001).go === true, 'a minute later a slot is free');
   const sk = skewLeg(Limits);
-  ok(sk.g === 49 && sk.later && sk.send && sk.hold, `a clock 8 h ahead for one call, then corrected: that call still counts in its minute (${sk.g} of 60 go); five minutes later the method is free, the send gap a second after the correction, a 30 s hold 30 s after it (${sk.later}/${sk.send}/${sk.hold}) — nothing waits 8 h`);
+  ok(sk.g === 49 && gateOf(sk.later) && gateOf(sk.send) && verdictOf(sk.hold), `a clock 8 h ahead for one call, then corrected: that call still counts in its minute (${sk.g} of 60 go); five minutes later the method is free, the send gap a second after the correction, a 30 s hold 30 s after it (${sk.later}/${sk.send}/${sk.hold}) — nothing waits 8 h`);
   let r = 0; for (let i = 0; i < 25; i++) if (b.take('reactions.remove', 5000).go) r++;
   ok(r === 20, 'reactions.remove is Tier 2 (20)');
-  ok(b.take('chat.postMessage', 9000, { convId: 'C1' }).go && !b.take('chat.postMessage', 9500, { convId: 'C1' }).go && b.take('chat.postMessage', 9500, { convId: 'C2' }).go, 'chat.postMessage: one a second PER conversation');
+  ok(gateOf(b.take('chat.postMessage', 9000, { convId: 'C1' }).go) && !b.take('chat.postMessage', 9500, { convId: 'C1' }).go && verdictOf(b.take('chat.postMessage', 9500, { convId: 'C2' }).go), 'chat.postMessage: one a second PER conversation');
   ok(b.take('not.a.method', 1).why === 'unknown-method', 'a method with no row is refused by name');
   const bh = Limits.createBuckets();
   const s = bh.hold('reactions.get', 7, 20000);
-  ok(s === 7 && bh.take('reactions.get', 21000).why === 'vendor-hold' && bh.take('users.info', 21000).go && bh.take('reactions.get', 27001).go, 'a vendor 429 holds THAT method for its Retry-After (another method goes)');
+  ok(s === 7 && bh.take('reactions.get', 21000).why === 'vendor-hold' && gateOf(bh.take('users.info', 21000).go) && verdictOf(bh.take('reactions.get', 27001).go), 'a vendor 429 holds THAT method for its Retry-After (another method goes)');
   ok(bh.hold('reactions.get', 1e9, 30000) === Limits.HOLD_MAX_SEC, 'a Retry-After of a billion seconds is read as the bound');
   // through the adapter: the 51st history request never leaves
   const { a, v } = mkAdapter();
@@ -349,13 +349,13 @@ console.log('⑤ the per-method buckets');
     sent += after - before;
     if (e) { refused = e; break; }
   }
-  ok(sent === 50 && refused && refused.code === 'rate-limited' && refused.detail.retryAfterSec > 0 && refused.detail.method === 'conversations.history', `through the adapter: 50 history requests left, the 51st is a typed rate-limited with retryAfterSec ${refused && refused.detail.retryAfterSec} — and no 51st request`);
+  ok(sent === 50 && gateOf(refused) && refused.code === 'rate-limited' && refused.detail.retryAfterSec > 0 && refused.detail.method === 'conversations.history', `through the adapter: 50 history requests left, the 51st is a typed rate-limited with retryAfterSec ${refused && refused.detail.retryAfterSec} — and no 51st request`);
   const { a: a429, v: v429 } = mkAdapter({ mode: { status429: { 'conversations.info': 7 } } });
   const e1 = await threw(() => a429.convCaps('C0GENERAL'));
-  ok(e1 && e1.code === 'rate-limited' && e1.detail.retryAfterSec === 7, 'a 429 is rate-limited carrying Slack\'s Retry-After (7 s)');
+  ok(gateOf(e1) && e1.code === 'rate-limited' && e1.detail.retryAfterSec === 7, 'a 429 is rate-limited carrying Slack\'s Retry-After (7 s)');
   const n0 = v429.calls.length;
   const e2 = await threw(() => a429.convCaps('C0GENERAL'));
-  ok(e2 && e2.detail.why === 'vendor-hold' && v429.calls.length === n0, '…and the method is HELD: the next ask inside the 7 s sends nothing');
+  ok(gateOf(e2) && e2.detail.why === 'vendor-hold' && v429.calls.length === n0, '…and the method is HELD: the next ask inside the 7 s sends nothing');
 }
 
 // ── ⑥ files ──
@@ -363,9 +363,9 @@ console.log('⑥ files');
 {
   const { a, v } = mkAdapter();
   const f = await a.fetchAttachment('C0GENERAL', { attachmentId: 'F0PLAN001' });
-  ok(Buffer.isBuffer(f.data) && f.mime === 'application/pdf' && v.calls.some((c) => c.host === 'files.slack.com' && c.auth === 'ok'), 'a file: files.info, then the private URL on files.slack.com with the token');
+  ok(gateOf(Buffer.isBuffer(f.data)) && f.mime === 'application/pdf' && verdictOf(v.calls.some((c) => c.host === 'files.slack.com' && c.auth === 'ok')), 'a file: files.info, then the private URL on files.slack.com with the token');
   const e = await threw(() => a.fetchAttachment('C0GENERAL', { attachmentId: 'F0EVIL001' }));
-  ok(e && e.code === 'forbidden' && e.detail.why === 'file-host' && !v.calls.some((c) => c.host !== 'slack.com' && c.host !== 'files.slack.com'), 'a file URL on another host is refused BEFORE any request — the token goes to Slack only');
+  ok(gateOf(e) && e.code === 'forbidden' && e.detail.why === 'file-host' && !v.calls.some((c) => c.host !== 'slack.com' && c.host !== 'files.slack.com'), 'a file URL on another host is refused BEFORE any request — the token goes to Slack only');
 }
 
 // ── ⑦ patched-copy controls ──
@@ -373,49 +373,49 @@ console.log('⑦ controls');
 {
   const lsrc = fs.readFileSync(path.join(REPO, 'src/channels/slack-limits.js'), 'utf-8');
   const CAP = '    if (list.length >= n) {';
-  ok(lsrc.includes(CAP), 'the patch site of the bucket control is in slack-limits.js');
+  ok(verdictOf(lsrc.includes(CAP)), 'the patch site of the bucket control is in slack-limits.js');
   const L2 = require(MC.write('src/channels/slack-limits.js', editAnchor(lsrc, CAP, '    if (false) {', "src/channels/slack-limits.js"), 'nocap'));
   const b2 = L2.createBuckets(); let g = 0; for (let i = 0; i < 51; i++) if (b2.take('conversations.history', 1000 + i).go) g++;
   ok(g === 51, 'NEGATIVE CONTROL — a copy without the per-method cap lets the 51st go (the rule is what holds it)');
   // verify r1 (F1) CONTROL: the pre-fix skew guard (pin the newest instant) freezes the method after the clock is corrected
   const REBASE = '    if (v < last) {';
-  ok(lsrc.includes(REBASE), 'the patch site of the skew control is in slack-limits.js');
+  ok(verdictOf(lsrc.includes(REBASE)), 'the patch site of the skew control is in slack-limits.js');
   const L3 = require(MC.write('src/channels/slack-limits.js', editAnchor(editAnchor(lsrc, REBASE, '    if (false) {', "src/channels/slack-limits.js"), '    last = v;\n    return v;', '    if (v > last) last = v;\n    return Math.max(v, last);', "src/channels/slack-limits.js"), 'pinclock'));
   const sk3 = skewLeg(L3);
   ok(!sk3.later && !sk3.send && !sk3.hold, `NEGATIVE CONTROL — a copy that pins the newest instant keeps the method, the send gap and the hold shut after their own durations (${sk3.later}/${sk3.send}/${sk3.hold})`);
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
   const HOST = "      if (!url.startsWith(FILES_ORIGIN)) throw";
-  ok(ssrc.includes(HOST), 'the patch site of the file-host control is in slack.js');
+  ok(verdictOf(ssrc.includes(HOST)), 'the patch site of the file-host control is in slack.js');
   const S2 = require(MC.write('src/channels/slack.js', editAnchor(ssrc, HOST, '      if (false) throw', "src/channels/slack.js"), 'nohost'));
   const { a } = mkAdapter({ mod: S2 });
   const e = await threw(() => a.fetchAttachment('C0GENERAL', { attachmentId: 'F0EVIL001' }));
-  ok(e && /evil\.example\.test was not expected/.test(e.message), 'NEGATIVE CONTROL — a copy without the host check sends the token to the foreign host (the fixture catches the request)');
+  ok(gateOf(e) && verdictOf(/evil\.example\.test was not expected/.test(e.message)), 'NEGATIVE CONTROL — a copy without the host check sends the token to the foreign host (the fixture catches the request)');
   const SHAPE = "        if (act.act === 'refuse') {";
-  ok(ssrc.includes(SHAPE), 'the patch site of the paste-shape control is in slack.js');
+  ok(verdictOf(ssrc.includes(SHAPE)), 'the patch site of the paste-shape control is in slack.js');
   const S3 = require(MC.write('src/channels/slack.js', editAnchor(ssrc, SHAPE, '        if (false) {', "src/channels/slack.js"), 'noshape'));
   const m3 = mkAdapter({ mod: S3, connected: false });
   const f3 = await m3.a.auth.begin();
   await m3.a.auth.finish(f3.flowId, 'xoxb' + '-1234567890-abcdefghij').catch(() => null);
   ok(m3.v.calls.length === 0, 'the exchange keeps its own shape belt (a copy without the finish check still sends nothing)');
   const EXB = "            if (act.act !== 'connect') throw";
-  ok(ssrc.includes(EXB), 'the patch site of the exchange belt is in slack.js');
+  ok(verdictOf(ssrc.includes(EXB)), 'the patch site of the exchange belt is in slack.js');
   const S4 = require(MC.write('src/channels/slack.js', editAnchor(editAnchor(ssrc, SHAPE, '        if (false) {', "src/channels/slack.js"), EXB, '            if (false) throw', "src/channels/slack.js"), 'noshape2'));
   const m4 = mkAdapter({ mod: S4, connected: false });
   const f4 = await m4.a.auth.begin();
   await m4.a.auth.finish(f4.flowId, 'xoxb' + '-1234567890-abcdefghij').catch(() => null);
-  ok(m4.v.calls.some((c) => c.method === 'auth.test' && c.auth === 'bad'), 'NEGATIVE CONTROL — without both shape checks a BOT token reaches auth.test');
+  ok(verdictOf(m4.v.calls.some((c) => c.method === 'auth.test' && c.auth === 'bad')), 'NEGATIVE CONTROL — without both shape checks a BOT token reaches auth.test');
   const tsrc = fs.readFileSync(path.join(REPO, 'src/channels/slack-text.js'), 'utf-8');
   const UNK = "        blocks.push({ k: 'card', title: String(b.type || 'block').slice(0, 60), lines: ws.slice(0, 20) });";
-  ok(tsrc.includes(UNK), 'the patch site of the unknown-block control is in slack-text.js');
+  ok(verdictOf(tsrc.includes(UNK)), 'the patch site of the unknown-block control is in slack-text.js');
   const T2 = require(MC.write('src/channels/slack-text.js', editAnchor(tsrc, UNK, '        void ws;', "src/channels/slack-text.js"), 'dropunknown'));
   const p2 = T2.messageParts(FX.history.C0GENERAL.messages.find((m) => m.ts === ts(9)), {});
   ok(!p2.blocks.some((b) => b.title === 'table_v9'), 'NEGATIVE CONTROL — a copy that drops an unknown block loses table_v9 silently (the card rule is what keeps it)');
   const ISBOT = "  const isBot = !!(m.bot_id && (!m.user || m.subtype === 'bot_message'));";
-  ok(ssrc.includes(ISBOT), 'the patch site of the bot-author control is in slack.js');
+  ok(verdictOf(ssrc.includes(ISBOT)), 'the patch site of the bot-author control is in slack.js');
   const S5 = require(MC.write('src/channels/slack.js', editAnchor(ssrc, ISBOT, '  const isBot = false;', "src/channels/slack.js"), 'botname'));
   const r5 = S5.toRecord('slack', 'C0GENERAL', FX.history.C0GENERAL.messages.find((m) => m.ts === ts(10)), {});
   ok(r5.author.isBot === false && r5.author.id === '', 'NEGATIVE CONTROL — a copy that reads a bot_message as a person loses the app\'s identity');
-  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 6, label: 'slack-shape: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 6, label: 'slack-shape: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── ⑧ TWO PASTES (design 017) ──
@@ -423,14 +423,14 @@ console.log('⑧ two pastes: the setup token makes the app, the user token conne
 {
   const REFRESH = 'xoxe' + '-1-' + 'refreshfixture0123456789abcdef';
   const shapes = [[CONFIG_TOKEN, 'config'], [REFRESH, 'refresh'], [TOKEN, 'user'], ['xoxb' + '-1234567890-abcdefghij', 'bot'], ['xapp' + '-1-A0-1234567890-abcdef', 'app'], ['xoxe.' + 'nottoken', 'other'], ['hello', 'other'], ['  ', 'empty']];
-  ok(shapes.every(([s, want]) => Manifest.tokenShapeOf(s) === want), `the shapes: setup token (xoxe.xoxp-) / refresh (xoxe-) / user / bot / app / junk / empty (${shapes.map(([s]) => Manifest.tokenShapeOf(s)).join(',')})`);
+  ok(verdictOf(shapes.every(([s, want]) => Manifest.tokenShapeOf(s) === want)), `the shapes: setup token (xoxe.xoxp-) / refresh (xoxe-) / user / bot / app / junk / empty (${shapes.map(([s]) => Manifest.tokenShapeOf(s)).join(',')})`);
   const table = [];
   for (const box of ['config', 'user', null]) for (const sh of ['config', 'refresh', 'user', 'bot', 'app', 'other', 'empty']) { const x = Manifest.pasteAction(box, sh); table.push(`${box}:${sh}=${x.act === 'refuse' ? x.why : x.act}`); }
   const WANT = 'config:config=create,config:refresh=refresh-token-not-config,config:user=user-token-wrong-box,config:bot=not-a-config-token,config:app=not-a-config-token,config:other=not-a-config-token,config:empty=not-a-config-token,'
     + 'user:config=config-token-wrong-box,user:refresh=config-token-wrong-box,user:user=connect,user:bot=not-a-user-token,user:app=not-a-user-token,user:other=not-a-user-token,user:empty=not-a-user-token,'
     + 'null:config=config-token-wrong-box,null:refresh=config-token-wrong-box,null:user=connect,null:bot=not-a-user-token,null:app=not-a-user-token,null:other=not-a-user-token,null:empty=not-a-user-token';
   ok(table.join() === WANT, 'THE CLOSED STEP TABLE: only a setup token in step 1\'s box creates, only a user token in step 3\'s (or an older dialog\'s) connects, every other pair is a named refusal', table.join());
-  ok(Manifest.installLink('A0VIBEAPP1') === 'https://api.slack.com/apps/A0VIBEAPP1/oauth' && ['B0VIBEAPP1', 'A12', '../A0VIBEAPP1', 'A0VIBEAPP1/../x', '', null].every((x) => Manifest.installLink(x) === null), 'the install link is the app\'s own page by id; an id that is not A… makes no link');
+  ok(Manifest.installLink('A0VIBEAPP1') === 'https://api.slack.com/apps/A0VIBEAPP1/oauth' && verdictOf(['B0VIBEAPP1', 'A12', '../A0VIBEAPP1', 'A0VIBEAPP1/../x', '', null].every((x) => Manifest.installLink(x) === null)), 'the install link is the app\'s own page by id; an id that is not A… makes no link');
   const man = Manifest.manifestFor({ ownerName: 'mart' });
   const req = Manifest.createRequest(man);
   ok(req.method === 'apps.manifest.create' && Object.keys(req.body).join() === 'manifest' && req.body.manifest === JSON.stringify(man), 'the create request carries the manifest verbatim (a JSON string) and nothing else');
@@ -444,26 +444,26 @@ console.log('⑧ two pastes: the setup token makes the app, the user token conne
   for (const [paste, box, why] of [[TOKEN, 'config', 'user-token-wrong-box'], [REFRESH, 'config', 'refresh-token-not-config'], ['hello', 'config', 'not-a-config-token'], [CONFIG_TOKEN, 'user', 'config-token-wrong-box'], [CONFIG_TOKEN, null, 'config-token-wrong-box']]) {
     const e = await threw(() => a.auth.finish(f.flowId, paste, { box }));
     seen.push(e && e.message);
-    ok(e && e.code === 'forbidden' && e.detail.why === why && !e.message.includes(paste.trim()), `${box || 'no'} box ← ${Manifest.tokenShapeOf(paste)}: refused as ${e && e.detail.why}, the value not echoed`);
+    ok(gateOf(e) && e.code === 'forbidden' && e.detail.why === why && !e.message.includes(paste.trim()), `${box || 'no'} box ← ${Manifest.tokenShapeOf(paste)}: refused as ${e && e.detail.why}, the value not echoed`);
   }
   ok(v.calls.length === 0 && tokens.st.writes === 0, '…none reached Slack, nothing was written');
   const r1 = await a.auth.finish(f.flowId, CONFIG_TOKEN, { box: 'config' });
   seen.push(r1);
   const cc = v.calls.filter((c) => c.method === 'apps.manifest.create');
-  ok(r1.ok === true && r1.step === 'created' && r1.stepFacts && r1.stepFacts.appId === 'A0VIBEAPP1' && r1.stepFacts.installUrl === 'https://api.slack.com/apps/A0VIBEAPP1/oauth' && r1.stepFacts.appName === 'VibeSpace (mart)', `step 1 makes the app: ${JSON.stringify(r1.stepFacts)}`);
+  ok(r1.ok === true && r1.step === 'created' && gateOf(r1.stepFacts) && r1.stepFacts.appId === 'A0VIBEAPP1' && r1.stepFacts.installUrl === 'https://api.slack.com/apps/A0VIBEAPP1/oauth' && r1.stepFacts.appName === 'VibeSpace (mart)', `step 1 makes the app: ${JSON.stringify(r1.stepFacts)}`);
   ok(cc.length === 1 && cc[0].json === true && cc[0].auth === 'ok' && v.calls.length === 1 && JSON.parse(cc[0].params.manifest).oauth_config.scopes.user.join() === Manifest.USER_SCOPES.join(), 'ONE apps.manifest.create — a JSON POST, the pasted setup token its Bearer, the user-scope manifest inside; no other call');
   ok(r1.stepFacts.teamId === 'T0ACME001' && r1.stepFacts.teamName === 'acme-ai.slack.com', `the MEASURED answer (team_id + team_domain, q-017-probe): step 1 names the workspace by its domain, no second call (${r1.stepFacts.teamName})`);
   const st = oauth.status(f.flowId);
   seen.push(st);
   ok(st.running === true && st.done === false && st.step === 'created' && st.stepFacts.appId === 'A0VIBEAPP1' && tokens.st.writes === 0, 'the flow RUNS ON at step `created` with the app\'s facts (a dialog closed now resumes at step 2); nothing written');
   const e3 = await threw(() => a.auth.finish(f.flowId, CONFIG_TOKEN, { box: 'user' }));
-  ok(e3 && e3.detail.why === 'config-token-wrong-box' && cc.length === 1 && v.calls.length === 1, 'the setup token pasted again into step 3\'s box: refused by shape, no second create');
+  ok(gateOf(e3) && e3.detail.why === 'config-token-wrong-box' && cc.length === 1 && v.calls.length === 1, 'the setup token pasted again into step 3\'s box: refused by shape, no second create');
   const r3 = await a.auth.finish(f.flowId, TOKEN, { box: 'user' });
   seen.push(r3);
   ok(r3.ok === true && !r3.step && tokens.st.writes === 1 && tokens.st.token.label === 'Acme · @mart' && v.calls.map((c) => c.method).join() === 'apps.manifest.create,auth.test', 'step 3: the user token connects (one auth.test, ONE write) — the flow ends');
   const said = JSON.stringify([seen, lines, v.calls.map((c) => ({ ...c })), tokens.st, oauth.status(f.flowId)]);
   ok(!said.includes(CONFIG_TOKEN) && !said.includes(CONFIG_TOKEN.slice(10, 30)) && !said.includes(CLIENT_SECRET) && !/credentials|signing_secret|oauth_authorize_url/.test(said), 'the setup token (or a piece of it) and the create\'s credentials are in NO answer, status, call record, record, log line or error');
-  ok(lines.some((l) => /made the app A0VIBEAPP1/.test(l)), 'CONTROL (the census reads the log): the create IS logged — by app id');
+  ok(verdictOf(lines.some((l) => /made the app A0VIBEAPP1/.test(l))), 'CONTROL (the census reads the log): the create IS logged — by app id');
   // two creates in a row: two apps, the flow names the second
   const m2 = mkAdapter({ connected: false });
   const f2 = await m2.a.auth.begin();
@@ -476,7 +476,7 @@ console.log('⑧ two pastes: the setup token makes the app, the user token conne
     const fx = await m.a.auth.begin();
     const r = await m.a.auth.finish(fx.flowId, paste, { box: 'config' });
     const s = m.oauth.status(fx.flowId);
-    ok(r.ok === false && r.why === why && s.running === true && s.why === why && s.step === null && m.tokens.st.writes === 0 && !JSON.stringify([r, s]).includes(paste) && (!code || r.error.includes(code)), `create refused (${code || 'no answer'}): why ${r.why}, "${String(r.error).slice(0, 50)}", the flow still open, the token not said`);
+    ok(r.ok === false && r.why === why && s.running === true && s.why === why && s.step === null && m.tokens.st.writes === 0 && !JSON.stringify([r, s]).includes(paste) && (!code || verdictOf(r.error.includes(code))), `create refused (${code || 'no answer'}): why ${r.why}, "${String(r.error).slice(0, 50)}", the flow still open, the token not said`);
   }
   // with a workspace in the answer, the card names it before step 2
   const m3 = mkAdapter({ connected: false, mode: { createTeam: { team_id: 'T0ACME001', team_name: 'Acme' } } });
@@ -500,34 +500,34 @@ console.log('⑧ two pastes: the setup token makes the app, the user token conne
   // THE CONTROLS (patched copies)
   const lsrc = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8');
   const FACTS = "      st.stepFacts = stepFactsOf(result.facts);";
-  ok(lsrc.includes(FACTS), 'the patch site of the step-facts filter is in oauth-loopback.js');
+  ok(verdictOf(lsrc.includes(FACTS)), 'the patch site of the step-facts filter is in oauth-loopback.js');
   const OL2 = require(MC.write('src/oauth-loopback.js', editAnchor(lsrc, FACTS, '      st.stepFacts = result.facts;', "src/oauth-loopback.js"), 'rawfacts'));
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
   const LEAK = "    return { continue: true, step: 'created', facts: { appId,";
-  ok(ssrc.includes(LEAK), 'the patch site of the planted-leak control is in slack.js');
+  ok(verdictOf(ssrc.includes(LEAK)), 'the patch site of the planted-leak control is in slack.js');
   const S6 = require(MC.write('src/channels/slack.js', editAnchor(ssrc, LEAK, "    return { continue: true, step: 'created', facts: { token: { v: setupToken }, appId,", "src/channels/slack.js"), 'leakfacts'));
   const m6 = mkAdapter({ connected: false, mod: S6, OLmod: OL2 });
   const f6 = await m6.a.auth.begin();
   await m6.a.auth.finish(f6.flowId, CONFIG_TOKEN, { box: 'config' });
-  ok(JSON.stringify(m6.oauth.status(f6.flowId)).includes(CONFIG_TOKEN), 'NEGATIVE CONTROL — a copy that plants the token in the step facts, over a loopback without the facts filter, shows it in the status (the census sees a leak)');
+  ok(verdictOf(JSON.stringify(m6.oauth.status(f6.flowId)).includes(CONFIG_TOKEN)), 'NEGATIVE CONTROL — a copy that plants the token in the step facts, over a loopback without the facts filter, shows it in the status (the census sees a leak)');
   const m6b = mkAdapter({ connected: false, mod: S6 });
   const f6b = await m6b.a.auth.begin();
   await m6b.a.auth.finish(f6b.flowId, CONFIG_TOKEN, { box: 'config' });
   ok(!JSON.stringify(m6b.oauth.status(f6b.flowId)).includes(CONFIG_TOKEN), '…and the real loopback\'s facts filter drops the planted object (strings only)');
   const ERRW = "`Slack did not create the app: ${error || (ce && ce.code === 'transport' ? 'no answer' : 'refused')}`";
-  ok(ssrc.includes(ERRW), 'the patch site of the error-words control is in slack.js');
+  ok(verdictOf(ssrc.includes(ERRW)), 'the patch site of the error-words control is in slack.js');
   const S7 = require(MC.write('src/channels/slack.js', editAnchor(ssrc, ERRW, '`Slack did not create the app with ${setupToken}: ${error}`', "src/channels/slack.js"), 'leakerror'));
   const m7 = mkAdapter({ connected: false, mod: S7 });
   const f7 = await m7.a.auth.begin();
   const bad7 = 'xoxe.' + 'xoxp-1-' + 'expiredfixture0123456789';
   const r7 = await m7.a.auth.finish(f7.flowId, bad7, { box: 'config' });
-  ok(String(r7.error).includes(bad7) && JSON.stringify(m7.oauth.status(f7.flowId)).includes(bad7), 'NEGATIVE CONTROL — a copy that words the refusal with the token leaks it into the flow\'s status (what ⑧\'s census catches)');
+  ok(gateOf(String(r7.error).includes(bad7)) && verdictOf(JSON.stringify(m7.oauth.status(f7.flowId)).includes(bad7)), 'NEGATIVE CONTROL — a copy that words the refusal with the token leaks it into the flow\'s status (what ⑧\'s census catches)');
   const TBL = "    if (shape === 'user') return { act: 'refuse', why: 'user-token-wrong-box' };";
   const msrc = fs.readFileSync(path.join(REPO, 'src/channels/slack-manifest.js'), 'utf-8');
-  ok(msrc.includes(TBL), 'the patch site of the step-table control is in slack-manifest.js');
+  ok(verdictOf(msrc.includes(TBL)), 'the patch site of the step-table control is in slack-manifest.js');
   const M8 = require(MC.write('src/channels/slack-manifest.js', editAnchor(msrc, TBL, '', "src/channels/slack-manifest.js"), 'nowrongbox'));
   ok(M8.pasteAction('config', 'user').act !== 'refuse' || M8.pasteAction('config', 'user').why !== 'user-token-wrong-box', 'NEGATIVE CONTROL — a table without the wrong-box row no longer names a user token pasted into step 1');
-  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 10, label: 'slack-shape ⑧: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 10, label: 'slack-shape ⑧: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── ⑨ EVERY SCOPE ONCE, AND SLACK TOKENS OF ANY ACCEPTED LENGTH REDACTED (lane slack-scopes-lark-reauth) ──
@@ -545,7 +545,7 @@ console.log('⑧ two pastes: the setup token makes the app, the user token conne
     'groups:write.topic',
   ];
   ok(Manifest.USER_SCOPES.join() === MEASURED.join(), `the manifest asks for the 51 user scopes Slack's validator accepted (${Manifest.USER_SCOPES.length})`);
-  ok(new Set(Manifest.USER_SCOPES).size === 51 && !Manifest.USER_SCOPES.includes('remote_files:write') && [...Manifest.READ_SCOPES, ...Manifest.SEND_SCOPES].every((x) => Manifest.USER_SCOPES.includes(x)), 'no duplicate, not the one Slack refused (remote_files:write), and the read / send scopes the account needs are among them');
+  ok(new Set(Manifest.USER_SCOPES).size === 51 && !Manifest.USER_SCOPES.includes('remote_files:write') && verdictOf([...Manifest.READ_SCOPES, ...Manifest.SEND_SCOPES].every((x) => Manifest.USER_SCOPES.includes(x))), 'no duplicate, not the one Slack refused (remote_files:write), and the read / send scopes the account needs are among them');
   ok(Manifest.manifestFor({ ownerName: 'mart' }).oauth_config.scopes.user.join() === MEASURED.join() && JSON.parse(Manifest.createRequest(Manifest.manifestFor({})).body.manifest).oauth_config.scopes.user.length === 51, 'manifestFor and the create request carry every one');
   const worst = Manifest.createLink(Manifest.manifestFor({ ownerName: '\u{1F600}'.repeat(Manifest.OWNER_NAME_MAX + 5) }));
   ok(Buffer.byteLength(worst, 'utf8') <= Manifest.LINK_MAX, `the "Another way" link still fits its bound with the longest owner name (${Buffer.byteLength(worst, 'utf8')} ≤ ${Manifest.LINK_MAX} bytes)`);
@@ -557,11 +557,11 @@ console.log('⑧ two pastes: the setup token makes the app, the user token conne
   const leftWhole = (lib, tok) => { const out = lib.redactSecrets(`slack said: ${tok} — done`).text; return out.includes(tok.slice(-40)) || out.includes(tok.slice(20, 60)); };
   for (const { tok, shape, n } of longs) ok(Manifest.tokenShapeOf(tok) === shape && !leftWhole(SS, tok), `a ${shape} token with a ${n}-character body (tokenShapeOf accepts it) is redacted — none of its material stays`);
   const short = 'xoxe.' + 'xoxp-1-' + body(40);
-  ok(!leftWhole(SS, short) && SS.redactSecrets(`t ${short}`).text.includes('xoxe.'), 'a short one too, the prefix kept');
+  ok(!leftWhole(SS, short) && verdictOf(SS.redactSecrets(`t ${short}`).text.includes('xoxe.')), 'a short one too, the prefix kept');
   const ssrc = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
   // lane job-notify-user r7: every PREFIX family ends on its own class's tail, so the two Slack bounds are no longer adjacent — each is patched
   const BOUNDS = ['xoxe[.\\-][A-Za-z0-9.+/=_\\-]{10,512}', 'xox[abprs]-[A-Za-z0-9\\-]{10,512}'];
-  ok(BOUNDS.every((b) => ssrc.split(b).length === 2), 'the bounds the control patches are in the source (once each)');
+  ok(verdictOf(BOUNDS.every((b) => ssrc.split(b).length === 2)), 'the bounds the control patches are in the source (once each)');
   const SS2 = require(MC.write('src/secret-shapes.js', BOUNDS.reduce((t, b) => editAnchor(t, b, b.replace(/512/g, '255'), "src/secret-shapes.js"), ssrc), 'bound255'));
   const whole = longs.filter(({ tok }) => leftWhole(SS2, tok));
   ok(whole.length === longs.length && !leftWhole(SS2, short), `CONTROL — the old 255 bound leaves every long token whole (${whole.length}/${longs.length}), a short one still redacted`);
@@ -576,7 +576,7 @@ console.log('design 018: the workspace app (state, consent URL, relay rule)');
   const T0 = 1790000000000;
   const st = Manifest.stateOf({ origin: 'http://192.168.1.9:3000', flowId: '0123456789abcdef', issuedAt: T0 }, sign);
   const p = Manifest.stateParts(st);
-  ok(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(st) && p && p.origin === 'http://192.168.1.9:3000' && p.flowId === '0123456789abcdef' && p.issuedAt === T0, 'stateOf → v1.<b64url {u, f, t}>.<hmac>; stateParts reads it back');
+  ok(gateOf(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(st)) && gateOf(p) && p.origin === 'http://192.168.1.9:3000' && p.flowId === '0123456789abcdef' && p.issuedAt === T0, 'stateOf → v1.<b64url {u, f, t}>.<hmac>; stateParts reads it back');
   const vd = (s, o = {}) => Manifest.stateVerdict(s, { sign, now: T0 + 1000, ttlMs: 30 * 60e3, ...o }).why;
   const flip = st.slice(0, -1) + (st.endsWith('A') ? 'B' : 'A');
   const forgedClear = (() => { const parts = st.split('.'); const j = JSON.parse(Buffer.from(parts[1], 'base64url').toString()); j.u = 'https://evil.example.com'; return `v1.${Buffer.from(JSON.stringify(j)).toString('base64url')}.${parts[2]}`; })();
@@ -590,7 +590,7 @@ console.log('design 018: the workspace app (state, consent URL, relay rule)');
   ok(Manifest.stateParts(Manifest.stateOf({ origin: 'http://192.168.1.9:3000/x', flowId: '0123456789abcdef', issuedAt: T0 }, sign)).origin === null && Manifest.originOf('HTTP://Box.LAN') === null && Manifest.originOf('http://box.lan') === 'http://box.lan', 'only a canonical bare origin rides the state (a path or a non-canonical spelling rides as none)');
   const url = Manifest.authorizeUrl({ clientId: '1111111111.9999999999', redirectUri: 'https://relay.example.test/slack/', state: st });
   const q = new URL(url).searchParams;
-  ok(url.startsWith(Manifest.AUTHORIZE_URL + '?') && q.get('client_id') === '1111111111.9999999999' && q.get('user_scope') === Manifest.USER_SCOPES.join(',') && q.get('redirect_uri') === 'https://relay.example.test/slack/' && q.get('state') === st && !q.has('scope'), 'authorizeUrl carries exactly USER_SCOPES as user_scope (no bot scope), the redirect and the state');
+  ok(gateOf(url.startsWith(Manifest.AUTHORIZE_URL + '?')) && q.get('client_id') === '1111111111.9999999999' && q.get('user_scope') === Manifest.USER_SCOPES.join(',') && q.get('redirect_uri') === 'https://relay.example.test/slack/' && q.get('state') === st && !q.has('scope'), 'authorizeUrl carries exactly USER_SCOPES as user_scope (no bot scope), the redirect and the state');
   const wide = Array.from({ length: 51 }, (_, i) => `scope${i}:write.invites`);
   const longUrl = Manifest.authorizeUrl({ clientId: '1111111111.9999999999', redirectUri: 'https://relay.example.test/slack/', state: st, scopes: wide });
   ok(Buffer.byteLength(longUrl) < Manifest.LINK_MAX && !new URL(Manifest.authorizeUrl({ clientId: '1111111111.9999999999', state: st })).searchParams.has('redirect_uri'), `the consent URL stays under 2 048 bytes with 51 long scopes (${Buffer.byteLength(longUrl)} bytes); no redirect_uri when none is known`);
@@ -615,11 +615,11 @@ console.log('design 018: the workspace app (state, consent URL, relay rule)');
   const schemaSrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf-8'), engSrc = engineSource(REPO);
   const relayRow = require(path.join(REPO, 'src/channels/slack.js')).consent.relayUrlSetting;
   const d1 = ((require(path.join(REPO, 'src/channels/slack/manifest.js')).settings.options || []).find((r) => r.key === 'slackRelayUrl') || {}).default, d2 = relayRow.fallback;   // lane dc-channels-manifest: the schema row derives from Slack's manifest
-  ok(d1 && d1 === d2 && d2 === Manifest.RELAY_DEFAULT && `channels.${relayRow.key}` === 'channels.slackRelayUrl' && !/slackRelayUrl|problemfactory/.test(engSrc) && Manifest.redirectFor({ relayUrl: d1 }).via === 'relay', `the relay page default is one https address in the schema and Slack's consent row, the engine spells neither (${d1})`);
+  ok(gateOf(d1) && d1 === d2 && d2 === Manifest.RELAY_DEFAULT && `channels.${relayRow.key}` === 'channels.slackRelayUrl' && !/slackRelayUrl|problemfactory/.test(engSrc) && Manifest.redirectFor({ relayUrl: d1 }).via === 'relay', `the relay page default is one https address in the schema and Slack's consent row, the engine spells neither (${d1})`);
   // the fixture the deploy side runs its admin relay against (scripts/fixtures/slack-state.json)
   const FXS = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/slack-state.json'), 'utf-8'));
   const fsign = signer(FXS.key);
-  ok(FXS.rows.length >= 5 && FXS.rows.every((r) => Manifest.stateVerdict(r.state, { sign: fsign, now: FXS.now, ttlMs: 30 * 60e3 }).why === r.verdict && (r.relay ? Manifest.relayTargetVerdict(Manifest.stateParts(r.state) ? Manifest.stateParts(r.state).origin : '', { allow: r.allow || [] }) === r.relay : true)), `scripts/fixtures/slack-state.json: each state's verdict under its key and its relay answer hold (${FXS.rows.length} rows)`);
+  ok(FXS.rows.length >= 5 && verdictOf(FXS.rows.every((r) => Manifest.stateVerdict(r.state, { sign: fsign, now: FXS.now, ttlMs: 30 * 60e3 }).why === r.verdict && (r.relay ? Manifest.relayTargetVerdict(Manifest.stateParts(r.state) ? Manifest.stateParts(r.state).origin : '', { allow: r.allow || [] }) === r.relay : true))), `scripts/fixtures/slack-state.json: each state's verdict under its key and its relay answer hold (${FXS.rows.length} rows)`);
 }
 
 // ── ⑩ THE VENDOR'S OWN SEARCH (lane slack-search, owner 2026-10-12: 「话说slack不支持搜索吗？」) ──
@@ -630,7 +630,7 @@ console.log('⑩ the vendor\'s own search');
   const row = slack.caps.search;
   ok(JSON.stringify(row) === JSON.stringify({ via: 'query', scope: 'search:read', pageSize: 20, pagesPerPress: 2, perMin: 10, cost: 1, snippet: true, context: 'around', match: 'tokens', adds: 'unsaved' }) && CH.validateCaps('slack', slack.caps) === true,
     'the row: a query search under the HELD search:read, 2 pages of 20 a press, 10 a sliding minute, 1 request a page, a snippet, read in context by around, token matching ("may be related"), hits not saved here');
-  ok(Manifest.USER_SCOPES.includes(row.scope) && Limits.perMinOf('search.messages') === 20 && row.perMin <= Limits.perMinOf('search.messages') / 2, `the scope is one every workspace app asks; search.messages has its OWN bucket (Tier 2: ${Limits.perMinOf('search.messages')}/min) and the row asks at most half of it`);
+  ok(gateOf(Manifest.USER_SCOPES.includes(row.scope)) && Limits.perMinOf('search.messages') === 20 && row.perMin <= Limits.perMinOf('search.messages') / 2, `the scope is one every workspace app asks; search.messages has its OWN bucket (Tier 2: ${Limits.perMinOf('search.messages')}/min) and the row asks at most half of it`);
   const said3 = SR.statusText({ state: 'done', found: 3, match: row.match, adds: row.adds }, { vendor: 'Slack' });
   ok(said3 === "Asked Slack's whole history: 3 not saved here — may be related" && SR.sectionHead([row.adds], { vendor: 'Slack' }) === "Not saved here — from Slack's search", 'VS3 + F2: Slack\'s hits are "not saved here" and "may be related" — never "found", never a mailbox', said3);
 
@@ -639,7 +639,7 @@ console.log('⑩ the vendor\'s own search');
   const c1 = v.calls.filter((c) => c.method === 'search.messages');
   ok(c1.length === 1 && c1[0].auth === 'ok' && JSON.stringify(c1[0].params) === JSON.stringify({ query: 'launch plan', sort: 'timestamp', sort_dir: 'desc', count: '20', page: '1' }), 'a press = ONE search.messages with the words as Slack\'s query, newest first, the row\'s page size, page 1', c1.map((c) => c.params));
   ok(p1.hits.length === 2 && p1.next === '2' && p1.stripped === 0 && p1.malformed === 0 && meters.n === 1, `page one: 2 hits, the next page token '2' (Slack's paging.pages), one request metered (${meters.n})`, p1);
-  ok(p1.hits.every((h) => Object.keys(h).join() === CH.SEARCH_HIT_FIELDS.join()), 'every hit carries exactly the closed field list', p1.hits.map((h) => Object.keys(h)));
+  ok(verdictOf(p1.hits.every((h) => Object.keys(h).join() === CH.SEARCH_HIT_FIELDS.join())), 'every hit carries exactly the closed field list', p1.hits.map((h) => Object.keys(h)));
   const [h1, h2] = p1.hits;
   ok(h1.convId === 'C0LAUNCH01' && h1.vendorId === '1699990300.000300' && h1.at === 1699990300000 && h1.fromId === 'U0ALICE01' && h1.threadKey === '1699990000.000200', 'a reply in a channel never joined: its channel id, ts, instant, author and THREAD (the match\'s thread_ts)', h1);
   ok(h1.snippet === 'the *launch plan* v2 is ready for @U0BOB0001', 'its snippet: the mrkdwn read — a mention drawn as @<id> (a search asks no people lookup; a name the adapter already holds is used), never the raw <@U…>', h1.snippet);
@@ -658,31 +658,31 @@ console.log('⑩ the vendor\'s own search');
   const n0 = v.calls.length;
   const badTok = [];
   for (const tk of ['abc', '0', '101', '2; DROP']) badTok.push(await threw(() => a.search({ query: 'launch plan', pageToken: tk })));
-  ok(badTok.every((e) => e && e.code === 'not-found' && e.detail && e.detail.why === 'page-token') && v.calls.length === n0, 'a page token that is not a page number 1–100 is refused by name — no request', badTok.map((e) => e && e.code));
+  ok(gateOf(badTok.every((e) => e && e.code === 'not-found' && e.detail && e.detail.why === 'page-token')) && v.calls.length === n0, 'a page token that is not a page number 1–100 is refused by name — no request', badTok.map((e) => e && e.code));
 
   // the vendor's 429: ONE request, the method held for its Retry-After, the engine told rate-limited (never a retry loop)
   const b9 = Limits.createBuckets(), r9 = mkAdapter({ mode: { status429: { 'search.messages': 30 } }, buckets: b9 });
   const e9 = await threw(() => r9.a.search({ query: 'launch plan' }));
   const sent9 = r9.v.calls.filter((c) => c.method === 'search.messages').length;
   const e9b = await threw(() => r9.a.search({ query: 'launch plan' }));
-  ok(e9 && e9.code === 'rate-limited' && e9.detail.retryAfterSec === 30 && sent9 === 1, `a 429 with Retry-After 30 = rate-limited carrying 30 s after ONE request (${sent9})`, e9 && e9.detail);
-  ok(e9b && e9b.code === 'rate-limited' && e9b.detail.why === 'vendor-hold' && r9.v.calls.filter((c) => c.method === 'search.messages').length === 1 && b9.view(now())['search.messages'].heldFor >= 29, 'asked again inside the hold: refused by the method\'s own bucket, NO request', e9b && e9b.detail);
+  ok(gateOf(e9) && e9.code === 'rate-limited' && e9.detail.retryAfterSec === 30 && sent9 === 1, `a 429 with Retry-After 30 = rate-limited carrying 30 s after ONE request (${sent9})`, e9 && e9.detail);
+  ok(gateOf(e9b) && e9b.code === 'rate-limited' && e9b.detail.why === 'vendor-hold' && r9.v.calls.filter((c) => c.method === 'search.messages').length === 1 && b9.view(now())['search.messages'].heldFor >= 29, 'asked again inside the hold: refused by the method\'s own bucket, NO request', e9b && e9b.detail);
   const bk = Limits.createBuckets();
   let gone = 0; for (let i = 0; i < 20; i++) if (bk.take('search.messages', 5000 + i).go) gone++;
   const v21 = bk.take('search.messages', 5100);
-  ok(gone === 20 && !v21.go && v21.why === 'method-minute' && bk.take('conversations.history', 5100).go, 'search.messages\' own minute: 20 go, the 21st waits — the history bucket untouched');
+  ok(gone === 20 && !v21.go && v21.why === 'method-minute' && verdictOf(bk.take('conversations.history', 5100).go), 'search.messages\' own minute: 20 go, the 21st waits — the history bucket untouched');
 
   // around: the channel at the hit — before page (latest, inclusive) + the after window when it is the hit's neighbours
   const m = mkAdapter();
   const ar = await m.a.around('C0GENERAL', { vendorId: '1699900000.000050', at: 1699900000000 });
   const hc = m.v.calls.filter((c) => c.method === 'conversations.history');
-  ok(ar.records.map((r) => r.vendorId).join() === '1699899000.000040,1699899500.000045,1699900000.000050,1699900200.000055,1699900400.000060' && ar.records.every((r) => r.convId === 'C0GENERAL') && ar.facts.target && ar.facts.before === 2 && ar.facts.after === 2 && ar.requests === 2,
+  ok(ar.records.map((r) => r.vendorId).join() === '1699899000.000040,1699899500.000045,1699900000.000050,1699900200.000055,1699900400.000060' && gateOf(ar.records.every((r) => r.convId === 'C0GENERAL')) && gateOf(ar.facts.target) && ar.facts.before === 2 && ar.facts.after === 2 && ar.requests === 2,
     'around a channel hit: the messages before and after it, oldest first, the hit among them — 2 requests', ar.records.map((r) => r.vendorId));
   ok(hc.length === 2 && hc[0].params.latest === '1699900000.000050' && hc[0].params.inclusive === 'true' && hc[0].params.limit === '25' && hc[1].params.oldest === '1699900000.000050' && hc[1].params.inclusive === 'false' && hc[1].params.latest === '1699900600.000050',
     'the two reads: latest = the hit (inclusive, 25), then oldest = the hit (exclusive) … the hit + half the span the first page covered (≥ 600 s)', hc.map((c) => c.params));
   const tr = await m.a.around('C0LAUNCH01', { vendorId: '1699990300.000300', at: 1699990300000 });
   const rc = m.v.calls.filter((c) => c.method === 'conversations.replies');
-  ok(tr.records.map((r) => r.vendorId).join() === '1699990000.000200,1699990100.000250,1699990300.000300' && tr.records[2].replyTo === '1699990000.000200' && tr.facts.target && tr.requests === 2 && rc.length === 1 && rc[0].params.ts === '1699990300.000300',
+  ok(tr.records.map((r) => r.vendorId).join() === '1699990000.000200,1699990100.000250,1699990300.000300' && tr.records[2].replyTo === '1699990000.000200' && gateOf(tr.facts.target) && tr.requests === 2 && rc.length === 1 && rc[0].params.ts === '1699990300.000300',
     'around a THREAD reply (the channel listing does not hold it): its thread, root first — conversations.replies named by the reply\'s own ts', tr);
   const gone1 = await m.a.around('C0LAUNCH01', { vendorId: '1699990333.000333', at: 1699990333000 });
   ok(gone1.facts.target === false && gone1.records.length === 1 && gone1.records[0].vendorId === '1699990000.000200', 'a hit Slack no longer finds (thread_not_found): the channel page alone, the target said missing — never a failure', gone1);
@@ -691,18 +691,18 @@ console.log('⑩ the vendor\'s own search');
   for (let i = 40; i >= 1; i--) SV.SX.archive[busy].push({ type: 'message', user: 'U0BOB0001', text: `after ${i}`, ts: `${1699800000 + i * 10}.000100` });
   for (let i = 0; i <= 30; i++) SV.SX.archive[busy].push({ type: 'message', user: 'U0ALICE01', text: `before ${i}`, ts: `${1699800000 - i * 10}.000100` });
   const bz = await m.a.around(busy, { vendorId: hitTs, at: 1699800000000 });
-  ok(bz.facts.target && bz.facts.before === 24 && bz.facts.after === 0 && bz.records.length === 25, 'a hit whose after-window holds more than a page (Slack answers it NEWEST first — not the hit\'s neighbours): that side is left out, never drawn with a gap', bz.facts);
+  ok(gateOf(bz.facts.target) && bz.facts.before === 24 && bz.facts.after === 0 && bz.records.length === 25, 'a hit whose after-window holds more than a page (Slack answers it NEWEST first — not the hit\'s neighbours): that side is left out, never drawn with a gap', bz.facts);
   SV.SX.archive[busy] = SV.SX.archive[busy].filter((x) => !/^after (1[1-9]|[2-4]\d)$/.test(x.text));
   const bz2 = await m.a.around(busy, { vendorId: hitTs, at: 1699800000000 });
   ok(bz2.facts.after === 10 && bz2.records.length === 35 && bz2.records[bz2.records.length - 1].text === 'after 10', 'the same hit with 10 messages after it: all 10 drawn after it (they ARE its neighbours)', bz2.facts);
   delete SV.SX.archive[busy];
   const ea = await threw(() => m.a.around('C0GENERAL', { vendorId: 'nope', at: 0 }));
-  ok(ea && ea.code === 'not-found', 'around without a ts or an instant is refused by name');
+  ok(gateOf(ea) && ea.code === 'not-found', 'around without a ts or an instant is refused by name');
 
   // patched-copy controls
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
   const ADJ = '        if (!after.next) msgs.push(...after.msgs);';
-  ok(ssrc.includes(ADJ), 'the patch site of the neighbours control is in slack.js');
+  ok(verdictOf(ssrc.includes(ADJ)), 'the patch site of the neighbours control is in slack.js');
   const S5 = require(MC.write('src/channels/slack.js', editAnchor(ssrc, ADJ, '        msgs.push(...after.msgs);', "src/channels/slack.js"), 'nobusy'));
   const m5 = mkAdapter({ mod: S5 });
   SV.SX.archive[busy] = [];
@@ -712,15 +712,15 @@ console.log('⑩ the vendor\'s own search');
   delete SV.SX.archive[busy];
   ok(b5.facts.after === 25 && b5.records[1].text === 'after 16', `NEGATIVE CONTROL — a copy without the neighbours rule draws the window\'s NEWEST page right after the hit (a gap of ${b5.records[1] && b5.records[1].text})`, b5.records.slice(0, 3).map((r) => r.text));
   const LINK = '  const x = THREAD_IN_LINK_RE.exec(';
-  ok(ssrc.includes(LINK), 'the patch site of the permalink-thread control is in slack.js');
+  ok(verdictOf(ssrc.includes(LINK)), 'the patch site of the permalink-thread control is in slack.js');
   const S6 = require(MC.write('src/channels/slack.js', editAnchor(ssrc, LINK, '  const x = null && THREAD_IN_LINK_RE.exec(', "src/channels/slack.js"), 'nolink'));
   const p6 = await mkAdapter({ mod: S6 }).a.search({ query: 'only link thread' });
   ok(p6.hits[0].threadKey === null, 'NEGATIVE CONTROL — a copy that reads no permalink loses the documented match\'s thread', p6.hits);
   const NOROW = "  search: Object.freeze({ via: 'query', scope: 'search:read'";
-  ok(ssrc.includes(NOROW), 'the patch site of the row control is in slack.js');
+  ok(verdictOf(ssrc.includes(NOROW)), 'the patch site of the row control is in slack.js');
   const S7 = require(MC.write('src/channels/slack.js', editAnchor(ssrc, NOROW, "  searchGone: Object.freeze({ via: 'query', scope: 'search:read'", "src/channels/slack.js"), 'norow'));
   const e7 = await threw(() => CH.validateMethods('slack', S7.caps, S7.create({ id: 'slack' }, {})));
-  ok(e7 && /search is implemented but caps\.search does not declare it/.test(String(e7.message)), 'NEGATIVE CONTROL — the methods without the row are refused by the registry (the census can go red)', e7 && e7.message);
+  ok(gateOf(e7) && verdictOf(/search is implemented but caps\.search does not declare it/.test(String(e7.message))), 'NEGATIVE CONTROL — the methods without the row are refused by the registry (the census can go red)', e7 && e7.message);
 }
 
 // ── lane attention-rule-at-you: THE MENTIONS CENSUS — a Slack <@U…> is a person mention (the first screen's @-me rule reads
@@ -730,14 +730,14 @@ console.log('\nattention-rule-at-you: Slack carries mentions; every adapter decl
   const FO = require(path.join(REPO, 'src/channel-focus.js'));
   const users = new Map([['U0SELF', 'Me'], ['U0PAT', 'Pat']]);
   const r = slack.toRecord('slack', 'C0AT', { ts: '1760000000.000100', user: 'U0PAT', text: '<@U0SELF> look <!here>' }, { users });
-  ok(slack.caps.mentions === 'people' && r.mentions.some((m) => m.id === 'U0SELF') && FO.mentionsSelf(r, 'U0SELF') && !FO.mentionsSelf(r, 'U0OTHER'), 'a <@U…> of me ⇒ 「@ 我」; caps.mentions = people', JSON.stringify(r.mentions));
+  ok(slack.caps.mentions === 'people' && gateOf(r.mentions.some((m) => m.id === 'U0SELF')) && gateOf(FO.mentionsSelf(r, 'U0SELF')) && !FO.mentionsSelf(r, 'U0OTHER'), 'a <@U…> of me ⇒ 「@ 我」; caps.mentions = people', JSON.stringify(r.mentions));
   const here = slack.toRecord('slack', 'C0AT', { ts: '1760000000.000200', user: 'U0PAT', text: '<!here> standup' }, { users });
-  ok(!FO.mentionsSelf(here, 'U0SELF') && here.mentions.every((m) => m.kind === 'broadcast'), '<!here> alone is a broadcast — never 「@ 我」', JSON.stringify(here.mentions));
+  ok(!FO.mentionsSelf(here, 'U0SELF') && verdictOf(here.mentions.every((m) => m.kind === 'broadcast')), '<!here> alone is a broadcast — never 「@ 我」', JSON.stringify(here.mentions));
   const gmail = require(path.join(REPO, 'src/channels/gmail.js')), lark = require(path.join(REPO, 'src/channels/lark.js'));
   ok(gmail.caps.mentions === 'not-applicable' && lark.caps.mentions === 'people', 'the census: Slack people · Lark people · Gmail not-applicable (mail has no @: a To / Cc is the direct address)');
   const bad = (() => { try { CH.validateCaps ? CH.validateCaps('x', { ...slack.caps, mentions: 'yes' }) : null; return null; } catch (e) { return String(e && e.message); } })();
-  ok(bad === null ? !CH.validateCaps : /caps\.mentions must be one of people\|none\|not-applicable/.test(bad), 'caps.mentions is CLOSED (a word outside people / none / not-applicable is refused)', bad);
+  ok(bad === null ? !CH.validateCaps : verdictOf(/caps\.mentions must be one of people\|none\|not-applicable/.test(bad)), 'caps.mentions is CLOSED (a word outside people / none / not-applicable is refused)', bad);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

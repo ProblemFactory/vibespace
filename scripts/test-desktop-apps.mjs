@@ -20,7 +20,7 @@ const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 // machine half moved verbatim to the SHARED src/desktop-serve.js (the daemon bundles it). Every keeper pin reads both.
 const keeperSrc = () => read('src/server/desktop-app-keeper.js') + '\n' + read('src/desktop-serve.js');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -45,11 +45,11 @@ const D = require('../src/desktop-display.js');
 console.log('§1 the ONE constants home');
 ok(M.LIMITS === L, 'desktop-apps.LIMITS IS keeper-limits (the same object, not a copy)');
 ok(L.GUARD_CPU_PCT === 150 && L.GUARD_CPU_SUSTAIN_MS === 300000 && L.GUARD_MEM_BYTES === 2 * 1024 ** 3 && !('GUARD_RSS_BYTES' in L) && L.RUNAWAY_COOLDOWN_MS === 3600000 && L.GUARD_SAMPLE_MS === 60000, 'the guard numbers are the 2.369.42 incident numbers (150 % / 5 min / 2 GiB / 1 h / 60 s); the memory number is GUARD_MEM_BYTES (a footprint — the RSS-sum name is gone)');
-ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP is a positive integer (${L.CONCURRENT_CAP})`);
+ok(gateOf(Number.isInteger(L.CONCURRENT_CAP)) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP is a positive integer (${L.CONCURRENT_CAP})`);
 {
   const oc = read('src/opencode-serve.js');
-  ok(/require\('\.\/keeper-limits'\)/.test(oc) && !/const GUARD_CPU_PCT = 150/.test(oc), 'opencode-serve READS keeper-limits — its own literals are gone (the twin this home exists to end)');
-  ok(/cliIdentity\.procSample\(pid, \{ memory: true \}\)/.test(oc) && /cliIdentity\.setMemory\(/.test(oc), 'opencode-serve samples /proc through cli-identity.procSample (memory = PSS) and the ONE set rule — the same reader the desktop keeper uses');
+  ok(gateOf(/require\('\.\/keeper-limits'\)/.test(oc)) && !/const GUARD_CPU_PCT = 150/.test(oc), 'opencode-serve READS keeper-limits — its own literals are gone (the twin this home exists to end)');
+  ok(gateOf(/cliIdentity\.procSample\(pid, \{ memory: true \}\)/.test(oc)) && verdictOf(/cliIdentity\.setMemory\(/.test(oc)), 'opencode-serve samples /proc through cli-identity.procSample (memory = PSS) and the ONE set rule — the same reader the desktop keeper uses');
   const kl = read('src/keeper-limits.js');
   ok(!/require\(/.test(kl), 'keeper-limits imports nothing');
   const da = read('src/desktop-apps.js');
@@ -61,7 +61,7 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
   const libWhole = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => /\.js$/.test(f) && /from '\.\.\/desktop-apps\.js'/.test(read('src/lib/' + f)));
   ok(libWhole.length === 0, `no client module imports the whole model — each imports its family (F-S1: the bundle carries no install plan for a scale chip)${libWhole.length ? ': ' + libWhole.join(', ') : ''}`);
   const famOk = Object.entries(FAMS).every(([f, want]) => same([...read(f).matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]), want));
-  ok(same(reqs, ['./keeper-limits', './office-open', './install-slot', ...Object.keys(FAMS).map((f) => './' + path.basename(f))]) && famOk && !/require\(/.test(read('src/hidden-chars.js')) && !/require\(/.test(read('src/install-slot.js')), 'desktop-apps.js imports nothing but the constants home, the PURE office table, the PURE package slot and its own PURE families (ladder / window / browser / machine desktop — the last asks the PURE hidden-character set; §7.9 — each imports nothing else)', reqs);
+  ok(gateOf(same(reqs, ['./keeper-limits', './office-open', './install-slot', ...Object.keys(FAMS).map((f) => './' + path.basename(f))])) && gateOf(famOk) && !/require\(/.test(read('src/hidden-chars.js')) && !/require\(/.test(read('src/install-slot.js')), 'desktop-apps.js imports nothing but the constants home, the PURE office table, the PURE package slot and its own PURE families (ladder / window / browser / machine desktop — the last asks the PURE hidden-character set; §7.9 — each imports nothing else)', reqs);
   // P8-2 x3 (2026-09-22): the guard numbers are IMPORTED, never copied — every consumer of the keeper's
   // ceiling names a guard number ONLY through the home (`limits.X` / `LIMITS.X`) and none re-spells a
   // guard literal. A grep census over the code with comments stripped (a comment may quote "150 %").
@@ -79,43 +79,43 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
   // consumers read the cadence + the cap through the home, and the verdict module reads the three thresholds
   ok(reads.length >= 4 && new Set(reads).size >= 2, `census scope is non-vacuous (${reads.length} reads of ${new Set(reads).size} guard names through the home)`, reads);
   const rg = strip(read('src/runaway-guard.js'));
-  ok(/require\('\.\/keeper-limits'\)/.test(rg) && ['GUARD_MEM_BYTES', 'GUARD_CPU_PCT', 'GUARD_CPU_SUSTAIN_MS'].every((n) => new RegExp(`\\bL\\.${n}\\b`).test(rg)), 'the verdict module reads the three thresholds through the home (limits injected, keeper-limits by default)');
+  ok(gateOf(/require\('\.\/keeper-limits'\)/.test(rg)) && verdictOf(['GUARD_MEM_BYTES', 'GUARD_CPU_PCT', 'GUARD_CPU_SUSTAIN_MS'].every((n) => new RegExp(`\\bL\\.${n}\\b`).test(rg))), 'the verdict module reads the three thresholds through the home (limits injected, keeper-limits by default)');
   ok(bareUses.length === 0, 'no consumer names a guard number except through `limits.`/`LIMITS.` — imported, not copied', bareUses);
   ok(literals.length === 0, 'no consumer re-spells a guard literal (150 / 5 min / 2 GiB / 1 h / the cap)', literals);
-  ok(/const GUARD_CPU_PCT = 150;/.test(strip(read('src/keeper-limits.js'))) && !!strip(`const X = 1; // GUARD_CPU_PCT = 150\n`).match(/const X = 1;\s*$/), 'CONTROL: the literal lives exactly once, in the home; the census strips comments (a quoted "150" in a comment is not a copy)');
+  ok(gateOf(/const GUARD_CPU_PCT = 150;/.test(strip(read('src/keeper-limits.js')))) && !!strip(`const X = 1; // GUARD_CPU_PCT = 150\n`).match(/const X = 1;\s*$/), 'CONTROL: the literal lives exactly once, in the home; the census strips comments (a quoted "150" in a comment is not a copy)');
   const neg = [...strip('const CONCURRENT_CAP = 6; x = limits.GUARD_CPU_PCT; // GUARD_MEM_BYTES\n').matchAll(new RegExp(`(?<![\\w.])${GUARD_NAMES.source}\\b`, 'g'))].map((m) => m[1]);
-  ok(same(neg, ['CONCURRENT_CAP']), 'NEGATIVE CONTROL: a bare re-definition is what the census catches — a `limits.` read and a comment are not', neg);
+  ok(verdictOf(same(neg, ['CONCURRENT_CAP'])), 'NEGATIVE CONTROL: a bare re-definition is what the census catches — a `limits.` read and a comment are not', neg);
 }
 
 console.log('§2 DISPLAY_BACKENDS — the capability table');
-ok(same(M.BACKEND_IDS, ['xpra', 'vnc-display', 'desktop-singleton', 'remoteapp', 'webrtc']) && same(M.LADDER_IDS, ['xpra', 'vnc-display', 'desktop-singleton']), 'three LOCAL rungs in DA1 order: xpra > vnc-display > desktop-singleton — then the two `remote` rows, never on the local ladder: remoteapp (lane remoteapp-r1a; scripts/test-remoteapp.mjs §1) and webrtc (lane stream-p1a-transport; scripts/test-desktop-webrtc.mjs §1)');
+ok(gateOf(same(M.BACKEND_IDS, ['xpra', 'vnc-display', 'desktop-singleton', 'remoteapp', 'webrtc'])) && verdictOf(same(M.LADDER_IDS, ['xpra', 'vnc-display', 'desktop-singleton'])), 'three LOCAL rungs in DA1 order: xpra > vnc-display > desktop-singleton — then the two `remote` rows, never on the local ladder: remoteapp (lane remoteapp-r1a; scripts/test-remoteapp.mjs §1) and webrtc (lane stream-p1a-transport; scripts/test-desktop-webrtc.mjs §1)');
 for (const b of M.DISPLAY_BACKENDS) {
-  ok(M.CAP_KEYS.every((k) => typeof b[k] === 'boolean') && !('adaptive' in b) && Array.isArray(b.needs) && b.needs.every((g) => Array.isArray(g) && g.length) && (['rfb', 'xpra'].includes(b.stream) || (b.remote === 'agent-webrtc' && b.stream === 'webrtc')) && typeof b.wired === 'boolean', `row ${b.id} declares every capability cell (${M.CAP_KEYS.join('/')}) + needs/stream/wired`);
-  ok(Object.isFrozen(b) && Object.isFrozen(b.needs), `row ${b.id} is frozen (a rung is a declaration, not state)`);
+  ok(gateOf(M.CAP_KEYS.every((k) => typeof b[k] === 'boolean')) && !('adaptive' in b) && gateOf(Array.isArray(b.needs)) && gateOf(b.needs.every((g) => Array.isArray(g) && g.length)) && (gateOf(['rfb', 'xpra'].includes(b.stream)) || (b.remote === 'agent-webrtc' && b.stream === 'webrtc')) && typeof b.wired === 'boolean', `row ${b.id} declares every capability cell (${M.CAP_KEYS.join('/')}) + needs/stream/wired`);
+  ok(gateOf(Object.isFrozen(b)) && verdictOf(Object.isFrozen(b.needs)), `row ${b.id} is frozen (a rung is a declaration, not state)`);
 }
-ok(M.CAP_KEYS.every((k) => M.backendById('xpra')[k] === true) && M.backendById('xpra').stream === 'xpra' && M.backendById('xpra').wired === true, 'xpra: every cell (scales, crisp text, per-window, seamless, satellites, geometry, its own display, a hosted client), xpra stream, WIRED since P8-2 (DA1: installed ⇒ every NEW session takes it)');
-ok(M.DISPLAY_BACKENDS.every((b) => b.wired === true), 'every SHIPPED row is wired — an unwired row is a table copy the suites hand in, never a product state');
-ok(M.CAP_KEYS.every((k) => M.backendById('vnc-display')[k] === (k === 'ownsDisplay')) && !M.backendById('desktop-singleton').ownsDisplay && M.backendById('vnc-display').stream === 'rfb' && M.backendById('vnc-display').wired === true, 'vnc-display: a whole display of its own, no other cell, rfb, wired; the singleton owns no display (shared)');
+ok(gateOf(M.CAP_KEYS.every((k) => M.backendById('xpra')[k] === true)) && M.backendById('xpra').stream === 'xpra' && M.backendById('xpra').wired === true, 'xpra: every cell (scales, crisp text, per-window, seamless, satellites, geometry, its own display, a hosted client), xpra stream, WIRED since P8-2 (DA1: installed ⇒ every NEW session takes it)');
+ok(verdictOf(M.DISPLAY_BACKENDS.every((b) => b.wired === true)), 'every SHIPPED row is wired — an unwired row is a table copy the suites hand in, never a product state');
+ok(gateOf(M.CAP_KEYS.every((k) => M.backendById('vnc-display')[k] === (k === 'ownsDisplay'))) && !M.backendById('desktop-singleton').ownsDisplay && M.backendById('vnc-display').stream === 'rfb' && M.backendById('vnc-display').wired === true, 'vnc-display: a whole display of its own, no other cell, rfb, wired; the singleton owns no display (shared)');
 {
   // lane dc-desktop-caps (rv-desktop F-B5): PROBE_BINS is DERIVED from the rows — a new rung's binary is probed with no second list
   const pix = Object.freeze({ id: 'fakepix', label: 'fakepix', stream: 'rfb', needs: Object.freeze([Object.freeze(['Xfakepix'])]), recipes: Object.freeze({ Xfakepix: 'x-then-server' }), wired: true });
-  ok(D.probeBinsOf([pix, ...M.DISPLAY_BACKENDS]).includes('Xfakepix') && !D.PROBE_BINS.includes('Xfakepix') && !D.PROBE_BINS.some((n) => n.includes(':')) && D.PROBE_BINS.includes('xrdb'), 'PROBE_BINS = every rung\'s needs (derived; a pseudo-binary is a fact, not a file) + the helpers — a fake row\'s binary is probed with no edit');
+  ok(gateOf(D.probeBinsOf([pix, ...M.DISPLAY_BACKENDS]).includes('Xfakepix')) && !D.PROBE_BINS.includes('Xfakepix') && !D.PROBE_BINS.some((n) => n.includes(':')) && verdictOf(D.PROBE_BINS.includes('xrdb')), 'PROBE_BINS = every rung\'s needs (derived; a pseudo-binary is a fact, not a file) + the helpers — a fake row\'s binary is probed with no edit');
   const probed = new Set([...D.PROBE_BINS, 'desktop-singleton:running']);
   const needed = M.DISPLAY_BACKENDS.flatMap((b) => b.needs.flat()).filter((n) => !/^agent:/.test(n));
-  ok(needed.every((n) => probed.has(n)), 'every binary a rung needs is one desktop-display PROBES (a rung nobody can probe is prose)', needed.filter((n) => !probed.has(n)));
+  ok(verdictOf(needed.every((n) => probed.has(n))), 'every binary a rung needs is one desktop-display PROBES (a rung nobody can probe is prose)', needed.filter((n) => !probed.has(n)));
   // lane stream-p1a-transport: an `agent:<capability>` need is the paired machine's AGENT's — judged against its hello-ack, never a PATH probe
   const agentNeeds = M.DISPLAY_BACKENDS.flatMap((b) => b.needs.flat()).filter((n) => /^agent:/.test(n));
   const helloCaps = (/capabilities: \[([^\]]*)\]/.exec(read('src/agentd/agentd.js')) || [])[1] || '';
-  ok(agentNeeds.length > 0 && agentNeeds.every((n) => helloCaps.includes(`'${n.slice(6)}'`)), `every agent:<capability> a rung needs is one the agent's hello-ack names (${agentNeeds.join(', ')})`, agentNeeds);
+  ok(agentNeeds.length > 0 && verdictOf(agentNeeds.every((n) => helloCaps.includes(`'${n.slice(6)}'`))), `every agent:<capability> a rung needs is one the agent's hello-ack names (${agentNeeds.join(', ')})`, agentNeeds);
 }
 
 for (const b of M.DISPLAY_BACKENDS) {
-  ok(b.recipes && Object.isFrozen(b.recipes) && b.needs.every((g) => typeof b.recipes[g.join('+')] === 'string'), `row ${b.id}: every needs-group names its bring-up recipe (r2 — the keeper looks it up, never spells a rung)`);
+  ok(gateOf(b.recipes) && gateOf(Object.isFrozen(b.recipes)) && verdictOf(b.needs.every((g) => typeof b.recipes[g.join('+')] === 'string')), `row ${b.id}: every needs-group names its bring-up recipe (r2 — the keeper looks it up, never spells a rung)`);
   for (const g of b.needs) { const via = g.join('+'); const name = M.recipeFor(b.id, via); ok(typeof D.RECIPES[name] === 'function', `${b.id} via ${via} ⇒ ${name} is a desktop-display RECIPE`); }
 }
-ok(Object.keys(D.RECIPES).every((n) => M.DISPLAY_BACKENDS.some((b) => Object.values(b.recipes).includes(n))), 'no recipe without a rung that names it');
+ok(verdictOf(Object.keys(D.RECIPES).every((n) => M.DISPLAY_BACKENDS.some((b) => Object.values(b.recipes).includes(n)))), 'no recipe without a rung that names it');
 ok(M.recipeFor('vnc-display', 'nope') === null && M.recipeFor('nope', 'Xvnc') === null && M.recipeFor('vnc-display', null) === null, 'an unknown (backend, via) pair names NO recipe — refused by name, never guessed');
-ok(M.KEEPER_ENV.includes('VIBESPACE_DESKTOP_APP'), 'a registry row may not set VIBESPACE_DESKTOP_APP — the keeper stamps it on every process of a session (its identity when the leader is gone)');
+ok(verdictOf(M.KEEPER_ENV.includes('VIBESPACE_DESKTOP_APP')), 'a registry row may not set VIBESPACE_DESKTOP_APP — the keeper stamps it on every process of a session (its identity when the leader is gone)');
 {
   const r = M.resolveBackend({ bins: { Xvfb: '/x', x11vnc: '/x' } });
   ok(r.recipe === 'x-then-server' && r.ladder[1].recipe === 'x-then-server' && r.ladder[0].recipe === null, 'resolveBackend carries the recipe of the winner and of every rung that can run (null where it cannot)');
@@ -175,14 +175,14 @@ function oracle(bins, singletonRunning) {
   // the instance preference (settings desktop.backendPrefs): REORDERS, never invents — the suites' pin and the owner's escape hatch
   const rp = M.resolveBackend({ bins: { xpra: '/usr/bin/xpra', Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } }, { backendPrefs: M.parseBackendPrefs('vnc-display, xpra, desktop-singleton') });
   ok(rp.backend === 'vnc-display' && rp.fallbackWhy === null && rp.ladder.length === 3 && rp.ladder[0].backend === 'vnc-display' && rp.ladder[1].backend === 'xpra' && rp.ladder[1].ok === true, 'prefs "vnc-display, xpra, desktop-singleton" put the whole-display rung first: it wins with NO fallback (nothing fell) and xpra is still reported runnable below it', rp);
-  ok(same(M.parseBackendPrefs('vnc-display, xpra,nonsense,, xpra'), ['vnc-display', 'xpra']) && same(M.parseBackendPrefs(['xpra', 'bogus']), ['xpra']) && same(M.parseBackendPrefs(''), []) && same(M.parseBackendPrefs(undefined), []) && same(M.parseBackendPrefs(42), []), 'parseBackendPrefs: comma/space list or array, known ids only, deduped, empty/garbage ⇒ [] (= the table order)');
+  ok(gateOf(same(M.parseBackendPrefs('vnc-display, xpra,nonsense,, xpra'), ['vnc-display', 'xpra'])) && gateOf(same(M.parseBackendPrefs(['xpra', 'bogus']), ['xpra'])) && gateOf(same(M.parseBackendPrefs(''), [])) && gateOf(same(M.parseBackendPrefs(undefined), [])) && verdictOf(same(M.parseBackendPrefs(42), [])), 'parseBackendPrefs: comma/space list or array, known ids only, deduped, empty/garbage ⇒ [] (= the table order)');
   ok(M.streamKindOf({ backend: 'xpra' }) === 'xpra' && M.streamKindOf({ backend: 'vnc-display' }) === 'rfb' && M.streamKindOf({ backend: 'desktop-singleton' }) === 'rfb' && M.streamKindOf({ backend: 'nope' }) === null && M.streamKindOf(null) === null, 'streamKindOf: the rung\'s stream kind from the table (the client picks its view by KIND, never by a backend id)');
 }
 {
   const r = M.resolveBackend({ bins: { Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } });
   ok(r.backend === 'vnc-display' && r.via === 'Xvfb+x11vnc' && r.fallbackWhy === 'xpra not on PATH', 'THIS BOX: Xvfb+x11vnc only ⇒ vnc-display via Xvfb+x11vnc, fallbackWhy "xpra not on PATH" (the status-chip words)', r);
   ok(M.fallbackLogLine(r) === '[desktop] backend fallback: xpra→vnc-display (xpra not on PATH)', "the §3 log line, verbatim: '[desktop] backend fallback: xpra→vnc-display (xpra not on PATH)'", M.fallbackLogLine(r));
-  ok(same(r.ladder.map((x) => [x.backend, x.ok, x.why]), [['xpra', false, 'xpra not on PATH'], ['vnc-display', true, null], ['desktop-singleton', false, 'Xtigervnc not on PATH; Xvnc not on PATH; desktop-singleton:running not on PATH']]), 'the ladder reports every rung with its reason (the launcher prints it)', r.ladder);
+  ok(verdictOf(same(r.ladder.map((x) => [x.backend, x.ok, x.why]), [['xpra', false, 'xpra not on PATH'], ['vnc-display', true, null], ['desktop-singleton', false, 'Xtigervnc not on PATH; Xvnc not on PATH; desktop-singleton:running not on PATH']])), 'the ladder reports every rung with its reason (the launcher prints it)', r.ladder);
 }
 {
   const r = M.resolveBackend({ bins: { Xvnc: '/usr/bin/Xvnc' } });
@@ -199,8 +199,8 @@ function oracle(bins, singletonRunning) {
 }
 
 console.log('§4 registry rows + launch requests');
-ok(M.validateAppRow({ id: 'xterm', label: 'xterm', exec: 'xterm' }).ok, 'a minimal row validates');
-ok(M.validateAppRow({ id: 'a.b-c_1', label: 'x', exec: '/usr/bin/x', args: ['-a', 'b'], cwd: '/tmp', env: { FOO: 'bar' }, category: 'c', backendPrefs: ['vnc-display'], needsWayland: false }).ok, 'a full row validates');
+ok(verdictOf(M.validateAppRow({ id: 'xterm', label: 'xterm', exec: 'xterm' }).ok), 'a minimal row validates');
+ok(verdictOf(M.validateAppRow({ id: 'a.b-c_1', label: 'x', exec: '/usr/bin/x', args: ['-a', 'b'], cwd: '/tmp', env: { FOO: 'bar' }, category: 'c', backendPrefs: ['vnc-display'], needsWayland: false }).ok), 'a full row validates');
 for (const [row, why] of [
   [{ id: 'Bad Id', label: 'x', exec: 'x' }, 'id with a space'],
   [{ id: '-x', label: 'x', exec: 'x' }, 'id starting with -'],
@@ -215,35 +215,35 @@ for (const [row, why] of [
   [{ id: 'x', label: 'x', exec: 'x', needsWayland: 'yes' }, 'needsWayland not a boolean'],
   [null, 'null row'],
 ]) ok(!M.validateAppRow(row).ok, `refused: ${why}`);
-ok(same(M.KEEPER_ENV, ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'VIBESPACE_DESKTOP_APP']), 'KEEPER_ENV names the five vars a row may never set (the fifth is the session marker the keeper stamps, r2)');
+ok(verdictOf(same(M.KEEPER_ENV, ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'VIBESPACE_DESKTOP_APP'])), 'KEEPER_ENV names the five vars a row may never set (the fifth is the session marker the keeper stamps, r2)');
 {
   const reg = M.DEFAULT_REGISTRY;
-  ok(reg.every((r) => M.validateAppRow(r).ok), 'every DEFAULT_REGISTRY row validates');
-  ok(reg[0].id === 'xterm' && reg.some((r) => r.id === 'gnome-calculator') && reg.some((r) => r.id === 'firefox') && reg.some((r) => r.id === 'code'), 'the default registry is xterm first + the short GUI allowlist (presence-checked by the keeper, never assumed)');
+  ok(verdictOf(reg.every((r) => M.validateAppRow(r).ok)), 'every DEFAULT_REGISTRY row validates');
+  ok(reg[0].id === 'xterm' && gateOf(reg.some((r) => r.id === 'gnome-calculator')) && gateOf(reg.some((r) => r.id === 'firefox')) && verdictOf(reg.some((r) => r.id === 'code')), 'the default registry is xterm first + the short GUI allowlist (presence-checked by the keeper, never assumed)');
   const v = M.validateLaunchRequest({ appId: 'xterm' }, reg);
-  ok(v.ok && v.launch.source === 'registry' && v.launch.row.id === 'xterm', '{appId} resolves a registry row');
+  ok(gateOf(v.ok) && v.launch.source === 'registry' && v.launch.row.id === 'xterm', '{appId} resolves a registry row');
   ok(!M.validateLaunchRequest({ appId: 'nope' }, reg).ok, 'an unknown appId is refused');
   const a = M.validateLaunchRequest({ exec: '/usr/bin/xterm', args: ['-e', 'top'], cwd: '/tmp' }, reg);
-  ok(a.ok && a.launch.source === 'adhoc' && a.launch.row.label === 'xterm' && same(a.launch.row.args, ['-e', 'top']) && a.launch.row.cwd === '/tmp', '{exec,args,cwd} is an adhoc launch; label defaults to the exec basename');
+  ok(gateOf(a.ok) && a.launch.source === 'adhoc' && a.launch.row.label === 'xterm' && gateOf(same(a.launch.row.args, ['-e', 'top'])) && a.launch.row.cwd === '/tmp', '{exec,args,cwd} is an adhoc launch; label defaults to the exec basename');
   ok(!M.validateLaunchRequest({ exec: '' }, reg).ok && !M.validateLaunchRequest(null, reg).ok && !M.validateLaunchRequest({ exec: 'x', args: [1] }, reg).ok, 'empty / null / non-string args are refused');
   ok(M.validateLaunchRequest({ exec: 'x', cwd: '' }, reg).launch.row.cwd === null, 'an empty cwd is "none"');
 }
 
 console.log('§5 the state machine');
-ok(same(M.APP_STATES, ['launching', 'ready', 'exited', 'failed']), 'four states');
+ok(verdictOf(same(M.APP_STATES, ['launching', 'ready', 'exited', 'failed'])), 'four states');
 ok(M.transition('launching', 'server-listening') === 'ready', 'launching → ready on server-listening');
 ok(M.transition('launching', 'spawn-error') === 'failed' && M.transition('launching', 'app-exit') === 'exited' && M.transition('launching', 'stop') === 'exited', 'launching → failed on spawn-error, → exited on app-exit / stop');
 ok(M.transition('ready', 'app-exit') === 'exited' && M.transition('ready', 'stop') === 'exited' && M.transition('ready', 'runaway') === null && M.transition('launching', 'runaway') === null && M.transition('ready', 'display-gone') === 'failed', 'ready → exited (app-exit/stop), → failed (display-gone); there is NO runaway edge (2026-09-25: a resource guard never ends an app)');
 ok(M.transition('ready', 'server-listening') === null, 'ready has no server-listening edge (idempotence is the keeper\'s, not the machine\'s)');
 ok(M.transition('exited', 'stop') === null && M.transition('failed', 'app-exit') === null && M.transition('nope', 'stop') === null, 'terminal states and unknown states have no edges');
-ok(M.isLiveState('launching') && M.isLiveState('ready') && !M.isLiveState('exited') && M.isTerminalState('failed'), 'isLiveState / isTerminalState');
+ok(gateOf(M.isLiveState('launching')) && gateOf(M.isLiveState('ready')) && !M.isLiveState('exited') && verdictOf(M.isTerminalState('failed')), 'isLiveState / isTerminalState');
 
 console.log('§6 verdicts');
 {
   const now = 1_000_000;
   const i = M.idleState({ startedAt: now - 10 * 60000, lastInputAt: now - 29 * 60000 + 1000 }, now, 30 * 60000);
   ok(!i.expired && i.remainingMs > 0 && i.remainingMs <= 61000 && i.idleMs >= 29 * 60000 - 1000, 'idle: 29 min since input under a 30 min limit ⇒ not expired, ~1 min left');
-  ok(M.idleState({ startedAt: now - 31 * 60000, lastInputAt: now - 31 * 60000 }, now, 30 * 60000).expired, 'idle: 31 min ⇒ expired');
+  ok(verdictOf(M.idleState({ startedAt: now - 31 * 60000, lastInputAt: now - 31 * 60000 }, now, 30 * 60000).expired), 'idle: 31 min ⇒ expired');
   ok(!M.idleState({ startedAt: now - 9e9 }, now, 0).expired && M.idleState({ startedAt: now - 9e9 }, now, 0).remainingMs === null, 'limit 0 ⇒ never expires (DA3: 0 = never)');
   ok(!M.idleState({ startedAt: now - 31 * 60000 }, now, 30 * 60000).expired === false, 'no lastInputAt ⇒ the start is the last input');
 }
@@ -251,7 +251,7 @@ console.log('§6 verdicts');
   const live = (n) => Array.from({ length: n }, (_, i) => ({ id: `a${i}`, label: `App ${i}`, state: 'ready' }));
   ok(M.capVerdict(live(L.CONCURRENT_CAP - 1)) === null, 'below the cap ⇒ a launch may proceed');
   const v = M.capVerdict(live(L.CONCURRENT_CAP));
-  ok(v && v.code === 'cap' && v.holders.length === L.CONCURRENT_CAP && /ceiling reached/.test(v.error) && /App 0 \(a0\)/.test(v.error) && /stop one first/.test(v.error), 'at the cap ⇒ a LOUD refusal naming the holders and the way out', v);
+  ok(gateOf(v) && v.code === 'cap' && v.holders.length === L.CONCURRENT_CAP && gateOf(/ceiling reached/.test(v.error)) && gateOf(/App 0 \(a0\)/.test(v.error)) && verdictOf(/stop one first/.test(v.error)), 'at the cap ⇒ a LOUD refusal naming the holders and the way out', v);
   ok(M.capVerdict(live(2), { CONCURRENT_CAP: 2 }).code === 'cap' && M.capVerdict(live(1), { CONCURRENT_CAP: 2 }) === null, 'the cap is the injected limits\' (the suite can shrink it)');
 }
 {
@@ -274,21 +274,21 @@ console.log('§6 verdicts');
   ];
   const bad = rows.map(([r, want]) => ({ r, want, got: RV(r) })).filter((x) => x.got.remove !== x.want);
   ok(bad.length === 0, `profileRetireVerdict: ${rows.length} rows — removed only after Stop / a relaunch / the app's own exit / no app ever ran; an idle-out, a dead display, the old guard and "keep profile" keep it`, bad);
-  ok(/by the keeper \(idle\), not by a person/.test(RV({ state: 'exited', stoppedBy: 'idle' }).why) && M.profileRetireVerdict({ state: 'exited' }).remove === false, 'a kept profile says WHY (the record carries it); a record without a profile is never a removal');
+  ok(gateOf(/by the keeper \(idle\), not by a person/.test(RV({ state: 'exited', stoppedBy: 'idle' }).why)) && M.profileRetireVerdict({ state: 'exited' }).remove === false, 'a kept profile says WHY (the record carries it); a record without a profile is never a removal');
 }
 {
   const rec = { state: 'ready', lastError: null };
-  ok(same(M.adoptVerdict(rec, { x: true, server: true, app: true }, true), { state: 'ready', adopted: true }), 'adopt: every part alive + banner ⇒ ready (adopted)');
-  ok(M.adoptVerdict(rec, { x: false, server: false, app: false }, false).state === 'exited' && /X display gone/.test(M.adoptVerdict(rec, { x: false, server: false, app: false }, false).lastError), 'adopt: X dead ⇒ exited, lastError says the display is gone');
-  ok(M.adoptVerdict(rec, { x: true, server: true, app: false }, true).state === 'exited' && /application exited while VibeSpace was down/.test(M.adoptVerdict(rec, { x: true, server: true, app: false }, true).lastError), 'adopt: app dead ⇒ exited, lastError says so');
+  ok(verdictOf(same(M.adoptVerdict(rec, { x: true, server: true, app: true }, true), { state: 'ready', adopted: true })), 'adopt: every part alive + banner ⇒ ready (adopted)');
+  ok(M.adoptVerdict(rec, { x: false, server: false, app: false }, false).state === 'exited' && verdictOf(/X display gone/.test(M.adoptVerdict(rec, { x: false, server: false, app: false }, false).lastError)), 'adopt: X dead ⇒ exited, lastError says the display is gone');
+  ok(M.adoptVerdict(rec, { x: true, server: true, app: false }, true).state === 'exited' && verdictOf(/application exited while VibeSpace was down/.test(M.adoptVerdict(rec, { x: true, server: true, app: false }, true).lastError)), 'adopt: app dead ⇒ exited, lastError says so');
   ok(M.adoptVerdict(rec, { x: true, server: false, app: true }, false).state === 'failed', 'adopt: picture server dead or silent ⇒ failed');
   ok(M.adoptVerdict({ state: 'ready', lastError: 'kept' }, { x: false, server: false, app: false }, false).lastError === 'kept', 'adopt: an existing lastError is KEPT');
   ok(M.adoptVerdict({ state: 'exited' }, { x: true, server: true, app: true }, true) === null, 'adopt: a terminal record is not re-adopted');
 }
-ok(same(M.streamTargetOf({ state: 'ready', port: 5901, backend: 'vnc-display' }), { kind: 'rfb', port: 5901, backend: 'vnc-display' }) && M.streamTargetOf({ state: 'launching', port: 5901, backend: 'vnc-display' }) === null && M.streamTargetOf({ state: 'ready', port: 1, backend: 'xpra' }).kind === 'xpra', 'streamTargetOf: ready+port ⇒ the rung\'s stream kind; launching ⇒ null');
+ok(gateOf(same(M.streamTargetOf({ state: 'ready', port: 5901, backend: 'vnc-display' }), { kind: 'rfb', port: 5901, backend: 'vnc-display' })) && M.streamTargetOf({ state: 'launching', port: 5901, backend: 'vnc-display' }) === null && M.streamTargetOf({ state: 'ready', port: 1, backend: 'xpra' }).kind === 'xpra', 'streamTargetOf: ready+port ⇒ the rung\'s stream kind; launching ⇒ null');
 {
   const r = M.newRecord({ id: 'da-1', label: 'x', exec: '/x', args: ['a'], cwd: null, source: 'adhoc', backend: 'vnc-display', via: 'Xvfb+x11vnc', fallbackWhy: 'xpra not on PATH', idleTimeoutMs: 60000, now: 5 });
-  ok(r.state === 'launching' && r.startedAt === 5 && r.lastInputAt === 5 && same(Object.keys(r.pids), ['x', 'app', 'server', 'wm']) && same(Object.keys(r.starts), ['x', 'app', 'server', 'wm']) && r.display === null && r.port === null && r.idleTimeoutMs === 60000 && r.env === undefined, 'newRecord: the §4 shape, facts only, nothing derived');
+  ok(r.state === 'launching' && r.startedAt === 5 && r.lastInputAt === 5 && gateOf(same(Object.keys(r.pids), ['x', 'app', 'server', 'wm'])) && gateOf(same(Object.keys(r.starts), ['x', 'app', 'server', 'wm'])) && r.display === null && r.port === null && r.idleTimeoutMs === 60000 && r.env === undefined, 'newRecord: the §4 shape, facts only, nothing derived');
 }
 ok(M.DESKTOP_SINGLETON_ID === 'desktop-singleton' && M.DEFAULT_IDLE_TIMEOUT_MIN === 0, 'DESKTOP_SINGLETON_ID + the DA3 default (0 = never since the 2026-09-25 owner ruling)');
 
@@ -322,13 +322,13 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
     encoders.push({ name, type: Number(type[1]), bytes, variable });
   }
   const byName = Object.fromEntries(encoders.map((e) => [e.name, e]));
-  ok(encoders.length >= 10 && byName.enableContinuousUpdates && byName.keyEvent && byName.pointerEvent && byName.extendedPointerEvent && byName.clientFence && byName.xvpOp && byName.setDesktopSize && byName.clientCutText && byName.clientEncodings && byName.pixelFormat && byName.fbUpdateRequest && byName.QEMUExtendedKeyEvent, `parsed ${encoders.length} client-message encoders from the shipped noVNC`, encoders.map((e) => e.name));
+  ok(encoders.length >= 10 && gateOf(byName.enableContinuousUpdates) && gateOf(byName.keyEvent) && gateOf(byName.pointerEvent) && gateOf(byName.extendedPointerEvent) && gateOf(byName.clientFence) && gateOf(byName.xvpOp) && gateOf(byName.setDesktopSize) && gateOf(byName.clientCutText) && gateOf(byName.clientEncodings) && gateOf(byName.pixelFormat) && gateOf(byName.fbUpdateRequest) && verdictOf(byName.QEMUExtendedKeyEvent), `parsed ${encoders.length} client-message encoders from the shipped noVNC`, encoders.map((e) => e.name));
   ok(byName.enableContinuousUpdates.bytes === 10 && !byName.enableContinuousUpdates.variable, 'noVNC\'s EnableContinuousUpdates is 10 bytes (type, enable, x, y, w, h) — the r3 defect was a 4 in the table', byName.enableContinuousUpdates);
   ok(byName.pointerEvent.bytes === 6 && byName.extendedPointerEvent.bytes === 7 && byName.pointerEvent.type === 5 && byName.extendedPointerEvent.type === 5, 'type 5 has TWO shapes in the shipped client: 6 bytes, or 7 with the ExtendedMouseButtons marker bit — a fixed-length table cannot say it');
   // the sieve's own fixed table must agree with every fixed-shape encoder it lists, and list no type the client can send at another length
   for (const [t, len] of Object.entries(S.RFB_FIXED_LEN)) {
     const encs = encoders.filter((e) => e.type === Number(t));
-    ok(encs.length >= 1 && encs.every((e) => !e.variable && e.bytes === len), `RFB_FIXED_LEN[${t}] = ${len} matches the shipped encoder(s) ${encs.map((e) => `${e.name}:${e.bytes}${e.variable ? ' (variable!)' : ''}`).join(', ') || '(none — a type the client never sends)'}`);
+    ok(encs.length >= 1 && verdictOf(encs.every((e) => !e.variable && e.bytes === len)), `RFB_FIXED_LEN[${t}] = ${len} matches the shipped encoder(s) ${encs.map((e) => `${e.name}:${e.bytes}${e.variable ? ' (variable!)' : ''}`).join(', ') || '(none — a type the client never sends)'}`);
   }
   const hs = [Buffer.from('RFB 003.008\n'), Buffer.from([1]), Buffer.from([1])];
   const key = Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x61]);
@@ -368,24 +368,24 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
     const s4 = S.rfbInputSieve({ onDesktopSize: (w, h) => got.push([w, h]) });
     const sd = Buffer.alloc(24); sd[0] = 251; sd.writeUInt16BE(900, 2); sd.writeUInt16BE(600, 4); sd[6] = 1; sd.writeUInt16BE(900, 16); sd.writeUInt16BE(600, 18);
     let n4 = 0; for (const b of [...hs, sd.subarray(0, 9), sd.subarray(9), key]) n4 += s4.feed(b);
-    ok(same(got, [[900, 600]]) && n4 === 1 && s4.state().pending === 0 && !s4.state().opaque, 'a SetDesktopSize split across two chunks is reported ONCE as 900x600, counts as no input, and the KeyEvent after it counts');
+    ok(gateOf(same(got, [[900, 600]])) && n4 === 1 && s4.state().pending === 0 && !s4.state().opaque, 'a SetDesktopSize split across two chunks is reported ONCE as 900x600, counts as no input, and the KeyEvent after it counts');
     const s5 = S.rfbInputSieve(); let n5 = 0; for (const b of [...hs, sd, key]) n5 += s5.feed(b);
     ok(n5 === 1 && s5.state().messages === 2, 'CONTROL: a sieve built without the hook walks the same bytes unchanged');
     const s6 = S.rfbInputSieve({ onDesktopSize: () => { throw new Error('keeper down'); } }); let n6 = 0; for (const b of [...hs, sd, key]) n6 += s6.feed(b);
     ok(n6 === 1 && !s6.state().opaque, 'a hook that throws never breaks the walk (the keeper is optional at the bridge)');
     const hsLen = hs.reduce((a, b) => a + b.length, 0);
     const ra = S.rfbInputSieve({ onDesktopSize: (w, h) => got.push(['allowed', w, h]) }).strip(Buffer.concat([...hs, sd, key]), true);
-    ok(same(got[1], ['allowed', 900, 600]) && ra.dropped === 0 && ra.relay && ra.relay.length === hsLen + 24 + key.length, 'through strip() with input ALLOWED the SetDesktopSize is relayed and reported (the holder\'s pane sizes the display)');
+    ok(gateOf(same(got[1], ['allowed', 900, 600])) && ra.dropped === 0 && gateOf(ra.relay) && ra.relay.length === hsLen + 24 + key.length, 'through strip() with input ALLOWED the SetDesktopSize is relayed and reported (the holder\'s pane sizes the display)');
     // r8 (2026-09-22, the twin of the xpra display-size fence): a REFUSED viewer's SetDesktopSize is cut — Xvnc resizes the
     // SHARED display for whoever asks — and never reported (the display did not move); the FramebufferUpdateRequest beside it passes
     const fur = Buffer.from([3, 1, 0, 0, 0, 0, 3, 0, 2, 0]);
     const sr = S.rfbInputSieve({ onDesktopSize: (w, h) => got.push(['refused', w, h]) });
     const r = sr.strip(Buffer.concat([...hs, sd, fur, key]), false);
-    ok(got.length === 2 && r.dropped === 2 && r.relay && r.relay.equals(Buffer.concat([...hs, fur])) && !sr.state().opaque, 'through strip() with input REFUSED the SetDesktopSize is CUT and not reported, beside the KeyEvent; the handshake + FramebufferUpdateRequest pass', { got, dropped: r.dropped });
+    ok(got.length === 2 && r.dropped === 2 && gateOf(r.relay) && gateOf(r.relay.equals(Buffer.concat([...hs, fur]))) && !sr.state().opaque, 'through strip() with input REFUSED the SetDesktopSize is CUT and not reported, beside the KeyEvent; the handshake + FramebufferUpdateRequest pass', { got, dropped: r.dropped });
     const r2 = sr.strip(Buffer.concat([sd.subarray(0, 9)]), false), r3 = sr.strip(sd.subarray(9), false);
     ok(r2.relay === null && r3.relay === null && r3.dropped === 1 && got.length === 2, 'a refused SetDesktopSize split across two chunks is cut whole, never reported');
     const r4 = sr.strip(sd, true);
-    ok(r4.relay && r4.relay.equals(sd) && same(got[2], ['refused', 900, 600]), 'the same viewer ALLOWED (a takeover) ⇒ its next SetDesktopSize passes and is reported (the sieve\'s refusal is per message, never sticky)');
+    ok(gateOf(r4.relay) && gateOf(r4.relay.equals(sd)) && verdictOf(same(got[2], ['refused', 900, 600])), 'the same viewer ALLOWED (a takeover) ⇒ its next SetDesktopSize passes and is reported (the sieve\'s refusal is per message, never sticky)');
     // CONTROL: the x4 strip (a SetDesktopSize relayed whatever the policy) — the reproduced class
     const srcS = read('src/server/stream-relay-rfb.js'); // F-B4: the rfb relay's own file
     const from = "if ((input || type === 251) && !allowInput) dropped++;";
@@ -393,7 +393,7 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
     const file = MUTD.write('src/server/stream-relay-rfb.js', editAnchor(srcS, from, "if (input && !allowInput) /* pre-fix (x4) */ dropped++;", "src/server/stream-relay-rfb.js"), 'rfbsize');
     try {
       const rc = require(file).rfbInputSieve().strip(Buffer.concat([...hs, sd, key]), false);
-      ok(rc.relay && rc.relay.equals(Buffer.concat([...hs, sd])) && rc.dropped === 1, 'CONTROL: the x4 strip relays a refused viewer\'s SetDesktopSize (Xvnc would resize the holder\'s display)');
+      ok(gateOf(rc.relay) && gateOf(rc.relay.equals(Buffer.concat([...hs, sd]))) && rc.dropped === 1, 'CONTROL: the x4 strip relays a refused viewer\'s SetDesktopSize (Xvnc would resize the holder\'s display)');
     } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   // NEGATIVE CONTROL: a patched copy of the real bridge with the round-2 table — same sequence, KeyEvents lost, sieve still 'followable'
@@ -433,20 +433,20 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const st = S.xpraInputSieve();
     const talk = ['hello', 'ping_echo', 'damage-sequence', 'map-window'];
     const r1 = st.strip(Buffer.concat([rpkt('hello'), rpkt('key-action'), rpkt('ping_echo'), rpkt('button-action'), rpkt('damage-sequence'), rpkt('clipboard-token'), rpkt('map-window'), rpkt('configure-window'), rpkt('keyboard-config')]), false);
-    ok(r1.inputs === 3 && r1.dropped === 5 && r1.relay.equals(Buffer.concat(talk.map((t) => rpkt(t)))), 'strip(refused): key-action / button-action / clipboard-token cut out, keyboard-config and (x5) configure-window fenced, hello / ping_echo / damage-sequence / map-window relayed byte-identical in order', { inputs: r1.inputs, dropped: r1.dropped });
+    ok(r1.inputs === 3 && r1.dropped === 5 && verdictOf(r1.relay.equals(Buffer.concat(talk.map((t) => rpkt(t))))), 'strip(refused): key-action / button-action / clipboard-token cut out, keyboard-config and (x5) configure-window fenced, hello / ping_echo / damage-sequence / map-window relayed byte-identical in order', { inputs: r1.inputs, dropped: r1.dropped });
     const r2 = st.strip(Buffer.concat([rpkt('hello'), rpkt('key-action')]), true);
-    ok(r2.inputs === 1 && r2.dropped === 0 && r2.replayed === 2 && r2.replayedKinds.join() === 'keymap,window geometry' && r2.relay.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('configure-window'), rpkt('hello'), rpkt('key-action')])), 'strip(allowed): everything relayed, the input still COUNTED — and the keyboard-config + configure-window fenced a moment ago go FIRST, in that order (held for the takeover)');
+    ok(r2.inputs === 1 && r2.dropped === 0 && r2.replayed === 2 && r2.replayedKinds.join() === 'keymap,window geometry' && verdictOf(r2.relay.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('configure-window'), rpkt('hello'), rpkt('key-action')]))), 'strip(allowed): everything relayed, the input still COUNTED — and the keyboard-config + configure-window fenced a moment ago go FIRST, in that order (held for the takeover)');
     const ka = rpkt('key-action');
     const r3a = st.strip(ka.subarray(0, 6), false), r3b = st.strip(ka.subarray(6), false);
     ok(r3a.relay === null && r3a.dropped === 0 && r3b.dropped === 1 && r3b.relay === null && st.state().pending === 0, 'a refused input split across two messages: the head is HELD (never relayed alone), the tail completes it and the whole packet is dropped');
     const hl = rpkt('hello');
     const r4a = st.strip(hl.subarray(0, 9), false), r4b = st.strip(hl.subarray(9), false);
-    ok(r4a.relay === null && r4b.relay && r4b.relay.equals(hl), 'a hello split across two messages under a refusal is relayed WHOLE once complete');
+    ok(r4a.relay === null && gateOf(r4b.relay) && verdictOf(r4b.relay.equals(hl)), 'a hello split across two messages under a refusal is relayed WHOLE once complete');
     const r5 = st.strip(Buffer.concat([rpkt('x', { index: 1 }), rpkt('key-action')]), false);
     const r6 = st.strip(Buffer.concat([rpkt('x', { index: 1 }), rpkt('damage-sequence')]), false);
-    ok(r5.relay === null && r5.dropped === 1 && r6.relay && r6.relay.equals(Buffer.concat([rpkt('x', { index: 1 }), rpkt('damage-sequence')])), 'a raw chunk travels WITH the main packet after it: dropped with a refused input, relayed with a relayed packet');
+    ok(r5.relay === null && r5.dropped === 1 && gateOf(r6.relay) && verdictOf(r6.relay.equals(Buffer.concat([rpkt('x', { index: 1 }), rpkt('damage-sequence')]))), 'a raw chunk travels WITH the main packet after it: dropped with a refused input, relayed with a relayed packet');
     const r7 = st.strip(Buffer.from('garbage that is not a header'), false), r8 = S.xpraInputSieve().strip(Buffer.from('garbage that is not a header'), true);
-    ok(r7.relay === null && r7.dropped === 1 && r8.relay && r8.relay.toString() === 'garbage that is not a header' && r8.inputs === 1, 'unreadable bytes are input: DROPPED under a refusal (never injected behind it), relayed and counted when allowed');
+    ok(r7.relay === null && r7.dropped === 1 && gateOf(r8.relay) && r8.relay.toString() === 'garbage that is not a header' && r8.inputs === 1, 'unreadable bytes are input: DROPPED under a refusal (never injected behind it), relayed and counted when allowed');
     const r9 = st.strip(rpkt('ping', { level: 0x10 | 1 }), false);
     ok(r9.relay === null && r9.dropped === 1, 'a COMPRESSED packet cannot be read ⇒ treated as input ⇒ dropped under a refusal (the upstream html5 client never compresses what it sends)');
   }
@@ -459,13 +459,13 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   {
     const st = S.xpraInputSieve();
     const r = st.strip(refusedBytes, false);
-    ok(r.relay && r.relay.equals(Buffer.concat([rpkt('hello'), rpkt('ping_echo')])) && r.dropped === CONTROL.length && r.lifecycle === 2 && r.inputs === 0, `strip(refused): only hello + ping_echo relayed — ${CONTROL.length} control packets cut (${CONTROL.join(', ')}), none of them counted as input, 2 named server-lifecycle`, { dropped: r.dropped, lifecycle: r.lifecycle, relayed: r.relay && r.relay.length });
+    ok(gateOf(r.relay) && gateOf(r.relay.equals(Buffer.concat([rpkt('hello'), rpkt('ping_echo')]))) && r.dropped === CONTROL.length && r.lifecycle === 2 && r.inputs === 0, `strip(refused): only hello + ping_echo relayed — ${CONTROL.length} control packets cut (${CONTROL.join(', ')}), none of them counted as input, 2 named server-lifecycle`, { dropped: r.dropped, lifecycle: r.lifecycle, relayed: r.relay && r.relay.length });
     const a = S.xpraInputSieve().strip(Buffer.concat([rpkt('shutdown-server'), rpkt('control'), rpkt('exit-server'), rpkt('key-action')]), true);
-    ok(a.relay && a.relay.equals(Buffer.concat([rpkt('control'), rpkt('key-action')])) && a.dropped === 2 && a.lifecycle === 2 && a.inputs === 1, 'strip(ALLOWED): shutdown-server and exit-server are cut from an input-allowed viewer too (the keeper owns the server\'s lifecycle); its other control and input packets pass');
+    ok(gateOf(a.relay) && gateOf(a.relay.equals(Buffer.concat([rpkt('control'), rpkt('key-action')]))) && a.dropped === 2 && a.lifecycle === 2 && a.inputs === 1, 'strip(ALLOWED): shutdown-server and exit-server are cut from an input-allowed viewer too (the keeper owns the server\'s lifecycle); its other control and input packets pass');
     const bl = S.xpraInputSieve().strip(Buffer.concat([bpkt('shutdown-server'), bpkt('exit-server')]), true);
     ok(bl.relay === null && bl.lifecycle === 2, 'the bencode spelling of shutdown-server / exit-server is cut the same way');
-    ok([...S.XPRA_WATCH_TYPES].every((t) => !S.XPRA_INPUT_TYPES.has(t) && !S.XPRA_LIFECYCLE_TYPES.has(t)), 'no watch type is input or lifecycle (the three sets are disjoint where it matters)');
-    for (const t of S.XPRA_WATCH_TYPES) { const x = S.xpraInputSieve().strip(rpkt(t), false); ok(x.relay && x.relay.equals(rpkt(t)) && x.dropped === 0, `watch type ${t} is relayed for a refused viewer`); }
+    ok(verdictOf([...S.XPRA_WATCH_TYPES].every((t) => !S.XPRA_INPUT_TYPES.has(t) && !S.XPRA_LIFECYCLE_TYPES.has(t))), 'no watch type is input or lifecycle (the three sets are disjoint where it matters)');
+    for (const t of S.XPRA_WATCH_TYPES) { const x = S.xpraInputSieve().strip(rpkt(t), false); ok(gateOf(x.relay) && gateOf(x.relay.equals(rpkt(t))) && x.dropped === 0, `watch type ${t} is relayed for a refused viewer`); }
   }
   // THE SHIPPED CLIENT'S OWN PACKETS (src/lib/xpra-proto.js builders xpra-client.js sends with): every non-input one is
   // a watch type — a refused viewer's picture never loses a packet it needs (the r5 regression this allowlist must not reopen)
@@ -477,25 +477,25 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
       P.bufferRefresh(1), // the .197 integration: the repaint ask (xpra 6.5.4) — a watch type, never input
     ].map((p) => String(p[0]));
     const keymaps = [P.keyboardConfigPacket(hints), P.keyboardConfigPacket([])].map((p) => String(p[0]));
-    ok(keymaps.join() === 'keyboard-config,keymap-changed' && keymaps.every((t) => S.XPRA_KEYMAP_TYPES.has(t) && !S.XPRA_WATCH_TYPES.has(t)), `both keymap spellings the shipped client builds (${keymaps.join(', ')}) are XPRA_KEYMAP_TYPES and NOT watch types — the keymap fence`);
+    ok(keymaps.join() === 'keyboard-config,keymap-changed' && verdictOf(keymaps.every((t) => S.XPRA_KEYMAP_TYPES.has(t) && !S.XPRA_WATCH_TYPES.has(t))), `both keymap spellings the shipped client builds (${keymaps.join(', ')}) are XPRA_KEYMAP_TYPES and NOT watch types — the keymap fence`);
     const sizes = [P.displayPacket(['display-configure'], { width: 10, height: 10 }), P.displayPacket(['configure-display'], { width: 10, height: 10 }), P.displayPacket([], { width: 10, height: 10 })].map((p) => String(p[0]));
-    ok(sizes.join() === 'display-configure,configure-display,desktop_size' && sizes.every((t) => S.XPRA_DISPLAY_TYPES.has(t) && !S.XPRA_WATCH_TYPES.has(t)), `all three display-size spellings the shipped client builds (${sizes.join(', ')}) are XPRA_DISPLAY_TYPES and NOT watch types — the display-size fence`);
+    ok(sizes.join() === 'display-configure,configure-display,desktop_size' && verdictOf(sizes.every((t) => S.XPRA_DISPLAY_TYPES.has(t) && !S.XPRA_WATCH_TYPES.has(t))), `all three display-size spellings the shipped client builds (${sizes.join(', ')}) are XPRA_DISPLAY_TYPES and NOT watch types — the display-size fence`);
     const client = read('src/lib/xpra-client.js');
     const used = [...new Set([...client.matchAll(/send\(P\.([a-zA-Z]+)\(/g)].map((m) => m[1]))];
     const nonInputBuilders = ['pingPacket', 'pingEcho', 'damageAck', 'mapWindow', 'configureWindow', 'clipboardNone', 'keyboardConfigPacket', 'displayPacket', 'bufferRefresh'];
     const inputBuilders = ['keyAction', 'buttonAction', 'pointerPosition', 'clipboardToken', 'clipboardContents', 'focusPacket', 'closeWindow'];
-    ok(used.length >= 10 && used.every((u) => nonInputBuilders.includes(u) || inputBuilders.includes(u)), `every builder xpra-client.js sends through is classified here (${used.join(', ')}) — a new one must be judged watch or input`, used);
+    ok(used.length >= 10 && verdictOf(used.every((u) => nonInputBuilders.includes(u) || inputBuilders.includes(u))), `every builder xpra-client.js sends through is classified here (${used.join(', ')}) — a new one must be judged watch or input`, used);
     // x5: configure-window LEFT the watch list (the geometry is the ACTIVE viewer's — held, replayed at a takeover) and so
     // did unmap-window (it unmaps the window for EVERY client; the shipped client never sends one — `used` above pins it)
     const watchOrHeld = (t) => S.XPRA_WATCH_TYPES.has(t) || S.XPRA_GEOMETRY_TYPES.has(t);
-    ok(built.filter((t) => t !== 'unmap-window').every(watchOrHeld), `every non-input packet the shipped client sends is a watch type or a HELD geometry packet (${built.join(', ')})`, built.filter((t) => !watchOrHeld(t)));
-    ok(!S.XPRA_WATCH_TYPES.has('configure-window') && S.XPRA_GEOMETRY_TYPES.has('configure-window') && !S.XPRA_WATCH_TYPES.has('unmap-window') && !used.includes('unmapWindow'), 'x5: configure-window is a HELD geometry packet and unmap-window is cut for a refused viewer (the shipped client never sends one)');
+    ok(verdictOf(built.filter((t) => t !== 'unmap-window').every(watchOrHeld)), `every non-input packet the shipped client sends is a watch type or a HELD geometry packet (${built.join(', ')})`, built.filter((t) => !watchOrHeld(t)));
+    ok(!S.XPRA_WATCH_TYPES.has('configure-window') && gateOf(S.XPRA_GEOMETRY_TYPES.has('configure-window')) && !S.XPRA_WATCH_TYPES.has('unmap-window') && !used.includes('unmapWindow'), 'x5: configure-window is a HELD geometry packet and unmap-window is cut for a refused viewer (the shipped client never sends one)');
   }
   // the installed server's own lifecycle handlers (SKIP without the package): both spellings it registers are ours
   {
     const base = ['/usr/lib/python3/dist-packages/xpra/server/base.py'].find((f) => fs.existsSync(f));
     if (!base) console.log('  ⚠ SKIP: no xpra server/base.py on this box — the lifecycle census needs the installed server');
-    else { const txt = fs.readFileSync(base, 'utf8'); const reg = /add_packets\(\s*"shutdown-server",\s*"exit-server"\s*\)/.test(txt); ok(reg && S.XPRA_LIFECYCLE_TYPES.has('shutdown-server') && S.XPRA_LIFECYCLE_TYPES.has('exit-server'), 'the installed server registers shutdown-server + exit-server as client packets (server/base.py add_packets) — both are XPRA_LIFECYCLE_TYPES'); }
+    else { const txt = fs.readFileSync(base, 'utf8'); const reg = /add_packets\(\s*"shutdown-server",\s*"exit-server"\s*\)/.test(txt); ok(gateOf(reg) && gateOf(S.XPRA_LIFECYCLE_TYPES.has('shutdown-server')) && verdictOf(S.XPRA_LIFECYCLE_TYPES.has('exit-server')), 'the installed server registers shutdown-server + exit-server as client packets (server/base.py add_packets) — both are XPRA_LIFECYCLE_TYPES'); }
   }
   // NEGATIVE CONTROL: the r5 strip (a denylist of input — every non-input packet relayed) on the same bytes relays the lifecycle packets
   {
@@ -507,7 +507,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
       const Pm = require(file);
       const r = Pm.xpraInputSieve().strip(refusedBytes, false);
       const types = []; for (let b = r.relay || Buffer.alloc(0); b.length >= 8;) { const n = b.readUInt32BE(4); types.push(S.xpraPacketType(b.subarray(8, 8 + n))); b = b.subarray(8 + n); }
-      ok(types.includes('shutdown-server') && types.includes('exit-server') && r.dropped === 0, `CONTROL: the r5 strip relays a refused viewer's ${types.length} packets incl. shutdown-server + exit-server (the reproduced session kill)`, types);
+      ok(gateOf(types.includes('shutdown-server')) && gateOf(types.includes('exit-server')) && r.dropped === 0, `CONTROL: the r5 strip relays a refused viewer's ${types.length} packets incl. shutdown-server + exit-server (the reproduced session kill)`, types);
     } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   // THE KEYMAP FENCE (hole B the r6 verify left open, 2026-09-22 — measured on the real rung: a Watch viewer's
@@ -517,26 +517,26 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   // in Watch mode and took over typed garbage without the replay — test-desktop-app-keeper §15 measures both on xpra).
   {
     const kc = rpkt('keyboard-config'), km = rpkt('keymap-changed'), pe = rpkt('ping_echo');
-    ok([...S.XPRA_KEYMAP_TYPES].sort().join() === 'keyboard-config,keymap-changed' && [...S.XPRA_KEYMAP_TYPES].every((t) => !S.XPRA_WATCH_TYPES.has(t) && !S.XPRA_INPUT_TYPES.has(t)), 'XPRA_KEYMAP_TYPES = keyboard-config + keymap-changed: neither a watch type nor input');
+    ok([...S.XPRA_KEYMAP_TYPES].sort().join() === 'keyboard-config,keymap-changed' && verdictOf([...S.XPRA_KEYMAP_TYPES].every((t) => !S.XPRA_WATCH_TYPES.has(t) && !S.XPRA_INPUT_TYPES.has(t))), 'XPRA_KEYMAP_TYPES = keyboard-config + keymap-changed: neither a watch type nor input');
     const st = S.xpraInputSieve();
     const a = st.strip(Buffer.concat([rpkt('hello'), kc, pe, km]), false);
-    ok(a.relay && a.relay.equals(Buffer.concat([rpkt('hello'), pe])) && a.dropped === 2 && a.inputs === 0 && st.state().heldKeymap === km.length, 'refused: keyboard-config and keymap-changed are cut (neither counted as input), the hello and ping_echo pass; the LAST keymap packet is held', st.state());
+    ok(gateOf(a.relay) && gateOf(a.relay.equals(Buffer.concat([rpkt('hello'), pe]))) && a.dropped === 2 && a.inputs === 0 && st.state().heldKeymap === km.length, 'refused: keyboard-config and keymap-changed are cut (neither counted as input), the hello and ping_echo pass; the LAST keymap packet is held', st.state());
     const b2 = st.strip(pe, false);
-    ok(b2.relay && b2.relay.equals(pe) && b2.replayed === 0 && st.state().heldKeymap === km.length, 'still refused: nothing replayed, the keymap still held');
+    ok(gateOf(b2.relay) && gateOf(b2.relay.equals(pe)) && b2.replayed === 0 && st.state().heldKeymap === km.length, 'still refused: nothing replayed, the keymap still held');
     const c = st.strip(pe, true);
-    ok(c.replayed === 1 && c.relay && c.relay.equals(Buffer.concat([km, pe])) && st.state().heldKeymap === 0, 'the first ALLOWED message (a takeover) carries the held keymap AHEAD of its own packets, in one write');
+    ok(c.replayed === 1 && gateOf(c.relay) && gateOf(c.relay.equals(Buffer.concat([km, pe]))) && st.state().heldKeymap === 0, 'the first ALLOWED message (a takeover) carries the held keymap AHEAD of its own packets, in one write');
     const d = st.strip(pe, true);
-    ok(d.replayed === 0 && d.relay.equals(pe), 'replayed once, never again');
+    ok(d.replayed === 0 && verdictOf(d.relay.equals(pe)), 'replayed once, never again');
     const e = st.strip(kc, true);
-    ok(e.relay && e.relay.equals(kc) && e.dropped === 0, 'an ALLOWED viewer\'s keyboard-config passes as before (the holder\'s keymap is the one X should carry)');
+    ok(gateOf(e.relay) && gateOf(e.relay.equals(kc)) && e.dropped === 0, 'an ALLOWED viewer\'s keyboard-config passes as before (the holder\'s keymap is the one X should carry)');
     const s2 = S.xpraInputSieve();
     const big = rpkt('keyboard-config', { tail: Buffer.alloc(S.XPRA_KEYMAP_HOLD_BYTES) });
     const f1 = s2.strip(big, false), f2 = s2.strip(pe, true);
-    ok(f1.relay === null && f1.dropped === 1 && s2.state().heldKeymap === 0 && f2.replayed === 0 && f2.relay.equals(pe), `a refused keymap packet over XPRA_KEYMAP_HOLD_BYTES (${S.XPRA_KEYMAP_HOLD_BYTES} B; the shipped client's is ~2.4 KB) is cut and NOT held — nothing to replay`);
+    ok(f1.relay === null && f1.dropped === 1 && s2.state().heldKeymap === 0 && f2.replayed === 0 && verdictOf(f2.relay.equals(pe)), `a refused keymap packet over XPRA_KEYMAP_HOLD_BYTES (${S.XPRA_KEYMAP_HOLD_BYTES} B; the shipped client's is ~2.4 KB) is cut and NOT held — nothing to replay`);
     const s3 = S.xpraInputSieve();
     s3.strip(kc, false);
     const g = s3.strip(Buffer.concat([rpkt('shutdown-server'), pe]), true);
-    ok(g.replayed === 1 && g.relay.equals(Buffer.concat([kc, pe])) && g.lifecycle === 1, 'the replay rides a message whose other packet is cut (the lifecycle rule still holds)');
+    ok(g.replayed === 1 && gateOf(g.relay.equals(Buffer.concat([kc, pe]))) && g.lifecycle === 1, 'the replay rides a message whose other packet is cut (the lifecycle rule still holds)');
   }
   // CONTROL: the r6 allowlist (keyboard-config / keymap-changed listed as watch types) relays a refused viewer's keymap
   {
@@ -547,7 +547,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     try {
       const Pm = require(file);
       const r = Pm.xpraInputSieve().strip(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')]), false);
-      ok(r.relay && r.relay.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')])) && r.dropped === 0, 'CONTROL: the r6 allowlist relays a refused viewer\'s keyboard-config + keymap-changed (the reproduced keymap change)');
+      ok(gateOf(r.relay) && gateOf(r.relay.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')]))) && r.dropped === 0, 'CONTROL: the r6 allowlist relays a refused viewer\'s keyboard-config + keymap-changed (the reproduced keymap change)');
     } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   // THE DISPLAY-SIZE FENCE (round 3 of the P8-2 verify, 2026-09-22 — reproduced on the real rung: a Watch viewer's
@@ -556,20 +556,20 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   // (after the keymap, in one write) — test-desktop-app-keeper §16 measures both on the real xpra.
   {
     const dc = rpkt('display-configure'), cd = rpkt('configure-display'), ds = rpkt('desktop_size'), kc = rpkt('keyboard-config'), pe = rpkt('ping_echo');
-    ok([...S.XPRA_DISPLAY_TYPES].sort().join() === 'configure-display,desktop_size,display-configure' && [...S.XPRA_DISPLAY_TYPES].every((t) => !S.XPRA_WATCH_TYPES.has(t) && !S.XPRA_INPUT_TYPES.has(t) && !S.XPRA_KEYMAP_TYPES.has(t)), 'XPRA_DISPLAY_TYPES = display-configure + configure-display + desktop_size: not a watch type, not input, not a keymap type');
+    ok([...S.XPRA_DISPLAY_TYPES].sort().join() === 'configure-display,desktop_size,display-configure' && verdictOf([...S.XPRA_DISPLAY_TYPES].every((t) => !S.XPRA_WATCH_TYPES.has(t) && !S.XPRA_INPUT_TYPES.has(t) && !S.XPRA_KEYMAP_TYPES.has(t))), 'XPRA_DISPLAY_TYPES = display-configure + configure-display + desktop_size: not a watch type, not input, not a keymap type');
     const st = S.xpraInputSieve();
     const a = st.strip(Buffer.concat([rpkt('hello'), dc, pe, cd, ds]), false);
-    ok(a.relay && a.relay.equals(Buffer.concat([rpkt('hello'), pe])) && a.dropped === 3 && a.inputs === 0 && st.state().heldDisplay === ds.length && st.state().heldKeymap === 0, 'refused: all three display-size spellings are cut (none counted as input), the hello and ping_echo pass; the LAST one is held', st.state());
+    ok(gateOf(a.relay) && gateOf(a.relay.equals(Buffer.concat([rpkt('hello'), pe]))) && a.dropped === 3 && a.inputs === 0 && st.state().heldDisplay === ds.length && st.state().heldKeymap === 0, 'refused: all three display-size spellings are cut (none counted as input), the hello and ping_echo pass; the LAST one is held', st.state());
     st.strip(kc, false);
     const b2 = st.strip(pe, false);
-    ok(b2.relay && b2.relay.equals(pe) && b2.replayed === 0 && st.state().heldDisplay === ds.length && st.state().heldKeymap === kc.length, 'still refused: nothing replayed — a keymap and a display size both held');
+    ok(gateOf(b2.relay) && gateOf(b2.relay.equals(pe)) && b2.replayed === 0 && st.state().heldDisplay === ds.length && st.state().heldKeymap === kc.length, 'still refused: nothing replayed — a keymap and a display size both held');
     const c = st.strip(pe, true);
-    ok(c.replayed === 2 && c.replayedKinds.join() === 'keymap,display size' && c.relay && c.relay.equals(Buffer.concat([kc, ds, pe])) && st.state().heldDisplay === 0 && st.state().heldKeymap === 0, 'the takeover carries the held keymap THEN the held display size ahead of its own packets, in one write; replayedKinds names both (the log line\'s words)', c.replayedKinds);
+    ok(c.replayed === 2 && c.replayedKinds.join() === 'keymap,display size' && gateOf(c.relay) && gateOf(c.relay.equals(Buffer.concat([kc, ds, pe]))) && st.state().heldDisplay === 0 && st.state().heldKeymap === 0, 'the takeover carries the held keymap THEN the held display size ahead of its own packets, in one write; replayedKinds names both (the log line\'s words)', c.replayedKinds);
     const d = st.strip(dc, true);
-    ok(d.relay && d.relay.equals(dc) && d.dropped === 0 && d.replayed === 0, 'an ALLOWED viewer\'s display-configure passes as before (the holder\'s pane sizes the display)');
+    ok(gateOf(d.relay) && gateOf(d.relay.equals(dc)) && d.dropped === 0 && d.replayed === 0, 'an ALLOWED viewer\'s display-configure passes as before (the holder\'s pane sizes the display)');
     const s2 = S.xpraInputSieve();
     const f1 = s2.strip(rpkt('display-configure', { tail: Buffer.alloc(S.XPRA_DISPLAY_HOLD_BYTES) }), false), f2 = s2.strip(pe, true);
-    ok(f1.relay === null && f1.dropped === 1 && s2.state().heldDisplay === 0 && f2.replayed === 0 && f2.relay.equals(pe), `a refused display packet over XPRA_DISPLAY_HOLD_BYTES (${S.XPRA_DISPLAY_HOLD_BYTES} B) is cut and NOT held — nothing to replay`);
+    ok(f1.relay === null && f1.dropped === 1 && s2.state().heldDisplay === 0 && f2.replayed === 0 && verdictOf(f2.relay.equals(pe)), `a refused display packet over XPRA_DISPLAY_HOLD_BYTES (${S.XPRA_DISPLAY_HOLD_BYTES} B) is cut and NOT held — nothing to replay`);
     const src = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
     ok(!/XPRA_WATCH_TYPES = [^\n]*'(display-configure|configure-display|desktop_size)'/.test(src), 'the bridge spells no display-size packet in its watch allowlist');
   }
@@ -583,7 +583,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
       const Pm = require(file);
       const bytes = Buffer.concat([rpkt('display-configure'), rpkt('configure-display'), rpkt('desktop_size')]);
       const r = Pm.xpraInputSieve().strip(bytes, false);
-      ok(r.relay && r.relay.equals(bytes) && r.dropped === 0, 'CONTROL: the r7 allowlist relays a refused viewer\'s display-configure + configure-display + desktop_size (the reproduced 900x600 ⇒ 1x1)');
+      ok(gateOf(r.relay) && gateOf(r.relay.equals(bytes)) && r.dropped === 0, 'CONTROL: the r7 allowlist relays a refused viewer\'s display-configure + configure-display + desktop_size (the reproduced 900x600 ⇒ 1x1)');
     } finally { /* MUTD's scratch dir is removed at exit */ }
     // CONTROL: the fence without the replay — a takeover carries nothing it held
     const fromN = '    if (allowInput && !st.oversize) {';
@@ -593,7 +593,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
       const sn = require(nfile).xpraInputSieve();
       sn.strip(rpkt('display-configure'), false);
       const c = sn.strip(rpkt('ping_echo'), true);
-      ok(c.replayed === 0 && c.relay.equals(rpkt('ping_echo')), 'CONTROL: fenced without the replay, the takeover carries no held display size (the pane that took over keeps the old holder\'s)');
+      ok(c.replayed === 0 && verdictOf(c.relay.equals(rpkt('ping_echo'))), 'CONTROL: fenced without the replay, the takeover carries no held display size (the pane that took over keeps the old holder\'s)');
     } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   // THE HELD-BYTES CAP (hole A the r6 verify left open, 2026-09-22 — reproduced: a viewer DECLARING a 2 GiB packet and
@@ -605,39 +605,39 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     ok(S.XPRA_MAX_PACKET_BYTES === 16 * MiB && S.RFB_MAX_MESSAGE_BYTES === 16 * MiB && S.WS_MAX_MESSAGE_BYTES === 16 * MiB + 8 && S.OVERSIZE_CLOSE === 1009 && S.OVERSIZE_REASON === 'packet-too-large', 'the caps: 16 MiB per xpra packet and per rfb cut text, one packet + its header per WebSocket message, closed 1009 packet-too-large');
     const consts = '/usr/lib/python3/dist-packages/xpra/net/constants.py', core = '/usr/lib/python3/dist-packages/xpra/server/core.py';
     if (!fs.existsSync(consts) || !fs.existsSync(core)) console.log('  ⚠ SKIP: no installed xpra net/constants.py + server/core.py — the "same number as xpra\'s own limit" census needs the package');
-    else ok(/MAX_PACKET_SIZE: int = envint\("XPRA_MAX_PACKET_SIZE", 16 \* 1024 \* 1024\)/.test(fs.readFileSync(consts, 'utf8')) && /def accept_protocol[\s\S]{0,600}proto\.max_packet_size = MAX_PACKET_SIZE/.test(fs.readFileSync(core, 'utf8')), 'the installed xpra refuses a client packet over the SAME 16 MiB (net/constants.py MAX_PACKET_SIZE, set on every client connection by server/core.py accept_protocol) — the cap cuts nothing xpra would take');
+    else ok(gateOf(/MAX_PACKET_SIZE: int = envint\("XPRA_MAX_PACKET_SIZE", 16 \* 1024 \* 1024\)/.test(fs.readFileSync(consts, 'utf8'))) && verdictOf(/def accept_protocol[\s\S]{0,600}proto\.max_packet_size = MAX_PACKET_SIZE/.test(fs.readFileSync(core, 'utf8'))), 'the installed xpra refuses a client packet over the SAME 16 MiB (net/constants.py MAX_PACKET_SIZE, set on every client connection by server/core.py accept_protocol) — the cap cuts nothing xpra would take');
     const hdr = (size, index = 0) => { const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h[3] = index; h.writeUInt32BE(size >>> 0, 4); return h; };
     const st = S.xpraInputSieve();
     const r = st.strip(Buffer.concat([rpkt('ping_echo'), hdr(2 ** 31), Buffer.alloc(1024)]), true);
-    ok(r.oversize && r.oversize.declared === 2 ** 31 && r.oversize.cap === 16 * MiB && r.relay && r.relay.equals(rpkt('ping_echo')) && st.state().pending === 0, 'a header DECLARING 2 GiB is judged in the chunk that carries it: oversize named (declared, cap), nothing held, the complete packet before it still relayed', r.oversize);
+    ok(gateOf(r.oversize) && r.oversize.declared === 2 ** 31 && r.oversize.cap === 16 * MiB && gateOf(r.relay) && gateOf(r.relay.equals(rpkt('ping_echo'))) && st.state().pending === 0, 'a header DECLARING 2 GiB is judged in the chunk that carries it: oversize named (declared, cap), nothing held, the complete packet before it still relayed', r.oversize);
     const r2 = st.strip(Buffer.alloc(MiB), true);
-    ok(r2.relay === null && r2.oversize && st.state().pending === 0 && st.state().group === 0, 'after it NOTHING is held or relayed (the bridge is closing this viewer)');
+    ok(r2.relay === null && gateOf(r2.oversize) && st.state().pending === 0 && st.state().group === 0, 'after it NOTHING is held or relayed (the bridge is closing this viewer)');
     const s3 = S.xpraInputSieve();
     const e3 = s3.strip(hdr(16 * MiB), true);
     ok(!e3.oversize && s3.state().pending === 8 && s3.state().need === 16 * MiB + 8, 'exactly 16 MiB is xpra\'s own limit (it refuses MORE): the header is held, waiting for its bytes');
     const s3b = S.xpraInputSieve();
-    ok(s3b.strip(hdr(16 * MiB + 1), true).oversize, '16 MiB + 1 is oversize');
+    ok(verdictOf(s3b.strip(hdr(16 * MiB + 1), true).oversize), '16 MiB + 1 is oversize');
     const s4 = S.xpraInputSieve({ maxPacket: 1024 });
     const raw = Buffer.concat([hdr(1000, 1), Buffer.alloc(1000)]);
     const g1 = s4.strip(raw, true);
     ok(!g1.oversize && s4.state().group === 1, 'a raw chunk (index 1) waits for its main packet');
     const g2 = s4.strip(Buffer.concat([hdr(1000), Buffer.alloc(100)]), true);
-    ok(g2.oversize && /raw chunks \+ a partial packet/.test(g2.oversize.what) && s4.state().group === 0 && s4.state().pending === 0, `raw chunks + a partial packet holding more than one largest packet (1008 + 108 > 1032 at a 1024 cap) ⇒ oversize, both released`, g2.oversize);
+    ok(gateOf(g2.oversize) && gateOf(/raw chunks \+ a partial packet/.test(g2.oversize.what)) && s4.state().group === 0 && s4.state().pending === 0, `raw chunks + a partial packet holding more than one largest packet (1008 + 108 > 1032 at a 1024 cap) ⇒ oversize, both released`, g2.oversize);
     // a legitimate 16 MiB packet streamed in 64 KiB messages completes and is relayed WHOLE (held as a list, joined once)
     const s5 = S.xpraInputSieve();
     const bigPkt = rpkt('clipboard-contents', { tail: Buffer.alloc(16 * MiB - 64) });
     const t5 = Date.now(); const outs = [];
     for (let i = 0; i < bigPkt.length; i += 64 * 1024) { const x = s5.strip(bigPkt.subarray(i, i + 64 * 1024), true); if (x.relay) outs.push(x.relay); if (x.oversize) outs.push(null); }
-    ok(outs.length === 1 && outs[0] && outs[0].equals(bigPkt) && s5.state().pending === 0, `a ${bigPkt.length - 8} B packet in ${Math.ceil(bigPkt.length / 65536)} messages is relayed whole, once (${Date.now() - t5} ms)`);
+    ok(outs.length === 1 && gateOf(outs[0]) && gateOf(outs[0].equals(bigPkt)) && s5.state().pending === 0, `a ${bigPkt.length - 8} B packet in ${Math.ceil(bigPkt.length / 65536)} messages is relayed whole, once (${Date.now() - t5} ms)`);
     // RFB: ClientCutText declares its own length (u32; negative = the extended clipboard)
     const hsR = [Buffer.from('RFB 003.008\n'), Buffer.from([1]), Buffer.from([1])];
     const cut = (n) => { const b = Buffer.alloc(8); b[0] = 6; b.writeInt32BE(n, 4); return b; };
     const rs = S.rfbInputSieve(); for (const x of hsR) rs.feed(x);
     const c1 = rs.strip(Buffer.concat([Buffer.from([3, 1, 0, 0, 0, 0, 0x04, 0x00, 0x03, 0x00]), cut(2 ** 31 - 1), Buffer.alloc(100)]), true);
-    ok(c1.oversize && c1.oversize.declared === 2 ** 31 - 1 && c1.oversize.what === 'ClientCutText' && c1.relay && c1.relay.length === 10 && rs.state().pending === 0, 'rfb: a ClientCutText DECLARING 2 GiB is oversize in its own chunk; the FramebufferUpdateRequest before it relayed, nothing held', c1.oversize);
+    ok(gateOf(c1.oversize) && c1.oversize.declared === 2 ** 31 - 1 && c1.oversize.what === 'ClientCutText' && gateOf(c1.relay) && c1.relay.length === 10 && rs.state().pending === 0, 'rfb: a ClientCutText DECLARING 2 GiB is oversize in its own chunk; the FramebufferUpdateRequest before it relayed, nothing held', c1.oversize);
     ok(rs.feed(Buffer.alloc(MiB)) === 0 && rs.state().pending === 0, 'rfb: after it nothing is held');
     const rx = S.rfbInputSieve(); for (const x of hsR) rx.feed(x);
-    ok(rx.strip(cut(-(2 ** 31)), true).oversize, 'rfb: the extended clipboard\'s negative length is judged by its magnitude (2^31 ⇒ oversize)');
+    ok(verdictOf(rx.strip(cut(-(2 ** 31)), true).oversize), 'rfb: the extended clipboard\'s negative length is judged by its magnitude (2^31 ⇒ oversize)');
     const ry = S.rfbInputSieve(); for (const x of hsR) ry.feed(x);
     const txt = Buffer.concat([cut(MiB), Buffer.alloc(MiB, 0x61)]); let yIn = 0, yRel = 0;
     for (let i = 0; i < txt.length; i += 64 * 1024) { const x = ry.strip(txt.subarray(i, i + 64 * 1024), true); yIn += x.inputs; if (x.relay) yRel += x.relay.length; if (x.oversize) yIn = -99; }
@@ -666,7 +666,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   const b = S.xpraInputSieve();
   ok(b.feed(bpkt('key-action')) === 1 && b.feed(bpkt('ping')) === 0 && b.feed(bpkt('clipboard-contents')) === 1, 'a bencode client (flags 0) is read the same way');
   ok(S.xpraPacketType(Buffer.concat([Buffer.from([192 + 1]), Buffer.from('70:'), Buffer.alloc(70, 0x61)])) === 'a'.repeat(70) && S.xpraPacketType(Buffer.from([192 + 1, 128 + 3])) === null && S.xpraPacketType(Buffer.from([1, 2, 3])) === null, 'xpraPacketType: the long-string spelling (length:bytes), a truncated string ⇒ null, a non-list ⇒ null');
-  ok(same(S.xpraStrings(Buffer.concat([Buffer.from([192 + 3, 128 + 10]), Buffer.from('disconnect'), Buffer.from([128 + 16]), Buffer.from('connection error'), Buffer.from([128 + 5]), Buffer.from('oops!')])), ['disconnect', 'connection error', 'oops!']), 'xpraStrings reads the leading strings of a list — the words a `disconnect` carries, so the close line can NAME why xpra hung up');
+  ok(verdictOf(same(S.xpraStrings(Buffer.concat([Buffer.from([192 + 3, 128 + 10]), Buffer.from('disconnect'), Buffer.from([128 + 16]), Buffer.from('connection error'), Buffer.from([128 + 5]), Buffer.from('oops!')])), ['disconnect', 'connection error', 'oops!'])), 'xpraStrings reads the leading strings of a list — the words a `disconnect` carries, so the close line can NAME why xpra hung up');
   for (const t of S.XPRA_INPUT_TYPES) ok(S.xpraInputSieve().feed(rpkt(t)) === 1, `input type ${t} counts`);
   // the client's OWN vocabulary (xpra-html5's Constants.js on this box; SKIP with the reason elsewhere): every
   // type we count that the html5 client can emit is spelled there — a renamed packet would silently stop counting
@@ -676,11 +676,11 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const txt = fs.readFileSync(consts, 'utf8');
     const spelled = new Set([...txt.matchAll(/:"([a-z_-]+)"/g)].map((m) => m[1]));
     const ours = [...S.XPRA_INPUT_TYPES].filter((t) => spelled.has(t));
-    ok(ours.length >= 6 && ['key-action', 'button-action', 'pointer-position', 'wheel-motion', 'clipboard-token', 'clipboard-contents'].every((t) => spelled.has(t)), `the installed html5 client spells ${ours.length} of our input types (${ours.join(', ')}) — key/button/pointer/wheel/clipboard all present`, [...spelled].filter((x) => /key|pointer|button|wheel|clip/.test(x)));
-    for (const notInput of ['ping', 'ping_echo', 'damage-sequence', 'buffer-refresh', 'hello', 'connection-data', 'configure-window']) ok(spelled.has(notInput) && !S.XPRA_INPUT_TYPES.has(notInput), `${notInput} is a client packet and NOT input`);
+    ok(ours.length >= 6 && verdictOf(['key-action', 'button-action', 'pointer-position', 'wheel-motion', 'clipboard-token', 'clipboard-contents'].every((t) => spelled.has(t))), `the installed html5 client spells ${ours.length} of our input types (${ours.join(', ')}) — key/button/pointer/wheel/clipboard all present`, [...spelled].filter((x) => /key|pointer|button|wheel|clip/.test(x)));
+    for (const notInput of ['ping', 'ping_echo', 'damage-sequence', 'buffer-refresh', 'hello', 'connection-data', 'configure-window']) ok(gateOf(spelled.has(notInput)) && !S.XPRA_INPUT_TYPES.has(notInput), `${notInput} is a client packet and NOT input`);
   }
   // netem: the parser and the queue (dev-only, env-gated at the bridge)
-  ok(same(S.parseNetem('rtt:200,kbps:1000'), { rttMs: 200, kbps: 1000 }) && same(S.parseNetem('kbps:500'), { rttMs: 0, kbps: 500 }) && same(S.parseNetem('RTT:50'), { rttMs: 50, kbps: 0 }) && S.parseNetem('off') === null && S.parseNetem('') === null && S.parseNetem('garbage') === null && S.parseNetem('rtt:0') === null, 'parseNetem: rtt/kbps in any order, off/empty/garbage/zero ⇒ null');
+  ok(gateOf(same(S.parseNetem('rtt:200,kbps:1000'), { rttMs: 200, kbps: 1000 })) && gateOf(same(S.parseNetem('kbps:500'), { rttMs: 0, kbps: 500 })) && gateOf(same(S.parseNetem('RTT:50'), { rttMs: 50, kbps: 0 })) && S.parseNetem('off') === null && S.parseNetem('') === null && S.parseNetem('garbage') === null && S.parseNetem('rtt:0') === null, 'parseNetem: rtt/kbps in any order, off/empty/garbage/zero ⇒ null');
   ok(S.netemOfUrl('/api/desktop/x/stream?viewer=a&netem=rtt:200') === 'rtt:200' && S.netemOfUrl('/api/desktop/x/stream') === null, 'netemOfUrl reads the upgrade url\'s own knob');
   await new Promise((resolve) => {
     const t0 = Date.now(); const got = [];
@@ -693,56 +693,56 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
       // against a's ACTUAL arrival, which a late timer moves (ci/int378-r2 attempt 1, load 7.5: a at 37, b at 91 ⇒ «b ≥ a + 55» 1 ms short)
       const onSchedule = (g) => g[0][1] >= 28 && g[1][1] >= 88 && g[2][1] >= g[1][1];
       const fromArrival = (g) => g[0][1] >= 28 && g[1][1] >= g[0][1] + 55 && g[2][1] >= g[1][1];   // the old yardstick, kept for its control
-      ok(onSchedule(got), `each message waits rtt/2 (a at ${got[0][1]} ms ≥ 30) and a 60 kB message lands only after its own airtime at 8 Mbps on the queue's schedule (b at ${got[1][1]} ms ≥ 90; c follows b)`, got);
+      ok(verdictOf(onSchedule(got)), `each message waits rtt/2 (a at ${got[0][1]} ms ≥ 30) and a 60 kB message lands only after its own airtime at 8 Mbps on the queue's schedule (b at ${got[1][1]} ms ≥ 90; c follows b)`, got);
       const lateTimer = [['a', 37], ['b', 91], ['c', 91]], noAirtime = [['a', 31], ['b', 33], ['c', 33]];
-      ok(!fromArrival(lateTimer) && onSchedule(lateTimer) && !onSchedule(noAirtime), 'the yardstick is the schedule: a late first timer (a 37 / b 91, the runner at load 7.5) reds the old «b ≥ a + 55» by name and holds here; a queue that skipped b\'s airtime (b at 33) reds here', { lateTimer, noAirtime });
+      ok(!fromArrival(lateTimer) && gateOf(onSchedule(lateTimer)) && !onSchedule(noAirtime), 'the yardstick is the schedule: a late first timer (a 37 / b 91, the runner at load 7.5) reds the old «b ≥ a + 55» by name and holds here; a queue that skipped b\'s airtime (b at 33) reds here', { lateTimer, noAirtime });
       const q2 = S.netemQueue({ rttMs: 40 }); let fired = false; q2.send(1, () => { fired = true; }); q2.stop();
       setTimeout(() => { ok(!fired, 'stop() drops what is still queued (a closed bridge sends nothing late)'); resolve(); }, 60);
     }, 160);
   });
   // the bridge refuses NOTHING by rung any more: an xpra target is relayed (the keeper suite drives it against a fake upstream + the real xpra)
   const src = read('src/server/desktop-stream.js');
-  ok(!/501, 'xpra stream not wired/.test(src) && /bridgeXpra\(a\.ws, a\.id, a\.port, a\.viewerId, a\.netem, a\.req\)/.test(read('src/server/stream-relay-xpra.js')) && /bridges\[target\.kind\]\(\{ ws, id, port, viewerId, netem, req, signIn: target\.signIn \|\| null \}\)/.test(src) /* lane desktop-vnc-remember: + the target's remembered sign-in */ && /const ep = streamEndpointFor\(target\)/.test(src), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra (lane C2: at the port streamEndpointFor answered — this machine\'s own, or the hub forward of a paired one)');
-  ok(/netemEnabled \? /.test(src) && !/parseNetem\(q\)/.test(src.replace(/netemEnabled\) \{ const q = netemOfUrl[^\n]*/, '')), 'netem is read ONLY behind the netemEnabled gate (never on by default)');
-  ok(/VIBESPACE_DESKTOP_NETEM === '1'/.test(read('server.js')), 'server.js flips the gate from VIBESPACE_DESKTOP_NETEM=1 and nothing else');
+  ok(!/501, 'xpra stream not wired/.test(src) && gateOf(/bridgeXpra\(a\.ws, a\.id, a\.port, a\.viewerId, a\.netem, a\.req\)/.test(read('src/server/stream-relay-xpra.js'))) && gateOf(/bridges\[target\.kind\]\(\{ ws, id, port, viewerId, netem, req, signIn: target\.signIn \|\| null \}\)/.test(src)) /* lane desktop-vnc-remember: + the target's remembered sign-in */ && verdictOf(/const ep = streamEndpointFor\(target\)/.test(src)), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra (lane C2: at the port streamEndpointFor answered — this machine\'s own, or the hub forward of a paired one)');
+  ok(gateOf(/netemEnabled \? /.test(src)) && !/parseNetem\(q\)/.test(src.replace(/netemEnabled\) \{ const q = netemOfUrl[^\n]*/, '')), 'netem is read ONLY behind the netemEnabled gate (never on by default)');
+  ok(verdictOf(/VIBESPACE_DESKTOP_NETEM === '1'/.test(read('server.js'))), 'server.js flips the gate from VIBESPACE_DESKTOP_NETEM=1 and nothing else');
 }
 
 console.log('§9 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: the fit policy column + the PURE fit plan');
 {
   // the policy: a CAPABILITY of the (rung, via) pair, from the table — never a backend-id switch anywhere else
-  ok(same(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvnc' }), { mode: 'follows', by: 'keeper' }), 'vnc-display via Xvnc: the display FOLLOWS (SetDesktopSize) and the keeper fits');
-  ok(same(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvfb+x11vnc' }), { mode: 'fixed', by: 'keeper' }), 'vnc-display via Xvfb+x11vnc: the display is FIXED, the keeper still fits the app to it');
-  ok(same(M.fitPolicyOf({ backend: 'xpra', via: 'xpra' }), { mode: 'client', by: 'client' }), 'xpra: the CLIENT fits (x2) — the keeper never touches an xpra display');
-  ok(same(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'Xtigervnc' }), { mode: 'shared', by: null }) && same(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'desktop-singleton:running' }), { mode: 'shared', by: null }), 'the shared desktop: never fitted (its own WM, the user\'s other windows)');
+  ok(verdictOf(same(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvnc' }), { mode: 'follows', by: 'keeper' })), 'vnc-display via Xvnc: the display FOLLOWS (SetDesktopSize) and the keeper fits');
+  ok(verdictOf(same(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvfb+x11vnc' }), { mode: 'fixed', by: 'keeper' })), 'vnc-display via Xvfb+x11vnc: the display is FIXED, the keeper still fits the app to it');
+  ok(verdictOf(same(M.fitPolicyOf({ backend: 'xpra', via: 'xpra' }), { mode: 'client', by: 'client' })), 'xpra: the CLIENT fits (x2) — the keeper never touches an xpra display');
+  ok(gateOf(same(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'Xtigervnc' }), { mode: 'shared', by: null })) && verdictOf(same(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'desktop-singleton:running' }), { mode: 'shared', by: null })), 'the shared desktop: never fitted (its own WM, the user\'s other windows)');
   ok(M.fitPolicyOf({ backend: 'vnc-display', via: null }) === null && M.fitPolicyOf({ backend: 'nope', via: 'Xvnc' }) === null && M.fitPolicyOf(null) === null && M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvnc' }, [{ id: 'vnc-display', stream: 'rfb' }]) === null, 'an older record without a via / an unknown rung / a table row without a fit column ⇒ null: no fit, no claim');
-  ok(M.keeperFits(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvnc' })) && M.keeperFits(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvfb+x11vnc' })) && !M.keeperFits(M.fitPolicyOf({ backend: 'xpra', via: 'xpra' })) && !M.keeperFits(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'Xvnc' })) && !M.keeperFits(null), 'keeperFits = exactly the two vnc-display spellings');
-  for (const b of M.DISPLAY_BACKENDS) ok(b.fit && Object.keys(b.recipes).every((via) => typeof b.fit[via] === 'string'), `${b.id}: every via that has a recipe has a fit verdict (${Object.entries(b.fit).map(([k, v]) => `${k}→${v}`).join(', ')})`);
+  ok(gateOf(M.keeperFits(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvnc' }))) && gateOf(M.keeperFits(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvfb+x11vnc' }))) && !M.keeperFits(M.fitPolicyOf({ backend: 'xpra', via: 'xpra' })) && !M.keeperFits(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'Xvnc' })) && !M.keeperFits(null), 'keeperFits = exactly the two vnc-display spellings');
+  for (const b of M.DISPLAY_BACKENDS) ok(gateOf(b.fit) && verdictOf(Object.keys(b.recipes).every((via) => typeof b.fit[via] === 'string')), `${b.id}: every via that has a recipe has a fit verdict (${Object.entries(b.fit).map(([k, v]) => `${k}→${v}`).join(', ')})`);
   // the plan
   const fb = { w: 1280, h: 800 };
   const main = { id: 5, depth: 1, mapped: true, w: 484, h: 316, x: 0, y: 0, cls: 'XTerm', instance: 'xterm', name: 'xterm' };
   const child = { id: 6, depth: 2, mapped: true, w: 484, h: 316, x: 1, y: 1, cls: null, instance: null, name: null };
   const leader = { id: 7, depth: 1, mapped: true, w: 1, h: 1, x: 0, y: 0, cls: 'XTerm', instance: 'xterm', name: null };
   const p1 = M.appFitPlan([main, child, leader], fb);
-  ok(p1.main && p1.main.id === 5 && same(p1.resize, { id: 5, w: 1280, h: 800 }) && p1.moves.length === 0 && !p1.settled, 'the largest CLASSED top-level is the main: moved to 0,0 and resized to the framebuffer; the depth-2 child and the 1x1 leader are never candidates');
+  ok(gateOf(p1.main) && p1.main.id === 5 && gateOf(same(p1.resize, { id: 5, w: 1280, h: 800 })) && p1.moves.length === 0 && !p1.settled, 'the largest CLASSED top-level is the main: moved to 0,0 and resized to the framebuffer; the depth-2 child and the 1x1 leader are never candidates');
   ok(M.topLevelWindows([main, child, leader, { id: 8, depth: 1, mapped: false, w: 300, h: 300 }]).map((w) => w.id).join(',') === '5', 'topLevelWindows = depth 1, mapped (or unknown), larger than 1x1');
   const fitted = { ...main, w: 1280, h: 800 };
   const p2 = M.appFitPlan([fitted, child], fb);
-  ok(p2.main && p2.main.id === 5 && p2.resize === null && p2.settled, 'a main already at 0,0 × the framebuffer is SETTLED — nothing to do (the tick belt must not touch it)');
+  ok(gateOf(p2.main) && p2.main.id === 5 && p2.resize === null && verdictOf(p2.settled), 'a main already at 0,0 × the framebuffer is SETTLED — nothing to do (the tick belt must not touch it)');
   const bigDialog = { id: 9, depth: 1, mapped: true, w: 1300, h: 200, x: 10, y: 10, cls: 'XTerm', name: 'dialog' }; // 260,000 px² > the unfitted main's 152,944
   const p3 = M.appFitPlan([main, bigDialog], fb, { applied: { wid: 5 } });
-  ok(p3.main.id === 5 && same(p3.resize, { id: 5, w: 1280, h: 800 }) && same(p3.moves, [{ id: 9, x: 0, y: 10 }]), 'STABILITY: the applied main stays the main even when a LARGER top-level appears (it is re-fitted); a dialog wider than the framebuffer goes to x 0 (never resized), its y kept');
+  ok(p3.main.id === 5 && gateOf(same(p3.resize, { id: 5, w: 1280, h: 800 })) && verdictOf(same(p3.moves, [{ id: 9, x: 0, y: 10 }])), 'STABILITY: the applied main stays the main even when a LARGER top-level appears (it is re-fitted); a dialog wider than the framebuffer goes to x 0 (never resized), its y kept');
   const p3b = M.appFitPlan([main, bigDialog], fb);
   ok(p3b.main.id === 9, 'CONTROL: without an applied wid the larger one would be picked (why the plan carries the applied main)');
   ok(M.appFitPlan([fitted, bigDialog], fb).main.id === 5, 'and once fitted the main IS the largest — the applied wid only matters before the first act');
   const dlg = { id: 10, depth: 1, mapped: true, w: 300, h: 200, x: 1200, y: 700, cls: 'Gtk', name: 'Open' };
   const p4 = M.appFitPlan([fitted, dlg], fb, { applied: { wid: 5 } });
-  ok(same(p4.moves, [{ id: 10, x: 980, y: 600 }]) && p4.resize === null && !p4.settled, 'a dialog overflowing the framebuffer is NUDGED inside (x/y clamped to fb − size), its size untouched');
+  ok(gateOf(same(p4.moves, [{ id: 10, x: 980, y: 600 }])) && p4.resize === null && !p4.settled, 'a dialog overflowing the framebuffer is NUDGED inside (x/y clamped to fb − size), its size untouched');
   const inside = { ...dlg, x: 100, y: 100 };
-  ok(M.appFitPlan([fitted, inside], fb, { applied: { wid: 5 } }).settled, 'a dialog already inside is left where the app put it');
+  ok(verdictOf(M.appFitPlan([fitted, inside], fb, { applied: { wid: 5 } }).settled), 'a dialog already inside is left where the app put it');
   ok(M.appFitPlan([fitted, { ...dlg, x: -20, y: -5 }], fb, { applied: { wid: 5 } }).moves[0].x === 0 && M.appFitPlan([fitted, { ...dlg, x: -20, y: -5 }], fb, { applied: { wid: 5 } }).moves[0].y === 0, 'a negative origin is clamped to 0');
   const p5 = M.appFitPlan([main, child], { w: 900, h: 600 }, { applied: { wid: 5 } });
-  ok(same(p5.resize, { id: 5, w: 900, h: 600 }), 'a framebuffer that shrank ⇒ the main is re-fitted to the NEW size (the follow)');
-  ok(M.appFitPlan([], fb).main === null && /no top-level/.test(M.appFitPlan([], fb).why) && M.appFitPlan([main], null).main === null && /no framebuffer/.test(M.appFitPlan([main], { w: 0, h: 0 }).why), 'no window / no framebuffer ⇒ main null with the reason (the keeper keeps asking, bounded)');
+  ok(verdictOf(same(p5.resize, { id: 5, w: 900, h: 600 })), 'a framebuffer that shrank ⇒ the main is re-fitted to the NEW size (the follow)');
+  ok(M.appFitPlan([], fb).main === null && gateOf(/no top-level/.test(M.appFitPlan([], fb).why)) && M.appFitPlan([main], null).main === null && verdictOf(/no framebuffer/.test(M.appFitPlan([main], { w: 0, h: 0 }).why)), 'no window / no framebuffer ⇒ main null with the reason (the keeper keeps asking, bounded)');
   const unnamed = { id: 11, depth: 1, mapped: true, w: 200, h: 200, x: 5, y: 5, cls: null, instance: null, name: null };
   ok(M.appFitPlan([unnamed], fb).main.id === 11, 'a display whose only top-level is class-less still gets it as the main (better than nothing on screen)');
   ok(M.appFitPlan([{ id: 12, mapped: true, w: 200, h: 100, x: 0, y: 0, cls: 'A' }], fb).main.id === 12, 'rows WITHOUT a depth (the pre-x4 enumeration shape) are taken as top-levels');
@@ -756,36 +756,36 @@ console.log('§9 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: the
   const helper = { id: 33, depth: 1, mapped: true, w: 5, h: 5, x: -1000, y: -1000, cls: 'Xfwm4', instance: 'xfwm4', name: 'Xfwm4' };
   const menu = { id: 34, depth: 1, mapped: true, w: 200, h: 300, x: 1200, y: 700, cls: 'XTerm', instance: 'xterm', name: null };
   const wmPlan = M.appFitPlan([frame, client, deco, helper, menu], fb);
-  ok(same(M.appWindows([frame, client, deco, helper, menu]).map((w) => [w.id, w.frame && w.frame.id]), [[31, 30]]), 'appWindows: the frame\'s shallowest CLASSED descendant is the app window (with its frame); once a frame is seen, depth-1 classed rows (the WM\'s helper, an override-redirect menu) are not the app\'s');
-  ok(wmPlan.main.id === 31 && wmPlan.main.name === 'xv-wm-title' && same(wmPlan.resize, { id: 31, w: 1270, h: 766, framed: true }) && wmPlan.moves.length === 0, 'the main is the CLIENT (its own name → the title), the act names the client with the size that makes its FRAME the framebuffer; the helper and the menu are never moved', wmPlan);
-  ok(M.appFitPlan([{ ...frame, x: 0, y: 0, w: 1280, h: 800 }, { ...client, x: 0, y: 24, w: 1280, h: 776 }], fb).settled, 'a frame at 0,0 × the framebuffer (the WM maximised the client under its title bar) is SETTLED');
+  ok(verdictOf(same(M.appWindows([frame, client, deco, helper, menu]).map((w) => [w.id, w.frame && w.frame.id]), [[31, 30]])), 'appWindows: the frame\'s shallowest CLASSED descendant is the app window (with its frame); once a frame is seen, depth-1 classed rows (the WM\'s helper, an override-redirect menu) are not the app\'s');
+  ok(wmPlan.main.id === 31 && wmPlan.main.name === 'xv-wm-title' && gateOf(same(wmPlan.resize, { id: 31, w: 1270, h: 766, framed: true })) && wmPlan.moves.length === 0, 'the main is the CLIENT (its own name → the title), the act names the client with the size that makes its FRAME the framebuffer; the helper and the menu are never moved', wmPlan);
+  ok(verdictOf(M.appFitPlan([{ ...frame, x: 0, y: 0, w: 1280, h: 800 }, { ...client, x: 0, y: 24, w: 1280, h: 776 }], fb).settled), 'a frame at 0,0 × the framebuffer (the WM maximised the client under its title bar) is SETTLED');
   const frame2 = { id: 40, depth: 1, mapped: true, w: 310, h: 230, x: 2000, y: 1500, cls: null, instance: null, name: null };
   const client2 = { id: 41, depth: 2, mapped: true, w: 300, h: 200, x: 2005, y: 1529, cls: 'Zenity', instance: 'zenity', name: 'Info' };
   const p6 = M.appFitPlan([{ ...frame, x: 0, y: 0, w: 1280, h: 800 }, { ...client, x: 0, y: 24, w: 1280, h: 776 }, frame2, client2], fb, { applied: { wid: 31 } });
-  ok(same(p6.moves, [{ id: 41, x: 970, y: 570 }]) && p6.resize === null, 'a second framed window off the framebuffer: the move names its CLIENT and the corner that puts its FRAME inside (1280−310, 800−230)', p6.moves);
+  ok(gateOf(same(p6.moves, [{ id: 41, x: 970, y: 570 }])) && p6.resize === null, 'a second framed window off the framebuffer: the move names its CLIENT and the corner that puts its FRAME inside (1280−310, 800−230)', p6.moves);
   ok(M.appWindows([frame, { ...client, mapped: false }]).length === 0 && M.appFitPlan([frame, { ...client, mapped: false }], fb).main === null, 'a frame whose client is not viewable (iconified) holds no app window');
   ok(M.appWindows([main, child, leader]).length === 1 && M.appWindows([main, child, leader])[0].frame === null, 'CONTROL: bare X (a classed top-level with an unnamed child) is NOT a frame — the pre-WM rule is unchanged');
   // the keeper's records are FACTS: newRecord carries no fb/fit; the VIEW lays fitMode over
   ok(!('fb' in M.newRecord({ id: 'x', label: 'x', exec: 'x', args: [], cwd: null, env: null, source: 'adhoc', backend: 'vnc-display', via: 'Xvnc', fallbackWhy: null, idleTimeoutMs: 0, now: 1 })), 'a new record carries no fb/fit — the keeper writes them as measured facts');
   // the chip (client PURE helper): fixed names the geometry + the group's X server; follows/client/none print nothing
   const win = read('src/lib/desktop-app-window.js');
-  ok(/export function fitChipText\(rec\)/.test(win) && /rec\.fitMode !== 'fixed'\) return ''/.test(win) && /desktop-app-chip-fit/.test(win) && /install tigervnc for a window that follows/.test(win), 'desktop-app-window.js exports fitChipText: only a FIXED display prints, naming the geometry and the group\'s X server, with the tigervnc remedy');
+  ok(gateOf(/export function fitChipText\(rec\)/.test(win)) && gateOf(/rec\.fitMode !== 'fixed'\) return ''/.test(win)) && gateOf(/desktop-app-chip-fit/.test(win)) && verdictOf(/install tigervnc for a window that follows/.test(win)), 'desktop-app-window.js exports fitChipText: only a FIXED display prints, naming the geometry and the group\'s X server, with the tigervnc remedy');
   // the app's OWN title on a keeper-fitted rung (x4): X's name, cleaned; null ⇒ the window keeps the label
   ok(M.windowTitleOf('Calculator') === 'Calculator' && M.windowTitleOf('计算器 "x" \\ é') === '计算器 "x" \\ é' && M.windowTitleOf('vs-fit "q" <b>x</b>') === 'vs-fit "q" <b>x</b>', 'windowTitleOf keeps a title VERBATIM (quotes, backslashes, CJK, angle brackets — escaping is the page\'s job, textContent)');
   ok(M.windowTitleOf('  a\tb\u0007c\u009b\n ') === 'abc' && M.windowTitleOf('\u0000\u0001') === null && M.windowTitleOf('') === null && M.windowTitleOf(null) === null && M.windowTitleOf(42) === null, 'control characters (C0, DEL, C1) are dropped and the rest trimmed; nothing left / not a string ⇒ null (the label stays)');
   const longT = M.windowTitleOf('中'.repeat(250) + '😀');
   ok(Array.from(longT).length === M.APP_TITLE_MAX && M.APP_TITLE_MAX === 200 && M.windowTitleOf('a'.repeat(199) + '😀') === 'a'.repeat(199) + '😀', `capped at APP_TITLE_MAX (${M.APP_TITLE_MAX}) CODE POINTS — a surrogate pair is never split`);
-  ok(/const title = M\.windowTitleOf\(plan\.main\.name\)/.test(keeperSrc()) && /rec\.appTitle = title/.test(keeperSrc()) && /appTitle \|\| \(rec && rec\.appTitle\)\) \|\| \(rec && rec\.label\)/.test(read('src/lib/desktop-app-window.js')) && /const label = titleText\(\);/.test(read('src/lib/desktop-app-window.js')), 'WIRING PIN: the keeper records the fitted main\'s title as `appTitle` and the window shows it before the label (titleText — the title bar and the blocked overlay read the same name)');
+  ok(gateOf(/const title = M\.windowTitleOf\(plan\.main\.name\)/.test(keeperSrc())) && gateOf(/rec\.appTitle = title/.test(keeperSrc())) && gateOf(/appTitle \|\| \(rec && rec\.appTitle\)\) \|\| \(rec && rec\.label\)/.test(read('src/lib/desktop-app-window.js'))) && verdictOf(/const label = titleText\(\);/.test(read('src/lib/desktop-app-window.js'))), 'WIRING PIN: the keeper records the fitted main\'s title as `appTitle` and the window shows it before the label (titleText — the title bar and the blocked overlay read the same name)');
   { const one = (p2) => M.appMainWindow(p2); const rows = [{ id: 1, name: 'Xpra-CorralWindow-0x5', cls: null, instance: null, w: 640, h: 472, depth: 1 }, { id: 5, name: 'app "t"', cls: 'XTerm', instance: 'xterm', w: 640, h: 472, depth: 2 }];
     const seam = rows.filter((w) => !/^Xpra/.test(w.name));
     ok(M.appMainWindow(seam, { seamless: true })?.id === 5 && one(seam) === null, 'appMainWindow({seamless}) picks the app among xpra\'s seamless rows (depth 2, its Corral parent dropped) — CONTROL: the frame grouping (seamless off) drops that orphaned row and finds nothing'); }
-  ok(/onDesktopSize: \(id, w, h\) => keeper\.noteDesktopSize/.test(read('src/server/window-live-wiring.js')) && /noteDesktopSize\(id, w, h\)/.test(keeperSrc()), 'WIRING PIN: the bridge\'s SetDesktopSize report reaches keeper.noteDesktopSize through the desktop scene\'s wiring (the 2.331.0 dead-fix lesson)');
-  ok(/^\s*keeper\.setWatchProbe\?\.\(\(id\) => stream\.connections\(id\) > 0\);/m.test(read('src/server/window-live-wiring.js')) && /beltDue\(rec\.id, fitState\(rec\.id\), t\)/.test(keeperSrc()), 'WIRING PIN: the fit belt\'s "somebody watches" fact is the bridge\'s open-socket count, wired as CODE at the start of a line (never text after a mid-line //)');
+  ok(gateOf(/onDesktopSize: \(id, w, h\) => keeper\.noteDesktopSize/.test(read('src/server/window-live-wiring.js'))) && verdictOf(/noteDesktopSize\(id, w, h\)/.test(keeperSrc())), 'WIRING PIN: the bridge\'s SetDesktopSize report reaches keeper.noteDesktopSize through the desktop scene\'s wiring (the 2.331.0 dead-fix lesson)');
+  ok(gateOf(/^\s*keeper\.setWatchProbe\?\.\(\(id\) => stream\.connections\(id\) > 0\);/m.test(read('src/server/window-live-wiring.js'))) && verdictOf(/beltDue\(rec\.id, fitState\(rec\.id\), t\)/.test(keeperSrc())), 'WIRING PIN: the fit belt\'s "somebody watches" fact is the bridge\'s open-socket count, wired as CODE at the start of a line (never text after a mid-line //)');
 }
 
 console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the app scale, its knobs, the launch dpr');
 {
-  ok(same(M.APP_SCALES, [1, 1.5, 2]) && Object.isFrozen(M.APP_SCALES), 'the scales the setting offers: 1, 1.5, 2');
+  ok(gateOf(same(M.APP_SCALES, [1, 1.5, 2])) && verdictOf(Object.isFrozen(M.APP_SCALES)), 'the scales the setting offers: 1, 1.5, 2');
   ok(M.appScaleFor('auto', 2) === 2 && M.appScaleFor(undefined, 2) === 2 && M.appScaleFor('', 1) === 1 && M.appScaleFor(null, 1.5) === 2, 'auto (also unset — the setting\'s default) follows the launching client\'s devicePixelRatio');
   // r2 (the verifier, measured): 1.5× is TEXT ONLY in GTK (no fractional GDK_SCALE on X11 — the calculator's minimum 370x616 device px
   // at 1.5× vs 720x1232 at 2×), so on a DPR-1.5 screen its keys drew at 0.67× their 1×-screen size. auto never picks the fraction:
@@ -794,7 +794,7 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   // that bit — a screen of 1.5 or more never gets the text-only 1.5, it gets 2
   const AUTO = [[1, 1], [1.2, 1.2], [1.25, 1.25], [1.49, 2], [1.5, 2], [1.75, 2], [2, 2], [3, 3], [0.5, 1], ['x', 1]];
   const autoGot = AUTO.map(([d]) => M.appScaleFor('auto', d));
-  ok(same(autoGot, AUTO.map(([, w]) => w)) && [1.5, 1.75].every((d) => M.scaleKnobs(M.appScaleFor('auto', d)).gdkScale === 2 && M.scaleKnobs(M.appScaleFor('auto', d)).pictureScale === 1), `auto on a screen of 1.5 or more is the whole 2 (drawn 1:1, never resampled) (${AUTO.map(([d], i) => `${d} ⇒ ${autoGot[i]}`).join(', ')})`);
+  ok(gateOf(same(autoGot, AUTO.map(([, w]) => w))) && verdictOf([1.5, 1.75].every((d) => M.scaleKnobs(M.appScaleFor('auto', d)).gdkScale === 2 && M.scaleKnobs(M.appScaleFor('auto', d)).pictureScale === 1)), `auto on a screen of 1.5 or more is the whole 2 (drawn 1:1, never resampled) (${AUTO.map(([d], i) => `${d} ⇒ ${autoGot[i]}`).join(', ')})`);
   const preFixAuto = (d) => Math.min(2, Math.max(1, Math.round(M.normalizeDpr(d) * 2) / 2)); // the shipped-then-refuted rule: the nearest 0.5
   ok(!same(AUTO.map(([d]) => preFixAuto(d)), AUTO.map(([, w]) => w)) && preFixAuto(1.5) === 1.5 && preFixAuto(1.25) === 1.5, 'CONTROL: the pre-fix rule (the nearest 0.5) fails that table — it picks 1.5 on a 1.25 and a 1.5 screen');
   ok(M.appScaleFor('1', 2) === 1 && M.appScaleFor('1.5', 1) === 1.5 && M.appScaleFor(2, 1) === 2 && M.appScaleFor('3', 1) === 3 && M.appScaleFor('1.25', 2) === 1 && M.appScaleFor('4', 1) === 1, 'an explicit scale wins over the DPR (as a string — the enum\'s values — or a number; lane D: every EXPLICIT_SCALES value, 3 included); an unknown value ⇒ 1');
@@ -804,34 +804,34 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   ok(k2.pictureScale === 1 && k1.pictureScale === 1 && M.scaleKnobs(3).pictureScale === 1, 'lane D (a): an integer scale is drawn 1:1 (pictureScale 1 — the 2.369.158 picture, bit for bit)');
   ok(k1.dpi === 96 && k1.xresources === '' && k1.env.GDK_SCALE === '1', '1×: 96 dpi, no X resources');
   ok(!('GDK_DPI_SCALE' in k2.env) && !('GDK_DPI_SCALE' in k15.env), 'GDK_DPI_SCALE is NOT set (GTK4 ignores it — measured — and in GTK3 it would double-count the fraction already in Xft.dpi)');
-  ok(/XTerm\*faceName: Monospace\n/.test(k2.xresources) && /XTerm\*faceSize: 16\n/.test(k2.xresources) && /UXTerm\*faceSize: 16\n/.test(k2.xresources) && /XTerm\*faceSize: 16\n/.test(k15.xresources) && /XTerm\*faceSize: 8\n/.test(M.scaleKnobs(1.5, { rule: 'dpi' }).xresources), 'xterm gets an Xft face at a scale > 1 (its bitmap default no dpi reaches — measured): faceSize 8 × GDK_SCALE — 16 at 1.5 (drawn at 2, shown at 0.75), 8 under the dpi rule (the fraction through Xft.dpi)');
+  ok(gateOf(/XTerm\*faceName: Monospace\n/.test(k2.xresources)) && gateOf(/XTerm\*faceSize: 16\n/.test(k2.xresources)) && gateOf(/UXTerm\*faceSize: 16\n/.test(k2.xresources)) && gateOf(/XTerm\*faceSize: 16\n/.test(k15.xresources)) && verdictOf(/XTerm\*faceSize: 8\n/.test(M.scaleKnobs(1.5, { rule: 'dpi' }).xresources)), 'xterm gets an Xft face at a scale > 1 (its bitmap default no dpi reaches — measured): faceSize 8 × GDK_SCALE — 16 at 1.5 (drawn at 2, shown at 0.75), 8 under the dpi rule (the fraction through Xft.dpi)');
   ok(M.scaleKnobs(7).scale === 1 && M.scaleKnobs('2').scale === 2, 'scaleKnobs: out of range ⇒ 1, a string is read as its number');
   // the launch request's dpr
   const reg = M.DEFAULT_REGISTRY;
   const v1 = M.validateLaunchRequest({ appId: 'xterm', dpr: 2 }, reg), v2 = M.validateLaunchRequest({ exec: 'xterm' }, reg), v3 = M.validateLaunchRequest({ appId: 'xterm', dpr: 1.25 }, reg);
-  ok(v1.ok && v1.launch.dpr === 2 && v2.ok && v2.launch.dpr === 1 && v3.launch.dpr === 1.25, 'POST /api/desktop/apps `dpr`: carried through (2, 1.25); absent ⇒ 1');
+  ok(gateOf(v1.ok) && v1.launch.dpr === 2 && gateOf(v2.ok) && v2.launch.dpr === 1 && v3.launch.dpr === 1.25, 'POST /api/desktop/apps `dpr`: carried through (2, 1.25); absent ⇒ 1');
   const bad = [0.5, 3.5, 'x', -1, Infinity].map((d) => M.validateLaunchRequest({ appId: 'xterm', dpr: d }, reg));
-  ok(bad.every((b) => !b.ok && /dpr must be a number from 1 to 3/.test(b.error)), 'a dpr outside 1..3 (or not a number) is REFUSED by name, never silently clamped');
+  ok(verdictOf(bad.every((b) => !b.ok && /dpr must be a number from 1 to 3/.test(b.error))), 'a dpr outside 1..3 (or not a number) is REFUSED by name, never silently clamped');
   const rec = M.newRecord({ id: 'da-1', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'xpra', now: 1, scale: 2, dpi: 96 });
   const recD = M.newRecord({ id: 'da-2', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'vnc-display', now: 1 });
   ok(rec.scale === 2 && rec.dpi === 96 && recD.scale === 1 && recD.dpi === 96, 'the record carries its scale and its display\'s font dpi (fixed at launch; defaults 1 / 96)');
   const keeper = keeperSrc(), disp = read('src/desktop-display.js');
-  ok(/const rungScales = M\.capsOf\(\{ backend: backend\.id \}, backends\)\.scales;[^\n]*\n\s*const knobs = rungScales \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch — on the xpra STREAM only (a whole-display rung\'s picture is CSS px), by the row\'s rule (lane D (a)); the pick itself is §13\'s pin');
-  ok(/\.\.\.\(M\.capsOf\(rec, backends\)\.scales \? knobs\.env : \{\}\), \.\.\.portalEnv, \.\.\.\(rec\.env \|\| \{\}\)/.test(keeper) && /display\.applyXResources\(\{ binPath: f\.bins\.xrdb, env: appEnv, text: knobs\.xresources \}\)/.test(keeper), 'WIRING PIN: the app\'s env gets the knobs, then its own portal\'s bus (a row\'s own env still wins) and the X resources are merged BEFORE the app starts');
+  ok(verdictOf(/const rungScales = M\.capsOf\(\{ backend: backend\.id \}, backends\)\.scales;[^\n]*\n\s*const knobs = rungScales \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper)), 'WIRING PIN: the keeper decides the scale ONCE at launch — on the xpra STREAM only (a whole-display rung\'s picture is CSS px), by the row\'s rule (lane D (a)); the pick itself is §13\'s pin');
+  ok(gateOf(/\.\.\.\(M\.capsOf\(rec, backends\)\.scales \? knobs\.env : \{\}\), \.\.\.portalEnv, \.\.\.\(rec\.env \|\| \{\}\)/.test(keeper)) && verdictOf(/display\.applyXResources\(\{ binPath: f\.bins\.xrdb, env: appEnv, text: knobs\.xresources \}\)/.test(keeper)), 'WIRING PIN: the app\'s env gets the knobs, then its own portal\'s bus (a row\'s own env still wins) and the X resources are merged BEFORE the app starts');
   { const iWait = keeper.indexOf('display.waitForXftDpi('), iMerge = keeper.indexOf('display.applyXResources('), iApp = keeper.indexOf('display.startApp(');
-    ok(iWait > 0 && iWait < iMerge && iMerge < iApp && /if \(own && M\.capsOf\(rec, backends\)\.crispText\) \{\n\s*const xd = await display\.waitForXftDpi\(/.test(keeper), 'WIRING PIN (r2, the verifier\'s race): on its own xpra display the keeper WAITS for xpra\'s resource write (Xft.dpi) BEFORE it merges its X resources and BEFORE it starts the app — xpra replaces the database ~1 s after the display is up'); }
-  ok(/dpi: rec\.dpi \|\| 96,/.test(keeper) && /startXpra\(\{ binPath: ctx\.bins\.xpra, port, dir: ctx\.dir, env, logFd: ctx\.logFd, dpi: ctx\.dpi \}\)/.test(disp), 'WIRING PIN: the record\'s dpi reaches `xpra start --dpi` through the recipe ctx');
+    ok(iWait > 0 && iWait < iMerge && iMerge < iApp && verdictOf(/if \(own && M\.capsOf\(rec, backends\)\.crispText\) \{\n\s*const xd = await display\.waitForXftDpi\(/.test(keeper)), 'WIRING PIN (r2, the verifier\'s race): on its own xpra display the keeper WAITS for xpra\'s resource write (Xft.dpi) BEFORE it merges its X resources and BEFORE it starts the app — xpra replaces the database ~1 s after the display is up'); }
+  ok(gateOf(/dpi: rec\.dpi \|\| 96,/.test(keeper)) && verdictOf(/startXpra\(\{ binPath: ctx\.bins\.xpra, port, dir: ctx\.dir, env, logFd: ctx\.logFd, dpi: ctx\.dpi \}\)/.test(disp)), 'WIRING PIN: the record\'s dpi reaches `xpra start --dpi` through the recipe ctx');
   const schema = read('src/lib/settings-schema.js');
-  ok(/'desktop\.appScale': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: '1', [^\]]*\{ value: '1\.5', [^\]]*\{ value: '2', /.test(schema), 'the setting `desktop.appScale` (auto | 1 | 1.5 | 2, default auto) exists in the schema — only for working code');
+  ok(verdictOf(/'desktop\.appScale': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: '1', [^\]]*\{ value: '1\.5', [^\]]*\{ value: '2', /.test(schema)), 'the setting `desktop.appScale` (auto | 1 | 1.5 | 2, default auto) exists in the schema — only for working code');
 }
 
 console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pick, the argv, the URL, the profile directory');
 {
   const reg = M.DEFAULT_REGISTRY;
   const cr = reg.find((r) => r.id === 'chromium'), fx = reg.find((r) => r.id === 'firefox');
-  ok(!!cr && cr.browser === 'chromium' && cr.category === 'browser' && same(cr.execs, ['chromium', 'chromium-browser', 'google-chrome']) && M.validateAppRow(cr).ok, 'the chromium row: family chromium, execs chromium → chromium-browser → google-chrome (first on PATH), validates', cr);
-  ok(!!fx && fx.browser === 'firefox' && fx.category === 'browser' && same(fx.execs, ['firefox', 'firefox-esr']) && M.validateAppRow(fx).ok, 'the firefox row: family firefox, execs firefox → firefox-esr, validates', fx);
-  ok(same(M.BROWSER_BINS, ['chromium', 'chromium-browser', 'google-chrome', 'firefox', 'firefox-esr']) && same(D.BROWSER_BINS, M.BROWSER_BINS), 'BROWSER_BINS is the union of the families, and desktop-display probes THAT list (one spelling)');
+  ok(!!cr && cr.browser === 'chromium' && cr.category === 'browser' && gateOf(same(cr.execs, ['chromium', 'chromium-browser', 'google-chrome'])) && verdictOf(M.validateAppRow(cr).ok), 'the chromium row: family chromium, execs chromium → chromium-browser → google-chrome (first on PATH), validates', cr);
+  ok(!!fx && fx.browser === 'firefox' && fx.category === 'browser' && gateOf(same(fx.execs, ['firefox', 'firefox-esr'])) && verdictOf(M.validateAppRow(fx).ok), 'the firefox row: family firefox, execs firefox → firefox-esr, validates', fx);
+  ok(gateOf(same(M.BROWSER_BINS, ['chromium', 'chromium-browser', 'google-chrome', 'firefox', 'firefox-esr'])) && verdictOf(same(D.BROWSER_BINS, M.BROWSER_BINS)), 'BROWSER_BINS is the union of the families, and desktop-display probes THAT list (one spelling)');
   // the binary pick — first on PATH wins, every combination of the chromium family
   const names = ['chromium', 'chromium-browser', 'google-chrome'];
   let pickOk = true;
@@ -841,18 +841,18 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
     const b = M.browserRowFor(cr, bins);
     if (want ? !(b.ok && b.row.exec === want && b.row.path === `/usr/bin/${want}`) : !(b.ok === false && b.code === 'browser-absent' && /none of chromium, chromium-browser, google-chrome on PATH/.test(b.error))) { pickOk = false; console.error('    pick', mask, JSON.stringify(b)); }
   }
-  ok(pickOk, 'browserRowFor over all 8 presence combinations of the chromium family: the FIRST present name wins; none ⇒ `browser-absent` naming every candidate');
+  ok(verdictOf(pickOk), 'browserRowFor over all 8 presence combinations of the chromium family: the FIRST present name wins; none ⇒ `browser-absent` naming every candidate');
   ok(M.browserRowFor(cr, { 'google-chrome': '/usr/bin/google-chrome' }).row.label === 'Google Chrome' && M.browserRowFor(fx, { 'firefox-esr': '/usr/bin/firefox-esr' }).row.label === 'Firefox ESR' && M.browserRowFor(cr, { chromium: '/usr/bin/chromium' }).row.label === 'Chromium', 'the served label follows the binary (google-chrome ⇒ "Google Chrome", firefox-esr ⇒ "Firefox ESR")');
   ok(M.browserRowFor(reg.find((r) => r.id === 'xterm'), { xterm: '/usr/bin/xterm' }).code === 'not-a-browser', 'browserRowFor refuses a non-browser row by name');
   // the argv: the profile flags, then the URL — no automation flag, ever
   const P = '/tmp/vs-da/desktop-apps/da-1/profile';
   const ac = M.browserArgv({ ...cr, exec: 'google-chrome' }, { profileDir: P, url: 'https://example.com/a?b=1' });
-  ok(ac.ok && same(ac.argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector', 'https://example.com/a?b=1']), 'chromium argv: --user-data-dir=<the session\'s profile> --no-first-run --no-default-browser-check --password-store=basic --force-renderer-accessibility (lane E, D4: the page\'s tree for a shared browser), THEN the URL (last)', ac);
+  ok(gateOf(ac.ok) && verdictOf(same(ac.argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector', 'https://example.com/a?b=1'])), 'chromium argv: --user-data-dir=<the session\'s profile> --no-first-run --no-default-browser-check --password-store=basic --force-renderer-accessibility (lane E, D4: the page\'s tree for a shared browser), THEN the URL (last)', ac);
   // (the .197 integration: Chrome 154 — measured — registers on the AT-SPI bus only with an accessibility env beside the flag)
-  ok(M.BROWSER_A11Y_FLAG === '--force-renderer-accessibility' && same(Object.keys(ac.env || {}), ['ACCESSIBILITY_ENABLED']) && ac.env.ACCESSIBILITY_ENABLED === '1' && M.browserArgv({ browser: 'firefox', args: [] }, { profileDir: P }).env.GNOME_ACCESSIBILITY === '1' && !M.isForbiddenBrowserArg(M.BROWSER_A11Y_FLAG), 'lane E (D4): the accessibility switch — chromium the flag AND ACCESSIBILITY_ENABLED=1 (Chrome ≥ 154: the flag alone no longer registers it on AT-SPI), firefox GNOME_ACCESSIBILITY=1 in the answer\'s env — and it is no forbidden (automation) flag');
+  ok(M.BROWSER_A11Y_FLAG === '--force-renderer-accessibility' && gateOf(same(Object.keys(ac.env || {}), ['ACCESSIBILITY_ENABLED'])) && ac.env.ACCESSIBILITY_ENABLED === '1' && M.browserArgv({ browser: 'firefox', args: [] }, { profileDir: P }).env.GNOME_ACCESSIBILITY === '1' && !M.isForbiddenBrowserArg(M.BROWSER_A11Y_FLAG), 'lane E (D4): the accessibility switch — chromium the flag AND ACCESSIBILITY_ENABLED=1 (Chrome ≥ 154: the flag alone no longer registers it on AT-SPI), firefox GNOME_ACCESSIBILITY=1 in the answer\'s env — and it is no forbidden (automation) flag');
   const af = M.browserArgv(fx, { profileDir: P, url: 'http://127.0.0.1:8080/' });
-  ok(af.ok && same(af.argv, ['--new-instance', '-profile', P, 'http://127.0.0.1:8080/']), 'firefox argv: --new-instance -profile <the session\'s profile>, THEN the URL', af);
-  ok(same(M.browserArgv(cr, { profileDir: P }).argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector']), 'no URL ⇒ no URL argument (the browser opens its own start page)');
+  ok(gateOf(af.ok) && verdictOf(same(af.argv, ['--new-instance', '-profile', P, 'http://127.0.0.1:8080/'])), 'firefox argv: --new-instance -profile <the session\'s profile>, THEN the URL', af);
+  ok(verdictOf(same(M.browserArgv(cr, { profileDir: P }).argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector'])), 'no URL ⇒ no URL argument (the browser opens its own start page)');
   // B-2a93: an application window's Chrome is started WITHOUT its own outdated-build notice (the «Can't update Chrome» bubble that took
   // the person's keyboard): ONE --disable-features, the row's own list merged in (Chrome reads only the last copy of a switch), the
   // name the vendor's source makes of kOutdatedBuildDetector; firefox untouched. RED: the release's argv (the switch cut, in a copy)
@@ -861,7 +861,7 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
     const own = M.browserArgv({ ...cr, args: ['--disable-features=A,B', '--lang=fr'] }, { profileDir: P }).argv;
     const two = M.browserArgv({ ...cr, args: ['--disable-features=Old', '--disable-features=A,OutdatedBuildDetector'] }, { profileDir: P }).argv;
     const fxa = M.browserArgv({ ...fx, args: ['--disable-features=A'] }, { profileDir: P }).argv;
-    ok(M.CHROMIUM_NO_UPDATE_BUBBLE === 'OutdatedBuildDetector' && same(dfOf(own), ['--disable-features=A,B,OutdatedBuildDetector']) && own[0] === '--lang=fr' && same(dfOf(two), ['--disable-features=A,OutdatedBuildDetector']) && same(fxa.slice(0, 1), ['--disable-features=A']) && !fxa.includes('--disable-features=OutdatedBuildDetector'),
+    ok(M.CHROMIUM_NO_UPDATE_BUBBLE === 'OutdatedBuildDetector' && gateOf(same(dfOf(own), ['--disable-features=A,B,OutdatedBuildDetector'])) && own[0] === '--lang=fr' && gateOf(same(dfOf(two), ['--disable-features=A,OutdatedBuildDetector'])) && gateOf(same(fxa.slice(0, 1), ['--disable-features=A'])) && !fxa.includes('--disable-features=OutdatedBuildDetector'),
       'B-2a93: chromium starts with ONE --disable-features carrying OutdatedBuildDetector — a row\'s own list kept (its LAST copy, as Chrome reads it), the name never twice; firefox untouched', { own, two, fxa });
     const bsrc = fs.readFileSync(path.join(repo, 'src/desktop-browser-app.js'), 'utf8');
     const MR = mutantCopies('dapps-b2a93', repo);
@@ -869,35 +869,35 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
     const rel = REL.browserArgv(cr, { profileDir: P }).argv;
     ok(!rel.some((x) => /OutdatedBuildDetector/.test(x)), 'B-2a93 RED: the release\'s argv (the switch cut, in a copy) starts the app\'s Chrome WITH its outdated-build notice — the bubble that took the keyboard', rel);
   }
-  ok(same(M.browserArgv(cr, { profileDir: '/tmp/vs-da/desktop-apps/./da-1/x/../profile' }).argv[0], `--user-data-dir=${P}`), 'the profile path is normalised (`.` / `..` folded) before it reaches argv');
+  ok(verdictOf(same(M.browserArgv(cr, { profileDir: '/tmp/vs-da/desktop-apps/./da-1/x/../profile' }).argv[0], `--user-data-dir=${P}`)), 'the profile path is normalised (`.` / `..` folded) before it reaches argv');
   const AUTOMATION = /^--?(remote-debugging|enable-automation|headless|marionette|remote-allow|start-debugger-server|load-extension)/;
-  ok([ac, af].every((a) => a.argv.every((x) => !AUTOMATION.test(x))), 'no automation flag in either family\'s argv (remote-debugging / enable-automation / headless / marionette / debugger server / extensions)');
+  ok(verdictOf([ac, af].every((a) => a.argv.every((x) => !AUTOMATION.test(x)))), 'no automation flag in either family\'s argv (remote-debugging / enable-automation / headless / marionette / debugger server / extensions)');
   const forbidden = ['--remote-debugging-port=9222', '--remote-debugging-pipe', '--enable-automation', '--headless=new', '--user-data-dir=/home/u/.config/chromium', '-profile', '--marionette', '--load-extension=/x'];
-  ok(forbidden.every((f) => { const v = M.validateAppRow({ ...cr, args: [f] }); const a = M.browserArgv({ ...cr, args: [f] }, { profileDir: P }); return !v.ok && /may not carry/.test(v.error) && !a.ok && a.code === 'automation-flag'; }), 'a browser row carrying a profile or automation flag is REFUSED by name (validateAppRow AND browserArgv)');
+  ok(verdictOf(forbidden.every((f) => { const v = M.validateAppRow({ ...cr, args: [f] }); const a = M.browserArgv({ ...cr, args: [f] }, { profileDir: P }); return !v.ok && /may not carry/.test(v.error) && !a.ok && a.code === 'automation-flag'; })), 'a browser row carrying a profile or automation flag is REFUSED by name (validateAppRow AND browserArgv)');
   ok(!M.validateAppRow({ id: 'x', label: 'x', exec: 'x', execs: ['x'] }).ok && !M.validateAppRow({ ...cr, browser: 'lynx' }).ok && !M.validateAppRow({ ...cr, execs: ['bad/name'] }).ok, 'execs only on a browser row, a known family only, bare names only');
   // the URL
   const good = ['https://example.com', 'http://127.0.0.1:3456/x?y=1#z', 'https://例え.jp/パス'];
-  ok(good.every((u) => M.validateBrowserUrl(u).ok) && M.validateBrowserUrl('  https://example.com  ').url === 'https://example.com/', 'http / https URLs pass (trimmed, parsed to their href)');
+  ok(gateOf(good.every((u) => M.validateBrowserUrl(u).ok)) && M.validateBrowserUrl('  https://example.com  ').url === 'https://example.com/', 'http / https URLs pass (trimmed, parsed to their href)');
   const badUrls = ['javascript:alert(1)', 'file:///etc/passwd', 'ftp://x/y', 'chrome://settings', 'about:config', 'data:text/html,x', 'not a url', 'https://a b', '--remote-debugging-port=1', '', '   ', 'http://', 'https://x/' + 'a'.repeat(2100), 'http://x/\u0000', 42];
   const refusals = badUrls.map((u) => M.validateBrowserUrl(u));
-  ok(refusals.every((r) => !r.ok && r.code === 'bad-url' && /^Open URL must be an http:\/\/ or https:\/\/ address \(/.test(r.error)), 'every non-http(s) / malformed / spaced / control-char / over-long URL is REFUSED by name (`bad-url`, the sentence says why)', refusals.filter((r) => r.ok || r.code !== 'bad-url'));
+  ok(verdictOf(refusals.every((r) => !r.ok && r.code === 'bad-url' && /^Open URL must be an http:\/\/ or https:\/\/ address \(/.test(r.error))), 'every non-http(s) / malformed / spaced / control-char / over-long URL is REFUSED by name (`bad-url`, the sentence says why)', refusals.filter((r) => r.ok || r.code !== 'bad-url'));
   const bu = M.browserArgv(cr, { profileDir: P, url: 'javascript:alert(1)' });
   ok(!bu.ok && bu.code === 'bad-url' && bu.argv === null, 'browserArgv refuses a bad URL by name (nothing half-built)');
   // the launch request
   const view = reg.map((r) => (r.browser ? M.browserRowFor(r, { 'google-chrome': '/usr/bin/google-chrome', firefox: '/usr/bin/firefox' }).row : r));
   const l1 = M.validateLaunchRequest({ appId: 'chromium', url: 'https://example.com', keepProfile: true }, view);
-  ok(l1.ok && l1.launch.url === 'https://example.com/' && l1.launch.keepProfile === true && l1.launch.row.exec === 'google-chrome', 'launch {appId: chromium, url, keepProfile}: the URL (parsed) and the keep choice ride the launch', l1);
+  ok(gateOf(l1.ok) && l1.launch.url === 'https://example.com/' && l1.launch.keepProfile === true && l1.launch.row.exec === 'google-chrome', 'launch {appId: chromium, url, keepProfile}: the URL (parsed) and the keep choice ride the launch', l1);
   const l0 = M.validateLaunchRequest({ appId: 'firefox' }, view);
-  ok(l0.ok && l0.launch.url === null && l0.launch.keepProfile === false, 'a browser launch without a URL / a keep choice: url null, keepProfile false (removed with the session by default)');
+  ok(gateOf(l0.ok) && l0.launch.url === null && l0.launch.keepProfile === false, 'a browser launch without a URL / a keep choice: url null, keepProfile false (removed with the session by default)');
   const lb = M.validateLaunchRequest({ appId: 'chromium', url: 'file:///etc/shadow' }, view);
   ok(!lb.ok && lb.code === 'bad-url', 'launch with a bad URL: refused by name (`bad-url`)', lb);
   const lx = M.validateLaunchRequest({ appId: 'xterm', url: 'https://example.com' }, view), lk = M.validateLaunchRequest({ appId: 'xterm', keepProfile: true }, view), la = M.validateLaunchRequest({ exec: 'chromium', url: 'https://example.com' }, view);
-  ok([lx, lk, la].every((r) => !r.ok && r.code === 'not-a-browser'), '`url` / `keepProfile` on a non-browser row or a typed command: refused by name (`not-a-browser`), never silently ignored', [lx, lk, la]);
+  ok(verdictOf([lx, lk, la].every((r) => !r.ok && r.code === 'not-a-browser')), '`url` / `keepProfile` on a non-browser row or a typed command: refused by name (`not-a-browser`), never silently ignored', [lx, lk, la]);
   ok(!M.validateLaunchRequest({ appId: 'chromium', keepProfile: 'yes' }, view).ok, 'keepProfile must be a boolean');
   // the profile directory — the app session's own, never the user's real profiles, never an agent-browser profile
   const home = '/home/u', owned = '/tmp/vs-da/desktop-apps';
   const pv = M.profileDirVerdict(P, { home, ownedRoot: owned });
-  ok(pv.ok && pv.dir === P && !P.startsWith(home + '/'), 'the keeper\'s profile dir (inside its own data/desktop-apps, a scratch /tmp root here) passes — and is NOT under $HOME');
+  ok(gateOf(pv.ok) && pv.dir === P && !P.startsWith(home + '/'), 'the keeper\'s profile dir (inside its own data/desktop-apps, a scratch /tmp root here) passes — and is NOT under $HOME');
   const refusedDirs = [
     [home, 'profile-not-owned', { ownedRoot: owned }],
     [`${home}/.config/chromium/Default`, 'profile-is-users', { ownedRoot: home }],
@@ -911,18 +911,18 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
     ['relative/profile', 'profile-not-owned', { ownedRoot: owned }],
   ];
   const got = refusedDirs.map(([d, code, o]) => { const v = M.profileDirVerdict(d, { home, ...o }); return { d, code, got: v.code, ok: v.ok }; });
-  ok(got.every((g) => !g.ok && g.got === g.code), '$HOME itself, the user\'s real Chromium / Chrome / Firefox / snap profiles, an agent-browser dir, a `..` escape, the root itself and a relative path are REFUSED by name', got.filter((g) => g.ok || g.got !== g.code));
+  ok(verdictOf(got.every((g) => !g.ok && g.got === g.code)), '$HOME itself, the user\'s real Chromium / Chrome / Firefox / snap profiles, an agent-browser dir, a `..` escape, the root itself and a relative path are REFUSED by name', got.filter((g) => g.ok || g.got !== g.code));
   const sn = (d) => M.profileDirVerdict(d, { home, ownedRoot: d.slice(0, d.indexOf('/desktop-apps') + 13), confinement: 'snap', exec: 'firefox' });
-  ok(sn(P).code === 'snap-profile-unreachable' && /firefox is a snap/.test(sn(P).error) && sn(`${home}/.vibespace/data/desktop-apps/da-1/profile`).code === 'snap-profile-unreachable' && sn(`${home}/work/vs/data/desktop-apps/da-1/profile`).ok, 'a SNAP browser (private /tmp, no hidden top-level folder): a /tmp or ~/.hidden data dir is refused by name (`snap-profile-unreachable`); ~/work/… passes');
+  ok(sn(P).code === 'snap-profile-unreachable' && gateOf(/firefox is a snap/.test(sn(P).error)) && sn(`${home}/.vibespace/data/desktop-apps/da-1/profile`).code === 'snap-profile-unreachable' && verdictOf(sn(`${home}/work/vs/data/desktop-apps/da-1/profile`).ok), 'a SNAP browser (private /tmp, no hidden top-level folder): a /tmp or ~/.hidden data dir is refused by name (`snap-profile-unreachable`); ~/work/… passes');
   const uj = M.firefoxUserJs();
-  ok(uj.split('\n').filter(Boolean).every((l) => /^user_pref\("[a-z.A-Z_]+", (false|true|"[^"]*")\);$/.test(l)) && /"browser\.shell\.checkDefaultBrowser", false/.test(uj) && /"browser\.aboutwelcome\.enabled", false/.test(uj), 'firefox\'s first-run switch is its profile\'s user.js (user_pref lines only; no default-browser check, no welcome page)');
+  ok(gateOf(uj.split('\n').filter(Boolean).every((l) => /^user_pref\("[a-z.A-Z_]+", (false|true|"[^"]*")\);$/.test(l))) && gateOf(/"browser\.shell\.checkDefaultBrowser", false/.test(uj)) && verdictOf(/"browser\.aboutwelcome\.enabled", false/.test(uj)), 'firefox\'s first-run switch is its profile\'s user.js (user_pref lines only; no default-browser check, no welcome page)');
   // WIRING PINS — the keeper / the launcher / the display name the PURE functions (never a re-spelled rule)
   const keeper = keeperSrc(), launcher = read('src/lib/desktop-app-launcher.js'), disp = read('src/desktop-display.js');
-  ok(/const av = M\.browserArgv\(row, \{ profileDir: pv\.dir, url: v\.launch\.url \}\);/.test(keeper) && /args: browser \? browser\.argv : office \? office\.argv : \(row\.args \|\| \[\]\)/.test(keeper), 'WIRING PIN: the keeper launches a browser row with browserArgv\'s argv (the profile flags, then the URL)');
-  ok(/const pv = M\.profileDirVerdict\(profileDirOf\(id\), \{ home: homeOf\(\), ownedRoot: logRoot, confinement, exec: row\.exec \}\);/.test(keeper) && /const profileDirOf = \(id\) => path\.join\(logRoot, id, 'profile'\);/.test(keeper), 'WIRING PIN: the profile dir is the session\'s own (data/desktop-apps/<id>/profile), judged by profileDirVerdict before anything starts');
-  ok(/mkdir\(browser\.profileDir, \{ recursive: true, mode: 0o700 \}\)/.test(keeper) && /fs\.promises\.rm\(pv\.dir, \{ recursive: true, force: true \}\)/.test(keeper) && !/rmSync\(/.test(keeper), 'WIRING PIN: created 0700, removed ASYNC (never a sync walk on the event loop — a Chrome profile is thousands of files, data/ may be NFS)');
-  ok(/import \{ validateBrowserUrl \} from '\.\.\/desktop-browser-app\.js';/.test(launcher) && /browserLaunchBody\(row, \{ url: urlIn\.value, keepProfile: keepIn\.checked \}\)/.test(launcher), 'WIRING PIN: the launcher checks the typed URL with the SAME pure function the server runs');
-  ok(/const \{ BROWSER_BINS \} = require\('\.\/desktop-apps'\);/.test(disp) && /const names = \[\.\.\.new Set\(\[\.\.\.bins, \.\.\.BROWSER_BINS, \.\.\.OFFICE\.OFFICE_EXECS\]\)\];/.test(disp) /* B-1425: the names once, each landed off the loop first */, 'WIRING PIN: hostFacts probes the families\' binaries from the PURE list');
+  ok(gateOf(/const av = M\.browserArgv\(row, \{ profileDir: pv\.dir, url: v\.launch\.url \}\);/.test(keeper)) && verdictOf(/args: browser \? browser\.argv : office \? office\.argv : \(row\.args \|\| \[\]\)/.test(keeper)), 'WIRING PIN: the keeper launches a browser row with browserArgv\'s argv (the profile flags, then the URL)');
+  ok(gateOf(/const pv = M\.profileDirVerdict\(profileDirOf\(id\), \{ home: homeOf\(\), ownedRoot: logRoot, confinement, exec: row\.exec \}\);/.test(keeper)) && verdictOf(/const profileDirOf = \(id\) => path\.join\(logRoot, id, 'profile'\);/.test(keeper)), 'WIRING PIN: the profile dir is the session\'s own (data/desktop-apps/<id>/profile), judged by profileDirVerdict before anything starts');
+  ok(gateOf(/mkdir\(browser\.profileDir, \{ recursive: true, mode: 0o700 \}\)/.test(keeper)) && gateOf(/fs\.promises\.rm\(pv\.dir, \{ recursive: true, force: true \}\)/.test(keeper)) && !/rmSync\(/.test(keeper), 'WIRING PIN: created 0700, removed ASYNC (never a sync walk on the event loop — a Chrome profile is thousands of files, data/ may be NFS)');
+  ok(gateOf(/import \{ validateBrowserUrl \} from '\.\.\/desktop-browser-app\.js';/.test(launcher)) && verdictOf(/browserLaunchBody\(row, \{ url: urlIn\.value, keepProfile: keepIn\.checked \}\)/.test(launcher)), 'WIRING PIN: the launcher checks the typed URL with the SAME pure function the server runs');
+  ok(gateOf(/const \{ BROWSER_BINS \} = require\('\.\/desktop-apps'\);/.test(disp)) && verdictOf(/const names = \[\.\.\.new Set\(\[\.\.\.bins, \.\.\.BROWSER_BINS, \.\.\.OFFICE\.OFFICE_EXECS\]\)\];/.test(disp)) /* B-1425: the names once, each landed off the loop first */, 'WIRING PIN: hostFacts probes the families\' binaries from the PURE list');
 }
 
 console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app exiting closes the window, the outer ✕ is the app\'s own close');
@@ -1021,10 +1021,10 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
   // (d) WIRING PINS — the keeper stamps the census BEFORE the teardown; the window decides with the PURE verdicts; every
   // user close of a window goes through the ONE veto point (programmatic closes — layout sync, the auto-close — do not)
   const keeper = keeperSrc(), win = read('src/lib/desktop-app-window.js'), wm = read('src/lib/window.js');
-  ok(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);/.test(keeper) && /return M\.windowsLeftCount\(rows\);/.test(keeper) && /rec\.windowsAtExit = await windowsLeftAtExit\(rec\);(?:\s*\/\/[^\n]*)*\s*commit\(\);\s*await teardown\(rec, handles\);\s*commit\(\);/.test(keeper), 'WIRING PIN: the keeper counts the windows left at an app exit through M.windowsLeftCount, BEFORE the teardown (X is still up), and the commit that broadcasts it comes BEFORE the teardown too (lane exit-close-cadence: the exit is the verdict), which commits again');
-  ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-fit\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win) && /frontWid: front \? front\.wid : 0/.test(win) && /if \(v\.act === 'ask-front'\) return !view\.closeFront\(\);/.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
-  ok(/leased: !!lease, holders: rec \? Number\(rec\.holders\) \|\| 0 : 0,/.test(win) && /import \{ RUNNING_STATES, userStoppedHeld \} from '\.\.\/desktop-fit\.js';/.test(read('src/lib/desktop-picker.js')) && /const stoppedHeld = apps\.filter\(userStoppedHeld\);/.test(read('src/lib/desktop-picker.js')), 'WIRING PIN (lane browser-display-holders): the window hands the record\'s holders to the verdict; the Desktop list keeps the «you stopped it» rows');
-  ok(/requestClose\(id, opts = \{\}\) \{/.test(wm) && /\.win-close'\)\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.requestCloseGroup\(winInfo\.id\); \}/.test(wm) && /return Promise\.resolve\(this\.requestClose\(id\)\);/.test(read('src/lib/tab-group.js')) && /for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid, \{ asked: true \}\);/.test(read('src/lib/tab-group.js')), 'WIRING PIN: the title bar ✕ asks requestCloseGroup (B-a67c: a group is asked first), whose every close — a lone window, each member of a confirmed group — is WindowManager.requestClose (the veto point), never closeWindow directly');
+  ok(gateOf(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);/.test(keeper)) && gateOf(/return M\.windowsLeftCount\(rows\);/.test(keeper)) && verdictOf(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);(?:\s*\/\/[^\n]*)*\s*commit\(\);\s*await teardown\(rec, handles\);\s*commit\(\);/.test(keeper)), 'WIRING PIN: the keeper counts the windows left at an app exit through M.windowsLeftCount, BEFORE the teardown (X is still up), and the commit that broadcasts it comes BEFORE the teardown too (lane exit-close-cadence: the exit is the verdict), which commits again');
+  ok(gateOf(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-fit\.js';/.test(win)) && gateOf(/exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win)) && gateOf(/outerCloseVerdict\(\{/.test(win)) && gateOf(/winInfo\.onCloseRequest = /.test(win)) && gateOf(/frontWid: front \? front\.wid : 0/.test(win)) && verdictOf(/if \(v\.act === 'ask-front'\) return !view\.closeFront\(\);/.test(win)), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
+  ok(gateOf(/leased: !!lease, holders: rec \? Number\(rec\.holders\) \|\| 0 : 0,/.test(win)) && gateOf(/import \{ RUNNING_STATES, userStoppedHeld \} from '\.\.\/desktop-fit\.js';/.test(read('src/lib/desktop-picker.js'))) && verdictOf(/const stoppedHeld = apps\.filter\(userStoppedHeld\);/.test(read('src/lib/desktop-picker.js'))), 'WIRING PIN (lane browser-display-holders): the window hands the record\'s holders to the verdict; the Desktop list keeps the «you stopped it» rows');
+  ok(gateOf(/requestClose\(id, opts = \{\}\) \{/.test(wm)) && gateOf(/\.win-close'\)\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.requestCloseGroup\(winInfo\.id\); \}/.test(wm)) && gateOf(/return Promise\.resolve\(this\.requestClose\(id\)\);/.test(read('src/lib/tab-group.js'))) && verdictOf(/for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid, \{ asked: true \}\);/.test(read('src/lib/tab-group.js'))), 'WIRING PIN: the title bar ✕ asks requestCloseGroup (B-a67c: a group is asked first), whose every close — a lone window, each member of a confirmed group — is WindowManager.requestClose (the veto point), never closeWindow directly');
   const userCloses = { 'src/lib/taskbar.js': /run: \(c\) => \(c\.group \? c\.app\.wm\.requestCloseGroup\(c\.id\) : c\.app\.wm\.requestClose\(c\.id\)\)/, 'src/lib/command-mode.js': /wm\.requestClose\(wm\.activeWindowId\)/, 'src/lib/mobile-nav.js': /app\.wm\.requestClose\(activeId\)/, 'src/lib/tab-group.js': /closeBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(tabWinId\); \}\)/ };
   const missing = Object.entries(userCloses).filter(([f, re]) => !re.test(read(f))).map(([f]) => f);
   ok(missing.length === 0, 'WIRING PIN: every USER close (taskbar menu, Ctrl+\\ x, the phone nav ✕, a tab ✕) passes the same veto point', missing);
@@ -1038,61 +1038,61 @@ console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scal
   const TABLE = [[1, 1, 1, 1, 1], [1.25, 1, 1.25, 2, 0.625], [1.5, 1, 2, 2, 1], [2, 1, 2, 2, 1], [2, 1.25, 2.5, 3, 0.8333], [3, 1, 3, 3, 1], [1.25, 1.25, 2, 2, 1], [1, 1.25, 1.25, 2, 0.625], [2, 0.75, 2, 2, 1], [1, 0.6, 1, 1, 1], [3, 2, 3, 3, 1]];
   const got = TABLE.map(([dpr, ui]) => { const s = M.appScaleFor('auto', dpr, ui); const k = M.scaleKnobs(s); return [s, k.gdkScale, k.pictureScale, k.dpi]; });
   const want = TABLE.map(([, , s, g, p]) => [s, g, p, 96]);
-  ok(same(got, want), `auto = the ratio rule over dpr × uiScale: ${TABLE.map(([d, u], i) => `${d}×${u} ⇒ ${got[i][0]}× (GDK_SCALE ${got[i][1]} shown at ${got[i][2]})`).join('; ')}`, { got, want });
+  ok(verdictOf(same(got, want)), `auto = the ratio rule over dpr × uiScale: ${TABLE.map(([d, u], i) => `${d}×${u} ⇒ ${got[i][0]}× (GDK_SCALE ${got[i][1]} shown at ${got[i][2]})`).join('; ')}`, { got, want });
   // the boundaries: √2 and 2√2 are the geometric midpoints between 1/2 and 2/3
   const B = [[1.41, 1.41], [1.42, 2], [2.82, 2.82], [2.83, 3]].map(([e, w]) => [e, M.appScaleFor('auto', e, 1), w]);
-  ok(B.every(([, g, w]) => g === w), `the boundaries √2 / 2√2: ${B.map(([e, g]) => `${e} ⇒ ${g}`).join(', ')}`, B);
+  ok(verdictOf(B.every(([, g, w]) => g === w)), `the boundaries √2 / 2√2: ${B.map(([e, g]) => `${e} ⇒ ${g}`).join(', ')}`, B);
   // (b) the owner's DPR-2 screen at UI scale 125 %: 2.5× — lane D (a): drawn at GDK_SCALE 3, shown at 0.8333 (widgets AND text 2.5×)
   const k25 = M.scaleKnobs(M.appScaleFor('auto', 2, 1.25));
-  ok(k25.scale === 2.5 && k25.gdkScale === 3 && k25.env.GDK_SCALE === '3' && k25.dpi === 96 && k25.pictureScale === 0.8333 && /XTerm\*faceSize: 24\n/.test(k25.xresources), 'DPR 2 × UI 1.25 = 2.5× ⇒ GDK_SCALE 3 at 96 dpi shown at 0.8333 — widgets and text 2.5× (the xterm face 8 × 3)', k25);
+  ok(k25.scale === 2.5 && k25.gdkScale === 3 && k25.env.GDK_SCALE === '3' && k25.dpi === 96 && k25.pictureScale === 0.8333 && verdictOf(/XTerm\*faceSize: 24\n/.test(k25.xresources)), 'DPR 2 × UI 1.25 = 2.5× ⇒ GDK_SCALE 3 at 96 dpi shown at 0.8333 — widgets and text 2.5× (the xterm face 8 × 3)', k25);
   // (c) an explicit 1.5 stays 1.5 whatever the screen — lane D (a): a REAL 1.5 (drawn at 2, shown at 0.75)
   const k15 = M.scaleKnobs(M.appScaleFor('1.5', 2, 1.25));
   ok(k15.scale === 1.5 && k15.gdkScale === 2 && k15.dpi === 96 && k15.pictureScale === 0.75, 'an explicit 1.5 stays 1.5 whatever the screen (GDK_SCALE 2 at 96 dpi, shown at 0.75)', k15);
   // (d) REGRESSION CONTROL — uiScale absent = 1: the .158 answers on the integer screens it was measured on are unchanged
   const r158 = [1, 1.5, 2].map((d) => [d, M.appScaleFor('auto', d), M.appScaleFor('auto', d, 1), M.appScaleFor('auto', d, undefined)]);
-  ok(r158.every(([d, a, b, c]) => a === b && b === c && a === (d >= 1.5 ? 2 : 1)), `uiScale absent / 1 / undefined give the .158 answer on DPR 1, 1.5, 2 (${r158.map((r) => r.join('→')).join(', ')})`, r158);
+  ok(verdictOf(r158.every(([d, a, b, c]) => a === b && b === c && a === (d >= 1.5 ? 2 : 1))), `uiScale absent / 1 / undefined give the .158 answer on DPR 1, 1.5, 2 (${r158.map((r) => r.join('→')).join(', ')})`, r158);
   ok(M.appScaleFor('auto', 2, 'x') === 2 && M.appScaleFor('auto', 2, 9) === 2 && M.normalizeUiScale(0.3) === 1 && M.normalizeUiScale(1.25) === 1.25 && M.normalizeUiScale('1.1') === 1.1, 'a uiScale outside 0.6..2 (or not a number) counts as 1 in the PURE derivation');
   ok(M.scaleKnobs(2.5).scale === 2.5 && M.scaleKnobs(7).scale === 1 && M.scaleKnobs(0.5).scale === 1 && M.scaleKnobs('3').gdkScale === 3, 'scaleKnobs takes any effective value 1..3 (anything else ⇒ 1)');
   // (e) the ORIGIN the chip names: auto (derived from this screen) | setting (an explicit desktop.appScale) | chosen (this window's Scale ▸)
   const pA = M.scalePick({ setting: 'auto', dpr: 2, uiScale: 1.25 }), pS = M.scalePick({ setting: '1.5', dpr: 2, uiScale: 1.25 }), pC = M.scalePick({ setting: 'auto', choice: 1, dpr: 2, uiScale: 1.25 }), pCA = M.scalePick({ setting: '2', choice: 'auto', dpr: 1, uiScale: 1.25 });
-  ok(pA.scale === 2.5 && pA.origin === 'auto' && same(pA.from, { dpr: 2, uiScale: 1.25 }) && pS.scale === 1.5 && pS.origin === 'setting' && pS.from === null && pC.scale === 1 && pC.origin === 'chosen' && pCA.scale === 1.25 && pCA.origin === 'auto' && same(pCA.from, { dpr: 1, uiScale: 1.25 }), 'scalePick names the origin: auto (with the dpr × uiScale it came from) / setting / chosen; a window\'s "auto" re-derives from the RELAUNCHING client', { pA, pS, pC, pCA });
+  ok(pA.scale === 2.5 && pA.origin === 'auto' && gateOf(same(pA.from, { dpr: 2, uiScale: 1.25 })) && pS.scale === 1.5 && pS.origin === 'setting' && pS.from === null && pC.scale === 1 && pC.origin === 'chosen' && pCA.scale === 1.25 && pCA.origin === 'auto' && verdictOf(same(pCA.from, { dpr: 1, uiScale: 1.25 })), 'scalePick names the origin: auto (with the dpr × uiScale it came from) / setting / chosen; a window\'s "auto" re-derives from the RELAUNCHING client', { pA, pS, pC, pCA });
   const rec = M.newRecord({ id: 'da-3', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'xpra', now: 1, scale: 2.5, dpi: 120, scaleOrigin: 'auto', scaleFrom: { dpr: 2, uiScale: 1.25 } });
-  ok(rec.scale === 2.5 && rec.dpi === 120 && rec.scaleOrigin === 'auto' && same(rec.scaleFrom, { dpr: 2, uiScale: 1.25 }), 'the record carries the effective scale (any 1..3), its dpi and its ORIGIN', rec);
+  ok(rec.scale === 2.5 && rec.dpi === 120 && rec.scaleOrigin === 'auto' && verdictOf(same(rec.scaleFrom, { dpr: 2, uiScale: 1.25 })), 'the record carries the effective scale (any 1..3), its dpi and its ORIGIN', rec);
   // (f) the launch request carries the UI scale; a value outside the product's own range is REFUSED by name
   const reg = M.DEFAULT_REGISTRY;
   const v1 = M.validateLaunchRequest({ appId: 'xterm', dpr: 2, uiScale: 1.25 }, reg), v2 = M.validateLaunchRequest({ appId: 'xterm', dpr: 2 }, reg);
-  ok(v1.ok && v1.launch.uiScale === 1.25 && v2.ok && v2.launch.uiScale === 1, 'POST /api/desktop/apps `uiScale`: carried (1.25); absent ⇒ 1');
+  ok(gateOf(v1.ok) && v1.launch.uiScale === 1.25 && gateOf(v2.ok) && v2.launch.uiScale === 1, 'POST /api/desktop/apps `uiScale`: carried (1.25); absent ⇒ 1');
   const badU = [0.5, 2.5, 'x', -1].map((u) => M.validateLaunchRequest({ appId: 'xterm', uiScale: u }, reg));
-  ok(badU.every((b) => !b.ok && /uiScale must be a number from 0\.6 to 2/.test(b.error)), 'a uiScale outside 0.6..2 is REFUSED by name, never silently clamped');
+  ok(verdictOf(badU.every((b) => !b.ok && /uiScale must be a number from 0\.6 to 2/.test(b.error))), 'a uiScale outside 0.6..2 is REFUSED by name, never silently clamped');
   // (g) the per-window relaunch: the request (auto | 1 | 1.5 | 2 — the menu's four rows) and the record's verdict
-  ok(same(M.SCALE_CHOICES, ['auto', 1, 1.5, 2, 2.5, 3]) && Object.isFrozen(M.SCALE_CHOICES), 'the Scale ▸ menu offers auto, 1×, 1.5×, 2× — and (lane D) 2.5×, 3×: every value scaleKnobs spells exactly by the floor rule');
+  ok(gateOf(same(M.SCALE_CHOICES, ['auto', 1, 1.5, 2, 2.5, 3])) && verdictOf(Object.isFrozen(M.SCALE_CHOICES)), 'the Scale ▸ menu offers auto, 1×, 1.5×, 2× — and (lane D) 2.5×, 3×: every value scaleKnobs spells exactly by the floor rule');
   const rq = [[{ scale: 'auto', dpr: 2, uiScale: 1.25 }, true], [{ scale: '1.5' }, true], [{ scale: 2 }, true], [{ scale: 3 }, true], [{ scale: 1.25 }, false], [{ scale: 4 }, false], [{}, false], [{ scale: 'auto', dpr: 9 }, false], [{ scale: 1, uiScale: 3 }, false]].map(([b, w]) => [b, w, M.validateRelaunchRequest(b)]);
-  ok(rq.every(([, w, v]) => v.ok === w) && rq[0][2].choice === 'auto' && rq[0][2].dpr === 2 && rq[0][2].uiScale === 1.25 && rq[1][2].choice === 1.5 && rq.filter(([, w]) => !w).every(([, , v]) => v.code === 'bad-request' && v.error), `validateRelaunchRequest: ${rq.map(([b, , v]) => `${JSON.stringify(b)} ⇒ ${v.ok ? 'ok ' + v.choice : v.error}`).join('; ')}`, rq.map((r) => r[2]));
+  ok(gateOf(rq.every(([, w, v]) => v.ok === w)) && rq[0][2].choice === 'auto' && rq[0][2].dpr === 2 && rq[0][2].uiScale === 1.25 && rq[1][2].choice === 1.5 && verdictOf(rq.filter(([, w]) => !w).every(([, , v]) => v.code === 'bad-request' && v.error)), `validateRelaunchRequest: ${rq.map(([b, , v]) => `${JSON.stringify(b)} ⇒ ${v.ok ? 'ok ' + v.choice : v.error}`).join('; ')}`, rq.map((r) => r[2]));
   const live = { id: 'da-9', state: 'ready', backend: 'xpra', exec: '/usr/bin/gnome-calculator', args: [], cwd: null, label: 'Calc', source: 'registry', appId: 'gnome-calculator' };
   const RV = [[live, null], [{ ...live, state: 'launching' }, 'not-ready'], [{ ...live, state: 'exited' }, 'not-ready'], [{ ...live, backend: 'vnc-display' }, 'not-xpra'], [{ ...live, browser: 'chrome' }, null], [null, 'not-found']].map(([r, w]) => [w, M.relaunchVerdict(r)]);
-  ok(RV.every(([w, v]) => (w === null ? v === null : v && v.code === w && typeof v.error === 'string' && v.error.length > 10)), `relaunchVerdict: ready xpra ⇒ ok, a browser row too (2.369.176: the keeper carries its profile); ${RV.filter(([w]) => w).map(([w]) => w).join(' / ')} refused by name`, RV);
-  ok(same(M.relaunchBodyOf(live), { appId: 'gnome-calculator' }) && same(M.relaunchBodyOf({ ...live, source: 'adhoc', appId: undefined, exec: '/usr/bin/xterm', args: ['-T', 'a b'], cwd: '/tmp', label: 'mine' }), { exec: '/usr/bin/xterm', args: ['-T', 'a b'], cwd: '/tmp', label: 'mine' }), 'relaunchBodyOf: a catalog row relaunches by its id, a typed command as typed (exec, args, cwd, label)');
+  ok(verdictOf(RV.every(([w, v]) => (w === null ? v === null : v && v.code === w && typeof v.error === 'string' && v.error.length > 10))), `relaunchVerdict: ready xpra ⇒ ok, a browser row too (2.369.176: the keeper carries its profile); ${RV.filter(([w]) => w).map(([w]) => w).join(' / ')} refused by name`, RV);
+  ok(gateOf(same(M.relaunchBodyOf(live), { appId: 'gnome-calculator' })) && verdictOf(same(M.relaunchBodyOf({ ...live, source: 'adhoc', appId: undefined, exec: '/usr/bin/xterm', args: ['-T', 'a b'], cwd: '/tmp', label: 'mine' }), { exec: '/usr/bin/xterm', args: ['-T', 'a b'], cwd: '/tmp', label: 'mine' })), 'relaunchBodyOf: a catalog row relaunches by its id, a typed command as typed (exec, args, cwd, label)');
   // (g2) the Scale ▸ menu model: auto shows what THIS client would derive now, the row the record runs at is current (and
   // not offered again unless auto would now derive something else), every reason a window cannot relaunch disables it
   const mm = M.scaleMenuModel({ ...live, scale: 2.5, scaleOrigin: 'auto' }, { dpr: 2, uiScale: 1.25 });
-  ok(mm.why === null && same(mm.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 2.5, true, true], [1, 1, false, false], [1.5, 1.5, false, false], [2, 2, false, false], [2.5, 2.5, false, false], [3, 3, false, false]]), 'scaleMenuModel on the auto 2.5× app, same screen: auto (2.5×) is current and not offered again; 1× / 1.5× / 2× / 2.5× / 3× offered (an explicit 2.5× is a relaunch, not a no-op: its origin changes)', mm);
+  ok(mm.why === null && verdictOf(same(mm.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 2.5, true, true], [1, 1, false, false], [1.5, 1.5, false, false], [2, 2, false, false], [2.5, 2.5, false, false], [3, 3, false, false]])), 'scaleMenuModel on the auto 2.5× app, same screen: auto (2.5×) is current and not offered again; 1× / 1.5× / 2× / 2.5× / 3× offered (an explicit 2.5× is a relaunch, not a no-op: its origin changes)', mm);
   const mm2 = M.scaleMenuModel({ ...live, scale: 1.5, scaleOrigin: 'chosen' }, { dpr: 1, uiScale: 1 });
-  ok(same(mm2.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 1, false, false], [1, 1, false, false], [1.5, 1.5, true, true], [2, 2, false, false], [2.5, 2.5, false, false], [3, 3, false, false]]), 'scaleMenuModel on a chosen 1.5×, from a DPR-1 client: 1.5× current; auto offered at THIS client\'s derivation (1×)', mm2);
+  ok(verdictOf(same(mm2.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 1, false, false], [1, 1, false, false], [1.5, 1.5, true, true], [2, 2, false, false], [2.5, 2.5, false, false], [3, 3, false, false]])), 'scaleMenuModel on a chosen 1.5×, from a DPR-1 client: 1.5× current; auto offered at THIS client\'s derivation (1×)', mm2);
   const mm3 = M.scaleMenuModel({ ...live, scale: 2, scaleOrigin: 'auto' }, { dpr: 1, uiScale: 1 });
-  ok(mm3.rows[0].current && !mm3.rows[0].disabled && mm3.rows[0].scale === 1, 'an auto app opened on ANOTHER screen: auto is current yet offered (it would re-derive 1× here)', mm3.rows[0]);
+  ok(gateOf(mm3.rows[0].current) && !mm3.rows[0].disabled && mm3.rows[0].scale === 1, 'an auto app opened on ANOTHER screen: auto is current yet offered (it would re-derive 1× here)', mm3.rows[0]);
   const whys = [[{ leased: true }, 'lease'], [{ seat: 'blocked' }, 'seat'], [{}, null]].map(([o, w]) => [w, M.scaleMenuModel(live, o).why]);
-  ok(whys.every(([w, g]) => w === g) && M.scaleMenuModel({ ...live, backend: 'vnc-display' }).why === 'not-xpra' && M.scaleMenuModel({ ...live, backend: 'vnc-display' }).rows.every((r) => r.disabled), `scaleMenuModel disables every row with the reason: an agent lease, a non-active seat, the relaunch verdict (${JSON.stringify(whys)})`);
+  ok(gateOf(whys.every(([w, g]) => w === g)) && M.scaleMenuModel({ ...live, backend: 'vnc-display' }).why === 'not-xpra' && verdictOf(M.scaleMenuModel({ ...live, backend: 'vnc-display' }).rows.every((r) => r.disabled)), `scaleMenuModel disables every row with the reason: an agent lease, a non-active seat, the relaunch verdict (${JSON.stringify(whys)})`);
   // (h) a relaunched record does not CLOSE its window — it names its successor, and every client follows it
   const old = { state: 'exited', stoppedBy: 'relaunch', replacedBy: 'da-10' };
-  ok(same(M.exitCloseVerdict(old), { close: false, why: 'relaunched', replacedBy: 'da-10' }) && same(M.exitCloseVerdict({ state: 'ready', replacedBy: 'da-10' }), { close: false, why: 'relaunched', replacedBy: 'da-10' }), 'exitCloseVerdict: a record replaced by a relaunch never closes its window — it names the successor (even before the old one has stopped)');
+  ok(gateOf(same(M.exitCloseVerdict(old), { close: false, why: 'relaunched', replacedBy: 'da-10' })) && verdictOf(same(M.exitCloseVerdict({ state: 'ready', replacedBy: 'da-10' }), { close: false, why: 'relaunched', replacedBy: 'da-10' })), 'exitCloseVerdict: a record replaced by a relaunch never closes its window — it names the successor (even before the old one has stopped)');
   // (i) WIRING PINS — the keeper decides the scale ONCE through scalePick (the launch's dpr + uiScale, or the relaunch's choice);
   // the launcher sends THIS client's UI scale; the window offers the menu and follows a replacement
   const keeper = keeperSrc(), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), routes = read('src/routes/desktop-apps.js');
-  ok(/const pick = M\.scalePick\(\{ choice: opts\.scaleChoice, appDefault: v\.launch\.scaleChoice, setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(keeper) && /const rungScales = M\.capsOf\(\{ backend: backend\.id \}, backends\)\.scales;[^\n]*\n\s*const knobs = rungScales \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper picks the scale once at launch (a relaunch\'s choice, lane D\'s app default, the setting) from the request\'s dpr + uiScale, and spells it by the row\'s rule (lane D (a)), on the xpra STREAM only');
-  ok(/const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(next\.id\) : null;\s*rec\.replacedBy = next\.id;\s*commit\(\);\s*let old;\s*try \{ old = await stop\(id, \{ why: 'relaunch' \}\); \} finally \{ if \(typeof armSeat === 'function'\) armSeat\(\); \}/.test(keeper) && /return machine\.relaunch\(id, body, \{ onSuccessor: \(nextId\) => carrySeat\(id, nextId\) \}\);/.test(keeper) && /M\.capVerdict\(liveRecords\(\)\.filter\(\(r\) => r\.id !== opts\.replacing\), limits\)/.test(keeper), 'WIRING PIN: relaunch = the successor launched first (the one it replaces does not count against the cap), the old record names it and is committed BEFORE its stop broadcasts, the seat carried first (A r1)');
-  ok(/router\.post\('\/api\/desktop\/apps\/:id\/relaunch'/.test(routes) && /ctx\.keeper\.relaunch\(req\.params\.id, req\.body \|\| \{\}\)/.test(routes), 'WIRING PIN: POST /api/desktop/apps/:id/relaunch → keeper.relaunch');
-  ok(/dpr: launchDpr\(\), uiScale: launchUiScale\(\)/.test(launcher), 'WIRING PIN: the launcher sends THIS client\'s dpr AND its UI scale');
-  ok(/r\.replacedBy/.test(win) && /retarget\(/.test(win) && /\/relaunch`/.test(win) && /showConfirmDialog\(/.test(win), 'WIRING PIN: the window follows a replacement (retarget) and relaunches through the route after a confirm');
+  ok(gateOf(/const pick = M\.scalePick\(\{ choice: opts\.scaleChoice, appDefault: v\.launch\.scaleChoice, setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(keeper)) && verdictOf(/const rungScales = M\.capsOf\(\{ backend: backend\.id \}, backends\)\.scales;[^\n]*\n\s*const knobs = rungScales \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper)), 'WIRING PIN: the keeper picks the scale once at launch (a relaunch\'s choice, lane D\'s app default, the setting) from the request\'s dpr + uiScale, and spells it by the row\'s rule (lane D (a)), on the xpra STREAM only');
+  ok(gateOf(/const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(next\.id\) : null;\s*rec\.replacedBy = next\.id;\s*commit\(\);\s*let old;\s*try \{ old = await stop\(id, \{ why: 'relaunch' \}\); \} finally \{ if \(typeof armSeat === 'function'\) armSeat\(\); \}/.test(keeper)) && gateOf(/return machine\.relaunch\(id, body, \{ onSuccessor: \(nextId\) => carrySeat\(id, nextId\) \}\);/.test(keeper)) && verdictOf(/M\.capVerdict\(liveRecords\(\)\.filter\(\(r\) => r\.id !== opts\.replacing\), limits\)/.test(keeper)), 'WIRING PIN: relaunch = the successor launched first (the one it replaces does not count against the cap), the old record names it and is committed BEFORE its stop broadcasts, the seat carried first (A r1)');
+  ok(gateOf(/router\.post\('\/api\/desktop\/apps\/:id\/relaunch'/.test(routes)) && verdictOf(/ctx\.keeper\.relaunch\(req\.params\.id, req\.body \|\| \{\}\)/.test(routes)), 'WIRING PIN: POST /api/desktop/apps/:id/relaunch → keeper.relaunch');
+  ok(verdictOf(/dpr: launchDpr\(\), uiScale: launchUiScale\(\)/.test(launcher)), 'WIRING PIN: the launcher sends THIS client\'s dpr AND its UI scale');
+  ok(gateOf(/r\.replacedBy/.test(win)) && gateOf(/retarget\(/.test(win)) && gateOf(/\/relaunch`/.test(win)) && verdictOf(/showConfirmDialog\(/.test(win)), 'WIRING PIN: the window follows a replacement (retarget) and relaunches through the route after a confirm');
 }
 
 console.log('§14 lane D (a) (docs/design-desktop-apps-seamless §3.4, the owner 2026-09-25: "从2x切换到1.5x之后出现大量白边，你窗口尺寸计算不对"): a fraction is a REAL scale, the record says what it was drawn at, the window follows a relaunch; Chrome draws its own frame');
@@ -1101,47 +1101,47 @@ console.log('§14 lane D (a) (docs/design-desktop-apps-seamless §3.4, the owner
   const KT = [[1, 'ceil', 1, 96, 1], [1.25, 'ceil', 2, 96, 0.625], [1.5, 'ceil', 2, 96, 0.75], [2, 'ceil', 2, 96, 1], [2.5, 'ceil', 3, 96, 0.8333], [3, 'ceil', 3, 96, 1],
     [1, 'dpi', 1, 96, 1], [1.5, 'dpi', 1, 144, 1], [2, 'dpi', 2, 96, 1], [2.5, 'dpi', 2, 120, 1], [3, 'dpi', 3, 96, 1]];
   const kGot = KT.map(([sc, rule]) => { const k = M.scaleKnobs(sc, { rule }); return [k.gdkScale, k.dpi, k.pictureScale, k.env.GDK_SCALE, k.rule]; });
-  ok(same(kGot, KT.map(([, rule, g, d, p]) => [g, d, p, String(g), rule])), `scaleKnobs: ${KT.map(([sc, rule], i) => `${sc}/${rule} ⇒ GDK ${kGot[i][0]} @${kGot[i][1]} dpi ×${kGot[i][2]}`).join('; ')}`, kGot);
-  ok(M.scaleKnobs(1.5).rule === 'ceil' && M.scaleKnobs(1.5, { rule: 'bogus' }).rule === 'ceil' && same(M.SCALE_RULES, ['ceil', 'dpi']), 'the default rule is ceil; an unknown rule is ceil');
+  ok(verdictOf(same(kGot, KT.map(([, rule, g, d, p]) => [g, d, p, String(g), rule]))), `scaleKnobs: ${KT.map(([sc, rule], i) => `${sc}/${rule} ⇒ GDK ${kGot[i][0]} @${kGot[i][1]} dpi ×${kGot[i][2]}`).join('; ')}`, kGot);
+  ok(M.scaleKnobs(1.5).rule === 'ceil' && M.scaleKnobs(1.5, { rule: 'bogus' }).rule === 'ceil' && verdictOf(same(M.SCALE_RULES, ['ceil', 'dpi'])), 'the default rule is ceil; an unknown rule is ceil');
   ok(M.scaleRuleOf({ browser: 'chromium' }) === 'dpi' && M.scaleRuleOf({ browser: 'firefox' }) === 'dpi' && M.scaleRuleOf({ browser: 'lynx' }) === 'ceil' && M.scaleRuleOf({ id: 'gnome-calculator' }) === 'ceil' && M.scaleRuleOf(null) === 'ceil', 'scaleRuleOf: a browser row scales WHOLE from the font dpi (Chrome 153 measured: [750,131] = 1.5 × [500,87] at GDK_SCALE 1 + 144 dpi) ⇒ dpi; every other app ⇒ ceil');
   // (b) THE RECORD says what it was drawn at; renderOf reads it (a record from before lane D = the floor rule, shown 1:1)
   const r15 = M.newRecord({ id: 'da-d1', label: 'c', exec: '/usr/bin/gnome-calculator', source: 'registry', backend: 'xpra', now: 1, scale: 1.5, dpi: 96, gdkScale: 2, pictureScale: 0.75 });
   const rBad = M.newRecord({ id: 'da-d2', label: 'c', exec: '/x', source: 'registry', backend: 'xpra', now: 1, scale: 1.5, dpi: 96, gdkScale: 7, pictureScale: 2 });
   ok(r15.gdkScale === 2 && r15.pictureScale === 0.75 && rBad.gdkScale === null && rBad.pictureScale === null, 'newRecord carries gdkScale (1..3) + pictureScale (0.3..1] — anything else is null', { r15: [r15.gdkScale, r15.pictureScale], rBad: [rBad.gdkScale, rBad.pictureScale] });
   const RO = [[r15, { gdk: 2, picture: 0.75, widget: 1.5, perLogical: 2 }], [{ scale: 2.5, gdkScale: 3, pictureScale: 0.8333 }, { gdk: 3, picture: 2.5 / 3, widget: 2.5, perLogical: 3 }], [{ scale: 1.5, dpi: 144 }, { gdk: 1, picture: 1, widget: 1, perLogical: 1 }], [{ scale: 2.5, dpi: 120 }, { gdk: 2, picture: 1, widget: 2, perLogical: 2 }], [{ scale: 2 }, { gdk: 2, picture: 1, widget: 2, perLogical: 2 }], [{ scale: 1.5, gdkScale: 1, pictureScale: 1 }, { gdk: 1, picture: 1, widget: 1, perLogical: 1 }], [null, { gdk: 1, picture: 1, widget: 1, perLogical: 1 }], [{ scale: 1.5, pictureScale: 0.75 }, { gdk: 1, picture: 1, widget: 1, perLogical: 1 }]];
-  ok(RO.every(([r, w]) => same(M.renderOf(r), w)), 'renderOf: a lane-D record ⇒ its own gdk × picture (1.5 = 2 × 0.75; 2.5 = 3 × 0.8333 reads 2.5 — the stored 0.8333 is read back as the exact 2.5 ÷ 3, never 2.4999, the chip once said so); a record WITHOUT gdkScale (older, or an older paired machine) ⇒ the floor rule it ran under, shown 1:1 — a pictureScale without its gdkScale is never trusted', RO.map(([r]) => M.renderOf(r)));
+  ok(verdictOf(RO.every(([r, w]) => same(M.renderOf(r), w))), 'renderOf: a lane-D record ⇒ its own gdk × picture (1.5 = 2 × 0.75; 2.5 = 3 × 0.8333 reads 2.5 — the stored 0.8333 is read back as the exact 2.5 ÷ 3, never 2.4999, the chip once said so); a record WITHOUT gdkScale (older, or an older paired machine) ⇒ the floor rule it ran under, shown 1:1 — a pictureScale without its gdkScale is never trusted', RO.map(([r]) => M.renderOf(r)));
   const RB = [[{ scale: 1.5, gdkScale: 1, pictureScale: 1, browser: 'chromium' }, { gdk: 1, picture: 1, widget: 1.5, perLogical: 1.5 }], [{ scale: 2.5, dpi: 120, browser: 'chromium' }, { gdk: 2, picture: 1, widget: 2.5, perLogical: 2.5 }]];
-  ok(RB.every(([r, w]) => same(M.renderOf(r), w)), 'renderOf, a BROWSER record (the dpi rule): the widgets are the WHOLE scale — Chrome at 1 + 144 dpi draws everything 1.5× (measured), drawn 1:1', RB.map(([r]) => M.renderOf(r)));
+  ok(verdictOf(RB.every(([r, w]) => same(M.renderOf(r), w))), 'renderOf, a BROWSER record (the dpi rule): the widgets are the WHOLE scale — Chrome at 1 + 144 dpi draws everything 1.5× (measured), drawn 1:1', RB.map(([r]) => M.renderOf(r)));
   const cb = M.relaunchPaneCss({ pane: { w: 898, h: 618 }, dpr: 1, from: { scale: 1, gdkScale: 1, pictureScale: 1, browser: 'chromium' }, to: { scale: 1.5, gdkScale: 1, pictureScale: 1, browser: 'chromium' } });
   const cb2 = M.relaunchPaneCss({ pane: cb, dpr: 1, from: { scale: 1.5, gdkScale: 1, pictureScale: 1, browser: 'chromium' }, to: { scale: 2, gdkScale: 2, pictureScale: 1, browser: 'chromium' } });
-  ok(same(cb, { w: 1347, h: 927 }) && same(cb2, { w: 1796, h: 1236 }), `a browser follows its scale too (its X px per logical px = its whole scale): 1× → 1.5× ⇒ ${cb && `${cb.w}×${cb.h}`}, → 2× ⇒ ${cb2 && `${cb2.w}×${cb2.h}`}`, { cb, cb2 });
+  ok(gateOf(same(cb, { w: 1347, h: 927 })) && verdictOf(same(cb2, { w: 1796, h: 1236 })), `a browser follows its scale too (its X px per logical px = its whole scale): 1× → 1.5× ⇒ ${cb && `${cb.w}×${cb.h}`}, → 2× ⇒ ${cb2 && `${cb2.w}×${cb2.h}`}`, { cb, cb2 });
   // (c) THE WINDOW FOLLOWS A RELAUNCH (relaunchPaneCss) — the numbers reader 1 predicted, round trips exact
   const rec = (scale, gdk, pic) => ({ scale, gdkScale: gdk, pictureScale: pic });
   const R2 = rec(2, 2, 1), R15 = rec(1.5, 2, 0.75), R1 = rec(1, 1, 1);
   const a = M.relaunchPaneCss({ pane: { w: 898, h: 681 }, dpr: 2, from: R2, to: R15 });
-  ok(same(a, { w: 673.5, h: 510.75 }), `DPR 2, 2× → 1.5×: the 898×681 pane becomes ${a && `${a.w}×${a.h}`} (0.75 — the app's own layout kept)`, a);
+  ok(verdictOf(same(a, { w: 673.5, h: 510.75 })), `DPR 2, 2× → 1.5×: the 898×681 pane becomes ${a && `${a.w}×${a.h}`} (0.75 — the app's own layout kept)`, a);
   const b = M.relaunchPaneCss({ pane: a, dpr: 2, from: R15, to: R2 }), c = M.relaunchPaneCss({ pane: { w: 898, h: 681 }, dpr: 2, from: R2, to: R1 }), d = M.relaunchPaneCss({ pane: c, dpr: 2, from: R1, to: R2 });
-  ok(same(b, { w: 898, h: 681 }) && same(c, { w: 449, h: 340.5 }) && same(d, { w: 898, h: 681 }), `round trips are exact: 2 → 1.5 → 2 ⇒ ${b && `${b.w}×${b.h}`}, 2 → 1 → 2 ⇒ ${d && `${d.w}×${d.h}`} (1× = ${c && `${c.w}×${c.h}`})`, { b, c, d });
+  ok(gateOf(same(b, { w: 898, h: 681 })) && gateOf(same(c, { w: 449, h: 340.5 })) && verdictOf(same(d, { w: 898, h: 681 })), `round trips are exact: 2 → 1.5 → 2 ⇒ ${b && `${b.w}×${b.h}`}, 2 → 1 → 2 ⇒ ${d && `${d.w}×${d.h}`} (1× = ${c && `${c.w}×${c.h}`})`, { b, c, d });
   // DPR 1, a 2× app SCALED TO FIT (its minimum 720x1232 in a workspace-capped pane): the main's own X size is the logical size
   const e = M.relaunchPaneCss({ pane: { w: 898, h: 913 }, mainPx: { w: 898, h: 1232 }, dpr: 1, from: R2, to: R15 });
   const e2 = M.relaunchPaneCss({ pane: { w: 898, h: 913 }, mainPx: null, dpr: 1, from: R2, to: R15 });
-  ok(same(e, { w: 673.5, h: 924 }) && same(e2, { w: 673.5, h: 684.75 }), `DPR 1, 2× scaled to fit → 1.5×: the main's X size (898×1232 at GDK 2 = 449×616 logical) gives ${e && `${e.w}×${e.h}`} — the capped pane alone would give ${e2 && `${e2.h}`} px tall (the fit's shrink kept)`, { e, e2 });
+  ok(gateOf(same(e, { w: 673.5, h: 924 })) && verdictOf(same(e2, { w: 673.5, h: 684.75 })), `DPR 1, 2× scaled to fit → 1.5×: the main's X size (898×1232 at GDK 2 = 449×616 logical) gives ${e && `${e.w}×${e.h}`} — the capped pane alone would give ${e2 && `${e2.h}`} px tall (the fit's shrink kept)`, { e, e2 });
   const f = M.relaunchPaneCss({ pane: { w: 898, h: 681 }, dpr: 2, from: { scale: 1.5, dpi: 144 }, to: R2 });
-  ok(same(f, { w: 1796, h: 1362 }), `a record from BEFORE lane D (1.5 = widgets 1×, text only) → 2×: the widgets double, so does the pane (${f && `${f.w}×${f.h}`})`, f);
+  ok(verdictOf(same(f, { w: 1796, h: 1362 })), `a record from BEFORE lane D (1.5 = widgets 1×, text only) → 2×: the widgets double, so does the pane (${f && `${f.w}×${f.h}`})`, f);
   const R25 = rec(2.5, 3, 0.8333), g1 = M.relaunchPaneCss({ pane: { w: 898, h: 681 }, dpr: 2, from: R2, to: R25 }), g2 = M.relaunchPaneCss({ pane: g1, dpr: 2, from: R25, to: R2 });
-  ok(same(g1, { w: 1122.5, h: 851.25 }) && same(g2, { w: 898, h: 681 }), `2× → 2.5× → 2× is exact too (${g1 && `${g1.w}×${g1.h}`} → ${g2 && `${g2.w}×${g2.h}`}) — the divisor is the GDK_SCALE, never widget ÷ a rounded picture scale`, { g1, g2 });
-  ok([{}, { pane: { w: 0, h: 1 }, from: R2, to: R1 }, { pane: { w: 5, h: 5 }, from: R2 }].every((x) => M.relaunchPaneCss(x) === null), 'relaunchPaneCss: a missing pane / record ⇒ null (the window is left as it is)');
+  ok(gateOf(same(g1, { w: 1122.5, h: 851.25 })) && verdictOf(same(g2, { w: 898, h: 681 })), `2× → 2.5× → 2× is exact too (${g1 && `${g1.w}×${g1.h}`} → ${g2 && `${g2.w}×${g2.h}`}) — the divisor is the GDK_SCALE, never widget ÷ a rounded picture scale`, { g1, g2 });
+  ok(verdictOf([{}, { pane: { w: 0, h: 1 }, from: R2, to: R1 }, { pane: { w: 5, h: 5 }, from: R2 }].every((x) => M.relaunchPaneCss(x) === null)), 'relaunchPaneCss: a missing pane / record ⇒ null (the window is left as it is)');
   // (d) CHROME DRAWS ITS OWN FRAME — the profile pref, merge-when-absent (measured: default decorations 1 ⇒ ssd; the pref ⇒ 0 ⇒ seamless)
   const CF = [[null, true, true, 'new'], [{}, true, true, 'absent'], [{ browser: { x: 1 } }, true, true, 'absent'], [{ browser: { custom_chrome_frame: false } }, true, false, 'set'], [{ browser: { custom_chrome_frame: true } }, true, false, 'set'], [[], false, false, 'not-an-object'], [{ browser: 5 }, false, false, 'browser-not-an-object'], ['x', false, false, 'not-an-object']];
   const cfGot = CF.map(([pr]) => M.chromiumFramePrefs(pr));
-  ok(CF.every(([, okW, chW, why], i) => cfGot[i].ok === okW && cfGot[i].changed === chW && cfGot[i].why === why), `chromiumFramePrefs: ${CF.map(([pr], i) => `${JSON.stringify(pr)} ⇒ ${cfGot[i].why}`).join('; ')}`, cfGot);
+  ok(verdictOf(CF.every(([, okW, chW, why], i) => cfGot[i].ok === okW && cfGot[i].changed === chW && cfGot[i].why === why)), `chromiumFramePrefs: ${CF.map(([pr], i) => `${JSON.stringify(pr)} ⇒ ${cfGot[i].why}`).join('; ')}`, cfGot);
   ok(cfGot[0].prefs.browser.custom_chrome_frame === true && cfGot[2].prefs.browser.x === 1 && cfGot[2].prefs.browser.custom_chrome_frame === true && cfGot[3].prefs.browser.custom_chrome_frame === false && M.CHROMIUM_FRAME_MARKER === '.vibespace-frame-seeded', 'the pref is set to true only when ABSENT — an existing false (the user turned "Use system title bar and borders" back on inside Chrome) is kept; other keys survive; the marker name');
   // (e) WIRING PINS — the keeper records what it drew, bringUp uses the SAME rule, the chromium profile is seeded before the app
   const keeper = keeperSrc(), win = read('src/lib/desktop-app-window.js');
-  ok(/gdkScale: rungScales \? knobs\.gdkScale : null, pictureScale: rungScales \? knobs\.pictureScale : null,/.test(keeper) && /const knobs = M\.scaleKnobs\(rec\.scale \|\| 1, \{ rule: M\.scaleRuleOf\(rec\) \}\);/.test(keeper), 'WIRING PIN: the launch records gdkScale + pictureScale; the bring-up spells the env by the same rule');
+  ok(gateOf(/gdkScale: rungScales \? knobs\.gdkScale : null, pictureScale: rungScales \? knobs\.pictureScale : null,/.test(keeper)) && verdictOf(/const knobs = M\.scaleKnobs\(rec\.scale \|\| 1, \{ rule: M\.scaleRuleOf\(rec\) \}\);/.test(keeper)), 'WIRING PIN: the launch records gdkScale + pictureScale; the bring-up spells the env by the same rule');
   { const iSeed = keeper.indexOf('await seedChromiumFrame(rec.profileDir)'), iApp = keeper.indexOf('display.startApp(');
-    ok(iSeed > 0 && iSeed < iApp && /if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(keeper) && /M\.chromiumFramePrefs\(prefs\)/.test(keeper) && /M\.CHROMIUM_FRAME_MARKER/.test(keeper), 'WIRING PIN: a chromium record\'s profile is seeded (once — the marker) BEFORE the browser starts, through the PURE chromiumFramePrefs'); }
-  ok(/pictureScale: \(\) => renderOf\(rec\)\.picture/.test(win) && /fitAfterRelaunch\(geo, next, plan\)/.test(win) && win.indexOf('    retarget(r.app.id);') > 0 && win.indexOf('    retarget(r.app.id);') < win.indexOf('    planRelaunch(r.app, { answer: true });') && win.indexOf('    applyMinSize(null);\n    if (relaunchPress && relaunchPress.fromId === id) relaunchPress = { ...relaunchPress, nextId }; // B-a52d') > 0 && win.indexOf('    applyMinSize(null);\n    if (relaunchPress && relaunchPress.fromId === id)') < win.indexOf('    id = nextId;\n    winInfo._desktopAppId = id;') && win.indexOf('    planRelaunch(r); // B-a52d') > 0 && win.indexOf('    planRelaunch(r); // B-a52d') < win.indexOf('    rec = r; ensureView(streamKindOf(r)); render();'), 'WIRING PIN: the view reads the RECORD\'s picture scale; the relaunch resizes the window AFTER retarget (the old app\'s minimum cleared first) — B-a52d: only through planRelaunch, at the answer (after retarget) or at the record\'s door (after the broadcast\'s retarget named the press\'s successor), before the successor\'s view');
+    ok(iSeed > 0 && iSeed < iApp && gateOf(/if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(keeper)) && gateOf(/M\.chromiumFramePrefs\(prefs\)/.test(keeper)) && verdictOf(/M\.CHROMIUM_FRAME_MARKER/.test(keeper)), 'WIRING PIN: a chromium record\'s profile is seeded (once — the marker) BEFORE the browser starts, through the PURE chromiumFramePrefs'); }
+  ok(gateOf(/pictureScale: \(\) => renderOf\(rec\)\.picture/.test(win)) && gateOf(/fitAfterRelaunch\(geo, next, plan\)/.test(win)) && win.indexOf('    retarget(r.app.id);') > 0 && win.indexOf('    retarget(r.app.id);') < win.indexOf('    planRelaunch(r.app, { answer: true });') && win.indexOf('    applyMinSize(null);\n    if (relaunchPress && relaunchPress.fromId === id) relaunchPress = { ...relaunchPress, nextId }; // B-a52d') > 0 && win.indexOf('    applyMinSize(null);\n    if (relaunchPress && relaunchPress.fromId === id)') < win.indexOf('    id = nextId;\n    winInfo._desktopAppId = id;') && win.indexOf('    planRelaunch(r); // B-a52d') > 0 && win.indexOf('    planRelaunch(r); // B-a52d') < win.indexOf('    rec = r; ensureView(streamKindOf(r)); render();'), 'WIRING PIN: the view reads the RECORD\'s picture scale; the relaunch resizes the window AFTER retarget (the old app\'s minimum cleared first) — B-a52d: only through planRelaunch, at the answer (after retarget) or at the record\'s door (after the broadcast\'s retarget named the press\'s successor), before the successor\'s view');
   // (f) NEGATIVE CONTROL — a patched copy with the floor rule (the pre-lane-D knobs): the 1.5 record's widgets are 1× (the white edges)
   const srcA = read('src/desktop-fit.js');
   const fromA = "  const gdkScale = r === 'dpi' ? Math.max(1, Math.min(SCALE_MAX, Math.floor(s))) : Math.max(1, Math.min(SCALE_MAX, Math.ceil(s - 1e-9)));";
@@ -1167,11 +1167,11 @@ console.log('B-5ee0 ② relaunchLeaseVerdict');
 {
   const lv = M.relaunchLeaseVerdict({ label: 'Calc' }, { sessionId: 's-1', sessionName: 'alpha' });
   const winSrc = read('src/lib/desktop-app-window.js');
-  ok(/seatState\(\) !== 'watch' \|\| !\(e\.ctrlKey \|\| e\.metaKey\)/.test(winSrc) && /xpra gives its clipboard to one viewer/.test(winSrc), '⑥ WIRING: a copy / paste key in a Watch pane SAYS that xpra gives its clipboard to one viewer (it cannot be fixed on this side)');
-  ok(lv && lv.code === 'lease' && /alpha is driving Calc/.test(lv.error) && M.relaunchLeaseVerdict({ label: 'Calc' }, null) === null, '② an agent holding the window ⇒ refused by name (who drives what); nobody ⇒ null', lv);
+  ok(gateOf(/seatState\(\) !== 'watch' \|\| !\(e\.ctrlKey \|\| e\.metaKey\)/.test(winSrc)) && verdictOf(/xpra gives its clipboard to one viewer/.test(winSrc)), '⑥ WIRING: a copy / paste key in a Watch pane SAYS that xpra gives its clipboard to one viewer (it cannot be fixed on this side)');
+  ok(gateOf(lv) && lv.code === 'lease' && gateOf(/alpha is driving Calc/.test(lv.error)) && M.relaunchLeaseVerdict({ label: 'Calc' }, null) === null, '② an agent holding the window ⇒ refused by name (who drives what); nobody ⇒ null', lv);
   const routes = read('src/routes/desktop-apps.js');
   const body = routes.slice(routes.indexOf("router.post('/api/desktop/apps/:id/relaunch'"), routes.indexOf("router.post('/api/desktop/apps/:id/relaunch'") + 900);
-  ok(/ctx\.windowEngine \? ctx\.windowEngine\.leaseOf\(req\.params\.id\)/.test(body) && /relaunchLeaseVerdict\(/.test(body) && body.indexOf('relaunchLeaseVerdict(') < body.indexOf('ctx.keeper.relaunch(') && /code === 'lease' \? 409|\|\| code === 'lease' \? 409/.test(routes), '② WIRING: the relaunch route asks the window engine for the lease BEFORE the keeper relaunches, and answers 409');
+  ok(gateOf(/ctx\.windowEngine \? ctx\.windowEngine\.leaseOf\(req\.params\.id\)/.test(body)) && gateOf(/relaunchLeaseVerdict\(/.test(body)) && body.indexOf('relaunchLeaseVerdict(') < body.indexOf('ctx.keeper.relaunch(') && verdictOf(/code === 'lease' \? 409|\|\| code === 'lease' \? 409/.test(routes)), '② WIRING: the relaunch route asks the window engine for the lease BEFORE the keeper relaunches, and answers 409');
 }
 
 // ── B-04da ④: ending a LibreOffice session ASKS it first ──
@@ -1181,7 +1181,7 @@ console.log('B-04da ④ askCloseVerdict');
   ok(M.askCloseVerdict(rec).ask === true, '④ a running LibreOffice session is asked first (its own File ▸ Exit)');
   ok(M.askCloseVerdict(rec, { force: true }).why === 'forced' && M.askCloseVerdict({ ...rec, state: 'launching' }).why === 'not-running' && M.askCloseVerdict({ ...rec, profileDir: null }).why === 'no-profile' && M.askCloseVerdict({ state: 'ready' }).why === 'not-office' && M.askCloseVerdict(null).ask === false, '④ CONTROLS: the person confirmed (force), still launching, no profile to hand over to, any other app ⇒ no ask', ['forced', 'not-running', 'no-profile', 'not-office']);
   const r1 = M.validateRelaunchRequest({ scale: 2, force: true }), r2 = M.validateRelaunchRequest({ scale: 2 }), r3 = M.validateRelaunchRequest({ scale: 2, force: 'yes' });
-  ok(r1.ok && r1.force === true && r2.ok && r2.force === false && !r3.ok && r3.code === 'bad-request', '④ a relaunch carries `force` (true only when the person confirmed; anything but a boolean is refused)', [r1, r2, r3]);
+  ok(gateOf(r1.ok) && r1.force === true && gateOf(r2.ok) && r2.force === false && !r3.ok && r3.code === 'bad-request', '④ a relaunch carries `force` (true only when the person confirmed; anything but a boolean is refused)', [r1, r2, r3]);
 }
 
 // ── design 014 D1 (lane desktop-vnc-native): the picker row per platform — every Linux row BYTE-IDENTICAL to ed1e0b83 ──
@@ -1191,11 +1191,11 @@ console.log('§D014 the machine picker: linux / darwin / win32 × online / offli
   // [input, the ed1e0b83 verdict] — computed ONCE from the base's own machinePickRow (git show ed1e0b83:src/desktop-apps.js), frozen here
   const BASE = [[{"hostId":"local"},{"selectable":true,"code":"ready"}],[{},{"selectable":true,"code":"ready"}],[null,{"selectable":true,"code":"ready"}],[{"hostId":"h","platform":"linux","connected":true,"capabilities":["desktop-serve"]},{"selectable":true,"code":"ready"}],[{"hostId":"h","platform":"linux","connected":true,"capabilities":[]},{"selectable":false,"code":"host_needs_daemon"}],[{"hostId":"h","platform":"linux","connected":true},{"selectable":false,"code":"host_needs_daemon"}],[{"hostId":"h","transport":"dial","link":"offline"},{"selectable":false,"code":"offline"}],[{"hostId":"h","transport":"dial","link":"online"},{"selectable":true,"code":"connect"}],[{"hostId":"h","transport":"dial","link":"unknown"},{"selectable":false,"code":"offline"}],[{"hostId":"h","transport":"ssh","link":"offline"},{"selectable":true,"code":"offline"}],[{"hostId":"h","transport":"ssh","link":"unknown"},{"selectable":true,"code":"connect"}],[{"hostId":"h","transport":"ssh","link":"online"},{"selectable":true,"code":"connect"}],[{"hostId":"h","platform":"linux","connected":false,"transport":"dial","link":"offline"},{"selectable":false,"code":"offline"}],[{"hostId":"h","platform":"freebsd","connected":true,"capabilities":["desktop-serve"]},{"selectable":false,"code":"no_x11"}],[{"hostId":"h","platform":"linux","connected":true,"capabilities":["desktop-serve"],"vnc":{"ok":true,"auth":"ard","type":30}},{"selectable":true,"code":"ready"}]];
   const linuxSame = (fn) => BASE.every(([inp, want]) => JSON.stringify(fn(inp)) === JSON.stringify(want));
-  ok(linuxSame(A.machinePickRow), `every Linux / unknown-platform row is byte-identical to today's (${BASE.length} rows; a probe answer on a Linux row is ignored)`, BASE.filter(([i, w]) => JSON.stringify(A.machinePickRow(i)) !== JSON.stringify(w)));
+  ok(verdictOf(linuxSame(A.machinePickRow)), `every Linux / unknown-platform row is byte-identical to today's (${BASE.length} rows; a probe answer on a Linux row is ignored)`, BASE.filter(([i, w]) => JSON.stringify(A.machinePickRow(i)) !== JSON.stringify(w)));
   const appsSrc = fs.readFileSync(path.join(repo, 'src/desktop-apps.js'), 'utf8');
   const anchor = "return caps.includes('desktop-serve') ? { selectable: true, code: 'ready' } : { selectable: false, code: 'host_needs_daemon' };";
   const moved = MUTD.load('src/desktop-apps.js', editAnchor(appsSrc, anchor, anchor.replace("code: 'ready' }", "code: 'ready', desktop: null }"), "src/desktop-apps.js"), 'd014-linux');
-  ok(appsSrc.includes(anchor) && !linuxSame(moved.machinePickRow), 'CONTROL: a copy that adds ONE key to a Linux row fails the byte-identical check');
+  ok(gateOf(appsSrc.includes(anchor)) && !linuxSame(moved.machinePickRow), 'CONTROL: a copy that adds ONE key to a Linux row fails the byte-identical check');
   const R = (o) => A.machinePickRow({ hostId: 'mac-1', transport: 'dial', link: 'online', ...o });
   const ARD = { ok: true, auth: 'ard', type: 30 }, VNC = { ok: true, auth: 'password', type: 2 }, NONE = { ok: false, code: 'no_listener' };
   const cases = [
@@ -1215,16 +1215,16 @@ console.log('§D014 the machine picker: linux / darwin / win32 × online / offli
   ok(DSm.upgradeId('/api/desktop/' + A.machineDesktopId('host-b-0d1e2f3a') + '/stream') === 'machine-desktop.host-b-0d1e2f3a', 'the id fits the bridge\'s STREAM_RE (no new path shape)');
 }
 
-for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 8 })) ok(verdictOf(r.pass), '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (lane dc-apps-rows, F-I2)');
 {
   const df = read('deploy/docker/Dockerfile');
   const steps = M.xpraRepoSteps('bookworm'), line = (re) => steps.find((l) => re.test(l)) || '';
   const keyLine = line(/curl -fsSL/), checkLine = line(/sha256sum -c --status/), moveLine = line(/^mv -f /), srcLine = line(/Types: deb/), pinLine = line(/Pin-Priority/);
-  ok(df.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new`) && keyLine.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new`), 'the image fetches the key the plan fetches (XPRA_KEY_URL), beside the keyring until it is checked');
+  ok(gateOf(df.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new`)) && verdictOf(keyLine.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new`)), 'the image fetches the key the plan fetches (XPRA_KEY_URL), beside the keyring until it is checked');
   // lane machine-needs-at-pairing pick 3: THE KEY IS PINNED — the check runs before the move, the move before any apt source names it
-  ok(checkLine === M.XPRA_KEY_CHECK && steps.indexOf(keyLine) < steps.indexOf(checkLine) && steps.indexOf(checkLine) < steps.indexOf(moveLine) && steps.indexOf(moveLine) < steps.indexOf(srcLine) && df.includes(`&& ${checkLine} \\\n`) && df.includes(`&& ${moveLine} \\\n`), 'the key is checked (its pinned SHA-256) BEFORE it is moved into the keyring, and moved before the apt source names it — the image runs the same lines');
+  ok(checkLine === M.XPRA_KEY_CHECK && steps.indexOf(keyLine) < steps.indexOf(checkLine) && steps.indexOf(checkLine) < steps.indexOf(moveLine) && steps.indexOf(moveLine) < steps.indexOf(srcLine) && gateOf(df.includes(`&& ${checkLine} \\\n`)) && verdictOf(df.includes(`&& ${moveLine} \\\n`)), 'the key is checked (its pinned SHA-256) BEFORE it is moved into the keyring, and moved before the apt source names it — the image runs the same lines');
   {
     const cp = require('node:child_process'), os = require('node:os');
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-xpra-key-')), k = path.join(d, 'k.asc');
@@ -1235,7 +1235,7 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
     for (const t of ['sh', 'mktemp', 'sha256sum', 'rm', 'cat', 'echo', '[']) { const w = cp.spawnSync('sh', ['-c', `command -v ${t === '[' ? 'test' : t}`], { encoding: 'utf8' }).stdout.trim(); if (w.startsWith('/')) fs.symlinkSync(w, path.join(nogpg, t)); }
     const a = run(real), b = other ? run(other) : null, c = run(real, { PATH: nogpg });
     const realHasGpg = cp.spawnSync('sh', ['-c', 'command -v gpg']).status === 0;
-    ok(a.rc === 0 && a.kept && (!realHasGpg || (b && b.rc === 3 && !b.kept && /is not the pinned one/.test(b.err))) && c.rc === 0, `the check: xpra.org's key (the fixture) passes; ${other ? 'another key' : '(no other key on this box)'} is refused (exit 3), its download removed, the reason said; with no gpg on PATH the file's pinned SHA-256 passes it`, { a, b, c });
+    ok(a.rc === 0 && gateOf(a.kept) && (!realHasGpg || (gateOf(b) && b.rc === 3 && !b.kept && gateOf(/is not the pinned one/.test(b.err)))) && c.rc === 0, `the check: xpra.org's key (the fixture) passes; ${other ? 'another key' : '(no other key on this box)'} is refused (exit 3), its download removed, the reason said; with no gpg on PATH the file's pinned SHA-256 passes it`, { a, b, c });
     const tampered = path.join(d, 'tampered.asc'); fs.writeFileSync(tampered, fs.readFileSync(real, 'utf8').replace('mQINB', 'mQINC'));
     const e = run(tampered, { PATH: nogpg });
     ok(e.rc === 3 && !e.kept, 'with no gpg, a changed key file fails the pinned SHA-256 and is removed (exit 3)', e);
@@ -1248,32 +1248,32 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
     const cases = { pinned_plus_other: fx + otherKey, other_plus_pinned: otherKey + fx, truncated: fx.slice(0, Math.floor(fx.length / 2)) };
     const got = {};
     for (const [name, body] of Object.entries(cases)) { const f = path.join(d, name + '.asc'); fs.writeFileSync(f, body); const g = run(f), n = run(f, { PATH: nogpg }); got[name] = [g.rc, g.kept, n.rc, n.kept, /is not the pinned one/.test(g.err)]; }
-    ok(Object.values(got).every(([gr, gk, nr, nk, said]) => gr === 3 && !gk && nr === 3 && !nk && said), `EXACTLY the pinned key file: the pinned key + another key (either order) and a truncated file are refused (exit 3, the download removed, the reason said) — with gpg on PATH${realHasGpg ? '' : ' (none on this box)'} as without it`, got);
+    ok(verdictOf(Object.values(got).every(([gr, gk, nr, nk, said]) => gr === 3 && !gk && nr === 3 && !nk && said)), `EXACTLY the pinned key file: the pinned key + another key (either order) and a truncated file are refused (exit 3, the download removed, the reason said) — with gpg on PATH${realHasGpg ? '' : ' (none on this box)'} as without it`, got);
     // a fetch that fails leaves nothing in the keyring folder (wget makes its -O file before it fails)
     const kr = path.join(d, 'kr'); fs.mkdirSync(kr); const stub = path.join(d, 'stub'); fs.mkdirSync(stub);
     fs.writeFileSync(path.join(stub, 'curl'), '#!/bin/sh\nexit 22\n', { mode: 0o755 });
     fs.writeFileSync(path.join(stub, 'wget'), '#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -qO ] && { : > "$2"; shift; }; shift; done\nexit 8\n', { mode: 0o755 });
     const fr = cp.spawnSync('sh', ['-c', `set -e; ${String(M.XPRA_KEY_FETCH || ': no fetch line').split('/usr/share/keyrings').join(kr)}`], { encoding: 'utf8', env: { PATH: `${stub}:${process.env.PATH}` } });
-    ok(fr.status === 3 && fs.readdirSync(kr).length === 0 && /could not be fetched/.test(fr.stderr), 'a key fetch that fails (curl, then wget) leaves NOTHING in the keyring folder and says so (exit 3)', { rc: fr.status, left: fs.readdirSync(kr), err: fr.stderr.slice(0, 160) });
+    ok(fr.status === 3 && fs.readdirSync(kr).length === 0 && verdictOf(/could not be fetched/.test(fr.stderr)), 'a key fetch that fails (curl, then wget) leaves NOTHING in the keyring folder and says so (exit 3)', { rc: fr.status, left: fs.readdirSync(kr), err: fr.stderr.slice(0, 160) });
     fs.rmSync(d, { recursive: true, force: true });
   }
   // the source names EXACTLY the pinned keyring file (apt never falls back to the machine-wide keyring)
-  ok(srcLine.includes("'Signed-By: /usr/share/keyrings/xpra.asc'") && df.includes("'Signed-By: /usr/share/keyrings/xpra.asc'"), 'the apt source says Signed-By: /usr/share/keyrings/xpra.asc — in the plan and in the image (never the machine-wide keyring)');
+  ok(gateOf(srcLine.includes("'Signed-By: /usr/share/keyrings/xpra.asc'")) && verdictOf(df.includes("'Signed-By: /usr/share/keyrings/xpra.asc'")), 'the apt source says Signed-By: /usr/share/keyrings/xpra.asc — in the plan and in the image (never the machine-wide keyring)');
   // hostile facts never reach the root script: every free-text fact set to shell text ⇒ the script byte-equal to the clean one
   {
     const clean = { platform: 'linux', apt: '/usr/bin/apt-get', distro: 'debian', codename: 'bookworm', aptXpra: '3.1', sudo: true };
     const evil = '$(touch /tmp/vs-pwn)`id`;"\'\n|&';
     const hostile = { ...clean, prettyName: evil, like: ['debian', evil], version: evil, id: evil, kernel: evil, arch: evil };
     const a = M.xpraInstallPlan(clean), b = M.xpraInstallPlan(hostile), c = M.xpraInstallPlan({ ...clean, codename: 'bookworm; rm -rf /' });
-    ok(a.ok && b.ok && a.script === b.script && !b.script.includes('vs-pwn') && !c.ok, 'hostile facts never reach the root script (every free-text field set to shell text ⇒ byte-equal to the clean one); a hostile codename is refused by name', { cOk: c.ok, cCode: c.code });
+    ok(gateOf(a.ok) && gateOf(b.ok) && a.script === b.script && !b.script.includes('vs-pwn') && !c.ok, 'hostile facts never reach the root script (every free-text field set to shell text ⇒ byte-equal to the clean one); a hostile codename is refused by name', { cOk: c.ok, cCode: c.code });
   }
-  ok(df.includes(`&& ${srcLine} \\\n`) && df.includes(`&& ${pinLine}\n`), 'the image writes the plan\'s deb822 source + pin lines verbatim (xpraRepoSteps(bookworm): XPRA_REPO_URL, XPRA_PIN_MAJOR)');
+  ok(gateOf(df.includes(`&& ${srcLine} \\\n`)) && verdictOf(df.includes(`&& ${pinLine}\n`)), 'the image writes the plan\'s deb822 source + pin lines verbatim (xpraRepoSteps(bookworm): XPRA_REPO_URL, XPRA_PIN_MAJOR)');
   const pl = M.xpraInstallPlan({ platform: 'linux', apt: true, distro: 'debian', codename: 'bookworm', aptXpra: '3.1', sudo: true });
-  ok(pl.ok && M.xpraRepoSteps('bookworm').every((l) => pl.script.includes(l)), 'the machine plan runs exactly xpraRepoSteps');
+  ok(gateOf(pl.ok) && verdictOf(M.xpraRepoSteps('bookworm').every((l) => pl.script.includes(l))), 'the machine plan runs exactly xpraRepoSteps');
   // B-bcb8 unit A's follow (r1716 (5)): THE COUNT of the copied commands lives HERE, with the pure function's own suite (the heavy
   // test-desktop-serve keeps its own pin): xpra.org's plan is ten steps — the keyring folder, the key's fetch, its pinned check,
   // its SYNC, its move, the source, the pin, apt-get update, the install, xpra --version — each one copied line
-  ok(pl.commands.length === 10 && pl.commands.some((c) => /sync_file "\$K"/.test(c)) && pl.commands.findIndex((c) => /sha256sum -c/.test(c)) < pl.commands.findIndex((c) => /sync_file "\$K"/.test(c)) && pl.commands.findIndex((c) => /sync_file "\$K"/.test(c)) < pl.commands.findIndex((c) => /mv -f \/usr\/share\/keyrings\/xpra\.asc\.new/.test(c)), `xpra.org's plan copies TEN commands, the key synced between its check and its move (${pl.commands.length})`, pl.commands);
+  ok(pl.commands.length === 10 && gateOf(pl.commands.some((c) => /sync_file "\$K"/.test(c))) && pl.commands.findIndex((c) => /sha256sum -c/.test(c)) < pl.commands.findIndex((c) => /sync_file "\$K"/.test(c)) && pl.commands.findIndex((c) => /sync_file "\$K"/.test(c)) < pl.commands.findIndex((c) => /mv -f \/usr\/share\/keyrings\/xpra\.asc\.new/.test(c)), `xpra.org's plan copies TEN commands, the key synced between its check and its move (${pl.commands.length})`, pl.commands);
 }
 
 { // lane app-display-portal: a sandboxed app's own bus + portal — the PURE plan
@@ -1287,17 +1287,17 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
   const bins = { 'dbus-daemon': '/usr/bin/dbus-daemon', 'xdg-desktop-portal': '/usr/libexec/xdg-desktop-portal', 'xdg-desktop-portal-gtk': '/usr/libexec/xdg-desktop-portal-gtk', 'xdg-document-portal': '/usr/libexec/xdg-document-portal', 'xdg-permission-store': null };
   const pl = M.portalPlan({ dir: '/d/da-1', display: ':7', authFile: '/d/da-1/Xauthority', bins, a11y: 'unix:path=/run/a11y', why: 'flatpak' });
   const txt = (f) => (pl.files.find((x) => x.file.endsWith(f)) || {}).text || '';
-  ok(pl.ok && pl.address === 'unix:path=/d/da-1/portal/bus' && pl.busArgv.join(' ') === '/usr/bin/dbus-daemon --nofork --config-file=/d/da-1/portal/bus.conf', 'portalPlan: the bus argv + address under the app dir');
-  ok(/<listen>unix:path=\/d\/da-1\/portal\/bus<\/listen>/.test(txt('bus.conf')) && /<servicedir>\/d\/da-1\/portal\/services<\/servicedir>/.test(txt('bus.conf')) && !/standard_session_servicedirs/.test(txt('bus.conf')), 'portalPlan: bus.conf listens on the socket and activates ONLY its own services dir');
+  ok(gateOf(pl.ok) && pl.address === 'unix:path=/d/da-1/portal/bus' && pl.busArgv.join(' ') === '/usr/bin/dbus-daemon --nofork --config-file=/d/da-1/portal/bus.conf', 'portalPlan: the bus argv + address under the app dir');
+  ok(gateOf(/<listen>unix:path=\/d\/da-1\/portal\/bus<\/listen>/.test(txt('bus.conf'))) && gateOf(/<servicedir>\/d\/da-1\/portal\/services<\/servicedir>/.test(txt('bus.conf'))) && !/standard_session_servicedirs/.test(txt('bus.conf')), 'portalPlan: bus.conf listens on the socket and activates ONLY its own services dir');
   ok(txt('org.freedesktop.portal.Desktop.service') === '[D-BUS Service]\nName=org.freedesktop.portal.Desktop\nExec=/usr/libexec/xdg-desktop-portal\n' && !!txt('org.freedesktop.impl.portal.desktop.gtk.service') && !!txt('org.freedesktop.portal.Documents.service') && !pl.files.some((f) => /PermissionStore/.test(f.file)), 'portalPlan: one service file per PRESENT binary (frontend, gtk, documents; the missing permission store left out)');
   ok(txt('portals.conf') === '[preferred]\ndefault=gtk\n' && pl.env.XDG_CONFIG_HOME === '/d/da-1/portal/config' && pl.env.DISPLAY === ':7' && pl.env.XAUTHORITY === '/d/da-1/Xauthority' && pl.env.XDG_CURRENT_DESKTOP === 'GNOME' && pl.env.XDG_RUNTIME_DIR === '/d/da-1/portal/run' && pl.env.XDG_DATA_HOME === '/d/da-1/portal/data' && pl.env.GTK_USE_PORTAL === '0', 'portalPlan: the bus env = the app display + private config (gtk for every interface) / data / runtime dirs');
   ok(pl.appEnv.DBUS_SESSION_BUS_ADDRESS === pl.address && pl.appEnv.AT_SPI_BUS_ADDRESS === 'unix:path=/run/a11y' && pl.env.AT_SPI_BUS_ADDRESS === 'unix:path=/run/a11y' && !('GTK_USE_PORTAL' in pl.appEnv), 'portalPlan: the app gets the private bus + the USER\'s a11y bus; a flatpak needs no GTK_USE_PORTAL');
   ok(M.portalPlan({ dir: '/d', display: ':1', bins, why: 'all' }).appEnv.GTK_USE_PORTAL === '1' && !('AT_SPI_BUS_ADDRESS' in M.portalPlan({ dir: '/d', display: ':1', bins }).appEnv), 'portalPlan: `all` ⇒ GTK_USE_PORTAL=1 on the app; no a11y address ⇒ none set');
   const miss = M.portalPlan({ dir: '/d', display: ':1', bins: { 'dbus-daemon': '/usr/bin/dbus-daemon' } });
   ok(miss.ok === false && miss.why === 'xdg-desktop-portal, xdg-desktop-portal-gtk not found on this machine', 'portalPlan: missing binaries ⇒ not ok, the reason names them');
-  ok(M.portalPlan({ dir: '/x'.repeat(60), display: ':1', bins }).ok === false && /over 107/.test(M.portalPlan({ dir: '/x'.repeat(60), display: ':1', bins }).why), 'portalPlan: a socket path over sun_path ⇒ not ok, said');
+  ok(M.portalPlan({ dir: '/x'.repeat(60), display: ':1', bins }).ok === false && verdictOf(/over 107/.test(M.portalPlan({ dir: '/x'.repeat(60), display: ':1', bins }).why)), 'portalPlan: a socket path over sun_path ⇒ not ok, said');
   ok(M.APP_PORTAL_MODES.join() === 'auto,all,off' && M.APP_PORTAL_DEFAULT === 'auto', 'the setting\'s three values, default auto (sandboxed apps + browsers)');
-  ok((M.browserArgv({ browser: 'chromium', exec: '/opt/google/chrome/chrome', args: [] }, { profileDir: '/d/p' }).argv || []).includes('--password-store=basic'), 'a desktop-app Chrome already runs the basic password store — the private bus loses it no keyring');
+  ok(verdictOf((M.browserArgv({ browser: 'chromium', exec: '/opt/google/chrome/chrome', args: [] }, { profileDir: '/d/p' }).argv || []).includes('--password-store=basic')), 'a desktop-app Chrome already runs the basic password store — the private bus loses it no keyring');
 }
 
 { // lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr, .268): ONE PROGRAM, ONE INSTANCE — the PURE verdicts (the keeper legs:
@@ -1321,34 +1321,34 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
   ok(M.launchVerdict({ row: { ...row, runsTwice: false, lock: { pid: 4242, live: false, recordId: null } }, apps: [] }).act === 'launch', 'a stale lock (dead pid) holds nothing');
   // the installed browser's family (DEFECT #0: Exec=/usr/bin/google-chrome-stable %U ran AS TYPED on the default profile)
   const fam = (o) => M.appBrowserVerdict(o);
-  ok(same(fam({ exec: '/usr/bin/google-chrome-stable', args: [], category: 'browser' }), { isBrowser: true, browser: 'chromium', ownProfile: true, why: 'exec' }), 'an installed google-chrome-stable ⇒ the chromium family, its own profile');
-  ok(['brave-browser', 'microsoft-edge-stable', 'vivaldi-stable', 'chromium-browser', '/opt/x/chrome'].every((e) => fam({ exec: e }).browser === 'chromium') && ['firefox-esr', 'librewolf', '/usr/lib/firefox/firefox'].every((e) => fam({ exec: e }).browser === 'firefox'), 'the families by precise basename (chromium-based / firefox-based)');
+  ok(verdictOf(same(fam({ exec: '/usr/bin/google-chrome-stable', args: [], category: 'browser' }), { isBrowser: true, browser: 'chromium', ownProfile: true, why: 'exec' })), 'an installed google-chrome-stable ⇒ the chromium family, its own profile');
+  ok(gateOf(['brave-browser', 'microsoft-edge-stable', 'vivaldi-stable', 'chromium-browser', '/opt/x/chrome'].every((e) => fam({ exec: e }).browser === 'chromium')) && verdictOf(['firefox-esr', 'librewolf', '/usr/lib/firefox/firefox'].every((e) => fam({ exec: e }).browser === 'firefox')), 'the families by precise basename (chromium-based / firefox-based)');
   ok(fam({ exec: 'chromium-thumbnailer' }).isBrowser === false && fam({ exec: 'firefox-wrapper' }).browser === null && fam({ exec: 'xterm' }).isBrowser === false, 'never a prefix: chromium-thumbnailer is no browser, an unknown name has no family');
   ok(fam({ exec: 'flatpak', args: ['run', 'com.google.Chrome'], category: 'browser' }).why === 'launcher' && fam({ exec: '/var/lib/flatpak/exports/bin/com.google.Chrome' }).why === 'app-id' && fam({ exec: 'epiphany', category: 'browser' }).why === 'unknown-family', 'a launcher / a sandboxed app id / an unknown browser ⇒ a browser WITHOUT its own profile');
   ok(fam({ id: 'chromium', browser: 'chromium', exec: 'google-chrome' }).why === 'catalog' && fam({ browser: 'chromium', browserBy: 'exec', exec: 'xterm' }).isBrowser === false, 'the catalog\'s browser row keeps its family; a family DERIVED from an exec is re-judged by the exec (a variant)');
   // runs twice
   const tw = (o) => M.runsTwiceVerdict(o);
-  ok(tw({ exec: 'google-chrome-stable' }).twice && tw({ office: 'writer', exec: 'soffice' }).twice && tw({ exec: '/usr/bin/xterm' }).twice, 'runs twice: a browser with its own profile, LibreOffice (its own profile), a one-process terminal');
-  ok(same(tw({ exec: 'flatpak', args: ['run', 'com.google.Chrome'] }), { twice: false, why: 'shared-profile' }) && same(tw({ exec: 'gnome-calculator' }), { twice: false, why: 'single-instance' }) && tw({ exec: 'gnome-terminal' }).twice === false, 'runs once: a browser on its default profile, anything that may hand a second start to the first (GApplication — gnome-terminal is a server)');
+  ok(gateOf(tw({ exec: 'google-chrome-stable' }).twice) && gateOf(tw({ office: 'writer', exec: 'soffice' }).twice) && verdictOf(tw({ exec: '/usr/bin/xterm' }).twice), 'runs twice: a browser with its own profile, LibreOffice (its own profile), a one-process terminal');
+  ok(gateOf(same(tw({ exec: 'flatpak', args: ['run', 'com.google.Chrome'] }), { twice: false, why: 'shared-profile' })) && gateOf(same(tw({ exec: 'gnome-calculator' }), { twice: false, why: 'single-instance' })) && tw({ exec: 'gnome-terminal' }).twice === false, 'runs once: a browser on its default profile, anything that may hand a second start to the first (GApplication — gnome-terminal is a server)');
   // the quick exit
   ok(M.QUICK_EXIT_MS === 3000, 'QUICK_EXIT_MS = 3 s');
-  ok(same(M.quickExitVerdict({ appAt: 1000, readyAt: 1200 }, 2000), { quick: true, asked: false, afterMs: 1000, sinceReadyMs: 800, tail: '0.8 s after ready' }) && M.quickExitVerdict({ appAt: 1000 }, 1400).tail === 'before ready, 0.4 s after it started', 'quickExitVerdict: measured from the app\'s own spawn; the journal tail says it since ready (or before ready)');
+  ok(gateOf(same(M.quickExitVerdict({ appAt: 1000, readyAt: 1200 }, 2000), { quick: true, asked: false, afterMs: 1000, sinceReadyMs: 800, tail: '0.8 s after ready' })) && M.quickExitVerdict({ appAt: 1000 }, 1400).tail === 'before ready, 0.4 s after it started', 'quickExitVerdict: measured from the app\'s own spawn; the journal tail says it since ready (or before ready)');
   ok(M.quickExitVerdict({ appAt: 1000, readyAt: 1010 }, 1030).tail === 'under 0.1 s after ready' && M.quickExitVerdict({ appAt: 1000 }, 1018).tail === 'before ready, under 0.1 s after it started', 'a handover inside 0.1 s says "under 0.1 s" (never "0.0 s")');
   ok(M.quickExitVerdict({ appAt: 1000, readyAt: 1100 }, 4000).quick === false && M.quickExitVerdict({ appAt: 1000 }, 3999).quick === true && M.quickExitVerdict({ startedAt: 1000 }, 1500).quick === true, 'the 3 s edge; an older record without appAt is measured from its start');
   // int267 seam (the guard-programmatic-not-the-press law): an exit after the person's own close (closeAskedAt since this spawn) ANSWERS it — never a quick exit; an ask from before this spawn, or after the exit, is not this exit's
   ok(M.quickExitVerdict({ appAt: 1000, readyAt: 1100, closeAskedAt: 1500 }, 2000).quick === false && M.quickExitVerdict({ appAt: 1000, closeAskedAt: 1500 }, 2000).asked === true && M.quickExitVerdict({ appAt: 1000, closeAskedAt: 900 }, 2000).quick === true && M.quickExitVerdict({ appAt: 1000, closeAskedAt: 2500 }, 2000).quick === true && M.quickExitVerdict({ appAt: 1000 }, 2000).asked === false, 'an exit that answers the person\'s close ask (closeAskedAt since the spawn) is never quick; an older ask or none still is', [M.quickExitVerdict({ appAt: 1000, closeAskedAt: 1500 }, 2000), M.quickExitVerdict({ appAt: 1000, closeAskedAt: 900 }, 2000)]);
-  ok(same(M.exitCloseVerdict({ state: 'exited', quickExit: { afterMs: 10, code: 0 } }), { close: false, why: 'quick-exit' }) && M.exitCloseVerdict({ state: 'exited', quickExit: { afterMs: 10 }, stoppedBy: 'user' }).close === true && M.exitCloseVerdict({ state: 'exited' }).close === true, 'exitCloseVerdict: a quick exit KEEPS the window (its sentence) — a person\'s stop still closes it, a plain exit still closes');
+  ok(gateOf(same(M.exitCloseVerdict({ state: 'exited', quickExit: { afterMs: 10, code: 0 } }), { close: false, why: 'quick-exit' })) && M.exitCloseVerdict({ state: 'exited', quickExit: { afterMs: 10 }, stoppedBy: 'user' }).close === true && M.exitCloseVerdict({ state: 'exited' }).close === true, 'exitCloseVerdict: a quick exit KEEPS the window (its sentence) — a person\'s stop still closes it, a plain exit still closes');
   const run = { display: ':2', launchedBy: { kind: 'agent', sessionId: 's', name: 'Install app chrome' } };
   ok(M.quickExitNoticeText({ label: 'Google Chrome', quickExit: { afterMs: 800, code: 0 } }, run) === 'Google Chrome exited right after it started (code 0, 0.8 s after it started) — the same program is already running on :2 (started by agent session Install app chrome): open it from Apps.', 'the notice names where it runs and who started it');
-  ok(/already running elsewhere \(on another display, or outside VibeSpace\); nothing was left open\.$/.test(M.quickExitNoticeText({ label: 'X', quickExit: { afterMs: 5, code: 0 } })) && M.launchedByText({ launchedBy: { kind: 'person' } }) === 'you' && M.launchedByText({}) === '', '…and when nothing runs it, says where it usually is');
+  ok(gateOf(/already running elsewhere \(on another display, or outside VibeSpace\); nothing was left open\.$/.test(M.quickExitNoticeText({ label: 'X', quickExit: { afterMs: 5, code: 0 } }))) && M.launchedByText({ launchedBy: { kind: 'person' } }) === 'you' && M.launchedByText({}) === '', '…and when nothing runs it, says where it usually is');
   // the lock words
-  ok(same(M.singletonLockFact('my-box-1-4242', { hostname: 'my-box-1' }), { host: 'my-box-1', pid: 4242, here: true }) && M.singletonLockFact('other-4242', { hostname: 'mine' }).here === false && M.singletonLockFact('nopid') === null && M.singletonLockFact('h-1') === null, 'singletonLockFact: <hostname>-<pid> (a hyphenated host), another host, junk');
+  ok(gateOf(same(M.singletonLockFact('my-box-1-4242', { hostname: 'my-box-1' }), { host: 'my-box-1', pid: 4242, here: true })) && M.singletonLockFact('other-4242', { hostname: 'mine' }).here === false && M.singletonLockFact('nopid') === null && M.singletonLockFact('h-1') === null, 'singletonLockFact: <hostname>-<pid> (a hyphenated host), another host, junk');
   ok(M.defaultProfileDirOf('/usr/bin/google-chrome-stable') === '.config/google-chrome' && M.defaultProfileDirOf('chromium-browser') === '.config/chromium' && M.defaultProfileDirOf('brave-browser') === '.config/BraveSoftware/Brave-Browser' && M.defaultProfileDirOf('microsoft-edge-beta') === '.config/microsoft-edge-beta' && M.defaultProfileDirOf('firefox') === null, 'defaultProfileDirOf: the chromium family\'s default dirs (firefox keeps one lock per profile — not read)');
-  ok(M.REAL_BROWSER_ROOTS.includes(M.defaultProfileDirOf('google-chrome')) && M.REAL_BROWSER_ROOTS.includes(M.defaultProfileDirOf('chromium')), 'the default dirs are the user\'s real roots profileDirVerdict already refuses');
+  ok(gateOf(M.REAL_BROWSER_ROOTS.includes(M.defaultProfileDirOf('google-chrome'))) && verdictOf(M.REAL_BROWSER_ROOTS.includes(M.defaultProfileDirOf('chromium'))), 'the default dirs are the user\'s real roots profileDirVerdict already refuses');
   // the keeper's wiring (the acts: scripts/test-app-launch-once.mjs)
   const ks = keeperSrc();
-  ok(/function launchFacts\(row\)[\s\S]{0,400}M\.appBrowserVerdict\(r\)[\s\S]{0,200}browserBy: 'exec'[\s\S]{0,120}runsTwice: M\.runsTwiceVerdict\(r\)\.twice/.test(ks) && /\.concat\(appRows, seenRows\)\.map\(launchFacts\)/.test(ks), 'WIRING: every served row passes launchFacts (an installed browser gets its family ⇒ browserArgv\'s own profile)');
-  ok(/ifRunning === 'attach' && v\.launch\.source === 'registry' && !v\.launch\.file/.test(ks) && /onQuickExit/.test(ks) && /rec\.appAt = now\(\);[^\n]*\n[^\n]*display\.startApp\(/.test(ks), 'WIRING: ifRunning attach (never for a document), the quick-exit hook, appAt stamped right before the app\'s spawn');
+  ok(gateOf(/function launchFacts\(row\)[\s\S]{0,400}M\.appBrowserVerdict\(r\)[\s\S]{0,200}browserBy: 'exec'[\s\S]{0,120}runsTwice: M\.runsTwiceVerdict\(r\)\.twice/.test(ks)) && verdictOf(/\.concat\(appRows, seenRows\)\.map\(launchFacts\)/.test(ks)), 'WIRING: every served row passes launchFacts (an installed browser gets its family ⇒ browserArgv\'s own profile)');
+  ok(gateOf(/ifRunning === 'attach' && v\.launch\.source === 'registry' && !v\.launch\.file/.test(ks)) && gateOf(/onQuickExit/.test(ks)) && verdictOf(/rec\.appAt = now\(\);[^\n]*\n[^\n]*display\.startApp\(/.test(ks)), 'WIRING: ifRunning attach (never for a document), the quick-exit hook, appAt stamped right before the app\'s spawn');
 }
 
 console.log('§copied-lines EVERY LINE A PERSON IS TOLD TO COPY RUNS WHEN PASTED (int402, 2026-11-14: the key fetch was copied as «sudo { … }»)');
@@ -1380,7 +1380,7 @@ console.log('§copied-lines EVERY LINE A PERSON IS TOLD TO COPY RUNS WHEN PASTED
   // the law in the builder itself: decided by what a step IS — each kind of shell step, whatever its first character
   const kinds = ['{ a; } || { b; }', '(a && b)', 'a | b', 'a && b', 'a; b', 'a > /etc/x', 'a < /etc/x', 'a `b`', 'a $(b)', 'a "$X"', 'printf %s x', 'cd /tmp', 'command -v a', '[ -e /x ]', 'if a; then b; fi'];
   const built = SLOT.planLines([...kinds, 'apt-get update', 'DEBIAN_FRONTEND=noninteractive apt-get install -y a', 'install -d -m 0755 /usr/share/keyrings']).commands;
-  ok(kinds.every((k, i) => built[i].startsWith("sudo sh -c '")) && built[kinds.length] === 'sudo apt-get update' && built[kinds.length + 1] === 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y a' && built[kinds.length + 2] === 'sudo install -d -m 0755 /usr/share/keyrings',
+  ok(gateOf(kinds.every((k, i) => built[i].startsWith("sudo sh -c '"))) && built[kinds.length] === 'sudo apt-get update' && built[kinds.length + 1] === 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y a' && built[kinds.length + 2] === 'sudo install -d -m 0755 /usr/share/keyrings',
     'the builder decides by what a step IS: a group, a subshell, a pipe, «and», a sequence, a redirection, a substitution, a variable, a word only a shell knows ⇒ through a shell under sudo; one simple command ⇒ handed to sudo as it is', built.map((b) => b.slice(0, 40)));
   // CONTROL: the line as it was built before (the group handed to sudo as it was) is red in this very harness, by that line
   const cut = paste('sudo ' + M.XPRA_KEY_FETCH), cut2 = paste('sudo { true; }');
@@ -1388,4 +1388,4 @@ console.log('§copied-lines EVERY LINE A PERSON IS TOLD TO COPY RUNS WHEN PASTED
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

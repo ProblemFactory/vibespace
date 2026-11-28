@@ -22,7 +22,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let n = 0, fails = 0;
-const ok = (c, m) => { n++; if (c) console.log(`  ✓ ${m}`); else { fails++; console.log(`  ✗ ${m}`); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); n++; if (c) console.log(`  ✓ ${m}`); else { fails++; console.log(`  ✗ ${m}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -104,12 +104,12 @@ ok(rj.length === 0, `POST …/send hands {text, attachments, direct} to the engi
 
 console.log('③ the window wires it (source)');
 const W = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf8');
-ok(/input\.type = 'file';\n  input\.multiple = true;/.test(W) && W.includes("icon('attachment', 14)") && W.includes("comp.addEventListener('drop'") && W.includes("ta.addEventListener('paste'"), 'the composer has a paperclip (the house attachment glyph) over a hidden multiple file input, a drop and a paste');
-ok(W.includes('P.composeFilesVerdict(caps, offer,') && W.includes("...(files.length ? { attachments: files } : {})") && W.includes('sending: () => verdict.send.map('), 'the chips are judged by the PURE verdict and only its `send` list rides the POST');
-ok(W.includes('img.src = p.url;') && !/chanwin-file[^\n]*innerHTML/.test(W), 'a picture chip draws its thumbnail through .src (never innerHTML)');
-ok(W.includes("composeReceiptText(r2.proposal, files.length)") && W.includes("showToast(said, { type: partly ? 'warn' : 'success' })"), 'the receipt names what landed — the line above the box AND a toast');
+ok(gateOf(/input\.type = 'file';\n  input\.multiple = true;/.test(W)) && gateOf(W.includes("icon('attachment', 14)")) && gateOf(W.includes("comp.addEventListener('drop'")) && verdictOf(W.includes("ta.addEventListener('paste'")), 'the composer has a paperclip (the house attachment glyph) over a hidden multiple file input, a drop and a paste');
+ok(gateOf(W.includes('P.composeFilesVerdict(caps, offer,')) && gateOf(W.includes("...(files.length ? { attachments: files } : {})")) && verdictOf(W.includes('sending: () => verdict.send.map(')), 'the chips are judged by the PURE verdict and only its `send` list rides the POST');
+ok(gateOf(W.includes('img.src = p.url;')) && !/chanwin-file[^\n]*innerHTML/.test(W), 'a picture chip draws its thumbnail through .src (never innerHTML)');
+ok(gateOf(W.includes("composeReceiptText(r2.proposal, files.length)")) && verdictOf(W.includes("showToast(said, { type: partly ? 'warn' : 'success' })")), 'the receipt names what landed — the line above the box AND a toast');
 const E = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-ok(E.includes("sendAttachment: filesOfferFor(rec, effectiveConvCaps(rec, en), t),") && E.includes('sendAttachments: c.sendAttachments || null,'), 'the conversation view carries the same files offer the send judges + the adapter\'s limits');
+ok(gateOf(E.includes("sendAttachment: filesOfferFor(rec, effectiveConvCaps(rec, en), t),")) && verdictOf(E.includes('sendAttachments: c.sendAttachments || null,')), 'the conversation view carries the same files offer the send judges + the adapter\'s limits');
 
 console.log('④ patched-copy controls');
 const ctlPure = [
@@ -119,13 +119,13 @@ const ctlPure = [
 const PS = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf8');
 for (const [from, to, what] of ctlPure) {
   const red = PS.includes(from) ? pureJudge(require(MC.write('src/channel-policy.js', editAnchor(PS, from, to, "src/channel-policy.js"), what.replace(/\W+/g, '-').slice(0, 30)))) : null;
-  ok(Array.isArray(red) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 {
   const RS = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf8');
   const from = '    if (refuseAgentBearer(req, res, OWN_SEND_IS_OWNERS)) return;';
   const red = RS.includes(from) ? await routeJudge(require(MC.write('src/routes/channels.js', editAnchor(RS, from, '', "src/routes/channels.js"), 'route-bearer'))) : null;
-  ok(Array.isArray(red) && red.length > 0, `control — the agent's bearer ACCEPTED on the owner's send: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — the agent's bearer ACCEPTED on the owner's send: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 
 console.log('⑤ the chip OPENS before the send — THE ONE attachment door, from the local File (lane compose-chip-open)');
@@ -158,13 +158,13 @@ const chipCensus = (src) => {
 const cc = chipCensus(W);
 ok(cc.length === 0, `the chip's thumb + name open through THE ONE door (openComposePick → openAttachment), the name by click / Enter / Space with data-open; × / destroy revoke the URL; a rebuild and the window's close destroy the composer${cc.length ? ` — ${cc.join('; ')}` : ''}`);
 const OB = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf8');
-ok(OB.includes("export function openComposePick(app, p) {\n  if (!p.url && p.file) p.url = URL.createObjectURL(p.file);\n  return p.url ? openAttachment(app, { url: p.url, name: p.name, mime: p.mime }) : 'download';\n}"), 'openComposePick mints the blob URL from the File on demand and hands it to openAttachment (the behaviour is judged in test-channel-outbox)');
+ok(verdictOf(OB.includes("export function openComposePick(app, p) {\n  if (!p.url && p.file) p.url = URL.createObjectURL(p.file);\n  return p.url ? openAttachment(app, { url: p.url, name: p.name, mime: p.mime }) : 'download';\n}")), 'openComposePick mints the blob URL from the File on demand and hands it to openAttachment (the behaviour is judged in test-channel-outbox)');
 for (const [from, to, what] of [
   ['const open = () => openComposePick(app, p);', 'const open = () => window.open(p.url || URL.createObjectURL(p.file));', 'a chip that opens through its own window.open'],
   ["const x = btn('', () => { forget(p); picks.splice(", "const x = btn('', () => { picks.splice(", 'a × that keeps the URL alive'],
 ]) {
   const red = W.includes(from) ? chipCensus(W.replace(from, to)) : null;
-  ok(Array.isArray(red) && red.length > 0, `control — ${what}: the census is red (${red === null ? 'the patch site is gone' : red.length ? red[0] : 'GREEN — the census missed it'})`);
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — ${what}: the census is red (${red === null ? 'the patch site is gone' : red.length ? red[0] : 'GREEN — the census missed it'})`);
 }
 
 console.log('⑥ A FILE ALONE IS A MESSAGE — by the capability row\'s `alone` cell, never an adapter id (lane composer-file-only-send, B-dce6)');
@@ -254,8 +254,8 @@ const aej = await aloneEngineJudge(ENG);
 ok(aej.length === 0, `the engine: fx-alone (the cell) sends a file alone, the adapter receiving it with an empty text; lark (no cell) refuses attachment-alone, nothing created, and sends a line WITH the file; propose mode stores the file (sha256 on disk, awaiting approval) and Approve sends it alone${aej.length ? ` — ${aej.join('; ')}` : ''}`);
 // the window: files alone pass the Send where the verdict allows it; the clip mounts in PROPOSE mode too (source pins —
 // the behaviour is the chrome leg's, test-channel-threads-ui (u))
-ok(W.includes('const cf = ad0.sendAttachments && c.offers && c.offers.sendAttachment') && !W.includes('const cf = direct && ad0.sendAttachments') && W.includes("/${direct ? 'send' : 'propose'}`"), 'the clip mounts in direct AND propose mode, and the files ride the route the mode names');
-ok(W.includes('if (!text && (!files.length || cf.needsText())) {') && W.includes("needsText: () => verdict.needsText,") && W.includes("alone.dataset.filesAlone = 'no';"), 'files alone pass the Send unless the verdict says needsText — then the box says so (data-files-alone), the Send stays live');
+ok(gateOf(W.includes('const cf = ad0.sendAttachments && c.offers && c.offers.sendAttachment')) && !W.includes('const cf = direct && ad0.sendAttachments') && verdictOf(W.includes("/${direct ? 'send' : 'propose'}`")), 'the clip mounts in direct AND propose mode, and the files ride the route the mode names');
+ok(gateOf(W.includes('if (!text && (!files.length || cf.needsText())) {')) && gateOf(W.includes("needsText: () => verdict.needsText,")) && verdictOf(W.includes("alone.dataset.filesAlone = 'no';")), 'files alone pass the Send unless the verdict says needsText — then the box says so (data-files-alone), the Send stays live');
 
 console.log('⑦ controls — the cell, not an id; the row reaches the proposal\'s shape');
 {
@@ -267,12 +267,12 @@ console.log('⑦ controls — the cell, not an id; the row reaches the proposal\
     ['    const v = P.validateProposal(input);', 'the engine never hands the row in (text required — the .245 shape)'],
   ]) {
     const red = ES.includes(at) ? await aloneEngineJudge(require(MC.write('src/server/channels-engine.js', ES.replace(at, to), what.replace(/\W+/g, '-').slice(0, 30)))) : null;
-    ok(Array.isArray(red) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
+    ok(gateOf(Array.isArray(red)) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
   }
   const from = "  const one = (g) => !!(g && typeof g === 'object' && (g.alone === true || g.withText === false));";
   const red = PS.includes(from) ? alonePureJudge(require(MC.write('src/channel-policy.js', editAnchor(PS, from, "  const one = (g) => !!(g && typeof g === 'object' && g.withText === false);", "src/channel-policy.js"), 'pure-no-cell'))) : null;
-  ok(Array.isArray(red) && red.length > 0, `control — fileAloneOf blind to the \`alone\` cell: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
+  ok(gateOf(Array.isArray(red)) && red.length > 0, `control — fileAloneOf blind to the \`alone\` cell: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 
 console.log(`\n${fails ? '✗' : '✓'} test-channel-compose-files: ${n - fails}/${n} passed`);
-process.exit(fails ? 1 : 0);
+process.exit(fails ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

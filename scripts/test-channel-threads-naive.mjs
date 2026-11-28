@@ -43,7 +43,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -114,19 +114,19 @@ const DISABLED_KEY = 'This account is disabled — enable it to load or send her
   engines.push(eng);
   const th = await eng.threadRefresh('lark', 'oc_thr', 'om_t0');
   const rf = await eng.refresh('lark', 'oc_thr');
-  ok(th && th.code === 'disabled' && th.error === 'Lark / 飞书 is disabled' && rf && rf.code === 'disabled', 'setup: the REAL engine answers `disabled` — with its English sentence "Lark / 飞书 is disabled" for the agent\'s log — to the thread walk the pane asks on open AND to the window\'s Refresh', J({ th, rf }));
+  ok(gateOf(th) && th.code === 'disabled' && th.error === 'Lark / 飞书 is disabled' && gateOf(rf) && rf.code === 'disabled', 'setup: the REAL engine answers `disabled` — with its English sentence "Lark / 飞书 is disabled" for the agent\'s log — to the thread walk the pane asks on open AND to the window\'s Refresh', J({ th, rf }));
   const w1 = Wd.routeErrorText(th), w2 = Wd.routeErrorText(rf);
   ok(w1 === DISABLED_KEY && w2 === DISABLED_KEY && !w1.includes(th.error), `routeErrorText words the code — "${w1}" — never the raw "${th.error}"`, J({ w1, w2 }));
-  ok(ZH.has(DISABLED_KEY) && JA.has(DISABLED_KEY) && !LATIN_ONLY.test(ZH.get(DISABLED_KEY)) && !LATIN_ONLY.test(JA.get(DISABLED_KEY)), `…in both dictionaries, translated: zh "${ZH.get(DISABLED_KEY)}" · ja "${JA.get(DISABLED_KEY)}"`);
+  ok(gateOf(ZH.has(DISABLED_KEY)) && gateOf(JA.has(DISABLED_KEY)) && !LATIN_ONLY.test(ZH.get(DISABLED_KEY)) && !LATIN_ONLY.test(JA.get(DISABLED_KEY)), `…in both dictionaries, translated: zh "${ZH.get(DISABLED_KEY)}" · ja "${JA.get(DISABLED_KEY)}"`);
   const paneSrc = read('src/lib/channel-thread-pane.js');
-  ok(paneSrc.includes("const note = el('div', 'chanthread-note', routeErrorText(r));"), 'WIRING: the pane\'s walk draws its refusal through routeErrorText (the sentence the user saw)');
+  ok(verdictOf(paneSrc.includes("const note = el('div', 'chanthread-note', routeErrorText(r));")), 'WIRING: the pane\'s walk draws its refusal through routeErrorText (the sentence the user saw)');
   // CONTROL: the words module as it was (no case for the code) hands the user the engine's English
   const src = fs.readFileSync(WORDS_PATH, 'utf-8');
   const line = "    case 'disabled': return t('This account is disabled — enable it to load or send here');   // B-7aef: its door is routeErrorDoor's «Enable this account»\n";
-  ok(src.includes(line), 'CONTROL setup: the case line is found verbatim');
+  ok(verdictOf(src.includes(line)), 'CONTROL setup: the case line is found verbatim');
   const C = await import(pathToFileURL(M.write(WORDS_PATH, src.replace(line, ''), 'no-disabled-case')).href);
   const c1 = C.routeErrorText(th);
-  ok(/is disabled$/.test(c1) && c1 === th.error && LATIN_ONLY.test(c1.replace('飞书', '')), `CONTROL: the copy without the case answers the engine's raw sentence "${c1}" — the zh page showed exactly that`, c1);
+  ok(gateOf(/is disabled$/.test(c1)) && c1 === th.error && verdictOf(LATIN_ONLY.test(c1.replace('飞书', ''))), `CONTROL: the copy without the case answers the engine's raw sentence "${c1}" — the zh page showed exactly that`, c1);
 }
 
 // ═══ ② the ↩ where the thread cannot be answered ═══════════════════════════════════════════════════
@@ -193,14 +193,14 @@ const judge = (x, drawnOffered) => {
 }
 {
   const ro = judge(await paneWith(Pane, false), false);
-  ok(ro.rows === 3 && ro.readOnly, 'setup: the REAL pane over a fake DOM drew the thread (the root + two replies) and the foot is the read-only line', J(ro));
-  ok(hidesPick && !ro.inBar && !ro.shown && !ro.pressDid && !ro.targeted, 'a thread that cannot be answered offers NO reply action in the rows\' bar (the PURE table) — nothing to press', J(ro));
+  ok(ro.rows === 3 && verdictOf(ro.readOnly), 'setup: the REAL pane over a fake DOM drew the thread (the root + two replies) and the foot is the read-only line', J(ro));
+  ok(gateOf(hidesPick) && !ro.inBar && !ro.shown && !ro.pressDid && !ro.targeted, 'a thread that cannot be answered offers NO reply action in the rows\' bar (the PURE table) — nothing to press', J(ro));
   const on = judge(await paneWith(Pane, true), true);
-  ok(on.inBar && on.shown && on.pressDid && on.targeted && !on.readOnly, 'where the thread CAN be answered the bar offers it and a press targets that reply ("Replying to …")', J(on));
+  ok(gateOf(on.inBar) && gateOf(on.shown) && gateOf(on.pressDid) && gateOf(on.targeted) && !on.readOnly, 'where the thread CAN be answered the bar offers it and a press targets that reply ("Replying to …")', J(on));
   const x = await paneWith(Pane, true);
   x.setOffered(false);
   const stale = judge(x, true);
-  ok(x.p.el.classList.contains('chanthread-noreply') && stale.shown === false, 'the offer withdrawn while the pane is open (a broadcast redraws the foot): a bar drawn before it is not displayed (`chanthread-noreply`) until the window re-syncs it', J(stale));
+  ok(gateOf(x.p.el.classList.contains('chanthread-noreply')) && stale.shown === false, 'the offer withdrawn while the pane is open (a broadcast redraws the foot): a bar drawn before it is not displayed (`chanthread-noreply`) until the window re-syncs it', J(stale));
   const before = x.p.el.querySelector('.chanthread-foot').textContent;
   x.p.pick(REC('m2', 'second reply', { replyTo: 'm0' }));
   ok(x.p.el.querySelector('.chanthread-foot').textContent === before, '…and a pick that still arrives (a key on the stale button) changes nothing — the pane refuses it');
@@ -210,12 +210,12 @@ const judge = (x, drawnOffered) => {
   // press does nothing (the dead control the user pressed, one window re-sync later)
   const src = fs.readFileSync(PANE_PATH, 'utf-8');
   const toggle = "    pane.classList.toggle('chanthread-noreply', !(offer && offer.offered));\n";
-  ok(src.includes(toggle), 'CONTROL setup: the toggle line is found verbatim');
+  ok(verdictOf(src.includes(toggle)), 'CONTROL setup: the toggle line is found verbatim');
   const Old = await import(pathToFileURL(M.write(PANE_PATH, src.replace(toggle, ''), 'no-noreply')).href);
   const y = await paneWith(Old, true);
   y.setOffered(false);
   const c = judge(y, true);
-  ok(c.shown && !c.pressDid && c.readOnly, 'CONTROL: the copy without the toggle SHOWS the stale reply action on the read-only thread and its press does nothing — the dead control the user pressed', J(c));
+  ok(gateOf(c.shown) && !c.pressDid && verdictOf(c.readOnly), 'CONTROL: the copy without the toggle SHOWS the stale reply action on the read-only thread and its press does nothing — the dead control the user pressed', J(c));
 }
 // ═══ ⑥ the pane's composer line wraps instead of cutting (the chrome leg measures it) ═══════════════════
 console.log('⑥ the pane\'s composer line — where and how a reply goes — is never cut');
@@ -223,14 +223,14 @@ console.log('⑥ the pane\'s composer line — where and how a reply goes — is
   const x = await paneWith(Pane, true);
   const note = x.p.el.querySelector('.chanwin-note-text');
   const inComposer = (n) => { for (let e = n; e; e = e.parentNode) if (e.classList && e.classList.contains('chanthread-composer')) return true; return false; };
-  ok(note && /Lands inside this thread · /.test(note.textContent) && inComposer(note), `setup: the REAL pane's composer draws its line inside .chanthread-composer ("${note && note.textContent}")`);
+  ok(gateOf(note) && gateOf(/Lands inside this thread · /.test(note.textContent)) && verdictOf(inComposer(note)), `setup: the REAL pane's composer draws its line inside .chanthread-composer ("${note && note.textContent}")`);
   const RULE = /\.chanthread-composer \.chanwin-note-text \{[^}]*white-space: normal;[^}]*overflow: visible;/;
   const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');
   const judge = (c) => RULE.test(c) && /\.chanwin-note-text \{[^}]*white-space: nowrap;/.test(c);
-  ok(judge(css), 'the stylesheet lets THAT line wrap (white-space normal, nothing hidden) while the main composer keeps its one-line rule');
+  ok(verdictOf(judge(css)), 'the stylesheet lets THAT line wrap (white-space normal, nothing hidden) while the main composer keeps its one-line rule');
   const pre = css.replace(RULE, '.chanthread-composer .x-removed {');
   ok(pre !== css && !judge(pre), 'CONTROL: the stylesheet without the rule is judged red (the chrome leg shows the same copy cutting "…あなたとしてす…")');
-  ok(read('scripts/test-channel-threads-ui.mjs').includes("whole(pane.querySelector('.chanthread-foot .chanwin-note-text'), 'pane composer line')"), 'WIRING: the chrome leg (h) measures the pane composer line whole in zh and ja at 360 px');
+  ok(verdictOf(read('scripts/test-channel-threads-ui.mjs').includes("whole(pane.querySelector('.chanthread-foot .chanwin-note-text'), 'pane composer line')")), 'WIRING: the chrome leg (h) measures the pane composer line whole in zh and ja at 360 px');
 }
 globalThis.fetch = realFetch;
 delete globalThis.document;
@@ -247,19 +247,19 @@ console.log('③ who reacted: names only — "You" for the owner, a nameless rea
   const list = r && r.ok ? r.reactions : [];
   const fire = list.find((x) => x.key === 'fire');
   const ids4 = fire ? fire.by.map((b) => b.id) : [];
-  ok(fire && fire.mine && ids4.includes('u-me') && fire.by.some((b) => !b.name && !b.self), 'setup: the REAL engine\'s fold for the owner\'s 🔥 on m4 — `mine`, the owner\'s id in `by`, and a reactor the room has no name for (the fake\'s "u-cass": Cass never wrote in Ops room)', J(fire && fire.by));
+  ok(gateOf(fire) && gateOf(fire.mine) && gateOf(ids4.includes('u-me')) && verdictOf(fire.by.some((b) => !b.name && !b.self)), 'setup: the REAL engine\'s fold for the owner\'s 🔥 on m4 — `mine`, the owner\'s id in `by`, and a reactor the room has no name for (the fake\'s "u-cass": Cass never wrote in Ops room)', J(fire && fire.by));
   ok(fire.by.filter((b) => b.self === true).map((b) => b.id).join() === 'u-me', 'the fold marks the OWNER\'s entry `self` (the token\'s id) and no other', J(fire.by));
   const Pick = await import(pathToFileURL(path.join(REPO, 'src/lib/reaction-picker.js')).href);
   const words = Pick.whoText(fire);
   const idsShown = ids4.filter((id) => words.includes(id));
-  ok(/^You, /.test(words) && idsShown.length === 0 && /and \d+ more$/.test(words), `the chip's who-words: "${words}" — the owner is "You", no id appears (${ids4.length} ids in \`by\`)`, J({ words, idsShown }));
+  ok(gateOf(/^You, /.test(words)) && idsShown.length === 0 && verdictOf(/and \d+ more$/.test(words)), `the chip's who-words: "${words}" — the owner is "You", no id appears (${ids4.length} ids in \`by\`)`, J({ words, idsShown }));
   const n = Number((/and (\d+) more$/.exec(words) || [])[1]);
   const drawn = words.split(' and ')[0].split(', ').length;
   ok(drawn + n === fire.count, `…and it still COUNTS everyone: ${drawn} drawn + ${n} more = ${fire.count}`);
   const other = [...eng.reactionsFor('fake-poll', 'fake-poll-ops', ids).values()].flat().find((x) => !x.mine && x.by.some((b) => !b.name));
-  ok(other && !other.by.map((b) => b.id).some((id) => Pick.whoText(other).includes(id)), `a chip that is not the owner's, with a nameless reactor: "${other && Pick.whoText(other)}" — no id`, J(other && other.by));
+  ok(gateOf(other) && !other.by.map((b) => b.id).some((id) => Pick.whoText(other).includes(id)), `a chip that is not the owner's, with a nameless reactor: "${other && Pick.whoText(other)}" — no id`, J(other && other.by));
   const PICK_SRC = read('src/lib/reaction-picker.js');
-  ok(PICK_SRC.includes("if (x.mine === true) { pop.appendChild(el('div', 'rx-who-row', t('You'))); rows++; }") && PICK_SRC.includes("if (b && b.self !== true && b.name) { pop.appendChild(el('div', 'rx-who-row', b.name)); rows++; }") && !PICK_SRC.includes("b.name || t('unknown')"), 'WIRING: the long-press list says "You" for the owner and draws a row only for a NAME (no "unknown" rows — counted in "and N more")');
+  ok(gateOf(PICK_SRC.includes("if (x.mine === true) { pop.appendChild(el('div', 'rx-who-row', t('You'))); rows++; }")) && gateOf(PICK_SRC.includes("if (b && b.self !== true && b.name) { pop.appendChild(el('div', 'rx-who-row', b.name)); rows++; }")) && !PICK_SRC.includes("b.name || t('unknown')"), 'WIRING: the long-press list says "You" for the owner and draws a row only for a NAME (no "unknown" rows — counted in "and N more")');
   ok(ZH.get('You') === '你' && JA.get('You') === 'あなた', 'the word "You" is in both dictionaries (你 / あなた)');
   // CONTROL: the pre-fix pair — whoList mapping `name || id`, whoText without the owner — prints the ids
   const RX_PATH = path.join(REPO, 'src/channel-reactions.js');
@@ -271,11 +271,11 @@ console.log('③ who reacted: names only — "You" for the owner, a nameless rea
   const pSrc = fs.readFileSync(path.join(REPO, 'src/lib/reaction-picker.js'), 'utf-8');
   const newWho = "  const parts = [...(w.self ? [t('You')] : []), ...w.names];\n  if (!parts.length) return x && x.count ? t('{n} reactions', { n: x.count }) : '';\n  const names = parts.join(', ');";
   const oldWho = "  if (!w.names.length) return x && x.count ? t('{n} reactions', { n: x.count }) : '';\n  const names = w.names.join(', ');";
-  ok(pSrc.includes(newWho) && pSrc.includes("import * as Rx from '../channel-reactions.js';"), 'CONTROL setup: whoText\'s body and its import are found');
+  ok(gateOf(pSrc.includes(newWho)) && verdictOf(pSrc.includes("import * as Rx from '../channel-reactions.js';")), 'CONTROL setup: whoText\'s body and its import are found');
   const pOld = editAnchor(editAnchor(pSrc, newWho, oldWho, "src/lib/reaction-picker.js"), "import * as Rx from '../channel-reactions.js';", `import * as Rx from ${JSON.stringify(pathToFileURL(rxOld).href)};`, "src/lib/reaction-picker.js");
   const PickOld = await import(pathToFileURL(M.write(path.join(REPO, 'src/lib/reaction-picker.js'), pOld, 'old-whotext')).href);
   const cw = PickOld.whoText(fire);
-  ok(/u-me/.test(cw) && !/^You/.test(cw), `CONTROL: the pre-fix pair words the same fold "${cw}" — the owner's own id, the words the user read`, cw);
+  ok(gateOf(/u-me/.test(cw)) && !/^You/.test(cw), `CONTROL: the pre-fix pair words the same fold "${cw}" — the owner's own id, the words the user read`, cw);
 }
 
 // ═══ ④ a reaction digest is not a channel message ════════════════════════════════════════════════
@@ -303,31 +303,31 @@ console.log('④ a reaction on the agent\'s message waits as "a reaction notice"
   const rx = sentId && eng.store.findRecord('fake-poll', 'fake-poll-ops', sentId) ? await eng.react('fake-poll', 'fake-poll-ops', sentId, 'tada') : null;
   for (let i = 0; i < 50 && !ladder.stash.length; i++) await new Promise((r) => setTimeout(r, 10));
   const dg = ladder.stash.filter((x) => x.cid === 'agent-1');
-  ok(sentId && rx && rx.ok && dg.length === 1 && /🎉 ×1 on your reply in Ops room/.test(dg[0].text) && dg[0].source === 'channel' && dg[0].fromName === S.REACTION_DIGEST_FROM, 'setup: the REAL engine — the agent\'s in-thread reply sent (approved), the owner\'s 🎉 on it ⇒ ONE digest line in the agent\'s next-turn stash, filed under the one sender name', J({ sentId, rx: rx && rx.ok, dg }));
+  ok(gateOf(sentId) && gateOf(rx) && gateOf(rx.ok) && dg.length === 1 && gateOf(/🎉 ×1 on your reply in Ops room/.test(dg[0].text)) && dg[0].source === 'channel' && dg[0].fromName === S.REACTION_DIGEST_FROM, 'setup: the REAL engine — the agent\'s in-thread reply sent (approved), the owner\'s 🎉 on it ⇒ ONE digest line in the agent\'s next-turn stash, filed under the one sender name', J({ sentId, rx: rx && rx.ok, dg }));
   const words = S.stashSummaryWords(S.summarize({ msg: dg }), (x, v) => (v ? x.replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m)) : x));
   ok(S.kindOf(dg[0]) === 'channel-reaction' && words.parts.join() === 'a reaction notice' && !/channel message/.test(words.parts.join()), `the strip above the composer: "${words.head}: ${words.parts.join(', ')}" — a reaction, never "a channel message"`, J(words));
   const inj = renderMsgStash(dg).text;
-  ok(/🎉 ×1 on your reply in Ops room/.test(inj) && !/a channel message is answered with vibespace-channels reply/.test(inj), 'the agent\'s next prompt carries the digest line WITHOUT the "answer it with vibespace-channels reply" hint', inj);
+  ok(gateOf(/🎉 ×1 on your reply in Ops room/.test(inj)) && !/a channel message is answered with vibespace-channels reply/.test(inj), 'the agent\'s next prompt carries the digest line WITHOUT the "answer it with vibespace-channels reply" hint', inj);
   const withMsg = renderMsgStash([...dg, { source: 'channel', kind: 'notification', fromName: 'Channels · fake-poll', text: 'Ada: can someone look?', ts: Date.now() }]).text;
-  ok(/a channel message is answered with vibespace-channels reply/.test(withMsg), '…the hint still rides a stash that holds a channel MESSAGE (the digest beside it changes nothing)');
-  ok(read('src/server/channels-engine.js').includes("const RX_DIGEST_FROM = require('../stash-summary.js').REACTION_DIGEST_FROM;"), 'WIRING: the engine files the digest under the ONE spelling the summary and the injection read');
+  ok(verdictOf(/a channel message is answered with vibespace-channels reply/.test(withMsg)), '…the hint still rides a stash that holds a channel MESSAGE (the digest beside it changes nothing)');
+  ok(verdictOf(read('src/server/channels-engine.js').includes("const RX_DIGEST_FROM = require('../stash-summary.js').REACTION_DIGEST_FROM;")), 'WIRING: the engine files the digest under the ONE spelling the summary and the injection read');
   const k2 = ['a reaction notice', '{n} reaction notices'];
-  ok(k2.every((k) => ZH.has(k) && JA.has(k) && !LATIN_ONLY.test(ZH.get(k)) && !LATIN_ONLY.test(JA.get(k))), `the words in both dictionaries: zh "${ZH.get(k2[0])}" / "${ZH.get(k2[1])}" · ja "${JA.get(k2[0])}"`);
-  ok(S.KIND_ORDER.every((k) => S.partWords({ kind: k, n: 1, label: 'X' }, (x) => x) !== 'a notice'), 'every kind in KIND_ORDER has its own words (the new one included — never the generic "a notice")');
+  ok(verdictOf(k2.every((k) => ZH.has(k) && JA.has(k) && !LATIN_ONLY.test(ZH.get(k)) && !LATIN_ONLY.test(JA.get(k)))), `the words in both dictionaries: zh "${ZH.get(k2[0])}" / "${ZH.get(k2[1])}" · ja "${JA.get(k2[0])}"`);
+  ok(verdictOf(S.KIND_ORDER.every((k) => S.partWords({ kind: k, n: 1, label: 'X' }, (x) => x) !== 'a notice')), 'every kind in KIND_ORDER has its own words (the new one included — never the generic "a notice")');
   // CONTROLS: the pre-fix kindOf (a digest is a "channel message") and the pre-fix hint (it rides any channel source)
   const SS_PATH = path.join(REPO, 'src/stash-summary.js');
   const ssSrc = fs.readFileSync(SS_PATH, 'utf-8');
   const k1 = "  if (src === 'channel') return from === REACTION_DIGEST_FROM ? 'channel-reaction' : 'channel';";
-  ok(ssSrc.includes(k1), 'CONTROL setup: the kind line is found');
+  ok(verdictOf(ssSrc.includes(k1)), 'CONTROL setup: the kind line is found');
   const SOld = M.load('src/stash-summary.js', ssSrc.replace(k1, "  if (src === 'channel') return 'channel';"), 'old-kind');
   const wOld = SOld.stashSummaryWords(SOld.summarize({ msg: dg }), (x, v) => (v ? x.replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m)) : x));
   ok(wOld.parts.join() === 'a channel message', `CONTROL: the pre-fix kind words the owner's 🎉 as "${wOld.parts.join()}" — the strip the user read`, J(wOld.parts));
   const AR_PATH = path.join(REPO, 'src/agent-routes.js');
   const arSrc = fs.readFileSync(AR_PATH, 'utf-8');
   const h1 = "  if (shown.some((e) => e.source === 'channel' && stashSummary.kindOf(e) !== 'channel-reaction')) hints.push(";
-  ok(arSrc.includes(h1), 'CONTROL setup: the hint line is found');
+  ok(verdictOf(arSrc.includes(h1)), 'CONTROL setup: the hint line is found');
   const AOld = M.load('src/agent-routes.js', arSrc.replace(h1, "  if (shown.some((e) => e.source === 'channel')) hints.push("), 'old-hint');
-  ok(/a channel message is answered with vibespace-channels reply/.test(AOld.renderMsgStash(dg).text), 'CONTROL: the pre-fix injection tells the agent to answer the 🎉 with `vibespace-channels reply`');
+  ok(verdictOf(/a channel message is answered with vibespace-channels reply/.test(AOld.renderMsgStash(dg).text)), 'CONTROL: the pre-fix injection tells the agent to answer the 🎉 with `vibespace-channels reply`');
 }
 
 // ═══ ⑤ the placement refusal says which flags ask for what is offered ════════════════════════════════
@@ -350,27 +350,27 @@ console.log('⑤ a placement refusal tells the agent which FLAGS ask for what th
   ok(!gThread.ok && gThread.code === 'placement-not-offered' && J(gThread.offered) === J(['chat', 'quote']) && !lBoth.ok && J(lBoth.offered) === J(['chat', 'quote', 'thread']), 'setup: the verdicts — Gmail offers chat + quote, Lark chat + quote + thread', J([gThread, lBoth]));
   answer = gThread;
   const a = await run(CLI, ['reply', 'gmail-1/t-1', 'x', '--to', 'm-1', '--in-thread']);
-  ok(a.code === 1 && /offered here: chat, quote \[placement-not-offered\]/.test(a.err) && a.err.includes('ask for what is offered with: chat: leave out --to · quote: --to <msg id>'), `Gmail-shaped, --in-thread: the refusal + "${(a.err.split('\n')[1] || '').trim()}"`, a.err);
+  ok(a.code === 1 && gateOf(/offered here: chat, quote \[placement-not-offered\]/.test(a.err)) && verdictOf(a.err.includes('ask for what is offered with: chat: leave out --to · quote: --to <msg id>')), `Gmail-shaped, --in-thread: the refusal + "${(a.err.split('\n')[1] || '').trim()}"`, a.err);
   answer = gBoth;
   const b = await run(CLI, ['reply', 'gmail-1/t-1', 'x', '--to', 'm-1', '--also-in-chat']);
-  ok(b.code === 1 && b.err.includes('ask for what is offered with: chat: leave out --to · quote: --to <msg id>'), 'Gmail-shaped, --also-in-chat: the same flags', b.err);
+  ok(b.code === 1 && verdictOf(b.err.includes('ask for what is offered with: chat: leave out --to · quote: --to <msg id>')), 'Gmail-shaped, --also-in-chat: the same flags', b.err);
   answer = lBoth;
   const c = await run(CLI, ['reply', 'lark-1/oc_x', 'x', '--to', 'm-1', '--also-in-chat']);
-  ok(c.code === 1 && c.err.includes('ask for what is offered with: chat: leave out --to · quote: --to <msg id> · thread: --to <msg id> --in-thread'), 'Lark-shaped, --also-in-chat: the flags for chat, quote AND thread', c.err);
+  ok(c.code === 1 && verdictOf(c.err.includes('ask for what is offered with: chat: leave out --to · quote: --to <msg id> · thread: --to <msg id> --in-thread')), 'Lark-shaped, --also-in-chat: the flags for chat, quote AND thread', c.err);
   answer = P.placementVerdict({ requested: 'quote', replyTo: 'm-1', caps: lark.caps, parent: { inThread: true } });
   const d = await run(CLI, ['reply', 'lark-1/oc_x', 'x', '--to', 'm-1']);
-  ok(d.code === 1 && /--in-thread/.test(d.err) && !d.err.includes('ask for what is offered with'), 'a parent-in-thread refusal already names its flags (--in-thread) — no second line', d.err);
+  ok(d.code === 1 && gateOf(/--in-thread/.test(d.err)) && !d.err.includes('ask for what is offered with'), 'a parent-in-thread refusal already names its flags (--in-thread) — no second line', d.err);
   // CONTROL: the CLI copy without the hint leaves the agent with the placement names only
   const cliSrc = fs.readFileSync(CLI, 'utf-8');
   const hook = " placementHint(j); process.exit(1); }";
-  ok(cliSrc.includes(hook), 'CONTROL setup: the hint call is found');
+  ok(verdictOf(cliSrc.includes(hook)), 'CONTROL setup: the hint call is found');
   answer = gThread;
   const o = await run(M.write('data/bin/vibespace-channels', cliSrc.replace(hook, ' process.exit(1); }'), 'no-hint', { esm: false }), ['reply', 'gmail-1/t-1', 'x', '--to', 'm-1', '--in-thread']);
-  ok(o.code === 1 && /offered here: chat, quote/.test(o.err) && !/--to <msg id>/.test(o.err), 'CONTROL: the copy without it answers "offered here: chat, quote" and nothing the agent can type', o.err);
+  ok(o.code === 1 && gateOf(/offered here: chat, quote/.test(o.err)) && !/--to <msg id>/.test(o.err), 'CONTROL: the copy without it answers "offered here: chat, quote" and nothing the agent can type', o.err);
   server.close();
 }
 
 for (const e of engines) try { e.stop(); } catch { }
-for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 7, label: 'chanthr-naive: ' })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 7, label: 'chanthr-naive: ' })) ok(verdictOf(row.pass), row.name, row.detail);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

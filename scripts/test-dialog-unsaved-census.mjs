@@ -22,7 +22,7 @@ const acorn = require('acorn');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 
 function walk(node, fn, parents = []) {
   if (!node || typeof node.type !== 'string') return;
@@ -160,7 +160,7 @@ if (isMain) {
   const cut = src.replace("unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });\n  if (raised) return null;", "unsavedX: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });\n  if (raised) return null;"); // (r3: the call reads `raised` next) // lane dialog-yield: the call declares its kind (a form)
   ok(cut !== src, 'mutant: Notify… loses `unsaved`');
   const m1 = censusSaveDialogs({ files: [NOTIFY], override: { [NOTIFY]: cut } });
-  ok(m1.bad.some((x) => x.fn === 'showNotifyDialog' && x.decl === 'missing'), 'Notify… without `unsaved:` ⇒ RED (missing)', m1.bad);
+  ok(verdictOf(m1.bad.some((x) => x.fn === 'showNotifyDialog' && x.decl === 'missing')), 'Notify… without `unsaved:` ⇒ RED (missing)', m1.bad);
   const PROBE = 'src/lib/__unsaved-census-probe.js';
   const probe = (body) => ({ [PROBE]: `import { createModalShell } from './utils.js';\nimport { t } from './i18n.js';\n${body}\n` });
   const run = (body) => censusSaveDialogs({ files: [], override: probe(body) });
@@ -169,13 +169,13 @@ if (isMain) {
   const viaHelper = run(`function drawForm(body) { const b = document.createElement('button'); b.textContent = t('Save'); body.appendChild(b); }\nexport function showThing() {\n  const { body } = createModalShell({ id: 'x' });\n  drawForm(body);\n}`);
   ok(viaHelper.bad.length === 1, 'a NEW Save dialog whose Save is drawn by a top-level helper it calls ⇒ RED', viaHelper.rows);
   const imported = censusSaveDialogs({ files: [], override: { ...probe(`import { grantAccessBody } from './channel-filter-editor.js';\nexport function showThing(app, st) {\n  const { body, close } = createModalShell({ id: 'x' });\n  grantAccessBody(app, st, body, { close });\n}`) } });
-  ok(imported.bad.length === 1 && imported.bad[0].saves.some((x) => x.startsWith('src/lib/channel-filter-editor.js:')), 'a NEW dialog whose Save is drawn by an IMPORTED helper (grantAccessBody) ⇒ RED', imported.rows);
+  ok(imported.bad.length === 1 && verdictOf(imported.bad[0].saves.some((x) => x.startsWith('src/lib/channel-filter-editor.js:'))), 'a NEW dialog whose Save is drawn by an IMPORTED helper (grantAccessBody) ⇒ RED', imported.rows);
   const zh = run(`export function showThing() {\n  const { body } = createModalShell({ id: 'x' });\n  body.innerHTML = '<button>' + '保存' + '</button>';\n}`);
   ok(zh.bad.length === 1, "a Save worded '保存' counts too", zh.rows);
   const noReason = run(`export function showThing() {\n  const { body } = createModalShell({ id: 'x', unsaved: false });\n  body.append(t('Save'));\n}`);
   ok(noReason.bad.length === 1 && noReason.bad[0].decl === 'bad', '`unsaved: false` without its reason ⇒ RED', noReason.rows);
   const withReason = run(`export function showThing() {\n  const { body } = createModalShell({ id: 'x', unsaved: false }); // nothing changes here until Save: it only shows\n  body.append(t('Save'));\n}`);
-  ok(withReason.bad.length === 0 && withReason.rows[0]?.decl === 'false' && /nothing changes/.test(withReason.rows[0].reason), '`unsaved: false // <reason>` is a declaration (the reason printed)', withReason.rows);
+  ok(withReason.bad.length === 0 && withReason.rows[0]?.decl === 'false' && verdictOf(/nothing changes/.test(withReason.rows[0].reason)), '`unsaved: false // <reason>` is a declaration (the reason printed)', withReason.rows);
   const named = run(`export function showThing(g) {\n  const { body } = createModalShell({ id: 'x', unsaved: g });\n  body.append(t('Save'));\n}`);
   ok(named.bad.length === 1 && named.bad[0].decl === 'bad', '`unsaved: someName` (neither an object nor false) ⇒ RED', named.rows);
   const guarded = run(`export function showThing() {\n  const { body } = createModalShell({ id: 'x', unsaved: { save: () => true } });\n  body.append(t('Save'));\n}`);
@@ -200,9 +200,9 @@ if (isMain) {
   const pinned = (text) => PINS.filter(([, s]) => !text.includes(s)).map(([w]) => w);
   ok(pinned(U).length === 0, "✕, the backdrop and both Escapes call the guard's dismiss (never `close` straight)", pinned(U));
   const mut = U.replace('closeBtn.onclick = () => dismiss();', 'closeBtn.onclick = close;');
-  ok(mut !== U && pinned(mut).includes('✕'), 'MUTANT ✕ straight to close ⇒ the pin is RED');
-  ok(/unsaved = null, onEscape = null, opener = 'person', from = null, undismissable = false \} = \{\}, deferred = false\) \{/.test(U) && /function unsavedGuard\(/.test(U), 'createModalShell takes `unsaved` and owns the ONE guard (unsavedGuard)');
+  ok(mut !== U && verdictOf(pinned(mut).includes('✕')), 'MUTANT ✕ straight to close ⇒ the pin is RED');
+  ok(gateOf(/unsaved = null, onEscape = null, opener = 'person', from = null, undismissable = false \} = \{\}, deferred = false\) \{/.test(U)) && verdictOf(/function unsavedGuard\(/.test(U)), 'createModalShell takes `unsaved` and owns the ONE guard (unsavedGuard)');
 
   console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
   process.exit(fail ? 1 : 0);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

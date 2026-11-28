@@ -41,7 +41,7 @@ const AF = require(path.join(REPO, 'src/artifacts.js'));
 const MODEL = path.join(REPO, 'src/lib/artifacts-list-model.js');
 const M = await import(pathToFileURL(MODEL).href);
 let pass = 0, fail = 0;
-const ok = (c, msg, why) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (why !== undefined ? ' — ' + (typeof why === 'string' ? why : JSON.stringify(why)).slice(0, 600) : '')); } };
+const ok = (c, msg, why) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (why !== undefined ? ' — ' + (typeof why === 'string' ? why : JSON.stringify(why)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -57,7 +57,7 @@ process.on('exit', () => { try { fs.rmSync(scratch, { recursive: true, force: tr
 
 console.log('⓪ the names this suite judges (a copy without them is RED here, by name)');
 const need = [['src/artifacts.js intentOf', typeof AF.intentOf === 'function'], ['src/artifacts.js INTENTS', Array.isArray(AF.INTENTS)], ['the model\'s shownNames', typeof M.shownNames === 'function'], ['the model\'s folderOf', typeof M.folderOf === 'function'], ['the model\'s foldersOf', typeof M.foldersOf === 'function'], ['the model\'s whereOf', typeof M.whereOf === 'function'], ['the model\'s metaLine', typeof M.metaLine === 'function'], ['the model\'s kindHit', typeof M.kindHit === 'function'], ['the model\'s pathWord', typeof M.pathWord === 'function'], ['src/artifacts.js opAuthor', typeof AF.opAuthor === 'function'], ['src/artifacts.js wasShown', typeof AF.wasShown === 'function'], ['the model\'s folderNames', typeof M.folderNames === 'function'], ['the model\'s hostTag', typeof M.hostTag === 'function'], ['the model\'s listCtx', typeof M.listCtx === 'function'], ['the model\'s foldToggle', typeof M.foldToggle === 'function'], ['the model\'s intent group', Array.isArray(M.GROUPS) && M.GROUPS[0] === 'intent']];
-for (const [n, c] of need) ok(c, `${n} exists`);
+for (const [n, c] of need) ok(verdictOf(c), `${n} exists`);
 if (fail) done();
 ok(AF.INTENTS.join() === 'foryou,made,touched' && M.INTENT_ORDER.join() === AF.INTENTS.join(), 'the bands, in order: for you · made here · touched (the server\'s INTENTS = the model\'s INTENT_ORDER)');
 
@@ -106,7 +106,7 @@ TABLE.push(['junk: null', null, 'touched']);
 TABLE.push(['junk: a row with no facts', { key: 'x' }, 'touched']);
 const got = TABLE.map(([what, row, want]) => ({ what, want, got: AF.intentOf(row) }));
 for (const g of got) console.log(`    ${g.got === g.want ? ' ' : '!'} ${g.what.padEnd(84)} ${g.got}`);
-ok(got.every((g) => g.got === g.want), `the table: ${got.length} row shapes, each in its band`, got.filter((g) => g.got !== g.want));
+ok(verdictOf(got.every((g) => g.got === g.want)), `the table: ${got.length} row shapes, each in its band`, got.filter((g) => g.got !== g.want));
 // r5 (V1): wasShown's read of a row WITHOUT `shown` agrees with `shown` on every row this reducer writes — over the
 // table and over a seeded walk of op sequences (every op the readers and the stores make, both authors, three paths)
 // — so the fallback can only ever speak for a row an older tree wrote, never add a showing this reducer would not stamp
@@ -119,15 +119,15 @@ let seed = 7, walks = 0;
 const rnd = (n) => ((seed = (seed * 1103515245 + 12345) % 2147483648) % n);
 for (let w = 0; w < 150; w++) { let rows = {}; for (let i = 0, n = 1 + rnd(6); i < n; i++) { const o = FZOPS[rnd(FZOPS.length)](['a.md', 'b.py', 'c.html'][rnd(3)]); if (o) rows = AF.apply(rows, { cwd: CWD, at: T0 + i, ...o, by: AF.opAuthor(o) === 'user' || o.by === 'user' ? 'user' : 'agent', id: o.id ? o.id + ':' + w + ':' + i : undefined }).rows; } for (const r of Object.values(rows)) { walks++; if (AF.wasShown(r) !== !!r.shown) disagree.push(JSON.stringify(r)); } }
 ok(!disagree.length && walks > 150, `r5 (V1): wasShown agrees with \`shown\` on every row the reducer writes (the table + ${walks} rows of 150 seeded op walks)`, disagree.slice(0, 3));
-ok(AF.KINDS.every((k) => TABLE.some(([, r]) => r && r.kind === k)), `every kind of src/artifacts.js KINDS is in the table (${AF.KINDS.join(' ')})`);
-ok(['publish', 'unpublish', 'present', 'handover', 'open', 'upload', 'write', 'edit', 'listen'].every((op) => TABLE.some(([, r]) => r && r.lastOp === op)), 'every op the rows can last carry is in the table (write · edit · the six REG_OPS · a service\'s listen)');
+ok(verdictOf(AF.KINDS.every((k) => TABLE.some(([, r]) => r && r.kind === k))), `every kind of src/artifacts.js KINDS is in the table (${AF.KINDS.join(' ')})`);
+ok(verdictOf(['publish', 'unpublish', 'present', 'handover', 'open', 'upload', 'write', 'edit', 'listen'].every((op) => TABLE.some(([, r]) => r && r.lastOp === op))), 'every op the rows can last carry is in the table (write · edit · the six REG_OPS · a service\'s listen)');
 console.log('  a /p/ link in the PERSON\'s own message is theirs: the harness hook tags it, the reducer never marks it shown');
 const OF = require(path.join(REPO, 'src/harnesses/artifacts-of.js'));
 const said = (t) => [{ type: 'text', text: t }];
 const cu = OF.claude({ type: 'user', message: { role: 'user', content: said('look at /p/pgabcdefghij') } }), ca = OF.claude({ type: 'assistant', message: { content: said('here: /p/pgabcdefghij') } });
 const xu = OF.codex({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '/p/pgabcdefghij' }] } }), xa = OF.codex({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '/p/pgabcdefghij' }] } });
 const au = OF.acp({ kind: 'update', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '/p/pgabcdefghij' } } }), aa = OF.acp({ kind: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '/p/pgabcdefghij' } } });
-ok([cu, xu, au].every((o) => o.length === 1 && o[0].op === 'present' && o[0].by === 'user') && [ca, xa, aa].every((o) => o.length === 1 && o[0].op === 'present' && !o[0].by), 'claude · codex · ACP: the person\'s message ⇒ a present op `by: user`; the agent\'s ⇒ untagged (the agent\'s)', [cu, xu, au, ca, xa, aa]);
+ok(gateOf([cu, xu, au].every((o) => o.length === 1 && o[0].op === 'present' && o[0].by === 'user')) && verdictOf([ca, xa, aa].every((o) => o.length === 1 && o[0].op === 'present' && !o[0].by)), 'claude · codex · ACP: the person\'s message ⇒ a present op `by: user`; the agent\'s ⇒ untagged (the agent\'s)', [cu, xu, au, ca, xa, aa]);
 ok(AF.opAuthor(cu[0]) === 'user' && AF.opAuthor(ca[0]) === 'agent' && AF.opAuthor({ op: 'write', by: 'user' }) === 'agent' && AF.opAuthor(null) === 'agent', 'opAuthor (the live consumer\'s and the rebuild\'s ONE rule): only a present op keeps the person\'s authorship');
 console.log('  r3: the AUTHOR of a link is the message\'s PROVENANCE, never the record\'s type (the CLI\'s measured user-record shapes)');
 const LNK = '/p/pgabcdefghij';
@@ -137,7 +137,7 @@ const FIX = fs.readFileSync(path.join(REPO, 'scripts/fixtures/message-origin/cla
 const PERSON = { 'mo-typed-1': 'user', 'mo-tray-answer-1': 'user', 'mo-command-1': 'user', 'mo-typed-picture': 'user', 'mo-typed-tasktag': 'user', 'mo-typed-compactpaste': 'user', 'mo-typed-2': 'user', 'mo-compact-1': 'none' }; // every other shape: an agent's
 const byOf = (ops) => (ops.length ? ops[0].by || 'agent' : 'none');
 const fx = FIX.map((r) => [r.uuid, byOf(OF.claude(withLink(r))), PERSON[r.uuid] || 'agent']);
-ok(fx.length >= 20 && fx.every(([, g, w]) => g === w), `claude: ${fx.length} measured user-record shapes ⇒ the person's typing (a message, a tray answer, a command, a typed tag / summary head) «user»; a peer, a notice, a task's wake, VibeSpace's note / continue, the CLI's own lines «agent»; the compaction summary witnesses nothing`, fx.filter(([, g, w]) => g !== w));
+ok(fx.length >= 20 && verdictOf(fx.every(([, g, w]) => g === w)), `claude: ${fx.length} measured user-record shapes ⇒ the person's typing (a message, a tray answer, a command, a typed tag / summary head) «user»; a peer, a notice, a task's wake, VibeSpace's note / continue, the CLI's own lines «agent»; the compaction summary witnesses nothing`, fx.filter(([, g, w]) => g !== w));
 const FRAME = `Message from session "referee" (via vibespace-msg; reply: vibespace-msg send "referee" "..."):\nreport published: ${LNK}`;
 ok(byOf(OF.claude({ type: 'user', message: { content: FRAME } })) === 'agent' && byOf(OF.claude({ type: 'user', _fromWebui: true, msgId: 'm1', message: { role: 'user', content: said(FRAME) } })) === 'user', 'the vibespace-msg frame with its origin stamp gone (the acceptor\'s probe) ⇒ an agent\'s; the same words sent from our composer stay the person\'s');
 const cx = (item) => byOf(OF.codex({ type: 'response_item', payload: { type: 'message', role: 'user', ...item } }));
@@ -198,7 +198,7 @@ const cells = (asks) => ({
   b3: bandBy(rebuild3(foldBy([PERSON_REC]), keep(BASE_PASTE), asks.filter((a) => String(a.text).includes(LNK)))),
 });
 const c6 = cells([fileAsk(RPT, 'ut-00000000e1'), fileAsk(TPY, 'ut-00000000e2'), askOf('ut-00000000e3', { status: 'open', text: `Please review the referee report ${LNK}` })]), c5 = cells([]);
-ok([c6.s3h, c6.s3g, c6.code].every((r) => r && AF.intentOf(r) === 'foryou' && r.shown === true) && c6.b3 === 'foryou',
+ok(gateOf([c6.s3h, c6.s3g, c6.code].every((r) => r && AF.intentOf(r) === 'foryou' && r.shown === true)) && c6.b3 === 'foryou',
   'r6 (U2): the base\'s rows + the transcript intact + the ask store ⇒ «for you», stamped — a file an ask attached, then the agent edited (S3h) or the PERSON saved (S3g); a code file (never «touched»); a page an ask named before the person pasted it (B3); an answered ask counts', c6);
 ok(AF.intentOf(c5.s3h) === 'made' && AF.intentOf(c5.s3g) === 'made' && AF.intentOf(c5.code) === 'touched' && c5.b3 === 'made', 'CONTROL r5\'s rebuild (no ask store — the `ask:` id read on page rows only, overwritten by the later op) ⇒ «made» · «made» · «touched» · «made» — RED', c5);
 const later = rebuild3(derive(W1, E1), persist(keep(c6.s3h)), [])[BASE_S3H.key];
@@ -208,7 +208,7 @@ ok(Object.keys(cutAsk).join() === ':/p/pgabcdefghik', 'the rebuild reads an ask\
 const pasted = TABLE.find(([w]) => w.startsWith('page: a /p/ link the PERSON'))[1];
 ok(pasted.shown !== true && pasted.by === 'user' && pasted.presented === true, 'the person\'s paste: a presented row, never `shown`', pasted);
 const W0 = (r, lang = 'en') => M.rowWords(r, { kindWord: (k) => AF.kindWord(k, lang), t: (s) => s });
-ok(W0(TABLE.find(([w]) => w.startsWith('page: UNPUBLISHED'))[1]).edits.includes('Unpublished') && W0(TABLE.find(([w]) => w.startsWith('page: written + PUBLISHED'))[1]).edits.includes('Published'), 'a page that left «for you» SAYS so on its row («Unpublished»); a published one says «Published»');
+ok(gateOf(W0(TABLE.find(([w]) => w.startsWith('page: UNPUBLISHED'))[1]).edits.includes('Unpublished')) && verdictOf(W0(TABLE.find(([w]) => w.startsWith('page: written + PUBLISHED'))[1]).edits.includes('Published')), 'a page that left «for you» SAYS so on its row («Unpublished»); a published one says «Published»');
 const askRow = TABLE.find(([w]) => w.startsWith('doc: an ask\'s --artifact, then'))[1];
 ok(askRow.shown === true && askRow.lastOp === 'edit', 'sticky: the present op marks the row `shown`; a later edit keeps it (lastOp alone would drop it)', askRow);
 const mergedShown = AF.merge({ [askRow.key]: { ...askRow, shown: undefined, lastAt: T0 + 9 * MIN } }, { [askRow.key]: askRow })[askRow.key];
@@ -231,7 +231,7 @@ ok(chipOrder(AF) === WANT_ORDER, `view: «for you» (the page, the service) › 
   const base = path.join(scratch, 'artifacts-base-order.js');
   fs.writeFileSync(base, editAnchor(src, needle, '(VIEW_ORDER.indexOf(a.kind) - VIEW_ORDER.indexOf(b.kind))', "src/artifacts.js").replace(/require\('\.\/([\w.-]+\.js)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`)); // its relative requires made absolute (r6: + the reply grammar's cut mark)
   const B = require(base);
-  ok(src.includes(needle) && chipOrder(B) !== WANT_ORDER, `CONTROL the base's kind-first view (VIEW_ORDER) ⇒ the order leg is RED ("${chipOrder(B)}")`); }
+  ok(gateOf(src.includes(needle)) && chipOrder(B) !== WANT_ORDER, `CONTROL the base's kind-first view (VIEW_ORDER) ⇒ the order leg is RED ("${chipOrder(B)}")`); }
 
 // ── ② THE OWNER'S SHAPE ──
 console.log('② the owner\'s shape: 30 artifacts (three README.md) + 41 code files; 2 pages published, a hand-over, a service');
@@ -263,10 +263,10 @@ const plan = M.listPlan(OV, { ...M.DEFAULT_VIEW, group: 'intent', collapsed: M.D
 const sec = (k) => plan.sections.find((s) => s.key === k);
 const bands = plan.sections.filter((s) => s.head.group === 'intent');
 ok(bands.map((s) => s.key + ' ' + s.head.count).join(' · ') === 'i:foryou 4 · i:made 26 · i:touched 41', `the INTENT plan's bands: ${bands.map((s) => s.key + ' ' + s.head.count).join(' · ')}`);
-ok(plan.sections[0].key === 'i:foryou' && plan.sections[0].open, 'the first section is «for you», open (the first screen = the attention list)');
-ok(sec('i:foryou').rows.map((b) => b.kind).sort().join() === 'doc,page,page,service' && sec('i:foryou').rows.every((b, i, a) => i === 0 || (a[i - 1].lastAt || 0) >= (b.lastAt || 0)), `«for you» = the 2 published pages + the hand-over + the service, newest first (${sec('i:foryou').rows.map((b) => b.name).join(', ')})`);
+ok(plan.sections[0].key === 'i:foryou' && verdictOf(plan.sections[0].open), 'the first section is «for you», open (the first screen = the attention list)');
+ok(sec('i:foryou').rows.map((b) => b.kind).sort().join() === 'doc,page,page,service' && verdictOf(sec('i:foryou').rows.every((b, i, a) => i === 0 || (a[i - 1].lastAt || 0) >= (b.lastAt || 0))), `«for you» = the 2 published pages + the hand-over + the service, newest first (${sec('i:foryou').rows.map((b) => b.name).join(', ')})`);
 ok(sec('i:touched').open === false && sec('i:touched').head.code === 41 && sec('i:touched').head.count === 41, '«touched» is FOLDED by default behind its count — 41, all code («顺带改了 41 个代码文件»)');
-ok(sec('i:made').rows.some((b) => b.kind === 'upload') && sec('i:made').rows.every((b) => b.kind !== 'code'), 'made here holds the upload (the person\'s own) and never a code row');
+ok(gateOf(sec('i:made').rows.some((b) => b.kind === 'upload')) && verdictOf(sec('i:made').rows.every((b) => b.kind !== 'code')), 'made here holds the upload (the person\'s own) and never a code row');
 const NAMES = plan.ctx.names;
 const readme = (p) => NAMES.get(':' + CWD + '/' + p);
 ok(readme('traces/v3-or1/README.md') === 'traces/v3-or1/README.md' && readme('referee3/README.md') === 'referee3/README.md' && readme('v3/README.md') === 'v3/README.md' && readme('mirror/v3-or1/README.md') === 'mirror/v3-or1/README.md',
@@ -277,7 +277,7 @@ const metaOf = (p) => words([...OV.items, ...OV.code].find((b) => b.path === CWD
 ok(metaOf('traces/v3-or1/README.md').folder === 'traces/v3-or1' && metaOf('summary.md').folder === 'proj' && metaOf('src/pkg1/mod_1.py').folder === 'src/pkg1', `every row names its FOLDER from the conversation's cwd; the cwd itself by its own name, never «./» (traces/v3-or1 · ${metaOf('summary.md').folder} · src/pkg1)`);
 const dirOf = (p) => String(p).slice(0, String(p).lastIndexOf('/'));
 const wholePath = (b) => { const f = words(b).folder, d = dirOf(b.path); return d.split('/').filter(Boolean).length > 1 && (f === d || f.endsWith(':' + d) || f.includes(CWD)); };
-ok([...OV.items, ...OV.code].every((b) => !wholePath(b)), 'no row\'s folder is the whole absolute path');
+ok(verdictOf([...OV.items, ...OV.code].every((b) => !wholePath(b))), 'no row\'s folder is the whole absolute path');
 const svcRow = OV.items.find((b) => b.kind === 'service'), handed = OV.items.find((b) => b.via && b.via.kind === 'handover');
 const zhW = (b, ctx = OV) => M.rowWords(b, { cwd: ctx.cwd, host: ctx.host, folders: ctx.folders, hubWord: ctx.hubWord, kindWord: (k) => AF.kindWord(k, 'zh'), t: (x, v) => x.replace(/\{(\w+)\}/g, (_, k) => v[k]) });
 ok(words(svcRow).folder === '' && words(handed).folder === '~/helper' && words(handed).away === true && M.metaLine(zhW(handed)) === 'referee · ~/helper · 文档', `a service has no folder; a hand-over from ANOTHER folder leads with WHO and WHERE («${M.metaLine(zhW(handed))}»)`);
@@ -286,15 +286,15 @@ const REFP = '/var/tmp/vibespace-lanes/wt-referee/out/review.md';
 const REF = AF.cardBlock(one(AF.handoverOp(one({ op: 'write', path: REFP, at: T0 }), { from: { cid: 'c-R', name: 'referee' }, at: T0 })));
 const refZh = M.metaLine(zhW(REF)), refEn = M.metaLine(M.rowWords(REF, { cwd: CWD, host: '', kindWord: (k) => AF.kindWord(k, 'en') }));
 ok(refZh === 'referee · …/out · 文档' && refEn === 'referee · …/out · Document', `the realistic helper's hand-over: «${refZh}» / «${refEn}» (who · the folder's tail · the kind)`);
-ok(M.metaLine(zhW(OV.items.find((b) => b.path === CWD + '/traces/v3-or1/README.md'))).startsWith('traces/v3-or1 · 文档'), 'a row under the cwd still leads with its folder («traces/v3-or1 · 文档 · …»)');
+ok(verdictOf(M.metaLine(zhW(OV.items.find((b) => b.path === CWD + '/traces/v3-or1/README.md'))).startsWith('traces/v3-or1 · 文档')), 'a row under the cwd still leads with its folder («traces/v3-or1 · 文档 · …»)');
 const FT = [[{ path: '/home/u/proj/a/b.md' }, 'a'], [{ path: '/home/u/proj/b.md' }, 'proj'], [{ path: '/home/u/proj/a/b/c/d/e/f.md' }, '…/c/d/e'], [{ path: '/home/u/x/y.md' }, '~/x'], [{ path: '/home/u/y.md' }, '~'], [{ path: '/home/u/a/b/c/d/e.md' }, '…/d'], [{ path: '/opt/data/x.csv' }, '…/data'], [{ path: '/tmp/x.csv' }, '/tmp'], [{ path: REFP }, '…/out'], [{ path: '/home/u/proj/q.md', host: 'gpu1' }, 'gpu1:~/proj'], [{ path: '/srv/w/out/q.md', host: 'gpu1' }, 'gpu1:…/out'], [{ path: '' , kind: 'service' }, ''], [{ path: '/p/pgabcdefghij', presented: true }, '']];
 const ft = FT.map(([r, want]) => [M.folderOf(r, { cwd: CWD, host: '' }), want]);
-ok(ft.every(([g, w]) => g === w), `folderOf (a LOCAL conversation): in the cwd · the cwd by its name · deep · a home · elsewhere = the folder's TAIL · another machine says so · none (${ft.map(([g]) => JSON.stringify(g)).join(' ')})`, ft);
+ok(verdictOf(ft.every(([g, w]) => g === w)), `folderOf (a LOCAL conversation): in the cwd · the cwd by its name · deep · a home · elsewhere = the folder's TAIL · another machine says so · none (${ft.map(([g]) => JSON.stringify(g)).join(' ')})`, ft);
 console.log('  x4: the host prefix names ANOTHER machine only — a remote conversation\'s own rows never wear it');
 const RC = { cwd: CWD, host: 'gpu1' };
 const FR = [[{ path: CWD + '/out/a.md', host: 'gpu1' }, 'out'], [{ path: CWD + '/a.md', host: 'gpu1' }, 'proj'], [{ path: '/home/u/notes/x.md', host: 'gpu1' }, '~/notes'], [{ path: '/srv/w/out/q.md', host: 'gpu2' }, 'gpu2:…/out']];
 const fr2 = FR.map(([r, want]) => [M.folderOf(r, RC), want]);
-ok(fr2.every(([g, w]) => g === w), `folderOf (a REMOTE conversation on gpu1): its cwd's rows · its home · a third machine (${fr2.map(([g]) => JSON.stringify(g)).join(' ')})`, fr2);
+ok(verdictOf(fr2.every(([g, w]) => g === w)), `folderOf (a REMOTE conversation on gpu1): its cwd's rows · its home · a third machine (${fr2.map(([g]) => JSON.stringify(g)).join(' ')})`, fr2);
 console.log('  r3: ONE host rule — the told-apart names and the folders: the machine that is not the conversation\'s says which');
 const TW = [{ key: 'gpu1:' + CWD + '/README.md', path: CWD + '/README.md', host: 'gpu1', name: 'README.md' }, { key: ':' + CWD + '/README.md', path: CWD + '/README.md', host: '', name: 'README.md' }];
 const remoteN = M.shownNames(TW, { host: 'gpu1' }), localN = M.shownNames(TW, { host: '' });
@@ -310,17 +310,17 @@ ok(M.folderOf(HV.items[0], HC) === 'gpu1:…/out' && HC.names.get(HV.items[1].ke
   `the folder and the told-apart name say «gpu1:» (the record\'s name), never «${HID}:»; a machine gone from the list by its id; the hub\'s own by the hub\'s word (${M.folderOf(HV.items[0], HC)} · ${HC.names.get(HV.items[1].key)})`);
 ok(M.whereOf({ path: '/home/u/a.md' }, { cwd: '/home/u' }).folder === '~' && M.whereOf({ path: '/home/u/a.md' }, { cwd: '/home/u' }).key === ':/home/u', 'a conversation AT a home: its root reads «~» (key = the directory — a sub-folder of the same name stays apart)');
 const made = sec('i:made');
-ok(Array.isArray(made.folders) && made.folders.length > 1 && made.folders.reduce((n, f) => n + f.rows.length, 0) === 26 && new Set(made.folders.flatMap((f) => f.rows.map((b) => b.key))).size === 26,
+ok(gateOf(Array.isArray(made.folders)) && made.folders.length > 1 && made.folders.reduce((n, f) => n + f.rows.length, 0) === 26 && new Set(made.folders.flatMap((f) => f.rows.map((b) => b.key))).size === 26,
   `«made here» (26 > 8) sub-groups by folder: ${made.folders.map((f) => (f.head.label || '·') + ' ' + f.head.count).join(', ')} — every row in exactly one`);
-ok(made.folders.every((f) => f.head.count === f.rows.length && f.open) && made.folders.every((f, i, a) => i === 0 || !f.head.label || Math.max(...a[i - 1].rows.map((b) => b.lastAt)) >= Math.max(...f.rows.map((b) => b.lastAt))), 'each folder head counts its rows, opens by default, the folder with the newest change first');
+ok(gateOf(made.folders.every((f) => f.head.count === f.rows.length && f.open)) && verdictOf(made.folders.every((f, i, a) => i === 0 || !f.head.label || Math.max(...a[i - 1].rows.map((b) => b.lastAt)) >= Math.max(...f.rows.map((b) => b.lastAt)))), 'each folder head counts its rows, opens by default, the folder with the newest change first');
 ok(sec('i:foryou').folders === null, '«for you» (4 ≤ 8) stays flat');
 const rootF = made.folders.find((f) => f.key === 'f:i:made::' + CWD);
-ok(rootF && rootF.head.label === 'proj' && rootF.rows.map((b) => b.name).join() === 'summary.md', `the ROOT folder's head says the cwd's own name («${rootF && rootF.head.label}»), never «./»`);
+ok(gateOf(rootF) && rootF.head.label === 'proj' && rootF.rows.map((b) => b.name).join() === 'summary.md', `the ROOT folder's head says the cwd's own name («${rootF && rootF.head.label}»), never «./»`);
 console.log('  x6: inside a folder head the BARE name and no folder (the head names it); the flat lists keep the suffix');
 const tr = made.folders.find((f) => f.head.label === 'traces/v3-or1');
 const trR = tr && tr.rows.find((b) => b.name === 'README.md');
-ok(tr && tr.ctx && tr.ctx.inFolder === true && tr.ctx.names.get(trR.key) === 'README.md' && tr.rows.every((b) => tr.ctx.names.get(b.key) === b.name), `in the «traces/v3-or1» head: «${tr && tr.ctx.names.get(trR.key)}» (bare) — the global name «${NAMES.get(trR.key)}» stays for the flat lists`);
-ok(!M.metaLine(zhW(trR), { inFolder: true }).includes('traces') && M.metaLine(zhW(trR), { inFolder: true }).startsWith('文档'), `…and its meta line drops the folder («${M.metaLine(zhW(trR), { inFolder: true })}» — the helper no longer pushed off at 320)`);
+ok(gateOf(tr) && gateOf(tr.ctx) && tr.ctx.inFolder === true && tr.ctx.names.get(trR.key) === 'README.md' && verdictOf(tr.rows.every((b) => tr.ctx.names.get(b.key) === b.name)), `in the «traces/v3-or1» head: «${tr && tr.ctx.names.get(trR.key)}» (bare) — the global name «${NAMES.get(trR.key)}» stays for the flat lists`);
+ok(!M.metaLine(zhW(trR), { inFolder: true }).includes('traces') && verdictOf(M.metaLine(zhW(trR), { inFolder: true }).startsWith('文档')), `…and its meta line drops the folder («${M.metaLine(zhW(trR), { inFolder: true })}» — the helper no longer pushed off at 320)`);
 console.log('  r3: a folder is KEYED by its directory, labelled by its tail — two helpers\' out/ folders are two heads');
 const OUTS = [['referee', '/var/tmp/vibespace-lanes/wt-referee/out'], ['judge', '/var/tmp/vibespace-lanes/wt-judge/out']];
 const handed2 = OUTS.flatMap(([who, dir], h) => Array.from({ length: 5 }, (_, i) => AF.cardBlock(one(AF.handoverOp(one({ op: 'write', path: `${dir}/part${i}.md`, at: T0 + h * 10 + i }), { from: { cid: 'c-' + who, name: who }, at: T0 + h * 10 + i })))));
@@ -329,7 +329,7 @@ const P2 = M.listPlan(OV2, { collapsed: ['i:touched'] });
 const outsOf = (p) => (p.sections.find((s) => s.key === 'i:foryou').folders || []).filter((f) => /out$/.test(f.head.label));
 ok(outsOf(P2).map((f) => f.head.label + ' · ' + f.head.count).sort().join(' | ') === '…/wt-judge/out · 5 | …/wt-referee/out · 5', `two helpers' out/ folders ⇒ TWO heads (${outsOf(P2).map((f) => f.head.label + ' · ' + f.head.count).sort().join(' | ')}) — never one «…/out · 10»`);
 const outKeys = outsOf(P2).map((f) => f.key);
-ok(new Set(outKeys).size === 2 && outKeys.every((k) => k.startsWith('f:i:foryou::/var/tmp/vibespace-lanes/wt-')) && outsOf(P2).every((f) => f.rows.every((b) => f.ctx.names.get(b.key) === b.name)), 'each with its own fold key (the directory: host + path), each row bare inside its own head', outKeys);
+ok(new Set(outKeys).size === 2 && gateOf(outKeys.every((k) => k.startsWith('f:i:foryou::/var/tmp/vibespace-lanes/wt-'))) && verdictOf(outsOf(P2).every((f) => f.rows.every((b) => f.ctx.names.get(b.key) === b.name))), 'each with its own fold key (the directory: host + path), each row bare inside its own head', outKeys);
 ok(outsOf(M.listPlan(OV2, { collapsed: ['i:touched', outKeys.find((k) => k.includes('wt-judge'))] })).map((f) => f.head.label + ':' + f.open).sort().join() === '…/wt-judge/out:false,…/wt-referee/out:true', 'folding one leaves the other open');
 ok(M.metaLine(zhW(handed2[0], P2.ctx)) === 'referee · …/wt-referee/out · 文档', `a flat list's meta line says the same grown words («${M.metaLine(zhW(handed2[0], P2.ctx))}»)`);
 const FN = M.folderNames([{ key: 'a', path: CWD + '/p1/q/k/l/m/one.md' }, { key: 'b', path: CWD + '/p2/q/k/l/m/two.md' }, { key: 'c', path: CWD + '/x.md' }, { key: 'd', path: CWD + '/proj/y.md' }, { key: 'e', path: '/home/u/elsewhere/out/r.md' }], { cwd: CWD, host: '' });
@@ -347,7 +347,7 @@ ok(homeL.join() === '/home/a/x,/root/x,/home/b/x,/home/a,/home/b' && !HOMES.has(
 const K1 = M.folderNames([{ key: 'k1', path: CWD + '/a.md' }, { key: 'k2', path: CWD + '/proj/b.md' }, { key: 'k3', path: CWD + '/proj/proj/c.md' }], { cwd: CWD, host: '' });
 const K2 = M.folderNames([{ key: 'm1', path: '/m/k/x/out/1.md' }, { key: 'm2', path: '/m/j/x/out/2.md' }, { key: 'm3', path: CWD + '/a/b/k/x/out/3.md' }], { cwd: CWD, host: '' });
 const k1L = [K1.get(':' + CWD), K1.get(':' + CWD + '/proj'), K1.get(':' + CWD + '/proj/proj')], k2L = [K2.get(':/m/k/x/out'), K2.get(':/m/j/x/out'), K2.get(':' + CWD + '/a/b/k/x/out')];
-ok(k1L.join() === 'proj,proj/proj,proj/proj/proj' && new Set(k2L).size === 3 && k2L.every(Boolean),
+ok(k1L.join() === 'proj,proj/proj,proj/proj/proj' && new Set(k2L).size === 3 && verdictOf(k2L.every(Boolean)),
   `a grown label that lands on another folder\'s grows on (the r3 acceptance\'s two): ${k1L.join(' · ')}; ${k2L.join(' · ')}`, [...K2]);
 console.log('  r4: a filter hides rows, never renames a folder — the head, the meta line and the window say the words grown over ALL rows');
 const AR = [...Array.from({ length: 6 }, (_, i) => ['referee', '/var/tmp/lanes/wt-referee/out', i]), ...Array.from({ length: 4 }, (_, i) => ['referee', '/var/tmp/lanes/wt-referee/notes', 6 + i])]
@@ -363,12 +363,12 @@ ok(aw0.head === REFOUT && aw0.judge === '…/wt-judge/out' && awQ.head === REFOU
 console.log('  the filter: name · folder · path · helper · the kind\'s word — the bands kept, a folded hit unfolded, the counts restated');
 const F = (q, extra = {}) => M.listPlan(OV, { q, collapsed: M.DEFAULT_VIEW.collapsed.intent, ...extra });
 const fr = F('referee3');
-ok(fr.sections.filter((s) => s.head.group === 'intent').map((s) => s.key + ' ' + s.head.count).join() === 'i:made 3' && fr.sections[0].rows.every((b) => b.path.includes('/referee3/')), `a FOLDER name ("referee3") finds its rows, in their band, the count restated (${fr.sections.map((s) => s.key + ' ' + s.head.count).join()})`);
+ok(fr.sections.filter((s) => s.head.group === 'intent').map((s) => s.key + ' ' + s.head.count).join() === 'i:made 3' && verdictOf(fr.sections[0].rows.every((b) => b.path.includes('/referee3/'))), `a FOLDER name ("referee3") finds its rows, in their band, the count restated (${fr.sections.map((s) => s.key + ' ' + s.head.count).join()})`);
 const fm = F('mirror');
 ok(fm.sections.length === 1 && fm.sections[0].key === 'i:touched' && fm.sections[0].open === true, 'a hit inside the FOLDED band («touched») unfolds it while filtering');
-ok(M.viewFrom(null).collapsed.intent.includes('i:touched'), '…and the remembered fold is untouched');
+ok(verdictOf(M.viewFrom(null).collapsed.intent.includes('i:touched')), '…and the remembered fold is untouched');
 ok(F('v3-or1/tr').sections[0].rows.map((b) => b.name).join() === 'trace.md', 'a PATH from the cwd ("v3-or1/tr") finds its row');
-ok(F('attack:sandbox').sections.every((s) => s.rows.every((b) => M.helperOf(b) === 'attack:sandbox')) && F('attack:sandbox').sections.length > 0, 'a helper\'s label finds its rows');
+ok(gateOf(F('attack:sandbox').sections.every((s) => s.rows.every((b) => M.helperOf(b) === 'attack:sandbox'))) && F('attack:sandbox').sections.length > 0, 'a helper\'s label finds its rows');
 const kw = (k) => AF.kindWord(k, 'zh');
 const fk = F('服务', { kindWord: kw });
 ok(fk.sections.length === 1 && fk.sections[0].rows.length === 1 && fk.sections[0].rows[0].kind === 'service', 'the KIND\'S WORD in the person\'s language ("服务") finds the service');
@@ -376,7 +376,7 @@ ok(F('proj').sections.flatMap((s) => s.rows).map((b) => b.name).join() === 'summ
 console.log('  x2: the kind\'s word matches as a WORD — «de» never floods, a prefix alone never unfolds «touched»');
 const KH = [['Document', 'de', ''], ['Code', 'co', ''], ['Document', 'me', ''], ['Code', 'code', 'equal'], ['Code', 'cod', 'prefix'], ['Document', 'docu', 'prefix'], ['Document', 'ume', ''], ['文档', '文', ''], ['文档', '文档', 'equal'], ['ドキュメント', 'ドキュ', ''], ['', 'x', '']];
 const kh = KH.map(([w, q, want]) => [M.kindHit(w, q), want]);
-ok(kh.every(([g, w]) => g === w), `kindHit: equal · a word's prefix of ≥ 3 · never inside a word · a CJK word only whole (${kh.map(([g]) => JSON.stringify(g)).join(' ')})`, kh);
+ok(verdictOf(kh.every(([g, w]) => g === w)), `kindHit: equal · a word's prefix of ≥ 3 · never inside a word · a CJK word only whole (${kh.map(([g]) => JSON.stringify(g)).join(' ')})`, kh);
 const enKw = (k) => AF.kindWord(k, 'en');
 const FEs = new Map(), FE = (q) => FEs.get(q) || FEs.set(q, F(q, { kindWord: enKw })).get(q); // one plan per query (read-only below)
 const real = (q) => [...OV.items, ...OV.code].filter((b) => [b.name, M.folderOf(b, OV), M.relPath(b, OV), M.helperOf(b)].some((x) => String(x).toLowerCase().includes(q))).length;
@@ -387,9 +387,9 @@ for (const q of ['de', 'co', 'me']) ok(rowsIn(FE(q)) === real(q) && touchedOpen(
 ok(!touchedOpen(FE('de')) && !touchedOpen(FE('co')), 'q="de" / "co" (typing «decisions.md», «cover») ⇒ «touched» stays folded');
 ok(FE('code').sections.find((s) => s.key === 'i:touched')?.open === true && FE('code').sections.find((s) => s.key === 'i:touched').rows.length === 41, 'q="code" (the kind\'s whole word) ⇒ «touched» opens with its 41 rows');
 const cod = FE('cod').sections.find((s) => s.key === 'i:touched');
-ok(cod && cod.rows.length === 41 && cod.open === false, `q="cod" (a prefix) ⇒ the 41 code rows counted, «touched» stays FOLDED (${cod && cod.open})`);
+ok(gateOf(cod) && cod.rows.length === 41 && cod.open === false, `q="cod" (a prefix) ⇒ the 41 code rows counted, «touched» stays FOLDED (${cod && cod.open})`);
 ok(FE('cod').count.filtered.weak.size === 41 && FE('code').count.filtered.weak.size === 0, 'filterRows names the prefix-only rows (`weak`) — the plan never unfolds on them');
-ok(F('文', { kindWord: kw }).sections.every((s) => s.rows.every((b) => /文/.test(b.name + b.path))) , 'zh: «文» (part of 文档) matches no row through the kind word — only the whole word does');
+ok(verdictOf(F('文', { kindWord: kw }).sections.every((s) => s.rows.every((b) => /文/.test(b.name + b.path)))) , 'zh: «文» (part of 文档) matches no row through the kind word — only the whole word does');
 console.log('  r3: a head tapped WHILE FILTERING is a peek — the plan honours it, never the stored folds');
 const PK = (q, peek) => M.listPlan(OV, { q, collapsed: M.DEFAULT_VIEW.collapsed.intent, kindWord: enKw, peek }).sections.find((s) => s.key === 'i:touched');
 ok(PK('cod', new Map([['i:touched', true]])).open === true && PK('cod', null).open === false, 'q="cod": a peek opens «touched» (the prefix rule left it folded)');
@@ -402,7 +402,7 @@ ok(!plan.sections.some((s) => s.key === 'recent') && twice(plan) === 0, 'the own
 const CN = ownerView({ codeNewest: true });
 const pc = M.listPlan(CN, { collapsed: M.DEFAULT_VIEW.collapsed.intent });
 const rc = pc.sections.find((s) => s.key === 'recent');
-ok(rc && rc.rows.length === 3 && rc.rows.every((b) => b.kind === 'code') && twice(pc) === 0, `code touched a minute ago (in the folded band) ⇒ 最近 holds just those ${rc ? rc.rows.length : 0} rows`);
+ok(gateOf(rc) && rc.rows.length === 3 && gateOf(rc.rows.every((b) => b.kind === 'code')) && twice(pc) === 0, `code touched a minute ago (in the folded band) ⇒ 最近 holds just those ${rc ? rc.rows.length : 0} rows`);
 ok(pc.sections.findIndex((s) => s.key === 'recent') === pc.sections.findIndex((s) => s.key === 'i:touched') - 1 && pc.sections[0].key === 'i:foryou', '…placed just above «touched» (the first screen stays «for you»)');
 ok(!M.listPlan(CN, { collapsed: [] }).sections.some((s) => s.key === 'recent'), '«touched» opened ⇒ those rows are on screen ⇒ 最近 goes');
 ok(M.listPlan(CN, { group: 'kind', collapsed: ['k:code'] }).sections[0].key === 'recent', 'by kind (a secondary choice) 最近 stays first');
@@ -411,9 +411,9 @@ ok(M.listPlan(CN, { group: 'kind', collapsed: ['k:code'] }).sections[0].key === 
 console.log('③ the window: the rail opens with the three bands; no column clicked ⇒ the bands, newest first');
 const R = M.railOf(M.rowsOfView(OV));
 ok(R.intents.map((b) => b.key + ' ' + b.count).join() === 'i:foryou 4,i:made 26,i:touched 41' && M.railRows(M.rowsOfView(OV), 'i:foryou').length === 4, `railOf: ${R.intents.map((b) => b.key + ' ' + b.count).join(', ')}; a click selects its band`);
-ok(M.railOf([]).intents.every((b) => b.count === 0) && M.railOf([]).intents.length === 3, 'an empty «for you» still shows (with 0) — the rail says nothing was put in front of you yet');
+ok(gateOf(M.railOf([]).intents.every((b) => b.count === 0)) && M.railOf([]).intents.length === 3, 'an empty «for you» still shows (with 0) — the rail says nothing was put in front of you yet');
 const wo = M.sortRows(M.rowsOfView(OV), { col: 'intent' });
-ok(wo.slice(0, 4).every((b) => M.bandOf(b) === 'foryou') && wo.slice(4, 30).every((b) => M.bandOf(b) === 'made') && wo.slice(30).every((b) => M.bandOf(b) === 'touched'), 'sortRows col "intent": band by band (4 · 26 · 41), newest first in each');
+ok(gateOf(wo.slice(0, 4).every((b) => M.bandOf(b) === 'foryou')) && gateOf(wo.slice(4, 30).every((b) => M.bandOf(b) === 'made')) && verdictOf(wo.slice(30).every((b) => M.bandOf(b) === 'touched')), 'sortRows col "intent": band by band (4 · 26 · 41), newest first in each');
 console.log('  x3: the Path column sorts by the folder it SHOWS, then the name');
 const PS = [['zz.md', 'x/a/zz.md'], ['aa.md', 'b/aa.md'], ['mm.md', 'c/mm.md'], ['a.md', 'b/a.md']].map(([name, p], i) => ({ key: ':' + CWD + '/' + p, name, path: CWD + '/' + p, kind: 'doc', lastAt: T0 + i }));
 const ps = M.sortRows(PS, { col: 'path', cwd: CWD, host: '' }).map((b) => M.pathWord(b, { cwd: CWD }) + '/' + b.name).join(' ');
@@ -437,7 +437,7 @@ const FK = Array.from({ length: 200 }, (_, i) => `f:i:made::/w/dir${i}`), CODE1 
 const touchedShut = (M0, v) => M0.listPlan({ items: [{ key: 'd1', kind: 'doc', path: CWD + '/a.md', name: 'a.md', lastAt: 2, intent: 'made' }], code: CODE1, cwd: CWD }, { group: 'intent', collapsed: v.collapsed.intent }).sections.find((s) => s.key === 'i:touched').open === false;
 const vS = tapFolds(M, M.viewFrom(null), 'intent', FK), FKK = FK.map((k) => k.replace('f:i:', 'f:k:'));
 const vK = M.viewFrom({ v: M.VIEW_VERSION, group: 'kind', collapsed: { kind: M.foldToggle([...FKK, 'k:code'], 'f:k:new') } }); // the kind group at the boundary: 200 folds + the seed, a 201st tap
-ok(vS.collapsed.intent.includes('i:touched') && vS.collapsed.intent.length === 201 && vS.collapsed.intent[0] === FK[199] && touchedShut(M, vS) === true && vK.collapsed.kind.includes('k:code') && vK.collapsed.kind.length === 201 && !vK.collapsed.kind.includes(FKK[199]),
+ok(gateOf(vS.collapsed.intent.includes('i:touched')) && vS.collapsed.intent.length === 201 && vS.collapsed.intent[0] === FK[199] && touchedShut(M, vS) === true && gateOf(vK.collapsed.kind.includes('k:code')) && vK.collapsed.kind.length === 201 && !vK.collapsed.kind.includes(FKK[199]),
   'r5 (V3): 200 folds after a fresh view ⇒ «touched» still SHUT (the seed is never the one evicted; the person\'s newest 200 kept beside it) — k:code alike in the kind group', { n: vS.collapsed.intent.length, last: vS.collapsed.intent.at(-1) });
 const vU = tapFolds(M, tapFolds(M, M.viewFrom(null), 'intent', ['i:touched']), 'intent', FK);
 ok(!vU.collapsed.intent.includes('i:touched') && touchedShut(M, vU) === false && vU.collapsed.intent.length === 200 && !tapFolds(M, vU, 'intent', ['f:i:made::/w/more']).collapsed.intent.includes('i:touched'),
@@ -448,38 +448,38 @@ console.log('⑤ CONTROLS — patched copies of the model, each must be RED');
 const src = fs.readFileSync(MODEL, 'utf8');
 const copy = async (tag, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(scratch, `model-${tag}.mjs`); fs.writeFileSync(f, editAnchor(src, from, to, "src/lib/artifacts-list-model.js")); return import(pathToFileURL(f).href); };
 const bare = await copy('bare', '    if (rs.length < 2) { out.set(rs[0].key, n); continue; }', '    { for (const r of rs) out.set(r.key, n); continue; }');
-ok(bare && bare.listPlan(OV, { collapsed: ['i:touched'] }).ctx.names.get(':' + CWD + '/referee3/README.md') === 'README.md', 'CONTROL the bare name on a collision ⇒ the README leg reads «README.md» three times — RED');
+ok(gateOf(bare) && bare.listPlan(OV, { collapsed: ['i:touched'] }).ctx.names.get(':' + CWD + '/referee3/README.md') === 'README.md', 'CONTROL the bare name on a collision ⇒ the README leg reads «README.md» three times — RED');
 const more = await copy('more', '    sections.push({ key: g.head.key, head: alone ? { ...g.head, alone: true } : g.head, rows: g.rows, open, folders });', '    sections.push({ key: g.head.key, head: g.head, rows: g.rows.slice(0, 8), more: Math.max(0, g.rows.length - 8), open, folders: null });');
 const pm = more && more.listPlan(OV, { collapsed: ['i:touched'] });
-ok(pm && !(pm.sections.find((s) => s.key === 'i:made').rows.length === 26 && Array.isArray(pm.sections.find((s) => s.key === 'i:made').folders)), 'CONTROL a «show more» in place of a section (8 rows + a count) ⇒ the made-here leg (26 rows, every one in a folder) is RED');
+ok(gateOf(pm) && !(pm.sections.find((s) => s.key === 'i:made').rows.length === 26 && Array.isArray(pm.sections.find((s) => s.key === 'i:made').folders)), 'CONTROL a «show more» in place of a section (8 rows + a count) ⇒ the made-here leg (26 rows, every one in a folder) is RED');
 const dup = await copy('dup', '.filter((r) => !drawn.has(r.key))', '');
 const pd = dup && dup.listPlan(OV, { collapsed: M.DEFAULT_VIEW.collapsed.intent });
-ok(pd && pd.sections.some((s) => s.key === 'recent') && (() => { const seen = new Set(), all = pd.sections.filter((s) => s.open).flatMap((s) => (s.folders || [s]).filter((x) => x.open !== false).flatMap((x) => x.rows.map((b) => b.key))); return all.some((k) => (seen.has(k) ? true : (seen.add(k), false))); })(), 'CONTROL 最近 repeating the open bands\' rows ⇒ a row twice on one screen — RED');
+ok(gateOf(pd) && gateOf(pd.sections.some((s) => s.key === 'recent')) && verdictOf((() => { const seen = new Set(), all = pd.sections.filter((s) => s.open).flatMap((s) => (s.folders || [s]).filter((x) => x.open !== false).flatMap((x) => x.rows.map((b) => b.key))); return all.some((k) => (seen.has(k) ? true : (seen.add(k), false))); })()), 'CONTROL 最近 repeating the open bands\' rows ⇒ a row twice on one screen — RED');
 
 const kfirst = await copy('kfirst', "export function listPlan(v, { q = '', group = 'intent'", "export function listPlan(v, { q = '', group = 'kind'");
-ok(kfirst && kfirst.listPlan(OV, { collapsed: [] }).sections[0].key !== 'i:foryou', 'CONTROL the kind-first default ⇒ the first section is not «for you» — RED');
+ok(gateOf(kfirst) && kfirst.listPlan(OV, { collapsed: [] }).sections[0].key !== 'i:foryou', 'CONTROL the kind-first default ⇒ the first section is not «for you» — RED');
 const unf = await copy('unfold', "intent: Object.freeze(['i:touched'])", 'intent: Object.freeze([])');
-ok(unf && unf.listPlan(OV, { collapsed: unf.DEFAULT_VIEW.collapsed.intent }).sections.find((s) => s.key === 'i:touched').open === true, 'CONTROL «touched» unfolded by default ⇒ 41 code rows on the first screens — RED');
+ok(gateOf(unf) && unf.listPlan(OV, { collapsed: unf.DEFAULT_VIEW.collapsed.intent }).sections.find((s) => s.key === 'i:touched').open === true, 'CONTROL «touched» unfolded by default ⇒ 41 code rows on the first screens — RED');
 const r1f = await copy('r1folder', "segs, base: 0, depth: 1, max:", "segs, base: 0, depth: 3, max:"); // r1: the folder's last three segments from the root
 const r1meta = r1f && r1f.metaLine(r1f.rowWords(REF, { cwd: CWD, host: '', kindWord: (k) => AF.kindWord(k, 'zh') }));
-ok(r1meta && r1meta !== 'referee · …/out · 文档' && r1meta.includes('vibespace-lanes'), `CONTROL r1's folderOf (a path outside the cwd printed from its root) ⇒ «${r1meta}» — RED`);
+ok(gateOf(r1meta) && r1meta !== 'referee · …/out · 文档' && verdictOf(r1meta.includes('vibespace-lanes')), `CONTROL r1's folderOf (a path outside the cwd printed from its root) ⇒ «${r1meta}» — RED`);
 const sub = await copy('substr', "    const k = kw ? kindHit(kw(kindKey(r)), s) : '';", "    const k = kw && fold(kw(kindKey(r))).includes(s) ? 'equal' : '';");
 const subP = sub && sub.listPlan(OV, { q: 'de', collapsed: ['i:touched'], kindWord: enKw });
-ok(subP && (subP.sections.some((s) => s.key === 'i:touched' && s.open) || subP.sections.reduce((n, s) => n + s.rows.length, 0) > real('de')), 'CONTROL the kind word as a substring ⇒ «de» floods «Document» / «Code» rows — RED');
+ok(gateOf(subP) && (verdictOf(subP.sections.some((s) => s.key === 'i:touched' && s.open)) || subP.sections.reduce((n, s) => n + s.rows.length, 0) > real('de')), 'CONTROL the kind word as a substring ⇒ «de» floods «Document» / «Code» rows — RED');
 const tailS = await copy('tailsort', "        : (a, b) => WORDS.compare(pathWord(a, { cwd, host, hubWord, hostNames, folders }), pathWord(b, { cwd, host, hubWord, hostNames, folders })) || CMP.name(a, b);", '        : keyCmp((r) => pathTail(r.path));');
-ok(tailS && tailS.sortRows(PS, { col: 'path', cwd: CWD }).map((b) => b.name).join() !== 'a.md,aa.md,mm.md,zz.md', 'CONTROL the Path sort by the path\'s tail (not what the cell shows) ⇒ RED');
+ok(gateOf(tailS) && tailS.sortRows(PS, { col: 'path', cwd: CWD }).map((b) => b.name).join() !== 'a.md,aa.md,mm.md,zz.md', 'CONTROL the Path sort by the path\'s tail (not what the cell shows) ⇒ RED');
 const hostAll = await copy('hostall', "  if (rh === str(host)) return '';", "  return rh ? rh + ':' : '';");
-ok(hostAll && hostAll.folderOf({ path: '/home/u/notes/x.md', host: 'gpu1' }, RC) === 'gpu1:~/notes', 'CONTROL the host on every row of a remote conversation («gpu1:~/notes») ⇒ RED');
+ok(gateOf(hostAll) && hostAll.folderOf({ path: '/home/u/notes/x.md', host: 'gpu1' }, RC) === 'gpu1:~/notes', 'CONTROL the host on every row of a remote conversation («gpu1:~/notes») ⇒ RED');
 const keepSfx = await copy('keepsfx', '[r.key, str(r.name)]', '[r.key, names.get(r.key)]');
 const ks = keepSfx && keepSfx.listPlan(OV, { collapsed: ['i:touched'] }).sections.find((s) => s.key === 'i:made').folders.find((f) => f.head.label === 'traces/v3-or1');
-ok(ks && ks.ctx.names.get(trR.key) !== 'README.md', 'CONTROL the suffix kept inside a folder head (the folder said three times) ⇒ RED');
+ok(gateOf(ks) && ks.ctx.names.get(trR.key) !== 'README.md', 'CONTROL the suffix kept inside a folder head (the folder said three times) ⇒ RED');
 
 const tailKey = await copy('tailkey', 'return { folder: grown || labelAt(w, w.depth), key: w.key, away: w.away };', 'return { folder: grown || labelAt(w, w.depth), key: w.away ? labelAt(w, w.depth) : w.key, away: w.away };');
-ok(tailKey && outsOf(tailKey.listPlan(OV2, { collapsed: ['i:touched'] })).length === 1, 'CONTROL a folder keyed by its TAIL (r2) ⇒ the two out/ folders share one head — RED');
+ok(gateOf(tailKey) && outsOf(tailKey.listPlan(OV2, { collapsed: ['i:touched'] })).length === 1, 'CONTROL a folder keyed by its TAIL (r2) ⇒ the two out/ folders share one head — RED');
 const hostR2 = await copy('namehost', '(paths.get(full[i]) > 1 ? hostTag(r, { host, hubWord, hostNames }) : \'\')', '(paths.get(full[i]) > 1 && r.host ? r.host + \':\' : \'\')');
-ok(hostR2 && hostR2.shownNames(TW, { host: 'gpu1' }).get(TW[0].key) === 'gpu1:proj/README.md', 'CONTROL the names\' r2 host rule (the conversation\'s OWN machine prefixed) ⇒ RED');
+ok(gateOf(hostR2) && hostR2.shownNames(TW, { host: 'gpu1' }).get(TW[0].key) === 'gpu1:proj/README.md', 'CONTROL the names\' r2 host rule (the conversation\'s OWN machine prefixed) ⇒ RED');
 const noPeek = await copy('nopeek', 'const unfold = (key, rs) => (peeked(key) ?', 'const unfold = (key, rs) => (false ?');
-ok(noPeek && noPeek.listPlan(OV, { q: 'cod', collapsed: M.DEFAULT_VIEW.collapsed.intent, kindWord: enKw, peek: new Map([['i:touched', true]]) }).sections.find((s) => s.key === 'i:touched').open === false, 'CONTROL the plan ignoring a peek ⇒ a tapped head stays shut while filtering — RED');
+ok(gateOf(noPeek) && noPeek.listPlan(OV, { q: 'cod', collapsed: M.DEFAULT_VIEW.collapsed.intent, kindWord: enKw, peek: new Map([['i:touched', true]]) }).sections.find((s) => s.key === 'i:touched').open === false, 'CONTROL the plan ignoring a peek ⇒ a tapped head stays shut while filtering — RED');
 const fnText = (name) => { const i = src.indexOf(`export function ${name}(`), j = i < 0 ? -1 : src.indexOf('\n}\n', i); return j < 0 ? '\0' : src.slice(i, j + 3); };
 const R3_FOLDER_NAMES = `export function folderNames(rows, ctx = {}) {
   const places = new Map(), byLabel = new Map(), out = new Map();
@@ -503,35 +503,35 @@ const r3N = await copy('r3names', fnText('folderNames'), R3_FOLDER_NAMES);
 const r3H = r3N && [':/home/a/x', ':/root/x'].map((k) => r3N.folderNames([{ key: 'h1', path: '/home/a/x/notes.md' }, { key: 'h2', path: '/root/x/plan.md' }], { cwd: '/w/proj', host: '' }).get(k));
 const r3K = r3N && r3N.folderNames([{ key: 'k1', path: CWD + '/a.md' }, { key: 'k2', path: CWD + '/proj/b.md' }, { key: 'k3', path: CWD + '/proj/proj/c.md' }], { cwd: CWD, host: '' });
 const r3W = (p) => r3N.whereOf({ path: p }, { cwd: CWD, host: '', folders: r3K }).folder; // the label a head / a meta line shows
-ok(r3H && r3H[0] === r3H[1] && r3W(CWD + '/proj/b.md') === r3W(CWD + '/proj/proj/c.md'), `CONTROL r3\'s folderNames (growth stops at the segments; a grown label checked only against its first collision) ⇒ two homes both «${r3H && r3H[0]}», «proj/proj» twice — RED`);
+ok(gateOf(r3H) && r3H[0] === r3H[1] && r3W(CWD + '/proj/b.md') === r3W(CWD + '/proj/proj/c.md'), `CONTROL r3\'s folderNames (growth stops at the segments; a grown label checked only against its first collision) ⇒ two homes both «${r3H && r3H[0]}», «proj/proj» twice — RED`);
 const hostId = await copy('hostid', "str(hostNames && typeof hostNames === 'object' && Object.hasOwn(hostNames, rh) ? hostNames[rh] : '') || rh", 'rh');
-ok(hostId && hostId.folderOf(HV.items[0], hostId.listCtx(HV)) === HID + ':…/out', 'CONTROL r3\'s host word (the internal id) ⇒ «host-1a2b3c4d:…/out» — RED');
+ok(gateOf(hostId) && hostId.folderOf(HV.items[0], hostId.listCtx(HV)) === HID + ':…/out', 'CONTROL r3\'s host word (the internal id) ⇒ «host-1a2b3c4d:…/out» — RED');
 const mm1 = await copy('mm1', "  const f = filterRows(all, q, { ...ctx, kindWord }), filtering = !!f.q;", "  const f = filterRows(all, q, { ...ctx, kindWord }), filtering = !!f.q; if (filtering) ctx.folders = folderNames(f.rows, ctx);");
 const mm3 = await copy('mm3', 'hostNames: ctx.hostNames, folders: ctx.folders })', 'hostNames: ctx.hostNames, folders: null })');
 const m1 = mm1 && allWords(mm1, 'referee'), m3 = mm3 && allWords(mm3, '');
-ok(m1 && m1.head !== REFOUT && m1.meta !== REFOUT, `CONTROL the folders grown over the FILTERED rows (the acceptor\'s MM1) ⇒ «referee» typed: the head «${m1 && m1.head}», the meta «${m1 && m1.meta}» — RED`);
-ok(m3 && m3.head !== REFOUT, `CONTROL a section\'s folders grown over its OWN rows (MM2 / MM3) ⇒ the for-you head «${m3 && m3.head}» while the judge\'s out/ sits in «made» — RED`);
+ok(gateOf(m1) && m1.head !== REFOUT && m1.meta !== REFOUT, `CONTROL the folders grown over the FILTERED rows (the acceptor\'s MM1) ⇒ «referee» typed: the head «${m1 && m1.head}», the meta «${m1 && m1.meta}» — RED`);
+ok(gateOf(m3) && m3.head !== REFOUT, `CONTROL a section\'s folders grown over its OWN rows (MM2 / MM3) ⇒ the for-you head «${m3 && m3.head}» while the judge\'s out/ sits in «made» — RED`);
 const pushF = await copy('foldpush', 'return rest.length < c.length ? rest : [k, ...rest];', 'return rest.length < c.length ? rest : [...rest, k];');
-ok(pushF && !pushF.viewFrom({ v: 2, collapsed: { day: pushF.foldToggle(F200, 'd:new') } }).collapsed.day.includes('d:new'), 'CONTROL the base\'s fold (APPENDED; the cap keeps the first 200) ⇒ the 201st fold lost on save — RED');
+ok(gateOf(pushF) && !pushF.viewFrom({ v: 2, collapsed: { day: pushF.foldToggle(F200, 'd:new') } }).collapsed.day.includes('d:new'), 'CONTROL the base\'s fold (APPENDED; the cap keeps the first 200) ⇒ the 201st fold lost on save — RED');
 const cjsCopy = (rel, from, to, tag) => { const src0 = fs.readFileSync(path.join(REPO, rel), 'utf8'); if (!src0.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(scratch, `${tag}.js`); fs.writeFileSync(f, src0.replace(from, to).replace(/(['"])\.\.?\/([\w./-]+\.js)\1/g, (m, q, p) => JSON.stringify(path.resolve(path.dirname(path.join(REPO, rel)), (m.slice(1).startsWith('../') ? '../' : './') + p)))); return require(f); }; // a CommonJS copy in the scratch dir, its relative requires made absolute (the tree is never written)
 const ofSrc = fs.readFileSync(path.join(REPO, 'src/harnesses/artifacts-of.js'), 'utf8');
 const dynReq = (t) => [...t.matchAll(/\brequire\(\s*(?!['"])/g)].length; // a require whose argument is not a literal: esbuild leaves it to the runtime
-ok(dynReq(ofSrc) === 0 && /lazy\(\(\) => require\('\.\.\/message-manager\.js'\)\)/.test(ofSrc), 'r4 (W5): every require in the reader is a LITERAL — the device\'s bundle (build:agentd) carries the module it reads (the heavy test-artifacts-intent-chrome bundles the reader and runs it)');
+ok(dynReq(ofSrc) === 0 && verdictOf(/lazy\(\(\) => require\('\.\.\/message-manager\.js'\)\)/.test(ofSrc)), 'r4 (W5): every require in the reader is a LITERAL — the device\'s bundle (build:agentd) carries the module it reads (the heavy test-artifacts-intent-chrome bundles the reader and runs it)');
 ok(dynReq(ofSrc.replace("const lazy = (load) => { let m = null; return () => m || (m = load()); };", "const lazy = (p) => { let m = null; return () => m || (m = require(p)); };")) > 0, 'CONTROL r3\'s lazy(p) (a variable require) ⇒ the census finds it — RED');
 const ofLine = "  if (r.type === 'user' && r.message) { const texts = textBlocks(r.message.content, ['text']); return texts.some((s) => pageLinksIn(s).length) ? said(claudeAuthor(r), texts) : []; }";
 const OFT = ofSrc.includes(ofLine) ? cjsCopy('src/harnesses/artifacts-of.js', ofLine, "  if (r.type === 'user' && r.message) return presentOps(textBlocks(r.message.content, ['text']), 'user');", 'of-typerule') : null;
-ok(OFT && bandBy(foldBy([PEER_REC], {}, AF, OFT)) === 'made', 'CONTROL the reader\'s r2 rule (every user RECORD is the person\'s) ⇒ a peer\'s page reads «made here» — RED');
+ok(gateOf(OFT) && bandBy(foldBy([PEER_REC], {}, AF, OFT)) === 'made', 'CONTROL the reader\'s r2 rule (every user RECORD is the person\'s) ⇒ a peer\'s page reads «made here» — RED');
 const sticky = '  if (prev && wasShown(prev)) row.shown = true;';
 const AFS = cjsCopy('src/artifacts.js', sticky, '  if (false) row.shown = true;', 'af-nosticky');
-ok(AFS && bandBy(foldBy([PERSON_REC], keep(BASE_ASK), AFS), AFS) === 'made', 'CONTROL the showing not sticky forward (r2) ⇒ the base\'s ask row quoted by the person reads «made here» — RED');
+ok(gateOf(AFS) && bandBy(foldBy([PERSON_REC], keep(BASE_ASK), AFS), AFS) === 'made', 'CONTROL the showing not sticky forward (r2) ⇒ the base\'s ask row quoted by the person reads «made here» — RED');
 const r4shown = "const wasShown = (r) => !!(r && (r.shown || (r.presented ? String(r.lastId || '').startsWith('ask:') : SHOWN_OPS.includes(r.lastOp))));";
 const AF4 = cjsCopy('src/artifacts.js', r4shown, "const wasShown = (r) => !!(r && (r.shown || (r.by !== 'user' && (r.presented || SHOWN_OPS.includes(r.lastOp)))));", 'af-r4shown');
 const rb4 = AF4 && rebuild([PERSON_REC], persist(rebuild([PERSON_REC], keep(BASE_PASTE), AF4)), AF4);
-ok(AF4 && bandBy(rb4, AF4) === 'foryou' && Object.values(rb4)[0].shown === true, 'CONTROL r4\'s wasShown (a row without `shown` read by its `by` / `presented`) ⇒ the base\'s row for the person\'s paste reads «for you», stamped `shown` and persisted — RED');
+ok(gateOf(AF4) && bandBy(rb4, AF4) === 'foryou' && Object.values(rb4)[0].shown === true, 'CONTROL r4\'s wasShown (a row without `shown` read by its `by` / `presented`) ⇒ the base\'s row for the person\'s paste reads «for you», stamped `shown` and persisted — RED');
 const cap4 = await copy('cap4', 'foldsCap((v.v >= 2 ? c[g] : c[g].slice().reverse()).filter((x) => typeof x === \'string\'), g)', '(v.v >= 2 ? c[g] : c[g].slice().reverse()).filter((x) => typeof x === \'string\').slice(0, FOLDS_MAX)');
-ok(cap4 && touchedShut(cap4, cap4.viewFrom({ v: cap4.VIEW_VERSION, collapsed: { intent: cap4.foldToggle([...FK.slice(0, 199).reverse(), 'i:touched'], FK[199]) } })) === false, 'CONTROL r4\'s cap (the newest 200 of every key) ⇒ after 200 folds the seeded «touched» is evicted and opens — RED');
+ok(gateOf(cap4) && touchedShut(cap4, cap4.viewFrom({ v: cap4.VIEW_VERSION, collapsed: { intent: cap4.foldToggle([...FK.slice(0, 199).reverse(), 'i:touched'], FK[199]) } })) === false, 'CONTROL r4\'s cap (the newest 200 of every key) ⇒ after 200 folds the seeded «touched» is evicted and opens — RED');
 const OFN = cjsCopy('src/harnesses/artifacts-of.js', '(ours || !CMM().opensWithServerFrame(text))', "(ours || !CMM().opensWithServerFrame(String(text).replace(/^\\s*VibeSpace \\(this workspace, not another agent\\) reports:/, '')))", 'of-nonotice');
-ok(OFN && byOf(OFN.acp({ kind: 'update', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: NOTICE } } })) === 'user', 'CONTROL the server frame without its notice-head half ⇒ VibeSpace\'s notice reads as the person\'s — RED');
+ok(gateOf(OFN) && byOf(OFN.acp({ kind: 'update', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: NOTICE } } })) === 'user', 'CONTROL the server frame without its notice-head half ⇒ VibeSpace\'s notice reads as the person\'s — RED');
 
 // .399 follow-up (the acceptance of 93c6e9132): A ROW'S PLACE IS ITS NORMALIZED PATH — a codex «*** Add File: ../other/y.md»
 // from /w/proj is a file OUTSIDE the folder: one row with the same file written by its absolute path, read as elsewhere
@@ -544,7 +544,7 @@ const dots = { keys: Object.keys(dW), writes: dRow.writes, edits: dRow.edits, wh
 ok(dots.keys.join() === ':/w/other/y.md' && dots.writes === 1 && dots.edits === 1 && dots.where.away === true && dots.where.folder === '…/other' && dots.merged.join() === ':/w/other/y.md' && !!dots.mergedWhere && dots.mergedWhere.away === true && JSON.stringify(dots.norm) === JSON.stringify(['~/b.md', '~/../x', '/x', '/a/b']),
   '.399 follow-up: a path that climbs out of the folder (../other/y.md from /w/proj) is ONE row with the same file written by its absolute path, read as elsewhere («…/other», away); an older tree\'s row under the dotted path folds into it at the merge; never above the root or a home\'s ~', dots);
 const AFD = cjsCopy('src/artifacts.js', "return normDots((String(cwd).replace(/\\/+$/, '') + '/' + p).replace(/\\/{2,}/g, '/'));", "return (String(cwd).replace(/\\/+$/, '') + '/' + p).replace(/\\/{2,}/g, '/');", 'af-r10abs');
-ok(AFD, 'CONTROL needle present: absPath normalizes the joined path (.399 follow-up) — a tree without it has nothing to patch');
+ok(verdictOf(AFD), 'CONTROL needle present: absPath normalizes the joined path (.399 follow-up) — a tree without it has nothing to patch');
 if (AFD) {
   const r10W = AFD.fold(AFD.fold({}, { op: 'write', path: '../other/y.md', cwd: '/w/proj', at: 1 }), { op: 'edit', path: '/w/other/y.md', at: 2 });
   const r10Where = M.whereOf(r10W[':/w/proj/../other/y.md'] || {}, { cwd: '/w/proj' });
@@ -558,7 +558,7 @@ if (AFD) {
   ok(!a.row && a.skipped === 'bad-op' && !Object.keys(a.rows).length && !Object.keys(f).length, 'B-3f50 (b): a READ op makes no row — apply() skips it by name (bad-op), fold() keeps nothing', { a: { row: a.row, skipped: a.skipped }, f });
   const M1 = cjsCopy('src/artifacts.js', "const OPS = Object.freeze(['write', 'edit']);", "const OPS = Object.freeze(['write', 'edit', 'read']);", 'af-m1-read');
   const m1 = M1 && M1.apply({}, readOp);
-  ok(M1 && m1.row && Object.keys(m1.rows).length === 1, 'B-3f50 (b) RED control: the verifier\'s M1 (OPS gains read) makes a row of a file the agent only read — the leg above can go red');
+  ok(gateOf(M1) && gateOf(m1.row) && Object.keys(m1.rows).length === 1, 'B-3f50 (b) RED control: the verifier\'s M1 (OPS gains read) makes a row of a file the agent only read — the leg above can go red');
 }
 
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

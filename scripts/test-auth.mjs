@@ -54,7 +54,7 @@ const { WebSocket, WebSocketServer } = require('ws');
 const AUTH = 'src/auth.js';
 const WO = require(path.join(REPO, 'src/write-origin.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const MUT = mutantCopies('auth', REPO);
 const DIR = scratch('auth'); fs.mkdirSync(DIR, { recursive: true });
 const fresh = (rel) => { const f = path.join(REPO, rel); delete require.cache[require.resolve(f)]; return require(f); };
@@ -117,32 +117,32 @@ ok(AT.routes >= 0 && AT.gate >= 0 && ORDER[0] === 'gate', `server.js mounts the 
   const I = await instance('clerk');
   const owner = I.cookie.cookie.split('=')[1];
   const anon = await hit(I, '/api/auth/set-password', { body: { newPassword: 'attacker1' } });
-  ok(anon.status === 401 && !anon.cookie && !I.auth.passwordEnabled && I.auth.checkToken(owner),
+  ok(anon.status === 401 && !anon.cookie && !I.auth.passwordEnabled && verdictOf(I.auth.checkToken(owner)),
     'SSO, no password: an ANONYMOUS POST {newPassword} is 401 — no password set, no cookie handed out, the signed-in session kept', { status: anon.status, cookie: anon.cookie, pw: I.auth.passwordEnabled });
   const anonRm = await hit(I, '/api/auth/set-password', { body: { remove: true } });
   ok(anonRm.status === 401, 'SSO, no password: an anonymous {remove:true} is 401 too', anonRm.status);
   const forged = await hit(I, '/api/auth/set-password', { headers: { cookie: `vs_token=${'ab'.repeat(24)}` }, body: { newPassword: 'attacker1' } });
   ok(forged.status === 401 && !I.auth.passwordEnabled, 'SSO, no password: a cookie that is no session (unknown token) is 401', forged.status);
   const mine = await hit(I, '/api/auth/set-password', { headers: { ...I.cookie, ...SAME(I) }, body: { newPassword: 'owner-pw-1' } });
-  ok(mine.status === 200 && I.auth.passwordEnabled && I.auth.verifyPassword('owner-pw-1') && /vs_token=[a-f0-9]+/.test(String(mine.cookie)),
+  ok(mine.status === 200 && gateOf(I.auth.passwordEnabled) && gateOf(I.auth.verifyPassword('owner-pw-1')) && verdictOf(/vs_token=[a-f0-9]+/.test(String(mine.cookie))),
     'SSO, no password: the SIGNED-IN owner (session cookie, from its own page) sets a password — 200, a fresh session cookie', { status: mine.status, json: mine.json });
   await I.close();
 }
 {
   const I = await instance('password');
   const wrong = await hit(I, '/api/auth/set-password', { headers: I.cookie, body: { current: 'nope', newPassword: 'other-pw-1' } });
-  ok(wrong.status === 401 && I.auth.verifyPassword(I.pw), 'a password configured: signed in, the wrong current password is 401, the password unchanged', wrong.status);
+  ok(wrong.status === 401 && verdictOf(I.auth.verifyPassword(I.pw)), 'a password configured: signed in, the wrong current password is 401, the password unchanged', wrong.status);
   const anon = await hit(I, '/api/auth/set-password', { body: { current: I.pw, newPassword: 'other-pw-1' } });
-  ok(anon.status === 401 && I.auth.verifyPassword(I.pw), 'a password configured: the current password WITHOUT a session is 401 — the cookie gate stands in front of the auth routes now', anon.status);
+  ok(anon.status === 401 && verdictOf(I.auth.verifyPassword(I.pw)), 'a password configured: the current password WITHOUT a session is 401 — the cookie gate stands in front of the auth routes now', anon.status);
   const right = await hit(I, '/api/auth/set-password', { headers: I.cookie, body: { current: I.pw, newPassword: 'other-pw-1' } });
-  ok(right.status === 200 && I.auth.verifyPassword('other-pw-1'), 'a password configured: signed in + the current password changes it', right.status);
+  ok(right.status === 200 && verdictOf(I.auth.verifyPassword('other-pw-1')), 'a password configured: signed in + the current password changes it', right.status);
   await I.close();
 }
 {
   const I = await instance('open');
   ok(!I.auth.enabled, 'neither configured: auth is off');
   const first = await hit(I, '/api/auth/set-password', { body: { newPassword: 'first-pw-1' } });
-  ok(first.status === 200 && I.auth.enabled && I.auth.verifyPassword('first-pw-1') && /vs_token=[a-f0-9]+/.test(String(first.cookie)),
+  ok(first.status === 200 && gateOf(I.auth.enabled) && gateOf(I.auth.verifyPassword('first-pw-1')) && verdictOf(/vs_token=[a-f0-9]+/.test(String(first.cookie))),
     'neither configured (first-run onboarding, src/lib/setup-flows.js #ob-setpw): {newPassword} sets the first password — 200 + a session cookie, as before', { status: first.status, json: first.json });
   const after = await hit(I, '/api/x', { body: {} });
   ok(after.status === 401, 'and from then on the cookie gate stands (an anonymous write is 401)', after.status);
@@ -155,7 +155,7 @@ ok(AT.routes >= 0 && AT.gate >= 0 && ORDER[0] === 'gate', `server.js mounts the 
   const I = await instance('clerk', { authMod: M, order: ['routes', 'gate'] });
   const owner = I.cookie.cookie.split('=')[1];
   const anon = await hit(I, '/api/auth/set-password', { body: { newPassword: 'attacker1' } });
-  ok(cut.length === 1 && anon.status === 200 && I.auth.passwordEnabled && /vs_token=[a-f0-9]+/.test(String(anon.cookie)) && !I.auth.checkToken(owner),
+  ok(cut.length === 1 && anon.status === 200 && gateOf(I.auth.passwordEnabled) && gateOf(/vs_token=[a-f0-9]+/.test(String(anon.cookie))) && !I.auth.checkToken(owner),
     'CONTROL — the check cut + the pre-fix order (routes before the gate) ⇒ the anonymous POST answers 200, sets a password, revokes the owner\'s session and hands the caller a cookie (① red by the same asserts)', { cut: cut.length, status: anon.status, pw: I.auth.passwordEnabled });
   await I.close();
   const J = await instance('clerk', { authMod: M });
@@ -267,27 +267,27 @@ console.log('③ the request\'s own origin behind each deployment (ownOriginOf) 
     const got = WO.ownOriginOf(headers, opt);
     const okMine = mine === null || WO.crossSiteVerdict({ method: 'POST', headers: { origin: mine } }, got).ok;
     const refusedOthers = others.every((o) => !WO.crossSiteVerdict({ method: 'POST', headers: { origin: o } }, got).ok);
-    ok(got === own && okMine && refusedOthers, `${where}: own = ${own || "'' (refuses every Origin)"}; its page allowed, ${others.join(' / ')} refused (no Sec-Fetch-Site: the Origin compare)`, { got });
+    ok(got === own && gateOf(okMine) && verdictOf(refusedOthers), `${where}: own = ${own || "'' (refuses every Origin)"}; its page allowed, ${others.join(' / ')} refused (no Sec-Fetch-Site: the Origin compare)`, { got });
     tbl.push(`${where} → ${own || '—'}`);
   }
   { // THE .275 INCIDENT, as the handshake arrived: a GET upgrade with Origin = the page, no Sec-Fetch-Site, X-Forwarded-Proto wss
     const hs = { method: 'GET', headers: { origin: 'https://alice.pods.example', upgrade: 'websocket', connection: 'Upgrade', 'sec-websocket-version': '13' } };
     const fwd = { host: 'alice.pods.example', 'x-forwarded-proto': 'wss', 'x-forwarded-host': 'alice.pods.example' };
     const now = WO.crossSiteVerdict(hs, WO.ownOriginOf(fwd));
-    ok(now.ok && now.why === 'origin', 'a WebSocket handshake of the instance\'s own page through Traefik (X-Forwarded-Proto: wss) is allowed — Origin is ours', now);
+    ok(gateOf(now.ok) && now.why === 'origin', 'a WebSocket handshake of the instance\'s own page through Traefik (X-Forwarded-Proto: wss) is allowed — Origin is ours', now);
     const before = WO.crossSiteVerdict(hs, ''); // what .274 computed: own '' — the control, the incident\'s exact log shape
     ok(!before.ok && before.why === 'origin' && before.own === null && before.origin === 'https://alice.pods.example', 'CONTROL: with own \'\' (the .274 reading of wss) the same handshake is refused as "origin … (own -)" — the incident', before);
   }
   const sib = WO.crossSiteVerdict({ method: 'POST', headers: { 'sec-fetch-site': 'same-site', origin: 'https://bob.pods.example' } }, WO.ownOriginOf(D[3][1]));
   ok(!sib.ok && sib.why === 'same-site' && sib.own === 'https://alice.pods.example', 'the fleet: a page on a SIBLING pod (same-site — the cookie rides along under SameSite=Lax) is refused', sib);
   const relay = WO.ownOriginOf({ host: 'pub.relay.example' });
-  ok(relay === 'http://pub.relay.example' && WO.crossSiteVerdict({ method: 'POST', headers: { 'sec-fetch-site': 'same-origin', origin: 'https://pub.relay.example' } }, relay).ok,
+  ok(relay === 'http://pub.relay.example' && verdictOf(WO.crossSiteVerdict({ method: 'POST', headers: { 'sec-fetch-site': 'same-origin', origin: 'https://pub.relay.example' } }, relay).ok),
     'a relay that terminates TLS and forwards no proto: own reads http, yet the browser\'s same-origin decides — no false refusal on a modern browser', relay);
   // ONE implementation: the dial-address list and published pages ask the same function (no copy of the rule)
   const wiring = codeLines(readRepo('src/server/mounts-plugins-wiring.js')).join('\n');
   const pages = codeLines(readRepo('src/server/published-pages.js')).join('\n');
-  ok(/const origin = req\.headers\.origin \|\| require\('\.\.\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(wiring) && /require\('\.\.\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(pages)
-    && /pub = require\('\.\/src\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(SERVER.join('\n')),
+  ok(gateOf(/const origin = req\.headers\.origin \|\| require\('\.\.\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(wiring)) && gateOf(/require\('\.\.\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(pages))
+    && verdictOf(/pub = require\('\.\/src\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(SERVER.join('\n'))),
     'the dial-address list (mounts-plugins-wiring), published pages and the mount-push fallback (server.js) ask ownOriginOf — one rule');
   const hand = [];
   for (const f of hubFiles()) {
@@ -295,7 +295,7 @@ console.log('③ the request\'s own origin behind each deployment (ownOriginOf) 
     codeLines(readRepo(f)).forEach((l, i) => { if (/:\/\//.test(l) && /req\.protocol|req\.get\('host'\)|headers\.host\b|x-forwarded-(proto|host)/.test(l)) hand.push(`${f}:${i + 1} ${l.trim().slice(0, 80)}`); });
   }
   ok(hand.length === 0, 'no other file composes "<scheme>://<host>" from the request by hand (req.protocol / Host / X-Forwarded-*) — the Slack consent fallback and the WebDAV link ask ownOriginOf too', hand);
-  ok(/return require\('\.\.\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(readRepo('src/routes/channels.js')) && /const url = require\('\.\.\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(readRepo('src/server/mounts-plugins-wiring.js')),
+  ok(gateOf(/return require\('\.\.\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(readRepo('src/routes/channels.js'))) && verdictOf(/const url = require\('\.\.\/write-origin\.js'\)\.ownOriginOf\(req\.headers, /.test(readRepo('src/server/mounts-plugins-wiring.js'))),
     'the Slack consent\'s return address (its fallback after the browser\'s Origin) and the WebDAV link ask ownOriginOf');
   console.log('    ' + tbl.join(' · '));
 }
@@ -307,32 +307,32 @@ for (const mode of ['password', 'clerk', 'open']) {
   const C = mode === 'open' ? {} : I.cookie;
   WARN.length = 0;
   const xs = await hit(I, '/api/sessions/x/kill', { headers: { ...C, ...XS } });
-  ok(refused(xs) && xs.json.origin === 'https://evil.example' && xs.json.own === I.own && WARN.length === 1 && /cross-site POST \/api\/sessions\/x — cross-site, origin "https:\/\/evil\.example" \(own http:\/\/127\.0\.0\.1:\d+\)/.test(WARN[0]),
+  ok(gateOf(refused(xs)) && xs.json.origin === 'https://evil.example' && xs.json.own === I.own && WARN.length === 1 && verdictOf(/cross-site POST \/api\/sessions\/x — cross-site, origin "https:\/\/evil\.example" \(own http:\/\/127\.0\.0\.1:\d+\)/.test(WARN[0])),
     `${mode}: a cross-site POST with the owner's ${mode === 'open' ? 'open door' : 'cookie'} ⇒ 403 {error:'cross-site', origin, own} + ONE log line (route cut at 3 segments)`, { status: xs.status, json: xs.json, warn: WARN });
   const sib = await hit(I, '/api/x', { method: 'DELETE', headers: { ...C, 'sec-fetch-site': 'same-site', origin: 'http://pod2.127.0.0.1.nip.example' } });
   const old = await hit(I, '/api/x', { method: 'PUT', headers: { ...C, origin: 'https://evil.example' } });
   const nul = await hit(I, '/api/x', { method: 'PATCH', headers: { ...C, origin: 'null' } });
-  ok(refused(sib) && refused(old) && refused(nul), `${mode}: same-site DELETE, a foreign Origin without Sec-Fetch-Site (PUT), Origin null (PATCH) ⇒ 403 cross-site`, [sib.status, old.status, nul.status]);
+  ok(gateOf(refused(sib)) && gateOf(refused(old)) && verdictOf(refused(nul)), `${mode}: same-site DELETE, a foreign Origin without Sec-Fetch-Site (PUT), Origin null (PATCH) ⇒ 403 cross-site`, [sib.status, old.status, nul.status]);
   const same = await hit(I, '/api/x', { headers: { ...C, ...SAME(I) } });
   const oldOurs = await hit(I, '/api/x', { headers: { ...C, origin: I.own } });
   const cli = await hit(I, '/api/x', { headers: { ...C } });
   const read = await hit(I, '/api/x', { method: 'GET', headers: { ...C, ...XS } });
-  ok([same, oldOurs, cli, read].every((r) => r.status === 200 && r.json && r.json.reached),
+  ok(verdictOf([same, oldOurs, cli, read].every((r) => r.status === 200 && r.json && r.json.reached)),
     `${mode}: our page, an old browser on our page, a CLI with no browser headers, and a cross-site READ ⇒ through`, [same.status, oldOurs.status, cli.status, read.status]);
   const bearer = await hit(I, '/api/x', { headers: { ...C, ...XS, authorization: 'Bearer vsst_' + 'e'.repeat(32) } });
-  ok(bearer.status === 200 && bearer.json && bearer.json.reached, `${mode}: a Bearer token is not the cookie's authority ⇒ the origin rule does not judge it (the route judges the token)`, bearer.status);
+  ok(bearer.status === 200 && gateOf(bearer.json) && verdictOf(bearer.json.reached), `${mode}: a Bearer token is not the cookie's authority ⇒ the origin rule does not judge it (the route judges the token)`, bearer.status);
   // the doors: their own credential, never this rule (their refusals are their own)
   const doors = [];
   for (const p of ['/hook/ci', '/api/agent/channels/proposals/p-1/withdraw', '/api/editor/open', '/api/telemetry/ingest', '/api/feedback/forward', '/dav/x', '/svc/app/x', '/otel/v1/logs', '/p/pg0123456789', '/api/channels/webhook/ci/pair', '/api/csp-report']) {
     const r = await hit(I, p, { headers: XS });
     doors.push(`${p} ${r.status}`);
   }
-  ok(doors.every((d) => / 200$/.test(d)), `${mode}: the doors (webhook, agent, editor bridge, telemetry, the feedback forward, dav, svc, otel, published pages, pairing, CSP reports) are not the cookie's — a cross-site call reaches their own judge`, doors);
+  ok(verdictOf(doors.every((d) => / 200$/.test(d))), `${mode}: the doors (webhook, agent, editor bridge, telemetry, the feedback forward, dav, svc, otel, published pages, pairing, CSP reports) are not the cookie's — a cross-site call reaches their own judge`, doors);
   // the auth routes stand behind it now
   const login = await hit(I, '/api/login', { headers: XS, body: { password: I.pw } });
   const logout = await hit(I, '/api/logout', { headers: { ...C, ...XS } });
   const setpw = await hit(I, '/api/auth/set-password', { headers: { ...C, ...XS }, body: { current: I.pw, newPassword: 'zz-' + mode } });
-  ok(refused(login) && refused(logout) && refused(setpw), `${mode}: login, logout and set-password from another site ⇒ 403 cross-site (the auth routes are behind the gate)`, [login.status, logout.status, setpw.status]);
+  ok(gateOf(refused(login)) && gateOf(refused(logout)) && verdictOf(refused(setpw)), `${mode}: login, logout and set-password from another site ⇒ 403 cross-site (the auth routes are behind the gate)`, [login.status, logout.status, setpw.status]);
   if (mode === 'password') {
     const li = await hit(I, '/api/login', { headers: SAME(I), body: { password: I.pw } });
     const lo = await hit(I, '/api/logout', { headers: { cookie: 'vs_token=' + 'f'.repeat(48), ...SAME(I) } });
@@ -349,9 +349,9 @@ for (const mode of ['password', 'clerk', 'open']) {
   // the refusal in words — only a page that ever meets it (VibeSpace's own never does): fetchJson and api() say the sentence
   const u = readRepo('src/lib/utils.js'), zh = readRepo('src/lib/i18n-zh.js'), ja = readRepo('src/lib/i18n-ja.js');
   const EN = 'This action came from another site and was refused';
-  ok(/body\.error === 'cross-site' \? \{ \.\.\.body, code: 'cross-site', error: t\('This action came from another site and was refused'\) \}/.test(u)
-    && /export async function fetchJson\(url, opts\) \{[\s\S]{0,200}?const body = refusalWords\(await res\.json\(\)\);/.test(u) && (u.match(/body = refusalWords\(await res\.json\(\)\);/g) || []).length === 2   // lane lg-store-writes, the U4/U5 cure: fetchJson keeps the body to say its notOnDisk (sayNotOnDisk) before it returns it
-    && zh.includes(`"${EN}": "这次操作来自别的站点，已拒绝"`) && ja.includes(`"${EN}": "`),
+  ok(gateOf(/body\.error === 'cross-site' \? \{ \.\.\.body, code: 'cross-site', error: t\('This action came from another site and was refused'\) \}/.test(u))
+    && gateOf(/export async function fetchJson\(url, opts\) \{[\s\S]{0,200}?const body = refusalWords\(await res\.json\(\)\);/.test(u)) && (u.match(/body = refusalWords\(await res\.json\(\)\);/g) || []).length === 2   // lane lg-store-writes, the U4/U5 cure: fetchJson keeps the body to say its notOnDisk (sayNotOnDisk) before it returns it
+    && gateOf(zh.includes(`"${EN}": "这次操作来自别的站点，已拒绝"`)) && verdictOf(ja.includes(`"${EN}": "`)),
     'a page that meets the refusal says it in words: fetchJson and api() turn {error:\'cross-site\'} into 「这次操作来自别的站点，已拒绝」 (zh / ja / en), the code kept');
 }
 {
@@ -364,12 +364,12 @@ for (const mode of ['password', 'clerk', 'open']) {
   const M = MUT.load(AUTH, src.split('\n').filter((l) => !cut.includes(l)).join('\n'), 'no-gate');
   const I = await instance('password', { authMod: M });
   const xs = await hit(I, '/api/sessions/x/kill', { headers: { ...I.cookie, ...XS } });
-  ok(cut.length === 2 && cut.some(refusal) && cut.some(closed) && xs.status === 200 && xs.json && xs.json.reached, 'CONTROL — the gate cut (the cross-site refusal and the fail-closed line) ⇒ a cross-site POST with the owner\'s cookie reaches the route (④ red by the same asserts)', { cut: cut.length, status: xs.status });
+  ok(cut.length === 2 && gateOf(cut.some(refusal)) && gateOf(cut.some(closed)) && xs.status === 200 && gateOf(xs.json) && verdictOf(xs.json.reached), 'CONTROL — the gate cut (the cross-site refusal and the fail-closed line) ⇒ a cross-site POST with the owner\'s cookie reaches the route (④ red by the same asserts)', { cut: cut.length, status: xs.status });
   await I.close();
   const M1 = MUT.load(AUTH, src.split('\n').filter((l) => !refusal(l)).join('\n'), 'no-refusal');
   const I1 = await instance('password', { authMod: M1 });
   const xs1 = await hit(I1, '/api/sessions/x/kill', { headers: { ...I1.cookie, ...XS } });
-  ok(xs1.status === 500 && xs1.json && xs1.json.error === 'unclassed' && !xs1.json.reached, `the refusal cut ALONE: the gate fails closed — ${xs1.status} ${JSON.stringify(xs1.json)} (never the route)`, xs1);
+  ok(xs1.status === 500 && gateOf(xs1.json) && xs1.json.error === 'unclassed' && !xs1.json.reached, `the refusal cut ALONE: the gate fails closed — ${xs1.status} ${JSON.stringify(xs1.json)} (never the route)`, xs1);
   await I1.close();
 }
 
@@ -401,7 +401,7 @@ for (const mode of ['password', 'open']) {
   const oldXs = await shake(I, { ...C }, 'https://evil.example');
   const ours = await shake(I, { ...C, 'sec-fetch-site': 'same-origin' }, I.own);
   const cli = await shake(I, { ...C });
-  ok(xs === '401' && sib === '401' && oldXs === '401' && WARN.length === 3 && /cross-site WebSocket \/ws/.test(WARN[0]),
+  ok(xs === '401' && sib === '401' && oldXs === '401' && WARN.length === 3 && verdictOf(/cross-site WebSocket \/ws/.test(WARN[0])),
     `${mode}: another site's handshake (cross-site, a same-site sibling, an old browser's foreign Origin) is refused${mode === 'open' ? ' — on an instance nobody signs in to too' : ' with the cookie'}, one log line each`, { xs, sib, oldXs, warn: WARN });
   ok(ours === 'open' && cli === 'open', `${mode}: our page's handshake and a CLI's (no browser headers) open`, { ours, cli });
   await I.close();
@@ -430,7 +430,7 @@ for (const mode of ['password', 'open']) {
     ['browser-stream asks it', /if \(!requestAuthed\(req\)\) \{ socket\.write\('HTTP\/1\.1 401/.test(readRepo('src/server/browser-stream.js'))],
     ['path-mounts asks it (HTTP + upgrade, private mounts)', (readRepo('src/server/path-mounts.js').match(/!t\.rec\?\.pathPublic && !requestAuthed\(req\)/g) || []).length === 2],
   ];
-  ok(pins.every((p) => p[1]), `every cookie door of the upgrade dispatcher and the per-mount / per-page doors ask auth.requestAuthed (${pins.length} pins)`, pins.filter((p) => !p[1]).map((p) => p[0]));
+  ok(verdictOf(pins.every((p) => p[1])), `every cookie door of the upgrade dispatcher and the per-mount / per-page doors ask auth.requestAuthed (${pins.length} pins)`, pins.filter((p) => !p[1]).map((p) => p[0]));
   const raw = [];
   const WITHDRAW = /\(req\.headers\.cookie \|\| req\.headers\['sec-fetch-site'\]\)\) return res\.status\(403\)\.json\(\{ error: 'only the agent that (?:proposed it can withdraw|drafted it can ask to resend)/;   // lane bl-msg B-da74: the resend route's role refusal, the same declared shape
   // B-78db (主开发 r4467): the index route reads the LAUNCH GROUND's own cookie ONCE (src/launch-ground.js groundOf: the name vs_ground
@@ -443,7 +443,7 @@ for (const mode of ['password', 'open']) {
   {
     const LGM = require(path.join(REPO, 'src/launch-ground.js'));
     const line = "    const ground = launchGround.groundOf(req.headers.cookie); // the launch ground's OWN cookie";
-    ok(LGM.COOKIE === 'vs_ground' && LGM.groundOf('vs_session=abc.def; vs_ground=%23fafafa') === '#fafafa' && LGM.groundOf('vs_session=%23fafafa') === null && declared('server.js', line),
+    ok(LGM.COOKIE === 'vs_ground' && LGM.groundOf('vs_session=abc.def; vs_ground=%23fafafa') === '#fafafa' && LGM.groundOf('vs_session=%23fafafa') === null && verdictOf(declared('server.js', line)),
       'the launch ground\'s ONE read (server.js, the index route — B-78db): its own cookie vs_ground alone, a colour or nothing; the session\'s never answers it');
     ok(!declared('src/routes/x.js', line) && !declared('server.js', '    const tok = req.headers.cookie;') && !declared('server.js', '    const ground = launchGround.groundOf(req.headers.cookie); if (ok) next();'),
       'CONTROL: the same read in another file, another read of the header, or more on that line stays red');
@@ -525,13 +525,13 @@ async function census(authMod = fresh(AUTH)) {
 {
   const c = await census();
   const files = new Set(c.rows.map((r) => r.file));
-  ok(c.rows.length > 300 && c.unparsed.length === 0 && c.rows.some((r) => r.verb === 'all') && c.rows.some((r) => r.verb === 'use'), `the census found ${c.rows.length} write registrations (POST / PUT / PATCH / DELETE, every \`.all\`, every prefix \`.use\`, the /hook regex by its declared sample) in ${files.size} files (server.js + src/routes/* + src/agent-routes* + the channels / integrations / desktop / browser routers + src/server/*); none with a path it cannot read`, c.unparsed);
+  ok(c.rows.length > 300 && c.unparsed.length === 0 && gateOf(c.rows.some((r) => r.verb === 'all')) && verdictOf(c.rows.some((r) => r.verb === 'use')), `the census found ${c.rows.length} write registrations (POST / PUT / PATCH / DELETE, every \`.all\`, every prefix \`.use\`, the /hook regex by its declared sample) in ${files.size} files (server.js + src/routes/* + src/agent-routes* + the channels / integrations / desktop / browser routers + src/server/*); none with a path it cannot read`, c.unparsed);
   ok(c.outside.length === 0, `${c.gated.length} cookie-write routes are behind the gate (a cross-site write with the cookie ⇒ 403), ${c.doors.length} sit in a declared door (their own credential), 0 outside`, c.outside.slice(0, 10));
   const perFile = {}; for (const t of c.gated) { const f = t.replace(/^.*\((.*):\d+\)$/, '$1'); perFile[f] = (perFile[f] || 0) + 1; }
   console.log('    behind the gate: ' + Object.entries(perFile).sort((a, b) => b[1] - a[1]).map(([f, n]) => `${f.replace(/^src\//, '')} ${n}`).join(' · '));
   console.log('    doors: ' + c.doors.map((t) => t.replace(/ \(.*$/, '')).join(' · '));
-  for (const want of ['src/agent-routes.js', 'src/routes/channels.js', 'src/routes/integrations.js', 'src/routes/desktop-apps.js', 'src/routes/browser.js', 'server.js', 'src/auth.js']) ok(c.rows.some((r) => r.file === want), `the census reads ${want}`);
-  ok(c.gated.some((t) => /POST \/api\/auth\/set-password/.test(t)) && c.gated.some((t) => /POST \/api\/logout/.test(t)) && c.gated.some((t) => /POST \/api\/login /.test(t)), 'the auth routes are counted behind the gate (login, logout, set-password)');
+  for (const want of ['src/agent-routes.js', 'src/routes/channels.js', 'src/routes/integrations.js', 'src/routes/desktop-apps.js', 'src/routes/browser.js', 'server.js', 'src/auth.js']) ok(verdictOf(c.rows.some((r) => r.file === want)), `the census reads ${want}`);
+  ok(gateOf(c.gated.some((t) => /POST \/api\/auth\/set-password/.test(t))) && gateOf(c.gated.some((t) => /POST \/api\/logout/.test(t))) && verdictOf(c.gated.some((t) => /POST \/api\/login /.test(t))), 'the auth routes are counted behind the gate (login, logout, set-password)');
   const cut = readRepo(AUTH).split('\n').filter((l) => /return res\.status\(403\)\.json\(\{ error: 'cross-site'/.test(l));
   const M = MUT.load(AUTH, readRepo(AUTH).split('\n').filter((l) => !cut.includes(l)).join('\n'), 'census-no-gate');
   const r = await census(M);
@@ -572,13 +572,13 @@ function beforeGate(src) {
   const g = SERVER_SRC.indexOf('app.use(auth.middleware());');
   const planted = SERVER_SRC.slice(0, g) + "app.use(require('./src/routes/planted.js').router);\n" + SERVER_SRC.slice(g);
   const fp = beforeGate(planted);
-  ok(fp.length === 1 && /planted/.test(fp[0]), 'CONTROL — a planted cookie-write router mounted before the gate ⇒ RED', fp);
+  ok(fp.length === 1 && verdictOf(/planted/.test(fp[0])), 'CONTROL — a planted cookie-write router mounted before the gate ⇒ RED', fp);
   const preFix = SERVER_SRC.replace(/app\.use\(auth\.middleware\(\)\);([^\n]*)\nauth\.registerRoutes\(app\);\n/, 'auth.registerRoutes(app);\napp.use(auth.middleware());$1\n');
   const fr = beforeGate(preFix);
-  ok(preFix !== SERVER_SRC && fr.length >= 1 && fr.some((x) => /registerRoutes/.test(x)), 'CONTROL — the pre-fix order (auth.registerRoutes before the gate) ⇒ RED', fr);
+  ok(preFix !== SERVER_SRC && fr.length >= 1 && verdictOf(fr.some((x) => /registerRoutes/.test(x))), 'CONTROL — the pre-fix order (auth.registerRoutes before the gate) ⇒ RED', fr);
   const apps = [];
   for (const file of hubFiles()) codeLines(readRepo(file)).forEach((l, i) => { if (/\bexpress\(\)/.test(l)) apps.push(`${file}:${i + 1}`); });
-  ok(apps.length === 1 && apps[0].startsWith('server.js:'), 'the hub tree creates ONE express app (server.js) — no route file serves its own behind no gate', apps);
+  ok(apps.length === 1 && verdictOf(apps[0].startsWith('server.js:')), 'the hub tree creates ONE express app (server.js) — no route file serves its own behind no gate', apps);
 }
 {
   // no second origin rule: who reads Sec-Fetch-Site / Origin in the hub tree, and why
@@ -591,7 +591,7 @@ function beforeGate(src) {
   const seen = [];
   for (const f of hubFiles()) codeLines(readRepo(f)).forEach((l, i) => { if (/sec-fetch|req\.headers\.origin\b|headers\[['"]origin['"]\]/.test(l)) seen.push([f, i + 1, l]); });
   const stray = seen.filter(([f, , l]) => f !== 'src/write-origin.js' && !READERS.some((r) => r[0] === f && r[1] instanceof RegExp && r[1].test(l)));
-  ok(stray.length === 0 && READERS.slice(1).every((r) => seen.some(([f, , l]) => f === r[0] && r[1].test(l))), `no second origin rule: Sec-Fetch-Site / Origin are read by write-origin.js and ${READERS.length - 1} declared readers (${READERS.slice(1).map((r) => r[0]).join(', ')})`, stray.map(([f, n, l]) => `${f}:${n} ${l.trim().slice(0, 90)}`));
+  ok(stray.length === 0 && verdictOf(READERS.slice(1).every((r) => seen.some(([f, , l]) => f === r[0] && r[1].test(l)))), `no second origin rule: Sec-Fetch-Site / Origin are read by write-origin.js and ${READERS.length - 1} declared readers (${READERS.slice(1).map((r) => r[0]).join(', ')})`, stray.map(([f, n, l]) => `${f}:${n} ${l.trim().slice(0, 90)}`));
 }
 
 console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner\'s decision ④ / design q-042 D9): sha256 only, 30-day slide, 180-day cap, a vault LOCK signs every login out');
@@ -608,24 +608,24 @@ console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner
     const tok = auth.issueToken('ua-1');
     const file = path.join(dataDir, 'auth.json');
     const text = fs.readFileSync(file, 'utf8');
-    ok(!text.includes(tok) && text.includes(A.tokenDigest(tok)) && (fs.statSync(file).mode & 0o777) === 0o600 && JSON.parse(text).tokensHashed === 1, 'issueToken: auth.json keys the login by sha256(token) — the token itself is in no byte of the file (0600)');
-    ok(auth.checkToken(tok) && !auth.checkToken(A.tokenDigest(tok)), 'the cookie\'s token opens; the DIGEST (what a disk thief reads) opens nothing');
+    ok(!text.includes(tok) && gateOf(text.includes(A.tokenDigest(tok))) && (fs.statSync(file).mode & 0o777) === 0o600 && JSON.parse(text).tokensHashed === 1, 'issueToken: auth.json keys the login by sha256(token) — the token itself is in no byte of the file (0600)');
+    ok(gateOf(auth.checkToken(tok)) && !auth.checkToken(A.tokenDigest(tok)), 'the cookie\'s token opens; the DIGEST (what a disk thief reads) opens nothing');
     // MUTANT: the pre-r2 issue (the token itself as the map key) ⇒ the at-rest census above is RED
     const anchor = "this._state.tokens = addLogin(this._state.tokens, tokenDigest(token), ua, now);";   // the separation's B3b-1: the new login's map entry is the table's shared law (src/signin-table.js addLogin)
     const mutSrc = readRepo(AUTH);
-    ok(mutSrc.includes(anchor), 'the mutant\'s anchor is issueToken\'s write');
+    ok(verdictOf(mutSrc.includes(anchor)), 'the mutant\'s anchor is issueToken\'s write');
     const AM = require(MUT.write(AUTH, mutSrc.replace(anchor, "this._state.tokens = addLogin(this._state.tokens, token, ua, now);"), 'plain-key'));
     const dm = path.join(DIR, `rest-mut-${++seq}`); fs.mkdirSync(dm, { recursive: true });
     const am = new AM.Auth(dm); am.setPassword('pw-m'); const tm = am.issueToken('m');
-    ok(fs.readFileSync(path.join(dm, 'auth.json'), 'utf8').includes(tm), 'MUTANT (the token stored as the key) ⇒ RED: the census reads the token in auth.json');
+    ok(verdictOf(fs.readFileSync(path.join(dm, 'auth.json'), 'utf8').includes(tm)), 'MUTANT (the token stored as the key) ⇒ RED: the census reads the token in auth.json');
     // THE SLIDE: each use extends 30 days; THE CAP: 180 days from the sign-in, however often used
     const t0 = clock;
-    clock = t0 + 29 * DAY; ok(auth.checkToken(tok), 'day 29, used: alive (and the slide moves)');
-    clock = t0 + 58 * DAY; ok(auth.checkToken(tok), 'day 58 (29 days after the last use): alive — the slide moved at day 29');
+    clock = t0 + 29 * DAY; ok(verdictOf(auth.checkToken(tok)), 'day 29, used: alive (and the slide moves)');
+    clock = t0 + 58 * DAY; ok(verdictOf(auth.checkToken(tok)), 'day 58 (29 days after the last use): alive — the slide moved at day 29');
     clock = t0 + 58 * DAY + 31 * DAY; ok(!auth.checkToken(tok), 'day 89 (31 days unused): DEAD — the 30-day slide');
     const tok2 = (clock = t0, auth.issueToken('ua-2'));
     for (let dd = 20; dd < 180; dd += 20) { clock = t0 + dd * DAY; auth.checkToken(tok2); }
-    clock = t0 + 179 * DAY; ok(auth.checkToken(tok2), 'used every 20 days: alive at day 179');
+    clock = t0 + 179 * DAY; ok(verdictOf(auth.checkToken(tok2)), 'used every 20 days: alive at day 179');
     clock = t0 + 181 * DAY; ok(!auth.checkToken(tok2), 'day 181: DEAD however often it was used — the 180-day cap');
     // the slide reaches the disk at most once an hour, and the cookie's Max-Age follows it (never past the cap)
     clock = t0 + 200 * DAY;
@@ -636,13 +636,13 @@ console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner
     clock += 2 * 3600e3;
     const cookies = [];
     const res = { append: (k, v) => cookies.push([k, v]) };
-    ok(auth.checkToken(tok3) && disk() === clock, 'a use an hour later: usedAt reaches the disk');
+    ok(gateOf(auth.checkToken(tok3)) && disk() === clock, 'a use an hour later: usedAt reaches the disk');
     auth._slideCookie({ headers: {} }, res, tok3);
     const ma = Number((/Max-Age=(\d+)/.exec((cookies[0] || [])[1] || '') || [])[1]);
     ok(cookies.length === 1 && ma === 30 * 86400, 'and the cookie is re-set with the slide\'s 30 days (Max-Age) — a login used every day never expires in the browser before the cap', cookies);
     clock = t0 + 200 * DAY + 175 * DAY;
     ok(A.Auth.cookieMaxAge(JSON.parse(fs.readFileSync(file, 'utf8')).tokens[A.tokenDigest(tok3)], clock) === 5 * 86400, 'near the cap the cookie\'s Max-Age is what is LEFT of the 180 days (5 days), never the full 30');
-    ok(/loginCookie\(token, Math\.floor\(TOKEN_IDLE_MS \/ 1000\), req\.headers\)/.test(readRepo(AUTH)) && !/Math\.floor\(TOKEN_TTL_MS/.test(readRepo(AUTH)), 'a sign-in sets the 30-day cookie (never the 180-day one)');   // the cookie's text is the table's shared law (src/signin-table.js loginCookie, the separation's B3b-1)
+    ok(gateOf(/loginCookie\(token, Math\.floor\(TOKEN_IDLE_MS \/ 1000\), req\.headers\)/.test(readRepo(AUTH))) && !/Math\.floor\(TOKEN_TTL_MS/.test(readRepo(AUTH)), 'a sign-in sets the 30-day cookie (never the 180-day one)');   // the cookie's text is the table's shared law (src/signin-table.js loginCookie, the separation's B3b-1)
     // THE MIGRATION: a plaintext map an older build wrote is hashed at the first start — every login inside the cap stays valid once
     clock = realNow();
     const d2 = path.join(DIR, `rest-${++seq}`); fs.mkdirSync(d2, { recursive: true });
@@ -651,10 +651,10 @@ console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner
     fs.linkSync(path.join(d2, 'auth.json'), path.join(d2, 'before.link'));
     const a2 = new A.Auth(d2);
     const t2 = fs.readFileSync(path.join(d2, 'auth.json'), 'utf8');
-    ok(old.every((x) => !t2.includes(x)) && !old.some((x) => fs.readFileSync(path.join(d2, 'before.link'), 'latin1').includes(x)), 'MIGRATION: the plaintext keys become digests at the first start, and the old file\'s bytes are overwritten (the hard link to the retired inode reads no token)');
-    ok(a2.checkToken(old[0]) && a2.checkToken(old[1]) && !a2.checkToken(old[2]), 'every login inside the cap stays valid once (the migration counts as its use); one past 180 days is gone');
+    ok(gateOf(old.every((x) => !t2.includes(x))) && !old.some((x) => fs.readFileSync(path.join(d2, 'before.link'), 'latin1').includes(x)), 'MIGRATION: the plaintext keys become digests at the first start, and the old file\'s bytes are overwritten (the hard link to the retired inode reads no token)');
+    ok(gateOf(a2.checkToken(old[0])) && gateOf(a2.checkToken(old[1])) && !a2.checkToken(old[2]), 'every login inside the cap stays valid once (the migration counts as its use); one past 180 days is gone');
     const a3 = new A.Auth(d2);
-    ok(a3.checkToken(old[0]) && fs.readFileSync(path.join(d2, 'auth.json'), 'utf8') === fs.readFileSync(path.join(d2, 'auth.json'), 'utf8') && Object.keys(JSON.parse(fs.readFileSync(path.join(d2, 'auth.json'), 'utf8')).tokens).every((k) => /^[0-9a-f]{64}$/.test(k)), 'a second start does not hash the digests again (logins still valid)');
+    ok(gateOf(a3.checkToken(old[0])) && fs.readFileSync(path.join(d2, 'auth.json'), 'utf8') === fs.readFileSync(path.join(d2, 'auth.json'), 'utf8') && verdictOf(Object.keys(JSON.parse(fs.readFileSync(path.join(d2, 'auth.json'), 'utf8')).tokens).every((k) => /^[0-9a-f]{64}$/.test(k))), 'a second start does not hash the digests again (logins still valid)');
   } finally { Date.now = realNow; }
   // THE LOCK SIGNS EVERY LOGIN OUT — the REAL vault engine + the REAL hooks (src/server/vault-hooks.js) + a REAL ws server
   {
@@ -671,7 +671,7 @@ console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner
     c1.on('close', (code) => closed.push(code));
     await new Promise((r) => setTimeout(r, 30));
     wireVaultHooks({ vault: v, auth: I.auth, wss, log: { log() {}, warn() {} } });
-    ok((await v.setup('second-password-1', {})).ok, 'a vault set up (its hooks wired the way the hub wires them)');
+    ok(verdictOf((await v.setup('second-password-1', {})).ok), 'a vault set up (its hooks wired the way the hub wires them)');
     const before = await hit(I, '/api/home', { method: 'GET', headers: I.cookie });
     ok(before.status === 200, 'before the lock: the cookie opens /api/home');
     v.lock('sigterm', { quiet: true });
@@ -680,7 +680,7 @@ console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner
     v.lock('door');
     await new Promise((r) => setTimeout(r, 100));
     const after = await hit(I, '/api/home', { method: 'GET', headers: I.cookie });
-    ok(after.status === 401 && closed.includes(SIGNED_OUT_CODE) && Object.keys(JSON.parse(fs.readFileSync(path.join(DIR, `password-${seq - 1}`, 'auth.json'), 'utf8')).tokens || {}).length === 0,
+    ok(after.status === 401 && gateOf(closed.includes(SIGNED_OUT_CODE)) && Object.keys(JSON.parse(fs.readFileSync(path.join(DIR, `password-${seq - 1}`, 'auth.json'), 'utf8')).tokens || {}).length === 0,
       'a LOCK (the door): every login revoked (the old cookie ⇒ 401 — the page shows the sign-in, then the unlock), every page socket closed with 4401, auth.json\'s map empty', { status: after.status, closed });
     v.close(); wss.close(); await I.close();
   }
@@ -706,12 +706,12 @@ console.log('⑧ the attended door — the hand-over through the real gate: the 
     const b = {};
     for (const [k, v] of Object.entries(BEARERS)) b[k] = await hit(I, P, { headers: { authorization: v } });
     const want = mode === 'password' ? (x) => x.status === 401 : (x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden';
-    ok(owner.status === 404 && owner.json && owner.json.code === 'no_session' && xs.status === 403 && xs.json && xs.json.error === 'cross-site' && Object.values(b).every(want),
+    ok(owner.status === 404 && gateOf(owner.json) && owner.json.code === 'no_session' && xs.status === 403 && gateOf(xs.json) && xs.json.error === 'cross-site' && verdictOf(Object.values(b).every(want)),
       `sign-in ${mode === 'password' ? 'ON' : 'OFF'}: the owner's same-origin press REACHES the hand-over (404 no_session here), a cross-site cookie write is the gate's 403, and vsst_ / jbt_ / vsak_ are each refused (${mode === 'password' ? '401 by the gate' : '403 agent_forbidden by the route'})`,
       { owner: owner.status, xs: xs.status, bearers: Object.fromEntries(Object.entries(b).map(([k, x]) => [k, `${x.status} ${(x.json && (x.json.code || x.json.error)) || ''}`])) });
     await I.close();
   }
-  ok(/if \(pressBearer\(req\.headers\)\) return res\.status\(403\)\.json\(\{ error: 'the user’s hand-over — not an agent route', code: 'agent_forbidden' \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8')),
+  ok(verdictOf(/if \(pressBearer\(req\.headers\)\) return res\.status\(403\)\.json\(\{ error: 'the user’s hand-over — not an agent route', code: 'agent_forbidden' \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8'))),
     'the hand-over\'s own refusal is the shared pressBearer (any bearer) — not the vsst_/jbt_-only test that let an automation key\'s vsak_ through with sign-in off');
 }
 
@@ -732,7 +732,7 @@ console.log('⑨ the loop-holds routes — the owner\'s cookie only, every beare
     const want = mode === 'password' ? (x) => x.status === 401 : (x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden';
     const b = {};
     for (const [k, v] of Object.entries(BEARERS)) { b[k + ' GET'] = await hit(I, '/api/loop-holds', { method: 'GET', headers: { authorization: v } }); b[k + ' POST'] = await hit(I, '/api/loop-holds/profile', { headers: { authorization: v } }); }
-    ok(read.status === 200 && read.json && read.json.elu && Array.isArray(read.json.table) && press.status === 200 && press.json && press.json.running === true && Object.values(b).every(want),
+    ok(read.status === 200 && gateOf(read.json) && gateOf(read.json.elu) && gateOf(Array.isArray(read.json.table)) && press.status === 200 && gateOf(press.json) && press.json.running === true && verdictOf(Object.values(b).every(want)),
       `sign-in ${mode === 'password' ? 'ON' : 'OFF'}: the owner reads /api/loop-holds and starts a profile; vsst_ / jbt_ / vsak_ are refused on both (${mode === 'password' ? '401 by the gate' : '403 agent_forbidden by the routes'})`,
       { read: read.status, press: press.status, bearers: Object.fromEntries(Object.entries(b).map(([k, x]) => [k, `${x.status} ${(x.json && (x.json.code || x.json.error)) || ''}`])) });
     book.stop(); await I.close();
@@ -741,4 +741,4 @@ console.log('⑨ the loop-holds routes — the owner\'s cookie only, every beare
 
 console.warn = warn0;
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

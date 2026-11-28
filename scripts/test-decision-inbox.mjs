@@ -42,7 +42,7 @@ const M = require(path.join(REPO, 'src/decision-model.js'));
 const A = require(path.join(REPO, 'src/attention-model.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -72,18 +72,18 @@ console.log('① PURE — the inbox plan, the never-list, eligibility, the verdi
 {
   const p = M.inputPlan('inbox');
   ok(p.ceiling === 600 && p.batch === 1 && p.perPass === 10 && p.wakePath === false, 'the plan: 600 tokens an item, ONE item a call, ≤ 10 a pass, not on a wake path', p);
-  ok(M.USES.includes('inbox') && !M.USES.includes('foryou') && M.FEATURES.includes('inbox') && DE.FEATURE_OF.inbox === 'inbox', 'use ④ is `inbox` (the placeholder `foryou` is gone) with its OWN feature switch');
+  ok(gateOf(M.USES.includes('inbox')) && !M.USES.includes('foryou') && gateOf(M.FEATURES.includes('inbox')) && DE.FEATURE_OF.inbox === 'inbox', 'use ④ is `inbox` (the placeholder `foryou` is gone) with its OWN feature switch');
   ok(M.memoMaterial('inbox', { id: 'ut-a', digest: 'd1' }) === JSON.stringify(['inbox', 'ut-a', `v${M.INBOX.version}`, 'd1']) && M.memoMaterial('inbox', { id: 'ut-b', digest: 'd1' }) !== M.memoMaterial('inbox', { id: 'ut-a', digest: 'd1' }), 'the memo key = use + item id + level-table version + the input digest (a redraw / restart finds it)');
   const h = (s) => require('node:crypto').createHash('sha256').update(String(s)).digest('hex');
   const d0 = M.inboxMemoOf(ITEM, h), d1 = M.inboxMemoOf({ ...ITEM, detail: 'DEADLINE TODAY — the CFO waits' }, h);
-  ok(d0.id === ITEM.id && /^[0-9a-f]{16}$/.test(d0.digest) && d1.digest !== d0.digest && M.inboxMemoOf({ ...ITEM, reply: { text: 'x' }, createdAt: 1 }, h).digest === d0.digest, 'F2: the digest = 16 hex of the cleaned text + detail — new words ⇒ a new key; a reply / a time ⇒ the same key', [d0, d1]);
+  ok(d0.id === ITEM.id && gateOf(/^[0-9a-f]{16}$/.test(d0.digest)) && d1.digest !== d0.digest && M.inboxMemoOf({ ...ITEM, reply: { text: 'x' }, createdAt: 1 }, h).digest === d0.digest, 'F2: the digest = 16 hex of the cleaned text + detail — new words ⇒ a new key; a reply / a time ⇒ the same key', [d0, d1]);
   const nk = neverKept(M, { ...ITEM, reply: { text: SECRET.reply } });
-  ok(nk.ok, 'the input carries ONLY the choices, the facts line, the item\'s words and the conversation\'s name — never its reply, artifacts, card or another item', nk.text);
-  ok(nk.text.includes('Expense bot') && nk.text.includes('Tokyo trip') && nk.text.includes('shared folder'), 'the words that ARE sent: the text, the detail, the conversation name');
+  ok(verdictOf(nk.ok), 'the input carries ONLY the choices, the facts line, the item\'s words and the conversation\'s name — never its reply, artifacts, card or another item', nk.text);
+  ok(gateOf(nk.text.includes('Expense bot')) && gateOf(nk.text.includes('Tokyo trip')) && verdictOf(nk.text.includes('shared folder')), 'the words that ARE sent: the text, the detail, the conversation name');
   const long = M.buildInput('inbox', M.inboxScoreInput({ ...ITEM, text: '报销'.repeat(400), detail: '流程说明。'.repeat(600), sessionName: 'x'.repeat(500) }));
-  ok(long.est <= long.ceiling && long.ceiling === 600 && long.truncated, `a CJK-heavy item is cut to the ceiling (est ${long.est} ≤ 600, truncated)`);
+  ok(long.est <= long.ceiling && long.ceiling === 600 && verdictOf(long.truncated), `a CJK-heavy item is cut to the ceiling (est ${long.est} ≤ 600, truncated)`);
   const cut = (v, max) => M.cleanPart(v, max).length <= max + 40;
-  ok(cut('报销'.repeat(400), 400) && cut('流程说明。'.repeat(600), 800), 'text ≤ 400 / detail ≤ 800 characters (+ the elision marker)');
+  ok(gateOf(cut('报销'.repeat(400), 400)) && verdictOf(cut('流程说明。'.repeat(600), 800)), 'text ≤ 400 / detail ≤ 800 characters (+ the elision marker)');
   ok(M.inboxLevelsText().length <= 600 && M.estTokens(M.inboxLevelsText()) <= M.PLANS.inbox.fixedCeiling, 'the choices text fits its fixed ceiling');
   const E = (o) => M.inboxEligible({ ...ITEM, reply: null, ...o }, T0);
   const table = [[{}, true], [{ urgency: undefined }, true], [{ urgency: 'high' }, 'urgency'], [{ urgency: 'urgent' }, 'urgency'], [{ urgency: 'low' }, 'urgency'], [{ options: ['A', 'B'] }, 'answers'], [{ action: { type: 'open-channel', key: 'k' } }, 'answers'],
@@ -97,7 +97,7 @@ console.log('① PURE — the inbox plan, the never-list, eligibility, the verdi
   ok(M.INBOX.version === 2 && M.INBOX_QUESTION.type === 'choice' && M.INBOX_QUESTION.choices.map((c) => c.value).join() === 'blocked,dated,whenever', 'INBOX v2 asks ONE choice of three: blocked | dated | whenever');
   for (const prov of M.PROVIDERS) {
     const body = M.buildRequest(prov, { input: 'x', questions: [M.INBOX_QUESTION] });
-    ok(!M.questionError(M.INBOX_QUESTION) && JSON.stringify(body).includes('inbox_need') && JSON.stringify(body).includes('whenever'), `${prov}: the choice question is valid and spelled by the dialect`);
+    ok(!M.questionError(M.INBOX_QUESTION) && gateOf(JSON.stringify(body).includes('inbox_need')) && verdictOf(JSON.stringify(body).includes('whenever')), `${prov}: the choice question is valid and spelled by the dialect`);
   }
 }
 
@@ -163,25 +163,25 @@ console.log('② THE PASS — the REAL engine + the REAL For-you store, a fake v
   const urg0 = seed(w);
   w.eng.attachInbox(w.store, { tickMs: 0 });
   const r1 = await w.eng.inboxPass();
-  ok(r1.ran && w.fetches === 10 && r1.judged === 10 && r1.untied === 0, `pass 1: 13 eligible — all asked in ONE minute, a band-5 tie (lane foryou-folds) ⇒ ${w.fetches} calls (≤ 10 a pass), ONE item a call`, r1);
-  ok(w.bodies.every((b) => (b.match(/\[record\]/g) || []).length === 1), 'every call carries exactly one item');
+  ok(gateOf(r1.ran) && w.fetches === 10 && r1.judged === 10 && r1.untied === 0, `pass 1: 13 eligible — all asked in ONE minute, a band-5 tie (lane foryou-folds) ⇒ ${w.fetches} calls (≤ 10 a pass), ONE item a call`, r1);
+  ok(verdictOf(w.bodies.every((b) => (b.match(/\[record\]/g) || []).length === 1)), 'every call carries exactly one item');
   ok(!w.bodies.some((b) => [SECRET.reply, SECRET.art].some((s) => b.includes(s))), 'no call carried a reply or an artifact path (the never-list on the wire)');
   const r2 = await w.eng.inboxPass(); const r3 = await w.eng.inboxPass();
   ok(w.fetches === 13 && r2.judged === 3 && r3.judged === 0, `pass 2 ⇒ the 3 left, pass 3 ⇒ 0 (every item scored once under table v${M.INBOX.version})`, { fetches: w.fetches, r2, r3 });
   const items = w.store.openItems();
   const judged = items.filter((i) => i.judged && i.judged.v);
-  ok(judged.length === 13 && judged.every((i) => ['now', 'later'].includes(i.judged.group) && i.judged.v === M.INBOX.version && typeof i.judged.p === 'number' && ['blocked', 'whenever'].includes(i.judged.why)
-    && i.judged.facts && i.judged.facts.state === 'unknown' && i.judged.sig === M.inboxFactsSig(i.judged.facts)), 'each verdict lives BESIDE its item: judged {group, why, p, at, v, facts, sig}', judged[0] && judged[0].judged);
+  ok(judged.length === 13 && verdictOf(judged.every((i) => ['now', 'later'].includes(i.judged.group) && i.judged.v === M.INBOX.version && typeof i.judged.p === 'number' && ['blocked', 'whenever'].includes(i.judged.why)
+    && i.judged.facts && i.judged.facts.state === 'unknown' && i.judged.sig === M.inboxFactsSig(i.judged.facts))), 'each verdict lives BESIDE its item: judged {group, why, p, at, v, facts, sig}', judged[0] && judged[0].judged);
   const young = items.find((i) => i.text === 'Filed just now');
-  ok(young.judged && young.judged.v === 0 && young.judged.group === null && young.judged.facts && items.filter((i) => i.judged && i.judged.facts).length === 19 && !items.find((i) => i.kind === 'notice').judged, 'the FACTS are free: every open ACTION item carries them (13 judged + 6 stand-ins {group: null, v: 0} — lane foryou-folds: not only the judge\'s rows), the notice none');
+  ok(gateOf(young.judged) && young.judged.v === 0 && young.judged.group === null && gateOf(young.judged.facts) && items.filter((i) => i.judged && i.judged.facts).length === 19 && !items.find((i) => i.kind === 'notice').judged, 'the FACTS are free: every open ACTION item carries them (13 judged + 6 stand-ins {group: null, v: 0} — lane foryou-folds: not only the judge\'s rows), the notice none');
   ok(judged.filter((i) => i.judged.group === 'now').length === 5, 'the money / deadline asks went to `now` (5), the finished reports to `later` (8)');
   ok(JSON.stringify(items.map((i) => [i.id, i.urgency])) === JSON.stringify(urg0), 'NO urgency moved — the judge sorts, it never re-urgences (every item\'s stored urgency byte-equal)');
   const inel = items.filter((i) => !(i.judged && i.judged.v)).map((i) => i.text).sort();
   ok(JSON.stringify(inel) === JSON.stringify(['A button', 'A reply came', 'Filed just now', 'Pick a colour', 'Production is down', 'Rotate the key', 'Spend notice']), 'the 7 ineligible were never sent', inel);
   const j = w.journal().filter((r) => r.outcome === 'ok');
-  ok(j.length === 13 && j.every((r) => r.use === 'inbox' && r.n === 1), 'the journal: 13 rows, use = inbox, one item each');
+  ok(j.length === 13 && verdictOf(j.every((r) => r.use === 'inbox' && r.n === 1)), 'the journal: 13 rows, use = inbox, one item each');
   const g = w.store.snapshot().grouping;
-  ok(g && g.on === true && g.today === 13 && w.eng.status().today.byUse.inbox.calls === 13, 'the day\'s counter counts the inbox use; the snapshot\'s grouping.today says 13', g);
+  ok(gateOf(g) && g.on === true && g.today === 13 && w.eng.status().today.byUse.inbox.calls === 13, 'the day\'s counter counts the inbox use; the snapshot\'s grouping.today says 13', g);
   const c0 = w.changes;
   w.cfg.inbox = false; w.eng.inboxSwitched(); w.eng.inboxSwitched();
   ok(w.changes === c0 + 1 && !('grouping' in w.store.snapshot()), 'the switch moving ⇒ ONE broadcast, and the snapshot drops `grouping` (the tray draws today\'s layout)');
@@ -194,7 +194,7 @@ console.log('② THE PASS — the REAL engine + the REAL For-you store, a fake v
   w2.store.reshapeItems((it) => { if (it.id !== lost) return false; delete it.judged; return true; });
   w2.eng.attachInbox(w2.store, { tickMs: 0 });
   await w2.eng.inboxPass();
-  ok(w2.fetches === 0 && w2.store.get(lost).judged, 'a restart re-reads the memo: the lost verdict is back with 0 calls');
+  ok(w2.fetches === 0 && verdictOf(w2.store.get(lost).judged), 'a restart re-reads the memo: the lost verdict is back with 0 calls');
   w2.store.stop();
 
   // the budget: room for ONE call ⇒ one item judged, the refusal stops the pass
@@ -205,7 +205,7 @@ console.log('② THE PASS — the REAL engine + the REAL For-you store, a fake v
   const refused = w3.journal().filter((r) => r.outcome === 'refused');
   ok(w3.fetches === 1 && rb.judged === 1 && refused.length === 1 && refused[0].use === 'inbox' && refused[0].why === 'daily-budget', 'a spent budget: the call it had room for flies, the next is refused (daily-budget) and the pass stops — through the ONE caller\'s reserve / settle', { fetches: w3.fetches, rb, refused });
   const st = w3.eng.status().inbox;
-  ok(rb.stopped === 'daily-budget' && st && st.stopped === 'daily-budget' && st.judged === 1 && w3.warns.filter((m) => /For-you pass stopped after 1 judged: daily-budget/.test(m)).length === 1, 'a stopped pass is SAID: status().inbox {judged, stopped} (the plugin\'s status carries it) + ONE log line', { st, warns: w3.warns });
+  ok(rb.stopped === 'daily-budget' && gateOf(st) && st.stopped === 'daily-budget' && st.judged === 1 && w3.warns.filter((m) => /For-you pass stopped after 1 judged: daily-budget/.test(m)).length === 1, 'a stopped pass is SAID: status().inbox {judged, stopped} (the plugin\'s status carries it) + ONE log line', { st, warns: w3.warns });
   await w3.eng.inboxPass();
   ok(w3.warns.filter((m) => /For-you pass stopped/.test(m)).length === 1, '…and the same reason again is not said twice (the line names a change)', w3.warns);
   w3.store.stop();
@@ -283,10 +283,10 @@ async function refileRun(name, opts = {}) {
 {
   const o = await refileRun('refile');
   ok(o.first === 'later' && o.calls1 === 2, 'the first filing: ONE call for it (and one for its twin — a band-5 tie), judged later', o);
-  ok(o.cleared, 'a re-file with new words (a new detail) clears `judged`', o);
+  ok(verdictOf(o.cleared), 'a re-file with new words (a new detail) clears `judged`', o);
   ok(o.second === 'now' && o.calls2 === 3, 'the next pass judges it again: ONE new call with the new words ⇒ now (and the pass after it: 0)', o);
-  ok(o.clearedRefile && o.third === 'now' && o.calls3 === 4, 'a resolved item re-filed with the SAME words: judged cleared, the memo answers by the digest (0 calls for it — the one new call is its new twin\'s)', o);
-  ok(o.clearedReopen, 'a reopen from the panel (setStatus open) clears `judged`', o);
+  ok(gateOf(o.clearedRefile) && o.third === 'now' && o.calls3 === 4, 'a resolved item re-filed with the SAME words: judged cleared, the memo answers by the digest (0 calls for it — the one new call is its new twin\'s)', o);
+  ok(verdictOf(o.clearedReopen), 'a reopen from the panel (setStatus open) clears `judged`', o);
   const MUT = mutantCopies('decision-refile', REPO);
   const sSrc = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
   const a1 = "{ existing.detail = detail; delete existing.judged; changed = true; }";
@@ -299,7 +299,7 @@ async function refileRun(name, opts = {}) {
   ok(eSrc.split(a2).length === 2, 'ANCHOR: the pass keys the memo by the digest');
   const IdOnly = MUT.load('src/server/decision-engine.js', editAnchor(eSrc, a2, 'memo: { id: it.id } });', "src/server/decision-engine.js"), 'memo-id-only');
   const m = await refileRun('ctl-refile-memo', { Engine: IdOnly });
-  ok(m.cleared && m.second === 'later' && m.calls2 === 2, 'CONTROL: the base memo key (item id only) ⇒ judged cleared but the memo answers the OLD verdict — RED', m);
+  ok(gateOf(m.cleared) && m.second === 'later' && m.calls2 === 2, 'CONTROL: the base memo key (item id only) ⇒ judged cleared but the memo answers the OLD verdict — RED', m);
 }
 
 console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, the decay, a blocked fact, the order, the five shapes');
@@ -348,7 +348,7 @@ console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, 
   ok(line === 'asked 3 h ago · the agent continued on a default · a date or time is named: "by Friday 5pm" · the item was re-asked 2 times, last 40 min ago', 'the facts line words the facts', line);
   ok(![named.id, named.sessionKey, '5c0ffee0', 'Ops agent', 'Zhang', 'Alice', 'Bob', 'Carol', 'sign'].some((x) => line.includes(x)), 'the facts-line census: no item id, no conversation key or name, no person\'s name, none of the item\'s other words', line);
   const sent = M.buildInput('inbox', M.inboxScoreInput(named, nf, T)).text;
-  ok(/^facts: asked 3 h ago · /m.test(sent) && sent.indexOf('facts:') < sent.indexOf('text:'), 'the line goes FIRST in the record (the head survives a cut), through cleanPart like every part', sent);
+  ok(gateOf(/^facts: asked 3 h ago · /m.test(sent)) && sent.indexOf('facts:') < sent.indexOf('text:'), 'the line goes FIRST in the record (the head survives a cut), through cleanPart like every part', sent);
 
   // THE DECAY — a fake clock (the function reads no clock of its own)
   const F = (o) => ({ state: 'unknown', dated: null, due: null, reasks: 0, askedAt: T - 47 * H, ...o });
@@ -405,7 +405,7 @@ console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, 
   const sentKinds = w.bodies.map((b) => (shapes.find(([, text]) => b.includes(text.slice(0, 30))) || ['twin'])[0]).sort();
   ok(r1b.judged === 2 && sentKinds.join() === 'default,twin', 'a twin asked in the default\'s minute ⇒ a band-5 tie: exactly those two are judged (2 calls)', { r1b, sentKinds });
   const factsLines = w.bodies.map((b) => (b.match(/^facts: (.*)$/m) || [, ''])[1]);
-  ok(factsLines.length === 2 && factsLines.every((l) => /^asked \d+ (min|h|days) ago/.test(l) && !/Agent |claude:|ut-/.test(l)) && factsLines.some((l) => l.includes('the agent continued on a default')),
+  ok(factsLines.length === 2 && gateOf(factsLines.every((l) => /^asked \d+ (min|h|days) ago/.test(l) && !/Agent |claude:|ut-/.test(l))) && verdictOf(factsLines.some((l) => l.includes('the agent continued on a default'))),
     'what the vendor read: each call\'s facts line (continued on a default) — never the conversation\'s name or key', factsLines);
   const r2 = await w.eng.inboxPass();
   ok(r2.judged === 0 && w.fetches === 2 && w.changes > 0, 'the next pass: 0 calls, and no facts rewrite (they did not change)');
@@ -474,7 +474,7 @@ console.log('⑦ ONE CLOCK (lane decision-inbox-clock) — the store reads only 
     return src.slice(a, b).split('\n').filter((l) => /\bDate\.now\b|new Date\(\)/.test(l) && !l.includes(', now = () => Date.now() }) {'));
   };
   const lines = bareClock(sSrc);
-  ok(sSrc.includes('class UserTodoManager {') && lines.length === 0, 'CENSUS: no Date.now / new Date() in UserTodoManager but the constructor default', lines);
+  ok(gateOf(sSrc.includes('class UserTodoManager {')) && lines.length === 0, 'CENSUS: no Date.now / new Date() in UserTodoManager but the constructor default', lines);
   const a4 = '        existing.createdAt = this._now();\n';
   ok(sSrc.split(a4).length === 2, 'ANCHOR: the re-file stamps createdAt on the store clock');
   const planted = editAnchor(sSrc, a4, '        existing.createdAt = Date.now();\n', "src/user-todos.js");
@@ -493,7 +493,7 @@ console.log('⑦ ONE CLOCK (lane decision-inbox-clock) — the store reads only 
   const MUT = mutantCopies('decision-clock', REPO);
   const { UserTodoManager: WallClock } = MUT.load('src/user-todos.js', planted, 'wall-clock-refile');
   const wc = await skewed('ctl-clock-ahead', 365 * 864e5, { Store: WallClock });
-  ok(wc.clearedRefile && !wc.third && wc.calls3 === 3, 'CONTROL: the base re-file stamp (Date.now) with the clock a year ahead ⇒ the re-filed item is young for ever, never judged (nor tied to its twin) — ⑤ RED', wc);
+  ok(gateOf(wc.clearedRefile) && !wc.third && wc.calls3 === 3, 'CONTROL: the base re-file stamp (Date.now) with the clock a year ahead ⇒ the re-filed item is young for ever, never judged (nor tied to its twin) — ⑤ RED', wc);
 }
 
 console.log('⑧ THE TIE-BREAKER (lane foryou-folds, design q-044 decision 3) — the judge scores only a band-5 tie');
@@ -509,7 +509,7 @@ console.log('⑧ THE TIE-BREAKER (lane foryou-folds, design q-044 decision 3) �
   w.T += 5 * 60e3;
   w.eng.attachInbox(w.store, { tickMs: 0 });
   const r1 = await w.eng.inboxPass();
-  ok(r1.ran && r1.judged === 0 && r1.untied === 1 && w.fetches === 0, 'a LONE band-5 ask: eligible, but no tie ⇒ 0 calls (status says 1 untied)', r1);
+  ok(gateOf(r1.ran) && r1.judged === 0 && r1.untied === 1 && w.fetches === 0, 'a LONE band-5 ask: eligible, but no tie ⇒ 0 calls (status says 1 untied)', r1);
   const two = w.store.add('claude:t2', { by: 'agent', origin: 'agent', sessionName: 'Agent two', text: 'The nightly backup finished.', urgency: 'normal' }).id;
   w.store.reshapeItems((it) => { if (it.id !== two) return false; it.createdAt = w.store.get(one).createdAt + 20e3; return true; });
   const r2 = await w.eng.inboxPass();
@@ -524,4 +524,4 @@ console.log('⑧ THE TIE-BREAKER (lane foryou-folds, design q-044 decision 3) �
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -71,7 +71,7 @@ const wt = scratch('vault-window-wt'), PROFILE = scratch('vault-window-chrome'),
 const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1]) : scratch('vault-window-shots');
 for (const d of [FIXTURE, SHOTS, SHIM_DIR]) fs.mkdirSync(d, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
 // r5604: a named, counted skip in the suite's own form; a run with one closes PARTIAL (never ALL PASS) and names each
 const SKIPPED = [];
 const skip = (label, why) => { SKIPPED.push(label); console.log(`  ~ SKIP (named, counted): ${label} — ${why}`); };
@@ -160,7 +160,7 @@ const headShot = async (name) => { await cdp('Emulation.setDeviceMetricsOverride
 const closeVaultWindow = () => evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'vault') app.wm.closeWindow(w.id); true`);
 
 startServer();
-check('the hub boots (sign-in password on, the clock shim loaded)', await ready());
+check('the hub boots (sign-in password on, the clock shim loaded)', verdictOf(await ready()));
 
 console.log('① sign in, the second password, two secrets');
 await cdp('Page.navigate', { url: URL + 'login' });
@@ -181,7 +181,7 @@ await typeInto('#vault-setup-pw', SECOND); await typeInto('#vault-setup-pw2', SE
 check('set ⇒ the modal closes', !!(await until(`!document.getElementById('vault-setup-dialog')`, { timeout: 20000 })));
 const su = await api('GET', '/api/vault/state');
 check('the second password is set (unlocked)', su.status === 200 && su.json.state === 'unlocked', su);
-check('the header follows: unlocked ⇒ 立即锁定 + 修改第二密码… + the idle row, and since when', (await until(`document.querySelector('.vw-head')?.dataset.state === 'unlocked'`, { timeout: 5000 })) === true && (await headDoors()) === 'vault-do-lock,vault-do-change' && (await headIdle()) && (await evalJs(`document.querySelectorAll('.vw-head .vault-state-when').length`)) === 2, await headDoors());
+check('the header follows: unlocked ⇒ 立即锁定 + 修改第二密码… + the idle row, and since when', (await until(`document.querySelector('.vw-head')?.dataset.state === 'unlocked'`, { timeout: 5000 })) === true && (await headDoors()) === 'vault-do-lock,vault-do-change' && (gateOf(await headIdle())) && (await evalJs(`document.querySelectorAll('.vw-head .vault-state-when').length`)) === 2, await headDoors());
 await evalJs(`(() => { const s = document.querySelector('.vw-head .vault-idle-select'); s.value = '4'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
 check('the idle row writes the same setting (4 h)', !!(await until(`fetch('/api/vault/state').then((r) => r.json()).then((j) => j.idleLockHours === 4)`, { timeout: 5000, step: 200 })));
 check('… and the header keeps showing it (redrawn from the facts)', (await until(`document.querySelector('.vw-head .vault-idle-select')?.value === '4'`, { timeout: 3000 })) === true);
@@ -201,7 +201,7 @@ check('an integration key (an HTML payload) and an API key are stored', put.stat
 const subAcc = await api('POST', '/api/accounts/subscription', { name: 'Window leg subscription' });
 const subId = subAcc.json && (subAcc.json.id || (subAcc.json.account && subAcc.json.account.id));
 const oatSave = subId ? await api('POST', `/api/accounts/${subId}/oat`, { token: 'sk-ant-oat01-' + crypto.randomBytes(24).toString('hex') }) : null;
-check('a subscription account holds a long-lived setup-token', !!subId && oatSave && oatSave.status === 200, { subAcc, oat: oatSave && oatSave.status });
+check('a subscription account holds a long-lived setup-token', !!subId && gateOf(oatSave) && oatSave.status === 200, { subAcc, oat: oatSave && oatSave.status });
 const ROW_OAT = `.vw-row[data-id="accounts:${subId}#oat"]`;
 
 console.log('② the window lists them, masked');
@@ -210,7 +210,7 @@ check('the integration row and the API-key row are listed', !!(await until(`!!do
 check('their value fields are masked (no field open)', (await evalJs(`document.querySelectorAll('.vw-plain').length`)) === 0 && (await evalJs(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-mask')}).textContent`)) === '••••••••');
 const t0 = await pageText();
 check('NO VALUE IN THE PAGE: neither planted value (nor its random part) in the markup or any input', ![PLANT_INT, PLANT_KEY, RAND].some((v) => t0.includes(v)));
-check('the setup-token row says 「Long-lived OAuth token」 (its own kind word) and setup-token', /Long-lived OAuth token/.test(await until(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent`, { timeout: 5000 }) || '') && /setup-token/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
+check('the setup-token row says 「Long-lived OAuth token」 (its own kind word) and setup-token', gateOf(/Long-lived OAuth token/.test(await until(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent`, { timeout: 5000 }) || '')) && verdictOf(/setup-token/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`))));
 await shot('vw-1-list.png');
 
 console.log('②b V2 (lane vault-window-v2, design q-047 §3): the purposes, the chips, the 显示 help, the filters, 添加…');
@@ -223,7 +223,7 @@ const railNow = await until(`(() => { const r = ${RAIL}; return r.length >= 10 ?
 check('THE RAIL: 全部 + the eleven purposes in the design\'s order (Other only when something lands in it; lane vault-paste-request: + Passwords & keys; lane browser-login: + Web logins)', !!railNow && railNow.map(([p]) => p).join() === 'all,two-step,accounts,integrations,machines,storage,app-logins,passkeys,web-logins,automation,keys,agents', railNow);
 const countsNow = () => evalJs(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; const by = {}; for (const r of rows) by[r.dataset.purpose] = (by[r.dataset.purpose] || 0) + 1; return { by, total: rows.length, rail: Object.fromEntries(${RAIL}), heads: Object.fromEntries([...document.querySelectorAll('.vw-list .vw-group')].map((h) => [h.dataset.purpose, h.querySelector('.vw-group-n').textContent])) }; })()`);
 const c0 = await countsNow();
-check('NINE-COLUMN COUNTS = ROWS: each purpose\'s rail count = its rows in the list = its group head; 全部 = every row (accounts 2 · integrations 1 · automation 1)', Number(c0.rail.all) === c0.total && Object.entries(c0.rail).filter(([p]) => p !== 'all').every(([p, n]) => Number(n) === (c0.by[p] || 0)) && Object.entries(c0.heads).every(([p, n]) => Number(n) === c0.by[p]) && c0.by.accounts === 2 && c0.by.integrations === 1 && c0.by.automation === 1 && c0.total === 4, c0);
+check('NINE-COLUMN COUNTS = ROWS: each purpose\'s rail count = its rows in the list = its group head; 全部 = every row (accounts 2 · integrations 1 · automation 1)', Number(c0.rail.all) === c0.total && gateOf(Object.entries(c0.rail).filter(([p]) => p !== 'all').every(([p, n]) => Number(n) === (c0.by[p] || 0))) && gateOf(Object.entries(c0.heads).every(([p, n]) => Number(n) === c0.by[p])) && c0.by.accounts === 2 && c0.by.integrations === 1 && c0.by.automation === 1 && c0.total === 4, c0);
 await click('.vw-rail-item[data-purpose="accounts"]');
 check('a purpose picked in the rail shows ITS rows only (its own head, the two account rows)', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 2 && rows.every((r) => r.dataset.purpose === 'accounts') && document.querySelector('.vw-rail-item[data-purpose="accounts"]').classList.contains('on'); })()`, { timeout: 5000 })));
 await click('.vw-rail-item[data-purpose="all"]');
@@ -231,9 +231,9 @@ check('全部 brings every row back', !!(await until(`document.querySelectorAll(
 const AK = '.vw-row[data-store="automation"]';
 const chipsOf = (sel) => evalJs(`(() => { const r = document.querySelector(${JSON.stringify(sel)}); if (!r) return null; const p = r.querySelector('.vw-chip-prov'); return { kind: r.querySelector('.vw-chip-kind')?.textContent, prov: p && p.dataset.prov, provText: p && p.textContent, help: p && p.title, purpose: r.dataset.purpose }; })()`);
 const akc = await chipsOf(AK), kc = await chipsOf(rowKey(accId));
-check('a row = name · KIND chip · PROVENANCE chip: the automation key «API key · Minted by the hub · never shown»; an account\'s key «API key · By you» (each chip says where the value came from as its help)', akc && akc.kind === 'API key' && akc.prov === 'hub-mint' && akc.provText === 'Minted by the hub · never shown' && /nobody typed it in/.test(akc.help) && kc && kc.prov === 'me' && kc.provText === 'By you' && kc.purpose === 'accounts', { akc, kc });
+check('a row = name · KIND chip · PROVENANCE chip: the automation key «API key · Minted by the hub · never shown»; an account\'s key «API key · By you» (each chip says where the value came from as its help)', gateOf(akc) && akc.kind === 'API key' && akc.prov === 'hub-mint' && akc.provText === 'Minted by the hub · never shown' && gateOf(/nobody typed it in/.test(akc.help)) && gateOf(kc) && kc.prov === 'me' && kc.provText === 'By you' && kc.purpose === 'accounts', { akc, kc });
 const helpNow = await evalJs(`(() => ({ ak: document.querySelector(${JSON.stringify(AK + ' .vw-show')})?.title, int: document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')})?.title, why: document.querySelectorAll('.vw-ak-why').length, words: [...document.querySelectorAll(${JSON.stringify(AK + ' .vw-meta, ' + AK + ' .vw-value, ' + AK + ' .vw-chips')})].map((e) => e.textContent).join(' | ') }))()`);
-check('THE REVEAL DOOR\'S HELP (the owner\'s confusion note): the automation key\'s 「显示」 says WHY as its own help — «only to hand it to an outside system…» — and no sentence sits beside the value as if it were the key\'s state', helpNow.ak === "Show the key's value — only to hand it to an outside system; agents inside use it by grant and never need to see it" && /second password is asked once/.test(helpNow.int || '') && helpNow.why === 0 && !/outside party|outside system/.test(helpNow.words), helpNow);
+check('THE REVEAL DOOR\'S HELP (the owner\'s confusion note): the automation key\'s 「显示」 says WHY as its own help — «only to hand it to an outside system…» — and no sentence sits beside the value as if it were the key\'s state', helpNow.ak === "Show the key's value — only to hand it to an outside system; agents inside use it by grant and never need to see it" && gateOf(/second password is asked once/.test(helpNow.int || '')) && helpNow.why === 0 && !/outside party|outside system/.test(helpNow.words), helpNow);
 const rowsShown = () => evalJs(`[...document.querySelectorAll('.vw-list .vw-row')].map((r) => r.dataset.store)`);
 await click('.vw-fchip[data-prov="system"]');
 check('the provenance filter «System»: only the hub\'s own row stays; the rail counts follow (全部 1 · accounts 0)', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 1 && rows[0].dataset.store === 'automation' && document.querySelector('.vw-rail-item[data-purpose="all"] .vw-rail-n').textContent === '1' && document.querySelector('.vw-rail-item[data-purpose="accounts"] .vw-rail-n').textContent === '0'; })()`, { timeout: 5000 })), await rowsShown());
@@ -247,7 +247,7 @@ await click('.vw-only-shown');
 await typeInto('.vw-search', 'release');
 check('the search: «release» finds the key by its name', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 1 && rows[0].dataset.store === 'automation'; })()`, { timeout: 5000 })));
 await typeInto('.vw-search', 'zz-nothing-here');
-check('nothing matches ⇒ the list says so', /No stored value matches/.test(await until(`document.querySelector('.vw-list .vw-empty')?.textContent`, { timeout: 5000 }) || ''));
+check('nothing matches ⇒ the list says so', verdictOf(/No stored value matches/.test(await until(`document.querySelector('.vw-list .vw-empty')?.textContent`, { timeout: 5000 }) || '')));
 await typeInto('.vw-search', '');
 check('cleared ⇒ the four rows back', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4`, { timeout: 5000 })));
 check('NO GREYED CONTROL anywhere in the window (a door a row has not is not drawn)', (await evalJs(`document.querySelectorAll('.vw [disabled]').length`)) === 0);
@@ -260,9 +260,9 @@ await shot('vw-v2-list.png');
 
 console.log('②c 「需要你」 — For you\'s own vault items: answered in one place, gone from both');
 const b0 = await until(`(() => { const r = [...document.querySelectorAll('.vw-band .vw-band-row')]; return r.length === 2 ? r.map((x) => ({ id: x.dataset.id, type: x.dataset.type, text: x.querySelector('.vw-band-txt').textContent, cause: (x.querySelector('.vw-band-cause') || {}).textContent || null, fold: (x.querySelector('.vw-band-more') || {}).open, doors: [...x.querySelectorAll('[data-door]')].map((b) => b.dataset.door).join() })) : null; })()`, { timeout: 8000 });
-check('the band at the top shows the two cards the producers filed, with 2 in its head', !!b0 && b0.some((x) => x.id === SEED.rotate && x.type === 'vault-rotate') && b0.some((x) => x.id === SEED.fail && x.type === 'vault-use-failed') && (await evalJs(`document.querySelector('.vw-band-n').textContent`)) === '2', b0);
+check('the band at the top shows the two cards the producers filed, with 2 in its head', !!b0 && gateOf(b0.some((x) => x.id === SEED.rotate && x.type === 'vault-rotate')) && gateOf(b0.some((x) => x.id === SEED.fail && x.type === 'vault-use-failed')) && (await evalJs(`document.querySelector('.vw-band-n').textContent`)) === '2', b0);
 // lane vault-key-row-compact (the card grammar): a use failure's HEAD says who · the key · the verb, its CAUSE is the second line, the rest under ONE closed fold
-check('their words and doors: «Release helper used “release-bot” for “Open a conversation” — refused» over «The vault is locked — Unlock… at the top of the page» (the count under ONE closed fold) — 打开行 + 知道了; «“github-token” was stored by an agent that saw its value — rotate it» — 换新… + 知道了', !!b0 && b0.find((x) => x.id === SEED.fail).text === 'Release helper used “release-bot” for “Open a conversation” — refused' && b0.find((x) => x.id === SEED.fail).cause === 'The vault is locked — Unlock… at the top of the page' && b0.find((x) => x.id === SEED.fail).fold === false && b0.find((x) => x.id === SEED.fail).doors === 'open,ack' && /github-token/.test(b0.find((x) => x.id === SEED.rotate).text) && b0.find((x) => x.id === SEED.rotate).cause === null && b0.find((x) => x.id === SEED.rotate).doors === 'renew,ack', b0);
+check('their words and doors: «Release helper used “release-bot” for “Open a conversation” — refused» over «The vault is locked — Unlock… at the top of the page» (the count under ONE closed fold) — 打开行 + 知道了; «“github-token” was stored by an agent that saw its value — rotate it» — 换新… + 知道了', !!b0 && b0.find((x) => x.id === SEED.fail).text === 'Release helper used “release-bot” for “Open a conversation” — refused' && b0.find((x) => x.id === SEED.fail).cause === 'The vault is locked — Unlock… at the top of the page' && b0.find((x) => x.id === SEED.fail).fold === false && b0.find((x) => x.id === SEED.fail).doors === 'open,ack' && gateOf(/github-token/.test(b0.find((x) => x.id === SEED.rotate).text)) && b0.find((x) => x.id === SEED.rotate).cause === null && b0.find((x) => x.id === SEED.rotate).doors === 'renew,ack', b0);
 const trayOpen = (id) => `!!document.querySelector('#user-todos-popup .ut-item[data-id="${id}"]:not(.ut-item-resolved)')`;
 await click('#taskbar-user-todos');
 await until(visible('#user-todos-popup'), { timeout: 5000 });
@@ -291,11 +291,11 @@ console.log('②d 「其他密钥或密码…」 (lane vault-paste-request — t
   check('Save to vault ⇒ the dialog closes', !!(await until(`!document.querySelector('.vault-secret-add-dialog')`, { timeout: 8000 })));
   const ROW_FREE = '.vw-row[data-purpose="keys"]';
   const fr = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW_FREE)}); if (!r) return null; const p = r.querySelector('.vw-chip-prov'); return { id: r.dataset.id, name: r.querySelector('.vw-name, .vw-label')?.textContent || r.textContent, kind: r.querySelector('.vw-chip-kind')?.textContent, prov: p && p.dataset.prov, del: !!r.querySelector('.vw-del'), show: !!r.querySelector('.vw-show'), rail: document.querySelector('.vw-rail-item[data-purpose="keys"] .vw-rail-n')?.textContent }; })()`, { timeout: 8000 });
-  check('its row: «Router admin» under Passwords & keys — Password · By you, 显示 and 删除 (the rail counts it)', !!fr && /^secrets:secret:[0-9a-f]{10}#secret$/.test(fr.id) && /Router admin/.test(fr.name) && fr.kind === 'Password' && fr.prov === 'me' && fr.show && fr.del && fr.rail === '1', fr);
+  check('its row: «Router admin» under Passwords & keys — Password · By you, 显示 and 删除 (the rail counts it)', !!fr && gateOf(/^secrets:secret:[0-9a-f]{10}#secret$/.test(fr.id)) && gateOf(/Router admin/.test(fr.name)) && fr.kind === 'Password' && fr.prov === 'me' && gateOf(fr.show) && gateOf(fr.del) && fr.rail === '1', fr);
   check('the value is in no markup and no field of the page (masked; the dialog\'s field emptied)', !(await pageText()).includes(FREE));
   // lane vault-entry-description: its DESCRIPTION under the name and its Edit… (the owner's own words — the ONE writer, no card)
   const desc0 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(ROW_FREE)}); const d = r && r.querySelector('.vw-desc'); return d ? { text: d.textContent, shared: !d.classList.contains('vw-desc-private'), edit: !!r.querySelector('.vw-words-edit'), pend: !!r.querySelector('.vw-desc-pending:not([hidden])') } : null; })()`);
-  check('its description is its own line under the name (the dialog\'s note — agents read it), with Edit…, no «proposes» mark', !!desc0 && desc0.text === 'the flat\'s router' && desc0.shared && desc0.edit && !desc0.pend, desc0);
+  check('its description is its own line under the name (the dialog\'s note — agents read it), with Edit…, no «proposes» mark', !!desc0 && desc0.text === 'the flat\'s router' && gateOf(desc0.shared) && gateOf(desc0.edit) && !desc0.pend, desc0);
   await click(ROW_FREE + ' .vw-words-edit');
   const dlg = await until(`(() => { const d = document.querySelector('.vault-words-dialog'); return d ? { name: d.querySelector('.vault-words-name').value, note: d.querySelector('.vault-words-note').value } : null; })()`, { timeout: 5000 });
   check('Edit… ⇒ its dialog holds the name and the description', !!dlg && dlg.name === 'Router admin' && dlg.note === 'the flat\'s router', dlg);
@@ -309,7 +309,7 @@ console.log('②d 「其他密钥或密码…」 (lane vault-paste-request — t
   await typeInto('.vault-words-dialog .vault-words-note', 'a ' + ['sk', 'proj', crypto.randomBytes(20).toString('hex')].join('-'));
   await click('.vault-words-dialog .btn-create');
   const refused = await until(`document.querySelector('.vault-words-dialog .vault-secret-error')?.textContent || null`, { timeout: 5000 });
-  check('a token\'s shape in the description ⇒ refused by name in the dialog, nothing written', !!refused && /may not contain a secret/.test(refused) && (await evalJs(`document.querySelector(${JSON.stringify(ROW_FREE + ' .vw-desc')})?.textContent`)) === NEWD, refused);
+  check('a token\'s shape in the description ⇒ refused by name in the dialog, nothing written', !!refused && gateOf(/may not contain a secret/.test(refused)) && (await evalJs(`document.querySelector(${JSON.stringify(ROW_FREE + ' .vw-desc')})?.textContent`)) === NEWD, refused);
   await evalJs(`(() => { const d = document.querySelector('.vault-words-dialog'); const c = d && d.querySelector('.btn-cancel'); if (c) c.click(); return true; })()`);
   check('Cancel ⇒ the dialog closes, the words as they were', !!(await until(`!document.querySelector('.vault-words-dialog')`, { timeout: 3000 })));
   const wl = fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } }).filter((x) => x.event === 'vault-entry-words');
@@ -319,9 +319,9 @@ console.log('②d 「其他密钥或密码…」 (lane vault-paste-request — t
   await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
   check('… the right one ⇒ the value appears in ITS row\'s field (the owner\'s cookie door)', (await until(`document.querySelector(${JSON.stringify(ROW_FREE + ' .vw-plain')})?.value || null`, { timeout: 8000 })) === FREE);
   const bear = await evalJs(`fetch('/api/vault/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'f'.repeat(32) }, body: JSON.stringify({ id: ${JSON.stringify(fr ? fr.id : '')} }) }).then(async (r) => ({ status: r.status, body: await r.text() }))`);
-  check('a BEARER asking the same door for it gets the existing refusal by name (human_only) — no value', bear.status === 403 && /human_only/.test(bear.body) && !bear.body.includes(FREE), bear);
+  check('a BEARER asking the same door for it gets the existing refusal by name (human_only) — no value', bear.status === 403 && gateOf(/human_only/.test(bear.body)) && !bear.body.includes(FREE), bear);
   await click(ROW_FREE + ' .vw-del');
-  check('删除 ⇒ the usual confirm dialog (its own words: the value leaves the vault)', /The value leaves the vault/.test(await until(`[...document.querySelectorAll('.dialog-overlay')].map((o) => o.textContent).join(' ') || null`, { timeout: 5000 }) || ''));
+  check('删除 ⇒ the usual confirm dialog (its own words: the value leaves the vault)', verdictOf(/The value leaves the vault/.test(await until(`[...document.querySelectorAll('.dialog-overlay')].map((o) => o.textContent).join(' ') || null`, { timeout: 5000 }) || '')));
   await evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);
   check('confirmed ⇒ the row is gone, the rail counts 0', !!(await until(`!document.querySelector(${JSON.stringify(ROW_FREE)}) && document.querySelector('.vw-rail-item[data-purpose="keys"] .vw-rail-n')?.textContent === '0'`, { timeout: 8000 })));
   const left = await api('GET', '/api/vault/contents');
@@ -344,11 +344,11 @@ console.log('②e lane browser-login: 添加… ▸ 网站登录… — a websit
   check('Save to vault ⇒ the dialog closes', !!(await until(`!document.querySelector('.vault-login-add-dialog')`, { timeout: 8000 })));
   const ROW_WL = '.vw-row[data-purpose="web-logins"]';
   const wr = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW_WL)}); if (!r || !r.querySelector('.vw-login-grant')) return null; const p = r.querySelector('.vw-chip-prov'); return { id: r.dataset.id, text: r.textContent, prov: p && p.dataset.prov, use: true, del: !!r.querySelector('.vw-del'), rail: document.querySelector('.vw-rail-item[data-purpose="web-logins"] .vw-rail-n')?.textContent }; })()`, { timeout: 10000 });
-  check('its row: «alice@example.test · shop.example.test» under Web logins — By you, 用于… and 删除 (the rail counts it)', !!wr && wr.id === 'secrets:web-login:https://shop.example.test#alice@example.test#password' && /alice@example\.test · shop\.example\.test/.test(wr.text) && wr.prov === 'me' && wr.use && wr.del && wr.rail === '1', wr);
+  check('its row: «alice@example.test · shop.example.test» under Web logins — By you, 用于… and 删除 (the rail counts it)', !!wr && wr.id === 'secrets:web-login:https://shop.example.test#alice@example.test#password' && gateOf(/alice@example\.test · shop\.example\.test/.test(wr.text)) && wr.prov === 'me' && gateOf(wr.use) && gateOf(wr.del) && wr.rail === '1', wr);
   check('the password is in no markup and no field of the page', !(await pageText()).includes(WPW));
   await click(ROW_WL + ' .vw-login-grant');
   const pk = await until(`(() => { const d = document.querySelector('.vw-login-grant-dialog'); if (!d || !d.querySelector('.pp')) return null; return { radios: d.querySelectorAll('input[type=radio]').length, head: (d.querySelector('.vw-login-head') || {}).textContent || '', everyone: !!d.querySelector('.pp-row[data-key="everyone:*"]') }; })()`, { timeout: 5000 });
-  check('用于… is about THIS login (the owner 2026-11-17): no radio — the house picker (Everyone among its rows) under the login\'s own facts (its user name, its site, «Two-step code: none»)', !!pk && pk.radios === 0 && pk.everyone && /alice@example\.test/.test(pk.head) && /shop\.example\.test/.test(pk.head) && /Two-step code: none/.test(pk.head), pk);
+  check('用于… is about THIS login (the owner 2026-11-17): no radio — the house picker (Everyone among its rows) under the login\'s own facts (its user name, its site, «Two-step code: none»)', !!pk && pk.radios === 0 && gateOf(pk.everyone) && gateOf(/alice@example\.test/.test(pk.head)) && gateOf(/shop\.example\.test/.test(pk.head)) && verdictOf(/Two-step code: none/.test(pk.head)), pk);
   await click('.vw-login-grant-dialog .btn-cancel');
   await until(`!document.querySelector('.vw-login-grant-dialog')`, { timeout: 5000 });
   await click('.vw-group[data-purpose="web-logins"] .vw-login-wide-any-site');
@@ -358,7 +358,7 @@ console.log('②e lane browser-login: 添加… ▸ 网站登录… — a websit
   const g = await until(`fetch('/api/vault/web-logins').then((r) => r.json()).then((j) => { const e = (j.entries || [])[0]; return e && e.grants.length ? e.grants.map((x) => x.scope + ':' + (x.to || []).map((p) => p.kind).join('+')).join() : null; })`, { timeout: 8000 });
   check('«Any site…» on the Web logins head, Everyone, Save ⇒ ONE row of the grants store («any site» to everyone, door browser-login); the login\'s row shows it «through» with NO ✕', g === 'any-site:everyone' && !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW_WL + ' .vw-ak-chip[data-scope="any-site"]')}); return !!c && c.classList.contains('vw-ak-chip-through') && !c.querySelector('.vw-ak-x'); })()`, { timeout: 8000 })), g);
   await click(ROW_WL + ' .vw-del');
-  check('删除 ⇒ the confirm in its own words (the password leaves the vault)', /Its password leaves the vault/.test(await until(`[...document.querySelectorAll('.dialog-overlay')].map((o) => o.textContent).join(' ') || null`, { timeout: 5000 }) || ''));
+  check('删除 ⇒ the confirm in its own words (the password leaves the vault)', verdictOf(/Its password leaves the vault/.test(await until(`[...document.querySelectorAll('.dialog-overlay')].map((o) => o.textContent).join(' ') || null`, { timeout: 5000 }) || '')));
   await evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);
   check('confirmed ⇒ the row is gone, the rail counts 0', !!(await until(`!document.querySelector(${JSON.stringify(ROW_WL)}) && document.querySelector('.vw-rail-item[data-purpose="web-logins"] .vw-rail-n')?.textContent === '0'`, { timeout: 8000 })));
   await api('POST', '/api/vault/web-logins/ungrant', { resource: '*', principal: 'everyone' });   // the wildcard names no entry — the owner takes it back by hand
@@ -384,8 +384,8 @@ console.log('②f B-ab6c (主开发 r5287 / r5317, must 1): EVERY door of EVERY 
       await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
       await reopen();
       const lf = await until(fitOf(LOGIN), { timeout: 8000 });
-      check(`②f the login row at ${tag} (${lang}): every door the row draws (${lf ? lf.n : '?'}: ${lf ? lf.doors.join(' · ') : '?'}) inside the pane, and the list does not scroll sideways (scrollWidth ${lf && lf.sw}, clientWidth ${lf && lf.cw})`, !!lf && lf.n >= 4 && lf.doors.some((d) => /Change password|修改密码/.test(d)) && lf.doors.some((d) => /previous password|上一个密码/.test(d)) && lf.inside && lf.sw <= lf.cw, lf);
-      if (FILE_ROWS) { const ff = await until(fitOf(FILE), { timeout: 8000 }); check(`②f the file row at ${tag} (${lang}): every door inside the pane, no sideways scroll`, !!ff && ff.n >= 2 && ff.inside && ff.sw <= ff.cw, ff); }
+      check(`②f the login row at ${tag} (${lang}): every door the row draws (${lf ? lf.n : '?'}: ${lf ? lf.doors.join(' · ') : '?'}) inside the pane, and the list does not scroll sideways (scrollWidth ${lf && lf.sw}, clientWidth ${lf && lf.cw})`, !!lf && lf.n >= 4 && gateOf(lf.doors.some((d) => /Change password|修改密码/.test(d))) && gateOf(lf.doors.some((d) => /previous password|上一个密码/.test(d))) && gateOf(lf.inside) && lf.sw <= lf.cw, lf);
+      if (FILE_ROWS) { const ff = await until(fitOf(FILE), { timeout: 8000 }); check(`②f the file row at ${tag} (${lang}): every door inside the pane, no sideways scroll`, !!ff && ff.n >= 2 && gateOf(ff.inside) && ff.sw <= ff.cw, ff); }
       await shot(`vw-fit-${lang}-${w}.png`);
       if (lang === 'en' && w === 768) {
         // RED CONTROL BY PLACEMENT (r5135 law 1, its witness): the release's rule ABOVE 640 px planted back as page CSS exactly (its 640 px rules stand below) — read in force (the doors' cell
@@ -419,7 +419,7 @@ console.log('②f B-ab6c (主开发 r5287 / r5317, must 1): EVERY door of EVERY 
   const dropFile = fileEntry ? await dropAnswer('/api/vault/files/' + encodeURIComponent(fileEntry.replace(/^keyfile:/, ''))) : null;
   const leftText = String(await evalJs(`fetch('/api/vault/contents').then((r) => r.text())`) || '');
   check(`②f's cleanup: the login${FILE_ROWS ? ' and the file' : ''} this leg planted are removed by their own doors and are GONE from the vault's own list before the leg ends`,
-    dropLogin.ok && (!FILE_ROWS || (!!fileEntry && !!dropFile && dropFile.ok)) && leftText.length > 0 && !leftText.includes('fit.example.test') && !(fileEntry && leftText.includes(fileEntry)),
+    gateOf(dropLogin.ok) && (!FILE_ROWS || (!!fileEntry && !!dropFile && gateOf(dropFile.ok))) && leftText.length > 0 && !leftText.includes('fit.example.test') && !(fileEntry && leftText.includes(fileEntry)),
     { dropLogin, dropFile, fileEntry: !!fileEntry, loginLeft: leftText.includes('fit.example.test'), fileLeft: !!(fileEntry && leftText.includes(fileEntry)) });
   await openWindow();
 }
@@ -435,7 +435,7 @@ await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
 check('the right one closes the modal', !!(await until(`!document.getElementById('vault-reveal-dialog')`, { timeout: 10000 })));
 check('the value appears in ITS row\'s field', (await until(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-plain')})?.value`, { timeout: 8000 })) === PLANT_INT);
 check('… and only there (the API key row stays masked)', (await plainOf(rowKey(accId))) === null);
-check('the countdown chip shows (4:5x)', /4:5\d|5:00/.test(await until(`(() => { const t = document.querySelector('.vw-timer'); return t && !t.hidden ? t.textContent : ''; })()`, { timeout: 3000 }) || ''));
+check('the countdown chip shows (4:5x)', verdictOf(/4:5\d|5:00/.test(await until(`(() => { const t = document.querySelector('.vw-timer'); return t && !t.hidden ? t.textContent : ''; })()`, { timeout: 3000 }) || '')));
 check('THE HTML PAYLOAD STAYS TEXT: no element made from it, no handler ran', (await evalJs(`document.querySelectorAll('img[src="x"]').length === 0 && window.__vwXss === undefined`)) === true);
 await shot('vw-3-shown.png');
 
@@ -449,25 +449,25 @@ check('KEYED: a search moves rows — the open row is the SAME element, its valu
 await typeInto('.vw-search', '');
 check('… cleared: the row that left comes back with ITS value still shown (never redrawn)', (await until(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-plain')})?.value`, { timeout: 5000 })) === PLANT_INT && (await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId))}).__vwMark`)) === 7);
 const tab2 = await api('POST', '/api/vault/reveal', { id: 'integrations:cloud:browserless#apiKey' });
-check('the SAME cookie without the page secret (a second tab) ⇒ 403 reveal_needs_password while this page\'s window is open', tab2.status === 403 && tab2.json && tab2.json.code === 'reveal_needs_password', tab2);
+check('the SAME cookie without the page secret (a second tab) ⇒ 403 reveal_needs_password while this page\'s window is open', tab2.status === 403 && gateOf(tab2.json) && tab2.json.code === 'reveal_needs_password', tab2);
 const OWN = `http://127.0.0.1:${PORT}`;
 const ck2 = await (async () => { const lr = await fetch(`${OWN}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', origin: OWN }, body: JSON.stringify({ password: SIGN_IN }) }); return String(lr.headers.get('set-cookie') || '').split(';')[0]; })();
 const node = (p, body) => fetch(`${OWN}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json', cookie: ck2, 'sec-fetch-site': 'same-origin', origin: OWN }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
 const other = await node('/api/vault/reveal', { id: 'integrations:cloud:browserless#apiKey' });
-check('another sign-in (a second cookie) ⇒ 403 reveal_needs_password', other.status === 403 && other.json && other.json.code === 'reveal_needs_password', other);
+check('another sign-in (a second cookie) ⇒ 403 reveal_needs_password', other.status === 403 && gateOf(other.json) && other.json.code === 'reveal_needs_password', other);
 const nodeWin = await node('/api/vault/reveal-session', { password: SECOND });
 const nodePage = nodeWin.json && nodeWin.json.page;
 const nodeRev = await node('/api/vault/reveal', { id: 'integrations:cloud:browserless#apiKey', page: nodePage });
-check('… which opens ITS OWN window with its own page secret (and reveals)', /^[0-9a-f]{32}$/.test(String(nodePage)) && nodeRev.status === 200 && nodeRev.json.value === PLANT_INT, { s: nodeRev.status });
+check('… which opens ITS OWN window with its own page secret (and reveals)', gateOf(/^[0-9a-f]{32}$/.test(String(nodePage))) && nodeRev.status === 200 && nodeRev.json.value === PLANT_INT, { s: nodeRev.status });
 const hide = await click(ROW_INT + ' .vw-show');
-check('「隐藏」 forgets that row\'s value (the field is gone)', hide && (await plainOf(ROW_INT)) === null && (await plainOf(rowKey(accId))) === PLANT_KEY);
+check('「隐藏」 forgets that row\'s value (the field is gone)', gateOf(hide) && (await plainOf(ROW_INT)) === null && (await plainOf(rowKey(accId))) === PLANT_KEY);
 
 console.log('⑤ five minutes later — the hub\'s clock and the page\'s moved on');
 srv.kill('SIGUSR2');
 await evalJs(`(() => { const real = Date.now; Date.now = () => real() + 6 * 60e3; return true; })()`);
 check('every value is masked again (no open field) and the chip is gone', !!(await until(`document.querySelectorAll('.vw-plain').length === 0 && document.querySelector('.vw-timer').hidden`, { timeout: 5000 })));
 const exp = await node('/api/vault/reveal', { id: 'integrations:cloud:browserless#apiKey', page: nodePage });
-check('the hub answers 403 reveal_needs_password to a page secret that WAS open (the hub\'s own 5 minutes are over too)', exp.status === 403 && exp.json && exp.json.code === 'reveal_needs_password', exp);
+check('the hub answers 403 reveal_needs_password to a page secret that WAS open (the hub\'s own 5 minutes are over too)', exp.status === 403 && gateOf(exp.json) && exp.json.code === 'reveal_needs_password', exp);
 const t1 = await pageText();
 check('no value left in the page', ![PLANT_INT, PLANT_KEY, RAND].some((v) => t1.includes(v)));
 await click(ROW_INT + ' .vw-show');
@@ -498,7 +498,7 @@ const AGENT_ROW = '.vw-row[data-id="secrets:agent:conv-chrome-1/deploy-token#sec
   ec.close();
   check('⑥c the agent\'s own entries sealed while the hub was down (a put + an agent-added two-step seed)', !!(un && un.ok && put.ok && seed.ok), { un: un && un.ok, put, seed });
   startServer();
-  check('⑥c the hub is back', await ready());
+  check('⑥c the hub is back', verdictOf(await ready()));
   const again = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
   check('⑥c signed in again after the restart', again === 200, again);
 }
@@ -518,8 +518,8 @@ check('a locked card\'s door (vs-vault-door) opens the UNLOCK modal — not mere
 await click('#vault-unlock-dialog .vault-later');
 await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 3000 });
 await evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
-check('the header says locked and offers 解锁… + 修改第二密码… (the change works locked too) + the idle row', (await until(`document.querySelector('.vw-head')?.dataset.state === 'locked'`, { timeout: 15000 })) === true && (await headDoors()) === 'vault-do-unlock,vault-do-change' && (await headIdle()), await headDoors());
-check('LOCKED (design q-047 §3.5): the list says so with 解锁… and holds no row; the rail counts say «—»; NO 「添加…」 (the bar is away — nothing greyed)', /locked/.test(await until(`document.querySelector('.vw-locked-box')?.textContent`, { timeout: 8000 }) || '') && (await evalJs(`document.querySelectorAll('.vw-row').length`)) === 0 && (await evalJs(`!!document.querySelector('.vw-locked-box .vw-unlock')`)) && (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-n')].every((n) => n.textContent === '—') && document.querySelectorAll('.vw-rail .vw-rail-item').length >= 10`)) && (await evalJs(`getComputedStyle(document.querySelector('.vw-bar')).display`)) === 'none' && !(await evalJs(visible('.vw-add'))));
+check('the header says locked and offers 解锁… + 修改第二密码… (the change works locked too) + the idle row', (await until(`document.querySelector('.vw-head')?.dataset.state === 'locked'`, { timeout: 15000 })) === true && (await headDoors()) === 'vault-do-unlock,vault-do-change' && (verdictOf(await headIdle())), await headDoors());
+check('LOCKED (design q-047 §3.5): the list says so with 解锁… and holds no row; the rail counts say «—»; NO 「添加…」 (the bar is away — nothing greyed)', gateOf(/locked/.test(await until(`document.querySelector('.vw-locked-box')?.textContent`, { timeout: 8000 }) || '')) && (await evalJs(`document.querySelectorAll('.vw-row').length`)) === 0 && (gateOf(await evalJs(`!!document.querySelector('.vw-locked-box .vw-unlock')`))) && (gateOf(await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-n')].every((n) => n.textContent === '—') && document.querySelectorAll('.vw-rail .vw-rail-item').length >= 10`))) && (await evalJs(`getComputedStyle(document.querySelector('.vw-bar')).display`)) === 'none' && !(await evalJs(visible('.vw-add'))));
 await click('.vw-locked-box .vw-unlock');
 check('the list\'s 解锁… opens the unlock modal', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
 await click('#vault-unlock-dialog .vault-later');
@@ -542,10 +542,10 @@ console.log('⑥c lane vault-agent-own: an agent\'s own rows say the rule — no
     const rule = r?.querySelector('.vw-own-rule'), rb = rule?.getBoundingClientRect();
     return { meta: rule?.textContent || '', ruleSeen: !!(rb && rb.height > 0 && rule.scrollWidth <= rule.clientWidth + 1 && getComputedStyle(rule).whiteSpace !== 'nowrap'), run: !!r?.querySelector('.vw-run'), prov: r?.dataset.prov, chip: r?.querySelector('.vw-chip-prov')?.getAttribute('aria-label') || '', purpose: r?.dataset.purpose,
       seedMeta: s?.querySelector('.vw-own-rule')?.textContent || '', seedProv: s?.dataset.prov, ownerRun: own ? !!own.querySelector('.vw-run') : null, help: head?.querySelector('.vw-group-help')?.textContent || '', railHelp: document.querySelector('.vw-rail-item[data-purpose="agents"]')?.title || '' }; })()`);
-  check('⑥c the agent row (a value it PUT): its own line says the rule — «Its own conversation uses it directly · another one only as you share it («Who may use it…»)» (B-bc3b) and who kept it — WHOLE (it wraps; the one-line meta would clip it); NO «Usable by agent runs» switch', /Its own conversation uses it directly · another one only as you share it/.test(ag.meta) && /kept by Deploy helper/.test(ag.meta) && ag.ruleSeen && ag.run === false && ag.purpose === 'agents', ag);
-  check('⑥c …its chip says «Stored by an agent · it saw the value» (a PUT — never «never shown»)', ag.prov === 'agent-put' && /Stored by an agent/.test(ag.chip), [ag.prov, ag.chip]);
-  check('⑥c the seed an agent added itself (Two-step codes): «stored by an agent», «… · other conversations need a grant»', ag.seedProv === 'agent-put' && /Its own conversation uses it directly · other conversations need a grant/.test(ag.seedMeta), [ag.seedProv, ag.seedMeta]);
-  check('⑥c «Kept by agents» says its rule under its name (and as the rail item\'s help)', /the conversation that kept it uses it without asking you; another conversation only as you share it/.test(ag.help) && ag.help === ag.railHelp, [ag.help, ag.railHelp]);
+  check('⑥c the agent row (a value it PUT): its own line says the rule — «Its own conversation uses it directly · another one only as you share it («Who may use it…»)» (B-bc3b) and who kept it — WHOLE (it wraps; the one-line meta would clip it); NO «Usable by agent runs» switch', gateOf(/Its own conversation uses it directly · another one only as you share it/.test(ag.meta)) && gateOf(/kept by Deploy helper/.test(ag.meta)) && gateOf(ag.ruleSeen) && ag.run === false && ag.purpose === 'agents', ag);
+  check('⑥c …its chip says «Stored by an agent · it saw the value» (a PUT — never «never shown»)', ag.prov === 'agent-put' && verdictOf(/Stored by an agent/.test(ag.chip)), [ag.prov, ag.chip]);
+  check('⑥c the seed an agent added itself (Two-step codes): «stored by an agent», «… · other conversations need a grant»', ag.seedProv === 'agent-put' && verdictOf(/Its own conversation uses it directly · other conversations need a grant/.test(ag.seedMeta)), [ag.seedProv, ag.seedMeta]);
+  check('⑥c «Kept by agents» says its rule under its name (and as the rail item\'s help)', gateOf(/the conversation that kept it uses it without asking you; another conversation only as you share it/.test(ag.help)) && ag.help === ag.railHelp, [ag.help, ag.railHelp]);
   check('⑥c an OWNER\'s row (storage / an app login) keeps its «Usable by agent runs» switch', ag.ownerRun !== false, ag.ownerRun);
   await evalJs(`document.querySelector(${JSON.stringify(AGENT_ROW)})?.scrollIntoView({ block: 'center' }); true`);
   await shot('vw-agent-row.png');
@@ -563,16 +563,16 @@ const showKey = async () => { await click(menuSel); await until(`[...document.qu
 // lane takeover-surface-census: the ask opens in the click's own task, before any key request (asked after the hub's refusal it
 // opened a round trip late — a driven agent browser kept the keys, and the second password went to its page)
 await evalJs(`(() => { if (window.__vsKeyGets == null) { window.__vsKeyGets = 0; const f0 = window.fetch; window.fetch = (u, o) => { const p = String(u); if (p.startsWith('/api/accounts/') && p.endsWith('/key')) window.__vsKeyGets++; return f0(u, o); }; } return true; })()`);
-check('⋯ ▸ Show key…', await showKey());
+check('⋯ ▸ Show key…', verdictOf(await showKey()));
 check('a fresh page ⇒ 验证是你 first — in the click\'s own task, before any key request', !!(await until(visible('#vault-reveal-dialog'), { timeout: 8000 })) && (await evalJs('window.__vsKeyGets')) === 0, await evalJs('window.__vsKeyGets'));
-check('the 验证是你 text says a second tab asks again', /Another tab or window asks again/.test(await evalJs(`document.querySelector('#vault-reveal-dialog .vault-text')?.textContent || ''`)));
+check('the 验证是你 text says a second tab asks again', verdictOf(/Another tab or window asks again/.test(await evalJs(`document.querySelector('#vault-reveal-dialog .vault-text')?.textContent || ''`))));
 const keyShown = `[...document.querySelectorAll('.dialog-overlay input, .dialog-form input')].some((i) => i.value === ${JSON.stringify(PLANT_KEY)})`; // (lane dialog-yield r2: Show key…'s showInputDialog is a FORM)
 check('no key on the page before the password', !(await evalJs(keyShown)));
 await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
 check('the right second password ⇒ the key in Show key…\'s dialog (ONE key request, inside the window)', !!(await until(keyShown, { timeout: 10000 })) && (await evalJs('window.__vsKeyGets')) === 1, await evalJs('window.__vsKeyGets'));
 await shot('vw-8-showkey.png');
 await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => { if ([...o.querySelectorAll('input')].some((i) => i.value)) o.remove(); })`);
-check('⋯ ▸ Show key… again', await showKey());
+check('⋯ ▸ Show key… again', verdictOf(await showKey()));
 check('… inside the window: the key at once, nothing asked', !!(await until(keyShown, { timeout: 8000 })) && !(await evalJs(`!!document.getElementById('vault-reveal-dialog')`)));
 await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove())`);
 
@@ -586,7 +586,7 @@ const ph = await evalJs(`(() => { const r = document.querySelector(${JSON.string
 check(`a row fits the screen (${Math.round(ph.l)}…${Math.round(ph.r)} of ${ph.w}) and 「显示」 is a ≥ 36 px target`, ph.l >= 0 && ph.r <= ph.w + 1 && ph.bh >= 36, ph);
 check('「显示」 is reachable (on top)', !!(await until(onTop(ROW_INT + ' .vw-show'), { timeout: 5000 })));
 const pf = await evalJs(`(() => { const rail = document.querySelector('.vw-rail'); const items = [...rail.querySelectorAll('.vw-rail-item')]; const tops = new Set(items.map((i) => Math.round(i.getBoundingClientRect().top))); const row = document.querySelector(${JSON.stringify(ROW_INT)}); const g = (s) => row.querySelector(s).getBoundingClientRect(); const main = g('.vw-main'), chips = g('.vw-chips'), act = g('.vw-act'); const rr = rail.getBoundingClientRect(); return { items: items.length, tops: tops.size, overflow: getComputedStyle(rail).overflowX, railW: Math.round(rr.width), w: innerWidth, filters: getComputedStyle(document.querySelector('.vw-filters')).display, filterBtn: document.querySelector('.vw-filter-btn').getBoundingClientRect().height, add: document.querySelector('.vw-add').getBoundingClientRect().height, stacked: chips.top >= main.bottom - 1 && act.top >= chips.bottom - 1 }; })()`);
-check('THE PHONE COLUMN: the rail is ONE scrolling chip strip; the filters sit behind 筛选… (≥ 36 px, 添加… too); a row stacks — name → chips → value + doors', pf.items >= 10 && pf.tops === 1 && pf.overflow === 'auto' && pf.railW <= pf.w && pf.filters === 'none' && pf.filterBtn >= 36 && pf.add >= 36 && pf.stacked, pf);
+check('THE PHONE COLUMN: the rail is ONE scrolling chip strip; the filters sit behind 筛选… (≥ 36 px, 添加… too); a row stacks — name → chips → value + doors', pf.items >= 10 && pf.tops === 1 && pf.overflow === 'auto' && pf.railW <= pf.w && pf.filters === 'none' && pf.filterBtn >= 36 && pf.add >= 36 && verdictOf(pf.stacked), pf);
 await click('.vw-filter-btn');
 check('筛选… opens the filters in a modal (sort · where from · only the ones I can show)', !!(await until(visible('#vault-filter-dialog .vw-fchip[data-prov="system"]'), { timeout: 5000 })) && !!(await evalJs(`!!document.querySelector('#vault-filter-dialog .vw-only-shown') && !!document.querySelector('#vault-filter-dialog select')`)));
 await click('#vault-filter-dialog .vw-fchip[data-prov="system"]');
@@ -608,7 +608,7 @@ const replaceState = () => evalJs(`({ form: !!document.getElementById('vault-fil
 const FILE_TEXT = ['# build server', 'server = build.example.test', 'port = 8443', 'retries = 3', ''].join('\n');
 const fput = await api('POST', '/api/vault/files', { label: 'Build server settings', note: 'How the build server is reached', filename: 'build.conf', size: Buffer.byteLength(FILE_TEXT), bytes: Buffer.from(FILE_TEXT).toString('base64') });
 const fentry = (fput && fput.json && fput.json.entry) || '';
-check('a FILE entry stored through the owner\'s door (POST /api/vault/files)', fput && fput.status === 200 && /^keyfile:[0-9a-f]+$/.test(fentry), fput);
+check('a FILE entry stored through the owner\'s door (POST /api/vault/files)', gateOf(fput) && fput.status === 200 && verdictOf(/^keyfile:[0-9a-f]+$/.test(fentry)), fput);
 const FROW = `.vw-row[data-id^="secrets:${fentry}#"]`, FREPLACE = `${FROW} .vw-file-replace`, FCANCEL = '#vault-file-replace .dialog-footer .btn-cancel';   // the FOOTER's Cancel: the picker's «Choose a file…» carries btn-cancel too, and comes first
 for (const sz of [{ w: 1280, h: 800 }, { w: 768, h: 1024 }]) {
   await cdp('Emulation.setDeviceMetricsOverride', { width: sz.w, height: sz.h, deviceScaleFactor: 1, mobile: false });
@@ -624,7 +624,7 @@ for (const sz of [{ w: 1280, h: 800 }, { w: 768, h: 1024 }]) {
   const p2 = await pressAsPerson(FCANCEL);
   const gone = !!(await until(`!document.getElementById('vault-file-replace') && [...app.wm.windows.values()].every((w) => w.type !== 'form')`, { timeout: 5000 }));
   const s1 = await replaceState();
-  check(`${sz.w}×${sz.h}: «Replace file…» pressed as a person opens its form, and its «Cancel» pressed as a person CLOSES it — the form gone, no form left in the taskbar`, hasRow && p1.pressed && opened && s0.form && named === 'Cancel' && p2.pressed && gone && !s1.form && s1.forms === 0, { hasRow, p1, named, p2, s0, s1 });
+  check(`${sz.w}×${sz.h}: «Replace file…» pressed as a person opens its form, and its «Cancel» pressed as a person CLOSES it — the form gone, no form left in the taskbar`, gateOf(hasRow) && gateOf(p1.pressed) && gateOf(opened) && gateOf(s0.form) && named === 'Cancel' && gateOf(p2.pressed) && gateOf(gone) && !s1.form && s1.forms === 0, { hasRow, p1, named, p2, s0, s1 });
   if (sz.w === 1280) {
     // RED CONTROL: the same press and the same reading over a Cancel PLANTED to do nothing (its witness: the button's handler is the plant)
     const p3 = await pressAsPerson(FREPLACE);
@@ -633,13 +633,13 @@ for (const sz of [{ w: 1280, h: 800 }, { w: 768, h: 1024 }]) {
     const p4 = await pressAsPerson(FCANCEL);
     await sleep(1500);
     const s2 = await replaceState();
-    check('red control: «a Cancel that leaves the form standing» (planted on the button, its handler read back) — the same press and reading see the form and its taskbar entry', p3.pressed && again && planted && p4.pressed && s2.form && s2.forms >= 1, { p3, planted, p4, s2 });
+    check('red control: «a Cancel that leaves the form standing» (planted on the button, its handler read back) — the same press and reading see the form and its taskbar entry', gateOf(p3.pressed) && gateOf(again) && gateOf(planted) && gateOf(p4.pressed) && gateOf(s2.form) && s2.forms >= 1, { p3, planted, p4, s2 });
     await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'form') app.wm.closeWindow(w.id); document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
   }
 }
 await cdp('Emulation.clearDeviceMetricsOverride');
 const fdrop = await api('DELETE', `/api/vault/files/${fentry.slice('keyfile:'.length)}`);
-check('… the file entry removed again (⑧ on read the rows they always had)', fdrop && fdrop.status === 200 && fdrop.json && fdrop.json.ok === true, fdrop);
+check('… the file entry removed again (⑧ on read the rows they always had)', gateOf(fdrop) && fdrop.status === 200 && gateOf(fdrop.json) && fdrop.json.ok === true, fdrop);
 
 console.log('⑧ the words in Chinese; the log; the audit');
 await evalJs(`localStorage.setItem('vibespace.lang', 'zh')`);
@@ -648,10 +648,10 @@ await until(`!!(window.app && app.wm)`, { timeout: 30000 });
 await splashGone();
 await openWindow();
 check('「显示」', (await evalJs(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')})?.textContent`)) === '显示');
-check('the setup-token row says 「长期 OAuth 令牌」', /长期 OAuth 令牌/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
+check('the setup-token row says 「长期 OAuth 令牌」', verdictOf(/长期 OAuth 令牌/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`))));
 // lane vault-agent-own: the agent row's rule in Chinese (the brief's words), and the group's help sentence
 const zhAgent = await evalJs(`({ meta: document.querySelector(${JSON.stringify(AGENT_ROW + ' .vw-own-rule')})?.textContent || '', help: document.querySelector('.vw-group[data-purpose="agents"] .vw-group-help')?.textContent || '' })`);
-check('⑥c in Chinese: the agent row says 「本对话可直接使用 · 其他对话只能按你的共享使用」 (B-bc3b) + 「由 Deploy helper 保存」; «agent 存放» says its rule', zhAgent.meta.includes('本对话可直接使用 · 其他对话只能按你的共享使用') && zhAgent.meta.includes('由 Deploy helper 保存') && /存它的那个对话直接使用/.test(zhAgent.help), zhAgent);
+check('⑥c in Chinese: the agent row says 「本对话可直接使用 · 其他对话只能按你的共享使用」 (B-bc3b) + 「由 Deploy helper 保存」; «agent 存放» says its rule', gateOf(zhAgent.meta.includes('本对话可直接使用 · 其他对话只能按你的共享使用')) && gateOf(zhAgent.meta.includes('由 Deploy helper 保存')) && verdictOf(/存它的那个对话直接使用/.test(zhAgent.help)), zhAgent);
 check('the rail in Chinese: 全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 网站登录 · 自动化 key · 密码与密钥 · agent 存放 (lane vault-paste-request: + 密码与密钥; lane browser-login: + 网站登录)', (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-name')].map((e) => e.textContent).join(' · ')`)) === '全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 网站登录 · 自动化 key · 密码与密钥 · agent 存放');
 check('「显示」 on the automation key carries the owner\'s own sentence as its help; the chips read 「hub 铸造 · 从未显示」 / 「我自己」', (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-show')?.title`)) === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-chip-prov')?.textContent`)) === 'hub 铸造 · 从未显示' && (await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId) + ' .vw-chip-prov')})?.textContent`)) === '我自己');
 await click(ROW_INT + ' .vw-show');
@@ -660,7 +660,7 @@ await shot('vw-7-zh.png');
 const log = fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8');
 const audit = fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8');
 check('no value and no password in the server log or the audit', ![PLANT_INT, PLANT_KEY, RAND, SECOND, 'not the second password'].some((v) => log.includes(v) || audit.includes(v)));
-check('the audit holds the reveals (vault-reveal: who / ip / entry)', audit.split('\n').filter((l) => l.includes('"event":"vault-reveal"')).length >= 3 && /"entry":"cloud:browserless"/.test(audit));
+check('the audit holds the reveals (vault-reveal: who / ip / entry)', audit.split('\n').filter((l) => l.includes('"event":"vault-reveal"')).length >= 3 && verdictOf(/"entry":"cloud:browserless"/.test(audit)));
 
 console.log('⑨ 立即锁定 from the header (lane vault-one-door; zh)');
 await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
@@ -717,7 +717,7 @@ check('⑨L … the judge sends the slow box’s reading to the not-observable r
 const seen9 = judge9L(row9(LOCK_WORDS9));
 check('⑨L … the judge takes the lock’s own words as the law seen', seen9.road === 'seen' && seen9.shape === true, seen9);
 const ctl9 = judge9L(row9(WAIT_WORDS9, 'VibeSpace (the integrations store)'));
-check('red control: «a lock act that filed nothing» — the row of the lock act’s own refusal alone (the integrations store) — is refused by the same judge', ctl9.road === 'red' && ctl9.read.startsWith('the lock act'), ctl9);
+check('red control: «a lock act that filed nothing» — the row of the lock act’s own refusal alone (the integrations store) — is refused by the same judge', ctl9.road === 'red' && verdictOf(ctl9.read.startsWith('the lock act')), ctl9);
 await cdp('Page.navigate', { url: URL });
 // wait-for-effect, staged (lane vault-unlock-modal-race): the same shape as ⑥a — the on-load unlock modal is gated behind
 // the serial /api/home → /api/vault/state boot, so wait for the /api/home pass (app._localHome), then the modal's OWN 10 s.
@@ -746,8 +746,8 @@ console.log('⑩ SAY THE WAIT (lane vault-slow-load — inc-mvk5jyv3; zh): from 
   await sleep(400);
   const wU = await waitOf('#vault-unlock-dialog');
   const goU = await evalJs(`(() => { const b = document.querySelector('.vault-unlock-go'); return b ? { text: b.textContent, disabled: b.disabled } : null; })()`);
-  check('⑩ 解锁 held: the button is disabled and says 「正在解锁…」', !!heldUnlock && goU && goU.disabled === true && goU.text === '正在解锁…', { held: !!heldUnlock, goU });
-  check('⑩ … and the dialog says the step: a spinner + 「正在核对第二密码…」 (role=status) — not a blank second', !!wU && wU.shown && wU.spin && wU.role === 'status' && wU.text === '正在核对第二密码…', wU);
+  check('⑩ 解锁 held: the button is disabled and says 「正在解锁…」', !!heldUnlock && gateOf(goU) && goU.disabled === true && goU.text === '正在解锁…', { held: !!heldUnlock, goU });
+  check('⑩ … and the dialog says the step: a spinner + 「正在核对第二密码…」 (role=status) — not a blank second', !!wU && gateOf(wU.shown) && gateOf(wU.spin) && wU.role === 'status' && wU.text === '正在核对第二密码…', wU);
   await release(heldUnlock);
   check('⑩ the answer ⇒ unlocked, the dialog closes (the line goes with it)', !!(await until(`!document.getElementById('vault-unlock-dialog') && document.querySelector('.vw-head')?.dataset.state === 'unlocked'`, { timeout: 20000 })));
   await unhold();
@@ -760,17 +760,17 @@ console.log('⑩ SAY THE WAIT (lane vault-slow-load — inc-mvk5jyv3; zh): from 
   await sleep(700);
   const wL = await waitOf('.vw-list');
   const early = await evalJs(`performance.getEntriesByType('resource').filter((e) => e.startTime >= ${t0}).map((e) => new URL(e.name).pathname)`);
-  check('⑩ the open, the list held: it SAYS 「正在读取保险库…」 with a spinner (the owner\'s blank list on a busy hub)', !!heldList && !!wL && wL.shown && wL.spin && wL.text === '正在读取保险库…', wL);
-  check('⑩ … the keys\' grants were asked WHILE the list is out (one round trip, not two)', early.includes('/api/automation/keys'), early);
+  check('⑩ the open, the list held: it SAYS 「正在读取保险库…」 with a spinner (the owner\'s blank list on a busy hub)', !!heldList && !!wL && gateOf(wL.shown) && gateOf(wL.spin) && wL.text === '正在读取保险库…', wL);
+  check('⑩ … the keys\' grants were asked WHILE the list is out (one round trip, not two)', verdictOf(early.includes('/api/automation/keys')), early);
   await release(heldList);
   check('⑩ the answer ⇒ the rows, and the wait line is gone', !!(await until(`!!document.querySelector(${JSON.stringify(ROW_INT)}) && !document.querySelector('.vw-list .vault-wait')`, { timeout: 15000 })));
   await unhold();
   await sleep(600);
   const opened = await evalJs(`performance.getEntriesByType('resource').filter((e) => e.startTime >= ${t0}).map((e) => new URL(e.name).pathname + new URL(e.name).search)`);
-  check('⑩ the window loads what it shows: the open never asks the chat accounts (/api/channels)', opened.includes('/api/vault/contents') && !opened.some((u) => u.startsWith('/api/channels')), opened);
+  check('⑩ the window loads what it shows: the open never asks the chat accounts (/api/channels)', gateOf(opened.includes('/api/vault/contents')) && !opened.some((u) => u.startsWith('/api/channels')), opened);
   const ring = await evalJs(`typeof window.__vsFetchTimings === 'function' ? window.__vsFetchTimings() : null`);
   const listT = Array.isArray(ring) ? ring.filter((r) => r.route === '/api/vault/contents').pop() : null;
-  check('⑩ the page\'s request ring (what an incident snapshot carries) has the held list\'s real wait — route + ms, no query', !!listT && listT.ms >= 600 && Object.keys(listT).join() === 'at,route,ms' && ring.length <= 20 && ring.every((r) => !/[?#]/.test(r.route)), { listT, n: ring && ring.length });
+  check('⑩ the page\'s request ring (what an incident snapshot carries) has the held list\'s real wait — route + ms, no query', !!listT && listT.ms >= 600 && Object.keys(listT).join() === 'at,route,ms' && ring.length <= 20 && verdictOf(ring.every((r) => !/[?#]/.test(r.route))), { listT, n: ring && ring.length });
   // 验证是你 and 显示全部
   const showWord = await evalJs(`document.querySelector('.vw-show-all')?.textContent || ''`);
   await hold('*/api/vault/reveal-session', '*/api/vault/reveal');
@@ -781,12 +781,12 @@ console.log('⑩ SAY THE WAIT (lane vault-slow-load — inc-mvk5jyv3; zh): from 
   await sleep(300);
   const wR = await waitOf('#vault-reveal-dialog');
   const goR = await evalJs(`(() => { const b = document.querySelector('.vault-reveal-go'); return b ? { text: b.textContent, disabled: b.disabled } : null; })()`);
-  check('⑩ 验证是你 held: 「正在验证…」 on the disabled button, 「正在核对第二密码…」 in the dialog', !!heldRs && goR && goR.disabled && goR.text === '正在验证…' && !!wR && wR.spin && wR.text === '正在核对第二密码…', { goR, wR });
+  check('⑩ 验证是你 held: 「正在验证…」 on the disabled button, 「正在核对第二密码…」 in the dialog', !!heldRs && gateOf(goR) && gateOf(goR.disabled) && goR.text === '正在验证…' && !!wR && gateOf(wR.spin) && wR.text === '正在核对第二密码…', { goR, wR });
   await release(heldRs);
   const heldRv = await heldOf('/api/vault/reveal');
   await sleep(200);
   const prog = await evalJs(`document.querySelector('.vw-show-all')?.textContent || ''`);
-  check('⑩ 显示全部 counts its reveals: 「正在显示 1 / N…」 while the first is out', !!heldRv && /^正在显示 1 \/ \d+…$/.test(prog), prog);
+  check('⑩ 显示全部 counts its reveals: 「正在显示 1 / N…」 while the first is out', !!heldRv && verdictOf(/^正在显示 1 \/ \d+…$/.test(prog)), prog);
   await release(heldRv);
   await unhold();
   check('⑩ … and says its own word again (「全部显示」) once every value is in', showWord === '全部显示' && !!(await until(`document.querySelector('.vw-show-all')?.textContent === ${JSON.stringify(showWord)} && document.querySelectorAll('.vw-row.vw-open').length >= 3`, { timeout: 20000 })), { showWord, now: await evalJs(`document.querySelector('.vw-show-all')?.textContent`) });
@@ -796,7 +796,7 @@ console.log('⑩ SAY THE WAIT (lane vault-slow-load — inc-mvk5jyv3; zh): from 
   const heldAu = await heldOf(/^\/api\/automation\/keys\/[^/]+\/audit$/);
   await sleep(300);
   const wA = await waitOf('#vault-ak-audit');
-  check('⑩ 审计… held: the dialog says 「正在读取审计记录…」 with a spinner', !!heldAu && !!wA && wA.spin && wA.text === '正在读取审计记录…', { held: !!heldAu, wA });
+  check('⑩ 审计… held: the dialog says 「正在读取审计记录…」 with a spinner', !!heldAu && !!wA && gateOf(wA.spin) && wA.text === '正在读取审计记录…', { held: !!heldAu, wA });
   await release(heldAu);
   check('⑩ … the answer replaces it (the lines, or «none yet»)', !!(await until(`!document.querySelector('#vault-ak-audit .vault-wait') && !!document.querySelector('#vault-ak-audit .vw-ak-audit-line, #vault-ak-audit .vw-empty')`, { timeout: 10000 })));
   await unhold();
@@ -806,4 +806,4 @@ console.log('⑩ SAY THE WAIT (lane vault-slow-load — inc-mvk5jyv3; zh): from 
 await stopServer();
 if (SKIPPED.length && !failed) { console.log(`\nPARTIAL (${passed} passed; ${SKIPPED.length} named skip(s), each said above: ${SKIPPED.join('; ')})`); process.exit(0); }
 console.log(failed ? `\nFAILED (${passed} passed, ${failed} failed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

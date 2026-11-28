@@ -19,7 +19,7 @@ import { walk } from './sync-fs-census.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 
 // ── ⑥ ROUND 2 — THE WRITER'S LAWS, in process (each RED on f4d75cd22 by itself) ──────────────────────────────────────
 console.log('⑥ round 2 — every byte or nothing, the order of acts, the pace floor, the journal\'s own bytes, the writer\'s own failures, a failed act');
@@ -73,7 +73,7 @@ parentPort.on('message', (m) => {
     w1.dirty(path.join(T, 'empty.json'), { name: 'empty.write', produce: () => [], debounceMs: 0 });
     const okEmpty = await w1.durable(path.join(T, 'empty.json'), { timeoutMs: 3000 });
     await sleep(50); process.off('uncaughtException', onU); w1.stop();
-    ok(uncaught === 0 && okBad === false && okEmpty === false && fs.readFileSync(bad, 'utf8') === '{"old":2}' && !fs.existsSync(path.join(T, 'empty.json')) && lines.some((l) => /bad\.write not written \(its bytes are not a string or a Buffer/.test(l)) && lines.some((l) => /empty\.write not written \(its bytes are empty/.test(l)),
+    ok(uncaught === 0 && okBad === false && okEmpty === false && fs.readFileSync(bad, 'utf8') === '{"old":2}' && !fs.existsSync(path.join(T, 'empty.json')) && gateOf(lines.some((l) => /bad\.write not written \(its bytes are not a string or a Buffer/.test(l))) && verdictOf(lines.some((l) => /empty\.write not written \(its bytes are empty/.test(l))),
       '(E iii) a produce() that returns a number or [] is THAT store\'s failed write — said, durable() false, the file untouched; nothing thrown out of the timer', { uncaught, okBad, okEmpty });
     // (C i) A PERSON'S ACT IS THE NEXT WRITE: with one write in flight (300 ms) and four small stores due, a durable act goes next
     withEnv({ VS_R2_DELAY: '300' });
@@ -85,7 +85,7 @@ parentPort.on('message', (m) => {
     for (let k = 0; k < 40 && order.length < 2; k++) await sleep(50);   // the order of the first two writes is the law; the rest need not land
     w2.stop();
     // the law is the ORDER (the fast tier holds no wall-clock bound — test-ci-gate's ratchet): the answer's time is said, not judged
-    ok(actOk && order[0] === 'first' && order[1] === 'act', `(C i) a durable act is the NEXT write after the one in flight — order ${order.join(' → ')}; answered in ${Math.round(actMs)} ms (the write in flight + its own)`, order);
+    ok(gateOf(actOk) && order[0] === 'first' && order[1] === 'act', `(C i) a durable act is the NEXT write after the one in flight — order ${order.join(' → ')}; answered in ${Math.round(actMs)} ms (the write in flight + its own)`, order);
     // (C ii) THE PACE NEVER ASKS SOONER THAN THE LAST WRITE TOOK
     ok(P.dueAt({ dirtySince: 0, lastEndAt: 1000, bytes: 1024, debounceMs: 100, lastMs: 1200 }) === 2200 && P.dueAt({ dirtySince: 0, lastEndAt: 1000, bytes: 1024, debounceMs: 100, lastMs: 0 }) === 1500,
       '(C ii) a small store\'s next write: never sooner than its last write TOOK (1.2 s ⇒ due at +1.2 s, not the 0.5 s floor)');
@@ -97,7 +97,7 @@ parentPort.on('message', (m) => {
     const tF = performance.now(); w3.forget(gone); const forgetMs = performance.now() - tF, stillFlying = w3.pending(gone);   // by MECHANISM: forget returned while the write still flew
     w3.dirty(other, { name: 'other', produce: () => '{"o":1}', debounceMs: 0 });
     const otherOk = await w3.durable(other, { timeoutMs: 5000 }); await sleep(400); w3.stop();
-    ok(stillFlying && otherOk && !fs.existsSync(gone) && fs.existsSync(other), `(E ii) forget() with the file's write in flight returns at once (${forgetMs.toFixed(1)} ms) — the write lands, the file is unlinked after it, and the queue goes on (the next store written)`, { forgetMs, gone: fs.existsSync(gone), otherOk });
+    ok(gateOf(stillFlying) && gateOf(otherOk) && !fs.existsSync(gone) && verdictOf(fs.existsSync(other)), `(E ii) forget() with the file's write in flight returns at once (${forgetMs.toFixed(1)} ms) — the write lands, the file is unlinked after it, and the queue goes on (the next store written)`, { forgetMs, gone: fs.existsSync(gone), otherOk });
     // (E i) THE THREAD DIES ⇒ RESTARTED, bounded; past the bound the main thread — SAID ONCE, and a write there never claims
     // the loop did not wait
     const die = path.join(T, 'die');
@@ -107,14 +107,14 @@ parentPort.on('message', (m) => {
     const r1ok = await w4.durable(r1, { timeoutMs: 5000 });
     fs.writeFileSync(die, '1'); const r2 = path.join(T, 'r2.json'); w4.dirty(r2, { name: 'r2', produce: () => '{"r":2}', debounceMs: 0 });
     const r2ok = await w4.durable(r2, { timeoutMs: 5000 }); const mode4 = w4.mode(); w4.stop();
-    ok(r1ok && r2ok && lines.some((l) => /restarted \(1 of 1 this hour\)/.test(l)) && lines.filter((l) => /from now on every store is written ON THE MAIN THREAD/.test(l)).length === 1 && mode4 === 'main' && lines.some((l) => /r2 took [\d.]+ s to reach the disk .* ON THE MAIN THREAD: the main loop was held/.test(l)) && !lines.some((l) => /r2 took .* the main loop did not wait/.test(l)),
+    ok(gateOf(r1ok) && gateOf(r2ok) && gateOf(lines.some((l) => /restarted \(1 of 1 this hour\)/.test(l))) && lines.filter((l) => /from now on every store is written ON THE MAIN THREAD/.test(l)).length === 1 && mode4 === 'main' && gateOf(lines.some((l) => /r2 took [\d.]+ s to reach the disk .* ON THE MAIN THREAD: the main loop was held/.test(l))) && !lines.some((l) => /r2 took .* the main loop did not wait/.test(l)),
       '(E i) the thread that died is restarted (once here); the second death: the main thread, said ONCE — and its write says it HELD the loop, never «did not wait»', lines.slice(0, 6));
     // (E iv) a killed process's temp files are swept by the next process's first write of that file
     withEnv({});
     const sw = path.join(T, 'sw.json'); for (const t0 of ['.tmp-99999990-w', '.tmp-99999991']) fs.writeFileSync(sw + t0, 'torn');
     const mine = sw + `.tmp-${process.pid}-x`; fs.writeFileSync(mine, 'mine');
     const w5 = SW.create({ log }); w5.dirty(sw, { name: 'sw', produce: () => '{"s":1}', debounceMs: 0 }); await w5.durable(sw); w5.stop();
-    ok(!fs.existsSync(sw + '.tmp-99999990-w') && !fs.existsSync(sw + '.tmp-99999991') && fs.existsSync(mine), '(E iv) the temp files a killed process left (another pid\'s) are swept at the first write of the file — never this process\'s');
+    ok(!fs.existsSync(sw + '.tmp-99999990-w') && !fs.existsSync(sw + '.tmp-99999991') && verdictOf(fs.existsSync(mine)), '(E iv) the temp files a killed process left (another pid\'s) are swept at the first write of the file — never this process\'s');
     // (E v) AN OUTAGE IS NO WRITE PER ACT: a failing store keeps its backoff even when acts wait on it
     withEnv({ VS_R2_FAIL: '1' });
     const w6 = SW.create({ log: { warn() {} }, workerPath: STAND }); let tries = 0;
@@ -138,7 +138,7 @@ parentPort.on('message', (m) => {
     const perAct = a30.bytesWritten / 30;
     ok(perAct < 4096 && a30.bytesWritten < 120 * 1024 && a31.writes === a30.writes && a31.bytesWritten === a30.bytesWritten, `(C iii) 30 acts on ~2 KB rows: ${Math.round(a30.bytesWritten / 1024)} KB written to the journal in all (${Math.round(perAct)} B an act — its OWN bytes, never the whole journal again); (C iv) an act that changes nothing writes nothing`, { a30, a31 });
     for (let i = 0; i < 40; i++) await st.index.update(() => { st.index.entry('a', 'c' + (i % 20)).readAt = 2000 + i; }, { durable: true });
-    ok(jl.some((l) => /index-acts\.ndjson is past its bound/.test(l)), '(C iii) the journal past its stated bound is SAID — and the index is written to fold it', jl.slice(-2));
+    ok(verdictOf(jl.some((l) => /index-acts\.ndjson is past its bound/.test(l))), '(C iii) the journal past its stated bound is SAID — and the index is written to fold it', jl.slice(-2));
     try { st.close(); } catch { } w7.stop();
     // (smaller 3) THE JOURNAL'S LOAD SAYS WHAT IT DROPPED: a torn line, an out-of-order seq and a line the index holds —
     // never applied, each COUNTED in the load's one line (round 1 dropped a torn line in silence and applied a backwards seq)
@@ -153,7 +153,7 @@ parentPort.on('message', (m) => {
       const s1 = CS.createChannelStore({ dir: ld, log: { warn: (l) => ll.push(String(l)), log() {} }, writer: w9 });
       const k1 = s1.index.peek('a/k1'), k2 = s1.index.peek('a/k2'); try { s1.close(); } catch { } w9.stop();
       const said = ll.find((l) => /index-acts\.ndjson: 1 act the index did not hold yet replayed/.test(l)) || '';
-      ok(k1 && k1.title === 'act-two' && k2 && k2.title === 'two' && /1 line not readable dropped/.test(said) && /1 out of order dropped/.test(said) && /1 the index already holds skipped/.test(said),
+      ok(gateOf(k1) && k1.title === 'act-two' && gateOf(k2) && k2.title === 'two' && gateOf(/1 line not readable dropped/.test(said)) && gateOf(/1 out of order dropped/.test(said)) && verdictOf(/1 the index already holds skipped/.test(said)),
         `(smaller 3) the journal's load says what it dropped — one torn line, one out of order, one held — and applies only the act past the index (${said.slice(0, 200)})`, { k1, k2, ll });
     }
     // (F) A FAILED ACT REACHES THE CALLER: the store's write fails ⇒ update() rejects «not-durable» — applied in memory, said so
@@ -164,7 +164,7 @@ parentPort.on('message', (m) => {
     let fErr = null; try { await st2.index.update(() => { st2.index.entry('a', 'z').title = 'act'; }, { durable: true }); } catch (e) { fErr = e; }
     const inMem = st2.index.peek('a/z');
     try { st2.close(); } catch { } w8.stop();
-    ok(fErr && fErr.code === 'not-durable' && fErr.status === 503 && fErr.applied === true && /not on disk yet/.test(fErr.message) && inMem && inMem.title === 'act', '(F) an act whose write failed REJECTS «not-durable» (503) — the person is told it is in memory, not on disk; never {ok: true}', fErr && { code: fErr.code, message: fErr.message });
+    ok(gateOf(fErr) && fErr.code === 'not-durable' && fErr.status === 503 && fErr.applied === true && gateOf(/not on disk yet/.test(fErr.message)) && gateOf(inMem) && inMem.title === 'act', '(F) an act whose write failed REJECTS «not-durable» (503) — the person is told it is in memory, not on disk; never {ok: true}', fErr && { code: fErr.code, message: fErr.message });
   } finally { for (const k of ['VS_R2_DELAY', 'VS_R2_FAIL', 'VS_R2_DIE_IF']) { if (env0[k] === undefined) delete process.env[k]; else process.env[k] = env0[k]; } fs.rmSync(T, { recursive: true, force: true }); }
   // (D) THE EXIT LAW IS A CALL — an AST walk of server.js (round 1's beginExit() sat inside a `//` comment and a text match
   // passed it): the shutdown and the crash path each CALL beginExit(); round 6 (E1): NO judge at the exit hook's join (no
@@ -267,12 +267,12 @@ console.log('⑧ round 3 — law 1: the queue\'s two stated bounds, a seeded wal
     for (const r of rows || []) { if (!(r.due <= now)) continue; if (r.urgent) { if (!u || r.dirtySince < u.dirtySince) u = r; } else if (!p || r.due < p.due || (r.due === p.due && r.dirtySince < p.dirtySince)) p = r; }
     if (u && p) return last === 'urgent' ? p : u; return u || p; };
   const r3 = runAll(placeR3);
-  ok(r3.bad.some((b) => b.kind === 'act' && b.failP > 0) && law.worstOwed > 1, `true words 1: round 3's ORDER (a failed store's retry back at its first change) breaks bound (a) on the walks with failing writes — an act waited ${Math.max(...r3.bad.filter((b) => b.kind === 'act').map((b) => b.writes), 0)} writes (its bound ${(r3.bad.find((b) => b.kind === 'act') || {}).bound}); round 3's SENTENCE (K = the acts owed at the arrival) is exceeded ${law.worstOwed}× by the walk's own acts — the table now states K as above (${law.worstRatioA} of it at worst)`, { r3bad: r3.bad.slice(0, 2), worstOwed: law.worstOwed });
+  ok(gateOf(r3.bad.some((b) => b.kind === 'act' && b.failP > 0)) && law.worstOwed > 1, `true words 1: round 3's ORDER (a failed store's retry back at its first change) breaks bound (a) on the walks with failing writes — an act waited ${Math.max(...r3.bad.filter((b) => b.kind === 'act').map((b) => b.writes), 0)} writes (its bound ${(r3.bad.find((b) => b.kind === 'act') || {}).bound}); round 3's SENTENCE (K = the acts owed at the arrival) is exceeded ${law.worstOwed}× by the walk's own acts — the table now states K as above (${law.worstRatioA} of it at worst)`, { r3bad: r3.bad.slice(0, 2), worstOwed: law.worstOwed });
   // RED CONTROL: round 2's verdict (an act is ALWAYS the next write) — the same walks starve a paced store
   const round2 = (rows, now) => { let best = null; const before = (a, b) => (!!a.urgent !== !!b.urgent ? !!a.urgent : a.urgent ? a.dirtySince < b.dirtySince : a.due < b.due || (a.due === b.due && a.dirtySince < b.dirtySince));
     for (const r of rows) { if (!(r.due <= now)) continue; if (!best || before(r, best)) best = r; } return best; };
   const ctl = runAll(round2);
-  ok(ctl.bad.some((b) => /paced/.test(b.kind)), `CONTROL: round 2's «an act is the next write» breaks bound (b) in the same walks — a paced store waited ${Math.max(...ctl.bad.filter((b) => /paced/.test(b.kind)).map((b) => b.writes), 0)} writes past due (bound ${(ctl.bad.find((b) => /paced/.test(b.kind)) || {}).bound})`, ctl.bad.slice(0, 2));
+  ok(verdictOf(ctl.bad.some((b) => /paced/.test(b.kind))), `CONTROL: round 2's «an act is the next write» breaks bound (b) in the same walks — a paced store waited ${Math.max(...ctl.bad.filter((b) => /paced/.test(b.kind)).map((b) => b.writes), 0)} writes past due (bound ${(ctl.bad.find((b) => /paced/.test(b.kind)) || {}).bound})`, ctl.bad.slice(0, 2));
   const tb = P.boundsTable({ writeMs: 1200 });
   ok(tb.acts[0].writes === 3 && tb.acts[0].ms === 3600 && tb.paced[0].writes === 3 && tb.acts[1].writes === 5,
     `the bounds as a person waits them at 1.2 s a write: an act ${tb.acts.map((r) => `${r.durableStoresWithAChange} durable store${r.durableStoresWithAChange > 1 ? 's' : ''} with a change ${(r.ms / 1000).toFixed(1)} s`).join(' · ')}; a paced store past due ${tb.paced.map((r) => `${r.pacedStoresDue} due ${(r.msPastDue / 1000).toFixed(1)} s`).join(' · ')}`);
@@ -302,7 +302,7 @@ console.log('⑧ round 3 — law 2: in the shutdown and the crash path, the exit
   };
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const live = orderOf(srv);
-  ok(live.length === 2 && live.every((r) => r.ok), `law 2: in ${live.map((r) => r.road).join(' and ')}, beginExit() then the rank-0 flush come BEFORE every other store's flush (${live.map((r) => `${r.road}: the first other flush is ${r.firstFlushName}()`).join('; ')})`, live);
+  ok(live.length === 2 && verdictOf(live.every((r) => r.ok)), `law 2: in ${live.map((r) => r.road).join(' and ')}, beginExit() then the rank-0 flush come BEFORE every other store's flush (${live.map((r) => `${r.road}: the first other flush is ${r.firstFlushName}()`).join('; ')})`, live);
   // MUTANTS by name: the writer's line moved after the stores' flushes, in each road
   const crashLine = srv.split('\n').find((l) => /let w0 = null; try \{ w0 = require\('\.\/src\/store-writer\.js'\)\.storeWriter\(\)/.test(l));
   const mutCrash = crashLine ? srv.replace(crashLine + '\n', '').replace("  console.error(e); try { w0.exitFlush(", crashLine + '\n  console.error(e); try { w0.exitFlush(') : null;
@@ -351,7 +351,7 @@ parentPort.on('message', (m) => {
     fs.writeFileSync = realW; fs.renameSync = realR;
     w.flushSync(); w.stop();
     const all = [...Array(20)].every((_, k) => JSON.parse(fs.readFileSync(path.join(dir, `cw-${k}.json`), 'utf8')).v === 1);
-    ok(updates === 0 && born === 2 && all, `law 3: a restart over 20 existing metas, one update of each — ${updates} synchronous store writes on the main thread (the directory listed once); a socket being born — its first version written here (${born} calls: the temp and its rename); every update on disk through the writer`, { updates, born });
+    ok(updates === 0 && born === 2 && verdictOf(all), `law 3: a restart over 20 existing metas, one update of each — ${updates} synchronous store writes on the main thread (the directory listed once); a socket being born — its first version written here (${born} calls: the temp and its rename); every update on disk through the writer`, { updates, born });
     // (ii) {sync: true} over an in-flight PACED write of the same meta: the file holds the sync version, and STAYS
     process.env.VS_R3_DELAY = '300';
     const dir2 = path.join(T, 'meta-b'); fs.mkdirSync(dir2, { recursive: true }); realW.call(fs, path.join(dir2, 'cw-x.json'), '{"v":0}');
@@ -365,7 +365,7 @@ parentPort.on('message', (m) => {
     await sleep3(500);
     const later = fs.existsSync(path.join(dir2, 'cw-x.json')) ? fs.readFileSync(path.join(dir2, 'cw-x.json'), 'utf8') : '(deleted)';
     w2.stop(); delete process.env.VS_R3_DELAY;
-    ok(flying && /"sync"/.test(rightAfter) && /"sync"/.test(later), `law 3: {sync: true} over a paced write in flight SUPERSEDES it — the file holds the sync version right after (${rightAfter}) and ${later === '(deleted)' ? 'was DELETED' : `still does 0.5 s later (${later})`} — never unlinked by the forgotten write`, { flying, rightAfter, later });
+    ok(gateOf(flying) && gateOf(/"sync"/.test(rightAfter)) && verdictOf(/"sync"/.test(later)), `law 3: {sync: true} over a paced write in flight SUPERSEDES it — the file holds the sync version right after (${rightAfter}) and ${later === '(deleted)' ? 'was DELETED' : `still does 0.5 s later (${later})`} — never unlinked by the forgotten write`, { flying, rightAfter, later });
   } finally { fs.writeFileSync = realW; fs.renameSync = realR; SW.storeWriter = realSW; delete process.env.VS_R3_DELAY; fs.rmSync(T, { recursive: true, force: true }); }
 }
 // ── ⑧ ROUND 3 — law 4: THE JOURNAL'S TAIL IS ALWAYS A WHOLE LINE BEFORE THE NEXT APPEND ─────────────────────────────────
@@ -426,7 +426,7 @@ parentPort.on('message', (m) => {
     return { fault, trunc, promised, whole, lines: lines.length, act2OnDiskAfterRestart: !!(replay && replay.note && replay.note.length === 9000), unreadableSaid: said.some((l) => /not readable/.test(l)) };
   };
   const res = await Promise.all([['enospc', 'eio'], ['short', 'eio'], ['fsync', 'eio'], ['enospc', 'ok']].map(([fault, trunc]) => scene(fault, trunc)));   // side by side: each its own dir, writer and thread
-  ok(res.every((r) => r.promised === 'not-durable' && r.whole && r.act2OnDiskAfterRestart && !r.unreadableSaid),
+  ok(verdictOf(res.every((r) => r.promised === 'not-durable' && r.whole && r.act2OnDiskAfterRestart && !r.unreadableSaid)),
     `law 4: an append that failed (${res.map((r) => `${r.fault}${r.trunc === 'eio' ? ' + its truncate EIO' : ''}`).join(' · ')}) — the act said «not on disk yet», the next good write re-established a WHOLE tail (every line parses), and after a restart the act is THERE`, res);
 }
 // ── ⑧ ROUND 3 — the smaller items' words: an undefined produce, one line per cause, a wrong-shape line ─────────────────
@@ -440,7 +440,7 @@ console.log('⑧ round 3 — smaller 4 and 7');
     const f = path.join(T, 'u.json'); fs.writeFileSync(f, '{"old":1}');
     w.dirty(f, { name: 'undef.write', produce: () => undefined, debounceMs: 0 });
     const okU = await w.durable(f, { timeoutMs: 3000 }); w.stop();
-    ok(okU === false && said.some((l) => /undef\.write not written \(its bytes are not a string or a Buffer \(undefined\)/.test(l)) && fs.readFileSync(f, 'utf8') === '{"old":1}',
+    ok(okU === false && gateOf(said.some((l) => /undef\.write not written \(its bytes are not a string or a Buffer \(undefined\)/.test(l))) && fs.readFileSync(f, 'utf8') === '{"old":1}',
       'smaller 4: a produce() that returns undefined is THAT store\'s failed write, said — durable() false, the file untouched (only null says «nothing to write»)', said);
     // (7) an outage: five acts fail — ONE line for the cause, the rest counted and said when a write lands
     const d1 = path.join(T, 'o'); fs.mkdirSync(d1);
@@ -461,7 +461,7 @@ console.log('⑧ round 3 — smaller 4 and 7');
     fs.writeFileSync(path.join(d2, 'index-acts.ndjson'), JSON.stringify({ hello: 'world' }) + '\n' + JSON.stringify({ seq: 99, rows: { 'a/c': 5 } }) + '\n');
     const s1 = CS.createChannelStore({ dir: d2, log: { warn: (l) => l2.push(String(l)), log() {} }, writer: w2 }); try { s1.close(); } catch { } w2.stop();
     const line = l2.find((l) => /index-acts\.ndjson/.test(l)) || '';
-    ok(/2 lines of JSON that is not an act's/.test(line) && !/not readable/.test(line), `smaller 7: the load says a line of valid JSON that is not an act's as that (${line.slice(0, 160)})`, l2);
+    ok(gateOf(/2 lines of JSON that is not an act's/.test(line)) && !/not readable/.test(line), `smaller 7: the load says a line of valid JSON that is not an act's as that (${line.slice(0, 160)})`, l2);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 }
 // @@ROUND3@@
@@ -508,7 +508,7 @@ console.log('⑨ B-dfa4 cut 3b — a producer answering LATER: nothing written, 
   r = await leg9(SW);
   ok(r.asked === 1 && r.pending === true && r.early === null && r.onDisk === false && r.landed === true && r.bytes === '{"v":1}',
     `⑨ LATER: asked ONCE in 25 of the writer's timer turns (${r.asked}) — nothing written, the file still owed (pending ${r.pending}), its durable() waiter WAITING (${r.early}); its store asks again: written, the waiter resolved (${r.landed})`, r);
-  ok(r.syncWritten && /sync/.test(r.syncAsks) && r.exitWritten && /sync/.test(r.exitAsks), `⑨ a synchronous flush asks produce({sync: true}) and writes (${r.syncAsks}); the exit's flush writes a store answered LATER (${r.exitAsks})`, r);
+  ok(gateOf(r.syncWritten) && gateOf(/sync/.test(r.syncAsks)) && gateOf(r.exitWritten) && verdictOf(/sync/.test(r.exitAsks)), `⑨ a synchronous flush asks produce({sync: true}) and writes (${r.syncAsks}); the exit's flush writes a store answered LATER (${r.exitAsks})`, r);
   const src9 = fs.readFileSync(path.join(REPO, 'src/store-writer.js'), 'utf8');
   const M9 = mutantCopies('store-writer-later', REPO);
   spin = await leg9(M9.load('src/store-writer.js', anchored(src9, '(s) => s.dirty && !s.later && s.produce', '(s) => s.dirty && s.produce', 'the queue asks a LATER store again at once'), 'later-spin'));
@@ -517,4 +517,4 @@ console.log('⑨ B-dfa4 cut 3b — a producer answering LATER: nothing written, 
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

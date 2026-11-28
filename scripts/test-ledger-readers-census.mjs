@@ -25,7 +25,7 @@ import { READERS, SITES, CACHE, DOORS, RULES, scan } from './ledger-reader-censu
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d === undefined ? '' : ' — ' + JSON.stringify(d))); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d === undefined ? '' : ' — ' + JSON.stringify(d))); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const hasFn = (src, fn) => new RegExp(`(?:function\\s*\\*?\\s*${fn}\\s*\\(|(?:^|[\\s{;])(?:async\\s+)?${fn}\\s*\\([^)]*\\)\\s*\\{|${fn}\\s*[:=]\\s*(?:async\\s*)?(?:\\([^)]*\\)|[a-z]+)\\s*=>)`, 'm').test(src);
 const judge = (r, sites = SITES, cache = CACHE) => {
@@ -39,21 +39,21 @@ const judge = (r, sites = SITES, cache = CACHE) => {
 };
 
 console.log('① the 21 readers');
-ok(READERS.length === 20 && new Set(READERS.map((x) => x.n)).size === 20 && READERS.every((x) => x.n >= 1 && x.n <= 21 && x.n !== 10), `20 readers, numbered as the page — #10 (the shadow usage index's recoverAll) RETIRED with the index (B-360d unit 1) (${READERS.length})`);
+ok(READERS.length === 20 && new Set(READERS.map((x) => x.n)).size === 20 && verdictOf(READERS.every((x) => x.n >= 1 && x.n <= 21 && x.n !== 10)), `20 readers, numbered as the page — #10 (the shadow usage index's recoverAll) RETIRED with the index (B-360d unit 1) (${READERS.length})`);
 const gone = READERS.filter((x) => { try { return !hasFn(read(x.file), x.fn); } catch { return true; } });
 ok(!gone.length, `every reader's function is in its file (${READERS.length - gone.length} of ${READERS.length})`, gone.map((x) => `#${x.n} ${x.file} ${x.fn}`));
-ok(READERS.every((x) => DOORS.has(x.door) && RULES[x.rule]), 'every reader names its door and its rule about a repeated request id', READERS.filter((x) => !DOORS.has(x.door) || !RULES[x.rule]).map((x) => x.n));
+ok(verdictOf(READERS.every((x) => DOORS.has(x.door) && RULES[x.rule])), 'every reader names its door and its rule about a repeated request id', READERS.filter((x) => !DOORS.has(x.door) || !RULES[x.rule]).map((x) => x.n));
 ok(READERS.filter((x) => x.rule === 'counts-copies').map((x) => x.n).join() === '17', 'exactly one reader counts copies — #17, the growth alarm, on purpose');
 
 console.log('② the sites that name the shards');
 const r = scan(REPO);
 const red = judge(r);
 ok(!red.length, `every scope naming the ledger's shards is a row, at its count (${r.sites.size} scopes over ${r.files} files)`, red);
-ok(SITES.every(([, , who]) => typeof who === 'string' ? who.length > 10 : READERS.some((x) => x.n === who)), 'each site row names its reader, or why it is no reader');
+ok(verdictOf(SITES.every(([, , who]) => typeof who === 'string' ? who.length > 10 : READERS.some((x) => x.n === who))), 'each site row names its reader, or why it is no reader');
 
 console.log('③ the cache\'s readers');
 ok([...r.cache].sort().join() === CACHE.map(([f]) => f).sort().join(), `every file reaching into the cache's internals is a row (${[...r.cache].join(', ')})`);
-ok(CACHE.every(([, n]) => READERS.some((x) => x.n === n && (x.rule === 'inherits' || x.n === 21 || x.n === 5 || x.n === 19))), 'each is a reader that inherits the first-wins rule (or is it)');
+ok(verdictOf(CACHE.every(([, n]) => READERS.some((x) => x.n === n && (x.rule === 'inherits' || x.n === 21 || x.n === 5 || x.n === 19)))), 'each is a reader that inherits the first-wins rule (or is it)');
 
 console.log('④ the measurement — this tree\'s walker and ledger, CLEAN and DOUBLED');
 {
@@ -81,7 +81,7 @@ console.log('④ the measurement — this tree\'s walker and ledger, CLEAN and D
     ok(raw(C.shard) === 5 && raw(D.shard) === 7, `the premise: the doubled ledger holds the two appended requests twice (${raw(C.shard)} → ${raw(D.shard)} rows)`);
     const tot = (uh) => { const t = uh.aggregate({}).totals; return `${t.requests} · ${Math.round(t.cost * 1e6)}`; };
     const totA = async (uh) => { const t = (await uh.aggregateAsync({})).totals; return `${t.requests} · ${Math.round(t.cost * 1e6)}`; };
-    ok(tot(C.uh) === tot(D.uh) && tot(D.uh).startsWith('5 ·'), `#1 aggregate — the Usage window's totals and splits: the same over both (${tot(C.uh)} / ${tot(D.uh)})`);
+    ok(tot(C.uh) === tot(D.uh) && verdictOf(tot(D.uh).startsWith('5 ·')), `#1 aggregate — the Usage window's totals and splits: the same over both (${tot(C.uh)} / ${tot(D.uh)})`);
     ok((await totA(C.uh)) === (await totA(D.uh)), `#1 aggregateAsync — the route's own fold: the same (${await totA(D.uh)})`);
     const e4 = await D.uh.eventForRid('req_L_4');
     ok(!!e4 && e4.rid === 'req_L_4', '#3 eventForRid — the message popup: one event for a doubled request');
@@ -92,12 +92,12 @@ console.log('④ the measurement — this tree\'s walker and ledger, CLEAN and D
     ok(sc.ratio === 1 && sd.ratio > 1 && sd.ratio <= 2, `#17 shapeOf — the growth alarm COUNTS the copies, on purpose (${sc.ratio} → ${Math.round(sd.ratio * 100) / 100}); a pure double never passes its trigger of 2`);
     const copy = path.join(D.base, 'dedup-copy.ndjson'); fs.copyFileSync(D.shard, copy);
     const dd = LD.runNow(LD.dedupSteps(copy, {}));
-    ok(dd && dd.removed === 2 && dd.kept === 5, `#16 dedupSteps — the dedup job removes exactly the copies, and says so (${dd && dd.removed} removed, ${dd && dd.kept} kept)`);
+    ok(gateOf(dd) && dd.removed === 2 && dd.kept === 5, `#16 dedupSteps — the dedup job removes exactly the copies, and says so (${dd && dd.removed} removed, ${dd && dd.kept} kept)`);
     const R = new UsageHistory({ dataDir: path.join(tmp, 'remote', 'data'), homeDir: path.join(tmp, 'remote', 'home') });
     fs.mkdirSync(path.join(tmp, 'remote', 'home', '.claude', 'projects'), { recursive: true });
     const ev = (i) => JSON.stringify({ rid: `req_R_${i}`, mid: `msg_R_${i}`, ts: now - (10 - i) * 60e3, sid: SID, model: 'claude-sonnet-4-5', cwd: '/r/p', origin: 'main', i: 1000, cw5: 70, cw1: 0, cr: 50, o: 200, tier: null });
     const ing = R.ingestRemoteEvents('h1', 'box', [1, 2, 3, 4, 4, 5, 5].map(ev).join('\n') + '\n');
-    ok(ing && ing.appended === 5 && ing.duplicates === 2, `#20 a remote machine's doubled batch (7 rows, 5 ids) lands ONCE (${ing && ing.appended} appended, ${ing && ing.duplicates} refused)`);
+    ok(gateOf(ing) && ing.appended === 5 && ing.duplicates === 2, `#20 a remote machine's doubled batch (7 rows, 5 ids) lands ONCE (${ing && ing.appended} appended, ${ing && ing.duplicates} refused)`);
     ok(raw(D.shard) === 7 && raw(D.shard) !== Number(tot(D.uh).split(' ')[0]), `CONTROL: a reader that summed the shard's raw lines would read ${raw(D.shard)} requests for 5 — what this census exists to keep out`);
   } finally {
     // B-f2cb: every UsageHistory here writes its cursors through the ONE store writer, on its own paced thread — the folder is
@@ -118,15 +118,15 @@ console.log('⑤ red controls (patched sources — never the tree)');
 {
   const newFile = "'use strict';\nconst fs = require('fs'), path = require('path');\nmodule.exports = (dir) => fs.readdirSync(dir).filter((f) => /^events-\\d{4}-\\d{2}\\.ndjson$/.test(f)).reduce((n, f) => n + fs.readFileSync(path.join(dir, f), 'utf8').split('\\n').length, 0);\n";
   const a = judge(scan(REPO, { patch: { 'src/zz-ledger-sum.js': newFile } }));
-  ok(a.some((x) => x.startsWith('unrowed src/zz-ledger-sum.js')), `a NEW file summing the shards' raw lines is red until it is a row (${a[0]})`);
+  ok(verdictOf(a.some((x) => x.startsWith('unrowed src/zz-ledger-sum.js'))), `a NEW file summing the shards' raw lines is red until it is a row (${a[0]})`);
   const uhSrc = read('src/usage-history.js').replace('  ledgerKnowsId(id) {', "  rawCount() { return require('fs').readdirSync(this.dir).filter((f) => /^events-\\d{4}-\\d{2}\\.ndjson$/.test(f)).length; }\n  ledgerKnowsId(id) {");
   const b = judge(scan(REPO, { patch: { 'src/usage-history.js': uhSrc } }));
-  ok(b.some((x) => x.includes('«UsageHistory.rawCount»')), `a new scope reading the shards in a rowed file is red (${b[0]})`);
+  ok(verdictOf(b.some((x) => x.includes('«UsageHistory.rawCount»'))), `a new scope reading the shards in a rowed file is red (${b[0]})`);
   const cacheFile = "'use strict';\nmodule.exports = (uh) => uh._evCache.events.length;\n";
   const c = judge(scan(REPO, { patch: { 'src/zz-cache-peek.js': cacheFile } }));
-  ok(c.some((x) => x === 'unlisted cache reader src/zz-cache-peek.js'), `a new file reaching into the cache's internals is red until it is a row (${c[0]})`);
-  ok(!hasFn("function other() {}\n", 'aggregateAsync') && hasFn('  async aggregateAsync(opts = {}) {', 'aggregateAsync') && hasFn('function* dedupSteps(file) {', 'dedupSteps'), 'a reader row whose function is gone is red (the presence check finds a method, an async method, a function, a generator)');
+  ok(verdictOf(c.some((x) => x === 'unlisted cache reader src/zz-cache-peek.js')), `a new file reaching into the cache's internals is red until it is a row (${c[0]})`);
+  ok(!hasFn("function other() {}\n", 'aggregateAsync') && gateOf(hasFn('  async aggregateAsync(opts = {}) {', 'aggregateAsync')) && verdictOf(hasFn('function* dedupSteps(file) {', 'dedupSteps')), 'a reader row whose function is gone is red (the presence check finds a method, an async method, a function, a generator)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

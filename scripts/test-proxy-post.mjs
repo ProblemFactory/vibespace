@@ -24,7 +24,7 @@ const express = require(path.join(REPO, 'node_modules/express'));
 const Unblocker = require(path.join(REPO, 'node_modules/unblocker'));
 
 let pass = 0, fail = 0;
-const ok = (name, cond, extra) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra ? ' — ' + extra : ''}`); } };
+const ok = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra ? ' — ' + extra : ''}`); } };
 
 // FREE ports (2026-09-07 round 2): a fixed pair is a claim on a name the whole
 // BOX shares, and the fast tier that runs this suite is fail-fast with no
@@ -74,12 +74,12 @@ ok('proxied non-JSON POST delivers its body', p2.got === 9, JSON.stringify(p2));
 
 // 4. the skip must not break normal routes: local JSON bodies still parse
 const l = await timed(fetch(`${base}/api/local`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"a":1}' }).then((r) => r.json()), 4000).catch((e) => ({ err: e.message }));
-ok('non-proxy routes still get parsed JSON bodies', l.parsed && l.parsed.a === 1, JSON.stringify(l));
+ok('non-proxy routes still get parsed JSON bodies', gateOf(l.parsed) && l.parsed.a === 1, JSON.stringify(l));
 
 // 5. wiring pins: server.js carries the exact pattern (unstaged-wiring class)
 const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
 // lane webhook-l1-server: the skip is ONE pattern now (/proxy/ + the webhook door + its pairing route read their own bytes)
-ok('server.js json parser skips /proxy/', /OWN_BODY_RE = \/\^\\\/\(\?:proxy\\\//.test(sv) && /OWN_BODY_RE\.test\(req\.path\)( \|\| \(persistenceRouter\.ownsBody && persistenceRouter\.ownsBody\(req\.path\)\))? \? next\(\) : jsonBody/.test(sv));
+ok('server.js json parser skips /proxy/', gateOf(/OWN_BODY_RE = \/\^\\\/\(\?:proxy\\\//.test(sv)) && verdictOf(/OWN_BODY_RE\.test\(req\.path\)( \|\| \(persistenceRouter\.ownsBody && persistenceRouter\.ownsBody\(req\.path\)\))? \? next\(\) : jsonBody/.test(sv)));
 // lane tailnet-names mounts it through the tailnet door (`app.use(require('./src/server/tailnet-door.js').embedded(unblocker))`):
 // the mount is found either way — a vanished mount still reads -1 and fails
 const unblockerAt = sv.search(/app\.use\((?:require\('\.\/src\/server\/tailnet-door\.js'\)\.embedded\()?unblocker\)/);
@@ -87,4 +87,4 @@ ok('unblocker still mounted AFTER auth (no open proxy)', unblockerAt >= 0 && sv.
 
 target.close(); proxySrv.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

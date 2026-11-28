@@ -24,7 +24,7 @@ const { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS } = require(path.join(ROOT, 's
 const M = require(path.join(ROOT, 'src/job-model.js'));
 const wiring = require(path.join(ROOT, 'src/server/jobs-wiring.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -91,23 +91,23 @@ process.on('exit', () => { try { sleeper.kill('SIGKILL'); } catch { } });
 for (const id of [fx.ids.running, fx.ids.awaiting]) writeAliveStamp(fs, path, dir1, fx.jobs.find((j) => j.id === id), sleeper.pid);
 const bc1 = [];
 const { jm, call } = boot(dir1, { broadcasts: bc1 });
-ok(jm.ready && !jm.readOnly, 'the engine takes the lock over the fixture store');
+ok(gateOf(jm.ready) && !jm.readOnly, 'the engine takes the lock over the fixture store');
 ok(jm.jobs.size === fx.jobs.length, `every fixture record is live at boot (${jm.jobs.size} = ${fx.jobs.length}; the boot sweep archived nothing at the real clock)`);
 ok(jm.jobs.get(fx.ids.running).state === 'up' && jm.jobs.get(fx.ids.awaiting).state === 'awaiting-user', 'the running and awaiting-user rows were ADOPTED (live stamp), not finalized');
 const failedIds = fx.failedRows.map((r) => r.id);
 const ackBy = (id) => M.ackState(jm.jobs.get(id) || jm.archivedById(id)).by;
 const byKind = (k) => fx.failedRows.filter((r) => r.kind === k).map((r) => r.id);
-ok(byKind('notified').every((id) => ackBy(id) === 'notified'), 'failed rows whose journal carries an ok:true message delivery are acknowledged (notified)');
-ok(byKind('stash').every((id) => ackBy(id) === null), 'failed rows whose ONLY journal entry is a stash are UNACKNOWLEDGED');
-ok(byKind('agent-read').every((id) => ackBy(id) === 'agent-read') && byKind('user-opened').every((id) => ackBy(id) === 'user-opened'), 'the agent-read / user-opened stamps acknowledge');
-ok(byKind('stranger').every((id) => ackBy(id) === null) && byKind('self').every((id) => ackBy(id) === null), "a stranger session's read and a jbt_ self-read left no stamp ⇒ unacknowledged");
+ok(verdictOf(byKind('notified').every((id) => ackBy(id) === 'notified')), 'failed rows whose journal carries an ok:true message delivery are acknowledged (notified)');
+ok(verdictOf(byKind('stash').every((id) => ackBy(id) === null)), 'failed rows whose ONLY journal entry is a stash are UNACKNOWLEDGED');
+ok(gateOf(byKind('agent-read').every((id) => ackBy(id) === 'agent-read')) && verdictOf(byKind('user-opened').every((id) => ackBy(id) === 'user-opened')), 'the agent-read / user-opened stamps acknowledge');
+ok(gateOf(byKind('stranger').every((id) => ackBy(id) === null)) && verdictOf(byKind('self').every((id) => ackBy(id) === null)), "a stranger session's read and a jbt_ self-read left no stamp ⇒ unacknowledged");
 const unackedAtBoot = failedIds.filter((id) => ackBy(id) === null);
 const ackedAtBoot = failedIds.filter((id) => ackBy(id) !== null);
 ok(unackedAtBoot.length === byKind('stash').length + byKind('stranger').length + byKind('self').length, `the unacknowledged set is exactly stash+stranger+self (${unackedAtBoot.length} of ${failedIds.length})`);
 const list0 = await call('GET', '/api/jobs');
-ok(list0.status === 200 && list0.body.jobs.length === fx.jobs.length && list0.body.archivedCount === 0 && list0.body.held && list0.body.held.total === Object.values(fx.notifs).flat().length, `GET /api/jobs carries the live list + archivedCount 0 + the held digest (${list0.body.held && list0.body.held.total} held)`);
+ok(list0.status === 200 && list0.body.jobs.length === fx.jobs.length && list0.body.archivedCount === 0 && gateOf(list0.body.held) && list0.body.held.total === Object.values(fx.notifs).flat().length, `GET /api/jobs carries the live list + archivedCount 0 + the held digest (${list0.body.held && list0.body.held.total} held)`);
 const snapFailed = list0.body.jobs.find((j) => j.id === byKind('stash')[0]);
-ok(snapFailed && snapFailed.ack && snapFailed.ack.acked === false && snapFailed.run && /failed to render/.test(snapFailed.run.lastLine) && snapFailed.ownerSession && snapFailed.ownerSession.conversationId, 'a snapshot carries ack + run.lastLine + ownerSession (the fold key)');
+ok(gateOf(snapFailed) && gateOf(snapFailed.ack) && snapFailed.ack.acked === false && gateOf(snapFailed.run) && gateOf(/failed to render/.test(snapFailed.run.lastLine)) && gateOf(snapFailed.ownerSession) && verdictOf(snapFailed.ownerSession.conversationId), 'a snapshot carries ack + run.lastLine + ownerSession (the fold key)');
 const attention = list0.body.jobs.filter((j) => M.attentionOf(j) === 'unacked-failure' || M.attentionOf(j) === 'awaiting').length;
 ok(attention === unackedAtBoot.length + 1, `attention = unacknowledged failures + awaiting-user = ${attention} (the badge no longer says 36!)`);
 
@@ -116,7 +116,7 @@ console.log('§2 acknowledgement stamps');
 const target = byKind('stranger')[0];
 const seen = await call('POST', '/api/jobs/:id/:act', { params: { id: target, act: 'seen' } });
 ok(seen.status === 200 && seen.body.changed === true && seen.body.ack.by === 'user-opened', 'POST /api/jobs/:id/seen stamps user-opened on an unacknowledged failure');
-ok(bc1.some((m) => m.type === 'jobs-updated' && m.id === target), '…and broadcasts jobs-updated for the record');
+ok(verdictOf(bc1.some((m) => m.type === 'jobs-updated' && m.id === target)), '…and broadcasts jobs-updated for the record');
 const seenAt = jm.jobs.get(target).ack.at;
 const seen2 = await call('POST', '/api/jobs/:id/:act', { params: { id: target, act: 'seen' } });
 ok(seen2.body.changed === false && jm.jobs.get(target).ack.at === seenAt, 'a second /seen changes nothing — the FIRST acknowledgement wins');
@@ -125,7 +125,7 @@ const seenRun = await call('POST', '/api/jobs/:id/:act', { params: { id: fx.ids.
 ok(seenRun.status === 200 && seenRun.body.changed === false, '/seen on a running job is a harmless no-op');
 const stashCid = jm.jobs.get(byKind('stash')[0]).owner.conversation.id;
 const drained = jm.drainNotifs(stashCid);
-ok(drained.length >= 1 && byKind('stash').filter((id) => jm.jobs.get(id).owner.conversation.id === stashCid).every((id) => ackBy(id) === 'notified'), 'draining the stash into a resume stamps notified on the jobs it named');
+ok(drained.length >= 1 && verdictOf(byKind('stash').filter((id) => jm.jobs.get(id).owner.conversation.id === stashCid).every((id) => ackBy(id) === 'notified')), 'draining the stash into a resume stamps notified on the jobs it named');
 { // an entry OLDER than the job's terminal instant (an earlier run) acks nothing
   const j = jm.jobs.get(byKind('self')[0]);
   jm.pendingNotifs.set(j.owner.conversation.id, [{ jobId: j.id, jobName: j.name, text: 'old', ts: M.terminalAt(j) - 1 }]);
@@ -136,9 +136,9 @@ ok(drained.length >= 1 && byKind('stash').filter((id) => jm.jobs.get(id).owner.c
   const j = jm.jobs.get(byKind('self')[0]);
   const owner = { conversationId: j.owner.conversation.id, sessionId: 'sess-NEW', sessionCreatedAt: 9, groups: new Set(['T-1']) };
   const stranger = { conversationId: 'e2e00000-0000-4000-8000-00000000ffff', sessionId: 'sZ', sessionCreatedAt: 3, groups: new Set(['T-1']) };
-  ok(M.agentReadAcks(j, owner) && !M.agentReadAcks(j, stranger) && !M.agentReadAcks(j, owner, { selfJob: true }), 'agentReadAcks: owner lineage yes, stranger no, jbt_ self no');
+  ok(gateOf(M.agentReadAcks(j, owner)) && !M.agentReadAcks(j, stranger) && !M.agentReadAcks(j, owner, { selfJob: true }), 'agentReadAcks: owner lineage yes, stranger no, jbt_ self no');
   const src = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf-8');
-  ok(/jobModel\.agentReadAcks\(job, a\.caller, \{ selfJob: !!a\.selfJob \}\)\) a\.jm\.markAck\(job, 'agent-read'\)/.test(src), "WIRING PIN: GET /api/agent/jobs/:ref stamps 'agent-read' through agentReadAcks (never a second predicate)");
+  ok(verdictOf(/jobModel\.agentReadAcks\(job, a\.caller, \{ selfJob: !!a\.selfJob \}\)\) a\.jm\.markAck\(job, 'agent-read'\)/.test(src)), "WIRING PIN: GET /api/agent/jobs/:ref stamps 'agent-read' through agentReadAcks (never a second predicate)");
 }
 
 { // a codex-owned failure notified on the ladder's 'rpc-queue' lane is acknowledged in the SERVED snapshot (verifier 2026-09-16: ACK_LANES lacked the codex lane ⇒ every codex-owned failure stayed red for ever and never archived)
@@ -147,7 +147,7 @@ ok(drained.length >= 1 && byKind('stash').filter((id) => jm.jobs.get(id).owner.c
   jm.jobs.set(j.id, j);
   const l = await call('GET', '/api/jobs');
   const snap = l.body.jobs.find((x) => x.id === j.id);
-  ok(snap && snap.ack && snap.ack.acked === true && snap.ack.by === 'notified' && M.attentionOf(snap) === 'acked-failure', "a failure delivered LIVE on the codex lane (rpc-queue, ok:true) is served acknowledged — never a red badge");
+  ok(gateOf(snap) && gateOf(snap.ack) && snap.ack.acked === true && snap.ack.by === 'notified' && M.attentionOf(snap) === 'acked-failure', "a failure delivered LIVE on the codex lane (rpc-queue, ok:true) is served acknowledged — never a red badge");
   jm.jobs.delete(j.id);
 }
 
@@ -157,36 +157,36 @@ policy.doneAfterHours = 24; policy.failedAfterDays = 7;
 bc1.length = 0;
 const r25 = sweepNow(jm, { now: T0 + 25 * H });
 const doneIds = fx.jobs.filter((j) => j.kind === 'task' && j.state === 'done' && !j.cronParent).map((j) => j.id);
-ok(r25.archived.length === doneIds.length && doneIds.every((id) => r25.archived.includes(id)), `+25 h: exactly the ${doneIds.length} done one-shots archive`);
-ok(failedIds.every((id) => jm.jobs.has(id)), 'no failed row archives at +25 h (the failed clock is 7 d after the ACK)');
-ok([fx.ids.running, fx.ids.awaiting, fx.ids.service, fx.ids.cron, fx.ids.cronChild].every((id) => jm.jobs.has(id)), 'running / awaiting-user / service / cron parent / active cron child all stay');
+ok(r25.archived.length === doneIds.length && verdictOf(doneIds.every((id) => r25.archived.includes(id))), `+25 h: exactly the ${doneIds.length} done one-shots archive`);
+ok(verdictOf(failedIds.every((id) => jm.jobs.has(id))), 'no failed row archives at +25 h (the failed clock is 7 d after the ACK)');
+ok(verdictOf([fx.ids.running, fx.ids.awaiting, fx.ids.service, fx.ids.cron, fx.ids.cronChild].every((id) => jm.jobs.has(id))), 'running / awaiting-user / service / cron parent / active cron child all stay');
 ok(bc1.filter((m) => m.type === 'jobs-updated' && Array.isArray(m.archived)).length === 1, 'the sweep broadcasts jobs-updated ONCE, not per record');
 const store25 = readStore(dir1), arch25 = readArchive(dir1);
-ok(!store25.some((j) => doneIds.includes(j.id)) && doneIds.every((id) => arch25.some((r) => r.id === id)), 'EXIT: the done rows are gone from jobs.json and present in jobs-archive.json');
-ok(arch25.every((r) => r.archivedAt === T0 + 25 * H && r.archivedWhy === 'done' && r.runs && r.notifyLog), 'an archived record keeps runs/notifyLog and gains archivedAt + archivedWhy');
+ok(!store25.some((j) => doneIds.includes(j.id)) && verdictOf(doneIds.every((id) => arch25.some((r) => r.id === id))), 'EXIT: the done rows are gone from jobs.json and present in jobs-archive.json');
+ok(verdictOf(arch25.every((r) => r.archivedAt === T0 + 25 * H && r.archivedWhy === 'done' && r.runs && r.notifyLog)), 'an archived record keeps runs/notifyLog and gains archivedAt + archivedWhy');
 ok(sweepNow(jm, { now: T0 + 25 * H + 1 }).archived.length === 0, 'a second sweep at the same clock moves nothing (idempotent)');
 // acked failures: 7 d after the ACK; unacked: never
 const r8d = sweepNow(jm, { now: T0 + 8 * D + H });
-ok(ackedAtBoot.concat([target]).every((id) => r8d.archived.includes(id)), '+8 d: every ACKNOWLEDGED failure (notified / agent-read / user-opened, incl. the /seen one) archives with why=failed-acknowledged');
-ok(r8d.archived.every((id) => jm.archivedById(id).archivedWhy === 'failed-acknowledged'), '…each carrying why=failed-acknowledged');
+ok(verdictOf(ackedAtBoot.concat([target]).every((id) => r8d.archived.includes(id))), '+8 d: every ACKNOWLEDGED failure (notified / agent-read / user-opened, incl. the /seen one) archives with why=failed-acknowledged');
+ok(verdictOf(r8d.archived.every((id) => jm.archivedById(id).archivedWhy === 'failed-acknowledged')), '…each carrying why=failed-acknowledged');
 const stillUnacked = failedIds.filter((id) => jm.jobs.has(id));
-ok(stillUnacked.length && stillUnacked.every((id) => ackBy(id) === null), `the ${stillUnacked.length} unacknowledged failures stay`);
-ok(sweepNow(jm, { now: T0 + 400 * D }).archived.filter((id) => stillUnacked.includes(id)).length === 0 && stillUnacked.every((id) => jm.jobs.has(id)), 'an UNACKNOWLEDGED failure never archives — not at +400 d either');
+ok(gateOf(stillUnacked.length) && verdictOf(stillUnacked.every((id) => ackBy(id) === null)), `the ${stillUnacked.length} unacknowledged failures stay`);
+ok(sweepNow(jm, { now: T0 + 400 * D }).archived.filter((id) => stillUnacked.includes(id)).length === 0 && verdictOf(stillUnacked.every((id) => jm.jobs.has(id))), 'an UNACKNOWLEDGED failure never archives — not at +400 d either');
 // the cron child follows its schedule
-ok(jm.jobs.has(fx.ids.cronChild), 'the cron child stayed while its parent schedules fires (it IS the run ring)');
+ok(verdictOf(jm.jobs.has(fx.ids.cronChild)), 'the cron child stayed while its parent schedules fires (it IS the run ring)');
 jm.jobs.get(fx.ids.cron).desiredUp = false;
-ok(sweepNow(jm, { now: T0 + 400 * D }).archived.includes(fx.ids.cronChild), '…and archives once the schedule is stopped');
+ok(verdictOf(sweepNow(jm, { now: T0 + 400 * D }).archived.includes(fx.ids.cronChild)), '…and archives once the schedule is stopped');
 // 0 = never
 policy.doneAfterHours = 0;
 {
   const j = { ...strip(fx.jobs[0]), id: 'jb-zero0', name: 'export-zero' };
   jm.jobs.set(j.id, j);
-  ok(sweepNow(jm, { now: T0 + 400 * D }).archived.length === 0 && jm.jobs.has(j.id), 'jobs.archiveDoneAfterHours = 0 archives no done record');
+  ok(sweepNow(jm, { now: T0 + 400 * D }).archived.length === 0 && verdictOf(jm.jobs.has(j.id)), 'jobs.archiveDoneAfterHours = 0 archives no done record');
   policy.doneAfterHours = 24;
-  ok(sweepNow(jm, { now: T0 + 400 * D }).archived.includes(j.id), '…and the default policy archives it');
+  ok(verdictOf(sweepNow(jm, { now: T0 + 400 * D }).archived.includes(j.id)), '…and the default policy archives it');
 }
 // live pid / open interaction never archive (the pure verdict, pinned through the engine)
-ok(jm.jobs.has(fx.ids.awaiting) && sweepNow(jm, { now: T0 + 400 * D }).archived.length === 0, 'an awaiting-user job with an open panel is never archived');
+ok(gateOf(jm.jobs.has(fx.ids.awaiting)) && sweepNow(jm, { now: T0 + 400 * D }).archived.length === 0, 'an awaiting-user job with an open panel is never archived');
 
 // ── §4 read-through: a held id never 404s; the same shape ──
 console.log('§4 read-through + routes');
@@ -197,17 +197,17 @@ const live = list0.body.jobs.find((j) => j.id === oldId);
 const shapeKeys = (o) => Object.keys(o).filter((k) => !['archived', 'archivedAt', 'archivedWhy', 'envKeys', 'envFrom', 'ownerSession', 'access', 'runs', 'interaction', 'logTail'].includes(k)).sort().join(',');
 ok(shapeKeys(g.body.job) === shapeKeys(live), 'the archived snapshot carries every key the live snapshot carries (plus the archive marks)');
 const la = await call('GET', '/api/jobs', { query: { archived: '1' } });
-ok(la.status === 200 && la.body.archived === true && la.body.jobs.length === jm.archivedCount() && la.body.jobs.every((j) => j.archived === true && j.archivedAt), 'GET /api/jobs?archived=1 lists the archive (same shape + archivedAt)');
+ok(la.status === 200 && la.body.archived === true && la.body.jobs.length === jm.archivedCount() && verdictOf(la.body.jobs.every((j) => j.archived === true && j.archivedAt)), 'GET /api/jobs?archived=1 lists the archive (same shape + archivedAt)');
 const l2 = await call('GET', '/api/jobs');
 ok(l2.body.archivedCount === jm.archivedCount() && !l2.body.jobs.some((j) => j.id === oldId), 'the live list carries archivedCount and no archived row');
 const bad = await call('POST', '/api/jobs/:id/:act', { params: { id: oldId, act: 'start' } });
-ok(bad.status === 400 && /archived/.test(bad.body.error), 'an action other than rm on an archived id is refused BY NAME (400, never a 404)');
+ok(bad.status === 400 && verdictOf(/archived/.test(bad.body.error)), 'an action other than rm on an archived id is refused BY NAME (400, never a 404)');
 const seenArc = await call('POST', '/api/jobs/:id/:act', { params: { id: oldId, act: 'seen' } });
 ok(seenArc.status === 200 && seenArc.body.archived === true && seenArc.body.changed === false, '/seen on an archived id is a no-op that says so');
 fs.mkdirSync(path.join(dir1, 'job-logs', oldId), { recursive: true }); fs.writeFileSync(path.join(dir1, 'job-logs', oldId, 'x'), '1');
 const rm = await call('POST', '/api/jobs/:id/:act', { params: { id: oldId, act: 'rm' } });
 ok(rm.status === 200 && !jm.archivedById(oldId) && !readArchive(dir1).some((r) => r.id === oldId) && !fs.existsSync(path.join(dir1, 'job-logs', oldId)), '✕ on an archived row deletes it for good (record + log dir) and persists');
-ok(bc1.some((m) => m.type === 'jobs-updated' && m.id === oldId && m.removed === true && m.archived === true), '…and broadcasts the removal');
+ok(verdictOf(bc1.some((m) => m.type === 'jobs-updated' && m.id === oldId && m.removed === true && m.archived === true)), '…and broadcasts the removal');
 ok((await call('GET', '/api/jobs/:id', { params: { id: oldId } })).status === 404, 'a deleted archived id is a real 404');
 
 // ── §5 a restart re-reads the archive ──
@@ -216,9 +216,9 @@ jm.shutdown();
 fs.rmSync(path.join(dir1, 'jobs.lock'), { force: true });
 const B = new JobManager({ dataDir: dir1, broadcast: () => { }, notifyUser: () => { }, log: () => { }, archivePolicy: () => policy });
 B.init();
-ok(B.archivedCount() === readArchive(dir1).length && B.archivedById(doneIds[1]) && B.archivedById(doneIds[1]).archivedWhy === 'done', 'a fresh engine over the same dir reads the archive back');
-ok(!B.jobs.has(doneIds[1]) && stillUnacked.every((id) => B.jobs.has(id) && M.ackState(B.jobs.get(id)).acked === false), 'the live store still holds only the unarchived records; the unacked failures survive the restart unacknowledged');
-ok(B.jobs.get(target) === undefined && B.archivedById(target) && B.archivedById(target).ack && B.archivedById(target).ack.by === 'user-opened', 'the /seen stamp travelled into the archive with its record');
+ok(B.archivedCount() === readArchive(dir1).length && gateOf(B.archivedById(doneIds[1])) && B.archivedById(doneIds[1]).archivedWhy === 'done', 'a fresh engine over the same dir reads the archive back');
+ok(!B.jobs.has(doneIds[1]) && verdictOf(stillUnacked.every((id) => B.jobs.has(id) && M.ackState(B.jobs.get(id)).acked === false)), 'the live store still holds only the unarchived records; the unacked failures survive the restart unacknowledged');
+ok(B.jobs.get(target) === undefined && gateOf(B.archivedById(target)) && gateOf(B.archivedById(target).ack) && B.archivedById(target).ack.by === 'user-opened', 'the /seen stamp travelled into the archive with its record');
 B.shutdown();
 
 // ── §6 the cap keeps the NEWEST 2000; dropped records lose their log dirs ──
@@ -240,9 +240,9 @@ console.log('§6 the archive cap');
   const arch = readArchive(dir2);
   ok(arch.length === ARCHIVE_CAP && C.jobs.size === 0, `${N} archived at once ⇒ the file holds exactly ARCHIVE_CAP=${ARCHIVE_CAP}`);
   const kept = new Set(arch.map((r) => r.id));
-  ok(rows.slice(0, ARCHIVE_CAP).every((r) => kept.has(r.id)) && rows.slice(ARCHIVE_CAP).every((r) => !kept.has(r.id)), 'the cap keeps the NEWEST records (by terminal instant) and drops the oldest');
+  ok(gateOf(rows.slice(0, ARCHIVE_CAP).every((r) => kept.has(r.id))) && verdictOf(rows.slice(ARCHIVE_CAP).every((r) => !kept.has(r.id))), 'the cap keeps the NEWEST records (by terminal instant) and drops the oldest');
   await C.logsSettled();   // lane job-logs-sweep: the cap's removal runs in the remover's worker (never on the main thread) — waited for here
-  ok(rows.slice(-5).every((r) => !fs.existsSync(path.join(dir2, 'job-logs', r.id))) && fs.existsSync(path.join(dir2, 'job-logs', rows[0].id)), 'a cap-dropped record loses its log dir; a kept one keeps it');
+  ok(gateOf(rows.slice(-5).every((r) => !fs.existsSync(path.join(dir2, 'job-logs', r.id)))) && verdictOf(fs.existsSync(path.join(dir2, 'job-logs', rows[0].id))), 'a cap-dropped record loses its log dir; a kept one keeps it');
   ok(arch[0].id === rows[0].id && arch[arch.length - 1].id === rows[ARCHIVE_CAP - 1].id, 'the archive is ordered newest first');
   C.shutdown();
 }
@@ -272,7 +272,7 @@ console.log('§6b an archive write that fails releases nothing');
   const onDisk3 = () => JSON.parse(fs.readFileSync(path.join(dir3, 'jobs.json'), 'utf-8'));
   ok(E.jobs.size === N && onDisk3().length === N, `every record is still LIVE in memory and on disk (${E.jobs.size} / ${onDisk3().length} of ${N})`);
   ok(readArchive(dir3) === null, 'no archive file was written');
-  ok(logs.some((l) => /archive write FAILED/.test(l) && /EISDIR/.test(l)) && !logs.some((l) => /archived \d+ one-shot/.test(l)), 'the log says the write FAILED with the verbatim error and never claims "archived N"');
+  ok(gateOf(logs.some((l) => /archive write FAILED/.test(l) && /EISDIR/.test(l))) && !logs.some((l) => /archived \d+ one-shot/.test(l)), 'the log says the write FAILED with the verbatim error and never claims "archived N"');
   ok(!bcs.some((b) => b.t === 'jobs-updated' && b.p && b.p.archived), 'no jobs-updated {archived} broadcast for a sweep that moved nothing');
   // CONTROL (the cheap wrong direction — a sweep that never moves anything):
   // with the obstruction gone the writer's write AGAIN lands and moves all N
@@ -295,15 +295,15 @@ console.log('§6b an archive write that fails releases nothing');
 console.log('§7 cadence + pins');
 {
   const src = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
-  ok(/now\(\) - this\._lastArchiveSweep >= ARCHIVE_SWEEP_MS/.test(src) && !/setInterval\([^)]*archiveSweep/.test(src), 'the archive cadence is a clause of _sweep (5 s tick), never a second timer');
+  ok(gateOf(/now\(\) - this\._lastArchiveSweep >= ARCHIVE_SWEEP_MS/.test(src)) && !/setInterval\([^)]*archiveSweep/.test(src), 'the archive cadence is a clause of _sweep (5 s tick), never a second timer');
   ok(ARCHIVE_SWEEP_MS === 5 * 60 * 1000, 'ARCHIVE_SWEEP_MS = 5 min');
-  ok(/archiveSweep\(\{ why: 'boot' \}\)/.test(src), 'the boot sweep runs inside init()');
+  ok(verdictOf(/archiveSweep\(\{ why: 'boot' \}\)/.test(src)), 'the boot sweep runs inside init()');
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf-8');
-  ok(/req\.query\.archived/.test(ar) && /findVisibleIn\(a\.jm\.archivedList\(\), a\.caller, ref\)/.test(ar), 'agent routes: ?archived=1 list + read-through of an archived ref (view-filtered by the SAME predicate)');
+  ok(gateOf(/req\.query\.archived/.test(ar)) && verdictOf(/findVisibleIn\(a\.jm\.archivedList\(\), a\.caller, ref\)/.test(ar)), 'agent routes: ?archived=1 list + read-through of an archived ref (view-filtered by the SAME predicate)');
   const cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf-8');
-  ok(/flags\.archived \? '\?archived=1'/.test(cli) && /--archived/.test(cli), 'the CLI sends ?archived=1 for list --archived');
+  ok(gateOf(/flags\.archived \? '\?archived=1'/.test(cli)) && verdictOf(/--archived/.test(cli)), 'the CLI sends ?archived=1 for list --archived');
   const schema = fs.readFileSync(path.join(ROOT, 'src/lib/settings-schema.js'), 'utf-8');
-  ok(/'jobs\.archiveDoneAfterHours': \{[\s\S]*?default: 24/.test(schema) && /'jobs\.archiveFailedAfterDays': \{[\s\S]*?default: 7/.test(schema) && /t\('Background Work'\),\n  t\('Spending'\)/.test(schema), 'the two archive settings exist with the owner defaults and their category is in SETTINGS_CATEGORIES');
+  ok(gateOf(/'jobs\.archiveDoneAfterHours': \{[\s\S]*?default: 24/.test(schema)) && gateOf(/'jobs\.archiveFailedAfterDays': \{[\s\S]*?default: 7/.test(schema)) && verdictOf(/t\('Background Work'\),\n  t\('Spending'\)/.test(schema)), 'the two archive settings exist with the owner defaults and their category is in SETTINGS_CATEGORIES');
 }
 
 // ── §8 the CLI's list --archived + poll of an archived id, against a fake API ──
@@ -328,9 +328,9 @@ console.log('§8 vibespace-job list --archived / poll <archived id>');
   // block the loop the child needs an answer from (a self-deadlock, measured)
   const run = (args) => new Promise((resolve) => execFile(process.execPath, [cliPath, ...args], { env, encoding: 'utf-8', timeout: 15000 }, (err, stdout, stderr) => resolve({ status: err ? (err.code ?? 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })));
   const out1 = await run(['list', '--archived']);
-  ok(out1.status === 0 && out1.stdout.includes(rec.id) && /\(archived/.test(out1.stdout), 'vibespace-job list --archived prints the archived rows marked (archived …)', out1.stdout + out1.stderr);
+  ok(out1.status === 0 && gateOf(out1.stdout.includes(rec.id)) && verdictOf(/\(archived/.test(out1.stdout)), 'vibespace-job list --archived prints the archived rows marked (archived …)', out1.stdout + out1.stderr);
   const out2 = await run(['poll', rec.id]);
-  ok(out2.status === 0 && /\(archived .* — done/.test(out2.stdout) && out2.stdout.includes(`${rec.id} ${rec.name}`), 'vibespace-job poll <archived id> answers (state + the archived marker), never a not-found', out2.stdout + out2.stderr);
+  ok(out2.status === 0 && gateOf(/\(archived .* — done/.test(out2.stdout)) && verdictOf(out2.stdout.includes(`${rec.id} ${rec.name}`)), 'vibespace-job poll <archived id> answers (state + the archived marker), never a not-found', out2.stdout + out2.stderr);
   srv.close();
   D2.shutdown();
 }
@@ -350,33 +350,33 @@ console.log('§9 typed held notifications + the held digest on the wire');
   J._notifyOwner(job, { what: 'failed exit=1 error (1m)' });
   await new Promise((r) => setTimeout(r, 50));
   const q = J.pendingNotifs.get(cid) || [];
-  ok(q.length === 1 && q[0].held && q[0].held.kind === 'spend-cap' && q[0].held.why === 'hour-cap' && q[0].held.identity === 'Member A' && q[0].held.cap === 12 && q[0].held.retryAfter === T0 + 3600e3, 'a spend-cap refusal stashes a TYPED entry: spend-cap / hour-cap / the slot / the ceiling', JSON.stringify(q[0] && q[0].held));
+  ok(q.length === 1 && gateOf(q[0].held) && q[0].held.kind === 'spend-cap' && q[0].held.why === 'hour-cap' && q[0].held.identity === 'Member A' && q[0].held.cap === 12 && q[0].held.retryAfter === T0 + 3600e3, 'a spend-cap refusal stashes a TYPED entry: spend-cap / hour-cap / the slot / the ceiling', JSON.stringify(q[0] && q[0].held));
   const dg = J.heldDigest();
-  ok(dg.total === 1 && dg.byConversation[cid] && dg.byConversation[cid].kinds['spend-cap'] === 1 && dg.byConversation[cid].reason.identity === 'Member A', 'heldDigest reports it per conversation with the typed reason');
-  ok(bc.some((m) => m.type === 'jobs-updated' && m.held && m.held.byConversation && m.held.byConversation[cid]), 'the jobs-updated broadcast that followed CARRIES the held digest (one signal, one computation)');
+  ok(dg.total === 1 && gateOf(dg.byConversation[cid]) && dg.byConversation[cid].kinds['spend-cap'] === 1 && dg.byConversation[cid].reason.identity === 'Member A', 'heldDigest reports it per conversation with the typed reason');
+  ok(verdictOf(bc.some((m) => m.type === 'jobs-updated' && m.held && m.held.byConversation && m.held.byConversation[cid])), 'the jobs-updated broadcast that followed CARRIES the held digest (one signal, one computation)');
   // the rate floor types rate-floor; an unreachable inbox types not-reachable
   J.d.deliverToConversation = async () => ({ ok: false, reason: 'no live inbox for this conversation on any reachable machine' });
   J._notifyOwner(job, { what: 'failed exit=1 error (2m)' }); // inside the 30 s floor ⇒ rate-floor
   await new Promise((r) => setTimeout(r, 20));
-  ok((J.pendingNotifs.get(cid) || []).some((n) => n.held && n.held.kind === 'rate-floor'), 'a floored event is held as rate-floor');
+  ok(verdictOf((J.pendingNotifs.get(cid) || []).some((n) => n.held && n.held.kind === 'rate-floor')), 'a floored event is held as rate-floor');
   J._notifyRate.clear();
   J._notifyOwner(job, { what: 'failed exit=1 error (3m)' });
   await new Promise((r) => setTimeout(r, 50));
-  ok((J.pendingNotifs.get(cid) || []).some((n) => n.held && n.held.kind === 'not-running'), 'a conversation with no live inbox is held as not-running (lane notify-retry: the old `not-reachable` printed "closed" for a running one)');
+  ok(verdictOf((J.pendingNotifs.get(cid) || []).some((n) => n.held && n.held.kind === 'not-running')), 'a conversation with no live inbox is held as not-running (lane notify-retry: the old `not-reachable` printed "closed" for a running one)');
   const g3 = await callH('GET', '/api/jobs');
-  ok(g3.body.held && g3.body.held.total === 3 && g3.body.held.byConversation[cid].count === 3, 'GET /api/jobs carries the same digest');
+  ok(gateOf(g3.body.held) && g3.body.held.total === 3 && g3.body.held.byConversation[cid].count === 3, 'GET /api/jobs carries the same digest');
   // draining CLEARS the chip: the digest empties on the next broadcast
   bc.length = 0;
   J.drainNotifs(cid);
-  ok(J.heldDigest().total === 0 && bc.some((m) => m.type === 'jobs-updated' && m.drained === cid && m.held && m.held.total === 0), 'a drain empties the digest and broadcasts it empty (the chip clears)');
+  ok(J.heldDigest().total === 0 && verdictOf(bc.some((m) => m.type === 'jobs-updated' && m.drained === cid && m.held && m.held.total === 0)), 'a drain empties the digest and broadcasts it empty (the chip clears)');
   // an OLD stash entry written by a build before typing reads as not-reachable
   ok(M.heldDigest({ c: [{ jobId: 'x', ts: 1 }] }).byConversation.c.reason.kind === 'not-reachable', 'a legacy stash entry with no `held` reads as not-reachable (never dropped)');
   // wiring pins: the chip + the ladder's typed refusal
   const csb = fs.readFileSync(path.join(ROOT, 'src/lib/chat-status-bar.js'), 'utf-8');
   const cv = fs.readFileSync(path.join(ROOT, 'src/lib/chat-view.js'), 'utf-8');
   const lad = fs.readFileSync(path.join(ROOT, 'src/server/conversation-deliver.js'), 'utf-8');
-  ok(/setJobsHeld\(text\)/.test(csb) && /chat-status-held/.test(csb) && /msg\.type === 'jobs-updated' && msg\.held/.test(cv) && /heldText\(digest, \{ t, cid \}\)/.test(cv), 'WIRING PIN: the status bar has the held chip and the live ChatView feeds it from jobs-updated.held for ITS conversation');
-  ok(/refused: 'spend', why: v\.why, retryAfter: v\.retryAfter \|\| 0, identity: v\.identity \?/.test(lad), "WIRING PIN: the ladder's spend refusal carries the identity + the ceiling the stash needs");
+  ok(gateOf(/setJobsHeld\(text\)/.test(csb)) && gateOf(/chat-status-held/.test(csb)) && gateOf(/msg\.type === 'jobs-updated' && msg\.held/.test(cv)) && verdictOf(/heldText\(digest, \{ t, cid \}\)/.test(cv)), 'WIRING PIN: the status bar has the held chip and the live ChatView feeds it from jobs-updated.held for ITS conversation');
+  ok(verdictOf(/refused: 'spend', why: v\.why, retryAfter: v\.retryAfter \|\| 0, identity: v\.identity \?/.test(lad)), "WIRING PIN: the ladder's spend refusal carries the identity + the ceiling the stash needs");
   J.shutdown();
 }
 
@@ -401,11 +401,11 @@ console.log('§10 r6 D-F5: monotonic panel identity, the answer names its panel,
   };
   const job1 = mkJob('jb-panel0001');
   const r1 = await staleLeg(J, job1);
-  ok(r1.expired && r1.a1 === 1 && r1.a2 === 2 && r1.stale.code === 'stale-panel' && /panel #1/.test(r1.stale.error) && /panel #2/.test(r1.stale.error) && r1.pendingTitle === 'Delete the production backup bucket?' && r1.recorded.length === 0, 'r6 D-F5: after panel #1 EXPIRED the next panel is #2 (never 1 again); a stale click on #1 is refused stale-panel BY NAME — nothing recorded, panel #2 still waits', JSON.stringify(r1));
+  ok(gateOf(r1.expired) && r1.a1 === 1 && r1.a2 === 2 && r1.stale.code === 'stale-panel' && gateOf(/panel #1/.test(r1.stale.error)) && gateOf(/panel #2/.test(r1.stale.error)) && r1.pendingTitle === 'Delete the production backup bucket?' && r1.recorded.length === 0, 'r6 D-F5: after panel #1 EXPIRED the next panel is #2 (never 1 again); a stale click on #1 is refused stale-panel BY NAME — nothing recorded, panel #2 still waits', JSON.stringify(r1));
   // the user route: named refusals with their codes
   const rNo = await callP('POST', '/api/jobs/:id/:act', { params: { id: job1.id, act: 'answer' }, body: { answers: { button: 'yes' } } });
   const rStale = await callP('POST', '/api/jobs/:id/:act', { params: { id: job1.id, act: 'answer' }, body: { answers: { button: 'yes', version: 1 } } });
-  ok(rNo.status === 400 && rNo.body.code === 'version-required' && rStale.status === 409 && rStale.body.code === 'stale-panel' && rStale.body.version === 2 && job1.interaction.pending, 'r6 D-F5: POST …/answer with NO version ⇒ 400 version-required; with panel #1\'s ⇒ 409 stale-panel (+ the panel it waits on) — panel #2 still pending', JSON.stringify({ rNo: rNo.body, rStale: rStale.body }));
+  ok(rNo.status === 400 && rNo.body.code === 'version-required' && rStale.status === 409 && rStale.body.code === 'stale-panel' && rStale.body.version === 2 && verdictOf(job1.interaction.pending), 'r6 D-F5: POST …/answer with NO version ⇒ 400 version-required; with panel #1\'s ⇒ 409 stale-panel (+ the panel it waits on) — panel #2 still pending', JSON.stringify({ rNo: rNo.body, rStale: rStale.body }));
   const rOk = await callP('POST', '/api/jobs/:id/:act', { params: { id: job1.id, act: 'answer' }, body: { answers: { button: 'no', version: 2 } } });
   ok(rOk.status === 200 && !job1.interaction.pending && job1.interaction.answers.at(-1).button === 'no' && job1.interaction.answers.at(-1).version === 2, 'r6 D-F5: the answer naming panel #2 is recorded as #2\'s', JSON.stringify(rOk.body));
   const a3 = J.ask(job1, panel('Rotate the keys?'));
@@ -416,7 +416,7 @@ console.log('§10 r6 D-F5: monotonic panel identity, the answer names its panel,
   const { jm: J2 } = boot(dir4);
   const j2 = J2.jobs.get(job1.id);
   const a4 = j2 ? J2.ask(j2, panel('After the restart')) : null;
-  ok(j2 && j2.interaction.seq >= 3 && a4 && a4.version === 4, 'r6 D-F5: after a RESTART the next panel is #4 — the count survived in the store', JSON.stringify({ seq: j2 && j2.interaction.seq, a4 }));
+  ok(gateOf(j2) && j2.interaction.seq >= 3 && gateOf(a4) && a4.version === 4, 'r6 D-F5: after a RESTART the next panel is #4 — the count survived in the store', JSON.stringify({ seq: j2 && j2.interaction.seq, a4 }));
   J2.shutdown();
   // CONTROL (scripts/mutant-copy.mjs): the pre-fix engine — version = pending + 1 (1 again after an expiry) and an answer
   // with a matching (or missing) version accepted ⇒ the stale click on #1 is recorded as the answer to #2
@@ -433,10 +433,10 @@ console.log('§10 r6 D-F5: monotonic panel identity, the answer names its panel,
   const noVer = (() => { const j = mkJob('jb-panel0003'); JX.jobs.set(j.id, j); JX.ask(j, panel('x')); return JX.answerPanel(j, { button: 'yes' }); })();
   ok(rx.a1 === 1 && rx.a2 === 1 && rx.stale.ok === true && rx.recorded.join() === 'yes@1' && noVer.ok === true, 'r6 D-F5 CONTROL (the pre-fix engine, in a copy): panel #2 is "version 1" again, the stale click on #1 is RECORDED as the answer to "Delete the production backup bucket?", and a version-less answer is accepted — the monotonic seq + the named refusal are the rule', JSON.stringify({ rx, noVer }));
   JX.shutdown();
-  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'r6 D-F5 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'r6 D-F5 ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
   // WIRING PINS: the panel sends the version it rendered; the CLI prints the panel's number
   const jp = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf-8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf-8');
-  ok(/const version = pending\.version;/.test(jp) && /answers: \{ \.\.\.values, button: o\.id, version \}/.test(jp) && /r2\.code === 'stale-panel'/.test(jp) && /posted\.version/.test(cli), 'WIRING PIN (r6 D-F5): the panel answers with the version it rendered (and re-reads on stale-panel); the CLI prints the panel\'s number');
+  ok(gateOf(/const version = pending\.version;/.test(jp)) && gateOf(/answers: \{ \.\.\.values, button: o\.id, version \}/.test(jp)) && gateOf(/r2\.code === 'stale-panel'/.test(jp)) && verdictOf(/posted\.version/.test(cli)), 'WIRING PIN (r6 D-F5): the panel answers with the version it rendered (and re-reads on stale-panel); the CLI prints the panel\'s number');
 }
 
 console.log('§11 B-dfb4: notifications dropped at the 30-entry stash cap are SAID in For you (≤ 1 notice per conversation per hour)');
@@ -460,9 +460,9 @@ console.log('§11 B-dfb4: notifications dropped at the 30-entry stash cap are SA
   jm._stashNotif('conv-drop', job(30), { what: 'result 30' }, 'not reachable');
   jm._stashNotif('conv-drop', job(31), { what: 'result 31' }, 'not reachable');
   const it = items();
-  ok(it.length === 1 && it[0].kind === 'notice' && it[0].origin === 'jobs' && it[0].sessionKey === 'claude:conv-drop' && /were dropped — 30 were already waiting/.test(it[0].text) && /^1 dropped, never delivered \(from: nightly\)/.test(it[0].detail || '') && it[0].sessionName === 'house model · Background Work',
+  ok(it.length === 1 && it[0].kind === 'notice' && it[0].origin === 'jobs' && it[0].sessionKey === 'claude:conv-drop' && gateOf(/were dropped — 30 were already waiting/.test(it[0].text)) && gateOf(/^1 dropped, never delivered \(from: nightly\)/.test(it[0].detail || '')) && it[0].sessionName === 'house model · Background Work',
     'the first eviction files ONE For-you notice (origin jobs, kind notice) under the owner conversation: how many, from which jobs, that the 30 still wait', it.map((i) => ({ text: i.text, detail: i.detail, kind: i.kind, sessionName: i.sessionName })));
-  ok(it[0].i18n && /\{cap\} were already waiting/.test(it[0].i18n.text.key) && it[0].i18n.text.params.cap === 30, '…worded per device (i18n key + params)', it[0].i18n);
+  ok(gateOf(it[0].i18n) && gateOf(/\{cap\} were already waiting/.test(it[0].i18n.text.key)) && it[0].i18n.text.params.cap === 30, '…worded per device (i18n key + params)', it[0].i18n);
   ok(logs.filter((l) => /fell off the 30-entry cap/.test(l)).length === 2, 'every eviction is still journaled (two lines)', logs.filter((l) => /fell off/.test(l)));
   ok(items().length === 1 && todos.forSession(['claude:conv-drop']).length === 1, 'the second eviction inside the hour adds NO line (≤ 1 per conversation per hour)');
   jm._dropNoticeAt.set('conv-drop', Date.now() - 3600e3 - 1);   // an hour later
@@ -490,7 +490,7 @@ console.log('§11 B-dfb4: notifications dropped at the 30-entry stash cap are SA
     const r2 = boot();   // the restart, minutes later
     r2.w.jm._stashNotif('conv-drop', job(40), { what: 'r40' }, 'not reachable');
     const n2 = mine(r2.t, 'claude:conv-drop');
-    ok(n1.length === 1 && n2.length === 1 && n2[0].status === 'dismissed' && r2.lg.some((l) => /fell off the 30-entry cap/.test(l)),
+    ok(n1.length === 1 && n2.length === 1 && n2[0].status === 'dismissed' && verdictOf(r2.lg.some((l) => /fell off the 30-entry cap/.test(l))),
       'verify r1: a RESTART inside the hour does not say it again — the dismissed notice stays dismissed (was: reopened), the eviction is journaled', n2.map((i) => i.status));
     // a filing the store REFUSES (its 20-open cap) consumes no window: once the user clears their asks, the next eviction is said
     for (let i = 0; i < 20; i++) r2.t.add('claude:conv-cap', { text: 'ask ' + i, origin: 'agent' });
@@ -522,7 +522,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   seedTorn(d12);
   const { jm: A } = boot(d12);
   const at1 = onDisk(d12);
-  ok(skel(A) === 'jb-5ke1e701,jb-5ke1e703' && asideOf(d12).length === 1 && fs.readFileSync(path.join(d12, asideOf(d12)[0]), 'utf-8').startsWith('[{"id":"jb-5ke1e701"'), 'B-ef97: a torn store is set aside (its bytes kept) and rebuilt as skeletons from the log dirs — never one for an id the archive holds', skel(A));
+  ok(skel(A) === 'jb-5ke1e701,jb-5ke1e703' && asideOf(d12).length === 1 && verdictOf(fs.readFileSync(path.join(d12, asideOf(d12)[0]), 'utf-8').startsWith('[{"id":"jb-5ke1e701"')), 'B-ef97: a torn store is set aside (its bytes kept) and rebuilt as skeletons from the log dirs — never one for an id the archive holds', skel(A));
   ok(at1 === 'jb-5ke1e701,jb-5ke1e703', 'B-ef97: the skeletons are ON DISK when init returns (was: memory only)', at1);
   A.shutdown();
   ok(fs.readFileSync(path.join(d12, 'job-notifications.json'), 'utf-8') === TORN_NOTIFS, 'B-ef97: the write-back writes jobs.json ALONE — a notifications file that did not load is not written over by it (nor by the exit)');
@@ -530,7 +530,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   ok(skel(B) === 'jb-5ke1e701,jb-5ke1e703' && B.jobs.get('jb-5ke1e701').note === LSm.RECOVERED_NOTE, 'B-ef97: AFTER A RESTART the recovered skeletons are still listed (was: the store loaded empty, the jobs vanished)', skel(B));
   // B-2204: a skeleton is the person's alone — owner-less, view 'session': no conversation lists it, the person does
   const sk = B.jobs.get('jb-5ke1e701'), agent = { conversationId: 'conv-any', sessionId: 'sess-any', sessionCreatedAt: 1, groups: new Set(['g-any']) };
-  ok(sk.access.view === 'session' && sk.access.control === 'session' && Object.keys(sk.owner).length === 0 && !M.canView(sk, agent) && M.canView(sk, { isUser: true }) && !M.visibleJobs([...B.jobs.values()], agent).some((j) => LSm.isSkeleton(j)), 'B-2204: a recovered skeleton is owner-less with view \'session\' — no conversation can view it (was \'all\': every one), the person can', sk.access);
+  ok(sk.access.view === 'session' && sk.access.control === 'session' && Object.keys(sk.owner).length === 0 && !M.canView(sk, agent) && gateOf(M.canView(sk, { isUser: true })) && !M.visibleJobs([...B.jobs.values()], agent).some((j) => LSm.isSkeleton(j)), 'B-2204: a recovered skeleton is owner-less with view \'session\' — no conversation can view it (was \'all\': every one), the person can', sk.access);
   B.shutdown();
   // B-2204: a skeleton the RELEASE wrote (view 'all' — its _save wrote memory whenever anything dirtied the store) is read back the person's alone
   const d12m = mkDir('jobs-triage-skel-migrate');
@@ -539,7 +539,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   fs.writeFileSync(path.join(d12m, 'jobs-archive.json'), JSON.stringify([{ ...oldSkel('jb-5ke1e7m2'), archivedAt: T0 - D, archivedWhy: 'unverified-acknowledged' }]));
   const { jm: Mg } = boot(d12m);
   const mArch = Mg._loadArchive().find((r) => r.id === 'jb-5ke1e7m2');
-  ok(Mg.jobs.get('jb-5ke1e7m1').access.view === 'session' && mArch && mArch.access.view === 'session' && !M.canView(Mg.jobs.get('jb-5ke1e7m1'), agent) && !M.canView(mArch, agent), 'B-2204: a skeleton the release wrote with view \'all\' (store and archive) is read back owner-less, view \'session\'');
+  ok(Mg.jobs.get('jb-5ke1e7m1').access.view === 'session' && gateOf(mArch) && mArch.access.view === 'session' && !M.canView(Mg.jobs.get('jb-5ke1e7m1'), agent) && !M.canView(mArch, agent), 'B-2204: a skeleton the release wrote with view \'all\' (store and archive) is read back owner-less, view \'session\'');
   Mg.shutdown();
   // B-ef97: the ARCHIVE unread at the torn boot — a skeleton then stands for an archived id too; when the archive answers it goes
   const d12r = mkDir('jobs-triage-skel-archive-late'), AFr = path.join(d12r, 'jobs-archive.json');
@@ -560,7 +560,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   Sw.jobs.set('jb-5ke1e7s1', { ...oldSkel('jb-5ke1e7s1'), access: { view: 'session', control: 'session' }, ack: { by: 'user-opened', at: T0 - 10 * D } });
   const swr = sweepNow(Sw, { now: T0 });
   const realOne = Sw._loadArchive().find((r) => r.id === 'jb-5ke1e7s1');
-  ok(!swr.archived.length && realOne && realOne.name === 'the real one' && !Sw.jobs.has('jb-5ke1e7s1'), 'B-ef97: an acknowledged skeleton whose id the archive holds leaves the store — it never replaces the archived record', { swr, name: realOne && realOne.name });
+  ok(!swr.archived.length && gateOf(realOne) && realOne.name === 'the real one' && !Sw.jobs.has('jb-5ke1e7s1'), 'B-ef97: an acknowledged skeleton whose id the archive holds leaves the store — it never replaces the archived record', { swr, name: realOne && realOne.name });
   Sw.shutdown();
   // CONTROL (scripts/mutant-copy.mjs): the release's engine — the skeletons never marked for a write ⇒ the restart loads an empty store
   const MJ = mutantCopies('jobs-torn-ef97', ROOT);
@@ -572,7 +572,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   const accLine = "const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };\n";
   const dropLine = "      if (this.jobs.size) { const held = new Set(this.archive.map((r) => r.id)); for (const [id, j] of this.jobs) if (LS.isSkeleton(j) && held.has(id)) { this.jobs.delete(id); dropped++; } }\n";
   const guardLine = "      if (LS.isSkeleton(moved[i]) && archIds.has(id)) { this.jobs.delete(id); this._dirty = true; moved.splice(i, 1); }\n      else if (!this.jobs.has(id)) moved.splice(i, 1);\n";
-  ok([accLine, dropLine, guardLine].every((x) => jsrc.split(x).length === 2), 'B-ef97 / B-2204 control setup: the read-back access, the archive\'s drop and the sweep\'s guard are each written once');
+  ok(verdictOf([accLine, dropLine, guardLine].every((x) => jsrc.split(x).length === 2)), 'B-ef97 / B-2204 control setup: the read-back access, the archive\'s drop and the sweep\'s guard are each written once');
   const JMod = MJ.load('src/jobs.js', editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(jsrc, owedLine, '    // MUTANT: the release — skeletons in memory only\n', "src/jobs.js"), viewLine, "access: { view: 'all', control: 'session' }, runs: [] }); // MUTANT: the release\n", "src/jobs.js"),
     accLine, 'const skeletonAccess = (j) => j; // MUTANT: no read-back\n', "src/jobs.js"), dropLine, '      // MUTANT: no drop\n', "src/jobs.js"), guardLine, '      if (!this.jobs.has(id)) moved.splice(i, 1); // MUTANT: no guard\n', "src/jobs.js"));
   const d12c = mkDir('jobs-triage-torn-mut');
@@ -581,7 +581,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   const X1 = mk(); const x1 = skel(X1); const xv = X1.jobs.get('jb-5ke1e701'); const xSeen = !!xv && M.canView(xv, { conversationId: 'conv-any', sessionId: 'sess-any', sessionCreatedAt: 1, groups: new Set() }); X1.shutdown();
   const X2 = mk(); const x2 = skel(X2); X2.shutdown();
   ok(x1 === 'jb-5ke1e701,jb-5ke1e703' && x2 === '', 'B-ef97 CONTROL (the release, in a copy): the skeletons of boot 1 are GONE after a restart', { x1, x2 });
-  ok(xSeen, 'B-2204 CONTROL (the release, in a copy): any conversation can view a recovered skeleton (view \'all\')');
+  ok(verdictOf(xSeen), 'B-2204 CONTROL (the release, in a copy): any conversation can view a recovered skeleton (view \'all\')');
   const dXm = mkDir('jobs-triage-skel-migrate-mut');
   fs.writeFileSync(path.join(dXm, 'jobs.json'), JSON.stringify([oldSkel('jb-5ke1e7m1')]));
   const XM = new JMod.JobManager({ dataDir: dXm, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); XM.init();
@@ -593,17 +593,17 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   XS.jobs.set('jb-5ke1e7s1', { ...oldSkel('jb-5ke1e7s1'), ack: { by: 'user-opened', at: T0 - 10 * D } });
   sweepNow(XS, { now: T0 });
   const xReal = XS._loadArchive().find((r) => r.id === 'jb-5ke1e7s1');
-  ok(xReal && xReal.name === 'jb-5ke1e7s1', 'B-ef97 CONTROL (no guard, in a copy): the acknowledged skeleton is archived OVER the real record (its name is gone)', xReal && xReal.name);
+  ok(gateOf(xReal) && xReal.name === 'jb-5ke1e7s1', 'B-ef97 CONTROL (no guard, in a copy): the acknowledged skeleton is archived OVER the real record (its name is gone)', xReal && xReal.name);
   XS.shutdown();
   const dXr = mkDir('jobs-triage-skel-archive-late-mut'), AFx = path.join(dXr, 'jobs-archive.json');
   seedTorn(dXr);
   fs.readFileSync = function (f, ...a) { if (String(f) === AFx) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf12.call(this, f, ...a); };
   let XR; try { XR = new JMod.JobManager({ dataDir: dXr, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, unreadRetry: { firstMs: 5, maxMs: 10 } }); XR.init(); } finally { fs.readFileSync = rf12; }
   const tx = Date.now(); while (XR._unread.archive && Date.now() - tx < 3000) await new Promise((r) => setTimeout(r, 10));
-  ok(!XR._unread.archive && skel(XR).includes('jb-5ke1e7a2'), 'B-ef97 CONTROL (no drop, in a copy): the skeleton of the archived id stays after the archive answers', skel(XR));
+  ok(!XR._unread.archive && verdictOf(skel(XR).includes('jb-5ke1e7a2')), 'B-ef97 CONTROL (no drop, in a copy): the skeleton of the archived id stays after the archive answers', skel(XR));
   if (XR._logsNoteP) await XR._logsNoteP;
   XR.shutdown();
-  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'B-ef97 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'B-ef97 ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 // ── §13 B-c17d: the 14-day gc never collects a cron's child while its parent still schedules fires ──
@@ -625,7 +625,7 @@ console.log('§13 B-c17d: a monthly cron keeps its child (its run ring) between 
     const { jm: G } = boot(d13);
     const atBoot = ['jb-c17d0c01', 'jb-c17d0c02', 'jb-c17d0t03'].every((id) => G.jobs.has(id));
     await G._gc({ now: T0 });
-    ok(atBoot && G.jobs.has('jb-c17d0c01') && G.jobs.get('jb-c17d0c01').runs.length === 1, 'B-c17d: the gc KEEPS a monthly cron\'s child whose last run ended 20 days ago — its parent still schedules fires (was: deleted with its run list and journal)');
+    ok(gateOf(atBoot) && gateOf(G.jobs.has('jb-c17d0c01')) && G.jobs.get('jb-c17d0c01').runs.length === 1, 'B-c17d: the gc KEEPS a monthly cron\'s child whose last run ended 20 days ago — its parent still schedules fires (was: deleted with its run list and journal)');
     ok(!G.jobs.has('jb-c17d0c02') && !G.jobs.has('jb-c17d0t03') && !G.jobs.has('jb-c17d0c04'), 'B-c17d: …and still collects a child whose cron is turned off, the child of a FIRED --at cron (it schedules nothing more) and a plain done task past 14 days');
     G.shutdown();
     // CONTROL (scripts/mutant-copy.mjs): the release's gc — leg (a) never asks the parent
@@ -645,9 +645,9 @@ console.log('§13 B-c17d: a monthly cron keeps its child (its run ring) between 
     const d13a = mkDir('jobs-triage-cron-gc-at-mut'); seed(d13a);
     const XA = new JAt.JobManager({ dataDir: d13a, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy });
     XA.init(); await XA._gc({ now: T0 });
-    ok(XA.jobs.has('jb-c17d0c04'), 'B-c17d CONTROL (a fired --at counted active, in a copy): its child is kept FOR EVER — neither archived nor collected');
+    ok(verdictOf(XA.jobs.has('jb-c17d0c04')), 'B-c17d CONTROL (a fired --at counted active, in a copy): its child is kept FOR EVER — neither archived nor collected');
     XA.shutdown();
-    for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 2, label: 'B-c17d ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+    for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 2, label: 'B-c17d ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
   } finally { policy.doneAfterHours = keep; }
 }
 
@@ -677,8 +677,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const mt = fs.statSync(SF).mtimeMs;
   const made = A.create(spec, { isUser: true });
   A._dirty = true; A._save(); landedU4();   // U4: whatever the save handed the writer has landed — the mtime below sees a late write too
-  ok(!readable && A.ready && A._unread.store && A._unread.store.code === codeA && A.jobs.size === 0 && asides(dA, 'jobs.json').length === 0 && fs.statSync(SF).mtimeMs === mt, 'B-f276: a store whose READ fails (EACCES, its stat answers) is kept as it is — NOT set aside (the release renamed the live file), and a save writes nothing over it', { unread: A._unread.store, asides: asides(dA, 'jobs.json') });
-  ok(made.code === 'records-unread' && new RegExp(`no job is created until they are read — jobs\\.json in VibeSpace's data folder could not be read \\(${codeA}\\).*For you says what to check`).test(made.error) && !made.job, `B-f276: …and no job is created while the records are unread — the refusal NAMES ITS DOOR (the file, For you) [${codeA}]`, made);
+  ok(!readable && gateOf(A.ready) && gateOf(A._unread.store) && A._unread.store.code === codeA && A.jobs.size === 0 && asides(dA, 'jobs.json').length === 0 && fs.statSync(SF).mtimeMs === mt, 'B-f276: a store whose READ fails (EACCES, its stat answers) is kept as it is — NOT set aside (the release renamed the live file), and a save writes nothing over it', { unread: A._unread.store, asides: asides(dA, 'jobs.json') });
+  ok(made.code === 'records-unread' && gateOf(new RegExp(`no job is created until they are read — jobs\\.json in VibeSpace's data folder could not be read \\(${codeA}\\).*For you says what to check`).test(made.error)) && !made.job, `B-f276: …and no job is created while the records are unread — the refusal NAMES ITS DOOR (the file, For you) [${codeA}]`, made);
   await until(() => A._unreadTries.store >= 3);   // three reads again, each failed
   if (A._logsNoteP) await A._logsNoteP;   // the clean-up's note, written by the remover's child
   const noteA = path.join(dA, 'jobs.json.corrupt-unread'), noteThere = fs.existsSync(noteA);
@@ -686,7 +686,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   unplant(SF, body, howA);   // the storage answers again
   const back = await until(() => !A._unread.store && A.jobs.has('jb-f2760a01') && A.jobs.has('jb-f2760a02'));
   const made2 = back ? A.create(spec, { isUser: true }) : null;
-  ok(back && made2 && made2.job && lA.some((l) => /jobs\.json read again after \d+ tr(y|ies): 2 record\(s\) — writes resume/.test(l)), 'B-f276: the store is READ AGAIN off the loop: its records are loaded, writes resume, a job can be created', { back, made2: made2 && (made2.error || 'ok') });
+  ok(gateOf(back) && gateOf(made2) && gateOf(made2.job) && verdictOf(lA.some((l) => /jobs\.json read again after \d+ tr(y|ies): 2 record\(s\) — writes resume/.test(l))), 'B-f276: the store is READ AGAIN off the loop: its records are loaded, writes resume, a job can be created', { back, made2: made2 && (made2.error || 'ok') });
   // cure r1, the ruling: a read that ANSWERED and LOADED lifts what the failure filed — its note marked done, its item resolved
   const lifted = await until(() => !fs.existsSync(noteA) && fs.readdirSync(dA).some((n) => /^jobs\.json\.unread-done-\d+$/.test(n)));
   // r1679 (the load row — seen red at 717191cda-20261121224429-both, the box zone: both legs below, {"noteThere":true,"lifted":true,
@@ -696,8 +696,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const liftEnded = await until(() => lA.some((l) => /jobs\.json was read again: its note jobs\.json\.corrupt-unread is marked done \(renamed\)/.test(l)));
   if (!liftEnded) console.log('    (the lift never said its line in 3 s — the two legs below read what stood then)');
   const told = filed.find((n) => n && n.fact === 'records-read-again');
-  ok(!!told && told.urgency === 'low' && /could not be read from \{when\} to \{until\} \(\{error\}\); VibeSpace read them again and nothing was lost/.test(told.words.key) && Number.isFinite(told.words.params.when.at) && Number.isFinite(told.words.params.until.at) && told.words.params.until.at >= told.words.params.when.at && !/written over: keep the note/.test(told.words.key), 'B-f276 cure r2 (the ruling): the person who was told hears ONE TRUE SENTENCE — could not be read from … to …, read again, nothing lost (never «may already have been written over»)', told && told.words);
-  ok(noteThere && lifted && A._logsUnread.store === null && resolved.length >= 1 && lA.some((l) => /jobs\.json was read again: its note jobs\.json\.corrupt-unread is marked done \(renamed\), 1 For-you item\(s\) resolved, the job-logs clean-up resumes/.test(l)), 'B-f276 cure (the ruling): the read again that loaded marks its note done (renamed — no hold reads it), resolves its For-you item, and the clean-up resumes', { noteThere, lifted, resolved });
+  ok(!!told && told.urgency === 'low' && gateOf(/could not be read from \{when\} to \{until\} \(\{error\}\); VibeSpace read them again and nothing was lost/.test(told.words.key)) && gateOf(Number.isFinite(told.words.params.when.at)) && gateOf(Number.isFinite(told.words.params.until.at)) && told.words.params.until.at >= told.words.params.when.at && !/written over: keep the note/.test(told.words.key), 'B-f276 cure r2 (the ruling): the person who was told hears ONE TRUE SENTENCE — could not be read from … to …, read again, nothing lost (never «may already have been written over»)', told && told.words);
+  ok(gateOf(noteThere) && gateOf(lifted) && A._logsUnread.store === null && resolved.length >= 1 && verdictOf(lA.some((l) => /jobs\.json was read again: its note jobs\.json\.corrupt-unread is marked done \(renamed\), 1 For-you item\(s\) resolved, the job-logs clean-up resumes/.test(l))), 'B-f276 cure (the ruling): the read again that loaded marks its note done (renamed — no hold reads it), resolves its For-you item, and the clean-up resumes', { noteThere, lifted, resolved });
   A.shutdown();
   ok(JSON.parse(fs.readFileSync(SF, 'utf-8')).map((j) => j.id).filter((id) => id.startsWith('jb-f2760a')).sort().join() === 'jb-f2760a01,jb-f2760a02', 'B-f276: …and the store on disk still holds every record it held (none written over)');
   }
@@ -707,12 +707,12 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     plant(F, body, 'folder');
     const { jm: R, call: callR } = boot(d);
     const list = await callR('GET', '/api/jobs', {}), one = await callR('GET', '/api/jobs/:id', { params: { id: 'jb-f2760a01' } }), act = await callR('POST', '/api/jobs/:id/:act', { params: { id: 'jb-f2760a01', act: 'stop' } }), mk = await callR('POST', '/api/jobs', { body: spec });
-    ok(list.status === 503 && list.body.code === 'records-unread' && list.body.why === 'EISDIR' && /For you says what to check/.test(list.body.error), 'B-f276 cure: the panel\'s list answers WHY it is empty — the records cannot be read (its code), never an empty list', list);
+    ok(list.status === 503 && list.body.code === 'records-unread' && list.body.why === 'EISDIR' && verdictOf(/For you says what to check/.test(list.body.error)), 'B-f276 cure: the panel\'s list answers WHY it is empty — the records cannot be read (its code), never an empty list', list);
     ok(one.status === 503 && act.status === 503 && one.body.code === 'records-unread' && !/no such job/.test(JSON.stringify([one.body, act.body])), 'B-f276 cure: a job\'s page and its stop answer «the records cannot be read», never «no such job» (that reads as a lost record)', { one, act });
-    ok(mk.status === 400 && /no job is created until they are read/.test(mk.body.error), 'B-f276 cure: the panel\'s ＋New is refused with its door', mk.body);
+    ok(mk.status === 400 && verdictOf(/no job is created until they are read/.test(mk.body.error)), 'B-f276 cure: the panel\'s ＋New is refused with its door', mk.body);
     R.shutdown();
     const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), jp = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf8');
-    ok(/if \(!jm\.ready\) \{ res\.status\(503\)[^\n]*\n  if \(jm\._unread && jm\._unread\.store\) \{ res\.status\(503\)\.json\(\{ error: jm\.unreadWords\(\), code: 'records-unread' \}\); return null; \}/.test(ar) && (jp.match(/listErrorText\(r\)/g) || []).length === 2, 'B-f276 cure WIRING: every agent job verb (jobAuth: list, show, poll, stop, run) answers the same words; the panel\'s two lists word the code in the person\'s language');
+    ok(gateOf(/if \(!jm\.ready\) \{ res\.status\(503\)[^\n]*\n  if \(jm\._unread && jm\._unread\.store\) \{ res\.status\(503\)\.json\(\{ error: jm\.unreadWords\(\), code: 'records-unread' \}\); return null; \}/.test(ar)) && (jp.match(/listErrorText\(r\)/g) || []).length === 2, 'B-f276 cure WIRING: every agent job verb (jobAuth: list, show, poll, stop, run) answers the same words; the panel\'s two lists word the code in the person\'s language');
   }
   // A3. THE READER TABLE's older roads (r3230), while jobs.json is HELD: the wake-grant rows, a job's token, the logs remover's «a live
   // record names it» — each says the hold or keeps, never «none» / «unknown token» / gone
@@ -721,9 +721,9 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     plant(F, body, 'folder');
     const { jm: R, call: callR } = boot(d);
     const wg = await callR('GET', '/api/jobs-wake-grants', { query: { conversation: 'conv-made-x' } });
-    ok(wg.status === 503 && wg.body.code === 'records-unread' && /a conversation's jobs cannot be listed while the job records cannot be read/.test(wg.body.error), 'the reader table (r3230): a conversation\'s wake-grant rows (the Terminate confirm) while held answer the hold by name (503) — never «owns no job»', wg);
+    ok(wg.status === 503 && wg.body.code === 'records-unread' && verdictOf(/a conversation's jobs cannot be listed while the job records cannot be read/.test(wg.body.error)), 'the reader table (r3230): a conversation\'s wake-grant rows (the Terminate confirm) while held answer the hold by name (503) — never «owns no job»', wg);
     const tk = R.tokenHeldAnswer('jbt_' + '0'.repeat(32));
-    ok(!!tk && tk.status === 503 && tk.code === 'records-unread' && /a job's token cannot be checked/.test(tk.error) && R.tokenHeldAnswer('vsst_made') === null, 'the reader table: a job\'s token while held is answered by the hold\'s words (503) — never «unknown job token» to a job that may be running', tk);
+    ok(!!tk && tk.status === 503 && tk.code === 'records-unread' && gateOf(/a job's token cannot be checked/.test(tk.error)) && R.tokenHeldAnswer('vsst_made') === null, 'the reader table: a job\'s token while held is answered by the hold\'s words (503) — never «unknown job token» to a job that may be running', tk);
     // the hourly clean-up's ARCHIVE leg (the clock's verdict, r3408): while held, «never a stale copy of a live record» cannot be judged —
     // an archived record past the 14 days keeps its folder; a person's ✕ still removes (the logs law, test-job-logs-sweep-heavy round 4)
     const DAY = 86400e3, old = Date.now() - 20 * DAY, arc = (id) => ({ id, kind: 'task', name: 'made-up', state: 'done', owner: {}, access: { view: 'all', control: 'session' }, runs: [{ startedAt: old, endedAt: old + 1000, exit: 0 }], archivedAt: old + 2000, archivedWhy: 'done' });
@@ -748,8 +748,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     const XP = engine(JP, dP, []); XP._unreadStopped = true;
     const px = XP._unread.store ? await rmWhileHeld(XP, 'jb-f2760a0d') : null;
     XP.shutdown();
-    ok(!!pr.r && pr.r.ok && pr.g && pr.g.gone === true && pr.gone && !!px && px.r.ok && px.gone === false && px.g && px.g.kept === 'named', 'the reader table (r3413): while held a PERSON\'s ✕ of an archived row still removes its logs (the hold is the clean-up pass\'s) — RED CONTROL (in a copy, line 720\'s filter): the folder kept («named»)', { pr, px });
-    for (const rr of copiesCensus(MJP.files, MJP.dir, ROOT, { minCopies: 1, label: 'reader-table person ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+    ok(!!pr.r && gateOf(pr.r.ok) && gateOf(pr.g) && pr.g.gone === true && gateOf(pr.gone) && !!px && gateOf(px.r.ok) && px.gone === false && gateOf(px.g) && px.g.kept === 'named', 'the reader table (r3413): while held a PERSON\'s ✕ of an archived row still removes its logs (the hold is the clean-up pass\'s) — RED CONTROL (in a copy, line 720\'s filter): the folder kept («named»)', { pr, px });
+    for (const rr of copiesCensus(MJP.files, MJP.dir, ROOT, { minCopies: 1, label: 'reader-table person ' })) ok(verdictOf(rr.pass), rr.name + (rr.pass ? '' : ' — ' + rr.detail));
     // RED CONTROL: the archive leg's held guard cut (in a copy) — the same hourly pass takes the folder while held
     const MJT = mutantCopies('jobs-unread-table', ROOT), jsT = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
     const JT = MJT.load('src/jobs.js', editAnchor(jsT, '      if (!(this._unread && this._unread.store)) for (const rec of this.archivedList()) {', '      for (const rec of this.archivedList()) {', 'src/jobs.js'), 'gc-archive-unheld');
@@ -760,9 +760,9 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     const LT = path.join(XT.logsDir, 'jb-f2760a0e'); fs.mkdirSync(LT, { recursive: true }); fs.writeFileSync(path.join(LT, 'run-1.log'), 'made-up');
     if (XT._unread.store) await XT._gc({ now: Date.now() });
     const goneCtl = !!XT._unread.store && await until(() => !fs.existsSync(LT), 3000);
-    ok(keptAtGc && fs.existsSync(LD) && goneCtl, 'the reader table (r3408 placed): while held the hourly clean-up\'s ARCHIVE leg takes no archived record\'s folder — RED CONTROL (in a copy, the guard cut): the same pass takes it', { keptAtGc, kept: fs.existsSync(LD), goneCtl });
+    ok(gateOf(keptAtGc) && gateOf(fs.existsSync(LD)) && verdictOf(goneCtl), 'the reader table (r3408 placed): while held the hourly clean-up\'s ARCHIVE leg takes no archived record\'s folder — RED CONTROL (in a copy, the guard cut): the same pass takes it', { keptAtGc, kept: fs.existsSync(LD), goneCtl });
     XT.shutdown();
-    for (const rr of copiesCensus(MJT.files, MJT.dir, ROOT, { minCopies: 1, label: 'reader-table ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+    for (const rr of copiesCensus(MJT.files, MJT.dir, ROOT, { minCopies: 1, label: 'reader-table ' })) ok(verdictOf(rr.pass), rr.name + (rr.pass ? '' : ' — ' + rr.detail));
     // THE TOKEN DOORS' CENSUS: every src file that looks a jbt_ token up is a row — its lookups and its held answers counted (a new
     // door, or a door without the hold's answer, is red until its row says it). jobAuth asks the hold before its lookup (A2's pin);
     // the vault's four lookups share ONE answer at its doors' gate. RED CONTROL: the census over a copy of the texts with one answer cut
@@ -779,7 +779,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     { const WG = fs.readFileSync(path.join(ROOT, 'src/lib/wake-grant-rows.js'), 'utf8'), UT = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
       const W = 'This conversation’s jobs cannot be listed right now: Background Work cannot read its records. They keep the wake choices they have — change them in Background Work once its records read again.';
       const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
-      ok(WG.includes("if (r && r.code === 'records-unread') return Object.assign([], { held: true });") && WG.includes("if (!rows.length) return rows.held ? { node: wakeGrantHeldNode(), save: async () => 0 } : null;") && UT.includes('if (!rows.length) { if (rows.held) place.replaceChildren(wakeGrantHeldNode()); return; }') && WG.includes(`t('${W}')`) && zh.includes(`"${W}":`) && ja.includes(`"${W}":`), 'the reader table (pins): the wake-grant rows\' loader keeps the hold; the Terminate confirm and the proposal card say it (zh, ja beside) — never an empty list read as «none owned»'); }
+      ok(gateOf(WG.includes("if (r && r.code === 'records-unread') return Object.assign([], { held: true });")) && gateOf(WG.includes("if (!rows.length) return rows.held ? { node: wakeGrantHeldNode(), save: async () => 0 } : null;")) && gateOf(UT.includes('if (!rows.length) { if (rows.held) place.replaceChildren(wakeGrantHeldNode()); return; }')) && gateOf(WG.includes(`t('${W}')`)) && gateOf(zh.includes(`"${W}":`)) && verdictOf(ja.includes(`"${W}":`)), 'the reader table (pins): the wake-grant rows\' loader keeps the hold; the Terminate confirm and the proposal card say it (zh, ja beside) — never an empty list read as «none owned»'); }
   }
   // B. THE ARCHIVE, EISDIR (a real mode): the boot's sweep would write over it — it keeps its records in the store instead
   const dB = mkDir('jobs-triage-unread-archive'), AF = path.join(dB, 'jobs-archive.json');
@@ -787,12 +787,12 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   fs.mkdirSync(AF);
   const lB = [];
   const Bj = engine({ JobManager }, dB, lB);
-  ok(Bj._unread.archive && Bj._unread.archive.code === 'EISDIR' && fs.statSync(AF).isDirectory() && asides(dB, 'jobs-archive.json').length === 0 && Bj.jobs.has('jb-f2760b01') && lB.some((l) => /NOT archived — the store keeps them/.test(l)), 'B-f276: an archive whose read fails (EISDIR) is not set aside and not written over — the boot sweep\'s record stays in the store', { unread: Bj._unread.archive, asides: asides(dB, 'jobs-archive.json') });
+  ok(gateOf(Bj._unread.archive) && Bj._unread.archive.code === 'EISDIR' && gateOf(fs.statSync(AF).isDirectory()) && asides(dB, 'jobs-archive.json').length === 0 && gateOf(Bj.jobs.has('jb-f2760b01')) && verdictOf(lB.some((l) => /NOT archived — the store keeps them/.test(l))), 'B-f276: an archive whose read fails (EISDIR) is not set aside and not written over — the boot sweep\'s record stays in the store', { unread: Bj._unread.archive, asides: asides(dB, 'jobs-archive.json') });
   fs.rmdirSync(AF); fs.writeFileSync(AF, JSON.stringify([{ ...rec('jb-f2760b02'), archivedAt: T0 - D, archivedWhy: 'done' }]));
   const backB = await until(() => !Bj._unread.archive && Bj.archive && Bj.archive.some((r) => r.id === 'jb-f2760b02'));
   const sw = backB ? sweepNow(Bj, { now: T0 }) : null;
   const onDiskB = (() => { try { return JSON.parse(fs.readFileSync(AF, 'utf-8')).map((r) => r.id).sort().join(); } catch (e) { return e.code; } })();
-  ok(backB && sw && sw.archived.includes('jb-f2760b01') && onDiskB === 'jb-f2760b01,jb-f2760b02', 'B-f276: the archive is read again; the next sweep archives beside what it held (nothing lost)', { backB, onDiskB });
+  ok(gateOf(backB) && gateOf(sw) && gateOf(sw.archived.includes('jb-f2760b01')) && onDiskB === 'jb-f2760b01,jb-f2760b02', 'B-f276: the archive is read again; the next sweep archives beside what it held (nothing lost)', { backB, onDiskB });
   if (Bj._logsNoteP) await Bj._logsNoteP;
   Bj.shutdown();
   // B2. THE ARCHIVE'S WRITE GUARD (an EIO stand-in on its read — a real file, so only the guard keeps the sweep's write off it)
@@ -808,7 +808,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     return { J, kept: fs.readFileSync(F, 'utf-8') === before, inStore: J.jobs.has('jb-f2760g01') };
   };
   const g = guardScene({ JobManager }, 'jobs-triage-unread-archive-guard');
-  ok(g.kept && g.inStore && g.J._unread.archive && g.J._unread.archive.code === 'EIO', 'B-f276: the boot sweep NEVER writes over an archive whose read failed (EIO) — its bytes are as they were, the due record stays in the store', g.J._unread.archive);
+  ok(gateOf(g.kept) && gateOf(g.inStore) && gateOf(g.J._unread.archive) && g.J._unread.archive.code === 'EIO', 'B-f276: the boot sweep NEVER writes over an archive whose read failed (EIO) — its bytes are as they were, the due record stays in the store', g.J._unread.archive);
   if (g.J._logsNoteP) await g.J._logsNoteP;
   g.J.shutdown();
   // C. TORN BYTES THAT COULD NOT BE SET ASIDE (the rename AND the copy refused): the live file is their only copy — never written over
@@ -820,7 +820,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   let C; try { C = engine({ JobManager }, dC, lC); } finally { fs.renameSync = rn; fs.copyFileSync = cp; }
   C._unreadStopped = true;   // the scene holds still (no read again while it is judged)
   C._dirty = true; C._save(); landedU4();   // lane lg-store-writes U4 (the move's meeting): the save is the store writer's — landed before the file is looked at, so «never writes over» is proved, not vacuous
-  ok(C._unread.store && C._unread.store.code === 'not set aside' && fs.readFileSync(CF, 'utf-8') === torn && C.jobs.has('jb-f2760c01'), 'B-f276: torn bytes whose set-aside failed hold the store — a save never writes the skeletons over their only copy', C._unread.store);
+  ok(gateOf(C._unread.store) && C._unread.store.code === 'not set aside' && fs.readFileSync(CF, 'utf-8') === torn && verdictOf(C.jobs.has('jb-f2760c01')), 'B-f276: torn bytes whose set-aside failed hold the store — a save never writes the skeletons over their only copy', C._unread.store);
   if (C._logsNoteP) await C._logsNoteP;
   C.shutdown();
   ok(fs.readFileSync(CF, 'utf-8') === torn, 'B-f276: …nor does the exit');
@@ -837,7 +837,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     if (J._logsNoteP) await J._logsNoteP; J.shutdown(); return out;
   };
   const dr = await dropScene({ JobManager }, 'jobs-triage-reread-drop');
-  ok(dr.before && !dr.skel && dr.real && !dr.held, 'B-f276 cure: a read again that answers DROPS the skeletons of the earlier answer before it loads — the records stand alone', dr);
+  ok(gateOf(dr.before) && !dr.skel && gateOf(dr.real) && !dr.held, 'B-f276 cure: a read again that answers DROPS the skeletons of the earlier answer before it loads — the records stand alone', dr);
   // F. A JOB OF THE PREVIOUS GENERATION THAT ENDED WHILE THE STORE WAS UNREAD is finalized, and its end told, when the read answers
   const endScene = async (Mod, name) => {
     const d = mkDir(name), F = path.join(d, 'jobs.json'), RT = T0 - 3600e3;
@@ -856,7 +856,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     if (J._logsNoteP) await J._logsNoteP; J.shutdown(); return out;
   };
   const en = await endScene({ JobManager }, 'jobs-triage-reread-ended');
-  ok(en.atBoot === 0 && en.state === 'done' && en.ended === 'jb-f2760f01' && en.told, 'B-f276 cure: a job that ENDED while the store was unread is finalized when the read answers (the boot\'s adoption, late) — its end is told', en);
+  ok(en.atBoot === 0 && en.state === 'done' && en.ended === 'jb-f2760f01' && verdictOf(en.told), 'B-f276 cure: a job that ENDED while the store was unread is finalized when the read answers (the boot\'s adoption, late) — its end is told', en);
   // H. A READ AGAIN THAT HANGS (cure r1, the brief's own law): said once, the tries go on, one read in flight; when it ends the next loads
   const hangScene = async (Mod, name, { waitBack = true } = {}) => {
     const d = mkDir(name), F = path.join(d, 'jobs.json'), hb = JSON.stringify([rec('jb-f2760h01')]);
@@ -880,7 +880,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     if (J._logsNoteP) await J._logsNoteP; J.shutdown(); return out;
   };
   const hg = await hangScene({ JobManager }, 'jobs-triage-reread-hang');
-  ok(hg.said === 1 && hg.triesAt >= 4 && hg.armed && hg.inFlight === 1 && hg.back, 'B-f276 cure: a read again that HANGS is said once, the next tries stay armed (never «held till a restart»), ONE read is in flight (never doubled), and once it ends the next try loads the store', hg);
+  ok(hg.said === 1 && hg.triesAt >= 4 && gateOf(hg.armed) && hg.inFlight === 1 && verdictOf(hg.back), 'B-f276 cure: a read again that HANGS is said once, the next tries stay armed (never «held till a restart»), ONE read is in flight (never doubled), and once it ends the next try loads the store', hg);
   // CONTROLS (scripts/mutant-copy.mjs): the release's classification (a failed read of a file that is there = corrupt) and its
   // unguarded save, in a copy
   const MJ = mutantCopies('jobs-unread-f276', ROOT);
@@ -888,7 +888,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const readLine = 'this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));';
   const archLine = 'this._archiveAnswer(SR.storeAnswer(read, { valid: Array.isArray }));';
   const saveLine = "if (!this._unread.store) {";   // lane lg-store-writes U4: the store's write hold now guards its hand-off to the store writer
-  ok([readLine, archLine, saveLine].every((x) => jsrc.split(x).length === 2), 'B-f276 control setup: the two reads and the store\'s write hold are each one line');
+  ok(verdictOf([readLine, archLine, saveLine].every((x) => jsrc.split(x).length === 2)), 'B-f276 control setup: the two reads and the store\'s write hold are each one line');
   const release = (r, f) => `((r) => (r.state === 'unreadable' && fs.existsSync(${f}) ? { ...r, state: 'corrupt' } : r))(${r})`;   // MUTANT: the release
   // (the moved line's must 1: the release had no producer guard either — the bytes refused while held at the write, cut too)
   const JMod = MJ.load('src/jobs.js', anchored(editAnchor(editAnchor(editAnchor(jsrc,
@@ -963,7 +963,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     return { dataCalls, done, tornCalls, aside };
   };
   const ls = await loopScene({ JobManager }, 'jobs-triage-reread-loop');
-  ok(ls.done === 'done' && ls.dataCalls.length === 0 && ls.aside && ls.tornCalls.length === 0, 'B-f276 cure r2: the late load makes NO synchronous file call on the data folder — a live record\'s control files and the torn bytes\' set-aside and listing are done off the loop, then loaded', ls);
+  ok(ls.done === 'done' && ls.dataCalls.length === 0 && gateOf(ls.aside) && ls.tornCalls.length === 0, 'B-f276 cure r2: the late load makes NO synchronous file call on the data folder — a live record\'s control files and the torn bytes\' set-aside and listing are done off the loop, then loaded', ls);
   // cure r2: an UNREAD archive's refusal is said ONCE a hold (never every sweep), and a clear that cannot reach it SAYS so
   {
     const d = mkDir('jobs-triage-unread-archive-once'), AF2 = path.join(d, 'jobs-archive.json'), lo = [];
@@ -972,18 +972,18 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     const J = engine({ JobManager }, d, lo, { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
     sweepNow(J, { now: T0 }); sweepNow(J, { now: T0 + 1 }); sweepNow(J, { now: T0 + 2 });
     const cl = J.clearJobs(['jb-f2760o01'], { allow: () => true });
-    ok(lo.filter((l) => /released but NOT archived/.test(l)).length === 1 && J.jobs.has('jb-f2760o01'), 'B-f276 cure r2: while the archive cannot be read its sweep\'s refusal is said ONCE a hold, not every sweep — the record stays in the store', lo.filter((l) => /NOT archived/.test(l)));
-    ok(cl && /archived records could not be reached, so their words were not cleared — clear them again once it reads — jobs-archive\.json in VibeSpace's data folder could not be read \(EISDIR\)/.test(cl.archiveUnread || ''), 'B-f276 cure r2: a clear that cannot reach a held archive SAYS so in its answer', cl);
+    ok(lo.filter((l) => /released but NOT archived/.test(l)).length === 1 && verdictOf(J.jobs.has('jb-f2760o01')), 'B-f276 cure r2: while the archive cannot be read its sweep\'s refusal is said ONCE a hold, not every sweep — the record stays in the store', lo.filter((l) => /NOT archived/.test(l)));
+    ok(gateOf(cl) && verdictOf(/archived records could not be reached, so their words were not cleared — clear them again once it reads — jobs-archive\.json in VibeSpace's data folder could not be read \(EISDIR\)/.test(cl.archiveUnread || '')), 'B-f276 cure r2: a clear that cannot reach a held archive SAYS so in its answer', cl);
     if (J._logsNoteP) await J._logsNoteP; J.shutdown();
   }
   const dropL = "        for (const [id, j] of this.jobs) if (LS.isSkeleton(j)) this.jobs.delete(id);   // the skeletons of an earlier answer: the new answer rebuilds its own, or has the records\n";
   const adoptL = "        if (!this._unread.store && !this.readOnly) { this._adoptAndReplay(); this._dirty = true; }   // the boot's adoption, late: the records are this process's now\n";
   const armL = "    this._unreadRetrySoon(which);   // the next try first: whatever this one does\n";
   const liftL = "      if (a.state === 'data') this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));\n      else this._unreadEnded(which, was, a, pre).catch((e) => this.d.log(`[jobs] ${base}: its end could not be said:`, e && e.message));\n";   // cure 2: the lift ONLY on a whole read
-  ok([dropL, adoptL, armL, liftL].every((x) => jsrc.split(x).length === 2), 'B-f276 cure control setup: the drop, the late adoption, the armed next try and the lift are each one line');
+  ok(verdictOf([dropL, adoptL, armL, liftL].every((x) => jsrc.split(x).length === 2)), 'B-f276 cure control setup: the drop, the late adoption, the armed next try and the lift are each one line');
   const JC = MJ.load('src/jobs.js', editAnchor(editAnchor(editAnchor(editAnchor(jsrc, dropL, '        // MUTANT: no drop\n', "src/jobs.js"), adoptL, '        // MUTANT: no late adoption\n', "src/jobs.js"), armL, '    // MUTANT: the next try only after an answer\n', "src/jobs.js"), liftL, '      // MUTANT: no lift\n', "src/jobs.js"), 'cure');
   const drx = await dropScene(JC, 'jobs-triage-reread-drop-mut');
-  ok(drx.skel && drx.real, 'B-f276 cure CONTROL (no drop, in a copy): the skeleton of the earlier answer stays beside the records', drx);
+  ok(gateOf(drx.skel) && verdictOf(drx.real), 'B-f276 cure CONTROL (no drop, in a copy): the skeleton of the earlier answer stays beside the records', drx);
   const enx = await endScene(JC, 'jobs-triage-reread-ended-mut');
   ok(enx.state === 'up' && !enx.ended, 'B-f276 cure CONTROL (no late adoption, in a copy): the job that ended meanwhile stays «up» — never finalized, never told', enx);
   const liftScene = async (Mod, name) => {
@@ -999,7 +999,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   };
   const lf = await liftScene({ JobManager }, 'jobs-triage-reread-lift');
   const lfx = await liftScene(JC, 'jobs-triage-reread-lift-mut');
-  ok(lf.wrote && !lf.noteLeft && !lf.held && lfx.wrote && lfx.noteLeft && lfx.held, 'B-f276 cure (the ruling) + CONTROL (no lift, in a copy): a folder fault writes the note; the read again that loads lifts it — without the lift it holds the clean-up for good', { lf, lfx });
+  ok(gateOf(lf.wrote) && !lf.noteLeft && !lf.held && gateOf(lfx.wrote) && gateOf(lfx.noteLeft) && verdictOf(lfx.held), 'B-f276 cure (the ruling) + CONTROL (no lift, in a copy): a folder fault writes the note; the read again that loads lifts it — without the lift it holds the clean-up for good', { lf, lfx });
   const preL = "      return { a, pre: await this._unreadPrefetch(which, a, file) };   // cure r2: what the late load reads, off the loop\n";   // cure 2: inside the one in-flight slot
   ok(jsrc.split(preL).length === 2, 'B-f276 cure r2 control setup: the late load\'s prefetch is one line');
   const JP = MJ.load('src/jobs.js', editAnchor(jsrc, preL, '      return { a, pre: null };   // MUTANT: the late load reads on the loop\n', "src/jobs.js"), 'prefetch');
@@ -1028,11 +1028,11 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(jsrc.split(LIFT_ANY).length === 2, 'B-f276 cure 2 control setup: the lift asks the answer\'s state on one line');
   const JL = MJ.load('src/jobs.js', editAnchor(jsrc, LIFT_ANY, "      if (true) this._unreadLift(which, was)", "src/jobs.js"), 'lift-any');   // MUTANT: r2 — the lift on ANY answer that clears the hold
   const gn = await notWhole({ JobManager }, 'jobs-triage-reread-gone', 'gone'), gnx = await notWhole(JL, 'jobs-triage-reread-gone-mut', 'gone');
-  ok(gn.wrote && gn.ended && gn.noteLeft && !gn.done && gn.held && !gn.readAgain && gn.resolved >= 1 && gn.gone && gn.gone.urgency === 'high' && /the file was gone — the jobs it listed are not in VibeSpace now/.test(gn.gone.words.key) && gn.gone.words.params.note === 'jobs.json.corrupt-unread' && Number.isFinite(gn.gone.words.params.when.at) && Number.isFinite(gn.gone.words.params.until.at) && /the file is GONE/.test(gn.said), 'cure 2: a read again that finds the file GONE ends the hold with ITS OWN sentence (what is gone, the note that keeps the logs) — the note STANDS, the clean-up stays held, never «nothing was lost»', gn);
-  ok(gnx.readAgain && !gnx.noteLeft && !gnx.held, 'cure 2 CONTROL (r2: the lift on any answer, in a copy): «nothing was lost» is said of a GONE file, its note is marked done and the clean-up resumes over jobs whose records are not there', gnx);
+  ok(gateOf(gn.wrote) && gateOf(gn.ended) && gateOf(gn.noteLeft) && !gn.done && gateOf(gn.held) && !gn.readAgain && gn.resolved >= 1 && gateOf(gn.gone) && gn.gone.urgency === 'high' && gateOf(/the file was gone — the jobs it listed are not in VibeSpace now/.test(gn.gone.words.key)) && gn.gone.words.params.note === 'jobs.json.corrupt-unread' && gateOf(Number.isFinite(gn.gone.words.params.when.at)) && gateOf(Number.isFinite(gn.gone.words.params.until.at)) && verdictOf(/the file is GONE/.test(gn.said)), 'cure 2: a read again that finds the file GONE ends the hold with ITS OWN sentence (what is gone, the note that keeps the logs) — the note STANDS, the clean-up stays held, never «nothing was lost»', gn);
+  ok(gateOf(gnx.readAgain) && !gnx.noteLeft && !gnx.held, 'cure 2 CONTROL (r2: the lift on any answer, in a copy): «nothing was lost» is said of a GONE file, its note is marked done and the clean-up resumes over jobs whose records are not there', gnx);
   const tn = await notWhole({ JobManager }, 'jobs-triage-reread-torn', 'torn'), tnx = await notWhole(JL, 'jobs-triage-reread-torn-mut', 'torn');
-  ok(tn.ended && tn.asides.length === 1 && tn.skel && tn.corrupt && tn.corrupt.words.params.file === tn.asides[0] && !tn.readAgain && tn.held && tn.done && tn.resolved >= 1 && /torn bytes, set aside as jobs\.json\.corrupt-\d+/.test(tn.said), 'cure 2: a read again that finds TORN bytes ends the hold as a boot would — set aside (named in its item), rebuilt from the job logs; the set-aside holds the clean-up, the failure\'s note is done, never «nothing was lost»', tn);
-  ok(tnx.readAgain && !tnx.held, 'cure 2 CONTROL (r2: the lift on any answer, in a copy): «nothing was lost» is said of TORN bytes and the clean-up resumes', tnx);
+  ok(gateOf(tn.ended) && tn.asides.length === 1 && gateOf(tn.skel) && gateOf(tn.corrupt) && tn.corrupt.words.params.file === tn.asides[0] && !tn.readAgain && gateOf(tn.held) && gateOf(tn.done) && tn.resolved >= 1 && verdictOf(/torn bytes, set aside as jobs\.json\.corrupt-\d+/.test(tn.said)), 'cure 2: a read again that finds TORN bytes ends the hold as a boot would — set aside (named in its item), rebuilt from the job logs; the set-aside holds the clean-up, the failure\'s note is done, never «nothing was lost»', tn);
+  ok(gateOf(tnx.readAgain) && !tnx.held, 'cure 2 CONTROL (r2: the lift on any answer, in a copy): «nothing was lost» is said of TORN bytes and the clean-up resumes', tnx);
   // CURE 2: ONE IN FLIGHT A STORE covers the read AND its prefetch — a SLOW prefetch with a second try: one read, one file at a time, one load
   // r3760 (B-3dbd member, placed by a probe on the kit, run 7da095ac2-20261124185718-box): the counter took every read under ANY
   // job-logs folder of the process — the suite's other live engines' memory samplers (_sampleUse → _treeAnonMb → pid.json, on a
@@ -1071,12 +1071,12 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const JS2 = MJ.load('src/jobs.js', editAnchor(jsrc, SLOT_A, SLOT_A + "      if (this._unreadP[which]) this._unreadP[which] = null;   // MUTANT: r2 — the slot covers the read only\n", "src/jobs.js"), 'slot-read-only');
   const pf = await prefScene({ JobManager }, 'jobs-triage-reread-prefetch'), pfx = await prefScene(JS2, 'jobs-triage-reread-prefetch-mut');
   const slotHeld = (x) => !!x.during && x.during.waited && x.during.triesHeld >= 3 && x.during.storeReads === 1 && x.during.ctlReads === 1 && x.during.held && x.back && x.said === 1 && x.loads === 1;
-  ok(slotHeld(pf), 'cure 2: a SLOW prefetch holds the one slot — the tries go on (three more met it), ONE read of the store, ONE control file of its own in flight at a time, said once, ONE load once it answers', pf);
+  ok(verdictOf(slotHeld(pf)), 'cure 2: a SLOW prefetch holds the one slot — the tries go on (three more met it), ONE read of the store, ONE control file of its own in flight at a time, said once, ONE load once it answers', pf);
   // r3760, THE PLACED FORM (every run, no load): the store's read held 60 ms (the tries pass the old «5» before the prefetch reads)
   // and another engine's control read started INSIDE the window — the leg judges this engine's prefetch alone, on its fact
   const pfP = await prefScene({ JobManager }, 'jobs-triage-reread-prefetch-placed', { storeHoldMs: 60, foreign: true });
-  ok(slotHeld(pfP) && pfP.during.triesAtRead >= 5 && pfP.during.others >= 1, `cure 2 PLACED: a store read held 60 ms (${pfP.during && pfP.during.triesAtRead} tries before the prefetch's first read) and another engine's control read in the window (${pfP.during && pfP.during.others}) — the slot is judged on its own prefetch, after its own read began`, pfP);
-  ok(pfx.during && (pfx.during.storeReads > 1 || pfx.during.ctlReads > 1), 'cure 2 CONTROL (r2: the slot covers the read only, in a copy): a second try reads the store and starts its prefetch over the slow one', pfx);
+  ok(gateOf(slotHeld(pfP)) && pfP.during.triesAtRead >= 5 && pfP.during.others >= 1, `cure 2 PLACED: a store read held 60 ms (${pfP.during && pfP.during.triesAtRead} tries before the prefetch's first read) and another engine's control read in the window (${pfP.during && pfP.during.others}) — the slot is judged on its own prefetch, after its own read began`, pfP);
+  ok(gateOf(pfx.during) && (pfx.during.storeReads > 1 || pfx.during.ctlReads > 1), 'cure 2 CONTROL (r2: the slot covers the read only, in a copy): a second try reads the store and starts its prefetch over the slow one', pfx);
   // ── CURE 3 (主开发 11:10Z, as if a must): a store that answers «missing» RIGHT AFTER an unreadable answer is read once more before
   // anything is written at its path — the storage that says «no such file» for a moment about a file that is there
   const onceScene = async (Mod, name) => {
@@ -1097,8 +1097,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(jsrc.split(ONCE_A).length === 2, 'B-f276 cure 3 control setup: «missing» read once more is one line');
   const JO = MJ.load('src/jobs.js', editAnchor(jsrc, ONCE_A, '    if (false /* MUTANT: cure 2 — «missing» believed at once */) {', "src/jobs.js"), 'missing-once');
   const on = await onceScene({ JobManager }, 'jobs-triage-reread-once'), onx = await onceScene(JO, 'jobs-triage-reread-once-mut');
-  ok(on.heldAfterOne && !on.wroteOver && on.back && on.said, 'cure 3: a store that answers «missing» right after an unreadable answer is READ ONCE MORE — the hold stands, the next save writes nothing at its path, and the file that was there all along is read back whole', on);
-  ok(!onx.heldAfterOne && onx.wroteOver && !onx.back, 'cure 3 CONTROL (cure 2: «missing» believed at once, in a copy): the hold ends and the next save WRITES OVER the path — the records that were there are lost', onx);
+  ok(gateOf(on.heldAfterOne) && !on.wroteOver && gateOf(on.back) && verdictOf(on.said), 'cure 3: a store that answers «missing» right after an unreadable answer is READ ONCE MORE — the hold stands, the next save writes nothing at its path, and the file that was there all along is read back whole', on);
+  ok(!onx.heldAfterOne && gateOf(onx.wroteOver) && !onx.back, 'cure 3 CONTROL (cure 2: «missing» believed at once, in a copy): the hold ends and the next save WRITES OVER the path — the records that were there are lost', onx);
   // the U4 move's read (small 3): a LOAD that finds the last engine's write of jobs.json STILL OWED (the writer could not land it)
   // never reads past it — the store starts UNREAD (code EOWED: B-f276's hold, never written over, read again off the loop), so the
   // earlier engine's write cannot land later over a store this one read older. RED: a copy that reads anyway (its plant first)
@@ -1114,7 +1114,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   };
   const OWED_A = "    if (owedStill) read = { error: Object.assign(new Error(`the last engine's write of jobs.json is still owed (${owedStill}) — read again once it lands`), { code: 'EOWED' }) };";
   const ow = owedScene({ JobManager }, 'jobs-triage-owed-load'), owx = owedScene(MJ.load('src/jobs.js', anchored(jsrc, OWED_A, '    if (false /* MUTANT: reads past a write still owed */) read = null;', 'still owed ⇒ never read past'), 'owed-read-anyway'), 'jobs-triage-owed-load-mut');
-  ok(ow.held && ow.code === 'EOWED' && !ow.read, 'the U4 move (small 3): a load whose earlier write of jobs.json is still owed holds the store UNREAD (EOWED) — never a read past it', ow);
+  ok(gateOf(ow.held) && ow.code === 'EOWED' && !ow.read, 'the U4 move (small 3): a load whose earlier write of jobs.json is still owed holds the store UNREAD (EOWED) — never a read past it', ow);
   ok(!owx.held && owx.code === null, 'CONTROL (a copy that reads past the owed write): the store is READ (not held) — the earlier engine\'s write could land over it later', owx);
   // ── THE MOVED2 CURE 2 (主开发's ruling): THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING — no roll back anywhere. The act changes
   // memory and marks the store; what cannot be undone (the job hears its answer, a For-you item resolved, a kept process ended) runs
@@ -1154,9 +1154,9 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     return { ans: outA, rm: outR, clear: outC, drain: outD, kill: outK };
   };
   const law = lawRun({ JobManager }, 'real');
-  ok(law.ans.ok && !law.ans.pending && law.ans.state === 'up' && law.ans.askedBefore === 0 && law.ans.askedAfter === 1,
+  ok(gateOf(law.ans.ok) && !law.ans.pending && law.ans.state === 'up' && law.ans.askedBefore === 0 && law.ans.askedAfter === 1,
     'THE STEP RIDES THE LANDING: a panel\'s answer not landed yet is TAKEN (memory and its store, never rolled back) — the job hears it and its For-you item closes only AT the landing, once', law.ans);
-  ok(law.rm.ok && !law.rm.kept && law.rm.askedBefore === 0 && law.rm.askedAfter === 1, '…a removal: the job is out of memory, its asks resolved only at the landing', law.rm);
+  ok(gateOf(law.rm.ok) && !law.rm.kept && law.rm.askedBefore === 0 && law.rm.askedAfter === 1, '…a removal: the job is out of memory, its asks resolved only at the landing', law.rm);
   ok(law.clear.cleared === 1 && !law.clear.notOnDisk && law.clear.state === 'up' && law.clear.askedBefore === 0 && law.clear.askedAfter === 1,
     '…a clear (must 3): the asked job\'s For-you item is resolved AT the landing — by itself, never left open for good', law.clear);
   ok(law.drain.got === 1 && law.drain.back === 0, '…a drain (must 4): nothing is PUT BACK — the text went out, the removal stays and the writer retries', law.drain);
@@ -1215,9 +1215,9 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(jsrc.split(AR_A).length === 2, 'B-f276 cure 3 control setup: the archive prefetch is one line');
   const JR = MJ.load('src/jobs.js', editAnchor(jsrc, AR_A, '      if (false /* MUTANT: cure 2 — the load reads the archive on the loop */) {', "src/jobs.js"), 'ro-archive');
   const ro = await roScene({ JobManager }, 'jobs-triage-reread-ro'), rox = await roScene(JR, 'jobs-triage-reread-ro-mut');
-  ok(ro.ro && ro.sync === 0 && ro.skel && !ro.archivedSkel, 'cure 3: a READ-ONLY engine\'s torn read again makes no synchronous read on the loop — the archive\'s ids come with the prefetch (its skeletons skip the archived job)', ro);
-  ok(rox.ro && rox.sync > 0, 'cure 3 CONTROL (cure 2, in a copy): the load reads jobs-archive.json synchronously on the loop', rox);
-  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 7, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  ok(gateOf(ro.ro) && ro.sync === 0 && gateOf(ro.skel) && !ro.archivedSkel, 'cure 3: a READ-ONLY engine\'s torn read again makes no synchronous read on the loop — the archive\'s ids come with the prefetch (its skeletons skip the archived job)', ro);
+  ok(gateOf(rox.ro) && rox.sync > 0, 'cure 3 CONTROL (cure 2, in a copy): the load reads jobs-archive.json synchronously on the loop', rox);
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 7, label: 'B-f276 ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log('§15 B-6c1a: a record whose runs is not a list never breaks the list');
@@ -1240,21 +1240,21 @@ console.log('§15 B-6c1a: a record whose runs is not a list never breaks the lis
   };
   const real = await scene(wiring, 'jobs-triage-runs-shape');
   const rowsOf = (r) => (r && r.body && Array.isArray(r.body.jobs) ? r.body.jobs : []), runsBy = (r, id) => (rowsOf(r).find((j) => j.id === id) || {}).runs;
-  ok(real.list && real.list.status === 200 && ['jb-6c1a0001', 'jb-6c1a0002'].every((id) => Array.isArray(runsBy(real.list, id)) && runsBy(real.list, id).length === 0) && runsBy(real.list, 'jb-6c1a0003').length === 1
-    && real.arch && real.arch.status === 200 && Array.isArray(runsBy(real.arch, 'jb-6c1a0004')) && runsBy(real.arch, 'jb-6c1a0004').length === 0,
+  ok(gateOf(real.list) && real.list.status === 200 && gateOf(['jb-6c1a0001', 'jb-6c1a0002'].every((id) => Array.isArray(runsBy(real.list, id)) && runsBy(real.list, id).length === 0)) && runsBy(real.list, 'jb-6c1a0003').length === 1
+    && gateOf(real.arch) && real.arch.status === 200 && gateOf(Array.isArray(runsBy(real.arch, 'jb-6c1a0004'))) && runsBy(real.arch, 'jb-6c1a0004').length === 0,
     'B-6c1a: records whose runs is an object, a number, a string, or a list holding a null are LISTED (live and archived) — their runs read as none, never a list that fails', { live: rowsOf(real.list).map((j) => [j.id, j.runs]), arch: rowsOf(real.arch).map((j) => [j.id, j.runs]) });
   const recordsOnly = (v) => Array.isArray(v) && v.every((r) => r && typeof r === 'object');
-  ok(recordsOnly(real.detail['jb-6c1a0001']) && real.detail['jb-6c1a0001'].length === 0 && recordsOnly(real.detail['jb-6c1a0002']) && recordsOnly(real.detail['jb-6c1a0003']) && real.detail['jb-6c1a0003'].length === 1 && recordsOnly(real.detail['jb-6c1a0004']),
+  ok(gateOf(recordsOnly(real.detail['jb-6c1a0001'])) && real.detail['jb-6c1a0001'].length === 0 && gateOf(recordsOnly(real.detail['jb-6c1a0002'])) && gateOf(recordsOnly(real.detail['jb-6c1a0003'])) && real.detail['jb-6c1a0003'].length === 1 && verdictOf(recordsOnly(real.detail['jb-6c1a0004'])),
     'B-6c1a: the row\'s DETAIL (live and archived) serves its runs as a list of whole records — the panel\'s detail never meets an object, a number, a string or a null', real.detail);
   const WSRC = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8'), NEW_RUNS = "(Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object').map((r) => ({";
   const DETAIL = ['runs: runsWhole(rec), vaultUses: vaultUsesOf(rec) } });', 'runs: runsWhole(job), vaultUses: vaultUsesOf(job) } });'];   // B-a08e (r1665): + every snapshot's vaultUses
-  ok(DETAIL.every((a) => WSRC.split(a).length === 2), 'B-6c1a control setup: the anchors of the detail\'s control (its two runs reads) are in the source');
+  ok(verdictOf(DETAIL.every((a) => WSRC.split(a).length === 2)), 'B-6c1a control setup: the anchors of the detail\'s control (its two runs reads) are in the source');
   ok(WSRC.split(NEW_RUNS).length === 2, 'B-6c1a control setup: the guarded runs read is in jobs-wiring once (the plant the control swaps)');
   const MJ6 = mutantCopies('jobs-runs-shape-6c1a', ROOT);
   const old = await scene(MJ6.load('src/server/jobs-wiring.js', editAnchor(editAnchor(editAnchor(WSRC, NEW_RUNS, '(j.runs || []).map((r) => ({', "src/server/jobs-wiring.js"), DETAIL[0], 'runs: rec.runs, vaultUses: vaultUsesOf(rec) } });', "src/server/jobs-wiring.js"), DETAIL[1], 'runs: job.runs, vaultUses: vaultUsesOf(job) } });', "src/server/jobs-wiring.js"), 'release'), 'jobs-triage-runs-shape-mut');   // stale-pins: kept — the control writes the release's runs read back into a copy
   ok(!(old.list && old.list.status === 200) || !(old.arch && old.arch.status === 200), 'B-6c1a CONTROL (the release\'s runs read, in a copy): the list FAILS on such a record', { list: old.list && (old.list.status || old.list.threw), arch: old.arch && (old.arch.status || old.arch.threw) });
   ok(!recordsOnly(old.detail['jb-6c1a0001']) && !recordsOnly(old.detail['jb-6c1a0003']), 'B-6c1a CONTROL (the release\'s detail, in the same copy): the detail serves the object as it is and the list with its null', old.detail);
-  for (const r of copiesCensus(MJ6.files, MJ6.dir, ROOT, { minCopies: 1, label: 'B-6c1a ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MJ6.files, MJ6.dir, ROOT, { minCopies: 1, label: 'B-6c1a ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log('§16 B-c330: the job-logs clean-up\'s steady passes fold into ONE journal line a day; a big pass speaks at once');
@@ -1276,15 +1276,15 @@ console.log('§16 B-c330: the job-logs clean-up\'s steady passes fold into ONE j
     J.shutdown(); return out;
   };
   const r = await scene({ JobManager }, 'jobs-triage-logs-fold');
-  ok(r.day1.length === 1 && /job-logs: 60 run dir\(s\) past the 14-day retention that no record lists removed \(120 entries\)/.test(r.day1[0]), 'B-c330: three small steady passes say NOTHING yet; a pass that removes fifty or more speaks at once', r.day1);
-  ok(r.all.length === 2 && /job-logs: on 2026-11-17 \(UTC\) 9 run dir\(s\) past the 14-day retention that no record lists were removed over 3 steady pass\(es\) \(18 entries\)/.test(r.all[1]), 'B-c330: the day\'s first pass after it says the day\'s ONE folded line — the counts summed', r.all);
-  ok(r.keptDay && r.keptDay.day === '2026-11-18' && r.keptDay.removed === 2 && r.keptDay.passes === 1, 'B-c330: the day\'s folded counts are in the clean-up\'s record — a restart loses none', r.keptDay);
+  ok(r.day1.length === 1 && verdictOf(/job-logs: 60 run dir\(s\) past the 14-day retention that no record lists removed \(120 entries\)/.test(r.day1[0])), 'B-c330: three small steady passes say NOTHING yet; a pass that removes fifty or more speaks at once', r.day1);
+  ok(r.all.length === 2 && verdictOf(/job-logs: on 2026-11-17 \(UTC\) 9 run dir\(s\) past the 14-day retention that no record lists were removed over 3 steady pass\(es\) \(18 entries\)/.test(r.all[1])), 'B-c330: the day\'s first pass after it says the day\'s ONE folded line — the counts summed', r.all);
+  ok(gateOf(r.keptDay) && r.keptDay.day === '2026-11-18' && r.keptDay.removed === 2 && r.keptDay.passes === 1, 'B-c330: the day\'s folded counts are in the clean-up\'s record — a restart loses none', r.keptDay);
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), FOLD = '    else if (ans.removed) { const d = st.day || (st.day = { day: today, removed: 0, entries: 0, passes: 0 }); d.removed += ans.removed; d.entries += ans.entries || 0; d.passes++; }';
   ok(JSRC.split(FOLD).length === 2, 'B-c330 control setup: the fold is one line in jobs.js (the plant the control swaps)');
   const MJ30 = mutantCopies('jobs-logs-fold-c330', ROOT);
   const rx = await scene(MJ30.load('src/jobs.js', editAnchor(JSRC, FOLD, '    else if (ans.removed) this.d.log(LS.words.pass(ans));   /* MUTANT: the release — a line every pass */', "src/jobs.js"), 'release'), 'jobs-triage-logs-fold-mut');
   ok(rx.day1.length === 4, 'B-c330 CONTROL (the release, in a copy): every steady pass says its own line (four in a morning)', rx.day1.length);
-  for (const rr of copiesCensus(MJ30.files, MJ30.dir, ROOT, { minCopies: 1, label: 'B-c330 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+  for (const rr of copiesCensus(MJ30.files, MJ30.dir, ROOT, { minCopies: 1, label: 'B-c330 ' })) ok(verdictOf(rr.pass), rr.name + (rr.pass ? '' : ' — ' + rr.detail));
 }
 
 console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause is gone — its For-you item resolved');
@@ -1313,8 +1313,8 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
     J.shutdown(); return out;
   };
   const r = await scene({ JobManager }, 'jobs-triage-withdraw');
-  ok(r.asked === 'awaiting-user' && r.w.ok && r.w.version === r.posted && r.pending === null && r.state === 'up' && r.resolved.join() === 'jb-8bd50001' && r.woke === 'woken' && r.recorded.join() === String(r.posted), 'B-8bd5: a job WITHDRAWS its own panel — closed, its For-you item resolved, a waiting `answers --wait` woken (the answers record the withdraw, as an expiry), back to «up»', r);
-  ok(r.again.ok && /no panel of this job is open/.test(r.again.already || ''), 'B-8bd5: withdrawn twice — answered, nothing changed');
+  ok(r.asked === 'awaiting-user' && gateOf(r.w.ok) && r.w.version === r.posted && r.pending === null && r.state === 'up' && r.resolved.join() === 'jb-8bd50001' && r.woke === 'woken' && r.recorded.join() === String(r.posted), 'B-8bd5: a job WITHDRAWS its own panel — closed, its For-you item resolved, a waiting `answers --wait` woken (the answers record the withdraw, as an expiry), back to «up»', r);
+  ok(gateOf(r.again.ok) && verdictOf(/no panel of this job is open/.test(r.again.already || '')), 'B-8bd5: withdrawn twice — answered, nothing changed');
   ok(r.stdin === 1, 'B-8bd5 (主开发 21:46Z): a stdin-open job reads the withdraw on its stdin (the wrapper\'s answers tail file), as it reads an answer', r.stdin);
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
   // the deferred-save census: the withdraw's resolve RIDES its landing (inside the step); its stdin mirror is written FIRST, at the act's
@@ -1326,9 +1326,9 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
   const MIR = "    if (ctl) { try { fs.promises.appendFile(path.join(ctl, 'answers.jsonl'), JSON.stringify(wrec) + '\\n').catch(() => { }); } catch { } }";   // the census cure (finding 8): written FIRST, at the act's time (the release's order) — outside the riding step
   const rm = await scene(MJ8.load('src/jobs.js', anchored(JSRC, MIR, '      /* MUTANT: no stdin mirror */', 'the stdin mirror of a withdraw'), 'no-mirror'), 'jobs-triage-withdraw-mut2');
   ok(rm.stdin === 0, 'B-8bd5 CONTROL (no mirror, in a copy): the stdin-open job never sees the withdraw', rm.stdin);
-  for (const rr of copiesCensus(MJ8.files, MJ8.dir, ROOT, { minCopies: 1, label: 'B-8bd5 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+  for (const rr of copiesCensus(MJ8.files, MJ8.dir, ROOT, { minCopies: 1, label: 'B-8bd5 ' })) ok(verdictOf(rr.pass), rr.name + (rr.pass ? '' : ' — ' + rr.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
-  ok(/const JOB_SELF_ACTS = Object\.freeze\(\['progress', 'ask', 'withdraw', 'announce'\]\);/.test(fs.readFileSync(path.join(ROOT, 'src/job-model.js'), 'utf8')) && /if \(a\.selfJob\) \{ const v = jobModel\.jobTokenVerdict\(a\.selfJob, job, act, ref, \{ write: true \}\);/.test(ar) && !/const needsControl = \[[^\]]*'withdraw'[^\]]*\];/.test(ar) && /if \(!a\.selfJob && act === 'withdraw' && !jobModel\.canEdit\(job, a\.caller\)\) return jobModel\.canView\(job, a\.caller\) \? res\.status\(403\)/.test(ar) && /else if \(act === 'withdraw'\) r = a\.jm\.withdrawAsk\(job, \{ self: !!a\.selfJob \}\);/.test(ar) && /case 'withdraw': \{/.test(cli) && /vibespace-job withdraw \(its cause is gone\)/.test(cli), 'WIRING: a job token withdraws its OWN panel; a conversation only as its owner — a control grant never withdraws (its route leg: test-jobs-addressed §0); the CLI has `withdraw` (in its usage)');
+  ok(gateOf(/const JOB_SELF_ACTS = Object\.freeze\(\['progress', 'ask', 'withdraw', 'announce'\]\);/.test(fs.readFileSync(path.join(ROOT, 'src/job-model.js'), 'utf8'))) && gateOf(/if \(a\.selfJob\) \{ const v = jobModel\.jobTokenVerdict\(a\.selfJob, job, act, ref, \{ write: true \}\);/.test(ar)) && !/const needsControl = \[[^\]]*'withdraw'[^\]]*\];/.test(ar) && gateOf(/if \(!a\.selfJob && act === 'withdraw' && !jobModel\.canEdit\(job, a\.caller\)\) return jobModel\.canView\(job, a\.caller\) \? res\.status\(403\)/.test(ar)) && gateOf(/else if \(act === 'withdraw'\) r = a\.jm\.withdrawAsk\(job, \{ self: !!a\.selfJob \}\);/.test(ar)) && gateOf(/case 'withdraw': \{/.test(cli)) && verdictOf(/vibespace-job withdraw \(its cause is gone\)/.test(cli)), 'WIRING: a job token withdraws its OWN panel; a conversation only as its owner — a control grant never withdraws (its route leg: test-jobs-addressed §0); the CLI has `withdraw` (in its usage)');
 }
 
 console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH THE STORE WRITER — jobs.json and job-notifications.json are never written on the main thread at a change');
@@ -1362,12 +1362,12 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   };
   const a = scene({ JobManager }, 'moved');
   const acts = a.rec.dirties.slice();
-  ok(a.unchanged && acts.some((x) => x.f === 'jobs.json' && x.name === 'jobs.write' && x.rank === 0) && acts.some((x) => x.f === 'job-notifications.json' && x.name === 'jobs-notifs.write' && x.rank === 0)
-    && acts.every((x) => x.urgent) && a.rec.durables.length === 0,
+  ok(gateOf(a.unchanged) && gateOf(acts.some((x) => x.f === 'jobs.json' && x.name === 'jobs.write' && x.rank === 0)) && gateOf(acts.some((x) => x.f === 'job-notifications.json' && x.name === 'jobs-notifs.write' && x.rank === 0))
+    && gateOf(acts.every((x) => x.urgent)) && a.rec.durables.length === 0,
     'U4: a direct save (an act) hands jobs.json and job-notifications.json to the writer by name, rank 0 + URGENT (the writer\'s own flag — the U4/U5 cure: no durable() timer asked at a save) — the file is NOT written on the main thread at the change', { unchanged: a.unchanged, acts, durables: a.rec.durables });
   a.rec.dirties.length = 0; a.rec.durables.length = 0;
   a.J._dirty = true; a.J._save({ paced: true });   // the 2 s tick
-  ok(a.rec.dirties.length === 2 && a.rec.dirties.every((x) => x.rank === undefined && !x.urgent) && a.rec.durables.length === 0, 'U4: the 2 s tick hands both files PACED — no rank, not urgent, no durable()', a.rec.dirties);
+  ok(a.rec.dirties.length === 2 && gateOf(a.rec.dirties.every((x) => x.rank === undefined && !x.urgent)) && a.rec.durables.length === 0, 'U4: the 2 s tick hands both files PACED — no rank, not urgent, no durable()', a.rec.dirties);
   // THE CENSUS CURE (主开发 19:44Z, the last hunt's findings 1 and 2): A NOTICE STASHED ANYWHERE MARKS ITS STORE URGENT AT THE STASH —
   // a stashed notice (here: the 2 s tick's paced hand-off already owed) makes job-notifications.json the writer's NEXT write (rank 0,
   // urgent): never left to the paced tick (a kill before it lost the only copy). RED (anchored): the stash without its mark
@@ -1380,11 +1380,11 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
     return { marks, urgent: marks.some((x) => x.rank === 0 && x.urgent && x.name === 'jobs-notifs.write') };
   };
   const sm = stashMark({ JobManager }, 'real');
-  ok(sm.urgent, 'THE CENSUS CURE (findings 1, 2): a notice STASHED marks job-notifications.json urgent AT THE STASH (rank 0) — the writer\'s next write, never the paced tick\'s', sm.marks);
+  ok(verdictOf(sm.urgent), 'THE CENSUS CURE (findings 1, 2): a notice STASHED marks job-notifications.json urgent AT THE STASH (rank 0) — the writer\'s next write, never the paced tick\'s', sm.marks);
   const MJS = mutantCopies('jobs-stash-urgent', ROOT);
   const smx = stashMark(MJS.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), '    this._notifsUrgent();   // THE STASH MARKS ITS STORE URGENT', '    // MUTANT: no urgent mark   // THE STASH MARKS ITS STORE URGENT', 'the stash marks its store'), 'stash-unmarked'), 'mut');
   ok(!smx.urgent, 'CONTROL (a stash without its urgent mark, in a copy): nothing hands the notices to the writer at the stash — red', smx.marks);
-  for (const rr of copiesCensus(MJS.files, MJS.dir, ROOT, { minCopies: 1, label: 'stash-urgent ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+  for (const rr of copiesCensus(MJS.files, MJS.dir, ROOT, { minCopies: 1, label: 'stash-urgent ' })) ok(verdictOf(rr.pass), rr.name + (rr.pass ? '' : ' — ' + rr.detail));
   const bytes = JSON.parse(a.rec.owed.get(a.F).produce());
   ok(bytes.length === 1 && bytes[0].name === 'u4 renamed' && !JSON.stringify(bytes).includes('"_'), 'U4: the bytes are the records when the write is due — a later change rides the same write, runtime-only `_` keys never persisted', bytes);
   // a new engine in the same process while the writes are owed: its load lands them first
@@ -1392,7 +1392,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   // (the first engine stays up — a suite's restart in the same process)
   const B = new JobManager({ dataDir: a.d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: a.rec });
   B._load();
-  ok(a.rec.flushes.length === flushes0 + 1 && a.rec.flushes[flushes0] === 'jobs.json+job-notifications.json' && B.jobs.get('jb-0248a401') && B.jobs.get('jb-0248a401').name === 'u4 renamed', 'U4: an engine made AGAIN while the store is owed lands exactly those two files first, then reads them', { flushes: a.rec.flushes });
+  ok(a.rec.flushes.length === flushes0 + 1 && a.rec.flushes[flushes0] === 'jobs.json+job-notifications.json' && gateOf(B.jobs.get('jb-0248a401')) && B.jobs.get('jb-0248a401').name === 'u4 renamed', 'U4: an engine made AGAIN while the store is owed lands exactly those two files first, then reads them', { flushes: a.rec.flushes });
   // the hub's exit: the store lands at the writer's exit flush — the lock goes only once jobs.json holds it
   a.J._touch(a.job); a.J._save({ paced: true });
   a.rec.exitAt = 1;
@@ -1400,7 +1400,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   const lockAtExit = fs.existsSync(a.J.lockFile);
   a.rec.land();
   const lockAfter = fs.existsSync(a.J.lockFile);
-  ok(lockAtExit && !lockAfter, 'U4: at the hub\'s exit the lock stays until jobs.json has landed (the writer\'s exit flush), then it goes', { lockAtExit, lockAfter });
+  ok(gateOf(lockAtExit) && !lockAfter, 'U4: at the hub\'s exit the lock stays until jobs.json has landed (the writer\'s exit flush), then it goes', { lockAtExit, lockAfter });
   // a shutdown OUTSIDE the hub's exit (a suite's engine): the store lands now, then the lock goes
   const c = scene({ JobManager }, 'down');
   c.J.shutdown();
@@ -1415,7 +1415,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   // «notOnDisk» before the command gives up — never a reset that makes an agent repeat a create)
   const BUDGET_W = require(path.join(ROOT, 'src/cli-call.js')).BUDGETS.write;
   let inPlace = null; c.J.persisted((v) => { inPlace = v; });
-  ok(inPlace === false && c.rec.waits.length >= 3 && c.rec.waits.every((w) => w.files.join('+') === 'jobs.json+job-notifications.json' && w.timeoutMs > 0 && w.timeoutMs < BUDGET_W),
+  ok(inPlace === false && c.rec.waits.length >= 3 && verdictOf(c.rec.waits.every((w) => w.files.join('+') === 'jobs.json+job-notifications.json' && w.timeoutMs > 0 && w.timeoutMs < BUDGET_W)),
     `U4 cure: persisted(answer) answers IN PLACE through the writer's whenDurable — both files, bounded under the CLI's ${BUDGET_W / 1000} s write budget (src/cli-call.js)`, c.rec.waits);
   // a CLAIM (a hand-over's stamp) is ON DISK when claimNotifs returns — the exactly-once law (verify r2), through the writer
   const k = scene({ JobManager }, 'claim');
@@ -1423,7 +1423,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   const flushesK = k.rec.flushes.length;
   k.J.claimNotifs('conv-u4', k.J.pendingNotifs.get('conv-u4'), 'ho-u4');
   const claimedOnDisk = (() => { try { return (JSON.parse(fs.readFileSync(path.join(k.d, 'job-notifications.json'), 'utf-8'))['conv-u4'] || [])[0].ho === 'ho-u4'; } catch { return false; } })();
-  ok(claimedOnDisk && k.rec.flushes.slice(flushesK).includes('job-notifications.json'), 'U4: a notifications CLAIM is on disk when claimNotifs returns (its one file waited for through the writer) — a kill after it never delivers twice', { claimedOnDisk, flushes: k.rec.flushes.slice(flushesK) });
+  ok(gateOf(claimedOnDisk) && verdictOf(k.rec.flushes.slice(flushesK).includes('job-notifications.json')), 'U4: a notifications CLAIM is on disk when claimNotifs returns (its one file waited for through the writer) — a kill after it never delivers twice', { claimedOnDisk, flushes: k.rec.flushes.slice(flushesK) });
   k.J.shutdown();
   // THE U4/U5 CURE (1) — A CHILD THE DISK DOES NOT HOLD IS NEVER STARTED: the run's intent not on disk inside the writer's
   // bound (a stalled mount), or deferred to the exit's flush ⇒ NO child; the start refused by name, the record failed
@@ -1448,7 +1448,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   };
   for (const how of ['held', 'deferred']) {
     const s1 = spawnScene({ JobManager }, how, stalled(how));
-    ok(/^not started \(manual\): its run could not be recorded on disk first/.test(s1.threw || '') && /start it again once the storage answers$/.test(s1.threw || '') && s1.state === 'failed' && !s1.proc && s1.runs === 0 && s1.said.length === 1 && s1.ack === 1234,
+    ok(gateOf(/^not started \(manual\): its run could not be recorded on disk first/.test(s1.threw || '')) && gateOf(/start it again once the storage answers$/.test(s1.threw || '')) && s1.state === 'failed' && !s1.proc && s1.runs === 0 && s1.said.length === 1 && s1.ack === 1234,
       `U4 cure (1): the run's intent NOT on disk (${how === 'held' ? 'held past the writer\'s bound' : 'deferred to the exit\'s flush'}) ⇒ NO child — the start refused by name and its door («start it again»), the record failed, its run entry taken back, its ack untouched (cure 2), said once`, { threw: s1.threw, state: s1.state, proc: s1.proc, runs: s1.runs, said: s1.said, ack: s1.ack });
     s1.J.shutdown();
   }
@@ -1456,7 +1456,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   const aSp = '    if (!intent.ok) {';
   const NoCheck = mutantCopies('jobs-triage-u4-spawn', ROOT).load('src/jobs.js', anchored(jsrcSp, aSp, '    if (false) {', 'the run\'s intent check (_spawn)'), 'no-intent-check');   // ALSO CURED (the moved2 cure 2): through anchored()
   const s2 = spawnScene(NoCheck, 'red', stalled('held'));
-  ok(!s2.threw && s2.asked, 'U4 cure (1) CONTROL: the check removed (a mutant copy) ⇒ a child IS started (asked of the starter) while its run is not on disk — the check above would be red', { threw: s2.threw, proc: s2.proc, state: s2.state });
+  ok(!s2.threw && verdictOf(s2.asked), 'U4 cure (1) CONTROL: the check removed (a mutant copy) ⇒ a child IS started (asked of the starter) while its run is not on disk — the check above would be red', { threw: s2.threw, proc: s2.proc, state: s2.state });
   try { if (s2.proc && s2.proc.pid) process.kill(s2.proc.pid, 'SIGKILL'); } catch { }
   s2.J.shutdown();
   // the cure's own adversarial read: (a) a REFUSED cron fire moves the schedule to its NEXT slot — never a re-fire at every
@@ -1475,7 +1475,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   const c1 = cronScene({ JobManager }, 'cure');
   const flushesAfterFire = c1.rec.flushes.length;
   await c1.J._cronTick();
-  ok(c1.child && c1.child.state === 'failed' && !c1.child.proc && c1.next > Date.now() && c1.rec.flushes.length === flushesAfterFire,
+  ok(gateOf(c1.child) && c1.child.state === 'failed' && !c1.child.proc && c1.next > Date.now() && c1.rec.flushes.length === flushesAfterFire,
     'U4 cure (1): a cron fire whose run is not on disk ⇒ no child, said; the schedule moves to its NEXT slot — the next tick fires nothing again', { child: c1.child && c1.child.state, next: c1.next, due: c1.due, flushes: c1.rec.flushes.length - flushesAfterFire });
   c1.J.shutdown();
   const jsrcCr = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
@@ -1492,7 +1492,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
     J.init();   // the boot's replay of a 'down' service: refused
     const svc = J.jobs.get('jb-0248a404'), st1 = svc.state, f1 = rec.flushes.length;
     let threw = null; try { J._spawn(svc, 'manual'); } catch (e) { threw = e.message; }
-    ok(st1 === 'down' && !svc.proc && /the storage still holds jobs\.json's write/.test(threw || '') && rec.flushes.length === f1 && svc.state === 'failed',
+    ok(st1 === 'down' && !svc.proc && gateOf(/the storage still holds jobs\.json's write/.test(threw || '')) && rec.flushes.length === f1 && svc.state === 'failed',
       'U4 cure (1): a refused boot replay keeps the service DOWN (said); while the store is still held the next start is refused AT ONCE — no second wait — and a person\'s start is failed', { st1, threw, flushes: rec.flushes.length - f1, state: svc.state });
     J.shutdown();
   }
@@ -1511,7 +1511,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
     return { J, st1, words, state: svc.state, proc: svc.proc || null };
   };
   const b1 = await backScene({ JobManager }, 'cure');
-  ok(b1.st1 === 'down' && /it starts again by itself once the store is on disk$/.test(b1.words) && b1.state === 'up' && !!b1.proc,
+  ok(b1.st1 === 'down' && gateOf(/it starts again by itself once the store is on disk$/.test(b1.words)) && b1.state === 'up' && !!b1.proc,
     'U4/U5 cure 2: a service whose boot replay was refused (its run not on disk) says it comes back by itself — and IS started again once the store lands', { st1: b1.st1, words: b1.words, state: b1.state, proc: b1.proc });
   try { if (b1.proc && b1.proc.pid) process.kill(b1.proc.pid, 'SIGKILL'); } catch { }
   b1.J.shutdown();
@@ -1528,7 +1528,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
     const J = new JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: rec });
     J.init();
     const cron = J.jobs.get('jb-0248a406'), words = (J.events.filter((e) => e.jobId === cron.id).pop() || {}).what || '';
-    ok(cron.state === 'failed' && cron.desiredUp === false && /a one-time schedule does not come back by itself: schedule it again \(vibespace-job run … --at "\+5m", or a new time\) if it still matters$/.test(words),
+    ok(cron.state === 'failed' && cron.desiredUp === false && verdictOf(/a one-time schedule does not come back by itself: schedule it again \(vibespace-job run … --at "\+5m", or a new time\) if it still matters$/.test(words)),
       'U4/U5 cure 2: a refused ONE-SHOT is parked and its words name the door — schedule it again (vibespace-job run … --at)', { state: cron.state, desiredUp: cron.desiredUp, words });
     J.shutdown();
   }
@@ -1546,7 +1546,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
   const { UserTodoManager } = require(path.join(ROOT, 'src/user-todos.js'));
   const JM_MODEL = require(path.join(ROOT, 'src/job-model.js'));
   // a leg that judges prints every fact it judges (the .414 gates' rule) — on a pass too
-  const okP = (c, n, facts) => { ok(c, n, facts); if (c) console.log('    ' + (typeof facts === 'string' ? facts : JSON.stringify(facts))); };
+  const okP = (c, n, facts) => { ok(verdictOf(c), n, facts); if (c) console.log('    ' + (typeof facts === 'string' ? facts : JSON.stringify(facts))); };
   const settle = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 5)); } return !!fn(); };
   const AWAY = { ok: false, reason: 'no live inbox for this conversation on any reachable machine', notRunning: true };
   // the ladder's own verdicts, as conversation-deliver answers them on the train (B-95fc): `live` = a peer lane (reachable, takes messages);
@@ -2398,7 +2398,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return out;
   };
   const RM = rmScene({ JobManager }, 'real');
-  ok(RM.inFlight.sync && !RM.inFlight.answered && RM.inFlight.listed && RM.answered && RM.answered.ok === true && !RM.listed, 'a person\'s ✕ on an archived row: no answer while its removal is in flight (the row still listed); at the landing it is answered and the row is gone', RM);
+  ok(gateOf(RM.inFlight.sync) && !RM.inFlight.answered && gateOf(RM.inFlight.listed) && gateOf(RM.answered) && RM.answered.ok === true && !RM.listed, 'a person\'s ✕ on an archived row: no answer while its removal is in flight (the row still listed); at the landing it is answered and the row is gone', RM);
   const RMX = rmScene(atOnce, 'atonce');
   ok(RMX.inFlight.answered === true && RMX.inFlight.listed === true, 'CONTROL (answered at the hand-off, in a copy): the ✕ is answered «gone» while the row is still on disk and listed (red)', RMX.inFlight);
   // (4) AN ARCHIVE WRITE THIS PROCESS STILL OWES IS NEVER READ PAST — AND NEVER FLUSHED ON THE LOOP (r1908 (5)): a second engine on the
@@ -2424,11 +2424,11 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { n0, held, flushed, n, readAgain: !J2._unread.archive, noted, saidFailed, clearWords };
   };
   const OW = await owedScene({ JobManager }, 'owed');
-  ok(OW.n0 === 0 && OW.held === 'EOWED' && OW.flushed === 0 && OW.readAgain && OW.n > 0 && !OW.noted && !OW.saidFailed && /has not landed yet/.test(OW.clearWords) && !/For you/.test(OW.clearWords), 'an archive write this process still owes is never read past and never flushed on the loop: a second engine holds the archive unread (EOWED) — none of a failed read\'s notes, a clear meanwhile says the write has not landed — and reads it again off the loop at THAT write\'s landing', OW);
+  ok(OW.n0 === 0 && OW.held === 'EOWED' && OW.flushed === 0 && gateOf(OW.readAgain) && OW.n > 0 && !OW.noted && !OW.saidFailed && gateOf(/has not landed yet/.test(OW.clearWords)) && !/For you/.test(OW.clearWords), 'an archive write this process still owes is never read past and never flushed on the loop: a second engine holds the archive unread (EOWED) — none of a failed read\'s notes, a clear meanwhile says the write has not landed — and reads it again off the loop at THAT write\'s landing', OW);
   const OWC_A = "this._unread.archive.owed ? `Background Work: archived records could not be reached";
   ok(JSRC.split(OWC_A).length === 2, 'control setup: the owed hold\'s own clear words are found once');
   const OWC = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWC_A, "false /* MUTANT: the failed read's words */ ? `Background Work: archived records could not be reached", 'archive-owed-clear-words'), 'archive-owed-clear-words'), 'owedc');
-  ok(/For you/.test(OWC.clearWords), 'CONTROL (the owed hold\'s own words cut, in a copy): a clear meanwhile says «could not be read … For you says what to check» — no such item exists (red)', OWC.clearWords);
+  ok(verdictOf(/For you/.test(OWC.clearWords)), 'CONTROL (the owed hold\'s own words cut, in a copy): a clear meanwhile says «could not be read … For you says what to check» — no such item exists (red)', OWC.clearWords);
   const OWED_A = "if (typeof W.pending === 'function' && W.pending(this.archiveFile)) owedStill = 'its write has not landed yet';";
   ok(JSRC.split(OWED_A).length === 2, 'control setup: the archive load\'s owed check is found once');
   const OWX = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWED_A, "if (false) owedStill = 'x';   /* MUTANT: the owed write read past */", 'archive-read-past'), 'archive-read-past'), 'owedx');
@@ -2467,7 +2467,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     } finally { rd.stop(); }
   };
   const OR = await owedRace({ JobManager }, 'owed-race');
-  ok(OR.n1 > 1 && OR.midway.held && OR.midway.n === 0 && !OR.after.held && OR.after.n === OR.n1 - 1, 'a write handed while the owed read again reads is waited for at ITS landing — the second engine never loads the older file, and reads the newer once it lands', OR);
+  ok(OR.n1 > 1 && gateOf(OR.midway.held) && OR.midway.n === 0 && !OR.after.held && OR.after.n === OR.n1 - 1, 'a write handed while the owed read again reads is waited for at ITS landing — the second engine never loads the older file, and reads the newer once it lands', OR);
   const ORA_A = "        if (owedNow()) { this._ride(this.archiveFile, 'the owed archive read again', again); return; }   // handed while it read";
   ok(JSRC.split(ORA_A).length === 2, 'control setup: the read again\'s second look is found once');
   const ORX = await owedRace(MJb.load('src/jobs.js', anchored(JSRC, ORA_A, "        /* MUTANT: no second look */   // handed while it read", 'archive-owed-no-second-look'), 'archive-owed-no-second-look'), 'owedracex');
@@ -2486,7 +2486,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { atLanding, inFile, note: J.jobs.get(id) && J.jobs.get(id).note };
   };
   const CH = changedScene({ JobManager }, 'real');
-  ok(CH.atLanding.live && !CH.atLanding.listedArchived && !CH.atLanding.inList && CH.inFile === false && /edited/.test(CH.note || ''), 'a record changed while its archive was in flight stays the store\'s (its change kept), is listed once — live — and its handed copy is taken out of the archive by a follow-up write', CH);
+  ok(gateOf(CH.atLanding.live) && !CH.atLanding.listedArchived && !CH.atLanding.inList && CH.inFile === false && verdictOf(/edited/.test(CH.note || '')), 'a record changed while its archive was in flight stays the store\'s (its change kept), is listed once — live — and its handed copy is taken out of the archive by a follow-up write', CH);
   const ASH_A = "if (j && storeBytes(j) === handedSigs.get(m.id)) out.push(m); else back.push(m.id);";
   ok(JSRC.split(ASH_A).length === 2, 'control setup: the as-handed check is found once');
   const CHX = changedScene(MJb.load('src/jobs.js', anchored(JSRC, ASH_A, "if (j) out.push(m); else back.push(m.id);   /* MUTANT: the as-handed check cut */", 'archive-as-handed-cut'), 'archive-as-handed-cut'), 'ashandedx');
@@ -2505,7 +2505,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   const BR_A = "? { error: 'its removal is not on disk yet — it finishes by itself', code: 'being-removed' } : ";
   ok(JSRC.split(BR_A).length === 2, 'control setup: the «being removed» answer is found once');
   const RTX = rmTwice(MJb.load('src/jobs.js', anchored(JSRC, BR_A, "? { error: 'no such archived job' } : /* MUTANT: «being removed» cut */ ", 'archive-being-removed-cut'), 'archive-being-removed-cut'), 'beingx');
-  ok(RTX.code !== 'being-removed' && /no such archived job/.test(RTX.error || ''), 'CONTROL («being removed» cut, in a copy): the repeat says «no such archived job» for a row still listed (red)', RTX);
+  ok(RTX.code !== 'being-removed' && verdictOf(/no such archived job/.test(RTX.error || '')), 'CONTROL («being removed» cut, in a copy): the repeat says «no such archived job» for a row still listed (red)', RTX);
   // (8) A CREATE's OR A STOP's ANSWER NEVER WAITS ON THE ARCHIVE (the read's should): persisted() waits for it only while a clear owes it
   const persScene = (Mod, tag) => {
     const { g, J, AF } = scene(Mod, tag);
@@ -2583,11 +2583,11 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { inFlight, atLanding: v };
   };
   const GN = await goneScene({ JobManager }, 'gone');
-  ok(GN.inFlight === null && GN.atLanding && GN.atLanding.kept === 'running', 'logsGone() asked between a ✕\'s hand-off and its landing waits for the landing, then says what stays and why (here «running») — never «gone» for a folder the remover was not handed yet', GN);
+  ok(GN.inFlight === null && gateOf(GN.atLanding) && GN.atLanding.kept === 'running', 'logsGone() asked between a ✕\'s hand-off and its landing waits for the landing, then says what stays and why (here «running») — never «gone» for a folder the remover was not handed yet', GN);
   const GN_A = "    this._logsGone.set(id, handed); handed.then(";
   ok(JSRC.split(GN_A).length === 2, 'control setup: the ✕\'s hand-off arming logsGone is found once');
   const GNX = await goneScene(MJb.load('src/jobs.js', anchored(JSRC, GN_A, "    /* MUTANT: not armed at the hand-off */ handed.then(", 'archive-gone-unarmed'), 'archive-gone-unarmed'), 'gonex');
-  ok(GNX.inFlight && GNX.inFlight.gone === true, 'CONTROL (not armed at the hand-off, in a copy): logsGone() says «gone» while the ✕ is in flight and its folder was never handed to the remover (red)', GNX);
+  ok(gateOf(GNX.inFlight) && GNX.inFlight.gone === true, 'CONTROL (not armed at the hand-off, in a copy): logsGone() says «gone» while the ✕ is in flight and its folder was never handed to the remover (red)', GNX);
   // r4362 (row B-3dbd's family, the flake census at 2.369.419): the waits below end on the FACT each leg reads, never on a count of
   // turns standing in for it. factOf polls the fact (every 5 ms) under a generous bound whose expiry is a NAMED failed line. drained()
   // is used only where the answer is IN MEMORY (an already-settled promise and its thens): one macrotask runs after EVERY pending
@@ -2626,11 +2626,11 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     try { J.shutdown(); } catch { }
     ok(owedAtTurns === false && owedAtFact === true, 'PLACED (r4340 law 3): the storage\'s held answer 40 turns after the ask — the old wait (20 turns) read the ✕ NOT owed yet (red at will for a leg judged then); the wait on the fact read it owed', { owedAtTurns, owedAtFact });
   }
-  ok(HL.owed && HL.late && HL.late.pending === true, 'a ✕ the storage held is OWED, and logsGone() asked after its answer settled still says «still being deleted» — never «gone»', HL);
+  ok(gateOf(HL.owed) && gateOf(HL.late) && HL.late.pending === true, 'a ✕ the storage held is OWED, and logsGone() asked after its answer settled still says «still being deleted» — never «gone»', HL);
   const HL_A = "if (!p) return Promise.resolve(this._logsOwed && this._logsOwed.has(id) ? { pending: true } : { gone: true });";
   ok(JSRC.split(HL_A).length === 2, 'control setup: logsGone\'s owed answer is found once');
   const HLX = await heldScene(MJb.load('src/jobs.js', anchored(JSRC, HL_A, "if (!p) return Promise.resolve({ gone: true });   /* MUTANT: the owed answer cut */", 'archive-held-gone'), 'archive-held-gone'), 'heldx');
-  ok(HLX.owed && HLX.late && HLX.late.gone === true, 'CONTROL (the owed answer cut, in a copy): a removal the storage held reads «gone» once its answer settled (red)', HLX);
+  ok(gateOf(HLX.owed) && gateOf(HLX.late) && HLX.late.gone === true, 'CONTROL (the owed answer cut, in a copy): a removal the storage held reads «gone» once its answer settled (red)', HLX);
   // (5) THE LOOP NO LONGER WAITS FOR THE ARCHIVE: the REAL store writer (its own thread), 300 ms placed in each main-thread rename /
   // fsync of the scene's folder; judged against the red's own figure (the release's write at the call, in a copy)
   const SWr = require(path.join(ROOT, 'src/store-writer.js'));
@@ -2684,7 +2684,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { cleared: (out.cleared || []).includes(id), atHandOff, atLanding };
   };
   const CL = clearScene({ JobManager }, 'clear-told');
-  ok(CL.cleared && CL.atHandOff.told === 0 && !CL.atHandOff.clearedOnDisk && CL.atLanding.told === 1 && CL.atLanding.clearedOnDisk, 'a clear of an ARCHIVED record is told to every page when the archive holding it lands (once) — never at the hand-off, while the landed archive still reads the old words', CL);
+  ok(gateOf(CL.cleared) && CL.atHandOff.told === 0 && !CL.atHandOff.clearedOnDisk && CL.atLanding.told === 1 && verdictOf(CL.atLanding.clearedOnDisk), 'a clear of an ARCHIVED record is told to every page when the archive holding it lands (once) — never at the hand-off, while the landed archive still reads the old words', CL);
   const CLT_A = "    clearMade = true; if (!archChanged || clearLanded) tellCleared();";
   ok(JSRC.split(CLT_A).length === 2, 'control setup: the clear\'s one broadcast, at the archive\'s landing, is found once');
   const CLX = clearScene(MJb.load('src/jobs.js', anchored(JSRC, CLT_A, "    clearMade = true; tellCleared();   /* MUTANT: told at the hand-off */", 'archive-clear-told-early'), 'archive-clear-told-early'), 'cleartoldx');
@@ -2708,7 +2708,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { inFlight, inFile, after };
   };
   const ST = staleScene({ JobManager }, 'stale');
-  ok(ST.inFlight.removed && !ST.inFlight.byId && !ST.inFlight.inList && ST.inFile === false && !ST.after, 'a live job removed whose stale archived copy a crash left: that copy is hidden while it is taken out (never an archived row for the job just removed), and out of the file at its landing', ST);
+  ok(gateOf(ST.inFlight.removed) && !ST.inFlight.byId && !ST.inFlight.inList && ST.inFile === false && !ST.after, 'a live job removed whose stale archived copy a crash left: that copy is hidden while it is taken out (never an archived row for the job just removed), and out of the file at its landing', ST);
   const STK_A = "      this._archiveTakingOut.add(job.id);\n      const w = this._writeArchive(";
   ok(JSRC.split(STK_A).length === 2, 'control setup: the removal\'s hiding of its stale copy is found once');
   const STX = staleScene(MJb.load('src/jobs.js', anchored(JSRC, STK_A, "      /* MUTANT: the stale copy not hidden */\n      const w = this._writeArchive(", 'archive-stale-shown'), 'archive-stale-shown'), 'stalex');
@@ -2732,12 +2732,12 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   };
   const inLang = (lang, k) => { const at = I18N[lang].indexOf(JSON.stringify(k) + ': "'); if (at < 0) return false; const v = I18N[lang].slice(at + JSON.stringify(k).length + 3, I18N[lang].indexOf('"', at + JSON.stringify(k).length + 3)); return /[぀-ヿ一-鿿]/.test(v); };
   const PW = await toastsFor(PANEL);
-  ok(PW && Object.values(PW).every((w) => w && !/the server's own English/.test(w) && inLang('zh', w) && inLang('ja', w)), 'the ✕\'s three new refusals (being removed, live, not durable) reach the panel as its own words, each with zh and ja — never the server\'s English', PW);
+  ok(gateOf(PW) && verdictOf(Object.values(PW).every((w) => w && !/the server's own English/.test(w) && inLang('zh', w) && inLang('ja', w))), 'the ✕\'s three new refusals (being removed, live, not durable) reach the panel as its own words, each with zh and ja — never the server\'s English', PW);
   for (const code of ['being-removed', 'live', 'not-durable']) {
     const MAP = `  if (act === 'rm' && r?.error && r.code === '${code}') r.error = t(`;
     ok(PANEL.split(MAP).length === 2, `control setup: the panel's «${code}» words are found once`);
     const PWX = await toastsFor(PANEL.replace(MAP, "  if (false) r.error = t("));
-    ok(PWX && /the server's own English/.test(PWX[code] || ''), `CONTROL (the «${code}» mapping cut, in a copy): the panel shows the server's English (red)`, PWX);
+    ok(gateOf(PWX) && verdictOf(/the server's own English/.test(PWX[code] || '')), `CONTROL (the «${code}» mapping cut, in a copy): the panel shows the server's English (red)`, PWX);
   }
   // (15) THE SWEEP's ANSWER ON ITS EARLY RETURNS TOO: nothing due, every due record already handed — answered at once, never left to a
   // caller's bound. RED: the early answer cut
@@ -2753,7 +2753,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { a1, a2, a3 };
   };
   const EA = earlyScene({ JobManager }, 'early');
-  ok(EA.a1 && Array.isArray(EA.a1.archived) && EA.a1.archived.length === 0 && EA.a2 && Array.isArray(EA.a2.archived) && EA.a2.archived.length === 0 && EA.a3 && EA.a3.failed === 'archive-unread', 'the sweep answers its early returns at once (nothing due; every due record already handed; a refusal) — never left to a caller\'s bound', EA);
+  ok(gateOf(EA.a1) && gateOf(Array.isArray(EA.a1.archived)) && EA.a1.archived.length === 0 && gateOf(EA.a2) && gateOf(Array.isArray(EA.a2.archived)) && EA.a2.archived.length === 0 && gateOf(EA.a3) && EA.a3.failed === 'archive-unread', 'the sweep answers its early returns at once (nothing due; every due record already handed; a refusal) — never left to a caller\'s bound', EA);
   const EA_A = "    const early = (x) => { if (answer) {";
   ok(JSRC.split(EA_A).length === 2, 'control setup: the sweep\'s early answer is found once');
   const EAX = earlyScene(MJb.load('src/jobs.js', anchored(JSRC, EA_A, "    const early = (x) => { if (false) {   /* MUTANT: the early answer cut */", 'archive-early-unanswered'), 'archive-early-unanswered'), 'earlyx');
@@ -2766,7 +2766,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { a };
   };
   const SE = sweepEnded({ JobManager }, 'sweep-ended');
-  ok(SE.a && SE.a.ended === true && SE.a.archived.length === 0, 'a sweep whose archive lands after the engine ended still answers — «ended», nothing released', SE);
+  ok(gateOf(SE.a) && SE.a.ended === true && SE.a.archived.length === 0, 'a sweep whose archive lands after the engine ended still answers — «ended», nothing released', SE);
   const SE_A = "ended: () => early({ archived: [], ended: true }), ";
   ok(JSRC.split(SE_A).length === 2, 'control setup: the sweep\'s ended answer is found once');
   const SEX = sweepEnded(MJb.load('src/jobs.js', anchored(JSRC, SE_A, "/* MUTANT: the ended answer cut */ ", 'archive-sweep-ended-unanswered'), 'archive-sweep-ended-unanswered'), 'sweependedx');
@@ -2843,7 +2843,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { beforeArchive, waitsOnArchive, atLanding: ans && { ok: ans.ok, cleared: ans.cleared, notOnDisk: !!ans.notOnDisk } };
   };
   const DR = await doorScene(require(path.join(ROOT, 'src/server/record-clear.js')), 'door');
-  ok(DR.beforeArchive === null && DR.atLanding && DR.atLanding.ok && DR.atLanding.cleared === 1 && !DR.atLanding.notOnDisk, 'a person\'s «Clear content…» of an ARCHIVED job is answered only once the archive holding the clear landed — not when jobs.json and the notices did', DR);
+  ok(DR.beforeArchive === null && gateOf(DR.atLanding) && gateOf(DR.atLanding.ok) && DR.atLanding.cleared === 1 && !DR.atLanding.notOnDisk, 'a person\'s «Clear content…» of an ARCHIVED job is answered only once the archive holding the clear landed — not when jobs.json and the notices did', DR);
   const DOOR_A = "name === 'jobs' && touched.archiveSeq ? { archiveSeq: touched.archiveSeq } : undefined";
   ok(RCSRC.split(DOOR_A).length === 2, 'control setup: record-clear passing the archive\'s sequence is found once');
   const DRX = await doorScene(MJb.load('src/server/record-clear.js', anchored(RCSRC, DOOR_A, "undefined /* MUTANT: the archive's sequence not passed */", 'record-clear-no-archive-seq'), 'record-clear-no-archive-seq'), 'doorx');
@@ -2865,7 +2865,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { r1: { status: r1.status, code: r1.body && r1.body.code }, r2: { status: r2.status, code: r2.body && r2.body.code }, listedMeanwhile, gone, told };
   };
   const RO = await routeScene(wiring, 'route');
-  ok(RO.r1.status === 503 && RO.r1.code === 'not-durable' && RO.r2.status === 409 && RO.r2.code === 'being-removed' && RO.listedMeanwhile && RO.gone && RO.told, 'the ✕ past its landing\'s bound, through the route: 503 «not-durable» while the archive is not on disk, a repeat 409 «being-removed», and the removal still lands by itself — the row gone, the pages told', RO);
+  ok(RO.r1.status === 503 && RO.r1.code === 'not-durable' && RO.r2.status === 409 && RO.r2.code === 'being-removed' && gateOf(RO.listedMeanwhile) && gateOf(RO.gone) && verdictOf(RO.told), 'the ✕ past its landing\'s bound, through the route: 503 «not-durable» while the archive is not on disk, a repeat 409 «being-removed», and the removal still lands by itself — the row gone, the pages told', RO);
   const WSRC19 = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8');
   const RO_A = "const r = jm.rmArchived(rec.id, (x) => { if (x.error) return res.status(x.notDurable ? 503 : 400).json({ error: x.error, ...(x.notDurable ? { code: 'not-durable' } : {}) });";
   ok(WSRC19.split(RO_A).length === 2, 'control setup: the route\'s «not durable» answer is found once');
@@ -2892,7 +2892,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   const BD_A = "{ onLanded: () => atLanding(this._rmLanded(id)), replyMs, ended,";
   ok(JSRC.split(BD_A).length === 2, 'control setup: the ✕\'s reply bound is found once');
   const BD = await boundScene({ JobManager }, 'bound');
-  ok(BD.atBound && BD.atBound.notDurable === true && BD.later && BD.later.pending === true, 'the ✕\'s reply comes at its bound while the archive is not on disk — «not durable», never a wait for ever; and a later logsGone() for it says «pending» at once (r1963)', BD);
+  ok(gateOf(BD.atBound) && BD.atBound.notDurable === true && gateOf(BD.later) && BD.later.pending === true, 'the ✕\'s reply comes at its bound while the archive is not on disk — «not durable», never a wait for ever; and a later logsGone() for it says «pending» at once (r1963)', BD);
   const BDP_A = "if (!r.ok && this._logsGone.get(id) === handed) this._logsGone.set(id, Promise.resolve({ pending: true })); ";
   ok(JSRC.split(BDP_A).length === 2, 'control setup: the ✕\'s bound turning logsGone «pending» is found once');
   const BDP = await boundScene(MJb.load('src/jobs.js', anchored(JSRC, BDP_A, "/* MUTANT: logsGone waits with the write */ ", 'archive-gone-waits'), 'archive-gone-waits'), 'gonewaitsx');
@@ -2912,7 +2912,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     return { said: logs.filter((l) => l.includes(id) && /its removal landed after the jobs engine ended/.test(l)).length, logsGone: lg };
   };
   const EN = await endedScene({ JobManager }, 'ended');
-  ok(EN.said === 1 && EN.logsGone && EN.logsGone.pending === true, 'a ✕ whose removal lands after the engine ended is SAID once — its log folder left to the clean-up\'s own pass — and logsGone answers «still being deleted» at once', EN);
+  ok(EN.said === 1 && gateOf(EN.logsGone) && EN.logsGone.pending === true, 'a ✕ whose removal lands after the engine ended is SAID once — its log folder left to the clean-up\'s own pass — and logsGone answers «still being deleted» at once', EN);
   const END_A = "replyMs, ended, answer:";
   ok(JSRC.split(END_A).length === 2, 'control setup: the ✕\'s ended words are found once');
   const ENX = await endedScene(MJb.load('src/jobs.js', anchored(JSRC, END_A, "replyMs, /* MUTANT: unsaid */ answer:", 'archive-ended-unsaid'), 'archive-ended-unsaid'), 'endedx');
@@ -2920,4 +2920,4 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

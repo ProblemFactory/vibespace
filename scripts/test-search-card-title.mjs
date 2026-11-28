@@ -20,7 +20,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 console.log('— ① search-card.js (pure)');
@@ -41,13 +41,13 @@ console.log('— ① search-card.js (pure)');
   ok('no results, no head → "no results"', renderSearchOutput({ query: 'q', action: { type: 'search' }, results: [] }).output === 'no results');
   ok('error (string / object) → is_error with the message', renderSearchOutput({ error: 'boom' }).isError === true && renderSearchOutput({ error: 'boom' }).output === 'boom' && renderSearchOutput({ error: { message: 'm' } }).output === 'm');
   const many = renderSearchOutput({ results: Array.from({ length: 25 }, (_, i) => ({ title: 't' + i, url: 'https://u/' + i })) });
-  ok(`results cap at ${MAX_RESULTS} with a "+N more" marker`, many.output.split('\n\n').length === MAX_RESULTS + 1 && /… \+5 more$/.test(many.output), many.output.slice(-40));
+  ok(`results cap at ${MAX_RESULTS} with a "+N more" marker`, many.output.split('\n\n').length === MAX_RESULTS + 1 && verdictOf(/… \+5 more$/.test(many.output)), many.output.slice(-40));
   const big = renderSearchOutput({ results: Array.from({ length: 20 }, (_, i) => ({ title: 'T' + i, url: 'https://u/' + i, snippet: '汉字'.repeat(200) })) });
-  ok(`output byte cap ${MAX_OUTPUT_BYTES} on a char boundary (CJK)`, Buffer.byteLength(big.output, 'utf8') <= MAX_OUTPUT_BYTES && big.output.endsWith('…') && !big.output.includes('�'), Buffer.byteLength(big.output, 'utf8'));
+  ok(`output byte cap ${MAX_OUTPUT_BYTES} on a char boundary (CJK)`, Buffer.byteLength(big.output, 'utf8') <= MAX_OUTPUT_BYTES && gateOf(big.output.endsWith('…')) && !big.output.includes('�'), Buffer.byteLength(big.output, 'utf8'));
   ok('twin key: end (query+action) == id-less call (action only), per action type', searchActionKey({ type: 'search', query: 'Q', queries: ['Q', 'Q2'] }, 'Q') === searchActionKey({ type: 'search', query: 'Q', queries: ['Q', 'Q2'] }, 'Q')
     && searchActionKey({ type: 'open_page', url: 'https://p' }, 'https://p') === searchActionKey({ type: 'open_page', url: 'https://p' }, undefined)
     && searchActionKey({ type: 'search', queries: ['a'] }, 'a') !== searchActionKey({ type: 'search', queries: ['b'] }, 'b'));
-  ok('module is PURE (no requires) and registered in the PURE tier', !/require\(/.test(read('src/search-card.js')) && /'src\/search-card\.js'/.test(read('scripts/test-architecture.mjs')));
+  ok('module is PURE (no requires) and registered in the PURE tier', !/require\(/.test(read('src/search-card.js')) && verdictOf(/'src\/search-card\.js'/.test(read('scripts/test-architecture.mjs'))));
 
   // ── verifier-refuted 2026-09-06 (real-data shapes, fleet scan by session_meta.cli_version) ──
   const { actionType } = require(path.join(REPO, 'src/search-card.js'));
@@ -93,12 +93,12 @@ console.log('— ② the real renderer (esbuild → node, DOM shimmed)');
   const card = (toolName, input, extra = {}) => ({ role: 'tool', status: 'complete', toolStatus: 'ok', toolName, content: [{ type: 'tool_result', toolCallId: 'c', toolName, input, output: 'ok', status: 'ok' }], ...extra });
   const chip = (html) => { const m = /<span class="chat-tool-query" title="([^"]*)">([^<]*)<\/span>/.exec(html); return m ? { title: m[1], text: m[2] } : null; };
   const ws = r.renderToolResult(card('WebSearch', { query: 'best van build 2026' }).content[0], card('WebSearch', { query: 'best van build 2026' }));
-  ok('claude WebSearch: title carries the query', chip(ws)?.text === 'best van build 2026' && /Web search/.test(ws), ws.slice(0, 300));
+  ok('claude WebSearch: title carries the query', chip(ws)?.text === 'best van build 2026' && verdictOf(/Web search/.test(ws)), ws.slice(0, 300));
   const wf = card('WebFetch', { url: 'https://example.org/page', prompt: 'x' });
   ok('claude WebFetch: title carries the url', chip(r.renderToolResult(wf.content[0], wf))?.text === 'https://example.org/page');
   const cx = card('web_search', { query: 'vibespace acp', action: { type: 'search', queries: ['vibespace acp'] } }, { collapseKind: 'search' });
   const cxHtml = r.renderToolResult(cx.content[0], cx);
-  ok('codex web_search (collapseKind hint): title carries the query + the localized "Web search" label', chip(cxHtml)?.text === 'vibespace acp' && /Web search/.test(cxHtml) && !/>web_search</.test(cxHtml), cxHtml.slice(0, 300));
+  ok('codex web_search (collapseKind hint): title carries the query + the localized "Web search" label', chip(cxHtml)?.text === 'vibespace acp' && gateOf(/Web search/.test(cxHtml)) && !/>web_search</.test(cxHtml), cxHtml.slice(0, 300));
   const op = card('web_search', { query: '', action: { type: 'open_page', url: 'https://x.example/p' } }, { collapseKind: 'search' });
   ok('codex open_page: title carries the url', chip(r.renderToolResult(op.content[0], op))?.text === 'https://x.example/p');
   const acp = card('Search', { query: 'needle' }, { collapseKind: 'search' });
@@ -108,16 +108,16 @@ console.log('— ② the real renderer (esbuild → node, DOM shimmed)');
   const xss = card('WebSearch', { query: evil });
   const xh = r.renderToolResult(xss.content[0], xss);
   const xc = chip(xh);
-  ok('XSS: the query is escaped in the chip text AND its title attribute', xc && !xh.includes('<img') && !/onmouseover="x/.test(xh) && xc.text.includes('&lt;img') && xc.title.includes('&quot;') && xc.title.includes('&lt;img'), xh.slice(0, 400));
+  ok('XSS: the query is escaped in the chip text AND its title attribute', gateOf(xc) && !xh.includes('<img') && !/onmouseover="x/.test(xh) && gateOf(xc.text.includes('&lt;img')) && gateOf(xc.title.includes('&quot;')) && verdictOf(xc.title.includes('&lt;img')), xh.slice(0, 400));
   const long = 'q'.repeat(200);
   const lc = chip(r.renderToolResult(card('WebSearch', { query: long }).content[0], card('WebSearch', { query: long })));
-  ok('long queries truncate at ~90 chars in the chip, full text in the title', lc && lc.text.length === 90 && lc.text.endsWith('…') && lc.title === long);
+  ok('long queries truncate at ~90 chars in the chip, full text in the title', gateOf(lc) && lc.text.length === 90 && gateOf(lc.text.endsWith('…')) && lc.title === long);
   const errCard = { ...card('WebSearch', { query: 'err q' }), toolStatus: 'error', status: 'error' }; errCard.content[0].status = 'error';
   ok('error card header carries the query too', chip(r.renderToolResult(errCard.content[0], errCard))?.text === 'err q');
   // pending (tool_call block): codex empty stub = no chip; claude pending WebSearch = chip
   const pendCodex = { role: 'tool', status: 'pending', toolName: 'web_search', collapseKind: 'search', content: [{ type: 'tool_call', toolCallId: 'p', toolName: 'web_search', input: { query: '', action: null } }] };
   const pendClaude = { role: 'tool', status: 'pending', toolName: 'WebSearch', content: [{ type: 'tool_call', toolCallId: 'p', toolName: 'WebSearch', input: { query: 'pending q' } }] };
-  ok('pending codex stub (empty query) renders NO empty chip', r.renderToolMsg(pendCodex)._html && !/chat-tool-query/.test(r.renderToolMsg(pendCodex)._html));
+  ok('pending codex stub (empty query) renders NO empty chip', gateOf(r.renderToolMsg(pendCodex)._html) && !/chat-tool-query/.test(r.renderToolMsg(pendCodex)._html));
   ok('pending claude WebSearch header carries the query while running', chip(r.renderToolMsg(pendClaude)._html)?.text === 'pending q', r.renderToolMsg(pendClaude)._html.slice(0, 300));
   ok('searchQueryChipHtml is exported and empty for non-search / empty input', searchQueryChipHtml({ toolName: 'Read', input: { query: 'x' } }, {}) === '' && searchQueryChipHtml({ toolName: 'WebSearch', input: {} }, {}) === '');
   // ── lane agy-card-details (2026-10-22 — the owner, two screenshots of an Antigravity chat: «很多卡片都缺少细节») ──
@@ -126,14 +126,14 @@ console.log('— ② the real renderer (esbuild → node, DOM shimmed)');
   const SUB_TERMINATED = '@@agy-subagent-terminated@@'; // = src/agy-store.js SUB_TERMINATED / src/helper-ask.js isSubTerminated
   const tr = (toolName, input, output, status = 'ok') => { const b = { type: 'tool_result', toolCallId: 'c', toolName, input, output, status }; return r.renderToolResult(b, { role: 'tool', status: status === 'ok' ? 'complete' : 'error', toolStatus: status, toolName, content: [b] }); };
   const rh = tr('Read', { file_path: '/home/u/roster.md', offset: 1, limit: 400, Path: '/home/u/roster.md' }, '113 lines, 24215 bytes');
-  ok('GAP 1 Read: agy’s «113 lines, 24215 bytes» summary → «113 lines · 23.6 KB» status over a clickable path — never «1 line»', /113 lines/.test(rh) && /23\.6 KB/.test(rh) && /roster\.md/.test(rh) && !/>\s*1 line</.test(rh), rh.slice(0, 320));
+  ok('GAP 1 Read: agy’s «113 lines, 24215 bytes» summary → «113 lines · 23.6 KB» status over a clickable path — never «1 line»', gateOf(/113 lines/.test(rh)) && gateOf(/23\.6 KB/.test(rh)) && gateOf(/roster\.md/.test(rh)) && !/>\s*1 line</.test(rh), rh.slice(0, 320));
   const bh = tr('Bash', { command: 'wc -l roster.md', summary: 'count the lines', CommandLine: 'wc -l roster.md' }, 'ok');
   ok('GAP 3 Bash: agy’s toolSummary rides the card head (its own words for the act)', chip(bh)?.text === 'count the lines', bh.slice(0, 320));
   const th = tr('Read', { file_path: '/home/u/a.txt' }, SUB_TERMINATED, 'error');
-  ok('GAP 5 timeline: a killed sub’s unfinished read card says «Terminated with the subagent» — never the raw sentinel, never a spinner', /Terminated with the subagent/.test(th) && !th.includes(SUB_TERMINATED) && !/chat-spinner/.test(th) && /a\.txt/.test(th), th.slice(0, 320));
+  ok('GAP 5 timeline: a killed sub’s unfinished read card says «Terminated with the subagent» — never the raw sentinel, never a spinner', gateOf(/Terminated with the subagent/.test(th)) && !th.includes(SUB_TERMINATED) && !/chat-spinner/.test(th) && verdictOf(/a\.txt/.test(th)), th.slice(0, 320));
   const subMsg = { role: 'tool', status: 'error', toolStatus: 'error', toolCallId: 'p:24', content: [{ type: 'tool_result', toolCallId: 'p:24', toolName: 'Agent', input: { description: 'A-L', prompt: 'Analyze A-L.' }, output: '', status: 'error' }], taskInfo: { id: 'aa000000-0000-4000-8000-0000000000f1', subId: 'aa000000-0000-4000-8000-0000000000f1', type: 'agent', status: 'stopped', state: 'SUBAGENT_STATE_KILLED', agentRole: 'A-L', lastText: 'Reading a.txt', summary: '', steps: 56, files: [] } };
   const sh = r.renderToolMsg(subMsg)._html;
-  ok('GAP 5 card: a KILLED sub → «Terminated by the parent» + «Last progress», never «It sent no answer»', /Terminated by the parent/.test(sh) && /Last progress/.test(sh) && /Reading a\.txt/.test(sh) && !/It sent no answer/.test(sh), sh.slice(0, 420));
+  ok('GAP 5 card: a KILLED sub → «Terminated by the parent» + «Last progress», never «It sent no answer»', gateOf(/Terminated by the parent/.test(sh)) && gateOf(/Last progress/.test(sh)) && gateOf(/Reading a\.txt/.test(sh)) && !/It sent no answer/.test(sh), sh.slice(0, 420));
   // a non-agy tool (no input.summary) gets NO summary chip — no behaviour change for claude / codex
   ok('no input.summary → no summary chip (claude / codex unchanged)', !/chat-tool-query/.test(tr('Bash', { command: 'ls' }, 'ok')));
 }
@@ -142,16 +142,16 @@ console.log('— ③ wiring pins');
 {
   const cr = read('src/lib/chat-renderers.js');
   ok('the three tool-card header paths (pending/interrupted, error, generic) all append searchQueryChipHtml', (cr.match(/\$\{searchQueryChipHtml\(block, msg\)\}/g) || []).length === 3);
-  ok('the chip escapes both text and title', /title="\$\{escHtml\(q\)\}">\$\{escHtml\(short\)\}/.test(cr));
-  ok('client imports the shared PURE module (no duplicate query logic)', /import \{ searchQueryOf \} from '\.\.\/search-card\.js'/.test(cr));
+  ok('the chip escapes both text and title', verdictOf(/title="\$\{escHtml\(q\)\}">\$\{escHtml\(short\)\}/.test(cr)));
+  ok('client imports the shared PURE module (no duplicate query logic)', verdictOf(/import \{ searchQueryOf \} from '\.\.\/search-card\.js'/.test(cr)));
   const css = read('public/chat.css');
-  ok('.chat-tool-query styled with theme vars only', /\.chat-tool-query \{[\s\S]{0,400}var\(--text-secondary\)/.test(css) && !/\.chat-tool-query \{[^}]*#[0-9a-f]{3}/i.test(css));
+  ok('.chat-tool-query styled with theme vars only', gateOf(/\.chat-tool-query \{[\s\S]{0,400}var\(--text-secondary\)/.test(css)) && !/\.chat-tool-query \{[^}]*#[0-9a-f]{3}/i.test(css));
   const cv = read('src/lib/chat-view.js');
-  ok('the fold summary line (per-kind counts, "N web searches") is untouched', /\['search', '\{n\} web searches'\]|t\('\{n\} web searches', \{ n: byKind\.search \}\)/.test(cv + read('src/lib/chat-run-summary.js')));
+  ok('the fold summary line (per-kind counts, "N web searches") is untouched', verdictOf(/\['search', '\{n\} web searches'\]|t\('\{n\} web searches', \{ n: byKind\.search \}\)/.test(cv + read('src/lib/chat-run-summary.js'))));
   const cm = read('src/codex-message-manager.js');
-  ok('the codex normalizer renders through the same PURE module', /require\('\.\/search-card'\)/.test(cm) && /renderSearchOutput\(\{ query, action, results: event\.results, error: event\.error \}\)/.test(cm));
-  ok("the 0.153.4 carrier (event_msg item_completed Extension web.search) is dispatched BEFORE the generic item_completed skip into the same web-search path", /if \(type === 'item_completed'\) return this\._processItemCompleted\(event, emit\);/.test(cm) && /it\.kind === 'web\.search'[\s\S]{0,200}_processWebSearchEvent\(\{ type: 'web_search_end', call_id: it\.id/.test(cm));
+  ok('the codex normalizer renders through the same PURE module', gateOf(/require\('\.\/search-card'\)/.test(cm)) && verdictOf(/renderSearchOutput\(\{ query, action, results: event\.results, error: event\.error \}\)/.test(cm)));
+  ok("the 0.153.4 carrier (event_msg item_completed Extension web.search) is dispatched BEFORE the generic item_completed skip into the same web-search path", gateOf(/if \(type === 'item_completed'\) return this\._processItemCompleted\(event, emit\);/.test(cm)) && verdictOf(/it\.kind === 'web\.search'[\s\S]{0,200}_processWebSearchEvent\(\{ type: 'web_search_end', call_id: it\.id/.test(cm)));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

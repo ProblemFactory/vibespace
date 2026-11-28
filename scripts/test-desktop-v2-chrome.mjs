@@ -55,7 +55,7 @@ const BUNDLE = path.join(REPO, 'data/bin/vibespace-agentd.js');
 const NOVNC = path.join(REPO, 'public/novnc.js');
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 for (const f of [BUNDLE, NOVNC]) if (!fs.existsSync(f)) { ok(false, `${path.relative(REPO, f)} exists (npm run build first)`); process.exit(1); }
 
@@ -89,7 +89,7 @@ fs.writeFileSync(path.join(home, '.local/bin/powershell.exe'), FAKE_PS); fs.chmo
 const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const FACTS_PLAT = /(readDisplayFacts\(\{\s*)platform: process\.platform,/;
-ok(HELLO.test(bundleText) && FACTS_PLAT.test(bundleText) && /"display-facts"/.test(bundleText), 'the bundle carries the hello-ack platform, the display-facts op and its capability (the copy patches exactly those)');
+ok(gateOf(HELLO.test(bundleText)) && gateOf(FACTS_PLAT.test(bundleText)) && verdictOf(/"display-facts"/.test(bundleText)), 'the bundle carries the hello-ack platform, the display-facts op and its capability (the copy patches exactly those)');
 fs.mkdirSync(path.join(root, 'bundle'), { recursive: true });
 fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, (all, pre) => `${pre}platform: "win32",`).replace(FACTS_PLAT, (all, pre) => `${pre}platform: "win32",`));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
@@ -98,7 +98,7 @@ const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: 
 started.push(home);
 const dm = new DeviceManager({ dataDir, bundlePath: path.join(root, 'bundle', 'vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
 try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; }
-ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includes('display-facts'), 'a real agent, Windows-shaped, says display-facts');
+ok(dm.status().info.platform === 'win32' && verdictOf(dm.status().info.capabilities.includes('display-facts')), 'a real agent, Windows-shaped, says display-facts');
 
 // ── the machine's VNC server: a stub RFB 3.8 with the VNC-password sign-in, 2560×800 = two 1280×800 screens ──────────
 const FW = 2560, FH = 800, HALF = 1280;
@@ -299,7 +299,7 @@ console.log('① – ⑨ desk 1280 px');
   const asked = await signIn(p);
   const up = await connected(p);
   const strip = await p.ev(`[...document.querySelector('${WIN} .desktop-strip').children].filter((e) => !e.hidden && !e.classList.contains('desktop-strip-hdr')).map((e) => e.classList.contains('desktop-strip-displays') ? [...e.children].map((b) => b.textContent).join(' · ') : e.classList.contains('desktop-strip-status') ? e.textContent.replace(/\\d+|—/g, 'N') : e.textContent)`);
-  ok(asked && up && vnc.seen.authed === 1 && vnc.seen.sessions === 1 && JSON.stringify(strip) === JSON.stringify(['WIN-DESK1 ▾', '1 · 2 · 全部', '⤢ 全屏', '⌨ 捕获快捷键', '已连接 · N ms · N fps', '清晰']), '② the press opens the window: the sign-in asked; the strip [WIN-DESK1 ▾] [1 · 2 · 全部] [⤢ 全屏] [⌨ 捕获快捷键] [已连接 · N ms · N fps] [清晰] (P1 added ⌨ + the rung)', { asked, up, seen: { a: vnc.seen.authed, s: vnc.seen.sessions }, strip });
+  ok(gateOf(asked) && gateOf(up) && vnc.seen.authed === 1 && vnc.seen.sessions === 1 && JSON.stringify(strip) === JSON.stringify(['WIN-DESK1 ▾', '1 · 2 · 全部', '⤢ 全屏', '⌨ 捕获快捷键', '已连接 · N ms · N fps', '清晰']), '② the press opens the window: the sign-in asked; the strip [WIN-DESK1 ▾] [1 · 2 · 全部] [⤢ 全屏] [⌨ 捕获快捷键] [已连接 · N ms · N fps] [清晰] (P1 added ⌨ + the rung)', { asked, up, seen: { a: vnc.seen.authed, s: vnc.seen.sessions }, strip });
   // the machine's own table is an HTTP read through the agent, the -308 rects ride the first frame: either lands first
   // (⑮ holds the table to prove both orders) — the names are WAITED for, never read the moment the strip says 已连接
   await p.until(`[...document.querySelectorAll('${WIN} .desktop-strip-seg')].map((b) => b.title).join('|') === ${JSON.stringify(NAMED)}`, 10000);
@@ -307,7 +307,7 @@ console.log('① – ⑨ desk 1280 px');
   ok(titles.join('|') === NAMED, '② the displays carry the machine\'s own names (the OS table agreed with the -308 rects)', titles);
   await seg(p, '2');
   const c2 = await cropOk(p);
-  ok(c2.ok, '③ 2: ONLY the second display is drawn — a 1280×800 canvas, every pixel the stub\'s screen-2 pattern (0 off, 0 from screen 1)', c2.r);
+  ok(verdictOf(c2.ok), '③ 2: ONLY the second display is drawn — a 1280×800 canvas, every pixel the stub\'s screen-2 pattern (0 off, 0 from screen 1)', c2.r);
   await p.shot('display2.png', WIN); await p.shot('strip.png', `${WIN} .desktop-strip`);
   // ④ a click at the picture's centre → the machine's second display's centre
   const box = await p.ev(`(() => { const b = document.querySelector('${WIN} canvas').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()`);
@@ -317,20 +317,20 @@ console.log('① – ⑨ desk 1280 px');
   const t0 = Date.now(); let press = null;
   while (!press && Date.now() - t0 < 5000) { press = vnc.seen.pointers.slice(n0).find((e) => e.mask & 1); if (!press) await sleep(50); }
   const tol = Math.ceil(1280 / box[2]) + 1;
-  ok(press && Math.abs(press.x - (HALF + 640)) <= tol && Math.abs(press.y - 400) <= tol, `④ a click at the picture's centre arrives at (${HALF + 640}, 400) on the machine — the viewport offset carried (±${tol})`, { press, box });
+  ok(gateOf(press) && Math.abs(press.x - (HALF + 640)) <= tol && Math.abs(press.y - 400) <= tol, `④ a click at the picture's centre arrives at (${HALF + 640}, 400) on the machine — the viewport offset carried (±${tol})`, { press, box });
   await seg(p, '1');
   const c1 = await (async () => { await sleep(400); return p.ev(PATTERN(1)); })();
   await seg(p, '全部');
   await sleep(400);
   const all = await p.ev(PATTERN('all'));
-  ok(c1 && c1.W === 1280 && c1.bad === 0 && all && all.W === 2560 && all.H === 800 && all.bad === 0 && vnc.seen.sessions === 1, '⑤ 1 shows screen 1 only, 全部 restores the whole 2560×800 framebuffer — ONE session on the server through every switch', { c1, all, sessions: vnc.seen.sessions });
+  ok(gateOf(c1) && c1.W === 1280 && c1.bad === 0 && gateOf(all) && all.W === 2560 && all.H === 800 && all.bad === 0 && vnc.seen.sessions === 1, '⑤ 1 shows screen 1 only, 全部 restores the whole 2560×800 framebuffer — ONE session on the server through every switch', { c1, all, sessions: vnc.seen.sessions });
   // ⑥ the stats: the stub answers each update 200 ms late
   vnc.st.delayMs = 200;
   await sleep(7500);
   const chip = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip-status'); return { text: s.textContent, title: s.title }; })()`);
   const trip = Number((/更新往返 (\d+) ms/.exec(chip.title) || [])[1]);
   const fps = Number((/· (\d+) fps$/.exec(chip.text) || [])[1]);
-  ok(/^已连接 · \d+ ms · \d+ fps$/.test(chip.text) && trip >= 190 && trip <= 450 && fps >= 2 && fps <= 6 && /浏览器 ⇄ hub \d+ ms · hub ⇄ 机器 \d+ ms/.test(chip.title), `⑥ the stats strip: ${chip.text}; a 200 ms server delay reads as an update round trip of ${trip} ms at ${fps} fps; both link numbers measured`, chip);
+  ok(gateOf(/^已连接 · \d+ ms · \d+ fps$/.test(chip.text)) && trip >= 190 && trip <= 450 && fps >= 2 && fps <= 6 && verdictOf(/浏览器 ⇄ hub \d+ ms · hub ⇄ 机器 \d+ ms/.test(chip.title)), `⑥ the stats strip: ${chip.text}; a 200 ms server delay reads as an update round trip of ${trip} ms at ${fps} fps; both link numbers measured`, chip);
   vnc.st.delayMs = 40;
   // ⑦ reload: the last choice is the picker's FIRST row; Enter opens it on display 2, the sign-in asked again
   await seg(p, '2');
@@ -338,12 +338,12 @@ console.log('① – ⑨ desk 1280 px');
   await p.ev('window.__picker()');
   await p.until(`!!document.querySelector('.desktop-picker-row[data-group="remote"]')`, 15000);
   const first = await p.ev(`(() => { const r = document.querySelector('.desktop-picker-row'); return { group: r.dataset.group, name: r.querySelector('.desktop-picker-name').textContent, focused: document.activeElement === r }; })()`);
-  ok(first.group === 'recent' && first.name === 'WIN-DESK1 · 2 LG 27UL' && first.focused, '⑦ after a reload the picker\'s FIRST row is the last choice (WIN-DESK1 · 2 LG 27UL), focused', first);
+  ok(first.group === 'recent' && first.name === 'WIN-DESK1 · 2 LG 27UL' && verdictOf(first.focused), '⑦ after a reload the picker\'s FIRST row is the last choice (WIN-DESK1 · 2 LG 27UL), focused', first);
   await p.key('Enter', 'Enter', 13);
   const again = await signIn(p);
   await connected(p);
   const c2b = await cropOk(p);
-  ok(again && vnc.seen.authed === 2 && c2b.ok, '⑦ Enter opens it straight on display 2 — and the sign-in is asked again (design 014 D1: nothing kept)', { again, authed: vnc.seen.authed, r: c2b.r });
+  ok(gateOf(again) && vnc.seen.authed === 2 && verdictOf(c2b.ok), '⑦ Enter opens it straight on display 2 — and the sign-in is asked again (design 014 D1: nothing kept)', { again, authed: vnc.seen.authed, r: c2b.r });
   // ⑧ the Apps dialog: its machine's desktop is a link to the Desktop picker now
   await p.ev('window.__closeAll()');
   await p.ev(`window.__dialog(${JSON.stringify({ hostId: 'win-a', label: 'WIN-DESK1', code: 'desktop_ready', auth: 'vnc', setup: 'win32', desktop: 'vnc-native', selectable: true })})`);
@@ -352,7 +352,7 @@ console.log('① – ⑨ desk 1280 px');
   const asked8 = await signIn(p);
   const up8 = await connected(p);
   const focus = await p.ev(`(() => ({ dialog: !!document.getElementById('machine-desktop-dialog'), windows: document.querySelectorAll('${WIN}').length, recent: JSON.parse(localStorage.getItem('vibespace.desktopRecent') || 'null') }))()`);
-  ok(JSON.stringify(link) === JSON.stringify(['打开它的桌面 → 桌面']) && !focus.dialog && focus.windows === 1 && asked8 && up8 && focus.recent && focus.recent.hostId === 'win-a', '⑧ the Apps dialog keeps app launching; its "打开它的桌面 → 桌面" closes it and shows the window at once (sign-in asked) — and the Desktop picker remembers it as the recent choice', { link, focus, asked8, up8 });
+  ok(JSON.stringify(link) === JSON.stringify(['打开它的桌面 → 桌面']) && !focus.dialog && focus.windows === 1 && gateOf(asked8) && gateOf(up8) && gateOf(focus.recent) && focus.recent.hostId === 'win-a', '⑧ the Apps dialog keeps app launching; its "打开它的桌面 → 桌面" closes it and shows the window at once (sign-in asked) — and the Desktop picker remembers it as the recent choice', { link, focus, asked8, up8 });
   p.close();
 }
 console.log('⑨ people only');
@@ -362,7 +362,7 @@ console.log('⑨ people only');
   const agent = await ask('/api/desktop/machine-desktop/displays?host=win-a', true);
   const agentLink = await ask('/api/desktop/machine-desktop/link?host=win-a', true);
   const ownLink = await ask('/api/desktop/machine-desktop/link?host=win-a');
-  ok(own.status === 200 && own.body.ok && own.body.displays.map((d) => `${d.name}@${d.x},${d.y}`).join('|') === 'DELL P2419H@0,0|LG 27UL@1280,0' && ownLink.status === 200 && Number.isFinite(ownLink.body.device), '⑨ the person: the machine\'s table through the real agent (DeviceName prefix gone) and a measured hub ⇄ machine round trip', { own, ownLink });
+  ok(own.status === 200 && gateOf(own.body.ok) && own.body.displays.map((d) => `${d.name}@${d.x},${d.y}`).join('|') === 'DELL P2419H@0,0|LG 27UL@1280,0' && ownLink.status === 200 && verdictOf(Number.isFinite(ownLink.body.device)), '⑨ the person: the machine\'s table through the real agent (DeviceName prefix gone) and a measured hub ⇄ machine round trip', { own, ownLink });
   ok(agent.status === 403 && agent.body.code === 'human_only' && agentLink.status === 403 && agentLink.body.code === 'human_only', '⑨ an agent token: both new routes refuse by name (human_only)', { agent, agentLink });
   const wsr = await new Promise((resolve) => {
     const w = new WebSocket(`ws://127.0.0.1:${PORT}/api/desktop/machine-desktop.win-a/stream`, { headers: { Authorization: 'Bearer vsst_agent' } });
@@ -377,13 +377,13 @@ console.log('⑩ phone 390');
   await p.ev('window.__picker()');
   await p.until(`!!document.querySelector('.desktop-picker-row[data-group="remote"]')`, 15000);
   const sheet = await p.ev(`(() => { const b = document.querySelector('.desktop-picker').getBoundingClientRect(); return { sheet: document.querySelector('.desktop-picker').classList.contains('desktop-picker-sheet'), left: b.left, right: b.right, bottom: Math.round(b.bottom) }; })()`);
-  ok(sheet.sheet && sheet.left === 0 && sheet.right === 390 && sheet.bottom === 844, '⑩ the phone\'s picker is a bottom sheet (full width, on the bottom edge)', sheet);
+  ok(gateOf(sheet.sheet) && sheet.left === 0 && sheet.right === 390 && sheet.bottom === 844, '⑩ the phone\'s picker is a bottom sheet (full width, on the bottom edge)', sheet);
   await p.ev(`document.querySelector('.desktop-picker-row').click()`);
   await signIn(p);
   await connected(p);
   await sleep(500);
   const row = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); const kids = [...s.children].filter((e) => !e.hidden).map((e) => e.getBoundingClientRect()); return { h: Math.round(s.getBoundingClientRect().height), oneRow: Math.max(...kids.map((r) => r.top)) < Math.min(...kids.map((r) => r.bottom)), scrolls: s.scrollWidth > s.clientWidth }; })()`);
-  ok(row.oneRow && row.h <= 34, '⑩ the window\'s strip on a phone is ONE row (it scrolls sideways when it must)', row);
+  ok(gateOf(row.oneRow) && row.h <= 34, '⑩ the window\'s strip on a phone is ONE row (it scrolls sideways when it must)', row);
   await p.shot('phone.png');
   p.close();
 }
@@ -413,7 +413,7 @@ console.log('⑫ – ⑭ the pointer at the picture\'s scale (DPR 2) + the HDR c
   await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
   await sleep(1200);
   const words = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip-status'); const c = document.querySelector('${WIN} .desktop-strip-compare'); return { title: s.title, row: c.hidden ? '' : c.textContent }; })()`);
-  ok(c12 && c12.w === 48 && c12.h === 48 && c12.hot === '12 6' && Math.abs(c12.scale - 0.5) < 0.005 && c12.dpr === 2 && /指针：在这里随画面缩放绘制，为原 96 px 的 50%/.test(words.title) && /指针：在这里随画面缩放绘制/.test(words.row),
+  ok(gateOf(c12) && c12.w === 48 && c12.h === 48 && c12.hot === '12 6' && Math.abs(c12.scale - 0.5) < 0.005 && c12.dpr === 2 && gateOf(/指针：在这里随画面缩放绘制，为原 96 px 的 50%/.test(words.title)) && verdictOf(/指针：在这里随画面缩放绘制/.test(words.row)),
     `⑫ a 96 px pointer (hotspot 24,12) over display 2 at scale ${c12 && c12.scale}, DPR 2 ⇒ the CSS cursor image is ${c12 && c12.w}×${c12 && c12.h}, hotspot ${c12 && c12.hot}; the stats row names the path`, { c12: c12 && { ...c12, url: undefined }, words });
   await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
   await showPointer(p, c12);
@@ -422,7 +422,7 @@ console.log('⑫ – ⑭ the pointer at the picture\'s scale (DPR 2) + the HDR c
   await sizeWin(p, 480);
   await cursorIs(p, 36);
   const c12b = await p.ev(CURSOR);
-  ok(c12b && c12b.w === 36 && c12b.hot === '9 5' && Math.abs(c12b.scale - 0.375) < 0.005, `⑫ a smaller window (scale ${c12b && c12b.scale}) redraws the same pointer at ${c12b && c12b.w} px — no new image from the machine`, c12b && { ...c12b, url: undefined });
+  ok(gateOf(c12b) && c12b.w === 36 && c12b.hot === '9 5' && Math.abs(c12b.scale - 0.375) < 0.005, `⑫ a smaller window (scale ${c12b && c12b.scale}) redraws the same pointer at ${c12b && c12b.w} px — no new image from the machine`, c12b && { ...c12b, url: undefined });
   // ⑬ a 256 px pointer: the machine paints it
   const before13 = vnc.seen.encs.length;
   vnc.st.cursor = { side: 256, hx: 8, hy: 8 };
@@ -431,14 +431,14 @@ console.log('⑫ – ⑭ the pointer at the picture\'s scale (DPR 2) + the HDR c
   const resent = vnc.seen.encs.slice(before13);
   const c13 = await p.ev(CURSOR);
   const title13 = await p.ev(`document.querySelector('${WIN} .desktop-strip-status').title`);
-  ok(again && resent.length >= 1 && resent.every((e) => e.session === sess && !e.cursor && !e.vmware) && vnc.seen.sessions === sess && c13 && c13.w === 3 && /指针：由机器画进画面 —— 它的 256 px 指针太大，这里画不了/.test(title13),
+  ok(gateOf(again) && resent.length >= 1 && gateOf(resent.every((e) => e.session === sess && !e.cursor && !e.vmware)) && vnc.seen.sessions === sess && gateOf(c13) && c13.w === 3 && verdictOf(/指针：由机器画进画面 —— 它的 256 px 指针太大，这里画不了/.test(title13)),
     '⑬ a 256 px pointer ⇒ SetEncodings again on the same session, without the pointer pseudo-encodings (the machine paints it; the ladder\'s later rungs keep them out), a 3 px dot here, the stats row says so', { again, resent, sessions: vnc.seen.sessions, sess, c13: c13 && { w: c13.w, css: c13.css } });
   const enc0 = vnc.seen.encs.length;
   vnc.drop();
   const asked13 = await signIn(p);
   const up13 = await connected(p);
   const first = vnc.seen.encs.slice(enc0)[0];
-  ok(asked13 && up13 && vnc.seen.sessions === sess + 1 && first && !first.cursor && !first.vmware, '⑬ the reconnect\'s first SetEncodings leaves the pointer pseudo-encodings out too (the choice lasts the window)', { up13, first, sessions: vnc.seen.sessions });
+  ok(gateOf(asked13) && gateOf(up13) && vnc.seen.sessions === sess + 1 && gateOf(first) && !first.cursor && !first.vmware, '⑬ the reconnect\'s first SetEncodings leaves the pointer pseudo-encodings out too (the choice lasts the window)', { up13, first, sessions: vnc.seen.sessions });
   // ⑭ the HDR chip
   await sizeWin(p, 1000);
   const hdr = async () => p.ev(`(() => { const h = document.querySelector('${WIN} .desktop-strip-hdr'); return h ? { shown: !h.hidden && h.getBoundingClientRect().width > 0, text: h.textContent, title: h.title } : null; })()`);
@@ -449,7 +449,7 @@ console.log('⑫ – ⑭ the pointer at the picture\'s scale (DPR 2) + the HDR c
   const h1 = await hdr();
   await seg(p, '全部'); await sleep(300);
   const hAll = await hdr();
-  ok(h2 && h2.shown && h2.text === 'HDR 已开 · 画面会偏白' && h2.title === 'Windows 的 HDR 画面被 TightVNC 原样抓取、没有色调映射；远程期间在 Windows 设置 › 显示 关闭"使用 HDR"（或按 Win+Alt+B 切换）' && h1 && !h1.shown && hAll && hAll.shown,
+  ok(gateOf(h2) && gateOf(h2.shown) && h2.text === 'HDR 已开 · 画面会偏白' && h2.title === 'Windows 的 HDR 画面被 TightVNC 原样抓取、没有色调映射；远程期间在 Windows 设置 › 显示 关闭"使用 HDR"（或按 Win+Alt+B 切换）' && gateOf(h1) && !h1.shown && gateOf(hAll) && verdictOf(hAll.shown),
     '⑭ HDR: display 2 (hdr 1) shows 「HDR 已开 · 画面会偏白」 with the remedy; display 1 (hdr 0) nothing; 全部 (an HDR screen in it) shows it', { h2, h1, hAll });
   vnc.st.cursor = null;
   p.close();
@@ -478,12 +478,12 @@ console.log('⑮ the table lands late: 2 pressed on the -308 rects, then the mac
     return { up, held, early, two, named, after, drawn };
   };
   const f = await lateTable('/');
-  ok(f.up && f.held === 1 && f.early === '显示器 1|显示器 2|全部' && f.two,
+  ok(gateOf(f.up) && f.held === 1 && f.early === '显示器 1|显示器 2|全部' && verdictOf(f.two),
     '⑮ the table held: the strip draws off the -308 rects with no names yet (RED CONTROL for ②: the old read right after 已连接 sees 显示器 1 / 显示器 2), and 2 crops on them', f);
-  ok(f.named && f.after.crop && f.after.crop.x === HALF && f.after.crop.w === HALF && f.after.pressed === '2' && f.after.recent && /DISPLAY2$/.test(String(f.after.recent.display)) && f.drawn,
+  ok(gateOf(f.named) && gateOf(f.after.crop) && f.after.crop.x === HALF && f.after.crop.w === HALF && f.after.pressed === '2' && gateOf(f.after.recent) && gateOf(/DISPLAY2$/.test(String(f.after.recent.display))) && verdictOf(f.drawn),
     '⑮ released: the names arrive and display 2 STAYS drawn — the pick moved from the RFB id to the OS id at the same place (carryPick), and the recent choice names the OS id', f.after);
   const g = await lateTable('/prefix');
-  ok(g.up && g.held === 1 && g.two && g.named && !g.after.crop && g.drawn,
+  ok(gateOf(g.up) && g.held === 1 && gateOf(g.two) && gateOf(g.named) && !g.after.crop && verdictOf(g.drawn),
     '⑮ RED CONTROL: the pre-fix machine-desktop.js drops the pick the moment the names arrive — the whole 2560 px framebuffer (the mirror\'s ③ {W:2560} and ④ press at x 1280)', g.after);
 }
 console.log('⑯ the rows at once: a late probe patches its row, the focus stays');
@@ -506,13 +506,13 @@ console.log('⑯ the rows at once: a late probe patches its row, the focus stays
   bcast.to = (m) => { p.ev(`window.__bcast(${JSON.stringify(m)})`).catch(() => { }); };
   const t1 = await p.ev(firstRows);
   const a = await p.ev(rowOf('win-a')), b0 = await p.ev(rowOf('win-b'));
-  ok(t1 < 500 && a && a.state === '就绪' && !a.disabled && /^上次检查 \d+ (秒|分钟)前 · 探测 \d+ ms$/.test(a.title) && b0 && b0.state === '检查中…' && b0.disabled, `⑯ the picker draws every machine in ${t1} ms with a 1.5 s greeting in flight: WIN-DESK1 就绪 from its last probe (title 「${a && a.title}」), WIN-DESK2 never probed 检查中… — that row only, not pressable`, { a, b0 });
+  ok(t1 < 500 && gateOf(a) && a.state === '就绪' && !a.disabled && gateOf(/^上次检查 \d+ (秒|分钟)前 · 探测 \d+ ms$/.test(a.title)) && gateOf(b0) && b0.state === '检查中…' && verdictOf(b0.disabled), `⑯ the picker draws every machine in ${t1} ms with a 1.5 s greeting in flight: WIN-DESK1 就绪 from its last probe (title 「${a && a.title}」), WIN-DESK2 never probed 检查中… — that row only, not pressable`, { a, b0 });
   await p.shot('picker-instant.png', '.desktop-picker');
   await p.key('ArrowDown', 'ArrowDown', 40); // the person moves the focus
   const mark = await p.ev(`(() => { const f = document.activeElement; f.dataset.mark = 'focus'; document.querySelector('${ROW('win-b')}').dataset.mark = 'b'; return f.dataset.group + ':' + f.dataset.host; })()`);
   const landed = await p.until(`(() => { const b = document.querySelector('${ROW('win-b')}'); return !!b && b.querySelector('.desktop-picker-state').textContent === '就绪'; })()`, 8000);
   const after = await p.ev(`(() => { const b = document.querySelector('${ROW('win-b')}'); return { same: b.dataset.mark === 'b', disabled: b.disabled, title: b.title, focus: document.activeElement.dataset.mark === 'focus', on: document.activeElement.dataset.group + ':' + document.activeElement.dataset.host }; })()`);
-  ok(landed && after.same && !after.disabled && after.focus && /^上次检查 \d+ 秒前 · 探测 1[5-9]\d\d ms$/.test(after.title) && whold.held.length >= 1 && bcast.got.some((m) => m.type === 'desktop-machines-updated' && m.hostId === 'win-b'), `⑯ the late probe arrives as the BROADCAST (the follow-up held): WIN-DESK2 → 就绪 on the SAME row node, the focus still on ${mark} (now ${after.on}), title 「${after.title}」`, after);
+  ok(gateOf(landed) && gateOf(after.same) && !after.disabled && gateOf(after.focus) && gateOf(/^上次检查 \d+ 秒前 · 探测 1[5-9]\d\d ms$/.test(after.title)) && whold.held.length >= 1 && verdictOf(bcast.got.some((m) => m.type === 'desktop-machines-updated' && m.hostId === 'win-b')), `⑯ the late probe arrives as the BROADCAST (the follow-up held): WIN-DESK2 → 就绪 on the SAME row node, the focus still on ${mark} (now ${after.on}), title 「${after.title}」`, after);
   await p.shot('picker-patched.png', '.desktop-picker');
   await p.key('Escape', 'Escape', 27);
   whold.on = false; for (const f of whold.held.splice(0)) f();
@@ -530,13 +530,13 @@ console.log('⑪ RED CONTROL: noVNC without the patch');
   await connected(p);
   await seg(p, '2');
   const m = await cropOk(p);
-  ok(!m.ok && m.r && m.r.W === 2560, '⑪ RED CONTROL: with noVNC built WITHOUT the patch the crop leg goes red (the canvas stays the whole 2560 px framebuffer)', m.r);
+  ok(!m.ok && gateOf(m.r) && m.r.W === 2560, '⑪ RED CONTROL: with noVNC built WITHOUT the patch the crop leg goes red (the canvas stays the whole 2560 px framebuffer)', m.r);
   // the whole 2560 px framebuffer in a window 1282 px wide = scale 0.5, as ⑫'s display 2 in 642
   await p.ev(`(() => { const w = document.querySelector('${WIN}'); w.style.width = '1282px'; w.style.height = '520px'; w.style.left = '0px'; return true; })()`);
   vnc.st.cursor = { side: 96, hx: 24, hy: 12 };
   await cursorIs(p, 96);
   const cm = await p.ev(CURSOR);
-  ok(cm && cm.w === 96 && cm.hot === '24 12' && Math.abs(cm.scale - 0.5) < 0.005, `⑪ RED CONTROL: unpatched, the same 96 px pointer stays ${cm && cm.w} px at scale ${cm && cm.scale} (the owner's "鼠标如此巨大")`, cm && { ...cm, url: undefined });
+  ok(gateOf(cm) && cm.w === 96 && cm.hot === '24 12' && Math.abs(cm.scale - 0.5) < 0.005, `⑪ RED CONTROL: unpatched, the same 96 px pointer stays ${cm && cm.w} px at scale ${cm && cm.scale} (the owner's "鼠标如此巨大")`, cm && { ...cm, url: undefined });
   await showPointer(p, cm);
   await p.shot('cursor-before.png', WIN);
   vnc.st.cursor = null;
@@ -544,4 +544,4 @@ console.log('⑪ RED CONTROL: noVNC without the patch');
   novncFile = NOVNC;
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

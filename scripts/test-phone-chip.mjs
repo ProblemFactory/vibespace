@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const TC = await import(path.join(REPO, 'src/lib/title-chips.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 console.log('① the three forms, never a cut');
@@ -33,7 +33,7 @@ for (const c of CASES) {
   const f = TC.billingPillForms(c.a);
   const noCut = [f.full, f.compact || '', f.icon || ''].every((x) => !/…/.test(x));
   const wholeWord = !f.compact || (c.a.target || c.a.name).split(' ').includes(f.compact.replace(/^⣿( → | )/, ''));
-  ok(f.full === c.full && f.compact === c.compact && noCut && wholeWord && f.tip === f.full, `${c.lang}: full "${f.full}" · compact ${JSON.stringify(f.compact)} · icon ${f.iconKind} — whole words only`, JSON.stringify(f));
+  ok(f.full === c.full && f.compact === c.compact && gateOf(noCut) && gateOf(wholeWord) && f.tip === f.full, `${c.lang}: full "${f.full}" · compact ${JSON.stringify(f.compact)} · icon ${f.iconKind} — whole words only`, JSON.stringify(f));
 }
 ok(TC.shortWord('Northwindcorp') === null && TC.shortWord('Beta Max') === 'Beta' && TC.shortWord('测试团队') === '测试团队', 'shortWord: a first word too long to stand alone is none, never a cut');
 { // verify r1 ③: the compact pill's word for a CJK name (no spaces) is the WHOLE run when ≤ MEMBER_SHORT_MAX (8) code points,
@@ -45,8 +45,8 @@ ok(TC.shortWord('Northwindcorp') === null && TC.shortWord('Beta Max') === 'Beta'
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 const html = TC.billingPillHtml(TC.billingPillForms({ kind: 'pooled', name: '<b>x</b>', target: 'Beta Max' }), esc);
-ok(/^<span class="pill-full">⣿ &lt;b&gt;x&lt;\/b&gt; → Beta Max<\/span><span class="pill-compact">⣿ → Beta<\/span><span class="pill-icon">⣿<\/span>$/.test(html), 'billingPillHtml: three spans, every word escaped', html);
-ok(/<svg/.test(TC.billingPillHtml(TC.billingPillForms({ kind: 'api', name: 'Console' }), esc)) && !/pill-compact/.test(TC.billingPillHtml(TC.billingPillForms({ kind: 'api', name: 'Console' }), esc)), 'an API pill folds to the key glyph (an SVG, never an emoji); no compact form when the name is one word');
+ok(verdictOf(/^<span class="pill-full">⣿ &lt;b&gt;x&lt;\/b&gt; → Beta Max<\/span><span class="pill-compact">⣿ → Beta<\/span><span class="pill-icon">⣿<\/span>$/.test(html)), 'billingPillHtml: three spans, every word escaped', html);
+ok(gateOf(/<svg/.test(TC.billingPillHtml(TC.billingPillForms({ kind: 'api', name: 'Console' }), esc))) && !/pill-compact/.test(TC.billingPillHtml(TC.billingPillForms({ kind: 'api', name: 'Console' }), esc)), 'an API pill folds to the key glyph (an SVG, never an emoji); no compact form when the name is one word');
 
 console.log('② the widest form that fits (pillMode = chipMode with no title)');
 // a width model: CJK ≈ 1 em, other ≈ 0.6 em at the chip's 10 px, × the UI scale; + 14 px of padding / border
@@ -77,16 +77,16 @@ function cssCensus(css) {
 try {
   const pre = execFileSync('git', ['-C', REPO, 'show', 'b924041f:public/style.css'], { encoding: 'utf8' });
   const bad = cssCensus(pre);
-  ok(bad.some((b) => /chat-status-billing: caps its width/.test(b)), 'CONTROL: the pre-fix stylesheet FAILS the census (the 90 px cap + ellipsis that cut "⣿ 全部 → Beta Ma")', bad.join('; '));
+  ok(verdictOf(bad.some((b) => /chat-status-billing: caps its width/.test(b))), 'CONTROL: the pre-fix stylesheet FAILS the census (the 90 px cap + ellipsis that cut "⣿ 全部 → Beta Ma")', bad.join('; '));
 } catch (e) { console.log(`  SKIP CONTROL: the pre-fix bytes (b924041f) are not readable here — ${String(e.message).split('\n')[0]}`); }
 
 console.log('④ wiring');
 {
   const sb = read('src/lib/chat-status-bar.js'), mn = read('src/lib/mobile-nav.js');
-  ok(/inDoor\('billing', [^\n]*value: forms\.full \}\);/.test(sb) && !/_fitBilling|pillMode/.test(sb), 'the status bar\'s billing chip is a row of «⚙ 对话设置» — nothing to fit on the strip; its value there is the FULL form\'s words (lane mask-value-shape)');
-  ok(/val\.textContent = \(r\.value \?\? textOf\(r\.html\)\) \+/.test(sb), 'the settings row writes that value whole, as text (never the three forms run together, never cut)');
-  ok(/billingPillHtml\(forms, escHtml\), \{ attrs: \{ 'aria-label': forms\.tip \}, value: forms\.full \}\);/.test(sb) && /forms\.tip \+ ' — ' \+ tip/.test(sb), 'the status bar draws the three forms; title + aria-label carry every word');
-  ok(/billChip\.innerHTML = billingPillHtml\(forms, escHtml\);/.test(mn) && /billChip\.setAttribute\('aria-label', forms\.tip\);/.test(mn) && /requestAnimationFrame\(\(\) => fitSwitcherRow\(item, label, billChip, splitBtn\)\)/.test(mn) && /chip\.dataset\.mode = p\.chip === 'compact' && hasCompact \? 'compact' : 'full';/.test(mn), 'the switcher row draws the three forms and fits them by the row\'s ladder beside its title (fitSwitcherRow — 主开发 2026-11-17, ruling B on the row; it was chipMode alone)');
+  ok(gateOf(/inDoor\('billing', [^\n]*value: forms\.full \}\);/.test(sb)) && !/_fitBilling|pillMode/.test(sb), 'the status bar\'s billing chip is a row of «⚙ 对话设置» — nothing to fit on the strip; its value there is the FULL form\'s words (lane mask-value-shape)');
+  ok(verdictOf(/val\.textContent = \(r\.value \?\? textOf\(r\.html\)\) \+/.test(sb)), 'the settings row writes that value whole, as text (never the three forms run together, never cut)');
+  ok(gateOf(/billingPillHtml\(forms, escHtml\), \{ attrs: \{ 'aria-label': forms\.tip \}, value: forms\.full \}\);/.test(sb)) && verdictOf(/forms\.tip \+ ' — ' \+ tip/.test(sb)), 'the status bar draws the three forms; title + aria-label carry every word');
+  ok(gateOf(/billChip\.innerHTML = billingPillHtml\(forms, escHtml\);/.test(mn)) && gateOf(/billChip\.setAttribute\('aria-label', forms\.tip\);/.test(mn)) && gateOf(/requestAnimationFrame\(\(\) => fitSwitcherRow\(item, label, billChip, splitBtn\)\)/.test(mn)) && verdictOf(/chip\.dataset\.mode = p\.chip === 'compact' && hasCompact \? 'compact' : 'full';/.test(mn)), 'the switcher row draws the three forms and fits them by the row\'s ladder beside its title (fitSwitcherRow — 主开发 2026-11-17, ruling B on the row; it was chipMode alone)');
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

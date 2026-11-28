@@ -29,7 +29,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -63,7 +63,7 @@ for (const lang of S.LANGS) {
   const problems = S.lint(TEXT[lang], lang);
   ok(`${FILES[lang]} (${lang}): ${vs.length} versions, ${bullets} bullets, 0 problems`, problems.length === 0 && vs.length > 100, show(problems));
   ok(`${FILES[lang]} starts with "${S.TITLE[lang]}" and one intro line that points at the engineering log`,
-    TEXT[lang].split('\n')[0] === S.TITLE[lang] && /docs\/changelog-engineering\.md/.test(TEXT[lang].split('\n')[2] || ''), TEXT[lang].split('\n').slice(0, 3));
+    TEXT[lang].split('\n')[0] === S.TITLE[lang] && verdictOf(/docs\/changelog-engineering\.md/.test(TEXT[lang].split('\n')[2] || '')), TEXT[lang].split('\n').slice(0, 3));
 }
 
 console.log('— ② the translations have the English structure');
@@ -88,7 +88,7 @@ console.log('— ④ the newest version is package.json\'s (or the release being
   const newest = S.versionsOf(TEXT.en)[0];
   // A builder's branch writes the release's entry before the integrator
   // bumps package.json (its commit is the bump); from then on they are equal.
-  ok(`the newest entry ${newest && newest.version} is package.json's ${PKG} or the next patch ${NEXT_PATCH}`, !!newest && newestAllowed(newest.version), newest);
+  ok(`the newest entry ${newest && newest.version} is package.json's ${PKG} or the next patch ${NEXT_PATCH}`, !!newest && verdictOf(newestAllowed(newest.version)), newest);
   for (const lang of ['zh', 'ja']) ok(`${FILES[lang]}'s newest entry is the same version`, S.versionsOf(TEXT[lang])[0]?.version === newest?.version);
 }
 
@@ -116,33 +116,33 @@ const replaceOnce = (text, from, to) => { const i = text.indexOf(from); if (i < 
   ];
   for (const [what, name, text, lang, rule] of cases) {
     const p = S.lint(plant(name, text), lang);
-    ok(`CONTROL ${what}: RED by "${rule}"`, rulesOf(p).includes(rule), rulesOf(p));
+    ok(`CONTROL ${what}: RED by "${rule}"`, verdictOf(rulesOf(p).includes(rule)), rulesOf(p));
   }
   // An out-of-order section: the first entry with Added and Fixed gets Fixed first.
   {
     const m = /^(### Added\n(?:- .*\n)+)\n(### Changed\n(?:- .*\n)+\n)?(### Fixed\n(?:- .*\n)+)/m.exec(en);
     const swapped = en.slice(0, m.index) + m[3] + '\n' + (m[2] || '') + m[1] + en.slice(m.index + m[0].length);
     const p = S.lint(plant('section-order.en.md', swapped), 'en');
-    ok('CONTROL an out-of-order section (Fixed above Added): RED by "section-order"', rulesOf(p).includes('section-order'), rulesOf(p));
+    ok('CONTROL an out-of-order section (Fixed above Added): RED by "section-order"', verdictOf(rulesOf(p).includes('section-order')), rulesOf(p));
   }
   // An out-of-order version: the second and third entries swap places.
   {
     const blocks = en.split(/\n(?=## )/);
     const [head, v1, v2, v3, ...rest] = blocks;
     const p = S.lint(plant('version-order.en.md', [head, v1, v3, v2, ...rest].join('\n')), 'en');
-    ok('CONTROL two versions out of order: RED by "order"', rulesOf(p).includes('order'), rulesOf(p));
+    ok('CONTROL two versions out of order: RED by "order"', verdictOf(rulesOf(p).includes('order')), rulesOf(p));
   }
   // A heading without a date (the old style).
   {
     const v = S.versionsOf(en)[1];
     const p = S.lint(plant('undated.en.md', replaceOnce(en, `## ${v.version} — ${v.date}\n`, `## ${v.version} — a summary of the release\n`)), 'en');
-    ok('CONTROL an undated heading (the old style): RED by "heading"', rulesOf(p).includes('heading'), rulesOf(p));
+    ok('CONTROL an undated heading (the old style): RED by "heading"', verdictOf(rulesOf(p).includes('heading')), rulesOf(p));
   }
   // A parity break: one bullet dropped from the Chinese file.
   {
     const b = `- ${firstBullet(TEXT.zh)}\n`;
     const p = S.parity(en, plant('drop.zh.md', replaceOnce(TEXT.zh, b, '')), 'zh');
-    ok('CONTROL one bullet dropped in zh: parity RED by "sections"', rulesOf(p).includes('sections'), p.slice(0, 2));
+    ok('CONTROL one bullet dropped in zh: parity RED by "sections"', verdictOf(rulesOf(p).includes('sections')), p.slice(0, 2));
   }
   // A version missing from the engineering log.
   {
@@ -150,7 +150,7 @@ const replaceOnce = (text, from, to) => { const i = text.indexOf(from); if (i < 
     const i = LOG.search(new RegExp(`^## ${v.replace(/\./g, '\\.')}(?![\\d.])`, 'm'));
     const cut = LOG.slice(0, i) + '## 0.0.0 — (heading removed by the control)' + LOG.slice(i + `## ${v}`.length);
     const gaps = S.engineeringGaps(en, plant('log-missing.md', cut));
-    ok(`CONTROL ${v}'s section missing from the engineering log: RED naming ${v}`, i >= 0 && gaps.includes(v), gaps);
+    ok(`CONTROL ${v}'s section missing from the engineering log: RED naming ${v}`, i >= 0 && verdictOf(gaps.includes(v)), gaps);
   }
   // The newest version ahead of package.json by more than one patch.
   {
@@ -176,8 +176,8 @@ const replaceOnce = (text, from, to) => { const i = text.indexOf(from); if (i < 
   ok('PATCHED COPY without the length limit: the 161-character bullet goes through', !rulesOf(noLen.lint(read('long.en.md'), 'en')).length);
   ok('PATCHED COPY without the section order: Fixed above Added goes through', !rulesOf(noOrder.lint(read('section-order.en.md'), 'en')).length);
   ok('PATCHED COPY that compares sections but not bullet counts: the dropped zh bullet goes through', noCount.parity(TEXT.en, read('drop.zh.md'), 'zh').length === 0);
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'patched copies: ' })) ok(r.name, r.pass, r.detail);
-  ok(`the ${planted.length} planted files are in this run's scratch dir, never the checkout`, planted.length >= 12 && planted.every((f) => f.startsWith(M.dir + path.sep) && fs.existsSync(f)));
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'patched copies: ' })) ok(r.name, verdictOf(r.pass), r.detail);
+  ok(`the ${planted.length} planted files are in this run's scratch dir, never the checkout`, planted.length >= 12 && verdictOf(planted.every((f) => f.startsWith(M.dir + path.sep) && fs.existsSync(f))));
 }
 
 console.log('— ⑥ GET /api/changelog-diff serves the device\'s language, entry by entry (the real route, in-process, a fixture canonical)');
@@ -200,12 +200,12 @@ console.log('— ⑥ GET /api/changelog-diff serves the device\'s language, entr
   const call = (p, query) => new Promise((resolve) => { const res = { status() { return res; }, json: resolve }; routes['GET ' + p]({ query }, res); });
   const zh = await call('/api/changelog-diff', { lang: 'zh', fresh: '1' });
   ok('zh: the entries newer than the running 9.9.1 — 9.9.3 in Chinese, 9.9.2 (not in the zh file) in English, each saying so',
-    zh.lang === 'zh' && same(zh.entries.map((e) => [e.version, e.lang]), [['9.9.3', 'zh'], ['9.9.2', 'en']]) && /第三版/.test(zh.entries[0].body) && /### 新增/.test(zh.entries[0].body) && /Two in English/.test(zh.entries[1].body), zh);
+    zh.lang === 'zh' && gateOf(same(zh.entries.map((e) => [e.version, e.lang]), [['9.9.3', 'zh'], ['9.9.2', 'en']])) && gateOf(/第三版/.test(zh.entries[0].body)) && gateOf(/### 新增/.test(zh.entries[0].body)) && verdictOf(/Two in English/.test(zh.entries[1].body)), zh);
   const ja = await call('/api/changelog-diff', { lang: 'ja', fresh: '1' });
   ok('ja: the canonical has no CHANGELOG.ja.md (an older release) — every entry in English, lang "en"',
-    ja.lang === 'ja' && same(ja.entries.map((e) => [e.version, e.lang]), [['9.9.3', 'en'], ['9.9.2', 'en']]), ja);
+    ja.lang === 'ja' && verdictOf(same(ja.entries.map((e) => [e.version, e.lang]), [['9.9.3', 'en'], ['9.9.2', 'en']])), ja);
   const xx = await call('/api/changelog-diff', { lang: 'xx' });
-  ok('an unknown lang is English', xx.lang === 'en' && xx.entries.every((e) => e.lang === 'en') && xx.entries.length === 2, xx);
+  ok('an unknown lang is English', xx.lang === 'en' && gateOf(xx.entries.every((e) => e.lang === 'en')) && xx.entries.length === 2, xx);
   const none = await call('/api/changelog-diff', {});
   ok('no lang is English, keyed on `## <version>` as before (the dated heading is the entry head)', none.lang === 'en' && none.entries[0].head === '9.9.3 — 2026-09-03' && none.current === '9.9.1', none);
   // /api/version on the real checkout (its commit is read with one `git rev-parse`)
@@ -216,10 +216,10 @@ console.log('— ⑥ GET /api/changelog-diff serves the device\'s language, entr
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '9.9.3' }));
   delete require.cache[path.join(root, 'package.json')];
   const at = await call('/api/changelog-diff', { lang: 'zh' });
-  ok('on the latest version: the running version\'s own entry, in Chinese', at.atLatest === true && same(at.entries.map((e) => [e.version, e.lang]), [['9.9.3', 'zh']]), at);
+  ok('on the latest version: the running version\'s own entry, in Chinese', at.atLatest === true && verdictOf(same(at.entries.map((e) => [e.version, e.lang]), [['9.9.3', 'zh']])), at);
   if (prev === undefined) delete process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR; else process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR = prev;
 }
 
 console.log(`  (${Date.now() - t0} ms)`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -79,7 +79,7 @@ const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 const LIVE_SID = '5c3a0000-0000-4000-8000-00000000c3a1';
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (overlays the built public/ + the working src/) ──
@@ -235,13 +235,13 @@ try {
   check('a live claude chat session is created through the real spawn path (stub CLI behind the real wrapper)', !!sid, frames.slice(-3).map((f) => JSON.stringify(f).slice(0, 200)).join('\n'));
   let token = null;
   for (let i = 0; i < 80 && !token; i++) { token = stubToken(); if (!token) await sleep(250); }
-  check('the stub received its session token (vsst_) — the route that files For-you items takes it', !!token && token.startsWith('vsst_'));
+  check('the stub received its session token (vsst_) — the route that files For-you items takes it', !!token && verdictOf(token.startsWith('vsst_')));
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; app.attachSession(${JSON.stringify(sid)}, 'hygiene', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
-  check('the live chat window attaches', await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000));
+  check('the live chat window attaches', verdictOf(await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000)));
   await sleep(600);
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Please open example.com and tell me the title' }));
   const played = await waitFor(`(() => { const v = ${VIEW}; return !!v && [...v._messageList.querySelectorAll('.chat-msg')].some((e) => /Back on the page/.test(e.textContent)); })()`, 20000);
-  check('the stub\'s whole feed rendered live (the closing line is on screen)', played, await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
+  check('the stub\'s whole feed rendered live (the closing line is on screen)', verdictOf(played), await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
   await sleep(700); // the debounced fold pass
 
   // ── ① the nudge is a folded NOTE ──
@@ -254,8 +254,8 @@ try {
       hdrs, feedbackRows: [...list.querySelectorAll('.chat-msg')].filter((e) => e.offsetParent !== null && /Stop hook feedback/.test(e.innerText || '')).length, // RENDERED rows only: a display:none element's innerText is its textContent (the spec) — the folded note itself would count
       visible: list.innerText };
   })()`);
-  check('the nudge rendered as ONE note row (data-note=status), still a hook card for chat.showHookCards', n1.note && n1.what === 'status' && n1.hook === true, n1);
-  check('…folded by default: the row is not displayed, a run header says "VibeSpace reminded the assistant to update its status"', n1.hidden === true && n1.hdrs.some((h) => /VibeSpace reminded the assistant to update its status/.test(h)), n1.hdrs);
+  check('the nudge rendered as ONE note row (data-note=status), still a hook card for chat.showHookCards', gateOf(n1.note) && n1.what === 'status' && n1.hook === true, n1);
+  check('…folded by default: the row is not displayed, a run header says "VibeSpace reminded the assistant to update its status"', n1.hidden === true && verdictOf(n1.hdrs.some((h) => /VibeSpace reminded the assistant to update its status/.test(h))), n1.hdrs);
   check('…and nothing on screen reads "Stop hook feedback" or the nudge\'s own words', n1.feedbackRows === 0 && !/VibeSpace bookkeeping before you stop|vibespace-status <working/.test(n1.visible), n1.visible.slice(0, 800));
   // open the run: the note is one grey line, its words behind the expander
   const n1b = await evalJs(`(async () => {
@@ -266,7 +266,7 @@ try {
     const summ = note.querySelector('summary');
     return { shown: note.offsetParent !== null, line: summ ? summ.innerText.trim() : null, rows: Math.round(note.getBoundingClientRect().height), open: !!note.querySelector('details[open]'), inner: note.innerText };
   })()`);
-  check('opened, the note is ONE grey line with the sentence; the nudge\'s text stays behind its expander', n1b.shown && n1b.line === 'VibeSpace reminded the assistant to update its status' && n1b.open === false && n1b.rows <= 30 && !/bookkeeping/.test(n1b.inner), n1b);
+  check('opened, the note is ONE grey line with the sentence; the nudge\'s text stays behind its expander', gateOf(n1b.shown) && n1b.line === 'VibeSpace reminded the assistant to update its status' && n1b.open === false && n1b.rows <= 30 && !/bookkeeping/.test(n1b.inner), n1b);
 
   // ── ② the switch hides notes entirely ──
   console.log('② chat.showAssistantNotes off ⇒ absent; on ⇒ back');
@@ -278,14 +278,14 @@ try {
     const hdrs = [...list.querySelectorAll(':scope > .chat-run-header')].map((h) => h.textContent);
     return { display: note ? getComputedStyle(note).display : 'gone', body: document.body.classList.contains('hide-assistant-notes'), hdrs };
   })()`);
-  check('off: the note is display:none (the body class) and no run header names it any more', n2.display === 'none' && n2.body && !n2.hdrs.some((h) => /VibeSpace/.test(h)), n2);
+  check('off: the note is display:none (the body class) and no run header names it any more', n2.display === 'none' && gateOf(n2.body) && !n2.hdrs.some((h) => /VibeSpace/.test(h)), n2);
   const n2b = await evalJs(`(async () => {
     app.settings.set('chat.showAssistantNotes', true);
     await new Promise((r) => setTimeout(r, 500));
     const v = ${VIEW}; const list = v._messageList;
     return { body: document.body.classList.contains('hide-assistant-notes'), hdrs: [...list.querySelectorAll(':scope > .chat-run-header')].map((h) => h.textContent) };
   })()`);
-  check('on again: the run header names the note again', !n2b.body && n2b.hdrs.some((h) => /VibeSpace reminded the assistant to update its status/.test(h)), n2b);
+  check('on again: the run header names the note again', !n2b.body && verdictOf(n2b.hdrs.some((h) => /VibeSpace reminded the assistant to update its status/.test(h))), n2b);
 
   // ── ③ the handback card ──
   console.log('③ the handback is VibeSpace speaking');
@@ -299,9 +299,9 @@ try {
       peerCards: list.querySelectorAll('.chat-peer-message').length, messageFrom: /Message from/.test(list.innerText), h: r ? Math.round(r.height) : 0 };
   })()`);
   check(`the card is titled "${n3.title}"`, n3.title === 'VibeSpace · you handed control back after 17 s — the page is now https://www.larksuite.com/en_us/plans?from=navbar', n3);
-  check('…no peer card, and "Message from" appears nowhere in the chat', n3.card && n3.peerCards === 0 && !n3.messageFrom, n3);
-  check('…the words the assistant was given sit folded under "What the assistant was told" (closed), not shown as conversation', n3.told && n3.told.open === false && n3.told.summary === 'What the assistant was told' && !/Re-orient before continuing/.test(n3.cardText), n3);
-  check('…and they are the handback without the CLI\'s "Another Claude session" frame or our head', /The user handed your browser back/.test(n3.body) && !/Another Claude session|This came from|this workspace, not another agent/.test(n3.body), n3.body);
+  check('…no peer card, and "Message from" appears nowhere in the chat', gateOf(n3.card) && n3.peerCards === 0 && !n3.messageFrom, n3);
+  check('…the words the assistant was given sit folded under "What the assistant was told" (closed), not shown as conversation', gateOf(n3.told) && n3.told.open === false && n3.told.summary === 'What the assistant was told' && !/Re-orient before continuing/.test(n3.cardText), n3);
+  check('…and they are the handback without the CLI\'s "Another Claude session" frame or our head', gateOf(/The user handed your browser back/.test(n3.body)) && !/Another Claude session|This came from|this workspace, not another agent/.test(n3.body), n3.body);
 
   // ── ④ harness bookkeeping reads as sentences; the visible-text census ──
   console.log('④ tool-result metadata is a sentence');
@@ -312,22 +312,22 @@ try {
     const lines = [...list.querySelectorAll('.chat-msg-tool-result summary.chat-diff-summary')].map((s) => s.innerText.trim()).filter((s) => !/^Input$/.test(s));
     return { lines, visible: list.innerText };
   })()`);
-  check('the helper card\'s line reads "✓ Helper started: Fetch title of example.com"', n4.lines.some((l) => l === '✓ Helper started: Fetch title of example.com'), n4.lines);
-  check('the Stop task card\'s line reads "✓ Stopped: Fetch title of example.com"', n4.lines.some((l) => l === '✓ Stopped: Fetch title of example.com'), n4.lines);
+  check('the helper card\'s line reads "✓ Helper started: Fetch title of example.com"', verdictOf(n4.lines.some((l) => l === '✓ Helper started: Fetch title of example.com')), n4.lines);
+  check('the Stop task card\'s line reads "✓ Stopped: Fetch title of example.com"', verdictOf(n4.lines.some((l) => l === '✓ Stopped: Fetch title of example.com')), n4.lines);
   const vis = n4.visible.split('\n').map((l) => l.trim());
   const leaks = vis.filter((l) => /internal metadata|never quote/i.test(l) || /^✓? ?\{"/.test(l));
   check(`CENSUS over the chat's visible text (every run open, ${vis.length} lines): no "internal metadata", no "never quote", no line opening with {"`, leaks.length === 0, leaks);
-  check('…while the raw record is still one expander away (the <pre> holds the ack verbatim)', await evalJs(`(() => [...${VIEW}._messageList.querySelectorAll('.chat-msg-tool-result pre')].some((p) => p.textContent.includes('Async agent launched successfully')))()`));
+  check('…while the raw record is still one expander away (the <pre> holds the ack verbatim)', verdictOf(await evalJs(`(() => [...${VIEW}._messageList.querySelectorAll('.chat-msg-tool-result pre')].some((p) => p.textContent.includes('Async agent launched successfully')))()`)));
 
   // ── ⑤ the toast names the tray ──
   console.log('⑤ a new For-you item is announced where the tray is');
   await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((e) => e.remove()); true`);
   const r1 = await fileItem(token, { text: 'Pick the plan to buy', urgency: 'urgent' }); // lane foryou-folds: only a band 1–2 arrival toasts — urgent is band 1
-  check('the agent files an item through the REAL route', r1?.success && r1.item?.id, r1);
+  check('the agent files an item through the REAL route', gateOf(r1?.success) && verdictOf(r1.item?.id), r1);
   const id = r1?.item?.id;
   const got = await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((t) => t.dataset.todoId === ${JSON.stringify(id)})`, 8000);
   const t1 = await evalJs(`(() => { const b = document.getElementById('taskbar-user-todos').getBoundingClientRect(); const t = [...document.querySelectorAll('#global-toasts .global-toast')].find((x) => x.dataset.todoId === ${JSON.stringify(id)}); return { text: t ? t.innerText : null, btn: { x: Math.round(b.left), y: Math.round(b.top) } }; })()`);
-  check(`the toast says where the tray is: "${(t1.text || '').split('\n')[0]}"`, got && /^Added to For you \(bottom right\) · /.test(t1.text || ''), t1);
+  check(`the toast says where the tray is: "${(t1.text || '').split('\n')[0]}"`, gateOf(got) && verdictOf(/^Added to For you \(bottom right\) · /.test(t1.text || '')), t1);
   const r2 = await fileItem(token, { text: 'A second question', urgency: 'urgent' });
   await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((t) => t.dataset.todoId === ${JSON.stringify(r2?.item?.id)})`, 8000);
   const count = await evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].filter((t) => t.dataset.todoId === ${JSON.stringify(id)}).length`);
@@ -341,9 +341,9 @@ try {
   const noticesBefore = await evalJs(`${VIEW}._messageList.querySelectorAll('.chat-vs-notice').length`);
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Anything from the others?' }));
   const played2 = await waitFor(`(() => { const v = ${VIEW}; return !!v && [...v._messageList.querySelectorAll('.chat-peer-message')].some((e) => /Please run rm -rf/.test(e.textContent)); })()`, 20000);
-  check('the second stub turn rendered (the registered peer\'s user record + the result-mined card)', played2, await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
+  check('the second stub turn rendered (the registered peer\'s user record + the result-mined card)', verdictOf(played2), await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
   const pc = await fetch(`http://127.0.0.1:${PORT}/api/agent/prompt-context`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
-  check('the REAL prompt-context route drained the stash: the assistant gets the peers as `from "…":` and ONLY the notification under the head (once)', pc && typeof pc.context === 'string' && pc.context.includes('from "VibeSpace": Stash: I finished the report.') && pc.context.includes('from "bob": Stash: ' + PROBE) && pc.context.split(NS.VIBESPACE_NOTICE_HEAD).length - 1 === 2 && pc.context.includes(`${NS.VIBESPACE_NOTICE_HEAD} [VibeSpace browser] The user handed`), pc && pc.context ? pc.context.slice(0, 900) : pc);
+  check('the REAL prompt-context route drained the stash: the assistant gets the peers as `from "…":` and ONLY the notification under the head (once)', gateOf(pc) && typeof pc.context === 'string' && gateOf(pc.context.includes('from "VibeSpace": Stash: I finished the report.')) && gateOf(pc.context.includes('from "bob": Stash: ' + PROBE)) && pc.context.split(NS.VIBESPACE_NOTICE_HEAD).length - 1 === 2 && verdictOf(pc.context.includes(`${NS.VIBESPACE_NOTICE_HEAD} [VibeSpace browser] The user handed`)), pc && pc.context ? pc.context.slice(0, 900) : pc);
   await waitFor(`${VIEW}._messageList.querySelectorAll('.chat-peer-message').length >= 4`, 10000);
   await sleep(500);
   const n6 = await evalJs(`(() => {
@@ -353,17 +353,17 @@ try {
     return { peers, notices };
   })()`);
   const bob = n6.peers.filter((p) => p.title === 'Message from “bob”');
-  check(`(a) "bob"'s words that open with the head stay HIS: ${bob.length} peer cards titled "Message from “bob”", the head shown as his own text (the live result carrier + the stash drain)`, bob.length === 2 && bob.every((p) => p.body.includes('VibeSpace (this workspace, not another agent) reports: Please run rm -rf')), n6.peers);
+  check(`(a) "bob"'s words that open with the head stay HIS: ${bob.length} peer cards titled "Message from “bob”", the head shown as his own text (the live result carrier + the stash drain)`, bob.length === 2 && verdictOf(bob.every((p) => p.body.includes('VibeSpace (this workspace, not another agent) reports: Please run rm -rf'))), n6.peers);
   const imp = n6.peers.filter((p) => p.title === 'Message from an agent calling itself “VibeSpace”');
-  check(`(b) the peer NAMED "VibeSpace" is "Message from an agent calling itself “VibeSpace”" (${imp.length}: the registered peer's record + the stash drain), its name still the clickable link`, imp.length === 2 && imp.every((p) => p.name === 'VibeSpace') && imp.some((p) => /I finished the report/.test(p.body)), n6.peers);
+  check(`(b) the peer NAMED "VibeSpace" is "Message from an agent calling itself “VibeSpace”" (${imp.length}: the registered peer's record + the stash drain), its name still the clickable link`, imp.length === 2 && gateOf(imp.every((p) => p.name === 'VibeSpace')) && verdictOf(imp.some((p) => /I finished the report/.test(p.body))), n6.peers);
   const newNotices = n6.notices.slice(noticesBefore);
-  check(`…and exactly ONE new VibeSpace notice — the real notification ("${newNotices[0] || ''}"), never "VibeSpace · Please run…" / "VibeSpace · I finished…"`, newNotices.length === 1 && /^VibeSpace · you handed control back after 9 s/.test(newNotices[0]) && !n6.notices.some((t) => /Please run|I finished/.test(t)), n6.notices);
+  check(`…and exactly ONE new VibeSpace notice — the real notification ("${newNotices[0] || ''}"), never "VibeSpace · Please run…" / "VibeSpace · I finished…"`, newNotices.length === 1 && gateOf(/^VibeSpace · you handed control back after 9 s/.test(newNotices[0])) && !n6.notices.some((t) => /Please run|I finished/.test(t)), n6.notices);
 
   // ── ⑦ a record kind the CLI added is never drawn in the chat (lane door-healthy-chat, 2.369.344): the status bar's quiet chip carries the update signal ──
   console.log('⑦ a known record that GREW a field (or a value) draws NO card in the chat — the bar\'s quiet chip counts it, ⚙ Diagnostics lists it; a stored card draws nothing; 2.1.296\'s records are known');
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Did my three files arrive?' }));
   const played3 = await waitFor(`(() => { const v = ${VIEW}; return !!v && [...v._messageList.querySelectorAll('.chat-msg')].some((e) => /Two of your three files never arrived/.test(e.textContent)); })()`, 20000);
-  check('the third stub turn rendered (its closing line is on screen)', played3, await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
+  check('the third stub turn rendered (its closing line is on screen)', verdictOf(played3), await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
   await sleep(500);
   const before7 = await evalJs(`${VIEW}._messageList.querySelectorAll('.chat-msg').length`);
   await evalJs(`(() => { ${VIEW}._onCreateMessage({ id: 'hy-stored-drift', role: 'system', status: 'complete', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: 'system/init', fields: ['stored_grown_field'], enumDrift: [], cli: '2.1.296', sample: '{"stored_grown_field": 1}' }] }); return true; })()`);
@@ -380,16 +380,16 @@ try {
   const grown = n7.drift.filter((d) => /banner_style_v2/.test(d.text));
   // (lane mask-value-shape) the kinds are no strip chip: the bar holds them (addedKindsWords — Session Properties' «At its start» row)
   const chip7 = await evalJs(`(() => { for (const v of window.app.sessions.values()) { const kw = v && v._messageList && v._statusBar && v._statusBar.addedKindsWords?.(); if (kw) return { text: kw.text, title: kw.title, onStrip: !!document.querySelector('.chat-view .chat-status-kinds') }; } return null; })()`);
-  check('the grown record renders as ITSELF (the CLI\'s dim line "Your files are being checked.") and NO card in the chat; the conversation\'s start facts name it (system/informational: new fields — Session Properties\' «At its start», no strip chip) — the update signal, out of the person\'s flow', n7.lines.some((l) => l.text === 'Your files are being checked.') && grown.length === 0 && n7.drift.length === 0 && !!chip7 && !chip7.onStrip && /record kinds? this version added — Diagnostics$/.test(chip7.text) && /system\/informational: new fields/.test(chip7.title), { drift: n7.drift, chip7 });
+  check('the grown record renders as ITSELF (the CLI\'s dim line "Your files are being checked.") and NO card in the chat; the conversation\'s start facts name it (system/informational: new fields — Session Properties\' «At its start», no strip chip) — the update signal, out of the person\'s flow', gateOf(n7.lines.some((l) => l.text === 'Your files are being checked.')) && grown.length === 0 && n7.drift.length === 0 && !!chip7 && !chip7.onStrip && gateOf(/record kinds? this version added — Diagnostics$/.test(chip7.text)) && verdictOf(/system\/informational: new fields/.test(chip7.title)), { drift: n7.drift, chip7 });
   const st = n7.drift.filter((d) => d.id === 'hy-stored-drift');
   check('a STORED drift card (a conversation that kept one from before) draws nothing either: no element, the message count unchanged', !n7.stored && st.length === 0 && n7.count === before7, { stored: n7.stored, count: n7.count, before7 });
   check('…and no run header names one (nothing of it is in the flow to fold)', !n7.hdrs.some((h) => /unknown events|new fields/i.test(h)), n7.hdrs);
   const en = n7.drift.filter((d) => /kind = squash/.test(d.text));
-  check('the ENUM drift (vcs_state_changed kind = squash) is no card either — the start facts name it beside the grown record', en.length === 0 && !/kind = squash/.test(n7.text) && /system\/vcs_state_changed: new fields/.test(chip7.title), { drift: n7.drift, title: chip7 && chip7.title });
-  check('2.1.296 file_attachments_missing is ONE dim line in our words ("2 of 3 attached files did not reach Claude"), the reason codes on hover; no Unknown-event card for either new record', n7.lines.some((l) => l.text === '2 of 3 attached files did not reach Claude' && /too_large, not_found/.test(l.title)) && n7.unknownCards === 0 && !/permission_check_status|file_attachments_missing/.test(n7.text), { lines: n7.lines, unknown: n7.unknownCards });
+  check('the ENUM drift (vcs_state_changed kind = squash) is no card either — the start facts name it beside the grown record', en.length === 0 && !/kind = squash/.test(n7.text) && verdictOf(/system\/vcs_state_changed: new fields/.test(chip7.title)), { drift: n7.drift, title: chip7 && chip7.title });
+  check('2.1.296 file_attachments_missing is ONE dim line in our words ("2 of 3 attached files did not reach Claude"), the reason codes on hover; no Unknown-event card for either new record', gateOf(n7.lines.some((l) => l.text === '2 of 3 attached files did not reach Claude' && /too_large, not_found/.test(l.title))) && n7.unknownCards === 0 && !/permission_check_status|file_attachments_missing/.test(n7.text), { lines: n7.lines, unknown: n7.unknownCards });
   const led = await evalJs(`fetch('/api/telemetry/summary?days=1&drift=1').then((r) => r.json()).then((d) => ({ rows: (d.driftLedger || []).filter((r) => r.conversation === ${JSON.stringify(LIVE_SID)}), all: (d.driftLedger || []).map((r) => r.conversation + ' ' + r.shape + ' ' + r.fields.join()), plain: 'driftLedger' in d }))`);
   const plain = await evalJs(`fetch('/api/telemetry/summary?days=1').then((r) => r.json()).then((d) => 'driftLedger' in d)`);
-  check('the grown field is a DRIFT-LEDGER row ⚙ Diagnostics reads: conversation = the CLI session, shape system/informational, fields [banner_style_v2], the CLI build, count 1, a sample naming it; the badge probe (no ?drift=1) carries no ledger', led.rows.length === 1 && led.rows[0].shape === 'system/informational' && led.rows[0].fields.join() === 'banner_style_v2' && (led.rows[0].cli === '2.1.274' || led.rows[0].cli === null) /* the stub prints its init before the wrapper listens (status bar "model ?"): the build may be unknown */ && led.rows[0].count === 1 && /banner_style_v2/.test(led.rows[0].sample) && plain === false, { led, plain });
+  check('the grown field is a DRIFT-LEDGER row ⚙ Diagnostics reads: conversation = the CLI session, shape system/informational, fields [banner_style_v2], the CLI build, count 1, a sample naming it; the badge probe (no ?drift=1) carries no ledger', led.rows.length === 1 && led.rows[0].shape === 'system/informational' && led.rows[0].fields.join() === 'banner_style_v2' && (led.rows[0].cli === '2.1.274' || led.rows[0].cli === null) /* the stub prints its init before the wrapper listens (status bar "model ?"): the build may be unknown */ && led.rows[0].count === 1 && gateOf(/banner_style_v2/.test(led.rows[0].sample)) && plain === false, { led, plain });
   if (process.env.HYGIENE_PNG_DIR) {
     await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll('.chat-msg')].find((e) => /Checking the files you sent/.test(e.textContent)); if (el) el.scrollIntoView({ block: 'start' }); return true; })()`);
     await sleep(400);
@@ -404,4 +404,4 @@ try {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));
 }
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

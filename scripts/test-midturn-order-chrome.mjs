@@ -45,7 +45,7 @@ const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
 const skip = (name, why) => { skipped++; console.log(`  ○ SKIP ${name} — ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 10000, step = 100) => { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch { } await sleep(step); } try { return !!(await fn()); } catch { return false; } };
@@ -153,7 +153,7 @@ for (const [sig, code] of [['SIGTERM', 143], ['SIGINT', 130], ['SIGHUP', 129]]) 
       const inOrder = S(drawn) === S(held.filter((id) => v._elements.has(id)));
       const okWin = vn === 'teleported onto the unread message' ? teleHeld.every((id) => held.includes(id) && v._elements.get(id)?.parentNode === v._messageList)
         : v._teleported ? (S(held) === S(teleIds)) : (S(held) === S(want));
-      ok(v.rereads === 0 && okWin && inOrder && (v._pinned || v.scrolls === 0) && v._total === mm.messages.length,
+      ok(v.rereads === 0 && gateOf(okWin) && gateOf(inOrder) && (gateOf(v._pinned) || v.scrolls === 0) && v._total === mm.messages.length,
         `§0 F4 ${name} · ${vn}: the reader stays — 0 re-reads, ${vn === 'teleported onto the unread message' ? 'the person\'s messages the slab holds STAY drawn (r3 m14)' : `the window holds exactly the server's slice [${v._windowStart}, ${v._windowEnd}) in order${v._teleported ? ' (the slab keeps its cards)' : ''}`}, the count = the server's`,
         { rereads: v.rereads, scrolls: v.scrolls, total: [v._total, mm.messages.length], firstDiff: v._teleported ? null : held.findIndex((id, i) => id !== want[i]), n: [held.length, want && want.length] });
     }
@@ -224,7 +224,7 @@ for (const [sig, code] of [['SIGTERM', 143], ['SIGINT', 130], ['SIGHUP', 129]]) 
     return { moves, live: fromTool(order(live)), rebuild: rb ? fromTool(order(rb)) : null, landed: recs.filter((r) => r.type === 'input_handover' && r.state === 'landed').flatMap((r) => r.msg_ids), dropped: recs.filter((r) => r.type === 'queue_dropped').map((r) => r.keptIds || []) };
   }
   const rk = await wrapperLeg('readkept');
-  ok(S(rk.live) === S(['tool', 'B[steered]', 'i2', 'I', 'i2', 'I', 'B2[kept]']) && rk.landed.includes('m-b') && !rk.landed.includes('m-b2') && S(rk.rebuild) === S(rk.live),
+  ok(S(rk.live) === S(['tool', 'B[steered]', 'i2', 'I', 'i2', 'I', 'B2[kept]']) && gateOf(rk.landed.includes('m-b')) && !rk.landed.includes('m-b2') && S(rk.rebuild) === S(rk.live),
     '§0b m15 a message READ at its tool result, another handed after it, Stop ⇒ the follow-up\'s init names only the second: the wrapper says the first LANDED — «Steered» where it rode, the second «Unread when stopped» below both stop rows; the restart draws the same', rk);
   // r4 m15: THE SPLIT FOLLOW-UP (STAND_IN_SPLIT_FOLLOW — the shape the real CLI showed: each held frame its own follow-up)
   const SPLIT = { STAND_IN_SPLIT_FOLLOW: '1', STAND_IN_RIDE_MISS: '1' };
@@ -292,7 +292,7 @@ startServer();
 const fontEnv = runnerFontEnv(scratchDir('mto-fonts'));
 const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1200,900', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...envNoBus, ...fontEnv } });
 procs.add(chrome);
-ok(await until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 250), 'the scratch hub answered', journal.slice(-1200));
+ok(verdictOf(await until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 250)), 'the scratch hub answered', journal.slice(-1200));
 const ctl = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 const frames = []; ctl.on('message', (d) => { if (d.length > 65536) return; try { frames.push(JSON.parse(String(d))); } catch { } });
 await new Promise((r, e) => { ctl.on('open', r); ctl.on('error', e); });
@@ -370,73 +370,73 @@ const rows = (o, l) => (o || []).map((r, i) => (r.label === l ? i : -1)).filter(
 console.log('① a tool runs · a message typed + Enter mid-tool · Stop · Stop again');
 await load('en');
 const o1 = await open();
-ok(o1 && o1.ok && !o1.ro, 'the chat window opened live with a composer', o1);
+ok(gateOf(o1) && gateOf(o1.ok) && !o1.ro, 'the chat window opened live with a composer', o1);
 await typeSend('TOOL-A run the slow command');
-ok(await until(async () => (await toolCards()) >= 1, 20000), 'the turn ran its tool (a tool card)');
+ok(verdictOf(await until(async () => (await toolCards()) >= 1, 20000)), 'the turn ran its tool (a tool card)');
 await typeSend('B the mid-turn message');
-ok(await until(async () => (await chipOf('B the mid-turn')) === 'handed', 8000), 'the message was handed to the running turn (Enter, the CLI\'s default) — «Handed to the turn»', await chipOf('B the mid-turn'));
+ok(verdictOf(await until(async () => (await chipOf('B the mid-turn')) === 'handed', 8000)), 'the message was handed to the running turn (Enter, the CLI\'s default) — «Handed to the turn»', await chipOf('B the mid-turn'));
 const stop1 = await realClick('[data-mto="1"] .chat-interrupt-btn');
 await sleep(60);
 const stop2 = (await streaming()) ? await realClick('[data-mto="1"] .chat-interrupt-btn') : false;
 console.log(`  (Stop pressed: first ${stop1}, second ${stop2 ? 'pressed' : 'not needed — the turn had ended'})`);
-ok(await until(async () => rows(await order(), 'i2').length >= 1 && rows(await order(), 'Interrupted').length >= 2 && !(await streaming()), 15000), 'the stop drew its rows: «…for tool use]», «[Request interrupted by user]», each with «Interrupted»', labels(await order()));
+ok(verdictOf(await until(async () => rows(await order(), 'i2').length >= 1 && rows(await order(), 'Interrupted').length >= 2 && !(await streaming()), 15000)), 'the stop drew its rows: «…for tool use]», «[Request interrupted by user]», each with «Interrupted»', labels(await order()));
 await sleep(400);
 const after = await order();
 const L = labels(after), b = L.findIndex((x) => /^B\[/.test(x));
 console.log(`  DOM order: ${L.join(' · ')}`);
 ok(b > rows(after, 'i1')[0] && b > rows(after, 'i2')[0] && b > Math.max(...rows(after, 'Interrupted')), '① THE ORDER THE AGENT LIVED: the message it never read is drawn BELOW both interrupt rows and their «Interrupted» rows', L);
 ok(S(L.slice(L.indexOf('tool'))) === S(['tool', 'i1', 'Interrupted', 'i2', 'Interrupted', 'B[kept]']), '…exactly: the tool, the stop for tool use, the follow-up the wrapper stopped on its init, then the message', L);
-ok(after.filter((r) => r.label === 'Interrupted').every((r) => r.text === 'Interrupted'), '① (r2 r1) each «Interrupted» row reads «Interrupted» alone — never a message\'s words above that message (the real CLI\'s interrupted result carries none; the stand-in now writes that shape)', after.filter((r) => r.label === 'Interrupted').map((r) => r.text));
+ok(verdictOf(after.filter((r) => r.label === 'Interrupted').every((r) => r.text === 'Interrupted')), '① (r2 r1) each «Interrupted» row reads «Interrupted» alone — never a message\'s words above that message (the real CLI\'s interrupted result carries none; the stand-in now writes that shape)', after.filter((r) => r.label === 'Interrupted').map((r) => r.text));
 const chip = after[b] || {};
-ok(chip.chip === 'kept' && chip.chipText === 'Unread when stopped — goes with your next message' && /^Stop came before the agent read it\. It stays in the conversation and reaches the agent with the next message it gets/.test(chip.chipTitle || ''), '…its chip says the agent had not read it and where it goes: «Unread when stopped — goes with your next message»', chip);
+ok(chip.chip === 'kept' && chip.chipText === 'Unread when stopped — goes with your next message' && verdictOf(/^Stop came before the agent read it\. It stays in the conversation and reaches the agent with the next message it gets/.test(chip.chipTitle || '')), '…its chip says the agent had not read it and where it goes: «Unread when stopped — goes with your next message»', chip);
 await shot('after-en-kept');
 const live1 = S(L);
 
 // ── ② RELOAD ──
 console.log('② a reload draws the same order');
 await load('en');
-ok((await open()).ok, 'the window reopened after the reload');
-ok(await until(async () => S(labels(await order())) === live1, 8000), '② the reload (the hub\'s slab) draws the live order', { reload: labels(await order()), live: JSON.parse(live1) });
+ok(verdictOf((await open()).ok), 'the window reopened after the reload');
+ok(verdictOf(await until(async () => S(labels(await order())) === live1, 8000)), '② the reload (the hub\'s slab) draws the live order', { reload: labels(await order()), live: JSON.parse(live1) });
 
 // ── ③ HUB RESTART ──
 console.log('③ a hub restart (the rebuild from the wrapper\'s buffer) draws the same order');
-ok(await restartServer(), 'the hub restarted (the session lives on in its own processes)', journal.slice(-600));
+ok(verdictOf(await restartServer()), 'the hub restarted (the session lives on in its own processes)', journal.slice(-600));
 await load('en');
-ok((await open()).ok, 'the window reopened after the restart');
+ok(verdictOf((await open()).ok), 'the window reopened after the restart');
 // the stand-in writes no transcript: the person's FIRST prompt (a turn's start — the CLI's transcript is its only record) is
 // not in a restart's rebuild on any tree; from the tool on, every row is the wrapper's buffer's — the order the law is about
 const fromTool = (l) => S(l.slice(l.indexOf('tool')));
-ok(await until(async () => fromTool(labels(await order())) === fromTool(JSON.parse(live1)), 15000), '③ the restart\'s rebuild draws the live order — the kept message below both interrupt rows, once', { rebuilt: labels(await order()), live: JSON.parse(live1) });
+ok(verdictOf(await until(async () => fromTool(labels(await order())) === fromTool(JSON.parse(live1)), 15000)), '③ the restart\'s rebuild draws the live order — the kept message below both interrupt rows, once', { rebuilt: labels(await order()), live: JSON.parse(live1) });
 
 // ── ④ zh ──
 console.log('④ the chip in Chinese');
 await load('zh');
-ok((await open()).ok, 'the window reopened in zh');
+ok(verdictOf((await open()).ok), 'the window reopened in zh');
 await until(async () => S(labels(await order())) === live1, 8000);
 const zhRow = (await order()).find((r) => r.chip === 'kept') || {};
-ok(zhRow.chipText === '停止时未读 · 随你的下一条消息送达' && /^停止先于 agent 读到它。/.test(zhRow.chipTitle || ''), '④ zh: «停止时未读 · 随你的下一条消息送达», the title says when it arrives', zhRow);
+ok(zhRow.chipText === '停止时未读 · 随你的下一条消息送达' && verdictOf(/^停止先于 agent 读到它。/.test(zhRow.chipTitle || '')), '④ zh: «停止时未读 · 随你的下一条消息送达», the title says when it arrives', zhRow);
 await shot('after-zh-kept');
 await load('en');
-ok((await open()).ok, 'back in en');
+ok(verdictOf((await open()).ok), 'back in en');
 
 // ── ⑤ THE NEXT MESSAGE ──
 console.log('⑤ the person\'s next message goes right below the kept one');
 await typeSend('N the next message');
-ok(await until(async () => labels(await order()).some((x) => /^said:reply: N the n/.test(x)) && !(await streaming()), 20000), 'the next turn answered', labels(await order()));
+ok(verdictOf(await until(async () => labels(await order()).some((x) => /^said:reply: N the n/.test(x)) && !(await streaming()), 20000)), 'the next turn answered', labels(await order()));
 const L5 = labels(await order());
 const kb = L5.findIndex((x) => /^B\[/.test(x));
-ok(kb >= 0 && L5[kb + 1] === 'N' && /^said:reply: N the n/.test(L5[kb + 2] || ''), '⑤ the kept message, then the next message, then its answer — they reached the agent together', L5);
+ok(kb >= 0 && L5[kb + 1] === 'N' && verdictOf(/^said:reply: N the n/.test(L5[kb + 2] || '')), '⑤ the kept message, then the next message, then its answer — they reached the agent together', L5);
 await shot('after-en-next');
 
 // ── ⑥ CONTROL: HANDED AND READ — UNCHANGED ──
 console.log('⑥ CONTROL: a message handed mid-tool and read at the tool result keeps its place');
 await typeSend('TOOL-C another slow command');
-ok(await until(async () => (await toolCards()) >= 2, 20000), 'the second turn ran its tool');
+ok(verdictOf(await until(async () => (await toolCards()) >= 2, 20000)), 'the second turn ran its tool');
 await typeSend('D handed mid tool');
-ok(await until(async () => (await chipOf('D handed mid tool')) === 'steered' && !(await streaming()), 30000), 'it rode the tool result — «Steered»', await chipOf('D handed mid tool'));
+ok(verdictOf(await until(async () => (await chipOf('D handed mid tool')) === 'steered' && !(await streaming()), 30000)), 'it rode the tool result — «Steered»', await chipOf('D handed mid tool'));
 const L6 = labels(await order());
 const d = L6.findIndex((x) => /^D\[/.test(x)), t2 = L6.lastIndexOf('tool');
-ok(d === t2 + 1 && /^said:/.test(L6[d + 1] || ''), '⑥ drawn where it entered: right below the tool card whose result carried it, above the answer that read it (as before this lane)', L6);
+ok(d === t2 + 1 && verdictOf(/^said:/.test(L6[d + 1] || '')), '⑥ drawn where it entered: right below the tool card whose result carried it, above the answer that read it (as before this lane)', L6);
 
 // ── ⑦ M1 IN THE BROWSER: the rider the CLI still held ──
 console.log('⑦ (r2 M1) a message rides a tool result the CLI still holds · Stop · the next message');
@@ -451,26 +451,26 @@ const created2 = frames.find((m) => m.type === 'created' && m.reqId === 'c2') ||
 if (!ok(!!created2, '⑦ a second claude session (its stand-in misses the request after the tool result: STAND_IN_RIDE_MISS)', S(frames.filter((m) => m.reqId === 'c2')).slice(0, 400))) { /* the legs below say why */ }
 else {
   OPEN = { sid: created2.sessionId, name: 'midturn ridemiss', cwd: cwd2 };
-  ok((await open()).ok, '⑦ its window opened live');
+  ok(verdictOf((await open()).ok), '⑦ its window opened live');
   await typeSend('TOOL-R run the slow command');
-  ok(await until(async () => (await toolCards()) >= 1, 20000), '⑦ the turn ran its tool');
+  ok(verdictOf(await until(async () => (await toolCards()) >= 1, 20000)), '⑦ the turn ran its tool');
   await typeSend('B rides then kept');
-  ok(await until(async () => (await chipOf('B rides then kept')) === 'handed', 8000), '⑦ handed to the running turn', await chipOf('B rides then kept'));
+  ok(verdictOf(await until(async () => (await chipOf('B rides then kept')) === 'handed', 8000)), '⑦ handed to the running turn', await chipOf('B rides then kept'));
   // the tool result came (the frame rode it — but the CLI missed it): Stop while the model would answer
-  ok(await until(() => ev(`(window.__mto._messages || []).some((m) => m.role === 'tool' && m.status === 'complete')`), 15000), '⑦ the tool result came (the frame rode it)');
+  ok(verdictOf(await until(() => ev(`(window.__mto._messages || []).some((m) => m.role === 'tool' && m.status === 'complete')`), 15000)), '⑦ the tool result came (the frame rode it)');
   await realClick('[data-mto="1"] .chat-interrupt-btn');
-  ok(await until(async () => rows(await order(), 'i2').length >= 2 && !(await streaming()), 15000), '⑦ the stop drew two «[Request interrupted by user]» rows (the turn, then the follow-up the wrapper stopped)', labels(await order()));
+  ok(verdictOf(await until(async () => rows(await order(), 'i2').length >= 2 && !(await streaming()), 15000)), '⑦ the stop drew two «[Request interrupted by user]» rows (the turn, then the follow-up the wrapper stopped)', labels(await order()));
   await sleep(400);
   // r3 m17: the window's own record of every move it is told — read off the wire, before any re-read could redraw the DOM
   await ev(`(() => { const v = window.__mto; const orig = v._onMoveMessage.bind(v); v.__moves = []; v._onMoveMessage = (op) => { v.__moves.push({ id: op.id, from: op.from, to: op.to }); return orig(op); }; return true; })()`);
   await typeSend('N the next message');
-  ok(await until(async () => labels(await order()).some((x) => /^said:reply: N the n/.test(x)) && !(await streaming()), 20000), '⑦ the next turn answered', labels(await order()));
+  ok(verdictOf(await until(async () => labels(await order()).some((x) => /^said:reply: N the n/.test(x)) && !(await streaming()), 20000)), '⑦ the next turn answered', labels(await order()));
   const L7 = labels(await order());
   console.log(`  DOM order: ${L7.join(' · ')}`);
   const k7 = L7.findIndex((x) => /^B\[/.test(x));
-  ok(k7 > L7.lastIndexOf('i2') && L7[k7] === 'B[kept]' && L7[k7 + 1] === 'N' && /^said:reply: N the n/.test(L7[k7 + 2] || ''), '⑦ M1: the kept rider stays BELOW both interrupt rows when the next message comes (never lifted back to where it rode), the next message right below it', L7);
+  ok(k7 > L7.lastIndexOf('i2') && L7[k7] === 'B[kept]' && L7[k7 + 1] === 'N' && verdictOf(/^said:reply: N the n/.test(L7[k7 + 2] || '')), '⑦ M1: the kept rider stays BELOW both interrupt rows when the next message comes (never lifted back to where it rode), the next message right below it', L7);
   const climbs = await ev(`(() => { const v = window.__mto; const b = (v._messages || []).find((m) => m.webuiMsgId && JSON.stringify(m.content).includes('B rides then kept')); return (v.__moves || []).filter((o) => b && o.id === b.id && o.to < o.from); })()`);
-  ok(Array.isArray(climbs) && climbs.length === 0, '⑦ (r3 m17) …and the window was told NO move that lifts the kept rider (the wire\'s own record; on the r1 tip the server sent one, its client\'s re-read then hid the climb in the DOM)', climbs);
+  ok(gateOf(Array.isArray(climbs)) && climbs.length === 0, '⑦ (r3 m17) …and the window was told NO move that lifts the kept rider (the wire\'s own record; on the r1 tip the server sent one, its client\'s re-read then hid the climb in the DOM)', climbs);
   await shot('after-en-ridemiss');
 }
 
@@ -487,11 +487,11 @@ for (const lang of ['en', 'ja']) {
   for (const compact of [false, true]) {
     await load(lang);
     await ev(`app.settings.set('chat.compactMode', ${compact}); true`); await sleep(600);
-    ok((await open()).ok, `⑧ ${lang} ${compact ? 'compact' : 'bubble'}: the window opened at 360 px`);
+    ok(verdictOf((await open()).ok), `⑧ ${lang} ${compact ? 'compact' : 'bubble'}: the window opened at 360 px`);
     let g = null; await until(async () => !!(g = await ev(PHONE)), 8000);
     const fits = !!(g && g.chip && g.chip.r <= g.row.r + 1 && g.chip.l >= g.row.l - 1 && !g.textOverflow);
     const notSqueezed = !!(g && g.chip && (compact || g.chip.t >= g.bubble.b - 1 || g.bubble.w >= 0.5 * g.row.w));
-    ok(fits && notSqueezed && g.compact === compact, `⑧ ${lang} ${compact ? 'compact' : 'bubble'} at 360 px: the chip stays inside the row and the person's words are whole${compact ? '' : ' — the chip wraps UNDER the bubble instead of squeezing it'}`, g);
+    ok(gateOf(fits) && gateOf(notSqueezed) && g.compact === compact, `⑧ ${lang} ${compact ? 'compact' : 'bubble'} at 360 px: the chip stays inside the row and the person's words are whole${compact ? '' : ' — the chip wraps UNDER the bubble instead of squeezing it'}`, g);
     if (!compact) {
       // r4 note: a SHORT chip («Steered») goes under its bubble too, and that bubble stays right-aligned with the others
       const st = await ev(`(() => { const v = window.__mto; const user = (v._messages || []).filter((x) => x.role === 'user');
@@ -499,7 +499,7 @@ for (const lang of ['en', 'ja']) {
         const r = (e) => { if (!e) return null; const q = e.getBoundingClientRect(); return { r: Math.round(q.right), t: Math.round(q.top), b: Math.round(q.bottom) }; };
         const el = sd && v._elements.get(sd.id), pl = plain && v._elements.get(plain.id);
         return { chip: r(el && el.querySelector('.chat-queue-chip')), bubble: r(el && el.querySelector('.chat-bubble-user')), plain: r(pl && pl.querySelector('.chat-bubble-user')) }; })()`);
-      ok(st && st.chip && st.bubble && st.plain && st.chip.t >= st.bubble.b - 1 && Math.abs(st.bubble.r - st.plain.r) <= 2, `⑧ ${lang} bubble at 360 px (r4): a short chip («Steered») sits UNDER its bubble, and that bubble stays right-aligned with the other bubbles`, st);
+      ok(gateOf(st) && gateOf(st.chip) && gateOf(st.bubble) && gateOf(st.plain) && st.chip.t >= st.bubble.b - 1 && Math.abs(st.bubble.r - st.plain.r) <= 2, `⑧ ${lang} bubble at 360 px (r4): a short chip («Steered») sits UNDER its bubble, and that bubble stays right-aligned with the other bubbles`, st);
     }
     await shot(`phone-${compact ? 'compact' : 'bubble'}-${lang}`);
   }
@@ -513,4 +513,4 @@ try { ctl.close(); } catch { }
 try { ctl2.close(); } catch { }
 console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
 cleanup();
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

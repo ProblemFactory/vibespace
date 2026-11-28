@@ -18,7 +18,7 @@ const stubGone = async (pids) => { const live = (p) => { try { return !/^\d+ \([
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
@@ -41,17 +41,17 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   ok(!!fk && fk.params.threadId === 'th-old', 'CODEX_WEBUI_FORK=1 + resume id → the wrapper sends thread/fork for the parent thread (not thread/resume)');
   ok(!rpcAbs().some((m) => m.method === 'thread/resume' || m.method === 'thread/start'), 'no resume/start alongside the fork (one writer, a NEW thread id comes back)');
   t0 = Date.now(); while (Date.now() - t0 < 5000 && (() => { try { return JSON.parse(readAbs(meta)).threadId !== 'th-forked'; } catch { return true; } })()) await sleep(100);
-  ok((() => { try { return JSON.parse(readAbs(meta)).threadId === 'th-forked'; } catch { return false; } })(), 'the forked thread id is adopted into the sidecar (discovery/forkedFrom chain sees the child)');
+  ok(verdictOf((() => { try { return JSON.parse(readAbs(meta)).threadId === 'th-forked'; } catch { return false; } })()), 'the forked thread id is adopted into the sidecar (discovery/forkedFrom chain sees the child)');
   const stubs = stubOf(w.pid);
   await stopWrapper(w, { dir });
-  ok(await stubGone(stubs), `B-b403: the stub app-server ends with its wrapper (${stubs.length} child)`);
+  ok(verdictOf(await stubGone(stubs)), `B-b403: the stub app-server ends with its wrapper (${stubs.length} child)`);
 }
 
 // ── wiring pins ──
 const caps = require(path.join(REPO, 'src/backend-caps.js'));
 ok(caps.capsOf('claude').fork === true && caps.capsOf('codex').fork === true && caps.capsOf('shell').fork === false && caps.capsOf('nope').fork === false, 'backend-caps carries fork per harness (claude/codex yes, shell/unknown no)');
 const wsc = read('src/ws-create.js');
-ok(/_forkRequested: !!data\.fork && !!capsOf\(backend\)\.fork/.test(wsc) && /require\('\.\/backend-caps'\)/.test(wsc), 'ws-create honours a fork request per harness caps (no claude-only branch)');
+ok(gateOf(/_forkRequested: !!data\.fork && !!capsOf\(backend\)\.fork/.test(wsc)) && verdictOf(/require\('\.\/backend-caps'\)/.test(wsc)), 'ws-create honours a fork request per harness caps (no claude-only branch)');
 const metaSrc = read('src/lib/agent-meta.js');
 const { BACKEND_META } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
 {
@@ -68,25 +68,25 @@ const { BACKEND_META } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
     && c.responseStyle?.live === true && JSON.stringify(c.responseStyle?.values) === JSON.stringify(['none', 'friendly', 'pragmatic']) && !('outputStyle' in c),
     'client META: codex caps.fork is true (the fork button/menu shows) + a LIVE responseStyle row', JSON.stringify(c));
 }
-ok(/permissionModes: \['default', 'read-only', 'safe-yolo', 'yolo'\]/.test(metaSrc) && /permissionModes: \['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'\]/.test(metaSrc), 'client META carries a permission-mode seed per backend');
+ok(gateOf(/permissionModes: \['default', 'read-only', 'safe-yolo', 'yolo'\]/.test(metaSrc)) && verdictOf(/permissionModes: \['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'\]/.test(metaSrc)), 'client META carries a permission-mode seed per backend');
 const sb = read('src/lib/chat-status-bar.js');
 // The SUBSTANCE is the seed expression + the fact that the names come from
 // agent-meta. Pinning the whole import list verbatim made every new helper a
 // false failure (2.369.62: effortDisplay/noteModelCatalog), so name only what
 // this assertion is actually about.
-ok(/BACKEND_META\[backend\]\?\.permissionModes/.test(sb) && /import \{[^}]*\bBACKEND_META\b[^}]*\} from '\.\/agent-meta\.js'/.test(sb), 'the status bar seeds its permission dropdown from META (never claude modes on a codex chat before the first status)');
+ok(gateOf(/BACKEND_META\[backend\]\?\.permissionModes/.test(sb)) && verdictOf(/import \{[^}]*\bBACKEND_META\b[^}]*\} from '\.\/agent-meta\.js'/.test(sb)), 'the status bar seeds its permission dropdown from META (never claude modes on a codex chat before the first status)');
 const sf = read('src/lib/setup-flows.js');
-ok(/const named = b\.namedLoggedIn \|\| 0;/.test(sf) && !/key === 'claude' \? \(b\.namedLoggedIn/.test(sf) && /const acctBtn = b\.installed\n/.test(sf), 'onboarding counts named accounts and offers the accounts door for every installed backend');
+ok(gateOf(/const named = b\.namedLoggedIn \|\| 0;/.test(sf)) && !/key === 'claude' \? \(b\.namedLoggedIn/.test(sf) && verdictOf(/const acctBtn = b\.installed\n/.test(sf)), 'onboarding counts named accounts and offers the accounts door for every installed backend');
 // The route moved OUT of server.js into src/server/backend-status-route.js
 // (2026-09-13, to pay the size ratchet for the channels wiring stanza). A
 // source pin follows the code it pins — the RULE is unchanged, only its home.
 const sv = read('src/server/backend-status-route.js');
-ok(/out\.codex\.namedLoggedIn = \(l\.accounts \|\| \[\]\)\.filter\(\(a\) => a\.backend === 'codex' && a\.loggedIn\)\.length/.test(sv), '/api/backend-status reports codex.namedLoggedIn');
-ok(/require\('\.\/src\/server\/backend-status-route\.js'\)\.create\(/.test(read('server.js')), '…and server.js still wires that route (a rule with no call site is a rule nobody runs)');
+ok(verdictOf(/out\.codex\.namedLoggedIn = \(l\.accounts \|\| \[\]\)\.filter\(\(a\) => a\.backend === 'codex' && a\.loggedIn\)\.length/.test(sv)), '/api/backend-status reports codex.namedLoggedIn');
+ok(verdictOf(/require\('\.\/src\/server\/backend-status-route\.js'\)\.create\(/.test(read('server.js'))), '…and server.js still wires that route (a rule with no call site is a rule nobody runs)');
 const sl = read('src/lib/session-lifecycle.js');
-ok(/return accountUsageStore\(this, a\.backend \|\| 'claude'\)\?\.\[a\.id\];/.test(sl) && /codexAccounts: '_codexAccountUsage'/.test(read('src/lib/agent-meta.js')), 'billing switcher: codex account rows read the persisted codex quota buckets');
-ok(/!bill\.machineUsage \? \(rHostId \? '' : usageHint\(accountUsageStore\(this, backend\)\?\.\[bill\.globalUsageKey\]/.test(sl), 'billing switcher: the ChatGPT-login row shows the global codex quota');
-ok(/_doForkSession\(sessionInfo/.test(sl) && /fork: true,/.test(sl), 'fork flows send fork:true for every backend (extraArgs stay claude-only: --fork-session)');
+ok(gateOf(/return accountUsageStore\(this, a\.backend \|\| 'claude'\)\?\.\[a\.id\];/.test(sl)) && verdictOf(/codexAccounts: '_codexAccountUsage'/.test(read('src/lib/agent-meta.js'))), 'billing switcher: codex account rows read the persisted codex quota buckets');
+ok(verdictOf(/!bill\.machineUsage \? \(rHostId \? '' : usageHint\(accountUsageStore\(this, backend\)\?\.\[bill\.globalUsageKey\]/.test(sl)), 'billing switcher: the ChatGPT-login row shows the global codex quota');
+ok(gateOf(/_doForkSession\(sessionInfo/.test(sl)) && verdictOf(/fork: true,/.test(sl)), 'fork flows send fork:true for every backend (extraArgs stay claude-only: --fork-session)');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

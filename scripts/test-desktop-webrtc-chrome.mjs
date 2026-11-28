@@ -124,7 +124,7 @@ const NOVNC = path.join(REPO, 'public/novnc.js');
 const FIXTURE = path.join(REPO, 'scripts/fixtures/stream/fake-desk-720p.h264');
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : process.env.VS_UI_SHOTS_DIR ? path.join(process.env.VS_UI_SHOTS_DIR, 'webrtc-chrome') : null; })(); // VS_UI_SHOTS_DIR: the Actions mirror's kept PNGs (ci.yml)
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // THE LOCK'S INSTANT is the fixture's, handed to the page — never the wall clock (the rule since 2026-11-14: a suite that draws a
 // time reads no clock); the page draws «Mac 已锁屏（HH:MM 起）» from it in its own zone. The owner's Mac locked 2026-10-26 13:05Z.
@@ -175,7 +175,7 @@ const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const INJ = /(createInjector\(\{\s*)platform: process\.platform,/;
 const SCR = /(createScreen\(\{\s*)platform: process\.platform,/;
 const WSRC = /(createWindowSource\(\{\s*)platform: process\.platform,/; // ⑪: THE window source, Windows-shaped
-ok(HELLO.test(bundleText) && INJ.test(bundleText) && SCR.test(bundleText) && WSRC.test(bundleText) && /"stream-offer"/.test(bundleText) && /"stream-screen"/.test(bundleText), 'the bundle carries the hello-ack platform, THE injector\'s, THE screen source\'s and the stream-offer / stream-screen capabilities (the copy patches exactly those)');
+ok(gateOf(HELLO.test(bundleText)) && gateOf(INJ.test(bundleText)) && gateOf(SCR.test(bundleText)) && gateOf(WSRC.test(bundleText)) && gateOf(/"stream-offer"/.test(bundleText)) && verdictOf(/"stream-screen"/.test(bundleText)), 'the bundle carries the hello-ack platform, THE injector\'s, THE screen source\'s and the stream-offer / stream-screen capabilities (the copy patches exactly those)');
 fs.mkdirSync(path.join(root, 'bundle'), { recursive: true });
 // lane stream-relay-udp: the copy's firewall drops its self-probe (no probe datagram is heard ⇒ directInbound blocked) and it names
 // a Windows node.exe (the page builds the owner's admin line from it)
@@ -203,7 +203,7 @@ if (SOUND_FAKE) process.env.VIBESPACE_SOUND_FFMPEG = writeFakeEncoder(path.join(
 const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: true });
 dm = new DeviceManager({ dataDir, bundlePath: path.join(root, 'bundle', 'vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
 try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; delete process.env.WINDIR; delete process.env.LOCALAPPDATA; delete process.env.VIBESPACE_MIC_HELPER; delete process.env.VIBESPACE_SOUND_FFMPEG; process.env.PATH = PATH0; }
-ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includes('stream-offer'), 'a real agent, Windows-shaped, says stream-offer');
+ok(dm.status().info.platform === 'win32' && verdictOf(dm.status().info.capabilities.includes('stream-offer')), 'a real agent, Windows-shaped, says stream-offer');
 
 // ── the machine's VNC server for the fallback: a stub RFB 3.8, VNC-password sign-in, one 1280×720 green frame ─────────
 const FW = 1280, FH = 720, GREEN = [40, 150, 70];
@@ -433,7 +433,7 @@ console.log('① – ⑥ desk 1280 px');
   const canvas = await p.ev(`!!document.querySelector('${WIN} canvas')`);
   await p.until(`/解码 [\\d.]+ ms · \\d+ kbps$/.test(${NUM})`, 8000); // decode ms and kbps need a second getStats read
   const s1 = await stripText(p);
-  ok(up && !canvas && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip || '') && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps$/.test(s1.stream || '') && !s1.note && vnc.seen.sessions === 0, '① the window opens STREAMING: a <video> where the canvas was (no VNC session), the strip [串流 · N ms · N fps], its title 往返 · 抖动 · fps · 解码 · kbps', s1);
+  ok(gateOf(up) && !canvas && gateOf(/^串流 · \d+ ms · \d+ fps$/.test(s1.chip || '')) && gateOf(/^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps$/.test(s1.stream || '')) && !s1.note && vnc.seen.sessions === 0, '① the window opens STREAMING: a <video> where the canvas was (no VNC session), the strip [串流 · N ms · N fps], its title 往返 · 抖动 · fps · 解码 · kbps', s1);
   // lane stream-cursor: the page's own arrow over the playing picture — and the RED CONTROL: a <video> without the class (no
   // rule) in the same pane inherits the pane's none
   const look = await p.ev(`(() => { const v = document.querySelector('${WIN} .stream-video'), b = v.getBoundingClientRect(), top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2), pane = v.parentElement;
@@ -454,7 +454,7 @@ console.log('① – ⑥ desk 1280 px');
   await sleep(1200);
   const s2 = await stripText(p);
   const fps = Number((/· (\d+) fps ·/.exec(s2.stream || '') || [])[1]);
-  ok(fps >= 15 && /解码 [\d.]+ ms/.test(s2.stream) && /\d+ kbps$/.test(s2.stream) && /发出 \d+ fps、\d+ kbps/.test(s2.title) && /指针是你的/.test(s2.title), `③ the numbers (the summary's title): ${fps} fps, decode ms, kbps; the agent's own numbers (sent fps, kbps) and 指针是你的 beside them`, s2);
+  ok(fps >= 15 && gateOf(/解码 [\d.]+ ms/.test(s2.stream)) && gateOf(/\d+ kbps$/.test(s2.stream)) && gateOf(/发出 \d+ fps、\d+ kbps/.test(s2.title)) && verdictOf(/指针是你的/.test(s2.title)), `③ the numbers (the summary's title): ${fps} fps, decode ms, kbps; the agent's own numbers (sent fps, kbps) and 指针是你的 beside them`, s2);
   const [cx, cy] = await centre(p);
   const n0 = psLines().length;
   await p.click(cx, cy);
@@ -462,19 +462,19 @@ console.log('① – ⑥ desk 1280 px');
   const got = await linesUntil(n0, 'K 30 0 1', 60);
   const pt = got.filter((l) => /^M /.test(l))[0] || '';
   const [, mx, my] = pt.split(' ').map(Number);
-  ok(Math.abs(mx - 640) <= 2 && Math.abs(my - 360) <= 2 && got.includes('D 0') && got.includes('U 0') && got.indexOf('D 0') < got.indexOf('U 0') && got.includes('K 30 0 0') && got.includes('K 30 0 1'), '④ a click at the picture\'s centre reached THE resident script as M 640 360 · D 0 · U 0 (over the data channel), the key A as its scan code down + up' + never(got), got);
+  ok(Math.abs(mx - 640) <= 2 && Math.abs(my - 360) <= 2 && gateOf(got.includes('D 0')) && gateOf(got.includes('U 0')) && got.indexOf('D 0') < got.indexOf('U 0') && gateOf(got.includes('K 30 0 0')) && verdictOf(got.includes('K 30 0 1')), '④ a click at the picture\'s centre reached THE resident script as M 640 360 · D 0 · U 0 (over the data channel), the key A as its scan code down + up' + never(got), got);
   fs.writeFileSync(ELEVATED, '1');
   await p.click(cx, cy);
   const uipi = await p.until(`/管理员窗口/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 5000);
   fs.rmSync(ELEVATED);
-  ok(uipi, '⑤ an elevated window in front: the press never reached it and the strip names it (Windows 不让输入进管理员窗口…)');
+  ok(verdictOf(uipi), '⑤ an elevated window in front: the press never reached it and the strip names it (Windows 不让输入进管理员窗口…)');
   await p.shot('uipi.png', WIN);
   const sid = (await sessions())[0]?.sid;
   const raw = await dm._request({ op: 'stream-stop', sid, timeoutMs: 5000 }); // the MACHINE ends it (past the client's own stop, so its `ended` push is heard)
   const said = await p.until(`/串流中断：机器那边结束了它（stopped）——正在重新连接/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 10000);
   const back = (await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.currentTime > 0.2; })()`, 15000)) && (await sessions()).some((x) => !x.ended && x.sid !== sid);
   const quiet0 = !(await p.ev(`!!document.querySelector('#machine-desktop-signin')`)) && vnc.seen.authed === 0;
-  ok(raw && raw.stopped && said && back && quiet0, '⑥ NEVER SILENT (lane stream-fallback-never-silent): the machine ends the PLAYING stream ⇒ the strip says 串流中断：机器那边结束了它（stopped）——正在重新连接…, the same stream again 1 s on — it plays; no VNC picture, no sign-in', { raw, said, back, quiet0, vnc: vnc.seen });
+  ok(gateOf(raw) && gateOf(raw.stopped) && gateOf(said) && gateOf(back) && verdictOf(quiet0), '⑥ NEVER SILENT (lane stream-fallback-never-silent): the machine ends the PLAYING stream ⇒ the strip says 串流中断：机器那边结束了它（stopped）——正在重新连接…, the same stream again 1 s on — it plays; no VNC picture, no sign-in', { raw, said, back, quiet0, vnc: vnc.seen });
   const sid2 = (await sessions()).find((x) => !x.ended && x.sid !== sid)?.sid;
   await dm._request({ op: 'stream-stop', sid: sid2, timeoutMs: 5000 }); // … and again within the minute
   const ask = await p.until(`(() => { const s = document.querySelector('${WIN} .desktop-display-say'); return !!s && /串流中断：机器那边结束了它（stopped）/.test(s.textContent) && s.querySelectorAll('button').length === 2; })()`, 10000);
@@ -485,10 +485,10 @@ console.log('① – ⑥ desk 1280 px');
   if (asked) await p.ev(`(() => { const f = document.querySelector('#machine-desktop-signin form'); f.querySelector('input[type=password]').value = 'pw'; f.requestSubmit(); })()`);
   const drawn = await p.until(`(() => { const cv = document.querySelector('${WIN} canvas'); if (!cv || cv.width !== 1280) return false; const d = cv.getContext('2d').getImageData(640, 360, 1, 1).data; return Math.abs(d[0] - 40) < 8 && Math.abs(d[1] - 150) < 8 && Math.abs(d[2] - 70) < 8; })()`, 15000);
   const s3 = await stripText(p);
-  ok(ask && quiet1 && asked && drawn && vnc.seen.authed === 1 && /没有串流：机器那边结束了它（stopped）/.test(s3.title || ''), '⑥ ended again within the minute ⇒ 「串流中断：机器那边结束了它（stopped）」 with 「重试」 「显示 VNC 画面」 — nothing by itself; the press ⇒ the VNC picture signs in and draws (the chip says why: 没有串流：…)', { ask, quiet1, asked, drawn, s3, vnc: vnc.seen });
+  ok(gateOf(ask) && gateOf(quiet1) && gateOf(asked) && gateOf(drawn) && vnc.seen.authed === 1 && verdictOf(/没有串流：机器那边结束了它（stopped）/.test(s3.title || '')), '⑥ ended again within the minute ⇒ 「串流中断：机器那边结束了它（stopped）」 with 「重试」 「显示 VNC 画面」 — nothing by itself; the press ⇒ the VNC picture signs in and draws (the chip says why: 没有串流：…)', { ask, quiet1, asked, drawn, s3, vnc: vnc.seen });
   const vc = await p.ev(`(() => { const cv = document.querySelector('${WIN} canvas'), b = cv.getBoundingClientRect(), top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return { computed: getComputedStyle(cv).cursor, inline: cv.style.cursor, top: top === cv ? 'canvas' : top ? top.tagName.toLowerCase() : null }; })()`);
   const s6 = await stripText(p);
-  ok(vc.computed === 'default' && vc.top === 'canvas' && /指针是你的/.test(s6.title || ''), `⑥ ⓟ the VNC picture with no pointer from the machine: the canvas shows YOUR arrow (${vc.computed}, inline ${vc.inline || '—'}), never noVNC's none; the chip's title says 指针是你的`, { vc, title: s6.title });
+  ok(vc.computed === 'default' && vc.top === 'canvas' && verdictOf(/指针是你的/.test(s6.title || '')), `⑥ ⓟ the VNC picture with no pointer from the machine: the canvas shows YOUR arrow (${vc.computed}, inline ${vc.inline || '—'}), never noVNC's none; the chip's title says 指针是你的`, { vc, title: s6.title });
   await p.shot('fallback.png', WIN);
   await p.close();
 }
@@ -521,9 +521,9 @@ console.log('⑦ relay-only ⑧ no source');
   // path lands when the viewer reports it (notePath) — so the record is read once IT says so, never right after the numbers
   const recordPath = async (hub) => { for (const t0 = Date.now(); Date.now() - t0 < 10000; await sleep(100)) { const r = hub.facts('win-a')[0]; if (r && r.path) return r; } return hub.facts('win-a')[0] || {}; };
   const f = await recordPath(relayOnly);
-  ok(up && via && f.path === 'relay' && f.relay && f.relay.via === 'udp' && f.relay.leg.down > 0, '⑦ relay-only: the daemon\'s own UDP leg carries it — the numbers say 经 hub 中转 · UDP, the record says path relay, via udp', { up, via, path: f.path, relay: f.relay });
+  ok(gateOf(up) && gateOf(via) && f.path === 'relay' && gateOf(f.relay) && f.relay.via === 'udp' && f.relay.leg.down > 0, '⑦ relay-only: the daemon\'s own UDP leg carries it — the numbers say 经 hub 中转 · UDP, the record says path relay, via udp', { up, via, path: f.path, relay: f.relay });
   const fw = await fwCopyAt(p);
-  ok(fw.up && /^机器防火墙挡住直连，经 hub 中转/.test(fw.sf.fw || '') && fw.sf.fwCopy === '复制管理员命令' && fw.sf.fwTitle === FW_RULE && fw.reach.ahead === 0 && fw.reach.inView && fw.reach.hit && fw.copied === FW_RULE && /已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(fw.toast), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转 (nothing long ahead of it — the numbers left the strip), its 复制管理员命令 in view (no sideways scroll), and it copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', fw);
+  ok(gateOf(fw.up) && gateOf(/^机器防火墙挡住直连，经 hub 中转/.test(fw.sf.fw || '')) && fw.sf.fwCopy === '复制管理员命令' && fw.sf.fwTitle === FW_RULE && fw.reach.ahead === 0 && gateOf(fw.reach.inView) && gateOf(fw.reach.hit) && fw.copied === FW_RULE && verdictOf(/已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(fw.toast)), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转 (nothing long ahead of it — the numbers left the strip), its 复制管理员命令 in view (no sideways scroll), and it copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', fw);
   await p.shot('relay.png', WIN);
   // lane ci-339-reds: the RED control's narrow window is MEASURED — THE strip's own content (max-content) + 24 px — so the
   // shipped order fits by construction and a sentence of the numbers' length ahead of the notice cannot (a fixed 900 px held
@@ -542,7 +542,7 @@ console.log('⑦ relay-only ⑧ no source');
     pair[name] = await fwCopyAt(pc);
     await pc.close();
   }
-  ok(narrowW < 1100 && pair.order.reach.inView && pair.order.copied === FW_RULE && pair.old.up && pair.old.reach.ahead > 200 && !pair.old.reach.inView && !pair.old.reach.hit && pair.old.copied === null, '⑦ RED CONTROL: a numbers sentence (' + pair.old.reach.ahead + ' px) back ahead of the notice in a ' + narrowW + ' px window (THE strip\'s content ' + fit.need + ' px + 24, measured) — the copy button past the strip\'s edge, a click at its centre copies nothing; the shipped strip in the same window copies', { order: pair.order.reach, old: pair.old.reach, oldCopied: pair.old.copied });
+  ok(narrowW < 1100 && gateOf(pair.order.reach.inView) && pair.order.copied === FW_RULE && gateOf(pair.old.up) && pair.old.reach.ahead > 200 && !pair.old.reach.inView && !pair.old.reach.hit && pair.old.copied === null, '⑦ RED CONTROL: a numbers sentence (' + pair.old.reach.ahead + ' px) back ahead of the notice in a ' + narrowW + ' px window (THE strip\'s content ' + fit.need + ' px + 24, measured) — the copy button past the strip\'s edge, a click at its centre copies nothing; the shipped strip in the same window copies', { order: pair.order.reach, old: pair.old.reach, oldCopied: pair.old.copied });
   relayOnly.shutdown();
   const linkOnly = DW.create({ access, direct: false, udpLeg: false, log: quiet });
   R.setup({ ...BASE, webrtc: linkOnly });
@@ -551,7 +551,7 @@ console.log('⑦ relay-only ⑧ no source');
   const upL = await playing(pl);
   const viaL = await pl.until(`/经设备链路$/.test(${NUM})`, 10000);
   const fl = await recordPath(linkOnly);
-  ok(upL && viaL && fl.path === 'relay' && fl.relay && fl.relay.via === 'link' && fl.relay.leg === null, '⑦ a hub that offers no leg: the relay over the device link — the numbers say 经设备链路, the record via link', { upL, viaL, path: fl.path, relay: fl.relay });
+  ok(gateOf(upL) && gateOf(viaL) && fl.path === 'relay' && gateOf(fl.relay) && fl.relay.via === 'link' && fl.relay.leg === null, '⑦ a hub that offers no leg: the relay over the device link — the numbers say 经设备链路, the record via link', { upL, viaL, path: fl.path, relay: fl.relay });
   await pl.shot('relay-link.png', WIN);
   await pl.close();
   linkOnly.shutdown();
@@ -565,7 +565,7 @@ console.log('⑦ relay-only ⑧ no source');
   await q.until(`!!document.querySelector('${WIN} canvas')`, 15000);
   await sleep(500);
   const s = await stripText(q);
-  ok(asked && vnc.seen.sessions === before + 1 && !s.note && !(await q.ev(`!!document.querySelector('${WIN} .stream-video')`)) && /没有串流：需要 ffmpeg 7 或更新版本，含 ddagrab 和一个 H\.264 编码器（NVENC、AMF、Quick Sync 或 x264）/.test(s.title), '⑧ a hub with no fake source, a machine with no ffmpeg (its screen source refused, no_ffmpeg): the rung is not taken ⇒ the VNC picture at once with NO note (the chip\'s title says why, in the page\'s words: 没有串流：需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）……)', s);
+  ok(gateOf(asked) && vnc.seen.sessions === before + 1 && !s.note && !(await q.ev(`!!document.querySelector('${WIN} .stream-video')`)) && verdictOf(/没有串流：需要 ffmpeg 7 或更新版本，含 ddagrab 和一个 H\.264 编码器（NVENC、AMF、Quick Sync 或 x264）/.test(s.title)), '⑧ a hub with no fake source, a machine with no ffmpeg (its screen source refused, no_ffmpeg): the rung is not taken ⇒ the VNC picture at once with NO note (the chip\'s title says why, in the page\'s words: 没有串流：需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）……)', s);
   await q.close();
   noSource.shutdown();
   R.setup({ ...BASE });
@@ -578,17 +578,17 @@ console.log('⑨ phone 375×667');
   const up = await playing(p);
   await p.until(`/^往返 \\d+ ms/.test(${NUM})`, 8000);
   const row = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); const kids = [...s.children].filter((e) => !e.hidden).map((e) => e.getBoundingClientRect()); const v = document.querySelector('${WIN} .stream-video').getBoundingClientRect(); return { h: Math.round(s.getBoundingClientRect().height), oneRow: Math.max(...kids.map((r) => r.top)) < Math.min(...kids.map((r) => r.bottom)), vw: Math.round(v.width) }; })()`);
-  ok(up && row.oneRow && row.h <= 34 && row.vw === 375, '⑨ the phone plays it in the same shell, full width; the strip is ONE row (it scrolls sideways)', row);
+  ok(gateOf(up) && gateOf(row.oneRow) && row.h <= 34 && row.vw === 375, '⑨ the phone plays it in the same shell, full width; the strip is ONE row (it scrolls sideways)', row);
   const [cx, cy] = await centre(p);
   const n0 = psLines().length;
   await p.tap(cx, cy);
   const got = await linesUntil(n0, 'U 0', 40);
   const pt = got.find((l) => /^M /.test(l)) || '';
   const [, mx, my] = pt.split(' ').map(Number);
-  ok(Math.abs(mx - 640) <= 4 && Math.abs(my - 360) <= 4 && got.includes('D 0') && got.includes('U 0'), '⑨ a TAP at the picture\'s centre is a click at the machine\'s 640 360 (touch → pointer events → the data channel)' + never(got), got);
+  ok(Math.abs(mx - 640) <= 4 && Math.abs(my - 360) <= 4 && gateOf(got.includes('D 0')) && verdictOf(got.includes('U 0')), '⑨ a TAP at the picture\'s centre is a click at the machine\'s 640 360 (touch → pointer events → the data channel)' + never(got), got);
   await p.shot('phone.png');
   const scrolled = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); s.scrollLeft = s.scrollWidth; const st = document.querySelector('${WIN} .desktop-strip-status').getBoundingClientRect(); return s.scrollLeft >= 0 && st.right <= 375 + 1 && st.left >= 0; })()`);
-  ok(scrolled, '⑨ the strip scrolls sideways to its summary (串流 · N ms · N fps in view — its tap opens the numbers: ⑮)');
+  ok(verdictOf(scrolled), '⑨ the strip scrolls sideways to its summary (串流 · N ms · N fps in view — its tap opens the numbers: ⑮)');
   await p.shot('phone-stats.png');
   await p.close();
 }
@@ -611,13 +611,13 @@ console.log('⑫ a Mac\'s strip (lane stream-mac-stall): the stream\'s display s
   const up = await playing(p);
   const segOf = () => p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-displays:not([hidden]) .desktop-strip-seg')].map((b) => [b.textContent, b.dataset.key, b.getAttribute('aria-pressed'), b.title])`);
   const seg1 = await segOf();
-  ok(up && same(seg1, [['1', '2', 'false', '1 · Studio 27 (1) · 1920×1080'], ['2', '3', 'true', '2 · Studio 27 (2) · 1920×1080'], ['全部显示器', '*', 'false', '全部一窗']]), '⑫ the STREAM draws the switcher: the Mac\'s two displays left to right (its offer\'s rows, each titled with its name and size), the streamed one pressed — lane desktop-display-modes: + 全部显示器 (all of them in this window, a stream each)', seg1);
+  ok(gateOf(up) && verdictOf(same(seg1, [['1', '2', 'false', '1 · Studio 27 (1) · 1920×1080'], ['2', '3', 'true', '2 · Studio 27 (2) · 1920×1080'], ['全部显示器', '*', 'false', '全部一窗']])), '⑫ the STREAM draws the switcher: the Mac\'s two displays left to right (its offer\'s rows, each titled with its name and size), the streamed one pressed — lane desktop-display-modes: + 全部显示器 (all of them in this window, a stream each)', seg1);
   await p.shot('mac-switcher.png', WIN);
   await p.ev(`document.querySelector('${WIN} .desktop-strip-seg[data-key="2"]').click()`);
   const again = (await p.until(`window.__asked.length === 2`, 5000)) && (await playing(p));
   const asked = await p.ev('window.__asked');
   const seg2 = await segOf();
-  ok(again && same(asked[1].source, { kind: 'display', id: '2' }) && !asked[0].source && seg2.length === 3 && seg2[0][2] === 'true' && seg2[1][2] === 'false', '⑫ a pick restarts the stream ON that display (start {source: {kind: display, id: 2}}) and it plays; the pick is pressed', { asked, seg2 });
+  ok(gateOf(again) && gateOf(same(asked[1].source, { kind: 'display', id: '2' })) && !asked[0].source && seg2.length === 3 && seg2[0][2] === 'true' && seg2[1][2] === 'false', '⑫ a pick restarts the stream ON that display (start {source: {kind: display, id: 2}}) and it plays; the pick is pressed', { asked, seg2 });
   await p.ev("localStorage.removeItem('vibespace.desktopModes')"); // lane desktop-display-modes: the pick is remembered per machine — the later legs open the main display
   await p.close();
   for (const mode of ['tcc-ok', 'tcc-old']) {
@@ -629,9 +629,9 @@ console.log('⑫ a Mac\'s strip (lane stream-mac-stall): the stream\'s display s
     await p.until(`/打开系统设置 ›|已复制/.test((document.getElementById('global-toasts') || {}).textContent || '')`, 5000);
     const r = await p.ev(`({ asked: window.__asked, copied: window.__copied || null, toast: (document.getElementById('global-toasts') || {}).textContent || '', words: document.querySelector('${WIN} .desktop-strip-tcc').textContent })`);
     if (mode === 'tcc-ok') {
-      ok(door && same(r.asked[1], { host: 'win-a', pane: 'screen' }) && /已在 Macbook 上打开系统设置 › 录屏与系统录音/.test(r.toast) && r.copied === null, '⑫ 「打开系统设置」 opens the pane ON the Mac (POST settings-open {pane: screen}): 已在 Macbook 上打开系统设置 › 录屏与系统录音 — nothing copied', r);
+      ok(gateOf(door) && gateOf(same(r.asked[1], { host: 'win-a', pane: 'screen' })) && gateOf(/已在 Macbook 上打开系统设置 › 录屏与系统录音/.test(r.toast)) && r.copied === null, '⑫ 「打开系统设置」 opens the pane ON the Mac (POST settings-open {pane: screen}): 已在 Macbook 上打开系统设置 › 录屏与系统录音 — nothing copied', r);
       await p.shot('mac-tcc-door.png', WIN);
-    } else ok(door && r.asked[1] && r.asked[1].pane === 'screen' && r.copied === 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' && /已复制/.test(r.toast), '⑫ an agent that predates it (agent_too_old): the pane\'s link is copied, as before — the fallback only', r);
+    } else ok(gateOf(door) && gateOf(r.asked[1]) && r.asked[1].pane === 'screen' && r.copied === 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' && verdictOf(/已复制/.test(r.toast)), '⑫ an agent that predates it (agent_too_old): the pane\'s link is copied, as before — the fallback only', r);
     await p.close();
   }
 }
@@ -652,8 +652,8 @@ console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip —
   const s = await stripText(p);
   const f = screenHub.facts('win-a')[0] || {};
   const sc = (f.stats && f.stats.screen) || {}, said = /机器以 (\d+) kbps 编码——这个大小的屏幕不会低于 (\d+) kbps/.exec(s.title || '') || [];
-  ok(rated && Number(said[1]) === sc.kbps && Number(said[2]) === sc.floor && sc.floor === 2500 && sc.kbps >= sc.floor, `⑩ the chip's title says what the machine decided: ${said[0]} — the agent's own kbps ${sc.kbps} and floor ${sc.floor} (1280×720 @ 30 ⇒ 2500: THE RATE)`, { said: said[0], sc: { kbps: sc.kbps, floor: sc.floor, rate: sc.rate } });
-  ok(up && nv && /HDR 已在机器上映射（SDR 白点 200 nits）/.test(s.title) && f.source && f.source.kind === 'screen' && f.source.encoder === 'NVENC' && f.source.mode === 'mapped', '⑩ the machine\'s own screen (no fake source on the hub): the HDR road plays, the numbers read … · NVENC · 编码 N ms, the chip\'s title says HDR 已在机器上映射（SDR 白点 200 nits）', { s, src: f.source });
+  ok(gateOf(rated) && Number(said[1]) === sc.kbps && Number(said[2]) === sc.floor && sc.floor === 2500 && sc.kbps >= sc.floor, `⑩ the chip's title says what the machine decided: ${said[0]} — the agent's own kbps ${sc.kbps} and floor ${sc.floor} (1280×720 @ 30 ⇒ 2500: THE RATE)`, { said: said[0], sc: { kbps: sc.kbps, floor: sc.floor, rate: sc.rate } });
+  ok(gateOf(up) && gateOf(nv) && gateOf(/HDR 已在机器上映射（SDR 白点 200 nits）/.test(s.title)) && gateOf(f.source) && f.source.kind === 'screen' && f.source.encoder === 'NVENC' && f.source.mode === 'mapped', '⑩ the machine\'s own screen (no fake source on the hub): the HDR road plays, the numbers read … · NVENC · 编码 N ms, the chip\'s title says HDR 已在机器上映射（SDR 白点 200 nits）', { s, src: f.source });
   await p.shot('screen.png', WIN);
   fs.writeFileSync(DIE, '1');
   const saidI = await p.until(`/串流中断：机器的屏幕采集一再中断——正在重新连接/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 15000);
@@ -664,7 +664,7 @@ console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip —
   const asked = await p.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 15000);
   if (asked) await p.ev(`(() => { const f = document.querySelector('#machine-desktop-signin form'); f.querySelector('input[type=password]').value = 'pw'; f.requestSubmit(); })()`);
   const drawn = await p.until(`(() => { const cv = document.querySelector('${WIN} canvas'); if (!cv || cv.width !== 1280) return false; const d = cv.getContext('2d').getImageData(640, 360, 1, 1).data; return Math.abs(d[0] - 40) < 8 && Math.abs(d[1] - 150) < 8 && Math.abs(d[2] - 70) < 8; })()`, 15000);
-  ok(saidI && ask && noSign && drawn, '⑩ the capture ffmpeg keeps dying ⇒ in place on the machine twice, then capture_interrupted: 串流中断：机器的屏幕采集一再中断——正在重新连接…; the retry dies too ⇒ 「串流中断：…」 with 「重试」 「显示 VNC 画面」 (no sign-in by itself); the press ⇒ the VNC picture signs in and draws', { saidI, ask, noSign, asked, drawn });
+  ok(gateOf(saidI) && gateOf(ask) && gateOf(noSign) && verdictOf(drawn), '⑩ the capture ffmpeg keeps dying ⇒ in place on the machine twice, then capture_interrupted: 串流中断：机器的屏幕采集一再中断——正在重新连接…; the retry dies too ⇒ 「串流中断：…」 with 「重试」 「显示 VNC 画面」 (no sign-in by itself); the press ⇒ the VNC picture signs in and draws', { saidI, ask, noSign, asked, drawn });
   await p.shot('screen-fallback.png', WIN);
   await p.close();
   screenHub.shutdown();
@@ -688,19 +688,19 @@ console.log('⑯ 「HDR 直通」 (lane stream-hdr-passthrough): the switch only
   const NOTE = `(() => { const e = document.querySelector('${WIN} .desktop-strip-note'); return e && !e.hidden ? e.textContent : null; })()`;
   const shown = async (opts) => { const p = await page(1280, 800, DESK, opts); await p.ev(`localStorage.removeItem('vibespace.streamHdr')`); await p.ev(`window.__open(${JSON.stringify(M)})`); const up = await playing(p); await sleep(400); return { p, up, sw: await p.ev(SW) }; };
   const a = await shown({});
-  ok(a.up && a.sw && a.sw.hidden === true, '⑯ a screen that is not HDR (this headless Chrome: (dynamic-range: high) false): the machine CAN (its HDR display, av1_nvenc) but no 「HDR 直通」', a.sw);
+  ok(gateOf(a.up) && gateOf(a.sw) && a.sw.hidden === true, '⑯ a screen that is not HDR (this headless Chrome: (dynamic-range: high) false): the machine CAN (its HDR display, av1_nvenc) but no 「HDR 直通」', a.sw);
   await a.p.close();
   const b = await shown({ hdr: { screen: true, decoder: LINUX } });
-  ok(b.up && b.sw && b.sw.hidden === true, '⑯ an HDR screen whose browser decodes WebRTC AV1 only in software (supported, NOT power-efficient — the measured Linux Chrome, whose decoder refuses 10-bit): no switch', b.sw);
+  ok(gateOf(b.up) && gateOf(b.sw) && b.sw.hidden === true, '⑯ an HDR screen whose browser decodes WebRTC AV1 only in software (supported, NOT power-efficient — the measured Linux Chrome, whose decoder refuses 10-bit): no switch', b.sw);
   await b.p.close();
   FF.set({ encoders: ['h264_nvenc', 'libx264'] }); await dm.streamFacts({ force: true });
   const c0 = await shown({ hdr: { screen: true, decoder: YES } });
-  ok(c0.up && c0.sw && c0.sw.hidden === true, '⑯ an HDR viewer, a machine whose ffmpeg has no AV1 encoder (its offer says can: false): no switch', c0.sw);
+  ok(gateOf(c0.up) && gateOf(c0.sw) && c0.sw.hidden === true, '⑯ an HDR viewer, a machine whose ffmpeg has no AV1 encoder (its offer says can: false): no switch', c0.sw);
   await c0.p.close();
   FF.set({ encoders: ['h264_nvenc', 'av1_nvenc', 'libx264'], av1: AV1_10 }); await dm.streamFacts({ force: true });
   const c = await shown({ hdr: { screen: true, decoder: YES } });
   const p = c.p;
-  ok(c.up && c.sw && c.sw.hidden === false && c.sw.pressed === 'false' && c.sw.text === 'HDR 直通' && /AV1 10 位 PQ/.test(c.sw.title) && (await p.ev(MEM)) === null && seen.filter((x) => x.mode === 'hdr').length === 0,
+  ok(gateOf(c.up) && gateOf(c.sw) && c.sw.hidden === false && c.sw.pressed === 'false' && c.sw.text === 'HDR 直通' && gateOf(/AV1 10 位 PQ/.test(c.sw.title)) && (await p.ev(MEM)) === null && seen.filter((x) => x.mode === 'hdr').length === 0,
     '⑯ an HDR screen + hardware AV1 (the owner\'s Edge) + a machine that can: 「HDR 直通」 on the strip, OFF (today\'s picture until the person turns it on)', c.sw);
   await p.shot('hdr-switch.png', WIN);
   // THE FALLBACK: this Chrome's WebRTC decoder (dav1d) refuses 10-bit — the press asks HDR, no frame is decoded, 2 s later SDR again, said
@@ -711,7 +711,7 @@ console.log('⑯ 「HDR 直通」 (lane stream-hdr-passthrough): the switch only
   const back = said && await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2 && window.__band() !== null; })()`, 20000);
   const b1 = back ? await p.ev('window.__band()') : null; await sleep(700); const b2 = back ? await p.ev('window.__band()') : null;
   const hdrS = seen.slice(s0).find((x) => x.mode === 'hdr'), sdrS = seen.slice(s0).filter((x) => x.mode === 'mapped');
-  ok(memOn === '{"win-a":true}' && hdrS && JSON.stringify(hdrS.hdr) === '{"can":true,"on":true,"why":null}' && stops.slice(stop0).includes('hdr_undecodable') && said && back && b1 !== null && b2 !== null && b2 !== b1 && sdrS.length >= 1,
+  ok(memOn === '{"win-a":true}' && gateOf(hdrS) && JSON.stringify(hdrS.hdr) === '{"can":true,"on":true,"why":null}' && gateOf(stops.slice(stop0).includes('hdr_undecodable')) && gateOf(said) && gateOf(back) && b1 !== null && b2 !== null && b2 !== b1 && sdrS.length >= 1,
     `⑯ THE FALLBACK for real: the press remembers HDR for this machine and the agent sends AV1 10-bit (an hdr session); THIS Chrome decodes no frame of it (dav1d: 10-bit unhandled) ⇒ 2 s later the strip says 「HDR 直通已回退：浏览器无法解码」, the session ends hdr_undecodable and the SDR picture plays again (the band advances ${b1} → ${b2})`, { memOn, hdrS, stops: stops.slice(stop0), said, back, b1, b2 });
   ok((await p.ev(MEM)) === '{}' && (await p.ev(SW)).pressed === 'false', '⑯ … and the switch is OFF again (remembered off — the next window does not repeat the black 2 s)', await p.ev(SW));
   await p.shot('hdr-fallback.png', WIN);
@@ -721,12 +721,12 @@ console.log('⑯ 「HDR 直通」 (lane stream-hdr-passthrough): the switch only
   await p.ev(`document.querySelector('${WIN} .desktop-strip-hdr-pass').click()`);
   const hdr8 = await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2 && window.__band() !== null && / · HDR$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || ''); })()`, 20000);
   const c1 = hdr8 ? await p.ev('window.__band()') : null; await sleep(1500); const c2 = hdr8 ? await p.ev('window.__band()') : null;
-  ok(hdr8 && seen.slice(s1).some((x) => x.mode === 'hdr') && c1 !== null && c2 !== c1 && (await p.ev(NOTE)) === null && (await p.ev(SW)).pressed === 'true',
+  ok(gateOf(hdr8) && gateOf(seen.slice(s1).some((x) => x.mode === 'hdr')) && c1 !== null && c2 !== c1 && (await p.ev(NOTE)) === null && (await p.ev(SW)).pressed === 'true',
     `⑯ CONTROL: the same HDR road carrying an 8-bit AV1 stream DECODES in this Chrome (the band advances ${c1} → ${c2}, the summary ends · HDR, no fallback) — the aggregated-TU packetizer through Chrome's own depacketizer; the refusal was the bit depth`, { hdr8, c1, c2, note: await p.ev(NOTE) });
   await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
   const tab = await p.until(`!!document.querySelector('.stream-stats-pop .stream-stats-table tr[data-k="hdr"]')`, 6000) ? await p.ev(`[...document.querySelectorAll('.stream-stats-pop .stream-stats-table tr')].map((tr) => [tr.dataset.k, tr.cells[0].textContent, tr.cells[1].textContent])`) : null;
   const rowHdr = tab && tab.find((r) => r[0] === 'hdr'), rowCodec = tab && tab.find((r) => r[0] === 'codec');
-  ok(rowHdr && rowHdr[1] === 'HDR' && rowHdr[2] === '直通 · PQ 10 位 · BT.2020' && rowCodec && rowCodec[2] === 'AV1' && tab.findIndex((r) => r[0] === 'hdr') === tab.findIndex((r) => r[0] === 'codec') + 1, '⑯ the details: the codec row says AV1 and the 「HDR」 row right after it says 直通 · PQ 10 位 · BT.2020', tab);
+  ok(gateOf(rowHdr) && rowHdr[1] === 'HDR' && rowHdr[2] === '直通 · PQ 10 位 · BT.2020' && gateOf(rowCodec) && rowCodec[2] === 'AV1' && tab.findIndex((r) => r[0] === 'hdr') === tab.findIndex((r) => r[0] === 'codec') + 1, '⑯ the details: the codec row says AV1 and the 「HDR」 row right after it says 直通 · PQ 10 位 · BT.2020', tab);
   await p.shot('hdr-details.png', '.stream-stats-pop');
   await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
   // the window moves to an SDR screen ⇒ the SDR picture (an SDR viewer tone-maps PQ: dim); back on the HDR screen ⇒ HDR again (remembered)
@@ -736,7 +736,7 @@ console.log('⑯ 「HDR 直通」 (lane stream-hdr-passthrough): the switch only
   const s3 = seen.length;
   await p.ev('window.__hdrScreen(true)');
   const hdrAgain = await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); const b = document.querySelector('${WIN} .desktop-strip-hdr-pass'); return !!v && v.currentTime > 0.2 && !b.hidden && b.getAttribute('aria-pressed') === 'true' && / · HDR$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || ''); })()`, 20000);
-  ok(sdrNow && seen.slice(s2, s3).some((x) => x.mode === 'mapped') && hdrAgain && seen.slice(s3).some((x) => x.mode === 'hdr') && (await p.ev(MEM)) === '{"win-a":true}', '⑯ the window moves to an SDR screen ((dynamic-range: high) changes) ⇒ the stream restarts as the SDR picture and the switch hides; back on the HDR screen ⇒ HDR again (still remembered on)', { sdrNow, hdrAgain });
+  ok(gateOf(sdrNow) && gateOf(seen.slice(s2, s3).some((x) => x.mode === 'mapped')) && gateOf(hdrAgain) && gateOf(seen.slice(s3).some((x) => x.mode === 'hdr')) && (await p.ev(MEM)) === '{"win-a":true}', '⑯ the window moves to an SDR screen ((dynamic-range: high) changes) ⇒ the stream restarts as the SDR picture and the switch hides; back on the HDR screen ⇒ HDR again (still remembered on)', { sdrNow, hdrAgain });
   await p.close();
   // REMEMBERED PER MACHINE: a new window of this machine starts in HDR at once (its first start asks hdr — no SDR stream first)
   const s4 = seen.length;
@@ -745,7 +745,7 @@ console.log('⑯ 「HDR 直通」 (lane stream-hdr-passthrough): the switch only
   await q.ev(`window.__open(${JSON.stringify(M)})`);
   const firstHdr = await q.until(`/ · HDR$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || '')`, 20000);
   const firsts = seen.slice(s4);
-  ok(memQ === '{"win-a":true}' && firstHdr && firsts.length >= 1 && firsts[0].mode === 'hdr', '⑯ remembered per machine: a new window of the same machine asks HDR in its FIRST start (no SDR stream before it)', { memQ, firsts });
+  ok(memQ === '{"win-a":true}' && gateOf(firstHdr) && firsts.length >= 1 && firsts[0].mode === 'hdr', '⑯ remembered per machine: a new window of the same machine asks HDR in its FIRST start (no SDR stream before it)', { memQ, firsts });
   await q.ev(`localStorage.removeItem('vibespace.streamHdr')`); // per-machine memory persists across this profile's pages — reset
   await q.close();
   clearInterval(watch);
@@ -776,28 +776,28 @@ console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only w
   const WNUM = NUMS(`${WWIN} .machine-window-chip`);
   await p.until(`/ · NVENC · 编码 \\d+ ms$/.test(${WNUM})`, 10000);
   const s1 = await p.ev(`(() => { ${vis} const q = (sel) => document.querySelector('${WWIN} ' + sel); return { title: q('.vs-win-title').textContent, chip: q('.machine-window-chip').textContent, stats: ${WNUM}, statsShown: vis(q('.machine-window-stats')), glyph: q('.machine-window-chip').hasAttribute('data-chart'), held: vis(q('.machine-window-held')), restore: vis(q('.machine-window-restore')), stop: vis(q('.machine-window-stop')) ? q('.machine-window-stop').textContent : null }; })()`);
-  ok(up && s1.title === `WIN-DESK1上的${CJK}` && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip) && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps · NVENC · 编码 \d+ ms$/.test(s1.stats) && !s1.statsShown && s1.glyph, '⑪ the window stream plays, its title intact (CJK + emoji), with THE stats row of the whole screen\'s window: its chip the summary (+ the chart glyph), 往返 · 抖动 · fps · 解码 · kbps · NVENC · 编码 in its title; the row under it is the firewall notice alone (none on the direct path)', s1);
+  ok(gateOf(up) && s1.title === `WIN-DESK1上的${CJK}` && gateOf(/^串流 · \d+ ms · \d+ fps$/.test(s1.chip)) && gateOf(/^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps · NVENC · 编码 \d+ ms$/.test(s1.stats)) && !s1.statsShown && verdictOf(s1.glyph), '⑪ the window stream plays, its title intact (CJK + emoji), with THE stats row of the whole screen\'s window: its chip the summary (+ the chart glyph), 往返 · 抖动 · fps · 解码 · kbps · NVENC · 编码 in its title; the row under it is the firewall notice alone (none on the direct path)', s1);
   // lane stream-stats-popup: the window stream's summary opens THE same details (one component)
   const wc = await centreOf(`${WWIN} .machine-window-chip`);
   await p.click(wc[0], wc[1]);
   const wpop = await p.until(`(() => { const d = document.querySelector('.stream-stats-pop'); return !!d && d.querySelectorAll('canvas.stream-chart-canvas').length === 3 && [...d.querySelectorAll('.stream-stats-table tr')].some((tr) => tr.dataset.k === 'encoder' && /NVENC · 编码 \\d+ ms/.test(tr.cells[1].textContent)); })()`, 4000);
-  ok(wpop, '⑪ its summary\'s click opens THE details (the same component): three charts, the encoder row NVENC · 编码 N ms');
+  ok(verdictOf(wpop), '⑪ its summary\'s click opens THE details (the same component): three charts, the encoder row NVENC · 编码 N ms');
   await p.click(wc[0], wc[1]);
-  ok(await p.until(`!document.querySelector('.stream-stats-pop')`, 2000), '⑪ a second click on the summary closes them');
+  ok(verdictOf(await p.until(`!document.querySelector('.stream-stats-pop')`, 2000)), '⑪ a second click on the summary closes them');
   ok(!s1.held && !s1.restore && s1.stop === '停止串流', '⑪ live: no 「还原它」 (the held row is not shown); 「停止串流」 is', s1);
   const cause = await p.ev(`(() => { const b = document.createElement('button'); b.className = 'file-tool-btn'; b.hidden = true; document.body.append(b); const d = getComputedStyle(b).display; b.remove(); return d; })()`);
   ok(cause === 'flex', '⑪ the cause, measured in this page: a hidden .file-tool-btn computes display:flex (viewers.css out-ranks [hidden]) — the old bare 「还原它」 showed at all times', cause);
   await p.shot('window-live.png', WWIN);
   const minShown = await p.until(`(() => { ${vis} const r = document.querySelector('${WWIN} .machine-window-held'); return vis(r) && r.firstChild.textContent === '窗口在WIN-DESK1上被最小化了——串流暂停' && vis(document.querySelector('${WWIN} .machine-window-restore')); })()`, 15000);
-  ok(minShown, '⑪ minimized on the machine ⇒ the row 窗口在WIN-DESK1上被最小化了——串流暂停 + 「还原它」 appear — only now');
+  ok(verdictOf(minShown), '⑪ minimized on the machine ⇒ the row 窗口在WIN-DESK1上被最小化了——串流暂停 + 「还原它」 appear — only now');
   await p.shot('window-minimized.png', WWIN);
   const rb = await centreOf(`${WWIN} .machine-window-restore`);
   await p.click(rb[0], rb[1]);
-  ok(await untilN(() => wgcLines().some((a) => a[0] === 'restore' && a[2] === '657982'), 6000), '⑪ 「还原它」 asks the machine\'s helper to restore THAT window', wgcLines().slice(-3));
-  ok(await p.until(`getComputedStyle(document.querySelector('${WWIN} .machine-window-held')).display === 'none'`, 15000), '⑪ live again ⇒ the row goes');
+  ok(verdictOf(await untilN(() => wgcLines().some((a) => a[0] === 'restore' && a[2] === '657982'), 6000)), '⑪ 「还原它」 asks the machine\'s helper to restore THAT window', wgcLines().slice(-3));
+  ok(verdictOf(await p.until(`getComputedStyle(document.querySelector('${WWIN} .machine-window-held')).display === 'none'`, 15000)), '⑪ live again ⇒ the row goes');
   await p.ev(`window.__picker(${JSON.stringify(M)})`);
   const pick = await p.until(`(() => { const r = document.querySelector('.machine-window-picker .machine-window-row.is-streaming'); return !!r && r.textContent.includes('正在串流') && !!r.querySelector('.machine-window-row-stop'); })()`, 10000);
-  ok(pick, '⑪ the picker marks the window a stream shows now — 正在串流 — with 「停止」');
+  ok(verdictOf(pick), '⑪ the picker marks the window a stream shows now — 正在串流 — with 「停止」');
   await p.shot('window-picker.png', '.machine-window-picker');
   await p.key('Escape', 'Escape', 27);
   // 停止串流: the session ends on the hub AND the helper on the machine; the window stays and says so
@@ -805,13 +805,13 @@ console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only w
   const sb = await centreOf(`${WWIN} .machine-window-stop`);
   await p.click(sb[0], sb[1]);
   const said1 = await p.until(`(() => { const s = document.querySelector('${WWIN} .machine-app-say'); return !!s && getComputedStyle(s).display !== 'none' && s.firstChild.textContent === '已停止串流“${CJK}”'; })()`, 8000) ? await sayText() : null;
-  ok(said1 && said1.acts[0] === '重新串流' && await untilN(() => winHub.facts('win-a').length === 0, 4000) && pid1 > 0 && await untilN(() => !alive(pid1), 4000), '⑪ 「停止串流」 ⇒ the hub\'s session ends and the machine\'s helper exits; the window stays: 已停止串流“…” + 「重新串流」', { said1, pid1, sessions: winHub.facts('win-a').length });
+  ok(gateOf(said1) && said1.acts[0] === '重新串流' && gateOf(await untilN(() => winHub.facts('win-a').length === 0, 4000)) && pid1 > 0 && verdictOf(await untilN(() => !alive(pid1), 4000)), '⑪ 「停止串流」 ⇒ the hub\'s session ends and the machine\'s helper exits; the window stays: 已停止串流“…” + 「重新串流」', { said1, pid1, sessions: winHub.facts('win-a').length });
   await p.shot('window-stopped.png', WWIN);
-  ok(await untilN(() => /window source ended: stopped — helper exit 0, encoder exit 0/.test(agentLog()), 4000), '⑪ the agent\'s log names it: window source ended: stopped — helper exit 0, encoder exit 0');
+  ok(verdictOf(await untilN(() => /window source ended: stopped — helper exit 0, encoder exit 0/.test(agentLog()), 4000)), '⑪ the agent\'s log names it: window source ended: stopped — helper exit 0, encoder exit 0');
   // 重新串流, then the picker's 停止 (any browser's session of that window)
   const ag = await centreOf(`${WWIN} .machine-app-say button`);
   await p.click(ag[0], ag[1]);
-  ok(await plays(), '⑪ 「重新串流」 streams it again');
+  ok(verdictOf(await plays()), '⑪ 「重新串流」 streams it again');
   const pid2 = helperPid();
   await p.ev(`window.__picker(${JSON.stringify(M)})`);
   await p.until(`!!document.querySelector('.machine-window-picker .machine-window-row-stop')`, 10000);
@@ -819,7 +819,7 @@ console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only w
   await p.click(ps[0], ps[1]);
   const said2 = await p.until(`(() => { const s = document.querySelector('${WWIN} .machine-app-say'); return !!s && getComputedStyle(s).display !== 'none' && s.firstChild.textContent === '已停止串流“${CJK}”'; })()`, 10000);
   const rowBack = await p.until(`(() => { const r = document.querySelector('.machine-window-picker .machine-window-row'); return !!r && !r.classList.contains('is-streaming') && r.textContent.includes('串流这个窗口'); })()`, 5000);
-  ok(said2 && rowBack && pid2 !== pid1 && await untilN(() => !alive(pid2), 4000) && winHub.facts('win-a').length === 0 && /window source ended: stopped_in_list/.test(agentLog()), '⑪ the picker\'s 「停止」 ends that window\'s stream on the machine (stopped_in_list); the open window says 已停止串流, the row offers 串流这个窗口 again', { said2, rowBack, pid2 });
+  ok(gateOf(said2) && gateOf(rowBack) && pid2 !== pid1 && gateOf(await untilN(() => !alive(pid2), 4000)) && winHub.facts('win-a').length === 0 && verdictOf(/window source ended: stopped_in_list/.test(agentLog())), '⑪ the picker\'s 「停止」 ends that window\'s stream on the machine (stopped_in_list); the open window says 已停止串流, the row offers 串流这个窗口 again', { said2, rowBack, pid2 });
   await p.key('Escape', 'Escape', 27);
   // the window's ×
   // lane race-sweep (B-6b74, 3/3 on 2 cpus): the press on 「重新串流」 went to the picker the Escape was still closing — the
@@ -840,7 +840,7 @@ console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only w
   const endedLine = () => (agentLog().match(/window source ended: [^\n]*/g) || []).slice(ended0)[0] || null;
   await untilN(() => !!endedLine(), 10000);
   const xState = { sayReached, sayCover, replays, pid3, ended: endedLine(), facts: winHub.facts('win-a').length, alive: alive(pid3) };
-  ok(xState.replays && /^window source ended: closed — helper exit 0/.test(xState.ended || '') && xState.facts === 0 && !xState.alive, '⑪ the window\'s × ends the session and the helper on the machine (closed, in the agent\'s log)', xState);
+  ok(gateOf(xState.replays) && gateOf(/^window source ended: closed — helper exit 0/.test(xState.ended || '')) && xState.facts === 0 && !xState.alive, '⑪ the window\'s × ends the session and the helper on the machine (closed, in the agent\'s log)', xState);
   await p.close();
   // a viewer that vanishes: its tab gone, not a word — the closed long poll ⇒ stopped within 5 s
   const vanish = async (hub) => {
@@ -854,10 +854,10 @@ console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only w
     return { ok1, gone, ms: Date.now() - t0, pid };
   };
   const v1 = await vanish(winHub);
-  ok(v1.ok1 && v1.gone && v1.ms <= 5500 && /window source ended: viewer_gone/.test(agentLog()), `⑪ the viewer vanishes (its tab closed, no stop asked) ⇒ the hub stops it (viewer_gone) and the machine's helper exits — ${v1.ms} ms`, v1);
+  ok(gateOf(v1.ok1) && gateOf(v1.gone) && v1.ms <= 5500 && verdictOf(/window source ended: viewer_gone/.test(agentLog())), `⑪ the viewer vanishes (its tab closed, no stop asked) ⇒ the hub stops it (viewer_gone) and the machine's helper exits — ${v1.ms} ms`, v1);
   const deaf = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({}) }), log: quiet, goneMs: 600000 });
   const v2 = await vanish(deaf);
-  ok(v2.ok1 && !v2.gone && deaf.facts('win-a').length === 1 && alive(v2.pid), '⑪ RED CONTROL: a hub that never acts on the closed poll (goneMs 10 min) still streams 6 s after the tab is gone — the idle sweep would wait 30 s', { v2, sessions: deaf.facts('win-a').length });
+  ok(gateOf(v2.ok1) && !v2.gone && deaf.facts('win-a').length === 1 && verdictOf(alive(v2.pid)), '⑪ RED CONTROL: a hub that never acts on the closed poll (goneMs 10 min) still streams 6 s after the tab is gone — the idle sweep would wait 30 s', { v2, sessions: deaf.facts('win-a').length });
   deaf.shutdown();
   await untilN(() => !alive(v2.pid), 4000);
   winHub.shutdown();
@@ -900,13 +900,13 @@ console.log('⑬ THE ESTIMATE: the agent reads its own transport-cc — werift 0
     return { up: playingNow, seen, tail, reached: !!reached, ratioOnly: tail.length === 3 && tail.every(tracking) };
   };
   const e3 = await estimateRun(3000);
-  ok(e3.up && e3.reached, `⑬ ~3 Mbps through the real agent bundle to this Chrome: three samples in a row at ≥ ${FLOOR} kbps with the agent's estimate tracking what it sent (sent/estimated kbps: ${e3.tail.map((x) => x.join('/')).join(', ')}) — werift's own would read ~1/11 (test-stream-plan §9's RED CONTROL)`, e3.seen);
+  ok(gateOf(e3.up) && verdictOf(e3.reached), `⑬ ~3 Mbps through the real agent bundle to this Chrome: three samples in a row at ≥ ${FLOOR} kbps with the agent's estimate tracking what it sent (sent/estimated kbps: ${e3.tail.map((x) => x.join('/')).join(', ')}) — werift's own would read ~1/11 (test-stream-plan §9's RED CONTROL)`, e3.seen);
   // THE SLOW SENDER IS WAITED OUT, NEVER PASSED (the census r2's placement, kept — r4707): a sender sending LESS (what a loaded box makes of
   // it), planted as a 1.2 Mbps fixture: the wait for the floor runs out (its named line above), so the leg is RED on it — while 6b9eddd32's
   // ratio-only judge (the floor dropped) would have passed it
   // (its run is EXPECTED to run out: the «…did not come in 60 s…» line it prints is the placement's own, judged by the ok below)
   const e1 = await estimateRun(1200);
-  ok(e1.up && !e1.reached && e1.ratioOnly, `PLACED ⑬: the sender at 1.2 Mbps is waited out — never three samples at ≥ ${FLOOR} kbps in the 60 s bound (${e1.tail.map((x) => x.join('/')).join(', ')}): the leg is RED on it, while the ratio alone (6b9eddd32) would pass it`, e1.seen);
+  ok(gateOf(e1.up) && !e1.reached && verdictOf(e1.ratioOnly), `PLACED ⑬: the sender at 1.2 Mbps is waited out — never three samples at ≥ ${FLOOR} kbps in the 60 s bound (${e1.tail.map((x) => x.join('/')).join(', ')}): the leg is RED on it, while the ratio alone (6b9eddd32) would pass it`, e1.seen);
 }
 console.log('⑭ THE HAND-OVER (lane desktop-handover): the strip gives the stream to ONE conversation; its records reach THE resident script; the owner\'s input pauses it; 「收回」');
 {
@@ -927,22 +927,22 @@ console.log('⑭ THE HAND-OVER (lane desktop-handover): the strip gives the stre
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const up = await playing(p);
   const give = up && await p.until(shown(`${WIN} .desktop-strip-handover-give`), 8000);
-  ok(up && give && (await textOf(`${WIN} .desktop-strip-handover-give`)) === '交给 agent' && !(await p.ev(shown(HO))), '⑭ while the stream plays the strip offers 「交给 agent」 (no lease yet)');
+  ok(gateOf(up) && gateOf(give) && (await textOf(`${WIN} .desktop-strip-handover-give`)) === '交给 agent' && !(await p.ev(shown(HO))), '⑭ while the stream plays the strip offers 「交给 agent」 (no lease yet)');
   await press(`${WIN} .desktop-strip-handover-give`);
   const dlg = await p.until(`!!document.querySelector('#machine-desktop-handover .pp-row[data-key="agent:cid-hand"]')`, 5000);
   await press('#machine-desktop-handover .pp-row[data-key="agent:cid-hand"]');
   await p.until(`!document.querySelector('#machine-desktop-handover .btn-create').disabled`, 3000);
   await press('#machine-desktop-handover .btn-create');
   const given = await p.until(`${shown(HO)} && /Alpha 正在操作/.test(document.querySelector('${WIN} .desktop-strip-handover-who').textContent)`, 5000);
-  ok(dlg && given && !(await p.ev(shown(`${WIN} .desktop-strip-handover-give`))) && (ho.stateOf('win-a') || {}).input === 'agent', '⑭ the one-holder picker (a live conversation) → 交给它 ⇒ the strip reads 「Alpha 正在操作 · 收回」, the lease is on the hub', ho.stateOf('win-a'));
+  ok(gateOf(dlg) && gateOf(given) && !(await p.ev(shown(`${WIN} .desktop-strip-handover-give`))) && (ho.stateOf('win-a') || {}).input === 'agent', '⑭ the one-holder picker (a live conversation) → 交给它 ⇒ the strip reads 「Alpha 正在操作 · 收回」, the lease is on the hub', ho.stateOf('win-a'));
   const shot = await ho.screenshot('md-win-a', A);
   ok(shot.w === 1280 && shot.h === 720 && shot.png.readUInt32BE(16) === 1280 && shot.coords === 'display', '⑭ the agent\'s screenshot = desktop-grab through the REAL bundle (the fake source\'s 1280×720 PNG) — its size printed', { w: shot.w, h: shot.h, bytes: shot.png.length });
   const n0 = psLines().length;
   await ho.act('md-win-a', A, { verb: 'click', at: '640,360' });
   const got = await linesUntil(n0, 'U 0', 50);
-  ok(JSON.stringify(got.slice(0, 4)) === JSON.stringify(['M 640 360', 'M 640 360', 'D 0', 'M 640 360']) || (got.includes('M 640 360') && got.includes('D 0') && got.includes('U 0') && got.indexOf('D 0') < got.indexOf('U 0') && got.every((l) => !/^M /.test(l) || l === 'M 640 360')), '⑭ the agent\'s click at the still\'s centre reached THE resident script as ④\'s owner click did: M 640 360 · D 0 · U 0 (desktop-input → the session\'s own sink)' + never(got), got);
+  ok(JSON.stringify(got.slice(0, 4)) === JSON.stringify(['M 640 360', 'M 640 360', 'D 0', 'M 640 360']) || (gateOf(got.includes('M 640 360')) && gateOf(got.includes('D 0')) && gateOf(got.includes('U 0')) && got.indexOf('D 0') < got.indexOf('U 0') && verdictOf(got.every((l) => !/^M /.test(l) || l === 'M 640 360'))), '⑭ the agent\'s click at the still\'s centre reached THE resident script as ④\'s owner click did: M 640 360 · D 0 · U 0 (desktop-input → the session\'s own sink)' + never(got), got);
   const dot = await p.until(`(() => { const c = document.querySelector('${WIN} .browser-live-agent-cursor'); if (!c || c.style.display === 'none') return false; const v = document.querySelector('${WIN} .stream-video').getBoundingClientRect(), b = c.getBoundingClientRect(); return Math.abs(b.left - (v.left + v.width / 2)) < 12 && Math.abs(b.top - (v.top + v.height / 2)) < 12 && /Alpha/.test(c.textContent); })()`, 5000);
-  ok(dot, '⑭ the agent\'s pointer shows over the picture where it clicked, labelled Alpha (browser-live-window\'s labelled cursor)');
+  ok(verdictOf(dot), '⑭ the agent\'s pointer shows over the picture where it clicked, labelled Alpha (browser-live-window\'s labelled cursor)');
   await p.shot('handover.png', WIN);
   // the owner's own click on the picture pauses it
   const [cx, cy] = await centre(p);
@@ -953,21 +953,21 @@ console.log('⑭ THE HAND-OVER (lane desktop-handover): the strip gives the stre
   const n2 = psLines().length;
   const refused = await codeOf(() => ho.act('md-win-a', A, { verb: 'click', at: '10,10' }));
   await sleep(300);
-  ok(paused && (ho.stateOf('win-a') || {}).input === 'user' && refused === 'window_paused' && psLines().length === n2 && linesSince(n1).includes('D 0'), '⑭ the owner\'s own click on the picture: it reaches the machine AND pauses the agent (已暂停——你在操作 + 「继续交给它」); the agent\'s next click ⇒ window_paused, nothing sent', { refused, state: ho.stateOf('win-a') });
+  ok(gateOf(paused) && (ho.stateOf('win-a') || {}).input === 'user' && refused === 'window_paused' && psLines().length === n2 && verdictOf(linesSince(n1).includes('D 0')), '⑭ the owner\'s own click on the picture: it reaches the machine AND pauses the agent (已暂停——你在操作 + 「继续交给它」); the agent\'s next click ⇒ window_paused, nothing sent', { refused, state: ho.stateOf('win-a') });
   await p.shot('handover-paused.png', WIN);
   await press(`${WIN} .desktop-strip-handover-resume`);
   const resumed = await p.until(`/Alpha 正在操作/.test(document.querySelector('${WIN} .desktop-strip-handover-who').textContent)`, 5000);
-  ok(resumed && (ho.stateOf('win-a') || {}).input === 'agent' && (await ho.act('md-win-a', A, { verb: 'key', chord: 'ctrl+s' })).ok, '⑭ 「继续交给它」 ⇒ Alpha drives again (its ctrl+s goes through)');
+  ok(gateOf(resumed) && (ho.stateOf('win-a') || {}).input === 'agent' && verdictOf((await ho.act('md-win-a', A, { verb: 'key', chord: 'ctrl+s' })).ok), '⑭ 「继续交给它」 ⇒ Alpha drives again (its ctrl+s goes through)');
   await p.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: cx, y: cy, deltaX: 0, deltaY: 120 });
   const wheelPaused = await p.until(`/已暂停/.test(document.querySelector('${WIN} .desktop-strip-handover-who').textContent)`, 5000);
-  ok(wheelPaused && (ho.stateOf('win-a') || {}).input === 'user', '⑭ the owner\'s wheel pauses it too');
+  ok(gateOf(wheelPaused) && (ho.stateOf('win-a') || {}).input === 'user', '⑭ the owner\'s wheel pauses it too');
   await press(`${WIN} .desktop-strip-handover-take`);
   const taken = await p.until(`${shown(`${WIN} .desktop-strip-handover-give`)} && !${shown(HO)}`, 5000);
-  ok(taken && ho.stateOf('win-a') === null && await codeOf(() => ho.screenshot('md-win-a', A)) === 'desktop_not_handed', '⑭ 「收回」 ⇒ the strip offers 「交给 agent」 again; the agent\'s verbs ⇒ desktop_not_handed');
+  ok(gateOf(taken) && ho.stateOf('win-a') === null && await codeOf(() => ho.screenshot('md-win-a', A)) === 'desktop_not_handed', '⑭ 「收回」 ⇒ the strip offers 「交给 agent」 again; the agent\'s verbs ⇒ desktop_not_handed');
   const key = (await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/stream/facts?host=win-a`)).json()).sessions[0].key;
   const again = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/handover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'win-a', key, principal: 'agent:cid-hand' }) })).json();
   const asAgent = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/handover/revoke`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_hand' }, body: JSON.stringify({ host: 'win-a' }) })).json();
-  ok(again.ok && asAgent.code === 'human_only' && ho.stateOf('win-a') !== null, '⑭ handed again over the route; the agent\'s own token on the owner\'s revoke ⇒ human_only (the lease stays)');
+  ok(gateOf(again.ok) && asAgent.code === 'human_only' && ho.stateOf('win-a') !== null, '⑭ handed again over the route; the agent\'s own token on the owner\'s revoke ⇒ human_only (the lease stays)');
   await p.close();
   await sleep(500);
   const ends = fs.readFileSync(path.join(hoDir, 'window-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.verb === 'lease-end').map((l) => l.cause);
@@ -1001,7 +1001,7 @@ let SHOWN = null;
   await pre.shot('fullscreen-before.png');
   await pre.ev('document.exitFullscreen().catch(() => {})');
   await pre.close();
-  ok(preFull && fsPre.full && !fsPre.pill && fsPre.pos === 'static' && fsPre.video[3] < fsPre.vh && fsPre.video[1] >= before.h, `⑭ RED CONTROL: the pre-lane full screen keeps the strip as a bar over the picture — the picture ${fsPre.video[2]}×${fsPre.video[3]} of ${fsPre.vw}×${fsPre.vh} (${Math.round((100 * fsPre.video[3]) / fsPre.vh)} % of the height), starting ${fsPre.video[1]} px down`, fsPre);
+  ok(gateOf(preFull) && gateOf(fsPre.full) && !fsPre.pill && fsPre.pos === 'static' && fsPre.video[3] < fsPre.vh && fsPre.video[1] >= before.h, `⑭ RED CONTROL: the pre-lane full screen keeps the strip as a bar over the picture — the picture ${fsPre.video[2]}×${fsPre.video[3]} of ${fsPre.vw}×${fsPre.vh} (${Math.round((100 * fsPre.video[3]) / fsPre.vh)} % of the height), starting ${fsPre.video[1]} px down`, fsPre);
   // AFTER
   const p = await page(1280, 800, DESK);
   await p.ev(`window.__open(${JSON.stringify(M)})`);
@@ -1009,7 +1009,7 @@ let SHOWN = null;
   await p.until(`/kbps/.test(${NUM})`, 8000);
   await sleep(2500); // a few seconds in the series
   const after = await stripFacts(p);
-  ok(up && before.numbers && !after.numbers && after.h === before.h && after.content < before.content && !after.scrolls && after.glyph && after.glyphPx === 12 && /^串流 · \d+ ms · \d+ fps$/.test(after.chip), `⑭ the strip shows ONE summary: 「${after.chip}」 + a 12 px chart glyph — the numbers sentence left it (the strip's content ${before.content} → ${after.content} px in ${after.room} px, height ${before.h} → ${after.h} px)`, { before, after });
+  ok(gateOf(up) && gateOf(before.numbers) && !after.numbers && after.h === before.h && after.content < before.content && !after.scrolls && gateOf(after.glyph) && after.glyphPx === 12 && verdictOf(/^串流 · \d+ ms · \d+ fps$/.test(after.chip)), `⑭ the strip shows ONE summary: 「${after.chip}」 + a 12 px chart glyph — the numbers sentence left it (the strip's content ${before.content} → ${after.content} px in ${after.room} px, height ${before.h} → ${after.h} px)`, { before, after });
   await p.shot('strip-after.png', STRIP);
   await press(p, `${WIN} .desktop-strip-status`);
   await p.until(SHOWN, 3000);
@@ -1018,9 +1018,9 @@ let SHOWN = null;
     const ink = (c) => { const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 0) n++; return n; };
     return { popover: d.dataset.popover === '1', rows: [...d.querySelectorAll('.stream-stats-table tr')].map((tr) => [tr.dataset.k, tr.cells[0].textContent, tr.cells[1].textContent]), kinds: [...d.querySelectorAll('.stream-chart')].map((c) => c.dataset.kind), names: [...d.querySelectorAll('.stream-chart-name')].map((e) => e.textContent), now: [...d.querySelectorAll('.stream-chart-now')].map((e) => e.textContent), max: [...d.querySelectorAll('.stream-chart-max')].map((e) => e.textContent), ink: cv.map(ink), size: cv.map((c) => [c.clientWidth, c.clientHeight]), box: [r.left, r.top, r.width, r.height].map(Math.round), inView: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight }; })()`;
   const pop = await p.ev(POP);
-  ok(pop && pop.popover && pop.kinds.join() === 'latency,loss,rate' && pop.names.join() === '延迟,丢包,带宽' && pop.ink.every((n) => n > 0) && pop.inView && /^\d+ ms/.test(pop.now[0]) && /^[\d.]+ %/.test(pop.now[1]) && /^\d+ kbps/.test(pop.now[2]) && pop.max[0].endsWith(' ms') && pop.max[2].endsWith(' kbps'), `⑭ the summary's click opens THE DETAILS (a createPopover — data-popover, so Esc and an outside press close it): three inked canvas charts 延迟 · 丢包 · 带宽 (${pop && pop.now.join(' | ')}; tops ${pop && pop.max.join(' / ')})`, pop);
+  ok(gateOf(pop) && gateOf(pop.popover) && pop.kinds.join() === 'latency,loss,rate' && pop.names.join() === '延迟,丢包,带宽' && gateOf(pop.ink.every((n) => n > 0)) && gateOf(pop.inView) && gateOf(/^\d+ ms/.test(pop.now[0])) && gateOf(/^[\d.]+ %/.test(pop.now[1])) && gateOf(/^\d+ kbps/.test(pop.now[2])) && gateOf(pop.max[0].endsWith(' ms')) && verdictOf(pop.max[2].endsWith(' kbps')), `⑭ the summary's click opens THE DETAILS (a createPopover — data-popover, so Esc and an outside press close it): three inked canvas charts 延迟 · 丢包 · 带宽 (${pop && pop.now.join(' | ')}; tops ${pop && pop.max.join(' / ')})`, pop);
   const row = (k) => ((pop && pop.rows.find((r) => r[0] === k)) || [])[2] || '';
-  ok(pop.rows.slice(0, 5).map((r) => r[1]).join() === '往返,抖动,帧率,解码,接收' && /^\d+ ms$/.test(row('rtt')) && /^\d+ fps · 发出 \d+$/.test(row('fps')) && /^\d+ kbps · 发出 \d+$/.test(row('kbps')) && row('path') === '直连' && /H264/i.test(row('codec')) && row('size') === '1280×720' && /^丢包 \d+ · 丢帧 \d+$/.test(row('loss')), '⑭ the table: 往返 · 抖动 · 帧率 (发出) · 解码 · 接收 (发出) · 路径 直连 · 编解码器 H264 · 画面大小 1280×720 · 丢失 — the page\'s own numbers beside the agent\'s', pop.rows);
+  ok(pop.rows.slice(0, 5).map((r) => r[1]).join() === '往返,抖动,帧率,解码,接收' && gateOf(/^\d+ ms$/.test(row('rtt'))) && gateOf(/^\d+ fps · 发出 \d+$/.test(row('fps'))) && gateOf(/^\d+ kbps · 发出 \d+$/.test(row('kbps'))) && row('path') === '直连' && gateOf(/H264/i.test(row('codec'))) && row('size') === '1280×720' && verdictOf(/^丢包 \d+ · 丢帧 \d+$/.test(row('loss'))), '⑭ the table: 往返 · 抖动 · 帧率 (发出) · 解码 · 接收 (发出) · 路径 直连 · 编解码器 H264 · 画面大小 1280×720 · 丢失 — the page\'s own numbers beside the agent\'s', pop.rows);
   await p.shot('details.png', '.stream-stats-pop');
   const lat = await p.ev(`(() => { const b = document.querySelector('.stream-stats-pop .stream-chart[data-kind="latency"] canvas').getBoundingClientRect(); return { x: b.right - 1, y: Math.round(b.top + b.height / 2), step: b.width / 119 }; })()`);
   await mouse(p, 'mouseMoved', lat.x, lat.y);
@@ -1029,20 +1029,20 @@ let SHOWN = null;
   await mouse(p, 'mouseMoved', lat.x - 2 * lat.step, lat.y);
   await sleep(150);
   const readout2 = await p.ev(`document.querySelector('.stream-stats-pop .stream-chart[data-kind="latency"] .stream-chart-now').textContent`);
-  ok(/^现在 · \d+ ms ± \d+$/.test(readout) && /^2 秒前 · (\d+ ms ± \d+|无读数)$/.test(readout2), `⑭ a hover on a chart reads that second: 「${readout}」, two seconds left 「${readout2}」`, { readout, readout2 });
+  ok(gateOf(/^现在 · \d+ ms ± \d+$/.test(readout)) && verdictOf(/^2 秒前 · (\d+ ms ± \d+|无读数)$/.test(readout2)), `⑭ a hover on a chart reads that second: 「${readout}」, two seconds left 「${readout2}」`, { readout, readout2 });
   // 钉住 ⇒ the panel in the picture's top-right corner; it outlives the popup
   await press(p, '.stream-stats-pop .stream-stats-pin');
   const PANEL = `(() => { const q = document.querySelector('${WIN} .stream-stats-panel'); if (!q) return null; const f = q.parentElement.getBoundingClientRect(), r = q.getBoundingClientRect(); return { corner: q.dataset.corner, gaps: { l: Math.round(r.left - f.left), t: Math.round(r.top - f.top), r: Math.round(f.right - r.right), b: Math.round(f.bottom - r.bottom) }, inPane: !!q.parentElement.querySelector('.stream-video'), popover: q.hasAttribute('data-popover'), charts: q.querySelectorAll('canvas.stream-chart-canvas').length, table: !!q.querySelector('table'), title: q.querySelector('.stream-stats-title').textContent, size: [Math.round(r.width), Math.round(r.height)], hash: [...q.querySelectorAll('canvas')].map((c) => { const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 0; for (let i = 3; i < px.length; i += 4) h = (h * 31 + px[i] * (i % 997)) % 1000000007; return h; }).join(':') }; })()`;
   const pinned = await p.until(`!document.querySelector('.stream-stats-pop') && !!document.querySelector('${WIN} .stream-stats-panel')`, 3000);
   const pf = await p.ev(PANEL);
-  ok(pinned && pf.corner === 'tr' && pf.gaps.t === 10 && pf.gaps.r === 10 && pf.inPane && !pf.popover && pf.charts === 3 && !pf.table && /^\d+ ms · \d+ fps · \d+ kbps$/.test(pf.title), `⑭ 钉住: the details become a ${pf.size.join('×')} panel in the picture's top-right corner (10 px in) — three live charts under one line (${pf.title}), no data-popover (the Esc sweep leaves it)`, pf);
+  ok(gateOf(pinned) && pf.corner === 'tr' && pf.gaps.t === 10 && pf.gaps.r === 10 && gateOf(pf.inPane) && !pf.popover && pf.charts === 3 && !pf.table && verdictOf(/^\d+ ms · \d+ fps · \d+ kbps$/.test(pf.title)), `⑭ 钉住: the details become a ${pf.size.join('×')} panel in the picture's top-right corner (10 px in) — three live charts under one line (${pf.title}), no data-popover (the Esc sweep leaves it)`, pf);
   await press(p, `${WIN} .desktop-strip-status`);
   const again = await p.until(SHOWN, 2000);
   await press(p, `${WIN} .vs-win-title`); // an outside press
   const closed = await p.until(`!document.querySelector('.stream-stats-pop')`, 2000);
   await sleep(2200);
   const pf2 = await p.ev(PANEL);
-  ok(again && closed && pf2 && pf2.hash !== pf.hash, '⑭ the panel outlives the popup: the summary opens the popup again beside it, an outside press closes the popup, the panel stays — and its charts moved on (updated each second)', { again, closed, before: pf.hash, after: pf2 && pf2.hash });
+  ok(gateOf(again) && gateOf(closed) && gateOf(pf2) && pf2.hash !== pf.hash, '⑭ the panel outlives the popup: the summary opens the popup again beside it, an outside press closes the popup, the panel stays — and its charts moved on (updated each second)', { again, closed, before: pf.hash, after: pf2 && pf2.hash });
   await p.shot('pinned.png', WIN);
   const head = await p.ev(`(() => { const b = document.querySelector('${WIN} .stream-stats-panel .stream-stats-head').getBoundingClientRect(), f = document.querySelector('${WIN} .stream-stats-panel').parentElement.getBoundingClientRect(); return { from: [Math.round(b.left + 30), Math.round(b.top + b.height / 2)], to: [Math.round(f.left + 160), Math.round(f.bottom - 60)] }; })()`);
   await drag(p, head.from, head.to);
@@ -1053,19 +1053,19 @@ let SHOWN = null;
   const fsOn = await goFull(p);
   await sleep(400);
   const fs1 = await fullFacts(p);
-  ok(fsOn && fs1.pill && fs1.pos === 'absolute' && fs1.video.join() === `0,0,${fs1.vw},${fs1.vh}`, `⑭ TRUE full screen: the picture takes the whole screen — ${fs1.video[2]}×${fs1.video[3]} of ${fs1.vw}×${fs1.vh} = 100 % (no fixed strip)`, fs1);
+  ok(gateOf(fsOn) && gateOf(fs1.pill) && fs1.pos === 'absolute' && fs1.video.join() === `0,0,${fs1.vw},${fs1.vh}`, `⑭ TRUE full screen: the picture takes the whole screen — ${fs1.video[2]}×${fs1.video[3]} of ${fs1.vw}×${fs1.vh} = 100 % (no fixed strip)`, fs1);
   ok(fs1.shown.join() === 'grip,summary,exit,more' && fs1.exit === '退出全屏' && fs1.corner === 'tl' && fs1.rect[0] === 10 && fs1.rect[1] === 10 && !fs1.away, '⑭ the strip floats over it as a pill in the top-left: grip · 串流 · N ms · N fps · 退出全屏 · ⋯ (nothing else of the bar)', fs1);
   const pfFull = await p.ev(PANEL);
-  ok(pfFull && pfFull.corner === 'bl' && pfFull.gaps.l === 10 && pfFull.gaps.b === 10, '⑭ the pinned panel rides along: the screen\'s bottom-left corner now', pfFull);
+  ok(gateOf(pfFull) && pfFull.corner === 'bl' && pfFull.gaps.l === 10 && pfFull.gaps.b === 10, '⑭ the pinned panel rides along: the screen\'s bottom-left corner now', pfFull);
   await p.shot('fullscreen.png');
   await press(p, `${WIN} .desktop-strip-pill-more`);
   const menu = await p.ev(`(() => { const m = document.querySelector('.stream-pill-menu'); return m ? { inFull: document.fullscreenElement.contains(m), items: [...m.querySelectorAll('.stream-pill-menu-item')].map((b) => b.textContent), held: document.querySelector('${STRIP}').dataset.why } : null; })()`);
-  ok(menu && menu.inFull && menu.items[0] === '串流详情' && menu.items.some((x) => /捕获快捷键$/.test(x)) && menu.held === 'menu', '⑭ ⋯ opens inside the full-screen element (a popup of the page behind would not show there): 串流详情 · (the displays) · 捕获快捷键 — and holds the pill up', menu);
+  ok(gateOf(menu) && gateOf(menu.inFull) && menu.items[0] === '串流详情' && gateOf(menu.items.some((x) => /捕获快捷键$/.test(x))) && menu.held === 'menu', '⑭ ⋯ opens inside the full-screen element (a popup of the page behind would not show there): 串流详情 · (the displays) · 捕获快捷键 — and holds the pill up', menu);
   await p.until(`getComputedStyle(document.querySelector('.stream-pill-menu')).visibility === 'visible'`, 2000);
   await press(p, '.stream-pill-menu .stream-pill-menu-item');
   await p.until(SHOWN, 3000);
   const fpop = await p.ev(`(() => { const d = document.querySelector('.stream-stats-pop'); if (!d) return null; const r = d.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + 30); return { inFull: document.fullscreenElement.contains(d), hit: !!(hit && d.contains(hit)), inView: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight }; })()`);
-  ok(fpop && fpop.inFull && fpop.hit && fpop.inView, '⑭ 串流详情 shows the details over the picture (inside the full-screen element, the topmost element where it is)', fpop);
+  ok(gateOf(fpop) && gateOf(fpop.inFull) && gateOf(fpop.hit) && verdictOf(fpop.inView), '⑭ 串流详情 shows the details over the picture (inside the full-screen element, the topmost element where it is)', fpop);
   await p.shot('fullscreen-details.png');
   await press(p, '.stream-stats-pop .stream-stats-x');
   await mouse(p, 'mouseMoved', 640, 520);
@@ -1074,11 +1074,11 @@ let SHOWN = null;
   const restMs = Date.now() - t0;
   await sleep(350); // past its 0.15 s fade
   const fsAway = await fullFacts(p);
-  ok(away && restMs >= 2500 && restMs <= 4500 && fsAway.opacity === '0', `⑭ the pointer rests: the pill fades ${restMs} ms later (3 s) — the picture alone`, { restMs, fsAway });
+  ok(gateOf(away) && restMs >= 2500 && restMs <= 4500 && fsAway.opacity === '0', `⑭ the pointer rests: the pill fades ${restMs} ms later (3 s) — the picture alone`, { restMs, fsAway });
   await p.shot('fullscreen-away.png');
   await mouse(p, 'mouseMoved', 600, 500);
   const back = await p.until(`!document.querySelector('${STRIP}').classList.contains('is-away')`, 1000);
-  ok(back, '⑭ a move brings it back');
+  ok(verdictOf(back), '⑭ a move brings it back');
   const gr = await at(p, `${STRIP} .desktop-strip-grip`);
   await drag(p, gr, [fs1.vw - 80, fs1.vh - 40]);
   const fs2 = await fullFacts(p);
@@ -1089,7 +1089,7 @@ let SHOWN = null;
   const exited = await p.until(`!document.fullscreenElement`, 3000);
   await sleep(300);
   const ex = await p.ev(`(() => { const s = document.querySelector('${STRIP}'), v = document.querySelector('${WIN} .stream-video').getBoundingClientRect(); return { pill: s.classList.contains('is-pill'), pos: getComputedStyle(s).position, full: s.querySelector('.desktop-strip-full').textContent, grip: getComputedStyle(s.querySelector('.desktop-strip-grip')).display, more: getComputedStyle(s.querySelector('.desktop-strip-pill-more')).display, below: Math.round(v.top - s.getBoundingClientRect().bottom) }; })()`);
-  ok(exited && !ex.pill && ex.pos === 'static' && ex.full === '⤢ 全屏' && ex.grip === 'none' && ex.more === 'none' && ex.below >= 0, '⑭ 「退出全屏」 leaves it: the strip is the window\'s bar again (⤢ 全屏; no grip, no ⋯), the picture under it', ex);
+  ok(gateOf(exited) && !ex.pill && ex.pos === 'static' && ex.full === '⤢ 全屏' && ex.grip === 'none' && ex.more === 'none' && ex.below >= 0, '⑭ 「退出全屏」 leaves it: the strip is the window\'s bar again (⤢ 全屏; no grip, no ⋯), the picture under it', ex);
   // Esc: the browser's own (it exits full screen and fires fullscreenchange — the same door); measured: CDP's Esc never leaves
   // a headless Chrome's full screen, so the browser's exit is taken through the API when it did not
   await goFull(p);
@@ -1097,9 +1097,9 @@ let SHOWN = null;
   const escLeft = await p.until(`!document.fullscreenElement`, 1500);
   if (!escLeft) await p.ev('document.exitFullscreen().catch(() => {})');
   const exEsc = await p.until(`!document.fullscreenElement && !document.querySelector('${STRIP}').classList.contains('is-pill')`, 3000);
-  ok(exEsc, `⑭ the browser's exit (Esc ${escLeft ? 'itself' : '— taken through the API: CDP\'s Esc never leaves headless full screen'}) puts the bar back the same way`, { escLeft });
+  ok(verdictOf(exEsc), `⑭ the browser's exit (Esc ${escLeft ? 'itself' : '— taken through the API: CDP\'s Esc never leaves headless full screen'}) puts the bar back the same way`, { escLeft });
   await press(p, `${WIN} .stream-stats-panel .stream-stats-x`);
-  ok(await p.until(`!document.querySelector('${WIN} .stream-stats-panel')`, 2000), '⑭ the panel\'s × closes it');
+  ok(verdictOf(await p.until(`!document.querySelector('${WIN} .stream-stats-panel')`, 2000)), '⑭ the panel\'s × closes it');
   await p.close();
   // reopened: the pill's corner and the pin's corner come back. Lane mirror-315-webrtc-pin (the .315 mirror, both tries: pf4
   // null): 钉住 was pressed where the details had been painted ONE FRAME before they moved above the pill (or before the
@@ -1133,19 +1133,19 @@ let SHOWN = null;
   const placesOf = (r) => r.frames.map((f) => `${f.top}–${f.bottom}`).join(' → ');
   const p2 = await page(1280, 800, DESK);
   const r3 = await reopenPin(p2), fs3 = r3.fs;
-  ok(r3.shown && r3.filled && r3.held && aboveAll(r3), `⑭ the window reopened in full screen: the summary's details open ABOVE the bottom-right pill from the first frame they show, and grow upward when the table's numbers come — painted at ${placesOf(r3)}, each bottom 2 px over the summary (${r3.frames[0] && r3.frames[0].anchorTop})`, r3);
+  ok(gateOf(r3.shown) && gateOf(r3.filled) && gateOf(r3.held) && verdictOf(aboveAll(r3)), `⑭ the window reopened in full screen: the summary's details open ABOVE the bottom-right pill from the first frame they show, and grow upward when the table's numbers come — painted at ${placesOf(r3)}, each bottom 2 px over the summary (${r3.frames[0] && r3.frames[0].anchorTop})`, r3);
   await press(p2, '.stream-stats-pop .stream-stats-pin');
   const pinned4 = await p2.until(`!!document.querySelector('${WIN} .stream-stats-panel')`, 3000);
   const pf4 = await p2.ev(PANEL);
   const land = await p2.ev('window.__pinTrace.press');
-  ok(fs3.full && fs3.corner === 'br' && fs3.rect[2] === fs3.vw - 10 && pinned4 && pf4 && pf4.corner === 'bl', '⑭ the window reopened: its full-screen pill comes back bottom-right, a new pin bottom-left — remembered per machine', { fs3, shown: r3.shown, filled: r3.filled, held: r3.held, land, pf4, pop: pf4 ? null : await p2.ev(`(() => { const d = document.querySelector('.stream-stats-pop'); if (!d) return null; const r = d.getBoundingClientRect(); return { visibility: getComputedStyle(d).visibility, box: [r.left, r.top, r.right, r.bottom].map(Math.round), away: document.querySelector('${STRIP}').classList.contains('is-away') }; })()`) });
+  ok(gateOf(fs3.full) && fs3.corner === 'br' && fs3.rect[2] === fs3.vw - 10 && gateOf(pinned4) && gateOf(pf4) && pf4.corner === 'bl', '⑭ the window reopened: its full-screen pill comes back bottom-right, a new pin bottom-left — remembered per machine', { fs3, shown: r3.shown, filled: r3.filled, held: r3.held, land, pf4, pop: pf4 ? null : await p2.ev(`(() => { const d = document.querySelector('.stream-stats-pop'); if (!d) return null; const r = d.getBoundingClientRect(); return { visibility: getComputedStyle(d).visibility, box: [r.left, r.top, r.right, r.bottom].map(Math.round), away: document.querySelector('${STRIP}').classList.contains('is-away') }; })()`) });
   await p2.ev(`document.exitFullscreen().catch(() => {}); true`);
   await p2.close();
   // its RED CONTROL: the details' pre-fix placement (above the anchor one frame after they showed, once) — the place the
   // mirror's press aimed at is painted first, and the table's numbers clamp them down over the pill
   const p3 = await page(1280, 800, DESK, { at: '/prepin' });
   const r3c = await reopenPin(p3);
-  ok(r3c.shown && r3c.filled && r3c.frames.length > 0 && !aboveAll(r3c), `⑭ RED CONTROL: the pre-fix placement paints the details at ${placesOf(r3c)} — a frame of them over the pill (its summary at ${r3c.frames[0] && r3c.frames[0].anchorTop}) before or after they move`, r3c);
+  ok(gateOf(r3c.shown) && gateOf(r3c.filled) && r3c.frames.length > 0 && !aboveAll(r3c), `⑭ RED CONTROL: the pre-fix placement paints the details at ${placesOf(r3c)} — a frame of them over the pill (its summary at ${r3c.frames[0] && r3c.frames[0].anchorTop}) before or after they move`, r3c);
   await p3.ev(`document.exitFullscreen().catch(() => {}); localStorage.removeItem('vibespace.streamPill'); localStorage.removeItem('vibespace.streamStatsPin'); true`); // this profile's memory reset for the legs after
   await p3.close();
 }
@@ -1161,12 +1161,12 @@ console.log('⑮ a phone: the summary\'s tap, the pill under a finger');
   const [sx, sy] = await p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-status').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
   await p.tap(sx, sy);
   const pop = await p.until(SHOWN, 3000) && await p.ev(`(() => { const d = document.querySelector('.stream-stats-pop'), r = d.getBoundingClientRect(); return { box: [r.left, r.top, r.right, r.bottom].map(Math.round), charts: d.querySelectorAll('canvas').length, rows: d.querySelectorAll('tr').length }; })()`);
-  ok(pop && pop.box[0] >= 0 && pop.box[2] <= 375 && pop.box[1] >= 0 && pop.box[3] <= 667 && pop.charts === 3 && pop.rows >= 7, `⑮ a TAP on the summary opens the details inside the 375 × 667 screen (${pop && pop.box.join(',')}) — the table and three charts`, pop);
+  ok(gateOf(pop) && pop.box[0] >= 0 && pop.box[2] <= 375 && pop.box[1] >= 0 && pop.box[3] <= 667 && pop.charts === 3 && pop.rows >= 7, `⑮ a TAP on the summary opens the details inside the 375 × 667 screen (${pop && pop.box.join(',')}) — the table and three charts`, pop);
   const [lx, ly] = await p.ev(`(() => { const b = document.querySelector('.stream-stats-pop .stream-chart[data-kind="rate"] canvas').getBoundingClientRect(); return [Math.floor(b.right - 1), Math.round(b.top + b.height / 2)]; })()`); // the newest second (a few rows only yet)
   await p.tap(lx, ly);
   await sleep(150);
   const tapRead = await p.ev(`document.querySelector('.stream-stats-pop .stream-chart[data-kind="rate"] .stream-chart-now').textContent`);
-  ok(/^现在 · \d+ kbps/.test(tapRead), `⑮ a tap on a chart holds that second's readout: 「${tapRead}」`, tapRead);
+  ok(verdictOf(/^现在 · \d+ kbps/.test(tapRead)), `⑮ a tap on a chart holds that second's readout: 「${tapRead}」`, tapRead);
   await p.shot('phone-details.png');
   await p.ev(`document.querySelector('.stream-stats-pop .stream-stats-x').click()`);
   await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); s.scrollLeft = 0; return true; })()`);
@@ -1178,16 +1178,16 @@ console.log('⑮ a phone: the summary\'s tap, the pill under a finger');
   await p.tap(187, 420); // the middle of the picture: the machine's
   const mid = await linesUntil(n0, 'U 0', 30);
   const stillAway = await p.ev(`document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`);
-  ok(full && away && mid.includes('D 0') && mid.includes('U 0') && stillAway, '⑮ in full screen the pill fades (no finger moved); a tap in the middle is a click on the machine (D 0 · U 0) and leaves the pill away' + never(mid), { full, away, mid, stillAway });
+  ok(gateOf(full) && gateOf(away) && gateOf(mid.includes('D 0')) && gateOf(mid.includes('U 0')) && verdictOf(stillAway), '⑮ in full screen the pill fades (no finger moved); a tap in the middle is a click on the machine (D 0 · U 0) and leaves the pill away' + never(mid), { full, away, mid, stillAway });
   const n1 = psLines().length;
   await p.tap(30, 40); // the pill's corner (top-left third)
   const woke = await p.until(`!document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`, 1000);
   await sleep(600);
   const corner = linesSince(n1).filter((l) => /^[DU] /.test(l));
-  ok(woke && corner.length === 0, '⑮ a tap in the pill\'s corner wakes it — and never reaches the machine (no press, no release sent)', { woke, corner });
+  ok(gateOf(woke) && corner.length === 0, '⑮ a tap in the pill\'s corner wakes it — and never reaches the machine (no press, no release sent)', { woke, corner });
   await p.shot('phone-fullscreen.png');
   const reAway = await p.until(`document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`, 5000);
-  ok(reAway, '⑮ …for 3 s, then it fades again');
+  ok(verdictOf(reAway), '⑮ …for 3 s, then it fades again');
   await p.ev('document.exitFullscreen().catch(() => {})');
   await p.close();
 }
@@ -1197,17 +1197,17 @@ console.log('⑰ THE MICROPHONE (lane stream-mic-road): 「麦克风」 — Chro
   const nodeUntil = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(60); } return false; };
   const micForce = () => fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/mic?host=win-a&force=1`).then((r) => r.json());
   MIC.setFacts(winFacts()); const f0 = await micForce();
-  ok(f0.state && f0.state.state === 'installed' && f0.words.road === 'virtual', '⑰ the hub reads the machine\'s microphone (GET …/mic): VB-CABLE installed', f0.state);
+  ok(gateOf(f0.state) && f0.state.state === 'installed' && f0.words.road === 'virtual', '⑰ the hub reads the machine\'s microphone (GET …/mic): VB-CABLE installed', f0.state);
   const micState = (p) => p.ev(`(() => { const b = document.querySelector('${MIC_BTN}'); if (!b) return null; const w = document.querySelector('${ROAD}'); const d = document.querySelector('${WIN} .desktop-strip-mic-install'); return { shown: !b.hidden, pressed: b.getAttribute('aria-pressed'), dot: !b.querySelector('.desktop-strip-mic-dot').hidden, label: b.textContent, words: w && !w.hidden ? w.textContent : null, door: !!d && !d.hidden, gum: window.__gum, tracks: (window.__micTracks || []).map((t) => t.readyState) }; })()`);
   const grant = (p) => p.cdp('Browser.grantPermissions', { origin: `http://127.0.0.1:${PORT}`, permissions: ['audioCapture'] }); // the person's answer to Chrome's own prompt — once the stream plays (see the launch line)
   const ungrant = (p) => p.cdp('Browser.resetPermissions', {});
   const press = async (p) => { const at = await p.ev(`(() => { const b = document.querySelector('${MIC_BTN}').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`); await p.click(at[0], at[1]); };
   const p = await page(1280, 800, DESK);
   await p.ev(`window.__open(${JSON.stringify(M)})`);
-  ok(await playing(p), '⑰ the stream plays');
+  ok(verdictOf(await playing(p)), '⑰ the stream plays');
   const shown = await p.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return !!b && !b.hidden; })()`, 8000);
   const s0 = await micState(p);
-  ok(shown && s0.pressed === 'false' && !s0.dot && s0.label.includes('麦克风') && s0.words === null && s0.gum === 0, '⑰ the stream offered the m-line ⇒ 「麦克风」 shows on the strip — OFF (no dot, no words) and the browser was NEVER asked', s0);
+  ok(gateOf(shown) && s0.pressed === 'false' && !s0.dot && gateOf(s0.label.includes('麦克风')) && s0.words === null && s0.gum === 0, '⑰ the stream offered the m-line ⇒ 「麦克风」 shows on the strip — OFF (no dot, no words) and the browser was NEVER asked', s0);
   const n0 = MIC.renders().length;
   await sleep(1200);
   ok(MIC.renders().length === n0, '⑰ nothing reaches the machine while it is off (no render started)');
@@ -1216,26 +1216,26 @@ console.log('⑰ THE MICROPHONE (lane stream-mic-road): 「麦克风」 — Chro
   await press(p);
   const live = await p.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return b.getAttribute('aria-pressed') === 'true' && !b.querySelector('.desktop-strip-mic-dot').hidden; })()`, 8000);
   const s1 = await micState(p);
-  ok(live && s1.gum === 1 && s1.tracks.length === 1 && s1.tracks[0] === 'live', '⑰ a press asks the browser ONCE (its own prompt — granted) ⇒ live on the PLAYING stream (no renegotiation): aria-pressed and the RED DOT', s1);
-  ok(await playing(p), '⑰ …and the picture plays on (the track joined the m-line by replaceTrack)');
+  ok(gateOf(live) && s1.gum === 1 && s1.tracks.length === 1 && s1.tracks[0] === 'live', '⑰ a press asks the browser ONCE (its own prompt — granted) ⇒ live on the PLAYING stream (no renegotiation): aria-pressed and the RED DOT', s1);
+  ok(verdictOf(await playing(p)), '⑰ …and the picture plays on (the track joined the m-line by replaceTrack)');
   const dot = await p.ev(`(() => { const d = document.querySelector('${MIC_BTN} .desktop-strip-mic-dot'); const s = getComputedStyle(d); return { bg: s.backgroundColor, red: getComputedStyle(document.documentElement).getPropertyValue('--red').trim(), w: d.getBoundingClientRect().width }; })()`);
-  ok(/^rgb\((\d+), (\d+), (\d+)\)$/.test(dot.bg) && Number(/^rgb\((\d+)/.exec(dot.bg)[1]) > 150 && Number(/, (\d+),/.exec(dot.bg)[1]) < 120 && dot.w >= 6, `⑰ the dot is red (the theme's --red ${dot.red || '(unset — its fallback)'}: ${dot.bg})`, dot);
+  ok(gateOf(/^rgb\((\d+), (\d+), (\d+)\)$/.test(dot.bg)) && Number(/^rgb\((\d+)/.exec(dot.bg)[1]) > 150 && Number(/, (\d+),/.exec(dot.bg)[1]) < 120 && dot.w >= 6, `⑰ the dot is red (the theme's --red ${dot.red || '(unset — its fallback)'}: ${dot.bg})`, dot);
   const started = await nodeUntil(() => MIC.renders().length === n0 + 1, 10000);
   const r1 = MIC.renders()[n0] || {};
-  ok(started && r1.device === 'cab-in' && r1.speakers === false, '⑰ the machine started ONE render into «CABLE Input» (its id on the helper\'s env)', r1);
+  ok(gateOf(started) && r1.device === 'cab-in' && r1.speakers === false, '⑰ the machine started ONE render into «CABLE Input» (its id on the helper\'s env)', r1);
   const said = await p.until(`((document.querySelector('${ROAD}') || {}).textContent || '').includes('你的声音 → 本机应用的麦克风『CABLE Output (VB-Audio Virtual Cable)』')`, 8000);
-  ok(said && !(await micState(p)).door, '⑰ the strip says where the voice goes: 「你的声音 → 本机应用的麦克风『CABLE Output (VB-Audio Virtual Cable)』」 (no install door)', (await micState(p)).words);
+  ok(gateOf(said) && !(await micState(p)).door, '⑰ the strip says where the voice goes: 「你的声音 → 本机应用的麦克风『CABLE Output (VB-Audio Virtual Cable)』」 (no install door)', (await micState(p)).words);
   await p.shot('mic-live.png', `${WIN} .desktop-strip`);
   await sleep(2500);
   await press(p);
   const off = await p.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return b.getAttribute('aria-pressed') === 'false' && b.querySelector('.desktop-strip-mic-dot').hidden; })()`, 5000);
   const s2 = await micState(p);
-  ok(off && s2.tracks.every((x) => x === 'ended') && s2.words === null, '⑰ a second press ⇒ OFF: no dot, no words, the browser\'s track STOPPED', s2);
+  ok(gateOf(off) && gateOf(s2.tracks.every((x) => x === 'ended')) && s2.words === null, '⑰ a second press ⇒ OFF: no dot, no words, the browser\'s track STOPPED', s2);
   const closed = await nodeUntil(() => MIC.ended(n0 + 1), MM.MIC_LIMITS.idleMs + 5000);
   const pcm = MIC.binOf(n0 + 1), ratio = REAL_FF ? toneRatio(pcm) : 0, runs = REAL_FF ? [] : pcmPages(pcm);
-  if (REAL_FF) ok(closed && pcm.length > 1.5 * 48000 * 4 && ratio > 20, `⑰ the machine's road ended on its own (no packet for ${MM.MIC_LIMITS.idleMs} ms); it got ${(pcm.length / 192000).toFixed(1)} s of PCM carrying Chrome's fake microphone (its 1 kHz tone: ${ratio.toFixed(0)}× the 3 kHz energy)`, { bytes: pcm.length, ratio });
+  if (REAL_FF) ok(gateOf(closed) && pcm.length > 1.5 * 48000 * 4 && ratio > 20, `⑰ the machine's road ended on its own (no packet for ${MM.MIC_LIMITS.idleMs} ms); it got ${(pcm.length / 192000).toFixed(1)} s of PCM carrying Chrome's fake microphone (its 1 kHz tone: ${ratio.toFixed(0)}× the 3 kHz energy)`, { bytes: pcm.length, ratio });
   else { // lane ci-339-reds: no ffmpeg here — the fake decoder's PCM names the Ogg pages it got (the road, not the sound)
-    ok(closed && pcm.length > 1.5 * 48000 * 4 && runs.length > 50 && runs.every((r, i) => r.seq === 2 + i && r.frames > 0), `⑰ the machine's road ended on its own (no packet for ${MM.MIC_LIMITS.idleMs} ms); it got ${(pcm.length / 192000).toFixed(1)} s of PCM through the FAKE decoder (no ffmpeg on this box): Chrome's Opus as Ogg pages 2…${runs.length + 1} in order, none lost`, { bytes: pcm.length, runs: runs.length, first: runs.slice(0, 3) });
+    ok(gateOf(closed) && pcm.length > 1.5 * 48000 * 4 && runs.length > 50 && verdictOf(runs.every((r, i) => r.seq === 2 + i && r.frames > 0)), `⑰ the machine's road ended on its own (no packet for ${MM.MIC_LIMITS.idleMs} ms); it got ${(pcm.length / 192000).toFixed(1)} s of PCM through the FAKE decoder (no ffmpeg on this box): Chrome's Opus as Ogg pages 2…${runs.length + 1} in order, none lost`, { bytes: pcm.length, runs: runs.length, first: runs.slice(0, 3) });
     console.log('  SKIP ⑰ the 1 kHz tone in the machine\'s PCM: no ffmpeg on this box (its PATH searched) — the fake decoder carries page numbers, not sound; judged where ffmpeg is');
   }
   // a LOCK: the page hidden (a phone's lock, a minimized window) ⇒ off
@@ -1244,24 +1244,24 @@ console.log('⑰ THE MICROPHONE (lane stream-mic-road): 「麦克风」 — Chro
   await p.ev(`Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); true`);
   const locked = await p.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'false'`, 3000);
   const s3 = await micState(p);
-  ok(locked && s3.tracks.every((x) => x === 'ended') && !s3.dot, '⑰ the page hidden (a lock) ⇒ OFF, the track stopped', s3);
+  ok(gateOf(locked) && gateOf(s3.tracks.every((x) => x === 'ended')) && !s3.dot, '⑰ the page hidden (a lock) ⇒ OFF, the track stopped', s3);
   await p.ev(`Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); true`);
   // THE WINDOW closes while live ⇒ the track stops with it
   await press(p);
   await p.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);
   await p.ev('window.__closeAll()'); await sleep(400);
   const s4 = await p.ev('(window.__micTracks || []).map((t) => t.readyState)');
-  ok(s4.length === 3 && s4.every((x) => x === 'ended'), '⑰ the window closed while live ⇒ the track stopped with it', s4);
+  ok(s4.length === 3 && verdictOf(s4.every((x) => x === 'ended')), '⑰ the window closed while live ⇒ the track stopped with it', s4);
   // A RESTORED window never re-opens it: the page reloaded, the window opened again — the browser is never asked
   await p.cdp('Page.reload', { ignoreCache: true }); await sleep(400); await p.until('typeof window.__open === "function"', 10000);
   const nR = MIC.renders().length;
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   await p.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return !!b && !b.hidden; })()`, 10000); await sleep(1500);
   const s5 = await micState(p);
-  ok(s5 && s5.pressed === 'false' && !s5.dot && s5.gum === 0 && MIC.renders().length === nR, '⑰ a restored window starts the microphone OFF — the browser never asked, nothing sent (micStep\'s restore row; the origin STILL holds the permission)', s5);
+  ok(gateOf(s5) && s5.pressed === 'false' && !s5.dot && s5.gum === 0 && MIC.renders().length === nR, '⑰ a restored window starts the microphone OFF — the browser never asked, nothing sent (micStep\'s restore row; the origin STILL holds the permission)', s5);
   await p.ev('window.__closeAll()'); await ungrant(p); await sleep(300);
   await p.ev(`window.__open(${JSON.stringify(M)})`);
-  ok(await playing(p), '⑰ (the permission reset: the next window plays — see the launch line for why it is held only while a stream plays)');
+  ok(verdictOf(await playing(p)), '⑰ (the permission reset: the next window plays — see the launch line for why it is held only while a stream plays)');
   // THE SPEAKERS ROAD: no virtual microphone ⇒ said every time it is in force, with the install door
   MIC.setFacts(winFacts({ cable: false })); await micForce();
   await grant(p);
@@ -1269,20 +1269,20 @@ console.log('⑰ THE MICROPHONE (lane stream-mic-road): 「麦克风」 — Chro
   const spk = await p.until(`((document.querySelector('${ROAD}') || {}).textContent || '').includes('对方电脑会从扬声器播放你的声音')`, 10000);
   const s6 = await micState(p);
   const r6 = MIC.renders()[MIC.renders().length - 1] || {};
-  ok(spk && s6.door && r6.speakers === true && r6.device === null, '⑰ no virtual microphone ⇒ the strip says 「对方电脑会从扬声器播放你的声音」 with 「安装虚拟麦克风…」 beside it; the machine plays it on its speakers', { s6, r6 });
+  ok(gateOf(spk) && gateOf(s6.door) && r6.speakers === true && r6.device === null, '⑰ no virtual microphone ⇒ the strip says 「对方电脑会从扬声器播放你的声音」 with 「安装虚拟麦克风…」 beside it; the machine plays it on its speakers', { s6, r6 });
   await p.shot('mic-speakers.png', `${WIN} .desktop-strip`);
   // THE DOOR: 「安装虚拟麦克风…」 opens THE install dialog with the plan the agent's facts give (absent ⇒ VB-CABLE); Install POSTs it with
   // the page's language and the shown plan's digest (the answer stubbed here — the run itself is test-stream-mic-op §8's)
   await p.ev(`document.querySelector('${WIN} .desktop-strip-mic-install').click(); true`);
   const dlg = await p.until(`(() => { const d = document.querySelector('#desktop-install-dialog'); return !!d && /VB-CABLE/.test(d.querySelector('.desktop-install-facts')?.textContent || '') && /VBCABLE_Setup_x64\.exe/.test(d.querySelector('.desktop-install-pre')?.textContent || ''); })()`, 15000);
   const dtext = await p.ev(`document.querySelector('#desktop-install-dialog')?.textContent || ''`);
-  ok(dlg && /安装虚拟麦克风/.test(dtext) && /vb-cable\.com/.test(dtext) && /Windows PowerShell/.test(dtext) && /b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb/.test(dtext), '⑰ the door opens THE install dialog: VB-CABLE donationware (vb-cable.com), its pinned SHA-256, the ONE UAC prompt, the commands', dtext.slice(0, 400));
+  ok(gateOf(dlg) && gateOf(/安装虚拟麦克风/.test(dtext)) && gateOf(/vb-cable\.com/.test(dtext)) && gateOf(/Windows PowerShell/.test(dtext)) && verdictOf(/b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb/.test(dtext)), '⑰ the door opens THE install dialog: VB-CABLE donationware (vb-cable.com), its pinned SHA-256, the ONE UAC prompt, the commands', dtext.slice(0, 400));
   await p.ev(`(() => { const f = window.fetch; window.__installReq = null; window.fetch = async (u, o) => { if (String(u).startsWith('/api/desktop/install?')) { window.__installReq = { url: String(u), method: o && o.method, body: o && o.body }; return new Response(JSON.stringify({ done: true, what: 'virtual-mic', label: 'VB-CABLE', defaultsKept: true }) + '\\n', { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } }); } return f(u, o); }; return true; })()`);
   await p.ev(`document.querySelector('#desktop-install-dialog .desktop-install-actions .btn-create').click(); true`);
   const kept = await p.until(`/已保持你原来的默认扬声器和麦克风/.test(document.querySelector('#desktop-install-dialog .desktop-install-note')?.textContent || '')`, 8000);
   const req = await p.ev('window.__installReq');
   let body = null; try { body = JSON.parse(req && req.body); } catch { body = null; }
-  ok(kept && req && req.method === 'POST' && /[?&]lang=zh(&|$)/.test(req.url) && body && body.what === 'virtual-mic' && body.host === 'win-a' && typeof body.planDigest === 'string' && body.planDigest.length > 8, '⑰ Install POSTs the shown plan (its digest) with the page\'s language; done ⇒ 「…已保持你原来的默认扬声器和麦克风」', { req, kept });
+  ok(gateOf(kept) && gateOf(req) && req.method === 'POST' && gateOf(/[?&]lang=zh(&|$)/.test(req.url)) && gateOf(body) && body.what === 'virtual-mic' && body.host === 'win-a' && typeof body.planDigest === 'string' && body.planDigest.length > 8, '⑰ Install POSTs the shown plan (its digest) with the page\'s language; done ⇒ 「…已保持你原来的默认扬声器和麦克风」', { req, kept });
   await p.ev(`document.querySelector('#desktop-install-dialog .dialog-close')?.click(); document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
   await press(p);
   ok(MIC.setdefaults().length === 0, '⑰ no default device was ever changed by the stream');
@@ -1306,14 +1306,14 @@ console.log('⑰ THE MICROPHONE (lane stream-mic-road): 「麦克风」 — Chro
   // a PHONE: the same strip
   const ph = await page(375, 667, PHONE, { touch: true });
   await ph.ev(`window.__open(${JSON.stringify(M)})`);
-  ok(await playing(ph), '⑰ phone 375: it plays');
+  ok(verdictOf(await playing(ph)), '⑰ phone 375: it plays');
   await ph.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return !!b && !b.hidden; })()`, 8000);
   await ph.ev(`document.querySelector('${MIC_BTN}').scrollIntoView({ inline: 'center', block: 'nearest' }); true`); await sleep(200);
   const pat = await ph.ev(`(() => { const b = document.querySelector('${MIC_BTN}').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2), b.right <= innerWidth + 1 && b.left >= -1]; })()`);
   await grant(ph);
   await ph.tap(pat[0], pat[1]);
   const phLive = await ph.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);
-  ok(pat[2] && phLive && (await micState(ph)).dot, '⑰ phone: 「麦克风」 is on the same strip (in view), a tap turns it on — the red dot', pat);
+  ok(gateOf(pat[2]) && gateOf(phLive) && verdictOf((await micState(ph)).dot), '⑰ phone: 「麦克风」 is on the same strip (in view), a tap turns it on — the red dot', pat);
   await ph.shot('phone-mic.png', `${WIN} .desktop-strip`);
   await ungrant(ph);
   await ph.close();
@@ -1331,7 +1331,7 @@ console.log('⑱ backlog B-c7d7 (found by lane stream-mic-road, fixed by lane we
   await sleep(1500);
   const s = (await sessions()).find((x) => !before.has(x.key)) || null;
   const ice = s && s.stats ? s.stats.ice : null;
-  ok(plays, `⑱ B-c7d7: a new stream with the microphone permission held plays (before lane werift-lite-multihomed: never, on a computer with several adapters) — the agent's ICE ${ice ? ice.state : '?'}, the browser's candidates as werift holds them: ${ice ? ice.remotes.length : 0}`, ice ? { state: ice.state, nominated: ice.nominated } : null);
+  ok(verdictOf(plays), `⑱ B-c7d7: a new stream with the microphone permission held plays (before lane werift-lite-multihomed: never, on a computer with several adapters) — the agent's ICE ${ice ? ice.state : '?'}, the browser's candidates as werift holds them: ${ice ? ice.remotes.length : 0}`, ice ? { state: ice.state, nominated: ice.nominated } : null);
   console.log(`  INFO ⑱ the agent's ICE: state ${ice ? ice.state : '?'}, nominated ${ice && ice.nominated ? `${ice.nominated.local} → ${ice.nominated.remote}` : 'none'}`);
   console.log(`  INFO ⑱ the browser's candidates as werift holds them (${ice ? ice.remotes.length : 0}): ${ice ? ice.remotes.join(' · ') : '?'}`);
   for (const pr of (ice && ice.pairs) || []) console.log(`  INFO ⑱ pair ${pr.local} → ${pr.remote}: ${pr.state}${pr.nominated ? ' NOMINATED' : ''}${pr.remoteNominated ? ' (the browser nominated)' : ''} rx ${pr.rx} tx ${pr.tx}`);
@@ -1365,7 +1365,7 @@ console.log('⑲ THE MICROPHONE ALLOWED (lane werift-lite-multihomed): the brows
   // B-0084 (lane bl-windows, 2026-11-18): each road's facts said COMPACTLY — ok() keeps 900 characters, and the per-pair rows of
   // an agent with 16 host addresses (the integration box) filled them with the first road's, hiding the second road's own facts
   const brief = (r) => r && { up: r.up, ms: r.ms, late: r.late, f: r.f && { hosts: r.f.hosts, mdns: r.f.mdns, lite: r.f.lite, sel: r.f.sel, changes: r.f.changes, dtls: r.f.dtls, remotes: r.f.remotes, pairs: Object.keys(r.f.rows || {}).length, rxPairs: Object.values(r.f.rows || {}).filter((b) => b > 0).length, rxOnSel: r.f.sel ? (r.f.rows || {})[r.f.sel] || 0 : null } };
-  ok(r1.up && r1.f && r1.f.hosts.length === 0 && r1.f.mdns === 1 && r1.f.lite, `⑲ the default origin (no microphone): the browser offers ONE mDNS name — it plays in ${r1.ms} ms`, brief(r1));
+  ok(gateOf(r1.up) && gateOf(r1.f) && r1.f.hosts.length === 0 && r1.f.mdns === 1 && verdictOf(r1.f.lite), `⑲ the default origin (no microphone): the browser offers ONE mDNS name — it plays in ${r1.ms} ms`, brief(r1));
   // the OLD road on the same origin (BASE_ICE: the agent's offer and pair handling as werift writes them) — a claim about the
   // code before this lane, never the product's road. B-0084: on the integration box (its agent offers 16 host addresses) it
   // never played within the 20 s bound — 24 tries in the twelve heavy fail-logs on record, each ending at the bound to the
@@ -1374,7 +1374,7 @@ console.log('⑲ THE MICROPHONE ALLOWED (lane werift-lite-multihomed): the brows
   // play, and the agent offers several (`remotes`: the offer's own host addresses). A road that did not play is watched 20 s
   // more (`late`: the ms it played at, or false) — the fact that tells a short bound from a road that never plays here
   const several = !!(r0.f && r0.f.remotes >= 2 && r0.f.mdns === 1 && !r0.f.lite);
-  if (r0.up || !several) ok(r0.up && r0.f && r0.f.mdns === 1 && !r0.f.lite, `⑲ …and in ${r0.ms} ms with the agent as werift alone: the mDNS road as before this lane`, brief(r0));
+  if (r0.up || !several) ok(gateOf(r0.up) && gateOf(r0.f) && r0.f.mdns === 1 && !r0.f.lite, `⑲ …and in ${r0.ms} ms with the agent as werift alone: the mDNS road as before this lane`, brief(r0));
   else console.log(`    (⑲ the old road NOT JUDGED on this computer (B-0084): with the agent as werift alone it did not play within ${r0.ms} ms (${r0.late ? `it played at ${r0.late} ms — the bound is short` : 'nor in 20 s more'}); the agent's offer holds ${r0.f.remotes} host addresses — ${JSON.stringify(brief(r0))})`);
   const moves0 = (agentLogText().match(/the browser moved its pair: [^\n]*/g) || []).length;
   const g = await browserCdp('Browser.grantPermissions', { origin: ORIGIN, permissions: ['audioCapture'] }); // a person who pressed 「麦克风」 once
@@ -1392,8 +1392,8 @@ console.log('⑲ THE MICROPHONE ALLOWED (lane werift-lite-multihomed): the brows
   const moves = (agentLogText().match(/the browser moved its pair: [^\n]*/g) || []).slice(moves0);
   const n = f2 ? f2.hosts.length : 0;
   console.log(`    (the browser offered ${n} host address${n === 1 ? '' : 'es'} + ${f2 ? f2.mdns : 0} mDNS name${f2 && f2.mdns === 1 ? '' : 's'}; it selected ${f2 ? f2.changes : '?'} pair${f2 && f2.changes === 1 ? '' : 's'} in turn; the agent followed ${moves.length}×${moves.length ? ': ' + moves.join(' · ') : ''})`);
-  ok(!g.error && up && f2 && n >= 1 && f2.mdns === 0 && f2.lite && f2.dtls === 'connected', `⑲ the microphone allowed for this origin: the browser offers every adapter (${n} host address${n === 1 ? '' : 'es'}, no mDNS name) — and the stream PLAYS (${ms} ms); the browser's own copy of the offer says a=ice-lite at the SESSION level`, { g: g.error, up, f2 });
-  ok(f2 && f2.sel && total > 0 && onSel >= 0.95 * total, `⑲ THE BROWSER'S CHOICE: the picture arrives on the pair the browser selected (${onSel} of ${total} bytes in 1.5 s)`, { grew, sel: f2 && f2.sel, moves });
+  ok(!g.error && gateOf(up) && gateOf(f2) && n >= 1 && f2.mdns === 0 && gateOf(f2.lite) && f2.dtls === 'connected', `⑲ the microphone allowed for this origin: the browser offers every adapter (${n} host address${n === 1 ? '' : 'es'}, no mDNS name) — and the stream PLAYS (${ms} ms); the browser's own copy of the offer says a=ice-lite at the SESSION level`, { g: g.error, up, f2 });
+  ok(gateOf(f2) && gateOf(f2.sel) && total > 0 && onSel >= 0.95 * total, `⑲ THE BROWSER'S CHOICE: the picture arrives on the pair the browser selected (${onSel} of ${total} bytes in 1.5 s)`, { grew, sel: f2 && f2.sel, moves });
   await p.close();
   // RED CONTROL: the agent as werift alone makes it — the same origin, the microphone still allowed
   fs.writeFileSync(BASE_ICE, '1');
@@ -1402,7 +1402,7 @@ console.log('⑲ THE MICROPHONE ALLOWED (lane werift-lite-multihomed): the brows
   const plays = await q.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2; })()`, 8000);
   const c = await q.ev(ICE_FACTS);
   const cn = c ? c.hosts.length : 0;
-  if (cn >= 2) ok(!plays && c && !c.lite && c.dtls !== 'connected', `⑲ RED CONTROL — the offer as werift writes it (a=ice-lite inside the media sections only: the browser's copy has none) and its first nomination kept: with ${cn} addresses offered the stream stays BLACK for 8 s (DTLS ${c && c.dtls}) — every new stream, before this lane`, { plays, c });
+  if (cn >= 2) ok(!plays && gateOf(c) && !c.lite && c.dtls !== 'connected', `⑲ RED CONTROL — the offer as werift writes it (a=ice-lite inside the media sections only: the browser's copy has none) and its first nomination kept: with ${cn} addresses offered the stream stays BLACK for 8 s (DTLS ${c && c.dtls}) — every new stream, before this lane`, { plays, c });
   else console.log(`    (⑲ RED CONTROL not judged: this computer's browser offers ${cn} address — the black stream needs two; the stream ${plays ? 'played' : 'did not play'})`);
   await q.close();
   fs.rmSync(BASE_ICE, { force: true });
@@ -1420,8 +1420,8 @@ console.log('⑲ NEVER SILENT before a picture (lane werift-lite-multihomed): IC
   const said = await a.until(`/^串流中断：没能及时连上——正在重新连接…$/.test(${NOTE})`, 25000);
   const ms = Date.now() - t0;
   const sa = await stripText(a), sb = await stripText(b), nb = await b.ev(NOTE);
-  ok(said && ms >= 14000 && /连接中/.test(sa.chip || '') && !(await a.ev(`!!document.querySelector('${WIN} .stream-video') && document.querySelector('${WIN} .stream-video').currentTime > 0`)), `⑲ an agent that answers no check: at the connect budget (${ms} ms) the strip says 「串流中断：没能及时连上——正在重新连接…」 (leg ⑥'s words; the view asks an ICE restart), still connecting, no picture`, { said, ms, sa });
-  ok(!/没能及时连上|正在重新连接/.test(nb || '') && /连接中/.test(sb.chip || ''), '⑲ RED CONTROL: the window before this lane says only 「串流 · 连接中…」 at that same moment — nothing about the connect budget (it spoke at the 45 s fallback; lane stream-udp-leg-fallback: a leg fallback\'s own one line may stand there)', { nb, sb });
+  ok(gateOf(said) && ms >= 14000 && gateOf(/连接中/.test(sa.chip || '')) && !(await a.ev(`!!document.querySelector('${WIN} .stream-video') && document.querySelector('${WIN} .stream-video').currentTime > 0`)), `⑲ an agent that answers no check: at the connect budget (${ms} ms) the strip says 「串流中断：没能及时连上——正在重新连接…」 (leg ⑥'s words; the view asks an ICE restart), still connecting, no picture`, { said, ms, sa });
+  ok(!/没能及时连上|正在重新连接/.test(nb || '') && verdictOf(/连接中/.test(sb.chip || '')), '⑲ RED CONTROL: the window before this lane says only 「串流 · 连接中…」 at that same moment — nothing about the connect budget (it spoke at the 45 s fallback; lane stream-udp-leg-fallback: a leg fallback\'s own one line may stand there)', { nb, sb });
   await a.close(); await b.close();
   fs.rmSync(DEAF_ICE, { force: true });
 }
@@ -1456,26 +1456,26 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   const p = await page(1280, 800, DESK, { pcs: true });
   await p.ev(`localStorage.removeItem('vibespace.streamSound'); true`);
   await p.ev(`window.__open(${JSON.stringify(M)})`);
-  ok(await playing(p), '⑳ the stream plays');
+  ok(verdictOf(await playing(p)), '⑳ the stream plays');
   await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); return !!b && !b.hidden; })()`, 8000);
   const r0 = runs(); await sleep(1500);
   const s0 = await soundState(p);
-  ok(s0 && s0.shown && s0.pressed === 'false' && s0.label.includes('声音') && !s0.tap && s0.muted === true && s0.audioTracks === 1 && s0.videoTracks === 1 && /不录制、不保存/.test(s0.title) && runs() === r0 && !(s0.page && s0.page.packets), '⑳ the stream carries the sound\'s track IN the picture\'s MediaStream (one <video>: 1 video + 1 audio track); 「声音」 shows OFF, its title says nothing is recorded or stored; the <video> muted; NOTHING runs on the machine (no loopback) and no packet comes', s0);
+  ok(gateOf(s0) && gateOf(s0.shown) && s0.pressed === 'false' && gateOf(s0.label.includes('声音')) && !s0.tap && s0.muted === true && s0.audioTracks === 1 && s0.videoTracks === 1 && gateOf(/不录制、不保存/.test(s0.title)) && runs() === r0 && !(s0.page && s0.page.packets), '⑳ the stream carries the sound\'s track IN the picture\'s MediaStream (one <video>: 1 video + 1 audio track); 「声音」 shows OFF, its title says nothing is recorded or stored; the <video> muted; NOTHING runs on the machine (no loopback) and no packet comes', s0);
   await p.shot('sound-off.png', `${WIN} .desktop-strip`);
   await pressAt(p, SND_BTN);
   const on = await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return b.getAttribute('aria-pressed') === 'true' && b.classList.contains('is-on') && v && v.muted === false; })()`, 10000);
   const lb = MIC.loopbacks()[r0] || {};
-  ok(on && runs() === r0 + 1 && JSON.stringify(lb.argv) === '["loopback"]', '⑳ the press ⇒ the <video> unmuted IN that click + ONE loopback on the machine (its argv the verb alone)', { on, lb });
+  ok(gateOf(on) && runs() === r0 + 1 && JSON.stringify(lb.argv) === '["loopback"]', '⑳ the press ⇒ the <video> unmuted IN that click + ONE loopback on the machine (its argv the verb alone)', { on, lb });
   const heard = await p.until(`(async () => { const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const a = w && w._streamView.stats() && w._streamView.stats().audio; return !!a && a.packets > 60 && a.level > 0.02; })()`, 10000);
   const s1 = await soundState(p);
-  ok(heard && s1.page.kbps > 20, `⑳ Chrome receives the machine's Opus and HEARS it: ${s1.page && s1.page.packets} packets, audio level ${s1.page && s1.page.level} (the −20 dBFS tone), ${s1.page && s1.page.kbps} kbps`, s1.page);
+  ok(gateOf(heard) && s1.page.kbps > 20, `⑳ Chrome receives the machine's Opus and HEARS it: ${s1.page && s1.page.packets} packets, audio level ${s1.page && s1.page.level} (the −20 dBFS tone), ${s1.page && s1.page.kbps} kbps`, s1.page);
   const sr = await p.until(`(async () => { const pc = (window.__pcs || []).slice(-1)[0]; if (!pc) return false; const r = await pc.getStats(); let a = 0, v = 0; r.forEach((x) => { if (x.type === 'remote-outbound-rtp') { if (x.kind === 'audio') a++; else if (x.kind === 'video') v++; } }); return a > 0 && v > 0; })()`, 8000);
-  ok(sr && s1.dirs && s1.dirs.offer === 'sendrecv', '⑳ Chrome holds the agent\'s RTCP sender reports for BOTH tracks (remote-outbound-rtp audio + video) — the lip-sync of one MediaStream rides them', s1.rob);
+  ok(gateOf(sr) && gateOf(s1.dirs) && s1.dirs.offer === 'sendrecv', '⑳ Chrome holds the agent\'s RTCP sender reports for BOTH tracks (remote-outbound-rtp audio + video) — the lip-sync of one MediaStream rides them', s1.rob);
   const rate = await p.until(`(() => { const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const a = w && w._streamView.agent(); return !!a && a.bweKbps != null && a.audio && a.audio.videoKbps != null; })()`, 12000);
   const ag = (await soundState(p)).agent;
   const want = ag && ag.bwe != null ? STM.videoKbpsOf({ kbps: ag.bwe, maxKbps: STM.STREAM_LIMITS.maxKbpsDefault, audio: true, audioKbps: 80 }) : null;
-  ok(rate && ag.audio.videoKbps === want && ag.audio.videoKbps <= ag.bwe && (ag.bwe - 80 < STM.STREAM_LIMITS.maxKbpsMin || ag.audio.videoKbps === Math.min(STM.STREAM_LIMITS.maxKbpsDefault, ag.bwe) - 80), `⑳ THE RATE: the agent tells the picture its estimate less the sound's 80 kbps — never more than the estimate, never under the floor because of the sound (estimate ${ag && ag.bwe} ⇒ ${ag && ag.audio && ag.audio.videoKbps})`, ag);
-  ok(s1.mem === '{"win-a":true}' && s1.agent && s1.agent.audio && s1.agent.audio.state === 'live' && s1.agent.audio.road === 'loopback', '⑳ ON is remembered for THIS machine; the machine\'s numbers say live on the loopback road', { mem: s1.mem, audio: s1.agent && s1.agent.audio });
+  ok(gateOf(rate) && ag.audio.videoKbps === want && ag.audio.videoKbps <= ag.bwe && (ag.bwe - 80 < STM.STREAM_LIMITS.maxKbpsMin || ag.audio.videoKbps === Math.min(STM.STREAM_LIMITS.maxKbpsDefault, ag.bwe) - 80), `⑳ THE RATE: the agent tells the picture its estimate less the sound's 80 kbps — never more than the estimate, never under the floor because of the sound (estimate ${ag && ag.bwe} ⇒ ${ag && ag.audio && ag.audio.videoKbps})`, ag);
+  ok(s1.mem === '{"win-a":true}' && gateOf(s1.agent) && gateOf(s1.agent.audio) && s1.agent.audio.state === 'live' && s1.agent.audio.road === 'loopback', '⑳ ON is remembered for THIS machine; the machine\'s numbers say live on the loopback road', { mem: s1.mem, audio: s1.agent && s1.agent.audio });
   await p.shot('sound-on.png', `${WIN} .desktop-strip`);
   await pressAt(p, SND_BTN);
   const offed = await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return b.getAttribute('aria-pressed') === 'false' && v.muted === true; })()`, 6000);
@@ -1483,7 +1483,7 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   const tail = await tailOf(p), atOff = await machineSent(p, { off: true });
   await sleep(1500);
   const pk2 = await audioRx(p), after = await machineSent(p, { later: true });
-  ok(offed && ended && tail.quiet && pk2 && pk2.n === tail.n && atOff && after && after.sent === atOff.sent && pk2.n <= after.sent && (await soundState(p)).mem === '{}', `⑳ the second press ⇒ muted, the machine's capture ENDED (its helper's stdin closed) and it sent NOTHING after (its count stays ${after && after.sent}); the packets already on the wire landed (quiet in ${tail.ms} ms), then NONE for 1.5 s (${pk2 && tail.n != null ? pk2.n - tail.n : '?'}); remembered OFF`, { tail, pk2, atOff, after });
+  ok(gateOf(offed) && gateOf(ended) && gateOf(tail.quiet) && gateOf(pk2) && pk2.n === tail.n && gateOf(atOff) && gateOf(after) && after.sent === atOff.sent && pk2.n <= after.sent && (await soundState(p)).mem === '{}', `⑳ the second press ⇒ muted, the machine's capture ENDED (its helper's stdin closed) and it sent NOTHING after (its count stays ${after && after.sent}); the packets already on the wire landed (quiet in ${tail.ms} ms), then NONE for 1.5 s (${pk2 && tail.n != null ? pk2.n - tail.n : '?'}); remembered OFF`, { tail, pk2, atOff, after });
   // RED CONTROL: an OFF that never reaches the machine (the page mutes, its `stream-audio off` is not sent) — the machine keeps
   // sending: Chrome's packets never go quiet and the machine's count keeps rising — the row above catches it
   await pressAt(p, SND_BTN);
@@ -1493,7 +1493,7 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   await pressAt(p, SND_BTN);
   await p.until(`document.querySelector('${SND_BTN}').getAttribute('aria-pressed') === 'false'`, 6000);
   const c0 = await machineSent(p), ct = await tailOf(p), c1 = await machineSent(p, { later: true });
-  ok(back && !ct.quiet && c0 && c1 && c1.sent > c0.sent && !MIC.loopbackEnded(r0 + 2), `⑳ RED CONTROL: an OFF that never reaches the machine — Chrome's packets never go quiet (${ct.ms} ms) and the machine's count keeps rising (${c0 && c0.sent} → ${c1 && c1.sent}): the row above catches a sender that keeps sending`, { back, ct, c0, c1 });
+  ok(gateOf(back) && !ct.quiet && gateOf(c0) && gateOf(c1) && c1.sent > c0.sent && !MIC.loopbackEnded(r0 + 2), `⑳ RED CONTROL: an OFF that never reaches the machine — Chrome's packets never go quiet (${ct.ms} ms) and the machine's count keeps rising (${c0 && c0.sent} → ${c1 && c1.sent}): the row above catches a sender that keeps sending`, { back, ct, c0, c1 });
   await p.ev(`(() => { const v = [...window.__app.wm.windows.values()].find((x) => x._streamView)._streamView; v.setSound = v.__setSound; delete v.__setSound; return v.setSound(false).then(() => true); })()`); // the shipped stop: the control's capture ends
   await nodeUntil(() => MIC.loopbackEnded(r0 + 2), 5000);
   // ON is remembered per machine: a NEW window of the machine (this page had the person's clicks) starts with its sound ON
@@ -1504,7 +1504,7 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   await playing(p);
   const again = await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return !!b && b.getAttribute('aria-pressed') === 'true' && v && v.muted === false; })()`, 10000);
   const flowing = await p.until(`(() => { const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const a = w && w._streamView.stats() && w._streamView.stats().audio; return !!a && a.packets > 20; })()`, 10000);
-  ok(again && await nodeUntil(() => runs() === r1 + 1, 5000) && flowing, '⑳ remembered per machine: a NEW window of the same machine starts with its sound ON (no press — the page has the person\'s gesture) and the sound arrives', { again, flowing, st: await soundState(p) });
+  ok(gateOf(again) && gateOf(await nodeUntil(() => runs() === r1 + 1, 5000)) && verdictOf(flowing), '⑳ remembered per machine: a NEW window of the same machine starts with its sound ON (no press — the page has the person\'s gesture) and the sound arrives', { again, flowing, st: await soundState(p) });
   // MICROPHONE + SOUND: ONE m-line, sendrecv — both roads live. Each step waits for ITS effect (bounded 15 s) and a red names the
   // step (lane gate-flakes-341: the .341 chain red here once — «voice: false», no render in 10 s, the step unknown — while every
   // measured run, alone or on two starved CPUs, had the render 50–170 ms after the press)
@@ -1521,7 +1521,7 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   const keeps = await nodeUntil(async () => (((await audioRx(p)) || {}).n || 0) > pkA + 30, 10000); // the machine's sound keeps arriving
   const s2 = await soundState(p), pkB = ((await audioRx(p)) || {}).n || 0;
   const step = granted && granted.error ? `the permission grant failed (${JSON.stringify(granted.error).slice(0, 120)})` : !both ? 'the toggle never went live (the browser\'s microphone)' : !sent ? 'Chrome sent no voice' : !got ? 'the machine received no voice' : !voice ? 'no render started' : !keeps ? 'the sound stopped arriving' : null;
-  ok(granted && !granted.error && both && sent && got && voice && keeps && s2.dirs && s2.dirs.offer === 'sendrecv' && s2.dirs.answer === 'sendrecv' && s2.pressed === 'true', `⑳ 「麦克风」 + 「声音」 together: ONE audio m-line, sendrecv both ways — the viewer's voice reaches the machine (a render started) while the machine's sound keeps arriving${step ? ` — STUCK AT: ${step}` : ''}`, { dirs: s2.dirs, both, sent, got, voice, keeps, packets: [pkA, pkB], mic: await p.ev(MIC_OF), btn: await p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-mic'); return b ? { cls: b.className, pressed: b.getAttribute('aria-pressed'), title: b.title } : null; })()`) });
+  ok(gateOf(granted) && !granted.error && gateOf(both) && gateOf(sent) && gateOf(got) && gateOf(voice) && gateOf(keeps) && gateOf(s2.dirs) && s2.dirs.offer === 'sendrecv' && s2.dirs.answer === 'sendrecv' && s2.pressed === 'true', `⑳ 「麦克风」 + 「声音」 together: ONE audio m-line, sendrecv both ways — the viewer's voice reaches the machine (a render started) while the machine's sound keeps arriving${step ? ` — STUCK AT: ${step}` : ''}`, { dirs: s2.dirs, both, sent, got, voice, keeps, packets: [pkA, pkB], mic: await p.ev(MIC_OF), btn: await p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-mic'); return b ? { cls: b.className, pressed: b.getAttribute('aria-pressed'), title: b.title } : null; })()`) });
   await pressAt(p, `${WIN} .desktop-strip-mic`);
   await p.cdp('Browser.resetPermissions', {});
   await p.close();
@@ -1536,28 +1536,28 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
     return { q, up, st: await soundState(q), started: runs() - rr, rr };
   };
   const R = await restoredCase('/');
-  ok(R.up && R.st.mem === '{"win-a":true}' && R.st.tap && R.st.tapText === '点一下开声音' && R.st.pressed === 'false' && R.st.muted === true && R.started === 0, '⑳ a RESTORED window of a machine whose sound is remembered ON: 「点一下开声音」, the <video> muted, NOTHING captured on the machine', { st: R.st, started: R.started });
+  ok(gateOf(R.up) && R.st.mem === '{"win-a":true}' && gateOf(R.st.tap) && R.st.tapText === '点一下开声音' && R.st.pressed === 'false' && R.st.muted === true && R.started === 0, '⑳ a RESTORED window of a machine whose sound is remembered ON: 「点一下开声音」, the <video> muted, NOTHING captured on the machine', { st: R.st, started: R.started });
   await R.q.shot('sound-tap.png', `${WIN} .desktop-strip`);
   const rr2 = runs();
   await pressAt(R.q, TAP);
   const tapped = await R.q.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); const t = document.querySelector('${TAP}'); return b.getAttribute('aria-pressed') === 'true' && v.muted === false && t.hidden; })()`, 8000);
-  ok(tapped && await nodeUntil(() => runs() === rr2 + 1, 5000), '⑳ a tap on 「点一下开声音」 ⇒ on: unmuted, ONE loopback on the machine');
+  ok(gateOf(tapped) && verdictOf(await nodeUntil(() => runs() === rr2 + 1, 5000)), '⑳ a tap on 「点一下开声音」 ⇒ on: unmuted, ONE loopback on the machine');
   await R.q.close();
   const B = await restoredCase('/soundrestore');
   if (B.started === 0 && await nodeUntil(() => runs() - B.rr === 1, 10000)) B.started = 1; // the mutant's own start, late under load (lane gate-flakes-341)
-  ok(B.up && B.started === 1 && B.st.pressed === 'true' && B.st.muted === false, '⑳ RED CONTROL: a toggle that ignores `restored` unmutes the restored window and starts the machine\'s capture BY ITSELF — the row above catches it', { st: B.st, started: B.started });
+  ok(gateOf(B.up) && B.started === 1 && B.st.pressed === 'true' && B.st.muted === false, '⑳ RED CONTROL: a toggle that ignores `restored` unmutes the restored window and starts the machine\'s capture BY ITSELF — the row above catches it', { st: B.st, started: B.started });
   await B.q.close();
   // a PHONE: the same strip
   const ph = await page(375, 667, PHONE, { touch: true });
   await ph.ev(`localStorage.removeItem('vibespace.streamSound'); true`);
   await ph.ev(`window.__open(${JSON.stringify(M)})`);
-  ok(await playing(ph), '⑳ phone 375: it plays');
+  ok(verdictOf(await playing(ph)), '⑳ phone 375: it plays');
   await ph.until(`(() => { const b = document.querySelector('${SND_BTN}'); return !!b && !b.hidden; })()`, 8000);
   await ph.ev(`document.querySelector('${SND_BTN}').scrollIntoView({ inline: 'center', block: 'nearest' }); true`); await sleep(200);
   const pat = await ph.ev(`(() => { const b = document.querySelector('${SND_BTN}').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2), b.right <= innerWidth + 1 && b.left >= -1]; })()`);
   await ph.tap(pat[0], pat[1]);
   const phOn = await ph.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return b.getAttribute('aria-pressed') === 'true' && v.muted === false; })()`, 8000);
-  ok(pat[2] && phOn, '⑳ phone: 「声音」 is on the same strip (in view); a tap turns it on, unmuted', pat);
+  ok(gateOf(pat[2]) && verdictOf(phOn), '⑳ phone: 「声音」 is on the same strip (in view); a tap turns it on, unmuted', pat);
   await ph.shot('phone-sound.png', `${WIN} .desktop-strip`);
   await ph.ev(`localStorage.removeItem('vibespace.streamSound'); true`);
   await ph.close();
@@ -1580,13 +1580,13 @@ console.log('㉑ THE LOCK (lane mac-locked-capture): a Mac whose screen is locke
     await p.ev(`window.__locked = ${LOCK_SINCE}; true`);
     const said = await p.until(`${WORDS}.test(${SAY}) && /串流 · 锁屏中/.test(${CHIP}.textContent || '')`, at === '/' ? 8000 : 4000);
     const r1 = await p.ev(`({ say: ${SAY}, chip: ${CHIP}.textContent || '', title: ${CHIP}.title || '' })`);
-    if (at === '/prelock') { ok(up && !said && r1.say === '' && !/锁屏/.test(r1.chip), '㉑ RED CONTROL: the page without THE LOCK\'s door says nothing while the hub says paused (the base: 串流 · N ms · 0 fps over a black pane)', r1); await p.close(); continue; }
-    ok(up && said && r1.title.includes(r1.say), '㉑ paused {why: locked}: the pane says Mac 已锁屏（HH:MM 起）— 解锁后自动继续, the chip 串流 · 锁屏中 (its title the same words) — never a spinner\'s 连接中…', r1);
+    if (at === '/prelock') { ok(gateOf(up) && !said && r1.say === '' && !/锁屏/.test(r1.chip), '㉑ RED CONTROL: the page without THE LOCK\'s door says nothing while the hub says paused (the base: 串流 · N ms · 0 fps over a black pane)', r1); await p.close(); continue; }
+    ok(gateOf(up) && gateOf(said) && verdictOf(r1.title.includes(r1.say)), '㉑ paused {why: locked}: the pane says Mac 已锁屏（HH:MM 起）— 解锁后自动继续, the chip 串流 · 锁屏中 (its title the same words) — never a spinner\'s 连接中…', r1);
     await p.shot('locked.png', WIN);
     await p.ev('window.__locked = 0; true');
     const gone = await p.until(`${SAY} === '' && /^串流 · \\d+ ms · \\d+ fps/.test(${CHIP}.textContent || '')`, 8000);
     const b1 = await p.ev('window.__band()'); await sleep(600); const b2 = await p.ev('window.__band()');
-    ok(gone && b1 !== null && b2 !== null && b2 !== b1, '㉑ the unlock (paused null): the words go BY THEMSELVES and the picture plays on in the same window — no click', { gone, b1, b2 });
+    ok(gateOf(gone) && b1 !== null && b2 !== null && b2 !== b1, '㉑ the unlock (paused null): the words go BY THEMSELVES and the picture plays on in the same window — no click', { gone, b1, b2 });
     await p.close();
   }
   // a PHONE (390 px, recovery .399 — the picture 主开发 reads): the same window, the same words
@@ -1598,11 +1598,11 @@ console.log('㉑ THE LOCK (lane mac-locked-capture): a Mac whose screen is locke
     await ph.ev(`window.__locked = ${LOCK_SINCE}; true`);
     const saidP = await ph.until(`${WORDS}.test(${SAY})`, 8000);
     await sleep(300); await ph.shot('locked-phone.png', WIN);
-    ok(upP && saidP, '㉑ phone 390: the locked Mac is said in the same words in the phone\'s window', { say: await ph.ev(SAY) });
+    ok(gateOf(upP) && verdictOf(saidP), '㉑ phone 390: the locked Mac is said in the same words in the phone\'s window', { say: await ph.ev(SAY) });
     await ph.ev('window.__locked = 0; true');
     await ph.close();
   }
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

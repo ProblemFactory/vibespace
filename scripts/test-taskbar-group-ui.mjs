@@ -95,7 +95,7 @@ const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '
 const SHOTS = scratch('taskbar-group-shots'); // kept for the human look, swept by the gate's reaper
 fs.mkdirSync(SHOTS, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // `--only l|o [--trials N] [--throttle R] [--trace]` = leg (l) or (o) alone, N times, the page's CPU slowed R× through
 // CDP (Emulation.setCPUThrottlingRate) — the construction a loaded runner is; `--trace` dumps the page's boundary events per failed (l) trial;
@@ -439,16 +439,16 @@ try {
     throw Object.assign(new Error('only'), { only: true });
   }
   const env = await evalJs(`({ fine: matchMedia('(any-pointer: fine)').matches, touch: app.isTouch, mobile: app.isMobile, items: [...document.querySelectorAll('#taskbar-items .taskbar-item')].map((e) => ({ id: e.dataset.winId, group: e.classList.contains('taskbar-group'), sub: e.querySelector('.taskbar-subtitle')?.textContent, role: e.getAttribute('role'), tab: e.tabIndex, label: e.getAttribute('aria-label'), title: e.title })) })`);
-  check(`the desk: a real mouse, not touch, desktop width; one GROUPED button + one single (${JSON.stringify(env.items.map((i) => (i.group ? 'G' : 'S') + ':' + i.sub))})`, env.fine && !env.touch && !env.mobile && env.items.length === 2 && env.items.filter((i) => i.group).length === 1, env);
+  check(`the desk: a real mouse, not touch, desktop width; one GROUPED button + one single (${JSON.stringify(env.items.map((i) => (i.group ? 'G' : 'S') + ':' + i.sub))})`, gateOf(env.fine) && !env.touch && !env.mobile && env.items.length === 2 && env.items.filter((i) => i.group).length === 1, env);
   const gi = env.items.find((i) => i.group), si = env.items.find((i) => !i.group);
-  check('the grouped button is a focusable button with a name and no native tooltip over the chooser', gi.role === 'button' && gi.tab === 0 && /2 windows grouped/.test(gi.label || '') && !gi.title, gi);
+  check('the grouped button is a focusable button with a name and no native tooltip over the chooser', gi.role === 'button' && gi.tab === 0 && gateOf(/2 windows grouped/.test(gi.label || '')) && !gi.title, gi);
   check('the single button is untouched (not made focusable, keeps its tooltip)', si.role === null && si.tab === -1 && !!si.title, si);
 
   // ══ (a) ══
   console.log('(a) click, group behind ⇒ activate, no chooser');
   const a = await legA();
   check(`before: C is focused, the group behind (active ${a.before.active})`, a.before.active === ids.C && !a.before.topIsA);
-  check(`the click ACTIVATES: the group's active tab (B) is focused, its host raised above C, B still on show (active ${a.after.active}, chain.active ${a.after.chainActive})`, a.after.active === ids.B && a.after.topIsA && a.after.chainActive === 1 && a.after.bShown && !a.after.aShown, a.after);
+  check(`the click ACTIVATES: the group's active tab (B) is focused, its host raised above C, B still on show (active ${a.after.active}, chain.active ${a.after.chainActive})`, a.after.active === ids.B && gateOf(a.after.topIsA) && a.after.chainActive === 1 && gateOf(a.after.bShown) && !a.after.aShown, a.after);
   check('…and NO chooser — not at the click, not after the pointer rested 500 ms on the button', !a.after.chooser && !a.rested.chooser && a.opens === 0, { after: a.after.chooser, rested: a.rested.chooser, opens: a.opens });
   await shot('a-activated.png');
 
@@ -457,7 +457,7 @@ try {
   const g = await rectOf(G);
   await click(g);
   const b1 = await facts();
-  check(`in front, the click is the CHOOSER (pinned: mode ${b1.chooser && b1.chooser.mode}), two rows, B marked active, aria-expanded`, !!b1.chooser && b1.chooser.mode === 'click' && b1.chooser.rows.length === 2 && b1.chooser.rows.find((r) => r.id === ids.B)?.active && b1.expanded === 'true', b1);
+  check(`in front, the click is the CHOOSER (pinned: mode ${b1.chooser && b1.chooser.mode}), two rows, B marked active, aria-expanded`, !!b1.chooser && b1.chooser.mode === 'click' && b1.chooser.rows.length === 2 && gateOf(b1.chooser.rows.find((r) => r.id === ids.B)?.active) && b1.expanded === 'true', b1);
   const pr = await until(`(() => { const p = document.querySelector('${CH}'); if (!p || getComputedStyle(p).visibility === 'hidden') return null; const r = p.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, vw: innerWidth, vh: innerHeight }; })()`);
   check(`the chooser sits ABOVE the button, on screen (pop b ${pr && Math.round(pr.b)} ≤ button t ${Math.round(g.t)})`, !!pr && pr.b <= g.t + 1 && pr.l >= 0 && pr.t >= 0 && pr.r <= pr.vw && Math.abs(pr.l - g.l) < 40, { pr, g });
   await shot('b-chooser-pinned.png');
@@ -466,7 +466,7 @@ try {
   const rowA = await rectOf(`${CH} .overlap-switcher-item[data-win-id="${ids.A}"]`);
   await click(rowA);
   const b2 = await facts();
-  check(`choosing A ⇒ A is the tab on show and focused, the chooser gone (active ${b2.active}, chain.active ${b2.chainActive})`, b2.active === ids.A && b2.chainActive === 0 && b2.aShown && !b2.bShown && !b2.chooser && b2.expanded === 'false', b2);
+  check(`choosing A ⇒ A is the tab on show and focused, the chooser gone (active ${b2.active}, chain.active ${b2.chainActive})`, b2.active === ids.A && b2.chainActive === 0 && gateOf(b2.aShown) && !b2.bShown && !b2.chooser && b2.expanded === 'false', b2);
   await shot('b-switched-to-A.png');
   // Esc and a click elsewhere
   await click(await rectOf(G)); await park();
@@ -517,7 +517,7 @@ try {
     crossed = await evalJs(`({ dwell: window.__tg.leaveG - window.__tg.enterG, opens: window.__tg.opens.length, onSingle: window.__tg.enterS > 0 })`);
     if (crossed.dwell < 280) break;
   }
-  check(`a cross-over (${Math.round(crossed.dwell)} ms on the grouped button, then the neighbour) never opens the chooser`, crossed.dwell < 280 && crossed.onSingle && crossed.opens === 0, crossed);
+  check(`a cross-over (${Math.round(crossed.dwell)} ms on the grouped button, then the neighbour) never opens the chooser`, crossed.dwell < 280 && gateOf(crossed.onSingle) && crossed.opens === 0, crossed);
   await evalJs(`document.getElementById('tg-probe-focus')?.remove(); true`);
 
   // ══ (d) ══
@@ -539,7 +539,7 @@ try {
   // 2.369.200 integration (lane drag-release × this leg): the title bar CAPTURES the pointer for the whole drag, so the button
   // under it sees no pointerenter at all — the drag's hover can no longer reach the hover rule (whose `dragging` row is PURE
   // test-taskbar-group's); what the person sees is the same: nothing opens, during the drag or after the release
-  check(`a real title-bar drag was in progress (${dragging}); under the title bar's pointer capture the button saw ${during.entered > enterBefore ? 'an enter' : 'no enter'}, and ~600 ms there opened NOTHING (opens ${during.opens} → ${dEnd.opens})`, dragging && during.opens === 0 && dEnd.opens === 0 && !dEnd.dragging, { dragging, enterBefore, during, dEnd });
+  check(`a real title-bar drag was in progress (${dragging}); under the title bar's pointer capture the button saw ${during.entered > enterBefore ? 'an enter' : 'no enter'}, and ~600 ms there opened NOTHING (opens ${during.opens} → ${dEnd.opens})`, gateOf(dragging) && during.opens === 0 && dEnd.opens === 0 && !dEnd.dragging, { dragging, enterBefore, during, dEnd });
 
   // ══ (g) ══ (before touch emulation changes the page's pointer facts)
   console.log('(g) the single button is unchanged');
@@ -552,7 +552,7 @@ try {
   check('click ⇒ C focused + raised', g1.active === ids.C && !g1.topIsA && !g1.chooser, g1);
   await click(sg);
   const g2 = await facts();
-  check('click again (focused) ⇒ C minimized — today\'s behaviour', g2.minC && !g2.chooser, g2);
+  check('click again (focused) ⇒ C minimized — today\'s behaviour', gateOf(g2.minC) && !g2.chooser, g2);
   await click(sg);
   const g3 = await facts();
   check('click again ⇒ C restored and focused', !g3.minC && g3.active === ids.C, g3);
@@ -566,7 +566,7 @@ try {
   await mouse('mouseReleased', gh.x, gh.y, { button: 'right', buttons: 0, clickCount: 1 });
   await sleep(400);
   const menu = await evalJs(`(() => { const m = document.querySelector('.taskbar-context-menu'); return m ? [...m.querySelectorAll('.taskbar-context-menu-item')].map((r) => r.textContent.trim()) : null; })()`);
-  check(`right-click opens the group's window menu (${menu && menu.slice(-2).join(' / ')}) and no chooser`, !!menu && menu.some((r) => /Close group/.test(r)) && !(await facts()).chooser, menu);
+  check(`right-click opens the group's window menu (${menu && menu.slice(-2).join(' / ')}) and no chooser`, !!menu && gateOf(menu.some((r) => /Close group/.test(r))) && !(await facts()).chooser, menu);
   await key('Escape'); await park();
 
   // ══ (f) ══
@@ -575,12 +575,12 @@ try {
   await evalJs(`document.querySelector('.taskbar-group').focus(); true`);
   await key('Enter');
   const f1 = await facts();
-  check(`Enter on the focused button while behind = activate (active ${f1.active}), no chooser`, [ids.A, ids.B].includes(f1.active) && f1.topIsA && !f1.chooser, f1);
+  check(`Enter on the focused button while behind = activate (active ${f1.active}), no chooser`, gateOf([ids.A, ids.B].includes(f1.active)) && gateOf(f1.topIsA) && !f1.chooser, f1);
   await evalJs(`document.querySelector('.taskbar-group').focus(); true`);
   await key('Enter');
   await sleep(120);
   const f2 = await evalJs(`({ chooser: !!document.querySelector('${CH}'), mode: document.querySelector('${CH}')?.dataset.mode, focusRow: document.activeElement?.getAttribute('role'), focusId: document.activeElement?.dataset?.winId, activeTab: app.wm.windows.get(window.__ids.A)._tabChain.tabs[app.wm.windows.get(window.__ids.A)._tabChain.active] })`);
-  check('Enter again (in front) = the chooser, focus on the ACTIVE row', f2.chooser && f2.focusRow === 'menuitem' && f2.focusId === f2.activeTab, f2);
+  check('Enter again (in front) = the chooser, focus on the ACTIVE row', gateOf(f2.chooser) && f2.focusRow === 'menuitem' && f2.focusId === f2.activeTab, f2);
   await key('ArrowDown');
   const other = await evalJs(`document.activeElement?.dataset?.winId`);
   check('ArrowDown moves to the other row', !!other && other !== f2.focusId, other);
@@ -592,10 +592,10 @@ try {
   await key('ArrowUp');
   await sleep(120);
   const f4 = await evalJs(`({ chooser: !!document.querySelector('${CH}'), focusRow: document.activeElement?.getAttribute('role'), active: app.wm.activeWindowId })`);
-  check('ArrowUp while behind = the chooser (nothing activated), focus in it', f4.chooser && f4.focusRow === 'menuitem' && f4.active === ids.C, f4);
+  check('ArrowUp while behind = the chooser (nothing activated), focus in it', gateOf(f4.chooser) && f4.focusRow === 'menuitem' && f4.active === ids.C, f4);
   await key('Escape');
   const f5 = await evalJs(`({ chooser: !!document.querySelector('${CH}'), back: document.activeElement?.classList.contains('taskbar-group') })`);
-  check('Esc closes it and hands the focus back to the button', !f5.chooser && f5.back, f5);
+  check('Esc closes it and hands the focus back to the button', !f5.chooser && verdictOf(f5.back), f5);
 
   // ══ lane K verify r1 (2026-09-25): (j) the hover chooser leaves no listener behind ══
   console.log('(j) 30 hover open/leave cycles leave no document listener behind');
@@ -605,41 +605,41 @@ try {
   // pointerdown (+ its pointerup / pointercancel) — those are the closer's listeners now; mousedown is counted too
   const PRESS_TYPES = ['pointerdown', 'pointerup', 'pointercancel', 'mousedown'];
   const grow = (a, b) => PRESS_TYPES.map((t) => `${t} ${a[t] || 0} → ${b[t] || 0}`).join(', ');
-  check(`no document press-listener growth with ZERO clicks (${grow(j.L0, j.L1)}) — each cycle's outside-press close is disposed by the chooser's one cleanup`, PRESS_TYPES.every((t) => (j.L1[t] || 0) === (j.L0[t] || 0)), j);
+  check(`no document press-listener growth with ZERO clicks (${grow(j.L0, j.L1)}) — each cycle's outside-press close is disposed by the chooser's one cleanup`, verdictOf(PRESS_TYPES.every((t) => (j.L1[t] || 0) === (j.L0[t] || 0))), j);
   check(`no document keydown listener growth (${j.L0.keydown || 0} → ${j.L1.keydown || 0})`, (j.L1.keydown || 0) === (j.L0.keydown || 0), j);
 
   // ══ the verify-r1 LOWS (2026-09-25): (k) re-anchor · (l) pen · (m) row menu · (n) restore ══
   console.log('(k) a taskbar rebuild under an open chooser re-anchors it to the live button');
   const k = await legReanchor();
-  check(`ArrowUp chooser, then a tab RENAMED under it (B-6cf9): the SAME button (${k.k0.same}, painted in place), the chooser stays (${k.k0.chooser}), its row says the new title («${k.k0.row}»)`, k.k0.same && k.k0.chooser && typeof k.k0.row === 'string' && k.k0.row.includes(k.k0.want), k.k0);
-  check(`…then a REBUILD (the strip's structure re-keyed — a tab added, closed or made active does it) makes a NEW button (${k.k1.rebuilt}): the chooser stays, the new button says aria-expanded="${k.k1.expanded}" and is the chooser's anchor (${k.k1.anchored})`, k.k1.rebuilt && k.k1.chooser && k.k1.expanded === 'true' && k.k1.anchored && k.k1.focusRow === 'menuitem', k.k1);
-  check(`Esc closes it and hands the focus to the LIVE button (focus ${k.k2.focus}), aria-expanded back to "false"`, !k.k2.chooser && k.k2.back && k.k2.expanded === 'false', k.k2);
-  check('a click on the REBUILT button keeps the SAME chooser (its mousedown is the button\'s own, never "a click elsewhere": no close + re-create)', k.k3a.chooser && k.k3.anchored && k.k4.same && k.k4.opens === 0 && k.k4.closes === 0 && k.k4.expanded === 'true', k);
+  check(`ArrowUp chooser, then a tab RENAMED under it (B-6cf9): the SAME button (${k.k0.same}, painted in place), the chooser stays (${k.k0.chooser}), its row says the new title («${k.k0.row}»)`, gateOf(k.k0.same) && gateOf(k.k0.chooser) && typeof k.k0.row === 'string' && verdictOf(k.k0.row.includes(k.k0.want)), k.k0);
+  check(`…then a REBUILD (the strip's structure re-keyed — a tab added, closed or made active does it) makes a NEW button (${k.k1.rebuilt}): the chooser stays, the new button says aria-expanded="${k.k1.expanded}" and is the chooser's anchor (${k.k1.anchored})`, gateOf(k.k1.rebuilt) && gateOf(k.k1.chooser) && k.k1.expanded === 'true' && gateOf(k.k1.anchored) && k.k1.focusRow === 'menuitem', k.k1);
+  check(`Esc closes it and hands the focus to the LIVE button (focus ${k.k2.focus}), aria-expanded back to "false"`, !k.k2.chooser && gateOf(k.k2.back) && k.k2.expanded === 'false', k.k2);
+  check('a click on the REBUILT button keeps the SAME chooser (its mousedown is the button\'s own, never "a click elsewhere": no close + re-create)', gateOf(k.k3a.chooser) && gateOf(k.k3.anchored) && gateOf(k.k4.same) && k.k4.opens === 0 && k.k4.closes === 0 && k.k4.expanded === 'true', k);
 
   console.log('(l) a pen hovers like a mouse — attributed to the pen\'s own enter');
   const l = await legPen();
   check(`a pen resting on the grouped button opens the HOVER chooser on its OWN enter, nothing activated (${l.v.why})`, l.v.verdict === 'opened' && l.rec.active === ids.C, penShape(l));
-  check('…and it closes when the pen leaves', l.closed, penShape(l));
-  check(`the race is IN the record: Chrome's hover recompute moved the MOUSE pointer onto the button after the open (${l.v.recompute.map((e) => `${e.type}#${e.id} +${Math.round(e.at - l.v.open.at)} ms`).join(', ') || 'none'})`, l.v.recompute.length > 0 && l.v.recompute.every((e) => e.type === 'mouse'), penShape(l));
+  check('…and it closes when the pen leaves', verdictOf(l.closed), penShape(l));
+  check(`the race is IN the record: Chrome's hover recompute moved the MOUSE pointer onto the button after the open (${l.v.recompute.map((e) => `${e.type}#${e.id} +${Math.round(e.at - l.v.open.at)} ms`).join(', ') || 'none'})`, l.v.recompute.length > 0 && verdictOf(l.v.recompute.every((e) => e.type === 'mouse')), penShape(l));
   check(`CONTROL (a patched copy of the judge, the pre-fix last-enter slot) reads the same record as NOT the pen's (${l.pre.verdict}: ${l.pre.why}) — the 2.369.183 red`, l.pre.verdict !== 'opened', penShape(l));
 
   console.log('(l2) the pen leg with the page\'s CPU slowed ×20 (a loaded runner)');
   await cdp('Emulation.setCPUThrottlingRate', { rate: 20 });
   const l2 = [];
   try { for (let i = 0; i < 3; i++) l2.push(await legPen({ openWithin: 4000 })); } finally { await cdp('Emulation.setCPUThrottlingRate', { rate: 1 }); }
-  check(`×20: 3 of 3 trials opened by the pen's own enter and closed on leaving (${l2.map((x) => `${x.v.verdict} ${Math.round(x.v.dwellMs || 0)} ms`).join(' / ')})`, l2.length === 3 && l2.every((x) => x.v.verdict === 'opened' && x.rec.active === ids.C && x.closed), l2.map(penShape));
-  check(`×20: the recompute is in every record and the pre-fix slot reads each as NOT the pen's (${l2.map((x) => x.pre.verdict).join(' / ')})`, l2.every((x) => x.v.recompute.length > 0 && x.pre.verdict !== 'opened'), l2.map(penShape));
+  check(`×20: 3 of 3 trials opened by the pen's own enter and closed on leaving (${l2.map((x) => `${x.v.verdict} ${Math.round(x.v.dwellMs || 0)} ms`).join(' / ')})`, l2.length === 3 && verdictOf(l2.every((x) => x.v.verdict === 'opened' && x.rec.active === ids.C && x.closed)), l2.map(penShape));
+  check(`×20: the recompute is in every record and the pre-fix slot reads each as NOT the pen's (${l2.map((x) => x.pre.verdict).join(' / ')})`, verdictOf(l2.every((x) => x.v.recompute.length > 0 && x.pre.verdict !== 'opened')), l2.map(penShape));
 
   console.log('(m) right-click on a chooser row = THAT tab\'s window menu, the chooser stays beneath');
   const m = await legRowMenu();
-  check(`right-click on row B opens the window menu on top (${m.m1.menu && m.m1.menu.slice(-1).join('')}), no native menu (defaultPrevented ${m.m1.prevented}), the chooser still open beneath it and PINNED past the leave grace (mode ${m.m1.mode})`, !!m.m1.menu && m.m1.menu.length > 0 && m.m1.onTop && m.m1.prevented && m.m1.chooser && m.m1.mode === 'click' && !m.m1.menu.some((r) => /Close group/.test(r)), m.m1);
-  check(`its "${m.closeRow && m.closeRow.text}" closes B — the tab right-clicked — and leaves A (the chooser goes with the group)`, !!m.closeRow && m.m2.a && !m.m2.b && !m.m2.chooser && !m.m2.menu && m.m2.groups === 0, m);
+  check(`right-click on row B opens the window menu on top (${m.m1.menu && m.m1.menu.slice(-1).join('')}), no native menu (defaultPrevented ${m.m1.prevented}), the chooser still open beneath it and PINNED past the leave grace (mode ${m.m1.mode})`, !!m.m1.menu && m.m1.menu.length > 0 && gateOf(m.m1.onTop) && gateOf(m.m1.prevented) && gateOf(m.m1.chooser) && m.m1.mode === 'click' && !m.m1.menu.some((r) => /Close group/.test(r)), m.m1);
+  check(`its "${m.closeRow && m.closeRow.text}" closes B — the tab right-clicked — and leaves A (the chooser goes with the group)`, !!m.closeRow && gateOf(m.m2.a) && !m.m2.b && !m.m2.chooser && !m.m2.menu && m.m2.groups === 0, m);
   ids = await evalJs(SETUP); await evalJs(RECORDER);
 
   console.log('(o) a rebuild under a RESTING pointer is not an arrival');
   const o = await legRebuild();
-  check(`after a CLICK, a rebuild (the strip's structure re-keyed) under the resting pointer made a new button (${o.clicked.rebuilt}) and Chrome re-targeted it (${o.clicked.retarget}): no hover chooser grew in two intent spans (opens ${JSON.stringify(o.clicked.opens)})`, o.clicked.rebuilt && !!o.clicked.retarget && o.clicked.opens.length === 0 && !o.clicked.chooser, o.clicked);
-  check(`a genuine arrival opens the hover chooser although the pointer left the button during the previous rebuild (the visit ended \'away\': ${o.escaped.pre.opened}); dismissed with Esc (${o.escaped.pre.gone}) it does not come back through a rebuild under the resting pointer (re-targeted ${o.escaped.retarget}, opens ${JSON.stringify(o.escaped.opens)})`, o.escaped.pre.opened && o.escaped.pre.gone && o.escaped.rebuilt && !!o.escaped.retarget && o.escaped.opens.length === 0 && !o.escaped.chooser, o.escaped);
+  check(`after a CLICK, a rebuild (the strip's structure re-keyed) under the resting pointer made a new button (${o.clicked.rebuilt}) and Chrome re-targeted it (${o.clicked.retarget}): no hover chooser grew in two intent spans (opens ${JSON.stringify(o.clicked.opens)})`, gateOf(o.clicked.rebuilt) && !!o.clicked.retarget && o.clicked.opens.length === 0 && !o.clicked.chooser, o.clicked);
+  check(`a genuine arrival opens the hover chooser although the pointer left the button during the previous rebuild (the visit ended \'away\': ${o.escaped.pre.opened}); dismissed with Esc (${o.escaped.pre.gone}) it does not come back through a rebuild under the resting pointer (re-targeted ${o.escaped.retarget}, opens ${JSON.stringify(o.escaped.opens)})`, gateOf(o.escaped.pre.opened) && gateOf(o.escaped.pre.gone) && gateOf(o.escaped.rebuilt) && !!o.escaped.retarget && o.escaped.opens.length === 0 && !o.escaped.chooser, o.escaped);
   ids = await evalJs(SETUP); await evalJs(RECORDER);
 
   console.log('(n) after a reload a restored tab group is ONE grouped button, with no input');
@@ -657,7 +657,7 @@ try {
   await tap(await rectOf(G));
   await sleep(400);
   const e1 = await facts();
-  check(`a tap while behind ACTIVATES (active ${e1.active}), no chooser even after 750 ms`, [ids.A, ids.B].includes(e1.active) && e1.topIsA && !e1.chooser && (await evalJs('window.__tg.opens.length')) === 0, e1);
+  check(`a tap while behind ACTIVATES (active ${e1.active}), no chooser even after 750 ms`, gateOf([ids.A, ids.B].includes(e1.active)) && gateOf(e1.topIsA) && !e1.chooser && (await evalJs('window.__tg.opens.length')) === 0, e1);
   await tap(await rectOf(G));
   const e2 = await facts();
   check('a second tap (in front) is the chooser — touch reaches the list', !!e2.chooser && e2.chooser.mode === 'click', e2);
@@ -689,7 +689,7 @@ try {
   const MOD = path.join(wt, 'src/lib/taskbar-group.js');
   const src = fs.readFileSync(MOD, 'utf8');
   const RULE = "return inFront ? 'chooser' : 'activate';";
-  check('the rule is spelled where the control patches it', src.includes(RULE));
+  check('the rule is spelled where the control patches it', verdictOf(src.includes(RULE)));
   fs.writeFileSync(MOD, src.replace(RULE, "return 'chooser';"));
   execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify', { cwd: wt, stdio: 'ignore' });
   await cdp('Page.navigate', { url: URL });
@@ -724,17 +724,17 @@ try {
   const cj = await legListeners(30);
   check(`CONTROL 2 (j): without the disposer 30 hover cycles grow the document's capture pointerdown (the outside-press closer since lane M) by 30 (${cj.L0.pointerdown || 0} → ${cj.L1.pointerdown || 0})`, cj.dom.opens >= 30 && (cj.L1.pointerdown || 0) - (cj.L0.pointerdown || 0) === 30, cj);
   const ck = await legReanchor();
-  check(`CONTROL 2 (k): without the re-anchor the rebuilt button reads aria-expanded="${ck.k1.expanded}" and Esc drops the focus (${ck.k2.focus})`, ck.k1.rebuilt && !ck.k1.anchored && ck.k1.expanded === 'false' && !ck.k2.back, ck);
+  check(`CONTROL 2 (k): without the re-anchor the rebuilt button reads aria-expanded="${ck.k1.expanded}" and Esc drops the focus (${ck.k2.focus})`, gateOf(ck.k1.rebuilt) && !ck.k1.anchored && ck.k1.expanded === 'false' && !ck.k2.back, ck);
   const cl = await legPen();
   check(`CONTROL 2 (l): a mouse-only hover gives the pen nothing (${cl.v.verdict}: ${cl.v.why})`, cl.v.verdict === 'no-open', penShape(cl));
   const cm = await legRowMenu();
   ids = await evalJs(SETUP); await evalJs(RECORDER);
   const co = await legRebuild();
-  check(`CONTROL 2 (o): with every pointerenter an arrival, the rebuild's re-targeting enter grows a hover chooser under the pointer that clicked (${JSON.stringify(co.clicked.opens)}) and brings back the one Esc dismissed (${JSON.stringify(co.escaped.opens)})`, co.clicked.retarget && co.clicked.opens.includes('hover') && co.escaped.opens.includes('hover'), co);
-  check(`CONTROL 2 (m): with no row handler a right-click opens no window menu (${JSON.stringify(cm.m1.menu)}, defaultPrevented ${cm.m1.prevented})`, cm.m1.row && !cm.m1.menu && !cm.m1.prevented, cm.m1);
+  check(`CONTROL 2 (o): with every pointerenter an arrival, the rebuild's re-targeting enter grows a hover chooser under the pointer that clicked (${JSON.stringify(co.clicked.opens)}) and brings back the one Esc dismissed (${JSON.stringify(co.escaped.opens)})`, gateOf(co.clicked.retarget) && gateOf(co.clicked.opens.includes('hover')) && verdictOf(co.escaped.opens.includes('hover')), co);
+  check(`CONTROL 2 (m): with no row handler a right-click opens no window menu (${JSON.stringify(cm.m1.menu)}, defaultPrevented ${cm.m1.prevented})`, gateOf(cm.m1.row) && !cm.m1.menu && !cm.m1.prevented, cm.m1);
 } catch (e) {
   if (!e.only) { failed++; console.error('  ✗ smoke crashed: ' + e.message); }
 }
 console.log(`screenshots: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed}; ${passed} passed)` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -27,7 +27,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { pathRe, cleanPath, CJK_PUNCT } = require(path.join(ROOT, 'src/path-linkify.js'));
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -81,7 +81,7 @@ eq(cleanPath('/home/u/项目'), '/home/u/项目', 'cleanPath never strips a CJK 
   ok(diff.length === 0, `r9: cleanPath (the backward walk) gives the old regex's verdict on every one of ${corpus.size} strings (${lits} string literals + tokens of the lane's suites, the rest a seeded random corpus)${diff.length ? ' — differ: ' + JSON.stringify(diff.slice(0, 5)) : ''}`);
   ok(!/\.replace\(TRAILING/.test(fs.readFileSync(path.join(ROOT, 'src/path-linkify.js'), 'utf8')) && !/const TRAIL_CH_RE = new RegExp/.test(fs.readFileSync(path.join(ROOT, 'src/lib/foryou-links.js'), 'utf8') + fs.readFileSync(path.join(ROOT, 'src/lib/chat-renderers.js'), 'utf8')), 'r9: ONE definition of the trailing set — path-linkify cleanPath walks it (no `[…]+$` replace), For-you and the chat import isTrailing (no copy of their own)');
 }
-ok(/\\u3000-\\u303F/.test(CJK_PUNCT) && /\\uFF01-\\uFF0F/.test(CJK_PUNCT), 'the class covers CJK symbols + fullwidth ASCII punctuation, and skips fullwidth digits/letters (FF10-FF19, FF21-FF3A, FF41-FF5A)');
+ok(gateOf(/\\u3000-\\u303F/.test(CJK_PUNCT)) && verdictOf(/\\uFF01-\\uFF0F/.test(CJK_PUNCT)), 'the class covers CJK symbols + fullwidth ASCII punctuation, and skips fullwidth digits/letters (FF10-FF19, FF21-FF3A, FF41-FF5A)');
 ok(!/\\uFF10|\\uFF21|\\uFF41/.test(CJK_PUNCT), '…the fullwidth digit/letter ranges are NOT in the class (a filename spelled with them stays linkable)');
 eq(links(pathRe(), '/home/u/ＡＢＣ１２.txt。'), ['/home/u/ＡＢＣ１２.txt'], 'a fullwidth-letter filename still links');
 
@@ -93,11 +93,11 @@ eq(pre, ['/home/u/w/SharedContext/designs/（浏览器'], 'the retired rule swal
 
 console.log('③ WIRING PIN: the renderer uses the shared definition and carries no local copy');
 const cr = fs.readFileSync(path.join(ROOT, 'src/lib/chat-renderers.js'), 'utf8');
-ok(/from '\.\.\/path-linkify\.js'/.test(cr), 'chat-renderers imports src/path-linkify.js');
-ok(/const pathRe = sharedPathRe\(\)/.test(cr) && /cleanPath\(p\) \{ return sharedCleanPath\(p\); \}/.test(cr), 'both the path regex and cleanPath delegate to it');
+ok(verdictOf(/from '\.\.\/path-linkify\.js'/.test(cr)), 'chat-renderers imports src/path-linkify.js');
+ok(gateOf(/const pathRe = sharedPathRe\(\)/.test(cr)) && verdictOf(/cleanPath\(p\) \{ return sharedCleanPath\(p\); \}/.test(cr)), 'both the path regex and cleanPath delegate to it');
 ok(!/\[\^\\0<>\?\\s!`&\*\(\)'":;\\\\\]/.test(cr), 'no inline copy of the old character class survives in the renderer');
-ok(/linkifyPathsTagSafe\(this\.linkifySchemeLinks\(this\.linkifyPagePaths\(this\.linkifyFileUrls\(this\.linkifyUrls\(text\)\)\), opts\)/.test(cr), 'ORDER pin: URLs, file: URLs, /p/<id> pages and (lane setting-doors pick 1) vibespace:// links (every target of the scheme) are linkified BEFORE paths (the path rule would match their path part); the scheme\'s pass is given the renderer\'s option');
-ok(/linkifyPagePaths\(text\) \{\n    return this\._linkifyBareText\(text,/.test(cr) && /linkifyFileUrls\(text\) \{\n    return this\._linkifyBareText\(text,/.test(cr) && /return this\._linkifyBareText\(html, \(txt\) => txt\.replace\(pathRe,/.test(cr),
+ok(verdictOf(/linkifyPathsTagSafe\(this\.linkifySchemeLinks\(this\.linkifyPagePaths\(this\.linkifyFileUrls\(this\.linkifyUrls\(text\)\)\), opts\)/.test(cr)), 'ORDER pin: URLs, file: URLs, /p/<id> pages and (lane setting-doors pick 1) vibespace:// links (every target of the scheme) are linkified BEFORE paths (the path rule would match their path part); the scheme\'s pass is given the renderer\'s option');
+ok(gateOf(/linkifyPagePaths\(text\) \{\n    return this\._linkifyBareText\(text,/.test(cr)) && gateOf(/linkifyFileUrls\(text\) \{\n    return this\._linkifyBareText\(text,/.test(cr)) && verdictOf(/return this\._linkifyBareText\(html, \(txt\) => txt\.replace\(pathRe,/.test(cr)),
   'SKIP pin (B-2dbc): the page, file: URL and path passes all run through _linkifyBareText, so none touches a tag or a link span an earlier pass made');
 
 console.log('④ THE REAL RENDERER (esbuild → node, DOM shimmed): no linkifier wraps text already inside a .chat-link (B-2dbc)');
@@ -187,7 +187,7 @@ let patched = 0;
 const preFix = await renderer((src) => { patched = src.split(SKIP).length - 1; return src.split(SKIP).join('((?!))|'); });
 ok(patched === 1, `the control's patch applied exactly once (${patched})`);
 const W = ENTRIES['assistant message'](preFix, userW);
-ok(/<span class="chat-link" data-href="http:\/\/test\/p\/pg5vex1gylcn"[^>]*><span class="chat-link chat-link-path" data-path="\/p\/pg5vex1gylcn"/.test(W), 'the defect reproduces: span.chat-link > span.chat-link.chat-link-path data-path="/p/pg5vex1gylcn" (what the click handler found)', W);
+ok(verdictOf(/<span class="chat-link" data-href="http:\/\/test\/p\/pg5vex1gylcn"[^>]*><span class="chat-link chat-link-path" data-path="\/p\/pg5vex1gylcn"/.test(W)), 'the defect reproduces: span.chat-link > span.chat-link.chat-link-path data-path="/p/pg5vex1gylcn" (what the click handler found)', W);
 const P0 = table(preFix);
 const redCells = P0.filter((x) => offenders(x.html));
 ok(redCells.length >= 9, `the census goes RED on it (${redCells.length} cells: page links, URLs in code / tool output)`);
@@ -255,9 +255,9 @@ const ABS = '/home/userW/x/out/report.md';
 reset();
 await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
 let T = toastOf(toasts()[0]);
-ok(toasts().length === 1 && /No such file on this machine: \/home\/userW\/x\/out\/report\.md — the agent may have written it elsewhere or removed it/.test(T?.body || ''), `a path that does not exist ⇒ ONE toast naming the FULL path and the machine (${T?.body})`);
+ok(toasts().length === 1 && verdictOf(/No such file on this machine: \/home\/userW\/x\/out\/report\.md — the agent may have written it elsewhere or removed it/.test(T?.body || '')), `a path that does not exist ⇒ ONE toast naming the FULL path and the machine (${T?.body})`);
 eq(T?.acts, ['Copy path', 'Search by name', 'Open the nearest folder'], '…with its three ways on');
-ok(/global-toast-warn/.test(T?.cls) && /global-toast-wide/.test(T?.cls), `…a warning, actions under the words (${T?.cls})`);
+ok(gateOf(/global-toast-warn/.test(T?.cls)) && verdictOf(/global-toast-wide/.test(T?.cls)), `…a warning, actions under the words (${T?.cls})`);
 eq(ROWS.map(({ op, kind, outcome, host, base, len }) => ({ op, kind, outcome, host, base, len })), [{ op: 'link-open', kind: 'path', outcome: 'not-found', host: null, base: 'report.md', len: ABS.length }], '…and ONE op-ring row: kind, outcome, host, the basename + the length');
 ok(typeof ROWS[0]?.t === 'number' && !leaks(ROWS, ABS).length, '…stamped, and no value in it carries the path');
 const acts = () => toasts()[0].children.filter((c) => c._c.has('global-toast-action'));
@@ -270,11 +270,11 @@ await acts()[2].onclick({ stopPropagation() {} }); for (let i = 0; i < 5; i++) a
 eq(opened, [['explorer', '/home/userW/x', null]], 'Open the nearest folder walks up (out/ is gone too) and opens the explorer at the first folder that exists');
 reset(); FS = {}; await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
 HITS = ['/w/proj/docs/report.md']; await acts()[1].onclick({ stopPropagation() {} }); for (let i = 0; i < 5; i++) await tick();
-ok(ASKED.some((u) => /\/api\/file\/locate\?name=report\.md&root=%2Fw%2Fproj&type=f/.test(u)), 'Search by name asks the bounded find for the basename under the session folder');
+ok(verdictOf(ASKED.some((u) => /\/api\/file\/locate\?name=report\.md&root=%2Fw%2Fproj&type=f/.test(u))), 'Search by name asks the bounded find for the basename under the session folder');
 eq(opened, [['file', '/w/proj/docs/report.md', undefined, undefined]], '…one hit opens it');
 reset(); await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
 HITS = []; await acts()[1].onclick({ stopPropagation() {} }); for (let i = 0; i < 5; i++) await tick();
-ok(/No file named report\.md under \/w\/proj/.test(toastOf(toasts()[0])?.body || ''), `…none is SAID (${toastOf(toasts()[0])?.body})`);
+ok(verdictOf(/No file named report\.md under \/w\/proj/.test(toastOf(toasts()[0])?.body || '')), `…none is SAID (${toastOf(toasts()[0])?.body})`);
 
 reset(); FS = { '/w/proj/docs': 'dir', '/w/proj/a.js': 'file' };
 await R._openLinkTarget(mkLink({ path: '/w/proj/docs' }), null, '/w/proj/docs');
@@ -286,32 +286,32 @@ ok(!toasts().length, '…and no toast');
 reset(); THROW = true;
 await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
 T = toastOf(toasts()[0]);
-ok(/Could not ask the server whether \/home\/userW\/x\/out\/report\.md exists on this machine/.test(T?.body || '') && /global-toast-error/.test(T?.cls), `a fetch that throws ⇒ the same toast in "could not ask the server" words (${T?.body})`);
+ok(gateOf(/Could not ask the server whether \/home\/userW\/x\/out\/report\.md exists on this machine/.test(T?.body || '')) && verdictOf(/global-toast-error/.test(T?.cls)), `a fetch that throws ⇒ the same toast in "could not ask the server" words (${T?.body})`);
 eq(ROWS.map((r) => r.outcome), ['error'], '…row outcome error');
 reset(); FS = { [ABS]: 'EACCES: permission denied, open' };
 await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
-ok(/Could not open \/home\/userW\/x\/out\/report\.md on this machine: EACCES: permission denied/.test(toastOf(toasts()[0])?.body || ''), "a refusal that is not ENOENT says the server's words, never \"no such file\"");
+ok(verdictOf(/Could not open \/home\/userW\/x\/out\/report\.md on this machine: EACCES: permission denied/.test(toastOf(toasts()[0])?.body || '')), "a refusal that is not ENOENT says the server's words, never \"no such file\"");
 // lane file-preview-mount (userW inc-mvq4hn9x): the mount guard's refusal arrives as a CODE — the toast says it in the
 // reader's words (fsErrorText: the storage by name, the release, the way on), never the `error` the hub keeps for agents
 reset(); FS = { [ABS]: { error: 'the hub’s English for agents', code: 'storage_sync_refused', params: { mount: 'NAS', release: '2.369.360' } } };
 await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
 T = toastOf(toasts()[0]);
-ok((T?.body || '').startsWith('Could not open /home/userW/x/out/report.md on this machine: this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there')
-  && !(T?.body || '').includes('the hub’s English') && /global-toast-error/.test(T?.cls), `a storage_sync_refused answer ⇒ the toast in the reader's words, never the raw text (${T?.body})`);
+ok(gateOf((T?.body || '').startsWith('Could not open /home/userW/x/out/report.md on this machine: this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there'))
+  && !(T?.body || '').includes('the hub’s English') && verdictOf(/global-toast-error/.test(T?.cls)), `a storage_sync_refused answer ⇒ the toast in the reader's words, never the raw text (${T?.body})`);
 
 reset(); FS = {}; CTX = { cwd: '/w/proj', host: 'h1' };
 await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
 T = toastOf(toasts()[0]);
-ok(/No such file on build-box: \/home\/userW\/x\/out\/report\.md/.test(T?.body || ''), `a remote session's link names ITS machine (${T?.body})`);
+ok(verdictOf(/No such file on build-box: \/home\/userW\/x\/out\/report\.md/.test(T?.body || '')), `a remote session's link names ITS machine (${T?.body})`);
 eq(T?.acts, ['Copy path', 'Open the nearest folder'], '…and offers no search (the remote door has no bounded find)');
 eq(ROWS.map((r) => r.host), ['h1'], '…its row carries the host');
-ok(ASKED.every((u) => /&host=h1/.test(u)), '…and it was looked for on that host');
+ok(verdictOf(ASKED.every((u) => /&host=h1/.test(u))), '…and it was looked for on that host');
 
 reset(); CTX = { cwd: '/w/proj', host: null }; FS = {};
 await R._openRelTarget(mkLink({ rel: 'docs/x.md' }), 'docs/x.md');
 T = toastOf(toasts()[0]);
-ok(/No such file on this machine: \/w\/proj\/docs\/x\.md/.test(T?.body || ''), `a relative path with no candidate ⇒ the same toast, naming the first place it looked (${T?.body})`);
-ok(ASKED.some((u) => /\/api\/file\/locate\?name=x\.md&root=%2Fw%2Fproj&type=f/.test(u)), '…AFTER the bounded find under the session folder was asked (it threw on a stale name before)');
+ok(verdictOf(/No such file on this machine: \/w\/proj\/docs\/x\.md/.test(T?.body || '')), `a relative path with no candidate ⇒ the same toast, naming the first place it looked (${T?.body})`);
+ok(verdictOf(ASKED.some((u) => /\/api\/file\/locate\?name=x\.md&root=%2Fw%2Fproj&type=f/.test(u))), '…AFTER the bounded find under the session folder was asked (it threw on a stale name before)');
 eq(ROWS.map((r) => `${r.kind}:${r.outcome}:${r.base}:${r.len}`), ['rel:not-found:x.md:9'], '…row kind rel, outcome not-found');
 reset(); HITS = ['/w/proj/sub/docs/x.md'];
 await R._openRelTarget(mkLink({ rel: 'docs/x.md' }), 'docs/x.md');
@@ -359,7 +359,7 @@ globalThis.document = saved.document; globalThis.fetch = saved.fetch; globalThis
 
 console.log('⑧ A PATH IS A PATH WHATEVER SYNTAX THE HARNESS WRITES IT IN — a file: URL, an anchor, a first letter of any script (lane agy-links-file-url)');
 const PL = require(path.join(ROOT, 'src/path-linkify.js'));
-ok(fs.readFileSync(path.join(ROOT, 'node_modules/dompurify/dist/purify.es.mjs'), 'utf8').includes(`IS_ALLOWED_URI = seal(/${URI_RULE}/i `), "the harness's sanitizer stub keeps an href only where DOMPurify's own URI rule does (the rule read from node_modules/dompurify — a file: href is dropped there)");
+ok(verdictOf(fs.readFileSync(path.join(ROOT, 'node_modules/dompurify/dist/purify.es.mjs'), 'utf8').includes(`IS_ALLOWED_URI = seal(/${URI_RULE}/i `)), "the harness's sanitizer stub keeps an href only where DOMPurify's own URI rule does (the rule read from node_modules/dompurify — a file: href is dropped there)");
 const FURL = [
   ['file:///home/u/标书研究/SKILL.md', '/home/u/标书研究/SKILL.md', 'raw UTF-8 (what Antigravity writes)'],
   ['file:///home/u/%E6%A0%87%E4%B9%A6%E7%A0%94%E7%A9%B6/SKILL.md', '/home/u/标书研究/SKILL.md', "percent-encoded CJK (marked's href) — decoded"],
@@ -399,7 +399,7 @@ const REL = [
   ['（草稿）/a.md', false], ['「x」/a.md', false], ['标书 研究/a.md', false], ['标书研究', false], ['1.2.3', false], ['10.0.0.0/8', false],
 ];
 const badR = REL.filter(([s, want]) => PL.looksRelPath(s) !== want);
-ok(PL.looksRelPath('docs/plan.md', { prose: true }) && !PL.looksRelPath('标书研究/方案.md', { prose: true }) && !PL.looksRelPath('请看docs/plan.md', { prose: true }), 'in PROSE (the For-you words) the first letter stays ASCII: a CJK word glued to a path (请看docs/plan.md) cannot be told from a CJK folder name');
+ok(gateOf(PL.looksRelPath('docs/plan.md', { prose: true })) && !PL.looksRelPath('标书研究/方案.md', { prose: true }) && !PL.looksRelPath('请看docs/plan.md', { prose: true }), 'in PROSE (the For-you words) the first letter stays ASCII: a CJK word glued to a path (请看docs/plan.md) cannot be told from a CJK folder name');
 ok(!badR.length, `looksRelPath: ${REL.length} rows — a first letter or digit of ANY script links (CJK, kana, hangul, fullwidth digits, é); punctuation first, a space, no slash + no file tail, versions / CIDR still do not` + (badR.length ? ' — ' + JSON.stringify(badR) : ''));
 const GATE = "/^[\\p{L}\\p{N}_@%+=.\\-][^\\s<>\"'`|]*$/u.test(txt)";
 const PL_SRC = fs.readFileSync(path.join(ROOT, 'src/path-linkify.js'), 'utf8');
@@ -442,10 +442,10 @@ const XSS = [
 for (const [s, why] of XSS) {
   const h = head.renderMarkdown(s);
   const tags = (h.replace(/"[^"]*"/g, '""').match(/<[a-z]+\b[^>]*>/gi) || []);
-  ok(tags.every((tg) => /^<(p|span|a)\b/i.test(tg) && !/\son[a-z]+=|\shref=|\ssrc=/i.test(tg)) && !/<img/i.test(h), `XSS — ${why}: no element but p / span / a, no on*= / href= / src= on any tag (${h.trim()})`);
+  ok(gateOf(tags.every((tg) => /^<(p|span|a)\b/i.test(tg) && !/\son[a-z]+=|\shref=|\ssrc=/i.test(tg))) && !/<img/i.test(h), `XSS — ${why}: no element but p / span / a, no on*= / href= / src= on any tag (${h.trim()})`);
 }
 eq(spans(head.renderMarkdown(XSS[0][0])), [`${P1}|data-path="/tmp/a&quot;&gt;&lt;img src=x onerror=alert(1)&gt;.md"|x`], '…the markup-carrying path is ONE span, its path escHtml\'d in data-path');
-ok(['[y](javascript:alert(1))', '[w](file:javascript:alert(1))', '[z](file:///a/%0Ab)'].every((s) => !/chat-link/.test(head.renderMarkdown(s))), '…a javascript: href, file:javascript: and a control character never become a link');
+ok(verdictOf(['[y](javascript:alert(1))', '[w](file:javascript:alert(1))', '[z](file:///a/%0Ab)'].every((s) => !/chat-link/.test(head.renderMarkdown(s)))), '…a javascript: href, file:javascript: and a control character never become a link');
 eq(head.renderMarkdown('[root](file:///)').trim(), '<p><a>root</a></p>', "…and the bare root file:/// is never carried as href=\"/\" (a click would open the app's root in a tab): it is dropped, as before");
 
 // RED CONTROL = the base: the four changed lines reverted on patched copies (renderer + path-linkify)
@@ -460,7 +460,7 @@ eq(hits8, [1, 1, 1], "the base control's three renderer patches each apply exact
 const MVS_CUT = [["      if (mask) return this._maskedToken(raw, mask);\n", ""], ["      if (anchor) { const masked = this._maskedAnchor(match); if (masked) return masked; } // lane mask-value-shape: a link a belt masked inside is words + the note\n", ""], ["    html = this._linkifyBareText(html, (txt) => !MARK_WORD_RE.test(txt) ? txt : txt.replace(MASKED_PATH_RE, (run) => { const mask = pathMask(run); return mask ? this._maskedToken(run, mask) : run; }));\n", ""], ["      const fmask = linkMask(raw); if (fmask) return this._maskedToken(raw, fmask);   // r3 (I): a file: URL a belt masked inside is words + the note\n", ""], ["            if (linkMask(txt)) { const cm = pathMask(txt); return open + (cm ? this._maskedWords(inner, cm) : inner) + close; }   // r3 (I, E): a masked relative path is words + the note; a bare mark is words\n", ""]];   // r3/r4: the five masked roads of the chat
 const base = await renderer((src) => [...REVERT, ...MVS_CUT].reduce((s, [from, to]) => s.split(from).join(to), src), { linkify: BASE_GATE });
 const baseAgy = base.renderMarkdown(AGY);
-ok(!spans(baseAgy).length && /<a>SKILL\.md<\/a>/.test(baseAgy) && /<a>inspect\.py<\/a>/.test(baseAgy), `RED CONTROL (the base): Antigravity's file: links render as a bare <a> with no href (the sanitizer dropped it) — no click handler reads one: «点不了» (${baseAgy.trim()})`);
+ok(!spans(baseAgy).length && gateOf(/<a>SKILL\.md<\/a>/.test(baseAgy)) && verdictOf(/<a>inspect\.py<\/a>/.test(baseAgy)), `RED CONTROL (the base): Antigravity's file: links render as a bare <a> with no href (the sanitizer dropped it) — no click handler reads one: «点不了» (${baseAgy.trim()})`);
 const baseDoc = base.renderMarkdown('[doc](/home/u/标书研究/a.md)');
 const hrefOf = /href="([^"]*)"/.exec(baseDoc)?.[1] || '';
 const tgt = base._linkTargets({ dataset: {}, getAttribute: (k) => (k === 'href' ? hrefOf : null) });
@@ -478,43 +478,43 @@ console.log('⑨ lane mask-value-shape (the owner 2026-11-07): A MASKED LINK NEV
   const linkOver = (h) => /<a\b[^>]*href="[^"]*(?:%C2%AB|«|%5Bvault|\[vault)[^"]*"/i.test(h) || /data-href="[^"]*(?:«|\[vault)/.test(h);
   for (const [entry, fn] of Object.entries({ 'tool output (linkifyText)': (r, s) => r.linkifyText(s), 'a peer card / assistant markdown (renderMarkdown)': (r, s) => r.renderMarkdown(s) })) {
     const h = fn(head, MASKED), hv = fn(head, VAULT), hw = fn(head, WHOLE);
-    ok(!linkOver(h) && /<span class="chat-link-masked">https:\/\/app\.example\.com\/login\?token=«redacted»&amp;next=%2Fhome<\/span> <span class="chat-link-note masked-link-note">/.test(h) && h.includes(NOTE), `${entry}: the masked URL is words + the note, no link to the mangled target`);
-    ok(!linkOver(hv) && /it holds the vault entry apikey:example: reveal it in Vault/.test(hv), `${entry}: a vault mark names its road (the entry, revealed in Vault)`);
-    ok(!/masked-link-note/.test(hw) && (/data-href="https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?response_type=code&amp;prompt=consent&amp;token_usage=remote&amp;access_type=offline"/.test(hw) || /<a href="https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?response_type=code&(?:amp;)?prompt=consent&(?:amp;)?token_usage=remote&(?:amp;)?access_type=offline"/.test(hw)), `${entry}: a whole URL (the owner's shape) stays ONE link to its whole target`);
+    ok(!linkOver(h) && gateOf(/<span class="chat-link-masked">https:\/\/app\.example\.com\/login\?token=«redacted»&amp;next=%2Fhome<\/span> <span class="chat-link-note masked-link-note">/.test(h)) && verdictOf(h.includes(NOTE)), `${entry}: the masked URL is words + the note, no link to the mangled target`);
+    ok(!linkOver(hv) && verdictOf(/it holds the vault entry apikey:example: reveal it in Vault/.test(hv)), `${entry}: a vault mark names its road (the entry, revealed in Vault)`);
+    ok(!/masked-link-note/.test(hw) && (verdictOf(/data-href="https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?response_type=code&amp;prompt=consent&amp;token_usage=remote&amp;access_type=offline"/.test(hw)) || verdictOf(/<a href="https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?response_type=code&(?:amp;)?prompt=consent&(?:amp;)?token_usage=remote&(?:amp;)?access_type=offline"/.test(hw))), `${entry}: a whole URL (the owner's shape) stays ONE link to its whole target`);
   }
   // r2 (m3): a vault mark in an HREF — a titled link (marked leaves the colon raw: %5Bvault:…%5D), the reference-style link, the agent-entry
   // label — is words + the note on the peer card; (m6) the label is words: a whole href stays a link whatever its label says; (m4) a PATH
   // a belt masked inside is words + the note, a plain path stays a path link
   const M3 = { 'a titled link': '[Call](https://api.example.com/v1/q?key=[vault:apikey:example]&x=1)', 'the reference-style link': 'see [d][r] now\n\n[r]: https://api.example.com/v1/q?key=[vault:apikey:example]', 'the agent-entry label': '[q](https://api.example.com/v1/q?key=[vault:agent:conv-1/gh-token])' };
-  for (const [n, s] of Object.entries(M3)) { const h = head.renderMarkdown(s); ok(!linkOver(h) && !/<a\b/.test(h) && /class="chat-link-masked"/.test(h) && /it holds the vault entry (apikey:example|agent:conv-1\/gh-token): reveal it in Vault/.test(h), `r2 (m3) ${n} with a vault mark in its HREF: words + the note naming the entry, no anchor`); }
+  for (const [n, s] of Object.entries(M3)) { const h = head.renderMarkdown(s); ok(!linkOver(h) && !/<a\b/.test(h) && gateOf(/class="chat-link-masked"/.test(h)) && verdictOf(/it holds the vault entry (apikey:example|agent:conv-1\/gh-token): reveal it in Vault/.test(h)), `r2 (m3) ${n} with a vault mark in its HREF: words + the note naming the entry, no anchor`); }
   const m6 = head.renderMarkdown('[how the «redacted» marker works](https://docs.example.com/belt)');
-  ok(/<a href="https:\/\/docs\.example\.com\/belt">how the «redacted» marker works<\/a>/.test(m6) && !/masked-link-note/.test(m6), 'r2 (m6): the label is words — a whole href stays ONE link whatever its label mentions');
+  ok(gateOf(/<a href="https:\/\/docs\.example\.com\/belt">how the «redacted» marker works<\/a>/.test(m6)) && !/masked-link-note/.test(m6), 'r2 (m6): the label is words — a whole href stays ONE link whatever its label mentions');
   for (const [entry, fn] of Object.entries({ 'tool output': (r, x) => r.linkifyText(x), 'a peer card': (r, x) => r.renderMarkdown(x) })) {
     const hp = fn(head, 'The report: /home/u/out/[vault:secret:run]/report.md here'), hq = fn(head, 'plain /home/u/x/report.md');
-    ok(/<span class="chat-link-masked">\/home\/u\/out\/\[vault:secret:run\]\/report\.md<\/span> <span class="chat-link-note masked-link-note">/.test(hp) && !/data-path="\/home\/u\/out/.test(hp) && /data-path="\/home\/u\/x\/report\.md"/.test(hq), `r2 (m4) ${entry}: a masked PATH is words + the note; a plain path stays a path link`);
+    ok(gateOf(/<span class="chat-link-masked">\/home\/u\/out\/\[vault:secret:run\]\/report\.md<\/span> <span class="chat-link-note masked-link-note">/.test(hp)) && !/data-path="\/home\/u\/out/.test(hp) && verdictOf(/data-path="\/home\/u\/x\/report\.md"/.test(hq)), `r2 (m4) ${entry}: a masked PATH is words + the note; a plain path stays a path link`);
   }
   // r3 (D): a masked token is EXACTLY its path / URL token — in CJK prose the path before a masked KEY=value stays ONE link, no note
   for (const [lg, x] of Object.entries({ en: 'Wrote /home/u/proj/config/app.env, where API_KEY=«redacted», see.', zh: '已写入 /home/u/proj/config/app.env，其中API_KEY=«redacted»，请查看。', ja: '/home/u/proj/config/app.env に書き込み、API_KEY=«redacted»、確認してください。' })) {
     for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) {
       const h = fn(head, x);
-      ok(/data-path="\/home\/u\/proj\/config\/app\.env"/.test(h) && !/masked-link-note|chat-link-masked/.test(h), `r3 (D) ${lg}, ${entry}: the path stays ONE link, the masked KEY=value is words with no note`);
+      ok(gateOf(/data-path="\/home\/u\/proj\/config\/app\.env"/.test(h)) && !/masked-link-note|chat-link-masked/.test(h), `r3 (D) ${lg}, ${entry}: the path stays ONE link, the masked KEY=value is words with no note`);
     }
   }
   const dUrl = head.linkifyText('请打开https://app.example.com/login?token=«redacted»，然后看。');
   const dMd = head.renderMarkdown('请打开https://app.example.com/login?token=«redacted»，然后看。');
-  ok([dUrl, dMd].every((h) => /<span class="chat-link-masked">https:\/\/app\.example\.com\/login\?token=«redacted»<\/span>/.test(h) && /<\/span>，然后看。/.test(h)), 'r3 (D): a masked URL in CJK prose (text and markdown) — the masked span is the URL token, the prose after it words');
+  ok(verdictOf([dUrl, dMd].every((h) => /<span class="chat-link-masked">https:\/\/app\.example\.com\/login\?token=«redacted»<\/span>/.test(h) && /<\/span>，然后看。/.test(h))), 'r3 (D): a masked URL in CJK prose (text and markdown) — the masked span is the URL token, the prose after it words');
   // r3 (E): a BARE vault mark is words — no masked «link», no note
   for (const x of ['value: [vault:secrets/db/secret] then', 'API_KEY=[vault:secrets/db/secret]', '`[vault:secrets/db/secret]`']) { const h = head.linkifyText(x), m = head.renderMarkdown(x); ok(!/masked-link-note|chat-link/.test(h) && !/masked-link-note|chat-link/.test(m), `r3 (E): a bare mark is words — ${x}`); }
   // r3 (I): every linkifier road asks the mark — a file: URL (text + markdown), a backticked path in tool output; the note itself is never
   // linkified (an entry name holding a path); an entry name with & < is escaped ONCE
   const fu = 'open file:///home/u/proj/«redacted»/x.md now';
-  ok(/class="chat-link-masked">file:\/\/\/home\/u\/proj\/«redacted»\/x\.md</.test(head.linkifyText(fu)) && /class="chat-link-masked">file:\/\/\/home\/u\/proj\/«redacted»\/x\.md</.test(head.renderMarkdown(fu)) && !/data-path="\/home\/u\/proj\/«/.test(head.linkifyText(fu)), 'r3 (I): a file: URL a belt masked inside is words + the note (text and markdown)');
+  ok(gateOf(/class="chat-link-masked">file:\/\/\/home\/u\/proj\/«redacted»\/x\.md</.test(head.linkifyText(fu))) && gateOf(/class="chat-link-masked">file:\/\/\/home\/u\/proj\/«redacted»\/x\.md</.test(head.renderMarkdown(fu))) && !/data-path="\/home\/u\/proj\/«/.test(head.linkifyText(fu)), 'r3 (I): a file: URL a belt masked inside is words + the note (text and markdown)');
   const bt = head.linkifyText('run `/home/u/«redacted»/x.md` and `/home/u/proj/[vault:secret:run]/x.md`');
   ok((bt.match(/class="chat-link-masked">/g) || []).length === 2 && !/data-path="\/home\/u\/«|data-path="\/home\/u\/proj\/\[vault"/.test(bt), 'r3 (I): a backticked masked path in tool output is words + the note, never a (truncated) path link');
   const np = head.renderMarkdown('see /home/u/out/[vault:secret:/home/u/k.pem]/r.md');
-  ok(/it holds the vault entry secret:\/home\/u\/k\.pem: reveal it in Vault/.test(np) && !/data-path="\/home\/u\/k\.pem/.test(np), 'r3 (I): the note is never linkified — an entry name holding a path stays words in it');
+  ok(gateOf(/it holds the vault entry secret:\/home\/u\/k\.pem: reveal it in Vault/.test(np)) && !/data-path="\/home\/u\/k\.pem/.test(np), 'r3 (I): the note is never linkified — an entry name holding a path stays words in it');
   const amp = head.renderMarkdown('see /home/u/out/[vault:secret:a&b<c]/r.md');
-  ok(/vault entry secret:a&amp;b&lt;c: reveal/.test(amp) && !/&amp;amp;|&amp;lt;/.test(amp), 'r3 (I): an entry name holding & < is escaped ONCE in the note');
+  ok(gateOf(/vault entry secret:a&amp;b&lt;c: reveal/.test(amp)) && !/&amp;amp;|&amp;lt;/.test(amp), 'r3 (I): an entry name holding & < is escaped ONCE in the note');
   // r3 (F): the masked-path pass is anchored on `/` — LINEAR BY THE COUNT (scripts/work-meter.mjs: every step and every regex backtrack, in a
   // child), never a clock (test-ci-gate's ratchet): the pass's own regex, read from chat-renderers.js as it stands (an identifier resolves to
   // its `new RegExp(…)` line), run over a bracket array with no `/` and one with many — ×4 input reads ×4 (r2's `(?<![^\s>(\[])[^…]*\/…`:
@@ -530,7 +530,7 @@ console.log('⑨ lane mask-value-shape (the owner 2026-11-07): A MASKED LINK NEV
       fs.writeFileSync(MOD, `const { CJK_PUNCT, SEG } = require(${JSON.stringify(path.join(ROOT, 'src/path-linkify.js'))});\nconst re = ${expr};\nmodule.exports = { pass: (x) => x.replace(re, (r) => r) };\n`);
       for (const [k, mk] of Object.entries({ 'brackets, no /': '(n) => "[" + Array.from({ length: Math.floor(n / 14) }, (_, i) => "[" + i + ",[" + (i + 1) + "," + (i + 2) + "]]").join(",") + "]"', 'brackets and /': '(n) => "[" + Array.from({ length: Math.floor(n / 9) }, (_, i) => "[\\"/a" + i + "\\"]").join(",") + "]"', 'open parens': '(n) => "(".repeat(n)' })) {
         const v = judgeInChild({ module: MOD, run: '(M, x) => M.pass(x)', mk: `(n) => n === 0 ? '' : (${mk})(n)`, n: 32768, kind: 'linear', backtracks: true, opts: { factor: 4 } });
-        ok(v.ok && v.w1 / 32768 <= 64, `r3 (F): the masked-path pass is linear by the count on ${k}: ${v.err ? 'the child failed: ' + v.err.slice(0, 200) : `${v.w1} → ${v.w2} steps, ×${v.r && v.r.toFixed(2)} (bound ×${v.bound}), ${(v.w1 / 32768).toFixed(1)} steps a character (≤ 64)`} at ×4 input`, v);
+        ok(gateOf(v.ok) && v.w1 / 32768 <= 64, `r3 (F): the masked-path pass is linear by the count on ${k}: ${v.err ? 'the child failed: ' + v.err.slice(0, 200) : `${v.w1} → ${v.w2} steps, ×${v.r && v.r.toFixed(2)} (bound ×${v.bound}), ${(v.w1 / 32768).toFixed(1)} steps a character (≤ 64)`} at ×4 input`, v);
       }
     }
   }
@@ -538,13 +538,13 @@ console.log('⑨ lane mask-value-shape (the owner 2026-11-07): A MASKED LINK NEV
   for (const [lg, x] of Object.entries({ en: 'first open https://app.example.com/a, then https://x.example/cb?token=«redacted» to sign in', zh: '先打开https://app.example.com/a，再用https://x.example/cb?token=«redacted»登录', ja: 'まずhttps://app.example.com/a、次にhttps://x.example/cb?token=«redacted»でログイン' })) {
     for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) {
       const h = fn(head, x);
-      ok(/(?:data-href|href)="https:\/\/app\.example\.com\/a"/.test(h) && /<span class="chat-link-masked">https:\/\/x\.example\/cb\?token=«redacted»/.test(h) && (h.match(/masked-link-note/g) || []).length === 1 && !linkOver(h) && !/data-path="\/\/x\.example/.test(h), `r4 (M3) ${lg}, ${entry}: the clean URL ONE link, the masked one words + ONE note`);
+      ok(gateOf(/(?:data-href|href)="https:\/\/app\.example\.com\/a"/.test(h)) && gateOf(/<span class="chat-link-masked">https:\/\/x\.example\/cb\?token=«redacted»/.test(h)) && (h.match(/masked-link-note/g) || []).length === 1 && !linkOver(h) && !/data-path="\/\/x\.example/.test(h), `r4 (M3) ${lg}, ${entry}: the clean URL ONE link, the masked one words + ONE note`);
     }
   }
   // r4 (m5): a vault mark's `]` is INSIDE the URL token on the text road too — the same masked span as markdown and For-you
   for (const x of ['https://x-access-token:[vault:gh/tok]@github.com/o/r.git (fetch)', 'see https://api.example/q?key=[vault:svc/k]&format=json now']) {
     const ht = head.linkifyText(x), hm = head.renderMarkdown(x), span = (h) => (/<span class="chat-link-masked">([^<]*)<\/span>/.exec(h) || [])[1];
-    ok(span(ht) && span(ht) === span(hm) && /github\.com\/o\/r\.git|format=json/.test(span(ht)), `r4 (m5): one masked token on both chat roads — ${span(ht)}`);
+    ok(gateOf(span(ht)) && span(ht) === span(hm) && verdictOf(/github\.com\/o\/r\.git|format=json/.test(span(ht))), `r4 (m5): one masked token on both chat roads — ${span(ht)}`);
   }
   // r5 (M1): both chat roads — a BALANCED full-width pair inside a URL token is the token's (`…/wiki/東京（都）` ONE whole link; markdown keeps
   // marked's own anchor, the base's); an unpaired CJK mark ends it (the base ran on: `…/x，然后点` linked the comma and the words — the change, disclosed)
@@ -552,7 +552,7 @@ console.log('⑨ lane mask-value-shape (the owner 2026-11-07): A MASKED LINK NEV
     const hrefs = (h) => [...h.matchAll(/(?:data-href|href)="([^"]*)"/g)].map((m) => { const v = m[1].replace(/&amp;/g, '&'); try { return decodeURIComponent(v); } catch { return v; } }).join('|');
     const M1C = { '…/wiki/東京（都） — a balanced pair: ONE whole link': ['see https://ja.example/wiki/東京（都） ok', 'https://ja.example/wiki/東京（都）'], '…/wiki/「東京」 — a corner-bracket pair': ['见https://ja.example/wiki/「東京」 ok', 'https://ja.example/wiki/「東京」'], '…/x，然后点 — the comma ends it': ['look https://a.example/x，然后点', 'https://a.example/x'], '…/x。 — the stop ends it': ['看https://a.example/x。', 'https://a.example/x'], '…/東京（都），再说 — the pair kept, the comma ends it': ['先看https://ja.example/wiki/東京（都），再说', 'https://ja.example/wiki/東京（都）'], '（…/a）吧 — the prose\'s own pair is not the token\'s': ['（https://x.example/a）吧', 'https://x.example/a'] };
     for (const [n, [x, want]] of Object.entries(M1C)) for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) { const got = hrefs(fn(head, x)); ok(got === want, `r5 (M1) ${entry}: ${n}`, got); }
-    ok(/<a href="https:\/\/ja\.example\/wiki\/%E6%9D%B1%E4%BA%AC%EF%BC%88%E9%83%BD%EF%BC%89">https:\/\/ja\.example\/wiki\/東京（都）<\/a>/.test(head.renderMarkdown('see https://ja.example/wiki/東京（都） ok')), 'r5 (M1) a peer card: the balanced autolink keeps marked\'s own anchor (the base\'s bytes)');
+    ok(verdictOf(/<a href="https:\/\/ja\.example\/wiki\/%E6%9D%B1%E4%BA%AC%EF%BC%88%E9%83%BD%EF%BC%89">https:\/\/ja\.example\/wiki\/東京（都）<\/a>/.test(head.renderMarkdown('see https://ja.example/wiki/東京（都） ok'))), 'r5 (M1) a peer card: the balanced autolink keeps marked\'s own anchor (the base\'s bytes)');
   }
   // r6 (m6): the markdown road cuts an autolink at its first UNPAIRED CJK mark and the URL before it keeps MARKED's anchor (its balanced-paren
   // and apostrophe rules) — the href marked gives the same URL with a blank after it; r5 re-read it with the text road's run (`…/Foo_(bar`)
@@ -564,7 +564,7 @@ console.log('⑨ lane mask-value-shape (the owner 2026-11-07): A MASKED LINK NEV
     }
     ok(hrefs6(head.renderMarkdown('先看https://ja.example/wiki/東京（都），再说')) === 'https://ja.example/wiki/東京（都）' && hrefs6(head.renderMarkdown('先打开https://app.example.com/a，再用https://app.example.com/b登录')) === 'https://app.example.com/a|https://app.example.com/b登录', 'r6 (m6) a peer card: the pair shape …/東京（都），再说 unchanged; two URLs in one blank-free run stay two links');
     const mk6 = head.renderMarkdown('参见 https://x.example/cb?token=«redacted»&r=(a)，然后');
-    ok(/<span class="chat-link-masked">https:\/\/x\.example\/cb\?token=«redacted»&amp;r=\(a/.test(mk6) && !linkOver(mk6) && (mk6.match(/masked-link-note/g) || []).length === 1 && /，然后/.test(mk6), 'r6 (m6) a peer card: a MASKED autolink holding a paren still takes the mask path — its words to the CJK mark + ONE note, no link', mk6);
+    ok(gateOf(/<span class="chat-link-masked">https:\/\/x\.example\/cb\?token=«redacted»&amp;r=\(a/.test(mk6)) && !linkOver(mk6) && (mk6.match(/masked-link-note/g) || []).length === 1 && verdictOf(/，然后/.test(mk6)), 'r6 (m6) a peer card: a MASKED autolink holding a paren still takes the mask path — its words to the CJK mark + ONE note, no link', mk6);
   }
   // r7 (M8): both chat roads — a dash / wave dash / ellipsis / curly quote INSIDE a URL stays in it (the stop is foryou-links URL_STOP only:
   // CJK sentence punctuation + an unpaired full-width bracket); one at the END is shed — on markdown too (marked kept a trailing `”`)
@@ -588,18 +588,18 @@ console.log('⑨ lane mask-value-shape (the owner 2026-11-07): A MASKED LINK NEV
     const V = 'curl https://api.example/q?key=[vault:svc/k]&x=1', NOTEV = 'it holds the vault entry svc/k: reveal it in Vault';
     const txt = (h) => h.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&');
     const fence = head.renderMarkdown('```\n' + V + '\n```'), fpre = (/<pre>[\s\S]*?<\/pre>/.exec(fence) || [''])[0];
-    ok(txt(fpre).trim() === V && !/masked-link-note/.test(fpre) && /<\/pre><div class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(fence) && /chat-link-masked/.test(fpre), 'r6 (m7) a fenced block: its text is the command exactly, the masked run its words, THE note a block after </pre>', fence);
+    ok(txt(fpre).trim() === V && !/masked-link-note/.test(fpre) && gateOf(/<\/pre><div class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(fence)) && verdictOf(/chat-link-masked/.test(fpre)), 'r6 (m7) a fenced block: its text is the command exactly, the masked run its words, THE note a block after </pre>', fence);
     const inl = head.renderMarkdown('run `' + V + '` now'), code = (/<code>[\s\S]*?<\/code>/.exec(inl) || [''])[0];
-    ok(txt(code) === V && !/masked-link-note/.test(code) && /<\/code> <span class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(inl), 'r6 (m7) an inline code span: its text is the command exactly, THE note after </code>', inl);
+    ok(txt(code) === V && !/masked-link-note/.test(code) && verdictOf(/<\/code> <span class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(inl)), 'r6 (m7) an inline code span: its text is the command exactly, THE note after </code>', inl);
     const el = mkEl(); head.wrapMsg(el, 'tool', '', '<pre class="chat-tool-out">' + head.linkifyText(V) + '</pre>'); const tool = el.innerHTML, tpre = (/<pre[^>]*>[\s\S]*?<\/pre>/.exec(tool) || [''])[0];
-    ok(txt(tpre) === V && !/masked-link-note/.test(tpre) && /<\/pre><div class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(tool), 'r6 (m7) a tool\'s <pre> (wrapMsg): its text is the output exactly, THE note after </pre>', tool);
+    ok(txt(tpre) === V && !/masked-link-note/.test(tpre) && verdictOf(/<\/pre><div class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(tool)), 'r6 (m7) a tool\'s <pre> (wrapMsg): its text is the output exactly, THE note after </pre>', tool);
     const prose = head.renderMarkdown('see ' + V.slice(5) + ' now');
-    ok(/<\/span> <span class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k[^<]*<\/span> now<\/p>/.test(prose) && prose.includes(NOTEV), 'r6 (m7) prose: the note stays INLINE after the masked words (r5)', prose);
+    ok(gateOf(/<\/span> <span class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k[^<]*<\/span> now<\/p>/.test(prose)) && verdictOf(prose.includes(NOTEV)), 'r6 (m7) prose: the note stays INLINE after the masked words (r5)', prose);
   }
   // RED CONTROL: the base renderer (the masked branches cut in its one build, MVS_CUT) links the mangled target
-  ok(MVS_CUT.every(([from]) => cr.split(from).length - 1 === 1), 'the control\'s five renderer patches each apply exactly once');
+  ok(verdictOf(MVS_CUT.every(([from]) => cr.split(from).length - 1 === 1)), 'the control\'s five renderer patches each apply exactly once');
   const r0 = base;
-  ok(linkOver(r0.linkifyText(MASKED)) && linkOver(r0.renderMarkdown(MASKED)) && !/masked-link-note/.test(r0.renderMarkdown(MASKED)) && /<a\b/.test(r0.renderMarkdown(M3['a titled link'])) && /data-path="\/home\/u\/out\/\[vault"/.test(r0.linkifyText('The report: /home/u/out/[vault:secret:run]/report.md here')), 'RED CONTROL (the base renderer): the masked URL, a titled vault href and a masked path are whole-looking links — the legs above go red');
+  ok(gateOf(linkOver(r0.linkifyText(MASKED))) && gateOf(linkOver(r0.renderMarkdown(MASKED))) && !/masked-link-note/.test(r0.renderMarkdown(MASKED)) && gateOf(/<a\b/.test(r0.renderMarkdown(M3['a titled link']))) && verdictOf(/data-path="\/home\/u\/out\/\[vault"/.test(r0.linkifyText('The report: /home/u/out/[vault:secret:run]/report.md here'))), 'RED CONTROL (the base renderer): the masked URL, a titled vault href and a masked path are whole-looking links — the legs above go red');
 }
 
 console.log('⑩ A DOOR IN THE CHAT DOES WHAT ITS ICON SAYS — the chat\'s delegation acts on the chat\'s own links only, never a card\'s door (lane card-door-in-chat)');
@@ -607,7 +607,7 @@ console.log('⑩ A DOOR IN THE CHAT DOES WHAT ITS ICON SAYS — the chat\'s dele
 // (`.x`, `a[href]`) and a classList with a length, as a browser's. Every card kind that draws an
 // anchor inside the chat is one specimen — its classes and attributes as its module draws them.
 globalThis.document = DOC;
-const okd = (c, m, d) => ok(c, c || d === undefined ? m : `${m} — ${JSON.stringify(d).slice(0, 700)}`);
+const okd = (c, m, d) => ok(verdictOf(c), c || d === undefined ? m : `${m} — ${JSON.stringify(d).slice(0, 700)}`);
 class D extends El {
   get classList() { const c = this._c; return { add: (...a) => a.forEach((x) => c.add(x)), remove: (...a) => a.forEach((x) => c.delete(x)), contains: (x) => c.has(x), toggle() {}, get length() { return c.size; } }; }
   matches(sel) {
@@ -726,4 +726,4 @@ globalThis.document = saved.document;
 fs.rmSync(SCR, { recursive: true, force: true });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

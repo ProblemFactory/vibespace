@@ -25,7 +25,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -71,32 +71,32 @@ const census = (files) => { const out = new Set(); for (const src of Object.valu
 const realFiles = Object.fromEntries(PRODUCERS.map((f) => [f, read(f)]));
 const seen = census(realFiles);
 const missing = [...seen].filter((k) => !Object.prototype.hasOwnProperty.call(M.RECORD_KINDS, k));
-ok('the census reads the producers: user_input + approval (+ the claude no-kind tool permission)', seen.has('user_input') && seen.has('approval'), [...seen]);
+ok('the census reads the producers: user_input + approval (+ the claude no-kind tool permission)', gateOf(seen.has('user_input')) && verdictOf(seen.has('approval')), [...seen]);
 ok('every permission kind a normalizer writes has a row in RECORD_KINDS', missing.length === 0, missing);
 const planted = { ...realFiles, 'src/codex-message-manager.js': realFiles['src/codex-message-manager.js'].replace("permission.kind = 'user_input';", "permission.kind = 'user_input';\n    } else if (method === 'item/x/requestReview') {\n      permission.kind = 'review';") };
 const plantedMissing = [...census(planted)].filter((k) => !Object.prototype.hasOwnProperty.call(M.RECORD_KINDS, k));
 ok('CONTROL: a planted new ask kind (codex requestReview → kind review) without a row ⇒ the census is RED', planted['src/codex-message-manager.js'] !== realFiles['src/codex-message-manager.js'] && plantedMissing.join() === 'review', plantedMissing);
-ok('the plan row is the tool the product names (chat-renderers ExitPlanMode)', M.PLAN_TOOLS.every((t) => read('src/lib/chat-renderers.js').includes(`${t}: t(`)));
+ok('the plan row is the tool the product names (chat-renderers ExitPlanMode)', verdictOf(M.PLAN_TOOLS.every((t) => read('src/lib/chat-renderers.js').includes(`${t}: t(`))));
 ok('ONE clock: MAIN_ASK_INBOX_MS is the helper\'s constant (60 s)', M.MAIN_ASK_INBOX_MS === H.HELPER_ASK_INBOX_MS && M.MAIN_ASK_INBOX_MS === 60000);
 const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
 const rowsOk = Object.entries(M.MAIN_ASK_KINDS).every(([, r]) => r.en && r.zh && r.ja && zh.includes(`${JSON.stringify(r.en)}: ${JSON.stringify(r.zh)}`) && ja.includes(`${JSON.stringify(r.en)}: ${JSON.stringify(r.ja)}`));
-ok('every row has en/zh/ja words and the locale files hold the same zh/ja', rowsOk && Object.keys(M.MAIN_ASK_KINDS).sort().join() === 'command,plan,question,tool,tool-bare');
+ok('every row has en/zh/ja words and the locale files hold the same zh/ja', gateOf(rowsOk) && Object.keys(M.MAIN_ASK_KINDS).sort().join() === 'command,plan,question,tool,tool-bare');
 const words = (perm) => M.inboxItemFor(M.mainAskOf(perm), { name: 'docusign', sessionId: 's1' });
 ok('words: a Bash ask names the command', words({ requestId: 'r', toolName: 'Bash', input: { command: 'rm -rf ./ds-out && ./sign.sh' } }).text === 'docusign is waiting for your permission to run: rm -rf ./ds-out && ./sign.sh');
-ok('words: another tool names the tool + its first words; a multi-line subject says there is more', words({ requestId: 'r', toolName: 'WebFetch', input: { url: 'https://example.com/a' } }).text === 'docusign is waiting for you: permission to use WebFetch (https://example.com/a)' && / …$/.test(words({ requestId: 'r', toolName: 'Bash', input: { command: 'ls\nrm x' } }).text));
+ok('words: another tool names the tool + its first words; a multi-line subject says there is more', words({ requestId: 'r', toolName: 'WebFetch', input: { url: 'https://example.com/a' } }).text === 'docusign is waiting for you: permission to use WebFetch (https://example.com/a)' && verdictOf(/ …$/.test(words({ requestId: 'r', toolName: 'Bash', input: { command: 'ls\nrm x' } }).text)));
 ok('words: a question names the question; the plan names the plan', words({ requestId: 'r', toolName: 'AskUserQuestion', kind: 'user_input', questions: [{ question: 'Which database?' }] }).text === 'docusign is waiting for you: a question: Which database?' && words({ requestId: 'r', toolName: 'ExitPlanMode', input: { plan: 'x' } }).text === 'docusign is waiting for you: the plan awaits your approval');
 const w0 = words({ requestId: 'r', toolName: 'Bash', input: { command: 'rm -rf ./ds-out' } });
-ok('the detail carries the whole request + the way out (answer, or Stop it); the action names the request + the session; i18n = the row key', /^Bash: rm -rf \.\/ds-out\n/.test(w0.detail) && /Open the conversation and answer.*or Stop it\.$/.test(w0.detail) && w0.action.type === 'main-ask' && w0.action.requestId === 'r' && w0.action.sessionId === 's1' && w0.i18n.text.key === M.MAIN_ASK_KINDS.command.en);
+ok('the detail carries the whole request + the way out (answer, or Stop it); the action names the request + the session; i18n = the row key', gateOf(/^Bash: rm -rf \.\/ds-out\n/.test(w0.detail)) && gateOf(/Open the conversation and answer.*or Stop it\.$/.test(w0.detail)) && w0.action.type === 'main-ask' && w0.action.requestId === 'r' && w0.action.sessionId === 's1' && w0.i18n.text.key === M.MAIN_ASK_KINDS.command.en);
 // lane ui-language (the walk's for-you-1 / for-you-3): the tray words the detail in the person's language — the request line and the
 // way out are KEYS with zh / ja rows (the stored `detail` stays the store's English), and no row carries a backtick the tray would show raw
 {
   const lines = w0.i18n.detail || [];
   ok('the i18n detail = the request line (its tool + the whole command) + the way out, each a key with zh / ja rows; a missing name is a key, not English',
-    lines.length === 2 && lines[0].key === '{tool}: {request}' && lines[0].params.tool === 'Bash' && lines[0].params.request === 'rm -rf ./ds-out' && /^The conversation is paused until you answer\./.test(lines[1].key)
-    && [lines[0].key, lines[1].key, 'A conversation', '… cut here — {n} more characters; the card in the conversation shows the whole request'].every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))
+    lines.length === 2 && lines[0].key === '{tool}: {request}' && lines[0].params.tool === 'Bash' && lines[0].params.request === 'rm -rf ./ds-out' && gateOf(/^The conversation is paused until you answer\./.test(lines[1].key))
+    && gateOf([lines[0].key, lines[1].key, 'A conversation', '… cut here — {n} more characters; the card in the conversation shows the whole request'].every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')))
     && typeof M.inboxItemFor(M.mainAskOf({ requestId: 'r', toolName: 'Bash', input: { command: 'ls' } }), {}).i18n.text.params.name === 'object',
     JSON.stringify(lines));
-  ok('no row of the table carries a backtick (the tray draws text: a `…` showed raw)', Object.values(M.MAIN_ASK_KINDS).every((r) => !/`/.test(r.en + r.zh + r.ja)));
+  ok('no row of the table carries a backtick (the tray draws text: a `…` showed raw)', verdictOf(Object.values(M.MAIN_ASK_KINDS).every((r) => !/`/.test(r.en + r.zh + r.ja))));
   // the reader's round (13:41Z, F9): an item filed by .398 carries the OLD key in its stored i18n.text — it keeps zh / ja rows (the
   // current words, no backtick) for one release, so an ask waiting across the update does not turn English
   {
@@ -104,7 +104,7 @@ ok('the detail carries the whole request + the way out (answer, or Stop it); the
     const rowOf = (src, k) => { const m = new RegExp('^\\s*' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':\\s*("(?:[^"\\\\]|\\\\.)*")', 'm').exec(src); return m ? JSON.parse(m[1]) : null; };
     const zr = rowOf(zh, OLD), jr = rowOf(ja, OLD);
     ok('an item filed before the update (its stored key the old command row) still reads in zh / ja — a LEGACY key with the current words, no backtick',
-      Array.isArray(M.LEGACY_KEYS) && M.LEGACY_KEYS.includes(OLD) && zr === M.MAIN_ASK_KINDS.command.zh && jr === M.MAIN_ASK_KINDS.command.ja && !/`/.test(zr + jr), { zr, jr });
+      gateOf(Array.isArray(M.LEGACY_KEYS)) && gateOf(M.LEGACY_KEYS.includes(OLD)) && zr === M.MAIN_ASK_KINDS.command.zh && jr === M.MAIN_ASK_KINDS.command.ja && !/`/.test(zr + jr), { zr, jr });
   }
 }
 ok('a settled or stale permission is no ask', M.mainAskOf({ requestId: 'r', resolved: 'allowed' }) === null && M.mainAskOf({ requestId: 'r', stale: true }) === null);
@@ -197,14 +197,14 @@ function scenarios(mod) {
 const S = scenarios(MA);
 ok('59 s: nothing; 60 s: ONE item (later syncs file nothing more)', S.filed.at59 === 0 && S.filed.open === 1 && S.filed.all === 1, S.filed);
 ok('the item: the conversation + the command, origin agent, kind action, urgency high, action = the request + the session', S.filed.text === 'docusign is waiting for your permission to run: bash -c "rm -rf ./ds-out && ./sign.sh"' && S.filed.origin === 'agent' && S.filed.kind === 'action' && S.filed.urgency === 'high' && S.filed.action?.type === 'main-ask' && S.filed.action?.requestId === RID && S.filed.action?.sessionId === 'sess-a', S.filed);
-ok('the first-seen instant is persisted (session meta mainAskedAt)', S.filed.persisted && Number.isFinite(S.filed.persisted[RID]));
+ok('the first-seen instant is persisted (session meta mainAskedAt)', gateOf(S.filed.persisted) && verdictOf(Number.isFinite(S.filed.persisted[RID])));
 ok('answered after filing ⇒ the item is resolved (done, by agent)', S.answeredAfter.open === 0 && S.answeredAfter.done === 1 && S.answeredAfter.by === 'agent', S.answeredAfter);
 ok('answered at 30 s ⇒ no item ever', S.answered30 === 0, S.answered30);
 ok('withdrawn by the CLI (control_cancel_request) ⇒ resolved', S.withdrawn.before === 1 && S.withdrawn.open === 0, S.withdrawn);
 ok('kill (forget) ⇒ resolved; a late sync files nothing', S.killed.before === 1 && S.killed.n === 1 && S.killed.open === 0 && S.killed.all === 1, S.killed);
 ok('a focused, attached window still files (no visible ⇒ skip)', S.visible === 1, S.visible);
 console.log('③ the restart');
-ok('restart at 40 s + the rebuilt card ⇒ nothing at 40 s, ONE item at 60 s from the ASK\'s instant', S.restart40.stamped && S.restart40.at40 === 0 && S.restart40.at60 === 1 && S.restart40.all === 1, S.restart40);
+ok('restart at 40 s + the rebuilt card ⇒ nothing at 40 s, ONE item at 60 s from the ASK\'s instant', gateOf(S.restart40.stamped) && S.restart40.at40 === 0 && S.restart40.at60 === 1 && S.restart40.all === 1, S.restart40);
 ok('an item filed before the restart + a renamed conversation ⇒ still ONE item (the same key)', S.renamed.before === 1 && S.renamed.open === 1 && S.renamed.all === 1, S.renamed);
 
 // ── ④ the other kinds ──
@@ -233,11 +233,11 @@ console.log('④ a question, the plan, a codex-shaped normalizer');
 // ── ⑤ wiring pins ──
 console.log('⑤ wiring');
 const server = read('server.js'), ss = read('src/server/session-stdout.js'), ws = read('src/ws-handler.js');
-ok('server.js installs main-asks with the store, the key, the live sessions and the meta clock (mainAskedAt)', /require\('\.\/src\/server\/main-asks'\)\.install\(\{ userTodos, sessionKeyFor: .*readAskedAt: .*mainAskedAt.*persistAskedAt: .*mainAskedAt: map/.test(server));
-ok('the exit path and the kill path forget the conversation\'s own asks beside the helpers\'', /require\('\.\/main-asks'\)\.forget\(session\)/.test(ss) && /require\('\.\/server\/main-asks'\)\.forget\(session\)/.test(ws));
-ok('one item per ask (THE For-you action registry: main-ask → identity requestId — the store\'s ACTION_IDENTITY is derived from it)', /\{ type: 'main-ask', identity: 'requestId',/.test(read('src/foryou-actions.js')) && /const \{ ACTION_IDENTITY \} = require\('\.\/foryou-actions\.js'\);/.test(read('src/user-todos.js')));
-ok('a typed reply never "answers" it (inbox-reply CARD_ACTION_TYPES) and the click lands on its card in its window (goToWindow switches the desktop)', /\{ type: 'main-ask', identity: 'requestId', [^}]*answer: 'card'/.test(read('src/foryou-actions.js')) && /const \{ ANSWER_ACTION_TYPES, CARD_ACTION_TYPES \} = require\('\.\/foryou-actions\.js'\);/.test(read('src/inbox-reply.js')) && /item\?\.action\?\.type === 'main-ask'\) && item\.action\.requestId/.test(read('src/lib/user-todos-actions.js')) && /if \(hasWindow\) app\.goToWindow\(s\.webuiId\)/.test(read('src/lib/user-todos-actions.js')));
-ok('the normalizers tell a second observer (main asks) beside the helpers\' slot', /function addAsksObserver\(fn\)/.test(read('src/normalizers.js')) && /addAsksObserver\(\(session\) => sync\(session\)\)/.test(MAIN_ASKS_SRC));
+ok('server.js installs main-asks with the store, the key, the live sessions and the meta clock (mainAskedAt)', verdictOf(/require\('\.\/src\/server\/main-asks'\)\.install\(\{ userTodos, sessionKeyFor: .*readAskedAt: .*mainAskedAt.*persistAskedAt: .*mainAskedAt: map/.test(server)));
+ok('the exit path and the kill path forget the conversation\'s own asks beside the helpers\'', gateOf(/require\('\.\/main-asks'\)\.forget\(session\)/.test(ss)) && verdictOf(/require\('\.\/server\/main-asks'\)\.forget\(session\)/.test(ws)));
+ok('one item per ask (THE For-you action registry: main-ask → identity requestId — the store\'s ACTION_IDENTITY is derived from it)', gateOf(/\{ type: 'main-ask', identity: 'requestId',/.test(read('src/foryou-actions.js'))) && verdictOf(/const \{ ACTION_IDENTITY \} = require\('\.\/foryou-actions\.js'\);/.test(read('src/user-todos.js'))));
+ok('a typed reply never "answers" it (inbox-reply CARD_ACTION_TYPES) and the click lands on its card in its window (goToWindow switches the desktop)', gateOf(/\{ type: 'main-ask', identity: 'requestId', [^}]*answer: 'card'/.test(read('src/foryou-actions.js'))) && gateOf(/const \{ ANSWER_ACTION_TYPES, CARD_ACTION_TYPES \} = require\('\.\/foryou-actions\.js'\);/.test(read('src/inbox-reply.js'))) && gateOf(/item\?\.action\?\.type === 'main-ask'\) && item\.action\.requestId/.test(read('src/lib/user-todos-actions.js'))) && verdictOf(/if \(hasWindow\) app\.goToWindow\(s\.webuiId\)/.test(read('src/lib/user-todos-actions.js'))));
+ok('the normalizers tell a second observer (main asks) beside the helpers\' slot', gateOf(/function addAsksObserver\(fn\)/.test(read('src/normalizers.js'))) && verdictOf(/addAsksObserver\(\(session\) => sync\(session\)\)/.test(MAIN_ASKS_SRC)));
 
 // ── ⑥ PATCHED-COPY CONTROLS ──
 console.log('⑥ controls');
@@ -255,4 +255,4 @@ ok('CONTROL visible-window skip: the focused, attached window files nothing ⇒ 
 MA.install({ userTodos: null, sessionKeyFor: null, activeSessions: null, log: quiet }); // the real module's deps back to inert
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

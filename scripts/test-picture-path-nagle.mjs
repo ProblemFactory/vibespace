@@ -32,7 +32,7 @@ const S = require(path.join(REPO, 'src/server/desktop-stream.js'));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 400) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 400) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SAMPLES = Number(process.env.PICTURE_NAGLE_SAMPLES) || 200;
 const GAP_MS = 25;
@@ -153,7 +153,7 @@ const stats = (xs) => { const s = [...xs].sort((a, b) => a - b); const at = (q) 
 console.log('§1 a real daemon of each kind on the device side');
 const dmNow = await deviceOn(homeNow, BUNDLE);
 const dmOld = await deviceOn(homeOld, preBundle);
-ok(dmNow.status().connected && dmOld.status().connected, 'today\'s daemon and the pre-change copy both connect (the copy\'s hello-ack is unchanged: no capability moved)');
+ok(gateOf(dmNow.status().connected) && verdictOf(dmOld.status().connected), 'today\'s daemon and the pre-change copy both connect (the copy\'s hello-ack is unchanged: no capability moved)');
 const capsOf = (dm) => JSON.stringify((dm.status().info || {}).capabilities || []);
 ok(capsOf(dmNow) === capsOf(dmOld), 'both name the same capabilities');
 
@@ -164,7 +164,7 @@ for (const [name, dm, hubBefore] of [['before', dmOld, true], ['after', dmNow, f
   legs[name] = r;
   const st = r.rtts.length ? stats(r.rtts) : null;
   console.log(`    ${name.padEnd(11)} ${st ? `median ${st.median} ms · p95 ${st.p95} ms · max ${st.max} ms (n=${st.n})` : '—'}${hubBefore ? ` · hub noDelay calls dropped: ${r.dropped}` : ''}`);
-  ok(r.opened && r.lost === 0 && r.rtts.length === SAMPLES, `${name}: the viewer's every press came back through the bridge, the forward and the daemon`, { opened: r.opened, lost: r.lost, n: r.rtts.length });
+  ok(gateOf(r.opened) && r.lost === 0 && r.rtts.length === SAMPLES, `${name}: the viewer's every press came back through the bridge, the forward and the daemon`, { opened: r.opened, lost: r.lost, n: r.rtts.length });
   r.st = st;
 }
 const B = legs.before.st, A = legs.after.st, O = legs['old-daemon'].st;
@@ -177,4 +177,4 @@ console.log(`PICTURE-NAGLE before median ${B && B.median} p95 ${B && B.p95} · a
 try { dmNow.stop?.(); dmOld.stop?.(); } catch { }
 vnc.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

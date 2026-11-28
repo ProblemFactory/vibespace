@@ -26,7 +26,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -97,7 +97,7 @@ const PUSH = /if \(msg\.type === 'accounts-updated' && Array\.isArray\(msg\.acco
 /** ② ③ ④ as rows, over a roster module and a refreshAccounts body. */
 async function starLegs(Mod, raBody) {
   const out = [];
-  const leg = (name, pass, detail) => out.push({ name, pass: !!pass, detail });
+  const leg = (name, pass, detail) => { if (typeof pass !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof pass}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (out.push({ name, pass: !!pass, detail })); };
   am.setDefault(null, 'antigravity'); am.setDefault(null, 'codex');
   class App { }
   Mod.installManageAgents(App, {});
@@ -153,39 +153,39 @@ async function starLegs(Mod, raBody) {
 console.log('① accountDefaultsOf (PURE)');
 {
   const fields = AM.defaultIdFields();
-  ok(`every billing row's field, read off the rows: ${fields.join(', ')}`, ['defaultAccountId', 'defaultCodexAccountId', 'defaultAntigravityAccountId'].every((f) => fields.includes(f)) && Object.keys(AM.BACKEND_META).every((be) => fields.includes(AM.billingRow(be).defaultIdField)));
+  ok(`every billing row's field, read off the rows: ${fields.join(', ')}`, gateOf(['defaultAccountId', 'defaultCodexAccountId', 'defaultAntigravityAccountId'].every((f) => fields.includes(f))) && verdictOf(Object.keys(AM.BACKEND_META).every((be) => fields.includes(AM.billingRow(be).defaultIdField))));
   const d = AM.accountDefaultsOf({ defaultAccountId: 'a', defaultCodexAccountId: 'b', defaultAntigravityAccountId: 'c', other: 1 });
   ok('an answer\'s fields are copied, nothing else', d.defaultAccountId === 'a' && d.defaultCodexAccountId === 'b' && d.defaultAntigravityAccountId === 'c' && !('other' in d));
-  ok('a missing field / no answer ⇒ null each', Object.values(AM.accountDefaultsOf({})).every((v) => v === null) && Object.values(AM.accountDefaultsOf(null)).every((v) => v === null));
+  ok('a missing field / no answer ⇒ null each', gateOf(Object.values(AM.accountDefaultsOf({})).every((v) => v === null)) && verdictOf(Object.values(AM.accountDefaultsOf(null)).every((v) => v === null)));
 }
 
 console.log('② ③ ④ the rosters over the real store');
-ok('app.js\'s refreshAccounts body is found (the legs run the product\'s own line)', !!RA && /\.\.\.accountDefaultsOf\(d\)/.test(RA[1]));
-for (const x of await starLegs(MA, RA ? RA[1] : '')) ok(x.name, x.pass, x.detail);
+ok('app.js\'s refreshAccounts body is found (the legs run the product\'s own line)', !!RA && verdictOf(/\.\.\.accountDefaultsOf\(d\)/.test(RA[1])));
+for (const x of await starLegs(MA, RA ? RA[1] : '')) ok(x.name, verdictOf(x.pass), x.detail);
 
 console.log('— wiring');
 {
   ok('both client cache writers copy every harness\'s field through accountDefaultsOf (no hand-picked default field left in app.js)', (APP.match(/\.\.\.accountDefaultsOf\(/g) || []).length === 3 && !/defaultCodexAccountId:/.test(APP) && !/defaultAccountId: (d|msg)\./.test(APP));
   const ma = read('src/lib/manage-agents.js');
-  ok('the isolated-home roster reads ITS harness\'s field (bill.defaultIdField), never claude\'s', /const defId = accts\[bill\.defaultIdField\] \|\| null;/.test(ma));
+  ok('the isolated-home roster reads ITS harness\'s field (bill.defaultIdField), never claude\'s', verdictOf(/const defId = accts\[bill\.defaultIdField\] \|\| null;/.test(ma)));
 }
 
 console.log('⑤ negative controls');
 {
   ok('control pre-fix: the base refreshAccounts line is swapped in', !!RA);
   const pre = RA ? RA[1].replace(/^ {6}if \(d\) this\._accounts = [^\n]*$/m, PRE_LINE) : '';
-  ok('…the swap took (the pre-fix line is in the body)', pre.includes(PRE_LINE));
+  ok('…the swap took (the pre-fix line is in the body)', verdictOf(pre.includes(PRE_LINE)));
   const redP = (await starLegs(MA, pre)).filter((x) => !x.pass).map((x) => x.name);
-  ok(`control pre-fix cache (two hand-picked fields — the owner's card): THE REPORT leg is RED (${redP.length} red), the codex twin stays green`, redP.some((n) => /^THE REPORT/.test(n)) && !redP.some((n) => /CODEX TWIN/.test(n)), redP.join(' | ').slice(0, 300));
+  ok(`control pre-fix cache (two hand-picked fields — the owner's card): THE REPORT leg is RED (${redP.length} red), the codex twin stays green`, gateOf(redP.some((n) => /^THE REPORT/.test(n))) && !redP.some((n) => /CODEX TWIN/.test(n)), redP.join(' | ').slice(0, 300));
   const M = mutantCopies('manage-agents', REPO);
   const SRC = read('src/lib/manage-agents.js');
   const FIND = 'const defId = accts[bill.defaultIdField] || null;';
-  ok('control claude-field: the roster line exists', SRC.includes(FIND));
+  ok('control claude-field: the roster line exists', verdictOf(SRC.includes(FIND)));
   const f = M.write('src/lib/manage-agents.js', editAnchor(SRC, FIND, 'const defId = accts.defaultAccountId || null;', "src/lib/manage-agents.js"), 'claude-field');
   const Mut = await import(pathToFileURL(f).href);
   const redM = (await starLegs(Mut, RA ? RA[1] : '')).filter((x) => !x.pass).map((x) => x.name);
-  ok(`control claude-field (the roster reads defaultAccountId): THE REPORT leg is RED (${redM.length} red)`, redM.some((n) => /^THE REPORT/.test(n)), redM.join(' | ').slice(0, 300));
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+  ok(`control claude-field (the roster reads defaultAccountId): THE REPORT leg is RED (${redM.length} red)`, verdictOf(redM.some((n) => /^THE REPORT/.test(n))), redM.join(' | ').slice(0, 300));
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 // ── THE PROVIDER REMOVE CONFIRM, DRIVEN WITH A STAND-IN APP (lane lg-providers, B-d578; the coordinator's 21:50Z: the Vault
@@ -207,24 +207,24 @@ console.log('⑤ negative controls');
   };
   const real = drive(PR);
   ok('the provider Remove confirm, driven: the rename wins over the raw name («Fix the build», never «Session 7»), the sidebar row\'s name over the live payload\'s, eight named then «and 3 more»; the Vault window\'s row names the provider by its name (never «Model provider key · …»); both doors say the same words; none on it ⇒ no sentence',
-    real.vault.message.endsWith(WANT) && real.vault.title === 'Remove the model provider "DeepSeek"?' && real.vault.confirm === 'Remove'
+    gateOf(real.vault.message.endsWith(WANT)) && real.vault.title === 'Remove the model provider "DeepSeek"?' && real.vault.confirm === 'Remove'
     && real.roster.title === real.vault.title && real.roster.message === real.vault.message && !real.none.message.includes('Running on it now') && real.none.title === 'Remove the model provider "Kimi"?',
     JSON.stringify({ vault: real.vault, none: real.none.message.slice(-60) }).slice(0, 400));
   const VW = read('src/lib/vault-window.js');
   const RS0 = read('src/lib/provider-roster.js');
   ok('the Vault window\'s provider Remove IS that function over the page\'s named rows (its one line), its confirm asked with the app and handed on to the words (every hop), and the roster\'s dialog shows the words it was given',
-    VW.includes('  provider: (row, app) => providerRemoveWords(row, namedLiveRows(app)),') && VW.includes('const w = confirmWords(d.confirm, row, app);') && VW.includes('  return w ? w(row, app) : {')
-    && RS0.includes('const yes = await showConfirmDialog({ title: w.title, message: w.message, confirmText: w.confirm, danger: true });'));
+    gateOf(VW.includes('  provider: (row, app) => providerRemoveWords(row, namedLiveRows(app)),')) && gateOf(VW.includes('const w = confirmWords(d.confirm, row, app);')) && gateOf(VW.includes('  return w ? w(row, app) : {'))
+    && verdictOf(RS0.includes('const yes = await showConfirmDialog({ title: w.title, message: w.message, confirmText: w.confirm, danger: true });')));
   const PM = mutantCopies('manage-agents-pv', REPO);
   const RS = read('src/lib/provider-roster.js');
   const NAME = "(names && (() => { try { return names.nameOfLive(s); } catch { return ''; } })()) || (s && s.name) || ''";
   const MORE = " + (on.more ? ' ' + t('and {n} more', { n: on.more }) : '')";
   ok('controls: each anchor is in provider-roster.js once', RS.split(NAME).length === 2 && RS.split(MORE).length === 2);
   const raw = drive(await import(pathToFileURL(PM.write('src/lib/provider-roster.js', anchored(RS, NAME, "(s && s.name) || ''", 'the live payload\'s raw name'), 'raw-name')).href));
-  ok('CONTROL: the live payload\'s raw name in place of the sidebar\'s («Session 7») ⇒ the leg goes RED', !raw.vault.message.endsWith(WANT) && raw.vault.message.includes('Session 7'), raw.vault.message.slice(-120));
+  ok('CONTROL: the live payload\'s raw name in place of the sidebar\'s («Session 7») ⇒ the leg goes RED', !raw.vault.message.endsWith(WANT) && verdictOf(raw.vault.message.includes('Session 7')), raw.vault.message.slice(-120));
   const cut = drive(await import(pathToFileURL(PM.write('src/lib/provider-roster.js', anchored(RS, MORE, '', 'the join without «and N more»'), 'no-more')).href));
   ok('CONTROL: the join without «and N more» (three conversations go unsaid) ⇒ the leg goes RED', !cut.vault.message.endsWith(WANT) && !cut.vault.message.includes('more'), cut.vault.message.slice(-80));
-  for (const r of copiesCensus(PM.files, PM.dir, REPO, { minCopies: 2 })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(PM.files, PM.dir, REPO, { minCopies: 2 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 // ── THE KEY TAILS ON THE PAGE (B-ba7d — the owner's decision 2026-11-18): the accounts list carries no tail; the page lays the
@@ -239,7 +239,7 @@ console.log('⑤ negative controls');
   const laid = await T.accountsWithTails();
   const row = (d) => (d.accounts || []).find((a) => a.id === kid) || {};
   ok('the page\'s own read: the list it fetches holds no tail; the person\'s read lays it on the API-key row (the roster\'s «API …» and the import compare read it)',
-    !!want && !('tail' in row(bare)) && row(laid).tail === want && T.tailsMissing(bare, { accounts: {} }) && !T.tailsMissing(bare, { accounts: { [kid]: want } }), { want, laid: row(laid).tail });
+    !!want && !('tail' in row(bare)) && row(laid).tail === want && gateOf(T.tailsMissing(bare, { accounts: {} })) && !T.tailsMissing(bare, { accounts: { [kid]: want } }), { want, laid: row(laid).tail });
   globalThis.__tailsRefused = true;
   const T2 = await import(pathToFileURL(path.join(REPO, 'src/lib/account-tails.js')).href + '?refused');   // a fresh page (no earlier read)
   const refused = await T2.accountsWithTails();
@@ -254,21 +254,21 @@ console.log('⑤ negative controls');
   ok('the accounts-updated push (no tail) gets the person\'s last read laid on by the page — the cache keeps showing it', row(pushLaid).tail === want && !JSON.stringify(am.list()).includes(want), row(pushLaid).tail);
   const AP = read('src/lib/app.js'), MAs = read('src/lib/manage-agents.js');
   ok('the page wiring: the app\'s refresh asks the list and the person\'s read together and lays them; its push handler lays the last read and asks again at every push (a re-keyed provider\'s new tail, never the old); the roster\'s own read goes through the same',
-    AP.includes("return fetchJson('/api/accounts').then((d0) => askTails(d0 && d0.tailsGen).then((tl) => [d0, tl])).then(([d0, tl]) => {") && AP.includes('const d = withTails(d0, tl);') && AP.includes('accounts: accountRowsOf(withTails(msg))') && AP.includes('        askTails(msg.tailsGen).then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts };')
-    && MAs.includes('    try { acct = await accountsWithTails(); } catch {}'));
+    gateOf(AP.includes("return fetchJson('/api/accounts').then((d0) => askTails(d0 && d0.tailsGen).then((tl) => [d0, tl])).then(([d0, tl]) => {")) && gateOf(AP.includes('const d = withTails(d0, tl);')) && gateOf(AP.includes('accounts: accountRowsOf(withTails(msg))')) && gateOf(AP.includes('        askTails(msg.tailsGen).then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts };'))
+    && verdictOf(MAs.includes('    try { acct = await accountsWithTails(); } catch {}')));
   const SC2 = read('src/lib/session-card.js'), CV = read('src/lib/chat-view.js'), SPp = read('src/lib/session-props.js'), WN = read('src/lib/window.js');
   ok('the conversation badges carry no key tail (the live payload reaches every client): the page reads the person\'s read by the badge\'s account id — the card, the chat header, Session Properties, the window chip',
     T.tailOf(kid) === want && T.tailOf('acct-unknown') === null
-    && SC2.includes("${badgeTail(a) ? ' (…' + badgeTail(a) + ')' : ''}") && CV.includes("(badgeTail(a) ? ' (…' + badgeTail(a) + ')' : '')")
-    && SPp.includes("tail: badgeTail(a) ? ' (…' + badgeTail(a) + ')' : ''") && WN.includes("(badgeTail(auth) ? ' (…' + badgeTail(auth) + ')' : '')")
-    && [SC2, CV, SPp, WN].every((s) => s.includes("import { badgeTail } from './account-tails.js';")) && T.badgeTail({ accountId: kid }) === want && T.badgeTail({ tail: 'abcd' }) === 'abcd');
+    && gateOf(SC2.includes("${badgeTail(a) ? ' (…' + badgeTail(a) + ')' : ''}")) && gateOf(CV.includes("(badgeTail(a) ? ' (…' + badgeTail(a) + ')' : '')"))
+    && gateOf(SPp.includes("tail: badgeTail(a) ? ' (…' + badgeTail(a) + ')' : ''")) && gateOf(WN.includes("(badgeTail(auth) ? ' (…' + badgeTail(auth) + ')' : '')"))
+    && gateOf([SC2, CV, SPp, WN].every((s) => s.includes("import { badgeTail } from './account-tails.js';"))) && T.badgeTail({ accountId: kid }) === want && T.badgeTail({ tail: 'abcd' }) === 'abcd');
   const TM = mutantCopies('manage-agents-tails', REPO);
   const TS = read('src/lib/account-tails.js');
   const LAY = "  if (Array.isArray(d.accounts)) out.accounts = d.accounts.map((a) => { if (!a) return a; const v = a.type === 'provider' ? prov[a.id] : tails[a.id]; return typeof v === 'string' ? { ...a, tail: v } : a; });";
   ok('control: the lay-on is one line of account-tails.js', TS.split(LAY).length === 2);
   const Tx = await import(pathToFileURL(TM.write('src/lib/account-tails.js', anchored(TS, LAY, '  // CONTROL: the lay-on cut', 'the page without the lay-on'), 'no-lay')).href);
   ok('CONTROL: the page without the lay-on shows no tail on the API-key row though the person\'s read answered it ⇒ the legs above go RED', !('tail' in row(await Tx.accountsWithTails())));
-  for (const r of copiesCensus(TM.files, TM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(TM.files, TM.dir, REPO, { minCopies: 1 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 // B-ee0a smalls: ONE tails ask a TAILS GENERATION (each ask is a synchronous read of the CLI's file on the hub's main loop) — and its
@@ -292,24 +292,24 @@ console.log('⑤ negative controls');
   const r1 = await oneGen(await import(pathToFileURL(path.join(REPO, 'src/lib/account-tails.js')).href + '?onegen'));   // a fresh page
   const APP2 = read('src/lib/app.js');
   ok('ONE tails ask a generation: two at once are one, the roster\'s refresh takes the read, the CLI\'s own key seen different asks again (never a wrong tail), a refused read is asked again, no word asks; the app\'s push and refresh pass the list\'s word',
-    r1.first === 1 && r1.reused === 1 && r1.afterCli === 2 && r1.afterRefusal === 4 && r1.noWord === 5 && r1.inflightOther === 7 && APP2.includes('        askTails(msg.tailsGen).then(') && APP2.includes('askTails(d0 && d0.tailsGen)')
-    && APP2.includes("try { this.refreshAccounts?.(); } catch { }   // B-ee0a (its delta read): an accounts push missed while away"), r1);
+    r1.first === 1 && r1.reused === 1 && r1.afterCli === 2 && r1.afterRefusal === 4 && r1.noWord === 5 && r1.inflightOther === 7 && gateOf(APP2.includes('        askTails(msg.tailsGen).then(')) && gateOf(APP2.includes('askTails(d0 && d0.tailsGen)'))
+    && verdictOf(APP2.includes("try { this.refreshAccounts?.(); } catch { }   // B-ee0a (its delta read): an accounts push missed while away")), r1);
   // the credential doors' refusals in the page's words — the reveal, the export and the import dialogs ask ONE function
   const CW = await import(pathToFileURL(path.join(REPO, 'src/lib/account-tails.js')).href + '?words');
   ok('the credential doors\' refusals are worded by ONE page function (the reveal, the export and the import dialogs): each code its words, anything else none',
-    /^Only the person, on this VibeSpace page/.test(CW.credentialDoorWords({ code: 'credential_person_only' }) || '') && /^Only the person, on this VibeSpace page/.test(CW.credentialDoorWords({ code: 'credential_page_only' }) || '') && CW.credentialDoorWords({ code: 'x' }) === null
+    gateOf(/^Only the person, on this VibeSpace page/.test(CW.credentialDoorWords({ code: 'credential_person_only' }) || '')) && gateOf(/^Only the person, on this VibeSpace page/.test(CW.credentialDoorWords({ code: 'credential_page_only' }) || '')) && CW.credentialDoorWords({ code: 'x' }) === null
     // the export's and the import's refusal lines AS RULED (主开发 08:55Z — seamed with the release's Task Groups cure by int361): the
     // release's TASK_GROUPS_UNREAD branch first, then (export) a store hold's words (heldWordsOf — test-hosts-held-census §8), then credentialDoorWords(d), then d.error, then the fallback — each branch named, none
     // optional, each line once
     && APP2.split("err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t(\"Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.\") : (heldWordsOf(d) || credentialDoorWords(d) || d.error || t('Export failed'));").length === 2
     && APP2.split("err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t(\"Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.\") : (credentialDoorWords(d) || d.error || t('Import failed'));").length === 2
-    && read('src/lib/vault-reveal.js').includes('const cw = credentialDoorWords(r);'));
+    && verdictOf(read('src/lib/vault-reveal.js').includes('const cw = credentialDoorWords(r);')));
   const OTS = read('src/lib/account-tails.js');
   const SAME = '  if (!inflight && same()) return Promise.resolve(last);\n';
   const OM = mutantCopies('manage-agents-onegen', REPO);
   const r0 = await oneGen(await import(pathToFileURL(OM.write('src/lib/account-tails.js', anchored(OTS, SAME, '  if (!inflight && readGen != null) return Promise.resolve(last);\n', 'the page that reuses a read under any word'), 'any-word')).href));
   ok('CONTROL: the page that reuses its read under any word keeps the old CLI-key tail after the key changed on disk ⇒ the leg above goes RED', r0.afterCli === r0.reused, r0);
-  for (const r of copiesCensus(OM.files, OM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(OM.files, OM.dir, REPO, { minCopies: 1 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 // B-ee0a (its delta read, S3): a paired machine whose tail is UNKNOWN is never «already imported» — the REAL predicate the host roster's
@@ -320,12 +320,12 @@ console.log('⑤ negative controls');
   const unknown = MA0.hostKeyImported(accts, { present: true }), known = MA0.hostKeyImported(accts, { present: true, tail: 'Kc4mR8vn' }), other = MA0.hostKeyImported(accts, { present: true, tail: 'Zz9yX8wv' });
   const MAs2 = read('src/lib/manage-agents.js');
   ok('a paired machine\'s key with an UNKNOWN tail is never «already imported» (its import offered — idempotent); a known tail matching an account is; another is not; both roster doors ask this one predicate',
-    unknown === false && known === true && other === false && MAs2.includes('    const hostKeyIn = (k) => hostKeyImported(claudeAccts, k);') && MAs2.split('!hostKeyIn(racct.cliKey)').length === 3, { unknown, known, other });
+    unknown === false && known === true && other === false && gateOf(MAs2.includes('    const hostKeyIn = (k) => hostKeyImported(claudeAccts, k);')) && MAs2.split('!hostKeyIn(racct.cliKey)').length === 3, { unknown, known, other });
   const OLDP = "  return !!(cliKey && typeof cliKey.tail === 'string' && cliKey.tail && tails.has(cliKey.tail));";
   const HM = mutantCopies('manage-agents-hostkey', REPO);
   const MAx = await import(pathToFileURL(HM.write('src/lib/manage-agents.js', anchored(MAs2, OLDP, '  return new Set((accts || []).map((a) => a && a.tail)).has(cliKey && cliKey.tail);', 'the old Set predicate'), 'old-set')).href);   // every tail-less row put undefined in it
   ok('CONTROL: the predicate as it was (the old Set) reads an unknown tail as «already imported» — the host\'s Console key would be orphaned ⇒ the leg above goes RED', MAx.hostKeyImported(accts, { present: true }) === true);
-  for (const r of copiesCensus(HM.files, HM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(HM.files, HM.dir, REPO, { minCopies: 1 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 // B-ee0a: A PAIRED machine's CLI-key tail — its accounts-status answer carries none; the REAL page helper lays the person's read on
@@ -342,8 +342,8 @@ console.log('⑤ negative controls');
   const MA = read('src/lib/manage-agents.js');
   ok('a paired machine\'s CLI-key tail: the person\'s read lays it on the machine\'s answer (a copy — the answer itself untouched); none asked for no key; a refused read lays nothing; the host roster reads through it',
     laid.cliKey.tail === HT && !('tail' in st.cliKey) && !('tail' in none.cliKey) && !('tail' in refused.cliKey)
-    && MA.includes('racct = await withHostKeyTail(selectedHost, await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`));'), { laid: laid.cliKey, refused: refused.cliKey });
+    && verdictOf(MA.includes('racct = await withHostKeyTail(selectedHost, await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`));')), { laid: laid.cliKey, refused: refused.cliKey });
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

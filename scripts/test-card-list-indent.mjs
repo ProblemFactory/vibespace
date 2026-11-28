@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
 
 // ── ① THE CENSUS: where each markdown render lands ──
@@ -72,7 +72,7 @@ for (const f of CENSUS_FILES) {
 }
 const crSites = census(read('src/lib/chat-renderers.js'));
 check(`① the census sees the renderer's markup sites (≥ 8 templates in chat-renderers.js: ${crSites.filter((s) => s.kind === 'template').length}) and its one definition`, crSites.filter((s) => s.kind === 'template').length >= 8 && crSites.filter((s) => s.kind === 'def').length === 1, crSites);
-check(`① the delegate to subagent-card.js is followed there (${delegates} delegate(s); subagent-card.js censused)`, delegates >= 1 && census(read('src/lib/subagent-card.js')).some((s) => s.kind === 'template'));
+check(`① the delegate to subagent-card.js is followed there (${delegates} delegate(s); subagent-card.js censused)`, delegates >= 1 && verdictOf(census(read('src/lib/subagent-card.js')).some((s) => s.kind === 'template')));
 { // the control: one fake site added to a scratch copy of the text ⇒ red at that line, by name
   const src = read('src/lib/chat-renderers.js') + '\nconst fake = `<div class="chat-agent-x">${this.renderMarkdown(text)}</div>`;\n';
   const bad = census(src).filter((s) => !s.ok);
@@ -102,4 +102,4 @@ check('② chat.css keeps no bubble-scoped list indent (`.chat-bubble-… .chat-
 
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

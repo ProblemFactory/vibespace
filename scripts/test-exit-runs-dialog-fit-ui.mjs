@@ -24,7 +24,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 // a private session: chrome and the server never see the owner's runtime dir, home or display
 const PRIV = { XDG_RUNTIME_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-erdf-xdg-')), HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-erdf-home-')) };
 fs.chmodSync(PRIV.XDG_RUNTIME_DIR, 0o700);
@@ -106,17 +106,17 @@ try {
     const n = await P.evalJs(OPEN_JS(true));
     await sleep(300);
     const head = await P.evalJs(`document.querySelector('#exit-runs-dialog .exit-runs-row .exit-runs-cmd')?.textContent || ''`);
-    ok(n === 4 && head.startsWith('PowerShell: [Console]::OutputEncoding'), `${tag}: the list drawn (${n} rows), the encoded row reads as its script (${head.slice(0, 40)}…)`);
+    ok(n === 4 && verdictOf(head.startsWith('PowerShell: [Console]::OutputEncoding')), `${tag}: the list drawn (${n} rows), the encoded row reads as its script (${head.slice(0, 40)}…)`);
     const c = await P.evalJs(CENSUS_JS);
-    ok(c.ok, `${tag} ①②: dialog ${c.dlg} in ${c.vw} px (${c.inView}), body inside it ${c.bodyIn}, sideways ${c.sideways}, past the body ${c.nPast} ${JSON.stringify(c.past)}, ${c.pres} pres, not wrapping/scrolling ${JSON.stringify(c.badPre)}, intro whole ${c.noteWhole}`);
+    ok(verdictOf(c.ok), `${tag} ①②: dialog ${c.dlg} in ${c.vw} px (${c.inView}), body inside it ${c.bodyIn}, sideways ${c.sideways}, past the body ${c.nPast} ${JSON.stringify(c.past)}, ${c.pres} pres, not wrapping/scrolling ${JSON.stringify(c.badPre)}, intro whole ${c.noteWhole}`);
     const wantStack = width < 600;
-    ok(c.stacked === (wantStack ? 'SSSS' : 'GGGG') && c.cmdLines.every((h) => h < 2 * 1.75), `${tag} ③: rows ${c.stacked} (${wantStack ? 'S = time + who over the command' : 'G = time · who · command'}), command heights ${c.cmdLines.join('/')} em (≤ 2 lines)`);
-    ok(c.transfer.length === 2 && c.transfer.every((x) => x.same && x.ms === '<0.1 s'), `${tag} ④: transfer outcome lines ${JSON.stringify(c.transfer.map((x) => [x.v, x.ms, x.same]))}`);
+    ok(c.stacked === (wantStack ? 'SSSS' : 'GGGG') && verdictOf(c.cmdLines.every((h) => h < 2 * 1.75)), `${tag} ③: rows ${c.stacked} (${wantStack ? 'S = time + who over the command' : 'G = time · who · command'}), command heights ${c.cmdLines.join('/')} em (≤ 2 lines)`);
+    ok(c.transfer.length === 2 && verdictOf(c.transfer.every((x) => x.same && x.ms === '<0.1 s')), `${tag} ④: transfer outcome lines ${JSON.stringify(c.transfer.map((x) => [x.v, x.ms, x.same]))}`);
     // ② no-wrap: the stdout toggle → the pre keeps its lines and scrolls INSIDE itself; the census still holds
     const clicked = await P.realClick(`(document.querySelector('#exit-runs-dialog .exit-runs-row .exit-runs-head .exit-runs-wrap'))`);
     const nw = await P.evalJs(`(() => { const p = document.querySelector('#exit-runs-dialog .exit-runs-row .exit-runs-out > pre.exit-runs-pre'); const cs = getComputedStyle(p); return { ws: cs.whiteSpace, ox: cs.overflowX, inner: p.scrollWidth, outer: p.clientWidth, btn: document.querySelector('#exit-runs-dialog .exit-runs-head .exit-runs-wrap').textContent }; })()`);
     const c2 = await P.evalJs(CENSUS_JS);
-    ok(clicked && nw.ws === 'pre' && /auto|scroll/.test(nw.ox) && nw.inner > nw.outer + 50 && c2.ok, `${tag} ②: Wrap off (${nw.btn}) → stdout ${nw.ws}/${nw.ox}, ${nw.inner} inside ${nw.outer}; census still ${c2.ok} (past ${c2.nPast}, sideways ${c2.sideways})`);
+    ok(gateOf(clicked) && nw.ws === 'pre' && gateOf(/auto|scroll/.test(nw.ox)) && nw.inner > nw.outer + 50 && verdictOf(c2.ok), `${tag} ②: Wrap off (${nw.btn}) → stdout ${nw.ws}/${nw.ox}, ${nw.inner} inside ${nw.outer}; census still ${c2.ok} (past ${c2.nPast}, sideways ${c2.sideways})`);
     await P.realClick(`(document.querySelector('#exit-runs-dialog .exit-runs-row .exit-runs-head .exit-runs-wrap'))`);
     if (SHOTS && lang === 'zh') {
       await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); true`);
@@ -133,9 +133,9 @@ try {
   const NEW_DLG = '.dialog.exit-runs-dialog { width: 960px; max-width: calc((100vw - 32px) / var(--ui-scale, 1)); }\n';
   const NEW_BODY = '.exit-runs-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-height: 70vh; overflow-x: hidden; overflow-y: auto; }';
   const OLD = CSS.replace(NEW_DLG, '').replace(NEW_BODY, '.exit-runs-body { display: flex; flex-direction: column; gap: 6px; min-width: min(640px, 92vw); max-height: 70vh; overflow: auto; }');
-  ok(CSS.includes(NEW_DLG) && CSS.includes(NEW_BODY) && OLD !== CSS, 'the control patch applies');
+  ok(gateOf(CSS.includes(NEW_DLG)) && gateOf(CSS.includes(NEW_BODY)) && OLD !== CSS, 'the control patch applies');
   const P = await W.openPage({ width: 1280, height: 820, lang: 'en', bundleText });
-  ok(await P.evalJs(swapStyleJs(OLD)), 'the old CSS swapped in');
+  ok(verdictOf(await P.evalJs(swapStyleJs(OLD))), 'the old CSS swapped in');
   await P.evalJs(OPEN_JS(true)); await sleep(300);
   const cc = await P.evalJs(CENSUS_JS);
   ok(!cc.ok && !cc.bodyIn && cc.nPast > 0 && !cc.noteWhole, `CONTROL: the 2.369.207 CSS → ① red (dialog ${cc.dlg}, body inside it ${cc.bodyIn}, sideways ${cc.sideways}, past ${cc.nPast} ${JSON.stringify(cc.past.slice(0, 3))}, intro whole ${cc.noteWhole})`);
@@ -147,4 +147,4 @@ try {
   W.cleanup();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : code);
+process.exit(fail ? 1 : code); import { verdictOf, gateOf } from './lib/check.mjs';

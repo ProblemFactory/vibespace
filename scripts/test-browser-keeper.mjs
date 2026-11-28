@@ -31,7 +31,7 @@ const BE = require('../src/browser-stderr.js');
 const F = require('../src/browser-facts.js');
 const DA = require('../src/desktop-apps.js');
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -60,9 +60,9 @@ console.log('— ① the argv table + the census');
 const quiet = BE.QUIET_LOG_ARGS;
 const av = AT.attachArgv({ profileDir: '/home/u/.agent-browser/vs-bp-0000000a', mark: B.keeperMarkArg('bp-0000000a'), quiet });
 const WANT = ['--remote-debugging-port=0', '--user-data-dir=/home/u/.agent-browser/vs-bp-0000000a', '--no-first-run', '--no-default-browser-check', '--ozone-platform=x11', '--disable-blink-features=AutomationControlled', '--disable-background-networking', '--password-store=basic', '--use-mock-keychain', '--disable-logging', '--log-level=3', '--vibespace-keeper=bp-0000000a', 'about:blank'];
-ok(av.ok && JSON.stringify(av.argv) === JSON.stringify(WANT), 'the argv AS COMMITTED (design §2.1 + the profile store + the quiet switches + the launch mark + about:blank)', av);
-ok(AT.argvVerdict(av.argv).ok && !av.argv.includes('--disable-sync'), 'its census: every required flag present, --disable-sync absent, one --user-data-dir');
-ok(av.argv.includes('--disable-blink-features=AutomationControlled') && av.argv.includes('--disable-background-networking'), 'the two flags the brief names are on it (webdriver hidden; no Google traffic of Chrome\'s own)');
+ok(gateOf(av.ok) && JSON.stringify(av.argv) === JSON.stringify(WANT), 'the argv AS COMMITTED (design §2.1 + the profile store + the quiet switches + the launch mark + about:blank)', av);
+ok(gateOf(AT.argvVerdict(av.argv).ok) && !av.argv.includes('--disable-sync'), 'its census: every required flag present, --disable-sync absent, one --user-data-dir');
+ok(gateOf(av.argv.includes('--disable-blink-features=AutomationControlled')) && verdictOf(av.argv.includes('--disable-background-networking')), 'the two flags the brief names are on it (webdriver hidden; no Google traffic of Chrome\'s own)');
 ok(!AT.attachArgv({ profileDir: 'relative/dir' }).ok && AT.attachArgv({ profileDir: 'relative/dir' }).code === 'bad_profile_dir', 'a relative profile dir is refused by name');
 // THE CENSUS OVER THE ARGV BUILDER: no file of the attach road spells --disable-sync outside the FORBIDDEN declaration
 const codeOf = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/\s\/\/ .*$/, '')).join('\n');
@@ -74,7 +74,7 @@ const hits = ATTACH_FILES.flatMap((f) => syncCensus(fs.readFileSync(path.join(RE
 const ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
 const attachFn = ks.slice(ks.indexOf('  async function attachStart('), ks.indexOf('  async function stop(profileId'));
 ok(hits.length === 0 && attachFn.length > 2000 && syncCensus(attachFn).length === 0, `no literal --disable-sync on the attach road (${ATTACH_FILES.length} files + the keeper's attachStart, ${attachFn.length} chars) beyond the FORBIDDEN list`, hits);
-ok(/AT\.attachArgv\(\{ profileDir: p\.dir, mark: B\.keeperMarkArg\(p\.id\), quiet: BE\.QUIET_LOG_ARGS, extra: engineArgs \}\)/.test(attachFn) && /const engineArgs = engineLaunch && Array\.isArray\(engineLaunch\.args\) \? ENG\.engineArgs\(engineLaunch\) : \[\];/.test(attachFn) && /ATL\.spawnChrome\(\{ exe, argv: av\.argv,/.test(attachFn), 'the keeper spawns EXACTLY the builder\'s argv (no flag added beside it — lane engine-plugin: an engine\'s own arguments go IN through the builder, censused with the rest; lane engine-spi-egress: the keeper\'s proxy arguments of a wrapped engine with them, engineArgs)');
+ok(gateOf(/AT\.attachArgv\(\{ profileDir: p\.dir, mark: B\.keeperMarkArg\(p\.id\), quiet: BE\.QUIET_LOG_ARGS, extra: engineArgs \}\)/.test(attachFn)) && gateOf(/const engineArgs = engineLaunch && Array\.isArray\(engineLaunch\.args\) \? ENG\.engineArgs\(engineLaunch\) : \[\];/.test(attachFn)) && verdictOf(/ATL\.spawnChrome\(\{ exe, argv: av\.argv,/.test(attachFn)), 'the keeper spawns EXACTLY the builder\'s argv (no flag added beside it — lane engine-plugin: an engine\'s own arguments go IN through the builder, censused with the rest; lane engine-spi-egress: the keeper\'s proxy arguments of a wrapped engine with them, engineArgs)');
 ok(syncCensus("const ARGV = ['--remote-debugging-port=0', '--disable-sync'];").length === 1, 'CONTROL: a planted argv literal with --disable-sync is RED');
 ok(syncCensus("const ARGV = ['--remote-debugging-port=0', '-disable-sync'];").length === 1, 'CONTROL (B-0528): a planted single-dash -disable-sync literal is RED too');
 const noAC = mutant('src/browser-attach.js', "\n    '--disable-blink-features=AutomationControlled', '--disable-background-networking', ...PROFILE_STORE", "\n    '--disable-background-networking', ...PROFILE_STORE");
@@ -85,7 +85,7 @@ const withSync = mutant('src/browser-attach.js', "'--disable-background-networki
 console.log('— ①b an engine\'s forbidden switch: dropped and said, never the launch refused');
 {
   const sf = typeof AT.stripForbidden === 'function' ? AT.stripForbidden(['--vibespace-engine=x', '--disable-sync', '--disable-sync=1', '--disable-syncx']) : null;
-  ok(sf && JSON.stringify(sf) === JSON.stringify({ kept: ['--vibespace-engine=x', '--disable-syncx'], dropped: ['--disable-sync', '--disable-sync=1'] }), 'stripForbidden (PURE): an engine\'s forbidden switch (bare or =value) is dropped, every other kept in its order (a longer name is another switch)', sf);
+  ok(gateOf(sf) && JSON.stringify(sf) === JSON.stringify({ kept: ['--vibespace-engine=x', '--disable-syncx'], dropped: ['--disable-sync', '--disable-sync=1'] }), 'stripForbidden (PURE): an engine\'s forbidden switch (bare or =value) is dropped, every other kept in its order (a longer name is another switch)', sf);
   // B-0528 (1): the single-dash spelling is the same switch to Chromium (the engine walls' `^--?` rule) — dropped and said too
   const sf1 = AT.stripForbidden(['-disable-sync', '-disable-sync=1', '-disable-syncx', '---disable-sync']);
   ok(JSON.stringify(sf1) === JSON.stringify({ kept: ['-disable-syncx', '---disable-sync'], dropped: ['-disable-sync', '-disable-sync=1'] }) && AT.argvVerdict(['-disable-sync']).forbidden.join() === '-disable-sync', 'B-0528: a single-dash -disable-sync (bare or =value) is the forbidden switch too — dropped from an engine, red in the census; a longer name or a triple dash is another switch', sf1);
@@ -94,16 +94,16 @@ console.log('— ①b an engine\'s forbidden switch: dropped and said, never the
     ok(pre.stripForbidden(['-disable-sync']).kept.join() === '-disable-sync', 'CONTROL (B-0528, the release\'s rule): an engine\'s -disable-sync is KEPT — it reached Chrome unsaid'); }
   const ae = AT.attachArgv({ profileDir: '/p', mark: B.keeperMarkArg('bp-0000000a'), quiet, extra: ['--vibespace-engine=x', '--disable-sync'] });
   const want = AT.attachArgv({ profileDir: '/p', mark: B.keeperMarkArg('bp-0000000a'), quiet, extra: ['--vibespace-engine=x'] });
-  ok(ae.ok && JSON.stringify(ae.argv) === JSON.stringify(want.argv) && AT.argvVerdict(ae.argv).ok && JSON.stringify(ae.dropped) === JSON.stringify(['--disable-sync']), 'an ENGINE\'s --disable-sync: the launch is NOT refused — its argv is the one without it, and `dropped` names it for the caller to say', ae);
-  ok(want.ok && Array.isArray(want.dropped) && want.dropped.length === 0, 'an engine with nothing forbidden: `dropped` is empty (nothing to say)', want.dropped);
+  ok(gateOf(ae.ok) && JSON.stringify(ae.argv) === JSON.stringify(want.argv) && gateOf(AT.argvVerdict(ae.argv).ok) && JSON.stringify(ae.dropped) === JSON.stringify(['--disable-sync']), 'an ENGINE\'s --disable-sync: the launch is NOT refused — its argv is the one without it, and `dropped` names it for the caller to say', ae);
+  ok(gateOf(want.ok) && gateOf(Array.isArray(want.dropped)) && want.dropped.length === 0, 'an engine with nothing forbidden: `dropped` is empty (nothing to say)', want.dropped);
   const own = AT.attachArgv({ profileDir: '/p', quiet: [...quiet, '--disable-sync'] });
   const ownMark = AT.attachArgv({ profileDir: '/p', mark: '--disable-sync=1' });
   ok(!own.ok && own.code === 'bad_argv' && JSON.stringify(own.offending) === JSON.stringify(['--disable-sync']) && !ownMark.ok && ownMark.code === 'bad_argv', 'PLANTED CONTROL: a forbidden switch the HUB puts in the argv (its quiet switches, its mark) is still refused bad_argv — the strip is the engine\'s part only, and the refusal names the item', { own, ownMark });
   const dup = AT.attachArgv({ profileDir: '/p', extra: ['--user-data-dir=/elsewhere'] });
-  ok(!dup.ok && dup.code === 'bad_argv' && JSON.stringify(dup.offending) === JSON.stringify(['--user-data-dir=/p', '--user-data-dir=/elsewhere']) && /--user-data-dir ×2/.test(dup.error), 'an engine\'s second --user-data-dir is still refused, the census naming both items (×2 in its words)', dup);
+  ok(!dup.ok && dup.code === 'bad_argv' && JSON.stringify(dup.offending) === JSON.stringify(['--user-data-dir=/p', '--user-data-dir=/elsewhere']) && verdictOf(/--user-data-dir ×2/.test(dup.error)), 'an engine\'s second --user-data-dir is still refused, the census naming both items (×2 in its words)', dup);
   ok(typeof AT.droppedWords === 'function' && AT.droppedWords({ engine: 'vibespace.custom-browser', dropped: ['--disable-sync'] }) === "engine vibespace.custom-browser's launch switch --disable-sync dropped on the attach road (driver-only; the attach road needs Chrome's sign-in entry)" && typeof AT.argvItemsText === 'function' && AT.argvItemsText(['--a=1', '--b c', '\t--x']) === '--a=1 "--b c" "\\t--x"', 'the words: one sentence names the engine and its switch(es); an argv item with a space or a control character is quoted (a journal line stays one line)');
   let judged = null; try { judged = mutant('src/browser-attach.js', '...eng.kept,', '...(Array.isArray(extra) ? extra.map(String) : []),'); } catch (e) { judged = { error: e && e.message }; } // a tree without the strip: red by name, the suite goes on
-  ok(judged && typeof judged.attachArgv === 'function' && !judged.attachArgv({ profileDir: '/p', extra: ['--disable-sync'] }).ok, 'CONTROL (the incident): a builder that JUDGES the engine\'s switch instead of dropping it refuses the whole launch bad_argv', judged && judged.error);
+  ok(gateOf(judged) && typeof judged.attachArgv === 'function' && !judged.attachArgv({ profileDir: '/p', extra: ['--disable-sync'] }).ok, 'CONTROL (the incident): a builder that JUDGES the engine\'s switch instead of dropping it refuses the whole launch bad_argv', judged && judged.error);
 }
 ok(!withSync.attachArgv({ profileDir: '/p' }).ok && syncCensus(fs.readFileSync(path.join(REPO, 'src/browser-attach.js'), 'utf8').replace("'--disable-background-networking', ...PROFILE_STORE", "'--disable-background-networking', '--disable-sync', ...PROFILE_STORE")).length === 1, 'CONTROL: a builder that adds --disable-sync is RED twice (its own census + the source census)');
 
@@ -114,8 +114,8 @@ const pf = (text, mtimeMs) => AT.portFileVerdict({ text, mtimeMs, spawnedAt: T0 
 ok(pf(`${DP}\n/devtools/browser/0b1f-aa\n`, T0 + 160).state === 'new' && pf(`${DP}\n/devtools/browser/0b1f-aa\n`, T0 + 160).port === DP, 'new: written after the spawn, both lines ⇒ its port');
 ok(pf(`${DP}\n/devtools/browser/0b1f-aa\n`, T0 - 60000).state === 'stale' && pf(`${DP}\n/devtools/browser/0b1f-aa\n`, T0).state === 'stale', 'stale: written before (or at) the spawn — a killed Chrome\'s dead port, never connected to');
 ok(pf(null, null).state === 'missing' && pf(`${DP}\n`, T0 + 10).state === 'missing' && pf('x\ny', T0 + 10).state === 'missing', 'missing: absent, or a new file still half-written (keep polling)');
-ok(AT.cdpUrlOf(DP, '/devtools/browser/0b1f-aa') === `ws://127.0.0.1:${DP}/devtools/browser/0b1f-aa` && B.isLoopbackCdpUrl(AT.cdpUrlOf(1, '/devtools/browser/x')), 'the cdpUrl is the loopback ws url a lease is handed');
-ok(AT.portMissing({}).code === 'cdp_port_missing' && /never connects to a port this launch did not write/.test(AT.portMissing({}).error), 'the refusal is named cdp_port_missing');
+ok(AT.cdpUrlOf(DP, '/devtools/browser/0b1f-aa') === `ws://127.0.0.1:${DP}/devtools/browser/0b1f-aa` && verdictOf(B.isLoopbackCdpUrl(AT.cdpUrlOf(1, '/devtools/browser/x'))), 'the cdpUrl is the loopback ws url a lease is handed');
+ok(AT.portMissing({}).code === 'cdp_port_missing' && verdictOf(/never connects to a port this launch did not write/.test(AT.portMissing({}).error)), 'the refusal is named cdp_port_missing');
 const lax = mutant('src/browser-attach.js', 'if (!(Number(mtimeMs) > Number(spawnedAt))) return', 'if (false) return');
 ok(lax.portFileVerdict({ text: `${DP}\n/devtools/browser/0b1f-aa\n`, mtimeMs: T0 - 60000, spawnedAt: T0 }).state === 'new', 'CONTROL: a verdict that ignores the mtime ACCEPTS the stale file (the table goes red on that row)');
 // the stand-ins' folders (the keeper's env names them; the fake Chrome and every launch are in the heavy twin)
@@ -127,17 +127,17 @@ console.log('— ③ the socket dir per config');
 const sa = AT.attachSocketDir({ base: '/tmp', uid: 1000, profileId: 'bp-0000000a' });
 const sb = AT.attachSocketDir({ base: '/tmp', uid: 1000, profileId: 'bp-0000000b' });
 ok(sa.dir === '/tmp/vs-ab-1000/bp-0000000a' && sb.dir === '/tmp/vs-ab-1000/bp-0000000b' && sa.parent === sb.parent && sa.dir !== sb.dir, 'one dir per config under the short per-uid root (browser-profiles\' vs-ab-<uid>)', { sa, sb });
-ok(sa.fits && sa.bytes === sa.dir.length + 50 && sa.bytes <= 103 && !AT.attachSocketDir({ base: '/tmp/' + 'x'.repeat(40), uid: 1000, profileId: 'bp-0000000a' }).fits, 'the socket path stays within 103 bytes (a long base is refused, never emitted)');
+ok(gateOf(sa.fits) && sa.bytes === sa.dir.length + 50 && sa.bytes <= 103 && !AT.attachSocketDir({ base: '/tmp/' + 'x'.repeat(40), uid: 1000, profileId: 'bp-0000000a' }).fits, 'the socket path stays within 103 bytes (a long base is refused, never emitted)');
 ok(AT.attachSocketDir({ profileId: '../etc' }).dir === null && AT.attachSocketDir({ base: '/tmp;rm', uid: 1, profileId: 'bp-1' }).dir === '/tmp/vs-ab-1/bp-1', 'a profile id that is not one names no dir; a base with shell syntax falls back to /tmp');
 const call = AT.attachCall(['tab', 'list', '--json'], { AGENT_BROWSER_SESSION: 'vs-bk-1', AGENT_BROWSER_PROFILE: '/x', AGENT_BROWSER_CDP: 'ws://127.0.0.1:9/x', AGENT_BROWSER_HEADED: '1', AGENT_BROWSER_EXECUTABLE_PATH: '/e', AGENT_BROWSER_SOCKET_DIR: '/run/user/1/agent-browser', AGENT_BROWSER_CONFIG: '/c/machine.json' }, { cdp: `ws://127.0.0.1:${DP}/devtools/browser/0b1f`, socketDir: sa.dir });
 ok(JSON.stringify(call.args) === JSON.stringify(['--cdp', `ws://127.0.0.1:${DP}/devtools/browser/0b1f`, 'tab', 'list', '--json']) && call.env.AGENT_BROWSER_SOCKET_DIR === sa.dir && !('AGENT_BROWSER_PROFILE' in call.env) && !('AGENT_BROWSER_CDP' in call.env) && !('AGENT_BROWSER_HEADED' in call.env) && !('AGENT_BROWSER_EXECUTABLE_PATH' in call.env) && call.env.AGENT_BROWSER_SESSION === 'vs-bk-1', 'a call: --cdp <the ws url> FIRST, no launch key in its env, the config\'s own socket root', call);
 const SOCKBASE = path.join(S, 's'); fs.mkdirSync(SOCKBASE, { recursive: true }); // production's base is /tmp (it exists)
 const own = ATL.ensureSocketDir(AT.attachSocketDir({ base: SOCKBASE, uid: process.getuid(), profileId: 'bp-0000000a' }));
-ok(own.ok && (fs.statSync(own.dir).mode & 0o777) === 0o700 && (fs.statSync(path.dirname(own.dir)).mode & 0o777) === 0o700, 'made 0700, the per-uid root too', own);
+ok(gateOf(own.ok) && (fs.statSync(own.dir).mode & 0o777) === 0o700 && (fs.statSync(path.dirname(own.dir)).mode & 0o777) === 0o700, 'made 0700, the per-uid root too', own);
 fs.symlinkSync('/tmp', path.join(path.dirname(own.dir), 'bp-0000000c'));
 const planted = ATL.ensureSocketDir(AT.attachSocketDir({ base: SOCKBASE, uid: process.getuid(), profileId: 'bp-0000000c' }));
-ok(!planted.ok && planted.code === 'socket_dir_unavailable' && /SYMLINK/.test(planted.error), 'a planted symlink at a config\'s name is refused by name (a socket never lands in somebody else\'s directory)', planted);
-ok(B.attachedEnvFor({ browserKey: 'bk-00000001', profileId: 'bp-0000000a', cdpUrl: `ws://127.0.0.1:${DP}/devtools/browser/x`, socketDir: sa.dir }).includes(`AGENT_BROWSER_SOCKET_DIR=${sa.dir}`) && !B.attachedEnvFor({ browserKey: 'bk-00000001', profileId: 'bp-0000000a', cdpUrl: `ws://127.0.0.1:${DP}/devtools/browser/x` }).some((kv) => kv.startsWith('AGENT_BROWSER_SOCKET_DIR=')), 'the agent\'s pairs name the config\'s root on the attach road only (the CLI sets it last — the same daemon as the keeper\'s calls)');
+ok(!planted.ok && planted.code === 'socket_dir_unavailable' && verdictOf(/SYMLINK/.test(planted.error)), 'a planted symlink at a config\'s name is refused by name (a socket never lands in somebody else\'s directory)', planted);
+ok(gateOf(B.attachedEnvFor({ browserKey: 'bk-00000001', profileId: 'bp-0000000a', cdpUrl: `ws://127.0.0.1:${DP}/devtools/browser/x`, socketDir: sa.dir }).includes(`AGENT_BROWSER_SOCKET_DIR=${sa.dir}`)) && !B.attachedEnvFor({ browserKey: 'bk-00000001', profileId: 'bp-0000000a', cdpUrl: `ws://127.0.0.1:${DP}/devtools/browser/x` }).some((kv) => kv.startsWith('AGENT_BROWSER_SOCKET_DIR=')), 'the agent\'s pairs name the config\'s root on the attach road only (the CLI sets it last — the same daemon as the keeper\'s calls)');
 
 // ═══ ④ THE KEEPER ═══
 console.log('— ④ the keeper: its road table and wiring pins (the launching legs are in the heavy twin)');
@@ -185,13 +185,13 @@ const journal = [];
 const jlog = { log(m) { journal.push(String(m)); }, warn(m) { journal.push(String(m)); }, error() { } };
 const mk = (extra = {}) => K.create({ dataDir: DATA, homeDir: HOME, env: () => rtEnv, serverSetting: (x) => settings[x], serverNotice: () => 1, liveKeys: () => new Set(), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: jlog, install: false, tickMs: 3600e3, displaySessions: DK, attachSocketBase: SOCKBASE, ...extra });
 // the wiring pins: the road decided in start() before the display fact; the api seam
-ok(/const road = AT\.launchRoad\(\{ local: true, starts: !!prow\.starts, ownLaunch: argvPrefix\.length > 0, headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper \? \(\(await cliNow\(\)\) \|\| \{\}\)\.version \|\| null : null, xpra: await displayHasXpra\(\), exe: attachExe \}\);/.test(ks) && /setDisplaySessions: \(dk\) =>/.test(ks), 'the keeper decides the road before the driver\'s display fact; server.js wires the desktop keeper through setDisplaySessions');
-ok(/browserKeeper\?\.setDisplaySessions\?\.\(desktopKeeper\)/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8')), 'server.js hands the desktop keeper over');
+ok(gateOf(/const road = AT\.launchRoad\(\{ local: true, starts: !!prow\.starts, ownLaunch: argvPrefix\.length > 0, headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper \? \(\(await cliNow\(\)\) \|\| \{\}\)\.version \|\| null : null, xpra: await displayHasXpra\(\), exe: attachExe \}\);/.test(ks)) && verdictOf(/setDisplaySessions: \(dk\) =>/.test(ks)), 'the keeper decides the road before the driver\'s display fact; server.js wires the desktop keeper through setDisplaySessions');
+ok(verdictOf(/browserKeeper\?\.setDisplaySessions\?\.\(desktopKeeper\)/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'))), 'server.js hands the desktop keeper over');
 // the road table (PURE)
 const R = (o) => AT.launchRoad({ local: true, starts: true, ownLaunch: false, headed: null, wired: true, driverVersion: '0.38.2', xpra: true, exe: '/usr/bin/google-chrome', ...o });
 ok(R({}).launch === 'attach' && R({ headed: true }).launch === 'attach' && R({ driverVersion: '0.39.0' }).launch === 'attach', 'the road: xpra + a Chrome + the display keeper + the measured driver (0.38.2, or newer) ⇒ attach');
-ok([R({ xpra: false }), R({ exe: null }), R({ wired: false }), R({ headed: false }), R({ ownLaunch: true }), R({ local: false }), R({ starts: false }), R({ driverVersion: '0.38.1' }), R({ driverVersion: null })].every((x) => x.launch === 'driver' && x.why), 'everything else ⇒ the driver road, each with its why (an older or unknown driver too: the attach facts are 0.38.2\'s)');
-ok(/older than 0\.38\.2, the version the attach road was measured on/.test(R({ driverVersion: '0.38.1' }).why) && AT.driverAtLeast('agent-browser 0.38.2') && !AT.driverAtLeast('0.38.1') && AT.driverAtLeast('1.0.0') && !AT.driverAtLeast(''), 'the driver gate says the version it saw and the one it needs');
+ok(verdictOf([R({ xpra: false }), R({ exe: null }), R({ wired: false }), R({ headed: false }), R({ ownLaunch: true }), R({ local: false }), R({ starts: false }), R({ driverVersion: '0.38.1' }), R({ driverVersion: null })].every((x) => x.launch === 'driver' && x.why)), 'everything else ⇒ the driver road, each with its why (an older or unknown driver too: the attach facts are 0.38.2\'s)');
+ok(gateOf(/older than 0\.38\.2, the version the attach road was measured on/.test(R({ driverVersion: '0.38.1' }).why)) && gateOf(AT.driverAtLeast('agent-browser 0.38.2')) && !AT.driverAtLeast('0.38.1') && gateOf(AT.driverAtLeast('1.0.0')) && !AT.driverAtLeast(''), 'the driver gate says the version it saw and the one it needs');
 // ═══ ⑥ LANE BROWSER-X-IN-WINDOW (design q-026 r1 §2.1 / §3 row B2): THE PICTURE SWITCH's verdict wiring ═══
 // The keeper's three doors over a FAKE CDP (the window calls the keeper makes — Browser.getWindowBounds / getWindowForTarget /
 // setWindowBounds, answered from a window map) and a FAKE display keeper whose `windows(id)` rows ARE that map (MEASURED: CDP
@@ -233,17 +233,17 @@ console.log('— ⑥ lane browser-x-in-window: the picture source, the holder\'s
   const v = kP.pictureSourceFor(pP.id);
   ok(v.source === 'x' && v.why === 'attach' && v.displaySession === 'da-pic', `the keeper's verdict: the attach record ⇒ 'x' on its display session (${JSON.stringify(v)})`);
   const xa = await kP.xWindowFor(pP.id, { browserKey: 'bk-0000pa01' });
-  ok(xa.wid === 0x40000c && xa.why === 'bounds' && xa.windowId === 12 && cdpCalls.some((m) => m.method === 'Browser.getWindowBounds' && m.params.windowId === 12), `A's X window = its OWN window's bounds matched against the display's rows (${xa.wid && xa.wid.toString(16)})`, xa);
+  ok(xa.wid === 0x40000c && xa.why === 'bounds' && xa.windowId === 12 && verdictOf(cdpCalls.some((m) => m.method === 'Browser.getWindowBounds' && m.params.windowId === 12)), `A's X window = its OWN window's bounds matched against the display's rows (${xa.wid && xa.wid.toString(16)})`, xa);
   const xb = await kP.xWindowFor(pP.id, { browserKey: 'bk-0000pb02' });
-  ok(xb.wid === 0x40000f && xb.windowId === 13 && cdpCalls.some((m) => m.method === 'Browser.getWindowForTarget' && m.params.targetId === 'TAB-B'), "B (no window of its own stamped): the window of its tab (getWindowForTarget) ⇒ its X window", xb);
-  ok(winCalls.length >= 1 && winCalls.every((id) => id === 'da-pic'), "the rows are the desktop keeper's own windows(id) of the record's display session (no spawn of the keeper's)", winCalls);
+  ok(xb.wid === 0x40000f && xb.windowId === 13 && verdictOf(cdpCalls.some((m) => m.method === 'Browser.getWindowForTarget' && m.params.targetId === 'TAB-B')), "B (no window of its own stamped): the window of its tab (getWindowForTarget) ⇒ its X window", xb);
+  ok(winCalls.length >= 1 && verdictOf(winCalls.every((id) => id === 'da-pic')), "the rows are the desktop keeper's own windows(id) of the record's display session (no spawn of the keeper's)", winCalls);
   // two windows with the very bounds ⇒ A's moved one pixel, asked again
   Object.assign(wins.get(13).bounds, { left: 20, top: 20, width: 1050, height: 980 });
   const set0 = cdpCalls.filter((m) => m.method === 'Browser.setWindowBounds').length;
   picSkew += 800; // past the rows' 750 ms memo (by the keeper's clock)
   const xa2 = await kP.xWindowFor(pP.id, { browserKey: 'bk-0000pa01' });
   const nudge = cdpCalls.filter((m) => m.method === 'Browser.setWindowBounds').slice(set0);
-  ok(xa2.wid === 0x40000c && nudge.length >= 1 && nudge.some((m) => m.params.windowId === 12 && m.params.bounds.left === 21) && wins.get(12).bounds.left === 21, 'TWINS (two windows, one geometry) ⇒ its window is moved ONE pixel and told apart', { xa2, nudge });
+  ok(xa2.wid === 0x40000c && nudge.length >= 1 && gateOf(nudge.some((m) => m.params.windowId === 12 && m.params.bounds.left === 21)) && wins.get(12).bounds.left === 21, 'TWINS (two windows, one geometry) ⇒ its window is moved ONE pixel and told apart', { xa2, nudge });
   // Chrome's own dialog window over B's window: said to B, never to A
   dialogs = [{ ...CHOOSER_X, x: 300 + 100, y: 20 + 100 }];
   Object.assign(wins.get(13).bounds, { left: 300, top: 120, width: 900, height: 700 });
@@ -276,18 +276,18 @@ console.log('— B-346d: the child url cache key follows the browser\'s run');
     const c2 = { 'bp-e1': { startedAt: 1000, pid: 41, browser: { pid: 501, starttime: 9002 } } };
     return Bm.childUrlKey('bk-0000000c', ephs, c1) === Bm.childUrlKey('bk-0000000c', ephs, c1b) && Bm.childUrlKey('bk-0000000c', ephs, c1) !== Bm.childUrlKey('bk-0000000c', ephs, c2);
   };
-  ok(judgeKey(B), 'B-346d childUrlKey: one run of a conversation\'s browser ⇒ one key; its daemon relaunched (a new start) ⇒ a NEW key (the old run\'s port is never the answer); no start stamp ⇒ the pid; no record ⇒ its own empty-run key');
-  ok(judgeInPlace(B), 'B-346d (its verdict\'s should): a Chrome its daemon relaunched IN PLACE (the same start, a new browser pid + start time) ⇒ a NEW key — the old port is never the answer on that road either');
+  ok(verdictOf(judgeKey(B)), 'B-346d childUrlKey: one run of a conversation\'s browser ⇒ one key; its daemon relaunched (a new start) ⇒ a NEW key (the old run\'s port is never the answer); no start stamp ⇒ the pid; no record ⇒ its own empty-run key');
+  ok(verdictOf(judgeInPlace(B)), 'B-346d (its verdict\'s should): a Chrome its daemon relaunched IN PLACE (the same start, a new browser pid + start time) ⇒ a NEW key — the old port is never the answer on that road either');
   const ks3 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  ok(ks3.includes('    const key = B.childUrlKey(h, reg.profiles.filter(isEph), reg.browsers);') && ks3.includes("    for (const k of [...vpUrls.keys()]) if (k !== key && k.startsWith('child:' + h + '@')) vpUrls.delete(k);")
-    && ks3.includes("target.kind === 'child' ? childUrlKey(target.handle) :") && ks3.includes('    if (fresh) vpUrls.delete(childUrlKey(p.owner.id));') && !ks3.includes("'child:' + String(target.handle || '')"),
+  ok(gateOf(ks3.includes('    const key = B.childUrlKey(h, reg.profiles.filter(isEph), reg.browsers);')) && gateOf(ks3.includes("    for (const k of [...vpUrls.keys()]) if (k !== key && k.startsWith('child:' + h + '@')) vpUrls.delete(k);"))
+    && gateOf(ks3.includes("target.kind === 'child' ? childUrlKey(target.handle) :")) && gateOf(ks3.includes('    if (fresh) vpUrls.delete(childUrlKey(p.owner.id));')) && !ks3.includes("'child:' + String(target.handle || '')"),
     'B-346d wiring: withCdpUrl and cdpEndpointFor key a conversation\'s browser\'s url by its run (the previous runs\' urls dropped); the per-conversation key is gone');
   const bsrc3 = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'), keyNeedle = "  return 'child:' + h + '@' + (rec ? String(Number(rec.startedAt) || rec.pid || '') + br : '');";
   ok(bsrc3.split(keyNeedle).length === 2, 'B-346d control setup: the run in the key is found once in src/browser-profiles.js');
   const brNeedle = "  const br = rec && rec.browser && rec.browser.pid ? ':' + rec.browser.pid + '.' + (rec.browser.starttime == null ? '' : rec.browser.starttime) : '';";
   ok(bsrc3.split(brNeedle).length === 2, 'B-346d control setup: the browser\'s identity in the key is found once');
   const By = mutantCopies('keeper-b346d-inplace', REPO).load('src/browser-profiles.js', editAnchor(bsrc3, brNeedle, "  const br = '';", "src/browser-profiles.js"), 'no-browser-in-key');
-  ok(judgeKey(By) && !judgeInPlace(By), 'CONTROL (B-346d, its verdict\'s should: the key without the browser\'s identity) ⇒ an in-place relaunch keeps the old key — RED');
+  ok(gateOf(judgeKey(By)) && !judgeInPlace(By), 'CONTROL (B-346d, its verdict\'s should: the key without the browser\'s identity) ⇒ an in-place relaunch keeps the old key — RED');
   const Bx = mutantCopies('keeper-b346d', REPO).load('src/browser-profiles.js', editAnchor(bsrc3, keyNeedle, "  return 'child:' + h;", "src/browser-profiles.js"), 'one-key-per-conversation');
   ok(!judgeKey(Bx), 'CONTROL (B-346d, the release\'s cache: one key per conversation) ⇒ a relaunched daemon is answered with the OLD run\'s port — RED');
 }
@@ -299,14 +299,14 @@ console.log('— B-346d: the child url cache key follows the browser\'s run');
   const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const MOVED = ["// the real spawn + poll, over a fake Chrome (node): the modes ok / stale / never / exit", "console.log('— ④ the keeper on the attach road');", "// THE HEAL: an attach Chrome that dies under a HOLDER", "// lane engine-plugin: a profile on a browser ENGINE takes the ATTACH road too", "console.log('— ⑦ lane browser-display-holders", "// cdp_port_missing AT THE KEEPER (started before Chrome", "// THE BOOT: a new keeper on the same data adopts a live attach record", "console.log('— B-8b87: the attach road carries the WebRTC policy", "console.log('— B-9584 U2b: the attach road with a profile"];
   const codeHere = here.replace(/`[\s\S]*?`/g, '``');   // the stubs' sources are template literals: only this file's own code is judged
-  ok(MOVED.every((h) => twin.includes(h)) && MOVED.every((h) => here.split(h).length === 2) && !/\bspawnChrome\(|\.start\(|\.attach\(|\badoptAll\(|\bexecFileSync\(/.test(codeHere),
+  ok(gateOf(MOVED.every((h) => twin.includes(h))) && gateOf(MOVED.every((h) => here.split(h).length === 2)) && !/\bspawnChrome\(|\.start\(|\.attach\(|\badoptAll\(|\bexecFileSync\(/.test(codeHere),
     `§T the heavy twin holds the ${MOVED.length} launching sections (② the real spawn … B-9584 U2b), and this file starts none of them`);
   const stubOf = (t) => { const a = t.indexOf("fs.writeFileSync(path.join(FAKE_BIN, 'agent-browser'), `"); const b = a < 0 ? -1 : t.indexOf('`, { mode: 0o755 });', a); return a >= 0 && b > a ? t.slice(a, b) : null; };
   ok(stubOf(here) !== null && stubOf(here) === stubOf(twin), '§T this file and the twin write the SAME fake driver, byte for byte (the keepers here read their driver through it)');
   const ci = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
-  ok(/\{ name: 'test-browser-keeper-launch', tier: 'heavy',/.test(ci), '§T the twin is a HEAVY row of the tier');
+  ok(verdictOf(/\{ name: 'test-browser-keeper-launch', tier: 'heavy',/.test(ci)), '§T the twin is a HEAVY row of the tier');
 }
 
 fs.rmSync(S, { recursive: true, force: true });
 console.log(`\n${fail ? '✗' : '✓'} test-browser-keeper: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

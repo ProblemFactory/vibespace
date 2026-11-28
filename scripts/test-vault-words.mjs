@@ -27,7 +27,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const acorn = require(path.join(REPO, 'node_modules/acorn'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : '')); } };
 
 // ── THE TWO FACTS, by reader ──
 const P_TOLD = /For you names|already been told|the owner has been told/;          // a person: For you names what waits on it
@@ -331,8 +331,8 @@ console.log('① ② ③ ④ THE CENSUS — every site wording a locked vault, i
 const C = census(FILES, DICTS);
 const byCls = {}; for (const s of C.sites) { const row = (ROWS[s.rel] || []).find(([n]) => s.words && s.words.includes(n)); const c = s.kind === 'agentWords' ? 'agentWords' : row ? row[1] : '?'; byCls[c] = (byCls[c] || 0) + 1; }
 ok(C.sites.length >= 50 && !C.red.length, `${C.sites.length} sites in ${new Set(C.sites.map((s) => s.rel)).size} files, every one a row — ${Object.entries(byCls).map(([k, v]) => `${k} ${v}`).join(' · ')} — every person / agent sentence says the owner has been told AND where to unlock (zh / ja too)`, C.red);
-ok(SEVEN.every(([, rel, needle]) => (ROWS[rel] || []).some(([n, c]) => n === needle && c !== 'label')), `the seven places r1 named (${SEVEN.map(([n]) => n).join(' · ')}) are rows that say both — none exempt`);
-ok(A_TOLD.test(VB.AGENT_WORDS) && A_WHERE.test(VB.AGENT_WORDS) && A_TOLD.test(VB.agentWords('x')) && /do not ask them to unlock it/.test(VB.TOLD), 'the agent\'s words (src/vault-blocked.js): AGENT_WORDS says both; agentWords(what) appends the TOLD clause — every caller names where (④ above)');
+ok(verdictOf(SEVEN.every(([, rel, needle]) => (ROWS[rel] || []).some(([n, c]) => n === needle && c !== 'label'))), `the seven places r1 named (${SEVEN.map(([n]) => n).join(' · ')}) are rows that say both — none exempt`);
+ok(gateOf(A_TOLD.test(VB.AGENT_WORDS)) && gateOf(A_WHERE.test(VB.AGENT_WORDS)) && gateOf(A_TOLD.test(VB.agentWords('x'))) && verdictOf(/do not ask them to unlock it/.test(VB.TOLD)), 'the agent\'s words (src/vault-blocked.js): AGENT_WORDS says both; agentWords(what) appends the TOLD clause — every caller names where (④ above)');
 
 console.log('⑤ MUTANTS — the census over a patched copy of the text (in memory), each RED');
 const patched = (rel, from, to) => { const t = FILES.get(rel); const n = t.split(from).length - 1; const m = new Map(FILES); m.set(rel, t.replace(from, to)); return { n, files: m }; };
@@ -345,10 +345,10 @@ const muts = [
   ['a vault_locked word map reworded without the phrase (found by its key)', patched('src/routes/automation.js', "vault_locked: VB.agentWords('every automation waits until a person unlocks it on this instance\\'s page'),", "vault_locked: 'sealed — try later',"), /automation\.js.*has no row/],
   ['the For-you item without where', patched('src/server/vault-hooks.js', "const BLOCKED_TEXT = i18nKey('The vault is locked — waiting on it: {who}. Enter the second password to unlock.');", "const BLOCKED_TEXT = i18nKey('The vault is locked — waiting on it: {who}.');"), /vault-hooks\.js.*where to unlock/],
 ];
-for (const [name, m, want] of muts) { const r = m.n === 1 ? census(m.files, DICTS) : null; ok(m.n === 1 && r && r.red.some((l) => want.test(l)), `MUTANT «${name}»: the patch hits once and the census goes RED${r && r.red[0] ? ' — ' + r.red.find((l) => want.test(l))?.slice(0, 140) : ''}`, r ? r.red : `the patch hit ${m.n} times`); }
+for (const [name, m, want] of muts) { const r = m.n === 1 ? census(m.files, DICTS) : null; ok(m.n === 1 && gateOf(r) && verdictOf(r.red.some((l) => want.test(l))), `MUTANT «${name}»: the patch hits once and the census goes RED${r && r.red[0] ? ' — ' + r.red.find((l) => want.test(l))?.slice(0, 140) : ''}`, r ? r.red : `the patch hit ${m.n} times`); }
 const zh2 = { ...zh, [K1]: '保险库已锁定——先解锁' };
 const rz = census(FILES, { zh: zh2, ja });
-ok(rz.red.some((l) => /the zh words/.test(l)), 'MUTANT «the zh words of the channels card lose For you»: RED (a person reads it in Chinese too)', rz.red.slice(0, 2));
+ok(verdictOf(rz.red.some((l) => /the zh words/.test(l))), 'MUTANT «the zh words of the channels card lose For you»: RED (a person reads it in Chinese too)', rz.red.slice(0, 2));
 
 console.log(`  (nine censuses, ${parses} acorn parses: each file once, and each patched copy's one file)`);
 console.log('⑥ M3 DOC REFUSAL CENSUS — every login_* code in the 6 docs is in BL.REFUSALS / paste login codes (no invented login_focus_hijacked)');
@@ -397,11 +397,11 @@ ok(docRed.length === 0, `6 docs carry 0 invented login_* codes and kb-api matche
 const docMutMap = new Map(DOC_FILES);
 docMutMap.set('docs/agent/browser-manual.md', DOC_FILES.get('docs/agent/browser-manual.md').replace('login_form_changed', 'login_focus_hijacked'));
 const docMutRed = loginDocCensus(docMutMap);
-ok(docMutRed.some((l) => /browser-manual\.md.*login_focus_hijacked/.test(l)), 'MUTANT «login_focus_hijacked in docs/agent/browser-manual.md»: census goes RED by name', docMutRed);
+ok(verdictOf(docMutRed.some((l) => /browser-manual\.md.*login_focus_hijacked/.test(l))), 'MUTANT «login_focus_hijacked in docs/agent/browser-manual.md»: census goes RED by name', docMutRed);
 const apiMutMap = new Map(DOC_FILES);
 apiMutMap.set('docs/kb-api.md', DOC_FILES.get('docs/kb-api.md').replace('409 `login_in_frame`', '403 `login_in_frame`'));
 const apiMutRed = loginDocCensus(apiMutMap);
-ok(apiMutRed.some((l) => /login_in_frame.*403/.test(l)), 'MUTANT «403 login_in_frame in docs/kb-api.md»: census goes RED by name', apiMutRed);
+ok(verdictOf(apiMutRed.some((l) => /login_in_frame.*403/.test(l))), 'MUTANT «403 login_in_frame in docs/kb-api.md»: census goes RED by name', apiMutRed);
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

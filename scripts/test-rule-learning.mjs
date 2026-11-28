@@ -67,7 +67,7 @@ const M = require(path.join(repo, 'src/decision-model.js'));
 const SRC = fs.readFileSync(path.join(repo, 'src/rule-learning.js'), 'utf8');
 const MC = mutantCopies('rulelearn', repo);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -92,12 +92,12 @@ console.log('① availability — exists only on OpenRouter + a key + the plugin
     cases.push([provider.trim().toLowerCase() || '-', key ? 'key' : 'none', pluginOn ? 'on' : 'off', a.exists, a.why]);
   }
   const yes = cases.filter((c) => c[3]);
-  ok(yes.length === 2 && yes.every((c) => c[0] === 'openrouter' && c[1] === 'key' && c[2] === 'on'), 'of 16 rows, ONLY openrouter + a key + the plugin on EXIST (the trimmed / cased provider counts)', cases);
-  ok(cases.filter((c) => c[0] === 'openai').every((c) => !c[3] && c[4] === 'not-openrouter') && cases.filter((c) => c[0] === 'openrouter' && c[1] === 'none').every((c) => c[4] === 'no-key')
-    && cases.filter((c) => c[0] === 'openrouter' && c[1] === 'key' && c[2] === 'off').every((c) => c[4] === 'plugin-off') && cases.filter((c) => c[0] === '-').every((c) => c[4] === 'no-key'), 'each absence is named: not-openrouter · no-key · plugin-off');
+  ok(yes.length === 2 && verdictOf(yes.every((c) => c[0] === 'openrouter' && c[1] === 'key' && c[2] === 'on')), 'of 16 rows, ONLY openrouter + a key + the plugin on EXIST (the trimmed / cased provider counts)', cases);
+  ok(gateOf(cases.filter((c) => c[0] === 'openai').every((c) => !c[3] && c[4] === 'not-openrouter')) && gateOf(cases.filter((c) => c[0] === 'openrouter' && c[1] === 'none').every((c) => c[4] === 'no-key'))
+    && gateOf(cases.filter((c) => c[0] === 'openrouter' && c[1] === 'key' && c[2] === 'off').every((c) => c[4] === 'plugin-off')) && verdictOf(cases.filter((c) => c[0] === '-').every((c) => c[4] === 'no-key')), 'each absence is named: not-openrouter · no-key · plugin-off');
   const orRow = row('openrouter', KEY);
   ok(RL.availability({ integrationRow: orRow, pluginOn: true, learnOn: false }).why === 'learn-off' && !RL.availability({ integrationRow: orRow, pluginOn: true, learnOn: false }).exists
-    && RL.availability({ integrationRow: orRow, pluginOn: true }).exists && RL.availability({ integrationRow: orRow, pluginOn: false, learnOn: false }).why === 'plugin-off'
+    && gateOf(RL.availability({ integrationRow: orRow, pluginOn: true }).exists) && RL.availability({ integrationRow: orRow, pluginOn: false, learnOn: false }).why === 'plugin-off'
     && RL.availability({ integrationRow: row('openai', KEY), pluginOn: true, learnOn: false }).why === 'not-openrouter', 'lane llm-plugin-rename: the drafter\'s own switch — off ⇒ `learn-off` (named after the provider, the key and the plugin); absent ⇒ on (its default)');
   ok(!RL.availability({}).exists && !RL.availability({ integrationRow: { values: null } }).exists && RL.availability({ integrationRow: { values: { provider: 'openrouter', apiKey: KEY }, source: 'cluster' } }).source === 'cluster', 'no row ⇒ absent; a cluster preset counts (its source said)');
 }
@@ -106,12 +106,12 @@ console.log('② the tiers + learnCost');
 {
   ok(RL.MODELS.flash.id === 'google/gemini-3.8-flash' && RL.MODELS.sonnet.id === 'anthropic/claude-sonnet-5.5' && RL.DEFAULT_TIER === 'flash' && RL.modelOf(undefined).key === 'flash' && RL.modelOf('sonnet').key === 'sonnet' && RL.modelOf('anthropic/claude-sonnet-5.5').key === 'sonnet' && RL.modelOf('bogus').key === 'flash', 'two OpenRouter tiers, Flash the default (an unknown setting falls back to it)');
   ok(RL.learnCost('flash', 4000, 1000) === 0.00675 && RL.learnCost('sonnet', 4000, 1000) === 0.018 && RL.learnCost('flash', -5, 'x') === 0, 'a full call ≈ $0.007 on Flash, ≈ $0.018 on Sonnet (the design\'s figures); junk counts 0', [RL.learnCost('flash', 4000, 1000), RL.learnCost('sonnet', 4000, 1000)]);
-  ok(Object.values(RL.MODELS).every((m) => !/api\.anthropic|claude\.ai\//.test(JSON.stringify(m))), 'no tier names an Anthropic endpoint (the quality tier rides OpenRouter, billed per token)');
+  ok(verdictOf(Object.values(RL.MODELS).every((m) => !/api\.anthropic|claude\.ai\//.test(JSON.stringify(m)))), 'no tier names an Anthropic endpoint (the quality tier rides OpenRouter, billed per token)');
 }
 
 {
   const proto = ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'];
-  ok(proto.every((v) => RL.modelOf(v) === RL.MODELS.flash) && RL.modelOf('sonnet') === RL.MODELS.sonnet && RL.modelOf('anthropic/claude-sonnet-5.5') === RL.MODELS.sonnet, 'L1 (lane rule-learning-fix): a prototype key (constructor / toString / __proto__ / hasOwnProperty / valueOf) is no tier ⇒ the Flash default, never a body without a model', proto.map((v) => RL.modelOf(v) && RL.modelOf(v).key));
+  ok(gateOf(proto.every((v) => RL.modelOf(v) === RL.MODELS.flash)) && RL.modelOf('sonnet') === RL.MODELS.sonnet && RL.modelOf('anthropic/claude-sonnet-5.5') === RL.MODELS.sonnet, 'L1 (lane rule-learning-fix): a prototype key (constructor / toString / __proto__ / hasOwnProperty / valueOf) is no tier ⇒ the Flash default, never a body without a model', proto.map((v) => RL.modelOf(v) && RL.modelOf(v).key));
   const m = mutant("(typeof v === 'string' && Object.hasOwn(MODELS, v) ? MODELS[v] : null)", 'MODELS[v]', 'l1');
   ok(typeof m.modelOf('constructor').id !== 'string', 'RED CONTROL (L1): MODELS[v] without the own-key check answers Object for "constructor" — a request body with no model id', typeof m.modelOf('constructor').id);
 }
@@ -125,12 +125,12 @@ const BLOCK = 'Invoices and contracts matter to me.\nAnything my manager asks.\n
   ok(sys.role === 'system' && sys.content === RL.TASK && user.role === 'user', 'two messages: the FIXED task first (system), the variable part last (user)');
   const u = user.content;
   ok(u.indexOf('[block] 3 lines') === 0 && u.indexOf('1. Invoices and contracts') < u.indexOf('2. Anything my manager') && u.indexOf('3. Not newsletters') < u.indexOf('[examples]'), 'the variable part: the block numbered line by line (the empty line skipped) BEFORE the examples', u.slice(0, 200));
-  ok(/#1 needs · Invoice 7 — can you approve it today\? · the judge saw: asks you, deadline or money/.test(u) && /#2 not · Weekly digest/.test(u) && /#3 not \(inferred\) · Lunch poll/.test(u), 'each example: its number, the verdict, `inferred` for an implicit one, the digest, the clause words the judge had named (OUR words)', u);
-  ok(eq(inp.examples.map((x) => [x.n, x.verdict, x.inferred]), [[1, 'needs', false], [2, 'not', false], [3, 'not', true]]) && eq(inp.lines, ['Invoices and contracts matter to me.', 'Anything my manager asks.', 'Not newsletters.']) && inp.est === M.estTokens(sys.content) + M.estTokens(JSON.stringify(RL.LEARN_SCHEMA)) + 16 + M.estTokens(u), 'the examples AS SENT (the numbers `from` refers to) and the est = task + schema + framing + the variable part');
+  ok(gateOf(/#1 needs · Invoice 7 — can you approve it today\? · the judge saw: asks you, deadline or money/.test(u)) && gateOf(/#2 not · Weekly digest/.test(u)) && verdictOf(/#3 not \(inferred\) · Lunch poll/.test(u)), 'each example: its number, the verdict, `inferred` for an implicit one, the digest, the clause words the judge had named (OUR words)', u);
+  ok(gateOf(eq(inp.examples.map((x) => [x.n, x.verdict, x.inferred]), [[1, 'needs', false], [2, 'not', false], [3, 'not', true]])) && gateOf(eq(inp.lines, ['Invoices and contracts matter to me.', 'Anything my manager asks.', 'Not newsletters.'])) && inp.est === M.estTokens(sys.content) + M.estTokens(JSON.stringify(RL.LEARN_SCHEMA)) + 16 + M.estTokens(u), 'the examples AS SENT (the numbers `from` refers to) and the est = task + schema + framing + the variable part');
   const empty = RL.buildLearnInput({ block: '', examples: ex });
-  ok(/^\[block\] 0 lines\n\(empty\)/.test(empty.messages[1].content), 'an empty block says (empty)');
+  ok(verdictOf(/^\[block\] 0 lines\n\(empty\)/.test(empty.messages[1].content)), 'an empty block says (empty)');
   const leak = RL.buildLearnInput({ block: `My key is ${TOK.gh}`, examples: [{ snippet: `token ${TOK.ant} · mail a.person@example.com`, verdict: 'needs' }] }).messages[1].content;
-  ok(!leak.includes(TOK.gh) && !leak.includes(TOK.ant) && !leak.includes('a.person@') && leak.includes('…@example.com'), 'the block and every digest pass the ONE scrub again (a secret redacted, an address cut to its domain)', leak);
+  ok(!leak.includes(TOK.gh) && !leak.includes(TOK.ant) && !leak.includes('a.person@') && verdictOf(leak.includes('…@example.com')), 'the block and every digest pass the ONE scrub again (a secret redacted, an address cut to its domain)', leak);
 
   // the 70-example fixtures (SHAPES, no names): short ASCII ⇒ the 60 cap; long CJK ⇒ the 4 000-token bound
   const short = Array.from({ length: 70 }, (_, i) => ({ snippet: `Order ${i} status — the shipment for line ${i} is ready`, verdict: i % 3 ? 'not' : 'needs', ...(i >= 40 ? { inferred: true } : {}) }));
@@ -142,7 +142,7 @@ const BLOCK = 'Invoices and contracts matter to me.\nAnything my manager asks.\n
   const ownNs = l.examples.filter((x) => !x.inferred).length;
   ok(l.est <= RL.LEARN.inputMax && l.counts.inferred === 0 && l.dropped.inferred === 30 && l.dropped.own > 0 && ownNs + l.dropped.own === 30, `70 long CJK examples (200 chars ≈ 200 tokens each) ⇒ ${l.est} tokens ≤ 4 000: the 30 inferred left FIRST, then the ${l.dropped.own} oldest own; ${ownNs} own kept`, { est: l.est, dropped: l.dropped, c: l.counts });
   const keptFirst = l.messages[1].content.split('\n').find((x) => x.startsWith('#1 '));
-  ok(keptFirst && keptFirst.includes(`第${l.dropped.own}号`) && l.examples.every((x, i) => x.n === i + 1), 'the OLDEST own ones left (the first kept is #' + l.dropped.own + ' of the list) and the numbers stay contiguous', keptFirst && keptFirst.slice(0, 40));
+  ok(gateOf(keptFirst) && gateOf(keptFirst.includes(`第${l.dropped.own}号`)) && verdictOf(l.examples.every((x, i) => x.n === i + 1)), 'the OLDEST own ones left (the first kept is #' + l.dropped.own + ' of the list) and the numbers stay contiguous', keptFirst && keptFirst.slice(0, 40));
   console.log(`    measured: short 70 → ${s.examples.length} sent, ${s.est} tokens · long CJK 70 → ${l.examples.length} sent, ${l.est} tokens (dropped ${l.dropped.inferred} inferred + ${l.dropped.own} own)`);
   const unbound = mutant('  while (est > LEARN.inputMax && list.length) {', '  while (false) {', 'nobound');
   const ul = unbound.buildLearnInput({ block: BLOCK, examples: long });
@@ -153,9 +153,9 @@ console.log('④ the strict schema');
 {
   const S = RL.LEARN_SCHEMA;
   const objs = [S, S.properties.lines.items, S.properties.removed.items];
-  ok(objs.every((o) => o.type === 'object' && o.additionalProperties === false && eq([...o.required].sort(), Object.keys(o.properties).sort())), 'strict: every object closed (additionalProperties false) with EVERY property required (the strict-mode rule)');
-  ok(eq(S.properties.lines.items.properties.kind.enum, ['keep', 'edit', 'add']) && eq(S.properties.lines.items.properties.line.type, ['integer', 'null']) && S.properties.lines.items.properties.from.items.type === 'integer' && S.properties.note.type === 'string', 'lines[]: text · kind keep|edit|add · line (null for add) · from [example #] · evidence; removed[]: line + reason; note');
-  ok(eq(JSON.parse(JSON.stringify(S)), S), 'the schema is plain JSON (it rides response_format as is)');
+  ok(verdictOf(objs.every((o) => o.type === 'object' && o.additionalProperties === false && eq([...o.required].sort(), Object.keys(o.properties).sort()))), 'strict: every object closed (additionalProperties false) with EVERY property required (the strict-mode rule)');
+  ok(gateOf(eq(S.properties.lines.items.properties.kind.enum, ['keep', 'edit', 'add'])) && gateOf(eq(S.properties.lines.items.properties.line.type, ['integer', 'null'])) && S.properties.lines.items.properties.from.items.type === 'integer' && S.properties.note.type === 'string', 'lines[]: text · kind keep|edit|add · line (null for add) · from [example #] · evidence; removed[]: line + reason; note');
+  ok(verdictOf(eq(JSON.parse(JSON.stringify(S)), S)), 'the schema is plain JSON (it rides response_format as is)');
 }
 
 console.log('⑤ THE NORMALIZER — six rules, each with a RED control');
@@ -165,62 +165,62 @@ const B3 = 'Invoices and contracts matter to me.\nAnything my manager asks.\nNot
   const many = { lines: Array.from({ length: 15 }, (_, i) => ({ text: `Criterion ${i}`, kind: 'add', line: null, from: [1], evidence: 'e' })), removed: [], note: '' };
   const r1 = RL.normalizeProposal(many, { block: B3, examples: EX3 });
   const m1 = mutant('    if (lines.length >= LEARN.linesMax) break;', '', 'r1').normalizeProposal(many, { block: B3, examples: EX3 });
-  ok(r1.ok && r1.lines.length === 12 && r1.lines[11].text === 'Criterion 11', '① at most 12 lines (15 answered ⇒ the first 12)', r1.lines.length);
+  ok(gateOf(r1.ok) && r1.lines.length === 12 && r1.lines[11].text === 'Criterion 11', '① at most 12 lines (15 answered ⇒ the first 12)', r1.lines.length);
   ok(m1.lines.length === 15, 'RED CONTROL ①: without the cap all 15 pass', m1.lines.length);
 
   const dirty = { lines: [{ text: `Mail from a.person@example.com about ${TOK.gh}`, kind: 'add', line: null, from: [1], evidence: `seen with ${TOK.ant}` }], removed: [{ line: 3, reason: `because ${TOK.gh}` }], note: `note ${TOK.ant}` };
   const r2 = RL.normalizeProposal(JSON.stringify(dirty), { block: B3, examples: EX3 });
   const all2 = JSON.stringify(r2);
-  ok(r2.ok && !all2.includes(TOK.gh) && !all2.includes(TOK.ant) && !all2.includes('a.person@') && all2.includes('…@example.com'), '② every string the model wrote (text, evidence, reason, note) passes the ONE scrub — secrets redacted, addresses cut', all2);
+  ok(gateOf(r2.ok) && !all2.includes(TOK.gh) && !all2.includes(TOK.ant) && !all2.includes('a.person@') && verdictOf(all2.includes('…@example.com')), '② every string the model wrote (text, evidence, reason, note) passes the ONE scrub — secrets redacted, addresses cut', all2);
   const m2 = mutant("const clean = (s, max) => (typeof s === 'string' ? M.cleanPart(s, max, 'line').replace(/\\s+/g, ' ').trim().slice(0, max) : '');", "const clean = (s, max) => (typeof s === 'string' ? s : '');", 'r2').normalizeProposal(dirty, { block: B3, examples: EX3 });
-  ok(JSON.stringify(m2).includes(TOK.gh), 'RED CONTROL ②: clean = identity ⇒ the token reaches the card');
+  ok(verdictOf(JSON.stringify(m2).includes(TOK.gh)), 'RED CONTROL ②: clean = identity ⇒ the token reaches the card');
   const longText = RL.normalizeProposal({ lines: [{ text: 'x'.repeat(500), kind: 'add', line: null, from: [1], evidence: 'y'.repeat(500) }], removed: [], note: 'z'.repeat(900) }, { block: B3, examples: EX3 });
   ok(longText.lines[0].text.length <= 120 && longText.lines[0].evidence.length <= 120 && longText.note.length <= 300, '② …and bounded (text / evidence ≤ 120, note ≤ 300)', [longText.lines[0].text.length, longText.note.length]);
 
   const refs = { lines: [{ text: 'Payments due this week', kind: 'add', line: null, from: [0, 2, 99, 2, 'x', 1.5, -1], evidence: 'e' }], removed: [], note: '' };
   const r3 = RL.normalizeProposal(refs, { block: B3, examples: EX3 });
-  ok(eq(r3.lines[0].from, [2]) && !r3.lines[0].unsupported, '③ example numbers outside the input (0, 99, -1, junk, a fraction) are dropped; a duplicate counted once ⇒ [2]', r3.lines[0].from);
+  ok(gateOf(eq(r3.lines[0].from, [2])) && !r3.lines[0].unsupported, '③ example numbers outside the input (0, 99, -1, junk, a fraction) are dropped; a duplicate counted once ⇒ [2]', r3.lines[0].from);
   const m3 = mutant('.filter((i) => Number.isInteger(i) && i >= 1 && i <= n)', '.filter(() => true)', 'r3').normalizeProposal(refs, { block: B3, examples: EX3 });
-  ok(m3.lines[0].from.includes(99), 'RED CONTROL ③: without the range check #99 (an example nobody sent) is cited', m3.lines[0].from);
+  ok(verdictOf(m3.lines[0].from.includes(99)), 'RED CONTROL ③: without the range check #99 (an example nobody sent) is cited', m3.lines[0].from);
 
   const bare = { lines: [{ text: 'Anything from the board', kind: 'add', line: null, from: [], evidence: 'a hunch' }, { text: 'Invoices and contracts matter to me.', kind: 'keep', line: 1, from: [], evidence: '' }, { text: 'Anything my manager asks, today', kind: 'edit', line: 2, from: [42], evidence: '' }], removed: [], note: '' };
   const r4 = RL.normalizeProposal(bare, { block: B3, examples: EX3 });
   const t4 = RL.diffTable(B3, r4);
-  ok(r4.lines[0].unsupported && !r4.lines[1].unsupported && r4.lines[2].unsupported && t4.rows[0].tick === false && t4.rows[1].tick === true && t4.rows[2].tick === false, '④ a new line and an edit with no valid example are `unsupported` (shown, NOT ticked); a keep is the person\'s own line (needs no example)', r4.lines.map((x) => [x.kind, x.unsupported]));
+  ok(gateOf(r4.lines[0].unsupported) && !r4.lines[1].unsupported && gateOf(r4.lines[2].unsupported) && t4.rows[0].tick === false && t4.rows[1].tick === true && t4.rows[2].tick === false, '④ a new line and an edit with no valid example are `unsupported` (shown, NOT ticked); a keep is the person\'s own line (needs no example)', r4.lines.map((x) => [x.kind, x.unsupported]));
   const m4 = mutant("unsupported: kind !== 'keep' && !from.length,", 'unsupported: false,', 'r4');
   const mt4 = m4.diffTable(B3, m4.normalizeProposal(bare, { block: B3, examples: EX3 }));
   ok(mt4.rows[0].tick === true && !mt4.rows[0].unsupported, 'RED CONTROL ④: without the mark an invented line is pre-ticked (it would be saved unread)', mt4.rows[0]);
 
   const dup = { lines: [{ text: 'Invoices', kind: 'add', line: null, from: [1], evidence: '' }, { text: '  invoices ', kind: 'add', line: null, from: [2], evidence: '' }, { text: '   ', kind: 'add', line: null, from: [1], evidence: '' }, { text: 'Contracts', kind: 'add', line: null, from: [1], evidence: '' }], removed: [], note: '' };
   const r5 = RL.normalizeProposal(dup, { block: B3, examples: EX3 });
-  ok(eq(r5.lines.map((x) => x.text), ['Invoices', 'Contracts']), '⑤ an empty line and a duplicate (case / space folded) are dropped', r5.lines.map((x) => x.text));
+  ok(verdictOf(eq(r5.lines.map((x) => x.text), ['Invoices', 'Contracts'])), '⑤ an empty line and a duplicate (case / space folded) are dropped', r5.lines.map((x) => x.text));
   const m5 = mutant('    if (!text || seen.has(fold(text))) continue;', '    if (!text) continue;', 'r5').normalizeProposal(dup, { block: B3, examples: EX3 });
   ok(m5.lines.length === 3, 'RED CONTROL ⑤: without the fold the duplicate stays', m5.lines.map((x) => x.text));
 
   const lines6 = { lines: [{ text: 'Invoices and contracts matter to me.', kind: 'keep', line: 1, from: [1], evidence: '' }, { text: 'Board decisions', kind: 'edit', line: 7, from: [1], evidence: '' }, { text: 'Manager asks — today', kind: 'edit', line: 1, from: [2], evidence: '' }], removed: [{ line: 9, reason: 'gone' }, { line: 1, reason: 'kept elsewhere' }, { line: 3, reason: 'never needed you' }, { line: 3, reason: 'again' }], note: '' };
   const r6 = RL.normalizeProposal(lines6, { block: B3, examples: EX3 });
-  ok(eq(r6.lines.map((x) => [x.kind, x.line]), [['keep', 1], ['add', null], ['add', null]]) && eq(r6.removed, [{ line: 3, reason: 'never needed you' }]), '⑥ a keep / an edit / a removal names an EXISTING block line, each claimed once: line 7 ⇒ a new line, a 2nd claim of line 1 ⇒ a new line, removals of 9 / of the kept 1 / a 2nd of 3 dropped', [r6.lines.map((x) => [x.kind, x.line]), r6.removed]);
+  ok(gateOf(eq(r6.lines.map((x) => [x.kind, x.line]), [['keep', 1], ['add', null], ['add', null]])) && verdictOf(eq(r6.removed, [{ line: 3, reason: 'never needed you' }])), '⑥ a keep / an edit / a removal names an EXISTING block line, each claimed once: line 7 ⇒ a new line, a 2nd claim of line 1 ⇒ a new line, removals of 9 / of the kept 1 / a 2nd of 3 dropped', [r6.lines.map((x) => [x.kind, x.line]), r6.removed]);
   const m6 = mutant('    if (!r || !Number.isInteger(r.line) || r.line < 1 || r.line > nl || claimed.has(r.line) || removed.some((x) => x.line === r.line)) continue;', '    if (!r) continue;', 'r6').normalizeProposal(lines6, { block: B3, examples: EX3 });
-  ok(m6.removed.some((x) => x.line === 9) && m6.removed.some((x) => x.line === 1), 'RED CONTROL ⑥: without the check a removal of a line that does not exist (9) and of the kept line 1 stand', m6.removed);
+  ok(gateOf(m6.removed.some((x) => x.line === 9)) && verdictOf(m6.removed.some((x) => x.line === 1)), 'RED CONTROL ⑥: without the check a removal of a line that does not exist (9) and of the kept line 1 stand', m6.removed);
   const m6b = mutant('    let line = Number.isInteger(x.line) && x.line >= 1 && x.line <= nl && !claimed.has(x.line) ? x.line : null;', '    let line = Number.isInteger(x.line) ? x.line : null;', 'r6b').normalizeProposal(lines6, { block: B3, examples: EX3 });
-  ok(m6b.lines.some((x) => x.line === 7), 'RED CONTROL ⑥b: without it an "edit" of block line 7 (of 3) stands', m6b.lines.map((x) => [x.kind, x.line]));
+  ok(verdictOf(m6b.lines.some((x) => x.line === 7)), 'RED CONTROL ⑥b: without it an "edit" of block line 7 (of 3) stands', m6b.lines.map((x) => [x.kind, x.line]));
 
   const reworded = RL.normalizeProposal({ lines: [{ text: 'Anything my manager asks.', kind: 'edit', line: 2, from: [], evidence: '' }, { text: 'Not newsletters or digests', kind: 'keep', line: 3, from: [2], evidence: '' }], removed: [], note: '' }, { block: B3, examples: EX3 });
-  ok(eq(reworded.lines.map((x) => [x.kind, x.text]), [['keep', 'Anything my manager asks.'], ['keep', 'Not newsletters.']]), 'an "edit" that changes nothing is a keep (the person\'s own words, as written); a "keep" of a valid line IS that line, verbatim, whatever the model wrote (lane rule-learning-fix F2)');
-  ok(!RL.normalizeProposal('not json', {}).ok && RL.normalizeProposal('not json', {}).why === 'bad-answer' && !RL.normalizeProposal({ lines: 'x' }).ok && RL.normalizeProposal('```json\n{"lines":[],"removed":[],"note":""}\n```', {}).ok, 'an answer that is no JSON object (or has no lines[]) ⇒ `bad-answer`; a fenced JSON answer is read');
+  ok(verdictOf(eq(reworded.lines.map((x) => [x.kind, x.text]), [['keep', 'Anything my manager asks.'], ['keep', 'Not newsletters.']])), 'an "edit" that changes nothing is a keep (the person\'s own words, as written); a "keep" of a valid line IS that line, verbatim, whatever the model wrote (lane rule-learning-fix F2)');
+  ok(!RL.normalizeProposal('not json', {}).ok && RL.normalizeProposal('not json', {}).why === 'bad-answer' && !RL.normalizeProposal({ lines: 'x' }).ok && verdictOf(RL.normalizeProposal('```json\n{"lines":[],"removed":[],"note":""}\n```', {}).ok), 'an answer that is no JSON object (or has no lines[]) ⇒ `bad-answer`; a fenced JSON answer is read');
 }
 
 console.log('⑥ diffTable + blockFrom');
 {
   const p = RL.normalizeProposal({ lines: [{ text: 'Invoices and contracts matter to me.', kind: 'keep', line: 1, from: [], evidence: '' }, { text: 'Anything my manager asks, the same day', kind: 'edit', line: 2, from: [1, 2], evidence: 'two of them waited a day' }, { text: 'Outages of the checkout', kind: 'add', line: null, from: [3], evidence: 'an incident needed you' }, { text: 'Anything from the board', kind: 'add', line: null, from: [], evidence: '' }], removed: [{ line: 3, reason: 'two newsletters needed you' }], note: 'Small changes.' }, { block: B3 + '\nTravel bookings.', examples: EX3 });
   const t = RL.diffTable(B3 + '\nTravel bookings.', p);
-  ok(eq(t.rows.map((r) => r.op), ['keep', 'edit', 'add', 'add']) && t.rows[1].was === 'Anything my manager asks.' && eq(t.rows[1].from, [1, 2]) && eq(t.counts, { keep: 1, edit: 1, add: 2, remove: 1, unmentioned: 1, replaced: 1, unproven: 0, shortened: 0, unsupported: 1, long: 0 }), 'the four kinds — keep · edit (with what it was) · add · remove — and a block line the answer never mentioned', t.counts);
-  ok(eq(t.removed.map((r) => [r.op, r.line, r.tick]), [['replaced', 2, false], ['remove', 3, false], ['unmentioned', 4, true]]) && t.removed[1].reason === 'two newsletters needed you', 'the line the (pre-ticked) edit rewords keeps its own row, unticked (`replaced` — lane learn-card-untick R3-F1); a named removal is unticked (it leaves) with its reason; an unmentioned line stays ticked (never lost unseen)', t.removed);
+  ok(gateOf(eq(t.rows.map((r) => r.op), ['keep', 'edit', 'add', 'add'])) && t.rows[1].was === 'Anything my manager asks.' && gateOf(eq(t.rows[1].from, [1, 2])) && verdictOf(eq(t.counts, { keep: 1, edit: 1, add: 2, remove: 1, unmentioned: 1, replaced: 1, unproven: 0, shortened: 0, unsupported: 1, long: 0 })), 'the four kinds — keep · edit (with what it was) · add · remove — and a block line the answer never mentioned', t.counts);
+  ok(gateOf(eq(t.removed.map((r) => [r.op, r.line, r.tick]), [['replaced', 2, false], ['remove', 3, false], ['unmentioned', 4, true]])) && t.removed[1].reason === 'two newsletters needed you', 'the line the (pre-ticked) edit rewords keeps its own row, unticked (`replaced` — lane learn-card-untick R3-F1); a named removal is unticked (it leaves) with its reason; an unmentioned line stays ticked (never lost unseen)', t.removed);
   ok(RL.blockFrom(t) === 'Invoices and contracts matter to me.\nAnything my manager asks, the same day\nOutages of the checkout\nTravel bookings.', 'blockFrom = the ticked lines in order, then the kept ones the answer left out (the unsupported line is not written)', RL.blockFrom(t));
   const edited = { rows: t.rows.map((r, i) => (i === 3 ? { ...r, tick: true, text: 'Board  decisions ' } : r)), removed: t.removed.map((r) => ({ ...r, tick: true })) };
-  ok(RL.blockFrom(edited).split('\n').length === 7 && RL.blockFrom(edited).includes('Board  decisions') && RL.blockFrom(edited).includes('Not newsletters.') && RL.blockFrom(edited).includes('Anything my manager asks.'), 'the person\'s ticks and edits are what Save writes (their replaced line ticked again ⇒ kept beside its rewording)');
+  ok(RL.blockFrom(edited).split('\n').length === 7 && gateOf(RL.blockFrom(edited).includes('Board  decisions')) && gateOf(RL.blockFrom(edited).includes('Not newsletters.')) && verdictOf(RL.blockFrom(edited).includes('Anything my manager asks.')), 'the person\'s ticks and edits are what Save writes (their replaced line ticked again ⇒ kept beside its rewording)');
   const long2k = RL.blockFrom({ rows: [{ text: 'y'.repeat(2000), tick: true }] });
-  ok(long2k.length === 2000 && RL.blockFit(long2k).over && RL.blockFit(long2k).chars === 2000 && !RL.blockFit('y'.repeat(M.USER_BLOCK_MAX)).over && RL.diffTable(B3, { ok: false }).rows.length === 0, 'never cut (lane rule-learning-fix F3): blockFrom answers the whole text, blockFit says over 1 500 (1 500 itself fits); a failed proposal draws nothing', RL.blockFit(long2k));
+  ok(long2k.length === 2000 && gateOf(RL.blockFit(long2k).over) && RL.blockFit(long2k).chars === 2000 && !RL.blockFit('y'.repeat(M.USER_BLOCK_MAX)).over && RL.diffTable(B3, { ok: false }).rows.length === 0, 'never cut (lane rule-learning-fix F3): blockFrom answers the whole text, blockFit says over 1 500 (1 500 itself fits); a failed proposal draws nothing', RL.blockFit(long2k));
 }
 
 console.log('⑦ weeklySummary (P1 words — the trigger is OFF, no timer)');
@@ -260,26 +260,26 @@ const inputCensus = (rlText, attText) => {
 };
 {
   const pr = inputCensus(SRC, ATT);
-  ok(fnSource(SRC, 'buildLearnInput').includes('dropped, counts:') && fnSource(ATT, 'learnDraft').includes('RL.diffTable(stored, proposal)'), 'the census reads the WHOLE bodies of buildLearnInput and learnDraft (not their signatures)');
+  ok(gateOf(fnSource(SRC, 'buildLearnInput').includes('dropped, counts:')) && verdictOf(fnSource(ATT, 'learnDraft').includes('RL.diffTable(stored, proposal)')), 'the census reads the WHOLE bodies of buildLearnInput and learnDraft (not their signatures)');
   ok(pr.length === 0, 'CENSUS: rule-learning.js requires only the decision model; buildLearnInput reads only an example\'s snippet / verdict / inferred / clauses; learnDraft builds from M.examplesForInput + the block — no tail, no record, no body', pr);
   const plantedRl = SRC.replace("verdict: x.verdict, inferred: !!x.inferred, digest:", "verdict: x.verdict, inferred: !!x.inferred, body: x.body, digest:");
   const plantedAtt = ATT.replace('    const block = userBlock();\n    const input = RL.buildLearnInput(', '    const block = userBlock() + tailOf(null).map((r) => r.text).join();\n    const input = RL.buildLearnInput(');
-  ok(plantedRl !== SRC && inputCensus(plantedRl, ATT).some((p) => /\.body/.test(p)) && plantedAtt !== ATT && inputCensus(SRC, plantedAtt).some((p) => /tailOf/.test(p)), 'RED CONTROLS: a body read in buildLearnInput, a tail read in learnDraft — each named', [inputCensus(plantedRl, ATT), inputCensus(SRC, plantedAtt)]);
+  ok(plantedRl !== SRC && gateOf(inputCensus(plantedRl, ATT).some((p) => /\.body/.test(p))) && plantedAtt !== ATT && verdictOf(inputCensus(SRC, plantedAtt).some((p) => /tailOf/.test(p))), 'RED CONTROLS: a body read in buildLearnInput, a tail read in learnDraft — each named', [inputCensus(plantedRl, ATT), inputCensus(SRC, plantedAtt)]);
   const MARK = 'BODY-MARK-' + 'q7';
   const inp = RL.buildLearnInput({ block: 'x', examples: [{ snippet: 'digest only', verdict: 'needs', body: MARK, text: MARK, title: MARK, tail: [MARK] }] });
-  ok(!JSON.stringify(inp.messages).includes(MARK) && JSON.stringify(inp.messages).includes('digest only'), 'RUNTIME: an example carrying a body / text / title / tail sends ONLY its digest');
+  ok(!JSON.stringify(inp.messages).includes(MARK) && verdictOf(JSON.stringify(inp.messages).includes('digest only')), 'RUNTIME: an example carrying a body / text / title / tail sends ONLY its digest');
 }
 
 console.log('⑨ the decision model\'s seams (use cap · clauses · readout)');
 {
   const on = { pluginOn: true, featureOn: true, keyPresent: true, now: 0, ceilingCents: 100 };
-  ok(M.WHY.includes('use-budget') && M.budgetVerdict({ ...on, spentUsd: 0.2, estUsd: 0.007, useSpentUsd: 0.095, useCeilingCents: 10 }).why === 'use-budget' && M.budgetVerdict({ ...on, spentUsd: 0.2, estUsd: 0.007, useSpentUsd: 0.09, useCeilingCents: 10 }).ok, 'budgetVerdict: a use\'s own cap (learn: 10 ¢) stops the 0.095 + 0.007 call, passes 0.09 + 0.007');
-  ok(M.budgetVerdict({ ...on, spentUsd: 0.999, estUsd: 0.007, useSpentUsd: 0, useCeilingCents: 10 }).why === 'daily-budget' && M.budgetVerdict({ ...on, spentUsd: 0.5, estUsd: 0.007 }).ok && M.budgetVerdict({ ...on, plan: true, useSpentUsd: 9, useCeilingCents: 10 }).why === 'plan', 'the daily budget is asked FIRST (the use cap lives inside it); no cap given ⇒ no effect; the row stops still come before the money');
+  ok(gateOf(M.WHY.includes('use-budget')) && M.budgetVerdict({ ...on, spentUsd: 0.2, estUsd: 0.007, useSpentUsd: 0.095, useCeilingCents: 10 }).why === 'use-budget' && verdictOf(M.budgetVerdict({ ...on, spentUsd: 0.2, estUsd: 0.007, useSpentUsd: 0.09, useCeilingCents: 10 }).ok), 'budgetVerdict: a use\'s own cap (learn: 10 ¢) stops the 0.095 + 0.007 call, passes 0.09 + 0.007');
+  ok(M.budgetVerdict({ ...on, spentUsd: 0.999, estUsd: 0.007, useSpentUsd: 0, useCeilingCents: 10 }).why === 'daily-budget' && gateOf(M.budgetVerdict({ ...on, spentUsd: 0.5, estUsd: 0.007 }).ok) && M.budgetVerdict({ ...on, plan: true, useSpentUsd: 9, useCeilingCents: 10 }).why === 'plan', 'the daily budget is asked FIRST (the use cap lives inside it); no cap given ⇒ no effect; the row stops still come before the money');
   const list = [{ key: 'a', snippet: 's1', verdict: 'needs', clauses: ['asks_me'] }, { key: 'b', snippet: 's2', verdict: 'not', clauses: [], source: 'implicit' }];
-  ok(eq(M.examplesForInput(list), [{ snippet: 's1', verdict: 'needs' }, { snippet: 's2', verdict: 'not', inferred: true }]) && eq(M.examplesForInput(list, 12, { clauses: true }), [{ snippet: 's1', verdict: 'needs', clauses: ['asks_me'] }, { snippet: 's2', verdict: 'not', inferred: true, clauses: [] }]), 'examplesForInput: the default shape unchanged (the judge\'s memo material), `{clauses: true}` adds the judge\'s clause names');
+  ok(gateOf(eq(M.examplesForInput(list), [{ snippet: 's1', verdict: 'needs' }, { snippet: 's2', verdict: 'not', inferred: true }])) && verdictOf(eq(M.examplesForInput(list, 12, { clauses: true }), [{ snippet: 's1', verdict: 'needs', clauses: ['asks_me'] }, { snippet: 's2', verdict: 'not', inferred: true, clauses: [] }])), 'examplesForInput: the default shape unchanged (the judge\'s memo material), `{clauses: true}` adds the judge\'s clause names');
   const L = M.decisionTodayLine({ byUse: { attention: { calls: 2, usd: 0.001 }, learn: { calls: 1, usd: 0.0068 } } }, 1);
   ok(L.title === 'Needs attention $0.001 · For-you tray $0 · Rules $0 · Block drafts $0.007' && L.calls === 3 && !M.decisionTodayLine({ byUse: {} }, 1).title.includes('Block drafts'), 'the readout names the drafter\'s money (「起草判据」) when it spent — counted in the day like every use', L.title);
-  ok(M.JOURNAL_FIELDS.includes('zdr') && M.journalRow({ use: 'learn', zdr: true, model: 'google/gemini-3.8-flash', usd: 0.0068 }).zdr === true, 'the journal line carries zdr: true');
+  ok(gateOf(M.JOURNAL_FIELDS.includes('zdr')) && M.journalRow({ use: 'learn', zdr: true, model: 'google/gemini-3.8-flash', usd: 0.0068 }).zdr === true, 'the journal line carries zdr: true');
 }
 
 console.log('⑩ SAVE NEVER LOSES A LINE (lane rule-learning-fix F2 / F3) — the verifier\'s §S2 / §S on the PURE table, each with a RED control');
@@ -288,7 +288,7 @@ const LONG = 'Anything my manager or the finance team sends about invoices, cont
   for (const block of [LONG, LONG + '\nForum digests never matter']) {
     const answer = { lines: block.split('\n').map((l, i) => ({ text: l, kind: 'keep', line: i + 1, from: [], evidence: '' })), removed: [], note: '' };
     const t = RL.diffTable(block, RL.normalizeProposal(answer, { block, examples: EX3 }));
-    ok(t.rows.every((r) => r.op === 'keep' && r.tick && !r.unsupported) && RL.blockFrom(t) === block, `§S2 a ${LONG.length}-char line kept word for word (a ${block.split('\n').length}-line block) ⇒ a ticked 原样保留 row, 保存 writes the block unchanged`, t.rows.map((r) => [r.op, r.tick, r.text.length]));
+    ok(gateOf(t.rows.every((r) => r.op === 'keep' && r.tick && !r.unsupported)) && RL.blockFrom(t) === block, `§S2 a ${LONG.length}-char line kept word for word (a ${block.split('\n').length}-line block) ⇒ a ticked 原样保留 row, 保存 writes the block unchanged`, t.rows.map((r) => [r.op, r.tick, r.text.length]));
   }
   const elided = M.cleanPart(LONG, 120, 'line');
   for (const [name, text] of [['its 120-cut copy with the elision', elided], ['a rewording', 'Manager and finance mail'], ['empty', ''], ['not a string', 42]]) {
@@ -298,10 +298,10 @@ const LONG = 'Anything my manager or the finance team sends about invoices, cont
   const sameLong = RL.normalizeProposal({ lines: [{ text: LONG, kind: 'edit', line: 1, from: [], evidence: '' }], removed: [], note: '' }, { block: LONG, examples: EX3 });
   ok(sameLong.lines[0].kind === 'keep' && sameLong.lines[0].text === LONG && !sameLong.lines[0].unsupported, 'an "edit" that writes the long line word for word is a keep (both sides compared at lineMax 300, never at the model\'s 120)', sameLong.lines[0]);
   const longEdit = RL.normalizeProposal({ lines: [{ text: LONG + ' — and travel', kind: 'edit', line: 1, from: [1], evidence: 'e' }, { text: 'n'.repeat(200), kind: 'add', line: null, from: [1], evidence: 'e' }], removed: [], note: '' }, { block: LONG, examples: EX3 });
-  ok(longEdit.lines.every((l) => l.text.length <= RL.LEARN.textMax), 'the 120 bound still holds for an edit and a new line (the model\'s own words)', longEdit.lines.map((l) => [l.kind, l.text.length]));
+  ok(verdictOf(longEdit.lines.every((l) => l.text.length <= RL.LEARN.textMax)), 'the 120 bound still holds for an edit and a new line (the model\'s own words)', longEdit.lines.map((l) => [l.kind, l.text.length]));
   const weak = RL.normalizeProposal({ lines: [{ text: 'Manager mail', kind: 'edit', line: 1, from: [], evidence: 'a guess' }], removed: [], note: '' }, { block: LONG, examples: EX3 });
   const tw = RL.diffTable(LONG, weak);
-  ok(tw.rows[0].op === 'edit' && tw.rows[0].unsupported && !tw.rows[0].tick && eq(tw.removed.map((r) => [r.op, r.line, r.tick]), [['unproven', 1, true]]) && RL.blockFrom(tw) === LONG && tw.counts.unproven === 1, 'a demoted row never takes the person\'s line: an edit with no evidence (unticked) leaves its line in the kept list (`unproven`, ticked) — 保存 writes it', { rows: tw.rows, removed: tw.removed });
+  ok(tw.rows[0].op === 'edit' && gateOf(tw.rows[0].unsupported) && !tw.rows[0].tick && gateOf(eq(tw.removed.map((r) => [r.op, r.line, r.tick]), [['unproven', 1, true]])) && RL.blockFrom(tw) === LONG && tw.counts.unproven === 1, 'a demoted row never takes the person\'s line: an edit with no evidence (unticked) leaves its line in the kept list (`unproven`, ticked) — 保存 writes it', { rows: tw.rows, removed: tw.removed });
   const ONE = 'Invoices and contracts matter to me.';
   const shapes = {
     'a keep': [{ text: ONE, kind: 'keep', line: 1, from: [] }],
@@ -315,14 +315,14 @@ const LONG = 'Anything my manager or the finance team sends about invoices, cont
   const lost = Object.entries(shapes).filter(([, lines]) => !RL.blockFrom(RL.diffTable(ONE, RL.normalizeProposal({ lines, removed: [], note: '' }, { block: ONE, examples: EX3 }))).split('\n').includes(ONE)).map(([k]) => k);
   ok(lost.length === 0, `a ONE-LINE block is never erased by the default 保存 — ${Object.keys(shapes).length} answer shapes (${Object.keys(shapes).join(' · ')})`, lost);
   const named = RL.diffTable(ONE, RL.normalizeProposal({ lines: [], removed: [{ line: 1, reason: 'never needed you' }], note: '' }, { block: ONE, examples: EX3 }));
-  ok(RL.blockFrom(named) === '' && RL.blockFit('').empty && RL.blockFit(' \n ').empty && named.removed[0].op === 'remove' && named.removed[0].tick === false, 'only a NAMED removal empties it by default — and blockFit says `empty` (the card then shows 「保存后这一段为空」 and 「清空并保存」)', named.removed);
+  ok(RL.blockFrom(named) === '' && gateOf(RL.blockFit('').empty) && gateOf(RL.blockFit(' \n ').empty) && named.removed[0].op === 'remove' && named.removed[0].tick === false, 'only a NAMED removal empties it by default — and blockFit says `empty` (the card then shows 「保存后这一段为空」 and 「清空并保存」)', named.removed);
   const N_NEW = "    else if (kind === 'keep' || fold(clean(x.text, LEARN.lineMax)) === fold(clean(bl[line - 1], LEARN.lineMax))) { kind = 'keep'; text = bl[line - 1]; }";
   const N_OLD = "    else if (fold(text) === fold(clean(bl[line - 1], LEARN.lineMax))) { kind = 'keep'; text = bl[line - 1]; }\n    else if (kind === 'keep') kind = 'edit';";
   const C_NEW = "  const claimed = new Set(rows.filter((r) => r.op === 'keep').map((r) => r.line).filter(Boolean));", C_OLD = '  const claimed = new Set(rows.map((r) => r.line).filter(Boolean));';
   const keepLong = { lines: [{ text: LONG, kind: 'keep', line: 1, from: [], evidence: '' }], removed: [], note: '' };
   const mA = mutant(N_NEW, N_OLD, 'f2a');
   const mtA = mA.diffTable(LONG, mA.normalizeProposal(keepLong, { block: LONG, examples: EX3 }));
-  ok(mtA.rows[0].op === 'edit' && mtA.rows[0].unsupported && !mtA.rows[0].tick && mtA.rows[0].text !== LONG && mtA.rows[0].text.length <= RL.LEARN.textMax, 'RED CONTROL (F2, the normalizer): the old one (the 120-cut text compared) demotes the kept line to an unticked 改写 · 无依据 whose box holds a cut copy — the §S2 leg above is red on it', mtA.rows[0]);
+  ok(mtA.rows[0].op === 'edit' && gateOf(mtA.rows[0].unsupported) && !mtA.rows[0].tick && mtA.rows[0].text !== LONG && mtA.rows[0].text.length <= RL.LEARN.textMax, 'RED CONTROL (F2, the normalizer): the old one (the 120-cut text compared) demotes the kept line to an unticked 改写 · 无依据 whose box holds a cut copy — the §S2 leg above is red on it', mtA.rows[0]);
   const mB = mutant(C_NEW, C_OLD, 'f2b');
   ok(mB.blockFrom(mB.diffTable(LONG, weak)) === '', 'RED CONTROL (F2, the claim): an unsupported row claiming its line again ⇒ the default 保存 erases the block');
   const mAB = MC.load('src/rule-learning.js', editAnchor(editAnchor(SRC, N_NEW, () => N_OLD, "src/rule-learning.js"), C_NEW, () => C_OLD, "src/rule-learning.js"), 'f2ab');
@@ -334,10 +334,10 @@ const LONG = 'Anything my manager or the finance team sends about invoices, cont
   const raw12 = { lines: Array.from({ length: 12 }, (_, i) => ({ text: `new criterion ${i + 1}: ` + 'messages about the quarterly budget review that ask me directly '.slice(0, 92), kind: 'add', line: null, from: [i + 1], evidence: 'seen' })), removed: [], note: '' };
   const tS = RL.diffTable(BIG, RL.normalizeProposal(raw12, { block: BIG, examples: EX12 }));
   const sS = RL.blockFrom(tS), fS = RL.blockFit(sS);
-  ok(BIG.length <= M.USER_BLOCK_MAX && own.every((l) => sS.split('\n').includes(l)) && sS.length > M.USER_BLOCK_MAX && fS.over && fS.chars === sS.length && fS.max === M.USER_BLOCK_MAX, `§S an 11-line block (${BIG.length} chars) + 12 new lines ⇒ blockFrom keeps ALL 11 "kept" lines, never cut (${sS.length} chars) — blockFit says over ${fS.max}, so the card says so and 保存 waits`, { saved: sS.length, fit: fS });
+  ok(BIG.length <= M.USER_BLOCK_MAX && gateOf(own.every((l) => sS.split('\n').includes(l))) && sS.length > M.USER_BLOCK_MAX && gateOf(fS.over) && fS.chars === sS.length && fS.max === M.USER_BLOCK_MAX, `§S an 11-line block (${BIG.length} chars) + 12 new lines ⇒ blockFrom keeps ALL 11 "kept" lines, never cut (${sS.length} chars) — blockFit says over ${fS.max}, so the card says so and 保存 waits`, { saved: sS.length, fit: fS });
   const fewer = { ...tS, rows: tS.rows.map((r, i) => ({ ...r, tick: i === 0, text: i === 0 ? 'Budget reviews' : r.text })) };
   const sF = RL.blockFrom(fewer);
-  ok(!RL.blockFit(sF).over && own.every((l) => sF.split('\n').includes(l)), `…unticking 11 new lines and shortening the 12th brings it under (${sF.length} ≤ ${M.USER_BLOCK_MAX}) with every kept line still there`, sF.length);
+  ok(!RL.blockFit(sF).over && verdictOf(own.every((l) => sF.split('\n').includes(l))), `…unticking 11 new lines and shortening the 12th brings it under (${sF.length} ≤ ${M.USER_BLOCK_MAX}) with every kept line still there`, sF.length);
   const mC = mutant("  return out.join('\\n');\n}", "  return M.userBlockOf(out.join('\\n'));\n}", 'f3');
   const cut = mC.blockFrom(tS);
   ok(own.filter((l) => cut.split('\n').includes(l)).length < own.length && cut.length === M.USER_BLOCK_MAX, `RED CONTROL (F3, §S): the old silent slice keeps ${own.filter((l) => cut.split('\n').includes(l)).length} of the 11 kept lines, the last cut mid-line («${cut.split('\n').pop()}»)`);
@@ -354,13 +354,13 @@ console.log('⑩c ONE RULE FOR EVERY REWORDING (lane learn-card-untick, verify r
   const rowsOf = (tb) => tb.removed.map((r) => [r.op, r.line, r.tick]);
   const LONGC = Array.from({ length: 24 }, (_, i) => `contract${i}`).join(' ');   // > 120 characters ⇒ cut, unticked (F4)
   const sup = tableOf(RL, [1]), weak = tableOf(RL, []), cut = RL.diffTable(BL, RL.normalizeProposal({ lines: [{ text: LONGC, kind: 'edit', line: 1, from: [1], evidence: 'e' }], removed: [], note: '' }, { block: BL, examples: EXR }));
-  ok(sup.rows[0].tick && eq(rowsOf(sup), [['replaced', 1, false], ['unmentioned', 2, true]]) && eq(rowsOf(weak), [['unproven', 1, true], ['unmentioned', 2, true]]) && eq(rowsOf(cut), [['shortened', 1, true], ['unmentioned', 2, true]]) && sup.counts.replaced === 1,
+  ok(gateOf(sup.rows[0].tick) && gateOf(eq(rowsOf(sup), [['replaced', 1, false], ['unmentioned', 2, true]])) && gateOf(eq(rowsOf(weak), [['unproven', 1, true], ['unmentioned', 2, true]])) && gateOf(eq(rowsOf(cut), [['shortened', 1, true], ['unmentioned', 2, true]])) && sup.counts.replaced === 1,
     'a PRE-TICKED (supported) rewording leaves its line a row of its own — `replaced`, unticked — as an unproven (`unproven`) and a cut one (`shortened`) do, those ticked: every rewording\'s line is a row, its tick the opposite of the rewording\'s', { sup: rowsOf(sup), weak: rowsOf(weak), cut: rowsOf(cut) });
-  ok(RL.blockFrom(sup) === 'Invoices this week, and contracts\nForum digests do not' && ['sup', 'weak', 'cut'].every((k) => RL.blockFrom(untick({ sup, weak, cut }[k])) === 'Invoices due this week matter to me\nForum digests do not'),
+  ok(RL.blockFrom(sup) === 'Invoices this week, and contracts\nForum digests do not' && verdictOf(['sup', 'weak', 'cut'].every((k) => RL.blockFrom(untick({ sup, weak, cut }[k])) === 'Invoices due this week matter to me\nForum digests do not')),
     'ticked ⇒ the rewording replaces the line; unticked ⇒ 保存 writes the person\'s ORIGINAL line — the same for a pre-ticked, an unproven and a cut rewording', [RL.blockFrom(sup), RL.blockFrom(untick(sup))]);
   const mR = mutant(C_NEW_R3, '  const claimed = new Set(rows.filter((r) => r.tick).map((r) => r.line).filter(Boolean));', 'r3f1');
   const supM = tableOf(mR, [1]);
-  ok(supM && eq(rowsOf(supM), [['unmentioned', 2, true]]) && mR.blockFrom(untick(supM)) === 'Forum digests do not', 'RED CONTROL (R3-F1): the old claim — a pre-ticked row claims its line ⇒ the line has no row, and unticking the rewording makes 保存 write «Forum digests do not» (verify r3\'s probe: line 1 gone, unsaid)', supM && { rows: rowsOf(supM), saved: mR.blockFrom(untick(supM)) });
+  ok(gateOf(supM) && gateOf(eq(rowsOf(supM), [['unmentioned', 2, true]])) && mR.blockFrom(untick(supM)) === 'Forum digests do not', 'RED CONTROL (R3-F1): the old claim — a pre-ticked row claims its line ⇒ the line has no row, and unticking the rewording makes 保存 write «Forum digests do not» (verify r3\'s probe: line 1 gone, unsaid)', supM && { rows: rowsOf(supM), saved: mR.blockFrom(untick(supM)) });
 }
 
 console.log('⑩b THE CUT + THE STORED BLOCK (lane rule-learning-fix-r2 F4 / F6) — an over-long edit / new line is cut without a marker and never pre-ticked; the table is built on the block as stored');
@@ -371,35 +371,35 @@ const STORED = Array.from({ length: 14 }, (_, i) => `stored rule ${i + 1}: ` + w
   const E170 = wordsOf(170, 'contract'), cE = RL.cutLine(E170, 120);
   const CJK200 = '发票合同付款审批'.repeat(25), cC = RL.cutLine(CJK200, 120);
   const cM = RL.cutLine('😀'.repeat(130), 120), cX = RL.cutLine('发票 ' + '合'.repeat(200), 120), cW = RL.cutLine('n'.repeat(200), 120);
-  ok(cE.length <= 120 && E170.startsWith(cE) && /\s/.test(E170[cE.length]) && !MARK.test(cE) && cC === CJK200.slice(0, 120) && cM === '😀'.repeat(120) && Array.from(cX).length === 120 && cW === 'n'.repeat(120) && RL.cutLine('short line', 120) === 'short line',
+  ok(cE.length <= 120 && gateOf(E170.startsWith(cE)) && gateOf(/\s/.test(E170[cE.length])) && !MARK.test(cE) && cC === CJK200.slice(0, 120) && cM === '😀'.repeat(120) && Array.from(cX).length === 120 && cW === 'n'.repeat(120) && RL.cutLine('short line', 120) === 'short line',
     'cutLine: a spaced line is cut at its last word boundary inside 120 (no marker); CJK and one long word at the character; counted in characters (120 emoji = 240 UTF-16 units, never a lone surrogate)', { E: [cE.length, E170[cE.length]], C: cC.length, M: [Array.from(cM).length, cM.length], X: Array.from(cX).length });
   // verify r2's §F2-e in the brief's shape: a 152-char keep + a 170-char edit (and a 170-char new line), both with evidence
   const L152 = wordsOf(152), BLK = `${L152}\nForum digests never matter`;
   const ans = { lines: [{ text: L152, kind: 'keep', line: 1, from: [], evidence: '' }, { text: E170, kind: 'edit', line: 2, from: [1], evidence: 'one contract waited' }, { text: wordsOf(170, 'payment'), kind: 'add', line: null, from: [1], evidence: 'a payment' }], removed: [], note: '' };
   const tE = RL.diffTable(BLK, RL.normalizeProposal(ans, { block: BLK, examples: EX3 })), sE = RL.blockFrom(tE);
   const [k0, e1, a2] = tE.rows;
-  ok(k0.op === 'keep' && k0.tick && k0.text === L152 && e1.op === 'edit' && e1.long && !e1.tick && !e1.unsupported && E170.startsWith(e1.text) && e1.text.length <= 120 && !MARK.test(e1.text) && e1.full === E170 && a2.op === 'add' && a2.long && !a2.tick && !MARK.test(a2.text),
+  ok(k0.op === 'keep' && gateOf(k0.tick) && k0.text === L152 && e1.op === 'edit' && gateOf(e1.long) && !e1.tick && !e1.unsupported && gateOf(E170.startsWith(e1.text)) && e1.text.length <= 120 && !MARK.test(e1.text) && e1.full === E170 && a2.op === 'add' && gateOf(a2.long) && !a2.tick && !MARK.test(a2.text),
     "§F2-e (verify r2): a 152-char keep + a 170-char edit + a 170-char new line, with evidence ⇒ the keep ticked, the person's line verbatim; the edit and the new line CUT at a word boundary (no marker), `long`, NOT pre-ticked, the whole text kept for the fold", tE.rows.map((r) => ({ op: r.op, tick: r.tick, long: r.long, len: r.text.length, end: r.text.slice(-16) })));
-  ok(sE === BLK && eq(tE.removed.map((r) => [r.op, r.line, r.tick]), [['shortened', 2, true]]) && tE.counts.long === 2 && tE.counts.shortened === 1, "…the default 保存 writes the person's two lines — the line the cut edit rewords stays (`shortened`, ticked); never a mangled line", { saved: sE, removed: tE.removed.map((r) => [r.op, r.line]) });
+  ok(sE === BLK && gateOf(eq(tE.removed.map((r) => [r.op, r.line, r.tick]), [['shortened', 2, true]])) && tE.counts.long === 2 && tE.counts.shortened === 1, "…the default 保存 writes the person's two lines — the line the cut edit rewords stays (`shortened`, ticked); never a mangled line", { saved: sE, removed: tE.removed.map((r) => [r.op, r.line]) });
   const one = RL.diffTable(L152, RL.normalizeProposal({ lines: [{ text: E170, kind: 'edit', line: 1, from: [1], evidence: 'e' }], removed: [], note: '' }, { block: L152, examples: EX3 }));
-  ok(RL.blockFrom(one) === L152 && one.rows[0].long && !one.rows[0].tick, "…verify r2's own §F2-e shape (a one-line block, the 170-char edit of it): 保存 writes the person's line", RL.blockFrom(one));
+  ok(RL.blockFrom(one) === L152 && gateOf(one.rows[0].long) && !one.rows[0].tick, "…verify r2's own §F2-e shape (a one-line block, the 170-char edit of it): 保存 writes the person's line", RL.blockFrom(one));
   const lit = RL.normalizeProposal({ lines: [{ text: 'Short criterion …[12 characters omitted]… its tail', kind: 'add', line: null, from: [1], evidence: 'e' }, { text: '发票'.repeat(100), kind: 'add', line: null, from: [2], evidence: 'e' }], removed: [], note: '' }, { block: B3, examples: EX3 });
-  ok(lit.lines[0].text === 'Short criterion' && lit.lines[0].long && lit.lines[1].text === '发票'.repeat(60) && lit.lines[1].long && RL.diffTable(B3, lit).rows.every((r) => !r.tick), 'a marker the model wrote itself is cut off with what follows it (never in a box); a 200-character CJK line is cut at 120 characters — both unticked', lit.lines.map((x) => [x.text, x.long]));
+  ok(lit.lines[0].text === 'Short criterion' && gateOf(lit.lines[0].long) && lit.lines[1].text === '发票'.repeat(60) && gateOf(lit.lines[1].long) && verdictOf(RL.diffTable(B3, lit).rows.every((r) => !r.tick)), 'a marker the model wrote itself is cut off with what follows it (never in a box); a 200-character CJK line is cut at 120 characters — both unticked', lit.lines.map((x) => [x.text, x.long]));
   ok(RL.LEARN_SCHEMA.properties.lines.items.properties.text.maxLength === RL.LEARN.textMax, "the strict schema bounds a line's text: maxLength 120 (the bound the task states)");
   const CUT_NEW = '    let text = long ? cutLine(head, LEARN.textMax) : head;', CUT_OLD = '    let text = clean(x.text, LEARN.textMax);';
   const LONG_NEW = "    const cut = kind !== 'keep' && long;", LONG_OLD = '    const cut = false;';
   const mF4 = MC.load('src/rule-learning.js', editAnchor(editAnchor(SRC, CUT_NEW, () => CUT_OLD, "src/rule-learning.js"), LONG_NEW, () => LONG_OLD, "src/rule-learning.js"), 'f4');
   const tF4 = mF4.diffTable(BLK, mF4.normalizeProposal(ans, { block: BLK, examples: EX3 }));
-  ok(SRC.includes(CUT_NEW) && SRC.includes(LONG_NEW) && tF4.rows[1].tick && /characters omitted/.test(mF4.blockFrom(tF4)), "RED CONTROL (F4): the old cut ⇒ the edit is pre-ticked holding cleanPart's marker, and 保存 writes it (verify r2's F4)", mF4.blockFrom(tF4).split('\n').map((l) => l.slice(0, 70)));
+  ok(gateOf(SRC.includes(CUT_NEW)) && gateOf(SRC.includes(LONG_NEW)) && gateOf(tF4.rows[1].tick) && verdictOf(/characters omitted/.test(mF4.blockFrom(tF4))), "RED CONTROL (F4): the old cut ⇒ the edit is pre-ticked holding cleanPart's marker, and 保存 writes it (verify r2's F4)", mF4.blockFrom(tF4).split('\n').map((l) => l.slice(0, 70)));
 
   // F6: a block already over 1 500 as STORED (settings.json by hand, an API write, a value from before the box's bound)
   const inF6 = RL.buildLearnInput({ block: STORED, examples: [{ snippet: 'Invoice 7', verdict: 'needs' }] });
   const pF6 = RL.normalizeProposal({ lines: [{ text: 'stored rule 1: …', kind: 'keep', line: 1, from: [] }, { text: 'Board decisions', kind: 'edit', line: 14, from: [1], evidence: 'e' }], removed: [{ line: 13, reason: 'never seen' }], note: '' }, { block: STORED, examples: EX3, shown: inF6.lines.length });
   const tF6 = RL.diffTable(STORED, pF6), sF6 = RL.blockFrom(tF6), fF6 = RL.blockFit(sF6);
   const all14 = STORED.split('\n');
-  ok(STORED.length > M.USER_BLOCK_MAX && tF6.stored.over && tF6.stored.chars === STORED.length && tF6.stored.max === M.USER_BLOCK_MAX && all14.every((l) => sF6.split('\n').includes(l)) && fF6.over,
+  ok(STORED.length > M.USER_BLOCK_MAX && gateOf(tF6.stored.over) && tF6.stored.chars === STORED.length && tF6.stored.max === M.USER_BLOCK_MAX && gateOf(all14.every((l) => sF6.split('\n').includes(l))) && verdictOf(fF6.over),
     `a block STORED at ${STORED.length} characters (> 1 500): the table is built on it whole — all 14 lines are rows (the tail kept), \`stored\` says ${STORED.length} > 1 500, the default 保存 is over (${fF6.chars}) so the card says so and waits — never a silent cut`, { stored: tF6.stored, saved: sF6.length });
-  ok(inF6.lines.length === RL.blockLines(M.userBlockOf(STORED)).length && inF6.lines.length < 14 && !inF6.messages[1].content.includes('stored rule 13:') && eq(pF6.lines.map((x) => [x.kind, x.line]), [['keep', 1], ['add', null]]) && pF6.removed.length === 0,
+  ok(inF6.lines.length === RL.blockLines(M.userBlockOf(STORED)).length && inF6.lines.length < 14 && !inF6.messages[1].content.includes('stored rule 13:') && gateOf(eq(pF6.lines.map((x) => [x.kind, x.line]), [['keep', 1], ['add', null]])) && pF6.removed.length === 0,
     `…the model is shown only the judge's read (the first 1 500 characters: ${inF6.lines.length} lines) — an edit of line 14 or a removal of line 13 (lines it never saw) names no line`, { shown: inF6.lines.length, lines: pF6.lines.map((x) => [x.kind, x.line]), removed: pF6.removed });
   const mF6 = mutant('const blockLines = (block) => str(block).split(', 'const blockLines = (block) => M.userBlockOf(block).split(', 'f6');
   const sF6m = mF6.blockFrom(mF6.diffTable(STORED, mF6.normalizeProposal({ lines: [{ text: 'x', kind: 'keep', line: 1, from: [] }], removed: [], note: '' }, { block: STORED, examples: EX3 })));
@@ -497,13 +497,13 @@ async function wireLaw(client, e, cases = CASES) {
   const jl = e.journalRows().filter((x) => x.use === 'learn' && x.outcome !== 'reserved');   // B-0248's next part: the RESULT lines — each call's reservation is its own line (paired below)
   const jr = new Set(e.journalRows().filter((x) => x.use === 'learn' && x.outcome === 'reserved').map((x) => x.call));
   { const asked = jl.filter((x) => x.reserved !== undefined);   // the calls that reached the vendor (a refusal before the hold has no reservation)
-    ok(asked.length > 0 && asked.every((x) => typeof x.call === 'string' && jr.has(x.call)) && jr.size === asked.length, `each of the ${asked.length} learn calls that reached the vendor left its RESERVATION line before its result (paired by call, B-0248)`, { asked: asked.length, reservations: jr.size }); }
-  ok(jl.length === CASES.length + 1 && jl.every((x) => x.zdr === true) && !JSON.stringify(jl).includes(KEYW) && jl.filter((x) => x.outcome === 'redirect').length === 3, `the journal: ${jl.length} learn lines, zdr true on each, no key; the three 3xx are \`redirect\``, jl.slice(-3));
+    ok(asked.length > 0 && gateOf(asked.every((x) => typeof x.call === 'string' && jr.has(x.call))) && jr.size === asked.length, `each of the ${asked.length} learn calls that reached the vendor left its RESERVATION line before its result (paired by call, B-0248)`, { asked: asked.length, reservations: jr.size }); }
+  ok(jl.length === CASES.length + 1 && gateOf(jl.every((x) => x.zdr === true)) && !JSON.stringify(jl).includes(KEYW) && jl.filter((x) => x.outcome === 'redirect').length === 3, `the journal: ${jl.length} learn lines, zdr true on each, no key; the three 3xx are \`redirect\``, jl.slice(-3));
   ok(wire.filter((q) => q.srv === 'other').length === 0, 'L2: no request ever reached the redirect\'s other origin (redirect: \'error\' — never followed)');
   // RED CONTROLS — the census-mutants of verify r1 as copies of the client over the same ledger: each breaks the wire law
   const U = '    const u = json ? usageOf(json)', LET = "    let status = 0, json = null, message = '', failed = null, sending = null;", ROUTE_LINE = "      provider: { zdr: true, data_collection: 'deny' },";
   const TS = THAW(TM_SRC);
-  ok(FREEZES.every(([a]) => TM_SRC.includes(a)) && FREEZES.every(([, b]) => TS.includes(b)) && TM_SRC.includes(SER), 'the shipped client freezes the request and its routing and serializes it once (the controls below mutate a copy with both freezes taken out)');
+  ok(gateOf(FREEZES.every(([a]) => TM_SRC.includes(a))) && gateOf(FREEZES.every(([, b]) => TS.includes(b))) && verdictOf(TM_SRC.includes(SER)), 'the shipped client freezes the request and its routing and serializes it once (the controls below mutate a copy with both freezes taken out)');
   const muts = {
     'M3 a non-ZDR retry': TS.replace(U, "    if (status === 0) { try { const r2 = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, provider: undefined }) }); status = r2.status; json = await r2.json().catch(() => null); } catch { } }\n" + U),
     'M2 the literal overridden': TS.replace(SER, "    Object.assign(body, { provider: { data_collection: 'allow' } });\n" + SER),
@@ -580,7 +580,7 @@ const clientOf = (Mod) => (e, t) => (Mod ? Mod.create({ integrations: ROW, ledge
   const s5 = TM_SRC.includes(S5_AT) && TM_SRC.includes(S5_RES) ? editAnchor(editAnchor(TM_SRC, S5_AT, '      let res = null, j = null;\n      for (let a = 0; a < 2; a++) {\n' + S5_AT, "src/server/text-model-client.js"),
     S5_RES, "      res = await sending;\n      status = res.status;\n      let half = false;\n      j = await res.json().catch((e) => { half = a === 0 && !!e && e.name === 'TypeError'; return null; });\n      if (!half) break;\n      }\n", "src/server/text-model-client.js") : null;
   const r5 = s5 && await sweepLaw(clientOf(MCW.load('src/server/text-model-client.js', s5, 'sweep-s5')), { first: true, tiers: ['sonnet', 'flash'] });
-  ok(r5 && r5.broke.length > 0 && r5.broke[0].answer === 'half', `RED CONTROL (verify r3 S5 — a retry through the ONE call site on a half body): the sweep breaks at ${r5 && r5.broke[0] ? `${r5.broke[0].tier} · ${r5.broke[0].answer} ⇒ ${r5.broke[0].requests.join(' + ')}` : 'nothing'} (answer ${r5 && r5.n})`, r5 && r5.broke.slice(0, 1));
+  ok(gateOf(r5) && r5.broke.length > 0 && r5.broke[0].answer === 'half', `RED CONTROL (verify r3 S5 — a retry through the ONE call site on a half body): the sweep breaks at ${r5 && r5.broke[0] ? `${r5.broke[0].tier} · ${r5.broke[0].answer} ⇒ ${r5.broke[0].requests.join(' + ')}` : 'nothing'} (answer ${r5 && r5.n})`, r5 && r5.broke.slice(0, 1));
 }
 
 console.log('⑪c THE STORED BLOCK THROUGH learnDraft (lane rule-learning-fix-r2 F6) — the real engine + attention module, a block stored over 1 500');
@@ -595,7 +595,7 @@ console.log('⑪c THE STORED BLOCK THROUGH learnDraft (lane rule-learning-fix-r2
   plan = [];
   const sent = wire.slice(k), user = sent[0] && sent[0].body ? sent[0].body.messages[1].content : '';
   const saved = r.ok ? RL.blockFrom(r.table) : '';
-  ok(r.ok && sent.length === 1 && r.table.stored.over && r.table.stored.chars === STORED.length && STORED.split('\n').every((l) => saved.split('\n').includes(l)) && RL.blockFit(saved).over && user.includes('1. stored rule 1:') && !user.includes('stored rule 13:'),
+  ok(gateOf(r.ok) && sent.length === 1 && gateOf(r.table.stored.over) && r.table.stored.chars === STORED.length && gateOf(STORED.split('\n').every((l) => saved.split('\n').includes(l))) && gateOf(RL.blockFit(saved).over) && gateOf(user.includes('1. stored rule 1:')) && !user.includes('stored rule 13:'),
     `learnDraft on a block stored at ${STORED.length} characters: ONE request carrying only the judge's read (no line past 1 500), the answer's table on the WHOLE block (stored.over, all 14 lines kept) — the card says it and waits`, r.ok ? { stored: r.table.stored, rows: r.table.rows.length, kept: r.table.removed.length } : r);
 }
 
@@ -610,14 +610,14 @@ console.log('⑫ THE JUDGE\'S REDIRECT (lane rule-learning-fix L2 — the same v
     return { r, got: wire.slice(n), st: e.status().today, jl: e.journalRows() };
   };
   const a = await judgeOnce(DE);
-  ok(!a.r.ok && a.r.why === 'redirect' && a.r.retryAt > 0 && a.got.length === 1 && a.got[0].srv === 'or' && a.st.total.usd === 0 && a.st.reserved === 0 && a.jl.some((x) => x.outcome === 'redirect'), 'a 307 on the decisions endpoint ⇒ `redirect` (journalled, paced like a wall), ONE request, nothing to the other origin, $0 settled', { r: a.r, got: a.got.map((q) => q.srv), usd: a.st.total.usd });
+  ok(!a.r.ok && a.r.why === 'redirect' && a.r.retryAt > 0 && a.got.length === 1 && a.got[0].srv === 'or' && a.st.total.usd === 0 && a.st.reserved === 0 && verdictOf(a.jl.some((x) => x.outcome === 'redirect')), 'a 307 on the decisions endpoint ⇒ `redirect` (journalled, paced like a wall), ONE request, nothing to the other origin, $0 settled', { r: a.r, got: a.got.map((q) => q.srv), usd: a.st.total.usd });
   const follow = editAnchor(DE_SRC, ", redirect: 'error' });   // a 3xx is never followed (lane rule-learning-fix L2)", ' });', "src/server/decision-engine.js");
   // lane judge-one-shot-body: the judge's body is a ONE-SHOT stream now — a followed 307 / 308 has no source to re-send, so
   // that copy fails closed (nothing reaches the other origin); a 303 is still followed (a GET, no body) — the control
   const FOLLOW = follow === DE_SRC ? null : MCW.load('src/server/decision-engine.js', follow, 'judge-follow');
   const b = FOLLOW && await judgeOnce(FOLLOW, 303), b7 = FOLLOW && await judgeOnce(FOLLOW, 307);
-  ok(b && b.got.some((q) => q.srv === 'other'), 'RED CONTROL: the judge without redirect: \'error\' follows a 303 — a request goes to the OTHER origin', b && b.got.map((q) => q.srv));
-  ok(b7 && b7.got.length === 1 && b7.got[0].srv === 'or' && !b7.r.ok, '…and the same copy on a 307: the one-shot body cannot be re-sent, so not even a following judge carries the question to the other origin (the second defence — lane judge-one-shot-body)', b7 && { r: b7.r, got: b7.got.map((q) => q.srv) });
+  ok(gateOf(b) && verdictOf(b.got.some((q) => q.srv === 'other')), 'RED CONTROL: the judge without redirect: \'error\' follows a 303 — a request goes to the OTHER origin', b && b.got.map((q) => q.srv));
+  ok(gateOf(b7) && b7.got.length === 1 && b7.got[0].srv === 'or' && !b7.r.ok, '…and the same copy on a 307: the one-shot body cannot be re-sent, so not even a following judge carries the question to the other origin (the second defence — lane judge-one-shot-body)', b7 && { r: b7.r, got: b7.got.map((q) => q.srv) });
 }
 
 console.log('⑬ ONE DRAFT AT A TIME (lane rule-learning-fix L4) — the REAL channels router: a POST while one is in flight ⇒ 409 busy, 0 requests');
@@ -642,7 +642,7 @@ console.log('⑬ ONE DRAFT AT A TIME (lane rule-learning-fix L4) — the REAL ch
   const third = await post();
   plan = [];
   const busy = two.find((x) => x.s === 409);
-  ok(two.map((x) => x.s).sort().join() === '200,409' && busy && busy.j.why === 'busy' && busy.j.ok === false && wire.length - n === 2 && third.s === 200, 'two POSTs at once ⇒ 200 + 409 `busy` (ONE vendor request); the next POST after it ⇒ 200 again (the flight is released)', { statuses: two.map((x) => x.s), busy: busy && busy.j, requests: wire.length - n, third: third.s });
+  ok(two.map((x) => x.s).sort().join() === '200,409' && gateOf(busy) && busy.j.why === 'busy' && busy.j.ok === false && wire.length - n === 2 && third.s === 200, 'two POSTs at once ⇒ 200 + 409 `busy` (ONE vendor request); the next POST after it ⇒ 200 again (the flight is released)', { statuses: two.map((x) => x.s), busy: busy && busy.j, requests: wire.length - n, third: third.s });
   srv.close();
   const RT_SRC = fs.readFileSync(path.join(repo, 'src/routes/channels.js'), 'utf8');
   const noGate = editAnchor(RT_SRC, "    if (learnInFlight) return res.status(409).json({ ok: false, why: 'busy', error: 'a draft is already being made' });\n", '', "src/routes/channels.js");
@@ -652,7 +652,7 @@ console.log('⑬ ONE DRAFT AT A TIME (lane rule-learning-fix L4) — the REAL ch
     plan = ['slow', 'slow']; const k = wire.length;
     const both = await Promise.all([m.post(), m.post()]);
     plan = [];
-    ok(both.every((x) => x.s === 200) && wire.length - k === 2, 'RED CONTROL: the route without the single-flight line ⇒ two presses at once = TWO vendor requests (two holds)', both.map((x) => x.s));
+    ok(gateOf(both.every((x) => x.s === 200)) && wire.length - k === 2, 'RED CONTROL: the route without the single-flight line ⇒ two presses at once = TWO vendor requests (two holds)', both.map((x) => x.s));
     m.srv.close();
   }
 }
@@ -677,14 +677,14 @@ console.log('⑬b THE DRAFTER\'S OWN SWITCH (lane llm-plugin-rename) — the REA
   };
   const n = wire.length;
   const off = await ask(mkEng({ learn: false }), 'off');
-  ok(off.g === 404 && off.p === 404 && off.gj.code === 'no-learn' && off.gj.why === 'learn-off' && off.pj.why === 'learn-off' && /switched off/.test(off.gj.error) && /Settings › Plugins › LLM/.test(off.gj.error),
+  ok(off.g === 404 && off.p === 404 && off.gj.code === 'no-learn' && off.gj.why === 'learn-off' && off.pj.why === 'learn-off' && gateOf(/switched off/.test(off.gj.error)) && verdictOf(/Settings › Plugins › LLM/.test(off.gj.error)),
     `the switch OFF ⇒ GET and POST answer 404 no-learn naming the switch («${off.gj.error}»)`, off);
   ok(mkEng({}).textModel.available().exists === true && mkEng({ learn: true }).textModel.available().exists === true, 'the switch absent (its default) or on ⇒ the drafter exists on an OpenRouter key');
   const dataDir = path.join(WIRE_ROOT, 'openai'); fs.mkdirSync(dataDir, { recursive: true });
   const oai = DE.create({ dataDir, integrations: { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: KEYW }, source: 'user' }) }, baseUrlFor: { openrouter: `http://127.0.0.1:${OR}` }, now: () => Date.UTC(2026, 9, 14, 12), tzOffset: () => 0, log: quiet });
   oai.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ dailyBudgetCents: 100, learnModel: 'flash', learn: true }) });
   const other = await ask(oai, 'openai');
-  ok(other.g === 404 && other.p === 404 && other.gj.why === 'not-openrouter' && /OpenRouter key/.test(other.gj.error) && /another provider/.test(other.gj.error), `an OpenAI key ⇒ 404 naming the provider («${other.gj.error}»)`, other);
+  ok(other.g === 404 && other.p === 404 && other.gj.why === 'not-openrouter' && gateOf(/OpenRouter key/.test(other.gj.error)) && verdictOf(/another provider/.test(other.gj.error)), `an OpenAI key ⇒ 404 naming the provider («${other.gj.error}»)`, other);
   ok(wire.length === n, `0 vendor requests for either (${wire.length - n})`);
 }
 
@@ -727,7 +727,7 @@ console.log('⑭ EVERY REFUSAL HAS WORDS (lane rule-learning-fix L5) + the regis
   const problems = [];
   const all = routeWhys(srcs, problems), words = cardWhys(CARD);
   const missing = [...all].filter((w) => !words.has(w));
-  ok(problems.length === 0 && all.size >= 15 && ['busy', 'redirect', 'no-answer', 'use-budget', 'no-zdr', 'vendor-busy', 'bad-answer', 'not-openrouter'].every((w) => all.has(w)) && missing.length === 0, `CENSUS: the ${all.size} whys the learn route can answer — derived from the client (its budget call swept, its refusals), learnDraft, the route and the PURE drafter — each has a sentence in the card's map (${[...all].sort().join(' · ')})`, { missing, problems });
+  ok(problems.length === 0 && all.size >= 15 && gateOf(['busy', 'redirect', 'no-answer', 'use-budget', 'no-zdr', 'vendor-busy', 'bad-answer', 'not-openrouter'].every((w) => all.has(w))) && missing.length === 0, `CENSUS: the ${all.size} whys the learn route can answer — derived from the client (its budget call swept, its refusals), learnDraft, the route and the PURE drafter — each has a sentence in the card's map (${[...all].sort().join(' · ')})`, { missing, problems });
   const planted = TM_SRC.replace('    if (!ledger) return { ok: false, why: \'plugin-off\' };', '    if (!ledger) return { ok: false, why: \'plugin-off\' };\n    if (!messages.length) return { ok: false, why: \'empty-input\' };');
   const swept = TM_SRC.replace('featureOn: true, keyPresent: !!key,', 'featureOn: true, keyPresent: !!key, accountNever: s.never,');
   const p2 = [];
@@ -735,7 +735,7 @@ console.log('⑭ EVERY REFUSAL HAS WORDS (lane rule-learning-fix L5) + the regis
   const R = require(path.join(repo, 'src/integration-registry.js'));
   const row = R.rowById('llm'), help = row.fields.find((f) => f.key === 'provider').help;
   const helpText = typeof help === 'string' ? help : JSON.stringify(help);
-  ok(eq(row.consumers, ['src/server/decision-engine.js', 'src/server/text-model-client.js']) && helpText.includes('/api/alpha/decisions') && helpText.includes('/api/v1/chat/completions'), 'L6: the Language model row lists BOTH consumers of its key (the judge, the text client) and its help names both endpoints', { consumers: row.consumers, help: helpText.slice(0, 260) });
+  ok(gateOf(eq(row.consumers, ['src/server/decision-engine.js', 'src/server/text-model-client.js'])) && gateOf(helpText.includes('/api/alpha/decisions')) && verdictOf(helpText.includes('/api/v1/chat/completions')), 'L6: the Language model row lists BOTH consumers of its key (the judge, the text client) and its help names both endpoints', { consumers: row.consumers, help: helpText.slice(0, 260) });
 }
 
 console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL learn-card.js (zh) over a fake DOM: the long kept line, the count, the empty block, the door, the refusals');
@@ -782,7 +782,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const got = [];
   const c1 = LC.renderLearnCard(answerOf(LONG, { lines: [{ text: M.cleanPart(LONG, 120, 'line'), kind: 'keep', line: 1, from: [], evidence: '' }], removed: [], note: '' }), { onSave: (x) => { got.push(x); return true; } });
   const row1 = c1.querySelector('.learn-text');
-  ok(c1.querySelector('.learn-chip').textContent === '原样保留' && c1.querySelector('.learn-tick').checked && row1.value === LONG && row1.maxLength >= LONG.length && look(c1).fit.hidden && look(c1).save.textContent === '保存', `§G-F2 the ${LONG.length}-char line the model kept (its copy cut with an elision): 原样保留, ticked, the box holds the WHOLE line, no notice, 「保存」`, { chip: c1.querySelector('.learn-chip').textContent, len: row1.value.length });
+  ok(c1.querySelector('.learn-chip').textContent === '原样保留' && gateOf(c1.querySelector('.learn-tick').checked) && row1.value === LONG && row1.maxLength >= LONG.length && gateOf(look(c1).fit.hidden) && look(c1).save.textContent === '保存', `§G-F2 the ${LONG.length}-char line the model kept (its copy cut with an elision): 原样保留, ticked, the box holds the WHOLE line, no notice, 「保存」`, { chip: c1.querySelector('.learn-chip').textContent, len: row1.value.length });
   // lane think-tools-phone (主开发 04:19Z — the stale page's law): the card's press (a billed judgment) put these lines here, so each box is
   // marked TYPED — a stale page holds its reload while the card shows; RED: the same card without its mark (a mutant copy, its own bundle)
   {
@@ -805,21 +805,21 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const c3 = LC.renderLearnCard(big, { onSave: (x) => { saved3.push(x); return true; } });
   const f3 = look(c3);
   const n3 = RL.blockFrom(big.table).length;
-  ok(!f3.fit.hidden && f3.fit.dataset.state === 'over' && f3.fit.textContent === `超出 1 500 字符（${n3}）——去掉几行或缩短后再保存` && f3.save.disabled, `§S the card counts what 保存 would write (${n3}) — 「超出 1 500 字符（${n3}）——去掉几行或缩短后再保存」, 保存 disabled`, { text: f3.fit.textContent, disabled: f3.save.disabled });
+  ok(!f3.fit.hidden && f3.fit.dataset.state === 'over' && f3.fit.textContent === `超出 1 500 字符（${n3}）——去掉几行或缩短后再保存` && verdictOf(f3.save.disabled), `§S the card counts what 保存 would write (${n3}) — 「超出 1 500 字符（${n3}）——去掉几行或缩短后再保存」, 保存 disabled`, { text: f3.fit.textContent, disabled: f3.save.disabled });
   f3.save.onclick();
   ok(saved3.length === 0, '§S …a press while over writes NOTHING (never a slice)');
   const ticks = c3.querySelectorAll('.learn-tick');
   for (let i = 2; i < 12; i++) { ticks[i].checked = false; ticks[i].onchange(); }
   const n3b = Number((/（(\d+)）/.exec(f3.fit.textContent) || [])[1]);
-  ok(!f3.fit.hidden && f3.save.disabled && n3b > M.USER_BLOCK_MAX && n3b < n3, `§S …unticking 10 of the 12 new lines is not yet enough: the count follows every tick (${n3} → ${n3b})`, f3.fit.textContent);
+  ok(!f3.fit.hidden && gateOf(f3.save.disabled) && n3b > M.USER_BLOCK_MAX && n3b < n3, `§S …unticking 10 of the 12 new lines is not yet enough: the count follows every tick (${n3} → ${n3b})`, f3.fit.textContent);
   ticks[1].checked = false; ticks[1].onchange();
-  ok(f3.fit.hidden && !f3.save.disabled, '§S …the 11th untick brings it under: the notice goes, 保存 is pressable', f3.fit.textContent);
+  ok(gateOf(f3.fit.hidden) && !f3.save.disabled, '§S …the 11th untick brings it under: the notice goes, 保存 is pressable', f3.fit.textContent);
   f3.save.onclick();
-  ok(saved3.length === 1 && own.every((l) => saved3[0].split('\n').includes(l)) && saved3[0].length <= M.USER_BLOCK_MAX, `§S …保存 then writes the new line + ALL 11 kept lines (${saved3[0] ? saved3[0].length : 0} chars) — nothing cut`, saved3[0] && saved3[0].length);
+  ok(saved3.length === 1 && gateOf(own.every((l) => saved3[0].split('\n').includes(l))) && saved3[0].length <= M.USER_BLOCK_MAX, `§S …保存 then writes the new line + ALL 11 kept lines (${saved3[0] ? saved3[0].length : 0} chars) — nothing cut`, saved3[0] && saved3[0].length);
   // the box typed past the bound ⇒ the same count
   const c3b = LC.renderLearnCard(answerOf('Invoices', { lines: [{ text: 'Invoices', kind: 'keep', line: 1, from: [] }], removed: [], note: '' }), {});
   const box = c3b.querySelector('.learn-text'); box.value = 'x'.repeat(1600); box.oninput();
-  ok(look(c3b).fit.dataset.state === 'over' && look(c3b).save.disabled, 'an edit typed past 1 500 in a row\'s box ⇒ the same notice, 保存 waits');
+  ok(look(c3b).fit.dataset.state === 'over' && verdictOf(look(c3b).save.disabled), 'an edit typed past 1 500 in a row\'s box ⇒ the same notice, 保存 waits');
   // F2: an empty save is SAID — 「保存后这一段为空」 + 「清空并保存」
   const c4 = LC.renderLearnCard(answerOf('Invoices matter', { lines: [], removed: [{ line: 1, reason: 'never needed you' }], note: '' }), {});
   ok(!look(c4).fit.hidden && look(c4).fit.textContent === '保存后这一段为空' && look(c4).save.textContent === '清空并保存' && !look(c4).save.disabled, 'a named removal of the only line ⇒ the card says 「保存后这一段为空」 and the button reads 「清空并保存」', [look(c4).fit.textContent, look(c4).save.textContent]);
@@ -829,7 +829,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   // the door refuses (an over-length value reached it anyway): the card stays, nothing else happens
   const c6 = LC.renderLearnCard(answerOf('Invoices matter', { lines: [{ text: 'Invoices matter', kind: 'keep', line: 1, from: [] }], removed: [], note: '' }), { onSave: () => false });
   DOC_BODY.appendChild(c6); look(c6).save.onclick();
-  ok(c6.isConnected, 'onSave answering false (the door refused it by name) ⇒ the card stays');
+  ok(verdictOf(c6.isConnected), 'onSave answering false (the door refused it by name) ⇒ the card stays');
   c6.remove();
   // L5: refusals — every why a sentence in a toast; a 500 never raw: 「没有起草——服务端出错」 + the text under ONE closed fold
   const wrap = new El('div'); DOC_BODY.appendChild(wrap);
@@ -841,9 +841,9 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const b = wrap.querySelector('[data-draft]');
   const seen = [];
   for (const _ of answers) { globalThis.__toasts = []; await b.onclick(); const rc = wrap.querySelector('[data-learn-refused]'); seen.push({ toast: globalThis.__toasts.map((x) => x[0]).join(), card: rc ? rc.querySelector('.learn-card-head').textContent : null, fold: rc ? rc.querySelectorAll('details').map((d) => [d.dataset.fold, d.open === true, d.textContent]) : null, btn: [b.disabled, b.textContent] }); }
-  ok(seen[0].toast === '没有起草——已有一次起草在进行——等它完成' && /跳转/.test(seen[1].toast) && /没有回应/.test(seen[2].toast) && seen.slice(0, 3).every((s) => !s.card && s.btn[0] === false && s.btn[1] === '从我的判定起草'), 'busy / redirect / no-answer ⇒ a toast in the owner\'s words; the button is pressable again (it follows the answer)', seen.slice(0, 3));
+  ok(seen[0].toast === '没有起草——已有一次起草在进行——等它完成' && gateOf(/跳转/.test(seen[1].toast)) && gateOf(/没有回应/.test(seen[2].toast)) && verdictOf(seen.slice(0, 3).every((s) => !s.card && s.btn[0] === false && s.btn[1] === '从我的判定起草')), 'busy / redirect / no-answer ⇒ a toast in the owner\'s words; the button is pressable again (it follows the answer)', seen.slice(0, 3));
   const raw = (s) => [s.toast, s.card].join(' ');
-  ok(seen.slice(3).every((s) => s.toast === '' && s.card === '没有起草——服务端出错' && s.fold.length === 1 && s.fold[0][0] === 'tech' && s.fold[0][1] === false && !/Cannot read|never-heard-of/.test(raw(s))) && /reading 'textModel'/.test(seen[3].fold[0][2]) && /never-heard-of/.test(seen[4].fold[0][2]), 'a 500\'s message and a why without words ⇒ 「没有起草——服务端出错」, the raw text ONLY under ONE closed 技术细节 fold — never in the toast', seen.slice(3));
+  ok(gateOf(seen.slice(3).every((s) => s.toast === '' && s.card === '没有起草——服务端出错' && s.fold.length === 1 && s.fold[0][0] === 'tech' && s.fold[0][1] === false && !/Cannot read|never-heard-of/.test(raw(s)))) && gateOf(/reading 'textModel'/.test(seen[3].fold[0][2])) && verdictOf(/never-heard-of/.test(seen[4].fold[0][2])), 'a 500\'s message and a why without words ⇒ 「没有起草——服务端出错」, the raw text ONLY under ONE closed 技术细节 fold — never in the toast', seen.slice(3));
   wrap.remove();
 
   // lane rule-learning-fix-r2 F4: the cut row — 「太长——已截短」, NOT ticked, no marker in its box, its whole text only under
@@ -852,7 +852,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const savedF4 = [];
   const c7 = LC.renderLearnCard(answerOf(BLK2, { lines: [{ text: L152c, kind: 'keep', line: 1, from: [] }, { text: E170c, kind: 'edit', line: 2, from: [1], evidence: 'one contract waited' }], removed: [], note: '' }), { onSave: (x) => { savedF4.push(x); return true; } });
   const r7 = c7.querySelectorAll('.learn-row')[1], fold7 = [...r7.querySelectorAll('details')].filter((d) => d.dataset.fold === 'tech'), box7 = r7.querySelector('.learn-text');   // lane ui-plain-words: the row's evidence chip is a disclosure of its own («依据 1 个判定»), never the tech fold
-  ok(r7.dataset.long === '1' && r7.querySelector('.learn-long').textContent === '太长——已截短' && !r7.querySelector('.learn-tick').checked && !/omitted|…\[/.test(box7.value) && box7.value.length <= 120 && E170c.startsWith(box7.value) && fold7.length === 1 && fold7[0].dataset.fold === 'tech' && !fold7[0].open && fold7[0].textContent === '技术细节' + E170c,
+  ok(r7.dataset.long === '1' && r7.querySelector('.learn-long').textContent === '太长——已截短' && !r7.querySelector('.learn-tick').checked && !/omitted|…\[/.test(box7.value) && box7.value.length <= 120 && gateOf(E170c.startsWith(box7.value)) && fold7.length === 1 && fold7[0].dataset.fold === 'tech' && !fold7[0].open && fold7[0].textContent === '技术细节' + E170c,
     "F4 the 170-char edit: 「太长——已截短」, NOT ticked, its box cut at a word boundary without a marker, the model's whole text only under the row's own closed 技术细节 fold", { chip: (r7.querySelector('.learn-long') || {}).textContent, tick: r7.querySelector('.learn-tick').checked, box: box7.value, folds: fold7.length });
   look(c7).save.onclick();
   ok(savedF4[0] === BLK2, "F4 …the default 保存 writes the person's two lines (the line the cut edit rewords stays) — never the cut text, never a marker", savedF4);
@@ -863,19 +863,19 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const H1 = LC.renderLearnCard(answerOf(...ONLY_UNMENTIONED), {});
   const H2 = LC.renderLearnCard(answerOf(L152c, { lines: [{ text: 'Invoices this week', kind: 'edit', line: 1, from: [] }], removed: [], note: '' }), {});
   const H3 = LC.renderLearnCard(answerOf('Invoices matter\nForum digests\nLunch polls', { lines: [{ text: 'Invoices matter', kind: 'keep', line: 1, from: [] }], removed: [{ line: 2, reason: 'you marked digests not needed' }], note: '' }), {});
-  ok(eq(heads(H1), [['保留的原文', 'kept']]) && eq(listOps(H1), [['kept', ['unmentioned', 'unmentioned', 'unmentioned']]]) && eq(heads(H2), [['保留的原文', 'kept']]) && eq(listOps(H2), [['kept', ['unproven']]])
-    && eq(heads(H3), [['提议删掉的行', 'remove'], ['保留的原文', 'kept']]) && eq(listOps(H3), [['remove', ['remove']], ['kept', ['unmentioned']]]),
+  ok(gateOf(eq(heads(H1), [['保留的原文', 'kept']])) && gateOf(eq(listOps(H1), [['kept', ['unmentioned', 'unmentioned', 'unmentioned']]])) && gateOf(eq(heads(H2), [['保留的原文', 'kept']])) && gateOf(eq(listOps(H2), [['kept', ['unproven']]]))
+    && gateOf(eq(heads(H3), [['提议删掉的行', 'remove'], ['保留的原文', 'kept']])) && verdictOf(eq(listOps(H3), [['remove', ['remove']], ['kept', ['unmentioned']]])),
     'F5 ONE header per kind: 3 unmentioned lines ⇒ only 「保留的原文」; an unproven line ⇒ only 「保留的原文」; a named removal + an unmentioned line ⇒ 「提议删掉的行」 over the removal ONLY, 「保留的原文」 over the line that stays', { H1: heads(H1), H2: heads(H2), H3: [heads(H3), listOps(H3)] });
   const CARD_SRC = fs.readFileSync(path.join(repo, 'src/lib/learn-card.js'), 'utf8');
   const HEAD_NEW = "  for (const [named, head] of [[true, t('Lines it would remove')], [false, t('Your lines it keeps')]]) {\n    const xs = table.removed.filter((x) => (x.op === 'remove') === named);";
   const HEAD_OLD = "  for (const [named, head] of [[true, t('Lines it would remove')]]) {\n    const xs = table.removed;";
   const oldCard = CARD_SRC.includes(HEAD_NEW) ? await bundleCard(CARD_SRC.replace(HEAD_NEW, () => HEAD_OLD), 'f5') : null;
   const O1 = oldCard && oldCard.renderLearnCard(answerOf(...ONLY_UNMENTIONED), {});
-  ok(O1 && eq(heads(O1).map((h) => h[0]), ['提议删掉的行']) && listOps(O1)[0][1].every((op) => op === 'unmentioned'), "RED CONTROL (F5): the old card — one header over every line that leaves the proposal ⇒ 「提议删掉的行」 over 3 lines that all STAY (verify r2's §R2-G6)", O1 && heads(O1));
+  ok(gateOf(O1) && gateOf(eq(heads(O1).map((h) => h[0]), ['提议删掉的行'])) && verdictOf(listOps(O1)[0][1].every((op) => op === 'unmentioned')), "RED CONTROL (F5): the old card — one header over every line that leaves the proposal ⇒ 「提议删掉的行」 over 3 lines that all STAY (verify r2's §R2-G6)", O1 && heads(O1));
   // F6: a block STORED over 1 500 is said at the top, its tail kept as rows; the count is over and 保存 waits
   const c8 = LC.renderLearnCard(answerOf(STORED, { lines: [{ text: 'stored rule 1', kind: 'keep', line: 1, from: [] }], removed: [], note: '' }), {});
   const st8 = c8.querySelector('.learn-stored');
-  ok(st8 && st8.dataset.state === 'over' && st8.textContent === `原文已超过 1 500 字符（${STORED.length}）——保存前要截掉 ${STORED.length - 1500} 字` && look(c8).fit.dataset.state === 'over' && look(c8).save.disabled && c8.querySelectorAll('.learn-old').length === 13,
+  ok(gateOf(st8) && st8.dataset.state === 'over' && st8.textContent === `原文已超过 1 500 字符（${STORED.length}）——保存前要截掉 ${STORED.length - 1500} 字` && look(c8).fit.dataset.state === 'over' && gateOf(look(c8).save.disabled) && c8.querySelectorAll('.learn-old').length === 13,
     `F6 the block as stored (${STORED.length}) is SAID — 「${st8 && st8.textContent}」 — its 13 other lines are rows (the tail kept), the count is over and 保存 waits`, { stored: st8 && st8.textContent, fit: look(c8).fit.textContent });
   ok(!LC.renderLearnCard(answerOf('Invoices matter', { lines: [{ text: 'Invoices matter', kind: 'keep', line: 1, from: [] }], removed: [], note: '' }), {}).querySelector('.learn-stored'), 'F6 …a block within the bound draws no such line');
   // verify r2's G7: ticking a rewording that was not pre-ticked unticks the line it rewords — and that line says so
@@ -889,7 +889,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   tw.checked = false; tw.onchange();
   const back = [tk.checked, kw()];
   tw.checked = true; tw.onchange(); look(c10).save.onclick();
-  ok(eq(before, [false, true, '上面的改写无依据——这一行保留']) && eq(during, [false, '已由上面的改写替换——要留原文就取消上面的勾']) && eq(back, [true, '上面的改写无依据——这一行保留']) && eq(savedG7, ['Invoices this week']),
+  ok(gateOf(eq(before, [false, true, '上面的改写无依据——这一行保留'])) && gateOf(eq(during, [false, '已由上面的改写替换——要留原文就取消上面的勾'])) && gateOf(eq(back, [true, '上面的改写无依据——这一行保留'])) && verdictOf(eq(savedG7, ['Invoices this week'])),
     'G7 ticking the unproven rewording unticks the line it rewords, that row saying 「已由上面的改写替换——要留原文就取消上面的勾」; unticking gives the line back; 保存 then writes the rewording alone', { before, during, back, savedG7 });
 
   // lane learn-card-untick (verify r3) — R3-F1: ONE rule for every rewording on the card. A PRE-TICKED rewording unticked ⇒
@@ -905,7 +905,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   flip(c11.querySelector('.learn-tick'), false);
   const u1 = stateOf(c11);
   look(c11).save.onclick();
-  ok(eq(u0, { rw: true, state: '已勾选：这一行将被改写', op: 'replaced', line: false, why: '已由上面的改写替换——要留原文就取消上面的勾' }) && eq(u1, { rw: false, state: '未勾选：原文不会被改写', op: 'replaced', line: true, why: '上面的改写未勾选——这一行保留' }) && eq(savedU, [BL2]),
+  ok(gateOf(eq(u0, { rw: true, state: '已勾选：这一行将被改写', op: 'replaced', line: false, why: '已由上面的改写替换——要留原文就取消上面的勾' })) && gateOf(eq(u1, { rw: false, state: '未勾选：原文不会被改写', op: 'replaced', line: true, why: '上面的改写未勾选——这一行保留' })) && verdictOf(eq(savedU, [BL2])),
     'R3-F1 a PRE-TICKED rewording: its line has a row of its own under 保留的原文 (unticked, 「已由上面的改写替换——要留原文就取消上面的勾」) and the rewording says 「已勾选：这一行将被改写」; unticked ⇒ the line is ticked again (「上面的改写未勾选——这一行保留」 / 「未勾选：原文不会被改写」) and 保存 writes the person\'s line', { u0, u1, savedU });
   const words2 = ['unproven', 'shortened'].map((kind) => {
     const raw = { lines: [{ text: kind === 'unproven' ? 'Invoices this week, and contracts' : wordsOf(170, 'contract'), kind: 'edit', line: 1, from: kind === 'unproven' ? [] : [1], evidence: 'e' }], removed: [], note: '' };
@@ -913,12 +913,12 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
     flip(cw.querySelector('.learn-tick'), true);
     return [a, stateOf(cw)];
   });
-  ok(words2.every(([a, b]) => a.state === '未勾选：原文不会被改写' && a.line && b.state === '已勾选：这一行将被改写' && !b.line && b.why === '已由上面的改写替换——要留原文就取消上面的勾'), 'R3-F1 …the SAME words on an unproven and a cut rewording (unticked: 「未勾选：原文不会被改写」, the line ticked; ticked: 「已勾选：这一行将被改写」, the line unticked and said)', words2);
+  ok(verdictOf(words2.every(([a, b]) => a.state === '未勾选：原文不会被改写' && a.line && b.state === '已勾选：这一行将被改写' && !b.line && b.why === '已由上面的改写替换——要留原文就取消上面的勾')), 'R3-F1 …the SAME words on an unproven and a cut rewording (unticked: 「未勾选：原文不会被改写」, the line ticked; ticked: 「已勾选：这一行将被改写」, the line unticked and said)', words2);
   const mR = mutant(C_NEW_R3, '  const claimed = new Set(rows.filter((r) => r.tick).map((r) => r.line).filter(Boolean));', 'r3f1-card');
   const savedR = [];
   const cR = LC.renderLearnCard({ ...answerOf(BL2, sup2), table: mR.diffTable(BL2, mR.normalizeProposal(sup2, { block: BL2, examples: EXN })) }, { onSave: (x) => { savedR.push(x); return true; } });
   flip(cR.querySelector('.learn-tick'), false); look(cR).save.onclick();
-  ok(!lineRow(cR) && eq(savedR, ['Forum digests do not']) && look(cR).fit.hidden, 'RED CONTROL (R3-F1): the card over the OLD table — the pre-ticked rewording claimed its line ⇒ no row for it; unticking the rewording makes 保存 write «Forum digests do not», and nothing on the card says the line went', { savedR });
+  ok(!lineRow(cR) && gateOf(eq(savedR, ['Forum digests do not'])) && verdictOf(look(cR).fit.hidden), 'RED CONTROL (R3-F1): the card over the OLD table — the pre-ticked rewording claimed its line ⇒ no row for it; unticking the rewording makes 保存 write «Forum digests do not», and nothing on the card says the line went', { savedR });
   // R3-F6: the person's own tick on the line outlives its rewording's ticks — an untick is never undone, a tick never taken
   const g6 = [];
   const c12 = LC.renderLearnCard(answerOf(BL2, { lines: [{ text: 'Invoices this week, and contracts', kind: 'edit', line: 1, from: [], evidence: '' }], removed: [], note: '' }), {});
@@ -928,15 +928,15 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const c13 = LC.renderLearnCard(answerOf(BL2, sup2), { onSave: (x) => { saved6.push(x); return true; } });
   const t13 = () => [c13.querySelector('.learn-tick'), lineRow(c13).querySelector('.learn-tick')];
   flip(t13()[1], true); g6.push(stateOf(c13)); flip(t13()[0], false); flip(t13()[0], true); g6.push(stateOf(c13)); look(c13).save.onclick();
-  ok(eq(g6[0], { rw: false, state: '未勾选：原文不会被改写', op: 'unproven', line: false, why: '已取消勾选——这一行不会保存' })
-    && eq(g6[1], { rw: true, state: '已勾选：与原文一起保存', op: 'replaced', line: true, why: '与上面的改写一起保留——两行都会保存' }) && eq(g6[2], g6[1]) && eq(saved6, ['Invoices this week, and contracts\n' + BL2]),
+  ok(gateOf(eq(g6[0], { rw: false, state: '未勾选：原文不会被改写', op: 'unproven', line: false, why: '已取消勾选——这一行不会保存' }))
+    && gateOf(eq(g6[1], { rw: true, state: '已勾选：与原文一起保存', op: 'replaced', line: true, why: '与上面的改写一起保留——两行都会保存' })) && gateOf(eq(g6[2], g6[1])) && verdictOf(eq(saved6, ['Invoices this week, and contracts\n' + BL2])),
     'R3-F6 the person unticks their line, then ticks and unticks its rewording ⇒ the line stays unticked (「已取消勾选——这一行不会保存」); the person ticks their replaced line ⇒ both are kept (「与上面的改写一起保留——两行都会保存」 / 「已勾选：与原文一起保存」), and the rewording\'s ticks never take it again', g6);
   const FLIP_NEW = 'tick.onchange = () => { if (mem.mine === null) gTick.checked = !tick.checked; say(); recount(); };';
   const flipCard = CARD_SRC.includes(FLIP_NEW) ? await bundleCard(CARD_SRC.replace(FLIP_NEW, () => 'tick.onchange = () => { gTick.checked = !tick.checked; say(); recount(); };'), 'r3f6') : null;
   const c12m = flipCard && flipCard.renderLearnCard(answerOf(BL2, { lines: [{ text: 'Invoices this week, and contracts', kind: 'edit', line: 1, from: [], evidence: '' }], removed: [], note: '' }), {});
   const t12m = () => [c12m.querySelector('.learn-tick'), lineRow(c12m).querySelector('.learn-tick')];
   if (c12m) { flip(t12m()[1], false); flip(t12m()[0], true); flip(t12m()[0], false); }
-  ok(c12m && t12m()[1].checked, 'RED CONTROL (R3-F6): the old flip — the rewording\'s untick re-ticks the line the person had unticked (verify r3 §G7(c))', c12m && stateOf(c12m));
+  ok(gateOf(c12m) && verdictOf(t12m()[1].checked), 'RED CONTROL (R3-F6): the old flip — the rewording\'s untick re-ticks the line the person had unticked (verify r3 §G7(c))', c12m && stateOf(c12m));
   // R3-F5: the stored block's notice follows the count — it says what must STILL go and goes once 保存 fits (never «over»
   // beside an enabled 保存): a block over 1 500 only by CRLF + blank lines + indentation, and 14 stored lines unticked to fit
   const lines12 = Array.from({ length: 12 }, (_, i) => `rule ${String(i).padStart(2, '0')}: ${wordsOf(109)}`);
@@ -945,7 +945,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const c14 = LC.renderLearnCard(answerOf(PAD, { lines: [], removed: [], note: '' }), { onSave: (x) => { savedP.push(x); return true; } });
   const st14 = c14.querySelector('.learn-stored');
   look(c14).save.onclick();
-  ok(PAD.length > M.USER_BLOCK_MAX && st14 && st14.hidden && !look(c14).save.disabled && eq(savedP, [lines12.join('\n')]) && savedP[0].length <= M.USER_BLOCK_MAX, `R3-F5 a block stored at ${PAD.length} only because of CRLF / blank lines / indentation (保存 writes ${lines12.join('\n').length}): the notice is hidden while 保存 is pressable — never «over» beside it`, { stored: PAD.length, hidden: st14 && st14.hidden, text: st14 && st14.textContent });
+  ok(PAD.length > M.USER_BLOCK_MAX && gateOf(st14) && gateOf(st14.hidden) && !look(c14).save.disabled && gateOf(eq(savedP, [lines12.join('\n')])) && savedP[0].length <= M.USER_BLOCK_MAX, `R3-F5 a block stored at ${PAD.length} only because of CRLF / blank lines / indentation (保存 writes ${lines12.join('\n').length}): the notice is hidden while 保存 is pressable — never «over» beside it`, { stored: PAD.length, hidden: st14 && st14.hidden, text: st14 && st14.textContent });
   const c15 = LC.renderLearnCard(answerOf(STORED, { lines: [{ text: 'stored rule 1', kind: 'keep', line: 1, from: [] }], removed: [], note: '' }), {});
   const st15 = c15.querySelector('.learn-stored'), kt15 = c15.querySelectorAll('.learn-removed')[0].children.map((r) => r.querySelector('.learn-tick'));
   const n15 = [st15.textContent];
@@ -957,8 +957,8 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const ST_NEW = "      stored.hidden = !f.over; stored.dataset.state = f.over ? 'over' : 'fits';";
   const onceCard = CARD_SRC.includes(ST_NEW) ? await bundleCard(CARD_SRC.replace(ST_NEW, () => "      stored.dataset.state = 'over';").replace('{ chars: st.chars, n: f.chars - st.max }) : \'\';', () => "{ chars: st.chars, n: st.chars - st.max }) : t('The block as stored is already over 1,500 characters ({chars}) — {n} must go before it can be saved', { chars: st.chars, n: st.chars - st.max });"), 'r3f5') : null;
   const c14m = onceCard && onceCard.renderLearnCard(answerOf(PAD, { lines: [], removed: [], note: '' }), {});
-  ok(c14m && !c14m.querySelector('.learn-stored').hidden && /保存前要截掉 \d+ 字/.test(c14m.querySelector('.learn-stored').textContent) && !look(c14m).save.disabled, 'RED CONTROL (R3-F5): the notice drawn once — 「…保存前要截掉 N 字」 beside a pressable 保存 that removes nothing (verify r3 §F6)', c14m && c14m.querySelector('.learn-stored').textContent);
+  ok(gateOf(c14m) && !c14m.querySelector('.learn-stored').hidden && gateOf(/保存前要截掉 \d+ 字/.test(c14m.querySelector('.learn-stored').textContent)) && !look(c14m).save.disabled, 'RED CONTROL (R3-F5): the notice drawn once — 「…保存前要截掉 N 字」 beside a pressable 保存 that removes nothing (verify r3 §F6)', c14m && c14m.querySelector('.learn-stored').textContent);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

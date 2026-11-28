@@ -49,7 +49,7 @@ const VC = require(path.join(REPO, 'src/server/vault-contents.js'));   // lane v
 const DOOR = require(path.join(REPO, 'src/server/vault-run-door.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -128,7 +128,7 @@ console.log('③ same-origin');
   const other = await hit('/api/vault/setup', { headers: { cookie: COOKIE, origin: 'http://127.0.0.1:1' }, body: { password: PW } });
   ok(other.status === 403, 'an Origin that is not this instance ⇒ 403', other);
   ok(calls.length === 0, 'none of them reached the engine');
-  ok(personVerdict({ headers: { origin: OWN, host: `127.0.0.1:${PORT}` }, socket: {} }).ok && personVerdict({ headers: { 'sec-fetch-site': 'same-origin' }, socket: {} }).ok, 'Origin = own, or Sec-Fetch-Site same-origin ⇒ a person on this page');
+  ok(gateOf(personVerdict({ headers: { origin: OWN, host: `127.0.0.1:${PORT}` }, socket: {} }).ok) && verdictOf(personVerdict({ headers: { 'sec-fetch-site': 'same-origin' }, socket: {} }).ok), 'Origin = own, or Sec-Fetch-Site same-origin ⇒ a person on this page');
 }
 
 console.log('④ the doors');
@@ -138,7 +138,7 @@ console.log('④ the doors');
   ok((await hit('/api/vault/setup', { body: { password: SIGN_IN } })).json.code === 'same_as_sign_in', 'the sign-in password is refused as the second (400 same_as_sign_in)');
   ok((await hit('/api/vault/setup', { body: { password: 'short' } })).status === 400, 'a short password ⇒ 400');
   const su = await hit('/api/vault/setup', { body: { password: PW } });
-  ok(su.status === 200 && su.json.ok && su.json.state === 'unlocked' && su.json.sealed.includes('.accounts-key'), 'setup ⇒ 200, unlocked, the key file sealed', su.json);
+  ok(su.status === 200 && gateOf(su.json.ok) && su.json.state === 'unlocked' && verdictOf(su.json.sealed.includes('.accounts-key')), 'setup ⇒ 200, unlocked, the key file sealed', su.json);
   ok((await hit('/api/vault/setup', { body: { password: PW } })).status === 409, 'a second setup ⇒ 409 already_set_up');
   const lk = await hit('/api/vault/lock');
   ok(lk.status === 200 && lk.json.state === 'locked', 'lock ⇒ locked');
@@ -147,7 +147,7 @@ console.log('④ the doors');
   const u = await hit('/api/vault/unlock', { body: { password: PW } });
   ok(u.status === 200 && u.json.state === 'unlocked', 'the right password ⇒ 200 unlocked');
   const ch = await hit('/api/vault/change', { body: { old: PW, new: PW + ' v2' } });
-  ok(ch.status === 200 && ch.json.ok, 'change ⇒ 200');
+  ok(ch.status === 200 && verdictOf(ch.json.ok), 'change ⇒ 200');
   const idle = await hit('/api/vault/idle', { body: { hours: 4 } });
   ok(idle.status === 200 && idle.json.idleLockHours === 4 && (await hit('/api/vault/idle', { body: { hours: -1 } })).status === 400, 'idle ⇒ 4 h; a bad value ⇒ 400');
   ok((await hit('/api/vault/active')).status === 200, 'a person\'s activity ping ⇒ 200');
@@ -165,20 +165,20 @@ console.log('⑥ the audit, and no password anywhere');
 {
   const audit = fs.readFileSync(path.join(dataDir, VE.AUDIT_FILE), 'utf8');
   const fails = audit.split('\n').filter((l) => l.includes('"vault-unlock-failed"'));
-  ok(fails.length >= 6 && fails.every((l) => /"ip":"127\.0\.0\.1"/.test(l)), `every failure is an audit line with the caller's address (${fails.length})`);
+  ok(fails.length >= 6 && verdictOf(fails.every((l) => /"ip":"127\.0\.0\.1"/.test(l))), `every failure is an audit line with the caller's address (${fails.length})`);
   const all = [audit, LOGS.join('\n'), ANSWERS.join('\n'), frames.join('\n')].join('\n');
   const leaked = [PW, PW + ' v2', 'not the password', 'wrong guess 0', SIGN_IN].filter((s) => all.includes(s));
   ok(leaked.length === 0, 'no password — set, right, wrong or the sign-in one — in the audit, the log, any answer or any broadcast', leaked);
 }
 
 console.log('⑦ the broadcast');
-ok(['unlocked', 'locked'].every((s) => frames.some((f) => JSON.parse(f).type === 'vault-state' && JSON.parse(f).state === s)), `vault-state on every change (${frames.length} frames)`);
+ok(verdictOf(['unlocked', 'locked'].every((s) => frames.some((f) => JSON.parse(f).type === 'vault-state' && JSON.parse(f).state === s))), `vault-state on every change (${frames.length} frames)`);
 
 console.log('⑧ agents');
 {
   const s = await hit('/api/agent/vault/state', { method: 'GET', headers: { authorization: 'Bearer ' + SESSION_TOKEN } });
   // lane agent-context-owner-facts (B-7960): + the hub's WORDS vibespace-vault prints — the lock time in the owner's zone, named, and the tray's label + place
-  ok(s.status === 200 && s.json.state === 'locked' && Object.keys(s.json).sort().join() === 'keys,lockedSince,setUpAt,state,tray,when' && Object.keys(s.json.when).join() === 'lockedSince' && / [A-Z]{2,5}$| GMT[+-][\d:]+$/.test(s.json.when.lockedSince) && /^the “[^”]+”( \(For you\))? tray$/.test(s.json.tray),
+  ok(s.status === 200 && s.json.state === 'locked' && Object.keys(s.json).sort().join() === 'keys,lockedSince,setUpAt,state,tray,when' && Object.keys(s.json.when).join() === 'lockedSince' && gateOf(/ [A-Z]{2,5}$| GMT[+-][\d:]+$/.test(s.json.when.lockedSince)) && verdictOf(/^the “[^”]+”( \(For you\))? tray$/.test(s.json.tray)),
     'an agent reads the state (state, since, setUpAt, key count — and the words it prints: when.lockedSince, tray — nothing else)', s.json);
   const bad = await hit('/api/agent/vault/state', { method: 'GET', headers: { authorization: 'Bearer vsst_' + 'f'.repeat(32) } });
   ok(bad.status === 401, 'an unknown session token ⇒ 401');
@@ -390,7 +390,7 @@ const TOTP_CHECKS = [
 console.log('⑨ two-step codes (design q-047 L1)');
 {
   const H = await totpHub('shipped');
-  for (const [name, fn] of TOTP_CHECKS) { let r = false; try { r = await fn(H); } catch (e) { r = false; console.error('    threw: ' + e.message); } ok(r, name); }
+  for (const [name, fn] of TOTP_CHECKS) { let r = false; try { r = await fn(H); } catch (e) { r = false; console.error('    threw: ' + e.message); } ok(verdictOf(r), name); }
   // lane vault-agent-own: THE REAL CLI — `vibespace-vault totp add` / `login add` read the value from a 0600 file or stdin (NEVER
   // argv), the hub answers names; the code answers the storing conversation; a file others can read is refused before any call
   const cli = (args, { input = null } = {}) => new Promise((res) => {
@@ -410,9 +410,9 @@ console.log('⑨ two-step codes (design q-047 L1)');
   const login = await cli(['login', 'add', 'https://shop.example.test', '--user', 'cli-user', '--stdin', '--totp', 'cli-shop'], { input: PW_CLI + '\n' });
   const kept = H.logins.names().find((x) => x.name === 'web-login:https://shop.example.test#cli-user');
   const all = [add, code, open, both, login].map((r) => r.out + r.err + r.argv).join('\n');
-  ok(add.code === 0 && /stored the two-step code cli-shop/.test(add.out) && code.code === 0 && code.out.startsWith(H.expect(SEED_CLI) + ' (') && login.code === 0 && /stored the login cli-user on https:\/\/shop\.example\.test/.test(login.out) && !!kept && kept.owner === 'conv-1' && kept.source === 'agent-typed',
+  ok(add.code === 0 && gateOf(/stored the two-step code cli-shop/.test(add.out)) && code.code === 0 && gateOf(code.out.startsWith(H.expect(SEED_CLI) + ' (')) && login.code === 0 && gateOf(/stored the login cli-user on https:\/\/shop\.example\.test/.test(login.out)) && !!kept && kept.owner === 'conv-1' && kept.source === 'agent-typed',
     'THE REAL CLI: `totp add <name> --from-file <0600>` stores the otpauth link, `totp <name>` answers ITS code with no grant, `login add … --stdin --totp` stores a web login this conversation owns (agent-typed)', { add, code: code.out, login, kept });
-  ok(open.code === 1 && /readable by others/.test(open.err) && both.code === 2 && /exactly one of --from-file/.test(both.err) && !all.includes(SEED_CLI) && !all.includes(PW_CLI),
+  ok(open.code === 1 && gateOf(/readable by others/.test(open.err)) && both.code === 2 && gateOf(/exactly one of --from-file/.test(both.err)) && !all.includes(SEED_CLI) && !all.includes(PW_CLI),
     '…a file others can read is refused (chmod 600 named), --from-file with --stdin is refused; no answer, no error and no command line holds the seed or the password', { open: open.err, both: both.err });
   H.close();
 }
@@ -440,7 +440,7 @@ console.log('⑩ MUTANTS — each RED');
     const red = [];
     for (const [cn, fn] of TOTP_CHECKS) { let r = false; try { r = await fn(H); } catch { r = false; } if (!r) red.push(cn.slice(0, 70)); }
     H.close();
-    ok(applied && red.length > 0, `RED: ${name} (${applied ? red[0] || 'NOT CAUGHT' : 'the mutant did not apply'})`);
+    ok(gateOf(applied) && red.length > 0, `RED: ${name} (${applied ? red[0] || 'NOT CAUGHT' : 'the mutant did not apply'})`);
   }
 }
 
@@ -483,7 +483,7 @@ const hit0 = hit, PAGE0 = PAGE;
   const bad = await hit('/api/agent/vault/run', { headers: { authorization: 'Bearer vsst_' + 'f'.repeat(32) }, body: { args: ARGS, cwd: WORK } });
   ok(bad.status === 401, 'an unknown session token ⇒ 401');
   const no = await hit('/api/agent/vault/run', { headers: B, body: { args: ARGS, cwd: WORK } });
-  ok(no.status === 403 && no.json.code === 'entry_not_runnable' && /Usable by agent runs/.test(no.json.error), 'the BEARER may run — an entry the owner has not opened ⇒ 403 entry_not_runnable, by name', no.json);
+  ok(no.status === 403 && no.json.code === 'entry_not_runnable' && verdictOf(/Usable by agent runs/.test(no.json.error)), 'the BEARER may run — an entry the owner has not opened ⇒ 403 entry_not_runnable, by name', no.json);
   const swB = await hit('/api/vault/runnable', { headers: { ...PAGE, ...B }, body: { id: 'mounts:m1#secretKey', on: true } });
   ok(swB.status === 403 && swB.json.code === 'human_only', 'an agent never opens an entry for runs (human_only)', swB.json);
   const sw0 = await hit('/api/vault/runnable', { body: { id: 'mounts:m1#secretKey', on: true } });
@@ -494,7 +494,7 @@ const hit0 = hit, PAGE0 = PAGE;
   ok(rs.status === 200 && sw1.status === 200 && sw1.json.open === true, '验证是你 (the second password again) ⇒ ON', sw1.json);
   const cont = await hit('/api/vault/contents', { method: 'GET', headers: PAGE });
   const row = (cont.json.rows || []).find((x) => x.id === 'mounts:m1#secretKey');
-  ok(row && row.run && row.run.can === true && row.run.open === true, 'the Vault window\'s row says so (run: can, open)', row);
+  ok(gateOf(row) && gateOf(row.run) && row.run.can === true && row.run.open === true, 'the Vault window\'s row says so (run: can, open)', row);
   const list = await hit('/api/agent/vault/runnable', { method: 'GET', headers: B });
   ok(list.status === 200 && list.json.entries.length === 1 && list.json.entries[0].ref === 'vault://mounts/m1/secretKey' && !JSON.stringify(list.json).includes(RUNV), 'GET /api/agent/vault/runnable names the opened entry (a reference, a label) — never its value', list.json);
   const listCk = await hit('/api/agent/vault/runnable', { method: 'GET', headers: PAGE });
@@ -525,7 +525,7 @@ const hit0 = hit, PAGE0 = PAGE;
   // the grant row is honoured by the run verdict; USES reads this conversation's own lines back
   const off = await hit('/api/vault/runnable', { body: { id: 'mounts:m1#secretKey', on: false } });
   const closed = await hit('/api/agent/vault/run', { headers: B, body: { args: CURL, cwd: WORK } });
-  ok(off.status === 200 && off.json.open === false && closed.status === 403 && closed.json.code === 'entry_not_runnable' && /vibespace-vault request/.test(closed.json.error), 'the entry switched OFF (no 验证是你 needed to close) ⇒ the run is refused entry_not_runnable, naming `vibespace-vault request`', closed.json);
+  ok(off.status === 200 && off.json.open === false && closed.status === 403 && closed.json.code === 'entry_not_runnable' && verdictOf(/vibespace-vault request/.test(closed.json.error)), 'the entry switched OFF (no 验证是你 needed to close) ⇒ the run is refused entry_not_runnable, naming `vibespace-vault request`', closed.json);
   const REQ = { entry: 'vault://mounts/m1/secretKey', purpose: 'sync the bucket for the nightly report' };
   const rqC = await hit('/api/agent/vault/request', { body: REQ });
   const rqJ = await hit('/api/agent/vault/request', { headers: { authorization: 'Bearer jbt_live' }, body: REQ });
@@ -533,11 +533,11 @@ const hit0 = hit, PAGE0 = PAGE;
   const asksOf = () => (userTodos.snapshot().open || []).filter((x) => x.action && x.action.type === 'vault-grant-ask');
   const rq1 = await hit('/api/agent/vault/request', { headers: B, body: REQ });
   const rq2 = await hit('/api/agent/vault/request', { headers: B, body: { ...REQ, purpose: 'please' } });
-  ok(rq1.status === 200 && rq1.json.ok && rq1.json.askId && rq2.status === 409 && rq2.json.code === 'request_pending' && asksOf().length === 1 && asksOf()[0].detail.includes(REQ.purpose) && asksOf()[0].text === 'Route Lane asks to use a stored secret',
+  ok(rq1.status === 200 && gateOf(rq1.json.ok) && gateOf(rq1.json.askId) && rq2.status === 409 && rq2.json.code === 'request_pending' && asksOf().length === 1 && gateOf(asksOf()[0].detail.includes(REQ.purpose)) && asksOf()[0].text === 'Route Lane asks to use a stored secret',
     'the BEARER may ask: the ask lands ONCE in For you (the agent, the entry, the purpose); a second request for the same entry while it is open ⇒ 409 request_pending', [rq1.json, rq2.json.code]);
   const usC = await hit('/api/agent/vault/uses', { method: 'GET', headers: PAGE });
   const us1 = await hit('/api/agent/vault/uses', { method: 'GET', headers: B });
-  ok(usC.status === 401 && us1.status === 200 && us1.json.requests.length === 1 && us1.json.requests[0].entry === REQ.entry && Array.isArray(us1.json.uses) && !us1.json.grants.length, 'USES: the bearer reads its open request back; a cookie gets nothing (401)', us1.json);
+  ok(usC.status === 401 && us1.status === 200 && us1.json.requests.length === 1 && us1.json.requests[0].entry === REQ.entry && gateOf(Array.isArray(us1.json.uses)) && !us1.json.grants.length, 'USES: the bearer reads its open request back; a cookie gets nothing (401)', us1.json);
   const ansB = await hit(`/api/vault/request/asks/${rq1.json.askId}`, { headers: { ...PAGE, ...B }, body: { answer: 'once' } });
   ok(ansB.status === 403 && ansB.json.code === 'human_only', 'an agent never answers a request (human_only)', ansB.json);
   const ans0 = await hit(`/api/vault/request/asks/${rq1.json.askId}`, { body: { answer: 'once' } });
@@ -557,7 +557,7 @@ const hit0 = hit, PAGE0 = PAGE;
     const cs = jobAsks.calls;
     ok(cs.length === 3 && cs[0].rev === null && cs[1].rev === 2 && cs[2].rev === 1, 'stage L3\'s F1: the press carries the card\'s revision it drew to the door (`rev`; none ⇒ null — the door refuses it ask_changed, nothing written)', cs.map((c) => c.rev));
     ok(jaB.status === 403 && jaB.json.code === 'human_only' && jaJ.status === 403 && jaJ.json.code === 'human_only' && n0 === 0, 'a Background job\'s approval card: a session bearer and a job token are refused human_only — its door is never asked', [jaB.json.code, jaJ.json.code, n0]);
-    ok(ja0.status === 200 && ja1.status === 200 && jaD.status === 200 && cs.length === 3 && cs[0].reauthed === false && cs[1].reauthed === true && cs[2].answer === 'deny' && cs[2].reauthed === false && cs.every((c) => c.person === true && c.by === 'user' && c.id === 'vj-' + '0'.repeat(16)),
+    ok(ja0.status === 200 && ja1.status === 200 && jaD.status === 200 && cs.length === 3 && cs[0].reauthed === false && cs[1].reauthed === true && cs[2].answer === 'deny' && cs[2].reauthed === false && verdictOf(cs.every((c) => c.person === true && c.by === 'user' && c.id === 'vj-' + '0'.repeat(16))),
       'a PERSON\'s 允许 reaches the door with reauthed = this page\'s 验证是你 window (none on the page ⇒ false — the door refuses it); 拒绝 never needs it; every answer is the person\'s', cs);
     // MUTANT: the answer route WITHOUT person() ⇒ a bearer's answer reaches the door — RED on the copy
     const Mod = require('module'), rf = path.join(REPO, 'src/routes/vault.js'), rsrc = fs.readFileSync(rf, 'utf8');
@@ -607,10 +607,10 @@ const hit0 = hit, PAGE0 = PAGE;
   const cardG = await waitCard();
   await hit(`/api/vault/run/asks/${cardG.action.askId}`, { body: { answer: 'once', page } });   // int331 seam: q-043 H1 (int330) — a sign-in-off hub's run-card «once» demands this page's 验证是你 window too (the grant opened the ENTRY; the shape card is still answered with the window)
   const rG = await prG;
-  ok(rG.status === 200 && rG.json.ok && rG.json.stdout === 'curl got [vault:mounts/m1/secretKey]\n' && /^vr-[0-9a-f]{16}$/.test(rG.json.receipt), 'THE GRANT ROW IS HONOURED BY THE RUN VERDICT: the closed entry runs for that conversation (the cluster still shows the run card), scrubbed, with its receipt', rG.json);
+  ok(rG.status === 200 && gateOf(rG.json.ok) && rG.json.stdout === 'curl got [vault:mounts/m1/secretKey]\n' && verdictOf(/^vr-[0-9a-f]{16}$/.test(rG.json.receipt)), 'THE GRANT ROW IS HONOURED BY THE RUN VERDICT: the closed entry runs for that conversation (the cluster still shows the run card), scrubbed, with its receipt', rG.json);
   const rG2 = await hit('/api/agent/vault/run', { headers: B, body: { args: CURL, cwd: WORK } });
   const us2 = await hit('/api/agent/vault/uses', { method: 'GET', headers: B });
-  ok(rG2.status === 403 && rG2.json.code === 'grant_expired' && /its one run was used at/.test(rG2.json.error || rG2.json.words || '') && us2.json.uses.some((u) => u.receipt === rG.json.receipt && u.purpose === REQ.purpose && u.outcome === 'ok' && u.door === 'run') && !JSON.stringify(us2.json).includes(RUNV),
+  ok(rG2.status === 403 && rG2.json.code === 'grant_expired' && gateOf(/its one run was used at/.test(rG2.json.error || rG2.json.words || '')) && gateOf(us2.json.uses.some((u) => u.receipt === rG.json.receipt && u.purpose === REQ.purpose && u.outcome === 'ok' && u.door === 'run')) && !JSON.stringify(us2.json).includes(RUNV),
     'once was once (the next run is refused); USES reads the run back — the entry, its purpose, the outcome, the same receipt — never a value', us2.json.uses && us2.json.uses.slice(0, 2));
   // B-4934 (q-043 verify L2): the hub-wide bound counts CONVERSATIONS — 32 asking at once, the 33rd refused BY NAME over the
   // route (429 too_many_askers); past 8 asking, the owner's For you holds ONE Vault notice «N conversations are asking»
@@ -619,12 +619,12 @@ const hit0 = hit, PAGE0 = PAGE;
   const capAsk = (k) => hit('/api/agent/vault/request', { headers: { authorization: 'Bearer ' + CAPS[k] }, body: { entry: REQ.entry, purpose: 'the cap leg ' + k } });
   const lineOf = () => (userTodos.snapshot().open || []).filter((i) => i.sessionKey === 'vault' && i.text === DOOR.ASKING_TEXT);
   const cap8 = []; for (let k = 0; k < 8; k++) cap8.push(await capAsk(k));
-  ok(cap8.every((x) => x.status === 200 && x.json.ok) && !lineOf().length, 'THE CAP (B-4934): eight conversations asking ⇒ every ask filed, no «are asking» line (8 is not more than 8)', cap8.map((x) => x.status));
+  ok(gateOf(cap8.every((x) => x.status === 200 && x.json.ok)) && !lineOf().length, 'THE CAP (B-4934): eight conversations asking ⇒ every ask filed, no «are asking» line (8 is not more than 8)', cap8.map((x) => x.status));
   const cap9 = await capAsk(8);
   ok(cap9.status === 200 && lineOf().length === 1 && lineOf()[0].i18n.text.params.n === 9 && lineOf()[0].origin === 'vault' && lineOf()[0].kind === 'notice', 'the NINTH conversation ⇒ filed (200); the owner\'s For you holds ONE Vault notice «9 conversations are asking to use stored secrets»', [cap9.status, lineOf().map((i) => i.i18n.text.params.n)]);
   const capRest = []; for (let k = 9; k < 32; k++) capRest.push(await capAsk(k));
   const cap33 = await capAsk(32);
-  ok(capRest.every((x) => x.status === 200) && cap33.status === 429 && cap33.json.code === 'too_many_askers' && cap33.json.error === DOOR.MORE_WORDS.too_many_askers && lineOf().length === 1 && lineOf()[0].i18n.text.params.n === 32,
+  ok(gateOf(capRest.every((x) => x.status === 200)) && cap33.status === 429 && cap33.json.code === 'too_many_askers' && cap33.json.error === DOOR.MORE_WORDS.too_many_askers && lineOf().length === 1 && lineOf()[0].i18n.text.params.n === 32,
     '32 conversations asking ⇒ the 33rd ⇒ 429 too_many_askers BY NAME (its words: nothing was filed, ask again once some are answered); the one line says 32', [cap33.status, cap33.json, lineOf().map((i) => i.i18n.text.params.n)]);
   ok(!ANSWERS.some((a) => a.includes(RUNV)), 'no answer of this whole suite carries the value (every route, every refusal, every run)');
   srv2.close(); vault2.close();
@@ -690,10 +690,10 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
     const KEY = Buffer.from([`-----BEGIN ${ARMOR}-----`, ...body.toString('base64').match(/.{1,70}/g), `-----END ${ARMOR}-----`, ''].join('\n'), 'latin1');
     const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
     const fp = await H('/api/agent/vault/put', { body: { name: 'deploy-key', bytes: KEY.toString('base64'), filename: 'id_ed25519', size: KEY.length, sha256: sha(KEY) } });
-    ok(fp.status === 200 && fp.json.name === 'agent:conv-NINE/deploy-key' && fp.json.file && fp.json.file.name === 'id_ed25519' && fp.json.file.size === KEY.length && fp.json.file.kind === 'ssh-key'
-      && /\$VAULT_FILE\{KEY\}/.test(fp.json.use) && /delete that copy yourself/.test(fp.json.copy) && /passphrase/.test(fp.json.encrypted || '') && !JSON.stringify(fp.json).includes(KEY.toString('base64').slice(0, 30)) && !('bytes' in fp.json),
+    ok(fp.status === 200 && fp.json.name === 'agent:conv-NINE/deploy-key' && gateOf(fp.json.file) && fp.json.file.name === 'id_ed25519' && fp.json.file.size === KEY.length && fp.json.file.kind === 'ssh-key'
+      && gateOf(/\$VAULT_FILE\{KEY\}/.test(fp.json.use)) && gateOf(/delete that copy yourself/.test(fp.json.copy)) && gateOf(/passphrase/.test(fp.json.encrypted || '')) && !JSON.stringify(fp.json).includes(KEY.toString('base64').slice(0, 30)) && !('bytes' in fp.json),
       'put --file ⇒ 200: the file\'s facts, the road to use it ($VAULT_FILE), the copy to delete, the passphrase fact (stored as is) — no byte back', fp.json);
-    ok((await v2.fileOpen('agent:conv-NINE/deploy-key')).bytes.equals(KEY) && v2.secretGet('agent:conv-NINE/deploy-key').code === 'is_a_file', 'sealed to the very bytes; no door reads its key');
+    ok(gateOf((await v2.fileOpen('agent:conv-NINE/deploy-key')).bytes.equals(KEY)) && v2.secretGet('agent:conv-NINE/deploy-key').code === 'is_a_file', 'sealed to the very bytes; no door reads its key');
     const tries = [
       [{ name: 'f1', bytes: KEY.toString('base64'), filename: 'k', size: KEY.length + 1 }, 400, 'bytes_bad', 'a size that is not what arrived'],
       [{ name: 'f1', bytes: KEY.toString('base64'), filename: 'k', sha256: sha(Buffer.from('other')) }, 400, 'bytes_bad', 'a digest that is not what arrived'],
@@ -705,7 +705,7 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
     ];
     const got = [];
     for (const [b, st, code] of tries) { const r = await H('/api/agent/vault/put', { body: b }); got.push([r.status, r.json.code, r.json.error]); }
-    ok(got.every(([st, code, err], i) => st === tries[i][1] && code === tries[i][2] && typeof err === 'string' && err.length > 15) && !v2.fileOf('agent:conv-NINE/f1'),
+    ok(gateOf(got.every(([st, code, err], i) => st === tries[i][1] && code === tries[i][2] && typeof err === 'string' && err.length > 15)) && !v2.fileOf('agent:conv-NINE/f1'),
       `each refused BY NAME, in words, nothing stored: ${tries.map((t) => t[3]).join(' · ')}`, got);
     const long = 'L' + crypto.randomBytes(7500).toString('base64').slice(0, 9999);   // built at run time: 10 000 characters
     const okLong = await H('/api/agent/vault/put', { body: { name: 'long', value: long } });
@@ -724,7 +724,7 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
   const fm = await H('/api/agent/vault/mint', { bearer: TOKF, body: { name: 'fork-pw' } });
   const dn = v2.secretNames().find((x) => x.name === 'agent:conv-durable-1/site-pw') || {};
   const forkPending = require(path.join(REPO, 'src/claude-lock-capture.js')).addressableId(sessions2.get('sess-32-1')) === null;
-  ok(dm.status === 200 && dm.json.ref === 'vault://agent:conv-durable-1/site-pw' && dp.json.name === 'agent:conv-durable-1/okta-seed' && dn.forHost === 'https://api.example.com/login' && dn.prov === 'minted' && forkPending && fm.json.name === 'agent:sess-32-1/fork-pw',
+  ok(dm.status === 200 && dm.json.ref === 'vault://agent:conv-durable-1/site-pw' && dp.json.name === 'agent:conv-durable-1/okta-seed' && dn.forHost === 'https://api.example.com/login' && dn.prov === 'minted' && gateOf(forkPending) && fm.json.name === 'agent:sess-32-1/fork-pw',
     'lane vault-agent-own: mint / put name a NEW entry by the conversation\'s DURABLE id (kept across a resume) and a mint records its --for; a pending fork names its own registered id, never its parent\'s', { dm: dm.json, dp: dp.json, fm: fm.json, forHost: dn.forHost, forkPending });
   // the review: --for is shown to the owner on a card — a control or direction character never survives the mint
   const cm = await H('/api/agent/vault/mint', { bearer: TOKD, body: { name: 'ctl-pw', for: 'api.example.com\u202e\nHosts: elsewhere.example.org' } });
@@ -748,7 +748,7 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
   const srvM = await new Promise((r) => { const sv = appM.listen(0, '127.0.0.1', () => r(sv)); });
   const PM = srvM.address().port;
   const mq = await new Promise((resolve, reject) => { const rq = http.request({ host: '127.0.0.1', port: PM, path: '/api/agent/vault/put?value=SECRET-FROM-URL', method: 'POST', headers: { authorization: 'Bearer ' + TOK, 'content-type': 'application/json', 'content-length': Buffer.byteLength('{"name":"argv"}') } }, (x) => { let d = ''; x.on('data', (c) => d += c); x.on('end', () => { let j = null; try { j = JSON.parse(d); } catch { } resolve({ status: x.statusCode, json: j || {} }); }); }); rq.on('error', reject); rq.end('{"name":"argv"}'); });
-  ok(rcut !== rsrc && pq.json.code === 'value_in_argv' && mq.status === 200 && v2.secretNames().some((x) => x.name === 'agent:conv-NINE/argv'), 'MUTANT (put reads the value from the URL) ⇒ ?value= is ACCEPTED and sealed — the real route refuses it value_in_argv (RED on the argv law)', mq.json);
+  ok(rcut !== rsrc && pq.json.code === 'value_in_argv' && mq.status === 200 && verdictOf(v2.secretNames().some((x) => x.name === 'agent:conv-NINE/argv')), 'MUTANT (put reads the value from the URL) ⇒ ?value= is ACCEPTED and sealed — the real route refuses it value_in_argv (RED on the argv law)', mq.json);
   srvM.close(); srv2.close(); v2.close();
 }
 
@@ -757,8 +757,8 @@ console.log('⑬ THE USE LAW (lane vault-use-law — design q-043 D1/D7): a BEAR
   const VU = require(path.join(REPO, 'src/vault-use.js'));
   const linesOf = () => fs.readFileSync(path.join(dataDir, VE.AUDIT_FILE), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use');
   const l2 = linesOf();
-  ok(l2.length > 0 && l2.every((l) => l.outcome === 'human_only' && ['setup', 'unlock', 'change'].includes(l.door) && l.entry === VU.VAULT_ENTRY && Object.keys(l).join() === VU.LINE_KEYS.join()), `② left one vault-use line per bearer refused at setup / unlock / change (${l2.length}) — entry the second password, outcome human_only, the closed key set`, l2.slice(0, 3));
-  ok(l2.some((l) => l.by === 'agent' && l.conv === 's1' && l.actor === 'a conversation') && l2.some((l) => l.by === 'job' && l.conv === 'job-j1' && l.actor === 'a job'), 'the bearer is NAMED by its own token: a session (its conversation key) and a job (job-<id>) — a nameless one by its kind', l2.map((l) => `${l.by}:${l.conv}:${l.actor}`));
+  ok(l2.length > 0 && verdictOf(l2.every((l) => l.outcome === 'human_only' && ['setup', 'unlock', 'change'].includes(l.door) && l.entry === VU.VAULT_ENTRY && Object.keys(l).join() === VU.LINE_KEYS.join())), `② left one vault-use line per bearer refused at setup / unlock / change (${l2.length}) — entry the second password, outcome human_only, the closed key set`, l2.slice(0, 3));
+  ok(gateOf(l2.some((l) => l.by === 'agent' && l.conv === 's1' && l.actor === 'a conversation')) && verdictOf(l2.some((l) => l.by === 'job' && l.conv === 'job-j1' && l.actor === 'a job')), 'the bearer is NAMED by its own token: a session (its conversation key) and a job (job-<id>) — a nameless one by its kind', l2.map((l) => `${l.by}:${l.conv}:${l.actor}`));
   ok(!l2.some((l) => l.door === 'lock' || l.door === 'idle') && !REFUSED.join('').includes('vr-'), 'the lock / idle doors open no entry (no use); a receipt is the audit\'s, never in a refused answer');
   const cards = []; vault.onFailing((c) => cards.push(c));
   const before = l2.filter((l) => l.by === 'agent' && l.conv === 's1').length;
@@ -805,10 +805,10 @@ console.log('⑭ A SLOW DOOR NAMES ITSELF (lane vault-slow-load): one line above
   };
   const d = await drive(R);
   ok(d.st.lock === 200 && d.st.unlock === 200 && d.st.state === 200 && d.st.agent === 200, 'the doors answered (lock, a 320 ms unlock, the state, the agent state)', d.st);
-  ok(d.lines.length === 1 && /^\[vault\] POST \/api\/vault\/unlock answered in \d{3,} ms$/.test(d.lines[0]) && Number(d.lines[0].match(/(\d+) ms$/)[1]) >= 320, 'the slow unlock is ONE line: the method, the route, the ms — and the fast doors say nothing', d.lines);
+  ok(d.lines.length === 1 && gateOf(/^\[vault\] POST \/api\/vault\/unlock answered in \d{3,} ms$/.test(d.lines[0])) && Number(d.lines[0].match(/(\d+) ms$/)[1]) >= 320, 'the slow unlock is ONE line: the method, the route, the ms — and the fast doors say nothing', d.lines);
   ok(!d.lines.join('\n').includes(PW), 'the line carries no password');
   const all = await drive(R, { slowMs: -1 });
-  ok(all.lines.some((l) => /^\[vault\] GET \/api\/vault\/state answered in \d+ ms$/.test(l)) && all.lines.some((l) => /^\[vault\] GET \/api\/agent\/vault\/state answered in \d+ ms$/.test(l)) && all.lines.length === 4, 'every vault door is timed — the person doors and the agent doors (a threshold below 0 names each)', all.lines);
+  ok(gateOf(all.lines.some((l) => /^\[vault\] GET \/api\/vault\/state answered in \d+ ms$/.test(l))) && gateOf(all.lines.some((l) => /^\[vault\] GET \/api\/agent\/vault\/state answered in \d+ ms$/.test(l))) && all.lines.length === 4, 'every vault door is timed — the person doors and the agent doors (a threshold below 0 names each)', all.lines);
   const red = await drive(require(MUT));
   ok(red.st.unlock === 200 && red.lines.length === 0, 'RED CONTROL: the routes without the timer — the same 320 ms unlock leaves no line (the owner\'s console)', red);
   vS.close();
@@ -914,17 +914,17 @@ console.log('⑮ (lane vault-standing-request r11, MINOR 2) THE «谁可以用�
   };
   const st = await stampHub(UGC, 'real');
   const ABDE = ['cid-a', 'cid-b', 'cid-d', 'cid-e'], ADE = ['cid-a', 'cid-d', 'cid-e'], ADEF = ['cid-a', 'cid-d', 'cid-e', 'cid-f'];
-  ok(st.setup === 200 && st.put && st.seed && st.reveal && Number.isSafeInteger(st.r0) && st.a1.status === 200 && st.a1.rev > st.r0
+  ok(st.setup === 200 && gateOf(st.put) && gateOf(st.seed) && gateOf(st.reveal) && gateOf(Number.isSafeInteger(st.r0)) && st.a1.status === 200 && st.a1.rev > st.r0
     && st.b1.status === 409 && st.b1.code === 'row_changed' && st.b1.error === UGC.WORDS.row_changed && J(st.b1.use) === J(ABDE) && st.b1.rev === st.a1.rev && J(st.afterB) === J(ABDE)
-    && st.b2 && st.b2.status === 200 && J(st.afterB2) === J(ADE),
+    && gateOf(st.b2) && st.b2.status === 200 && J(st.afterB2) === J(ADE),
   `⑯a B-f212's remainder — TWO CLIENTS over the real route: A's Save lands (e added; the stamp moves), B's Save over the row it read (b out — e it never saw) is REFUSED 409 row_changed by name, nothing written, A's row answered with its stamp; B again over that stamp lands (b out, e kept) — ${J(st)}`, st);
-  ok(st.card && J(st.afterCard) === J(ADEF) && st.r3 > st.r2 && st.c1.status === 409 && st.c1.code === 'row_changed' && J(st.c1.use) === J(ADEF) && J(st.afterC) === J(ADEF),
+  ok(gateOf(st.card) && J(st.afterCard) === J(ADEF) && st.r3 > st.r2 && st.c1.status === 409 && st.c1.code === 'row_changed' && J(st.c1.use) === J(ADEF) && J(st.afterC) === J(ADEF),
     `⑯b a run card's «Always» (ONE member, addMember) is never judged — it lands while a dialog is open and moves the stamp; that dialog's Save over the old stamp is refused with the card's member in the row it answers (kept) — ${J({ card: st.card, afterCard: st.afterCard, r2: st.r2, r3: st.r3, c1: st.c1, afterC: st.afterC })}`, st);
   ok(st.typed.status === 409 && st.typed.code === 'row_changed' && J(st.afterTyped) === J(ADEF) && st.old.status === 200 && J(st.afterOld) === J(['cid-a', 'cid-d']),
     `⑯c a stamp sent as a string is no stamp the row could have (refused, nothing written); a page with NO stamp (from before this release) is written as before, for this one release — ${J({ typed: st.typed, afterTyped: st.afterTyped, old: st.old, afterOld: st.afterOld })}`, st);
-  ok(st.dropped && st.dropRow && st.gone.status === 404 && st.gone.code === 'entry_unknown' && J(st.afterGone) === J([]),
+  ok(gateOf(st.dropped) && gateOf(st.dropRow) && st.gone.status === 404 && st.gone.code === 'entry_unknown' && J(st.afterGone) === J([]),
     `⑯e the read: an entry deleted while a dialog is open — a Save naming members for it is refused entry_unknown, no row left for it — ${J({ dropped: st.dropped, dropRow: st.dropRow, gone: st.gone, afterGone: st.afterGone })}`, st);
-  ok(st.restart.put2 && st.restart.seed2 && st.restart.cut2 && Number.isSafeInteger(st.restart.knownRev) && st.restart.knownRev > 0 && st.restart.restartRev === st.restart.knownRev && st.restart.save === 'ok',
+  ok(gateOf(st.restart.put2) && gateOf(st.restart.seed2) && gateOf(st.restart.cut2) && gateOf(Number.isSafeInteger(st.restart.knownRev)) && st.restart.knownRev > 0 && st.restart.restartRev === st.restart.knownRev && st.restart.save === 'ok',
     `⑯f the narrow read: A RESTART — the row's last member ✕'d (its row gone, the stamp moved), a new writer over the same data hands a page the stamp it judges (the sidecar read once), and a Save over it lands — ${J(st.restart)}`, st.restart);
   const UG_REL = 'src/server/vault-use-grants.js', UGsrc = fs.readFileSync(path.join(REPO, UG_REL), 'utf8');
   const DOOR_REL0 = 'src/server/vault-run-door.js', DOORsrc = fs.readFileSync(path.join(REPO, DOOR_REL0), 'utf8');
@@ -992,7 +992,7 @@ console.log('⑮ (lane vault-standing-request r11, MINOR 2) THE «谁可以用�
   const czR = censusOf((f) => (f === DOOR_REL ? sneak : wrText(f)));
   const bare = anchored(wrText(ROUTE_REL), "...('rev' in b ? { rev: b.rev } : {}) }", ' }', '⑯d RED the route drops the stamp');
   const czR2 = censusOf((f) => (f === ROUTE_REL ? bare : wrText(f)));
-  ok(czR.unnamed.length === 1 && czR.unnamed[0].startsWith(DOOR_REL) && czR2.noStamp.length === 1 && czR2.noStamp[0].startsWith(ROUTE_REL), `RED control: one more whole-row caller planted is named unnamed; the route without the stamp is named — ${J({ unnamed: czR.unnamed, noStamp: czR2.noStamp })}`, { czR, czR2 });
+  ok(czR.unnamed.length === 1 && gateOf(czR.unnamed[0].startsWith(DOOR_REL)) && czR2.noStamp.length === 1 && verdictOf(czR2.noStamp[0].startsWith(ROUTE_REL)), `RED control: one more whole-row caller planted is named unnamed; the route without the stamp is named — ${J({ unnamed: czR.unnamed, noStamp: czR2.noStamp })}`, { czR, czR2 });
   await new Promise((r) => setTimeout(r, 20));
   sU.close(); vU.close();
 }
@@ -1000,4 +1000,4 @@ console.log('⑮ (lane vault-standing-request r11, MINOR 2) THE «谁可以用�
 srv.close(); vault.close(); console.warn = warn0;
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

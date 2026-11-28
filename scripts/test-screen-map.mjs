@@ -25,7 +25,7 @@ const S = require(path.join(REPO, 'src/desktop-screens.js'));
 const MW = require(path.join(REPO, 'src/machine-window.js'));
 const P = require(path.join(REPO, 'src/novnc-patch.js'));
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 700) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 700) : '')); } };
 const rects = (m) => m.displays.map((d) => `${d.n}:${d.name || '-'}@${d.rect.x},${d.rect.y},${d.rect.w}x${d.rect.h}${d.primary ? '*' : ''}`).join(' ');
 
 console.log('§1 screenMap');
@@ -63,7 +63,7 @@ ok(S.screenMap({ fb: { w: 1441, h: 900 }, screens: [mac2[0]] }).state === 'singl
   const rows = [[S.carryPick(first, both, '8'), 'R'], [S.carryPick(first, both, '7'), 'L'], [S.carryPick(both, both, 'R'), 'R'], [S.carryPick(first, both, null), null],
     [S.carryPick(first, S.screenMap({ fb: { w: 3200, h: 900 } }), '8'), '8'], [S.carryPick(null, both, '8'), '8'], [S.carryPick(first, both, 'gone'), 'gone'],
     [S.carryPick(first, S.screenMap({ fb: { w: 3200, h: 900 }, rfb: [{ id: 3, x: 0, y: 0, w: 1000, h: 900 }, { id: 4, x: 1000, y: 0, w: 2200, h: 900 }] }), '8'), '8']];
-  ok(first.displays.map((d) => d.key).join() === '7,8' && both.displays.map((d) => d.key).join() === 'L,R' && rows.every(([got, want]) => got === want),
+  ok(first.displays.map((d) => d.key).join() === '7,8' && both.displays.map((d) => d.key).join() === 'L,R' && verdictOf(rows.every(([got, want]) => got === want)),
     'carryPick: a key the new map lacks moves to its display at the SAME place (RFB id 8 → OS id R); kept as it was when the new map has it, maps nothing, or has no display there', rows);
   ok(!both.displays.some((d) => d.key === '8'), 'RED CONTROL: without the carry the first map\'s key names no display of the second — the picture falls back to the whole framebuffer');
 }
@@ -84,47 +84,47 @@ ok(st.roundTripMs === 50 && st.samples === 4 && st.fps === 2, 'updateTimer: requ
 
 console.log('§3 the display-facts op');
 ok(MW.displaysArgv('linux').code === 'not_desktop_machine' && MW.displaysArgv('darwin').argv === null && MW.displaysArgv('win32').argv[0] === 'powershell.exe', 'argv per platform (encoded PowerShell on Windows; a Mac has NONE — its screen helper\'s facts, nothing under node; none elsewhere)');
-ok(/Screen\]::AllScreens/.test(MW.winDisplaysScript()) && /SetProcessDPIAware/.test(MW.winDisplaysScript()), 'the Windows script reads AllScreens after SetProcessDPIAware (physical pixels)');
+ok(gateOf(/Screen\]::AllScreens/.test(MW.winDisplaysScript())) && verdictOf(/SetProcessDPIAware/.test(MW.winDisplaysScript())), 'the Windows script reads AllScreens after SetProcessDPIAware (physical pixels)');
 const macOut = JSON.stringify({ t: 'displays', origin: 'bottom-left', rows: [{ id: 69733632, name: 'Built-in Retina Display', x: 0, y: 0, w: 1512, h: 982, scale: 2, primary: 1 }, { id: 2, name: 'DELL U2720Q', x: 1512, y: -98, w: 1920, h: 1080, scale: 1, primary: 0 }] }) + '\n';
 const mac = MW.parseDisplayFacts('darwin', macOut);
-ok(mac.ok && mac.displays.map((d) => `${d.name}@${d.x},${d.y}`).join('|') === 'Built-in Retina Display@0,0|DELL U2720Q@1512,0' && mac.displays[0].primary, 'a bottom-left table (NSScreen\'s frames) is flipped against the primary (a taller monitor below the menu bar line lands at y 0)', mac);
+ok(gateOf(mac.ok) && mac.displays.map((d) => `${d.name}@${d.x},${d.y}`).join('|') === 'Built-in Retina Display@0,0|DELL U2720Q@1512,0' && verdictOf(mac.displays[0].primary), 'a bottom-left table (NSScreen\'s frames) is flipped against the primary (a taller monitor below the menu bar line lands at y 0)', mac);
 const MAC_HELPER = { ok: true, platform: 'darwin', tcc: { screen: 'denied', accessibility: 'denied' }, windows: [], displays: [
   { id: '2', x: 1512, y: 0, w: 1920, h: 1080, pw: 1920, ph: 1080, scale: 1, main: false, hdr: true, asleep: false, name: 'DELL U2720Q' },
   { id: '69733632', x: 0, y: 0, w: 1512, h: 982, pw: 3024, ph: 1964, scale: 2, main: true, hdr: false, asleep: false, name: 'Built-in Retina Display' }] };
 const mh = MW.macDisplaysOf(MAC_HELPER);
-ok(mh.ok && mh.displays.map((d) => `${d.id}:${d.name}@${d.x},${d.y}x${d.scale}`).join('|') === '69733632:Built-in Retina Display@0,0x2|2:DELL U2720Q@1512,0x1' && mh.displays[0].primary && !mh.displays[1].primary && mh.displays.every((d) => d.hdr === null), 'a Mac: its screen helper\'s displays (CGDisplayBounds, top-left already; the MAIN one first; hdr unknown — the HDR words are Windows\'), whatever its Screen Recording', mh);
+ok(gateOf(mh.ok) && mh.displays.map((d) => `${d.id}:${d.name}@${d.x},${d.y}x${d.scale}`).join('|') === '69733632:Built-in Retina Display@0,0x2|2:DELL U2720Q@1512,0x1' && gateOf(mh.displays[0].primary) && !mh.displays[1].primary && verdictOf(mh.displays.every((d) => d.hdr === null)), 'a Mac: its screen helper\'s displays (CGDisplayBounds, top-left already; the MAIN one first; hdr unknown — the HDR words are Windows\'), whatever its Screen Recording', mh);
 ok(MW.macDisplaysOf({ displays: [{ id: '1', w: 0, h: 0 }] }).code === 'bad_output' && MW.macDisplaysOf(null).code === 'bad_output', 'a helper that listed no usable display ⇒ bad_output, by name');
 const winOut = '#< CLIXML\r\n' + JSON.stringify({ t: 'displays', origin: 'top-left', aware: 1, rows: { id: '\\\\.\\DISPLAY1', name: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 2560, h: 1440, scale: 1.5, primary: 1 } }) + '\r\n';
 const w1 = MW.parseDisplayFacts('win32', winOut);
-ok(w1.ok && w1.displays.length === 1 && w1.displays[0].name === 'DISPLAY1' && w1.displays[0].scale === 1.5, 'a Windows fixture: PowerShell 5\'s lone row as an object, the \\\\.\\ prefix dropped', w1);
+ok(gateOf(w1.ok) && w1.displays.length === 1 && w1.displays[0].name === 'DISPLAY1' && w1.displays[0].scale === 1.5, 'a Windows fixture: PowerShell 5\'s lone row as an object, the \\\\.\\ prefix dropped', w1);
 ok(MW.parseDisplayFacts('win32', 'garbage\n{"t":"other"}').code === 'bad_output' && MW.parseDisplayFacts('darwin', '{"t":"displays","rows":[{"x":0}]}').code === 'bad_output', 'no table / no usable row ⇒ bad_output, by name');
 const ran = [];
 const fx = (out, err = null) => (file, argv, opts, cb) => { ran.push([file, opts.timeout]); setImmediate(() => cb(err, out, err ? 'denied' : '')); };
 const r1 = await MW.readDisplayFacts({ platform: 'win32', execFile: fx(winOut), env: {} });
 const r2 = await MW.readDisplayFacts({ platform: 'win32', execFile: fx('', Object.assign(new Error('x'), { code: 1 })), env: {} });
 const r3 = await MW.readDisplayFacts({ platform: 'linux', execFile: fx(''), env: {} });
-ok(r1.ok && r2.code === 'displays_failed' && r2.error === 'denied' && r3.code === 'not_desktop_machine' && ran.length === 2 && ran[0][1] === MW.DISPLAYS_MS, 'readDisplayFacts: bounded (10 s), a failure named with its first stderr line, Linux never spawns', { r1, r2, r3, ran });
+ok(gateOf(r1.ok) && r2.code === 'displays_failed' && r2.error === 'denied' && r3.code === 'not_desktop_machine' && ran.length === 2 && ran[0][1] === MW.DISPLAYS_MS, 'readDisplayFacts: bounded (10 s), a failure named with its first stderr line, Linux never spawns', { r1, r2, r3, ran });
 const asked = [];
 const m1 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx(''), env: {}, mac: { displays: async () => { asked.push('displays'); return MAC_HELPER; } } });
 const m2 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx(''), env: {}, mac: { displays: async () => ({ ok: false, code: 'no_helper', error: 'the Mac has no screen helper yet' }) } });
 const m3 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx(''), env: {} });
 const m4 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx(''), env: {}, mac: { displays: async () => { throw new Error('helper hung'); } } });
-ok(m1.ok && m1.displays.length === 2 && asked.join() === 'displays' && m2.code === 'no_helper' && m3.code === 'no_helper' && m4.code === 'displays_failed' && /helper hung/.test(m4.error) && ran.length === 2, 'a Mac asks its SCREEN HELPER (one facts read) and spawns nothing under node; no helper ⇒ no_helper by name, a failed read ⇒ displays_failed', { m1, m2, m3, m4, ran });
+ok(gateOf(m1.ok) && m1.displays.length === 2 && asked.join() === 'displays' && m2.code === 'no_helper' && m3.code === 'no_helper' && m4.code === 'displays_failed' && gateOf(/helper hung/.test(m4.error)) && ran.length === 2, 'a Mac asks its SCREEN HELPER (one facts read) and spawns nothing under node; no helper ⇒ no_helper by name, a failed read ⇒ displays_failed', { m1, m2, m3, m4, ran });
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const ad = read('src/agentd/agentd.js'), cl = read('src/agentd/client.js'), rt = read('src/routes/desktop-apps.js');
-ok(/capabilities: \[[^\]]*'display-facts'[^\]]*\]/.test(ad) /* by CONTENT, never the list's tail (lane remoteapp-r1b appended one after it) */ && /if \(msg\.op === 'display-facts'\)/.test(ad) && /m\.op === 'display-facts-result'/.test(cl) && /includes\?\.\('display-facts'\)\) \{ const e = new Error\('daemon lacks display-facts/.test(cl), 'the agent answers the op and says the capability; the client gates on it (an old agent is never asked) and routes the answer');
-ok(/router\.get\('\/api\/desktop\/machine-desktop\/displays', async \(req, res\) => \{\n  if \(humanOnly\(req, res\)\) return;/.test(rt) && /router\.get\('\/api\/desktop\/machine-desktop\/link', async \(req, res\) => \{\n  if \(humanOnly\(req, res\)\) return;/.test(rt), 'both new routes are people-only first (human_only before anything is read)');
+ok(gateOf(/capabilities: \[[^\]]*'display-facts'[^\]]*\]/.test(ad)) /* by CONTENT, never the list's tail (lane remoteapp-r1b appended one after it) */ && gateOf(/if \(msg\.op === 'display-facts'\)/.test(ad)) && gateOf(/m\.op === 'display-facts-result'/.test(cl)) && verdictOf(/includes\?\.\('display-facts'\)\) \{ const e = new Error\('daemon lacks display-facts/.test(cl)), 'the agent answers the op and says the capability; the client gates on it (an old agent is never asked) and routes the answer');
+ok(gateOf(/router\.get\('\/api\/desktop\/machine-desktop\/displays', async \(req, res\) => \{\n  if \(humanOnly\(req, res\)\) return;/.test(rt)) && verdictOf(/router\.get\('\/api\/desktop\/machine-desktop\/link', async \(req, res\) => \{\n  if \(humanOnly\(req, res\)\) return;/.test(rt)), 'both new routes are people-only first (human_only before anything is read)');
 
 console.log('§4 the noVNC patch');
 const rfbSrc = read('node_modules/@novnc/novnc/core/rfb.js');
 const pr = P.patchRfb(rfbSrc);
-ok(pr.ok && pr.applied.join() === 'crop,screens,cursor,cursor-scale,own-pointer,server-cursor' && P.ADDED_LINES <= 20, `every anchor applies exactly once on the bundled noVNC; ${P.ADDED_LINES} added lines (≤ 20)`, pr.missing);
-ok(/Disable viewport clipping if we are scaling/.test(rfbSrc) && /if \(i === 0\) \{\n\s+this\._screenID = this\._sock\.rQshift32\(\);/.test(rfbSrc) && /typeof urlOrChannel === "string"/.test(rfbSrc), 'the measured 1.7 facts the patch answers: clip is dropped while scaling; ExtendedDesktopSize keeps only screen 0; RFB takes a channel object');
+ok(gateOf(pr.ok) && pr.applied.join() === 'crop,screens,cursor,cursor-scale,own-pointer,server-cursor' && P.ADDED_LINES <= 20, `every anchor applies exactly once on the bundled noVNC; ${P.ADDED_LINES} added lines (≤ 20)`, pr.missing);
+ok(gateOf(/Disable viewport clipping if we are scaling/.test(rfbSrc)) && gateOf(/if \(i === 0\) \{\n\s+this\._screenID = this\._sock\.rQshift32\(\);/.test(rfbSrc)) && verdictOf(/typeof urlOrChannel === "string"/.test(rfbSrc)), 'the measured 1.7 facts the patch answers: clip is dropped while scaling; ExtendedDesktopSize keeps only screen 0; RFB takes a channel object');
 const drift = P.patchRfb(rfbSrc.replace('const firstUpdate = !this._supportsSetDesktopSize;', 'const firstUpdate = !this._supportsSetDesktopSize ;'));
 ok(!drift.ok && drift.missing.join() === 'screens', 'a drifted anchor is MISSING by name (scripts/build-novnc.mjs then fails the build)', drift);
 ok(!P.patchRfb(pr.text).ok, 'applied twice: the anchors are gone (no double patch)');
 const built = fs.existsSync(path.join(REPO, 'public/novnc.js')) ? read('public/novnc.js') : '';
-ok(/vsCrop/.test(built) && /vsscreens/.test(built) && /node scripts\/build-novnc\.mjs/.test(read('package.json')), 'the built public/novnc.js carries the patch (the build script makes it)', built.length);
+ok(gateOf(/vsCrop/.test(built)) && gateOf(/vsscreens/.test(built)) && verdictOf(/node scripts\/build-novnc\.mjs/.test(read('package.json'))), 'the built public/novnc.js carries the patch (the build script makes it)', built.length);
 
 
 console.log('§5 the pointer at the picture\'s scale + the HDR fact');
@@ -146,9 +146,9 @@ ok(sc1.length === 4 && sc1[0] === 128 && sc1[1] === 0 && sc1[2] === 128 && sc1[3
 const up = S.scaleRgba(Uint8ClampedArray.from([9, 8, 7, 255]), 1, 1, 2, 2);
 ok(up.length === 16 && up[12] === 9 && up[15] === 255, 'scaleRgba upscales by the nearest pixel', [...up]);
 const ws = MW.winDisplaysScript();
-ok(/QueryDisplayConfig\(2, ref np, P, ref nm, M, IntPtr\.Zero\)/.test(ws) && /Marshal\.WriteInt32\(B, 0, 9\)/.test(ws) && /\(v & 2\) != 0 && \(v & 4\) == 0/.test(ws) && /hdr = \$h \}/.test(ws) && /\} catch \{ \}/.test(ws), 'the Windows script reads each screen\'s HDR state through the DisplayConfig API (advanced-colour info: enabled and not the SDR wide-colour mode); a failure leaves it unknown');
+ok(gateOf(/QueryDisplayConfig\(2, ref np, P, ref nm, M, IntPtr\.Zero\)/.test(ws)) && gateOf(/Marshal\.WriteInt32\(B, 0, 9\)/.test(ws)) && gateOf(/\(v & 2\) != 0 && \(v & 4\) == 0/.test(ws)) && gateOf(/hdr = \$h \}/.test(ws)) && verdictOf(/\} catch \{ \}/.test(ws)), 'the Windows script reads each screen\'s HDR state through the DisplayConfig API (advanced-colour info: enabled and not the SDR wide-colour mode); a failure leaves it unknown');
 const wf = MW.parseDisplayFacts('win32', JSON.stringify({ t: 'displays', origin: 'top-left', rows: [{ id: '\\\\.\\DISPLAY1', name: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 1920, h: 1080, scale: 1, primary: 1, hdr: 0 }, { id: '\\\\.\\DISPLAY2', name: '\\\\.\\DISPLAY2', x: 1920, y: 0, w: 1920, h: 1080, scale: 1, primary: 0, hdr: 1 }, { id: '\\\\.\\DISPLAY3', name: 'X', x: 3840, y: 0, w: 800, h: 600, scale: 1, primary: 0, hdr: -1 }] }));
-ok(wf.ok && wf.displays.map((d) => d.hdr).join() === 'false,true,', 'parseDisplayFacts: hdr 1 → true, 0 → false, -1 (no reading) → null', wf.displays.map((d) => d.hdr));
+ok(gateOf(wf.ok) && wf.displays.map((d) => d.hdr).join() === 'false,true,', 'parseDisplayFacts: hdr 1 → true, 0 → false, -1 (no reading) → null', wf.displays.map((d) => d.hdr));
 const fb3 = { w: 4640, h: 1080 };
 const map3 = S.screenMap({ fb: fb3, screens: wf.displays });
 ok(map3.state === 'map' && map3.displays.map((d) => d.hdr).join() === 'false,true,', 'the screen map carries each display\'s hdr', map3.displays.map((d) => d.hdr));
@@ -156,10 +156,10 @@ const keys = map3.displays.map((d) => d.key);
 ok(S.hdrShown({ screens: wf.displays, map: map3, key: keys[1] }) === true && S.hdrShown({ screens: wf.displays, map: map3, key: keys[0] }) === false && S.hdrShown({ screens: wf.displays, map: map3, key: keys[2] }) === false && S.hdrShown({ screens: wf.displays, map: map3, key: null }) === true,
   'hdrShown: the HDR display ⇒ the chip; the SDR one and the unknown one ⇒ nothing; 全部 with an HDR screen in it ⇒ the chip', keys);
 ok(S.hdrShown({ screens: wf.displays.map((d) => ({ ...d, hdr: d.hdr === true ? null : d.hdr })), map: null, key: null }) === false && S.hdrShown({}) === false, 'no measured hdr: true anywhere (an old agent, a Mac) ⇒ nothing');
-ok(/vsCursor/.test(built) && /vsServerCursor/.test(built) && /_vsCursorAt/.test(built) && /this\._canvas\.style\.cursor ?= ?this\.vsOwnPointer/.test(built), 'the built public/novnc.js carries the pointer patch (vsCursor, the redraw on a new scale, vsServerCursor, vsOwnPointer)');
+ok(gateOf(/vsCursor/.test(built)) && gateOf(/vsServerCursor/.test(built)) && gateOf(/_vsCursorAt/.test(built)) && verdictOf(/this\._canvas\.style\.cursor ?= ?this\.vsOwnPointer/.test(built)), 'the built public/novnc.js carries the pointer patch (vsCursor, the redraw on a new scale, vsServerCursor, vsOwnPointer)');
 const vv = read('src/lib/vnc-view.js');
-ok(/rfb\.vsOwnPointer = 'default';/.test(vv) && /if \(!pointerShown\(img\)\) \{ cursorNow = \{ path: 'own'/.test(vv), 'vnc-view: no pointer to see from the machine ⇒ the page\'s arrow (vsOwnPointer default) and the stats say own (lane stream-cursor)');
-ok(/rfb\.vsServerCursor = serverCursor;/.test(vv) && /cursorPlan\(img, scale\)/.test(vv) && /mine\._sendEncodings\(\)/.test(vv) && /get cursor\(\) \{ return cursorNow; \}/.test(vv), 'vnc-view answers vsCursor with the plan, re-sends SetEncodings once the machine must paint it, and keeps that choice for every reconnect');
+ok(gateOf(/rfb\.vsOwnPointer = 'default';/.test(vv)) && verdictOf(/if \(!pointerShown\(img\)\) \{ cursorNow = \{ path: 'own'/.test(vv)), 'vnc-view: no pointer to see from the machine ⇒ the page\'s arrow (vsOwnPointer default) and the stats say own (lane stream-cursor)');
+ok(gateOf(/rfb\.vsServerCursor = serverCursor;/.test(vv)) && gateOf(/cursorPlan\(img, scale\)/.test(vv)) && gateOf(/mine\._sendEncodings\(\)/.test(vv)) && verdictOf(/get cursor\(\) \{ return cursorNow; \}/.test(vv)), 'vnc-view answers vsCursor with the plan, re-sends SetEncodings once the machine must paint it, and keeps that choice for every reconnect');
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

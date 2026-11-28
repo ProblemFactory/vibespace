@@ -31,7 +31,7 @@ const { WebSocket } = require('ws');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const ROOT = path.join(os.tmpdir(), `vs-pchip-${process.pid}`);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 600) : '')); } return c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 600) : '')); } return c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome on this machine'); process.exit(0); }
@@ -124,7 +124,7 @@ for (const width of [360, 375, 390]) {
     await ev(`window.mkBar(${JSON.stringify(n.auth)})`);
     await sleep(80);
     const r = await ev(READ);
-    ok(whole(r, n), `${width} px ${n.lang}: «Who pays» says "${r && r.text}" — the full words, whole (overflow ${r && r.overflow}, ${r && Math.round(r.left)}–${r && Math.round(r.right)} of ${width} px), the full words in its tooltip, never on the strip`, JSON.stringify(r));
+    ok(verdictOf(whole(r, n)), `${width} px ${n.lang}: «Who pays» says "${r && r.text}" — the full words, whole (overflow ${r && r.overflow}, ${r && Math.round(r.left)}–${r && Math.round(r.right)} of ${width} px), the full words in its tooltip, never on the strip`, JSON.stringify(r));
   }
 }
 { // the UI scale = a CSS zoom on <body> (desktop widths): the row stays whole in one unit
@@ -148,8 +148,8 @@ if (pagePre) {
   await at(pagePre, 360);
   await ev(`window.mkBar(${JSON.stringify(NAMES[0].auth)})`); await sleep(80);
   const r = await ev(READ_PRE);
-  ok(r && r.overflow > 0, `CONTROL: the pre-fix chip CUTS the owner's name (its text overflows its box by ${r && r.overflow} px — "⣿ 全部 → Beta Ma…")`, JSON.stringify(r));
+  ok(gateOf(r) && r.overflow > 0, `CONTROL: the pre-fix chip CUTS the owner's name (its text overflows its box by ${r && r.overflow} px — "⣿ 全部 → Beta Ma…")`, JSON.stringify(r));
 }
 await done();
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

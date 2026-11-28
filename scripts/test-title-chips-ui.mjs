@@ -38,7 +38,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -48,7 +48,7 @@ function editAnchor(text, from, to, file, mode = 'one') {
   if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
-const okBase = (c, n, extra) => ok(c, n, extra); // the module-level check (a face pass shadows `ok` to name its face)
+const okBase = (c, n, extra) => ok(verdictOf(c), n, extra); // the module-level check (a face pass shadows `ok` to name its face)
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 50) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -98,7 +98,7 @@ else await (async () => {
   let journal = '';
   const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000, 100)), 'the worktree server booted', journal.slice(-800))) return;
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
   const create = async (reqId, name) => { ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: ROOT, cols: 80, rows: 24, reqId, name })); await until(() => msgs.some((m) => m.type === 'created' && m.reqId === reqId), 15000); return msgs.find((m) => m.type === 'created' && m.reqId === reqId)?.sessionId; };
@@ -110,7 +110,7 @@ else await (async () => {
   };
   let chrome = null, P = null;
   try {
-  if (!ok(sids.every(Boolean), 'three chat sessions were created on the fake claude', journal.slice(-600))) return;
+  if (!ok(verdictOf(sids.every(Boolean)), 'three chat sessions were created on the fake claude', journal.slice(-600))) return;
   await sleep(1200);
 
   chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -137,7 +137,7 @@ else await (async () => {
     for (let i = 0; i < 120; i++) { try { if (await ev('if (!window.app || !window.app.ready) return false; return await Promise.race([window.app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 100))]);')) return true; } catch { } await sleep(250); }
     return false;
   };
-  if (!ok(await boot(), 'the app booted in headless chrome (desktop, 1280×900)')) return;
+  if (!ok(verdictOf(await boot()), 'the app booted in headless chrome (desktop, 1280×900)')) return;
   await sleep(1500);
   const mouse = (type, x, y, extra = {}) => send('Input.dispatchMouseEvent', { type, x, y, ...extra });
 
@@ -227,13 +227,13 @@ else await (async () => {
    *  'DejaVu Sans' (the runner's `system-ui`), so the runner's geometry is proven here before it ships. */
   const stripChecks = (rows, face, tag) => {
     const px = rows.map((r) => `${r.vis.n} chars in a ${r.vis.labelW} px label (${r.mode})`).join(', ');
-    ok(rows.length === 3 && rows.every((r) => r.mode), `${tag}three tabs, each with its billing chip`, S(rows));
-    ok(rows.every((r) => r.vis.n >= (r.mode === 'compact' ? 6 : 5)), `${tag}every tab's title stays readable — compact ⇒ ≥ 6 characters (the rule's own guarantee), icon ⇒ ≥ 5: ${px} under ${face || 'an unreported face'} — 2.369.177 drew "V.."`, S(rows.map((r) => r.vis)));
-    ok(rows.every((r) => r.mode === 'compact' || r.mode === 'icon'), `${tag}every chip yields: compact or icon (${rows.map((r) => r.mode).join(', ')})`);
-    ok(rows.every((r) => !r.drawn.includes('全部')), `${tag}no chip draws the pool prefix "全部 →" on the strip`, S(rows.map((r) => r.drawn)));
-    ok(rows.every((r) => r.mode !== 'compact' || r.drawn === 'UCI Max'), `${tag}a compact chip draws the member's short name only ("UCI Max")`, S(rows.map((r) => r.drawn)));
-    ok(rows.every((r) => r.tip && r.tip.startsWith(FULL_WORDS)), `${tag}every chip's tooltip LEADS with the full words "${FULL_WORDS}"`, S(rows.map((r) => r.tip)));
-    ok(rows.every((r) => r.inbox === '1' && r.inboxW <= 32), `${tag}the inbox chip keeps its number at its minimal width (${rows.map((r) => r.inboxW + 'px').join(', ')})`);
+    ok(rows.length === 3 && verdictOf(rows.every((r) => r.mode)), `${tag}three tabs, each with its billing chip`, S(rows));
+    ok(verdictOf(rows.every((r) => r.vis.n >= (r.mode === 'compact' ? 6 : 5))), `${tag}every tab's title stays readable — compact ⇒ ≥ 6 characters (the rule's own guarantee), icon ⇒ ≥ 5: ${px} under ${face || 'an unreported face'} — 2.369.177 drew "V.."`, S(rows.map((r) => r.vis)));
+    ok(verdictOf(rows.every((r) => r.mode === 'compact' || r.mode === 'icon')), `${tag}every chip yields: compact or icon (${rows.map((r) => r.mode).join(', ')})`);
+    ok(verdictOf(rows.every((r) => !r.drawn.includes('全部'))), `${tag}no chip draws the pool prefix "全部 →" on the strip`, S(rows.map((r) => r.drawn)));
+    ok(verdictOf(rows.every((r) => r.mode !== 'compact' || r.drawn === 'UCI Max')), `${tag}a compact chip draws the member's short name only ("UCI Max")`, S(rows.map((r) => r.drawn)));
+    ok(verdictOf(rows.every((r) => r.tip && r.tip.startsWith(FULL_WORDS))), `${tag}every chip's tooltip LEADS with the full words "${FULL_WORDS}"`, S(rows.map((r) => r.tip)));
+    ok(verdictOf(rows.every((r) => r.inbox === '1' && r.inboxW <= 32)), `${tag}the inbox chip keeps its number at its minimal width (${rows.map((r) => r.inboxW + 'px').join(', ')})`);
   };
   const TAB_LABEL = '.window .tab-bar-tabs .tab-item > .tab-label';
 
@@ -357,14 +357,14 @@ else await (async () => {
     ok(src.split(head).length === 2, 'the rule\'s entry line is spelled once (the control patches exactly it)');
     const mut = MUT.write(path.join(repo, 'src/lib/title-chips.js'), editAnchor(src, head, head + " return 'full'; // NEGATIVE CONTROL: the pre-fix chip", "src/lib/title-chips.js"), 'always-full', { esm: true });
     await bundle(mut);
-    if (!ok(await boot(), 'the control bundle booted')) return;
+    if (!ok(verdictOf(await boot()), 'the control bundle booted')) return;
     await sleep(1200);
     const s = await scene({ chain: true, width: 640 });
     const rows = await measure(s.host);
     note('    ' + brief(rows));
     await shot('6-control-chain-640', s.host);
-    ok(rows.length === 3 && rows.every((r) => r.mode === 'full' && r.drawn === FULL_WORDS), 'CONTROL: every chip draws every word', S(rows.map((r) => [r.mode, r.drawn])));
-    ok(rows.every((r) => r.vis.n <= 3), `CONTROL: …and every tab's title shrinks to ≤ 3 characters (${rows.map((r) => r.vis.n).join(', ')} — the owner's "V..")`, S(rows.map((r) => r.vis)));
+    ok(rows.length === 3 && verdictOf(rows.every((r) => r.mode === 'full' && r.drawn === FULL_WORDS)), 'CONTROL: every chip draws every word', S(rows.map((r) => [r.mode, r.drawn])));
+    ok(verdictOf(rows.every((r) => r.vis.n <= 3)), `CONTROL: …and every tab's title shrinks to ≤ 3 characters (${rows.map((r) => r.vis.n).join(', ')} — the owner's "V..")`, S(rows.map((r) => r.vis)));
     await bundle(null); // the worktree's bundle back to the real one (nothing reads it after this)
   }
   } finally {
@@ -376,7 +376,7 @@ else await (async () => {
 })();
 
 console.log('\ntree: the patched copy never touches the tree');
-if (MUT.files.length) for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+if (MUT.files.length) for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`}`);
 cleanup();
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

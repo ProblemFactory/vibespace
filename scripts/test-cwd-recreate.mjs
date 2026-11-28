@@ -13,7 +13,7 @@ const MISSING_CWD = scratch('cwdre-workdir') + '/deleted-project';
 const SID = '77770000-1111-2222-3333-444455556666';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c, extra) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${extra ? ' — ' + extra : ''}`); } };
+const check = (n, c, extra) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${extra ? ' — ' + extra : ''}`); } };
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -64,7 +64,7 @@ check('error carries cwd', r1.cwd === MISSING_CWD);
 // 2. recreate flag → mkdir + spawn
 const r2 = await send({ type: 'create', backend: 'claude', mode: 'chat', resume: true, resumeId: SID, cwd: MISSING_CWD, recreateCwd: true, reqId: 'r2', cols: 80, rows: 24 });
 check('recreateCwd create succeeds', r2.type === 'created', JSON.stringify(r2).slice(0, 120));
-check('directory recreated on disk', fs.existsSync(MISSING_CWD));
+check('directory recreated on disk', verdictOf(fs.existsSync(MISSING_CWD)));
 await sleep(3000);
 // 3. meta flag + agent token
 const metaDir = path.join(wt, 'data', 'session-meta');
@@ -75,9 +75,9 @@ const tok = meta?.agentToken;
 check('agent token in meta', !!tok);
 // 4. one-shot notice via prompt-context
 const pc1 = await (await fetch(`http://127.0.0.1:${PORT}/api/agent/prompt-context`, { headers: { Authorization: `Bearer ${tok}` } })).json();
-check('first prompt-context carries cwd notice', String(pc1.context || '').includes('<vibespace-cwd-notice>'), JSON.stringify(pc1).slice(0, 150));
-check('notice names the cwd', String(pc1.context || '').includes(MISSING_CWD));
+check('first prompt-context carries cwd notice', verdictOf(String(pc1.context || '').includes('<vibespace-cwd-notice>')), JSON.stringify(pc1).slice(0, 150));
+check('notice names the cwd', verdictOf(String(pc1.context || '').includes(MISSING_CWD)));
 const pc2 = await (await fetch(`http://127.0.0.1:${PORT}/api/agent/prompt-context`, { headers: { Authorization: `Bearer ${tok}` } })).json();
 check('second call: notice one-shot (absent)', !String(pc2.context || '').includes('<vibespace-cwd-notice>'));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

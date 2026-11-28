@@ -34,9 +34,9 @@ const wait=async(fn,ms=60000)=>{const t=Date.now();while(Date.now()-t<ms){try{if
 // B-7a99: the ssh reverse tunnel this suite starts, held HERE where the end sees it (it was declared inside the try: the end's
 // `tun?.kill()` threw, its catch swallowed it, and every run that reached the tunnel left an ssh process behind)
 let tun=null;
-let pass=0,fail=0; const ck=(n,c,extra='')=>{ if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n+(extra?' — '+extra:''))} };
+let pass=0,fail=0; const ck=(n,c,extra='')=>{ if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n+(extra?' — '+extra:''))} };
 try{
-  ck('server booted', await wait(async()=>(await req('GET','/api/home')).status===200, 60000));
+  ck('server booted', verdictOf(await wait(async()=>(await req('GET','/api/home')).status===200, 60000)));
   const add=await req('POST','/api/hosts',{name:'gradtest',host:HOST,user:USER,port:Number(PORT_SSH),privateKey:fs.readFileSync(KEY,'utf-8')});
   const hid=add.json?.host?.id||add.json?.id; ck('ssh host added',!!hid, JSON.stringify(add.json).slice(0,150));
   const t=await req('POST',`/api/hosts/${hid}/test`); ck('ssh reachable', t.status===200 && !t.json?.error, JSON.stringify(t.json).slice(0,120));
@@ -51,10 +51,10 @@ try{
   ck('graduate route succeeded', g.json?.success===true, JSON.stringify(g.json).slice(0,300));
   const live=await wait(async()=>{const l=await req('GET','/api/hosts');const h=(l.json.hosts||[]).find(x=>x.id===hid);return h?.graduated&&h?.dialLive;},90000);
   const lNow=await req('GET','/api/hosts'); const hNow=(lNow.json.hosts||[]).find(x=>x.id===hid);
-  ck('host reports graduated + dialLive', live, 'record: '+JSON.stringify({graduated:hNow?.graduated,dialLive:hNow?.dialLive,deviceId:hNow?.deviceId,transport:hNow?.transport}));
+  ck('host reports graduated + dialLive', verdictOf(live), 'record: '+JSON.stringify({graduated:hNow?.graduated,dialLive:hNow?.dialLive,deviceId:hNow?.deviceId,transport:hNow?.transport}));
   const fi=await req('GET',`/api/file/info?path=${encodeURIComponent('~')}&host=${hid}`);
   ck('data-plane op works while graduated', fi.status===200, JSON.stringify(fi.json).slice(0,120));
-  ck('server log shows the dial-in', /dialed in/.test(log));
+  ck('server log shows the dial-in', verdictOf(/dialed in/.test(log)));
   const rm=await req('POST',`/api/hosts/${hid}/graduate-dial`,{remove:true});
   ck('remove rolled it back', rm.json?.removed===true, JSON.stringify(rm.json).slice(0,150));
   const l2=await req('GET','/api/hosts'); const h2=(l2.json.hosts||[]).find(x=>x.id===hid);
@@ -70,8 +70,8 @@ if(tun&&Number.isInteger(tun.pid)&&tun.pid>1){
   const heard=await ended;
   if(!heard&&running()){ try{ tun.kill('SIGKILL'); }catch{} await new Promise(r=>{tun.once('exit',r);setTimeout(r,3000);}); }
   let alive=true; try{ process.kill(tun.pid,0); }catch(e){ alive=e.code!=='ESRCH'; }
-  ck('the ssh tunnel this suite started is gone (its exit heard after SIGTERM, its pid answers no signal)', heard&&!alive, `pid ${tun.pid}`);
+  ck('the ssh tunnel this suite started is gone (its exit heard after SIGTERM, its pid answers no signal)', gateOf(heard)&&!alive, `pid ${tun.pid}`);
 }
 console.log(fail?`${fail} FAILED (${pass} passed)`:`ALL PASS (${pass})`);
 if(fail) console.log('--- server log tail ---\n'+log.slice(-2500));
-srv.kill(); try{ execFileSync('git',['worktree','remove','--force',WT],{cwd:REPO,stdio:'ignore'}); }catch{} process.exit(fail?1:0);
+srv.kill(); try{ execFileSync('git',['worktree','remove','--force',WT],{cwd:REPO,stdio:'ignore'}); }catch{} process.exit(fail?1:0); import { verdictOf, gateOf } from './lib/check.mjs';

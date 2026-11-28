@@ -52,7 +52,7 @@ const FX = scratch('fhview-fx');
 const OUT = scratch('fhview-out');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── fixtures: the repo's own pages WITH their folders, the app's page, a hostile page, a hostile mail ──
@@ -204,15 +204,15 @@ try {
   for (const [dir, file, effect, what] of PAGES) {
     const el = await evalJs(`__fh.preview(${P(dir, file)}, ${JSON.stringify(file)})`);
     const sid = await frameWhere(`location.pathname.startsWith('/frame-host/f/') && (${effect})`);
-    ok(el && el.sandbox === 'allow-scripts' && !el.srcdoc && el.src === `/frame-host?kind=preview&base=${encodeURIComponent(path.join(FX, dir))}` && el.kept > 0, `${dir}/${file}: the frame is sandbox="allow-scripts" (no allow-same-origin), no srcdoc, at the host's preview address with its folder`, el);
+    ok(gateOf(el) && el.sandbox === 'allow-scripts' && !el.srcdoc && el.src === `/frame-host?kind=preview&base=${encodeURIComponent(path.join(FX, dir))}` && el.kept > 0, `${dir}/${file}: the frame is sandbox="allow-scripts" (no allow-same-origin), no srcdoc, at the host's preview address with its folder`, el);
     if (!ok(!!sid, `${dir}/${file}: the page RAN at its folder's address — ${what}`)) continue;
     const inside = await evalJs(`({ origin: self.origin, url: location.href, cookie: (() => { try { return document.cookie; } catch (e) { return 'THROW ' + e.name; } })(), ls: (() => { try { localStorage.setItem('x', '1'); return 'ok'; } catch (e) { return 'THROW ' + e.name; } })(), parentDoc: (() => { try { return String(!!parent.document); } catch (e) { return 'THROW ' + e.name; } })() })`, sid);
-    ok(inside.origin === 'null' && /^THROW/.test(inside.cookie) && /^THROW/.test(inside.ls) && /^THROW/.test(inside.parentDoc) && /^http:\/\/127\.0\.0\.1:\d+\/frame-host\/f\/[A-Za-z0-9_-]{24}\/$/.test(inside.url), `${dir}/${file}: an opaque origin — no cookie, no storage, no parent document; its URL is the folder's (/frame-host/f/<token>/)`, inside);
+    ok(inside.origin === 'null' && gateOf(/^THROW/.test(inside.cookie)) && gateOf(/^THROW/.test(inside.ls)) && gateOf(/^THROW/.test(inside.parentDoc)) && verdictOf(/^http:\/\/127\.0\.0\.1:\d+\/frame-host\/f\/[A-Za-z0-9_-]{24}\/$/.test(inside.url)), `${dir}/${file}: an opaque origin — no cookie, no storage, no parent document; its URL is the folder's (/frame-host/f/<token>/)`, inside);
     await sleep(400);
     const reqs = folderReqs(sid);
     const files = reqs.filter((r) => r.url.startsWith(inside.url) && r.url !== inside.url), hub = reqs.filter((r) => !r.url.startsWith(inside.url) && !r.url.startsWith(BASE + '/frame-host?'));
-    ok(files.length > 0 && files.every((r) => r.status === 200), `${dir}/${file}: every file it asked of its folder (${[...new Set(files.map((r) => r.url.slice(inside.url.length)))].join(', ')}) answered 200 at the folder's address`, files.filter((r) => r.status !== 200));
-    ok(hub.every((r) => r.status === undefined && r.blocked === 'csp'), `${dir}/${file}: what it asked of the HUB itself (${hub.length ? [...new Set(hub.map((r) => r.url.slice(BASE.length)))].join(', ') : 'nothing'}) was blocked by the preview policy, never fetched`, hub.filter((r) => r.blocked !== 'csp'));
+    ok(files.length > 0 && verdictOf(files.every((r) => r.status === 200)), `${dir}/${file}: every file it asked of its folder (${[...new Set(files.map((r) => r.url.slice(inside.url.length)))].join(', ')}) answered 200 at the folder's address`, files.filter((r) => r.status !== 200));
+    ok(verdictOf(hub.every((r) => r.status === undefined && r.blocked === 'csp')), `${dir}/${file}: what it asked of the HUB itself (${hub.length ? [...new Set(hub.map((r) => r.url.slice(BASE.length)))].join(', ') : 'nothing'}) was blocked by the preview policy, never fetched`, hub.filter((r) => r.blocked !== 'csp'));
   }
 
   // ── Ⓑ the app's own page ──
@@ -225,7 +225,7 @@ try {
       await sleep(1200);
       const inside = await evalJs(`({ app: typeof window.app, sheets: document.styleSheets.length, url: location.href })`, sid);
       const hub = net.filter((r) => r.sid === sid && r.url.startsWith(BASE + '/') && !r.url.startsWith(inside.url) && !r.url.startsWith(BASE + '/frame-host?'));
-      ok(inside.app === 'undefined' && hub.length >= 7 && hub.every((r) => r.status === undefined && r.blocked === 'csp'), `its /style.css, /dist/… are the HUB's: ${hub.length} request(s), every one blocked by the preview policy before it left (never fetched); the app did not boot inside`, { app: inside.app, hub: hub.map((r) => [r.url.slice(BASE.length), r.status, r.blocked]) });
+      ok(inside.app === 'undefined' && hub.length >= 7 && verdictOf(hub.every((r) => r.status === undefined && r.blocked === 'csp')), `its /style.css, /dist/… are the HUB's: ${hub.length} request(s), every one blocked by the preview policy before it left (never fetched); the app did not boot inside`, { app: inside.app, hub: hub.map((r) => [r.url.slice(BASE.length), r.status, r.blocked]) });
     }
   }
 
@@ -237,8 +237,8 @@ try {
     if (ok(!!sid, 'the hostile page runs in the preview frame')) {
       const r = await evalJs(`window.__probe.then((p) => ({ ...p, inline: window.__inline, ev: window.__eval, top: window.__top, ok: getComputedStyle(document.getElementById('ok')).color }))`, sid);
       ok(r.inline === 1 && r.ev === 42 && r.ok === 'rgb(1, 2, 3)' && r.json === '200:{"fhv":"sibling-json"}', 'its own inline script and eval run; its sibling stylesheet applies; fetch() of a sibling json answers (CORS from the opaque frame)', r);
-      ok(/^404:/.test(r.env) && /^404:/.test(r.pem) && /^404:/.test(r.link) && !/secret/.test(JSON.stringify(r)), 'the folder\'s .env, key.pem (not a web file) and a symlink OUT of the folder ⇒ 404 — never their bytes', { env: r.env, pem: r.pem, link: r.link });
-      ok(/^(404:|ERR)/.test(r.up) && !/sibling-json/.test(r.up), 'a ../ path out of the folder never answers', r.up);
+      ok(gateOf(/^404:/.test(r.env)) && gateOf(/^404:/.test(r.pem)) && gateOf(/^404:/.test(r.link)) && !/secret/.test(JSON.stringify(r)), 'the folder\'s .env, key.pem (not a web file) and a symlink OUT of the folder ⇒ 404 — never their bytes', { env: r.env, pem: r.pem, link: r.link });
+      ok(gateOf(/^(404:|ERR)/.test(r.up)) && !/sibling-json/.test(r.up), 'a ../ path out of the folder never answers', r.up);
       ok(r.api === 'ERR TypeError' && r.hubAbs === 'ERR TypeError' && r.api2 === 'ERR TypeError', 'the hub\'s /api (relative, absolute, the file-content route on the key) ⇒ refused by the policy before it leaves', { api: r.api, hubAbs: r.hubAbs, api2: r.api2 });
       const top = await evalJs('location.href');
       ok(!/fhv-top/.test(top), 'the top page was not navigated by the preview', { top, inFrame: r.top });
@@ -250,7 +250,7 @@ try {
   {
     await evalJs(`__fh.openFile(${P('mail', 'hostile.eml')}, 'hostile.eml', (el) => !!el.querySelector('.eml-html-frame'))`);
     const el = await evalJs(`(() => { const f = __fh.el().querySelector('.eml-html-frame'); return { sandbox: f.getAttribute('sandbox'), src: f.getAttribute('src'), srcdoc: f.hasAttribute('srcdoc'), kept: (f.__frameDoc || '').includes('FHV-MAIL-BODY'), pics: !!__fh.el().querySelector('.eml-pictures') }; })()`);
-    ok(el.sandbox === 'allow-scripts' && el.src === '/frame-host?kind=eml' && !el.srcdoc && el.kept && el.pics, 'the mail frame is at the host\'s eml address, no srcdoc (the host\'s line is its only script); "Show pictures" is offered', el);
+    ok(el.sandbox === 'allow-scripts' && el.src === '/frame-host?kind=eml' && !el.srcdoc && gateOf(el.kept) && verdictOf(el.pics), 'the mail frame is at the host\'s eml address, no srcdoc (the host\'s line is its only script); "Show pictures" is offered', el);
     const sid = await frameWhere(`document.getElementById('m') && document.getElementById('m').textContent === 'FHV-MAIL-BODY'`);
     if (ok(!!sid, 'the mail body is shown')) {
       await evalJs(`document.getElementById('js').click(); true`, sid);
@@ -261,7 +261,7 @@ try {
       await evalJs(`__fh.el().querySelector('.eml-pictures').click(); true`);
       const sid2 = await frameWhere(`document.getElementById('remote') && document.getElementById('remote').naturalWidth === 1`, 10000);
       const src2 = await evalJs(`__fh.el().querySelector('.eml-html-frame').getAttribute('src')`);
-      ok(!!sid2 && src2 === '/frame-host?kind=eml&pictures=1' && paused.some((u) => u === 'https://pictures.example/fhv.gif'), 'after "Show pictures" the frame is the host\'s eml address WITH pictures and the remote picture loads', { src2, paused });
+      ok(!!sid2 && src2 === '/frame-host?kind=eml&pictures=1' && verdictOf(paused.some((u) => u === 'https://pictures.example/fhv.gif')), 'after "Show pictures" the frame is the host\'s eml address WITH pictures and the remote picture loads', { src2, paused });
       if (sid2) { const p2 = await evalJs(`window.__emlPwned === undefined ? null : window.__emlPwned`, sid2); ok(p2 === null, '…and still nothing of the mail ran', p2); }
     }
   }
@@ -304,13 +304,13 @@ try {
       await evalJs(`(window.__fhvLet(), true)`);
       const up = await waitFrame('fhv-held', 'w.__probe', 'the held control frame set its probe once let go');
       const now = up ? await readProbe('fhv-held') : { p: null };
-      ok(shown && asStood.p === null && up && now.p && /^200:/.test(now.p.api), `Ⓔ PLACED (r4456): its script HELD, the parsed control frame read as the leg stood has no probe (${asStood.p === null}) — the control RED with nothing wrong; the wait on the probe, once let go, reads the app's answer (${now.p && now.p.api})`, { asStood, now: now.p && now.p.api });
+      ok(gateOf(shown) && asStood.p === null && gateOf(up) && gateOf(now.p) && verdictOf(/^200:/.test(now.p.api)), `Ⓔ PLACED (r4456): its script HELD, the parsed control frame read as the leg stood has no probe (${asStood.p === null}) — the control RED with nothing wrong; the wait on the probe, once let go, reads the app's answer (${now.p && now.p.api})`, { asStood, now: now.p && now.p.api });
       await evalJs(`document.getElementById('fhv-held').remove(); true`);
     }
     await mkFrame('fhv-control', html);
     await waitFrame('fhv-control', 'w.__probe', 'the control frame set its probe');
     const c = await readProbe('fhv-control');
-    ok(c.origin === new URL(BASE).origin && c.p && /^200:/.test(c.p.api), 'CONTROL: the old shape runs AS THE APP — the app\'s origin, and the hub\'s /api answers it with the owner\'s cookie', { origin: c.origin, api: c.p && c.p.api });
+    ok(c.origin === new URL(BASE).origin && gateOf(c.p) && verdictOf(/^200:/.test(c.p.api)), 'CONTROL: the old shape runs AS THE APP — the app\'s origin, and the hub\'s /api answers it with the owner\'s cookie', { origin: c.origin, api: c.p && c.p.api });
     const taken = await takeCspReports((r) => r.document === 'about', { ms: 3000, want: Infinity });
     ok(taken.length > 0, `CONTROL: the app page's policy reports the old shape's page (${taken.length} report(s), taken — the teardown judges the rest)`, taken.slice(0, 3));
     await evalJs(`document.getElementById('fhv-control').remove(); true`);
@@ -321,4 +321,4 @@ try {
 console.log(`\n  (${((Date.now() - T0) / 1000).toFixed(1)} s)`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exitCode = fail ? 1 : 0;
-setTimeout(() => process.exit(process.exitCode), 300);
+setTimeout(() => process.exit(process.exitCode), 300); import { verdictOf, gateOf } from './lib/check.mjs';

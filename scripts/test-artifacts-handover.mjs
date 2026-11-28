@@ -26,7 +26,7 @@ const HT = require(path.join(REPO, 'src/harnesses/helper-transcripts.js'));
 const C = require(path.join(REPO, 'src/adapters/codex.js'));
 const M = mutantCopies('artifacts-handover', REPO);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -67,15 +67,15 @@ console.log('① a Task subagent\'s writes are the PARENT\'s rows (via.subagent)
   REG.observe(live, TASK[1]); REG.observe(live, TASK[1]); // the parse + the device feed
   await REG.helperSettled(live); // B-299b: the helper's rows land when its read off the loop has
   const row = (live._artifacts || {})[':' + BRIEF];
-  ok(row && row.via && row.via.kind === 'subagent' && row.via.name === 'Draft the brief' && row.writes === 1 && row.edits === 1, 'the sidechain\'s Write + Edit ⇒ ONE parent row, via {subagent, "Draft the brief"}, counted once though the result was fed twice', row);
+  ok(gateOf(row) && gateOf(row.via) && row.via.kind === 'subagent' && row.via.name === 'Draft the brief' && row.writes === 1 && row.edits === 1, 'the sidechain\'s Write + Edit ⇒ ONE parent row, via {subagent, "Draft the brief"}, counted once though the result was fed twice', row);
   const c = cards(live).find((b) => b.path === BRIEF);
-  ok(c && c.via && c.via.name === 'Draft the brief' && AF.cardFacts(c).via.kind === 'subagent', 'the parent\'s chat gets the card at the Task result (its block carries via)', c);
-  ok(live._artifacts[':' + CWD + '/tmp/scratch.py'] && !cards(live).some((b) => b.path.endsWith('.py')), 'the sidechain\'s code file is a row behind the chip\'s Code fold, never a card (the parent\'s rule)');
+  ok(gateOf(c) && gateOf(c.via) && c.via.name === 'Draft the brief' && AF.cardFacts(c).via.kind === 'subagent', 'the parent\'s chat gets the card at the Task result (its block carries via)', c);
+  ok(gateOf(live._artifacts[':' + CWD + '/tmp/scratch.py']) && !cards(live).some((b) => b.path.endsWith('.py')), 'the sidechain\'s code file is a row behind the chip\'s Code fold, never a card (the parent\'s rule)');
   const rb = mk('R1', { _normalizer: null, _artifacts: null });
   await N.rebuildHistory(rb, 'R1', TASK);
   ok(shape(rb._artifacts) === shape(live._artifacts), 'REPLAY PARITY: the rebuild over the parent transcript derives the same rows', { live: shape(live._artifacts), rebuild: shape(rb._artifacts) });
   const msgs = rb._normalizer.messages, ci = msgs.findIndex((m) => m.noticeKind === 'artifact' && m.content[0].path === BRIEF);
-  ok(ci > 0 && msgs.slice(0, ci).some((m) => JSON.stringify(m).includes('the brief is written')), 'the rebuilt card sits AFTER the Task\'s result (where the live one was born)', ci);
+  ok(ci > 0 && verdictOf(msgs.slice(0, ci).some((m) => JSON.stringify(m).includes('the brief is written'))), 'the rebuilt card sits AFTER the Task\'s result (where the live one was born)', ci);
   const streamed = mk('L2');
   REG.configure({ activeSessions: () => new Map([['L2', streamed]]), log: quiet });
   ok(REG.observe(streamed, { ...side('a01', 'toolu_S1', 'Write', { file_path: BRIEF, content: 'x' }, 3), parent_tool_use_id: 'toolu_T1' }) === 0 && !Object.keys(streamed._artifacts || {}).length,
@@ -90,7 +90,7 @@ console.log('① a Task subagent\'s writes are the PARENT\'s rows (via.subagent)
   REG.observe(bg, note('toolu_T2', 14));
   await REG.helperSettled(bg);
   const r = bg._artifacts[':' + CWD + '/notes.md'];
-  ok(r && r.writes === 1 && r.edits === 1 && r.via.name === 'Background notes', 'a background agent: read at its launch AND at its notification — each op counted once', r);
+  ok(gateOf(r) && r.writes === 1 && r.edits === 1 && r.via.name === 'Background notes', 'a background agent: read at its launch AND at its notification — each op counted once', r);
   const wf = mk('L4');
   REG.configure({ activeSessions: () => new Map([['L4', wf]]), log: quiet });
   agent(path.join(SUB, 'workflows', 'wf_demo1'), 'w01', { agentType: 'workflow-agent', description: 'review: tables' }, [side('w01', 'toolu_W1', 'Write', { file_path: CWD + '/review.md', content: 'r' }, 21)]);
@@ -100,7 +100,7 @@ console.log('① a Task subagent\'s writes are the PARENT\'s rows (via.subagent)
   REG.observe(wf, note('toolu_WF', 30));
   await REG.helperSettled(wf);
   const w = wf._artifacts[':' + CWD + '/review.md'];
-  ok(w && w.via && w.via.name === 'review: tables' && w.via.wf === 'wf_demo1', 'a workflow run\'s agent ⇒ the same rule at the run\'s notification (via names the agent + the run)', w);
+  ok(gateOf(w) && gateOf(w.via) && w.via.name === 'review: tables' && w.via.wf === 'wf_demo1', 'a workflow run\'s agent ⇒ the same rule at the run\'s notification (via names the agent + the run)', w);
   const remote = mk('L5', { host: 'gpu-box' });
   REG.configure({ activeSessions: () => new Map([['L5', remote]]), log: quiet });
   REG.observe(remote, TASK[1]);
@@ -125,19 +125,19 @@ console.log('① a Task subagent\'s writes are the PARENT\'s rows (via.subagent)
   for (const r of T4) REG.observe(hp, r);
   await REG.helperSettled(hp);
   const lr = (hp._artifacts || {})[':' + PG];
-  ok(lr && lr.presented && lr.by === 'agent' && lr.shown === true && AF.intentOf(lr) === 'foryou' && lr.via && lr.via.kind === 'subagent', 'a page link in a helper\'s Task prompt (its transcript\'s first user record) ⇒ by the agent, shown — «for you», never the person\'s', lr);
+  ok(gateOf(lr) && gateOf(lr.presented) && lr.by === 'agent' && lr.shown === true && AF.intentOf(lr) === 'foryou' && gateOf(lr.via) && lr.via.kind === 'subagent', 'a page link in a helper\'s Task prompt (its transcript\'s first user record) ⇒ by the agent, shown — «for you», never the person\'s', lr);
   const rb6 = mk('R6', { _normalizer: null, _artifacts: null });
   await N.rebuildHistory(rb6, 'R6', T4);
   const rr = (rb6._artifacts || {})[':' + PG];
-  ok(rr && rr.by === 'agent' && AF.intentOf(rr) === 'foryou', 'the rebuild (the same helper door) says the same', rr);
+  ok(gateOf(rr) && rr.by === 'agent' && AF.intentOf(rr) === 'foryou', 'the rebuild (the same helper door) says the same', rr);
   const hsrc = fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
   const STRIP = "    const { by: _who, ...op } = o; // a helper's transcript is an agent's: its Task prompt is the parent's words, never the person's (lane artifacts-by-intent r3)\n    out.push({ ...op, id, via, cwd: cwd || session.cwd || '', ...(at ? { at } : {}) });"; // B-299b: helperTagged
   const MH = hsrc.includes(STRIP) ? M.load('src/server/artifact-registry.js', editAnchor(hsrc, STRIP, "    out.push({ ...o, id, via, cwd: cwd || session.cwd || '', ...(at ? { at } : {}) });", "src/server/artifact-registry.js"), 'helperby') : null;
   const hm = mk('M6');
-  if (ok(MH, 'CONTROL needle present: the helper door\'s strip of the reader\'s tag (r3) — a tree without it has nothing to patch')) { // r4: a control that cannot find its anchor says so by name, never «null»
+  if (ok(verdictOf(MH), 'CONTROL needle present: the helper door\'s strip of the reader\'s tag (r3) — a tree without it has nothing to patch')) { // r4: a control that cannot find its anchor says so by name, never «null»
     MH.configure({ activeSessions: () => new Map([['M6', hm]]), log: quiet }); for (const r of T4) MH.observe(hm, r); await MH.helperSettled(hm); REG.configure({ activeSessions: () => new Map([['L6', hp]]), log: quiet });
     const mr = (hm._artifacts || {})[':' + PG];
-    ok(mr && mr.by === 'user' && AF.intentOf(mr) === 'made', 'CONTROL the helper door keeping the reader\'s person tag (r2: the record\'s TYPE) ⇒ the helper\'s page reads «made here» — RED', mr);
+    ok(gateOf(mr) && mr.by === 'user' && AF.intentOf(mr) === 'made', 'CONTROL the helper door keeping the reader\'s person tag (r2: the record\'s TYPE) ⇒ the helper\'s page reads «made here» — RED', mr);
   }
 }
 
@@ -161,25 +161,25 @@ function world(reg = REG) {
 {
   const w = world();
   const r = REG.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CR], items: ['/opt/demo/helper/report.md', DESIGN, '/p/pg7'], reach: reachFrom(CH), at: 50 });
-  ok(r.ok && r.handed.length === 3 && !r.refused.length, 'reachable receiver ⇒ 3 items handed (a file, a design folder, a page link)', r);
+  ok(gateOf(r.ok) && r.handed.length === 3 && !r.refused.length, 'reachable receiver ⇒ 3 items handed (a file, a design folder, a page link)', r);
   const rr = w.recv._artifacts || {};
   const doc = rr[':/opt/demo/helper/report.md'], des = rr[':' + DESIGN], page = Object.values(rr).find((x) => x.url === '/p/pg7');
-  ok(doc && doc.kind === 'doc' && doc.via.kind === 'handover' && doc.via.from.cid === CH && doc.via.from.name === 'design desk' && doc.writes === 0, 'the receiver\'s row: same path + kind, via {handover, from: the helper} — a hand-over never counts as a write', doc);
-  ok(des && des.kind === 'design' && page && page.kind === 'page' && page.state === 'published', 'the design is a design row, the page a page row (its link + state)', { des, page });
+  ok(gateOf(doc) && doc.kind === 'doc' && doc.via.kind === 'handover' && doc.via.from.cid === CH && doc.via.from.name === 'design desk' && doc.writes === 0, 'the receiver\'s row: same path + kind, via {handover, from: the helper} — a hand-over never counts as a write', doc);
+  ok(gateOf(des) && des.kind === 'design' && gateOf(page) && page.kind === 'page' && page.state === 'published', 'the design is a design row, the page a page row (its link + state)', { des, page });
   const rc = cards(w.recv);
-  ok(rc.length === 3 && rc.every((b) => b.via && b.via.kind === 'handover'), 'the receiver\'s chat gets one card per item, each saying who handed it over', rc.map((b) => b.name));
+  ok(rc.length === 3 && verdictOf(rc.every((b) => b.via && b.via.kind === 'handover')), 'the receiver\'s chat gets one card per item, each saying who handed it over', rc.map((b) => b.name));
   ok(REG.listFor('r').count === 3, 'the receiver\'s Artifacts chip counts them', REG.listFor('r').count);
   ok((w.helper._artifacts[':/opt/demo/helper/report.md'].handedTo || [])[0].cid === CR && (w.helper._artifacts[':/opt/demo/helper/report.md'].handedTo || [])[0].name === 'coordinator', 'the helper\'s own row keeps handedTo {the receiver}', w.helper._artifacts[':/opt/demo/helper/report.md'].handedTo);
   ok(w.DE.calls.length === 1 && w.DE.calls[0].dir === DESIGN && w.DE.calls[0].sessionId === 'r' && w.DE.calls[0].conversationId === CR && w.DE.calls[0].via.cid === CH && w.DE.opened[0].sid === 'r',
     'the design re-registers in the Design window\'s registry under the RECEIVER (via the helper) and its window opens there', w.DE);
   const again = REG.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CR], items: ['/opt/demo/helper/report.md'], reach: reachFrom(CH), at: 60 });
-  ok(again.ok && Object.keys(w.recv._artifacts).length === 3 && cards(w.recv).length === 3, 'handing the same file over again patches the receiver\'s row — still one row, one card');
+  ok(gateOf(again.ok) && Object.keys(w.recv._artifacts).length === 3 && cards(w.recv).length === 3, 'handing the same file over again patches the receiver\'s row — still one row, one card');
   const st = REG.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CS], items: ['/opt/demo/helper/report.md'], reach: reachFrom(CH), at: 70 });
-  ok(!st.ok && st.refused[0].why === 'unreachable' && st.refused[0].error.includes(CS) && !Object.keys(w.stranger._artifacts || {}).length, 'a conversation outside the helper\'s reach ⇒ refused by name, nothing lands', st);
+  ok(!st.ok && st.refused[0].why === 'unreachable' && gateOf(st.refused[0].error.includes(CS)) && !Object.keys(w.stranger._artifacts || {}).length, 'a conversation outside the helper\'s reach ⇒ refused by name, nothing lands', st);
   const no = REG.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CR], items: ['/opt/demo/elsewhere/secret.md'], reach: reachFrom(CH) });
-  ok(!no.ok && no.refused[0].why === 'not-yours' && no.refused[0].error.includes('/opt/demo/elsewhere/secret.md'), 'a path the helper does not own ⇒ refused by name', no);
+  ok(!no.ok && no.refused[0].why === 'not-yours' && verdictOf(no.refused[0].error.includes('/opt/demo/elsewhere/secret.md')), 'a path the helper does not own ⇒ refused by name', no);
   const many = REG.handover({ from: { cid: CH, session: w.helper }, to: [CR], items: Array.from({ length: 21 }, (_, i) => `/opt/demo/helper/f${i}.md`), reach: reachFrom(CH) });
-  ok(!many.ok && many.code === 'too-many' && /21/.test(many.error), '21 items ⇒ refused (≤ 20 per hand-over)', many);
+  ok(!many.ok && many.code === 'too-many' && verdictOf(/21/.test(many.error)), '21 items ⇒ refused (≤ 20 per hand-over)', many);
   const far = REG.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CX], items: ['/opt/demo/helper/report.md'], reach: reachFrom(CH) });
   ok(!far.ok && far.refused[0].why === 'other-machine' && !Object.keys(w.far._artifacts || {}).length, 'a receiver on another machine ⇒ refused by name (files are never copied)', far);
   ok(!REG.handover({ from: { cid: CH, session: w.helper }, to: [CR], items: ['/opt/demo/helper/report.md'] }).ok, 'no reach function ⇒ refused (the reach is never assumed)');
@@ -189,9 +189,9 @@ console.log('③ the words (en / zh / ja)');
 {
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const KEYS = ['Handed over by {name}', 'By subagent {name}', 'Handed to {names}', 'via {name}'];
-  ok(KEYS.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')) && zh.includes('"移交自 {name}"'), 'every card word has its zh + ja line ("移交自 {name}")');
+  ok(gateOf(KEYS.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))) && verdictOf(zh.includes('"移交自 {name}"')), 'every card word has its zh + ja line ("移交自 {name}")');
   const card = fs.readFileSync(path.join(REPO, 'src/lib/artifact-card.js'), 'utf8'), home = fs.readFileSync(path.join(REPO, 'src/lib/design-home.js'), 'utf8');
-  ok(KEYS.slice(0, 3).every((k) => card.includes(`t('${k}'`)) && home.includes("t('via {name}'"), 'the card says them through t(); the Design home says "via <helper>"');
+  ok(gateOf(KEYS.slice(0, 3).every((k) => card.includes(`t('${k}'`))) && verdictOf(home.includes("t('via {name}'")), 'the card says them through t(); the Design home says "via <helper>"');
   ok(AF.viaOf({ kind: 'handover', from: { cid: 'x'.repeat(300), name: 'n' } }).from.cid.length === 64 && AF.viaOf({ kind: 'bogus' }) === null, 'via is bounded and closed (an unknown kind ⇒ none)');
 }
 
@@ -200,17 +200,17 @@ console.log('④ patched-copy controls');
   const src = fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
   const REACH = "    if (!reach(cid)) {";
   const MR = src.includes(REACH) ? M.load('src/server/artifact-registry.js', editAnchor(src, REACH, '    if (false) {', "src/server/artifact-registry.js"), 'noreach') : null;
-  if (ok(MR, 'CONTROL needle present: the reach check')) { const w = world(MR); const r = MR.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CS], items: ['/opt/demo/helper/report.md'], reach: reachFrom(CH) }); ok(r.ok && Object.keys(w.stranger._artifacts || {}).length === 1, 'CONTROL: without the reach check a stranger\'s registry gets the row (② sees it red)', r); }
+  if (ok(verdictOf(MR), 'CONTROL needle present: the reach check')) { const w = world(MR); const r = MR.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CS], items: ['/opt/demo/helper/report.md'], reach: reachFrom(CH) }); ok(gateOf(r.ok) && Object.keys(w.stranger._artifacts || {}).length === 1, 'CONTROL: without the reach check a stranger\'s registry gets the row (② sees it red)', r); }
   const OWN = "const row = AF.rowFor(helper._artifacts || {}, it, helper.host || '');";
   const MO = src.includes(OWN) ? M.load('src/server/artifact-registry.js', editAnchor(src, OWN, "const row = AF.rowFor(helper._artifacts || {}, it, helper.host || '') || { key: ':' + it, host: '', path: it, name: it, kind: 'doc' };", "src/server/artifact-registry.js"), 'noown') : null;
-  if (ok(MO, 'CONTROL needle present: the ownership check')) { const w = world(MO); const r = MO.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CR], items: ['/opt/demo/elsewhere/secret.md'], reach: reachFrom(CH) }); ok(r.ok && w.recv._artifacts[':/opt/demo/elsewhere/secret.md'], 'CONTROL: without the ownership check a path the helper never wrote lands (② sees it red)', r); }
+  if (ok(verdictOf(MO), 'CONTROL needle present: the ownership check')) { const w = world(MO); const r = MO.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CR], items: ['/opt/demo/elsewhere/secret.md'], reach: reachFrom(CH) }); ok(gateOf(r.ok) && verdictOf(w.recv._artifacts[':/opt/demo/elsewhere/secret.md']), 'CONTROL: without the ownership check a path the helper never wrote lands (② sees it red)', r); }
   const SIDE = "  foldHelpers(session, record, session._helperArtifacts);\n"; // lane agy-subagent-cards: the door asks every record (the descriptor's hook names what ends a helper); B-299b: it folds off the loop
   const MS = src.includes(SIDE) ? M.load('src/server/artifact-registry.js', editAnchor(src, SIDE, '', "src/server/artifact-registry.js"), 'noside') : null;
-  if (ok(MS, 'CONTROL needle present: the live helper door')) { const s = mk('M1'); MS.configure({ activeSessions: () => new Map([['M1', s]]), log: quiet }); MS.observe(s, TASK[1]); await MS.helperSettled(s); ok(!Object.keys(s._artifacts || {}).length, 'CONTROL: sidechain not read ⇒ the fixture\'s row is missing live (① sees it red)'); }
+  if (ok(verdictOf(MS), 'CONTROL needle present: the live helper door')) { const s = mk('M1'); MS.configure({ activeSessions: () => new Map([['M1', s]]), log: quiet }); MS.observe(s, TASK[1]); await MS.helperSettled(s); ok(!Object.keys(s._artifacts || {}).length, 'CONTROL: sidechain not read ⇒ the fixture\'s row is missing live (① sees it red)'); }
   const nsrc = fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
   const NSIDE = 'if (helper && artifactHelperSource && raw)'; // lane agy-subagent-cards: the hook decides which record ends a helper
   const MN = nsrc.includes(NSIDE) ? M.load('src/normalizers.js', editAnchor(nsrc, NSIDE, 'if (false)', "src/normalizers.js"), 'nonside') : null;
-  if (ok(MN, 'CONTROL needle present: the rebuild\'s helper seam')) { MN.setArtifactHelperSource(REG.helperOps, REG.helperPrefetch); const s = mk('M2', { _normalizer: null, _artifacts: null }); await MN.rebuildHistory(s, 'M2', TASK); ok(!Object.keys(s._artifacts || {}).length, 'CONTROL: the rebuild without the helper seam derives no row (the parity assert sees it red)'); }
+  if (ok(verdictOf(MN), 'CONTROL needle present: the rebuild\'s helper seam')) { MN.setArtifactHelperSource(REG.helperOps, REG.helperPrefetch); const s = mk('M2', { _normalizer: null, _artifacts: null }); await MN.rebuildHistory(s, 'M2', TASK); ok(!Object.keys(s._artifacts || {}).length, 'CONTROL: the rebuild without the helper seam derives no row (the parity assert sees it red)'); }
 }
 
 console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the transcript pool\'s pager), its rows the release\'s');
@@ -259,7 +259,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const D = CWD + '/eq/', EXTRA = ['', '   ', 'null', '{"type":"assistant","broken', '  ' + JSON.stringify(side('a05', 'toolu_EQpad', 'Write', { file_path: D + 'padded.md', content: 'x' }, 2)) + '  ', JSON.stringify(side('a05', 'toolu_EQcr', 'Edit', { file_path: D + 'padded.md', old_string: 'x', new_string: 'y' }, 2)) + '\r'];
   const F5 = helper('a05', 'toolu_T5', 'Equal under 8 MB', { mb: 7.5, writes: [0.1, 1.5, 3, 4.5, 6, 7.4].map((atMb, i) => ({ atMb, file: D + `f${i}.md` })), extra: EXTRA });
   const recP = await C.readJsonlBoundedParsedPagedAsync(F5, { tailOnly: false }), recR = releaseRecords(F5);
-  ok(fs.statSync(F5).size < 8 * MB && Array.isArray(recP) && recP.length === recR.length && JSON.stringify(recP) === JSON.stringify(recR), 'a 7.5 MB helper: the pager\'s records (head+tail road) are EXACTLY the release reader\'s — every record, in order, the «null» line kept, blank and broken lines dropped', { pager: recP && recP.length, release: recR.length });
+  ok(fs.statSync(F5).size < 8 * MB && gateOf(Array.isArray(recP)) && recP.length === recR.length && JSON.stringify(recP) === JSON.stringify(recR), 'a 7.5 MB helper: the pager\'s records (head+tail road) are EXACTLY the release reader\'s — every record, in order, the «null» line kept, blank and broken lines dropped', { pager: recP && recP.length, release: recR.length });
   const T5 = [use('toolu_T5', 'Agent', { description: 'Equal under 8 MB', prompt: 'go', subagent_type: 'general-purpose' }, 60), ends('toolu_T5', 'a05', 61)];
   const pagedBefore = C.pagedReadStats().reads, readBefore = REG.helperReadStats().read;
   let L5 = null;
@@ -279,8 +279,8 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   ok(C.pagedReadStats().reads >= pagedBefore + 1 && REG.helperReadStats().read === readBefore + 1, 'the read went through the transcript pool\'s pager (its paged-read count), ONCE: the rebuild used the ops kept for the unchanged file', { paged: C.pagedReadStats().reads - pagedBefore, read: REG.helperReadStats().read - readBefore, kept: REG.helperReadStats().kept });
   let M5 = null;
   const mReads = await mainReads(async () => { M5 = await liveOf(MR, 'B1m', T5); }); REG.configure({ activeSessions: () => new Map(), log: quiet }); // the copy's configure pointed the rebuild's helper seam at itself — the real one again
-  ok(mReads.length >= 2 && mReads.some((x) => /^openSync /.test(x)), 'CONTROL the release\'s reader in the same door ⇒ the spy names its main-thread reads (stat + open) — the zero above can fail', mReads);
-  ok(want5.every((p) => rows(L5)[':' + p] && rows(L5)[':' + p].via.name === 'Equal under 8 MB') && shape(rows(L5)) === shape(rows(M5)) && shape(rows(R5)) === shape(rows(L5)) && rows(L5)[':' + D + 'padded.md'].writes === 1 && rows(L5)[':' + D + 'padded.md'].edits === 1,
+  ok(mReads.length >= 2 && verdictOf(mReads.some((x) => /^openSync /.test(x))), 'CONTROL the release\'s reader in the same door ⇒ the spy names its main-thread reads (stat + open) — the zero above can fail', mReads);
+  ok(gateOf(want5.every((p) => rows(L5)[':' + p] && rows(L5)[':' + p].via.name === 'Equal under 8 MB')) && shape(rows(L5)) === shape(rows(M5)) && shape(rows(R5)) === shape(rows(L5)) && rows(L5)[':' + D + 'padded.md'].writes === 1 && rows(L5)[':' + D + 'padded.md'].edits === 1,
     'THE ROWS ARE THE RELEASE\'S under 8 MB: the cure\'s live rows = the release reader\'s rows (the control copy) = the rebuild\'s — seven files, the padded and CRLF lines counted', { cure: shape(rows(L5)), release: shape(rows(M5)), rebuild: shape(rows(R5)) });
 
   // (b) A LONGER HELPER: 9 MB — the release read its newest 8 MB and lost a write in its first MB; the pager reads it whole
@@ -288,7 +288,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   helper('a06', 'toolu_T6', 'Nine megabytes', { mb: 9, writes: [{ atMb: 0.2, file: D9 + 'early.md' }, { atMb: Infinity, file: D9 + 'late.md' }] });
   const T6 = [use('toolu_T6', 'Agent', { description: 'Nine megabytes', prompt: 'go', subagent_type: 'general-purpose' }, 62), ends('toolu_T6', 'a06', 63)];
   const L6 = await liveOf(REG, 'B2', T6), M6 = await liveOf(MR, 'B2m', T6); REG.configure({ activeSessions: () => new Map(), log: quiet });
-  ok(rows(L6)[':' + D9 + 'early.md'] && rows(L6)[':' + D9 + 'late.md'] && !rows(M6)[':' + D9 + 'early.md'] && rows(M6)[':' + D9 + 'late.md'], 'a 9 MB helper: its early write is a row now (the file is read whole up to 34 MB); the release\'s 8 MB tail lost it (the control)', { cure: shape(rows(L6)), release: shape(rows(M6)) });
+  ok(gateOf(rows(L6)[':' + D9 + 'early.md']) && gateOf(rows(L6)[':' + D9 + 'late.md']) && !rows(M6)[':' + D9 + 'early.md'] && verdictOf(rows(M6)[':' + D9 + 'late.md']), 'a 9 MB helper: its early write is a row now (the file is read whole up to 34 MB); the release\'s 8 MB tail lost it (the control)', { cure: shape(rows(L6)), release: shape(rows(M6)) });
 
   // (c) OVER 34 MB: its first 2 MB and its last 32 MB — and the chat window's «tail-only display» line is NEVER said for a helper's file
   const DL = CWD + '/long/';
@@ -300,8 +300,8 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   let L7 = null;
   const heardDoor = await hear(async () => { L7 = await liveOf(REG, 'B3', T7); });
   const heardChat = await hear(async () => { await C.readJsonlBoundedParsedPagedAsync(FL, { tailOnly: true }); });
-  ok(!/tail-only display/.test(heardDoor) && /tail-only display/.test(heardChat), 'a 34.5 MB helper: the helper door says NO «tail-only display» line (the head+tail road never prints it); CONTROL the same file on the chat window\'s tailOnly road says it — the ear hears the worker', { door: heardDoor.slice(0, 200), chat: (heardChat.match(/\[jsonl\][^\n]*/) || [''])[0].slice(0, 160) });
-  ok(rows(L7)[':' + DL + 'start.md'] && !rows(L7)[':' + DL + 'middle.md'] && rows(L7)[':' + DL + 'end.md'], 'over 34 MB a helper\'s rows come from its first 2 MB and its last 32 MB: the write at 0.5 MB and the last one are rows, the one at 2.2 MB (in neither) is not', shape(rows(L7)));
+  ok(!/tail-only display/.test(heardDoor) && verdictOf(/tail-only display/.test(heardChat)), 'a 34.5 MB helper: the helper door says NO «tail-only display» line (the head+tail road never prints it); CONTROL the same file on the chat window\'s tailOnly road says it — the ear hears the worker', { door: heardDoor.slice(0, 200), chat: (heardChat.match(/\[jsonl\][^\n]*/) || [''])[0].slice(0, 160) });
+  ok(gateOf(rows(L7)[':' + DL + 'start.md']) && !rows(L7)[':' + DL + 'middle.md'] && verdictOf(rows(L7)[':' + DL + 'end.md']), 'over 34 MB a helper\'s rows come from its first 2 MB and its last 32 MB: the write at 0.5 MB and the last one are rows, the one at 2.2 MB (in neither) is not', shape(rows(L7)));
 
   // (d) NO READ OFF THE LOOP ⇒ NO ROWS, NO MAIN-THREAD READ, said ONCE a process (the history worker refuses by its heap bound — a real road)
   const DN = CWD + '/none/', warns = [];
@@ -318,13 +318,13 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   C._setHistoryHeapMbForTest(768);
   REG.configure({ activeSessions: () => new Map(), log: quiet });
   const notDerived = warns.filter((w) => /a helper's rows were not derived/.test(w));
-  ok(!Object.keys(rows(S8)).length && nReads.length === 0 && REG.helperReadStats().unread === unreadBefore + 2 && notDerived.length === 1 && /heap bound/.test(notDerived[0]) && /none is read on it/.test(notDerived[0]),
+  ok(!Object.keys(rows(S8)).length && nReads.length === 0 && REG.helperReadStats().unread === unreadBefore + 2 && notDerived.length === 1 && gateOf(/heap bound/.test(notDerived[0])) && verdictOf(/none is read on it/.test(notDerived[0])),
     'the history worker refusing (its heap bound): the two helpers\' rows are NOT derived, nothing is read on the main thread, and the log says why ONCE', { rows: Object.keys(rows(S8)), reads: nReads, warns });
   const agentUse = (tuid, desc, s0) => use(tuid, 'Agent', { description: desc, prompt: 'go', subagent_type: 'general-purpose' }, s0);
   // (d2) a read that failed is read AGAIN at the next rebuild (a null is never kept as «nothing found»)
   const R8 = mk('B4r', { _normalizer: null, _artifacts: null });
   await N.rebuildHistory(R8, 'B4r', [agentUse('toolu_T8', 'Refused one', 66), ends('toolu_T8', 'a08', 67), agentUse('toolu_T9', 'Refused two', 68), ends('toolu_T9', 'a09', 69)]);
-  ok(rows(R8)[':' + DN + 'one.md'] && rows(R8)[':' + DN + 'two.md'], 'the two refused helpers are read again at the next rebuild, the worker answering now: their rows', shape(rows(R8)));
+  ok(gateOf(rows(R8)[':' + DN + 'one.md']) && verdictOf(rows(R8)[':' + DN + 'two.md']), 'the two refused helpers are read again at the next rebuild, the worker answering now: their rows', shape(rows(R8)));
 
   // (e) 主开发 r604 ①: a person's PAGED history read keeps its pages while a helper is read beside it (the worker's own «helper» slot)
   const PF = path.join(HOME, 'person-history.jsonl');
@@ -342,7 +342,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const MP = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), "{ tailOnly: false, slot: 'helper', note: false, onFail: (w) => { why = w; } }", /* stale-pins: kept — the control's PLANT (a helper read in the history slot), not a pin */ "{ tailOnly: false, note: false, onFail: (w) => { why = w; } }", 'a helper read without its slot'), 'noslot');
   const bOwn = await beside(REG, 'a10'), bShared = await beside(MP, 'a11');
   REG.configure({ activeSessions: () => new Map(), log: quiet }); // the copy's configure pointed the rebuild's helper seam at itself — the real one again
-  ok(bOwn.records === 3000 && bOwn.gone === 0 && bOwn.oneShot === 0 && bOwn.row && bShared.gone >= 1 && bShared.row,
+  ok(bOwn.records === 3000 && bOwn.gone === 0 && bOwn.oneShot === 0 && gateOf(bOwn.row) && bShared.gone >= 1 && verdictOf(bShared.row),
     'a person\'s 300-page history read beside a helper\'s read keeps every page (no snapshot gone, no one-shot read); CONTROL a helper read in the history slot cuts it (gone)', { own: bOwn, shared: bShared });
 
   // (f) 主开发 r604 ②: a conversation killed while its helper is read gets NO rows and NO save (its meta would come back holding only the rows)
@@ -359,7 +359,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     return { rows: Object.keys(rows(s)).length, saveDue: timer, writes: writes.length };
   };
   const kOn = await killed(true), kOff = await killed(false);
-  ok(kOn.rows === 0 && !kOn.saveDue && kOn.writes === 0 && kOff.rows === 1 && kOff.saveDue, 'a conversation killed while its helper\'s read is in flight: no row, no save due; CONTROL the one still standing gets its row and its save', { killed: kOn, standing: kOff });
+  ok(kOn.rows === 0 && !kOn.saveDue && kOn.writes === 0 && kOff.rows === 1 && verdictOf(kOff.saveDue), 'a conversation killed while its helper\'s read is in flight: no row, no save due; CONTROL the one still standing gets its row and its save', { killed: kOn, standing: kOff });
 
   // (g) 主开发 r604 ③: the rebuild's prefetch is BOUNDED — the history opens, what it left is said and read on; the next open folds it
   for (const [aid, nm] of [['a14', 'one'], ['a15', 'two']]) helper(aid, 'toolu_B' + aid, 'Bounded ' + nm, { mb: 0.05, writes: [{ atMb: 0.01, file: CWD + '/bounded/' + nm + '.md' }] });
@@ -380,7 +380,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const s1 = REG.helperReadStats();
   REG.configure({ activeSessions: () => new Map(), log: quiet });
   const B1 = CWD + '/bounded/';
-  ok(!rows(RB1)[':' + B1 + 'one.md'] && !rows(RB1)[':' + B1 + 'two.md'] && s1.left - s0.left === 2 && told.some((m) => /the history opened before 2 of 2 helper transcripts were read/.test(m)) && rows(RB2)[':' + B1 + 'one.md'] && rows(RB2)[':' + B1 + 'two.md'] && s1.read - s0.read === 3,
+  ok(!rows(RB1)[':' + B1 + 'one.md'] && !rows(RB1)[':' + B1 + 'two.md'] && s1.left - s0.left === 2 && gateOf(told.some((m) => /the history opened before 2 of 2 helper transcripts were read/.test(m))) && gateOf(rows(RB2)[':' + B1 + 'one.md']) && gateOf(rows(RB2)[':' + B1 + 'two.md']) && s1.read - s0.read === 3,
     'a rebuild whose prefetch wait is spent (behind a long helper read) opens without the two helpers\' rows and SAYS it; their reads go on — the next open folds both, each file read once (three reads with the long one)', { first: shape(rows(RB1)), second: shape(rows(RB2)), left: s1.left - s0.left, reads: s1.read - s0.read, told });
 
   // (h) THE REBUILD'S FOLD, PACED (B-299b, the member after A6 — 主开发 r604 / r648 / r751): ONE Task end bringing 1 200 helper writes
@@ -413,7 +413,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const heavyRows = paced ? JSON.parse(paced.rows) : [];
   ok(cP.thenables === 1 && cP.turns >= 3 && cY.thenables === 1 && cY.turns === 0 && cU.thenables === 0,
     'a rebuild of ONE end bringing 1 200 helper writes folds them PACED: the loop got turns while that record folded (counted); CONTROL the yield removed ⇒ 0 turns (the async wrapper alone holds the loop), the pacing off ⇒ no promise', { paced: cP, noYield: cY, unpaced: cU });
-  ok(paced.rows === unpaced.rows && paced.order === unpaced.order && heavyRows.length === 500 && heavyRows.some((r) => r.path === DH + `f${HW - 1}.md` && r.writes === 1 && r.edits === 1 && r.lastOp === 'edit'),
+  ok(paced.rows === unpaced.rows && paced.order === unpaced.order && heavyRows.length === 500 && verdictOf(heavyRows.some((r) => r.path === DH + `f${HW - 1}.md` && r.writes === 1 && r.edits === 1 && r.lastOp === 'edit')),
     '…and every row field, every card and every message\'s place = the unpaced fold\'s — 500 rows (the cap), the parent\'s later Edit on its row', { rows: heavyRows.length, cards: paced.cards, sameRows: paced.rows === unpaced.rows, sameOrder: paced.order === unpaced.order });
 
   // (i) 主开发 r751: a fold that THROWS midway is SAID — one journal line naming the record it was folding — and the conversion goes on
@@ -425,7 +425,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const RE = mk('BE', { _normalizer: null, _artifacts: null });
   try { await MBR.rebuildHistory(RE, 'BE', TE); } finally { console.error = realErrI; }
   const saidI = errsI.filter((m) => /the step before a record failed during history rebuild/.test(m));
-  ok(saidI.length === 1 && saidI[0].includes('rtoolu_T17') && saidI[0].includes('planted fold error') && rows(RE)[':' + CWD + '/broken/f0.md'] && !rows(RE)[':' + CWD + '/broken/f99.md'] && rows(RE)[':' + CWD + '/broken/after.md'],
+  ok(saidI.length === 1 && gateOf(saidI[0].includes('rtoolu_T17')) && gateOf(saidI[0].includes('planted fold error')) && gateOf(rows(RE)[':' + CWD + '/broken/f0.md']) && !rows(RE)[':' + CWD + '/broken/f99.md'] && verdictOf(rows(RE)[':' + CWD + '/broken/after.md']),
     'a paced fold that throws midway: ONE journal line naming the record it was folding (its uuid) and why; the ops before it stand, its later ones are lost, the NEXT record still folds', { said: saidI, rows: Object.keys(rows(RE)).length });
 
   // (j) B-360d (主开发 r1206 — the artifact registry's fold over a helper's transcript, the LIVE door): EVERY PACED STRETCH STARTS ON
@@ -583,8 +583,8 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     const MBG = M.load('src/server/artifact-registry.js', anchored(RSRC, READ_FG, '  const out = [], pace = pacer();', 'r1384 the reads in the background share'), 'r1384-read-bg');   // the control writes the reads' old pacer back on purpose — stale-pins: kept
     const rsc = MBG ? await readShareOf(MBG, 'pf2') : null;
     REG.configure({ activeSessions: () => new Map(), log: quiet });
-    ok(rs.read && rs.fgSeen && rs.samples > 0, 'r1384 (1): the rebuild\'s prefetch READS a helper and its slices take the PERSON\'s share (the foreground share is live while they run)', rs);
-    ok(!!rsc && rsc.read && !rsc.fgSeen, 'CONTROL the reads in the background\'s share (the tip before): no foreground share while they run — the leg above can tell', rsc);
+    ok(gateOf(rs.read) && gateOf(rs.fgSeen) && rs.samples > 0, 'r1384 (1): the rebuild\'s prefetch READS a helper and its slices take the PERSON\'s share (the foreground share is live while they run)', rs);
+    ok(!!rsc && gateOf(rsc.read) && !rsc.fgSeen, 'CONTROL the reads in the background\'s share (the tip before): no foreground share while they run — the leg above can tell', rsc);
   }
   // (m) THE ROWS' ORDER AND THE LAST ROW = the unpaced fold's (the round: counted, never compared) — 600 writes past the 500-row cap,
   // every row's fields but its instants; CONTROL a copy that tags each chunk backwards ⇒ the order differs (the compare can fail)
@@ -632,4 +632,4 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   }
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

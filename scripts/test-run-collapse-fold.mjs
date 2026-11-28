@@ -15,7 +15,7 @@ if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
 const PORT = await freePort(), CDP = await freePort(), wt = `/tmp/vs-foldtest-${process.pid}`, fakeHome = `/tmp/vs-fold-home-${process.pid}`, chromeDir = `/tmp/vs-fold-chrome-${process.pid}`; // per-pid + free ports (2.369.46): concurrent gates collided on fixed ports/dirs
 process.on('exit', () => { for (const d of [fakeHome, chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} } });
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
-let failed = 0; const check=(n,c,e)=>{ if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
+let failed = 0; const check=(n,c,e)=>{ if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
 try { execSync(`git worktree remove --force ${wt}`,{stdio:'ignore'}); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`,{stdio:'ignore'});
 for (const f of ['src','public','server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -50,11 +50,11 @@ const out = await evalJs(`(async () => {
 // Option row: assert on the SCHEMA source (the contract) — DOM class names of
 // the settings UI are not part of it.
 const schemaSrc = fs.readFileSync(path.join(wt,'src','lib','settings-schema.js'),'utf8');
-check('Skill is an option in chat.collapseKinds', /value: 'skill'/.test(schemaSrc), JSON.stringify(out));
-check('Skill folds by default (the reported expectation)', out.inDefault);
+check('Skill is an option in chat.collapseKinds', verdictOf(/value: 'skill'/.test(schemaSrc)), JSON.stringify(out));
+check('Skill folds by default (the reported expectation)', verdictOf(out.inDefault));
 // bundle-level assertions for the two code paths
 const b = fs.readFileSync(path.join(wt,'public','bundle.js'),'utf8');
-check('memberKind classifies Skill', /==="Skill"\)return"skill"|===\"Skill\"\)return\"skill\"/.test(b) || b.includes('"skill"'));
+check('memberKind classifies Skill', verdictOf(/==="Skill"\)return"skill"|===\"Skill\"\)return\"skill\"/.test(b)) || verdictOf(b.includes('"skill"')));
 // the pre-paint fold path is decided by the PURE classifier since inc-mudv05ja-n5rv (foldPassMode,
 // chat-run-summary.js) — pinned on its BEHAVIOUR and on the observer's call, never on the minified
 // spelling of one comparison (`nextSibling===null` vs `== null`: the old pin went red on a rename)
@@ -63,7 +63,7 @@ check('memberKind classifies Skill', /==="Skill"\)return"skill"|===\"Skill\"\)re
   const rec = (a, d, next) => ({ type: 'childList', addedNodes: { length: a }, removedNodes: { length: d }, nextSibling: next, previousSibling: null });
   const cvSrc = fs.readFileSync(path.join(wt, 'src', 'lib', 'chat-view.js'), 'utf8');
   check('observer has a synchronous tail-append path (a live tail append folds before the next paint: foldPassMode → raf, a mid-list insert → debounce; the runs observer routes through it)',
-    foldPassMode([rec(1, 0, null)]) === 'raf' && foldPassMode([rec(1, 0, {})]) === 'debounce' && /if \(list && foldPassMode\(records\) === 'raf'\) \{/.test(cvSrc));
+    foldPassMode([rec(1, 0, null)]) === 'raf' && foldPassMode([rec(1, 0, {})]) === 'debounce' && verdictOf(/if \(list && foldPassMode\(records\) === 'raf'\) \{/.test(cvSrc)));
 }
 console.log(failed===0?'ALL PASS':`${failed} FAILED`);
-process.exit(failed?1:0);
+process.exit(failed?1:0); import { verdictOf } from './lib/check.mjs';

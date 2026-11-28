@@ -37,7 +37,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const S = require(path.join(repo, 'src/app-system.js'));
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 2000) : ''}`); } return !!c; };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 2000) : ''}`); } return !!c; };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 8000, step = 25) => { const t = Date.now() + ms; while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
@@ -141,22 +141,22 @@ await leg('§1', async () => {
   const r = await run(HELPER, wd, ['--cwd', cwd, '--', PROBE, 'a b', '--flag'], env);
   const cs = calls(wd), un = cs.filter((c) => c.name === 'unshare'), mo = cs.filter((c) => c.name === 'mount'), ch = cs.filter((c) => c.name === 'chroot');
   ok(r.code === 0 && un.length === 1 && ch.length === 1, 'user mode ran to the app: one unshare, one chroot, exit 0', { code: r.code, stderr: r.stderr.slice(0, 600), names: cs.map((c) => c.name) });
-  ok(un[0] && same(un[0].argv, ['--mount', '--propagation', 'private', '--', HELPER, '--stage2', '--cwd', cwd, '--', PROBE, 'a b', '--flag']), 'unshare: `--mount --propagation private -- <helper> --stage2 --cwd <dir> -- <cmd> <args…>` (the helper again, inside the fresh private namespace)', un[0] && un[0].argv);
+  ok(gateOf(un[0]) && verdictOf(same(un[0].argv, ['--mount', '--propagation', 'private', '--', HELPER, '--stage2', '--cwd', cwd, '--', PROBE, 'a b', '--flag'])), 'unshare: `--mount --propagation private -- <helper> --stage2 --cwd <dir> -- <cmd> <args…>` (the helper again, inside the fresh private namespace)', un[0] && un[0].argv);
   const R = wd.R, table = mountTable(R, 'user');
-  ok(same(mo.map((c) => c.argv), table), `the mount table, in order (${table.length} calls): rbind /proc (the container's masks), /sys then ro, /dev; ro binds of resolv.conf / hosts / hostname / localtime; the image's fonts ro at usr/share/fonts/vibespace-host; /home, /tmp, /run/user/<uid>`, { got: mo.map((c) => c.argv), want: table });
+  ok(verdictOf(same(mo.map((c) => c.argv), table)), `the mount table, in order (${table.length} calls): rbind /proc (the container's masks), /sys then ro, /dev; ro binds of resolv.conf / hosts / hostname / localtime; the image's fonts ro at usr/share/fonts/vibespace-host; /home, /tmp, /run/user/<uid>`, { got: mo.map((c) => c.argv), want: table });
   const wantChroot = [`--userspec=${ME}:${MYGID}`, R, '/usr/bin/env', '-i', `PATH=${SYS_PATH}`, `HOME=${wd.home}`, `USER=${NAME}`, `LOGNAME=${NAME}`, 'SHELL=/bin/bash', ...keptEnv(env), 'GDK_BACKEND=x11', 'QT_QPA_PLATFORM=xcb', ...(fs.existsSync(`/run/user/${ME}`) ? [`XDG_RUNTIME_DIR=/run/user/${ME}`] : []), '/bin/sh', '-c', INNER, cwd, PROBE, 'a b', '--flag'];
-  ok(ch[0] && same(ch[0].argv, wantChroot), 'chroot: `--userspec=<uid>:<gid> <rootfs> /usr/bin/env -i <the allowlist> /bin/sh -c \'cd "$0" || cd "$HOME"; exec "$@"\' <cwd> <cmd…>` — HOME from passwd (the caller said /root-lied), the system PATH, the X env + GDK/QT', { got: ch[0] && ch[0].argv, want: wantChroot });
+  ok(gateOf(ch[0]) && verdictOf(same(ch[0].argv, wantChroot)), 'chroot: `--userspec=<uid>:<gid> <rootfs> /usr/bin/env -i <the allowlist> /bin/sh -c \'cd "$0" || cd "$HOME"; exec "$@"\' <cwd> <cmd…>` — HOME from passwd (the caller said /root-lied), the system PATH, the X env + GDK/QT', { got: ch[0] && ch[0].argv, want: wantChroot });
   const pids = new Set([r.pid, ...un.map((c) => c.pid), ...ch.map((c) => c.pid)]);
   const app = kv(path.join(wd.log, 'app')) || {};
   ok(pids.size === 1 && Number(app.pid) === r.pid, `ONE pid from the spawn to the app (${r.pid}): env -i re-exec → unshare → stage 2 → chroot → env → sh → the app, every hop an exec`, { spawn: r.pid, recorded: [...pids], app: app.pid });
   ok(app.cwd === cwd && app.args === 'a b --flag', '--cwd kept; the arguments arrive as given (a space inside one stays inside it)', app);
   const ae = kv(path.join(wd.log, 'app-env')) || {};
   const names = Object.keys(ae).sort(), allowed = new Set(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', ...KEEP, 'GDK_BACKEND', 'QT_QPA_PLATFORM', 'XDG_RUNTIME_DIR', 'PWD', 'OLDPWD', 'SHLVL', '_']);
-  ok(names.every((k) => allowed.has(k)) && ae.PATH === SYS_PATH && ae.HOME === wd.home && ae.DISPLAY === ':4093' && ae.VIBESPACE_DESKTOP_APP === 'ds-1a2b', `the app's environment = the allowlist (+ what sh sets): ${names.join(' ')}`, ae);
+  ok(gateOf(names.every((k) => allowed.has(k))) && ae.PATH === SYS_PATH && ae.HOME === wd.home && ae.DISPLAY === ':4093' && ae.VIBESPACE_DESKTOP_APP === 'ds-1a2b', `the app's environment = the allowlist (+ what sh sets): ${names.join(' ')}`, ae);
   ok(!leaks([...cs.flatMap((c) => c.argv), JSON.stringify(ae)]).length && !fs.existsSync(BASH_CANARY), 'never across: VIBESPACE_SESSION_TOKEN, a loader knob (LD_LIBRARY_PATH), BASH_ENV (not even run: `bash -p`), the caller\'s HOME', leaks([...cs.flatMap((c) => c.argv), JSON.stringify(ae)]));
   const pw = fs.readFileSync(path.join(R, 'etc', 'passwd'), 'utf8'), gr = fs.readFileSync(path.join(R, 'etc', 'group'), 'utf8');
-  ok(pw.includes(`\n${NAME}:x:${ME}:${MYGID}::${wd.home}:/bin/sh\n`) && pw.startsWith('root:x:0:0:') && gr.includes(`\n${GROUP}:x:${MYGID}:\n`), 'the userland\'s passwd / group carry the user (upserted; the shell is /bin/sh while the userland has no /bin/bash)', { pw, gr });
-  ok(fs.statSync(path.join(R, 'etc', 'localtime')).isFile() && !fs.lstatSync(path.join(R, 'etc', 'localtime')).isSymbolicLink(), 'minbase\'s etc/localtime LINK replaced by a plain file before its bind (never followed out of the userland)');
+  ok(gateOf(pw.includes(`\n${NAME}:x:${ME}:${MYGID}::${wd.home}:/bin/sh\n`)) && gateOf(pw.startsWith('root:x:0:0:')) && verdictOf(gr.includes(`\n${GROUP}:x:${MYGID}:\n`)), 'the userland\'s passwd / group carry the user (upserted; the shell is /bin/sh while the userland has no /bin/bash)', { pw, gr });
+  ok(gateOf(fs.statSync(path.join(R, 'etc', 'localtime')).isFile()) && !fs.lstatSync(path.join(R, 'etc', 'localtime')).isSymbolicLink(), 'minbase\'s etc/localtime LINK replaced by a plain file before its bind (never followed out of the userland)');
   const again = await run(HELPER, wd, ['--cwd', cwd, '--', PROBE], env);
   ok(again.code === 0 && fs.readFileSync(path.join(R, 'etc', 'passwd'), 'utf8') === pw, 'a second start leaves passwd byte-identical (the upsert writes only a difference)');
 
@@ -164,10 +164,10 @@ await leg('§1', async () => {
   fs.writeFileSync(CUR, wr.w);
   const rr = await run(HELPER, wr, ['--root', '--', 'dpkg', '--audit'], callerEnv(wr));
   const cr = calls(wr), mr = cr.filter((c) => c.name === 'mount').map((c) => c.argv), chr = cr.find((c) => c.name === 'chroot');
-  ok(rr.code === 0 && same(cr.find((c) => c.name === 'unshare').argv, ['--mount', '--propagation', 'private', '--', HELPER, '--stage2', '--root', '--', 'dpkg', '--audit']), '--root: unshare carries `--stage2 --root -- dpkg --audit`', cr.map((c) => c.argv));
-  ok(same(mr, mountTable(wr.R, 'root')), '--root mounts NO /home, /tmp, /run/user (root inside sees the userland, the masks, the fonts — never the user\'s files)', { got: mr, want: mountTable(wr.R, 'root') });
+  ok(rr.code === 0 && verdictOf(same(cr.find((c) => c.name === 'unshare').argv, ['--mount', '--propagation', 'private', '--', HELPER, '--stage2', '--root', '--', 'dpkg', '--audit'])), '--root: unshare carries `--stage2 --root -- dpkg --audit`', cr.map((c) => c.argv));
+  ok(verdictOf(same(mr, mountTable(wr.R, 'root'))), '--root mounts NO /home, /tmp, /run/user (root inside sees the userland, the masks, the fonts — never the user\'s files)', { got: mr, want: mountTable(wr.R, 'root') });
   const wantRoot = [wr.R, '/usr/bin/env', '-i', `PATH=${SYS_PATH}`, 'HOME=/root', 'USER=root', 'LOGNAME=root', 'DEBIAN_FRONTEND=noninteractive', 'LANG=C.UTF-8', 'TERM=dumb', 'dpkg', '--audit'];
-  ok(chr && same(chr.argv, wantRoot), '--root chroot: no --userspec, a FIXED environment (no allowlisted value reaches apt / dpkg)', { got: chr && chr.argv, want: wantRoot });
+  ok(gateOf(chr) && verdictOf(same(chr.argv, wantRoot)), '--root chroot: no --userspec, a FIXED environment (no allowlisted value reaches apt / dpkg)', { got: chr && chr.argv, want: wantRoot });
   ok(!fs.readFileSync(path.join(wr.R, 'etc', 'passwd'), 'utf8').includes(NAME), '--root never upserts the user into passwd');
 
   const wn = world();
@@ -175,7 +175,7 @@ await leg('§1', async () => {
   put(path.join(wn.R + '.next', 'etc', 'vibespace-sysroot.json'), `{"v":1,"arch":"amd64","helperContract":${S.HELPER_CONTRACT}}\n`);
   const rn = await run(HELPER, wn, ['--root', '--next', '--', 'apt-get', 'install', '-y', 'hello'], callerEnv(wn));
   const cn = calls(wn), chn = cn.find((c) => c.name === 'chroot');
-  ok(rn.code === 0 && same(cn.find((c) => c.name === 'unshare').argv.slice(4, 8), [HELPER, '--stage2', '--root', '--next']) && chn && chn.argv[0] === wn.R + '.next' && same(chn.argv.slice(-4), ['apt-get', 'install', '-y', 'hello']), '--root --next: the Rebase target rootfs.next, the same fixed environment', cn.map((c) => c.argv));
+  ok(rn.code === 0 && gateOf(same(cn.find((c) => c.name === 'unshare').argv.slice(4, 8), [HELPER, '--stage2', '--root', '--next'])) && gateOf(chn) && chn.argv[0] === wn.R + '.next' && verdictOf(same(chn.argv.slice(-4), ['apt-get', 'install', '-y', 'hello'])), '--root --next: the Rebase target rootfs.next, the same fixed environment', cn.map((c) => c.argv));
 });
 
 await leg('§5', async () => {
@@ -231,8 +231,8 @@ await leg('§5', async () => {
     const c = await boot('boot-held', { hold: true });
     ok(b.built === 0 && c.built === 0, 'building the machine half + the engine (server.js does it BEFORE listen) spawns no child — no sudo before listen');
     const bootAt = b.lines.findIndex((m) => /^\[apps\] app system: helper \+ sudoers installed in \d+ ms$/.test(m)), replayAt = b.lines.findIndex((m) => /^\[apps\] boot: /.test(m));
-    ok(!b.r.error && b.st.appSystem && b.st.appSystem.enabled === true && b.st.appSystem.helper.installed === true && bootAt >= 0 && replayAt > bootAt, 'after listen: the helper + sudoers install, then the replay line ("installed" before "[apps] boot:")', { r: b.r, lines: b.lines.slice(0, 8), appSystem: b.st.appSystem });
-    ok(b.spawned.length >= 2 && b.spawned[0].what === 'install' && b.spawned.some((s) => s.what === 'audit'), `the boot's children in order: ${b.spawned.map((s) => s.what).join(' → ')} (each a real child; the sudo ones ${SUDO_CHILD_S} s)`, b.spawned);
+    ok(!b.r.error && gateOf(b.st.appSystem) && b.st.appSystem.enabled === true && b.st.appSystem.helper.installed === true && bootAt >= 0 && replayAt > bootAt, 'after listen: the helper + sudoers install, then the replay line ("installed" before "[apps] boot:")', { r: b.r, lines: b.lines.slice(0, 8), appSystem: b.st.appSystem });
+    ok(b.spawned.length >= 2 && b.spawned[0].what === 'install' && verdictOf(b.spawned.some((s) => s.what === 'audit')), `the boot's children in order: ${b.spawned.map((s) => s.what).join(' → ')} (each a real child; the sudo ones ${SUDO_CHILD_S} s)`, b.spawned);
     ok(b.shims.length === N, `the ${N} launchers written by the catalog read after the boot (stale / missing ones regenerated)`, { shims: b.shims.length, cat: b.cat });
     const maxGap = Math.max(...b.gaps), ctlGap = Math.max(...c.gaps), childMs = Number(SUDO_CHILD_S) * 1000;
     ok(ctlGap >= childMs, `CONTROL: the same boot waiting for its sudo child SYNCHRONOUSLY holds the loop for the child's whole run (${ctlGap} ms ≥ ${childMs})`, { ctlGap });
@@ -256,12 +256,12 @@ await leg('§T', async () => {
     "console.log('§4 THE KEEPER — a sys row\\'s shim, started by the REAL keeper, IS the app (pid P through sudo → helper → unshare → chroot → sh)');",
   ];
   const ci = fs.readFileSync(path.join(repo, 'scripts/ci.mjs'), 'utf8');
-  ok(MOVED.every((h) => twin.includes(h)) && !/^await leg\('§[234]'/m.test(here) && /^await leg\('§1'/m.test(here) && /^await leg\('§5'/m.test(here), 'the twin holds §2 (the refusals), §3 (the controls) and §4 (the keeper) by their headings, and this file runs none of them (§1, the chain\'s law, stays here)', MOVED.filter((h) => !twin.includes(h)));
-  ok(/\{ name: 'test-app-system-chain-helper', tier: 'heavy',/.test(ci), 'the twin is a HEAVY row of the tier');
+  ok(gateOf(MOVED.every((h) => twin.includes(h))) && !/^await leg\('§[234]'/m.test(here) && gateOf(/^await leg\('§1'/m.test(here)) && verdictOf(/^await leg\('§5'/m.test(here)), 'the twin holds §2 (the refusals), §3 (the controls) and §4 (the keeper) by their headings, and this file runs none of them (§1, the chain\'s law, stays here)', MOVED.filter((h) => !twin.includes(h)));
+  ok(verdictOf(/\{ name: 'test-app-system-chain-helper', tier: 'heavy',/.test(ci)), 'the twin is a HEAVY row of the tier');
 });
 } finally {
   fs.rmSync(CUR, { force: true });
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -31,7 +31,7 @@ const REL = 'src/record-clear.js';
 const SRC = fs.readFileSync(path.join(ROOT, REL), 'utf8');
 const RC = require(path.join(ROOT, REL));
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -125,9 +125,9 @@ const verdictFailures = (R) => {
 for (const [label, input, want] of VERDICTS(RC)) {
   const v = RC.clearVerdict(input);
   const got = v && v.ok ? 'ok' : v && v.code;
-  ok(got === want && (v.ok || (typeof v.why === 'string' && v.why.length > 10 && Number.isInteger(v.status))), `${label} → ${want}${v.ok ? '' : ` (${v.status}: "${String(v.why).slice(0, 48)}…")`}`, v);
+  ok(got === want && (verdictOf(v.ok) || (typeof v.why === 'string' && v.why.length > 10 && verdictOf(Number.isInteger(v.status)))), `${label} → ${want}${v.ok ? '' : ` (${v.status}: "${String(v.why).slice(0, 48)}…")`}`, v);
 }
-ok(Object.values(RC.REFUSALS).every((r) => Number.isInteger(r.status) && typeof r.why === 'string' && r.why.length > 10), `every refusal code has a status and a plain sentence (${Object.keys(RC.REFUSALS).join(', ')})`);
+ok(verdictOf(Object.values(RC.REFUSALS).every((r) => Number.isInteger(r.status) && typeof r.why === 'string' && r.why.length > 10)), `every refusal code has a status and a plain sentence (${Object.keys(RC.REFUSALS).join(', ')})`);
 ok(RC.REFUSALS.agent_forbidden.status === 403 && RC.REFUSALS.job_token.status === 403 && RC.REFUSALS.not_yours.status === 403 && RC.REFUSALS.pending_fork.status === 409 && RC.REFUSALS.not_found.status === 404, 'the statuses: agent_forbidden / job_token / not_yours 403 · pending_fork 409 · not_found 404');
 
 // ── ② THE CLEARED RECORD ──
@@ -184,7 +184,7 @@ for (const [label, rec, want] of CASES) {
   const c = RC.clearedRecord(rec, { kind, by: 'owner', at: 1790000009999 });
   const same = outside(RC, kind, c) === outside(RC, kind, rec);
   const fields = Object.entries(want).every(([p, v]) => J(get(c, p)) === J(v));
-  ok(same && fields && c.clearedAt === 1790000009999 && c.clearedBy === 'owner', `${label}: ${Object.keys(want).join(', ')} cleared; everything else byte-identical; stamped`, { same, fields, c });
+  ok(gateOf(same) && gateOf(fields) && c.clearedAt === 1790000009999 && c.clearedBy === 'owner', `${label}: ${Object.keys(want).join(', ')} cleared; everything else byte-identical; stamped`, { same, fields, c });
 }
 {
   const j = RC.clearedRecord(job(MY_CID), { kind: 'job', by: 'owner', at: 5 });
@@ -198,13 +198,13 @@ for (const [label, rec, want] of CASES) {
   const live = activity(ME);
   const r1 = RC.applyClear(live, { kind: 'activity', by: 'owner', at: 100 });
   const r2 = RC.applyClear(live, { kind: 'activity', by: ME, at: 200 });
-  ok(r1.changed && J(r1.paths) === J(['note', 'detail']) && live.note === RC.CLEARED_TEXT && live.clearedAt === 100, 'applyClear mutates IN PLACE and names the paths it changed (a live job object keeps its runtime-only fields)', r1);
+  ok(gateOf(r1.changed) && J(r1.paths) === J(['note', 'detail']) && live.note === RC.CLEARED_TEXT && live.clearedAt === 100, 'applyClear mutates IN PLACE and names the paths it changed (a live job object keeps its runtime-only fields)', r1);
   ok(!r2.changed && live.clearedAt === 100 && live.clearedBy === 'owner', 'a SECOND clear is a no-op that keeps the FIRST stamp', { r2, live });
   const j = job(MY_CID);
   RC.applyClear(j, { kind: 'job', by: 'owner', at: 300 });
   j.runs.push({ startedAt: 50, trigger: 'cron', lastLine: 'Subject: more invoices' });
   const r3 = RC.applyClear(j, { kind: 'job', by: 'owner', at: 400 });
-  ok(r3.changed && J(r3.paths) === J(['runs[].lastLine']) && j.runs[2].lastLine === null && j.clearedAt === 400, 'a job that RAN AGAIN after a clear has new words — a second clear takes them and restamps', r3);
+  ok(gateOf(r3.changed) && J(r3.paths) === J(['runs[].lastLine']) && j.runs[2].lastLine === null && j.clearedAt === 400, 'a job that RAN AGAIN after a clear has new words — a second clear takes them and restamps', r3);
   const s = status({ reason: null, detail: null });
   const r4 = RC.applyClear(s, { kind: 'status', by: 'owner', at: 7 });
   ok(!r4.changed && J(r4.paths) === '[]' && s.reason === null && !('clearedAt' in s), 'a record with no words (a state-only status entry) is left as it is — it would read the sentence for nothing');
@@ -216,7 +216,7 @@ console.log('③ the stores hold the ENGLISH key; the words live in the client d
 ok(RC.CLEARED_TEXT === "[cleared at the user's request]" && RC.CLEARED_WORDS.en === RC.CLEARED_TEXT, 'CLEARED_TEXT = "[cleared at the user\'s request]" (the key)');
 ok(RC.CLEARED_WORDS.zh === '已按用户要求清除' && RC.CLEARED_WORDS.ja === 'ユーザーの要請により消去済み' && RC.clearedWords('zh') === RC.CLEARED_WORDS.zh && RC.clearedWords('xx') === RC.CLEARED_TEXT, 'the owner\'s words: zh 已按用户要求清除 · ja ユーザーの要請により消去済み; an unknown language ⇒ English');
 const dictHas = (f, w) => fs.readFileSync(path.join(ROOT, f), 'utf8').includes(`  ${J(RC.CLEARED_TEXT)}: ${J(w)},`);
-ok(dictHas('src/lib/i18n-zh.js', RC.CLEARED_WORDS.zh) && dictHas('src/lib/i18n-ja.js', RC.CLEARED_WORDS.ja), 'i18n-zh.js / i18n-ja.js word the key with exactly those words');
+ok(gateOf(dictHas('src/lib/i18n-zh.js', RC.CLEARED_WORDS.zh)) && verdictOf(dictHas('src/lib/i18n-ja.js', RC.CLEARED_WORDS.ja)), 'i18n-zh.js / i18n-ja.js word the key with exactly those words');
 {
   // verify r2: a refusal is worded on the owner's device by its CODE (record-clear-ui clearErrorText) —
   // every sentence it can print has zh + ja words, and "Already cleared" / "Select none" read native
@@ -235,7 +235,7 @@ ok(dictHas('src/lib/i18n-zh.js', RC.CLEARED_WORDS.zh) && dictHas('src/lib/i18n-j
   ok(miss.length === 0, 'the refusal words (by code), "Already cleared" 已经清除过了, "Select none" 取消全选 and the Find line have their zh + ja entries', miss);
   const ui = dict('src/lib/record-clear-ui.js');
   const codes = ['not_found', 'unavailable', 'failed', 'ambiguous', 'unreachable'];
-  ok(codes.every((c) => new RegExp(`case '${c}': return t\\('`).test(ui)) && !/why: r && r\.error \?/.test(ui), 'clearErrorText words every code an owner\'s own clear can meet with a literal t() (the old toast printed the server\'s English sentence)', codes.filter((c) => !new RegExp(`case '${c}': return t\\('`).test(ui)));
+  ok(gateOf(codes.every((c) => new RegExp(`case '${c}': return t\\('`).test(ui))) && !/why: r && r\.error \?/.test(ui), 'clearErrorText words every code an owner\'s own clear can meet with a literal t() (the old toast printed the server\'s English sentence)', codes.filter((c) => !new RegExp(`case '${c}': return t\\('`).test(ui)));
 }
 const storedWords = (R) => {
   const bad = [];
@@ -271,7 +271,7 @@ console.log('④ foldClears — the replacement records and the index');
   ok(f[0].text === 'one' && !f[0].clearedAt, 'an untouched message stays itself');
   ok(f[1].text === RC.CLEARED_TEXT && f[1].clearedAt === 40 && f[1].at === 20 && f[1].author.id === OTHER_CID, 'a record a replacement names is cleared (its time and author stay)');
   ok(f[2].text === RC.CLEARED_TEXT && f[2].clearedAt === 50, 'a record the INDEX names is cleared even when the page does not reach its replacement');
-  ok(RC.isReplacement(repl) && !RC.isReplacement(m1) && RC.REPLACEMENT_KIND === 'cleared' && !/-/.test(RC.REPLACEMENT_KIND), 'the replacement kind is `cleared` (no hyphen — the frame census of test-channel-record stays quiet)');
+  ok(gateOf(RC.isReplacement(repl)) && !RC.isReplacement(m1) && RC.REPLACEMENT_KIND === 'cleared' && !/-/.test(RC.REPLACEMENT_KIND), 'the replacement kind is `cleared` (no hyphen — the frame census of test-channel-record stays quiet)');
   ok(J(RC.foldClears(null)) === '[]' && J(RC.foldClears([m1], null)) === J([m1]), 'garbage in ⇒ []; no index ⇒ the log as it is');
 }
 
@@ -315,9 +315,9 @@ ok(chunkFailures(RC).length === 0, 'MAX_ITEMS 200 (the route\'s too_many names i
 {
   // the ORCH door counts by the same number (one constant, never a twin)
   const orch = fs.readFileSync(path.join(ROOT, 'src/server/record-clear.js'), 'utf8');
-  ok(/const MAX_ITEMS = RC\.MAX_ITEMS;/.test(orch) && !/const MAX_ITEMS = \d/.test(orch), 'src/server/record-clear.js refuses by the PURE module\'s MAX_ITEMS (no second number)');
+  ok(gateOf(/const MAX_ITEMS = RC\.MAX_ITEMS;/.test(orch)) && !/const MAX_ITEMS = \d/.test(orch), 'src/server/record-clear.js refuses by the PURE module\'s MAX_ITEMS (no second number)');
   const ui = fs.readFileSync(path.join(ROOT, 'src/lib/record-clear-ui.js'), 'utf8');
-  ok(/for \(const part of chunked\(list, MAX_ITEMS\)\)/.test(ui), 'the client sends a batch in chunked(list, MAX_ITEMS) parts (wiring pin: "Select all shown" over a 500-entry log was ONE refused request)');
+  ok(verdictOf(/for \(const part of chunked\(list, MAX_ITEMS\)\)/.test(ui)), 'the client sends a batch in chunked(list, MAX_ITEMS) parts (wiring pin: "Select all shown" over a 500-entry log was ONE refused request)');
 }
 // verify r4: THE DIALOG SAYS WHAT A CLEAR CANNOT REACH — a copy an agent already received (injected into its turn, delivered
 // as a notification / wake, or written by it) stays in its own conversation; "This cannot be undone" alone read as "gone
@@ -338,7 +338,7 @@ const copiesFailures = (ui) => {
   // NEGATIVE CONTROL: the dialog as it was before r4 (the sentence never appended) fails the same check
   const PRE = M.write(UI_REL, UI_SRC.replace('body.append(ul, hint, copies);', 'body.append(ul, hint);'), 'dialog-silent-on-copies');
   const bad = copiesFailures(fs.readFileSync(PRE, 'utf8'));
-  ok(bad.some((b) => /not appended/.test(b)), 'NEGATIVE CONTROL: a dialog that builds the sentence but never shows it fails the check', bad);
+  ok(verdictOf(bad.some((b) => /not appended/.test(b))), 'NEGATIVE CONTROL: a dialog that builds the sentence but never shows it fails the check', bad);
   // verify r4 (LOW): the For-you board chip's tooltip (popup + window) printed the status record's stored reason — after a
   // clear, the English KEY on a zh / ja device. The model words it once (`why`); neither chip reads `rec.reason` itself.
   const acts = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
@@ -346,7 +346,7 @@ const copiesFailures = (ui) => {
   const win = fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window.js'), 'utf8');
   // lane foryou-folds: the popup's board chip left with its group heads (a blocked board PLACES the row now) — the popup must
   // not grow a reader of the record's reason back; the window keeps its chip, worded by the model
-  ok(/why: typeof rec\.reason === 'string' \? \(isCleared\(rec\) \? clearedText\(\) : rec\.reason\) : ''/.test(acts) && !/'ut-board'/.test(panel) && /c\.board\.title = b\.why \|\| '';/.test(win) && !/rec\.reason/.test(panel) && !/b\.rec\.reason/.test(win),
+  ok(gateOf(/why: typeof rec\.reason === 'string' \? \(isCleared\(rec\) \? clearedText\(\) : rec\.reason\) : ''/.test(acts)) && !/'ut-board'/.test(panel) && gateOf(/c\.board\.title = b\.why \|\| '';/.test(win)) && !/rec\.reason/.test(panel) && !/b\.rec\.reason/.test(win),
     'the board chip\'s tooltip is the model\'s `why` — a cleared reason in this device\'s words — in the window; the popup draws no board chip (lane foryou-folds) and reads no reason (verify r4)');
 }
 // verify r4 (reproduced in chrome on the pre-fix modules — test-record-clear-ui ③ went red on all three legs): a For-you item's
@@ -375,11 +375,11 @@ const toastFailures = (panelSrc, utilsSrc) => {
   ok(P_SRC.split(NEW).length === 2, 'the arrival toast call is present once (the control swaps exactly it)');
   const PRE = M.write(P_REL, P_SRC.replace(NEW, OLD), 'arrival-toast-keeps-words');
   const bad = toastFailures(fs.readFileSync(PRE, 'utf8'), U_SRC);
-  ok(bad.some((b) => /head \+ the item's ref/.test(b)), 'NEGATIVE CONTROL: the pre-r4 arrival toast (the words in the message, no history) fails the check', bad);
+  ok(verdictOf(bad.some((b) => /head \+ the item's ref/.test(b))), 'NEGATIVE CONTROL: the pre-r4 arrival toast (the words in the message, no history) fails the check', bad);
   // verify r5 NEGATIVE CONTROL: r4's form — the history keeps `<head> · <label>` — fails too (the label can be a job's name)
   const R4 = M.write(P_REL, P_SRC.replace(NEW, "const kept = `${head} · ${nameFor(i.sessionKey, [i])}`; const el = showToast(`${kept}: ${wordsOf(i, { arrival: true })}`, { history: { m: kept, ref: { kind: 'todo', id: i.id } } });"), 'arrival-toast-keeps-label');
   const bad2 = toastFailures(fs.readFileSync(R4, 'utf8'), U_SRC);
-  ok(bad2.some((b) => /label/.test(b)), 'NEGATIVE CONTROL (verify r5): r4\'s history (the head + the item\'s label) fails the check', bad2);
+  ok(verdictOf(bad2.some((b) => /label/.test(b))), 'NEGATIVE CONTROL (verify r5): r4\'s history (the head + the item\'s label) fails the check', bad2);
 }
 
 // verify r5 (reproduced in chrome — test-record-clear-client, the pre-fix run): the Job input window listened to its own
@@ -402,7 +402,7 @@ const interactFailures = (src) => {
   ok(JP_SRC.split(FIXED).length === 2, 'the window\'s listener is present once (the control swaps exactly it)');
   const PRE = M.write(JP_REL, JP_SRC.replace(FIXED, "if (msg.type === 'jobs-updated' && msg.id === jobId) render();"), 'interact-own-id-only');
   const bad = interactFailures(fs.readFileSync(PRE, 'utf8'));
-  ok(bad.length === 1 && /cleared/.test(bad[0]), 'NEGATIVE CONTROL: the pre-r5 listener (its own id only) fails the check', bad);
+  ok(bad.length === 1 && verdictOf(/cleared/.test(bad[0])), 'NEGATIVE CONTROL: the pre-r5 listener (its own id only) fails the check', bad);
 }
 
 // verify r5 (reproduced in chrome): a status HISTORY entry that is not the current status, cleared, left the statuses map
@@ -425,7 +425,7 @@ const statusGuardFailures = (tasksSrc, statusSrc, serverSrc) => {
   ok(T_SRC.split(FIXED).length === 2, 'the guard is present once (the control swaps exactly it)');
   const PRE = M.write(T_REL, editAnchor(T_SRC, FIXED, 'let changed = false;', "src/lib/sidebar-tasks.js"), 'status-guard-drops-clear');
   const bad = statusGuardFailures(fs.readFileSync(PRE, 'utf8'), ST_SRC, SV_SRC);
-  ok(bad.length === 1 && /change guard/.test(bad[0]), 'NEGATIVE CONTROL: the pre-r5 guard (the statuses\' signature alone) fails the check', bad);
+  ok(bad.length === 1 && verdictOf(/change guard/.test(bad[0])), 'NEGATIVE CONTROL: the pre-r5 guard (the statuses\' signature alone) fails the check', bad);
 }
 
 // verify r5 (reproduced in chrome): the Task Group detail window skips its WHOLE render while a non-empty field is focused
@@ -448,7 +448,7 @@ const detailGuardFailures = (src) => {
   ok(TD_SRC.split(FIXED).length === 2, 'the guard is present once (the control swaps exactly it)');
   const PRE = M.write(TD_REL, TD_SRC.replace(FIXED, 'if (typing) return;'), 'detail-guard-skips-activity');
   const bad = detailGuardFailures(fs.readFileSync(PRE, 'utf8'));
-  ok(bad.some((b) => /without fetching/.test(b)), 'NEGATIVE CONTROL: the pre-r5 guard (return, nothing repainted) fails the check', bad);
+  ok(verdictOf(bad.some((b) => /without fetching/.test(b))), 'NEGATIVE CONTROL: the pre-r5 guard (return, nothing repainted) fails the check', bad);
 }
 
 // r600 (1) — lane lg-group-parents (row B-91a7 U5a; the hosted run 44818862371 placed test-record-clear-client's heap legs on it):
@@ -479,8 +479,8 @@ const paintHolderFailures = (src) => {
   const SEEN = '    const inhRows = ((seenAt) => ';
   const redB = paintHolderFailures(anchored(TD_SRC, SEEN, '    const seenAt = new Set();\n' + SEEN, 'paint-seen-set-in-scope'));
   console.log(`    judged (RED: U5a's byId planted back): ${JSON.stringify(redA)} · (RED: the seen set back in the paint): ${JSON.stringify(redB)}`);
-  ok(redA.some((b) => /WHOLE groups/.test(b)), 'NEGATIVE CONTROL: U5a\'s Map of whole groups planted back in the paint fails the census', redA);
-  ok(redB.some((b) => /seen set/.test(b)), 'NEGATIVE CONTROL: the seen set declared in the paint\'s own scope fails the census', redB);
+  ok(verdictOf(redA.some((b) => /WHOLE groups/.test(b))), 'NEGATIVE CONTROL: U5a\'s Map of whole groups planted back in the paint fails the census', redA);
+  ok(verdictOf(redB.some((b) => /seen set/.test(b))), 'NEGATIVE CONTROL: the seen set declared in the paint\'s own scope fails the census', redB);
 }
 
 // verify r5 (reproduced in chrome): Session Properties skips its WHOLE render while one of its selects has the focus (an open
@@ -504,7 +504,7 @@ const propsGuardFailures = (src) => {
   ok(g0 > 0 && g1 > g0, 'the guard is present (the control swaps exactly it)');
   const PRE = M.write(SP_REL, SP_SRC.slice(0, g0) + "if (root.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;\n" + SP_SRC.slice(g1), 'props-guard-skips-status');
   const bad = propsGuardFailures(fs.readFileSync(PRE, 'utf8'));
-  ok(bad.some((b) => /bare select guard|without repainting/.test(b)), 'NEGATIVE CONTROL: the pre-r5 select guard (Session Properties returns, nothing repainted) fails the check', bad);
+  ok(verdictOf(bad.some((b) => /bare select guard|without repainting/.test(b))), 'NEGATIVE CONTROL: the pre-r5 select guard (Session Properties returns, nothing repainted) fails the check', bad);
 }
 
 // verify r5 (LOW, seen by the client census): the arrival toast ON SCREEN kept the item's words for its whole life (up to the
@@ -524,7 +524,7 @@ const liveToastFailures = (src) => {
   ok(a > 0 && b > a, 'the re-word loop is present (the control removes exactly it)');
   const PRE = M.write(P_REL, P_SRC.slice(0, a) + P_SRC.slice(b), 'live-toast-keeps-words');
   const bad = liveToastFailures(fs.readFileSync(PRE, 'utf8'));
-  ok(bad.length === 1 && /re-word/.test(bad[0]), 'NEGATIVE CONTROL: the pre-r5 panel (no re-word) fails the check', bad);
+  ok(bad.length === 1 && verdictOf(/re-word/.test(bad[0])), 'NEGATIVE CONTROL: the pre-r5 panel (no re-word) fails the check', bad);
 }
 
 // verify r5 (LOW, found by the client census's HEAP leg — a V8 snapshot after the clear): three handlers kept a WHOLE record
@@ -546,7 +546,7 @@ const idCaptureFailures = (panel, tasks, props) => {
   ok(P_SRC.split(FIXED).length === 2, 'the toast\'s click is present once (the control swaps exactly it)');
   const PRE = M.write(P_REL, P_SRC.replace(FIXED, "if (el) { el.style.cursor = 'pointer'; el.onclick = () => jump(i.sessionKey, i); }"), 'toast-click-keeps-item');
   const bad = idCaptureFailures(fs.readFileSync(PRE, 'utf8'), T_SRC, S_SRC);
-  ok(bad.length === 1 && /arrival toast/.test(bad[0]), 'NEGATIVE CONTROL: the pre-r5 toast click (the item captured) fails the check', bad);
+  ok(bad.length === 1 && verdictOf(/arrival toast/.test(bad[0])), 'NEGATIVE CONTROL: the pre-r5 toast click (the item captured) fails the check', bad);
 }
 
 // verify r5 (LOW, client-side ORDER — what the census cannot see by construction): a fetch answered BEFORE a clear that lands
@@ -584,23 +584,23 @@ const orderFailures = (win, jobs, acts, sidebar = null, appSrc = '', panel = '')
   ok(AP.split(APP_FIX).length === 2, 'the resync\'s status fetch is present once (the control swaps exactly it)');
   const APP_M = M.write('src/lib/app.js', editAnchor(AP, APP_FIX, APP_PRE, "src/lib/app.js"), 'status-resync-ungated');
   const badR = orderFailures(W_SRC, JB, AC, SB, fs.readFileSync(APP_M, 'utf8'), CP);
-  ok(badR.length === 1 && /reconnect resync fetches the statuses itself/.test(badR[0]), 'NEGATIVE CONTROL (verify r6): the pre-r6 reconnect resync (the statuses set from its own fetch, no generation) fails the check', badR);
+  ok(badR.length === 1 && verdictOf(/reconnect resync fetches the statuses itself/.test(badR[0])), 'NEGATIVE CONTROL (verify r6): the pre-r6 reconnect resync (the statuses set from its own fetch, no generation) fails the check', badR);
   const PANEL_FIX = '    if (groupsGen !== g0) {';
   ok(CP.split(PANEL_FIX).length === 2, 'the panel\'s generation check is present once (the control removes exactly it)');
   const CP_M = M.write('src/lib/channels-panel.js', editAnchor(CP, PANEL_FIX, '    if (false) {', "src/lib/channels-panel.js"), 'panel-refresh-ungated');
   const badP = orderFailures(W_SRC, JB, AC, SB, AP, fs.readFileSync(CP_M, 'utf8'));
-  ok(badP.length === 1 && /Channels panel/.test(badP[0]), 'NEGATIVE CONTROL (verify r6): a Channels panel refresh that keeps its answer over a newer broadcast fails the check', badP);
+  ok(badP.length === 1 && verdictOf(/Channels panel/.test(badP[0])), 'NEGATIVE CONTROL (verify r6): a Channels panel refresh that keeps its answer over a newer broadcast fails the check', badP);
   // verify r6 NEGATIVE CONTROL: the pre-r6 broadcast handler (returns on `!group` before it keeps the clear) fails the check
   const FIRST_FIX = "    if (msg.type !== 'channel-groups-updated') return;\n";
   ok(W_SRC.split(FIRST_FIX).length === 2, 'the group window\'s handler head is present once (the control swaps exactly it)');
   const W_M = M.write(W_REL, W_SRC.replace(FIRST_FIX, "    if (msg.type !== 'channel-groups-updated' || !group) return;\n"), 'group-first-page-drops-clear');
   const badF = orderFailures(fs.readFileSync(W_M, 'utf8'), JB, AC, SB, AP, CP);
-  ok(badF.length === 1 && /FIRST page/.test(badF[0]), 'NEGATIVE CONTROL (verify r6): a group window that drops a clear while its first page is on its way fails the check', badF);
+  ok(badF.length === 1 && verdictOf(/FIRST page/.test(badF[0])), 'NEGATIVE CONTROL (verify r6): a group window that drops a clear while its first page is on its way fails the check', badF);
   const FIXED = 'const fresh = recs.filter((r) => r && !seen.has(r.vendorId)).map((r) => clearedSeen.get(r.vendorId) || r);';
   ok(W_SRC.split(FIXED).length === 2, 'the page substitution is present once (the control swaps exactly it)');
   const PRE = M.write(W_REL, W_SRC.replace(FIXED, 'const fresh = recs.filter((r) => r && !seen.has(r.vendorId));'), 'group-page-draws-original');
   const bad = orderFailures(fs.readFileSync(PRE, 'utf8'), JB, AC);
-  ok(bad.length === 1 && /group window/.test(bad[0]), 'NEGATIVE CONTROL: the pre-r5 place() (the page\'s copy drawn as it came) fails the check', bad);
+  ok(bad.length === 1 && verdictOf(/group window/.test(bad[0])), 'NEGATIVE CONTROL: the pre-r5 place() (the page\'s copy drawn as it came) fails the check', bad);
 }
 
 // verify r5 (LOW, the client belt): the Background Work "Remove job" confirm named a cleared job by its STORED English key on a
@@ -608,7 +608,7 @@ const orderFailures = (win, jobs, acts, sidebar = null, appSrc = '', panel = '')
 {
   const JP_REL = 'src/lib/jobs-panel.js', JP_SRC = fs.readFileSync(path.join(ROOT, JP_REL), 'utf8');
   const rmOk = (src) => /t\('Remove \{name\} and its run history\?', \{ name: isCleared\(j\) \? clearedText\(\) : j\.name \}\)/.test(src) && !/\{ name: j\.name \}/.test(src);
-  ok(rmOk(JP_SRC), 'the "Remove job" confirm words a cleared job\'s name in this device\'s language (verify r5, the belt)');
+  ok(verdictOf(rmOk(JP_SRC)), 'the "Remove job" confirm words a cleared job\'s name in this device\'s language (verify r5, the belt)');
   const PRE = M.write(JP_REL, JP_SRC.replace('{ name: isCleared(j) ? clearedText() : j.name }', '{ name: j.name }'), 'rm-confirm-stored-key');
   ok(!rmOk(fs.readFileSync(PRE, 'utf8')), 'NEGATIVE CONTROL: the pre-r5 confirm (the stored name) fails the check');
 }
@@ -632,7 +632,7 @@ const popoverFailures = (src) => {
   ok(T_SRC.split(FIXED).length === 2, 'the Apply handler is present once (the control swaps exactly it)');
   const PRE = M.write(T_REL, editAnchor(T_SRC, FIXED, "      this.setSessionStatusUser(sessionRef, { state: stateSel.value || null, urgency: urgSel.value || null, reason: reasonInp.value });", "src/lib/sidebar-tasks.js"), 'popover-apply-refiles-prefill');
   const bad = popoverFailures(fs.readFileSync(PRE, 'utf8'));
-  ok(bad.length === 1 && /re-files an untouched prefill/.test(bad[0]), 'NEGATIVE CONTROL (verify r6): the pre-r6 Apply (the box\'s value, whatever it was prefilled with) fails the check', bad);
+  ok(bad.length === 1 && verdictOf(/re-files an untouched prefill/.test(bad[0])), 'NEGATIVE CONTROL (verify r6): the pre-r6 Apply (the box\'s value, whatever it was prefilled with) fails the check', bad);
 }
 
 // ── ⑥ PATCHED-COPY CONTROLS ──
@@ -640,30 +640,30 @@ console.log('⑥ negative controls — each rule broken on a copy goes red');
 {
   const lax = mutant('verdict-lets-agent-clear-another', "activity: (rec, c) => typeof rec.session === 'string' && c.keys.has(rec.session),", 'activity: (rec, c) => typeof rec.session === \'string\',');
   const bad = lax ? verdictFailures(lax) : ['no copy'];
-  ok(lax && bad.some((b) => /ANOTHER session's activity entry: ok ≠ not_yours/.test(b)), 'a verdict that lets an agent clear ANOTHER session\'s activity entry fails ① (control)', bad);
+  ok(gateOf(lax) && verdictOf(bad.some((b) => /ANOTHER session's activity entry: ok ≠ not_yours/.test(b))), 'a verdict that lets an agent clear ANOTHER session\'s activity entry fails ① (control)', bad);
   const nofork = mutant('verdict-forgets-the-fork', "  if (caller.pendingFork) return refuse('pending_fork');\n", '');
   const bad2 = nofork ? verdictFailures(nofork) : ['no copy'];
-  ok(nofork && bad2.some((b) => /FORK still borrowing/.test(b)), 'a verdict that forgets the pending fork fails ① (control)', bad2);
+  ok(gateOf(nofork) && verdictOf(bad2.some((b) => /FORK still borrowing/.test(b))), 'a verdict that forgets the pending fork fails ① (control)', bad2);
   const jobok = mutant('verdict-lets-a-job-token-in', "  if (caller.role === 'job') return refuse('job_token');\n", '');
   const bad3 = jobok ? verdictFailures(jobok) : ['no copy'];
-  ok(jobok && bad3.some((b) => /JOB TOKEN/.test(b)), 'a verdict that lets a job token through fails ① (control)', bad3);
+  ok(gateOf(jobok) && verdictOf(bad3.some((b) => /JOB TOKEN/.test(b))), 'a verdict that lets a job token through fails ① (control)', bad3);
   const drops = mutant('clear-drops-a-field', '  record.clearedAt = Number.isFinite(at) ? at : Date.now();', '  delete record.session; delete record.sessionKey; delete record.author;\n  record.clearedAt = Number.isFinite(at) ? at : Date.now();');
   const bad4 = drops ? clearedFailures(drops) : ['no copy'];
-  ok(drops && bad4.some((b) => /OUTSIDE the text fields|disappeared/.test(b)), 'a clear that drops a field it does not own (the author) fails ② (control)', bad4.slice(0, 3));
+  ok(gateOf(drops) && verdictOf(bad4.some((b) => /OUTSIDE the text fields|disappeared/.test(b))), 'a clear that drops a field it does not own (the author) fails ② (control)', bad4.slice(0, 3));
   const keeps = mutant('clear-keeps-the-detail', "activity: Object.freeze([['note', 'text'], ['detail', 'drop']]),", "activity: Object.freeze([['note', 'text']]),");
   const bad5 = keeps ? clearedFailures(keeps) : ['no copy'];
-  ok(keeps && bad5.some((b) => /activity: detail = /.test(b)), 'a clear that keeps the detail fails ② (control)', bad5.slice(0, 3));
+  ok(gateOf(keeps) && verdictOf(bad5.some((b) => /activity: detail = /.test(b))), 'a clear that keeps the detail fails ② (control)', bad5.slice(0, 3));
   const zh = mutant('store-writes-the-zh-words', 'const CLEARED_TEXT = "[cleared at the user\'s request]";', "const CLEARED_TEXT = '已按用户要求清除';");
   const bad6 = zh ? storedWords(zh) : ['no copy'];
-  ok(zh && bad6.length > 0, 'a store that writes the translated words fails ③ (control)', bad6.slice(0, 2));
+  ok(gateOf(zh) && bad6.length > 0, 'a store that writes the translated words fails ③ (control)', bad6.slice(0, 2));
   ok(verdictFailures(RC).length === 0 && clearedFailures(RC).length === 0 && storedWords(RC).length === 0, 'the same three checks pass on the real module', [...verdictFailures(RC), ...clearedFailures(RC), ...storedWords(RC)].slice(0, 3));
   // verify r2 controls: a chunker that drops the last part, a snippet that ignores case
   const drop = mutant('chunked-drops-the-tail', '  for (let i = 0; i < a.length; i += size) out.push(a.slice(i, i + size));', '  for (let i = 0; i + size <= a.length; i += size) out.push(a.slice(i, i + size));');
   const bad7 = drop ? chunkFailures(drop) : ['no copy'];
-  ok(drop && bad7.some((b) => /450 ⇒/.test(b)), 'a chunker that drops the short last part fails ⑤b (control)', bad7.slice(0, 2));
+  ok(gateOf(drop) && verdictOf(bad7.some((b) => /450 ⇒/.test(b))), 'a chunker that drops the short last part fails ⑤b (control)', bad7.slice(0, 2));
   const cased = mutant('snippet-case-sensitive', '  const at = v.toLowerCase().indexOf(q.toLowerCase());', '  const at = v.indexOf(q);');
   const bad8 = cased ? snippetFailures(cased) : ['no copy'];
-  ok(cased && bad8.some((b) => /not in its own snippet/.test(b)), 'a snippet that ignores the Find box\'s case-insensitive rule fails ⑤b (control)', bad8.slice(0, 2));
+  ok(gateOf(cased) && verdictOf(bad8.some((b) => /not in its own snippet/.test(b))), 'a snippet that ignores the Find box\'s case-insensitive rule fails ⑤b (control)', bad8.slice(0, 2));
 }
 
 // ── ⑦ the census ──
@@ -679,33 +679,33 @@ console.log('\nB-20b6 «Clear content…» says the archived job records it coul
   const one = await RCS.clear({ kind: 'job', id: 'jb-0000a001' }, { caller: OWNER });
   const many = await RCS.clearMany([{ kind: 'job', id: 'jb-0000a001' }, { kind: 'job', id: 'jb-0000a002' }], { caller: OWNER });
   const plain = await RCP.clear({ kind: 'job', id: 'jb-0000a001' }, { caller: OWNER });
-  ok(one.ok && one.archiveUnread === true && many.ok && many.archiveUnread === true && plain.ok && !('archiveUnread' in plain), 'B-20b6: a job clear whose archived records could not be reached carries archiveUnread through the seam (one and many); a clear that reached them carries nothing', { one, many, plain });
+  ok(gateOf(one.ok) && one.archiveUnread === true && gateOf(many.ok) && many.archiveUnread === true && gateOf(plain.ok) && !('archiveUnread' in plain), 'B-20b6: a job clear whose archived records could not be reached carries archiveUnread through the seam (one and many); a clear that reached them carries nothing', { one, many, plain });
   const SSRC = fs.readFileSync(path.join(ROOT, 'src/server/record-clear.js'), 'utf8');
   const CARRY = '      if (r.archiveUnread) res.archiveUnread = true;';
   ok(SSRC.split(CARRY).length === 2, 'control setup: the seam\'s carry is found once');
   const RX = M.load('src/server/record-clear.js', anchored(SSRC, CARRY, '      /* MUTANT: not carried */', 'b20b6-no-carry'), 'b20b6-no-carry').create({ getJobs: () => jmOf(true), log: () => { } });
   const ox = await RX.clear({ kind: 'job', id: 'jb-0000a001' }, { caller: OWNER });
-  ok(ox.ok && !ox.archiveUnread, 'CONTROL (the carry cut, in a copy): the clear answers «cleared» alone — the archived words left uncleared are never said — RED', ox);
+  ok(gateOf(ox.ok) && !ox.archiveUnread, 'CONTROL (the carry cut, in a copy): the clear answers «cleared» alone — the archived words left uncleared are never said — RED', ox);
   const routes = new Map(), app = { post: (p, h) => routes.set(p, h) };
   require(path.join(ROOT, 'src/routes/records-clear.js')).registerRecordClearRoutes(app, { recordClear: RCS });
   const call = async (p, body) => { let out = null, code = 200; await routes.get(p)({ body, headers: {} }, { status(c) { code = c; return this; }, json(b) { out = { code, ...b }; } }); return out; };
   const a1 = await call('/api/records/clear', { kind: 'job', id: 'jb-0000a001' }), a2 = await call('/api/records/clear-many', { items: [{ kind: 'job', id: 'jb-0000a001' }] });
-  ok(a1 && a1.code === 200 && a1.archiveUnread === true && a2 && a2.code === 200 && a2.archiveUnread === true, 'B-20b6: both clear routes answer archiveUnread (they cut the answer to {ok, cleared, already…})', { a1, a2 });
+  ok(gateOf(a1) && a1.code === 200 && a1.archiveUnread === true && gateOf(a2) && a2.code === 200 && a2.archiveUnread === true, 'B-20b6: both clear routes answer archiveUnread (they cut the answer to {ok, cleared, already…})', { a1, a2 });
   const UI = fs.readFileSync(path.join(ROOT, 'src/lib/record-clear-ui.js'), 'utf8');
-  ok(UI.includes("if (r.archiveUnread) showToast(done1 + ' — ' + t('" + ARCH + "'), { type: 'error' }); else showToast(done1);") && UI.includes("const arch = archiveUnread ? ' — ' + t('" + ARCH + "') : '';") && UI.includes('if (r.archiveUnread) archiveUnread = true;')
+  ok(gateOf(UI.includes("if (r.archiveUnread) showToast(done1 + ' — ' + t('" + ARCH + "'), { type: 'error' }); else showToast(done1);")) && gateOf(UI.includes("const arch = archiveUnread ? ' — ' + t('" + ARCH + "') : '';")) && gateOf(UI.includes('if (r.archiveUnread) archiveUnread = true;'))
     && !UI.includes("if (archiveUnread) showToast(") && !UI.includes("if (r.archiveUnread) showToast(t('"),   // stale-pins: kept — absence checks: the two separate toasts are gone
     'B-20b6 (主开发 04:08Z (3)): the dialog says it in ONE line with its «cleared» — one record or a batch — and says when to clear again (after a restart, or once the storage answers)');
-  ok(UI.includes("case 'archive_unread': return t('" + ERR + "');"), 'B-20b6 (1): the dialog words the archive\'s refusal of a single clear by its code');
-  for (const lang of ['zh', 'ja']) { const T = fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8'); ok(T.includes(JSON.stringify(ARCH) + ':') && T.includes(JSON.stringify(ERR) + ':'), `B-20b6: both sentences have their ${lang} rows`); }
+  ok(verdictOf(UI.includes("case 'archive_unread': return t('" + ERR + "');")), 'B-20b6 (1): the dialog words the archive\'s refusal of a single clear by its code');
+  for (const lang of ['zh', 'ja']) { const T = fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8'); ok(gateOf(T.includes(JSON.stringify(ARCH) + ':')) && verdictOf(T.includes(JSON.stringify(ERR) + ':')), `B-20b6: both sentences have their ${lang} rows`); }
   // its read (smalls r1, M1): the zh rows call the archive by the panel's word, 归档 («已归档») — never 存档
   { const T = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'); const valOf = (k) => { const i = T.indexOf(JSON.stringify(k) + ':'); if (i < 0) return ''; const j = T.indexOf('\n', i); return T.slice(i + JSON.stringify(k).length + 1, j); };
     const zA = valOf(ARCH), zE = valOf(ERR);
-    ok(!!zA && !!zE && zA.includes('归档') && zE.includes('归档') && !zA.includes('存档') && !zE.includes('存档'), 'B-20b6: the zh rows say 归档 (the panel\'s word for archived) and never 存档', { zA, zE }); }
+    ok(!!zA && !!zE && gateOf(zA.includes('归档')) && gateOf(zE.includes('归档')) && !zA.includes('存档') && !zE.includes('存档'), 'B-20b6: the zh rows say 归档 (the panel\'s word for archived) and never 存档', { zA, zE }); }
   // its read (smalls r1, N1 + N4): the BATCH road answers an archive-only id as the single road does, and both batch toasts carry the
   // archive's words (`+ arch`)
-  ok(UI.includes("    else if (unknown.length) note(r.archiveUnread ? 'archive_unread' : 'not_found');")
-    && UI.includes("showToast(t('{n} cleared · {m} could not be cleared: {why}', { n: cleared, m: missed, why }) + arch, { type: 'error' });")
-    && UI.includes("showToast((cleared ? t('{n} cleared', { n: cleared }) : t('Already cleared')) + arch, arch ? { type: 'error' } : undefined);"),
+  ok(gateOf(UI.includes("    else if (unknown.length) note(r.archiveUnread ? 'archive_unread' : 'not_found');"))
+    && gateOf(UI.includes("showToast(t('{n} cleared · {m} could not be cleared: {why}', { n: cleared, m: missed, why }) + arch, { type: 'error' });"))
+    && verdictOf(UI.includes("showToast((cleared ? t('{n} cleared', { n: cleared }) : t('Already cleared')) + arch, arch ? { type: 'error' } : undefined);")),
   'B-20b6: a batch\'s archive-only id is answered by the archive\'s words (never «no such record»), and both batch toasts carry them');
   // (1) 主开发 04:08Z: a SINGLE clear of a record that stands only in the held archive answers the ARCHIVE's refusal (503), never «no such record»
   const jmGone = { ready: true, clearJobs: (ids) => ({ cleared: [], already: [], unknown: ids.slice(), refused: [], archiveUnread: 'archived records could not be reached' }) };
@@ -713,10 +713,10 @@ console.log('\nB-20b6 «Clear content…» says the archived job records it coul
   const GONE1 = "RC.refuse(r.archiveUnread ? 'archive_unread' : 'not_found')";
   ok(SSRC.split(GONE1).length === 2, 'control setup: the single clear\'s archive answer is found once');
   const onex = await M.load('src/server/record-clear.js', anchored(SSRC, GONE1, "RC.refuse('not_found')", 'b20b6-gone-not-found'), 'b20b6-gone-not-found').create({ getJobs: () => jmGone, log: () => { } }).clear({ kind: 'job', id: 'jb-0000a003' }, { caller: OWNER });
-  ok(!one1.ok && one1.code === 'archive_unread' && one1.status === 503 && /when the archive reads/.test(one1.why) && !onex.ok && onex.code === 'not_found', 'B-20b6 (1): a single clear of an id found only in the held archive answers archive_unread (503, when to try again); CONTROL (the answer cut, in a copy): «no such record» — RED', { one1, onex });
+  ok(!one1.ok && one1.code === 'archive_unread' && one1.status === 503 && gateOf(/when the archive reads/.test(one1.why)) && !onex.ok && onex.code === 'not_found', 'B-20b6 (1): a single clear of an id found only in the held archive answers archive_unread (503, when to try again); CONTROL (the answer cut, in a copy): «no such record» — RED', { one1, onex });
 }
 
-for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 8, label: '⑦ ' })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 8, label: '⑦ ' })) ok(verdictOf(row.pass), row.name, row.detail);
 
 // ── lane webhook-l1-server: `channel-webhook` — a webhook caller's call, cleared through the channel store's rewrite door
 // (the text, the kept body, the mapped facts; the author and the ids stay); the owner only — an agent never wrote one ──
@@ -736,13 +736,13 @@ for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 8, label: '⑦
     ok(!agent.ok && agent.code === 'not_yours' && got0.text === 'secret plan', 'channel-webhook: an AGENT is refused (not_yours) — a caller\'s call is no session\'s words; nothing changed', agent);
     const own = await RCS.clear({ kind: 'channel-webhook', path: 'ci', id: rec.vendorId }, { caller: { role: 'owner' } });
     const got = store.findRecord('webhook', 'ci', rec.vendorId);
-    ok(own.ok && got.text === RC.CLEARED_TEXT && got.raw.callText === null && Array.isArray(got.facts) && got.facts.length === 0 && got.author.id === 'caller:c-0000abcd' && got.vendorId === rec.vendorId && got.clearedBy, 'channel-webhook: the OWNER clears the text, the kept body and the facts — the author and the ids stay', got);
+    ok(gateOf(own.ok) && got.text === RC.CLEARED_TEXT && got.raw.callText === null && gateOf(Array.isArray(got.facts)) && got.facts.length === 0 && got.author.id === 'caller:c-0000abcd' && got.vendorId === rec.vendorId && verdictOf(got.clearedBy), 'channel-webhook: the OWNER clears the text, the kept body and the facts — the author and the ids stay', got);
     const again = await RCS.clear({ kind: 'channel-webhook', path: 'ci', id: rec.vendorId }, { caller: { role: 'owner' } });
     const unk = await RCS.clear({ kind: 'channel-webhook', path: 'ci', id: 'c-0000abcd:nope' }, { caller: { role: 'owner' } });
-    ok(again.ok && again.already === 1 && again.cleared === 0 && !unk.ok, 'channel-webhook: a second clear is `already`; an unknown id is refused');
+    ok(gateOf(again.ok) && again.already === 1 && again.cleared === 0 && !unk.ok, 'channel-webhook: a second clear is `already`; an unknown id is refused');
     ok(!CRm.carriesFrame(JSON.stringify(got)), 'control: the rewritten line is a plain record');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

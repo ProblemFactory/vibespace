@@ -26,7 +26,7 @@ import { armWatchdog } from './suite-watchdog.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
 
@@ -79,7 +79,7 @@ srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: ['ignore', srvFd,
 const origin = `http://127.0.0.1:${port}`;
 let up = false;
 for (let i = 0; i < 160 && !up; i++) { try { await fetch(`${origin}/api/home`); up = true; } catch { await sleep(250); } }
-check('③ the tree\'s server answers', up, up ? undefined : fs.readFileSync(srvLog, 'utf8').split('\n').slice(-12).join(' | '));
+check('③ the tree\'s server answers', verdictOf(up), up ? undefined : fs.readFileSync(srvLog, 'utf8').split('\n').slice(-12).join(' | '));
 if (!up) process.exit(1);
 
 // bare Chrome under a 4 GiB data limit (its own — the hub's workers need more address space than that)
@@ -203,7 +203,7 @@ const shotOf = async (id, name) => {
 
 await step('③ open', async () => {
   await evalJs(`(async () => { window.app.viewSession(${J(SID)}, ${J(CWD)}, 'card lists'); return true; })()`);
-  check('③ the conversation opens in a ChatView', await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 2`, 20000));
+  check('③ the conversation opens in a ChatView', verdictOf(await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 2`, 20000)));
   await evalJs(`(async () => { const v = ${VIEW}; for (const m of ${J(CARDS.map((c) => c.msg))}) v._onCreateMessage(m); await new Promise((r) => setTimeout(r, 600)); return true; })()`);
   // a collapsed tool run hides the report until its head opens it
   await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll('.chat-msg')].find((e) => e.dataset.msgId === 'cli-report'); if (el && el.getClientRects().length === 0) { let h = el.previousElementSibling; while (h && !h.classList.contains('chat-run-header')) h = h.previousElementSibling; if (h) h.click(); } return true; })()`);
@@ -220,13 +220,13 @@ for (const c of CARDS) {
     for (const l of [ul, ol].filter(Boolean)) {
       const kind = l.tag === 'ul' ? 'bullet' : 'ordered';
       const inset = Math.min(...l.items.map((it) => +(it.l - m.textL).toFixed(1)));
-      check(`③ ${c.what}: ${kind} list — every item starts ≥ 8 px inside the text column (${inset} px; padding-left ${l.pl} px)`, l.items.every((it) => it.l - m.textL >= 8), { textL: m.textL, items: l.items.map((it) => it.l) });
+      check(`③ ${c.what}: ${kind} list — every item starts ≥ 8 px inside the text column (${inset} px; padding-left ${l.pl} px)`, verdictOf(l.items.every((it) => it.l - m.textL >= 8)), { textL: m.textL, items: l.items.map((it) => it.l) });
       const mk = l.items.map((it) => ({ tag: it.tag, m: marks[it.tag] }));
       const missing = mk.filter((x) => !x.m).map((x) => x.tag);
       const worst = mk.filter((x) => x.m).reduce((a, x) => Math.min(a, +(x.m.l - m.textL).toFixed(1)), Infinity);
-      check(`③ ${c.what}: ${kind} list — every marker${l.tag === 'ol' ? ' (to «12.»)' : ''} sits inside the text column, not left of it (worst ${worst} px from the column's edge)`, !missing.length && mk.every((x) => x.m.l >= m.textL - 0.5), { missing, textL: m.textL, marks: mk.map((x) => x.m && x.m.l) });
-      check(`③ ${c.what}: ${kind} list — every marker stands ≥ 8 px off the card's left border (worst ${mk.filter((x) => x.m).reduce((a, x) => Math.min(a, +(x.m.l - m.cardL).toFixed(1)), Infinity)} px)`, !missing.length && mk.every((x) => x.m.l >= m.cardL + 8), { cardL: m.cardL, marks: mk.map((x) => x.m && x.m.l) });
-      check(`③ ${c.what}: ${kind} list — no clipping ancestor cuts a marker (clip edge ${Number.isFinite(m.clipL) ? m.clipL.toFixed(1) : 'none'})`, !missing.length && mk.every((x) => x.m.l >= m.clipL - 0.5), { clipL: m.clipL, marks: mk.map((x) => x.m && x.m.l) });
+      check(`③ ${c.what}: ${kind} list — every marker${l.tag === 'ol' ? ' (to «12.»)' : ''} sits inside the text column, not left of it (worst ${worst} px from the column's edge)`, !missing.length && verdictOf(mk.every((x) => x.m.l >= m.textL - 0.5)), { missing, textL: m.textL, marks: mk.map((x) => x.m && x.m.l) });
+      check(`③ ${c.what}: ${kind} list — every marker stands ≥ 8 px off the card's left border (worst ${mk.filter((x) => x.m).reduce((a, x) => Math.min(a, +(x.m.l - m.cardL).toFixed(1)), Infinity)} px)`, !missing.length && verdictOf(mk.every((x) => x.m.l >= m.cardL + 8)), { cardL: m.cardL, marks: mk.map((x) => x.m && x.m.l) });
+      check(`③ ${c.what}: ${kind} list — no clipping ancestor cuts a marker (clip edge ${Number.isFinite(m.clipL) ? m.clipL.toFixed(1) : 'none'})`, !missing.length && verdictOf(mk.every((x) => x.m.l >= m.clipL - 0.5)), { clipL: m.clipL, marks: mk.map((x) => x.m && x.m.l) });
     }
     await shotOf(c.msg.id, c.key);
   });
@@ -244,8 +244,8 @@ await step('③ markdown-preview', async () => {
   const marks = await markerBoxes(m.lists.flatMap((l) => l.items.map((it) => it.tag)));
   for (const l of m.lists) {
     const kind = l.tag === 'ul' ? 'bullet' : 'ordered';
-    check(`③ .markdown-preview (file viewer / jobs panel): ${kind} list — every item starts ≥ 8 px inside the text column`, l.items.every((it) => it.l - m.textL >= 8), { textL: m.textL, items: l.items.map((it) => it.l) });
-    check(`③ .markdown-preview: ${kind} list — every marker sits inside the text column (not in the box's padding)`, l.items.every((it) => marks[it.tag] && marks[it.tag].l >= m.textL - 0.5), { textL: m.textL, marks: l.items.map((it) => marks[it.tag] && marks[it.tag].l) });
+    check(`③ .markdown-preview (file viewer / jobs panel): ${kind} list — every item starts ≥ 8 px inside the text column`, verdictOf(l.items.every((it) => it.l - m.textL >= 8)), { textL: m.textL, items: l.items.map((it) => it.l) });
+    check(`③ .markdown-preview: ${kind} list — every marker sits inside the text column (not in the box's padding)`, verdictOf(l.items.every((it) => marks[it.tag] && marks[it.tag].l >= m.textL - 0.5)), { textL: m.textL, marks: l.items.map((it) => marks[it.tag] && marks[it.tag].l) });
   }
   const { data } = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 34, y: 34, width: 432, height: 652, scale: 1 } });
   const f = path.join(SHOTS, `${PREFIX}-markdown-preview.png`); fs.writeFileSync(f, Buffer.from(data, 'base64')); console.log(`    (shot: ${f})`);
@@ -254,4 +254,4 @@ await step('③ markdown-preview', async () => {
 check('③ the page threw nothing', !pageErrors.length, pageErrors.slice(0, 3));
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

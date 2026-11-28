@@ -29,7 +29,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 10000, step = 50) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -155,11 +155,11 @@ factsAnswer = factsOf({ edition: 'Core', product: 'Windows 11 Home', deny: '1', 
 const p = await page(1100, 1700, 'zh'); // tall enough for the whole card in one PNG
 {
   await p.ev(`window.__openDialog(${JSON.stringify(ROW)})`);
-  ok(await p.waitFor(`!!document.querySelector('.machine-remoteapp-settings')`), 'the machine dialog of a Windows machine shows «RemoteApp settings…»');
+  ok(verdictOf(await p.waitFor(`!!document.querySelector('.machine-remoteapp-settings')`)), 'the machine dialog of a Windows machine shows «RemoteApp settings…»');
   const b = await p.ev(`(() => { const b = document.querySelector('.machine-remoteapp-settings'); return { text: b.textContent, disabled: b.disabled }; })()`);
   ok(b.text === ZH['RemoteApp settings…'] && b.disabled === false, 'its zh words, never greyed', b);
   await p.ev(`document.querySelector('.machine-remoteapp-settings').click()`);
-  ok(await p.waitFor(`!!${CARD} && document.querySelectorAll('#remoteapp-settings .ra-fact').length === 4`), 'it opens the card, and the machine\'s facts arrive: four rows');
+  ok(verdictOf(await p.waitFor(`!!${CARD} && document.querySelectorAll('#remoteapp-settings .ra-fact').length === 4`)), 'it opens the card, and the machine\'s facts arrive: four rows');
 }
 
 console.log('§2 the facts table — sentences, doors, the takeover line, one fold');
@@ -168,25 +168,25 @@ console.log('§2 the facts table — sentences, doors, the takeover line, one fo
   ok(JSON.stringify(rows.map((r) => [r.key, r.met])) === '[["edition","0"],["rdp","0"],["allowlist","0"],["gpu","0"]]', 'a Home machine with Remote Desktop off: edition / Remote Desktop / allow list / GPU — each unmet', rows);
   ok(rows[0].state === '这台是 Windows Home，没有远程桌面服务；RemoteApp 做不了，「作为独立窗口运行…」（裁剪画面）可用', 'the Home sentence (the design\'s words, the cropped mode named by its button)', rows[0].state);
   ok(rows[1].state === '打开 设置 → 系统 → 远程桌面；无需开放防火墙到局域网', 'Remote Desktop off: the design\'s sentence verbatim', rows[1].state);
-  ok(rows[2].state === z('Windows opens only listed programs as RemoteApps; copy the admin command and run it once in an administrator PowerShell on {machine}', { machine: 'Lab PC' }) && rows[2].copy && rows[3].copy && !rows[0].copy && !rows[1].copy, 'the allow list and the GPU policy: a sentence + «复制管理员命令» (their door); the edition and Remote Desktop rows: a sentence only', rows.map((r) => r.copy));
+  ok(rows[2].state === z('Windows opens only listed programs as RemoteApps; copy the admin command and run it once in an administrator PowerShell on {machine}', { machine: 'Lab PC' }) && gateOf(rows[2].copy) && gateOf(rows[3].copy) && !rows[0].copy && !rows[1].copy, 'the allow list and the GPU policy: a sentence + «复制管理员命令» (their door); the edition and Remote Desktop rows: a sentence only', rows.map((r) => r.copy));
   ok(rows[3].state === 'Blender 这类走软件渲染；要 GPU 请用管理员命令开这条策略', 'the GPU policy\'s sentence (the design\'s words + the admin command)', rows[3].state);
-  ok(await p.ev(`(() => { const r = document.querySelector('#remoteapp-settings [data-ready]'); return r && r.dataset.ready === '0' && r.textContent === ${JSON.stringify(z('{machine} is not ready for RemoteApp yet', { machine: 'Lab PC' }))}; })()`), 'not ready, said in words');
-  ok(await p.ev(takeoverCensus) && await p.ev(`document.querySelector('#remoteapp-settings .ra-takeover').textContent === ${JSON.stringify(SENTENCE_TAKEOVER)}`), 'the fixed console-takeover sentence, the design\'s words verbatim (no machine name)');
+  ok(verdictOf(await p.ev(`(() => { const r = document.querySelector('#remoteapp-settings [data-ready]'); return r && r.dataset.ready === '0' && r.textContent === ${JSON.stringify(z('{machine} is not ready for RemoteApp yet', { machine: 'Lab PC' }))}; })()`)), 'not ready, said in words');
+  ok(gateOf(await p.ev(takeoverCensus)) && verdictOf(await p.ev(`document.querySelector('#remoteapp-settings .ra-takeover').textContent === ${JSON.stringify(SENTENCE_TAKEOVER)}`)), 'the fixed console-takeover sentence, the design\'s words verbatim (no machine name)');
   const greyed = await p.ev(`[...document.querySelectorAll('#remoteapp-settings button, #remoteapp-settings input')].filter((x) => x.disabled).map((x) => x.textContent || x.name)`);
   ok(greyed.length === 0, 'no control in the card is greyed (an unmet fact is a sentence with its door)', greyed);
   const g = await p.ev(`(() => { const c = ${CARD}; const fold = c.querySelector('[data-fold="tech"]'); const clone = c.cloneNode(true); clone.querySelectorAll('[data-fold="tech"]').forEach((f) => f.remove()); const out = clone.textContent; return { folds: c.querySelectorAll('[data-fold="tech"]').length, outRaw: /HKLM|New-ItemProperty|Get-ItemProperty|([0-9a-f]{2}:){31}[0-9a-f]{2}|https?:\\/\\//.test(out), inFold: fold.textContent }; })()`);
-  ok(g.folds === 1 && g.outRaw === false && g.inFold.includes(RA.ALLOWLIST_COMMAND) && g.inFold.includes(RA.GPU_COMMAND), 'the card grammar: ONE 技术细节 fold holds both admin commands; no registry path, PowerShell or fingerprint outside it', { folds: g.folds, outRaw: g.outRaw });
+  ok(g.folds === 1 && g.outRaw === false && gateOf(g.inFold.includes(RA.ALLOWLIST_COMMAND)) && verdictOf(g.inFold.includes(RA.GPU_COMMAND)), 'the card grammar: ONE 技术细节 fold holds both admin commands; no registry path, PowerShell or fingerprint outside it', { folds: g.folds, outRaw: g.outRaw });
   await p.ev(`document.querySelector('#remoteapp-settings .ra-fact[data-fact="allowlist"] .ra-copy').click()`);
-  ok(await p.waitFor(toastHas(`/${z('Copied — paste it into an administrator PowerShell on {machine}', { machine: 'Lab PC' }).slice(0, 3)}/`)), '«复制管理员命令» copies the line and says where it goes (VibeSpace never runs it)');
+  ok(verdictOf(await p.waitFor(toastHas(`/${z('Copied — paste it into an administrator PowerShell on {machine}', { machine: 'Lab PC' }).slice(0, 3)}/`))), '«复制管理员命令» copies the line and says where it goes (VibeSpace never runs it)');
   await p.shot('remoteapp-card.facts.zh.1100.png');
 }
 
 console.log('§3 save seals');
 {
   await p.ev(`(() => { const c = ${CARD}; const set = (n, v) => { const i = c.querySelector('input[name="' + n + '"]'); i.value = v; i.dispatchEvent(new Event('input')); }; set('user', 'someone'); set('password', ${JSON.stringify(PW)}); c.querySelector('.ra-save').click(); })()`);
-  ok(await p.waitFor(toastHas(`/${z('Saved {machine}’s sign-in', { machine: 'Lab PC' })}/`)), 'Save ⇒ 「已保存 Lab PC 的登录信息」');
+  ok(verdictOf(await p.waitFor(toastHas(`/${z('Saved {machine}’s sign-in', { machine: 'Lab PC' })}/`))), 'Save ⇒ 「已保存 Lab PC 的登录信息」');
   const file = fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf8');
-  ok(file.includes(`remoteapp/${HOST}`) && !file.includes(PW) && store.resolveMachine('remoteapp', HOST).values.password === PW && store.resolveMachine('remoteapp', HOST).values.user === 'someone', 'the store holds the sign-in, the password SEALED (integrations.json: ciphertext only)');
+  ok(gateOf(file.includes(`remoteapp/${HOST}`)) && !file.includes(PW) && store.resolveMachine('remoteapp', HOST).values.password === PW && store.resolveMachine('remoteapp', HOST).values.user === 'someone', 'the store holds the sign-in, the password SEALED (integrations.json: ciphertext only)');
   const pg = await p.ev(`(() => { const c = ${CARD}; const pw = c.querySelector('input[name="password"]'); return { value: pw.value, ph: pw.placeholder, html: document.documentElement.outerHTML.includes(${JSON.stringify(PW)}) }; })()`);
   ok(pg.value === '' && pg.ph === ZH['Saved — type to replace'] && pg.html === false, 'the page holds it no more: the box cleared, its placeholder says saved, no byte of it in the document', pg);
 }
@@ -196,18 +196,18 @@ console.log('§4 the first connection pins');
   const before = await p.ev(`(() => { const c = ${CARD}; return { state: c.querySelector('.ra-cert').dataset.state, btn: c.querySelector('.ra-trust').textContent }; })()`);
   ok(before.state === 'none' && before.btn === '首次连接', 'no pin yet: 「首次连接」', before);
   await p.ev(`${CARD}.querySelector('.ra-trust').click()`);
-  ok(await p.waitFor(`${CARD}.querySelector('.ra-cert').dataset.state === 'pinned'`), 'pressed ⇒ the certificate line says pinned');
+  ok(verdictOf(await p.waitFor(`${CARD}.querySelector('.ra-cert').dataset.state === 'pinned'`)), 'pressed ⇒ the certificate line says pinned');
   const after = await p.ev(`(() => { const c = ${CARD}; return { btn: c.querySelector('.ra-trust').textContent, line: c.querySelector('.ra-cert').textContent, fold: c.querySelector('[data-fold="tech"]').textContent }; })()`);
-  ok(store.machineView('remoteapp', HOST).values.certFp === fpOf(PEM_A) && after.fold.includes(fpOf(PEM_A)) && after.btn === '重新信任' && after.line === z('{machine}’s certificate is pinned; every launch checks it.', { machine: 'Lab PC' }), 'the machine certificate\'s sha256 pinned on the sealed row (shown only in the fold); the button is now 「重新信任」', after.btn);
-  ok(await p.ev(toastHas(`/${z('Signed in to {machine} and pinned its certificate', { machine: 'Lab PC' })}/`)), 'said: 「已登录 Lab PC 并钉住它的证书」');
+  ok(store.machineView('remoteapp', HOST).values.certFp === fpOf(PEM_A) && gateOf(after.fold.includes(fpOf(PEM_A))) && after.btn === '重新信任' && after.line === z('{machine}’s certificate is pinned; every launch checks it.', { machine: 'Lab PC' }), 'the machine certificate\'s sha256 pinned on the sealed row (shown only in the fold); the button is now 「重新信任」', after.btn);
+  ok(verdictOf(await p.ev(toastHas(`/${z('Signed in to {machine} and pinned its certificate', { machine: 'Lab PC' })}/`))), 'said: 「已登录 Lab PC 并钉住它的证书」');
   factsAnswer = factsOf({});
   await p.ev(`${CARD}.querySelector('.ra-recheck').click()`);
-  ok(await p.waitFor(`(() => { const r = document.querySelector('#remoteapp-settings [data-ready]'); return r && r.dataset.ready === '1' && document.querySelectorAll('#remoteapp-settings .ra-fact[data-met="1"]').length === 4; })()`), '«再检查一次» on a set-up Pro machine: every row met, ready');
+  ok(verdictOf(await p.waitFor(`(() => { const r = document.querySelector('#remoteapp-settings [data-ready]'); return r && r.dataset.ready === '1' && document.querySelectorAll('#remoteapp-settings .ra-fact[data-met="1"]').length === 4; })()`)), '«再检查一次» on a set-up Pro machine: every row met, ready');
   await p.shot('remoteapp-card.ready.zh.1100.png');
   factsAnswer = 'old';
   await p.ev(`${CARD}.querySelector('.ra-recheck').click()`);
   const need = require(path.join(REPO, 'package.json')).version;
-  ok(await p.waitFor(`${CARD}.querySelector('.ra-facts').textContent === ${JSON.stringify(z('{machine}’s agent ({have}) cannot read these settings; it needs version {need} or later', { machine: 'Lab PC', have: '2.369.250', need }))}`), 'an agent too old: the version it has and the one it needs, in words (never a guess)');
+  ok(verdictOf(await p.waitFor(`${CARD}.querySelector('.ra-facts').textContent === ${JSON.stringify(z('{machine}’s agent ({have}) cannot read these settings; it needs version {need} or later', { machine: 'Lab PC', have: '2.369.250', need }))}`)), 'an agent too old: the version it has and the one it needs, in words (never a guess)');
   factsAnswer = factsOf({});
 }
 
@@ -216,21 +216,21 @@ console.log('§5 a changed certificate refuses');
   serverPem = PEM_B;
   const v = await acc.launchRemoteApp(HOST, { program: 'notepad.exe' }).catch((e) => ({ id: null, e }));
   const end = await until(() => { const r = v.id && keeper.get(v.id); return r && !['launching', 'ready'].includes(r.state) ? r : null; });
-  ok(end && end.rdp.ended === 'rdp_cert_changed', 'the machine shows another certificate ⇒ the launch ends rdp_cert_changed', end && end.rdp);
+  ok(gateOf(end) && end.rdp.ended === 'rdp_cert_changed', 'the machine shows another certificate ⇒ the launch ends rdp_cert_changed', end && end.rdp);
   await until(() => acc.forwards().length === 0);
   // (lane dialog-yield r2: the card from §4 is closed first — a form whose id is open is RAISED by the next open, never replaced)
   await p.ev(`(() => { document.querySelector('#remoteapp-settings .dialog-close')?.click(); document.querySelector('#remoteapp-settings')?.remove(); return true; })()`);
   await p.ev(`window.__openCard(${JSON.stringify(ROW)})`);
-  ok(await p.waitFor(`${CARD}.querySelector('.ra-cert').dataset.state === 'refused'`), 'the card reopened says refused');
+  ok(verdictOf(await p.waitFor(`${CARD}.querySelector('.ra-cert').dataset.state === 'refused'`)), 'the card reopened says refused');
   const r = await p.ev(`(() => { const c = ${CARD}; return { line: c.querySelector('.ra-cert').textContent, btn: c.querySelector('.ra-trust').textContent }; })()`);
   ok(r.line === z('{machine} showed a different certificate at the last launch, so the launch was refused. If the machine was reinstalled, trust it again.', { machine: 'Lab PC' }) && r.btn === '重新信任', 'its sentence and 「重新信任」', r);
   await p.shot('remoteapp-card.refused.zh.1100.png');
   await p.ev(`${CARD}.querySelector('.ra-trust').click()`);
-  ok(await p.waitFor(`${CARD}.querySelector('.ra-cert').dataset.state === 'pinned'`) && store.machineView('remoteapp', HOST).values.certFp === fpOf(PEM_B), '「重新信任」 pins the new certificate');
-  ok(await p.ev(toastHas(`/${z('Signed in to {machine} and pinned its new certificate', { machine: 'Lab PC' })}/`)), 'said: the NEW certificate');
+  ok(gateOf(await p.waitFor(`${CARD}.querySelector('.ra-cert').dataset.state === 'pinned'`)) && store.machineView('remoteapp', HOST).values.certFp === fpOf(PEM_B), '「重新信任」 pins the new certificate');
+  ok(verdictOf(await p.ev(toastHas(`/${z('Signed in to {machine} and pinned its new certificate', { machine: 'Lab PC' })}/`))), 'said: the NEW certificate');
   const v2 = await acc.launchRemoteApp(HOST, { program: 'notepad.exe' }).catch((e) => ({ id: null, e }));
   const r2 = await until(() => { const x = v2.id && keeper.get(v2.id); return x && x.state !== 'launching' ? x : null; });
-  ok(r2 && r2.state === 'ready', 'and the next launch connects');
+  ok(gateOf(r2) && r2.state === 'ready', 'and the next launch connects');
   if (v2.id) await keeper.machine.stop(v2.id).catch(() => { }); await until(() => acc.forwards().length === 0);
   p.close();
 }
@@ -240,7 +240,7 @@ console.log('§6 the phone, en, the PNGs');
   factsAnswer = factsOf({ allowList: '0', gpu: null });
   const ph = await page(390, 844, 'zh');
   await ph.ev(`window.__openCard(${JSON.stringify(ROW)})`);
-  ok(await ph.waitFor(`document.querySelectorAll('#remoteapp-settings .ra-fact').length === 4`), 'the card opens on a phone');
+  ok(verdictOf(await ph.waitFor(`document.querySelectorAll('#remoteapp-settings .ra-fact').length === 4`)), 'the card opens on a phone');
   const geo = await ph.ev(`(() => { const d = document.querySelector('.dialog.remoteapp-settings').getBoundingClientRect(); const over = [...document.querySelectorAll('#remoteapp-settings button, #remoteapp-settings input')].filter((x) => { const b = x.getBoundingClientRect(); return b.width && (b.right > innerWidth + 0.5 || b.left < -0.5); }).map((x) => x.className || x.name); const inp = document.querySelector('#remoteapp-settings input[name="user"]').getBoundingClientRect().width; return { w: d.width, right: d.right, over, inp }; })()`);
   ok(geo.right <= 390 && geo.over.length === 0 && geo.inp > 200, 'the same card at 390 px: nothing past the edge, the boxes keep their width', geo);
   await ph.shot('remoteapp-card.zh.390.png');
@@ -249,9 +249,9 @@ console.log('§6 the phone, en, the PNGs');
   ph.close();
   const en = await page(1100, 1700, 'en');
   await en.ev(`window.__openCard(${JSON.stringify(ROW)})`);
-  ok(await en.waitFor(`document.querySelectorAll('#remoteapp-settings .ra-fact').length === 4`), 'en: the card opens');
+  ok(verdictOf(await en.waitFor(`document.querySelectorAll('#remoteapp-settings .ra-fact').length === 4`)), 'en: the card opens');
   const enText = await en.ev(`${CARD}.textContent`);
-  ok(enText.includes('After the Remote Desktop sign-in, that machine’s own screen shows its lock screen') && enText.includes('Windows opens only listed programs as RemoteApps') && enText.includes('Trust again'), 'en: the takeover sentence, the allow-list sentence, «Trust again» (pinned)');
+  ok(gateOf(enText.includes('After the Remote Desktop sign-in, that machine’s own screen shows its lock screen')) && gateOf(enText.includes('Windows opens only listed programs as RemoteApps')) && verdictOf(enText.includes('Trust again')), 'en: the takeover sentence, the allow-list sentence, «Trust again» (pinned)');
   await en.shot('remoteapp-card.en.1100.png');
   en.close();
 }
@@ -260,7 +260,7 @@ console.log('CONTROL — the words census can fail');
 {
   const m = await page(1100, 1000, 'zh', { mut: true });
   await m.ev(`window.__openCardMut(${JSON.stringify(ROW)})`);
-  ok(await m.waitFor(`document.querySelectorAll('#remoteapp-settings .ra-fact').length === 4`), 'the control card opens (the same card, its takeover line removed)');
+  ok(verdictOf(await m.waitFor(`document.querySelectorAll('#remoteapp-settings .ra-fact').length === 4`)), 'the control card opens (the same card, its takeover line removed)');
   ok((await m.ev(takeoverCensus)) === false, 'CONTROL: a card without the console-takeover sentence fails the census (§2\'s sentence leg would be red)');
   m.close();
 }
@@ -270,4 +270,4 @@ try { process.kill(-chrome.pid, 'SIGKILL'); } catch { }
 await new Promise((r) => { chrome.once('exit', r); setTimeout(r, 3000); });
 await sleep(200);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

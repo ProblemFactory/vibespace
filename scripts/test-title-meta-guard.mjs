@@ -19,7 +19,7 @@ import path from 'node:path';
 import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -93,13 +93,13 @@ console.log('§2 CONTROL: the unguarded setTitleMeta');
 {
   const src = read('src/lib/window.js');
   const GUARD = /\n[ \t]*if \(prevKeys\.length === nextKeys\.length && nextKeys\.every\(\(k\) => prevMeta\[k\] === nextMeta\[k\]\)\) return;/;
-  ok(GUARD.test(src) && src.split('prevMeta[k] === nextMeta[k]').length === 2, 'the guard is spelled once — the control removes exactly it');
+  ok(gateOf(GUARD.test(src)) && src.split('prevMeta[k] === nextMeta[k]').length === 2, 'the guard is spelled once — the control removes exactly it');
   const M = mutantCopies('badge-meta', REPO);
   const { WindowManager: Pre } = await import(M.write('src/lib/window.js', editAnchor(src, GUARD, '', "src/lib/window.js"), 'unguarded'));
   const { wm, n } = mkWm(Pre);
   for (let i = 0; i < 10; i++) wm.setTitleMeta('w-guest', { ...META });
   ok(n.render === 10 && n.notify === 10 && n.apply === 10, `the pre-fix manager re-draws the strip on EVERY identical call (${n.render} of 10) — every tab chip on the page, every poll`, n);
-  ok(M.files.length === 1 && path.relative(REPO, M.files[0]).startsWith('..'), 'the patched copy lives outside the checkout', M.files);
+  ok(M.files.length === 1 && verdictOf(path.relative(REPO, M.files[0]).startsWith('..')), 'the patched copy lives outside the checkout', M.files);
 }
 
 console.log('§3 wiring');
@@ -110,14 +110,14 @@ console.log('§3 wiring');
   const empty = files.filter((f) => /setTitleMeta\([^,()]+,\s*\{\s*\}\s*\)/.test(strip(fs.readFileSync(path.join(lib, f), 'utf8'))));
   ok(empty.length === 0, 'no caller asks setTitleMeta for an EMPTY patch to force a re-draw (it is a no-op now)', empty);
   const daw = strip(read('src/lib/desktop-app-window.js'));
-  ok(/if \(winInfo\._tabChain\) \{ app\.wm\._renderTabBar\(winInfo\._tabChain\); app\.wm\._notify\(\); \}/.test(daw), 'desktop-app-window.js re-draws its tab\'s app icon through _renderTabBar (+ the notify it had)');
+  ok(verdictOf(/if \(winInfo\._tabChain\) \{ app\.wm\._renderTabBar\(winInfo\._tabChain\); app\.wm\._notify\(\); \}/.test(daw)), 'desktop-app-window.js re-draws its tab\'s app icon through _renderTabBar (+ the notify it had)');
   const app = strip(read('src/lib/app.js'));
   const sync = app.slice(app.indexOf('  syncSessionIdentity('), app.indexOf('  syncSessionIdentity(') + 6000);
-  ok(/this\.wm\.setTitleMeta\(winId, this\._buildTitleMeta\(match\)\);/.test(sync) && /this\.wm\.setAuthBadge\?\.\(winId, match\.auth \|\| null\);/.test(sync), 'the identity sync still writes the meta and the billing chip on every merge (the guards live in the manager)');
-  ok(/const specWas = JSON\.stringify\(win\._openSpec\);/.test(sync) && /if \(JSON\.stringify\(win\._openSpec\) !== specWas\) this\.layoutManager\?\.scheduleAutoSave\?\.\(\);/.test(sync), '…and asks the layout autosave only when the openSpec it keeps changed (it used to ride the per-merge notify)');
+  ok(gateOf(/this\.wm\.setTitleMeta\(winId, this\._buildTitleMeta\(match\)\);/.test(sync)) && verdictOf(/this\.wm\.setAuthBadge\?\.\(winId, match\.auth \|\| null\);/.test(sync)), 'the identity sync still writes the meta and the billing chip on every merge (the guards live in the manager)');
+  ok(gateOf(/const specWas = JSON\.stringify\(win\._openSpec\);/.test(sync)) && verdictOf(/if \(JSON\.stringify\(win\._openSpec\) !== specWas\) this\.layoutManager\?\.scheduleAutoSave\?\.\(\);/.test(sync)), '…and asks the layout autosave only when the openSpec it keeps changed (it used to ride the per-merge notify)');
   const wj = strip(read('src/lib/window.js'));
   const body = wj.slice(wj.indexOf('  setTitleMeta(id, meta = {}) {'), wj.indexOf('  applyLayout(layout) {'));
   ok(body.indexOf('return;', body.indexOf('prevKeys.length')) < body.indexOf('win.titleMeta = nextMeta;') && body.indexOf('win.titleMeta = nextMeta;') < body.indexOf('this._renderTabBar(win._tabChain)'), 'window.js: the guard sits BEFORE the store, the apply, the strip and the notify');
 }
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

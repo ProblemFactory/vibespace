@@ -44,7 +44,7 @@ const SELF = path.basename(fileURLToPath(import.meta.url));
 const MUT = mutantCopies('roster-row-fold', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ── ① the verdict ──
@@ -114,19 +114,19 @@ const MA = read('src/lib/manage-agents.js'), CSS = read('public/style.css'), VS 
 const fn = (() => { const i = MA.indexOf('function foldRowByTier('); if (i < 0) return ''; const j = MA.indexOf('\n}\n', i); return MA.slice(i, j + 2); })();
 const sites = (MA.match(/actions\.className = 'agent-actions'/g) || []).length;
 const calls = [...MA.matchAll(/^.*\bfoldRowByTier\(.*$/gm)].map((m) => m[0].trim()).filter((l) => !l.startsWith('function foldRowByTier('));
-ok(sites === 3 && calls.length === 3 && calls.every((l) => l.startsWith('foldRowByTier(row, actions, () => this.isMobile, renderCtl.signal);')) && !/\bfoldPhoneRow\b/.test(MA), `every status row that holds buttons is handed to the fold WITH THE TIER'S READER (never decided once at render) and THE SIGNAL OF THE RENDER THAT DREW IT — ${calls.length} calls for ${sites} strips (the dial row's strip holds a note, no button, and shares its strip with the remote row)`, calls);
-ok(/const phone = !!isPhone\(\);\n    if \(phone !== tier\) \{ tier = phone; px = new WeakMap\(\); lastW = -1; if \(more\) \{ more\.remove\(\); more = null; \} \}\n    if \(!phone\) \{ for \(const b of actions\.querySelectorAll\(':scope > \.' \+ FOLDED\)\) b\.classList\.remove\(FOLDED\); return; \}/.test(fn),
+ok(sites === 3 && calls.length === 3 && gateOf(calls.every((l) => l.startsWith('foldRowByTier(row, actions, () => this.isMobile, renderCtl.signal);'))) && !/\bfoldPhoneRow\b/.test(MA), `every status row that holds buttons is handed to the fold WITH THE TIER'S READER (never decided once at render) and THE SIGNAL OF THE RENDER THAT DREW IT — ${calls.length} calls for ${sites} strips (the dial row's strip holds a note, no button, and shares its strip with the remote row)`, calls);
+ok(verdictOf(/const phone = !!isPhone\(\);\n    if \(phone !== tier\) \{ tier = phone; px = new WeakMap\(\); lastW = -1; if \(more\) \{ more\.remove\(\); more = null; \} \}\n    if \(!phone\) \{ for \(const b of actions\.querySelectorAll\(':scope > \.' \+ FOLDED\)\) b\.classList\.remove\(FOLDED\); return; \}/.test(fn)),
   'ONE verdict reads the tier on EVERY pass: a tier change forgets the widths measured on the other side; the desktop tier takes every folded class off and the «…» away (the base\'s inline bar, byte for byte)');
-ok(/const ro = new ResizeObserver\(\(\) => layout\(\)\);/.test(fn) && /window\.addEventListener\('vs-viewport-class', layout, \{ signal \}\);/.test(fn) && /width === lastW\) return;/.test(fn),
+ok(gateOf(/const ro = new ResizeObserver\(\(\) => layout\(\)\);/.test(fn)) && gateOf(/window\.addEventListener\('vs-viewport-class', layout, \{ signal \}\);/.test(fn)) && verdictOf(/width === lastW\) return;/.test(fn)),
   'the verdict runs on the row\'s WIDTH change (its ResizeObserver) and on the tier\'s signal (vs-viewport-class)');
-ok(/^function foldRowByTier\(row, actions, isPhone, signal\) \{\n  if \(signal\.aborted\) return;/.test(fn) && /signal\.addEventListener\('abort', \(\) => ro\.disconnect\(\), \{ once: true \}\);/.test(fn) && !/removeEventListener|\bstop\(|row\.isConnected/.test(fn),
+ok(gateOf(/^function foldRowByTier\(row, actions, isPhone, signal\) \{\n  if \(signal\.aborted\) return;/.test(fn)) && gateOf(/signal\.addEventListener\('abort', \(\) => ro\.disconnect\(\), \{ once: true \}\);/.test(fn)) && !/removeEventListener|\bstop\(|row\.isConnected/.test(fn),
   'A RENDER\'S LISTENERS DIE WITH IT (r3): the window listener is bound to the render\'s signal, the ResizeObserver is disconnected by its abort, a row drawn under a dead signal attaches nothing — and no teardown waits inside layout() for a callback a hidden row never gets');
 { const iRen = MA.indexOf("      if (stale() || surface.signal.aborted) return;\n      renderCtl?.abort(); renderCtl = new AbortController();"), iDraw = MA.indexOf("body.innerHTML = '';", iRen);
   const RAIL = read('src/lib/sidebar-rail.js');
-  ok(/const surface = new AbortController\(\);\n    const shell = container \?/.test(MA) && /escapeToClose: true, onClose: \(\) => \{ surface\.abort\(\); onClose\?\.\(\); \}, opener,/.test(MA)
-    && /let renderCtl = null;\n    surface\.signal\.addEventListener\('abort', \(\) => renderCtl\?\.abort\(\), \{ once: true \}\);/.test(MA) && iRen > 0 && iDraw > iRen && iDraw - iRen < 400
-    && /refresh\(\);\n    if \(container\) return \(\) => surface\.abort\(\);/.test(MA)
-    && /else if \(this\._activeTab === 'agents'\) \{ const d = this\.app\._showAgentsDialog\?\.\(\{ container: c \}\); this\._panelDispose = typeof d === 'function' \? d : null; \}/.test(RAIL),
+  ok(gateOf(/const surface = new AbortController\(\);\n    const shell = container \?/.test(MA)) && gateOf(/escapeToClose: true, onClose: \(\) => \{ surface\.abort\(\); onClose\?\.\(\); \}, opener,/.test(MA))
+    && gateOf(/let renderCtl = null;\n    surface\.signal\.addEventListener\('abort', \(\) => renderCtl\?\.abort\(\), \{ once: true \}\);/.test(MA)) && iRen > 0 && iDraw > iRen && iDraw - iRen < 400
+    && gateOf(/refresh\(\);\n    if \(container\) return \(\) => surface\.abort\(\);/.test(MA))
+    && verdictOf(/else if \(this\._activeTab === 'agents'\) \{ const d = this\.app\._showAgentsDialog\?\.\(\{ container: c \}\); this\._panelDispose = typeof d === 'function' \? d : null; \}/.test(RAIL)),
   'THE OWNER: one controller per drawn surface, aborted by its end (every door of the form runs onClose; the rail panel takes the returned dispose as its _panelDispose) — each render holds its own, aborted by the NEXT render right before it draws (a surface that ended draws nothing)', { iRen, iDraw }); }
 // THE LEAK PROBE (r3): foldRowByTier's own text over a stub page — a window that honours { signal }, observers that count
 // what they watch, rows that NEVER get a resize callback (a display:none surface: 0×0 → 0×0). Five renders, each aborting
@@ -147,25 +147,25 @@ const leakProbe = (src) => {
   return counts;
 };
 { let got = null; try { got = leakProbe(fn); } catch (e) { got = 'threw: ' + e.message; }
-  ok(same(got, ['4+4', '4+4', '4+4', '4+4', '4+4', '0+0', '0+0']), `THE LEAK PROBE: a hidden surface re-rendered five times keeps its four rows' listeners + observers FLAT (${Array.isArray(got) ? got.slice(0, 5).join(' → ') : got}), its end ⇒ ${Array.isArray(got) ? got[5] : '?'}, a row drawn under a dead signal attaches nothing`, got);
+  ok(verdictOf(same(got, ['4+4', '4+4', '4+4', '4+4', '4+4', '0+0', '0+0'])), `THE LEAK PROBE: a hidden surface re-rendered five times keeps its four rows' listeners + observers FLAT (${Array.isArray(got) ? got.slice(0, 5).join(' → ') : got}), its end ⇒ ${Array.isArray(got) ? got[5] : '?'}, a row drawn under a dead signal attaches nothing`, got);
   // CONTROL — r2's teardown (inside layout(), on a resize callback or a tier signal a hidden row never gets): RED by name
   const R2 = [["  if (signal.aborted) return;\n", ''], ["  const layout = () => {\n", "  const layout = () => {\n    if (!row.isConnected) { stop(); return; }\n"],
     ["window.addEventListener('vs-viewport-class', layout, { signal });", "window.addEventListener('vs-viewport-class', layout);"],
     ["signal.addEventListener('abort', () => ro.disconnect(), { once: true });", "const stop = () => { ro.disconnect(); window.removeEventListener('vs-viewport-class', layout); };"]];
   const gone = R2.filter(([a]) => !fn.includes(a));
   let bad = null; if (!gone.length) { try { bad = leakProbe(R2.reduce((x, [a, b]) => x.replace(a, b), fn)); } catch (e) { bad = 'threw: ' + e.message; } }
-  ok(!gone.length && Array.isArray(bad) && bad[4] === '20+20' && bad[5] === '20+20', `CONTROL (r2's teardown inside layout()): the probe is RED by name — ${Array.isArray(bad) ? bad.join(' → ') : bad || 'patch site gone: ' + gone.map(([a]) => a.trim()).join(' | ')} (every render left its rows' listeners behind; the end freed none)`); }
+  ok(!gone.length && gateOf(Array.isArray(bad)) && bad[4] === '20+20' && bad[5] === '20+20', `CONTROL (r2's teardown inside layout()): the probe is RED by name — ${Array.isArray(bad) ? bad.join(' → ') : bad || 'patch site gone: ' + gone.map(([a]) => a.trim()).join(' | ')} (every render left its rows' listeners behind; the end freed none)`); }
 { const iMob = VS.indexOf('app.isMobile = isPhoneClass(next);'), iTier = VS.indexOf('(v.phone ? enterPhone : enterDesktop)(app);'), iSig = VS.indexOf("window.dispatchEvent(new CustomEvent('vs-viewport-class'");
   ok(iMob > 0 && iTier > iMob && iSig > iTier, 'viewport-switch signals vs-viewport-class AFTER app.isMobile is the new tier and the forms are re-hosted (the verdict reads the tier it signals, on the host it lands in)', { iMob, iTier, iSig }); }
-ok(/const layoutPx = \(el\) => el\.getBoundingClientRect\(\)\.width \/ \(uiScale\(\) \|\| 1\);/.test(fn) && /const width = row\.clientWidth - /.test(fn), 'a button is measured in LAYOUT px (its rect ÷ uiScale — the row\'s clientWidth is layout px; a crossing out of a zoomed desktop is measured under the zoom the page still wears)');
-ok(/import \{ rowActionsFold \} from '\.\/row-fold-model\.js'/.test(MA) && /rowActionsFold\(\{ items: btns\.map/.test(fn), 'the fold decides through the PURE rowActionsFold, over the buttons the row actually holds');
-ok(/showContextMenu\(r\.left, r\.bottom \+ 4, items, 'context-menu', \{ extraClass: 'row-more-menu' \}\)/.test(fn), 'the «…» opens ONE context menu — one class name, its modifier as extraClass (Esc closes it: the global [data-popover] door)');
-ok(/more\.innerHTML = UI_ICONS\.more;/.test(fn) && /t\('More actions'\)/.test(fn) && /aria-haspopup', 'menu'/.test(fn) && /'agent-btn ' \+ ROW_MORE/.test(fn), 'the «…» is the row\'s own agent-btn wearing the SVG dots glyph, named «More actions», announcing its menu');
-{ const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js'); ok(/^\s*"More actions": "[^"]+",/m.test(zh) && /^\s*"More actions": "[^"]+",/m.test(ja), '«More actions» has its zh + ja words'); }
-ok(/label: b\.textContent, title: b\.title \|\| '', disabled: b\.disabled, action: \(\) => b\.click\(\)/.test(fn), 'each menu item is a folded button by its own words, its own title and its own click (a disabled button stays disabled)');
-{ const BF = read('src/lib/bar-fold.js'); ok(/import \{ FOLDED \} from '\.\/bar-fold\.js'/.test(MA) && /export const FOLDED = 'bar-folded';/.test(BF) && /^\.agent-actions > \.bar-folded \{ display: none !important; \}$/m.test(CSS), 'the fold\'s ONE class is bar-fold.js FOLDED (the chrome bars wear it too); style.css takes a folded button out of the strip'); }
-ok(/chkBtn\.onclick = \(\) => \{ const rect = foldAnchor\(chkBtn\)\.getBoundingClientRect\(\);/.test(MA), '«Rules & checks» opens its menu from the «…» while it is folded (a folded button has no box)');
-ok(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ \.row-more-menu \.context-menu-item \{ min-height: 44px; font-size: 16px;/.test(CSS), 'on a phone the «…» menu\'s rows are 44 px with 16 px words (the touch scale)');
+ok(gateOf(/const layoutPx = \(el\) => el\.getBoundingClientRect\(\)\.width \/ \(uiScale\(\) \|\| 1\);/.test(fn)) && verdictOf(/const width = row\.clientWidth - /.test(fn)), 'a button is measured in LAYOUT px (its rect ÷ uiScale — the row\'s clientWidth is layout px; a crossing out of a zoomed desktop is measured under the zoom the page still wears)');
+ok(gateOf(/import \{ rowActionsFold \} from '\.\/row-fold-model\.js'/.test(MA)) && verdictOf(/rowActionsFold\(\{ items: btns\.map/.test(fn)), 'the fold decides through the PURE rowActionsFold, over the buttons the row actually holds');
+ok(verdictOf(/showContextMenu\(r\.left, r\.bottom \+ 4, items, 'context-menu', \{ extraClass: 'row-more-menu' \}\)/.test(fn)), 'the «…» opens ONE context menu — one class name, its modifier as extraClass (Esc closes it: the global [data-popover] door)');
+ok(gateOf(/more\.innerHTML = UI_ICONS\.more;/.test(fn)) && gateOf(/t\('More actions'\)/.test(fn)) && gateOf(/aria-haspopup', 'menu'/.test(fn)) && verdictOf(/'agent-btn ' \+ ROW_MORE/.test(fn)), 'the «…» is the row\'s own agent-btn wearing the SVG dots glyph, named «More actions», announcing its menu');
+{ const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js'); ok(gateOf(/^\s*"More actions": "[^"]+",/m.test(zh)) && verdictOf(/^\s*"More actions": "[^"]+",/m.test(ja)), '«More actions» has its zh + ja words'); }
+ok(verdictOf(/label: b\.textContent, title: b\.title \|\| '', disabled: b\.disabled, action: \(\) => b\.click\(\)/.test(fn)), 'each menu item is a folded button by its own words, its own title and its own click (a disabled button stays disabled)');
+{ const BF = read('src/lib/bar-fold.js'); ok(gateOf(/import \{ FOLDED \} from '\.\/bar-fold\.js'/.test(MA)) && gateOf(/export const FOLDED = 'bar-folded';/.test(BF)) && verdictOf(/^\.agent-actions > \.bar-folded \{ display: none !important; \}$/m.test(CSS)), 'the fold\'s ONE class is bar-fold.js FOLDED (the chrome bars wear it too); style.css takes a folded button out of the strip'); }
+ok(verdictOf(/chkBtn\.onclick = \(\) => \{ const rect = foldAnchor\(chkBtn\)\.getBoundingClientRect\(\);/.test(MA)), '«Rules & checks» opens its menu from the «…» while it is folded (a folded button has no box)');
+ok(verdictOf(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ \.row-more-menu \.context-menu-item \{ min-height: 44px; font-size: 16px;/.test(CSS)), 'on a phone the «…» menu\'s rows are 44 px with 16 px words (the touch scale)');
 
 // ── ③ the CLI-presence census ──
 console.log('③ every door into Manage Agents\' CLI rows is named from the product; every suite that boots a hub and reaches one injects the CLI shape — or says why its verdict cannot depend on it');
@@ -333,7 +333,7 @@ ok(dc.bad.length === 0 && Object.keys(dc.sites).length >= 8, `every call of the 
   const planted = doorsCensus({ ...prod, 'src/lib/zz-planted.js': "export function zz(app) { document.querySelector('.zz').onclick = () => app._showAgentsDialog?.(); }\n" }, DOORS);
   const twice = doorsCensus({ ...prod, 'src/lib/gear-menu.js': prod['src/lib/gear-menu.js'] + "\nexport const zz = (c) => c.app._showAgentsDialog();\n" }, DOORS);
   const comment = doorsCensus({ ...prod, 'src/lib/zz-planted.js': '// app._showAgentsDialog() — a comment names a door, it never opens one\n' }, DOORS);
-  ok(planted.bad.some((b) => b.startsWith('src/lib/zz-planted.js: 1 call(s) of the Agents renderer, the census names 0 — a NEW door')) && twice.bad.some((b) => b.startsWith('src/lib/gear-menu.js: 2 call(s)')) && comment.bad.length === 0,
+  ok(gateOf(planted.bad.some((b) => b.startsWith('src/lib/zz-planted.js: 1 call(s) of the Agents renderer, the census names 0 — a NEW door'))) && gateOf(twice.bad.some((b) => b.startsWith('src/lib/gear-menu.js: 2 call(s)'))) && comment.bad.length === 0,
     'CONTROL: a new product door (a planted file) and a second call in a named door\'s file are each named; a comment that names the renderer is no door', { planted: planted.bad.slice(-1), twice: twice.bad.slice(-1), comment: comment.bad });
 { const IMP = "import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';\n";
   const counts = { named: IMP + 'const hub = startHub({ root });', renamed: "import { mintRoot, startHub as boot } from './hub-boot.mjs';\nconst hub = boot({ root });",
@@ -354,10 +354,10 @@ const srcs = Object.fromEntries(fs.readdirSync(SCRIPTS).filter((f) => /^test-.*\
 const c = census(srcs, CLI_PRESENCE, DOORS);
 console.log(`  · the suites (${c.universe.length} boot a hub and reach a door; harnesses that boot a hub: ${c.harnesses.join(', ') || 'none'}):`);
 for (const f of c.universe) { const r = CLI_PRESENCE[f]; console.log(`      ${f} [${c.doorsOf(f).join(' + ')}] — ${r ? (r.injects ? 'INJECTS: ' + r.injects : 'WHY NOT: ' + r.whyNot) : 'NO ROW'}`); }
-ok(c.universe.length >= 12 && ['test-roster-reset-eta.mjs', 'test-exit-access-ui.mjs'].every((f) => c.universe.includes(f)), `the census scope is non-vacuous (${c.universe.length} suites — a harness's boot counts for the suites that import it)`, c.universe);
+ok(c.universe.length >= 12 && verdictOf(['test-roster-reset-eta.mjs', 'test-exit-access-ui.mjs'].every((f) => c.universe.includes(f))), `the census scope is non-vacuous (${c.universe.length} suites — a harness's boot counts for the suites that import it)`, c.universe);
 { const want = { 'test-sidebar-rail.mjs': ['rail'], 'test-agents-overview.mjs': ['renderer', 'rail', 'usage'], 'test-resume-account-chrome.mjs': ['renderer', 'relogin'] };
   const got = Object.fromEntries(Object.keys(want).map((f) => [f, c.universe.includes(f) ? c.doorsOf(f) : null]));
-  ok(Object.entries(want).every(([f, ds]) => JSON.stringify(got[f]) === JSON.stringify(ds) && !!CLI_PRESENCE[f]), 'the suites a selector\'s spelling missed are rows by their doors: test-sidebar-rail (the rail panel), test-agents-overview (the rail panel + the usage popup\'s Full overview), test-resume-account-chrome (the resume bar\'s 「重新登录」)', got); }
+  ok(verdictOf(Object.entries(want).every(([f, ds]) => JSON.stringify(got[f]) === JSON.stringify(ds) && !!CLI_PRESENCE[f])), 'the suites a selector\'s spelling missed are rows by their doors: test-sidebar-rail (the rail panel), test-agents-overview (the rail panel + the usage popup\'s Full overview), test-resume-account-chrome (the resume bar\'s 「重新登录」)', got); }
 ok(c.bad.length === 0, `every suite that reaches a door names its doors and injects the shape or says why not, each claim checked (${c.bad.length} wrong)`, c.bad);
 ok(c.stale.length === 0, `no row names a suite outside the census (${c.stale.length} stale)`, c.stale);
 {
@@ -372,18 +372,18 @@ ok(c.stale.length === 0, `no row names a suite outside the census (${c.stale.len
   // RED: the census's spawn-only spelling (the form before) lets it pass unseen
   const viaHelper = "import { mintRoot, startHub } from './hub-boot.mjs';\nconst hub = startHub({ root, tree: wt, port: PORT, env });\n";
   const plantedH = census({ ...srcs, 'test-zz-planted.mjs': viaHelper + "await evalJs(`app._showAgentsDialog(); document.querySelector('.ob-backend .agent-actions')`);\n" }, CLI_PRESENCE, DOORS);
-  ok(pick(plantedH, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) renderer — and has no row/) && !SPAWN_HUB.test(viaHelper),
+  ok(gateOf(pick(plantedH, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) renderer — and has no row/)) && !SPAWN_HUB.test(viaHelper),
     'CONTROL: a planted suite that boots through hub-boot.mjs startHub (no spawn of its own) and reaches the dialog with no row is named — the spawn-only spelling alone would miss it', plantedH.bad.slice(-1));
-  ok(pick(planted, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) renderer — and has no row/) && pick(railOnly, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) rail — and has no row/) && pick(wrongDoors, /^test-zz-planted\.mjs: its row names the door\(s\) renderer, its code reaches rail/) && pick(tabbed, /^test-zz-planted\.mjs: «Machines only» — and an open draws another tab/) && pick(reads, /^test-zz-planted\.mjs: says its verdict cannot depend/),
+  ok(gateOf(pick(planted, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) renderer — and has no row/)) && gateOf(pick(railOnly, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) rail — and has no row/)) && gateOf(pick(wrongDoors, /^test-zz-planted\.mjs: its row names the door\(s\) renderer, its code reaches rail/)) && gateOf(pick(tabbed, /^test-zz-planted\.mjs: «Machines only» — and an open draws another tab/)) && verdictOf(pick(reads, /^test-zz-planted\.mjs: says its verdict cannot depend/)),
     'CONTROL: a planted suite with no row (through the dialog, and through the rail panel alone), a row whose doors are not its code\'s, a «Machines only» suite that also opens the Accounts tab and a «why not» suite that reads .agent-actions are each named',
     { planted: planted.bad.slice(-1), railOnly: railOnly.bad.slice(-1), wrongDoors: wrongDoors.bad.slice(-1), tabbed: tabbed.bad.slice(-1), reads: reads.bad.slice(-1) });
   // MUTANT (r1's predicate — a selector's spelling): the rail / re-login / overview suites fall outside it, their rows stale, RED by name
   const R1_DRAWS = /_showAgentsDialog\s*\(|\.ob-backend\b|agent-actions|ob-backends/;
   const r1 = census(srcs, CLI_PRESENCE, DOORS, { reach: (f) => R1_DRAWS.test(srcs[f]) });
   const missed = ['test-sidebar-rail.mjs', 'test-agents-overview.mjs', 'test-resume-account-chrome.mjs'];
-  ok(missed.every((f) => r1.stale.includes(f) && !r1.universe.includes(f)), `MUTANT (r1's predicate, a selector's spelling): ${r1.universe.length} suites — ${missed.join(', ')} fall outside it, RED by name (${r1.stale.length} rows stale: ${r1.stale.join(', ')})`, { universe: r1.universe, stale: r1.stale });
+  ok(verdictOf(missed.every((f) => r1.stale.includes(f) && !r1.universe.includes(f))), `MUTANT (r1's predicate, a selector's spelling): ${r1.universe.length} suites — ${missed.join(', ')} fall outside it, RED by name (${r1.stale.length} rows stale: ${r1.stale.join(', ')})`, { universe: r1.universe, stale: r1.stale });
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

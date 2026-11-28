@@ -22,7 +22,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const { create } = require(path.join(REPO, 'src/server/instance-url.js'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -84,11 +84,11 @@ const mk = (opts = {}) => {
   const { iu, settings } = mk();
   settings['agentd.publicUrl'] = 'https://configured.example';
   const u = await iu.ensurePublished();
-  ok('ensurePublished mints a URL for the caller that needs a dial-back address', /^https:\/\/remembered\.relay\.example/.test(u), u);
+  ok('ensurePublished mints a URL for the caller that needs a dial-back address', verdictOf(/^https:\/\/remembered\.relay\.example/.test(u)), u);
   ok('an AUTO publish does NOT outrank the setting (a side effect must not repoint share links)', iu.url() === 'https://configured.example' && iu.effective().source === 'setting');
   ok('but it IS recorded + shown', iu.status().published === true && iu.status().auto === true);
   const st = iu.status();
-  ok('status names both addresses so the UI can explain itself', st.url && st.settingUrl === 'https://configured.example' && st.effectiveUrl === 'https://configured.example');
+  ok('status names both addresses so the UI can explain itself', gateOf(st.url) && st.settingUrl === 'https://configured.example' && st.effectiveUrl === 'https://configured.example');
   // with NO setting at all, a live auto URL is still better than nothing
   delete settings['agentd.publicUrl'];
   ok('with nothing configured, the auto URL is used (source says so)', iu.url() === 'https://remembered.relay.example' && iu.effective().source === 'frp-auto');
@@ -136,7 +136,7 @@ const mk = (opts = {}) => {
   await iu.ensurePublished();
   ok('a second ensurePublished does not re-publish (one relay proxy, one owner)', pl.calls.publish.length === 1);
   ok('it publishes THIS instance\'s own port under the shared proxy name', pl.calls.publish[0].port === 3456 && pl.calls.publish[0].name === 'vibespace-instance');
-  ok('the subdomain is handed back to the plugin so other callers reuse it', pl.calls.selfDial.includes('remembered'));
+  ok('the subdomain is handed back to the plugin so other callers reuse it', verdictOf(pl.calls.selfDial.includes('remembered')));
 }
 
 // ── 4. refusals are loud and name the fix ──
@@ -144,20 +144,20 @@ const mk = (opts = {}) => {
   const { iu } = mk({ auth: false });
   let err = null;
   try { await iu.publish({}); } catch (e) { err = e.message; }
-  ok('publishing with auth OFF is refused (it would be an open instance on the internet)', /password or SSO/i.test(err || ''), err);
+  ok('publishing with auth OFF is refused (it would be an open instance on the internet)', verdictOf(/password or SSO/i.test(err || '')), err);
   ok('and nothing was published', iu.status().published === false);
 }
 {
   const { iu } = mk({ plugins: fakePlugins({ configured: false }) });
   let err = null;
   try { await iu.publish({}); } catch (e) { err = e.message; }
-  ok('no relay ⇒ refused, naming WHICH fields are missing', /not configured/.test(err || '') && /serverAddr/.test(err || ''), err);
+  ok('no relay ⇒ refused, naming WHICH fields are missing', gateOf(/not configured/.test(err || '')) && verdictOf(/serverAddr/.test(err || '')), err);
 }
 {
   const { iu } = mk();
   let err = null;
   try { await iu.publish({ sub: 'Bad_Sub!' }); } catch (e) { err = e.message; }
-  ok('a malformed subdomain is refused', /lowercase/.test(err || ''), err);
+  ok('a malformed subdomain is refused', verdictOf(/lowercase/.test(err || '')), err);
 }
 
 // ── 5. persistence + boot republish (a mapping the user asked for comes back) ──
@@ -181,7 +181,7 @@ const mk = (opts = {}) => {
   second.stop();
   third.stop();
   ok('restore republishes on boot, on the SAME subdomain', second.url() === 'https://persisted.relay.example', second.url());
-  ok('a failed republish keeps the intent and SAYS why (no silent disappearance)', third.status().desired === true && /relay down/.test(third.status().error || ''), JSON.stringify(third.status()));
+  ok('a failed republish keeps the intent and SAYS why (no silent disappearance)', third.status().desired === true && verdictOf(/relay down/.test(third.status().error || '')), JSON.stringify(third.status()));
   ok('a failed republish does not erase the last known URL either (it may still be live)', third.status().url === 'https://x.relay.example/');
   fs.rmSync(dir2, { recursive: true, force: true });
 }
@@ -190,19 +190,19 @@ const mk = (opts = {}) => {
 {
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const sv = read('server.js');
-  ok('server.js creates the resolver + registers its routes + restores on boot', sv.includes("instance-url.js').create") && sv.includes('instanceUrl.registerRoutes(app)') && sv.includes('instanceUrl.restore()'));
+  ok('server.js creates the resolver + registers its routes + restores on boot', gateOf(sv.includes("instance-url.js').create")) && gateOf(sv.includes('instanceUrl.registerRoutes(app)')) && verdictOf(sv.includes('instanceUrl.restore()')));
   ok('EVERY "this instance\'s URL" consumer goes through it', (sv.match(/instanceUrl\.url\(\)/g) || []).length >= 3, String((sv.match(/instanceUrl\.url\(\)/g) || []).length));
   ok('NEGATIVE: no consumer reads agentd.publicUrl inline any more', !/serverSetting\('agentd\.publicUrl'\)/.test(sv), 'server.js still has an inline read');
   const w = read('src/server/mounts-plugins-wiring.js');
   ok('the agent-install path no longer publishes the instance behind our back', !w.includes("frpPublish('vibespace-instance'") && (w.match(/instanceUrl\.ensurePublished\(\)/g) || []).length === 2);
-  ok('and it resolves its base URL through the same resolver', w.includes('instanceUrl?.url()') && !/serverSetting\('agentd\.publicUrl'\)/.test(w));
+  ok('and it resolves its base URL through the same resolver', gateOf(w.includes('instanceUrl?.url()')) && !/serverSetting\('agentd\.publicUrl'\)/.test(w));
   const rail = read('src/lib/sidebar-rail.js');
-  ok('the Ports panel has the "This VibeSpace" row', rail.includes('_renderInstanceUrlRow') && rail.includes("tr('This VibeSpace')"));
+  ok('the Ports panel has the "This VibeSpace" row', gateOf(rail.includes('_renderInstanceUrlRow')) && verdictOf(rail.includes("tr('This VibeSpace')")));
   // lane ui-controls-and-bugs pick 1: the panel builds off-DOM through latestRender (the Ports panel was drawn twice) — the row goes into `out`
-  ok('the row is rendered by the panel', rail.includes('await this._renderInstanceUrlRow(out, api, render)'));
-  ok('the row hits the instance-url API both ways', rail.includes("'/api/instance-url/publish', { method: 'DELETE' }") && rail.includes("'/api/instance-url/publish', { method: 'POST'"));
-  ok('the row SAYS what happens to the configured address', rail.includes('is kept and restored when you unmap'));
-  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(`${path.basename(f)} carries the new keys`, read(f).includes("'This VibeSpace'") && read(f).includes("'Mapped: {url}'"));
+  ok('the row is rendered by the panel', verdictOf(rail.includes('await this._renderInstanceUrlRow(out, api, render)')));
+  ok('the row hits the instance-url API both ways', gateOf(rail.includes("'/api/instance-url/publish', { method: 'DELETE' }")) && verdictOf(rail.includes("'/api/instance-url/publish', { method: 'POST'")));
+  ok('the row SAYS what happens to the configured address', verdictOf(rail.includes('is kept and restored when you unmap')));
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(`${path.basename(f)} carries the new keys`, gateOf(read(f).includes("'This VibeSpace'")) && verdictOf(read(f).includes("'Mapped: {url}'")));
 }
 
 // ── 7. THE RELAY READ (lane fleet-instance-publish — a fleet canary red, 2026-10-20) ──
@@ -233,7 +233,7 @@ const mk = (opts = {}) => {
   const judge = (iuSrc, svSrc) => { const handed = handedOf(svSrc) || []; return readsOf(iuSrc).filter((m) => !handed.includes(m)); };
   const IU = read('src/server/instance-url.js'), SV = read('server.js');
   const reads = readsOf(IU), handed = handedOf(SV);
-  ok(`the census sees what it judges: instance-url reads ${reads.join(' · ')} on plugins; server.js hands ${handed ? handed.join(' · ') : 'NOTHING'}`, reads.includes('relayStatus') && reads.includes('frpPublish') && Array.isArray(handed) && handed.length >= 4, JSON.stringify({ reads, handed }));
+  ok(`the census sees what it judges: instance-url reads ${reads.join(' · ')} on plugins; server.js hands ${handed ? handed.join(' · ') : 'NOTHING'}`, gateOf(reads.includes('relayStatus')) && gateOf(reads.includes('frpPublish')) && gateOf(Array.isArray(handed)) && handed.length >= 4, JSON.stringify({ reads, handed }));
   const missing = judge(IU, SV);
   ok('THE CENSUS: every member instance-url.js reads on `plugins` is on the object server.js hands it', missing.length === 0, missing.join(', '));
   const { PluginManager } = require(path.join(REPO, 'src/plugins.js'));
@@ -243,15 +243,15 @@ const mk = (opts = {}) => {
   const iuBase = IU.replace(/  const frp = \(\) => \{[^\n]*\n/, "  const frp = () => { try { return plugins ? plugins.status(plugins.providerId?.('relay')) : null; } catch { return null; } };\n");
   const svBase = SV.replace('plugins: { relayStatus: () => plugins.relayStatus(), frpPublish:', 'plugins: { status: (id) => plugins.status(id), frpPublish:');
   const m1 = iuBase !== IU && svBase !== SV ? judge(iuBase, svBase) : null;
-  ok('RED CONTROL the base (instance-url\'s providerId read over server.js\'s object of .214–.330) ⇒ the census names `providerId`', !!m1 && m1.includes('providerId'), m1 ? m1.join(', ') : 'the control did not apply');
+  ok('RED CONTROL the base (instance-url\'s providerId read over server.js\'s object of .214–.330) ⇒ the census names `providerId`', !!m1 && verdictOf(m1.includes('providerId')), m1 ? m1.join(', ') : 'the control did not apply');
   const m2 = svBase !== SV ? judge(IU, svBase) : null;
-  ok('RED CONTROL the fixed read over the OLD object ⇒ the census names `relayStatus`', !!m2 && m2.includes('relayStatus'), m2 ? m2.join(', ') : 'the control did not apply');
+  ok('RED CONTROL the fixed read over the OLD object ⇒ the census names `relayStatus`', !!m2 && verdictOf(m2.includes('relayStatus')), m2 ? m2.join(', ') : 'the control did not apply');
 }
 {
   // a relay read that FAILED is named — never «not configured» (that swallow hid the red above for 15 days)
   const { iu } = mk({ plugins: fakePlugins({ readThrows: 'unknown plugin: undefined' }) });
   let err = null; try { await iu.publish({}); } catch (e) { err = e.message; }
-  ok('a relay read that THROWS is refused BY NAME (what the read said), never «not configured»', /could not be read \(unknown plugin: undefined\)/.test(err || '') && !/not configured/.test(err || ''), err);
+  ok('a relay read that THROWS is refused BY NAME (what the read said), never «not configured»', gateOf(/could not be read \(unknown plugin: undefined\)/.test(err || '')) && !/not configured/.test(err || ''), err);
   ok('…and the panel\'s status carries it (frpReadError), frpConfigured false', iu.status().frpReadError === 'unknown plugin: undefined' && iu.status().frpConfigured === false, JSON.stringify(iu.status()));
 }
 {
@@ -259,7 +259,7 @@ const mk = (opts = {}) => {
   const pl = fakePlugins({ configured: false, vaultLocked: true });
   const { iu } = mk({ plugins: pl });
   let err = null; try { await iu.publish({}); } catch (e) { err = e.message; }
-  ok('the vault LOCKED holding the relay\'s only key: the plugin\'s own refusal (it names the lock), not «not configured»', /vault is locked/.test(err || '') && pl.calls.publish.length === 1, err);
+  ok('the vault LOCKED holding the relay\'s only key: the plugin\'s own refusal (it names the lock), not «not configured»', gateOf(/vault is locked/.test(err || '')) && pl.calls.publish.length === 1, err);
 }
 
 // ── 8. THE UNLOCK'S RE-TRY (lane fleet-instance-publish, the second half) — the vault's unlock calls restore({ ifFailed }):
@@ -274,7 +274,7 @@ const mk = (opts = {}) => {
   ok('restore({ ifFailed }) with no failure on record tries nothing (a mapping that came back is left alone)', pl.calls.publish.length === 0);
   iu.restore({ retries: 2, delayMs: 60000, firstMs: 5 });
   await sleep(40);
-  ok('the boot\'s cycle: its first try failed and SAYS why; the next waits (60 s here)', pl.calls.publish.length === 1 && /relay down/.test(iu.status().error || ''), String(pl.calls.publish.length));
+  ok('the boot\'s cycle: its first try failed and SAYS why; the next waits (60 s here)', pl.calls.publish.length === 1 && verdictOf(/relay down/.test(iu.status().error || '')), String(pl.calls.publish.length));
   iu.restore({ ifFailed: true, firstMs: 5 });   // an unlock, the relay still down
   await sleep(60);
   ok('an unlock PULLS the waiting try forward (now, not in 60 s) — the cycle\'s own budget: its last try spent, no timer left (bounded)', pl.calls.publish.length === 2, String(pl.calls.publish.length));
@@ -286,7 +286,7 @@ const mk = (opts = {}) => {
   ok('the next unlock (no cycle running) starts ONE new cycle — republished, the error cleared', pl.calls.publish.length === 3 && iu.url() === 'https://podx.relay.example' && !iu.status().error, JSON.stringify(iu.status()));
   iu.stop();
   const w = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok('the vault\'s unlock calls it (mounts-plugins-wiring.js, beside mounts\' own restore after the unlock)', /^vault\.onUnlock\(\(\) => \{ try \{ instanceUrl\?\.restore\?\.\(\{ ifFailed: true \}\); \}/m.test(w));
+  ok('the vault\'s unlock calls it (mounts-plugins-wiring.js, beside mounts\' own restore after the unlock)', verdictOf(/^vault\.onUnlock\(\(\) => \{ try \{ instanceUrl\?\.restore\?\.\(\{ ifFailed: true \}\); \}/m.test(w)));
   fs.rmSync(dir, { recursive: true, force: true });
 }
 // ── r3009 (B-f276 family, lane bl-machines-a): THE STORE-READ LAW for instance-url.json. A read that FAILS (a PLACED refusal of the
@@ -305,7 +305,7 @@ const mk = (opts = {}) => {
   let unpubErr = null; try { await held.unpublish(); } catch (e) { unpubErr = e; }
   const after = fs.readFileSync(sfile, 'utf8'), st = held.status();
   ok('r3009: instance-url.json read FAILED (a placed EIO) — an agent install\'s ensurePublished, a Publish and an Unpublish write NOTHING over it: the person\'s address survives', after === before, after.slice(0, 240));
-  ok('r3009 / r3174: …a Publish, an Unpublish AND ensurePublished are refused BY NAME (503 instance_url_unread) — the relay is asked for nothing — and the status says why', !!pubErr && pubErr.status === 503 && pubErr.code === 'instance_url_unread' && !!unpubErr && unpubErr.code === 'instance_url_unread' && ensured === null && !!ensureErr && ensureErr.code === 'instance_url_unread' && ensureErr.status === 503 && relayAsks === 0 && /could not be read/.test(String(st.held || '')), JSON.stringify({ pub: pubErr && pubErr.message, unpub: unpubErr && unpubErr.code, ensured, ensureErr: ensureErr && ensureErr.message, held: st.held }));
+  ok('r3009 / r3174: …a Publish, an Unpublish AND ensurePublished are refused BY NAME (503 instance_url_unread) — the relay is asked for nothing — and the status says why', !!pubErr && pubErr.status === 503 && pubErr.code === 'instance_url_unread' && !!unpubErr && unpubErr.code === 'instance_url_unread' && ensured === null && !!ensureErr && ensureErr.code === 'instance_url_unread' && ensureErr.status === 503 && relayAsks === 0 && verdictOf(/could not be read/.test(String(st.held || ''))), JSON.stringify({ pub: pubErr && pubErr.message, unpub: unpubErr && unpubErr.code, ensured, ensureErr: ensureErr && ensureErr.message, held: st.held }));
   fs.rmSync(sdir, { recursive: true, force: true });
 }
 // r3104: TORN instance-url.json — its bytes kept aside once (the helper), it starts as not published, and the status NAMES the copy
@@ -317,7 +317,7 @@ const mk = (opts = {}) => {
   const t0 = Date.now(); while (!tt.status().torn && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 25));
   const st = tt.status(), copy = st.torn;
   const copyOk = !!copy && fs.existsSync(path.join(tdir, copy)) && fs.readFileSync(path.join(tdir, copy), 'utf8') === TORN;
-  ok('r3104: torn instance-url.json — its bytes kept aside once, it starts as not published, and the status names the copy for the panel', copyOk && /^instance-url\.json\.corrupt-/.test(copy) && st.published === false && !st.held, JSON.stringify({ copy, published: st.published, held: st.held }));
+  ok('r3104: torn instance-url.json — its bytes kept aside once, it starts as not published, and the status names the copy for the panel', gateOf(copyOk) && gateOf(/^instance-url\.json\.corrupt-/.test(copy)) && st.published === false && !st.held, JSON.stringify({ copy, published: st.published, held: st.held }));
   if (tt._hold && tt._hold.stop) tt._hold.stop();
   fs.rmSync(tdir, { recursive: true, force: true });
 }
@@ -339,8 +339,8 @@ const mk = (opts = {}) => {
   const LINE = "        if (e && e.code === 'instance_url_unread') return res.status(503).json({ error: e.message, code: e.code });   // r3174: the publish setting is held — refused by name, nothing minted\n";
   const { anchored: anch8 } = await import('./scratch.mjs');
   const pRed = block && block.split(LINE).length === 2 ? await pairing(anch8(block, LINE, '', 'release-catch'), heldIu) : null;
-  ok('r3174: the pairing road while the publish setting is held — refused by name (503 instance_url_unread, the hold\'s words), nothing minted', !!block && pNow.c === 503 && pNow.b && pNow.b.code === 'instance_url_unread' && /could not be read/.test(String(pNow.b.error)) && !pNow.base, JSON.stringify(pNow));
-  ok('RED CONTROL r3174: the release\'s catch (in a lifted copy) answers 400 with the wrong advice («is the frp plugin installed»)', !!pRed && pRed.c === 400 && /frp plugin/.test(String(pRed.b && pRed.b.error)), JSON.stringify(pRed));
+  ok('r3174: the pairing road while the publish setting is held — refused by name (503 instance_url_unread, the hold\'s words), nothing minted', !!block && pNow.c === 503 && gateOf(pNow.b) && pNow.b.code === 'instance_url_unread' && gateOf(/could not be read/.test(String(pNow.b.error))) && !pNow.base, JSON.stringify(pNow));
+  ok('RED CONTROL r3174: the release\'s catch (in a lifted copy) answers 400 with the wrong advice («is the frp plugin installed»)', !!pRed && pRed.c === 400 && verdictOf(/frp plugin/.test(String(pRed.b && pRed.b.error))), JSON.stringify(pRed));
   // (2) the stronger restore ask
   const runAsk = async (createFn) => {
     const dir9 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iurl-ask-')), f9 = path.join(dir9, 'instance-url.json');
@@ -366,4 +366,4 @@ const mk = (opts = {}) => {
   ok(`RED CONTROL r3174: the later ask replacing the first (in a copy) — at the lift nothing is asserted again (${askRed} relay asks)`, askRed === 0, `relay asks ${askRed}`);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

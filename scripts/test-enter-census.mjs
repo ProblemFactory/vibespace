@@ -32,7 +32,7 @@ const require = createRequire(import.meta.url);
 const acorn = require('acorn');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 
 const KEY_EVENTS = new Set(['keydown', 'keyup', 'keypress']);
 const TEXT_TYPES = new Set(['', 'text', 'search', 'url', 'password', 'email', 'tel', 'number']);
@@ -554,7 +554,7 @@ ok('every text-box Enter in src/lib goes through enterSubmits(e) / the full guar
 ok('the census sees the class: ≥ 25 guarded text-box sites and ≥ 25 exempt rows (a broken classifier shrinks one side)', by('OK').length >= 25 && by('EXEMPT').length >= 25, { ok: by('OK').length, exempt: by('EXEMPT').length });
 ok('an unresolvable receiver is never assumed a button: unknown-kind rows are guarded, or exempt only by a narrowing of the event target', !rows.some((r) => r.kind === 'unknown' && r.verdict !== 'OK' && !r.narrow), rows.filter((r) => r.kind === 'unknown').map((r) => `${r.file}:${r.line} ${r.why} ${r.verdict}`));
 const rj = rows.filter((r) => r.file === 'channel-outbox.js' && /chan-opt-input|el\(input\)/.test(r.why) && r.kind === 'text');
-ok('the incident\'s reject boxes (channel-outbox.js, input.chan-opt-input) are text-box rows and guarded', rj.length === 2 && rj.every((r) => r.verdict === 'OK'), rj);
+ok('the incident\'s reject boxes (channel-outbox.js, input.chan-opt-input) are text-box rows and guarded', rj.length === 2 && verdictOfGuard(rj.every((r) => r.verdict === 'OK')), rj);
 ok(`the census's cost is a census over what it scans: ${cost.files} files / ${cost.bytes} B / ${cost.nodes} AST nodes, its selector searches ${CV.markupPerByte.toFixed(2)} B read per parsed byte — each within ${COST_GROWTH} × the base declared at ${COST_BASE.at}`, !CV.problems.some((p) => !/bare parse/.test(p)), CV.problems);
 ok(`its time is RELATIVE: CPU ${CV.ratio.toFixed(2)} × the bare parse + walk of ${ref.name} measured in this process, scaled to every node parsed (≤ ${COST_RATIO_MAX} ×) — no absolute millisecond bound`, CV.ratio <= COST_RATIO_MAX, CV.problems);
 
@@ -589,7 +589,7 @@ ok('RED control: a planted bare handler on an el(\'input\') is RED', V.bareInput
 ok('… its twins through enterSubmits(e), the inline isComposing+229 guard, an early imeOwnsKey return are OK', V.helperInput === 'OK' && V.inlineInput === 'OK' && V.earlyReturn === 'OK', [V.helperInput, V.inlineInput, V.earlyReturn]);
 ok('`!e.isComposing` alone (no keyCode 229 — Safari) is RED', V.partial === 'RED', V.partial);
 ok('every spelling is seen: switch case, […].includes, keyCode 13, a named handler attached later — all RED bare', V.switchCase === 'RED' && V.includes === 'RED' && V.keyCode === 'RED' && V.named === 'RED', [V.switchCase, V.includes, V.keyCode, V.named]);
-ok('a PURE verdict that tests Enter is followed into the text box\'s handler: RED bare, OK after an early imeOwnsKey return', V.verdictCall.split(',').includes('RED') && !V.verdictGuarded.split(',').includes('RED'), [V.verdictCall, V.verdictGuarded]);
+ok('a PURE verdict that tests Enter is followed into the text box\'s handler: RED bare, OK after an early imeOwnsKey return', gateOf(V.verdictCall.split(',').includes('RED')) && !V.verdictGuarded.split(',').includes('RED'), [V.verdictCall, V.verdictGuarded]);
 ok('a container that builds a text box is the class (RED); one that builds none is exempt; document unguarded is RED, narrowed to SELECT exempt', V.containerWithInput === 'RED' && V.containerNoInput === 'EXEMPT' && V.document === 'RED' && V.documentNarrowed === 'EXEMPT', [V.containerWithInput, V.containerNoInput, V.document, V.documentNarrowed]);
 ok('a container narrowed TO its text box is RED (the narrowing reads the element\'s kind, never just "a target check")', V.narrowedToInput === 'RED', V.narrowedToInput);
 ok('exempt BY KIND: a role=button row, a checkbox', V.row === 'EXEMPT' && V.checkbox === 'EXEMPT', [V.row, V.checkbox]);
@@ -605,10 +605,10 @@ ok('an unresolvable receiver (a parameter not named like an input) is RED, never
   const slow = { ...cost, cpuMs: cost.cpuMs * 4, refCpuMs: cost.refCpuMs * 4 };
   ok(`a machine 4 × slower (both sides × 4) stays green — the wall clock would read ${(ms * 4).toFixed(0)} ms there (the runner read 4335 ms against the old fixed 3 s)`, !costVerdict(slow).problems.length, costVerdict(slow).problems);
   const costlier = { ...cost, cpuMs: CV.linearMs * (COST_RATIO_MAX + 1) };
-  ok(`RED control: a census ${COST_RATIO_MAX + 1} × a bare parse of what it read, on the same machine, is RED`, costVerdict(costlier).problems.some((p) => /bare parse/.test(p)), costVerdict(costlier).problems);
+  ok(`RED control: a census ${COST_RATIO_MAX + 1} × a bare parse of what it read, on the same machine, is RED`, verdictOfGuard(costVerdict(costlier).problems.some((p) => /bare parse/.test(p))), costVerdict(costlier).problems);
   const grown = { ...cost, files: Math.ceil(COST_BASE.files * COST_GROWTH) + 1, markupBytes: cost.bytes * COST_BASE.markupPerByte * COST_GROWTH * 1.1 };
   const gp = costVerdict(grown).problems;
-  ok(`RED control: src/lib past ${COST_GROWTH} × the base's files, selector searches past ${COST_GROWTH} × its bytes read per parsed byte — both RED (re-declare the base, re-measure the ratio)`, gp.some((p) => /^files/.test(p)) && gp.some((p) => /selector searches/.test(p)), gp);
+  ok(`RED control: src/lib past ${COST_GROWTH} × the base's files, selector searches past ${COST_GROWTH} × its bytes read per parsed byte — both RED (re-declare the base, re-measure the ratio)`, gateOf(gp.some((p) => /^files/.test(p))) && verdictOfGuard(gp.some((p) => /selector searches/.test(p))), gp);
 }
 
 // the base rel268: the incident's two reject boxes are RED there
@@ -618,8 +618,8 @@ try { baseSrc = execFileSync('git', ['-C', REPO, 'show', `${BASE}:src/lib/channe
 if (baseSrc == null) console.log(`  SKIP: ${BASE} is not in this checkout (the base control needs the rel268 commit)`);
 else {
   const b = census([{ name: 'channel-outbox.js', src: baseSrc }]).filter((r) => r.kind === 'text');
-  ok(`the base ${BASE}'s two reject-box handlers (channel-outbox.js, \`if (e.key === 'Enter') go.click()\`) are RED`, b.length === 2 && b.every((r) => r.verdict === 'RED'), b.map((r) => `${r.line} ${r.verdict}`));
+  ok(`the base ${BASE}'s two reject-box handlers (channel-outbox.js, \`if (e.key === 'Enter') go.click()\`) are RED`, b.length === 2 && verdictOfGuard(b.every((r) => r.verdict === 'RED')), b.map((r) => `${r.line} ${r.verdict}`));
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'}: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf as verdictOfGuard, gateOf } from './lib/check.mjs';

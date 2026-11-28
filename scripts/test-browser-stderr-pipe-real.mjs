@@ -21,7 +21,7 @@ import { scratch, DRIVER, DRIVER_LEFT_ALONE, REHOMED, driverArgs } from './scrat
 const require = createRequire(import.meta.url);
 const BE = require('../src/browser-stderr.js');
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const done = (code) => { console.log(`\n${fail ? '✗' : '✓'} test-browser-stderr-pipe-real: ${pass} passed, ${fail} failed`); process.exit(code); };
 
@@ -93,9 +93,9 @@ try {
   if (AB_BASE && verBase && cmpV(verBase, BE.FIXED_IN) < 0) {
     console.log(`— Ⓐ base: the driver ${verBase}'s own stdio under log spam`);
     const A = await launch('bspa' + process.pid, { __bin: AB_BASE, AGENT_BROWSER_ARGS: driverArgs('--no-sandbox', '--enable-logging=stderr') });
-    ok(A.ok && A.cpid && A.port, 'the base browser launched (daemon + Chrome + its DevTools port)', A.error || { dpid: A.dpid, cpid: A.cpid, port: A.port });
+    ok(gateOf(A.ok) && gateOf(A.cpid) && verdictOf(A.port), 'the base browser launched (daemon + Chrome + its DevTools port)', A.error || { dpid: A.dpid, cpid: A.cpid, port: A.port });
     const fdA = fd2Of(A.cpid);
-    ok(/^pipe:\[\d+\]$/.test(String(fdA)), `Chrome's fd 2 is the driver's pipe (${fdA})`);
+    ok(verdictOf(/^pipe:\[\d+\]$/.test(String(fdA))), `Chrome's fd 2 is the driver's pipe (${fdA})`);
     let hungAt = null;
     while (!hungAt && Date.now() - A.t0 < 60000) { if ((await cdpBytes(A.port)) === 0) hungAt = Date.now() - A.t0; else await sleep(500); }
     const pfA = await BE.probeStderrPipe(A.cpid);
@@ -108,7 +108,7 @@ try {
   // ═══ Ⓑ THE PIN ═══
   console.log(`— Ⓑ the pin (${ver}): the same spam`);
   const B = await launch('bspb' + process.pid, { AGENT_BROWSER_ARGS: driverArgs('--no-sandbox', '--enable-logging=stderr') });
-  ok(B.ok && B.cpid && B.port, 'the browser launched on the pinned driver', B.error);
+  ok(gateOf(B.ok) && gateOf(B.cpid) && verdictOf(B.port), 'the browser launched on the pinned driver', B.error);
   const fdB = fd2Of(B.cpid);
   const hold = Math.max(3 * tHang, 30000);
   let misses = 0, asks = 0;
@@ -132,7 +132,7 @@ try {
   };
   const D = await quietLeg('bspd', driverArgs('--no-sandbox'));
   const C = await quietLeg('bspc', BE.withQuietLogging(driverArgs('--no-sandbox')));
-  ok(D.ok && C.ok && D.answers && C.answers, 'both browsers launched and answer', { D, C });
+  ok(gateOf(D.ok) && gateOf(C.ok) && gateOf(D.answers) && verdictOf(C.answers), 'both browsers launched and answer', { D, C });
   ok(C.bytes < D.bytes, `the quiet switches cut what Chrome writes on its own: ${C.bytes} bytes vs ${D.bytes} without them (same page, same 20 s)`, { C, D });
 
   // ═══ Ⓓ B-1789: a helper's (child) browser on its own config answers past 60 s ═══
@@ -147,11 +147,11 @@ try {
     be.envFor({ browserKey: PK }); // the conversation's own spawn file (the parent the child's copies)
     const cc = be.childConfigFor(PK + '.1');
     const ccArgs = cc.path ? String((JSON.parse(fs.readFileSync(cc.path, 'utf8')) || {}).args || '') : '';
-    ok(!!cc.path && BE.QUIET_LOG_ARGS.every((q) => ccArgs.split(/[,\n]/).map((x) => x.trim()).includes(q)), `the child's own config (browser-env childConfigFor) carries the quiet switches (${ccArgs})`, cc);
+    ok(!!cc.path && verdictOf(BE.QUIET_LOG_ARGS.every((q) => ccArgs.split(/[,\n]/).map((x) => x.trim()).includes(q))), `the child's own config (browser-env childConfigFor) carries the quiet switches (${ccArgs})`, cc);
     const K = await launch('bspk' + process.pid, { AGENT_BROWSER_CONFIG: cc.path || '' });
-    ok(K.ok && K.cpid && K.port, 'the child browser launched through the driver on its own config', K.error);
+    ok(gateOf(K.ok) && gateOf(K.cpid) && verdictOf(K.port), 'the child browser launched through the driver on its own config', K.error);
     let cmd = ''; try { cmd = fs.readFileSync(`/proc/${K.cpid}/cmdline`, 'utf8').split('\0').join(' '); } catch { cmd = ''; }
-    ok(BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q)), 'its Chrome\'s command line carries --disable-logging --log-level=3', cmd.slice(0, 300));
+    ok(verdictOf(BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q))), 'its Chrome\'s command line carries --disable-logging --log-level=3', cmd.slice(0, 300));
     // the box's first run of this leg (2.369.412, int361's row 7 at 691f34c0b): 65 of 65 `eval`s judged missed FROM 0 s while
     // the child's Chrome was up (launched, its command line read) — a stderr hang answers first and then stops; a judge that misses
     // from the first ask is the judge's own. Ⓓ now asks the way Ⓑ and Ⓒ do (the suite's measured signal: the stderr hang is
@@ -169,4 +169,4 @@ try {
   for (const it of ended) await end(it);
   fs.rmSync(S, { recursive: true, force: true });
 }
-done(fail ? 1 : 0);
+done(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

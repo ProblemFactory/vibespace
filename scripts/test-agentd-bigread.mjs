@@ -26,7 +26,7 @@ process.env.VIBESPACE_NODE_MODULES = path.join(repo, 'node_modules');
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
@@ -69,7 +69,7 @@ try {
 
   // 4) small read still fine (the common path)
   const small = await dm.fsReadRange(big, 0, 1000);
-  check('small read unchanged', small.data.length === 1000 && small.data.equals(content.subarray(0, 1000)));
+  check('small read unchanged', small.data.length === 1000 && verdictOf(small.data.equals(content.subarray(0, 1000))));
 
   // 5) read-range on a missing file rejects (no hang)
   let errMsg = '';
@@ -84,4 +84,4 @@ try {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
 console.log(failed ? `\n${failed} FAILED` : '\nagentd big-read integrity test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

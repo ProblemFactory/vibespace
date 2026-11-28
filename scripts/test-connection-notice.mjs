@@ -23,7 +23,7 @@ import { createRequire } from 'node:module';
 const REPO = path.resolve(process.env.REPO || new URL('..', import.meta.url).pathname);
 const require = createRequire(path.join(REPO, 'package.json'));
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 // ── a stub DOM: what the handler, appendSystem and the notice touch ──
@@ -77,7 +77,7 @@ console.log('① 363 socket cycles ⇒ ONE row');
   const v = makeView(); const before = pager(v), cardsBefore = cards(v).length;
   for (let i = 0; i < 363; i++) { v.down(); v.up(); }
   ok('363 cycles ⇒ one row in the transcript', rows(v).length === 1, `${rows(v).length} rows`);
-  ok('it counts them', /dropped 363 times/.test(rows(v)[0]?.textContent || ''), rows(v)[0]?.textContent);
+  ok('it counts them', verdictOf(/dropped 363 times/.test(rows(v)[0]?.textContent || '')), rows(v)[0]?.textContent);
   ok('the re-attach still ran on every reconnect (363)', v.attaches === 363, v.attaches);
   ok('the pager reads what it read', pager(v) === before, pager(v));
   ok('no reader of the window\'s cards sees a new card (.chat-msg, the trim\'s and the landings\' selector)', cards(v).length === cardsBefore, cards(v).length);
@@ -91,8 +91,8 @@ console.log('② the reconnect patches the drop\'s row');
   v.up(12000);
   ok('the reconnect is that same row, with how long it was out', rows(v).length === 1 && rows(v)[0] === el && el.textContent === 'Reconnected · down 12s', rows(v).map((x) => x.textContent));
   v.down(); v.up();
-  ok('the second cycle patches it again and counts', rows(v).length === 1 && rows(v)[0] === el && /^Connection unstable: dropped 2 times, last reconnected T\d+$/.test(el.textContent), el.textContent);
-  ok('…naming the LAST reconnect\'s time', el.textContent.endsWith('T' + v.now), el.textContent);
+  ok('the second cycle patches it again and counts', rows(v).length === 1 && rows(v)[0] === el && verdictOf(/^Connection unstable: dropped 2 times, last reconnected T\d+$/.test(el.textContent)), el.textContent);
+  ok('…naming the LAST reconnect\'s time', verdictOf(el.textContent.endsWith('T' + v.now)), el.textContent);
   const v2 = makeView();
   for (const [ms, words] of [[59000, '59s'], [120000, '2 min'], [7200000, '2 h']]) { const x = makeView(); x.down(); x.up(ms); ok(`out for ${ms} ms reads «${words}»`, x._messageList.children[0]?.textContent === `Reconnected · down ${words}`, x._messageList.children[0]?.textContent); }
   v2.down(); v2.up(0);
@@ -120,7 +120,7 @@ console.log('④ a real message starts a new stretch');
   ok('…which starts over at its first words', rows(v)[1]?.textContent === 'Disconnected from server', rows(v)[1]?.textContent);
   ok('…and the first row keeps its last words', first.textContent === firstWords, first.textContent);
   v.up(); v.down(); v.up();
-  ok('the next cycles patch the NEW row', rows(v).length === 2 && /dropped 2 times/.test(rows(v)[1].textContent) && first.textContent === firstWords, rows(v).map((x) => x.textContent));
+  ok('the next cycles patch the NEW row', rows(v).length === 2 && gateOf(/dropped 2 times/.test(rows(v)[1].textContent)) && first.textContent === firstWords, rows(v).map((x) => x.textContent));
   const u = makeView();
   u.down(); u.up(); u._total++; // a live message the reader has not scrolled to: `_onCreateMessage` counts it and draws nothing
   u.down();
@@ -135,7 +135,7 @@ console.log('④ the row is seen');
   const v = makeView();
   v.down(); v.up(); v.down(); v.up();
   ok('every write to the row tells the view (born, patched, patched again…), so a pinned view follows it', v.paints === 4, v.paints);
-  ok('the view follows only when pinned', /onPaint: \(\) => \{ if \(this\._pinned\) this\._scrollToBottom\(\); \}/.test(cvSrc));
+  ok('the view follows only when pinned', verdictOf(/onPaint: \(\) => \{ if \(this\._pinned\) this\._scrollToBottom\(\); \}/.test(cvSrc)));
 }
 
 console.log('⑤ a rebuild\'s sweep');
@@ -145,7 +145,7 @@ console.log('⑤ a rebuild\'s sweep');
   rows(v)[0].remove(); // `_fullViewReset` / a jump: querySelectorAll('.chat-msg, .chat-msg-system').forEach(remove)
   ok('the sweep takes it (a page reload never shows it again either: it is in no store)', rows(v).length === 0);
   v.down();
-  ok('the same stretch comes back as one row, with its count', rows(v).length === 1 && /dropped 3 times/.test(rows(v)[0].textContent), rows(v).map((x) => x.textContent));
+  ok('the same stretch comes back as one row, with its count', rows(v).length === 1 && verdictOf(/dropped 3 times/.test(rows(v)[0].textContent)), rows(v).map((x) => x.textContent));
 }
 
 console.log('⑤ a row paged over');
@@ -155,7 +155,7 @@ console.log('⑤ a row paged over');
   const paged = new El('div'); paged.className = 'chat-msg chat-msg-assistant'; v._messageList.appendChild(paged); // _extendBottom: a page of history, the count unmoved
   v.down();
   ok('the same stretch goes back to the tail, still one row', rows(v).length === 1 && rows(v)[0] === el && v._messageList.children.at(-1) === el, v._messageList.children.indexOf(el));
-  ok('…and keeps counting', /dropped 2 times/.test(el.textContent), el.textContent);
+  ok('…and keeps counting', verdictOf(/dropped 2 times/.test(el.textContent)), el.textContent);
 }
 
 console.log('⑥ the words say what is true NOW');
@@ -163,7 +163,7 @@ console.log('⑥ the words say what is true NOW');
   const v = makeView();
   v.down(); v.up(); v.down();
   const w = rows(v)[0].textContent;
-  ok('a second drop not yet back never reads as reconnected', /dropped 2 times, disconnected since T/.test(w) && !/reconnected/i.test(w), w);
+  ok('a second drop not yet back never reads as reconnected', gateOf(/dropped 2 times, disconnected since T/.test(w)) && !/reconnected/i.test(w), w);
   const e = makeView();
   e.up();
   ok('an up that answers no drop says nothing', rows(e).length === 0, rows(e).length);
@@ -181,28 +181,28 @@ console.log('⑦ a trim leaves no row outside the cards');
   const bot = build(); cards(bot).at(-1).remove();
   CN?.dropStrandedNotices(bot._messageList, 'bottom');
   ok('after a bottom trim the row below the last card is gone, the one between cards stays', rows(bot).length === 1 && bot._messageList.children.indexOf(rows(bot)[0]) === 1, rows(bot).length);
-  ok('_trimEdge does it, for both sides', /this\._connNotice\?\.dropStranded\(side\);/.test(cvSrc));
+  ok('_trimEdge does it, for both sides', verdictOf(/this\._connNotice\?\.dropStranded\(side\);/.test(cvSrc)));
 }
 
 console.log('⑧ a status row is not a message');
 {
   const v = makeView(); v.down(); const el = rows(v)[0];
   ok('no .chat-msg on it (the trim\'s count and bounds, search and jumpToIndex\'s index landings, the timestamp walks all select on it)', !el.classList.contains('chat-msg'), el.className);
-  ok('.chat-msg-system on it (every rebuild\'s sweep takes it)', el.classList.contains('chat-msg-system'), el.className);
-  ok('the search highlight walks past it', /closest\('\.chat-conn-notice'\)\) continue;/.test(read('src/lib/chat-search.js')));
+  ok('.chat-msg-system on it (every rebuild\'s sweep takes it)', verdictOf(el.classList.contains('chat-msg-system')), el.className);
+  ok('the search highlight walks past it', verdictOf(/closest\('\.chat-conn-notice'\)\) continue;/.test(read('src/lib/chat-search.js'))));
   ok('nothing stores or sends it: the module speaks to one DOM list only', !!CN && !/\b(fetch|WebSocket|localStorage|sessionStorage|\.send\(|showToast)\b/.test(read('src/lib/connection-notice.js')));
   ok('the state handler announces through the notice alone — no toast, no appendSystem', !/showToast|appendSystem/.test(handlerSrc || ''), handlerSrc?.slice(0, 200));
-  ok('the row has its own box: never shrunk in the flex column', /\.chat-conn-notice \{[^}]*flex-shrink: 0/.test(read('public/chat.css')));
+  ok('the row has its own box: never shrunk in the flex column', verdictOf(/\.chat-conn-notice \{[^}]*flex-shrink: 0/.test(read('public/chat.css'))));
 }
 
 console.log('⑨ the reconnect road is untouched');
 {
   const ws = read('src/lib/ws.js');
-  ok('2 s + jitter retry', /setTimeout\(\(\) => this\.connect\(\), 2000 \+ Math\.floor\(Math\.random\(\) \* 1000\)\);/.test(ws));
-  ok('the 401 bounce', /fetch\('\/api\/home'\)\.then\(r => \{ if \(r\.status === 401\) location\.href = '\/login'; \}\)/.test(ws));
-  ok('one state call per real transition', /if \(wasConnected\) \{ this\._outageStart = Date\.now\(\); this\._notifyState\(false\); \}/.test(ws));
-  ok('_reconnectAttach on every reconnect, the queue for a suspended view', /this\._connNotice\.up\(\);\s*\n\s*this\._reconnectAttach\(\);/.test(cvSrc) && /if \(q && this\._suspended && !this\._readOnly && !this\._disposed\) \{/.test(cvSrc));
-  ok('the lagged re-attach by seq', /if \(this\._readOnly \|\| this\._disconnected \|\| this\._disposed\) return;\s*\n\s*this\._reattach\(false\);/.test(cvSrc) && /attachFrame\.sinceSeq = this\._lastSeq;/.test(cvSrc));
+  ok('2 s + jitter retry', verdictOf(/setTimeout\(\(\) => this\.connect\(\), 2000 \+ Math\.floor\(Math\.random\(\) \* 1000\)\);/.test(ws)));
+  ok('the 401 bounce', verdictOf(/fetch\('\/api\/home'\)\.then\(r => \{ if \(r\.status === 401\) location\.href = '\/login'; \}\)/.test(ws)));
+  ok('one state call per real transition', verdictOf(/if \(wasConnected\) \{ this\._outageStart = Date\.now\(\); this\._notifyState\(false\); \}/.test(ws)));
+  ok('_reconnectAttach on every reconnect, the queue for a suspended view', gateOf(/this\._connNotice\.up\(\);\s*\n\s*this\._reconnectAttach\(\);/.test(cvSrc)) && verdictOf(/if \(q && this\._suspended && !this\._readOnly && !this\._disposed\) \{/.test(cvSrc)));
+  ok('the lagged re-attach by seq', gateOf(/if \(this\._readOnly \|\| this\._disconnected \|\| this\._disposed\) return;\s*\n\s*this\._reattach\(false\);/.test(cvSrc)) && verdictOf(/attachFrame\.sinceSeq = this\._lastSeq;/.test(cvSrc)));
 }
 
 console.log('⑩ a slow client is not a dead one');
@@ -287,7 +287,7 @@ console.log('⑩ a slow client is not a dead one');
   { const c = fakeClient(); const tickP = beat(new Set([c]));
     c.queue(6 * MiB); tickP(); c.take(100000); tickP(); const ceil0 = c._hbEpisode?.ceiling;
     c.take(100000); c.pong(); tickP(); const ceil1 = c._hbEpisode?.ceiling;
-    ok('a pong round past the allowance keeps the episode and its ceiling (the heartbeat\'s own memo)', Number.isFinite(ceil0) && ceil1 === ceil0, { ceil0, ceil1 });
+    ok('a pong round past the allowance keeps the episode and its ceiling (the heartbeat\'s own memo)', gateOf(Number.isFinite(ceil0)) && ceil1 === ceil0, { ceil0, ceil1 });
     c.take(6 * MiB); c.pong(); tickP();
     ok('…a round back under the allowance ends it', c._hbEpisode == null, c._hbEpisode); }
   // the backlog is every byte still in user space: the write in flight AND the frames waiting behind it. `socket.bytesWritten` counts both, the handle's
@@ -342,21 +342,21 @@ console.log('⑩ a slow client is not a dead one');
   };
   const within = (r) => r.worst <= 1.0001;
   { const r = burstModel({ R: 46.6e3, P: 48.7e3, S: 4.4e6, T: 30, seed: 0, maxS: 9000 });
-    ok('B1: a burst period just above one round (46.6 KB/s under 48.7 KB/s, 30 s rounds): within the bound (7.8 MiB, cut at 3 210 s)', within(r) && r.cutS != null, r); }
+    ok('B1: a burst period just above one round (46.6 KB/s under 48.7 KB/s, 30 s rounds): within the bound (7.8 MiB, cut at 3 210 s)', gateOf(within(r)) && r.cutS != null, r); }
   { const r = burstModel({ R: 47.9e3, P: 48.5e3, S: 4.4e6, T: 30, seed: 3e6, maxS: 9000 });
-    ok('B1: …47.9 under 48.5 KB/s, 3 MB owed: within the bound (8.9 MiB, cut at 8 520 s)', within(r) && r.cutS != null, r); }
+    ok('B1: …47.9 under 48.5 KB/s, 3 MB owed: within the bound (8.9 MiB, cut at 8 520 s)', gateOf(within(r)) && r.cutS != null, r); }
   { const r = burstModel({ R: 74e3, P: 85e3, S: 8e6, T: 30, seed: 0, maxS: 3600 });
-    ok('B1: …an 8 MB send buffer, 74 under 85 KB/s: within the bound (13 MiB)', within(r) && r.cutS != null, r); }
+    ok('B1: …an 8 MB send buffer, 74 under 85 KB/s: within the bound (13 MiB)', gateOf(within(r)) && r.cutS != null, r); }
   { const R0 = 30e3; const r = burstModel({ R: ({ round }) => (round % 2 === 0 ? 0 : 2 * R0), P: R0 * 1.1, S: 4.4e6, T: 30, seed: 0, maxS: 3600 });
-    ok('B2: a link that stalls a whole round and catches up at twice its rate, under a producer 10 % faster: within the bound (94–137 MiB, kept 12–22 min)', within(r) && r.cutS != null, r); }
+    ok('B2: a link that stalls a whole round and catches up at twice its rate, under a producer 10 % faster: within the bound (94–137 MiB, kept 12–22 min)', gateOf(within(r)) && r.cutS != null, r); }
   { const P = 400e3; const r = burstModel({ R: ({ round, pending, lastPing }) => (round > 2 && pending && round === lastPing + 1 ? 0 : P * 1.002), P, S: 65536, T: 2, seed: 1e6, maxS: 1800 });
-    ok('B2: the ratchet (stall the round after each ping, else read 0.2 % faster than the producer): cut, within the bound (never cut, 30.9 MiB)', within(r) && r.cutS != null, r); }
+    ok('B2: the ratchet (stall the round after each ping, else read 0.2 % faster than the producer): cut, within the bound (never cut, 30.9 MiB)', gateOf(within(r)) && r.cutS != null, r); }
   { const r = burstModel({ R: 400e3, P: 520e3, S: 4.4e6, T: 2, seed: 1e6, maxS: 240 });
-    ok('H1: bursts a round or two apart, the surplus smaller than a burst: cut, within the bound', within(r) && r.cutS != null, r); }
+    ok('H1: bursts a round or two apart, the surplus smaller than a burst: cut, within the bound', gateOf(within(r)) && r.cutS != null, r); }
   { const r = burstModel({ R: 30e3, P: 45e3, S: 4.4e6, T: 30, seed: 1e6, maxS: 1800 });
-    ok('H1: …at the real 30 s round, 30 KB/s under a 45 KB/s terminal: cut, within the bound', within(r) && r.cutS != null, r); }
+    ok('H1: …at the real 30 s round, 30 KB/s under a 45 KB/s terminal: cut, within the bound', gateOf(within(r)) && r.cutS != null, r); }
   { const r = burstModel({ R: 400e3, P: 900e3, S: 4.4e6, T: 2, seed: 1e6, maxS: 60 });
-    ok('the control, a surplus larger than a burst: cut within seconds, within the bound', within(r) && r.cutS != null && r.cutS <= 20, r); }
+    ok('the control, a surplus larger than a burst: cut within seconds, within the bound', gateOf(within(r)) && r.cutS != null && r.cutS <= 20, r); }
   { const r = burstModel({ R: 400e3, P: 250e3, S: 4.4e6, T: 2, seed: 8e6, maxS: 120 });
     ok('a reader that drains in bursts and SHRINKS the backlog across them is kept: no cut while it is past the allowance, ≥ 10 rounds', r.belowS != null && (r.cutS == null || r.cutS > r.belowS) && r.belowS / 2 >= 10, r); }
   { const r = burstModel({ R: 30e3, P: 20e3, S: 4.4e6, T: 30, seed: 8e6, maxS: 1800 });
@@ -383,13 +383,13 @@ console.log('⑪ the words exist in zh + ja');
 {
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   { // the row's time (主开发's PICK A read: «07:38 PM» inside a Chinese sentence): the product's own clock for the owner, never the browser's locale
-    ok('the view hands the notice the owner\'s clock (timeOn: the page\'s zone, 24-hour)', /import \{ timeOn \} from '\.\/owner-facts\.js';/.test(cvSrc) && /createConnectionNotice\(\{[^\n]*clock: \(at\) => timeOn\(this\.app, at\)/.test(cvSrc));
+    ok('the view hands the notice the owner\'s clock (timeOn: the page\'s zone, 24-hour)', gateOf(/import \{ timeOn \} from '\.\/owner-facts\.js';/.test(cvSrc)) && verdictOf(/createConnectionNotice\(\{[^\n]*clock: \(at\) => timeOn\(this\.app, at\)/.test(cvSrc)));
     const WW = fs.existsSync(path.join(REPO, 'src/when-words.js')) ? require(path.join(REPO, 'src/when-words.js')) : null;
     const at = Date.UTC(2026, 10, 13, 3, 38), words = WW?.timeOf?.(at, 'Asia/Shanghai');
-    ok('…which reads 24-hour words with its zone, never AM / PM', words === '11:38 GMT+8' || /^11:38 \S+$/.test(words || ''), words);
+    ok('…which reads 24-hour words with its zone, never AM / PM', words === '11:38 GMT+8' || verdictOf(/^11:38 \S+$/.test(words || '')), words);
   }
   for (const k of ['Disconnected from server', 'Reconnected · down {duration}', 'Connection unstable: dropped {n} times, last reconnected {time}', 'Connection unstable: dropped {n} times, disconnected since {time}', 'First dropped at {time}']) {
-    ok(`«${k}»`, zh.includes(`"${k}":`) && ja.includes(`"${k}":`));
+    ok(`«${k}»`, gateOf(zh.includes(`"${k}":`)) && verdictOf(ja.includes(`"${k}":`)));
   }
   ok('the retired row word left both dictionaries', !zh.includes('"Reconnected":') && !ja.includes('"Reconnected":'));
 }
@@ -397,14 +397,14 @@ console.log('⑪ the words exist in zh + ja');
 console.log('⑫ the Resume dialog prints words, not tags (addendum 1)');
 {
   const lay = read('src/lib/layout.js'), utils = read('src/lib/utils.js');
-  ok('showConfirmDialog prints its message as text — so a tag in it shows, literally', /p\.textContent = message;/.test(utils));
+  ok('showConfirmDialog prints its message as text — so a tag in it shows, literally', verdictOf(/p\.textContent = message;/.test(utils)));
   const expr = /async _offerResumeAll\(stopped\) \{[\s\S]*?message: ([\s\S]*?),\n\s*confirmText:/.exec(lay)?.[1];
   ok('the tree has the offer this leg renders', !!expr);
   const shown = (ended, locked = false) => { const p = new El('p'); p.textContent = new Function('t', 'stopped', 'ended', 'locked', `return ${expr}`)(t, [1, 2, 3], ended, locked); return p.textContent; };
   for (const ended of [0, 2]) ok(`no literal tag in what the person reads (${ended} ended)`, !/<\/?\w/.test(shown(ended)), shown(ended));
-  ok('…nor while the vault is locked (B-864f: the offer says to unlock first)', !/<\/?\w/.test(shown(2, true)) && /Resume all of them now\? 2 of them stopped[^]* The vault is locked: /.test(shown(2, true)), shown(2, true));
-  ok('…and it still says how many', /^3 sessions were interrupted/.test(shown(0)), shown(0));
-  ok('…and the second sentence is its own', /Resume all of them now\? 2 of them stopped/.test(shown(2)), shown(2));
+  ok('…nor while the vault is locked (B-864f: the offer says to unlock first)', !/<\/?\w/.test(shown(2, true)) && verdictOf(/Resume all of them now\? 2 of them stopped[^]* The vault is locked: /.test(shown(2, true))), shown(2, true));
+  ok('…and it still says how many', verdictOf(/^3 sessions were interrupted/.test(shown(0))), shown(0));
+  ok('…and the second sentence is its own', verdictOf(/Resume all of them now\? 2 of them stopped/.test(shown(2))), shown(2));
   const entry = (d) => new RegExp('"\\{n\\} sessions were interrupted[^"]*": "([^"]*)"').exec(d)?.[1] || '';
   for (const [name, d] of [['zh', read('src/lib/i18n-zh.js')], ['ja', read('src/lib/i18n-ja.js')]]) ok(`${name}: the sentence exists, tag-free`, !!entry(d) && !/</.test(entry(d)), entry(d));
 }
@@ -450,7 +450,7 @@ console.log('⑬ a cycle nobody could have noticed is not a notice');
     p.drop();
     ok('an awake page: a drop is the notice at once', words(p).length === 1 && words(p)[0] === 'Disconnected from server', words(p));
     p.pass(4000); p.back(); p.answer(false);
-    ok('…counted, whatever the re-attach answers', p.n() === 1 && /^Reconnected · down 4s$/.test(words(p)[0]), words(p)); }
+    ok('…counted, whatever the re-attach answers', p.n() === 1 && verdictOf(/^Reconnected · down 4s$/.test(words(p)[0])), words(p)); }
   { const p = makePage();
     p.freeze(); p.pass(1000); p.resume(); p.pass(GRACE + 1); p.drop();
     ok('a drop past the grace after a wake is an awake drop', rows(p.v).length === 1 && p.n() === 1, words(p)); }
@@ -459,7 +459,7 @@ console.log('⑬ a cycle nobody could have noticed is not a notice');
     ok('a drop inside the grace still began asleep', rows(p.v).length === 0 && p.n() === 0, words(p)); }
   { const p = makePage();
     p.drop(); p.pass(1000); p.hide(); p.pass(1000); p.back(); p.answer(false); p.show();
-    ok('a cycle that began awake stays told when the page then sleeps', rows(p.v).length === 1 && p.n() === 1 && /^Reconnected/.test(words(p)[0]), words(p)); }
+    ok('a cycle that began awake stays told when the page then sleeps', rows(p.v).length === 1 && p.n() === 1 && verdictOf(/^Reconnected/.test(words(p)[0])), words(p)); }
 
   { const p = makePage();
     p.freeze(); p.pass(600000); p.resume(); p.drop(); p.pass(3000); p.back();
@@ -470,13 +470,13 @@ console.log('⑬ a cycle nobody could have noticed is not a notice');
     p.answer(true);
     ok('…told once', p.n() === 1, p.n());
     p.pass(GRACE + 1); p.drop(); p.pass(1000); p.back();
-    ok('…awake-class: the next awake drop counts on from it', rows(p.v).length === 1 && /dropped 2 times/.test(words(p)[0]), words(p)); }
+    ok('…awake-class: the next awake drop counts on from it', rows(p.v).length === 1 && verdictOf(/dropped 2 times/.test(words(p)[0])), words(p)); }
 
   { const p = makePage();
     p.drop(); p.pass(1000); p.back();
     for (let i = 0; i < 5; i++) { p.pass(60000); p.freeze(); p.pass(60000); p.resume(); p.drop(); p.pass(3000); p.back(); p.answer(false); }
     p.pass(GRACE + 1); p.drop(); p.pass(1000); p.back();
-    ok('«断开 N 次» counts awake outages only: 2 awake + 5 unlocks reads 2', rows(p.v).length === 1 && /dropped 2 times/.test(words(p)[0]), words(p)); }
+    ok('«断开 N 次» counts awake outages only: 2 awake + 5 unlocks reads 2', rows(p.v).length === 1 && verdictOf(/dropped 2 times/.test(words(p)[0])), words(p)); }
 
   { const p = makePage();
     p.freeze(); p.pass(5000); p.resume(); p.drop(); p.pass(WINDOW - 1);
@@ -529,7 +529,7 @@ console.log('⑬ a cycle nobody could have noticed is not a notice');
     ok('…the same through a missed answer (a rebuild after a hub restart): the socket\'s own clock', words(p)[0] === 'Reconnected · down 4s', words(p)); }
   { const p = makePage();
     p.hide(); p.pass(1000); p.freeze(); p.pass(600000); p.resume(); p.show(); p.drop(); p.pass(3000); p.back(); p.answer(true);
-    ok('a sleep that froze still dates its row: no code ran', /^Reconnected · down 10 min$/.test(words(p)[0] || ''), words(p)); }
+    ok('a sleep that froze still dates its row: no code ran', verdictOf(/^Reconnected · down 10 min$/.test(words(p)[0] || '')), words(p)); }
   { const p = makePage();
     p.freeze(); p.pass(600000); p.resume(); p.pass(60000);
     p.hide(); p.pass(2 * 3600000); p.show(); p.pass(3000); p.drop(); p.pass(4000); p.back(); p.answer(true);
@@ -562,7 +562,7 @@ console.log('⑬ a cycle nobody could have noticed is not a notice');
     const two = [0, 1].map(() => { const list = new El('div'); list.isRoot = true; return { list, n: CN?.createConnectionNotice({ list: () => list, t, total: () => 0, now: () => at, clock: (x) => 'T' + x, doc, life, onPaint() {} }) }; });
     fire('freeze'); at += 600000; fire('resume');
     for (const v of two) v.n?.down(); at += 2000; for (const v of two) v.n?.up(); for (const v of two) v.n?.answered?.(true);
-    ok('every view on the page dates the same close from the sleep: one view\'s reconnect spends it for the NEXT drop, not for its neighbours', two.every((v) => v.list.children[0]?.textContent === 'Reconnected · down 10 min'), two.map((v) => v.list.children[0]?.textContent)); }
+    ok('every view on the page dates the same close from the sleep: one view\'s reconnect spends it for the NEXT drop, not for its neighbours', verdictOf(two.every((v) => v.list.children[0]?.textContent === 'Reconnected · down 10 min')), two.map((v) => v.list.children[0]?.textContent)); }
 
   console.log('⑬ the page\'s own lifecycle');
   { const lis = {}, doc = { visibilityState: 'visible', addEventListener: (k, f) => { (lis[k] ||= []).push(f); } }, fire = (k) => { for (const f of lis[k] || []) f(); };
@@ -600,8 +600,8 @@ console.log('⑬ a cycle nobody could have noticed is not a notice');
     ok('a miss on the rebuild road waits for the rebuild: its sweep would take the row', rows(p.v).length === 0 && p.v._connNoticeOwed === true, p.v._connNoticeOwed);
     if (owedSrc) new Function(owedSrc).call(p.v);
     ok('…and the rebuild pays it, once', rows(p.v).length === 1 && p.v._connNoticeOwed === false && p.n() === 1, p.n()); }
-  ok('the rebuild pays AFTER its slab and drain', /this\._drainResetQueue\(held, msg\);\s*\n\s*if \(this\._connNoticeOwed\)/.test(cvSrc));
-  ok('the view stands its window down when it dies', /this\._disposed = true;\s*\n\s*this\._connNotice\?\.dispose\(\);/.test(cvSrc));
+  ok('the rebuild pays AFTER its slab and drain', verdictOf(/this\._drainResetQueue\(held, msg\);\s*\n\s*if \(this\._connNoticeOwed\)/.test(cvSrc)));
+  ok('the view stands its window down when it dies', verdictOf(/this\._disposed = true;\s*\n\s*this\._connNotice\?\.dispose\(\);/.test(cvSrc)));
   ok('the notice reads no socket: the re-attach road tells it, the road itself sends the same frame', !!CN && !/\.send\(|sinceSeq/.test(read('src/lib/connection-notice.js'))); // !!CN: an older tree has no such file, and a RED run reads to its last row
 }
 
@@ -611,8 +611,8 @@ console.log('⑭ one rule, one measurement');
   const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
   const hb = code(read('src/server/ws-heartbeat.js')), ka = code(read('src/ws-keepalive.js'));
   ok('the keepalive owns the measurement', typeof KA.drainMark === 'function');
-  ok('the heartbeat reads the keepalive\'s verdict over it', /require\('\.\.\/ws-keepalive'\)/.test(hb) && /drainVerdict\(client\._hbEpisode/.test(hb) && /const heard = livenessVerdict\(round\)/.test(ka));
-  ok('the stream bridges read the rule alone: their own high-water stops their producer, so they never read `losing`', /const heard = livenessVerdict\(\{ pong: false, inbound,/.test(ka));
+  ok('the heartbeat reads the keepalive\'s verdict over it', gateOf(/require\('\.\.\/ws-keepalive'\)/.test(hb)) && gateOf(/drainVerdict\(client\._hbEpisode/.test(hb)) && verdictOf(/const heard = livenessVerdict\(round\)/.test(ka)));
+  ok('the stream bridges read the rule alone: their own high-water stops their producer, so they never read `losing`', verdictOf(/const heard = livenessVerdict\(\{ pong: false, inbound,/.test(ka)));
   ok('…and keeps no rule or measurement of its own', !/function drainMark/.test(hb) && !/\.queued > 0/.test(hb) && !/writeQueueSize/.test(hb));
   const kaOutsideMark = ka.replace(/function drainMark[\s\S]*?\n\}\n/, '');
   ok('the keepalive reads no second measurement', !/bytesWritten|writableLength|bufferedAmount/.test(kaOutsideMark), (kaOutsideMark.match(/bytesWritten|writableLength|bufferedAmount/g) || []).length);
@@ -625,7 +625,7 @@ console.log('⑭ one rule, one measurement');
     for (let i = 0; i < 8; i++) { a.take(800000); a.round(); }
     ok('inside ONE frame the keepalive now sees the bytes move: spared for as long as they do', a.s.terminated === 0, a.s.drops); }
   { const a = armed(); a.queue(12582912); a.round(); a.round();
-    ok('a frame that does not move is cut on time', a.s.terminated === 1 && /nothing acknowledged/.test(a.s.drops[0] || ''), a.s.drops); }
+    ok('a frame that does not move is cut on time', a.s.terminated === 1 && verdictOf(/nothing acknowledged/.test(a.s.drops[0] || '')), a.s.drops); }
   { const a = armed(); a.round(); a.ws._socket._bytesDispatched += 200; a.round();
     ok('a trickle swallowed by a kernel with room is no drain: a ghost is cut on time', a.s.terminated === 1, a.s.drops); }
 }
@@ -655,7 +655,7 @@ console.log('\n⑮ B-8165: the wake toast only when the page fell behind (frames
     settle: /\}, CATCH_UP_SETTLE_MS\);/.test(tick),
   });
   const live = judge(tickOf(cj), wsj);
-  ok('⑮ WIRING: ws.js counts every handled frame; the count before the gap is the freeze\'s (else the wake\'s own); the wake measured and the belt run at once; the ONE toast waits for the settle, a visible page and fellBehind', Object.values(live).every(Boolean), live);
+  ok('⑮ WIRING: ws.js counts every handled frame; the count before the gap is the freeze\'s (else the wake\'s own); the wake measured and the belt run at once; the ONE toast waits for the settle, a visible page and fellBehind', verdictOf(Object.values(live).every(Boolean)), live);
   // the tick's own text over a stub world: a freeze (the browser's `freeze` event), a 70 s gap, the frames after the wake; a page
   // only throttled (no freeze, frames handled live); a page still hidden at the settle
   const drive = (tick, { after = 0, freeze = true, live = 0, visible = true } = {}) => {
@@ -674,12 +674,12 @@ console.log('\n⑮ B-8165: the wake toast only when the page fell behind (frames
   const tick = tickOf(cj);
   const quiet = drive(tick), busy = drive(tick, { after: 3 }), throttled = drive(tick, { freeze: false, live: 9 }), hidden = drive(tick, { after: 3, visible: false });
   ok('⑮ the tick\'s own text: a 70 s freeze with NOTHING missed ⇒ the wake measured at once («70s», the release\'s event), the belt run, NO toast', quiet.toasts.length === 0 && quiet.belts.length === 1 && quiet.evs.length === 1 && quiet.evs[0][1] === 'page-suspend-wake' && quiet.evs[0][2] === '70s', JSON.stringify(quiet));
-  ok('⑮ …the same freeze with three frames it had missed ⇒ the toast «Browser suspended this page for 70s — caught up now»', busy.toasts.length === 1 && /for 70s — caught up now/.test(busy.toasts[0]), JSON.stringify(busy));
+  ok('⑮ …the same freeze with three frames it had missed ⇒ the toast «Browser suspended this page for 70s — caught up now»', busy.toasts.length === 1 && verdictOf(/for 70s — caught up now/.test(busy.toasts[0])), JSON.stringify(busy));
   ok('⑮ …a page only THROTTLED (hidden: one timer a minute — no freeze) that handled nine frames live in the gap ⇒ NO toast; a page still hidden at the settle ⇒ NO toast', throttled.toasts.length === 0 && throttled.evs.length === 1 && hidden.toasts.length === 0, JSON.stringify({ throttled, hidden }));
   let base = ''; try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/client.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
-  if (base) { const b = judge(tickOf(base), wsj); ok('⑮ RED CONTROL: the release b06f36e90\'s tick toasts on EVERY wake over 45 s (no count, no settle) — the legs above can go red', !b.before && !b.gated && /showToast\(t\('Browser suspended this page for \{n\}s — caught up now'/.test(tickOf(base)), b); }
+  if (base) { const b = judge(tickOf(base), wsj); ok('⑮ RED CONTROL: the release b06f36e90\'s tick toasts on EVERY wake over 45 s (no count, no settle) — the legs above can go red', !b.before && !b.gated && verdictOf(/showToast\(t\('Browser suspended this page for \{n\}s — caught up now'/.test(tickOf(base))), b); }
   else console.log('  · SKIP: the release b06f36e90 is not in this clone');
 }
 
 console.log(fail ? `\nFAILED: ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

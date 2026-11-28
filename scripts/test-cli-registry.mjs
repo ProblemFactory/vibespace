@@ -49,7 +49,7 @@ if (process.argv.includes('--write-index')) {
 }
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 
 // What sits in data/bin that is NOT an agent CLI — each with its reason (like test-architecture §43). A name here and a
 // row is RED (exactly one); a reason no census input names any more is RED (a dead reason hides the next one).
@@ -152,28 +152,28 @@ const mutate = (name, patch) => REG.ROWS.map((r) => (r.name === name ? { ...r, .
 console.log('— ① the census: every bin has exactly one row or one reason');
 {
   const inputs = censusInputs();
-  ok(inputs.written.includes('vibespace-status') && inputs.tracked.includes('vibespace-docs') && inputs.shipped.includes('vibespace-msg') && inputs.built.length > 0,
+  ok(gateOf(inputs.written.includes('vibespace-status')) && gateOf(inputs.tracked.includes('vibespace-docs')) && gateOf(inputs.shipped.includes('vibespace-msg')) && inputs.built.length > 0,
     `the inputs are read (non-vacuous): ${inputs.written.length} written by the generators, ${inputs.tracked.length} tracked, ${inputs.shipped.length} shipped, ${inputs.built.length} built`);
   const bad = censusProblems(inputs);
   ok(bad.length === 0, `${REG.ROWS.length} rows + ${Object.keys(EXCLUDED).length} EXCLUDED cover every name, each once`, bad);
   const mut = censusProblems(censusInputs({ generators: read('src/server/agent-tool-generators.js') + "\nconst X = path.join(AGENT_BIN_DIR, 'vibespace-mutant');\n" }));
-  ok(mut.length === 1 && /vibespace-mutant \(written\) has no registry row/.test(mut[0]), 'MUTANT: the generators write a vibespace-mutant with no row ⇒ RED', mut);
-  ok(censusProblems({ ...inputs, tracked: [...inputs.tracked, 'vibespace-stray'] }).some((p) => /vibespace-stray \(tracked\)/.test(p)), 'MUTANT: a tracked data/bin/vibespace-stray with no row ⇒ RED');
-  ok(censusProblems(inputs, REG.ROWS, { ...EXCLUDED, 'vibespace-gone': 'x' }).some((p) => /dead reason/.test(p)) && censusProblems(inputs, REG.ROWS, { ...EXCLUDED, 'vibespace-msg': 'x' }).some((p) => /row AND excluded/.test(p)), 'a dead EXCLUDED reason, or a name both a row and excluded ⇒ RED');
+  ok(mut.length === 1 && verdictOf(/vibespace-mutant \(written\) has no registry row/.test(mut[0])), 'MUTANT: the generators write a vibespace-mutant with no row ⇒ RED', mut);
+  ok(verdictOf(censusProblems({ ...inputs, tracked: [...inputs.tracked, 'vibespace-stray'] }).some((p) => /vibespace-stray \(tracked\)/.test(p))), 'MUTANT: a tracked data/bin/vibespace-stray with no row ⇒ RED');
+  ok(gateOf(censusProblems(inputs, REG.ROWS, { ...EXCLUDED, 'vibespace-gone': 'x' }).some((p) => /dead reason/.test(p))) && verdictOf(censusProblems(inputs, REG.ROWS, { ...EXCLUDED, 'vibespace-msg': 'x' }).some((p) => /row AND excluded/.test(p))), 'a dead EXCLUDED reason, or a name both a row and excluded ⇒ RED');
   // every CLI a teaching surface names is a row (tags like <vibespace-reminder> are not names); the no-group intro too —
   // its own lines are not rendered from the rows (its 4 096 B budget, its browser facts), so this is what holds it
   const set = { attachments: [{ alias: 'work', isDefault: true, profileId: 'bp-00000001' }, { alias: 'personal', isDefault: false, profileId: 'bp-00000002' }] };
   const surfaces = [...teachingShapes().map((s) => s.text), ...['D', 'none', 'H'].map((v) => AR.sessionToolsIntro(T_ALL('read'), { browserVariant: v, browserSet: set, fileTools })), REG.renderIndex(), read(INDEX_FILE)];
   const named = new Set(surfaces.flatMap((t) => [...t.matchAll(/(?<![<\/\w-])vibespace-[a-z][a-z-]*[a-z]/g)].map((m) => m[0])));
   const rowNames = new Set(REG.ROWS.map((r) => r.name));
-  ok([...named].every((n) => rowNames.has(n)) && named.size >= 10, `every CLI the surfaces name is a row (${named.size}: ${[...named].sort().join(' ')})`, [...named].filter((n) => !rowNames.has(n)));
+  ok(gateOf([...named].every((n) => rowNames.has(n))) && named.size >= 10, `every CLI the surfaces name is a row (${named.size}: ${[...named].sort().join(' ')})`, [...named].filter((n) => !rowNames.has(n)));
 }
 
 console.log('— ② the rows');
 {
   ok(rowProblems().length === 0, `${REG.ROWS.length} rows: unique names and topics, a known gate, every manual on disk, every summary one line ≤ ${REG.CAPS.summary} B (widest ${Math.max(...REG.ROWS.map((r) => B(r.summary)))} B)`, rowProblems());
   for (const r of REG.ROWS) console.log(`     ${r.name.padEnd(19)} ${r.topic.padEnd(9)} ${r.gate.padEnd(9)} ${String(B(r.summary)).padStart(3)} B  ${r.teach ? 'taught' : 'index-only'}`);
-  ok(rowProblems(mutate('vibespace-exit', () => ({ summary: 'x'.repeat(2048) }))).some((p) => /vibespace-exit: summary 2048 B/.test(p)), 'MUTANT: a 2 KB summary ⇒ RED');
+  ok(verdictOf(rowProblems(mutate('vibespace-exit', () => ({ summary: 'x'.repeat(2048) }))).some((p) => /vibespace-exit: summary 2048 B/.test(p))), 'MUTANT: a 2 KB summary ⇒ RED');
   ok(rowProblems(mutate('vibespace-page', () => ({ gate: 'pages' }))).length === 1 && rowProblems(mutate('vibespace-page', () => ({ manual: 'nope-manual.md' }))).length === 1, 'MUTANT: a gate the hook never evaluates, a manual not on disk ⇒ RED');
   const taught = REG.ROWS.filter((r) => r.teach).map((r) => r.topic), indexOnly = REG.ROWS.filter((r) => !r.teach).map((r) => r.topic);
   ok(taught.join(' ') === 'status ask task jobs channels msg feedback index' && indexOnly.join(' ') === 'pages design exit remote window browser apps vault api' /* lane vault-e2e-password: + vibespace-vault; design q-046: + vibespace-api */, `taught rows: ${taught.join(' ')} · index-only: ${indexOnly.join(' ')} (no injected bytes for them)`);
@@ -187,11 +187,11 @@ console.log('— ③ the caps (every gate open, the widest shape)');
   const big = 'x'.repeat(2048);
   const m1 = capProblems(mutate('vibespace-status', (r) => ({ teach: { ...r.teach, sessionStart: () => big } })));
   const m2 = capProblems(mutate('vibespace-job', (r) => ({ teach: { ...r.teach, reminder: () => big } })));
-  ok(m1.length === 1 && /SessionStart section/.test(m1[0]) && m2.length === 1 && /reminder line/.test(m2[0]), `MUTANT: a 2 KB paragraph / a 2 KB segment ⇒ RED (${m1[0]} · ${m2[0]})`);
+  ok(m1.length === 1 && gateOf(/SessionStart section/.test(m1[0])) && m2.length === 1 && verdictOf(/reminder line/.test(m2[0])), `MUTANT: a 2 KB paragraph / a 2 KB segment ⇒ RED (${m1[0]} · ${m2[0]})`);
   // a new taught row pays its bytes into the same caps: a row the size of the channels one fits the reminder once
   const extra = { name: 'vibespace-extra', topic: 'extra', manual: 'pages-manual.md', gate: 'always', summary: 's', teach: { sessionStart: () => REG.CHANNELS_SECTION_LINES.read, reminder: () => REG.CHANNELS_REMINDER_SEG.read } };
   const mx = capProblems([...REG.ROWS, extra]);
-  ok(mx.some((p) => /SessionStart/.test(p)), `a seventh taught row with a channels-size paragraph is RED on the SessionStart cap (${mx.join('; ')})`);
+  ok(verdictOf(mx.some((p) => /SessionStart/.test(p))), `a seventh taught row with a channels-size paragraph is RED on the SessionStart cap (${mx.join('; ')})`);
 }
 
 // lane resume-words (the owner 2026-10-29: an agent read the CLI's «resets at …» as the time IT may continue): the
@@ -219,15 +219,15 @@ console.log('— ③b the standing rules (a usage wall\'s reset is one account\'
     return bad;
   };
   const now = ruleProblems(REG.STANDING_RULES);
-  ok(Array.isArray(REG.STANDING_RULES) && Object.isFrozen(REG.STANDING_RULES) && now.length === 0, `the standing rules carry their facts and ride the section (${(REG.STANDING_RULES || []).map((r) => `${r.id} ${B(r.text({ status: true }))} B`).join(', ')})`, now);
+  ok(gateOf(Array.isArray(REG.STANDING_RULES)) && gateOf(Object.isFrozen(REG.STANDING_RULES)) && now.length === 0, `the standing rules carry their facts and ride the section (${(REG.STANDING_RULES || []).map((r) => `${r.id} ${B(r.text({ status: true }))} B`).join(', ')})`, now);
   const shapes = teachingShapes().filter((x) => /^section · /.test(x.name));
-  ok(shapes.length >= 7 && shapes.every((x) => !x.text || /\nUSAGE WALLS: /.test(x.text)) && shapes.filter((x) => x.text).length >= 6, `every SessionStart shape the hook renders carries USAGE WALLS (${shapes.filter((x) => x.text).length} rendered; every toggle off renders nothing)`);
+  ok(shapes.length >= 7 && gateOf(shapes.every((x) => !x.text || /\nUSAGE WALLS: /.test(x.text))) && shapes.filter((x) => x.text).length >= 6, `every SessionStart shape the hook renders carries USAGE WALLS (${shapes.filter((x) => x.text).length} rendered; every toggle off renders nothing)`);
   const off = REG.renderSessionStartTools({ ask: true, task: true, jobs: true }, {}).join('\n');
-  ok(/\nUSAGE WALLS: /.test(off) && !/vibespace-status/.test(off) && /If you must wait, say so and stop — never a backlog item "after the reset"\./.test(off), 'the status toggle closed: the rule still rides, and teaches no vibespace-status (2.211.0)');
+  ok(gateOf(/\nUSAGE WALLS: /.test(off)) && !/vibespace-status/.test(off) && verdictOf(/If you must wait, say so and stop — never a backlog item "after the reset"\./.test(off)), 'the status toggle closed: the rule still rides, and teaches no vibespace-status (2.211.0)');
   const removed = ruleProblems((REG.STANDING_RULES || []).filter((r) => r.id !== 'usage-walls'));
   ok(removed.length === 1 && removed[0] === 'usage-walls: no standing rule row', `CONTROL: the usage-walls row removed ⇒ RED by name (${removed[0]})`);
   const gutted = ruleProblems((REG.STANDING_RULES || []).map((r) => (r.id === 'usage-walls' ? { ...r, text: () => 'USAGE WALLS: wait for the reset.' } : r)));
-  ok(gutted.length === 6 && gutted.every((p) => /^usage-walls: lost /.test(p)), `CONTROL: its facts gutted ⇒ RED by name, fact by fact (${gutted.length})`);
+  ok(gutted.length === 6 && verdictOf(gutted.every((p) => /^usage-walls: lost /.test(p))), `CONTROL: its facts gutted ⇒ RED by name, fact by fact (${gutted.length})`);
   const dropped = ruleProblems(REG.STANDING_RULES).length === 0 && REG.renderSessionStartTools(TT, {}, REG.ROWS, []).join('\n').includes('USAGE WALLS');
   ok(!dropped, 'CONTROL: a section rendered without the rules carries no USAGE WALLS (the paragraph is the rule\'s, not a row\'s)');
 }
@@ -259,17 +259,17 @@ console.log('— ④ the renders (pinned per shape: the 4a14bcc2 render, or a pi
 console.log('— ⑤ the index, the topics, the gates');
 {
   const idx = REG.renderIndex();
-  ok(REG.ROWS.every((r) => idx.includes(`| \`${r.topic}\` | \`${r.name}\` | `) && idx.includes(r.summary.replace(/\|/g, '\\|'))), `renderIndex: one table row per registry row (${REG.ROWS.length}), each with its summary, + the usage line`);
+  ok(verdictOf(REG.ROWS.every((r) => idx.includes(`| \`${r.topic}\` | \`${r.name}\` | `) && idx.includes(r.summary.replace(/\|/g, '\\|')))), `renderIndex: one table row per registry row (${REG.ROWS.length}), each with its summary, + the usage line`);
   const md = read(INDEX_FILE);
   ok(withIndex(md, idx) === md, `${INDEX_FILE}'s generated block equals renderIndex() (else: node scripts/test-cli-registry.mjs --write-index)`);
   ok(withIndex(md, idx + '\n| `x` | `vibespace-x` | drift | `vibespace-docs x` |') !== md, 'CONTROL: a hand-added table row is a different file (the judge sees drift)');
   const want = Object.fromEntries(REG.ROWS.flatMap((r) => [r.topic, ...(r.aliases || [])].map((t) => [t, r.manual])));
   ok(JSON.stringify(AR.AGENT_DOC_TOPICS) === JSON.stringify(want) && AR.AGENT_DOC_TOPICS.index === 'index-manual.md' && AR.AGENT_DOC_TOPICS.app === AR.AGENT_DOC_TOPICS.apps, `AGENT_DOC_TOPICS (the docs route's) = the rows' topics + aliases (${Object.keys(want).join(' ')})`);
-  ok(/process\.argv\[2\] \|\| 'index'/.test(read('data/bin/vibespace-docs')), '`vibespace-docs` with no argument asks for the index topic (the rendered list + the usage line)');
+  ok(verdictOf(/process\.argv\[2\] \|\| 'index'/.test(read('data/bin/vibespace-docs'))), '`vibespace-docs` with no argument asks for the index topic (the rendered list + the usage line)');
   // a closed gate omits its row from EVERY surface — the section, the reminder's segment, the docs pointer
   const T4 = { status: true, ask: true, task: true, jobs: true };
   const surf = (T) => fullSection(T, false) + '\n' + REG.renderReminderLine(T, {});
-  ok(!/vibespace-channels|\|channels|vibespace-docs channels/.test(surf(T4)) && /vibespace-channels/.test(surf(T_ALL('read'))) && REG.pointerTopics(T_ALL('read')).includes('channels'), 'no reach ⇒ no vibespace-channels, no `channels` topic anywhere; with reach ⇒ both');
+  ok(!/vibespace-channels|\|channels|vibespace-docs channels/.test(surf(T4)) && gateOf(/vibespace-channels/.test(surf(T_ALL('read')))) && verdictOf(REG.pointerTopics(T_ALL('read')).includes('channels')), 'no reach ⇒ no vibespace-channels, no `channels` topic anywhere; with reach ⇒ both');
   const off = surf({ ...T4, status: false });
   ok(!/vibespace-status|status\|/.test(off) && REG.pointerTopics({ ...T4, status: false })[0] === 'ask', 'status toggled off ⇒ no vibespace-status in the section or the reminder, no `status` in the docs pointer');
   ok(REG.renderSessionStartTools({ status: false, ask: false, task: false, jobs: false }).length === 0 && REG.renderSessionStartTools({ status: false, ask: false, task: false, jobs: false, channels: 'read' }).length > 0, 'every toggle and the reach closed ⇒ no section (the msg pointer never rides alone); reach alone opens it');
@@ -277,4 +277,4 @@ console.log('— ⑤ the index, the topics, the gates');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -62,8 +62,8 @@ let pass = 0, fail = 0;
 // exactly that page during the road (a product that never goes there leaves none: its leg stays a red).
 const auxKept = []; let skipped = 0;
 const keptSince = (k0, url) => auxKept.slice(k0).some((x) => x.url === url);
-const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, c, e); };
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, verdictOf(c), e); };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (no rebuild: overlays the built public/) ──
@@ -335,27 +335,27 @@ try {
     console.log(`  · shipped ${JSON.stringify(G).slice(0, 2400)}`);
     const C = cache === 'off' ? 'I' : 'II';
     check(`${C}⑨ RED (round 4): a tap 4 s into the exit, after the stay (the older document's HTML at 6 s) — it only dropped the intent: the older document LOADED and booted (the person yanked to it)`,
-      !!R.tap && R.tap.armed && R.tap.held >= 1 && !R.tap.same && R.tap.onApp && R.tap.loads === 1, R.tap);
+      !!R.tap && gateOf(R.tap.armed) && R.tap.held >= 1 && !R.tap.same && gateOf(R.tap.onApp) && R.tap.loads === 1, R.tap);
     check(`${C}⑨ the shipped rules: the tap's step DOWN onto the page's own entry ABORTS the suspended go() — the page stays, re-armed (rearm why input-late), the older document never loads`,
-      G.tap.armed && G.tap.held >= 1 && G.tap.same && G.tap.st?.vs === 1 && G.tap.loads === 0 && /cancelled rearm:cancelled rearm:input-late\b/.test(G.tap.rows), G.tap);
+      gateOf(G.tap.armed) && G.tap.held >= 1 && gateOf(G.tap.same) && G.tap.st?.vs === 1 && G.tap.loads === 0 && verdictOf(/cancelled rearm:cancelled rearm:input-late\b/.test(G.tap.rows)), G.tap);
     // the boot's cost row is its verdict — the capture itself is one per tab per half hour (⑨'s RED road filed one already)
     judged(`${C}⑩ RED (round 4): a chain of slow pages (the older document at 3.5 s, the page before VibeSpace at 10 s) — the older document went on, stayed at its own bound and booted: «a slow exit» FILED (its boot's cost row why slow)`,
       R.chain, !!R.chain && R.chain.armed && R.chain.held >= 2 && R.chain.outside && /hop1 hop-stay:cancelled cost:slow\b/.test(R.chain.rows) && R.chain.incidents.every((x) => /a slow exit/.test(x)), R.chain);
     judged(`${C}⑩ the shipped rules: the same chain — the tab outside, the diary tells it (hop 1, hop stay why cancelled, hop slow), NOTHING filed`,
       G.chain, G.chain.armed && G.chain.held >= 2 && G.chain.outside && G.chain.incidents.length === 0 && /slow:\d+ hop1 hop-stay:cancelled hop-slow:\d+/.test(G.chain.rows) && !/cost:/.test(G.chain.rows), G.chain);
     check(`${C}⑪ RED (round 4): a #fragment link followed 4 s into the exit ended the late watch — no slow row, no re-key: the older document booted with no intent and filed NOTHING (the owner's silent load)`,
-      !!R.frag && R.frag.armed && R.frag.held >= 1 && R.frag.onApp && R.frag.booted && !/slow:/.test(R.frag.rows) && R.frag.incidents.length === 0, R.frag);
+      !!R.frag && gateOf(R.frag.armed) && R.frag.held >= 1 && gateOf(R.frag.onApp) && gateOf(R.frag.booted) && !/slow:/.test(R.frag.rows) && R.frag.incidents.length === 0, R.frag);
     check(`${C}⑪ the shipped rules: the fragment link aborts nothing and ends no watch — the late commit told (leave slow), the intent re-keyed: the older document goes on, the tab outside, nothing filed`,
-      G.frag.armed && G.frag.held >= 1 && G.frag.outside && G.frag.loads === 1 && /^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.frag.rows) && G.frag.incidents.length === 0, G.frag);
+      gateOf(G.frag.armed) && G.frag.held >= 1 && gateOf(G.frag.outside) && G.frag.loads === 1 && gateOf(/^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.frag.rows)) && G.frag.incidents.length === 0, G.frag);
     // round 6 — the press sent by CDP while the go() is pending, answered at once (sent → answered: the 60 ms hold)
     check(`${C}⑫ RED (round 5, 36df506a): a mouse's back button 4 s into the exit (pointerdown and pointerup, button 3) — read as a tap: the step down ran (rearm why input-late)`,
-      !!R.mouse && R.mouse.armed && R.mouse.held >= 1 && /^pointerdown:3 pointerup:3\b/.test(R.mouse.ptr) && /rearm:input-late\b/.test(R.mouse.rows) && R.mouse.answered - R.mouse.sent < 1500, R.mouse);
+      !!R.mouse && gateOf(R.mouse.armed) && R.mouse.held >= 1 && gateOf(/^pointerdown:3 pointerup:3\b/.test(R.mouse.ptr)) && gateOf(/rearm:input-late\b/.test(R.mouse.rows)) && R.mouse.answered - R.mouse.sent < 1500, R.mouse);
     check(`${C}⑫ the shipped rules: the mouse's back button is no tap — no step down; the browser's own back at the release aborts the suspended go(): the page stays, re-armed, the older document never loads`,
-      G.mouse.armed && G.mouse.held >= 1 && /^pointerdown:3 pointerup:3\b/.test(G.mouse.ptr) && G.mouse.same && G.mouse.st?.vs === 1 && G.mouse.loads === 0 && /^3\/0 cancelled rearm:cancelled$/.test(G.mouse.rows), G.mouse);
+      gateOf(G.mouse.armed) && G.mouse.held >= 1 && gateOf(/^pointerdown:3 pointerup:3\b/.test(G.mouse.ptr)) && gateOf(G.mouse.same) && G.mouse.st?.vs === 1 && G.mouse.loads === 0 && verdictOf(/^3\/0 cancelled rearm:cancelled$/.test(G.mouse.rows)), G.mouse);
     check(`${C}⑬ RED (round 5, 36df506a): a pan 4 s into the exit (a pointerdown, then the pointercancel of the touch the browser took) — the pointerdown was the tap: the step down cancelled the exit (rearm why input-late), the page stays`,
-      !!R.pan && R.pan.armed && R.pan.held >= 1 && /^pointerdown:0 pointercancel:/.test(R.pan.ptr) && R.pan.same && R.pan.loads === 0 && /rearm:input-late\b/.test(R.pan.rows), R.pan);
+      !!R.pan && gateOf(R.pan.armed) && R.pan.held >= 1 && gateOf(/^pointerdown:0 pointercancel:/.test(R.pan.ptr)) && gateOf(R.pan.same) && R.pan.loads === 0 && verdictOf(/rearm:input-late\b/.test(R.pan.rows)), R.pan);
     check(`${C}⑬ the shipped rules: the pan is no tap — no step; the commit at 6 s, the watch holds (leave slow, the re-key): the older document goes on, the tab outside, nothing filed`,
-      G.pan.armed && G.pan.held >= 1 && /^pointerdown:0 pointercancel:/.test(G.pan.ptr) && !/pointerup/.test(G.pan.ptr) && G.pan.outside && G.pan.loads === 1 && /^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.pan.rows) && !/input-late/.test(G.pan.rows) && G.pan.incidents.length === 0, G.pan);
+      gateOf(G.pan.armed) && G.pan.held >= 1 && gateOf(/^pointerdown:0 pointercancel:/.test(G.pan.ptr)) && !/pointerup/.test(G.pan.ptr) && gateOf(G.pan.outside) && G.pan.loads === 1 && gateOf(/^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.pan.rows)) && !/input-late/.test(G.pan.rows) && G.pan.incidents.length === 0, G.pan);
     await quit();
   }
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));
@@ -365,4 +365,4 @@ try {
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`}`);
 await quit();
 await sleep(300);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

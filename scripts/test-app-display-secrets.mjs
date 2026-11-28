@@ -32,7 +32,7 @@ const D = require(path.join(ROOT, 'src/desktop-display.js'));
 const SB = require(path.join(ROOT, 'src/secret-box.js'));
 const PROBE = path.join(ROOT, 'scripts/fixtures/secret-probe.py');
 let pass = 0, fail = 0;
-const check = (name, ok, extra = '') => { if (ok) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ''}`); } };
+const check = (name, ok, extra = '') => { if (typeof ok !== 'boolean') throw new TypeError(`check: its condition is a ${typeof ok}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (ok) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra ? ` — ${extra}` : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -52,9 +52,9 @@ check('on: service file activates org.freedesktop.secrets with python + service 
 check('on: the key is the plan\'s SECOND file — under the private runtime dir, never the Exec line and never an env (lane display-secret-fd)', on.files.length === 2 && on.files[1].file === '/x/portal/run/secrets.key' && on.files[1].text === facts0.keyHex && on.keyFile === on.files[1].file && !on.files[0].text.includes(facts0.keyHex) && on.env === undefined, JSON.stringify(Object.keys(on)));
 check('off / unset facts ⇒ off, no file', M.secretServicePlan({ plan: plan0, facts: { off: true } }).secrets === 'off' && M.secretServicePlan({ plan: plan0, facts: null }).files.length === 0);
 check('a missing piece is SAID', M.secretServicePlan({ plan: plan0, facts: { why: 'python3 not found on this machine' } }).secrets === 'unavailable: python3 not found on this machine');
-check('no bus ⇒ unavailable', /^unavailable: no private bus/.test(M.secretServicePlan({ plan: { ok: false }, facts: facts0 }).secrets));
+check('no bus ⇒ unavailable', verdictOf(/^unavailable: no private bus/.test(M.secretServicePlan({ plan: { ok: false }, facts: facts0 }).secrets)));
 check('a malformed key ⇒ unavailable, no file', M.secretServicePlan({ plan: plan0, facts: { ...facts0, keyHex: 'zz' } }).files.length === 0);
-check('a path with a space ⇒ unavailable (Exec= splits)', /space/.test(M.secretServicePlan({ plan: plan0, facts: { ...facts0, node: '/a b/node' } }).secrets));
+check('a path with a space ⇒ unavailable (Exec= splits)', verdictOf(/space/.test(M.secretServicePlan({ plan: plan0, facts: { ...facts0, node: '/a b/node' } }).secrets)));
 check('secretsCountOf reads n, refuses junk', M.secretsCountOf('{"v":1,"n":3,"sealed":"x"}') === 3 && M.secretsCountOf('nope') === null && M.secretsCountOf('{"n":-1}') === null);
 check('appSecretsMode default on', M.appSecretsMode(undefined) === 'on' && M.appSecretsMode('off') === 'off' && M.APP_SECRETS_DEFAULT === 'on');
 const schema = require(path.join(ROOT, 'src/lib/settings-schema.js'));
@@ -64,7 +64,7 @@ check('Settings desktop.appSecrets on|off, default on', !!row && row.default ===
 const BINS0 = { 'dbus-daemon': '/x/bin/dbus-daemon', 'xdg-desktop-portal': '/x/libexec/xdg-desktop-portal', 'xdg-desktop-portal-gtk': '/x/libexec/xdg-desktop-portal-gtk' };
 const planF = M.portalPlan({ dir: '/x/da-f1', display: ':199', authFile: null, bins: BINS0, why: 'browser' });
 const onF = M.secretServicePlan({ plan: planF, facts: facts0 });
-check('portalPlan over a FIXTURE binary table: the bus, its services dir, the portal + gtk service files; the secrets file lands in that dir', planF.ok && planF.address === 'unix:path=/x/da-f1/portal/bus' && planF.dirs[0] === '/x/da-f1/portal' && planF.files.some((f) => f.file === '/x/da-f1/portal/services/org.freedesktop.portal.Desktop.service' && f.text.includes('Exec=/x/libexec/xdg-desktop-portal\n')) && onF.secrets === 'on' && onF.files[0].file === '/x/da-f1/portal/services/org.freedesktop.secrets.service' && onF.files[1].file === `/x/da-f1/portal/${M.SECRETS_KEY_FILE}` && planF.dirs.includes('/x/da-f1/portal/run'), JSON.stringify(planF.why || planF.files && planF.files.map((f) => f.file)));
+check('portalPlan over a FIXTURE binary table: the bus, its services dir, the portal + gtk service files; the secrets file lands in that dir', gateOf(planF.ok) && planF.address === 'unix:path=/x/da-f1/portal/bus' && planF.dirs[0] === '/x/da-f1/portal' && gateOf(planF.files.some((f) => f.file === '/x/da-f1/portal/services/org.freedesktop.portal.Desktop.service' && f.text.includes('Exec=/x/libexec/xdg-desktop-portal\n'))) && onF.secrets === 'on' && onF.files[0].file === '/x/da-f1/portal/services/org.freedesktop.secrets.service' && onF.files[1].file === `/x/da-f1/portal/${M.SECRETS_KEY_FILE}` && verdictOf(planF.dirs.includes('/x/da-f1/portal/run')), JSON.stringify(planF.why || planF.files && planF.files.map((f) => f.file)));
 const plan00 = M.portalPlan({ dir: '/x/da-f1', display: ':199', authFile: null, bins: {}, why: 'browser' });
 check('RED control: an EMPTY binary table ⇒ the plan refuses and names every missing binary (and the secrets plan says no bus)', plan00.ok === false && plan00.why === 'dbus-daemon, xdg-desktop-portal, xdg-desktop-portal-gtk not found on this machine' && M.secretServicePlan({ plan: plan00, facts: facts0 }).secrets === 'unavailable: no private bus', JSON.stringify(plan00));
 
@@ -77,7 +77,7 @@ const named = treeFiles.filter((f) => NAMED(fs.readFileSync(f, 'utf8'))).map((f)
 console.log(`  census (src files naming the old env key): ${named.length ? named.join(', ') : 'none'}`);
 check('the per-display key has NO env name left in the tree — it is handed over as a file + a pipe fd', named.length === 0, named.join());
 const oldShape = fs.readFileSync(path.join(ROOT, 'src/desktop-apps.js'), 'utf8').replace('return { secrets: \'on\', store, keyFile,', 'return { secrets: \'on\', store, keyFile, env: { VS_APP_SECRETS_KEY: facts.keyHex },');
-check('RED control: the .267 line put back in a COPY of desktop-apps.js ⇒ the census names it', NAMED(oldShape));
+check('RED control: the .267 line put back in a COPY of desktop-apps.js ⇒ the census names it', verdictOf(NAMED(oldShape)));
 // the ENV OBJECTS themselves: a secret-named key is allowed only when its value is an fd number (VS_APP_SECRETS_FD)
 const SECRET_NAME = /(?:KEY|SECRET|TOKEN|PASS|CRED)/i;
 const envOffenders = (o) => Object.entries(o || {}).filter(([k, v]) => SECRET_NAME.test(k) && !/^\d{1,5}$/.test(String(v))).map(([k]) => k);
@@ -86,7 +86,7 @@ const ssE = M.secretServicePlan({ plan: planE, facts: facts0 });
 console.log(`  census (plan.env): ${Object.keys(planE.env).sort().join(' ')}`);
 check('portalPlan env + appEnv + the secrets plan carry no secret-named key and no key bytes', envOffenders(planE.env).join() === '' && envOffenders(planE.appEnv).join() === '' && !JSON.stringify({ e: planE.env, a: planE.appEnv }).includes(facts0.keyHex) && envOffenders(ssE.env).join() === '', JSON.stringify(envOffenders(planE.env)));
 check('RED control: the key planted back over plan.env ⇒ the same census names VS_APP_SECRETS_KEY', envOffenders({ ...planE.env, VS_APP_SECRETS_KEY: facts0.keyHex }).join() === 'VS_APP_SECRETS_KEY');
-check('desktop-serve lays the secrets FILES over the plan and nothing over its env', /if \(secrets && secrets\.files\.length\) plan\.files\.push\(\.\.\.secrets\.files\);/.test(fs.readFileSync(path.join(ROOT, 'src/desktop-serve.js'), 'utf8')) && !/Object\.assign\(plan\.env, secrets/.test(fs.readFileSync(path.join(ROOT, 'src/desktop-serve.js'), 'utf8')));
+check('desktop-serve lays the secrets FILES over the plan and nothing over its env', gateOf(/if \(secrets && secrets\.files\.length\) plan\.files\.push\(\.\.\.secrets\.files\);/.test(fs.readFileSync(path.join(ROOT, 'src/desktop-serve.js'), 'utf8'))) && !/Object\.assign\(plan\.env, secrets/.test(fs.readFileSync(path.join(ROOT, 'src/desktop-serve.js'), 'utf8')));
 
 console.log('② secret-box: the keyed cipher is the boxes\' cipher (same bytes both ways)');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-adsec-t-'));
@@ -104,7 +104,7 @@ const users = srcFiles.filter((f) => /\bportalPlan\(|\bplan\.dirs\b/.test(srcOf(
 console.log(`  census (src/*.js naming portalPlan( or plan.dirs in code): ${users.join(', ')}`);
 check('the census is the three known consumers (a new one ⇒ red until it reads plan.ok here)', users.join() === 'desktop-apps.js,desktop-display.js,desktop-serve.js', users.join());
 const refused = { ok: false, why: 'xdg-desktop-portal, xdg-desktop-portal-gtk not found on this machine' };
-check('desktop-serve: the bring-up reads plan.ok and records the why (no secrets plan on a refused plan)', /secrets = plan\.ok && /.test(srcOf('desktop-serve.js')) && /if \(!plan\.ok\) rec\.portal = `unavailable: \$\{plan\.why\}`/.test(srcOf('desktop-serve.js')));
+check('desktop-serve: the bring-up reads plan.ok and records the why (no secrets plan on a refused plan)', gateOf(/secrets = plan\.ok && /.test(srcOf('desktop-serve.js'))) && verdictOf(/if \(!plan\.ok\) rec\.portal = `unavailable: \$\{plan\.why\}`/.test(srcOf('desktop-serve.js'))));
 check('desktop-apps secretServicePlan: a refused plan ⇒ unavailable: no private bus', M.secretServicePlan({ plan: refused, facts: { python: '/p', service: '/s', node: '/n', sealer: '/x', keyHex: 'a'.repeat(64) } }).secrets === 'unavailable: no private bus');
 const rej = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const eBus = await rej(() => D.startPortalBus({ plan: refused, env: {} }));
@@ -113,7 +113,7 @@ const busSrc = (srcOf('desktop-display.js').match(/async function startPortalBus
 const guard = busSrc.split('\n').find((l) => /if \(!plan \|\| !plan\.ok\) throw/.test(l)) || '';
 const unguarded = new Function('fs', 'namedError', `return (${busSrc.replace(guard + '\n', '')})`)(fs, (c, m) => Object.assign(new Error(m), { code: c }));
 const eRed = await rej(() => unguarded({ plan: refused, env: {} }));
-check('RED control: the same function WITHOUT the check throws the runner\'s TypeError (plan.dirs is not iterable)', !!guard && eRed instanceof TypeError && /plan\.dirs is not iterable/.test(eRed.message), eRed && eRed.message);
+check('RED control: the same function WITHOUT the check throws the runner\'s TypeError (plan.dirs is not iterable)', !!guard && eRed instanceof TypeError && verdictOf(/plan\.dirs is not iterable/.test(eRed.message)), eRed && eRed.message);
 
 console.log('③ the real plan\'s bus + libsecret');
 const dataDir = path.join(tmp, 'data'), appDir = path.join(dataDir, 'desktop-apps', 'da-sec1'), home = path.join(tmp, 'home'), run = path.join(tmp, 'run');
@@ -141,7 +141,7 @@ if (capWhy) { // a machine capability, never a red: the plan's shape is proven i
   console.log(`\n${pass} passed, ${fail} failed, 1 skipped (${Date.now() - t0} ms)`);
   process.exit(fail ? 1 : 0);
 }
-check('facts: python3 + gi + service + sealer + a 32-byte per-display key', !facts.why && /^[0-9a-f]{64}$/.test(facts.keyHex || ''), JSON.stringify(facts.why || ''));
+check('facts: python3 + gi + service + sealer + a 32-byte per-display key', !facts.why && verdictOf(/^[0-9a-f]{64}$/.test(facts.keyHex || '')), JSON.stringify(facts.why || ''));
 const facts2 = await D.appSecretsFacts({ env, mode: 'on', dataDir, id: 'da-sec2' });
 check('the key is PER DISPLAY (another id ⇒ another key), the master is minted 0600', facts2.keyHex !== facts.keyHex && (fs.statSync(path.join(dataDir, '.app-secrets-key')).mode & 0o777) === 0o600);
 check('the setting off ⇒ { off }', (await D.appSecretsFacts({ env, mode: 'off', dataDir, id: 'da-sec1' })).off === true);
@@ -191,21 +191,21 @@ try {
   let r = probe(b.plan, 'store');
   // (lane wall-clock-ratchet-down: the probe's own `r.store.ms < 2000` judged the machine — "no hang" is the BUS's
   // answer, ServiceUnknown by name, where a hang reads a timeout)
-  check('RED control: setting off ⇒ libsecret fails "not provided by any .service files" (no hang)', r.store && !r.store.ok && /org\.freedesktop\.secrets was not provided/.test(r.store.error), JSON.stringify(r.store));
+  check('RED control: setting off ⇒ libsecret fails "not provided by any .service files" (no hang)', gateOf(r.store) && !r.store.ok && verdictOf(/org\.freedesktop\.secrets was not provided/.test(r.store.error)), JSON.stringify(r.store));
   await stopBus(b);
   b = await startBus('on');
   check('rec.secrets fact = on', b.ss.secrets === 'on');
   r = probe(b.plan, 'all', 'pw-one-s3cr3t');
   // (lane wall-clock-ratchet-down: the old `r.store.ms < 3000` judged the machine — the store answered ok through the
   // service the bus activated; the ms are information)
-  check('store (activates the service)', r.store && r.store.ok, JSON.stringify(r.store));
-  check('a second item', r.store2 && r.store2.ok);
-  check('lookup by attributes', r.lookup && r.lookup.value === 'pw-one-s3cr3t');
-  check('search by attributes finds both', r.search && JSON.stringify(r.search.value) === '["ann at a","bob at a"]' && JSON.stringify(r['search-secrets'].value) === '["pw-one-s3cr3t","pw-two"]');
-  check('delete ⇒ lookup null', r.delete && r.delete.ok && r['lookup-after-delete'].value === null);
+  check('store (activates the service)', gateOf(r.store) && verdictOf(r.store.ok), JSON.stringify(r.store));
+  check('a second item', gateOf(r.store2) && verdictOf(r.store2.ok));
+  check('lookup by attributes', gateOf(r.lookup) && r.lookup.value === 'pw-one-s3cr3t');
+  check('search by attributes finds both', gateOf(r.search) && JSON.stringify(r.search.value) === '["ann at a","bob at a"]' && JSON.stringify(r['search-secrets'].value) === '["pw-one-s3cr3t","pw-two"]');
+  check('delete ⇒ lookup null', gateOf(r.delete) && gateOf(r.delete.ok) && r['lookup-after-delete'].value === null);
   r = probe(b.plan, 'store', 'pw-one-s3cr3t');
   r = probe(b.plan, 'unlock');
-  check('Unlock answers the objects, no prompt, never locked', r.unlock && r.unlock.ok && r.unlock.value.unlocked === 1 && r.unlock.value.locked.join() === 'false');
+  check('Unlock answers the objects, no prompt, never locked', gateOf(r.unlock) && gateOf(r.unlock.ok) && r.unlock.value.unlocked === 1 && r.unlock.value.locked.join() === 'false');
   const store = path.join(appDir, 'portal', M.SECRETS_STORE_FILE);
   // B-694d: ONE read is the right read — the service answers a store only after the sealer renamed the new file in
   // (secret-service.py Store.save). The plaintext is looked for OUTSIDE the ciphertext: the ciphertext is base64, where
@@ -215,11 +215,11 @@ try {
   const opened = (o) => { try { return JSON.parse(SB.decWith(keyBuf, o.sealed)); } catch { return null; } };
   const sealedOk = (text) => { let o; try { o = JSON.parse(text); } catch { return false; } const items = opened(o); return Object.keys(o).sort().join() === 'n,sealed,v' && o.n === 2 && SB.BOX_CIPHERTEXT_RE.test(o.sealed) && Array.isArray(items) && items.length === 2 && !PLAIN.test(JSON.stringify({ ...o, sealed: '' })); };
   const sealed = fs.readFileSync(store, 'utf8');
-  check('ONE sealed file, 0600, n = 2, the two items under this display\'s key, no plaintext secret or attribute outside the ciphertext', sealedOk(sealed) && (fs.statSync(store).mode & 0o777) === 0o600, sealed.slice(0, 120));
+  check('ONE sealed file, 0600, n = 2, the two items under this display\'s key, no plaintext secret or attribute outside the ciphertext', gateOf(sealedOk(sealed)) && (fs.statSync(store).mode & 0o777) === 0o600, sealed.slice(0, 120));
   const items2 = opened(JSON.parse(sealed)) || [];
   let annBlob = '';
   for (let i = 0; i < 100000 && !annBlob; i++) { const t = JSON.stringify({ v: 1, n: 2, sealed: SB.encWith(keyBuf, JSON.stringify(items2)) }); if (/ann/.test(t)) annBlob = t; }
-  check('RED control: a CORRECT sealed file whose ciphertext holds «ann» by chance ⇒ the old whole-file regex reds it, the shape check takes it', !!annBlob && PLAIN.test(annBlob) && sealedOk(annBlob), annBlob.slice(0, 120));
+  check('RED control: a CORRECT sealed file whose ciphertext holds «ann» by chance ⇒ the old whole-file regex reds it, the shape check takes it', !!annBlob && gateOf(PLAIN.test(annBlob)) && verdictOf(sealedOk(annBlob)), annBlob.slice(0, 120));
   check('RED control: the same items in CLEARTEXT (as the sealed field, or beside it) ⇒ the shape check reds', !sealedOk(JSON.stringify({ v: 1, n: 2, sealed: JSON.stringify(items2) })) && !sealedOk(JSON.stringify({ ...JSON.parse(sealed), items: items2 })));
   // B-694d, the product's side: EVERY writer whose seal FAILS is answered with an error by name and changes nothing in
   // memory — never «stored» (or «deleted», «forgotten») over bytes that are not on the disk. The fault: a DIRECTORY where
@@ -248,55 +248,55 @@ try {
     };
   }
   const fl = await faultLegs(b, 'pw-one-s3cr3t');
-  check('a REPLACE whose seal fails ⇒ an error by name; the item keeps its old value', fl.replace, JSON.stringify(fl.seen.rp));
-  check('a DELETE whose seal fails ⇒ an error by name; the item is still there', fl.delete, JSON.stringify(fl.seen.rd));
-  check('a NEW item whose seal fails ⇒ an error by name; nothing is stored', fl.create, JSON.stringify(fl.seen.rn));
-  check('Forget all whose seal fails ⇒ refused by name over the bus (the hub removes no file behind a service that still holds the items); nothing forgotten', fl.forget, JSON.stringify(fl.seen.fg) + ' ' + JSON.stringify([fl.seen.all0, fl.seen.all1]));
+  check('a REPLACE whose seal fails ⇒ an error by name; the item keeps its old value', verdictOf(fl.replace), JSON.stringify(fl.seen.rp));
+  check('a DELETE whose seal fails ⇒ an error by name; the item is still there', verdictOf(fl.delete), JSON.stringify(fl.seen.rd));
+  check('a NEW item whose seal fails ⇒ an error by name; nothing is stored', verdictOf(fl.create), JSON.stringify(fl.seen.rn));
+  check('Forget all whose seal fails ⇒ refused by name over the bus (the hub removes no file behind a service that still holds the items); nothing forgotten', verdictOf(fl.forget), JSON.stringify(fl.seen.fg) + ' ' + JSON.stringify([fl.seen.all0, fl.seen.all1]));
   r = probe(b.plan, 'store', 'pw-one-s3cr3t');
-  check('… and the service goes on: the next store is sealed (n = 2, the same items)', r.store && r.store.ok && sealedOk(fs.readFileSync(store, 'utf8')), JSON.stringify(r.store));
+  check('… and the service goes on: the next store is sealed (n = 2, the same items)', gateOf(r.store) && gateOf(r.store.ok) && verdictOf(sealedOk(fs.readFileSync(store, 'utf8'))), JSON.stringify(r.store));
   const sealSrc = fs.readFileSync(path.join(ROOT, 'src/app-secrets-seal.js'), 'utf8');
   const syncedFirst = (x) => { const f = x.indexOf(' fs.fsyncSync(fd);'), rn = x.indexOf('fs.renameSync(tmp, file);'); return f > 0 && rn > f; };
-  check('the sealer fsyncs the temp file BEFORE its rename — «stored» is answered after the sealer exits, so the bytes are on the disk', syncedFirst(sealSrc));
+  check('the sealer fsyncs the temp file BEFORE its rename — «stored» is answered after the sealer exits, so the bytes are on the disk', verdictOf(syncedFirst(sealSrc)));
   check('RED control: a sealer copy without that fsync ⇒ the order check is red', !syncedFirst(sealSrc.replace(' fs.fsyncSync(fd);', '')));
   const pids = execFileSync('ps', ['-s', String(b.child.pid), '-o', 'pid='], { encoding: 'utf8' }).trim().split(/\s+/);
   const argvs = pids.map((p) => { try { return fs.readFileSync(`/proc/${p}/cmdline`, 'utf8'); } catch { return ''; } }).join('\n');
-  check('the service runs in the bus\'s session; no key or secret in any argv', /secret-service\.py/.test(argvs) && !argvs.includes(facts.keyHex) && !argvs.includes('s3cr3t'));
+  check('the service runs in the bus\'s session; no key or secret in any argv', gateOf(/secret-service\.py/.test(argvs)) && !argvs.includes(facts.keyHex) && !argvs.includes('s3cr3t'));
   // ── lane display-secret-fd: THE ENVIRON CENSUS of the whole bus session — dbus-daemon and everything it activated
   const cen = environCensus(b.child.pid, facts.keyHex);
   console.log(`  census (the bus's session): ${cen.pids.join(' · ')}`);
   check('no process of the display\'s bus carries the key or a secret-named env (the finding: it sat in every one of them)', cen.rows.length === 0, JSON.stringify(cen.rows));
-  check('the key file was handed over ONCE: the service unlinked it, the sealed store stays', !fs.existsSync(b.ss.keyFile) && fs.existsSync(path.join(appDir, 'portal', M.SECRETS_STORE_FILE)), b.ss.keyFile);
+  check('the key file was handed over ONCE: the service unlinked it, the sealed store stays', !fs.existsSync(b.ss.keyFile) && verdictOf(fs.existsSync(path.join(appDir, 'portal', M.SECRETS_STORE_FILE))), b.ss.keyFile);
   await stopBus(b);
   // RED control: the .267 shape — the key laid over plan.env ⇒ the same census names dbus-daemon AND the service
   const bRed = await startBus('on', null, { keyInEnv: true });
   probe(bRed.plan, 'store', 'pw-env-red');
   const red = environCensus(bRed.child.pid, facts.keyHex);
-  check('RED control: the key over plan.env (the .267 shape) ⇒ the census names the daemon and the service it activated', red.rows.length >= 2 && red.rows.every((w) => w.keyBytes && w.named.includes('VS_APP_SECRETS_KEY')), JSON.stringify(red.rows));
+  check('RED control: the key over plan.env (the .267 shape) ⇒ the census names the daemon and the service it activated', red.rows.length >= 2 && verdictOf(red.rows.every((w) => w.keyBytes && w.named.includes('VS_APP_SECRETS_KEY'))), JSON.stringify(red.rows));
   await stopBus(bRed);
   // a service started with NO key file refuses BY NAME (its log), and libsecret is answered, never left hanging
   const bNo = await startBus('on', null, { dropKey: true });
   // "never a hang" is libsecret's ERROR, not a timeout (lane wall-clock-ratchet-down: `< 3000 ms` judged the machine)
   const rNo = probe(bNo.plan, 'store', 'pw-nokey');
   const logNo = fs.readFileSync(path.join(appDir, 'app.log'), 'utf8');
-  check('no key file ⇒ the service refuses BY NAME and says what to do; libsecret gets an error, never a hang', /\[secrets\] no per-display key: the key file is gone \(secrets\.key ENOENT\) — it is handed over once, when the display starts/.test(logNo) && rNo.store && !rNo.store.ok && !/[Tt]imeout|NoReply|timed out/.test(rNo.store.error || ''), JSON.stringify(rNo.store));
+  check('no key file ⇒ the service refuses BY NAME and says what to do; libsecret gets an error, never a hang', gateOf(/\[secrets\] no per-display key: the key file is gone \(secrets\.key ENOENT\) — it is handed over once, when the display starts/.test(logNo)) && gateOf(rNo.store) && !rNo.store.ok && !/[Tt]imeout|NoReply|timed out/.test(rNo.store.error || ''), JSON.stringify(rNo.store));
   await stopBus(bNo);
   b = await startBus('on');
   probe(b.plan, 'store', 'pw-one-s3cr3t');
   await stopBus(b);
   b = await startBus('on');
   r = probe(b.plan, 'search');
-  check('a restart keeps the items (the sealed file round-trips — a NEW key file each bring-up)', r['search-secrets'] && JSON.stringify(r['search-secrets'].value) === '["pw-one-s3cr3t","pw-two"]', JSON.stringify(r['search-secrets']));
+  check('a restart keeps the items (the sealed file round-trips — a NEW key file each bring-up)', gateOf(r['search-secrets']) && JSON.stringify(r['search-secrets'].value) === '["pw-one-s3cr3t","pw-two"]', JSON.stringify(r['search-secrets']));
   const of = D.appSecretsOf({ rec: { secrets: 'on' }, dir: appDir });
   check('appSecretsOf: the count the ⋯ menu shows', of.count === 2 && of.secrets === 'on');
   const fg = await D.forgetAppSecrets({ rec: { secrets: 'on' }, dir: appDir, env });
   r = probe(b.plan, 'search');
-  check('Forget all over the bus ⇒ forgot 2, nothing found, count 0', fg.ok && fg.via === 'bus' && fg.forgot === 2 && JSON.stringify(r.search.value) === '[]' && D.appSecretsOf({ rec: { secrets: 'on' }, dir: appDir }).count === 0, JSON.stringify(fg));
+  check('Forget all over the bus ⇒ forgot 2, nothing found, count 0', gateOf(fg.ok) && fg.via === 'bus' && fg.forgot === 2 && JSON.stringify(r.search.value) === '[]' && D.appSecretsOf({ rec: { secrets: 'on' }, dir: appDir }).count === 0, JSON.stringify(fg));
   probe(b.plan, 'store', 'pw-again');
   await stopBus(b);
   const fg2 = await D.forgetAppSecrets({ rec: { secrets: 'on' }, dir: appDir, env });
-  check('Forget all with no bus ⇒ the sealed file is removed', fg2.ok && fg2.via === 'file' && fg2.forgot === 1 && !fs.existsSync(store), JSON.stringify(fg2));
+  check('Forget all with no bus ⇒ the sealed file is removed', gateOf(fg2.ok) && fg2.via === 'file' && fg2.forgot === 1 && !fs.existsSync(store), JSON.stringify(fg2));
   const log = fs.readFileSync(path.join(appDir, 'app.log'), 'utf8');
-  check('libsecret asked dh-ietf1024-sha256-aes128-cbc-pkcs7 first, refused (NotSupported), then plain', /OpenSession dh-ietf1024-sha256-aes128-cbc-pkcs7 refused \(NotSupported\)[\s\S]*OpenSession plain/.test(log));
+  check('libsecret asked dh-ietf1024-sha256-aes128-cbc-pkcs7 first, refused (NotSupported), then plain', verdictOf(/OpenSession dh-ietf1024-sha256-aes128-cbc-pkcs7 refused \(NotSupported\)[\s\S]*OpenSession plain/.test(log)));
   check('the app\'s log names no secret, attribute or key', !/s3cr3t|pw-two|pw-again|ann at a|a\.example/.test(log) && !log.includes(facts.keyHex));
   // the mutant: a service that logs the secret it is handed ⇒ the same check goes red
   const mut = path.join(tmp, 'secret-service-mutant.py');
@@ -308,7 +308,7 @@ try {
   probe(b.plan, 'store', 'pw-mutant-s3cr3t');
   await stopBus(b);
   const mlog = fs.readFileSync(path.join(appDir, 'app.log'), 'utf8');
-  check('MUTANT (the service logs a secret) ⇒ the no-secret-in-log check is RED', /pw-mutant-s3cr3t/.test(mlog));
+  check('MUTANT (the service logs a secret) ⇒ the no-secret-in-log check is RED', verdictOf(/pw-mutant-s3cr3t/.test(mlog)));
   // B-694d's RED control: every writer in its .407 shape (memory changed, the seal's answer ignored, ok answered) ⇒ each
   // of the four fault legs is RED on its own writer
   const mut2 = path.join(tmp, 'secret-service-unsealed.py');
@@ -324,13 +324,13 @@ try {
   probe(b.plan, 'lookup');   // the bus activates the service now — a service started over the fault refuses to start (it opens the store)
   const fl2 = await faultLegs(b, 'pw-mutant-s3cr3t');
   await stopBus(b);
-  check('RED control (every writer in its .407 shape): the replace leg is RED — ok answered, the new value served', !fl2.replace && fl2.seen.rp.store && fl2.seen.rp.store.ok && fl2.seen.rp.lookup.value === 'pw-refused', JSON.stringify(fl2.seen.rp));
-  check('RED control: the delete leg is RED — ok answered, the item gone from memory', !fl2.delete && fl2.seen.rd.delete && fl2.seen.rd.delete.ok, JSON.stringify(fl2.seen.rd));
-  check('RED control: the new-item leg is RED — ok answered, the item served', !fl2.create && fl2.seen.rn.store && fl2.seen.rn.store.ok, JSON.stringify(fl2.seen.rn));
+  check('RED control (every writer in its .407 shape): the replace leg is RED — ok answered, the new value served', !fl2.replace && gateOf(fl2.seen.rp.store) && gateOf(fl2.seen.rp.store.ok) && fl2.seen.rp.lookup.value === 'pw-refused', JSON.stringify(fl2.seen.rp));
+  check('RED control: the delete leg is RED — ok answered, the item gone from memory', !fl2.delete && gateOf(fl2.seen.rd.delete) && verdictOf(fl2.seen.rd.delete.ok), JSON.stringify(fl2.seen.rd));
+  check('RED control: the new-item leg is RED — ok answered, the item served', !fl2.create && gateOf(fl2.seen.rn.store) && verdictOf(fl2.seen.rn.store.ok), JSON.stringify(fl2.seen.rn));
   check('RED control: the Forget-all leg is RED — the service said forgotten while its file kept the items', !fl2.forget && fl2.seen.fg.ok === true, JSON.stringify(fl2.seen.fg));
 } finally {
   for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 console.log(`\n${pass} passed, ${fail} failed (${Date.now() - t0} ms)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

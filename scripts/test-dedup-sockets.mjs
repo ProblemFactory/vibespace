@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const { dedupWebuiSockets } = require('../src/session-store.js');
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const arr = (s) => [...s].sort();
 
 // the reported case: two husks for one conversation, both claude dead → newest wins

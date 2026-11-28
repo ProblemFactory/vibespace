@@ -52,7 +52,7 @@ const wt = scratch('vault-chrome-wt'), PROFILE = scratch('vault-chrome-chrome'),
 const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1]) : scratch('vault-chrome-shots');
 fs.mkdirSync(FIXTURE, { recursive: true }); fs.mkdirSync(SHOTS, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SIGN_IN = 'chrome-leg-sign-in-7';
 const SECOND = 'chrome leg second password';
@@ -117,7 +117,7 @@ const chipAtJs = `(() => { const c = document.getElementById('taskbar-vault'); c
 const openVaultItems = async () => { const r = (await api('GET', '/api/user-todos')).json || {}; return ((r.todos && r.todos.open) || []).filter((i) => i.sessionKey === 'vault' && i.action && i.action.type === 'vault-unlock'); };
 
 startServer();
-check('the hub boots (sign-in password on)', await ready());
+check('the hub boots (sign-in password on)', verdictOf(await ready()));
 
 console.log('① sign in, store a secret');
 await cdp('Page.navigate', { url: URL + 'login' });
@@ -127,7 +127,7 @@ check('signed in through /api/login (the cookie is set)', login === 200, login);
 await cdp('Page.navigate', { url: URL });
 check('the app loads behind the sign-in', !!(await until(`!!(window.app && document.getElementById('taskbar-tray'))`, { timeout: 30000 })));
 const put = await api('PUT', '/api/integrations/cloud:browserless', { values: { apiKey: 'chrome-leg-api-key', apiUrl: 'https://chrome.example.net' } });
-check('an integration key is stored (not set up: its key FILE is minted beside the data)', put.status === 200 && fs.existsSync(path.join(DATA, '.integrations-key')) && !fs.existsSync(path.join(DATA, 'vault.json')), put);
+check('an integration key is stored (not set up: its key FILE is minted beside the data)', put.status === 200 && gateOf(fs.existsSync(path.join(DATA, '.integrations-key'))) && !fs.existsSync(path.join(DATA, 'vault.json')), put);
 check('the vault says not_set_up', (await api('GET', '/api/vault/state')).json?.state === 'not_set_up');
 {
   await sleep(1000);   // the boot read has landed (the setup nag is snoozed by the suite's ONBOARDED_SOURCE)
@@ -147,15 +147,15 @@ await splashGone();
 check('… on top once the splash is gone (its Set button is what a click reaches)', !!(await until(onTop('.vault-setup-go'), { timeout: 5000 })));
 await shot('vault-1-setup.png');
 await typeInto('#vault-setup-pw', SECOND); await typeInto('#vault-setup-pw2', SECOND + 'x'); await click('.vault-setup-go');
-check('two passwords that differ are refused in words', /differ/.test(await until(`document.querySelector('#vault-setup-dialog .vault-err')?.textContent`, { timeout: 3000 }) || ''));
+check('two passwords that differ are refused in words', verdictOf(/differ/.test(await until(`document.querySelector('#vault-setup-dialog .vault-err')?.textContent`, { timeout: 3000 }) || '')));
 await typeInto('#vault-setup-pw2', SECOND); await click('.vault-setup-go');
 check('set ⇒ the modal closes', !!(await until(`!document.getElementById('vault-setup-dialog')`, { timeout: 15000 })));
-check('the key file is sealed: gone, a .sealed marker, data/vault.json', !fs.existsSync(path.join(DATA, '.integrations-key')) && fs.existsSync(path.join(DATA, '.integrations-key.sealed')) && fs.existsSync(path.join(DATA, 'vault.json')));
-check('the integration still answers (unlocked)', (await integration()).configured);
+check('the key file is sealed: gone, a .sealed marker, data/vault.json', !fs.existsSync(path.join(DATA, '.integrations-key')) && gateOf(fs.existsSync(path.join(DATA, '.integrations-key.sealed'))) && verdictOf(fs.existsSync(path.join(DATA, 'vault.json'))));
+check('the integration still answers (unlocked)', verdictOf((await integration()).configured));
 
 console.log('③ RESTART ⇒ the unlock modal, the chip, vault_locked');
 await stopServer(); startServer();
-check('the hub is back', await ready());
+check('the hub is back', verdictOf(await ready()));
 await cdp('Page.navigate', { url: URL });
 check('the page opens the UNLOCK modal at once (still signed in)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
 await splashGone();
@@ -165,7 +165,7 @@ check('③ the persistent lock strip shows at the top of the workspace (owner 20
 check('③ the strip never covers the unlock dialog\u2019s button (the dialog stays reachable)', !!(await evalJs(onTop('.vault-unlock-go'))));
 {
   const m = await until(`(() => { const m = ${gearMarkJs()}; return m.on ? m : null; })()`, { timeout: 5000 });
-  check('③L lane vault-locked-loud: the ⚙ button wears the RED mark (a lock SVG in --red, the cog in --red) and says «Vault locked — click to unlock»', markRed(m), m);
+  check('③L lane vault-locked-loud: the ⚙ button wears the RED mark (a lock SVG in --red, the cog in --red) and says «Vault locked — click to unlock»', verdictOf(markRed(m)), m);
   const tray = await until(`(() => { const t = ${trayUrgentJs}; return t.urgent >= 1 ? t : null; })()`, { timeout: 8000 });
   check('③L the For-you tray holds the URGENT item at once — the badge\u2019s red (urgent) segment counts it', !!tray && tray.urgency === 'urgent' && tray.urgent >= 1, tray || await evalJs(trayUrgentJs));
   const it = await openVaultItems();
@@ -180,7 +180,7 @@ check('③ the refusal is NOTED: the vault\u2019s facts count who the lock stopp
 check('③ the persistent strip shows the COUNT ("N waiting on it") — and where to unlock (lane vault-manual-and-lock: Unlock… enters the second password)', !!(await until(`(() => { const s = document.getElementById('vault-lock-strip'); const n = s ? Number(s.dataset.blocked) : 0; return n >= 1 && s.querySelector('.vls-text').textContent === 'The vault is locked \u2014 ' + n + ' waiting on it (For you names them). Unlock\u2026 enters the second password.'; })()`, { timeout: 8000 })), await evalJs(`document.querySelector('#vault-lock-strip .vls-text')?.textContent`));
 const vaultItems = async () => { const r = (await api('GET', '/api/user-todos')).json || {}; return ((r.todos && r.todos.open) || []).filter((i) => i.sessionKey === 'vault' && i.action && i.action.type === 'vault-unlock'); };
 const items3 = await vaultItems();
-check('③ ONE For-you item names who was stopped and what (VibeSpace \u2014 the integrations store)', items3.length === 1 && items3[0].i18n && /VibeSpace \(.*the integrations store/.test(items3[0].i18n.text.params?.who || ''), items3.map((i) => i.i18n));
+check('③ ONE For-you item names who was stopped and what (VibeSpace \u2014 the integrations store)', items3.length === 1 && gateOf(items3[0].i18n) && verdictOf(/VibeSpace \(.*the integrations store/.test(items3[0].i18n.text.params?.who || '')), items3.map((i) => i.i18n));
 await shot('vault-2-locked.png');
 await typeInto('#vault-unlock-pw', 'not the second password'); await click('.vault-unlock-go');
 check('a wrong password says so', (await until(`document.querySelector('#vault-unlock-dialog .vault-err')?.textContent`, { timeout: 8000 })) === 'That is not the second password');
@@ -191,12 +191,12 @@ check('③b 「稍后」 closes the modal; the lock chip stays (the door back)',
 check('③b the persistent strip stays after 「稍后」 (not dismissable) and its Unlock button is now reachable (on top)', !!(await until(`!!document.getElementById('vault-lock-strip')`, { timeout: 3000 })) && !!(await evalJs(onTop('#vault-lock-strip .vls-unlock'))));
 {
   // lane vault-locked-loud: 「稍后」 set THIS lock aside for the tab — a reload asks no more, the mark and the item stay
-  check('③L 「稍后」 wrote the set-aside lock into the tab\u2019s sessionStorage', /^\d+:\d+$/.test(await evalJs(`sessionStorage.getItem('vs-vault-unlock-later') || ''`) || ''));
+  check('③L 「稍后」 wrote the set-aside lock into the tab\u2019s sessionStorage', verdictOf(/^\d+:\d+$/.test(await evalJs(`sessionStorage.getItem('vs-vault-unlock-later') || ''`) || '')));
   await cdp('Page.navigate', { url: URL });
   check('③L RELOAD after 「稍后」: the app is back, its strip drawn by the boot read', !!(await until(`!!document.getElementById('vault-lock-strip')`, { timeout: 30000 })));
   await splashGone(); await sleep(1500);
   check('③L … and NO dialog (the set-aside lock; the base asked at every load)', !(await evalJs(`!!document.getElementById('vault-unlock-dialog')`)));
-  check('③L … while the ⚙ mark stays red and the tray keeps the urgent item', markRed(await evalJs(gearMarkJs())) && (await evalJs(trayUrgentJs)).urgent >= 1 && (await openVaultItems()).length === 1);
+  check('③L … while the ⚙ mark stays red and the tray keeps the urgent item', gateOf(markRed(await evalJs(gearMarkJs()))) && (await evalJs(trayUrgentJs)).urgent >= 1 && (await openVaultItems()).length === 1);
   await evalJs(`document.getElementById('vault-unlock-dialog')?.remove(); true`);   // (a base run's dialog — the legs below open their own)
   await shot('vault-L1-reload-after-later.png');
   // Esc closes the dialog (the door opens it; the strip stays)
@@ -241,7 +241,7 @@ check('④L client A: the ⚙ mark is gone (the plain title back) and the tray\u
 check('④L client B follows the broadcast WITHOUT a reload: its dialog, its ⚙ mark, its strip and its urgent item are gone', !!(await untilB(`(() => { const m = ${gearMarkJs()}; const t = ${trayUrgentJs}; return !document.getElementById('vault-unlock-dialog') && !m.on && m.title === 'Global settings' && !document.getElementById('vault-lock-strip') && !t.urgent; })()`, { timeout: 10000 })), { mark: await evalB(gearMarkJs()), tray: await evalB(trayUrgentJs), dialog: await evalB(`!!document.getElementById('vault-unlock-dialog')`) });
 try { wsB.close(); await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tB.id}`); } catch { }
 const openInt = await integration();
-check('the integration\'s key opens again (the feature works)', openInt.configured && !openInt.storeError, openInt);
+check('the integration\'s key opens again (the feature works)', gateOf(openInt.configured) && !openInt.storeError, openInt);
 
 console.log('④b TWO-STEP CODES (design q-047 L1, lane vault-totp) — 看码 + its ring in the Vault window; the seed only behind 显示');
 {
@@ -255,20 +255,20 @@ console.log('④b TWO-STEP CODES (design q-047 L1, lane vault-totp) — 看码 +
   const q = (sel) => JSON.stringify(ROW + ' ' + sel);
   check('④b its row in the Vault window: the name · «Two-step code» · 看码 · 显示 · 用于… · 删除', !!(await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); return !!r && r.querySelector('.vw-label')?.textContent === 'github-owner' && /Two-step code/.test(r.querySelector('.vw-meta')?.textContent || '') && !!r.querySelector('.vw-code-view') && !!r.querySelector('.vw-show') && !!r.querySelector('.vw-totp-grant') && !!r.querySelector('.vw-del'); })()`, { timeout: 15000 })));
   check('④b no code before 看码, and no seed anywhere in the DOM', !!(await evalJs(`document.querySelector(${q('.vw-code')}).hidden && !document.documentElement.outerHTML.includes(${JSON.stringify(SEEDC)})`)));
-  check('④b 显示\'s help says what it shows and behind what (a door\'s help, never a state)', /seed and its settings/.test(await evalJs(`document.querySelector(${q('.vw-show')}).title`) || ''));
+  check('④b 显示\'s help says what it shows and behind what (a door\'s help, never a state)', verdictOf(/seed and its settings/.test(await evalJs(`document.querySelector(${q('.vw-show')}).title`) || '')));
   const t0 = Date.now();
   await click(`${ROW} .vw-code-view`);
   const read = `(() => { const c = document.querySelector(${q('.vw-code')}); if (!c || c.hidden) return null; const d = c.querySelector('.vw-code-digits').textContent; return d ? { d, left: c.querySelector('.vw-code-left').textContent, p: c.querySelector('.vw-ring').style.getPropertyValue('--p'), dialog: !!document.getElementById('vault-reveal-dialog'), btn: document.querySelector(${q('.vw-code-view')}).textContent } : null; })()`;
   const shown = await until(read, { timeout: 8000 });
   const want = new Set([codeAt(t0), codeAt(Date.now())]);
-  check('④b 看码 ⇒ the CURRENT code (RFC 6238 over the seed at this clock), grouped 3 + 3 — and NO 验证是你', !!shown && want.has(shown.d.replace(' ', '')) && /^\d{3} \d{3}$/.test(shown.d) && !shown.dialog && shown.btn === 'Hide code', { shown, want: [...want] });
+  check('④b 看码 ⇒ the CURRENT code (RFC 6238 over the seed at this clock), grouped 3 + 3 — and NO 验证是你', !!shown && gateOf(want.has(shown.d.replace(' ', ''))) && gateOf(/^\d{3} \d{3}$/.test(shown.d)) && !shown.dialog && shown.btn === 'Hide code', { shown, want: [...want] });
   const secs = shown && /^(\d+) s$/.test(shown.left) ? Number(shown.left.split(' ')[0]) : -1;
-  check('④b … its ring (--p in (0, 100] %) and its seconds («N s», 1 ≤ N ≤ 30)', !!shown && /^\d+%$/.test(shown.p) && parseInt(shown.p, 10) > 0 && parseInt(shown.p, 10) <= 100 && secs >= 1 && secs <= 30, shown);
+  check('④b … its ring (--p in (0, 100] %) and its seconds («N s», 1 ≤ N ≤ 30)', !!shown && gateOf(/^\d+%$/.test(shown.p)) && parseInt(shown.p, 10) > 0 && parseInt(shown.p, 10) <= 100 && secs >= 1 && secs <= 30, shown);
   await evalJs(`document.querySelector(${JSON.stringify(ROW)}).scrollIntoView({ block: 'center' }); true`);
   await shot('vault-7-totp-code.png');
   const first = shown ? shown.d : '';
   const next = await until(`(() => { const r = ${read}; return r && r.d !== ${JSON.stringify(first)} ? r : null; })()`, { timeout: (secs + 6) * 1000, step: 250 });
-  check('④b at the step\'s boundary the code is asked again and CHANGES (the ring restarted near full)', !!next && new Set([codeAt(Date.now() - 2000), codeAt(Date.now())]).has(next.d.replace(' ', '')) && parseInt(next.p, 10) >= 80, { first, next });
+  check('④b at the step\'s boundary the code is asked again and CHANGES (the ring restarted near full)', !!next && gateOf(new Set([codeAt(Date.now() - 2000), codeAt(Date.now())]).has(next.d.replace(' ', ''))) && parseInt(next.p, 10) >= 80, { first, next });
   const views = fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8').split('\n').filter((l) => l.includes('"vault-totp-view"'));
   check('④b every view is a vault-totp-view audit line (2 so far) — never a code', views.length === 2 && !views.some((l) => (first && l.includes(first.replace(' ', ''))) || (next && l.includes(next.d.replace(' ', '')))), views);
   await click(`${ROW} .vw-show`);
@@ -282,7 +282,7 @@ console.log('④b TWO-STEP CODES (design q-047 L1, lane vault-totp) — 看码 +
   check('④b 全部显示 opens the other values but NOT the two-step seed (a seed only by its own 显示 — never a list\'s)', !!all && all.other === 'chrome-leg-api-key' && all.seed === false, all);
   await click('.vw-hide-all');
   await click(`${ROW} .vw-totp-grant`);
-  check('④b 用于… opens its picker (no conversation runs here: it says so)', !!(await until(visible('#vault-totp-grant'), { timeout: 5000 })) && /Nothing to pick|Task groups|Conversations/.test(await evalJs(`document.querySelector('#vault-totp-grant')?.textContent || ''`)));
+  check('④b 用于… opens its picker (no conversation runs here: it says so)', !!(await until(visible('#vault-totp-grant'), { timeout: 5000 })) && verdictOf(/Nothing to pick|Task groups|Conversations/.test(await evalJs(`document.querySelector('#vault-totp-grant')?.textContent || ''`))));
   await shot('vault-8-totp-use-for.png');
   await evalJs(`document.querySelector('#vault-totp-grant .btn-cancel')?.click(); true`);
   await click(`${ROW} .vw-code-view`);
@@ -295,7 +295,7 @@ console.log('④b TWO-STEP CODES (design q-047 L1, lane vault-totp) — 看码 +
 console.log('③c the OPEN tab re-asks on a bundle-preserving restart — no navigate; a same-startedAt broadcast is the chip only');
 const atOpen = (await api('GET', '/api/vault/state')).json || {};
 await stopServer(); startServer();
-check('the hub is back (same bundle)', await ready());
+check('the hub is back (same bundle)', verdictOf(await ready()));
 check('③c the OPEN tab opens the unlock modal on the ws reconnect — no navigate (the bug: it used to stay silent)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
 check('③c … and draws the strip and the chip', !!(await until(`!!document.getElementById('vault-lock-strip') && !!document.getElementById('taskbar-vault')`, { timeout: 5000 })));
 const atBoot = (await api('GET', '/api/vault/state')).json || {};
@@ -310,7 +310,7 @@ check('③c RED CONTROL: a same-startedAt broadcast opened NO new dialog (a lock
 
 console.log('⑤ RESTART again ⇒ locked again; a phone gets the same modal');
 await stopServer(); startServer();
-check('the hub is back', await ready());
+check('the hub is back', verdictOf(await ready()));
 await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });
 await cdp('Page.navigate', { url: URL });
 check('locked again after the restart — the unlock modal (no auto-unlock of any kind)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })) && (await api('GET', '/api/vault/state')).json?.state === 'locked');
@@ -323,7 +323,7 @@ check(`the phone modal sits inside the screen (${Math.round(rect.l)}…${Math.ro
   const box = await evalJs(`(() => { const r = document.querySelector('#vault-unlock-dialog .dialog').getBoundingClientRect(); return { t: r.top, b: r.bottom, h: innerHeight, w: innerWidth }; })()`);
   check(`⑤L the dialog fits 375×812 top to bottom (${Math.round(box.t)}…${Math.round(box.b)} of ${box.h})`, box.w === 375 && box.h === 812 && box.t >= 0 && box.b <= box.h, box);
   const pm = await evalJs(gearMarkJs('mobile-nav-gear'));
-  check('⑤L the phone nav\u2019s ⚙ wears the same red mark', markRed(pm), pm);
+  check('⑤L the phone nav\u2019s ⚙ wears the same red mark', verdictOf(markRed(pm)), pm);
 }
 await shot('vault-4-phone.png');
 await cdp('Emulation.clearDeviceMetricsOverride');
@@ -339,7 +339,7 @@ await shot('vault-5-zh.png');
 console.log('⑦ the login at rest + a LOCK signs every login out');
 const cookieTok = ((await cdp('Network.getCookies', { urls: [URL] })).cookies || []).find((c) => c.name === 'vs_token')?.value || '';
 const authText = fs.readFileSync(path.join(DATA, 'auth.json'), 'utf8');
-check('auth.json holds the login as sha256(token) — never the cookie\'s token', cookieTok.length === 48 && !authText.includes(cookieTok) && authText.includes(require('crypto').createHash('sha256').update(cookieTok).digest('hex')));
+check('auth.json holds the login as sha256(token) — never the cookie\'s token', cookieTok.length === 48 && !authText.includes(cookieTok) && verdictOf(authText.includes(require('crypto').createHash('sha256').update(cookieTok).digest('hex'))));
 await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');
 check('unlocked', !!(await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 15000 })));
 const locked = await api('POST', '/api/vault/lock');
@@ -372,9 +372,9 @@ console.log('Z lane vault-chip-zone-errors (inc-mvi50qdh-ygmh): the chip beside 
   await sleep(1500);   // the boot read (initVault) and the onboarding check (maybeNagVault) have both applied the facts
   const d2 = await evalJs(chipAtJs);
   check('Z … the chip sits in the toolbar’s second row right before For-you, visible', !!d2 && d2.zone === 'toolbar-row2' && d2.next === 'taskbar-user-todos' && d2.forYou === 'toolbar-row2' && d2.w > 0 && d2.h > 0, d2);
-  check('Z … the phone pair the same way: the phone chip right before the phone’s For-you button', await evalJs(`(() => { const c = document.getElementById('mobile-nav-vault'); return !!c && c.parentElement.id === 'mobile-nav' && c.nextElementSibling && c.nextElementSibling.id === 'mobile-nav-todos'; })()`));
+  check('Z … the phone pair the same way: the phone chip right before the phone’s For-you button', verdictOf(await evalJs(`(() => { const c = document.getElementById('mobile-nav-vault'); return !!c && c.parentElement.id === 'mobile-nav' && c.nextElementSibling && c.nextElementSibling.id === 'mobile-nav-todos'; })()`)));
   const gm = await evalJs(gearMarkJs());
-  check('Z … the strip and the ⚙ mark show too (each lock sign draws on its own)', !!(await evalJs(visible('#vault-lock-strip'))) && gm.on && gm.svg && gm.color === gm.red, gm);
+  check('Z … the strip and the ⚙ mark show too (each lock sign draws on its own)', !!(await evalJs(visible('#vault-lock-strip'))) && gateOf(gm.on) && gateOf(gm.svg) && gm.color === gm.red, gm);
   check('Z … and the page threw NOTHING at load (the incident: «insertBefore … not a child of this node», twice)', pageErrors.length === 0, errs());
   // THE FILL — Chrome's autofill / saved passwords dispatch a bare Event('keydown') (no key) on each field they fill, then
   // input, change and a bare keyup (measured, CDP Autofill.trigger): the owner's second password, two fields, two throws
@@ -407,7 +407,7 @@ console.log('Z lane vault-chip-zone-errors (inc-mvi50qdh-ygmh): the chip beside 
   const ib = incId ? JSON.parse(fs.readFileSync(path.join(DATA, 'incidents', incId, 'bundle.json'), 'utf8')) : null;
   const fills = ib ? ib.client.rings.action.filter((a) => a.k === 'key' && a.key === '(fill)') : [];
   const errEntries = ib ? ib.client.rings.console.filter((c) => c.l === 'uncaught' || c.l === 'unhandled') : null;
-  check('Z the captured ring (the real capture road) holds each fill as the word "(fill)" on its field — never a value — and no uncaught / unhandled entry', !!ib && fills.length >= 2 && fills.some((a) => a.el === 'input#vault-unlock-pw') && !JSON.stringify(ib.client.rings).includes('filled-not-the-password') && errEntries.length === 0, { incId, fills: fills.map((a) => a.el), errEntries });
+  check('Z the captured ring (the real capture road) holds each fill as the word "(fill)" on its field — never a value — and no uncaught / unhandled entry', !!ib && fills.length >= 2 && gateOf(fills.some((a) => a.el === 'input#vault-unlock-pw')) && !JSON.stringify(ib.client.rings).includes('filled-not-the-password') && errEntries.length === 0, { incId, fills: fills.map((a) => a.el), errEntries });
   // Customize again while locked: For-you into the toolbar's right zone, then back to the default (the arrangement cleared)
   const arr2 = JSON.parse(JSON.stringify(OWNER_SHAPE['chrome.arrangement']));
   arr2['toolbar-row2'] = arr2['toolbar-row2'].filter((x) => x !== 'taskbar-user-todos'); arr2['toolbar-right'].push('taskbar-user-todos');
@@ -438,14 +438,14 @@ await stopServer();
   fs.writeFileSync(vu, prefix);
   execSync(`${wt}/node_modules/.bin/esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify`, { cwd: wt, stdio: 'ignore' });
   startServer();
-  check('the hub is back (pre-fix bundle)', await ready());
+  check('the hub is back (pre-fix bundle)', verdictOf(await ready()));
   await cdp('Page.navigate', { url: URL });
   check('③c-RED the boot path still asks (unchanged — the regression is ONLY the reconnect/broadcast re-ask)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
   await splashGone();
   await click('#vault-unlock-dialog .vault-later');
   await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 3000 });
   await stopServer(); startServer();
-  check('the hub is back', await ready());
+  check('the hub is back', verdictOf(await ready()));
   check('③c-RED the pre-fix tab\u2019s ws reconnects (so it can RECEIVE the broadcast — it just won\u2019t act on it)', !!(await until(`!!(window.app && window.app.ws && window.app.ws.connected)`, { timeout: 20000 })));
   await evalJs(`document.getElementById('taskbar-vault')?.remove(); true`);
   const idleR = await api('POST', '/api/vault/idle', { hours: 0 });   // a locked broadcast carrying the NEW startedAt
@@ -467,7 +467,7 @@ await stopServer();
   fs.writeFileSync(vu, v1); fs.writeFileSync(ck, c1);
   execSync(`${wt}/node_modules/.bin/esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify`, { cwd: wt, stdio: 'ignore' });
   startServer();
-  check('the hub is back (pre-fix chip bundle; locked)', await ready());
+  check('the hub is back (pre-fix chip bundle; locked)', verdictOf(await ready()));
   const OWNER_ARR = { 'toolbar-center': ['taskbar-status', 'spring-2', 'layout-presets', 'spring-6'], 'toolbar-right': ['btn-presets', 'btn-new-session', 'btn-terminal', 'btn-file-explorer', 'btn-browser', 'btn-desktop'], 'toolbar-row2': ['spring-3', 'spring-1', 'taskbar-user-todos', 'taskbar-usage', 'desktop-previews', 'spring-5', 'spring-4'], 'taskbar-tray': [], 'taskbar-row2': [] };
   await until(`fetch('/api/settings').then((r) => r.ok)`, { timeout: 20000 });
   await api('PATCH', '/api/settings', { 'chrome.arrangement': OWNER_ARR });
@@ -491,15 +491,15 @@ await stopServer();
   const ring = incFile ? JSON.parse(fs.readFileSync(incFile, 'utf8')).client.rings.console : [];
   const unh = ring.find((c) => c.l === 'unhandled' && /insertBefore/.test(c.m));
   const unc = ring.find((c) => c.l === 'uncaught' && /reading 'length'/.test(c.m));
-  check('Z-RED the ring keeps BOTH errors WITH their stacks (≤ 3 frames, ≤ 400 chars, the bundle’s line:column, no origin)', !!unh && !!unc && [unh, unc].every((c) => typeof c.stack === 'string' && c.stack.length <= 400 && c.stack.split('\n').length <= 3 && /^at .*\/bundle\.js\?v=\d+:\d+:\d+\)?$/m.test(c.stack) && !c.stack.includes('127.0.0.1')), { unh, unc });
+  check('Z-RED the ring keeps BOTH errors WITH their stacks (≤ 3 frames, ≤ 400 chars, the bundle’s line:column, no origin)', !!unh && !!unc && verdictOf([unh, unc].every((c) => typeof c.stack === 'string' && c.stack.length <= 400 && c.stack.split('\n').length <= 3 && /^at .*\/bundle\.js\?v=\d+:\d+:\d+\)?$/m.test(c.stack) && !c.stack.includes('127.0.0.1'))), { unh, unc });
   let sym = '';
   try { sym = execFileSync(process.execPath, ['--no-warnings', path.join(repo, 'scripts/symbolicate.mjs'), incFile, '--checkout', wt], { encoding: 'utf8' }); } catch (e) { sym = String(e.stdout || '') + String(e.stderr || ''); }
   console.log(sym.split('\n').filter((l) => /insertBefore|reading 'length'|→/.test(l)).map((l) => '      ' + l).join('\n'));
   const symLines = sym.split('\n');
   const topOf = (re) => { const i = symLines.findIndex((l) => re.test(l)); return i >= 0 ? symLines[i + 1] || '' : ''; };
-  check('Z-RED symbolicate (the map rebuilt in memory, byte-identical) names both lines: the throw in vault-unlock.js and the `.length` read in chat-enter-keys.js', /rebuilt in memory \(byte-identical/.test(sym) && /→\s+src\/lib\/vault-unlock\.js:\d+:\d+/.test(topOf(/unhandled .*insertBefore/)) && /→\s+src\/lib\/chat-enter-keys\.js:\d+:\d+/.test(topOf(/uncaught .*reading 'length'/)), sym.slice(0, 1500));
+  check('Z-RED symbolicate (the map rebuilt in memory, byte-identical) names both lines: the throw in vault-unlock.js and the `.length` read in chat-enter-keys.js', gateOf(/rebuilt in memory \(byte-identical/.test(sym)) && gateOf(/→\s+src\/lib\/vault-unlock\.js:\d+:\d+/.test(topOf(/unhandled .*insertBefore/))) && verdictOf(/→\s+src\/lib\/chat-enter-keys\.js:\d+:\d+/.test(topOf(/uncaught .*reading 'length'/))), sym.slice(0, 1500));
 }
 
 await stopServer();
 console.log(failed ? `\nFAILED (${passed} passed, ${failed} failed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

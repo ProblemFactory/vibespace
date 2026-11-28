@@ -31,7 +31,7 @@ const require = createRequire(import.meta.url);
 const MPC = require(path.join(REPO, 'src/mount-path-class.js'));
 const SP = require(path.join(REPO, 'src/storage-path.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, detail) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (detail === undefined ? '' : ' — ' + JSON.stringify(detail))); } };
+const ok = (c, n, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (detail === undefined ? '' : ' — ' + JSON.stringify(detail))); } };
 
 // the owner's /proc/self/mountinfo at the incident (2026-10-23), redacted: the user is `u`, the NAS 192.0.2.10, the rclone
 // remotes VS{a}…; trimmed to one line per kind that matters
@@ -59,19 +59,19 @@ const REGISTRY = [{ mountpoint: `${HOME}/vibespace-mounts/NAS`, name: 'NAS', id:
 
 console.log('① the roots from the mountinfo of the incident');
 const rows = MPC.parseMountinfo(MOUNTINFO);
-ok(rows.length === 13 && rows.every((r) => r.mountpoint && r.fstype), `every well-formed line is a row (${rows.length}), a line it cannot read is skipped`);
-ok(rows.some((r) => r.mountpoint === `${HOME}/My Share` && r.fstype === 'cifs'), 'octal escapes undone (\\040 → a space)');
+ok(rows.length === 13 && verdictOf(rows.every((r) => r.mountpoint && r.fstype)), `every well-formed line is a row (${rows.length}), a line it cannot read is skipped`);
+ok(verdictOf(rows.some((r) => r.mountpoint === `${HOME}/My Share` && r.fstype === 'cifs')), 'octal escapes undone (\\040 → a space)');
 const roots = MPC.rootsOf({ mounts: rows, registry: REGISTRY, rootDir: ROOT_DIR, dataDir: DATA_DIR });
 const at = (p) => roots.find((r) => r.root === p);
-ok(['/proc', '/sys/fs/fuse/connections', '/media/usb', '/'].every((p) => !at(p)), 'procfs, fusectl, fuseblk (a FUSE over a LOCAL disk) and / are never roots', roots.map((r) => r.root));
-ok(roots.length === 10 && roots.every((r, i) => !i || roots[i - 1].root.length >= r.root.length), `10 roots (the NAS row and its mount are one), the longest first (${roots.map((r) => r.root).join(' ')})`);
+ok(verdictOf(['/proc', '/sys/fs/fuse/connections', '/media/usb', '/'].every((p) => !at(p))), 'procfs, fusectl, fuseblk (a FUSE over a LOCAL disk) and / are never roots', roots.map((r) => r.root));
+ok(roots.length === 10 && verdictOf(roots.every((r, i) => !i || roots[i - 1].root.length >= r.root.length)), `10 roots (the NAS row and its mount are one), the longest first (${roots.map((r) => r.root).join(' ')})`);
 
 console.log('② the kinds');
 ok(at(`${HOME}/workspace`).kind === 'home' && at(`${HOME}/workspace`).fstype === 'fuse.bindfs', 'the workspace bindfs holds rootDir ⇒ home (witnessed, never refused)');
 ok(at('/mnt/nfs_workspace').kind === 'network' && at('/mnt/nas_public').kind === 'network', 'a kernel NFS mount the instance does not live on ⇒ network');
-ok(['/mnt/gdrive_39ai', '/run/user/1000/doc', '/run/user/1000/gvfs', `${HOME}/vibespace-mounts/OneDrive`, `${HOME}/My Share`].every((p) => at(p).kind === 'storage'), 'rclone by hand, the doc portal, gvfs, cifs ⇒ storage');
+ok(verdictOf(['/mnt/gdrive_39ai', '/run/user/1000/doc', '/run/user/1000/gvfs', `${HOME}/vibespace-mounts/OneDrive`, `${HOME}/My Share`].every((p) => at(p).kind === 'storage')), 'rclone by hand, the doc portal, gvfs, cifs ⇒ storage');
 ok(at(`${HOME}/vibespace-mounts/NAS`).kind === 'storage' && at(`${HOME}/vibespace-mounts/NAS`).name === 'NAS' && at(`${HOME}/vibespace-mounts/NAS`).id === 'mnt-1' && at(`${HOME}/vibespace-mounts/NAS`).fstype === 'fuse.rclone', 'a product storage row carries its name + id beside the mountinfo fstype');
-ok(at(`${HOME}/vibespace-mounts/Gone`) && at(`${HOME}/vibespace-mounts/Gone`).kind === 'storage' && at(`${HOME}/vibespace-mounts/Gone`).fstype === null, 'a storage row NOT mounted is still a storage root (the bare folder the shadow rule guards)');
+ok(gateOf(at(`${HOME}/vibespace-mounts/Gone`)) && at(`${HOME}/vibespace-mounts/Gone`).kind === 'storage' && at(`${HOME}/vibespace-mounts/Gone`).fstype === null, 'a storage row NOT mounted is still a storage root (the bare folder the shadow rule guards)');
 ok(MPC.rootsOf({ mounts: rows, registry: [{ mountpoint: ROOT_DIR + '/data' }], rootDir: ROOT_DIR, dataDir: DATA_DIR }).find((r) => r.root === DATA_DIR).kind === 'home', 'a registry row that holds dataDir is home (a pod whose data sits on its storage row)');
 
 console.log('③ the exemption: the instance\'s own subtree');
@@ -190,4 +190,4 @@ console.log('⑥ A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -20,7 +20,7 @@ import path from 'node:path';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 // ── every symbol our client source DEFINES (exported or top-level declared) ──
 function ourSymbols() {
@@ -53,7 +53,7 @@ function ourSymbols() {
 
 const SYMBOLS = ourSymbols();
 ok(SYMBOLS.size > 50, `collected our own client symbols (${SYMBOLS.size})`);
-ok(SYMBOLS.has('installTelemetry') && SYMBOLS.has('reportBootTime'),
+ok(gateOf(SYMBOLS.has('installTelemetry')) && verdictOf(SYMBOLS.has('reportBootTime')),
   'the two symbols from the real incident are in the symbol set');
 
 
@@ -128,12 +128,12 @@ if (bundle) {
 {
   const broken = 'var a=1;function b(){a++}installTelemetry();b();reportBootTime();';
   const free = freeCalls(broken);
-  ok(free.has('installTelemetry') && free.has('reportBootTime'),
+  ok(gateOf(free.has('installTelemetry')) && verdictOf(free.has('reportBootTime')),
     'NEGATIVE CONTROL: both incident symbols are detected in a synthetic broken bundle');
   const healthy = 'var a=1,e=2;function b(){a++}b();e();';
   ok(freeCalls(healthy).size === 0, 'NEGATIVE CONTROL: a properly minified bundle is clean');
   const prose = 'var t="The mount point /x is not empty (a, b) — reportBootTime (it runs at boot)";';
-  ok(freeCalls(prose).size === 0 && freeCalls('var t=1;reportBootTime();').has('reportBootTime'),
+  ok(freeCalls(prose).size === 0 && verdictOf(freeCalls('var t=1;reportBootTime();').has('reportBootTime')),
     'B-af94: one of our names, a SPACE and «(» inside a string is prose, never a call (minified output never spaces a callee from its «(»); the same name called is still caught');
 }
 
@@ -145,4 +145,4 @@ if (bundle) {
 // two where one does.
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

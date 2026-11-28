@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1200) : '')); } return !!c; };
 const S = JSON.stringify;
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 /** A section that THROWS (an older tree has no such method) is one red line naming it — the sections after it still run. */
@@ -58,13 +58,13 @@ const mirror = AM.getBackendMeta('claude').caps.inputModes;
 ok(S(mirror) === S(cl), 'the client mirror carries the SAME row (enterDoor included — test-harness-contract deep-compares the rest)', { mirror, cl });
 // the live intersection chat-view's _queueCaps() builds: the harness row ∧ the verbs the RUNNING wrapper named
 const live = (row, served) => { const verbs = (row.queueVerbs || []).filter((v) => !served || served.includes(v)); return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, ...(row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) }; };
-ok((/\.\.\.\(row\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}\)/.test(read('src/lib/chat-view.js')) || (/const caps = doorCapsOf\(row, served\);/.test(read('src/lib/chat-view.js')) && /\.\.\.\(row\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}\)/.test(read('src/backend-caps.js')))) && /caps\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}/.test(read('src/lib/chat-input.js')), 'chat-view\'s _queueCaps() and ChatInput.setQueue carry the row\'s door (the intersection above is theirs)');
+ok((gateOf(/\.\.\.\(row\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}\)/.test(read('src/lib/chat-view.js'))) || (gateOf(/const caps = doorCapsOf\(row, served\);/.test(read('src/lib/chat-view.js'))) && gateOf(/\.\.\.\(row\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}\)/.test(read('src/backend-caps.js'))))) && verdictOf(/caps\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}/.test(read('src/lib/chat-input.js'))), 'chat-view\'s _queueCaps() and ChatInput.setQueue carry the row\'s door (the intersection above is theirs)');
 const m = (row, served, o) => AM.composerSendModes(live(row, served), o);
 const NEW = ['remove', 'steer', 'steer-all', 'reorder', 'edit'], W354 = ['remove', 'reorder', 'edit'];
 const cNew = m(cl, NEW);
 ok(cNew.enterDoor === 'steer' && cNew.altDoor === 'queue' && cNew.steerOnEnter === true && cNew.allowHoldChord === true && cNew.allowSteerChord === false && cNew.showHint === true, 'claude on a 2.369.361 wrapper: Enter hands it to the running turn, Alt+Enter HOLDS it (the hold chord, not the steer one)', cNew);
 const c354 = m(cl, W354);
-ok(c354.enterDoor === 'queue' && c354.altDoor === null && c354.steerOnEnter === false && c354.allowHoldChord === false && c354.allowSteerChord === false && c354.queueSegment && !c354.steerSegment, 'OLD WRAPPER (2.369.354, names no steer): Enter keeps the door it really serves — «Enter queues» alone, no chord, no stamp', c354);
+ok(c354.enterDoor === 'queue' && c354.altDoor === null && c354.steerOnEnter === false && c354.allowHoldChord === false && c354.allowSteerChord === false && gateOf(c354.queueSegment) && !c354.steerSegment, 'OLD WRAPPER (2.369.354, names no steer): Enter keeps the door it really serves — «Enter queues» alone, no chord, no stamp', c354);
 const cOld = AM.composerSendModes({ queue: false, steer: false, queueOps: false, queueVerbs: [] });
 ok(cOld.showHint === false && cOld.enterDoor === null && cOld.steerOnEnter === false, 'a wrapper from before the queue (no advert at all): no hint, no chord, no stamp', cOld);
 const cx = m(capsOf('codex').inputModes, null);
@@ -116,23 +116,23 @@ await guard('§2 the composer', () => {
   const key = () => { const ev = { key: 'Enter', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, prevented: false }; ev.preventDefault = () => { ev.prevented = true; }; return ev; };
   const chord = (over) => { const c = mkCI(live(cl, NEW), { _enterGuard: new EnterGuard(), _getTouchEnterSends: () => false, _showImeHint() { }, ...over }); const ev = key(); const did = c.ci._altEnter(ev); return { did, prevented: ev.prevented, frames: c.frames, value: c.ci._textarea.value, events: c.ci._textarea.events || [] }; };
   const run = chord({ _isStreaming: true }), runX = chord({ _isStreaming: true, _expanded: true, _textarea: { value: 'words for the agent', style: {}, classList: { remove() { } }, parentElement: null }, _shortcutHint: {} });
-  ok(run.did === 'hold' && run.prevented && run.frames.length === 1 && !('steer' in run.frames[0]) && runX.did === 'hold' && runX.frames.length === 1, 'Alt+Enter while a turn runs HOLDS — in the expanded composer too (an unstamped frame the wrapper keeps)', { run, runX });
+  ok(run.did === 'hold' && gateOf(run.prevented) && run.frames.length === 1 && !('steer' in run.frames[0]) && runX.did === 'hold' && runX.frames.length === 1, 'Alt+Enter while a turn runs HOLDS — in the expanded composer too (an unstamped frame the wrapper keeps)', { run, runX });
   // r5: a newline TYPED — Chrome inserts nothing for Alt+Enter (the reviewers' bare textarea; the product's composer in
   // test-claude-steer-chrome ⑲), so leaving it to the textarea's default made it a dead key
   const ab = () => ({ value: 'ab', selectionStart: 1, selectionEnd: 1, style: {}, events: [], dispatchEvent(e) { this.events.push(e.type); return true; } });
   const idleX = chord({ _isStreaming: false, _expanded: true, _textarea: ab() }), idleOff = chord({ _isStreaming: false, _getEnterSends: () => false, _textarea: ab() });
-  ok(idleX.did === 'newline' && idleX.prevented && idleX.frames.length === 0 && idleX.value === 'a\nb' && idleX.events.join() === 'input'
-    && idleOff.did === 'newline' && idleOff.prevented && idleOff.frames.length === 0 && idleOff.value === 'a\nb', 'Alt+Enter at IDLE in the expanded composer / with chat.enterSends off: a NEWLINE TYPED at the caret (+ an input event) — nothing sent, never a dead key', { idleX, idleOff });
+  ok(idleX.did === 'newline' && gateOf(idleX.prevented) && idleX.frames.length === 0 && idleX.value === 'a\nb' && idleX.events.join() === 'input'
+    && idleOff.did === 'newline' && gateOf(idleOff.prevented) && idleOff.frames.length === 0 && idleOff.value === 'a\nb', 'Alt+Enter at IDLE in the expanded composer / with chat.enterSends off: a NEWLINE TYPED at the caret (+ an input event) — nothing sent, never a dead key', { idleX, idleOff });
   const idle = chord({ _isStreaming: false });
-  ok(idle.did === 'send' && idle.prevented && idle.frames.length === 1 && !('steer' in idle.frames[0]), 'Alt+Enter at idle where Enter sends: a send, UNSTAMPED — so a tab whose flag lags behind a running turn still has it HELD by the wrapper (r2)', idle);
+  ok(idle.did === 'send' && gateOf(idle.prevented) && idle.frames.length === 1 && !('steer' in idle.frames[0]), 'Alt+Enter at idle where Enter sends: a send, UNSTAMPED — so a tab whose flag lags behind a running turn still has it HELD by the wrapper (r2)', idle);
   ok(mkCI(live(cl, NEW), { _isStreaming: false }).ci.holdChordActs === false && mkCI(live(cl, NEW)).ci.holdChordActs === true && mkCI(live(cl, W354)).ci.holdChordActs === false, 'holdChordActs = the door exists AND a turn runs');
   const att = mkCI(live(cl, NEW), { _attachments: [{ mediaType: 'image/png', base64: 'iVBORw0KGgo=' }], _renderAttachments() { } }); att.ci._send();
-  ok(att.frames[0].steer === true && /"type":"image"/.test(att.frames[0].text), 'attachments ride a stamped frame as on a plain send (one frame: the image blocks + the words)', att.frames);
+  ok(att.frames[0].steer === true && verdictOf(/"type":"image"/.test(att.frames[0].text)), 'attachments ride a stamped frame as on a plain send (one frame: the image blocks + the words)', att.frames);
 });
 const ciSrc = read('src/lib/chat-input.js'), cvSrc = read('src/lib/chat-view.js');
-ok(/e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && \(this\.steerChordAllowed \|\| this\.holdChordAllowed\)\) \{ this\._altEnter\(e\); return; \}/.test(ciSrc) && (ciSrc.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1 && /_altEnter\(e\) \{\n\s+if \(this\.steerChordAllowed\) \{ e\.preventDefault\(\); if \(this\._onSteerChord\) this\._onSteerChord\(\); else this\.steerNow\(\); return 'steer'; \}\n\s+if \(this\.holdChordActs\) \{ e\.preventDefault\(\); if \(this\._onHoldChord\) this\._onHoldChord\(\); else this\.holdNow\(\); return 'hold'; \}/.test(ciSrc) && /_canHoldComposer\(\) \{ return !!this\._chatInput\?\.holdChordActs; \}/.test(cvSrc), 'ONE Alt+Enter chord, the session\'s second door: steer (chat.steerNow) or — here — HOLD (chat.holdNow); still the only chord');
-ok(/export const HOLD_NOW_COMMAND = 'chat\.holdNow';/.test(cvSrc) && /command: HOLD_NOW_COMMAND,\n\s+when: \(ctx\) => steerTargetView\(ctx\) === this && this\._canHoldComposer\(\),/.test(cvSrc) && /onHoldChord: \(\) => runCommand\(HOLD_NOW_COMMAND, \{ view: this \}\)/.test(cvSrc) && /this\._holdKeyDispose\?\.\(\)/.test(cvSrc), 'chat.holdNow: registered once, keybound per view with its own `when` (mutually exclusive with chat.steerNow on the one chord), disposed with the view');
-ok(/this\._holdBtn\.classList\.toggle\('hidden', !modes\.allowHoldChord\)/.test(ciSrc) && /get holdChordAllowed\(\) \{ return !!this\._sendModes\(\)\.allowHoldChord; \}/.test(ciSrc) && /this\._holdBtn\.innerHTML = UI_ICONS\.clock;/.test(ciSrc) && /\.chat-hold-btn:not\(\.hidden\)/.test(read('public/chat.css')), '≤ 768 px: the hold button beside Send (Send itself hands the message over), shown on the capability alone like the chord (r2), placed by CSS');
+ok(gateOf(/e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && \(this\.steerChordAllowed \|\| this\.holdChordAllowed\)\) \{ this\._altEnter\(e\); return; \}/.test(ciSrc)) && (ciSrc.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1 && gateOf(/_altEnter\(e\) \{\n\s+if \(this\.steerChordAllowed\) \{ e\.preventDefault\(\); if \(this\._onSteerChord\) this\._onSteerChord\(\); else this\.steerNow\(\); return 'steer'; \}\n\s+if \(this\.holdChordActs\) \{ e\.preventDefault\(\); if \(this\._onHoldChord\) this\._onHoldChord\(\); else this\.holdNow\(\); return 'hold'; \}/.test(ciSrc)) && verdictOf(/_canHoldComposer\(\) \{ return !!this\._chatInput\?\.holdChordActs; \}/.test(cvSrc)), 'ONE Alt+Enter chord, the session\'s second door: steer (chat.steerNow) or — here — HOLD (chat.holdNow); still the only chord');
+ok(gateOf(/export const HOLD_NOW_COMMAND = 'chat\.holdNow';/.test(cvSrc)) && gateOf(/command: HOLD_NOW_COMMAND,\n\s+when: \(ctx\) => steerTargetView\(ctx\) === this && this\._canHoldComposer\(\),/.test(cvSrc)) && gateOf(/onHoldChord: \(\) => runCommand\(HOLD_NOW_COMMAND, \{ view: this \}\)/.test(cvSrc)) && verdictOf(/this\._holdKeyDispose\?\.\(\)/.test(cvSrc)), 'chat.holdNow: registered once, keybound per view with its own `when` (mutually exclusive with chat.steerNow on the one chord), disposed with the view');
+ok(gateOf(/this\._holdBtn\.classList\.toggle\('hidden', !modes\.allowHoldChord\)/.test(ciSrc)) && gateOf(/get holdChordAllowed\(\) \{ return !!this\._sendModes\(\)\.allowHoldChord; \}/.test(ciSrc)) && gateOf(/this\._holdBtn\.innerHTML = UI_ICONS\.clock;/.test(ciSrc)) && verdictOf(/\.chat-hold-btn:not\(\.hidden\)/.test(read('public/chat.css'))), '≤ 768 px: the hold button beside Send (Send itself hands the message over), shown on the capability alone like the chord (r2), placed by CSS');
 
 // ── §3 THE ADAPTER + THE TYPING PATH ──
 console.log('§3 the adapter and the typing path');
@@ -145,7 +145,7 @@ const fimg = fr(ad.formatChatInput(img, 'm3', { steer: true }));
 ok(fimg.webui_steer === true && fimg.message.content[0].type === 'image', 'an image paste is spliced with the stamp, its blocks untouched');
 ok(ad.formatQueueOp({ op: 'steer', id: 'q1' }) === S({ type: 'queue-op', op: 'steer', id: 'q1' }) && ad.formatQueueOp({ op: 'steer-all' }) === S({ type: 'queue-op', op: 'steer-all', id: null }), 'claude steer / steer-all → the codex frame shapes (was: refused «takes no input into a running turn» — measured false on 2.1.308)');
 let runNowErr = ''; try { ad.formatQueueOp({ op: 'run-now', id: 'q1' }); } catch (e) { runNowErr = e.message; }
-ok(/as soon as the current turn ends/.test(runNowErr), 'run-now stays refused with its honest words', runNowErr);
+ok(verdictOf(/as soon as the current turn ends/.test(runNowErr)), 'run-now stays refused with its honest words', runNowErr);
 });
 await guard('§3 the typing path', () => {
   const { createUserInputSender } = require(path.join(REPO, 'src/server/user-input.js'));
@@ -156,7 +156,7 @@ await guard('§3 the typing path', () => {
   send('w1', 'held', { msgId: 'mq', origin: 'ws' });
   send('w1', '/compact', { msgId: 'md', origin: 'dispatch', steer: true });
   ok(lines[0].webui_steer === true && !('webui_steer' in lines[1]) && !('webui_steer' in lines[2]) && lines[2].webui_origin === 'dispatch', 'THE ONE typing path: the person\'s door rides to the wrapper; a dispatch never hands over', lines);
-  ok(/sendUserInput\(data\.sessionId, data\.text, \{ msgId: data\.msgId, origin: 'ws', steer: data\.steer === true \}\)/.test(read('src/ws-handler.js')), 'ws `chat-input`: only `steer: true` counts');
+  ok(verdictOf(/sendUserInput\(data\.sessionId, data\.text, \{ msgId: data\.msgId, origin: 'ws', steer: data\.steer === true \}\)/.test(read('src/ws-handler.js'))), 'ws `chat-input`: only `steer: true` counts');
 });
 
 // ── §4 THE NORMALIZER ──
@@ -176,9 +176,9 @@ await guard('§4 the normalizer', () => {
   ok(S(handed) === S(['handed', 'handed', 'handed']), 'handed: the bubble reads «Handed to the turn» (the agent reads it at its next tool call)', handed);
   ok(chip('m-b') === 'steered' && !chip('m-c') && chip('m-d') === 'kept' && !chip('m-e'), 'landed ⇒ «Steered» where it sits · own-turn ⇒ an ordinary message (no chip) · kept ⇒ «Unread when stopped — goes with your next message» (lane midturn-order) · an unknown state changes nothing', ['m-b', 'm-c', 'm-d', 'm-e'].map(chip));
   ok(ops.filter((o) => o.op === 'edit' && o.fields && 'queueState' in o.fields).length === 6 && !mm.messages.some((x) => x.noticeKind === 'unknown-record'), 'one edit op per change, live to every client; no unknown-record card');
-  ok(/'input_handover',/.test(read('server.js')), 'server.js CLAUDE_STREAM_TYPES knows the record (the unhandled-type breadcrumb stays quiet)');
+  ok(verdictOf(/'input_handover',/.test(read('server.js'))), 'server.js CLAUDE_STREAM_TYPES knows the record (the unhandled-type breadcrumb stays quiet)');
   const rend = read('src/lib/chat-renderers.js');
-  ok(/state === 'handed' \? t\('Handed to the turn'\)/.test(rend) && /state === 'kept' \? t\('Unread when stopped — goes with your next message'\)/.test(rend) && /&& state !== 'handed' && state !== 'kept' && state !== 'undelivered' && state !== 'unconfirmed' && state !== 'resent' && state !== 'dismissed'\) return null;/.test(rend), 'the chip renderer draws both new states, each with its own words');
+  ok(gateOf(/state === 'handed' \? t\('Handed to the turn'\)/.test(rend)) && gateOf(/state === 'kept' \? t\('Unread when stopped — goes with your next message'\)/.test(rend)) && verdictOf(/&& state !== 'handed' && state !== 'kept' && state !== 'undelivered' && state !== 'unconfirmed' && state !== 'resent' && state !== 'dismissed'\) return null;/.test(rend)), 'the chip renderer draws both new states, each with its own words');
 });
 
 // ── §5 STOP'S PUT-BACK COUNTS WHAT STAYS ──
@@ -186,7 +186,7 @@ console.log('§5 Stop: what was handed stays with the turn — counted, never pu
 await guard('§5 the put-back count', async () => {
   const PB = require(path.join(REPO, 'src/queue-putback.js'));
   const d = PB.queueDroppedOf({ type: 'queue_dropped', dropId: '9-1', by: 'stop', turnId: null, items: [], omitted: 0, kept: 2 });
-  ok(d && d.kept === 2 && d.items.length === 0, 'queueDroppedOf reads `kept` (a record may carry it and no rows at all)', d);
+  ok(gateOf(d) && d.kept === 2 && d.items.length === 0, 'queueDroppedOf reads `kept` (a record may carry it and no rows at all)', d);
   ok(S(PB.putbackNotice(d)) === S({ n: 0, images: 0, others: 0, cut: 0, omitted: 0, started: 0, kept: 2 }) && !('kept' in PB.putbackNotice(PB.queueDroppedOf({ type: 'queue_dropped', dropId: '9-2', items: [] }))), 'the toast\'s facts carry it — and only when there is one (every other harness\'s shape is unchanged)');
   const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
   const mm = createMessageManager('claude', 'steer-kept');
@@ -194,10 +194,10 @@ await guard('§5 the put-back count', async () => {
   mm.processLive({ type: 'queue_dropped', dropId: '9-1', by: 'stop', turnId: null, items: [], omitted: 0, kept: 1 });
   const meta = ops.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback');
   ok(meta.length === 1 && meta[0].kept === 1 && meta[0].n === 0, 'a Stop that put nothing back but ends a turn holding a handed message still says ONE toast', meta);
-  ok(/if \(op\.kept > 0\) parts\.push\(t\('\{k\} message\(s\) unread when stopped — they go with your next message', \{ k: op\.kept \}\)\);/.test(cvSrc), 'the toast\'s words: «{k} message(s) unread when stopped — they go with your next message» (lane midturn-order r2 m5)');
+  ok(verdictOf(/if \(op\.kept > 0\) parts\.push\(t\('\{k\} message\(s\) unread when stopped — they go with your next message', \{ k: op\.kept \}\)\);/.test(cvSrc)), 'the toast\'s words: «{k} message(s) unread when stopped — they go with your next message» (lane midturn-order r2 m5)');
   // r2: ONE record says EACH frame's fate, and the chips are drawn from it
   const d2 = PB.queueDroppedOf({ type: 'queue_dropped', dropId: '9-3', items: [{ id: 'q1', msgId: 'm-p', text: 'put back' }], kept: 1, keptIds: ['m-k'], landed: 1, landedIds: ['m-l'] });
-  ok(d2 && S(d2.keptIds) === S(['m-k']) && S(d2.landedIds) === S(['m-l']) && d2.landed === 1 && S(PB.putbackNotice(d2)) === S({ n: 1, images: 0, others: 0, cut: 0, omitted: 0, started: 0, kept: 1, landed: 1 }), 'queueDroppedOf names each handed frame (keptIds / landedIds) and the toast\'s facts count both', { d2, facts: PB.putbackNotice(d2) });
+  ok(gateOf(d2) && S(d2.keptIds) === S(['m-k']) && S(d2.landedIds) === S(['m-l']) && d2.landed === 1 && S(PB.putbackNotice(d2)) === S({ n: 1, images: 0, others: 0, cut: 0, omitted: 0, started: 0, kept: 1, landed: 1 }), 'queueDroppedOf names each handed frame (keptIds / landedIds) and the toast\'s facts count both', { d2, facts: PB.putbackNotice(d2) });
   const mm2 = createMessageManager('claude', 'steer-fates');
   const ops2 = []; mm2.onOp((o) => ops2.push(o));
   for (const id of ['m-p', 'm-k', 'm-l']) mm2.processLive(ad.formatChatInput('words ' + id, id, { steer: id !== 'm-p' }).userMsg);
@@ -206,7 +206,7 @@ await guard('§5 the put-back count', async () => {
   const chip2 = (id) => mm2.messages.find((x) => x.webuiMsgId === id)?.queueState;
   const meta2 = ops2.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback');
   ok(chip2('m-p') === 'removed' && chip2('m-k') === 'kept' && chip2('m-l') === 'steered' && meta2.length === 1 && meta2[0].kept === 1 && meta2[0].landed === 1, 'the chips come from THE record: put back «Removed», kept «Unread when stopped — goes with your next message», read «Steered» — and ONE toast', { chips: ['m-p', 'm-k', 'm-l'].map(chip2), meta2 });
-  ok(/if \(op\.landed > 0\) parts\.push\(t\('\{k\} message\(s\) you sent into the turn had already reached the agent', \{ k: op\.landed \}\)\);/.test(cvSrc), 'the toast names a read one in its own words — never «stays with it»: «{k} message(s) you sent into the turn had already reached the agent»');
+  ok(verdictOf(/if \(op\.landed > 0\) parts\.push\(t\('\{k\} message\(s\) you sent into the turn had already reached the agent', \{ k: op\.landed \}\)\);/.test(cvSrc)), 'the toast names a read one in its own words — never «stays with it»: «{k} message(s) you sent into the turn had already reached the agent»');
   const ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default || {};
   ok(!!zh['{k} message(s) you sent into the turn had already reached the agent'] && !!ja['{k} message(s) you sent into the turn had already reached the agent'], '…in zh and ja too');
 });
@@ -278,9 +278,9 @@ await guard('§6 the buffer copy', () => {
   e.processLive({ type: 'queue_dropped', dropId: '9-9', by: 'stop', turnId: null, items: [{ id: 'q', msgId: 'm-e', text: 'E put back' }], omitted: 0 });
   e.processLive({ type: 'user', uuid: U(12), promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'E put back' }] } });
   ok(users(e, 'E put back').length === 2 && users(e, 'E put back')[0].queueState === 'removed', 'a frame Stop PUT BACK never ran: the person\'s resend of the same words is its own bubble (the copy keeps «Removed»)', users(e, 'E put back').map((m) => m.queueState || null));
-  ok(/if \(msg\._fromWebui && msg\.timestamp && !msg\.webui_copy\) \{/.test(read('src/session-store.js')), 'the history merge keeps a copy whatever user record follows it (a tool_result is one) — src/session-store.js');
+  ok(verdictOf(/if \(msg\._fromWebui && msg\.timestamp && !msg\.webui_copy\) \{/.test(read('src/session-store.js'))), 'the history merge keeps a copy whatever user record follows it (a tool_result is one) — src/session-store.js');
   const wr = read('data/bin/chat-wrapper.js');
-  ok(/if \(!origin && msgId && !isCommandFrame\(o\)\) \{\n\s+const st = stampFrame\(line, o\);\n\s+line = st\.line;\n\s+if \(recordPersonFrame\(o, msgId, st\.uuid\)\) buffered = false;\n\s+\}/.test(wr) && /return JSON\.stringify\(\{ type: 'user', message: \{ role: 'user', content \}, msgId, cliUuid, handNo, _fromWebui: true, webui_copy: true, timestamp: ts \}\);/.test(wr) && /buffer \+= line \+ '\\n';\n\s+copies\.set\(msgId, \{ line, ts, cliUuid, handNo: 0, settled: false \}\);/.test(wr) && /rewriteCopy\(entry\.msgId, o\);/.test(wr), 'the wrapper writes the copy into its HISTORY BUFFER only (never stdout — the live view drew it at send), for the person\'s mid-turn frames (never a slash command — the CLI records the command it runs its own way)');
+  ok(gateOf(/if \(!origin && msgId && !isCommandFrame\(o\)\) \{\n\s+const st = stampFrame\(line, o\);\n\s+line = st\.line;\n\s+if \(recordPersonFrame\(o, msgId, st\.uuid\)\) buffered = false;\n\s+\}/.test(wr)) && gateOf(/return JSON\.stringify\(\{ type: 'user', message: \{ role: 'user', content \}, msgId, cliUuid, handNo, _fromWebui: true, webui_copy: true, timestamp: ts \}\);/.test(wr)) && gateOf(/buffer \+= line \+ '\\n';\n\s+copies\.set\(msgId, \{ line, ts, cliUuid, handNo: 0, settled: false \}\);/.test(wr)) && verdictOf(/rewriteCopy\(entry\.msgId, o\);/.test(wr)), 'the wrapper writes the copy into its HISTORY BUFFER only (never stdout — the live view drew it at send), for the person\'s mid-turn frames (never a slash command — the CLI records the command it runs its own way)');
 });
 
 // ── §7 THE STRIP AND THE REFUSALS (r2) ──
@@ -291,10 +291,10 @@ await guard('§7 the strip', () => {
   const steers = (html.match(/data-queue-op="steer" data-queue-id="([^"]+)"/g) || []).map((s) => s.replace(/.*data-queue-id="([^"]+)"/, '$1'));
   ok(S(steers) === S(['q1']) && !/data-queue-op="steer-all"/.test(html), 'a row marked `steerable: false` (a command, a frame VibeSpace typed) has no ⚡, and «Steer all» counts only rows that may join (one ⇒ none drawn)', steers);
   const html2 = ChatInput.queueStripHtml([{ id: 'q1', msgId: 'm1', preview: 'a', kind: 'user' }, { id: 'q2', msgId: 'm2', preview: 'b', kind: 'user' }], caps);
-  ok((html2.match(/data-queue-op="steer"/g) || []).length === 2 && /data-queue-op="steer-all"/.test(html2), 'CONTROL: rows that say nothing keep their ⚡ (codex / agy / acp unchanged)');
+  ok((html2.match(/data-queue-op="steer"/g) || []).length === 2 && verdictOf(/data-queue-op="steer-all"/.test(html2)), 'CONTROL: rows that say nothing keep their ⚡ (codex / agy / acp unchanged)');
   const MM = require(path.join(REPO, 'src/message-manager.js'));
   const txt = (why) => (MM.MessageManager || MM).queueOpFailureText({ reason: 'not-steerable', ...(why ? { why } : {}) });
-  ok(/^VibeSpace's own message runs between turns/.test(txt('origin')) && /^The turn is being stopped/.test(txt('stopping')) && /^This agent has not shown yet/.test(txt('unproven')) && /^A command runs between turns/.test(txt('command')) && /^A command runs between turns/.test(txt()), 'not-steerable says WHY: VibeSpace\'s own message / the stop settling / an unproven CLI / a command (no why = a command, an older wrapper)', ['origin', 'stopping', 'unproven', 'command', null].map(txt));
+  ok(gateOf(/^VibeSpace's own message runs between turns/.test(txt('origin'))) && gateOf(/^The turn is being stopped/.test(txt('stopping'))) && gateOf(/^This agent has not shown yet/.test(txt('unproven'))) && gateOf(/^A command runs between turns/.test(txt('command'))) && verdictOf(/^A command runs between turns/.test(txt())), 'not-steerable says WHY: VibeSpace\'s own message / the stop settling / an unproven CLI / a command (no why = a command, an older wrapper)', ['origin', 'stopping', 'unproven', 'command', null].map(txt));
 });
 
 await guard('§r6 the settle chip tells the truth', () => {
@@ -309,9 +309,9 @@ await guard('§r6 the settle chip tells the truth', () => {
   const running = c()?.settling;
   ok(!!settling && settling.why === 'handover' && Number(settling.now) > 0 && Number(settling.until) > settling.now && !!running && running.running === true && !running.until, '(r6) the owed turn\'s init ENDS the settle: «settling» (its why, the hub\'s now + until) → «running» with no deadline — a countdown only while a timer exists', { settling, running });
   const cv = read('src/lib/chat-view.js'), cr = read('src/lib/chat-renderers.js');
-  ok(/localUntil: Date\.now\(\) \+ \(Number\(fields\.settling\.until\) - Number\(fields\.settling\.now\)\)/.test(cv) && /Number\(settling\.localUntil\) > 0 \? Number\(settling\.localUntil\)/.test(cr) && !/Number\(settling\.until\) > 0 \? Number\(settling\.until\)/.test(cr), '(r6) the hub-clock law: the browser counts down to `until − now` from the moment the edit arrived (never the hub\'s epoch against its own clock); a restored page shows no seconds');
+  ok(gateOf(/localUntil: Date\.now\(\) \+ \(Number\(fields\.settling\.until\) - Number\(fields\.settling\.now\)\)/.test(cv)) && gateOf(/Number\(settling\.localUntil\) > 0 \? Number\(settling\.localUntil\)/.test(cr)) && !/Number\(settling\.until\) > 0 \? Number\(settling\.until\)/.test(cr), '(r6) the hub-clock law: the browser counts down to `until − now` from the moment the edit arrived (never the hub\'s epoch against its own clock); a restored page shows no seconds');
   const w = read('data/bin/chat-wrapper.js');
-  ok(/record\('queue_settle', \{ state: 'running', why: 'handover' \}\)/.test(w) && /why: stopping \? 'stop' : 'handover'/.test(w), '(r6) the wrapper says «running» at the owed turn\'s init and names WHY a window holds (a Stop or a hand-over)');
+  ok(gateOf(/record\('queue_settle', \{ state: 'running', why: 'handover' \}\)/.test(w)) && verdictOf(/why: stopping \? 'stop' : 'handover'/.test(w)), '(r6) the wrapper says «running» at the owed turn\'s init and names WHY a window holds (a Stop or a hand-over)');
 });
 await guard('§r7 the hook bound is two facts: which hooks the CLI loads AND how many it said started', () => {
   // the wrapper's own census + bound, run over scratch settings (never the box's): HOME / cwd / argv / env are stubs
@@ -331,13 +331,13 @@ await guard('§r7 the hook bound is two facts: which hooks the CLI loads AND how
   try {
     const flag = path.join(root, 'mine.json'); fs.writeFileSync(flag, hooksOf({ type: 'command', command: 'sleep 100', timeout: 120 }));
     const lone = run({ settings: hooksOf(PRODUCT) });
-    ok(lone.ms === 15000 && /the product's hook/.test(lone.why), '(r7) the product-only control: one hook started, the settings name only the product\'s (this install\'s path, timeout 10) ⇒ 15 s', lone);
+    ok(lone.ms === 15000 && verdictOf(/the product's hook/.test(lone.why)), '(r7) the product-only control: one hook started, the settings name only the product\'s (this install\'s path, timeout 10) ⇒ 15 s', lone);
     const two = run({ settings: hooksOf(PRODUCT), started: 2 });
-    ok(two.ms === 605000 && /2 hook\(s\) said started/.test(two.why), '(r7) TWO hooks started, the settings name one ⇒ the unseen one fails closed: 605 s (r6: 15 s ⇒ the kept frame answered after Stop)', two);
+    ok(two.ms === 605000 && verdictOf(/2 hook\(s\) said started/.test(two.why)), '(r7) TWO hooks started, the settings name one ⇒ the unseen one fails closed: 605 s (r6: 15 s ⇒ the kept frame answered after Stop)', two);
     const remote = run({ settings: hooksOf(PRODUCT), env: { VIBESPACE_REMOTE_SID: 'r-1' } });
-    ok(remote.ms === 605000 && /remote session/.test(remote.why), '(r7) a REMOTE session (its CLI loads the device\'s settings) ⇒ unknown ⇒ 605 s', remote);
+    ok(remote.ms === 605000 && verdictOf(/remote session/.test(remote.why)), '(r7) a REMOTE session (its CLI loads the device\'s settings) ⇒ unknown ⇒ 605 s', remote);
     const flagged = run({ settings: hooksOf(PRODUCT), argv: ['--settings', flag], started: 2 });
-    ok(flagged.ms === 125000 && /not the product's: its timeout 120 s/.test(flagged.why), '(r7) a `--settings <file>` in the CLI\'s arguments is READ: its 120 s hook attributed ⇒ 125 s', flagged);
+    ok(flagged.ms === 125000 && verdictOf(/not the product's: its timeout 120 s/.test(flagged.why)), '(r7) a `--settings <file>` in the CLI\'s arguments is READ: its 120 s hook attributed ⇒ 125 s', flagged);
     const inline = run({ settings: hooksOf(PRODUCT), argv: ['--settings=' + hooksOf({ type: 'command', command: 'sleep 1', timeout: 40 })], started: 2 });
     ok(inline.ms === 45000, '(r7) an inline `--settings=<json>` is read too ⇒ its 40 s hook + 5 s', inline);
     const named = run({ settings: hooksOf({ type: 'command', command: 'sleep 125 # vibespace-hook.mjs' }) });
@@ -349,8 +349,8 @@ await guard('§r7 the hook bound is two facts: which hooks the CLI loads AND how
     const plugin = run({ settings: hooksOf(PRODUCT), argv: ['--plugin-dir', root] });
     ok(plugin.ms === 605000, '(r7) a `--plugin-dir` (its hooks are its own) ⇒ 605 s', plugin);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
-  ok(/const b = promptHookBound\(hooksStarted\);/.test(w) && /promptHooks\.add\(hid\); hooksStarted\+\+;/.test(w), '(r7) the wrapper arms the bound with the count the CLI said started (r6 read the census alone)');
-  ok(/function settleStopCopies\(why\) \{\n\s+landRiding\(why\);[\s\S]{0,200}settleCopies\(kept\); settleCopies\(rode\);/.test(w) && (w.match(/settleStopCopies\(/g) || []).length === 3, '(r7) every frame a Stop touched settles once — kept AND riding (the follow-up took it), at the settle and at the backstop');
+  ok(gateOf(/const b = promptHookBound\(hooksStarted\);/.test(w)) && verdictOf(/promptHooks\.add\(hid\); hooksStarted\+\+;/.test(w)), '(r7) the wrapper arms the bound with the count the CLI said started (r6 read the census alone)');
+  ok(gateOf(/function settleStopCopies\(why\) \{\n\s+landRiding\(why\);[\s\S]{0,200}settleCopies\(kept\); settleCopies\(rode\);/.test(w)) && (w.match(/settleStopCopies\(/g) || []).length === 3, '(r7) every frame a Stop touched settles once — kept AND riding (the follow-up took it), at the settle and at the backstop');
 });
 // ── §8 THE STOP THAT CAME LATE (B-28b1 — the same row as B-1c04; the coordinator's ruling 2026-11-18 «TELL, DO NOT PRETEND») ──
 // A frame the CLI still held at Stop runs as a follow-up the wrapper interrupts on its init; on a loaded machine the CLI read that
@@ -489,20 +489,20 @@ await guard('§8', async () => {
   // (the two RED controls read the release's way, byOrder 'off' by design; a step they MISSED is named here like every run's)
   const offOrder = Object.entries({ L, A, E, O, C, T2, M2, V, G, GS, K2, K4, K1, K3 }).filter(([k, x]) => x.byOrder !== (k === 'K1' || k === 'K3' ? 'off' : 'read')).map(([k, x]) => k + ': ' + x.byOrder);
   ok(offOrder.length === 0, '§8 BY ORDER (r2323): every step of every run came (r3297: each waited on its fact, none named missed) and every run read the record it waits for — the result carrying the late mark, else the line the window settled at (none met the deadline)', offOrder);
-  ok(K2.held === true && K2.settled && K2.lateLines === 1 && K2.late.length === 1 && K2.late[0].how === 'billed', '§8 THE RECORD BY ORDER (r2320): the SAY of the record that carries the late fact HELD (a stall placed between the logged fact and the said record) — the run still reads the fact off the record', S8(K2));
-  ok(K1.held === true && K1.settled && K1.lateLines === 1 && K1.late.length === 0, '§8 RED CONTROL: the same stall read the release\'s way (20 ms after the log\'s settle) misses the record — «late: [] · lateLines: 1», the hosted gates\' symptom made at will', S8(K1));
-  ok(K4.held === true && K4.settled && K4.lateLines === 0 && K4.late.length === 0 && K4.results >= 2, '§8 THE SETTLE\'S LINE BY ORDER (r2323): nothing late, the SAY of the follow-up\'s result HELD — the run reads past it (the CLI\'s idle word comes after it) before «nothing late» is judged', S8(K4));
-  ok(K3.held === true && K3.settled && K3.lateLines === 0 && K3.results === 1, '§8 RED CONTROL: the same stall read the release\'s way — «nothing late» judged before the follow-up\'s result was read', S8(K3));
+  ok(K2.held === true && gateOf(K2.settled) && K2.lateLines === 1 && K2.late.length === 1 && K2.late[0].how === 'billed', '§8 THE RECORD BY ORDER (r2320): the SAY of the record that carries the late fact HELD (a stall placed between the logged fact and the said record) — the run still reads the fact off the record', S8(K2));
+  ok(K1.held === true && gateOf(K1.settled) && K1.lateLines === 1 && K1.late.length === 0, '§8 RED CONTROL: the same stall read the release\'s way (20 ms after the log\'s settle) misses the record — «late: [] · lateLines: 1», the hosted gates\' symptom made at will', S8(K1));
+  ok(K4.held === true && gateOf(K4.settled) && K4.lateLines === 0 && K4.late.length === 0 && K4.results >= 2, '§8 THE SETTLE\'S LINE BY ORDER (r2323): nothing late, the SAY of the follow-up\'s result HELD — the run reads past it (the CLI\'s idle word comes after it) before «nothing late» is judged', S8(K4));
+  ok(K3.held === true && gateOf(K3.settled) && K3.lateLines === 0 && K3.results === 1, '§8 RED CONTROL: the same stall read the release\'s way — «nothing late» judged before the follow-up\'s result was read', S8(K3));
   console.log(`    §8 agent tokens only — ${G.late.length} told (the since-last copy: ${GS.late.length})`);
   console.log(`    §8 leaked follow-ups (told) — late ${L.requests} (${L.late.length}) · answered ${A.requests} (${A.late.length}) · ran ${E.requests} (${E.late.length}) · on time ${O.requests} (${O.late.length}) · blind ${C.requests} (${C.late.length}) · second Stop ${T2.requests} (${T2.late.length}) · drops ${M2.requests} (${M2.late.length}) · 2.1.308 ${V.requests} (${V.late.length})`);
-  ok(L.settled && L.requests === 1 && L.late.length === 1 && L.late[0].follow === 1 && L.late[0].how === 'billed' && L.late[0].cut === true && L.late[0].tokens > 0 && L.lateLines === 1,
+  ok(gateOf(L.settled) && L.requests === 1 && L.late.length === 1 && L.late[0].follow === 1 && L.late[0].how === 'billed' && L.late[0].cut === true && L.late[0].tokens > 0 && L.lateLines === 1,
     '§8 the follow-up\'s request LEFT, THEN the CLI read the second interrupt (the stall placed by order) ⇒ the stop-late fact rides ITS result (billed, cut off), one log line', S8(L));
   ok(A.requests === 1 && A.late.length === 1 && A.late[0].how === 'answered' && A.late[0].cut === true, '§8 …the model answered before the interrupt was read ⇒ the fact says answered (cut off)', S8(A));
   ok(E.requests === 1 && E.late.length === 1 && E.late[0].how === 'answered' && E.late[0].cut === false, '§8 …the follow-up RAN TO ITS END before the interrupt was read ⇒ the fact says so (not cut off)', S8(E));
-  ok(O.settled && O.requests === 0 && O.late.length === 0 && O.lateLines === 0, '§8 the other way (the follow-up sends no request at all; the interrupt is read first and ends it): nothing reached the model and NOTHING is told — no false alarm', S8(O));
-  ok(C.settled && C.requests === 1 && C.late.length === 0 && C.lateLines === 0, '§8 RED CONTROL: the wrapper that never looks (the release\'s) — the same leaked request, and it reports a clean stop', S8(C));
-  ok(T2.settled && T2.secondBeforeResult && T2.requests === 1 && T2.late.length === 1 && T2.late[0].how === 'billed', '§8 a SECOND Stop pressed while the follow-up runs (the wrapper saw it before the result — the stand-in held by count) rebuilds the window — the follow-up is still judged at its result and told', { ...S8(T2), secondBeforeResult: T2.secondBeforeResult });
-  ok(M2.secondBeforeResult && M2.requests === 1 && M2.late.length === 0, '§8 RED CONTROL: a rebuild that drops the follow-up\'s mark — the second Stop (seen before the result) loses the fact', { ...S8(M2), secondBeforeResult: M2.secondBeforeResult });
+  ok(gateOf(O.settled) && O.requests === 0 && O.late.length === 0 && O.lateLines === 0, '§8 the other way (the follow-up sends no request at all; the interrupt is read first and ends it): nothing reached the model and NOTHING is told — no false alarm', S8(O));
+  ok(gateOf(C.settled) && C.requests === 1 && C.late.length === 0 && C.lateLines === 0, '§8 RED CONTROL: the wrapper that never looks (the release\'s) — the same leaked request, and it reports a clean stop', S8(C));
+  ok(gateOf(T2.settled) && gateOf(T2.secondBeforeResult) && T2.requests === 1 && T2.late.length === 1 && T2.late[0].how === 'billed', '§8 a SECOND Stop pressed while the follow-up runs (the wrapper saw it before the result — the stand-in held by count) rebuilds the window — the follow-up is still judged at its result and told', { ...S8(T2), secondBeforeResult: T2.secondBeforeResult });
+  ok(gateOf(M2.secondBeforeResult) && M2.requests === 1 && M2.late.length === 0, '§8 RED CONTROL: a rebuild that drops the follow-up\'s mark — the second Stop (seen before the result) loses the fact', { ...S8(M2), secondBeforeResult: M2.secondBeforeResult });
   ok(V.requests === 1 && V.late.length === 1 && V.late[0].how === 'billed' && V.late[0].tokens > 0, '§8 a CLI before the per-result count (2.1.308): its result\'s own usage says it, as on every version', S8(V));
   ok(G.requests === 0 && G.late.length === 0 && G.lateLines === 0, '§8 an agent\'s tokens in the since-last count (the follow-up itself sent nothing) tell NOTHING — the follow-up\'s own usage is empty', S8(G));
   ok(GS.requests === 0 && GS.late.length === 1, '§8 RED CONTROL: a wrapper that reads the since-last count tells «billed» for a follow-up that sent nothing', S8(GS));
@@ -519,17 +519,17 @@ await guard('§8', async () => {
   mmT.convertHistory([{ type: 'assistant', message: { id: 'msg_t1', role: 'assistant', content: [{ type: 'text', text: 'the answer' }] } }, { type: 'result', subtype: 'success', is_error: false, session_id: 'x', webui_stop_late: { follow: 1, how: 'answered', cut: false } }, { type: 'system', subtype: 'turn_duration', duration_ms: 1234, message_count: 2 }]);
   const metaOn = mmT.messages.filter((m) => m.meta && m.meta.turn).map((m) => (m.content?.[0]?.stopLate ? 'late-row' : m.role));
   ok(JSON.stringify(metaOn) === JSON.stringify(['assistant']), '§8 the turn\'s meta (its duration) rides the follow-up\'s answer, never the Stop\'s own late row — the skip reads the mark on the record', metaOn);
-  ok(read('src/lib/chat-renderers.js').includes("if (late && late.own) { const lel = this.appendSystem(stopLateLine(late));"), '§8 WIRING: the renderer draws the own row\'s words keyed on the record\'s `own` mark (the stored row holds none)');
+  ok(verdictOf(read('src/lib/chat-renderers.js').includes("if (late && late.own) { const lel = this.appendSystem(stopLateLine(late));")), '§8 WIRING: the renderer draws the own row\'s words keyed on the record\'s `own` mark (the stored row holds none)');
   const noSub = lone({ is_error: false, webui_stop_late: { follow: 1, how: 'billed', cut: true, tokens: 9 } }), errOk = lone({ subtype: 'success', is_error: true, webui_stop_late: { follow: 1, how: 'answered', cut: false } });
   ok(noSub.length === 1 && noSub[0].late.own === true && noSub[0].text === '' && errOk.length === 1 && !errOk[0].late.own && errOk[0].status === 'error', '§8 a result with NO subtype carrying the fact gets its own row (it draws none); a success with is_error says it once, on its error row', { noSub, errOk });
   ok(rowsOf(O.recs, false).length === 0 && rowsOf(C.recs, false).length === 0, '§8 …and nothing is drawn where nothing was told');
   const CR = read('src/lib/chat-renderers.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
   const CUT = 'The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed';
   const RAN = 'The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed';
-  ok(CR.includes(`t('${CUT}')`) && CR.includes(`t('${RAN}')`) && CR.includes("if (late) { const line = document.createElement('div'); line.className = 'chat-system chat-stop-late'; line.textContent = stopLateLine(late); el.appendChild(line); }"),
+  ok(gateOf(CR.includes(`t('${CUT}')`)) && gateOf(CR.includes(`t('${RAN}')`)) && verdictOf(CR.includes("if (late) { const line = document.createElement('div'); line.className = 'chat-system chat-stop-late'; line.textContent = stopLateLine(late); el.appendChild(line); }")),
     '§8 WIRING: the renderer says the fact through t() beside «Interrupted» (or as its own line) — never a toast, never a For-you item');
-  ok([ZH, JA].every((D) => D.includes(`  "${CUT}": "`) && D.includes(`  "${RAN}": "`)), '§8 …in zh and ja');
-  ok(cwSrc.includes("msg.message?.model !== '<synthetic>') stopping.followRun.answered = true;") && cwSrc.includes("const tokens = sum(result && result.usage, ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']);") && !/stopLateOf[\s\S]{0,1200}model_usage_since_last_result\s*;/.test(cwSrc),
+  ok(verdictOf([ZH, JA].every((D) => D.includes(`  "${CUT}": "`) && D.includes(`  "${RAN}": "`))), '§8 …in zh and ja');
+  ok(gateOf(cwSrc.includes("msg.message?.model !== '<synthetic>') stopping.followRun.answered = true;")) && gateOf(cwSrc.includes("const tokens = sum(result && result.usage, ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']);")) && !/stopLateOf[\s\S]{0,1200}model_usage_since_last_result\s*;/.test(cwSrc),
     '§8 WIRING: the follow-up\'s OWN tokens only — its result\'s usage (a background agent\'s calls are in the since-last count, never in it), and a <synthetic> record is no answer');
 });
 await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init without the names took NONE — the rider the model read lands', () => {
@@ -556,7 +556,7 @@ await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init with
     // the reader's should: a recording that lost its naming init would make every expected value «null» and still agree — the
     // stamped recordings MUST witness and then omit (the post-witness «[]» half on real data); the frames recording names nothing
     const proves = v.endsWith('-stamped') ? first >= 0 && read2.slice(first + 1).includes('[]') : first === -1 && read2.every((x) => x === 'null');
-    ok(proves && inits.length >= 2 && inits.every((r) => !Array.isArray(r.user_message_uuids) || r.user_message_uuids.length > 0) && S(read2) === S(want),
+    ok(gateOf(proves) && inits.length >= 2 && gateOf(inits.every((r) => !Array.isArray(r.user_message_uuids) || r.user_message_uuids.length > 0)) && S(read2) === S(want),
       `${v} (the real CLI, recorded): no init writes an empty list; read in order, an omission before the first naming init cannot say, after it says «none» (${read2.join(' ')})`, { read2, want });
   }
   const PURE = [[{}, false, 'null'], [{}, true, '[]'], [{ user_message_uuids: ['u-1', 2] }, false, '["u-1","2"]'], [{ user_message_uuids: [] }, false, '[]'], [{ claude_code_version: '2.1.312' }, false, 'null']];
@@ -595,9 +595,9 @@ await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init with
   // THE WIRING: every init line feeds the witness; the Stop window's follow-up branch asks noteFollowUpNames(msg) — the ONE
   // writer of namesSaid (dropHeldForStop only carries the flag over into a second Stop's window)
   const branch = cut('      if (stopping && stopping.held > 0) {', '      } else if (cliOwesTurn) {', 'the follow-up branch');
-  ok(/\n\s+noteFollowUpNames\(msg\);/.test(branch) && (w.match(/noteFollowUpNames\(msg\);/g) || []).length === 1 && (w.match(/stopping\.namesSaid = true/g) || []).length === 1
+  ok(gateOf(/\n\s+noteFollowUpNames\(msg\);/.test(branch)) && (w.match(/noteFollowUpNames\(msg\);/g) || []).length === 1 && (w.match(/stopping\.namesSaid = true/g) || []).length === 1
     && (w.match(/namesSaid = /g) || []).length === 1 && (w.match(/if \(msg\.type === 'system' && msg\.subtype === 'init'\) noteInitNames\(msg\);/g) || []).length === 1
-    && w.includes("    if (stopping && (msg.type === 'user' || msg.type === 'attachment')) noteWindowRecord(msg);") && /function startChild\(\) \{\n  reconnectTimer = null;\n  if \(!OFFSET_MODE\) initNamesSeen = false;/.test(w),
+    && gateOf(w.includes("    if (stopping && (msg.type === 'user' || msg.type === 'attachment')) noteWindowRecord(msg);")) && verdictOf(/function startChild\(\) \{\n  reconnectTimer = null;\n  if \(!OFFSET_MODE\) initNamesSeen = false;/.test(w)),
     'the wiring: every init feeds the witness; the follow-up branch (inside the Stop window, before the owed-turn branch) calls noteFollowUpNames(msg), the ONE writer of namesSaid');
 });
 // ── §8b THE STOP REACHES THE CLI FIRST (主开发 r5172; test-claude-steer-chrome §A ③'s hosted red, rows B-1217 / B-28b1) — and
@@ -696,7 +696,7 @@ await guard('§8b', async () => {
   const cwSrc = read('data/bin/chat-wrapper.js');
   const FIRST = "          handedAfterStop = true;\n          try { dropHeldForStop(); } finally { handedAfterStop = false; }\n          sendChild(line);\n";
   const LOGL = "  owedOnStop(() => log(dropWords));", KEPTL = "  owedOnStop(() => KC.dropFiles(KEPT_DIR, unnamedNow(names)));", RCPT = "if (receipt) writeReceipt(ack, stop);";
-  ok([FIRST, LOGL, KEPTL, RCPT].every((a) => cwSrc.split(a).length === 2), '§8b ANCHORS: the Stop\'s branch, the drop\'s owed log line, the owed unlink, the owed receipt — each spelled once (a missing anchor builds no control: RED by name)');
+  ok(verdictOf([FIRST, LOGL, KEPTL, RCPT].every((a) => cwSrc.split(a).length === 2)), '§8b ANCHORS: the Stop\'s branch, the drop\'s owed log line, the owed unlink, the owed receipt — each spelled once (a missing anchor builds no control: RED by name)');
   const copyOf = (tag, src) => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-ctl-' + tag + '-')); own.push(d);
     fs.mkdirSync(path.join(d, 'data', 'bin'), { recursive: true });
@@ -719,11 +719,11 @@ await guard('§8b', async () => {
   firstRoad.catch(() => { });   // handled where it is awaited (below): never an unhandled rejection while the second road runs
   const judgeFirst = (runs) => { for (const [i, kind] of KINDS.entries()) {
     const cur = runs[2 * i], red = runs[2 * i + 1];
-    ok(!cur.missed && FILE[kind].test(String(cur.heldFile || '')), `§8b WITNESS (${kind}): the hold was in force on the Stop's own call — ${WORDS[kind]}, the file it held named`, cur);
+    ok(!cur.missed && verdictOf(FILE[kind].test(String(cur.heldFile || ''))), `§8b WITNESS (${kind}): the hold was in force on the Stop's own call — ${WORDS[kind]}, the file it held named`, cur);
     ok(!cur.missed && cur.interruptWhileHeld === true && cur.carriedWhileHeld === false && cur.carried.length === 0
       && (kind !== 'kept' || cur.keptLeft === 0) && (kind !== 'receipt' || cur.receipt === true) && (kind !== 'droplog' || cur.dropLine === true),
       `§8b THE STOP REACHES THE CLI FIRST (${kind}): with ${WORDS[kind]} held, the CLI read the interrupt and nothing carried the handed frame to the model — and the owed call was MADE after it`, cur);
-    ok(!red.missed && FILE[kind].test(String(red.heldFile || '')) && red.interruptWhileHeld === false && red.carriedWhileHeld === true,
+    ok(!red.missed && gateOf(FILE[kind].test(String(red.heldFile || ''))) && red.interruptWhileHeld === false && red.carriedWhileHeld === true,
       `§8b RED CONTROL (${kind}: ${WORDS[kind]} where 2.369.420 had it, in a copy): held there, the interrupt does NOT reach the CLI and the tool's result carries the handed frame to the model before the Stop`, red);
   } };
   // THE SAME CHUNK (主开发 r5457 (1)): a frame HELD with a picture, then ONE stdin write holding the Stop AND a new held frame with the
@@ -799,13 +799,13 @@ await guard('§8b', async () => {
   };
   const [runs, [cur2, red2], [cur3, red3]] = await Promise.all([firstRoad, Promise.all([second(path.join(REPO, 'data/bin/chat-wrapper.js'), 'tip-second'), second(RED2, 'release-second')]), chunkRoad]);
   judgeFirst(runs);
-  ok(!cur3.missed && cur3.oneChunk === true && /chat-wrapper\.log$/.test(String(cur3.heldFile || '')) && cur3.bytes < 4096 && cur3.standsAtHold === true,
+  ok(!cur3.missed && cur3.oneChunk === true && gateOf(/chat-wrapper\.log$/.test(String(cur3.heldFile || ''))) && cur3.bytes < 4096 && cur3.standsAtHold === true,
     '§8b THE SAME CHUNK (r5457 (1)): a Stop and a frame with the same picture in ONE stdin chunk (the preload\'s witness) — at the batch\'s end, after the owed unlink ran, the kept file the new held copy names still stands', cur3);
   ok(!red3.missed && red3.oneChunk === true && red3.standsAtHold === false,
     '§8b RED CONTROL (the owed unlink not filtered again, in a copy): the same chunk, and the file the new held copy names is removed', red3);
-  ok(!cur2.missed && /chat-wrapper\.log$/.test(String(cur2.heldFile || '')) && cur2.heldRoad === true && cur2.heldSaidFirst === true && cur2.interrupts >= 2,
+  ok(!cur2.missed && gateOf(/chat-wrapper\.log$/.test(String(cur2.heldFile || ''))) && cur2.heldRoad === true && cur2.heldSaidFirst === true && cur2.interrupts >= 2,
     '§8b THE SECOND STOP\'s ROAD: held in the window (its own words said first), its drop line made at the batch\'s end, and the held Stop reaches the CLI on the follow-up\'s init', cur2);
-  ok(!red2.missed && /chat-wrapper\.log$/.test(String(red2.heldFile || '')) && red2.heldRoad === true && red2.heldSaidFirst === false,
+  ok(!red2.missed && gateOf(/chat-wrapper\.log$/.test(String(red2.heldFile || ''))) && red2.heldRoad === true && red2.heldSaidFirst === false,
     '§8b RED CONTROL (the second Stop\'s drop outside the rule, in a copy): its drop line is written INSIDE the drop — the hold is reached before the held road said anything', red2);
 });
 // ── §8c THE OWED MARK OUTLIVES A THROW (主开发 r5357 (2): the owed records write, made safe against a throw, carries a mark ANOTHER
@@ -848,10 +848,10 @@ await guard('§8c', async () => {
   const at = (r, e) => r.ev.indexOf(e), SAID = 'said the batch\'s line';
   const tip = run(src, false), tip2 = run(src, true);
   ok(!tip.threw && !tip.threw2 && tip.markAfterThrow === true && tip.markAfterNext === false && tip.writes === 2
-    && tip.ev.some((e) => /^log handed records: the owed write threw \(placed\) — still owed/.test(e))
+    && gateOf(tip.ev.some((e) => /^log handed records: the owed write threw \(placed\) — still owed/.test(e)))
     && at(tip, 'owed call') > at(tip, 'write 1') && at(tip, SAID) > at(tip, 'owed call') && tip.ev[tip.ev.length - 1] === 'write 2',
     '§8c THE MARK OUTLIVES A THROW: the owed records write threw (placed, its log line the witness) — the mark another road set stays owed, the batch\'s owed call runs and its line is said, and the next batch\'s end writes the records', tip);
-  ok(!tip2.threw && tip2.ev.some((e) => /^log a Stop's owed file call threw \(placed owed\)/.test(e)) && at(tip2, 'owed call') > -1 && at(tip2, SAID) > at(tip2, 'owed call'),
+  ok(!tip2.threw && gateOf(tip2.ev.some((e) => /^log a Stop's owed file call threw \(placed owed\)/.test(e))) && at(tip2, 'owed call') > -1 && at(tip2, SAID) > at(tip2, 'owed call'),
     '§8c ONE OWED CALL THAT THROWS SKIPS NONE: it is logged, the next owed call runs, the batch\'s line is said', tip2);
   const RED_MARK = anchored(src, /  if \(handedDue\) \{ let wrote = false;[^\n]*\n/, '  if (handedDue) { handedDue = false; writeRecords(); }\n', 'the guarded owed records write');
   const RED_LOOP = anchored(src, /  for \(const f of stopOwed\.splice\(0\)\) \{ try \{ f\(\); \}[^\n]*\n/, '  for (const f of stopOwed.splice(0)) f();\n', 'the guarded owed calls');
@@ -884,10 +884,10 @@ await guard('§8c', async () => {
     return { atStop, atNext, files };
   };
   const rt = runR(src), rr = runR(anchored(src, RLINE, 'if (receipt) { if (stop) stopOwed.push(() => writeReceipt(ack)); else writeReceipt(ack); }', 'the receipt pushed whole'));   // stale-pins: kept — 60320367c's line, the red copy's planted text (not a pin)
-  ok(src.split(RLINE).length === 2 && rt.atStop.stamp === true && rt.atStop.ring === 'm-stop' && rt.atStop.files === 0 && rt.atNext.ring === 'm-stop,m-next' && rt.files.length === 2 && rt.files.every((x) => x === 'm-stop,m-next'),
+  ok(src.split(RLINE).length === 2 && rt.atStop.stamp === true && rt.atStop.ring === 'm-stop' && rt.atStop.files === 0 && rt.atNext.ring === 'm-stop,m-next' && rt.files.length === 2 && verdictOf(rt.files.every((x) => x === 'm-stop,m-next')),
     '§8c THE RECEIPT AT THE PUSH (r5457 (2)): the Stop line\'s receipt is stamped and placed in the ring at its line (in line order) and its file is not written there; the batch\'s files hold both, in order', rt);
   ok(rr.atStop.stamp === false && rr.atNext.ring === 'm-next',
     '§8c RED CONTROL (60320367c\'s line, in a copy): the Stop\'s stamp and ring place wait for the batch\'s end — a later line\'s receipt comes first', rr);
 });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

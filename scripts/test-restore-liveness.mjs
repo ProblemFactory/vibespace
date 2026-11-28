@@ -57,7 +57,7 @@ const unhandled = [];
 process.on('unhandledRejection', (e) => unhandled.push(String((e && e.message) || e)));
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -159,7 +159,7 @@ function buildBundle(dst, { version = null, fault = true } = {}) {
 
 const REAL_VERSION = require(path.join(REPO, 'package.json')).version;
 const FAULT_BUNDLE = buildBundle(path.join(ROOT, 'bundles', 'faulty.js'), { fault: true });
-ok(fs.readFileSync(FAULT_BUNDLE, 'utf-8').includes('injected fault: open-session refused'),
+ok(verdictOf(fs.readFileSync(FAULT_BUNDLE, 'utf-8').includes('injected fault: open-session refused')),
   'PATCH LANDED: the throwaway daemon bundle carries the open-session fault injector');
 
 // ── the PRE-FIX control module (master's attach, patched into a real copy) ──
@@ -257,7 +257,7 @@ console.log('— §1 dtach -a emits its redraw preamble even when the program is
   p.onData((d) => { seen += d; });
   await sleep(800);
   ok(seen.length > 0, 'local: a healthy attach to a SILENT program produces bytes (the probe can tell alive from dead)', JSON.stringify(seen));
-  ok(/\x1b\[H|\x1b\[[0-3]?J/.test(seen), 'local: those bytes are dtach\'s redraw preamble (what the terminal branch already strips)', JSON.stringify(seen));
+  ok(verdictOf(/\x1b\[H|\x1b\[[0-3]?J/.test(seen)), 'local: those bytes are dtach\'s redraw preamble (what the terminal branch already strips)', JSON.stringify(seen));
   try { p.kill(); } catch { }
 
   const dm = newDaemon('premise');
@@ -307,14 +307,14 @@ async function attachLeg({ label, fault, modulePath, expectBytes, expectDaemon =
 
 for (const [fault, what] of [['', 'a healthy daemon'], ['error', 'open-session REFUSED'], ['silent', 'open-session NEVER ANSWERED'], ['deadchan', 'open-session answered but the channel relays NOTHING']]) {
   const fixed = await attachLeg({ label: 'fixed-' + (fault || 'healthy'), fault, modulePath: path.join(REPO, 'src/server/session-stdout.js'), expectBytes: true });
-  ok(fixed.gotBytes, `FIX / ${what}: the session streams within ${BUDGET_MS} ms with ZERO input`,
+  ok(verdictOf(fixed.gotBytes), `FIX / ${what}: the session streams within ${BUDGET_MS} ms with ZERO input`,
     fixed.logs.join(' | '));
   if (fault === '') {
-    ok(fixed.onDaemon, 'FIX / a healthy daemon: the attach really ran through the DEVICE (the daemon path is not disabled)',
+    ok(verdictOf(fixed.onDaemon), 'FIX / a healthy daemon: the attach really ran through the DEVICE (the daemon path is not disabled)',
       fixed.logs.join(' | '));
   } else {
-    ok(fixed.hasPty && !fixed.onDaemon, `FIX / ${what}: it ended on a LOCAL pty (fallback or heal)`);
-    ok(fixed.logs.some((l) => /local pty fallback|re-attaching dtach locally/.test(l)),
+    ok(gateOf(fixed.hasPty) && !fixed.onDaemon, `FIX / ${what}: it ended on a LOCAL pty (fallback or heal)`);
+    ok(verdictOf(fixed.logs.some((l) => /local pty fallback|re-attaching dtach locally/.test(l))),
       `FIX / ${what}: it SAID so (never a silent degrade)`, fixed.logs.join(' | '));
   }
   if (fault) {
@@ -324,7 +324,7 @@ for (const [fault, what] of [['', 'a healthy daemon'], ['error', 'open-session R
     ok(!ctl.logs.some((l) => /local pty fallback|re-attaching/.test(l)),
       `PRE-FIX CONTROL / ${what}: and it never even SAYS anything (no journal line to find it by)`, ctl.logs.join(' | '));
     if (fault === 'error') {
-      ok(unhandled.length > before && /open-session refused/.test(unhandled.join(' | ')),
+      ok(unhandled.length > before && verdictOf(/open-session refused/.test(unhandled.join(' | '))),
         'PRE-FIX CONTROL / open-session REFUSED: master leaves the `ready` rejection UNHANDLED (the server prints one context-free line, with no session id)',
         unhandled.join(' | '));
     }
@@ -388,8 +388,8 @@ console.log('— §2b a byte that arrives before `ready` settles must not be dro
   };
 
   const fixed = await earlyLeg(path.join(REPO, 'src/server/session-stdout.js'));
-  ok(fixed.early, 'FIX: a byte delivered before `ready` settles still reaches the clients (buffered, replayed once the shim has listeners)', fixed.logs.join(' | '));
-  ok(fixed.onDaemon && !fixed.healed, 'FIX: …and it counts as the attach\'s proof of life — a session that says nothing else is NOT healed off the daemon', `onDaemon=${fixed.onDaemon} healed=${fixed.healed} | ${fixed.logs.join(' | ')}`);
+  ok(verdictOf(fixed.early), 'FIX: a byte delivered before `ready` settles still reaches the clients (buffered, replayed once the shim has listeners)', fixed.logs.join(' | '));
+  ok(gateOf(fixed.onDaemon) && !fixed.healed, 'FIX: …and it counts as the attach\'s proof of life — a session that says nothing else is NOT healed off the daemon', `onDaemon=${fixed.onDaemon} healed=${fixed.healed} | ${fixed.logs.join(' | ')}`);
   ok(fixed.heals === 0, 'FIX: an attach that produced a byte leaves the heal counter at 0 (the bound is on CONSECUTIVE silent attaches, never a lifetime cap)', `heals=${fixed.heals}`);
 
   // NEGATIVE CONTROL — a copy of the REAL module with ONLY the early-data
@@ -399,13 +399,13 @@ console.log('— §2b a byte that arrives before `ready` settles must not be dro
   {
     const src = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf-8');
     const line = "      for (const buf of (h._earlyData || []).splice(0)) { try { h.onData(buf); } catch { } }\n";
-    ok(src.includes(line), 'PATCH LANDED: the early-data replay is where the control expects it');
+    ok(verdictOf(src.includes(line)), 'PATCH LANDED: the early-data replay is where the control expects it');
     noReplay = MUTR.write('src/server/session-stdout.js', editAnchor(src, line, '', "src/server/session-stdout.js"), 'noreplay');
   }
   const ctl = await earlyLeg(noReplay);
   ok(!ctl.early, 'NEGATIVE CONTROL: without the replay that byte is dropped on the floor (no listener existed yet)', ctl.logs.join(' | '));
-  ok(ctl.healed, 'NEGATIVE CONTROL: …and the probe then heals a bridge that was never broken', `healed=${ctl.healed} | ${ctl.logs.join(' | ')}`);
-  ok(ctl.tick, 'NEGATIVE CONTROL: the local heal does rescue it (the cost is a needless re-attach, not a lost session)');
+  ok(verdictOf(ctl.healed), 'NEGATIVE CONTROL: …and the probe then heals a bridge that was never broken', `healed=${ctl.healed} | ${ctl.logs.join(' | ')}`);
+  ok(verdictOf(ctl.tick), 'NEGATIVE CONTROL: the local heal does rescue it (the cost is a needless re-attach, not a lost session)');
   ok(ctl.heals === 1, 'NEGATIVE CONTROL: …and exactly ONE heal is counted (the counter moves only when the probe really acted)', `heals=${ctl.heals}`);
 }
 
@@ -420,10 +420,10 @@ console.log('— §3 a restore must not race the daemon connect/self-upgrade —
   const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: sock, cwd: ROOT };
   activeSessions.set(id, session);
   eng.attachToDtach(id, sock, session);
-  ok(session.pty && !session.pty._daemon, 'FIX: a restore while the link is still connecting attaches LOCALLY, in the same tick');
+  ok(gateOf(session.pty) && !session.pty._daemon, 'FIX: a restore while the link is still connecting attaches LOCALLY, in the same tick');
   const t0 = Date.now();
   while (Date.now() - t0 < 5000 && !streamHas(frames, /TICK/)) await sleep(120);
-  ok(streamHas(frames, /TICK/), 'FIX: and it streams immediately (no blind window while the daemon comes up)');
+  ok(verdictOf(streamHas(frames, /TICK/)), 'FIX: and it streams immediately (no blind window while the daemon comes up)');
   try { session.pty?.kill?.(); } catch { }
 
   // control: master takes the daemon path in that same window
@@ -534,11 +534,11 @@ e2e: {
     return re.test(outText());
   };
   const shellReady = await typeUntil(`sh ${readySh}`, /VSREADY_OK/, 12, 1500);
-  ok(shellReady, 'e2e setup: the login shell inside dtach is taking commands (the handshake marker only the SCRIPT can print)',
+  ok(verdictOf(shellReady), 'e2e setup: the login shell inside dtach is taking commands (the handshake marker only the SCRIPT can print)',
     JSON.stringify(outText().slice(-300)));
   if (!shellReady) { ws1.close(); srv.kill('SIGKILL'); servers.delete(srv); break e2e; }  // failed LOUDLY above; every leg below would be vacuous
   const ticking = await typeUntil(`exec sh ${tickSh}`, /VSTICK[\s\S]*VSTICK/, 3, 4000);
-  ok(ticking, 'e2e setup: the session is emitting on a timer before the restart', JSON.stringify(outText().slice(-300)));
+  ok(verdictOf(ticking), 'e2e setup: the session is emitting on a timer before the restart', JSON.stringify(outText().slice(-300)));
   if (!ticking) { ws1.close(); srv.kill('SIGKILL'); servers.delete(srv); break e2e; }      // ditto
   ws1.close(); srv.kill('SIGKILL'); servers.delete(srv);
   await sleep(600);
@@ -558,7 +558,7 @@ e2e: {
     try { p2.kill(); } catch { }
     return /VSTICK/.test(seen);
   };
-  ok(await fixtureAlive(), 'e2e precondition: the dtach session is STILL printing after the restart (an independent reader says so)');
+  ok(verdictOf(await fixtureAlive()), 'e2e precondition: the dtach session is STILL printing after the restart (an independent reader says so)');
 
   // ② the CONTROL boot: master's attach + the dead channel
   installStale();
@@ -574,13 +574,13 @@ e2e: {
     await sleep(12000);   // > the whole fixed budget, and ZERO input the entire time
     // A zero that comes from "the attach never happened" would be a VACUOUS
     // control, so the attach itself is asserted first.
-    ok(all.some((m) => m.type === 'attached' && m.sessionId === sid),
+    ok(verdictOf(all.some((m) => m.type === 'attached' && m.sessionId === sid)),
       'PRE-FIX CONTROL e2e: the client really attached (the zero below is about output, not about a failed attach)',
       JSON.stringify(all.map((m) => m.type)));
     ok(got.length === 0, 'PRE-FIX CONTROL e2e: the restored session streams NOTHING with no input — the production incident',
       `frames=${got.length}; journal tail: ${jrn().slice(-400)}`);
-    ok(await fixtureAlive(), 'PRE-FIX CONTROL e2e: …while the session itself never stopped printing (the zero is the BRIDGE, not the shell)');
-    ok(/upgrading \(attempt 1\/3\)/.test(jrn()), 'PRE-FIX CONTROL e2e: the daemon really took the self-upgrade path (the incident environment)',
+    ok(verdictOf(await fixtureAlive()), 'PRE-FIX CONTROL e2e: …while the session itself never stopped printing (the zero is the BRIDGE, not the shell)');
+    ok(verdictOf(/upgrading \(attempt 1\/3\)/.test(jrn())), 'PRE-FIX CONTROL e2e: the daemon really took the self-upgrade path (the incident environment)',
       jrn().slice(-400));
     ws.close();
   }
@@ -599,7 +599,7 @@ e2e: {
     ws.send(JSON.stringify({ type: 'attach', sessionId: sid, cols: 80, rows: 24 }));
     const t0 = Date.now();
     while (Date.now() - t0 < 12000 && got.length === 0) await sleep(200);
-    ok(all.some((m) => m.type === 'attached' && m.sessionId === sid), 'FIX e2e: the client attached',
+    ok(verdictOf(all.some((m) => m.type === 'attached' && m.sessionId === sid)), 'FIX e2e: the client attached',
       JSON.stringify(all.map((m) => m.type)));
     ok(got.length > 0, 'FIX e2e: the restored session streams to an attached client with ZERO input',
       `frames=${JSON.stringify(all.map((m) => m.type))}; journal tail: ${jrn().slice(-900)}`);
@@ -611,7 +611,7 @@ e2e: {
     // have HAPPENED yet measures the other leg's duration, not the daemon.
     const tUp = Date.now();
     while (Date.now() - tUp < 25000 && !/upgrading \(attempt 1\/3\)/.test(jrn())) await sleep(250);
-    ok(/upgrading \(attempt 1\/3\)/.test(jrn()), 'FIX e2e: measured in the SAME environment — the daemon self-upgraded under the restore',
+    ok(verdictOf(/upgrading \(attempt 1\/3\)/.test(jrn())), 'FIX e2e: measured in the SAME environment — the daemon self-upgraded under the restore',
       jrn().slice(-400));
     ws.close();
   }
@@ -650,7 +650,7 @@ e2e: {
     const t0 = Date.now();
     let seen = { sid: metaOf(sid), sid2: metaOf(sid2) };
     while (!(seen.sid && seen.sid2) && Date.now() - t0 < META_BOUND_MS) { await sleep(100); seen = { sid: metaOf(sid), sid2: metaOf(sid2) }; }
-    ok(seen.sid && seen.sid2, `e2e ④ setup: both sessions' metas are on disk before the SIGKILL (found by webuiSessionId)${seen.sid && seen.sid2 ? '' : ` — not within ${META_BOUND_MS / 1000} s`}`, JSON.stringify({ ...seen, ms: Date.now() - t0 }));
+    ok(gateOf(seen.sid) && verdictOf(seen.sid2), `e2e ④ setup: both sessions' metas are on disk before the SIGKILL (found by webuiSessionId)${seen.sid && seen.sid2 ? '' : ` — not within ${META_BOUND_MS / 1000} s`}`, JSON.stringify({ ...seen, ms: Date.now() - t0 }));
   }
   srv.kill('SIGKILL'); servers.delete(srv);
   await sleep(600);
@@ -681,8 +681,8 @@ e2e: {
     }
     return false;
   };
-  ok(patchMeta(sid, { backend: 'codex', accountId: cxP, heldPoolMember: cxA }), 'e2e ④ setup: the first session\'s meta carries accountId + heldPoolMember (the r2 spawn stamp)');
-  ok(patchMeta(sid2, { backend: 'codex', accountId: cxP }), 'e2e ④ setup: the second session\'s meta carries the pool and NO stamp');
+  ok(verdictOf(patchMeta(sid, { backend: 'codex', accountId: cxP, heldPoolMember: cxA })), 'e2e ④ setup: the first session\'s meta carries accountId + heldPoolMember (the r2 spawn stamp)');
+  ok(verdictOf(patchMeta(sid2, { backend: 'codex', accountId: cxP })), 'e2e ④ setup: the second session\'s meta carries the pool and NO stamp');
   installStale();
   srv = boot(); jrn = journal(srv); await waitReady(srv);
   {
@@ -700,7 +700,7 @@ e2e: {
       'e2e ④ CONTROL: the same meta WITHOUT the stamp (older than every ledger row of its pool ⇒ unknown) follows the link (Cx Beta)', JSON.stringify(row2 && row2.auth));
     const tUp = Date.now();
     while (Date.now() - tUp < 25000 && !/upgrading \(attempt 1\/3\)/.test(jrn())) await sleep(250);
-    ok(/upgrading \(attempt 1\/3\)/.test(jrn()), 'e2e ④ …measured under the same self-upgrading daemon', jrn().slice(-300));
+    ok(verdictOf(/upgrading \(attempt 1\/3\)/.test(jrn())), 'e2e ④ …measured under the same self-upgrading daemon', jrn().slice(-300));
     ws.close();
   }
   srv.kill('SIGKILL'); servers.delete(srv);
@@ -776,7 +776,7 @@ e2e: {
     // (a) the FIXED store under a full table
     installStale();
     srv = bootLimited(); jrn = journal(srv); await waitReady(srv);
-    ok(new RegExp(`\\[fd\\] open-files limit: soft ${LIM} / hard ${LIM}`).test(jrn()), `e2e ⑤ the boot line says the limit it really runs at (soft ${LIM} / hard ${LIM})`, (jrn().match(/\[fd\][^\n]*/) || [''])[0]);
+    ok(verdictOf(new RegExp(`\\[fd\\] open-files limit: soft ${LIM} / hard ${LIM}`).test(jrn())), `e2e ⑤ the boot line says the limit it really runs at (soft ${LIM} / hard ${LIM})`, (jrn().match(/\[fd\][^\n]*/) || [''])[0]);
     await req('GET', '/api/session-status');   // the keep-alive connection the status write will ride (no new accept needed)
     await req('POST', '/api/session-status', { sessionKey: 'webui:warm', state: 'done' });   // the JSON body parser loads its charset module lazily — on a full table that require() itself is refused
     const conns = await fill(srv.pid);
@@ -797,20 +797,20 @@ e2e: {
     ok(!!r1Met && srv.exitCode === null, `FIX e2e ⑤ a minute at a FULL table, the status write included, did NOT kill the server, and the POST answered by the law (this run: ${r1Met || `POST ${r1.status} — ${String(r1.body).slice(0, 120)}`}; exit ${srv.exitCode})`,
       jrn().split('\n').filter((l) => /EMFILE|Error|\[fd\]|\[channels\]/.test(l)).slice(-12).join('\n'));
     const failLine = (jrn().match(/\[fd\] a background write failed \(EMFILE[^\n]*/) || [''])[0];
-    ok(/This server ran out of file handles \(EMFILE\)/.test(failLine) && new RegExp(`holds ${LIM} of ${LIM}`).test(failLine), `FIX e2e ⑤ …and it said WHO ran out: ${JSON.stringify(failLine.slice(0, 220))}`);
+    ok(gateOf(/This server ran out of file handles \(EMFILE\)/.test(failLine)) && verdictOf(new RegExp(`holds ${LIM} of ${LIM}`).test(failLine)), `FIX e2e ⑤ …and it said WHO ran out: ${JSON.stringify(failLine.slice(0, 220))}`);
     for (const w of conns) { try { w.terminate(); } catch { } }
     // seam 3: bound to THIS probe's key and its record — the same state and reason the POST carried (a 503 above is honest
     // only if this lands)
     const landed = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 70000) { try { const st = JSON.parse(fs.readFileSync(path.join(wt, 'data/session-status.json'), 'utf8')); const rec = st && st.statuses && st.statuses['webui:emfile-probe']; if (rec && rec.state === 'working' && rec.reason === 'emfile') return true; } catch { } await sleep(500); } return false; })();
-    ok(landed, `FIX e2e ⑤ the pressure gone, the retry LANDED: data/session-status.json carries webui:emfile-probe as the POST set it (working, «emfile») — the POST answered ${r1.status}`);
+    ok(verdictOf(landed), `FIX e2e ⑤ the pressure gone, the retry LANDED: data/session-status.json carries webui:emfile-probe as the POST set it (working, «emfile») — the POST answered ${r1.status}`);
     const sAfter = await streams('after-pressure');
-    ok(sAfter.ok, 'FIX e2e ⑤ the session still streams to a new client after the pressure', JSON.stringify(sAfter));
+    ok(verdictOf(sAfter.ok), 'FIX e2e ⑤ the session still streams to a new client after the pressure', JSON.stringify(sAfter));
     srv.kill('SIGKILL'); servers.delete(srv);
     await sleep(800);
     installStale();
     srv = boot(); jrn = journal(srv); await waitReady(srv);
     const sRest = await streams('restored');
-    ok(sRest.ok, 'FIX e2e ⑤ after a kill at the end of the EMFILE episode the restored session streams with ZERO input', JSON.stringify(sRest));
+    ok(verdictOf(sRest.ok), 'FIX e2e ⑤ after a kill at the end of the EMFILE episode the restored session streams with ZERO input', JSON.stringify(sRest));
     // lane race-sweep: THE RED CONTROL for streams()'s wait — a server that reaches the attach LATE (SIGSTOPped 13 s right after
     // the send: the .322 chain's backlog, made deterministic). The pre-fix wait (12 s from the send) calls the session dead; the
     // wait for the attach's own answer streams it
@@ -829,7 +829,7 @@ e2e: {
       const fixed = streams('stalled-server', { beforeSend: bothOpen });
       const [pre, fix] = await Promise.all([preFix, fixed]);
       await stopped;
-      ok(!pre && fix.ok, `CONTROL: a server that reaches the attach 13 s late — the pre-fix wait (12 s from the send) says the session is dead (${pre}); the wait for the attach's answer streams it (attached ${fix.attachedMs} ms after the send)`, JSON.stringify({ pre, fix }));
+      ok(!pre && verdictOf(fix.ok), `CONTROL: a server that reaches the attach 13 s late — the pre-fix wait (12 s from the send) says the session is dead (${pre}); the wait for the attach's answer streams it (attached ${fix.attachedMs} ms after the send)`, JSON.stringify({ pre, fix }));
     }
     srv.kill('SIGKILL'); servers.delete(srv);
     await sleep(800);
@@ -849,15 +849,15 @@ e2e: {
     const code = await Promise.race([exited, sleep(8000).then(() => 'alive')]);
     servers.delete(srv);
     for (const w of conns2) { try { w.terminate(); } catch { } }
-    ok(code === 1 && /EMFILE: too many open files, open '[^']*session-status\.json\.tmp'/.test(jrn()), `PRE-FIX CONTROL e2e ⑤ the same write KILLS the server: exit ${code}, ${JSON.stringify((jrn().match(/Error: EMFILE[^\n]*/) || [''])[0].slice(0, 140))}`);
-    ok(/\[fd\] This server ran out of file handles \(EMFILE\)/.test(jrn()), 'e2e ⑤ …the crash handler named who ran out before dying');
+    ok(code === 1 && verdictOf(/EMFILE: too many open files, open '[^']*session-status\.json\.tmp'/.test(jrn())), `PRE-FIX CONTROL e2e ⑤ the same write KILLS the server: exit ${code}, ${JSON.stringify((jrn().match(/Error: EMFILE[^\n]*/) || [''])[0].slice(0, 140))}`);
+    ok(verdictOf(/\[fd\] This server ran out of file handles \(EMFILE\)/.test(jrn())), 'e2e ⑤ …the crash handler named who ran out before dying');
     await sleep(500);
-    ok(before.length >= 1 && before.every((p) => { try { process.kill(p, 0); return false; } catch { return true; } }), `e2e ⑤ …and ended its attach client(s) on the way out (${JSON.stringify(before)} gone) — a crash leaves no orphan to hold the next server's attach`);
+    ok(before.length >= 1 && verdictOf(before.every((p) => { try { process.kill(p, 0); return false; } catch { return true; } })), `e2e ⑤ …and ended its attach client(s) on the way out (${JSON.stringify(before)} gone) — a crash leaves no orphan to hold the next server's attach`);
     fs.writeFileSync(ssFile, ssFixed);
     installStale();
     srv = boot(); jrn = journal(srv); await waitReady(srv);
     const sCrash = await streams('restored-after-crash');
-    ok(sCrash.ok, 'e2e ⑤ after the EMFILE crash the restored session streams with ZERO input', JSON.stringify(sCrash));
+    ok(verdictOf(sCrash.ok), 'e2e ⑤ after the EMFILE crash the restored session streams with ZERO input', JSON.stringify(sCrash));
     srv.kill('SIGKILL'); servers.delete(srv);
   }
 }   // the worktree is removed by cleanup() — see `worktrees` above
@@ -903,7 +903,7 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   // first attach, whichever is larger (the old 5 s literal read red once on 2 busy cpus), its state printed
   const t0 = Date.now(), healBound = Math.max(BUDGET_MS, attachMs * 20);
   while (Date.now() - t0 < healBound && !streamHas(frames, /VSHEALED/, sinceHeal)) await sleep(50);
-  ok(streamHas(frames, /VSHEALED/, sinceHeal), 'reattachLocalPty RESENDS the input the never-spoke bridge was holding (judged on the joined stream since the heal)',
+  ok(verdictOf(streamHas(frames, /VSHEALED/, sinceHeal)), 'reattachLocalPty RESENDS the input the never-spoke bridge was holding (judged on the joined stream since the heal)',
     JSON.stringify({ attachMs, healBound, waitedMs: Date.now() - t0, frames: frames.length, sinceHeal, tail: frames.slice(-3).map((f) => String(f.data || '').slice(-60)) }));
   try { session.pty?.kill?.(); } catch { }
   // B-1217 (the folded B-380f, lane lg-recovery): THIS LEG'S RUNNER RED, PLACED. setupSessionPty stamped the birth at `now` and
@@ -943,7 +943,7 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
     return { replay, seen, aMs, lastByte, frames: F.length };
   };
   const st = await stalledHeal(path.join(REPO, 'src/server/session-stdout.js'), 'b1217-cure');
-  ok(JSON.stringify(st.replay) === '["echo VSSTALLED"]' && st.seen, 'B-1217 THE STALL PLACED: the stand-in born in the old attach\'s last-byte millisecond still reads never-spoke — the heal holds the input and the new attach carries it', st);
+  ok(JSON.stringify(st.replay) === '["echo VSSTALLED"]' && verdictOf(st.seen), 'B-1217 THE STALL PLACED: the stand-in born in the old attach\'s last-byte millisecond still reads never-spoke — the heal holds the input and the new attach carries it', st);
   const sr = await stalledHeal(MUTR.write('src/server/session-stdout.js', release5, 'b1217-release'), 'b1217-release');
   ok(sr.replay.length === 0 && !sr.seen, 'B-1217 RED (a copy of the release\'s two lines, the same stall): the tie reads «spoke» — nothing held, nothing resent (the runner\'s red, every run)', sr);
 }
@@ -1083,10 +1083,10 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
   try {
     const fixed = await deadHub('fixed', null);
     const s = fixed.steps;
-    ok(fixed.ready, `§7 the hub with a dead paired machine boots (${fixed.bootMs} ms)`, fixed.journal().slice(-600));
-    ok(s.install.status === 400 && /my-mac cannot be reached/.test(s.install.j?.error || '') && s.harvest.status === 200 && s.harvest.j?.hosts?.['h-dead']?.error && /my-mac cannot be reached/.test(s.harvest.j.hosts['h-dead'].error),
+    ok(verdictOf(fixed.ready), `§7 the hub with a dead paired machine boots (${fixed.bootMs} ms)`, fixed.journal().slice(-600));
+    ok(s.install.status === 400 && gateOf(/my-mac cannot be reached/.test(s.install.j?.error || '')) && s.harvest.status === 200 && gateOf(s.harvest.j?.hosts?.['h-dead']?.error) && verdictOf(/my-mac cannot be reached/.test(s.harvest.j.hosts['h-dead'].error)),
       '§7 the stdin roads answer with the machine BY NAME (a ~6 MB tools tar → 400 «my-mac cannot be reached — ssh: …»; the usage harvest names it per machine)', JSON.stringify({ install: s.install, harvest: s.harvest }).slice(0, 600));
-    ok(s.slice.j?.unreachable?.host === 'my-mac' && /Could not resolve hostname/.test(s.slice.j.unreachable.line) && s.recent.j?.unreachable?.host === 'my-mac' && s.home.status === 400 && s.home.j?.code === 'host-unreachable',
+    ok(s.slice.j?.unreachable?.host === 'my-mac' && gateOf(/Could not resolve hostname/.test(s.slice.j.unreachable.line)) && s.recent.j?.unreachable?.host === 'my-mac' && s.home.status === 400 && s.home.j?.code === 'host-unreachable',
       '§7 the host rung refuses it BY NAME before any listing spawns (dir-complete + recent-cwds say `unreachable`; its home is a 400 host-unreachable)', JSON.stringify({ slice: s.slice.j, recent: s.recent.j, home: s.home }).slice(0, 600));
     ok(s.next.status === 200 && fixed.exited == null && !fixed.writeErr, '§7 …and the hub answers the NEXT request (alive, no stream write error in its journal)', JSON.stringify({ next: s.next.status, exited: fixed.exited, writeErr: fixed.writeErr, tail: fixed.journal().slice(-400) }));
     const src7 = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
@@ -1114,7 +1114,7 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     const OLD_ORDER7 = (sc) => preFix7.replace(STALL7, `  ${WHEN_CLOSED7(sc, BODY7 + ' ' + PLANT_CALL7)} /* the third form's order, placed: the write after the close, the plant behind it */\n`);
     const compiles7 = (src) => { try { new (require('node:vm').Script)('(function (exports, require, module, __filename, __dirname) {' + src + '\n})', { filename: 'hosts-copy.js' }); return true; } catch (e) { return String(e && e.message); } };
     const probe7 = { closed: '/tmp/s7-probe-closed', written: '/tmp/s7-probe-written' };   // the compile checks' stand-in paths (never written)
-    ok(preFix7 !== src7 && preFix7.includes(STALL7) && !!plantedPre7(probe7) && !!plantedFixed7(probe7) && plantedPre7(probe7).includes(PLANT7(probe7)) && plantedFixed7(probe7).includes(PLANT7(probe7)) && plantedFixed7(probe7).includes(LISTENER7) && !plantedPre7(probe7).includes(LISTENER7),
+    ok(preFix7 !== src7 && gateOf(preFix7.includes(STALL7)) && !!plantedPre7(probe7) && !!plantedFixed7(probe7) && gateOf(plantedPre7(probe7).includes(PLANT7(probe7))) && gateOf(plantedFixed7(probe7).includes(PLANT7(probe7))) && gateOf(plantedFixed7(probe7).includes(LISTENER7)) && !plantedPre7(probe7).includes(LISTENER7),
       '§7 the copies take their edits: the listener gone from the pre-fix copy, the plant beside the one write of feedStdin in BOTH copies, each form written whole');
     ok(compiles7(plantedPre7(probe7)) === true && compiles7(plantedFixed7(probe7)) === true && compiles7(OLD_ORDER7(probe7)) === true && compiles7(formOf(EXIT_FORM7)(probe7)) === true && compiles7(formOf(CLOSED_FORM7)(probe7)) === true && compiles7(formOf(WRITTEN_FORM7)(probe7)) === true,
       '§7 …and every copy of src/hosts.js COMPILES (a copy that does not parse is red here, by name — never a hub that silently never boots)',
@@ -1123,7 +1123,7 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     ok(compiles7(broken7) !== true, `§7 CONTROL of the compile check: the form 3837f878c wrote (its exit call never closed) does NOT compile — «${compiles7(broken7)}»`);
     // (A) THE JUDGED CONTROL — one scene pair, the error planted at the stream
     const ctl = await deadHub('planted-prefix', (sc) => plantedPre7(sc), { expectDeath: true, kind: 'written-then-ends' });
-    ok(ctl.ready, `§7 RED CONTROL setup: the pre-fix copy with the plant booted (${ctl.bootMs} ms — «did not boot» is this red, never «survived»)`, ctl.journal().slice(-600));
+    ok(verdictOf(ctl.ready), `§7 RED CONTROL setup: the pre-fix copy with the plant booted (${ctl.bootMs} ms — «did not boot» is this red, never «survived»)`, ctl.journal().slice(-600));
     // r4928 THE LAW THE CONTROL PROVES: «a hub that does not listen dies of an error on the child's stdin» — the planted error (A: the
     // order made by the scene puts it first) OR a real pipe error on that same stream proves it, each named by the death's own words,
     // read after the copy's output drained; red when the copy lived, died of something else, or died with no words
@@ -1133,7 +1133,7 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     ok(ctl.plantReached === true && ctl.exitedAfterInstall != null && ctl.exitedAfterInstall.code === 1 && (ctlKind === 'the plant' || ctlKind === 'a real pipe error on the stream') && ctl.steps.next.status === 'NO ANSWER',
       `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of an 'error' on the child's stdin — of ${ctlKind}, by its death's own words «${ctl.death || 'no error line printed'}» (its output ${ctl.drained === true ? 'drained to its end' : ctl.drained === false ? `NOT DRAINED in ${DRAIN_MS7} ms` : 'not asked'}, ${ctl.plantReached ? (ctl.exitedAfterInstall == null ? 'it SURVIVED the plant' : 'the plant was reached') : 'the plant was NEVER reached'}, ${ctl.errorLines.length > 1 ? `then ${ctl.errorLines.length - 1} more error line(s) on its stream after the death, never read as it «${ctl.errorLines.slice(1).join(' | ').slice(0, 240)}», ` : ''}exit ${JSON.stringify(ctl.exitedAfterInstall)}, looked for ${ctl.deathWaitMs} ms, the stream's write error «${ctl.writeErr}», the next request ${ctl.steps.next.status})`, `${ctl.death || '(no death line)'}\n${ctl.journal().slice(-600)}`);
     const live = await deadHub('planted-fixed', (sc) => plantedFixed7(sc), { expectDeath: true, kind: 'written-then-ends' });
-    ok(live.ready && live.plantReached === true && live.exitedAfterInstall == null && live.exited == null && live.steps.next.status === 200,
+    ok(gateOf(live.ready) && live.plantReached === true && live.exitedAfterInstall == null && live.exited == null && live.steps.next.status === 200,
       `§7 …and the FIXED hub with the SAME plant LIVES and answers the next request (${live.plantReached ? 'the plant reached' : 'the plant NEVER reached'}, exit ${JSON.stringify(live.exited)}, the install ${live.steps.install.status}, the next request ${live.steps.next.status})`, live.journal().slice(-600));
     // r4863: THE THIRD FORM's ORDER, PLACED — OBSERVED, NEVER JUDGED. The lane first judged it «dies of the REAL pipe error first»: on
     // the box (Node 24, two tries of run 18f78a0f3-20261126070603h-box) it died of the PLANT even with the write after the close — a
@@ -1161,7 +1161,7 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\n§tree the patched copies never touch the tree');
-for (const r of copiesCensus(MUTR.files, MUTR.dir, REPO, { minCopies: 2, match: /session-stdout\.__\w+_control\.js/ })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTR.files, MUTR.dir, REPO, { minCopies: 2, match: /session-stdout\.__\w+_control\.js/ })) ok(verdictOf(r.pass), '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

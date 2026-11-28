@@ -46,7 +46,7 @@ const cleanup = () => { for (const f of atExit.splice(0)) { try { f(); } catch {
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -123,7 +123,7 @@ console.log('① a turn that carries the reply: the hook confirms, THEN the mark
   const h = await hub('carried');
   const r = await hookRun(h.port);
   await until(() => h.marker() !== null, 3000);
-  ok(r.ctx.includes(h.text) && r.code === 0 && !r.err, 'the hook printed the reply (what the CLI attaches) and said nothing on stderr', r);
+  ok(gateOf(r.ctx.includes(h.text)) && r.code === 0 && !r.err, 'the hook printed the reply (what the CLI attaches) and said nothing on stderr', r);
   ok(h.marker() === h.at && h.cards.filter((c) => c.group && c.group.id === h.gid).length === 1, 'its confirm arrived: the marker moved to the reply and ONE card was drawn — the sender reads «read by beta»', { marker: h.marker(), at: h.at, cards: h.cards.length });
   const r2 = await hookRun(h.port);
   ok(!r2.ctx.includes(h.text) && !r2.ctx.includes('sent again'), 'the next turn: nothing repeated');
@@ -136,12 +136,12 @@ console.log('② the hub\'s main loop stalled 4 s while the hook waits: nothing 
   h.box.stallOn.set(1, 4000);
   const r = await hookRun(h.port);
   await sleep(200);
-  ok(!r.ctx && /vibespace-hook: no hub context this turn — the hub did not answer within 3 s/.test(r.err), 'the hook gave up at 3 s: it printed NOTHING (the turn carries no hub context) and said why on stderr', r);
+  ok(!r.ctx && verdictOf(/vibespace-hook: no hub context this turn — the hub did not answer within 3 s/.test(r.err)), 'the hook gave up at 3 s: it printed NOTHING (the turn carries no hub context) and said why on stderr', r);
   ok(h.marker() === null && h.cards.length === 0, 'the route ran after the stall and STAGED the report — the marker did not move, no card was drawn (the sender still reads «waiting»)', { marker: h.marker(), cards: h.cards.length });
   const r2 = await hookRun(h.port);
   await until(() => h.marker() !== null, 3000);
-  ok(r2.ctx.startsWith(TC.AGAIN_LINE) && r2.ctx.includes(h.text), 'the next turn carries the reply, under «sent again — the previous turn did not confirm it»', r2.ctx.slice(0, 300));
-  ok(h.journal.some((l) => /^\[inject\] not carried: claude:bbbbbbbb-2222-4000-8000-0000000000b2 — the person turn's UserPromptSubmit answer \(\d+ B: group-report\) was not confirmed before the next call; its request had waited 4\.\d s for the hub — the caller gives up at 3 s/.test(l)) && !h.journal.some((l) => l.includes(h.text)),
+  ok(gateOf(r2.ctx.startsWith(TC.AGAIN_LINE)) && verdictOf(r2.ctx.includes(h.text)), 'the next turn carries the reply, under «sent again — the previous turn did not confirm it»', r2.ctx.slice(0, 300));
+  ok(gateOf(h.journal.some((l) => /^\[inject\] not carried: claude:bbbbbbbb-2222-4000-8000-0000000000b2 — the person turn's UserPromptSubmit answer \(\d+ B: group-report\) was not confirmed before the next call; its request had waited 4\.\d s for the hub — the caller gives up at 3 s/.test(l))) && !h.journal.some((l) => l.includes(h.text)),
     'the hub journal COUNTS the drop: «[inject] not carried», the turn kind, how long the request waited, the riders — never the content', h.journal.filter((l) => /inject/.test(l)));
   ok(h.marker() === h.at && h.cards.length === 1, '…and that turn\'s confirm moved the marker, the card drawn once');
   h.close();
@@ -152,7 +152,7 @@ console.log('③ a confirm the hub reads only after a stall still lands');
   const h = await hub('late-confirm');
   h.box.stallOn.set(2, 2000);   // the second connection is the hook's confirm
   const r = await hookRun(h.port);
-  ok(r.ctx.includes(h.text) && r.code === 0, 'the hook printed the reply and exited (it never waits on the confirm\'s answer)', { ms: r.ms });
+  ok(gateOf(r.ctx.includes(h.text)) && r.code === 0, 'the hook printed the reply and exited (it never waits on the confirm\'s answer)', { ms: r.ms });
   await until(() => h.marker() !== null, 4000);
   ok(h.marker() === h.at && h.cards.length === 1, 'the confirm, written before the hook exited, is read after the stall — the marker moved, the card drawn');
   h.close();
@@ -169,7 +169,7 @@ console.log('④ a Stop during the hook (the CLI SIGTERMs it, measured on 2.1.32
   h.box.delayMs = 0;
   const r2 = await hookRun(h.port);
   await until(() => h.marker() !== null, 3000);
-  ok(r2.ctx.startsWith(TC.AGAIN_LINE) && r2.ctx.includes(h.text) && h.marker() === h.at, 'the next turn carries it (under «sent again»), and its confirm moves the marker');
+  ok(gateOf(r2.ctx.startsWith(TC.AGAIN_LINE)) && gateOf(r2.ctx.includes(h.text)) && h.marker() === h.at, 'the next turn carries it (under «sent again»), and its confirm moves the marker');
   h.close();
 }
 
@@ -179,7 +179,7 @@ console.log('⑤ the hub down (a restart): nothing staged, the next turn carries
   const port = h.port;
   await new Promise((r) => h.srv.close(r));
   const r = await hookRun(port);
-  ok(!r.ctx && /no hub context this turn — the hub is unreachable \(ECONNREFUSED\)/.test(r.err), 'the hook says the hub is unreachable (stderr) and prints nothing', r.err);
+  ok(!r.ctx && verdictOf(/no hub context this turn — the hub is unreachable \(ECONNREFUSED\)/.test(r.err)), 'the hook says the hub is unreachable (stderr) and prints nothing', r.err);
   ok(h.marker() === null, 'nothing was composed, nothing moved');
 }
 
@@ -196,7 +196,7 @@ console.log('⑤b a closed stdout (acceptance r1, law C): the hook says why — 
     c.stdin.end(JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: B, prompt: 'p' }));
   });
   const r = await closedRun(HOOK);
-  ok(r.code === 0 && /^vibespace-hook: no hub context this turn — its answer could not be written to the CLI \(EPIPE\)\n$/.test(r.err), 'the hook with its stdout closed: exit 0 and ONE line naming why (EPIPE) — the line the chat wrapper logs', r);
+  ok(r.code === 0 && verdictOf(/^vibespace-hook: no hub context this turn — its answer could not be written to the CLI \(EPIPE\)\n$/.test(r.err)), 'the hook with its stdout closed: exit 0 and ONE line naming why (EPIPE) — the line the chat wrapper logs', r);
   // RED CONTROL: the r1 hook (no error listener on stdout) crashes on the same pipe
   const MUTH = mutantCopies('turn-carry-hook', REPO);
   const hsrc = fs.readFileSync(HOOK, 'utf8');
@@ -204,7 +204,7 @@ console.log('⑤b a closed stdout (acceptance r1, law C): the hook says why — 
   if (hsrc.split(NEEDLE).length !== 2) throw new Error('mutation anchor missing: the hook\'s stdout error listener');
   const old = path.join(ROOT, 'hook-no-listener.mjs'); fs.writeFileSync(old, hsrc.replace(NEEDLE, ''));
   const ro = await closedRun(old);
-  ok(ro.code !== 0 && /EPIPE/.test(ro.err) && !/no hub context this turn/.test(ro.err), 'RED CONTROL the hook without its stdout listener (r1): an unhandled EPIPE, a non-zero exit, no line', { code: ro.code, lines: ro.err.split('\n').length });
+  ok(ro.code !== 0 && gateOf(/EPIPE/.test(ro.err)) && !/no hub context this turn/.test(ro.err), 'RED CONTROL the hook without its stdout listener (r1): an unhandled EPIPE, a non-zero exit, no line', { code: ro.code, lines: ro.err.split('\n').length });
   void MUTH;
   srv.close();
 }
@@ -224,7 +224,7 @@ console.log('⑤c the hook\'s own 8 s exit (acceptance r2, item 4): a pipe nobod
     c.stdin.end(JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: B, prompt: 'p' }));
   });
   srv.close();
-  ok(res.code === 0 && /^vibespace-hook: no hub context this turn — the hook stopped at its 8 s limit \(the CLI did not take its answer\)\n$/.test(res.err) && Date.now() - t0 >= 7500, 'the hook whose answer the CLI never takes: at its 8 s limit, exit 0 and ONE line naming why — like the other four cases', { code: res.code, err: res.err, ms: Date.now() - t0 });
+  ok(res.code === 0 && gateOf(/^vibespace-hook: no hub context this turn — the hook stopped at its 8 s limit \(the CLI did not take its answer\)\n$/.test(res.err)) && Date.now() - t0 >= 7500, 'the hook whose answer the CLI never takes: at its 8 s limit, exit 0 and ONE line naming why — like the other four cases', { code: res.code, err: res.err, ms: Date.now() - t0 });
 }
 
 console.log('⑨ the two stashes between the stage and the confirm — the REAL delivery ladder and the REAL jobs engine (acceptance r2, the unverified items)');
@@ -256,12 +256,12 @@ console.log('⑨ the two stashes between the stage and the confirm — the REAL 
   stash('STASH-ONE'); stash('STASH-TWO');
   const a1 = ask(P);
   const claimed = deliver.stashEntries(B).filter((e) => /STASH-(ONE|TWO)/.test(e.text || ''));
-  ok(a1.context.includes('STASH-ONE') && a1.context.includes('STASH-TWO') && claimed.length === 2 && claimed.every((e) => e.ho === 'carry') && deliver.stashEntries(B).filter((e) => !e.ho).length === 0 && cardsOf('STASH-ONE') === 0,
+  ok(gateOf(a1.context.includes('STASH-ONE')) && gateOf(a1.context.includes('STASH-TWO')) && claimed.length === 2 && gateOf(claimed.every((e) => e.ho === 'carry')) && deliver.stashEntries(B).filter((e) => !e.ho).length === 0 && cardsOf('STASH-ONE') === 0,
     'S1 staged: both entries told, CLAIMED meanwhile (a hand-over sees nothing it may take), no card yet', claimed.map((e) => e.ho));
   stash('STASH-THREE');   // a live delivery landing in the window
   const c1 = confirm(a1.delivery);
   const a2 = ask(P); confirm(a2.delivery);
-  ok(c1.status === 200 && cardsOf('STASH-ONE') === 1 && cardsOf('STASH-TWO') === 1 && !inStash('STASH-ONE').length && a2.context.includes('STASH-THREE') && !a2.context.includes('STASH-ONE') && cardsOf('STASH-THREE') === 1,
+  ok(c1.status === 200 && cardsOf('STASH-ONE') === 1 && cardsOf('STASH-TWO') === 1 && !inStash('STASH-ONE').length && gateOf(a2.context.includes('STASH-THREE')) && !a2.context.includes('STASH-ONE') && cardsOf('STASH-THREE') === 1,
     'S1 confirmed: exactly the two told are taken (one card each); the one that landed in the window waits and rides the next turn (one card)', { cards: cards.map((c) => c.text) });
   // S2 — the stash cap passes a staged entry by
   stash('STASH-FOUR');
@@ -269,31 +269,31 @@ console.log('⑨ the two stashes between the stage and the confirm — the REAL 
   for (let i = 0; i < 40; i++) stash(`FILL-${i}`);   // over the cap of 30
   const survived = inStash('STASH-FOUR').length === 1;
   confirm(b1.delivery);
-  ok(survived && cardsOf('STASH-FOUR') === 1 && !inStash('STASH-FOUR').length, 'S2 the cap evicts the OLDEST unclaimed entries: the staged one, claimed, survives 40 arrivals and is taken by its confirm (one card)');
+  ok(gateOf(survived) && cardsOf('STASH-FOUR') === 1 && !inStash('STASH-FOUR').length, 'S2 the cap evicts the OLDEST unclaimed entries: the staged one, claimed, survives 40 arrivals and is taken by its confirm (one card)');
   for (let n = 0; n < 4; n++) { const d = ask(P); if (d.delivery) confirm(d.delivery); }   // drain the fill
   // S3 — both routes stage the same entry: one card, whichever confirms first
   stash('STASH-FIVE');
   const d1 = ask(P), d2 = ask(T);
   const k1 = confirm(d1.delivery), k2 = confirm(d2.delivery);
-  ok(d1.context.includes('STASH-FIVE') && d2.context.includes('STASH-FIVE') && k1.status === 200 && k2.status === 200 && cardsOf('STASH-FIVE') === 1, 'S3 the prompt and SessionStart both carried it and both confirmed: ONE card (a confirm that takes nothing draws nothing)', { cards: cardsOf('STASH-FIVE') });
+  ok(gateOf(d1.context.includes('STASH-FIVE')) && gateOf(d2.context.includes('STASH-FIVE')) && k1.status === 200 && k2.status === 200 && cardsOf('STASH-FIVE') === 1, 'S3 the prompt and SessionStart both carried it and both confirmed: ONE card (a confirm that takes nothing draws nothing)', { cards: cardsOf('STASH-FIVE') });
   // S4 — an answer never confirmed: its claim is released, the next answer takes the entry again
   stash('STASH-SIX');
   const e1 = ask(P);
   const e2 = ask(P);   // e1 dropped
   confirm(e2.delivery);
-  ok(e1.context.includes('STASH-SIX') && e2.context.startsWith(TC.AGAIN_LINE) && e2.context.includes('STASH-SIX') && cardsOf('STASH-SIX') === 1 && confirm(e1.delivery).status === 409, 'S4 a dropped answer releases its claim: the next answer carries the entry again under «sent again» and its confirm draws ONE card; the dropped id is refused (409)');
+  ok(gateOf(e1.context.includes('STASH-SIX')) && gateOf(e2.context.startsWith(TC.AGAIN_LINE)) && gateOf(e2.context.includes('STASH-SIX')) && cardsOf('STASH-SIX') === 1 && confirm(e1.delivery).status === 409, 'S4 a dropped answer releases its claim: the next answer carries the entry again under «sent again» and its confirm draws ONE card; the dropped id is refused (409)');
   // J — the jobs stash on the REAL engine: claimed while staged, one card across both routes
   const notif = (t) => { const q = jm.pendingNotifs.get(B) || []; q.push({ jobId: 'jb-nightly', jobName: 'nightly', text: t, ts: Date.now(), urgency: 'low' }); jm.pendingNotifs.set(B, q); };
   notif('NIGHTLY-ONE');
   const j1 = ask(P);
   const held = (jm.pendingNotifs.get(B) || []).find((n) => n.text === 'NIGHTLY-ONE');
-  ok(j1.context.includes('NIGHTLY-ONE') && held && held.ho === 'carry', 'J staged: the job notification is told and CLAIMED in the jobs engine meanwhile');
+  ok(gateOf(j1.context.includes('NIGHTLY-ONE')) && gateOf(held) && held.ho === 'carry', 'J staged: the job notification is told and CLAIMED in the jobs engine meanwhile');
   confirm(j1.delivery);
   ok(!(jm.pendingNotifs.get(B) || []).some((n) => n.text === 'NIGHTLY-ONE') && cardsOf('NIGHTLY-ONE') === 1, 'J confirmed: drained from the engine, one card');
   notif('NIGHTLY-TWO');
   const jp = ask(P), jt = ask(T);
   confirm(jp.delivery); confirm(jt.delivery);
-  ok(jp.context.includes('NIGHTLY-TWO') && jt.context.includes('NIGHTLY-TWO') && cardsOf('NIGHTLY-TWO') === 1, 'J both routes carried it and both confirmed: ONE card');
+  ok(gateOf(jp.context.includes('NIGHTLY-TWO')) && gateOf(jt.context.includes('NIGHTLY-TWO')) && cardsOf('NIGHTLY-TWO') === 1, 'J both routes carried it and both confirmed: ONE card');
 }
 
 console.log('⑥ RED CONTROL: mark-on-send (the confirm switch off — the base\'s law) loses the reply under the same stall');
@@ -330,12 +330,12 @@ console.log('⑦ the REAL chat-wrapper over the stand-in CLI running the REAL ho
   await until(() => delivered().some((d) => d.how === 'turn' && d.text === 'first turn'), 15000);
   await sleep(300);
   ok(!delivered().some((d) => d.how === 'context') && h.marker() === null, 'the stalled turn ran WITHOUT hub context (the stand-in attached nothing) — and nothing moved', delivered());
-  ok(/this turn carries no hub context: the hub did not answer within 3 s — what the hub composed for it is composed again next turn/.test(wlog()), "the wrapper's log says why (the hook's stderr, which never reaches the model)", wlog().split('\n').filter((l) => /hub context/.test(l)));
+  ok(verdictOf(/this turn carries no hub context: the hub did not answer within 3 s — what the hub composed for it is composed again next turn/.test(wlog())), "the wrapper's log says why (the hook's stderr, which never reaches the model)", wlog().split('\n').filter((l) => /hub context/.test(l)));
   w.stdin.write(ad.formatChatInput('second turn', 'm-2').stdinPayload + '\n');
   await until(() => delivered().some((d) => d.how === 'turn' && d.text === 'second turn'), 15000);
   await until(() => h.marker() !== null, 4000);
   const ctx = delivered().filter((d) => d.how === 'context').map((d) => d.text);
-  ok(ctx.length === 1 && ctx[0].startsWith(TC.AGAIN_LINE) && ctx[0].includes(h.text), 'the next turn CARRIES the reply (the stand-in attached the hook\'s additionalContext), under «sent again»', ctx.map((c) => c.slice(0, 160)));
+  ok(ctx.length === 1 && gateOf(ctx[0].startsWith(TC.AGAIN_LINE)) && verdictOf(ctx[0].includes(h.text)), 'the next turn CARRIES the reply (the stand-in attached the hook\'s additionalContext), under «sent again»', ctx.map((c) => c.slice(0, 160)));
   ok(h.marker() === h.at && h.cards.length === 1, '…the hook confirmed it: the marker moved, the card drawn once');
   await stopWrapper(w, { dir });
   h.close();
@@ -346,15 +346,15 @@ console.log('⑧ the three wrappers that call prompt-context themselves confirm 
   const rd = (f) => fs.readFileSync(path.join(REPO, 'data/bin', f), 'utf8');
   const codex = rd('codex-chat-wrapper.js'), acp = rd('acp-wrapper.js'), agy = rd('agy-wrapper.js');
   const sends = (s) => /'\/api\/agent\/prompt-context', \{[^}]*'X-VibeSpace-Confirm': '1'/.test(s.replace(/\n\s*/g, ' '));
-  ok([codex, acp, agy].every(sends), 'each asks with X-VibeSpace-Confirm (the hub stages its marks)');
+  ok(verdictOf([codex, acp, agy].every(sends)), 'each asks with X-VibeSpace-Confirm (the hub stages its marks)');
   ok(codex.indexOf("contextCarried(data.delivery)") > codex.indexOf("await request('thread/inject_items'") && codex.indexOf("await request('thread/inject_items'") > 0,
     'codex-chat: confirmed only after thread/inject_items answered (the thread holds it)');
   const ia = acp.indexOf("const pr = request('session/prompt'"), ic = acp.indexOf('if (writable && carriedId) contextCarried(carriedId);'), ix = acp.indexOf('if (mine.cancelled) { endPrompt(mine, \'cancelled\', null, opts); return; }');
-  ok(ia > 0 && ic > ia && ix > 0 && ix < ia && /carriedId = ctxDelivery; ctxDelivery = null;/.test(acp), 'acp: the turn\'s own id, confirmed only once its prompt is written to the agent — a prompt Stopped before dispatch confirms nothing');
+  ok(ia > 0 && ic > ia && ix > 0 && ix < ia && verdictOf(/carriedId = ctxDelivery; ctxDelivery = null;/.test(acp)), 'acp: the turn\'s own id, confirmed only once its prompt is written to the agent — a prompt Stopped before dispatch confirms nothing');
   const gw = agy.indexOf("child.stdin.write(JSON.stringify({ event: 'user', message: { content: body } }) + '\\n');"), gc = agy.indexOf('if (carriedId) contextCarried(carriedId);');
-  ok(gw > 0 && gc > gw && /carriedId = ctxDelivery; ctxDelivery = null;/.test(agy), 'agy: the turn\'s own id, confirmed only after its text (which carries the context) is on the agent\'s stdin');
-  ok([codex, acp, agy].every((s) => /fetch\(api \+ '\/api\/agent\/prompt-context\/carried', \{ method: 'POST'/.test(s)), 'each returns it to the confirm door (/api/agent/prompt-context/carried)');
+  ok(gw > 0 && gc > gw && verdictOf(/carriedId = ctxDelivery; ctxDelivery = null;/.test(agy)), 'agy: the turn\'s own id, confirmed only after its text (which carries the context) is on the agent\'s stdin');
+  ok(verdictOf([codex, acp, agy].every((s) => /fetch\(api \+ '\/api\/agent\/prompt-context\/carried', \{ method: 'POST'/.test(s))), 'each returns it to the confirm door (/api/agent/prompt-context/carried)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -33,7 +33,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 const L = require(path.join(REPO, 'src/record-lateness.js'));
@@ -131,9 +131,9 @@ console.log('— §A7 a systematic offset is a clock, not a backlog (PURE)');
     !!skewRun.declared && skewRun.declared.at === 2 && skewRun.declared.skewMs === 5 * M - 1e3 && skewRun.declared.n === 3 && JSON.stringify(skewRun.verdicts) === '["late","late","live"]', JSON.stringify(skewRun));
   const backlog = feed(Array.from({ length: 50 }, (_, i) => ({ arrive: now + i * 60, delay: 3 * 3600e3 - i * (3 * 3600e3 / 49) })));
   ok('§A7 the incident\'s backlog — 50 records of 3 h delivered in 3 s, delays shrinking to 0 — declares NO offset (arrival span 3 s, spread 3 h): every late one stays late',
-    backlog.declared === null && backlog.verdicts.slice(0, 45).every((v) => v === 'late') && !backlog.clock.skewMs, JSON.stringify({ declared: backlog.declared, skew: backlog.clock.skewMs }));
+    backlog.declared === null && gateOf(backlog.verdicts.slice(0, 45).every((v) => v === 'late')) && !backlog.clock.skewMs, JSON.stringify({ declared: backlog.declared, skew: backlog.clock.skewMs }));
   const drip = feed([{ arrive: now, delay: 3 * M }, { arrive: now + 30e3, delay: 3 * M + 25e3 }, { arrive: now + 61e3, delay: 3 * M + 50e3 }]);
-  ok('§A7 a 10-s burst drip-fed over 60 s (the delays GROW with the arrivals, spread 50 s) is a backlog, never an offset', drip.declared === null && drip.verdicts.every((v) => v === 'late'));
+  ok('§A7 a 10-s burst drip-fed over 60 s (the delays GROW with the arrivals, spread 50 s) is a backlog, never an offset', drip.declared === null && verdictOf(drip.verdicts.every((v) => v === 'late')));
   const mixed = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 30e3, delay: 0 }, { arrive: now + 61e3, delay: 5 * M }, { arrive: now + 90e3, delay: 5 * M }]);
   ok('§A7 a LIVE record ends the run — a stream late only sometimes never declares an offset', mixed.declared === null && JSON.stringify(mixed.verdicts) === '["late","live","late","late"]');
   const two = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 61e3, delay: 5 * M }]);
@@ -298,8 +298,8 @@ console.log('— §A2 THE INCIDENT: the backlog of a stalled bridge is not taken
     ok('§A2 the first LIVE turn is taken: its reading lands on the member it came from',
       w.readCache(w.id.s).fiveHour.utilization === 0.08, JSON.stringify(w.readCache(w.id.s).fiveHour));
     ok('§A2 …and closes the backlog episode with its count',
-      lines2.some((l) => /^\[stream\] sess-4: backlog over — 5 late fact\(s\) not taken as live \(/.test(l) && /2 rate_limit_event/.test(l) && /1 limit banner/.test(l) && /2 turn end/.test(l)), lines2.filter((l) => /\[stream\]/.test(l)).join(' | '));
-    ok('§A2 …and a normally completed LIVE turn still earns its credit', w.recovered.some((r) => r.why === 'turn completed normally'), JSON.stringify(w.recovered));
+      verdictOf(lines2.some((l) => /^\[stream\] sess-4: backlog over — 5 late fact\(s\) not taken as live \(/.test(l) && /2 rate_limit_event/.test(l) && /1 limit banner/.test(l) && /2 turn end/.test(l))), lines2.filter((l) => /\[stream\]/.test(l)).join(' | '));
+    ok('§A2 …and a normally completed LIVE turn still earns its credit', verdictOf(w.recovered.some((r) => r.why === 'turn completed normally')), JSON.stringify(w.recovered));
   }
   // NEGATIVE CONTROL: the engine without the gate. The backlog's readings and
   // turn ends are taken as NOW again — the spent member reads 95 %, the breaker
@@ -466,15 +466,15 @@ console.log('— §A6 the DEVICE feed shows every record to the same clock');
 console.log('— §A7 wiring');
 {
   const cs = read('src/server/stdout/claude-stream-json.js'), br = read('src/server/session-brain.js'), eng = read('src/server/usage-pool-engine.js');
-  ok('§A7 the parse shows EVERY record to the clock right after it parses', /const msg = JSON\.parse\(line\);\s*\n\s*parsed = true;[\s\S]{0,400}?noteStreamRecord\?\.\(session, msg\)/.test(cs));
+  ok('§A7 the parse shows EVERY record to the clock right after it parses', verdictOf(/const msg = JSON\.parse\(line\);\s*\n\s*parsed = true;[\s\S]{0,400}?noteStreamRecord\?\.\(session, msg\)/.test(cs)));
   ok('§A7 …and hands the record to the banner (both producers) and the turn end',
-    (cs.match(/markLimitBanner\(session, [^,]+, msg\)/g) || []).length === 2 && /noteTurnEnd\?\.\(session, msg\)/.test(cs) && /noteSessionProduced\?\.\(session, msg\)/.test(cs));
-  ok('§A7 the device feed does the same', /noteStreamRecord\?\.\(session, msg\)/.test(br) && /markLimitBanner\(session, b\.text, msg\)/.test(br));
-  ok('§A7 both feeds keep a backlog\'s spend off the live odometer', /recordIsLate\?\.\(session, msg\)\)/.test(cs) && /recordIsLate\?\.\(session, msg\)\)/.test(br));   // stale-pins: kept — it reads claude-stream-json and session-brain (both still say it), not acp-events
+    (cs.match(/markLimitBanner\(session, [^,]+, msg\)/g) || []).length === 2 && gateOf(/noteTurnEnd\?\.\(session, msg\)/.test(cs)) && verdictOf(/noteSessionProduced\?\.\(session, msg\)/.test(cs)));
+  ok('§A7 the device feed does the same', gateOf(/noteStreamRecord\?\.\(session, msg\)/.test(br)) && verdictOf(/markLimitBanner\(session, b\.text, msg\)/.test(br)));
+  ok('§A7 both feeds keep a backlog\'s spend off the live odometer', gateOf(/recordIsLate\?\.\(session, msg\)\)/.test(cs)) && verdictOf(/recordIsLate\?\.\(session, msg\)\)/.test(br)));   // stale-pins: kept — it reads claude-stream-json and session-brain (both still say it), not acp-events
   ok('§A7 the three live-fact consumers are gated in the engine',
-    /function recordRateLimitEvent\(session, msg\) \{\s*\n\s*return gateLiveFact\(session, msg, 'rate_limit_event'/.test(eng)
-    && /function markLimitBanner\(session, text, rec = null\) \{\s*\n\s*return gateLiveFact\(session, rec, 'limit banner'/.test(eng)
-    && /function noteTurnEnd\(session, rec = null\) \{[\s\S]{0,900}?if \(recordIsLate\(session, rec\)\)/.test(eng));
+    gateOf(/function recordRateLimitEvent\(session, msg\) \{\s*\n\s*return gateLiveFact\(session, msg, 'rate_limit_event'/.test(eng))
+    && gateOf(/function markLimitBanner\(session, text, rec = null\) \{\s*\n\s*return gateLiveFact\(session, rec, 'limit banner'/.test(eng))
+    && verdictOf(/function noteTurnEnd\(session, rec = null\) \{[\s\S]{0,900}?if \(recordIsLate\(session, rec\)\)/.test(eng)));
 }
 
 // ═══ §A8 THE FIRST MINUTE OF AN OFFSET STREAM IS HELD, NOT DROPPED (lane reset-path verify r7 ④, reproduced) ═══
@@ -507,16 +507,16 @@ console.log('— §A8 the first minute of an offset stream is held and replayed 
   if (!r) ok('§A8 SKIP — pools unsupported on this platform', true);
   else {
     ok('§A8 the first turn\'s reading (stamped 5 min behind) is late and HELD, not taken: S\'s 5 h still reads 7 %', r.after1.u5 === 0.07 && JSON.stringify(r.after1.held) === '["rate_limit_event"]', JSON.stringify({ u5: r.after1.u5, held: r.after1.held }));
-    ok('§A8 …said as "a stalled bridge\'s backlog (or the first minute of a clock offset — the next records decide)"', r.after1.lines.some((l) => /records arriving 5m late — a stalled bridge's backlog \(or the first minute of a clock offset — the next records decide\)/.test(l)), r.after1.lines.filter((l) => /\[stream\]/.test(l)).join(' | ').slice(0, 300));
-    ok('§A8 the third stamped record over 61 s declares the offset and the held reading is REPLAYED through its gate: S\'s 5 h reads 95 % now, nothing held', skewDeclared(r.after3.skew) && r.after3.u5 === 0.95 && r.after3.held === null, JSON.stringify({ skew: r.after3.skew, u5: r.after3.u5, held: r.after3.held }));
-    ok('§A8 …the journal says the declaration, then the replay by count and kind, then what the first minute did NOT replay (its two turn ends — the next one comes), never "backlog over"', r.after3.lines.some((l) => /a clock offset on the CLI's machine, not a backlog/.test(l)) && r.after3.lines.some((l) => /^\[stream\] sess-4: 1 fact\(s\) held from the offset stream's first minute re-judged live by the offset and taken \(1 rate_limit_event\)/.test(l)) && r.after3.lines.some((l) => /^\[stream\] sess-4: the offset stream's first minute over — 2 fact\(s\) not replayed \(2 turn end; a turn end is never replayed/.test(l)) && !r.after3.lines.some((l) => /backlog over/.test(l)), r.after3.lines.filter((l) => /\[stream\]/.test(l)).join(' | ').slice(0, 500));
+    ok('§A8 …said as "a stalled bridge\'s backlog (or the first minute of a clock offset — the next records decide)"', verdictOf(r.after1.lines.some((l) => /records arriving 5m late — a stalled bridge's backlog \(or the first minute of a clock offset — the next records decide\)/.test(l))), r.after1.lines.filter((l) => /\[stream\]/.test(l)).join(' | ').slice(0, 300));
+    ok('§A8 the third stamped record over 61 s declares the offset and the held reading is REPLAYED through its gate: S\'s 5 h reads 95 % now, nothing held', gateOf(skewDeclared(r.after3.skew)) && r.after3.u5 === 0.95 && r.after3.held === null, JSON.stringify({ skew: r.after3.skew, u5: r.after3.u5, held: r.after3.held }));
+    ok('§A8 …the journal says the declaration, then the replay by count and kind, then what the first minute did NOT replay (its two turn ends — the next one comes), never "backlog over"', gateOf(r.after3.lines.some((l) => /a clock offset on the CLI's machine, not a backlog/.test(l))) && gateOf(r.after3.lines.some((l) => /^\[stream\] sess-4: 1 fact\(s\) held from the offset stream's first minute re-judged live by the offset and taken \(1 rate_limit_event\)/.test(l))) && gateOf(r.after3.lines.some((l) => /^\[stream\] sess-4: the offset stream's first minute over — 2 fact\(s\) not replayed \(2 turn end; a turn end is never replayed/.test(l))) && !r.after3.lines.some((l) => /backlog over/.test(l)), r.after3.lines.filter((l) => /\[stream\]/.test(l)).join(' | ').slice(0, 500));
   }
   const noHold = mutate('src/server/usage-pool-engine.js', 'nohold', [["    replayHeldLate(session); // the first minute's facts, each through its own gate against the offset (verify r7 ④)\n", '']]);
   ok('§A8 CONTROL (int374, B-96c4): the skew judge takes the declared offset plus the read-to-read time — SK and SK + 1 ms (the runner\'s 300001) pass; SK − 1 ms and SK + 51 ms do not',
-    skewDeclared(SK) && skewDeclared(SK + 1) && !skewDeclared(SK - 1) && !skewDeclared(SK + SKEW_SLACK_MS + 1) && !skewDeclared(undefined));
+    gateOf(skewDeclared(SK)) && gateOf(skewDeclared(SK + 1)) && !skewDeclared(SK - 1) && !skewDeclared(SK + SKEW_SLACK_MS + 1) && !skewDeclared(undefined));
   ok('§A8 CONTROL: the patch hit the engine', noHold.hit === true, noHold.why || '');
   const r2 = noHold.hit ? leg(noHold.mod) : null;
-  ok('§A8 CONTROL: with the replay removed the declaration takes nothing back — S still reads 7 % (the rows above see the replay)', !!r2 && skewDeclared(r2.after3.skew) && r2.after3.u5 === 0.07, r2 && JSON.stringify({ skew: r2.after3.skew, u5: r2.after3.u5 }));
+  ok('§A8 CONTROL: with the replay removed the declaration takes nothing back — S still reads 7 % (the rows above see the replay)', !!r2 && gateOf(skewDeclared(r2.after3.skew)) && r2.after3.u5 === 0.07, r2 && JSON.stringify({ skew: r2.after3.skew, u5: r2.after3.u5 }));
 }
 
 // ═══ §B A WALL WHOSE OWN WINDOW REFUTES THE PIN NEVER DEMOTES THE PIN ═══════
@@ -537,11 +537,11 @@ const liveRefutedWall = (w) => chunk(said(Date.now() - 5, 'working'), fableWall(
     ok('§B THE FIX: the banner of a refuted wall does not mark the pin (its Fable is untouched)',
       fableOf(S).utilization === 0.03 && fableOf(S).status !== 'limited', JSON.stringify(fableOf(S)));
     ok('§B …the record and the banner are both ARCHIVED with the reason, never silently dropped',
-      lines.some((l) => /\[wall\] sess-4: refusing to mark Member S sevenDay|\[wall\] sess-4: refusing to mark Member S 7d/.test(l))
-      && lines.some((l) => /\[wall\] sess-4: refusing to mark Member S fable — the banner is the same wall this turn's rejection record proved is not Member S's/.test(l)),
+      gateOf(lines.some((l) => /\[wall\] sess-4: refusing to mark Member S sevenDay|\[wall\] sess-4: refusing to mark Member S 7d/.test(l)))
+      && verdictOf(lines.some((l) => /\[wall\] sess-4: refusing to mark Member S fable — the banner is the same wall this turn's rejection record proved is not Member S's/.test(l))),
       lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 400));
     ok('§B …the turn end says the pin did not refuse, and demotes nothing',
-      lines.some((l) => /\[wall\] sess-4: Member S did not refuse this turn/.test(l)) && !lines.some((l) => /\[wall\] demoted/.test(l)),
+      gateOf(lines.some((l) => /\[wall\] sess-4: Member S did not refuse this turn/.test(l))) && !lines.some((l) => /\[wall\] demoted/.test(l)),
       lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 400));
     ok('§B …S is NOT excluded from this conversation (it was the "2 members already rejected" of the incident)',
       !w.eng.sessionWalledMembers('sess-4').has(w.id.s), JSON.stringify([...w.eng.sessionWalledMembers('sess-4')]));
@@ -579,7 +579,7 @@ const liveRefutedWall = (w) => chunk(said(Date.now() - 5, 'working'), fableWall(
     w2.mkSession('sess-4', 's');
     play(w2, liveRefutedWall(w2));
     ok('§B NEGATIVE CONTROL: without it the member with quota is excluded from the conversation',
-      w2.eng.sessionWalledMembers('sess-4').has(w2.id.s), JSON.stringify([...w2.eng.sessionWalledMembers('sess-4')]));
+      verdictOf(w2.eng.sessionWalledMembers('sess-4').has(w2.id.s)), JSON.stringify([...w2.eng.sessionWalledMembers('sess-4')]));
   }
 }
 
@@ -610,7 +610,7 @@ function repointLegs(AM) {
 }
 {
   const r = repointLegs(AccountManager);
-  if (r) ok('§C every re-point path leaves the target creds mtime changed (per-session switch, default + sweep)', r.perSession && r.sweep && r.linkNow, JSON.stringify(r));
+  if (r) ok('§C every re-point path leaves the target creds mtime changed (per-session switch, default + sweep)', gateOf(r.perSession) && gateOf(r.sweep) && verdictOf(r.linkNow), JSON.stringify(r));
   const mat = mutate('src/account-material.js', 'nobump', [[
     '  if (credsPath) { try { const now = Date.now() / 1000; fs.utimesSync(credsPath, now, now); } catch { } }',
     '  // PRE-FIX: no bump',
@@ -620,7 +620,7 @@ function repointLegs(AM) {
     const rebind = ["require('./account-material.js')", `require(${JSON.stringify(mat.file)})`];
     const accts = mutate('src/accounts.js', 'nobump-acc', Array(read('src/accounts.js').split(rebind[0]).length - 1).fill(rebind)); // accounts.js requires it at EVERY site — the three re-points + the private writer's merge / import + the oat's syncOatFile (lane pool-oat-materialize): rebind them all
     const r2 = accts.hit ? repointLegs(accts.mod.AccountManager) : null;
-    ok('§C NEGATIVE CONTROL: without the bump every path leaves the mtime — a running CLI never follows the move', !!r2 && !r2.perSession && !r2.sweep && r2.linkNow, JSON.stringify(r2) + (accts.why || ''));
+    ok('§C NEGATIVE CONTROL: without the bump every path leaves the mtime — a running CLI never follows the move', !!r2 && !r2.perSession && !r2.sweep && verdictOf(r2.linkNow), JSON.stringify(r2) + (accts.why || ''));
   }
 }
 
@@ -634,7 +634,7 @@ console.log('— §D the OTel org is a label: nothing reads it as a member');
 {
   const rec = JSON.parse(read('scripts/fixtures/claude-cred-read-2.1.281.json'));
   const orgs = rec.variants.symlink.otelOrg;
-  ok('§D the measurement: ONE OTel org for both tokens across the re-point (a label, not the bill)', orgs.length === 1 && rec.variants.symlink.requests.msg2.every((a) => a === 'B:200'), JSON.stringify(rec.variants.symlink));
+  ok('§D the measurement: ONE OTel org for both tokens across the re-point (a label, not the bill)', orgs.length === 1 && verdictOf(rec.variants.symlink.requests.msg2.every((a) => a === 'B:200')), JSON.stringify(rec.variants.symlink));
   const codeOf = (t) => t.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const asksLabel = (text) => /observedOrgFor\??\.?\(|\bobservedMemberFor\b|\bcorroborateReading\b/.test(codeOf(text));
   const readers = (files) => files.filter((f) => asksLabel(read(f)));
@@ -644,11 +644,11 @@ console.log('— §D the OTel org is a label: nothing reads it as a member');
   const hits = readers(srcFiles);
   ok('§D no executable line in src/ or server.js asks the label which member a session is on', hits.length === 0, hits.join(' '));
   const ingest = codeOf(read('src/server/otel-ingest.js'));
-  ok('§D the stash row names its comparison for what it is (`labelMatchesSlot`), and writes no `agreed`', /labelMatchesSlot: attributed === \(acct \|\| null\)/.test(ingest) && !/\bagreed:/.test(ingest));
+  ok('§D the stash row names its comparison for what it is (`labelMatchesSlot`), and writes no `agreed`', gateOf(/labelMatchesSlot: attributed === \(acct \|\| null\)/.test(ingest)) && !/\bagreed:/.test(ingest));
   // NEGATIVE CONTROL: the census sees a planted reader
   const planted = read('src/server/usage-pool-engine.js').replace('function resolveUsageKey(session) {', 'function resolveUsageKey(session) { const o = getOtelIngest()?.observedOrgFor?.(session?.claudeSessionId); void o;');
-  ok('§D NEGATIVE CONTROL: the same census catches a planted `observedOrgFor` read in the engine', planted !== read('src/server/usage-pool-engine.js') && asksLabel(planted) && !asksLabel(read('src/server/usage-pool-engine.js')));
+  ok('§D NEGATIVE CONTROL: the same census catches a planted `observedOrgFor` read in the engine', planted !== read('src/server/usage-pool-engine.js') && gateOf(asksLabel(planted)) && !asksLabel(read('src/server/usage-pool-engine.js')));
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -19,7 +19,7 @@ const { cliIdentityShellFns } = require(REPO + '/src/cli-identity.js');
 const { claimJsonls } = require(REPO + '/src/session-store.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 const run = (lines) => interpretDiscoveryLines(lines.join('\n'), { hostId: 'host-x', hostName: 'BoxX', claimJsonls });
 
@@ -65,7 +65,7 @@ const run = (lines) => interpretDiscoveryLines(lines.join('\n'), { hostId: 'host
     `T ${proj}/${Q}.jsonl\t${Q},`,
   ]);
   const ids = s.map((x) => x.sessionId).sort();
-  ok(s.length === 2 && ids[0] === P && ids[1] === Q && s.every((x) => x.status === 'remote-running'), 'two locks in one cwd each claim their OWN transcript (the N-parallel incident)');
+  ok(s.length === 2 && ids[0] === P && ids[1] === Q && verdictOf(s.every((x) => x.status === 'remote-running')), 'two locks in one cwd each claim their OWN transcript (the N-parallel incident)');
 }
 
 // ── case 4: a lock with no flushed transcript yet → listed by its own id ──
@@ -182,15 +182,15 @@ if (fs.existsSync('/proc/self')) {
 
   // wiring — the rule has one home and both sides take it from there
   const facts = fs.readFileSync(REPO + '/src/discovery-facts.js', 'utf8');
-  ok(/require\('\.\/cli-identity'\)/.test(facts) && /return isCliProcess\(pid, 'claude'\)/.test(facts),
+  ok(gateOf(/require\('\.\/cli-identity'\)/.test(facts)) && verdictOf(/return isCliProcess\(pid, 'claude'\)/.test(facts)),
     'WIRING: discovery-facts takes "is this pid the CLI" from the shared module (pidLooksClaude delegates)');
-  ok(/isCliProcess\(pid, 'codex'\)/.test(facts) && !/isCodexCommandLine/.test(facts),
+  ok(gateOf(/isCliProcess\(pid, 'codex'\)/.test(facts)) && !/isCodexCommandLine/.test(facts),
     'WIRING: the open-rollout scan asks the same predicate — the whole-argv codex regex is gone');
 
   // the PID-reuse guard, functionally
   ok(pidLooksClaude(realClaude.pid) === true,
     'pidLooksClaude: a real `<prefix>/bin/claude` process IS claude (the narrowing did not break detection)');
-  ok(holdsIt(readerTail.pid, jsonl) && pidLooksClaude(readerTail.pid) === false,
+  ok(gateOf(holdsIt(readerTail.pid, jsonl)) && pidLooksClaude(readerTail.pid) === false,
     '…and a `tail -f <HOME>/.claude/projects/<id>.jsonl` reader is NOT — even though it holds the transcript open');
   const retiredRule = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').includes('claude'); } catch { return false; } };
   ok(retiredRule(readerTail.pid) === true && retiredRule(wrapper.pid) === true,
@@ -198,9 +198,9 @@ if (fs.existsSync('/proc/self')) {
 
   // the codex CO lines, functionally
   const open = listOpenCodexRolloutPaths({ sessionsDir: path.join(home, '.codex', 'sessions') });
-  ok(open.includes(rollout),
+  ok(verdictOf(open.includes(rollout)),
     'listOpenCodexRolloutPaths: a real codex holder of the rollout IS reported (positive control — the scan reached it)');
-  ok(holdsIt(wrapper.pid, rollout) && !isCliProcess(wrapper.pid, 'codex'),
+  ok(gateOf(holdsIt(wrapper.pid, rollout)) && !isCliProcess(wrapper.pid, 'codex'),
     'a wrapper/dtach-master that merely NAMES the codex binary in its arguments — while holding the rollout fd — is not the codex CLI, so a dead thread stops reading RUNNING');
 
   // ── THE NO-/proc RUNG (r3): the branch no test could reach ────────────────
@@ -240,9 +240,9 @@ if (fs.existsSync('/proc/self')) {
   // answers, no SKIP is printed, and all three run and pass — so they are live
   // where they can be, and silent where the suite has already said it is blind.
   const haveLsofAnswer = haveLsof && !lsofUnknown;
-  ok(!haveLsofAnswer || viaLsof.includes(rollout),
+  ok(!haveLsofAnswer || verdictOf(viaLsof.includes(rollout)),
     'the no-/proc rung REACHES the real codex holder (positive control — an empty answer would make every assert below pass)', JSON.stringify(viaLsof));
-  ok(!haveLsof || (holdsIt(keeper.pid, rollout) && !isCliProcess(keeper.pid, 'codex')),
+  ok(!haveLsof || (gateOf(holdsIt(keeper.pid, rollout)) && !isCliProcess(keeper.pid, 'codex')),
     'the `codex-keeper` fixture holds the rollout open and is NOT the codex CLI (the shape the loose rule confuses)');
   // THE MEASURED FACT the status fix rests on: lsof answers correctly on STDOUT
   // and exits non-zero — the product consumes stdout and IGNORES both the exit
@@ -253,12 +253,12 @@ if (fs.existsSync('/proc/self')) {
   // none of which the product reads. (A machine with docker overlay mounts made
   // this leg's old `!stderr.trim()` clause a false RED — 2.369.71 gate.)
   const rawLsof = haveLsof ? spawnSync('lsof', ['-Fpn', '+D', codexRoot], { encoding: 'utf-8', maxBuffer: 8 * 1024 * 1024 }) : null;
-  ok(!haveLsofAnswer || (rawLsof.status !== 0 && rawLsof.stdout.includes(rollout)),
+  ok(!haveLsofAnswer || (rawLsof.status !== 0 && verdictOf(rawLsof.stdout.includes(rollout))),
     '`lsof +D` reports the holder CORRECTLY on stdout and still exits non-zero (its status is not an error signal — stderr warnings about unstat-able mounts are ignored, as the product ignores them)',
     JSON.stringify({ status: rawLsof && rawLsof.status, stderrLen: rawLsof && String(rawLsof.stderr || '').length }));
   // …and the product's own reader is PROVEN indifferent to that stderr: it read
   // the same tree correctly above (viaLsof.includes(rollout)) on this very box.
-  ok(!haveLsofAnswer || viaLsof.includes(rollout),
+  ok(!haveLsofAnswer || verdictOf(viaLsof.includes(rollout)),
     'the product reader (listOpenRolloutPathsViaLsof) returns the holder even when lsof warned on stderr — stderr is not consumed');
   // NEGATIVE CONTROL #1 — the pre-r3 EXIT-STATUS handling with the SHIPPED
   // identity: `execFileSync` throws on that status and the catch eats it.
@@ -304,7 +304,7 @@ if (fs.existsSync('/proc/self')) {
   fs.closeSync(keeperFd2);
   const t1 = Date.now();
   while (!holdsIt(keeper2.pid, keeperRollout) && Date.now() - t1 < 15000) execFileSync('sleep', ['0.05']);
-  ok(!haveLsofAnswer || preR3IdentityViaLsof(keeperOnlyRoot).includes(keeperRollout),
+  ok(!haveLsofAnswer || verdictOf(preR3IdentityViaLsof(keeperOnlyRoot).includes(keeperRollout)),
     'NEGATIVE CONTROL: the pre-r3 IDENTITY reports a rollout held ONLY by `codex-keeper` — lsof\'s COMMAND field is a substring test over comm');
   ok(!haveLsofAnswer || listOpenRolloutPathsViaLsof(keeperOnlyRoot).length === 0,
     '…and the shipped rung reports NOTHING for it: the same predicate as /proc and as the shell (a stopped thread stops reading RUNNING on macOS too)',
@@ -332,4 +332,4 @@ if (fs.existsSync('/proc/self')) {
 } else { console.log('  · SKIP the process-identity twin: /proc absent'); }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

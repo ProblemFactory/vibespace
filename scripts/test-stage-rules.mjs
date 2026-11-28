@@ -40,7 +40,7 @@ const SRC = read(MODEL);
 const J = JSON.stringify;
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -69,7 +69,7 @@ const clearToasts = () => store.delete('vibespace.toastHistory');
 /** The PURE legs over one copy of the model — the controls re-run them on a patched copy. */
 function pureLegs(R, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const run = (fn) => { try { return fn(); } catch (e) { return e; } };
   const K = (f) => run(() => R.stageWindowKind(f, '__stage__'));
   // §1
@@ -88,11 +88,11 @@ function pureLegs(R, { quiet = false } = {}) {
   const tUp = (s) => '«' + s + '»';
   const refusals = [V('window', 'd2'), V('session', 'd2'), V('placeholder', 'd2'), V(null, '__stage__')];
   const words = refusals.map((v) => run(() => R.stageRefusalWords(v, { t: (s) => s })));
-  leg(words.every((w) => w && typeof w.line === 'string' && w.line.length > 10 && typeof w.next === 'string' && w.next.length > 10), '§3 every refusal has a line AND a next step', J(words));
+  leg(verdictOf(words.every((w) => w && typeof w.line === 'string' && w.line.length > 10 && typeof w.next === 'string' && w.next.length > 10)), '§3 every refusal has a line AND a next step', J(words));
   leg(new Set(words.map((w) => w && w.line)).size === 4 && new Set(words.map((w) => w && w.next)).size === 4, '§3 the four refusals say four different things (a window, the conversation, the slot, the other direction)', J(words));
-  leg(words[0] && words[0].line === 'Windows on the Stage stay on the Stage' && words[1] && words[1].line === 'The conversation stays on the Stage' && words[3] && /onto the Stage/.test(words[3].line), '§3 …in the words the chrome gate reads (a window / the conversation / onto the Stage)', J(words));
+  leg(gateOf(words[0]) && words[0].line === 'Windows on the Stage stay on the Stage' && gateOf(words[1]) && words[1].line === 'The conversation stays on the Stage' && gateOf(words[3]) && verdictOf(/onto the Stage/.test(words[3].line)), '§3 …in the words the chrome gate reads (a window / the conversation / onto the Stage)', J(words));
   const tw = refusals.map((v) => run(() => R.stageRefusalWords(v, { t: tUp })));
-  leg(tw.every((w) => w && /^«.*»$/.test(w.line) && /^«.*»$/.test(w.next)), '§3 every string goes through the injected t (no raw English reaches a zh / ja user)', J(tw));
+  leg(verdictOf(tw.every((w) => w && /^«.*»$/.test(w.line) && /^«.*»$/.test(w.next))), '§3 every string goes through the injected t (no raw English reaches a zh / ja user)', J(tw));
   leg(!!words[0] && run(() => R.stageRefusalSentence(refusals[0], { t: (s) => s })) === words[0].line + ' — ' + words[0].next, '§3 the sentence a toast / menu row says = "<line> — <next>"');
   leg(run(() => R.stageRefusalWords({ ok: true }, {})) === null && run(() => R.stageRefusalSentence({ ok: true, same: true }, {})) === '' && run(() => R.stageRefusalWords(null)) === null, '§3 an ok verdict has no words');
   return failed;
@@ -124,14 +124,14 @@ const { StageManager, STAGE_ID } = await import('../src/lib/stage-manager.js');
   ];
   const got = cases.map(([win]) => sm.windowKind(win));
   ok(J(got) === J(cases.map((c) => c[1])), '§5 windowKind reads type / _isStagePlaceholder / _onStage / _desktopId / the aux binding', J(got));
-  ok(cases.every(([win, k]) => sm.dragToDesktopBlocked(win) === !!k) && sm.dragToDesktopBlocked(null) === false, '§5 dragToDesktopBlocked = "is a Stage window" (the 2.112.4 membership, unchanged)');
+  ok(gateOf(cases.every(([win, k]) => sm.dragToDesktopBlocked(win) === !!k)) && sm.dragToDesktopBlocked(null) === false, '§5 dragToDesktopBlocked = "is a Stage window" (the 2.112.4 membership, unchanged)');
   ok(J(sm.moveVerdict(cases[3][0], 'd1')) === J({ ok: false, code: 'stage-window', kind: 'window' }) && J(sm.moveVerdict(cases[5][0], STAGE_ID)) === J({ ok: false, code: 'onto-stage', kind: null }) && sm.moveVerdict(cases[5][0], 'd2').ok === true, '§5 moveVerdict = the PURE verdict over those facts');
 }
 
 console.log('— §6 DesktopManager: a typed refusal, spoken on a user\'s act, silent for a program');
 async function dmLegs(DesktopManager, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const sm = new StageManager({ settings: null, isMobile: false, wm: { windows: new Map() } });
   const wins = new Map([
     ['live', { id: 'live', type: 'browser-live', _desktopId: STAGE_ID, element: { style: {} } }],
@@ -149,24 +149,24 @@ async function dmLegs(DesktopManager, { quiet = false } = {}) {
   leg(J(r1) === J({ ok: false, code: 'stage-window', kind: 'window' }) && wins.get('live')._desktopId === STAGE_ID && calls.length === 0, '§6 a Stage window → a desktop: the TYPED refusal, nothing moved, nothing saved', J({ r1, calls }));
   leg(toasts().length === 0, '§6 …and a programmatic call (no speak) says nothing', J(toasts()));
   const r2 = dm.moveWindowToDesktop('live', 'd2', { speak: true });
-  leg(r2 && r2.ok === false && toasts().length === 1 && toasts()[0] === 'Windows on the Stage stay on the Stage — Open it again on the desktop where you want it.', '§6 a USER\'s move (speak) says the refusal in a toast — b970f16d returned in silence', J({ r2, toasts: toasts() }));
+  leg(gateOf(r2) && r2.ok === false && toasts().length === 1 && toasts()[0] === 'Windows on the Stage stay on the Stage — Open it again on the desktop where you want it.', '§6 a USER\'s move (speak) says the refusal in a toast — b970f16d returned in silence', J({ r2, toasts: toasts() }));
   clearToasts();
   const r3 = dm.moveWindowToDesktop('hero', 'd2', { speak: true });
-  leg(r3 && r3.code === 'stage-window' && r3.kind === 'session' && /^The conversation stays on the Stage — /.test(toasts()[0] || ''), '§6 the hero: "The conversation stays on the Stage — …"', J({ r3, toasts: toasts() }));
+  leg(gateOf(r3) && r3.code === 'stage-window' && r3.kind === 'session' && verdictOf(/^The conversation stays on the Stage — /.test(toasts()[0] || '')), '§6 the hero: "The conversation stays on the Stage — …"', J({ r3, toasts: toasts() }));
   clearToasts();
   const r4 = dm.moveWindowToDesktop('ex', STAGE_ID, { speak: true });
-  leg(r4 && r4.code === 'onto-stage' && /onto the Stage/.test(toasts()[0] || '') && wins.get('ex')._desktopId === 'd1', '§6 a desktop window → the Stage: "onto-stage", said, not moved', J({ r4, toasts: toasts() }));
+  leg(gateOf(r4) && r4.code === 'onto-stage' && gateOf(/onto the Stage/.test(toasts()[0] || '')) && wins.get('ex')._desktopId === 'd1', '§6 a desktop window → the Stage: "onto-stage", said, not moved', J({ r4, toasts: toasts() }));
   clearToasts();
   leg(J(dm.moveWindowToDesktop('live', STAGE_ID, { speak: true })) === J({ ok: true, moved: false }) && toasts().length === 0, '§6 a Stage window → the Stage: already there — no move, no words');
   dm._activeId = 'd1';
   const r5 = dm.moveWindowToDesktop('ex', 'd2', { speak: true });
-  leg(J(r5) === J({ ok: true, moved: true }) && wins.get('ex')._desktopId === 'd2' && calls.includes('hide:ex') && calls.includes('save') && toasts().length === 0, '§6 a desktop window → another desktop still moves (hidden, saved), no words', J({ r5, calls }));
+  leg(J(r5) === J({ ok: true, moved: true }) && wins.get('ex')._desktopId === 'd2' && gateOf(calls.includes('hide:ex')) && gateOf(calls.includes('save')) && toasts().length === 0, '§6 a desktop window → another desktop still moves (hidden, saved), no words', J({ r5, calls }));
   leg(J(dm.moveWindowToDesktop('nope', 'd2')) === J({ ok: false, code: 'no-window' }), '§6 an unknown window ⇒ {ok:false, code:"no-window"}');
   // the menu
   const mLive = dm.getDesktopMenuItems('live');
   leg(mLive.length === 1 && mLive[0].label === 'Windows on the Stage stay on the Stage — Open it again on the desktop where you want it.' && !mLive[0].disabled && typeof mLive[0].action !== 'function' && !mLive.some((r) => /^(Main|Work)$/.test(r.label)), '§6 "Move to Desktop ▸" of a Stage window = ONE row that says why — no desktop names that do nothing, never greyed', J(mLive));
   const mHero = dm.getDesktopMenuItems('hero');
-  leg(mHero.length === 1 && /^The conversation stays on the Stage/.test(mHero[0].label), '§6 …the hero\'s row names the conversation', J(mHero));
+  leg(mHero.length === 1 && verdictOf(/^The conversation stays on the Stage/.test(mHero[0].label)), '§6 …the hero\'s row names the conversation', J(mHero));
   wins.get('ex')._desktopId = 'd1';
   const mEx = dm.getDesktopMenuItems('ex');
   leg(J(mEx.map((r) => r.label)) === J(['Work']) && typeof mEx[0].action === 'function', '§6 a desktop window\'s menu lists the other desktops, as before', J(mEx));
@@ -182,7 +182,7 @@ console.log('— §9–§10 THE VANISH (owner correction #2: "他那个拖动出
 /** §9: tab-group's _matchFrameVisibility — a window leaving a chain takes its FRAME's visibility. */
 async function frameLegs(installTabGroupMixin, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const mkWin = (id, o = {}) => { const attrs = new Map(); return { id, type: 'browser-live', ...o, element: { style: { visibility: '', pointerEvents: '', contentVisibility: '' }, classList: { contains: () => false }, getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null), setAttribute: (k, v) => attrs.set(k, v), removeAttribute: (k) => attrs.delete(k), attrs } }; };
   const calls = [];
   // inc-munl8jkl-gaih: the window manager's ONE door + derivation (the real WindowManager prototype) — a leaving window
@@ -193,14 +193,14 @@ async function frameLegs(installTabGroupMixin, { quiet = false } = {}) {
   // the exact state 2.369.196 left on his live view: the Stage's leave-time hide on the guest's own element, the host shown
   const stale = mkWin('live', { _hiddenByStage: true }); stale.element.style.visibility = 'hidden'; stale.element.style.pointerEvents = 'none'; stale.element.attrs.set('aria-hidden', 'true');
   wm._matchFrameVisibility(stale, mkWin('hero', { type: 'chat' }));
-  leg(stale._hiddenByStage === false && stale._hiddenByDesktop === false && stale.element.style.visibility === '' && stale.element.style.pointerEvents === '' && !stale.element.attrs.has('aria-hidden') && calls.includes('stage:false') && calls.includes('desktop:false'), '§9 a guest carrying the Stage\'s hide, leaving a SHOWN frame ⇒ every mark goes (both flags, visibility, pointer-events, aria-hidden, the suspended view) — 2.369.196 kept them: an invisible window', J({ stale: { s: stale._hiddenByStage, v: stale.element.style.visibility, pe: stale.element.style.pointerEvents }, calls }));
+  leg(stale._hiddenByStage === false && stale._hiddenByDesktop === false && stale.element.style.visibility === '' && stale.element.style.pointerEvents === '' && !stale.element.attrs.has('aria-hidden') && gateOf(calls.includes('stage:false')) && verdictOf(calls.includes('desktop:false')), '§9 a guest carrying the Stage\'s hide, leaving a SHOWN frame ⇒ every mark goes (both flags, visibility, pointer-events, aria-hidden, the suspended view) — 2.369.196 kept them: an invisible window', J({ stale: { s: stale._hiddenByStage, v: stale.element.style.visibility, pe: stale.element.style.pointerEvents }, calls }));
   const chatStale = mkWin('c2', { type: 'chat', _hiddenByDesktop: true }); chatStale.element.style.contentVisibility = 'hidden'; chatStale.element.style.visibility = 'hidden';
   wm._matchFrameVisibility(chatStale, mkWin('host2'));
   leg(chatStale._hiddenByDesktop === false && chatStale.element.style.contentVisibility === '' && chatStale.element.style.visibility === '', '§9 …a desktop hider\'s marks too (a chat\'s content-visibility included)');
   const g1 = mkWin('g1'); wm._matchFrameVisibility(g1, mkWin('hs', { _hiddenByStage: true }));
   const g2 = mkWin('g2'); wm._matchFrameVisibility(g2, mkWin('hd', { _hiddenByDesktop: true }));
   const hid = (w) => w.element.style.visibility === 'hidden' && w.element.style.pointerEvents === 'none' && w.element.attrs.get('aria-hidden') === 'true';
-  leg(g1._hiddenByStage && !g1._hiddenByDesktop && hid(g1) && g2._hiddenByDesktop && !g2._hiddenByStage && hid(g2), '§9 a HIDDEN frame ⇒ the leaving window is hidden the same way (a programmatic detach on a hidden Stage / desktop never pops a window onto the screen)', J({ g1: [g1._hiddenByStage, g1.element.style.visibility], g2: [g2._hiddenByDesktop, g2.element.style.visibility] }));
+  leg(gateOf(g1._hiddenByStage) && !g1._hiddenByDesktop && gateOf(hid(g1)) && gateOf(g2._hiddenByDesktop) && !g2._hiddenByStage && verdictOf(hid(g2)), '§9 a HIDDEN frame ⇒ the leaving window is hidden the same way (a programmatic detach on a hidden Stage / desktop never pops a window onto the screen)', J({ g1: [g1._hiddenByStage, g1.element.style.visibility], g2: [g2._hiddenByDesktop, g2.element.style.visibility] }));
   const same = mkWin('x', { _hiddenByStage: true }); same.element.style.visibility = 'hidden';
   wm._matchFrameVisibility(same, same); wm._matchFrameVisibility(same, null);
   leg(same._hiddenByStage === true && same.element.style.visibility === 'hidden', '§9 the host leaving its own chain / no frame ⇒ nothing changes (the host IS the frame)');
@@ -213,7 +213,7 @@ const frameFailed = await frameLegs(TG.installTabGroupMixin);
 /** §10: StageManager — the hero's frame is its whole group; a torn-off tab belongs to the frame it left. */
 async function stageFrameLegs(StageMgr, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const mk = (id, o = {}) => { const attrs = new Map(); return { id, type: 'browser-live', element: { style: {}, classList: { contains: () => false }, getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null), setAttribute: (k, v) => attrs.set(k, v), removeAttribute: (k) => attrs.delete(k) }, ...o }; };
   const chain = { tabs: ['hero', 'live'], active: 0, layout: 'tabs' };
   const hero = mk('hero', { type: 'chat', _tabChain: chain, _desktopId: STAGE_ID, gridBounds: { left: 0.1, top: 0.1, width: 0.5, height: 0.5 } });
@@ -310,19 +310,19 @@ console.log('— §11c PURE tornOffStep: the step beside a home nothing occupies
 console.log('— §7 wiring: every door asks the one rule and says its refusal');
 {
   const W = read('src/lib/window.js'), D = read('src/lib/desktop-manager.js'), CM = read('src/lib/command-mode.js'), TB = read('src/lib/taskbar.js');
-  ok(/const v = this\._app\?\.stage\?\.moveVerdict \? this\._app\.stage\.moveVerdict\(win, toStage \? STAGE_ID : \(hoverPreview\.dataset\.desktopId \|\| null\)\)/.test(W), '§7 window.js: a hovered preview is judged by stage.moveVerdict (its own desktop id, or the Stage)');
-  ok(/markRefusal\(refused, deskRefusal, e\);/.test(W) && /preview\.classList\.add\('stage-refuse'\)/.test(W) && /refuseLabel\.className = 'stage-refuse-label'/.test(W), '§7 …the refused preview is marked and the words ride beside the pointer');
-  ok(/if \(refusal\) \{[\s\S]{0,700}this\._putBackAfterRefusedDrop\(win, dragFrom[\s\S]{0,200}this\._app\?\.desktopManager\?\.sayStageRefusal\?\.\(refusal\);\s*return;/.test(W), '§7 …a refused drop puts the window back where the drag began and SAYS why');
+  ok(verdictOf(/const v = this\._app\?\.stage\?\.moveVerdict \? this\._app\.stage\.moveVerdict\(win, toStage \? STAGE_ID : \(hoverPreview\.dataset\.desktopId \|\| null\)\)/.test(W)), '§7 window.js: a hovered preview is judged by stage.moveVerdict (its own desktop id, or the Stage)');
+  ok(gateOf(/markRefusal\(refused, deskRefusal, e\);/.test(W)) && gateOf(/preview\.classList\.add\('stage-refuse'\)/.test(W)) && verdictOf(/refuseLabel\.className = 'stage-refuse-label'/.test(W)), '§7 …the refused preview is marked and the words ride beside the pointer');
+  ok(verdictOf(/if \(refusal\) \{[\s\S]{0,700}this\._putBackAfterRefusedDrop\(win, dragFrom[\s\S]{0,200}this\._app\?\.desktopManager\?\.sayStageRefusal\?\.\(refusal\);\s*return;/.test(W)), '§7 …a refused drop puts the window back where the drag began and SAYS why');
   ok(!/dragToDesktopBlocked\?\.\(win\)\)\) hoverPreview = null;/.test(W), '§7 …the old silent null-out of the hovered preview is gone');
-  ok(!/dragToDesktopBlocked\?\.\(win\) \|\| desktopId === '__stage__'\) return;/.test(D) && /if \(!v\.ok\) \{ if \(speak\) this\.sayStageRefusal\(v\); return v; \}/.test(D), '§7 desktop-manager: the silent `return;` is a typed, spoken refusal');
-  ok(/if \(winId\) this\.moveWindowToDesktop\(winId, desk\.id, \{ speak: true \}\);/.test(D) && /action: \(\) => this\.moveWindowToDesktop\(win\.id, d\.id, \{ speak: true \}\)/.test(D), '§7 …a taskbar item dropped on a preview and a menu row are user acts (speak)');
-  ok(/dm\.moveWindowToDesktop\(wm\.activeWindowId, dm\.desktops\[next\]\.id, \{ speak: true \}\)/.test(CM), '§7 command mode\'s move-to-desktop keys speak');
-  ok(/id: 'window\/move-to-desktop'[^\n]*getDesktopMenuItems\(c\.id\)/.test(TB), '§7 the window menu\'s "Move to Desktop ▸" reads getDesktopMenuItems (so the reason row reaches every window menu)');
+  ok(!/dragToDesktopBlocked\?\.\(win\) \|\| desktopId === '__stage__'\) return;/.test(D) && verdictOf(/if \(!v\.ok\) \{ if \(speak\) this\.sayStageRefusal\(v\); return v; \}/.test(D)), '§7 desktop-manager: the silent `return;` is a typed, spoken refusal');
+  ok(gateOf(/if \(winId\) this\.moveWindowToDesktop\(winId, desk\.id, \{ speak: true \}\);/.test(D)) && verdictOf(/action: \(\) => this\.moveWindowToDesktop\(win\.id, d\.id, \{ speak: true \}\)/.test(D)), '§7 …a taskbar item dropped on a preview and a menu row are user acts (speak)');
+  ok(verdictOf(/dm\.moveWindowToDesktop\(wm\.activeWindowId, dm\.desktops\[next\]\.id, \{ speak: true \}\)/.test(CM)), '§7 command mode\'s move-to-desktop keys speak');
+  ok(verdictOf(/id: 'window\/move-to-desktop'[^\n]*getDesktopMenuItems\(c\.id\)/.test(TB)), '§7 the window menu\'s "Move to Desktop ▸" reads getDesktopMenuItems (so the reason row reaches every window menu)');
   const TGS = read('src/lib/tab-group.js'), SMS = read('src/lib/stage-manager.js');
-  ok(/if \(hostWin && hostWin !== win\) this\._matchFrameVisibility\(win, hostWin\);/.test(TGS), '§7 tab-group _detachFromChain: a leaving guest takes its frame\'s visibility (every detach — the drag, a regroup, a re-chain)');
-  ok(/const frame = this\.windows\.get\(chain\.tabs\[0\] === winId \? chain\.tabs\[1\] : chain\.tabs\[0\]\) \|\| null;\s*this\._detachFromChain\(chain, winId\);[\s\S]{0,800}this\._app\?\.stage\?\.onTornOff\?\.\(win, frame\)/.test(TGS), '§7 …the tab drag names the frame BEFORE the detach and hands the torn-off window to the stage (the span admits the lanes\' witness lines between: desktop-move\'s witnessChain, stage-blank\'s _noteChainAct)');
-  ok(/for \(const m of this\._frameOf\(win\)\) this\.app\.wm\.setWindowHidden\(m, \{ desktop: false, stage: false \}\);/.test(SMS) && /_frameOf\(win\) \{[\s\S]{0,200}win\._tabChain\.tabs/.test(SMS), '§7 stage-manager _borrowHero re-shows the hero\'s whole group (every member\'s reasons cleared through the one door — inc-munl8jkl-gaih)');
-  ok(/\.desktop-preview\.stage-refuse \{/.test(read('public/style.css')) && /\.stage-refuse-label \{/.test(read('public/style.css')), '§7 style.css draws the mark and the label (theme vars)');
+  ok(verdictOf(/if \(hostWin && hostWin !== win\) this\._matchFrameVisibility\(win, hostWin\);/.test(TGS)), '§7 tab-group _detachFromChain: a leaving guest takes its frame\'s visibility (every detach — the drag, a regroup, a re-chain)');
+  ok(verdictOf(/const frame = this\.windows\.get\(chain\.tabs\[0\] === winId \? chain\.tabs\[1\] : chain\.tabs\[0\]\) \|\| null;\s*this\._detachFromChain\(chain, winId\);[\s\S]{0,800}this\._app\?\.stage\?\.onTornOff\?\.\(win, frame\)/.test(TGS)), '§7 …the tab drag names the frame BEFORE the detach and hands the torn-off window to the stage (the span admits the lanes\' witness lines between: desktop-move\'s witnessChain, stage-blank\'s _noteChainAct)');
+  ok(gateOf(/for \(const m of this\._frameOf\(win\)\) this\.app\.wm\.setWindowHidden\(m, \{ desktop: false, stage: false \}\);/.test(SMS)) && verdictOf(/_frameOf\(win\) \{[\s\S]{0,200}win\._tabChain\.tabs/.test(SMS)), '§7 stage-manager _borrowHero re-shows the hero\'s whole group (every member\'s reasons cleared through the one door — inc-munl8jkl-gaih)');
+  ok(gateOf(/\.desktop-preview\.stage-refuse \{/.test(read('public/style.css'))) && verdictOf(/\.stage-refuse-label \{/.test(read('public/style.css'))), '§7 style.css draws the mark and the label (theme vars)');
 }
 
 console.log('— §8 negative controls (patched copies, scripts/mutant-copy.mjs)');
@@ -334,42 +334,42 @@ console.log('— §8 negative controls (patched copies, scripts/mutant-copy.mjs)
   ];
   for (const m of PURE) {
     const found = SRC.includes(m.find);
-    ok(found, `control ${m.tag}: the patched line exists in the model`);
+    ok(verdictOf(found), `control ${m.tag}: the patched line exists in the model`);
     if (!found) continue;
     const f = pureLegs(M.load(MODEL, SRC.replace(m.find, m.repl), m.tag), { quiet: true });
-    ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+    ok(verdictOf(f.some((n) => m.expect.test(n))), `control ${m.tag}: the patched copy turns its leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   // the pre-fix desktop-manager: the silent return (a patched ESM copy, every import re-bound to the real modules)
   const DSRC = read('src/lib/desktop-manager.js');
   const find = '    if (!v.ok) { if (speak) this.sayStageRefusal(v); return v; }';
-  ok(DSRC.includes(find), 'control silent-return: the patched line exists in desktop-manager.js');
+  ok(verdictOf(DSRC.includes(find)), 'control silent-return: the patched line exists in desktop-manager.js');
   if (DSRC.includes(find)) {
     const f = M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '    if (!v.ok) return;', "src/lib/desktop-manager.js"), 'silent-return');
     const failed = await dmLegs((await import(f)).DesktopManager, { quiet: true });
-    ok(failed.some((n) => /says the refusal in a toast/.test(n)) && failed.some((n) => /TYPED refusal/.test(n)), `control silent-return: the pre-fix silent return turns the typed + spoken legs RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 160)})`);
+    ok(gateOf(failed.some((n) => /says the refusal in a toast/.test(n))) && verdictOf(failed.some((n) => /TYPED refusal/.test(n))), `control silent-return: the pre-fix silent return turns the typed + spoken legs RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   // the vanish: a frame-visibility that copies the reasons without deriving (the inline hide stays), and a borrow that
   // shows the hero alone (2.369.196)
   const TGSRC = read('src/lib/tab-group.js');
   const tgFind = "    this.setWindowHidden(win, { desktop: !!frame._hiddenByDesktop, stage: !!frame._hiddenByStage });\n";
-  ok(TGSRC.includes(tgFind), 'control keeps-inline-hide: the patched line exists in tab-group.js');
+  ok(verdictOf(TGSRC.includes(tgFind)), 'control keeps-inline-hide: the patched line exists in tab-group.js');
   if (TGSRC.includes(tgFind)) {
     const f = M.write('src/lib/tab-group.js', editAnchor(TGSRC, tgFind, '    win._hiddenByDesktop = !!frame._hiddenByDesktop; win._hiddenByStage = !!frame._hiddenByStage;\n', "src/lib/tab-group.js"), 'keeps-inline-hide');
     const failed = await frameLegs((await import(f)).installTabGroupMixin, { quiet: true });
-    ok(failed.some((n) => /every mark goes/.test(n)), `control keeps-inline-hide: the torn-off window keeps visibility:hidden ⇒ the §9 leg turns RED (${failed.length}: ${failed.slice(0, 1).join(' | ').slice(0, 140)})`);
+    ok(verdictOf(failed.some((n) => /every mark goes/.test(n))), `control keeps-inline-hide: the torn-off window keeps visibility:hidden ⇒ the §9 leg turns RED (${failed.length}: ${failed.slice(0, 1).join(' | ').slice(0, 140)})`);
   }
   const SMSRC = read('src/lib/stage-manager.js');
   const smFind = '    for (const m of this._frameOf(win)) this.app.wm.setWindowHidden(m, { desktop: false, stage: false });\n';
-  ok(SMSRC.includes(smFind), 'control hero-alone: the patched line exists in stage-manager.js');
+  ok(verdictOf(SMSRC.includes(smFind)), 'control hero-alone: the patched line exists in stage-manager.js');
   if (SMSRC.includes(smFind)) {
     // the copy re-evaluates the module: its window-type registration would be a duplicate — the copy drops it (the class is what is judged)
     const f = M.write('src/lib/stage-manager.js', editAnchor(editAnchor(SMSRC, smFind, '    this.app.wm.setWindowHidden(win, { desktop: false, stage: false });\n', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js"), 'hero-alone');
     const failed = await stageFrameLegs((await import(f)).StageManager, { quiet: true });
-    ok(failed.some((n) => /WHOLE group/.test(n)), `control hero-alone: the borrow that shows the hero alone (2.369.196) turns the §10 leg RED (${failed.length}: ${failed.slice(0, 1).join(' | ').slice(0, 140)})`);
+    ok(verdictOf(failed.some((n) => /WHOLE group/.test(n))), `control hero-alone: the borrow that shows the hero alone (2.369.196) turns the §10 leg RED (${failed.length}: ${failed.slice(0, 1).join(' | ').slice(0, 140)})`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5 })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 const anyFailed = fail || realFailed.length || dmFailed.length || frameFailed.length || stageFrameFailed.length;
 console.log(`\n${anyFailed ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(anyFailed ? 1 : 0);
+process.exit(anyFailed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

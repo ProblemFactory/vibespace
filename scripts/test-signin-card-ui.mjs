@@ -43,7 +43,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const esbuild = require('esbuild');
 let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 400)); } };
+const ok = (c, name, info) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 400)); } };
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 const stubs = {
@@ -104,21 +104,21 @@ const URL = 'https://claude.ai/oauth/authorize?code=true&state=zz';
   const host = new Host();
   const card = new SignInCard({ ws, hasWaiting: () => true, onResend: () => { resent++; } });
   card.mount(host);
-  ok(/Sign in with Claude/.test(host.innerHTML) && host.querySelector('[data-act="begin"]'), '① no-login shows a Sign in with Claude button', host.innerHTML.slice(0, 80));
+  ok(gateOf(/Sign in with Claude/.test(host.innerHTML)) && verdictOf(host.querySelector('[data-act="begin"]')), '① no-login shows a Sign in with Claude button', host.innerHTML.slice(0, 80));
 
   await card._begin();
-  ok(calls.some((c) => c.url === '/api/accounts/subscription' && c.method === 'POST') && calls.some((c) => c.url === '/api/accounts/acc-x/signin' && c.method === 'POST'), '① begin creates a subscription then starts the sign-in', calls.map((c) => c.url));
-  ok(/href="https:\/\/claude\.ai\/oauth/.test(host.innerHTML) && /target="_blank"/.test(host.innerHTML) && !!host.querySelector('.signin-code-input'), '② a url shows an Open-the-sign-in-page link + a code box', host.innerHTML.slice(0, 180));
+  ok(gateOf(calls.some((c) => c.url === '/api/accounts/subscription' && c.method === 'POST')) && verdictOf(calls.some((c) => c.url === '/api/accounts/acc-x/signin' && c.method === 'POST')), '① begin creates a subscription then starts the sign-in', calls.map((c) => c.url));
+  ok(gateOf(/href="https:\/\/claude\.ai\/oauth/.test(host.innerHTML)) && gateOf(/target="_blank"/.test(host.innerHTML)) && !!host.querySelector('.signin-code-input'), '② a url shows an Open-the-sign-in-page link + a code box', host.innerHTML.slice(0, 180));
 
   const codeNode = host.querySelector('.signin-code-input');
   if (codeNode) { codeNode.value = '  mycode#state  '; host.querySelector('[data-act="code"]').click(); await flush(); }
   const codeCall = calls.find((c) => c.url === '/api/accounts/acc-x/signin/code');
-  ok(codeCall && codeCall.body && codeCall.body.code === 'mycode#state', '③ the pasted code (trimmed) is POSTed to …/signin/code', codeCall);
+  ok(gateOf(codeCall) && gateOf(codeCall.body) && codeCall.body.code === 'mycode#state', '③ the pasted code (trimmed) is POSTed to …/signin/code', codeCall);
 
   ws.push(SIGNIN('connected', { rev: 3 }));
   await flush(); await flush();
-  ok(calls.some((c) => c.url === '/api/accounts/subscription/acc-x/finalize'), '④ connected → finalize is called', calls.map((c) => c.url));
-  ok(/Connected/.test(host.innerHTML) && /me@co\.example/.test(host.innerHTML), '④ the card shows Connected as the e-mail', host.innerHTML.slice(0, 160));
+  ok(verdictOf(calls.some((c) => c.url === '/api/accounts/subscription/acc-x/finalize')), '④ connected → finalize is called', calls.map((c) => c.url));
+  ok(gateOf(/Connected/.test(host.innerHTML)) && verdictOf(/me@co\.example/.test(host.innerHTML)), '④ the card shows Connected as the e-mail', host.innerHTML.slice(0, 160));
   const resend = host.querySelector('[data-act="resend"]');
   ok(!!resend, '④ a waiting message shows «Send my message again»', host.innerHTML.slice(0, 200));
   if (resend) resend.click();
@@ -134,7 +134,7 @@ const URL = 'https://claude.ai/oauth/authorize?code=true&state=zz';
   card.mount(host);
   await card._begin();
   ws.push(SIGNIN('failed', { error: 'OAuth error: the code was rejected', rev: 2 }));
-  ok(/OAuth error: the code was rejected/.test(host.innerHTML) && !!host.querySelector('[data-act="begin"]'), '⑤ failed shows the reason + a Try again button', host.innerHTML.slice(0, 180));
+  ok(gateOf(/OAuth error: the code was rejected/.test(host.innerHTML)) && !!host.querySelector('[data-act="begin"]'), '⑤ failed shows the reason + a Try again button', host.innerHTML.slice(0, 180));
 }
 
 // ⑥ a stale snapshot never repaints over a newer one
@@ -146,7 +146,7 @@ const URL = 'https://claude.ai/oauth/authorize?code=true&state=zz';
   await card._begin();
   const before = host.innerHTML;
   ws.push(SIGNIN('starting', { rev: 2 })); // an older publication of the same run
-  ok(host.innerHTML === before && /signin-code-input/.test(host.innerHTML), '⑥ an older-rev snapshot of the same run is ignored (no repaint back to starting)', host.innerHTML.slice(0, 80));
+  ok(host.innerHTML === before && verdictOf(/signin-code-input/.test(host.innerHTML)), '⑥ an older-rev snapshot of the same run is ignored (no repaint back to starting)', host.innerHTML.slice(0, 80));
 }
 
 // ── THE VERIFY ROUND (lane door-signin-fixes — each leg below was RED on 959d583e) ──
@@ -163,11 +163,11 @@ await leg('⑦', async () => {
   const calls = fetchStub2(happy); const ws = makeWs2(); const host = new Host();
   const card = new SignInCard({ ws }); card.mount(host);
   host.querySelector('[data-act="begin"]').click(); await flush3();
-  ok(/signin-code-input/.test(host.innerHTML), '⑦ (setup) the sign-in is running (url shown, the code box up)');
+  ok(verdictOf(/signin-code-input/.test(host.innerHTML)), '⑦ (setup) the sign-in is running (url shown, the code box up)');
   card.destroy(); await flush();
   ok(!ws.live, '⑦ destroy unsubscribes the WS');
   const d = deletes(calls);
-  ok(d.length === 1 && d[0].keepalive, '⑦ CLAIM 4: destroying the card mid-sign-in sends DELETE /api/accounts/:id/signin (keepalive)', calls.map((c) => c.method + ' ' + c.url));
+  ok(d.length === 1 && verdictOf(d[0].keepalive), '⑦ CLAIM 4: destroying the card mid-sign-in sends DELETE /api/accounts/:id/signin (keepalive)', calls.map((c) => c.method + ' ' + c.url));
   // CONTROL: a card whose sign-in already ended sends nothing
   const c2 = fetchStub2(happy); const ws2 = makeWs2(); const h2 = new Host();
   const card2 = new SignInCard({ ws: ws2 }); card2.mount(h2);
@@ -193,7 +193,7 @@ await leg('⑧', async () => {
   getAnswer = { signin: SIGNIN('cancelled', { rev: 9 }) }; // the hub ended it while the page was away
   ws.reconnect(); await flush3();
   ok(holds().length === 2, '⑧ a reconnected socket holds it again', ws.sent);
-  ok(calls.some((c) => c.method === 'GET' && c.url === '/api/accounts/acc-x/signin') && !!host.querySelector('[data-act="begin"]') && !host.querySelector('.signin-code-input'), '⑧ … and reads what it missed: a run ended while away shows the start button, not a dead code box', host.innerHTML.slice(0, 160));
+  ok(gateOf(calls.some((c) => c.method === 'GET' && c.url === '/api/accounts/acc-x/signin')) && !!host.querySelector('[data-act="begin"]') && !host.querySelector('.signin-code-input'), '⑧ … and reads what it missed: a run ended while away shows the start button, not a dead code box', host.innerHTML.slice(0, 160));
   card.destroy();
   ws.reconnect(); await flush();
   ok(holds().length === 2, '⑧ a destroyed card holds nothing on a later reconnect');
@@ -212,7 +212,7 @@ await leg('⑨', async () => {
   fetchStub2(happy); const ws2 = makeWs2(); const h2 = new Host();
   const card2 = new SignInCard({ ws: ws2, hasWaiting: () => false, onResend: () => { resent++; } }); card2.mount(h2);
   await card2._begin(); ws2.push(SIGNIN('connected', { rev: 3 })); await flush3();
-  ok(/Connected/.test(h2.innerHTML) && !h2.querySelector('[data-act="resend"]'), '⑨ nothing waiting ⇒ the card says «Connected» with NO re-send button', h2.innerHTML.slice(0, 200));
+  ok(gateOf(/Connected/.test(h2.innerHTML)) && !h2.querySelector('[data-act="resend"]'), '⑨ nothing waiting ⇒ the card says «Connected» with NO re-send button', h2.innerHTML.slice(0, 200));
 });
 
 // ⑩ debris (the card): «Try again» reuses the card's own never-signed-in account
@@ -226,11 +226,11 @@ await leg('⑩', async () => {
   const creates = calls.filter((c) => c.url === '/api/accounts/subscription');
   const starts = calls.filter((c) => c.url === '/api/accounts/acc-x/signin' && c.method === 'POST');
   ok(creates.length === 1 && starts.length === 3, '⑩ three attempts (Sign in + Try again ×2) → ONE account created, three sign-ins on it', { creates: creates.length, starts: starts.length });
-  ok(creates[0] && creates[0].body && creates[0].body.signin === true, '⑩ the card asks for the sign-in row ({signin:true}: the server reuses an idle one too)', creates[0]);
+  ok(gateOf(creates[0]) && gateOf(creates[0].body) && creates[0].body.signin === true, '⑩ the card asks for the sign-in row ({signin:true}: the server reuses an idle one too)', creates[0]);
   // the reused account is gone (swept) → a fresh one, once
   const c2 = fetchStub2((url, opts) => (url === '/api/accounts/acc-x/signin' && opts.method === 'POST' && c2.filter((c) => c.url === '/api/accounts/subscription').length === 0 ? { error: 'unknown account: acc-x', code: 'unknown_account' } : happy(url, opts)));
   host.querySelector('[data-act="begin"]').click(); await flush3();
-  ok(c2.filter((c) => c.url === '/api/accounts/subscription').length === 1 && /signin-code-input/.test(host.innerHTML), '⑩ a reused account that is gone → ONE fresh account, the sign-in runs', c2.map((c) => c.method + ' ' + c.url));
+  ok(c2.filter((c) => c.url === '/api/accounts/subscription').length === 1 && verdictOf(/signin-code-input/.test(host.innerHTML)), '⑩ a reused account that is gone → ONE fresh account, the sign-in runs', c2.map((c) => c.method + ' ' + c.url));
 });
 
 // ⑪ claim 5 (the chat): what «Send my message again» re-sends — chat-view's own method, read off the source
@@ -257,7 +257,7 @@ await leg('⑪', async () => {
   const notes = [U('do x'), A('done'), { role: 'user', originKind: 'task-notification', content: [{ type: 'text', text: '<task-notification>…' }] }, { role: 'user', imageAttachment: true, synthetic: true, content: [{ type: 'image', data: 'B' }] }];
   ok(W(notes) === '', '⑪ a notification / the CLI’s page images after an answer are no waiting turn', W(notes));
   ok(W([A('hello')]) === '', '⑪ CONTROL: no user turn → nothing');
-  ok(/_resendWaiting\(at\) \{[\s\S]{0,900}this\._waitingText = ''/.test(CV), '⑪ the chat consumes the waiting text when it re-sends (sent once)');
+  ok(verdictOf(/_resendWaiting\(at\) \{[\s\S]{0,900}this\._waitingText = ''/.test(CV)), '⑪ the chat consumes the waiting text when it re-sends (sent once)');
 });
 
 // ⑫ claim 8: which wall a chat's «not logged in» gets — chat-view's own branch, run over a stub view
@@ -272,13 +272,13 @@ await leg('⑫', async () => {
     if (wall) view._signinWall = new Function('signinWallOf', 'capsOf', 'return function () {' + wall + '}')(M.signinWallOf, CAPS.capsOf);
     new Function('msg', 't', code).call(view, { reason: 'not_logged_in' }, (s) => s); return calls; };
   const local = run({ backend: 'claude', host: null }), codex = run({ backend: 'codex', host: null }), remote = run({ backend: 'claude', host: 'h-remote' });
-  ok(local.includes('card') && !local.includes('terminal-bar'), '⑫ a LOCAL Claude conversation’s death shows the sign-in card', local);
-  ok(!codex.includes('card') && codex.includes('terminal-bar') && codex.includes('system: Not logged in — please log in to continue.'), '⑫ CLAIM 8: a Codex death keeps the terminal road and its words (no Claude card)', codex);
-  ok(!remote.includes('card') && remote.includes('terminal-bar'), '⑫ CLAIM 8: a remote-host death keeps the terminal road (the card drives the LOCAL hub’s account only)', remote);
+  ok(gateOf(local.includes('card')) && !local.includes('terminal-bar'), '⑫ a LOCAL Claude conversation’s death shows the sign-in card', local);
+  ok(!codex.includes('card') && gateOf(codex.includes('terminal-bar')) && verdictOf(codex.includes('system: Not logged in — please log in to continue.')), '⑫ CLAIM 8: a Codex death keeps the terminal road and its words (no Claude card)', codex);
+  ok(!remote.includes('card') && verdictOf(remote.includes('terminal-bar')), '⑫ CLAIM 8: a remote-host death keeps the terminal road (the card drives the LOCAL hub’s account only)', remote);
   const bar = methodBody('_showLoginBar') || '';
-  ok(/Claude CLI is not logged in\. Open a terminal to run \/login, then retry\./.test(bar) && /Open Login Terminal/.test(bar) && /_resumeAndClose\(\)/.test(bar), '⑫ the terminal road is the old bar (its words, Open Login Terminal, Retry)', bar.slice(0, 120));
+  ok(gateOf(/Claude CLI is not logged in\. Open a terminal to run \/login, then retry\./.test(bar)) && gateOf(/Open Login Terminal/.test(bar)) && verdictOf(/_resumeAndClose\(\)/.test(bar)), '⑫ the terminal road is the old bar (its words, Open Login Terminal, Retry)', bar.slice(0, 120));
   const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
-  ok(['Claude CLI is not logged in. Open a terminal to run /login, then retry.', 'Not logged in — please log in to continue.', 'Open Login Terminal'].every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')), '⑫ its words keep their zh + ja');
+  ok(verdictOf(['Claude CLI is not logged in. Open a terminal to run /login, then retry.', 'Not logged in — please log in to continue.', 'Open Login Terminal'].every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))), '⑫ its words keep their zh + ja');
 });
 
 // ⑬ THE REAL SCREEN (the card)
@@ -289,7 +289,7 @@ await leg('⑬', async () => {
   let card = new SignInCard({ ws }); card.mount(host);
   host.querySelector('[data-act="begin"]').click(); await flush3();
   const b = host.querySelector('[data-act="begin"]');
-  ok(b && b.disabled === true && /Starting the sign-in…/.test(host.innerHTML), '⑬ a LIVE run starting → the button is DISABLED and says «Starting the sign-in…» (never a second press)', host.innerHTML.slice(0, 260));
+  ok(gateOf(b) && b.disabled === true && verdictOf(/Starting the sign-in…/.test(host.innerHTML)), '⑬ a LIVE run starting → the button is DISABLED and says «Starting the sign-in…» (never a second press)', host.innerHTML.slice(0, 260));
   const n0 = calls.length;
   b.click(); await card._begin(); await flush3();
   ok(calls.length === n0, '⑬ a press (or a direct begin) on a live run sends nothing — no second account, no second run', calls.slice(n0).map((c) => c.method + ' ' + c.url));
@@ -298,32 +298,32 @@ await leg('⑬', async () => {
   globalThis.__raws = [];
   ws.push(SIGNIN('starting', { rev: 2, rawHint: 'stalled' })); await flush();
   const raw = globalThis.__raws[0];
-  ok(/could not read the sign-in link/.test(host.innerHTML) && host.querySelector('.signin-raw-host') && raw && raw.o.screenUrl() === '/api/accounts/acc-x/signin/screen' && raw.started >= 1, '⑬ the cue (stalled) → the raw screen: ONE RawScreen reading …/signin/screen, hung into the card, started', { html: host.innerHTML.slice(0, 200), url: raw && raw.o.screenUrl() });
+  ok(gateOf(/could not read the sign-in link/.test(host.innerHTML)) && gateOf(host.querySelector('.signin-raw-host')) && gateOf(raw) && raw.o.screenUrl() === '/api/accounts/acc-x/signin/screen' && raw.started >= 1, '⑬ the cue (stalled) → the raw screen: ONE RawScreen reading …/signin/screen, hung into the card, started', { html: host.innerHTML.slice(0, 200), url: raw && raw.o.screenUrl() });
   const ci = host.querySelector('.signin-code-input');
-  ok(ci && !ci.disabled && /Show the simple view/.test(host.innerHTML), '⑬ …the code box below it is enabled; the toggle offers the simple view', host.innerHTML.slice(-300));
+  ok(gateOf(ci) && !ci.disabled && verdictOf(/Show the simple view/.test(host.innerHTML)), '⑬ …the code box below it is enabled; the toggle offers the simple view', host.innerHTML.slice(-300));
   ci.value = 'raw#code'; host.querySelector('[data-act="code"]').click(); await flush3();
-  ok(calls.some((c) => c.url === '/api/accounts/acc-x/signin/code' && c.body && c.body.code === 'raw#code'), '⑬ the code typed under the raw screen → POST …/signin/code');
+  ok(verdictOf(calls.some((c) => c.url === '/api/accounts/acc-x/signin/code' && c.body && c.body.code === 'raw#code')), '⑬ the code typed under the raw screen → POST …/signin/code');
   // the toggle flips to the parsed view (the raw screen stops reading); the reader's next verdict takes over again
   ws.push(SIGNIN('starting', { rev: 4, rawHint: 'stalled' })); await flush();
   host.querySelector('[data-act="raw"]').click(); await flush();
-  ok(!host.querySelector('.signin-raw-host') && raw.stopped >= 1 && /Show the raw screen/.test(host.innerHTML), '⑬ the toggle → the simple view (the raw screen stops reading)', host.innerHTML.slice(0, 200));
+  ok(!host.querySelector('.signin-raw-host') && raw.stopped >= 1 && verdictOf(/Show the raw screen/.test(host.innerHTML)), '⑬ the toggle → the simple view (the raw screen stops reading)', host.innerHTML.slice(0, 200));
   host.querySelector('[data-act="raw"]').click(); await flush();
   ok(!!host.querySelector('.signin-raw-host') && globalThis.__raws.length === 1, '⑬ …and back (the same RawScreen, re-hung — never a second xterm)');
   ws.push(SIGNIN('waiting-code', { rev: 5, url: URL })); await flush();
-  ok(!host.querySelector('.signin-raw-host') && /href="https:\/\/claude\.ai/.test(host.innerHTML) && !!host.querySelector('[data-act="raw"]'), '⑬ the reader recognises the screen later → the parsed view comes back (the link), the toggle stays', host.innerHTML.slice(0, 200));
+  ok(!host.querySelector('.signin-raw-host') && gateOf(/href="https:\/\/claude\.ai/.test(host.innerHTML)) && !!host.querySelector('[data-act="raw"]'), '⑬ the reader recognises the screen later → the parsed view comes back (the link), the toggle stays', host.innerHTML.slice(0, 200));
   card.destroy();
   // a JOINED run: no second account; its close leaves the run to its starter
   calls = fetchStub2((url, opts) => (url === '/api/accounts/subscription' ? { id: 'acc-x', joined: true } : url === '/api/accounts/acc-x/signin' && opts.method === 'POST' ? { success: true, joined: true, signin: SIGNIN('url', { url: URL, rev: 3 }) } : { ok: true }));
   ws = makeWs2(); host = new Host(); card = new SignInCard({ ws }); card.mount(host);
   await card._begin(); await flush3();
-  ok(calls.filter((c) => c.url === '/api/accounts/subscription').length === 1 && /href="https:\/\/claude\.ai/.test(host.innerHTML), '⑬ a run already live (another card, the tour\'s terminal road) is JOINED — its link shown, no second account', calls.map((c) => c.method + ' ' + c.url));
+  ok(calls.filter((c) => c.url === '/api/accounts/subscription').length === 1 && verdictOf(/href="https:\/\/claude\.ai/.test(host.innerHTML)), '⑬ a run already live (another card, the tour\'s terminal road) is JOINED — its link shown, no second account', calls.map((c) => c.method + ' ' + c.url));
   card.destroy(); await flush();
   ok(deletes(calls).length === 0, '⑬ a JOINED card\'s close sends no DELETE — the run stays its starter\'s');
   // rawFirst (the tour's «Advanced → terminal»): auto-starts on the raw screen and stays there
   globalThis.__raws = [];
   calls = fetchStub2((url, opts) => (url === '/api/accounts/subscription' ? { id: 'acc-x' } : url === '/api/accounts/acc-x/signin' && opts.method === 'POST' ? { signin: SIGNIN('url', { url: URL, rev: 1 }) } : { ok: true }));
   ws = makeWs2(); host = new Host(); card = new SignInCard({ ws, rawFirst: true }); card.mount(host); await flush3();
-  ok(calls.some((c) => c.url === '/api/accounts/acc-x/signin' && c.method === 'POST') && !!host.querySelector('.signin-raw-host'), '⑬ rawFirst: the card starts by itself on the raw screen', host.innerHTML.slice(0, 160));
+  ok(gateOf(calls.some((c) => c.url === '/api/accounts/acc-x/signin' && c.method === 'POST')) && !!host.querySelector('.signin-raw-host'), '⑬ rawFirst: the card starts by itself on the raw screen', host.innerHTML.slice(0, 160));
   ws.push(SIGNIN('waiting-code', { rev: 2, url: URL, rawHint: null })); await flush();
   ok(!!host.querySelector('.signin-raw-host'), '⑬ …and stays there when the reader recognises the screen (the person asked for the terminal)');
   card.destroy();
@@ -331,10 +331,10 @@ await leg('⑬', async () => {
   fetchStub2((url, opts) => (url === '/api/accounts/subscription/acc-x/finalize' ? { loggedIn: true, email: 'me@co.example', madeDefault: true } : happy(url, opts)));
   ws = makeWs2(); host = new Host(); card = new SignInCard({ ws }); card.mount(host);
   await card._begin(); ws.push(SIGNIN('connected', { rev: 3 })); await flush3();
-  ok(/Set as your default account · change it in Manage agents/.test(host.innerHTML), '⑬ the first sign-in made the default → «Set as your default account · change it in Manage agents»', host.innerHTML.slice(0, 260));
+  ok(verdictOf(/Set as your default account · change it in Manage agents/.test(host.innerHTML)), '⑬ the first sign-in made the default → «Set as your default account · change it in Manage agents»', host.innerHTML.slice(0, 260));
   fetchStub2(happy); ws = makeWs2(); host = new Host(); card = new SignInCard({ ws }); card.mount(host);
   await card._begin(); ws.push(SIGNIN('connected', { rev: 3 })); await flush3();
-  ok(/Connected/.test(host.innerHTML) && !/default account/.test(host.innerHTML), '⑬ CONTROL: not made the default → not said');
+  ok(gateOf(/Connected/.test(host.innerHTML)) && !/default account/.test(host.innerHTML), '⑬ CONTROL: not made the default → not said');
 });
 
 // ⑭ the chat's live wall, the re-send that stops the CLI first, «/login» → the card (chat-view's own methods)
@@ -359,29 +359,29 @@ await leg('⑭', async () => {
   const v = mkView({ backend: 'claude', host: null, backendSessionId: 'conv-1', cwd: '/w' });
   v._onSigninWall({ reason: 'not_logged_in', detail: 'Not logged in · Please run /login' });
   v._onSigninWall({ reason: 'not_logged_in' }); // the next refused turn says it again
-  ok(v.calls.filter((c) => c === 'card').length === 1 && v.calls.includes('readonly') && v._signinLive === true, '⑭ the CLI\'s LIVE «Not logged in» (signin-wall) → the card, the composer hidden — once per conversation', v.calls);
+  ok(v.calls.filter((c) => c === 'card').length === 1 && gateOf(v.calls.includes('readonly')) && v._signinLive === true, '⑭ the CLI\'s LIVE «Not logged in» (signin-wall) → the card, the composer hidden — once per conversation', v.calls);
   v._resendWaiting();
-  ok(v.calls.includes('kill w-1 conv-1') && !v.calls.some((c) => c.startsWith('resume')), '⑭ «Send my message again» on a live wall STOPS the CLI first (resuming beside it = two writers)', v.calls);
+  ok(gateOf(v.calls.includes('kill w-1 conv-1')) && !v.calls.some((c) => c.startsWith('resume')), '⑭ «Send my message again» on a live wall STOPS the CLI first (resuming beside it = two writers)', v.calls);
   v.ws.emit({ type: 'exited', sessionId: 'w-1' });
   v._signinLive = false; // (the view's exited handler clears it)
   await new Promise((r) => setTimeout(r, 450));
-  ok(v.calls.includes('resume conv-1 hello'), '⑭ …then resumes the conversation with the waiting message once the CLI exited', v.calls);
+  ok(verdictOf(v.calls.includes('resume conv-1 hello')), '⑭ …then resumes the conversation with the waiting message once the CLI exited', v.calls);
   const cx = mkView({ backend: 'codex', host: null, backendSessionId: 'c-2', cwd: '/w' });
   cx._onSigninWall({ reason: 'not_logged_in' });
-  ok(cx.calls.includes('terminal-bar') && !cx.calls.includes('card'), '⑭ a Codex conversation\'s live wall keeps the terminal road', cx.calls);
+  ok(gateOf(cx.calls.includes('terminal-bar')) && !cx.calls.includes('card'), '⑭ a Codex conversation\'s live wall keeps the terminal road', cx.calls);
   const sl = mkView({ backend: 'claude', host: null, backendSessionId: 'conv-3', cwd: '/w' });
-  ok(sl._onSlashLogin() === true && sl.calls.includes('card') && !sl.calls.includes('readonly'), '⑭ «/login» typed → the card (the composer stays; the CLI would only say «isn\'t available»)', sl.calls);
+  ok(sl._onSlashLogin() === true && gateOf(sl.calls.includes('card')) && !sl.calls.includes('readonly'), '⑭ «/login» typed → the card (the composer stays; the CLI would only say «isn\'t available»)', sl.calls);
   const rm = mkView({ backend: 'claude', host: 'h-remote', backendSessionId: 'conv-4', cwd: '/w' });
   ok(rm._onSlashLogin() === false && !rm.calls.includes('card'), '⑭ «/login» on a remote host → false: the line goes to the CLI');
   const CI = fs.readFileSync(path.join(ROOT, 'src/lib/chat-input.js'), 'utf8');
-  ok(/if \(\/\^\\\/login\\s\*\$\/i\.test\(text\) && !hasAttachments && this\._onLogin && this\._onLogin\(\) === true\) \{/.test(CI) && CI.indexOf('this._onLogin()') < CI.indexOf('const goalMatch'), '⑭ chat-input intercepts «/login» (before /goal) when the view takes it', null);
-  ok(/onLogin: \(\) => this\._onSlashLogin\(\)/.test(CV) && /msg\.type === 'signin-wall' && msg\.sessionId === sessionId\) \{\s*this\._onSigninWall\(msg\)/.test(CV), '⑭ chat-view wires both (onLogin, the signin-wall frame)');
+  ok(gateOf(/if \(\/\^\\\/login\\s\*\$\/i\.test\(text\) && !hasAttachments && this\._onLogin && this\._onLogin\(\) === true\) \{/.test(CI)) && CI.indexOf('this._onLogin()') < CI.indexOf('const goalMatch'), '⑭ chat-input intercepts «/login» (before /goal) when the view takes it', null);
+  ok(gateOf(/onLogin: \(\) => this\._onSlashLogin\(\)/.test(CV)) && verdictOf(/msg\.type === 'signin-wall' && msg\.sessionId === sessionId\) \{\s*this\._onSigninWall\(msg\)/.test(CV)), '⑭ chat-view wires both (onLogin, the signin-wall frame)');
   const SJ = fs.readFileSync(path.join(ROOT, 'src/server/stdout/claude-stream-json.js'), 'utf8');
-  ok(/if \(msg\.type === 'assistant'\) \{ const wall = liveWallOf\(msg\); if \(wall\) \{ try \{ broadcastToSession\(session, id, \{ type: 'signin-wall', sessionId: id, reason: wall\.reason, detail: wall\.detail \}\)/.test(SJ) && /require\('\.\.\/\.\.\/signin-model\.js'\)/.test(SJ), '⑭ the claude stream consumer names the live record through the PURE row and tells the chat (signin-wall)');
+  ok(gateOf(/if \(msg\.type === 'assistant'\) \{ const wall = liveWallOf\(msg\); if \(wall\) \{ try \{ broadcastToSession\(session, id, \{ type: 'signin-wall', sessionId: id, reason: wall\.reason, detail: wall\.detail \}\)/.test(SJ)) && verdictOf(/require\('\.\.\/\.\.\/signin-model\.js'\)/.test(SJ)), '⑭ the claude stream consumer names the live record through the PURE row and tells the chat (signin-wall)');
   const DEATH = fs.readFileSync(path.join(ROOT, 'src/server/agent-tool-generators.js'), 'utf8');
-  ok(/if \(\(d = line\(\/\(\?:Not logged in\|Please run \\\/login\|OAuth token revoked\)\[\^\\n\]\*\/\)\)\) return \{ reason: 'not_logged_in', detail: d \};/.test(DEATH), '⑭ classifyCliDeath is untouched (it still names a real death)');
+  ok(verdictOf(/if \(\(d = line\(\/\(\?:Not logged in\|Please run \\\/login\|OAuth token revoked\)\[\^\\n\]\*\/\)\)\) return \{ reason: 'not_logged_in', detail: d \};/.test(DEATH)), '⑭ classifyCliDeath is untouched (it still names a real death)');
 });
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(`\ntest-signin-card-ui: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

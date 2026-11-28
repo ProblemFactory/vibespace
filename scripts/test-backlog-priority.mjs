@@ -44,7 +44,7 @@ const { TaskGroupManager } = require('../src/task-groups.js');
 const { setupAgentRoutes } = require('../src/agent-routes.js');
 
 let failed = 0, passed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -81,7 +81,7 @@ const ORDER = ['B-0005', 'B-0003', 'B-0006', 'B-0008', 'B-0009', 'B-0001', 'B-00
 const orderLeg = (mod) => mod.sortBacklog(fixture()).map((b) => b.id).join(',') === ORDER.join(',');
 check('PRIORITIES is the closed set high,normal,low', sel.PRIORITIES.join(',') === 'high,normal,low');
 check('priorityRank: high 0 · normal 1 · low 2 · unknown/absent = normal', sel.priorityRank('high') === 0 && sel.priorityRank('normal') === 1 && sel.priorityRank('low') === 2 && sel.priorityRank('URGENT') === 1 && sel.priorityRank(undefined) === 1);
-check('sortBacklog: open by priority, NEWEST first within one (ties by id; unknown = normal), then resolved by resolvedAt desc', orderLeg(sel), sel.sortBacklog(fixture()).map((b) => b.id).join(','));
+check('sortBacklog: open by priority, NEWEST first within one (ties by id; unknown = normal), then resolved by resolvedAt desc', verdictOf(orderLeg(sel)), sel.sortBacklog(fixture()).map((b) => b.id).join(','));
 { const f = fixture(); const before = f.map((b) => b.id).join(','); sel.sortBacklog(f); check('sortBacklog never mutates its input', f.map((b) => b.id).join(',') === before); }
 {
   const open = fixture().filter((b) => (b.status || 'open') === 'open');
@@ -126,12 +126,12 @@ const g = tasks.create({ title: 'prio', objective: 'obj', folders: [cwd], contex
   await tasks.mirrorIdle();   // lane cli-call-timeouts: TASK.md is mirrored OFF the store write (queued, bounded) — wait for the copy to land
   const md = fs.readFileSync(path.join(ctx, '.vibespace', 'TASK.md'), 'utf8');
   const lines = md.split('\n').filter((l) => /^- \[B-/.test(l));
-  check('TASK.md lists open items in sortBacklog order with the markers (high `!`, low `↓`)', lines.length === 4 && / ! a /.test(lines[0] + ' ') && / c /.test(lines[1] + ' ') && / b /.test(lines[2] + ' ') && / ↓ d /.test(lines[3] + ' '), lines.join(' | '));
+  check('TASK.md lists open items in sortBacklog order with the markers (high `!`, low `↓`)', lines.length === 4 && gateOf(/ ! a /.test(lines[0] + ' ')) && gateOf(/ c /.test(lines[1] + ' ')) && gateOf(/ b /.test(lines[2] + ' ')) && verdictOf(/ ↓ d /.test(lines[3] + ' ')), lines.join(' | '));
   // repo-file round-trip
   const file = path.join(tmp, 'repo', 'task.md');
   await tasks.exportToFile(g.id, file);
   const txt = fs.readFileSync(file, 'utf8');
-  check('repo file carries the markers after the id', /\] \[B-[0-9a-f]+\] ! a$/m.test(txt) && /\] \[B-[0-9a-f]+\] ↓ d$/m.test(txt) && /\] \[B-[0-9a-f]+\] c$/m.test(txt), txt);
+  check('repo file carries the markers after the id', gateOf(/\] \[B-[0-9a-f]+\] ! a$/m.test(txt)) && gateOf(/\] \[B-[0-9a-f]+\] ↓ d$/m.test(txt)) && verdictOf(/\] \[B-[0-9a-f]+\] c$/m.test(txt)), txt);
   tasks.update(g.id, { backlog: out.map((b) => ({ ...b, priority: 'normal' })) });
   const back = tasks.importFromFile(file).backlog;
   check('import round-trip restores every priority (and keeps the text without the marker)', back.map((b) => `${b.text}:${b.priority}`).join(',') === 'a:high,b:normal,c:normal,d:low', back.map((b) => `${b.text}:${b.priority}`).join(','));
@@ -149,9 +149,9 @@ const g = tasks.create({ title: 'prio', objective: 'obj', folders: [cwd], contex
   cur[0].priority = 'high'; cur[0].claimedBy = ['claude:sess1'];
   tasks.update(g.id, { backlog: cur });
   const d = tasks.diffChanges(g.id, { ...snap, backlog: snap.backlog.map((b, i) => (i === 0 ? { ...b, claimedBy: ['claude:sess1'] } : b)) }, { sessionKey: 'claude:sess1' });
-  check('a priority change rides the diff to the owner', d && d.lines.some((l) => /^- Backlog priority normal → high \[B-/.test(l)), d && d.lines.join(' | '));
+  check('a priority change rides the diff to the owner', gateOf(d) && verdictOf(d.lines.some((l) => /^- Backlog priority normal → high \[B-/.test(l))), d && d.lines.join(' | '));
   const dOld = tasks.diffChanges(g.id, { ...snap, backlog: snap.backlog.map((b) => { const { p, ...rest } = b; return { ...rest, claimedBy: ['claude:sess1'] }; }) }, { sessionKey: 'claude:sess1' });
-  check('a pre-priority snapshot (no `p`) is not read as a priority change', dOld && !dOld.lines.some((l) => /Backlog priority/.test(l)));
+  check('a pre-priority snapshot (no `p`) is not read as a priority change', gateOf(dOld) && !dOld.lines.some((l) => /Backlog priority/.test(l)));
 }
 
 // ── (2b) the repo task file never turns TEXT into a marker ──
@@ -169,7 +169,7 @@ console.log('(2b) repo-file marker-like text');
   };
   const { txt, back } = await roundTrip(tasks);
   check('every text + priority survives the export/import round trip (a normal "! …" / "↓ …" stays normal, its prefix kept)', JSON.stringify(back) === JSON.stringify(TEXTS), JSON.stringify(back));
-  check('the writer declares `backlog_priority: markers` and escapes a marker-like normal text as `\\! …`', /^backlog_priority: markers$/m.test(txt) && /\] \\! not urgent/.test(txt) && /\] \\↓ arrow/.test(txt) && /\] ! \\! shouting/.test(txt), txt);
+  check('the writer declares `backlog_priority: markers` and escapes a marker-like normal text as `\\! …`', gateOf(/^backlog_priority: markers$/m.test(txt)) && gateOf(/\] \\! not urgent/.test(txt)) && gateOf(/\] \\↓ arrow/.test(txt)) && verdictOf(/\] ! \\! shouting/.test(txt)), txt);
   // a file written BEFORE priorities (no frontmatter key, no escaping) is read verbatim
   const oldFile = path.join(tmp, 'repo', 'pre-priority.md');
   fs.writeFileSync(oldFile, ['---', `vibespace_task: ${g2.id}`, 'title: "esc"', 'kind: task', 'archived: false', 'color: null', '---', '', '# esc', '', '## Objective', '', 'o', '', '## Backlog', '', '- [ ] [B-00aa] ! exclaiming text', '- [ ] [B-00ab] ↓ arrow text', '- [x] [B-00ac] done thing', ''].join('\n'));
@@ -178,7 +178,7 @@ console.log('(2b) repo-file marker-like text');
   // TASK.md prints the same escaped form
   tasks.update(g2.id, { backlog: [{ text: '! bang normal', addedAt: 1 }, { text: 'hi', priority: 'high', addedAt: 2 }] });
   const md2 = tasks.renderTaskMd(tasks.get(g2.id), 50);
-  check('TASK.md escapes a marker-like normal text too (`[B-x] \\! bang normal`), a real high reads `[B-x] ! hi`', /\[B-[0-9a-f]+\] \\! bang normal/.test(md2) && /\[B-[0-9a-f]+\] ! hi/.test(md2), md2);
+  check('TASK.md escapes a marker-like normal text too (`[B-x] \\! bang normal`), a real high reads `[B-x] ! hi`', gateOf(/\[B-[0-9a-f]+\] \\! bang normal/.test(md2)) && verdictOf(/\[B-[0-9a-f]+\] ! hi/.test(md2)), md2);
   // NEGATIVE CONTROL — the pre-fix writer (marker only, no escape, no key) + the pre-fix reader
   const Bad = loadPatched('src/task-groups.js', [
     ["} ${markedText(b)}`);\n        if (b.detail) for (const dl of b.detail.split('\\n')) body.push(`  > ${dl}`);", "}${priorityMarker(b.priority) ? ' ' + priorityMarker(b.priority) : ''} ${b.text}`);\n        if (b.detail) for (const dl of b.detail.split('\\n')) body.push(`  > ${dl}`);"],
@@ -229,14 +229,14 @@ await tasks.groupsForSessionDecided({ cwd });
   const r0 = call('POST', '/api/agent/task-backlog', { add: 'plain thing' });
   check('add without priority → normal', r0.code === 200 && r0.out.item?.priority === 'normal');
   const rBad = call('POST', '/api/agent/task-backlog', { add: 'bad thing', priority: 'urgent' });
-  check('add with a value outside the set → 400 naming the set, nothing stored', rBad.code === 400 && /high, normal, low/.test(rBad.out.error || '') && tasks.get(g.id).backlog.length === 2, JSON.stringify(rBad.out));
+  check('add with a value outside the set → 400 naming the set, nothing stored', rBad.code === 400 && gateOf(/high, normal, low/.test(rBad.out.error || '')) && tasks.get(g.id).backlog.length === 2, JSON.stringify(rBad.out));
   const rLow = call('POST', '/api/agent/task-backlog', { add: 'someday', priority: 'low' });
   const rE = call('POST', '/api/agent/task-backlog', { edit: r0.out.item.id, priority: 'low' });
   check('edit priority → stored, the edit echoes its item BY ID', rE.code === 200 && rE.out.item?.id === r0.out.item.id && rE.out.item?.priority === 'low' && tasks.get(g.id).backlog.find((b) => b.id === r0.out.item.id).priority === 'low', JSON.stringify(rE.out).slice(0, 200));
   const rEBad = call('POST', '/api/agent/task-backlog', { edit: r0.out.item.id, priority: 'medium' });
   check('edit with an invalid priority → 400, unchanged', rEBad.code === 400 && tasks.get(g.id).backlog.find((b) => b.id === r0.out.item.id).priority === 'low');
   const rG = call('GET', '/api/agent/task');
-  check('GET task lists open items in sortBacklog order, carrying priority + `you`', rG.out.you === 'claude:sess1' && rG.out.task.backlog[0].id === r.out.item.id && rG.out.task.backlog.every((b) => typeof b.priority === 'string'), JSON.stringify(rG.out.task.backlog.map((b) => [b.text, b.priority])));
+  check('GET task lists open items in sortBacklog order, carrying priority + `you`', rG.out.you === 'claude:sess1' && rG.out.task.backlog[0].id === r.out.item.id && verdictOf(rG.out.task.backlog.every((b) => typeof b.priority === 'string')), JSON.stringify(rG.out.task.backlog.map((b) => [b.text, b.priority])));
   const rP = call('POST', '/api/agent/task-backlog', { show: '1' });
   check('a NUMBER ref resolves in the same sorted order (1 = the high item)', rP.code === 200 && rP.out.item?.id === r.out.item.id, JSON.stringify(rP.out).slice(0, 200));
   check('the POST answer lists open items in the same order', JSON.stringify(rLow.out.backlog.map((b) => b.id)) === JSON.stringify(sel.sortBacklog(rLow.out.backlog).map((b) => b.id)) && rLow.out.backlog[0].priority === 'high');
@@ -301,8 +301,8 @@ const numberLegs = async (mod) => {
   check('`edit 1` rewrites C (store A,B,EDITED), never the oldest stored item', r.afterEdit === 'A,B,EDITED', r.afterEdit);
   check("another session's add does not move a number: `done 3` resolves A, the item a was shown as 3", r.done3 === 'A', r.done3);
   check('done echoes the item it resolved (by id)', r.doneEcho === 'A', String(r.doneEcho));
-  check('a number whose shown item is already resolved is REFUSED by name, nothing changes', r.againCode === 400 && /already done/.test(r.againErr) && /\bA\b/.test(r.againErr) && r.dropped === 0, `${r.againCode} ${r.againErr}`);
-  check('a number past the shown list is refused, naming the list and the id route', r.farCode === 400 && /no item #9 in the backlog list you were last shown \(3 items\)/.test(r.farErr), r.farErr);
+  check('a number whose shown item is already resolved is REFUSED by name, nothing changes', r.againCode === 400 && gateOf(/already done/.test(r.againErr)) && gateOf(/\bA\b/.test(r.againErr)) && r.dropped === 0, `${r.againCode} ${r.againErr}`);
+  check('a number past the shown list is refused, naming the list and the id route', r.farCode === 400 && verdictOf(/no item #9 in the backlog list you were last shown \(3 items\)/.test(r.farErr)), r.farErr);
   check('a session that never listed resolves against the live sorted open list', r.bShow1 === 'D', r.bShow1);
   // NEGATIVE CONTROL — the pre-fix numbering: store order when openOnly is off, the live order otherwise, no snapshot
   const bad = await numberLegs(loadPatched('src/agent-routes.js', [[
@@ -333,16 +333,16 @@ console.log('(4) injection');
   const itemLines = lines.filter((l) => /^- \[B-/.test(l));
   const texts = itemLines.map((l) => l.replace(/^- \[B-[0-9a-f]+\] (?:[!↓] )?/, '').replace(/ †$/, ''));
   check('an 8-owned session sees its 5 highest-priority newest items, in order', texts.join(',') === 'o-high-2,o-high-1,o-norm-2,o-norm-3,o-norm-4', texts.join(','));
-  check('owned high items carry the `!` marker', itemLines[0].includes('] ! o-high-2'));
-  check('the "+N more claimed by you" line counts the rest', lines.some((l) => l === '- … +3 more claimed by you'));
+  check('owned high items carry the `!` marker', verdictOf(itemLines[0].includes('] ! o-high-2')));
+  check('the "+N more claimed by you" line counts the rest', verdictOf(lines.some((l) => l === '- … +3 more claimed by you')));
   const hl = lines.filter((l) => l.startsWith('- unclaimed HIGH: '));
-  check('ONE unclaimed-HIGH line naming the unowned high items (newest first), never a claimed/resolved one', hl.length === 1 && /\[B-[0-9a-f]+\] free-high-B · \[B-[0-9a-f]+\] free-high-A/.test(hl[0]) && !/taken-high|resolved-high/.test(hl[0]), hl.join(' | '));
-  check('the count line follows (12 open incl. 4 not claimed by you)', /^\(group backlog holds 12 open parked items incl\. 4 not claimed by you/.test(lines[lines.length - 1]), lines[lines.length - 1]);
+  check('ONE unclaimed-HIGH line naming the unowned high items (newest first), never a claimed/resolved one', hl.length === 1 && gateOf(/\[B-[0-9a-f]+\] free-high-B · \[B-[0-9a-f]+\] free-high-A/.test(hl[0])) && !/taken-high|resolved-high/.test(hl[0]), hl.join(' | '));
+  check('the count line follows (12 open incl. 4 not claimed by you)', verdictOf(/^\(group backlog holds 12 open parked items incl\. 4 not claimed by you/.test(lines[lines.length - 1])), lines[lines.length - 1]);
   const other = tasks._backlogNoteLines(tasks.get(g.id), { sessionKey: 'codex:nobody' });
-  check('a session owning nothing gets the pointer line AND the unclaimed-HIGH line', /^Group backlog: 12 open/.test(other[1]) && other.some((l) => l.startsWith('- unclaimed HIGH: ')) && !other.some((l) => /^- \[B-/.test(l)));
+  check('a session owning nothing gets the pointer line AND the unclaimed-HIGH line', gateOf(/^Group backlog: 12 open/.test(other[1])) && gateOf(other.some((l) => l.startsWith('- unclaimed HIGH: '))) && !other.some((l) => /^- \[B-/.test(l)));
   check('task tool off ⇒ no backlog lines at all', tasks._backlogNoteLines(tasks.get(g.id), { sessionKey: me, tools: { task: false } }).length === 0);
   const ctxText = tasks.renderContext(g.id, { sessionKey: me });
-  check('renderContext carries the same selection', ctxText.includes('- unclaimed HIGH: ') && ctxText.includes('] ! o-high-2'));
+  check('renderContext carries the same selection', gateOf(ctxText.includes('- unclaimed HIGH: ')) && verdictOf(ctxText.includes('] ! o-high-2')));
 }
 
 // ── (4b) the unclaimed-HIGH line: a BYTE budget, one budget across groups, dead owners ──
@@ -354,12 +354,12 @@ console.log('(4b) unclaimed-HIGH budget + dead owners');
   const lineOf = (lines) => lines.find((l) => l.startsWith('- unclaimed HIGH: ')) || '';
   const one = lineOf(tasks._backlogNoteLines(tasks.get(gs[0]), { sessionKey: 'claude:x' }));
   const bytes = Buffer.byteLength(one, 'utf-8');
-  check('one group: 5 CJK high items of 100 chars — the line stays ≤ 600 B of text + its fixed tail (≤ 800 B), the rest by id', bytes <= 800 && /\[B-[0-9a-f]+\]( ·|  _)/.test(one), `${bytes} B: ${one.slice(0, 120)}`);
+  check('one group: 5 CJK high items of 100 chars — the line stays ≤ 600 B of text + its fixed tail (≤ 800 B), the rest by id', bytes <= 800 && verdictOf(/\[B-[0-9a-f]+\]( ·|  _)/.test(one)), `${bytes} B: ${one.slice(0, 120)}`);
   const unbudgeted = lineOf(tasks._backlogNoteLines(tasks.get(gs[0]), { sessionKey: 'claude:x', highBudget: { bytes: 1e9 } }));
   check('negative control: without the budget the same line is > 1400 B (the pre-fix growth)', Buffer.byteLength(unbudgeted, 'utf-8') > 1400, String(Buffer.byteLength(unbudgeted, 'utf-8')));
   const multi = tasks.renderMultiContext(gs, { sessionKey: 'claude:x' });
   const hl = multi.split('\n').filter((l) => l.startsWith('- unclaimed HIGH: '));
-  check('multi-group: ONE shared budget — the later groups name their high items by id only', hl.length === 3 && !/[高]/.test(hl[1]) && !/[高]/.test(hl[2]) && /[高]/.test(hl[0]), hl.map((l) => Buffer.byteLength(l)).join(','));
+  check('multi-group: ONE shared budget — the later groups name their high items by id only', hl.length === 3 && !/[高]/.test(hl[1]) && !/[高]/.test(hl[2]) && verdictOf(/[高]/.test(hl[0])), hl.map((l) => Buffer.byteLength(l)).join(','));
   const multiBytes = hl.reduce((n, l) => n + Buffer.byteLength(l, 'utf-8'), 0);
   check('multi-group: three groups spend < 1400 B on the line in total (pre-fix: ~1.6 KB each)', multiBytes < 1400, String(multiBytes));
   // dead owners
@@ -371,9 +371,9 @@ console.log('(4b) unclaimed-HIGH budget + dead owners');
   ] });
   const live = (k) => k === 'claude:alive' || k === 'claude:me';
   const dl = lineOf(tasks._backlogNoteLines(tasks.get(gd.id), { sessionKey: 'claude:me', isLiveClaim: live }));
-  check('a high item whose claimant is not running is surfaced as unowned, marked (claimant not running); a live owner keeps it', /owned by a gone session \(claimant not running\)/.test(dl) && /nobody/.test(dl) && !/owned by a live session/.test(dl), dl);
+  check('a high item whose claimant is not running is surfaced as unowned, marked (claimant not running); a live owner keeps it', gateOf(/owned by a gone session \(claimant not running\)/.test(dl)) && gateOf(/nobody/.test(dl)) && !/owned by a live session/.test(dl), dl);
   const noPred = lineOf(tasks._backlogNoteLines(tasks.get(gd.id), { sessionKey: 'claude:me' }));
-  check('negative control: without the liveness predicate a dead claim still hides the item', !/gone session/.test(noPred) && /nobody/.test(noPred), noPred);
+  check('negative control: without the liveness predicate a dead claim still hides the item', !/gone session/.test(noPred) && verdictOf(/nobody/.test(noPred)), noPred);
   const pure = sel.selectReminders(tasks.get(gd.id).backlog, 'claude:gone', { isLive: live });
   check('pure: the caller\'s OWN claim is "mine", never surfaced to itself as unowned', pure.mine.length === 1 && !pure.unclaimedHigh.some((b) => b.text === 'owned by a gone session'));
 }
@@ -402,25 +402,25 @@ console.log('(5) CLI');
   ] });
   const a = await run('backlog-add', 'cli high item', '--priority', 'high');
   const stored = tasks.get(g.id).backlog.find((b) => b.text === 'cli high item');
-  check('`backlog-add --priority high` reaches the store', a.code === 0 && stored?.priority === 'high' && /parked as \[B-[0-9a-f]+\] priority high/.test(a.out), a.out);
+  check('`backlog-add --priority high` reaches the store', a.code === 0 && stored?.priority === 'high' && verdictOf(/parked as \[B-[0-9a-f]+\] priority high/.test(a.out)), a.out);
   const bad = await run('backlog-add', 'x', '--priority=soon');
-  check('`--priority=soon` is refused by the server, exit 1, nothing stored', bad.code === 1 && /invalid priority/.test(bad.out) && !tasks.get(g.id).backlog.some((b) => b.text === 'x'), bad.out);
+  check('`--priority=soon` is refused by the server, exit 1, nothing stored', bad.code === 1 && gateOf(/invalid priority/.test(bad.out)) && !tasks.get(g.id).backlog.some((b) => b.text === 'x'), bad.out);
   const e = await run('backlog-edit', stored.id, '--priority', 'low');
-  check('`backlog-edit <id> --priority low` changes it and says so', e.code === 0 && tasks.get(g.id).backlog.find((b) => b.id === stored.id).priority === 'low' && /priority low/.test(e.out), e.out);
+  check('`backlog-edit <id> --priority low` changes it and says so', e.code === 0 && tasks.get(g.id).backlog.find((b) => b.id === stored.id).priority === 'low' && verdictOf(/priority low/.test(e.out)), e.out);
   await run('backlog-edit', stored.id, '--priority', 'high');
   const l = await run('backlog');
   const rows = l.out.split('\n').filter((x) => /^\s+\d+\. /.test(x));
   check('`backlog` lists high first with `!`, the (you)/(claimed by N)/(unclaimed) tails, `↓` on low', rows.length === 3
-    && /^\s+1\. ! \[B-[0-9a-f]+\] cli high item\s+\(you\)$/.test(rows[0])
-    && /^\s+2\. \[B-[0-9a-f]+\] theirs\s+\(claimed by 2\)$/.test(rows[1])
-    && /^\s+3\. ↓ \[B-[0-9a-f]+\] nobody\s+\(unclaimed\)$/.test(rows[2]), rows.join(' | '));
+    && gateOf(/^\s+1\. ! \[B-[0-9a-f]+\] cli high item\s+\(you\)$/.test(rows[0]))
+    && gateOf(/^\s+2\. \[B-[0-9a-f]+\] theirs\s+\(claimed by 2\)$/.test(rows[1]))
+    && verdictOf(/^\s+3\. ↓ \[B-[0-9a-f]+\] nobody\s+\(unclaimed\)$/.test(rows[2])), rows.join(' | '));
   const one = await run('backlog', stored.id);
-  check('`backlog <id>` prints the priority', /priority: high/.test(one.out), one.out);
+  check('`backlog <id>` prints the priority', verdictOf(/priority: high/.test(one.out)), one.out);
   const dn = await run('backlog-done', stored.id);
-  check('`backlog-done` prints WHICH item it resolved (id + text)', dn.code === 0 && new RegExp(`^resolved \\[${stored.id}\\] cli high item; 2 still open`).test(dn.out.trim()), dn.out);
+  check('`backlog-done` prints WHICH item it resolved (id + text)', dn.code === 0 && verdictOf(new RegExp(`^resolved \\[${stored.id}\\] cli high item; 2 still open`).test(dn.out.trim())), dn.out);
   const u = await run('--help');
-  check('usage says a # is the number in the list you were last shown, and steers mutating verbs to ids', /a # is the number in the list YOU were last shown/.test(u.out) && /prefer the B-xxxx id/.test(u.out));
-  check('usage documents --priority on backlog-add and backlog-edit', /backlog-add "item" \[--detail "context"\] \[--priority high\|normal\|low\]/.test(u.out) && /backlog-edit <id\|#\|text> \[--text "new"\] \[--detail "more"\] \[--replace-detail\] \[--priority high\|normal\|low\]/.test(u.out));
+  check('usage says a # is the number in the list you were last shown, and steers mutating verbs to ids', gateOf(/a # is the number in the list YOU were last shown/.test(u.out)) && verdictOf(/prefer the B-xxxx id/.test(u.out)));
+  check('usage documents --priority on backlog-add and backlog-edit', gateOf(/backlog-add "item" \[--detail "context"\] \[--priority high\|normal\|low\]/.test(u.out)) && verdictOf(/backlog-edit <id\|#\|text> \[--text "new"\] \[--detail "more"\] \[--replace-detail\] \[--priority high\|normal\|low\]/.test(u.out)));
   server.close();
 }
 
@@ -431,30 +431,30 @@ const tg = strip(fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8'))
 const ar = strip(fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8'));
 const cli = strip(fs.readFileSync(path.join(REPO, 'data/bin/vibespace-task'), 'utf8'));
 const bs = fs.readFileSync(path.join(REPO, 'src/backlog-select.js'), 'utf8');
-check('task-groups.js requires backlog-select', /require\('\.\/backlog-select'\)/.test(tg));
-check('_backlogNoteLines selects through selectReminders, with the liveness predicate', /const sel = selectReminders\(open, sessionKey, \{ limit: LIMIT, isLive: isLiveClaim \}\)/.test(tg));
-check('renderContext + renderMultiContext thread isLiveClaim to _backlogNoteLines; multi shares ONE highBudget', /this\._backlogNoteLines\(t, \{ gid: multi \? `--group \$\{t\.id\} ` : '', sessionKey, tools, isLiveClaim \}\)/.test(tg) && /this\._backlogNoteLines\(ts\[id\], \{ gid: `--group \$\{id\} `, sessionKey, tools, isLiveClaim, highBudget, mineBudget, nudge: false \}\)/.test(tg) && /const highBudget = \{ bytes: HIGH_LINE_TEXT_BYTES \};/.test(tg));
+check('task-groups.js requires backlog-select', verdictOf(/require\('\.\/backlog-select'\)/.test(tg)));
+check('_backlogNoteLines selects through selectReminders, with the liveness predicate', verdictOf(/const sel = selectReminders\(open, sessionKey, \{ limit: LIMIT, isLive: isLiveClaim \}\)/.test(tg)));
+check('renderContext + renderMultiContext thread isLiveClaim to _backlogNoteLines; multi shares ONE highBudget', gateOf(/this\._backlogNoteLines\(t, \{ gid: multi \? `--group \$\{t\.id\} ` : '', sessionKey, tools, isLiveClaim \}\)/.test(tg)) && gateOf(/this\._backlogNoteLines\(ts\[id\], \{ gid: `--group \$\{id\} `, sessionKey, tools, isLiveClaim, highBudget, mineBudget, nudge: false \}\)/.test(tg)) && verdictOf(/const highBudget = \{ bytes: HIGH_LINE_TEXT_BYTES \};/.test(tg)));
 check('every agent-routes render call passes isLiveClaim: liveClaimPredicate() (4 sites)', (ar.match(/isLiveClaim: liveClaimPredicate\(\)/g) || []).length === 4 && (ar.match(/tasks\.render(?:Multi)?Context\(/g) || []).length === 4);
-check('GET task remembers the listing it served; findIdx resolves a number against it', /rememberBacklogListing\(`\$\{you\}\|\$\{gid\}`, openSorted\.map\(\(b\) => b\.id\)\);/.test(ar) && /const shown = backlogListingShown\.get\(`\$\{key\}\|\$\{gid\}`\);/.test(ar));
-check('done/drop echo the resolved item by id', /backlog\[r\]\.resolvedAt = Date\.now\(\);\n\s*actedId = backlog\[r\]\.id \|\| null;/.test(ar));
+check('GET task remembers the listing it served; findIdx resolves a number against it', gateOf(/rememberBacklogListing\(`\$\{you\}\|\$\{gid\}`, openSorted\.map\(\(b\) => b\.id\)\);/.test(ar)) && verdictOf(/const shown = backlogListingShown\.get\(`\$\{key\}\|\$\{gid\}`\);/.test(ar)));
+check('done/drop echo the resolved item by id', verdictOf(/backlog\[r\]\.resolvedAt = Date\.now\(\);\n\s*actedId = backlog\[r\]\.id \|\| null;/.test(ar)));
 {
   // raw source (the '/**' string literal in renderTaskMd defeats the comment stripper — see below)
   const raw = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
-  check('the repo-file writer + TASK.md + reminders print through markedText; the reader gates markers on the frontmatter key', /body\.push\(`- \[\$\{b\.status === 'done'[^\n]*\} \$\{markedText\(b\)\}`\);/.test(raw) && /lines\.push\(`- \[\$\{b\.id \|\| '\?'\}\] \$\{markedText\(\{ priority: b\.priority, text: agentLine\(b\.text\) \}\)\}/.test(raw) && /out\.push\(`- \[\$\{b\.id \|\| '\?'\}\] \$\{markedText\(\{ priority: b\.priority/.test(raw) && /'backlog_priority: markers',/.test(raw) && /const markersOn = fm\.backlog_priority === 'markers';/.test(raw));
+  check('the repo-file writer + TASK.md + reminders print through markedText; the reader gates markers on the frontmatter key', gateOf(/body\.push\(`- \[\$\{b\.status === 'done'[^\n]*\} \$\{markedText\(b\)\}`\);/.test(raw)) && gateOf(/lines\.push\(`- \[\$\{b\.id \|\| '\?'\}\] \$\{markedText\(\{ priority: b\.priority, text: agentLine\(b\.text\) \}\)\}/.test(raw)) && gateOf(/out\.push\(`- \[\$\{b\.id \|\| '\?'\}\] \$\{markedText\(\{ priority: b\.priority/.test(raw)) && gateOf(/'backlog_priority: markers',/.test(raw)) && verdictOf(/const markersOn = fm\.backlog_priority === 'markers';/.test(raw)));
 }
 {
   // (the raw source: renderTaskMd holds a '/**' string literal the comment stripper would eat through)
   const raw = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
   const body = raw.slice(raw.indexOf('  renderTaskMd(t, cap = 50, { now = null } = {}) {'), raw.indexOf('  syncAllContextMd() {'));   // lane agent-context-owner-facts: + the `now` option (the injection's dateless today)
-  check('renderTaskMd lists through sortBacklog', /\n\s*const openBl = sortBacklog\(\(t\.backlog \|\| \[\]\)\.filter/.test(body));
+  check('renderTaskMd lists through sortBacklog', verdictOf(/\n\s*const openBl = sortBacklog\(\(t\.backlog \|\| \[\]\)\.filter/.test(body)));
 }
-check('update() normalizes priority', /priority: normalizePriority\(it\?\.priority\),/.test(tg));
-check('agent-routes requires backlog-select and GET task sorts with it', /require\('\.\/backlog-select\.js'\)/.test(ar) && /const openSorted = sortBacklog\(\(t\.backlog \|\| \[\]\)\.filter\(\(b\) => b\.status === 'open'\)\);/.test(ar) && /task: taskShowAnswer\(t, openSorted\)/.test(ar));   // verify r4 F1 (lane peer-census): the answer leaves through the task door, the sorted open list inside it
-check('findIdx numbers the SAME sorted open list (never the store order)', /const ids = shown \|\| sortBacklog\(backlog\.filter\(\(b\) => b\.status === 'open'\)\)\.map\(\(b\) => b\.id\);/.test(ar));
-check('the route refuses a priority outside the set', /!BACKLOG_PRIORITIES\.includes\(priority\)\) return res\.status\(400\)/.test(ar));
-check('the CLI passes `priority` on backlog-add and backlog-edit', /\{ add: arg, [^\n]*\{ priority \}/.test(cli) && /body\.priority = priority;/.test(cli));
+check('update() normalizes priority', verdictOf(/priority: normalizePriority\(it\?\.priority\),/.test(tg)));
+check('agent-routes requires backlog-select and GET task sorts with it', gateOf(/require\('\.\/backlog-select\.js'\)/.test(ar)) && gateOf(/const openSorted = sortBacklog\(\(t\.backlog \|\| \[\]\)\.filter\(\(b\) => b\.status === 'open'\)\);/.test(ar)) && verdictOf(/task: taskShowAnswer\(t, openSorted\)/.test(ar)));   // verify r4 F1 (lane peer-census): the answer leaves through the task door, the sorted open list inside it
+check('findIdx numbers the SAME sorted open list (never the store order)', verdictOf(/const ids = shown \|\| sortBacklog\(backlog\.filter\(\(b\) => b\.status === 'open'\)\)\.map\(\(b\) => b\.id\);/.test(ar)));
+check('the route refuses a priority outside the set', verdictOf(/!BACKLOG_PRIORITIES\.includes\(priority\)\) return res\.status\(400\)/.test(ar)));
+check('the CLI passes `priority` on backlog-add and backlog-edit', gateOf(/\{ add: arg, [^\n]*\{ priority \}/.test(cli)) && verdictOf(/body\.priority = priority;/.test(cli)));
 // lane peer-census verify r4 F1: the ONE import allowed is the PURE belt (the nudge quotes other sessions' item texts and cuts them — a cut is followed by the rule where the cut is)
-check('backlog-select.js is PURE (imports nothing but the PURE belt ./peer-text.js)', (bs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').match(/require\(/g) || []).length === 1 && /require\('\.\/peer-text\.js'\)/.test(bs));
+check('backlog-select.js is PURE (imports nothing but the PURE belt ./peer-text.js)', (bs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').match(/require\(/g) || []).length === 1 && verdictOf(/require\('\.\/peer-text\.js'\)/.test(bs)));
 
 // ── (7) the Backlog tab (src/lib/task-log.js) shows and sets priority ──
 // The tab is DOM-bound (no DOM library in the tree), so its legs are: the
@@ -474,7 +474,7 @@ console.log('(7) Backlog tab');
   // the tab's own shape: rows = backlog.map((b, i) => ({ ...b, _i: i })) → sortBacklog
   const rows = sel.sortBacklog(stored.map((b, i) => ({ ...b, _i: i })));
   check('tab order: high, then normal/low newest-first by priority, resolved last', rows.map((r) => r.text).join('|') === 'mid high|old normal|new low|done one', rows.map((r) => r.text).join('|'));
-  check('every sorted row still names ITS store index (_i) — a write patches the right item', rows.every((r) => stored[r._i].id === r.id));
+  check('every sorted row still names ITS store index (_i) — a write patches the right item', verdictOf(rows.every((r) => stored[r._i].id === r.id)));
   // the Priority submenu's write: patchItem(it, b => ({ ...b, priority })) — ONE ROW by its id since B-0248 step 3 (the fields fn changed)
   const target = rows.find((r) => r.text === 'old normal');
   const after = tasks.update(g7.id, { backlogRow: { id: target.id, set: { priority: 'high' } } }).backlog;
@@ -500,7 +500,7 @@ console.log('(7) Backlog tab');
     'Copy as Markdown exports the view order with the markers': (src) => /md = sortBacklog\(task\.backlog \|\| \[\]\)\n\s*\.filter\(/.test(src) && /\$\{priorityMarker\(it\.priority\) \? priorityMarker\(it\.priority\) \+ ' ' : ''\}\$\{it\.text\}/.test(src),
     'the ✎ editor has a Priority select and Save writes it': (src) => /prioLbl\.textContent = t\('Priority'\);/.test(src) && /b\.priority = ps\.value;/.test(src) && /form\.append\(ti, prioWrap, ta, btns\);/.test(src),
   };
-  for (const [name, fn] of Object.entries(pins)) check(`pin: ${name}`, fn(TL));
+  for (const [name, fn] of Object.entries(pins)) check(`pin: ${name}`, verdictOf(fn(TL)));
   // NEGATIVE CONTROLS — each pin must fail on a copy with its wiring removed
   const cuts = [
     ['the Backlog tab lists sortBacklog(items), filtered after', ['const visible = sortBacklog(items).filter(', 'const visible = items.filter(']],
@@ -517,15 +517,15 @@ console.log('(7) Backlog tab');
   }
   // the chip CSS: theme vars only (no literal colours in the new rules)
   const rules = CSS.split('\n').filter((l) => /^\.bl-prio/.test(l));
-  check('style.css has .bl-prio-high and .bl-prio-low chips', rules.some((l) => l.startsWith('.bl-prio-high ')) && rules.some((l) => l.startsWith('.bl-prio-low ')));
+  check('style.css has .bl-prio-high and .bl-prio-low chips', gateOf(rules.some((l) => l.startsWith('.bl-prio-high '))) && verdictOf(rules.some((l) => l.startsWith('.bl-prio-low '))));
   const lit = (l) => /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/.test(l);
   check('the chip rules use theme vars only (no literal colours)', rules.length >= 3 && !rules.some(lit), rules.filter(lit).join(' | '));
-  check('negative control: the literal-colour check catches a hard-coded colour', lit('.bl-prio-high { color: #e55; }'));
+  check('negative control: the literal-colour check catches a hard-coded colour', verdictOf(lit('.bl-prio-high { color: #e55; }')));
   // i18n: the new keys exist in both dictionaries
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
   const ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const keys = ['Priority', 'High priority', 'Low priority', 'High', 'Normal', 'Low'];
-  check('zh + ja carry every Backlog-priority key', keys.every((k) => zh.includes(`  "${k}": `) && ja.includes(`  "${k}": `)), keys.filter((k) => !zh.includes(`  "${k}": `) || !ja.includes(`  "${k}": `)).join(','));
+  check('zh + ja carry every Backlog-priority key', verdictOf(keys.every((k) => zh.includes(`  "${k}": `) && ja.includes(`  "${k}": `))), keys.filter((k) => !zh.includes(`  "${k}": `) || !ja.includes(`  "${k}": `)).join(','));
 }
 
 console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
@@ -558,7 +558,7 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
   const p2 = await patch8(A.id, { backlogRow: { id: A.R2, unclaim: ['claude:bbb'] } });
   const l1 = A.live(), r1 = l1.find((b) => b.id === A.R1), r2 = l1.find((b) => b.id === A.R2);
   check('a row write\'s answer says the hub TOOK it as one row (backlogRows: a page newer than its hub tells an old hub\'s plain 200 apart)', p1.body.backlogRows === 1 && p2.body.backlogRows === 1, JSON.stringify(p1.body).slice(0, 200));
-  check('THE LOST CLAIM, cured: a page\'s ONE-ROW writes (R1\'s priority, R2\'s one unclaim) keep the agent\'s claims and its parked row that landed after the page\'s copy', p1.status === 200 && p2.status === 200 && r1.priority === 'high' && r1.claimedBy.includes('claude:agentA') && r2.claimedBy.join() === 'claude:agentA' && l1.some((b) => b.text === 'agent parked') && l1.length === 3, JSON.stringify({ p1: p1.status, p2: p2.status, l1 }));
+  check('THE LOST CLAIM, cured: a page\'s ONE-ROW writes (R1\'s priority, R2\'s one unclaim) keep the agent\'s claims and its parked row that landed after the page\'s copy', p1.status === 200 && p2.status === 200 && r1.priority === 'high' && gateOf(r1.claimedBy.includes('claude:agentA')) && r2.claimedBy.join() === 'claude:agentA' && gateOf(l1.some((b) => b.text === 'agent parked')) && l1.length === 3, JSON.stringify({ p1: p1.status, p2: p2.status, l1 }));
   // CONTROL (a copy of the ROUTE without its refusal — the release's road): the page's copy with the one field changed erases them
   const B = scene('release');
   const TGWx = loadPatched('src/server/task-groups-wiring.js', [["    if (req.body && req.body.backlog !== undefined) { const one = require('../task-groups.js').oldPageAdd(req.body);", "    if (false) { const one = require('../task-groups.js').oldPageAdd(req.body);"]]);
@@ -570,11 +570,11 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
   // a page OLDER than the hub: that same whole-list body over the route ⇒ refused by name, nothing written
   const before = JSON.stringify(A.live());
   const w = await patch8(A.id, { backlog: A.pageCopy.map((b) => (b.id === A.R1 ? { ...b, priority: 'low' } : b)) });
-  check('a whole list from a page older than the hub is REFUSED (409 backlog_whole): its words name the one act that ends it (reload) and keep what was typed (copy it first); nothing written', w.status === 409 && w.body.code === 'backlog_whole' && /reload the page/.test(w.body.error) && /copy anything you typed/.test(w.body.error) && JSON.stringify(A.live()) === before, JSON.stringify(w));
+  check('a whole list from a page older than the hub is REFUSED (409 backlog_whole): its words name the one act that ends it (reload) and keep what was typed (copy it first); nothing written', w.status === 409 && w.body.code === 'backlog_whole' && gateOf(/reload the page/.test(w.body.error)) && gateOf(/copy anything you typed/.test(w.body.error)) && JSON.stringify(A.live()) === before, JSON.stringify(w));
   // …but that old page's ADD (its copy + the one row it just cleared from its box) keeps the typed words, as that one row
   const a = await patch8(A.id, { backlog: [...A.pageCopy, { text: 'typed on an old page', status: 'open', addedBy: 'user', addedAt: 40 }] });
   const l2 = A.live(), typed = l2.find((b) => b.text === 'typed on an old page');
-  check('…an old page\'s ADD (its copy + one row without an id) is taken as THAT row: the typed words kept (a fresh id, no claim), the agent\'s claims and row untouched', a.status === 200 && !!typed && /^B-[0-9a-f]{4,8}$/.test(typed.id) && typed.claimedBy.length === 0 && l2.length === 4 && l2.find((b) => b.id === A.R1).claimedBy.includes('claude:agentA') && l2.some((b) => b.text === 'agent parked'), JSON.stringify({ a: a.status, l2 }));
+  check('…an old page\'s ADD (its copy + one row without an id) is taken as THAT row: the typed words kept (a fresh id, no claim), the agent\'s claims and row untouched', a.status === 200 && !!typed && gateOf(/^B-[0-9a-f]{4,8}$/.test(typed.id)) && typed.claimedBy.length === 0 && l2.length === 4 && gateOf(l2.find((b) => b.id === A.R1).claimedBy.includes('claude:agentA')) && verdictOf(l2.some((b) => b.text === 'agent parked')), JSON.stringify({ a: a.status, l2 }));
   // r1699 (3): an old page's whole list is taken as an add ONLY with exactly one row without an id — two such rows, or a list whose only
   // change is a removed row, are refused by name (nothing written)
   const snap3 = JSON.stringify(A.live());
@@ -589,7 +589,7 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
   const del = await patch8(A.id, { backlogRow: { id: A.R2, remove: true } });
   const afterDel = JSON.stringify(A.live());
   const gone = await patch8(A.id, { backlogRow: { id: A.R2, set: { priority: 'low' } } });
-  check('a row deleted meanwhile (another window) is refused BY NAME (409 backlog_row_gone, the row\'s id) — nothing written; the page says it by the row\'s text (pinned below)', del.status === 200 && !A.live().some((b) => b.id === A.R2) && gone.status === 409 && gone.body.code === 'backlog_row_gone' && gone.body.error.includes(A.R2) && JSON.stringify(A.live()) === afterDel, JSON.stringify(gone));
+  check('a row deleted meanwhile (another window) is refused BY NAME (409 backlog_row_gone, the row\'s id) — nothing written; the page says it by the row\'s text (pinned below)', del.status === 200 && !A.live().some((b) => b.id === A.R2) && gone.status === 409 && gone.body.code === 'backlog_row_gone' && gateOf(gone.body.error.includes(A.R2)) && JSON.stringify(A.live()) === afterDel, JSON.stringify(gone));
   // a claim is never SET through a row; a row keeps its line; a page's add brings no id and no claim
   const m1 = await patch8(A.id, { backlogRow: { id: A.R1, set: { claimedBy: [] } } });
   const m2 = await patch8(A.id, { backlogRow: { id: A.R1, set: { text: '' } } });
@@ -606,7 +606,7 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
   // a field is typed: a non-string line never deletes a row in silence; an add needs its line
   const m4 = await patch8(A.id, { backlogRow: { id: A.R1, set: { text: false } } });
   const m5 = await patch8(A.id, { backlogAdd: {} });
-  check('a row\'s fields are TYPED (set.text false, an add with no line: 400 backlog_row_bad) — never a row deleted or a no-op answered 200', m4.status === 400 && m4.body.code === 'backlog_row_bad' && m5.status === 400 && m5.body.code === 'backlog_row_bad' && A.live().some((b) => b.id === A.R1), JSON.stringify({ m4, m5 }));
+  check('a row\'s fields are TYPED (set.text false, an add with no line: 400 backlog_row_bad) — never a row deleted or a no-op answered 200', m4.status === 400 && m4.body.code === 'backlog_row_bad' && m5.status === 400 && m5.body.code === 'backlog_row_bad' && verdictOf(A.live().some((b) => b.id === A.R1)), JSON.stringify({ m4, m5 }));
   // an add whose answer was lost, sent again with the same stamp (the page keeps it): taken ONCE
   const tw = { text: 'sent twice', status: 'open', addedBy: 'user', addedAt: 80 };
   const t1 = await patch8(A.id, { backlogAdd: tw }), t2 = await patch8(A.id, { backlogAdd: { ...tw } });
@@ -660,7 +660,7 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
     'a press finds its row by the row\'s own id (never the drawn index)': (src) => /const was = \(task\.backlog \|\| \[\]\)\.find\(\(b\) => b && row0 && b\.id === row0\.id\);/.test(src) && /const was = \(task\.backlog \|\| \[\]\)\.find\(\(b\) => b && b\.id === el\.dataset\.bid\);/.test(src) && !/patchItem\(it\._i/.test(src),
     'a close / reopen carries the status the press saw; a hub that did not take a row is said': (src) => /if \(set\.status !== undefined\) row\.expect = \{ status: was\.status \|\| 'open' \};/.test(src) && /if \(data\.backlogRows\) return true;/.test(src),
   };
-  for (const [name, fn] of Object.entries(pins8)) check(`pin: ${name}`, fn(TL8));
+  for (const [name, fn] of Object.entries(pins8)) check(`pin: ${name}`, verdictOf(fn(TL8)));
   const cuts8 = [
     ['a gone or moved row is SAID by its text, the call answered (no generic toast), at both row writes', ["{ onRefused: rowGone(was) }).then(tookRow);", '{}).then(tookRow);']],
     ['the add box keeps what was typed until the hub took the row (the CURRENT boxes cleared)', ['if (!took) return;', '']],
@@ -675,9 +675,9 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
   const zh8 = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja8 = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const K8s = ['"{text}" is no longer in this group\'s backlog — it was removed meanwhile; nothing was written', '"{text}" was closed or reopened meanwhile by someone else — nothing was written; the list shows it now', 'This page is newer than VibeSpace — reload it once VibeSpace has restarted (nothing changed)', '"{text}" was removed from this group\'s backlog meanwhile — what you typed is in the add box', '"{text}" was removed from this group\'s backlog meanwhile', '"{text}" changed meanwhile and this view hides it now — your edit is kept until it shows again'].map((k) => '  ' + JSON.stringify(k) + ': ');
   K8s.push(...['"{text}" was removed from this group\'s backlog meanwhile — what you typed: {words}', 'Drop this edit', '"{text}" is hidden by this view\'s search or filter — your edit is kept until it shows again', 'The clipboard refused the copy — the words are still in the notice, to select'].map((k) => '  ' + JSON.stringify(k) + ': '));
-  check('zh + ja carry the Backlog tab\'s ten new sentences', K8s.every((k) => zh8.includes(k) && ja8.includes(k)), K8s.filter((k) => !zh8.includes(k) || !ja8.includes(k)).join(' | '));
+  check('zh + ja carry the Backlog tab\'s ten new sentences', verdictOf(K8s.every((k) => zh8.includes(k) && ja8.includes(k))), K8s.filter((k) => !zh8.includes(k) || !ja8.includes(k)).join(' | '));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED (${passed} passed)`); process.exit(1); }
-console.log(`\nALL PASS (${passed})`);
+console.log(`\nALL PASS (${passed})`); import { verdictOf, gateOf } from './lib/check.mjs';

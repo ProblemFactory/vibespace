@@ -40,7 +40,7 @@ import { anchored } from './scratch.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, cpuMs = 0;
-const ok = (c, n, d) => { siteArmed = false; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); siteArmed = false; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -542,13 +542,13 @@ async function legNamed(tag, node) {
   console.log(`① the planted hogs are named (${tag})`);
   const busy = await run({ plan: 'busy' }, { node });
   const bl = lineWith(busy, /busyHog \(src\/hogs\.js:2\)/);
-  ok(bl && new RegExp(` — JavaScript${WAITED}: the main thread ran \\d+\\.\\d s of the \\d+\\.\\d s measured \\(user \\d+\\.\\d, kernel \\d+\\.\\d\\)${SCHED_TAIL}; \\d samples?: busyHog \\(src\\/hogs\\.js:2\\)`).test(bl) && /heap \d+\.\d of \d+\.\d GB, external \d+\.\d GB, rss \d+\.\d GB/.test(bl) && /the loop was \d+ % busy in the minute before/.test(bl),
+  ok(gateOf(bl) && gateOf(new RegExp(` — JavaScript${WAITED}: the main thread ran \\d+\\.\\d s of the \\d+\\.\\d s measured \\(user \\d+\\.\\d, kernel \\d+\\.\\d\\)${SCHED_TAIL}; \\d samples?: busyHog \\(src\\/hogs\\.js:2\\)`).test(bl)) && gateOf(/heap \d+\.\d of \d+\.\d GB, external \d+\.\d GB, rss \d+\.\d GB/.test(bl)) && verdictOf(/the loop was \d+ % busy in the minute before/.test(bl)),
     `a pure JS busy function: JavaScript, named by function + file, the scheduler's numbers, memory, utilization: ${bl}`, busy.lines);
   const live = busy.lines.find((l) => l.startsWith('[sync-fs] the main loop has been held'));
-  ok(live && / — JavaScript: src\/hogs\.js:2/.test(live) && !/busyHog/.test(live), `the watchdog thread's while-held line carries the frames by LOCATION (round 4, MUST 2: no name is read while the loop is held — names come with the hold's own line after it): ${live}`, busy.lines);
+  ok(gateOf(live) && gateOf(/ — JavaScript: src\/hogs\.js:2/.test(live)) && !/busyHog/.test(live), `the watchdog thread's while-held line carries the frames by LOCATION (round 4, MUST 2: no name is read while the loop is held — names come with the hold's own line after it): ${live}`, busy.lines);
   const tb = busy.out && busy.out.report.table.find((r) => r.frame === 'busyHog (src/hogs.js:2)');
-  ok(tb && tb.verdict === 'JavaScript' && tb.count === 1 && busy.out.report.holds.some((h) => h.line === bl), 'the since-start table and the ring carry the same hold');
-  if (tag !== 'Node 24') { const sl = await run({ plan: 'sleep' }, { node }); const l = lineWith(sl, /sleepHog/); ok(l && / — in the kernel \(blocked\): /.test(l) && /\d samples?: asleep: \S+ in \w+/.test(l), `a sync child: in the kernel, its sample asleep with the kernel's wait channel: ${l}`, sl.lines); return; }
+  ok(gateOf(tb) && tb.verdict === 'JavaScript' && tb.count === 1 && verdictOf(busy.out.report.holds.some((h) => h.line === bl)), 'the since-start table and the ring carry the same hold');
+  if (tag !== 'Node 24') { const sl = await run({ plan: 'sleep' }, { node }); const l = lineWith(sl, /sleepHog/); ok(gateOf(l) && gateOf(/ — in the kernel \(blocked\): /.test(l)) && verdictOf(/\d samples?: asleep: \S+ in \w+/.test(l)), `a sync child: in the kernel, its sample asleep with the kernel's wait channel: ${l}`, sl.lines); return; }
   const js = await run({ plan: 'json' });
   const jl = lineWith(js, /the first JavaScript after it: .*jsonHog \(src\/hogs\.js:5\)/);
   {   // r116: the parse's own length and its samples, MEASURED and printed. ONE ask is in flight at a time and an ask posted inside a native
@@ -561,18 +561,18 @@ async function legNamed(tag, node) {
     site(); if (!sp || sp.ms < 450) skip('the planted parse is a hold well past the bar (≥ 450 ms): a sample inside it, never «JavaScript» nor a tie', `the parse ran ${sp ? Math.round(sp.ms) : '?'} ms (${plan.n} elements, the most the plan sizes) on this box`);
     else ok(nS >= 1 && verdictOfLine(jl) !== LH.V.js && !/ \(a tie, in the order they came\)/.test(jl), `the parse's hold (${Math.round(sp.ms)} ms) has ${nS} sample(s) inside it, and its edge never names it «JavaScript» nor a tie: «${verdictOfLine(jl)}»`, { ms: sp && sp.ms, nS, plan, line: jl });
   }
-  ok(jl && (v => v === LH.V.native || v === LH.V.cpu || (v === LH.V.kernel && kernelTrue(jl)))(verdictOfLine(jl)) && !/ — in the kernel \(blocked\)/.test(jl) && /the first JavaScript after it: [^;]*afterParse \(src\/hogs\.js:4\)/.test(jl),
+  ok(gateOf(jl) && gateOf((v => v === LH.V.native || v === LH.V.cpu || (v === LH.V.kernel && kernelTrue(jl)))(verdictOfLine(jl))) && !/ — in the kernel \(blocked\)/.test(jl) && verdictOf(/the first JavaScript after it: [^;]*afterParse \(src\/hogs\.js:4\)/.test(jl)),
     `a JSON.parse of a large buffer: on the CPU, not JavaScript while it parsed (never «blocked» — round 5 law B), the first JavaScript after it names the parse's caller (afterParse ← jsonHog): ${jl}`, js.lines);
   const zl = await run({ plan: 'zlib' });
   const z = lineWith(zl, /zlibHog \(src\/hogs\.js:6\)/);
   // 主开发's r249 (the box at bde7b4bc5: «JavaScript ×1 and native code or garbage collection ×1 (a tie, in the order they came)», both
   // samples naming zlib driven by zlibHog): a hold MADE in native work says native, or a tie that holds native — never JavaScript
   // ALONE — and its driver (the hog's frame) is named in every form
-  ok(zlibTrue(z), `a sync zlib: native while it compressed, or a tie that holds native — never «${LH.V.js}» alone (round 4: an ask is JavaScript only when answered at JavaScript speed); zlibHog named: ${z}`, zl.lines);
+  ok(verdictOf(zlibTrue(z)), `a sync zlib: native while it compressed, or a tie that holds native — never «${LH.V.js}» alone (round 4: an ask is JavaScript only when answered at JavaScript speed); zlibHog named: ${z}`, zl.lines);
   { // its RED CONTROL, over the box's own line: the same line with «JavaScript» alone at its head is refused; without its driver too
     const BOX = `[loop-hold] the main loop was held 0.3 s — ${LH.V.js} ×1 and ${LH.V.native} ×1 (a tie, in the order they came): the main thread ran 0.3 s of the 0.3 s measured (user 0.3, kernel 0.0); 2 samples: node’s own code — zlib, driven by zlibHog (src/hogs.js:6) ×1, on the CPU, not in JavaScript (native code or a collection) ×1`;
     const jsAlone = BOX.replace(`${LH.V.js} ×1 and ${LH.V.native} ×1 (a tie, in the order they came)`, LH.V.js), nat = BOX.replace(`${LH.V.js} ×1 and ${LH.V.native} ×1 (a tie, in the order they came)`, LH.V.native);
-    ok(zlibTrue(BOX) && zlibTrue(nat) && !zlibTrue(jsAlone) && !zlibTrue(BOX.split('zlibHog (src/hogs.js:6)').join('somethingElse (src/other.js:1)')),
+    ok(gateOf(zlibTrue(BOX)) && gateOf(zlibTrue(nat)) && !zlibTrue(jsAlone) && !zlibTrue(BOX.split('zlibHog (src/hogs.js:6)').join('somethingElse (src/other.js:1)')),
       `RED CONTROL (the zlib leg's own law): the box's tie line and a native line pass; the same line saying «${LH.V.js}» alone is refused, and so is one without its driver`);
   }
   // r5456 (lane hub-loop-stalls — the placement of this leg's red on 2.369.422's hosted proof): A FAST ANSWER IN NODE's OWN CODE IS
@@ -584,7 +584,7 @@ async function legNamed(tag, node) {
   const zr = await run({ plan: 'zlibRand' }, { node });
   const zrl = lineWith(zr, /zlibHog \(src\/hogs\.js:6\)/);
   const zPlan = (r) => JSON.stringify(r.out && r.out.checks && r.out.checks.zlibRandPlan);
-  ok(zlibTrue(zrl) && !jsAt(zrl), `r5456: a sync zlib of incompressible data (a native call returning every ~0.4 ms; ${zPlan(zr)}): node's own fast answers say THE TIE (or native), never «${LH.V.js}» alone; zlibHog named: ${zrl}`, zr.lines);
+  ok(gateOf(zlibTrue(zrl)) && !jsAt(zrl), `r5456: a sync zlib of incompressible data (a native call returning every ~0.4 ms; ${zPlan(zr)}): node's own fast answers say THE TIE (or native), never «${LH.V.js}» alone; zlibHog named: ${zrl}`, zr.lines);
   const relTree = (() => {
     const t = path.join(ROOT, 'mut-r5456-release-fold'); if (!fs.existsSync(t)) fs.cpSync(path.join(REPO, 'src'), path.join(t, 'src'), { recursive: true });
     const f = path.join(t, 'src/loop-hold.js');
@@ -597,25 +597,25 @@ async function legNamed(tag, node) {
   // load gives a native sample, and the release says the tie there too — no lie to be red on: a named, counted skip)
   const plantZ = !!zxl && /\d+ samples?: node’s own code — zlib, driven by zlibHog \(src\/hogs\.js:6\) ×\d+(; |$)/.test(zxl) && !/not in JavaScript \(native code/.test(zxl);
   site(); if (!plantZ) skip('CONTROL r5456 (the release\'s fold, in a copy)', `its plant did not land: the copy's hold holds a sample outside node's zlib, or none (${zPlan(zx)}): ${zxl}`);
-  else ok(jsAt(zxl) && !zlibTrue(zxl), `CONTROL r5456 (the release's fold, in a copy) on that hold: «${LH.V.js}» alone — red by name: ${zxl}`, zx.lines);
+  else ok(gateOf(jsAt(zxl)) && !zlibTrue(zxl), `CONTROL r5456 (the release's fold, in a copy) on that hold: «${LH.V.js}» alone — red by name: ${zxl}`, zx.lines);
   const jb5456 = await run({ plan: 'busy' }, { node });
   const jl5456 = lineWith(jb5456, /busyHog \(src\/hogs\.js:2\)/);
-  ok(jsAt(jl5456), `r5456: a hold in the suite's OWN JavaScript (busyHog) still says «${LH.V.js}»: ${jl5456}`, jb5456.lines);
+  ok(verdictOf(jsAt(jl5456)), `r5456: a hold in the suite's OWN JavaScript (busyHog) still says «${LH.V.js}»: ${jl5456}`, jb5456.lines);
   const rx = await run({ plan: 'regex' });
   const r = lineWith(rx, /regexHog \(src\/hogs\.js:7\)/);
-  ok(r && new RegExp(` — JavaScript${WAITED}: `).test(r) && /\(built-in\) ← regexHog \(src\/hogs\.js:7\)/.test(r), `a catastrophic regex: the built-in under regexHog: ${r}`, rx.lines);
+  ok(gateOf(r) && gateOf(new RegExp(` — JavaScript${WAITED}: `).test(r)) && verdictOf(/\(built-in\) ← regexHog \(src\/hogs\.js:7\)/.test(r)), `a catastrophic regex: the built-in under regexHog: ${r}`, rx.lines);
   const sl = await run({ plan: 'sleep' });
   const s = lineWith(sl, /sleepHog \(src\/hogs\.js:8\)/);
-  ok(s && / — in the kernel \(blocked\): the main thread ran 0\.\d s of the 0\.\d s measured/.test(s) && /\d samples?: asleep: \S+ in \w+/.test(s) && /the first JavaScript after it: .*sleepHog \(src\/hogs\.js:8\)/.test(s),
+  ok(gateOf(s) && gateOf(/ — in the kernel \(blocked\): the main thread ran 0\.\d s of the 0\.\d s measured/.test(s)) && gateOf(/\d samples?: asleep: \S+ in \w+/.test(s)) && verdictOf(/the first JavaScript after it: .*sleepHog \(src\/hogs\.js:8\)/.test(s)),
     `a sync child (execFileSync sleep): in the kernel, its sample asleep with the kernel's wait channel, the first JavaScript after it: ${s}`, sl.lines);
   // law B, as shipped: NO gc observer (on Node 24 near the heap limit it alone ran a process out of memory with a third
   // less data) — the hold line carries the heap's size instead; the observer, opted in, names the collections
   const gcOff = await run({ plan: 'gc' }, { args: ['--expose-gc'] });
   const g0 = holdLines(gcOff).find((l) => l.startsWith('[loop-hold] the main loop was held'));
-  ok(g0 && !collectionStated(g0) && /heap \d+\.\d of \d+\.\d GB, external \d+\.\d GB, rss \d+\.\d GB/.test(g0), `law B as shipped: no collection observer — the hold line states no collection as a fact (a sample outside JavaScript keeps its hedged class «${LH.V.native}») and carries the heap's size: ${g0}`, gcOff.lines);
+  ok(gateOf(g0) && !collectionStated(g0) && verdictOf(/heap \d+\.\d of \d+\.\d GB, external \d+\.\d GB, rss \d+\.\d GB/.test(g0)), `law B as shipped: no collection observer — the hold line states no collection as a fact (a sample outside JavaScript keeps its hedged class «${LH.V.native}») and carries the heap's size: ${g0}`, gcOff.lines);
   const gc = await run({ plan: 'gc', gcMinMs: 5, observeGc: true }, { args: ['--expose-gc'] });   // opted in; the ring's floor injected (5 ms): two forced mark-compacts of a ~75 MB heap
   const g = holdLines(gc).find((l) => l.startsWith('[loop-hold] the main loop was held') && /gcHog \(src\/hogs\.js:9\)|busyHog/.test(l) && /garbage collection: mark-compact \d+\.\d s \(2\)[^;]* inside the hold/.test(l));
-  ok(g, `the observer opted in: a collection forced inside a hold is named: ${g}`, gc.lines);
+  ok(verdictOf(g), `the observer opted in: a collection forced inside a hold is named: ${g}`, gc.lines);
 }
 
 // ── ② – ④ ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -627,10 +627,10 @@ async function legBootCapSwitch() {
   // («waiting for a CPU», the suite's own count agreeing) is a NAMED, COUNTED non-verdict
   const bStarved = (b.starve || []).some((x) => x.outside && x.h && x.h.boot);
   site(); if (bStarved) skip('② the boot is a hold, sampled and said as the boot\'s', `the box starved the boot: «${LH.V.waiting}», the suite\'s own count agreeing`);
-  else ok(bl && new RegExp(`before its first turn — JavaScript${WAITED}: `).test(bl) && /bootHog \(src\/hogs\.js:3\)/.test(bl) && b.out && b.out.report.counts.boot === 1, `the main module busy before its first turn is sampled and said as the boot's, with a time budget of 0: ${bl}`, b.lines);
+  else ok(gateOf(bl) && gateOf(new RegExp(`before its first turn — JavaScript${WAITED}: `).test(bl)) && gateOf(/bootHog \(src\/hogs\.js:3\)/.test(bl)) && gateOf(b.out) && b.out.report.counts.boot === 1, `the main module busy before its first turn is sampled and said as the boot's, with a time budget of 0: ${bl}`, b.lines);
   const late = await run({ plan: 'late' });
   const ll = holdLines(late);
-  ok(ll.length === 1 && new RegExp(`^\\[loop-hold\\] the main loop was held 0\\.[2-4] s — JavaScript${WAITED}: `).test(ll[0]) && late.out && late.out.report.counts.boot === 0, `a witness started AFTER the loop's first turn (2 s into the process) then held at once: an ordinary hold timed from its own start, never «the boot» of the process's age: ${ll[0]}`, late.lines);
+  ok(ll.length === 1 && gateOf(new RegExp(`^\\[loop-hold\\] the main loop was held 0\\.[2-4] s — JavaScript${WAITED}: `).test(ll[0])) && gateOf(late.out) && late.out.report.counts.boot === 0, `a witness started AFTER the loop's first turn (2 s into the process) then held at once: an ordinary hold timed from its own start, never «the boot» of the process's age: ${ll[0]}`, late.lines);
   // lane hub-loop-stalls (the owner's .393 hub: 54 of 74 holds «not sampled (20 holds were sampled in the last hour)»):
   // EVERY HOLD GETS ITS FIRST SAMPLE — 30 holds in a row, every one named (2.369.395: 20, the rest past its count); a time
   // budget of 0 ⇒ each hold its FIRST sample only, the later ones said as not asked
@@ -644,19 +644,19 @@ async function legBootCapSwitch() {
   const out0 = new Set((c0.starve || []).filter((x) => x.outside).map((x) => x.h.line));
   const asleep0 = h0.filter(oneAsleep), starved0 = h0.filter((l) => !oneAsleep(l) && out0.has(l)), awake0 = h0.filter((l) => !oneAsleep(l) && !out0.has(l));
   site(); if (h0.length === 4 && !awake0.length) skip('③ a budget of 0: each hold its FIRST sample only', `no sample this run: all 4 first asks found the thread asleep or the box starved them (${asleep0.length} asleep, ${starved0.length} «${LH.V.waiting}») in 2 runs (${h0.map(verdictOfLine).join(' · ')}) — a child the box starved past the suite's floor twice is ALSO red at the close («the box starved the suite»)`);
-  else ok(h0.length === 4 && h0.filter((l) => !starved0.includes(l)).every((l) => /later samples not asked: the samples used their time budget/.test(l)) && awake0.every((l) => / 1 sample: busyHog \(src\/hogs\.js:\d+\)/.test(l)) && asleep0.every((l) => asleepTrue(verdictOfLine(l), l)),
+  else ok(h0.length === 4 && gateOf(h0.filter((l) => !starved0.includes(l)).every((l) => /later samples not asked: the samples used their time budget/.test(l))) && gateOf(awake0.every((l) => / 1 sample: busyHog \(src\/hogs\.js:\d+\)/.test(l))) && verdictOf(asleep0.every((l) => asleepTrue(verdictOfLine(l), l))),
     `a budget of 0: each of the 4 holds its FIRST sample only, the later ones said as not asked (${asleep0.length} first asks found the thread asleep — judged by their own true forms, counted; ${starved0.length} the box starved — «${LH.V.waiting}», the suite's own count agreeing, counted)`, h0);
   console.log('④ the off switch, the debugger');
   // the off switch asks NOTHING: the real evaluates that reached the main thread, counted (a session is now connected only
   // for one ask at a time, so an exit no longer shows one — the count is the evidence)
   const offE = await run({ plan: 'busy', sampling: false, countEvals: true }), onE = await run({ plan: 'busy', countEvals: true });
-  ok(offE.out && offE.out.checks.evals === 0 && onE.out && onE.out.checks.evals >= 1, `the off switch: a sampled hold drew ${onE.out && onE.out.checks.evals} real evaluates, the same hold with sampling OFF drew ${offE.out && offE.out.checks.evals}`);
+  ok(gateOf(offE.out) && offE.out.checks.evals === 0 && gateOf(onE.out) && onE.out.checks.evals >= 1, `the off switch: a sampled hold drew ${onE.out && onE.out.checks.evals} real evaluates, the same hold with sampling OFF drew ${offE.out && offE.out.checks.evals}`);
   const offB = await run({ plan: 'busy', sampling: false });
   const ol = holdLines(offB)[0];
-  ok(ol && /not sampled \(sampling is off in Settings\)/.test(ol) && /ran \d+\.\d s of/.test(ol) && !/busyHog/.test(ol), `sampling off: «not sampled (sampling is off in Settings)», law A's numbers still said: ${ol}`, offB.lines);
+  ok(gateOf(ol) && gateOf(/not sampled \(sampling is off in Settings\)/.test(ol)) && gateOf(/ran \d+\.\d s of/.test(ol)) && !/busyHog/.test(ol), `sampling off: «not sampled (sampling is off in Settings)», law A's numbers still said: ${ol}`, offB.lines);
   const dbg = await run({ plan: 'busy' }, { args: ['--inspect=127.0.0.1:0'] });
   const dl = holdLines(dbg)[0], said = dbg.lines.filter((l) => l.startsWith('[loop-hold] a debugger port is open'));
-  ok(said.length === 1 && dl && /not sampled \(a debugger is attached\)/.test(dl), `a debugger port open: said once, the sampler stands down: ${said[0]} / ${dl}`, dbg.lines);
+  ok(said.length === 1 && gateOf(dl) && verdictOf(/not sampled \(a debugger is attached\)/.test(dl)), `a debugger port open: said once, the sampler stands down: ${said[0]} / ${dl}`, dbg.lines);
 }
 
 // ── ⑤ LAW C ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -669,16 +669,16 @@ async function legLawC(tag, node) {
   for (let i = 0; i < runs.on.length; i++) if (sampledOf(runs.on[i]) < 3) runs.on[i] = await run({ plan: 'lawC' }, { node });   // (cure 3) once more for a run the box left under 3 samples
   const sampledOn = runs.on.map(sampledOf);
   site(); if (sampledOn.some((n) => n < 3)) skip(`⑤ law C exercised (${tag})`, `no sample this run: the ON runs were sampled ${sampledOn.join(', ')} times after one more run each — a run under 3 does not exercise law C (the order and observation legs still run)`);
-  else ok(sampledOn.every((n) => n >= 3), `the ON runs were really sampled inside their holds (${sampledOn.join(', ')} samples)`, runs.on.map((r) => holdLines(r)));
+  else ok(verdictOf(sampledOn.every((n) => n >= 3)), `the ON runs were really sampled inside their holds (${sampledOn.join(', ')} samples)`, runs.on.map((r) => holdLines(r)));
   const orders = new Set([...runs.on, ...runs.off].map((r) => C(r).order));
-  ok(orders.size === 1 && /^t1,m1,m2,/.test([...orders][0]), `pending nextTick / microtasks / timers / immediates run in ONE order over ${runs.on.length + runs.off.length} runs, sampled or not (${[...orders].join(' | ')})`);
-  ok([...runs.on, ...runs.off].every((r) => C(r).early === 0), 'none of them ran early (inside the hold) — with samples landing there');
-  ok(runs.on.every((r) => C(r).alsBad === 0 && C(r).initsInHold === 0 && C(r).uncaught === 0) && runs.off.every((r) => C(r).initsInHold === 0),
+  ok(orders.size === 1 && verdictOf(/^t1,m1,m2,/.test([...orders][0])), `pending nextTick / microtasks / timers / immediates run in ONE order over ${runs.on.length + runs.off.length} runs, sampled or not (${[...orders].join(' | ')})`);
+  ok(verdictOf([...runs.on, ...runs.off].every((r) => C(r).early === 0)), 'none of them ran early (inside the hold) — with samples landing there');
+  ok(gateOf(runs.on.every((r) => C(r).alsBad === 0 && C(r).initsInHold === 0 && C(r).uncaught === 0)) && verdictOf(runs.off.every((r) => C(r).initsInHold === 0)),
     'the AsyncLocalStorage store unchanged; no async-hooks init (no promise, no resource); nothing reached uncaughtException / unhandledRejection', runs.on.map(C));
-  ok(runs.on.every((r) => C(r).errBad === 0 && C(r).after && C(r).after.p && C(r).after.l), 'inside the hub\'s own prepareStackTrace window: its hook and its limit stay in place while samples land', runs.on.map(C));
+  ok(verdictOf(runs.on.every((r) => C(r).errBad === 0 && C(r).after && C(r).after.p && C(r).after.l)), 'inside the hub\'s own prepareStackTrace window: its hook and its limit stay in place while samples land', runs.on.map(C));
   const deepLines = runs.on.map((r) => holdLines(r).find((l) => /deep recursion|deepHog/.test(l)) || '');
   const atLimit = deepLines.map((l) => (/(the stack was nearly full \(deep recursion\)|deepHog \(src\/hogs\.js:\d+\)[^,;]*) ×\d/.exec(l) || [])[0]);
-  ok(runs.on.every((r) => C(r).deepBad === 0 && C(r).depth > 1000) && atLimit.every(Boolean), `one frame from the stack limit (depth ${C(runs.on[0]).depth}): a sample landed there (${atLimit.join(' | ')}) and prepareStackTrace / stackTraceLimit were never seen changed`, { checks: runs.on.map(C), lines: deepLines });
+  ok(gateOf(runs.on.every((r) => C(r).deepBad === 0 && C(r).depth > 1000)) && verdictOf(atLimit.every(Boolean)), `one frame from the stack limit (depth ${C(runs.on[0]).depth}): a sample landed there (${atLimit.join(' | ')}) and prepareStackTrace / stackTraceLimit were never seen changed`, { checks: runs.on.map(C), lines: deepLines });
 }
 
 // ── ⑥ – ⑦ ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -689,15 +689,15 @@ async function legRetainExitProfile() {
   ok(k.samples >= 5000 && k.h1 - k.h0 < 1024 * 1024, `${k.samples} samples by value from an idle loop: the heap moved ${((k.h1 - k.h0) / 1024).toFixed(0)} KB (< 1 MB — a remote object a sample would be a leak)`, k);
   const nat = await run({ plan: 'natural' });
   const over = Number((/hold over at (\d+)/.exec(nat.err) || [])[1]);
-  ok(nat.code === 0 && over && nat.exitAt - over < 1500, `a natural exit right after a sampled hold: the process ends by itself ${nat.exitAt - over} ms after the hold (the watchdog keeps nothing alive)`, nat.lines);
+  ok(nat.code === 0 && gateOf(over) && nat.exitAt - over < 1500, `a natural exit right after a sampled hold: the process ends by itself ${nat.exitAt - over} ms after the hold (the watchdog keeps nothing alive)`, nat.lines);
   const inf = await run({ plan: 'exit-inflight' });
   const at = Number((/exit at (\d+)/.exec(inf.err) || [])[1]);
-  ok(inf.code === 0 && at && inf.exitAt - at < 1000, `process.exit() while a sample is in flight (a sync child held the loop): it exits ${inf.exitAt - at} ms later — never delayed`, inf.lines);
+  ok(inf.code === 0 && gateOf(at) && inf.exitAt - at < 1000, `process.exit() while a sample is in flight (a sync child held the loop): it exits ${inf.exitAt - at} ms later — never delayed`, inf.lines);
   console.log('⑦ law L — a short profile');
   const p = await run({ plan: 'profile' });
   const last = p.out && p.out.report.profile.last;
   const pl = p.lines.find((l) => l.startsWith('[loop-hold] profile of'));
-  ok(last && last.samples >= 15 && last.idlePct > 0 && last.noJsPct > 0 && last.top.some((x) => x.frame === 'busyHog (src/hogs.js:2)' && x.pct > 0) && pl && /busyHog \(src\/hogs\.js:2\) \d+(\.\d)? %/.test(pl),
+  ok(gateOf(last) && last.samples >= 15 && last.idlePct > 0 && last.noJsPct > 0 && gateOf(last.top.some((x) => x.frame === 'busyHog (src/hogs.js:2)' && x.pct > 0)) && gateOf(pl) && verdictOf(/busyHog \(src\/hogs\.js:2\) \d+(\.\d)? %/.test(pl)),
     `a 1.5 s profile (a sample every 50 ms): the hog's share by its frame, the idle share, the no-JavaScript share of a sync child's 0.4 s (counted per lost interval, one ask in flight); its line: ${pl}`, last);
 }
 
@@ -706,29 +706,29 @@ async function legAcceptance() {
   console.log('⑩ the acceptance\'s must-fix');
   // 1. a LATE watchdog invents no hold: its own procfs reads block 1.6 s while the main loop beats every 20 ms
   const lw = await run({ plan: 'lateWatchdog', blockS: 1.6 });
-  ok(lw.code === 0 && lw.out && lw.out.checks.mainMaxGap < 300 && holdLines(lw).length === 0 && lw.out.report.counts.holds === 0,
+  ok(lw.code === 0 && gateOf(lw.out) && lw.out.checks.mainMaxGap < 300 && holdLines(lw).length === 0 && lw.out.report.counts.holds === 0,
     `1 — the watchdog thread alone blocked 1.6 s while the main loop beat on (its largest gap ${lw.out && lw.out.checks.mainMaxGap} ms): NO hold, no table row, no metric — a hold exists only when the main thread's own beats say so`, { code: lw.code, counts: lw.out && lw.out.report.counts, wall: lw.wallMs, err: lw.err.slice(-600) });
   // 2. a hold nobody sampled is not «native»
   const ns = await run({ plan: 'busy', sampling: false });
   const nl = holdLines(ns)[0];
-  ok(nl && / — on the CPU in user mode — JavaScript or native code, not sampled: /.test(nl) && /not sampled \(sampling is off in Settings\)/.test(nl) && ns.out.report.table[0].verdict === LH.V.unsampled,
+  ok(gateOf(nl) && gateOf(/ — on the CPU in user mode — JavaScript or native code, not sampled: /.test(nl)) && gateOf(/not sampled \(sampling is off in Settings\)/.test(nl)) && ns.out.report.table[0].verdict === LH.V.unsampled,
     `2 — a JavaScript loop nobody sampled: the verdict says «not sampled» (the line, the table key) — never «native code or garbage collection»: ${nl}`, ns.lines);
   let cap = await run({ plan: 'cap', budget: 0 });
   const capOut = (r) => new Set((r.starve || []).filter((x) => x.outside).map((x) => x.h.line));   // (its readers' should 8) the box starved it: counted, said
   if (holdLines(cap).length === 4 && holdLines(cap).every((l) => oneAsleep(l) || capOut(cap).has(l))) cap = await run({ plan: 'cap', budget: 0 });   // (cure 3) once more when every first ask found the thread asleep
   const clOut = capOut(cap), cl = holdLines(cap), clAsleep = cl.filter(oneAsleep), clStarved = cl.filter((l) => !oneAsleep(l) && clOut.has(l)), clAwake = cl.filter((l) => !oneAsleep(l) && !clOut.has(l));
   site(); if (cl.length === 4 && !clAwake.length) skip('2 — past the time budget: every JavaScript hold says «JavaScript» from its first sample', `no sample this run: all 4 first asks found the thread asleep or the box starved them (${clAsleep.length} asleep, ${clStarved.length} «${LH.V.waiting}») in 2 runs — a child the box starved past the suite's floor twice is ALSO red at the close («the box starved the suite»)`);
-  else ok(cl.length === 4 && cl.every((l) => !/native code or garbage collection/.test(l)) && clAwake.every((l) => /^\[loop-hold\] the main loop was held [\d.]+ s — JavaScript/.test(l)) && clAsleep.every((l) => asleepTrue(verdictOfLine(l), l)),
+  else ok(cl.length === 4 && gateOf(cl.every((l) => !/native code or garbage collection/.test(l))) && gateOf(clAwake.every((l) => /^\[loop-hold\] the main loop was held [\d.]+ s — JavaScript/.test(l))) && verdictOf(clAsleep.every((l) => asleepTrue(verdictOfLine(l), l))),
     `2 — past the time budget: every JavaScript hold still says «JavaScript» from its first sample, none «native» (${clAsleep.length} first asks found the thread asleep — their own true forms, counted; ${clStarved.length} the box starved — «${LH.V.waiting}», the suite's own count agreeing, counted)`, cl);
   // 3. no name forges a frame; a vm script with a repo-looking name is not a repo frame
   const fg = await run({ plan: 'forge', record: true });
   const fl = holdLines(fg), sinks = JSON.stringify({ lines: fl, table: fg.out && fg.out.report.table, recs: fg.out && fg.out.checks.recs });
-  ok(fl.length === 2 && !/sk_live|INJECTED|src\/x\.js|fake-vm/.test(sinks) && /busyHog \(src\/hogs\.js:2\)/.test(fl[0]) && /\(outside the repo\)/.test(fl[1]),
+  ok(fl.length === 2 && !/sk_live|INJECTED|src\/x\.js|fake-vm/.test(sinks) && gateOf(/busyHog \(src\/hogs\.js:2\)/.test(fl[0])) && verdictOf(/\(outside the repo\)/.test(fl[1])),
     `3 — a function renamed «sk_live…\\t…/src/x.js\\t7…» and a vm script named …/src/fake-vm.js: no forged name, no non-existent repo file in the lines, the table or the telemetry — the outside frames «(outside the repo)»: ${fl.map((l) => l.slice(0, 200)).join(' | ')}`, fl);
   // 4. off from the first instruction: the REAL boot-trace start reads the setting before anything is asked
   const offBoot = await new Promise((r) => { const c = spawn(process.execPath, [BOOTKID, JSON.stringify({ setting: false })], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir() } }); let o = ''; c.stdout.on('data', (d) => { o += d; }); c.on('exit', () => { let j = null; try { j = JSON.parse(o); } catch { } if (j) cpuMs += j.cpuMs; r(j); }); });
   const onBoot = await new Promise((r) => { const c = spawn(process.execPath, [BOOTKID, JSON.stringify({})], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir() } }); let o = ''; c.stdout.on('data', (d) => { o += d; }); c.on('exit', () => { let j = null; try { j = JSON.parse(o); } catch { } if (j) cpuMs += j.cpuMs; r(j); }); });
-  ok(offBoot && offBoot.evals === 0 && /the boot held the main loop/.test(offBoot.line || '') && /not sampled \(sampling is off in Settings\)/.test(offBoot.line) && onBoot && onBoot.evals >= 1 && /\d samples?: /.test(onBoot.line || ''),
+  ok(gateOf(offBoot) && offBoot.evals === 0 && gateOf(/the boot held the main loop/.test(offBoot.line || '')) && gateOf(/not sampled \(sampling is off in Settings\)/.test(offBoot.line)) && gateOf(onBoot) && onBoot.evals >= 1 && verdictOf(/\d samples?: /.test(onBoot.line || '')),
     `4 — the setting OFF in data/settings.json: a 1.35 s boot through the REAL boot-trace start is asked NOTHING (${offBoot && offBoot.evals} evaluates; the control with no setting: ${onBoot && onBoot.evals}) and still said: ${offBoot && offBoot.line}`, { offBoot, onBoot });
   // 5. no «Waiting for the debugger to disconnect…» at a stop — also the stop of a held hub (the verifier's rows; six strict, two by exitJudge)
   // (主开发 2026-11-18 20:20Z, the shard's red at 58e8087fc: exitNative 1 of 2) THE SECOND ASK'S DOOR: a hold still open past a sync
@@ -744,7 +744,7 @@ async function legAcceptance() {
     const r = await run({ plan: 'stopRow', row }, { atClose: true, onReady: (c) => { setTimeout(() => { try { c.kill('SIGTERM'); } catch { } }, 120); } });   // atClose: its reader's S1
     seen[row] = (seen[row] || 0) + (r.err.includes('Waiting for the debugger') || r.cutShort ? 1 : 0);   // a stderr never closed is no green
   }
-  ok(rows.every((r) => seen[r] === 0), `5 — the six stop rows, twice each (exit / throw inside and right after a sampled hold, SIGTERM inside one, a SIGTERM handler's 1.1 s flush): no «Waiting for the debugger…» line (${JSON.stringify(seen)})`);
+  ok(verdictOf(rows.every((r) => seen[r] === 0)), `5 — the six stop rows, twice each (exit / throw inside and right after a sampled hold, SIGTERM inside one, a SIGTERM handler's 1.1 s flush): no «Waiting for the debugger…» line (${JSON.stringify(seen)})`);
   const nat = [];
   for (const row of ['exitNative', 'exitNativeCross']) for (let i = 0; i < 2; i++) {
     const r = await run({ plan: 'stopRow', row, ...(row === 'exitNative' ? { samplesPerHold: 1 } : {}) }, { args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' }, atClose: true });
@@ -762,8 +762,8 @@ async function legAcceptance() {
   const jW = exitJudge('[lh-post] R 100.000\n[kid] call end 400.000\n' + W8), jL = exitJudge('[lh-post] R 399.000\n[lh-post] S 399.500\n[kid] call end 400.000\n' + W8);
   const jB = exitJudge('[lh-post] S 100.000\n[kid] call end 400.000\n' + W8), jS1 = exitJudge('[lh-post] S 399.000\n[kid] call end 400.000\n' + W8), jNoEnd = exitJudge('[lh-post] R 399.000\n' + W8), jR = exitJudge('[lh-post] S 100.000\n[lh-post] R 401.000\n[kid] call end 400.000\n' + W8);
   const parsed = jB.posts === 1 && jB.stamped && jB.lastAsleep && jS1.posts === 1 && jS1.stamped && jS1.lastAsleep && jNoEnd.posts === 1 && !jNoEnd.stamped && jR.lastSt === 'R' && jW.stamped && jW.lastSt === 'R' && jL.stamped && jR.posts === 2 && jR.stamped && jW.posts === 1 && !jW.lastAsleep && jL.posts === 2 && jL.lastAsleep;
-  ok(parsed && nat.some((x) => x.asleepPosts >= 1) && jB.broken && !jB.residual && jS1.broken && !jS1.residual && jNoEnd.broken && !jNoEnd.residual && jW.broken && !jW.residual && jL.broken && !jL.residual && jR.residual && !jR.broken, `5 — exitJudge reads what it claims: ${nat.reduce((n, x) => n + x.asleepPosts, 0)} asks stamped asleep inside the calls (the main thread's state, not the poster's); RED CONTROLS, each parse proved first: a line whose last ask was posted asleep is «broken» — 300 ms before the call's end AND 1 ms before it (the state term alone); one with no call-end stamp; one whose last ask ran 300 ms before the end (the window term alone); one whose running ask in the window was followed by an asleep one (the last-ask term); one posted running at the call's end is the residual`, nat.map((x) => ({ row: x.row, posts: x.posts, asleep: x.asleepPosts })));
-  ok(nat.every((x) => x.code === 0 && !x.cutShort && x.stamped && x.posts >= 1 && !x.broken), `5 — an exit right after a 0.35 s native hold, twice each: exitNative (ONE ask a hold, abandoned asleep) and exitNativeCross (the second ask met in the exit) exit by themselves (code 0), their stderr read whole (at close), each with its call and its asks stamped; NO line without its last ask posted on the CPU within SESSION_MS of the call's end (${nat.filter((x) => x.broken).length} broken) — red in every branch`, nat);
+  ok(gateOf(parsed) && gateOf(nat.some((x) => x.asleepPosts >= 1)) && gateOf(jB.broken) && !jB.residual && gateOf(jS1.broken) && !jS1.residual && gateOf(jNoEnd.broken) && !jNoEnd.residual && gateOf(jW.broken) && !jW.residual && gateOf(jL.broken) && !jL.residual && gateOf(jR.residual) && !jR.broken, `5 — exitJudge reads what it claims: ${nat.reduce((n, x) => n + x.asleepPosts, 0)} asks stamped asleep inside the calls (the main thread's state, not the poster's); RED CONTROLS, each parse proved first: a line whose last ask was posted asleep is «broken» — 300 ms before the call's end AND 1 ms before it (the state term alone); one with no call-end stamp; one whose last ask ran 300 ms before the end (the window term alone); one whose running ask in the window was followed by an asleep one (the last-ask term); one posted running at the call's end is the residual`, nat.map((x) => ({ row: x.row, posts: x.posts, asleep: x.asleepPosts })));
+  ok(verdictOf(nat.every((x) => x.code === 0 && !x.cutShort && x.stamped && x.posts >= 1 && !x.broken)), `5 — an exit right after a 0.35 s native hold, twice each: exitNative (ONE ask a hold, abandoned asleep) and exitNativeCross (the second ask met in the exit) exit by themselves (code 0), their stderr read whole (at close), each with its call and its asks stamped; NO line without its last ask posted on the CPU within SESSION_MS of the call's end (${nat.filter((x) => x.broken).length} broken) — red in every branch`, nat);
   // (主开发 21:55Z, law 3; its reader's M1 / S2) A SKIP IS NOT A GREEN: the asleep-ask law is EXERCISED by an exit with NO line after an
   // ask stamped asleep (the product's own read); an exit excused as the residual, or one that was asked nothing asleep, exercised
   // nothing. None exercised ⇒ a counted site's named skip (a broken exit is red above, whatever this count)
@@ -783,29 +783,29 @@ async function legAcceptance() {
     su6.push(holdLines(await run({ plan: 'sigusr1' }, { args: ['--inspect-port=127.0.0.1:0'], onReady: (c) => { try { process.kill(c.pid, 'SIGUSR1'); } catch { } } }))[0]);
     ac6.push(holdLines(await run({ plan: 'accessorHog' }))[0]);
   }
-  ok(st6.every((l) => l && /not sampled \(a debugger is attached\)/.test(l) && !NATIVE_WORDS.test(l)), `6 — a port opened in the same tick as a hold, 3 runs: the sample itself answers «stand down» — «not sampled (a debugger is attached)», never native: ${st6[0]}`, st6);
-  ok(su6.every((l) => l && (/not sampled \(a debugger is attached\)/.test(l) || / — JavaScript: .*then a debugger is attached: the sampler stood down/.test(l)) && !NATIVE_WORDS.test(l)), `6 — SIGUSR1 inside a held loop (how a person attaches to a stuck hub), 3 runs: stood down — never native: ${su6[0]}`, su6);
-  ok(ac6.every((l) => l && (/not sampled \(Error\.prepareStackTrace is an accessor here/.test(l) || / — JavaScript: /.test(l)) && !NATIVE_WORDS.test(l)), `6 — an accessor on Error.prepareStackTrace (round 5 law A), 3 runs: «not sampled (… an accessor …)», never native: ${ac6[0]}`, ac6);
+  ok(verdictOf(st6.every((l) => l && /not sampled \(a debugger is attached\)/.test(l) && !NATIVE_WORDS.test(l))), `6 — a port opened in the same tick as a hold, 3 runs: the sample itself answers «stand down» — «not sampled (a debugger is attached)», never native: ${st6[0]}`, st6);
+  ok(verdictOf(su6.every((l) => l && (/not sampled \(a debugger is attached\)/.test(l) || / — JavaScript: .*then a debugger is attached: the sampler stood down/.test(l)) && !NATIVE_WORDS.test(l))), `6 — SIGUSR1 inside a held loop (how a person attaches to a stuck hub), 3 runs: stood down — never native: ${su6[0]}`, su6);
+  ok(verdictOf(ac6.every((l) => l && (/not sampled \(Error\.prepareStackTrace is an accessor here/.test(l) || / — JavaScript: /.test(l)) && !NATIVE_WORDS.test(l))), `6 — an accessor on Error.prepareStackTrace (round 5 law A), 3 runs: «not sampled (… an accessor …)», never native: ${ac6[0]}`, ac6);
   // 7. THE RATE WHERE IT RUNS: the real evaluates of a hold never exceed the schedule's bound for its length
   const rb = await run({ plan: 'busy', countEvals: true });
   const rh = rb.out && rb.out.report.holds[0];
-  ok(rh && rb.out.checks.evals >= 1 && rb.out.checks.evals <= LH.samplesBound(rh.msHi || rh.ms, 100), `7 — a ${rh && rh.ms} ms hold drew ${rb.out && rb.out.checks.evals} real evaluates — at most the schedule's ${rh && LH.samplesBound(rh.msHi || rh.ms, 100)} (a worker that asks at every check goes red here)`, rb.out && rb.out.checks);
+  ok(gateOf(rh) && rb.out.checks.evals >= 1 && rb.out.checks.evals <= LH.samplesBound(rh.msHi || rh.ms, 100), `7 — a ${rh && rh.ms} ms hold drew ${rb.out && rb.out.checks.evals} real evaluates — at most the schedule's ${rh && LH.samplesBound(rh.msHi || rh.ms, 100)} (a worker that asks at every check goes red here)`, rb.out && rb.out.checks);
   // …and the census is a SECOND asker (loop-day-report, the .407 mirror's «3 where 2»): the same busy hold with the census
   // on (every 50 ms here; 1 s in a hub) draws the hold's evaluates PLUS the census's own asks while the loop ran — they are
   // not the hold's, and the leg above counts with it off
   const rc = await run({ plan: 'busy', countEvals: true, census: 50 });
   const rch = rc.out && rc.out.report.holds[0];
-  ok(rch && rb.out && rc.out.checks.evals > rb.out.checks.evals, `7 — the census is a second asker: the same hold with the census on (every 50 ms) drew ${rc.out && rc.out.checks.evals} real evaluates against ${rb.out && rb.out.checks.evals} with it off — the census's own asks while the loop ran (the hold: «${rch && rch.verdict}»)`, { on: rc.out && rc.out.checks.evals, off: rb.out && rb.out.checks.evals, verdict: rch && rch.verdict });
+  ok(gateOf(rch) && gateOf(rb.out) && rc.out.checks.evals > rb.out.checks.evals, `7 — the census is a second asker: the same hold with the census on (every 50 ms) drew ${rc.out && rc.out.checks.evals} real evaluates against ${rb.out && rb.out.checks.evals} with it off — the census's own asks while the loop ran (the hold: «${rch && rch.verdict}»)`, { on: rc.out && rc.out.checks.evals, off: rb.out && rb.out.checks.evals, verdict: rch && rch.verdict });
   // smaller: the press refuses AT THE PRESS; a dead watchdog leaves no profile running; the telemetry name; the byte bound
   const p1 = await run({ plan: 'pressRefuse', sampling: false }), p2 = await run({ plan: 'pressRefuse', openPortFirst: true }), p3 = await run({ plan: 'pressRefuse', fakeHeap: 0.9 });
   const e = (r) => r.out && r.out.checks.press && r.out.checks.press.error;
   ok(e(p1) === 'sampling_off' && e(p2) === 'debugger_attached' && e(p3) === 'heap_near_limit', `(a) a refused profile answers AT THE PRESS by name: ${e(p1)} / ${e(p2)} / ${e(p3)}`);
   const dw = await run({ plan: 'deadWatchdog', lostAfterMs: 200 });
   const da = dw.out && dw.out.checks.after;
-  ok(da && da.running === null && da.last && da.last.refused === 'lost', `(a) the watchdog thread gone mid-profile: no profile «running» for ever — «the watchdog thread stopped» (${JSON.stringify(da && da.last && da.last.refused)})`);
+  ok(gateOf(da) && da.running === null && gateOf(da.last) && da.last.refused === 'lost', `(a) the watchdog thread gone mid-profile: no profile «running» for ever — «the watchdog thread stopped» (${JSON.stringify(da && da.last && da.last.refused)})`);
   const tm = await run({ plan: 'telemetry', record: true, maxBytes: 2048 });
   const rec = tm.out && tm.out.checks.recs.find((x) => x.name === 'srv-loop-hold-ms');
-  ok(rec && rec.kind === 'metric' && rec.value > 0 && /^JavaScript · busyHog \(src\/hogs\.js:2\)$/.test(rec.detail) && Buffer.byteLength(JSON.stringify(tm.out.report)) <= 2048,
+  ok(gateOf(rec) && rec.kind === 'metric' && rec.value > 0 && gateOf(/^JavaScript · busyHog \(src\/hogs\.js:2\)$/.test(rec.detail)) && Buffer.byteLength(JSON.stringify(tm.out.report)) <= 2048,
     `(d) the telemetry row is srv-loop-hold-ms with «verdict · frame» (${rec && rec.detail}); a report asked with a byte bound keeps it (${tm.out && Buffer.byteLength(JSON.stringify(tm.out.report))} ≤ 2048)`);
 }
 
@@ -824,32 +824,32 @@ async function legConditions() {
   const AW_RE = /between JavaScript frames|task_queues|awaitHog|awaitWorkHog/;
   let aw = null, al = null; const awTries = [];
   for (let k = 0; k < 3 && !al; k++) { aw = await run({ plan: 'await', n: 400000, work: true }); const hl = holdLines(aw); awTries.push(hl.find((l) => l.startsWith('[loop-hold] the main loop was held')) || '(no hold line)'); al = hl.find((l) => AW_RE.test(l)) || null; }
-  ok(awTries.every((l) => !/no JavaScript frame|idle/.test(l)), `condition 3, every run (${awTries.length}): an await chain's hold never says «idle» nor «no JavaScript frame» — sampled or not`, awTries);
+  ok(verdictOf(awTries.every((l) => !/no JavaScript frame|idle/.test(l))), `condition 3, every run (${awTries.length}): an await chain's hold never says «idle» nor «no JavaScript frame» — sampled or not`, awTries);
   site(); if (!al) skip('condition 3: a loop held by an await chain is JavaScript (between its jobs, or in the drain that runs them)', `no sample landed inside the chain in ${awTries.length} runs — its lines: ${awTries.map((l) => l.slice(0, 200)).join(' | ')}`);
-  else ok(new RegExp(` — JavaScript${WAITED}: `).test(al) && !/no JavaScript frame|idle/.test(al), `condition 3: a loop held by an await chain — JavaScript (between its jobs, or in the drain that runs them), never «idle», never «no JavaScript frame» (run ${awTries.length} of at most 3): ${al}`, aw.lines);
+  else ok(gateOf(new RegExp(` — JavaScript${WAITED}: `).test(al)) && !/no JavaScript frame|idle/.test(al), `condition 3: a loop held by an await chain — JavaScript (between its jobs, or in the drain that runs them), never «idle», never «no JavaScript frame» (run ${awTries.length} of at most 3): ${al}`, aw.lines);
   const pr = await run({ plan: 'prep' });
   const pl = holdLines(pr).find((l) => /src\/hogs\.js:12/.test(l));
-  ok(pl && !pl.includes(ROOT) && new RegExp(` — JavaScript${WAITED}: `).test(pl) && !/slowPrepHook/.test(pl), `condition 2: a hold inside the program's own stack formatting — V8's string form read for LOCATIONS only (a name there cannot be told from the text around it), repo-relative, no absolute path: ${pl}`, pr.lines);
+  ok(gateOf(pl) && !pl.includes(ROOT) && gateOf(new RegExp(` — JavaScript${WAITED}: `).test(pl)) && !/slowPrepHook/.test(pl), `condition 2: a hold inside the program's own stack formatting — V8's string form read for LOCATIONS only (a name there cannot be told from the text around it), repo-relative, no absolute path: ${pl}`, pr.lines);
   const sc = await run({ plan: 'stopcont' }, { onReady: (c) => { setTimeout(() => { try { process.kill(c.pid, 'SIGSTOP'); } catch { } setTimeout(() => { try { process.kill(c.pid, 'SIGCONT'); } catch { } }, 1300); }, 100); } });
   const sl = holdLines(sc).find((l) => /not running \(stopped, frozen or blocked\)/.test(l));
-  ok(sl && /^\[loop-hold\] the main loop was held 1\.[0-5](–1\.[0-5])? s — not running \(stopped, frozen or blocked\): the main thread ran 0\.0 s of the 1\.\d s measured/.test(sl), `condition 9: a process stopped 1.3 s (SIGSTOP / SIGCONT — a paused container or VM) ⇒ the fifth verdict, not running: ${sl}`, sc.lines);
+  ok(gateOf(sl) && verdictOf(/^\[loop-hold\] the main loop was held 1\.[0-5](–1\.[0-5])? s — not running \(stopped, frozen or blocked\): the main thread ran 0\.0 s of the 1\.\d s measured/.test(sl)), `condition 9: a process stopped 1.3 s (SIGSTOP / SIGCONT — a paused container or VM) ⇒ the fifth verdict, not running: ${sl}`, sc.lines);
   const op = await run({ plan: 'openPort' });
   const said = op.lines.filter((l) => l.startsWith('[loop-hold] a debugger port is open')), ol = holdLines(op)[0];
-  ok(said.length === 1 && ol && /not sampled \(a debugger is attached\)/.test(ol), `condition 4: a loopback port opened at RUN time (inspector.open) — the main thread's beat says it once, the sampler stands down: ${ol}`, op.lines);
+  ok(said.length === 1 && gateOf(ol) && verdictOf(/not sampled \(a debugger is attached\)/.test(ol)), `condition 4: a loopback port opened at RUN time (inspector.open) — the main thread's beat says it once, the sampler stands down: ${ol}`, op.lines);
   const st = await run({ plan: 'stopNoLine' }, { atClose: true });   // its reader's S1: the absence of a line is read on the WHOLE stderr
   const sampled = holdLines(st).some((l) => / \d samples?: busyHog/.test(l));
-  ok(sampled && st.code === 0 && !st.cutShort && st.err.includes('[kid] an ordinary stop') && !st.err.includes('Waiting for the debugger'), 'condition 5: after a SAMPLED hold, an ordinary stop (process.exit) prints no «Waiting for the debugger to disconnect…» — the session lives only while the hold does', st.err.slice(-400));
+  ok(gateOf(sampled) && st.code === 0 && !st.cutShort && gateOf(st.err.includes('[kid] an ordinary stop')) && !st.err.includes('Waiting for the debugger'), 'condition 5: after a SAMPLED hold, an ordinary stop (process.exit) prints no «Waiting for the debugger to disconnect…» — the session lives only while the hold does', st.err.slice(-400));
   const ds = await run({ plan: 'deepSoak', beatMs: 1, profileEveryMs: 1, profileMs: 2500 }, { timeoutMs: 60000 });
   const k = (ds.out && ds.out.checks) || {}, pl2 = ds.out && ds.out.report.profile.last;
   const deepN = pl2 ? (pl2.top.find((x) => x.frame === LH_KEYS_DEEP) || { n: 0 }).n : 0;
-  ok(k.max > 1000 && k.spun >= 15 && k.bad === 0 && k.after && k.after.p && k.after.l && k.after.typeofStack === 'string' && pl2 && pl2.samples >= 1000 && deepN > 0,
+  ok(k.max > 1000 && k.spun >= 15 && k.bad === 0 && gateOf(k.after) && gateOf(k.after.p) && gateOf(k.after.l) && k.after.typeofStack === 'string' && gateOf(pl2) && pl2.samples >= 1000 && deepN > 0,
     `condition 1: 21 depths from the stack limit down 400 frames (max ${k.max}) under ${pl2 && pl2.samples} samples (one a ms; ${deepN} answered «the stack was nearly full», the rest in frames): Error.prepareStackTrace / stackTraceLimit never seen changed, identical after, err.stack still a string`, { k, pl2 });
   const hr = await run({ plan: 'heapRefuse', fakeHeap: 0.9 });
   const rf = hr.out && hr.out.checks.refusal;
-  ok(rf && rf.ok === false && rf.error === 'heap_near_limit', `condition 6: heap used at 90 % of its limit ⇒ the profile is REFUSED by name (${JSON.stringify(rf)})`);
+  ok(gateOf(rf) && rf.ok === false && rf.error === 'heap_near_limit', `condition 6: heap used at 90 % of its limit ⇒ the profile is REFUSED by name (${JSON.stringify(rf)})`);
   const hs = await run({ plan: 'heapStop', heapHighAfterMs: 1100 });
   const hl = hs.out && hs.out.report.profile.last, hline = hs.lines.find((l) => l.startsWith('[loop-hold] profile of'));
-  ok(hl && hl.stopped === 'heap' && hl.samples > 0 && / — It stopped early: the server’s memory neared its limit\.$/.test(hline || ''), `condition 6: the heap passing 85 % while a profile runs ⇒ it stops by itself, said: ${hline}`, hl);
+  ok(gateOf(hl) && hl.stopped === 'heap' && hl.samples > 0 && verdictOf(/ — It stopped early: the server’s memory neared its limit\.$/.test(hline || '')), `condition 6: the heap passing 85 % while a profile runs ⇒ it stops by itself, said: ${hline}`, hl);
 }
 
 // ── ⑪ ROUND 3 (d174ac207: six laws, each against the red control the verifiers measured) ──────────────────────────────
@@ -868,7 +868,7 @@ async function legRound3(node, tag) {
     }
     const native = res.filter((x) => x.verdicts.includes(LH.V.native));
     const okv = res.every((x) => x.verdicts.length && x.verdicts.every((v) => v === LH.V.js || v === LH.V.unsampled || v === LH.V.cpu));
-    ok(!native.length && okv && res.every((x) => x.contains !== false),
+    ok(!native.length && gateOf(okv) && verdictOf(res.every((x) => x.contains !== false)),
       `(1) a JavaScript hog whose watchdog wakes in its last ms (${res.length} runs, d = ${Math.min(...res.map((x) => x.d))} … +${Math.max(...res.map((x) => x.d))} ms): never «native» — JavaScript when a sample landed inside, else «on the CPU in user mode … not sampled» with the asks said; every held range contains the truth (${res.map((x) => x.how).join(' · ')})`, res.filter((x) => native.includes(x) || !x.verdicts.length || x.contains === false)); }
   // (2) EVERY LENGTH FROM A CLOCK THAT CANNOT STEP: the wall clock stepped by ±2 s and ±1 h in the main thread, the watchdog, both — an idle loop
   { const bad = [];
@@ -880,7 +880,7 @@ async function legRound3(node, tag) {
     ok(!bad.length, '(2) the date stepped +2 s, −2 s, +1 h, −1 h — in the main thread, in the watchdog, in both (12 runs, an idle loop): no hold, no table row, no metric', bad);
     const r = await run({ plan: 'monoAcrossStep', record: true }, { node, args: ['-r', STEPPER], env: { STEP_SIDE: 'both', STEP_BY: '3600000', STEP_AT: '650' } });
     const hs = (r.out && r.out.report.holds) || [], truth = r.out && r.out.checks.truthMs;
-    ok(hs.length === 1 && within(hs[0], truth) && hs[0].verdict === LH.V.js, `(2) a real ${truth && truth.toFixed(0)} ms hold across a +1 h step of the date in both threads: ONE hold of ${hs[0] && hs[0].ms}–${hs[0] && hs[0].msHi} ms (its range contains the truth), dated once`, hs.map((h) => [h.at, h.ms, h.msHi, h.line])); }
+    ok(hs.length === 1 && gateOf(within(hs[0], truth)) && hs[0].verdict === LH.V.js, `(2) a real ${truth && truth.toFixed(0)} ms hold across a +1 h step of the date in both threads: ONE hold of ${hs[0] && hs[0].ms}–${hs[0] && hs[0].msHi} ms (its range contains the truth), dated once`, hs.map((h) => [h.at, h.ms, h.msHi, h.line])); }
   // (3) A SAMPLE COSTS THE HELD PROGRAM NOTHING IT KEEPS: main-thread heap per REAL evaluate (counted at the sample's own first call)
   { const r = await run({ plan: 'heapEvals', beatMs: 1, profileEveryMs: 1, countEvals: true, want: 2200, profileMs: 20000 }, { node, args: ['--expose-gc'], timeoutMs: 60000 });
     const k = (r.out && r.out.checks) || {}, per = k.realEvals ? (k.h1 - k.h0) / k.realEvals : null;
@@ -888,24 +888,24 @@ async function legRound3(node, tag) {
   // (4) A PROFILE THAT RAN IS NEVER «LOST»: 600 functions in one long-named module, rotated through a profile
   { const r = await run({ plan: 'manyLocations', beatMs: 10, profileEveryMs: 10, profileMs: 3000, lostAfterMs: 1000 }, { node, timeoutMs: 40000 });
     const p = r.out && r.out.report.profile, l = p && p.last, sum = l ? Math.round(10 * (l.idlePct + l.betweenPct + l.noJsPct + l.notSampledPct + l.top.reduce((a, x) => a + x.pct, 0))) / 10 : null;
-    ok(l && !l.refused && !p.running && l.samples >= 100 && l.locations >= 100 && l.top.some((x) => x.other) && sum === 100,
+    ok(gateOf(l) && !l.refused && !p.running && l.samples >= 100 && l.locations >= 100 && gateOf(l.top.some((x) => x.other)) && sum === 100,
       `(4) a profile over ${l && l.locations} distinct locations of one long-named module: its result kept (${l && l.samples} samples, the top ${l && l.top.length - 1} + «(other)», shares summing to ${sum} %) — never «running» past its end, never «lost»`, p); }
   // (5) THE LINE NAMES THE CAUSE THAT STOPPED IT: a debugger port opened while a profile runs
   { const r = await run({ plan: 'stopDebugger' }, { node });
     const l = r.out && r.out.report.profile.last, pl = r.lines.find((x) => x.startsWith('[loop-hold] profile of'));
     const dw = (LH.PROFILE_STOPPED || {}).debugger;   // (a red control runs these legs against an older tree: no table there)
-    ok(l && dw && l.stopped === 'debugger' && l.stoppedWords === dw && !/memory/.test(l.stoppedWords) && pl && (pl.endsWith(' — ' + dw) || pl.endsWith(' — ' + dw + ' — ' + (LH.PROFILE_UNSAMPLED || {}).debugger)),
+    ok(gateOf(l) && gateOf(dw) && l.stopped === 'debugger' && l.stoppedWords === dw && !/memory/.test(l.stoppedWords) && gateOf(pl) && (verdictOf(pl.endsWith(' — ' + dw)) || verdictOf(pl.endsWith(' — ' + dw + ' — ' + (LH.PROFILE_UNSAMPLED || {}).debugger))),
       `(5) a profile stopped by a debugger says so — in the result Diagnostics shows and in the journal line, the same sentence: ${pl}`, l); }
   // (6) NO NAME THE REPO'S OWN SOURCE DOES NOT SPELL AT THAT PLACE — the verifiers' three plants beside four honest names
   { const r = await run({ plan: 'names', record: true }, { node, timeoutMs: 40000 });
     const rep = r.out && r.out.report, all = JSON.stringify({ lines: r.lines, table: rep && rep.table, holds: rep && rep.holds, recs: r.out && r.out.checks.recs });
     const hl = holdLines(r);
-    ok(rep && !/sk_live|john|smith/i.test(all) && !all.includes('src/loop-hold.js:77'),
+    ok(gateOf(rep) && !/sk_live|john|smith/i.test(all) && !all.includes('src/loop-hold.js:77'),
       '(6) a vm script compiled under a REAL repo file\'s name, a repo function named by a runtime value (a computed key), and an outside name planting a repo location line in the string form: no outside name and no planted culprit in the journal, the ring, the table or the telemetry', hl);
     const rows = (rep && rep.table) || [], computedRows = rows.filter((x) => /^src\/hogs\.js:\d+$/.test(x.frame));
-    ok(hl.some((l) => /samples?: [^;]*\bsrc\/loop-hold\.js:1 ← /.test(l)) && hl.some((l) => /samples?: [^;]*\bserver\.js:1 ← /.test(l)) && hl.filter((l) => /samples?: [^;]*\bsrc\/hogs\.js:\d+ ← computedSelf \(src\/hogs\.js:\d+\)/.test(l)).length === 2 && computedRows.length >= 1 && computedRows.every((x) => x.count === 2) && hl.some((l) => l.includes(LH.WORDS.formatting)),
+    ok(gateOf(hl.some((l) => /samples?: [^;]*\bsrc\/loop-hold\.js:1 ← /.test(l))) && gateOf(hl.some((l) => /samples?: [^;]*\bserver\.js:1 ← /.test(l))) && hl.filter((l) => /samples?: [^;]*\bsrc\/hogs\.js:\d+ ← computedSelf \(src\/hogs\.js:\d+\)/.test(l)).length === 2 && computedRows.length >= 1 && gateOf(computedRows.every((x) => x.count === 2)) && verdictOf(hl.some((l) => l.includes(LH.WORDS.formatting))),
       '(6) …said by LOCATION alone (the vm scripts at src/loop-hold.js:1 / server.js:1, the computed-key function at its line), and the planted string form as «frames unreadable (inside the program\'s own stack formatting)»', hl);
-    ok(['member', 'arrowHog', 'methodHog', '\\(anonymous\\)'].every((n) => hl.some((l) => new RegExp(`${n} \\(src/hogs\\.js:\\d+\\)`).test(l))),
+    ok(verdictOf(['member', 'arrowHog', 'methodHog', '\\(anonymous\\)'].every((n) => hl.some((l) => new RegExp(`${n} \\(src/hogs\\.js:\\d+\\)`).test(l)))),
       '(6) HONEST NAMES STAY: a class member, an arrow assigned to a const, a method, an anonymous function — each a real repo function whose name its own line spells', hl.filter((l) => /member|arrowHog|methodHog|anonymous/.test(l))); }
   // (7) NO DEBUGGER LINE: a sync child held the loop and the process exited right after it — swept across the ask (round 2: 28 of 56 inside the session's 50 ms)
   { const hits = [];
@@ -922,16 +922,16 @@ async function legRound3(node, tag) {
   // (8) THE PRESS: a debugger port opened in the same tick, and a watchdog that died
   { const r = await run({ plan: 'pressSameTick' }, { node });
     const pr = r.out && r.out.checks.press;
-    ok(pr && pr.ok === false && pr.error === 'debugger_attached', `(8) a press in the same tick a debugger port opened: refused AT the press by name (${JSON.stringify(pr)}) — never a success toast then nothing`);
+    ok(gateOf(pr) && pr.ok === false && pr.error === 'debugger_attached', `(8) a press in the same tick a debugger port opened: refused AT the press by name (${JSON.stringify(pr)}) — never a success toast then nothing`);
     const d = await run({ plan: 'deadPress' }, { node });
     const k = (d.out && d.out.checks) || {};
-    ok(k.mid && !k.mid.running && k.mid.last && k.mid.last.refused === 'lost' && k.press2 && k.press2.error === 'no_watchdog',
+    ok(gateOf(k.mid) && !k.mid.running && gateOf(k.mid.last) && k.mid.last.refused === 'lost' && gateOf(k.press2) && k.press2.error === 'no_watchdog',
       `(8) the watchdog died 0.2 s into a 3 s profile: at once «lost — the watchdog thread stopped» (never «running» for the profile's length + 30 s), and a second press is refused no_watchdog`, k); }
   // (10, 13a) TWO HOLDS WHILE THE WATCHDOG SLEPT: both said (the main thread's gap ring loses none), each dated at its own gap's end, each range containing the truth
   { const r = await run({ plan: 'twoUnseen', fifo: true, blockS: 1.3, at1: 300, at2: 750 }, { node });
     const hs = ((r.out && r.out.report.holds) || []).slice().reverse(), tw = (r.out && r.out.checks.truth) || [];
     const dated = hs.map((h, i) => (tw[i] ? Math.abs(h.at - tw[i].start) : null));
-    ok(hs.length === 2 && tw.length === 2 && hs.every((h) => /not sampled \(the watchdog was not running either\)/.test(h.line)) && dated.every((x) => x != null && x <= 60) && hs.every((h, i) => within(h, tw[i].end - tw[i].start)),
+    ok(hs.length === 2 && tw.length === 2 && gateOf(hs.every((h) => /not sampled \(the watchdog was not running either\)/.test(h.line))) && gateOf(dated.every((x) => x != null && x <= 60)) && verdictOf(hs.every((h, i) => within(h, tw[i].end - tw[i].start))),
       `(10) two holds while the watchdog slept 1.3 s: both said (round 2's handshake kept only the largest), each dated at its own gap (${dated.map((x) => (x == null ? '?' : x.toFixed(0) + ' ms')).join(', ')} from the truth), each range containing it`, { holds: hs.map((h) => [h.at, h.ms, h.msHi]), truth: tw }); }
 }
 
@@ -1055,7 +1055,7 @@ async function legRound4(node, tag, tree = null) {
     if (SRCL.split(CUTA).length === 2) vmM.compileFunction(editAnchor(SRCL, CUTA, "  if (state === 'asleep') return { cls: 'native', words: ASK_WORDS.native, key: '(native)', keyWords: '(native)', after };\n  if (false) {", "src/loop-hold.js"), ['module', 'exports', 'require'], { filename: 'loop-hold-asleep-sampled-mutant.js' })(mut, mut.exports, () => ({}));
     const fold = (L) => { const J = L.judgeAsks([{ postedAt: 1000, answeredAt: 1300, state: 'asleep', kernel: L.RUNNING_KERNEL_WORDS, answer: { kind: 'js', words: 'pbkdfHog (src/hogs.js:24)', key: 'src/hogs.js:24', keyWords: 'pbkdfHog (src/hogs.js:24)' }, beat: 7 }], { beat0: 7, holdEnd: 1400 }); return L.foldHold({ from: 900, to: 1400, fromM: 900, toM: 1400, ms: 500, samples: J.samples, outside: J.outside, d: { wallMs: 500, ranMs: 480, userMs: 470, kernelMs: 10, waitMs: 0 } }); };
     const real = fold(LH), lie = mut.exports.foldHold ? fold(mut.exports) : null;
-    ok(asleepTrue(real.verdict, { userMs: 470, kernelMs: 10 }) && lie && !asleepTrue(lie.verdict, { userMs: 470, kernelMs: 10 }),
+    ok(gateOf(asleepTrue(real.verdict, { userMs: 470, kernelMs: 10 })) && gateOf(lie) && !asleepTrue(lie.verdict, { userMs: 470, kernelMs: 10 }),
       `(A) the asleep leg's RED CONTROL: the canonical asleep hold folds to «${real.verdict}» (passes); a product that words the asleep ask as sampled folds it to «${lie && lie.verdict}» — refused`, { real: real.verdict, lie: lie && lie.verdict });
   }
   { // (its readers' should 3) THE ASLEEP WORDS THE SUITE READS ARE askOf's OWN — both forms, through both of the suite's readers
@@ -1063,7 +1063,7 @@ async function legRound4(node, tag, tree = null) {
     // the line is the PRODUCT'S (judgeAsks → holdLine), never one the suite types: a product that reworded the samples part fails here too
     const lineOf = (state, kernel) => { const J = LH.judgeAsks([{ postedAt: 1000, answeredAt: null, state, kernel, answer: null, beat: null }], { beat0: 7, holdEnd: 1400 }); return LH.holdLine({ from: 900, to: 1400, fromM: 900, toM: 1400, ms: 500, samples: J.samples, outside: J.outside, d: null }); };
     const one = (w) => lineOf('asleep', w === w2 ? LH.RUNNING_KERNEL_WORDS : 'pipe_read in read');
-    ok(w1 === 'asleep: pipe_read in read' && w2 === LH.WOKE_WORDS && [w1, w2].every((w) => ASLEEP_IN_LINE.test(one(w)) && oneAsleep(one(w)) && samplesIn(one(w)) === 1) && !ASLEEP_IN_LINE.test(lineOf('running', null)),
+    ok(w1 === 'asleep: pipe_read in read' && w2 === LH.WOKE_WORDS && gateOf([w1, w2].every((w) => ASLEEP_IN_LINE.test(one(w)) && oneAsleep(one(w)) && samplesIn(one(w)) === 1)) && !ASLEEP_IN_LINE.test(lineOf('running', null)),
       `(A) the asleep words the suite reads off a line are the product's own: askOf says «${w1}» and «${w2}» (LH.WOKE_WORDS), both read as ONE asleep sample; a native ask is not`, { w1, w2 });
   }
 
@@ -1106,7 +1106,7 @@ async function legRound4(node, tag, tree = null) {
     { // r415's control of the law: a line saying «JavaScript» with «not sampled» is refused — over a built line, and over every real tail line
       const bad = '[loop-hold] the main loop was held 0.1 s — JavaScript: the main thread ran 0.1 s of the 0.1 s measured (user 0.1, kernel 0.0); not sampled (no sample landed inside it — asked 1 time: answered as it ended)';
       const lied = inTail.filter((a) => a.verdict === LH.V.js && !jsSampled(a));
-      ok(!jsSampled({ verdict: LH.V.js, line: bad }) && jsSampled({ verdict: LH.V.js, line: '[loop-hold] the main loop was held 0.1 s — JavaScript: x; 1 sample: pbkdfHog (src/hogs.js:24) ×1' }) && !lied.length,
+      ok(!jsSampled({ verdict: LH.V.js, line: bad }) && gateOf(jsSampled({ verdict: LH.V.js, line: '[loop-hold] the main loop was held 0.1 s — JavaScript: x; 1 sample: pbkdfHog (src/hogs.js:24) ×1' })) && !lied.length,
         `(A) ${tag}: «not sampled» is never dressed as «${LH.V.js}» — a built line saying it is refused, a sampled one passes; of ${inTail.length} real tail lines, ${lied.length} said it`, lied.slice(0, 2));
     }
     // r147: THE EDGE — an ask answered at the hold's last moment never names it: the window's own verdict, its frame said neutrally
@@ -1137,10 +1137,10 @@ async function legRound4(node, tag, tree = null) {
     // on a loaded box also asks after the child ended, where node's own JavaScript answers (a release gate's D 921 on
     // Node 24: two asks answered by undici's lazy load, «JavaScript» 2 : 1) — the rest a NAMED, COUNTED skip like (A)'s
     const child = started.filter((b) => b.asks.length && !b.outside.length), unjudged = started.filter((b) => !child.includes(b));
-    ok(B.length === 10 && B.every((b) => b.verdict && b.verdict !== LH.V.native), `(B) ${tag}: the mixed hold is never «native code or garbage collection», wherever the watchdog started (D = 400…1300 ms)`, B.filter((b) => !b.verdict || b.verdict === LH.V.native).slice(0, 2));
+    ok(B.length === 10 && verdictOf(B.every((b) => b.verdict && b.verdict !== LH.V.native)), `(B) ${tag}: the mixed hold is never «native code or garbage collection», wherever the watchdog started (D = 400…1300 ms)`, B.filter((b) => !b.verdict || b.verdict === LH.V.native).slice(0, 2));
     site(); if (unjudged.length) skip(`(B) ${tag}: ${unjudged.length} of ${started.length} runs whose watchdog started inside the sync child`, `the watchdog was late on this box: an ask outside the child's own stamps — ${unjudged.map((b) => `D ${b.measured}: asks at ${b.asks.join('/') || 'none'} ms, the child ${b.child ? b.child.join('–') : '?'} ms`).join('; ')}`);
     site(); if (child.length < 4) skip(`(B) ${tag}: the count floor (4 runs with every ask inside the sync child)`, `the watchdog was late on this box: ${child.length} of 4`);
-    if (child.length) ok(child.every((b) => b.verdict === LH.V.blocked && /asleep: \S/.test(b.line || '')), `(B) ${tag}: the watchdog started inside the sync child (${child.length} runs, every ask inside the child's own stamps, its window covering less than half the hold) ⇒ «in the kernel (blocked)» with the wait channel the ask found`, child.filter((b) => b.verdict !== LH.V.blocked || !/asleep: \S/.test(b.line || '')).slice(0, 2));
+    if (child.length) ok(verdictOf(child.every((b) => b.verdict === LH.V.blocked && /asleep: \S/.test(b.line || ''))), `(B) ${tag}: the watchdog started inside the sync child (${child.length} runs, every ask inside the child's own stamps, its window covering less than half the hold) ⇒ «in the kernel (blocked)» with the wait channel the ask found`, child.filter((b) => b.verdict !== LH.V.blocked || !/asleep: \S/.test(b.line || '')).slice(0, 2));
   }
   // (C) MUST 2 — THE WATCHDOG'S OWN FILE READS NEVER DELAY A CHECK: every read of a repo source takes SLOW_READ_MS (sync or async,
   //     in the watchdog's own thread); a 700 ms hold is asked at held ≈ 80, 200, 400 ms ON TIME, the next hold too, and
@@ -1165,8 +1165,8 @@ async function legRound4(node, tag, tree = null) {
     // the CPU past due + 60 is counted and said, never red
     const F = FIRST_ASK_MS, due = [F, SECOND_ASK_MS, THIRD_ASK_MS], first = lag[0] || [];
     const lateN = due.filter((d, i) => first[i] != null && first[i] > d + 60).length + ((lag[1] || [])[0] > F + 60 ? 1 : 0);
-    ok(!!cc && first.length >= 3 && due.every((d, i) => first[i] != null && first[i] <= d + 250) && (lag[1] || [])[0] != null && lag[1][0] <= F + 250, `(C) ${tag}: with every source read taking ${SLOW_READ_MS} ms, the 700 ms hold is asked at ${first.join(' / ')} ms (due ${due.join(' / ')} + one check; ${lateN} later than due + 60 — the watchdog late on the CPU, said; a ${SLOW_READ_MS} ms read at the first two asks or at the hold's end would push an ask past its bound or out of its hold — not one at the third) and the next hold at ${(lag[1] || [])[0]} ms — no read delays a check`, { lag, err: C.err.slice(-400) });
-    ok(lines.length >= 2 && lines.every((l) => /said by location alone \((the source files answered slowly|the time for reading names was spent)/.test(l)) && lines.every((l) => /src\/hogs\.js:\d+/.test(l) && !/busyHog \(src\/hogs/.test(l)),
+    ok(!!cc && first.length >= 3 && gateOf(due.every((d, i) => first[i] != null && first[i] <= d + 250)) && (lag[1] || [])[0] != null && lag[1][0] <= F + 250, `(C) ${tag}: with every source read taking ${SLOW_READ_MS} ms, the 700 ms hold is asked at ${first.join(' / ')} ms (due ${due.join(' / ')} + one check; ${lateN} later than due + 60 — the watchdog late on the CPU, said; a ${SLOW_READ_MS} ms read at the first two asks or at the hold's end would push an ask past its bound or out of its hold — not one at the third) and the next hold at ${(lag[1] || [])[0]} ms — no read delays a check`, { lag, err: C.err.slice(-400) });
+    ok(lines.length >= 2 && gateOf(lines.every((l) => /said by location alone \((the source files answered slowly|the time for reading names was spent)/.test(l))) && verdictOf(lines.every((l) => /src\/hogs\.js:\d+/.test(l) && !/busyHog \(src\/hogs/.test(l))),
       `(C) ${tag}: their frames are said by location alone (src/hogs.js:…, no name), and the line says why`, lines.slice(0, 2));
   }
   // (D) THE NAME ROADS (9): a name only inside a string on its line; a vm script under a repo path that is a symlink leading
@@ -1178,9 +1178,9 @@ async function legRound4(node, tag, tree = null) {
   const dl = D.out ? (D.out.report.holds || []).slice().reverse().map((y) => y.line) : [];
   say(`(D) ${dl.map((l) => (/: (?:\d+ samples?|where it was[^:]*): ([^;]*)/.exec(l) || [])[1] || l.slice(0, 120)).join(' · ')}`);
   if (!tree) {
-    ok(dl.length === 3 && /src\/hogs\.js:\d+/.test(dl[0]) && !/strHog/.test(dl[0]), `(D) ${tag}: a name V8 took from a computed key whose own line spells it only INSIDE a string is said by its location alone`, dl[0]);
-    ok(dl.length === 3 && /\(outside the repo\)/.test(dl[1]) && !/outsideHog|link-out/.test(dl[1]), `(D) ${tag}: a repo path that is a symlink leading OUT of the repo is «(outside the repo)» — no name, no path`, dl[1]);
-    ok(dl.length === 3 && /node:internal\/forged/.test(dl[2]) && !/forgedInternal/.test(dl[2]), `(D) ${tag}: a vm script named «node:internal/forged» is said by its location alone — never with its name`, dl[2]);
+    ok(dl.length === 3 && gateOf(/src\/hogs\.js:\d+/.test(dl[0])) && !/strHog/.test(dl[0]), `(D) ${tag}: a name V8 took from a computed key whose own line spells it only INSIDE a string is said by its location alone`, dl[0]);
+    ok(dl.length === 3 && gateOf(/\(outside the repo\)/.test(dl[1])) && !/outsideHog|link-out/.test(dl[1]), `(D) ${tag}: a repo path that is a symlink leading OUT of the repo is «(outside the repo)» — no name, no path`, dl[1]);
+    ok(dl.length === 3 && gateOf(/node:internal\/forged/.test(dl[2])) && !/forgedInternal/.test(dl[2]), `(D) ${tag}: a vm script named «node:internal/forged» is said by its location alone — never with its name`, dl[2]);
   }
   // (E) THE HEAP THAT FILLS (3), with REAL heap statistics: a process under --max-old-space-size=96 filled to 88 % of its OLD
   //     generation — the press is refused by name (round 3 judged 85 % of heap_size_limit, 288 MB on Node 24: never reached)
@@ -1188,7 +1188,7 @@ async function legRound4(node, tag, tree = null) {
   const E = await run({ plan: 'heapFill', tree }, { node, args: ['--max-old-space-size=160'], timeoutMs: 30000 });
   const eh = E.out && E.out.checks && E.out.checks.heap;
   say(`(E) ${eh ? `old generation ${eh.usedMb} of ${eh.limitMb} MB used (heap_size_limit ${eh.heapSizeLimitMb} MB) — the press: ${JSON.stringify(eh.press)}` : 'no answer: ' + E.err.split('\n').filter((l) => /FATAL|heap|Error/.test(l)).slice(0, 3).join(' | ').slice(0, 400)}`);
-  if (!tree) ok(!!eh && eh.limitMb === 160 && eh.press && eh.press.error === 'heap_near_limit', `(E) ${tag}: filled to 86 % of a 160 MB old generation, the press is refused «heap_near_limit» — the process stays alive`, eh);
+  if (!tree) ok(!!eh && eh.limitMb === 160 && gateOf(eh.press) && eh.press.error === 'heap_near_limit', `(E) ${tag}: filled to 86 % of a 160 MB old generation, the press is refused «heap_near_limit» — the process stays alive`, eh);
   return { A, B, C: lag, D: dl, E: eh };
 }
 
@@ -1213,7 +1213,7 @@ async function legRamp(node, tag, runs = 10, tree = REPO) {
   const med = (a) => { const b = a.slice().sort((x, y) => x - y); return b.length % 2 ? b[(b.length - 1) / 2] : (b[b.length / 2 - 1] + b[b.length / 2]) / 2; };
   const load = fs.readFileSync('/proc/loadavg', 'utf8').split(' ').slice(0, 3).join(' ');
   console.log(`  · ${tag}: without the watchdog ${res.none.join(' ')} (median ${med(res.none)}); with it at default ${res.watchdog.join(' ')} (median ${med(res.watchdog)}); load ${load}`);
-  ok(res.none.length === runs && res.watchdog.length === runs && res.none.every((x) => x > 5) && res.watchdog.every((x) => x > 5), `⑬ ${tag}: ${runs} interleaved runs a side reached the ramp's end by abort (a number for the kb's near-limit sentence)`, res);
+  ok(res.none.length === runs && res.watchdog.length === runs && gateOf(res.none.every((x) => x > 5)) && verdictOf(res.watchdog.every((x) => x > 5)), `⑬ ${tag}: ${runs} interleaved runs a side reached the ramp's end by abort (a number for the kb's near-limit sentence)`, res);
   return { ...res, medNone: med(res.none), medWatchdog: med(res.watchdog), load };
 }
 
@@ -1249,13 +1249,13 @@ async function legStarved() {
   };
   const S = await starvedRun(), sr = starveOf(S), sh = sr.find((x) => x.share != null);
   say(`⑭ the starved scene (cpu ${cpu} shared with two spinners): the suite measured ${sh ? (100 * sh.share).toFixed(0) : '?'} % run-queue wait; the product said «${sh ? sh.h.verdict : '?'}»`);
-  ok(sh && sh.share >= SUITE_STARVED && sh.waiting && !agreeOf(sr).length, `a TRUE starved hold (one cpu, two spinners beside it): the suite's own count ≥ ${100 * SUITE_STARVED} % and the product says «waiting for a CPU» — they agree`, sr.map((x) => ({ share: x.share, v: x.h.verdict })));
+  ok(gateOf(sh) && sh.share >= SUITE_STARVED && gateOf(sh.waiting) && !agreeOf(sr).length, `a TRUE starved hold (one cpu, two spinners beside it): the suite's own count ≥ ${100 * SUITE_STARVED} % and the product says «waiting for a CPU» — they agree`, sr.map((x) => ({ share: x.share, v: x.h.verdict })));
   const never = await starvedRun(mutTree('never', 'WAIT_SHARE = 0.2,', 'WAIT_SHARE = 99,'));
   const nb = agreeOf(starveOf(never));
-  ok(nb.length > 0 && /said «/.test(nb[0]), `MUTANT «never waiting» (WAIT_SHARE out of reach) on the starved scene is RED by name: ${nb[0] || 'no disagreement found'}`);
+  ok(nb.length > 0 && verdictOf(/said «/.test(nb[0])), `MUTANT «never waiting» (WAIT_SHARE out of reach) on the starved scene is RED by name: ${nb[0] || 'no disagreement found'}`);
   const always = await run1({ plan: 'busy', tree: mutTree('always', 'if (waitedMuch(d) && d.waitMs >= d.ranMs) return V.waiting;', 'if (d.waitMs != null) return V.waiting;') });
   const ab = agreeOf(starveOf(always));
-  ok(ab.length > 0 && /said «waiting for a CPU», measured/.test(ab[0]), `MUTANT «always waiting» (any wait the verdict) on a calm scene is RED by name: ${ab[0] || 'no disagreement found'}`);
+  ok(ab.length > 0 && verdictOf(/said «waiting for a CPU», measured/.test(ab[0])), `MUTANT «always waiting» (any wait the verdict) on a calm scene is RED by name: ${ab[0] || 'no disagreement found'}`);
   // r5404 THE LATE WATCHDOG's WINDOW, placed AT WILL (no machine load): a lateJs child pinned to one cpu, its stat FIFO armed at
   // 350 ms, its 300 ms hog at 650 ms (the product's window ≈ 620 ms: from the arm to the span's end plus a beat), and spinners
   // pinned to the SAME cpu, started by the child at its hog's start. ONE spinner for ~150 ms (plus its own start) puts ~75–120 ms
@@ -1270,16 +1270,16 @@ async function legStarved() {
   say(`⑭b one spinner into a late watchdog's hog (cpu ${cpu}): the span ${c1 ? (100 * c1.spanShare).toFixed(0) : '?'} %, the window ${c1 ? (100 * c1.share).toFixed(0) : '?'} %; the product said «${c1 ? c1.h.verdict : '?'}»${c1 && c1.also ? ' (it also waited)' : ''}`);
   site(); if (!c1 || !(c1.spanShare >= SUITE_STARVED && c1.share < SUITE_STARVED) || c1.waiting || c1.also) skip('⑭b the late band, placed: the release\'s form red, the cured form green', `the plant missed its band: the span ${c1 ? (100 * c1.spanShare).toFixed(0) : '?'} % (≥ 25 % wanted), the window ${c1 ? (100 * c1.share).toFixed(0) : '?'} % (< 25 % wanted), the product silent wanted — it said «${c1 ? c1.h.verdict : '?'}»${c1 && c1.also ? ' and it also waited' : ''}`);
   else {
-    ok(relRed.length > 0 && /^lateJs: the suite measured \d+ % run-queue wait, the product said «.+» and nothing of a wait$/.test(relRed[0]), `CONTROL r5404 (the RELEASE's form: the share over the span) on a late watchdog's hold in the band, placed at will: RED by name with the first try's words — ${relRed[0] || 'no disagreement'}`);
+    ok(relRed.length > 0 && verdictOf(/^lateJs: the suite measured \d+ % run-queue wait, the product said «.+» and nothing of a wait$/.test(relRed[0])), `CONTROL r5404 (the RELEASE's form: the share over the span) on a late watchdog's hold in the band, placed at will: RED by name with the first try's words — ${relRed[0] || 'no disagreement'}`);
     ok(!agreeOf(notBoot(cured1)).length, `r5404: the cured form judges that hold over the window the product has (${(100 * c1.share).toFixed(0)} % < ${100 * SUITE_STARVED} %): neither side asserted — the band, no red`, agreeOf(notBoot(cured1)));
   }
   const A2 = await late({ n: 2, ms: 340 }), cured2 = starveOf(A2), c2 = hogRow(cured2);
   say(`⑭b two spinners for a late watchdog's whole hog: the span ${c2 ? (100 * c2.spanShare).toFixed(0) : '?'} %, the window ${c2 ? (100 * c2.share).toFixed(0) : '?'} %; the product said «${c2 ? c2.h.verdict : '?'}»${c2 && c2.also ? ' (it also waited)' : ''}`);
   site(); if (!c2 || !(c2.share >= SUITE_STARVED)) skip('⑭b a late watchdog\'s hold starved over its window: the words required', `the plant missed: the window ${c2 ? (100 * c2.share).toFixed(0) : '?'} % (≥ 25 % wanted)`);
   else {
-    ok((c2.waiting || c2.also) && !agreeOf(notBoot(cured2)).length, `r5404: a late watchdog's hold starved over its WINDOW (${(100 * c2.share).toFixed(0)} %): the words are still REQUIRED, and said (${c2.waiting ? 'the verdict' : 'it also waited'})`, cured2.map((x) => ({ share: x.share, v: x.h.verdict, also: x.also })));
+    ok((gateOf(c2.waiting) || gateOf(c2.also)) && !agreeOf(notBoot(cured2)).length, `r5404: a late watchdog's hold starved over its WINDOW (${(100 * c2.share).toFixed(0)} %): the words are still REQUIRED, and said (${c2.waiting ? 'the verdict' : 'it also waited'})`, cured2.map((x) => ({ share: x.share, v: x.h.verdict, also: x.also })));
     const N2 = agreeOf(notBoot(starveOf(await late({ n: 2, ms: 340 }, mutTree('never-late', 'WAIT_SHARE = 0.2,', 'WAIT_SHARE = 99,')))));
-    ok(N2.length > 0 && /said «/.test(N2[0]), `MUTANT «never waiting» on a late watchdog's starved hold is RED by name (the cured form judges it): ${N2[0] || 'no disagreement found'}`);
+    ok(N2.length > 0 && verdictOf(/said «/.test(N2[0])), `MUTANT «never waiting» on a late watchdog's starved hold is RED by name (the cured form judges it): ${N2[0] || 'no disagreement found'}`);
   }
 }
 
@@ -1379,4 +1379,4 @@ const sk = skipped.length ? `, ${skipped.length} skipped` : '';
 console.log(`\nLEGS WITH A SAMPLE FLOOR: ${floorSites - skipped.length} judged, ${skipped.length} NOT judged (named above), of ${floorSites}; ${pass + fail} checks judged in all`);
 if (floorSites && skipped.length * 2 > floorSites) console.log(`\n⚠ MOST LEGS WITH A SAMPLE FLOOR WERE NOT JUDGED THIS RUN (${skipped.length} of ${floorSites}) — this run proves little about them`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed${sk})` : `\nALL PASS (${pass}${sk})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

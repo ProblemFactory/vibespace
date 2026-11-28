@@ -62,7 +62,7 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 const SID = 'f01d0000-0000-4000-8000-00000000c0de'; // view-only fixture (the mobile-gaps precedent: a non-guarded id under a scratch HOME)
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the fixture: four turns, each answer a wrapped paragraph + a code block, one Thinking card ──────────────────────
@@ -205,9 +205,9 @@ try {
   await phone.waitApp();
   await sleep(1000);
   const env = await evalJs(`({ mobile: app.isMobile, touch: app.isTouch, iw: innerWidth, dpr: devicePixelRatio })`);
-  check(`the phone: app.isMobile + app.isTouch at ${env.iw} px, DPR ${env.dpr}`, env.mobile && env.touch && env.iw === 390 && env.dpr === 3, env);
+  check(`the phone: app.isMobile + app.isTouch at ${env.iw} px, DPR ${env.dpr}`, gateOf(env.mobile) && gateOf(env.touch) && env.iw === 390 && env.dpr === 3, env);
   await evalJs(`app.viewSession(${JSON.stringify(SID)}, ${JSON.stringify(CWD)}, 'mobile select'); true`);
-  check('the view-only fixture chat renders (6 answers + 1 Thinking card)', await waitFor(`document.querySelectorAll('.chat-view .chat-msg-assistant .chat-text p').length >= 6 && !!document.querySelector('.chat-view .chat-thinking summary')`, 20000));
+  check('the view-only fixture chat renders (6 answers + 1 Thinking card)', verdictOf(await waitFor(`document.querySelectorAll('.chat-view .chat-msg-assistant .chat-text p').length >= 6 && !!document.querySelector('.chat-view .chat-thinking summary')`, 20000)));
   await sleep(600);
 
   // ── ① the … button ──
@@ -227,20 +227,20 @@ try {
       return { has: true, w: Math.round(br.width), h: Math.round(br.height), hits, covered, at: covered && at ? at.tagName.toLowerCase() + '.' + String(at.className).split(' ')[0] : null, narrowed, toolbarBelow, clearedFirst, textBeside: firstTop != null && firstTop < br.bottom - 2, firstKind: (b.parentElement && [...b.parentElement.children].find((c) => c !== b)?.tagName.toLowerCase()) || null, us: getComputedStyle(b).userSelect, label: b.getAttribute('aria-label') }; });
     return { n: msgs.length, compact: !!document.querySelector('.chat-compact'), rows, thinking: !!document.querySelector('.chat-view .chat-msg:has(.chat-thinking) .chat-msg-more') }; })()`;
   const more = await evalJs(CENSUS);
-  check(`every user / assistant text message carries a … button (${more.rows.filter((r) => r.has).length}/${more.n}, compact mode)`, more.compact && more.n === 12 && more.rows.every((r) => r.has), more);
-  check(`…≥ 36 px wide, labelled, user-select none (${more.rows[0]?.w}×${more.rows[0]?.h}, "${more.rows[0]?.label}")`, more.rows.every((r) => r.w >= 36 && r.label === 'Message actions' && r.us === 'none'), more.rows[0]);
-  check('…and drawn over NONE of its message\'s words (the 21×16 hover buttons overlapped 18 of 18 — design-mobile-gaps)', more.rows.every((r) => r.hits.length === 0), more.rows.filter((r) => r.hits.length));
-  check('…the element under its own centre on every message (verify r1 F1: a code-first message\'s toolbar "Wrap" sat over it)', more.rows.every((r) => !r.covered), more.rows.filter((r) => r.covered));
-  check('…no code block / table narrowed beside it; the code-first message\'s toolbar sits BELOW the button (F1: a BFC beside the float was 38 px narrower to its last line)', more.rows.every((r) => r.narrowed.length === 0) && more.rows.some((r) => r.toolbarBelow === true) && more.rows.every((r) => r.toolbarBelow !== false), more.rows.filter((r) => r.narrowed.length || r.toolbarBelow === false));
-  check('…the first line of every paragraph-first message beside the button, never under it; a code-first / table-first message starts below it (F1, the clear)', more.rows.every((r) => (r.clearedFirst ? !r.textBeside : r.textBeside)) && more.rows.filter((r) => r.clearedFirst).length === 2, more.rows.filter((r) => (r.clearedFirst ? r.textBeside : !r.textBeside)));
+  check(`every user / assistant text message carries a … button (${more.rows.filter((r) => r.has).length}/${more.n}, compact mode)`, gateOf(more.compact) && more.n === 12 && verdictOf(more.rows.every((r) => r.has)), more);
+  check(`…≥ 36 px wide, labelled, user-select none (${more.rows[0]?.w}×${more.rows[0]?.h}, "${more.rows[0]?.label}")`, verdictOf(more.rows.every((r) => r.w >= 36 && r.label === 'Message actions' && r.us === 'none')), more.rows[0]);
+  check('…and drawn over NONE of its message\'s words (the 21×16 hover buttons overlapped 18 of 18 — design-mobile-gaps)', verdictOf(more.rows.every((r) => r.hits.length === 0)), more.rows.filter((r) => r.hits.length));
+  check('…the element under its own centre on every message (verify r1 F1: a code-first message\'s toolbar "Wrap" sat over it)', verdictOf(more.rows.every((r) => !r.covered)), more.rows.filter((r) => r.covered));
+  check('…no code block / table narrowed beside it; the code-first message\'s toolbar sits BELOW the button (F1: a BFC beside the float was 38 px narrower to its last line)', gateOf(more.rows.every((r) => r.narrowed.length === 0)) && gateOf(more.rows.some((r) => r.toolbarBelow === true)) && verdictOf(more.rows.every((r) => r.toolbarBelow !== false)), more.rows.filter((r) => r.narrowed.length || r.toolbarBelow === false));
+  check('…the first line of every paragraph-first message beside the button, never under it; a code-first / table-first message starts below it (F1, the clear)', gateOf(more.rows.every((r) => (r.clearedFirst ? !r.textBeside : r.textBeside))) && more.rows.filter((r) => r.clearedFirst).length === 2, more.rows.filter((r) => (r.clearedFirst ? r.textBeside : !r.textBeside)));
   check('the Thinking card (no text to copy beyond its toggle) has none — its toggle is the menu press', !more.thinking);
   // ①b BUBBLE MODE (verify r1 F2): the bubble is a shrink-to-fit flex item — with the float in the bubble every short
   // message's words went UNDER the button ("hi" 41 → 68 px wide, +28 px); inside the first paragraph they share the line
   await evalJs(`app.settings.set('chat.compactMode', false); true`); await sleep(600);
   const bub = await evalJs(CENSUS);
-  check(`BUBBLE mode: every text message carries the … (${bub.rows.filter((r) => r.has).length}/${bub.n}), over none of its words, the element under its centre`, !bub.compact && bub.n === 12 && bub.rows.every((r) => r.has && r.hits.length === 0 && !r.covered), bub.rows.filter((r) => !r.has || r.hits.length || r.covered));
-  check('BUBBLE mode: the first line of EVERY paragraph-first message beside the button (the short user questions included) — never under it; the two block-first ones below it', bub.rows.every((r) => (r.clearedFirst ? !r.textBeside : r.textBeside)) && bub.rows.filter((r) => r.clearedFirst).length === 2, bub.rows.filter((r) => (r.clearedFirst ? r.textBeside : !r.textBeside)));
-  check('BUBBLE mode: no code block / table narrowed beside the button', bub.rows.every((r) => r.narrowed.length === 0 && r.toolbarBelow !== false), bub.rows.filter((r) => r.narrowed.length || r.toolbarBelow === false));
+  check(`BUBBLE mode: every text message carries the … (${bub.rows.filter((r) => r.has).length}/${bub.n}), over none of its words, the element under its centre`, !bub.compact && bub.n === 12 && verdictOf(bub.rows.every((r) => r.has && r.hits.length === 0 && !r.covered)), bub.rows.filter((r) => !r.has || r.hits.length || r.covered));
+  check('BUBBLE mode: the first line of EVERY paragraph-first message beside the button (the short user questions included) — never under it; the two block-first ones below it', gateOf(bub.rows.every((r) => (r.clearedFirst ? !r.textBeside : r.textBeside))) && bub.rows.filter((r) => r.clearedFirst).length === 2, bub.rows.filter((r) => (r.clearedFirst ? r.textBeside : !r.textBeside)));
+  check('BUBBLE mode: no code block / table narrowed beside the button', verdictOf(bub.rows.every((r) => r.narrowed.length === 0 && r.toolbarBelow !== false)), bub.rows.filter((r) => r.narrowed.length || r.toolbarBelow === false));
   await phone.shot('01b-bubble.png');
   await evalJs(`app.settings.set('chat.compactMode', true); true`); await sleep(600);
   await phone.shot('01-more-buttons.png');
@@ -255,8 +255,8 @@ try {
   const trustedCm = a.log.filter((r) => r.type === 'contextmenu' && r.trusted);
   const synthCm = a.log.filter((r) => r.type === 'contextmenu' && !r.trusted);
   console.log('    measured order: ' + a.log.map((r) => `${r.type}${r.type === 'contextmenu' ? (r.trusted ? '(trusted ' + r.ptype + ')' : '(synthetic)') : ''}${r.prevented ? '[prevented]' : ''}`).join(' → '));
-  check(`the platform's selection holds a word of that paragraph ("${a.sel}")`, a.sel.trim().length > 0 && a.inPara, a);
-  check('the native long press happened (selectstart, then a TRUSTED touch contextmenu) and the page did NOT cancel it', a.log.some((r) => r.type === 'selectstart') && trustedCm.length === 1 && trustedCm[0].ptype === 'touch' && trustedCm[0].prevented === false, a.log);
+  check(`the platform's selection holds a word of that paragraph ("${a.sel}")`, a.sel.trim().length > 0 && verdictOf(a.inPara), a);
+  check('the native long press happened (selectstart, then a TRUSTED touch contextmenu) and the page did NOT cancel it', gateOf(a.log.some((r) => r.type === 'selectstart')) && trustedCm.length === 1 && trustedCm[0].ptype === 'touch' && trustedCm[0].prevented === false, a.log);
   check('no synthetic contextmenu was dispatched (the door never armed its timer on text)', synthCm.length === 0, synthCm);
   check(`NO menu in the DOM, none built (${a.menus} / ${a.built}), nothing drawn over the selected word (${a.over})`, a.menus === 0 && a.built === 0 && a.over !== 'menu', a);
   await phone.shot('02-android-selection.png');
@@ -266,7 +266,7 @@ try {
   await resetLog();
   await touchPress(await wordPoint('.chat-view .chat-msg-assistant .chat-text p', 'lazy', -2));
   const i3 = await evalJs(`({ cm: window.__log.filter((r) => r.type === 'contextmenu').length, built: window.__menus, end: window.__log.find((r) => r.type === 'touchend') })`);
-  check(`no synthetic contextmenu, no menu (${i3.cm} / ${i3.built}), the touchend not cancelled (the platform's selection would stand)`, i3.cm === 0 && i3.built === 0 && i3.end && i3.end.prevented === false, i3);
+  check(`no synthetic contextmenu, no menu (${i3.cm} / ${i3.built}), the touchend not cancelled (the platform's selection would stand)`, i3.cm === 0 && i3.built === 0 && gateOf(i3.end) && i3.end.prevented === false, i3);
 
   // ── ④ the message's chrome keeps the menu ──
   console.log('④ a long press on the message\'s chrome');
@@ -275,25 +275,25 @@ try {
   const gutterIs = await evalJs(`(() => { const el = document.elementFromPoint(${gutter.x}, ${gutter.y}); return el ? el.className : null; })()`);
   await touchPress(gutter);
   let items = await menuItems();
-  check(`a long press in the message GUTTER (left of the words, on ${gutterIs}) opens the message menu: ${items.join(' / ')}`, items.includes('Copy text') && items.includes('Open in editor') && items.includes('Message details'), items);
+  check(`a long press in the message GUTTER (left of the words, on ${gutterIs}) opens the message menu: ${items.join(' / ')}`, gateOf(items.includes('Copy text')) && gateOf(items.includes('Open in editor')) && verdictOf(items.includes('Message details')), items);
   await escape();
   await resetLog();
   await androidPress(gutter);
   const g2 = await evalJs(`({ built: window.__menus, open: document.querySelectorAll('.context-menu.chat-msg-menu').length, cms: window.__log.filter((r) => r.type === 'contextmenu').map((r) => (r.trusted ? 'trusted' : 'synthetic') + (r.prevented ? '/prevented' : '')), sel: getSelection().toString(), log: window.__log.map((r) => r.type + (r.trusted ? '' : '(synthetic)') + ':' + r.target) })`);
-  check(`ANDROID on the strip: our menu at 500 ms, the trusted contextmenu after it swallowed — ONE menu built and still open (${g2.built}; ${g2.cms.join(', ')})`, g2.built === 1 && g2.open === 1 && g2.cms.includes('synthetic/prevented') && g2.cms.includes('trusted/prevented'), g2);
+  check(`ANDROID on the strip: our menu at 500 ms, the trusted contextmenu after it swallowed — ONE menu built and still open (${g2.built}; ${g2.cms.join(', ')})`, g2.built === 1 && g2.open === 1 && gateOf(g2.cms.includes('synthetic/prevented')) && verdictOf(g2.cms.includes('trusted/prevented')), g2);
   check(`…and the platform's long press selected nothing under it ("${g2.sel}" — before the hold-off it selected "Answer" and that selection closed the menu)`, g2.sel === '', g2);
   await escape();
   await resetLog();
   await touchPress(await centerOf('.chat-view .chat-thinking > summary'));
   items = await menuItems();
-  check(`a long press on the Thinking toggle (a <summary>) opens the menu: ${items.join(' / ')}`, items.includes('Copy text') && items.includes('Message details'), items);
+  check(`a long press on the Thinking toggle (a <summary>) opens the menu: ${items.join(' / ')}`, gateOf(items.includes('Copy text')) && verdictOf(items.includes('Message details')), items);
   await escape();
   await evalJs(`document.querySelector('.chat-view').dataset.roleIndicator = 'label'; true`); await sleep(200);
   await resetLog();
   await touchPress(await centerOf('.chat-view .chat-msg-user .chat-role'));
   items = await menuItems();
   const roleUS = await evalJs(`getComputedStyle(document.querySelector('.chat-view .chat-role')).userSelect`);
-  check(`label mode: a long press on the role label (the message HEADER, user-select ${roleUS}) opens the menu: ${items.join(' / ')}`, roleUS === 'none' && items.includes('Copy text'), items);
+  check(`label mode: a long press on the role label (the message HEADER, user-select ${roleUS}) opens the menu: ${items.join(' / ')}`, roleUS === 'none' && verdictOf(items.includes('Copy text')), items);
   await escape();
   await evalJs(`document.querySelector('.chat-view').dataset.roleIndicator = 'border'; true`); await sleep(200);
 
@@ -302,7 +302,7 @@ try {
   await resetLog();
   await tapAt(await centerOf('.chat-view .chat-msg-assistant .chat-msg-more'));
   items = await menuItems();
-  check(`a tap on the … button opens the message menu: ${items.join(' / ')}`, items[0] === 'Copy text' && items.includes('Open in editor') && items.includes('Message details'), items);
+  check(`a tap on the … button opens the message menu: ${items.join(' / ')}`, items[0] === 'Copy text' && gateOf(items.includes('Open in editor')) && verdictOf(items.includes('Message details')), items);
   await phone.shot('05-more-menu.png');
   await tapAt(await evalJs(`(() => { const el = [...document.querySelectorAll('.chat-msg-menu .context-menu-item')].find((x) => x.textContent.trim() === 'Copy text'); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`));
   await sleep(300);
@@ -311,8 +311,8 @@ try {
   const toast = await evalJs(`[...document.querySelectorAll('.global-toast')].map((t) => t.textContent.trim()).join(' | ')`);
   const clip = await evalJs(`navigator.clipboard.readText().catch((e) => 'ERR ' + e.message)`);
   check(`Copy text puts the WHOLE message on the clipboard (${clip.length} chars, the last answer verbatim)`, clip === want, { clip: clip.slice(0, 80), want: want.slice(0, 80) });
-  check(`…and the toast names what was copied: "${toast}"`, toast.includes(`Copied the whole message (${wantLines} lines)`), toast);
-  check('…and the menu closed', await evalJs(`!document.querySelector('.chat-msg-menu')`));
+  check(`…and the toast names what was copied: "${toast}"`, verdictOf(toast.includes(`Copied the whole message (${wantLines} lines)`)), toast);
+  check('…and the menu closed', verdictOf(await evalJs(`!document.querySelector('.chat-msg-menu')`)));
 
   // ── ⑥ M2: a selection that starts outside the open menu closes it ──
   console.log('⑥ the menu open, a long press on other words');
@@ -321,7 +321,7 @@ try {
   const open6 = await evalJs(`!!document.querySelector('.chat-msg-menu')`);
   await androidPress(await wordPoint('.chat-view .chat-msg-assistant .chat-text p', 'brown', -1));
   const s6 = await evalJs(`({ open: !!document.querySelector('.chat-msg-menu'), sel: getSelection().toString() })`);
-  check(`the menu was open (${open6}); the long press on another message's words selects ("${s6.sel}") AND closes it (a long press is never an outside TAP — the selection closer did)`, open6 && !s6.open && s6.sel.trim().length > 0, s6);
+  check(`the menu was open (${open6}); the long press on another message's words selects ("${s6.sel}") AND closes it (a long press is never an outside TAP — the selection closer did)`, gateOf(open6) && !s6.open && s6.sel.trim().length > 0, s6);
 
   // ── ⑦ the user-select census on live surfaces ──
   console.log('⑦ chrome text is never selectable');
@@ -329,21 +329,21 @@ try {
   await tapAt(await centerOf('.chat-view .chat-msg-assistant .chat-msg-more'));
   const usOf = (sel) => evalJs(`(() => { const root = document.querySelector(${JSON.stringify(sel)}); if (!root) return null; const els = [root, ...root.querySelectorAll('*')].filter((e) => !e.matches('input, textarea, select, [contenteditable]')); return { n: els.length, bad: els.filter((e) => getComputedStyle(e).userSelect !== 'none').map((e) => e.className || e.tagName) }; })()`);
   const menuUS = await usOf('.context-menu.chat-msg-menu');
-  check(`the message menu: every element user-select none (${menuUS?.n} elements)`, menuUS && menuUS.n >= 4 && menuUS.bad.length === 0, menuUS);
+  check(`the message menu: every element user-select none (${menuUS?.n} elements)`, gateOf(menuUS) && menuUS.n >= 4 && menuUS.bad.length === 0, menuUS);
   await tapAt(await evalJs(`(() => { const el = [...document.querySelectorAll('.chat-msg-menu .context-menu-item')].find((x) => x.textContent.trim() === 'Message details'); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`));
   await sleep(250);
   await phone.shot('07-meta.png');
   const metaUS = await usOf('.msg-meta-pop');
-  check(`Message details (a popover): every element user-select none (${metaUS?.n} elements)`, metaUS && metaUS.n >= 4 && metaUS.bad.length === 0, metaUS);
+  check(`Message details (a popover): every element user-select none (${metaUS?.n} elements)`, gateOf(metaUS) && metaUS.n >= 4 && metaUS.bad.length === 0, metaUS);
   await escape(); await evalJs(`document.querySelectorAll('.msg-meta-pop').forEach((p) => p.remove()); true`);
   const toastUS = await usOf('#global-toasts');
-  check(`the toast stack: every element user-select none (${toastUS?.n} elements)`, toastUS && toastUS.n >= 1 && toastUS.bad.length === 0, toastUS);
+  check(`the toast stack: every element user-select none (${toastUS?.n} elements)`, gateOf(toastUS) && toastUS.n >= 1 && toastUS.bad.length === 0, toastUS);
   const built = await evalJs(`(() => { const list = document.querySelector('.chat-view .chat-message-list');
     const make = (attrs) => { const d = document.createElement('div'); for (const [k, v] of Object.entries(attrs)) d.setAttribute(k, v); const row = document.createElement('div'); row.className = 'context-menu-item'; row.textContent = 'words'; d.appendChild(row); list.appendChild(d); return d; };
     const cases = { '[data-popover]': { 'data-popover': '1' }, '.context-menu': { class: 'context-menu' }, '.global-toast': { class: 'global-toast' }, '.overlap-switcher': { class: 'overlap-switcher' }, '.tab-item': { class: 'tab-item' }, '.chat-msg-more': { class: 'chat-msg-more' }, 'plain div (control)': {} };
     const out = {}; for (const [k, attrs] of Object.entries(cases)) { const d = make(attrs); out[k] = getComputedStyle(d.firstChild).userSelect; d.remove(); } return out; })()`);
   const chromeOk = Object.entries(built).filter(([k]) => !k.startsWith('plain')).every(([, v]) => v === 'none');
-  check(`each chrome surface built INSIDE the selectable chat list stays none (${Object.entries(built).map(([k, v]) => k + ':' + v).join(', ')}) — the plain div there is 'text' (the control: the list opts in, the rule is what differs)`, chromeOk && built['plain div (control)'] === 'text', built);
+  check(`each chrome surface built INSIDE the selectable chat list stays none (${Object.entries(built).map(([k, v]) => k + ':' + v).join(', ')}) — the plain div there is 'text' (the control: the list opts in, the rule is what differs)`, gateOf(chromeOk) && built['plain div (control)'] === 'text', built);
 
   // ── ⑧ DESKTOP unchanged ──
   console.log('⑧ desktop (mouse) unchanged');
@@ -362,9 +362,9 @@ try {
   if (!(await desk.evalJs(`document.querySelectorAll('.chat-view .chat-text p').length >= 4`))) {
     await desk.evalJs(`app.viewSession(${JSON.stringify(SID)}, ${JSON.stringify(CWD)}, 'mobile select'); true`);
   }
-  check('the desktop page renders the same chat (not touch, not mobile)', !denv.touch && !denv.mobile && await desk.waitFor(`document.querySelectorAll('.chat-view .chat-text p').length >= 4`, 20000), denv);
+  check('the desktop page renders the same chat (not touch, not mobile)', !denv.touch && !denv.mobile && verdictOf(await desk.waitFor(`document.querySelectorAll('.chat-view .chat-text p').length >= 4`, 20000)), denv);
   await sleep(500);
-  check('no … buttons on a mouse client (the hover buttons + the strip serve it)', await desk.evalJs(`document.querySelectorAll('.chat-msg-more').length === 0 && document.querySelectorAll('.chat-msg > .chat-open-editor-btn').length > 0`));
+  check('no … buttons on a mouse client (the hover buttons + the strip serve it)', verdictOf(await desk.evalJs(`document.querySelectorAll('.chat-msg-more').length === 0 && document.querySelectorAll('.chat-msg > .chat-open-editor-btn').length > 0`)));
   const rclick = async (p) => { await desk.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); await desk.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'right', clickCount: 1 }); await desk.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'right', clickCount: 1 }); await sleep(300); };
   await desk.evalJs(`window.__log = []; true`);
   const dp = await desk.evalJs(`(() => { const p = [...document.querySelectorAll('.chat-view .chat-msg-assistant .chat-text p')].at(-1); p.scrollIntoView({ block: 'center' }); const w = document.createTreeWalker(p, NodeFilter.SHOW_TEXT); const n = w.nextNode(); const i = n.data.indexOf('quick'); const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 5); const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
@@ -373,7 +373,7 @@ try {
   check('a right-click on the words: the browser\'s own menu (the contextmenu NOT cancelled), no app menu, no metadata popup — as before', d1.cm.length === 1 && d1.cm[0].ptype === 'mouse' && d1.cm[0].prevented === false && !d1.menu && !d1.meta, d1);
   const strip = await desk.evalJs(`(() => { const m = [...document.querySelectorAll('.chat-view .chat-msg-assistant')].filter((x) => x.querySelector('.chat-text p')).at(-1); const r = m.getBoundingClientRect(); return { x: r.left + 3, y: r.top + 12 }; })()`);
   await rclick(strip);
-  check('a right-click on the message\'s left strip opens Message details — as before', await desk.evalJs(`!!document.querySelector('.msg-meta-pop')`));
+  check('a right-click on the message\'s left strip opens Message details — as before', verdictOf(await desk.evalJs(`!!document.querySelector('.msg-meta-pop')`)));
   await desk.front().catch(() => {});
 
   // ── ⑨ a touch TABLET (verify r1 F3) ──
@@ -392,14 +392,14 @@ try {
   await tab.waitApp(); await sleep(800);
   await tab.front();
   if (!(await tab.evalJs(`document.querySelectorAll('.chat-view .chat-msg-more').length >= 12`))) await tab.evalJs(`app.viewSession(${JSON.stringify(SID)}, ${JSON.stringify(CWD)}, 'mobile select'); true`);
-  check('the tablet page: isTouch, not isMobile, the … buttons present', await tab.waitFor(`app.isTouch && !app.isMobile && document.querySelectorAll('.chat-view .chat-msg-more').length >= 12`, 20000));
+  check('the tablet page: isTouch, not isMobile, the … buttons present', verdictOf(await tab.waitFor(`app.isTouch && !app.isMobile && document.querySelectorAll('.chat-view .chat-msg-more').length >= 12`, 20000)));
   await sleep(400);
   const tp = await tab.evalJs(`(() => { const b = [...document.querySelectorAll('.chat-view .chat-msg-assistant .chat-msg-more')].at(-1); b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect(); const c = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; const at = document.elementFromPoint(c.x, c.y); const hov = [...document.querySelectorAll('.chat-msg > .chat-open-editor-btn')]; return { c, atIsBtn: !!at && (at === b || b.contains(at)), at: at ? at.tagName.toLowerCase() + '.' + String(at.className).split(' ')[0] : null, hover: { n: hov.length, shown: hov.filter((h) => getComputedStyle(h).display !== 'none').length }, windows: document.querySelectorAll('.window').length }; })()`);
-  check(`the hover buttons are hidden on the tablet (${tp.hover.n} buttons, ${tp.hover.shown} shown) and the … is the element under its own centre (${tp.at})`, tp.hover.n > 0 && tp.hover.shown === 0 && tp.atIsBtn, tp);
+  check(`the hover buttons are hidden on the tablet (${tp.hover.n} buttons, ${tp.hover.shown} shown) and the … is the element under its own centre (${tp.at})`, tp.hover.n > 0 && tp.hover.shown === 0 && verdictOf(tp.atIsBtn), tp);
   await tab.cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: tp.c.x, y: tp.c.y }] }); await sleep(60);
   await tab.cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await sleep(300);
   const t9 = await tab.evalJs(`({ items: [...document.querySelectorAll('.context-menu.chat-msg-menu .context-menu-item')].map((el) => el.textContent.trim()), windows: document.querySelectorAll('.window').length })`);
-  check(`a tap on the … opens the message menu on the tablet (${t9.items.join(' / ')}) and opens no editor window (before the fix: an invisible "Open in editor" took the tap)`, t9.items.includes('Copy text') && t9.windows === tp.windows, t9);
+  check(`a tap on the … opens the message menu on the tablet (${t9.items.join(' / ')}) and opens no editor window (before the fix: an invisible "Open in editor" took the tap)`, gateOf(t9.items.includes('Copy text')) && t9.windows === tp.windows, t9);
   await tab.shot('09-tablet.png');
   // ── ⑩ lane think-tools-phone: a control never covers the words it serves ──
   console.log('⑩ the code toolbar and the Thinking door never cover the words (360 px touch, then a desktop hover)');
@@ -438,10 +438,10 @@ try {
   await sleep(600);
   const p10 = await census10(phone, false);
   const th10 = p10.filter((r) => r.kind === 'thinking'), code10 = p10.filter((r) => r.kind === 'code');
-  check(`360 px: the Thinking block and ${code10.length} code fences drawn (${await evalJs('innerWidth')} px), each with its tools shown`, th10.length === 1 && code10.length >= 5 && p10.every((r) => r.tools.some((t) => t.shown)), p10.map((r) => ({ kind: r.kind, tools: r.tools.map((t) => t.label + (t.shown ? '' : '(hidden)')) })));
-  check('…no shown tool covers a word of its block — at rest (the owner\'s shot: «复制» / «换行» over «spawn 队列卡…»)', p10.every((r) => r.hits.length === 0), p10.filter((r) => r.hits.length).map((r) => ({ kind: r.kind, hits: r.hits.slice(0, 6) })));
-  check(`…nor scrolled sideways to its end (${code10.filter((r) => r.moved > 0).length} fences scroll; an overlay would cover whatever slid under it)`, code10.some((r) => r.moved > 0) && p10.every((r) => r.sideHits.length === 0), p10.filter((r) => r.sideHits.length).map((r) => ({ kind: r.kind, hits: r.sideHits.slice(0, 6) })));
-  check(`the Thinking block carries ONE door — Copy, in its summary — and no Wrap (it is prose, already wrapped): ${th10[0] ? th10[0].tools.map((t) => t.label + (t.inSummary ? ' (summary)' : ' (row)')).join(', ') : 'none'}`, th10.length === 1 && th10[0].tools.length === 1 && th10[0].tools[0].label === 'Copy' && th10[0].tools[0].inSummary, th10[0]);
+  check(`360 px: the Thinking block and ${code10.length} code fences drawn (${await evalJs('innerWidth')} px), each with its tools shown`, th10.length === 1 && code10.length >= 5 && verdictOf(p10.every((r) => r.tools.some((t) => t.shown))), p10.map((r) => ({ kind: r.kind, tools: r.tools.map((t) => t.label + (t.shown ? '' : '(hidden)')) })));
+  check('…no shown tool covers a word of its block — at rest (the owner\'s shot: «复制» / «换行» over «spawn 队列卡…»)', verdictOf(p10.every((r) => r.hits.length === 0)), p10.filter((r) => r.hits.length).map((r) => ({ kind: r.kind, hits: r.hits.slice(0, 6) })));
+  check(`…nor scrolled sideways to its end (${code10.filter((r) => r.moved > 0).length} fences scroll; an overlay would cover whatever slid under it)`, gateOf(code10.some((r) => r.moved > 0)) && verdictOf(p10.every((r) => r.sideHits.length === 0)), p10.filter((r) => r.sideHits.length).map((r) => ({ kind: r.kind, hits: r.sideHits.slice(0, 6) })));
+  check(`the Thinking block carries ONE door — Copy, in its summary — and no Wrap (it is prose, already wrapped): ${th10[0] ? th10[0].tools.map((t) => t.label + (t.inSummary ? ' (summary)' : ' (row)')).join(', ') : 'none'}`, th10.length === 1 && th10[0].tools.length === 1 && th10[0].tools[0].label === 'Copy' && verdictOf(th10[0].tools[0].inSummary), th10[0]);
   const small10 = p10.flatMap((r) => r.tools.filter((t) => t.shown && (t.w < 44 || t.h < 44 || t.font < 12)).map((t) => `${r.kind} ${t.label} ${t.w}×${t.h} ${t.font}px`));
   check(`every shown tool is a finger's target — ≥ 44×44 px, words ≥ 12 px (${p10.flatMap((r) => r.tools).slice(0, 2).map((t) => `${t.label} ${t.w}×${t.h} ${t.font}px`).join(', ')})`, small10.length === 0, small10.slice(0, 6));
   // THE TAP (round 2 — the acceptance found this leg red 7 of 8 there; measured, r2 probe): the suite's own ⑧ desktop and
@@ -484,7 +484,7 @@ try {
   await sleep(300);
   const c10 = await tapped10();
   check(`a tap on the Thinking's Copy — once the view settled (${s10 && s10.ms} ms, ${s10 && s10.tries} scroll(s)) — puts the whole thinking on the clipboard (${c10.clip.length} chars), the block stays open, and the door never moved under the finger (${(c10.tap || []).map((x) => x.ty + ' ' + x.at).join(' / ')})`,
-    !!s10 && s10.settled && c10.clip === THINK && c10.open && unmoved10(c10), { s10, ...c10, clip: c10.clip.slice(0, 40) });
+    !!s10 && gateOf(s10.settled) && c10.clip === THINK && gateOf(c10.open) && verdictOf(unmoved10(c10)), { s10, ...c10, clip: c10.clip.slice(0, 40) });
   // (b) THE PERSON inside an armed resume
   await evalJs(`navigator.clipboard.writeText('').catch(() => {}); (() => { const l = (${DOOR10}).closest('.chat-message-list'); l.scrollTop = l.scrollHeight; return 1; })()`); await sleep(700);
   const arm10 = await evalJs(`(() => { const door = ${DOOR10}; const v = [...app.sessions.values()].find((x) => typeof x.setHidden === 'function' && x._container && x._container.contains(door)); if (!v) return null; v.setHidden('mobile', true); v.setHidden('mobile', false); return { pinned: v._pinned, at: Date.now() }; })()`);
@@ -498,7 +498,7 @@ try {
   const p10c = await tapped10();
   const rest10 = await frames10(Math.max(0, 2400 - (Date.now() - t10)));
   check(`a PERSON inside an armed resume (the sync's own hide/show; an input-less scroll there is re-tailed: the door ${ctl10 ? ctl10.join(' → ') : '?'}) — a finger drag brings the door to ${f10.top} px, a tap as the list stops (+${tapAfter10} ms) copies the whole thinking (${p10c.clip.length} chars), the door unmoved from the touchstart to the click and past both re-tail rungs (${rest10.join(' → ')})`,
-    !!arm10 && arm10.pinned && !!ctl10 && ctl10.at(-1) < 0 && f10.top > 0 && p10c.clip === THINK && p10c.open && unmoved10(p10c) && rest10.length === 1 && rest10[0] === f10.top, { arm10, ctl10, f10, tapAfter10, ...p10c, clip: p10c.clip.slice(0, 40), rest10 });
+    !!arm10 && gateOf(arm10.pinned) && !!ctl10 && ctl10.at(-1) < 0 && f10.top > 0 && p10c.clip === THINK && gateOf(p10c.open) && gateOf(unmoved10(p10c)) && rest10.length === 1 && rest10[0] === f10.top, { arm10, ctl10, f10, tapAfter10, ...p10c, clip: p10c.clip.slice(0, 40), rest10 });
   // THE SUMMARY: the door sits INSIDE <summary> — a tap on the summary's LABEL folds the block (the toggle is live), a tap on the
   // door never does (its press is preventDefault + stopPropagation — test-chat-pre-tools ③ pins the handler; Chrome's own
   // activation target is the button, measured: a door without them stays open here too, so this pins the behaviour)
@@ -506,16 +506,16 @@ try {
   await tapAt(lab10); await sleep(250);
   const folded10 = await evalJs(`!([...document.querySelectorAll('.chat-view .chat-thinking')].find((d) => d.getClientRects().length)?.open)`);
   await evalJs(`[...document.querySelectorAll('.chat-view .chat-thinking')].forEach((d) => { d.open = true; }); true`); await sleep(200);
-  check(`the door sits inside the Thinking's <summary>: a tap on the label folds the block (${folded10 ? 'folded' : 'still open'}), the taps on the door above left it open`, folded10 && c10.open && p10c.open && await evalJs(`!!(${DOOR10}).closest('summary')`));
+  check(`the door sits inside the Thinking's <summary>: a tap on the label folds the block (${folded10 ? 'folded' : 'still open'}), the taps on the door above left it open`, gateOf(folded10) && gateOf(c10.open) && gateOf(p10c.open) && verdictOf(await evalJs(`!!(${DOOR10}).closest('summary')`)));
   await evalJs(`__tt10.at(0)`); await sleep(200);
   await phone.shot('10-phone-thinking.png');
   await evalJs(`(() => { const b = [...document.querySelectorAll('.chat-view .chat-text .chat-pre-wrap')][0]; b.scrollIntoView({ block: 'center' }); return 1; })()`); await sleep(200);
   await phone.shot('10-phone-code.png');
   await desk.front();
   const d10 = await census10(desk, true);
-  check(`desktop, the mouse over each block (${d10.length}): no shown tool covers a word — at rest or scrolled sideways`, d10.length >= 6 && d10.every((r) => r.hits.length === 0 && r.sideHits.length === 0) && d10.every((r) => r.tools.some((t) => t.shown)), d10.filter((r) => r.hits.length || r.sideHits.length || !r.tools.some((t) => t.shown)).map((r) => ({ kind: r.kind, hits: r.hits.slice(0, 4), side: r.sideHits.slice(0, 4), tools: r.tools.map((t) => t.label + (t.shown ? '' : '(hidden)')) })));
+  check(`desktop, the mouse over each block (${d10.length}): no shown tool covers a word — at rest or scrolled sideways`, d10.length >= 6 && gateOf(d10.every((r) => r.hits.length === 0 && r.sideHits.length === 0)) && verdictOf(d10.every((r) => r.tools.some((t) => t.shown))), d10.filter((r) => r.hits.length || r.sideHits.length || !r.tools.some((t) => t.shown)).map((r) => ({ kind: r.kind, hits: r.hits.slice(0, 4), side: r.sideHits.slice(0, 4), tools: r.tools.map((t) => t.label + (t.shown ? '' : '(hidden)')) })));
   const dth = d10.find((r) => r.kind === 'thinking');
-  check(`desktop: the Thinking block's one door (Copy, in its summary), every tool still a 24 px mouse target (${d10.flatMap((r) => r.tools).slice(0, 2).map((t) => `${t.w}×${t.h}`).join(', ')})`, !!dth && dth.tools.length === 1 && dth.tools[0].label === 'Copy' && dth.tools[0].inSummary && d10.every((r) => r.tools.every((t) => t.w >= 24 && t.h >= 24)), { dth, small: d10.flatMap((r) => r.tools.filter((t) => t.w < 24 || t.h < 24)) });
+  check(`desktop: the Thinking block's one door (Copy, in its summary), every tool still a 24 px mouse target (${d10.flatMap((r) => r.tools).slice(0, 2).map((t) => `${t.w}×${t.h}`).join(', ')})`, !!dth && dth.tools.length === 1 && dth.tools[0].label === 'Copy' && gateOf(dth.tools[0].inSummary) && verdictOf(d10.every((r) => r.tools.every((t) => t.w >= 24 && t.h >= 24))), { dth, small: d10.flatMap((r) => r.tools.filter((t) => t.w < 24 || t.h < 24)) });
   await desk.shot('10-desk-hover.png');
   // T2 (round 2): a MOUSE click on a code block's Copy focuses the button — the row FADES once the mouse leaves (the base's
   // hover fade; r1's :focus-within kept it shown); a keyboard Tab inside the row (:focus-visible) shows it with the mouse away
@@ -533,7 +533,7 @@ try {
   await desk.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); await sleep(450);
   const k2 = await desk.evalJs(`({ focused: !!__kbRow.contains(document.activeElement), op: getComputedStyle(__kbRow).opacity, fv: !!document.activeElement?.matches(':focus-visible'), on: document.activeElement?.textContent?.trim() })`);
   check(`desktop: a mouse click on «${kb.label}» focuses it, and its row FADES once the mouse leaves (opacity ${k1.op}); a keyboard Tab inside the row shows it (${k2.on}: opacity ${k2.op}, :focus-visible)`,
-    kb.pressed && k1.focused && !k1.fv && Number(k1.op) === 0 && k2.focused && k2.fv && Number(k2.op) === 1, { hoverNoneBlocksOff: hov10, pressed: kb.pressed, k1, k2 });
+    gateOf(kb.pressed) && gateOf(k1.focused) && !k1.fv && Number(k1.op) === 0 && gateOf(k2.focused) && gateOf(k2.fv) && Number(k2.op) === 1, { hoverNoneBlocksOff: hov10, pressed: kb.pressed, k1, k2 });
   await desk.evalJs(`document.activeElement?.blur(); for (const r of window.__hoverNone || []) r.media.mediaText = '(hover: none)'; true`);
   check('no page errors on any page', phone.pageErrors.length === 0 && desk.pageErrors.length === 0 && tab.pageErrors.length === 0, [...phone.pageErrors, ...desk.pageErrors, ...tab.pageErrors].slice(0, 3));
 } catch (e) {
@@ -544,4 +544,4 @@ try {
 
 if (failed) console.error(`\n${failed} FAILED (${passed} passed) — screenshots in ${SHOTS}`);
 else console.log(`\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

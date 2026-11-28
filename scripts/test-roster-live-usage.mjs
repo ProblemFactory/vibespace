@@ -17,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -58,16 +58,16 @@ console.log('— _repaintRosterUsage over a fake document');
   listA.querySelectorAll = () => [];
   app._accountUsage = { 'sub-a': { fiveHour: { utilization: 0.42 } } }; app._usageEstimates = {}; app._rateLimit = { fiveHour: { utilization: 0.1 } };
   const n1 = app._repaintRosterUsage();
-  ok('first poll paints the cells the maps can answer (A + the machine login), not the unanswerable one (B) nor the unstamped one', n1 === 2 && cells[0].innerHTML.includes('0.42') && cells[2].innerHTML.includes('0.1') && cells[1].innerHTML === '' && cells[3].innerHTML === 'unstamped', JSON.stringify(cells.map((c) => c.innerHTML)));
+  ok('first poll paints the cells the maps can answer (A + the machine login), not the unanswerable one (B) nor the unstamped one', n1 === 2 && gateOf(cells[0].innerHTML.includes('0.42')) && gateOf(cells[2].innerHTML.includes('0.1')) && cells[1].innerHTML === '' && cells[3].innerHTML === 'unstamped', JSON.stringify(cells.map((c) => c.innerHTML)));
   ok('the cell\'s own tooltip (the ⟳ rung note) survives a repaint', cells[0].title === 'kept');
   const n2 = app._repaintRosterUsage();
   ok('an unchanged poll repaints NOTHING (no churn)', n2 === 0);
   app._accountUsage = { 'sub-a': { fiveHour: { utilization: 0.77 } }, 'sub-b': { fiveHour: { utilization: 0.05 } } };
   const n3 = app._repaintRosterUsage();
-  ok('THE REPORT: fresh numbers land in place — A moves 42 → 77 and B, now answerable, is painted', n3 === 2 && cells[0].innerHTML.includes('0.77') && cells[1].innerHTML.includes('0.05'), JSON.stringify(cells.map((c) => c.innerHTML)));
+  ok('THE REPORT: fresh numbers land in place — A moves 42 → 77 and B, now answerable, is painted', n3 === 2 && gateOf(cells[0].innerHTML.includes('0.77')) && verdictOf(cells[1].innerHTML.includes('0.05')), JSON.stringify(cells.map((c) => c.innerHTML)));
   delete app._accountUsage['sub-a'];
   const n4 = app._repaintRosterUsage();
-  ok('a snapshot that DISAPPEARS from the maps leaves the last paint (never blanked by a poll)', n4 === 0 && cells[0].innerHTML.includes('0.77'));
+  ok('a snapshot that DISAPPEARS from the maps leaves the last paint (never blanked by a poll)', n4 === 0 && verdictOf(cells[0].innerHTML.includes('0.77')));
   globalThis.document = { querySelectorAll: () => [] };
   ok('no mounted roster ⇒ 0 and no throw', app._repaintRosterUsage() === 0);
   delete globalThis.document;
@@ -106,7 +106,7 @@ const WORD = { en: 'Credits', zh: '按量', ja: '従量' };
 // the legs, run against the real module AND against each patched copy
 async function creditsLegs(MA) {
   const out = [];
-  const leg = (name, pass, detail) => out.push({ name, pass: !!pass, detail });
+  const leg = (name, pass, detail) => { if (typeof pass !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof pass}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (out.push({ name, pass: !!pass, detail })); };
   // (a) the face in three languages, from the PURE rule + the ONE builder
   for (const lang of ['en', 'zh', 'ja']) {
     const t = tFor(lang);
@@ -115,11 +115,11 @@ async function creditsLegs(MA) {
       const el = parseChip(US.creditsChipHtml(chip, { icon: UI_ICONS.money }));
       const sentence = kind === 'in use' ? t('Using paid overage credits — this account’s subscription quota is spent and its requests are billed pay-per-use.') : t('Extra usage is enabled on this org: requests past 100 % are billed pay-per-use. The pool moves conversations onto it only when no member has quota left.');
       leg(`${lang} · ${kind}: the chip = the money icon + "${WORD[lang]}", the sentence in title AND aria-label (role img), data-credits="${state}"`,
-        el && el.svg === UI_ICONS.money && el.word.textContent === WORD[lang] && el.attrs.role === 'img' && el.attrs.title === chip.tip && el.attrs['aria-label'] === chip.tip && el.attrs.title.startsWith(sentence) && el.attrs['data-credits'] === state && el.attrs.class === 'credits-chip',
+        gateOf(el) && el.svg === UI_ICONS.money && el.word.textContent === WORD[lang] && el.attrs.role === 'img' && el.attrs.title === chip.tip && el.attrs['aria-label'] === chip.tip && gateOf(el.attrs.title.startsWith(sentence)) && el.attrs['data-credits'] === state && el.attrs.class === 'credits-chip',
         JSON.stringify(el && { attrs: el.attrs, word: el.word.textContent }));
     }
   }
-  leg('the money figure rides the TIP, never the face ("$4.25 / $20.00")', /Spent this period: \$4\.25 \/ \$20\.00\./.test(US.overageChip(SA.overageState(U.inUse()), {}).tip) && !/\$/.test(US.overageChip(SA.overageState(U.inUse()), {}).label));
+  leg('the money figure rides the TIP, never the face ("$4.25 / $20.00")', gateOf(/Spent this period: \$4\.25 \/ \$20\.00\./.test(US.overageChip(SA.overageState(U.inUse()), {}).tip)) && !/\$/.test(US.overageChip(SA.overageState(U.inUse()), {}).label));
   leg('a member NOT on credits draws no chip (disabled, unknown, a plain reading, no reading)',
     MA.creditsChipFor(U.disabled()) === null && MA.creditsChipFor(U.plain()) === null && MA.creditsChipFor(null) === null && US.creditsChipHtml(null) === '');
   leg('a hostile translation is escaped in both attributes and the word (the chip is interpolated HTML)',
@@ -139,7 +139,7 @@ async function creditsLegs(MA) {
     app._repaintRosterUsage();
     const c1 = cr.slot.querySelector('.credits-chip');
     leg('poll 1: the credits row gets its chip (in use, the word, the money in the tip); the plain row gets none',
-      c1 && c1.getAttribute('data-credits') === 'in-use' && c1.word.textContent === 'Credits' && /\$4\.25/.test(c1.getAttribute('title')) && pl.slot.querySelector('.credits-chip') === null && pl.slot.innerHTML === '',
+      gateOf(c1) && c1.getAttribute('data-credits') === 'in-use' && c1.word.textContent === 'Credits' && gateOf(/\$4\.25/.test(c1.getAttribute('title'))) && pl.slot.querySelector('.credits-chip') === null && pl.slot.innerHTML === '',
       JSON.stringify({ cr: cr.slot.innerHTML.slice(0, 80), pl: pl.slot.innerHTML }));
     if (c1) c1.__mark = 'kept';
     app._accountUsage = { 'sub-cr': { ...U.inUse(7.5), fiveHour: { utilization: 0.99 } }, 'sub-plain': U.plain() };
@@ -147,13 +147,13 @@ async function creditsLegs(MA) {
     app._repaintRosterUsage();
     const c2 = cr.slot.querySelector('.credits-chip');
     leg('poll 2 (the donut AND the spend moved): the cell repaints, the chip is the SAME node, patched — title + aria-label say $7.50',
-      cr.cell.innerHTML !== cellBefore && c2 === c1 && c2 && c2.__mark === 'kept' && /\$7\.50/.test(c2.getAttribute('title')) && c2.getAttribute('aria-label') === c2.getAttribute('title'),
+      cr.cell.innerHTML !== cellBefore && c2 === c1 && gateOf(c2) && c2.__mark === 'kept' && gateOf(/\$7\.50/.test(c2.getAttribute('title'))) && c2.getAttribute('aria-label') === c2.getAttribute('title'),
       JSON.stringify({ same: c2 === c1, title: c2 && c2.getAttribute('title') }));
     app._accountUsage = { 'sub-cr': U.allowed(), 'sub-plain': U.plain() };
     app._repaintRosterUsage();
     const c3 = cr.slot.querySelector('.credits-chip');
     leg('poll 3 (money no longer flowing, the org still allows it): the same node turns to the dim state (data-credits="allowed")',
-      c3 === c1 && c3 && c3.getAttribute('data-credits') === 'allowed' && /Extra usage is enabled/.test(c3.getAttribute('aria-label')));
+      c3 === c1 && gateOf(c3) && c3.getAttribute('data-credits') === 'allowed' && verdictOf(/Extra usage is enabled/.test(c3.getAttribute('aria-label'))));
     const n4 = app._repaintRosterUsage();
     leg('poll 4 (nothing changed): nothing is repainted or patched (0)', n4 === 0, String(n4));
     app._accountUsage = { 'sub-cr': U.disabled(), 'sub-plain': U.plain() };
@@ -167,7 +167,7 @@ async function creditsLegs(MA) {
 }
 {
   const MA = await import(path.join(REPO, 'src/lib/manage-agents.js'));
-  for (const r of await creditsLegs(MA)) ok(r.name, r.pass, r.detail);
+  for (const r of await creditsLegs(MA)) ok(r.name, verdictOf(r.pass), r.detail);
 }
 // NEGATIVE CONTROLS: a patched copy that IGNORES the credits state, and one that re-creates the chip wholesale
 console.log('— the credits chip\'s negative controls (patched copies, scripts/mutant-copy.mjs)');
@@ -180,34 +180,34 @@ console.log('— the credits chip\'s negative controls (patched copies, scripts/
   ];
   for (const m of MUTANTS) {
     const found = SRC.includes(m.find);
-    ok(`control ${m.tag}: the patched line exists in manage-agents.js (the control judges the current source)`, found);
+    ok(`control ${m.tag}: the patched line exists in manage-agents.js (the control judges the current source)`, verdictOf(found));
     if (!found) continue;
     const f = M.write('src/lib/manage-agents.js', editAnchor(SRC, m.find, m.repl, "src/lib/manage-agents.js"), m.tag);
     const Mod = await import(pathToFileURL(f).href);
     const red = (await creditsLegs(Mod)).filter((r) => !r.pass).map((r) => r.name);
-    ok(`control ${m.tag}: the patched copy turns its leg RED (${red.length} failed: ${red.slice(0, 2).join(' | ').slice(0, 160)})`, red.some((n) => m.expect.test(n)));
+    ok(`control ${m.tag}: the patched copy turns its leg RED (${red.length} failed: ${red.slice(0, 2).join(' | ').slice(0, 160)})`, verdictOf(red.some((n) => m.expect.test(n))));
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 console.log('— wiring pins');
 {
   const ma = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
   const um = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');
-  ok('every usage cell the rosters render is stamped (claude row via usageStampAttrs, claude global + host-own, codex row pool/loggedIn, codex global, an isolated-home account\'s on-demand reading — lane antigravity-card-fixes)', (ma.match(/data-usage-src=/g) || []).length === 7 && /acct-usage-cell"\$\{usageStampAttrs\}/.test(ma) && /<span class="acct-usage-cell" data-usage-src="home" data-usage-key="\$\{escHtml\(a\.id\)\}">\$\{usageOf\(a\.id\)\}<\/span>/.test(ma));
-  ok('the claude row\'s stamp is the SAME decision as its snapshot (pool → current target; host-login → host-own; host-held → host:account; local → the account)', /const usageStamp = isPool \? \(a\.current \? \{ src: 'accounts', key: a\.current \} : null\)/.test(ma) && /\{ src: 'host-own', key: selectedHost \}/.test(ma) && /\{ src: 'host-account', key: selectedHost \+ ':' \+ a\.id \}/.test(ma) && /\(a\.loggedIn \|\| a\.oat \|\| signinUnread\(a\)\) \? \{ src: 'accounts', key: a\.id \} : null/.test(ma));   // B-360d: a sign-in not read yet keeps its reading's cell
-  ok('_renderUsage (every poll, every popup refresh) calls the repaint first', /_renderUsage\(\) \{\s*\n(\s*\/\/[^\n]*\n)*\s*try \{ this\._repaintRosterUsage\?\.\(\); \} catch \{ \}/.test(um));
-  ok('the repaint re-derives the two-soonest highlight per list it touched', /for \(const list of lists\) markSoonRows\(list\);/.test(ma));
-  ok('the per-row ⟳ path still repaints its own row — and patches its credits chip from the same snapshot', /if \(u\) \{ cell\.innerHTML = this\._acctUsageHtml\(u, est\); markSoonRows\(cell\.closest\('\.acct-list'\)\); patchCreditsSlot\(row\.querySelector\('\.acct-credits-slot'\), creditsChipFor\(u\)\); \}/.test(ma));
+  ok('every usage cell the rosters render is stamped (claude row via usageStampAttrs, claude global + host-own, codex row pool/loggedIn, codex global, an isolated-home account\'s on-demand reading — lane antigravity-card-fixes)', (ma.match(/data-usage-src=/g) || []).length === 7 && gateOf(/acct-usage-cell"\$\{usageStampAttrs\}/.test(ma)) && verdictOf(/<span class="acct-usage-cell" data-usage-src="home" data-usage-key="\$\{escHtml\(a\.id\)\}">\$\{usageOf\(a\.id\)\}<\/span>/.test(ma)));
+  ok('the claude row\'s stamp is the SAME decision as its snapshot (pool → current target; host-login → host-own; host-held → host:account; local → the account)', gateOf(/const usageStamp = isPool \? \(a\.current \? \{ src: 'accounts', key: a\.current \} : null\)/.test(ma)) && gateOf(/\{ src: 'host-own', key: selectedHost \}/.test(ma)) && gateOf(/\{ src: 'host-account', key: selectedHost \+ ':' \+ a\.id \}/.test(ma)) && verdictOf(/\(a\.loggedIn \|\| a\.oat \|\| signinUnread\(a\)\) \? \{ src: 'accounts', key: a\.id \} : null/.test(ma)));   // B-360d: a sign-in not read yet keeps its reading's cell
+  ok('_renderUsage (every poll, every popup refresh) calls the repaint first', verdictOf(/_renderUsage\(\) \{\s*\n(\s*\/\/[^\n]*\n)*\s*try \{ this\._repaintRosterUsage\?\.\(\); \} catch \{ \}/.test(um)));
+  ok('the repaint re-derives the two-soonest highlight per list it touched', verdictOf(/for \(const list of lists\) markSoonRows\(list\);/.test(ma)));
+  ok('the per-row ⟳ path still repaints its own row — and patches its credits chip from the same snapshot', verdictOf(/if \(u\) \{ cell\.innerHTML = this\._acctUsageHtml\(u, est\); markSoonRows\(cell\.closest\('\.acct-list'\)\); patchCreditsSlot\(row\.querySelector\('\.acct-credits-slot'\), creditsChipFor\(u\)\); \}/.test(ma)));
   // THE CREDITS CHIP's wiring (2.369.189): every row that renders a usage cell renders its slot beside the name
   ok('every roster row template renders the credits slot on its identity line (claude global + member, codex global + member)',
-    /<span class="acct-key-tail">\$\{gIdent\}<\/span>\$\{!selectedHost && sub\.loggedIn \? creditsSlotHtml\(this\._rateLimit\)/.test(ma)
-    && /\$\{ident\}\$\{hint\}<\/span>\$\{creditsTag\}/.test(ma) && /const creditsTag = \(rowSnap \|\| usageStamp\) \? creditsSlotHtml\(rowSnap \? rowSnap\.u : null\) : '';/.test(ma)
-    && /creditsSlotHtml\(this\._codexAccountUsage\?\.\['__global_codex__'\]\) \+ resetSlot\('__global_codex__'\)/.test(ma)
-    && /creditsSlotHtml\(this\._codexAccountUsage\?\.\[isPool \? a\.current : a\.id\]\)/.test(ma));
+    gateOf(/<span class="acct-key-tail">\$\{gIdent\}<\/span>\$\{!selectedHost && sub\.loggedIn \? creditsSlotHtml\(this\._rateLimit\)/.test(ma))
+    && gateOf(/\$\{ident\}\$\{hint\}<\/span>\$\{creditsTag\}/.test(ma)) && gateOf(/const creditsTag = \(rowSnap \|\| usageStamp\) \? creditsSlotHtml\(rowSnap \? rowSnap\.u : null\) : '';/.test(ma))
+    && gateOf(/creditsSlotHtml\(this\._codexAccountUsage\?\.\['__global_codex__'\]\) \+ resetSlot\('__global_codex__'\)/.test(ma))
+    && verdictOf(/creditsSlotHtml\(this\._codexAccountUsage\?\.\[isPool \? a\.current : a\.id\]\)/.test(ma)));
   ok('the usage CELL no longer draws either credits state (the in-use sentence pushed the next-usable column)', !/ovc\.kind !== 'credits'/.test(ma) && !/acct-usage-credits/.test(ma));
-  ok('the usage popup draws the SAME chip (creditsChipHtml + UI_ICONS.money)', /if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)(?: \+ \(ovc\.kind === 'inUse' && !turnsAllowed \? ` <button [^`]*data-door=\"settings:spend\.allowOverageTurns\"[^`]*` : ''\))?\);/.test(um));
-  ok('ci.mjs runs this suite', /'test-roster-live-usage'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')));
+  ok('the usage popup draws the SAME chip (creditsChipHtml + UI_ICONS.money)', verdictOf(/if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)(?: \+ \(ovc\.kind === 'inUse' && !turnsAllowed \? ` <button [^`]*data-door=\"settings:spend\.allowOverageTurns\"[^`]*` : ''\))?\);/.test(um)));
+  ok('ci.mjs runs this suite', verdictOf(/'test-roster-live-usage'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8'))));
 }
 console.log('— B-ce1c: the machine login and a named account of the same identity are TWO sign-ins');
 {
@@ -216,10 +216,10 @@ console.log('— B-ce1c: the machine login and a named account of the same ident
   // the owner took the live machine login for Personal Max. One account ⇒ one quota (merged), two sign-ins.
   const hint = typeof MA.machineLoginLinkHint === 'function' ? MA.machineLoginLinkHint : null;
   const h = hint ? hint('Personal Max') : null;
-  ok('B-ce1c: the CLI-login row names the account AND says it is a separate sign-in (not "= “Personal Max”")', !!h && /“Personal Max”/.test(h.label) && /separate sign-in/.test(h.label) && !/^=/.test(h.label), JSON.stringify(h));
-  ok('B-ce1c: …its tooltip says one Anthropic account, one quota, two sign-ins that each expire and renew on their own', !!h && /same Anthropic account/.test(h.tip) && /one quota/.test(h.tip) && /two separate sign-ins/.test(h.tip) && /expires and is renewed on its own/.test(h.tip), h && h.tip);
+  ok('B-ce1c: the CLI-login row names the account AND says it is a separate sign-in (not "= “Personal Max”")', !!h && gateOf(/“Personal Max”/.test(h.label)) && gateOf(/separate sign-in/.test(h.label)) && !/^=/.test(h.label), JSON.stringify(h));
+  ok('B-ce1c: …its tooltip says one Anthropic account, one quota, two sign-ins that each expire and renew on their own', !!h && gateOf(/same Anthropic account/.test(h.tip)) && gateOf(/one quota/.test(h.tip)) && gateOf(/two separate sign-ins/.test(h.tip)) && verdictOf(/expires and is renewed on its own/.test(h.tip)), h && h.tip);
   const hc = hint ? hint('Personal Pro', 'ChatGPT') : null;
-  ok('B-ce1c: the codex twin says the same about a ChatGPT account', !!hc && /same ChatGPT account/.test(hc.tip) && /“Personal Pro”/.test(hc.label));
+  ok('B-ce1c: the codex twin says the same about a ChatGPT account', !!hc && gateOf(/same ChatGPT account/.test(hc.tip)) && verdictOf(/“Personal Pro”/.test(hc.label)));
   const maSrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
   ok('B-ce1c WIRING: both machine-login rows (claude + codex) render machineLoginLinkHint, escaped; none writes the bare "= “{name}”"',
     (maSrc.match(/const h = machineLoginLinkHint\(linked(Sub|Cx)\.name[^\n]*title="\$\{escHtml\(h\.tip\)\}">\$\{escHtml\(h\.label\)\}/g) || []).length === 2 && !maSrc.includes("t('= “{name}”'"));
@@ -228,8 +228,8 @@ console.log('— B-ce1c: the machine login and a named account of the same ident
     (umSrc.match(/t\('same account as this machine’s CLI login — one quota, two separate sign-ins'\)/g) || []).length === 2 && !umSrc.includes('also the CLI login on this machine'));
   const keys = ['same account as “{name}” · a separate sign-in', 'same account as this machine’s CLI login — one quota, two separate sign-ins'];
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-  ok('B-ce1c: the new words are in zh and ja (and the tooltip keeps {name} + {vendor} in both)', keys.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))
-    && [zh, ja].every((d) => { const m = d.match(/^  "This machine’s CLI login and “\{name\}” are the same \{vendor\} account[^\n]*": "([^\n]*)",$/m); return !!m && m[1].includes('{name}') && m[1].includes('{vendor}'); }));
+  ok('B-ce1c: the new words are in zh and ja (and the tooltip keeps {name} + {vendor} in both)', gateOf(keys.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')))
+    && verdictOf([zh, ja].every((d) => { const m = d.match(/^  "This machine’s CLI login and “\{name\}” are the same \{vendor\} account[^\n]*": "([^\n]*)",$/m); return !!m && m[1].includes('{name}') && m[1].includes('{vendor}'); })));
 }
 console.log('— a reset nobody confirmed is drawn RESET; a member never read says so (lane reset-unproven)');
 {
@@ -240,17 +240,17 @@ console.log('— a reset nobody confirmed is drawn RESET; a member never read sa
   const ur = typeof MA.unreadUsageHtml === 'function' ? MA.unreadUsageHtml() : 'no unreadUsageHtml';
   const reset = app._acctUsageHtml({ fetchedAt: Date.now() - 4 * 86400e3, fiveHour: { utilization: 0.84, resetsAt: nowS - 3 * 86400 }, sevenDay: { utilization: 0.95, resetsAt: nowS - 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: nowS - 86400 }] }, null);
   ok('every bucket whose reset landed is drawn RESET — three dashed empty rings + the reset glyph, never the stale 84 / 95 / 100 %', (reset.match(/acct-donut-unconfirmed/g) || []).length === 3 && (reset.match(/acct-donut-reset/g) || []).length === 3 && !/(84|95|100)%/.test(reset), reset.slice(0, 300));
-  ok('…its words ride the tooltip and the narrow pill says «reset · unconfirmed»', /unconfirmed — confirms when a session uses it/.test(reset) && /acct-mini-unconfirmed[^>]*>reset · unconfirmed</.test(reset));
+  ok('…its words ride the tooltip and the narrow pill says «reset · unconfirmed»', gateOf(/unconfirmed — confirms when a session uses it/.test(reset)) && verdictOf(/acct-mini-unconfirmed[^>]*>reset · unconfirmed</.test(reset)));
   const half = app._acctUsageHtml({ fetchedAt: Date.now() - 5 * 3600e3, fiveHour: { utilization: 0.97, resetsAt: nowS - 2400 }, sevenDay: { utilization: 0.7, resetsAt: nowS + 4 * 86400 } }, null);
-  ok('PER BUCKET: the 5h that reset is drawn reset, the week inside its window keeps its reading (70 %)', (half.match(/acct-donut-unconfirmed/g) || []).length === 1 && /7d: 70%/.test(half) && !/97%/.test(half), half.slice(0, 300));
+  ok('PER BUCKET: the 5h that reset is drawn reset, the week inside its window keeps its reading (70 %)', (half.match(/acct-donut-unconfirmed/g) || []).length === 1 && gateOf(/7d: 70%/.test(half)) && !/97%/.test(half), half.slice(0, 300));
   const none = app._acctUsageHtml({ fetchedAt: Date.now() }, null);
-  ok('a reading that states no window is NO READING — «no reading yet — confirms when a session uses it», never a 0 % donut', none === ur && /no reading yet — confirms when a session uses it/.test(none) && !/acct-usage-donut/.test(none), none);
+  ok('a reading that states no window is NO READING — «no reading yet — confirms when a session uses it», never a 0 % donut', none === ur && gateOf(/no reading yet — confirms when a session uses it/.test(none)) && !/acct-usage-donut/.test(none), none);
   const fresh = app._acctUsageHtml({ fetchedAt: Date.now(), fiveHour: { utilization: 0.42, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.55, resetsAt: nowS + 2 * 86400 } }, null);
-  ok('a reading inside its windows is drawn as before (no reset mark, 42 % / 55 %)', !/unconfirmed/.test(fresh) && /5h: 42%/.test(fresh) && /7d: 55%/.test(fresh));
+  ok('a reading inside its windows is drawn as before (no reset mark, 42 % / 55 %)', !/unconfirmed/.test(fresh) && gateOf(/5h: 42%/.test(fresh)) && verdictOf(/7d: 55%/.test(fresh)));
   const roster = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
-  ok('the never-read SUBSCRIPTION row (no file at all) puts the same words in its bucket slot', /rowSnap \? usageHtml\(rowSnap\.u, rowSnap\.est, probeNote\) : isSub && !isPool && usageStamp && usageStamp\.src === 'accounts' \? unreadUsageHtml\(\) : ''/.test(roster));
+  ok('the never-read SUBSCRIPTION row (no file at all) puts the same words in its bucket slot', verdictOf(/rowSnap \? usageHtml\(rowSnap\.u, rowSnap\.est, probeNote\) : isSub && !isPool && usageStamp && usageStamp\.src === 'accounts' \? unreadUsageHtml\(\) : ''/.test(roster)));
   const k = ['reset {time} · unconfirmed — confirms when a session uses it', 'reset · unconfirmed', 'no reading yet — confirms when a session uses it'];
-  ok('zh + ja carry the three new phrases', k.every((x) => typeof DICT.zh[x] === 'string' && typeof DICT.ja[x] === 'string'), k.filter((x) => !DICT.zh[x] || !DICT.ja[x]).join(' | '));
+  ok('zh + ja carry the three new phrases', verdictOf(k.every((x) => typeof DICT.zh[x] === 'string' && typeof DICT.ja[x] === 'string')), k.filter((x) => !DICT.zh[x] || !DICT.ja[x]).join(' | '));
 }
 console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset RESET, never the pre-reset number (lane reset-unproven r3)');
 {
@@ -300,7 +300,7 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
     ];
   };
   const UM = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-meter.js')).href);
-  for (const r of meterLegs(UM)) ok(r.name, r.pass, r.detail);
+  for (const r of meterLegs(UM)) ok(r.name, verdictOf(r.pass), r.detail);
   // (2) THE BILLING SWITCHER's usage cluster (session-lifecycle showBillingSwitcher's `usageHint`, evaluated from the
   // module's own text — session-lifecycle loads xterm and cannot be imported here — with the module's real imports)
   const { t: tI18n } = await import(pathToFileURL(path.join(REPO, 'src/lib/i18n.js')).href);
@@ -321,7 +321,7 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
   };
   const SL = srcOf('src/lib/session-lifecycle.js');
   ok('billing switcher: its usageHint is found in session-lifecycle.js (the census judges the current source)', !!hintOf(SL));
-  for (const r of hintLegs(hintOf(SL))) ok(r.name, r.pass, r.detail);
+  for (const r of hintLegs(hintOf(SL))) ok(r.name, verdictOf(r.pass), r.detail);
   // (3) THE MACHINES' HOST PILL + (4) the roster donuts and the narrow pill (manage-agents, the real module)
   const maLegs = (Mod) => {
     const pill = typeof Mod.hostQuotaPillHtml === 'function' ? Mod.hostQuotaPillHtml(STALE) : '';
@@ -335,11 +335,11 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
       { name: 'roster: the narrow pill says «reset · unconfirmed», never a pre-reset number', pass: /acct-mini-unconfirmed[^>]*>reset · unconfirmed</.test(roster) && !PRE.test(narrow), detail: narrow },
     ];
   };
-  for (const r of maLegs(MA)) ok(r.name, r.pass, r.detail);
+  for (const r of maLegs(MA)) ok(r.name, verdictOf(r.pass), r.detail);
   // RED controls — each surface's bypass (the acceptance's mutant shape) on a patched copy; every one reds its own leg by name
   const red = async (tag, legs, needle) => {
     const failed = legs.filter((r) => !r.pass).map((r) => r.name);
-    ok(`census RED ${tag}: the bypass reds «${needle}» (${failed.length} red)`, failed.some((n) => n.includes(needle)), failed.join(' | ').slice(0, 200));
+    ok(`census RED ${tag}: the bypass reds «${needle}» (${failed.length} red)`, verdictOf(failed.some((n) => n.includes(needle))), failed.join(' | ').slice(0, 200));
   };
   const umRaw5 = ['const v5 = bucketView(quotaModel, rl?.fiveHour, estSel?.fiveHour, Date.now(), { readAt: rl?.fetchedAt });', 'const v5 = { reading: rl?.fiveHour, est: estSel?.fiveHour }; /* PATCHED */'];
   const umRaw7 = ['const v7 = bucketView(quotaModel, rl?.sevenDay, estSel?.sevenDay, Date.now(), { readAt: rl?.fetchedAt });', 'const v7 = { reading: rl?.sevenDay, est: estSel?.sevenDay }; /* PATCHED */'];
@@ -401,22 +401,22 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
   };
   const AW2d = autoLegs(UM);
   const showW = (w) => JSON.stringify(w && { err: w.err, title: w.title, n90: w.n90, n40: w.n40, none: w.none });
-  ok('B-2d35 Claude Auto: a default ACCOUNT with its own reading — its name over ITS numbers (40 %), never the CLI login\'s 90 %', !AW2d.w1.err && /Acct A/.test(AW2d.w1.title) && AW2d.w1.n40 && !AW2d.w1.n90, showW(AW2d.w1));
-  ok('B-2d35 Claude Auto: a default ACCOUNT with NO reading yet — its name and «no reading yet», never the CLI login\'s 90 % under it', !AW2d.w2.err && /Acct A/.test(AW2d.w2.title) && AW2d.w2.none && !AW2d.w2.n90, showW(AW2d.w2));
-  ok('B-2d35 Claude Auto: a POOL default right after a switch to A (no reading yet) — A\'s name and «no reading yet» (the plain label over the CLI login\'s numbers before)', !AW2d.w3.err && /Acct A/.test(AW2d.w3.title) && AW2d.w3.none && !AW2d.w3.n90, showW(AW2d.w3));
-  ok('B-2d35 Claude Auto: a POOL on B, the CLI login LINKED to B by email — B\'s name over that reading (it is B\'s own)', !AW2d.w3b.err && /Acct B/.test(AW2d.w3b.title) && AW2d.w3b.n90, showW(AW2d.w3b));
-  ok('B-2d35 Claude Auto: NO default — Auto means the CLI login: its 90 % under the plain «Claude» label, as before', !AW2d.w4.err && /Claude/.test(AW2d.w4.title) && !/Acct [AB]/.test(AW2d.w4.title) && AW2d.w4.n90, showW(AW2d.w4));
+  ok('B-2d35 Claude Auto: a default ACCOUNT with its own reading — its name over ITS numbers (40 %), never the CLI login\'s 90 %', !AW2d.w1.err && gateOf(/Acct A/.test(AW2d.w1.title)) && gateOf(AW2d.w1.n40) && !AW2d.w1.n90, showW(AW2d.w1));
+  ok('B-2d35 Claude Auto: a default ACCOUNT with NO reading yet — its name and «no reading yet», never the CLI login\'s 90 % under it', !AW2d.w2.err && gateOf(/Acct A/.test(AW2d.w2.title)) && gateOf(AW2d.w2.none) && !AW2d.w2.n90, showW(AW2d.w2));
+  ok('B-2d35 Claude Auto: a POOL default right after a switch to A (no reading yet) — A\'s name and «no reading yet» (the plain label over the CLI login\'s numbers before)', !AW2d.w3.err && gateOf(/Acct A/.test(AW2d.w3.title)) && gateOf(AW2d.w3.none) && !AW2d.w3.n90, showW(AW2d.w3));
+  ok('B-2d35 Claude Auto: a POOL on B, the CLI login LINKED to B by email — B\'s name over that reading (it is B\'s own)', !AW2d.w3b.err && gateOf(/Acct B/.test(AW2d.w3b.title)) && verdictOf(AW2d.w3b.n90), showW(AW2d.w3b));
+  ok('B-2d35 Claude Auto: NO default — Auto means the CLI login: its 90 % under the plain «Claude» label, as before', !AW2d.w4.err && gateOf(/Claude/.test(AW2d.w4.title)) && !/Acct [AB]/.test(AW2d.w4.title) && verdictOf(AW2d.w4.n90), showW(AW2d.w4));
   const umRed = await patchedImport('src/lib/usage-meter.js', 'claude-auto-fallback', [["      rl = !claudeDefId ? this._rateLimit : ((claudeDefKey && this._accountUsage?.[claudeDefKey]) || (claudeDefKey && gl.accountId === claudeDefKey ? this._rateLimit : null) || null);", "      rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;"]]);   // stale-pins: kept (the RED copy plants the release's fallback on purpose)
   const AW2dr = umRed ? autoLegs(umRed) : null;
-  ok('B-2d35 RED: a copy with the CLI login\'s fallback put back draws B\'s 90 % under «Acct A» (no reading of its own) — the legs see it', !!AW2dr && /Acct A/.test(AW2dr.w2.title) && AW2dr.w2.n90, AW2dr ? showW(AW2dr.w2) : 'the patched line is not there');
+  ok('B-2d35 RED: a copy with the CLI login\'s fallback put back draws B\'s 90 % under «Acct A» (no reading of its own) — the legs see it', !!AW2dr && gateOf(/Acct A/.test(AW2dr.w2.title)) && verdictOf(AW2dr.w2.n90), AW2dr ? showW(AW2dr.w2) : 'the patched line is not there');
   // B-2d35 small (round wfm9rn69h): a POOL default's note names what the view shows — the pool's CURRENT member, never «Default
   // account» (an account default keeps its note); RED: the release's note line in an anchored copy says «Default account» for the pool
   const poolNote = /current member · refreshes when you run it in a terminal session/, defNote = /Default account · refreshes when you run it in a terminal session/;
-  ok('B-2d35 the POOL default\'s note says «The pool\'s current member · …», never «Default account»', poolNote.test(AW2d.w3.pop) && !defNote.test(AW2d.w3.pop), AW2d.w3.pop.slice(0, 300));
-  ok('B-2d35 …an ACCOUNT default keeps «Default account · …»', defNote.test(AW2d.w1.pop) && !poolNote.test(AW2d.w1.pop), AW2d.w1.pop.slice(0, 300));
+  ok('B-2d35 the POOL default\'s note says «The pool\'s current member · …», never «Default account»', gateOf(poolNote.test(AW2d.w3.pop)) && !defNote.test(AW2d.w3.pop), AW2d.w3.pop.slice(0, 300));
+  ok('B-2d35 …an ACCOUNT default keeps «Default account · …»', gateOf(defNote.test(AW2d.w1.pop)) && !poolNote.test(AW2d.w1.pop), AW2d.w1.pop.slice(0, 300));
   const umNote = await patchedImport('src/lib/usage-meter.js', 'claude-pool-note', [["      if (defAcct) usageNote = claudeDefRow && claudeDefRow.type === 'pooled' ? t('The pool\\'s current member · refreshes when you run it in a terminal session') : t('Default account · refreshes when you run it in a terminal session');", "      if (defAcct) usageNote = t('Default account · refreshes when you run it in a terminal session');"]]); // stale-pins: kept — the RED plants the release's note line
   const wNoteRed = umNote ? autoWorld(umNote, { def: 'P', cur: 'A' }) : null;
-  ok('B-2d35 RED (the note): the release\'s line says «Default account» for the pool — the leg sees it', !!wNoteRed && defNote.test(wNoteRed.pop) && !poolNote.test(wNoteRed.pop), wNoteRed ? wNoteRed.pop.slice(0, 200) : 'the patched line is not there');
+  ok('B-2d35 RED (the note): the release\'s line says «Default account» for the pool — the leg sees it', !!wNoteRed && gateOf(defNote.test(wNoteRed.pop)) && !poolNote.test(wNoteRed.pop), wNoteRed ? wNoteRed.pop.slice(0, 200) : 'the patched line is not there');
   // r2047 (5): the CODEX pool default's note too — «The pool's current member · refreshes as its sessions run», never «Default account»
   const codexPoolWorld = (UM) => {
     for (const k of Object.keys(els)) delete els[k];
@@ -435,11 +435,11 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
     return { err, txt };
   };
   const cw = codexPoolWorld(UM);
-  ok('B-2d35 the CODEX pool default\'s note says «The pool\'s current member · refreshes as its sessions run», never «Default account» (r2047 (5))', !cw.err && /current member · refreshes as its sessions run/.test(cw.txt) && !/Default account · refreshes as its sessions run/.test(cw.txt), cw.err || cw.txt.slice(0, 300));
+  ok('B-2d35 the CODEX pool default\'s note says «The pool\'s current member · refreshes as its sessions run», never «Default account» (r2047 (5))', !cw.err && gateOf(/current member · refreshes as its sessions run/.test(cw.txt)) && !/Default account · refreshes as its sessions run/.test(cw.txt), cw.err || cw.txt.slice(0, 300));
   const umCxNote = await patchedImport('src/lib/usage-meter.js', 'codex-pool-note', [["      if (defAcct) codexNote = codexDefRow && codexDefRow.type === 'pooled' ? t('The pool\\'s current member · refreshes as its sessions run') : t('Default account · refreshes as its sessions run');", "      if (defAcct) codexNote = t('Default account · refreshes as its sessions run');"]]); // stale-pins: kept — the RED plants the release's codex note line
   const cwr = umCxNote ? codexPoolWorld(umCxNote) : null;
-  ok('B-2d35 RED (the codex note): the release\'s line says «Default account» for the codex pool — the leg sees it', !!cwr && /Default account · refreshes as its sessions run/.test(cwr.txt), cwr ? cwr.txt.slice(0, 200) : 'the patched line is not there');
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(r.name, r.pass, r.detail);
+  ok('B-2d35 RED (the codex note): the release\'s line says «Default account» for the codex pool — the leg sees it', !!cwr && verdictOf(/Default account · refreshes as its sessions run/.test(cwr.txt)), cwr ? cwr.txt.slice(0, 200) : 'the patched line is not there');
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

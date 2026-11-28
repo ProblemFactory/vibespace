@@ -111,7 +111,7 @@ const MED = require('../src/server/cdp-mediator.js');
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -250,7 +250,7 @@ if (world) {
   const v = await getJson(gB.httpBase + '/json/version');
   ok(v.status === 200 && v.json.Browser === ver.Browser && v.json.webSocketDebuggerUrl === gB.url && !v.raw.includes(`:${world.port}/`), '/json/version through B\'s url names the real browser and B\'s endpoint, never the raw one');
   const l = await getJson(gB.httpBase + '/json/list');
-  ok(l.status === 200 && Array.isArray(l.json) && l.json.length === 1 && l.json[0].id === Bt && l.json[0].webSocketDebuggerUrl === gB.url.replace('/devtools/browser', '/devtools/page/' + Bt), '/json/list through B\'s url: only B\'s tab, its endpoint re-pointed', l.raw);
+  ok(l.status === 200 && gateOf(Array.isArray(l.json)) && l.json.length === 1 && l.json[0].id === Bt && l.json[0].webSocketDebuggerUrl === gB.url.replace('/devtools/browser', '/devtools/page/' + Bt), '/json/list through B\'s url: only B\'s tab, its endpoint re-pointed', l.raw);
   const cB = cdpClient(gB.url); await cB.open;
   const seen = (await cB.call('Target.getTargets')).result.targetInfos.map((t) => t.targetId);
   ok(seen.join() === Bt, `B's Target.getTargets lists only B's tab (chrome itself holds ${(await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').length} pages)`);
@@ -269,20 +269,20 @@ if (world) {
   ok((await cB.call('Target.setDiscoverTargets', { discover: true })).result !== undefined && !cB.events.some((e) => e.method === 'Target.targetCreated' && e.params.targetInfo.targetId === A), 'B turns discovery on and the burst of announcements never names A\'s tab');
   const created = await cB.call('Target.createTarget', { url: 'data:text/html,<title>bravo-new</title>' });
   const C = created.result && created.result.targetId;
-  ok(!!C && cB.events.some((e) => e.method === 'Target.targetCreated' && e.params.targetInfo.targetId === C), 'B creates a tab and sees its targetCreated (replayed — Chrome announced it before the reply)');
+  ok(!!C && verdictOf(cB.events.some((e) => e.method === 'Target.targetCreated' && e.params.targetInfo.targetId === C)), 'B creates a tab and sees its targetCreated (replayed — Chrome announced it before the reply)');
   ok((await cB.call('Target.getTargets')).result.targetInfos.map((t) => t.targetId).sort().join() === [Bt, C].sort().join(), 'B now sees exactly its two tabs');
   ok(M.refusalCodeOf(await cB.call('Browser.close')) === 'method_refused', 'Browser.close through B\'s url is method_refused (the browser lives)');
   ok((await upgradeStatus(gA.url.replace('/devtools/browser', '/devtools/page/' + Bt))) === 403 && (await upgradeStatus(gA.url.replace('/devtools/browser', '/devtools/page/' + A))) === 'open', 'A\'s page endpoint for B\'s tab is 403; for its own it opens');
   const cA = cdpClient(gA.url); await cA.open;
   ok(M.refusalCodeOf(await cA.call('Target.closeTarget', { targetId: Bt })) === 'target_out_of_scope' && M.refusalCodeOf(await cA.call('Target.closeTarget', { targetId: C })) === 'target_out_of_scope', 'A cannot close B\'s tabs either (symmetry)');
   const rawPages = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page');
-  ok(rawPages.find((t) => t.targetId === A).title === 'alpha' && rawPages.find((t) => t.targetId === Bt).title === 'bravo-2' && rawPages.some((t) => t.targetId === C), 'the browser\'s own list: A untouched (alpha), B moved by B only, B\'s new tab present');
+  ok(rawPages.find((t) => t.targetId === A).title === 'alpha' && rawPages.find((t) => t.targetId === Bt).title === 'bravo-2' && verdictOf(rawPages.some((t) => t.targetId === C)), 'the browser\'s own list: A untouched (alpha), B moved by B only, B\'s new tab present');
   const rv = med.revoke({ profileId: 'bp-0000000a', browserKey: 'bk-0000000b' });
   const c2 = await cB.closed;
   const closing = await rv.closing;
   await sleep(200);
   const after = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').map((t) => t.targetId);
-  ok(c2.code === 1008 && closing.closed === 2 && !after.includes(Bt) && !after.includes(C) && after.includes(A), 'revoking B closes its connection 1008 and its TWO tabs in the browser; A\'s tab stays');
+  ok(c2.code === 1008 && closing.closed === 2 && !after.includes(Bt) && !after.includes(C) && verdictOf(after.includes(A)), 'revoking B closes its connection 1008 and its TWO tabs in the browser; A\'s tab stays');
   cA.ws.close();
 }
 
@@ -292,7 +292,7 @@ if (!world) skip('⑥ needs the real chrome');
 else {
   const C = M.CENSUS;
   const proto = await getJson(`http://127.0.0.1:${world.port}/json/protocol`);
-  ok(proto.status === 200 && proto.json && Array.isArray(proto.json.domains) && proto.json.domains.length > 40, '⑥ the launched Chrome answers GET /json/protocol (its own method list)');
+  ok(proto.status === 200 && gateOf(proto.json) && gateOf(Array.isArray(proto.json.domains)) && proto.json.domains.length > 40, '⑥ the launched Chrome answers GET /json/protocol (its own method list)');
   const cv = (/Chrome\/(\d+\.\d+\.\d+\.\d+)/.exec(world.ver.Browser) || [])[1] || '?';
   // lane-cdp-154 (2026-09-28): the census reads more than one Chrome (CENSUS_CHROMES) — compared AT the live version:
   // a censused Chrome must match exactly; a newer (or unknown) one fails on every method no row names (PRINTED, so a
@@ -303,7 +303,7 @@ else {
   console.log(`  (census ${C.CENSUS_CHROMES.join(' + ')} vs live Chrome ${cv} [${rel}]: ${cmp.listed} methods listed, ${cmp.rows} rows — ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale, ${cmp.misdated.length} misdated)`);
   if (cmp.unclassified.length) console.error(`  UNCLASSIFIED — Chrome ${cv} lists methods the census has no row for (each is refused BY NAME while the user drives${rel === 'older' ? '; this Chrome is OLDER than the census' : ' until it gets a row in src/cdp-census.js; re-run scripts/cdp-protocol-fetch.mjs for the fixture'}):\n    ` + cmp.unclassified.join('\n    '));
   if (cmp.stale.length || cmp.misdated.length) console.log(`  (stale — rows Chrome ${cv} lacks${rel === 'censused' ? '' : ' (not a censused Chrome — informational)'}: ` + cmp.stale.slice(0, 10).join(', ') + (cmp.stale.length > 10 ? ` … +${cmp.stale.length - 10}` : '') + (cmp.misdated.length ? ` · misdated: ${cmp.misdated.join(', ')}` : '') + ')');
-  if (rel === 'censused') ok(cmp.sameSet, `⑥ Chrome ${cv} is a censused Chrome: the table names exactly its methods (${cmp.listed} = ${cmp.rows}; ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale, ${cmp.misdated.length} misdated)`);
+  if (rel === 'censused') ok(verdictOf(cmp.sameSet), `⑥ Chrome ${cv} is a censused Chrome: the table names exactly its methods (${cmp.listed} = ${cmp.rows}; ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale, ${cmp.misdated.length} misdated)`);
   else if (rel === 'older') ok(true, `⑥ Chrome ${cv} is OLDER than the census (first censused ${C.CENSUS_CHROMES[0]}): ${cmp.unclassified.length} of its methods have no row — not classed here, each refused BY NAME on the paused lease below`);
   else ok(cmp.unclassified.length === 0, `⑥ Chrome ${cv} (${rel} — censused: ${C.CENSUS_CHROMES.join(' + ')}): every method it lists has a census row — ${cmp.unclassified.length} unclassified (PRINTED above; they fail here until classified)`);
   // the fence's OBSERVABLE effect: A's tab under A's grant; the ORACLE is the raw endpoint (never the lease's own fence). The retired r4 switch:
@@ -337,16 +337,16 @@ else {
   ok(codeOf(await c6.call('Target.createTarget', { url: 'about:blank' })) === 'browser_interrupted' && (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').length === before6, '⑥ PAUSED · view: Target.createTarget is browser_interrupted and the browser holds the same number of pages');
   // page-mutation: refused (the owner's ruling, 2026-09-27 — D6's open door is closed; the stale switch callback reads OFF and changes nothing)
   const ev = await c6.call('Runtime.evaluate', { expression: 'document.title = "mutated"; document.title', returnByValue: true }, s6);
-  ok(codeOf(ev) === 'browser_interrupted' && /took over your window of this browser/.test(ev.error.message) && !/fenceScriptsWhileDriven/.test(ev.error.message) && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Runtime.evaluate is browser_interrupted and did NOT change the page (title still "census") — the stale switch callback reading OFF re-opens nothing', ev.error && ev.error.message);
+  ok(codeOf(ev) === 'browser_interrupted' && gateOf(/took over your window of this browser/.test(ev.error.message)) && !/fenceScriptsWhileDriven/.test(ev.error.message) && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Runtime.evaluate is browser_interrupted and did NOT change the page (title still "census") — the stale switch callback reading OFF re-opens nothing', ev.error && ev.error.message);
   // read / session / harmless
   const shot = await frontShot(FS6, A, frontA, () => c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6), { name: '⑥ the paused read\'s picture' });
-  ok(shot.result && typeof shot.result.data === 'string' && shot.result.data.length > 100, '⑥ PAUSED · read: Page.captureScreenshot answers with a picture');
+  ok(gateOf(shot.result) && typeof shot.result.data === 'string' && shot.result.data.length > 100, '⑥ PAUSED · read: Page.captureScreenshot answers with a picture');
   ok((await c6.call('DOM.getDocument', { depth: 1 }, s6)).result !== undefined && (await c6.call('Page.getLayoutMetrics', {}, s6)).result !== undefined, '⑥ PAUSED · read: DOM.getDocument and Page.getLayoutMetrics answer');
   ok(((await c6.call('Target.getTargets')).result || {}).targetInfos.map((t) => t.targetId).join() === A, '⑥ PAUSED · session: Target.getTargets answers (the lease\'s own tab only)');
   ok((await c6.call('Page.enable', {}, s6)).result !== undefined && (await c6.call('Runtime.enable', {}, s6)).result !== undefined, '⑥ PAUSED · harmless: Page.enable / Runtime.enable answer');
   // unknown: refused BY NAME whoever drives (lane chrome-157 — 主开发's ruling)
   const unk = await c6.call('Page.zzzFutureMethod', {}, s6);
-  ok(codeOf(unk) === 'method_unclassified' && /Page\.zzzFutureMethod is not a method this VibeSpace knows yet/.test(unk.error.message) && /cdp-census/.test(unk.error.message) && /no way round it/.test(unk.error.message), '⑥ PAUSED · unknown: a method with no census row is method_unclassified BY NAME (the method, that VibeSpace does not know it yet, the census file, no way round it)', unk.error && unk.error.message);
+  ok(codeOf(unk) === 'method_unclassified' && gateOf(/Page\.zzzFutureMethod is not a method this VibeSpace knows yet/.test(unk.error.message)) && gateOf(/cdp-census/.test(unk.error.message)) && verdictOf(/no way round it/.test(unk.error.message)), '⑥ PAUSED · unknown: a method with no census row is method_unclassified BY NAME (the method, that VibeSpace does not know it yet, the census file, no way round it)', unk.error && unk.error.message);
   // lane-cdp-154: THIS Chrome's own methods without a row (a newer or an older Chrome than the census) — every one is
   // refused by name while the user drives, whatever the version; none reaches the browser
   const extraWrong = [];
@@ -358,7 +358,7 @@ else {
   if (lists('Ads.getAdScripts') && lists('Browser.getGlobalPrivacyControl')) {
     const ads = await c6.call('Ads.getAdScripts', {}, s6);
     const gpc = await c6.call('Browser.getGlobalPrivacyControl', {});
-    ok(codeOf(ads) === null && ads.result && Array.isArray(ads.result.newScripts) && codeOf(gpc) === null && ((gpc.result && typeof gpc.result.gpc === 'boolean') || (gpc.error && /Global Privacy Control/.test(gpc.error.message))), `⑥ PAUSED · read (Chrome ${cv}): Ads.getAdScripts answers (${ads.result ? ads.result.newScripts.length : '?'} scripts) and Browser.getGlobalPrivacyControl is FORWARDED (Chrome's own answer: ${JSON.stringify(gpc.result || gpc.error).slice(0, 80)})`);
+    ok(codeOf(ads) === null && gateOf(ads.result) && gateOf(Array.isArray(ads.result.newScripts)) && codeOf(gpc) === null && ((gateOf(gpc.result) && typeof gpc.result.gpc === 'boolean') || (gateOf(gpc.error) && verdictOf(/Global Privacy Control/.test(gpc.error.message)))), `⑥ PAUSED · read (Chrome ${cv}): Ads.getAdScripts answers (${ads.result ? ads.result.newScripts.length : '?'} scripts) and Browser.getGlobalPrivacyControl is FORWARDED (Chrome's own answer: ${JSON.stringify(gpc.result || gpc.error).slice(0, 80)})`);
   } else if (cvMajor >= 154) ok(false, `⑥ Chrome ${cv} (>= 154) lists no Ads.getAdScripts / Browser.getGlobalPrivacyControl`);
   else console.log(`  · ⑥ Chrome ${cv} predates Ads.getAdScripts / Browser.getGlobalPrivacyControl (154+)`);
   // lane mediation-chrome-155: Chrome 155's three DOM methods on the paused lease — the forced spelling / grammar marker
@@ -383,7 +383,7 @@ else {
     const btnB = ((await c6.call('DOM.describeNode', { nodeId: PB }, s6)).result || { node: {} }).node.backendNodeId;
     const ia = await c6.call('DOM.getImplicitAnchorCandidates', { nodeId: POP }, s6);
     const cl = await c6.call('DOM.clearTextMarkers', {}, s6);
-    ok(codeOf(ia) === null && ia.result && String(ia.result.backendNodeIds) === String(btnB) && codeOf(cl) === null && cl.result !== undefined && (await oracle('document.getElementById("pop").matches(":popover-open")')) === false, `⑥ PAUSED · read + harmless (Chrome ${cv}): DOM.getImplicitAnchorCandidates answers with the popover's button (backend node ${btnB}) and the popover stays closed; DOM.clearTextMarkers is FORWARDED (Chrome's own answer)`, JSON.stringify({ ia, cl }).slice(0, 240));
+    ok(codeOf(ia) === null && gateOf(ia.result) && String(ia.result.backendNodeIds) === String(btnB) && codeOf(cl) === null && cl.result !== undefined && (await oracle('document.getElementById("pop").matches(":popover-open")')) === false, `⑥ PAUSED · read + harmless (Chrome ${cv}): DOM.getImplicitAnchorCandidates answers with the popover's button (backend node ${btnB}) and the popover stays closed; DOM.clearTextMarkers is FORWARDED (Chrome's own answer)`, JSON.stringify({ ia, cl }).slice(0, 240));
   } else if (cvMajor >= 155) ok(false, `⑥ Chrome ${cv} (>= 155) lists no DOM.setTextMarker / clearTextMarkers / getImplicitAnchorCandidates`);
   else console.log(`  · ⑥ Chrome ${cv} predates DOM.setTextMarker / clearTextMarkers / getImplicitAnchorCandidates (155+)`);
   // lane chrome-156-drift: Chrome 156's new FindInPage domain on the paused lease — a VIEW act all through (measured on
@@ -400,12 +400,12 @@ else {
     await sleep(300);
     ok(codeOf(ff) === 'browser_interrupted' && codeOf(st) === 'browser_interrupted' && (await at()) === before && JSON.parse(before)[0] === 0, `⑥ PAUSED · view (Chrome ${cv}): FindInPage.findFirst and FindInPage.stop are browser_interrupted — the page did not scroll and its focused field kept the focus (${before})`, JSON.stringify({ ff, st }).slice(0, 240));
     const sa = await c6.call('Page.getSubApps', {}, s6);
-    ok(codeOf(sa) === null && sa.result && Array.isArray(sa.result.subApps), `⑥ PAUSED · read (Chrome ${cv}): Page.getSubApps answers (${sa.result ? sa.result.subApps.length : '?'} sub-apps — a plain page is no Isolated Web App)`, JSON.stringify(sa).slice(0, 200));
+    ok(codeOf(sa) === null && gateOf(sa.result) && verdictOf(Array.isArray(sa.result.subApps)), `⑥ PAUSED · read (Chrome ${cv}): Page.getSubApps answers (${sa.result ? sa.result.subApps.length : '?'} sub-apps — a plain page is no Isolated Web App)`, JSON.stringify(sa).slice(0, 200));
   } else if (cvMajor >= 156) ok(false, `⑥ Chrome ${cv} (>= 156) lists no FindInPage domain / Page.getSubApps`);
   else console.log(`  · ⑥ Chrome ${cv} predates FindInPage domain / Page.getSubApps (156+)`);
   ok(codeOf(await c6.call('Network.setCookie', { name: 'vs6', value: '1', url: 'https://example.invalid/' }, s6)) === 'browser_interrupted' && codeOf(await c6.call('DOM.setOuterHTML', { nodeId: 1, outerHTML: '<html></html>' }, s6)) === 'browser_interrupted' && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Network.setCookie and DOM.setOuterHTML are browser_interrupted too (the whole class) — the page unchanged');
   const shot2 = await frontShot(FS6, A, frontA, () => c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6), { name: '⑥ the second paused read\'s picture' });
-  ok(shot2.result && typeof shot2.result.data === 'string' && (await c6.call('Runtime.getHeapUsage', {}, s6)).result !== undefined, '⑥ PAUSED · a read (Page.captureScreenshot, Runtime.getHeapUsage) still answers');
+  ok(gateOf(shot2.result) && typeof shot2.result.data === 'string' && (await c6.call('Runtime.getHeapUsage', {}, s6)).result !== undefined, '⑥ PAUSED · a read (Page.captureScreenshot, Runtime.getHeapUsage) still answers');
   // the deaf-page arm: refused on a live lease, paused or not
   ok(codeOf(await c6.call('Input.setIgnoreInputEvents', { ignore: true }, s6)) === 'method_refused', '⑥ Input.setIgnoreInputEvents is method_refused on a live lease while paused…');
   // handback: everything of the agent's flows again
@@ -413,13 +413,13 @@ else {
   ok(codeOf(await c6.call('Input.setIgnoreInputEvents', { ignore: true }, s6)) === 'method_refused', '⑥ …and after the handback (refused on every lease)');
   ok((await c6.call('Input.dispatchKeyEvent', KEY, s6)).result !== undefined && (await oracle('window.k')) === 2, '⑥ handed back: the agent\'s key lands again (the oracle counts 2 — the page was never made deaf)');
   const ev3 = await c6.call('Runtime.evaluate', { expression: 'document.title = "mutated-3"; document.title', returnByValue: true }, s6);
-  ok(ev3.result && ev3.result.result && ev3.result.result.value === 'mutated-3' && (await oracle('document.title')) === 'mutated-3', '⑥ handed back: Runtime.evaluate goes through (the fence bites only while the user drives)');
+  ok(gateOf(ev3.result) && gateOf(ev3.result.result) && ev3.result.result.value === 'mutated-3' && (await oracle('document.title')) === 'mutated-3', '⑥ handed back: Runtime.evaluate goes through (the fence bites only while the user drives)');
   const dm2 = await c6.call('Emulation.setDeviceMetricsOverride', { width: 300, height: 200, deviceScaleFactor: 1, mobile: false }, s6);
   await sleep(150);
   ok(dm2.result !== undefined && (await oracle('innerWidth')) === 300, '⑥ handed back: Emulation.setDeviceMetricsOverride goes through and the viewport is 300 px wide (the view row is honest both ways)');
   await c6.call('Emulation.clearDeviceMetricsOverride', {}, s6);
   const unk2 = await c6.call('Page.zzzFutureMethod', {}, s6);
-  ok(codeOf(unk2) === 'method_unclassified' && unk2.result === undefined && unk2.error.message.includes(cv), `⑥ handed back (the agent drives): the unknown method is STILL refused by name, naming the live browser (${cv}) — lane chrome-157: before, it was FORWARDED and Chrome itself answered -32601; never reaches the browser`, JSON.stringify(unk2).slice(0, 240));
+  ok(codeOf(unk2) === 'method_unclassified' && unk2.result === undefined && verdictOf(unk2.error.message.includes(cv)), `⑥ handed back (the agent drives): the unknown method is STILL refused by name, naming the live browser (${cv}) — lane chrome-157: before, it was FORWARDED and Chrome itself answered -32601; never reaches the browser`, JSON.stringify(unk2).slice(0, 240));
   // lane-cdp-154: Chrome 154's two whole-browser SETTERS are method_refused on EVERY lease — handed back too (the agent
   // drives). The camera's effect is OBSERVED from another tab: a loopback page (a secure context) counts the video
   // inputs; the RAW endpoint adding a mock camera is the positive control (the oracle sees one when one is added)
@@ -441,7 +441,7 @@ else {
     // add, made after it, is seen at exactly n0 + 1: a camera the refused call had added would be counted there too)
     const camsAt = async (want, what, ms = 15000) => { const end = Date.now() + ms; let n = await cams(); while (n !== want && Date.now() < end) { await sleep(50); n = await cams(); } if (n !== want) console.log(`    · HARNESS (⑥): ${what}: the device list read ${n}, not ${want}, within ${ms} ms`); return n; };
     const mc = await c6.call('Browser.addMockCamera', { deviceId: 'vs-census-lease' });
-    ok(typeof n0 === 'number' && codeOf(mc) === 'method_refused' && /every browser context/.test(mc.error.message) && (await cams()) === n0, `⑥ handed back (the agent drives), Chrome ${cv}: Browser.addMockCamera is method_refused and the browser's device list is unchanged (${n0} video inputs, counted from another tab)`, mc.error && mc.error.message);
+    ok(typeof n0 === 'number' && codeOf(mc) === 'method_refused' && gateOf(/every browser context/.test(mc.error.message)) && (await cams()) === n0, `⑥ handed back (the agent drives), Chrome ${cv}: Browser.addMockCamera is method_refused and the browser's device list is unchanged (${n0} video inputs, counted from another tab)`, mc.error && mc.error.message);
     const rawCam = cdpClient(world.ver.webSocketDebuggerUrl); await rawCam.open;
     // PLACED FIRST, RED AT WILL: the raw add HELD (sent only after the read as the leg stood) — the device list «did not move», the
     // control red with nothing wrong; then the disconnect HELD (the read as the leg stood comes before it) — the camera «never left»
@@ -455,7 +455,7 @@ else {
     ok(asStoodN1 === n0 && asStoodN2 === n0 + 1 && n1 === n0 + 1 && n2 === n0, `⑥ …PLACED (r4456): the raw add held, the device list read as the leg stood did not move (${asStoodN1}); the disconnect held, the camera read as the leg stood had not left (${asStoodN2}) — the control red both ways with nothing wrong; the waits read ${n1} and ${n2}`, JSON.stringify({ n0, asStoodN1, n1, asStoodN2, n2 }));
     ok(added.result !== undefined && n1 === n0 + 1 && n2 === n0, `⑥ …CONTROL: the same call on the RAW endpoint adds one (${n0} → ${n1} video inputs in another tab, exactly one: the lease's refused call added none) and it leaves with its DevTools connection (${n2}) — the oracle sees what the lease's call did not do`, JSON.stringify(added).slice(0, 160));
     const sg = await c6.call('Browser.setGlobalPrivacyControl', { gpc: true });
-    ok(codeOf(sg) === 'method_refused' && /Global Privacy Control/.test(sg.error.message), `⑥ handed back, Chrome ${cv}: Browser.setGlobalPrivacyControl is method_refused on the lease — the mediator's refusal, never Chrome's own answer`, sg.error && sg.error.message);
+    ok(codeOf(sg) === 'method_refused' && verdictOf(/Global Privacy Control/.test(sg.error.message)), `⑥ handed back, Chrome ${cv}: Browser.setGlobalPrivacyControl is method_refused on the lease — the mediator's refusal, never Chrome's own answer`, sg.error && sg.error.message);
     try { await raw.call('Target.closeTarget', { targetId: camT }); } catch { /* gone */ }
     camSrv.close();
   } else if (cvMajor >= 154) ok(false, `⑥ Chrome ${cv} (>= 154) lists no Browser.addMockCamera / setGlobalPrivacyControl`);
@@ -504,8 +504,8 @@ if (AB) {
   const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
   const cfgValue = (m.other || []).some((o) => o.flag === '--config' && /config file not found: zzq9/.test(o.said));
   const diff = { valueMissing: m.value.filter((f) => !V.VALUE_FLAGS.includes(f)), valueExtra: V.VALUE_FLAGS.filter((f) => !m.value.includes(f) && !(f === '--config' && cfgValue)), boolMissing: m.bool.filter((f) => !V.BOOL_FLAGS.includes(f)), boolExtra: V.BOOL_FLAGS.filter((f) => !m.bool.includes(f)) };
-  ok(m.candidates >= 500 && m.value.length >= 30 && Object.values(diff).every((x) => !x.length), `r3: the INSTALLED binary (${m.version}) measured — ${m.candidates} flag-shaped strings, ${m.value.length} value / ${m.bool.length} boolean global flags — equals the router's VALUE_FLAGS / BOOL_FLAGS (${m.ms} ms)`, JSON.stringify(diff));
-  if (m.version === GF.version) ok(same(m.value, GF.value) && same(m.bool, GF.bool), `r3: …and the checked-in fixture the fast gate reads (${GF.version}) is this measurement`, JSON.stringify({ value: m.value, bool: m.bool }));
+  ok(m.candidates >= 500 && m.value.length >= 30 && verdictOf(Object.values(diff).every((x) => !x.length)), `r3: the INSTALLED binary (${m.version}) measured — ${m.candidates} flag-shaped strings, ${m.value.length} value / ${m.bool.length} boolean global flags — equals the router's VALUE_FLAGS / BOOL_FLAGS (${m.ms} ms)`, JSON.stringify(diff));
+  if (m.version === GF.version) ok(gateOf(same(m.value, GF.value)) && verdictOf(same(m.bool, GF.bool)), `r3: …and the checked-in fixture the fast gate reads (${GF.version}) is this measurement`, JSON.stringify({ value: m.value, bool: m.bool }));
   else skip(`the installed binary is ${m.version}, the checked-in fixture ${GF.version} — the table was compared above; re-run \`node scripts/browser-flag-census.mjs --write scripts/fixtures/browser-verbs/global-flags-${m.version}.json\` to record it`);
   fs.rmSync(cdir, { recursive: true, force: true });
 }
@@ -523,7 +523,7 @@ else if (AB) {
   const o1 = await ab('c', g1, ['open', 'data:text/html,<title>charlie</title><div id=e cdp-url=zzz>hi</div><cdp-url>tagtext</cdp-url>']);
   if (!o1.ok) skip(`the real agent-browser did not open through the mediated url: ${o1.err || o1.out}`);
   else {
-    ok(o1.json && o1.json.success === true && o1.json.data && o1.json.data.title === 'charlie', 'session C opens a page through its mediated url (the real daemon, the real chrome)');
+    ok(gateOf(o1.json) && o1.json.success === true && gateOf(o1.json.data) && o1.json.data.title === 'charlie', 'session C opens a page through its mediated url (the real daemon, the real chrome)');
     // ── THE WHOLE-PROFILE LAW with the REAL driver (lane chrome-157, the owner's law 2026-11-13): its OWN grants and sessions (never C's),
     //    on the MEDIATED and the SCOPE road — `cookies clear` refused by name, `download` WORKS and the profile is put back when it ends
     {
@@ -533,12 +533,12 @@ else if (AB) {
         const ow = await ab(k, gw, ['open', 'data:text/html,<title>wp</title><a id=d href="data:text/plain,whole-profile" download="wp-' + road + '.txt">d</a>']);
         const cc = await ab(k, gw, ['cookies', 'clear']);
         const said = cc.json && cc.json.error ? String(cc.json.error) : String(cc.err || cc.out || '');
-        ok(ow.ok && !(cc.json && cc.json.success === true) && /method_refused/.test(said) && /WHOLE/.test(said) && /site-reset --host/.test(said),
+        ok(gateOf(ow.ok) && !(cc.json && cc.json.success === true) && gateOf(/method_refused/.test(said)) && gateOf(/WHOLE/.test(said)) && verdictOf(/site-reset --host/.test(said)),
           `the real driver (${road} road): \`cookies clear\` is REFUSED by name — it would empty the person's whole jar; the words point at site-reset / the conversation's own browser`, said.slice(0, 300));
         const dl = await ab(k, gw, ['download', '#d', path.join(dlDir, 'wp-' + road + '.txt')]);
         let landed = false; for (let i = 0; i < 40 && !landed; i++) { landed = fs.existsSync(path.join(dlDir, 'wp-' + road + '.txt')); if (!landed) await new Promise((r) => setTimeout(r, 150)); }
         let back = false; for (let i = 0; i < 40 && !back; i++) { back = !med.downloadWindowOf('bp-000000w' + k); if (!back) await new Promise((r) => setTimeout(r, 150)); }
-        ok(dl.ok && landed && back, `the real driver (${road} road): \`download\` WORKS (the file landed) and the profile's download folder is put back when it ends (the window closed)`, JSON.stringify({ dl: dl.ok ? 'ok' : String(dl.err || dl.out).slice(0, 200), landed, back }));
+        ok(gateOf(dl.ok) && gateOf(landed) && verdictOf(back), `the real driver (${road} road): \`download\` WORKS (the file landed) and the profile's download folder is put back when it ends (the window closed)`, JSON.stringify({ dl: dl.ok ? 'ok' : String(dl.err || dl.out).slice(0, 200), landed, back }));
         // THE PERSON'S DOWNLOAD (the .401 read — the lane's own probe, now a leg): a stand-in person's tab (the raw endpoint) downloads
         //   (1) once the lease's window has CLOSED (the real driver's download ended): the file lands in the PERSON's own place;
         //   (2) while a window of the lease's stands (a CDP client through the lease's own url, the set on its page session as the
@@ -551,7 +551,7 @@ else if (AB) {
         };
         const landsIn = async (f) => { for (let i = 0; i < 40; i++) { if (fs.existsSync(f)) return true; await sleep(150); } return false; };
         const p1 = await personTab(road + '-after');
-        ok(await landsIn(path.join(CHROME_HOME, 'Downloads', 'person-' + road + '-after.txt')) && !fs.existsSync(path.join(dlDir, 'person-' + road + '-after.txt')),
+        ok(gateOf(await landsIn(path.join(CHROME_HOME, 'Downloads', 'person-' + road + '-after.txt'))) && !fs.existsSync(path.join(dlDir, 'person-' + road + '-after.txt')),
           `the real driver (${road} road): once its download ended, a download the PERSON starts lands in the person's own place — the folder was put back`);
         try { await raw.call('Target.closeTarget', { targetId: p1 }); } catch { /* gone */ }
         for (const form of ['session', 'browser']) {
@@ -579,9 +579,9 @@ else if (AB) {
     // AGENT_BROWSER_* keys must never reach it through vibespace-browser)
     const fj = await ab('c', g1, ['get', '--json', 'cdp-url']);
     const fk = await ab('c', g1, ['get', 'cdp-url', '--json']);
-    ok(fj.ok && fj.json && fj.json.success === true && fj.json.data && /^wss?:\/\//.test(String(fj.json.data.cdpUrl || '')) && fk.ok && fk.json && fk.json.data && fk.json.data.cdpUrl, 'CONTROL (r1): the real binary answers `get --json cdp-url` AND `get cdp-url --json` with the raw endpoint — a flag between the verb and its noun hides nothing', JSON.stringify([fj, fk]));
+    ok(gateOf(fj.ok) && gateOf(fj.json) && fj.json.success === true && gateOf(fj.json.data) && gateOf(/^wss?:\/\//.test(String(fj.json.data.cdpUrl || ''))) && gateOf(fk.ok) && gateOf(fk.json) && gateOf(fk.json.data) && verdictOf(fk.json.data.cdpUrl), 'CONTROL (r1): the real binary answers `get --json cdp-url` AND `get cdp-url --json` with the raw endpoint — a flag between the verb and its noun hides nothing', JSON.stringify([fj, fk]));
     const V = require('../src/browser-verbs.js');
-    ok(['get --json cdp-url', 'get -c cdp-url', 'get cdp-url --json'].every((l) => V.classify(l.split(' ')).code === 'raw_cdp_refused'), '…and the router refuses every one of those spellings');
+    ok(verdictOf(['get --json cdp-url', 'get -c cdp-url', 'get cdp-url --json'].every((l) => V.classify(l.split(' ')).code === 'raw_cdp_refused')), '…and the router refuses every one of those spellings');
     // r2 (takeover finding 1) THE ORACLE: every spelling through the REAL binary, the router held to its
     // answer — a spelling that printed an endpoint MUST be refused (a boolean flag's optional `true`/`false`
     // included), and `cdp-url` as an attribute NAME or a SELECTOR is a read the router must pass
@@ -605,12 +605,12 @@ else if (AB) {
       ok(rows.filter((r) => r.leaked).length >= 7 && unsound.length === 0, `r2 ORACLE: every spelling the real binary answers with an endpoint is refused by the router (${rows.filter((r) => r.leaked).length} leaking spellings; let through: ${unsound.map((r) => r.argv).join('; ') || 'none'})`, JSON.stringify(rows));
       const fz = rows.filter((r) => FUZZ.some((a) => a.join(' ') === r.argv));
       const idle = rows.find((r) => r.argv === 'get --idle-timeout 5m cdp-url');
-      ok(idle && idle.leaked && idle.verdict === 'refused' && fz.length >= 30 && fz.filter((r) => r.leaked).length >= 20 && fz.every((r) => !r.leaked || r.verdict === 'refused'), `r3 ORACLE: \`get --idle-timeout 5m cdp-url\` IS the raw endpoint on the real binary and the router refuses it; so is every one of ${fz.filter((r) => r.leaked).length} measured-flag spellings that leak (of ${fz.length} run)`, JSON.stringify(fz.filter((r) => r.leaked !== (r.verdict === 'refused'))));
+      ok(gateOf(idle) && gateOf(idle.leaked) && idle.verdict === 'refused' && fz.length >= 30 && fz.filter((r) => r.leaked).length >= 20 && verdictOf(fz.every((r) => !r.leaked || r.verdict === 'refused')), `r3 ORACLE: \`get --idle-timeout 5m cdp-url\` IS the raw endpoint on the real binary and the router refuses it; so is every one of ${fz.filter((r) => r.leaked).length} measured-flag spellings that leak (of ${fz.length} run)`, JSON.stringify(fz.filter((r) => r.leaked !== (r.verdict === 'refused'))));
       const reads = rows.filter((r) => /^get (attr|text|count)\b/.test(r.argv));
-      ok(reads.length === 4 && reads.every((r) => !r.leaked && r.verdict === 'page') && /zzz/.test(reads[0].value) && /tagtext/.test(reads[1].value), 'r2 ORACLE: `get attr #e cdp-url` (the attribute NAMED cdp-url ⇒ zzz), `get text cdp-url` (a <cdp-url> element) and `count` print no endpoint — and the router passes them', JSON.stringify(reads));
+      ok(reads.length === 4 && gateOf(reads.every((r) => !r.leaked && r.verdict === 'page')) && gateOf(/zzz/.test(reads[0].value)) && verdictOf(/tagtext/.test(reads[1].value)), 'r2 ORACLE: `get attr #e cdp-url` (the attribute NAMED cdp-url ⇒ zzz), `get text cdp-url` (a <cdp-url> element) and `count` print no endpoint — and the router passes them', JSON.stringify(reads));
     }
     const twinDirect = await new Promise((res) => execFile('agent-browser', ['get', 'title'], { env: { ...envFor('t', g1), AGENT_BROWSER_CDP: 'http://127.0.0.1:1' }, encoding: 'utf8', timeout: 45000 }, (e, so, se) => res({ ok: !e, text: String(so) + String(se || (e && e.message) || '') })));
-    ok(!twinDirect.ok && /127\.0\.0\.1:1\b/.test(twinDirect.text), 'CONTROL (r1): run directly, the real binary HONOURS the AGENT_BROWSER_CDP twin (it tries 127.0.0.1:1 — exactly what `--cdp 1` is refused for)', twinDirect.text.slice(0, 300));
+    ok(!twinDirect.ok && verdictOf(/127\.0\.0\.1:1\b/.test(twinDirect.text)), 'CONTROL (r1): run directly, the real binary HONOURS the AGENT_BROWSER_CDP twin (it tries 127.0.0.1:1 — exactly what `--cdp 1` is refused for)', twinDirect.text.slice(0, 300));
     {
       // the same shell through vibespace-browser over a stub /resolve answering an ATTACHMENT (the
       // keeper's mediated pairs): the twins are dropped and SAID, the command lands on the lease's url
@@ -622,7 +622,7 @@ else if (AB) {
       const iC = await info({}), iD = await info({ AGENT_BROWSER_SOCKET_DIR: DECOY });
       const tail = `/namespaces/${NS_PREFIX}c/run`;
       const rootC = iC && typeof iC.socketDir === 'string' && iC.socketDir.endsWith(tail) ? iC.socketDir.slice(0, -tail.length) : null;
-      ok(iC && iC.active === true && rootC && iD && iD.active === false && String(iD.socketDir || '').startsWith(DECOY + '/'), `r2 CONTROL (the real binary): the same session under another SOCKET_DIR is ANOTHER daemon (active under ${rootC}, inactive under the decoy) — the socket root picks the daemon`, JSON.stringify({ iC, iD }));
+      ok(gateOf(iC) && iC.active === true && gateOf(rootC) && gateOf(iD) && iD.active === false && verdictOf(String(iD.socketDir || '').startsWith(DECOY + '/')), `r2 CONTROL (the real binary): the same session under another SOCKET_DIR is ANOTHER daemon (active under ${rootC}, inactive under the decoy) — the socket root picks the daemon`, JSON.stringify({ iC, iD }));
       const calls = [];
       const answer = { ok: true, kind: 'attachment', handle: 'work', env: envPairsOf('c', g1), spawnEnv: [], socketDir: rootC, runtimeDir: process.env.XDG_RUNTIME_DIR || null, profile: { id: 'bp-0000000c', label: 'Work' }, lease: { since: Date.now() }, others: 0, handles: [], isDefault: true, pinTab: false };
       const stub = http.createServer((req, res) => { let b = ''; req.on('data', (d) => b += d); req.on('end', () => { calls.push(req.url); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(req.url === '/api/agent/browser/resolve' ? answer : { ok: true })); }); });
@@ -633,24 +633,24 @@ else if (AB) {
       const attr = await viaCli(['get', 'attr', '#e', 'cdp-url']);
       stub.close();
       let j = null; try { j = JSON.parse(via.so.trim().split('\n').filter(Boolean).pop()); } catch { j = null; }
-      ok(via.ok && j && j.success === true && j.data && j.data.title === 'charlie' && !/127\.0\.0\.1:1\b/.test(via.so + via.se) && /\[env_twin_dropped\]/.test(via.se) && calls.includes('/api/agent/browser/resolve'), 'r1: through vibespace-browser the same shell reaches the REAL binary with the twins dropped (said once) and lands on the lease\'s own browser (`charlie`)', JSON.stringify(via).slice(0, 600));
-      ok(via.ok && !fs.existsSync(path.join(DECOY, 'namespaces')) && !fs.existsSync(path.join(DECOY_XDG, 'agent-browser')) && /AGENT_BROWSER_SOCKET_DIR/.test(via.se) && /XDG_RUNTIME_DIR/.test(via.se), 'r2: …under the ANSWER\'s socket root — the agent\'s exported SOCKET_DIR / XDG_RUNTIME_DIR got no daemon (nothing under either decoy) and were named as not passed', JSON.stringify({ se: via.se.slice(0, 400), decoy: fs.existsSync(DECOY) ? fs.readdirSync(DECOY) : null }));
-      ok(attr.ok && /zzz/.test(attr.so) && !/devtools/.test(attr.so + attr.se) && !/raw_cdp_refused/.test(attr.se), 'r2: `vibespace-browser get attr #e cdp-url` reaches the real binary and prints the attribute (zzz), never an endpoint', JSON.stringify(attr).slice(0, 400));
+      ok(gateOf(via.ok) && gateOf(j) && j.success === true && gateOf(j.data) && j.data.title === 'charlie' && !/127\.0\.0\.1:1\b/.test(via.so + via.se) && gateOf(/\[env_twin_dropped\]/.test(via.se)) && verdictOf(calls.includes('/api/agent/browser/resolve')), 'r1: through vibespace-browser the same shell reaches the REAL binary with the twins dropped (said once) and lands on the lease\'s own browser (`charlie`)', JSON.stringify(via).slice(0, 600));
+      ok(gateOf(via.ok) && !fs.existsSync(path.join(DECOY, 'namespaces')) && !fs.existsSync(path.join(DECOY_XDG, 'agent-browser')) && gateOf(/AGENT_BROWSER_SOCKET_DIR/.test(via.se)) && verdictOf(/XDG_RUNTIME_DIR/.test(via.se)), 'r2: …under the ANSWER\'s socket root — the agent\'s exported SOCKET_DIR / XDG_RUNTIME_DIR got no daemon (nothing under either decoy) and were named as not passed', JSON.stringify({ se: via.se.slice(0, 400), decoy: fs.existsSync(DECOY) ? fs.readdirSync(DECOY) : null }));
+      ok(gateOf(attr.ok) && gateOf(/zzz/.test(attr.so)) && !/devtools/.test(attr.so + attr.se) && !/raw_cdp_refused/.test(attr.se), 'r2: `vibespace-browser get attr #e cdp-url` reaches the real binary and prints the attribute (zzz), never an endpoint', JSON.stringify(attr).slice(0, 400));
     }
     const o2 = await ab('d', g2, ['open', 'data:text/html,<title>delta</title>']);
     const o3 = await ab('d', g2, ['tab', 'new', 'data:text/html,<title>delta-2</title>']);
-    ok(o2.ok && o3.ok, 'session D opens a page and a second tab through ITS url');
+    ok(gateOf(o2.ok) && verdictOf(o3.ok), 'session D opens a page and a second tab through ITS url');
     const tC = titles(await ab('c', g1, ['tab', 'list'])), tD = titles(await ab('d', g2, ['tab', 'list']));
-    ok(Array.isArray(tC) && tC.length === 1 && /charlie/.test(tC[0]) && !tC.some((t) => /delta/.test(t)), `C's tab list is C's alone (${JSON.stringify(tC)})`);
-    ok(Array.isArray(tD) && tD.length === 2 && tD.every((t) => /delta/.test(t)) && !tD.some((t) => /charlie/.test(t)), `D's tab list is D's alone (${JSON.stringify(tD)})`);
+    ok(gateOf(Array.isArray(tC)) && tC.length === 1 && gateOf(/charlie/.test(tC[0])) && !tC.some((t) => /delta/.test(t)), `C's tab list is C's alone (${JSON.stringify(tC)})`);
+    ok(gateOf(Array.isArray(tD)) && tD.length === 2 && gateOf(tD.every((t) => /delta/.test(t))) && !tD.some((t) => /charlie/.test(t)), `D's tab list is D's alone (${JSON.stringify(tD)})`);
     const pages = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').map((t) => t.title);
-    ok(pages.includes('charlie') && pages.includes('delta') && pages.includes('delta-2'), `the browser holds all three (${JSON.stringify(pages)})`);
+    ok(gateOf(pages.includes('charlie')) && gateOf(pages.includes('delta')) && verdictOf(pages.includes('delta-2')), `the browser holds all three (${JSON.stringify(pages)})`);
     paused.b = true;
     const po = await ab('d', g2, ['open', 'data:text/html,<title>nope</title>']);
     const pc = await ab('d', g2, ['click', 'body']);
     const pt = await ab('d', g2, ['get', 'title']);
-    ok(!po.ok && po.json && po.json.success === false && /browser_interrupted/.test(po.json.error) && /Page\.navigate/.test(po.json.error), 'a takeover of D: `open` fails with the typed browser_interrupted inside agent-browser\'s own JSON', JSON.stringify(po).slice(0, 400));
-    ok(!pc.ok && pc.json && /browser_interrupted/.test(pc.json.error) && /(Input\.|Runtime\.|DOM\.)/.test(pc.json.error), '`click` too (its first fenced call refused)', JSON.stringify(pc).slice(0, 400));
+    ok(!po.ok && gateOf(po.json) && po.json.success === false && gateOf(/browser_interrupted/.test(po.json.error)) && verdictOf(/Page\.navigate/.test(po.json.error)), 'a takeover of D: `open` fails with the typed browser_interrupted inside agent-browser\'s own JSON', JSON.stringify(po).slice(0, 400));
+    ok(!pc.ok && gateOf(pc.json) && gateOf(/browser_interrupted/.test(pc.json.error)) && verdictOf(/(Input\.|Runtime\.|DOM\.)/.test(pc.json.error)), '`click` too (its first fenced call refused)', JSON.stringify(pc).slice(0, 400));
     // MEASURED (the owner's ruling): `get title` is a read to the agent — on 0.38.1 it is answered from a READ method (it answers) or through script
     // evaluation (refused browser_interrupted like every script while the user drives); either is honest, and the CLI rung refuses the verb anyway
     const ptWay = pt.ok && pt.json && pt.json.success === true ? 'answered (a read method)' : (pt.json && /browser_interrupted/.test(String(pt.json.error)) ? 'refused browser_interrupted (0.38.1 reads the title by script)' : null);
@@ -658,9 +658,9 @@ else if (AB) {
     ok(!!ptWay, '…`get title` is either answered or refused browser_interrupted — never a hang, never a third answer', JSON.stringify(pt).slice(0, 300));
     paused.b = false;
     const after = await ab('d', g2, ['open', 'data:text/html,<title>delta-3</title>']);
-    ok(after.ok && after.json && after.json.data && after.json.data.title === 'delta-3', 'handed back: D drives again');
+    ok(gateOf(after.ok) && gateOf(after.json) && gateOf(after.json.data) && after.json.data.title === 'delta-3', 'handed back: D drives again');
     const cpages = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').map((t) => t.title);
-    ok(cpages.includes('charlie') && !cpages.includes('nope'), 'C\'s page was never touched and the refused navigation never happened');
+    ok(gateOf(cpages.includes('charlie')) && !cpages.includes('nope'), 'C\'s page was never touched and the refused navigation never happened');
     // ═══ ⑦ THE OWNER'S RULING (2026-09-27 — "直接打断所有脚本和agent操作") on the REAL binary + the REAL chrome ═══
     console.log('— ⑦ the owner\'s ruling on the real 0.38.1 + chrome: an `eval` busy loop, a `fill` and a `type` caught in flight by a takeover — the call answered browser_interrupted, the effect MEASURED through the raw endpoint');
     {
@@ -668,7 +668,7 @@ else if (AB) {
       const PID7 = 'bp-0000000c', BK7 = 'bk-0000000e';
       const g7 = await med.grantFor({ profileId: PID7, browserKey: BK7, upstream: ver.webSocketDebuggerUrl, paused: () => paused.e });
       const o7 = await ab('e', g7, ['open', 'data:text/html,<title>seven</title><input id=f>']);
-      ok(o7.ok && o7.json && o7.json.data && o7.json.data.title === 'seven', '⑦ session E opens a page through its own mediated url', JSON.stringify(o7).slice(0, 300));
+      ok(gateOf(o7.ok) && gateOf(o7.json) && gateOf(o7.json.data) && o7.json.data.title === 'seven', '⑦ session E opens a page through its own mediated url', JSON.stringify(o7).slice(0, 300));
       const T7 = (await raw.call('Target.getTargets')).result.targetInfos.find((t) => t.type === 'page' && t.title === 'seven');
       const rs7 = (await raw.call('Target.attachToTarget', { targetId: T7.targetId, flatten: true })).result.sessionId;
       const probe = async (expr) => { const s = Date.now(); const r = await raw.call('Runtime.evaluate', { expression: expr, returnByValue: true }, rs7); return { v: r.result && r.result.result ? r.result.result.value : undefined, ms: Date.now() - s }; };
@@ -687,8 +687,8 @@ else if (AB) {
       const pr1 = await probe('document.title');
       const evCall = seen7.find((x) => /^Runtime\.(evaluate|callFunctionOn)$/.test(x.method) && !x.internal && x.at >= tEval);
       console.log(`  (measured on ${AB}: \`eval\` = ${evCall ? evCall.method + ' awaitPromise=' + evCall.awaitPromise : '?'}; takeover ${tk ? tk.at - tEval : '?'} ms after the CLI started; the CLI answered ${tk ? evDone - tk.at : '?'} ms after the takeover; the page answered a probe ${pr1.ms} ms after that, title ${JSON.stringify(pr1.v)}; interrupt: ${JSON.stringify(tk && tk.r)})`);
-      ok(!!tk && tk.r.aborted.some((a) => /^Runtime\./.test(a.method)) && tk.r.terminated === 1, '⑦ eval: the takeover found the script call in flight — aborted, and ONE Runtime.terminateExecution sent on its session', JSON.stringify(tk && tk.r));
-      ok(!ev7.ok && ev7.json && ev7.json.success === false && /browser_interrupted/.test(String(ev7.json.error)) && /took over your window of this browser/.test(String(ev7.json.error)) && tk && evDone - tk.at < 2000, `⑦ eval: the real CLI's own JSON carries browser_interrupted (THE sentence) ${tk ? evDone - tk.at : '?'} ms after the takeover — not 5 s later`, JSON.stringify(ev7).slice(0, 400));
+      ok(!!tk && gateOf(tk.r.aborted.some((a) => /^Runtime\./.test(a.method))) && tk.r.terminated === 1, '⑦ eval: the takeover found the script call in flight — aborted, and ONE Runtime.terminateExecution sent on its session', JSON.stringify(tk && tk.r));
+      ok(!ev7.ok && gateOf(ev7.json) && ev7.json.success === false && gateOf(/browser_interrupted/.test(String(ev7.json.error))) && gateOf(/took over your window of this browser/.test(String(ev7.json.error))) && gateOf(tk) && evDone - tk.at < 2000, `⑦ eval: the real CLI's own JSON carries browser_interrupted (THE sentence) ${tk ? evDone - tk.at : '?'} ms after the takeover — not 5 s later`, JSON.stringify(ev7).slice(0, 400));
       await sleep(Math.max(0, 5600 - (Date.now() - tEval)));
       const pr2 = await probe('document.title');
       const loopOutcome = pr1.ms < 1000 && pr2.v === 'seven' ? 'terminated' : (pr2.v === 'loop-finished' ? 'ran to completion' : `unclear (${JSON.stringify([pr1, pr2])})`);
@@ -696,7 +696,7 @@ else if (AB) {
       ok(loopOutcome === 'terminated' && JSON.stringify(g7o.lastInterrupt && g7o.lastInterrupt.terminateAnswers) === '["ok"]', `⑦ eval MEASURED: the RUNNING busy loop was terminated — the page answered a probe in ${pr1.ms} ms and the loop's last statement never ran (title still "seven" after 5.6 s); Chrome answered terminateExecution ok`);
       paused.e = false;
       const back7 = await ab('e', g7, ['eval', 'document.title']);
-      ok(back7.ok && back7.json && back7.json.data && /seven/.test(JSON.stringify(back7.json.data)), '⑦ handed back: the agent\'s next eval runs (the page is alive)', JSON.stringify(back7).slice(0, 300));
+      ok(gateOf(back7.ok) && gateOf(back7.json) && gateOf(back7.json.data) && verdictOf(/seven/.test(JSON.stringify(back7.json.data))), '⑦ handed back: the agent\'s next eval runs (the page is alive)', JSON.stringify(back7).slice(0, 300));
       // (2) a `fill` caught in flight: the takeover lands the moment its first INPUT call leaves the proxy
       const LONG = 'x'.repeat(4000);
       hook();
@@ -707,7 +707,7 @@ else if (AB) {
       const fv = await probe('document.getElementById("f").value.length');
       const fillOutcome = fv.v === LONG.length ? 'completed (its Input call had already reached Chrome — it cannot be recalled)' : fv.v === 0 ? 'stopped (nothing typed)' : `stopped part-way (${fv.v} of ${LONG.length} chars)`;
       console.log(`  (measured on ${AB}: \`fill\` sent ${JSON.stringify(fillCalls.slice(0, 12))}; the takeover landed on ${tk ? tk.why : 'nothing (no Input.* call seen)'}; the input then held ${fv.v} chars — ${fillOutcome})`);
-      ok(!!tk && !fl.ok && /browser_interrupted/.test(String(fl.json && fl.json.error)) && Number.isInteger(fv.v), `⑦ fill MEASURED: caught in flight, the CLI answers browser_interrupted and the field is ${fillOutcome}`, JSON.stringify(fl).slice(0, 300));
+      ok(!!tk && !fl.ok && gateOf(/browser_interrupted/.test(String(fl.json && fl.json.error))) && verdictOf(Number.isInteger(fv.v)), `⑦ fill MEASURED: caught in flight, the CLI answers browser_interrupted and the field is ${fillOutcome}`, JSON.stringify(fl).slice(0, 300));
       paused.e = false;
       await probe('document.getElementById("f").value = ""');
       // (3) a `type` caught mid-word: the takeover lands after its 20th key left the proxy — the keys after it never reach the page
@@ -719,7 +719,7 @@ else if (AB) {
       const tv = await probe('document.getElementById("f").value.length');
       const typeCalls = seen7.filter((x) => x.at >= tType && !x.internal);
       console.log(`  (measured on ${AB}: \`type\` sent ${typeCalls.length} calls (${[...new Set(typeCalls.map((x) => x.method))].join(', ')}); the takeover landed on ${tk ? tk.why : 'nothing'} after ${keys} keyDowns; the field then held ${tv.v} of 300 chars)`);
-      ok((!!tk && !ty.ok && /browser_interrupted/.test(String(ty.json && ty.json.error)) && tv.v >= 1 && tv.v < 300) || (!tk && keys < 20), `⑦ type MEASURED: cut mid-word — the CLI answers browser_interrupted and the field holds ${tv.v} of 300 chars (the keys after the takeover never reached the page)${!tk ? ' [0.38.1 typed with fewer than 20 key events — nothing to cut]' : ''}`, JSON.stringify(ty).slice(0, 300));
+      ok((!!tk && !ty.ok && gateOf(/browser_interrupted/.test(String(ty.json && ty.json.error))) && tv.v >= 1 && tv.v < 300) || (!tk && keys < 20), `⑦ type MEASURED: cut mid-word — the CLI answers browser_interrupted and the field holds ${tv.v} of 300 chars (the keys after the takeover never reached the page)${!tk ? ' [0.38.1 typed with fewer than 20 key events — nothing to cut]' : ''}`, JSON.stringify(ty).slice(0, 300));
       paused.e = false;
       try { await raw.call('Target.detachFromTarget', { sessionId: rs7 }); } catch { /* gone */ }
       med.revoke({ profileId: PID7, browserKey: BK7 });
@@ -727,12 +727,12 @@ else if (AB) {
     const ca = await ab('d', g2, ['close', '--all']);
     await sleep(300);
     const kept = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').map((t) => t.title);
-    ok(ca.ok && kept.includes('charlie'), `D's close --all never reaches Browser.close: C's page survives (${JSON.stringify(kept)})`);
+    ok(gateOf(ca.ok) && verdictOf(kept.includes('charlie')), `D's close --all never reaches Browser.close: C's page survives (${JSON.stringify(kept)})`);
     const rv = med.revoke({ profileId: 'bp-0000000c', browserKey: 'bk-0000000d' });
     const closing = await rv.closing;
     await sleep(300);
     const final = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').map((t) => t.title);
-    ok(closing.closed >= 1 && !final.some((t) => /delta/.test(t)) && final.includes('charlie'), `revoking D's lease closes D's tabs in the browser and leaves C's (${JSON.stringify(final)})`);
+    ok(closing.closed >= 1 && !final.some((t) => /delta/.test(t)) && verdictOf(final.includes('charlie')), `revoking D's lease closes D's tabs in the browser and leaves C's (${JSON.stringify(final)})`);
   }
   reapDaemons();
 }
@@ -758,7 +758,7 @@ if (AB) {
   reset();
   await new Promise((res) => execFile('agent-browser', ['open', 'about:blank'], { env: cfgEnv('a'), cwd: DIRTY, encoding: 'utf8', timeout: 45000 }, () => res()));
   const pa = argsOf('project-chrome');
-  ok(pa && pa.includes('--remote-debugging-port=42945') && pa.some((x) => x.startsWith('--user-data-dir=' + path.join(ROOT, 'stolen'))) && !argsOf('user-chrome'), 'r3 CONTROL (the real binary, bare, from the dirty directory): ./agent-browser.json\'s executablePath RAN with its --remote-debugging-port and --user-data-dir — the finding', JSON.stringify(pa));
+  ok(gateOf(pa) && gateOf(pa.includes('--remote-debugging-port=42945')) && gateOf(pa.some((x) => x.startsWith('--user-data-dir=' + path.join(ROOT, 'stolen')))) && !argsOf('user-chrome'), 'r3 CONTROL (the real binary, bare, from the dirty directory): ./agent-browser.json\'s executablePath RAN with its --remote-debugging-port and --user-data-dir — the finding', JSON.stringify(pa));
   // through vibespace-browser over a stub /resolve — (b) an answer naming NO config (a remote session / an older
   // server): the CLI composes one by the rule — the USER file's executable and args (raw port gone), nothing of the directory's
   // (the answer carries the session's OWN pairs under this run's namespace prefix and a scratch socket root:
@@ -778,13 +778,13 @@ if (AB) {
   reset(); which = 'b';
   const vb = await viaCli('b');
   const ub = argsOf('user-chrome');
-  ok(ub && !argsOf('project-chrome') && ub.includes('--r3-user-arg') && ub.includes('--no-sandbox') && !ub.includes('--remote-debugging-port=41999') && !ub.includes('--remote-debugging-port=42945') && !ub.some((x) => x.includes('stolen')) && /\[config_keys_dropped\]/.test(vb.se),
+  ok(gateOf(ub) && !argsOf('project-chrome') && gateOf(ub.includes('--r3-user-arg')) && gateOf(ub.includes('--no-sandbox')) && !ub.includes('--remote-debugging-port=41999') && !ub.includes('--remote-debugging-port=42945') && !ub.some((x) => x.includes('stolen')) && verdictOf(/\[config_keys_dropped\]/.test(vb.se)),
     'r3: through vibespace-browser (no config named) the SAME directory lands nothing — the user file\'s executable ran with its own args, its raw debugging port gone, and the drop is said', JSON.stringify({ ub, se: vb.se.slice(0, 400) }));
   // (c) an answer NAMING the keeper's file: that file, and neither of the two searched ones
   reset(); which = 'c';
   const vc = await viaCli('c');
   const nc = argsOf('named-chrome');
-  ok(nc && nc.includes('--r3-named-arg') && !argsOf('user-chrome') && !argsOf('project-chrome'), 'r3: an answer naming a config ⇒ exactly that file runs the launch — neither ~/.agent-browser/config.json nor ./agent-browser.json is read', JSON.stringify({ nc, se: vc.se.slice(0, 300) }));
+  ok(gateOf(nc) && gateOf(nc.includes('--r3-named-arg')) && !argsOf('user-chrome') && !argsOf('project-chrome'), 'r3: an answer naming a config ⇒ exactly that file runs the launch — neither ~/.agent-browser/config.json nor ./agent-browser.json is read', JSON.stringify({ nc, se: vc.se.slice(0, 300) }));
   stub.close();
   reapDaemons();
 } else skip(`${DRIVER.skip} no agent-browser for the config-file legs`);
@@ -824,20 +824,20 @@ if (AB && CHROME) {
     const cdpM = /ws:\/\/127\.0\.0\.1:(\d+)(\/devtools\/browser\/[0-9a-f-]+)/.exec(cdp);
     await bare(['open', `file://${portFile}`]);
     const pf = (await bare(['get', 'text', 'body'])).text;
-    ok(prof && /--remote-debugging-port=0/.test(ver) && cdpM && pf.includes(cdpM[1]) && pf.includes(cdpM[2]), `r4 CONTROL (the real binary, bare): \`open chrome://version\` names the profile directory (${udd}) and the launch's --remote-debugging-port=0; \`open file://…/DevToolsActivePort\` prints port ${cdpM && cdpM[1]} + the browser GUID — exactly \`get cdp-url\`'s answer`, JSON.stringify({ prof, cdp: cdp.slice(0, 120), pf: pf.slice(0, 200), ver: ver.slice(0, 300) }));
+    ok(gateOf(prof) && gateOf(/--remote-debugging-port=0/.test(ver)) && gateOf(cdpM) && gateOf(pf.includes(cdpM[1])) && verdictOf(pf.includes(cdpM[2])), `r4 CONTROL (the real binary, bare): \`open chrome://version\` names the profile directory (${udd}) and the launch's --remote-debugging-port=0; \`open file://…/DevToolsActivePort\` prints port ${cdpM && cdpM[1]} + the browser GUID — exactly \`get cdp-url\`'s answer`, JSON.stringify({ prof, cdp: cdp.slice(0, 120), pf: pf.slice(0, 200), ver: ver.slice(0, 300) }));
     // …and a crafted `state load` lands on chrome://version too
     await bare(['open', 'about:blank']);
     const SF = path.join(ROOT, 'nav-state.json');
     fs.writeFileSync(SF, JSON.stringify({ cookies: [], origins: [{ origin: 'chrome://version', localStorage: [{ name: 'a', value: 'b' }] }] }));
     await bare(['state', 'load', SF]);
     const su = (await bare(['get', 'url'])).text;
-    ok(/chrome:\/\/version/.test(su), 'r4 CONTROL (bare): `state load <file naming chrome://version as an origin>` leaves the page ON chrome://version', su.slice(0, 200));
+    ok(verdictOf(/chrome:\/\/version/.test(su)), 'r4 CONTROL (bare): `state load <file naming chrome://version as an origin>` leaves the page ON chrome://version', su.slice(0, 200));
     // …and a renderer-initiated navigation from the web cannot follow (the residual `eval` has, measured)
     await bare(['open', 'data:text/html,<title>web</title>']);
     await bare(['eval', `location.href='file://${portFile}'; 1`]);
     await sleep(500);
     const eu = (await bare(['get', 'url'])).text;
-    ok(/^data:/m.test(eu.trim()) || eu.includes('data:text/html'), 'r4 (measured residual): an `eval` navigation from a web page to file:// is refused by the browser itself — the page stays on the web', eu.slice(0, 200));
+    ok(verdictOf(/^data:/m.test(eu.trim())) || verdictOf(eu.includes('data:text/html')), 'r4 (measured residual): an `eval` navigation from a web page to file:// is refused by the browser itself — the page stays on the web', eu.slice(0, 200));
     // THROUGH vibespace-browser: every one refused locally, before /resolve; the page never leaves the web.
     // B-a23c (.268): each refusal is judged by its CODE (the refusal line: the first un-indented line that is not a
     // `note:`) against the PURE verdict of the same spelling (classify / stateFileVerdict) — never by stderr's FIRST
@@ -864,25 +864,25 @@ if (AB && CHROME) {
       rows.push({ args: sp.label, code: r.code, pure: sp.pure, said: (/\[([a-z_]+)\]$/.exec(refusal) || [])[1] || null, late: sp.late, notes: lines.filter((l) => /^note: /.test(l)), first: lines[0] || '' });
     }
     const after = (await bare(['get', 'url'])).text;
-    ok(rows.every((r) => r.code === 1 && r.pure && r.said === r.pure) && calls4.length === n0 && !/chrome:|file:/.test(after), `r4: through vibespace-browser each of ${rows.length} spellings is refused locally with its PURE verdict's code (${[...new Set(rows.map((r) => r.pure))].join(' / ')}), no /resolve made, and the page never left the web (${after.trim().split('\n').pop()})`, JSON.stringify({ rows: rows.map((r) => ({ args: r.args.slice(0, 40), code: r.code, pure: r.pure, said: r.said })), after: after.slice(0, 200) }));
+    ok(gateOf(rows.every((r) => r.code === 1 && r.pure && r.said === r.pure)) && calls4.length === n0 && !/chrome:|file:/.test(after), `r4: through vibespace-browser each of ${rows.length} spellings is refused locally with its PURE verdict's code (${[...new Set(rows.map((r) => r.pure))].join(' / ')}), no /resolve made, and the page never left the web (${after.trim().split('\n').pop()})`, JSON.stringify({ rows: rows.map((r) => ({ args: r.args.slice(0, 40), code: r.code, pure: r.pure, said: r.said })), after: after.slice(0, 200) }));
     // the measured row: the CLI says which binary it runs only when it drifts — every note one `[flag_table_drift]`,
     // on exactly the late spellings, naming one version that is not the table's; no drift ⇒ no note anywhere
     const noted = rows.filter((r) => r.notes.length);
     const named = [...new Set(noted.flatMap((r) => r.notes.map((n) => (/the browser CLI here is (\S+);/.exec(n) || [])[1] || '?')))];
     const drifts = noted.length > 0;
-    ok(drifts ? rows.every((r) => (r.late ? r.notes.length === 1 && r.first === r.notes[0] && r.notes[0].endsWith('[flag_table_drift]') : r.notes.length === 0)) && named.length === 1 && named[0] !== V4.TABLE_VERSION && V4.versionDrift(named[0]) === named[0] : true, `r4 (measured row): ${drifts ? `the browser CLI vibespace-browser runs here is ${named.join('/')}, the flag table ${V4.TABLE_VERSION} — its \`[flag_table_drift]\` note leads exactly the ${noted.length} spelling(s) refused after the binary lookup (${noted.map((r) => r.args).join('; ')})` : `no drift: the CLI's binary is the flag table's ${V4.TABLE_VERSION}, no spelling carries a note`} (PATH's: ${abVer})`, JSON.stringify(rows.map((r) => ({ args: r.args.slice(0, 40), late: r.late, notes: r.notes }))));
+    ok(drifts ? gateOf(rows.every((r) => (r.late ? r.notes.length === 1 && r.first === r.notes[0] && r.notes[0].endsWith('[flag_table_drift]') : r.notes.length === 0))) && named.length === 1 && named[0] !== V4.TABLE_VERSION && V4.versionDrift(named[0]) === named[0] : true, `r4 (measured row): ${drifts ? `the browser CLI vibespace-browser runs here is ${named.join('/')}, the flag table ${V4.TABLE_VERSION} — its \`[flag_table_drift]\` note leads exactly the ${noted.length} spelling(s) refused after the binary lookup (${noted.map((r) => r.args).join('; ')})` : `no drift: the CLI's binary is the flag table's ${V4.TABLE_VERSION}, no spelling carries a note`} (PATH's: ${abVer})`, JSON.stringify(rows.map((r) => ({ args: r.args.slice(0, 40), late: r.late, notes: r.notes }))));
     // CONTROL — the pre-.268 read (stderr's FIRST line must end in the refusal tag): under drift it misreads exactly the late spellings
     const firstRead = rows.filter((r) => !/\[(local_scheme_refused|batch_line_refused)\]$/.test(r.first)).map((r) => r.args);
-    ok(drifts ? firstRead.length > 0 && firstRead.every((a) => rows.find((r) => r.args === a).late) : firstRead.length === 0, `r4 CONTROL (the pre-.268 first-line read): ${drifts ? `under this drift it reads ${firstRead.length} refused spelling(s) as not refused (${firstRead.join('; ')}) — the hub's red from .250 to .267` : 'with no drift it agrees with the verdict read'}`, JSON.stringify(firstRead));
+    ok(drifts ? firstRead.length > 0 && verdictOf(firstRead.every((a) => rows.find((r) => r.args === a).late)) : firstRead.length === 0, `r4 CONTROL (the pre-.268 first-line read): ${drifts ? `under this drift it reads ${firstRead.length} refused spelling(s) as not refused (${firstRead.join('; ')}) — the hub's red from .250 to .267` : 'with no drift it agrees with the verdict read'}`, JSON.stringify(firstRead));
     const good = await via(['open', 'data:text/html,<title>still-web</title>']);
-    ok(good.ok && calls4.includes('/api/agent/browser/resolve') && /still-web/.test((await bare(['get', 'title'])).text), 'r4 CONTROL: `vibespace-browser open data:…` reaches the real binary and navigates', JSON.stringify(good).slice(0, 300));
+    ok(gateOf(good.ok) && gateOf(calls4.includes('/api/agent/browser/resolve')) && verdictOf(/still-web/.test((await bare(['get', 'title'])).text)), 'r4 CONTROL: `vibespace-browser open data:…` reaches the real binary and navigates', JSON.stringify(good).slice(0, 300));
     // finding 3 — the stdin batch: bare plain lines are the binary's own `Invalid JSON input` (the control); through the CLI both forms run
     const bl = await bare(['batch'], 'get title\nget url\n');
     const bj = await bare(['batch'], '[["get","title"]]');
-    ok(!bl.ok && /Invalid JSON input/.test(bl.text) && bj.ok && /still-web/.test(bj.text), 'r4 CONTROL (bare): the binary reads a stdin batch only as a JSON array of string arrays — plain lines are `Invalid JSON input`', JSON.stringify({ bl: bl.text.slice(0, 200), bj: bj.text.slice(0, 200) }));
+    ok(!bl.ok && gateOf(/Invalid JSON input/.test(bl.text)) && gateOf(bj.ok) && verdictOf(/still-web/.test(bj.text)), 'r4 CONTROL (bare): the binary reads a stdin batch only as a JSON array of string arrays — plain lines are `Invalid JSON input`', JSON.stringify({ bl: bl.text.slice(0, 200), bj: bj.text.slice(0, 200) }));
     const vl = await via(['batch'], 'get title\nget url\n');
     const vj = await via(['batch'], '[["get","title"],["get","url"]]');
-    ok(vl.ok && /still-web/.test(vl.so) && /data:text\/html/.test(vl.so) && vj.ok && /still-web/.test(vj.so), 'r4: through vibespace-browser a plain-line stdin batch AND the JSON form both run on the real binary (r3: the JSON form was refused, the plain form was the binary\'s Invalid JSON)', JSON.stringify({ vl: [vl.code, vl.so.slice(0, 200), vl.se.slice(0, 200)], vj: [vj.code, vj.so.slice(0, 200), vj.se.slice(0, 200)] }));
+    ok(gateOf(vl.ok) && gateOf(/still-web/.test(vl.so)) && gateOf(/data:text\/html/.test(vl.so)) && gateOf(vj.ok) && verdictOf(/still-web/.test(vj.so)), 'r4: through vibespace-browser a plain-line stdin batch AND the JSON form both run on the real binary (r3: the JSON form was refused, the plain form was the binary\'s Invalid JSON)', JSON.stringify({ vl: [vl.code, vl.so.slice(0, 200), vl.se.slice(0, 200)], vj: [vj.code, vj.so.slice(0, 200), vj.se.slice(0, 200)] }));
     // lane L r5 F1 (verify r3 CRITICAL) — THE FRAME ON THE REAL BINARY. This daemon was started by `bare` from ROOT
     // (A); the CLI runs from B. The daemon resolves a relative word against ITS cwd (measured): through
     // vibespace-browser `pdf ./frame.pdf` lands in B — the absolute path it judged —, while the r4 hand-over (a
@@ -895,17 +895,17 @@ if (AB && CHROME) {
       const shellB = { ...shell4, VIBESPACE_SESSION_CWD: Bd };
       const viaFile = (cliFile, args) => new Promise((res) => execFile(process.execPath, [...cliUnder(H4).slice(0, 2), cliFile, ...args], { env: shellB, cwd: Bd, encoding: 'utf8', timeout: 45000 }, (e, so, se) => res({ ok: !e, so: String(so), se: String(se || '') })));
       const pdfAt = (f) => { try { return fs.readFileSync(f).subarray(0, 5).toString('latin1') === '%PDF-'; } catch { return false; } };
-      if (!ok(dpid && dcwd === A, `lane L r5 F1 precondition: the real daemon (pid ${dpid}) runs in A = ${A} (the cwd it was started from)`, JSON.stringify({ dpid, dcwd, inf: inf.slice(0, 200) }))) { /* the legs below would prove nothing */ }
+      if (!ok(gateOf(dpid) && dcwd === A, `lane L r5 F1 precondition: the real daemon (pid ${dpid}) runs in A = ${A} (the cwd it was started from)`, JSON.stringify({ dpid, dcwd, inf: inf.slice(0, 200) }))) { /* the legs below would prove nothing */ }
       else {
         await bare(['open', 'data:text/html,<title>frame</title><h1>frame</h1>']);
         const r1 = await viaFile(path.join(REPO, 'data/bin/vibespace-browser'), ['pdf', './frame.pdf']);
-        ok(r1.ok && pdfAt(path.join(Bd, 'frame.pdf')) && !fs.existsSync(path.join(A, 'frame.pdf')), 'lane L r5 F1 (the REAL ' + abVer + ' daemon, started in A): `vibespace-browser pdf ./frame.pdf` from B writes B/frame.pdf — the path it judged — and nothing in A', JSON.stringify({ r1: [r1.ok, r1.so.slice(-200), r1.se.slice(-300)], inB: fs.existsSync(path.join(Bd, 'frame.pdf')), inA: fs.existsSync(path.join(A, 'frame.pdf')) }));
+        ok(gateOf(r1.ok) && gateOf(pdfAt(path.join(Bd, 'frame.pdf'))) && !fs.existsSync(path.join(A, 'frame.pdf')), 'lane L r5 F1 (the REAL ' + abVer + ' daemon, started in A): `vibespace-browser pdf ./frame.pdf` from B writes B/frame.pdf — the path it judged — and nothing in A', JSON.stringify({ r1: [r1.ok, r1.so.slice(-200), r1.se.slice(-300)], inB: fs.existsSync(path.join(Bd, 'frame.pdf')), inA: fs.existsSync(path.join(A, 'frame.pdf')) }));
         const src = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
         const pre = editAnchor(src, "const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];", "data/bin/vibespace-browser"); // the hand-over line since the 2.369.182 integration (lane H's close --all filter over the in-frame argv)
         const ctl = path.join(ROOT, 'ctl-frame', 'bin'); fs.mkdirSync(ctl, { recursive: true });
         fs.writeFileSync(path.join(ctl, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ctl, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ctl, 'cli-call.js'));
         const r2 = await viaFile(path.join(ctl, 'vibespace-browser'), ['pdf', './frame2.pdf']);
-        ok(pre !== src && r2.ok && pdfAt(path.join(A, 'frame2.pdf')) && !fs.existsSync(path.join(Bd, 'frame2.pdf')), 'lane L r5 F1 NEGATIVE CONTROL (the REAL daemon): the r4 hand-over (patched copy, the word as typed) — judged in B — lands in A, the daemon\'s own frame', JSON.stringify({ r2: [r2.ok, r2.so.slice(-200), r2.se.slice(-300)], inA: fs.existsSync(path.join(A, 'frame2.pdf')), inB: fs.existsSync(path.join(Bd, 'frame2.pdf')) }));
+        ok(pre !== src && gateOf(r2.ok) && gateOf(pdfAt(path.join(A, 'frame2.pdf'))) && !fs.existsSync(path.join(Bd, 'frame2.pdf')), 'lane L r5 F1 NEGATIVE CONTROL (the REAL daemon): the r4 hand-over (patched copy, the word as typed) — judged in B — lands in A, the daemon\'s own frame', JSON.stringify({ r2: [r2.ok, r2.so.slice(-200), r2.se.slice(-300)], inA: fs.existsSync(path.join(A, 'frame2.pdf')), inB: fs.existsSync(path.join(Bd, 'frame2.pdf')) }));
       }
     }
     await bare(['close']);
@@ -956,19 +956,19 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       const run = (pairs, args, c = cfg) => new Promise((resolve) => execFile('agent-browser', args, { env: { ...kenv, ...Ss.pairsToEnv(pairs), AGENT_BROWSER_CONFIG: c }, encoding: 'utf8', timeout: 60000 }, (err, so, se) => resolve({ ok: !err, out: String(so || '') + String(se || '') })));
       const ax = await kk.attach({ profileId: bank.id, browserKey: KA4, sessionId: 'sess-a4' });
       const ay = await kk.attach({ profileId: bank.id, browserKey: KB4, sessionId: 'sess-b4' });
-      ok(ax.env && ay.env && [ax.env, ay.env].every((e) => e.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=ws://127.0.0.1:')) && !e.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE='))) && chromesOn(bank.dir) === 1, `④ the keeper launched the profile's ONE Chrome and both leases carry its CDP url, never the directory (${ver4})`, JSON.stringify({ ax: ax.env, ay: ay.env }));
+      ok(gateOf(ax.env) && gateOf(ay.env) && gateOf([ax.env, ay.env].every((e) => e.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=ws://127.0.0.1:')) && !e.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')))) && chromesOn(bank.dir) === 1, `④ the keeper launched the profile's ONE Chrome and both leases carry its CDP url, never the directory (${ver4})`, JSON.stringify({ ax: ax.env, ay: ay.env }));
       const rec4 = kk.browserOf(bank.id);
-      ok(rec4 && Ff.pidAlive(rec4.pid) && Ff.sameProcess(rec4.pid, rec4.starttime), `④ the keeper's recorded daemon pid (${rec4 && rec4.pid}) is alive after its own \`get cdp-url\` — every keeper call carries the launch's view (a different idle value restarted the daemon and relaunched Chrome on 0.38.1, leaving a dead pid recorded)`, JSON.stringify(rec4 && { pid: rec4.pid, state: rec4.state }));
+      ok(gateOf(rec4) && gateOf(Ff.pidAlive(rec4.pid)) && verdictOf(Ff.sameProcess(rec4.pid, rec4.starttime)), `④ the keeper's recorded daemon pid (${rec4 && rec4.pid}) is alive after its own \`get cdp-url\` — every keeper call carries the launch's view (a different idle value restarted the daemon and relaunched Chrome on 0.38.1, leaving a dead pid recorded)`, JSON.stringify(rec4 && { pid: rec4.pid, state: rec4.state }));
       const pin = ax.pinTab ? ['--pin-tab'] : [];
       const oa = await run(ax.env, [...pin, 'open', 'data:text/html,<title>BANK-A4</title>']);
       const ob = await run(ay.env, [...pin, 'open', 'data:text/html,<title>BANK-B4</title>']);
       const ta = await run(ax.env, [...pin, 'get', 'title']), tb = await run(ay.env, [...pin, 'get', 'title']);
-      ok(oa.ok && ob.ok && /BANK-A4/.test(ta.out) && /BANK-B4/.test(tb.out) && chromesOn(bank.dir) === 1, `④ two sessions on ONE named profile both run — each on its own tab ("${ta.out.trim().split('\n').pop()}" / "${tb.out.trim().split('\n').pop()}") — with exactly ${chromesOn(bank.dir)} Chrome on its directory (the owner's "bank": SingletonLock on every launch)`, JSON.stringify({ oa: oa.out.slice(-300), ob: ob.out.slice(-300) }));
+      ok(gateOf(oa.ok) && gateOf(ob.ok) && gateOf(/BANK-A4/.test(ta.out)) && gateOf(/BANK-B4/.test(tb.out)) && chromesOn(bank.dir) === 1, `④ two sessions on ONE named profile both run — each on its own tab ("${ta.out.trim().split('\n').pop()}" / "${tb.out.trim().split('\n').pop()}") — with exactly ${chromesOn(bank.dir)} Chrome on its directory (the owner's "bank": SingletonLock on every launch)`, JSON.stringify({ oa: oa.out.slice(-300), ob: ob.out.slice(-300) }));
       const view = await kk.streamPortFor(Ss.streamTargetFor({ browserKey: KA4, set: kk.setFor(KA4), profiles: kk.list().profiles }));
-      ok(view.ok && Number.isInteger(view.port) && chromesOn(bank.dir) === 1, `④ the live view's stream port is answered under the lease's session (${view.port}) and still ONE Chrome (the S5-45 "Live view unavailable … SingletonLock" screen)`, JSON.stringify(view));
+      ok(gateOf(view.ok) && gateOf(Number.isInteger(view.port)) && chromesOn(bank.dir) === 1, `④ the live view's stream port is answered under the lease's session (${view.port}) and still ONE Chrome (the S5-45 "Live view unavailable … SingletonLock" screen)`, JSON.stringify(view));
       const pre = [`AGENT_BROWSER_SESSION=vs-${KC4}`, `AGENT_BROWSER_NAMESPACE=vs-${bank.id}`, `AGENT_BROWSER_PROFILE=${bank.dir}`, 'AGENT_BROWSER_IDLE_TIMEOUT_MS=0'];
       const oc = await run(pre, [...pin, 'open', 'data:text/html,<title>BANK-C4</title>']);
-      ok(!oc.ok && /SingletonLock|exit code: 21|ProcessSingleton/.test(oc.out) && chromesOn(bank.dir) === 1, `④ CONTROL: a third session given the PRE-FIX env (the profile directory) dies on the lock on the real binary — "${(oc.out.match(/[^\n]*SingletonLock[^\n]*/) || [oc.out.trim().split('\n').pop()])[0].trim().slice(0, 140)}"`, oc.out.slice(-500));
+      ok(!oc.ok && gateOf(/SingletonLock|exit code: 21|ProcessSingleton/.test(oc.out)) && chromesOn(bank.dir) === 1, `④ CONTROL: a third session given the PRE-FIX env (the profile directory) dies on the lock on the real binary — "${(oc.out.match(/[^\n]*SingletonLock[^\n]*/) || [oc.out.trim().split('\n').pop()])[0].trim().slice(0, 140)}"`, oc.out.slice(-500));
       // LANE H VERIFY r2 M1, ON THE REAL BINARY: `kill -9` of the keeper's daemon (a crash / an OOM / stop()'s own SIGKILL)
       // leaves its Chrome ALIVE holding the profile's SingletonLock — the binary itself then refuses a relaunch on the
       // directory (exit 21, the CONTROL). The keeper recorded that Chrome at launch; its tick ends it, and the next start
@@ -977,7 +977,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       const dtp = () => { try { return fs.readFileSync(path.join(bank.dir, 'DevToolsActivePort'), 'utf8'); } catch { return null; } };
       const recK = kk.browserOf(bank.id);
       const c1 = chromePidsOn(bank.dir);
-      ok(recK && recK.browser && c1.length === 1 && recK.browser.pid === c1[0] && Ff.sameProcess(recK.browser.pid, recK.browser.starttime), `④ r2 M1: the keeper RECORDED the Chrome its launch started (pid ${recK && recK.browser && recK.browser.pid}, the daemon's child on the profile dir, pid + starttime)`, JSON.stringify(recK && recK.browser));
+      ok(gateOf(recK) && gateOf(recK.browser) && c1.length === 1 && recK.browser.pid === c1[0] && verdictOf(Ff.sameProcess(recK.browser.pid, recK.browser.starttime)), `④ r2 M1: the keeper RECORDED the Chrome its launch started (pid ${recK && recK.browser && recK.browser.pid}, the daemon's child on the profile dir, pid + starttime)`, JSON.stringify(recK && recK.browser));
       // the old browser's DevTools port = its recorded cdp url's (the file itself may already be gone: the CONTROL's failed Chrome above removes it on start)
       const portOf = (u) => { try { return String(new URL(String(u).replace(/^ws/, 'http')).port); } catch { return null; } };
       const dt0 = portOf(recK.cdpUrl);
@@ -988,13 +988,13 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       const keeperPairs = [`AGENT_BROWSER_SESSION=${Bp.sessionNameFor(bank.id)}`, `AGENT_BROWSER_NAMESPACE=${Bp.sessionNameFor(bank.id)}`, `AGENT_BROWSER_PROFILE=${bank.dir}`, 'AGENT_BROWSER_IDLE_TIMEOUT_MS=0'];
       const cfgK = kk.machineConfigFile('machine', bank.id);
       const raw = await run(keeperPairs, ['open', 'about:blank'], cfgK);
-      ok(!Ff.pidAlive(recK.pid) && orphan.length === 1 && orphan[0] === c1[0] && !raw.ok && /exit code: 21|SingletonLock/.test(raw.out), `④ r2 M1 CONTROL (the binary itself): the daemon SIGKILLed, its Chrome ${orphan[0]} survives holding the lock, and a relaunch on the directory under the keeper's own session dies "${(raw.out.match(/Chrome exited early[^\n]*/) || [raw.out.trim().split('\n').pop()])[0].slice(0, 90)}"`, raw.out.slice(-400));
+      ok(!Ff.pidAlive(recK.pid) && orphan.length === 1 && orphan[0] === c1[0] && !raw.ok && verdictOf(/exit code: 21|SingletonLock/.test(raw.out)), `④ r2 M1 CONTROL (the binary itself): the daemon SIGKILLed, its Chrome ${orphan[0]} survives holding the lock, and a relaunch on the directory under the keeper's own session dies "${(raw.out.match(/Chrome exited early[^\n]*/) || [raw.out.trim().split('\n').pop()])[0].slice(0, 90)}"`, raw.out.slice(-400));
       await kk.tick();
       let goneAfterTick = false; for (let i = 0; i < 100 && !(goneAfterTick = chromePidsOn(bank.dir).length === 0); i++) await sleep(50);
-      ok(kk.browserOf(bank.id).state === 'stopped' && goneAfterTick && !Ff.pidAlive(c1[0]), `④ r2 M1: the tick records the dead daemon stopped AND ends the orphaned Chrome ${c1[0]} it had recorded (0 Chromes on the directory)`, JSON.stringify({ state: kk.browserOf(bank.id).state, left: chromePidsOn(bank.dir) }));
+      ok(kk.browserOf(bank.id).state === 'stopped' && gateOf(goneAfterTick) && !Ff.pidAlive(c1[0]), `④ r2 M1: the tick records the dead daemon stopped AND ends the orphaned Chrome ${c1[0]} it had recorded (0 Chromes on the directory)`, JSON.stringify({ state: kk.browserOf(bank.id).state, left: chromePidsOn(bank.dir) }));
       let restartErr = null; try { await kk.start(bank.id, { why: 'r2 relaunch after a dead daemon' }); } catch (e) { restartErr = (e.code || '') + ' ' + e.message; }
       const dt1 = String(dtp() || '').split('\n')[0]; const c2 = chromePidsOn(bank.dir);
-      ok(!restartErr && kk.browserOf(bank.id).state === 'ready' && c2.length === 1 && c2[0] !== c1[0] && dt0 && dt1 && dt1 !== dt0 && portOf(kk.browserOf(bank.id).cdpUrl) === dt1 && kk.browserOf(bank.id).browser && kk.browserOf(bank.id).browser.pid === c2[0], `④ r2 M1: the next start launches on the directory — ONE new Chrome (${c2[0]}), a NEW DevToolsActivePort (${dt0} → ${dt1}, the record's cdp url follows), recorded again`, restartErr || JSON.stringify({ c2, dt0, dt1, cdp: kk.browserOf(bank.id).cdpUrl }));
+      ok(!restartErr && kk.browserOf(bank.id).state === 'ready' && c2.length === 1 && c2[0] !== c1[0] && gateOf(dt0) && gateOf(dt1) && dt1 !== dt0 && portOf(kk.browserOf(bank.id).cdpUrl) === dt1 && gateOf(kk.browserOf(bank.id).browser) && kk.browserOf(bank.id).browser.pid === c2[0], `④ r2 M1: the next start launches on the directory — ONE new Chrome (${c2[0]}), a NEW DevToolsActivePort (${dt0} → ${dt1}, the record's cdp url follows), recorded again`, restartErr || JSON.stringify({ c2, dt0, dt1, cdp: kk.browserOf(bank.id).cdpUrl }));
       // LANE H VERIFY r3 MAJOR 1, ON THE REAL BINARY: when the daemon's Chrome dies (SIGTERM = the user closing a headed
       // window) the DAEMON LIVES and the next verb under the keeper's own session relaunches Chrome IN THE SAME DAEMON — a
       // new pid, lock and DevToolsActivePort, its environ no witness (.268, B-a23c: NOT scrubbed — see the CONTROL) — so the
@@ -1018,22 +1018,22 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       const envRead = (pid) => { let raw; try { raw = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); } catch { return { kind: 'unreadable' }; } const ch = raw.split('\0').filter(Boolean); return ch.some((e) => e.startsWith('HOME=')) && ch.some((e) => e.startsWith('PATH=')) ? { kind: 'environment', ab: ch.filter((e) => e.startsWith('AGENT_BROWSER_')).map((e) => e.split('=')[0]).sort() } : { kind: 'title', head: ch.join(' ').slice(0, 60) }; };
       const eB = cB.length ? envRead(cB[0]) : null; const abD = (abEnvKeys(recA.pid) || []).sort(); const busSet = !!kenv.DBUS_SESSION_BUS_ADDRESS;
       const envNoWitness = !!eB && (busSet ? eB.kind === 'title' : eB.kind === 'environment' && abD.length > 0 && JSON.stringify(eB.ab) === JSON.stringify(abD));
-      ok(cA.length === 1 && daemonLived && reo.ok && cB.length === 1 && cB[0] !== cA[0] && ppidOf(cB[0]) === recA.pid && envNoWitness, `④ r3 M1 CONTROL (the binary itself): its Chrome ${cA[0]} ended, the daemon ${recA.pid} LIVED, and the next verb under the keeper's session relaunched Chrome ${cB[0]} IN THE SAME DAEMON — its /proc environ is no witness (session bus ${busSet ? 'set ⇒ overwritten by Chrome\'s own title rewrite' : `unset ⇒ the daemon's environment copied whole, its ${abD.length} AGENT_BROWSER_* keys too`}; read: ${eB && eB.kind})`, JSON.stringify({ cA, cB, daemonLived, ppid: cB.map(ppidOf), env: eB, daemonAb: abD, reo: reo.out.slice(-300) }));
+      ok(cA.length === 1 && gateOf(daemonLived) && gateOf(reo.ok) && cB.length === 1 && cB[0] !== cA[0] && ppidOf(cB[0]) === recA.pid && verdictOf(envNoWitness), `④ r3 M1 CONTROL (the binary itself): its Chrome ${cA[0]} ended, the daemon ${recA.pid} LIVED, and the next verb under the keeper's session relaunched Chrome ${cB[0]} IN THE SAME DAEMON — its /proc environ is no witness (session bus ${busSet ? 'set ⇒ overwritten by Chrome\'s own title rewrite' : `unset ⇒ the daemon's environment copied whole, its ${abD.length} AGENT_BROWSER_* keys too`}; read: ${eB && eB.kind})`, JSON.stringify({ cA, cB, daemonLived, ppid: cB.map(ppidOf), env: eB, daemonAb: abD, reo: reo.out.slice(-300) }));
       try { process.kill(recA.pid, 'SIGKILL'); } catch { }
       for (let i = 0; i < 80 && Ff.pidAlive(recA.pid); i++) await sleep(50);
       await sleep(300);
       const orphanB = chromePidsOn(bank.dir);
       await kk.tick();
       let goneB = false; for (let i = 0; i < 100 && !(goneB = chromePidsOn(bank.dir).length === 0); i++) await sleep(50);
-      ok(orphanB.length === 1 && orphanB[0] === cB[0] && kk.browserOf(bank.id).state === 'stopped' && goneB && !Ff.pidAlive(cB[0]), `④ r3 M1: the daemon SIGKILLed after that in-place relaunch — the tick ends the RELAUNCHED Chrome ${cB[0]} (nothing recorded it: the minted directory's lock, no live daemon its parent) — 0 Chromes on the directory`, JSON.stringify({ orphanB, state: kk.browserOf(bank.id).state, left: chromePidsOn(bank.dir) }));
+      ok(orphanB.length === 1 && orphanB[0] === cB[0] && kk.browserOf(bank.id).state === 'stopped' && gateOf(goneB) && !Ff.pidAlive(cB[0]), `④ r3 M1: the daemon SIGKILLed after that in-place relaunch — the tick ends the RELAUNCHED Chrome ${cB[0]} (nothing recorded it: the minted directory's lock, no live daemon its parent) — 0 Chromes on the directory`, JSON.stringify({ orphanB, state: kk.browserOf(bank.id).state, left: chromePidsOn(bank.dir) }));
       let restart3 = null; try { await kk.start(bank.id, { why: 'r3 relaunch after an in-place relaunch' }); } catch (e) { restart3 = (e.code || '') + ' ' + e.message; }
       const cC = chromePidsOn(bank.dir); const dtC = String(dtp() || '').split('\n')[0];
-      ok(!restart3 && kk.browserOf(bank.id).state === 'ready' && cC.length === 1 && cC[0] !== cB[0] && dtB && dtC && dtC !== dtB && portOf(kk.browserOf(bank.id).cdpUrl) === dtC && kk.browserOf(bank.id).browser && kk.browserOf(bank.id).browser.pid === cC[0], `④ r3 M1: …and the profile starts again — ONE new Chrome (${cC[0]}), a NEW DevToolsActivePort (${dtB} → ${dtC}), recorded — never profile_locked`, restart3 || JSON.stringify({ cC, dtB, dtC, cdp: kk.browserOf(bank.id).cdpUrl }));
+      ok(!restart3 && kk.browserOf(bank.id).state === 'ready' && cC.length === 1 && cC[0] !== cB[0] && gateOf(dtB) && gateOf(dtC) && dtC !== dtB && portOf(kk.browserOf(bank.id).cdpUrl) === dtC && gateOf(kk.browserOf(bank.id).browser) && kk.browserOf(bank.id).browser.pid === cC[0], `④ r3 M1: …and the profile starts again — ONE new Chrome (${cC[0]}), a NEW DevToolsActivePort (${dtB} → ${dtC}), recorded — never profile_locked`, restart3 || JSON.stringify({ cC, dtB, dtC, cdp: kk.browserOf(bank.id).cdpUrl }));
       // LANE H VERIFY r4, ON THE REAL BINARY. The keeper's own Chrome carries its LAUNCH MARK on its (title-rewritten)
       // command line — the config's `args` reach it; a Chrome the user opens by hand never carries it.
       const cmdOf = (pid) => { try { return ' ' + fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ') + ' '; } catch { return ''; } };
       const markArg = Bp.keeperMarkArg(bank.id);
-      ok(cC.length === 1 && cmdOf(cC[0]).includes(' ' + markArg + ' ') && cmdOf(cC[0]).includes(' --remote-debugging-port=0 '), `④ r4: the keeper's own Chrome ${cC[0]} carries ${markArg} on its command line beside the binary's --remote-debugging-port=0 (the launch config's args, measured)`, cmdOf(cC[0]).slice(0, 300));
+      ok(cC.length === 1 && gateOf(cmdOf(cC[0]).includes(' ' + markArg + ' ')) && verdictOf(cmdOf(cC[0]).includes(' --remote-debugging-port=0 ')), `④ r4: the keeper's own Chrome ${cC[0]} carries ${markArg} on its command line beside the binary's --remote-debugging-port=0 (the launch config's args, measured)`, cmdOf(cC[0]).slice(0, 300));
       // MAJOR 1: SIGTERM the Chrome (the user closing a headed window / a crash) — the daemon LIVES with no browser, and a
       // lease is a CDP client (it cannot launch): r3 left `ready` on a dead port, every verb "Connection refused", for good.
       // Now a `tick` ALONE (the profile leased) — and, again, an `attach` ALONE — heals it: exactly ONE Chrome, its parent
@@ -1061,7 +1061,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
         const answered = pin.length ? ((!gH.ok && /tab_gone/.test(gH.out) && /tab new/.test(gH.out)) || (gH.ok && !!(axNew && axNew.rebound))) : gH.ok;
         const nH = pin.length ? await run(axNew.env, [...pin, 'tab', 'new', 'about:blank']) : { ok: true, out: '' };
         const oH = await run(axNew.env, [...pin, 'open', `data:text/html,<title>HEAL-${via}</title>`]); const tH = await run(axNew.env, [...pin, 'get', 'title']);
-        ok(cH.length === 1 && Ff.pidAlive(recH.pid) && !dead.ok && /refused|connect failed/i.test(dead.out) && cH2.length === 1 && cH2[0] !== cH[0] && ppidOf(cH2[0]) === recH.pid && cmdOf(cH2[0]).includes(' ' + markArg + ' ') && dH && dH2 && dH2 !== dH && portOf(kk.browserOf(bank.id).cdpUrl) === dH2 && kk.browserOf(bank.id).browser && kk.browserOf(bank.id).browser.pid === cH2[0] && answered && nH.ok && oH.ok && tH.ok && tH.out.includes(`HEAL-${via}`),
+        ok(cH.length === 1 && gateOf(Ff.pidAlive(recH.pid)) && !dead.ok && gateOf(/refused|connect failed/i.test(dead.out)) && cH2.length === 1 && cH2[0] !== cH[0] && ppidOf(cH2[0]) === recH.pid && gateOf(cmdOf(cH2[0]).includes(' ' + markArg + ' ')) && gateOf(dH) && gateOf(dH2) && dH2 !== dH && portOf(kk.browserOf(bank.id).cdpUrl) === dH2 && gateOf(kk.browserOf(bank.id).browser) && kk.browserOf(bank.id).browser.pid === cH2[0] && gateOf(answered) && gateOf(nH.ok) && gateOf(oH.ok) && gateOf(tH.ok) && verdictOf(tH.out.includes(`HEAL-${via}`)),
           `④ r4 MAJOR 1: its Chrome ${cH[0]} SIGTERMed (the old lease env: "${(dead.out.trim().split('\n').pop() || '').slice(0, 70)}") — a ${via} ALONE heals it: ONE Chrome ${cH2[0]} under the daemon ${recH.pid} (marked), DevToolsActivePort ${dH} → ${dH2}; the lease's next /resolve env answers over the new port (${pin.length ? '"' + (gH.out.trim().split('\n').pop() || '').slice(0, 60) + '…" — its pinned tab died with the old Chrome — then `tab new` and' : ''} "${(tH.out.trim().split('\n').pop() || '').slice(0, 30)}")`, JSON.stringify({ cH, cH2, ppid: cH2.map(ppidOf), dH, dH2, cdp: kk.browserOf(bank.id).cdpUrl, dead: dead.out.slice(-200), g: gH.out.slice(-240), n: nH.out.slice(-160), o: oH.out.slice(-200), t: tH.out.slice(-200) }));
       }
       // VERIFY r5 MAJOR 1 ON THE REAL BINARY: a profile whose Chrome is killed right after every relaunch (a crash-on-load
@@ -1090,13 +1090,13 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
         let eS = null; try { await kk.attach({ profileId: storm.id, browserKey: KD4, sessionId: 'sess-d4' }); } catch (e) { eS = e; }
         const left = chromePidsOn(storm.dir);
         const n = notices4.filter((x) => x.origin === 'browser');
-        ok(relaunches >= 1 && relaunches <= Bp.HEAL_BUDGET && recS.closed && recS.closed.code === 'browser_unstable' && !recS.browser && left.length === 0 && eS && eS.code === 'browser_unstable' && n.length === 1 && n[0].key === 'browser' && n[0].text.includes('Storm') && n[0].text.includes(String(Bp.HEAL_BUDGET)),
+        ok(relaunches >= 1 && relaunches <= Bp.HEAL_BUDGET && gateOf(recS.closed) && recS.closed.code === 'browser_unstable' && !recS.browser && left.length === 0 && gateOf(eS) && eS.code === 'browser_unstable' && n.length === 1 && n[0].key === 'browser' && gateOf(n[0].text.includes('Storm')) && verdictOf(n[0].text.includes(String(Bp.HEAL_BUDGET))),
           `④ r5 MAJOR 1: a Chrome killed 2 s after every relaunch on the REAL ${ver4} — ${relaunches} relaunches (≤ ${Bp.HEAL_BUDGET}), then \`${recS.closed && recS.closed.code}\` with ${left.length} Chromes left, the attach refused by name, ONE notice ("${n[0] ? n[0].text.slice(0, 80) : ''}") (${perTick.join(' ')})`, JSON.stringify({ perTick, relaunches, closed: recS.closed, left, err: eS && (eS.code + ' ' + eS.message), notices: n }));
         // the user's Stop resets it: the next start runs with a fresh ledger
         await kk.stop(storm.id, { why: 'user' }).catch(() => { });
         let eS2 = null; try { await kk.attach({ profileId: storm.id, browserKey: KD4, sessionId: 'sess-d4' }); } catch (e) { eS2 = (e.code || '') + ' ' + e.message; }
         const recS2 = kk.browserOf(storm.id); const cS2 = await waitOne(storm.dir);
-        ok(!eS2 && recS2.state === 'ready' && !recS2.closed && cS2.length === 1 && recS2.browser && recS2.browser.pid === cS2[0] && !(recS2.heals && recS2.heals.attempts && recS2.heals.attempts.length), `④ r5 MAJOR 1: …the user's Stop resets it — the next attach starts ONE Chrome (${cS2[0]}) on a fresh ledger`, eS2 || JSON.stringify({ closed: recS2.closed, heals: recS2.heals, cS2 }));
+        ok(!eS2 && recS2.state === 'ready' && !recS2.closed && cS2.length === 1 && gateOf(recS2.browser) && recS2.browser.pid === cS2[0] && !(recS2.heals && recS2.heals.attempts && recS2.heals.attempts.length), `④ r5 MAJOR 1: …the user's Stop resets it — the next attach starts ONE Chrome (${cS2[0]}) on a fresh ledger`, eS2 || JSON.stringify({ closed: recS2.closed, heals: recS2.heals, cS2 }));
         await kk.stop(storm.id).catch(() => { });
       }
       // MAJOR 2: a REAL Chrome the human launched by hand on the MINTED directory (no daemon, no mark, no debugging port) —
@@ -1110,11 +1110,11 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       let eH = null; try { await kk.start(bank.id, { why: 'the agent\'s next verb' }); } catch (e) { eH = e; }
       await sleep(300);
       const onDir = chromePidsOn(bank.dir);
-      ok(lockPid(bank.dir) === h1.pid && !cmdOf(h1.pid).includes('--vibespace-keeper') && eH && eH.code === 'profile_locked' && eH.message.includes(String(h1.pid)) && /may be your own browser — close it first/.test(eH.message) && Ff.pidAlive(h1.pid) && onDir.length === 1 && onDir[0] === h1.pid, `④ r4 MAJOR 2: a real ${HUMAN} the human launched on the MINTED directory (pid ${h1.pid}, no mark) — the agent's next start is refused "${eH ? eH.message.slice(0, 120) : 'no refusal'}…", the human's Chrome ALIVE, nothing else on the directory`, JSON.stringify({ err: eH && (eH.code + ' ' + eH.message), onDir, alive: Ff.pidAlive(h1.pid) }));
+      ok(lockPid(bank.dir) === h1.pid && !cmdOf(h1.pid).includes('--vibespace-keeper') && gateOf(eH) && eH.code === 'profile_locked' && gateOf(eH.message.includes(String(h1.pid))) && gateOf(/may be your own browser — close it first/.test(eH.message)) && gateOf(Ff.pidAlive(h1.pid)) && onDir.length === 1 && onDir[0] === h1.pid, `④ r4 MAJOR 2: a real ${HUMAN} the human launched on the MINTED directory (pid ${h1.pid}, no mark) — the agent's next start is refused "${eH ? eH.message.slice(0, 120) : 'no refusal'}…", the human's Chrome ALIVE, nothing else on the directory`, JSON.stringify({ err: eH && (eH.code + ' ' + eH.message), onDir, alive: Ff.pidAlive(h1.pid) }));
       await killHuman(h1);
       let eH2 = null; try { await kk.start(bank.id, { why: 'after the human closed it' }); } catch (e) { eH2 = (e.code || '') + ' ' + e.message; }
       const cOwn = chromePidsOn(bank.dir);
-      ok(!eH2 && kk.browserOf(bank.id).state === 'ready' && cOwn.length === 1 && cmdOf(cOwn[0]).includes(' ' + markArg + ' '), `④ r4 MAJOR 2: …closed by hand ⇒ the start runs (ONE Chrome ${cOwn[0]}, marked)`, eH2 || JSON.stringify(cOwn));
+      ok(!eH2 && kk.browserOf(bank.id).state === 'ready' && cOwn.length === 1 && verdictOf(cmdOf(cOwn[0]).includes(' ' + markArg + ' ')), `④ r4 MAJOR 2: …closed by hand ⇒ the start runs (ONE Chrome ${cOwn[0]}, marked)`, eH2 || JSON.stringify(cOwn));
       await kk.stop(bank.id).catch(() => { });
       // CONTROL (the r3 rule, a runtime neuter of the PURE verdict the keeper reads at call time): "the directory is minted"
       // ALONE makes the holder the keeper's own — the agent's next start ENDS the human's real Chrome
@@ -1124,7 +1124,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
         const h2 = await humanOn(bank.dir);
         let eC = null; try { await kk.start(bank.id, { why: 'control' }); } catch (e) { eC = e; } finally { Bp.profileLockVerdict = realV; }
         let ended = false; for (let i = 0; i < 60 && !(ended = !Ff.pidAlive(h2.pid)); i++) await sleep(50);
-        ok(!eC && ended, `④ r4 MAJOR 2 CONTROL: with "minted alone" (the r3 rule) the start ENDS the human's real Chrome ${h2.pid} — the leg above can go red`, eC ? eC.message : `alive: ${Ff.pidAlive(h2.pid)}`);
+        ok(!eC && verdictOf(ended), `④ r4 MAJOR 2 CONTROL: with "minted alone" (the r3 rule) the start ENDS the human's real Chrome ${h2.pid} — the leg above can go red`, eC ? eC.message : `alive: ${Ff.pidAlive(h2.pid)}`);
         await killHuman(h2);
         await kk.stop(bank.id).catch(() => { });
       }
@@ -1150,11 +1150,11 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
             const after = chromePidsOn(b2.dir);
             const a3 = await kc.attach({ profileId: b2.id, browserKey: KC4, sessionId: 'sess-c4' });
             const t3 = await run(a3.env, [...pin, 'get', 'title']);
-            ok(c0.length === 1 && after.length === 0 && kc.browserOf(b2.id).state === 'ready' && !t3.ok && /refused|connect failed/i.test(t3.out), `④ r4 MAJOR 1 CONTROL: a keeper copy with no heal — after the SIGTERM the leased tick leaves ${after.length} Chromes, the record \`${kc.browserOf(b2.id).state}\`, and a lease verb under the next /resolve env fails "${(t3.out.trim().split('\n').pop() || '').slice(0, 80)}"`, JSON.stringify({ c0, after, t3: t3.out.slice(-300) }));
+            ok(c0.length === 1 && after.length === 0 && kc.browserOf(b2.id).state === 'ready' && !t3.ok && verdictOf(/refused|connect failed/i.test(t3.out)), `④ r4 MAJOR 1 CONTROL: a keeper copy with no heal — after the SIGTERM the leased tick leaves ${after.length} Chromes, the record \`${kc.browserOf(b2.id).state}\`, and a lease verb under the next /resolve env fails "${(t3.out.trim().split('\n').pop() || '').slice(0, 80)}"`, JSON.stringify({ c0, after, t3: t3.out.slice(-300) }));
             await kc.stop(b2.id).catch(() => { });
           } finally { kc.shutdown(); }
         } else ok(false, '④ r4 MAJOR 1 CONTROL: the healBrowser anchor was not found in src/server/browser-keeper.js');
-        for (const r of copiesCensus(Mh.files, Mh.dir, REPO, { minCopies: 1, label: '④ r4 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+        for (const r of copiesCensus(Mh.files, Mh.dir, REPO, { minCopies: 1, label: '④ r4 ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
       }
     } catch (e) { ok(false, '④ the keeper-launcher leg threw', e && (e.stack || e.message)); }
     finally {
@@ -1199,17 +1199,17 @@ console.log('— ⑧ lane engine-plugin: the real agent-browser launches the FAK
       LD8.setEnabled(EID, true, { trusted: true });
       const t0 = Date.now(); while (!REG8.rows().length && Date.now() - t0 < 8000) await sleep(25);
       const fact = await kk.engineFactOf(EID);
-      ok(REG8.rows().length === 1 && fact && fact.installed && /vibespace-fake-kernel/.test(String(fact.version)), `⑧ the fixture engine is in the table and its probe ran the fake kernel's own --version ("${fact && fact.version}")`, JSON.stringify(fact));
+      ok(REG8.rows().length === 1 && gateOf(fact) && gateOf(fact.installed) && verdictOf(/vibespace-fake-kernel/.test(String(fact.version))), `⑧ the fixture engine is in the table and its probe ran the fake kernel's own --version ("${fact && fact.version}")`, JSON.stringify(fact));
       const pk = kk.createProfile({ label: 'Kernel' }, { owner: { kind: 'instance', id: null } });
       await kk.setBrowserChoice({ profileId: pk.id, choice: { kind: 'plugin', id: EID }, by: 'user' });
       const v8 = await kk.start(pk.id, { why: 'test' });
       const rec8 = kk.browserOf(pk.id), view8 = kk.list().browsers[pk.id] || {};
       let argv8 = []; try { argv8 = JSON.parse(fs.readFileSync(path.join(pk.dir, 'fake-kernel-argv.json'), 'utf8')); } catch { argv8 = []; }
-      ok(v8 && v8.state === 'ready' && rec8 && B_isLoop(rec8.cdpUrl) && rec8.browserChoice && rec8.browserChoice.kind === 'plugin' && view8.runningBuild === '150.0.7871.186', `⑧ the REAL ${ver8} launched the kernel as the profile's browser: ready, its CDP url on loopback, the record {kind:'plugin'} + the build the kernel reports (${view8.runningBuild})`, JSON.stringify(rec8 && { state: rec8.state, cdp: rec8.cdpUrl, bc: rec8.browserChoice, rb: view8.runningBuild }));
-      ok(argv8.includes('--vibespace-engine=fixture') && argv8.includes(Bp.keeperMarkArg(pk.id)) && argv8.includes(`--user-data-dir=${pk.dir}`) && argv8.some((a) => /^--remote-debugging-port=/.test(a)), '⑧ the engine\'s own arguments + the keeper\'s mark reached the kernel THROUGH the real CLI (AGENT_BROWSER_ARGS), beside the CLI\'s own debugging port and the profile\'s directory', JSON.stringify(argv8));
+      ok(gateOf(v8) && v8.state === 'ready' && gateOf(rec8) && gateOf(B_isLoop(rec8.cdpUrl)) && gateOf(rec8.browserChoice) && rec8.browserChoice.kind === 'plugin' && view8.runningBuild === '150.0.7871.186', `⑧ the REAL ${ver8} launched the kernel as the profile's browser: ready, its CDP url on loopback, the record {kind:'plugin'} + the build the kernel reports (${view8.runningBuild})`, JSON.stringify(rec8 && { state: rec8.state, cdp: rec8.cdpUrl, bc: rec8.browserChoice, rb: view8.runningBuild }));
+      ok(gateOf(argv8.includes('--vibespace-engine=fixture')) && gateOf(argv8.includes(Bp.keeperMarkArg(pk.id))) && gateOf(argv8.includes(`--user-data-dir=${pk.dir}`)) && verdictOf(argv8.some((a) => /^--remote-debugging-port=/.test(a))), '⑧ the engine\'s own arguments + the keeper\'s mark reached the kernel THROUGH the real CLI (AGENT_BROWSER_ARGS), beside the CLI\'s own debugging port and the profile\'s directory', JSON.stringify(argv8));
       c8 = cdpClient(rec8.cdpUrl); await c8.open;
       const gv = await c8.call('VibeSpace.getVersion');
-      ok(gv.result && gv.result.protocol === 1 && Array.isArray(gv.result.kinds) && gv.result.kinds.length === 20 && gv.result.features.includes('surfaces'), `⑧ OUR OWN CDP socket on the record's url: VibeSpace.getVersion answers protocol ${gv.result && gv.result.protocol}, ${gv.result && gv.result.kinds && gv.result.kinds.length} kinds, features ${gv.result && gv.result.features && gv.result.features.join(',')}`, JSON.stringify(gv));
+      ok(gateOf(gv.result) && gv.result.protocol === 1 && gateOf(Array.isArray(gv.result.kinds)) && gv.result.kinds.length === 20 && verdictOf(gv.result.features.includes('surfaces')), `⑧ OUR OWN CDP socket on the record's url: VibeSpace.getVersion answers protocol ${gv.result && gv.result.protocol}, ${gv.result && gv.result.kinds && gv.result.kinds.length} kinds, features ${gv.result && gv.result.features && gv.result.features.join(',')}`, JSON.stringify(gv));
       c8.ws.close(); c8 = null;
       await kk.stop(pk.id, { why: 'user' });
       LD8.shutdown(); // the plugin's own process is the loader's — ended with it, before the census of this leg's processes
@@ -1269,10 +1269,10 @@ console.log('— ⑧b lane engine-args-string: a conversation\'s browser born on
       // the kernel's argv as it RUNS (/proc): what the real CLI handed it from the config's one line
       const kpid = mine().find((pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('fake-kernel.mjs'); } catch { return false; } });
       let argvB = []; try { argvB = fs.readFileSync(`/proc/${kpid}/cmdline`, 'utf8').split('\0'); } catch { }
-      ok(recB && recB.state === 'ready' && !recB.lastError && recB.browserChoice && recB.browserChoice.kind === 'plugin' && recB.browserChoice.id === EID, `⑧b the REAL ${verB} STARTED the conversation's browser on the engine: ready, no error, the record {kind:'plugin'}`, JSON.stringify({ ev: ev instanceof Error ? `${ev.code}: ${ev.message}` : ev && ev.state, rec: recB && { state: recB.state, lastError: recB.lastError, choice: recB.browserChoice } }));
+      ok(gateOf(recB) && recB.state === 'ready' && !recB.lastError && gateOf(recB.browserChoice) && recB.browserChoice.kind === 'plugin' && recB.browserChoice.id === EID, `⑧b the REAL ${verB} STARTED the conversation's browser on the engine: ready, no error, the record {kind:'plugin'}`, JSON.stringify({ ev: ev instanceof Error ? `${ev.code}: ${ev.message}` : ev && ev.state, rec: recB && { state: recB.state, lastError: recB.lastError, choice: recB.browserChoice } }));
       let wtext = ''; try { wtext = cfgB ? fs.readFileSync(cfgB.executablePath, 'utf8') : ''; } catch { }
-      ok(cfgB && typeof cfgB.args === 'string' && cfgB.executablePath !== KPB && /\/engine-[^/]+\.sh$/.test(cfgB.executablePath) && wtext.includes(`exec '${KPB}' "$@"`) && !cfgB.args.includes('fixture'), '⑧b the config the launch and the agent\'s own commands name holds `args` as ONE string (the keeper\'s part) and, as its program, the keeper\'s WRAPPER over the kernel', JSON.stringify(cfgB));
-      ok(argvB.includes('--vibespace-engine=fixture') && argvB.includes('--use-angle=gl') && !argvB.includes('--use-angle=swiftshader') && argvB.filter((a) => a.startsWith('--vibespace-keeper=')).length === 1 && argvB.includes(Bp.keeperMarkArg(KEYB)) && argvB.filter((a) => a === '--disable-blink-features=AutomationControlled').length === 1,
+      ok(gateOf(cfgB) && typeof cfgB.args === 'string' && cfgB.executablePath !== KPB && gateOf(/\/engine-[^/]+\.sh$/.test(cfgB.executablePath)) && gateOf(wtext.includes(`exec '${KPB}' "$@"`)) && !cfgB.args.includes('fixture'), '⑧b the config the launch and the agent\'s own commands name holds `args` as ONE string (the keeper\'s part) and, as its program, the keeper\'s WRAPPER over the kernel', JSON.stringify(cfgB));
+      ok(gateOf(argvB.includes('--vibespace-engine=fixture')) && gateOf(argvB.includes('--use-angle=gl')) && !argvB.includes('--use-angle=swiftshader') && argvB.filter((a) => a.startsWith('--vibespace-keeper=')).length === 1 && gateOf(argvB.includes(Bp.keeperMarkArg(KEYB))) && argvB.filter((a) => a === '--disable-blink-features=AutomationControlled').length === 1,
         '⑧b the kernel RUNS with the engine\'s switches (its value: --use-angle=gl), the keeper\'s mark ONCE (the forged one dropped), the automation flag once', JSON.stringify(argvB));
       // the driver road records no CDP url: the kernel's own DevToolsActivePort (in the --user-data-dir the CLI handed it) names it
       const udd = (argvB.find((a) => a.startsWith('--user-data-dir=')) || '').slice('--user-data-dir='.length);
@@ -1280,9 +1280,9 @@ console.log('— ⑧b lane engine-args-string: a conversation\'s browser born on
       // r2: the switches holding a comma arrive WHOLE through the real CLI (the wrapper appends them after its own "$@": the CLI's
       // defaults — its own --window-size / --disable-features — come first, so the engine's value is the LAST, the one Chromium reads)
       const lastOf = (n) => argvB.filter((a) => a.startsWith(n + '=')).pop();
-      ok(COMMA_B.every((x) => argvB.includes(x)) && lastOf('--window-size') === COMMA_B[0] && lastOf('--disable-features') === COMMA_B[1],
+      ok(gateOf(COMMA_B.every((x) => argvB.includes(x))) && lastOf('--window-size') === COMMA_B[0] && lastOf('--disable-features') === COMMA_B[1],
         '⑧b the engine\'s switches HOLDING A COMMA reach the kernel whole through the REAL CLI (--window-size=1234,567, --disable-features=A,B — each the last of its name)', JSON.stringify(argvB.filter((a) => /^--(window-size|disable-features)=/.test(a))));
-      if (urlB && B_isLoop(urlB)) { cB = cdpClient(urlB); await cB.open; const gv = await cB.call('VibeSpace.getVersion'); ok(gv.result && gv.result.protocol === 1, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', JSON.stringify(gv)); cB.ws.close(); cB = null; }
+      if (urlB && B_isLoop(urlB)) { cB = cdpClient(urlB); await cB.open; const gv = await cB.call('VibeSpace.getVersion'); ok(gateOf(gv.result) && gv.result.protocol === 1, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', JSON.stringify(gv)); cB.ws.close(); cB = null; }
       else ok(false, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', `no DevToolsActivePort under ${udd || '(no --user-data-dir)'}`);
       // keeper-sweep-yields (2.369.407): the conversation lets go FIRST — a detach, the road every product caller takes before a retire
       // (detach, dropChild and the orphan sweep drop or check the lease); a retire of a record its conversation still holds keeps the
@@ -1359,19 +1359,19 @@ console.log('— ⑨ lane browser-surfaces: the real agent-browser on the FAKE K
       });
       let r = await cli9(['open', 'https://example.test/start']);
       const st9 = dw9.stats()[0] || {};
-      ok(r.code === 0 && st9.kernel && st9.kernel.protocol === 1 && st9.kernel.features.includes('surfaces'), `⑨ the REAL ${ver9} drives the kernel; the watch on its CDP url took the KERNEL road (VibeSpace.getVersion: surfaces)`, JSON.stringify({ r, kernel: st9.kernel }));
+      ok(r.code === 0 && gateOf(st9.kernel) && st9.kernel.protocol === 1 && verdictOf(st9.kernel.features.includes('surfaces')), `⑨ the REAL ${ver9} drives the kernel; the watch on its CDP url took the KERNEL road (VibeSpace.getVersion: surfaces)`, JSON.stringify({ r, kernel: st9.kernel }));
       r = await cli9(['open', 'https://example.test/next#vs-surface=js-dialog:confirm']);
       const sid9 = (opens9.find((o) => o.kind === 'js-dialog') || {}).id || '';
-      ok(r.code === 1 && r.out.startsWith('A page dialog is open and the page will not move until it is answered — confirm: "Leave this page?"') && /\[dialog_open\]/.test(r.err) && opens9.filter((o) => o.id === sid9).length === 1 && /^surf-js-dialog-\d+$/.test(sid9), '⑨ a js-dialog SURFACE holds the navigation ⇒ the verb in flight ends [dialog_open] with THE sentence (ONE open — the watch read it from the surface)', JSON.stringify({ r, opens9 }));
+      ok(r.code === 1 && gateOf(r.out.startsWith('A page dialog is open and the page will not move until it is answered — confirm: "Leave this page?"')) && gateOf(/\[dialog_open\]/.test(r.err)) && opens9.filter((o) => o.id === sid9).length === 1 && verdictOf(/^surf-js-dialog-\d+$/.test(sid9)), '⑨ a js-dialog SURFACE holds the navigation ⇒ the verb in flight ends [dialog_open] with THE sentence (ONE open — the watch read it from the surface)', JSON.stringify({ r, opens9 }));
       r = await cli9(['surfaces']);
-      ok(r.code === 0 && r.out.includes(`${sid9}  js-dialog  held blocking`) && /answers: accept, dismiss/.test(r.out), '⑨ `vibespace-browser surfaces` lists it with its answers', JSON.stringify(r));
+      ok(r.code === 0 && gateOf(r.out.includes(`${sid9}  js-dialog  held blocking`)) && verdictOf(/answers: accept, dismiss/.test(r.out)), '⑨ `vibespace-browser surfaces` lists it with its answers', JSON.stringify(r));
       r = await cli9(['answer', sid9, 'accept']);
       let kcalls = []; try { kcalls = fs.readFileSync(path.join(pk.dir, 'fake-kernel-calls.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { kcalls = []; }
       const ans9 = kcalls.filter((c) => c.method === 'VibeSpace.answerSurface');
       const watchSess = new Set(kcalls.filter((c) => c.method === 'VibeSpace.enable').map((c) => c.session));
-      ok(r.code === 0 && /the browser prompt was answered: "OK"/.test(r.out) && ans9.length === 1 && ans9[0].params.surfaceId === sid9 && ans9[0].params.answerId === 'accept' && watchSess.has(ans9[0].session), '⑨ `vibespace-browser answer <id> accept` = ONE VibeSpace.answerSurface {surfaceId, answerId: accept} on the watch\'s own page session', JSON.stringify({ r, ans9 }));
+      ok(r.code === 0 && gateOf(/the browser prompt was answered: "OK"/.test(r.out)) && ans9.length === 1 && ans9[0].params.surfaceId === sid9 && ans9[0].params.answerId === 'accept' && verdictOf(watchSess.has(ans9[0].session)), '⑨ `vibespace-browser answer <id> accept` = ONE VibeSpace.answerSurface {surfaceId, answerId: accept} on the watch\'s own page session', JSON.stringify({ r, ans9 }));
       r = await cli9(['get', 'url']);
-      ok(r.code === 0 && /https:\/\/example\.test\/next/.test(r.out) && !dw9.factFor({ profileId: pk.id, browserKey: KEY9, sessionId: SID9, consume: false }).open, '⑨ the page continues — the next verb runs (its url), nothing open', JSON.stringify(r));
+      ok(r.code === 0 && gateOf(/https:\/\/example\.test\/next/.test(r.out)) && !dw9.factFor({ profileId: pk.id, browserKey: KEY9, sessionId: SID9, consume: false }).open, '⑨ the page continues — the next verb runs (its url), nothing open', JSON.stringify(r));
       const watchCalls = kcalls.filter((c) => watchSess.has(c.session)).map((c) => c.method);
       ok(watchSess.size >= 1 && !watchCalls.includes('Fetch.enable') && !watchCalls.includes('Page.setInterceptFileChooserDialog') && watchCalls.indexOf('VibeSpace.enable') < watchCalls.indexOf('Page.enable') && (dw9.stats()[0] || {}).nativeIgnored === 0, '⑨ ONE SOURCE on the watch\'s session: VibeSpace.enable before Page.enable, no Fetch / chooser hook; the kernel sent it no native dialog event', JSON.stringify({ watchCalls, st: dw9.stats()[0] }));
       await kk.stop(pk.id, { why: 'user' });
@@ -1451,18 +1451,18 @@ console.log('— ⑨b lane engine-spi-egress: the real agent-browser on the fake
       let argv = []; try { argv = JSON.parse(fs.readFileSync(path.join(pk.dir, 'fake-kernel-argv.json'), 'utf8')); } catch { argv = []; }
       const pxArg = argv.find((a) => String(a).startsWith('--proxy-server=')) || '';
       const stG = dwG.stats()[0] || {};
-      ok(r.code === 0 && /^--proxy-server=http:\/\/127\.0\.0\.1:\d+$/.test(pxArg) && argv.includes('--proxy-bypass-list=<-loopback>') && argv.includes('--vibespace-kernel-features=egress-allowlist') && stG.kernel === false,
+      ok(r.code === 0 && gateOf(/^--proxy-server=http:\/\/127\.0\.0\.1:\d+$/.test(pxArg)) && gateOf(argv.includes('--proxy-bypass-list=<-loopback>')) && gateOf(argv.includes('--vibespace-kernel-features=egress-allowlist')) && stG.kernel === false,
         `⑨b the REAL ${verg} launched the fake kernel WRAPPED: --proxy-server=<the keeper's per-profile proxy> + <-loopback> on its argv (the keeper's, never the plugin's); no surfaces ⇒ the watch took Chrome's dialog road`, JSON.stringify({ r, argv, kernel: stG.kernel }));
       r = await cliG(['get', 'title']);
-      ok(r.code === 0 && /egress 200: hello from the target/.test(r.out), '⑨b a LISTED host loads — the kernel fetched it THROUGH the keeper\'s proxy (the loopback target behind its name)', JSON.stringify(r));
+      ok(r.code === 0 && verdictOf(/egress 200: hello from the target/.test(r.out)), '⑨b a LISTED host loads — the kernel fetched it THROUGH the keeper\'s proxy (the loopback target behind its name)', JSON.stringify(r));
       r = await cliG(['open', `http://unlisted.test:${TP}/x`]);
       const r2 = await cliG(['get', 'title']);
-      ok(r.code === 0 && /note: .*site list refused unlisted\.test while this page loaded.*\[egress_refused\]/.test(r.err) && /Fixture Egress Engine's site list/.test(r.err) && /egress 403: egress refused: unlisted\.test is not in the egress allowlist \(listed\.test\)/.test(r2.out),
+      ok(r.code === 0 && gateOf(/note: .*site list refused unlisted\.test while this page loaded.*\[egress_refused\]/.test(r.err)) && gateOf(/Fixture Egress Engine's site list/.test(r.err)) && verdictOf(/egress 403: egress refused: unlisted\.test is not in the egress allowlist \(listed\.test\)/.test(r2.out)),
         '⑨b an UNLISTED host is refused with the keeper\'s words (the page reads them) and the verb answer NAMES it — the engine\'s own list [egress_refused]', JSON.stringify({ r, r2 }));
       r = await cliG(['open', `http://127.0.0.1:${TP}/x`]);
       const r3 = await cliG(['get', 'title']);
       let eg = []; try { eg = fs.readFileSync(path.join(pk.dir, 'fake-kernel-egress.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { eg = []; }
-      ok(/egress 403: egress refused: 127\.0\.0\.1 is loopback\/link-local/.test(r3.out) && eg.length >= 3 && eg.every((x) => x.via === 'proxy'),
+      ok(gateOf(/egress 403: egress refused: 127\.0\.0\.1 is loopback\/link-local/.test(r3.out)) && eg.length >= 3 && verdictOf(eg.every((x) => x.via === 'proxy')),
         '⑨b LOOPBACK never: <-loopback> sent it through the proxy, which refused it by name; every fetch of the kernel went through the proxy', JSON.stringify({ r3, eg }));
       await kk.stop(pk.id, { why: 'user' });
       LDG.shutdown();
@@ -1553,18 +1553,18 @@ console.log('— ⑩ lane browser-login (r22): the real agent-browser on the FAK
       let r = await cli10(['open', `${SITE10}/login#vs-login=login`]);
       await until10(() => (dw10.stats()[0] || {}).kernel);
       const st10 = dw10.stats()[0] || {};
-      ok(r.code === 0 && st10.kernel && st10.kernel.protocol === 1, `⑩ the REAL ${ver10} drives the kernel on ${SITE10}`, JSON.stringify({ r, kernel: st10.kernel }));
-      ok(logins10.addOwn({ origin: SITE10, username: 'alice', password: PW10 }).ok && logins10.grant(`web-login:${SITE10}#alice`, 'this-account', `session:${CID10}`).ok, '⑩ the owner keeps a login for the site in the vault and grants this account to the conversation');
+      ok(r.code === 0 && gateOf(st10.kernel) && st10.kernel.protocol === 1, `⑩ the REAL ${ver10} drives the kernel on ${SITE10}`, JSON.stringify({ r, kernel: st10.kernel }));
+      ok(gateOf(logins10.addOwn({ origin: SITE10, username: 'alice', password: PW10 }).ok) && verdictOf(logins10.grant(`web-login:${SITE10}#alice`, 'this-account', `session:${CID10}`).ok), '⑩ the owner keeps a login for the site in the vault and grants this account to the conversation');
       const ret10 = await cli10(['login']);
-      ok(ret10.code === 1 && /\[login_retired\]/.test(ret10.err), '⑩ `vibespace-browser login` is refused [login_retired] on the kernel too');
+      ok(ret10.code === 1 && verdictOf(/\[login_retired\]/.test(ret10.err)), '⑩ `vibespace-browser login` is refused [login_retired] on the kernel too');
       const ru = await cli10(['fill', '#u', '--vault', `${SITE10}#alice/user`]);
       const rp = await cli10(['fill', '#pw', '--vault', `${SITE10}#alice/password`]);
       const inserts = kcalls().filter((c) => c.method === 'Input.insertText');
       const watchSess = new Set(kcalls().filter((c) => c.method === 'VibeSpace.enable').map((c) => c.session));
-      ok(ru.code === 0 && rp.code === 0 && inserts.some((c) => c.params?.textLen === PW10.length && watchSess.has(c.session)),
+      ok(ru.code === 0 && rp.code === 0 && verdictOf(inserts.some((c) => c.params?.textLen === PW10.length && watchSess.has(c.session))),
         '⑩ `fill #u/#pw --vault` runs Hub isolated-world fill + Input.insertText on the watch\'s own page session over the kernel',
         JSON.stringify({ ru, rp, inserts }));
-      ok(!rp.out.includes(PW10) && !rp.err.includes(PW10) && /Receipt vr-[0-9a-f]{12}\./.test(rp.out), '⑩ the agent\'s answer (stdout + stderr) carries no value — what was filled and a receipt');
+      ok(!rp.out.includes(PW10) && !rp.err.includes(PW10) && verdictOf(/Receipt vr-[0-9a-f]{12}\./.test(rp.out)), '⑩ the agent\'s answer (stdout + stderr) carries no value — what was filled and a receipt');
       // `new:<site>#bob/password --generate` — sealed into `pending: "register"` (24 chars) + ONE human-only Confirm/Discard card
       r = await cli10(['open', `${SITE10}/signup#vs-login=signup`]);
       logins10.grant(`web-login:${SITE10}#alice`, 'any-account', `session:${CID10}`);
@@ -1572,12 +1572,12 @@ console.log('— ⑩ lane browser-login (r22): the real agent-browser on the FAK
       const bob = eng10.secretGet(`web-login:${SITE10}#bob`);
       const bobRec = bob.ok && bob.value ? BL10.recordOf(bob.value.toString('utf8')) : null;
       const bobPw = bobRec?.pending?.password || '';
-      ok(r.code === 0 && bobRec && bobRec.current === null && bobRec.pending?.kind === 'register' && bobPw.length === 24
+      ok(r.code === 0 && gateOf(bobRec) && bobRec.current === null && bobRec.pending?.kind === 'register' && bobPw.length === 24
         && !r.out.includes(bobPw) && !r.err.includes(bobPw)
         && notices10.length === 1 && notices10[0].action?.type === 'save-login' && notices10[0].action?.pending === 'register',
         '⑩ `fill #npw --vault new:...#bob/password --generate`: seals 24-char pending:"register" (current===null) and files ONE human-only Confirm/Discard For-you card',
         JSON.stringify({ out: r.out.slice(0, 300), pending: bobRec?.pending?.kind, len: bobPw.length, notices10 }));
-      ok(logins10.confirmOwn(`web-login:${SITE10}#bob`, { who: 'owner' }).ok
+      ok(gateOf(logins10.confirmOwn(`web-login:${SITE10}#bob`, { who: 'owner' }).ok)
         && BL10.recordOf(eng10.secretGet(`web-login:${SITE10}#bob`).value.toString('utf8')).current?.password === bobPw,
         '⑩ owner Confirm promotes bob\'s pending password to current («只有人能转正»)');
       await kk.stop(pk.id, { why: 'user' });
@@ -1605,4 +1605,4 @@ cleanup();
 if (fail) { console.log(`\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})`); process.exit(1); }
 if (skipped) { console.error(`\nSKIPPED (${skipped} skipped, ${pass} passed — a skip is never green)`); process.exit(2); }
 console.log(`\nALL PASS (${pass})`);
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -17,7 +17,7 @@ import { anchored } from './scratch.mjs';   // B-0d3e: a red control's edit thro
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };   // (name, condition, detail)
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };   // (name, condition, detail)
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -80,11 +80,11 @@ let W1, gid1, sent1 = [];
   for (const text of ['are you there?', 'still waiting', 'please reply']) sent1.push(await W1.eng.post({ group: gid1, from: A, text, wake: true }));
   await settleTick();
   ok('① each --wake is answered QUEUED, never woke: the post\'s result lists the addressee under `queued` (with the turn it waits behind), `woke` is empty — 3 of 3',
-    sent1.every((s) => s.ok && (s.woke || []).length === 0 && (s.queued || []).length === 1 && s.queued[0].member === X && s.queued[0].since === T_TURN), JSON.stringify(sent1.map((s) => ({ woke: s.woke, queued: s.queued }))));
+    verdictOf(sent1.every((s) => s.ok && (s.woke || []).length === 0 && (s.queued || []).length === 1 && s.queued[0].member === X && s.queued[0].since === T_TURN)), JSON.stringify(sent1.map((s) => ({ woke: s.woke, queued: s.queued }))));
   const rows = sent1.map((s) => W1.row(gid1, s.message));
   ok('① …and each record reads «waiting for xray\'s current turn» (deliveryOf `queued`, since = the running turn\'s start), never «read by»',
-    rows.every((r) => r && r.state === 'queued' && r.since === T_TURN), JSON.stringify(rows));
-  ok('① …the frames were written (the wrapper holds them), and each send TOOK ITS UNIT as a RESERVATION — a stamp named by its frame\'s id, counted like a spent turn (round 2: the owner\'s ceiling is never passed by queueing)', W1.frames.length === 3 && W1.money.auth === 3 && W1.money.notes.filter((n) => !n.carried).length === 3 && W1.money.notes.every((n) => /^qw-/.test(n.reservation || '')) && W1.charged() === 3, JSON.stringify(W1.money));
+    verdictOf(rows.every((r) => r && r.state === 'queued' && r.since === T_TURN)), JSON.stringify(rows));
+  ok('① …the frames were written (the wrapper holds them), and each send TOOK ITS UNIT as a RESERVATION — a stamp named by its frame\'s id, counted like a spent turn (round 2: the owner\'s ceiling is never passed by queueing)', W1.frames.length === 3 && W1.money.auth === 3 && W1.money.notes.filter((n) => !n.carried).length === 3 && gateOf(W1.money.notes.every((n) => /^qw-/.test(n.reservation || ''))) && W1.charged() === 3, JSON.stringify(W1.money));
   // the wrapper's records: its queue grows (queue_changed), each frame answered «queued» (peer_result)
   for (let i = 0; i < 3; i++) { W1.deliver.noteQueueItems(X, Array.from({ length: i + 1 }, (_, k) => ({ id: 'q' + (k + 1) })), { fresh: true }); ok(`① the wrapper answers frame ${i + 1} «queued» ⇒ the settle says so; its reservation stands (no second unit)`, W1.settle('queued') === 'queued' && W1.charged() === 3 && W1.money.notes.filter((n) => !n.carried).length === 3); }
   ok('① …no hold is left open and nothing was given back: each hold BECAME its reservation', W1.money.releases === 0, JSON.stringify(W1.money));
@@ -99,7 +99,7 @@ console.log('② THE TURN ENDS — the wrapper drains one frame per turn; each i
   const drain = (left) => { W1.deliver.noteTurnEnded(X); W1.deliver.noteQueueItems(X, left.map((id) => ({ id })), { fresh: true }); W1.deliver.noteTurnStarted(X); };
   drain(['q2', 'q3']); await settleTick();
   let st = sent1.map((s) => W1.row(gid1, s.message).state);
-  ok('② the first frame\'s turn starts ⇒ its record reads «read by» (the hand-over clock = that turn), the other two still wait for the current turn', st.join() === 'handed,queued,queued' && Number.isFinite(W1.row(gid1, sent1[0].message).at), st.join());
+  ok('② the first frame\'s turn starts ⇒ its record reads «read by» (the hand-over clock = that turn), the other two still wait for the current turn', st.join() === 'handed,queued,queued' && verdictOf(Number.isFinite(W1.row(gid1, sent1[0].message).at)), st.join());
   ok('② …the turn that carries it IS its reserved unit: nothing more is charged (3 units, the authorization\'s identity and reason)', W1.charged() === 3 && W1.money.notes.filter((n) => !n.carried).length === 3 && W1.money.notes[0].reason === 'peer-message' && W1.money.notes[0].identity === 'slot-1', JSON.stringify(W1.money.notes));
   drain(['q3']); drain([]); await settleTick();
   st = sent1.map((s) => W1.row(gid1, s.message).state);
@@ -119,14 +119,14 @@ console.log('③ STOP HANDS THE THREE BACK — once each, never charged, then re
   W.deliver.noteQueueItems(X, [], { fresh: true });
   const back = W.frames.map((f) => W.deliver.noteHandedBack(X, f.text, 'dropped by Stop before it was delivered'));
   await settleTick();
-  ok('③ Stop: each of the three frames is recognised by its words and handed back (3 of 3)', back.every(Boolean), JSON.stringify(back));
-  ok('③ …each reservation RETURNED by its id (3 of 3) — no unit kept for a turn that never ran; the ledger holds them only as words for the next turn', W.charged() === 0 && W.money.returned.size === 3 && W.deliver.queuedEntries(X).every((e) => e.state === 'restashed'), JSON.stringify(W.money));
-  ok('③ …the records say «waiting for xray\'s next turn» (the words ride the stash, master\'s road), never «read»', sent.every((s) => W.row(gid, s.message).state === 'waiting'));
+  ok('③ Stop: each of the three frames is recognised by its words and handed back (3 of 3)', verdictOf(back.every(Boolean)), JSON.stringify(back));
+  ok('③ …each reservation RETURNED by its id (3 of 3) — no unit kept for a turn that never ran; the ledger holds them only as words for the next turn', W.charged() === 0 && W.money.returned.size === 3 && verdictOf(W.deliver.queuedEntries(X).every((e) => e.state === 'restashed')), JSON.stringify(W.money));
+  ok('③ …the records say «waiting for xray\'s next turn» (the words ride the stash, master\'s road), never «read»', verdictOf(sent.every((s) => W.row(gid, s.message).state === 'waiting')));
   ok('③ …a second hand-back of the same words finds nothing (once)', W.deliver.noteHandedBack(X, W.frames[0].text) === false);
   W.deliver.noteTurnStarted(X); await settleTick();
-  ok('③ a turn start alone reads nothing: the words are in the stash (three entries, once each, with the ref their drain answers)', sent.every((s) => W.row(gid, s.message).state === 'waiting') && W.deliver.stashEntries(X).length === 3 && W.deliver.stashEntries(X).every((e) => /^queued-wake:/.test(e.ref || '')));
+  ok('③ a turn start alone reads nothing: the words are in the stash (three entries, once each, with the ref their drain answers)', gateOf(sent.every((s) => W.row(gid, s.message).state === 'waiting')) && W.deliver.stashEntries(X).length === 3 && verdictOf(W.deliver.stashEntries(X).every((e) => /^queued-wake:/.test(e.ref || ''))));
   W.deliver.drainStash(X); await settleTick();
-  ok('③ the stash HANDS the three to a turn (its drain) ⇒ read, still charged nothing (the stash rode a turn somebody else paid for)', sent.every((s) => W.row(gid, s.message).state === 'handed') && W.charged() === 0 && W.deliver.queuedEntries(X).length === 0);
+  ok('③ the stash HANDS the three to a turn (its drain) ⇒ read, still charged nothing (the stash rode a turn somebody else paid for)', gateOf(sent.every((s) => W.row(gid, s.message).state === 'handed')) && W.charged() === 0 && W.deliver.queuedEntries(X).length === 0);
 }
 
 console.log('④ A HUB RESTART between the queue and the drain — the owed charge and the mark survive, the drain charges once');
@@ -137,7 +137,7 @@ console.log('④ A HUB RESTART between the queue and the drain — the owed char
   W.deliver.noteQueueItems(X, [{ id: 'r1' }], { fresh: true }); W.settle('queued');
   SW.storeWriter().flushSync();
   const held = JSON.parse(fs.readFileSync(path.join(W.dir, 'msg-queued.json'), 'utf8'));
-  ok('④ the queued entry is on disk (msg-queued.json, through the store writer): its reservation, its words, its mark, its bound item', held.entries.length === 1 && held.entries[0].reserved === true && /across a restart/.test(held.entries[0].text) && held.entries[0].mark && held.entries[0].mark.gid === gid && held.entries[0].bind[0] === 'r1', JSON.stringify(held));
+  ok('④ the queued entry is on disk (msg-queued.json, through the store writer): its reservation, its words, its mark, its bound item', held.entries.length === 1 && held.entries[0].reserved === true && gateOf(/across a restart/.test(held.entries[0].text)) && gateOf(held.entries[0].mark) && held.entries[0].mark.gid === gid && held.entries[0].bind[0] === 'r1', JSON.stringify(held));
   // the new hub: the same data dir and store (the wrapper outlived the hub)
   const W2 = world('antigravity', { dataDir: W.dir, store: W.store });
   ok('④ the restarted hub holds the entry again', W2.deliver.queuedEntries(X).length === 1 && W2.row(gid, s.message).state === 'queued');
@@ -206,7 +206,7 @@ console.log('⑦ THE INCIDENT, REAL PROCESSES — the agy wrapper over the fake 
     await until(() => L.queuedEntries(CID).filter((e) => e.state === 'queued').length === 3, 5000, 'three answered «queued» by the REAL wrapper');
     const rows = () => sent.map((s) => G.deliveryOf(eng.get(gid), s.message, { log: [s.message] }).find((x) => x.member === CID).state).join();
     ok('⑦ the three sends: «waiting for verifier\'s current turn» — queued, not woke; the rows `queued`; each unit RESERVED at the send (the incident said woke ×3, read ×3)',
-      sent.every((s) => !(s.woke || []).length && (s.queued || []).length === 1) && rows() === 'queued,queued,queued' && money.notes === 3 && money.auth === 3, JSON.stringify({ rows: rows(), money }));
+      gateOf(sent.every((s) => !(s.woke || []).length && (s.queued || []).length === 1)) && rows() === 'queued,queued,queued' && money.notes === 3 && money.auth === 3, JSON.stringify({ rows: rows(), money }));
     await new Promise((r) => setTimeout(r, 300));
     ok('⑦ …the turn stays open (no result ever comes) and the three stay waiting — no mark, their three units held, no matter how long', S._isStreaming === true && rows() === 'queued,queued,queued' && money.notes === 3 && money.returned === 0);
     // Stop — the owner's door: the wrapper ends the turn, empties its queue and hands each peer item back
@@ -214,8 +214,8 @@ console.log('⑦ THE INCIDENT, REAL PROCESSES — the agy wrapper over the fake 
     await until(() => L.stashEntries(CID).length >= 3, 8000, 'the three re-stashed');
     await new Promise((r) => setTimeout(r, 150));
     const st = L.stashEntries(CID);
-    ok('⑦ Stop hands the three over ONCE: three stash entries carrying their words (never a fourth), the three reservations RETURNED', st.length === 3 && sent.every((s) => st.some((e) => String(e.text).includes(s.message.text))) && money.returned === 3, JSON.stringify({ n: st.length, money }));
-    ok('⑦ …the records now wait for the next turn (`waiting`), and the ladder holds them only as words for it', rows() === 'waiting,waiting,waiting' && L.queuedEntries(CID).every((e) => e.state === 'restashed'), rows());
+    ok('⑦ Stop hands the three over ONCE: three stash entries carrying their words (never a fourth), the three reservations RETURNED', st.length === 3 && gateOf(sent.every((s) => st.some((e) => String(e.text).includes(s.message.text)))) && money.returned === 3, JSON.stringify({ n: st.length, money }));
+    ok('⑦ …the records now wait for the next turn (`waiting`), and the ladder holds them only as words for it', rows() === 'waiting,waiting,waiting' && verdictOf(L.queuedEntries(CID).every((e) => e.state === 'restashed')), rows());
     console.log = log0;
   } finally { try { kid.kill('SIGKILL'); } catch { } }
 }
@@ -230,7 +230,7 @@ console.log('⑧ CODEX — the same law through its own records (peer_message_re
   W.deliver.noteTurnEnded(X); W.deliver.noteTurnStarted(X); W.deliver.noteQueueItems(X, [], { fresh: true }); await settleTick();   // codex: turn/started may precede the queue's republish
   ok('⑧ …its turn starts and the queue no longer holds it (either order) ⇒ read, still one unit', W.row(gid, s.message).state === 'handed' && W.charged() === 1 && W.money.notes.filter((n) => !n.carried).length === 1);
   const n = await W.deliver.deliverToConversation(X, 'job done', { kind: 'notification', spendReason: 'job-notification' });
-  ok('⑧ a NOTIFICATION into a running codex turn still STEERS, free — master\'s cell, rowed for the owner (not this lane\'s)', n.ok && n.steered === true && !n.queued && W.settle('steered') === 'free');
+  ok('⑧ a NOTIFICATION into a running codex turn still STEERS, free — master\'s cell, rowed for the owner (not this lane\'s)', gateOf(n.ok) && n.steered === true && !n.queued && W.settle('steered') === 'free');
 }
 
 console.log('⑨ WIRING — the consumers feed the ladder by PROPERTY ACCESS; the words reach the CLI, the window, zh / ja');
@@ -238,26 +238,26 @@ console.log('⑨ WIRING — the consumers feed the ladder by PROPERTY ACCESS; th
   const acp = read('src/server/stdout/acp-events.js'), cdx = read('src/server/stdout/codex-events.js');
   for (const [name, src] of [['acp-events', acp], ['codex-events', cdx]]) {
     ok(`⑨ ${name}: queue_changed → noteQueueItems, the turn's start → noteTurnStarted (+ _turnOpenedAt), its end → noteTurnEnded, a mode-less hand-back → noteHandedBack — each by property access on the lazy ref`,
-      ['deliverRef?.noteQueueItems?.(', 'deliverRef?.noteTurnStarted?.(', 'deliverRef?.noteTurnEnded?.(', 'deliverRef?.noteHandedBack?.(', 'session._turnOpenedAt = Date.now();'].every((n) => src.includes(n)));
+      verdictOf(['deliverRef?.noteQueueItems?.(', 'deliverRef?.noteTurnStarted?.(', 'deliverRef?.noteTurnEnded?.(', 'deliverRef?.noteHandedBack?.(', 'session._turnOpenedAt = Date.now();'].every((n) => src.includes(n))));
   }
   const msg = read('data/bin/vibespace-msg');
   ok('⑨ vibespace-msg says a queued wake as waiting («waiting (not billed yet): xray\'s current turn (running since …)»), a claude one as «handed into …»; read\'s clause names the `queued` row',
-    /waiting \(not billed yet\): /.test(msg) && msg.includes('handed into ${[...into].map(') && msg.includes("wk.delivered === 'queued'") && /x\.state === 'queued' \? `waiting for \$\{x\.name\}'s current turn/.test(msg));
+    gateOf(/waiting \(not billed yet\): /.test(msg)) && gateOf(msg.includes('handed into ${[...into].map(')) && gateOf(msg.includes("wk.delivered === 'queued'")) && verdictOf(/x\.state === 'queued' \? `waiting for \$\{x\.name\}'s current turn/.test(msg)));
   const routes = read('src/agent-routes.js');
-  ok('⑨ the send answer carries `queued` (name + since) and `intoTurn`; a read row carries `since`', /queued: \(r\.queued \|\| \[\]\)\.map/.test(routes) && /intoTurn: msgNames\(/.test(routes) && /since: d\.since/.test(routes));
+  ok('⑨ the send answer carries `queued` (name + since) and `intoTurn`; a read row carries `since`', gateOf(/queued: \(r\.queued \|\| \[\]\)\.map/.test(routes)) && gateOf(/intoTurn: msgNames\(/.test(routes)) && verdictOf(/since: d\.since/.test(routes)));
   // round 2 SMALL: the owner's toast and a channel receipt say the same truth (driven, not read)
   const CW = await import(path.join(REPO, 'src/lib/channel-words.js'));
   const toastQ = CW.wakeEchoText({ woke: [], queued: [{ member: X }] }), toastIn = CW.wakeEchoText({ woke: [{ member: X, intoTurn: true }] });
   ok('⑨ the owner\'s toast: a queued wake is «waiting behind a running turn — billed when a turn carries it» (never «woke nobody — no billed turn»); a claude hand-in is «handed into a running turn = 1 billed turn» (never «woke 1 agent»)',
-    /1 waiting behind a running turn — billed when a turn carries it/.test(toastQ) && !/woke nobody/.test(toastQ) && /1 handed into a running turn = 1 billed turn/.test(toastIn) && !/woke 1 agent/.test(toastIn), JSON.stringify({ toastQ, toastIn }));
+    gateOf(/1 waiting behind a running turn — billed when a turn carries it/.test(toastQ)) && !/woke nobody/.test(toastQ) && gateOf(/1 handed into a running turn = 1 billed turn/.test(toastIn)) && !/woke 1 agent/.test(toastIn), JSON.stringify({ toastQ, toastIn }));
   const CP = require(path.join(REPO, 'src/channel-policy.js'));
   const fate = CP.receiptFateOf({ receipt: true, draftedBy: { kind: 'agent', name: 'xray' }, receiptDelivery: { ok: true, at: Date.parse('2026-11-12T09:00:00Z'), woke: true, queued: true, lane: 'rpc-queue' } });
   ok('⑨ a channel receipt delivered into a queue reads «Queued for xray at 09:00 — it runs when its current turn ends», never «woken for it»', fate.queued === true && fate.woke === false && CP.receiptFateText(fate) === 'Queued for xray at 09:00 — it runs when its current turn ends', CP.receiptFateText(fate));
   const words = read('src/lib/channel-words.js');
-  ok('⑨ the window words the `queued` row and counts it', /case 'queued': return/.test(words) && /'\{n\} waiting for a current turn'/.test(words));
+  ok('⑨ the window words the `queued` row and counts it', gateOf(/case 'queued': return/.test(words)) && verdictOf(/'\{n\} waiting for a current turn'/.test(words)));
   for (const lang of ['zh', 'ja']) {
     const t = read(`src/lib/i18n-${lang}.js`);
-    ok(`⑨ ${lang}: the three new strings are translated`, ["\"Waiting for {name}'s current turn (running since {time})\"", "\"Waiting for {name}'s current turn\"", '"delivery::{n} waiting for a current turn"'].every((k) => t.includes(k)));
+    ok(`⑨ ${lang}: the three new strings are translated`, verdictOf(["\"Waiting for {name}'s current turn (running since {time})\"", "\"Waiting for {name}'s current turn\"", '"delivery::{n} waiting for a current turn"'].every((k) => t.includes(k))));
   }
 }
 
@@ -273,7 +273,7 @@ const hourOf = (g) => ((g.snapshot().budget.identities || {})['slot-1'] || []).l
   const sent = [];
   for (let i = 0; i < 8; i++) { sent.push(await W.eng.post({ group: gid, from: A, text: 'm' + i, wake: true })); W.deliver.noteQueueItems(X, Array.from({ length: Math.min(i + 1, 3) }, (_, k) => ({ id: 'c' + k })), { fresh: true }); W.settle('queued'); }
   const shape = sent.map((s) => (s.queued || []).length ? 'Q' : (s.refused || []).length ? 'R' : '?').join('');
-  ok('⑪ eight --wake sends to a conversation in a turn at cap 3: the first three QUEUED, sends 4 to 8 REFUSED at the send, by name (the hour cap) — frames written: 3', shape === 'QQQRRRRR' && W.frames.length === 3 && sent.slice(3).every((s) => /hour/.test(String((s.refused || [])[0] && s.refused[0].reason))), JSON.stringify({ shape, frames: W.frames.length, r: sent[3].refused }));
+  ok('⑪ eight --wake sends to a conversation in a turn at cap 3: the first three QUEUED, sends 4 to 8 REFUSED at the send, by name (the hour cap) — frames written: 3', shape === 'QQQRRRRR' && W.frames.length === 3 && verdictOf(sent.slice(3).every((s) => /hour/.test(String((s.refused || [])[0] && s.refused[0].reason)))), JSON.stringify({ shape, frames: W.frames.length, r: sent[3].refused }));
   ok('⑪ …the hour reads 3 the moment they are queued (the reservations count like spent turns)', hourOf(guard) === 3, String(hourOf(guard)));
   for (const left of [['c1', 'c2'], ['c2'], []]) { W.deliver.noteTurnEnded(X); W.deliver.noteQueueItems(X, left.map((id) => ({ id })), { fresh: true }); W.deliver.noteTurnStarted(X); }
   await settleTick();
@@ -295,7 +295,7 @@ console.log('⑫ AFTER A RESTART THE HUB ASKS (round 2, moderate 1) — an idle 
   W.deliver.noteQueueItems(X, [{ id: 'z1' }], { fresh: true }); W.settle('queued'); SW.storeWriter().flushSync();
   const W2 = world('antigravity', { dataDir: W.dir, store: W.store, streaming: false, caps: { peerMessage: true, notificationSteer: false, queueResync: true } });
   const asked = W2.deliver.noteAttached(W2.S);
-  ok('⑫ the restarted hub ASKS the wrapper holding its frame for its queue (queue-resync, the verb its sidecar adverts)', asked === true && W2.frames.some((f) => f.type === 'queue-resync'), JSON.stringify(W2.frames));
+  ok('⑫ the restarted hub ASKS the wrapper holding its frame for its queue (queue-resync, the verb its sidecar adverts)', asked === true && verdictOf(W2.frames.some((f) => f.type === 'queue-resync')), JSON.stringify(W2.frames));
   W2.deliver.noteQueueItems(X, [], { fresh: true }); await settleTick();   // the wrapper's answer: the item is gone (its turn ran while the hub was down)
   ok('⑫ …its answer settles the entry: carried, read, no second unit — never «waiting» for hours behind an idle wrapper', W2.row(gid, s.message).state === 'handed' && W2.deliver.queuedEntries(X).length === 0 && W2.money.notes.filter((n) => !n.carried).length === 0);
 }
@@ -311,7 +311,7 @@ console.log('⑬ THE WRAPPER IS GONE (round 2, moderate 2) — the HUB hands its
   const back = W.deliver.noteProcessGone(X);
   await settleTick();
   const st = W.deliver.stashEntries(X);
-  ok('⑬ the wrapper\'s process is gone ⇒ the hub hands the frame back: ONE stash entry with its words, its reservation RETURNED, the row waits for the next turn', back.length === 1 && st.length === 1 && /held by a wrapper that dies/.test(st[0].text) && W.charged() === 0 && W.row(gid, s.message).state === 'waiting');
+  ok('⑬ the wrapper\'s process is gone ⇒ the hub hands the frame back: ONE stash entry with its words, its reservation RETURNED, the row waits for the next turn', back.length === 1 && st.length === 1 && gateOf(/held by a wrapper that dies/.test(st[0].text)) && W.charged() === 0 && W.row(gid, s.message).state === 'waiting');
   ok('⑬ …a second notice of the same death hands nothing back twice', W.deliver.noteProcessGone(X).length === 0 && W.deliver.stashEntries(X).length === 1);
   W.deliver.drainStash(X); await settleTick();
   ok('⑬ …read only when the stash hands its words to a turn', W.row(gid, s.message).state === 'handed' && W.charged() === 0);
@@ -338,7 +338,7 @@ console.log('⑬b THE BOOT ROADS (round 3, MUST 2) — the REAL guard: the hour 
     const W2 = world('antigravity', { dataDir: dir, store: W.store, guard, pid: deadPid }); W2.S.pty = null;   // restarted: its process is gone
     W2.deliver.sweepQueued(); await settleTick();
     const st = W2.deliver.stashEntries(X);
-    ok('⑬b (a) the process ended while the hub was down and nothing tells whether the frame ran ⇒ the unit STAYS (the hour reads 1, never 0), the words ride the next turn ONCE, marked as a possible repeat', hourOf(guard) === 1 && st.length === 1 && st[0].text.startsWith('(This may repeat an earlier message.)'), JSON.stringify({ hour: hourOf(guard), st: st.map((e) => e.text.slice(0, 80)) }));
+    ok('⑬b (a) the process ended while the hub was down and nothing tells whether the frame ran ⇒ the unit STAYS (the hour reads 1, never 0), the words ride the next turn ONCE, marked as a possible repeat', hourOf(guard) === 1 && st.length === 1 && verdictOf(st[0].text.startsWith('(This may repeat an earlier message.)')), JSON.stringify({ hour: hourOf(guard), st: st.map((e) => e.text.slice(0, 80)) }));
     W2.deliver.drainStash(X); await settleTick();
     ok('⑬b (a) …read when the stash hands it to a turn; the hour still 1 (that turn is the reserved unit)', hourOf(guard) === 1 && W2.deliver.queuedEntries(X).length === 0);
   }
@@ -383,7 +383,7 @@ console.log('⑬c THE KILL AND THE ARCHIVE ROADS (round 3, moderate 3) — at th
 {
   const wsh = read('src/ws-handler.js'), ge = read('src/server/groups-engine.js'), srv = read('server.js');
   ok('⑬c the ws kill road (it removes the session BEFORE its pty exits) hands the held frames back AT THE ACT; an archive drops them (groups-engine onConversationEnded → noteConversationEnded); server.js hands ws-handler the ladder',
-    /getDeliver\(\)\?\.noteProcessGone\?\.\(qc, 'the conversation was terminated'\)/.test(wsh) && wsh.indexOf("noteProcessGone?.(qc, 'the conversation was terminated')") < wsh.indexOf('activeSessions.delete(data.sessionId);') && /deliver\?\.noteConversationEnded\?\.\(cid, why\)/.test(ge) && /getDeliver: \(\) => \{ try \{ return deliver; \} catch \{ return null; \} \},/.test(srv));
+    gateOf(/getDeliver\(\)\?\.noteProcessGone\?\.\(qc, 'the conversation was terminated'\)/.test(wsh)) && wsh.indexOf("noteProcessGone?.(qc, 'the conversation was terminated')") < wsh.indexOf('activeSessions.delete(data.sessionId);') && gateOf(/deliver\?\.noteConversationEnded\?\.\(cid, why\)/.test(ge)) && verdictOf(/getDeliver: \(\) => \{ try \{ return deliver; \} catch \{ return null; \} \},/.test(srv)));
   const dir = fs.mkdtempSync(path.join(ROOT, 'arch-')); const guard = realGuard(dir);
   const W = world('antigravity', { dataDir: dir, guard });
   const g = (await W.eng.sendToAgent({ from: A, to: X, text: 'hello', wake: false })).group.id;
@@ -422,7 +422,7 @@ console.log('⑮ THE BOUND REFUSES AT THE SEND (round 2, moderate 4) — a money
     if (!r.ok) { refusedAt = { i, r }; break; }
   }
   ok(`⑮ ${QW.PER_CONVERSATION_MAX} frames wait behind one running turn; the next is REFUSED at the send, by name (queued-full), no frame written, nothing dropped`,
-    refusedAt && refusedAt.i === QW.PER_CONVERSATION_MAX && refusedAt.r.refused === 'queued-full' && /bound is 50/.test(refusedAt.r.reason) && W.frames.length === QW.PER_CONVERSATION_MAX && W.deliver.queuedEntries(X).length === QW.PER_CONVERSATION_MAX && W.charged() === QW.PER_CONVERSATION_MAX, JSON.stringify(refusedAt && refusedAt.r));
+    gateOf(refusedAt) && refusedAt.i === QW.PER_CONVERSATION_MAX && refusedAt.r.refused === 'queued-full' && gateOf(/bound is 50/.test(refusedAt.r.reason)) && W.frames.length === QW.PER_CONVERSATION_MAX && W.deliver.queuedEntries(X).length === QW.PER_CONVERSATION_MAX && W.charged() === QW.PER_CONVERSATION_MAX, JSON.stringify(refusedAt && refusedAt.r));
 }
 
 console.log('⑯ THE ONE PREDICATE (round 4, MUST 1) — a unit is returned only on evidence NEWER than every turn start the hub has seen');
@@ -450,34 +450,34 @@ console.log('⑯ THE ONE PREDICATE (round 4, MUST 1) — a unit is returned only
   for (const after of ['U3', 'U3c']) {
     for (const exit of ['gone', 'kill', 'holder']) {
       const r = await road(after, exit);
-      ok(`⑯ ${after} (${after === 'U3' ? 'a turn start after the listing, nothing listed since' : 'the cached queue re-published at the start'}) → ${exit === 'gone' ? 'the process gone' : exit === 'kill' ? 'Terminate (U3k)' : 'a new holder'}: UNKNOWN — the hour stays 1, the words once, MARKED`, same(r, { hour: 1, stash: ['marked'] }), JSON.stringify(r));
+      ok(`⑯ ${after} (${after === 'U3' ? 'a turn start after the listing, nothing listed since' : 'the cached queue re-published at the start'}) → ${exit === 'gone' ? 'the process gone' : exit === 'kill' ? 'Terminate (U3k)' : 'a new holder'}: UNKNOWN — the hour stays 1, the words once, MARKED`, verdictOf(same(r, { hour: 1, stash: ['marked'] })), JSON.stringify(r));
     }
     const d = await road(after, 'dropped');
-    ok(`⑯ ${after} → the conversation dropped (archive): the unit STAYS counted (the hour 1)`, same(d, { hour: 1, stash: [] }), JSON.stringify(d));
+    ok(`⑯ ${after} → the conversation dropped (archive): the unit STAYS counted (the hour 1)`, verdictOf(same(d, { hour: 1, stash: [] })), JSON.stringify(d));
   }
   const old = await road('old-wrapper', 'gone');
-  ok('⑯ an OLD wrapper\'s listing (no fresh mark) is no evidence: its process gone ⇒ unknown — the hour 1, marked', same(old, { hour: 1, stash: ['marked'] }), JSON.stringify(old));
+  ok('⑯ an OLD wrapper\'s listing (no fresh mark) is no evidence: its process gone ⇒ unknown — the hour 1, marked', verdictOf(same(old, { hour: 1, stash: ['marked'] })), JSON.stringify(old));
   for (const exit of ['gone', 'holder']) {
     const r = await road('fresh', exit);
-    ok(`⑯ a FRESH listing, no turn start since → ${exit === 'gone' ? 'the process gone' : 'a new holder'}: KNOWN not run — returned (the hour 1 → 0), one PLAIN copy`, same(r, { hour: 0, stash: ['plain'] }), JSON.stringify(r));
+    ok(`⑯ a FRESH listing, no turn start since → ${exit === 'gone' ? 'the process gone' : 'a new holder'}: KNOWN not run — returned (the hour 1 → 0), one PLAIN copy`, verdictOf(same(r, { hour: 0, stash: ['plain'] })), JSON.stringify(r));
   }
   const fd = await road('fresh', 'dropped');
-  ok('⑯ a FRESH listing, no turn start since → dropped: returned (the hour 0)', same(fd, { hour: 0, stash: [] }), JSON.stringify(fd));
+  ok('⑯ a FRESH listing, no turn start since → dropped: returned (the hour 0)', verdictOf(same(fd, { hour: 0, stash: [] })), JSON.stringify(fd));
   // what a frame queued behind a turn the PERSON started gets
   for (const exit of ['gone', 'holder', 'dropped']) {
     const r = await road('person', exit);
-    ok(`⑯ a frame still queued behind a turn the PERSON started, the wrapper's listing read AFTER that start still holding it → ${exit}: known not run — returned (the hour 0)${exit === 'dropped' ? '' : ', one plain copy'}`, same(r, { hour: 0, stash: exit === 'dropped' ? [] : ['plain'] }), JSON.stringify(r));
+    ok(`⑯ a frame still queued behind a turn the PERSON started, the wrapper's listing read AFTER that start still holding it → ${exit}: known not run — returned (the hour 0)${exit === 'dropped' ? '' : ', one plain copy'}`, verdictOf(same(r, { hour: 0, stash: exit === 'dropped' ? [] : ['plain'] })), JSON.stringify(r));
   }
   const ps = await road('U3', 'gone');
-  ok('⑯ …and with no listing read after the person\'s start (the U3 shape): kept and marked, never returned', same(ps, { hour: 1, stash: ['marked'] }), JSON.stringify(ps));
+  ok('⑯ …and with no listing read after the person\'s start (the U3 shape): kept and marked, never returned', verdictOf(same(ps, { hour: 1, stash: ['marked'] })), JSON.stringify(ps));
   // ONE predicate: every exit that returns a unit reads knownNotRun — no exit carries its own copy of the test
   const qsrc = read('src/server/queued-wakes.js');
   const exits = ['function noteHolder(', 'function dropConversation(', 'function handBackGone('].map((h) => { const i = qsrc.indexOf(h); const j = qsrc.indexOf('\n  }\n', i); return qsrc.slice(i, j); });
-  ok('⑯ ONE predicate: the three exits (a new holder, the conversation dropped, the process gone) each read knownNotRun(e); none tests the mirror itself', exits.every((b) => /knownNotRun\(e\)/.test(b) && !/m\.ids\.has/.test(b)) && (qsrc.match(/m\.idsFresh === true && m\.idsSeq > m\.startSeq/g) || []).length === 1, JSON.stringify(exits.map((b) => b.slice(0, 60))));
+  ok('⑯ ONE predicate: the three exits (a new holder, the conversation dropped, the process gone) each read knownNotRun(e); none tests the mirror itself', gateOf(exits.every((b) => /knownNotRun\(e\)/.test(b) && !/m\.ids\.has/.test(b))) && (qsrc.match(/m\.idsFresh === true && m\.idsSeq > m\.startSeq/g) || []).length === 1, JSON.stringify(exits.map((b) => b.slice(0, 60))));
   const cw = read('data/bin/codex-chat-wrapper.js'), aw = read('data/bin/agy-wrapper.js');
   ok('⑯ the fresh mark: codex marks only a complete thread/queue/list read (never the cached re-publish at the turn start); agy marks its own queue as it is; the consumers pass it',
-    /publishQueue\(items, \{ fresh: listed\.complete === true \}\)/.test(cw) && (cw.match(/publishQueue\([^)]*fresh:/g) || []).length === 1 && /emitTaskEvent\('queue_changed', \{ items, turn_id: meta\.activeTurnId \|\| null, verbs: QUEUE_VERBS_SERVED, \.\.\.\(fresh \? \{ fresh: true \} : \{\}\) \}\)/.test(cw) && (cw.match(/fresh: true/g) || []).length === 1 && /record\('queue_changed', \{ items, turn_id: meta\.activePromptId \|\| null, verbs: QUEUE_VERBS, fresh: true \}\)/.test(aw)
-    && /noteQueueItems\?\.\(session\.backendSessionId, msg\.items, \{ fresh: msg\.fresh === true \}\)/.test(read('src/server/stdout/acp-events.js')) && /noteQueueItems\?\.\(qc, payload\.items, \{ fresh: payload\.fresh === true \}\)/.test(read('src/server/stdout/codex-events.js')));
+    gateOf(/publishQueue\(items, \{ fresh: listed\.complete === true \}\)/.test(cw)) && (cw.match(/publishQueue\([^)]*fresh:/g) || []).length === 1 && gateOf(/emitTaskEvent\('queue_changed', \{ items, turn_id: meta\.activeTurnId \|\| null, verbs: QUEUE_VERBS_SERVED, \.\.\.\(fresh \? \{ fresh: true \} : \{\}\) \}\)/.test(cw)) && (cw.match(/fresh: true/g) || []).length === 1 && gateOf(/record\('queue_changed', \{ items, turn_id: meta\.activePromptId \|\| null, verbs: QUEUE_VERBS, fresh: true \}\)/.test(aw))
+    && gateOf(/noteQueueItems\?\.\(session\.backendSessionId, msg\.items, \{ fresh: msg\.fresh === true \}\)/.test(read('src/server/stdout/acp-events.js'))) && verdictOf(/noteQueueItems\?\.\(qc, payload\.items, \{ fresh: payload\.fresh === true \}\)/.test(read('src/server/stdout/codex-events.js'))));
   // the codex record census knows the new field: an undeclared one becomes an «unknown_fields» card IN THE TRANSCRIPT (the
   // round-4 heavy claim caught it — test-codex-p2-wrapper «no queue message ever enters the transcript»)
   {
@@ -575,7 +575,7 @@ console.log('⑲ AN ENTRY THAT LEAVES IS SAID IN ITS ROW (round 4, moderate 5) �
   const dropRow = { ...G.deliveryOf(W.eng.get(gid), sent[0].message, { log: [sent[0].message] }).find((x) => x.member === X), name: 'xray' };
   const said = CW.deliveryRowText(dropRow, { t: (k, p) => k.replace(/\{(\w+)\}/g, (_, n) => String(p[n])) });
   const cli = read('data/bin/vibespace-msg');
-  ok('⑲ …what the sender reads says so: «not delivered — the copy for xray was dropped before a turn read it; send it again» (vibespace-msg and the window\'s words)', /x\.why === 'dropped' \? `not delivered — the copy for \$\{x\.name\} was dropped before a turn read it; send it again`/.test(cli) && /Not delivered — the copy for \{name\} was dropped before a turn read it; send it again/.test(read('src/lib/channel-words.js')) && said === 'Not delivered — the copy for xray was dropped before a turn read it; send it again', String(said));
+  ok('⑲ …what the sender reads says so: «not delivered — the copy for xray was dropped before a turn read it; send it again» (vibespace-msg and the window\'s words)', gateOf(/x\.why === 'dropped' \? `not delivered — the copy for \$\{x\.name\} was dropped before a turn read it; send it again`/.test(cli)) && gateOf(/Not delivered — the copy for \{name\} was dropped before a turn read it; send it again/.test(read('src/lib/channel-words.js'))) && said === 'Not delivered — the copy for xray was dropped before a turn read it; send it again', String(said));
   // U14: 32 handed back, the stash keeps 30 — 2 «not delivered»
   const W5 = world('antigravity');
   const g5 = (await W5.eng.sendToAgent({ from: A, to: X, text: 'hello', wake: false })).group.id;
@@ -614,7 +614,7 @@ console.log('⑲ AN ENTRY THAT LEAVES IS SAID IN ITS ROW (round 4, moderate 5) �
   Q.onDropped((cid, e, x) => said8.push(x.why));
   Q.noteWritten(X, { text: 'kept for ever?' });
   t += QW.LIVE_MAX_AGE_MS + 1;
-  ok('⑲ in a RUNNING hub (U13: kept at boot, its wrapper never back): the entry leaves by age at the next read, send or turn start — said («aged out»); the ladder checks hourly', Q.entriesFor(X).length === 0 && said8.join() === 'aged out' && /const ageTick = \(\) => \{ try \{ queued\.ageOut\(\); \}/.test(read('src/server/conversation-deliver.js')), JSON.stringify(said8));
+  ok('⑲ in a RUNNING hub (U13: kept at boot, its wrapper never back): the entry leaves by age at the next read, send or turn start — said («aged out»); the ladder checks hourly', Q.entriesFor(X).length === 0 && said8.join() === 'aged out' && verdictOf(/const ageTick = \(\) => \{ try \{ queued\.ageOut\(\); \}/.test(read('src/server/conversation-deliver.js'))), JSON.stringify(said8));
 }
 
 console.log('⑳ THE FOUR STATES A BOOT CAN FIND (round 4, moderate 3) — the entry with / without its carry record × the stamp with / without its converted mark; none returns a unit that may have run');
@@ -675,7 +675,7 @@ console.log('㉑ AN ENTRY BINDS ITS OWN FRAME (follow-up 2026-11-13: a person\'s
     w.q.noteQueue(CID, [{ id: 'p' }, { id: 'h' }], PID, { fresh: true }); w.q.answer(e.id, { mode: 'queued' });
     w.q.noteTurnEnded(CID); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [{ id: 'h' }], PID, { fresh: true });
     const stash = []; w.q.handBackGone(CID, (pe, x) => stash.push(x.text), 'the conversation was terminated');
-    ok('㉑ B: no kind in the listing — the EARLIEST unseen item is the frame (queue order = write order): p ran ⇒ carried; the kill hands NOTHING back (never sent twice)', w.ev.some((x) => x[0] === 'carried' && x[1] === e.id) && stash.length === 0, JSON.stringify({ ev: w.ev, stash })); }
+    ok('㉑ B: no kind in the listing — the EARLIEST unseen item is the frame (queue order = write order): p ran ⇒ carried; the kill hands NOTHING back (never sent twice)', gateOf(w.ev.some((x) => x[0] === 'carried' && x[1] === e.id)) && stash.length === 0, JSON.stringify({ ev: w.ev, stash })); }
   // C — two frames of ONE sender in one round trip: FIFO, p1 runs; then a kill
   { const w = start(); const e1 = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'P1', fromName: 'alpha', holder: PID }); const e2 = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'P2', fromName: 'alpha', holder: PID });
     w.q.answer(e1.id, { mode: 'queued' }); w.q.answer(e2.id, { mode: 'queued' });
@@ -705,7 +705,7 @@ console.log('㉑ AN ENTRY BINDS ITS OWN FRAME (follow-up 2026-11-13: a person\'s
     w.q.noteQueue(CID, [{ id: 's', kind: 'system', from: null }, { id: 'p', kind: 'peer', from: 'alpha' }], PID, { fresh: true }); w.q.answer(e.id, { mode: 'queued' });
     w.q.noteTurnEnded(CID); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [{ id: 'p', kind: 'peer', from: 'alpha' }], PID, { fresh: true });   // the nudge ran, p waits
     ok('㉑ E′: a wrapper nudge s (kind \'system\') listed BEFORE the peer frame p, s run first: the entry is NOT carried while p waits', !w.ev.some((x) => x[0] === 'carried') && S(state(w)) === S(['queued']), JSON.stringify({ ev: w.ev, st: state(w) })); }
-  ok('㉑ the module binds by what the listing says an item IS, and takes the earliest (never `fresh[fresh.length - 1]`)', /e\.bind = \[fresh\[0\]\];/.test(read('src/server/queued-wakes.js')) && !/fresh\[fresh\.length - 1\]/.test(read('src/server/queued-wakes.js')) && /it\.kind && it\.kind !== 'peer'/.test(read('src/server/queued-wakes.js')));
+  ok('㉑ the module binds by what the listing says an item IS, and takes the earliest (never `fresh[fresh.length - 1]`)', gateOf(/e\.bind = \[fresh\[0\]\];/.test(read('src/server/queued-wakes.js'))) && !/fresh\[fresh\.length - 1\]/.test(read('src/server/queued-wakes.js')) && verdictOf(/it\.kind && it\.kind !== 'peer'/.test(read('src/server/queued-wakes.js'))));
 }
 
 console.log('㉒ AN UNREAD msg-queued.json IS NEVER WRITTEN OVER (B-e3fe) — what it holds is the record until it reads again or is removed');
@@ -745,22 +745,22 @@ const lastWrite = (w) => (w.writes.length ? JSON.parse(w.writes[w.writes.length 
   a.disk.now = OLD_QW; a.adv(QW.UNREAD_RECHECK_MS); unreadFrame(a, 'new words 5');
   const c = lastWrite(a), cIds = c ? c.entries.map((e) => e.id) : [];
   ok('㉒ C: the file repaired — at the next write past the bound it reads again: its frame (old-1, its words) and this process\'s five are written together; the journal says it reads again',
-    a.writes.length > 0 && cIds.includes('old-1') && cIds.includes(a1.id) && cIds.length === 6 && c.entries.find((e) => e.id === 'old-1').text === 'the old frame' && a.q.entriesFor('conv-u').some((e) => e.id === 'old-1') && a.logs.some((l) => l.includes('reads again')), S({ cIds, n: a.writes.length }));
+    a.writes.length > 0 && gateOf(cIds.includes('old-1')) && gateOf(cIds.includes(a1.id)) && cIds.length === 6 && c.entries.find((e) => e.id === 'old-1').text === 'the old frame' && gateOf(a.q.entriesFor('conv-u').some((e) => e.id === 'old-1')) && verdictOf(a.logs.some((l) => l.includes('reads again'))), S({ cIds, n: a.writes.length }));
   // D — an I/O error at boot, then the owner removes the file ⇒ the writes resume with this process's entries only
   const d = mkUnread(QW, 'EIO'); unreadFrame(d, 'd1'); const dHeld = d.writes.length;
   d.disk.now = null; d.adv(QW.UNREAD_RECHECK_MS); unreadFrame(d, 'd2');
   const dw = lastWrite(d);
   ok('㉒ D: a read error at boot ⇒ not written; the file then removed ⇒ the next write past the bound writes this process\'s two frames (the count starts over from what it holds)',
-    dHeld === 0 && !!dw && dw.entries.length === 2 && d.logs.some((l) => l.includes('was removed')), S({ dHeld, dw }));
+    dHeld === 0 && !!dw && dw.entries.length === 2 && verdictOf(d.logs.some((l) => l.includes('was removed'))), S({ dHeld, dw }));
   // E — JSON that is no record (another build's shape, a stray value) is unread too — never an empty record to write over
   const e1 = mkUnread(QW, S({ v: 3, items: [{ id: 'x' }] })); unreadFrame(e1, 'e1');
   const e2 = mkUnread(QW, 'null'); unreadFrame(e2, 'e2');
   ok('㉒ E: a file of another shape ({ v:3, items }) or a bare null reads as UNREAD — neither is written over', e1.writes.length === 0 && e2.writes.length === 0, S({ e1: e1.writes, e2: e2.writes }));
   // F — a file that reads is written at once (the guard never holds a readable record), its frame kept beside the new one
   const f = mkUnread(QW, OLD_QW); unreadFrame(f, 'f1'); const fw = lastWrite(f);
-  ok('㉒ F: a readable file is written at once, its frame kept beside the new one — the guard holds only what could not be read', !!fw && fw.entries.length === 2 && fw.entries.some((x) => x.id === 'old-1') && f.reads === 1, S({ fw }));
+  ok('㉒ F: a readable file is written at once, its frame kept beside the new one — the guard holds only what could not be read', !!fw && fw.entries.length === 2 && gateOf(fw.entries.some((x) => x.id === 'old-1')) && f.reads === 1, S({ fw }));
   ok('㉒ persist() asks stillUnread() before every write, and the boot and the re-read share ONE reader (readHeld)',
-    /function persist\(\) \{\n    if \(stillUnread\(\)\) \{/.test(read('src/server/queued-wakes.js')) && read('src/server/queued-wakes.js').split('readHeld()').length === 3);
+    gateOf(/function persist\(\) \{\n    if \(stillUnread\(\)\) \{/.test(read('src/server/queued-wakes.js'))) && read('src/server/queued-wakes.js').split('readHeld()').length === 3);
 }
 
 console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04:02Z) — ONE For-you item while the file cannot be read; «Set it aside»');
@@ -792,12 +792,12 @@ console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04
   const aside = fs.readdirSync(a.dir).filter((f) => f.startsWith('msg-queued.json.unreadable-'));
   const last = a.writes.length ? JSON.parse(a.writes[a.writes.length - 1]) : null;
   ok('㉓ B: «Set it aside» renames the torn file beside it (its bytes kept — nothing deleted), the record is written again with this process\'s frame, and the item resolves itself',
-    r.ok && r.state === 'pass' && aside.length === 1 && fs.readFileSync(path.join(a.dir, aside[0]), 'utf8') === TORN_QW && !fs.existsSync(path.join(a.dir, 'msg-queued.json')) && !!last && last.entries.length === 1 && a.open().length === 0 && a.q.fileState().unread === false, S({ r, aside, n: a.writes.length, open: a.open().length }));
+    gateOf(r.ok) && r.state === 'pass' && aside.length === 1 && fs.readFileSync(path.join(a.dir, aside[0]), 'utf8') === TORN_QW && !fs.existsSync(path.join(a.dir, 'msg-queued.json')) && !!last && last.entries.length === 1 && a.open().length === 0 && a.q.fileState().unread === false, S({ r, aside, n: a.writes.length, open: a.open().length }));
   // C — a press after the file was repaired (inside the re-read bound): it reads once more FIRST — the file joins, nothing moves
   const c = hub(); fs.writeFileSync(path.join(c.dir, 'msg-queued.json'), OLD_QW); c.adv(5e3);
   const rc = await c.q.setAside();
   ok('㉓ C: the file repaired a moment before the press — the press reads it once more first: «nothing to set aside», no file moved, its frame joined, the item resolved',
-    rc.ok && rc.state === 'none' && fs.readdirSync(c.dir).filter((f) => f.includes('.unreadable-')).length === 0 && c.q.entriesFor('conv-u').some((e) => e.id === 'old-1') && c.open().length === 0, S({ rc, open: c.open().length }));
+    gateOf(rc.ok) && rc.state === 'none' && fs.readdirSync(c.dir).filter((f) => f.includes('.unreadable-')).length === 0 && gateOf(c.q.entriesFor('conv-u').some((e) => e.id === 'old-1')) && c.open().length === 0, S({ rc, open: c.open().length }));
   // D — a readable file (or none): no item at all
   const d = hub(QW, QF, OLD_QW), d0 = hub(QW, QF, null);
   ok('㉓ D: a readable file, or none at all ⇒ no item (the door is only for a file that cannot be read)', d.ut.items.length === 0 && d0.ut.items.length === 0 && (await d.q.setAside()).state === 'none', S({ d: d.ut.items.length, d0: d0.ut.items.length }));
@@ -807,10 +807,10 @@ console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04
   const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
   const words = [QF.TEXT, QF.DETAIL, row.checkAgain, row.checkLabel, row.checkSaid.done, row.checkSaid.none, row.checkSaid.failed, 'Agent messages'];
   ok('㉓ E: the row declares the door (checkRoute /api/queued-wakes/set-aside, its said words) and every new sentence is in zh and ja',
-    row.producer === 'src/server/queued-file-for-you.js' && row.card === 'inbox-window' && row.checkRoute === '/api/queued-wakes/set-aside' && words.every((k) => ZH.has(k) && JA.has(k)), words.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
+    row.producer === 'src/server/queued-file-for-you.js' && row.card === 'inbox-window' && row.checkRoute === '/api/queued-wakes/set-aside' && verdictOf(words.every((k) => ZH.has(k) && JA.has(k))), words.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
   const WO = require(path.join(REPO, 'src/write-origin.js'));
   ok('㉓ E: the route is a PERSON\'S press — the owner\'s page verdict (ownerPageWhy) refuses before the ladder is asked; a bearer is refused by it',
-    /app\.post\('\/api\/queued-wakes\/set-aside', async \(req, res\) => \{\n    const w = require\('\.\.\/write-origin\.js'\)\.ownerPageWhy\(req\);[^\n]*\n    if \(w\) return res\.status\(403\)/.test(jw) && WO.ownerPageWhy({ headers: { authorization: 'Bearer x', 'sec-fetch-site': 'same-origin' } }) === 'bearer' && WO.ownerPageWhy({ headers: { 'sec-fetch-site': 'same-origin' } }) === null);
+    gateOf(/app\.post\('\/api\/queued-wakes\/set-aside', async \(req, res\) => \{\n    const w = require\('\.\.\/write-origin\.js'\)\.ownerPageWhy\(req\);[^\n]*\n    if \(w\) return res\.status\(403\)/.test(jw)) && WO.ownerPageWhy({ headers: { authorization: 'Bearer x', 'sec-fetch-site': 'same-origin' } }) === 'bearer' && WO.ownerPageWhy({ headers: { 'sec-fetch-site': 'same-origin' } }) === null);
   // THE CURE (round wz96dfzt3's MUST): an earlier run's open item is CLOSED — by a boot that reads the file (or finds it gone), and
   // by a press that finds no hold (its own button answers «nothing to set aside» AND closes it)
   const f1 = hub(QW, QF, OLD_QW, { ut: earlier() }), f2 = hub(QW, QF, null, { ut: earlier() });
@@ -818,7 +818,7 @@ console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04
     f1.open().length === 0 && f2.open().length === 0 && f1.ut.items.length === 1, S({ f1: f1.ut.items.map((x) => x.status), f2: f2.ut.items.map((x) => x.status) }));
   const g = hub(QW, QF, OLD_QW); g.ut.add('queued-wakes', { origin: 'server', kind: 'action', text: 'x', action: { type: 'queued-file-unread' }, itemKey: 'queued-file-unread' });
   const rg = await g.q.setAside();
-  ok('㉓ G: a press with NO hold behind it (the item outlived its cause) answers «nothing to set aside» and closes the item', rg.ok && rg.state === 'none' && g.open().length === 0, S({ rg, open: g.open().length }));
+  ok('㉓ G: a press with NO hold behind it (the item outlived its cause) answers «nothing to set aside» and closes the item', gateOf(rg.ok) && rg.state === 'none' && g.open().length === 0, S({ rg, open: g.open().length }));
   // small 3: two presses racing on one torn file — only the press whose rename moved it says «set aside»
   const h = hub(); const [p1, p2] = await Promise.all([h.q.setAside(), h.q.setAside()]);
   const asideH = fs.readdirSync(h.dir).filter((f2x) => f2x.startsWith('msg-queued.json.unreadable-'));
@@ -840,7 +840,7 @@ console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04
       && toastPre !== null && (toastPre === '' || toastPre === MOUNT_FIRST), S({ ri, toastPre }));
   // small 1: the press reads the file OFF the loop — setAside awaits the async reader and never calls the bounded synchronous re-read
   const qsrc0 = read('src/server/queued-wakes.js'), sa = qsrc0.slice(qsrc0.indexOf('  async function setAside() {'), qsrc0.indexOf('\n  }\n', qsrc0.indexOf('  async function setAside() {')));
-  ok('㉓ J: the press\'s re-read is OFF the loop — setAside awaits readHeldAsync (fs.promises) and calls neither stillUnread() nor readHeld()', sa.length > 200 && /await readHeldAsync\(\)/.test(sa) && !/stillUnread\(\)|readHeld\(\)/.test(sa) && /await require\('fs'\)\.promises\.readFile\(file, 'utf8'\)/.test(qsrc0));
+  ok('㉓ J: the press\'s re-read is OFF the loop — setAside awaits readHeldAsync (fs.promises) and calls neither stillUnread() nor readHeld()', sa.length > 200 && gateOf(/await readHeldAsync\(\)/.test(sa)) && !/stillUnread\(\)|readHeld\(\)/.test(sa) && verdictOf(/await require\('fs'\)\.promises\.readFile\(file, 'utf8'\)/.test(qsrc0)));
   // RED CONTROLS (setup-checked anchors; each fails by name when its anchor is gone)
   const MH = mutantCopies('queued-wake-hold', REPO);
   const qsrc = read('src/server/queued-wakes.js'), fsrc = read('src/server/queued-file-for-you.js');
@@ -880,7 +880,7 @@ console.log('㉔ AN OLD AGENT\'S FRAME, SAID FOR REAL (B-0a33 cure (c)) — the 
   };
   const got = await run(DELIVER);
   ok('㉔ a frame waiting in an agent that serves no «remove», the cap lowered below it: the REAL pullQueued answers no-remove and the REAL guard files ONE For-you line, under the conversation it waits behind',
-    got.length === 1 && /could not be held: its agent is too old to give a queued message back/.test(got[0].it.text) && got[0].it.sessionName === 'Spending', JSON.stringify({ got: got.map((g) => ({ key: g.key, text: g.it.text, itemKey: g.it.itemKey })), why: got.why }));
+    got.length === 1 && gateOf(/could not be held: its agent is too old to give a queued message back/.test(got[0].it.text)) && got[0].it.sessionName === 'Spending', JSON.stringify({ got: got.map((g) => ({ key: g.key, text: g.it.text, itemKey: g.it.itemKey })), why: got.why }));
   const dsrc = read('src/server/conversation-deliver.js'), NR = "return 'no-remove';";
   ok('㉔ setup: pullQueued\'s «no-remove» is in the ladder once', dsrc.split(NR).length === 2);
   const NoNR = mutantCopies('queued-wake-nr', REPO).load('src/server/conversation-deliver.js', editAnchor(dsrc, NR, 'return false;', "src/server/conversation-deliver.js"), 'no-remove-false');
@@ -919,7 +919,7 @@ console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its l
   const sent = [];
   for (const text of ['a', 'b', 'c']) sent.push(await W.eng.post({ group: gid, from: A, text, wake: true }));
   ok('⑩ WITHOUT the in-turn branch the incident is back: woke ×3, read ×3, charged ×3 at the stdin write (① can go red)',
-    sent.every((s) => (s.woke || []).length === 1 && !(s.queued || []).length) && sent.every((s) => W.row(gid, s.message).state === 'handed') && W.charged() === 3, JSON.stringify({ n: W.charged() }));
+    gateOf(sent.every((s) => (s.woke || []).length === 1 && !(s.queued || []).length)) && gateOf(sent.every((s) => W.row(gid, s.message).state === 'handed')) && W.charged() === 3, JSON.stringify({ n: W.charged() }));
   // the marker moves with a queued wake (no second carrier): without it, the next-turn report re-sends what the queue holds
   const gsrc = read('src/server/groups-engine.js');
   const MOVE = "      if (!(Number(m.reportedUpTo) >= upTo)) m.reportedUpTo = upTo;\n      m.queued = ";
@@ -981,7 +981,7 @@ console.log('㉖ 主开发 r5164 (2), a silence of the release: a frame a wrappe
     for (const road of ['restash', 'ours']) {
       const r = scene(require(path.join(REPO, rel)), kind, road);
       if (r.reached !== 1) console.log(`  SKIP ㉖ ${kind} ${road}: the hand-back never reached its road (${JSON.stringify(r)})`);
-      else ok(`㉖ ${kind}, the ${road === 'ours' ? 'ladder\'s own' : 're-stash'} road: the handed-back frame not on disk is SAID by name in the journal (its size, its conversation, why and its bound) — the stash's own health read once`, r.said && r.healthReads === 1, JSON.stringify(r));
+      else ok(`㉖ ${kind}, the ${road === 'ours' ? 'ladder\'s own' : 're-stash'} road: the handed-back frame not on disk is SAID by name in the journal (its size, its conversation, why and its bound) — the stash's own health read once`, gateOf(r.said) && r.healthReads === 1, JSON.stringify(r));
     }
     const rx = scene(MS.load(rel, anchored(read(rel), NEW, OLD, `${kind}: the release (the stash's state not read)`), `silence-${kind}`), kind, 'restash');
     if (rx.reached !== 1) console.log(`  SKIP ㉖ ${kind} RED: the hand-back never reached the stash (${JSON.stringify(rx)})`);
@@ -990,4 +990,4 @@ console.log('㉖ 主开发 r5164 (2), a silence of the release: a frame a wrappe
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

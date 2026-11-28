@@ -14,7 +14,7 @@
 // is roughly 600-900px tall).
 import './scratch.mjs';
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 // the SCROLL-handler guard, verbatim from chat-view.js (settling-window model)
 const indeterminate = ({ scrollHeight, clientHeight, children, windowStart, windowEnd, total, sinceStructuralMs = 0 }) => {
@@ -34,7 +34,7 @@ const VIEWPORTS = [600, 700, 800, 900]; // plausible chat-list heights
 
 for (const ch of VIEWPORTS) {
   for (const sh of PATHOLOGICAL) {
-    ok(indeterminate({ scrollHeight: sh, clientHeight: ch, children: 50, windowStart: 3540, windowEnd: 3590, total: 3800, sinceStructuralMs: 30 }),
+    ok(verdictOf(indeterminate({ scrollHeight: sh, clientHeight: ch, children: 50, windowStart: 3540, windowEnd: 3590, total: 3800, sinceStructuralMs: 30 })),
       `collapsed landing sh=${sh} @ clientHeight=${ch} → NO boundary decision`);
   }
 }
@@ -49,7 +49,7 @@ ok(!wheelExtendsBottom({ scrollHeight: 755, clientHeight: 755, scrollTop: 0, del
   'collapsed list (sh===ch===755, top of list): a DOWNWARD wheel tick does NOT extend bottom');
 ok(!wheelExtendsBottom({ scrollHeight: 755, clientHeight: 755, scrollTop: 0, deltaY: -120 }),
   'an upward tick never hits the bottom branch either');
-ok(wheelExtendsBottom({ scrollHeight: 4000, clientHeight: 755, scrollTop: 3245, deltaY: 120 }),
+ok(verdictOf(wheelExtendsBottom({ scrollHeight: 4000, clientHeight: 755, scrollTop: 3245, deltaY: 120 })),
   'a REAL parked-at-the-end list still extends bottom (the 2.193.0 stall fix keeps working)');
 ok(!wheelExtendsBottom({ scrollHeight: 4000, clientHeight: 755, scrollTop: 0, deltaY: 120 }),
   'a real list scrolled to the TOP does not extend bottom');
@@ -98,29 +98,29 @@ const extendsTop = ({ scrollTop, wheelDir, dirAgeMs, pinned = false }) => {
 // the captured geometry right before the bounce: st 2297, sh ~3100, ch 755
 ok(!extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: -1, dirAgeMs: 20, userAgoMs: 20 }),
   'content growth pushed the view toward the end while the user wheels UP → NO extendBottom');
-ok(extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: 1, dirAgeMs: 20, userAgoMs: 20 }),
+ok(verdictOf(extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: 1, dirAgeMs: 20, userAgoMs: 20 })),
   'the same geometry with the user actually wheeling DOWN still extends (paging down keeps working)');
 ok(!extendsTop({ scrollTop: 20, wheelDir: 1, dirAgeMs: 20 }),
   'mirror: at the top edge while wheeling DOWN → no extendTop (no reverse bounce)');
-ok(extendsTop({ scrollTop: 20, wheelDir: -1, dirAgeMs: 20 }),
+ok(verdictOf(extendsTop({ scrollTop: 20, wheelDir: -1, dirAgeMs: 20 })),
   'at the top edge while wheeling UP → extendTop, the normal paging path');
 
 // ── ROUND 5 field scenarios (inc-mspemym2, exact capture numbers) ──
 // Segment 1: pin=1, scrollTop drifted 92→0 by height resolution, no input.
 ok(!extendsTop({ scrollTop: 0, wheelDir: 0, dirAgeMs: 99999, pinned: true }),
   'PINNED view whose scrollTop drifted to 0 with no input → NO extendTop (kills the 4-slab walk)');
-ok(extendsTop({ scrollTop: 0, wheelDir: 0, dirAgeMs: 99999, pinned: false }),
+ok(verdictOf(extendsTop({ scrollTop: 0, wheelDir: 0, dirAgeMs: 99999, pinned: false })),
   'the same drift UNPINNED still lazy-loads upward (a paused reader keeps continuous scroll)');
 // Segment 2: anchoring pushed st into the near-end band 2539 ms after the
 // last wheel (dir -1, expired) while the user was reading history.
 ok(!extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: -1, dirAgeMs: 2539, windowEnd: 2483, total: 2685, userAgoMs: 2539 }),
   'settling geometry 2.5s after the last input → NO extendBottom (both time gates expired; positive evidence required)');
-ok(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: 1, dirAgeMs: 300, windowEnd: 2483, total: 2685, userAgoMs: 300 }),
+ok(verdictOf(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: 1, dirAgeMs: 300, windowEnd: 2483, total: 2685, userAgoMs: 300 })),
   'a real downward reader (fresh input) still pages');
-ok(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: -1, dirAgeMs: 5000, windowEnd: 2483, total: 2685, userAgoMs: 400 }),
+ok(verdictOf(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: -1, dirAgeMs: 5000, windowEnd: 2483, total: 2685, userAgoMs: 400 })),
   'stale wheel DIRECTION with recent keyboard/pointer input still pages (scrollbar/keyboard readers)');
-ok(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: 0, dirAgeMs: 99999, pinned: true, windowEnd: 900, total: 900, userAgoMs: 99999 }),
+ok(verdictOf(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: 0, dirAgeMs: 99999, pinned: true, windowEnd: 900, total: 900, userAgoMs: 99999 })),
   'a PINNED live view is exempt from the evidence gate (bottom-follow keeps working with no input)');
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

@@ -26,7 +26,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const SP = require(path.join(REPO, 'src/sock-path.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -48,17 +48,17 @@ console.log('the rung ladder');
   const r86l = SP.daemonSocketPath({ root: rootOf(86), platform: 'linux', uid: 1000 });
   eq([r86d.tried[0].bytes, r86d.via, r86l.via], [104, 'tmp', 'natural'], 'an 86-byte root (+18 = 104) does NOT fit on darwin, DOES on linux (108)');
   const r120l = SP.daemonSocketPath({ root: rootOf(120), platform: 'linux', xdgRuntimeDir: '/run/user/1000', uid: 1000 });
-  ok(r120l.via === 'runtime-dir' && /^\/run\/user\/1000\/vibespace\/d-[0-9a-f]{12}\.sock$/.test(r120l.path), 'a 120-byte root ⇒ runtime-dir on linux', r120l);
+  ok(r120l.via === 'runtime-dir' && verdictOf(/^\/run\/user\/1000\/vibespace\/d-[0-9a-f]{12}\.sock$/.test(r120l.path)), 'a 120-byte root ⇒ runtime-dir on linux', r120l);
   const r120d = SP.daemonSocketPath({ root: rootOf(120), platform: 'darwin', tmpdir: '/var/folders/zz/abcdefgh_1234567890/T/', uid: 501 });
-  ok(r120d.via === 'tmpdir' && r120d.path.startsWith('/var/folders/zz/abcdefgh_1234567890/T/vibespace/d-'), '…tmpdir on darwin with a per-user /var/folders/… TMPDIR', r120d);
+  ok(r120d.via === 'tmpdir' && verdictOf(r120d.path.startsWith('/var/folders/zz/abcdefgh_1234567890/T/vibespace/d-')), '…tmpdir on darwin with a per-user /var/folders/… TMPDIR', r120d);
   const r120t = SP.daemonSocketPath({ root: rootOf(120), platform: 'darwin', tmpdir: '/tmp', uid: 501 });
   ok(r120t.via === 'tmp' && r120t.path === `/tmp/vs-dev-501/d-${SP.rootHash(rootOf(120))}.sock`, '…tmp when TMPDIR is /tmp (a shared /tmp is not the tmpdir rung)', r120t);
   const r120p = SP.daemonSocketPath({ root: rootOf(120), platform: 'darwin', tmpdir: '/private/var/folders/q/T', uid: 501 });
   eq(r120p.via, 'tmpdir', '/private/var/folders/… is a per-user TMPDIR too');
   const longBase = '/tmp/' + 'b'.repeat(90);
   const none = SP.daemonSocketPath({ root: rootOf(120), platform: 'darwin', tmpdir: '/tmp', uid: 4294967294, tmpBase: longBase });
-  ok(none.path === null && none.code === 'socket_path_too_long' && none.tried.length === 2 && none.tried.every((t) => t.bytes > 103), 'socket_path_too_long when even the tmp rung cannot fit (constructed with a patched base)', none);
-  ok(/socket_path_too_long — no socket path fits 103 bytes: natural \d+ B/.test(SP.tooLongLine(none)), 'the refusal line names every rung\'s bytes', SP.tooLongLine(none));
+  ok(none.path === null && none.code === 'socket_path_too_long' && none.tried.length === 2 && verdictOf(none.tried.every((t) => t.bytes > 103)), 'socket_path_too_long when even the tmp rung cannot fit (constructed with a patched base)', none);
+  ok(verdictOf(/socket_path_too_long — no socket path fits 103 bytes: natural \d+ B/.test(SP.tooLongLine(none))), 'the refusal line names every rung\'s bytes', SP.tooLongLine(none));
   const tenDigit = SP.daemonSocketPath({ root: rootOf(300), platform: 'darwin', tmpdir: '/tmp', uid: 4294967294 });
   ok(tenDigit.via === 'tmp' && tenDigit.bytes === 42 && tenDigit.bytes <= 103, `a 10-digit uid's tmp rung is ${tenDigit.bytes} bytes (/tmp/vs-dev-<10 digits>/d-<12 hex>.sock) — always fits`);
   const cjk = '/home/' + '用户'.repeat(12) + '/.vibespace/agentd';
@@ -76,7 +76,7 @@ console.log('the ownership verdict');
   eq(SP.socketDirVerdict(st({}), 1000), { ok: true }, 'ours, a directory, 0700 ⇒ ok');
   for (const [x, why] of [[{ link: true }, 'SYMLINK'], [{ uid: 0 }, 'owned by uid 0'], [{ mode: 0o40777 }, 'mode is 777'], [{ mode: 0o40750 }, 'mode is 750'], [{ dir: false }, 'not a directory']]) {
     const v = SP.socketDirVerdict(st(x), 1000);
-    ok(!v.ok && v.code === 'socket_dir_hijacked' && v.why.includes(why), `${JSON.stringify(x)} ⇒ socket_dir_hijacked (${why}) — attack 21`, v);
+    ok(!v.ok && v.code === 'socket_dir_hijacked' && verdictOf(v.why.includes(why)), `${JSON.stringify(x)} ⇒ socket_dir_hijacked (${why}) — attack 21`, v);
   }
   // the REAL creator with a patched fs: the lstat after mkdir answers a planted symlink
   const fake = { lstatSync: () => { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }, mkdirSync: () => {} };
@@ -88,7 +88,7 @@ console.log('the ownership verdict');
   const dir = path.join(scratch('sockpath'), 'vs-dev-' + process.getuid());
   try {
     const v = SP.ensureSocketDir(dir, { uid: process.getuid() });
-    ok(v.ok && (fs.statSync(dir).mode & 0o777) === 0o700, 'the real creator makes the directory 0700 and accepts it', v);
+    ok(gateOf(v.ok) && (fs.statSync(dir).mode & 0o777) === 0o700, 'the real creator makes the directory 0700 and accepts it', v);
     fs.chmodSync(dir, 0o777);
     eq(SP.ensureSocketDir(dir, { uid: process.getuid() }).code, 'socket_dir_hijacked', 'the same directory at 0777 is refused (never "fixed" silently)');
   } finally { try { fs.rmSync(path.dirname(dir), { recursive: true, force: true }); } catch { } }
@@ -184,11 +184,11 @@ const tracked = () => {
   eq(commented.unlisted, [], '…while the same shape in a comment is not code');
   // the wiring each row promises (pins on the named sites)
   // (ws-create's per-session channel socket and its reader in the ladder went with the VibeSpace channel, B-df40 — their rows with them)
-  ok(/socketPathFits\(tsSock\(\), process\.platform\)/.test(readReal('src/plugins/tailscale.js')), 'the tailscale plugin asks socketPathFits at start');
-  ok(/socketPathFits\(path\.join\(SOCKETS_DIR, 'cw-' \+ 'x'\.repeat\(36\)\)/.test(readReal('server.js')), 'server.js says the dtach anchors\' bound once at boot');
+  ok(verdictOf(/socketPathFits\(tsSock\(\), process\.platform\)/.test(readReal('src/plugins/tailscale.js'))), 'the tailscale plugin asks socketPathFits at start');
+  ok(verdictOf(/socketPathFits\(path\.join\(SOCKETS_DIR, 'cw-' \+ 'x'\.repeat\(36\)\)/.test(readReal('server.js'))), 'server.js says the dtach anchors\' bound once at boot');
   const ad = readReal('src/agentd/agentd.js');
-  ok(/SOCKP\.daemonSocketPath\(\{/.test(ad) && /SOCKP\.witnessOrRule\(\{/.test(ad) && /SOCKP\.ensureSocketDir\(/.test(ad) && /process\.exit\(7\)/.test(ad) && /process\.exit\(8\)/.test(ad) && /SOCKP\.witnessPathOf\(ROOT\)/.test(ad), 'the daemon: the rule at listen, the witness written, the bridge reads witness-or-rule, too-long exits 7, hijacked exits 8');
-  ok(/SP\.witnessOrRule\(\{ root: this\._root/.test(readReal('src/agentd/client.js')), 'the hub\'s transport reads witness-or-rule');
+  ok(gateOf(/SOCKP\.daemonSocketPath\(\{/.test(ad)) && gateOf(/SOCKP\.witnessOrRule\(\{/.test(ad)) && gateOf(/SOCKP\.ensureSocketDir\(/.test(ad)) && gateOf(/process\.exit\(7\)/.test(ad)) && gateOf(/process\.exit\(8\)/.test(ad)) && verdictOf(/SOCKP\.witnessPathOf\(ROOT\)/.test(ad)), 'the daemon: the rule at listen, the witness written, the bridge reads witness-or-rule, too-long exits 7, hijacked exits 8');
+  ok(verdictOf(/SP\.witnessOrRule\(\{ root: this\._root/.test(readReal('src/agentd/client.js'))), 'the hub\'s transport reads witness-or-rule');
 }
 
 console.log('control (patched copy)');
@@ -200,8 +200,8 @@ console.log('control (patched copy)');
   const X = M.load('src/sock-path.js', fixed, 'bound108');
   const cell = (m) => m.daemonSocketPath({ root: rootOf(86), platform: 'darwin', uid: 501 }).via;
   ok(cell(X) === 'natural' && cell(SP) === 'tmp', 'CONTROL: a ladder with the bound fixed at 108 puts the 104-byte darwin path on the natural rung (the incident) — the real one moves it');
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

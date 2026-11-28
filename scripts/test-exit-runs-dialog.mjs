@@ -64,7 +64,7 @@ const require = createRequire(path.join(REPO, 'package.json'));
 const esbuild = require('esbuild');
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
 const SCR = fs.mkdtempSync(path.join(os.tmpdir(), `vs-exit-runs-dialog-${process.pid}-`));
 process.on('exit', () => { try { fs.rmSync(SCR, { recursive: true, force: true }); } catch { } });
 
@@ -132,17 +132,17 @@ async function painterCase(D, label) {
 console.log('§1 the Commands list: the whole command opens the row, Copy, no hover title, keyed in place');
 const D = await bundle('src/lib/exit-runs-dialog.js');
 const p1 = await painterCase(D);
-ok(p1.head && !p1.head.includes('\n') && p1.head.length === 80 && p1.head.endsWith('…') && p1.head.startsWith('powershell.exe -NoProfile -Command " \t$Error'), 'the summary keeps the HEAD on one line (80 characters)', p1.head);
-ok(p1.wholeTag === 'PRE' && p1.whole === MULTI && p1.first, 'the body OPENS with the WHOLE command as itself — its lines and tabs kept — in a pre', { whole: p1.whole, first: p1.first });
+ok(gateOf(p1.head) && !p1.head.includes('\n') && p1.head.length === 80 && gateOf(p1.head.endsWith('…')) && verdictOf(p1.head.startsWith('powershell.exe -NoProfile -Command " \t$Error')), 'the summary keeps the HEAD on one line (80 characters)', p1.head);
+ok(p1.wholeTag === 'PRE' && p1.whole === MULTI && verdictOf(p1.first), 'the body OPENS with the WHOLE command as itself — its lines and tabs kept — in a pre', { whole: p1.whole, first: p1.first });
 ok(p1.titles === 0, 'no element of the row carries a hover `title` (pre-fix: the whole command lived only in one)', p1.titles);
-ok(p1.clip.length === 1 && p1.clip[0] === MULTI && p1.toasts.includes('Command copied'), 'Copy puts the WHOLE command on the clipboard (the stub) and says so', { clip: p1.clip, toasts: p1.toasts });
-ok(p1.same && p1.open && p1.sums === 1 && p1.wholes === 1 && p1.out2, 'a re-paint of the keyed row is IN PLACE: the same node, still open, one summary, one whole command, the new output', p1);
+ok(p1.clip.length === 1 && p1.clip[0] === MULTI && verdictOf(p1.toasts.includes('Command copied')), 'Copy puts the WHOLE command on the clipboard (the stub) and says so', { clip: p1.clip, toasts: p1.toasts });
+ok(gateOf(p1.same) && gateOf(p1.open) && p1.sums === 1 && p1.wholes === 1 && verdictOf(p1.out2), 'a re-paint of the keyed row is IN PLACE: the same node, still open, one summary, one whole command, the new output', p1);
 
 // ── §2 the chat card's command block ──
 // §1b (lane exit-runs-dialog-fit, DOM-free): the duration words — a run that rounds to nothing reads "<0.1 s", never a
 // "0.0 s"; tenths otherwise; junk / negative = nothing
 const DUR = (f) => { const got = [0, 12, 49, 50, 100, 1234, -5, NaN, undefined, '2500'].map((ms) => f(ms)); return { ok: JSON.stringify(got) === JSON.stringify(['<0.1 s', '<0.1 s', '<0.1 s', '0.1 s', '0.1 s', '1.2 s', '<0.1 s', '<0.1 s', '<0.1 s', '2.5 s']), got }; };
-{ const r = DUR(D.durationText); ok(r.ok, `§1b durationText: 0 / 12 / 49 ms → "<0.1 s", 50 / 100 ms → "0.1 s", 1234 → "1.2 s", junk → "<0.1 s" (${r.got.join(' | ')})`); }
+{ const r = DUR(D.durationText); ok(verdictOf(r.ok), `§1b durationText: 0 / 12 / 49 ms → "<0.1 s", 50 / 100 ms → "0.1 s", 1234 → "1.2 s", junk → "<0.1 s" (${r.got.join(' | ')})`); }
 { const n = D.paintRow(document.createElement('details'), { at: 1, name: 'n', cmd: 'pull /a → /b', ms: 0, outcome: 'ok', transfer: { verb: 'pull', bytes: 2048, verified: 'sha256', local: '/b', remote: '/a' } }); const o = n.querySelector('.exit-runs-outcome'); const ms = o && o.querySelector('.exit-runs-ms'), v = o && o.querySelector('.exit-runs-verdict');
   ok(!!(ms && v && ms.textContent === '<0.1 s' && /2/.test(v.textContent)), `§1b a 0 ms transfer row: its size and "<0.1 s" in ONE outcome line (${v && v.textContent} · ${ms && ms.textContent})`); }
 
@@ -157,12 +157,12 @@ const cardOf = (Rm, x) => { const b = Rm.exitRunBlock(x); const det = b.querySel
   return { b, det, sum, box, pre, text: pre && pre.textContent, label: sum && sum.textContent, len: len && len.textContent, inFold: !!(det && pre && det.all.includes(pre)), last: !!det && b.children[b.children.length - 1] === det, closed: !!det && det.open === false, fold: det ? det.dataset.fold : null,
     folds: b.all.filter((n) => n.tagName === 'DETAILS' && n.dataset.fold === 'tech').length, clamp: !!b.querySelector('.chat-exit-cmd-fold') || !!(box && box.classList.contains('chat-exit-cmd-folded')), wrapped: !!pre && pre.classList.contains('chat-pre-wrapped') }; };
 const c1 = cardOf(R, { cmd: ONE, code: 0, stdout: 'ok\n', stderr: '', cut: {} });
-ok(c1.text === ONE && c1.text.length === 4096 && c1.wrapped && c1.pre.tagName === 'PRE' && c1.inFold, 'a 4 096-byte one-token command is WHOLE in a wrapped pre — inside the fold', { len: c1.text && c1.text.length, inFold: c1.inFold });
-ok(c1.fold === 'tech' && c1.label === 'Technical details' && c1.closed && c1.last && c1.folds === 1 && c1.len === 'Command · 4096 characters' && !c1.clamp, 'ONE closed 技术细节 fold (data-fold="tech") AFTER the output, naming the length of a one-liner in characters; no clamp, no second fold inside', { label: c1.label, len: c1.len, last: c1.last, folds: c1.folds, clamp: c1.clamp });
+ok(c1.text === ONE && c1.text.length === 4096 && gateOf(c1.wrapped) && c1.pre.tagName === 'PRE' && verdictOf(c1.inFold), 'a 4 096-byte one-token command is WHOLE in a wrapped pre — inside the fold', { len: c1.text && c1.text.length, inFold: c1.inFold });
+ok(c1.fold === 'tech' && c1.label === 'Technical details' && gateOf(c1.closed) && gateOf(c1.last) && c1.folds === 1 && c1.len === 'Command · 4096 characters' && !c1.clamp, 'ONE closed 技术细节 fold (data-fold="tech") AFTER the output, naming the length of a one-liner in characters; no clamp, no second fold inside', { label: c1.label, len: c1.len, last: c1.last, folds: c1.folds, clamp: c1.clamp });
 const c2 = cardOf(R, { cmd: L200, code: 0, stdout: '', stderr: '', cut: {} });
-ok(c2.text === L200 && c2.inFold && c2.len === 'Command · 200 lines' && c2.last && !!c2.b.querySelector('.chat-exit-none'), 'a 200-line script keeps its lines, its length in lines — with no output, the fold follows the no-output line', c2.len);
+ok(c2.text === L200 && gateOf(c2.inFold) && c2.len === 'Command · 200 lines' && gateOf(c2.last) && !!c2.b.querySelector('.chat-exit-none'), 'a 200-line script keeps its lines, its length in lines — with no output, the fold follows the no-output line', c2.len);
 const c3 = cardOf(R, { cmd: 'a\nb\nc\nd', code: 0, stdout: 'x', stderr: '', cut: {} });
-ok(c3.text === 'a\nb\nc\nd' && c3.inFold && c3.len === 'Command · 4 lines' && !c3.clamp, 'four short lines: whole, in the fold too (a command on the card is technical detail)', c3.len);
+ok(c3.text === 'a\nb\nc\nd' && gateOf(c3.inFold) && c3.len === 'Command · 4 lines' && !c3.clamp, 'four short lines: whole, in the fold too (a command on the card is technical detail)', c3.len);
 const c4 = cardOf(R, { code: 0, stdout: 'x', stderr: '', cut: {} });
 ok(!c4.det && !c4.box && !!c4.b.querySelector('.chat-exit-out'), 'a card without `cmd` (an older card) draws no fold, its output as before');
 // lane win-run-hide-console: the output was decoded as UTF-8 because the machine's console code page was not read — ONE line
@@ -171,9 +171,9 @@ const ENC_EN = "Decoded as UTF-8 (this machine's console code page was not read)
 const FALLBACK = { cmd: 'type missing.txt', code: 1, stdout: '', stderr: '\u03f5\u0373\ufffd', cut: {}, encoding: 'utf-8-fallback' };
 const encOf = (Rm, x) => { const c = cardOf(Rm, x); const lines = c.b.querySelectorAll('.chat-exit-enc'); return { c, n: lines.length, text: lines[0] ? lines[0].textContent : null, inFold: !!(c.det && lines[0] && c.det.all.includes(lines[0])) }; };
 const e1 = encOf(R, FALLBACK);
-ok(e1.n === 1 && e1.text === ENC_EN && e1.inFold && e1.c.folds === 1 && e1.c.inFold, 'a card whose output fell back to UTF-8: ONE line in its 技术细节 fold says so (the command still whole in the same fold)', e1.text);
+ok(e1.n === 1 && e1.text === ENC_EN && gateOf(e1.inFold) && e1.c.folds === 1 && verdictOf(e1.c.inFold), 'a card whose output fell back to UTF-8: ONE line in its 技术细节 fold says so (the command still whole in the same fold)', e1.text);
 const e2 = ['gbk', 'utf-8', 'shift_jis', undefined].map((encoding) => encOf(R, { cmd: 'ver', code: 0, stdout: 'x', stderr: '', cut: {}, ...(encoding ? { encoding } : {}) }));
-ok(e2.every((e) => e.n === 0 && e.c.det), '…a gbk / utf-8 / shift_jis decoding, or none (POSIX, an older card), draws no such line', e2.map((e) => e.n));
+ok(verdictOf(e2.every((e) => e.n === 0 && e.c.det)), '…a gbk / utf-8 / shift_jis decoding, or none (POSIX, an older card), draws no such line', e2.map((e) => e.n));
 const langBundle = async (lang) => { const g = globalThis.localStorage.getItem; globalThis.localStorage.getItem = (k) => (k === 'vibespace.lang' ? lang : null); try { return await bundle('src/lib/chat-renderers.js'); } finally { globalThis.localStorage.getItem = g; } };
 const ez = encOf(await langBundle('zh'), FALLBACK), ej = encOf(await langBundle('ja'), FALLBACK);
 ok(ez.text === '按 UTF-8 解码（未取到该机控制台的代码页）' && ez.c.label === '技术细节', 'zh: 「按 UTF-8 解码（未取到该机控制台的代码页）」 under 技术细节', [ez.text, ez.c.label]);
@@ -189,22 +189,22 @@ const rowCensus = (src) => ({
   imported: /^import \{ openExitRunsDialog \} from '\.\/exit-runs-dialog\.js';/m.test(src),
 });
 const rc = rowCensus(SM);
-ok(rc.icon && rc.last && rc.noTitle && rc.imported, 'the machine row: the Commands icon and the last-run line both open openExitRunsDialog; the last-run line has no hover title', rc);
+ok(gateOf(rc.icon) && gateOf(rc.last) && gateOf(rc.noTitle) && verdictOf(rc.imported), 'the machine row: the Commands icon and the last-run line both open openExitRunsDialog; the last-run line has no hover title', rc);
 const CSS = fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8'), STY = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
 const rule = (css, sel) => { const m = new RegExp('^' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}', 'm').exec(css); return m ? m[1] : ''; };
 const wraps = (r) => /white-space: pre-wrap/.test(r) && /overflow-wrap: anywhere/.test(r);
-ok(wraps(rule(CSS, '.chat-exit-cmd')) && wraps(rule(CSS, '.chat-exit-out, .chat-exit-out-all')) && wraps(rule(STY, '.exit-runs-cmd-all')), 'both command pres and the card\'s output wrap anywhere (a 1 365-byte token breaks on a phone)');
-ok(/max-height: 60vh; overflow: auto/.test(rule(CSS, '.chat-exit-tech .chat-exit-cmd')) && !/chat-exit-cmd-folded|chat-exit-cmd-fold\b/.test(CSS), 'inside 技术细节 the whole command scrolls past 60vh; no four-line clamp is left in chat.css');
+ok(gateOf(wraps(rule(CSS, '.chat-exit-cmd'))) && gateOf(wraps(rule(CSS, '.chat-exit-out, .chat-exit-out-all'))) && verdictOf(wraps(rule(STY, '.exit-runs-cmd-all'))), 'both command pres and the card\'s output wrap anywhere (a 1 365-byte token breaks on a phone)');
+ok(gateOf(/max-height: 60vh; overflow: auto/.test(rule(CSS, '.chat-exit-tech .chat-exit-cmd'))) && !/chat-exit-cmd-folded|chat-exit-cmd-fold\b/.test(CSS), 'inside 技术细节 the whole command scrolls past 60vh; no four-line clamp is left in chat.css');
 
 // ── §3b B-f169 follow-up 2: a run ALLOWED, THEN REFUSED (the agent said cmd.exe after the Allow) is never «exit ?» on the row ──
 console.log('§3b the machine row\'s last-run words for a run allowed, then refused (B-f169)');
 const XA = await bundle('src/lib/exit-access-dialog.js');
 const QLR = { cmd: 'cmd /c dir C:/My Files', outcome: 'quoting', code: null, at: Date.now() - 60000, by: { name: 'conv' } };
 const qWords = XA.lastRunText(QLR);
-ok(/not run — allowed, then refused: this machine runs commands with cmd\.exe; write the command as one line/.test(qWords) && !/exit/.test(qWords), 'a run allowed, then refused (the agent said cmd.exe) reads «not run — allowed, then refused …» on the machine row (the Remote row and «Who can use it» share these words) — never «exit ?»', qWords);
-ok(/, exit 0$/.test(XA.lastRunText({ ...QLR, outcome: 'ran', code: 0 })), '…a run that ran still says its exit code', XA.lastRunText({ ...QLR, outcome: 'ran', code: 0 }));
+ok(gateOf(/not run — allowed, then refused: this machine runs commands with cmd\.exe; write the command as one line/.test(qWords)) && !/exit/.test(qWords), 'a run allowed, then refused (the agent said cmd.exe) reads «not run — allowed, then refused …» on the machine row (the Remote row and «Who can use it» share these words) — never «exit ?»', qWords);
+ok(verdictOf(/, exit 0$/.test(XA.lastRunText({ ...QLR, outcome: 'ran', code: 0 }))), '…a run that ran still says its exit code', XA.lastRunText({ ...QLR, outcome: 'ran', code: 0 }));
 const pq = patched('src/lib/exit-access-dialog.js', /\n  \/\/ B-f169 follow-up 2:[^\n]*\n  if \(lr\.outcome === 'quoting'\)[^\n]*\n/, '\n');
-ok(pq.applies && /, exit \?$/.test((await bundle('src/lib/exit-access-dialog.js', pq)).lastRunText(QLR)), 'CONTROL: the tip before this cure (no branch for the outcome) — the row reads «exit ?» for a run that never ran: §5 goes red');
+ok(gateOf(pq.applies) && verdictOf(/, exit \?$/.test((await bundle('src/lib/exit-access-dialog.js', pq)).lastRunText(QLR))), 'CONTROL: the tip before this cure (no branch for the outcome) — the row reads «exit ?» for a run that never ran: §5 goes red');
 
 // ── §4 controls ──
 console.log('§4 controls (patched copies, bundled in memory)');
@@ -215,7 +215,7 @@ const TECH = "  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x
 const pc = patched('src/lib/chat-renderers.js', TECH, '  const tech = null; // CONTROL: no command block');
 const pd = patched('src/lib/chat-renderers.js', TECH, TECH + "\n  if (tech) wrap.appendChild(exitCmdBlock(x.cmd)); // CONTROL: the command on the card again, outside its fold");
 const pg = patched('src/lib/chat-renderers.js', TECH, "  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd) : null; // CONTROL: the pre-lane fold, no decoding handed in");
-ok(pa.applies && pb.applies && pc.applies && pd.applies && pf.applies && pg.applies, 'every patch applies');
+ok(gateOf(pa.applies) && gateOf(pb.applies) && gateOf(pc.applies) && gateOf(pd.applies) && gateOf(pf.applies) && verdictOf(pg.applies), 'every patch applies');
 ok(encOf(await bundle('src/lib/chat-renderers.js', pg), FALLBACK).n === 0, 'CONTROL (g): the fold without the device\'s decoding handed in (the pre-lane line) — a utf-8-fallback card says nothing: §2\'s fallback line goes red');
 ok(!DUR((await bundle('src/lib/exit-runs-dialog.js', pf)).durationText).ok, 'CONTROL (f): the old duration words ("0.0 s" for a 0 ms transfer) — §1b goes red');
 ok((await painterCase(await bundle('src/lib/exit-runs-dialog.js', pa))).titles > 0, 'CONTROL (a): the hover title back on the row — §1\'s title census goes red');
@@ -247,9 +247,9 @@ const keepCase = (Rm) => {
   return { shape, kept, closedStays, others: !other.tech.open && !other.out.open && !bare.tech.open && !bare.out.open, keys: [...FOLDS].sort() };
 };
 const k5 = keepCase(R);
-ok(k5.shape && k5.kept, 'law 3: «Technical details», «Show output» and an encoded command\'s «Show full command», opened, are OPEN again on the redrawn card', k5);
-ok(k5.closedStays && JSON.stringify(k5.keys) === JSON.stringify(['m1#raw', 'm1#tech']), 'law 3: one closed by the person stays closed on the next redraw; the state is the message\'s (`<id>#tech`, `#out`, `#raw`)', k5.keys);
-ok(k5.others, 'law 3: another message\'s card, and a card drawn without the view\'s state, are closed as before', k5);
+ok(gateOf(k5.shape) && verdictOf(k5.kept), 'law 3: «Technical details», «Show output» and an encoded command\'s «Show full command», opened, are OPEN again on the redrawn card', k5);
+ok(gateOf(k5.closedStays) && JSON.stringify(k5.keys) === JSON.stringify(['m1#raw', 'm1#tech']), 'law 3: one closed by the person stays closed on the next redraw; the state is the message\'s (`<id>#tech`, `#out`, `#raw`)', k5.keys);
+ok(verdictOf(k5.others), 'law 3: another message\'s card, and a card drawn without the view\'s state, are closed as before', k5);
 const RSRC = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
 // THE VIEW'S OWN SWAP (主开发 2026-11-17 23:4xZ: «one leg that redraws the row through the view's own swap while each fold is
 // open»): the REAL ChatView.prototype._swapMessageEl moves a fresh card of the same record into the list in place of the old
@@ -268,20 +268,20 @@ const swapCase = (Rm) => {
   return { swapped: back === fresh && list.children[0] === fresh && V._elements.get('m1') === fresh && fresh.classList.contains('chat-machine-compact'), open: !!(f1.tech.open && f1.out.open && f1.raw.open), state: [...V._peerOpen].sort() };
 };
 const sw = swapCase(R);
-ok(/peerFold: \{ isOpen: \(id\) => this\._peerOpen\.has\(id\), set: \(id, open, el\) => this\._setPeerOpen\(id, open, el\) \}/.test(CV_SRC), 'law 3: chat-view hands the renderer ITS per-message fold state (peerFold → _peerOpen / _setPeerOpen) — the state this leg drives');
-ok(sw.swapped && sw.open && JSON.stringify(sw.state) === JSON.stringify(['m1#out', 'm1#raw', 'm1#tech']), 'law 3, THE VIEW\'S OWN SWAP: each fold open, the row redrawn through ChatView._swapMessageEl (a fresh card of the same record in its place, the run classes carried) — every fold is open on the new card BECAUSE THE KEEPER OPENS IT AT THE DRAW (exitRunBlock reading the view\'s _peerOpen); the swap itself carries no inner <details>', sw);
-ok(/el\.appendChild\(exitRunBlock\(msg\.exitRun, \{ id: msg\.id, fold: this\._peerFold \}\)\)/.test(RSRC), 'law 3: the notice renderer hands the card its message id and the view\'s per-message fold state (this._peerFold, the compact line\'s own)');
+ok(verdictOf(/peerFold: \{ isOpen: \(id\) => this\._peerOpen\.has\(id\), set: \(id, open, el\) => this\._setPeerOpen\(id, open, el\) \}/.test(CV_SRC)), 'law 3: chat-view hands the renderer ITS per-message fold state (peerFold → _peerOpen / _setPeerOpen) — the state this leg drives');
+ok(gateOf(sw.swapped) && gateOf(sw.open) && JSON.stringify(sw.state) === JSON.stringify(['m1#out', 'm1#raw', 'm1#tech']), 'law 3, THE VIEW\'S OWN SWAP: each fold open, the row redrawn through ChatView._swapMessageEl (a fresh card of the same record in its place, the run classes carried) — every fold is open on the new card BECAUSE THE KEEPER OPENS IT AT THE DRAW (exitRunBlock reading the view\'s _peerOpen); the swap itself carries no inner <details>', sw);
+ok(verdictOf(/el\.appendChild\(exitRunBlock\(msg\.exitRun, \{ id: msg\.id, fold: this\._peerFold \}\)\)/.test(RSRC)), 'law 3: the notice renderer hands the card its message id and the view\'s per-message fold state (this._peerFold, the compact line\'s own)');
 const drawnOf = (pre) => pre.children.length ? pre.children.filter((c) => !c._cls.includes('chat-exit-margin')).map((c) => c.textContent).join('') : pre.textContent;
 const marginCase = (Rm, stdout, stderr = '') => { const pre = Rm.exitRunBlock({ cmd: 'x', code: 0, stdout, stderr, cut: {} }).querySelector('.chat-exit-out'); return { text: pre.textContent, drawn: drawnOf(pre), spans: pre.querySelectorAll('.chat-exit-margin').length }; };
 const m1 = marginCase(R, '      42\n'), m2 = marginCase(R, '  a\n    b\n\n  c\n'), m3 = marginCase(R, '\tx\n  y\n'), m4 = marginCase(R, '', '   err: no such file\n');
 ok(m1.text === '      42' && m1.drawn === '42' && m1.spans === 1, 'law 4: `wc -l`\'s «      42» is DRAWN as «42» — the pre\'s text (Copy reads it) keeps all six spaces', m1);
 ok(m2.text === '  a\n    b\n' && m2.drawn === 'a\n  b\n' && m3.text === '\tx\n  y' && m3.drawn === '\tx\n  y' && m3.spans === 0 && m4.drawn === 'err: no such file', 'law 4: the COMMON margin only — a deeper line keeps its extra indent, a blank line stays, a tab-led line hides nothing, the stderr preview too', { m2, m3, m4 });
 const all5 = R.exitRunBlock({ cmd: 'x', code: 0, stdout: Array.from({ length: 5 }, (_, i) => `    ${i}`).join('\n'), stderr: '', cut: {} }).querySelector('.chat-exit-out-all');
-ok(!!all5 && all5.textContent.startsWith('    0') && all5.querySelectorAll('.chat-exit-margin').length === 0, 'law 4: «Show output» is drawn as itself (the stored head, every byte, no margin hidden)');
-ok(/display: none/.test(rule(CSS, '.chat-exit-margin')), 'law 4: chat.css draws no `.chat-exit-margin` (the span the preview\'s margin sits in)');
+ok(!!all5 && gateOf(all5.textContent.startsWith('    0')) && all5.querySelectorAll('.chat-exit-margin').length === 0, 'law 4: «Show output» is drawn as itself (the stored head, every byte, no margin hidden)');
+ok(verdictOf(/display: none/.test(rule(CSS, '.chat-exit-margin'))), 'law 4: chat.css draws no `.chat-exit-margin` (the span the preview\'s margin sits in)');
 const ph = patched('src/lib/chat-renderers.js', "  if (!det || !fold || !id) return;\n  const key = `${id}#${which}`;", "  return; // CONTROL: no keeper (the release)\n  const key = `${id}#${which}`;");
 const pi = patched('src/lib/chat-renderers.js', '  drawPreview(pre, pv.lines);', "  pre.textContent = pv.lines.join('\\n'); // CONTROL: the release's drawing");
-ok(ph.applies && pi.applies, '§5 patches apply');
+ok(gateOf(ph.applies) && verdictOf(pi.applies), '§5 patches apply');
 // ONE WORD FOR ONE THING (主开发's look, 2026-11-18 02:34Z: «退出码 0» in the head, «退出 0» on the card, an English «exit 0» on each
 // row): the REAL _machineLine draws a run's compact line; its outcome is said in the page's words through the head's keys
 const ZH = await langBundle('zh');
@@ -294,14 +294,14 @@ const rowOut = (Rm, outcome) => {
 const rz = [rowOut(ZH, 'ok'), rowOut(ZH, 'timed_out')], re = rowOut(R, 'ok');
 const zhD = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
 ok(rz[0] === '· 退出码 0 · 0.2 s' && rz[1] === '· 0.2 秒后超时' && re === '· exit 0 · 0.2 s', 'ONE WORD: a run\'s compact line says its outcome in the page\'s words — zh «· 退出码 0 · 0.2 s» / «· 0.2 秒后超时», en as before', { zh: rz, en: re });
-ok(['Ran a command on {machine} — exit {code} · {secs}', 'last: exit {code}', 'exit {code}'].every((k) => typeof zhD[k] === 'string' && zhD[k].includes('退出码 {code}')), 'ONE WORD: the card\'s sentence, the group\'s head and the row say 退出码 in zh — never a bare 退出', ['Ran a command on {machine} — exit {code} · {secs}', 'last: exit {code}', 'exit {code}'].map((k) => zhD[k]));
+ok(verdictOf(['Ran a command on {machine} — exit {code} · {secs}', 'last: exit {code}', 'exit {code}'].every((k) => typeof zhD[k] === 'string' && zhD[k].includes('退出码 {code}'))), 'ONE WORD: the card\'s sentence, the group\'s head and the row say 退出码 in zh — never a bare 退出', ['Ran a command on {machine} — exit {code} · {secs}', 'last: exit {code}', 'exit {code}'].map((k) => zhD[k]));
 const PH = await bundle('src/lib/chat-renderers.js', ph);
 ok(!keepCase(PH).kept, 'CONTROL (h): no keeper (the release) — the redraw closes every fold: §5\'s law 3 leg goes red');
 const pj = patched('src/lib/chat-renderers.js', '    const outcome = runOutcomeWords(msg) ?? ml.outcome;', '    const outcome = ml.outcome; // CONTROL: the hub\'s English sentence on the row');
 const zhPatched = async (patch) => { const g = globalThis.localStorage.getItem; globalThis.localStorage.getItem = (k) => (k === 'vibespace.lang' ? 'zh' : null); try { return await bundle('src/lib/chat-renderers.js', patch); } finally { globalThis.localStorage.getItem = g; } };
 const rj = pj.applies ? rowOut(await zhPatched(pj), 'ok') : null;
-ok(pj.applies && rj === '· exit 0 · 0.2 s', 'CONTROL (j): the row with the hub\'s English words (the release), bundled in zh — the zh page says «· exit 0 · 0.2 s»: §5\'s one-word leg goes red', rj);
-ok(swapCase(PH).swapped && !swapCase(PH).open, 'CONTROL (h2): no keeper (the release) through the view\'s own swap — the swapped card\'s folds are CLOSED: §5\'s swap leg goes red');
+ok(gateOf(pj.applies) && rj === '· exit 0 · 0.2 s', 'CONTROL (j): the row with the hub\'s English words (the release), bundled in zh — the zh page says «· exit 0 · 0.2 s»: §5\'s one-word leg goes red', rj);
+ok(gateOf(swapCase(PH).swapped) && !swapCase(PH).open, 'CONTROL (h2): no keeper (the release) through the view\'s own swap — the swapped card\'s folds are CLOSED: §5\'s swap leg goes red');
 ok(marginCase(await bundle('src/lib/chat-renderers.js', pi), '      42\n').drawn !== '42', 'CONTROL (i): the release\'s drawing — «      42» drawn with its margin: §5\'s law 4 leg goes red');
 
 // ── §6 B-a31a the Remote panel under a burst ──
@@ -360,7 +360,7 @@ const flightCase = async (M) => {
 };
 const ML = await bundle('src/lib/mounts-live.js');
 const pr = patchCase(ML);
-ok(pr.replaced && pr.did[0] === 'updated', 'a recorded command: the row\'s last-run line takes its new words IN PLACE — the same row, EVERY node the same node (the line too: a focus or a press survives), one last-run line', pr);
+ok(gateOf(pr.replaced) && pr.did[0] === 'updated', 'a recorded command: the row\'s last-run line takes its new words IN PLACE — the same row, EVERY node the same node (the line too: a focus or a press survives), one last-run line', pr);
 const cacheCase = (M) => {
   const L = document.createElement('div');
   const a = document.createElement('div'); a.className = 'mounts-row'; a._hostId = 'host-a';
@@ -377,15 +377,15 @@ const cacheCase = (M) => {
     overlay: list[0].exit.lastRun.cmd === 'pushed' && list[1].exit.lastRun.cmd === 'b1' && keptIds.join() === 'host-a' && [...seen.keys()].join() === 'host-a', keptIds, left: [...seen.keys()] };
 };
 const cc = cacheCase(ML);
-ok(cc.byKey, 'the panel\'s rows are found by their key (`row._hostId`); a row with no key (this machine) is not one of them');
-ok(cc.noted, 'a pushed last run lands in the page\'s cached hosts list (the doors read it); a host the list lacks is left alone');
-ok(cc.overlay, 'a refresh that brings back an OLDER list keeps the pushed run (the newer `at` wins); a pushed run the list caught up with, or of a host gone, leaves', cc);
-ok(pr.inserted && pr.did[1] === 'inserted', 'a row with no last run yet: the line goes right after the exit summary (before the agent line)', pr.did);
-ok(pr.removed && pr.did[2] === 'removed', 'a row whose machine has no last run: its line is removed, nothing else', pr.did);
+ok(verdictOf(cc.byKey), 'the panel\'s rows are found by their key (`row._hostId`); a row with no key (this machine) is not one of them');
+ok(verdictOf(cc.noted), 'a pushed last run lands in the page\'s cached hosts list (the doors read it); a host the list lacks is left alone');
+ok(verdictOf(cc.overlay), 'a refresh that brings back an OLDER list keeps the pushed run (the newer `at` wins); a pushed run the list caught up with, or of a host gone, leaves', cc);
+ok(gateOf(pr.inserted) && pr.did[1] === 'inserted', 'a row with no last run yet: the line goes right after the exit summary (before the agent line)', pr.did);
+ok(gateOf(pr.removed) && pr.did[2] === 'removed', 'a row whose machine has no last run: its line is removed, nothing else', pr.did);
 const cr = coalesceCase(ML);
 ok(cr.set1 === 1 && cr.win === 250 && cr.after1 === 1 && cr.set2 === 1 && cr.runs === 2, '60 frames inside one 250 ms window paint ONCE; the next frame opens the next window', cr);
 const fr = await flightCase(ML);
-ok(fr.started === 1 && fr.same && fr.duringFirst === 1 && fr.afterFirst === 2 && fr.runs === 2 && fr.most === 1 && fr.got === 2 && fr.first === 1, 'ONE refresh in flight: five calls during it fold into ONE trailing refresh (never two at once), and their promise is the trailing one\'s', fr);
+ok(fr.started === 1 && gateOf(fr.same) && fr.duringFirst === 1 && fr.afterFirst === 2 && fr.runs === 2 && fr.most === 1 && fr.got === 2 && fr.first === 1, 'ONE refresh in flight: five calls during it fold into ONE trailing refresh (never two at once), and their promise is the trailing one\'s', fr);
 const wiring = (src) => ({
   patchFrame: /if \(msg\.type === 'host-last-run' && msg\.hostId\) this\._patchHostLastRun\(msg\.hostId, msg\.lastRun \|\| null\);/.test(src),
   listSoon: /msg\.type === 'hosts-updated'\) && this\._activeTab === 'mounts'\) this\._renderMountsSoon\(\);/.test(src),
@@ -411,19 +411,19 @@ const wiring = (src) => ({
 const SB = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
 const GUARD = "const v = rerenderVerdict({ tab: this._activeTab, shown: !!shown, slow: !!slowEl });\n      if (v === 'keep') return;\n      if (v === 'refresh') { if (noteAskOnce(slowEl)) this._renderMountsSoon?.(); return; } // cure 2: ONCE per note";
 const guarded = (src) => { const rail = src.indexOf("{ this._renderRailPanel?.(); return; }"), g = src.indexOf(GUARD), w = g < 0 ? -1 : src.indexOf("this.listEl.innerHTML = '';", g); return rail > 0 && g > rail && w > g && w - g < 600; };
-ok(guarded(SB) && /^import \{ rerenderVerdict, noteAskOnce \} from '\.\/mounts-live\.js';/m.test(SB), 'a sidebar re-render never wipes a Remote panel that shows — it asks rerenderVerdict (src/lib/sidebar.js: before the list\'s wipe, after the rail panels\' own)');
+ok(gateOf(guarded(SB)) && verdictOf(/^import \{ rerenderVerdict, noteAskOnce \} from '\.\/mounts-live\.js';/m.test(SB)), 'a sidebar re-render never wipes a Remote panel that shows — it asks rerenderVerdict (src/lib/sidebar.js: before the list\'s wipe, after the rail panels\' own)');
 const wr = wiring(SM);
-ok(Object.values(wr).every(Boolean), 'the wiring: host-last-run → the row patch (coalesced); a list frame → ONE coalesced, single-flight refresh, never a direct whole redraw; a failed or held refresh keeps the panel and says so; the builder and the patch draw the same line', wr);
+ok(verdictOf(Object.values(wr).every(Boolean)), 'the wiring: host-last-run → the row patch (coalesced); a list frame → ONE coalesced, single-flight refresh, never a direct whole redraw; a failed or held refresh keeps the panel and says so; the builder and the patch draw the same line', wr);
 const slowCss = rule(STY, '.mounts-slow');
-ok(/var\(--/.test(slowCss) && !/#[0-9a-fA-F]{3}/.test(slowCss) && /position: sticky; top: 0;/.test(slowCss) && /background: var\(--bg-sidebar\)/.test(slowCss), 'the slow note\'s CSS reads theme variables only, and it stays in view however far the list is scrolled (sticky, on the sidebar\'s own background — the pictures showed it scrolled out of sight)', slowCss);
+ok(gateOf(/var\(--/.test(slowCss)) && !/#[0-9a-fA-F]{3}/.test(slowCss) && gateOf(/position: sticky; top: 0;/.test(slowCss)) && verdictOf(/background: var\(--bg-sidebar\)/.test(slowCss)), 'the slow note\'s CSS reads theme variables only, and it stays in view however far the list is scrolled (sticky, on the sidebar\'s own background — the pictures showed it scrolled out of sight)', slowCss);
 const a6PH = { src: SM.replace("if (msg.type === 'host-last-run' && msg.hostId) this._patchHostLastRun(msg.hostId, msg.lastRun || null);", '').replace("&& this._activeTab === 'mounts') this._renderMountsSoon();", "&& this._activeTab === 'mounts') this._renderMounts();") }; // stale-pins: kept — the control BUILDS the release's listener line; it pins no product line
 ok(a6PH.src !== SM && !Object.values(wiring(a6PH.src)).every(Boolean), 'CONTROL (h): the release\'s listener (every frame a whole refetch and redraw) — the wiring census goes red');
 const a6PI = patched('src/lib/mounts-live.js', 'if (pending) return; pending = true; ', '');
 const a6PJ = patched('src/lib/mounts-live.js', "if (old && line) { if (old.textContent !== line.textContent) old.textContent = line.textContent; return 'updated'; }", "if (old && line) { for (const k of kids) k.remove(); for (const k of kids) row.appendChild(k === old ? line : Object.assign(document.createElement(k.tagName), { className: k.className })); return 'updated'; } // CONTROL: the row rebuilt whole");
 const a6PM = patched('src/lib/mounts-live.js', 'if (h && lr && atOf(lr) > atOf(listed))', 'if (false) // CONTROL: the older list wins\n    if (h && lr && atOf(lr) > atOf(listed))');
 const a6PK = patched('src/lib/mounts-live.js', 'if (cur) return next || (next = cur.then(again, again));', '');
-ok(a6PI.applies && a6PJ.applies && a6PK.applies && a6PM.applies, 'the §6 patches apply');
-ok(!guarded(SB.replace(GUARD, '')) && SB.includes(GUARD), 'CONTROL (l): the release\'s sidebar re-render (no guard: every digest change wipes the panel to «Loading…») — §6 goes red');
+ok(gateOf(a6PI.applies) && gateOf(a6PJ.applies) && gateOf(a6PK.applies) && verdictOf(a6PM.applies), 'the §6 patches apply');
+ok(!guarded(SB.replace(GUARD, '')) && verdictOf(SB.includes(GUARD)), 'CONTROL (l): the release\'s sidebar re-render (no guard: every digest change wipes the panel to «Loading…») — §6 goes red');
 ok(!cacheCase(await bundle('src/lib/mounts-live.js', a6PM)).overlay, 'CONTROL (m): an overlay that takes the older list (a run pushed during a refresh drawn away) — §6 goes red');
 
 // THE CURE (主开发 07:52Z): THE PANEL IS TRUE AGAIN BY ITSELF, WITHOUT A STORM — counts over the verdict + the coalesced refresh
@@ -440,12 +440,12 @@ const rerenderCase = (M) => {
   return { healthy, afterHealthy, slow, afterSlow, afterReconnect: refreshes - afterSlow, paint: M.rerenderVerdict({ tab: 'mounts', shown: false }), other: M.rerenderVerdict({ tab: 'folders', shown: true }) };
 };
 const rc5 = rerenderCase(ML);
-ok(rc5.healthy.every((v) => v === 'keep') && rc5.afterHealthy === 0, 'TEN sidebar re-renders over a HEALTHY panel ⇒ ZERO refreshes (the storm\'s leg stays)', rc5);
-ok(rc5.slow.every((v) => v === 'refresh') && rc5.afterSlow === 1, 'a panel SAYING the server is slow is not healthy: the recovery edge\'s re-render ⇒ exactly ONE refresh (the note leaves when it lands)', rc5);
+ok(gateOf(rc5.healthy.every((v) => v === 'keep')) && rc5.afterHealthy === 0, 'TEN sidebar re-renders over a HEALTHY panel ⇒ ZERO refreshes (the storm\'s leg stays)', rc5);
+ok(gateOf(rc5.slow.every((v) => v === 'refresh')) && rc5.afterSlow === 1, 'a panel SAYING the server is slow is not healthy: the recovery edge\'s re-render ⇒ exactly ONE refresh (the note leaves when it lands)', rc5);
 ok(rc5.afterReconnect === 1, 'the page\'s connection back (three «up» edges inside one window) ⇒ exactly ONE refresh', rc5);
 ok(rc5.paint === 'paint' && rc5.other === 'other', 'no panel yet ⇒ paint (a tab change); another tab ⇒ not the panel\'s business', rc5);
 const pn = patched('src/lib/mounts-live.js', "return slow ? 'refresh' : 'keep';", "return 'keep'; // CONTROL: the tip before the cure");
-ok(pn.applies && (rerenderCase(await bundle('src/lib/mounts-live.js', pn))).afterSlow === 0, 'CONTROL (n): the tip before the cure (a showing panel is always «healthy») — the slow note never leaves by itself: the recovery leg goes red');
+ok(gateOf(pn.applies) && (rerenderCase(await bundle('src/lib/mounts-live.js', pn))).afterSlow === 0, 'CONTROL (n): the tip before the cure (a showing panel is always «healthy») — the slow note never leaves by itself: the recovery leg goes red');
 const noReconnect = SM.replace("this.app.ws.onStateChange?.((up) => { if (up && this._activeTab === 'mounts') this._renderMountsSoon(); });", '');
 ok(noReconnect !== SM && !wiring(noReconnect).reconnect, 'CONTROL (o): no refresh when the connection comes back (the tip before the cure) — the wiring census goes red');
 
@@ -473,9 +473,9 @@ const faceCase = (M) => {
 };
 const fc = faceCase(ML);
 ok(fc.same === 'same' && fc.replaced1 === 0 && fc.added1 === 0 && fc.touched1 === 0, 'ONE PROBE whose answer equals what the row shows ⇒ ZERO row nodes replaced, none added, none touched (a focused button or an open control stays)', fc);
-ok(fc.changed === 'patched' && fc.replaced2 === 0 && fc.dotNow === 'mounts-dot mounts-dot-err' && fc.chipBeforeActs && fc.errline, 'a CHANGED answer changes the dot and its words only: the dot\'s class and title, the chip before the actions, the failure line — every node the row had is the same node', fc);
+ok(fc.changed === 'patched' && fc.replaced2 === 0 && fc.dotNow === 'mounts-dot mounts-dot-err' && gateOf(fc.chipBeforeActs) && verdictOf(fc.errline), 'a CHANGED answer changes the dot and its words only: the dot\'s class and title, the chip before the actions, the failure line — every node the row had is the same node', fc);
 const pq2 = (() => { const src0 = fs.readFileSync(path.join(REPO, 'src/lib/mounts-live.js'), 'utf8'); const src = src0.replace("  if (hostFaceSame(prev, next)) return 'same';\n", '').replace("    if (dot.className !== cls) dot.className = cls;", "    { const nd = document.createElement('span'); nd.className = cls; dot.replaceWith(nd); } // CONTROL: the probe rebuilds what it shows"); return { file: 'src/lib/mounts-live.js', src, applies: src !== src0 && !src.includes("return 'same';\n  const dot") }; })();
-ok(pq2.applies && faceCase(await bundle('src/lib/mounts-live.js', pq2)).replaced1 > 0, 'CONTROL (p): a probe that rebuilds what it shows (the tip as it stood replaced the whole row twice) — the zero-replaced leg goes red');
+ok(gateOf(pq2.applies) && faceCase(await bundle('src/lib/mounts-live.js', pq2)).replaced1 > 0, 'CONTROL (p): a probe that rebuilds what it shows (the tip as it stood replaced the whole row twice) — the zero-replaced leg goes red');
 // THE MEETING AT THE RESTACK FOR 2.369.412 (主开发 20:03Z, ruling (a), both meanings): ui-needs-a-button's NEED LINE (its words and its
 // doors) is the row's failure line that B-a31a's probe patches IN PLACE — the face carries the need line's inputs, the builder draws it
 // (errOf). An answer with the SAME words builds nothing and writes nothing to the line; CHANGED words replace it and its fold once,
@@ -518,14 +518,14 @@ const needCase = (M) => {
   return { same, sameOther, kept, changed, built, replaced: !!line1 && line1 !== line0 && !!fold1 && fold1 !== fold0, doors: doors.length, pressed, words: line1 && line1.textContent, foldText: fold1 && fold1.textContent, lines: row.children.filter((k) => k._cls.includes('mounts-errline')).length, order };
 };
 const nd = needCase(ML);
-ok(nd.same === 'same' && nd.sameOther === 'patched' && nd.kept.built === 0 && nd.kept.writes === 0 && nd.kept.line && nd.kept.fold, 'THE MEETING (ruling (a), the restack for 2.369.412): a probe answer with the SAME words builds nothing and writes nothing to the need line or its fold (the identical answer ⇒ «same»; the same words with the chip moved ⇒ the chip patched, the line at zero writes)', nd);
-ok(nd.changed === 'patched' && nd.built === 1 && nd.replaced && nd.lines === 1 && nd.doors === 1 && nd.pressed === 1 && /refused the key/.test(nd.words || '') && /publickey/.test(nd.foldText || '') && nd.order === 'line,key,fold', '…CHANGED words replace the need line and its fold ONCE, each in its own place (a key answer between them stays): its door is there and works', nd);
+ok(nd.same === 'same' && nd.sameOther === 'patched' && nd.kept.built === 0 && nd.kept.writes === 0 && gateOf(nd.kept.line) && verdictOf(nd.kept.fold), 'THE MEETING (ruling (a), the restack for 2.369.412): a probe answer with the SAME words builds nothing and writes nothing to the need line or its fold (the identical answer ⇒ «same»; the same words with the chip moved ⇒ the chip patched, the line at zero writes)', nd);
+ok(nd.changed === 'patched' && nd.built === 1 && gateOf(nd.replaced) && nd.lines === 1 && nd.doors === 1 && nd.pressed === 1 && gateOf(/refused the key/.test(nd.words || '')) && gateOf(/publickey/.test(nd.foldText || '')) && nd.order === 'line,key,fold', '…CHANGED words replace the need line and its fold ONCE, each in its own place (a key answer between them stays): its door is there and works', nd);
 // RED CONTROL (v), its plant proven first: the release's patch — the failure line's words written IN PLACE — takes the doors
 const pnd = patched('src/lib/mounts-live.js', '  if (errOf) {\n', "  if (false) { // CONTROL: the release's in-place text\n");
 const plantOk = pnd.applies && /if \(false\) \{ \/\/ CONTROL/.test(pnd.src) && /if \(e\.textContent !== next\.errline\.text\) e\.textContent = next\.errline\.text;/.test(pnd.src);
 const ndr = plantOk ? needCase(await bundle('src/lib/mounts-live.js', pnd)) : null;
-ok(plantOk && !!ndr && ndr.doors === 0, 'CONTROL (v): the plant is in its copy (the builder\'s branch off, the release\'s text write live) — CHANGED words write over the line and its doors are gone: the door leg goes red', { plantOk, doors: ndr && ndr.doors });
-ok(/errOf: \(e\) => this\._hostErrLine\(h, e, row\)\.nodes/.test(SM) && /const \{ nodes, place \} = this\._hostErrLine\(h, face\.errline, row\);/.test(SM) && /errline: st && !st\.ok \? this\._hostErrFacts\(h, st\) : null/.test(SM), 'the wiring: the face carries the need line\'s inputs; the builder and the in-place patch draw it through ONE door (_hostErrLine)');
+ok(gateOf(plantOk) && !!ndr && ndr.doors === 0, 'CONTROL (v): the plant is in its copy (the builder\'s branch off, the release\'s text write live) — CHANGED words write over the line and its doors are gone: the door leg goes red', { plantOk, doors: ndr && ndr.doors });
+ok(gateOf(/errOf: \(e\) => this\._hostErrLine\(h, e, row\)\.nodes/.test(SM)) && gateOf(/const \{ nodes, place \} = this\._hostErrLine\(h, face\.errline, row\);/.test(SM)) && verdictOf(/errline: st && !st\.ok \? this\._hostErrFacts\(h, st\) : null/.test(SM)), 'the wiring: the face carries the need line\'s inputs; the builder and the in-place patch draw it through ONE door (_hostErrLine)');
 const tipProbe = SM.replace(/(\n    _autoTestHosts\(hosts, hlist\) \{[\s\S]*?)this\._patchHostFace\(h, hlist\)/, '$1this._swapHostRow(h, hlist)');
 ok(tipProbe !== SM && !wiring(tipProbe).inPlace, 'CONTROL (q): _autoTestHosts swapping the row (the tip as it stood) — the in-place wiring goes red');
 const renderProbe = SM.replace("        // (the render's own probe runs at its END, through the on-screen gate, once the list is on the page — _mountsDotsNow)", "        this._autoTestHosts(hd.hosts.filter((h) => h.transport !== 'dial'), hlist);"); // stale-pins: kept — control (u) BUILDS the old line
@@ -547,14 +547,14 @@ const nc = noteCase(ML);
 ok(nc.made[0] === true && nc.made[1] === false && nc.notes === 1 && nc.timers === 1 && nc.ms === 15000 && nc.selfRetries === 1, 'the slow note: TWO FAILURES ⇒ ONE note and ONE 15-s self-retry timer (never a second, never a loop)', nc);
 ok(JSON.stringify(nc.asks) === '[true,false,true,false]', 'a re-render asks the note\'s refresh ONCE PER FAILURE: two re-renders over one failure ⇒ one ask; the failure said again ⇒ one more (the hub back after a second failure is asked)', nc.asks);
 const pr2 = patched('src/lib/mounts-live.js', '  const had = kid(panel, \'mounts-slow\');\n  if (had) {', '  const had = kid(panel, \'mounts-slow\');\n  if (false) { // CONTROL: no «met again»');
-ok(pr2.applies && noteCase(await bundle('src/lib/mounts-live.js', pr2)).timers === 2, 'CONTROL (r): a note made again at each failure — two timers: the retry leg goes red');
+ok(gateOf(pr2.applies) && noteCase(await bundle('src/lib/mounts-live.js', pr2)).timers === 2, 'CONTROL (r): a note made again at each failure — two timers: the retry leg goes red');
 const ps2 = patched('src/lib/mounts-live.js', '  if (!note || note._asked) return false;', '  if (!note) return false; // CONTROL');
-ok(ps2.applies && noteCase(await bundle('src/lib/mounts-live.js', ps2)).asks[1] === true, 'CONTROL (s): a re-render that asks at every pass — the once-per-note leg goes red');
+ok(gateOf(ps2.applies) && noteCase(await bundle('src/lib/mounts-live.js', ps2)).asks[1] === true, 'CONTROL (s): a re-render that asks at every pass — the once-per-note leg goes red');
 const pt2 = patched('src/lib/mounts-live.js', '    had._asked = false;', '    /* CONTROL: once per note */');
-ok(pt2.applies && noteCase(await bundle('src/lib/mounts-live.js', pt2)).asks[2] === false, 'CONTROL (t): «once per note» (the tip before this) — after a second failure the recovery edge asks nothing: the once-per-failure leg goes red');
+ok(gateOf(pt2.applies) && noteCase(await bundle('src/lib/mounts-live.js', pt2)).asks[2] === false, 'CONTROL (t): «once per note» (the tip before this) — after a second failure the recovery edge asks nothing: the once-per-failure leg goes red');
 ok((coalesceCase(await bundle('src/lib/mounts-live.js', a6PI))).set1 === 60, 'CONTROL (i): a coalescer with no window — 60 frames, 60 paints: §6 goes red');
 ok(!patchCase(await bundle('src/lib/mounts-live.js', a6PJ)).replaced, 'CONTROL (j): the row rebuilt whole (new nodes) — §6\'s in-place leg goes red');
 ok((await flightCase(await bundle('src/lib/mounts-live.js', a6PK))).most > 1, 'CONTROL (k): no single-flight guard — refreshes overlap: §6 goes red');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

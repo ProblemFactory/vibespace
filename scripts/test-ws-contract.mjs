@@ -16,7 +16,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 const { WS_CTX_CONTRACT } = require(path.join(REPO, 'src/ws-handler.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? ' — ' + extra : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? ' — ' + extra : '')); } };
 
 const contract = new Set(WS_CTX_CONTRACT);
 ok(contract.size >= 40, `contract is populated (${contract.size} keys)`);

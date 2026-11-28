@@ -102,7 +102,7 @@ const PROJ = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-
 const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pct = (d, of) => (of > 0 ? `${(100 * d / of).toFixed(1)} %` : 'n/a');
 
@@ -517,7 +517,7 @@ if (!midTurn) check('④ the fixture has a user turn past its midpoint', false);
 else {
   const tp = await teleport();
   console.log(`  teleport: ${JSON.stringify(tp)}`);
-  check(`④ the teleport landed in the elided middle (${tp.gap} gap cards, teleported=${tp.ok})`, tp.ok, JSON.stringify(tp));
+  check(`④ the teleport landed in the elided middle (${tp.gap} gap cards, teleported=${tp.ok})`, verdictOf(tp.ok), JSON.stringify(tp));
   const T0 = await measure('teleport slab');
   const c0 = await bandCensus();
   console.log(`  band after the teleport: ${JSON.stringify(c0)}`);
@@ -531,7 +531,7 @@ else {
   T2 = await measure('teleport + 2 slabs');
   census = await bandCensus();
   console.log(`  band after two slabs: ${JSON.stringify(census)}`);
-  check(`④a both gap page-ups loaded a slab (${p1.g0} → ${p1.gap} → ${p2.gap} gap cards)`, p1.ok && p2.ok, JSON.stringify([p1, p2]));
+  check(`④a both gap page-ups loaded a slab (${p1.g0} → ${p1.gap} → ${p2.gap} gap cards)`, gateOf(p1.ok) && verdictOf(p2.ok), JSON.stringify([p1, p2]));
   check(`④b THE BAND: every card in view (${census.inView}) and within 2 viewports (${census.near}) is exposed (${census.inViewHidden} / ${census.nearHidden} aria-hidden), every card beyond 2 viewports is out of the tree (${census.beyond} beyond, ${census.beyondExposed} exposed); ${census.hidden} of ${census.cards - census.folded} non-folded cards hidden`,
     census.inView > 0 && census.inViewHidden === 0 && census.nearHidden === 0 && census.beyond > 0 && census.beyondExposed === 0, JSON.stringify(census));
   // THE GROWTH INVARIANT, as measured: the band bounds the PLATFORM tree — NON-IGNORED is flat across a
@@ -556,7 +556,7 @@ else {
   // band let through would still be red here — and ⑥ proves the predicate bites.
   const shrank = T2.live < 0.90 * T1.live;
   check(`④c GROWTH INVARIANT (the platform tree): the second 2,000-line slab (${T1.page.rendered} → ${T2.page.rendered} rendered cards) never GROWS NON-IGNORED by > 10 % (${T1.live} → ${T2.live}${shrank ? ` — a SHRINK: slab 1's landing exposed ${edge1?.zeroHeightAtTop || 0} + ${edge1?.zeroHeightAtBottom || 0} zero-height rows within 16 px of the band's edges, anchors ${JSON.stringify(edge1?.anchors || [])}` : ''}); TOTAL ${T1.total} → ${T2.total} = ${((T2.total - T1.total) / Math.max(1, T2.page.rendered - T1.page.rendered)).toFixed(1)} serialised nodes per added card (ignored — see ⑥ for the exposed cost)`,
-    noGrowth(T1.live, T2.live));
+    verdictOf(noGrowth(T1.live, T2.live)));
   // the design's §4 per-window ceiling (5,000) assumed aria-hidden removes a hidden card's serialisation
   // entirely; it removes ≈ 60–70 % of it (11.5 → 4.7 per card at a2). Pinned at the measured number
   // ×1.25 on THIS deterministic state (the design's rule: measure, then pin; tighten as each step
@@ -586,7 +586,7 @@ else {
     return { off, outside: key != null, on: { list: list.getAttribute('aria-hidden'), hidden: cards().filter((e) => e.getAttribute('aria-hidden') === 'true').length, cards: cards().length, why: v._axBand?.why } };
   })()`);
   check(`⑤ exposeChat=false ⇒ the LIST is aria-hidden (${sw.off.list}); true ⇒ the list is not (${sw.on.list}) and the band is re-derived on the flip without a scroll, for a view outside app.sessions (${sw.on.hidden} of ${sw.on.cards} cards hidden again, why=${sw.on.why})`,
-    sw.off.list === 'true' && sw.on.list == null && sw.outside && sw.on.hidden > 0 && /^setting/.test(sw.on.why || ''), JSON.stringify(sw));
+    sw.off.list === 'true' && sw.on.list == null && gateOf(sw.outside) && sw.on.hidden > 0 && verdictOf(/^setting/.test(sw.on.why || '')), JSON.stringify(sw));
 
   // ⑦ FOCUS EXPOSES ITS CARD IN THE FOCUS EVENT'S OWN TASK (verifier finding, 2026-09-22): Tab /
   //    Shift+Tab / .focus() can land inside a band-hidden card, and the pass that exempts the
@@ -667,7 +667,7 @@ else {
     await evaljs(`(() => { window.removeEventListener('focusin', window.__axBlock, true); document.querySelector('[data-ax-probe="focus-from"]').focus({ preventScroll: true }); return true; })()`);
     console.log(`  ⑦a control: ${JSON.stringify(ctl)} · Chrome's AX node ${JSON.stringify(ctlAx)} · Chrome blocked ${ctlBlocked.length}: ${JSON.stringify(ctlBlocked[0] || '')}`);
     check(`⑦a NEGATIVE CONTROL: with the list's focusin handler blocked (the pre-fix code) a .focus() into a band-hidden card leaves the card aria-hidden at the focus instant (before ${ctl?.before}, after ${ctl?.after}) and Chrome has to block it (${ctlBlocked.length} "Blocked aria-hidden" warning${ctlBlocked.length === 1 ? '' : 's'})`,
-      ctl?.inList && ctl.before === 'true' && ctl.after === 'true' && ctlBlocked.length >= 1, JSON.stringify({ ctl, ctlAx, ctlBlocked }));
+      gateOf(ctl?.inList) && ctl.before === 'true' && ctl.after === 'true' && ctlBlocked.length >= 1, JSON.stringify({ ctl, ctlAx, ctlBlocked }));
     // ⑦b .focus() — exposed in the focus event's own task, kept by the band's exemption, nothing widened
     await evaljs(`(() => { document.querySelector('[data-ax-probe="focus-prog"]').focus({ preventScroll: true }); return true; })()`);
     const progAx = await axOfActive();
@@ -676,9 +676,9 @@ else {
     const progBlocked = blocked.splice(0);
     console.log(`  ⑦b .focus(): ${JSON.stringify(prog)} · Chrome's AX node ${JSON.stringify(progAx)} · Chrome blocked ${progBlocked.length} · +1.8 s ${JSON.stringify(kept)}`);
     check(`⑦b .focus() into a band-hidden card exposes it in the focus event's own task (before ${prog?.before} → after ${prog?.after}; the focused ${prog?.tag} not ignored in Chrome's tree: ${!progAx.ignored}) and Chrome never has to block an aria-hidden (${progBlocked.length} warnings)`,
-      prog?.inList && prog.before === 'true' && prog.after == null && progAx.ignored === false && progBlocked.length === 0, JSON.stringify({ prog, progAx, progBlocked }));
+      gateOf(prog?.inList) && prog.before === 'true' && prog.after == null && progAx.ignored === false && progBlocked.length === 0, JSON.stringify({ prog, progAx, progBlocked }));
     check(`⑦b …the band's next passes keep it exposed (+1.8 s: card ${kept.card}, why=${kept.why}) and widen nothing: exactly ONE card fewer hidden (${focusSetup.hidden} → ${kept.hidden}) with the view unmoved (st ${focusSetup.st} → ${kept.st}, ws ${focusSetup.ws} → ${kept.ws})`,
-      kept.active && kept.card == null && kept.hidden === focusSetup.hidden - 1 && kept.st === focusSetup.st && kept.ws === focusSetup.ws, JSON.stringify(kept));
+      gateOf(kept.active) && kept.card == null && kept.hidden === focusSetup.hidden - 1 && kept.st === focusSetup.st && kept.ws === focusSetup.ws, JSON.stringify(kept));
     // ⑦c the verifier's keyboard path: Shift+Tab from the first tabbable after the list
     await evaljs(`(() => { document.querySelector('[data-ax-probe="focus-from"]').focus({ preventScroll: true }); return true; })()`);
     blocked.splice(0);
@@ -689,7 +689,7 @@ else {
     const landed = await evaljs(`document.activeElement === document.querySelector('[data-ax-probe="focus-last"]')`);
     console.log(`  ⑦c Shift+Tab: ${JSON.stringify(kb)} · on the predicted last tabbable ${landed} · Chrome's AX node ${JSON.stringify(keyAx)} · Chrome blocked ${keyBlocked.length}`);
     check(`⑦c Shift+Tab from the first tabbable after the list (${focusSetup.from.cls}) lands inside the list in a band-hidden card (${kb?.tag}.${kb?.cls}, before ${kb?.before}) and that card is exposed at the focus instant (after ${kb?.after}; ${keyBlocked.length} "Blocked aria-hidden" warnings)`,
-      kb?.inList && kb.before === 'true' && kb.after == null && keyAx.ignored === false && keyBlocked.length === 0, JSON.stringify({ kb, keyAx, keyBlocked, landed }));
+      gateOf(kb?.inList) && kb.before === 'true' && kb.after == null && keyAx.ignored === false && keyBlocked.length === 0, JSON.stringify({ kb, keyAx, keyBlocked, landed }));
     await evaljs(`(() => { window.removeEventListener('focusin', window.__axRec, true); document.activeElement?.blur?.(); return true; })()`);
   }
   await cdp('Log.disable');
@@ -716,7 +716,7 @@ if (T2 && census) {
       const C2 = await measure('CONTROL: band neutered, teleport + 2 slabs');
       const cc = await bandCensus();
       console.log(`  control band: ${JSON.stringify(cc)}`);
-      check(`⑥ NEGATIVE CONTROL: the same gestures on the neutered copy really ran (${cc.cards} vs ${census.cards} rendered cards)`, tp.ok && p1.ok && p2.ok && cc.cards >= 0.8 * census.cards, JSON.stringify({ tp, p1, p2 }));
+      check(`⑥ NEGATIVE CONTROL: the same gestures on the neutered copy really ran (${cc.cards} vs ${census.cards} rendered cards)`, gateOf(tp.ok) && gateOf(p1.ok) && gateOf(p2.ok) && cc.cards >= 0.8 * census.cards, JSON.stringify({ tp, p1, p2 }));
       check(`⑥ NEGATIVE CONTROL: with the band neutered every card beyond 2 viewports is exposed (${cc.beyond} beyond, ${cc.beyondExposed} exposed, ${cc.hidden} hidden)`, cc.beyond > 0 && cc.beyondExposed === cc.beyond && cc.hidden === 0, JSON.stringify(cc));
       check(`⑥ NEGATIVE CONTROL: …and the exposure GROWS by > 30 % — TOTAL ${T2.total} → ${C2.total} (${ratio(C2.total, T2.total)}), NON-IGNORED ${T2.live} → ${C2.live} (${ratio(C2.live, T2.live)})`,
         C2.total > 1.3 * T2.total && C2.live > 1.3 * T2.live);
@@ -743,4 +743,4 @@ if (T2 && census) {
 
 ws.close();
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

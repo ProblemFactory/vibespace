@@ -78,7 +78,7 @@ function withDecisionRoad(store) {
   });
 }
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -283,7 +283,7 @@ if (!probe) {
     return key;
   };
   ok('§2 NEGATIVE CONTROL: orgVerifiedKey\'s rule, applied to the very same state, files the reading on the account the session was SPAWNED on', preFix(w.session, w.SPARE) === w.FISH && w.eng.readingSlotFor(w.session).key === w.SPARE, `pre-fix=${preFix(w.session, w.SPARE)} now=${w.eng.readingSlotFor(w.session).key}`);
-  ok('§2 …and a label naming the slot\'s own member changes nothing either (the key is the slot either way)', (() => { w.obs.set(w.CID, { orgUuid: 'org-x', acct: w.SPARE, known: true, ts: Date.now() }); return w.eng.readingSlotFor(w.session).key === w.SPARE; })());
+  ok('§2 …and a label naming the slot\'s own member changes nothing either (the key is the slot either way)', verdictOf((() => { w.obs.set(w.CID, { orgUuid: 'org-x', acct: w.SPARE, known: true, ts: Date.now() }); return w.eng.readingSlotFor(w.session).key === w.SPARE; })()));
 }
 
 // ── §3 the turn pin ────────────────────────────────────────────────────────
@@ -311,7 +311,7 @@ if (!probe) {
   await new Promise((r) => setTimeout(r, 2)); // the ledger is ms-stamped; two writes inside one ms are indistinguishable BY TIME
   w.am.ensureSessionPoolLink(w.P, w.SID, w.SPARE, { why: 'per-session-switch' });
   const rows = st.all();
-  ok('§4 accounts.js is the SINGLE WRITER: the spawn link, the pool default and the switch are all on record', rows.length >= 3 && rows.some((r) => r.sessionId === w.SID && r.to === w.SPARE && r.from === w.LINK && r.why === 'per-session-switch'), JSON.stringify(rows.map((r) => `${r.sessionId || '(default)'}:${r.from}→${r.to}:${r.why}`)));
+  ok('§4 accounts.js is the SINGLE WRITER: the spawn link, the pool default and the switch are all on record', rows.length >= 3 && verdictOf(rows.some((r) => r.sessionId === w.SID && r.to === w.SPARE && r.from === w.LINK && r.why === 'per-session-switch')), JSON.stringify(rows.map((r) => `${r.sessionId || '(default)'}:${r.from}→${r.to}:${r.why}`)));
   ok('§4 a lookup by TIME answers where the conversation was BEFORE the switch', st.slotAt(w.SID, spawnRow.at).id === w.LINK, JSON.stringify(st.slotAt(w.SID, spawnRow.at)));
   ok('§4 …and after it', st.slotAt(w.SID, Date.now() + 1).id === w.SPARE);
   ok('§4 a session with NO link of its own falls back to the pool DEFAULT (which decides for it)', st.slotAt('some-other-session', Date.now() + 1, { poolId: w.P }).scope === 'default');
@@ -325,8 +325,8 @@ if (!probe) {
   const arch = fs.readdirSync(path.join(d2, 'archive')).filter((f) => /^slot-transitions-\d+\.jsonl$/.test(f));
   ok('§4 bounded: past the cap the file is trimmed…', live.length < 40 && live.length > 0, `live=${live.length}`);
   ok('§4 …by ARCHIVING the head, never deleting it — and all() still reads the whole history', arch.length === 1 && small.all().length === 40, `archives=${arch.length} all=${small.all().length}`);
-  ok('§4 a repeated re-point of the same link inside a minute is ONE fact', (() => { const before = small.all().length; small.record({ sessionId: 'dup', to: 'sub-z', at: 5000 }); const mid = small.all().length; small.record({ sessionId: 'dup', to: 'sub-z', at: 5100 }); return mid === before + 1 && small.all().length === mid; })());
-  ok('§4 …but a SAME-TARGET re-point after the window IS recorded (it is evidence the link was confirmed there)', (() => { const before = small.all().length; small.record({ sessionId: 'dup', to: 'sub-z', at: 5000 + 120000 }); return small.all().length === before + 1; })());
+  ok('§4 a repeated re-point of the same link inside a minute is ONE fact', verdictOf((() => { const before = small.all().length; small.record({ sessionId: 'dup', to: 'sub-z', at: 5000 }); const mid = small.all().length; small.record({ sessionId: 'dup', to: 'sub-z', at: 5100 }); return mid === before + 1 && small.all().length === mid; })()));
+  ok('§4 …but a SAME-TARGET re-point after the window IS recorded (it is evidence the link was confirmed there)', verdictOf((() => { const before = small.all().length; small.record({ sessionId: 'dup', to: 'sub-z', at: 5000 + 120000 }); return small.all().length === before + 1; })()));
   cap.done();
 }
 
@@ -339,7 +339,7 @@ if (!probe) {
   // THE PRODUCTION SHAPE, byte-for-byte: accessToken "" / expiresAt 0, file present
   const wiped = w('b.json', JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: now + 30 * 86400e3, scopes: ['user:inference'], subscriptionType: 'max', rateLimitTier: 'default_claude_max_20x' } }));
   const wst = loginState(wiped, { now });
-  ok('§5 wiped (the shape this instance actually has: empty tokens, expiresAt 0) — and `since` is the write that emptied it, as a WHOLE millisecond (mtimeMs is fractional on ext4/NFS)', wst.state === 'wiped' && !wst.usable && wst.since === Math.round(fs.statSync(wiped).mtimeMs) && Number.isInteger(wst.since), JSON.stringify(wst));
+  ok('§5 wiped (the shape this instance actually has: empty tokens, expiresAt 0) — and `since` is the write that emptied it, as a WHOLE millisecond (mtimeMs is fractional on ext4/NFS)', wst.state === 'wiped' && !wst.usable && wst.since === Math.round(fs.statSync(wiped).mtimeMs) && verdictOf(Number.isInteger(wst.since)), JSON.stringify(wst));
   const exp = loginState(w('c.json', CREDS('c', { expiresAt: now - 10000, refreshExpiresAt: now - 5000 })), { now });
   ok('§5 expired = BOTH tokens dead; `since` is the later expiry, not the file mtime', exp.state === 'expired' && !exp.usable && exp.since === now - 5000, JSON.stringify(exp));
   ok('§5 access expired but refresh alive is still LIVE (the CLI refreshes it)', loginState(w('d.json', CREDS('d', { expiresAt: now - 10000 })), { now }).state === 'live');
@@ -347,12 +347,12 @@ if (!probe) {
   // the gap 2.369.66 called unsatisfiable
   const { get: harnessOf } = require(path.join(REPO, 'src/harnesses/index.js'));
   const parsed = harnessOf('claude').creds.parseAuth(d.replace(/[^/]*$/, '')) || {};
-  ok('§5 THE SATISFIABLE GAP: parseAuth reports loggedIn TRUE for a doubly-expired login (it only nulls the accessToken), so poolMembers keeps it — which is why validateBillingSlot needs an explicit state leg', (() => {
+  ok('§5 THE SATISFIABLE GAP: parseAuth reports loggedIn TRUE for a doubly-expired login (it only nulls the accessToken), so poolMembers keeps it — which is why validateBillingSlot needs an explicit state leg', verdictOf((() => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-gap-')); cleanup.push(dir);
     fs.writeFileSync(path.join(dir, '.credentials.json'), CREDS('g', { expiresAt: now - 10000, refreshExpiresAt: now - 5000 }));
     const info = harnessOf('claude').creds.parseAuth(dir);
     return info.loggedIn === true && loginState(path.join(dir, '.credentials.json'), { now }).usable === false;
-  })(), JSON.stringify(parsed));
+  })()), JSON.stringify(parsed));
   // …and the engine's slot validation uses it
   {
     const w2 = mkWorld();
@@ -371,14 +371,14 @@ if (!probe) {
     fs.writeFileSync(path.join(w3.am.subDir(w3.SPARE), '.credentials.json'), CREDS(w3.SPARE, { expiresAt: now - 10000, refreshExpiresAt: now - 5000 }));
     const after = w3.eng.healthyPoolMembers(w3.P).map((m) => m.id).sort();
     cap.done();
-    ok('§5 a doubly-expired member is dropped from the switch CANDIDATES…', before.includes(w3.SPARE) && !after.includes(w3.SPARE) && after.length === before.length - 1, JSON.stringify({ before: before.length, after: after.length }));
-    ok('§5 …while poolMembers still offers it (which is exactly why the engine needed its own filter)', w3.am.poolMembers(w3.P).some((m) => m.id === w3.SPARE));
-    ok('§5 …and there is NO all-unusable fallback: an empty candidate list is the honest "only the user can fix this" state', (() => {
+    ok('§5 a doubly-expired member is dropped from the switch CANDIDATES…', gateOf(before.includes(w3.SPARE)) && !after.includes(w3.SPARE) && after.length === before.length - 1, JSON.stringify({ before: before.length, after: after.length }));
+    ok('§5 …while poolMembers still offers it (which is exactly why the engine needed its own filter)', verdictOf(w3.am.poolMembers(w3.P).some((m) => m.id === w3.SPARE)));
+    ok('§5 …and there is NO all-unusable fallback: an empty candidate list is the honest "only the user can fix this" state', verdictOf((() => {
       for (const id of [w3.FISH, w3.LINK]) fs.writeFileSync(path.join(w3.am.subDir(id), '.credentials.json'), CREDS(id, { expiresAt: now - 10000, refreshExpiresAt: now - 5000 }));
       const w4 = mkWorld(); // fresh engine: the state memo is 30s
       for (const id of [w4.FISH, w4.LINK, w4.SPARE]) fs.writeFileSync(path.join(w4.am.subDir(id), '.credentials.json'), CREDS(id, { expiresAt: now - 10000, refreshExpiresAt: now - 5000 }));
       return w4.eng.healthyPoolMembers(w4.P).length === 0;
-    })());
+    })()));
   }
   // ── §5b THE CROSSING LEG (integration r2, a REPRODUCED merge-only defect).
   // The two halves above were each pinned alone: "healthyPoolMembers drops the
@@ -405,7 +405,7 @@ if (!probe) {
     for (const id of [w5.FISH, w5.SPARE]) fs.writeFileSync(path.join(w5.am.subDir(id), '.credentials.json'), dead(id));
     const n5 = blocked(w5);
     ok('§5b the pool NAMES the login wall end to end (healthyPoolMembers → decidePoolSwitch → poolBlockedNotice), not a spent quota bucket',
-      /Re-login those accounts in Manage Agents/.test(n5) && n5.includes('Member F') && n5.includes('Member B'), n5);
+      gateOf(/Re-login those accounts in Manage Agents/.test(n5)) && gateOf(n5.includes('Member F')) && verdictOf(n5.includes('Member B')), n5);
     ok('§5b …and does NOT prescribe the quota remedy for a wall the user clears in 30 seconds',
       !/until a window resets/.test(n5), n5);
 
@@ -415,7 +415,7 @@ if (!probe) {
     for (const id of [w6.LINK, w6.FISH, w6.SPARE]) spent(w6, id);
     const n6 = blocked(w6);
     ok('§5b NEG ① an all-quota-dead pool keeps the quota sentence and never says re-login',
-      /until a window resets/.test(n6) && !/[Rr]e-login/.test(n6), n6);
+      gateOf(/until a window resets/.test(n6)) && !/[Rr]e-login/.test(n6), n6);
 
     // NEGATIVE CONTROL ②: the member only the FILE reader can call dead. The
     // naming must not cost the exclusion — it must still never become a
@@ -430,7 +430,7 @@ if (!probe) {
     ok('§5b NEG ② …but poolReadLogin folds BOTH readers, so the decision still excludes it',
       w7.eng.poolReadLogin()(w7.FISH).state === 'expired');
     const n7 = blocked(w7);
-    ok('§5b NEG ② …the pool did NOT move onto it, and the notice names it', w7.am.poolCurrent(w7.P) === w7.LINK && n7.includes('Member F') && /Re-login/.test(n7), n7);
+    ok('§5b NEG ② …the pool did NOT move onto it, and the notice names it', w7.am.poolCurrent(w7.P) === w7.LINK && gateOf(n7.includes('Member F')) && verdictOf(/Re-login/.test(n7)), n7);
 
     // …and the two lists stay two different questions: DECIDE sees the dead
     // members (so it can name them), ACT never does.
@@ -517,17 +517,17 @@ if (!probe) {
   ok('§6 a LIVE member\'s cache is untouched', JSON.parse(fs.readFileSync(path.join(cache, LIVE + '.json'), 'utf8')).fetchedAt === AFTER);
   const arch = (n) => fs.readFileSync(path.join(dataDir, 'archive', n), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const ac = arch('readings-foreign-usage-cache.ndjson');
-  ok('§6 the discarded snapshot is ARCHIVED WITH A REASON, never silently dropped', ac.length === 1 && /after this account's login was wiped at 2026-09-03T05:55/.test(ac[0].reason) && ac[0].entry.fetchedAt === AFTER, JSON.stringify(ac[0] && ac[0].reason));
+  ok('§6 the discarded snapshot is ARCHIVED WITH A REASON, never silently dropped', ac.length === 1 && gateOf(/after this account's login was wiped at 2026-09-03T05:55/.test(ac[0].reason)) && ac[0].entry.fetchedAt === AFTER, JSON.stringify(ac[0] && ac[0].reason));
   const left = fs.readFileSync(A, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   ok('§6 both foreign ANCHORS are gone, the honest one stays', left.length === 1 && left[0].fetchedAt === BEFORE, JSON.stringify(left.map((r) => r.fetchedAt)));
   ok('§6 …archived with a reason too', arch('readings-foreign-anchors.ndjson').length === 2);
   ok('§6 the LIVE identity\'s anchors are untouched', fs.readFileSync(B, 'utf8').trim().split('\n').length === 1);
   ok('§6 the learned rates are archived and dropped so the estimator re-learns from the cleaned pairs', !fs.existsSync(path.join(anchors, 'rates.json')) && arch('readings-foreign-rates.ndjson').length === 1);
   const at = fs.readFileSync(path.join(hist, 'attribution.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  ok('§6 an attribution entry WITH a slot transition on record is RE-ATTRIBUTED by time', at.some((r) => r.sid === 'conv-2' && r.acct === LIVE && r.repairedBy === 'T'), JSON.stringify(at));
-  ok('§6 …one WITHOUT is archived, so the by-time walk falls back to that session\'s previous un-refuted entry', !at.some((r) => r.sid === 'conv-1' && r.acct === DEAD) && at.some((r) => r.sid === 'conv-1' && r.acct === LIVE && r.ts === BEFORE));
+  ok('§6 an attribution entry WITH a slot transition on record is RE-ATTRIBUTED by time', verdictOf(at.some((r) => r.sid === 'conv-2' && r.acct === LIVE && r.repairedBy === 'T')), JSON.stringify(at));
+  ok('§6 …one WITHOUT is archived, so the by-time walk falls back to that session\'s previous un-refuted entry', !at.some((r) => r.sid === 'conv-1' && r.acct === DEAD) && verdictOf(at.some((r) => r.sid === 'conv-1' && r.acct === LIVE && r.ts === BEFORE)));
   const aa = arch('readings-foreign-attribution.ndjson');
-  ok('§6 …and both carry a reason naming the evidence', aa.length === 2 && aa.some((r) => /slot transition at/.test(r.reason)) && aa.some((r) => /no slot transition on record/.test(r.reason)), JSON.stringify(aa.map((r) => r.reason)));
+  ok('§6 …and both carry a reason naming the evidence', aa.length === 2 && gateOf(aa.some((r) => /slot transition at/.test(r.reason))) && verdictOf(aa.some((r) => /no slot transition on record/.test(r.reason))), JSON.stringify(aa.map((r) => r.reason)));
   ok('§6 the ledger re-bake marker is cleared so the baked events recompute from the cleaned walk', !fs.existsSync(path.join(hist, '.attrib-rebake-v1')));
 
   // idempotent + restart-safe
@@ -590,7 +590,7 @@ if (!probe) {
   const st = S.staleSince({ state: 'wiped', usable: false, since: 1000 }, 5000);
   ok('§8 a signed-out member names the state, the instant, and that its newest reading POSTDATES the death (= not its own)', st.what === 'signed out' && st.since === 1000 && st.suspect === true, JSON.stringify(st));
   ok('§8 …while a reading from before the death is simply old, not suspect', S.staleSince({ state: 'wiped', usable: false, since: 5000 }, 1000).suspect === false);
-  ok('§8 the stamp is absolute (a "5 days ago" for something that will never move again is the wrong unit)', /\d/.test(S.stampText(Date.parse('2026-09-03T05:55:00Z'))) && S.stampText(null) === '—');
+  ok('§8 the stamp is absolute (a "5 days ago" for something that will never move again is the wrong unit)', gateOf(/\d/.test(S.stampText(Date.parse('2026-09-03T05:55:00Z')))) && S.stampText(null) === '—');
   // (§8 the meter's wiring pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
@@ -679,12 +679,12 @@ if (!probe) {
   const at2 = at + 60000;
   w.am.noteDeviceRepoint({ link: w.am.subDir(w.P), poolId: w.P, from: w.am.subDir(w.SPARE), to: w.FISH, at: at2 });
   ok('§11b …and a move of the pool DEFAULT link is recorded as the default (sessionId null), so it answers for sessions with no link of their own', st.slotAt('some-other-session', at2, { poolId: w.P }).scope === 'default' && st.slotAt('some-other-session', at2, { poolId: w.P }).id === w.FISH, JSON.stringify(st.slotAt('some-other-session', at2, { poolId: w.P })));
-  ok('§11b an unresolvable `from` is left null, never guessed (the daemon reports a PATH, the ledger stores ids)', (() => {
+  ok('§11b an unresolvable `from` is left null, never guessed (the daemon reports a PATH, the ledger stores ids)', verdictOf((() => {
     const at3 = at2 + 60000;
     w.am.noteDeviceRepoint({ link, poolId: w.P, from: '/somewhere/sub-not-an-account', to: w.LINK, at: at3 });
     const r = st.all().find((x) => x.at === at3);
     return !!r && r.from === null && r.to === w.LINK;
-  })());
+  })()));
 }
 
 // (c) MEDIUM — when the migration archives the ONLY attribution entry of a
@@ -740,9 +740,9 @@ if (!probe) {
   const x = evAfter.find((e) => e.sid === 'conv-X');
   ok('§11c an event whose conversation LOST its only attribution entry is re-baked off the refuted account…', x.acct === LIVEX && x.aname === 'Live', JSON.stringify(x));
   ok('§11c …onto the session-meta account, which is the un-refuted record we still hold', JSON.parse(fs.readFileSync(path.join(fixed.dataDir, 'session-meta', 'sess-x.json'), 'utf8')).accountId === LIVEX);
-  ok('§11c …the repair NAMES those conversations for the re-bake (a list that stays true, so any later generation inherits it)', JSON.parse(fs.readFileSync(path.join(fixed.hist, '.attrib-emptied.json'), 'utf8')).includes('conv-X'));
+  ok('§11c …the repair NAMES those conversations for the re-bake (a list that stays true, so any later generation inherits it)', verdictOf(JSON.parse(fs.readFileSync(path.join(fixed.hist, '.attrib-emptied.json'), 'utf8')).includes('conv-X')));
   ok('§11c a conversation that KEEPS an entry still re-bakes the ordinary way', evAfter.find((e) => e.sid === 'conv-Y').acct === LIVEX);
-  ok('§11c …and one that NEVER had an entry is left exactly as it was (the deliberate rule this fix does not widen)', (() => { const z = evAfter.find((e) => e.sid === 'conv-Z'); return z.acct === 'sub-zzz' && z.aname === 'Z'; })());
+  ok('§11c …and one that NEVER had an entry is left exactly as it was (the deliberate rule this fix does not widen)', verdictOf((() => { const z = evAfter.find((e) => e.sid === 'conv-Z'); return z.acct === 'sub-zzz' && z.aname === 'Z'; })()));
   // NEGATIVE CONTROL: the same repair, the same re-bake, without the list
   const ctl = mkRebakeFixture();
   const evCtl = runRepairAndRebake(ctl, { dropEmptiedList: true });
@@ -765,10 +765,10 @@ if (!probe) {
   ok('§11d the ACCOUNT reader says the account is usable through its long-lived token', withOat.state === 'oat' && withOat.usable === true && withOat.since === null, JSON.stringify(withOat));
   const deadOat = accountLoginState(wiped, { now, oatMintedAt: now - (OAT_TTL_MS + 86400e3) });
   ok('§11d …and when BOTH channels are dead it dies at the LATER instant, never the earlier one', deadOat.usable === false && deadOat.since === Math.max(Math.round(fs.statSync(wiped).mtimeMs), now - 86400e3), JSON.stringify(deadOat));
-  ok('§11d …an oat also DATES an account whose dir was never there at all ("missing" has no mtime to speak with)', (() => {
+  ok('§11d …an oat also DATES an account whose dir was never there at all ("missing" has no mtime to speak with)', verdictOf((() => {
     const st2 = accountLoginState(path.join(d, 'nope.json'), { now, oatMintedAt: now - (OAT_TTL_MS + 3600e3) });
     return st2.usable === false && st2.since === now - 3600e3;
-  })());
+  })()));
   ok('§11d …and with no token at all it is byte-for-byte the file answer (one predicate, no second opinion)', JSON.stringify(accountLoginState(wiped, { now })) === JSON.stringify(loginState(wiped, { now })));
   ok('§11d the TTL has ONE definition — accounts.js reads it from login-state (a second copy is a twin that expires on a different day)', probe.am.OAT_TTL_MS === OAT_TTL_MS && OAT_TTL_MS > 0);
 
@@ -807,8 +807,8 @@ if (!probe) {
     const anchorsBefore = fs.readFileSync(path.join(f.dataDir, 'usage-anchors', 'anchors-org_oat.ndjson'), 'utf8');
     const notes = runMigration(f.root);
     ok('§11d MIGRATION: an oat-only member\'s fresh reading survives (it really is that account\'s)', fs.readFileSync(path.join(f.dataDir, 'usage-cache', f.OAT + '.json'), 'utf8') === before, fs.readFileSync(path.join(f.dataDir, 'usage-cache', f.OAT + '.json'), 'utf8').slice(0, 120));
-    ok('§11d …its anchors and the instance-wide learned rates survive too', fs.readFileSync(path.join(f.dataDir, 'usage-anchors', 'anchors-org_oat.ndjson'), 'utf8') === anchorsBefore && fs.existsSync(path.join(f.dataDir, 'usage-anchors', 'rates.json')));
-    ok('§11d …its attribution entry survives, and nothing was archived', fs.readFileSync(path.join(f.dataDir, 'usage-history', 'attribution.ndjson'), 'utf8').includes('conv-oat') && !fs.existsSync(path.join(f.dataDir, 'archive')) && notes.length === 0);
+    ok('§11d …its anchors and the instance-wide learned rates survive too', fs.readFileSync(path.join(f.dataDir, 'usage-anchors', 'anchors-org_oat.ndjson'), 'utf8') === anchorsBefore && verdictOf(fs.existsSync(path.join(f.dataDir, 'usage-anchors', 'rates.json'))));
+    ok('§11d …its attribution entry survives, and nothing was archived', gateOf(fs.readFileSync(path.join(f.dataDir, 'usage-history', 'attribution.ndjson'), 'utf8').includes('conv-oat')) && !fs.existsSync(path.join(f.dataDir, 'archive')) && notes.length === 0);
   }
   {
     // NEGATIVE CONTROL: the very same fixture with NO token — every store IS
@@ -851,10 +851,10 @@ if (!probe) {
   cap.done();
   ok('§11e a preserve-merge does NOT inherit the previous write\'s corroboration verdict', merged.corroborated === undefined && merged.source === 'on-demand', JSON.stringify({ c: merged.corroborated, s: merged.source }));
   ok('§11e …while it still preserves IDENTITY, which is a fact about the account rather than about one reading', merged.orgUuid === 'org-keep' && merged.orgName === 'Keep');
-  ok('§11e …and a caller that DOES supply a verdict keeps it (undefined ⇒ delete is the rule captureRateLimitEvent states; an unconditional delete would be accept-and-ignore)', (() => {
+  ok('§11e …and a caller that DOES supply a verdict keeps it (undefined ⇒ delete is the rule captureRateLimitEvent states; an unconditional delete would be accept-and-ignore)', verdictOf((() => {
     w.eng.writeUsageCacheForKey(w.LINK, { fiveHour: { utilization: 0.7 }, source: 'on-demand', fetchedAt: Date.now(), corroborated: true });
     return w.readCache(w.LINK).corroborated === true;
-  })());
+  })()));
   // (was a NEGATIVE CONTROL "a producer that DOES have an opinion still stamps
   // it" — since 2026-09-30 no live producer has one: the OTel org is a
   // machine-wide label and corroborates nothing, lane-hot-switch)
@@ -932,7 +932,7 @@ if (!probe) {
     const rep = runRepair(f);
     const row = lines(f)[0];
     ok('§12a a conversation is re-attributed to ITS OWN credential link\'s target, joined through session-meta (the ledger speaks webui keys, attribution speaks conversation ids)', rep.reattributed === 1 && row.acct === FISH && row.repairedBy === 'R3', JSON.stringify({ rep, row }));
-    ok('§12a …and the archived copy NAMES the webui session it was joined through', /scope session, via session sess-7-/.test(String(archLine(f)?.reason)), String(archLine(f)?.reason));
+    ok('§12a …and the archived copy NAMES the webui session it was joined through', verdictOf(/scope session, via session sess-7-/.test(String(archLine(f)?.reason))), String(archLine(f)?.reason));
   }
   {
     // NEGATIVE CONTROL #1: the pre-fix lookup, run against this very ledger.
@@ -949,7 +949,7 @@ if (!probe) {
     const f = mkFixture({ withMeta: false });
     const rep = runRepair(f);
     ok('§12a a conversation we cannot join to a webui key is ARCHIVED, not re-attributed to whatever the pool default happened to be', rep.reattributed === 0 && rep.archived === 1 && rep.unjoinable === 1 && lines(f).length === 0, JSON.stringify(rep));
-    ok('§12a …and the reason says WHICH evidence was missing', /no webui session key for this conversation/.test(String(archLine(f)?.reason)), String(archLine(f)?.reason));
+    ok('§12a …and the reason says WHICH evidence was missing', verdictOf(/no webui session key for this conversation/.test(String(archLine(f)?.reason))), String(archLine(f)?.reason));
   }
   {
     // joinable, but only the DEFAULT has a row: still not evidence about a
@@ -957,7 +957,7 @@ if (!probe) {
     const f = mkFixture({ ownRow: false });
     const rep = runRepair(f);
     ok('§12a a joinable conversation with only a POOL-DEFAULT row is archived too (the default is not evidence about a session that may have had its own link)', rep.reattributed === 0 && rep.archived === 1, JSON.stringify(rep));
-    ok('§12a …and says so', /only the POOL DEFAULT answers for it/.test(String(archLine(f)?.reason)), String(archLine(f)?.reason));
+    ok('§12a …and says so', verdictOf(/only the POOL DEFAULT answers for it/.test(String(archLine(f)?.reason))), String(archLine(f)?.reason));
   }
   {
     // ONE CONVERSATION, MANY WEBUI KEYS: a resume mints a new sess-* under the
@@ -1133,10 +1133,10 @@ if (!probe) {
     const w = mk();
     execFileSync(process.execPath, [SCRIPT], { input: P(11, 22), encoding: 'utf8', env: { ...TOOL_ENV, VIBESPACE_USAGE_CACHE: path.join(w.d, 'usage-cache'), VIBESPACE_ACCOUNT_KEY: 'sub-plain00' } });
     const names = fs.readdirSync(path.join(w.d, 'usage-cache'));
-    ok('§12d a session with NO credential link writes no slot state at all (it cannot switch under itself)', !names.some((n) => n.startsWith('.slot-')) && names.includes('sub-plain00.json'), JSON.stringify(names));
+    ok('§12d a session with NO credential link writes no slot state at all (it cannot switch under itself)', !names.some((n) => n.startsWith('.slot-')) && verdictOf(names.includes('sub-plain00.json')), JSON.stringify(names));
     const w2 = mk();
     render(w2, P(1, 2));
-    ok('§12d …and the state file carries no `.json`, so every usage-cache scanner keeps ignoring it', fs.readdirSync(path.join(w2.d, 'usage-cache')).some((n) => n.startsWith('.slot-') && !n.endsWith('.json')));
+    ok('§12d …and the state file carries no `.json`, so every usage-cache scanner keeps ignoring it', verdictOf(fs.readdirSync(path.join(w2.d, 'usage-cache')).some((n) => n.startsWith('.slot-') && !n.endsWith('.json'))));
   }
   // (§12d the rule names its server-side twin — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -1177,13 +1177,13 @@ if (!probe) {
     ok('§12e …the fixed key keeps the same FROM-LESS row of pool B (the control\'s input)', !!st3.record({ sessionId: null, poolId: 'pool-B', from: null, to: 'sub-shared', at: t0 + 10000, why: 'pool-target' })); }
   // the SESSION dedup is unchanged: a session key is globally unique and a
   // conversation belongs to exactly one pool, so it needs nothing more.
-  ok('§12e a repeated re-point of the SAME session link inside the window is still ONE fact', (() => {
+  ok('§12e a repeated re-point of the SAME session link inside the window is still ONE fact', verdictOf((() => {
     const n = st.all().length;
     st.record({ sessionId: 'sess-9-1', poolId: 'pool-A', to: 'sub-z', at: t0 });
     const mid = st.all().length;
     st.record({ sessionId: 'sess-9-1', poolId: 'pool-A', to: 'sub-z', at: t0 + 100 });
     return mid === n + 1 && st.all().length === mid;
-  })());
+  })()));
 }
 
 // ── §13 THE LAG SHADOW + THE WINDOW GUARD, as a PURE rule ───────────────────
@@ -1245,7 +1245,7 @@ if (!probe) {
     L.compareWindows({ sevenDay: W_A, fiveHour: 111 }, { sevenDay: W_A, fiveHour: nowSec + 7200, scoped: {} }) === 'agree'
     && L.compareWindows({ sevenDay: W_A, fiveHour: READ_5H }, { sevenDay: W_B, fiveHour: READ_5H, scoped: {} }) === 'differ');
   ok('§13 …so a reading with NO weekly component is simply written — never re-filed onto a sibling, never archived (no evidence, no refusal)',
-    (() => {
+    verdictOf((() => {
       const win5 = { fish: { sevenDay: null, fiveHour: OWN_5H, scoped: {} }, bstack: { sevenDay: null, fiveHour: READ_5H, scoped: {} } };
       const d = L.decideReadingTarget({ key: 'fish', readingWindow: { kind: 'fiveHour', resetsAt: READ_5H }, windows: win5 });
       const alone = L.decideReadingTarget({ key: 'fish', readingWindow: { kind: 'fiveHour', resetsAt: READ_5H }, windows: { fish: win5.fish } });
@@ -1253,16 +1253,16 @@ if (!probe) {
       // reading just carries nothing that names an account
       return d.action === 'write' && d.key === 'fish' && /no weekly window/.test(d.reason)
         && alone.action === 'write' && alone.key === 'fish';
-    })());
+    })()));
   ok('§13 NEGATIVE CONTROL: the retired 5-hour rung, on those same numbers, calls the account\'s OWN reading foreign and a stranger\'s a match',
-    (() => {
+    verdictOf((() => {
       // the pre-fix rung, verbatim: absNear on 5h whenever the target's own 5h
       // is still future
       const absNear = (a, b, j = 120) => Math.abs(Number(a) - Number(b)) <= j;
       const nowS = Math.floor(Date.now() / 1000);
       const preFix = (readingR, ownR) => (ownR > nowS) ? (absNear(readingR, ownR) ? 'agree' : 'differ') : 'unknown';
       return preFix(READ_5H, OWN_5H) === 'differ' && preFix(READ_5H, READ_5H) === 'agree';
-    })());
+    })()));
   // TWO MECHANISMS, TWO LEGS. Removing the 5h rung is what makes
   // `compareWindows` answer 'unknown'; the no-weekly early return in
   // `decideReadingTarget` is what keeps that answer from being re-derived by a
@@ -1270,7 +1270,7 @@ if (!probe) {
   // consulted at all, which is why the engine-level leg in §15 survives even a
   // restored rung. Each is mutation-checked on its own.
   ok('§13 MECHANISM 2: a reading with no weekly component short-circuits the guard BEFORE any comparison, and says so in the reason that reaches the journal and the archive',
-    (() => {
+    verdictOf((() => {
       const d = L.decideReadingTarget({
         key: 'fish', readingWindow: { kind: 'fiveHour', resetsAt: READ_5H },
         windows: { fish: { sevenDay: W_A, fiveHour: OWN_5H, scoped: {} }, bstack: { sevenDay: W_B, fiveHour: READ_5H, scoped: {} } },
@@ -1278,7 +1278,7 @@ if (!probe) {
       // the target HAS an established window, so "no established window to
       // contradict" would be a false sentence about it
       return d.action === 'write' && d.key === 'fish' && d.reason === 'reading states no weekly window';
-    })());
+    })()));
   ok('§13 a scoped weekly bucket carries the same fingerprint', L.compareWindows({ kind: 'scoped', scopedName: 'fable', resetsAt: W_A }, { sevenDay: null, fiveHour: null, scoped: { fable: W_B } }, { nowSec }) === 'differ');
 
   // ── the shadow, on the incident's own timing
@@ -1307,7 +1307,7 @@ if (!probe) {
   ok('§13 …while a NEGATIVE age is still rejected (a number that cannot be an age is not evidence)',
     s3d.shadowed === false && s3d.why === 'shadow-expired', JSON.stringify(s3d));
   ok('§13 NEGATIVE CONTROL: the PRE-FIX ordering (clock first) answers `shadow-expired` on the very reading whose window names the previous slot',
-    (() => {
+    verdictOf((() => {
       const preFix = ({ prevKey, newKey, repointAgeMs, shadowMs = L.SHADOW_MS }) => {
         if (!prevKey || !newKey || prevKey === newKey) return 'no-repoint';
         if (!(Number(repointAgeMs) >= 0) || Number(repointAgeMs) > shadowMs) return 'shadow-expired';
@@ -1321,7 +1321,7 @@ if (!probe) {
         && s3.why === 'window-of-previous-slot'
         && preFix({ prevKey: 'acct-A', newKey: 'acct-B', repointAgeMs: null }) === 'window-of-previous-slot'
         && s3c.why === 'identical-payload';
-    })());
+    })()));
   ok('§13 no re-point ⇒ no shadow, ever', L.decideLagShadow({ prevKey: null, newKey: 'acct-B', readingWindow: { kind: 'sevenDay', resetsAt: W_A } }).why === 'no-repoint'
     && L.decideLagShadow({ prevKey: 'acct-B', newKey: 'acct-B', readingWindow: { kind: 'sevenDay', resetsAt: W_A } }).why === 'no-repoint');
   // the r3 statusline clause, now the LAST rung of the same rule
@@ -1339,7 +1339,7 @@ if (!probe) {
   const g2 = L.decideReadingTarget({ key: 'acct-B', readingWindow: { kind: 'sevenDay', resetsAt: W_B }, windows, nowSec });
   ok('§13 …a reading that AGREES is simply written', g2.action === 'write' && g2.key === 'acct-B');
   const g3 = L.decideReadingTarget({ key: 'acct-B', readingWindow: { kind: 'sevenDay', resetsAt: W_B + 3 * 86400 }, windows, nowSec });
-  ok('§13 …one that matches NOBODY is archived with the reason, never written where it provably does not belong', g3.action === 'archive' && g3.key === null && /matches no known account/.test(g3.reason), JSON.stringify(g3));
+  ok('§13 …one that matches NOBODY is archived with the reason, never written where it provably does not belong', g3.action === 'archive' && g3.key === null && verdictOf(/matches no known account/.test(g3.reason)), JSON.stringify(g3));
   const amb = { ...windows, 'acct-D': { sevenDay: W_A + WEEK, fiveHour: null, scoped: {} } };
   const g4 = L.decideReadingTarget({ key: 'acct-B', readingWindow: { kind: 'sevenDay', resetsAt: W_A }, windows: amb, nowSec });
   ok('§13 …and two accounts that genuinely share a weekly phase are AMBIGUOUS, so nothing is re-filed on a guess', g4.action === 'archive' && g4.matched.length === 2, JSON.stringify(g4));
@@ -1379,7 +1379,7 @@ if (!probe) {
       [{ prevKey: 'a', newKey: 'b', readingWindow: { kind: 'sevenDay', resetsAt: W_A }, readingFingerprint: 'X', prevFingerprint: 'X', repointAgeMs: -5, nowSec }],
     ];
     const same = table.every(([inp]) => JSON.stringify(T.decideLagShadow(inp)) === JSON.stringify(L.decideLagShadow(inp)));
-    ok('§13 …and the two spellings answer the SAME table identically, driven through the shipped file\'s own bytes', same,
+    ok('§13 …and the two spellings answer the SAME table identically, driven through the shipped file\'s own bytes', verdictOf(same),
       JSON.stringify(table.map(([i]) => [T.decideLagShadow(i).why, L.decideLagShadow(i).why])));
     // …and the GUARD too: r3 moved `decideReadingTarget` INSIDE the sentinels
     // because the statusline now runs it (it was the one value producer with no
@@ -1395,7 +1395,7 @@ if (!probe) {
         { key: 'b', readingWindow: { kind: 'sevenDay', resetsAt: W_A }, windows: { ...gw, d: { sevenDay: W_A + WEEK, fiveHour: null, scoped: {} } } },
       ];
       ok('§13 …including the WINDOW GUARD, which the statusline now runs from the same mirrored bytes',
-        gtable.every((i) => JSON.stringify(T.decideReadingTarget(i)) === JSON.stringify(L.decideReadingTarget(i))),
+        verdictOf(gtable.every((i) => JSON.stringify(T.decideReadingTarget(i)) === JSON.stringify(L.decideReadingTarget(i)))),
         JSON.stringify(gtable.map((i) => [T.decideReadingTarget(i).action, L.decideReadingTarget(i).action])));
     }
     // the statusline's rate_limits payload shape is one of the shapes windowOf reads
@@ -1407,10 +1407,10 @@ if (!probe) {
   // NEGATIVE CONTROL: the r3-only rule, applied to the incident, does nothing —
   // the numbers moved (0.92 → 0.93), so "same payload" never fires.
   ok('§13 NEGATIVE CONTROL: the r3 rule ALONE (fingerprint equality) cannot see the incident — its numbers changed',
-    (function () {
+    verdictOf((function () {
       const preFix = (stKey, key, stFp, fp) => (stKey && stKey !== key && stFp === fp) ? stKey : key;
       return preFix('acct-A', 'acct-B', '-/93', '-/94') === 'acct-B' && s1.key === 'acct-A';
-    })());
+    })()));
 }
 
 // ── §14 THE INCIDENT, replayed against the REAL engine + REAL pool ──────────
@@ -1472,7 +1472,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§14 …and the member the pool had just moved TO keeps its OWN number (the owner\'s "low-usage account" is not touched)',
       Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9, JSON.stringify(w.readCache(w.SPARE).sevenDay));
     ok('§14 …and it SAYS SO, naming both accounts and how late the response was (a write that moves money is not silent)',
-      lines.some((l) => /after the link moved to/.test(l) && /window-of-previous-slot/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 220));
+      verdictOf(lines.some((l) => /after the link moved to/.test(l) && /window-of-previous-slot/.test(l))), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 220));
     // the anchors follow the cache, so the estimator trains on the right stream (B-360d U1: a sweep that reads off the loop is awaited)
     await w.eng.sweepUsageAnchors();
     const anchorsOf = (id) => {
@@ -1492,7 +1492,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     };
     const aL = anchorsOf(w.LINK), aS = anchorsOf(w.SPARE);
     ok('§14 the ANCHOR lands on that member\'s identity stream too (the estimator learns from the account that was burned)',
-      aL.some((r) => Math.abs((r.buckets?.sevenDay?.u ?? -1) - POISON) < 1e-9), JSON.stringify(aL.map((r) => r.buckets?.sevenDay)));
+      verdictOf(aL.some((r) => Math.abs((r.buckets?.sevenDay?.u ?? -1) - POISON) < 1e-9)), JSON.stringify(aL.map((r) => r.buckets?.sevenDay)));
     ok('§14 …and no such anchor is written for the account that did not produce it',
       !aS.some((r) => Math.abs((r.buckets?.sevenDay?.u ?? -1) - POISON) < 1e-9), JSON.stringify(aS.map((r) => r.buckets?.sevenDay)));
 
@@ -1540,7 +1540,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     w.eng.recordRateLimitEvent(s2, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.99, resets_at: w.WIN[w.LINK], resetsAt: w.WIN[w.LINK] } });
     const lines = cap.done();
     ok('§14 a conversation with NO link of its own is shadowed by the POOL DEFAULT\'s move (that is what decides for it)',
-      Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.99) < 1e-9 && lines.some((l) => /after the link moved to/.test(l)), JSON.stringify(w.readCache(w.LINK).sevenDay));
+      Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.99) < 1e-9 && verdictOf(lines.some((l) => /after the link moved to/.test(l))), JSON.stringify(w.readCache(w.LINK).sevenDay));
     // …and the session that HAS its own link is not explained by that same row
     const w2 = mkIncidentWorld();
     const cap2 = quiet();
@@ -1615,7 +1615,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§14 STALE TURN PIN ((B): ARCHIVED): a reading whose window is the NEW member\'s is never filed under the pinned member, nor re-filed onto the new one (the new member keeps its own 11 %; the red lives in test-reading-truth)',
       Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9, JSON.stringify(w.readCache(w.SPARE).sevenDay));
     ok('§14 …and the pinned member does not receive it', Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.20) < 1e-9, JSON.stringify(w.readCache(w.LINK).sevenDay));
-    ok('§14 …the archive is SPOKEN, naming the account the window names', lines.some((l) => /refusing to write/.test(l) && /never filed under another row/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
+    ok('§14 …the archive is SPOKEN, naming the account the window names', verdictOf(lines.some((l) => /refusing to write/.test(l) && /never filed under another row/.test(l))), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
     ok('§14 …and no window re-pins the turn ((B)): the pin stays the turn\'s own',
       w.eng.readingSlotFor(w.session).key === w.LINK, JSON.stringify(w.eng.readingSlotFor(w.session)));
   }
@@ -1645,8 +1645,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const arch = path.join(w.dataDir, 'archive', 'readings-window-mismatch.ndjson');
     const rows = fs.existsSync(arch) ? fs.readFileSync(arch, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
     ok('§15 …ARCHIVED with the reason, the session, and the target\'s own window (never destroyed)',
-      rows.length === 1 && /matches no known account/.test(rows[0].reason) && rows[0].sid === w.SID && rows[0].ownWindow && rows[0].entry, JSON.stringify(rows[0] && rows[0].reason));
-    ok('§15 …and SPOKEN once', lines.some((l) => /refusing to write/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
+      rows.length === 1 && gateOf(/matches no known account/.test(rows[0].reason)) && rows[0].sid === w.SID && gateOf(rows[0].ownWindow) && verdictOf(rows[0].entry), JSON.stringify(rows[0] && rows[0].reason));
+    ok('§15 …and SPOKEN once', verdictOf(lines.some((l) => /refusing to write/.test(l))), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
   }
   // INERT where there is no evidence — the guard must not delete data it cannot judge
   {
@@ -1671,11 +1671,11 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§15 a REJECTION is judged at the write too — a foreign weekly reset never reaches the member\'s bucket',
       w.readCache(w.LINK).sevenDay.utilization !== 1 && w.readCache(w.LINK).sevenDay.resetsAt !== nowSec + 9 * 86400, JSON.stringify(w.readCache(w.LINK).sevenDay));
     ok('§15 …and the refusal is ARCHIVED as its own moment (\'rejection:\', not the turn-end \'wall:\') and SPOKEN',
-      (() => {
+      verdictOf((() => {
         const arch = path.join(w.dataDir, 'archive', 'readings-window-mismatch.ndjson');
         const rows = fs.existsSync(arch) ? fs.readFileSync(arch, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
         return rows.some((r) => r.what === 'rejection:7d') && lines.some((l) => /refusing to mark/.test(l));
-      })(), lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 220));
+      })()), lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 220));
   }
   // …and the GUESS case the old exemption was really about is untouched: a
   // rejection that states NO reset has no window evidence, so the pin stands
@@ -1711,13 +1711,13 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     w.stampWindow(w.LINK, { sevenDay: w.WIN[w.LINK], fiveHour: OWN5, scoped: {} });
     const FOREIGN5 = nowSec + 4 * 3600;
     ok('§15 CONTROL setup: the stated reset really does contradict the member\'s own unexpired 5h window (else the leg below cannot fail)',
-      quotaModel.windowRefutes(OWN5, FOREIGN5, { atSec: nowSec }), `own=${OWN5} stated=${FOREIGN5}`);
+      verdictOf(quotaModel.windowRefutes(OWN5, FOREIGN5, { atSec: nowSec })), `own=${OWN5} stated=${FOREIGN5}`);
     w.eng.recordRateLimitEvent(w.session, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resets_at: FOREIGN5, resetsAt: FOREIGN5 } });
     const lines = cap.done();
     ok('§15 CONTROL: a five-hour rejection nothing else identifies is still marked on the pin (a 5h window is evidence, not proof)',
       w.readCache(w.LINK).fiveHour.utilization === 1 && w.readCache(w.LINK).fiveHour.status === 'limited', JSON.stringify(w.readCache(w.LINK).fiveHour));
     ok('§15 CONTROL: …and the disagreement is SPOKEN rather than passing silently',
-      lines.some((l) => /disagrees with .* own window — writing it there anyway/.test(l)), lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 220));
+      verdictOf(lines.some((l) => /disagrees with .* own window — writing it there anyway/.test(l))), lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 220));
   }
   // the established window may only be written by the panel refresh, and the
   // session-attributed producers must PRESERVE it (dropping it disarms the guard)
@@ -1760,14 +1760,14 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     for (const id of [w.LINK, w.SPARE, w.FISH]) runTool(TOOL_PATH, w, id, w.WIN[id], Math.round(w.readCache(id).sevenDay.utilization * 100));
     const after = [w.LINK, w.SPARE, w.FISH].map((id) => !!w.readWindow(id)?.sevenDay);
     ok('§15 CLOBBER: one legitimate statusline render per member leaves every established window intact (pre-fix: all three deleted)',
-      before.every(Boolean) && after.every(Boolean), JSON.stringify([before, after]));
+      gateOf(before.every(Boolean)) && verdictOf(after.every(Boolean)), JSON.stringify([before, after]));
     ok('§15 …and the renders really happened (a leg that measures nothing would pass too)',
-      [w.LINK, w.SPARE, w.FISH].every((id) => w.readCache(id).source === 'passive'),
+      verdictOf([w.LINK, w.SPARE, w.FISH].every((id) => w.readCache(id).source === 'passive')),
       JSON.stringify([w.LINK, w.SPARE, w.FISH].map((id) => w.readCache(id).source)));
     ok('§15 …the sidecar stays invisible to every usage-cache scanner (they all filter on `.json`, like the `.slot-` sidecar beside it)',
       !readingLag.windowSidecarName(w.LINK).endsWith('.json')
-      && fs.existsSync(path.join(w.cacheDir, readingLag.windowSidecarName(w.LINK)))
-      && fs.readdirSync(w.cacheDir).filter((f) => f.endsWith('.json')).every((f) => !f.startsWith('.window-')));
+      && gateOf(fs.existsSync(path.join(w.cacheDir, readingLag.windowSidecarName(w.LINK))))
+      && verdictOf(fs.readdirSync(w.cacheDir).filter((f) => f.endsWith('.json')).every((f) => !f.startsWith('.window-'))));
     // …so the incident STILL does not replay AFTER the render
     const cap = quiet();
     w.am.ensureSessionPoolLink(w.P, w.SID, w.SPARE, { why: 'per-session-switch' });
@@ -1815,7 +1815,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     for (const id of [w2.LINK, w2.SPARE, w2.FISH]) runTool(preFixTool, w2, id, w2.WIN[id], Math.round(w2.readCache(id).sevenDay.utilization * 100));
     const after2 = [w2.LINK, w2.SPARE, w2.FISH].map((id) => !!w2.readCache(id).ownWindow);
     ok('§15 NEGATIVE CONTROL: with the window back in the snapshot, one render of the pre-fix `out` literal deletes all three',
-      before2.every(Boolean) && after2.every((x) => x === false), JSON.stringify([before2, after2]));
+      gateOf(before2.every(Boolean)) && verdictOf(after2.every((x) => x === false)), JSON.stringify([before2, after2]));
     // …and the SHIPPED tool, with only the storage reverted, would NOT have —
     // which is what makes the second reversion load-bearing rather than
     // decorative (the spread preserves any field it does not measure).
@@ -2001,7 +2001,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const readRefused = () => { try { return fs.readFileSync(path.join(w.cacheDir, '.window-refused.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } };
       const refused = readRefused();
       ok('§15 …and the refusal is WRITTEN DOWN with its reason (an archive naming the account the window names), beside the cache and invisible to every `.json` scanner',
-        refused.length === 1 && refused[0].action === 'archive' && refused[0].key === w.SPARE && refused[0].to === w.LINK && /never filed under another row/.test(refused[0].reason) && /matches exactly one account/.test(refused[0].reason)
+        refused.length === 1 && refused[0].action === 'archive' && refused[0].key === w.SPARE && refused[0].to === w.LINK && gateOf(/never filed under another row/.test(refused[0].reason)) && gateOf(/matches exactly one account/.test(refused[0].reason))
         && !'.window-refused.ndjson'.endsWith('.json'), JSON.stringify(refused));
       // …and it is a SAMPLE, not a count: a statusline is a fresh process per
       // render, so it cannot hold the engine's per-verdict memory, and a
@@ -2090,7 +2090,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     w3.reading(0.66, { resetsAt: w3.W7[w3.SPARE] });       // LINK's slot, SPARE's WEEK
     cap3.done();
     ok('§15 POSITIVE CONTROL: in the same world a WEEKLY reading that is not the target\'s is still JUDGED (only the 5h rung was retired) — archived since 2.369.423 (B), filed under neither member',
-      Math.abs(w3.readCache(w3.SPARE).sevenDay.utilization - 0.66) > 1e-9 && Math.abs(w3.readCache(w3.LINK).sevenDay.utilization - 0.3) < 1e-9 && fs.existsSync(path.join(w3.dataDir, 'archive', 'readings-window-mismatch.ndjson')),
+      Math.abs(w3.readCache(w3.SPARE).sevenDay.utilization - 0.66) > 1e-9 && Math.abs(w3.readCache(w3.LINK).sevenDay.utilization - 0.3) < 1e-9 && verdictOf(fs.existsSync(path.join(w3.dataDir, 'archive', 'readings-window-mismatch.ndjson'))),
       JSON.stringify([w3.readCache(w3.LINK).sevenDay, w3.readCache(w3.SPARE).sevenDay]));
   }
 }
@@ -2131,31 +2131,31 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
 
   const rep = repair.repairByWindow({ dataDir, roster: [A, B], id: 'W' });
   const rows = (f) => fs.readFileSync(path.join(anchors, f), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  ok('§16 each stream establishes its window from its OWN panel readings only', rep.identities.length === 2 && rep.identities.every((i) => i.own === 8),
+  ok('§16 each stream establishes its window from its OWN panel readings only', rep.identities.length === 2 && verdictOf(rep.identities.every((i) => i.own === 8)),
     JSON.stringify(rep.identities.map((i) => [i.key, i.own, i.of, i.canReceive])));
   ok('§16 …a stream with too few own readings establishes nothing (a coincidence is not a fingerprint)', !rep.identities.some((i) => i.key === 'org_gone'));
   ok('§16 the foreign anchor is RE-FILED onto the account whose window it carries', rep.anchors.refiled === 1 && rep.anchors.archived === 0, JSON.stringify(rep.anchors));
-  ok('§16 …and a REMOVED account that shares the phase is not a candidate, so the answer stays unambiguous', rows('anchors-org_bbbb.ndjson').some((r) => Math.abs(r.buckets.sevenDay.u - 0.9) < 1e-9));
-  ok('§16 …inserted IN TIME ORDER, unchained and uncosted (its Δu is real for that account, the cost interval is not)', (() => {
+  ok('§16 …and a REMOVED account that shares the phase is not a candidate, so the answer stays unambiguous', verdictOf(rows('anchors-org_bbbb.ndjson').some((r) => Math.abs(r.buckets.sevenDay.u - 0.9) < 1e-9)));
+  ok('§16 …inserted IN TIME ORDER, unchained and uncosted (its Δu is real for that account, the cost interval is not)', verdictOf((() => {
     const b = rows('anchors-org_bbbb.ndjson');
     const moved = b.find((r) => Math.abs(r.buckets.sevenDay.u - 0.9) < 1e-9);
     return moved && moved.prevFetchedAt === null && moved.costSince === null && moved.accountId === B && moved.identityKey === 'org_bbbb' && moved.refiledFrom === 'org_aaaa'
       && b.every((r, i) => i === 0 || r.fetchedAt >= b[i - 1].fetchedAt);
-  })(), JSON.stringify(rows('anchors-org_bbbb.ndjson').map((r) => [r.fetchedAt - T0, r.buckets.sevenDay.u])));
-  ok('§16 the pair it broke is VOIDED, not silently re-pointed at a different interval', (() => {
+  })()), JSON.stringify(rows('anchors-org_bbbb.ndjson').map((r) => [r.fetchedAt - T0, r.buckets.sevenDay.u])));
+  ok('§16 the pair it broke is VOIDED, not silently re-pointed at a different interval', verdictOf((() => {
     const a = rows('anchors-org_aaaa.ndjson');
     const after = a.find((r) => r.fetchedAt === T0 + 10 * 60000);
     return rep.anchors.voided === 1 && after && after.costSince === null && after.prevFetchedAt === T0 + 7 * 60000;
-  })(), JSON.stringify(rep.anchors));
-  ok('§16 ARCHIVE-NEVER-DESTROY: every moved row is archived with the reason, and the corpus keeps every record', (() => {
+  })()), JSON.stringify(rep.anchors));
+  ok('§16 ARCHIVE-NEVER-DESTROY: every moved row is archived with the reason, and the corpus keeps every record', verdictOf((() => {
     const arch = fs.readFileSync(path.join(dataDir, 'archive', 'readings-window-anchors.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const total = ['anchors-org_aaaa.ndjson', 'anchors-org_bbbb.ndjson', 'anchors-org_gone.ndjson'].reduce((n, f) => n + rows(f).length, 0);
     return arch.length === 1 && arch[0].action === 'refiled' && /is not org_aaaa's/.test(arch[0].reason) && total === 10 + 8 + 2;
-  })());
-  ok('§16 the cache snapshot carrying another account\'s window is archived and REBUILT from that account\'s newest own-window reading', (() => {
+  })()));
+  ok('§16 the cache snapshot carrying another account\'s window is archived and REBUILT from that account\'s newest own-window reading', verdictOf((() => {
     const c = JSON.parse(fs.readFileSync(path.join(cache, A + '.json'), 'utf8'));
     return rep.caches.foreign === 1 && rep.caches.restored === 1 && Math.abs(c.sevenDay.utilization - 0.2) < 1e-9 && c.orgUuid === 'aaaa';
-  })(), JSON.stringify(JSON.parse(fs.readFileSync(path.join(cache, A + '.json'), 'utf8'))));
+  })()), JSON.stringify(JSON.parse(fs.readFileSync(path.join(cache, A + '.json'), 'utf8'))));
   ok('§16 every roster account is SEEDED with its own window, so the live guard is armed on THIS boot, not on the next panel refresh',
     rep.caches.seeded === 2 && readWindow(cache, A)?.sevenDay === WA && readWindow(cache, B)?.sevenDay === WB
     // …into the SIDECAR, so the next statusline render cannot delete what the
@@ -2163,7 +2163,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     && JSON.parse(fs.readFileSync(path.join(cache, A + '.json'), 'utf8')).ownWindow === undefined,
     JSON.stringify([rep.caches.seeded, readWindow(cache, A), readWindow(cache, B)]));
   ok('§16 the learned rates are archived and dropped so the estimator re-learns from the cleaned pairs',
-    !fs.existsSync(path.join(anchors, 'rates.json')) && fs.existsSync(path.join(dataDir, 'archive', 'readings-window-rates.ndjson')));
+    !fs.existsSync(path.join(anchors, 'rates.json')) && verdictOf(fs.existsSync(path.join(dataDir, 'archive', 'readings-window-rates.ndjson'))));
   const rep2 = repair.repairByWindow({ dataDir, roster: [A, B], id: 'W' });
   ok('§16 IDEMPOTENT: a second run finds nothing left to move', rep2.anchors.refiled === 0 && rep2.anchors.archived === 0 && rep2.caches.foreign === 0, JSON.stringify(rep2.anchors));
 
@@ -2178,7 +2178,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     fs.writeFileSync(path.join(dd, 'usage-anchors', 'anchors-org_aaaa.ndjson'), rs.map((r) => JSON.stringify(r)).join('\n') + '\n');
     const r = repair.repairByWindow({ dataDir: dd, roster: [A], id: 'W2' });
     const arch = fs.readFileSync(path.join(dd, 'archive', 'readings-window-anchors.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    ok('§16 a foreign reading matching NO account is ARCHIVED with the reason, never re-filed on a guess', r.anchors.archived === 1 && r.anchors.refiled === 0 && /matches no known account/.test(arch[0].reason), JSON.stringify(r.anchors));
+    ok('§16 a foreign reading matching NO account is ARCHIVED with the reason, never re-filed on a guess', r.anchors.archived === 1 && r.anchors.refiled === 0 && verdictOf(/matches no known account/.test(arch[0].reason)), JSON.stringify(r.anchors));
   }
   // (§16 the migration's registration + roster pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -2251,7 +2251,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   const dataDir = build(path.join(d, 'fix'));
   const rep = repair.repairByWindow({ dataDir, roster: [A, B], id: 'W4' });
   ok('§16b each identity establishes its model-scoped weekly phases from its OWN panel readings too (r3 established `scoped:{}` and was therefore blind to half the record)',
-    rep.identities.length === 2 && rep.identities.every((i) => i.scoped && i.scoped.fable && i.scoped.fable.n === 8),
+    rep.identities.length === 2 && verdictOf(rep.identities.every((i) => i.scoped && i.scoped.fable && i.scoped.fable.n === 8)),
     JSON.stringify(rep.identities.map((i) => [i.key, i.phase, i.scoped])));
   ok('§16b …and the SEEDED sidecar carries them, so the live guard is armed on the scoped buckets exactly as the panel producer arms it (usage-routes stamps windowOf(merged), which includes scopedWeekly)',
     readWindow(path.join(dataDir, 'usage-cache'), A)?.scoped?.fable === WA
@@ -2264,20 +2264,20 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     !!movedA && Math.abs(movedA.buckets.sevenDay.u - 0.20) < 1e-9 && movedA.buckets.sevenDay.resetsAt === WA && movedA.accountId === A,
     JSON.stringify(movedA && movedA.buckets));
   ok('§16b …while its Fable bucket — whose weekly phase is the OTHER account\'s — does NOT travel with it',
-    !!movedA && (movedA.buckets.scopedWeekly || []).length === 0 && Array.isArray(movedA.droppedBuckets) && movedA.droppedBuckets.includes('fable'),
+    !!movedA && (movedA.buckets.scopedWeekly || []).length === 0 && gateOf(Array.isArray(movedA.droppedBuckets)) && verdictOf(movedA.droppedBuckets.includes('fable')),
     JSON.stringify(movedA && [movedA.buckets.scopedWeekly, movedA.droppedBuckets]));
   ok('§16b …and the five-hour half travels WITH the seven-day one (one payload, one producer, one credential — a 5h window names a TIME and can prove nothing alone)',
-    !!movedA && movedA.buckets.fiveHour && movedA.buckets.fiveHour.resetsAt === 1, JSON.stringify(movedA && movedA.buckets.fiveHour));
+    !!movedA && gateOf(movedA.buckets.fiveHour) && movedA.buckets.fiveHour.resetsAt === 1, JSON.stringify(movedA && movedA.buckets.fiveHour));
 
   // (c) THE DROPPED BUCKET IS ARCHIVED WITH A REASON THAT NAMES ITS OWNER
   const archRows = fs.readFileSync(path.join(dataDir, 'archive', 'readings-window-anchors.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const line = archRows.find((r) => r.action === 'refiled' && r.to === 'org_aaaa');
   ok('§16b the Fable half is ARCHIVED with its OWN reason, naming the account it does belong to',
-    !!line && Array.isArray(line.buckets) && line.buckets.length === 1 && line.buckets[0].bucket === 'fable'
-    && /is org_bbbb's, not org_aaaa's/.test(line.buckets[0].reason),
+    !!line && gateOf(Array.isArray(line.buckets)) && line.buckets.length === 1 && line.buckets[0].bucket === 'fable'
+    && verdictOf(/is org_bbbb's, not org_aaaa's/.test(line.buckets[0].reason)),
     JSON.stringify(line && line.buckets));
   ok('§16b …and that line keeps the ORIGINAL WHOLE RECORD, so nothing is destroyed and the corpus still re-derives offline',
-    !!line && line.entry && line.entry.buckets.scopedWeekly.length === 1 && line.entry.buckets.scopedWeekly[0].resetsAt === WB
+    !!line && gateOf(line.entry) && line.entry.buckets.scopedWeekly.length === 1 && line.entry.buckets.scopedWeekly[0].resetsAt === WB
     && Math.abs(line.entry.buckets.sevenDay.u - 0.20) < 1e-9,
     JSON.stringify(line && line.entry && line.entry.buckets));
   ok('§16b the report counts the two kinds apart (a partial move is not a whole one)',
@@ -2301,7 +2301,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     rep2.anchors.refiled === 0 && rep2.anchors.archived === 0 && rep2.anchors.bucketsArchived === 0 && rep2.anchors.stripped === 0 && rep2.caches.foreign === 0 && rep2.caches.scopedStripped === 0,
     JSON.stringify([rep2.anchors, rep2.caches]));
   ok('§16b …and the census holds: NO stream and NO cache ends with a weekly bucket whose phase contradicts its account',
-    (() => {
+    verdictOf((() => {
       const phase = { org_aaaa: { sevenDay: WA, fable: WA }, org_bbbb: { sevenDay: WB, fable: WB } };
       let bad = 0;
       for (const [ident, w] of Object.entries(phase)) {
@@ -2316,7 +2316,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         for (const s of (c.scopedWeekly || [])) if (Number(s.resetsAt) > 0 && readingLag.weeklyNear(s.resetsAt, w.fable) === false) bad++;
       }
       return bad === 0;
-    })());
+    })()));
 
   // (f) NEGATIVE CONTROL — the r3 repair, as a PATCHED COPY of the real module
   // (never a re-typed one), with EXACTLY the decisions this round changed
@@ -2383,7 +2383,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const r = repair.repairByWindow({ dataDir: dd, roster: [A, B], id: 'W5' });
     const arch = fs.readFileSync(path.join(dd, 'archive', 'readings-window-anchors.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     ok('§16b a record with NO bucket that can be proven to belong anywhere is ARCHIVED WHOLE, never moved on a guess',
-      r.anchors.archived === 1 && r.anchors.refiled === 0 && arch.some((x) => x.action === 'archived' && /matches no known account/.test(x.reason)),
+      r.anchors.archived === 1 && r.anchors.refiled === 0 && verdictOf(arch.some((x) => x.action === 'archived' && /matches no known account/.test(x.reason))),
       JSON.stringify([r.anchors, arch.map((x) => x.action)]));
   }
 
@@ -2403,7 +2403,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const kept = rowsOf(dd, 'anchors-org_bbbb.ndjson').find((x) => x.fetchedAt === T0 + 20 * 60000);
     ok('§16b a record whose 7-day half is its own but whose Fable bucket is another account\'s STAYS, stripped of that bucket (it is not a re-file — only the bucket is foreign)',
       r.anchors.stripped === 1 && r.anchors.refiled === 0 && !!kept && (kept.buckets.scopedWeekly || []).length === 0
-      && kept.buckets.sevenDay.resetsAt === WB && Array.isArray(kept.strippedBuckets) && kept.strippedBuckets.includes('fable'),
+      && kept.buckets.sevenDay.resetsAt === WB && gateOf(Array.isArray(kept.strippedBuckets)) && verdictOf(kept.strippedBuckets.includes('fable')),
       JSON.stringify([r.anchors, kept && kept.buckets]));
     ok('§16b …and the report COUNTS that stream — "streams: 0" about a run that rewrote one is the quiet lie the per-bucket counters exist to prevent',
       r.anchors.streams === 1, JSON.stringify(r.anchors));
@@ -2413,7 +2413,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       JSON.stringify(cacheOf(dd, B)));
     const arch = fs.readFileSync(path.join(dd, 'archive', 'readings-window-usage-cache.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     ok('§16b …with the snapshot archived under its own action and a reason naming the buckets and why they matter',
-      arch.some((x) => x.action === 'scoped-stripped' && /Fable@/.test(x.reason) && /accountRemaining/.test(x.reason)), JSON.stringify(arch.map((x) => [x.key, x.action])));
+      verdictOf(arch.some((x) => x.action === 'scoped-stripped' && /Fable@/.test(x.reason) && /accountRemaining/.test(x.reason))), JSON.stringify(arch.map((x) => [x.key, x.action])));
   }
 
   // (h2) THE `best` PICKER IS ITS OWN BARRIER, and it needs its own control.
@@ -2543,7 +2543,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       by['__global__'] === 'org_aaaa/identity' && by[A] === 'org_aaaa/identity' && by[B] === 'org_bbbb/identity', JSON.stringify(by));
     ok('§16c …and the product\'s own predicate is what refuses the rest: `__models__` and `host-*` never reach the map at all, while a zombie file of a removed account and a POOL are named and skipped',
       !('__models__' in by) && !('host-h1' in by)
-      && /no roster record/.test(by['sub-zombiezombie'] || '') && /pool holds no quota/.test(by['pool-000000000000'] || ''), JSON.stringify(by));
+      && gateOf(/no roster record/.test(by['sub-zombiezombie'] || '')) && verdictOf(/pool holds no quota/.test(by['pool-000000000000'] || '')), JSON.stringify(by));
   }
 
   // (b) …so the machine login is REPAIRED and SEEDED like any other key
@@ -2640,13 +2640,13 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     fs.writeFileSync(path.join(dir, B + '.json'), JSON.stringify(bare));
     const one = repair.identityCacheKeys(dir, repair.establishedWindows(streams(dd), { roster: ROSTER }), { accounts: ACCOUNTS }).find((k) => k.key === B);
     ok('§16c a cache file that states NO identity is resolved by the one established stream that names it — its own rows, written beside `identityKey` from the SAME group at the SAME moment',
-      one && one.ident === 'org_bbbb' && one.via === 'stream', JSON.stringify(one && [one.ident, one.via, one.why]));
+      gateOf(one) && one.ident === 'org_bbbb' && one.via === 'stream', JSON.stringify(one && [one.ident, one.via, one.why]));
     // …and never on a guess: two streams naming it is UNKNOWN, not a coin toss
     const rowsA = rowsOf(dd, 'anchors-org_aaaa.ndjson'); rowsA[0].accountId = B;
     fs.writeFileSync(path.join(dd, 'usage-anchors', 'anchors-org_aaaa.ndjson'), rowsA.map((r) => JSON.stringify(r)).join('\n') + '\n');
     const amb = repair.identityCacheKeys(dir, repair.establishedWindows(streams(dd), { roster: ROSTER }), { accounts: ACCOUNTS }).find((k) => k.key === B);
     ok('§16c …and when TWO established streams name it, it is left alone and SAID — an unresolvable key is never seeded with a window it cannot be shown to have',
-      amb && amb.ident === null && /2 established streams name this account/.test(amb.why), JSON.stringify(amb && [amb.ident, amb.why]));
+      gateOf(amb) && amb.ident === null && verdictOf(/2 established streams name this account/.test(amb.why)), JSON.stringify(amb && [amb.ident, amb.why]));
     // a pseudo key is NEVER resolved this way: the engine records accountId
     // `null` for BOTH `__global__.json` and `__global_codex__.json`, so a null
     // row cannot tell the two apart (measured: this instance's codex stream is
@@ -2655,7 +2655,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     fs.writeFileSync(path.join(dir, '__global__.json'), JSON.stringify(bareG));
     const g = repair.identityCacheKeys(dir, repair.establishedWindows(streams(dd), { roster: ROSTER }), { accounts: ACCOUNTS }).find((k) => k.key === '__global__');
     ok('§16c …and a PSEUDO key is never resolved from the streams at all: `accountId: null` cannot tell the machine login from the codex one',
-      g && g.ident === null && /no established stream names this account/.test(g.why), JSON.stringify(g && [g.ident, g.why]));
+      gateOf(g) && g.ident === null && verdictOf(/no established stream names this account/.test(g.why)), JSON.stringify(g && [g.ident, g.why]));
     // (§16c the two pseudo caches' null account — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 
@@ -2789,28 +2789,28 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const dd = withSibling('sibling');
     const rep6 = repair.repairByWindow({ dataDir: dd, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8h' });
     ok('§16c the machine login\'s SECOND snapshot — `data/usage-cache.json`, which is NOT in the directory the repair walks — is judged too, and says so in the report',
-      rep6.globalFile === 'archived' && /data\/usage-cache\.json/.test(rep6.globalFileWhy || '') && /newest-wins/.test(rep6.globalFileWhy || ''),
+      rep6.globalFile === 'archived' && gateOf(/data\/usage-cache\.json/.test(rep6.globalFileWhy || '')) && verdictOf(/newest-wins/.test(rep6.globalFileWhy || '')),
       JSON.stringify([rep6.globalFile, rep6.globalFileWhy]));
     ok('§16c …ARCHIVE-NEVER-DESTROY: the line names its own store and keeps the WHOLE original payload, and only then is the copy removed',
-      (() => {
+      verdictOf((() => {
         const rows = fs.readFileSync(path.join(dd, 'archive', 'readings-window-usage-cache.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
         const mine = rows.filter((r) => r.store === 'usage-cache.json');
         return mine.length === 1 && mine[0].action === 'unlinked' && mine[0].key === '__global__'
           && mine[0].entry.sevenDay.resetsAt === WB && !fs.existsSync(path.join(dd, 'usage-cache.json'));
-      })(), '');
+      })()), '');
     const fixed = await serveUsage(dd);
     ok('§16c THE REAL /api/usage NOW SERVES THE REPAIRED NUMBERS ON BOTH ROWS — the machine login from `_rateLimitCache`, and the named subscription because the same-account merge hands the freshest of the pair to both',
       fixed.rateLimit?.sevenDay?.resetsAt === WA && fixed.accounts?.[A]?.sevenDay?.resetsAt === WA && fixed.globalLogin?.accountId === A,
       JSON.stringify([fixed.rateLimit?.sevenDay, fixed.accounts?.[A]?.sevenDay, fixed.globalLogin?.accountId]));
     ok('§16c …and the file is RE-SEEDED by the product\'s own `!_rateLimitCache` branch, from the repaired directory — so it agrees with the window this migration seeded for `__global__`, and its `fetchedAt` can never outrank it again',
-      (() => {
+      verdictOf((() => {
         // B-360d part 3 U2: the copy is written by the STORE WRITER (src/usage-routes.js writeUsageCache, off the thread) — a reader of the
         // disk asks the writer to land it first, as the identity repair itself does (its flushSync before it judges the file)
         try { require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync([path.join(dd, 'usage-cache.json')], { waitedBy: 'the leg (§16c re-seed)' }); } catch { }
         const sib = sibOf(dd), seeded = readWindow(path.join(dd, 'usage-cache'), '__global__');
         return !!sib && !!seeded && readingLag.weeklyNear(readingLag.windowOf(sib).sevenDay, seeded.sevenDay) === true
           && sib.fetchedAt === JSON.parse(fs.readFileSync(path.join(dd, 'usage-cache', '__global__.json'), 'utf8')).fetchedAt;
-      })(), JSON.stringify([sibOf(dd)?.sevenDay, readWindow(path.join(dd, 'usage-cache'), '__global__')?.sevenDay]));
+      })()), JSON.stringify([sibOf(dd)?.sevenDay, readWindow(path.join(dd, 'usage-cache'), '__global__')?.sevenDay]));
 
     // §16c(h) PRODUCTION ORDER (the r6 verifier): `setupUsage()` runs at module
     // top level (server.js ~:1616) and loads data/usage-cache.json into
@@ -2851,7 +2851,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       // (§16c(h) server.js reloads the cache after the migrations — wiring pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     }
     ok('§16c …and a second run has nothing left to do (idempotent: the copy is gone, and what re-seeded it came FROM the repaired directory)',
-      (() => { const r2 = repair.repairByWindow({ dataDir: dd, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8h2' }); return r2.globalFile === 'clean' && sibOf(dd)?.sevenDay?.resetsAt === WA; })(), '');
+      verdictOf((() => { const r2 = repair.repairByWindow({ dataDir: dd, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8h2' }); return r2.globalFile === 'clean' && sibOf(dd)?.sevenDay?.resetsAt === WA; })()), '');
 
     // NEGATIVE CONTROL — the r5 module, which never looked at this file, driven
     // through the SAME real route on the SAME fixture.
@@ -2883,7 +2883,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const sc = withSibling('sibling-scoped', (g) => ({ ...g, sevenDay: { utilization: 0.2, resetsAt: WA }, scopedWeekly: [{ name: 'Fable', utilization: 0.9, resetsAt: WB }], fetchedAt: T0 + 90 * 60000 }));
       const r = repair.repairByWindow({ dataDir: sc, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8sc' });
       ok('§16c …ANY contradicting bucket removes the copy, not just the 7-day one: this file is a COPY of a snapshot just repaired in both shapes, so the honest repair for either is to drop it and let it be re-seeded',
-        r.globalFile === 'archived' && /fable@/.test(r.globalFileWhy || '') && !fs.existsSync(path.join(sc, 'usage-cache.json')), JSON.stringify([r.globalFile, r.globalFileWhy]));
+        r.globalFile === 'archived' && gateOf(/fable@/.test(r.globalFileWhy || '')) && !fs.existsSync(path.join(sc, 'usage-cache.json')), JSON.stringify([r.globalFile, r.globalFileWhy]));
     }
     // …and an AGREEING copy is left byte-identical: this half only ever acts on
     // a contradiction, exactly like the directory half.
@@ -2892,7 +2892,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const before = fs.readFileSync(path.join(cl, 'usage-cache.json'));
       const r = repair.repairByWindow({ dataDir: cl, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8cl' });
       ok('§16c NEGATIVE CONTROL: a copy whose window IS this identity\'s is left byte-identical and reported clean',
-        r.globalFile === 'clean' && r.globalFileWhy === null && fs.readFileSync(path.join(cl, 'usage-cache.json')).equals(before), JSON.stringify([r.globalFile, r.globalFileWhy]));
+        r.globalFile === 'clean' && r.globalFileWhy === null && verdictOf(fs.readFileSync(path.join(cl, 'usage-cache.json')).equals(before)), JSON.stringify([r.globalFile, r.globalFileWhy]));
     }
     // …and with no copy at all there is simply nothing to say.
     {
@@ -2911,8 +2911,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const before = fs.readFileSync(path.join(un, 'usage-cache.json'));
       const r = repair.repairByWindow({ dataDir: un, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8un' });
       ok('§16c …an UNRESOLVABLE `__global__` leaves the copy exactly where it is and SAYS which evidence is missing — the payload still states the identity, and asking it directly would be the second, weaker map r5 exists to remove',
-        r.globalFile === 'unresolvable' && /no established stream names this account/.test(r.globalFileWhy || '')
-        && fs.readFileSync(path.join(un, 'usage-cache.json')).equals(before)
+        r.globalFile === 'unresolvable' && gateOf(/no established stream names this account/.test(r.globalFileWhy || ''))
+        && gateOf(fs.readFileSync(path.join(un, 'usage-cache.json')).equals(before))
         && !!sibOf(un).orgUuid, JSON.stringify([r.globalFile, r.globalFileWhy]));
       // …including the shape where the directory holds no `__global__.json` at
       // all, so the map never names the key this file is a copy of
@@ -2921,8 +2921,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       fs.rmSync(path.join(un2, 'usage-cache', '__global__.json'));
       const r2 = repair.repairByWindow({ dataDir: un2, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8un2' });
       ok('§16c …and with no `usage-cache/__global__.json` at all the answer is the same refusal, naming that as the missing evidence',
-        r2.globalFile === 'unresolvable' && /__global__\.json is absent/.test(r2.globalFileWhy || '')
-        && fs.readFileSync(path.join(un2, 'usage-cache.json')).equals(b2), JSON.stringify([r2.globalFile, r2.globalFileWhy]));
+        r2.globalFile === 'unresolvable' && gateOf(/__global__\.json is absent/.test(r2.globalFileWhy || ''))
+        && verdictOf(fs.readFileSync(path.join(un2, 'usage-cache.json')).equals(b2)), JSON.stringify([r2.globalFile, r2.globalFileWhy]));
     }
     // THE SECOND LOOKUP MUST GIVE THE FIRST ONE'S ANSWER. This half asks
     // `identityCacheKeys` again, AFTER the directory half has rewritten those
@@ -2952,7 +2952,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       try { repair.repairByWindow({ dataDir: nf, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8nf2' }); } catch (e) { threw = e; }
       finally { fs.chmodSync(nf, 0o755); }
       ok('§16c …and a copy that CANNOT be removed fails the migration loudly instead of reporting it archived — the ledger row stays unwritten and the next boot retries',
-        !!threw && /usage-cache\.json/.test(String(threw.message)) && fs.existsSync(path.join(nf, 'usage-cache.json'))
+        !!threw && gateOf(/usage-cache\.json/.test(String(threw.message))) && gateOf(fs.existsSync(path.join(nf, 'usage-cache.json')))
         && JSON.parse(fs.readFileSync(path.join(nf, 'archive', 'readings-window-usage-cache.ndjson'), 'utf8').trim().split('\n').pop()).store === 'usage-cache.json',
         String(threw && threw.message).slice(0, 160));
     }
@@ -3008,16 +3008,16 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const { by, all } = census(entries);
       console.log('    census: ' + JSON.stringify(by));
       ok('§16c STANDING SWEEP: the census covers the files that actually hold these roots (an assert that can walk an empty set is not an assert)',
-        all.length >= 8 && ['server.js', 'src/reading-repair.js', 'src/agentd/agentd.js', 'data/bin/vibespace-usage'].every((f) => all.some((x) => x.startsWith(f + ':'))),
+        all.length >= 8 && verdictOf(['server.js', 'src/reading-repair.js', 'src/agentd/agentd.js', 'data/bin/vibespace-usage'].every((f) => all.some((x) => x.startsWith(f + ':')))),
         JSON.stringify(all));
       ok('§16c STANDING SWEEP: the only persisted claude snapshot OUTSIDE the usage-cache directory is `data/usage-cache.json` — the constant in server.js and the half that now judges it — so a THIRD home would fail here',
-        onlyKnownSibling(by), JSON.stringify(by.sibling));
+        verdictOf(onlyKnownSibling(by)), JSON.stringify(by.sibling));
       ok('§16c STANDING SWEEP CONTROL: …and it really would — the same verdict over the same tree PLUS one synthetic module persisting the slot somewhere else says no',
         !onlyKnownSibling(census([...entries, { file: 'src/fake-third-home.js', text: "const f = path.join(dataDir, 'usage-cache.json');" }]).by));
       ok('§16c STANDING SWEEP: …and the remaining root is a DEVICE\'s own store (`~/.vibespace/usage-cache`), NAMED out of scope: it belongs to that machine, reaches us only as `usage-cache/host-*.json`, and the repair\'s own predicate refuses those because no anchor stream describes a host\'s login — it has no established window to judge or seed one with',
-        by.device.some((x) => x.startsWith('src/agentd/agentd.js:')) && by.device.some((x) => x.startsWith('data/bin/vibespace-usage:'))   // stale-pins: kept — a census ENTRY's file prefix, not a pinned text: the census reads the same 16 sites in the same three buckets at the release and at this stack's tip (only line numbers move; B-0248's move check)
-        && /!f\.startsWith\('host-'\)/.test(read('src/reading-repair.js'))
-        && /host-\*` is excluded for the same reason the engine excludes it from/.test(read('src/reading-repair.js')),
+        gateOf(by.device.some((x) => x.startsWith('src/agentd/agentd.js:'))) && gateOf(by.device.some((x) => x.startsWith('data/bin/vibespace-usage:')))   // stale-pins: kept — a census ENTRY's file prefix, not a pinned text: the census reads the same 16 sites in the same three buckets at the release and at this stack's tip (only line numbers move; B-0248's move check)
+        && gateOf(/!f\.startsWith\('host-'\)/.test(read('src/reading-repair.js')))
+        && verdictOf(/host-\*` is excluded for the same reason the engine excludes it from/.test(read('src/reading-repair.js'))),
         JSON.stringify(by.device));
     }
   }
@@ -3077,17 +3077,17 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     && (moved.buckets.scopedWeekly || []).length === 1 && moved.buckets.scopedWeekly[0].resetsAt === WA,
     JSON.stringify(moved && moved.buckets));
   ok('§16d …and EACH primary bucket the record actually STATES gets its own archived line — an undated bucket states no weekly window, so it cannot be shown to belong to the destination',
-    !!line && Array.isArray(line.buckets) && line.buckets.length === 2
+    !!line && gateOf(Array.isArray(line.buckets)) && line.buckets.length === 2
     && line.buckets.map((b) => b.bucket).join(',') === 'sevenDay,fiveHour'
-    && /states no weekly window, so it cannot be shown to be org_aaaa's/.test(line.buckets[0].reason)
-    && /five-hour window names a TIME/.test(line.buckets[1].reason),
+    && gateOf(/states no weekly window, so it cannot be shown to be org_aaaa's/.test(line.buckets[0].reason))
+    && verdictOf(/five-hour window names a TIME/.test(line.buckets[1].reason)),
     JSON.stringify(line && line.buckets));
   ok('§16d …the move is counted PARTIAL, naming the buckets it dropped (a WHOLE re-file that silently deleted two buckets is a report about a run that did not happen)',
     rep.anchors.refiled === 1 && rep.anchors.refiledPartial === 1 && rep.anchors.refiledWhole === 0 && rep.anchors.bucketsArchived === 2
-    && Array.isArray(moved.droppedBuckets) && moved.droppedBuckets.join(',') === 'sevenDay,fiveHour',
+    && gateOf(Array.isArray(moved.droppedBuckets)) && moved.droppedBuckets.join(',') === 'sevenDay,fiveHour',
     JSON.stringify([rep.anchors, moved && moved.droppedBuckets]));
   ok('§16d …and the reason the record MOVED is the verdict of the bucket that decided it — never a drop line (that sentence is about a bucket that stayed behind) and never the `window` placeholder',
-    !!line && /matches exactly one account/.test(line.reason) && line.reason === moved.refiledReason && !/cannot be shown/.test(line.reason),
+    !!line && gateOf(/matches exactly one account/.test(line.reason)) && line.reason === moved.refiledReason && !/cannot be shown/.test(line.reason),
     JSON.stringify([line && line.reason, moved && moved.refiledReason]));
   ok('§16d ARCHIVE-NEVER-DESTROY holds for the silent half too: the line keeps the ORIGINAL record, undated utilizations and all',
     !!line && Math.abs(line.entry.buckets.sevenDay.u - 0.66) < 1e-9 && Math.abs(line.entry.buckets.fiveHour.u - 0.77) < 1e-9,
@@ -3191,10 +3191,10 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         `;
         const html = await ev(`(() => { ${setup} window.app._renderUsage(); const p = document.getElementById('usage-popup'); return p ? p.innerHTML : ''; })()`);
         const H = html || '';
-        ok('§10 the panel names the SOURCE of its latest reading (not just "Updated 3min ago")', /class="usage-src"/.test(H) && /own session \(limit hit\)/.test(H), H.replace(/\s+/g, ' ').slice(0, 300));
-        ok('§10 …and reports that the observation did NOT corroborate it', /not corroborated/.test(H));
-        ok('§10 a SIGNED-OUT member gets a WARNING, not a fresh-looking panel: the state, the instant, and that newer readings are not its own', /class="usage-warn"/.test(H) && /signed out/.test(H) && /NOT this account/.test(H), H.replace(/\s+/g, ' ').slice(0, 400));
-        ok('§10 the account name is ESCAPED (peer-controlled text reaches every client)', !/<Max>/.test(H) && /Personal &lt;Max&gt;/.test(H));
+        ok('§10 the panel names the SOURCE of its latest reading (not just "Updated 3min ago")', gateOf(/class="usage-src"/.test(H)) && verdictOf(/own session \(limit hit\)/.test(H)), H.replace(/\s+/g, ' ').slice(0, 300));
+        ok('§10 …and reports that the observation did NOT corroborate it', verdictOf(/not corroborated/.test(H)));
+        ok('§10 a SIGNED-OUT member gets a WARNING, not a fresh-looking panel: the state, the instant, and that newer readings are not its own', gateOf(/class="usage-warn"/.test(H)) && gateOf(/signed out/.test(H)) && verdictOf(/NOT this account/.test(H)), H.replace(/\s+/g, ' ').slice(0, 400));
+        ok('§10 the account name is ESCAPED (peer-controlled text reaches every client)', !/<Max>/.test(H) && verdictOf(/Personal &lt;Max&gt;/.test(H)));
         const geom = await ev(`(() => {
           // the popup is display:none until opened — measure it OPEN, the way a
           // user sees it (a hidden element reports 0×0 and every legibility
@@ -3207,7 +3207,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
           const r = el.getBoundingClientRect(), w = warn && warn.getBoundingClientRect();
           return { popVis: getComputedStyle(pop).display !== 'none', w: Math.round(r.width), h: Math.round(r.height), vis: getComputedStyle(el).display !== 'none', inView: r.left >= -1 && r.right <= innerWidth + 1, warnH: w ? Math.round(w.height) : 0, warnIn: w ? (w.left >= -1 && w.right <= innerWidth + 1) : null };
         })()`);
-        ok('§10 the provenance line RENDERS inside a 375px viewport (wraps, never clipped)', !!geom && geom.popVis && geom.vis && geom.h > 0 && geom.inView, JSON.stringify(geom));
+        ok('§10 the provenance line RENDERS inside a 375px viewport (wraps, never clipped)', !!geom && gateOf(geom.popVis) && gateOf(geom.vis) && geom.h > 0 && verdictOf(geom.inView), JSON.stringify(geom));
         ok('§10 …and so does the stale-since warning', !!geom && geom.warnH > 0 && geom.warnIn === true, JSON.stringify(geom));
         // NEGATIVE CONTROL: a LIVE member with a corroborated own-panel reading
         const html2 = await ev(`(() => { ${setup}
@@ -3218,7 +3218,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
           return document.getElementById('usage-popup').innerHTML;
         })()`);
         const H2 = html2 || '';
-        ok('§10 NEGATIVE CONTROL: a live member reading its OWN /usage panel shows that source + "corroborated", and NO warning', /own \/usage panel/.test(H2) && /corroborated/.test(H2) && !/usage-warn/.test(H2), H2.replace(/\s+/g, ' ').slice(0, 300));
+        ok('§10 NEGATIVE CONTROL: a live member reading its OWN /usage panel shows that source + "corroborated", and NO warning', gateOf(/own \/usage panel/.test(H2)) && gateOf(/corroborated/.test(H2)) && !/usage-warn/.test(H2), H2.replace(/\s+/g, ' ').slice(0, 300));
         // §12c IN THE REAL PANEL: the CODEX section used to say "via unknown /
         // No producer recorded this reading" about the only codex producer we
         // ship. Feed the snapshot the way /api/usage carries it (codexRateLimit
@@ -3237,9 +3237,9 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
           return i >= 0 ? String(h).slice(i) : '';
         };
         const Hcx = await renderCodex({ ...cxSnap, source: 'codex-rate-limits' });
-        ok('§10 the CODEX panel names its producer instead of "via unknown"', /class="usage-src"/.test(Hcx) && /own session/.test(Hcx) && !/unknown/.test(Hcx) && !/No producer recorded/.test(Hcx), Hcx.replace(/\s+/g, ' ').slice(-280));
+        ok('§10 the CODEX panel names its producer instead of "via unknown"', gateOf(/class="usage-src"/.test(Hcx)) && gateOf(/own session/.test(Hcx)) && !/unknown/.test(Hcx) && !/No producer recorded/.test(Hcx), Hcx.replace(/\s+/g, ' ').slice(-280));
         const HcxOld = await renderCodex(cxSnap);   // the PRE-FIX snapshot: no `source` at all
-        ok('§10 NEGATIVE CONTROL: the pre-fix codex snapshot (no `source`) renders exactly the sentence the fix removes', /unknown/.test(HcxOld) && /No producer recorded/.test(HcxOld), HcxOld.replace(/\s+/g, ' ').slice(-280));
+        ok('§10 NEGATIVE CONTROL: the pre-fix codex snapshot (no `source`) renders exactly the sentence the fix removes', gateOf(/unknown/.test(HcxOld)) && verdictOf(/No producer recorded/.test(HcxOld)), HcxOld.replace(/\s+/g, ' ').slice(-280));
         // ── §17 THREE LIMITS ON ONE ACCOUNT, IN THE REAL PANEL (B-9213) ──
         // The codex app-server pushes one snapshot PER LIMIT and they were
         // collapsed into one cache file, so the panel showed whichever spoke
@@ -3269,14 +3269,14 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
           ],
         };
         const Hm = await renderCodex(cxMulti);
-        ok('§17 the panel names the model-scoped limit the vendor reported', /GPT-5\.3-Codex-Spark/.test(Hm), Hm.replace(/\s+/g, ' ').slice(0, 400));
-        ok('§17 …and the OTHER limit the same account holds (`premium`, which reports no window at all)', /premium/.test(Hm) && /no window reported/.test(Hm), Hm.replace(/\s+/g, ' ').slice(-400));
-        ok('§17 the plan limit still reads 5 % — a Spark push is not news about it (the collapse showed 0 %)', /5% used/.test(Hm) && !/0% used[\s\S]{0,120}7-day limit/.test(Hm), Hm.replace(/\s+/g, ' ').slice(0, 300));
-        ok('§17 a window that has NOT STARTED says so instead of printing a reset that slides on every read', /starts on first use/.test(Hm), Hm.replace(/\s+/g, ' ').slice(-400));
+        ok('§17 the panel names the model-scoped limit the vendor reported', verdictOf(/GPT-5\.3-Codex-Spark/.test(Hm)), Hm.replace(/\s+/g, ' ').slice(0, 400));
+        ok('§17 …and the OTHER limit the same account holds (`premium`, which reports no window at all)', gateOf(/premium/.test(Hm)) && verdictOf(/no window reported/.test(Hm)), Hm.replace(/\s+/g, ' ').slice(-400));
+        ok('§17 the plan limit still reads 5 % — a Spark push is not news about it (the collapse showed 0 %)', gateOf(/5% used/.test(Hm)) && !/0% used[\s\S]{0,120}7-day limit/.test(Hm), Hm.replace(/\s+/g, ' ').slice(0, 300));
+        ok('§17 a window that has NOT STARTED says so instead of printing a reset that slides on every read', verdictOf(/starts on first use/.test(Hm)), Hm.replace(/\s+/g, ' ').slice(-400));
         const rows17 = await ev("(() => Array.from(document.querySelectorAll('#usage-popup .usage-session[data-limit-id]')).map((e) => ({ id: e.dataset.limitId, w: Math.round(e.getBoundingClientRect().width), inView: e.getBoundingClientRect().left >= -1 && e.getBoundingClientRect().right <= innerWidth + 1, vis: getComputedStyle(e).display !== 'none' })))()");
         ok('§17 every extra limit RENDERS inside a 375px viewport (a limit nobody can read is a limit nobody has)',
-          Array.isArray(rows17) && rows17.length === 2 && rows17.every((r) => r.vis && r.w > 0 && r.inView), JSON.stringify(rows17));
-        ok('§17 …and each of the two is the limit it claims to be', Array.isArray(rows17) && rows17.map((r) => r.id).sort().join(',') === 'codex_bengalfox,premium', JSON.stringify(rows17));
+          gateOf(Array.isArray(rows17)) && rows17.length === 2 && verdictOf(rows17.every((r) => r.vis && r.w > 0 && r.inView)), JSON.stringify(rows17));
+        ok('§17 …and each of the two is the limit it claims to be', gateOf(Array.isArray(rows17)) && rows17.map((r) => r.id).sort().join(',') === 'codex_bengalfox,premium', JSON.stringify(rows17));
         // NEGATIVE CONTROL: the PRE-FIX collapse — one file, the Spark
         // snapshot, no `limits`. The panel can only show 0 % and a reset that
         // is not one, and the plan limit is nowhere.
@@ -3287,7 +3287,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
           fetchedAt: T0, source: 'codex-rate-limits',
         };
         const Hc = await renderCodex(cxCollapsed);
-        ok('§17 NEGATIVE CONTROL: the collapsed pre-fix snapshot shows 0 % and names no other limit', /0% used/.test(Hc) && !/GPT-5\.3-Codex-Spark/.test(Hc) && !/starts on first use/.test(Hc), Hc.replace(/\s+/g, ' ').slice(0, 300));
+        ok('§17 NEGATIVE CONTROL: the collapsed pre-fix snapshot shows 0 % and names no other limit', gateOf(/0% used/.test(Hc)) && !/GPT-5\.3-Codex-Spark/.test(Hc) && !/starts on first use/.test(Hc), Hc.replace(/\s+/g, ' ').slice(0, 300));
         cws.close();
       }
     } catch (e) {
@@ -3363,14 +3363,14 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§18 …and the foreign wall is filed on the member the link had moved to',
       t5 === OWN_TRUE, `true owner 5h resetsAt=${t5} expected=${OWN_TRUE}`);
     ok('§18 …the re-file SPEAKS (a write that moves money may never be silent)',
-      lines.some((l) => /re-filed \(the link moved mid-turn\)/.test(l)), lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 300));
+      verdictOf(lines.some((l) => /re-filed \(the link moved mid-turn\)/.test(l))), lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 300));
 
     // THE MONEY HALF. The victim legitimately walled on its OWN 5h at ①, so it
     // IS walled — what must NOT happen is the true owner going unmarked while
     // the victim absorbs a second, foreign wall.
     const walled = w.eng.sessionWalledMembers(w.SID);
     ok('§18 the member the link moved to is marked walled — the wall it actually served',
-      walled.has(w.FISH), `walled: ${JSON.stringify([...walled])}`);
+      verdictOf(walled.has(w.FISH)), `walled: ${JSON.stringify([...walled])}`);
 
     // ── NEGATIVE CONTROL: the pre-fix rule, on the SAME world ───────────────
     // A PATCHED COPY OF THE PRODUCT MODULE (the r4/§8 pattern), not my idea of
@@ -3387,7 +3387,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const src = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
       const marker = 'function wallTargetFor(session, poolId, b, pinned) {';
       const patched = editAnchor(src, marker, marker + '\n  return { member: pinned, why: null };  // PRE-FIX: the turn pin, unconditionally', "src/server/usage-pool-engine.js");
-      ok('§18 NEGATIVE CONTROL: the patch hit the product source', patched !== src && patched.includes('PRE-FIX: the turn pin'));
+      ok('§18 NEGATIVE CONTROL: the patch hit the product source', patched !== src && verdictOf(patched.includes('PRE-FIX: the turn pin')));
       const I2 = mkIncident();
       const w2 = I2.w;
       const prefixMod = MUT.load('src/server/usage-pool-engine.js', patched, '18');
@@ -3487,7 +3487,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       ok('§18d the BANNER for that same wall follows the proven re-file — it states no time of its own, so it may not fall back to the member just proved innocent',
         T3.w.readCache(T3.w.LINK).fiveHour?.utilization !== 1 && T3.w.readCache(T3.w.FISH).fiveHour?.utilization === 1,
         `victim=${JSON.stringify(T3.w.readCache(T3.w.LINK).fiveHour)} was=${JSON.stringify(beforeBanner)} owner=${JSON.stringify(T3.w.readCache(T3.w.FISH).fiveHour)}`);
-      ok('§18d …and it SAYS which member it moved to and why', lines3.some((l) => /banner follows this turn's proven re-file/.test(l)), lines3.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 260));
+      ok('§18d …and it SAYS which member it moved to and why', verdictOf(lines3.some((l) => /banner follows this turn's proven re-file/.test(l))), lines3.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 260));
       T3.w.eng.noteTurnEnd(T3.w.session);
       ok('§18d …and the proof dies with the turn, like the two pins beside it (a re-point only reaches the CLI on its NEXT request)',
         !T3.w.session._turnWallRefile, JSON.stringify(T3.w.session._turnWallRefile));
@@ -3511,7 +3511,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         const lines5 = cap5.done();
         const walled5 = T5.w.eng.sessionWalledMembers(T5.w.SID);
         ok('§18d …and the pinned member\'s OWN wall still reaches the turn-end pass (the banner moved the WRITE, not the signal that decides whose turn this was)',
-          walled5.has(T5.w.LINK) && walled5.has(T5.w.FISH) && /demoted .* 7d/.test(lines5.join(' | ')),
+          gateOf(walled5.has(T5.w.LINK)) && gateOf(walled5.has(T5.w.FISH)) && verdictOf(/demoted .* 7d/.test(lines5.join(' | '))),
           `walled=${JSON.stringify([...walled5])} LINK=${T5.w.LINK} FISH=${T5.w.FISH} :: ${lines5.filter((l) => /demoted/.test(l)).join(' | ')}`);
         ok('§18d …and the banner did NOT put a second 5h mark back on the pin at turn end (one rejection, one member)',
           T5.w.readCache(T5.w.LINK).fiveHour?.utilization !== 1 && T5.w.readCache(T5.w.FISH).fiveHour?.utilization === 1,
@@ -3556,11 +3556,11 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         Number(v2.fiveHour?.resetsAt) === T2.OWN_T5 && v2.fiveHour?.status === 'limited',
         `pre-fix victim 5h=${JSON.stringify(v2.fiveHour)} foreign=${T2.OWN_T5} own=${T2.OWN_V5}`);
       ok('§18d NEGATIVE CONTROL: …and that is money — the pool reads the victim as having no headroom until a window that is not its own',
-        (() => {
+        verdictOf((() => {
           const { accountRemaining } = require(path.join(REPO, 'src/account-pool-auto.js'));
           const rem = accountRemaining(v2, {});
           return rem && rem.remaining === 0 && rem.known === true;
-        })(), JSON.stringify(require(path.join(REPO, 'src/account-pool-auto.js')).accountRemaining(v2, {})));
+        })()), JSON.stringify(require(path.join(REPO, 'src/account-pool-auto.js')).accountRemaining(v2, {})));
     }
   }
 }
@@ -3632,7 +3632,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   const strengths = [['sevenDay', 'decisive'], ['scoped', 'decisive'], ['weekly', 'decisive'], ['7d', 'decisive'],
   ['fiveHour', 'corroborating'], ['5h', 'corroborating'], ['other', 'none'], [null, 'none'], ['', 'none']];
   ok('§18c the strength is a function of the WINDOW KIND and nothing else',
-    strengths.every(([k, s]) => quotaModel.refutationStrength(k) === s),
+    verdictOf(strengths.every(([k, s]) => quotaModel.refutationStrength(k) === s)),
     JSON.stringify(strengths.map(([k]) => [k, quotaModel.refutationStrength(k)])));
 
   const refuted = (kind, extra) => quotaModel.wallAttribution({
@@ -3646,7 +3646,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   ok('§18c a FIVE-HOUR refutation does NOT — the pin stands, because refusing a wall costs money too',
     w5.action === 'write' && w5.key === 'A' && w5.disagrees === true, JSON.stringify(w5));
   ok('§18c …and it SAYS so rather than passing silently (the disagreement is the incident\'s own shape)',
-    /five-hour reset is only corroborating evidence/.test(w5.reason), w5.reason);
+    verdictOf(/five-hour reset is only corroborating evidence/.test(w5.reason)), w5.reason);
   const p7 = refuted('sevenDay', { ledgerKey: 'A', ledgerIsSessionScoped: true });
   const p5 = refuted('fiveHour', { ledgerKey: 'A', ledgerIsSessionScoped: true });
   ok('§18c the same split when the ledger names the PIN (witnesses disagree)',
@@ -3666,7 +3666,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   //    'decisive' with its own measurement, never inherit claude's.
   const un = refuted('credits', { ledgerKey: 'B', ledgerIsSessionScoped: true, ledgerOwnResetsAt: nowS + 9999 });
   ok('§18c an UNMEASURED window kind refutes nothing at all — unknown is not a licence',
-    un.action === 'write' && un.key === 'A' && /nothing is measured/.test(un.reason), JSON.stringify(un));
+    un.action === 'write' && un.key === 'A' && verdictOf(/nothing is measured/.test(un.reason)), JSON.stringify(un));
 
   // NEGATIVE CONTROL: round 1's rule, which had no notion of strength. Driven
   // through the SAME entry point by handing it the kind the old code implied
@@ -3779,18 +3779,18 @@ esac
     const cap0 = quiet(); w.reading(0.05, { resetsAt: OWN_WIN }); cap0.done();
     const aw1 = w.apiWin();
     ok('§19 ① ONE slot-verified rate_limit_event is a CANDIDATE, not a witness (final verifier: one lagging reading poisoned a fresh member for good): the ring holds it (.apiwin-<key>, never .json), no window is established, no `.window-` sidecar is stamped',
-      aw1 && Array.isArray(aw1.ring) && aw1.ring.length === 1 && aw1.ring[0].resetsAt === OWN_WIN && aw1.ring[0].outcome === 'write' && aw1.ring[0].sid === w.SID && aw1.sevenDay === null && w.eng.apiDerivedWindow(w.LINK) === null && w.readWindow(w.LINK) === null
+      gateOf(aw1) && gateOf(Array.isArray(aw1.ring)) && aw1.ring.length === 1 && aw1.ring[0].resetsAt === OWN_WIN && aw1.ring[0].outcome === 'write' && aw1.ring[0].sid === w.SID && aw1.sevenDay === null && w.eng.apiDerivedWindow(w.LINK) === null && w.readWindow(w.LINK) === null
       && !fs.readdirSync(w.cacheDir).some((f) => f.startsWith('.apiwin-') && f.endsWith('.json')), JSON.stringify({ aw1, win: w.readWindow(w.LINK) }));
     const cap0a = quiet(); w.reading(0.06, { resetsAt: OWN_WIN }); w.reading(0.07, { resetsAt: OWN_WIN }); cap0a.done();
     const aw = w.apiWin();
     ok('§19 ① …the THIRD agreeing candidate (K = 3) establishes the API-derived window (source rate-limit-events, n 3) and stamps the ABSENT `.window-` sidecar from the API',
-      aw && aw.sevenDay === OWN_WIN && aw.source === 'rate-limit-events' && aw.n === 3 && aw.sessionId === w.SID && aw.ring.length === 3 && w.eng.apiDerivedWindow(w.LINK)?.sevenDay === OWN_WIN
+      gateOf(aw) && aw.sevenDay === OWN_WIN && aw.source === 'rate-limit-events' && aw.n === 3 && aw.sessionId === w.SID && aw.ring.length === 3 && w.eng.apiDerivedWindow(w.LINK)?.sevenDay === OWN_WIN
       && w.readWindow(w.LINK)?.sevenDay === OWN_WIN && w.readWindow(w.LINK)?.source === 'api' && w.readWindow(w.LINK)?.verifiedBy === 'rate-limit-events', JSON.stringify({ aw, win: w.readWindow(w.LINK) }));
     const cap0b = quiet();
     w.eng.recordRateLimitEvent(w.session, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.5, resets_at: base + 5 * H, resetsAt: base + 5 * H } });
     cap0b.done();
     ok('§19 ① …a five_hour event does not touch it (a 5h window names a time, never an account) and the engine reads it back without a fiveHour half',
-      (() => { const r = w.eng.apiDerivedWindow(w.LINK); return r && r.sevenDay === OWN_WIN && r.fiveHour === null && w.apiWin().sevenDay === OWN_WIN; })(), JSON.stringify(w.eng.apiDerivedWindow(w.LINK)));
+      verdictOf((() => { const r = w.eng.apiDerivedWindow(w.LINK); return r && r.sevenDay === OWN_WIN && r.fiveHour === null && w.apiWin().sevenDay === OWN_WIN; })()), JSON.stringify(w.eng.apiDerivedWindow(w.LINK)));
 
     // ② the FIXED refresher: own panel ⇒ written + sidecar stamped + a `written` probe record, over a HOME whose ~/.claude.json names ANOTHER org
     const { u } = w.mkUsage({ probe: false });
@@ -3799,29 +3799,29 @@ esac
     ok('§19 ② the fixed spawn hands the CLI an isolated config dir UNDER the creds dir, seeded with the account\'s OWN org (the fake read org-own there while ~/.claude.json said org-foreign)',
       r1 === true && sp1.length === 1 && sp1[0] === `cfg=${path.join(w.am.subDir(w.LINK), '.probe-config', '.claude.json')} org=org-own secure=${w.am.subDir(w.LINK)} cwd=${path.join(w.am.subDir(w.LINK), '.probe-config', 'cwd')}`, JSON.stringify(sp1));
     ok('§19 ② …and the WORKING DIRECTORY is the empty dir inside that isolated config (owner: config dir AND cwd on the new path — the CLI keys per-project state by cwd), created by the seed, never os.tmpdir()',
-      fs.existsSync(path.join(w.am.subDir(w.LINK), '.probe-config', 'cwd')) && fs.readdirSync(path.join(w.am.subDir(w.LINK), '.probe-config', 'cwd')).length === 0 && /cwd: probeCwd, timeout: 60000/.test(fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8')) && !/cwd: os\.tmpdir\(\), timeout: 60000/.test(fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8')));
+      gateOf(fs.existsSync(path.join(w.am.subDir(w.LINK), '.probe-config', 'cwd'))) && fs.readdirSync(path.join(w.am.subDir(w.LINK), '.probe-config', 'cwd')).length === 0 && gateOf(/cwd: probeCwd, timeout: 60000/.test(fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8'))) && !/cwd: os\.tmpdir\(\), timeout: 60000/.test(fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8')));
     ok('§19 ② …~/.claude.json is never read for identity and never written', JSON.parse(fs.readFileSync(path.join(w.home, '.claude.json'), 'utf8')).oauthAccount.organizationUuid === 'org-foreign' && !/\/home\/\.claude\.json/.test(sp1[0]));
     const c1 = w.readCache(w.LINK);
-    ok('§19 ② …the panel is WRITTEN: 7d 12 %, Fable 5 %, in the account\'s own window', c1 && Math.abs(c1.sevenDay.utilization - 0.12) < 1e-9 && c1.sevenDay.resetsAt === OWN_WIN && (c1.scopedWeekly || []).some((s) => /fable/i.test(s.name) && Math.abs(s.utilization - 0.05) < 1e-9), JSON.stringify(c1 && { s: c1.sevenDay, sw: c1.scopedWeekly }));
+    ok('§19 ② …the panel is WRITTEN: 7d 12 %, Fable 5 %, in the account\'s own window', gateOf(c1) && Math.abs(c1.sevenDay.utilization - 0.12) < 1e-9 && c1.sevenDay.resetsAt === OWN_WIN && verdictOf((c1.scopedWeekly || []).some((s) => /fable/i.test(s.name) && Math.abs(s.utilization - 0.05) < 1e-9)), JSON.stringify(c1 && { s: c1.sevenDay, sw: c1.scopedWeekly }));
     ok('§19 ② …the established-window sidecar is stamped with it', w.readWindow(w.LINK)?.sevenDay === OWN_WIN, JSON.stringify(w.readWindow(w.LINK)));
     const p1 = w.probeRows().pop();
     ok('§19 ② …and the probe log says `written`, identity VERIFIED by the weekly phase against the API-derived window, with the isolated dir and both org contexts recorded',
-      p1 && p1.outcome === 'written' && p1.identityVerified === true && p1.identity && p1.identity.phase === 'agree' && p1.configDir === path.join(w.am.subDir(w.LINK), '.probe-config') && p1.configOrgBefore && p1.configOrgBefore.orgUuid === 'org-own' && p1.machineOrgBefore && p1.machineOrgBefore.orgUuid === 'org-foreign' && p1.why === null,
+      gateOf(p1) && p1.outcome === 'written' && p1.identityVerified === true && gateOf(p1.identity) && p1.identity.phase === 'agree' && p1.configDir === path.join(w.am.subDir(w.LINK), '.probe-config') && gateOf(p1.configOrgBefore) && p1.configOrgBefore.orgUuid === 'org-own' && gateOf(p1.machineOrgBefore) && p1.machineOrgBefore.orgUuid === 'org-foreign' && p1.why === null,
       JSON.stringify(p1 && { outcome: p1.outcome, iv: p1.identityVerified, id: p1.identity, cfg: p1.configDir, before: p1.configOrgBefore, mach: p1.machineOrgBefore, why: p1.why }));
 
     // ③ a FOREIGN panel (a replaced login answering for another org) ⇒ refused: nothing written, sidecar untouched, archived naming both, probe log write-refused
     w.setMode('force-foreign');
     const cap2 = quiet(); const r2 = await w.withHome(() => u.refreshViaCliPanel(w.LINK)); const lines2 = cap2.done();
     const c2 = w.readCache(w.LINK);
-    ok('§19 ③ a foreign panel returns false and writes NOTHING (the cache still holds the account\'s own 12 % / 5 %)', r2 === false && c2 && Math.abs(c2.sevenDay.utilization - 0.12) < 1e-9 && c2.sevenDay.resetsAt === OWN_WIN && !(c2.scopedWeekly || []).some((s) => Math.abs(s.utilization - 0.98) < 1e-9), JSON.stringify(c2 && c2.sevenDay));
+    ok('§19 ③ a foreign panel returns false and writes NOTHING (the cache still holds the account\'s own 12 % / 5 %)', r2 === false && gateOf(c2) && Math.abs(c2.sevenDay.utilization - 0.12) < 1e-9 && c2.sevenDay.resetsAt === OWN_WIN && !(c2.scopedWeekly || []).some((s) => Math.abs(s.utilization - 0.98) < 1e-9), JSON.stringify(c2 && c2.sevenDay));
     ok('§19 ③ …the established-window sidecar is NOT re-stamped with the foreign window (the B-855a ② re-stamp)', w.readWindow(w.LINK)?.sevenDay === OWN_WIN, JSON.stringify(w.readWindow(w.LINK)));
     const ar = w.archive().filter((x) => x.what === 'panel-identity');
     ok('§19 ③ …the reading is ARCHIVED as `panel-identity`, naming BOTH identities (the account asked for and the member whose window it carries) with the API-derived window it contradicted',
-      ar.length === 1 && ar[0].key === w.LINK && /Member Y/.test(ar[0].reason) && /Member F/.test(ar[0].reason) && ar[0].matched.includes(w.FISH) && ar[0].ownWindow && ar[0].ownWindow.sevenDay === OWN_WIN && ar[0].entry && Math.abs(ar[0].entry.sevenDay.utilization - 0.5) < 1e-9, JSON.stringify(ar[0] && ar[0].reason));
+      ar.length === 1 && ar[0].key === w.LINK && gateOf(/Member Y/.test(ar[0].reason)) && gateOf(/Member F/.test(ar[0].reason)) && gateOf(ar[0].matched.includes(w.FISH)) && gateOf(ar[0].ownWindow) && ar[0].ownWindow.sevenDay === OWN_WIN && gateOf(ar[0].entry) && Math.abs(ar[0].entry.sevenDay.utilization - 0.5) < 1e-9, JSON.stringify(ar[0] && ar[0].reason));
     const p2 = w.probeRows().pop();
     ok('§19 ③ …the probe log records `write-refused` with `why` naming both identities and the verdict (phase differ)',
-      p2 && p2.outcome === 'write-refused' && /Member Y/.test(p2.why) && /Member F/.test(p2.why) && p2.identity && p2.identity.phase === 'differ' && p2.identityVerified === false, JSON.stringify(p2 && { o: p2.outcome, why: p2.why, id: p2.identity }));
-    ok('§19 ③ …telemetry `usage-probe-identity-refused` fired and the journal spoke once, naming both', events.some((e) => e.startsWith('usage-probe-identity-refused:' + w.LINK)) && lines2.filter((l) => /panel-identity: refusing to write Member Y/.test(l) && /Member F/.test(l)).length === 1, events.filter((e) => /identity/.test(e)).join(' | ') + ' || ' + lines2.filter((l) => /\[usage\]/.test(l)).join(' | '));
+      gateOf(p2) && p2.outcome === 'write-refused' && gateOf(/Member Y/.test(p2.why)) && gateOf(/Member F/.test(p2.why)) && gateOf(p2.identity) && p2.identity.phase === 'differ' && p2.identityVerified === false, JSON.stringify(p2 && { o: p2.outcome, why: p2.why, id: p2.identity }));
+    ok('§19 ③ …telemetry `usage-probe-identity-refused` fired and the journal spoke once, naming both', gateOf(events.some((e) => e.startsWith('usage-probe-identity-refused:' + w.LINK))) && lines2.filter((l) => /panel-identity: refusing to write Member Y/.test(l) && /Member F/.test(l)).length === 1, events.filter((e) => /identity/.test(e)).join(' | ') + ' || ' + lines2.filter((l) => /\[usage\]/.test(l)).join(' | '));
     const cap3 = quiet(); const r3 = await w.withHome(() => u.refreshViaCliPanel(w.LINK)); const lines3 = cap3.done();
     ok('§19 ③ …a repeat of the same verdict is archived and logged again but not re-journaled (one line per (key, verdict) transition)', r3 === false && w.archive().filter((x) => x.what === 'panel-identity').length === 2 && w.probeRows().filter((p) => p.outcome === 'write-refused').length === 2 && !lines3.some((l) => /panel-identity: refusing/.test(l)));
 
@@ -3829,18 +3829,18 @@ esac
     w.setMode('by-config');
     w.obs.set(w.CID, { orgUuid: 'org-fish', acct: w.FISH, known: true, ts: Date.now() });   // observed on Member F while linked to Member Y
     const capD = quiet(); const d1 = await w.eng.probeUsageForAccountKey(w.LINK, { detailed: true }); capD.done();
-    ok('§19 ⑤ control rung: an OTel-DIVERGENT session IS asked — the label vetoes nothing (lane-hot-switch: it is machine-wide; it was the veto that sent almost every ⟳ to the panel)', d1 && d1.rung === 'control' && d1.skipped.length === 0 && d1.sessionId === w.SID, JSON.stringify(d1));
+    ok('§19 ⑤ control rung: an OTel-DIVERGENT session IS asked — the label vetoes nothing (lane-hot-switch: it is machine-wide; it was the veto that sent almost every ⟳ to the panel)', gateOf(d1) && d1.rung === 'control' && d1.skipped.length === 0 && d1.sessionId === w.SID, JSON.stringify(d1));
     const capD2 = quiet(); const bare = await w.eng.probeUsageForAccountKey(w.LINK); capD2.done();
     ok('§19 ⑤ …and the bare call keeps its parsed|null shape for every other caller', bare === null);
     const { call } = w.mkUsage();
     const capR = quiet(); const a1 = await w.withHome(() => call({ account: w.LINK })); capR.done();
     ok('§19 ⑤ the ⟳ route answer names the rung that answered (panel — the asked session gave nothing here) and that the identity was verified; no session was skipped for a label',
-      a1.success === true && a1.via === 'cli-panel' && a1.rung === 'panel' && a1.identityVerified === true && /API-derived window/.test(a1.why) && a1.skipped.length === 0, JSON.stringify(a1));
+      a1.success === true && a1.via === 'cli-panel' && a1.rung === 'panel' && a1.identityVerified === true && gateOf(/API-derived window/.test(a1.why)) && a1.skipped.length === 0, JSON.stringify(a1));
     // inside a re-point's LAG SHADOW: the link just moved and no reading has ended the shadow
     w.obs.set(w.CID, { orgUuid: 'org-b', acct: w.SPARE, known: true, ts: Date.now() });
     w.am.ensureSessionPoolLink(w.P, w.SID, w.SPARE, { why: 'per-session-switch' });
     const capS = quiet(); const d2 = await w.eng.probeUsageForAccountKey(w.SPARE, { detailed: true }); capS.done();
-    ok('§19 ⑤ control rung: a session inside a re-point\'s lag shadow (Member Y → Member B seconds ago, no reading yet) is not asked either', d2 && d2.parsed === null && d2.skipped.length === 1 && /re-pointed Member Y → Member B \d+s ago/.test(d2.skipped[0].why), JSON.stringify(d2));
+    ok('§19 ⑤ control rung: a session inside a re-point\'s lag shadow (Member Y → Member B seconds ago, no reading yet) is not asked either', gateOf(d2) && d2.parsed === null && d2.skipped.length === 1 && verdictOf(/re-pointed Member Y → Member B \d+s ago/.test(d2.skipped[0].why)), JSON.stringify(d2));
     // the shadow ENDS when a reading demonstrably arrives on the new credentials — then the session is asked and answers
     w.endTurn();   // the turn pin from ① would otherwise answer before the shadow is consulted (a pin outlives a re-point until the turn ends)
     const capE = quiet(); w.reading(0.2, { resetsAt: SPARE_WIN }); capE.done();
@@ -3849,7 +3849,7 @@ esac
     w.session.pty = { write(line) { let req = null; try { req = JSON.parse(line); } catch { } const pend = req && w.eng._vsuPending.get(req.request_id); if (!pend) return; w.eng._vsuPending.delete(req.request_id); clearTimeout(pend.timer); pend.raw = payload; pend.resolve(ClaudeCodeAdapter.parseGetUsageResponse(payload)); } };
     const capF = quiet(); const d3 = await w.eng.probeUsageForAccountKey(w.SPARE, { detailed: true }); capF.done();
     ok('§19 ⑤ …once a reading has ENDED the shadow the session is asked, answers, and the detailed verdict says verified (its window matches Member B\'s established window)',
-      d3 && d3.parsed && d3.skipped.length === 0 && d3.sessionId === w.SID && d3.target === w.SPARE && d3.identityVerified === true && /matches Member B/.test(d3.why), JSON.stringify(d3 && { t: d3.target, iv: d3.identityVerified, why: d3.why, sk: d3.skipped }));
+      gateOf(d3) && gateOf(d3.parsed) && d3.skipped.length === 0 && d3.sessionId === w.SID && d3.target === w.SPARE && d3.identityVerified === true && verdictOf(/matches Member B/.test(d3.why)), JSON.stringify(d3 && { t: d3.target, iv: d3.identityVerified, why: d3.why, sk: d3.skipped }));
 
     // ⑥ the ⟳ route on an identity refusal answers the refusal and does NOT fall to the token ladder
     // safety net: were the ladder reached, there is no token to spend on a vendor call — an EXPIRED access token (the ladder
@@ -3860,7 +3860,7 @@ esac
     const { call: call2 } = w.mkUsage({ probe: false });
     const capG = quiet(); const a2 = await w.withHome(() => call2({ account: w.LINK })); capG.done();
     ok('§19 ⑥ the ⟳ route on an identity refusal answers the refusal (rung panel, identityVerified false, both identities named) instead of spending a second vendor call on the token ladder',
-      a2.success !== true && /not recorded — the \/usage panel for Member Y answered with Member F/.test(a2.error || '') && a2.rung === 'panel' && a2.identityVerified === false, JSON.stringify(a2));
+      a2.success !== true && gateOf(/not recorded — the \/usage panel for Member Y answered with Member F/.test(a2.error || '')) && a2.rung === 'panel' && a2.identityVerified === false, JSON.stringify(a2));
   } finally { global.__vsEvent = prevEv; }
 
   // ⑦ THE SIDECAR IS STAMPED ONLY BY A PANEL THAT PROVED WHOSE IT IS (c2 (a)),
@@ -3872,7 +3872,7 @@ esac
     const capA = quiet(); const rA = await w7.withHome(() => u7.refreshViaCliPanel(w7.LINK)); capA.done();
     const pA = w7.probeRows().pop();
     ok('§19 ⑦ an UNVERIFIED panel (no org evidence, no API-derived window yet) is WRITTEN but does not stamp the established window — it may not define who the account is',
-      rA === true && w7.readCache(w7.LINK) && Math.abs(w7.readCache(w7.LINK).sevenDay.utilization - 0.12) < 1e-9 && w7.readWindow(w7.LINK) === null && pA && pA.outcome === 'written' && pA.identityVerified === false && /not-stamped/.test(pA.sidecar || ''),
+      rA === true && gateOf(w7.readCache(w7.LINK)) && Math.abs(w7.readCache(w7.LINK).sevenDay.utilization - 0.12) < 1e-9 && w7.readWindow(w7.LINK) === null && gateOf(pA) && pA.outcome === 'written' && pA.identityVerified === false && verdictOf(/not-stamped/.test(pA.sidecar || '')),
       JSON.stringify({ rA, win: w7.readWindow(w7.LINK), p: pA && { o: pA.outcome, iv: pA.identityVerified, sc: pA.sidecar } }));
     // the account's own slot-verified API readings arrive ⇒ after K = 3 agreeing candidates the ENGINE stamps the absent sidecar from the API (one is a candidate, never a verdict)
     w7.obs.set(w7.CID, { orgUuid: 'org-own', acct: w7.LINK, known: true, ts: Date.now() });
@@ -3881,12 +3881,12 @@ esac
     const capB2 = quiet(); w7.reading(0.07, { resetsAt: OWN_WIN }); capB2.done();
     const winB = w7.readWindow(w7.LINK);
     ok('§19 ⑦ …the THIRD agreeing slot-verified rate_limit_event stamps the ABSENT sidecar from the API (source api, verifiedAt, n 3) — the guard is armed without any panel',
-      winB && winB.sevenDay === OWN_WIN && winB.source === 'api' && winB.verifiedAt > 0 && winB.verifiedBy === 'rate-limit-events' && winB.n === 3, JSON.stringify(winB));
+      gateOf(winB) && winB.sevenDay === OWN_WIN && winB.source === 'api' && winB.verifiedAt > 0 && winB.verifiedBy === 'rate-limit-events' && winB.n === 3, JSON.stringify(winB));
     // the same own panel is now VERIFIED by the API phase ⇒ it may (re)stamp, and says by what
     const capC = quiet(); const rC = await w7.withHome(() => u7.refreshViaCliPanel(w7.LINK)); capC.done();
     const winC = w7.readWindow(w7.LINK); const pC = w7.probeRows().pop();
     ok('§19 ⑦ …a panel verified against the API-derived window stamps it as on-demand WITH verifiedAt + verifiedBy api-phase',
-      rC === true && winC && winC.sevenDay === OWN_WIN && winC.source === 'on-demand' && winC.verifiedAt > 0 && winC.verifiedBy === 'api-phase' && pC && pC.identityVerified === true && pC.sidecar === 'stamped',
+      rC === true && gateOf(winC) && winC.sevenDay === OWN_WIN && winC.source === 'on-demand' && winC.verifiedAt > 0 && winC.verifiedBy === 'api-phase' && gateOf(pC) && pC.identityVerified === true && pC.sidecar === 'stamped',
       JSON.stringify({ winC, p: pC && { iv: pC.identityVerified, sc: pC.sidecar } }));
     // the human-triggered repair route: an agent token is refused, a human gets the report
     const capD = quiet();
@@ -3894,7 +3894,7 @@ esac
     const aOk = await callRoute('/api/usage/repair-identity', {});
     capD.done();
     ok('§19 ⑦ POST /api/usage/repair-identity refuses an agent Bearer (403 agent-forbidden) and answers a human with the repair report (counts + per-account verdicts)',
-      a403.status === 403 && a403.code === 'agent-forbidden' && aOk.status === 200 && aOk.success === true && !!aOk.counts && Array.isArray(aOk.identities) && aOk.identities.some((r) => r.key === w7.LINK),
+      a403.status === 403 && a403.code === 'agent-forbidden' && aOk.status === 200 && aOk.success === true && !!aOk.counts && gateOf(Array.isArray(aOk.identities)) && verdictOf(aOk.identities.some((r) => r.key === w7.LINK)),
       JSON.stringify({ a403, aOk: aOk && { s: aOk.status, c: aOk.counts, n: aOk.identities && aOk.identities.length } }));
   }
 
@@ -3932,7 +3932,7 @@ esac
     const c8d = quiet(); const r8 = await w8.withHome(() => u8.refreshViaCliPanel(N)); c8d.done();
     const p8 = w8.probeRows().pop();
     ok('§19 ⑧ …and N\'s OWN panel is accepted: written, identity VERIFIED by the phase against N\'s witness (the base refused it against the poisoned witness)',
-      r8 === true && p8 && p8.outcome === 'written' && p8.identityVerified === true && p8.identity && p8.identity.phase === 'agree' && Math.abs(w8.readCache(N).sevenDay.utilization - 0.12) < 1e-9,
+      r8 === true && gateOf(p8) && p8.outcome === 'written' && p8.identityVerified === true && gateOf(p8.identity) && p8.identity.phase === 'agree' && Math.abs(w8.readCache(N).sevenDay.utilization - 0.12) < 1e-9,
       JSON.stringify(p8 && { o: p8.outcome, iv: p8.identityVerified, id: p8.identity }));
     ok('§19 ⑧ CONTROL: Member Y\'s own witness and sidecar were untouched by the re-point and by N\'s readings', w8.apiWin()?.sevenDay === OWN_WIN && w8.readWindow(w8.LINK)?.sevenDay === OWN_WIN);
   }
@@ -3949,14 +3949,14 @@ esac
     const c9b = quiet(); w9.reading(0.05, { resetsAt: MOVED_WIN }); w9.reading(0.06, { resetsAt: MOVED_WIN }); const l9b = c9b.done();
     ok('§19 ⑨ the first two readings in a NEW phase are archived by the guard (the sidecar still says the old window, the cache keeps the old numbers) and counted as candidates',
       w9.readWindow(w9.LINK)?.sevenDay === OWN_WIN && w9.apiWin().sevenDay === OWN_WIN && w9.apiWin().ring.filter((e) => e.outcome === 'archived').length === 2 && Math.abs(w9.readCache(w9.LINK).sevenDay.utilization - 0.22) < 1e-9
-      && l9b.some((l) => /refusing to write Member Y a reading from another window/.test(l)), JSON.stringify({ win: w9.readWindow(w9.LINK), ring: w9.apiWin().ring.map((e) => e.outcome) }));
+      && verdictOf(l9b.some((l) => /refusing to write Member Y a reading from another window/.test(l))), JSON.stringify({ win: w9.readWindow(w9.LINK), ring: w9.apiWin().ring.map((e) => e.outcome) }));
     // the ⟳ in between: the panel (in the new window) is still refused against the witness, but the refusal names the likely cause with the count
     w9.setPanel(`Current session: 3% used · resets ${when(base + 5 * H)}\nCurrent week (all models): 7% used · resets ${when(MOVED_WIN)}\n`);
     const { u: u9 } = w9.mkUsage({ probe: false });
     const c9c = quiet(); const r9 = await w9.withHome(() => u9.refreshViaCliPanel(w9.LINK)); c9c.done();
     const p9 = w9.probeRows().pop();
     ok('§19 ⑨ …a panel in the new window is still refused (two candidates are not a verdict) but the refusal says the window may have MOVED, with the count',
-      r9 === false && p9 && p9.outcome === 'write-refused' && p9.identity && p9.identity.movedLikely === true && /2 of Member Y's own last 5 API readings share the panel's window: Member Y's weekly window may have MOVED; 3 consecutive agreeing readings re-anchor it/.test(p9.why),
+      r9 === false && gateOf(p9) && p9.outcome === 'write-refused' && gateOf(p9.identity) && p9.identity.movedLikely === true && verdictOf(/2 of Member Y's own last 5 API readings share the panel's window: Member Y's weekly window may have MOVED; 3 consecutive agreeing readings re-anchor it/.test(p9.why)),
       JSON.stringify(p9 && { o: p9.outcome, why: p9.why }));
     const ev9 = []; const prev9 = global.__vsEvent; global.__vsEvent = (n, d) => { ev9.push(n + ':' + d); try { prev9 && prev9(n, d); } catch { } };
     const c9d = quiet(); try { w9.reading(0.07, { resetsAt: MOVED_WIN }); } finally { global.__vsEvent = prev9; } const l9d = c9d.done();
@@ -3964,13 +3964,13 @@ esac
     const mv = w9.foreignArchive().filter((x) => x.store === 'window-sidecar' && x.action === 'moved' && x.key === w9.LINK);
     ok('§19 ⑨ …the THIRD consecutive reading in the new phase MOVES both sidecars there (journal "window moved", the old sidecar archived with a reason naming both), telemetry usage-window-moved',
       w9.readWindow(w9.LINK)?.sevenDay === MOVED_WIN && w9.readWindow(w9.LINK)?.source === 'api' && w9.readWindow(w9.LINK)?.verifiedBy === 'rate-limit-events' && w9.apiWin().sevenDay === MOVED_WIN
-      && l9d.some((l) => /window moved: Member Y's weekly window is now/.test(l) && /3 consecutive slot-verified readings/.test(l)) && mv.length === 1 && mv[0].entry && mv[0].entry.sevenDay === OWN_WIN && /archived\/archived\/archived/.test(mv[0].reason)
-      && events.some((e) => e.startsWith('usage-window-moved:' + w9.LINK)), JSON.stringify({ win: w9.readWindow(w9.LINK), lines: l9d, mv: mv.map((x) => x.reason) }));
+      && gateOf(l9d.some((l) => /window moved: Member Y's weekly window is now/.test(l) && /3 consecutive slot-verified readings/.test(l))) && mv.length === 1 && gateOf(mv[0].entry) && mv[0].entry.sevenDay === OWN_WIN && gateOf(/archived\/archived\/archived/.test(mv[0].reason))
+      && verdictOf(events.some((e) => e.startsWith('usage-window-moved:' + w9.LINK))), JSON.stringify({ win: w9.readWindow(w9.LINK), lines: l9d, mv: mv.map((x) => x.reason) }));
     const c9e = quiet(); w9.reading(0.08, { resetsAt: MOVED_WIN }); c9e.done();
     const c9f = quiet(); const r9b = await w9.withHome(() => u9.refreshViaCliPanel(w9.LINK)); c9f.done();
     const p9b = w9.probeRows().pop();
     ok('§19 ⑨ …from then on the account\'s own readings are WRITTEN (7d 8 % in the new window) and its own panel is verified and written (7 %) — the self-heal the panel alone could no longer provide',
-      r9b === true && p9b && p9b.outcome === 'written' && p9b.identityVerified === true && w9.readCache(w9.LINK).sevenDay.resetsAt === MOVED_WIN && Math.abs(w9.readCache(w9.LINK).sevenDay.utilization - 0.07) < 1e-9,
+      r9b === true && gateOf(p9b) && p9b.outcome === 'written' && p9b.identityVerified === true && w9.readCache(w9.LINK).sevenDay.resetsAt === MOVED_WIN && Math.abs(w9.readCache(w9.LINK).sevenDay.utilization - 0.07) < 1e-9,
       JSON.stringify({ p: p9b && { o: p9b.outcome, iv: p9b.identityVerified, why: p9b.why }, c: w9.readCache(w9.LINK).sevenDay }));
     // (§19 ⑨ the hourly standing repair — wiring pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
@@ -3988,8 +3988,8 @@ esac
     const c10b = quiet(); const r10 = await w10.withHome(() => u10.refreshViaCliPanel(w10.LINK)); c10b.done();
     const p10 = w10.probeRows().pop(), v10 = u10.panelVerdictFor(w10.LINK);
     ok('§19 ⑩ a panel whose weekly phase is SHARED with another member is written (no evidence to refuse) but NOT verified — the phase is not identifying — the verdict names who shares it, and the sidecar keeps its API stamp (never re-stamped by an unverified panel)',
-      r10 === true && p10 && p10.outcome === 'written' && p10.identityVerified === false && p10.identity && p10.identity.shared === true && p10.identity.matched.includes(w10.FISH) && /not-stamped/.test(p10.sidecar || '')
-      && v10 && v10.identityVerified === false && /shared with Member F — not identifying/.test(v10.why) && w10.readWindow(w10.LINK)?.verifiedBy === 'rate-limit-events' && w10.readWindow(w10.LINK)?.source === 'api',
+      r10 === true && gateOf(p10) && p10.outcome === 'written' && p10.identityVerified === false && gateOf(p10.identity) && p10.identity.shared === true && gateOf(p10.identity.matched.includes(w10.FISH)) && gateOf(/not-stamped/.test(p10.sidecar || ''))
+      && gateOf(v10) && v10.identityVerified === false && gateOf(/shared with Member F — not identifying/.test(v10.why)) && w10.readWindow(w10.LINK)?.verifiedBy === 'rate-limit-events' && w10.readWindow(w10.LINK)?.source === 'api',
       JSON.stringify({ p: p10 && { o: p10.outcome, iv: p10.identityVerified, id: p10.identity, sc: p10.sidecar }, v: v10, win: w10.readWindow(w10.LINK) }));
     // CONTROL: the same panel, the same readings, nobody sharing the phase ⇒ verified and stamped
     const w11 = mkProbeWorld();
@@ -3998,7 +3998,7 @@ esac
     const { u: u11 } = w11.mkUsage({ probe: false });
     const c11b = quiet(); const r11 = await w11.withHome(() => u11.refreshViaCliPanel(w11.LINK)); c11b.done();
     const p11 = w11.probeRows().pop();
-    ok('§19 ⑩ CONTROL: the same panel with nobody sharing the phase IS verified (api-phase) and re-stamps the sidecar', r11 === true && p11 && p11.identityVerified === true && p11.identity.shared === false && p11.sidecar === 'stamped' && w11.readWindow(w11.LINK)?.verifiedBy === 'api-phase', JSON.stringify(p11 && { iv: p11.identityVerified, sc: p11.sidecar, id: p11.identity }));
+    ok('§19 ⑩ CONTROL: the same panel with nobody sharing the phase IS verified (api-phase) and re-stamps the sidecar', r11 === true && gateOf(p11) && p11.identityVerified === true && p11.identity.shared === false && p11.sidecar === 'stamped' && w11.readWindow(w11.LINK)?.verifiedBy === 'api-phase', JSON.stringify(p11 && { iv: p11.identityVerified, sc: p11.sidecar, id: p11.identity }));
   }
 
   // ④ PRE-FIX CONTROL: the same fake binary, the same HOME, the shipped refresher with the two halves removed ⇒ it reads ~/.claude.json's org and writes BOTH (the incident, end to end)
@@ -4020,13 +4020,13 @@ esac
     const capB = quiet(); const rr = await w2.withHome(() => u2.refreshViaCliPanel(w2.LINK)); capB.done();
     const spB = w2.spawns(); const cB = w2.readCache(w2.LINK);
     ok('§19 ④ CONTROL: without the isolation the SAME binary reads ~/.claude.json and answers the OTHER org (the fake logged the machine-wide file and org-foreign)', spB.length === 1 && spB[0] === `cfg=${path.join(w2.home, '.claude.json')} org=org-foreign secure=${w2.am.subDir(w2.LINK)} cwd=${fs.realpathSync(os.tmpdir())}`, JSON.stringify(spB));
-    ok('§19 ④ CONTROL: …and without the gate it WRITES the foreign numbers on the account (7d 50 %, Fable 98 %) — the panel the owner saw at 02:23', rr === true && cB && Math.abs(cB.sevenDay.utilization - 0.5) < 1e-9 && cB.sevenDay.resetsAt === FOREIGN_WIN && (cB.scopedWeekly || []).some((s) => /fable/i.test(s.name) && Math.abs(s.utilization - 0.98) < 1e-9), JSON.stringify(cB && cB.sevenDay));
+    ok('§19 ④ CONTROL: …and without the gate it WRITES the foreign numbers on the account (7d 50 %, Fable 98 %) — the panel the owner saw at 02:23', rr === true && gateOf(cB) && Math.abs(cB.sevenDay.utilization - 0.5) < 1e-9 && cB.sevenDay.resetsAt === FOREIGN_WIN && verdictOf((cB.scopedWeekly || []).some((s) => /fable/i.test(s.name) && Math.abs(s.utilization - 0.98) < 1e-9)), JSON.stringify(cB && cB.sevenDay));
     ok('§19 ④ CONTROL: …and RE-STAMPS the established-window sidecar with the foreign window (B-855a ②: every later own reading would be archived as foreign)', w2.readWindow(w2.LINK)?.sevenDay === FOREIGN_WIN, JSON.stringify(w2.readWindow(w2.LINK)));
     // control for the control: the FIXED refresher over the polluted store, same HOME and binary, heals it
     const { u: u3 } = w2.mkUsage({ probe: false });
     const capC = quiet(); const rh = await w2.withHome(() => u3.refreshViaCliPanel(w2.LINK)); capC.done();
     const cH = w2.readCache(w2.LINK);
-    ok('§19 ④ …CONTROL for the control: the fixed refresher over the SAME polluted store, HOME and binary writes the account\'s OWN panel back and re-stamps its own window (self-heal)', rh === true && cH && Math.abs(cH.sevenDay.utilization - 0.12) < 1e-9 && cH.sevenDay.resetsAt === OWN_WIN && w2.readWindow(w2.LINK)?.sevenDay === OWN_WIN && w2.spawns().length === 2 && /org=org-own/.test(w2.spawns()[1]), JSON.stringify({ c: cH && cH.sevenDay, w: w2.readWindow(w2.LINK), sp: w2.spawns() }));
+    ok('§19 ④ …CONTROL for the control: the fixed refresher over the SAME polluted store, HOME and binary writes the account\'s OWN panel back and re-stamps its own window (self-heal)', rh === true && gateOf(cH) && Math.abs(cH.sevenDay.utilization - 0.12) < 1e-9 && cH.sevenDay.resetsAt === OWN_WIN && w2.readWindow(w2.LINK)?.sevenDay === OWN_WIN && w2.spawns().length === 2 && verdictOf(/org=org-own/.test(w2.spawns()[1])), JSON.stringify({ c: cH && cH.sevenDay, w: w2.readWindow(w2.LINK), sp: w2.spawns() }));
   }
 }
 
@@ -4092,7 +4092,7 @@ esac
   const rep = repair.repairSidecarsByApiPhase({ dataDir, accounts, id: 'T' });
   const row = (k) => rep.identities.find((r) => r.key === k);
   ok('§20 Member A\'s API phase is established from the readings the API STATED (four 7d moves + three slot-verified archived readings), never from the carried-forward foreign 7d, the rejection or the unvalidated slot',
-    row(A) && row(A).apiPhase === pa && row(A).n === 7 && row(A).of === 7 && row(A).sources.changed === 4 && row(A).sources.archived === 3, JSON.stringify(row(A)));
+    gateOf(row(A)) && row(A).apiPhase === pa && row(A).n === 7 && row(A).of === 7 && row(A).sources.changed === 4 && row(A).sources.archived === 3, JSON.stringify(row(A)));
   const winA = JSON.parse(bytes(readingLag.windowSidecarName(A)));
   ok('§20 …its sidecar — which carried Member F\'s phase — is RE-STAMPED to the API phase, source api, verifiedAt, every scoped bucket on the 7d phase',
     row(A).sidecar === 'restamped' && row(A).sidecarWas === pf && winA.sevenDay === WA && winA.source === 'api' && winA.verifiedAt > 0 && winA.scoped.fable === WA && winA.n === 7, JSON.stringify(winA));
@@ -4101,7 +4101,7 @@ esac
   const cA = JSON.parse(bytes(A + '.json'));
   const fabA = (cA.scopedWeekly || []).find((s) => /fable/i.test(s.name));
   ok('§20 …its cache — the foreign panel\'s 7d 50 % / Fable 98 % — is REPLACED: rebuilt from the newest wholly-agreeing anchor, then the archived own readings re-admitted in time order, ending on the newest (7d 26 %, Fable 7 %, its OWN window)',
-    row(A).cache === 'replaced' && row(A).readmitted === 4 && Math.abs(cA.sevenDay.utilization - 0.26) < 1e-9 && cA.sevenDay.resetsAt === WA && fabA && Math.abs(fabA.utilization - 0.07) < 1e-9 && fabA.resetsAt === WA && cA.fetchedAt === at(1) && cA.orgUuid === 'aaaa',
+    row(A).cache === 'replaced' && row(A).readmitted === 4 && Math.abs(cA.sevenDay.utilization - 0.26) < 1e-9 && cA.sevenDay.resetsAt === WA && gateOf(fabA) && Math.abs(fabA.utilization - 0.07) < 1e-9 && fabA.resetsAt === WA && cA.fetchedAt === at(1) && cA.orgUuid === 'aaaa',
     JSON.stringify({ row: row(A), sevenDay: cA.sevenDay, fabA, fetchedAt: cA.fetchedAt - at(1) }));
   ok('§20 …never the foreign 98 %: no bucket of the rebuilt cache is in Member F\'s phase', !(cA.scopedWeekly || []).some((s) => readingLag.weeklyNear(s.resetsAt, WF) === true) && readingLag.weeklyNear(cA.sevenDay.resetsAt, WF) === false);
   {
@@ -4109,16 +4109,16 @@ esac
     const ov = SA.overageState(cA, { now: nowMs });
     const gate = SA.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: A, name: 'Member A' }, state: SA.emptyBudget(), now: nowMs, overage: ov });
     ok('§20 ORG FACTS SURVIVE THE REBUILD (final verifier): the replaced cache still carries `overage` (inUse, status, resetsAt, asOf) and `spend`, overageState reads in-use, and the spend authorizer still REFUSES an unattended turn on it — dropping them flipped every such turn from refuse to allow',
-      cA.overage && cA.overage.inUse === true && cA.overage.status === 'allowed' && cA.overage.resetsAt === OV_A.resetsAt && cA.overage.asOf === OV_A.asOf && cA.spend && cA.spend.used === 12.5 && cA.spend.limit === 50
+      gateOf(cA.overage) && cA.overage.inUse === true && cA.overage.status === 'allowed' && cA.overage.resetsAt === OV_A.resetsAt && cA.overage.asOf === OV_A.asOf && gateOf(cA.spend) && cA.spend.used === 12.5 && cA.spend.limit === 50
       && ov.inUse === 'yes' && ov.mode === 'inUse' && gate.ok === false && gate.why === 'overage-in-use', JSON.stringify({ ov: cA.overage, sp: cA.spend, st: ov.inUse, gate }));
   }
   ok('§20 the witness is NOT evidence for the repair that judges it (final verifier): apiPhaseFor tallies anchors and archived readings only, and a live-path row marked not-a-witness is skipped',
-    (() => { const r = repair.apiPhaseFor({ key: A, anchorRows: [], mismatchRows: [{ key: A, at: nowMs - 1000, what: 'rate-limit-event:sevenDay', entry: { ev: { kind: 'sevenDay', status: 'allowed', resetsAt: WA }, slot: { slotOk: true }, witness: { ok: false, why: 're-pointed' } } }], apiwin: { sevenDay: WF, at: nowMs } }); return r.top === null && r.total === 0 && r.sources.skipped === 1 && r.sources.live === undefined; })());
+    verdictOf((() => { const r = repair.apiPhaseFor({ key: A, anchorRows: [], mismatchRows: [{ key: A, at: nowMs - 1000, what: 'rate-limit-event:sevenDay', entry: { ev: { kind: 'sevenDay', status: 'allowed', resetsAt: WA }, slot: { slotOk: true }, witness: { ok: false, why: 're-pointed' } } }], apiwin: { sevenDay: WF, at: nowMs } }); return r.top === null && r.total === 0 && r.sources.skipped === 1 && r.sources.live === undefined; })()));
   const arch = fs.readFileSync(path.join(archive, 'readings-foreign-usage-cache.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((x) => x.migration === 'T');
   const byAct = (st, a) => arch.filter((x) => x.store === st && x.action === a);
   ok('§20 ARCHIVE-NEVER-DESTROY: the old sidecar and the foreign snapshot are archived with a reason naming BOTH phases, and the re-admission is recorded',
-    byAct('window-sidecar', 'restamped').length === 1 && byAct('window-sidecar', 'restamped')[0].key === A && new RegExp(`phase ${pf}`).test(byAct('window-sidecar', 'restamped')[0].reason) && new RegExp(`phase ${pa}`).test(byAct('window-sidecar', 'restamped')[0].reason)
-    && byAct('usage-cache', 'replaced').length === 1 && byAct('usage-cache', 'replaced')[0].entry.sevenDay.utilization === 0.5 && /Member A/.test(byAct('usage-cache', 'replaced')[0].reason)
+    byAct('window-sidecar', 'restamped').length === 1 && byAct('window-sidecar', 'restamped')[0].key === A && gateOf(new RegExp(`phase ${pf}`).test(byAct('window-sidecar', 'restamped')[0].reason)) && gateOf(new RegExp(`phase ${pa}`).test(byAct('window-sidecar', 'restamped')[0].reason))
+    && byAct('usage-cache', 'replaced').length === 1 && byAct('usage-cache', 'replaced')[0].entry.sevenDay.utilization === 0.5 && gateOf(/Member A/.test(byAct('usage-cache', 'replaced')[0].reason))
     && byAct('usage-cache', 'readmitted').length === 1 && byAct('usage-cache', 'readmitted')[0].count === 4,
     JSON.stringify(arch.map((x) => [x.store, x.action, x.key])));
   ok('§20 NEGATIVE CONTROL: an account already anchored to its API phase is UNTOUCHED — cache and sidecar byte-identical (kept)',
@@ -4146,8 +4146,8 @@ esac
     const r = repair.repairSidecarsByApiPhase({ dataDir: dd, accounts: accounts.slice(0, 1), id: 'T2' });
     const c = JSON.parse(fs.readFileSync(path.join(dd, 'usage-cache', A + '.json'), 'utf8'));
     ok('§20 with NO anchor agreeing wholly (each carries a foreign Fable) the cache is EMPTIED with a reason — identity kept, no bucket, no fetchedAt — never rebuilt from a record that contradicts the account',
-      r.counts.emptied === 1 && r.counts.replaced === 0 && c.orgUuid === 'aaaa' && !c.sevenDay && !c.scopedWeekly && !c.fetchedAt && /no anchor of Member A agrees/.test(c.emptiedReason), JSON.stringify(c));
-    ok('§20 …and the EMPTIED remnant still carries the org facts (overage + spend) — an emptied reading is not an emptied bill', c.overage && c.overage.inUse === true && c.overage.status === 'allowed' && c.spend && c.spend.used === 12.5, JSON.stringify({ ov: c.overage, sp: c.spend }));
+      r.counts.emptied === 1 && r.counts.replaced === 0 && c.orgUuid === 'aaaa' && !c.sevenDay && !c.scopedWeekly && !c.fetchedAt && verdictOf(/no anchor of Member A agrees/.test(c.emptiedReason)), JSON.stringify(c));
+    ok('§20 …and the EMPTIED remnant still carries the org facts (overage + spend) — an emptied reading is not an emptied bill', gateOf(c.overage) && c.overage.inUse === true && c.overage.status === 'allowed' && gateOf(c.spend) && c.spend.used === 12.5, JSON.stringify({ ov: c.overage, sp: c.spend }));
   }
   // (§20 the repair's wiring pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -4213,7 +4213,7 @@ console.log('\n§22 the long-lived token\'s identity post-check: the real produc
   const lane = run(null);
   ok('§22 an oat-only row\'s FIRST token reading agrees with the window it established before the token ⇒ confirmed', lane.checks.O1 === 'confirmed', JSON.stringify(lane.checks));
   ok(`§22 …a token whose readings carry the window an owner confirmed for ANOTHER row's token: ${K22 - 1} turn(s) are suspects, turn #${K22}'s reading ⇒ mismatch naming that row, the token KEPT (the K-run, verify r1 F2)`,
-    K22 >= 2 && JSON.stringify(lane.after) === JSON.stringify([...Array(K22 - 1).fill('pending'), 'mismatch']) && lane.checks.O2 === 'mismatch' && JSON.stringify(lane.others) === JSON.stringify([lane.OT_id]) && lane.kept, JSON.stringify(lane));
+    K22 >= 2 && JSON.stringify(lane.after) === JSON.stringify([...Array(K22 - 1).fill('pending'), 'mismatch']) && lane.checks.O2 === 'mismatch' && JSON.stringify(lane.others) === JSON.stringify([lane.OT_id]) && verdictOf(lane.kept), JSON.stringify(lane));
   ok('§22 …a conversation still on a row\'s PREVIOUS token never judges the token saved now (verify r1 F1) — however many turns', lane.checks.O3 === 'pending', JSON.stringify(lane.checks));
   ok('§22 …the pooled member whose folder holds its OWN login: its reading says nothing about its token — the check stays armed', lane.checks.LINK === 'pending' && lane.checks.OT === 'pending', JSON.stringify(lane.checks));
   const baseSrc = editAnchor(ENG_SRC, HOOK, '    const postCheck = () => { };\n', "src/server/usage-pool-engine.js");
@@ -4221,12 +4221,12 @@ console.log('\n§22 the long-lived token\'s identity post-check: the real produc
   const base = run(MUT.load('src/server/usage-pool-engine.js', baseSrc, '22base'));
   ok('§22 …the base engine judges nothing (the checks are still armed) — the verdicts above are the hook\'s', base.checks.O1 === 'pending' && base.checks.O2 === 'pending' && base.checks.O3 === 'pending', JSON.stringify(base.checks));
   ok('§22 THE SLOT LAW: with and without the check, every reading lands in the SAME caches with the SAME numbers, and the guard archives the same records',
-    JSON.stringify(lane.caches) === JSON.stringify(base.caches) && JSON.stringify(lane.archived) === JSON.stringify(base.archived) && lane.seven && lane.seven.resetsAt === W_A,
+    JSON.stringify(lane.caches) === JSON.stringify(base.caches) && JSON.stringify(lane.archived) === JSON.stringify(base.archived) && gateOf(lane.seven) && lane.seven.resetsAt === W_A,
     JSON.stringify({ lane: lane.caches, base: base.caches, la: lane.archived, ba: base.archived }));
   // the RED control: a check consulted BEFORE the guard whose answer re-keys the reading (the hook itself runs after the
   // write since fix r2 — a re-key there would be inert, so the plant puts the consultation where it could move a number)
   const rekey = editAnchor(ENG_SRC, '    if (win) {\n      const target = guardReadingTarget(key, win, ', "    if (win) { try { const v22 = oatIdentity.onReading(slotKey, { window: win, at: Date.now(), viaToken: () => tokenSpentBy(session, slotKey), gen: () => tokenGenOf(session, slotKey), eligible: witness, sid: session._webuiId || null }); if (v22 && v22.verdict === 'mismatch' && (v22.others || [])[0]) key = v22.others[0]; } catch { } }\n    if (win) {\n      const target = guardReadingTarget(key, win, ", "src/server/usage-pool-engine.js");
-  ok('§22 the RED control applies (a check whose answer files the reading on the row it named)', rekey !== ENG_SRC && /key = v22\.others\[0\]/.test(rekey));
+  ok('§22 the RED control applies (a check whose answer files the reading on the row it named)', rekey !== ENG_SRC && verdictOf(/key = v22\.others\[0\]/.test(rekey)));
   const red = run(MUT.load('src/server/usage-pool-engine.js', rekey, '22rekey'));
   console.log(`    RED control (a reading re-attributed by the check): Token Other's cache ${JSON.stringify(red.caches.OT)} vs ${JSON.stringify(base.caches.OT)} without it`);
   ok('§22 RED control: re-attributing by the check moves the reading — the differential catches it', JSON.stringify(red.caches) !== JSON.stringify(base.caches), JSON.stringify({ red: red.caches, base: base.caches }));
@@ -4238,8 +4238,8 @@ console.log('\n§22 the long-lived token\'s identity post-check: the real produc
 // SIBLINGS in src/server/ (vs-readattr-mut-*, gitignored — so git never saw
 // them) and any suite scanning src/ beside this one counted them as product.
 console.log('\n§21 the patched copies never touch the tree');
-for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 2 })) ok('§21 ' + r.name, r.pass, r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 2 })) ok('§21 ' + r.name, verdictOf(r.pass), r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';
 

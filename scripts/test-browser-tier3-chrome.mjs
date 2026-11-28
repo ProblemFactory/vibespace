@@ -23,7 +23,7 @@ import { scratch, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const run = (bin, args, env = process.env, timeout = 10000) => new Promise((res) => execFile(bin, args, { env, timeout, encoding: 'utf8' }, (err, stdout, stderr) => res({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
@@ -122,7 +122,7 @@ async function main() {
   const readArgv = (pid) => fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split(/\0|\s+/).filter(Boolean);
   const cmdline = readArgv(busPid);
   const bad = cmdline.filter((a) => AUTOMATION_FLAGS.some((f) => a.startsWith(f)));
-  ok(bad.length === 0 && cmdline.length > 1 && cmdline.some((a) => a.startsWith('--user-data-dir=')), `the browser's argv carries NO automation flag (${cmdline.length} tokens; checked ${AUTOMATION_FLAGS.join(', ')})`, bad);
+  ok(bad.length === 0 && cmdline.length > 1 && verdictOf(cmdline.some((a) => a.startsWith('--user-data-dir='))), `the browser's argv carries NO automation flag (${cmdline.length} tokens; checked ${AUTOMATION_FLAGS.join(', ')})`, bad);
   ok(!fs.existsSync(path.join(udd, 'DevToolsActivePort')), 'no DevToolsActivePort in the profile (no CDP endpoint was ever opened)');
 
   // the engine: a fake keeper with NO records (nothing is ours), the switch ON,
@@ -138,21 +138,21 @@ async function main() {
 
   const l = await engine.list(A);
   const row = l.targets.find((t) => t.handle === H);
-  ok(row && row.origin === 'desktop' && row.yourDesktop === true && l.desktop.enabled, `the real browser is listed as a desktop-class row (${row ? row.label : 'MISSING'}) — marked yourDesktop`);
+  ok(gateOf(row) && row.origin === 'desktop' && row.yourDesktop === true && verdictOf(l.desktop.enabled), `the real browser is listed as a desktop-class row (${row ? row.label : 'MISSING'}) — marked yourDesktop`);
   let r = await caught(() => engine.attach(H, A));
-  ok(r.ok && r.value.origin === 'desktop' && /USER'S OWN DESKTOP/.test(r.value.note), 'attach: the lease is desktop-class, the note is §6.6\'s');
+  ok(gateOf(r.ok) && r.value.origin === 'desktop' && verdictOf(/USER'S OWN DESKTOP/.test(r.value.note)), 'attach: the lease is desktop-class, the note is §6.6\'s');
   let snap = null;
   for (let i = 0; i < 10 && !(snap && snap.ok && snap.value.nodes.length > 5); i++) { snap = await caught(() => engine.snapshot(H, A, { budget: 1500, text: false })); if (!(snap.ok && snap.value.nodes.length > 5)) await sleep(1000); }
-  ok(snap.ok && snap.value.nodes.length > 5 && snap.value.yourDesktop === true, `snapshot from the REAL AT-SPI tree: ${snap.ok ? snap.value.nodes.length : 0} nodes in ${snap.ok ? snap.value.ms : '?'} ms`, snap.ok ? null : snap.message);
+  ok(gateOf(snap.ok) && snap.value.nodes.length > 5 && snap.value.yourDesktop === true, `snapshot from the REAL AT-SPI tree: ${snap.ok ? snap.value.nodes.length : 0} nodes in ${snap.ok ? snap.value.ms : '?'} ms`, snap.ok ? null : snap.message);
   if (snap.ok) { const c = snap.value.census; console.log(`  census: Action ${c.action}/${c.nodes}, EditableText ${c.editableText}/${c.nodes}, Text ${c.text}/${c.nodes}, buttons with Action ${c.buttonsWithAction}/${c.buttons}, actions ${JSON.stringify(c.actionNames).slice(0, 200)}`); }
-  ok(snap.ok && !JSON.stringify(snap.value).includes('devtools/browser') && !JSON.stringify(snap.value).includes('ws://'), 'nothing in the answer is a CDP url');
+  ok(gateOf(snap.ok) && !JSON.stringify(snap.value).includes('devtools/browser') && !JSON.stringify(snap.value).includes('ws://'), 'nothing in the answer is a CDP url');
   // one click @ref on a node that self-reports an action (a button first, else any node with an action other than the never-by-default ones)
   const nodes = snap.ok ? snap.value.nodes : [];
   const pick = nodes.find((n) => /button/.test(n.role) && (n.actions || []).some((a) => !WT.NEVER_BY_DEFAULT.has(a))) || nodes.find((n) => (n.actions || []).some((a) => !WT.NEVER_BY_DEFAULT.has(a)));
   if (!pick) skip('no node in the tree self-reports a clickable action (coverage is per toolkit — the census above is the reading)');
   else {
     r = await caught(() => engine.act(H, A, { verb: 'click', ref: pick.ref }));
-    ok(r.ok && r.value.did.by === 'node' && r.value.did.ref === pick.ref, `click ${pick.ref} (${pick.role} ${JSON.stringify(pick.name).slice(0, 40)}) = do_action "${r.ok ? r.value.did.action : '?'}" on the node, through NO injection`, r.ok ? null : r.message);
+    ok(gateOf(r.ok) && r.value.did.by === 'node' && r.value.did.ref === pick.ref, `click ${pick.ref} (${pick.role} ${JSON.stringify(pick.name).slice(0, 40)}) = do_action "${r.ok ? r.value.did.action : '?'}" on the node, through NO injection`, r.ok ? null : r.message);
   }
   const noAct = nodes.find((n) => !n.actions || !n.actions.length);
   if (noAct) { r = await caught(() => engine.act(H, A, { verb: 'click', ref: noAct.ref })); ok(!r.ok && r.code === 'node_has_no_action', `a node without Action (${noAct.ref} ${noAct.role}) is refused, never degraded`); }
@@ -167,18 +167,18 @@ async function main() {
   if (!xdotool || !ffmpeg) skip(`screenshot rung needs xdotool + ffmpeg (${xdotool ? '' : 'xdotool missing '}${ffmpeg ? '' : 'ffmpeg missing'})`);
   else {
     r = await caught(() => engine.screenshot(H, A));
-    ok(r.ok && r.value.via === 'x11grab' && r.value.bytes > 1000 && fs.existsSync(r.value.file), `screenshot = x11grab -window_id of the browser's own window (${r.ok ? r.value.bytes + ' bytes, ' + r.value.w + 'x' + r.value.h : r.code + ': ' + r.message})`);
+    ok(gateOf(r.ok) && r.value.via === 'x11grab' && r.value.bytes > 1000 && verdictOf(fs.existsSync(r.value.file)), `screenshot = x11grab -window_id of the browser's own window (${r.ok ? r.value.bytes + ' bytes, ' + r.value.w + 'x' + r.value.h : r.code + ': ' + r.message})`);
     if (r.ok) try { fs.unlinkSync(r.value.file); } catch { }
   }
   // the argv is STILL clean after everything (nothing we did re-launched or re-flagged the browser)
   const after = readArgv(busPid);
   ok(after.join(' ') === cmdline.join(' ') && !after.some((a) => AUTOMATION_FLAGS.some((f) => a.startsWith(f))), 'the same process, the same argv, still no automation flag — the site saw an ordinary browser throughout');
   const audit = fs.readFileSync(engine.auditFile, 'utf8').trim().split('\n').map((x) => JSON.parse(x));
-  ok(audit.length >= 4 && audit.every((x) => x.origin === 'desktop'), `every audit line carries origin:desktop (${audit.length})`);
+  ok(audit.length >= 4 && verdictOf(audit.every((x) => x.origin === 'desktop')), `every audit line carries origin:desktop (${audit.length})`);
   engine.shutdown();
 }
 
 try { await main(); } catch (e) { fail++; console.error(`  ✗ suite threw: ${e && e.stack || e}`); }
 console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
 cleanup();
-setTimeout(() => process.exit(fail ? 1 : 0), 700);
+setTimeout(() => process.exit(fail ? 1 : 0), 700); import { verdictOf, gateOf } from './lib/check.mjs';

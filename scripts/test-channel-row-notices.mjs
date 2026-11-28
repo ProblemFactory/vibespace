@@ -28,7 +28,7 @@ const SHOTS = process.env.RN_SHOTS || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the bundle: the REAL panel of the tree (patch = {from, to} rewrites channels-panel.js for the control)
@@ -139,17 +139,17 @@ const pushOf = (S, id) => S.secs[id].lines.find((l) => l.push === id) || null;
 const first = (S, label) => {
   const L = S.secs.lark, L2 = S.secs['lark:b'], SL = S.secs.slack, G = S.secs['gmail:a'];
   const p = pushOf(S, 'lark');
-  ok(p && p.shown && p.text === LINE && !p.warn && p.h <= 20 && p.verbs.includes('知道了') && p.verbs.includes('详情'), `${label} ① the parked push lane is ONE short plain line «${p && p.text}» (${p && p.h} px) + ⓘ + 「知道了」`, JSON.stringify(p));
-  ok(L && !COMMAND.test(L.visibleAll) && !L.shownText.some((x) => /248/.test(x)) && L.fold && !L.fold.open && L.infos.some((b) => b.inHealth) && L.infos.every((b) => b.exp === 'false'), `${label} ① no command anywhere on the row (no npm, no scope, no backtick); the 248 line waits under ⓘ (closed); the health line carries ⓘ`, JSON.stringify({ visible: L && L.visibleAll, fold: L && L.fold }));
+  ok(gateOf(p) && gateOf(p.shown) && p.text === LINE && !p.warn && p.h <= 20 && gateOf(p.verbs.includes('知道了')) && verdictOf(p.verbs.includes('详情')), `${label} ① the parked push lane is ONE short plain line «${p && p.text}» (${p && p.h} px) + ⓘ + 「知道了」`, JSON.stringify(p));
+  ok(gateOf(L) && !COMMAND.test(L.visibleAll) && !L.shownText.some((x) => /248/.test(x)) && gateOf(L.fold) && !L.fold.open && gateOf(L.infos.some((b) => b.inHealth)) && verdictOf(L.infos.every((b) => b.exp === 'false')), `${label} ① no command anywhere on the row (no npm, no scope, no backtick); the 248 line waits under ⓘ (closed); the health line carries ⓘ`, JSON.stringify({ visible: L && L.visibleAll, fold: L && L.fold }));
   const g2 = L2 && L2.lines.find((l) => l.grants === 'lark:b');
-  ok(g2 && g2.shown && !g2.folded && g2.text === PAGED_KEPT && !g2.warn && g2.verbs.includes('重新授权'), `${label} ① the account whose consent kept the names LEADS with the gain (plain) + 「重新授权」: «${g2 && g2.text}»`, JSON.stringify(g2));
+  ok(gateOf(g2) && gateOf(g2.shown) && !g2.folded && g2.text === PAGED_KEPT && !g2.warn && verdictOf(g2.verbs.includes('重新授权')), `${label} ① the account whose consent kept the names LEADS with the gain (plain) + 「重新授权」: «${g2 && g2.text}»`, JSON.stringify(g2));
   const ex = SL && SL.lines.find((l) => l.expiring === 'slack');
-  ok(ex && ex.shown && /^登录将在 .+ 后到期 — 到期前再授权一次即可$/.test(ex.text) && !ex.warn && ex.verbs.includes('重新授权'), `${label} ① the countdown says when and what keeps it, plain: «${ex && ex.text}»`, JSON.stringify(ex));
+  ok(gateOf(ex) && gateOf(ex.shown) && gateOf(/^登录将在 .+ 后到期 — 到期前再授权一次即可$/.test(ex.text)) && !ex.warn && verdictOf(ex.verbs.includes('重新授权')), `${label} ① the countdown says when and what keeps it, plain: «${ex && ex.text}»`, JSON.stringify(ex));
   const red = G && G.lines.find((l) => l.red);
-  ok(red && red.shown && red.text === `登录失效 — 需要重新授权 · 服务方拒绝了刷新令牌 · 始于 ${hhmm(at0714)}` && red.verbs.includes('重新连接'), `${label} ① the dead sign-in's red line (lane channel-reauth-visible) is unchanged: «${red && red.text}»`, JSON.stringify(red));
+  ok(gateOf(red) && gateOf(red.shown) && red.text === `登录失效 — 需要重新授权 · 服务方拒绝了刷新令牌 · 始于 ${hhmm(at0714)}` && verdictOf(red.verbs.includes('重新连接')), `${label} ① the dead sign-in's red line (lane channel-reauth-visible) is unchanged: «${red && red.text}»`, JSON.stringify(red));
   const all = Object.values(S.secs).flatMap((s) => s.lines.map((l) => l.text));
-  ok(all.length > 8 && all.every((x) => !BARE.test(String(x).trim())), `${label} ① RED CONTROL: none of the ${all.length} lines is a bare «需要重新授权»`, JSON.stringify(all));
-  ok(S.sw <= S.vw && Object.values(S.secs).every((s) => s.right <= S.vw), `${label} nothing wider than the screen`, JSON.stringify({ vw: S.vw, sw: S.sw }));
+  ok(all.length > 8 && verdictOf(all.every((x) => !BARE.test(String(x).trim()))), `${label} ① RED CONTROL: none of the ${all.length} lines is a bare «需要重新授权»`, JSON.stringify(all));
+  ok(S.sw <= S.vw && verdictOf(Object.values(S.secs).every((s) => s.right <= S.vw)), `${label} nothing wider than the screen`, JSON.stringify({ vw: S.vw, sw: S.sw }));
 };
 
 console.log('§1 desk (1100 px, zh, light): the rows of four accounts shaped like the owner\'s');
@@ -163,32 +163,32 @@ await sleep(150);
 let S = await d.ev(SECS);
 const F = S.secs.lark;
 const fl = F.lines.filter((l) => l.folded && l.shown).map((l) => l.text);
-ok(F.fold && F.fold.open && fl.includes('本实例没有安装飞书官方 SDK。') && fl.includes('不会漏消息：每条消息仍靠轮询收到。') && fl.some((x) => /实时推送（可选）/.test(x) && /诊断/.test(x)) && fl.includes(PAGED_OLD) && F.infos.every((b) => b.exp === 'true'), '② the fold says the cause, that nothing is lost, where the steps are (the setup card + Diagnostics) and the 248 line; both ⓘ say expanded', JSON.stringify({ fl, infos: F.infos }));
+ok(gateOf(F.fold) && gateOf(F.fold.open) && gateOf(fl.includes('本实例没有安装飞书官方 SDK。')) && gateOf(fl.includes('不会漏消息：每条消息仍靠轮询收到。')) && gateOf(fl.some((x) => /实时推送（可选）/.test(x) && /诊断/.test(x))) && gateOf(fl.includes(PAGED_OLD)) && verdictOf(F.infos.every((b) => b.exp === 'true')), '② the fold says the cause, that nothing is lost, where the steps are (the setup card + Diagnostics) and the 248 line; both ⓘ say expanded', JSON.stringify({ fl, infos: F.infos }));
 ok(!COMMAND.test(F.visibleAll), '② …and still no command on the row (the install steps are the setup card\'s)', F.visibleAll);
 await d.shot('fold.png');
 await d.ev(`(() => { window.__fire({ type: 'channels-updated', digest: { partial: true, conversations: [], adapters: ${JSON.stringify(adapters)} } }); return 1; })()`);
 await sleep(500);
 S = await d.ev(SECS);
-ok(S.secs.lark.fold && S.secs.lark.fold.open, '② a redraw (a broadcast) keeps the fold open (per page session)', JSON.stringify(S.secs.lark.fold));
+ok(gateOf(S.secs.lark.fold) && verdictOf(S.secs.lark.fold.open), '② a redraw (a broadcast) keeps the fold open (per page session)', JSON.stringify(S.secs.lark.fold));
 await d.ev(`(() => { const b = [...document.querySelectorAll('.chan-account[data-adapter="lark"] .chan-sec-details button')].find((x) => x.textContent === '重新授权'); b.click(); return 1; })()`);
 let dlg = null;
 for (let i = 0; i < 20 && !dlg; i++) { await sleep(150); dlg = await d.ev(`(() => { const x = document.getElementById('chan-reauth-dialog'); return x ? (x.textContent || '').slice(0, 200) : null; })()`); }
-ok(dlg && /重新授权/.test(dlg), '② the 248 line\'s 「重新授权」 opens THE account\'s Re-authorize dialog', dlg);
+ok(gateOf(dlg) && verdictOf(/重新授权/.test(dlg)), '② the 248 line\'s 「重新授权」 opens THE account\'s Re-authorize dialog', dlg);
 await d.ev(`(() => { const x = document.getElementById('chan-reauth-dialog'); const c = x && (x.closest('.modal-overlay, .dialog-overlay') || x); if (c) c.remove(); return 1; })()`);
 
 console.log('§3 「知道了」 puts the line away — kept per instance, a reload draws nothing');
 await d.ev(`(() => { document.querySelector('[data-chan-push="lark"] .chan-push-ack').click(); return 1; })()`);
 await sleep(300);
 S = await d.ev(SECS);
-ok(!pushOf(S, 'lark') && patches.length >= 1 && userState.channelsNoticesSeen && userState.channelsNoticesSeen.lark === 'unavailable:sdk-not-installed', `③ the line is gone at once; the user state keeps {lark: '${userState.channelsNoticesSeen && userState.channelsNoticesSeen.lark}'}`, JSON.stringify({ patches, push: pushOf(S, 'lark') }));
+ok(!pushOf(S, 'lark') && patches.length >= 1 && gateOf(userState.channelsNoticesSeen) && userState.channelsNoticesSeen.lark === 'unavailable:sdk-not-installed', `③ the line is gone at once; the user state keeps {lark: '${userState.channelsNoticesSeen && userState.channelsNoticesSeen.lark}'}`, JSON.stringify({ patches, push: pushOf(S, 'lark') }));
 d.close();
 const r = await page(1100, 1000, 'b=after.js');
 S = await r.ev(SECS);
-ok(!pushOf(S, 'lark') && S.secs.lark.infos.some((b) => b.inHealth), '③ after a RELOAD the put-away line stays away; the health line\'s ⓘ is still there', JSON.stringify(S.secs.lark.lines));
+ok(!pushOf(S, 'lark') && verdictOf(S.secs.lark.infos.some((b) => b.inHealth)), '③ after a RELOAD the put-away line stays away; the health line\'s ⓘ is still there', JSON.stringify(S.secs.lark.lines));
 await r.ev(`(() => { document.querySelector('.chan-account[data-adapter="lark"] .chan-sec-health .chan-sec-info').click(); return 1; })()`);
 await sleep(150);
 S = await r.ev(SECS);
-ok(S.secs.lark.fold.open && S.secs.lark.lines.some((l) => l.folded && l.shown && l.text === '本实例没有安装飞书官方 SDK。'), '③ …and ⓘ still reaches the details of the state that was put away', JSON.stringify(S.secs.lark.fold));
+ok(gateOf(S.secs.lark.fold.open) && verdictOf(S.secs.lark.lines.some((l) => l.folded && l.shown && l.text === '本实例没有安装飞书官方 SDK。')), '③ …and ⓘ still reaches the details of the state that was put away', JSON.stringify(S.secs.lark.fold));
 r.close();
 
 console.log('§4 the state CHANGES ⇒ the line is back');
@@ -196,7 +196,7 @@ LARK.push = { ...PARKED, lastStateCode: 'needs-credentials', lastStateWhy: 'no u
 const c4 = await page(1100, 1000, 'b=after.js');
 S = await c4.ev(SECS);
 const p4 = pushOf(S, 'lark');
-ok(p4 && p4.shown && p4.text === LINE && p4.verbs.includes('知道了'), '④ another code (the SDK appeared, then the credential failed): the line is shown again', JSON.stringify(p4));
+ok(gateOf(p4) && gateOf(p4.shown) && p4.text === LINE && verdictOf(p4.verbs.includes('知道了')), '④ another code (the SDK appeared, then the credential failed): the line is shown again', JSON.stringify(p4));
 c4.close();
 LARK.push = PARKED; userState = { ...OPEN_FOLDS };
 
@@ -204,7 +204,7 @@ console.log('§5 phone (390 px): the same lines, nothing wider, a 36 px ⓘ');
 const ph = await page(390, 844, 'b=after.js&w=100%25');
 first(await ph.ev(SECS), 'phone');
 const PI = (await ph.ev(SECS)).secs.lark.infos;
-ok(PI.length >= 2 && PI.every((b) => b.w >= 36 && b.h >= 36), `phone ⑤ every ⓘ is a 36 px target (${PI.map((b) => `${b.w}×${b.h}`).join(', ')})`, JSON.stringify(PI));
+ok(PI.length >= 2 && verdictOf(PI.every((b) => b.w >= 36 && b.h >= 36)), `phone ⑤ every ⓘ is a 36 px target (${PI.map((b) => `${b.w}×${b.h}`).join(', ')})`, JSON.stringify(PI));
 await ph.shot('phone.png');
 ph.close();
 
@@ -213,7 +213,7 @@ if (fs.existsSync(path.join(dir, 'paragraph.js'))) {
   const c = await page(1100, 1000, 'b=paragraph.js');
   const X = await c.ev(SECS);
   const xp = X.secs.lark.lines.find((l) => l.shown && /npm install/.test(l.text));
-  ok(xp && xp.warn && COMMAND.test(X.secs.lark.visibleAll) && !pushOf(X, 'lark'), 'CONTROL: the old row draws the install paragraph as a warning (commands on the row, no 「知道了」) — leg ① would be red', JSON.stringify(xp));
+  ok(gateOf(xp) && gateOf(xp.warn) && gateOf(COMMAND.test(X.secs.lark.visibleAll)) && !pushOf(X, 'lark'), 'CONTROL: the old row draws the install paragraph as a warning (commands on the row, no 「知道了」) — leg ① would be red', JSON.stringify(xp));
   c.close();
 }
 // chrome's helpers outlive a SIGKILL of its parent by a moment and re-create the profile dir: wait for the exit, then sweep
@@ -222,4 +222,4 @@ await new Promise((r) => { if (chrome.exitCode !== null || chrome.signalCode) r(
 await sleep(500);
 cleanup();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

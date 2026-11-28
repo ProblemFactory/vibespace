@@ -24,7 +24,7 @@ import { mutantCopies } from './mutant-copy.mjs';   // B-1561: the census lists 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; process.stderr.write('  ✗ ' + n + (e ? ' — ' + e : '') + '\n'); } }; // stderr directly: console.error is captured below
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; process.stderr.write('  ✗ ' + n + (e ? ' — ' + e : '') + '\n'); } }; // stderr directly: console.error is captured below
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 const { CONSUMERS, PROTOCOLS, hasConsumer, createStdoutRegistry } = require(path.join(REPO, 'src/server/stdout/index.js'));
@@ -38,9 +38,9 @@ const { slashCompletionList, initHealthIssues } = await import(path.join(REPO, '
 // ── 1. registry shape ──
 console.log('— registry');
 ok('three built-in protocols registered (stream-json / codex-events / acp-events)', PROTOCOLS.join(',') === 'stream-json,codex-events,acp-events', PROTOCOLS.join(','));
-ok('every registry key agrees with its module\'s declared protocol', Object.entries(CONSUMERS).every(([k, m]) => m.protocol === k && typeof m.create === 'function'));
-ok('every chat harness\'s caps.streamProtocol has a consumer (descriptor NAMES it, registry RESOLVES it)', chatHarnessIds().every((id) => hasConsumer(HARNESSES[id].caps.streamProtocol)), chatHarnessIds().map((id) => `${id}:${HARNESSES[id].caps.streamProtocol}`).join(','));
-ok('no dead consumer row: every registered protocol is declared by some chat harness', PROTOCOLS.every((p) => chatHarnessIds().some((id) => HARNESSES[id].caps.streamProtocol === p)));
+ok('every registry key agrees with its module\'s declared protocol', verdictOf(Object.entries(CONSUMERS).every(([k, m]) => m.protocol === k && typeof m.create === 'function')));
+ok('every chat harness\'s caps.streamProtocol has a consumer (descriptor NAMES it, registry RESOLVES it)', verdictOf(chatHarnessIds().every((id) => hasConsumer(HARNESSES[id].caps.streamProtocol))), chatHarnessIds().map((id) => `${id}:${HARNESSES[id].caps.streamProtocol}`).join(','));
+ok('no dead consumer row: every registered protocol is declared by some chat harness', verdictOf(PROTOCOLS.every((p) => chatHarnessIds().some((id) => HARNESSES[id].caps.streamProtocol === p))));
 ok('an unregistered / empty protocol has NO consumer (never a stream-json fallback)', !hasConsumer('gemini-events') && !hasConsumer(null) && !hasConsumer(undefined) && !hasConsumer(''));
 ok('the terminal-only harness declares no protocol at all', capsOf('shell').streamProtocol === null);
 
@@ -186,11 +186,11 @@ console.log('— stream-json (claude 2.1.319: the dumped shapes)');
   p.data(J({ type: 'user', session_id: sid, uuid: 'u-319-u', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_319', content: OUT, is_error: true }] } }));
   p.data(J({ type: 'result', subtype: 'success', session_id: sid, uuid: 'u-319-r', is_error: false, num_turns: 1, result: 'ok', duration_ms: 1, duration_api_ms: 1, stop_reason: 'end_turn', total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], credential_expires_at: '2026-12-01T00:00:00.000Z', stopped_by_permission_check: true }));
   p.data(J({ type: 'system', subtype: 'session_writes_lost', session_id: sid, uuid: 'u-319-l', error_code: 'ENOSPC', lost: ['transcript'], transcript_session_ids: [sid] })); // «after the last result», as the CLI exits
-  ok('…the lost write reached its brain consumer first (lane cli-2-1-319-records r2: kept past this process — the exit deletes the meta and the buffer)', brainCalls.some((c) => c[0] === 'writes-lost' && c[1] === 'w-319' && c[2] === 'u-319-l'), brainCalls);
+  ok('…the lost write reached its brain consumer first (lane cli-2-1-319-records r2: kept past this process — the exit deletes the meta and the buffer)', verdictOf(brainCalls.some((c) => c[0] === 'writes-lost' && c[1] === 'w-319' && c[2] === 'u-319-l')), brainCalls);
   const msgs = s._normalizer.messages;
-  ok('the 2.1.319 frames (init, the Agent call, «[Agent call interrupted: …», result, session_writes_lost after it) reach the REAL normalizer through feedLive: no unknown-record, no drift card', s._fed.filter((m) => m.session_id === sid).length === 5 && msgs.every((m) => m.noticeKind !== 'unknown-record' && m.noticeKind !== 'unknown-fields'), msgs.map((m) => m.noticeKind).filter(Boolean));
+  ok('the 2.1.319 frames (init, the Agent call, «[Agent call interrupted: …», result, session_writes_lost after it) reach the REAL normalizer through feedLive: no unknown-record, no drift card', s._fed.filter((m) => m.session_id === sid).length === 5 && verdictOf(msgs.every((m) => m.noticeKind !== 'unknown-record' && m.noticeKind !== 'unknown-fields')), msgs.map((m) => m.noticeKind).filter(Boolean));
   const swl = msgs.find((m) => m.content && m.content[0] && m.content[0].say === 'writes-lost');
-  ok('…the lost write after the last result is a create op on the wire to the client (a warning line), its Agent card marked', !!swl && swl.content[0].level === 'warning' && s._ops.some((o) => o.op === 'create' && (o.message || o.msg)?.id === swl.id) && msgs.some((m) => m.content && m.content[0] && m.content[0].toolCallId === 'toolu_319' && m.content[0].agentCutOff === true));
+  ok('…the lost write after the last result is a create op on the wire to the client (a warning line), its Agent card marked', !!swl && swl.content[0].level === 'warning' && gateOf(s._ops.some((o) => o.op === 'create' && (o.message || o.msg)?.id === swl.id)) && verdictOf(msgs.some((m) => m.content && m.content[0] && m.content[0].toolCallId === 'toolu_319' && m.content[0].agentCutOff === true)));
 }
 
 // ── 3a. claude stream-json consumer ──
@@ -203,28 +203,28 @@ console.log('— stream-json (claude)');
   ok('init record → id adoption (backendSessionId + claudeSessionId) persisted to session-meta', s.backendSessionId === 'sid-claude-1' && s.claudeSessionId === 'sid-claude-1' && meta(s)?.claudeSessionId === 'sid-claude-1' && meta(s)?.webuiSessionId === 'w-claude', JSON.stringify(meta(s)));
   { const m = meta(s);
     ok('…apiKeySource + permissionMode truth adopted from the init record (on disk by the STORE WRITER\'s write — read after its flush of the file, bound 5 s)', !metaNotLanded && s._apiKeySource === 'none' && s._permissionMode === 'default' && m?.apiKeySource === 'none', metaNotLanded || JSON.stringify(m)); }
-  ok('…and the init record reached the REAL normalizer through feedLive', s._fed.some((m) => m.type === 'system' && m.subtype === 'init'));
+  ok('…and the init record reached the REAL normalizer through feedLive', verdictOf(s._fed.some((m) => m.type === 'system' && m.subtype === 'init')));
   const asst = { type: 'assistant', session_id: 'sid-claude-1', uuid: 'u-asst-1', message: { id: 'msg_1', model: 'claude-fable-5', role: 'assistant', content: [{ type: 'text', text: 'hello from claude' }], usage: { input_tokens: 10, output_tokens: 5 } } };
   const asstLine = J(asst);
   p.data(asstLine.slice(0, 40)); // split across two pty chunks — line buffering
   ok('a partial line is buffered (nothing parsed yet)', !s._fed.some((m) => m.type === 'assistant'));
   p.data(asstLine.slice(40));
-  ok('assistant record (real shape) → REAL normalizer emitted a create op with the text', s._fed.some((m) => m.type === 'assistant') && s._ops.some((o) => o.op === 'create' && (o.message || o.msg)?.role === 'assistant' && JSON.stringify((o.message || o.msg).content).includes('hello from claude')), JSON.stringify(s._ops.filter((o) => o.op === 'create').slice(-1)));
-  ok('…REGISTERED through sbSeenFirst (session-brain first-writer-wins gate) before the side-effect families', calls.sbSeen.includes('assistant'));
-  ok('…and the SAME feedLive gate told the search index\'s live door (lane global-search: every consumer feeds through it)', searchLive.includes(s));
-  ok('…served-model latch + model registry + noteSessionProduced fired (main-thread record)', s._servedModel === 'claude-fable-5' && calls.modelSeen.includes('claude-fable-5') && calls.produced.includes(s));
-  ok("…streaming label 'responding' broadcast for a text-final assistant record", labels('w-claude').includes('responding'));
+  ok('assistant record (real shape) → REAL normalizer emitted a create op with the text', gateOf(s._fed.some((m) => m.type === 'assistant')) && verdictOf(s._ops.some((o) => o.op === 'create' && (o.message || o.msg)?.role === 'assistant' && JSON.stringify((o.message || o.msg).content).includes('hello from claude'))), JSON.stringify(s._ops.filter((o) => o.op === 'create').slice(-1)));
+  ok('…REGISTERED through sbSeenFirst (session-brain first-writer-wins gate) before the side-effect families', verdictOf(calls.sbSeen.includes('assistant')));
+  ok('…and the SAME feedLive gate told the search index\'s live door (lane global-search: every consumer feeds through it)', verdictOf(searchLive.includes(s)));
+  ok('…served-model latch + model registry + noteSessionProduced fired (main-thread record)', s._servedModel === 'claude-fable-5' && gateOf(calls.modelSeen.includes('claude-fable-5')) && verdictOf(calls.produced.includes(s)));
+  ok("…streaming label 'responding' broadcast for a text-final assistant record", verdictOf(labels('w-claude').includes('responding')));
   p.data(J({ type: '_stdin_ack', timestamp: Date.now() }));
   ok('_stdin_ack → session._stdinAckReceived (broken-pty detector input)', s._stdinAckReceived === true);
   p.data(J({ type: 'user', session_id: 'sid-claude-1', message: { role: 'user', content: 'hi' } }));
-  ok("user record → streaming ON + 'thinking...' label", s._isStreaming === true && labels('w-claude').includes('thinking...'));
+  ok("user record → streaming ON + 'thinking...' label", s._isStreaming === true && verdictOf(labels('w-claude').includes('thinking...')));
   p.data(J({ type: 'result', subtype: 'success', session_id: 'sid-claude-1', duration_ms: 1 }));
-  ok('result record → streaming OFF + noteTurnEnd (the turn boundary owner)', s._isStreaming === false && calls.turnEnd.includes(s));
+  ok('result record → streaming OFF + noteTurnEnd (the turn boundary owner)', s._isStreaming === false && verdictOf(calls.turnEnd.includes(s)));
   p.data('dtach noise, not json\n');
-  ok('a non-JSON line is passed through as raw output (never swallowed)', outputs('w-claude').some((d) => /dtach noise/.test(d)));
+  ok('a non-JSON line is passed through as raw output (never swallowed)', verdictOf(outputs('w-claude').some((d) => /dtach noise/.test(d))));
   p.data(J({ type: 'tool_progress', tool_use_id: 'toolu_X-heartbeat-0', tool_name: 'Bash', parent_tool_use_id: 'toolu_X', elapsed_time_seconds: 30, heartbeat: true, session_id: 'sid-claude-1' }));
-  ok('tool_progress rides its own channel, never the subagent path', calls.broadcasts.some((b) => b.id === 'w-claude' && b.type === 'tool-progress' && b.elapsedSeconds === 30) && !calls.broadcasts.some((b) => b.id === 'w-claude' && b.type === 'subagent-message'));
-  ok('the session buffer accumulates the raw stream', s.buffer.includes('hello from claude'));
+  ok('tool_progress rides its own channel, never the subagent path', gateOf(calls.broadcasts.some((b) => b.id === 'w-claude' && b.type === 'tool-progress' && b.elapsedSeconds === 30)) && !calls.broadcasts.some((b) => b.id === 'w-claude' && b.type === 'subagent-message'));
+  ok('the session buffer accumulates the raw stream', verdictOf(s.buffer.includes('hello from claude')));
 }
 
 // ── 3a-B3. TURN TRUTH: authoritative turn state, the run set, compaction stage,
@@ -253,7 +253,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   s._streamingLabel = ''; // the result's turn is over on the line (the line the composer reads)
   const before = labels('w-own').length;
   p.data(J({ type: 'system', subtype: 'init', session_id: 'sid-own', model: 'm', tools: [] }));
-  ok('a top-level init while the CLI still says \'running\' and the line is clear (its own turn for a frame it held) ⇒ the running line is back: \'thinking...\'', s._streamingLabel === 'thinking...' && labels('w-own').slice(before).includes('thinking...'), JSON.stringify({ label: s._streamingLabel, labels: labels('w-own') }));
+  ok('a top-level init while the CLI still says \'running\' and the line is clear (its own turn for a frame it held) ⇒ the running line is back: \'thinking...\'', s._streamingLabel === 'thinking...' && verdictOf(labels('w-own').slice(before).includes('thinking...')), JSON.stringify({ label: s._streamingLabel, labels: labels('w-own') }));
   const s2 = mkSession('claude', 'w-own-idle'); const p2 = fakePty();
   so.setupSessionPty(s2, 'w-own-idle', p2);
   p2.data(J({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'u-own-2', session_id: 'sid-own2' }));
@@ -291,7 +291,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   // ④ THE POINT: a result no longer ends a turn the harness says is running
   p.data(J({ type: 'result', subtype: 'success', session_id: 'sid-b3', duration_ms: 1 }));
   ok('under authority a `result` does NOT end the turn (the CLI’s idle fires later, after the bg-agent loop)', s._isStreaming === true && s._turnState === 'requires_action');
-  ok('…but the turn-boundary owner still ran (noteTurnEnd is about billing/pool, not about streaming)', calls.turnEnd.includes(s));
+  ok('…but the turn-boundary owner still ran (noteTurnEnd is about billing/pool, not about streaming)', verdictOf(calls.turnEnd.includes(s)));
   // ⑤ a stray user record cannot restart a turn the harness has not restarted
   p.data(J({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'u-st-3', session_id: 'sid-b3' }));
   ok("'idle' ends the turn and clears the label", s._isStreaming === false && s._streamingLabel === '');
@@ -310,15 +310,15 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   {
     const before = calls.events.length;
     p.data(J({ type: 'set_in_progress_tool_use_ids', op: { action: 'toggle', ids: ['toolu_c'] }, uuid: 'u-ip-3', session_id: 'sid-b3' }));
-    ok('an unknown op action is a BREADCRUMB, not a silent guess (the set is unchanged)', calls.events.slice(before).some(([k, d]) => k === 'cli-unknown-inprogress-action' && d === 'toggle') && [...s._inProgressTools].join(',') === 'toolu_b');
+    ok('an unknown op action is a BREADCRUMB, not a silent guess (the set is unchanged)', gateOf(calls.events.slice(before).some(([k, d]) => k === 'cli-unknown-inprogress-action' && d === 'toggle')) && [...s._inProgressTools].join(',') === 'toolu_b');
   }
   // ⑧ compaction stage — three records, three labels, one broadcast each
   p.data(J({ type: 'compact_progress', event: { type: 'hooks_start', hook_type: 'pre_compact' }, uuid: 'u-cp-1', session_id: 'sid-b3' }));
-  ok("compact_progress hooks_start → a REAL stage label (not the hardcoded apology)", labels('w-b3').includes('Compacting: running pre compact hooks…') && s._streamingKind === 'compacting');
+  ok("compact_progress hooks_start → a REAL stage label (not the hardcoded apology)", gateOf(labels('w-b3').includes('Compacting: running pre compact hooks…')) && s._streamingKind === 'compacting');
   p.data(J({ type: 'compact_progress', event: { type: 'compact_start', hint_text: 'summarizing 812 messages' }, uuid: 'u-cp-2', session_id: 'sid-b3' }));
-  ok('…compact_start carries the CLI’s own hint_text into the label', labels('w-b3').includes('Compacting: summarizing 812 messages'));
+  ok('…compact_start carries the CLI’s own hint_text into the label', verdictOf(labels('w-b3').includes('Compacting: summarizing 812 messages')));
   p.data(J({ type: 'compact_progress', event: { type: 'compact_start' }, uuid: 'u-cp-2b', session_id: 'sid-b3' }));
-  ok('…a hint-less compact_start still says what is happening (hint_text is nullable+optional in the schema)', labels('w-b3').includes('Compacting the conversation…'));
+  ok('…a hint-less compact_start still says what is happening (hint_text is nullable+optional in the schema)', verdictOf(labels('w-b3').includes('Compacting the conversation…')));
   p.data(J({ type: 'compact_progress', event: { type: 'compact_end' }, uuid: 'u-cp-3', session_id: 'sid-b3' }));
   ok('compact_end clears the compacting kind (the Stop two-step guard goes back to normal)', s._streamingKind === null);
   const cps = calls.broadcasts.filter((b) => b.id === 'w-b3' && b.type === 'compact-progress').map((b) => b.event);
@@ -399,7 +399,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   const parkedFromCold = s2._streamingLabel;
   p2.data(J({ type: 'system', subtype: 'session_state_changed', state: 'running', uuid: 'q2', session_id: 'sid-q' }));
   ok("NEGATIVE CONTROL: a bare 'running' onto an EMPTY line still writes 'thinking...' (the branch is gated, not deleted)",
-    s2._streamingLabel === 'thinking...' && labels('w-b3-perm2').includes('thinking...'), `parkedFromCold=${JSON.stringify(parkedFromCold)} then=${JSON.stringify(s2._streamingLabel)}`);
+    s2._streamingLabel === 'thinking...' && verdictOf(labels('w-b3-perm2').includes('thinking...')), `parkedFromCold=${JSON.stringify(parkedFromCold)} then=${JSON.stringify(s2._streamingLabel)}`);
   // NEGATIVE CONTROL 2 — turn state may still CLEAR the line. 'idle' is the one
   // label write that is a retirement, and it must survive the fix.
   p2.data(J({ type: 'assistant', session_id: 'sid-q', uuid: 'q3', message: { id: 'm2', model: 'claude-fable-5', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_2', name: 'Bash', input: {} }] } }));
@@ -599,7 +599,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
         s8._streamingKind === null && dB().slice(-1)[0]?.event === 'compact_end' && dB().slice(-1)[0]?.result === null,
         JSON.stringify([s8._streamingKind, dB().map((b) => b.event)]));
       ok('…and the retirement frame goes out BEFORE the `exited` broadcast (a client that has already read "the session is over" cannot act on a later stage frame)',
-        (() => { const list = calls.broadcasts.filter((b) => b.id === 'w-b3-death'); const e = list.findIndex((b) => b.type === 'exited'); const c = list.findIndex((b) => b.type === 'compact-progress' && b.event === 'compact_end'); return c >= 0 && e >= 0 && c < e; })(),
+        verdictOf((() => { const list = calls.broadcasts.filter((b) => b.id === 'w-b3-death'); const e = list.findIndex((b) => b.type === 'exited'); const c = list.findIndex((b) => b.type === 'compact-progress' && b.event === 'compact_end'); return c >= 0 && e >= 0 && c < e; })()),
         JSON.stringify(calls.broadcasts.filter((b) => b.id === 'w-b3-death').map((b) => b.type + (b.event ? '/' + b.event : ''))));
     }
     {
@@ -611,7 +611,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
       p9.exit({ exitCode: 0 });
       ok('NEGATIVE CONTROL: a session that never compacted dies with NO compact-progress frame at all',
         !calls.broadcasts.some((b) => b.id === 'w-b3-death2' && b.type === 'compact-progress')
-        && calls.broadcasts.some((b) => b.id === 'w-b3-death2' && b.type === 'exited'),
+        && verdictOf(calls.broadcasts.some((b) => b.id === 'w-b3-death2' && b.type === 'exited')),
         JSON.stringify(calls.broadcasts.filter((b) => b.id === 'w-b3-death2').map((b) => b.type)));
     }
     // (the ONE-writer census of the cleared kind (its injected fourth exit is the control) — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -653,7 +653,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
       undrivable.length === 0 && shapes.length >= 8, JSON.stringify({ undrivable, shapes: shapes.length }));
     // POSITIVE CONTROL: the sweep really does exercise the exits it exists for.
     ok('POSITIVE CONTROL: the vocabulary contains both turn-lifecycle exits and the outcome record (the sweep is not scanning an empty set)',
-      types.includes('result') && subtypes.includes('session_state_changed') && subtypes.includes('status'),
+      gateOf(types.includes('result')) && gateOf(subtypes.includes('session_state_changed')) && verdictOf(subtypes.includes('status')),
       JSON.stringify({ types, subtypes }));
     // NEGATIVE CONTROL: the detector itself. A clear with no frame must be seen.
     {
@@ -801,11 +801,11 @@ const wireVerdict = (res, why = '') => {
         && now - (s.startedAt || 0) > ms);
 
     ok(`the probe REPORTS the sweep rule it used (staleMs=${staleMs}, spared ${res.cleaned?.spared?.length}) — a cleanup assert applies the rule instead of guessing one`,
-      Number.isFinite(staleMs) && staleMs > 0 && Array.isArray(res.cleaned?.spared), JSON.stringify(res.cleaned));
+      gateOf(Number.isFinite(staleMs)) && staleMs > 0 && verdictOf(Array.isArray(res.cleaned?.spared)), JSON.stringify(res.cleaned));
     ok(`…and it reports the CLOCK it decided on (sweptAt=${sweptAt}), not just the threshold — a reader on its own, later clock re-judges what the sweep already judged`,
-      Number.isFinite(sweptAt) && sweptAt > 0 && sweptAt <= Date.now(), JSON.stringify(res.cleaned));
+      gateOf(Number.isFinite(sweptAt)) && sweptAt > 0 && sweptAt <= Date.now(), JSON.stringify(res.cleaned));
     ok('…and everything it SPARED really is younger than that threshold ON THAT CLOCK (it never calls a stale leftover "concurrent")',
-      (res.cleaned?.spared || []).every((s) => s.ageMs >= 0 && s.ageMs <= staleMs), JSON.stringify(res.cleaned?.spared));
+      verdictOf((res.cleaned?.spared || []).every((s) => s.ageMs >= 0 && s.ageMs <= staleMs)), JSON.stringify(res.cleaned?.spared));
     ok(`the probe removed its own temp cwd (${res.cwd})`, !fs.existsSync(res.cwd), 'the throwaway cwd survived — it becomes a junk folder group in the sidebar');
     ok('…and the transcript the CLI wrote for it (no junk session in the user’s sidebar)', !fs.existsSync(projDir), projDir);
     ok('…and no STALE leftover of an earlier run survived the sweep',
@@ -814,7 +814,7 @@ const wireVerdict = (res, why = '') => {
     // NEGATIVE CONTROL: the raw capture is deliberately KEPT, at ONE fixed path
     // outside the deleted cwd — cleanup must not mean "lost the evidence".
     ok('NEGATIVE CONTROL: the raw stdout capture survives at one fixed, overwritten path (a failure is still debuggable)',
-      typeof res.raw === 'string' && !res.raw.startsWith(res.cwd) && fs.existsSync(res.raw), `raw=${res.raw} rawSkip=${res.rawSkip}`);
+      typeof res.raw === 'string' && !res.raw.startsWith(res.cwd) && verdictOf(fs.existsSync(res.raw)), `raw=${res.raw} rawSkip=${res.rawSkip}`);
 
     // THE CONSEQUENCE, asked of the product: discovery must not see a leftover
     // one — and must not be fooled into calling a LIVE probe one either. The
@@ -877,7 +877,7 @@ const wireVerdict = (res, why = '') => {
       fs.utimesSync(ctlJsonl, old, old); fs.utimesSync(ctlDir, old, old);
       const listOld = await discoverClaudeSessions({ activeSessions: new Map() });
       ok('NEGATIVE CONTROL: the SAME dir backdated past the threshold IS flagged by the age-sensitive reader (it filters on age, it is not blind to the name)',
-        staleLeftovers(PROJECTS, staleMs).includes(path.basename(ctlDir)),
+        verdictOf(staleLeftovers(PROJECTS, staleMs).includes(path.basename(ctlDir))),
         JSON.stringify({ leftovers: staleLeftovers(PROJECTS, staleMs) }));
       ok('…and discovery still refuses it when STALE too (age-blind by design — the sweep owns the age question, the guard owns the convention)',
         !seesFixture(listOld) && staleJunk(listOld, staleMs).length === 0,
@@ -992,16 +992,16 @@ setTimeout(() => process.exit(0), 60000);
   const footprints = () => (() => { try { return fs.readFileSync(path.join(fhome, 'fake-cli-footprint.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();
   const fp1 = footprints();
   ok('POSITIVE CONTROL: the fake CLI left the real one\'s footprint (a transcript under the encoded cwd + a per-session env dir) — "left nothing behind" is not vacuous',
-    fp1.length === 1 && fp1[0].cwd === r1.cwd && /vs-wire-probe-/.test(fp1[0].proj) && /session-env/.test(fp1[0].senv), JSON.stringify(fp1));
+    fp1.length === 1 && fp1[0].cwd === r1.cwd && gateOf(/vs-wire-probe-/.test(fp1[0].proj)) && verdictOf(/session-env/.test(fp1[0].senv)), JSON.stringify(fp1));
   ok('THE SWEEP: a STALE leftover (30min) is removed — cwd AND the transcript the CLI wrote for it',
     !fs.existsSync(oldOne.c) && !fs.existsSync(oldOne.d), JSON.stringify({ cwd: fs.existsSync(oldOne.c), proj: fs.existsSync(oldOne.d) }));
   ok('…and a CONCURRENT one (5s) SURVIVES — killing a running probe\'s cwd out from under it is the failure this threshold exists to prevent',
-    fs.existsSync(liveOne.c) && fs.existsSync(liveOne.d));
+    gateOf(fs.existsSync(liveOne.c)) && verdictOf(fs.existsSync(liveOne.d)));
   ok('…and the report NAMES the spared one, with its age (the rule a reader must apply)',
-    (r1.cleaned?.spared || []).some((s) => s.name === path.basename(liveOne.d) && s.ageMs < r1.cleaned.staleMs) && r1.cleaned.swept >= 1,
+    gateOf((r1.cleaned?.spared || []).some((s) => s.name === path.basename(liveOne.d) && s.ageMs < r1.cleaned.staleMs)) && r1.cleaned.swept >= 1,
     JSON.stringify(r1.cleaned));
   ok('…and the probe removed its OWN footprint — the exact transcript and session-env dir the CLI just created, and the temp cwd',
-    !fs.existsSync(r1.cwd) && fp1.every((f) => !fs.existsSync(f.proj) && !fs.existsSync(f.senv) && !fs.existsSync(path.dirname(f.proj))),
+    !fs.existsSync(r1.cwd) && verdictOf(fp1.every((f) => !fs.existsSync(f.proj) && !fs.existsSync(f.senv) && !fs.existsSync(path.dirname(f.proj)))),
     JSON.stringify({ cwd: fs.existsSync(r1.cwd), fp: fp1.map((f) => [fs.existsSync(f.proj), fs.existsSync(f.senv)]) }));
   // THE RAW CAPTURE. Round 5 wrote it to a predictable name directly in the
   // shared /tmp with `fs.writeFileSync`, which FOLLOWS symlinks: /tmp's sticky
@@ -1010,7 +1010,7 @@ setTimeout(() => process.exit(0), 60000);
   // `/tmp/vs-wire-probe.last.jsonl -> victim` had the victim's contents
   // replaced by CLI stdout, under the developer's own uid, on every push.
   ok('POSITIVE CONTROL: the raw capture IS written, at one fixed path, in a dir this uid owns (0700)',
-    typeof r1.raw === 'string' && fs.existsSync(r1.raw) && /session_state_changed/.test(fs.readFileSync(r1.raw, 'utf8'))
+    typeof r1.raw === 'string' && gateOf(fs.existsSync(r1.raw)) && gateOf(/session_state_changed/.test(fs.readFileSync(r1.raw, 'utf8')))
     && (fs.statSync(path.dirname(r1.raw)).mode & 0o777) === 0o700, `raw=${r1.raw} rawSkip=${r1.rawSkip}`);
   ok('…and it is NOT a bare predictable name in the shared /tmp root (the shape that made it a symlink target)',
     path.dirname(r1.raw) !== ftmp && path.dirname(path.dirname(r1.raw)) === ftmp, r1.raw);
@@ -1028,9 +1028,9 @@ setTimeout(() => process.exit(0), 60000);
     unplant(r1.raw); fs.symlinkSync(victim, r1.raw);
     const r2 = runProbe();
     ok('ATTACK: a symlink planted at the capture path is NOT followed — the victim file is untouched and the probe SAYS why',
-      fs.readFileSync(victim, 'utf8') === VICTIM && r2.raw === null && /ELOOP|not a directory|open /.test(String(r2.rawSkip)), `rawSkip=${r2.rawSkip} victim=${JSON.stringify(fs.readFileSync(victim, 'utf8').slice(0, 40))}`);
+      fs.readFileSync(victim, 'utf8') === VICTIM && r2.raw === null && verdictOf(/ELOOP|not a directory|open /.test(String(r2.rawSkip))), `rawSkip=${r2.rawSkip} victim=${JSON.stringify(fs.readFileSync(victim, 'utf8').slice(0, 40))}`);
     ok('…and the probe still MEASURED the wire (a refused capture degrades the evidence, it does not fail the run)', r2.ok === true && r2.toolUses === 1, JSON.stringify(r2).slice(0, 200));
-    ok('…and the plant is still a SYMLINK afterwards — the probe never replaced it with a file of its own', fs.lstatSync(r1.raw).isSymbolicLink());
+    ok('…and the plant is still a SYMLINK afterwards — the probe never replaced it with a file of its own', verdictOf(fs.lstatSync(r1.raw).isSymbolicLink()));
     unplant(r1.raw);
   }
   {
@@ -1041,17 +1041,17 @@ setTimeout(() => process.exit(0), 60000);
     unplant(rawDir); fs.symlinkSync(vdir, rawDir);
     const r3 = runProbe();
     ok('ATTACK: a symlink planted at the capture DIR is refused by name+owner check — nothing is written through it',
-      fs.readdirSync(vdir).length === 0 && r3.raw === null && /not a directory/.test(String(r3.rawSkip)), `rawSkip=${r3.rawSkip} dir=${JSON.stringify(fs.readdirSync(vdir))}`);
+      fs.readdirSync(vdir).length === 0 && r3.raw === null && verdictOf(/not a directory/.test(String(r3.rawSkip))), `rawSkip=${r3.rawSkip} dir=${JSON.stringify(fs.readdirSync(vdir))}`);
     unplant(rawDir);
     const r4 = runProbe();
     ok('NEGATIVE CONTROL: with the plant removed the capture works again (the guard refuses an attack, it does not disable the feature)',
-      r4.raw && fs.existsSync(r4.raw) && r4.rawSkip == null, `raw=${r4.raw} rawSkip=${r4.rawSkip}`);
+      gateOf(r4.raw) && gateOf(fs.existsSync(r4.raw)) && r4.rawSkip == null, `raw=${r4.raw} rawSkip=${r4.rawSkip}`);
     // A dir we OWN but that is group/other-writable is a shared namespace
     // again — the whole point of moving out of /tmp. We own it, so close it.
     fs.chmodSync(rawDir, 0o777);
     const r5 = runProbe();
     ok('…and a capture dir left world-writable is CLOSED before use (owning it is not enough — it has to stay ours alone)',
-      (fs.statSync(rawDir).mode & 0o777) === 0o700 && r5.raw && fs.existsSync(r5.raw) && r5.rawSkip == null,
+      (fs.statSync(rawDir).mode & 0o777) === 0o700 && gateOf(r5.raw) && gateOf(fs.existsSync(r5.raw)) && r5.rawSkip == null,
       `mode=${(fs.statSync(rawDir).mode & 0o777).toString(8)} rawSkip=${r5.rawSkip}`);
   }
   {
@@ -1081,11 +1081,11 @@ setTimeout(() => process.exit(0), 60000);
     fs.chmodSync(path.join(bin6, 'claude'), 0o755);
     const rOld = runProbe({ PATH: `${bin6}:${nodeless}` });
     ok('NEGATIVE CONTROL: the SAME fake CLI with round 6\'s `#!/usr/bin/env node` cannot start on that PATH, and the probe SAYS so (a skip, not a crash)',
-      rOld.ok !== true && /--version failed|no claude CLI/.test(String(rOld.skip)), JSON.stringify(rOld).slice(0, 220));
+      rOld.ok !== true && verdictOf(/--version failed|no claude CLI/.test(String(rOld.skip))), JSON.stringify(rOld).slice(0, 220));
     // …and the report is still a report: the gate above reads `ok` FIRST, so a
     // skip like that one can never reach `path.dirname(r.raw)`.
     ok('…and a skipped probe still reports the sweep it ran before the CLI check (the contract asserts have something to read, or bail loudly)',
-      rOld.cleaned && Number.isFinite(rOld.cleaned.staleMs) && Number.isFinite(rOld.cleaned.sweptAt), JSON.stringify(rOld.cleaned));
+      gateOf(rOld.cleaned) && gateOf(Number.isFinite(rOld.cleaned.staleMs)) && verdictOf(Number.isFinite(rOld.cleaned.sweptAt)), JSON.stringify(rOld.cleaned));
   }
   {
     // ── THE SWEEP'S CLOCK, not the reader's (round 7) ───────────────────────
@@ -1103,7 +1103,7 @@ setTimeout(() => process.exit(0), 60000);
     const edgeName = path.basename(edge.d);
     const sparedE = (rE.cleaned?.spared || []).find((x) => x.name === edgeName);
     ok('the sweep SPARED the edge leftover and reported its age ON ITS OWN CLOCK (under the threshold), not on the reader\'s later one',
-      !!sparedE && sparedE.ageMs <= staleMs && fs.existsSync(edge.d), JSON.stringify({ spared: rE.cleaned?.spared, exists: fs.existsSync(edge.d) }));
+      !!sparedE && sparedE.ageMs <= staleMs && verdictOf(fs.existsSync(edge.d)), JSON.stringify({ spared: rE.cleaned?.spared, exists: fs.existsSync(edge.d) }));
     // The consequence, on BOTH readers, exactly as leg ⓕ′ builds them.
     const sparedNames = new Set((rE.cleaned?.spared || []).map((x) => x.name));
     const reader = (now) => fs.readdirSync(fProjects)
@@ -1121,7 +1121,7 @@ setTimeout(() => process.exit(0), 60000);
     const sleepSync = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { } };
     while (r6reader().length === 0 && Date.now() < deadline) sleepSync(200);
     ok('NEGATIVE CONTROL: the round-6 reader (its OWN, later clock, no decision list) flags that spared leftover — which is the failure, reproduced',
-      r6reader().includes(edgeName), JSON.stringify({ r6: r6reader(), edgeName, ageMs: Date.now() - fs.statSync(edge.d).mtimeMs }));
+      verdictOf(r6reader().includes(edgeName)), JSON.stringify({ r6: r6reader(), edgeName, ageMs: Date.now() - fs.statSync(edge.d).mtimeMs }));
     // …and the NEXT run really does collect it: sparing is a deferral, not an
     // exemption (or the sweep would leak one dir per overlapping run forever).
     const rF = runProbe();
@@ -1139,7 +1139,7 @@ setTimeout(() => process.exit(0), 60000);
     const rCut = runProbe({ FAKE_CLI_NO_RESULT: '1' });
     const vCut = wireVerdict(rCut);
     ok('TERMINAL SIGNAL: a capture cut BEFORE the turn\'s result record is SKIPPED by the wire verdict (with the reason), never judged — a partial capture is not evidence',
-      !!vCut.skip && /result/.test(vCut.skip), JSON.stringify({ vCut, cut: { ok: rCut.ok, toolUses: rCut.toolUses, toolResults: rCut.toolResults, sawResult: rCut.sawResult, types: rCut.types } }));
+      !!vCut.skip && verdictOf(/result/.test(vCut.skip)), JSON.stringify({ vCut, cut: { ok: rCut.ok, toolUses: rCut.toolUses, toolResults: rCut.toolResults, sawResult: rCut.sawResult, types: rCut.types } }));
     ok('…and the COMPLETE capture (result seen) is still JUDGED — the gate is not a blanket skip',
       wireVerdict(r1).judge === true && r1.sawResult === true, JSON.stringify({ v: wireVerdict(r1), sawResult: r1.sawResult }));
   }
@@ -1170,10 +1170,10 @@ setTimeout(() => process.exit(0), 60000);
   ok('the partial assistant message rendered first (there is something to retract)', !!created);
   p.data(J({ type: 'tombstone', message: { type: 'assistant', uuid: 'u-partial', message: { id: 'msg_partial' } }, uuid: 'u-tomb', session_id: 'sid-t' }));
   const rew = s._ops.filter((o) => o.op === 'meta' && o.subtype === 'rewound');
-  ok("tombstone → ONE normalized 'rewound' meta op naming the message", rew.length === 1 && rew[0].data.ids.includes(created.message.id) && rew[0].data.toMessageId === created.message.id, JSON.stringify(rew[0]?.data));
+  ok("tombstone → ONE normalized 'rewound' meta op naming the message", rew.length === 1 && gateOf(rew[0].data.ids.includes(created.message.id)) && rew[0].data.toMessageId === created.message.id, JSON.stringify(rew[0]?.data));
   ok("…kind 'superseded' (the CLI replaced a partial orphan — the view removes it), harness named, numTurns null but PRESENT", rew[0].data.kind === 'superseded' && rew[0].data.harness === 'claude' && 'numTurns' in rew[0].data && rew[0].data.numTurns === null);
   ok('…and the normalizer’s own copy is marked, so a rebuild shows the same thing', s._normalizer.messages.find((m) => m.id === created.message.id)?.rewound === 'superseded');
-  ok('…the message is MARKED, never spliced: total is unchanged (the virtual window’s indices are load-bearing)', s._normalizer.total === s._normalizer.messages.length && s._normalizer.messages.some((m) => m.id === created.message.id));
+  ok('…the message is MARKED, never spliced: total is unchanged (the virtual window’s indices are load-bearing)', s._normalizer.total === s._normalizer.messages.length && verdictOf(s._normalizer.messages.some((m) => m.id === created.message.id)));
   {
     const before = s._ops.length;
     p.data(J({ type: 'tombstone', message: { type: 'assistant', uuid: 'u-never-seen' }, uuid: 'u-tomb-2', session_id: 'sid-t' }));
@@ -1223,19 +1223,19 @@ console.log('— stream-json: init frame widening + commands_changed');
   const frame = initMsg?.content?.[0]?.initData?.frame;
   ok('the init record still adopts the session id (unchanged side effects)', s.backendSessionId === 'sid-init-1' && s._permissionMode === 'default');
   ok('…and the WHOLE frame reaches the client through initData: a FAILED mcp server, the demoted plugin, skills, output style, memory dirs, terminal-bound commands',
-    !!frame && frame.mcpServers.some((m) => m.status === 'failed') && frame.pluginErrors[0].plugin === 'old-helper'
+    !!frame && gateOf(frame.mcpServers.some((m) => m.status === 'failed')) && frame.pluginErrors[0].plugin === 'old-helper'
     && frame.skills.length === 3 && frame.outputStyle === 'Explanatory' && !!frame.memoryPaths.auto
     && frame.terminalSlashCommands.join(',') === 'doctor,color', JSON.stringify(frame).slice(0, 300));
   const cmdOps = () => s._ops.filter((o) => o.op === 'meta' && o.subtype === 'slash-commands');
   ok('…the command list rides ONE meta op carrying the terminal-bound subset (what the composer must hide)',
-    cmdOps().length === 1 && cmdOps()[0].data.commands.includes('doctor') && cmdOps()[0].data.terminal.join(',') === 'doctor,color');
+    cmdOps().length === 1 && gateOf(cmdOps()[0].data.commands.includes('doctor')) && cmdOps()[0].data.terminal.join(',') === 'doctor,color');
   p.data(J({ type: 'system', subtype: 'commands_changed', session_id: 'sid-init-1', uuid: 'u-cc', commands: [{ name: 'compact', description: 'x', argumentHint: '' }, { name: 'brand-new', description: 'y', argumentHint: '' }] }));
   ok('a mid-session commands_changed REPLACES the list wholesale (the CLI\'s own contract) — the new command is in, the dropped ones are gone',
     cmdOps().length === 2 && cmdOps()[1].data.commands.join(',') === 'compact,brand-new' && !cmdOps()[1].data.commands.includes('model'), JSON.stringify(cmdOps()[1]?.data));
   ok('…and the completion the composer builds from it hides nothing that is gone upstream, everything else keeps its slash',
     slashCompletionList(cmdOps()[1].data.commands, cmdOps()[1].data.terminal).join(',') === '/compact,/brand-new');
   ok('the composer completion from the INIT push hides the terminal-bound commands (/doctor, /color) and keeps the rest',
-    (() => { const l = slashCompletionList(cmdOps()[0].data.commands, cmdOps()[0].data.terminal); return !l.includes('/doctor') && !l.includes('/color') && l.includes('/compact'); })());
+    verdictOf((() => { const l = slashCompletionList(cmdOps()[0].data.commands, cmdOps()[0].data.terminal); return !l.includes('/doctor') && !l.includes('/color') && l.includes('/compact'); })()));
   ok('the health strip has something to say for this frame (a failed + a needs-auth server, a skipped config, a demoted plugin)…',
     initHealthIssues(frame).length === 4, JSON.stringify(initHealthIssues(frame)));
   // NOTE (round 2): this is a record that OMITS the widened keys — a shape
@@ -1243,13 +1243,13 @@ console.log('— stream-json: init frame widening + commands_changed');
   // pins those keys as REQUIRED in 2.1.238/.239/.257, so no installed CLI
   // produces it; codex/ACP produce initData with no frame at all).
   ok('…NEGATIVE CONTROL: an init record that omits the widened keys carries no facts at all (absent ≠ empty) and reports no health issues, so nothing renders',
-    (() => {
+    verdictOf((() => {
       const s2 = mkSession('claude', 'w-init-old'); const p2 = fakePty();
       so.setupSessionPty(s2, 'w-init-old', p2);
       p2.data(J({ type: 'system', subtype: 'init', session_id: 'sid-old', model: 'claude-opus-4', permissionMode: 'default', slash_commands: ['compact'], uuid: 'u-old' }));
       const f2 = s2._ops.find((o) => o.op === 'create')?.message?.content?.[0]?.initData?.frame;
       return f2 && Object.keys(f2).join(',') === 'slashCommands' && initHealthIssues(f2).length === 0;
-    })());
+    })()));
 }
 
 // ── 3a-bis. the claude agent→user channel (--brief): SendUserMessage /
@@ -1266,13 +1266,13 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
   // (a) the classifier — the ONE gate every surface reads
   ok('SendUserMessage / its documented alias Brief / SendUserFile classify; every other tool is NOT a user message',
     userChannelKind('SendUserMessage') === 'message' && userChannelKind('Brief') === 'message' && userChannelKind('SendUserFile') === 'file'
-    && ['Bash', 'Read', 'Write', 'TodoWrite', 'Agent', 'WebSearch', 'mcp__x__send_user_message', 'SendMessage', '', null, undefined].every((n) => userChannelKind(n) === null),
+    && verdictOf(['Bash', 'Read', 'Write', 'TodoWrite', 'Agent', 'WebSearch', 'mcp__x__send_user_message', 'SendMessage', '', null, undefined].every((n) => userChannelKind(n) === null)),
     JSON.stringify(['Bash', 'SendMessage'].map(userChannelKind)));
 
   // (b) REAL SendUserMessage tool_use → a typed record with the message text
   const sumInput = { message: 'The build is green.\n\n- 3 tests added', attachments: ['out/report.md', { file_uuid: 'file_abc', file_name: 'shot.png', size: 2048, is_image: true }], status: 'proactive' };
   const sumRec = userChannelRecord({ toolName: 'SendUserMessage', input: sumInput, output: null });
-  ok('SendUserMessage tool_use → {kind:message, status, markdown text}', sumRec?.kind === 'message' && sumRec.status === 'proactive' && sumRec.message.startsWith('The build is green.'), JSON.stringify(sumRec && { k: sumRec.kind, s: sumRec.status }));
+  ok('SendUserMessage tool_use → {kind:message, status, markdown text}', sumRec?.kind === 'message' && sumRec.status === 'proactive' && verdictOf(sumRec.message.startsWith('The build is green.')), JSON.stringify(sumRec && { k: sumRec.kind, s: sumRec.status }));
   ok('…both attachment FORMS survive (a bare path string AND the device attach_file object, passed through verbatim)',
     sumRec.files.length === 2 && sumRec.files[0].path === 'out/report.md' && sumRec.files[1].fileUuid === 'file_abc' && sumRec.files[1].isImage === true, JSON.stringify(sumRec.files));
   // the MINIMAL input form the binary uses when attachments are off
@@ -1284,7 +1284,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     output: JSON.stringify({ message: 'see attached', attachments: [{ path: '/p/a.png', size: 10, isImage: true }, { path: '/p/gone.png', size: 0, isImage: false, upload_error: 'file not found' }], sentAt: '2026-09-07T00:00:00Z' }),
   });
   ok("…the tool RESULT is MERGED with the input: a file the CLI could not deliver keeps its row AND its upload_error (never 'output if present else input')",
-    outRec.files.length === 2 && outRec.files.some((f) => f.error === 'file not found') && outRec.files.every((f) => f.resolved), JSON.stringify(outRec.files.map((f) => [f.name, f.error])));
+    outRec.files.length === 2 && gateOf(outRec.files.some((f) => f.error === 'file not found')) && verdictOf(outRec.files.every((f) => f.resolved)), JSON.stringify(outRec.files.map((f) => [f.name, f.error])));
 
   // (c) REAL SendUserFile tool_use → paths resolved against the CLI's own cwd
   const sufInput = { files: ['report.md', '/abs/chart.png'], caption: 'before vs after', status: 'normal', display: 'render' };
@@ -1323,16 +1323,16 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     { type: 'tool_use', id: 'toolu_uf1', name: 'SendUserFile', input: { files: ['chart.png', 'notes.md', 'missing.bin'], caption: 'the run', status: 'proactive' } },
   ] } }));
   // the publish is async by design (never block the event loop): waited on ITS OWN END — the road's settled count
-  ok(`harness: the publish of toolu_uf1 settled (the road's settled count reached its started one within ${SETTLE_MS} ms)`, await settledTo(s4, roadOf(s4).started) && roadOf(s4).started === 1, JSON.stringify(roadOf(s4)));
+  ok(`harness: the publish of toolu_uf1 settled (the road's settled count reached its started one within ${SETTLE_MS} ms)`, gateOf(await settledTo(s4, roadOf(s4).started)) && roadOf(s4).started === 1, JSON.stringify(roadOf(s4)));
   const pubMsg = calls.broadcasts.filter((b) => b.id === 'w-userfile' && b.type === 'user-file-published').slice(-1)[0];
   ok("a live SendUserFile record publishes through published-pages and broadcasts the rows, keyed by the card's OWN toolCallId", !!pubMsg && pubMsg.toolCallId === 'toolu_uf1' && pubMsg.files.length === 3, JSON.stringify(pubMsg && pubMsg.files));
   const okRows = (pubMsg?.files || []).filter((f) => f.link);
   ok('…every existing file gets a RELATIVE /p/<id> link (the 2.366.1 URL law: the server never guesses an absolute URL)',
-    okRows.length === 2 && okRows.every((f) => /^\/p\/pg[a-z0-9]{10}$/.test(f.link)), JSON.stringify(okRows.map((f) => f.link)));
+    okRows.length === 2 && verdictOf(okRows.every((f) => /^\/p\/pg[a-z0-9]{10}$/.test(f.link))), JSON.stringify(okRows.map((f) => f.link)));
   ok('…a file that does not exist is reported ON THE ROW rather than silently dropped (no-silent-failures)',
-    (pubMsg?.files || []).some((f) => f.name === 'missing.bin' && /not found/i.test(f.error || '')), JSON.stringify((pubMsg?.files || []).map((f) => [f.name, f.error])));
+    verdictOf((pubMsg?.files || []).some((f) => f.name === 'missing.bin' && /not found/i.test(f.error || ''))), JSON.stringify((pubMsg?.files || []).map((f) => [f.name, f.error])));
   const stored = pages.list({}).filter((p) => p.sessionId === 'w-userfile');
-  ok('…the pages are session-owned and PRIVATE by default (a VibeSpace login is the gate)', stored.length === 2 && stored.every((p) => p.public === false), JSON.stringify(stored.map((p) => [p.name, p.public, p.mediaType])));
+  ok('…the pages are session-owned and PRIVATE by default (a VibeSpace login is the gate)', stored.length === 2 && verdictOf(stored.every((p) => p.public === false)), JSON.stringify(stored.map((p) => [p.name, p.public, p.mediaType])));
   ok('…a binary file is stored with its own media type (never served as a document), a text one as plain text',
     stored.find((p) => p.name === 'chart.png')?.mediaType === 'image/png' && stored.find((p) => p.name === 'notes.md')?.mediaType === 'text/plain', JSON.stringify(stored.map((p) => [p.name, p.mediaType])));
 
@@ -1360,7 +1360,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     const chanRec = pages.list({}).find((x) => x.id === chanRow?.pageId);
     ok("a SendUserFile publish NEVER touches the user's own page for the same path: separate record, and the shared one keeps its id, its visibility and its bytes",
       !!chanRec && chanRec.id !== mine.page.id && after?.public === true && after?.name === 'my shared page'
-      && fs.readFileSync(path.join(pagesDir, 'published-pages', mine.page.id + '.html'), 'utf8').includes('OWN page'),
+      && verdictOf(fs.readFileSync(path.join(pagesDir, 'published-pages', mine.page.id + '.html'), 'utf8').includes('OWN page')),
       JSON.stringify({ mine: mine.page.id, chan: chanRec && chanRec.id, publicNow: after?.public }));
     ok("...and the channel record is still session-owned + private by default (a freshly minted page IS private -- the flag is simply never re-asserted over the user's choice)",
       chanRec?.public === false && chanRec?.sessionId === 'w-userfile-key' && chanRec?.conversationId === 'conv-A' && chanRec?.srcPath === userSrc,
@@ -1379,8 +1379,8 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     const rowB = (calls.broadcasts.filter((b) => b.id === 'w-userfile-key2' && b.type === 'user-file-published').slice(-1)[0]?.files || [])[0];
     ok('...two conversations naming the SAME absolute path get their OWN pages, so neither card loses its link when the other sends',
       !!rowB?.pageId && rowB.pageId !== chanRow.pageId
-      && pages.list({ conversationId: 'conv-A' }).some((x) => x.id === chanRow.pageId)
-      && pages.list({ conversationId: 'conv-B' }).some((x) => x.id === rowB.pageId),
+      && gateOf(pages.list({ conversationId: 'conv-A' }).some((x) => x.id === chanRow.pageId))
+      && verdictOf(pages.list({ conversationId: 'conv-B' }).some((x) => x.id === rowB.pageId)),
       JSON.stringify({ a: chanRow.pageId, b: rowB.pageId }));
 
     // ...and the SAME conversation re-sending the SAME file keeps ONE stable
@@ -1421,20 +1421,20 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
       [{}, 'ok'], [null, 'ok'],
     ];
     ok('userChannelOutcome: pending / ok / error, and an INTERRUPTED call (message says error, block does not) is an error too',
-      table.every(([m, want]) => O(m) === want), JSON.stringify(table.map(([m]) => O(m))));
+      verdictOf(table.every(([m, want]) => O(m) === want)), JSON.stringify(table.map(([m]) => O(m))));
 
     const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const tt = (x, prm) => String(x).replace(/\{(\w+)\}/g, (_, k) => (prm && k in prm ? prm[k] : `{${k}}`));
     const failRec = userChannelRecord({ toolName: 'SendUserFile', input: { files: ['/tmp/report.md'], status: 'normal' }, output: 'Error: /tmp/report.md is outside the allowed workspace', status: 'error' });
     const failHtml = userFileCardHtml(failRec, { esc, t: tt, icons: { upload: '<svg></svg>' }, link: () => '', note: 'remote note' });
     ok("a REJECTED SendUserFile says so on the card, with the CLI's own reason, and drops the delivery note",
-      failRec.outcome === 'error' && /outside the allowed workspace/.test(failRec.error)
-      && /chat-userchan-error/.test(failHtml) && /chat-userchan-failed/.test(failHtml)
-      && /outside the allowed workspace/.test(failHtml) && !/remote note/.test(failHtml), failHtml.slice(0, 200));
+      failRec.outcome === 'error' && gateOf(/outside the allowed workspace/.test(failRec.error))
+      && gateOf(/chat-userchan-error/.test(failHtml)) && gateOf(/chat-userchan-failed/.test(failHtml))
+      && gateOf(/outside the allowed workspace/.test(failHtml)) && !/remote note/.test(failHtml), failHtml.slice(0, 200));
     const intRec = userChannelRecord({ toolName: 'SendUserMessage', input: { message: 'all done' }, output: null, toolStatus: 'error' });
     const intHtml = userMessageCardHtml(intRec, { esc, t: tt, icons: { mail: '<svg></svg>' } });
     ok('...and an INTERRUPTED SendUserMessage (no result body at all) still says it did not complete rather than reading as the reply',
-      intRec.outcome === 'error' && intRec.error === '' && /did not complete/.test(intHtml) && /chat-userchan-error/.test(intHtml), intHtml.slice(0, 200));
+      intRec.outcome === 'error' && intRec.error === '' && gateOf(/did not complete/.test(intHtml)) && verdictOf(/chat-userchan-error/.test(intHtml)), intHtml.slice(0, 200));
     const errText = '<img src=x onerror=alert(1)>';
     ok("...the failure text is ESCAPED like every other interpolation (it is the CLI's string, and it reaches innerHTML)",
       !userFileCardHtml(userChannelRecord({ toolName: 'SendUserFile', input: { files: ['a.md'] }, output: errText, status: 'error' }), { esc, t: tt }).includes('<img src=x'));
@@ -1497,7 +1497,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     } finally { release(); }
     const settledW = await settledTo(sW, 1);
     ok('RED CONTROL (the planted wrong road, its stat HELD): the control\'s own judgment reads it in the same turn — started +1 at once, settled still 0 while held (the order: started before settled), the old 200 ms wait saw no broadcast',
-      w1.judged === w0.judged + 1 && w1.started === w0.started + 1 && w2.settled === 0 && !broadcastWhileHeld && settledW, JSON.stringify({ w0, w1, w2, broadcastWhileHeld, settledW }));
+      w1.judged === w0.judged + 1 && w1.started === w0.started + 1 && w2.settled === 0 && !broadcastWhileHeld && verdictOf(settledW), JSON.stringify({ w0, w1, w2, broadcastWhileHeld, settledW }));
   }
 
   // (f) the REMOTE rule: a session whose files live on another machine
@@ -1524,7 +1524,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     try { r0 = roadOf(sR); pR.data(REMOTE('u-ufr', 'toolu_ufr')); r1 = roadOf(sR); } finally { release(); }
     const settledR = await settledTo(sR, 1);
     ok('RED CONTROL (the host check dropped, the stat HELD): the remote call is started at once (started +1, settled 0 while held) — the remote leg\'s judgment reads it in the same turn',
-      r1.judged === r0.judged + 1 && r1.started === r0.started + 1 && r1.settled === 0 && settledR, JSON.stringify({ r0, r1, settledR }));
+      r1.judged === r0.judged + 1 && r1.started === r0.started + 1 && r1.settled === 0 && verdictOf(settledR), JSON.stringify({ r0, r1, settledR }));
   }
   // THE SEAM NEVER TRAVELS (r4741, condition 1): the real outputs of this run — every broadcast the consumer sent
   // (broadcastToSession) and the session meta it wrote (session-stdout's meta writer, read back by meta()) — carry no field of it,
@@ -1534,7 +1534,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     const wire = JSON.stringify(calls.broadcasts) + JSON.stringify([s4, s5].map((s) => meta(s)));
     const three = [s4, s5].every((s) => s._fileRoad && Object.keys(s._fileRoad).sort().join(',') === 'judged,settled,started' && Object.values(s._fileRoad).every((v) => Number.isInteger(v)));
     ok('the file road\'s seam never reaches the wire or the stored meta (this run\'s broadcasts and session meta name no _fileRoad), and it is three integers on each session it counted',
-      !/fileRoad/.test(wire) && three, JSON.stringify({ s4: s4._fileRoad, s5: s5._fileRoad }));
+      !/fileRoad/.test(wire) && verdictOf(three), JSON.stringify({ s4: s4._fileRoad, s5: s5._fileRoad }));
   }
 
   // (g) the WORKTREE PATH the CLI itself announced (owner ruling 9) — the init
@@ -1545,7 +1545,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
   const m6 = meta(s6), m6Not = metaNotLanded;
   ok('a --worktree session records the directory the CLI ANNOUNCED in its init frame (never a path composed from a naming rule) + persists (the STORE WRITER\'s write, landed within its bound) + broadcasts it',
     !m6Not && s6._worktreePath === '/repo/.claude/worktrees/w1' && m6?.worktreePath === '/repo/.claude/worktrees/w1' && m6?.worktree === true
-    && calls.broadcasts.some((b) => b.id === 'w-wt' && b.type === 'worktree-path' && b.worktreePath === '/repo/.claude/worktrees/w1'), m6Not || JSON.stringify(m6));
+    && verdictOf(calls.broadcasts.some((b) => b.id === 'w-wt' && b.type === 'worktree-path' && b.worktreePath === '/repo/.claude/worktrees/w1')), m6Not || JSON.stringify(m6));
   const s7 = mkSession('claude', 'w-nowt'); s7.cwd = '/repo';
   const p7 = fakePty(); so2.setupSessionPty(s7, 'w-nowt', p7);
   p7.data(J({ type: 'system', subtype: 'init', session_id: 'sid-nowt', cwd: '/somewhere/else', model: 'claude-fable-5' }));
@@ -1580,7 +1580,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     && !!goneMsg && goneMsg.worktree === false && goneMsg.worktreePath === null,
     JSON.stringify({ live: s8._worktree, path: s8._worktreePath, meta: meta(s8), msg: goneMsg && { w: goneMsg.worktree, p: goneMsg.worktreePath } }));
   ok('…and the isolated case still SAYS worktree:true on the same broadcast, so one reader handles both',
-    calls.broadcasts.some((b) => b.id === 'w-wt' && b.type === 'worktree-path' && b.worktree === true));
+    verdictOf(calls.broadcasts.some((b) => b.id === 'w-wt' && b.type === 'worktree-path' && b.worktree === true)));
   // NEGATIVE CONTROL: the retirement is not a free-running clear — a SECOND
   // init frame that still names the worktree leaves the fact standing (and
   // does not re-broadcast, so a re-attach storm cannot flap the badge).
@@ -1646,7 +1646,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
       const TO = `            if (announced && launched) {
               applyWorktreeVerdict(announced !== launched);   // PRE-FIX: "same cwd" WAS the verdict
             } else if (false) {`;
-      ok('NEGATIVE CONTROL: the mutation patch matches the shipped arbiter (a control that no longer patches anything is not a control)', srcTxt.includes(FROM));
+      ok('NEGATIVE CONTROL: the mutation patch matches the shipped arbiter (a control that no longer patches anything is not a control)', verdictOf(srcTxt.includes(FROM)));
       const patchedPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vs-wtpatch-')), 'claude-stream-json-prefix.cjs');
       fs.writeFileSync(patchedPath, srcTxt.replace(FROM, TO).replace(/require\('\.\.\/\.\.\//g, `require('${REPO}/src/`).replace(/require\('\.\.\//g, `require('${REPO}/src/server/`));   // the copy lives in a temp folder: every relative require of the real file is made absolute (B-d868's `require('../session-brain.js')` runs at attach)
       delete require.cache[idxId]; delete require.cache[soId];
@@ -1693,7 +1693,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     p11.data(J({ type: 'system', subtype: 'init', session_id: 'sid-norepo', cwd: bare, model: 'claude-fable-5' }));
     await settle();
     ok('…and a directory that is not a repository at all retires it too (a non-repo is certainly not a linked worktree)',
-      s11._worktree === false && !s11._worktreePath && calls.broadcasts.some((b) => b.id === 'w-wt-norepo' && b.type === 'worktree-path' && b.worktree === false));
+      s11._worktree === false && !s11._worktreePath && verdictOf(calls.broadcasts.some((b) => b.id === 'w-wt-norepo' && b.type === 'worktree-path' && b.worktree === false)));
 
     // THE TRI-STATE: a probe that cannot ANSWER retires nothing. Made real by
     // taking `git` off PATH — the measured spawn failure (code 'ENOENT', a
@@ -1709,7 +1709,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     ok('a probe that CANNOT answer (no git on PATH) leaves BOTH facts untouched and says so — the same tri-state rule the ws-create preflight follows',
       s12._worktree === true && s12._worktreePath === WT && !meta(s12)?.worktree
       && !calls.broadcasts.some((b) => b.id === 'w-wt-unknown' && b.type === 'worktree-path')
-      && calls.events.slice(eventsBefore).some(([k]) => k === 'worktree-probe-unknown'),
+      && verdictOf(calls.events.slice(eventsBefore).some(([k]) => k === 'worktree-probe-unknown')),
       JSON.stringify({ live: s12._worktree, path: s12._worktreePath, ev: calls.events.slice(eventsBefore) }));
     // …and the probe is asked ONCE per attach per directory (a re-attach storm
     // or a repeated init frame must not spawn a child process per frame).
@@ -1741,7 +1741,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     await settle();
     ok("a REMOTE session asks the machine it actually runs on (hostId is a PARAMETER, not a branch) and keeps the fact on __VS_WT_YES__",
       sr1._worktree === true && sr1._worktreePath === '/srv/proj' && shellSeen.length === 1
-      && /rev-parse --git-dir/.test(shellSeen[0]) && /--git-common-dir/.test(shellSeen[0]),
+      && gateOf(/rev-parse --git-dir/.test(shellSeen[0])) && verdictOf(/--git-common-dir/.test(shellSeen[0])),
       JSON.stringify({ live: sr1._worktree, p: sr1._worktreePath, script: shellSeen[0] }));
     const sr2 = mkSession('claude', 'w-wt-remote2'); sr2.cwd = '/srv/proj2'; sr2.host = 'h1'; sr2._worktree = true;
     const pr2 = fakePty(); so3.setupSessionPty(sr2, 'w-wt-remote2', pr2);
@@ -1817,16 +1817,16 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
         };
         const preOut = runShell(preFix(path.join(repo, 'sub')));
         ok('NEGATIVE CONTROL: the pre-fix raw-string compare calls that same plain-checkout subdirectory a linked WORKTREE (`/repo/.git` vs `../.git`)',
-          preOut.includes('__VS_WT_YES__'), JSON.stringify({ preOut: preOut.trim() }));
+          verdictOf(preOut.includes('__VS_WT_YES__')), JSON.stringify({ preOut: preOut.trim() }));
         // …and the shape the fix depends on is really what git answers here.
         const abs = git(path.join(repo, 'sub'), 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir').trim().split('\n');
         ok('…and `--path-format=absolute` is what makes them comparable at all: both answers absolute, and EQUAL in a plain checkout',
-          abs.length === 2 && abs[0] === abs[1] && abs[0].startsWith('/'), JSON.stringify(abs));
+          abs.length === 2 && abs[0] === abs[1] && verdictOf(abs[0].startsWith('/')), JSON.stringify(abs));
         // An EMPTY answer after git was found is UNKNOWN, never NO: an old git
         // that refuses --path-format must retire nothing.
         const emptyProbe = ranScripts[0].replace(/git rev-parse --path-format=absolute --git-dir 2>\/dev\/null/, 'true');
         ok('…and an empty answer from a git that refused the flag reads as UNKNOWN (a probe that cannot answer retires nothing)',
-          runShell(emptyProbe).includes('__VS_WT_UNKNOWN__'), JSON.stringify({ out: runShell(emptyProbe).trim() }));
+          verdictOf(runShell(emptyProbe).includes('__VS_WT_UNKNOWN__')), JSON.stringify({ out: runShell(emptyProbe).trim() }));
         try { fs.rmSync(lw, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); } catch { }
       }
     }
@@ -1846,21 +1846,21 @@ console.log('— codex-events');
   ok('codex attach → engine.catchUpResetCreditFromBuffer(session, id) once, at the attach, before the first live byte (lane reset-path verify r10)', JSON.stringify(calls.catchUp) === JSON.stringify(['w-codex']) && !calls.codexQuota.length, JSON.stringify(calls.catchUp));
   p.data(J({ type: 'session_meta', payload: { id: 'thr_1', cwd: tmp } }));
   ok('session_meta → thread id adoption persisted to session-meta (claudeSessionId stays null)', s.backendSessionId === 'thr_1' && s.claudeSessionId === null && meta(s)?.backendSessionId === 'thr_1' && meta(s)?.claudeSessionId === null, JSON.stringify(meta(s)));
-  ok('…and the meta record reached the REAL codex normalizer through feedLive', s._fed.some((m) => m.type === 'session_meta'));
+  ok('…and the meta record reached the REAL codex normalizer through feedLive', verdictOf(s._fed.some((m) => m.type === 'session_meta')));
   p.data('\x1b[0m' + JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } }) + '\x1b[0m\n');
-  ok("ANSI-wrapped task_started → streaming ON + 'thinking...' (the stripper is per-attach state)", s._isStreaming === true && labels('w-codex').includes('thinking...'));
+  ok("ANSI-wrapped task_started → streaming ON + 'thinking...' (the stripper is per-attach state)", s._isStreaming === true && verdictOf(labels('w-codex').includes('thinking...')));
   p.data(J({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi from codex' }] } }));
-  ok('assistant response_item (real shape) → REAL codex normalizer emitted a create op', s._ops.some((o) => o.op === 'create' && (o.message || o.msg)?.role === 'assistant' && JSON.stringify((o.message || o.msg).content).includes('hi from codex')), JSON.stringify(s._ops.slice(-1)));
+  ok('assistant response_item (real shape) → REAL codex normalizer emitted a create op', verdictOf(s._ops.some((o) => o.op === 'create' && (o.message || o.msg)?.role === 'assistant' && JSON.stringify((o.message || o.msg).content).includes('hi from codex'))), JSON.stringify(s._ops.slice(-1)));
   p.data(J({ type: '_stdin_ack', timestamp: Date.now() }));
   ok('_stdin_ack → session._stdinAckReceived', s._stdinAckReceived === true);
   p.data(J({ type: 'event_msg', payload: { type: 'rate_limits_updated', rateLimits: { primary: { usedPercent: 10, windowDurationMins: 300 } } } }));
-  ok('rate_limits_updated → recordCodexQuotaSignal (the S4 quota entry point)', calls.codexQuota.some((pl) => pl.type === 'rate_limits_updated'));
+  ok('rate_limits_updated → recordCodexQuotaSignal (the S4 quota entry point)', verdictOf(calls.codexQuota.some((pl) => pl.type === 'rate_limits_updated')));
   p.data(J({ type: 'event_msg', payload: { type: 'plan_updated', plan: [{ step: 'a', status: 'inProgress' }, { step: 'b', status: 'completed' }] } }));
   ok('plan_updated → live todos {done,total,current}', s._todos?.done === 1 && s._todos?.total === 2 && s._todos?.current === 'a', JSON.stringify(s._todos));
   p.data(J({ type: 'event_msg', payload: { type: 'task_complete' } }));
-  ok('task_complete → streaming OFF + noteTurnEnd', s._isStreaming === false && calls.turnEnd.includes(s));
+  ok('task_complete → streaming OFF + noteTurnEnd', s._isStreaming === false && verdictOf(calls.turnEnd.includes(s)));
   p.data('garbage line\n');
-  ok('a non-JSON line is passed through as raw output', outputs('w-codex').some((d) => /garbage line/.test(d)));
+  ok('a non-JSON line is passed through as raw output', verdictOf(outputs('w-codex').some((d) => /garbage line/.test(d))));
 }
 
 // ── 3c. acp-events consumer ──
@@ -1870,20 +1870,20 @@ console.log('— acp-events');
   so.setupSessionPty(s, 'w-acp', p);
   p.data(J({ ts: Date.now(), type: 'acp', kind: 'session', sessionId: 'ses_1', cwd: tmp, how: 'new', agentInfo: { name: 'mock' }, models: [{ id: 'm1', name: 'M1' }], model: 'm1' }));
   ok('session record → id adoption persisted (backendSessionId, claudeSessionId null)', s.backendSessionId === 'ses_1' && s.claudeSessionId === null && meta(s)?.backendSessionId === 'ses_1', JSON.stringify(meta(s)));
-  ok('…the agent\'s offered models reach the model registry (noteHarnessModels)', calls.harnessModels.some(([b, ms]) => b === 'opencode' && ms[0]?.id === 'm1'));
-  ok('…and the session record reached the REAL ACP normalizer through feedLive', s._fed.some((m) => m.type === 'acp' && m.kind === 'session'));
+  ok('…the agent\'s offered models reach the model registry (noteHarnessModels)', verdictOf(calls.harnessModels.some(([b, ms]) => b === 'opencode' && ms[0]?.id === 'm1')));
+  ok('…and the session record reached the REAL ACP normalizer through feedLive', verdictOf(s._fed.some((m) => m.type === 'acp' && m.kind === 'session')));
   p.data(J({ ts: Date.now(), type: 'acp', kind: 'prompt_start', promptId: 'p1' }));
-  ok("prompt_start → streaming ON + 'thinking...'", s._isStreaming === true && labels('w-acp').includes('thinking...'));
+  ok("prompt_start → streaming ON + 'thinking...'", s._isStreaming === true && verdictOf(labels('w-acp').includes('thinking...')));
   p.data(J({ type: '_stdin_ack', timestamp: Date.now() }));
   ok('_stdin_ack → session._stdinAckReceived', s._stdinAckReceived === true);
   p.data(J({ ts: Date.now(), type: 'acp', kind: 'update', sessionId: 'ses_1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi from acp' } } }));
-  ok("agent_message_chunk → 'responding' label + the chunk reached the normalizer", labels('w-acp').includes('responding') && s._fed.some((m) => m.kind === 'update'));
+  ok("agent_message_chunk → 'responding' label + the chunk reached the normalizer", gateOf(labels('w-acp').includes('responding')) && verdictOf(s._fed.some((m) => m.kind === 'update')));
   p.data(J({ ts: Date.now(), type: 'acp', kind: 'update', sessionId: 'ses_1', update: { sessionUpdate: 'plan', entries: [{ content: 'a', status: 'in_progress' }, { content: 'b', status: 'completed' }] } }));
   ok('plan update → live todos', s._todos?.done === 1 && s._todos?.total === 2 && s._todos?.current === 'a', JSON.stringify(s._todos));
   p.data(J({ ts: Date.now(), type: 'acp', kind: 'prompt_end', promptId: 'p1', stopReason: 'end_turn', error: null }));
-  ok('prompt_end → streaming OFF + noteTurnEnd', s._isStreaming === false && calls.turnEnd.includes(s));
+  ok('prompt_end → streaming OFF + noteTurnEnd', s._isStreaming === false && verdictOf(calls.turnEnd.includes(s)));
   p.data('not json either\n');
-  ok('a non-JSON line is passed through as raw output', outputs('w-acp').some((d) => /not json either/.test(d)));
+  ok('a non-JSON line is passed through as raw output', verdictOf(outputs('w-acp').some((d) => /not json either/.test(d))));
 }
 
 // ── 3d. STOP'S PUT-BACK rides the ONE gate (lane stop-refills-composer): every consumer feeds the normalizer through
@@ -1939,13 +1939,13 @@ console.log('— the put-back door at the feedLive gate (lane stop-refills-compo
     const bubble = s._normalizer.messages.find((m) => m.role === 'user');
     ok('claude: the wrapper\'s queue records pass the stream-json consumer to the normalizer — the strip\'s meta ops, the result, the chip queued → removed, no unknown-record card',
       JSON.stringify(metas.filter((m) => /^queue/.test(m))) === JSON.stringify(['queue', 'queue-result', 'queue']) && bubble?.webuiMsgId === 'm-held' && bubble?.queueState === 'removed'
-      && s._ops.some((o) => o.op === 'edit' && o.fields?.queueState === 'queued') && !s._normalizer.messages.some((m) => m.noticeKind === 'unknown-record'), { metas, chip: bubble?.queueState });
+      && gateOf(s._ops.some((o) => o.op === 'edit' && o.fields?.queueState === 'queued')) && !s._normalizer.messages.some((m) => m.noticeKind === 'unknown-record'), { metas, chip: bubble?.queueState });
     // (CLAUDE_STREAM_TYPES' queue records pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   const s0 = mkSession('codex', 'w-pb-none'); const p0 = fakePty();
   so.setupSessionPty(s0, 'w-pb-none', p0);   // the suite's own engine: no getSyncStore (the null default every other create() caller relies on)
   let threw = null; try { p0.data(legs[0][2]('78-1', 'nowhere to go')); } catch (e) { threw = e; }
-  ok('an engine built without getSyncStore (the default) feeds the record on and writes nothing — no throw', !threw && s0._fed.some((m) => m.payload?.type === 'queue_dropped'));
+  ok('an engine built without getSyncStore (the default) feeds the record on and writes nothing — no throw', !threw && verdictOf(s0._fed.some((m) => m.payload?.type === 'queue_dropped')));
 }
 
 // ── 4. LOUD failure: declared protocol with no consumer / no protocol at all ──
@@ -1956,18 +1956,18 @@ console.log('— unknown protocol');
   const s = mkSession('mockproto', 'w-mock', { normalizer: false }); const p = fakePty();
   so.setupSessionPty(s, 'w-mock', p);
   const said = errors.slice(before);
-  ok('a declared-but-unregistered protocol is reported LOUDLY at session start (console.error names the backend, the protocol and the fix)', said.some((e) => /mockproto/.test(e) && /mock-events/.test(e) && /registers no consumer/.test(e) && /src\/server\/stdout\/index\.js/.test(e)), said.join(' | '));
-  ok('…and lands in telemetry (chat-protocol-no-consumer backend/protocol)', calls.events.some(([k, d]) => k === 'chat-protocol-no-consumer' && d === 'mockproto/mock-events'));
+  ok('a declared-but-unregistered protocol is reported LOUDLY at session start (console.error names the backend, the protocol and the fix)', verdictOf(said.some((e) => /mockproto/.test(e) && /mock-events/.test(e) && /registers no consumer/.test(e) && /src\/server\/stdout\/index\.js/.test(e))), said.join(' | '));
+  ok('…and lands in telemetry (chat-protocol-no-consumer backend/protocol)', verdictOf(calls.events.some(([k, d]) => k === 'chat-protocol-no-consumer' && d === 'mockproto/mock-events')));
   p.data(J({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'would be claude' }] } }));
-  ok('…its output passes through RAW — never parsed as stream-json (normalizer untouched, raw output broadcast)', s._fed.length === 0 && outputs('w-mock').some((d) => /would be claude/.test(d)) && s.backendSessionId === null);
+  ok('…its output passes through RAW — never parsed as stream-json (normalizer untouched, raw output broadcast)', s._fed.length === 0 && gateOf(outputs('w-mock').some((d) => /would be claude/.test(d))) && s.backendSessionId === null);
   delete BACKEND_CAPS.mockproto;
   const before2 = errors.length;
   const s2 = mkSession('shell', 'w-shell-chat', { normalizer: false }); const p2 = fakePty();
   so.setupSessionPty(s2, 'w-shell-chat', p2);
   const said2 = errors.slice(before2);
-  ok("a chat backend with NO streamProtocol keeps today's console.error text + chat-backend-no-protocol event", said2.some((e) => /has no streamProtocol in src\/backend-caps\.js/.test(e)) && calls.events.some(([k, d]) => k === 'chat-backend-no-protocol' && d === 'shell'), said2.join(' | '));
+  ok("a chat backend with NO streamProtocol keeps today's console.error text + chat-backend-no-protocol event", gateOf(said2.some((e) => /has no streamProtocol in src\/backend-caps\.js/.test(e))) && verdictOf(calls.events.some(([k, d]) => k === 'chat-backend-no-protocol' && d === 'shell')), said2.join(' | '));
   p2.data('raw shell bytes\n');
-  ok('…RAW passthrough there too', outputs('w-shell-chat').some((d) => /raw shell bytes/.test(d)) && s2._fed.length === 0);
+  ok('…RAW passthrough there too', gateOf(outputs('w-shell-chat').some((d) => /raw shell bytes/.test(d))) && s2._fed.length === 0);
   const before3 = errors.length;
   const s3 = mkSession('claude', 'w-claude-2'); so.setupSessionPty(s3, 'w-claude-2', fakePty());
   ok('NEGATIVE CONTROL: a registered protocol attaches silently (no error, no no-consumer event)', errors.length === before3 && !calls.events.some(([k, d]) => k === 'chat-protocol-no-consumer' && /claude/.test(d)));
@@ -1977,14 +1977,14 @@ console.log('— unknown protocol');
 console.log('— builder');
 {
   const reg = createStdoutRegistry({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: '', checkClaudeGoalStatus() { }, noteModelSeen() { }, noteHarnessModels() { }, sbSeenFirst: () => true, hosts: null, usageHistory: null, deliverRef: null });
-  ok('createStdoutRegistry builds every consumer once: get(known) → {protocol, attach}, get(unknown) → null', PROTOCOLS.every((p) => reg.get(p)?.protocol === p && typeof reg.get(p).attach === 'function') && reg.get('mock-events') === null && reg.has('stream-json') && !reg.has('mock-events') && reg.protocols().join(',') === PROTOCOLS.join(','));
+  ok('createStdoutRegistry builds every consumer once: get(known) → {protocol, attach}, get(unknown) → null', gateOf(PROTOCOLS.every((p) => reg.get(p)?.protocol === p && typeof reg.get(p).attach === 'function')) && reg.get('mock-events') === null && gateOf(reg.has('stream-json')) && !reg.has('mock-events') && reg.protocols().join(',') === PROTOCOLS.join(','));
 }
 
 // ── 6. wiring pins ──
 console.log('— wiring pins');
 {
   // (the registry + consumers' wiring pins (the release-gate pin below stays: it names this heavy suite) — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-  ok('test-harness-contract pins descriptor↔consumer coverage; ci.mjs runs this suite; test-session-schema + test-attach-rebuild scan src/server/stdout/', /hasConsumer\(h\.caps\.streamProtocol\)/.test(read('scripts/test-harness-contract.mjs')) && /'test-stdout-registry'/.test(read('scripts/ci.mjs')) && /src\/server\/stdout/.test(read('scripts/test-session-schema.mjs')) && /src\/server\/stdout/.test(read('scripts/test-attach-rebuild.mjs')));
+  ok('test-harness-contract pins descriptor↔consumer coverage; ci.mjs runs this suite; test-session-schema + test-attach-rebuild scan src/server/stdout/', gateOf(/hasConsumer\(h\.caps\.streamProtocol\)/.test(read('scripts/test-harness-contract.mjs'))) && gateOf(/'test-stdout-registry'/.test(read('scripts/ci.mjs'))) && gateOf(/src\/server\/stdout/.test(read('scripts/test-session-schema.mjs'))) && verdictOf(/src\/server\/stdout/.test(read('scripts/test-attach-rebuild.mjs'))));
   // B3 turn truth (§2.5/§2.10/§2.11) — the seams a green unit test cannot see
   {
     // (its five source reads went with the seams' pins to scripts/test-stdout-registry-pins.mjs — B-94d3)
@@ -2024,7 +2024,7 @@ console.log('— unknown-records: notification / api_error / vcs / code_change r
   p.data(J({ type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'fix/x', cwd: tmp, session_id: 'sid-ur', uuid: 'u-v1' }));
   p.data(J({ type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://example.invalid/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'pushed', session_id: 'sid-ur', uuid: 'u-c1' }));
   ok('the PARSE hands each of the four records to its brain consumer (one call each, the record\'s own fields)', JSON.stringify(brainCalls) === JSON.stringify([['notification', 'w-ur-1', 'stop-hook-error', 'immediate'], ['api_error', 'w-ur-1', 401], ['vcs', 'w-ur-1', 'push', 'fix/x'], ['published', 'w-ur-1', 'https://example.invalid/o/r/pull/7']]), JSON.stringify(brainCalls));
-  ok('…and every one of them ALSO reached the real normalizer (the card path is the normalizer\'s; the side effect is the brain\'s)', ['notification', 'api_error', 'vcs_state_changed', 'code_change_published'].every((st) => s._fed.some((m) => m.type === 'system' && m.subtype === st)));
+  ok('…and every one of them ALSO reached the real normalizer (the card path is the normalizer\'s; the side effect is the brain\'s)', verdictOf(['notification', 'api_error', 'vcs_state_changed', 'code_change_published'].every((st) => s._fed.some((m) => m.type === 'system' && m.subtype === st))));
   ok('…the notification is a card, the vcs/api_error records are NOT (declared card-less), the code change is ONE card', s._normalizer.messages.filter((m) => m.noticeKind === 'harness-notification').length === 1 && s._normalizer.messages.filter((m) => m.noticeKind === 'code-change-published').length === 1 && !s._normalizer.messages.some((m) => m.noticeKind === 'unknown-record'));
   // THE REAL consumers, driven through claudeSideEffects (the device feed) with stub deps
   const notices = [], pushes = [], metaWrites = [], events = [], authFails = [];
@@ -2041,7 +2041,7 @@ console.log('— unknown-records: notification / api_error / vcs / code_change r
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'stop-hook-error', text: 'Stop hook error occurred', priority: 'immediate' });
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'stop-hook-error', text: 'Stop hook error occurred', priority: 'immediate' });
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'memory-saved', text: 'Saved 2 memories', priority: 'low' });
-  ok('DEVICE FEED: an immediate notification → ONE server-notice toast (level 2), keyed by session + key + turn (the repeat in the same turn dedupes at serverNotice by key; low priority never toasts)', notices.length === 2 && notices[0][0] === 'hn:w-dev:stop-hook-error:3' && notices[1][0] === notices[0][0] && /dev-sess: Stop hook error/.test(notices[0][1]) && notices[0][2] === 2, JSON.stringify(notices));
+  ok('DEVICE FEED: an immediate notification → ONE server-notice toast (level 2), keyed by session + key + turn (the repeat in the same turn dedupes at serverNotice by key; low priority never toasts)', notices.length === 2 && notices[0][0] === 'hn:w-dev:stop-hook-error:3' && notices[1][0] === notices[0][0] && gateOf(/dev-sess: Stop hook error/.test(notices[0][1])) && notices[0][2] === 2, JSON.stringify(notices));
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'fast-mode-overage-rejected', text: 'Fast mode is off', priority: 'high' });
   ok('…a high one toasts at level 1', notices.length === 3 && notices[2][2] === 1);
   // OUR OWN NUDGE (2.369.127): the CLI calls every Stop-hook block an "error"; when VibeSpace's bookkeeping nudge
@@ -2073,13 +2073,13 @@ console.log('— unknown-records: notification / api_error / vcs / code_change r
   ok('the REAL claude classifier over what the consumer forwards: 401 attempt 1 with an expiry message → true (the wording qualifies), a bare 401 attempt 1 → REFUSED (refresh race), 401 attempt 2 → true, 403 attempt 1 → true, the transcript-spelled retryAttempt rides through too', JSON.stringify(verdicts) === JSON.stringify([[401, 1, true], [401, 1, false], [401, 2, true], [403, 1, true], [401, 2, true]]), JSON.stringify(verdicts));
   // (the fixture's api_error rows + the transcript path — source pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'fix/x', cwd: '/w/proj' });
-  ok('vcs_state_changed → session._vcs {kind,branch,cwd,at}, persisted to session-meta (merged over the existing meta), a session-vcs push to EVERY client naming session + cwd, an active-sessions broadcast, a timeline event', d._vcs?.kind === 'push' && d._vcs.branch === 'fix/x' && d._vcs.cwd === '/w/proj' && Number.isFinite(d._vcs.at) && metaWrites.some(([sock, m]) => sock === 'cw-dev' && m.existing === 1 && m.vcs?.kind === 'push') && pushes.some((m) => m.type === 'session-vcs' && m.sessionId === 'w-dev' && m.kind === 'push' && m.cwd === '/w/proj' && m.branch === 'fix/x') && active >= 1 && events.some(([k, e]) => k === 'webui:w-dev' && e.event === 'vcs' && e.kind === 'push' && e.branch === 'fix/x'), JSON.stringify({ vcs: d._vcs, pushes, events }));
+  ok('vcs_state_changed → session._vcs {kind,branch,cwd,at}, persisted to session-meta (merged over the existing meta), a session-vcs push to EVERY client naming session + cwd, an active-sessions broadcast, a timeline event', d._vcs?.kind === 'push' && d._vcs.branch === 'fix/x' && d._vcs.cwd === '/w/proj' && gateOf(Number.isFinite(d._vcs.at)) && gateOf(metaWrites.some(([sock, m]) => sock === 'cw-dev' && m.existing === 1 && m.vcs?.kind === 'push')) && gateOf(pushes.some((m) => m.type === 'session-vcs' && m.sessionId === 'w-dev' && m.kind === 'push' && m.cwd === '/w/proj' && m.branch === 'fix/x')) && active >= 1 && verdictOf(events.some(([k, e]) => k === 'webui:w-dev' && e.event === 'vcs' && e.kind === 'push' && e.branch === 'fix/x')), JSON.stringify({ vcs: d._vcs, pushes, events }));
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'vcs_state_changed', kind: 'commit', cwd: '/w/proj' });
   ok('…a later commit without a branch replaces the fact (branch null — the CLI omitted it)', d._vcs.kind === 'commit' && d._vcs.branch === null);
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://example.invalid/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'pushed' });
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://example.invalid/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'merged' });
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'code_change_published', provider: 'github', url: 'javascript:alert(1)', repo: 'o/r', identifier: '8', action: 'pushed' });
-  ok('code_change_published → session._prLinks keyed by url (the second record for the same url UPDATES action to merged; a non-http url is refused), persisted', d._prLinks?.length === 1 && d._prLinks[0].url === 'https://example.invalid/o/r/pull/7' && d._prLinks[0].action === 'merged' && d._prLinks[0].identifier === '7' && metaWrites.some(([, m]) => Array.isArray(m.prLinks) && m.prLinks[0].action === 'merged'), JSON.stringify(d._prLinks));
+  ok('code_change_published → session._prLinks keyed by url (the second record for the same url UPDATES action to merged; a non-http url is refused), persisted', d._prLinks?.length === 1 && d._prLinks[0].url === 'https://example.invalid/o/r/pull/7' && d._prLinks[0].action === 'merged' && d._prLinks[0].identifier === '7' && verdictOf(metaWrites.some(([, m]) => Array.isArray(m.prLinks) && m.prLinks[0].action === 'merged')), JSON.stringify(d._prLinks));
   // (the parse and the device feed call the same four functions — source pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   activeSessions.delete('w-ur-1');
 }
@@ -2102,7 +2102,7 @@ console.log('— Claude Code\'s `origin.kind:"auto-continuation"` is GENERIC pro
   const readers = files.filter((f) => ORIGIN_RE.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(REPO, f));
   ok(`census: no source among ${files.length} reads the CLI's generic "auto-continuation" origin as a signal`, files.length > 100 && readers.length === 0, readers.join(', '));
   // NEGATIVE CONTROL — the census can say no: the refuted classifier rung it exists to keep out
-  ok('census NEGATIVE CONTROL: the refuted origin-only rung is caught', ORIGIN_RE.test("if (rec.origin && typeof rec.origin === 'object' && rec.origin.kind === 'auto-continuation') return { via: 'origin', carrier };"));
+  ok('census NEGATIVE CONTROL: the refuted origin-only rung is caught', verdictOf(ORIGIN_RE.test("if (rec.origin && typeof rec.origin === 'object' && rec.origin.kind === 'auto-continuation') return { via: 'origin', carrier };")));
   // …and the shapes that origin also carries reach the REAL parse without anybody treating them as a
   // limit: every brain consumer stays silent for plan approval, /goal approval and the ultraplan hand-off.
   const s = mkSession('claude', 'w-acorig'); const p = fakePty();
@@ -2118,7 +2118,7 @@ console.log('— Claude Code\'s `origin.kind:"auto-continuation"` is GENERIC pro
   ok('plan approval / /goal / ultraplan records with origin auto-continuation hand NOTHING to a brain consumer', brainCalls.length === 0, JSON.stringify(brainCalls));
   // control for that leg: the recorder is live on this very session (a vcs record reaches it)
   p.data(J({ type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'b', cwd: tmp, session_id: 'sid-acorig', uuid: 'u-acorig-v' }));
-  ok('…NEGATIVE CONTROL: the same recorder on the same session does see a consumed record (the silence above is a measurement)', brainCalls.some((c) => c[0] === 'vcs' && c[1] === 'w-acorig'), JSON.stringify(brainCalls));
+  ok('…NEGATIVE CONTROL: the same recorder on the same session does see a consumed record (the silence above is a measurement)', verdictOf(brainCalls.some((c) => c[0] === 'vcs' && c[1] === 'w-acorig')), JSON.stringify(brainCalls));
   activeSessions.delete('w-acorig');
 }
 
@@ -2127,4 +2127,4 @@ console.log('— Claude Code\'s `origin.kind:"auto-continuation"` is GENERIC pro
 ok(`no meta read of the run found the store writer not landed (${metaReads.n} reads, each after the writer's flush of its file, bound ${META_FLUSH_BOUND_MS} ms)`,
   metaReads.n > 0 && metaReads.notLanded.length === 0, metaReads.notLanded.slice(0, 3).join(' | '));
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -34,7 +34,7 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 let passed = 0, failed = 0, skipped = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
 const done = () => { console.log(`\n${failed ? `${failed} FAILED` : 'ALL PASS'} (${passed}${skipped ? `, ${skipped} skipped` : ''}) in ${Math.round((Date.now() - T0) / 1000)} s`); process.exit(failed ? 1 : 0); };
@@ -108,7 +108,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); proc
 const serverUp = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
 const backendNow = async () => { try { return ((await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps`)).json()).availability || {}).backend || null; } catch { return null; } };
 const up = await serverUp();
-check('the worktree server answered', up, fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').slice(-2000) : '');
+check('the worktree server answered', verdictOf(up), fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').slice(-2000) : '');
 
 const WebSocket = require('ws');
 let target = null;
@@ -149,29 +149,29 @@ try {
   console.log(`  · time to first card with a due 3 s walk: ${fp.ms} ms`);
   check(`the catalog paints ${fp.ms} ms after the press (≤ 300) while the 3 s walk runs — the group says "listing…"`, fp.ms >= 0 && fp.ms <= 300 && fp.state === 'listing…', fp);
   const g0 = await evalJs(groupState);
-  check('the last list is shown meanwhile (JASP), the new entry not yet', (g0.cards || []).some((c) => c.label === 'JASP') && !(g0.cards || []).some((c) => c.label === 'Late Witness Tool'), g0.cards);
+  check('the last list is shown meanwhile (JASP), the new entry not yet', gateOf((g0.cards || []).some((c) => c.label === 'JASP')) && !(g0.cards || []).some((c) => c.label === 'Late Witness Tool'), g0.cards);
   await typeInto(`${D} .desktop-launch-filter`, 'witness'); // (typing re-renders the dialog — the mark below is set after it)
   await evalJs(`(() => { const w = [...document.querySelectorAll('${D} .desktop-launch-seen .desktop-launch-card-wrap')].find((x) => x.textContent.includes('JASP')); if (w) w.__keep = 1; return !!w; })()`);
-  check('the rows arrive by the broadcast and patch in — the new entry listed, "listing…" over, the filter kept (JASP filtered out)', await waitFor(`(() => { const s = ${groupState}; return s.cards.some((c) => c.label === 'Late Witness Tool') && !s.cards.some((c) => c.label === 'JASP') && document.querySelector('${D} .desktop-launch-seen-state').hidden && document.querySelector('${D} .desktop-launch-filter').value === 'witness'; })()`, 8000), await evalJs(groupState));
-  check('in place: the JASP card is the same node (keyed rows, never a rebuild)', await evalJs(`(() => { const w = [...document.querySelectorAll('${D} .desktop-launch-seen .desktop-launch-card-wrap')].find((x) => x.textContent.includes('JASP')); return !!(w && w.__keep); })()`));
+  check('the rows arrive by the broadcast and patch in — the new entry listed, "listing…" over, the filter kept (JASP filtered out)', verdictOf(await waitFor(`(() => { const s = ${groupState}; return s.cards.some((c) => c.label === 'Late Witness Tool') && !s.cards.some((c) => c.label === 'JASP') && document.querySelector('${D} .desktop-launch-seen-state').hidden && document.querySelector('${D} .desktop-launch-filter').value === 'witness'; })()`, 8000)), await evalJs(groupState));
+  check('in place: the JASP card is the same node (keyed rows, never a rebuild)', verdictOf(await evalJs(`(() => { const w = [...document.querySelectorAll('${D} .desktop-launch-seen .desktop-launch-card-wrap')].find((x) => x.textContent.includes('JASP')); return !!(w && w.__keep); })()`)));
   await evalJs(`(() => { const e = document.querySelector('${D} .desktop-launch-filter'); e.value = ''; e.dispatchEvent(new Event('input')); return true; })()`);
   fs.rmSync(path.join(stubDir, 'slow'));
 
   console.log('① desk: the group under the engine\'s rows');
-  check('the group "Installed outside VibeSpace (n)" appears', await waitFor(`(${groupState})?.shown === true`, 15000), await evalJs(groupState));
+  check('the group "Installed outside VibeSpace (n)" appears', verdictOf(await waitFor(`(${groupState})?.shown === true`, 15000)), await evalJs(groupState));
   const g = await evalJs(groupState);
   const by = (l) => (g.cards || []).find((c) => c.label === l);
   const BACKEND = await backendNow(); // the launcher dims EVERY card when this machine has no display backend (the runner's shape)
   const mineListed = (m) => !!m && m.chip === 'Desktop entry · yours' && m.sub === path.join(stubDir, 'mytool');
   check('JASP is listed — Flatpak · yours, its command shown', !!by('JASP') && by('JASP').chip === 'Flatpak · yours' && by('JASP').sub === 'flatpak run org.jaspstats.JASP' && by('JASP').id === 'seen.f.org.jaspstats.jasp', g.cards);
-  check('the user\'s tool is listed — Desktop entry · yours, its own command shown (never "gone")', mineListed(by('My Witness Tool')), g.cards);
+  check('the user\'s tool is listed — Desktop entry · yours, its own command shown (never "gone")', verdictOf(mineListed(by('My Witness Tool'))), g.cards);
   check(`the user's tool is pressable exactly when a display backend answers (here: ${BACKEND || 'none'})`, !!by('My Witness Tool') && by('My Witness Tool').disabled === !BACKEND, { backend: BACKEND, mine: by('My Witness Tool') });
-  check('a gone program stays listed and says so (disabled, never hidden)', !!by('Gone Witness App') && by('Gone Witness App').disabled && /Its program is gone: \/opt\/vs-witness-gone\/bin\/gone/.test(by('Gone Witness App').sub), by('Gone Witness App'));
+  check('a gone program stays listed and says so (disabled, never hidden)', !!by('Gone Witness App') && gateOf(by('Gone Witness App').disabled) && verdictOf(/Its program is gone: \/opt\/vs-witness-gone\/bin\/gone/.test(by('Gone Witness App').sub)), by('Gone Witness App'));
   check('a NoDisplay entry is not listed', !by('Hidden Witness'));
-  check(`the title counts the group (${g.title})`, new RegExp(`^Installed outside VibeSpace \\(${g.cards.length}\\)$`).test(g.title || ''), g.title);
-  check('no witnessed card sits in the engine\'s grid', (g.eng || []).every((id) => !id.startsWith('seen.')), g.eng);
-  check('the user\'s own rows come first (JASP leads)', g.cards[0] && g.cards[0].chip && /yours/.test(g.cards[0].chip) && g.cards.findIndex((c) => /system/.test(c.chip || '')) !== 0, g.cards.slice(0, 4));
-  check('every card\'s command line sits under its name (the chip leads it — never squeezed into the icon column)', g.cards.every((c) => c.subRect && c.subRect.subLeft === c.subRect.labelLeft && c.subRect.subW > 60), g.cards.filter((c) => !(c.subRect && c.subRect.subLeft === c.subRect.labelLeft && c.subRect.subW > 60)).slice(0, 3));
+  check(`the title counts the group (${g.title})`, verdictOf(new RegExp(`^Installed outside VibeSpace \\(${g.cards.length}\\)$`).test(g.title || '')), g.title);
+  check('no witnessed card sits in the engine\'s grid', verdictOf((g.eng || []).every((id) => !id.startsWith('seen.'))), g.eng);
+  check('the user\'s own rows come first (JASP leads)', gateOf(g.cards[0]) && gateOf(g.cards[0].chip) && gateOf(/yours/.test(g.cards[0].chip)) && g.cards.findIndex((c) => /system/.test(c.chip || '')) !== 0, g.cards.slice(0, 4));
+  check('every card\'s command line sits under its name (the chip leads it — never squeezed into the icon column)', verdictOf(g.cards.every((c) => c.subRect && c.subRect.subLeft === c.subRect.labelLeft && c.subRect.subW > 60)), g.cards.filter((c) => !(c.subRect && c.subRect.subLeft === c.subRect.labelLeft && c.subRect.subW > 60)).slice(0, 3));
   console.log('⑥ the distro\'s own entries wait behind "Show them"');
   const sysN = await evalJs(`(async () => { const r = await (await fetch('/api/desktop/apps')).json(); return (r.registry || []).filter((x) => x.witnessed && x.distro).length; })()`);
   const more = `(() => { const d = document.querySelector('${D}'); return { shown: !d.querySelector('.desktop-launch-seen-more').hidden, text: d.querySelector('.desktop-launch-seen-more-text').textContent, btn: d.querySelector('.desktop-launch-seen-show').textContent, n: d.querySelectorAll('.desktop-launch-seen .desktop-launch-card-wrap').length, sys: [...d.querySelectorAll('.desktop-launch-seen .desktop-launch-chip')].filter((c) => /system/i.test(c.textContent)).length }; })()`;
@@ -180,12 +180,12 @@ try {
   check(`the stub dpkg owns every system entry, so none is listed as hand-copied (${sysListed} listed, ${sysN} hidden)`, sysListed === 0, sysListed);
   if (!sysN) { skipped++; console.log('  ⊘ SKIP no system .desktop entry on this machine'); } else {
     const m0 = await evalJs(more);
-    check(`no system entry is listed; the head says "${sysN} system entries not shown — Show them"`, m0.shown && m0.sys === 0 && m0.text === `${sysN} system entries not shown` && m0.btn === 'Show them', m0);
+    check(`no system entry is listed; the head says "${sysN} system entries not shown — Show them"`, gateOf(m0.shown) && m0.sys === 0 && m0.text === `${sysN} system entries not shown` && m0.btn === 'Show them', m0);
     await realClick(`${D} .desktop-launch-seen-show`);
-    check(`Show them reveals the ${sysN} (the line says shown, the button Hide them)`, await waitFor(`(() => { const m = ${more}; return m.n === ${m0.n + sysN} && m.text === '${sysN} system entries shown' && m.btn === 'Hide them'; })()`, 5000), await evalJs(more));
-    check('remembered in the user state', await evalJs(`(async () => (await (await fetch('/api/user-state')).json()).desktopAppsShowSystem === true)()`));
+    check(`Show them reveals the ${sysN} (the line says shown, the button Hide them)`, verdictOf(await waitFor(`(() => { const m = ${more}; return m.n === ${m0.n + sysN} && m.text === '${sysN} system entries shown' && m.btn === 'Hide them'; })()`, 5000)), await evalJs(more));
+    check('remembered in the user state', verdictOf(await evalJs(`(async () => (await (await fetch('/api/user-state')).json()).desktopAppsShowSystem === true)()`)));
     await realClick(`${D} .desktop-launch-seen-show`);
-    check('Hide them puts them back behind the line', await waitFor(`(${more}).n === ${m0.n}`, 5000), await evalJs(more));
+    check('Hide them puts them back behind the line', verdictOf(await waitFor(`(${more}).n === ${m0.n}`, 5000)), await evalJs(more));
   }
   await evalJs(`document.querySelector('${D} .desktop-launch-seen-sec').scrollIntoView({ block: 'start' }); true`);
   await sleep(250);
@@ -193,22 +193,22 @@ try {
 
   console.log('② the filter box');
   await typeInto(`${D} .desktop-launch-filter`, 'jasp');
-  check('the filter finds JASP and hides the rest (both groups)', await waitFor(`(() => { const s = ${groupState}; return s.cards.length === 1 && s.cards[0].label === 'JASP' && s.eng.length === 0; })()`, 5000), await evalJs(groupState));
+  check('the filter finds JASP and hides the rest (both groups)', verdictOf(await waitFor(`(() => { const s = ${groupState}; return s.cards.length === 1 && s.cards[0].label === 'JASP' && s.eng.length === 0; })()`, 5000)), await evalJs(groupState));
   await evalJs(`(() => { const e = document.querySelector('${D} .desktop-launch-filter'); e.value = ''; e.dispatchEvent(new Event('input')); return true; })()`);
-  check('clearing it restores both groups', await waitFor(`(() => { const s = ${groupState}; return s.cards.length === ${g.cards.length} && s.eng.length === ${g.eng.length}; })()`, 5000));
+  check('clearing it restores both groups', verdictOf(await waitFor(`(() => { const s = ${groupState}; return s.cards.length === ${g.cards.length} && s.eng.length === ${g.eng.length}; })()`, 5000)));
 
   console.log('③ a press launches through the door');
   if (!XPRA) { skipped++; console.log('  ⊘ SKIP no xpra — the launch leg'); }
   else {
     const can = await evalJs(`!document.querySelector('${D} .desktop-launch-card[data-app-id="seen.f.org.jaspstats.jasp"]')?.disabled`);
-    check('the JASP card is pressable (a display backend answers)', can, await evalJs(`document.querySelector('${D} .desktop-launch-avail')?.textContent || ''`));
+    check('the JASP card is pressable (a display backend answers)', verdictOf(can), await evalJs(`document.querySelector('${D} .desktop-launch-avail')?.textContent || ''`));
     if (can) {
       check('a real click on JASP', await realClick(`${D} .desktop-launch-card[data-app-id="seen.f.org.jaspstats.jasp"]`) === true);
-      check('the press POSTs {appId: seen.f.org.jaspstats.jasp} to the launch door', await waitFor(`(window.__launches || []).some((b) => b.appId === 'seen.f.org.jaspstats.jasp')`, 5000), await evalJs('window.__launches'));
+      check('the press POSTs {appId: seen.f.org.jaspstats.jasp} to the launch door', verdictOf(await waitFor(`(window.__launches || []).some((b) => b.appId === 'seen.f.org.jaspstats.jasp')`, 5000)), await evalJs('window.__launches'));
       const ran = await (async () => { for (let i = 0; i < 120; i++) { if (fs.existsSync(MARK)) return JSON.parse(fs.readFileSync(MARK, 'utf8')); await sleep(250); } return null; })();
-      check('the stub ran `flatpak run org.jaspstats.JASP` on the session\'s private display', !!ran && ran.argv === 'run org.jaspstats.JASP' && /^:\d+$/.test(ran.display), ran || fs.readFileSync(LOG, 'utf8').slice(-1500));
+      check('the stub ran `flatpak run org.jaspstats.JASP` on the session\'s private display', !!ran && ran.argv === 'run org.jaspstats.JASP' && verdictOf(/^:\d+$/.test(ran.display)), ran || fs.readFileSync(LOG, 'utf8').slice(-1500));
       const recs = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps`)).json();
-      check('the keeper records the session under the witnessed row', (recs.apps || []).some((a) => a.appId === 'seen.f.org.jaspstats.jasp'), (recs.apps || []).map((a) => ({ id: a.id, appId: a.appId, state: a.state })));
+      check('the keeper records the session under the witnessed row', verdictOf((recs.apps || []).some((a) => a.appId === 'seen.f.org.jaspstats.jasp')), (recs.apps || []).map((a) => ({ id: a.id, appId: a.appId, state: a.state })));
       for (const a of recs.apps || []) { try { await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${a.id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) }); } catch {} }
     }
   }
@@ -218,7 +218,7 @@ try {
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await sleep(300);
   await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
-  check('the group appears on the phone', await waitFor(`(${groupState})?.shown === true`, 15000));
+  check('the group appears on the phone', verdictOf(await waitFor(`(${groupState})?.shown === true`, 15000)));
   await evalJs(`document.querySelector('${D} .desktop-launch-seen-sec').scrollIntoView({ block: 'start' }); true`);
   await sleep(300);
   const wide = await evalJs(`[...document.querySelectorAll('${D} .desktop-launch-seen-sec, ${D} .desktop-launch-seen-sec *, ${D} .desktop-launch-filter')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > innerWidth + 0.5 || r.left < -0.5); }).map((e) => e.className + ' ' + Math.round(e.getBoundingClientRect().right))`);
@@ -236,19 +236,19 @@ try {
     for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); await sleep(100); } catch { break; } }
     srv = startServer(noBackendPath());
     const up5 = await serverUp(); const b5 = up5 ? await backendNow() : 'down';
-    check(`the server came back with ${BACKEND_BINS.join('/')} off PATH and no display backend`, up5 && b5 === null, { up5, backend: b5 });
+    check(`the server came back with ${BACKEND_BINS.join('/')} off PATH and no display backend`, gateOf(up5) && b5 === null, { up5, backend: b5 });
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
     pageErrors.length = 0;
     await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
     await waitFor(`!!window.app && !!app._desktopAppsAvailable && !!document.getElementById('btn-desktop-apps') && !document.getElementById('loading-screen')`, 20000);
     await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
-    check('the group appears without a display backend', await waitFor(`(${groupState})?.shown === true`, 15000), await evalJs(groupState));
+    check('the group appears without a display backend', verdictOf(await waitFor(`(${groupState})?.shown === true`, 15000)), await evalJs(groupState));
     const g5 = await evalJs(groupState);
     const mine5 = (g5.cards || []).find((c) => c.label === 'My Witness Tool');
     const avail5 = await evalJs(`document.querySelector('${D} .desktop-launch-avail')?.textContent || ''`);
-    check('the user\'s tool is still listed — Desktop entry · yours, its own command shown (never hidden, never "gone")', mineListed(mine5), g5.cards);
-    check('…dimmed like every card, the launcher saying why (No display backend)', !!mine5 && mine5.disabled === true && g5.cards.every((c) => c.disabled) && /No display backend/.test(avail5), { avail5, cards: g5.cards.map((c) => ({ id: c.id, disabled: c.disabled })) });
+    check('the user\'s tool is still listed — Desktop entry · yours, its own command shown (never hidden, never "gone")', verdictOf(mineListed(mine5)), g5.cards);
+    check('…dimmed like every card, the launcher saying why (No display backend)', !!mine5 && mine5.disabled === true && gateOf(g5.cards.every((c) => c.disabled)) && verdictOf(/No display backend/.test(avail5)), { avail5, cards: g5.cards.map((c) => ({ id: c.id, disabled: c.disabled })) });
     check('no page error without a display backend', pageErrors.length === 0, pageErrors.slice(0, 3));
   }
 } catch (e) { check('the suite ran to its end', false, e.stack || String(e)); }
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

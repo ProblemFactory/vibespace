@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const acorn = require(path.join(REPO, 'node_modules/acorn'));
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n      ' + JSON.stringify(extra).slice(0, 900) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n      ' + JSON.stringify(extra).slice(0, 900) : '')); } };
 
 /** What reads a Mac's screen or its windows (a WindowServer / ScreenCaptureKit client): the token → its pattern. */
 const TOKENS = Object.freeze([
@@ -93,34 +93,34 @@ console.log('§1 THE CENSUS: every screen read in src/ is the helper\'s, or allo
 const base = census();
 for (const r of base.rows) console.log(`      ${r.kind.padEnd(7)} ${r.rel}: ${r.names.join(', ')} (${r.sites.length} site${r.sites.length === 1 ? '' : 's'})${r.kind === 'allowed' ? ` — ${ALLOW[r.rel].why}` : ''}`);
 ok(base.problems.length === 0, 'no screen read under node: every hit is the helper\'s source or an allowed non-read', base.problems);
-ok(base.rows.some((r) => r.rel === HELPER && r.kind === 'helper') && base.rows.filter((r) => r.kind === 'allowed').length === Object.keys(ALLOW).length, 'the census saw the helper\'s source and every ALLOW row (it is not vacuous)', base.rows.map((r) => r.rel));
+ok(gateOf(base.rows.some((r) => r.rel === HELPER && r.kind === 'helper')) && base.rows.filter((r) => r.kind === 'allowed').length === Object.keys(ALLOW).length, 'the census saw the helper\'s source and every ALLOW row (it is not vacuous)', base.rows.map((r) => r.rel));
 ok(!base.rows.some((r) => r.rel === 'src/machine-window.js' || r.rel.startsWith('src/agentd/') && r.rel !== HELPER), 'src/machine-window.js and the agent\'s own files read no screen (the window look, the screen table, the pin)', base.rows.map((r) => r.rel));
 
 console.log('§2 the reads live in the helper — moved, not lost');
 const helperText = textOf(HELPER);
 const swift = fs.readFileSync(path.join(REPO, 'tools/vibespace-screen/vibespace-screen.swift'), 'utf8');
-ok(['CGWindowListCopyWindowInfo', 'CGDisplayBounds', 'NSScreen', 'SCShareableContent'].every((t) => helperText.includes(t) && swift.includes(t)), 'the helper (source + its bundled text) reads the window list, the displays and the shareable content');
+ok(verdictOf(['CGWindowListCopyWindowInfo', 'CGDisplayBounds', 'NSScreen', 'SCShareableContent'].every((t) => helperText.includes(t) && swift.includes(t))), 'the helper (source + its bundled text) reads the window list, the displays and the shareable content');
 
 console.log('§3 MUTANTS — the census goes RED');
 const agentd = textOf('src/agentd/agentd.js');
 const mw = textOf('src/machine-window.js');
 const m1 = census({ 'src/agentd/agentd.js': agentd + "\nconst peek = () => require('child_process').execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', \"ObjC.import('CoreGraphics'); $.CGWindowListCopyWindowInfo(1, 0)\"]);\n" });
-ok(m1.problems.some((p) => p.startsWith('src/agentd/agentd.js:') && /CGWindowListCopyWindowInfo/.test(p)), 'a CGWindowList read added under src/agentd ⇒ RED (named, with its line)', m1.problems);
+ok(verdictOf(m1.problems.some((p) => p.startsWith('src/agentd/agentd.js:') && /CGWindowListCopyWindowInfo/.test(p))), 'a CGWindowList read added under src/agentd ⇒ RED (named, with its line)', m1.problems);
 const m2 = census({ 'src/machine-window.js': mw + "\nconst MAC_TRACK_JXA = [\"ObjC.import('Cocoa');\", 'const scr = $.NSScreen.mainScreen;'].join('\\n');\n" });
-ok(m2.problems.some((p) => p.startsWith('src/machine-window.js:') && /NSScreen/.test(p)), 'the old JXA look put back in src/machine-window.js ⇒ RED', m2.problems);
+ok(verdictOf(m2.problems.some((p) => p.startsWith('src/machine-window.js:') && /NSScreen/.test(p))), 'the old JXA look put back in src/machine-window.js ⇒ RED', m2.problems);
 const m3 = census({ 'src/agentd/window-peek.js': "'use strict';\nmodule.exports = (execFile) => execFile('/usr/sbin/screencapture', ['-x', 'shot.png']);\n" });
-ok(m3.problems.some((p) => p.startsWith('src/agentd/window-peek.js:') && /screencapture/.test(p)), 'a NEW src/ file running screencapture ⇒ RED (the walk is the tree — an uncommitted file is seen)', m3.problems);
+ok(verdictOf(m3.problems.some((p) => p.startsWith('src/agentd/window-peek.js:') && /screencapture/.test(p))), 'a NEW src/ file running screencapture ⇒ RED (the walk is the tree — an uncommitted file is seen)', m3.problems);
 const m4 = census({ 'src/routes/files.js': textOf('src/routes/files.js') + "\nconst grab = 'screencapture -x';\n" });
-ok(m4.problems.some((p) => p.startsWith('src/routes/files.js:')), 'an ALLOW row allows only its own tokens: screencapture beside the clipboard\'s osascript ⇒ RED', m4.problems);
+ok(verdictOf(m4.problems.some((p) => p.startsWith('src/routes/files.js:'))), 'an ALLOW row allows only its own tokens: screencapture beside the clipboard\'s osascript ⇒ RED', m4.problems);
 const m5 = census({ 'src/routes/files.js': null });
-ok(m5.problems.some((p) => /an ALLOW row with nothing/.test(p)), 'an ALLOW row whose file no longer hits ⇒ RED (a stale row)', m5.problems);
+ok(verdictOf(m5.problems.some((p) => /an ALLOW row with nothing/.test(p))), 'an ALLOW row whose file no longer hits ⇒ RED (a stale row)', m5.problems);
 const c1 = census({ 'src/machine-window.js': mw + '\n// a Mac once ran osascript here to read CGWindowListCopyWindowInfo (lane mac-window-list-helper moved it)\n' });
 ok(c1.problems.length === 0, 'CONTROL: a comment naming osascript / CGWindowList is no site', c1.problems);
 
 console.log('§4 the wiring: the agent hands THE helper to the look and the table; the pin is LaunchServices');
 const MW = require(path.join(REPO, 'src/machine-window.js'));
-ok((agentd.match(/mac: macWindowLook\b/g) || []).length === 2 && /const macWindowLook = \{ facts: \(\) => streamScreenOf\(\)\.look\(\), displays: \(\) => streamScreenOf\(\)\.look\(\{ force: false, windows: false \}\), starts: \(pids\) => streamScreenOf\(\)\.starts\(pids\) \}/.test(agentd), 'agentd: window-track and display-facts both get `mac: macWindowLook` — the helper\'s facts (look), its table (no grant needed), the process starts');
+ok((agentd.match(/mac: macWindowLook\b/g) || []).length === 2 && verdictOf(/const macWindowLook = \{ facts: \(\) => streamScreenOf\(\)\.look\(\), displays: \(\) => streamScreenOf\(\)\.look\(\{ force: false, windows: false \}\), starts: \(pids\) => streamScreenOf\(\)\.starts\(pids\) \}/.test(agentd)), 'agentd: window-track and display-facts both get `mac: macWindowLook` — the helper\'s facts (look), its table (no grant needed), the process starts');
 ok(MW.trackArgv('darwin', {}).argv === null && MW.displaysArgv('darwin').argv === null && MW.pinArgv('darwin', { pid: 9, bundle: 'com.example.app', on: true }).argv.join(' ') === '/usr/bin/open -b com.example.app', 'a Mac\'s look and table have no argv under node; its pin is `open -b <bundle>`');
 
 console.log(`\n${fail ? '✗' : '✓'} test-mac-screen-reads: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -49,7 +49,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const SCAN = path.join(REPO, 'scripts', 'secret-scan.mjs');
 const S = await import(pathToFileURL(SCAN).href);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
 
 const GIT_ENV = gitEnvFrom(process.env);
 delete GIT_ENV.VIBESPACE_SKIP_CI;
@@ -108,16 +108,16 @@ for (const r of S.RULES) {
   const fx = F[r.id];
   if (!fx) { ok(false, `${r.id}: no fixture in this suite — every row of the table needs a RED + its near-misses`); continue; }
   const reds = fx.red.map((t) => rulesOf(t, r.partner ? { allow: ALL } : {}));
-  ok(reds.every((ids) => ids.includes(r.id)), `${r.id}: ${fx.red.length} RED fixture(s) found${r.partner ? ' — under an allow-everything list (a partner row never consults it)' : ''}`, reds);
+  ok(verdictOf(reds.every((ids) => ids.includes(r.id))), `${r.id}: ${fx.red.length} RED fixture(s) found${r.partner ? ' — under an allow-everything list (a partner row never consults it)' : ''}`, reds);
   const nears = fx.near.map((t) => rulesOf(t));
-  ok(nears.every((ids) => !ids.includes(r.id)), `${r.id}: ${fx.near.length} near-miss(es) GREEN (one char short / a character outside the alphabet)`, nears);
+  ok(verdictOf(nears.every((ids) => !ids.includes(r.id))), `${r.id}: ${fx.near.length} near-miss(es) GREEN (one char short / a character outside the alphabet)`, nears);
   if (!r.partner) {
     const hitOf = (t) => { const m = r.re.exec(t); return m ? m[0] : ''; };
     const lit = (s) => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    ok(fx.red.every((t) => !rulesOf(t, { allow: [lit(hitOf(t))] }).includes(r.id)), `${r.id}: an allow row on the hit silences it (a generic row)`);
+    ok(verdictOf(fx.red.every((t) => !rulesOf(t, { allow: [lit(hitOf(t))] }).includes(r.id))), `${r.id}: an allow row on the hit silences it (a generic row)`);
   }
 }
-ok(Object.keys(F).every((id) => S.RULES.some((r) => r.id === id)), 'every fixture here names a row of the table (no stale fixture)', Object.keys(F).filter((id) => !S.RULES.some((r) => r.id === id)));
+ok(verdictOf(Object.keys(F).every((id) => S.RULES.some((r) => r.id === id))), 'every fixture here names a row of the table (no stale fixture)', Object.keys(F).filter((id) => !S.RULES.some((r) => r.id === id)));
 
 // ── scratch-repo plumbing ──
 const git = (cwd, args, input) => {
@@ -158,20 +158,20 @@ const runHook = (stdin, env = {}, hook = path.join(repo, 'pre-push')) => {
 };
 const push = (local, remote = ZERO, branch = 'main') => `refs/heads/${branch} ${local} refs/heads/${branch} ${remote}\n`;
 const allowRows = fs.readFileSync(path.join(REPO, '.repo-guard-allow'), 'utf8').split('\n');
-ok(allowRows.includes('BEGIN [A-Z ]*PRIVATE KEY'), 'the repo allowlist still carries the row that hid rel263\'s token (`BEGIN [A-Z ]*PRIVATE KEY`) — the legs below are non-vacuous');
+ok(verdictOf(allowRows.includes('BEGIN [A-Z ]*PRIVATE KEY')), 'the repo allowlist still carries the row that hid rel263\'s token (`BEGIN [A-Z ]*PRIVATE KEY`) — the legs below are non-vacuous');
 const r1 = runHook(push(B, A));
 ok(r1.status === 1, 'the push is REFUSED', r1.out);
-ok(r1.out.includes(`${REL}:3`) && /slack-token/.test(r1.out), `…naming the file:line (${REL}:3) and the row`, r1.out);
-ok(r1.out.includes('concatenation') && /GH013/.test(r1.out), '…and the fixture rule (build token shapes at runtime by concatenation) with GitHub\'s refusal code', r1.out);
+ok(gateOf(r1.out.includes(`${REL}:3`)) && verdictOf(/slack-token/.test(r1.out)), `…naming the file:line (${REL}:3) and the row`, r1.out);
+ok(gateOf(r1.out.includes('concatenation')) && verdictOf(/GH013/.test(r1.out)), '…and the fixture rule (build token shapes at runtime by concatenation) with GitHub\'s refusal code', r1.out);
 ok(r1.calls.length === 0, 'refused BEFORE the heavy verdict and the fast tier are asked', r1.calls);
 const r2 = runHook(push(B, A), { VIBESPACE_SKIP_CI: '1' });
 ok(r2.status === 1 && r2.calls.length === 0, 'VIBESPACE_SKIP_CI=1 does not skip the scan (GitHub refuses the shape whatever we skip)', r2.out);
 const r5 = runHook(push(B, ZERO, 'feature'));
-ok(r5.status === 1 && r5.out.includes(`${REL}:3`), 'a NEW branch (remote sha zeros) is refused too — its whole unpublished range is read', r5.out);
+ok(r5.status === 1 && verdictOf(r5.out.includes(`${REL}:3`)), 'a NEW branch (remote sha zeros) is refused too — its whole unpublished range is read', r5.out);
 const FIXED = `  const SIX = { ant: ['sk', '${ANT.slice(2)}'].join(''), slack: ['xo', '${SLACK.slice(2)}'].join(''), pem: ['-----BEGIN RSA ', 'PRIVATE KEY-----'].join(''), mail: 'alice.smith@example.com' };`;
 const C = commit(repo, { [REL]: `// the rel263 shape: the PEM header shares the line with the token\nimport fs from 'node:fs';\n${FIXED}\n` }, 'C: fixed in a later commit');
 const r3 = runHook(push(C, A));
-ok(r3.status === 1 && r3.out.includes(`commit ${B.slice(0, 9)}`), 'a fix in a LATER commit of the same push is still refused, naming the commit that carries the literal (GitHub reads every commit)', r3.out);
+ok(r3.status === 1 && verdictOf(r3.out.includes(`commit ${B.slice(0, 9)}`)), 'a fix in a LATER commit of the same push is still refused, naming the commit that carries the literal (GitHub reads every commit)', r3.out);
 git(repo, ['checkout', '-q', '-b', 'squashed', A]);
 const D = commit(repo, { [REL]: `// the rel263 shape, fixed\nimport fs from 'node:fs';\n${FIXED}\n` }, 'D: the squashed fix');
 const r4 = runHook(push(D, A));
@@ -183,7 +183,7 @@ if (cutFrom > 0 && cutTo > cutFrom) {
   const pre = path.join(repo, 'pre-push.noscan');
   fs.writeFileSync(pre, hookSrc.slice(0, cutFrom) + hookSrc.slice(cutTo));
   const rn = runHook(push(B, A), {}, pre);
-  ok(rn.status === 0 && rn.calls.includes('fast'), 'CONTROL: the same hook WITHOUT its scan block lets the rel263 shape through (the block is what refuses)', rn);
+  ok(rn.status === 0 && verdictOf(rn.calls.includes('fast')), 'CONTROL: the same hook WITHOUT its scan block lets the rel263 shape through (the block is what refuses)', rn);
 } else ok(false, 'CONTROL: the scan block\'s anchors (`# ── SECRET SCAN (B-89da` … the VIBESPACE_SKIP_CI line) are not in the shipped hook — the control would prove nothing');
 // CONTROL (b): the scanner with the line-wide allow, partner rows consulting the allowlist
 const scanSrc = fs.readFileSync(SCAN, 'utf8');
@@ -195,7 +195,7 @@ let lineWide = scanSrc;
 for (const [from, to] of EDITS) lineWide = lineWide.replace(from, to);
 const lineWideAt = path.join(ROOT, 'secret-scan.linewide.mjs');
 fs.writeFileSync(lineWideAt, lineWide);
-ok(EDITS.every(([from]) => scanSrc.includes(from)) && lineWide !== scanSrc, 'CONTROL: both anchors of the line-wide copy are in the shipped scanner');
+ok(gateOf(EDITS.every(([from]) => scanSrc.includes(from))) && lineWide !== scanSrc, 'CONTROL: both anchors of the line-wide copy are in the shipped scanner');
 const shipped = cli(repo, [`--range=${A}..${B}`, '--quiet']), wide = cli(repo, [`--range=${A}..${B}`, '--quiet'], lineWideAt);
 ok(shipped.status === 1 && wide.status === 0, `CONTROL: over the same push the shipped scanner says RED (rc ${shipped.status}), the line-wide copy says clean (rc ${wide.status}) — rel263's miss, reproduced`, wide.out);
 // CONTROL (c): the base scanner itself, when this checkout has the base commit (a shallow CI clone does not)
@@ -214,18 +214,18 @@ const allowNow = fs.readFileSync(path.join(repo, '.repo-guard-allow'), 'utf8');
 const E = commit(repo, { '.repo-guard-allow': allowNow + `${SLACK}\nscripts/test-rel263\\.mjs\n${REL}\n.*\n` }, 'E: allow rows for the literal, the path and everything');
 const allowLine = (allowNow + `${SLACK}\n`).split('\n').length - 1;
 const re = cli(repo, [`--range=${A}..${E}`, '--json', '--quiet']);
-ok(re.status === 1 && re.json.some((f) => f.file === REL && f.line === 3 && f.rule === 'slack-token'), 'rows naming the literal, the file\'s own path and `.*` — the token is still RED', re.json);
-ok(re.json.some((f) => f.file === '.repo-guard-allow' && f.line === allowLine && f.rule === 'slack-token'), `…and the row that spells the literal is a finding of its own (.repo-guard-allow:${allowLine})`, re.json);
+ok(re.status === 1 && verdictOf(re.json.some((f) => f.file === REL && f.line === 3 && f.rule === 'slack-token')), 'rows naming the literal, the file\'s own path and `.*` — the token is still RED', re.json);
+ok(verdictOf(re.json.some((f) => f.file === '.repo-guard-allow' && f.line === allowLine && f.rule === 'slack-token')), `…and the row that spells the literal is a finding of its own (.repo-guard-allow:${allowLine})`, re.json);
 const rh = runHook(push(E, A));
 ok(rh.status === 1 && rh.calls.length === 0, 'the hook refuses that push', rh.out);
 const GEN = `const password = '${rnd(ALNUM, 24)}';`;
-ok(S.judgeLine(GEN, { allow: [] }).some((f) => f.rule === 'generic-secret-assign') && !S.judgeLine(GEN, { allow: [/.*/] }).length, 'the same `.*` still silences a GENERIC row (the allowlist keeps its job for non-partner shapes)');
+ok(gateOf(S.judgeLine(GEN, { allow: [] }).some((f) => f.rule === 'generic-secret-assign')) && !S.judgeLine(GEN, { allow: [/.*/] }).length, 'the same `.*` still silences a GENERIC row (the allowlist keeps its job for non-partner shapes)');
 
 console.log('\n④ an allow row suppresses only the finding it overlaps');
 const V = rnd(ALNUM, 20);
 const R1 = P('fixture-', 'refresh-0001'); // assembled, so this source line is no assignment-shaped literal itself
 const TWO = `const t = { refresh_token: '${R1}', access_token: '${V}' };`;
-ok(S.judgeLine(TWO, { allow: [/fixture-refresh-000/] }).some((f) => f.rule === 'generic-secret-assign'), 'a row covering the FIRST assignment leaves the second one RED (every match on the line is judged)');
+ok(verdictOf(S.judgeLine(TWO, { allow: [/fixture-refresh-000/] }).some((f) => f.rule === 'generic-secret-assign')), 'a row covering the FIRST assignment leaves the second one RED (every match on the line is judged)');
 ok(!S.judgeLine(TWO, { allow: [/fixture-refresh-000/, new RegExp(V)] }).length, 'a row on each value silences both');
 ok(!S.judgeLine(`token: '${V}'`, { allow: [new RegExp(`token: '${V}'`)] }).length, 'a row matching the finding itself silences it');
 put(path.join(ROOT, 'span'), 'f.mjs', TWO + '\n');
@@ -242,23 +242,23 @@ const xLines = ['one', 'two', 'three', 'four', 'five', 'six', `holder ${GH}`, 'e
 const A0 = commit(rr, { 'notes/x.txt': xLines.join('\n') + '\n', 'notes/y.txt': `one\nholder ${GH2}\n` }, 'A0');
 const A1 = commit(rr, { 'notes/x.txt': [...xLines, 'nine'].join('\n') + '\n' }, 'A1: a clean line appended');
 const q1 = cli(rr, [`--range=${A0}..${A1}`, '--json', '--quiet']);
-ok(q1.json.some((f) => f.file === 'notes/x.txt' && f.line === 7 && f.rule === 'github-token' && !f.commit), 'a TOUCHED file is read whole: the token already in notes/x.txt is found at its real line 7', q1.json);
+ok(verdictOf(q1.json.some((f) => f.file === 'notes/x.txt' && f.line === 7 && f.rule === 'github-token' && !f.commit)), 'a TOUCHED file is read whole: the token already in notes/x.txt is found at its real line 7', q1.json);
 ok(!q1.json.some((f) => f.file === 'notes/y.txt'), '…an untouched file is not part of what the push publishes', q1.json);
 const A2 = commit(rr, { 'src/t.js': `// t\nconst k = '${SL2}';\n` }, 'A2: a token');
 const A3 = commit(rr, { 'src/t.js': '// t\n' }, 'A3: removed again');
 const q2 = cli(rr, [`--range=${A1}..${A3}`, '--json', '--quiet']);
-ok(q2.status === 1 && q2.json.some((f) => f.file === 'src/t.js' && f.line === 2 && f.commit === A2 && f.rule === 'slack-token'), 'a token added and removed inside the range is found at src/t.js:2, named by its commit', q2.json);
+ok(q2.status === 1 && verdictOf(q2.json.some((f) => f.file === 'src/t.js' && f.line === 2 && f.commit === A2 && f.rule === 'slack-token')), 'a token added and removed inside the range is found at src/t.js:2, named by its commit', q2.json);
 ok(!q2.json.some((f) => f.file.startsWith('notes/')), '…and nothing outside the range', q2.json);
 git(rr, ['update-ref', 'refs/remotes/origin/main', A1]);
 const q3 = cli(rr, [`--range=${A3}`, '--json', '--quiet']);
-ok(q3.json.some((f) => f.file === 'src/t.js' && f.commit === A2) && !q3.json.some((f) => f.file.startsWith('notes/')), 'a lone sha = what no remote-tracking ref has (A1 is published: notes/ is not read)', q3.json);
+ok(gateOf(q3.json.some((f) => f.file === 'src/t.js' && f.commit === A2)) && !q3.json.some((f) => f.file.startsWith('notes/')), 'a lone sha = what no remote-tracking ref has (A1 is published: notes/ is not read)', q3.json);
 // EITHER END NOT A COMMIT HERE IS REFUSED BY NAME (the test kit's scan check, 2026-11-19): a never-fetched base once fell back
 // to the lone-tip reading, which over a clone whose remote-tracking refs hold every commit reads NOTHING — and said clean
 const q4 = cli(rr, [`--range=${'f'.repeat(39)}1..${A3}`, '--json']);
-ok(q4.status === 2 && /the range's base f{39}1 is not a commit in this repository/.test(q4.out) && /NOT a clean verdict/.test(q4.out) && q4.json.length === 0,
+ok(q4.status === 2 && gateOf(/the range's base f{39}1 is not a commit in this repository/.test(q4.out)) && gateOf(/NOT a clean verdict/.test(q4.out)) && q4.json.length === 0,
   `a base this checkout never fetched is REFUSED by name — exit 2, never «clean», nothing printed as findings (rc ${q4.status})`, q4.out);
 const q4t = cli(rr, [`--range=${A0}..${'d'.repeat(40)}`, '--json']);
-ok(q4t.status === 2 && /the range's tip d{40} is not a commit in this repository/.test(q4t.out), `…and an unknown TIP in the two-ended form (rc ${q4t.status})`, q4t.out);
+ok(q4t.status === 2 && verdictOf(/the range's tip d{40} is not a commit in this repository/.test(q4t.out)), `…and an unknown TIP in the two-ended form (rc ${q4t.status})`, q4t.out);
 { // CONTROL (the kit's find, reproduced): the scanner with the old fallback put back, over a range whose base this checkout lacks
   // and whose tip a remote-tracking ref already holds, answers CLEAN (exit 0) — A2's token in that history unread
   const NOW_LINE = "  if (m && !has(m[1])) throw gitErr(`the range's base ${m[1]} is not a commit in this repository (a remote sha never fetched?) — a range whose ends are not both commits here is never read as clean: fetch the base, or name the lone tip`);\n";
@@ -268,16 +268,16 @@ ok(q4t.status === 2 && /the range's tip d{40} is not a commit in this repository
   git(rr, ['update-ref', 'refs/remotes/origin/kit', A3]);   // every commit up to A3 published, as in the kit's clone
   const was = cli(rr, [`--range=${'f'.repeat(39)}1..${A3}`, '--quiet'], fallbackAt), now = cli(rr, [`--range=${'f'.repeat(39)}1..${A3}`, '--quiet']);
   git(rr, ['update-ref', '-d', 'refs/remotes/origin/kit']);
-  ok(scanSrc.split(NOW_LINE).length === 2 && was.status === 0 && /scanning what no remote-tracking ref has instead/.test(was.out) && now.status === 2,
+  ok(scanSrc.split(NOW_LINE).length === 2 && was.status === 0 && gateOf(/scanning what no remote-tracking ref has instead/.test(was.out)) && now.status === 2,
     `CONTROL: with the old fallback put back (its own «scanning what no remote-tracking ref has instead» said) the same range reads CLEAN (rc ${was.status}) though A2 carries a token; the shipped scanner refuses it (rc ${now.status})`, was.out); }
 const q5 = cli(rr, [`--range=${'e'.repeat(40)}`]);
-ok(q5.status === 2 && /NOT a clean verdict/.test(q5.out), `an unknown tip exits 2 — never "clean" (rc ${q5.status})`, q5.out);
+ok(q5.status === 2 && verdictOf(/NOT a clean verdict/.test(q5.out)), `an unknown tip exits 2 — never "clean" (rc ${q5.status})`, q5.out);
 const A4 = commit(rr, { 'src/plus.txt': `++ ${GH3}\n` }, 'A4: a content line that starts with ++');
 const q7 = cli(rr, ['--tree', '--json', '--quiet']);
-ok(['notes/x.txt:7', 'notes/y.txt:2', 'src/plus.txt:1'].every((k) => q7.json.some((f) => `${f.file}:${f.line}` === k)), '--tree reads every tracked file', q7.json);
+ok(verdictOf(['notes/x.txt:7', 'notes/y.txt:2', 'src/plus.txt:1'].every((k) => q7.json.some((f) => `${f.file}:${f.line}` === k))), '--tree reads every tracked file', q7.json);
 const A5 = commit(rr, { 'src/plus.txt': '\n' }, 'A5: removed again');
 const q6 = cli(rr, [`--range=${A3}..${A5}`, '--json', '--quiet']);
-ok(q6.json.some((f) => f.file === 'src/plus.txt' && f.line === 1 && f.commit === A4), 'an added line whose content starts with `++` is content, not a file header (found in its commit\'s patch)', q6.json);
+ok(verdictOf(q6.json.some((f) => f.file === 'src/plus.txt' && f.line === 1 && f.commit === A4)), 'an added line whose content starts with `++` is content, not a file header (found in its commit\'s patch)', q6.json);
 
 console.log('\n⑥ THE THREE CALLERS run the ONE table');
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
@@ -286,24 +286,24 @@ const scanAt = hook.indexOf('node scripts/secret-scan.mjs --range="$(range_for_s
 ok(scanAt > 0, 'caller 1, the pre-push hook: `node scripts/secret-scan.mjs --range=<what the ref publishes>`');
 ok(scanAt < hook.indexOf('[ "${VIBESPACE_SKIP_CI:-}" = "1" ]') && scanAt < hook.indexOf('node scripts/ci.mjs --check-heavy --head=') && scanAt < hook.indexOf('node scripts/ci.mjs $kg ||'), '…before the bypass, the heavy verdict and the fast tier');
 const fastGate = ci.slice(ci.indexOf('async function fastGate('), ci.indexOf('async function heavyGate('));
-ok(ci.includes("const script = path.join(cwd, 'scripts', 'secret-scan.mjs');") && ci.includes("[script, '--tree', '--quiet']"), 'caller 2, scripts/ci.mjs: runSecretScan spawns scripts/secret-scan.mjs --tree');
-ok(fastGate.includes('runSecretScan({ cwd: runRoot, sha })') && fastGate.indexOf('await runFastLanes(plan, {') > 0 && fastGate.indexOf('runSecretScan(') < fastGate.indexOf('await runFastLanes(plan, {'), '…in the FAST tier, after the build and before the first suite (the Actions fast job runs `node scripts/ci.mjs` too)');
-ok(/^\s*if ! node scripts\/secret-scan\.mjs --tree; then$/m.test(wf) && !wf.includes('git ls-files'), 'caller 3, the Actions secret-scan workflow: `node scripts/secret-scan.mjs --tree` (no per-file loop of its own)');
+ok(gateOf(ci.includes("const script = path.join(cwd, 'scripts', 'secret-scan.mjs');")) && verdictOf(ci.includes("[script, '--tree', '--quiet']")), 'caller 2, scripts/ci.mjs: runSecretScan spawns scripts/secret-scan.mjs --tree');
+ok(gateOf(fastGate.includes('runSecretScan({ cwd: runRoot, sha })')) && fastGate.indexOf('await runFastLanes(plan, {') > 0 && fastGate.indexOf('runSecretScan(') < fastGate.indexOf('await runFastLanes(plan, {'), '…in the FAST tier, after the build and before the first suite (the Actions fast job runs `node scripts/ci.mjs` too)');
+ok(gateOf(/^\s*if ! node scripts\/secret-scan\.mjs --tree; then$/m.test(wf)) && !wf.includes('git ls-files'), 'caller 3, the Actions secret-scan workflow: `node scripts/secret-scan.mjs --tree` (no per-file loop of its own)');
 // THE HOSTED FAST JOB RUNS THE SECRET SCAN — the law, never the line's spelling (主开发 11:48Z, after B-7353 split the job in two):
 // the job's line runs scripts/ci.mjs, whole or as one part; EVERY part reaches the scan (fastGate calls it unconditionally, after the
 // build and before any lane, whatever part it runs); and the scan's own suite is a fast row the split puts in exactly one part
 const FAST_RUN = /^\s*- run: node scripts\/ci\.mjs(?: --fast-part=\$\{\{ matrix\.part \}\}\/\d+)?(?: --keep-going)?\s*$/m;
-ok(FAST_RUN.test(ciYml), '…and ci.yml\'s fast job runs scripts/ci.mjs — the whole tier or one part of it (--fast-part=${{ matrix.part }}/n) — caller 2 on the runner');
+ok(verdictOf(FAST_RUN.test(ciYml)), '…and ci.yml\'s fast job runs scripts/ci.mjs — the whole tier or one part of it (--fast-part=${{ matrix.part }}/n) — caller 2 on the runner');
 const runLine = (ciYml.match(FAST_RUN) || [''])[0];
 ok(!!runLine && !FAST_RUN.test(ciYml.replace(runLine, runLine.replace('scripts/ci.mjs', 'scripts/other.mjs'))) && !FAST_RUN.test(ciYml.replace(runLine, runLine.replace('scripts/ci.mjs', 'scripts/ci.mjs --only=test-a'))),
   'CONTROL: a fast job line that runs another script — or the tier cut to a named list — is red');
-ok(/\n {4}if \(!runSecretScan\(\{ cwd: runRoot, sha \}\)\.ok\)/.test(fastGate) && fastGate.indexOf('if (part) fast = fastPartPlan(') > 0 && fastGate.indexOf('if (part) fast = fastPartPlan(') < fastGate.indexOf('runSecretScan('),
+ok(gateOf(/\n {4}if \(!runSecretScan\(\{ cwd: runRoot, sha \}\)\.ok\)/.test(fastGate)) && fastGate.indexOf('if (part) fast = fastPartPlan(') > 0 && fastGate.indexOf('if (part) fast = fastPartPlan(') < fastGate.indexOf('runSecretScan('),
   '…and EVERY part runs the scan: fastGate calls it unconditionally, after the part\'s cut is made and before its lanes');
 { const C = await import(pathToFileURL(path.join(REPO, 'scripts', 'ci.mjs')).href), fp = C.workflowFastPartsAt(ciYml);
   const sourceOf = (n) => { try { return fs.readFileSync(path.join(REPO, 'scripts', n + '.mjs'), 'utf8'); } catch { return ''; } };
   const parts = fp ? C.fastPartPlan(C.SUITES.filter((x) => x.tier === 'fast'), fp.n, { sourceOf }).parts : [];
   const holding = parts.filter((p) => p.some((x) => x.name === 'test-secret-scan')).length;
-  ok(C.SUITES.some((x) => x.name === 'test-secret-scan' && x.tier === 'fast') && !!fp && holding === 1,
+  ok(gateOf(C.SUITES.some((x) => x.name === 'test-secret-scan' && x.tier === 'fast')) && !!fp && holding === 1,
     `…and the scan's own suite is a FAST row the split puts in exactly ONE of the workflow's ${fp ? fp.n : '?'} parts (test-ci-gate §2 holds every row in exactly one)`); }
 const OWN_PATTERN = /xox\[|gh\[pousr\]|github_pat_|sk-ant-|AKIA|AIza|GOCSPX|glpat-|PRIVATE KEY|T3Blbk|npm_\[|hf_\[|SG\\\./;
 for (const [name, text] of [['scripts/git-hooks/pre-push', hook], ['scripts/ci.mjs', ci], ['.github/workflows/secret-scan.yml', wf], ['.github/workflows/ci.yml', ciYml]]) ok(!OWN_PATTERN.test(text), `${name} carries no secret pattern of its own`, (OWN_PATTERN.exec(text) || [])[0]);
@@ -313,7 +313,7 @@ ok(JSON.stringify(S.RULES.filter((r) => r.partner).map((r) => r.id)) === JSON.st
 ok(JSON.stringify(S.RULES.filter((r) => !r.partner).map((r) => r.id)) === JSON.stringify(GENERIC), `…and ${GENERIC.length} generic rows`, S.RULES.filter((r) => !r.partner).map((r) => r.id));
 const tableAt = scanSrc.indexOf('export const RULES = ['), tableEnd = scanSrc.indexOf('\n];\n', tableAt);
 const reAt = [...scanSrc.matchAll(/\bre: \//g)].map((m) => m.index);
-ok(tableAt > 0 && reAt.length === S.RULES.length && reAt.every((i) => i > tableAt && i < tableEnd), `every \`re:\` in scripts/secret-scan.mjs sits inside the one table (${reAt.length} rows)`);
+ok(tableAt > 0 && reAt.length === S.RULES.length && verdictOf(reAt.every((i) => i > tableAt && i < tableEnd)), `every \`re:\` in scripts/secret-scan.mjs sits inside the one table (${reAt.length} rows)`);
 
 console.log('\n⑦ B-ecc4: the PUSHING checkout\'s allow file judges what a push publishes (the production-cwd case) — so a pick adds no row');
 {
@@ -333,13 +333,13 @@ console.log('\n⑦ B-ecc4: the PUSHING checkout\'s allow file judges what a push
   const genAt = (r) => (r.json || []).some((f) => f.file === 'src/g.js' && f.line === 1 && f.rule === 'generic-secret-assign');
   const valLine = fs.readFileSync(path.join(pc, '.repo-guard-allow'), 'utf8').split('\n').findIndex((l) => l.trim() === VAL) + 1;
   const rowAt = (r) => (r.json || []).filter((f) => f.rule === S.ALLOW_ROW_RULE).map((f) => `${f.file}:${f.line}@${String(f.commit).slice(0, 9)}`);
-  ok(!genAt(own) && genAt(atRelease) && atRelease.status === 1,
+  ok(!genAt(own) && gateOf(genAt(atRelease)) && atRelease.status === 1,
     `THE PRODUCTION-CWD CASE: one range, one allow row added in it — in the lane's checkout (at the range's tip) the row counts: src/g.js:1 is not a finding (its findings: ${JSON.stringify((own.json || []).map((f) => `${f.rule} ${f.file}:${f.line}`))}); in the pushing checkout at the release it does not: RED at src/g.js:1 (rc ${atRelease.status}) — the row never counts at the push`, { own: own.json, atRelease: atRelease.json });
   ok(valLine > 0 && own.status === 1 && rowAt(own).join() === `.repo-guard-allow:${valLine}@${P1.slice(0, 9)}` && rowAt(atRelease).join() === rowAt(own).join(),
     `…and the lane's own gate is no longer clean there (before part 1 it said rc 0): the allow-row census names the row in both checkouts — ${rowAt(own).join()} (rc ${own.status}); see ⑧`, { own: own.json, valLine });
   // …and the hook asks exactly that checkout: its scan runs `node scripts/secret-scan.mjs` from the pushing checkout's root
   const hookText = fs.readFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), 'utf8');
-  ok(/^\s*node scripts\/secret-scan\.mjs --range="\$\(range_for_sha "\$sha"\)" --quiet$/m.test(hookText) && !/--allow[\s=]/.test(hookText) && fs.readFileSync(SCAN, 'utf8').includes("fs.existsSync(ALLOW_FILE) ? [ALLOW_FILE] : []"),
+  ok(gateOf(/^\s*node scripts\/secret-scan\.mjs --range="\$\(range_for_sha "\$sha"\)" --quiet$/m.test(hookText)) && !/--allow[\s=]/.test(hookText) && verdictOf(fs.readFileSync(SCAN, 'utf8').includes("fs.existsSync(ALLOW_FILE) ? [ALLOW_FILE] : []")),
     '…the hook runs the pushing checkout\'s scripts/secret-scan.mjs with no --allow, and the scanner reads ALLOW_FILE relative to its cwd (the working tree), never the range\'s tip');
   // PICK 1 — so a pick adds no row: every row the tree's allow file holds is one of the 77 it held at 2.369.407 (sha256, 12 hex)
   const ALLOW_407 = new Set('3cc12ce2667e 3f3434d8240e c19438560b65 03d104c669e3 30548b5cb1c8 ea62db040a9c 01b9083c8bc8 e092ca99a7a7 8b02551f72b4 723ecb08abae 999d3d5fb4dc 7b4aa4407bc5 c32aa37b25e2 7dca712ed078 1966454e3b8a cf9935d8e391 45895de6778e ed1722b2d2ad 4f4552bff5b2 6bfdfbf9e1c1 27060996ec53 7e542c9b2015 f1f8a11fea21 8fd3fe55ed05 0e17bae56c63 5dcb6aad924d 9779fcac3937 da0b0b95d3b1 749c7dc29631 835f971d349b 865254dcfb90 f78312c46e59 bb49f01b9dd8 b7b70fd3a07e ca4e0588b586 f7d29a7e7b86 85b4932501f8 4e6e02616841 34359798e030 7fbc475f8283 6bbe590f1e6d eb227ed5bc15 1c22db73ecbb cbbc8a064f87 bc5e96105884 0b1905f56677 fe93c201d672 0fc4f6fa3a5e 8470b7b4c82c e0f51801d025 e101f457792f 79de2834097f 6cc566d54873 3a77e7758d0a 4841e95e341f ae5edd108af9 736257930fb7 e6972cb90caa 13f0c8e81e74 ba732f7f43bb 8803269a812f 79315bfa201b dfb8d5d93047 60d9057e35e2 7240ceccf4e4 0ef383bb9d47 77266140b7bb 00298af781bf 7f6fde709e71 6e9ea61808b9 b810b42b1e2a 1cb6571ffa9e c3b578964845 22601c9e6239 f65d7d8cceb3 1b5a110d3736 2f2cc53cc3bb'.split(' '));
@@ -375,12 +375,12 @@ console.log('\n⑧ B-ecc4 part 1: THE ALLOW-ROW CENSUS — no commit of a range 
   const c1 = cli(ar, [`--range=${B0}..${B7}`, '--json', '--quiet']);
   ok(c1.status === 1 && JSON.stringify(rows(c1)) === JSON.stringify(want),
     `over B0..B7 the census names exactly the two new rows, each by its commit and line: ${JSON.stringify(rows(c1))} (B1's row is RED though B4 took it out again — a range scan reads every commit; B7's edited row is a new row) (rc ${c1.status})`, { got: c1.json, want });
-  ok(!c1.json.some((f) => f.rule === S.ALLOW_ROW_RULE && [B2, B3, B4, B5, B6].includes(f.commit)) && c1.json.every((f) => f.rule === S.ALLOW_ROW_RULE),
+  ok(!c1.json.some((f) => f.rule === S.ALLOW_ROW_RULE && [B2, B3, B4, B5, B6].includes(f.commit)) && verdictOf(c1.json.every((f) => f.rule === S.ALLOW_ROW_RULE)),
     `CONTROLS: a comment and a blank (B2), a base row moved (B3), a row taken out (B4, B5) and a base row put back (B6) are not named; the range has no other finding (${c1.json.length} finding(s), all the census's)`, c1.json);
-  ok(c1.json.every((f) => f.rule !== S.ALLOW_ROW_RULE || (!f.snippet.includes(NEW1) && !f.snippet.includes(GAMMA2))), '…and no finding prints a row whole (its snippet is redacted, as every finding\'s is)', c1.json.map((f) => f.snippet));
+  ok(verdictOf(c1.json.every((f) => f.rule !== S.ALLOW_ROW_RULE || (!f.snippet.includes(NEW1) && !f.snippet.includes(GAMMA2)))), '…and no finding prints a row whole (its snippet is redacted, as every finding\'s is)', c1.json.map((f) => f.snippet));
   const c2 = cli(ar, [`--range=${B0}..${B7}`, '--quiet']);
   const said = c2.out.replace(/\x1b\[[0-9;]*m/g, '');
-  ok(c2.status === 1 && said.includes(`allow-row-added ${AF}:5 (commit ${B1.slice(0, 9)})`) && said.includes('never counts when the release is pushed') && said.includes('Fold the cure INTO that commit') && !said.includes('If a non-partner match is a false positive'),
+  ok(c2.status === 1 && gateOf(said.includes(`allow-row-added ${AF}:5 (commit ${B1.slice(0, 9)})`)) && gateOf(said.includes('never counts when the release is pushed')) && gateOf(said.includes('Fold the cure INTO that commit')) && !said.includes('If a non-partner match is a false positive'),
     `the report says it by name — «allow-row-added ${AF}:5 (commit ${B1.slice(0, 9)})», why the row never counts, and the cure (fold it into that commit); not the false-positive advice`, said);
   const c3 = cli(ar, [`--range=${B1}..${B7}`, '--json', '--quiet']);
   ok(JSON.stringify(rows(c3)) === JSON.stringify([`${AF}:2@${B7.slice(0, 9)}`]), `the floor is the range's BASE: over B1..B7 (a base that holds B1's row) only B7's row is named — ${JSON.stringify(rows(c3))}`, c3.json);
@@ -395,7 +395,7 @@ console.log('\n⑧ B-ecc4 part 1: THE ALLOW-ROW CENSUS — no commit of a range 
     `a row a MERGE brought (no commit's patch adds it) is named at its line in the tip's file, with no commit (the kit's scan check blames such a line): ${JSON.stringify(rows(c4))}`, c4.json);
   // a lone tip (a first publication: no base, no remote-tracking ref) is not judged by the census, and that is said
   const c5 = cli(ar, [`--range=${B7}`, '--json']);
-  ok(c5.status === 0 && rows(c5).length === 0 && /the allow-row census \(B-ecc4\) needs the range's base: a lone tip/.test(c5.out),
+  ok(c5.status === 0 && rows(c5).length === 0 && verdictOf(/the allow-row census \(B-ecc4\) needs the range's base: a lone tip/.test(c5.out)),
     `a lone tip is not judged by the census and the scan says so («${(c5.out.match(/the allow-row census[^\n]*/) || [''])[0].slice(0, 110)}») (rc ${c5.status})`, c5.out);
   // PURE: what a row is
   ok(JSON.stringify(S.allowRowsOf('# c\n\n  x  \ny\n')) === '["x","y"]' && S.allowRowsAdded(`\x01c1\ndiff --git a/${AF} b/${AF}\n--- a/${AF}\n+++ b/${AF}\n@@ -0,0 +3,2 @@\n+keep\n+fresh\n`, new Set(['keep'])).map((a) => `${a.commit}:${a.line}:${a.row}`).join() === 'c1:4:fresh'
@@ -410,4 +410,4 @@ console.log('\n⑧ B-ecc4 part 1: THE ALLOW-ROW CENSUS — no commit of a range 
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

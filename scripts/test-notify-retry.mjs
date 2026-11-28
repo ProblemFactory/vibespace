@@ -28,7 +28,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -91,7 +91,7 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   ok(r.ok === true && r.phase === 'written' && !r.reason, '(a) a socket that swallows: ok, phase written, settled by the flush + a short grace, never the 2 s timer', JSON.stringify(r) + ' ' + dt + ' ms');
   await sleep(20);
   ok(frames.length === 2 && frames[0].type === 'auth' && frames[1].type === 'user' && frames[1].message.content === 'job done', '(a) …both frames intact, in order');
-  ok(Number.isFinite(r.elapsedMs) && r.elapsedMs >= 0, '(a) …the result carries elapsedMs');
+  ok(gateOf(Number.isFinite(r.elapsedMs)) && r.elapsedMs >= 0, '(a) …the result carries elapsedMs');
   s.close();
 }
 {
@@ -117,7 +117,7 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   // (d) nobody listens on the path the registry names: refused at once, NOT transient (the CLI is gone or re-bound)
   const dead = path.join(dir, 'dead.sock'); fs.writeFileSync(dead, ''); // a plain file where a socket should be
   const r = await PM.postToPeer({ socketPath: dead, key: null }, 'x', { timeoutMs: 500 });
-  ok(r.ok === false && r.phase === 'connect' && r.transient === false && /socket error/.test(r.reason), '(d) a dead path: refused, phase connect, transient false', JSON.stringify(r));
+  ok(r.ok === false && r.phase === 'connect' && r.transient === false && verdictOf(/socket error/.test(r.reason)), '(d) a dead path: refused, phase connect, transient false', JSON.stringify(r));
   const r2 = await PM.postToPeer({ socketPath: path.join(dir, 'absent.sock'), key: null }, 'x', { timeoutMs: 500 });
   ok(r2.ok === false && r2.transient === false && r2.code === 'ENOENT', '(d) an absent path: ENOENT, transient false', JSON.stringify(r2));
 }
@@ -191,7 +191,7 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   ok(fixed.ok === true, `(f) CONTROL: the fixed 4 MB frame over a peer that takes 6 MB is delivered (${fixed.phase}) — the leg as it was is red where the buffers are larger (red)`, JSON.stringify(fixed));
   // B-7f97 cure (主开发 09:15Z, three readers): the machine the skip exists for skips HERE too — never a red on its buffers
   if (!mb.err && !mb.stalled) skip(`(f) CONTROL — a peer that reads 6 MB here took ${MB(CAP + BIG)} MB without a stall: no sized frame can stall the write on this machine`);
-  else ok(mb.stalled && mb.took >= BIG && !!sized && sized.ok === false && sized.reason === 'timeout' && sized.phase === 'write', `(f) CONTROL: …and the frame sized by the measurement there (${MB(2 * mb.took + (1 << 20))} MB over the ${MB(mb.took)} MB that peer takes) still times out in the write phase`, JSON.stringify({ mb, sized }));
+  else ok(gateOf(mb.stalled) && mb.took >= BIG && !!sized && sized.ok === false && sized.reason === 'timeout' && sized.phase === 'write', `(f) CONTROL: …and the frame sized by the measurement there (${MB(2 * mb.took + (1 << 20))} MB over the ${MB(mb.took)} MB that peer takes) still times out in the write phase`, JSON.stringify({ mb, sized }));
 }
 {
   // (g) the frame flushed, then the peer RESETS: the frame is in the kernel — never a failure, the reset NAMED
@@ -211,7 +211,7 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   stall(160);
   const r = await p;
   ok(r.ok === false && r.reason === 'timeout', 'CONTROL: the pre-fix primitive reports the stalled-loop post as a timeout (the incident)', JSON.stringify(r));
-  ok(!/transient/.test(pre) && /transient/.test(src), 'CONTROL: the pre-fix copy classifies nothing as transient');
+  ok(!/transient/.test(pre) && verdictOf(/transient/.test(src)), 'CONTROL: the pre-fix copy classifies nothing as transient');
   s.close();
 }
 
@@ -258,17 +258,17 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   ok(r.phase === 'connect' && r.busy === true && Number(r.retryAt) === R.now() + 30_000, '(a) …the answer carries the phase, the target\'s turn state (busy) and the next attempt (+30 s)', JSON.stringify(r));
   ok(R.deliver.retryCount(R.cid) === 1 && R.deliver.stashCount(R.cid) === 0, '(a) …one parked entry, nothing in the stash');
   ok(R.authorized.length === 1 && R.ledger.length === 0 && R.releases.length === 0, '(a) …authorized ONCE, the hold kept on the parked entry (not charged, not released)', JSON.stringify({ a: R.authorized, l: R.ledger, r: R.releases }));
-  ok(/parked for retry/.test(R.logs.join('\n')) && /phase connect/.test(R.logs.join('\n')) && /mid-turn: yes/.test(R.logs.join('\n')), '(a) …the journal line names the phase and whether the target was mid-turn', R.logs.join(' | '));
+  ok(gateOf(/parked for retry/.test(R.logs.join('\n'))) && gateOf(/phase connect/.test(R.logs.join('\n'))) && verdictOf(/mid-turn: yes/.test(R.logs.join('\n'))), '(a) …the journal line names the phase and whether the target was mid-turn', R.logs.join(' | '));
   const parsed = JSON.parse(fs.readFileSync(path.join(R.dir, 'msg-retry.json'), 'utf-8'));
-  ok(parsed[R.cid] && parsed[R.cid].length === 1 && parsed[R.cid][0].text.includes('dc-watch finished'), '(a) …the parked entry is on disk at once');
+  ok(gateOf(parsed[R.cid]) && parsed[R.cid].length === 1 && verdictOf(parsed[R.cid][0].text.includes('dc-watch finished')), '(a) …the parked entry is on disk at once');
   // the turn ends; the CLI now takes the frame
   R.session._isStreaming = false;
   R.setAnswer(async () => ({ ok: true, phase: 'written', elapsedMs: 160 }));
   await R.deliver.noteTurnEnd(R.session);
-  ok(R.posts.length === 1 && R.posts[0].includes('dc-watch finished'), '(a) the turn end posts the SAME text once', JSON.stringify(R.posts));
+  ok(R.posts.length === 1 && verdictOf(R.posts[0].includes('dc-watch finished')), '(a) the turn end posts the SAME text once', JSON.stringify(R.posts));
   ok(R.ledger.length === 1 && R.ledger[0].reason === 'job-notification' && R.ledger[0].hold === 'h1' && R.authorized.length === 1 && R.releases.length === 0, '(a) …ONE wake billed: the original hold converted, no second authorization, nothing released', JSON.stringify({ l: R.ledger, a: R.authorized, r: R.releases }));
   ok(R.cards.length === 1 && R.cards[0].kind === 'notification' && R.deliver.retryCount(R.cid) === 0, '(a) …the card drawn once, the park empty');
-  ok(R.events.some((e) => e.ev === 'parked') && R.events.some((e) => e.ev === 'delivered' && e.extra.lane === 'message' && e.extra.attempts === 2), '(a) …the producer heard parked then delivered (attempts 2)', JSON.stringify(R.events));
+  ok(gateOf(R.events.some((e) => e.ev === 'parked')) && verdictOf(R.events.some((e) => e.ev === 'delivered' && e.extra.lane === 'message' && e.extra.attempts === 2)), '(a) …the producer heard parked then delivered (attempts 2)', JSON.stringify(R.events));
   ok(!fs.existsSync(path.join(R.dir, 'msg-retry.json')) || Object.keys(JSON.parse(fs.readFileSync(path.join(R.dir, 'msg-retry.json'), 'utf-8'))).length === 0, '(a) …the file is empty again');
   await R.deliver.noteTurnEnd(R.session);
   ok(R.posts.length === 1, '(a) a second turn end posts nothing (never twice)');
@@ -302,10 +302,10 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   await R.advance(61 * 60 * 1000);
   const mins = ats.map((ms) => +(ms / 60000).toFixed(2));
   ok(JSON.stringify(mins.slice(0, 5)) === JSON.stringify([0.5, 1.5, 3.5, 8.5, 18.5]), '(d) the steps: +30 s, +1, +2, +5, +10 min from the first miss', JSON.stringify(mins));
-  ok(mins.every((m) => m <= 60) && mins.length >= 8 && mins.length <= 10 && mins[mins.length - 1] >= 50, '(d) …then every 10 min, nothing past 60 min (' + mins.length + ' retries)', JSON.stringify(mins));
+  ok(gateOf(mins.every((m) => m <= 60)) && mins.length >= 8 && mins.length <= 10 && mins[mins.length - 1] >= 50, '(d) …then every 10 min, nothing past 60 min (' + mins.length + ' retries)', JSON.stringify(mins));
   const fell = R.events.find((e) => e.ev === 'fell');
-  ok(fell && fell.extra.kind === 'not-reachable' && fell.extra.attempts === mins.length + 1 && /did not accept/.test(fell.extra.reason), '(d) …falls as not-reachable naming the attempts', JSON.stringify({ extra: fell && fell.extra, mins: mins.length, events: R.events.map((e) => e.ev + ':' + (e.extra.why || e.extra.kind || '')).join(',') }));
-  ok(R.deliver.retryCount(R.cid) === 0 && R.deliver.stashCount(R.cid) === 1 && R.deliver.stashPeek(R.cid)[0].held && R.deliver.stashPeek(R.cid)[0].held.kind === 'not-reachable', '(d) …nobody took it ⇒ the ladder\'s own stash holds it with `held` typed', JSON.stringify({ n: R.deliver.retryCount(R.cid), s: R.deliver.stashPeek(R.cid), logs: R.logs.slice(-3) }));
+  ok(gateOf(fell) && fell.extra.kind === 'not-reachable' && fell.extra.attempts === mins.length + 1 && verdictOf(/did not accept/.test(fell.extra.reason)), '(d) …falls as not-reachable naming the attempts', JSON.stringify({ extra: fell && fell.extra, mins: mins.length, events: R.events.map((e) => e.ev + ':' + (e.extra.why || e.extra.kind || '')).join(',') }));
+  ok(R.deliver.retryCount(R.cid) === 0 && R.deliver.stashCount(R.cid) === 1 && gateOf(R.deliver.stashPeek(R.cid)[0].held) && R.deliver.stashPeek(R.cid)[0].held.kind === 'not-reachable', '(d) …nobody took it ⇒ the ladder\'s own stash holds it with `held` typed', JSON.stringify({ n: R.deliver.retryCount(R.cid), s: R.deliver.stashPeek(R.cid), logs: R.logs.slice(-3) }));
   ok(R.releases.length === R.authorized.length && R.releases[0] === 'h1' && new Set(R.releases).size === R.releases.length, '(d) every hold was given back exactly once (the first before the attempt past its 3-min TTL, each re-judged one when its next attempt would outlive the TTL) — none leaked, none charged', JSON.stringify(R.releases));
   const after = R.authorized.length - 1;
   ok(after >= mins.length - 2 && after <= mins.length && R.ledger.length === 0, '(d) …every attempt past the TTL re-judged (asked again, ' + after + ' times), no charge ever', JSON.stringify({ a: R.authorized.length, l: R.ledger }));
@@ -324,14 +324,14 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   const R2 = rig('restart2', { dataDir: R.dir });
   ok(r2nd.parked === true && R2.deliver.retryCount(R.cid) === 2 && R2.deliver.retryPeek(R.cid)[0].id === raw[R.cid][0].id, '(e) a second server over the same dir finds both parked entries');
   ok(R2.deliver.retryPeek(R.cid)[0].charged.hold === null && !R2.deliver.retryPeek(R.cid)[1].inflight && R2.deliver.retryPeek(R.cid)[1].maybeDelivered === true && R2.deliver.retryEntries(R.cid).length === 1, '(e) …holds forgotten; the in-flight one is marked may-have-landed and is not listed as waiting');
-  ok(R2.logs.some((l) => /was being posted when the previous server stopped — its frame may have landed, so it is handed to the stash/.test(l)), '(e) …and the boot says so by id', R2.logs.join(' | '));
+  ok(verdictOf(R2.logs.some((l) => /was being posted when the previous server stopped — its frame may have landed, so it is handed to the stash/.test(l))), '(e) …and the boot says so by id', R2.logs.join(' | '));
   R2.setAnswer(async () => ({ ok: true, phase: 'written' }));
   R2.session.claudeSessionId = R.cid; R2.session.backendSessionId = R.cid;
   fs.writeFileSync(path.join(R2.reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: R.cid, messagingSocketPath: R2.sockPath, name: 'Owner' }));
   await R2.advance(31 * 1000);
   ok(R2.posts.length === 1 && !/the one in flight/.test(R2.posts[0]) && R2.authorized.length === 1 && R2.ledger.length === 1 && R2.deliver.retryCount(R.cid) === 0, '(e) …the timer posts the waiting one once (re-authorized ONCE, charged ONCE) and never the in-flight one', JSON.stringify({ p: R2.posts.length, a: R2.authorized, l: R2.ledger }));
   const fellE = R2.events.find((e) => e.ev === 'fell');
-  ok(fellE && fellE.extra.kind === 'not-reachable' && fellE.extra.maybeDelivered === true && R2.deliver.stashCount(R.cid) === 1 && R2.deliver.stashPeek(R.cid)[0].held.maybeDelivered === true && /the one in flight/.test(R2.deliver.stashPeek(R.cid)[0].text), '(e) …the in-flight one fell to the stash typed not-reachable + maybeDelivered (the next prompt carries it free)', JSON.stringify({ fell: fellE && fellE.extra, stash: R2.deliver.stashPeek(R.cid) }));
+  ok(gateOf(fellE) && fellE.extra.kind === 'not-reachable' && fellE.extra.maybeDelivered === true && R2.deliver.stashCount(R.cid) === 1 && R2.deliver.stashPeek(R.cid)[0].held.maybeDelivered === true && verdictOf(/the one in flight/.test(R2.deliver.stashPeek(R.cid)[0].text)), '(e) …the in-flight one fell to the stash typed not-reachable + maybeDelivered (the next prompt carries it free)', JSON.stringify({ fell: fellE && fellE.extra, stash: R2.deliver.stashPeek(R.cid) }));
   // (e2) A HAND-OVER'S CLAIM ACROSS A RESTART (verify r2, reproduced): a park entry stamped `ho:<id>` when the previous
   // server died inside the hand-over's post was never posted (the timer, the turn end, the bound and the hand-over's view all
   // skip a claimed one) and never fell — a silent loss counted as "being retried" for ever. It is handed to the stash at the
@@ -344,12 +344,12 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   const RH2 = rig('ho-restart2', { dataDir: RH.dir });
   RH2.session.claudeSessionId = RH.cid; RH2.session.backendSessionId = RH.cid;
   fs.writeFileSync(path.join(RH2.reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: RH.cid, messagingSocketPath: RH2.sockPath, name: 'Owner' }));
-  ok(RH2.logs.some((l) => /was claimed by hand-over ho-dead-1 when the previous server stopped — its frame may have landed/.test(l)), '(e2) the boot names the claimed entry and its hand-over', RH2.logs.join(' | '));
+  ok(verdictOf(RH2.logs.some((l) => /was claimed by hand-over ho-dead-1 when the previous server stopped — its frame may have landed/.test(l))), '(e2) the boot names the claimed entry and its hand-over', RH2.logs.join(' | '));
   ok(RH2.deliver.retryPeek(RH.cid).length === 1 && !RH2.deliver.retryPeek(RH.cid)[0].ho && RH2.deliver.retryPeek(RH.cid)[0].maybeDelivered === true && RH2.deliver.retryEntries(RH.cid).length === 0, '(e2) …the claim is gone, the entry is may-have-landed and listed to nobody');
   RH2.setAnswer(async () => ({ ok: true, phase: 'written' }));
   RH2.session._isStreaming = false;
   await RH2.advance(1000);
-  ok(RH2.posts.length === 0 && RH2.deliver.retryCount(RH.cid) === 0 && RH2.deliver.stashCount(RH.cid) === 1 && RH2.deliver.stashPeek(RH.cid)[0].held.maybeDelivered === true && RH2.events.some((e) => e.ev === 'fell' && e.extra.maybeDelivered === true), '(e2) …the first sweep hands it to the stash (never posted by the park), the producer told', JSON.stringify({ p: RH2.posts.length, stash: RH2.deliver.stashPeek(RH.cid).map((e) => e.held) }));
+  ok(RH2.posts.length === 0 && RH2.deliver.retryCount(RH.cid) === 0 && RH2.deliver.stashCount(RH.cid) === 1 && RH2.deliver.stashPeek(RH.cid)[0].held.maybeDelivered === true && verdictOf(RH2.events.some((e) => e.ev === 'fell' && e.extra.maybeDelivered === true)), '(e2) …the first sweep hands it to the stash (never posted by the park), the producer told', JSON.stringify({ p: RH2.posts.length, stash: RH2.deliver.stashPeek(RH.cid).map((e) => e.held) }));
   await RH2.deliver.noteTurnEnd(RH2.session); await RH2.advance(3 * 3600 * 1000);
   ok(RH2.posts.length === 0 && RH2.deliver.retryCount(RH.cid) === 0, '(e2) …and nothing later posts it');
   // the graceful stop: the door shuts, the post in flight is waited for, nothing new leaves
@@ -372,7 +372,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   // clears the stamp on disk
   const ES = require(path.join(REPO, 'src/server/exit-settle.js'));
   ok(PM.POST_BOUND_MS === 5000 + 1000 + 150 && ES.SETTLE_MS > PM.POST_BOUND_MS && ES.SETTLE_MS < 30 * 1000, '(e3) the exit settle\'s default covers the primitive\'s bound (timer + write grace + flush grace) and stays far under systemd\'s stop timeout', JSON.stringify({ bound: PM.POST_BOUND_MS, settle: ES.SETTLE_MS }));
-  ok(/settleInFlight\(\{ stashView, deliver, n, m \}\)/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8')), '(e3) server.js takes the exit settle\'s default (no shorter deadline of its own)');
+  ok(verdictOf(/settleInFlight\(\{ stashView, deliver, n, m \}\)/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8'))), '(e3) server.js takes the exit settle\'s default (no shorter deadline of its own)');
   const R4 = rig('settle-bound');
   await NOTIFY(R4);
   // r4965: THE POST IS HELD BY THE LEG — its answer comes only when the leg releases it (a placed hold), never after a 1.2 s timer of the
@@ -392,7 +392,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   await factWithin(() => !!releasePost && stampOf(), 'the held post asked for and its in-flight stamp on disk');   // (was a 5 ms settle)
   R4.deliver.closeRetries();
   const short = await R4.deliver.settleRetries(50);
-  ok(short === -1 && JSON.parse(fs.readFileSync(path.join(R4.dir, 'msg-retry.json'), 'utf-8'))[R4.cid][0].inflight, '(e3) a deadline shorter than the post reads unsettled while the stamp is still on disk (the pre-fix exit)');
+  ok(short === -1 && verdictOf(JSON.parse(fs.readFileSync(path.join(R4.dir, 'msg-retry.json'), 'utf-8'))[R4.cid][0].inflight), '(e3) a deadline shorter than the post reads unsettled while the stamp is still on disk (the pre-fix exit)');
   const warned = [];
   let exitDone = false;
   const exitSettle = ES.settleInFlight({ stashView: null, deliver: R4.deliver, n: 0, m: 1, log: { log: () => { }, warn: (l) => warned.push(l) } }).then(() => { exitDone = true; });
@@ -403,7 +403,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   const atExit = { posts: R4.posts.length, stamp: !!JSON.parse(fs.readFileSync(path.join(R4.dir, 'msg-retry.json'), 'utf-8'))[R4.cid] };   // the exit's wait alone
   await p4;
   clearInterval(keepUp);
-  ok(waitedHeld && atExit.posts === 1 && !atExit.stamp && !warned.length && R4.deliver.retryCount(R4.cid) === 0, '(e3) …the exit\'s own wait outlasts the post: still waiting a turn into the hold, and once it ends the post landed, no warning, the stamp gone from disk', JSON.stringify({ waitedHeld, atExit, warned }));
+  ok(gateOf(waitedHeld) && atExit.posts === 1 && !atExit.stamp && !warned.length && R4.deliver.retryCount(R4.cid) === 0, '(e3) …the exit\'s own wait outlasts the post: still waiting a turn into the hold, and once it ends the post landed, no warning, the stamp gone from disk', JSON.stringify({ waitedHeld, atExit, warned }));
   // (e3)'s RED control (B-3dbd, lane bl-chat-b): a copy of the exit settle that leaves the retry posts out of its wait (anchored); the
   // same held scene finds it done a turn into the hold with the post still unanswered — the verdict above reads it. Judged on its
   // WITNESS (r5135 law 1): the copy's exit ran inside the hold with the plant in force — its own text carries the mark, and it never
@@ -449,14 +449,14 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   await R.advance(4 * 60 * 1000);   // past the TTL: the next attempt must ask again
   ok(R.posts.length === 0 && R.ledger.length === 0 && R.deliver.retryCount(R.cid) === 0, '(f) a throwing authorizer: nothing posted, nothing charged, the park empty');
   const fell = R.events.find((e) => e.ev === 'fell');
-  ok(fell && fell.extra.kind === 'spend-cap' && /authorizer failed/.test(fell.extra.reason), '(f) …fell as spend-cap naming the failure', JSON.stringify(fell && fell.extra));
+  ok(gateOf(fell) && fell.extra.kind === 'spend-cap' && verdictOf(/authorizer failed/.test(fell.extra.reason)), '(f) …fell as spend-cap naming the failure', JSON.stringify(fell && fell.extra));
   // a REFUSAL at the re-judge: the same fall, typed with the ceiling's why
   const R2 = rig('refused');
   await NOTIFY(R2);
   R2.setRefuse('hour-cap');
   await R2.advance(4 * 60 * 1000);
   const f2 = R2.events.find((e) => e.ev === 'fell');
-  ok(f2 && f2.extra.kind === 'spend-cap' && f2.extra.why === 'hour-cap' && f2.extra.identity === 'Work' && f2.extra.cap === 30 && R2.posts.length === 0, '(f) a refused re-judge falls as spend-cap with why / identity / cap', JSON.stringify(f2 && f2.extra));
+  ok(gateOf(f2) && f2.extra.kind === 'spend-cap' && f2.extra.why === 'hour-cap' && f2.extra.identity === 'Work' && f2.extra.cap === 30 && R2.posts.length === 0, '(f) a refused re-judge falls as spend-cap with why / identity / cap', JSON.stringify(f2 && f2.extra));
 }
 {
   // (g) THE FLOOR: a successful post 5 s ago ⇒ a turn-end attempt is rescheduled to the floor, not posted
@@ -478,14 +478,14 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   const R = rig('take');
   await NOTIFY(R);
   const views = R.deliver.retryEntries(R.cid);
-  ok(views.length === 1 && views[0].source === 'retry' && views[0].kind === 'notification' && views[0].held.kind === 'retrying' && views[0].held.nextAt === R.now() + 30_000 && views[0].text.includes('dc-watch'), '(h) retryEntries = the stash shape with held.kind retrying + nextAt', JSON.stringify(views[0]));
+  ok(views.length === 1 && views[0].source === 'retry' && views[0].kind === 'notification' && views[0].held.kind === 'retrying' && views[0].held.nextAt === R.now() + 30_000 && verdictOf(views[0].text.includes('dc-watch')), '(h) retryEntries = the stash shape with held.kind retrying + nextAt', JSON.stringify(views[0]));
   const release = R.deliver.claimRetry(R.cid, views, 'ho-1');
   await R.advance(31 * 1000);
   ok(R.posts.length === 0 && R.deliver.retryCount(R.cid) === 1, '(h) a claimed entry is skipped by the timer');
   release();
   const took = R.deliver.retryTake(R.cid, new Set(views), { via: 'hand-over', lane: 'message' });
   ok(took.length === 1 && R.deliver.retryCount(R.cid) === 0 && R.releases.length === 1 && R.ledger.length === 0, '(h) the take empties the park and gives the hold back (the hand-over bills its own turn)');
-  ok(R.events.some((e) => e.ev === 'delivered' && e.extra.via === 'hand-over'), '(h) …the producer hears delivered via hand-over');
+  ok(verdictOf(R.events.some((e) => e.ev === 'delivered' && e.extra.via === 'hand-over')), '(h) …the producer hears delivered via hand-over');
 }
 {
   // (i) a post IN FLIGHT when the turn ends is not posted twice; a delivered-but-slow socket is never re-posted
@@ -542,10 +542,10 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   await R.deliver.noteTurnEnd(R.session);
   await R.advance(5 * 60 * 1000);
   ok(R.posts.length === 1 && R.ledger.length === 1 && R.ledger[0].hold === 'h1' && R.releases.length === 4 && R.deliver.retryCount(R.cid) === 0, '(l) the turn end posts ONE frame, ONE charge (the oldest hold converted, the other four given back), the park empty', JSON.stringify({ p: R.posts.length, l: R.ledger, rel: R.releases }));
-  ok([1, 2, 3, 4, 5].every((i) => R.posts[0].includes(`job-${i} finished`)) && /5 notice\(s\) VibeSpace could not deliver earlier/.test(R.posts[0]) && R.posts[0].startsWith('VibeSpace (this workspace, not another agent) reports:'), '(l) …the frame carries all five under the ONE head', R.posts[0].slice(0, 160));
-  ok(R.events.filter((e) => e.ev === 'delivered').length === 5 && R.events.filter((e) => e.ev === 'delivered').every((e) => e.extra.frame === 5 && e.extra.via === 'message'), '(l) …every producer hears delivered (frame 5)');
-  ok(R.cards.length === 1 && R.cards[0].fromName === 'VibeSpace notices' && R.cards[0].recorded === R.posts[0] && /^5 waiting notice\(s\) handed over — their delivery was being retried — delivered now/.test(R.cards[0].text), '(l) …ONE card in the hand-over\'s shape, recorded = the frame', R.cards[0] && R.cards[0].text.split('\n')[0]);
-  ok(R.logs.some((l) => /5 notices in ONE frame/.test(l)), '(l) …the journal says so');
+  ok(gateOf([1, 2, 3, 4, 5].every((i) => R.posts[0].includes(`job-${i} finished`))) && gateOf(/5 notice\(s\) VibeSpace could not deliver earlier/.test(R.posts[0])) && verdictOf(R.posts[0].startsWith('VibeSpace (this workspace, not another agent) reports:')), '(l) …the frame carries all five under the ONE head', R.posts[0].slice(0, 160));
+  ok(R.events.filter((e) => e.ev === 'delivered').length === 5 && verdictOf(R.events.filter((e) => e.ev === 'delivered').every((e) => e.extra.frame === 5 && e.extra.via === 'message')), '(l) …every producer hears delivered (frame 5)');
+  ok(R.cards.length === 1 && R.cards[0].fromName === 'VibeSpace notices' && R.cards[0].recorded === R.posts[0] && verdictOf(/^5 waiting notice\(s\) handed over — their delivery was being retried — delivered now/.test(R.cards[0].text)), '(l) …ONE card in the hand-over\'s shape, recorded = the frame', R.cards[0] && R.cards[0].text.split('\n')[0]);
+  ok(verdictOf(R.logs.some((l) => /5 notices in ONE frame/.test(l))), '(l) …the journal says so');
   // the renderer injected (server.js wires agent-routes' renderMsgStash): the hand-over's lines, the bound honoured
   const R2 = rig('batch-render');
   R2.deliver = CD.create({ dataDir: R2.dir, activeSessions: R2.sessions, serverSetting: () => undefined, peerMsg: { findPeer: (c) => PM.findPeer(c, R2.reg), postToPeer: async (p, text) => { R2.posts.push(text); return { ok: true, phase: 'written' }; }, postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: (c, card) => R2.cards.push(card), log: () => { }, retryClock: R2.clock, renderBatch: ARl.renderMsgStash });
@@ -563,9 +563,9 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   await R3.deliver.noteTurnEnd(R3.session);
   // verify r2 (re-pinned deliberately): the park's frame keeps the OLDEST — rt-40 … rt-11 by firstAt — and the 10 NEWEST
   // stay for the next frame (a hand-over keeps the newest; the park's entries expire and the oldest are nearest the bound)
-  ok(posts3.length === 1 && /### Notices VibeSpace could not deliver at once/.test(posts3[0]) && !/unreachable/.test(posts3[0]) && (posts3[0].match(/^- \[/gm) || []).length === 30 && /\(10 newer message\(s\) follow in the next message\)/.test(posts3[0]) && R3.deliver.retryCount(R2.cid) === 10 && R3.deliver.retryPeek(R2.cid).every((e) => Number(e.id.slice(3)) <= 10) && posts3[0].indexOf('job-40 finished') < posts3[0].indexOf('job-11 finished'), '(l) the first frame carries the 30 OLDEST in time order under the park\'s own heading, the 10 newest stay parked and the frame says so', JSON.stringify({ p: posts3.length, left: R3.deliver.retryPeek(R2.cid).map((e) => e.id), lines: (posts3[0] || '').match(/^- \[/gm)?.length }));
+  ok(posts3.length === 1 && gateOf(/### Notices VibeSpace could not deliver at once/.test(posts3[0])) && !/unreachable/.test(posts3[0]) && (posts3[0].match(/^- \[/gm) || []).length === 30 && gateOf(/\(10 newer message\(s\) follow in the next message\)/.test(posts3[0])) && R3.deliver.retryCount(R2.cid) === 10 && gateOf(R3.deliver.retryPeek(R2.cid).every((e) => Number(e.id.slice(3)) <= 10)) && posts3[0].indexOf('job-40 finished') < posts3[0].indexOf('job-11 finished'), '(l) the first frame carries the 30 OLDEST in time order under the park\'s own heading, the 10 newest stay parked and the frame says so', JSON.stringify({ p: posts3.length, left: R3.deliver.retryPeek(R2.cid).map((e) => e.id), lines: (posts3[0] || '').match(/^- \[/gm)?.length }));
   await R3.advance(31 * 1000);
-  ok(posts3.length === 2 && R3.deliver.retryCount(R2.cid) === 0 && [1, 10].every((i) => posts3[1].includes(`job-${i} finished`)), '(l) …the next frame after the floor carries the rest (the newest)');
+  ok(posts3.length === 2 && R3.deliver.retryCount(R2.cid) === 0 && verdictOf([1, 10].every((i) => posts3[1].includes(`job-${i} finished`))), '(l) …the next frame after the floor carries the rest (the newest)');
   // (l2) THE CUT VS THE BOUND (verify r2, reproduced on the newest-first frame): 16 notices of ~900 B parked over the last
   // 59 min 40 s, the agent busy throughout; the frame's 12 KiB holds twelve. Oldest-first, the four newest follow 30 s on
   // and nothing expires; newest-first left the oldest four parked and the next frame's bound dropped job-01 to the stash
@@ -598,13 +598,13 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   await R6.advance(1000);
   clearTimeout(guard);
   const q6 = R6.deliver.retryPeek(R5.cid);
-  ok(tries5 === 1 && q6.length === 40 && q6.every((e) => e.nextAt > R6.now() && e.attempts.length >= 1) && new Set(q6.map((e) => e.nextAt)).size === 1, '(l) a failed frame of 40 (bound 30): ONE post, every entry moved to one next instant — the sweep settles (was: a hot loop)', JSON.stringify({ tries: tries5, left: q6.length, nexts: [...new Set(q6.map((e) => e.nextAt - R6.now()))] }));
+  ok(tries5 === 1 && q6.length === 40 && gateOf(q6.every((e) => e.nextAt > R6.now() && e.attempts.length >= 1)) && new Set(q6.map((e) => e.nextAt)).size === 1, '(l) a failed frame of 40 (bound 30): ONE post, every entry moved to one next instant — the sweep settles (was: a hot loop)', JSON.stringify({ tries: tries5, left: q6.length, nexts: [...new Set(q6.map((e) => e.nextAt - R6.now()))] }));
   // a FAILED frame: every entry gets the attempt, one shared next instant (the most eager step), nothing charged
   const R4 = rig('batch-fail');
   for (let i = 1; i <= 3; i++) await R4.deliver.deliverToConversation(R4.cid, `n-${i}`, { kind: 'notification', spendReason: 'job-notification', retry: { producer: 'test', meta: { jobId: 'jb-' + i } } });
   await R4.advance(30_000);
   const q4 = R4.deliver.retryPeek(R4.cid);
-  ok(q4.length === 3 && q4.every((e) => e.attempts.length === 2 && e.nextAt === q4[0].nextAt) && q4[0].nextAt === R4.now() + 60_000 && R4.ledger.length === 0 && R4.posts.length === 0, '(l) a failed frame: three entries, each with the attempt, one shared next instant (+1 min), nothing charged', JSON.stringify(q4.map((e) => [e.attempts.length, e.nextAt - R4.now()])));
+  ok(q4.length === 3 && gateOf(q4.every((e) => e.attempts.length === 2 && e.nextAt === q4[0].nextAt)) && q4[0].nextAt === R4.now() + 60_000 && R4.ledger.length === 0 && R4.posts.length === 0, '(l) a failed frame: three entries, each with the attempt, one shared next instant (+1 min), nothing charged', JSON.stringify(q4.map((e) => [e.attempts.length, e.nextAt - R4.now()])));
 }
 {
   // (m) verify r1 N1e (reproduced: 100 parks = 100 entries, no cap): the park holds STASH_CAP (30) per conversation; the
@@ -612,8 +612,8 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   const R = rig('cap');
   for (let i = 1; i <= 31; i++) await R.deliver.deliverToConversation(R.cid, `n-${i}`, { kind: 'notification', spendReason: 'job-notification', retry: { producer: 'test', meta: { jobId: 'jb-' + i } } });
   const fell = R.events.filter((e) => e.ev === 'fell');
-  ok(R.deliver.RETRY_CAP === 30 && R.deliver.retryCount(R.cid) === 30 && fell.length === 1 && fell[0].extra.evicted === true && fell[0].extra.kind === 'not-reachable' && /n-1$/.test(R.deliver.stashPeek(R.cid)[0].text) && R.deliver.stashPeek(R.cid)[0].held.kind === 'not-reachable', '(m) the 31st park evicts the OLDEST into the stash, typed not-reachable, evicted said', JSON.stringify({ n: R.deliver.retryCount(R.cid), fell: fell.map((f) => f.extra), stash: R.deliver.stashPeek(R.cid).map((e) => e.text) }));
-  ok(R.releases.length === 1 && R.ledger.length === 0 && R.logs.some((l) => /holds 30 waiting per conversation — rt-.* \(the oldest waiting, parked \d+ s ago\) falls to the stash, evicted/.test(l)), '(m) …its hold given back, nothing charged, the journal names it with its age');
+  ok(R.deliver.RETRY_CAP === 30 && R.deliver.retryCount(R.cid) === 30 && fell.length === 1 && fell[0].extra.evicted === true && fell[0].extra.kind === 'not-reachable' && gateOf(/n-1$/.test(R.deliver.stashPeek(R.cid)[0].text)) && R.deliver.stashPeek(R.cid)[0].held.kind === 'not-reachable', '(m) the 31st park evicts the OLDEST into the stash, typed not-reachable, evicted said', JSON.stringify({ n: R.deliver.retryCount(R.cid), fell: fell.map((f) => f.extra), stash: R.deliver.stashPeek(R.cid).map((e) => e.text) }));
+  ok(R.releases.length === 1 && R.ledger.length === 0 && verdictOf(R.logs.some((l) => /holds 30 waiting per conversation — rt-.* \(the oldest waiting, parked \d+ s ago\) falls to the stash, evicted/.test(l))), '(m) …its hold given back, nothing charged, the journal names it with its age');
   // (m2) THE CAP COUNTS WHAT WAITS (verify r2, reproduced): thirty on the wire in ONE frame, a thirty-first park arrives — it
   // was the only waiting entry, evicted at once and called "the oldest"; the frame landed a second later. Now it waits
   // beside the frame and rides the next one after the floor; thirty-one WAITING still evicts the oldest waiting
@@ -632,7 +632,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   releaseW(); await teW;
   ok(RW.posts.length === 1 && RW.deliver.retryCount(RW.cid) === 1 && RW.deliver.retryPeek(RW.cid)[0].id === r31.id, '(m2) …the frame lands, the thirty-first is the park\'s only entry');
   await RW.advance(31 * 1000);
-  ok(RW.posts.length === 2 && /n-31/.test(RW.posts[1]) && RW.deliver.retryCount(RW.cid) === 0, '(m2) …and it rides the next frame after the floor (never the stash)');
+  ok(RW.posts.length === 2 && gateOf(/n-31/.test(RW.posts[1])) && RW.deliver.retryCount(RW.cid) === 0, '(m2) …and it rides the next frame after the floor (never the stash)');
   // a hand-over's claim is spoken for the same way: thirty claimed + a park ⇒ nothing falls; the thirty-first WAITING falls
   const RC = rig('cap-claim');
   for (let i = 1; i <= 30; i++) { await RC.deliver.deliverToConversation(RC.cid, 'c-' + i, { kind: 'notification', spendReason: 'job-notification', retry: { producer: 'test', meta: { jobId: 'jb-' + i } } }); }
@@ -642,7 +642,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   relC();
   await RC.deliver.deliverToConversation(RC.cid, 'c-32', { kind: 'notification', spendReason: 'job-notification', retry: { producer: 'test', meta: { jobId: 'jb-32' } } });
   const fellC = RC.events.filter((e) => e.ev === 'fell');
-  ok(RC.deliver.retryCount(RC.cid) === 30 && fellC.length === 2 && /c-1$/.test(RC.deliver.stashPeek(RC.cid)[0].text) && /c-2$/.test(RC.deliver.stashPeek(RC.cid)[1].text) && RC.logs.some((l) => /the oldest waiting/.test(l)), '(m2) …released, the next park evicts the two oldest WAITING (c-1, c-2), named', JSON.stringify({ n: RC.deliver.retryCount(RC.cid), stash: RC.deliver.stashPeek(RC.cid).map((e) => e.text) }));
+  ok(RC.deliver.retryCount(RC.cid) === 30 && fellC.length === 2 && gateOf(/c-1$/.test(RC.deliver.stashPeek(RC.cid)[0].text)) && gateOf(/c-2$/.test(RC.deliver.stashPeek(RC.cid)[1].text)) && verdictOf(RC.logs.some((l) => /the oldest waiting/.test(l))), '(m2) …released, the next park evicts the two oldest WAITING (c-1, c-2), named', JSON.stringify({ n: RC.deliver.retryCount(RC.cid), stash: RC.deliver.stashPeek(RC.cid).map((e) => e.text) }));
   // the REAL jobs engine books the eviction in its own store (the fall is the producer's)
   const { JobManager: JMm } = require(path.join(REPO, 'src/jobs.js'));
   const RJ = (() => { const R0 = rig('cap-jobs'); const jm = new JMm({ dataDir: R0.dir, log: (...a) => R0.logs.push(a.join(' ')), broadcast: () => { }, notifyUser: () => { }, onStash: () => { }, deliverToConversation: (cid, text, opts) => R0.deliver.deliverToConversation(cid, text, opts), onRetry: (fn) => R0.deliver.onRetry(fn), peerReachable: (cid) => R0.deliver.peerReachable(cid) }); const job = { id: 'jb-aaaa1111', kind: 'task', name: 'dc-discussion-watch', state: 'done', owner: { conversation: { id: R0.cid } }, access: { view: 'all', control: 'session' }, runs: [] }; jm.jobs.set(job.id, job); return { ...R0, jm, job }; })();
@@ -666,7 +666,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   R2.setAnswer(async () => ({ ok: true, phase: 'written' }));
   await R2.advance(1000);
   const fell = R2.events.find((e) => e.ev === 'fell');
-  ok(R2.posts.length === 0 && R2.ledger.length === 0 && R2.authorized.length === 0 && R2.deliver.retryCount(R.cid) === 0 && fell && fell.extra.kind === 'not-reachable' && fell.extra.expired === true && /60 min bound passed 120 min after the first miss \(1 attempt\)/.test(fell.extra.reason) && R2.deliver.stashCount(R.cid) === 1, '(n) at boot an entry past the bound is not posted, not authorized: it falls to the stash as not-reachable, expired, the age named', JSON.stringify({ p: R2.posts.length, fell: fell && fell.extra, stash: R2.deliver.stashCount(R.cid) }));
+  ok(R2.posts.length === 0 && R2.ledger.length === 0 && R2.authorized.length === 0 && R2.deliver.retryCount(R.cid) === 0 && gateOf(fell) && fell.extra.kind === 'not-reachable' && fell.extra.expired === true && gateOf(/60 min bound passed 120 min after the first miss \(1 attempt\)/.test(fell.extra.reason)) && R2.deliver.stashCount(R.cid) === 1, '(n) at boot an entry past the bound is not posted, not authorized: it falls to the stash as not-reachable, expired, the age named', JSON.stringify({ p: R2.posts.length, fell: fell && fell.extra, stash: R2.deliver.stashCount(R.cid) }));
   // the same at a turn end (a late timer is the same path): a fresh entry beside it still goes out
   const R3 = rig('old3');
   await NOTIFY(R3);
@@ -678,7 +678,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   fs.writeFileSync(path.join(R4.reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: R3.cid, messagingSocketPath: R4.sockPath, name: 'Owner' }));
   R4.setAnswer(async () => ({ ok: true, phase: 'written' }));
   await R4.deliver.noteTurnEnd(R4.session);
-  ok(R4.posts.length === 1 && !/stale one/.test(R4.posts[0]) && /dc-watch finished/.test(R4.posts[0]) && R4.deliver.stashCount(R3.cid) === 1 && R4.deliver.retryCount(R3.cid) === 0, '(n) at a turn end the stale one falls and the fresh one goes out alone (never in one frame with a frame nobody should pay for)', JSON.stringify({ p: R4.posts.map((t) => t.slice(-30)), s: R4.deliver.stashCount(R3.cid) }));
+  ok(R4.posts.length === 1 && !/stale one/.test(R4.posts[0]) && gateOf(/dc-watch finished/.test(R4.posts[0])) && R4.deliver.stashCount(R3.cid) === 1 && R4.deliver.retryCount(R3.cid) === 0, '(n) at a turn end the stale one falls and the fresh one goes out alone (never in one frame with a frame nobody should pay for)', JSON.stringify({ p: R4.posts.map((t) => t.slice(-30)), s: R4.deliver.stashCount(R3.cid) }));
 }
 {
   // (o) verify r1 N5 (reproduced: a torn msg-retry.json read as {} without a word and the next park OVERWROTE its bytes):
@@ -689,13 +689,13 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   const R = rig('torn', { dataDir: dir });
   const aside = fs.readdirSync(dir).filter((f) => /^msg-retry\.json\.corrupt-/.test(f));
   ok(aside.length === 1 && fs.readFileSync(path.join(dir, aside[0]), 'utf-8') === torn && !fs.existsSync(path.join(dir, 'msg-retry.json')), '(o) the torn file is set aside with its bytes, the live name freed', JSON.stringify(aside));
-  ok(R.logs.some((l) => /msg-retry\.json could not be read \(.*\) — set aside as msg-retry\.json\.corrupt-.* \(\d+ bytes kept\); the retry park starts empty/.test(l)), '(o) …said once, by name', R.logs.join(' | '));
+  ok(verdictOf(R.logs.some((l) => /msg-retry\.json could not be read \(.*\) — set aside as msg-retry\.json\.corrupt-.* \(\d+ bytes kept\); the retry park starts empty/.test(l))), '(o) …said once, by name', R.logs.join(' | '));
   await NOTIFY(R);
-  ok(fs.existsSync(path.join(dir, 'msg-retry.json')) && fs.readFileSync(path.join(dir, aside[0]), 'utf-8') === torn && R.deliver.retryCount(R.cid) === 1, '(o) …the next park writes a fresh file; the set-aside bytes are untouched');
+  ok(gateOf(fs.existsSync(path.join(dir, 'msg-retry.json'))) && fs.readFileSync(path.join(dir, aside[0]), 'utf-8') === torn && R.deliver.retryCount(R.cid) === 1, '(o) …the next park writes a fresh file; the set-aside bytes are untouched');
   const dir2 = path.join(scratchDir('ntr'), 'torn2'); fs.mkdirSync(dir2, { recursive: true });
   fs.writeFileSync(path.join(dir2, 'msg-retry.json'), '[1,2]');
   const R2 = rig('torn2', { dataDir: dir2 });
-  ok(fs.readdirSync(dir2).some((f) => /corrupt-/.test(f)) && R2.logs.some((l) => /not an object/.test(l)), '(o) a file of the wrong shape is set aside too (not an object)');
+  ok(gateOf(fs.readdirSync(dir2).some((f) => /corrupt-/.test(f))) && verdictOf(R2.logs.some((l) => /not an object/.test(l))), '(o) a file of the wrong shape is set aside too (not an object)');
   const dir3 = path.join(scratchDir('ntr'), 'torn3'); fs.mkdirSync(dir3, { recursive: true });
   const R3 = rig('torn3', { dataDir: dir3 });
   ok(!fs.readdirSync(dir3).some((f) => /corrupt-/.test(f)) && !R3.logs.some((l) => /could not be read/.test(l)), '(o) an absent file is a fresh park, nothing said');
@@ -706,13 +706,13 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   const R = rig('busy-unknown');
   R.session._isStreaming = false;   // a restore's default: no record, no turn state seen
   const r1 = await NOTIFY(R);
-  ok(r1.busy === null && R.logs.some((l) => /target mid-turn: unknown/.test(l)), '(p) a restored session with no turn-state record: busy null, the journal says unknown', JSON.stringify({ busy: r1.busy, line: R.logs.find((l) => /mid-turn/.test(l)) }));
+  ok(r1.busy === null && verdictOf(R.logs.some((l) => /target mid-turn: unknown/.test(l))), '(p) a restored session with no turn-state record: busy null, the journal says unknown', JSON.stringify({ busy: r1.busy, line: R.logs.find((l) => /mid-turn/.test(l)) }));
   const R2 = rig('busy-idle'); R2.session._isStreaming = false; R2.session._turnStateSeen = true;
   const r2 = await NOTIFY(R2);
-  ok(r2.busy === false && R2.logs.some((l) => /target mid-turn: no/.test(l)), '(p) …once the harness has spoken its turn state, idle is "no"');
+  ok(r2.busy === false && verdictOf(R2.logs.some((l) => /target mid-turn: no/.test(l))), '(p) …once the harness has spoken its turn state, idle is "no"');
   const R3 = rig('busy-yes'); R3.session._isStreaming = true;
   const r3 = await NOTIFY(R3);
-  ok(r3.busy === true && R3.logs.some((l) => /target mid-turn: yes/.test(l)), '(p) …a streaming flag is evidence: "yes"');
+  ok(r3.busy === true && verdictOf(R3.logs.some((l) => /target mid-turn: yes/.test(l))), '(p) …a streaming flag is evidence: "yes"');
 }
 {
   // (q) verify r1 N1a: the hold's TTL release fires WHILE the retry post is in flight — the charge was ONE either way
@@ -746,8 +746,8 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   ok(n === 1 && e.text === headed(CLEARED_TEXT) && e.fromName === 'Background Work · ' + CLEARED_TEXT && !e.cardText && JSON.parse(fs.readFileSync(path.join(R.dir, 'msg-retry.json'), 'utf-8'))[R.cid][0].text === headed(CLEARED_TEXT), '(r) a clear rewrites the parked copy (the sentence under the ladder\'s head, the fromName, the card text dropped) and it is on disk', JSON.stringify({ n, e: { text: e.text, fromName: e.fromName } }));
   R.session._isStreaming = false; R.setAnswer(async () => ({ ok: true, phase: 'written' }));
   await R.deliver.noteTurnEnd(R.session);
-  ok(R.posts.length === 1 && R.posts[0].endsWith(CLEARED_TEXT) && !/dc-watch finished/.test(R.posts[0]), '(r) …the retry posts the sentence, never the cleared words', R.posts[0]);
-  ok(R.deliver.retryEntries(R.cid).length === 0 && R.cards[0] && R.cards[0].text === headed(CLEARED_TEXT) && R.cards[0].fromName === 'Background Work · ' + CLEARED_TEXT, '(r) …and the card drawn at landing is the sentence');
+  ok(R.posts.length === 1 && gateOf(R.posts[0].endsWith(CLEARED_TEXT)) && !/dc-watch finished/.test(R.posts[0]), '(r) …the retry posts the sentence, never the cleared words', R.posts[0]);
+  ok(R.deliver.retryEntries(R.cid).length === 0 && gateOf(R.cards[0]) && R.cards[0].text === headed(CLEARED_TEXT) && R.cards[0].fromName === 'Background Work · ' + CLEARED_TEXT, '(r) …and the card drawn at landing is the sentence');
 }
 {
   // (j) THE CENSUS: the park's post site is gated (the same function asks the authorizer above it) — test-spend-paths' rule
@@ -775,13 +775,13 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   R.setAnswer(async () => ({ ok: false, reason: 'timeout', phase: 'connect', transient: true }));
   await R.deliver.noteTurnEnd(R.session);
   const e1 = R.deliver.retryPeek(R.cid)[0];
-  ok(e1 && e1.firstAt <= R.clock.now() && e1.nextAt - R.clock.now() <= R.deliver.RETRY_STEPS_MS[R.deliver.RETRY_STEPS_MS.length - 1] && R.logs.some((l) => /was stamped 12\d min in the future — the clock went back/.test(l)), '(y) the first attempt after the leap re-bases the entry (first miss, next attempt) and says so', JSON.stringify({ firstAhead: e1 && Math.round((e1.firstAt - R.clock.now()) / 60000), nextIn: e1 && Math.round((e1.nextAt - R.clock.now()) / 1000) }));
+  ok(gateOf(e1) && e1.firstAt <= R.clock.now() && e1.nextAt - R.clock.now() <= R.deliver.RETRY_STEPS_MS[R.deliver.RETRY_STEPS_MS.length - 1] && verdictOf(R.logs.some((l) => /was stamped 12\d min in the future — the clock went back/.test(l))), '(y) the first attempt after the leap re-bases the entry (first miss, next attempt) and says so', JSON.stringify({ firstAhead: e1 && Math.round((e1.firstAt - R.clock.now()) / 60000), nextIn: e1 && Math.round((e1.nextAt - R.clock.now()) / 1000) }));
   ok(R.logs.filter((l) => /clock went back/.test(l)).length === 1, '(y) …said once');
   // turn ends every minute with the CLI refusing: the attempt judge ends it before the hour, never for ever
   let fellAt = null;
   for (let i = 0; i < 45 && !fellAt; i++) { shim.off += 60 * 1000; await R.deliver.noteTurnEnd(R.session); if (R.deliver.retryCount(R.cid) === 0) fellAt = i + 1; }
   const fq = R.events.find((e) => e.ev === 'fell');
-  ok(fellAt && fq && fq.extra.kind === 'not-reachable' && fq.extra.expired === true && fq.extra.attempts === R.deliver.RETRY_MAX_ATTEMPTS && /attempt bound/.test(fq.extra.reason) && R.posts.length === 0, `(y) …the attempt bound (${R.deliver.RETRY_MAX_ATTEMPTS}) ends it at turn end ${fellAt}, typed expired, the attempts named`, JSON.stringify({ fellAt, extra: fq && fq.extra }));
+  ok(gateOf(fellAt) && gateOf(fq) && fq.extra.kind === 'not-reachable' && fq.extra.expired === true && fq.extra.attempts === R.deliver.RETRY_MAX_ATTEMPTS && gateOf(/attempt bound/.test(fq.extra.reason)) && R.posts.length === 0, `(y) …the attempt bound (${R.deliver.RETRY_MAX_ATTEMPTS}) ends it at turn end ${fellAt}, typed expired, the attempts named`, JSON.stringify({ fellAt, extra: fq && fq.extra }));
   ok(R.deliver.RETRY_MAX_ATTEMPTS === 30, '(y) the attempt bound is 3× the timer\'s own ten attempts in the hour');
   // (y2) the same leap with NO turn end: the rig's timers sit on its internal clock while the shim steps the wall clock
   // the park reads — libuv's timers are monotonic, so the 30 s timer armed before the step still fires 30 s on; at that
@@ -797,7 +797,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   ok(R2.deliver.retryCount(R2.cid) === 1 && R2.deliver.retryPeek(R2.cid)[0].attempts.length === 2, '(y2) …the next sweep attempts (attempt 2)', JSON.stringify(R2.deliver.retryPeek(R2.cid).map((e) => e.attempts.length)));
   await R2.advance(61 * 60 * 1000);
   const f2 = R2.events.find((e) => e.ev === 'fell');
-  ok(R2.deliver.retryCount(R2.cid) === 0 && f2 && f2.extra.expired === true && f2.extra.attempts < R2.deliver.RETRY_MAX_ATTEMPTS && R2.posts.length === 0, '(y2) …and the wall-time judge expires it within the hour after the re-base (the backoff ran its steps, under the attempt bound)', JSON.stringify({ left: R2.deliver.retryCount(R2.cid), extra: f2 && f2.extra }));
+  ok(R2.deliver.retryCount(R2.cid) === 0 && gateOf(f2) && f2.extra.expired === true && f2.extra.attempts < R2.deliver.RETRY_MAX_ATTEMPTS && R2.posts.length === 0, '(y2) …and the wall-time judge expires it within the hour after the re-base (the backoff ran its steps, under the attempt bound)', JSON.stringify({ left: R2.deliver.retryCount(R2.cid), extra: f2 && f2.extra }));
 }
 {
   // (z) "CLEAR CONTENT…" WHILE THE POST IS ON THE WIRE (verify r2, reproduced): the clear rewrote the in-flight entry, the
@@ -813,10 +813,10 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   R1.session._isStreaming = false;
   const te1 = R1.deliver.noteTurnEnd(R1.session);
   await sleep(10);
-  ok(clear(R1) === 1 && R1.logs.some((l) => /was cleared while its frame was on the wire — the frame carried the words before the clear/.test(l)), '(z) a clear reaching an in-flight entry is said at once', R1.logs.filter((l) => /clear/.test(l)).join(' | '));
+  ok(clear(R1) === 1 && verdictOf(R1.logs.some((l) => /was cleared while its frame was on the wire — the frame carried the words before the clear/.test(l))), '(z) a clear reaching an in-flight entry is said at once', R1.logs.filter((l) => /clear/.test(l)).join(' | '));
   release1(); await te1;
-  ok(R1.posts.length === 1 && /the secret result/.test(R1.posts[0]) && R1.cards.length === 1 && R1.cards[0].recorded === R1.posts[0] && /\(cleared\)/.test(R1.cards[0].text) && !/secret/.test(R1.cards[0].text) && R1.cards[0].fromName === '(cleared)', '(z) single: the frame carried the words before the clear; the card draws the cleared sentence and its recorded is the frame as written', JSON.stringify({ post: R1.posts[0], card: R1.cards[0] }));
-  ok(R1.logs.some((l) => /landed after a clear reached it mid-flight/.test(l)), '(z) …the landing says so');
+  ok(R1.posts.length === 1 && gateOf(/the secret result/.test(R1.posts[0])) && R1.cards.length === 1 && R1.cards[0].recorded === R1.posts[0] && gateOf(/\(cleared\)/.test(R1.cards[0].text)) && !/secret/.test(R1.cards[0].text) && R1.cards[0].fromName === '(cleared)', '(z) single: the frame carried the words before the clear; the card draws the cleared sentence and its recorded is the frame as written', JSON.stringify({ post: R1.posts[0], card: R1.cards[0] }));
+  ok(verdictOf(R1.logs.some((l) => /landed after a clear reached it mid-flight/.test(l))), '(z) …the landing says so');
   // the batch shape: two parked, cleared while the frame of both is in flight
   const R2 = rig('clear-mid-2');
   R2.deliver = CD.create({ dataDir: R2.dir, activeSessions: R2.sessions, serverSetting: () => undefined, peerMsg: { findPeer: (c) => PM.findPeer(c, R2.reg), postToPeer: async (p, text, o) => { const r = await R2._answer(p, text, o); if (r.ok) R2.posts.push(text); return r; }, postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: (c, card) => R2.cards.push(card), log: (...a) => R2.logs.push(a.join(' ')), retryClock: R2.clock, renderBatch: ARz.renderMsgStash });
@@ -828,7 +828,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   await sleep(10);
   ok(clear(R2) === 2, '(z) batch: both in-flight entries cleared');
   release2(); await te2;
-  ok(R2.posts.length === 1 && /secret one/.test(R2.posts[0]) && /secret two/.test(R2.posts[0]) && R2.cards.length === 1 && R2.cards[0].recorded === R2.posts[0] && !/secret/.test(R2.cards[0].text) && (R2.cards[0].text.match(/\(cleared\)/g) || []).length >= 2 && /^2 waiting notice\(s\) handed over/.test(R2.cards[0].text), '(z) batch: the frame carried the words; the ONE card draws two cleared sentences, recorded = the frame', JSON.stringify({ card: R2.cards[0].text.split('\n').slice(0, 5), rec: R2.cards[0].recorded === R2.posts[0] }));
+  ok(R2.posts.length === 1 && gateOf(/secret one/.test(R2.posts[0])) && gateOf(/secret two/.test(R2.posts[0])) && R2.cards.length === 1 && R2.cards[0].recorded === R2.posts[0] && !/secret/.test(R2.cards[0].text) && (R2.cards[0].text.match(/\(cleared\)/g) || []).length >= 2 && verdictOf(/^2 waiting notice\(s\) handed over/.test(R2.cards[0].text)), '(z) batch: the frame carried the words; the ONE card draws two cleared sentences, recorded = the frame', JSON.stringify({ card: R2.cards[0].text.split('\n').slice(0, 5), rec: R2.cards[0].recorded === R2.posts[0] }));
   // a clear mid-flight whose post FAILS: the retry carries the sentence, nothing is said about a landing
   const R3 = rig('clear-mid-3');
   await R3.deliver.deliverToConversation(R3.cid, 'job-1 finished: secret three', { fromName: 'Background Work · dc-watch', kind: 'notification', spendReason: 'job-notification', retry: { producer: 'test', meta: { jobId: 'jb-1' } } });
@@ -838,7 +838,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   await sleep(10); clear(R3); release3(); await te3;
   R3.setAnswer(async () => ({ ok: true, phase: 'written' }));
   await R3.advance(61 * 1000);
-  ok(R3.posts.length === 1 && /\(cleared\)/.test(R3.posts[0]) && !/secret/.test(R3.posts[0]) && !R3.logs.some((l) => /landed after a clear/.test(l)) && R3.cards[0].recorded === R3.posts[0], '(z) a failed frame after a mid-flight clear: the retry posts the sentence, no landing claim', JSON.stringify({ posts: R3.posts, logs: R3.logs.filter((l) => /clear/.test(l)) }));
+  ok(R3.posts.length === 1 && gateOf(/\(cleared\)/.test(R3.posts[0])) && !/secret/.test(R3.posts[0]) && !R3.logs.some((l) => /landed after a clear/.test(l)) && R3.cards[0].recorded === R3.posts[0], '(z) a failed frame after a mid-flight clear: the retry posts the sentence, no landing claim', JSON.stringify({ posts: R3.posts, logs: R3.logs.filter((l) => /clear/.test(l)) }));
 }
 console.log('\n§3 the REAL JobManager over the park: notifyLog, lastNotify, the floor, the fall into its own store');
 const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
@@ -855,10 +855,10 @@ function jobsRig(name) {
   R.jm._notifyOwner(R.job, { what: 'finished: 3 new threads' });
   await sleep(10);
   const l1 = R.job.notifyLog[R.job.notifyLog.length - 1]; l1.h = R.jm._notifyRate.get(R.cid).h;
-  ok(l1 && l1.lane === 'message' && l1.ok === false && l1.parked === true && l1.phase === 'connect' && l1.busy === true && l1.retries === 0 && l1.retryAt === R.now() + 30_000, 'the parked Delivery-log line: lane message, parked, phase, busy, retries 0, the next instant', JSON.stringify(l1));
-  ok(R.job.lastNotify && R.job.lastNotify.lane === 'retry' && R.job.lastNotify.ok === false, 'lastNotify says retry', JSON.stringify(R.job.lastNotify));
+  ok(gateOf(l1) && l1.lane === 'message' && l1.ok === false && l1.parked === true && l1.phase === 'connect' && l1.busy === true && l1.retries === 0 && l1.retryAt === R.now() + 30_000, 'the parked Delivery-log line: lane message, parked, phase, busy, retries 0, the next instant', JSON.stringify(l1));
+  ok(gateOf(R.job.lastNotify) && R.job.lastNotify.lane === 'retry' && R.job.lastNotify.ok === false, 'lastNotify says retry', JSON.stringify(R.job.lastNotify));
   ok(R.jm.peekNotifs(R.cid).length === 0, 'nothing in the jobs stash (H1: it used to be stashed at once)');
-  ok(R.logs.some((l) => /\[jobs\] notify → parked for retry/.test(l) && /phase connect/.test(l) && /mid-turn: yes/.test(l)), 'the journal line names phase + busy', R.logs.filter((l) => /\[jobs\]/.test(l)).join(' | '));
+  ok(verdictOf(R.logs.some((l) => /\[jobs\] notify → parked for retry/.test(l) && /phase connect/.test(l) && /mid-turn: yes/.test(l))), 'the journal line names phase + busy', R.logs.filter((l) => /\[jobs\]/.test(l)).join(' | '));
   const floorBefore = R.jm._notifyRate.get(R.cid).ts;
   // one timer attempt fails: the SAME line is updated in place (retries 1), no new line
   await R.advance(30_000);
@@ -873,7 +873,7 @@ function jobsRig(name) {
   await R.deliver.noteTurnEnd(R.session);
   const tLanded = Date.now();
   const l2 = R.job.notifyLog[R.job.notifyLog.length - 1];
-  ok(l2 && l2.lane === 'message' && l2.ok === true && l2.retries === 3 && l2.deliveredAt === R.now() && l2.parkedFor === 100_000 && l2.via === 'message' && l2.to === 'Owner', 'the delivered line: lane message ok, retries 3 (the timer at +30 s and +90 s, then the turn end at +100 s), deliveredAt, parkedFor, via message', JSON.stringify(l2));
+  ok(gateOf(l2) && l2.lane === 'message' && l2.ok === true && l2.retries === 3 && l2.deliveredAt === R.now() && l2.parkedFor === 100_000 && l2.via === 'message' && l2.to === 'Owner', 'the delivered line: lane message ok, retries 3 (the timer at +30 s and +90 s, then the turn end at +100 s), deliveredAt, parkedFor, via message', JSON.stringify(l2));
   ok(R.job.lastNotify.lane === 'message' && R.job.lastNotify.ok === true && R.job.lastNotify.retries === 3, 'lastNotify says delivered after 3 retries', JSON.stringify(R.job.lastNotify));
   // (lane wall-clock-ratchet-down: `< 2000` of the wall judged the machine — the stamp lies inside the landing call)
   ok(R.jm._notifyRate.get(R.cid).ts > floorBefore && R.jm._notifyRate.get(R.cid).ts >= tLand && R.jm._notifyRate.get(R.cid).ts <= tLanded && R.jm._notifyRate.get(R.cid).h === l1.h, 'R5: the 30 s floor is re-stamped by the delivery that LANDED (the engine\'s clock), with the raw text\'s digest', JSON.stringify(R.jm._notifyRate.get(R.cid)));
@@ -891,7 +891,7 @@ function jobsRig(name) {
   ok(q.length === 1 && q[0].jobId === R.job.id && q[0].jobName === 'dc-discussion-watch' && q[0].text === 'finished' && q[0].held.kind === 'not-running' && q[0].held.attempts === 1 && q[0].held.phase === 'connect' && q[0].held.busy === true, 'the fallen entry sits in the jobs store typed not-running with the attempt facts', JSON.stringify(q));
   ok(R.deliver.stashCount(R.cid) === 0 && R.deliver.retryCount(R.cid) === 0, '…taken by the engine (never the ladder\'s stash), the park empty');
   const last = R.job.notifyLog[R.job.notifyLog.length - 1];
-  ok(last.lane === 'stash' && /not-running|no live inbox/.test(last.reason), 'the Delivery log ends on the stash line naming the reason', JSON.stringify(last));
+  ok(last.lane === 'stash' && verdictOf(/not-running|no live inbox/.test(last.reason)), 'the Delivery log ends on the stash line naming the reason', JSON.stringify(last));
   ok(R.releases.length === 1 && R.ledger.length === 0, 'the hold given back, nothing charged');
   // the record GONE (archived) before the fall: still booked by the meta
   const R2 = jobsRig('jobsgone');
@@ -917,7 +917,7 @@ const tEn = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p[n] !== u
   const parked = { source: 'retry', kind: 'notification', fromName: 'Background Work · dc-watch', text: 'VibeSpace (this workspace, not another agent) reports:\nBackground Work · dc-watch finished', ts: 1000, held: { kind: 'retrying', nextAt: 240_000, attempts: 2 } };
   ok(S.kindOf(parked) === 'retrying' && S.kindOf({ source: 'agent', kind: 'notification', held: { kind: 'retrying' } }) === 'retrying' && S.KIND_ORDER[0] === 'retrying', 'kindOf: source retry / held retrying ⇒ retrying, listed first');
   const sum = S.summarize({ msg: [parked, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'ping', ts: 2000 }], jobs: [] });
-  ok(sum.count === 2 && sum.items[0].kind === 'retrying' && sum.items[0].n === 1 && sum.retrying && sum.retrying.n === 1 && sum.retrying.nextAt === 240_000, 'summarize carries retrying {n, nextAt} and orders it first', JSON.stringify(sum.items));
+  ok(sum.count === 2 && sum.items[0].kind === 'retrying' && sum.items[0].n === 1 && gateOf(sum.retrying) && sum.retrying.n === 1 && sum.retrying.nextAt === 240_000, 'summarize carries retrying {n, nextAt} and orders it first', JSON.stringify(sum.items));
   ok(sum.previews[0].kind === 'retrying' && sum.previews[0].label === 'Background Work · dc-watch' && sum.previews[0].head === 'Background Work · dc-watch finished', 'the preview row names the sender and the head (our head line skipped)', JSON.stringify(sum.previews[0]));
   ok(S.previewWords(sum.previews[0], tEn) === 'Background Work · dc-watch · being retried · Background Work · dc-watch finished', 'previewWords: "<sender> · being retried · <head>"', S.previewWords(sum.previews[0], tEn));
   const w = S.stashSummaryWords(sum, tEn, { billed: true, now: 0 });
@@ -925,20 +925,20 @@ const tEn = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p[n] !== u
   const only = S.stashSummaryWords(S.summarize({ msg: [parked] }), tEn, { billed: true, now: 225_000 });
   { // B-f276 1b: KEPT entries are named beside others, and alone they are the strip with no press (never an empty strip as the truth)
     const beside = S.stashSummaryWords(sum, tEn, { billed: true, now: 0, kept: 2 }), alone = S.stashSummaryWords({ count: 0, kept: 2, items: [], reachable: false }, tEn, { reachable: false, kept: 2 });
-    ok(!!beside && /2 more wait whose reach cannot be judged now/.test(beside.held || '') && !!alone && alone.head === '2 notices wait whose reach cannot be judged now' && /they wait until VibeSpace can judge them/.test(alone.noButton || '') && alone.cost === null, 'B-f276 1b: the strip names KEPT entries beside others («2 more wait whose reach cannot be judged now») and, alone, stands in their own words with no press', JSON.stringify({ beside: beside && beside.held, alone }));
+    ok(!!beside && gateOf(/2 more wait whose reach cannot be judged now/.test(beside.held || '')) && !!alone && alone.head === '2 notices wait whose reach cannot be judged now' && gateOf(/they wait until VibeSpace can judge them/.test(alone.noButton || '')) && alone.cost === null, 'B-f276 1b: the strip names KEPT entries beside others («2 more wait whose reach cannot be judged now») and, alone, stands in their own words with no press', JSON.stringify({ beside: beside && beside.held, alone }));
     ok(S.stashSummaryWords({ count: 0, kept: 0, items: [] }, tEn, {}) === null, 'B-f276 1b CONTROL: with nothing kept and nothing waiting there is no strip (the kept words come from the count alone)'); }
-  ok(only.head === '1 notice is being retried for this agent' && only.held === 'next attempt in 15 s or when this turn ends' && /Hand over now delivers it this instant/.test(only.title) && only.button === 'Hand over now', 'all retrying: the head says so, the next attempt + the turn end are named, the button still works', JSON.stringify(only));
+  ok(only.head === '1 notice is being retried for this agent' && only.held === 'next attempt in 15 s or when this turn ends' && gateOf(/Hand over now delivers it this instant/.test(only.title)) && only.button === 'Hand over now', 'all retrying: the head says so, the next attempt + the turn end are named, the button still works', JSON.stringify(only));
   ok(S.whenWords(0, 10, tEn) === 'now' && S.whenWords(1000 + 500, 1000, tEn) === 'now' && S.whenWords(60_000, 0, tEn) === 'in 60 s' && S.whenWords(90_000, 0, tEn) === 'in 2 min', 'whenWords: now / s / min');
   ok(S.summaryDigest(sum) !== S.summaryDigest({ ...sum, retrying: { n: 1, nextAt: 999 } }), 'a moved next attempt changes the digest (the strip repaints)');
   // the hand-over head: why they waited, read back as a key the client translates
   ok(S.heldWhyOf(['not-running']) === 'they arrived while this conversation was not running' && S.heldWhyOf(['retrying', 'retrying']) === 'their delivery was being retried — delivered now' && S.heldWhyOf(['not-reachable']) === 'the agent did not accept them at once (busy or unreachable) — delivered now' && S.heldWhyOf(['rate-floor', 'spend-cap']) === 'they were held until now' && S.heldWhyOf([]) === null && S.heldWhyOf(['junk']) === null, 'heldWhyOf: one sentence per kind, mixed ⇒ held until now, nothing ⇒ null');
   const card = S.handoverCardText(2, 'the notices', { why: S.heldWhyOf(['retrying']) });
   const f = S.handoverFacts(card);
-  ok(f && f.title.key === '{n} waiting notice(s) handed over — {why}' && f.title.params.n === 2 && f.title.params.why.key === 'their delivery was being retried — delivered now' && f.body === 'the notices', 'handoverFacts reads the why back as a nested key', JSON.stringify(f));
+  ok(gateOf(f) && f.title.key === '{n} waiting notice(s) handed over — {why}' && f.title.params.n === 2 && f.title.params.why.key === 'their delivery was being retried — delivered now' && f.body === 'the notices', 'handoverFacts reads the why back as a nested key', JSON.stringify(f));
   ok(S.handoverFacts(S.handoverCardText(1, 'x')).title.key === '{n} waiting notice(s) handed over' && S.handoverFacts('1 waiting notice(s) handed over — <script>alert(1)</script>\n\nx').title.key === '{n} waiting notice(s) handed over', 'no why ⇒ the old title; a why outside the table is not ours (never echoed)');
   // the client's rule: a param that is itself a key is translated — the exact expression chat-renderers runs
   const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf-8');
-  ok(/v && typeof v === 'object' && v\.key \? t\(v\.key, v\.params \|\| \{\}\) : v/.test(cr), 'chat-renderers translates a {key} param inside the title');
+  ok(verdictOf(/v && typeof v === 'object' && v\.key \? t\(v\.key, v\.params \|\| \{\}\) : v/.test(cr)), 'chat-renderers translates a {key} param inside the title');
   const tZh = (k, p = {}) => tEn(zh[k] || k, p);
   const why = f.title.params.why;
   const title = tZh(f.title.key, { n: 2, why: tZh(why.key) });
@@ -949,20 +949,20 @@ const tEn = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p[n] !== u
   // the panel's held sentence (jobs-layout heldText)
   const JL = await import(path.join(REPO, 'src/lib/jobs-layout.js'));
   const ht = (kind) => JL.heldText({ total: 1, byConversation: { c: { count: 1, kinds: { [kind]: 1 }, reason: { kind } } } }, tEn);
-  ok(/not running; delivered when it next resumes/.test(ht('not-running')) && /did not accept it at once; posted again when its turn ends/.test(ht('retrying')) && /did not accept it \(busy or unreachable\)/.test(ht('not-reachable')), 'the Background Work panel words each kind', [ht('not-running'), ht('retrying'), ht('not-reachable')].join(' | '));
+  ok(gateOf(/not running; delivered when it next resumes/.test(ht('not-running'))) && gateOf(/did not accept it at once; posted again when its turn ends/.test(ht('retrying'))) && verdictOf(/did not accept it \(busy or unreachable\)/.test(ht('not-reachable'))), 'the Background Work panel words each kind', [ht('not-running'), ht('retrying'), ht('not-reachable')].join(' | '));
   // the digest's tail (agent-facing, and what the owner read on the card)
   const items = (kind) => [{ jobId: 'jb-1', jobName: 'dc-watch', text: 'done', ts: 1_700_000_000_000, ...(kind ? { held: { kind } } : {}) }];
-  ok(/These arrived while this conversation was not running\./.test(JM_MODEL.renderNotifStash(items('not-running'))) && /These arrived while this conversation was not running\./.test(JM_MODEL.renderNotifStash(items(null))), 'the tail for not-running (and an older entry without held)');
-  ok(/The agent did not accept these when they arrived \(busy or unreachable\) — delivered now\./.test(JM_MODEL.renderNotifStash(items('not-reachable'))) && /paced by the 30 s/.test(JM_MODEL.renderNotifStash(items('rate-floor'))) && /held until now \(not-running, rate-floor\)/.test(JM_MODEL.renderNotifStash([...items('not-running'), ...items('rate-floor')])), 'the tail for not-reachable / rate-floor / a mix');
+  ok(gateOf(/These arrived while this conversation was not running\./.test(JM_MODEL.renderNotifStash(items('not-running')))) && verdictOf(/These arrived while this conversation was not running\./.test(JM_MODEL.renderNotifStash(items(null)))), 'the tail for not-running (and an older entry without held)');
+  ok(gateOf(/The agent did not accept these when they arrived \(busy or unreachable\) — delivered now\./.test(JM_MODEL.renderNotifStash(items('not-reachable')))) && gateOf(/paced by the 30 s/.test(JM_MODEL.renderNotifStash(items('rate-floor')))) && verdictOf(/held until now \(not-running, rate-floor\)/.test(JM_MODEL.renderNotifStash([...items('not-running'), ...items('rate-floor')]))), 'the tail for not-reachable / rate-floor / a mix');
   ok(!/completed while this conversation was closed/.test(fs.readFileSync(path.join(REPO, 'src/job-model.js'), 'utf-8')), 'the lie is gone from the source');
   // verify r2: the DETAIL rides the tail and the card's why — thirty may-have-landed notices after a restart read "did not
   // accept these" for notices the agent may already have seen; the park's cap and the hour of retries were unnamed too
   const held = (d) => [{ jobId: 'jb-1', jobName: 'dc-watch', text: 'done', ts: 1_700_000_000_000, held: { kind: 'not-reachable', ...d } }];
-  ok(/did not accept these when they arrived \(busy or unreachable\) — delivered now\. The server stopped while some were being sent — one or more may have reached you already \(a repeat, not news\)\./.test(JM_MODEL.notifTailSentence(held({ maybeDelivered: true }))), 'the tail names a may-have-landed entry (a repeat is possible)', JM_MODEL.notifTailSentence(held({ maybeDelivered: true })));
-  ok(/More arrived than the retry park holds/.test(JM_MODEL.notifTailSentence(held({ evicted: true }))) && /The hour of retries passed/.test(JM_MODEL.notifTailSentence(held({ expired: true }))) && !/repeat|park holds|hour of retries/.test(JM_MODEL.notifTailSentence(held({}))), 'the tail names an evicted / an expired entry, and nothing extra for a plain one');
-  ok(S.heldKeyOf({ kind: 'not-reachable', maybeDelivered: true }) === 'maybe-delivered' && S.heldKeyOf({ kind: 'not-reachable' }) === 'not-reachable' && S.heldKeyOf(null) === null && /the server stopped while they were being sent — some may have reached the agent already, delivered again now/.test(S.heldWhyOf(['maybe-delivered'])) && S.handoverFacts(S.handoverCardText(3, 'x', { why: S.heldWhyOf(['maybe-delivered']) })).why === S.HELD_WHY['maybe-delivered'], 'the hand-over card\'s why for a may-have-landed entry is its own sentence, read back as a key');
-  ok(/S\.heldKeyOf\(e && e\.held\)/.test(fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8')), 'the hand-over asks heldKeyOf for its why (wiring pin)');
-  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(fs.readFileSync(path.join(REPO, f), 'utf-8').includes('"the server stopped while they were being sent — some may have reached the agent already, delivered again now":'), `${f} carries the new why`);
+  ok(verdictOf(/did not accept these when they arrived \(busy or unreachable\) — delivered now\. The server stopped while some were being sent — one or more may have reached you already \(a repeat, not news\)\./.test(JM_MODEL.notifTailSentence(held({ maybeDelivered: true })))), 'the tail names a may-have-landed entry (a repeat is possible)', JM_MODEL.notifTailSentence(held({ maybeDelivered: true })));
+  ok(gateOf(/More arrived than the retry park holds/.test(JM_MODEL.notifTailSentence(held({ evicted: true })))) && gateOf(/The hour of retries passed/.test(JM_MODEL.notifTailSentence(held({ expired: true })))) && !/repeat|park holds|hour of retries/.test(JM_MODEL.notifTailSentence(held({}))), 'the tail names an evicted / an expired entry, and nothing extra for a plain one');
+  ok(S.heldKeyOf({ kind: 'not-reachable', maybeDelivered: true }) === 'maybe-delivered' && S.heldKeyOf({ kind: 'not-reachable' }) === 'not-reachable' && S.heldKeyOf(null) === null && gateOf(/the server stopped while they were being sent — some may have reached the agent already, delivered again now/.test(S.heldWhyOf(['maybe-delivered']))) && S.handoverFacts(S.handoverCardText(3, 'x', { why: S.heldWhyOf(['maybe-delivered']) })).why === S.HELD_WHY['maybe-delivered'], 'the hand-over card\'s why for a may-have-landed entry is its own sentence, read back as a key');
+  ok(verdictOf(/S\.heldKeyOf\(e && e\.held\)/.test(fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8'))), 'the hand-over asks heldKeyOf for its why (wiring pin)');
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(verdictOf(fs.readFileSync(path.join(REPO, f), 'utf-8').includes('"the server stopped while they were being sent — some may have reached the agent already, delivered again now":')), `${f} carries the new why`);
 }
 {
   // THE REAL HAND-OVER over a parked entry (the owner's click): ONE ladder turn under stash-handover, the park emptied,
@@ -972,16 +972,16 @@ const tEn = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p[n] !== u
   const published = [];
   const view = SH.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => null, broadcastSessions: () => published.push(1), renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } } });
   const fact = view.summaryFor(R.session);
-  ok(fact && fact.count === 1 && fact.items[0].kind === 'retrying' && fact.retrying.n === 1 && fact.retrying.nextAt === R.now() + 30_000 && fact.reachable === true && fact.billed === true, 'the `stash` fact shows the parked entry as retrying with its next attempt', JSON.stringify(fact));
+  ok(gateOf(fact) && fact.count === 1 && fact.items[0].kind === 'retrying' && fact.retrying.n === 1 && fact.retrying.nextAt === R.now() + 30_000 && fact.reachable === true && fact.billed === true, 'the `stash` fact shows the parked entry as retrying with its next attempt', JSON.stringify(fact));
   R.setAnswer(async () => ({ ok: true, phase: 'written' }));
   const r = await view.handOver('w1', { pressed: PRESS });
-  ok(r.ok === true && r.delivered === 1 && R.posts.length === 1 && /hand-over ho-/.test(R.posts[0]) && /dc-watch finished/.test(R.posts[0]), 'Hand over now delivers the parked notice as ONE frame', JSON.stringify(r));
+  ok(r.ok === true && r.delivered === 1 && R.posts.length === 1 && gateOf(/hand-over ho-/.test(R.posts[0])) && verdictOf(/dc-watch finished/.test(R.posts[0])), 'Hand over now delivers the parked notice as ONE frame', JSON.stringify(r));
   ok(R.ledger.length === 1 && R.ledger[0].reason === 'stash-handover' && R.releases.length === 1 && R.releases[0] === 'h1' && R.authorized.length === 2, 'the hand-over bills its own turn; the parked hold (h1) is given back, never charged', JSON.stringify({ l: R.ledger, r: R.releases, a: R.authorized }));
   ok(R.deliver.retryCount(R.cid) === 0 && !view.summaryFor(R.session), 'the park is empty, the fact clears');
   const card = R.cards.find((c) => c.fromName === 'VibeSpace notices');
   const facts = S.handoverFacts(card.text);
-  ok(facts && facts.why === 'their delivery was being retried — delivered now', 'the card\'s head says why it waited', card && card.text.split('\n')[0]);
-  ok(R.events.some((e) => e.ev === 'delivered' && e.extra.via === 'hand-over'), 'the producer heard delivered via hand-over');
+  ok(gateOf(facts) && facts.why === 'their delivery was being retried — delivered now', 'the card\'s head says why it waited', card && card.text.split('\n')[0]);
+  ok(verdictOf(R.events.some((e) => e.ev === 'delivered' && e.extra.via === 'hand-over')), 'the producer heard delivered via hand-over');
   // a frame that comes back is restored as a WAITING notice (never one still retried)
   const n = view.restoreHandedOver(R.cid, R.posts[0], { kind: 'notification' });
   ok(n === 1 && R.deliver.stashCount(R.cid) === 1 && R.deliver.stashPeek(R.cid)[0].held.kind === 'not-reachable' && S.kindOf(R.deliver.stashPeek(R.cid)[0]) === 'job' && R.deliver.retryCount(R.cid) === 0, 'a bounced frame restores it as a plain waiting job notice typed not-reachable (never retrying)', JSON.stringify(R.deliver.stashPeek(R.cid)));
@@ -1029,7 +1029,7 @@ await (async () => {
     return { before, afterInFile: /a ride check/.test(parkFile(R)) };
   };
   const f1 = await fallScene({ JobManager }, 'ride-fall');
-  ok(f1.before.parked && f1.before.park === 0 && f1.before.stashed === 1 && f1.before.inFile, '(hunt 2) a fallen jobs entry is the jobs store\'s now — gone from the park in memory, but STILL in msg-retry.json while the jobs notifications holding it are not on disk (a kill keeps it parked, never lost)', f1.before);
+  ok(gateOf(f1.before.parked) && f1.before.park === 0 && f1.before.stashed === 1 && verdictOf(f1.before.inFile), '(hunt 2) a fallen jobs entry is the jobs store\'s now — gone from the park in memory, but STILL in msg-retry.json while the jobs notifications holding it are not on disk (a kill keeps it parked, never lost)', f1.before);
   ok(!f1.afterInFile, '…and it leaves msg-retry.json when they LAND (the park\'s write rides the jobs landing)', f1);
   const TAKEN_A = "      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }\n      return this._taken(this._parkCopyIn(cid, entry.id));";   // B-54b7: the take names its copy
   const JR = mutantCopies('ntr-ride', REPO).load('src/jobs.js', anchored(JSRC_R, TAKEN_A, "      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }\n      return true;   // MUTANT: taken, no landing to ride", 'a fall rides the jobs landing'), 'fell-no-ride');
@@ -1047,10 +1047,10 @@ await (async () => {
   // reply says so (finishes-on-landing, after its bound) and its record of delivery is NOT written yet — never «delivered» over a drain
   // a kill would undo (the next start would hand the same notices over again)
   const memAtReply = mem();
-  ok(ho.ok && ho.notOnDisk === true && ho.code === 'finishes-on-landing' && Object.keys(memAtReply).length === 0, 'FINDING 11: a hand-over whose drained job notices are not on disk says finishes-on-landing, and its record of delivery waits for their landing', { ho, memAtReply });
+  ok(gateOf(ho.ok) && ho.notOnDisk === true && ho.code === 'finishes-on-landing' && Object.keys(memAtReply).length === 0, 'FINDING 11: a hand-over whose drained job notices are not on disk says finishes-on-landing, and its record of delivery waits for their landing', { ho, memAtReply });
   const back = view.restoreHandedOver(R.cid, R.posts[R.posts.length - 1], { kind: 'notification' });
   const rec0 = Object.values(mem())[0] || {};
-  ok(ho.ok && back === 1 && jm.peekNotifs(R.cid).length === 1 && rec0.jobsOwed === true && (rec0.jobs || []).length === 1,
+  ok(gateOf(ho.ok) && back === 1 && jm.peekNotifs(R.cid).length === 1 && rec0.jobsOwed === true && (rec0.jobs || []).length === 1,
     '(must 1) a hand-over\'s frame that comes back: its job notification is back in the jobs store AND the hand-over memory keeps its copy (jobsOwed, on disk) while the put-back is not on disk', { ho, back, rec0 });
   // A START after a kill (the put-back never landed): a new jobs engine on the same folder, a new hand-over view — the copy goes back
   // THE KILL WRITES NOTHING AFTER IT (主开发 r183): the dead engine's writer H is never landed again — the copy is dropped by the NEW
@@ -1065,7 +1065,7 @@ await (async () => {
   const owedBeforeLanding = !!(Object.values(mem())[0] || {}).jobsOwed;
   H2.land();
   const rec1 = Object.values(mem())[0] || {};
-  ok(owedBeforeLanding && !rec1.jobsOwed && (rec1.jobs || []).length === 0, '(must 1) …and the copy is dropped only when the put-back LANDS — the new engine\'s (the dead one\'s writer never lands after the kill)', { owedBeforeLanding, rec1 });
+  ok(gateOf(owedBeforeLanding) && !rec1.jobsOwed && (rec1.jobs || []).length === 0, '(must 1) …and the copy is dropped only when the put-back LANDS — the new engine\'s (the dead one\'s writer never lands after the kill)', { owedBeforeLanding, rec1 });
   // the moved2 cure 3: its RED control — a copy of the hand-over that drops its kept copy at once (anchored)
   {
     const SHSRC = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
@@ -1115,10 +1115,10 @@ await (async () => {
       return { hoOk: !!(hoh && hoh.ok), backh, heldOwed: held.jobsOwed === true && (held.jobs || []).length === 1, liftedOwed: !lifted.unread && lifted.rec.jobsOwed === true, landedDropped: !landed.jobsOwed && (landed.jobs || []).length === 0 };
     };
     const mh = await heldScene({ JobManager }, 'ride-handover-held');
-    ok(mh.hoOk && mh.backh === 1 && mh.heldOwed && mh.liftedOwed && mh.landedDropped, 'must 2: a put-back while job-notifications.json is HELD keeps the hand-over\'s copy (the writer owes nothing for the file — no «landed»), still after the lift until ITS save lands, and drops it only then', mh);
+    ok(gateOf(mh.hoOk) && mh.backh === 1 && gateOf(mh.heldOwed) && gateOf(mh.liftedOwed) && verdictOf(mh.landedDropped), 'must 2: a put-back while job-notifications.json is HELD keeps the hand-over\'s copy (the writer owes nothing for the file — no «landed»), still after the lift until ITS save lands, and drops it only then', mh);
     const JLX = mutantCopies('ntr-held-lift', REPO).load('src/jobs.js', anchored(JSRC2, LIFT_A, "  afterNotifsLanded(step) { if (false) return this._afterNotifsLift(", 'the put-back waits for the lift'), 'held-no-lift-wait');
     const mhx = await heldScene(JLX, 'ride-handover-held-red');
-    ok(mhx.hoOk && !mhx.heldOwed, 'CONTROL (the wait for the lift cut, in a copy): the put-back «lands» at once over a held file and the kept copy is GONE while the notices are in memory only — a restart now loses them (red)', mhx);
+    ok(gateOf(mhx.hoOk) && !mhx.heldOwed, 'CONTROL (the wait for the lift cut, in a copy): the put-back «lands» at once over a held file and the kept copy is GONE while the notices are in memory only — a restart now loses them (red)', mhx);
     // 主开发's cure read wis993v2b, should 2: a drain while held is landed by fact — but a copy put back at the BOOT may already be in the
     // held file (the last process died after that landing, before the stash dropped its copy): drained now, it came back at the lift's
     // merge — handed over twice. The drain while held remembers what it took (by the notice's own identity) and the merge leaves it out.
@@ -1148,15 +1148,15 @@ await (async () => {
       return { took, lifted: !jt._notifsUnread, back, sub, freshTook, remembered };
     };
     const tw = await twiceScene({ JobManager }, 'held-drain-twice');
-    ok(tw.took === 1 && tw.lifted && tw.back === 0 && tw.sub === 1 && tw.freshTook === 1 && tw.remembered === 1, 'should 2 (+ the move check\'s bound: a notice stashed in this process while held is drained and NEVER remembered — only an older copy is): a notice drained while the file was held (its copy already IN the file) does not come back at the lift — never handed over twice; and a SUBSCRIBER\'s copy of the same job event at the same instant is still waiting (the identity carries the conversation)', tw);
+    ok(tw.took === 1 && gateOf(tw.lifted) && tw.back === 0 && tw.sub === 1 && tw.freshTook === 1 && tw.remembered === 1, 'should 2 (+ the move check\'s bound: a notice stashed in this process while held is drained and NEVER remembered — only an older copy is): a notice drained while the file was held (its copy already IN the file) does not come back at the lift — never handed over twice; and a SUBSCRIBER\'s copy of the same job event at the same instant is still waiting (the identity carries the conversation)', tw);
     const JTX = mutantCopies('ntr-held-twice', REPO).load('src/jobs.js', anchored(JSRC2, TWICE_A, "        if (false) {", 'the merge leaves out what a drain took'), 'held-twice-cut');
     const twx = await twiceScene(JTX, 'held-drain-twice-red');
-    ok(twx.took === 1 && twx.lifted && twx.back === 1, 'CONTROL (the merge\'s filter cut, in a copy): the drained notice is BACK after the lift — handed over twice (red)', twx);
+    ok(twx.took === 1 && gateOf(twx.lifted) && twx.back === 1, 'CONTROL (the merge\'s filter cut, in a copy): the drained notice is BACK after the lift — handed over twice (red)', twx);
     const D_ID = "took.add(`${cid}\\u0000${n.jobId}\\u0000${n.ts}`); }", M_ID = "this._drainedWhileHeld.has(`${cid}\\u0000${list[i].jobId}\\u0000${list[i].ts}`)";
-    ok([D_ID, M_ID].every((x) => JSRC2.split(x).length === 2), 'control setup: the drained identity carries the conversation at both sites (found once each)');
+    ok(verdictOf([D_ID, M_ID].every((x) => JSRC2.split(x).length === 2)), 'control setup: the drained identity carries the conversation at both sites (found once each)');
     const JCX = mutantCopies('ntr-held-nocid', REPO).load('src/jobs.js', anchored(anchored(JSRC2, D_ID, "took.add(`${n.jobId}\\u0000${n.ts}`); }", 'drain identity without the conversation'), M_ID, "this._drainedWhileHeld.has(`${list[i].jobId}\\u0000${list[i].ts}`)", 'merge identity without the conversation'), 'held-nocid');
     const twc = await twiceScene(JCX, 'held-drain-nocid-red');
-    ok(twc.took === 1 && twc.lifted && twc.sub === 0, 'CONTROL (the conversation dropped from the identity, in a copy): the SUBSCRIBER\'s copy is taken out at the lift — never told, nothing said (red)', twc);
+    ok(twc.took === 1 && gateOf(twc.lifted) && twc.sub === 0, 'CONTROL (the conversation dropped from the identity, in a copy): the SUBSCRIBER\'s copy is taken out at the lift — never told, nothing said (red)', twc);
   }
   {   // FINDING 11's RED (anchored): a copy of the hand-over that does not hold — «delivered» and the record of delivery at once, over a drain not on disk
     const SHSRC11 = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
@@ -1168,7 +1168,7 @@ await (async () => {
     R11.setAnswer(async () => ({ ok: true, phase: 'written' }));
     const ho11 = await v11.handOver('w1', { pressed: PRESS });
     let m11 = {}; try { m11 = JSON.parse(fs.readFileSync(path.join(R11.dir, 'stash-handover.json'), 'utf-8')); } catch { }
-    ok(ho11.ok && !ho11.notOnDisk && Object.keys(m11).length === 1, 'CONTROL FINDING 11 (a copy that does not hold): «delivered» and the record written at once while the drain is not on disk — red', { ho11, m11: Object.keys(m11).length });
+    ok(gateOf(ho11.ok) && !ho11.notOnDisk && Object.keys(m11).length === 1, 'CONTROL FINDING 11 (a copy that does not hold): «delivered» and the record written at once while the drain is not on disk — red', { ho11, m11: Object.keys(m11).length });
   }
 })();
 
@@ -1190,11 +1190,11 @@ function r3Rig(name) {
   ok(R.deliver.retryCount(R.cid) === 1 && R.jm.peekNotifs(R.cid).length === 0, '(a) parked, not stashed');
   const dlogs = [];
   const text = AR.drainNotifsUnderCap(R.jm, R.deliver, R.cid, 100, (l) => dlogs.push(l));
-  ok(/<vibespace-jobs-missed-while-away>/.test(text) && /jb-aaaa1111 dc-discussion-watch: finished: 3 new threads/.test(text) && /These were waiting for a retry — delivered now\./.test(text), '(a) the digest carries it with the retry tail', text);
+  ok(gateOf(/<vibespace-jobs-missed-while-away>/.test(text)) && gateOf(/jb-aaaa1111 dc-discussion-watch: finished: 3 new threads/.test(text)) && verdictOf(/These were waiting for a retry — delivered now\./.test(text)), '(a) the digest carries it with the retry tail', text);
   ok(R.deliver.retryCount(R.cid) === 0 && R.posts.length === 0 && R.ledger.length === 0 && R.releases.length === 1, '(a) the park is empty, nothing posted, nothing charged, the hold given back (the prompt was free)');
   const last = R.job.notifyLog[R.job.notifyLog.length - 1];
   ok(last.lane === 'stash' && last.ok === true && last.via === 'prompt' && last.retries === 0, '(a) the Delivery log: rode the prompt (lane stash ok, via prompt)', JSON.stringify(last));
-  ok(R.cards.some((c) => c.kind === 'notification' && /finished: 3 new threads/.test(c.text)), '(a) the card the drain emits');
+  ok(verdictOf(R.cards.some((c) => c.kind === 'notification' && /finished: 3 new threads/.test(c.text))), '(a) the card the drain emits');
   ok(!R.deliver.handoverArmed(R.cid) && dlogs.length === 0, '(a) nothing armed');
 }
 {
@@ -1209,27 +1209,27 @@ function r3Rig(name) {
   const t1 = AR.drainNotifsUnderCap(R.jm, R.deliver, R.cid, 9600, (l) => dlogs.push(l));
   const t2 = AR.drainStashUnderCap(R.deliver, R.cid, 9600, (l) => dlogs.push(l));
   ok(t1 === '' && t2 === '' && R.deliver.retryCount(R.cid) === 1 && R.jm.peekNotifs(R.cid).length === 1 && R.deliver.stashCount(R.cid) === 1, '(b) a starved prompt takes nothing');
-  ok(dlogs.length === 2 && dlogs.every((l) => /will arrive as a message when this turn ends/.test(l)) && !dlogs.some((l) => /wait for the next prompt/.test(l)), '(b) …and says "will arrive as a message when this turn ends" (never "wait for the next prompt")', dlogs.join(' | '));
+  ok(dlogs.length === 2 && gateOf(dlogs.every((l) => /will arrive as a message when this turn ends/.test(l))) && !dlogs.some((l) => /wait for the next prompt/.test(l)), '(b) …and says "will arrive as a message when this turn ends" (never "wait for the next prompt")', dlogs.join(' | '));
   ok(R.deliver.handoverArmed(R.cid) === true, '(b) …the hand-over is armed');
   const fact = R.view.summaryFor(R.session);
-  ok(fact && fact.armed === true && fact.count === 3, '(b) the fact says armed (count 3: the parked, the stashed job, the peer)', JSON.stringify(fact));
+  ok(gateOf(fact) && fact.armed === true && fact.count === 3, '(b) the fact says armed (count 3: the parked, the stashed job, the peer)', JSON.stringify(fact));
   const w = S.stashSummaryWords(fact, tEn, { billed: true, armed: true, now: R.now() });
-  ok(/^they will arrive as a message when this turn ends/.test(w.held) && /1 of them is being retried \(in 30 s\)/.test(w.held), '(b) the strip\'s words: arrive at the turn end · one being retried', w.held);
-  ok(zh['they will arrive as a message when this turn ends'] && ja['they will arrive as a message when this turn ends'], '(b) zh + ja');
+  ok(gateOf(/^they will arrive as a message when this turn ends/.test(w.held)) && verdictOf(/1 of them is being retried \(in 30 s\)/.test(w.held)), '(b) the strip\'s words: arrive at the turn end · one being retried', w.held);
+  ok(gateOf(zh['they will arrive as a message when this turn ends']) && verdictOf(ja['they will arrive as a message when this turn ends']), '(b) zh + ja');
   // the turn ends, the CLI idle: ONE post under stash-retry
   R.session._isStreaming = false;
   R.setAnswer(async () => ({ ok: true, phase: 'written' }));
   await R.deliver.noteTurnEnd(R.session);
   await sleep(20);
-  ok(R.posts.length === 1 && /did not fit your previous prompt's context \(hand-over ho-/.test(R.posts[0]) && /finished \(parked\)/.test(R.posts[0]) && /an older one, stashed/.test(R.posts[0]) && /ping from Ada/.test(R.posts[0]), '(b) ONE frame at the turn end carrying all three', R.posts[0] && R.posts[0].slice(0, 200));
+  ok(R.posts.length === 1 && gateOf(/did not fit your previous prompt's context \(hand-over ho-/.test(R.posts[0])) && gateOf(/finished \(parked\)/.test(R.posts[0])) && gateOf(/an older one, stashed/.test(R.posts[0])) && verdictOf(/ping from Ada/.test(R.posts[0])), '(b) ONE frame at the turn end carrying all three', R.posts[0] && R.posts[0].slice(0, 200));
   ok(R.ledger.length === 1 && R.ledger[0].reason === 'stash-retry' && R.releases.length === 1, '(b) billed ONCE under stash-retry; the parked hold given back', JSON.stringify({ l: R.ledger, r: R.releases }));
   ok(R.deliver.retryCount(R.cid) === 0 && R.jm.peekNotifs(R.cid).length === 0 && R.deliver.stashCount(R.cid) === 0 && !R.deliver.handoverArmed(R.cid) && !R.view.summaryFor(R.session), '(b) every store empty, the arm consumed, the fact clear');
-  ok(R.logs.some((l) => /posted as a message after the turn ended \(hand-over ho-/.test(l)), '(b) the journal says so', R.logs.filter((l) => /\[stash\]/.test(l)).join(' | '));
+  ok(verdictOf(R.logs.some((l) => /posted as a message after the turn ended \(hand-over ho-/.test(l))), '(b) the journal says so', R.logs.filter((l) => /\[stash\]/.test(l)).join(' | '));
   const why = S.handoverFacts(R.cards.find((c) => c.fromName === 'VibeSpace notices').text).why;
   ok(why === 'they were held until now', '(b) the card\'s head: a mixed set is "held until now"', why);
   await R.deliver.noteTurnEnd(R.session);
   ok(R.posts.length === 1 && R.ledger.length === 1, '(b) the next turn end posts nothing (no loop)');
-  ok(SA.SPEND_REASONS['stash-retry'] && SA.SPEND_REASONS['stash-retry'].turn === true, '(b) stash-retry is a declared reason that spends a turn');
+  ok(gateOf(SA.SPEND_REASONS['stash-retry']) && SA.SPEND_REASONS['stash-retry'].turn === true, '(b) stash-retry is a declared reason that spends a turn');
 }
 {
   // (a2) verify r1 (a revert-table control was GREEN): a parked entry of a producer OTHER than the jobs engine rides the
@@ -1238,7 +1238,7 @@ function r3Rig(name) {
   const r = await R.deliver.deliverToConversation(R.cid, 'a peer-ish notice', { fromName: 'VibeSpace browser', kind: 'notification', spendReason: 'peer-message', retry: { producer: 'browser', meta: {} } });
   ok(r.parked === true && R.deliver.retryCount(R.cid) === 1, '(a2) parked by a non-jobs producer');
   const text = AR.drainStashUnderCap(R.deliver, R.cid, 100, () => { });
-  ok(/a peer-ish notice/.test(text) && R.deliver.retryCount(R.cid) === 0 && R.releases.length === 1 && R.ledger.length === 0 && R.events.some((e) => e.ev === 'delivered' && e.extra.via === 'prompt'), '(a2) the stash drain carries it, the park is empty, the hold given back, delivered via prompt', JSON.stringify({ n: R.deliver.retryCount(R.cid), rel: R.releases }));
+  ok(gateOf(/a peer-ish notice/.test(text)) && R.deliver.retryCount(R.cid) === 0 && R.releases.length === 1 && R.ledger.length === 0 && verdictOf(R.events.some((e) => e.ev === 'delivered' && e.extra.via === 'prompt')), '(a2) the stash drain carries it, the park is empty, the hold given back, delivered via prompt', JSON.stringify({ n: R.deliver.retryCount(R.cid), rel: R.releases }));
   R.session._isStreaming = false; R.setAnswer(async () => ({ ok: true, phase: 'written' }));
   await R.deliver.noteTurnEnd(R.session); await R.advance(60_000);
   ok(R.posts.length === 0, '(a2) …and nothing posts it again');
@@ -1250,7 +1250,7 @@ function r3Rig(name) {
   fs.unlinkSync(path.join(R.reg, `${process.pid}.json`));
   const dlogs = [];
   AR.drainNotifsUnderCap(R.jm, R.deliver, R.cid, 9600, (l) => dlogs.push(l));
-  ok(dlogs.length === 1 && /wait for the next prompt/.test(dlogs[0]) && !R.deliver.handoverArmed(R.cid), '(c) a dead pid: not armed, "wait for the next prompt"', dlogs[0]);
+  ok(dlogs.length === 1 && gateOf(/wait for the next prompt/.test(dlogs[0])) && !R.deliver.handoverArmed(R.cid), '(c) a dead pid: not armed, "wait for the next prompt"', dlogs[0]);
 }
 {
   // (d) THE FLOOR: a post landed 5 s before the turn end — the armed hand-over waits the floor out, then posts
@@ -1266,7 +1266,7 @@ function r3Rig(name) {
   ok(R.posts.length === 1 && R.scheduled.length === 1 && R.scheduled[0].ms === 25_000 && !R.deliver.handoverArmed(R.cid), '(d) inside the floor: deferred 25 s, not posted yet', JSON.stringify({ p: R.posts.length, s: R.scheduled.map((x) => x.ms) }));
   await R.advance(25_000);
   await R.scheduled[0].fn(); await sleep(10);
-  ok(R.posts.length === 2 && /held/.test(R.posts[1]) && R.jm.peekNotifs(R.cid).length === 0, '(d) …posted when the floor clears');
+  ok(R.posts.length === 2 && gateOf(/held/.test(R.posts[1])) && R.jm.peekNotifs(R.cid).length === 0, '(d) …posted when the floor clears');
   // deferred but a turn runs again: re-armed for that turn's end, not posted under it
   const R2 = r3Rig('r3floor2');
   R2.jm._stashNotif(R2.cid, R2.job, { what: 'held2' }, 'rate floor — queued for injection instead', { held: { kind: 'rate-floor' } });
@@ -1287,15 +1287,15 @@ function r3Rig(name) {
   R.setRefuse('hour-cap');
   R.session._isStreaming = false;
   await R.deliver.noteTurnEnd(R.session); await sleep(10);
-  ok(R.posts.length === 0 && R.jm.peekNotifs(R.cid).length === 1 && R.logs.some((l) => /armed hand-over after the turn end was not made — spend_refused/.test(l)), '(e) refused: the stash stays, the journal names the ceiling', R.logs.filter((l) => /\[stash\]/.test(l)).join(' | '));
+  ok(R.posts.length === 0 && R.jm.peekNotifs(R.cid).length === 1 && verdictOf(R.logs.some((l) => /armed hand-over after the turn end was not made — spend_refused/.test(l))), '(e) refused: the stash stays, the journal names the ceiling', R.logs.filter((l) => /\[stash\]/.test(l)).join(' | '));
   const dlogs = [];
   AR.drainNotifsUnderCap(R.jm, R.deliver, R.cid, 9600, (l) => dlogs.push(l));
-  ok(R.deliver.handoverArmed(R.cid) === true && /will arrive as a message/.test(dlogs[0]), '(e) the next starved prompt re-arms it');
+  ok(R.deliver.handoverArmed(R.cid) === true && verdictOf(/will arrive as a message/.test(dlogs[0])), '(e) the next starved prompt re-arms it');
 }
 {
   // (f) THE CENSUS PINS: both reasons spelled literally beside the ladder call (the spend census reads the literal)
   const sh = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
-  ok(/spendReason: 'stash-retry', fromName: FROM_NAME/.test(sh) && /spendReason: 'stash-handover', fromName: FROM_NAME/.test(sh), '(f) stash-handover.js spells both reasons literally');
+  ok(gateOf(/spendReason: 'stash-retry', fromName: FROM_NAME/.test(sh)) && verdictOf(/spendReason: 'stash-handover', fromName: FROM_NAME/.test(sh)), '(f) stash-handover.js spells both reasons literally');
   const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
   ok((ar.match(/armOrWait\(deliver, cid, 'inline-cap'\)/g) || []).length === 2 && (ar.match(/retryTake\(cid, new Set\((shownParked|parked)\), \{ via: 'prompt' \}\)/g) || []).length === 2, '(f) both drains arm on a starved prompt and take a parked entry on a fitting one');
 }
@@ -1342,7 +1342,7 @@ async function legA(CDx, label) {
 }
 {
   const a = await legA(CD, '');
-  ok(a.kept && a.gone && a.n === 30 && a.said, '(a) a may-have-landed copy reaching a full stash gives way first: the oldest real entry is kept, the eviction names the copy', JSON.stringify(a));
+  ok(gateOf(a.kept) && gateOf(a.gone) && a.n === 30 && verdictOf(a.said), '(a) a may-have-landed copy reaching a full stash gives way first: the oldest real entry is kept, the eviction names the copy', JSON.stringify(a));
   // the same door with the copy in the MIDDLE of the queue: still the one that falls
   const R = rigOver(CD, 'r3a-mid');
   for (let i = 1; i <= 15; i++) R.deliver.stashFor(R.cid, { source: 'agent', kind: 'notification', fromName: 'x', text: 'real ' + i, ts: R.now() + i });
@@ -1355,7 +1355,7 @@ async function legA(CDx, label) {
   for (let i = 1; i <= 30; i++) RJ.jm._stashNotif(RJ.cid, RJ.job, { what: 'real ' + i, at: RJ.now() }, 'unreachable', { stampLast: false, held: { kind: 'not-reachable' } });
   RJ.jm._stashNotif(RJ.cid, RJ.job, { what: 'the copy', at: RJ.now() }, 'may have landed', { stampLast: false, held: { kind: 'not-reachable', maybeDelivered: true } });
   const q = RJ.jm.peekNotifs(RJ.cid);
-  ok(q.length === 30 && q[0].text === 'real 1' && !q.some((e) => e.text === 'the copy') && RJ.logs.some((l) => /\[jobs\].*fell off the 30-entry cap/.test(l) && /a may-have-landed copy, gave way first/.test(l)), '(a) the jobs store: the may-have-landed copy gives way first there too, said', JSON.stringify({ n: q.length, first: q[0] && q[0].text, logs: RJ.logs.filter((l) => /fell off/.test(l)).map((l) => l.slice(0, 160)) }));
+  ok(q.length === 30 && q[0].text === 'real 1' && !q.some((e) => e.text === 'the copy') && verdictOf(RJ.logs.some((l) => /\[jobs\].*fell off the 30-entry cap/.test(l) && /a may-have-landed copy, gave way first/.test(l))), '(a) the jobs store: the may-have-landed copy gives way first there too, said', JSON.stringify({ n: q.length, first: q[0] && q[0].text, logs: RJ.logs.filter((l) => /fell off/.test(l)).map((l) => l.slice(0, 160)) }));
   RJ.jm._stashNotif(RJ.cid, RJ.job, { what: 'real 31', at: RJ.now() }, 'unreachable', { stampLast: false, held: { kind: 'not-reachable' } });
   ok(RJ.jm.peekNotifs(RJ.cid).length === 30 && RJ.jm.peekNotifs(RJ.cid)[0].text === 'real 2', '(a) …with no copy to give way, the oldest real entry falls as before');
   // CONTROL: the cap without the first pass evicts the oldest real entry for the copy
@@ -1380,10 +1380,10 @@ async function legB(CDx, label) {
 }
 {
   const b = await legB(CD, '');
-  ok(b.first && b.postedAt === 1 && b.floors === 0 && b.said === 1 && !b.fell, '(b) a landed post, the clock back 2 h, a new miss: the floor witness is dropped (said once) and the notice rides the first attempt', JSON.stringify({ ...b, fell: b.fell && b.fell.extra.reason }));
+  ok(gateOf(b.first) && b.postedAt === 1 && b.floors === 0 && b.said === 1 && !b.fell, '(b) a landed post, the clock back 2 h, a new miss: the floor witness is dropped (said once) and the notice rides the first attempt', JSON.stringify({ ...b, fell: b.fell && b.fell.extra.reason }));
   const pre = editAnchor(CD_SRC, "    for (const [cid, at] of lastPostAt) {\n      if (!(at > now)) continue;", "    for (const [cid, at] of []) {\n      if (!(at > now)) continue;", "src/server/conversation-deliver.js");
   if (pre === CD_SRC) ok(false, '(b) CONTROL: the lastPostAt re-base anchor moved');
-  else { const c = await legB(M4.load('src/server/conversation-deliver.js', pre, 'floor-no-rebase'), 'ctl'); ok(c.postedAt == null && c.floors >= 100 && c.fell && c.fell.extra.expired === true, '(b) CONTROL: without the re-base the floor holds for the whole step and the notice expires unposted', JSON.stringify({ postedAt: c.postedAt, floors: c.floors, fell: c.fell && c.fell.extra.reason })); }
+  else { const c = await legB(M4.load('src/server/conversation-deliver.js', pre, 'floor-no-rebase'), 'ctl'); ok(c.postedAt == null && c.floors >= 100 && gateOf(c.fell) && c.fell.extra.expired === true, '(b) CONTROL: without the re-base the floor holds for the whole step and the notice expires unposted', JSON.stringify({ postedAt: c.postedAt, floors: c.floors, fell: c.fell && c.fell.extra.reason })); }
   // the jobs engine's own floor (R5's witness) has the same clock rule
   const RJ = jobsRig('r3b-jobs');
   RJ.jm._notifyRate.set(RJ.cid, { ts: Date.now() + 2 * 3600_000, h: 'not-this-text' });
@@ -1391,7 +1391,7 @@ async function legB(CDx, label) {
   RJ.jm._notifyOwner(RJ.job, { what: 'after the leap' });
   await sleep(10);
   const last = RJ.job.notifyLog[RJ.job.notifyLog.length - 1];
-  ok(last && last.lane === 'message' && last.ok === true && RJ.posts.length === 1 && RJ.logs.some((l) => /\[jobs\].*the notify floor was stamped 1(19|20) min in the future — the clock went back; the witness is dropped \(no floor, no duplicate window\)/.test(l)), '(b) the jobs floor stamped in the future is dropped at the read (said once) and the notification is delivered at once, not held as rate floor', JSON.stringify({ last, posts: RJ.posts.length, logs: RJ.logs.filter((l) => /floor/.test(l)).map((l) => l.slice(0, 140)) }));
+  ok(gateOf(last) && last.lane === 'message' && last.ok === true && RJ.posts.length === 1 && verdictOf(RJ.logs.some((l) => /\[jobs\].*the notify floor was stamped 1(19|20) min in the future — the clock went back; the witness is dropped \(no floor, no duplicate window\)/.test(l))), '(b) the jobs floor stamped in the future is dropped at the read (said once) and the notification is delivered at once, not held as rate floor', JSON.stringify({ last, posts: RJ.posts.length, logs: RJ.logs.filter((l) => /floor/.test(l)).map((l) => l.slice(0, 140)) }));
 }
 /** (c) ONE ATTEMPT IN FLIGHT PER CONVERSATION (reproduced: a turn end during a frame's flight posted a second frame 5 ms
  *  behind it — two billed wakes inside the 30 s floor) */
@@ -1415,7 +1415,7 @@ async function legC(CDx, label) {
 }
 {
   const c = await legC(CD, '');
-  ok(c.inflight0 === 1 && c.duringPosts === 0 && c.duringLedger === 0 && c.afterA.posts.length === 1 && /e1/.test(c.afterA.posts[0]) && c.afterA.park === 1, '(c) a turn end during a frame\'s flight posts nothing — it waits for the frame, then the floor holds the newcomer', JSON.stringify({ inflight0: c.inflight0, duringPosts: c.duringPosts, afterA: { ...c.afterA, posts: c.afterA.posts.length } }));
+  ok(c.inflight0 === 1 && c.duringPosts === 0 && c.duringLedger === 0 && c.afterA.posts.length === 1 && gateOf(/e1/.test(c.afterA.posts[0])) && c.afterA.park === 1, '(c) a turn end during a frame\'s flight posts nothing — it waits for the frame, then the floor holds the newcomer', JSON.stringify({ inflight0: c.inflight0, duringPosts: c.duringPosts, afterA: { ...c.afterA, posts: c.afterA.posts.length } }));
   ok(c.final.posts === 2 && c.final.ledger === 2 && c.final.park === 0 && c.final.authorized === 2, '(c) …the newcomer rides 30 s later in its own frame: two notices, two posts 30 s apart, one charge each (its own hold converted)', JSON.stringify(c.final));
   const pre = editAnchor(CD_SRC, "    while (attempting.has(cid)) { try { await attempting.get(cid); } catch { } }\n", "", "src/server/conversation-deliver.js");
   if (pre === CD_SRC) ok(false, '(c) CONTROL: the single-flight anchor moved');
@@ -1434,9 +1434,9 @@ async function legC(CDx, label) {
   ok(q.length === 31 && q[0].maybeDelivered === true && fell.length === 0, '(d) thirty waiting + one may-have-landed: a thirty-first park evicts nothing (the leaving one is not counted, thirty are waiting)', JSON.stringify({ n: q.length, first: q[0] && q[0].maybeDelivered, fell: fell.length }));
   await notifyOver(R, 'n-32');
   const fell2 = R.events.filter((e) => e.ev === 'fell');
-  ok(fell2.length === 1 && fell2[0].extra.evicted === true && /n-2\b/.test(R.deliver.stashPeek(R.cid)[0].text) && R.deliver.retryPeek(R.cid)[0].maybeDelivered === true, '(d) …the thirty-second evicts the oldest REAL waiting entry (n-2), never the may-have-landed one', JSON.stringify({ fell: fell2.map((e) => e.extra.kind + ':' + !!e.extra.evicted), stash: R.deliver.stashPeek(R.cid).map((e) => e.text.slice(-4)) }));
+  ok(fell2.length === 1 && fell2[0].extra.evicted === true && gateOf(/n-2\b/.test(R.deliver.stashPeek(R.cid)[0].text)) && R.deliver.retryPeek(R.cid)[0].maybeDelivered === true, '(d) …the thirty-second evicts the oldest REAL waiting entry (n-2), never the may-have-landed one', JSON.stringify({ fell: fell2.map((e) => e.extra.kind + ':' + !!e.extra.evicted), stash: R.deliver.stashPeek(R.cid).map((e) => e.text.slice(-4)) }));
   await R.advance(0);
-  ok(R.deliver.stashPeek(R.cid).some((e) => e.held && e.held.maybeDelivered) && R.deliver.retryPeek(R.cid).every((e) => !e.maybeDelivered), '(d) …and the sweep hands it to the stash with its own word');
+  ok(gateOf(R.deliver.stashPeek(R.cid).some((e) => e.held && e.held.maybeDelivered)) && verdictOf(R.deliver.retryPeek(R.cid).every((e) => !e.maybeDelivered)), '(d) …and the sweep hands it to the stash with its own word');
   const pre = editAnchor(CD_SRC, "filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);", "filter((x) => x && !x.inflight && !x.ho);", "src/server/conversation-deliver.js", 'first');
   if (pre === CD_SRC) ok(false, '(d) CONTROL: the waiting filter anchor moved');
   else {
@@ -1559,7 +1559,7 @@ function judge(name, { table, engine, owner, expect }) {
   const diffs = Object.keys(expect).filter((k) => !same(expect[k], owner[k])).map((k) => `${k}: expected ${JSON.stringify(expect[k])} saw ${JSON.stringify(owner[k])}`);
   const agree = !te && !diffs.length;
   results.push({ name, agree, te, diffs });
-  ok(agree, name, (te ? 'table/engine: ' + te + ' ' : '') + (diffs.length ? 'owner: ' + diffs.join('; ') : ''));
+  ok(verdictOf(agree), name, (te ? 'table/engine: ' + te + ' ' : '') + (diffs.length ? 'owner: ' + diffs.join('; ') : ''));
 }
 
 // ── S1 THE INCIDENT: a transient miss on a live busy CLI → parked → delivered at the turn end, ONE wake ──
@@ -1935,9 +1935,9 @@ console.log('\n§7 verify r4: a hit during a flight; the copy that gives way; a 
     R.setAnswer(async () => OKr());
     R.setNow(R.now() + 5000); resolveA(); await pA; await te; await sleep(5);
     const e2 = R.deliver.retryPeek(R.cid)[0];
-    ok(R.posts.length === 1 && e2 && !e2.inflight && e2.nextAt === R.now() + 30_000 && R.events.some((e) => e.id === e2.id && e.ev === 'attempt' && e.extra.why === 'floor'), '(a) A landed at +35 s; the waiting turn end re-asked the floor: e2 rescheduled to the landing + 30 s (why: floor)', JSON.stringify({ posts: R.posts.length, next: e2 && e2.nextAt - R.now() }));
+    ok(R.posts.length === 1 && gateOf(e2) && !e2.inflight && e2.nextAt === R.now() + 30_000 && verdictOf(R.events.some((e) => e.id === e2.id && e.ev === 'attempt' && e.extra.why === 'floor')), '(a) A landed at +35 s; the waiting turn end re-asked the floor: e2 rescheduled to the landing + 30 s (why: floor)', JSON.stringify({ posts: R.posts.length, next: e2 && e2.nextAt - R.now() }));
     await R.advance(30_000);
-    ok(R.posts.length === 2 && /e2 words/.test(R.posts[1]) && R.ledger.length === 2 && R.deliver.retryCount(R.cid) === 0, '(a) …and the TIMER posts e2 at +65 s — a hit during the flight posts at the flight\'s end + the floor, never waits for the next turn end (T2① refuted)', JSON.stringify({ p: R.posts.length, l: R.ledger.length }));
+    ok(R.posts.length === 2 && gateOf(/e2 words/.test(R.posts[1])) && R.ledger.length === 2 && R.deliver.retryCount(R.cid) === 0, '(a) …and the TIMER posts e2 at +65 s — a hit during the flight posts at the flight\'s end + the floor, never waits for the next turn end (T2① refuted)', JSON.stringify({ p: R.posts.length, l: R.ledger.length }));
   }
   // (b) T2②: a stash of 30 may-have-landed copies and no real entry, then a real one — the OLDEST copy gives way, named
   {
@@ -1945,12 +1945,12 @@ console.log('\n§7 verify r4: a hit during a flight; the copy that gives way; a 
     for (let i = 1; i <= 30; i++) RJ.jm._stashNotif(RJ.cid, { ...RJ.job, id: 'jb-copy-' + i }, { what: 'copy ' + i, at: Date.now() - 60_000 * (31 - i) }, 'maybe', { held: { kind: 'not-reachable', maybeDelivered: true, attempts: 1 } });
     RJ.jm._stashNotif(RJ.cid, { ...RJ.job, id: 'jb-real' }, { what: 'the real one', at: Date.now() }, 'not reachable', { held: { kind: 'not-reachable', attempts: 1 } });
     const q = RJ.jm.peekNotifs(RJ.cid);
-    ok(q.length === 30 && q.some((e) => e.jobId === 'jb-real') && !q.some((e) => e.jobId === 'jb-copy-1') && q.filter((e) => e.held.maybeDelivered).length === 29, '(b) 30 copies + 1 real at the cap: the real one stays, the OLDEST copy (copy 1) goes', JSON.stringify({ n: q.length, first: q[0] && q[0].jobId }));
-    ok(RJ.logs.some((l) => /fell off the 30-entry cap \(jb-copy-1 \S+ — a may-have-landed copy, gave way first\)/.test(l)), '(b) …the journal names the copy by job + instant and says it gave way first', RJ.logs.filter((l) => /fell off/.test(l)).join(' | '));
+    ok(q.length === 30 && gateOf(q.some((e) => e.jobId === 'jb-real')) && !q.some((e) => e.jobId === 'jb-copy-1') && q.filter((e) => e.held.maybeDelivered).length === 29, '(b) 30 copies + 1 real at the cap: the real one stays, the OLDEST copy (copy 1) goes', JSON.stringify({ n: q.length, first: q[0] && q[0].jobId }));
+    ok(verdictOf(RJ.logs.some((l) => /fell off the 30-entry cap \(jb-copy-1 \S+ — a may-have-landed copy, gave way first\)/.test(l))), '(b) …the journal names the copy by job + instant and says it gave way first', RJ.logs.filter((l) => /fell off/.test(l)).join(' | '));
     const RL = rig('r4-copies-ladder');
     for (let i = 1; i <= 30; i++) RL.deliver.stashFor(RL.cid, { source: 'agent', kind: 'notification', fromName: 'Background Work · copy-' + i, text: 'copy ' + i, ts: RL.now() - 60_000 * (31 - i), held: { kind: 'not-reachable', maybeDelivered: true } });
     RL.deliver.stashFor(RL.cid, { source: 'agent', kind: 'notification', fromName: 'Background Work · real', text: 'the real one', ts: RL.now(), held: { kind: 'not-reachable' } });
-    ok(RL.deliver.stashCount(RL.cid) === 30 && RL.deliver.stashPeek(RL.cid).some((e) => e.text === 'the real one') && !RL.deliver.stashPeek(RL.cid).some((e) => e.text === 'copy 1') && RL.logs.some((l) => /a may-have-landed copy, gave way first/.test(l)), '(b) the ladder\'s stash: the same rule, the same words');
+    ok(RL.deliver.stashCount(RL.cid) === 30 && gateOf(RL.deliver.stashPeek(RL.cid).some((e) => e.text === 'the real one')) && !RL.deliver.stashPeek(RL.cid).some((e) => e.text === 'copy 1') && verdictOf(RL.logs.some((l) => /a may-have-landed copy, gave way first/.test(l))), '(b) the ladder\'s stash: the same rule, the same words');
   }
   // (c) T2③ (reproduced): a clock that KEEPS stepping back. The first future witness is dropped (one floor-less post, said);
   // a second within the hour is RE-BASED to now (one floor held, said once an hour); a third says nothing more
@@ -1963,11 +1963,11 @@ console.log('\n§7 verify r4: a hit during a flight; the copy that gives way; a 
     ok(R.posts.length === 2 && R.logs.filter((l) => /the witness is dropped \(no floor\)/.test(l)).length === 1, '(c) the clock steps back a millisecond: the first future witness is dropped — n-1 posts at once, said');
     R.setNow(R.now() - 1); await park('n-2'); await R.deliver.noteTurnEnd(R.session);
     const e2 = R.deliver.retryPeek(R.cid)[0];
-    ok(R.posts.length === 2 && e2 && e2.nextAt === R.now() + 30_000 && R.logs.filter((l) => /the clock keeps going back; the witness is re-based to now \(one floor held, not dropped\) and this is said once an hour/.test(l)).length === 1, '(c) …it steps back again within the hour: the witness is RE-BASED to now — n-2 waits the floor (rescheduled +30 s), said once', JSON.stringify({ p: R.posts.length, next: e2 && e2.nextAt - R.now(), lines: R.logs.filter((l) => /witness/.test(l)).length }));
+    ok(R.posts.length === 2 && gateOf(e2) && e2.nextAt === R.now() + 30_000 && R.logs.filter((l) => /the clock keeps going back; the witness is re-based to now \(one floor held, not dropped\) and this is said once an hour/.test(l)).length === 1, '(c) …it steps back again within the hour: the witness is RE-BASED to now — n-2 waits the floor (rescheduled +30 s), said once', JSON.stringify({ p: R.posts.length, next: e2 && e2.nextAt - R.now(), lines: R.logs.filter((l) => /witness/.test(l)).length }));
     R.setNow(R.now() - 1); await park('n-3'); await R.deliver.noteTurnEnd(R.session);
     ok(R.posts.length === 2 && R.logs.filter((l) => /re-based to now \(one floor held/.test(l)).length === 1 && R.logs.filter((l) => /witness is dropped/.test(l)).length === 1, '(c) …a third step says nothing more (once an hour)');
     await R.advance(31_000);
-    ok(R.posts.length === 3 && /n-2/.test(R.posts[2]) && /n-3/.test(R.posts[2]) && R.deliver.retryCount(R.cid) === 0, '(c) …and the floor\'s end posts both waiting ones in ONE frame (three posts for four notices under a misbehaving clock; it was one post per notice)', JSON.stringify({ p: R.posts.length }));
+    ok(R.posts.length === 3 && gateOf(/n-2/.test(R.posts[2])) && gateOf(/n-3/.test(R.posts[2])) && R.deliver.retryCount(R.cid) === 0, '(c) …and the floor\'s end posts both waiting ones in ONE frame (three posts for four notices under a misbehaving clock; it was one post per notice)', JSON.stringify({ p: R.posts.length }));
     // an hour later the first drop stands again
     R.setNow(R.now() + 3600_000 + 1000); await park('n-4'); await R.deliver.noteTurnEnd(R.session);   // lands (the witness is in the past)
     R.setNow(R.now() - 1); await park('n-5'); await R.deliver.noteTurnEnd(R.session);
@@ -2014,7 +2014,7 @@ console.log('\n§7 verify r4: a hit during a flight; the copy that gives way; a 
   {
     const cds = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
     const shs = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
-    ok(/const RETRY_FRAME_MAX_ENTRIES = STASH_CAP;/.test(cds) && /const RETRY_CAP = STASH_CAP;/.test(cds) && /const HANDOVER_MAX_ENTRIES = 30;/.test(shs) && CD.create.length === 1, '(d) the three per-conversation bounds are one constant (30): the cap, the frame, the hand-over');
+    ok(gateOf(/const RETRY_FRAME_MAX_ENTRIES = STASH_CAP;/.test(cds)) && gateOf(/const RETRY_CAP = STASH_CAP;/.test(cds)) && gateOf(/const HANDOVER_MAX_ENTRIES = 30;/.test(shs)) && CD.create.length === 1, '(d) the three per-conversation bounds are one constant (30): the cap, the frame, the hand-over');
     const R = rig('r4-bound');
     const park = (t) => R.deliver.deliverToConversation(R.cid, t, { kind: 'notification', spendReason: 'job-notification', retry: { producer: 'test', meta: { jobId: 'jb-' + t } } });
     let max = 0; const track = () => { max = Math.max(max, R.deliver.retryCount(R.cid)); };
@@ -2041,10 +2041,10 @@ console.log('\n§7 verify r4: a hit during a flight; the copy that gives way; a 
     const q = R.jm.peekNotifs(R.cid);
     ok(q.length === 1 && q[0].held.kind === 'not-reachable' && q[0].held.expired === true && q[0].held.attempts === 10, '(e) the expired entry sits in the jobs store typed not-reachable + expired, attempts 10', JSON.stringify(q[0] && q[0].held));
     const digest = JM_MODEL.renderNotifStash(q);
-    ok(/The hour of retries passed without the agent accepting some of them\./.test(digest), '(e) …the digest\'s tail says the hour passed (it never could: the listener dropped `expired`)', digest.split('\n').slice(-2).join(' | '));
+    ok(verdictOf(/The hour of retries passed without the agent accepting some of them\./.test(digest)), '(e) …the digest\'s tail says the hour passed (it never could: the listener dropped `expired`)', digest.split('\n').slice(-2).join(' | '));
     const parked = (R.job.notifyLog || []).find((l) => l.parked);
     const last = (R.job.notifyLog || []).slice(-1)[0];
-    ok(parked && parked.retries === 9 && parked.nextAt === null && last.lane === 'stash' && /in 10 attempts/.test(last.reason), '(e) …the parked line reads retries 9 (closed, no next instant) beside the stash line\'s 10 attempts — one story', JSON.stringify({ retries: parked && parked.retries, next: parked && parked.nextAt, last: last && last.reason.slice(0, 60) }));
+    ok(gateOf(parked) && parked.retries === 9 && parked.nextAt === null && last.lane === 'stash' && verdictOf(/in 10 attempts/.test(last.reason)), '(e) …the parked line reads retries 9 (closed, no next instant) beside the stash line\'s 10 attempts — one story', JSON.stringify({ retries: parked && parked.retries, next: parked && parked.nextAt, last: last && last.reason.slice(0, 60) }));
     const R2 = jobsRig('r4-expired-boot');
     R2.jm._notifyOwner(R2.job, { what: 'finished' }); await sleep(10);
     const f = path.join(R2.dir, 'msg-retry.json'); const raw = JSON.parse(fs.readFileSync(f, 'utf-8'));
@@ -2054,19 +2054,19 @@ console.log('\n§7 verify r4: a hit during a flight; the copy that gives way; a 
     jm3.jobs.set(R2.job.id, R2.job);
     await R3.advance(1000);
     const q3 = jm3.peekNotifs(R2.cid);
-    ok(q3.length === 1 && q3[0].held.expired === true && /The hour of retries passed/.test(JM_MODEL.renderNotifStash(q3)), '(e) the bound at a boot (a downtime) carries expired too', JSON.stringify(q3[0] && q3[0].held));
+    ok(q3.length === 1 && q3[0].held.expired === true && verdictOf(/The hour of retries passed/.test(JM_MODEL.renderNotifStash(q3))), '(e) the bound at a boot (a downtime) carries expired too', JSON.stringify(q3[0] && q3[0].held));
   }
 }
 
 console.log('\n§W wiring pins');
 {
   const sj = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
-  ok(/noteTurnEnd: noteTurnEndEngine,/.test(sj) && /const noteTurnEnd = \(s, m\) => \{ noteTurnEndEngine\(s, m\); try \{ deliver\.noteTurnEnd\(s\); \}/.test(sj) && /modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped,/.test(sj), 'server.js: the ONE noteTurnEnd the stdout consumers get forwards every turn end to the park (claude result / codex task_complete / ACP)');
-  ok(/deliver\.closeRetries\(\); m = deliver\.retryInFlightCount\(\);/.test(sj) && /require\('\.\/src\/server\/exit-settle\.js'\)\.settleInFlight\(\{ stashView, deliver, n, m \}\)\.finally\(shutdownNow\)/.test(sj) && /deliver\.settleRetries\(maxMs\)/.test(fs.readFileSync(path.join(REPO, 'src/server/exit-settle.js'), 'utf-8')), 'server.js: the shutdown shuts the park\'s door and waits for its posts in flight beside the hand-overs (exit-settle.js, verify r1)');
+  ok(gateOf(/noteTurnEnd: noteTurnEndEngine,/.test(sj)) && gateOf(/const noteTurnEnd = \(s, m\) => \{ noteTurnEndEngine\(s, m\); try \{ deliver\.noteTurnEnd\(s\); \}/.test(sj)) && verdictOf(/modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped,/.test(sj)), 'server.js: the ONE noteTurnEnd the stdout consumers get forwards every turn end to the park (claude result / codex task_complete / ACP)');
+  ok(gateOf(/deliver\.closeRetries\(\); m = deliver\.retryInFlightCount\(\);/.test(sj)) && gateOf(/require\('\.\/src\/server\/exit-settle\.js'\)\.settleInFlight\(\{ stashView, deliver, n, m \}\)\.finally\(shutdownNow\)/.test(sj)) && verdictOf(/deliver\.settleRetries\(maxMs\)/.test(fs.readFileSync(path.join(REPO, 'src/server/exit-settle.js'), 'utf-8'))), 'server.js: the shutdown shuts the park\'s door and waits for its posts in flight beside the hand-overs (exit-settle.js, verify r1)');
   const jw = fs.readFileSync(path.join(REPO, 'src/server/jobs-wiring.js'), 'utf-8');
-  ok(/onRetry: \(fn\) => deliver\.onRetry\(fn\)/.test(jw), 'jobs-wiring hands the engine the park\'s events');
+  ok(verdictOf(/onRetry: \(fn\) => deliver\.onRetry\(fn\)/.test(jw)), 'jobs-wiring hands the engine the park\'s events');
   const jobs = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf-8');
-  ok(/spendReason: 'job-notification', retry \}/.test(jobs) && /deps\.onRetry\(\(ev, cid, entry, extra\) => this\._onRetryEvent/.test(jobs), 'jobs.js opts into the park and books its events');
+  ok(gateOf(/spendReason: 'job-notification', retry \}/.test(jobs)) && verdictOf(/deps\.onRetry\(\(ev, cid, entry, extra\) => this\._onRetryEvent/.test(jobs)), 'jobs.js opts into the park and books its events');
   // verify r2 (R3): THE PARK → STASH FALL IS ONE-WAY. The only `retry` opt-in site in the tree is the jobs engine's first
   // attempt (`_notifyOwner`); an evicted / expired / may-have-landed entry lands in the producer's stash ONCE (`fell` ⇒
   // `_stashNotif`, which never posts), and every later carrier of that stash — the prompt's drain, a hand-over, the armed
@@ -2074,11 +2074,11 @@ console.log('\n§W wiring pins');
   const { execFileSync } = require('node:child_process');
   // the opt-in is the KEY `retry` in the call's options (`retry }` / `retry:`), never the word inside 'stash-retry'
   const optIns = execFileSync('git', ['grep', '-n', '-E', 'deliverToConversation\\(.*[{,] *retry *[:}]', '--', 'src', 'server.js', 'data/bin'], { cwd: REPO, encoding: 'utf-8' }).trim().split('\n').filter(Boolean);
-  ok(optIns.length === 1 && optIns[0].startsWith('src/jobs.js:') && /spendReason: 'job-notification', retry \}\)/.test(optIns[0]), 'the ONE retry opt-in site is the jobs engine\'s first attempt (grep census)', optIns.join(' | '));
+  ok(optIns.length === 1 && gateOf(optIns[0].startsWith('src/jobs.js:')) && verdictOf(/spendReason: 'job-notification', retry \}\)/.test(optIns[0])), 'the ONE retry opt-in site is the jobs engine\'s first attempt (grep census)', optIns.join(' | '));
   const sh = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
   ok((sh.match(/d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'stash-(retry|handover)', fromName: FROM_NAME, cardText \}\)/g) || []).length === 2 && !/deliverToConversation\([^)]*[{,] *retry *[:}]/.test(sh), 'the hand-over\'s two posts (auto + pressed) carry no retry: a miss re-stashes, never parks');
   const fellBody = jobs.slice(jobs.indexOf("if (ev === 'fell') {"), jobs.indexOf("return this._taken(this._parkCopyIn(cid, entry.id));", jobs.indexOf("if (ev === 'fell') {")));   // lane lg-store-writes (the moved2 cure 2): it answers «taken» with the jobs landing to ride
-  ok(/this\._stashNotif\(cid, target/.test(fellBody) && !/deliverToConversation|_notifyOwner\(/.test(fellBody), 'the jobs engine\'s fell listener stashes in its own store and posts nothing');
+  ok(gateOf(/this\._stashNotif\(cid, target/.test(fellBody)) && !/deliverToConversation|_notifyOwner\(/.test(fellBody), 'the jobs engine\'s fell listener stashes in its own store and posts nothing');
 }
 
 {
@@ -2103,7 +2103,7 @@ console.log('\n§W wiring pins');
       await sleep(5);
       const said = { parked: r.parked, posts: R.posts.length, park: R.deliver.retryCount(R.cid), stash: R.deliver.stashCount(R.cid), ledger: R.ledger.length, releases: R.releases.length, asked, ev: R.events.map((e) => e.ev), ho: ho && (ho.code || ho.ok) };
       if (owed) ok(r.parked === true && R.posts.length === 1 && asked >= 1 && R.deliver.retryCount(R.cid) === 0, `(r4) ${road}: the producer's judge says OWED ⇒ the parked copy is delivered (the control)`, JSON.stringify(said));
-      else ok(r.parked === true && asked >= 1 && R.posts.length === 0 && R.deliver.retryCount(R.cid) === 0 && R.deliver.stashCount(R.cid) === 0 && R.ledger.length === 0 && R.releases.length === 1 && R.events.some((e) => e.ev === 'dropped'),
+      else ok(r.parked === true && asked >= 1 && R.posts.length === 0 && R.deliver.retryCount(R.cid) === 0 && R.deliver.stashCount(R.cid) === 0 && R.ledger.length === 0 && R.releases.length === 1 && verdictOf(R.events.some((e) => e.ev === 'dropped')),
         `(r4) ${road}: the producer's judge says NOT OWED ⇒ dropped — no post, no wake (nothing billed, the hold given back), no stash; the producer hears «dropped»`, JSON.stringify(said));
     }
   }
@@ -2154,12 +2154,12 @@ console.log('\n§W wiring pins');
     view.live = new Set();   // its next turn: a live record that may not view
     ok(jm.peekNotifs(R.cid).length === 0 && !heldOf(jm, R.cid).length, '(r5) …and at its next turn (it may not view) nothing is printed: the drain drops the held line');
     const line = (j.notifyLog || []).find((l) => l && l.parked);
-    ok(line && line.dropped === true && /held for its next turn/.test(line.reason || ''), '(r5) the Delivery log says what happened — held for its next turn, judged there', JSON.stringify(line));
+    ok(gateOf(line) && line.dropped === true && verdictOf(/held for its next turn/.test(line.reason || '')), '(r5) the Delivery log says what happened — held for its next turn, judged there', JSON.stringify(line));
   }
   { // ITS CONTROL: still a member by key ⇒ delivered
     const { R, jm, parked } = await setup('r5-member');
     await turnEnd(R);
-    ok(parked === 1 && R.posts.length === 1 && /you subscribed/.test(R.posts[0]) && !heldOf(jm, R.cid).length, '(r5) CONTROL: still a member by key ⇒ the retry delivers the subscriber\'s copy (marked)', JSON.stringify({ posts: R.posts.map((t) => t.slice(0, 80)) }));
+    ok(parked === 1 && R.posts.length === 1 && gateOf(/you subscribed/.test(R.posts[0])) && !heldOf(jm, R.cid).length, '(r5) CONTROL: still a member by key ⇒ the retry delivers the subscriber\'s copy (marked)', JSON.stringify({ posts: R.posts.map((t) => t.slice(0, 80)) }));
   }
   { // REFUSED: a live record that may not view ⇒ dropped, nothing held
     const { R, jm, view, parked } = await setup('r5-refused');
@@ -2180,7 +2180,7 @@ console.log('\n§W wiring pins');
     jm.retryOwed = () => { throw new Error('view source down'); };
     await turnEnd(R);
     const line = (j.notifyLog || []).find((l) => l && l.parked);
-    ok(R.posts.length === 0 && line && /the delivery check failed/.test(line.reason || '') && !/can no longer view/.test(line.reason || ''), '(r5) a check that THREW is journalled as such — «the delivery check failed», never «can no longer view»', JSON.stringify(line));
+    ok(R.posts.length === 0 && gateOf(line) && gateOf(/the delivery check failed/.test(line.reason || '')) && !/can no longer view/.test(line.reason || ''), '(r5) a check that THREW is journalled as such — «the delivery check failed», never «can no longer view»', JSON.stringify(line));
   }
 }
 
@@ -2219,7 +2219,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
     const W = wakeRig('b6721-incident'); W.mk(SH);
     await fire(W, 'fired: the ticket window opens in 1 h');
     const q0 = W.jm.peekNotifs(W.cid);
-    ok(q0.length === 1 && q0[0].held && q0[0].held.kind === 'not-running' && W.scheduled.length === 1 && W.scheduled[0].ms === 5000, '(a) B-6721: stashed not-running (the incident) — ONE check armed (5 s)', JSON.stringify({ q: q0.map((n) => n.held), s: W.scheduled.map((x) => x.ms) }));
+    ok(q0.length === 1 && gateOf(q0[0].held) && q0[0].held.kind === 'not-running' && W.scheduled.length === 1 && W.scheduled[0].ms === 5000, '(a) B-6721: stashed not-running (the incident) — ONE check armed (5 s)', JSON.stringify({ q: q0.map((n) => n.held), s: W.scheduled.map((x) => x.ms) }));
     await W.run();
     ok(W.filed.length === 1 && W.filed[0].cid === W.cid && W.posts.length === 0 && W.scheduled.length === 0,
       '(a) …the conversation AWAY (no live session): For you says the notices wait (once), nothing posted, and the chain ENDS — nothing polls a stopped conversation', JSON.stringify({ filed: W.filed, posts: W.posts.length, s: W.scheduled.map((x) => x.ms) }));
@@ -2228,9 +2228,9 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
     W.comeBack(); W.broadcast(); await sleep(5);
     ok(W.scheduled.length === 1 && W.scheduled[0].ms === 5000, '(a) …a LIVE session of it (the resume) arms its chain at once', JSON.stringify(W.scheduled.map((x) => x.ms)));
     await W.run();
-    ok(W.posts.length === 1 && /that were waiting for this conversation/.test(W.posts[0]) && /ticket window opens in 1 h/.test(W.posts[0]) && W.jm.peekNotifs(W.cid).length === 0,
+    ok(W.posts.length === 1 && gateOf(/that were waiting for this conversation/.test(W.posts[0])) && gateOf(/ticket window opens in 1 h/.test(W.posts[0])) && W.jm.peekNotifs(W.cid).length === 0,
       '(a) …back, idle: ONE post — the frame carries the notice — the stash empty', JSON.stringify({ posts: W.posts.map((x) => x.slice(0, 160)) }));
-    ok(W.ledger.length === 1 && W.ledger[0].reason === 'stash-reachable' && W.resolved.includes(W.cid) && W.scheduled.length === 0 && W.filed.length === 1,
+    ok(W.ledger.length === 1 && W.ledger[0].reason === 'stash-reachable' && gateOf(W.resolved.includes(W.cid)) && W.scheduled.length === 0 && W.filed.length === 1,
       '(a) …billed ONCE under its OWN reason (stash-reachable), For you\'s item closed, no chain left, nothing filed again', JSON.stringify({ ledger: W.ledger, resolved: W.resolved, s: W.scheduled.length }));
   }
   // (a) the hand-over is a delivery for the engine's 30 s floor (its read: two billed posts inside 30 s otherwise) — the stamp
@@ -2246,7 +2246,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
   };
   {
     const f = await floorRun(SH);
-    ok(f.posts === 1 && f.stamped, '(a) …the engine\'s 30 s floor counts the hand-over (stamped AT it, as a post of its own)', JSON.stringify(f));
+    ok(f.posts === 1 && verdictOf(f.stamped), '(a) …the engine\'s 30 s floor counts the hand-over (stamped AT it, as a post of its own)', JSON.stringify(f));
     const SHnoStamp = MB.load('src/server/stash-handover.js', anchored(SHSRC, "      if (tookJobs.length && jm && typeof jm.noteHandedOver === 'function') { try { jm.noteHandedOver(cid, frame); } catch { } }   // B-6721: the engine's 30 s floor counts this delivery\n", '', 'B-6721: the floor not stamped'), 'sh-nostamp');
     const fr = await floorRun(SHnoStamp);
     ok(fr.posts === 1 && !fr.stamped, 'RED control: without the stamp the floor still reads the ATTEMPT\'s older stamp (two billed posts could land inside 30 s)', JSON.stringify(fr));
@@ -2287,7 +2287,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
     ok(W.posts.length === 1 && W.scheduled.length === 1 && W.scheduled[0].ms >= 29000, '(b) …the first look waits the ladder\'s floor out (never two posts inside it)', JSON.stringify(W.scheduled.map((x) => x.ms)));
     await W.advance(31 * 1000);
     await W.run();
-    ok(W.posts.length === 2 && /second: inside the floor/.test(W.posts[1]) && W.jm.peekNotifs(W.cid).length === 0 && W.filed.length === 0, '(b) …and fires at its bound — never left for a prompt; no For-you item (never away)', JSON.stringify({ posts: W.posts.length, filed: W.filed.length }));
+    ok(W.posts.length === 2 && gateOf(/second: inside the floor/.test(W.posts[1])) && W.jm.peekNotifs(W.cid).length === 0 && W.filed.length === 0, '(b) …and fires at its bound — never left for a prompt; no For-you item (never away)', JSON.stringify({ posts: W.posts.length, filed: W.filed.length }));
   }
   // (c) a notice the SPEND CEILING held, alone, waits for the person as before — no chain
   {
@@ -2305,7 +2305,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
     const n = W.jm.announceOwedWakes(); await sleep(20);
     ok(n === 1 && W.scheduled.length === 1, '(d) the engine\'s boot announce (after its notices are read) arms the owed conversation\'s chain', JSON.stringify({ n, s: W.scheduled.length }));
     const JSRC = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
-    ok(/this\._loadNotifs\(\);\n\s+this\.announceOwedWakes\(\);/.test(JSRC), '(d) …and init() announces right after it reads the notices (the writable engine\'s road)');
+    ok(verdictOf(/this\._loadNotifs\(\);\n\s+this\.announceOwedWakes\(\);/.test(JSRC)), '(d) …and init() announces right after it reads the notices (the writable engine\'s road)');
   }
   // (e) the person's prompt drains it first: For you's item closed; the conversation back is armed for nothing
   {
@@ -2313,7 +2313,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
     await fire(W, 'fired: drained by a prompt');
     await W.run();
     const text = AR.drainNotifsUnderCap(W.jm, W.deliver, W.cid, 0, () => { });   // a prompt with room for the digest (9600 B ahead = none: the cap's leg)
-    ok(/drained by a prompt/.test(text) && W.resolved.includes(W.cid), '(e) the person\'s prompt carries it and For you\'s item is closed', JSON.stringify({ text: String(text).slice(0, 120), resolved: W.resolved }));
+    ok(gateOf(/drained by a prompt/.test(text)) && verdictOf(W.resolved.includes(W.cid)), '(e) the person\'s prompt carries it and For you\'s item is closed', JSON.stringify({ text: String(text).slice(0, 120), resolved: W.resolved }));
     W.comeBack(); W.broadcast(); await sleep(5);
     ok(W.posts.length === 0 && W.scheduled.length === 0, '(e) …the conversation back: nothing owed, nothing armed', JSON.stringify({ posts: W.posts.length, s: W.scheduled.length }));
   }
@@ -2384,7 +2384,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
   };
   {
     const r = await forkRun(SH);
-    ok(r.fact && r.armed === 0 && r.posts === 0 && r.billed === 0 && r.owed === 2 && r.hand === 'no_conversation', '(g) a PENDING FORK carrying an owed (stopped) parent\'s id: its payload arms NOTHING and its strip shows none of the parent\'s stash; a newer owed notice while it is pending posts and bills NOTHING (the chain ends AWAY, never on the fork\'s window — a registration answers under the parent\'s id, as the fork\'s own CLI may); its «Hand over» is no hand-over of the parent\'s', JSON.stringify(r));
+    ok(gateOf(r.fact) && r.armed === 0 && r.posts === 0 && r.billed === 0 && r.owed === 2 && r.hand === 'no_conversation', '(g) a PENDING FORK carrying an owed (stopped) parent\'s id: its payload arms NOTHING and its strip shows none of the parent\'s stash; a newer owed notice while it is pending posts and bills NOTHING (the chain ends AWAY, never on the fork\'s window — a registration answers under the parent\'s id, as the fork\'s own CLI may); its «Hand over» is no hand-over of the parent\'s', JSON.stringify(r));
     const SHraw = MB.load('src/server/stash-handover.js', anchored(SHSRC, '  const ownCidOf = (s) => addressableId(s);', '  const ownCidOf = cidOf;', 'B-6721: the wake by the raw id'), 'sh-rawid');
     const rr = await forkRun(SHraw);
     ok(rr.armed >= 1, 'RED control: the raw-id lookup — the fork\'s payload arms the stopped parent\'s chain on the fork\'s window (the 5 s … 10 min steps for as long as the fork is pending)', JSON.stringify(rr));
@@ -2410,7 +2410,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
   };
   {
     const b = await bootWave(JobManager);
-    ok(b.atBoot === 0 && b.armedAfter === 0 && b.filed === 1 && b.since === b.old && b.handed, '(h) the BOOT\'s own announce of a month-old not-running notice files NO For-you item (the chain ends AWAY, quiet); a notice stashed for the stopped conversation while the hub runs files ONE, counting every notice waiting there (since = the oldest); back, the month-old notice is still handed over', JSON.stringify(b));
+    ok(b.atBoot === 0 && b.armedAfter === 0 && b.filed === 1 && b.since === b.old && verdictOf(b.handed), '(h) the BOOT\'s own announce of a month-old not-running notice files NO For-you item (the chain ends AWAY, quiet); a notice stashed for the stopped conversation while the hub runs files ONE, counting every notice waiting there (since = the oldest); back, the month-old notice is still handed over', JSON.stringify(b));
     const JSRCh = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
     const JMboot = MB.load('src/jobs.js', anchored(JSRCh, '    if (!this._stoppedThisRun || !this._stoppedThisRun.has(cid)) return null;\n', '', 'B-6721: a state found at boot said'), 'jobs-bootwave').JobManager;
     const br = await bootWave(JMboot);
@@ -2431,7 +2431,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
   };
   {
     const d = await dropRun(JobManager);
-    ok(d.filed === 1 && d.owed === 0 && d.resolved, '(i) the drain\'s judge drops the only owed notice (its job deleted): For you\'s item is closed there', JSON.stringify(d));
+    ok(d.filed === 1 && d.owed === 0 && verdictOf(d.resolved), '(i) the drain\'s judge drops the only owed notice (its job deleted): For you\'s item is closed there', JSON.stringify(d));
     const JSRCi = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
     const JMdrop = MB.load('src/jobs.js', anchored(JSRCi, "    this.wakeSettled(cid);   // B-6721 (the round's should): the drop may leave nothing owed — For you's «notices wait» goes with it\n", '', 'B-6721: the drop without the settle'), 'jobs-judgedrop').JobManager;
     const dr = await dropRun(JMdrop);
@@ -2614,10 +2614,10 @@ await (async () => {
   for (const how of ['unknown', 'groups-unread']) {
     const x = await judgeScene({ JobManager }, 'judge-' + how, how);
     console.log(`    facts (${how}) ` + JSON.stringify(x));
-    ok(judgeOk(x), `B-54b7 L1 (${how}): while job-notifications.json is held (${x.premise.code}) the judge's held line is TAKEN — the park's copy stays in msg-retry.json, the stash copy waits in memory carrying its id, and no door (peek, wake list, drain, the ladder's prompt view, its waiting count, its park) offers it`, JSON.stringify({ took: x.took, doors: x.doors }));
-    ok(quietOk(x), `B-54b7 L1 (${how}) r519 (3): a retry tick past the ladder's hour, a turn end and a person's hand-over press during the hold post nothing and start no turn (no authorization)`, JSON.stringify(x.quiet));
-    ok(bootsOk(x), `B-54b7 L1 (${how}) r519 (4): a crash, then a boot still held — twice: the park's entry comes back and is judged again into the SAME bounded state (one copy each, nothing posted)`, JSON.stringify(x.boots));
-    ok(liftOk(x), `B-54b7 L1 (${how}): the file reads again — while the lift's save has not landed the copy is still offered by no door; at its landing the conversation's strip is told; it lands in job-notifications.json ONCE, the park's copy leaves at that landing, one drain prints it once, a restart brings nothing back`, JSON.stringify({ lifting: x.lifting, lifted: x.lifted, d1: x.d1, d2: x.d2, drained: x.drained, delivered: x.delivered, after: x.after }));
+    ok(verdictOf(judgeOk(x)), `B-54b7 L1 (${how}): while job-notifications.json is held (${x.premise.code}) the judge's held line is TAKEN — the park's copy stays in msg-retry.json, the stash copy waits in memory carrying its id, and no door (peek, wake list, drain, the ladder's prompt view, its waiting count, its park) offers it`, JSON.stringify({ took: x.took, doors: x.doors }));
+    ok(verdictOf(quietOk(x)), `B-54b7 L1 (${how}) r519 (3): a retry tick past the ladder's hour, a turn end and a person's hand-over press during the hold post nothing and start no turn (no authorization)`, JSON.stringify(x.quiet));
+    ok(verdictOf(bootsOk(x)), `B-54b7 L1 (${how}) r519 (4): a crash, then a boot still held — twice: the park's entry comes back and is judged again into the SAME bounded state (one copy each, nothing posted)`, JSON.stringify(x.boots));
+    ok(verdictOf(liftOk(x)), `B-54b7 L1 (${how}): the file reads again — while the lift's save has not landed the copy is still offered by no door; at its landing the conversation's strip is told; it lands in job-notifications.json ONCE, the park's copy leaves at that landing, one drain prints it once, a restart brings nothing back`, JSON.stringify({ lifting: x.lifting, lifted: x.lifted, d1: x.d1, d2: x.d2, drained: x.drained, delivered: x.delivered, after: x.after }));
   }
   // CONTROL (a): the take's plain ride (the release's) — while held it answers «landed» at once: the park's copy is gone, a crash loses the notice
   const TAKE_A = '  _taken(item = null) { return { taken: true, ride: (step) => this._rideTaken(item, step) }; }';
@@ -2690,8 +2690,8 @@ await (async () => {
   {
     const f = await fallScene({ JobManager }, 'fall');
     console.log('    facts (fall) ' + JSON.stringify(f));
-    ok(!!f.id && f.fell && JSON.stringify(f.took.park) === JSON.stringify([f.id]) && JSON.stringify(f.took.mem) === JSON.stringify([f.id]) && !f.took.disk.length && noDoor(f.doors), 'B-54b7 L2 (the fall road): an owner\'s copy that falls «not running» while held keeps its park copy in msg-retry.json; the stash copy waits, offered by no door', JSON.stringify({ fell: f.fell, took: f.took, doors: f.doors }));
-    ok(f.boots.every((b) => b.held && b.back === 1 && JSON.stringify(b.park) === JSON.stringify([f.id]) && JSON.stringify(b.mem) === JSON.stringify([f.id]) && b.quiet) && !f.lifted.park.length && JSON.stringify(f.lifted.disk) === JSON.stringify([f.id]) && f.d1 === 1 && f.drained === 1 && f.posts === 0, 'B-54b7 L2: two crashes while held, each boot falls it again into one copy; at the read again it lands ONCE and is drained once', JSON.stringify({ boots: f.boots, lifted: f.lifted, d1: f.d1, drained: f.drained }));
+    ok(!!f.id && gateOf(f.fell) && JSON.stringify(f.took.park) === JSON.stringify([f.id]) && JSON.stringify(f.took.mem) === JSON.stringify([f.id]) && !f.took.disk.length && verdictOf(noDoor(f.doors)), 'B-54b7 L2 (the fall road): an owner\'s copy that falls «not running» while held keeps its park copy in msg-retry.json; the stash copy waits, offered by no door', JSON.stringify({ fell: f.fell, took: f.took, doors: f.doors }));
+    ok(gateOf(f.boots.every((b) => b.held && b.back === 1 && JSON.stringify(b.park) === JSON.stringify([f.id]) && JSON.stringify(b.mem) === JSON.stringify([f.id]) && b.quiet)) && !f.lifted.park.length && JSON.stringify(f.lifted.disk) === JSON.stringify([f.id]) && f.d1 === 1 && f.drained === 1 && f.posts === 0, 'B-54b7 L2: two crashes while held, each boot falls it again into one copy; at the read again it lands ONCE and is drained once', JSON.stringify({ boots: f.boots, lifted: f.lifted, d1: f.d1, drained: f.drained }));
     const fa = await fallScene(MB.load('src/jobs.js', anchored(JSRC, TAKE_A, "  _taken(item = null) { return { taken: true, ride: (step) => this._ride(this.notifsFile, 'a parked notification the jobs store took', step) }; }   // MUTANT: the plain ride", 'b54b7 the take rides its own landing'), 'b54b7-plain-ride'), 'fall-plain-ride');
     ok(!fa.took.park.length && fa.boots[0].back === 0 && !fa.boots[0].mem.length, 'CONTROL (a) on the fall road: the plain ride drops the park\'s copy while held — the crash loses the owner\'s notice (red)', JSON.stringify({ took: fa.took, boot: fa.boots[0] }));
   }
@@ -2707,7 +2707,7 @@ await (async () => {
   {
     const c = await capScene({ JobManager }, 'cap');
     console.log('    facts (cap) ' + JSON.stringify(c));
-    ok(c.n === 80 && c.park === 30 && c.mem === 30 && c.newest && c.said && c.posts === 0, 'B-54b7 r519 (2): eighty events through a held file — msg-retry.json holds at most the cap (30) for the conversation: an evicted copy\'s park entry leaves at its eviction (said by name)', JSON.stringify(c));
+    ok(c.n === 80 && c.park === 30 && c.mem === 30 && gateOf(c.newest) && gateOf(c.said) && c.posts === 0, 'B-54b7 r519 (2): eighty events through a held file — msg-retry.json holds at most the cap (30) for the conversation: an evicted copy\'s park entry leaves at its eviction (said by name)', JSON.stringify(c));
     const EVICT_A = '    for (const d of dropped) this._letParkGo(d);';
     const cx = await capScene(MB.load('src/jobs.js', anchored(JSRC, EVICT_A, '    for (const d of dropped) void d;   // MUTANT: the evicted copy\'s park entry stays', 'b54b7 an eviction lets the park copy go'), 'b54b7-evict'), 'cap-evict');
     console.log('    facts (cap control) ' + JSON.stringify(cx));
@@ -2734,13 +2734,13 @@ await (async () => {
     const CDSRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
     const bt = await batchScene({ JobManager }, CD, 'batch');
     console.log('    facts (batch) ' + JSON.stringify(bt));
-    ok(bt.before === 30 && bt.back === 30 && bt.batched && bt.evicted === 29 && bt.park === 30 && bt.mem === 30, 'B-54b7 (the read\'s must, r576): a boot during the hold judges the thirty taken copies as ONE batch — each leaves the park at its own taker\'s landing, so twenty-nine events past the cap leave msg-retry.json at the cap (30)', JSON.stringify(bt));
+    ok(bt.before === 30 && bt.back === 30 && gateOf(bt.batched) && bt.evicted === 29 && bt.park === 30 && bt.mem === 30, 'B-54b7 (the read\'s must, r576): a boot during the hold judges the thirty taken copies as ONE batch — each leaves the park at its own taker\'s landing, so twenty-nine events past the cap leave msg-retry.json at the cap (30)', JSON.stringify(bt));
     const EACH_A = "const riders = []; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, riders); if (riders.length) leaveOne(e, riders); else leaveNow.push(e); }";
     const shared = anchored(anchored(CDSRC, EACH_A, "emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, sharedRiders); leaveNow.push(e); }", 'b54b7 each entry leaves at its own landing'),
       '    if (leaveNow.length) leaveParkWhenLanded(leaveNow, []);', '    leaveParkWhenLanded(leaveNow, sharedRiders);   // MUTANT: one shared countdown for the batch', 'b54b7 the untaken leave in one write');
     const btx = await batchScene({ JobManager }, MB.load('src/server/conversation-deliver.js', anchored(shared, '    const leaveNow = [];', '    const leaveNow = [], sharedRiders = [];', 'b54b7 the batch'), 'b54b7-shared-countdown'), 'batch-shared');
     console.log('    facts (batch control) ' + JSON.stringify(btx));
-    ok(btx.batched && btx.evicted === 29 && btx.park === 59, 'CONTROL (the batch\'s one shared countdown, in a copy): no copy of the boot\'s batch leaves while any of its riders waits — msg-retry.json holds the cap plus the batch\'s evicted (59) (red)', JSON.stringify(btx));
+    ok(gateOf(btx.batched) && btx.evicted === 29 && btx.park === 59, 'CONTROL (the batch\'s one shared countdown, in a copy): no copy of the boot\'s batch leaves while any of its riders waits — msg-retry.json holds the cap plus the batch\'s evicted (59) (red)', JSON.stringify(btx));
   }
   // ALSO CURED (control c): a HELD VIEW's line (groups-unread) rides its own landing — with the file READABLE and a disk that does not answer
   // inside the flush (the failure branch): the park's copy stays until that landing
@@ -2832,7 +2832,7 @@ await (async () => {
     const CDSRC2 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
     const TOKEN_A = "  const retryRun = require('crypto').randomBytes(4).toString('hex');";
     const idsx = await idScene(MB.load('src/server/conversation-deliver.js', anchored(CDSRC2, TOKEN_A, "  const retryRun = 'x';   /* MUTANT: no token of the process */", 'b54b7 a park id carries its park\'s token'), 'b54b7-no-token'), 'ids-no-token');
-    ok(idsx.first && idsx.first === idsx.second, 'CONTROL (no token, in a copy): the next process mints the previous process\'s id at the same instant (red)', JSON.stringify(idsx));
+    ok(gateOf(idsx.first) && idsx.first === idsx.second, 'CONTROL (no token, in a copy): the next process mints the previous process\'s id at the same instant (red)', JSON.stringify(idsx));
   }
   // (iv) THE INSTANT BOTH ARE ON DISK (a kill between the notices' landing and the park's own rewrite): the boot judges the park entry — never a second copy
   const bothScene = async (Mod, name, who = 'subscriber') => {
@@ -2863,4 +2863,4 @@ await (async () => {
 })();
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? ` (${skipped} skipped, each named above)` : ''}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

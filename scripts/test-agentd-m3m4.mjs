@@ -39,7 +39,7 @@ fs.mkdirSync(path.join(fakeHome, '.claude', 'projects', PROJ_DIR), { recursive: 
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const version = require('../package.json').version;
@@ -127,7 +127,7 @@ console.log('— M3.3 discovery: raw-facts snapshot + dirty push —');
   await sleep(300);
   fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', PROJ_DIR, 'bbbb.jsonl'), '{"type":"user"}\n');
   for (let i = 0; i < 20 && !dirty; i++) await sleep(200);
-  check('fs.watch dirty PUSH on a new transcript', dirty, '');
+  check('fs.watch dirty PUSH on a new transcript', verdictOf(dirty), '');
   const snap2 = await dm.discoverySnapshot();
   check('re-snapshot sees the new transcript', snap2.jsonls.length === 2, String(snap2.jsonls.length));
 }
@@ -154,7 +154,7 @@ console.log('— M4.2 tcp-forward (the VNC-bridge shape): bidirectional loopback
   check('bytes forwarded to the device-local service and back', got === 'ACK:rfb-hello', JSON.stringify(got));
   fwd.write('frame2');
   await sleep(400);
-  check('channel stays live for more traffic', got.includes('ACK:frame2'), JSON.stringify(got));
+  check('channel stays live for more traffic', verdictOf(got.includes('ACK:frame2')), JSON.stringify(got));
   fwd.close(); echo.close();
   const refused = await dm.tcpForward(1).catch((e) => e.message);
   check('connection-refused surfaces as an error', typeof refused === 'string', JSON.stringify(refused));
@@ -166,7 +166,7 @@ console.log('— M4.3 Ctrl+G shape: write → device-side edit → read-back —
   await dm.fsWrite(p, 'line-original\n', { by: 'system:test' });
   await dm.runCmd('sed', ['-i', 's/original/edited-on-device/', p], { by: 'system:test' });
   const rr = await dm.fsReadRange(p, 0, 1024);
-  check('device-side edit visible in the read-back', rr.data.toString().includes('edited-on-device'), rr.data.toString());
+  check('device-side edit visible in the read-back', verdictOf(rr.data.toString().includes('edited-on-device')), rr.data.toString());
 }
 
 console.log('— M5 shape: device-owned long-lived mount-class process lifecycle —');
@@ -189,4 +189,4 @@ dm.stop();
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M3/M4 acceptance tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf } from './lib/check.mjs';

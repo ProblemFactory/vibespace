@@ -32,7 +32,7 @@ const H = require('../src/server/browser-handback.js');
 const express = require('express');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
 const REPO = new URL('..', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms = 3000, every = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(every); } return pred(); };
@@ -131,11 +131,11 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   ok(e0.status === 400 && e0.json.code === 'empty', 'an ask with no words is refused empty (400)');
   const a1 = await call('POST', '/api/agent/browser/takeover-request', { text: 'Log in to the bank and solve the captcha' }, asC);
   const id = a1.json.request && a1.json.request.id;
-  ok(a1.status === 200 && TQ.ID_RE.test(String(id)) && a1.json.request.state === 'waiting' && !a1.json.reasserted && /asked a human to take over the "Bank" browser/.test(a1.json.line) && /waits until they hand back or you withdraw/.test(a1.json.line), 'ask-human files ONE request (waiting) and answers the agent\'s line (where the person sees it, the next verb waits)', JSON.stringify(a1.json).slice(0, 300));
+  ok(a1.status === 200 && gateOf(TQ.ID_RE.test(String(id))) && a1.json.request.state === 'waiting' && !a1.json.reasserted && gateOf(/asked a human to take over the "Bank" browser/.test(a1.json.line)) && verdictOf(/waits until they hand back or you withdraw/.test(a1.json.line)), 'ask-human files ONE request (waiting) and answers the agent\'s line (where the person sees it, the next verb waits)', JSON.stringify(a1.json).slice(0, 300));
   const q1 = k12.takeoverRequests();
   ok(q1.length === 1 && q1[0].id === id && q1[0].profileId === p.id && q1[0].browserKey === KEY_C && q1[0].sessionId === 'sess-c' && q1[0].conversationName === 'Bank reconcile' && q1[0].profileLabel === 'Bank', 'the keeper\'s queue lists it: the lease (browser key × profile), the session, the conversation\'s and the profile\'s names');
   const bcLast = bc12.filter((m) => m.type === 'browser-takeovers-updated').pop();
-  ok(bcLast && bcLast.requests.length === 1 && bcLast.requests[0].id === id && !('takenBy' in bcLast.requests[0]), 'broadcast with the change (`browser-takeovers-updated`, the owner\'s queue — no viewer id)');
+  ok(gateOf(bcLast) && bcLast.requests.length === 1 && bcLast.requests[0].id === id && !('takenBy' in bcLast.requests[0]), 'broadcast with the change (`browser-takeovers-updated`, the owner\'s queue — no viewer id)');
   if (typeof k12._recordsLanded === 'function') k12._recordsLanded();   // B-574d browser-stores 8/8: an agent's ask is handed to the store writer, never awaited — on disk once it landed
   const disk = JSON.parse(fs.readFileSync(path.join(D12, 'browser-takeovers.json'), 'utf8'));
   ok(disk.version === 1 && disk.requests.length === 1 && disk.requests[0].id === id && disk.requests[0].state === 'waiting', 'persisted (data/browser-takeovers.json, on the store writer)');
@@ -145,11 +145,11 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   // a second ask on the same lease RE-ASSERTS
   clock12 += 60000;
   const a2 = await call('POST', '/api/agent/browser/takeover-request', { text: 'Also accept the cookie banner' }, asC);
-  ok(a2.json.request.id === id && a2.json.reasserted && k12.takeoverRequests().length === 1 && k12.takeoverRequest(id).asks === 2 && /the same request/.test(a2.json.line), 'a second ask on the same lease re-asserts it — the same id, asks 2, never a second row');
+  ok(a2.json.request.id === id && gateOf(a2.json.reasserted) && k12.takeoverRequests().length === 1 && k12.takeoverRequest(id).asks === 2 && verdictOf(/the same request/.test(a2.json.line)), 'a second ask on the same lease re-asserts it — the same id, asks 2, never a second row');
   ok(items().length === 1 && items()[0].id === it1[0].id && items()[0].i18n.text.params.words === 'Also accept the cookie banner', '…and the SAME For-you item carries the new words');
   // a page verb while it waits
   const rz1 = await call('POST', '/api/agent/browser/resolve', { handle: '', wrapper: true }, asC);
-  ok(rz1.status === 409 && rz1.json.code === 'human_asked' && rz1.json.request && rz1.json.request.id === id && rz1.json.request.waitMs === 3000 && /did NOT run yet/.test(rz1.json.error), 'a page verb while a person is asked: 409 human_asked + the request (the CLI waits on it)');
+  ok(rz1.status === 409 && rz1.json.code === 'human_asked' && gateOf(rz1.json.request) && rz1.json.request.id === id && rz1.json.request.waitMs === 3000 && verdictOf(/did NOT run yet/.test(rz1.json.error)), 'a page verb while a person is asked: 409 human_asked + the request (the CLI waits on it)');
   // the other conversation sees nothing of it
   const g0 = await call('GET', `/api/agent/browser/takeover-request?id=${id}`, undefined, asD);
   const own = await call('GET', '/api/browser/takeovers', undefined, asC);
@@ -159,7 +159,7 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   // the person takes over: taken; the verb answers browser_paused WITH the request
   k12.takeover({ browserKey: KEY_C, profileId: p.id, viewerId: 61, sessionId: 'sess-c' });
   const rz2 = await call('POST', '/api/agent/browser/resolve', { handle: '', wrapper: true }, asC);
-  ok(k12.takeoverRequest(id).state === 'taken' && rz2.status === 409 && rz2.json.code === 'browser_paused' && rz2.json.request && rz2.json.request.state === 'taken', 'a takeover moves it to taken (the keeper\'s own takeover road); the verb answers browser_paused WITH the request (the CLI keeps waiting)');
+  ok(k12.takeoverRequest(id).state === 'taken' && rz2.status === 409 && rz2.json.code === 'browser_paused' && gateOf(rz2.json.request) && rz2.json.request.state === 'taken', 'a takeover moves it to taken (the keeper\'s own takeover road); the verb answers browser_paused WITH the request (the CLI keeps waiting)');
   // a handback nobody chose (the view closed): waiting again, still listed, the item still open
   k12.handback({ browserKey: KEY_C, profileId: p.id, cause: 'viewer-left' });
   ok(k12.takeoverRequest(id).state === 'waiting' && k12.takeoverRequests().length === 1 && items()[0].status === 'open', 'a handback nobody chose (the live view closed) puts it back to WAITING — still listed, the item still open');
@@ -171,10 +171,10 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   const r1 = k12.takeoverRequest(id);
   ok(h1.status === 200 && r1.state === 'done' && r1.how === 'handback' && k12.takeoverRequests().length === 0, 'the explicit Hand back resolves it (done, by the handback) — it leaves the queue');
   const dv = delivered.filter((d) => d.cid === 'conv-c').pop();
-  ok(dv && /The user handed .*"Bank" browser.* back to you after/.test(dv.text) && dv.text.includes(`This answers your request ${id} ("Also accept the cookie banner") — it is done.`) && dv.opts.spendReason === 'browser-handback', 'the handback\'s ONE delivery names the request it answers (src/browser-interrupt.js\'s words + the request\'s id)', dv && dv.text);
+  ok(gateOf(dv) && gateOf(/The user handed .*"Bank" browser.* back to you after/.test(dv.text)) && gateOf(dv.text.includes(`This answers your request ${id} ("Also accept the cookie banner") — it is done.`)) && dv.opts.spendReason === 'browser-handback', 'the handback\'s ONE delivery names the request it answers (src/browser-interrupt.js\'s words + the request\'s id)', dv && dv.text);
   ok(items()[0].status === 'done' && items()[0].resolvedBy === 'handed-back', '…and its For-you item is resolved by the handback (never by a dismissal)');
   const rz3 = await call('POST', '/api/agent/browser/resolve', { handle: '', wrapper: true }, asC);
-  ok(rz3.status === 200 && rz3.json.ok, 'the agent\'s next verb runs');
+  ok(rz3.status === 200 && verdictOf(rz3.json.ok), 'the agent\'s next verb runs');
   // a NEW ask on the same lease (the old one is closed) is a new request; the person's Done without a takeover tells the agent once
   const a3 = await call('POST', '/api/agent/browser/takeover-request', { text: 'Approve the payment in the bank app' }, asC);
   const id3 = a3.json.request.id;
@@ -183,7 +183,7 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   const d1 = await call('POST', `/api/browser/takeovers/${id3}/done`, {});
   await settle();
   ok(d1.status === 200 && d1.json.how === 'done' && k12.takeoverRequest(id3).state === 'done' && k12.takeoverRequest(id3).how === 'done', 'the person\'s Done on a waiting request resolves it (no takeover)');
-  ok(delivered.length === n0 + 1 && /marked your browser request .* done from the Agent browser window/.test(delivered[delivered.length - 1].text), '…and the agent is told ONCE (the announcer\'s one ladder site)', delivered.slice(n0).map((d) => d.text).join(' | '));
+  ok(delivered.length === n0 + 1 && verdictOf(/marked your browser request .* done from the Agent browser window/.test(delivered[delivered.length - 1].text)), '…and the agent is told ONCE (the announcer\'s one ladder site)', delivered.slice(n0).map((d) => d.text).join(' | '));
   const d2 = await call('POST', `/api/browser/takeovers/${id3}/done`, {});
   ok(d2.status === 409 && d2.json.code === 'closed' && delivered.length === n0 + 1, 'CONTROL: a second Done is refused closed — nothing is told twice');
   const dAgent = await call('POST', `/api/browser/takeovers/${id3}/done`, {}, asC);
@@ -231,7 +231,7 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   const a5 = await call('POST', '/api/agent/browser/takeover-request', { text: 'Solve the puzzle' }, asC);
   const w5 = await call('POST', '/api/agent/browser/takeover-request', { withdraw: true }, asC);
   await settle();
-  ok(w5.status === 200 && /withdrew request/.test(w5.json.line) && k12.takeoverRequest(a5.json.request.id).state === 'withdrawn' && items().find((i) => i.action.requestId === a5.json.request.id).resolvedBy === 'agent', 'the agent withdraws its request (withdrawn; its item resolved by the agent)');
+  ok(w5.status === 200 && gateOf(/withdrew request/.test(w5.json.line)) && k12.takeoverRequest(a5.json.request.id).state === 'withdrawn' && items().find((i) => i.action.requestId === a5.json.request.id).resolvedBy === 'agent', 'the agent withdraws its request (withdrawn; its item resolved by the agent)');
   const w6 = await call('POST', '/api/agent/browser/takeover-request', { withdraw: true }, asC);
   ok(w6.status === 409 && w6.json.code === 'no_request', 'nothing open ⇒ the withdraw is refused no_request');
   // a dismissal parks it (band 4, still listed); a reply reopens the item and wakes the CLI's wait; the ✓ is the person's Done
@@ -246,13 +246,13 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   await sleep(150);
   UT.resolveByReply(it7.id, 'The code is on its way — wait a minute');
   const pr = await poll;
-  ok(pr.status === 200 && pr.json.replied === true && pr.json.open === true && /the person replied to your request/.test(pr.json.line) && UT.get(it7.id).status === 'open' && k12.takeoverRequest(id7).state === 'waiting', 'a reply through the item reopens it (the request still stands) and wakes the agent\'s wait (`replied`)', JSON.stringify(pr.json).slice(0, 300));
+  ok(pr.status === 200 && pr.json.replied === true && pr.json.open === true && gateOf(/the person replied to your request/.test(pr.json.line)) && UT.get(it7.id).status === 'open' && k12.takeoverRequest(id7).state === 'waiting', 'a reply through the item reopens it (the request still stands) and wakes the agent\'s wait (`replied`)', JSON.stringify(pr.json).slice(0, 300));
   const poll2 = call('GET', `/api/agent/browser/takeover-request?id=${id7}&wait=5000`, undefined, asC);
   await sleep(150);
   UT.setStatus(it7.id, 'done', 'user');
   const pr2 = await poll2;
   await settle();
-  ok(pr2.json.open === false && /the person is done/.test(pr2.json.line) && k12.takeoverRequest(id7).state === 'done' && k12.takeoverRequest(id7).how === 'done', 'the item\'s ✓ is the person\'s Done: the request done, the wait answers at once');
+  ok(pr2.json.open === false && gateOf(/the person is done/.test(pr2.json.line)) && k12.takeoverRequest(id7).state === 'done' && k12.takeoverRequest(id7).how === 'done', 'the item\'s ✓ is the person\'s Done: the request done, the wait answers at once');
   // the shipped CLI: the verb, its --status, a page verb that WAITS for the handback, the bounded wait, --withdraw
   const cliEnv = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: TOKEN };
   const runCli = (argv) => new Promise((resolve) => {
@@ -263,12 +263,12 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
     ch.on('close', (status, signal) => { clearTimeout(t); resolve({ status, signal, stdout, stderr }); });
   });
   const c0 = await runCli(['ask-human']);
-  ok(c0.status === 2 && /usage: vibespace-browser ask-human/.test(c0.stderr), 'CLI: `ask-human` with no words prints its usage (exit 2)');
+  ok(c0.status === 2 && verdictOf(/usage: vibespace-browser ask-human/.test(c0.stderr)), 'CLI: `ask-human` with no words prints its usage (exit 2)');
   const c1 = await runCli(['ask-human', 'Log in to Gmail as the shared mailbox, then hand back']);
   const cid = k12.takeoverRequests()[0] && k12.takeoverRequests()[0].id;
-  ok(c1.status === 0 && /asked a human to take over the "Bank" browser: "Log in to Gmail as the shared mailbox, then hand back" \(request tr-[0-9a-f]{8}\)/.test(c1.stdout) && TQ.ID_RE.test(String(cid)), 'CLI: `vibespace-browser ask-human "<words>"` files the request and prints the server\'s line', c1.stdout + c1.stderr);
+  ok(c1.status === 0 && gateOf(/asked a human to take over the "Bank" browser: "Log in to Gmail as the shared mailbox, then hand back" \(request tr-[0-9a-f]{8}\)/.test(c1.stdout)) && verdictOf(TQ.ID_RE.test(String(cid))), 'CLI: `vibespace-browser ask-human "<words>"` files the request and prints the server\'s line', c1.stdout + c1.stderr);
   const c2 = await runCli(['ask-human', '--status']);
-  ok(c2.status === 0 && /waiting for a person/.test(c2.stdout) && c2.stdout.includes(cid), 'CLI: `ask-human --status` reads it');
+  ok(c2.status === 0 && gateOf(/waiting for a person/.test(c2.stdout)) && verdictOf(c2.stdout.includes(cid)), 'CLI: `ask-human --status` reads it');
   const t0 = Date.now();
   const cw = runCli(['wait', '10']);
   await sleep(1200);
@@ -278,17 +278,17 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   clock12 += 1000;
   k12.handback({ browserKey: KEY_C, profileId: p.id, cause: 'explicit' });
   const w = await cw;
-  ok(w.status === 0 && /waiting for the person \(request tr-/.test(w.stderr) && /note: the person is done \(request tr-[0-9a-f]{8}, handed back\) — re-read the page first; your command runs now/.test(w.stderr) && Date.now() - t0 >= 1200, 'CLI: a page verb run while the person is asked WAITS (through the takeover too) and runs after the handback', `status ${w.status} ${w.stderr.slice(0, 400)}`);
+  ok(w.status === 0 && gateOf(/waiting for the person \(request tr-/.test(w.stderr)) && gateOf(/note: the person is done \(request tr-[0-9a-f]{8}, handed back\) — re-read the page first; your command runs now/.test(w.stderr)) && Date.now() - t0 >= 1200, 'CLI: a page verb run while the person is asked WAITS (through the takeover too) and runs after the handback', `status ${w.status} ${w.stderr.slice(0, 400)}`);
   const c3 = await runCli(['ask-human', 'One more thing: close the pop-up']);
   const t1 = Date.now();
   const cs = await runCli(['wait', '10']);
-  ok(cs.status === 1 && /\[human_asked\]/.test(cs.stderr) && /still waiting for the person after 3 s/.test(cs.stderr) && /End your turn: their handback arrives as a message/.test(cs.stderr) && Date.now() - t1 >= 2900 && !/note: the person is done/.test(cs.stderr), 'CLI: the wait is BOUNDED (the server\'s budget) — still waiting ⇒ nothing ran, exit 1, the line says end the turn', `status ${cs.status} ${cs.stderr.slice(0, 400)}`);
+  ok(cs.status === 1 && gateOf(/\[human_asked\]/.test(cs.stderr)) && gateOf(/still waiting for the person after 3 s/.test(cs.stderr)) && gateOf(/End your turn: their handback arrives as a message/.test(cs.stderr)) && Date.now() - t1 >= 2900 && !/note: the person is done/.test(cs.stderr), 'CLI: the wait is BOUNDED (the server\'s budget) — still waiting ⇒ nothing ran, exit 1, the line says end the turn', `status ${cs.status} ${cs.stderr.slice(0, 400)}`);
   const c4 = await runCli(['ask-human', '--withdraw']);
-  ok(c3.status === 0 && c4.status === 0 && /withdrew request/.test(c4.stdout) && k12.takeoverRequests().length === 0, 'CLI: `ask-human --withdraw` ends it');
+  ok(c3.status === 0 && c4.status === 0 && gateOf(/withdrew request/.test(c4.stdout)) && k12.takeoverRequests().length === 0, 'CLI: `ask-human --withdraw` ends it');
   const c5 = await runCli(['wait', '10']);
   ok(c5.status === 0 && !/human_asked/.test(c5.stderr), 'CLI: …and the next verb runs at once');
   const c6 = await runCli(['help']);
-  ok(/ask-human "<what you need>"/.test(c6.stdout) && /your next page verb WAITS until they hand back/.test(c6.stdout), 'CLI: the verb is in the usage');
+  ok(gateOf(/ask-human "<what you need>"/.test(c6.stdout)) && verdictOf(/your next page verb WAITS until they hand back/.test(c6.stdout)), 'CLI: the verb is in the usage');
   // the lease ending withdraws it; a restart is a handback (taken ⇒ waiting)
   const a8 = await call('POST', '/api/agent/browser/takeover-request', { text: 'Last one' }, asC);
   k12.takeover({ browserKey: KEY_C, profileId: p.id, viewerId: 65, sessionId: 'sess-c' });
@@ -308,4 +308,4 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

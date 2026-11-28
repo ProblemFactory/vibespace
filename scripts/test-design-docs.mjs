@@ -28,7 +28,7 @@ import { gitEnvFrom } from './git-env.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 const M = require(path.join(REPO, 'src/design-model.js'));
@@ -111,7 +111,7 @@ console.log('— ① the manual vs the PURE model');
 {
   const p = modelCensus(MANUAL);
   ok(p.length === 0, `the example design.json validates; ${[...new Set(Object.values(M.KEYS).flat())].length} keys, ${M.NOTE_COLORS.length} colours, ${M.PRINT_MODES.length} print modes, the bounds and the §5 codes are the model's`, p);
-  ok(HUB_CODES.every((c) => Object.prototype.hasOwnProperty.call(DE_STATUS, c)), 'every hub code the manual\'s §5 may name is one the engine answers (its STATUS table)', HUB_CODES.filter((c) => !(c in DE_STATUS)));
+  ok(verdictOf(HUB_CODES.every((c) => Object.prototype.hasOwnProperty.call(DE_STATUS, c))), 'every hub code the manual\'s §5 may name is one the engine answers (its STATUS table)', HUB_CODES.filter((c) => !(c in DE_STATUS)));
 }
 console.log('— ② the manual vs the CLI');
 {
@@ -122,7 +122,7 @@ console.log('— ③ the craft rules');
 {
   const p = skillCensus(SKILL);
   ok(p.length === 0, `docs/agent/design-skill.md carries the ${RULES.length} rules the design names`, p);
-  ok(/^# How to design here/.test(SKILL) && MANUAL.includes('**How to design here**'), 'the manual points at the rules by the heading they are printed under');
+  ok(gateOf(/^# How to design here/.test(SKILL)) && verdictOf(MANUAL.includes('**How to design here**')), 'the manual points at the rules by the heading they are printed under');
 }
 
 console.log('— ④ the topic serves both texts through the real route');
@@ -148,7 +148,7 @@ console.log('— ④ the topic serves both texts through the real route');
   ok(typeof routes['GET /api/agent/docs/:topic'] === 'function', 'the docs route is registered');
   const r = get('design');
   const text = r.out && r.out.text || '';
-  ok(r.code === 200 && text.startsWith(MANUAL) && text.endsWith(SKILL) && text.indexOf(SKILL) > text.indexOf(MANUAL) && text.length === MANUAL.length + SKILL.length + '\n---\n\n'.length,
+  ok(r.code === 200 && gateOf(text.startsWith(MANUAL)) && gateOf(text.endsWith(SKILL)) && text.indexOf(SKILL) > text.indexOf(MANUAL) && text.length === MANUAL.length + SKILL.length + '\n---\n\n'.length,
     '`vibespace-docs design` = the manual, a rule line, then the craft rules — whole, in that order', { code: r.code, len: text.length });
   const pages = get('pages');
   ok(pages.code === 200 && pages.out.text === read('docs/agent/pages-manual.md'), 'a one-file topic is served exactly as before (pages)');
@@ -157,10 +157,10 @@ console.log('— ④ the topic serves both texts through the real route');
   // the ci-gate derives its gate inputs from the registry's rows with this exact read (test-ci-gate §4, lane cli-registry) — both files must stay visible to it
   const REGISTRY = require(path.join(REPO, 'src/agent-cli-registry.js'));
   const manuals = [...new Set(REGISTRY.ROWS.flatMap((r) => [].concat(r.manual)))];
-  ok(manuals.includes('design-manual.md') && manuals.includes('design-skill.md'), 'the ci-gate\'s AGENT_DOC_TOPICS read sees both design files (a docs-only push that edits them runs the gate)', manuals);
+  ok(gateOf(manuals.includes('design-manual.md')) && verdictOf(manuals.includes('design-skill.md')), 'the ci-gate\'s AGENT_DOC_TOPICS read sees both design files (a docs-only push that edits them runs the gate)', manuals);
   // every file a topic names exists (a missing one is a 500 for every agent)
   const all = manuals;
-  ok(all.length >= 12 && all.every((f) => fs.existsSync(path.join(REPO, 'docs/agent', f))), `every file AGENT_DOC_TOPICS names exists (${all.length})`, all.filter((f) => !fs.existsSync(path.join(REPO, 'docs/agent', f))));
+  ok(all.length >= 12 && verdictOf(all.every((f) => fs.existsSync(path.join(REPO, 'docs/agent', f)))), `every file AGENT_DOC_TOPICS names exists (${all.length})`, all.filter((f) => !fs.existsSync(path.join(REPO, 'docs/agent', f))));
 }
 
 console.log('— ⑤ the tools intro');
@@ -170,8 +170,8 @@ console.log('— ⑤ the tools intro');
   const set2 = { attachments: [{ alias: 'work', isDefault: true, profileId: 'bp-00000001' }, { alias: 'personal', isDefault: false, profileId: 'bp-00000002' }] };
   const intros = [AR.sessionToolsIntro(T, {}), AR.sessionToolsIntro(T, { browserVariant: 'D' }), AR.sessionToolsIntro(T, { browserVariant: 'D', browserSet: set2 })];
   const line = intros[0].split('\n').find((l) => l.startsWith('Designs')) || '';
-  ok(/`vibespace-docs design`/.test(line) && /`vibespace-design new <slug>`/.test(line) && /Design window/.test(line) && /`vibespace-design add <file\.html>`/.test(line) && /`sync`/.test(line) && /`publish`/.test(line) && /asks the user/.test(line), 'ONE design line: read the manual, new <slug>, one HTML file per screen, add / sync, publish asks', line);
-  ok(intros.every((t) => (t.match(/^Designs/gm) || []).length === 1), 'exactly one design line in every variant');
+  ok(gateOf(/`vibespace-docs design`/.test(line)) && gateOf(/`vibespace-design new <slug>`/.test(line)) && gateOf(/Design window/.test(line)) && gateOf(/`vibespace-design add <file\.html>`/.test(line)) && gateOf(/`sync`/.test(line)) && gateOf(/`publish`/.test(line)) && verdictOf(/asks the user/.test(line)), 'ONE design line: read the manual, new <slug>, one HTML file per screen, add / sync, publish asks', line);
+  ok(verdictOf(intros.every((t) => (t.match(/^Designs/gm) || []).length === 1)), 'exactly one design line in every variant');
   ok(Buffer.byteLength(line) <= 500, `the line is ${Buffer.byteLength(line)} B (≤ 500 — the kit line it replaced was 453)`);
   const max = Math.max(...intros.map((t) => Buffer.byteLength(t)));
   ok(max < AR.INLINE_CAP && AR.INLINE_CAP === 9600, `the largest intro is ${max} B, under the ${AR.INLINE_CAP} B inline cap`);
@@ -228,9 +228,9 @@ console.log('— ⑥ the Claude CLI kit stays gone');
 {
   ok(!fs.existsSync(path.join(REPO, 'src/server/design-kit.js')) && !fs.existsSync(path.join(REPO, 'scripts/test-design-kit.mjs')), 'its module and its suite do not exist');
   const R = require(path.join(REPO, 'src/agent-tool-rules.js'));
-  ok(Array.isArray(R.PAGE_VERBS) && !R.PAGE_VERBS.includes('kit') && !/if \(verb === 'kit'\)/.test(read('data/bin/vibespace-page')), 'vibespace-page has no kit verb, and none is pre-approved');
+  ok(gateOf(Array.isArray(R.PAGE_VERBS)) && !R.PAGE_VERBS.includes('kit') && !/if \(verb === 'kit'\)/.test(read('data/bin/vibespace-page')), 'vibespace-page has no kit verb, and none is pre-approved');
   const hits = kitHits();
-  ok(Array.isArray(hits), 'git grep answered (the census reads the TRACKED tree)');
+  ok(verdictOf(Array.isArray(hits)), 'git grep answered (the census reads the TRACKED tree)');
   if (hits) {
     const v = kitVerdict(hits);
     const scanned = hits.length;
@@ -245,18 +245,18 @@ console.log('— ⑦ controls: every census catches its plant');
   const cut = (t, from, to = '') => { const i = t.indexOf(from); if (i < 0) throw new Error('plant anchor missing: ' + from.slice(0, 60)); return t.slice(0, i) + to + t.slice(i + from.length); };
   const has = (problems, re) => problems.some((p) => re.test(p));
   // ① an example with a key the model does not take
-  ok(has(modelCensus(cut(MANUAL, '"title": "Spring menu",', '"title": "Spring menu", "theme": "dark",')), /example is refused: theme unknown_key/), 'CONTROL an example design.json with an unknown key: RED (refused by the real validator)');
-  ok(has(modelCensus(MANUAL.replace(/teal/g, 'cyan')), /colour teal not named/), 'CONTROL a colour list missing teal: RED');
-  ok(has(modelCensus(MANUAL.replace(/"launch"/g, '"start"')), /key "launch" not named/), 'CONTROL a manual that never names "launch": RED');
-  ok(has(modelCensus(cut(MANUAL, '`out_of_range`', '`out_of_bounds`')), /code out_of_bounds is not a model/), 'CONTROL a refusal code the model never answers: RED');
-  ok(has(modelCensus(MANUAL.replace(/120–8000/g, '100–8000')), /bound w \/ h/), 'CONTROL a wrong size bound: RED');
+  ok(verdictOf(has(modelCensus(cut(MANUAL, '"title": "Spring menu",', '"title": "Spring menu", "theme": "dark",')), /example is refused: theme unknown_key/)), 'CONTROL an example design.json with an unknown key: RED (refused by the real validator)');
+  ok(verdictOf(has(modelCensus(MANUAL.replace(/teal/g, 'cyan')), /colour teal not named/)), 'CONTROL a colour list missing teal: RED');
+  ok(verdictOf(has(modelCensus(MANUAL.replace(/"launch"/g, '"start"')), /key "launch" not named/)), 'CONTROL a manual that never names "launch": RED');
+  ok(verdictOf(has(modelCensus(cut(MANUAL, '`out_of_range`', '`out_of_bounds`')), /code out_of_bounds is not a model/)), 'CONTROL a refusal code the model never answers: RED');
+  ok(verdictOf(has(modelCensus(MANUAL.replace(/120–8000/g, '100–8000')), /bound w \/ h/)), 'CONTROL a wrong size bound: RED');
   // ② a verb the CLI lacks / a verb left out / a flag left out
-  ok(has(cliCensus(cut(MANUAL, 'vibespace-design list ', 'vibespace-design rename <slug>\nvibespace-design list ')), /documents "rename"/), 'CONTROL a documented verb the CLI does not have: RED');
-  ok(has(cliCensus(MANUAL, CLI.replace("if (verb === 'list') {", "if (verb === 'list') {} if (verb === 'tidy') {")), /verb tidy not in the command block/), 'CONTROL a new CLI verb nobody documented: RED');
-  ok(has(cliCensus(MANUAL.replace(/--page/g, '--pg')), /flag --page not in the command block/), 'CONTROL a flag the manual no longer names: RED');
+  ok(verdictOf(has(cliCensus(cut(MANUAL, 'vibespace-design list ', 'vibespace-design rename <slug>\nvibespace-design list ')), /documents "rename"/)), 'CONTROL a documented verb the CLI does not have: RED');
+  ok(verdictOf(has(cliCensus(MANUAL, CLI.replace("if (verb === 'list') {", "if (verb === 'list') {} if (verb === 'tidy') {")), /verb tidy not in the command block/)), 'CONTROL a new CLI verb nobody documented: RED');
+  ok(verdictOf(has(cliCensus(MANUAL.replace(/--page/g, '--pg')), /flag --page not in the command block/)), 'CONTROL a flag the manual no longer names: RED');
   // ③ a rule removed
-  ok(has(skillCensus(SKILL.replace('Never lorem ipsum', 'Avoid filler')), /real copy, never lorem/), 'CONTROL the craft rules without "never lorem": RED');
-  ok(has(skillCensus(SKILL.replace(/\*\*390\*\*/g, '375')), /390 wide/), 'CONTROL the craft rules with another phone width: RED');
+  ok(verdictOf(has(skillCensus(SKILL.replace('Never lorem ipsum', 'Avoid filler')), /real copy, never lorem/)), 'CONTROL the craft rules without "never lorem": RED');
+  ok(verdictOf(has(skillCensus(SKILL.replace(/\*\*390\*\*/g, '375')), /390 wide/)), 'CONTROL the craft rules with another phone width: RED');
 }
 
 {
@@ -268,8 +268,8 @@ console.log('— ⑦ controls: every census catches its plant');
   ok(plant('src/lib/i18n-zh.js', "'Design kit ready (CLI {v})': '…',", { clientJudged: false }).bad.length === 0, '…and before the client lands that file is not judged (the chip is the other lane\'s)');
   ok(plant('docs/kb-file-structure.md', 'see the design-kit essay above').bad.length === 1, 'CONTROL a kb mention that is not the retirement record: RED');
   ok(kitVerdict([]).dead.length === KIT_LINES.length, 'CONTROL a retirement record that is gone: its allowance reads dead');
-  ok(KIT_RE.test('const designKit = require(x)') && KIT_RE.test('readKitFile(name)') && KIT_RE.test('the design canvas kit') && !KIT_RE.test('designs/<slug>/ + design.json'), 'the census pattern sees every spelling and not the new canvas\'s words');
+  ok(gateOf(KIT_RE.test('const designKit = require(x)')) && gateOf(KIT_RE.test('readKitFile(name)')) && gateOf(KIT_RE.test('the design canvas kit')) && !KIT_RE.test('designs/<slug>/ + design.json'), 'the census pattern sees every spelling and not the new canvas\'s words');
 }
 
 console.log(fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -12,7 +12,7 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = await freePort(), CDP_PORT = await freePort(), wt = scratch('incident-smoke'); // per-process (scripts/scratch.mjs)
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -38,12 +38,12 @@ console.log(`    (scratch server up in ${Date.now() - bootStart} ms)`);
 
 const post = async (url, body) => (await fetch(`http://127.0.0.1:${PORT}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
 const r = await post('/api/incident', { note: 'test note 现场', version: '0.0.0', rings: { action: [{ t: 1, k: 'ptr', el: 'div#x' }], ws: [], console: [{ t: 1, l: 'error', m: 'boom' }] }, snapshot: { windows: [], sessions: [] } });
-check('capture returns an inc- id', /^inc-[a-z0-9-]+$/.test(r.id || ''), JSON.stringify(r));
+check('capture returns an inc- id', verdictOf(/^inc-[a-z0-9-]+$/.test(r.id || '')), JSON.stringify(r));
 const bundle = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'incidents', r.id, 'bundle.json'), 'utf8'));
 check('bundle holds note + client rings', bundle.note === 'test note 现场' && bundle.client.rings.action[0].el === 'div#x');
-check('bundle holds server state (sessions + console ring + uptime)', Array.isArray(bundle.server.sessions) && Array.isArray(bundle.server.console) && bundle.server.uptimeS >= 0);
+check('bundle holds server state (sessions + console ring + uptime)', gateOf(Array.isArray(bundle.server.sessions)) && gateOf(Array.isArray(bundle.server.console)) && bundle.server.uptimeS >= 0);
 const a = await post(`/api/incident/${r.id}/append`, { rings: { action: [] }, snapshot: {} });
-check('follow-up append ok', a.ok === true && fs.existsSync(path.join(wt, 'data', 'incidents', r.id, 'followup.json')));
+check('follow-up append ok', a.ok === true && verdictOf(fs.existsSync(path.join(wt, 'data', 'incidents', r.id, 'followup.json'))));
 const bad = await post('/api/incident/inc-../../etc/append', {});
 check('append rejects a traversal id', bad.error != null);
 // prune: fabricate 35 old incidents → capture → ≤30 remain
@@ -55,7 +55,7 @@ await post('/api/incident', { note: 'prune trigger', rings: {}, snapshot: {} });
 const left = fs.readdirSync(path.join(wt, 'data', 'incidents')).filter((d) => d.startsWith('inc-'));
 check(`prune keeps ≤30 (${left.length})`, left.length <= 30);
 const list = await (await fetch(`http://127.0.0.1:${PORT}/api/incidents`)).json();
-check('list returns newest incidents with notes', Array.isArray(list.incidents) && list.incidents.length > 0 && 'note' in list.incidents[0]);
+check('list returns newest incidents with notes', gateOf(Array.isArray(list.incidents)) && list.incidents.length > 0 && 'note' in list.incidents[0]);
 
 // ── FREEZE THE SCENE (2.239.0): the volatile facts a user's own
 // troubleshooting would destroy must be copied out, asynchronously, and the
@@ -80,12 +80,12 @@ fs.mkdirSync(cacheDir, { recursive: true });
 fs.writeFileSync(path.join(cacheDir, CID + '.jsonl'), '{"type":"user","uuid":"u1"}\n{"type":"assistant","uuid":"u2"}\n');
 const r2 = await post('/api/incident', { note: 'freeze test', rings: {}, snapshot: { sessions: [{ id: CID, host: 'host-test' }] } });
 const dir2 = path.join(wt, 'data', 'incidents', r2.id);
-check('pending marker written immediately', fs.existsSync(path.join(dir2, 'env.json.pending')) || fs.existsSync(path.join(dir2, 'env.json')));
+check('pending marker written immediately', verdictOf(fs.existsSync(path.join(dir2, 'env.json.pending'))) || verdictOf(fs.existsSync(path.join(dir2, 'env.json'))));
 for (let i = 0; i < 60 && !fs.existsSync(path.join(dir2, 'env.json')); i++) await sleep(500);
-check('env.json produced by the async freeze', fs.existsSync(path.join(dir2, 'env.json')));
+check('env.json produced by the async freeze', verdictOf(fs.existsSync(path.join(dir2, 'env.json'))));
 const env = JSON.parse(fs.readFileSync(path.join(dir2, 'env.json'), 'utf8'));
-check('process table captured (the kill-erases-it evidence)', Array.isArray(env.local.processes) && env.local.processes.length > 0);
-check('session metas frozen as real copies', fs.existsSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json'))
+check('process table captured (the kill-erases-it evidence)', gateOf(Array.isArray(env.local.processes)) && env.local.processes.length > 0);
+check('session metas frozen as real copies', gateOf(fs.existsSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json')))
   && JSON.parse(fs.readFileSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json'), 'utf8')).name === 'frozen probe');
 {
   const readFrozen = (f) => { try { return JSON.parse(fs.readFileSync(path.join(dir2, 'frozen', 'session-meta', f), 'utf8')); } catch (e) { return { __parseError: e.message }; } };
@@ -100,9 +100,9 @@ check('session metas frozen as real copies', fs.existsSync(path.join(dir2, 'froz
     && big.taskRecords[big.taskRecords.length - 1].task_id === 't1199', JSON.stringify(big._frozenTrimmed || big).slice(0, 300));
 }
 const tr = env.local.transcripts?.[CID];
-check('transcript fingerprinted (sha256 + size) for the referenced conversation', Array.isArray(tr) && tr.length > 0 && /^[0-9a-f]{64}$/.test(tr[0].sha256 || ''), JSON.stringify(tr));
-check('transcript tail frozen to disk', fs.readdirSync(path.join(dir2, 'frozen', 'transcripts')).some((f) => f.startsWith(CID)));
-check('targets include the referenced host', (env.targets?.hostIds || []).includes('host-test'));
+check('transcript fingerprinted (sha256 + size) for the referenced conversation', gateOf(Array.isArray(tr)) && tr.length > 0 && verdictOf(/^[0-9a-f]{64}$/.test(tr[0].sha256 || '')), JSON.stringify(tr));
+check('transcript tail frozen to disk', verdictOf(fs.readdirSync(path.join(dir2, 'frozen', 'transcripts')).some((f) => f.startsWith(CID))));
+check('targets include the referenced host', verdictOf((env.targets?.hostIds || []).includes('host-test')));
 // TERMINAL TAILS + DESKTOP SCENE (2.369.118, userW's two reports arrived with the
 // wrapper sidecar only and nothing about the picture server): the last 64 KB of a
 // terminal-mode session's raw PTY buffer the reporter had open is frozen; the
@@ -115,11 +115,11 @@ const dirT = path.join(wt, 'data', 'incidents', rT.id);
 for (let i = 0; i < 60 && !fs.existsSync(path.join(dirT, 'env.json')); i++) await sleep(500);
 const envT = JSON.parse(fs.readFileSync(path.join(dirT, 'env.json'), 'utf8'));
 const tailFile = path.join(dirT, 'frozen', 'buffers', 'sess-77-term.tail');
-check('the reporter\'s open terminal is a freeze target', (envT.targets?.terminalIds || []).includes('sess-77-term'), envT.targets);
-check('its raw buffer TAIL is frozen (last 64 KB, truncatedFrom recorded)', fs.existsSync(tailFile) && fs.statSync(tailFile).size === 64 * 1024 && fs.readFileSync(tailFile, 'latin1').endsWith('TAIL-MARK') && envT.local.terminalTails?.['sess-77-term']?.bytes === 64 * 1024 && envT.local.terminalTails['sess-77-term'].truncatedFrom > 64 * 1024, envT.local.terminalTails);
+check('the reporter\'s open terminal is a freeze target', verdictOf((envT.targets?.terminalIds || []).includes('sess-77-term')), envT.targets);
+check('its raw buffer TAIL is frozen (last 64 KB, truncatedFrom recorded)', gateOf(fs.existsSync(tailFile)) && fs.statSync(tailFile).size === 64 * 1024 && gateOf(fs.readFileSync(tailFile, 'latin1').endsWith('TAIL-MARK')) && envT.local.terminalTails?.['sess-77-term']?.bytes === 64 * 1024 && envT.local.terminalTails['sess-77-term'].truncatedFrom > 64 * 1024, envT.local.terminalTails);
 check('a traversal-shaped session id is never a target', !(envT.targets?.terminalIds || []).some((x) => x.includes('..')) && !fs.existsSync(path.join(dirT, 'frozen', 'buffers', 'passwd.tail')));
 const bundleT = JSON.parse(fs.readFileSync(path.join(dirT, 'bundle.json'), 'utf8'));
-check('the server section carries the desktop scene (singleton + apps + bridge stats)', bundleT.server.desktop && typeof bundleT.server.desktop === 'object' && 'singleton' in bundleT.server.desktop && Array.isArray(bundleT.server.desktop.apps) && typeof bundleT.server.desktop.streams === 'object', bundleT.server.desktop);
+check('the server section carries the desktop scene (singleton + apps + bridge stats)', gateOf(bundleT.server.desktop) && typeof bundleT.server.desktop === 'object' && 'singleton' in bundleT.server.desktop && gateOf(Array.isArray(bundleT.server.desktop.apps)) && typeof bundleT.server.desktop.streams === 'object', bundleT.server.desktop);
 // the meta a later kill would clobber: prove the frozen copy is independent
 fs.writeFileSync(path.join(metaDir, 'cw-99-test.json'), JSON.stringify({ sessionId: null, name: 'CLOBBERED' }));
 check('frozen copy survives the original being clobbered',
@@ -140,10 +140,10 @@ const dir3 = path.join(wt, 'data', 'incidents', r3.id);
 for (let i = 0; i < 60 && !fs.existsSync(path.join(dir3, 'env.json')); i++) await sleep(500);
 const env3 = JSON.parse(fs.readFileSync(path.join(dir3, 'env.json'), 'utf8'));
 const cx = env3.local.transcripts?.[TID];
-check('codex rollout fingerprinted through the harness store (sha256 + size + harness tag)', Array.isArray(cx) && cx.length === 1 && /^[0-9a-f]{64}$/.test(cx[0].sha256 || '') && cx[0].harness === 'codex' && cx[0].size > 0, JSON.stringify(cx));
-check('codex rollout tail frozen to disk (.tail.jsonl named by its cache dir)', fs.readdirSync(path.join(dir3, 'frozen', 'transcripts')).some((f) => f.startsWith(TID) && f.endsWith('.tail.jsonl')));
-check('the frozen codex tail is the real bytes', fs.readFileSync(path.join(dir3, 'frozen', 'transcripts', fs.readdirSync(path.join(dir3, 'frozen', 'transcripts')).find((f) => f.startsWith(TID))), 'utf8').includes('frozen codex probe'));
-check('the claude conversation in the same report still freezes exactly once (locate dedups against the scan)', Array.isArray(env3.local.transcripts?.[CID]) && env3.local.transcripts[CID].length === 1);
+check('codex rollout fingerprinted through the harness store (sha256 + size + harness tag)', gateOf(Array.isArray(cx)) && cx.length === 1 && gateOf(/^[0-9a-f]{64}$/.test(cx[0].sha256 || '')) && cx[0].harness === 'codex' && cx[0].size > 0, JSON.stringify(cx));
+check('codex rollout tail frozen to disk (.tail.jsonl named by its cache dir)', verdictOf(fs.readdirSync(path.join(dir3, 'frozen', 'transcripts')).some((f) => f.startsWith(TID) && f.endsWith('.tail.jsonl'))));
+check('the frozen codex tail is the real bytes', verdictOf(fs.readFileSync(path.join(dir3, 'frozen', 'transcripts', fs.readdirSync(path.join(dir3, 'frozen', 'transcripts')).find((f) => f.startsWith(TID))), 'utf8').includes('frozen codex probe')));
+check('the claude conversation in the same report still freezes exactly once (locate dedups against the scan)', gateOf(Array.isArray(env3.local.transcripts?.[CID])) && env3.local.transcripts[CID].length === 1);
 // the remote probe is built from every harness's store.remoteFind — claude's line unchanged, codex's added
 const inc = (await import(path.join(repo, 'src', 'incident.js'))).default || (await import('node:module')).createRequire(import.meta.url)(path.join(repo, 'src', 'incident.js'));
 // the copier itself (inc-mudv05ja-n5rv): a frozen file is truncated as DATA, never as bytes
@@ -156,20 +156,20 @@ const inc = (await import(path.join(repo, 'src', 'incident.js'))).default || (aw
   const r0 = typeof cj === 'function' ? cj(src, dst, 20 * 1024) : null;
   const o = (() => { try { return JSON.parse(fs.readFileSync(dst, 'utf8')); } catch { return null; } })();
   check('copyJsonWhole: over the ceiling ⇒ valid JSON under it, the largest array keeps its NEWEST records, marker names field/from/kept + original size',
-    r0 && o && fs.statSync(dst).size <= 20 * 1024 && o.a === 1 && o.small.length === 2 && o._frozenTrimmed?.originalBytes === fs.statSync(src).size
+    gateOf(r0) && gateOf(o) && fs.statSync(dst).size <= 20 * 1024 && o.a === 1 && o.small.length === 2 && o._frozenTrimmed?.originalBytes === fs.statSync(src).size
     && o._frozenTrimmed.dropped[0].field === 'taskRecords' && o._frozenTrimmed.dropped[0].from === 100 && o.taskRecords.at(-1).i === 99 && r0.trimmed === true, JSON.stringify(r0));
   fs.writeFileSync(src, '{"not json' + 'z'.repeat(50 * 1024));
   const r1 = typeof cj === 'function' ? cj(src, dst, 20 * 1024) : null;
   const o1 = (() => { try { return JSON.parse(fs.readFileSync(dst, 'utf8')); } catch { return null; } })();
-  check('copyJsonWhole: an unparseable file over the ceiling still freezes to VALID JSON (marker + the raw tail as a string)', r1 && o1 && o1._frozenTrimmed?.unparseable === true && typeof o1.rawTail === 'string' && fs.statSync(dst).size <= 20 * 1024, JSON.stringify(r1));
+  check('copyJsonWhole: an unparseable file over the ceiling still freezes to VALID JSON (marker + the raw tail as a string)', gateOf(r1) && gateOf(o1) && o1._frozenTrimmed?.unparseable === true && typeof o1.rawTail === 'string' && fs.statSync(dst).size <= 20 * 1024, JSON.stringify(r1));
   fs.writeFileSync(src, '{"x":1}');
   const r2c = typeof cj === 'function' ? cj(src, dst, 20 * 1024) : null;
-  check('copyJsonWhole: under the ceiling ⇒ the bytes verbatim', r2c && fs.readFileSync(dst, 'utf8') === '{"x":1}' && !r2c.trimmed);
+  check('copyJsonWhole: under the ceiling ⇒ the bytes verbatim', gateOf(r2c) && fs.readFileSync(dst, 'utf8') === '{"x":1}' && !r2c.trimmed);
 }
 const probe = inc.buildRemoteTranscriptProbe([CID, TID]);
-check('remote probe: claude find line = the pre-B-8ebb expression', probe.includes(`find "$HOME"/.claude/projects -maxdepth 2 -name "${CID}.jsonl" 2>/dev/null | head -3); do probe_transcript "$f" "claude"; done`), probe.slice(0, 300));
-check('remote probe: codex rollouts (.jsonl and .jsonl.zst) probed under $HOME/.codex/sessions', probe.includes(`rollout-*${TID}.jsonl.zst`) && probe.includes('"$HOME"/.codex/sessions') && probe.includes('probe_transcript "$f" "codex"'), probe.slice(-400));
-check('REMOTE_SCRIPT defines probe_transcript once and embeds the per-harness lines', (() => { const s = inc.REMOTE_SCRIPT([CID]); return s.includes('probe_transcript() {') && s.includes('probe_transcript "$f" "claude"') && !s.includes('$HOME/.claude/projects -maxdepth 2 -name "$cid.jsonl"'); })());
+check('remote probe: claude find line = the pre-B-8ebb expression', verdictOf(probe.includes(`find "$HOME"/.claude/projects -maxdepth 2 -name "${CID}.jsonl" 2>/dev/null | head -3); do probe_transcript "$f" "claude"; done`)), probe.slice(0, 300));
+check('remote probe: codex rollouts (.jsonl and .jsonl.zst) probed under $HOME/.codex/sessions', gateOf(probe.includes(`rollout-*${TID}.jsonl.zst`)) && gateOf(probe.includes('"$HOME"/.codex/sessions')) && verdictOf(probe.includes('probe_transcript "$f" "codex"')), probe.slice(-400));
+check('REMOTE_SCRIPT defines probe_transcript once and embeds the per-harness lines', verdictOf((() => { const s = inc.REMOTE_SCRIPT([CID]); return s.includes('probe_transcript() {') && s.includes('probe_transcript "$f" "claude"') && !s.includes('$HOME/.claude/projects -maxdepth 2 -name "$cid.jsonl"'); })()));
 // dc-twins M4: a harness is captured by its declared `store.scene` row — a FAKE harness added through ONE registration
 // line shows up in the remote script (process word, locks, listing, --version) and in the local process filter; the
 // script names no harness of its own
@@ -179,7 +179,7 @@ check('REMOTE_SCRIPT defines probe_transcript once and embeds the per-harness li
   reg.register({ ...base, id: 'acme-cli', store: { scene: { process: 'acme-cli', locks: '.acme/locks', listings: [['acme threads', '.acme/threads', 7]], version: 'acme-cli' } } });
   try {
     const s = inc.REMOTE_SCRIPT([CID]);
-    check('scene rows: a fake harness (one register() line) is in the remote scene — ps words, its locks, its listing, its --version', /grep -E "[^"]*\bacme-cli\b/.test(s) && s.includes('echo "== acme-cli locks"\nfor f in $HOME/.acme/locks/*.json') && s.includes('echo "== acme threads"; ls $HOME/.acme/threads 2>/dev/null | head -7') && s.includes('(acme-cli --version 2>/dev/null || echo "acme-cli: not on PATH")'));
+    check('scene rows: a fake harness (one register() line) is in the remote scene — ps words, its locks, its listing, its --version', gateOf(/grep -E "[^"]*\bacme-cli\b/.test(s)) && gateOf(s.includes('echo "== acme-cli locks"\nfor f in $HOME/.acme/locks/*.json')) && gateOf(s.includes('echo "== acme threads"; ls $HOME/.acme/threads 2>/dev/null | head -7')) && verdictOf(s.includes('(acme-cli --version 2>/dev/null || echo "acme-cli: not on PATH")')));
   } finally { reg.unregister('acme-cli'); }
   // (the scene rows' source pin of src/incident.js: MOVED to the fast scripts/test-incident-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -240,8 +240,8 @@ if (CHROME) {
   await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
   await sleep(200);
   const rings = await evaljs(`(() => ({ same: window.__ringRefs.filter(([k, f]) => window[k] !== f).map(([k]) => k), inputs: (window.__vsInputs ? window.__vsInputs() : []).filter((t) => t >= ${t0} - 5).length }))()`);
-  check('rings: every window.__vs* ring accessor is still the first copy\'s after the Doc window (the doc editor\'s copy re-points none)', before === 6 && rings && rings.same.length === 0, JSON.stringify({ before, rings }));
-  check('rings: the REAL click and key after the Doc window are in the inputs ring', !!bar && rings && rings.inputs >= 2, JSON.stringify({ bar, rings }));
+  check('rings: every window.__vs* ring accessor is still the first copy\'s after the Doc window (the doc editor\'s copy re-points none)', before === 6 && gateOf(rings) && rings.same.length === 0, JSON.stringify({ before, rings }));
+  check('rings: the REAL click and key after the Doc window are in the inputs ring', !!bar && gateOf(rings) && rings.inputs >= 2, JSON.stringify({ bar, rings }));
   const ui = await evaljs(`(async () => {
     window.app.captureIncident();
     await new Promise((r) => setTimeout(r, 300));
@@ -274,10 +274,10 @@ if (CHROME) {
     const b2 = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'incidents', ui.id, 'bundle.json'), 'utf8'));
     check('UI-driven capture wrote the note from the textarea', b2.note === 'ui e2e note');
     const inputs = b2.client?.snapshot?.inputs;
-    check('rings: the bundle captured after the Doc window carries the click and the key (snapshot.inputs)', Array.isArray(inputs) && inputs.filter((x) => x >= t0 - 5).length >= 2, JSON.stringify(inputs));
+    check('rings: the bundle captured after the Doc window carries the click and the key (snapshot.inputs)', gateOf(Array.isArray(inputs)) && inputs.filter((x) => x >= t0 - 5).length >= 2, JSON.stringify(inputs));
   }
   cws.close();
 } else console.log('  (chrome absent — dialog render check skipped)');
 
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -15,7 +15,7 @@ const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit
 const { runMigrations } = require('../src/migration-runner.js');
 const { create } = require('../src/server/migrations.js');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 // r4456 (the flake census, round 2): a wait on the FACT a leg judges — its bound generous, its expiry a NAMED harness row (red), never a
 // silent read of whatever is there
 // waitFact: the wait alone (→ its ms, or -1 at its bound) — for a wait inside a hushed span, its expiry named once the span is over
@@ -59,7 +59,7 @@ try {
   ok(ran === 1 && r.find((x) => x.id === 'a').status === 'already', 'second run: applied id skipped (ledger)');
   ok(boom === 2, 'FAILED migration re-attempts next run (never recorded)');
   const led = JSON.parse(fs.readFileSync(ledger, 'utf-8'));
-  ok(led.applied.a && !led.applied.b, 'ledger records success only');
+  ok(gateOf(led.applied.a) && !led.applied.b, 'ledger records success only');
 
   // ── lane lg-store-writes, the U4/U5 cure (U5 reader 3's should 0): `landStores` — what the migrations that ran handed the
   // store writer lands before the ledger is stamped; a reshape NOT on disk is not recorded (it runs again next boot), said ──
@@ -70,14 +70,14 @@ try {
     const mig2 = [{ id: 'land-a', run: () => { } }, { id: 'land-b', run: () => { } }];
     const rL = runMigrations({ ledgerPath: lsl, migrations: mig2, log: () => { }, warn: () => { }, todos, landStores: () => { asked.push(1); return [{ name: 'task-groups.write', file: 'x', why: 'its write was still held by the storage at the bound (30.0 s)' }]; } });
     const ledL = JSON.parse(fs.readFileSync(lsl, 'utf8'));
-    ok(asked.length === 1 && !ledL.applied['land-a'] && !ledL.applied['land-b'] && rL.length === 2 && rL.every((x) => x.status === 'failed' && /^task-groups\.write not on disk yet \(its write was still held/.test(x.error)) && filed.join() === 'land-a,land-b',
+    ok(asked.length === 1 && !ledL.applied['land-a'] && !ledL.applied['land-b'] && rL.length === 2 && gateOf(rL.every((x) => x.status === 'failed' && /^task-groups\.write not on disk yet \(its write was still held/.test(x.error))) && filed.join() === 'land-a,land-b',
       'U4/U5 cure: a reshape whose store did not land is NOT recorded — every migration that ran comes off the ledger, failed by name, its For-you row opened (it runs again next boot)', { asked, applied: ledL.applied, rL, filed });
     const rOk = runMigrations({ ledgerPath: lsl, migrations: mig2, log: () => { }, warn: () => { }, todos, landStores: () => [] });
-    ok(rOk.every((x) => x.status === 'ran') && !!JSON.parse(fs.readFileSync(lsl, 'utf8')).applied['land-a'], 'U4/U5 cure CONTROL: the same migrations with their stores landed ([]) are recorded', rOk);
+    ok(gateOf(rOk.every((x) => x.status === 'ran')) && !!JSON.parse(fs.readFileSync(lsl, 'utf8')).applied['land-a'], 'U4/U5 cure CONTROL: the same migrations with their stores landed ([]) are recorded', rOk);
     const rThrow = runMigrations({ ledgerPath: path.join(tmp, 'ledger-land-throw.json'), migrations: [{ id: 'land-c', run: () => { } }], log: () => { }, warn: () => { }, landStores: () => { throw new Error('the writer is gone'); } });
-    ok(rThrow.length === 1 && rThrow[0].status === 'failed' && /^the store writer not on disk yet \(the writer is gone\)/.test(rThrow[0].error), 'U4/U5 cure: a landing that THREW counts as a store not on disk (failed by name, not recorded)', rThrow);
+    ok(rThrow.length === 1 && rThrow[0].status === 'failed' && verdictOf(/^the store writer not on disk yet \(the writer is gone\)/.test(rThrow[0].error)), 'U4/U5 cure: a landing that THREW counts as a store not on disk (failed by name, not recorded)', rThrow);
     const rNoRun = runMigrations({ ledgerPath: lsl, migrations: mig2, log: () => { }, warn: () => { }, landStores: () => { asked.push(2); return []; } });
-    ok(rNoRun.every((x) => x.status === 'already') && !asked.includes(2), 'U4/U5 cure: a boot where no migration ran asks the store writer nothing', { rNoRun, asked });
+    ok(gateOf(rNoRun.every((x) => x.status === 'already')) && !asked.includes(2), 'U4/U5 cure: a boot where no migration ran asks the store writer nothing', { rNoRun, asked });
     // the U5b cure's ORDER LAW (both readers of lg-store-writes-u5b-keeper-cure): a migration that threw EVSNOTONDISK (a store
     // reshaped in memory, its write not on disk) HOLDS the pass — the migration after it (it may read that store's FILE, as
     // grants-unify reads browser-profiles.json) neither runs nor is recorded this boot; any OTHER failure keeps going, as before
@@ -89,7 +89,7 @@ try {
       const appliedOf = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).applied || {}; } catch { return {}; } };
       const ranH = [], lh = path.join(tmp, 'ledger-order.json');
       const rH = runMigrations({ ledgerPath: lh, migrations: orderMigs(ranH), log: () => { }, warn: () => { }, landStores: () => [] });
-      ok(rH.length === 2 && rH[0].status === 'failed' && rH[1].status === 'held' && /ord-reshape's write is not on disk yet/.test(rH[1].why || '') && !ranH.length && !appliedOf(lh)['ord-reader'] && !appliedOf(lh)['ord-reshape'],
+      ok(rH.length === 2 && rH[0].status === 'failed' && rH[1].status === 'held' && gateOf(/ord-reshape's write is not on disk yet/.test(rH[1].why || '')) && !ranH.length && !appliedOf(lh)['ord-reader'] && !appliedOf(lh)['ord-reshape'],
         'U5b cure ORDER LAW: a migration whose write is NOT ON DISK (EVSNOTONDISK) holds the pass — the reader after it neither runs nor is recorded this boot (the next boot runs both, in order)', { rH, ranH, applied: appliedOf(lh) });
       const ranP = [];
       const rP = runMigrations({ ledgerPath: path.join(tmp, 'ledger-order-plain.json'), migrations: [{ id: 'ord-plain', run: () => { throw new Error('a plain failure'); } }, { id: 'ord-next', run: () => { ranP.push('ord-next'); } }], log: () => { }, warn: () => { }, landStores: () => [] });
@@ -132,12 +132,12 @@ try {
     const r1 = runMigrations({ ledgerPath: sl, migrations: steppedMig, log: () => { }, warn: (m) => warned.push(m), onLate: (x) => late.push(x) });
     const st = Object.fromEntries(r1.map((x) => [x.id, x.status]));
     const led0 = JSON.parse(fs.readFileSync(sl, 'utf-8'));
-    ok(st.s1 === 'started' && st.s2 === 'started' && st.s3 === 'started' && st.s4 === 'ran' && !led0.applied.s1 && led0.applied.s4, 'a stepped migration: the boot goes on at once (started), nothing recorded yet — a sync one beside it is recorded as always', st);
+    ok(st.s1 === 'started' && st.s2 === 'started' && st.s3 === 'started' && st.s4 === 'ran' && !led0.applied.s1 && verdictOf(led0.applied.s4), 'a stepped migration: the boot goes on at once (started), nothing recorded yet — a sync one beside it is recorded as always', st);
     resolveS({ shards: 2, deduped: 1 }); rejectS(new Error('ENOSPC'));
     await new Promise((r) => setImmediate(r));
     const led1 = JSON.parse(fs.readFileSync(sl, 'utf-8'));
-    ok(led1.applied.s1 && led1.reports.s1.deduped === 1 && led1.applied.s4 && !led1.applied.s2 && !led1.applied.s3, 'it is recorded when it ENDS (its report beside it; the ledger re-read, the sync one kept); the hung and the failed are not', led1);
-    ok(late.some((x) => x.id === 's1' && x.status === 'ran') && late.some((x) => x.id === 's3' && x.status === 'failed' && /ENOSPC/.test(x.error)) && warned.some((m) => /s3 FAILED \(will retry next boot\): ENOSPC/.test(m)), 'onLate hears the end (ran / failed); a failure is said VERBATIM like a sync one\'s', { late, warned });
+    ok(gateOf(led1.applied.s1) && led1.reports.s1.deduped === 1 && gateOf(led1.applied.s4) && !led1.applied.s2 && !led1.applied.s3, 'it is recorded when it ENDS (its report beside it; the ledger re-read, the sync one kept); the hung and the failed are not', led1);
+    ok(gateOf(late.some((x) => x.id === 's1' && x.status === 'ran')) && gateOf(late.some((x) => x.id === 's3' && x.status === 'failed' && /ENOSPC/.test(x.error))) && verdictOf(warned.some((m) => /s3 FAILED \(will retry next boot\): ENOSPC/.test(m))), 'onLate hears the end (ran / failed); a failure is said VERBATIM like a sync one\'s', { late, warned });
     const r2 = runMigrations({ ledgerPath: sl, migrations: steppedMig, log: () => { }, warn: () => { } });
     const st2 = Object.fromEntries(r2.map((x) => [x.id, x.status]));
     ok(st2.s1 === 'already' && st2.s2 === 'started' && st2.s3 === 'started' && hung === 2, 'the next boot: the ended one is skipped; the one a restart cut short and the failed one run again', st2);
@@ -162,7 +162,7 @@ try {
   m.runLocalMigrations();
   {
     const st = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'settings.json'), 'utf-8'));
-    ok(st['chat.collapseKinds'].includes('agent'), "pre-'agent' collapse saves gain the new default-on kind once (a saved multiSelect can't tell 'unchecked' from 'predates the option')");
+    ok(verdictOf(st['chat.collapseKinds'].includes('agent')), "pre-'agent' collapse saves gain the new default-on kind once (a saved multiSelect can't tell 'unchecked' from 'predates the option')");
     ok(st['window.closeBehavior'] === 'detach' && st['chat.collapseKinds'][0] === 'thinking', 'everything else in settings.json untouched');
     // after the one-shot, an explicit un-tick sticks (ledger, not content-sniffing)
     st['chat.collapseKinds'] = st['chat.collapseKinds'].filter((k) => k !== 'agent');
@@ -171,7 +171,7 @@ try {
     const st2 = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'settings.json'), 'utf-8'));
     ok(!st2['chat.collapseKinds'].includes('agent'), 'a post-migration explicit un-tick is never re-added');
     // lane S3: the 'note' kind (VibeSpace's notes to the assistant) rides the same one-shot rule
-    ok(st['chat.collapseKinds'].includes('note'), "lane S3: a saved collapse-kinds selection gains the default-on 'note' kind once");
+    ok(verdictOf(st['chat.collapseKinds'].includes('note')), "lane S3: a saved collapse-kinds selection gains the default-on 'note' kind once");
     st2['chat.collapseKinds'] = st2['chat.collapseKinds'].filter((k) => k !== 'note');
     fs.writeFileSync(path.join(rootDir, 'data', 'settings.json'), JSON.stringify(st2));
     m.runLocalMigrations();
@@ -244,15 +244,15 @@ try {
     ok(arch.length === 1, `the archive shard is DATED (append-only; two rotations in one millisecond must not overwrite): ${arch.join(',')}`);
     const archLines = fs.readFileSync(path.join(root2, 'data', 'archive', arch[0]), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     const rowLines = archLines.filter((l) => l.store === 'usage-history');
-    ok(rowLines.length === 2 && rowLines.every((l) => l.entry && l.reason && l.migration === '2026-09-purge-test-fixture-ledger'),
+    ok(rowLines.length === 2 && verdictOf(rowLines.every((l) => l.entry && l.reason && l.migration === '2026-09-purge-test-fixture-ledger')),
       'every archived row keeps the WHOLE record plus a reason and the migration id');
-    ok(/no API request ever happened/.test(rowLines.find((l) => l.entry.rid === 'fx_sid_1').reason)
-      && /throwaway cwd/.test(rowLines.find((l) => l.entry.rid === 'fx_cwd_1').reason),
+    ok(gateOf(/no API request ever happened/.test(rowLines.find((l) => l.entry.rid === 'fx_sid_1').reason))
+      && verdictOf(/throwaway cwd/.test(rowLines.find((l) => l.entry.rid === 'fx_cwd_1').reason)),
       'the two classes carry DIFFERENT reasons (fabricated vs a real turn in a fixture cwd) — the whole subject of this repair');
 
     const cur2 = JSON.parse(fs.readFileSync(path.join(hist, '_cursors.json'), 'utf-8'));
     const curKeys = Object.keys(cur2);
-    ok(curKeys.length === 1 && /-home-u-work\/aaaaaaaa/.test(curKeys[0]),
+    ok(curKeys.length === 1 && verdictOf(/-home-u-work\/aaaaaaaa/.test(curKeys[0])),
       `dead cursors dropped by project dir AND by synthetic sid, the real one kept (${curKeys.length} left)`);
 
     const attr2 = fs.readFileSync(path.join(hist, 'attribution.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -260,14 +260,14 @@ try {
 
     const anchors2 = fs.readFileSync(path.join(anch, 'anchors-org_x.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     const voided = anchors2.filter((a) => a.costSince === null);
-    ok(voided.length === 2 && voided.every((a) => a.repairedBy === '2026-09-purge-test-fixture-ledger'),
+    ok(voided.length === 2 && verdictOf(voided.every((a) => a.repairedBy === '2026-09-purge-test-fixture-ledger')),
       `only the anchors whose interval CONTAINED a removed row are voided (${voided.length}/3), and they say who did it`);
     ok(anchors2.find((a) => a.fetchedAt === 8000).costSince.total === 4,
       'NEGATIVE CONTROL: an anchor whose interval held nothing removed keeps its costSince (this is not a blanket wipe)');
     ok(anchors2.length === 3, 'no anchor RECORD is removed — the readings are real, only the cost measured beside them is not');
-    ok(!fs.existsSync(path.join(anch, 'rates.json')) && archLines.some((l) => l.store === 'usage-anchors/rates.json'),
+    ok(!fs.existsSync(path.join(anch, 'rates.json')) && verdictOf(archLines.some((l) => l.store === 'usage-anchors/rates.json')),
       'the learned rates are archived and dropped so the estimator re-learns from the cleaned pairs');
-    ok(notices2.includes('fixture-ledger-purged'), 'the user is TOLD (a repair nobody can see ran is a repair nobody can verify ran)');
+    ok(verdictOf(notices2.includes('fixture-ledger-purged')), 'the user is TOLD (a repair nobody can see ran is a repair nobody can verify ran)');
 
     // IDEMPOTENT — and, because the ledger is keyed by id, a second boot does
     // not even re-enter it.
@@ -290,7 +290,7 @@ try {
     fs.writeFileSync(path.join(root3, 'data', 'usage-history', 'events-2026-08.ndjson'), row({ rid: 'r', ts: 1, sid: REAL, cwd: '/home/u/work' }) + '\n');
     const notices3 = [];
     create({ rootDir: root3, homeDir: scratchHomeDir, serverNotice: (k) => notices3.push(k) }).runLocalMigrations();
-    ok(fs.readFileSync(path.join(root3, 'data', 'usage-history', 'events-2026-08.ndjson'), 'utf-8').includes('"rid":"r"')
+    ok(gateOf(fs.readFileSync(path.join(root3, 'data', 'usage-history', 'events-2026-08.ndjson'), 'utf-8').includes('"rid":"r"'))
       && !notices3.includes('fixture-ledger-purged'),
       'a clean instance keeps every row and is not told about a repair that did nothing');
   }
@@ -358,7 +358,7 @@ try {
     ok(acopy.split('\n').filter(Boolean).length === preRows.length && acopy.split('\n').filter(Boolean).filter((l) => /"origin"/.test(l)).length === 1,
       'the archive is a VERBATIM copy of the pre-migration shard (archive, then rewrite — never destroy)');
     const man = JSON.parse(fs.readFileSync(path.join(root4, 'data', 'archive', adirs[0], '_migration.json'), 'utf-8'));
-    ok(man.migration === '2026-09-usage-origin-backfill' && man.shards.includes('events-2026-08.ndjson'),
+    ok(man.migration === '2026-09-usage-origin-backfill' && verdictOf(man.shards.includes('events-2026-08.ndjson')),
       'the archive says WHICH migration copied it (a directory of unlabelled ndjson is not a recovery path)');
 
     // IDEMPOTENT — the function itself, not just the ledger belt.
@@ -439,11 +439,11 @@ try {
     ok(Math.abs(fx.sevenDay.utilization - 0.43) < 1e-9 && fx.sevenDay.resetsAt === 1790535600 && fx.sevenDay.status === 'allowed',
       'the plan week reads 0.43 — the NEWEST windowed event\'s unifiedWindows.seven_day, not the older 0.40, not the rejection\'s 0.99, not the bucket\'s 0.86', JSON.stringify(fx.sevenDay));
     const fable = (fx.scopedWeekly || []).find((s) => s.name === 'Fable');
-    ok(fable && Math.abs(fable.utilization - 0.87) < 1e-9 && fable.status === 'allowed_warning' && !(fx.scopedWeekly || []).some((s) => s.name === 'Model cap'),
+    ok(gateOf(fable) && Math.abs(fable.utilization - 0.87) < 1e-9 && fable.status === 'allowed_warning' && !(fx.scopedWeekly || []).some((s) => s.name === 'Model cap'),
       'Fable reads 0.87 with the representative\'s warning — named through the sidecar, no placeholder', JSON.stringify(fx.scopedWeekly));
     ok(Math.abs(fx.fiveHour.utilization - 0.09) < 1e-9 && fx.fiveHour.resetsAt === 1790048400, 'the 5-hour lane is exactly what it was (a tail line has no clock; the 5h was never the bucket\'s victim)', JSON.stringify(fx.fiveHour));
     const plan = (fx.limits || []).find((l) => l.limitId === 'plan'), fl = (fx.limits || []).find((l) => l.limitId === 'model:fable');
-    ok(plan && plan.windows.find((w) => w.kind === '7d').usedPct === 43 && plan.source === 'rate-limit-event' && fl && fl.windows[0].usedPct === 87,
+    ok(gateOf(plan) && plan.windows.find((w) => w.kind === '7d').usedPct === 43 && plan.source === 'rate-limit-event' && gateOf(fl) && fl.windows[0].usedPct === 87,
       'the typed limits agree (plan 7d 43, model:fable 87) and the plan\'s provenance stays the event\'s — the number came from the session\'s own record', JSON.stringify((fx.limits || []).map((l) => [l.limitId, l.source, l.windows.map((w) => [w.kind, w.usedPct])])));
     ok(fx.fetchedAt > incident.fetchedAt && plan.windows.find((w) => w.kind === '7d').measuredAt > incident.fetchedAt,
       'the reading\'s clock never regresses the file\'s freshness stamp (the anchors sweep and both newest-wins merges rank on it)', JSON.stringify({ was: incident.fetchedAt, now: fx.fetchedAt }));
@@ -451,15 +451,15 @@ try {
     // pre-model file first — its job — so "untouched" is judged on the numbers,
     // the producer and the freshness stamp, never on bytes)
     const same = (k, u) => { const o = rd6(k); return Math.abs(o.sevenDay.utilization - u) < 1e-9 && o.fetchedAt === incident.fetchedAt && (o.limits || []).find((l) => l.limitId === 'plan')?.windows.find((w) => w.kind === '7d').usedPct === Math.round(u * 100); };
-    ok(same('sub-panel', 0.86) && rd6('sub-panel').source === 'on-demand', 'a PANEL-sourced plan week is never touched — its number, its producer and its freshness stamp are what the panel left');
-    ok(same('sub-orphan', 0.7), 'a candidate with no linked windowed event is left as it was (the next panel or event corrects it)');
-    ok(same('sub-foreign', 0.9), 'a candidate whose linked event states ANOTHER account\'s weekly reset is left as it was (the readings-by-window rule)');
-    ok(fs.existsSync(path.join(cache6, '.window-sub-fixture-max')) && fs.readFileSync(path.join(cache6, '.window-sub-fixture-max'), 'utf-8') === JSON.stringify(sidecar), 'the established-window sidecar is read, never written');
+    ok(gateOf(same('sub-panel', 0.86)) && rd6('sub-panel').source === 'on-demand', 'a PANEL-sourced plan week is never touched — its number, its producer and its freshness stamp are what the panel left');
+    ok(verdictOf(same('sub-orphan', 0.7)), 'a candidate with no linked windowed event is left as it was (the next panel or event corrects it)');
+    ok(verdictOf(same('sub-foreign', 0.9)), 'a candidate whose linked event states ANOTHER account\'s weekly reset is left as it was (the readings-by-window rule)');
+    ok(gateOf(fs.existsSync(path.join(cache6, '.window-sub-fixture-max'))) && fs.readFileSync(path.join(cache6, '.window-sub-fixture-max'), 'utf-8') === JSON.stringify(sidecar), 'the established-window sidecar is read, never written');
     const { unfoldWeeklyLanes } = require('../src/weekly-lanes-unfold.js');
     // the archive: the pre-repair object verbatim + a manifest naming the migration
     const adirs6 = fs.readdirSync(path.join(d6, 'archive')).filter((f) => f.startsWith('weekly-lanes-unfold-'));
     const arch6 = adirs6.length === 1 ? JSON.parse(fs.readFileSync(path.join(d6, 'archive', adirs6[0], 'sub-fixture-max.json'), 'utf-8')) : null;
-    ok(arch6 && Math.abs(arch6.sevenDay.utilization - 0.86) < 1e-9 && arch6.fetchedAt === incident.fetchedAt && arch6.source === 'rate-limit-event',
+    ok(gateOf(arch6) && Math.abs(arch6.sevenDay.utilization - 0.86) < 1e-9 && arch6.fetchedAt === incident.fetchedAt && arch6.source === 'rate-limit-event',
       `the pre-repair object (plan 7d 0.86, the incident's stamp) is archived in a dated directory before the rewrite (${adirs6.join(',')})`);
     const man6 = JSON.parse(fs.readFileSync(path.join(d6, 'archive', adirs6[0], '_migration.json'), 'utf-8'));
     ok(man6.migration === '2026-09-weekly-lanes-unfold' && man6.keys.length === 1 && man6.keys[0] === 'sub-fixture-max' && !fs.existsSync(path.join(d6, 'archive', adirs6[0], 'sub-panel.json')),
@@ -470,7 +470,7 @@ try {
     const verb = (k) => rep6.keys.find((r) => r.key === k)?.action;
     ok(rep6.candidates === 3 && verb('sub-fixture-max') === 'already' && verb('sub-orphan') === 'left' && verb('sub-foreign') === 'left' && verb('sub-panel') === 'kept',
       'IDEMPOTENT + a verb per key: the rewritten key is now `already`, the two candidates without evidence stay `left`, the panel-sourced key is `kept`', JSON.stringify(rep6));
-    ok(/is not this account's/.test(rep6.keys.find((r) => r.key === 'sub-foreign').why) && /no live buffer/.test(rep6.keys.find((r) => r.key === 'sub-orphan').why),
+    ok(gateOf(/is not this account's/.test(rep6.keys.find((r) => r.key === 'sub-foreign').why)) && verdictOf(/no live buffer/.test(rep6.keys.find((r) => r.key === 'sub-orphan').why)),
       'each `left` names its reason (foreign window vs no linked buffer)');
     ok(fs.readdirSync(path.join(d6, 'archive')).filter((f) => f.startsWith('weekly-lanes-unfold-')).length === 1 && fs.readdirSync(path.join(d6, 'archive', adirs6[0])).length === 2,
       'a second run archives nothing twice');
@@ -487,7 +487,7 @@ try {
       setupUsage({ app, accounts, activeSessions: new Map(), serverSetting: () => null, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(d6, 'usage-cache.json'), USAGE_CACHE_DIR: cache6, CODEX_SESSIONS_DIR: path.join(d6, 'codex-sessions'), META_DIR: path.join(d6, 'session-meta'), AVAILABLE_MODELS: { claude: [] }, BUFFERS_DIR: path.join(d6, 'session-buffers') });
       const payload = await new Promise((resolve) => routes['GET /api/usage']({}, { json: resolve }));
       const a = payload?.accounts?.['sub-fixture-max'];
-      ok(a && Math.abs(a.sevenDay.utilization - 0.43) < 1e-9 && Math.abs(a.fiveHour.utilization - 0.09) < 1e-9 && (a.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.87,
+      ok(gateOf(a) && Math.abs(a.sevenDay.utilization - 0.43) < 1e-9 && Math.abs(a.fiveHour.utilization - 0.09) < 1e-9 && (a.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.87,
         '/api/usage for the repaired key says sevenDay 0.43 · fiveHour 0.09 · Fable 0.87 — what the taskbar donut draws', JSON.stringify(a && { f: a.fiveHour, s: a.sevenDay, sc: a.scopedWeekly }));
       ok(Math.abs(payload?.accounts?.['sub-panel']?.sevenDay?.utilization - 0.86) < 1e-9, '…and the panel-sourced neighbour still says what its panel said (0.86)');
     }
@@ -506,7 +506,7 @@ try {
       const res7 = m7.runLocalMigrations().find((r) => r.id === '2026-09-weekly-lanes-unfold');
       const led7 = () => { try { return JSON.parse(fs.readFileSync(path.join(d7, 'migrations.json'), 'utf-8')); } catch { return { applied: {} }; } };
       const plan7 = () => JSON.parse(fs.readFileSync(path.join(cache7, 'sub-r.json'), 'utf-8')).sevenDay.utilization;
-      ok(res7?.status === 'failed' && /refused/.test(res7.error || '') && /sub-r \(archive failed/.test(res7.error || ''), 'r2: an unwritable archive makes the run FAIL, naming the key and why', JSON.stringify(res7));
+      ok(res7?.status === 'failed' && gateOf(/refused/.test(res7.error || '')) && verdictOf(/sub-r \(archive failed/.test(res7.error || '')), 'r2: an unwritable archive makes the run FAIL, naming the key and why', JSON.stringify(res7));
       ok(!led7().applied['2026-09-weekly-lanes-unfold'] && Math.abs(plan7() - 0.86) < 1e-9, 'r2: …no ledger row, and the plan week untouched (archive-before-rewrite held)', JSON.stringify({ ledger: led7().applied, plan: plan7() }));
       const rep7 = unfoldWeeklyLanes({ dataDir: d7, id: 'probe' });
       ok(rep7.refused === 1 && rep7.left === 0 && rep7.keys.find((k) => k.key === 'sub-r')?.action === 'refused', 'r2: the report says `refused`, not `left` (a refusal is the repair\'s own failure, not missing evidence)', JSON.stringify(rep7.keys));
@@ -567,7 +567,7 @@ try {
     fs.writeFileSync(path.join(d10, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [legacyRec('gmail', 'gmail')] }));
     const res10 = create({ rootDir: root10, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
     const led10 = JSON.parse(fs.readFileSync(path.join(d10, 'migrations.json'), 'utf-8'));
-    ok(res10?.status === 'failed' && /no channels engine/.test(res10.error) && /gmail/.test(res10.error) && !led10.applied['2026-09-channel-credential-key'], 'without an engine a legacy real record FAILS the run by name — never recorded as a no-op', JSON.stringify(res10));
+    ok(res10?.status === 'failed' && gateOf(/no channels engine/.test(res10.error)) && gateOf(/gmail/.test(res10.error)) && !led10.applied['2026-09-channel-credential-key'], 'without an engine a legacy real record FAILS the run by name — never recorded as a no-op', JSON.stringify(res10));
     const root11 = path.join(tmp, 'inst11'); fs.mkdirSync(path.join(root11, 'data'), { recursive: true });
     const res11 = create({ rootDir: root11, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
     ok(res11?.status === 'ran', 'CONTROL: a fresh instance (no adapters.json) is nothing to stamp — a success');
@@ -624,9 +624,9 @@ try {
     const e14 = ENG.create({ dataDir: d14, env: {}, integrations: s14, log: quiet });
     const rep14 = e14.stampCredentialKeys(); await rep14.write;
     const by14 = Object.fromEntries(rep14.stamped.map((r) => [r.id, r]));
-    ok(by14.gmail && by14.gmail.key === 'own' && by14.gmail.evidence === 'token' && by14.gmail.tokenKey === 'own', `a token minted under the user's own values is stamped \`own\` with evidence 'token' while those values are complete (r4: \`own\` is no longer OFFERED, but a token minted under it stays bound to it — the own → custom copy below moves the values onto the record) (${JSON.stringify(by14.gmail)})`);
-    ok(by14['gmail:00000005'] && by14['gmail:00000005'].key === 'cluster:org1' && by14['gmail:00000005'].evidence === 'token', 'an org1-minted token is stamped org1 with evidence \'token\'');
-    ok(by14['gmail:00000006'] && by14['gmail:00000006'].key === 'cluster:channels' && by14['gmail:00000006'].evidence === 'row-pick' && by14['gmail:00000006'].tokenKey === 'cluster:gone', 'a withdrawn key falls to the row\'s pick (r4: the cluster\'s — the saved own values are never a pick) with evidence \'row-pick\' and the token\'s own key NAMED beside it', JSON.stringify(by14['gmail:00000006']));
+    ok(gateOf(by14.gmail) && by14.gmail.key === 'own' && by14.gmail.evidence === 'token' && by14.gmail.tokenKey === 'own', `a token minted under the user's own values is stamped \`own\` with evidence 'token' while those values are complete (r4: \`own\` is no longer OFFERED, but a token minted under it stays bound to it — the own → custom copy below moves the values onto the record) (${JSON.stringify(by14.gmail)})`);
+    ok(gateOf(by14['gmail:00000005']) && by14['gmail:00000005'].key === 'cluster:org1' && by14['gmail:00000005'].evidence === 'token', 'an org1-minted token is stamped org1 with evidence \'token\'');
+    ok(gateOf(by14['gmail:00000006']) && by14['gmail:00000006'].key === 'cluster:channels' && by14['gmail:00000006'].evidence === 'row-pick' && by14['gmail:00000006'].tokenKey === 'cluster:gone', 'a withdrawn key falls to the row\'s pick (r4: the cluster\'s — the saved own values are never a pick) with evidence \'row-pick\' and the token\'s own key NAMED beside it', JSON.stringify(by14['gmail:00000006']));
     try { eng.stop(); e12.stop(); e13.stop(); e14.stop(); } catch { }
   }
 
@@ -699,12 +699,12 @@ try {
     const e17 = ENG.create({ dataDir: d17, env: {}, integrations: s17, log: quiet });
     const res17 = create({ rootDir: root17, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e17 }).runLocalMigrations().find((r) => r.id === ID);
     const led17 = JSON.parse(fs.readFileSync(path.join(d17, 'migrations.json'), 'utf-8'));
-    ok(res17?.status === 'failed' && /gmail \(integration-key-missing/.test(res17.error) && /\.integrations-key is missing/.test(res17.error) && !led17.applied[ID], 'a missing `.integrations-key` FAILS the run BY NAME (the account, the code, the file) — never recorded, retried next boot', JSON.stringify(res17));
+    ok(res17?.status === 'failed' && gateOf(/gmail \(integration-key-missing/.test(res17.error)) && gateOf(/\.integrations-key is missing/.test(res17.error)) && !led17.applied[ID], 'a missing `.integrations-key` FAILS the run BY NAME (the account, the code, the file) — never recorded, retried next boot', JSON.stringify(res17));
     ok(!fs.existsSync(path.join(d17, STORE.KEY_FILE)) && disk(d17).find((x) => x.id === 'gmail').credentialKey === 'own', 'no key was minted over the missing one, and the account keeps `own`');
     // no engine: an `own` record fails the run by name; none is a success
     const root18 = path.join(tmp, 'inst18'); const d18 = path.join(root18, 'data'); legacyOwn(d18);
     const res18 = create({ rootDir: root18, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
-    ok(res18?.status === 'failed' && /no channels engine/.test(res18.error) && /gmail/.test(res18.error), 'without an engine an `own` record FAILS the run by name');
+    ok(res18?.status === 'failed' && gateOf(/no channels engine/.test(res18.error)) && verdictOf(/gmail/.test(res18.error)), 'without an engine an `own` record FAILS the run by name');
     const root19 = path.join(tmp, 'inst19'); fs.mkdirSync(path.join(root19, 'data'), { recursive: true });
     ok(create({ rootDir: root19, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID)?.status === 'ran', 'CONTROL: a fresh instance (no adapters.json) is a dry run — a success (this instance: zero `own` accounts)');
     // ④ THE PRE-FIX CONTROL: the base engine under the r4 store — its `own` account resolves to nothing
@@ -787,13 +787,13 @@ try {
       // migration flushed the live store's 500 ms debounce itself, so the
       // reshaping is on disk before the runner wrote applied[id]
       const disk0 = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
-      ok(judge(disk0, t0, t1).oldAll && judge(disk0, t0, t1).fresh && !live.writeOwed(), 'the live path FLUSHES too: when run() returns the file already carries the reshaping and no debounced write is pending (the ledger row never lands before the data)', { pending: live.writeOwed() });
+      ok(gateOf(judge(disk0, t0, t1).oldAll) && gateOf(judge(disk0, t0, t1).fresh) && !live.writeOwed(), 'the live path FLUSHES too: when run() returns the file already carries the reshaping and no debounced write is pending (the ledger row never lands before the data)', { pending: live.writeOwed() });
       const j = judge(live._state.items, t0, t1);
-      ok(res?.status === 'ran' && j.oldAll, 'the 13 stale Spending items become notices AND are resolved done/expired at the end of the window they were about (kept in the store, never deleted)', res);
+      ok(res?.status === 'ran' && verdictOf(j.oldAll), 'the 13 stale Spending items become notices AND are resolved done/expired at the end of the window they were about (kept in the store, never deleted)', res);
       const newestRetired = Math.max(...live._state.items.filter((x) => /^ut-old/.test(x.id)).map((x) => x.resolvedAt));
       ok(newestRetired <= t0 - (137 - 24) * H, 'the retirements sort as OLD history: the newest is 113 h in the past, not the upgrade boot', { hoursAgo: (t0 - newestRetired) / H });
-      ok(j.fresh, 'the 2 fresh Spending notices stay open and gain expiresAt = filing + 24 h (they can no longer live forever either)', live._state.items.filter((x) => /^ut-fresh/.test(x.id)).map((x) => [x.status, x.expiresAt - x.createdAt]));
-      ok(j.action, 'the session\'s own action is untouched (no kind change, no expiry)', byId(live._state.items)['ut-act']);
+      ok(verdictOf(j.fresh), 'the 2 fresh Spending notices stay open and gain expiresAt = filing + 24 h (they can no longer live forever either)', live._state.items.filter((x) => /^ut-fresh/.test(x.id)).map((x) => [x.status, x.expiresAt - x.createdAt]));
+      ok(verdictOf(j.action), 'the session\'s own action is untouched (no kind change, no expiry)', byId(live._state.items)['ut-act']);
       const r = byId(live._state.items)['ut-res'];
       ok(r.status === 'done' && r.resolvedBy === 'user' && r.resolvedAt === now - 290 * H && r.kind === 'notice', 'the already-resolved Spending item keeps its status/resolvedBy/resolvedAt (it is only re-kinded, so a later ↺ reopens it as a notice)', r);
       ok(j.badge.action.length === 1 && j.badge.notices === 2, 'the badge: 1 action (the real one), 2 notices — was 14 actions', { action: j.badge.action.length, notices: j.badge.notices });
@@ -803,10 +803,10 @@ try {
       live.setStatus('ut-act', 'open');
       live.flush();
       const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
-      ok(judge(disk, t0, t1).oldAll, 'the live store persisted it through its own atomic writer');
+      ok(verdictOf(judge(disk, t0, t1).oldAll), 'the live store persisted it through its own atomic writer');
       const led = JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf-8'));
       const rep = led.reports && led.reports[ID];
-      ok(!!led.applied[ID] && rep && rep.matched === 16 && rep.rekinded === 14 && rep.expired === 13 && rep.stamped === 2 && rep.store === 'live' && rep.at === led.applied[ID], 'the ledger row carries the counts (matched 16, rekinded 14, expired 13, stamped 2) beside its timestamp', rep);
+      ok(!!led.applied[ID] && gateOf(rep) && rep.matched === 16 && rep.rekinded === 14 && rep.expired === 13 && rep.stamped === 2 && rep.store === 'live' && rep.at === led.applied[ID], 'the ledger row carries the counts (matched 16, rekinded 14, expired 13, stamped 2) beside its timestamp', rep);
       // run-at-most-once: a stale Spending action added after the upgrade is NOT swept by a second boot
       live._state.items.push({ ...fixture(Date.now()).items[0], id: 'ut-late' });
       const res2 = create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live }).runLocalMigrations().find((r) => r.id === ID);
@@ -821,7 +821,7 @@ try {
       const t1 = Date.now();
       const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
       const j = judge(disk, t0, t1);
-      ok(res?.status === 'ran' && res.report?.store === 'private' && j.oldAll && j.fresh && j.action, 'without a live store the migration writes through a private manager and flushes before it returns', res);
+      ok(res?.status === 'ran' && res.report?.store === 'private' && gateOf(j.oldAll) && gateOf(j.fresh) && verdictOf(j.action), 'without a live store the migration writes through a private manager and flushes before it returns', res);
       const root2 = path.join(tmp, 'inst-spend-absent'); fs.mkdirSync(path.join(root2, 'data'), { recursive: true });
       const res3 = create({ rootDir: root2, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
       ok(res3?.status === 'ran' && res3.report?.store === 'absent' && !fs.existsSync(path.join(root2, 'data', 'user-todos.json')), 'CONTROL: no store on disk is nothing to do — no file is created', res3);
@@ -866,13 +866,13 @@ try {
       const live = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
       const res = pre.create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live }).runLocalMigrations().find((r) => r.id === ID);
       const led = JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf-8'));
-      ok(res?.status === 'ran' && !!led.applied[ID] && fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8') === before && live.writeOwed(),
+      ok(res?.status === 'ran' && !!led.applied[ID] && fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8') === before && verdictOf(live.writeOwed()),
         'CONTROL: the pre-fix run left the file UNCHANGED with the ledger row already written (a crash now would lose the reshaping for good) — the flush leg above fails on it');
       // r4456: the second half reads the file once the store's OWN write has landed (writeOwed() false: its 500 ms debounce, then the
       // store writer off the main thread — late on a loaded machine), never after a fixed 700 ms
       await untilFact(() => !live.writeOwed(), 'the store\'s own write LANDED (writeOwed() false)');
       const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
-      ok(disk.filter((x) => /^ut-old/.test(x.id)).every((x) => x.status === 'done'), 'CONTROL: …and the change reached the file only when the debounce fired');
+      ok(verdictOf(disk.filter((x) => /^ut-old/.test(x.id)).every((x) => x.status === 'done')), 'CONTROL: …and the change reached the file only when the debounce fired');
       live.stop();
       // r4456 (1) PLACED: what runs late is the store's debounced write. While that write is HELD (the leg's own hold on the store's
       // writer seam, src/user-todos.js `writer`: its hand-over is KEPT until the leg lets it go; every other ask goes to the hub's one
@@ -892,7 +892,7 @@ try {
         holding = false; for (const [f, o] of kept.splice(0)) realW.dirty(f, o);   // the leg lets the write go
         await untilFact(() => !liveH.writeOwed(), 'the held store write LANDED once let go (writeOwed() false)');
         const newDone = doneOf();
-        ok(resH?.status === 'ran' && heldN >= 1 && !oldDone && newDone, 'PLACED (r4456): while the store\'s write is HELD, the control\'s old fixed 700 ms reads the OLD file (a red with nothing wrong); the wait on the store\'s own landing reads the change once the held write lands', { status: resH && resH.status, heldN, oldDone, newDone });
+        ok(resH?.status === 'ran' && heldN >= 1 && !oldDone && verdictOf(newDone), 'PLACED (r4456): while the store\'s write is HELD, the control\'s old fixed 700 ms reads the OLD file (a red with nothing wrong); the wait on the store\'s own landing reads the change once the held write lands', { status: resH && resH.status, heldN, oldDone, newDone });
         liveH.stop();
       }
       // (d2) THE RUNNER's BELT: the copy with ONLY the live-path flush behind `if (priv)` — the store writer's landing puts the
@@ -904,7 +904,7 @@ try {
       const t2a = Date.now();
       const res2 = require(path.join(pdir2, 'migrations.js')).create({ rootDir: root2, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live2 }).runLocalMigrations().find((r) => r.id === ID);
       const t2b = Date.now(), disk2 = JSON.parse(fs.readFileSync(path.join(d2, 'user-todos.json'), 'utf-8')).items;
-      ok(res2?.status === 'ran' && judge(disk2, t2a, t2b).oldAll && !live2.writeOwed(), 'the RUNNER lands it too (B-0248 step 2): with the live-path flush gone, the store writer\'s landing puts the reshaping on disk before applied[id] — nothing owed when run() returns', { status: res2?.status, owed: live2.writeOwed() });
+      ok(res2?.status === 'ran' && gateOf(judge(disk2, t2a, t2b).oldAll) && !live2.writeOwed(), 'the RUNNER lands it too (B-0248 step 2): with the live-path flush gone, the store writer\'s landing puts the reshaping on disk before applied[id] — nothing owed when run() returns', { status: res2?.status, owed: live2.writeOwed() });
       live2.stop();
     }
 
@@ -929,9 +929,9 @@ try {
       const b = byId(live._state.items);
       const stamped = (x, ms) => x.status === 'open' && x.expiresAt === x.createdAt + ms;
       const retired = (x, ms) => x.status === 'done' && x.resolvedBy === 'expired' && x.resolvedAt === x.createdAt + ms;
-      ok(stamped(b['h-fresh'], H) && retired(b['h-old'], H), '`Scope: hour` ⇒ filing + 1 h: a 10-min-old warning is stamped, a 3 h-old one is retired at the hour\'s end', [b['h-fresh'], b['h-old']].map((x) => [x.status, (x.expiresAt || x.resolvedAt) - x.createdAt]));
-      ok(stamped(b['r-fresh'], 6 * H) && retired(b['r-old'], 6 * H), 'a refusal ⇒ filing + 6 h (its re-file cadence): 2 h old stamped, 8 h old retired', [b['r-fresh'], b['r-old']].map((x) => [x.status, (x.expiresAt || x.resolvedAt) - x.createdAt]));
-      ok(stamped(b['i-mid'], 24 * H) && stamped(b['none-mid'], 24 * H), '`Scope: instance` (the instance DAY) and a detail naming nothing ⇒ filing + 24 h', [b['i-mid'], b['none-mid']].map((x) => x.expiresAt - x.createdAt));
+      ok(gateOf(stamped(b['h-fresh'], H)) && verdictOf(retired(b['h-old'], H)), '`Scope: hour` ⇒ filing + 1 h: a 10-min-old warning is stamped, a 3 h-old one is retired at the hour\'s end', [b['h-fresh'], b['h-old']].map((x) => [x.status, (x.expiresAt || x.resolvedAt) - x.createdAt]));
+      ok(gateOf(stamped(b['r-fresh'], 6 * H)) && verdictOf(retired(b['r-old'], 6 * H)), 'a refusal ⇒ filing + 6 h (its re-file cadence): 2 h old stamped, 8 h old retired', [b['r-fresh'], b['r-old']].map((x) => [x.status, (x.expiresAt || x.resolvedAt) - x.createdAt]));
+      ok(gateOf(stamped(b['i-mid'], 24 * H)) && verdictOf(stamped(b['none-mid'], 24 * H)), '`Scope: instance` (the instance DAY) and a detail naming nothing ⇒ filing + 24 h', [b['i-mid'], b['none-mid']].map((x) => x.expiresAt - x.createdAt));
       ok(res?.report?.matched === 6 && res.report.expired === 2 && res.report.stamped === 4, 'the report counts it (matched 6, expired 2, stamped 4)', res?.report);
       live.stop();
     }
@@ -1005,45 +1005,45 @@ try {
     fs.cpSync(root, path.join(tmp, 'inst-ledger-slot-pristine'), { recursive: true }); // quota r2: the crash legs below replay THIS fixture
     const mm = create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: (k, t) => notices2.push([k, t]) });
     const notices2 = [];
-    ok(mm.MIGRATIONS.some((m) => m.id === ID), 'the backfill is registered as a ledger-keyed one-shot');
+    ok(verdictOf(mm.MIGRATIONS.some((m) => m.id === ID)), 'the backfill is registered as a ledger-keyed one-shot');
     fs.writeFileSync(path.join(d, 'migrations.json'), JSON.stringify({ applied: Object.fromEntries(mm.MIGRATIONS.filter((m) => m.id !== ID).map((m) => [m.id, 1])) }));
     fs.writeFileSync(path.join(d, 'grants.json'), JSON.stringify({ v: 1, rows: [] }), { mode: 0o600 });   // lane grants-unify: an instance whose ledger names 2026-10-grants-unify holds its store (none ⇒ grants_store_missing — verify F2)
     const logs = [];
     const oLog = console.log; console.log = (...a) => { logs.push(a.join(' ')); };
     let res; try { res = mm.runLocalMigrations(); } finally { console.log = oLog; }
     const me = res.find((r) => r.id === ID);
-    ok(me && me.status === 'ran', 'the backfill ran (and only it)', res.filter((r) => r.status !== 'already'));
+    ok(gateOf(me) && me.status === 'ran', 'the backfill ran (and only it)', res.filter((r) => r.status !== 'already'));
     const after = fs.readFileSync(shard, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     const by = Object.fromEntries(after.map((r) => [r.rid, r]));
-    ok(by.req_1 && by.req_1.acct === 'sub-a' && !by.req_1.slotRekeyedBy, 'a row whose OTel account IS its slot is confirmed and left byte-for-byte alone', by.req_1);
-    ok(by.req_2 && by.req_2.acct === 'sub-b' && by.req_2.slotRekeyedBy === ID && by.req_2.slotRekeyedFrom === 'sub-a' && by.req_2.aname === 'Member B' && by.req_2.atype === 'subscription' && by.req_2.cr === 1000, 'PROVABLE: 30 min after the re-point the walk (corrective entries set aside) names B — re-keyed, tokens kept, relabelled', by.req_2);
-    ok(by.req_4 && by.req_4.acct === 'sub-b' && by.req_4.slotRekeyedBy === ID, 'a row that INHERITED a corrective entry (no stash row of its own) is a candidate too — re-keyed to B', by.req_4);
-    ok(by.req_6 && by.req_6.acct === 'sub-b', 'the SLOT LEDGER outranks the conversation\'s own walk (the walk said A, the transition ledger says B)', by.req_6);
+    ok(gateOf(by.req_1) && by.req_1.acct === 'sub-a' && !by.req_1.slotRekeyedBy, 'a row whose OTel account IS its slot is confirmed and left byte-for-byte alone', by.req_1);
+    ok(gateOf(by.req_2) && by.req_2.acct === 'sub-b' && by.req_2.slotRekeyedBy === ID && by.req_2.slotRekeyedFrom === 'sub-a' && by.req_2.aname === 'Member B' && by.req_2.atype === 'subscription' && by.req_2.cr === 1000, 'PROVABLE: 30 min after the re-point the walk (corrective entries set aside) names B — re-keyed, tokens kept, relabelled', by.req_2);
+    ok(gateOf(by.req_4) && by.req_4.acct === 'sub-b' && by.req_4.slotRekeyedBy === ID, 'a row that INHERITED a corrective entry (no stash row of its own) is a candidate too — re-keyed to B', by.req_4);
+    ok(gateOf(by.req_6) && by.req_6.acct === 'sub-b', 'the SLOT LEDGER outranks the conversation\'s own walk (the walk said A, the transition ledger says B)', by.req_6);
     ok(!by.req_3 && !by.req_7 && !by.req_8, 'UNPROVABLE rows leave the live ledger (lag shadow, no slot record, a dead slot)', Object.keys(by));
-    ok(by.req_5 && by.req_5.acct === 'sub-b' && !by.req_5.slotRekeyedBy, 'a row the OTel path did not write is untouched', by.req_5);
-    ok(by.req_9 && by.req_9.acct === 'sub-a' && by['h:host-1:req_x'] && by['h:host-1:req_x'].acct === 'host-1', 'codex rows and remote-host rows are out of scope', [by.req_9, by['h:host-1:req_x']]);
-    ok(by.req_10 && by.req_10.acct === 'sub-a' && !by.req_10.slotRekeyedBy, 'a row billed through NO pool is out of scope even with no slot record (its observed org IS its one credential)', by.req_10);
-    ok(by.req_11 && by.req_11.acct === 'sub-b' && !by.req_11.slotRekeyedBy, 'a row whose OTel account AGREES with its slot is confirmed even inside a re-point\'s shadow (nothing was mis-attributed)', by.req_11);
+    ok(gateOf(by.req_5) && by.req_5.acct === 'sub-b' && !by.req_5.slotRekeyedBy, 'a row the OTel path did not write is untouched', by.req_5);
+    ok(gateOf(by.req_9) && by.req_9.acct === 'sub-a' && gateOf(by['h:host-1:req_x']) && by['h:host-1:req_x'].acct === 'host-1', 'codex rows and remote-host rows are out of scope', [by.req_9, by['h:host-1:req_x']]);
+    ok(gateOf(by.req_10) && by.req_10.acct === 'sub-a' && !by.req_10.slotRekeyedBy, 'a row billed through NO pool is out of scope even with no slot record (its observed org IS its one credential)', by.req_10);
+    ok(gateOf(by.req_11) && by.req_11.acct === 'sub-b' && !by.req_11.slotRekeyedBy, 'a row whose OTel account AGREES with its slot is confirmed even inside a re-point\'s shadow (nothing was mis-attributed)', by.req_11);
     const archFile = fs.readdirSync(path.join(d, 'archive')).find((f) => /^ledger-by-slot-\d{4}-\d{2}-\d{2}\.ndjson$/.test(f));
     const arch = archFile ? fs.readFileSync(path.join(d, 'archive', archFile), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
     const archOf = (rid) => arch.find((a) => a.store === 'usage-history' && a.entry && a.entry.rid === rid);
-    ok(archOf('req_3') && /lag shadow/.test(archOf('req_3').reason) && /cannot be proven/.test(archOf('req_3').reason), 'the lag-shadow row is archived VERBATIM with its reason', archOf('req_3')?.reason);
-    ok(archOf('req_7') && /no slot transition and no attribution entry/.test(archOf('req_7').reason), 'the no-record row is archived with its reason', archOf('req_7')?.reason);
-    ok(archOf('req_8') && /sub-c, whose login was expired/.test(archOf('req_8').reason), 'the dead-slot row is archived with its reason (the walk named a member whose login had died)', archOf('req_8')?.reason);
-    ok(archOf('req_2') && archOf('req_2').entry.acct === 'sub-a' && /re-keyed to sub-b/.test(archOf('req_2').reason), 'every RE-KEYED row\'s original is archived too (reversible) with the rung that proved it', archOf('req_2')?.reason);
+    ok(gateOf(archOf('req_3')) && gateOf(/lag shadow/.test(archOf('req_3').reason)) && verdictOf(/cannot be proven/.test(archOf('req_3').reason)), 'the lag-shadow row is archived VERBATIM with its reason', archOf('req_3')?.reason);
+    ok(gateOf(archOf('req_7')) && verdictOf(/no slot transition and no attribution entry/.test(archOf('req_7').reason)), 'the no-record row is archived with its reason', archOf('req_7')?.reason);
+    ok(gateOf(archOf('req_8')) && verdictOf(/sub-c, whose login was expired/.test(archOf('req_8').reason)), 'the dead-slot row is archived with its reason (the walk named a member whose login had died)', archOf('req_8')?.reason);
+    ok(gateOf(archOf('req_2')) && archOf('req_2').entry.acct === 'sub-a' && verdictOf(/re-keyed to sub-b/.test(archOf('req_2').reason)), 'every RE-KEYED row\'s original is archived too (reversible) with the rung that proved it', archOf('req_2')?.reason);
     const attAfter = fs.readFileSync(path.join(hd, 'attribution.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     ok(attAfter.length === 4 && !attAfter.some((e) => e.sid === S1 && e.acct === 'sub-a' && e.ts > T0), 'both CORRECTIVE entries (either spelling) are set aside; the real entries stay', attAfter);
     ok(arch.filter((a) => a.store === 'attribution').length === 2, '…and archived with their reason', arch.filter((a) => a.store === 'attribution').map((a) => a.reason.slice(0, 60)));
     const rep = me.report || {};
     ok(rep.rows === 12 && rep.candidates === 8 && rep.rekeyed === 3 && rep.archived === 3 && rep.untouched === 6 && rep.confirmed === 2 && rep.corrective === 2, 'the ledger report row counts re-keyed / archived / untouched (rows 12, candidates 8, re-keyed 3, archived 3, untouched 6, confirmed 2, corrective 2)', rep);
     const led2 = JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf-8'));
-    ok(led2.reports && led2.reports[ID] && led2.reports[ID].rekeyed === 3 && led2.reports[ID].archived === 3 && led2.reports[ID].untouched === 6, 'the counts ride data/migrations.json', led2.reports?.[ID]);
+    ok(gateOf(led2.reports) && gateOf(led2.reports[ID]) && led2.reports[ID].rekeyed === 3 && led2.reports[ID].archived === 3 && led2.reports[ID].untouched === 6, 'the counts ride data/migrations.json', led2.reports?.[ID]);
     const line = logs.filter((l) => l.startsWith('[migrate] ledger-by-slot:'));
-    ok(line.length === 1 && /"rekeyed":3/.test(line[0]) && /"archived":3/.test(line[0]) && /"untouched":6/.test(line[0]), 'ONE log line says what happened', line);
-    ok(notices2.length === 1 && notices2[0][0] === 'ledger-by-slot' && /3 ledger row\(s\)/.test(notices2[0][1]), 'the user is told once (an info notice naming both counts)', notices2);
+    ok(line.length === 1 && gateOf(/"rekeyed":3/.test(line[0])) && gateOf(/"archived":3/.test(line[0])) && verdictOf(/"untouched":6/.test(line[0])), 'ONE log line says what happened', line);
+    ok(notices2.length === 1 && notices2[0][0] === 'ledger-by-slot' && verdictOf(/3 ledger row\(s\)/.test(notices2[0][1])), 'the user is told once (an info notice naming both counts)', notices2);
     const rates = JSON.parse(fs.readFileSync(path.join(ad, 'rates.json'), 'utf-8'));
-    ok(rates['acct:sub-a'] && !rates['acct:sub-a'].stale && rates['acct:sub-a'].buckets && rates['acct:sub-b'] && rates['acct:sub-b'].buckets && rates['acct:untouched']?.keep === true, 'the estimator RE-LEARNED the touched identities (A lost rows, B gained them) and left an untouched one alone', Object.keys(rates));
-    ok(rep.relearned === 2 && arch.some((a) => a.store === 'usage-anchors/rates.json' && a.entry['acct:sub-a']?.stale === true), '…the stale learned entry archived first (relearned 2)', rep.relearned);
+    ok(gateOf(rates['acct:sub-a']) && !rates['acct:sub-a'].stale && gateOf(rates['acct:sub-a'].buckets) && gateOf(rates['acct:sub-b']) && gateOf(rates['acct:sub-b'].buckets) && rates['acct:untouched']?.keep === true, 'the estimator RE-LEARNED the touched identities (A lost rows, B gained them) and left an untouched one alone', Object.keys(rates));
+    ok(rep.relearned === 2 && verdictOf(arch.some((a) => a.store === 'usage-anchors/rates.json' && a.entry['acct:sub-a']?.stale === true)), '…the stale learned entry archived first (relearned 2)', rep.relearned);
     // the re-bake: a row the slot LEDGER proved must survive a later re-bake of the walk
     {
       const { UsageHistory } = require('../src/usage-history.js');
@@ -1051,7 +1051,7 @@ try {
       const uh = new UsageHistory({ dataDir: d, homeDir: scratchHomeDir });
       uh._maybeRebakeAttribution();
       const rb = Object.fromEntries(fs.readFileSync(shard, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).map((r) => [r.rid, r]));
-      ok(rb.req_6 && rb.req_6.acct === 'sub-b', 'a later re-bake of the walk (which says A for S2) leaves the slot-ledger-proven row on B', rb.req_6);
+      ok(gateOf(rb.req_6) && rb.req_6.acct === 'sub-b', 'a later re-bake of the walk (which says A for S2) leaves the slot-ledger-proven row on B', rb.req_6);
     }
     // idempotent: a second run finds nothing to do and rewrites nothing
     {
@@ -1125,7 +1125,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const liveOf = (root) => ['events-2026-08.ndjson', 'attribution.ndjson'].map((f) => fs.readFileSync(path.join(root, 'data', 'usage-history', f), 'utf-8')).join('\n--\n');
     const ref = inst('inst-ls-ref'); const rr = runChild(ref, 'none');
     const refArch = archLines(ref);
-    ok(rr.res && rr.res.status === 'ran' && rr.res.report.rekeyed === 3 && rr.res.report.archived === 3 && refArch.length === 9 && dupCount(refArch) === 0, 'reference: the fixture uninterrupted (re-keyed 3, archived 3, corrective 2, one rates line = 9 archive lines, no duplicate)', { rep: rr.res?.report, lines: refArch.length, err: rr.err });
+    ok(gateOf(rr.res) && rr.res.status === 'ran' && rr.res.report.rekeyed === 3 && rr.res.report.archived === 3 && refArch.length === 9 && dupCount(refArch) === 0, 'reference: the fixture uninterrupted (re-keyed 3, archived 3, corrective 2, one rates line = 9 archive lines, no duplicate)', { rep: rr.res?.report, lines: refArch.length, err: rr.err });
     const refRates = JSON.parse(fs.readFileSync(path.join(ref, 'data', 'usage-anchors', 'rates.json'), 'utf-8'));
     // (A) killed after the shard's archive append, before its rename
     {
@@ -1133,11 +1133,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const k = runChild(r, 'shard');
       const afterCrash = archLines(r).length;
       const led = JSON.parse(fs.readFileSync(path.join(r, 'data', 'migrations.json'), 'utf-8'));
-      ok(k.signal === 'SIGKILL' && afterCrash === 6 && !led.applied[ID] && fs.existsSync(path.join(r, 'data', 'usage-history', 'events-2026-08.ndjson.tmp')), '(A) the kill lands between the shard\'s archive append (6 lines) and its rename; the id is not recorded', { signal: k.signal, afterCrash, applied: led.applied[ID] });
+      ok(k.signal === 'SIGKILL' && afterCrash === 6 && !led.applied[ID] && verdictOf(fs.existsSync(path.join(r, 'data', 'usage-history', 'events-2026-08.ndjson.tmp'))), '(A) the kill lands between the shard\'s archive append (6 lines) and its rename; the id is not recorded', { signal: k.signal, afterCrash, applied: led.applied[ID] });
       const re = runChild(r, 'none'); const lines = archLines(r);
-      ok(re.res && re.res.status === 'ran' && lines.length === refArch.length && dupCount(lines) === 0, `(A) the retry archives nothing twice: ${lines.length} archive lines = the uninterrupted run's ${refArch.length} (red on quota r1: 15, 6 duplicates)`, { lines: lines.length, dups: dupCount(lines) });
+      ok(gateOf(re.res) && re.res.status === 'ran' && lines.length === refArch.length && dupCount(lines) === 0, `(A) the retry archives nothing twice: ${lines.length} archive lines = the uninterrupted run's ${refArch.length} (red on quota r1: 15, 6 duplicates)`, { lines: lines.length, dups: dupCount(lines) });
       ok(liveOf(r) === liveOf(ref), '(A) …and the live ledger is byte-identical to the uninterrupted run');
-      ok(re.res.report.rekeyed === 3 && re.res.report.archived === 3 && re.res.report.resumed === true && re.res.notices.length === 1 && /: 3 ledger row\(s\)/.test(re.res.notices[0][1]), '(A) the retry\'s report + notice state the WHOLE repair (3 / 3), and say it resumed', re.res.report);
+      ok(re.res.report.rekeyed === 3 && re.res.report.archived === 3 && re.res.report.resumed === true && re.res.notices.length === 1 && verdictOf(/: 3 ledger row\(s\)/.test(re.res.notices[0][1])), '(A) the retry\'s report + notice state the WHOLE repair (3 / 3), and say it resumed', re.res.report);
     }
     // (B) killed after every shard, before the attribution rename — the retry has nothing left to re-key
     {
@@ -1145,9 +1145,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       runChild(r, 'attribution');
       const re = runChild(r, 'none'); const lines = archLines(r);
       const rep = re.res && re.res.report;
-      ok(rep && dupCount(lines) === 0 && lines.length === refArch.length, `(B) the corrective entries are archived once (${lines.length} lines; red on quota r1: 10, 2 duplicates — and no rates line, the relearn never ran)`, { lines: lines.length, dups: dupCount(lines) });
-      ok(rep && rep.rekeyed === 3 && rep.archived === 3 && rep.corrective === 2 && rep.thisPass && rep.thisPass.rekeyed === 0 && re.res.notices.length === 1 && /: 3 ledger row\(s\)/.test(re.res.notices[0][1]) && /, and 3 row\(s\)/.test(re.res.notices[0][1]), '(B) the ledger report and the notice carry the crashed pass\'s counts (3 re-keyed, 3 archived — this pass found 0) (red on quota r1: 0 / 0 and NO notice at all)', { rep, notices: re.res?.notices });
-      ok(rep && rep.relearned === 2, '(B) …and the estimator is re-learned for the accounts the crashed pass moved (red on quota r1: relearned 0 — the rates stayed learned from the OTel-attributed ledger)', rep);
+      ok(gateOf(rep) && dupCount(lines) === 0 && lines.length === refArch.length, `(B) the corrective entries are archived once (${lines.length} lines; red on quota r1: 10, 2 duplicates — and no rates line, the relearn never ran)`, { lines: lines.length, dups: dupCount(lines) });
+      ok(gateOf(rep) && rep.rekeyed === 3 && rep.archived === 3 && rep.corrective === 2 && gateOf(rep.thisPass) && rep.thisPass.rekeyed === 0 && re.res.notices.length === 1 && gateOf(/: 3 ledger row\(s\)/.test(re.res.notices[0][1])) && verdictOf(/, and 3 row\(s\)/.test(re.res.notices[0][1])), '(B) the ledger report and the notice carry the crashed pass\'s counts (3 re-keyed, 3 archived — this pass found 0) (red on quota r1: 0 / 0 and NO notice at all)', { rep, notices: re.res?.notices });
+      ok(gateOf(rep) && rep.relearned === 2, '(B) …and the estimator is re-learned for the accounts the crashed pass moved (red on quota r1: relearned 0 — the rates stayed learned from the OTel-attributed ledger)', rep);
     }
     // (C) killed inside the relearn (the first rates.json rename)
     {
@@ -1155,7 +1155,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       runChild(r, 'rates');
       const re = runChild(r, 'none'); const rep = re.res && re.res.report;
       const rates = JSON.parse(fs.readFileSync(path.join(r, 'data', 'usage-anchors', 'rates.json'), 'utf-8'));
-      ok(rep && rep.relearned === 2 && rates['acct:sub-a'] && !rates['acct:sub-a'].stale && JSON.stringify(rates['acct:sub-a'].buckets) === JSON.stringify(refRates['acct:sub-a'].buckets), '(C) a pass killed inside the relearn is re-learned by the retry (red on quota r1: relearned 0, the stale rate kept)', { rep, rates: Object.keys(rates) });
+      ok(gateOf(rep) && rep.relearned === 2 && gateOf(rates['acct:sub-a']) && !rates['acct:sub-a'].stale && JSON.stringify(rates['acct:sub-a'].buckets) === JSON.stringify(refRates['acct:sub-a'].buckets), '(C) a pass killed inside the relearn is re-learned by the retry (red on quota r1: relearned 0, the stale rate kept)', { rep, rates: Object.keys(rates) });
       ok(dupCount(archLines(r)) === 0, '(C) …nothing archived twice');
     }
     // (D) quota r3: killed AFTER the pass marker, before the runner's migrations.json rename — the retry found every row
@@ -1167,14 +1167,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const led = JSON.parse(fs.readFileSync(path.join(r, 'data', 'migrations.json'), 'utf-8'));
       ok(k.signal === 'SIGKILL' && !led.applied[ID] && markersOf(r) === 1, '(D) the kill lands after the pass marker, before the runner records the id', { signal: k.signal, markers: markersOf(r) });
       const re = runChild(r, 'none'); const rep = re.res && re.res.report;
-      ok(re.res && re.res.status === 'ran' && rep && rep.rekeyed === 3 && rep.archived === 3 && rep.corrective === 2 && rep.relearned === 2 && re.res.notices.length === 1 && /: 3 ledger row\(s\)/.test(re.res.notices[0][1]), '(D) the retry states the FINISHED pass\'s repair (3 / 3 / 2, relearned 2) and files its notice (red on quota r2: 0 / 0, no notice)', { rep, notices: re.res?.notices });
+      ok(gateOf(re.res) && re.res.status === 'ran' && gateOf(rep) && rep.rekeyed === 3 && rep.archived === 3 && rep.corrective === 2 && rep.relearned === 2 && re.res.notices.length === 1 && verdictOf(/: 3 ledger row\(s\)/.test(re.res.notices[0][1])), '(D) the retry states the FINISHED pass\'s repair (3 / 3 / 2, relearned 2) and files its notice (red on quota r2: 0 / 0, no notice)', { rep, notices: re.res?.notices });
       ok(markersOf(r) === 1 && dupCount(archLines(r)) === 0 && liveOf(r) === liveOf(ref), '(D) …writing no second marker and nothing twice; the live ledger equals the uninterrupted run');
       let txt = fs.readFileSync(BACKFILL, 'utf-8').replace(/require\('\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(path.join(path.dirname(BACKFILL), f))})`);
       const a = 'if (nothingNow && lc && lc.total';
-      ok(txt.includes(a), 'control anchor present (D)');
+      ok(verdictOf(txt.includes(a)), 'control anchor present (D)');
       const pc = path.join(tmp, 'ledger-slot-backfill-norecover.js'); fs.writeFileSync(pc, txt.replace(a, 'if (false && nothingNow && lc && lc.total'));
       const rc = inst('inst-ls-ctl-ledger'); runChild(rc, 'ledger', { BACKFILL_MOD: pc }); const rec = runChild(rc, 'none', { BACKFILL_MOD: pc });
-      ok(rec.res && rec.res.report.rekeyed === 0 && rec.res.notices.length === 0, 'NEGATIVE CONTROL (no recovery from the marker): the same kill leaves the repair recorded as 0 re-keyed and nobody told', rec.res?.report);
+      ok(gateOf(rec.res) && rec.res.report.rekeyed === 0 && rec.res.notices.length === 0, 'NEGATIVE CONTROL (no recovery from the marker): the same kill leaves the repair recorded as 0 re-keyed and nobody told', rec.res?.report);
     }
     // (E) quota r3: a TORN archive tail (ENOSPC / a short write: a fragment with no newline) swallowed the first line of
     //     the next append — one archived original left the ledger with no readable archive record
@@ -1194,7 +1194,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(t.bad === 1 && t.uh === 6 && t.rep.archiveUnparseable === 1, `(E) after a torn tail every archived original still has its readable line (${t.uh} of 6); the fragment stays alone on its line and is counted (report.archiveUnparseable) (red on quota r2: 5 — the first line of the append was swallowed)`, { bad: t.bad, uh: t.uh, unparseable: t.rep.archiveUnparseable });
       let txt = fs.readFileSync(BACKFILL, 'utf-8').replace(/require\('\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(path.join(path.dirname(BACKFILL), f))})`);
       const a = 'torn = b[0] !== 0x0a;';
-      ok(txt.includes(a), 'control anchor present (E)');
+      ok(verdictOf(txt.includes(a)), 'control anchor present (E)');
       const pc = path.join(tmp, 'ledger-slot-backfill-notorn.js'); fs.writeFileSync(pc, txt.replace(a, 'torn = false;'));
       const tc = tornRun(pc);
       ok(tc.uh === 5, '(E) NEGATIVE CONTROL (patched copy that appends straight after the fragment): one archived original has no readable line', tc);
@@ -1203,12 +1203,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     {
       let txt = fs.readFileSync(BACKFILL, 'utf-8').replace(/require\('\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(path.join(path.dirname(BACKFILL), f))})`);
       const a = 'const prior = readPriorArchive(archiveDir, id);';
-      ok(txt.includes(a), 'control anchor present');
+      ok(verdictOf(txt.includes(a)), 'control anchor present');
       txt = txt.replace(a, 'const prior = { keys: new Set(), open: [] };');
       const pc = path.join(tmp, 'ledger-slot-backfill-nomemory.js'); fs.writeFileSync(pc, txt);
       const rA = inst('inst-ls-ctl-shard'); runChild(rA, 'shard', { BACKFILL_MOD: pc }); runChild(rA, 'none', { BACKFILL_MOD: pc });
       const rB = inst('inst-ls-ctl-attr'); runChild(rB, 'attribution', { BACKFILL_MOD: pc }); const reB = runChild(rB, 'none', { BACKFILL_MOD: pc });
-      ok(dupCount(archLines(rA)) === 6 && reB.res && reB.res.report.rekeyed === 0 && reB.res.report.relearned === 0 && reB.res.notices.length === 0, 'NEGATIVE CONTROL (no memory of the crashed pass): (A) 6 duplicate archive lines, (B) the retry reports 0 re-keyed, re-learns nothing and tells nobody', { dupA: dupCount(archLines(rA)), repB: reB.res?.report });
+      ok(dupCount(archLines(rA)) === 6 && gateOf(reB.res) && reB.res.report.rekeyed === 0 && reB.res.report.relearned === 0 && reB.res.notices.length === 0, 'NEGATIVE CONTROL (no memory of the crashed pass): (A) 6 duplicate archive lines, (B) the retry reports 0 re-keyed, re-learns nothing and tells nobody', { dupA: dupCount(archLines(rA)), repB: reB.res?.report });
     }
     // a row the ledger GENUINELY holds twice is two rows leaving it: the retry
     // dedupe is against EARLIER passes only, never inside a pass
@@ -1230,7 +1230,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       fs.appendFileSync(fa, drift.map((a) => JSON.stringify(a)).join('\n') + '\n'); // the production shape: a second, file-name spelling of the same identity inside the same file
       const rep = backfillLedgerBySlot({ dataDir: path.join(r, 'data'), id: ID });
       const rates = JSON.parse(fs.readFileSync(path.join(ad, 'rates.json'), 'utf-8'));
-      ok(rep.identities.join(',') === 'acct:sub-a,acct:sub-b' && rep.relearned === 2 && !('acct_sub-a' in rates) && rates['acct:sub-a'] && rates['acct:sub-a'].buckets, 'one identity per anchors file: the \':\' spelling is relearned and reported ONCE, no phantom \'acct_sub-a\' rates entry (red on quota r1: identities 3, relearned 3, a phantom entry)', { ids: rep.identities, relearned: rep.relearned, rates: Object.keys(rates) });
+      ok(rep.identities.join(',') === 'acct:sub-a,acct:sub-b' && rep.relearned === 2 && !('acct_sub-a' in rates) && gateOf(rates['acct:sub-a']) && verdictOf(rates['acct:sub-a'].buckets), 'one identity per anchors file: the \':\' spelling is relearned and reported ONCE, no phantom \'acct_sub-a\' rates entry (red on quota r1: identities 3, relearned 3, a phantom entry)', { ids: rep.identities, relearned: rep.relearned, rates: Object.keys(rates) });
       ok(rep.anchorKeySpellings.join(',') === 'acct_sub-a', '…and the drifted spelling is named in the report for a separate cleanup', rep.anchorKeySpellings);
     }
   }
@@ -1270,10 +1270,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const archFile = fs.readdirSync(path.join(d, 'archive')).find((f) => /^ledger-by-slot-/.test(f));
     const arch = archFile ? fs.readFileSync(path.join(d, 'archive', archFile), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
     const archOf = (rid) => arch.find((a) => a.store === 'usage-history' && a.entry && a.entry.rid === rid);
-    ok(!by.rq_n1 && archOf('rq_n1') && /lag shadow/.test(archOf('rq_n1').reason) && /machine login → sub-b/.test(archOf('rq_n1').reason) && rep.archivedWhy['lag-shadow'] === 1,
+    ok(!by.rq_n1 && gateOf(archOf('rq_n1')) && gateOf(/lag shadow/.test(archOf('rq_n1').reason)) && gateOf(/machine login → sub-b/.test(archOf('rq_n1').reason)) && rep.archivedWhy['lag-shadow'] === 1,
       'a row 3 s after a `from:null` per-session re-point is inside the LAG SHADOW (machine login → sub-b) — archived, never re-keyed (red on 2.369.163 quota 3: re-keyed to sub-b by the slot ledger)', { live: by.rq_n1, arch: archOf('rq_n1')?.reason, why: rep.archivedWhy });
-    ok(by.rq_n2 && by.rq_n2.acct === 'sub-b' && by.rq_n2.slotRekeyedBy, '…20 min after the same re-point the slot ledger proves sub-b — re-keyed', by.rq_n2);
-    ok(by.rq_s1 && by.rq_s1.acct === 'sub-b' && by.rq_s1.slotRekeyedFrom === 'sub-a', 'a row 3 s after a SPAWN is not in any shadow (a new process has no in-flight request on the pool default `from` names) — re-keyed to the spawn\'s slot', { live: by.rq_s1, arch: archOf('rq_s1')?.reason });
+    ok(gateOf(by.rq_n2) && by.rq_n2.acct === 'sub-b' && verdictOf(by.rq_n2.slotRekeyedBy), '…20 min after the same re-point the slot ledger proves sub-b — re-keyed', by.rq_n2);
+    ok(gateOf(by.rq_s1) && by.rq_s1.acct === 'sub-b' && by.rq_s1.slotRekeyedFrom === 'sub-a', 'a row 3 s after a SPAWN is not in any shadow (a new process has no in-flight request on the pool default `from` names) — re-keyed to the spawn\'s slot', { live: by.rq_s1, arch: archOf('rq_s1')?.reason });
   }
   // ── 2026-09-runaway-parks-void (2026-09-25, the owner's ruling: a resource guard never stops an app a person uses) ──
   {
@@ -1290,19 +1290,19 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     fs.writeFileSync(daFile, JSON.stringify({ apps: { 'da-1': { id: 'da-1', label: 'Google Chrome', state: 'failed', stoppedBy: 'runaway', lastError: OLD }, 'da-2': { id: 'da-2', label: 'xterm', state: 'exited', lastError: 'application exited (code 0)' }, 'da-3': { id: 'da-3', label: 'burner', state: 'failed', lastError: CPU } }, runawayParkedUntil: { chromium: Date.now() + 3600e3 } }), { mode: 0o644 });
     fs.writeFileSync(bpFile, JSON.stringify({ version: 1, profiles: [], leases: [], browsers: { 'bp-00000001': { profileId: 'bp-00000001', state: 'failed', lastError: OLD } }, pins: {}, runawayParkedUntil: { 'bp-00000001': Date.now() + 3600e3 } }), { mode: 0o600 });
     const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
-    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    ok(verdictOf(mm1.MIGRATIONS.some((x) => x.id === ID)), 'registered as a ledger-keyed one-shot');
     const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
     const da = JSON.parse(fs.readFileSync(daFile, 'utf-8')), bp = JSON.parse(fs.readFileSync(bpFile, 'utf-8'));
-    ok(res1 && res1.status === 'ran' && !('runawayParkedUntil' in da) && !('runawayParkedUntil' in bp), 'both park maps are REMOVED from disk (a park no longer exists)', { res1, da, bp });
-    ok(da.apps['da-1'].lastError === RUNAWAY_VOID_TEXT && bp.browsers['bp-00000001'].lastError === RUNAWAY_VOID_TEXT && RUNAWAY_VOID_TEXT.startsWith('stopped by the old resource guard (a per-process RSS sum'), 'an RSS-sum runaway lastError is rewritten to name the retired guard and its metric', { da: da.apps['da-1'].lastError });
-    ok(da.apps['da-2'].lastError === 'application exited (code 0)' && da.apps['da-3'].lastError === CPU && OLD.startsWith(OLD_RUNAWAY_PREFIX) && !CPU.startsWith(OLD_RUNAWAY_PREFIX), 'every other lastError is untouched (an app exit, the CPU-rule sentence — only the RSS sum was a lie)');
+    ok(gateOf(res1) && res1.status === 'ran' && !('runawayParkedUntil' in da) && !('runawayParkedUntil' in bp), 'both park maps are REMOVED from disk (a park no longer exists)', { res1, da, bp });
+    ok(da.apps['da-1'].lastError === RUNAWAY_VOID_TEXT && bp.browsers['bp-00000001'].lastError === RUNAWAY_VOID_TEXT && verdictOf(RUNAWAY_VOID_TEXT.startsWith('stopped by the old resource guard (a per-process RSS sum')), 'an RSS-sum runaway lastError is rewritten to name the retired guard and its metric', { da: da.apps['da-1'].lastError });
+    ok(da.apps['da-2'].lastError === 'application exited (code 0)' && da.apps['da-3'].lastError === CPU && gateOf(OLD.startsWith(OLD_RUNAWAY_PREFIX)) && !CPU.startsWith(OLD_RUNAWAY_PREFIX), 'every other lastError is untouched (an app exit, the CPU-rule sentence — only the RSS sum was a lie)');
     ok((fs.statSync(daFile).mode & 0o777) === 0o644 && (fs.statSync(bpFile).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'atomic tmp+rename, each file keeps its own mode (browser-profiles.json stays 0600), no temp left');
-    ok(res1.report && res1.report.desktop.parks === 1 && res1.report.desktop.rewritten === 1 && res1.report.browser.parks === 1 && res1.report.browser.rewritten === 1, 'the report counts what it voided', res1.report);
+    ok(gateOf(res1.report) && res1.report.desktop.parks === 1 && res1.report.desktop.rewritten === 1 && res1.report.browser.parks === 1 && res1.report.browser.rewritten === 1, 'the report counts what it voided', res1.report);
     ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
     // (b) missing files are not a failure, and nothing is CREATED
     const r2 = mkInst('rpv-none');
     const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
-    ok(res2 && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'desktop-apps.json')) && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
+    ok(gateOf(res2) && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'desktop-apps.json')) && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
     // (c) THROUGH THE LIVE KEEPER — the real desktop-app keeper loaded its store at construction and its next save
     //     would overwrite a file edit; the reshape goes through reshapeStore and the keeper's own atomic save
     const r3 = mkInst('rpv-keeper');
@@ -1335,17 +1335,17 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const f1 = path.join(r1, 'data', 'desktop-apps.json');
     fs.writeFileSync(f1, JSON.stringify({ apps: { 'da-1': { id: 'da-1', label: 'xterm', state: 'exited' }, 'da-2': { id: 'da-2', label: 'calc', state: 'ready', pids: {}, starts: {} }, 'da-3': { id: 'da-3', label: 'remote', state: 'exited', hostId: 'dev-abc' } } }), { mode: 0o640 });
     const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
-    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    ok(verdictOf(mm1.MIGRATIONS.some((x) => x.id === ID)), 'registered as a ledger-keyed one-shot');
     const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
     const d1 = JSON.parse(fs.readFileSync(f1, 'utf-8'));
-    ok(res1 && res1.status === 'ran' && d1.apps['da-1'].hostId === 'local' && d1.apps['da-2'].hostId === 'local', 'every record written before the lane names THIS machine (hostId: local)', d1);
+    ok(gateOf(res1) && res1.status === 'ran' && d1.apps['da-1'].hostId === 'local' && d1.apps['da-2'].hostId === 'local', 'every record written before the lane names THIS machine (hostId: local)', d1);
     ok(d1.apps['da-3'].hostId === 'dev-abc' && res1.report.stamped === 2 && res1.report.records === 3 && res1.report.via === 'file', 'a record that already names a machine is left alone; the report counts what it stamped', res1.report);
     ok((fs.statSync(f1).mode & 0o777) === 0o640 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'atomic tmp+rename, the file keeps its mode, no temp left');
     ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
     // (b) no store ⇒ ran, nothing created
     const r2 = mkInst('hk-none');
     const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
-    ok(res2 && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'desktop-apps.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
+    ok(gateOf(res2) && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'desktop-apps.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
     // (c) THROUGH THE LIVE KEEPER (its in-memory store is what it saves next) — the same reason as runaway-parks-void (c)/(d)
     const r3 = mkInst('hk-keeper');
     const f3 = path.join(r3, 'data', 'desktop-apps.json');
@@ -1387,23 +1387,23 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(rp.migrated.map((m) => m.id).join(',') === 'bp-0000a001,bp-0000a002,bp-0000a007' && byId['bp-0000a001'].owner.kind === 'instance' && byId['bp-0000a001'].createdBy === KA && byId['bp-0000a002'].createdBy === KB && byId['bp-0000a007'].createdBy === KA, 'PURE: every session-owned NAMED record becomes all-conversations (owner instance), its old owner kept as createdBy (a helper\'s child key → its conversation)', rp);
     ok(byId['bp-0000a002'].sharing === 'instance' && byId['bp-0000a001'].sharing === 'owner', '…`sharing` (the tab-isolation knob) is never touched');
     ok(byId['bp-0000a005'].owner.kind === 'conversation' && byId['bp-0000a006'].owner.kind === 'task' && byId['bp-0000a004'].legacy === true && rp.kept.length === 4, 'the ephemeral record, the task-owned record (an explicit scope) and the legacy one are left alone; the UI-made one already is all', rp.kept);
-    ok(doc.profiles.filter((p) => !p.ephemeral).every((p) => p.owner.kind !== 'session') && BP.migrateScopeAll(doc).migrated.length === 0, 'idempotent: a second pass migrates nothing');
-    ok(BP.mayAttach(withUse(byId['bp-0000a002']), { browserKey: 'bk-0000a0ff' }).ok && BP.mayAttach(withUse(byId['bp-0000a001']), { browserKey: KB }).ok, 'the study\'s path-A records now admit another conversation');
+    ok(gateOf(doc.profiles.filter((p) => !p.ephemeral).every((p) => p.owner.kind !== 'session')) && BP.migrateScopeAll(doc).migrated.length === 0, 'idempotent: a second pass migrates nothing');
+    ok(gateOf(BP.mayAttach(withUse(byId['bp-0000a002']), { browserKey: 'bk-0000a0ff' }).ok) && verdictOf(BP.mayAttach(withUse(byId['bp-0000a001']), { browserKey: KB }).ok), 'the study\'s path-A records now admit another conversation');
     // (a) the FILE path
     const r1 = mkInst('bpall-file');
     const f1 = path.join(r1, 'data', 'browser-profiles.json');
     fs.writeFileSync(f1, JSON.stringify(fixture()), { mode: 0o600 });
     const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
-    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    ok(verdictOf(mm1.MIGRATIONS.some((x) => x.id === ID)), 'registered as a ledger-keyed one-shot');
     const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
     const d1 = JSON.parse(fs.readFileSync(f1, 'utf-8'));
-    ok(res1 && res1.status === 'ran' && res1.report.via === 'file' && res1.report.migrated.length === 3 && d1.profiles.find((p) => p.id === 'bp-0000a001').owner.kind === 'instance' && d1.pins[KB].profileId === 'bp-0000a001', 'the file is reshaped (3 migrated, the report names them); pins are untouched', res1.report);
+    ok(gateOf(res1) && res1.status === 'ran' && res1.report.via === 'file' && res1.report.migrated.length === 3 && d1.profiles.find((p) => p.id === 'bp-0000a001').owner.kind === 'instance' && d1.pins[KB].profileId === 'bp-0000a001', 'the file is reshaped (3 migrated, the report names them); pins are untouched', res1.report);
     ok((fs.statSync(f1).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'atomic tmp+rename, browser-profiles.json stays 0600, no temp left');
     ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
     // (b) no store ⇒ ran, nothing created
     const r2 = mkInst('bpall-none');
     const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
-    ok(res2 && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
+    ok(gateOf(res2) && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
     // (c) THROUGH THE LIVE KEEPER (its in-memory registry is what it saves next)
     const r3 = mkInst('bpall-keeper');
     const f3 = path.join(r3, 'data', 'browser-profiles.json');
@@ -1413,7 +1413,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { }, browserKeeper: () => Kp }), r3).find((x) => x.id === ID);
     ok(res3.status === 'ran' && res3.report.via === 'keeper' && Kp.profile('bp-0000a001').owner.kind === 'instance' && Kp.profile('bp-0000a001').createdBy === KA && JSON.parse(fs.readFileSync(f3, 'utf-8')).profiles.find((p) => p.id === 'bp-0000a001').owner.kind === 'instance', 'with a live keeper the IN-MEMORY record is reshaped and the keeper\'s own save puts it on disk', res3.report);
     const gu3 = runGrantsUnify(r3, { browserKeeper: () => Kp });   // lane grants-unify: then the rows (what the upgrade does next)
-    ok(gu3 && gu3.status === 'ran' && Kp.list().profiles.find((p) => p.id === 'bp-0000a001').scope === 'all', '…and the digest says every conversation can use it (scope all)', gu3);
+    ok(gateOf(gu3) && gu3.status === 'ran' && Kp.list().profiles.find((p) => p.id === 'bp-0000a001').scope === 'all', '…and the digest says every conversation can use it (scope all)', gu3);
     Kp.shutdown();
     // (e) VERIFY S5 (2026-09-26): a CORRUPT / unreadable registry FAILS BY NAME — the ledger is not stamped, the file is
     // not touched, and the next run (the file whole again) migrates it; only a MISSING file is "nothing to migrate"
@@ -1424,14 +1424,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const mm5 = create({ rootDir: r5, homeDir: scratchHomeDir, serverNotice: () => { } });
     const res5 = runOnly(mm5, r5).find((x) => x.id === ID);
     let led5 = null; try { led5 = JSON.parse(fs.readFileSync(path.join(r5, 'data', 'migrations.json'), 'utf-8')); } catch { led5 = null; }
-    ok(res5 && res5.status !== 'ran' && res5.status !== 'already' && /browser-profiles\.json could not be read/.test(String(res5.error || '')) && fs.readFileSync(f5, 'utf-8') === torn && !(led5 && led5.applied && led5.applied[ID]), `a torn registry: the run FAILS by name (${res5 && res5.status}), the file is untouched, the ledger is NOT stamped`, res5);
+    ok(gateOf(res5) && res5.status !== 'ran' && res5.status !== 'already' && gateOf(/browser-profiles\.json could not be read/.test(String(res5.error || ''))) && fs.readFileSync(f5, 'utf-8') === torn && !(led5 && led5.applied && led5.applied[ID]), `a torn registry: the run FAILS by name (${res5 && res5.status}), the file is untouched, the ledger is NOT stamped`, res5);
     fs.writeFileSync(f5, JSON.stringify(fixture()), { mode: 0o600 });
     const res5b = runOnly(mm5, r5).find((x) => x.id === ID);
-    ok(res5b && res5b.status === 'ran' && res5b.report.via === 'file' && res5b.report.migrated.length === 3, 'the file whole again ⇒ the next run migrates it (never blocked, never skipped)', res5b);
+    ok(gateOf(res5b) && res5b.status === 'ran' && res5b.report.via === 'file' && res5b.report.migrated.length === 3, 'the file whole again ⇒ the next run migrates it (never blocked, never skipped)', res5b);
     fs.writeFileSync(f5, 'null', { mode: 0o600 });
     const r6 = mkInst('bpall-null'); fs.writeFileSync(path.join(r6, 'data', 'browser-profiles.json'), 'null');
     const res6 = runOnly(create({ rootDir: r6, homeDir: scratchHomeDir, serverNotice: () => { } }), r6).find((x) => x.id === ID);
-    ok(res6 && res6.status !== 'ran' && /not a registry document/.test(String(res6.error || '')), 'a file holding `null` is not a registry — fails by name too', res6);
+    ok(gateOf(res6) && res6.status !== 'ran' && verdictOf(/not a registry document/.test(String(res6.error || ''))), 'a file holding `null` is not a registry — fails by name too', res6);
     // (d) CONTROL: the pre-ruling registry refuses the study's path A — what the migration exists for
     const pre = fixture();
     ok(BP.mayAttach(withUse(pre.profiles[0]), { browserKey: KB }).code === 'not_owner' && BP.mayAttach(withUse(pre.profiles[1]), { browserKey: 'bk-0000a0ff' }).code === 'not_owner', 'CONTROL: before the migration both path-A records refuse another conversation (not_owner) — the legs above can go red');
@@ -1471,7 +1471,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return !!(pin && pin.profileId === p.id && pin.by !== 'agent' && (Number(pin.at) || 0) >= (Number(p.scopeAt) || 0));
     };
     const pre = fixture();
-    ok(oldAdmits(pre.profiles[1], K2, pre.pins) && !BP.mayAttach(withUse(pre.profiles[1]), { browserKey: K2 }).ok && oldAdmits(pre.profiles[2], K7, pre.pins) && !BP.mayAttach(withUse(pre.profiles[2]), { browserKey: K7 }).ok, 'CONTROL: yesterday\'s admission let the pinned chats in (K2 on work, K7 on Group) and today\'s — a pin never authorizes — refuses them on the pre-migration file: the fold below is what keeps them in');
+    ok(gateOf(oldAdmits(pre.profiles[1], K2, pre.pins)) && !BP.mayAttach(withUse(pre.profiles[1]), { browserKey: K2 }).ok && gateOf(oldAdmits(pre.profiles[2], K7, pre.pins)) && !BP.mayAttach(withUse(pre.profiles[2]), { browserKey: K7 }).ok, 'CONTROL: yesterday\'s admission let the pinned chats in (K2 on work, K7 on Group) and today\'s — a pin never authorizes — refuses them on the pre-migration file: the fold below is what keeps them in');
     const doc = fixture();
     const rp = BP.migrateWhoList(doc);
     const byId = Object.fromEntries(doc.profiles.map((p) => [p.id, p]));
@@ -1479,7 +1479,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(JSON.stringify(byId['bp-0000e002'].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'session', id: K1 }, { kind: 'session', id: K2 }] }) && rp.migrated[0].folded.join() === K2, 'work ⇒ [its conversation (a helper\'s key → its parent), + K2 folded]; the agent\'s pin, the older pin, another profile\'s pin and the fork\'s old copy are NOT folded', byId['bp-0000e002'].owner);
     ok(JSON.stringify(byId['bp-0000e003'].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'task', id: 'T-OPS' }, { kind: 'session', id: K7 }] }), 'Group ⇒ [Task Group T-OPS, + K7 folded] (a pre-ruling pin with no `by` is the user\'s)', byId['bp-0000e003'].owner);
     ok(byId['bp-0000e001'].owner.kind === 'instance' && byId['bp-0000e004'].owner.kind === 'conversation' && byId['bp-0000e005'].legacy === true && JSON.stringify(doc.pins) === JSON.stringify(fixture().pins), 'the instance / ephemeral / legacy records and every pin are untouched');
-    ok(BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K2 }).ok && BP.mayAttach(withUse(byId['bp-0000e003']), { browserKey: K7 }).ok && !BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K3 }).ok && !BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K4 }).ok, 'after the fold, everyone yesterday admitted is admitted by the LIST (and nobody else)');
+    ok(gateOf(BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K2 }).ok) && gateOf(BP.mayAttach(withUse(byId['bp-0000e003']), { browserKey: K7 }).ok) && !BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K3 }).ok && !BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K4 }).ok, 'after the fold, everyone yesterday admitted is admitted by the LIST (and nobody else)');
     doc.pins[K3] = { profileId: 'bp-0000e002', origin: 'chosen', at: 999, by: 'user' }; // a fresh user pin present at the second pass
     const again = JSON.stringify(doc.profiles);
     const rp2 = BP.migrateWhoList(doc);
@@ -1489,10 +1489,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const f1 = path.join(r1, 'data', 'browser-profiles.json');
     fs.writeFileSync(f1, JSON.stringify(fixture()), { mode: 0o600 });
     const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
-    ok(mm1.MIGRATIONS.some((x) => x.id === ID) && mm1.MIGRATIONS.findIndex((x) => x.id === ID) > mm1.MIGRATIONS.findIndex((x) => x.id === '2026-09-browser-profiles-all-conversations'), 'registered as a ledger-keyed one-shot, AFTER 2026-09-browser-profiles-all-conversations');
+    ok(gateOf(mm1.MIGRATIONS.some((x) => x.id === ID)) && mm1.MIGRATIONS.findIndex((x) => x.id === ID) > mm1.MIGRATIONS.findIndex((x) => x.id === '2026-09-browser-profiles-all-conversations'), 'registered as a ledger-keyed one-shot, AFTER 2026-09-browser-profiles-all-conversations');
     const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
     const d1 = JSON.parse(fs.readFileSync(f1, 'utf-8'));
-    ok(res1 && res1.status === 'ran' && res1.report.via === 'file' && res1.report.migrated.length === 2 && d1.profiles.find((p) => p.id === 'bp-0000e002').owner.kind === 'only' && (fs.statSync(f1).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'the file is reshaped atomically (0600 kept, no temp left); the report names both records', res1.report);
+    ok(gateOf(res1) && res1.status === 'ran' && res1.report.via === 'file' && res1.report.migrated.length === 2 && d1.profiles.find((p) => p.id === 'bp-0000e002').owner.kind === 'only' && (fs.statSync(f1).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'the file is reshaped atomically (0600 kept, no temp left); the report names both records', res1.report);
     ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
     // (b) through the LIVE keeper
     const r3 = mkInst('whol-keeper');
@@ -1501,12 +1501,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     Kp.list();
     const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { }, browserKeeper: () => Kp }), r3).find((x) => x.id === ID);
     const gu3 = runGrantsUnify(r3, { browserKeeper: () => Kp });   // lane grants-unify: then the rows (what the upgrade does next)
-    ok(res3.status === 'ran' && res3.report.via === 'keeper' && gu3 && gu3.status === 'ran' && Kp.list().profiles.find((p) => p.id === 'bp-0000e002').use.who.map((w) => w.key).join() === [K1, K2].join(), 'with a live keeper the IN-MEMORY record is reshaped (the digest\'s `use` lists both conversations) and its own save puts it on disk', res3.report);
+    ok(res3.status === 'ran' && res3.report.via === 'keeper' && gateOf(gu3) && gu3.status === 'ran' && Kp.list().profiles.find((p) => p.id === 'bp-0000e002').use.who.map((w) => w.key).join() === [K1, K2].join(), 'with a live keeper the IN-MEMORY record is reshaped (the digest\'s `use` lists both conversations) and its own save puts it on disk', res3.report);
     Kp.shutdown();
     // (c) no store ⇒ ran, nothing created; (d) an unparsable store FAILS by name, the ledger unstamped, retried when whole
     const r2 = mkInst('whol-none');
     const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
-    ok(res2 && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store ⇒ ran, nothing created', res2);
+    ok(gateOf(res2) && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store ⇒ ran, nothing created', res2);
     const r5 = mkInst('whol-corrupt');
     const f5 = path.join(r5, 'data', 'browser-profiles.json');
     const torn = '{"version":1,"profiles":[{"id":"bp-0000e002","owner":{"kind":"session"';
@@ -1514,10 +1514,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const mm5 = create({ rootDir: r5, homeDir: scratchHomeDir, serverNotice: () => { } });
     const res5 = runOnly(mm5, r5).find((x) => x.id === ID);
     let led5 = null; try { led5 = JSON.parse(fs.readFileSync(path.join(r5, 'data', 'migrations.json'), 'utf-8')); } catch { led5 = null; }
-    ok(res5 && res5.status !== 'ran' && /browser-profiles\.json could not be read/.test(String(res5.error || '')) && fs.readFileSync(f5, 'utf-8') === torn && !(led5 && led5.applied && led5.applied[ID]), 'an unparsable registry FAILS by name — the file untouched, the ledger NOT stamped', res5);
+    ok(gateOf(res5) && res5.status !== 'ran' && gateOf(/browser-profiles\.json could not be read/.test(String(res5.error || ''))) && fs.readFileSync(f5, 'utf-8') === torn && !(led5 && led5.applied && led5.applied[ID]), 'an unparsable registry FAILS by name — the file untouched, the ledger NOT stamped', res5);
     fs.writeFileSync(f5, JSON.stringify(fixture()), { mode: 0o600 });
     const res5b = runOnly(mm5, r5).find((x) => x.id === ID);
-    ok(res5b && res5b.status === 'ran' && res5b.report.migrated.length === 2, 'the file whole again ⇒ the next boot migrates it', res5b);
+    ok(gateOf(res5b) && res5b.status === 'ran' && res5b.report.migrated.length === 2, 'the file whole again ⇒ the next boot migrates it', res5b);
     // (e) the 2.369.196 integration: "yesterday" is 2.369.195 — its B-f7ab r3 rule: a pin DATED 0 (the late browser key's
     //     LANDING on the current default) authorized NOTHING, even on a narrowed record that carries no `scopeAt`; a dated
     //     user pick did. The fold preserves exactly that: the landing is never folded into the list, the dated pick is.
@@ -1529,10 +1529,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       } });
       const admits195 = (p, bk, pins) => { const pin = pins[bk]; const at = pin ? Number(pin.at) || 0 : 0; return !!(pin && pin.profileId === p.id && pin.by !== 'agent' && at > 0 && at >= (Number(p.scopeAt) || 0)); };
       const z = docZ(); const pz = z.profiles[0];
-      ok(!admits195(pz, L0, z.pins) && admits195(pz, LD, z.pins) && oldAdmits(pz, L0, z.pins), 'setup (e): 2.369.195 refused the landing dated 0 and admitted the dated pick; the 2.369.194 rule (no date clause) would have admitted the landing — the fixture tells the two apart');
+      ok(!admits195(pz, L0, z.pins) && gateOf(admits195(pz, LD, z.pins)) && verdictOf(oldAdmits(pz, L0, z.pins)), 'setup (e): 2.369.195 refused the landing dated 0 and admitted the dated pick; the 2.369.194 rule (no date clause) would have admitted the landing — the fixture tells the two apart');
       const rz = BP.migrateWhoList(z);
       ok(rz.migrated.length === 1 && rz.migrated[0].folded.join() === LD && JSON.stringify(z.profiles[0].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'session', id: K1 }, { kind: 'session', id: LD }] })
-        && !BP.mayAttach(withUse(z.profiles[0]), { browserKey: L0 }).ok && BP.mayAttach(withUse(z.profiles[0]), { browserKey: LD }).ok,
+        && !BP.mayAttach(withUse(z.profiles[0]), { browserKey: L0 }).ok && verdictOf(BP.mayAttach(withUse(z.profiles[0]), { browserKey: LD }).ok),
       '(e) the fold preserves 2.369.195\'s admission: the late key\'s landing (dated 0) is NOT folded — nothing yesterday refused is opened — the dated user pick is', rz);
       // CONTROL: migrateWhoList without the date clause (the 2.369.194 rule the lane was written against) folds the landing
       const { mutantCopies } = await import('./mutant-copy.mjs');
@@ -1541,12 +1541,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const bpSrc = fs.readFileSync(path.join(repoRoot, 'src', 'browser-profiles.js'), 'utf-8');
       const DATED = "      if (!(at > 0) || at < (Number(p.scopeAt) || 0)) continue; // 2.369.195's rule: a pin dated 0 (a landing) authorized nothing\n";
       const foundDated = bpSrc.split(DATED).length === 2; // (this suite's ok() returns nothing — the condition is kept)
-      ok(foundDated, 'CONTROL (e) setup: the fold\'s date clause is found exactly once');
+      ok(verdictOf(foundDated), 'CONTROL (e) setup: the fold\'s date clause is found exactly once');
       if (foundDated) {
         try {
           const B0 = MZ.load('src/browser-profiles.js', editAnchor(bpSrc, DATED, "      if (at < (Number(p.scopeAt) || 0)) continue;\n", "src/browser-profiles.js"), 'fold-undated');
           const z0 = docZ(); const r0 = B0.migrateWhoList(z0);
-          ok(r0.migrated.length === 1 && r0.migrated[0].folded.includes(L0) && B0.mayAttach(withUse(z0.profiles[0]), { browserKey: L0 }).ok, 'CONTROL (e): that copy folds the landing into the list — a conversation 2.369.195 refused would be let in by the upgrade; the date clause is what keeps it out', r0);
+          ok(r0.migrated.length === 1 && gateOf(r0.migrated[0].folded.includes(L0)) && verdictOf(B0.mayAttach(withUse(z0.profiles[0]), { browserKey: L0 }).ok), 'CONTROL (e): that copy folds the landing into the list — a conversation 2.369.195 refused would be let in by the upgrade; the date clause is what keeps it out', r0);
         } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
       }
     }
@@ -1584,12 +1584,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     finally { console.log = origLog; }
     const line = lines.find((l) => /\[migrate\] channels-aggregated-im:/.test(l)) || '';
     let counts = null; try { counts = JSON.parse(line.slice(line.indexOf('{'))); } catch { }
-    ok(resA && resA.status === 'started' && counts && counts.hot === 1 && counts.cleared === 1 && counts.readStamped === 0 && Array.isArray(counts.linked) && counts.linked.length === 0, 'the boot line reports the rows the migration changes (hot 1, cleared 1) — not the zeros of a report filled a microtask later', line);
+    ok(gateOf(resA) && resA.status === 'started' && gateOf(counts) && counts.hot === 1 && counts.cleared === 1 && counts.readStamped === 0 && gateOf(Array.isArray(counts.linked)) && counts.linked.length === 0, 'the boot line reports the rows the migration changes (hot 1, cleared 1) — not the zeros of a report filled a microtask later', line);
     const lgA = await waitLedger(dA, ID);   // B-a09e: a STEPPED migration — recorded (its report beside it) once the index LANDED
-    ok(!!lgA.applied && lgA.report && lgA.report.hot === 1 && lgA.report.cleared === 1, 'the same counts ride the ledger\'s report row (B-a09e: written once the index holding them landed)', JSON.stringify(lgA));
+    ok(!!lgA.applied && gateOf(lgA.report) && lgA.report.hot === 1 && lgA.report.cleared === 1, 'the same counts ride the ledger\'s report row (B-a09e: written once the index holding them landed)', JSON.stringify(lgA));
     await eA.store.index.update(() => { });   // the write queued by the run lands ahead of anything after it
     const lA = eA.store.index.live();
-    ok(lA['fake-poll/t1'].refresh && lA['fake-poll/t1'].refresh.every === 30 && !('tracked' in lA['fake-poll/t1']) && !lA['fake-poll/t2'].refresh && lA['fake-poll/t2'].readAt === 3, 'the edits that landed are exactly the counted ones (t1 hot + cleared, t2 untouched)');
+    ok(gateOf(lA['fake-poll/t1'].refresh) && lA['fake-poll/t1'].refresh.every === 30 && !('tracked' in lA['fake-poll/t1']) && !lA['fake-poll/t2'].refresh && lA['fake-poll/t2'].readAt === 3, 'the edits that landed are exactly the counted ones (t1 hot + cleared, t2 untouched)');
     eA.stop();
     // (b) a BLOCKED index: the run FAILS by name and the ledger does not record it
     const rB = path.join(tmp, 'agg-b'); const dB = path.join(rB, 'data');
@@ -1602,7 +1602,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       resB = runOnly(create({ rootDir: rB, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eB }), rB).find((x) => x.id === ID);
     } finally { fs.chmodSync(path.join(dB, 'channels'), 0o700); }
     const ledB = JSON.parse(fs.readFileSync(path.join(dB, 'migrations.json'), 'utf-8'));
-    ok(resB && resB.status === 'failed' && /blocked|refus|paused/i.test(resB.error || '') && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
+    ok(gateOf(resB) && resB.status === 'failed' && gateOf(/blocked|refus|paused/i.test(resB.error || '')) && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
     if (eB) eB.stop();
   }
   // ── 2026-09-channels-access-watchers (R4, 2026-09-27) ──
@@ -1646,7 +1646,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // are still read off the pre-split record until this pass lifts it
     const guA = runGrantsUnify(rA, { channels: eA });
     const pre = eA.effectiveFor('fake-poll', 'c1');
-    ok(guA && guA.status === 'ran' && pre && pre.access.some((x) => x.row.principal.id === 'agent-A') && pre.watchers.some((x) => x.watcher.principal.id === 'agent-A') && pre.access.some((x) => x.row.principal.id === 'tg-work' && x.source === 'account'), 'BEFORE the run the engine already reads each pre-split record as one access row + one watcher row (merged, never a fallback)');
+    ok(gateOf(guA) && guA.status === 'ran' && gateOf(pre) && gateOf(pre.access.some((x) => x.row.principal.id === 'agent-A')) && gateOf(pre.watchers.some((x) => x.watcher.principal.id === 'agent-A')) && verdictOf(pre.access.some((x) => x.row.principal.id === 'tg-work' && x.source === 'account')), 'BEFORE the run the engine already reads each pre-split record as one access row + one watcher row (merged, never a fallback)');
     const lines = [];
     const origLog = console.log;
     console.log = (...a) => { lines.push(a.join(' ')); };
@@ -1654,7 +1654,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     try { resA = runOnly(create({ rootDir: rA, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eA }), rA).find((x) => x.id === ID); }
     finally { console.log = origLog; }
     const lgW = await waitLedger(dA, ID);   // B-a09e: a STEPPED migration — recorded (its report beside it) once the lifted index LANDED
-    ok(resA && resA.status === 'started' && !!lgW.applied && lgW.report && lgW.report.conversations === 1 && lgW.report.accounts === 1 && lgW.report.patterns === 1 && lgW.report.grantsRenamed === 2 && lgW.report.pendingTagged === 3, 'the run reports the rows it changes: 1 conversation, 1 account, 1 rule, 2 grants renamed, 3 pending tagged (two hits + the elided count)', JSON.stringify(resA && resA.report));
+    ok(gateOf(resA) && resA.status === 'started' && !!lgW.applied && gateOf(lgW.report) && lgW.report.conversations === 1 && lgW.report.accounts === 1 && lgW.report.patterns === 1 && lgW.report.grantsRenamed === 2 && lgW.report.pendingTagged === 3, 'the run reports the rows it changes: 1 conversation, 1 account, 1 rule, 2 grants renamed, 3 pending tagged (two hits + the elided count)', JSON.stringify(resA && resA.report));
     await eA.store.index.update(() => { });
     const ix = eA.store.index.snapshot();
     const c1 = ix.conversations['fake-poll/c1'], c2 = ix.conversations['fake-poll/c2'];
@@ -1666,7 +1666,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(c1.pending[0].for === 'agent:agent-A' && c1.pendingElidedBy['agent:agent-A'] === 2 && !c1.pendingElided, 'its held hits (and the elided count) are tagged for the watcher they were held for');
     ok(c2.pending[0].for === 'group:tg-work', 'an INHERITED conversation\'s held hit is tagged for the account\'s watcher (the one in effect)');
     ok(!('principal' in acct) && acct.access[0].principal.id === 'tg-work' && acct.watchers[0].notify === 'digest' && acct.watchers[0].stats.wakes.length === 1 && acct.createdAt === 5, 'account: the top-level principal ⇒ one access row + one watcher row (the ledger rides on the watcher; the grain keeps createdAt)');
-    ok(!('principal' in pat) && pat.pattern && pat.access[0].principal.id === 'agent-P' && pat.watchers[0].filterId === 'f-pattern-pa-1' && pat.createdAt === 7, 'rule: same, and its pattern and filter reference stay');
+    ok(!('principal' in pat) && gateOf(pat.pattern) && pat.access[0].principal.id === 'agent-P' && pat.watchers[0].filterId === 'f-pattern-pa-1' && pat.createdAt === 7, 'rule: same, and its pattern and filter reference stay');
     ok(ix.accountGrants[0].origin === 'access', 'the account-scope grant is renamed origin access');
     const again = eA.migrateGrants(); await again.write;
     ok(again.conversations === 0 && again.accounts === 0 && again.patterns === 0 && again.grantsRenamed === 0 && again.pendingTagged === 0, 'idempotent: a second run finds nothing to lift');
@@ -1682,17 +1682,17 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       resB = runOnly(create({ rootDir: rB, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eB }), rB).find((x) => x.id === ID);
     } finally { fs.chmodSync(path.join(dB, 'channels'), 0o700); }
     const ledB = JSON.parse(fs.readFileSync(path.join(dB, 'migrations.json'), 'utf-8'));
-    ok(resB && resB.status === 'failed' && /refus|blocked|paused/i.test(resB.error || '') /* B-f276 1b: a held index pauses the channels — the run fails in the pause's words */ && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
+    ok(gateOf(resB) && resB.status === 'failed' && gateOf(/refus|blocked|paused/i.test(resB.error || '')) /* B-f276 1b: a held index pauses the channels — the run fails in the pause's words */ && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
     if (eB) eB.stop();
     // (c) NO ENGINE on this boot: a pre-split record fails the run BY NAME; none is a success
     const rC = path.join(tmp, 'aw-c'); const dC = path.join(rC, 'data');
     seed(dC, legacyIndex());
     const resC = runOnly(create({ rootDir: rC, homeDir: scratchHomeDir, serverNotice: () => { }, channels: null }), rC).find((x) => x.id === ID);
-    ok(resC && resC.status === 'failed' && /no channels engine to split 1 conversation assignment\(s\) and 2 account\/rule/.test(resC.error || ''), 'without an engine a pre-split index FAILS the run by name (retried on a boot that has one)', JSON.stringify(resC));
+    ok(gateOf(resC) && resC.status === 'failed' && verdictOf(/no channels engine to split 1 conversation assignment\(s\) and 2 account\/rule/.test(resC.error || '')), 'without an engine a pre-split index FAILS the run by name (retried on a boot that has one)', JSON.stringify(resC));
     const rD = path.join(tmp, 'aw-d'); const dD = path.join(rD, 'data');
     seed(dD, { v: 1, conversations: {}, updatedAt: 0 });
     const resD = runOnly(create({ rootDir: rD, homeDir: scratchHomeDir, serverNotice: () => { }, channels: null }), rD).find((x) => x.id === ID);
-    ok(resD && resD.status === 'ran', '…and an index with nothing to split is a success');
+    ok(gateOf(resD) && resD.status === 'ran', '…and an index with nothing to split is a success');
     // (e) B-a09e's small (主开发 09:18Z) — THE INDEX'S LANDING: its ordering write answering false (held past the writer's bound, or
     // failed and still owed) ⇒ the stepped migration FAILS by name and is NOT recorded (the next boot runs it again); the same
     // scene with the write landing is recorded (the leg discriminates)
@@ -1714,9 +1714,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { status: resE && resE.status, failedSaid: failedSaid(), applied, lg: !!(lg && lg.applied) };
     };
     const notLanded = await indexLeg('held', false);
-    ok(notLanded.status === 'started' && notLanded.failedSaid && !notLanded.applied, 'B-a09e small: the index NOT landing (its ordering write answers false) fails the stepped run BY NAME — NOT recorded, the next boot runs it again', notLanded);
+    ok(notLanded.status === 'started' && gateOf(notLanded.failedSaid) && !notLanded.applied, 'B-a09e small: the index NOT landing (its ordering write answers false) fails the stepped run BY NAME — NOT recorded, the next boot runs it again', notLanded);
     const landedE = await indexLeg('lands', true);
-    ok(landedE.status === 'started' && landedE.applied && !landedE.failedSaid, '…and the same scene with the index landing is recorded (the leg discriminates)', landedE);
+    ok(landedE.status === 'started' && gateOf(landedE.applied) && !landedE.failedSaid, '…and the same scene with the index landing is recorded (the leg discriminates)', landedE);
   }
   // ── 2026-09-exit-access-lists (lane-pairing ⑥, B-7007): ONE `allowExit` boolean → two lists per machine ──
   {
@@ -1737,18 +1737,18 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const f1 = path.join(r1, 'data', 'hosts.json');
     fs.writeFileSync(f1, JSON.stringify(FIX), { mode: 0o600 });
     const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
-    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    ok(verdictOf(mm1.MIGRATIONS.some((x) => x.id === ID)), 'registered as a ledger-keyed one-shot');
     const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
     const d1 = JSON.parse(fs.readFileSync(f1, 'utf-8'));
     const byId = (d, id) => d.hosts.find((h) => h.id === id);
-    ok(res1 && res1.status === 'ran' && JSON.stringify(byId(d1, 'host-dial-Macbook').exit.use) === '{"mode":"everyone"}' && JSON.stringify(byId(d1, 'host-dial-Macbook').exit.run) === '{"mode":"everyone","ask":false}', 'allowExit on ⇒ everyone / everyone (behaviour unchanged)', byId(d1, 'host-dial-Macbook'));
+    ok(gateOf(res1) && res1.status === 'ran' && JSON.stringify(byId(d1, 'host-dial-Macbook').exit.use) === '{"mode":"everyone"}' && JSON.stringify(byId(d1, 'host-dial-Macbook').exit.run) === '{"mode":"everyone","ask":false}', 'allowExit on ⇒ everyone / everyone (behaviour unchanged)', byId(d1, 'host-dial-Macbook'));
     ok(byId(d1, 'host-box').exit.use.mode === 'nobody' && byId(d1, 'host-plain').exit.run.mode === 'nobody', 'off ⇒ nobody, absent ⇒ nobody');
     ok(JSON.stringify(byId(d1, 'host-new').exit) === JSON.stringify(FIX.hosts[3].exit), 'a record that already carries `exit` is kept untouched');
-    ok(d1.hosts.every((h) => !('allowExit' in h)) && byId(d1, 'host-dial-Macbook').dialTokenHash === 'h1', 'every allowExit is stripped; nothing else on the record changes (the dial token hash kept)');
+    ok(gateOf(d1.hosts.every((h) => !('allowExit' in h))) && byId(d1, 'host-dial-Macbook').dialTokenHash === 'h1', 'every allowExit is stripped; nothing else on the record changes (the dial token hash kept)');
     ok(byId(d1, 'host-dial-Macbook').exit.updatedBy === 'migration' && Number(byId(d1, 'host-dial-Macbook').exit.updatedAt) > 0, 'stamped updatedBy migration');
     const arch = fs.readdirSync(path.join(r1, 'data', 'archive')).filter((f) => /^hosts-allow-exit-\d+\.json$/.test(f));
     const archDoc = arch.length === 1 ? JSON.parse(fs.readFileSync(path.join(r1, 'data', 'archive', arch[0]), 'utf-8')) : null;
-    ok(archDoc && archDoc['host-dial-Macbook'] === true && archDoc['host-box'] === false && archDoc['host-plain'] === false, 'the ARCHIVE holds every record\'s old value (written before the strip)', archDoc);
+    ok(gateOf(archDoc) && archDoc['host-dial-Macbook'] === true && archDoc['host-box'] === false && archDoc['host-plain'] === false, 'the ARCHIVE holds every record\'s old value (written before the strip)', archDoc);
     ok(res1.report.converted.length === 1 && res1.report.converted[0] === 'host-dial-Macbook' && res1.report.defaulted === 2 && res1.report.kept === 1 && res1.report.via === 'file', 'the report: converted [ids] / defaulted n / kept n', res1.report);
     ok((fs.statSync(f1).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'atomic tmp+rename, the file keeps its mode (it holds dial token hashes)');
     ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
@@ -1764,13 +1764,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { }, hosts: HM }), r2).find((x) => x.id === ID);
     ok(res2.status === 'ran' && res2.report.via === 'hosts' && HM.get('host-dial-Macbook').exit.use.mode === 'everyone' && !('allowExit' in HM.get('host-dial-Macbook')), 'with a live HostManager the IN-MEMORY records are reshaped', res2.report);
     HM.flushThrottled();   // B-48a4: the live HostManager's save goes through the store writer — what it owes, on disk now
-    ok(JSON.parse(fs.readFileSync(path.join(r2, 'data', 'hosts.json'), 'utf-8')).hosts.every((h) => !('allowExit' in h) && h.exit), '…and its own save puts them on disk');
+    ok(verdictOf(JSON.parse(fs.readFileSync(path.join(r2, 'data', 'hosts.json'), 'utf-8')).hosts.every((h) => !('allowExit' in h) && h.exit)), '…and its own save puts them on disk');
     // (c) an unreadable hosts.json FAILS the run by name, the ledger stays unstamped, nothing touched
     const r3 = mkInst('ex-bad');
     fs.writeFileSync(path.join(r3, 'data', 'hosts.json'), '{not json');
     const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { } }), r3).find((x) => x.id === ID);
     const led3 = JSON.parse(fs.readFileSync(path.join(r3, 'data', 'migrations.json'), 'utf-8'));
-    ok(res3.status === 'failed' && /hosts\.json is unreadable/.test(res3.error || '') && !(led3.applied || {})[ID] && fs.readFileSync(path.join(r3, 'data', 'hosts.json'), 'utf-8') === '{not json', 'an unparsable hosts.json fails BY NAME, the ledger unstamped (retried next boot), the file untouched', JSON.stringify(res3));
+    ok(res3.status === 'failed' && gateOf(/hosts\.json is unreadable/.test(res3.error || '')) && !(led3.applied || {})[ID] && fs.readFileSync(path.join(r3, 'data', 'hosts.json'), 'utf-8') === '{not json', 'an unparsable hosts.json fails BY NAME, the ledger unstamped (retried next boot), the file untouched', JSON.stringify(res3));
     // (d) no store ⇒ ran, nothing created
     const r4 = mkInst('ex-none');
     const res4 = runOnly(create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: () => { } }), r4).find((x) => x.id === ID);
@@ -1782,7 +1782,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // lane grants-unify: the reader judges THE grants store's rows — the rows 2026-10-grants-unify carries a record to
     const GMx = require('../src/grant-model.js');
     const accessAfter = (h) => { const m = GMx.rowsOfHosts([h]); const of = (g) => m.rows.filter((r) => r.resource === `${h.id}:${g}`); return E.exitAccessOf(h, { use: of('use'), run: of('run') }); };
-    ok(d1.hosts.every((h) => { const a = accessAfter(h); const was = oldList.includes(h.id); return h.id === 'host-new' || (was ? (a.use.mode === 'everyone' && a.run.mode === 'everyone') : (a.use.mode === 'nobody' && a.run.mode === 'nobody')); }), '…and exactly those read everyone / everyone after it (on ⇒ everyone preserves what the old boolean granted)');
+    ok(verdictOf(d1.hosts.every((h) => { const a = accessAfter(h); const was = oldList.includes(h.id); return h.id === 'host-new' || (was ? (a.use.mode === 'everyone' && a.run.mode === 'everyone') : (a.use.mode === 'nobody' && a.run.mode === 'nobody')); })), '…and exactly those read everyone / everyone after it (on ⇒ everyone preserves what the old boolean granted)');
     ok(accessAfter(FIX.hosts[0]).use.mode === 'everyone', '…and the grants migration carries the boolean the same way BEFORE 2026-09 ran (a boot where it failed: the mapper reads the boolean)');
   }
   // ── 2026-09-pool-manual-priority (2026-09-28: the whole-pool manual switch is retired — manual PRIORITY replaces it) ──
@@ -1814,7 +1814,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       am._save();
       const before = am.poolCurrent(manual);
       const res = runOnly(create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { }, accounts: () => am }), r1).find((x) => x.id === ID);
-      ok(res && res.status === 'ran', 'the migration runs through the LIVE account store');
+      ok(gateOf(res) && res.status === 'ran', 'the migration runs through the LIVE account store');
       const m = am.get(manual);
       ok(m.auto === true && JSON.stringify(m.priority) === JSON.stringify([B, A, C]), 'a manual pool becomes auto with priority [its current target, …the others in list order] — the owner\'s pick is #1', JSON.stringify(m));
       ok(am.poolCurrent(manual) === before, 'nothing moves by itself: the default is still the member it sat on');
@@ -1827,7 +1827,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(onDisk.auto === true && onDisk.priority.length === 3, 'the reshape is saved by the store itself (not written beside it)');
       const snap = fs.readFileSync(path.join(r1, 'data', 'accounts.json'), 'utf-8');
       const again = runMigrations({ ledgerPath: path.join(r1, 'data', 'migrations.json'), migrations: create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { }, accounts: () => am }).MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } }).find((x) => x.id === ID);
-      ok(again && again.status === 'already', 'ledger-keyed: a second boot does not run it again');
+      ok(gateOf(again) && again.status === 'already', 'ledger-keyed: a second boot does not run it again');
       ok(am.migrateManualPools().length === 0, '…and the reshape itself is idempotent (a reshaped pool is auto)');
       ok(fs.readFileSync(path.join(r1, 'data', 'accounts.json'), 'utf-8') === snap, '…the second run and the second reshape left the record BYTE-identical');
       // no store on this boot: an old manual pool FAILS by name (retried next boot); nothing manual = success
@@ -1835,16 +1835,16 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       fs.writeFileSync(path.join(r2, 'data', 'accounts.json'), JSON.stringify({ version: 1, accounts: [{ id: 'pool-x', type: 'pooled', auto: false }] }));
       const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
       const led2 = JSON.parse(fs.readFileSync(path.join(r2, 'data', 'migrations.json'), 'utf-8'));
-      ok(res2 && res2.status === 'failed' && /no live account store to reshape 1 manual pool/.test(res2.error || '') && !(led2.applied || {})[ID], 'without the live store a manual pool FAILS the run by name (never written beside the store; retried next boot)', res2);
+      ok(gateOf(res2) && res2.status === 'failed' && gateOf(/no live account store to reshape 1 manual pool/.test(res2.error || '')) && !(led2.applied || {})[ID], 'without the live store a manual pool FAILS the run by name (never written beside the store; retried next boot)', res2);
       // verify r2 (census adequacy): r1's F10 fixed BOTH readings of "manual" (the reshape and this no-store count),
       // but only the reshape had a leg — reverting the count to `auto === false` left the suite green
       const r2b = mkRoot('nostore-bare');
       fs.writeFileSync(path.join(r2b, 'data', 'accounts.json'), JSON.stringify({ version: 1, accounts: [{ id: 'pool-y', type: 'pooled' }, { id: 'pool-z', type: 'pooled', auto: true }] }));
       const res2b = runOnly(create({ rootDir: r2b, homeDir: scratchHomeDir, serverNotice: () => { } }), r2b).find((x) => x.id === ID);
-      ok(res2b && res2b.status === 'failed' && /no live account store to reshape 1 manual pool/.test(res2b.error || ''), 'without the live store a record with NO `auto` field is a manual pool too (`!!auto` — the switch it retires) — counted and FAILED by name; an auto:true record is not counted', res2b);
+      ok(gateOf(res2b) && res2b.status === 'failed' && verdictOf(/no live account store to reshape 1 manual pool/.test(res2b.error || '')), 'without the live store a record with NO `auto` field is a manual pool too (`!!auto` — the switch it retires) — counted and FAILED by name; an auto:true record is not counted', res2b);
       const r3 = mkRoot('nothing');
       const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { } }), r3).find((x) => x.id === ID);
-      ok(res3 && res3.status === 'ran', '…and a boot with nothing manual is a success');
+      ok(gateOf(res3) && res3.status === 'ran', '…and a boot with nothing manual is a success');
     }
   }
   // ── 2026-10-design-kit-removed (lane design-docs: the Design window replaces the Claude CLI's /design kit) ──
@@ -1864,33 +1864,33 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const outside = path.join(tmp, 'dk-outside'); put(path.join(outside, 'keep.txt'), 'never followed');
     fs.symlinkSync(outside, path.join(kit, '2.1.274', 'linked'));   // a link INSIDE the kit
     const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
-    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    ok(verdictOf(mm1.MIGRATIONS.some((x) => x.id === ID)), 'registered as a ledger-keyed one-shot');
     const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
-    ok(res1 && res1.status === 'ran' && !fs.existsSync(kit), 'data/design-kit/ is gone (the extracted vendor kit — deleted, not archived)', res1);
-    ok(res1.report && res1.report.removed === true && res1.report.kind === 'dir' && res1.report.versions === 2 && res1.report.files === 7 && res1.report.bytes >= 2280, 'the report counts what went: 2 versions, 6 files + 1 link, the bytes (it rides the ledger)', res1 && res1.report);
+    ok(gateOf(res1) && res1.status === 'ran' && !fs.existsSync(kit), 'data/design-kit/ is gone (the extracted vendor kit — deleted, not archived)', res1);
+    ok(gateOf(res1.report) && res1.report.removed === true && res1.report.kind === 'dir' && res1.report.versions === 2 && res1.report.files === 7 && res1.report.bytes >= 2280, 'the report counts what went: 2 versions, 6 files + 1 link, the bytes (it rides the ledger)', res1 && res1.report);
     ok(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8') === 'never followed', 'a link inside the kit is removed as a link — what it pointed at is untouched');
-    ok(fs.existsSync(path.join(r1, 'data', 'designs.json')) && fs.readFileSync(path.join(r1, 'data', 'published-pages', 'pgabc.html'), 'utf8') === '<html>canvas</html>' && fs.existsSync(path.join(r1, 'data', 'design-kit-notes.txt')), 'everything else in data/ is untouched — the published canvases stay on /p/<id>, a look-alike name stays');
+    ok(gateOf(fs.existsSync(path.join(r1, 'data', 'designs.json'))) && fs.readFileSync(path.join(r1, 'data', 'published-pages', 'pgabc.html'), 'utf8') === '<html>canvas</html>' && verdictOf(fs.existsSync(path.join(r1, 'data', 'design-kit-notes.txt'))), 'everything else in data/ is untouched — the published canvases stay on /p/<id>, a look-alike name stays');
     ok(!fs.readdirSync(path.join(r1, 'data')).some((f) => /archive/.test(f)), 'nothing is archived (keeping a copy of the vendor text is the thing to stop)');
     ok(JSON.parse(fs.readFileSync(path.join(r1, 'data', 'migrations.json'), 'utf8')).reports[ID].versions === 2, 'the ledger keeps the report beside the timestamp');
     ok(runOnly(create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } }), r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
     // (b) nothing there
     const r2 = mkRoot('none');
     const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
-    ok(res2 && res2.status === 'ran' && res2.report.removed === false && res2.report.why === 'absent' && !fs.existsSync(path.join(r2, 'data', 'design-kit')), 'no kit on disk ⇒ ran, nothing created');
+    ok(gateOf(res2) && res2.status === 'ran' && res2.report.removed === false && res2.report.why === 'absent' && !fs.existsSync(path.join(r2, 'data', 'design-kit')), 'no kit on disk ⇒ ran, nothing created');
     // (c) a SYMLINK at data/design-kit: unlinked, never followed
     const r3 = mkRoot('link');
     const target = path.join(tmp, 'dk-target'); put(path.join(target, 'SKILL.md'), 'the target survives');
     fs.symlinkSync(target, path.join(r3, 'data', 'design-kit'));
     const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { } }), r3).find((x) => x.id === ID);
     let linkGone = false; try { fs.lstatSync(path.join(r3, 'data', 'design-kit')); } catch (e) { linkGone = e.code === 'ENOENT'; }
-    ok(res3 && res3.status === 'ran' && res3.report.kind === 'symlink' && linkGone && fs.readFileSync(path.join(target, 'SKILL.md'), 'utf8') === 'the target survives', 'a link at data/design-kit is unlinked — the directory it named is never entered', res3 && res3.report);
+    ok(gateOf(res3) && res3.status === 'ran' && res3.report.kind === 'symlink' && gateOf(linkGone) && fs.readFileSync(path.join(target, 'SKILL.md'), 'utf8') === 'the target survives', 'a link at data/design-kit is unlinked — the directory it named is never entered', res3 && res3.report);
     // (c2) a link at data/design-kit that NAMES data/published-pages (L4 B④): unlinked, the pages behind it untouched
     const r3b = mkRoot('link-pages');
     put(path.join(r3b, 'data', 'published-pages', 'pgxyz.html'), '<html>kept</html>');
     fs.symlinkSync(path.join(r3b, 'data', 'published-pages'), path.join(r3b, 'data', 'design-kit'));
     const res3b = runOnly(create({ rootDir: r3b, homeDir: scratchHomeDir, serverNotice: () => { } }), r3b).find((x) => x.id === ID);
     let linkGone2 = false; try { fs.lstatSync(path.join(r3b, 'data', 'design-kit')); } catch (e) { linkGone2 = e.code === 'ENOENT'; }
-    ok(res3b && res3b.status === 'ran' && res3b.report.kind === 'symlink' && linkGone2 && fs.readFileSync(path.join(r3b, 'data', 'published-pages', 'pgxyz.html'), 'utf8') === '<html>kept</html>' && fs.readdirSync(path.join(r3b, 'data', 'published-pages')).length === 1, 'a link at data/design-kit pointing AT data/published-pages is unlinked — the pages behind it are never entered, nothing of them removed', res3b && res3b.report);
+    ok(gateOf(res3b) && res3b.status === 'ran' && res3b.report.kind === 'symlink' && gateOf(linkGone2) && fs.readFileSync(path.join(r3b, 'data', 'published-pages', 'pgxyz.html'), 'utf8') === '<html>kept</html>' && fs.readdirSync(path.join(r3b, 'data', 'published-pages')).length === 1, 'a link at data/design-kit pointing AT data/published-pages is unlinked — the pages behind it are never entered, nothing of them removed', res3b && res3b.report);
     // (d) a failure is retried next boot (never recorded, the notice names it)
     if (typeof process.getuid === 'function' && process.getuid() === 0) ok(true, 'SKIP — running as root: a read-only parent does not refuse root');
     else {
@@ -1902,10 +1902,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const mm4 = create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: (k, t) => notices.push([k, t]) });
       const res4 = mm4.runLocalMigrations().find((x) => x.id === ID);
       const led4 = JSON.parse(fs.readFileSync(path.join(r4, 'data', 'migrations.json'), 'utf8'));
-      ok(res4 && res4.status === 'failed' && !(led4.applied || {})[ID] && notices.some(([k]) => k === 'migration-failed:' + ID), 'a removal the disk refuses FAILS (not recorded; the server notice names it) — retried next boot', res4);
+      ok(gateOf(res4) && res4.status === 'failed' && !(led4.applied || {})[ID] && verdictOf(notices.some(([k]) => k === 'migration-failed:' + ID)), 'a removal the disk refuses FAILS (not recorded; the server notice names it) — retried next boot', res4);
       fs.chmodSync(ver, 0o755);
       const res4b = runOnly(create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: () => { } }), r4).find((x) => x.id === ID);
-      ok(res4b && res4b.status === 'ran' && !fs.existsSync(path.join(r4, 'data', 'design-kit')), '…and the next boot finishes it');
+      ok(gateOf(res4b) && res4b.status === 'ran' && !fs.existsSync(path.join(r4, 'data', 'design-kit')), '…and the next boot finishes it');
     }
   }
   // ── 2026-10-settings-rows-retired (B-df40 part 1, lane settings-prune: the VibeSpace channel + three dead rows out) ──
@@ -1928,7 +1928,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       })(path.join(r, 'data'), '');
       return h.digest('hex');
     };
-    ok(RETIRED_SETTING_KEYS.length >= 7 && require('../src/retired-settings.js').RETIRED_2026_10.length === 7 && ['agents.vibespaceChannel', 'window.enableBounceOnFocus', 'terminal.preserveCustomTitle', 'sessionCard.detailTruncation', 'agentd.dataPlane', 'agentd.remoteSessions', 'agentd.sessions'].every((k) => RETIRED_SETTING_KEYS.includes(k)) && Object.isFrozen(RETIRED_SETTING_KEYS), 'the retired list names the seven keys of the design (frozen)');
+    ok(RETIRED_SETTING_KEYS.length >= 7 && require('../src/retired-settings.js').RETIRED_2026_10.length === 7 && gateOf(['agents.vibespaceChannel', 'window.enableBounceOnFocus', 'terminal.preserveCustomTitle', 'sessionCard.detailTruncation', 'agentd.dataPlane', 'agentd.remoteSessions', 'agentd.sessions'].every((k) => RETIRED_SETTING_KEYS.includes(k))) && verdictOf(Object.isFrozen(RETIRED_SETTING_KEYS)), 'the retired list names the seven keys of the design (frozen)');
     // the PURE strip: input untouched, order kept, an own "__proto__" stays an own key
     {
       const input = JSON.parse('{"a":1,"agents.vibespaceChannel":true,"__proto__":{"x":1},"b":[2]}');
@@ -1979,15 +1979,15 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { out, res };
     };
     const { out, res } = await scenario(create, 'real');
-    ok(out.ran, 'registered as a ledger-keyed one-shot and ran', res);
-    ok(out.stripsExactly, 'strips EXACTLY the seven retired keys — every live key keeps its value, in its order');
-    ok(out.liveBytes, 'V2: the live keys are byte-for-byte what the settings route writes (2-space JSON, no reformat of a value), the file mode kept');
-    ok(out.archived, 'the stripped values are ARCHIVED in the ledger report ({stripped: {key: value}}), each value as it was stored', res && res.report);
-    ok(out.socks, 'data/channel-socks/: both live sockets removed, the directory gone', res && res.report && res.report.socks);
-    ok(out.restUntouched, 'V4: nothing else under data/ changed (a hash of data/ minus settings.json, channel-socks/ and the ledger)');
-    ok(out.once, 'run-at-most-once (the ledger)');
-    ok(out.cleanUntouched, 'a settings.json holding none of the keys is NOT rewritten (byte-identical, mtime kept) and an absent socket dir is reported absent');
-    ok(out.absentNoop, 'no settings.json, no socket dir ⇒ ran, nothing created');
+    ok(verdictOf(out.ran), 'registered as a ledger-keyed one-shot and ran', res);
+    ok(verdictOf(out.stripsExactly), 'strips EXACTLY the seven retired keys — every live key keeps its value, in its order');
+    ok(verdictOf(out.liveBytes), 'V2: the live keys are byte-for-byte what the settings route writes (2-space JSON, no reformat of a value), the file mode kept');
+    ok(verdictOf(out.archived), 'the stripped values are ARCHIVED in the ledger report ({stripped: {key: value}}), each value as it was stored', res && res.report);
+    ok(verdictOf(out.socks), 'data/channel-socks/: both live sockets removed, the directory gone', res && res.report && res.report.socks);
+    ok(verdictOf(out.restUntouched), 'V4: nothing else under data/ changed (a hash of data/ minus settings.json, channel-socks/ and the ledger)');
+    ok(verdictOf(out.once), 'run-at-most-once (the ledger)');
+    ok(verdictOf(out.cleanUntouched), 'a settings.json holding none of the keys is NOT rewritten (byte-identical, mtime kept) and an absent socket dir is reported absent');
+    ok(verdictOf(out.absentNoop), 'no settings.json, no socket dir ⇒ ran, nothing created');
     // the socket half keeps what is not a socket, and never follows a link
     {
       const r4 = mkRoot('keep');
@@ -2004,13 +2004,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const res5 = runOnly(create({ rootDir: r5, homeDir: scratchHomeDir, serverNotice: () => { } }), r5).find((x) => x.id === ID);
       const targetSockLives = fs.existsSync(path.join(target, 'w-1.sock'));
       await new Promise((r) => srv5.close(() => r()));
-      ok(res5.status === 'ran' && res5.report.socks.dir === 'kept' && res5.report.socks.why === 'symlink' && targetSockLives && fs.lstatSync(path.join(r5, 'data', 'channel-socks')).isSymbolicLink(), 'a link at data/channel-socks is never followed (what it names keeps its socket)', res5.report);
+      ok(res5.status === 'ran' && res5.report.socks.dir === 'kept' && res5.report.socks.why === 'symlink' && gateOf(targetSockLives) && verdictOf(fs.lstatSync(path.join(r5, 'data', 'channel-socks')).isSymbolicLink()), 'a link at data/channel-socks is never followed (what it names keeps its socket)', res5.report);
       const r6 = mkRoot('bad');
       fs.writeFileSync(settingsOf(r6), '{"agents.vibespaceChannel": true,');
       const res6 = runOnly(create({ rootDir: r6, homeDir: scratchHomeDir, serverNotice: () => { } }), r6).find((x) => x.id === ID);
       // B-225b R9 (the persistence holds): settings that are not the settings are HELD — the migration fails BY NAME, rewrites nothing
       // and is not recorded (it runs again at the next start; the release recorded «unparseable» as done, for good)
-      ok(res6.status === 'failed' && /settings\.json could not be read \(damaged/.test(res6.error || '') && fs.readFileSync(settingsOf(r6), 'utf8') === '{"agents.vibespaceChannel": true,', 'an unparseable settings.json is left exactly as it is (never rewrite what we cannot read) — and the migration fails by name, not recorded', res6);
+      ok(res6.status === 'failed' && gateOf(/settings\.json could not be read \(damaged/.test(res6.error || '')) && fs.readFileSync(settingsOf(r6), 'utf8') === '{"agents.vibespaceChannel": true,', 'an unparseable settings.json is left exactly as it is (never rewrite what we cannot read) — and the migration fails by name, not recorded', res6);
     }
     // NEGATIVE CONTROLS — PATCHED COPIES of src/server/migrations.js (scripts/mutant-copy.mjs): the same scenario must go red
     {
@@ -2021,10 +2021,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(src.split(guard).length === 2 && src.split(ret).length === 2, 'CONTROL scope: the two lines the patched copies remove are present once each');
       const always = M.load('src/server/migrations.js', editAnchor(src, guard, '', "src/server/migrations.js"), 'always-rewrite');
       const c1 = (await scenario(always.create, 'mut1')).out;
-      ok(!c1.cleanUntouched && c1.stripsExactly, 'NEGATIVE CONTROL: a copy that rewrites even when nothing was stripped is caught by the byte-identical leg (and only by it)');
+      ok(!c1.cleanUntouched && verdictOf(c1.stripsExactly), 'NEGATIVE CONTROL: a copy that rewrites even when nothing was stripped is caught by the byte-identical leg (and only by it)');
       const noArchive = M.load('src/server/migrations.js', editAnchor(src, ret, "    return { settings: 'rewritten', stripped: {} };\n", "src/server/migrations.js"), 'no-archive');
       const c2 = (await scenario(noArchive.create, 'mut2')).out;
-      ok(!c2.archived && c2.stripsExactly, 'NEGATIVE CONTROL: a copy that strips without archiving is caught by the archive leg');
+      ok(!c2.archived && verdictOf(c2.stripsExactly), 'NEGATIVE CONTROL: a copy that strips without archiving is caught by the archive leg');
       // 主开发's pin (lane engine-spi-egress L3 interim, 2026-11-03): THIS migration strips ITS OWN seven keys, ever — re-run where
       // its ledger was lost, it must not take the two keys a LATER retirement appended (browser.cloak.*), which
       // 2026-11-cloak-to-plugin still has to READ and carry. The control: the pre-correction call (the whole retired list)
@@ -2037,13 +2037,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         return { after, kept: after[P1] === '/opt/x/chrome' && after[P2] === 'a.example', own: !('agents.vibespaceChannel' in after) && after['chat.compactMode'] === true };
       };
       const o7 = ownSeven(create, 'own-seven');
-      ok(o7.own && o7.kept && RETIRED_SETTING_KEYS.includes('browser.cloak.executablePath') && !require('../src/retired-settings.js').RETIRED_2026_10.includes('browser.cloak.executablePath'),
+      ok(gateOf(o7.own) && gateOf(o7.kept) && gateOf(RETIRED_SETTING_KEYS.includes('browser.cloak.executablePath')) && !require('../src/retired-settings.js').RETIRED_2026_10.includes('browser.cloak.executablePath'),
         '2026-10-settings-rows-retired strips ITS OWN seven keys only: re-run where its ledger was lost, it keeps the two later-retired browser.cloak.* values for 2026-11-cloak-to-plugin to carry', o7.after);
       const cut7 = 'stripRetiredSettings(doc, RETIRED_2026_10)';
       ok(src.split(cut7).length === 2, 'CONTROL scope: the own-seven call is present once');
       const wholeList = M.load('src/server/migrations.js', editAnchor(src, cut7, 'stripRetiredSettings(doc)', "src/server/migrations.js"), 'whole-list');
       const c7 = ownSeven(wholeList.create, 'own-seven-mut');
-      ok(c7.own && !c7.kept, 'NEGATIVE CONTROL: the pre-correction call (the whole retired list) strips the browser.cloak.* values a lost ledger re-runs over — the leg above would be red', c7.after);
+      ok(gateOf(c7.own) && !c7.kept, 'NEGATIVE CONTROL: the pre-correction call (the whole retired list) strips the browser.cloak.* values a lost ledger re-runs over — the leg above would be red', c7.after);
     }
     // settings-prune verify r1: the strip must SURVIVE the running server. Boot reads settings.json into the persistence
     // cache BEFORE the migrations run, so GET kept serving the stripped keys and the first save (the client POSTs its whole
@@ -2051,7 +2051,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // Reproduced on a real boot (/var/tmp/vibespace-lanes/settings-prune/r1-repro/boot-cache.mjs): 7 back, 0 after the fix.
     {
       const sv = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
-      ok(/\.runLocalMigrations\(\)\)?; persistenceRouter\.reloadSettings\?\.\(\)/.test(sv), 'server.js drops the settings cache right after the boot migrations ran (lane hub-loop-stalls: the run is the boot trace\'s «migrations» step)');
+      ok(verdictOf(/\.runLocalMigrations\(\)\)?; persistenceRouter\.reloadSettings\?\.\(\)/.test(sv)), 'server.js drops the settings cache right after the boot migrations ran (lane hub-loop-stalls: the run is the boot trace\'s «migrations» step)');
       const express = require('express');
       const survive = async (P, tag) => {
         const r = mkRoot('cache-' + tag);
@@ -2075,7 +2075,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       };
       const PSRC = fs.readFileSync(path.join(REPO_ROOT, 'src/routes/persistence.js'), 'utf8');
       const v = await survive(require('../src/routes/persistence.js'), 'real');
-      ok(v.early === 8 && v.served === 0 && v.fresh === 0 && v.stale === 0 && v.kept, 'r1: after the boot migration GET serves no retired key, and neither a fresh tab\'s save nor a stale tab\'s whole-object save writes one back (the live value lands)', v);
+      ok(v.early === 8 && v.served === 0 && v.fresh === 0 && v.stale === 0 && verdictOf(v.kept), 'r1: after the boot migration GET serves no retired key, and neither a fresh tab\'s save nor a stale tab\'s whole-object save writes one back (the live value lands)', v);
       const M2 = mutantCopies('migrations-retired-cache', REPO_ROOT);
       const guardLine = '    if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }\n';
       const reloadLine = "    _settingsCache = v; _settingsRead = true; try { settingsHold.adoptRead(v); } catch { /* held since: its own ladder reads it */ }   // (the file is THERE now: a start read «missing» no longer makes the next write an exclusive create that meets it)\n";   // (B-225b: the re-read replaces the copy only with settings it READ — and the hold adopts it: the file is there now)
@@ -2121,17 +2121,17 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const prevCH = process.env.CODEX_HOME; delete process.env.CODEX_HOME;
     try {
       const mm = create({ rootDir: root, homeDir: fhome, serverNotice: () => { } });
-      ok(mm.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+      ok(verdictOf(mm.MIGRATIONS.some((x) => x.id === ID)), 'registered as a ledger-keyed one-shot');
       const res = runMigrations({ ledgerPath: path.join(root, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } }).find((x) => x.id === ID);
-      ok(res && res.status === 'ran', 'it ran', res);
+      ok(gateOf(res) && res.status === 'ran', 'it ran', res);
     } finally { if (prevCH !== undefined) process.env.CODEX_HOME = prevCH; }
     const left = fs.readFileSync(path.join(hist, 'events-2026-08.ndjson'), 'utf8').split('\n').filter(Boolean);
     const gone = lines.filter((l) => !left.includes(l));
-    ok(left.length === lines.length - 3 && gone.length === 3 && gone.every((l) => /"rid":"cx:01a0371e-4f99-7102-bae2-(125bb8f992b1|000000000003):69585610"/.test(l)),
+    ok(left.length === lines.length - 3 && gone.length === 3 && verdictOf(gone.every((l) => /"rid":"cx:01a0371e-4f99-7102-bae2-(125bb8f992b1|000000000003):69585610"/.test(l))),
       `exactly the fork's replay (both copies) and the depth-2 replay left the shard; the original, the real same-total request, the fork's own request, the non-fork twin, the out-of-window twin, the host row, the claude row and the unparseable line stay (${left.length}/${lines.length})`, gone);
     const arch = fs.readdirSync(path.join(root, 'data', 'archive')).filter((f) => /^codex-fork-replays-\d{4}-\d{2}-\d{2}\.ndjson$/.test(f));
     const al = arch.length ? fs.readFileSync(path.join(root, 'data', 'archive', arch[0]), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
-    ok(al.length === 3 && al.every((a) => a.migration === ID && /fork replay/.test(a.reason) && a.entry && a.file === 'events-2026-08.ndjson'), 'each archived line carries the migration, a reason and the row itself', al.map((a) => a.reason));
+    ok(al.length === 3 && verdictOf(al.every((a) => a.migration === ID && /fork replay/.test(a.reason) && a.entry && a.file === 'events-2026-08.ndjson')), 'each archived line carries the migration, a reason and the row itself', al.map((a) => a.reason));
     const again = purgeCodexForkReplays({ dataDir: path.join(root, 'data'), codexSessionsDir: path.join(fhome, '.codex', 'sessions'), id: 'again' });
     ok(again.archived === 0 && again.keptNotFork >= 1 && again.keptOutsideWindow === 1 && again.keptHost === 1, 'idempotent: a second run archives nothing (and names what it kept)', again);
   }
@@ -2164,7 +2164,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     try { go({ purgeCodexForkReplays }); } catch (e) { crashed = e.message; } finally { fs.renameSync = realRename; }
     const archFile = path.join(root, 'data', 'archive', 'codex-fork-replays-2026-10-03.ndjson');
     const archLines = () => fs.readFileSync(archFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    ok(crashed && archLines().length === 2 && fs.readFileSync(path.join(hist, 'events-2026-08.ndjson'), 'utf8').split('\n').filter(Boolean).length === 3, 'the crash: the 2 replay rows are archived, the shard still holds them', crashed);
+    ok(gateOf(crashed) && archLines().length === 2 && fs.readFileSync(path.join(hist, 'events-2026-08.ndjson'), 'utf8').split('\n').filter(Boolean).length === 3, 'the crash: the 2 replay rows are archived, the shard still holds them', crashed);
     const re = go({ purgeCodexForkReplays });
     const al = archLines();
     const left = fs.readFileSync(path.join(hist, 'events-2026-08.ndjson'), 'utf8').split('\n').filter(Boolean);
@@ -2185,7 +2185,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     try { goC(); } catch { } finally { fs.renameSync = realRename; }
     goC();
     const ctlArch = fs.readFileSync(path.join(ctlRoot, 'data', 'archive', 'codex-fork-replays-2026-10-03.ndjson'), 'utf8').split('\n').filter(Boolean);
-    ok(psrc.includes(cut) && ctlArch.length === 4, `CONTROL: without the check the rerun archives the 2 rows a second time (${ctlArch.length} archive lines)`);
+    ok(gateOf(psrc.includes(cut)) && ctlArch.length === 4, `CONTROL: without the check the rerun archives the 2 rows a second time (${ctlArch.length} archive lines)`);
     // a ledger with no codex row: byte-identical, no archive
     const nroot = path.join(tmp, 'cxnone'); fs.mkdirSync(path.join(nroot, 'data', 'usage-history'), { recursive: true });
     const claudeOnly = JSON.stringify({ rid: 'req_1', be: 'claude', ts: T0, sid: 's', model: 'claude-opus-5-5', i: 1, cr: 0, o: 1, cw5: 0, cw1: 0 }) + '\r\n\n' + 'not json\n';
@@ -2241,18 +2241,18 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const h = a.live();
     const ra = runOne(a, { plugins: h.pm, integrations: h.st });
     const s1 = rd(path.join(a.dataDir, 'settings.json')), p1 = rd(path.join(a.dataDir, 'plugins.json')), i1 = rd(path.join(a.dataDir, 'integrations.json'));
-    ok(ra && ra.status === 'ran', 'the migration ran (recorded once)', ra);
+    ok(gateOf(ra) && ra.status === 'ran', 'the migration ran (recorded once)', ra);
     ok(!Object.keys(s1).some((k) => k.startsWith(`plugin.${OLD}.`)) && s1['plugin.llm.attention'] === true && s1['plugin.llm.dailyBudgetUsd'] === 2.5 && s1['plugin.llm.inbox'] === false,
       'settings: plugin.<old>.* → plugin.llm.* (attention, the budget); the NEW key that already held a value WINS (inbox stays false); no old key left', s1);
     ok(s1['decision.threshold'] === 0.8 && s1['decision.attentionBlock'] === 'Invoices matter.' && s1['chat.compactMode'] === true, 'settings: the legacy decision.* spellings and every other key are untouched');
     ok(s1['plugin.llm.judgeModel'] === 'openai/gpt-6-luna-decisions', `settings: the card's model → plugin.llm.judgeModel (${s1['plugin.llm.judgeModel']})`);
-    ok(!p1.plugins[OLD] && p1.plugins.llm && p1.plugins.llm.enabled === true && JSON.stringify(p1.plugins.tailscale) === JSON.stringify(before.p.plugins.tailscale) && h.pm.list().find((x) => x.id === 'llm').enabled === true,
+    ok(!p1.plugins[OLD] && gateOf(p1.plugins.llm) && p1.plugins.llm.enabled === true && JSON.stringify(p1.plugins.tailscale) === JSON.stringify(before.p.plugins.tailscale) && h.pm.list().find((x) => x.id === 'llm').enabled === true,
       'plugins.json: the record moved whole (enabled kept) THROUGH the live manager — its list says the LLM plugin is on; tailscale untouched', p1);
     const oldRec = before.i.integrations[OLD], newRec = i1.integrations.llm;
-    ok(!i1.integrations[OLD] && newRec && newRec.values.apiKey === oldRec.values.apiKey && newRec.values.provider === 'openrouter' && !('model' in newRec.values) && newRec.testedAt === oldRec.testedAt && newRec.lastOk === true && newRec.clusterKey === null,
+    ok(!i1.integrations[OLD] && gateOf(newRec) && newRec.values.apiKey === oldRec.values.apiKey && newRec.values.provider === 'openrouter' && !('model' in newRec.values) && newRec.testedAt === oldRec.testedAt && newRec.lastOk === true && newRec.clusterKey === null,
       'integrations.json: the row moved (the ciphertext byte for byte, the provider, the Test state, the own|cluster choice); the retired model left it', i1);
     ok(h.st.resolveIntegration('llm').source === 'user' && h.st.resolveIntegration('llm').values.apiKey === KEY, 'the live store answers the moved key (it decrypts under the same key file)');
-    ok(['decision-memo.json', 'decision-usage.json', 'decision-journal.jsonl'].every((n) => fs.readFileSync(path.join(a.dataDir, n), 'utf8') === `{"kept":"${n}"}\n`), 'data/decision-memo.json / decision-usage.json / decision-journal.jsonl keep their names and bytes');
+    ok(verdictOf(['decision-memo.json', 'decision-usage.json', 'decision-journal.jsonl'].every((n) => fs.readFileSync(path.join(a.dataDir, n), 'utf8') === `{"kept":"${n}"}\n`)), 'data/decision-memo.json / decision-usage.json / decision-journal.jsonl keep their names and bytes');
     console.log(`    report: ${JSON.stringify(ra.report)}`);
     // (2) idempotent: the ledger says already; the move itself run again changes nothing
     const again = runOne(a, { plugins: h.pm, integrations: h.st });
@@ -2287,10 +2287,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const d = oldInstance('nohandle', { plugins: { [OLD]: { enabled: true } } });
     const rd5 = runOne(d, {});
     const led = rd(path.join(d.dataDir, 'migrations.json'));
-    ok(rd5.status === 'failed' && /no live PluginManager/.test(rd5.error) && !led.applied[ID] && rd(path.join(d.dataDir, 'plugins.json')).plugins[OLD], 'no manager + an old record on disk ⇒ FAILED by name, not recorded, nothing touched', rd5);
+    ok(rd5.status === 'failed' && gateOf(/no live PluginManager/.test(rd5.error)) && !led.applied[ID] && verdictOf(rd(path.join(d.dataDir, 'plugins.json')).plugins[OLD]), 'no manager + an old record on disk ⇒ FAILED by name, not recorded, nothing touched', rd5);
     const e = oldInstance('nostore', { row: { provider: 'openai', apiKey: KEY2 } });
     const re5 = runOne(e, { plugins: e.live().pm });
-    ok(re5.status === 'failed' && /no live integration store/.test(re5.error), 'no integration store + the old row on disk ⇒ FAILED by name', re5);
+    ok(re5.status === 'failed' && verdictOf(/no live integration store/.test(re5.error)), 'no integration store + the old row on disk ⇒ FAILED by name', re5);
     const fresh = path.join(tmp, 'llm-fresh'); fs.mkdirSync(path.join(fresh, 'data'), { recursive: true });
     const rf = create({ rootDir: fresh, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
     ok(rf.status === 'ran' && rf.report.plugins === 'none' && rf.report.judgeModel === 'none', 'CONTROL: a fresh instance (nothing under the old id, no handles) is a dry run — a success', rf);
@@ -2351,20 +2351,20 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const st = GS.forDir(path.join(rA, 'data'));
     const rowOf = (door, res2) => st.rowsFor(door, res2)[0] || null;
     const admits = (door, res2, facts) => GMx.admits(st.rowsFor(door, res2), facts).ok;
-    ok(res && res.status === 'ran' && res.report && res.report.refused === 0 && res.report.seeded > 0, 'registered and run: every resource agreed, the rows are seeded', res && res.report);
-    ok(admits('exit', 'h-1:use', { conversationKey: CID1 }) && admits('exit', 'h-1:use', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && !admits('exit', 'h-1:use', { conversationKey: 'x9' }) && admits('exit', 'h-2:use', { conversationKey: 'x9' }) && admits('exit', 'h-2:run', { conversationKey: 'x9' }) && !rowOf('exit', 'h-3:use'), 'exit: the listed conversation (by its id) and the Task Group admit, an outsider does not; a pre-list allowExit is everyone / everyone; nobody ⇒ no row');
-    ok(!rowOf('exit', 'h-4:use') && !rowOf('exit', 'h-4:run') && res.report.counts.exit.unknown === 2 && (res.report.unread || []).includes('exit h-4:use') && (res.report.unread || []).includes('exit h-4:run'), 'exit (verify F4): a stored hub the OLD reader could not read (`{mode:\'default\'}` spelled out — it refused both lists) carries NO grant, and the run NAMES it (`unread`) — never everyone', res.report);
+    ok(gateOf(res) && res.status === 'ran' && gateOf(res.report) && res.report.refused === 0 && res.report.seeded > 0, 'registered and run: every resource agreed, the rows are seeded', res && res.report);
+    ok(gateOf(admits('exit', 'h-1:use', { conversationKey: CID1 })) && gateOf(admits('exit', 'h-1:use', { conversationKey: 'x9', groupIds: ['tg-ops'] })) && !admits('exit', 'h-1:use', { conversationKey: 'x9' }) && gateOf(admits('exit', 'h-2:use', { conversationKey: 'x9' })) && gateOf(admits('exit', 'h-2:run', { conversationKey: 'x9' })) && !rowOf('exit', 'h-3:use'), 'exit: the listed conversation (by its id) and the Task Group admit, an outsider does not; a pre-list allowExit is everyone / everyone; nobody ⇒ no row');
+    ok(!rowOf('exit', 'h-4:use') && !rowOf('exit', 'h-4:run') && res.report.counts.exit.unknown === 2 && gateOf((res.report.unread || []).includes('exit h-4:use')) && verdictOf((res.report.unread || []).includes('exit h-4:run')), 'exit (verify F4): a stored hub the OLD reader could not read (`{mode:\'default\'}` spelled out — it refused both lists) carries NO grant, and the run NAMES it (`unread`) — never everyone', res.report);
     const hostsAfter = JSON.parse(fs.readFileSync(path.join(rA, 'data', 'hosts.json'), 'utf-8')).hosts;
     ok(hostsAfter.find((h) => h.id === 'h-1').exit.ask === true && hostsAfter.find((h) => h.id === 'h-1').exit.run.mode === 'only' && hostsAfter.find((h) => h.id === 'h-2').allowExit === true, 'exit: «Ask me each time» is carried to the record\'s own `exit.ask`; the old fields stay on disk, unread', hostsAfter.map((h) => h.exit));
-    ok(admits('browser-profile', 'bp-0000f001', { conversationKey: 'anyone' }) && admits('browser-profile', 'bp-0000f002', { conversationKeys: [BK1] }) && admits('browser-profile', 'bp-0000f002', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && !admits('browser-profile', 'bp-0000f002', { conversationKey: 'x9' }) && !rowOf('browser-profile', 'bp-0000f003') && admits('browser-profile', 'bp-0000f004', { conversationKey: 'x9' }), 'browser: instance / legacy ⇒ everyone; a list keeps its conversation (a key no binding names stands for itself) and its Task Group; an ephemeral record is no grant');
+    ok(gateOf(admits('browser-profile', 'bp-0000f001', { conversationKey: 'anyone' })) && gateOf(admits('browser-profile', 'bp-0000f002', { conversationKeys: [BK1] })) && gateOf(admits('browser-profile', 'bp-0000f002', { conversationKey: 'x9', groupIds: ['tg-ops'] })) && !admits('browser-profile', 'bp-0000f002', { conversationKey: 'x9' }) && !rowOf('browser-profile', 'bp-0000f003') && verdictOf(admits('browser-profile', 'bp-0000f004', { conversationKey: 'x9' })), 'browser: instance / legacy ⇒ everyone; a list keeps its conversation (a key no binding names stands for itself) and its Task Group; an ephemeral record is no grant');
     // verify F6 — ONE spelling: the suites' fixture mapper (GM.rowsOfBrowserProfiles) writes exactly the rows the migration wrote
     const bpFix = JSON.parse(fs.readFileSync(path.join(rA, 'data', 'browser-profiles.json'), 'utf-8')).profiles;
     const bpMig = st.rowsOfDoor('browser-profile').map((x) => ({ resource: x.resource, to: x.to.map((e) => GMx.principalKey(e)) })).sort((x, y) => x.resource.localeCompare(y.resource));
     const bpMap = GMx.rowsOfBrowserProfiles(bpFix).rows.filter((x) => x.to.length).map((x) => ({ resource: x.resource, to: x.to.map((e) => GMx.principalKey(e)) })).sort((x, y) => x.resource.localeCompare(y.resource));
-    ok(JSON.stringify(bpMig) === JSON.stringify(bpMap) && bpMig.some((x) => x.to.includes(`conversation:${BK1}`)), 'browser (verify F6): the fixture mapper and the migration spell a key no binding names the SAME way (its own conversation) — one spelling, the rows identical', { bpMig, bpMap });
-    ok(admits('automation-key-use', 'ag-000000000001', { conversationKey: CID1 }) && !admits('automation-key-use', 'ag-000000000001', { conversationKey: 'x9' }) && admits('automation-key-reach', 'ag-000000000001', { conversationKey: 'x9' }) && admits('automation-key-use', 'ag-000000000002', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && admits('automation-key-reach', 'ag-000000000002', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && !admits('automation-key-reach', 'ag-000000000002', { conversationKey: 'x9' }), 'automation: a conversation subject / a Task Group subject, reach instance ⇒ everyone, reach {taskGroups} ⇒ those groups');
-    ok(admits('window', 'da-1', { conversationKey: CID1 }) && admits('window', 'da-1', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && rowOf('window', 'da-1').to.find((e) => e.kind === 'conversation').origin === 'self-open', 'window: a `<backend>:<cid>` key becomes its conversation id; the opener\'s origin rides the entry');
-    ok(admits('group-visibility', 'tg-ops', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && rowOf('group-visibility', 'tg-ops').to[0].level === 'messageable' && !rowOf('group-visibility', 'tg-quiet'), 'group visibility: the level rides the entry; a group with none has no row');
+    ok(JSON.stringify(bpMig) === JSON.stringify(bpMap) && verdictOf(bpMig.some((x) => x.to.includes(`conversation:${BK1}`))), 'browser (verify F6): the fixture mapper and the migration spell a key no binding names the SAME way (its own conversation) — one spelling, the rows identical', { bpMig, bpMap });
+    ok(gateOf(admits('automation-key-use', 'ag-000000000001', { conversationKey: CID1 })) && !admits('automation-key-use', 'ag-000000000001', { conversationKey: 'x9' }) && gateOf(admits('automation-key-reach', 'ag-000000000001', { conversationKey: 'x9' })) && gateOf(admits('automation-key-use', 'ag-000000000002', { conversationKey: 'x9', groupIds: ['tg-ops'] })) && gateOf(admits('automation-key-reach', 'ag-000000000002', { conversationKey: 'x9', groupIds: ['tg-ops'] })) && !admits('automation-key-reach', 'ag-000000000002', { conversationKey: 'x9' }), 'automation: a conversation subject / a Task Group subject, reach instance ⇒ everyone, reach {taskGroups} ⇒ those groups');
+    ok(gateOf(admits('window', 'da-1', { conversationKey: CID1 })) && gateOf(admits('window', 'da-1', { conversationKey: 'x9', groupIds: ['tg-ops'] })) && rowOf('window', 'da-1').to.find((e) => e.kind === 'conversation').origin === 'self-open', 'window: a `<backend>:<cid>` key becomes its conversation id; the opener\'s origin rides the entry');
+    ok(gateOf(admits('group-visibility', 'tg-ops', { conversationKey: 'x9', groupIds: ['tg-ops'] })) && rowOf('group-visibility', 'tg-ops').to[0].level === 'messageable' && !rowOf('group-visibility', 'tg-quiet'), 'group visibility: the level rides the entry; a group with none has no row');
     ok(rowOf('channel-reach', 'conversation:lark-1/c1').to[0].authority === 'send' && rowOf('channel-reach', 'conversation:lark-1/c1#user').to[0].level === 'requestable' && rowOf('channel-reach', 'conversation:lark-1/c1#request').to[0].key === 'cid-asker-1' && rowOf('channel-reach', 'account:lark-1').to[0].id === 'tg-ops' && rowOf('channel-watch', 'account:lark-1').to[0].id === 'tg-ops' && rowOf('channel-watch', 'conversation:lark-1/c1').to[0].key === CID1 && rowOf('channel-api', 'lark-1').to[0].tier === 'write-auto', 'channels: the grains\' access (authority), the owner\'s and the approved rows (level), who each notification wakes, the API tier');
     ok(runIt(rA).status === 'already', 'run-at-most-once (the ledger)');
     // (b) RED: the old reader admits what the rows cannot carry (an account grant no access row backs) ⇒ NOT written, named, FAILED
@@ -2373,7 +2373,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const resB = runIt(rB);
     const stB = GS.forDir(path.join(rB, 'data'));
     const ledB = JSON.parse(fs.readFileSync(path.join(rB, 'data', 'migrations.json'), 'utf-8'));
-    ok(resB && resB.status === 'failed' && /channel-reach account:lark-1/.test(resB.error) && /cid-stray-1/.test(resB.error) && !(ledB.applied && ledB.applied[ID]), 'RED FIXTURE: an account grant no access row backs ⇒ the run FAILS naming the row and who (the ledger is not stamped — retried next boot)', resB && resB.error);
+    ok(gateOf(resB) && resB.status === 'failed' && gateOf(/channel-reach account:lark-1/.test(resB.error)) && gateOf(/cid-stray-1/.test(resB.error)) && !(ledB.applied && ledB.applied[ID]), 'RED FIXTURE: an account grant no access row backs ⇒ the run FAILS naming the row and who (the ledger is not stamped — retried next boot)', resB && resB.error);
     ok(!stB.rowsFor('channel-reach', 'account:lark-1').length && stB.rowsFor('exit', 'h-1:use').length === 1 && stB.rowsFor('channel-api', 'lark-1').length === 1, '…that resource is NOT written (nobody may use it — closed, never widened or guessed); every resource that agreed IS (the owner\'s grants never all go dark)');
     // (c) a row the store already holds is kept (a door wrote it since the upgrade) — and the next run passes
     stB.set('channel-reach', 'account:lark-1', { to: [{ kind: 'group', id: 'tg-ops', authority: 'draft' }], except: [] }, 'user');
@@ -2384,7 +2384,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     fixture(rD);
     fs.writeFileSync(path.join(rD, 'data', 'grants.json'), '{"v":1,"rows":[{"door":"exit"', { mode: 0o600 });
     const resD = runIt(rD, { grants: GS.create({ dataDir: path.join(rD, 'data') }) });
-    ok(resD.status === 'failed' && /grants\.json cannot be read/.test(resD.error) && fs.readFileSync(path.join(rD, 'data', 'grants.json'), 'utf-8').startsWith('{"v":1,"rows":[{"door":"exit"'), 'an unreadable grants.json ⇒ FAILED by name; the file is not written over', resD);
+    ok(resD.status === 'failed' && gateOf(/grants\.json cannot be read/.test(resD.error)) && verdictOf(fs.readFileSync(path.join(rD, 'data', 'grants.json'), 'utf-8').startsWith('{"v":1,"rows":[{"door":"exit"')), 'an unreadable grants.json ⇒ FAILED by name; the file is not written over', resD);
     // (e) verify F2 — THE ROLLBACK ROAD: data/grants.json deleted after the migration ran (the ledger stamped). Each boot is a
     // fresh store read from disk (as server.js builds it) through the real runLocalMigrations.
     const bootIn = (r, mod = { create }) => { const said = [], notices = []; const res = mod.create({ rootDir: r, homeDir: scratchHomeDir, grants: GS.create({ dataDir: path.join(r, 'data') }), note: (l) => said.push(l), serverNotice: (k) => notices.push(k) }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID); return { res, said, notices }; };
@@ -2396,7 +2396,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(b1.res.status === 'ran' && n1 > 10, `rollback: boot 1 runs the migration (${n1} rows)`, b1.res);
     fs.unlinkSync(gfile(rR));
     const b2 = bootIn(rR);
-    ok(b2.res.status === 'rearmed' && rowsOnDisk(rR) === rows1 && b2.said.some((l) => /2026-10-grants-unify rearmed: data\/grants\.json was missing/.test(l)), `rollback: grants.json DELETED with the ledger stamped ⇒ boot 2 RE-RUNS it — the same ${n1} rows, byte-identical (door / resource / to / except), said by name in ⚙ Diagnostics (pre-fix: \`already\`, 0 rows, every door closed silently)`, { res: b2.res, said: b2.said });
+    ok(b2.res.status === 'rearmed' && rowsOnDisk(rR) === rows1 && verdictOf(b2.said.some((l) => /2026-10-grants-unify rearmed: data\/grants\.json was missing/.test(l))), `rollback: grants.json DELETED with the ledger stamped ⇒ boot 2 RE-RUNS it — the same ${n1} rows, byte-identical (door / resource / to / except), said by name in ⚙ Diagnostics (pre-fix: \`already\`, 0 rows, every door closed silently)`, { res: b2.res, said: b2.said });
     const b3 = bootIn(rR);
     ok(b3.res.status === 'already' && !b3.said.length && rowsOnDisk(rR) === rows1, 'rollback: boot 3 (the store on disk) runs nothing and says nothing', b3);
     // a store missing with NOTHING left to carry ⇒ grants_store_missing by name, every boot, nothing made up
@@ -2406,7 +2406,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(bootIn(rM).said.length === 0, '…and the next boot (the store on disk) is silent');
     fs.unlinkSync(gfile(rM));
     const m3 = bootIn(rM), m4 = bootIn(rM);
-    ok(m3.res.status === 'already' && m3.res.missing === 'grants_store_missing' && m3.said.some((l) => /^grants_store_missing: data\/grants\.json is missing/.test(l)) && m3.notices.includes('grants_store_missing') && rowsOnDisk(rM) === 'absent', 'no store AND no old list ⇒ `grants_store_missing` in the log, ⚙ Diagnostics and a notice — every door closed (nobody), no file made up', m3);
+    ok(m3.res.status === 'already' && m3.res.missing === 'grants_store_missing' && gateOf(m3.said.some((l) => /^grants_store_missing: data\/grants\.json is missing/.test(l))) && gateOf(m3.notices.includes('grants_store_missing')) && rowsOnDisk(rM) === 'absent', 'no store AND no old list ⇒ `grants_store_missing` in the log, ⚙ Diagnostics and a notice — every door closed (nobody), no file made up', m3);
     ok(m4.res.missing === 'grants_store_missing' && m4.said.length === 1, '…and the next boot says it again (never silence until access is given)', m4);
     // CONTROL: the boot check removed ⇒ boot 2 answers `already` with no store — the rollback leg goes red
     const MR = mutantCopies('migrations-rearm', REPO_ROOT);
@@ -2431,7 +2431,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const stC = GS.create({ memory: true });
       let threw = null; try { GMZ.migrate({ dataDir: path.join(rC, 'data'), store: stC }); } catch (e) { threw = e; }
       const p = GMx.admits(stC.rowsFor('channel-reach', 'account:lark-1'), { conversationKey: 'x9', groupIds: ['tg-ops'] });
-      ok(!threw && p.ok && !GMx.admits(stC.rowsFor('channel-reach', 'account:lark-1'), { conversationKey: 'cid-stray-1' }).ok, 'CONTROL: without the judge the run PASSES and the stray grant silently disappears (the old reader let cid-stray-1 see the whole account) — the RED leg is what names it');
+      ok(!threw && gateOf(p.ok) && !GMx.admits(stC.rowsFor('channel-reach', 'account:lark-1'), { conversationKey: 'cid-stray-1' }).ok, 'CONTROL: without the judge the run PASSES and the stray grant silently disappears (the old reader let cid-stray-1 see the whole account) — the RED leg is what names it');
     } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
   }
   // ── 2026-10-task-group-context-rows (lane task-group-context): a Task Group's folders[] + contextDir → its Context
@@ -2456,7 +2456,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const live = new TaskGroupManager({ dataDir: a.dataDir, homeDir: scratchHomeDir });
     const ra = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, tasks: live }).runLocalMigrations().find((r) => r.id === ID);
     const doc = rd(path.join(a.dataDir, 'task-groups.json'));
-    ok(ra && ra.status === 'ran' && ra.report.groups === 2 && ra.report.rows === 2 && ra.report.notes === 1, 'the migration ran through the live store (2 groups, 2 rows, 1 notes row)', ra);
+    ok(gateOf(ra) && ra.status === 'ran' && ra.report.groups === 2 && ra.report.rows === 2 && ra.report.notes === 1, 'the migration ran through the live store (2 groups, 2 rows, 1 notes row)', ra);
     ok(JSON.stringify(live.get('T-1-a').ctx.map((r) => [r.path, r.tell, r.tags])) === JSON.stringify([[a.w, 'names', ['discover']], [path.join(a.w, 'shared'), 'names', ['notes']]]) && live.get('T-1-b').ctx.length === 0,
       'folders[] → 文件名 + 自动发现会话, contextDir → 文件名 + agent 在这里记笔记; a group with neither gets an empty table', live.get('T-1-a').ctx);
     ok(live.groupsForSession({ cwd: path.join(a.w, 'deep') }).map((g) => g.id).join() === 'T-1-a' && live.contextDirOf('T-1-a') === path.join(a.w, 'shared'), 'the live store answers from the rows at once (membership, the notes folder)');
@@ -2510,7 +2510,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const live = new TaskGroupManager({ dataDir: a.dataDir, homeDir: scratchHomeDir, onChange: () => { notes++; } });
     const ra = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, tasks: live }).runLocalMigrations().find((r) => r.id === ID);
     const arch = rd(path.join(a.dataDir, 'archive', 'task-group-archived-members.json'));
-    ok(ra && ra.status === 'ran' && ra.report.via === 'store' && ra.report.groups === 1 && ra.report.keys === 2 && JSON.stringify(live.get('T-1-a').sessions) === JSON.stringify(KEEP) && JSON.stringify(live.get('T-1-b').sessions) === '["claude:c3"]',
+    ok(gateOf(ra) && ra.status === 'ran' && ra.report.via === 'store' && ra.report.groups === 1 && ra.report.keys === 2 && JSON.stringify(live.get('T-1-a').sessions) === JSON.stringify(KEEP) && JSON.stringify(live.get('T-1-b').sessions) === '["claude:c3"]',
       'through the live store: the archived key and the BARE archived id (claude:b2) leave the group; a not-archived member (claude:c3, codex:b2x — another id) stays', ra);
     ok(JSON.stringify(arch) === JSON.stringify({ 'T-1-a': ['claude:a1', 'claude:b2'] }) && notes === 1 && JSON.stringify(rd(path.join(a.dataDir, 'task-groups.json')).tasks['T-1-a'].sessions) === JSON.stringify(KEEP),
       'ARCHIVE FIRST: the pruned keys per group are in data/archive/task-group-archived-members.json; the store saved once and notified once', { arch, notes });
@@ -2538,13 +2538,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const d1 = door.noteArchived(['claude:c3']);
     door.bind('T-1-b', 'claude:c3');
     const d2 = door.noteArchived(['claude:c3', 'claude:a1']);
-    ok(JSON.stringify(d1) === '["T-1-a","T-1-b"]' && JSON.stringify(d2) === '["T-1-a"]' && door.get('T-1-b').sessions.includes('claude:c3') && !door.get('T-1-a').sessions.includes('claude:a1'),
+    ok(JSON.stringify(d1) === '["T-1-a","T-1-b"]' && JSON.stringify(d2) === '["T-1-a"]' && gateOf(door.get('T-1-b').sessions.includes('claude:c3')) && !door.get('T-1-a').sessions.includes('claude:a1'),
       'the live door (the user-state write hook): a NEW archive key leaves every group; a conversation bound again after its archive stays (only keys new to the list)', { d1, d2 });
     const d3 = door.noteArchived(['claude:c3', 'claude:a1', 'codex:b2x']);
     const kept = door.get('T-1-a').sessions.includes('codex:b2x');
     running.delete('codex:b2x');
     const d4 = door.noteArchived(['claude:c3', 'claude:a1', 'codex:b2x']);
-    ok(JSON.stringify(d3) === '[]' && kept && JSON.stringify(d4) === '["T-1-a"]' && !door.get('T-1-a').sessions.includes('codex:b2x'),
+    ok(JSON.stringify(d3) === '[]' && gateOf(kept) && JSON.stringify(d4) === '["T-1-a"]' && !door.get('T-1-a').sessions.includes('codex:b2x'),
       'an archived conversation still RUNNING keeps its groups (its next turn needs their context) and leaves them at the first write after it ended', { d3, d4 });
   }
 
@@ -2586,8 +2586,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const live = new UserTodoManager({ dataDir: a.dataDir, expirySweepMs: 0 });
     const ra = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live, channels: engineOver(a.ids, live) }).runLocalMigrations().find((r) => r.id === ID);
     const g = (id) => { const it = live.get(id); return it && [it.status, it.resolvedBy]; };
-    ok(ra && ra.status === 'ran' && ra.report.hidden === 2 && ra.report.store === 'live', 'the two pointers the PERSON closed (✓ / ✕) over an OPEN request are rewritten as round 3 writes that close — hidden («hidden — nothing was decided»)', ra && ra.report);
-    ok(ra.report.back === 3 && [a.ids.doneByUser, a.ids.dismissedByUser, a.ids.hidden].every((id) => JSON.stringify(g(id)) === '["open",null]'), '…and the engine\'s resurface brings them back to For you NOW (with the one round 3 hid) — the boot reconcile ran before this run', { back: ra.report.back, a: g(a.ids.doneByUser), b: g(a.ids.dismissedByUser) });
+    ok(gateOf(ra) && ra.status === 'ran' && ra.report.hidden === 2 && ra.report.store === 'live', 'the two pointers the PERSON closed (✓ / ✕) over an OPEN request are rewritten as round 3 writes that close — hidden («hidden — nothing was decided»)', ra && ra.report);
+    ok(ra.report.back === 3 && verdictOf([a.ids.doneByUser, a.ids.dismissedByUser, a.ids.hidden].every((id) => JSON.stringify(g(id)) === '["open",null]')), '…and the engine\'s resurface brings them back to For you NOW (with the one round 3 hid) — the boot reconcile ran before this run', { back: ra.report.back, a: g(a.ids.doneByUser), b: g(a.ids.dismissedByUser) });
     ok(JSON.stringify(g(a.ids.decided)) === '["done","user"]' && JSON.stringify(g(a.ids.byProducer)) === '["done","system"]' && JSON.stringify(g(a.ids.open)) === '["open",null]', 'untouched: a pointer whose request was DECIDED since, a producer\'s own close, an open pointer', { decided: g(a.ids.decided), producer: g(a.ids.byProducer), open: g(a.ids.open) });
     const disk = JSON.parse(fs.readFileSync(path.join(a.dataDir, 'user-todos.json'), 'utf8'));
     const onDisk = (id) => { const it = (disk.items || []).find((x) => x.id === id); return it && it.status; };
@@ -2599,12 +2599,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const b = seed('file');
     const rb = create({ rootDir: b.root, homeDir: scratchHomeDir, serverNotice: () => { }, channels: engineOver(b.ids, new UserTodoManager({ dataDir: b.dataDir, expirySweepMs: 0 })) }).runLocalMigrations().find((r) => r.id === ID);
     const fileStore = new UserTodoManager({ dataDir: b.dataDir, expirySweepMs: 0 });
-    ok(rb.status === 'ran' && rb.report.store === 'private' && rb.report.hidden === 2 && rb.report.back === 0 && FA.isHidden(fileStore.get(b.ids.doneByUser)) && FA.isHidden(fileStore.get(b.ids.dismissedByUser)), 'without a live store: a private store on the file (hidden; the boot reconcile brings them back on the next boot)', rb.report);
+    ok(rb.status === 'ran' && rb.report.store === 'private' && rb.report.hidden === 2 && rb.report.back === 0 && gateOf(FA.isHidden(fileStore.get(b.ids.doneByUser))) && verdictOf(FA.isHidden(fileStore.get(b.ids.dismissedByUser))), 'without a live store: a private store on the file (hidden; the boot reconcile brings them back on the next boot)', rb.report);
     // (3) no engine: channels data present ⇒ FAILS by name (retried next boot), nothing touched; none ⇒ nothing to do
     const x = seed('noeng');
     const rx = create({ rootDir: x.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
     const xs = new UserTodoManager({ dataDir: x.dataDir, expirySweepMs: 0 });
-    ok(rx.status === 'failed' && /no channels engine/.test(rx.error) && !JSON.parse(fs.readFileSync(path.join(x.dataDir, 'migrations.json'), 'utf8')).applied[ID] && xs.get(x.ids.doneByUser).resolvedBy === 'user', 'no engine while channels data exists ⇒ FAILS by name, not recorded (retried next boot), nothing touched', rx);
+    ok(rx.status === 'failed' && gateOf(/no channels engine/.test(rx.error)) && !JSON.parse(fs.readFileSync(path.join(x.dataDir, 'migrations.json'), 'utf8')).applied[ID] && xs.get(x.ids.doneByUser).resolvedBy === 'user', 'no engine while channels data exists ⇒ FAILS by name, not recorded (retried next boot), nothing touched', rx);
     const n = seed('nochan', { channelsDir: false });
     const rn = create({ rootDir: n.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
     ok(rn.status === 'ran' && rn.report.store === 'absent', 'no channels data ⇒ nothing to do (recorded)', rn.report);
@@ -2631,30 +2631,30 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const PASTED_NAME = 'sk-' + crypto.randomBytes(16).toString('hex');   // a VALUE pasted into the name field — the accident class
     const notesOf = (store) => store.forSession('vault');
     const leaks = (text) => [...V, PASTED_NAME].filter((x) => String(text).includes(x));
-    ok(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID), `the registry carries ${ID} (append-only, dated)`);
+    ok(verdictOf(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID)), `the registry carries ${ID} (append-only, dated)`);
     // (1) a planted store, the LIVE inbox store
     const a = seedJS('live', { GH_TOKEN: V[0], NPM_TOKEN: V[1], [PASTED_NAME]: V[2] });
     const bytes = fs.readFileSync(a.src);
     const live = new UserTodoManager({ dataDir: a.dataDir, expirySweepMs: 0 });
     const ra = boot(a, { userTodos: live });
     const retMode = fs.existsSync(a.ret) ? fs.statSync(a.ret).mode & 0o777 : null;
-    ok(ra?.status === 'ran' && !fs.existsSync(a.src) && fs.existsSync(a.ret) && fs.readFileSync(a.ret).equals(bytes) && retMode === 0o600,
+    ok(ra?.status === 'ran' && !fs.existsSync(a.src) && gateOf(fs.existsSync(a.ret)) && gateOf(fs.readFileSync(a.ret).equals(bytes)) && retMode === 0o600,
       'a planted data/job-secrets.json (0644) ⇒ RENAMED to data/job-secrets.retired.json — its bytes KEPT, 0600', { ra, retMode });
     const na = notesOf(live), it = na[0] || {};
-    ok(na.length === 1 && it.origin === 'vault' && it.kind === 'notice' && it.urgency === 'high' && it.status === 'open' && it.text.includes('data/job-secrets.retired.json') && /put each into the vault, then delete the file/.test(it.text),
+    ok(na.length === 1 && it.origin === 'vault' && it.kind === 'notice' && it.urgency === 'high' && it.status === 'open' && gateOf(it.text.includes('data/job-secrets.retired.json')) && verdictOf(/put each into the vault, then delete the file/.test(it.text)),
       'ONE For-you notice (origin vault, a notice): it names the file and says put each into the vault, then delete it', it);
-    ok(/It holds 3 name\(s\): GH_TOKEN, NPM_TOKEN —/.test(it.detail || '') && /…and 1 more not shown/.test(it.detail || '') && /--vault NAME=vault:\/\/… \(vibespace-docs jobs\)/.test(it.detail || '') && /deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is/.test(it.detail || '') && it.action?.type === 'job-secrets-retired',
+    ok(gateOf(/It holds 3 name\(s\): GH_TOKEN, NPM_TOKEN —/.test(it.detail || '')) && gateOf(/…and 1 more not shown/.test(it.detail || '')) && gateOf(/--vault NAME=vault:\/\/… \(vibespace-docs jobs\)/.test(it.detail || '')) && gateOf(/deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is/.test(it.detail || '')) && it.action?.type === 'job-secrets-retired',
       '…its detail: the 3 names it held (the 2 variable names shown, the one shaped like a pasted value COUNTED, never shown) and the recipe (B-ef1b: the two buttons ARE the step — its action job-secrets-retired; a job reads --vault)', { detail: it.detail, action: it.action });
-    ok(it.i18n?.text?.key && Array.isArray(it.i18n?.detail) && it.i18n.detail.length === 3 && it.i18n?.source?.key === 'Vault', '…and its words ride as structure (the client says them in zh / ja — the group\'s name too, r3)', it.i18n);
+    ok(gateOf(it.i18n?.text?.key) && gateOf(Array.isArray(it.i18n?.detail)) && it.i18n.detail.length === 3 && it.i18n?.source?.key === 'Vault', '…and its words ride as structure (the client says them in zh / ja — the group\'s name too, r3)', it.i18n);
     const todosText = fs.existsSync(path.join(a.dataDir, 'user-todos.json')) ? fs.readFileSync(path.join(a.dataDir, 'user-todos.json'), 'utf8') : '';
-    ok(todosText.includes('job-secrets.retired.json') && leaks(JSON.stringify(na)).length === 0 && leaks(todosText).length === 0,
+    ok(gateOf(todosText.includes('job-secrets.retired.json')) && leaks(JSON.stringify(na)).length === 0 && leaks(todosText).length === 0,
       'NO VALUE in the notice (text, detail, i18n) nor in data/user-todos.json — flushed before the ledger row', leaks(JSON.stringify(na)).length + leaks(todosText).length);
     const la = a.ledger();
     ok(!!la.applied[ID] && la.reports?.[ID]?.names === 3 && la.reports?.[ID]?.store === 'renamed' && leaks(JSON.stringify(la)).length === 0 && !JSON.stringify(la).includes('GH_TOKEN'),
       'the ledger row: applied, its report a COUNT (names: 3) — never a name or a value', la.reports?.[ID]);
     // (2) a second boot ⇒ nothing again
     const again = boot(a, { userTodos: live });
-    ok(again?.status === 'already' && notesOf(live).length === 1 && fs.existsSync(a.ret) && fs.readFileSync(a.ret).equals(bytes), 'a second boot ⇒ nothing again (the ledger: already; still ONE notice; the retired file untouched)', again);
+    ok(again?.status === 'already' && notesOf(live).length === 1 && gateOf(fs.existsSync(a.ret)) && verdictOf(fs.readFileSync(a.ret).equals(bytes)), 'a second boot ⇒ nothing again (the ledger: already; still ONE notice; the retired file untouched)', again);
     live.stop();
     // (3) no file ⇒ nothing
     const n = seedJS('none');
@@ -2665,15 +2665,15 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const rb = boot(b);
     const fileStore = new UserTodoManager({ dataDir: b.dataDir, expirySweepMs: 0 });
     const nb = notesOf(fileStore);
-    ok(rb?.status === 'ran' && rb?.report?.via === 'private' && nb.length === 1 && /It holds 1 name\(s\): API_KEY —/.test(nb[0]?.detail || '') && leaks(JSON.stringify(nb)).length === 0, 'without a live store: a PRIVATE store on the same file — the notice is on disk when the row is recorded', rb);
+    ok(rb?.status === 'ran' && rb?.report?.via === 'private' && nb.length === 1 && gateOf(/It holds 1 name\(s\): API_KEY —/.test(nb[0]?.detail || '')) && leaks(JSON.stringify(nb)).length === 0, 'without a live store: a PRIVATE store on the same file — the notice is on disk when the row is recorded', rb);
     fileStore.stop();
     // (5) the notice FAILS ⇒ the run is not recorded (the file renamed and kept); the next boot files it from the retired file
     const c = seedJS('retry', { BOT_TOKEN: V[3] });
     const rc1 = boot(c, { userTodos: { add() { throw new Error('the store refused it'); }, flush() { } } });
-    ok(rc1?.status === 'failed' && !c.ledger().applied[ID] && !fs.existsSync(c.src) && fs.existsSync(c.ret), 'the notice cannot be filed ⇒ the run FAILS (not recorded; said at boot) — the file already renamed and KEPT', rc1);
+    ok(rc1?.status === 'failed' && !c.ledger().applied[ID] && !fs.existsSync(c.src) && verdictOf(fs.existsSync(c.ret)), 'the notice cannot be filed ⇒ the run FAILS (not recorded; said at boot) — the file already renamed and KEPT', rc1);
     const liveC = new UserTodoManager({ dataDir: c.dataDir, expirySweepMs: 0 });
     const rc2 = boot(c, { userTodos: liveC });
-    ok(rc2?.status === 'ran' && rc2?.report?.store === 'renamed-earlier' && notesOf(liveC).length === 1 && /BOT_TOKEN/.test(notesOf(liveC)[0]?.detail || '') && !!c.ledger().applied[ID], '…the next boot finds the retired file, files the ONE notice and records the row', rc2);
+    ok(rc2?.status === 'ran' && rc2?.report?.store === 'renamed-earlier' && notesOf(liveC).length === 1 && gateOf(/BOT_TOKEN/.test(notesOf(liveC)[0]?.detail || '')) && !!c.ledger().applied[ID], '…the next boot finds the retired file, files the ONE notice and records the row', rc2);
     liveC.stop();
     // (6) both names present ⇒ FAILS by name, nothing moved — and (r3, review F2: the runner runs inside hub.listen's callback,
     // before any client connects) the Vault For-you item says it first: two files, nothing moved, move one out of data/. Its
@@ -2682,11 +2682,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     fs.writeFileSync(d.ret, JSON.stringify({ B_KEY: V[1] }), { mode: 0o600 });
     const dBefore = [fs.readFileSync(d.src), fs.readFileSync(d.ret)];
     const rd = boot(d);   // no live store: the private one on the same file
-    ok(rd?.status === 'failed' && /already exists/.test(rd?.error || '') && fs.readFileSync(d.src).equals(dBefore[0]) && fs.readFileSync(d.ret).equals(dBefore[1]) && !d.ledger().applied[ID],
+    ok(rd?.status === 'failed' && gateOf(/already exists/.test(rd?.error || '')) && gateOf(fs.readFileSync(d.src).equals(dBefore[0])) && gateOf(fs.readFileSync(d.ret).equals(dBefore[1])) && !d.ledger().applied[ID],
       'both names present ⇒ FAILS by name — nothing moved, never over the owner\'s bytes, not recorded', rd);
     const tdD = new UserTodoManager({ dataDir: d.dataDir, expirySweepMs: 0 });
     const nd = notesOf(tdD), itD = nd[0] || {};
-    ok(nd.length === 1 && itD.origin === 'vault' && itD.kind === 'notice' && /^Two files hold secrets for background jobs and nothing was moved: data\/job-secrets\.json and data\/job-secrets\.retired\.json\. Move one of them out of data\//.test(itD.text || '') && itD.i18n?.text?.key === require('../src/server/migrations.js').JOB_SECRETS_WORDS?.both && leaks(JSON.stringify(nd)).length === 0,
+    ok(nd.length === 1 && itD.origin === 'vault' && itD.kind === 'notice' && gateOf(/^Two files hold secrets for background jobs and nothing was moved: data\/job-secrets\.json and data\/job-secrets\.retired\.json\. Move one of them out of data\//.test(itD.text || '')) && itD.i18n?.text?.key === require('../src/server/migrations.js').JOB_SECRETS_WORDS?.both && leaks(JSON.stringify(nd)).length === 0,
       '…and ONE Vault For-you notice says it where the owner looks — two files, nothing moved, move one out of data/ (no value)', { n: nd.length, text: itD.text });
     const rd2 = boot(d, { userTodos: tdD });
     ok(rd2?.status === 'failed' && notesOf(tdD).length === 1 && notesOf(tdD)[0]?.id === itD.id && tdD.forSession('migrations').length === 0,
@@ -2694,7 +2694,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     fs.rmSync(d.ret);   // the owner moved one aside
     const rd3 = boot(d, { userTodos: tdD });
     const nd3 = notesOf(tdD);
-    ok(rd3?.status === 'ran' && nd3.length === 1 && nd3[0]?.id === itD.id && /^A plain file kept secrets/.test(nd3[0]?.text || '') && /It holds 1 name\(s\): A_KEY —/.test(nd3[0]?.detail || ''),
+    ok(rd3?.status === 'ran' && nd3.length === 1 && nd3[0]?.id === itD.id && gateOf(/^A plain file kept secrets/.test(nd3[0]?.text || '')) && verdictOf(/It holds 1 name\(s\): A_KEY —/.test(nd3[0]?.detail || '')),
       '…one moved aside ⇒ the next boot renames the other and the SAME item (one id) now says the retired file\'s words', { status: rd3?.status, n: nd3.length, same: nd3[0]?.id === itD.id });
     tdD.stop();
     // (6b) r4 (review R3-F2): a state with nothing left to tell SETTLES the «Two files…» item — it never stays open over files
@@ -2719,27 +2719,27 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ['dir', (x) => { fs.rmSync(x.src); fs.rmSync(x.ret); fs.mkdirSync(x.src); }, 'not-a-file', 'both removed and a directory by the name'],
     ]) {
       const o = twoThen(tag, fix);
-      ok(o.filed && o.store === store && o.recorded && o.item === 'done' && o.open === 0 && o.onDisk === 'done', `«Two files…» filed, then ${words} ⇒ the next boot (\`${store}\`) RESOLVES that item — on disk, never left open over files that are gone`, o);
+      ok(gateOf(o.filed) && o.store === store && gateOf(o.recorded) && o.item === 'done' && o.open === 0 && o.onDisk === 'done', `«Two files…» filed, then ${words} ⇒ the next boot (\`${store}\`) RESOLVES that item — on disk, never left open over files that are gone`, o);
     }
     // (7) a store that is not a JSON object: renamed and told — its names could not be read
     const u = seedJS('unread', 'not json ' + V[2]);
     const tu = new UserTodoManager({ dataDir: u.dataDir, expirySweepMs: 0 });
     const ru = boot(u, { userTodos: tu });
-    ok(ru?.status === 'ran' && ru?.report?.names === null && fs.existsSync(u.ret) && /Its names could not be read/.test(notesOf(tu)[0]?.detail || '') && leaks(JSON.stringify(notesOf(tu))).length === 0, 'a store that is not a JSON object ⇒ renamed, and the notice says its names could not be read (no byte of it shown)', ru);
+    ok(ru?.status === 'ran' && ru?.report?.names === null && gateOf(fs.existsSync(u.ret)) && gateOf(/Its names could not be read/.test(notesOf(tu)[0]?.detail || '')) && leaks(JSON.stringify(notesOf(tu))).length === 0, 'a store that is not a JSON object ⇒ renamed, and the notice says its names could not be read (no byte of it shown)', ru);
     tu.stop();
     // (8) an EMPTY store: renamed (kept), nothing to tell
     const e0 = seedJS('empty', {});
     const te = new UserTodoManager({ dataDir: e0.dataDir, expirySweepMs: 0 });
     const re = boot(e0, { userTodos: te });
-    ok(re?.status === 'ran' && re?.report?.names === 0 && fs.existsSync(e0.ret) && notesOf(te).length === 0, 'an empty store ⇒ renamed (kept), no notice — it held no name', re);
+    ok(re?.status === 'ran' && re?.report?.names === 0 && gateOf(fs.existsSync(e0.ret)) && notesOf(te).length === 0, 'an empty store ⇒ renamed (kept), no notice — it held no name', re);
     te.stop();
     // (9) the words: each key is a dict ENTRY in zh AND ja (the client words the notice; the build's lint does not scan this file)
     const { dictHasEntry } = await import('./i18n-check.mjs');
     const W = (() => { try { return Object.values(require('../src/server/migrations.js').JOB_SECRETS_WORDS || {}); } catch { return []; } })();
     const dicts = ['zh', 'ja'].map((l) => fs.readFileSync(path.join(REPO_ROOT, `src/lib/i18n-${l}.js`), 'utf8'));
-    ok(W.length === 6 && W.every((k) => dicts.every((dt) => dictHasEntry(dt, k))), `the notice's ${W.length} keys are entries in BOTH dicts (zh, ja)`, W.filter((k) => !dicts.every((dt) => dictHasEntry(dt, k))));
+    ok(W.length === 6 && verdictOf(W.every((k) => dicts.every((dt) => dictHasEntry(dt, k)))), `the notice's ${W.length} keys are entries in BOTH dicts (zh, ja)`, W.filter((k) => !dicts.every((dt) => dictHasEntry(dt, k))));
     const FW = Object.values(require('../src/migration-runner.js').FAILED_WORDS || {});
-    ok(FW.length === 4 && FW.every((k) => dicts.every((dt) => dictHasEntry(dt, k))), `the runner's failed-migration notice: its ${FW.length} keys are entries in BOTH dicts (zh, ja)`, FW.filter((k) => !dicts.every((dt) => dictHasEntry(dt, k))));
+    ok(FW.length === 4 && verdictOf(FW.every((k) => dicts.every((dt) => dictHasEntry(dt, k)))), `the runner's failed-migration notice: its ${FW.length} keys are entries in BOTH dicts (zh, ja)`, FW.filter((k) => !dicts.every((dt) => dictHasEntry(dt, k))));
     // (10) r3 (review F1): a TOKEN pasted as a NAME is never shown — six families built at runtime by concatenation; five of them
     // fit an environment variable's shape (ghp_…, npm_…, hf_…, AKIA…, a 40-hex run). Ordinary names are still shown
     const alnum = (k, set = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789') => Array.from(crypto.randomBytes(k), (b) => set[b % set.length]).join('');
@@ -2757,7 +2757,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     tt.flush();
     const nt = notesOf(tt), blobT = JSON.stringify(nt) + (fs.existsSync(path.join(tk.dataDir, 'user-todos.json')) ? fs.readFileSync(path.join(tk.dataDir, 'user-todos.json'), 'utf8') : '') + JSON.stringify(tk.ledger());
     const shownT = TOKENS.filter((t) => blobT.includes(t)).length;
-    ok(rt?.status === 'ran' && nt.length === 1 && shownT === 0 && /It holds 9 name\(s\): GH_TOKEN, API_KEY, PASSWORD —/.test(nt[0]?.detail || '') && /…and 6 more not shown \(past the first 20, or shaped like a value rather than a name\)/.test(nt[0]?.detail || ''),
+    ok(rt?.status === 'ran' && nt.length === 1 && shownT === 0 && gateOf(/It holds 9 name\(s\): GH_TOKEN, API_KEY, PASSWORD —/.test(nt[0]?.detail || '')) && verdictOf(/…and 6 more not shown \(past the first 20, or shaped like a value rather than a name\)/.test(nt[0]?.detail || '')),
       'six token families pasted as NAMES (sk-, ghp_, npm_, hf_, AKIA, a 40-hex run) ⇒ 0 shown, 6 counted; GH_TOKEN / API_KEY / PASSWORD shown', { status: rt?.status, notices: nt.length, tokensShown: shownT });
     ok(shownT === 0 && leaks(blobT).length === 0, '…no token and no value in the notice, data/user-todos.json or the ledger', { tokens: shownT, values: leaks(blobT).length });
     tt.stop();
@@ -2768,7 +2768,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const half = { add: (k, o) => { if (k === 'vault') throw new Error('the vault section refused it'); return tg.add(k, o); }, flush: () => tg.flush(), idsWhere: (f) => tg.idsWhere(f), setStatus: (...a) => tg.setStatus(...a), get: (x) => tg.get(x) };
     const rg1 = boot(g, { userTodos: half });
     const sg1 = tg.forSession('migrations');
-    ok(rg1?.status === 'failed' && sg1.length === 1 && sg1[0]?.itemKey === ID && sg1[0]?.origin === 'server' && sg1[0]?.text === `A data migration failed at startup: ${ID}` && /Its error: the vault section refused it/.test(sg1[0]?.detail || '') && leaks(JSON.stringify(sg1)).length === 0,
+    ok(rg1?.status === 'failed' && sg1.length === 1 && sg1[0]?.itemKey === ID && sg1[0]?.origin === 'server' && sg1[0]?.text === `A data migration failed at startup: ${ID}` && gateOf(/Its error: the vault section refused it/.test(sg1[0]?.detail || '')) && leaks(JSON.stringify(sg1)).length === 0,
       'the hub\'s wiring: the one-shot fails (its own notice refused) ⇒ the runner files ONE For-you item naming it (origin server, no value)', { status: rg1?.status, n: sg1.length, text: sg1[0]?.text });
     const rg2 = boot(g, { userTodos: tg });
     ok(rg2?.status === 'ran' && tg.forSession('migrations').length === 0 && tg.get(sg1[0]?.id)?.status === 'done' && notesOf(tg).length === 1, '…the next boot runs it ⇒ the runner\'s item is RESOLVED and the ONE Vault notice is filed', { status: rg2?.status, item: tg.get(sg1[0]?.id)?.status });
@@ -2797,18 +2797,18 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const boot = (r) => create({ rootDir: r.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: r.live }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID);
     const items = (r) => { const sn = r.live.snapshot() || {}; return [...(sn.open || []), ...(sn.resolved || [])].filter((i) => i.sessionKey === 'vault' && i.itemKey === ITEM); };   // open AND resolved (forSession lists the open ones only)
-    ok(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID) && MJ.JOB_SECRETS_ACTION === 'job-secrets-retired', `the registry carries ${ID} (append-only, dated); the notice's action is job-secrets-retired`);
+    ok(gateOf(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID)) && MJ.JOB_SECRETS_ACTION === 'job-secrets-retired', `the registry carries ${ID} (append-only, dated); the notice's action is job-secrets-retired`);
     const a = seed('open'); const ra = boot(a); const ia = items(a);
-    ok(ra?.status === 'ran' && ia.length === 1 && ia[0].status === 'open' && ia[0].action?.type === 'job-secrets-retired' && /deletes it only when you say so/.test(ia[0].detail || '') && /It holds 1 name\(s\): GH_TOKEN/.test(ia[0].detail || ''),
+    ok(ra?.status === 'ran' && ia.length === 1 && ia[0].status === 'open' && ia[0].action?.type === 'job-secrets-retired' && gateOf(/deletes it only when you say so/.test(ia[0].detail || '')) && verdictOf(/It holds 1 name\(s\): GH_TOKEN/.test(ia[0].detail || '')),
       'an OPEN notice from an earlier boot + the retired file ⇒ re-filed as the SAME one item, now with its buttons (its action) and the new words', { status: ra?.status, items: ia.map((i) => ({ status: i.status, action: i.action })) });
     const b = seed('closed', { item: 'done' }); const rb = boot(b); const ib = items(b);
     ok(rb?.status === 'ran' && ib.length === 1 && ib[0].status === 'done' && !ib[0].action, 'a notice the owner CLOSED stays closed — no buttons pushed back onto it', { status: rb?.status, items: ib.map((i) => ({ status: i.status, action: i.action })) });
     const c = seed('gone', { store: null }); const rc = boot(c);
-    ok(rc?.status === 'ran' && items(c).length === 1 && !items(c)[0].action && /no retired file/.test(JSON.stringify(rc?.report || '')), 'no retired file ⇒ nothing filed (the old notice untouched)', rc);
+    ok(rc?.status === 'ran' && items(c).length === 1 && !items(c)[0].action && verdictOf(/no retired file/.test(JSON.stringify(rc?.report || ''))), 'no retired file ⇒ nothing filed (the old notice untouched)', rc);
     const d = seed('both', { both: true }); const rd = boot(d);
-    ok(rd?.status === 'ran' && !items(d)[0].action && /two files/.test(JSON.stringify(rd?.report || '')), 'a second store beside it ⇒ nothing filed (2026-10-job-secrets-retired says «Two files…» until the owner chooses)', rd);
+    ok(rd?.status === 'ran' && !items(d)[0].action && verdictOf(/two files/.test(JSON.stringify(rd?.report || ''))), 'a second store beside it ⇒ nothing filed (2026-10-job-secrets-retired says «Two files…» until the owner chooses)', rd);
     const e = seed('none', { item: null }); const re2 = boot(e);
-    ok(re2?.status === 'ran' && items(e).length === 0 && /no open notice/.test(JSON.stringify(re2?.report || '')), 'the file there and NO notice at all (closed and pruned from the tray — the read, r1) ⇒ nothing filed: a notice the owner closed never comes back', { report: re2?.report, items: items(e).length });
+    ok(re2?.status === 'ran' && items(e).length === 0 && verdictOf(/no open notice/.test(JSON.stringify(re2?.report || ''))), 'the file there and NO notice at all (closed and pruned from the tray — the read, r1) ⇒ nothing filed: a notice the owner closed never comes back', { report: re2?.report, items: items(e).length });
     for (const r of [a, b, c, d, e]) r.live.stop();
   }
 
@@ -2831,10 +2831,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const r1 = runMigrations({ ledgerPath, migrations: M, todos: td, ...quiet })[0];
     td.flush();
     const s1 = said(), i1 = s1[0] || {};
-    ok(R.FAILED_INBOX_KEY === 'migrations' && r1?.status === 'failed' && s1.length === 1 && i1.origin === 'server' && i1.kind === 'notice' && i1.itemKey === '2099-01-runner-said' && i1.text === 'A data migration failed at startup: 2099-01-runner-said' && /Its error: the store could not be read/.test(i1.detail || '') && /it retries at the next start/.test(i1.detail || '') && !/the second line/.test(i1.detail || '') && i1.i18n?.text?.key === R.FAILED_WORDS?.text && i1.i18n?.source?.key === 'Migrations',
+    ok(R.FAILED_INBOX_KEY === 'migrations' && r1?.status === 'failed' && s1.length === 1 && i1.origin === 'server' && i1.kind === 'notice' && i1.itemKey === '2099-01-runner-said' && i1.text === 'A data migration failed at startup: 2099-01-runner-said' && gateOf(/Its error: the store could not be read/.test(i1.detail || '')) && gateOf(/it retries at the next start/.test(i1.detail || '')) && !/the second line/.test(i1.detail || '') && i1.i18n?.text?.key === R.FAILED_WORDS?.text && i1.i18n?.source?.key === 'Migrations',
       'a migration that throws ⇒ ONE For-you notice (origin server): the migration, its error\'s FIRST line, «it retries at the next start» — words as structure', { status: r1?.status, n: s1.length, text: i1.text });
     const todosFile = () => (fs.existsSync(path.join(dir, 'user-todos.json')) ? fs.readFileSync(path.join(dir, 'user-todos.json'), 'utf8') : '');
-    ok(s1.length === 1 && !JSON.stringify(s1).includes(TOK) && todosFile().includes('2099-01-runner-said') && !todosFile().includes(TOK), '…a token in the error line is masked by the secret-shapes belt — never in the item nor in data/user-todos.json');
+    ok(s1.length === 1 && !JSON.stringify(s1).includes(TOK) && gateOf(todosFile().includes('2099-01-runner-said')) && !todosFile().includes(TOK), '…a token in the error line is masked by the secret-shapes belt — never in the item nor in data/user-todos.json');
     const r2 = runMigrations({ ledgerPath, migrations: M, todos: td, ...quiet })[0];
     ok(r2?.status === 'failed' && said().length === 1 && said()[0]?.id === i1.id, 'a second failing boot ⇒ still ONE item (the same id), never a second', { n: said().length });
     failing = false;
@@ -2854,7 +2854,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(r6?.status === 'failed' && !fs.existsSync(path.join(dir2, 'user-todos.json')), 'no store (a device daemon passes none) ⇒ nothing filed — failed, not recorded, as before', r6);
     const warns = [];
     const r7 = runMigrations({ ledgerPath: path.join(dir2, 'm2.json'), migrations: [{ id: '2099-01-runner-y', run() { throw new Error('no'); } }, { id: '2099-01-runner-z', run() { return null; } }], todos: { add() { throw new Error('the store refused it'); } }, log: () => { }, warn: (l) => warns.push(l) });
-    ok(r7.map((x) => x.status).join() === 'failed,ran' && warns.some((l) => /2099-01-runner-y: its For-you notice was not filed — the store refused it/.test(l)), 'a store that refuses the item ⇒ a warn line by name, never a failed boot — the next row still runs', { statuses: r7.map((x) => x.status), warns: warns.length });
+    ok(r7.map((x) => x.status).join() === 'failed,ran' && verdictOf(warns.some((l) => /2099-01-runner-y: its For-you notice was not filed — the store refused it/.test(l))), 'a store that refuses the item ⇒ a warn line by name, never a failed boot — the next row still runs', { statuses: r7.map((x) => x.status), warns: warns.length });
     // r4 (review R3-F1): the belt sees the WHOLE line, THEN the cut — a token straddling character 300 was no longer a shape the
     // belt knows once cut first (r3 showed ghp_ + 14 of its 36; 31 of a prefix-free 40). Each: no run of ≥ 6 of it visible
     const { redactSecrets } = require('../src/secret-shapes.js');
@@ -2894,7 +2894,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const toastOf = (list, id) => list.filter(([k]) => k === 'migration-failed:' + id).map(([, t]) => String(t)).join('\n');
     const MS = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8').split('\n').filter((l) => l.includes("'migration-failed:'"));
     // B-44f3: the stepped migration's late failure is said through the SAME door as a sync one's (migrations.js sayFailures) — two toast lines, never a third
-    ok(MS.length === 2 && MS.every((l) => /failedLine\((e|r\.error)\)/.test(l) && !/\$\{(e\.message|r\.error)\}/.test(l)), `every \`migration-failed:\` toast in src/server/migrations.js (${MS.length}) carries its error through the runner's failedLine — never the raw line`, MS.map((l) => l.trim().slice(0, 100)));
+    ok(MS.length === 2 && verdictOf(MS.every((l) => /failedLine\((e|r\.error)\)/.test(l) && !/\$\{(e\.message|r\.error)\}/.test(l))), `every \`migration-failed:\` toast in src/server/migrations.js (${MS.length}) carries its error through the runner's failedLine — never the raw line`, MS.map((l) => l.trim().slice(0, 100)));
     // (a) the boot's sync failure — the job-secrets one-shot whose own notice the store refused with a token in its words
     const JID = '2026-10-job-secrets-retired';
     const dA = path.join(tmp, 'toast-sync', 'data');
@@ -2903,7 +2903,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const toastsA = []; let resA = null;
     const saidA = await hush(() => { resA = create({ rootDir: path.dirname(dA), homeDir: scratchHomeDir, serverNotice: (k, t) => toastsA.push([k, t]), userTodos: { add() { throw new Error('the vault section refused it: ' + TOKN); }, flush() { } } }).runLocalMigrations({ only: [JID] }).find((x) => x.id === JID); });
     const tA = toastOf(toastsA, JID);
-    ok(resA?.status === 'failed' && String(resA?.error).includes(TOKN) && tA.includes(JID) && /the vault section refused it/.test(tA) && visible(TOKN, tA) === 0 && saidA.some((l) => l.includes(TOKN)),
+    ok(resA?.status === 'failed' && gateOf(String(resA?.error).includes(TOKN)) && gateOf(tA.includes(JID)) && gateOf(/the vault section refused it/.test(tA)) && visible(TOKN, tA) === 0 && verdictOf(saidA.some((l) => l.includes(TOKN))),
       'the boot\'s sync failure: a token in the thrown error (the raw r.error carries it) ⇒ 0 chars of it in the `migration-failed:` toast, its id and words kept; the journal keeps the line whole', { status: resA?.status, toast: !!tA, visible: visible(TOKN, tA), journal: saidA.filter((l) => l.includes(TOKN)).length });
     // (b) a STEPPED migration's later failure (onLate — clients are connected by then): the ledger dedup over a shard of repeated
     // rows, through a usageHistory whose dedupShard rejects with a token in its words
@@ -2918,7 +2918,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     });
     if (tookB < 0) ok(false, 'harness: the stepped migration\'s late toast — the state never came within 10 s (the row after it judges nothing)');
     const tB = toastOf(toastsB, LID);
-    ok(resB?.status === 'started' && tB.includes(LID) && /the shard could not be rewritten/.test(tB) && visible(TOKN, tB) === 0 && saidB.some((l) => l.includes(TOKN)),
+    ok(resB?.status === 'started' && gateOf(tB.includes(LID)) && gateOf(/the shard could not be rewritten/.test(tB)) && visible(TOKN, tB) === 0 && verdictOf(saidB.some((l) => l.includes(TOKN))),
       'a STEPPED migration that rejects after the boot (onLate): 0 chars of the token in its `migration-failed:` toast; the journal keeps the line whole', { status: resB?.status, toast: !!tB, visible: visible(TOKN, tB), journal: saidB.filter((l) => l.includes(TOKN)).length });
     // (c) the grants REARM (data/grants.json deleted after its row ran) whose store refuses with a token: the toast AND ⚙ Diagnostics
     const dC = path.join(tmp, 'toast-rearm', 'data');
@@ -2927,7 +2927,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const toastsC = [], diag = []; let resC = null;
     const saidC = await hush(() => { resC = create({ rootDir: path.dirname(dC), homeDir: scratchHomeDir, grants: refusing, note: (l) => diag.push(String(l)), serverNotice: (k, t) => toastsC.push([k, t]) }).grantsStoreBoot(); });
     const tC = toastOf(toastsC, '2026-10-grants-unify');
-    ok(resC?.status === 'failed' && String(resC?.error).includes(TOKN) && /the grants store refused it/.test(tC) && /rearmed .*FAILED: the grants store refused it/.test(diag.join('\n')) && visible(TOKN, tC + '\n' + diag.join('\n')) === 0 && saidC.some((l) => l.includes(TOKN)),
+    ok(resC?.status === 'failed' && gateOf(String(resC?.error).includes(TOKN)) && gateOf(/the grants store refused it/.test(tC)) && gateOf(/rearmed .*FAILED: the grants store refused it/.test(diag.join('\n'))) && visible(TOKN, tC + '\n' + diag.join('\n')) === 0 && verdictOf(saidC.some((l) => l.includes(TOKN))),
       'the grants rearm that fails: 0 chars of the token in its `migration-failed:` toast and its ⚙ Diagnostics line; the journal keeps it whole', { status: resC?.status, toast: !!tC, diag: diag.length, visible: visible(TOKN, tC + diag.join('')), journal: saidC.filter((l) => l.includes(TOKN)).length });
   }
   // lane vault-standing-request r4 (THE ROOT MODEL — 主开发: «a MIGRATION of existing members from one-end to per-scope ends
@@ -2957,15 +2957,15 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const stored = g.rowsFor('vault-use', RES)[0].to[0], stored2 = g.rowsFor('vault-use', RES2)[0].to[0];
       const ug = UG.create({ grants: () => g, vault, dataDir, log: () => { } });
       const pub = ug.publicFor(RES).to, after = JSON.stringify(pub.map((m) => [m.grant || m.id, m.hosts, m.toolFor, m.until, m.commands.length]));
-      ok(res && res.status === 'ran' && res.report.reshaped === 1 && Array.isArray(stored.scopes) && stored.scopes.length === 3 && stored.scopes.every((s) => s.until === END) && stored.hosts === undefined && stored.until === undefined && stored.mac === marked(RES, a).mac && pub.length === 1 && after === before, 'a one-end member is RESHAPED to its scopes — each with the member\'s end, tool and writer — its mark kept AS IT WAS and still VERIFIED by the writer (the vault reads it held, its hosts, tool, end and command unchanged): no vault at boot', { res: res && res.report, stored, before, after });
-      ok(Array.isArray(stored2.hosts) && stored2.scopes === undefined && stored2.tool === 'curl' && ug.publicFor(RES2).to.length === 1 && res.report.kept === 1 && notices.filter(([k]) => k === 'vault-use-per-scope-kept').length === 1 && /1 grant\(s\) could not be given per-host ends/.test((notices.find(([k]) => k === 'vault-use-per-scope-kept') || [])[1] || ''), 'a member that CANNOT be mapped (a legacy single tool — its mark would move) is left as it is, still read as before, and named in ONE notice', { stored2, notices });
+      ok(gateOf(res) && res.status === 'ran' && res.report.reshaped === 1 && gateOf(Array.isArray(stored.scopes)) && stored.scopes.length === 3 && gateOf(stored.scopes.every((s) => s.until === END)) && stored.hosts === undefined && stored.until === undefined && stored.mac === marked(RES, a).mac && pub.length === 1 && after === before, 'a one-end member is RESHAPED to its scopes — each with the member\'s end, tool and writer — its mark kept AS IT WAS and still VERIFIED by the writer (the vault reads it held, its hosts, tool, end and command unchanged): no vault at boot', { res: res && res.report, stored, before, after });
+      ok(gateOf(Array.isArray(stored2.hosts)) && stored2.scopes === undefined && stored2.tool === 'curl' && ug.publicFor(RES2).to.length === 1 && res.report.kept === 1 && notices.filter(([k]) => k === 'vault-use-per-scope-kept').length === 1 && verdictOf(/1 grant\(s\) could not be given per-host ends/.test((notices.find(([k]) => k === 'vault-use-per-scope-kept') || [])[1] || '')), 'a member that CANNOT be mapped (a legacy single tool — its mark would move) is left as it is, still read as before, and named in ONE notice', { stored2, notices });
       const again = mm().runLocalMigrations().find((r) => r.id === ID);
       const rerun = mm().MIGRATIONS.find((m) => m.id === ID).run();
       ok(again.status === 'already' && rerun.reshaped === 0 && rerun.kept === 1 && JSON.stringify(g.rowsFor('vault-use', RES)[0].to[0]) === JSON.stringify(stored), 'LEDGER-KEYED + IDEMPOTENT: a second boot says already, and the run itself finds nothing left to reshape (the row byte for byte)', { again: again.status, rerun });
       const broken = path.join(tmp, 'vault-per-scope-broken'); fs.mkdirSync(path.join(broken, 'data'), { recursive: true });
       fs.writeFileSync(path.join(broken, 'data', 'grants.json'), '{ not json');
       const rb = create({ rootDir: broken, homeDir: scratchHomeDir, serverNotice: () => { }, grants: GS.create({ dataDir: path.join(broken, 'data') }) }).runLocalMigrations().find((r) => r.id === ID);
-      ok(rb && rb.status === 'failed' && /could not be read/.test(rb.error) && !JSON.parse(fs.readFileSync(path.join(broken, 'data', 'migrations.json'), 'utf8')).applied[ID], 'an UNREADABLE grants store fails the run BY NAME — not recorded, retried on the next boot (never «nothing to reshape»)', rb);
+      ok(gateOf(rb) && rb.status === 'failed' && gateOf(/could not be read/.test(rb.error)) && !JSON.parse(fs.readFileSync(path.join(broken, 'data', 'migrations.json'), 'utf8')).applied[ID], 'an UNREADABLE grants store fails the run BY NAME — not recorded, retried on the next boot (never «nothing to reshape»)', rb);
     } catch (e) { ok(false, `${ID} threw on this tree (the migration it asks for is missing): ${(e && e.message) || e}`); }
   }
   // ── B-2e7b r1: 2026-11-warmth-derived-current — the ONE rule drops a value equal to its key's CURRENT derivation (trimmed)
@@ -2979,9 +2979,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     fs.writeFileSync(path.join(r, 'data', 'custom-themes.json'), JSON.stringify(STORE, null, 2));
     let res = null, doc = null;
     try { res = create({ rootDir: r, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID); doc = JSON.parse(fs.readFileSync(path.join(r, 'data', 'custom-themes.json'), 'utf8')); } catch (e) { res = { status: 'threw', error: (e && e.message) || String(e) }; }
-    ok(res && res.status === 'ran' && doc && Object.keys(CUR).every((k) => !(k in doc.savedSince.css)) && doc.savedSince.css['--bg-window'] === '#101018',
+    ok(gateOf(res) && res.status === 'ran' && gateOf(doc) && gateOf(Object.keys(CUR).every((k) => !(k in doc.savedSince.css))) && doc.savedSince.css['--bg-window'] === '#101018',
       `${ID}: a theme saved since the r5 ramp loses the five CURRENT derivation strings (a padded copy too) — the theme keeps deriving; its other rows stay`, { res, css: doc && doc.savedSince.css });
-    ok(doc && doc.chosen.css['--warmth-fresh'] === '#00ff88' && doc.chosen.css['--warmth-late'] === 'var(--red)', '…a chosen colour and ANOTHER key\'s derivation string are the person\'s — kept', doc && doc.chosen.css);
+    ok(gateOf(doc) && doc.chosen.css['--warmth-fresh'] === '#00ff88' && doc.chosen.css['--warmth-late'] === 'var(--red)', '…a chosen colour and ANOTHER key\'s derivation string are the person\'s — kept', doc && doc.chosen.css);
     const NSRC = fs.readFileSync(path.join(REPO_ROOT, 'src/custom-theme-normalize.js'), 'utf8');
     const CURRULE = " || (typeof v === 'string' && v.trim() === DERIVED_WARMTH[k])";
     ok(NSRC.split(CURRULE).length === 2, 'ANCHOR: the current-derivation rule, spelled once');
@@ -3009,24 +3009,24 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     let r1 = null, res = null, doc = null;
     try { r1 = rootOf('main', STORE); res = boot(r1); doc = JSON.parse(fs.readFileSync(fileOf(r1), 'utf8')); } catch (e) { res = { status: 'threw', error: (e && e.message) || String(e) }; }
     const rep = (res && res.report) || {};
-    ok(res && res.status === 'ran' && rep.store === 'rewritten' && rep.themes === 6, `${ID}: the row runs at boot over data/custom-themes.json and rewrites it (RED on 749aa7bf9: there is no such row)`, res);
-    ok(doc && Object.keys(OLD).every((k) => !(k in doc.saved374.css)) && doc.saved374.css['--bg-window'] === '#101018' && doc.saved374.css['--text'] === '#eeeeee' && doc.saved374.terminal.background === '#000000'
+    ok(gateOf(res) && res.status === 'ran' && rep.store === 'rewritten' && rep.themes === 6, `${ID}: the row runs at boot over data/custom-themes.json and rewrites it (RED on 749aa7bf9: there is no such row)`, res);
+    ok(gateOf(doc) && gateOf(Object.keys(OLD).every((k) => !(k in doc.saved374.css))) && doc.saved374.css['--bg-window'] === '#101018' && doc.saved374.css['--text'] === '#eeeeee' && doc.saved374.terminal.background === '#000000'
       && JSON.stringify(rep.dropped && rep.dropped.saved374) === JSON.stringify(Object.keys(OLD)), 'EQUAL ⇒ DROPPED: a theme saved on .374 loses all five frozen strings (the derivation applies); its other rows and its terminal stay', doc && doc.saved374);
-    ok(doc && doc.mine.css['--warmth-fresh'] === '#00ff88' && doc.mine.css['--warmth-mid'] === 'var(--ok-text)' && doc.mine.css['--warmth-late'] === 'var(--warn-text) ' && !('--warmth-critical' in doc.mine.css) && rep.kept === 3
+    ok(gateOf(doc) && doc.mine.css['--warmth-fresh'] === '#00ff88' && doc.mine.css['--warmth-mid'] === 'var(--ok-text)' && doc.mine.css['--warmth-late'] === 'var(--warn-text) ' && !('--warmth-critical' in doc.mine.css) && rep.kept === 3
       && JSON.stringify(rep.dropped && rep.dropped.mine) === '["--warmth-critical"]', 'DIFFERENT ⇒ KEPT: a colour, another key\'s .374 string and a value with a trailing space are the person\'s; only the byte-equal one goes', doc && { mine: doc.mine.css, kept: rep.kept });
     const ran = !!(res && res.status === 'ran');   // the legs below judge a run that HAPPENED (on a tree without the row they are red, never vacuous)
-    ok(ran && doc && JSON.stringify(doc.before374) === JSON.stringify(STORE.before374) && !(rep.dropped && rep.dropped.before374), 'ABSENT ⇒ UNTOUCHED: a theme with no warmth rows is byte-for-byte what it was', doc && doc.before374);
-    ok(doc && doc.broken === 'not a theme' && JSON.stringify(doc.nocss) === '{"terminal":{}}' && JSON.stringify(doc.listcss) === JSON.stringify(STORE.listcss) && JSON.stringify(rep.skipped) === '["broken","nocss","listcss"]',
+    ok(gateOf(ran) && gateOf(doc) && JSON.stringify(doc.before374) === JSON.stringify(STORE.before374) && !(rep.dropped && rep.dropped.before374), 'ABSENT ⇒ UNTOUCHED: a theme with no warmth rows is byte-for-byte what it was', doc && doc.before374);
+    ok(gateOf(doc) && doc.broken === 'not a theme' && JSON.stringify(doc.nocss) === '{"terminal":{}}' && JSON.stringify(doc.listcss) === JSON.stringify(STORE.listcss) && JSON.stringify(rep.skipped) === '["broken","nocss","listcss"]',
       'NOT AN OBJECT ⇒ SKIPPED, SAID: a theme that is not an object, one with no css, one whose css is a list — each kept as it was and named in the report', rep.skipped);
     let led = null; try { led = JSON.parse(fs.readFileSync(path.join(r1, 'data', 'migrations.json'), 'utf8')); } catch { }
-    ok(led && typeof led.applied[ID] === 'number' && led.reports && led.reports[ID] && JSON.stringify(led.reports[ID].dropped) === JSON.stringify(rep.dropped),
+    ok(gateOf(led) && typeof led.applied[ID] === 'number' && gateOf(led.reports) && gateOf(led.reports[ID]) && JSON.stringify(led.reports[ID].dropped) === JSON.stringify(rep.dropped),
       'THE LEDGER: data/migrations.json stamps the id and keeps the report (every dropped key by theme — the archive; the values are the five .374 constants)', led && led.reports && led.reports[ID]);
     let mode = null; try { mode = fs.statSync(fileOf(r1)).mode & 0o777; } catch { }
-    ok(ran && rep.store === 'rewritten' && mode === 0o600 && fs.readFileSync(fileOf(r1), 'utf8') === JSON.stringify(doc, null, 2) && !fs.readdirSync(path.join(r1, 'data')).some((f) => f.includes('.tmp')), 'ATOMIC: written whole as the route writes it (2-space JSON), the file\'s mode kept, no tmp left behind', { mode });
-    ok(ran && notices.length === 0 && !fs.existsSync(path.join(r1, 'data', 'user-todos.json')), 'NOTHING IS SAID to the person: no notice, no For-you item (nothing they chose changed)', notices);
+    ok(gateOf(ran) && rep.store === 'rewritten' && mode === 0o600 && fs.readFileSync(fileOf(r1), 'utf8') === JSON.stringify(doc, null, 2) && !fs.readdirSync(path.join(r1, 'data')).some((f) => f.includes('.tmp')), 'ATOMIC: written whole as the route writes it (2-space JSON), the file\'s mode kept, no tmp left behind', { mode });
+    ok(gateOf(ran) && notices.length === 0 && !fs.existsSync(path.join(r1, 'data', 'user-todos.json')), 'NOTHING IS SAID to the person: no notice, no For-you item (nothing they chose changed)', notices);
     let again = null, rerun = null, before = null, after = null;
     try { before = fs.readFileSync(fileOf(r1), 'utf8'); again = boot(r1); rerun = rowOf(r1).run(); after = fs.readFileSync(fileOf(r1), 'utf8'); } catch (e) { again = { status: 'threw', error: e.message }; }
-    ok(again && again.status === 'already' && rerun && rerun.store === 'untouched' && JSON.stringify(rerun.dropped) === '{}' && rerun.kept === 3 && before === after,
+    ok(gateOf(again) && again.status === 'already' && gateOf(rerun) && rerun.store === 'untouched' && JSON.stringify(rerun.dropped) === '{}' && rerun.kept === 3 && before === after,
       'IDEMPOTENT: a second boot answers `already`; the row run again by hand changes nothing (untouched, the store byte-identical)', { again, rerun });
     // a TORN first run: the store is computed whole and written once, so a throw anywhere before the rename (after the first
     // theme or the last) leaves the file as it was — planted here at the rename itself, the last instant it can tear
@@ -3036,20 +3036,20 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     fs.renameSync = (a, b) => { if (String(b).endsWith('custom-themes.json')) throw new Error('ENOSPC: planted — the disk filled at the rename'); return realRename(a, b); };
     try { torn = boot(r2); } catch (e) { torn = { status: 'threw', error: e.message }; } finally { fs.renameSync = realRename; }
     let led2 = null; try { led2 = JSON.parse(fs.readFileSync(path.join(r2, 'data', 'migrations.json'), 'utf8')); } catch { }
-    ok(torn && torn.status === 'failed' && /planted/.test(torn.error || '') && fs.readFileSync(fileOf(r2), 'utf8') === text0 && !(led2 && led2.applied && led2.applied[ID]) && !fs.readdirSync(path.join(r2, 'data')).some((f) => f.includes('.tmp')),
+    ok(gateOf(torn) && torn.status === 'failed' && gateOf(/planted/.test(torn.error || '')) && fs.readFileSync(fileOf(r2), 'utf8') === text0 && !(led2 && led2.applied && led2.applied[ID]) && !fs.readdirSync(path.join(r2, 'data')).some((f) => f.includes('.tmp')),
       'A TORN FIRST RUN fails loudly, records nothing and leaves the store byte-identical with no tmp behind (the runner retries next boot)', torn);
     let retry = null; try { retry = boot(r2); } catch (e) { retry = { status: 'threw', error: e.message }; }
-    ok(retry && retry.status === 'ran' && fs.readFileSync(fileOf(r2), 'utf8') === fs.readFileSync(fileOf(r1), 'utf8'), '…and THE RETRY CONVERGES: the next boot writes exactly what an untorn run wrote', retry);
+    ok(gateOf(retry) && retry.status === 'ran' && fs.readFileSync(fileOf(r2), 'utf8') === fs.readFileSync(fileOf(r1), 'utf8'), '…and THE RETRY CONVERGES: the next boot writes exactly what an untorn run wrote', retry);
     // torn the other way: the write landed, the process died before the runner stamped the ledger ⇒ the next boot runs it again
     const r3 = rootOf('late', STORE);
     let lateRes = null; try { rowOf(r3).run(); lateRes = boot(r3); } catch (e) { lateRes = { status: 'threw', error: e.message }; }
-    ok(lateRes && lateRes.status === 'ran' && lateRes.report.store === 'untouched' && fs.readFileSync(fileOf(r3), 'utf8') === fs.readFileSync(fileOf(r1), 'utf8'),
+    ok(gateOf(lateRes) && lateRes.status === 'ran' && lateRes.report.store === 'untouched' && fs.readFileSync(fileOf(r3), 'utf8') === fs.readFileSync(fileOf(r1), 'utf8'),
       '…and a run whose write landed but whose ledger stamp did not: the next boot finds nothing left to drop and records it', lateRes);
     const ra = rootOf('absent'), ru = rootOf('unparseable', '{ not json');
     let absent = null, unp = null; try { absent = boot(ra); unp = boot(ru); } catch (e) { absent = absent || { status: 'threw', error: e.message }; }
     // B-225b R9 (the persistence holds): a store that is not the set is HELD — the migration THROWS by name, never rewrites it, and is
     // NOT recorded: it runs again at the next start (the release recorded «unparseable» as done, for good, over a file it never read)
-    ok(absent && absent.status === 'ran' && absent.report.store === 'absent' && !fs.existsSync(fileOf(ra)) && unp && unp.status === 'failed' && /custom-themes\.json could not be read \(damaged/.test(unp.error || '') && fs.readFileSync(fileOf(ru), 'utf8') === '{ not json',
+    ok(gateOf(absent) && absent.status === 'ran' && absent.report.store === 'absent' && !fs.existsSync(fileOf(ra)) && gateOf(unp) && unp.status === 'failed' && gateOf(/custom-themes\.json could not be read \(damaged/.test(unp.error || '')) && fs.readFileSync(fileOf(ru), 'utf8') === '{ not json',
       'no store ⇒ none made (recorded); a store that is not the set ⇒ never rewritten, the migration fails BY NAME and is not recorded (it runs again at the next start)', { absent, unp });
 
     // r3 (the acceptance of 3ba074455): ① a by-name map is PROTOTYPE-LESS — themes named `constructor`, `__proto__` and
@@ -3063,7 +3063,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       try { rpr = boot(rp); back = JSON.parse(fs.readFileSync(fileOf(rp), 'utf8')); } catch (e) { rpr = rpr || { status: 'threw', error: (e && e.message) || String(e) }; }
       const ownOf = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
       const fixed = (n, i) => ownOf(back, n) && ownOf(back[n], 'css') && Object.keys(back[n].css).join(',') === '--bg-window' && back[n].css['--bg-window'] === `#0${i + 1}0${i + 1}0${i + 1}`;
-      ok(rpr && rpr.status === 'ran' && rpr.report && rpr.report.store === 'rewritten' && NAMES.every(fixed) && Object.keys(rpr.report.dropped).sort().join(',') === [...NAMES].sort().join(','),
+      ok(gateOf(rpr) && rpr.status === 'ran' && gateOf(rpr.report) && rpr.report.store === 'rewritten' && gateOf(NAMES.every(fixed)) && Object.keys(rpr.report.dropped).sort().join(',') === [...NAMES].sort().join(','),
         'r3 PROTOTYPE NAMES: themes named constructor / __proto__ / toString beside an ordinary one — all four rewritten (the five strings gone, their own row kept), none thrown (RED on 3ba074455: `dropped[name].push` threw on constructor)', rpr && (rpr.error || rpr.report));
       let nz = {};   // a tree without the ONE rule (3ba074455) reds the leg by name, never the suite
       try { nz = require('../src/custom-theme-normalize.js').normalizeCustomThemes(JSON.parse(`{"__proto__": ${row(9)}}`)); } catch (e) { nz = { error: (e && e.message) || String(e) }; }
@@ -3083,7 +3083,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         const a = statOf(fileOf(r)); let res = null; try { res = boot(r); } catch (e) { res = { status: 'threw', error: e.message }; }
         seen[tag] = { status: res && res.status, store: res && res.report && res.report.store, same: same(a, statOf(fileOf(r))) };
       }
-      ok(Object.values(seen).every((x) => x.status === 'ran' && x.store === 'untouched' && x.same),
+      ok(verdictOf(Object.values(seen).every((x) => x.status === 'ran' && x.store === 'untouched' && x.same)),
         'r3 WRITE PIN: zero themes / no css / none of the five keys ⇒ the run is recorded and the store keeps its inode AND its mtime (never rewritten)', seen);
       const rc = rootOf('pin-control', { a: { css: { '--accent': '#ff00ff' }, terminal: {} } }); fs.utimesSync(fileOf(rc), PAST, PAST);
       const c0 = statOf(fileOf(rc)), tmpc = fileOf(rc) + '.ctl'; fs.writeFileSync(tmpc, fs.readFileSync(fileOf(rc))); fs.renameSync(tmpc, fileOf(rc));
@@ -3105,13 +3105,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         const bundle = { exported374: { css: { '--bg-window': '#101018', ...OLD, '--text': '#eeeeee' }, terminal: { background: '#000000' } }, theirs: { css: { '--warmth-mid': '#3366ff', '--accent': '#ff00ff' }, terminal: {} } };
         const im = await req('POST', '/api/config/import', { file: { app: 'vibespace-config', sections: { customThemes: bundle } }, sections: ['customThemes'] });
         const s1 = stored();
-        ok(im.status === 200 && s1 && Object.keys(OLD).every((k) => !(k in s1.exported374.css)) && JSON.stringify(s1.exported374.css) === '{"--bg-window":"#101018","--text":"#eeeeee"}' && JSON.stringify(s1.exported374.terminal) === '{"background":"#000000"}'
+        ok(im.status === 200 && gateOf(s1) && gateOf(Object.keys(OLD).every((k) => !(k in s1.exported374.css))) && JSON.stringify(s1.exported374.css) === '{"--bg-window":"#101018","--text":"#eeeeee"}' && JSON.stringify(s1.exported374.terminal) === '{"background":"#000000"}'
           && JSON.stringify(s1.theirs) === JSON.stringify(bundle.theirs),
           'r3 THE IMPORT DOOR: a bundle exported on .374 (the five strings) imported AFTER the one-shot ⇒ dropped at the store\'s one writer; its other rows and the other theme byte-identical (RED on 3ba074455: written back frozen)', { status: im.status, body: im.body.slice(0, 200), files: fs.readdirSync(D), s1 });
         const sv = await req('POST', '/api/custom-themes', { name: 'Saved', css: { '--bg-window': '#202020', '--warmth-fresh': 'var(--ok-text)', '--warmth-expired': 'var(--border)', '--warmth-late': '#ffaa00' }, terminal: {} });
         const s2 = stored(), got = await req('GET', '/api/custom-themes');
         let served = null; try { served = JSON.parse(got.body); } catch { }
-        ok(sv.status === 200 && s2 && JSON.stringify(s2.Saved.css) === '{"--bg-window":"#202020","--warmth-late":"#ffaa00"}' && served && JSON.stringify(served.Saved.css) === JSON.stringify(s2.Saved.css) && JSON.stringify(s2.theirs) === JSON.stringify(bundle.theirs),
+        ok(sv.status === 200 && gateOf(s2) && JSON.stringify(s2.Saved.css) === '{"--bg-window":"#202020","--warmth-late":"#ffaa00"}' && gateOf(served) && JSON.stringify(served.Saved.css) === JSON.stringify(s2.Saved.css) && JSON.stringify(s2.theirs) === JSON.stringify(bundle.theirs),
           'r3 THE SAVE ROAD: a POST save carrying .374 strings (an old tab) ⇒ dropped at the same writer — on disk AND in what GET serves; the person\'s #ffaa00 and the other themes untouched (RED on 3ba074455)', { status: sv.status, saved: s2 && s2.Saved, served: served && served.Saved });
       } finally { await new Promise((r) => srv.close(r)); }
     }
@@ -3168,7 +3168,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const l = w.ledger();
       return { id: ID, status: (l.applied || {})[ID] ? 'ran' : 'failed', report: (l.reports || {})[ID], stepped: true };
     };
-    ok(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID), `the registry carries ${ID} (append-only, dated)`);
+    ok(verdictOf(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID)), `the registry carries ${ID} (append-only, dated)`);
     // M1 THE WORLD — two CloakBrowser profiles (seeds 17 / 99), a running one with the old proxy shape, the program path + the site list,
     // a chromium profile CloakBrowser was made the default of, an open proposal with its For-you Approve, a stored licence key — through
     // the LIVE keeper and the LIVE inbox store (what the boot hands in)
@@ -3181,31 +3181,31 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const r1 = boot(w1, { browserKeeper: () => K1, userTodos: live1 });
     const reg1 = K1._reg(), P1 = (n) => reg1.profiles.find((p) => p.id === `bp-0000c0${n}`) || {};
     ok(r1?.status === 'ran' && r1?.report?.via === 'keeper', 'M1 ran THROUGH the live keeper (it holds the registry in memory and saves it whole)', r1);
-    ok(['a1', 'a2'].every((n) => P1(n).provider === 'chromium' && JSON.stringify(P1(n).browser) === JSON.stringify({ kind: 'plugin', id: PID }) && P1(n).fingerprintSeed === null) && P1('a4').provider === 'chromium' && P1('a4').browser === undefined,
+    ok(gateOf(['a1', 'a2'].every((n) => P1(n).provider === 'chromium' && JSON.stringify(P1(n).browser) === JSON.stringify({ kind: 'plugin', id: PID }) && P1(n).fingerprintSeed === null)) && P1('a4').provider === 'chromium' && P1('a4').browser === undefined,
       'M1 every CloakBrowser profile is chromium with the plugin as its build — its seed off the record (it is in the plugin\'s table); another profile untouched', { a1: P1('a1'), a4: P1('a4') });
     const sd1 = w1.seeds(), sdMode = fs.existsSync(w1.seedsFile) ? fs.statSync(w1.seedsFile).mode & 0o777 : null;
-    ok(sd1 && sd1['bp-0000c0a1'] === 17 && sd1['bp-0000c0a2'] === 99 && Object.keys(sd1).length === 2 && sdMode === 0o600, 'M1 the seeds are in the plugin\'s seeds.json {profile: seed} (0600) — the same fingerprint at its next start', { sd1, sdMode });
+    ok(gateOf(sd1) && sd1['bp-0000c0a1'] === 17 && sd1['bp-0000c0a2'] === 99 && Object.keys(sd1).length === 2 && sdMode === 0o600, 'M1 the seeds are in the plugin\'s seeds.json {profile: seed} (0600) — the same fingerprint at its next start', { sd1, sdMode });
     const st1 = w1.J('settings.json') || {};
     ok(st1[EXE] === '/opt/cloak/chrome' && st1[SITES] === 'bank.example, .shop.example' && !('browser.cloak.executablePath' in st1) && !('browser.cloak.egressAllowlist' in st1) && st1['browser.headed'] === true,
       'M1 the program path (verbatim) and the site list are the plugin\'s rows; both old keys are gone; every other setting kept', st1);
     const b1 = reg1.browsers['bp-0000c0a1'] || {}, b2 = reg1.browsers['bp-0000c0a2'] || {};
-    ok(b1.endAtBoot && b1.endAtBoot.why === MW.closed && b1.endAtBoot.by === ID && !('egress' in b1) && !b2.endAtBoot,
+    ok(gateOf(b1.endAtBoot) && b1.endAtBoot.why === MW.closed && b1.endAtBoot.by === ID && !('egress' in b1) && !b2.endAtBoot,
       'M1 the RUNNING CloakBrowser is marked for the keeper to end at its boot (the migration\'s words), its old proxy shape dropped; a stopped one is not marked', { b1, b2 });
-    ok(P1('a2').defaultBackend === null && P1('a3').defaultBackend === null && P1('a3').lastBackend === 'cloak' && !reg1.seats.cloak && !reg1.majors.cloak && reg1.majors.chromium && reg1.majors.chromium.major === 150,
+    ok(P1('a2').defaultBackend === null && P1('a3').defaultBackend === null && P1('a3').lastBackend === 'cloak' && !reg1.seats.cloak && !reg1.majors.cloak && gateOf(reg1.majors.chromium) && reg1.majors.chromium.major === 150,
       'M1/M11 a defaultBackend of CloakBrowser is cleared on EVERY profile (a chromium one too — the history field lastBackend stays); its seat and Chromium-major readings dropped, chromium\'s kept', { a3: P1('a3'), seats: reg1.seats, majors: reg1.majors });
     const pr1 = ((reg1.blocked || []).find((b) => b.id === 'bl-0000c001') || {}).proposal || {};
     const it1 = live1.get(item1.id) || {};
-    ok(pr1.state === 'unavailable' && pr1.plan && pr1.plan.kind === 'none' && pr1.install === 'unavailable' && !('installBytes' in pr1) && it1.status === 'dismissed',
+    ok(pr1.state === 'unavailable' && gateOf(pr1.plan) && pr1.plan.kind === 'none' && pr1.install === 'unavailable' && !('installBytes' in pr1) && it1.status === 'dismissed',
       'M10 an open proposal to switch to CloakBrowser is re-judged UNAVAILABLE (nothing to approve) and its For-you Approve is closed', { pr1, item: it1.status });
     const n1 = notes(live1), x1 = n1[0] || {};
     const det1 = String(x1.detail || '');
     ok(n1.length === 1 && x1.origin === 'browser' && x1.kind === 'notice' && x1.status === 'open' && x1.text === 'CloakBrowser now installs as a plugin — ⚙ → Plugins → Install plugin…',
       'M1 ONE For-you notice (origin browser): «CloakBrowser now installs as a plugin — ⚙ → Plugins → Install plugin…»', x1);
-    ok(/^2 browser profile\(s\) ran CloakBrowser: Bank, Shop\./m.test(det1) && /^1 of them were running and were closed at the update/m.test(det1) && /program path was carried/.test(det1) && /site list was carried/.test(det1) && /^1 open proposal\(s\) to switch/m.test(det1) && /licence key is no longer used/.test(det1) && !det1.includes(LIC),
+    ok(gateOf(/^2 browser profile\(s\) ran CloakBrowser: Bank, Shop\./m.test(det1)) && gateOf(/^1 of them were running and were closed at the update/m.test(det1)) && gateOf(/program path was carried/.test(det1)) && gateOf(/site list was carried/.test(det1)) && gateOf(/^1 open proposal\(s\) to switch/m.test(det1)) && gateOf(/licence key is no longer used/.test(det1)) && !det1.includes(LIC),
       '…its lines say what moved: the profiles by name, the one closed, the path and the list carried, the proposal closed, the licence key unused (its value never shown)', det1);
-    ok(Array.isArray(x1.i18n?.detail) && x1.i18n.detail.length === 6 && x1.i18n?.text?.key === MW.text && x1.i18n?.source?.key === 'Agent browser', '…and its words ride as structure (the client says them in zh / ja)', x1.i18n);
+    ok(gateOf(Array.isArray(x1.i18n?.detail)) && x1.i18n.detail.length === 6 && x1.i18n?.text?.key === MW.text && x1.i18n?.source?.key === 'Agent browser', '…and its words ride as structure (the client says them in zh / ja)', x1.i18n);
     const arch1 = (() => { try { return fs.readFileSync(w1.archive, 'utf8'); } catch { return ''; } })(), archMode = fs.existsSync(w1.archive) ? fs.statSync(w1.archive).mode & 0o777 : null;
-    ok(arch1.includes('"bp-0000c0a1"') && arch1.includes('/opt/cloak/chrome') && arch1.includes('"seed": 17') && archMode === 0o600 && !arch1.includes(LIC) && w1.J('integrations.json')?.integrations?.cloak?.values?.licenseKey === LIC,
+    ok(gateOf(arch1.includes('"bp-0000c0a1"')) && gateOf(arch1.includes('/opt/cloak/chrome')) && gateOf(arch1.includes('"seed": 17')) && archMode === 0o600 && !arch1.includes(LIC) && w1.J('integrations.json')?.integrations?.cloak?.values?.licenseKey === LIC,
       'M1 the report is archived (data/archive/2026-11-cloak-to-plugin.json, 0600: the profiles, their seeds, the old values) — the licence key NEVER copied, left where it is', { archMode, hasLic: arch1.includes(LIC) });
     ok((w1.J('browser-profiles.json')?.profiles || []).filter((p) => p.provider === 'cloak').length === 0, 'M1 the keeper\'s own save put it on disk (no profile on CloakBrowser in the file)');
     // …the keeper's FIRST BOOT of the new version ends the marked record by identity (its pid is gone here: nothing to signal) and says why
@@ -3213,10 +3213,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const K1b = Kmod.create({ dataDir: w1.dataDir, homeDir: scratchHomeDir, install: false, log: quiet, daemonTable: async () => [], endIdentity: async () => 'ended' });
     await K1b.boot();
     const e1 = K1b._reg().browsers['bp-0000c0a1'] || {};
-    ok(e1.state === 'stopped' && !e1.endAtBoot && /closed at the update: it ran CloakBrowser, which is now a plugin — ended at the update \(gone\)/.test(e1.lastError || '') && /closed at the update/.test(e1.note || ''),
+    ok(e1.state === 'stopped' && !e1.endAtBoot && gateOf(/closed at the update: it ran CloakBrowser, which is now a plugin — ended at the update \(gone\)/.test(e1.lastError || '')) && verdictOf(/closed at the update/.test(e1.note || '')),
       'M1 the next keeper boot ENDS the marked record (never adopted): stopped, the mark gone, its row says why', e1);
     let ed1 = null; try { ed1 = K1b.updateProfile('bp-0000c0a3', { label: 'Plain renamed' }); } catch (e) { ed1 = { error: e.code || e.message }; }
-    ok(ed1 && !ed1.error && (K1b.profile('bp-0000c0a3') || {}).label === 'Plain renamed', 'M11 the chromium profile CloakBrowser was the default of still edits (a rename answers ok)', ed1);
+    ok(gateOf(ed1) && !ed1.error && (K1b.profile('bp-0000c0a3') || {}).label === 'Plain renamed', 'M11 the chromium profile CloakBrowser was the default of still edits (a rename answers ok)', ed1);
     K1b.shutdown(); live1.stop();
     // M2 no program path set; VibeSpace's earlier download is there ⇒ THAT FILE, where it is (no rename, no receipt)
     const w2 = seedC('download', { reg: world(), settings: { 'browser.cloak.egressAllowlist': '' }, download: true });
@@ -3224,7 +3224,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const seam2 = (() => { const sha = crypto.createHash('sha256').update(fs.readFileSync(w2.dl)).digest('hex'); fs.writeFileSync(path.join(w2.dataDir, 'browser-tools', 'cloak-installed.json'), JSON.stringify({ chromium: '146.0.7680.177.5', sha256: sha, path: 'cloak-cache/chromium-146.0.7680.177.5/chrome', at: 1 })); return { cloakMeasured: { chromium: '146.0.7680.177.5', sha256: sha } }; })(); // its install proof (round 2: law A)
     const r2 = await bootA(w2, { userTodos: t2, ...seam2 });
     const st2 = w2.J('settings.json') || {}, d2 = String((notes(t2)[0] || {}).detail || '');
-    ok(r2?.status === 'ran' && r2?.report?.via === 'file' && st2[EXE] === w2.dl && fs.existsSync(w2.dl) && !(SITES in st2) && !('browser.cloak.egressAllowlist' in st2) && /earlier download at data\/browser-tools\/cloak-cache\/chromium-146\.0\.7680\.177\.5\/chrome is now the program/.test(d2),
+    ok(r2?.status === 'ran' && r2?.report?.via === 'file' && st2[EXE] === w2.dl && gateOf(fs.existsSync(w2.dl)) && !(SITES in st2) && !('browser.cloak.egressAllowlist' in st2) && verdictOf(/earlier download at data\/browser-tools\/cloak-cache\/chromium-146\.0\.7680\.177\.5\/chrome is now the program/.test(d2)),
       'M2 no path set ⇒ the earlier download — its install stamp naming the file — becomes the plugin\'s program row (the file stays where it is); an EMPTY old site list is stripped, never carried; said', { st2, d2 });
     t2.stop();
     // M3 neither ⇒ the row stays empty and the notice says the plugin needs CloakBrowser installed by the user
@@ -3232,7 +3232,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const t3 = new UserTodoManager({ dataDir: w3.dataDir, expirySweepMs: 0 });
     const r3 = boot(w3, { userTodos: t3 });
     const d3 = String((notes(t3)[0] || {}).detail || '');
-    ok(r3?.status === 'ran' && !fs.existsSync(path.join(w3.dataDir, 'settings.json')) && /needs CloakBrowser installed by you — see its README/.test(d3) && !/github|https?:\/\//i.test(d3 + (notes(t3)[0] || {}).text),
+    ok(r3?.status === 'ran' && !fs.existsSync(path.join(w3.dataDir, 'settings.json')) && gateOf(/needs CloakBrowser installed by you — see its README/.test(d3)) && !/github|https?:\/\//i.test(d3 + (notes(t3)[0] || {}).text),
       'M3 neither ⇒ no row written (no settings file made) and the notice says the plugin needs CloakBrowser installed by the user — the door only, no address', d3);
     t3.stop();
     // M4 the plugin was installed and set on .372–.374 ⇒ NOTHING of the plugin's is overwritten (its rows, a seed it minted)
@@ -3240,7 +3240,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const t4 = new UserTodoManager({ dataDir: w4.dataDir, expirySweepMs: 0 });
     const r4 = boot(w4, { userTodos: t4 });
     const st4 = w4.J('settings.json') || {}, sd4 = w4.seeds() || {}, d4 = String((notes(t4)[0] || {}).detail || ''), a4 = (() => { try { return fs.readFileSync(w4.archive, 'utf8'); } catch { return ''; } })();
-    ok(r4?.status === 'ran' && st4[EXE] === '/home/u/cloak/chrome' && st4[SITES] === 'mine.example' && sd4['bp-0000c0a1'] === 5 && sd4['bp-0000c0a2'] === 99 && sd4['bp-0000feed'] === 7 && /own program path was kept/.test(d4) && /own site list was kept/.test(d4) && a4.includes('/opt/old/chrome') && a4.includes('old.example'),
+    ok(r4?.status === 'ran' && st4[EXE] === '/home/u/cloak/chrome' && st4[SITES] === 'mine.example' && sd4['bp-0000c0a1'] === 5 && sd4['bp-0000c0a2'] === 99 && sd4['bp-0000feed'] === 7 && gateOf(/own program path was kept/.test(d4)) && gateOf(/own site list was kept/.test(d4)) && gateOf(a4.includes('/opt/old/chrome')) && verdictOf(a4.includes('old.example')),
       'M4 the plugin\'s own rows and its own seed are KEPT (the new seed merged beside them) — the old values are in the archive, the notice says so', { st4, sd4, d4 });
     t4.stop();
     // M5 a TORN registry ⇒ failed by name before ANY write (settings untouched, no seeds), the ledger not stamped; whole again ⇒ ran
@@ -3249,7 +3249,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const w5 = seedC('torn', { reg: torn, settings: set5 });
     const s5 = w5.B('settings.json');
     const r5 = boot(w5);
-    ok(r5 && r5.status === 'failed' && /browser-profiles\.json could not be read/.test(String(r5.error || '')) && w5.B('settings.json') === s5 && !fs.existsSync(w5.seedsFile) && !(w5.ledger().applied || {})[ID] && w5.B('browser-profiles.json') === torn,
+    ok(gateOf(r5) && r5.status === 'failed' && gateOf(/browser-profiles\.json could not be read/.test(String(r5.error || ''))) && w5.B('settings.json') === s5 && !fs.existsSync(w5.seedsFile) && !(w5.ledger().applied || {})[ID] && w5.B('browser-profiles.json') === torn,
       'M5 a torn registry: FAILED by name — nothing written (settings byte-identical, no seeds.json), the ledger NOT stamped', r5);
     fs.writeFileSync(path.join(w5.dataDir, 'browser-profiles.json'), JSON.stringify(world()));
     const t5 = new UserTodoManager({ dataDir: w5.dataDir, expirySweepMs: 0 });
@@ -3273,14 +3273,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const w8 = seedC('seeds-torn', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/cloak/chrome' }, seeds: '{ not json' });
     const r8 = boot(w8);
     const g8 = w8.J('browser-profiles.json') || {};
-    ok(r8 && r8.status === 'failed' && /seeds\.json could not be read/.test(String(r8.error || '')) && fs.readFileSync(w8.seedsFile, 'utf8') === '{ not json' && (g8.profiles || []).find((p) => p.id === 'bp-0000c0a1')?.fingerprintSeed === 17 && (g8.profiles || []).find((p) => p.id === 'bp-0000c0a1')?.provider === 'cloak' && (w8.J('settings.json') || {})['browser.cloak.executablePath'] === '/opt/cloak/chrome' && !(w8.ledger().applied || {})[ID],
+    ok(gateOf(r8) && r8.status === 'failed' && gateOf(/seeds\.json could not be read/.test(String(r8.error || ''))) && fs.readFileSync(w8.seedsFile, 'utf8') === '{ not json' && (g8.profiles || []).find((p) => p.id === 'bp-0000c0a1')?.fingerprintSeed === 17 && (g8.profiles || []).find((p) => p.id === 'bp-0000c0a1')?.provider === 'cloak' && (w8.J('settings.json') || {})['browser.cloak.executablePath'] === '/opt/cloak/chrome' && !(w8.ledger().applied || {})[ID],
       'M8 an unreadable seeds.json: FAILED by name — the table untouched, every profile keeps its seed and its provider, settings untouched, not stamped', r8);
     // M9 the install slot found a CloakBrowser install running at the update (the keeper's restart, before this) ⇒ said
     const w9 = seedC('install', { reg: { version: 1, profiles: [], leases: [], browsers: {} } });
     const t9 = new UserTodoManager({ dataDir: w9.dataDir, expirySweepMs: 0 });
     const r9 = boot(w9, { userTodos: t9, browserKeeper: () => ({ retiredInstall: () => ({ kind: 'cloak', result: 'ended', pid: 4242, step: 'package' }) }) });
     const d9 = String((notes(t9)[0] || {}).detail || '');
-    ok(r9?.status === 'ran' && /CloakBrowser install that was running at the update was stopped/.test(d9) && r9?.report?.install?.result === 'ended', 'M9 a CloakBrowser install the slot stopped at the restart is said in the notice', { d9, rep: r9 && r9.report && r9.report.install });
+    ok(r9?.status === 'ran' && gateOf(/CloakBrowser install that was running at the update was stopped/.test(d9)) && r9?.report?.install?.result === 'ended', 'M9 a CloakBrowser install the slot stopped at the restart is said in the notice', { d9, rep: r9 && r9.report && r9.report.install });
     t9.stop();
     // M12 the notice could not be filed ⇒ not stamped; the next boot (nothing left to move) files it FROM THE ARCHIVE — one item
     const w12 = seedC('refile', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/cloak/chrome' } });
@@ -3288,7 +3288,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const t12 = new UserTodoManager({ dataDir: w12.dataDir, expirySweepMs: 0 });
     const r12b = boot(w12, { userTodos: t12 });
     const d12 = String((notes(t12)[0] || {}).detail || '');
-    ok(r12 && r12.status === 'failed' && fs.existsSync(w12.archive) && r12b?.status === 'ran' && r12b?.report?.resumed === true && r12b?.report?.earlierRuns === 0 && notes(t12).length === 1 && /^2 browser profile\(s\) ran CloakBrowser: Bank, Shop/m.test(d12) && /program path was carried/.test(d12),
+    ok(gateOf(r12) && r12.status === 'failed' && gateOf(fs.existsSync(w12.archive)) && r12b?.status === 'ran' && r12b?.report?.resumed === true && r12b?.report?.earlierRuns === 0 && notes(t12).length === 1 && gateOf(/^2 browser profile\(s\) ran CloakBrowser: Bank, Shop/m.test(d12)) && verdictOf(/program path was carried/.test(d12)),
       'M12 a run whose notice failed is NOT stamped; the next boot RESUMES the run its archive holds (nothing left to move) and files the notice — once, with the first run\'s lines', { r12: r12 && r12.status, r12b: r12b && r12b.report, d12 });
     t12.stop();
     // ── round 2 (主开发's laws A, B, D on c5c6c6599) ──
@@ -3316,7 +3316,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const st = w.J('settings.json') || {}, d = String((notes(t)[0] || {}).detail || '');
       const name = { match: 'STAMPED + MATCHING ⇒ the earlier download IS the plugin\'s program row (the file stays where it is), said', mismatch: 'stamped but the file is not the one the stamp names (its SHA-256 differs) ⇒ NOT carried: the row left for the plugin\'s own download, the notice says it was left out as unverified',
         marker: 'an unpack the update cut (its marker, no install stamp) ⇒ NOT carried — the sentence says so', 'other-build': 'a stamp that names a build the measured one never was (another SHA-256) ⇒ NOT carried' }[kind];
-      ok(r?.status === 'ran' && (carried ? st[EXE] === w.dl : !(EXE in st)) && r?.report?.settings?.program === (carried ? 'download' : 'unverified') && words.test(d) && (carried || !/is now the program/.test(d)) && (kind !== 'marker' || /unpack the update cut/.test(r?.report?.download?.why || '')),
+      ok(r?.status === 'ran' && (carried ? st[EXE] === w.dl : !(EXE in st)) && r?.report?.settings?.program === (carried ? 'download' : 'unverified') && gateOf(words.test(d)) && (gateOf(carried) || !/is now the program/.test(d)) && (kind !== 'marker' || verdictOf(/unpack the update cut/.test(r?.report?.download?.why || ''))),
         `A ${name}`, { st, program: r?.report?.settings?.program, download: r?.report?.download, d });
       t.stop();
     }
@@ -3334,11 +3334,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     {
       const srcP = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
       const rowSrc = srcP.slice(srcP.indexOf('  function cloakDownloadFacts()'), srcP.indexOf('  /** 2026-10-settings-rows-retired, the settings half:'));
-      ok(/const sha256Of = \(file\) => new Promise\(.*fs\.createReadStream\(file/.test(srcP) && /sha256Of\(f\.file\)/.test(rowSrc) && !/update\(fs\.readFileSync/.test(rowSrc) && rowSrc.length > 1000,
+      ok(gateOf(/const sha256Of = \(file\) => new Promise\(.*fs\.createReadStream\(file/.test(srcP)) && gateOf(/sha256Of\(f\.file\)/.test(rowSrc)) && !/update\(fs\.readFileSync/.test(rowSrc) && rowSrc.length > 1000,
         'A′ STRUCTURE: the proof streams through the named sha256Of (fs.createReadStream) — no readFileSync feeds a hash anywhere in the row');
       const wiring = fs.readFileSync(path.join(REPO_ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
       const bk = wiring.slice(wiring.indexOf('  function bootBrowserKeeper('), wiring.indexOf('  function bootBrowserKeeper(') + 1200);
-      ok(/gate = require\('\.\/migrations\.js'\)\.beforeBrowserBoot\(\)/.test(bk) && /Promise\.resolve\(gate\)\.catch\(\(\) => null\)\.then\(\(\) => browserKeeper\.boot\(\)\)/.test(bk) && /browserBootGate = run\.then\(/.test(srcP),
+      ok(gateOf(/gate = require\('\.\/migrations\.js'\)\.beforeBrowserBoot\(\)/.test(bk)) && gateOf(/Promise\.resolve\(gate\)\.catch\(\(\) => null\)\.then\(\(\) => browserKeeper\.boot\(\)\)/.test(bk)) && verdictOf(/browserBootGate = run\.then\(/.test(srcP)),
         'A′ THE ORDER LAW: the keeper\'s boot (mounts-plugins-wiring bootBrowserKeeper) waits on the migration\'s gate before boot() — a STEPPED row is still judged before any record is adopted');
       const lagRun = async (mod, tag) => {
         const w = seedC('proof-big-' + tag, { reg: world() });
@@ -3374,9 +3374,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         lgS = await lagRun(syncHash, 'sync');
       } catch (e) { ok(false, `A′: the negative control could not run on this tree (${(e && e.message) || e})`); }
       const lg = await lagRun(MIGM, 'stream');
-      ok(lg.stepped && lg.status === 'ran' && lg.carried && lg.hashed >= BIG && lg.turnBytes * 8 <= BIG,
+      ok(gateOf(lg.stepped) && lg.status === 'ran' && gateOf(lg.carried) && lg.hashed >= BIG && lg.turnBytes * 8 <= BIG,
         `A′ a 64 MB stand-in, its stamp naming it: the row runs STEPPED (the keeper's boot waits on its gate), carries the file, and hashes its ${MB(lg.hashed)} over many loop turns — at most ${MB(lg.turnBytes)} in one (≤ 1/8; counted, not timed — its longest hold read ${lg.maxLag} ms of a ${lg.ms} ms run)`, { lg, lgS });
-      ok(!!lgS && lgS.carried && lgS.turnBytes >= BIG, `A′ NEGATIVE CONTROL: the sync spelling (readFileSync → createHash) hashes ${lgS ? MB(lgS.turnBytes) : '?'} in ONE loop turn (its hold read ${lgS ? lgS.maxLag : '?'} ms) — the leg above goes red with it planted back`, lgS);
+      ok(!!lgS && gateOf(lgS.carried) && lgS.turnBytes >= BIG, `A′ NEGATIVE CONTROL: the sync spelling (readFileSync → createHash) hashes ${lgS ? MB(lgS.turnBytes) : '?'} in ONE loop turn (its hold read ${lgS ? lgS.maxLag : '?'} ms) — the leg above goes red with it planted back`, lgS);
     }
     // B — ARCHIVE BEFORE STRIP: a crash after EACH write (an env-gated throw the suite plants — never a patched copy), then the retry:
     // it converges to the uncrashed run's end state with ONE notice whose words are the first run's truth; the archive holds the old
@@ -3403,8 +3403,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         const end = endOf(w, t2); t2.stop();
         const a2 = (() => { try { return fs.readFileSync(w.archive, 'utf8'); } catch { return ''; } })();
         const same = JSON.stringify({ ...end, detail: null }) === JSON.stringify({ ...ref, detail: null });
-        ok(r1?.status === 'failed' && new RegExp(`planted fault after the ${step} write`).test(String(r1?.error || '')) && a1.includes('/opt/old/chrome') && a1.includes('old.example')
-          && r2?.status === 'ran' && same && end.n === 1 && end.detail === ref.detail && a2.includes('/opt/old/chrome') && a2.includes('old.example') && !a2.includes('"pending": true'),
+        ok(r1?.status === 'failed' && gateOf(new RegExp(`planted fault after the ${step} write`).test(String(r1?.error || ''))) && gateOf(a1.includes('/opt/old/chrome')) && gateOf(a1.includes('old.example'))
+          && r2?.status === 'ran' && gateOf(same) && end.n === 1 && end.detail === ref.detail && gateOf(a2.includes('/opt/old/chrome')) && gateOf(a2.includes('old.example')) && !a2.includes('"pending": true'),
           `B a crash right after the ${step} write (the plugin's rows ${kept ? 'set' : 'unset'}): the archive already held the old values; the retry converges to the uncrashed end state, ONE notice, the first run's words`,
           { r1: r1 && { status: r1.status, error: r1.error }, r2: r2 && r2.status, same, end: same ? null : end, ref: same ? null : ref, detail: end.detail, refDetail: ref.detail });
         if (step === 'registry') {
@@ -3425,7 +3425,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const ra2 = boot(wa, { userTodos: ta });
       const enda = endOf(wa, ta); ta.stop();
       const aa = (() => { try { return fs.readFileSync(wa.archive, 'utf8'); } catch { return ''; } })();
-      ok(ra1?.status === 'failed' && /archive.*could not be read/.test(String(ra1?.error || '')) && untouched && ra2?.status === 'ran' && enda.n === 1 && enda.detail === ref.detail && aa.includes('/opt/old/chrome') && aa.includes('old.example'),
+      ok(ra1?.status === 'failed' && gateOf(/archive.*could not be read/.test(String(ra1?.error || ''))) && gateOf(untouched) && ra2?.status === 'ran' && enda.n === 1 && enda.detail === ref.detail && gateOf(aa.includes('/opt/old/chrome')) && verdictOf(aa.includes('old.example')),
         `B the archive cannot be written (data/archive is a file; the plugin's rows ${kept ? 'set' : 'unset'}): FAILED before any write — boot 2 moves everything, tells the person once, archives the old values`, { ra1: ra1 && { status: ra1.status, error: ra1.error }, untouched, ra2: ra2 && ra2.status, n: enda.n, d: enda.detail });
     }
     // D — a per-site hint naming CloakBrowser: a hint names a provider or a tier (never an engine) — kept as tier 2 (the tier the
@@ -3442,9 +3442,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const served = Kd.siteHints(); Kd.shutdown();
       const cliLine = fs.readFileSync(path.join(REPO_ROOT, 'data/bin/vibespace-browser'), 'utf8').includes("console.log(`site hint already on file: ${r.hint.host} → ${r.hint.backend || 'tier ' + r.hint.tier} (by ${r.hint.by})`)");
       const printed = bank ? `${bank.host} → ${bank.backend || 'tier ' + bank.tier}` : null;
-      ok(r?.status === 'ran' && shop && shop.backend === 'cdp' && !hs.some((h) => h.backend === 'cloak') && !served.some((h) => h.backend === 'cloak') && (program
-        ? bank && bank.backend === null && bank.tier === 2 && bank.by === 'user' && printed === 'bank.example → tier 2' && cliLine && /^1 per-site note\(s\) that named CloakBrowser now say the site needs an anti-bot browser \(tier 2\)\./m.test(d)
-        : !bank && arch.includes('"host": "bank.example"') && /^1 per-site note\(s\) that named CloakBrowser were removed \(no plugin program is set\); they are in data\/archive\/2026-11-cloak-to-plugin\.json\./m.test(d)),
+      ok(r?.status === 'ran' && gateOf(shop) && shop.backend === 'cdp' && !hs.some((h) => h.backend === 'cloak') && !served.some((h) => h.backend === 'cloak') && (program
+        ? gateOf(bank) && bank.backend === null && bank.tier === 2 && bank.by === 'user' && printed === 'bank.example → tier 2' && gateOf(cliLine) && verdictOf(/^1 per-site note\(s\) that named CloakBrowser now say the site needs an anti-bot browser \(tier 2\)\./m.test(d))
+        : !bank && gateOf(arch.includes('"host": "bank.example"')) && verdictOf(/^1 per-site note\(s\) that named CloakBrowser were removed \(no plugin program is set\); they are in data\/archive\/2026-11-cloak-to-plugin\.json\./m.test(d))),
         program ? 'D a site hint naming CloakBrowser becomes tier 2 (the plugin has a program row): the keeper serves no hint naming it, the CLI\'s «site hint already on file» prints «bank.example → tier 2», the notice says so; another hint untouched'
           : 'D …with no plugin program row the hint is DROPPED and archived, the notice says where; another hint untouched', { hs, served, printed, d });
       t.stop();
@@ -3453,7 +3453,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const { dictHasEntry } = await import('./i18n-check.mjs');
     const dictsC = ['zh', 'ja'].map((l) => fs.readFileSync(path.join(REPO_ROOT, `src/lib/i18n-${l}.js`), 'utf8'));
     const WC = Object.values(MW);
-    ok(WC.length === 17 && WC.every((k) => dictsC.every((dt) => dictHasEntry(dt, k))), `the notice's ${WC.length} keys are entries in BOTH dicts (zh, ja)`, WC.filter((k) => !dictsC.every((dt) => dictHasEntry(dt, k))));
+    ok(WC.length === 17 && verdictOf(WC.every((k) => dictsC.every((dt) => dictHasEntry(dt, k)))), `the notice's ${WC.length} keys are entries in BOTH dicts (zh, ja)`, WC.filter((k) => !dictsC.every((dt) => dictHasEntry(dt, k))));
     // NEGATIVE CONTROLS — patched copies of src/server/migrations.js: the legs above can go red
     try {
       const MC = mutantCopies('migrations-cloak', REPO_ROOT);
@@ -3500,12 +3500,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { hk, hk2, home, home2, dA, dB, dC, a, b, a2, c, projA, projC: projOf(home2) };
     };
     const S = await scenes(require('../' + HRS), 'real');
-    ok(S.hk.calls.length === 1 && S.a.length === 1 && S.a[0].home === true && S.a[0].data === true && S.projA === '-home-userN-proj' && mountOf(S.dA) === '/home/userN/proj' && fs.existsSync(path.join(S.dA, NAME)) && fs.existsSync(path.join(S.home, '.vibespace', NAME)),
+    ok(S.hk.calls.length === 1 && S.a.length === 1 && S.a[0].home === true && S.a[0].data === true && S.projA === '-home-userN-proj' && mountOf(S.dA) === '/home/userN/proj' && gateOf(fs.existsSync(path.join(S.dA, NAME))) && verdictOf(fs.existsSync(path.join(S.home, '.vibespace', NAME))),
       'the first install: the projdir re-encoded ONCE (the real hook), its data/ stores rewritten, a marker per half — data/ and ~/.vibespace', { calls: S.hk.calls, a: S.a, proj: S.projA });
-    ok(S.hk.calls.length === 1 && S.b.length === 1 && S.b[0].home === false && S.b[0].data === true && mountOf(S.dB) === '/home/userN/proj' && fs.existsSync(path.join(S.dB, NAME)),
+    ok(S.hk.calls.length === 1 && S.b.length === 1 && S.b[0].home === false && S.b[0].data === true && mountOf(S.dB) === '/home/userN/proj' && verdictOf(fs.existsSync(path.join(S.dB, NAME))),
       'a SECOND install over the same HOME (a fresh data/, no stale projdir left): the HOME marker names the old user — its OWN stores rewritten, nothing moved again', { calls: S.hk.calls, b: S.b, mountB: mountOf(S.dB) });
     ok(!S.a2.length && S.hk.calls.length === 1, 'the first install\'s next start: both markers there — nothing runs');
-    ok(S.hk2.calls.length === 1 && S.c.length === 1 && S.c[0].home === true && S.c[0].data === false && S.projC === '-home-userN-left' && mountOf(S.dC) === '/home/olduser/proj' && fs.existsSync(path.join(S.home2, '.vibespace', NAME)),
+    ok(S.hk2.calls.length === 1 && S.c.length === 1 && S.c[0].home === true && S.c[0].data === false && S.projC === '-home-userN-left' && mountOf(S.dC) === '/home/olduser/proj' && verdictOf(fs.existsSync(path.join(S.home2, '.vibespace', NAME))),
       'an install migrated before the split (a data/ marker only, a projdir left behind): the move runs — a merge — and writes the HOME marker; no second rewrite', { calls: S.hk2.calls, c: S.c, proj: S.projC });
     const SRC = fs.readFileSync(path.join(REPO_ROOT, HRS), 'utf8');
     const ONE = 'const hmState = homeMarkerState(hm), homeDone = hmState.exists, dmState = dataMarkerState(dm), dataDone = dmState.done;';   // B-574d follow: the data marker read for its state; follow 3: the HOME marker's too
@@ -3535,9 +3535,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { said, said2, r1, r2, marker1, marker2, rBack, mountBack: mountOf(dBack), projs: projOf(home) };
     };
     const CS = await cureScenes(require('../' + HRS), 'real');
-    ok(!CS.marker1 && CS.r1[0] && CS.r1[0].whole === false && CS.said.some((l) => /could not be moved — no marker; tried again at the next start/.test(l)),
+    ok(!CS.marker1 && gateOf(CS.r1[0]) && CS.r1[0].whole === false && verdictOf(CS.said.some((l) => /could not be moved — no marker; tried again at the next start/.test(l))),
       'B-8033 cure (1): a project folder whose rename FAILED withholds the HOME marker — said, tried again at the next start (it was marked done and never retried)', { r1: CS.r1, said: CS.said });
-    ok(CS.marker2 && CS.r2[0] && CS.r2[0].whole === true && CS.projs.includes('-home-userN-blocked') && CS.r2[0].sameName === 1 && CS.said2.some((l) => /^\[migrate\] home rename: 1 project folder\(s\) of \/home\/olduser stay under the old name/.test(l)),
+    ok(gateOf(CS.marker2) && gateOf(CS.r2[0]) && CS.r2[0].whole === true && gateOf(CS.projs.includes('-home-userN-blocked')) && CS.r2[0].sameName === 1 && verdictOf(CS.said2.some((l) => /^\[migrate\] home rename: 1 project folder\(s\) of \/home\/olduser stay under the old name/.test(l))),
       '…the next start moves it and writes the marker; a folder left behind by same-name transcripts is SAID with its count (never overwritten), no retry', { r2: CS.r2, said2: CS.said2, projs: CS.projs });
     ok(!CS.rBack.length && CS.mountBack === '/home/olduser/proj', 'B-8033 cure (2): an old user a marker names whose /home/<old> EXISTS again is taken by neither source — a fresh data/ keeps its paths', { rBack: CS.rBack, mount: CS.mountBack });
     const WHOLE = '        if (!whole && !gaveUp) {';
@@ -3579,11 +3579,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const WANT = '-home-olduser-doe-repo,-home-olduser-x,-home-olduser-x-mix,-home-olduser-x-p,-home-olduser-x-q,-home-olduser-x-sub,-home-olduser-x-x-notes,-home-olduser-x-zz';
     const PS = await prefixScene(CH, 'real');
-    ok(PS.p1 === WANT && PS.m1 && PS.p2 === PS.p1 && PS.said.some((l) => /^\[migrate\] home rename: 3 project folder\(s\) of \/home\/olduser could not be told apart/.test(l)),
+    ok(PS.p1 === WANT && gateOf(PS.m1) && PS.p2 === PS.p1 && verdictOf(PS.said.some((l) => /^\[migrate\] home rename: 3 project folder\(s\) of \/home\/olduser could not be told apart/.test(l))),
       'B-8033 cure 2: olduser → olduser-x moves the old projects ONCE (x-notes too — its transcripts read past records with no working folder, across a chunk) and nothing else: the person\'s own (-x, the BARE home folder; -x-q) and a colleague\'s /home/olduser.doe stay; -x-zz (none says) and -x-mix (they disagree) stay, said; marked; the next start renames nothing', PS);
     for (const [nm, u] of [['dotted', 'olduser.x'], ['underscored', 'olduser_x']]) {
       const D = await prefixScene(CH, nm, u);
-      ok(D.p1 === WANT && D.m1 && D.p2 === D.p1, `B-8033 cure 2: a ${nm} new name (${u} — claude encodes it -home-olduser-x) keeps the person's own folders where resume looks; the old ones land there too`, D);
+      ok(D.p1 === WANT && gateOf(D.m1) && D.p2 === D.p1, `B-8033 cure 2: a ${nm} new name (${u} — claude encodes it -home-olduser-x) keeps the person's own folders where resume looks; the old ones land there too`, D);
     }
     const MUT = (from, to, tag, user) => { ok(CHSRC.split(from).length === 2, `ANCHOR (${tag}): spelled once`, from.slice(0, 80)); return prefixScene(MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, from, to, "src/harnesses/claude-home.js", 'join'), tag), tag, user); };
     const N1 = await MUT("    if (owners.get(d) !== 'old') continue;", "    if (owners.get(d) === 'own') continue;", 'm-move-unless-own');
@@ -3591,17 +3591,17 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const N2 = await MUT("const ownPrefixOf = (user) => projDirOf(path.posix.join('/home', String(user)));", 'const ownPrefixOf = (user) => `-home-${user}`;', 'm-raw', 'olduser.x');
     ok(N2.p1 !== WANT, 'MUTANT RED: the raw user name as the new prefix ⇒ a dotted name\'s old projects land where claude never looks', N2);
     const N3 = await MUT('      let c = cwdOfLine(rest + text.slice(0, at));\n      if (c != null) return c;', '      return cwdOfLine(rest + text.slice(0, at));', 'm-first-record');
-    ok(N3.p1.split(',').includes('-home-olduser-x-notes'), 'MUTANT RED: the first record decides ⇒ the old project whose transcript opens with a summary stays under its old name for good', N3);
+    ok(verdictOf(N3.p1.split(',').includes('-home-olduser-x-notes')), 'MUTANT RED: the first record decides ⇒ the old project whose transcript opens with a summary stays under its old name for good', N3);
     const N4 = await MUT("projDirOf(cwd) === path.basename(dir) ? 'old' : '?');", "projDirOf(cwd) === path.basename(dir) ? '?' : '?');", 'm-never-old');
-    ok(N4.p1.split(',').includes('-home-olduser-p'), 'MUTANT RED: nothing ever «old» ⇒ the old projects are stranded', N4);
+    ok(verdictOf(N4.p1.split(',').includes('-home-olduser-p')), 'MUTANT RED: nothing ever «old» ⇒ the old projects are stranded', N4);
     const N5 = await MUT("  return seen.size === 1 && !seen.has('?') ? [...seen][0] : null;", '  return seen.size ? [...seen][0] : null;', 'm-first-transcript');
-    ok(N5.p1.split(',').includes('-home-olduser-x-x-mix'), 'MUTANT RED: the first transcript decides ⇒ a folder whose transcripts disagree is moved (a conversation started in ~ goes with it)', N5);
+    ok(verdictOf(N5.p1.split(',').includes('-home-olduser-x-x-mix')), 'MUTANT RED: the first transcript decides ⇒ a folder whose transcripts disagree is moved (a conversation started in ~ goes with it)', N5);
     const N6 = await MUT('    if (cwd == null) continue;\n    const underOld', '    if (cwd == null) return null;\n    const underOld', 'm-stop-at-silent');
-    ok(N6.p1.split(',').includes('-home-olduser-x-notes'), 'MUTANT RED: a transcript naming no working folder ends the search ⇒ x-notes stranded', N6);
+    ok(verdictOf(N6.p1.split(',').includes('-home-olduser-x-notes')), 'MUTANT RED: a transcript naming no working folder ends the search ⇒ x-notes stranded', N6);
     const N7 = await MUT('const CWD_READ_MAX = 1024 * 1024;', 'const CWD_READ_MAX = 1;', 'm-short-read');
-    ok(N7.p1.split(',').includes('-home-olduser-x-notes'), 'MUTANT RED: a read that stops at the first chunk ⇒ the working folder past it is never seen', N7);
+    ok(verdictOf(N7.p1.split(',').includes('-home-olduser-x-notes')), 'MUTANT RED: a read that stops at the first chunk ⇒ the working folder past it is never seen', N7);
     const N8 = await MUT("      rest = text.slice(text.lastIndexOf('\\n') + 1);", "      rest = '';", 'm-no-carry');
-    ok(N8.p1.split(',').includes('-home-olduser-x-notes'), 'MUTANT RED: a line split across chunks not carried ⇒ the straddling working folder is lost', N8);
+    ok(verdictOf(N8.p1.split(',').includes('-home-olduser-x-notes')), 'MUTANT RED: a line split across chunks not carried ⇒ the straddling working folder is lost', N8);
     const N9 = await MUT("projDirOf(cwd) === path.basename(dir) ? 'old' : '?');", "projDirOf(cwd) === path.basename(dir) ? 'old' : 'own');", 'm-mismatch-own');   // stale-pins: kept — a deliberate mutant restoring cure 2's silent «own»
     ok(N9.p1 === WANT && !N9.said.some((l) => /^\[migrate\] home rename: 3 project folder\(s\)/.test(l)), 'MUTANT RED (cure 3): a working folder under the old home that is not the name\'s encoding taken as «own» ⇒ the folder stays SILENTLY (not counted, not said)', N9.said);
     // the OLD user's BARE home folder (conversations started in ~): it names the old user and moves to the new bare folder
@@ -3611,14 +3611,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { projs: projOf(home), marker: fs.existsSync(path.join(home, '.vibespace', NAME)) };
     };
     const BS = await bareScene(CH, 'real');
-    ok(BS.projs === '-home-userN' && BS.marker, 'B-8033 cure 2: the old user\'s BARE home folder alone names the old user, and moves to the new bare folder (resume in ~ finds its conversations)', BS);
+    ok(BS.projs === '-home-userN' && verdictOf(BS.marker), 'B-8033 cure 2: the old user\'s BARE home folder alone names the old user, and moves to the new bare folder (resume in ~ finds its conversations)', BS);
     const STALE = '    const m = /^-home-([a-z][a-z0-9]*)(?:-|$)/.exec(d);';
     ok(CHSRC.split(STALE).length === 2, 'ANCHOR: staleUsers reads the bare folder too, spelled once');
     const MB = await bareScene(MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, STALE, '    const m = /^-home-([a-z][a-z0-9]*)-/.exec(d);', "src/harnesses/claude-home.js"), 'bare-unread'), 'mb');
     ok(MB.projs === '-home-olduser', 'MUTANT RED: the bare folder unread ⇒ the old user is never found from it; its conversations stay where resume no longer looks', MB);
     // relinkLegacy (the symlinked-home deploy) follows the same law — pinned, not driven: its new prefix is the encoding of the
     // WHOLE home path, and a scratch home never encodes to -home-<name>
-    ok(CHSRC.includes('  const newPrefix = projDirOf(home);') && CHSRC.includes('    if (underPrefix(d, newPrefix)) continue;'), 'B-8033 cure 3: relinkLegacy uses the same encoder and never renames a folder under the new name (the bare one included)');
+    ok(gateOf(CHSRC.includes('  const newPrefix = projDirOf(home);')) && verdictOf(CHSRC.includes('    if (underPrefix(d, newPrefix)) continue;')), 'B-8033 cure 3: relinkLegacy uses the same encoder and never renames a folder under the new name (the bare one included)');
     // cure 3: THE RELINK READS NO TRANSCRIPT — lstat FIRST, a link is skipped before anything is opened; it runs at EVERY boot of
     // a symlink deploy, so a read here would be paid at every start
     const relinkReads = (CHm, tag) => {
@@ -3664,7 +3664,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { a: mountOf(dA), b: mountOf(dB), marker: fs.existsSync(path.join(h, '.vibespace', '.home-migrated-olduser-to-olduser.x')) };
     };
     const JS = await judgedScene(require('../' + HRS), 'real');
-    ok(JS.a === '/home/olduser/proj' && JS.b === '/home/olduser/proj' && JS.marker, 'B-8033 cure 3: no folder judged «old» ⇒ NO rewrite — a paired machine\'s /home/olduser/proj stays, for the first install and a second one over the same HOME (the marker\'s judged count)', JS);
+    ok(JS.a === '/home/olduser/proj' && JS.b === '/home/olduser/proj' && verdictOf(JS.marker), 'B-8033 cure 3: no folder judged «old» ⇒ NO rewrite — a paired machine\'s /home/olduser/proj stays, for the first install and a second one over the same HOME (the marker\'s judged count)', JS);
     const JG = 'if (judgedOld > 0) rewrote = rewriteStores(dataDir, metaDir, old, user, log, retry);';   // B-574d follow: the call hands its retry
     ok(SRC.split(JG).length === 2, 'ANCHOR: the judged gate, spelled once');
     const JM = await judgedScene(MH.load(HRS, SRC.replace(JG, 'if (true) rewrote = rewriteStores(dataDir, metaDir, old, user, log, retry);'), 'rewrite-ungated'), 'm11');
@@ -3683,7 +3683,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { m1, p1, said, mount1, m2: fs.existsSync(path.join(home, '.vibespace', NAME)), p2: projOf(home), mount2: mountOf(d1) };
     };
     const US = await unreadScene(CH, 'real');
-    ok(!US.m1 && US.p1 === '-home-olduser-r' && US.said.some((l) => l.includes('could not be made — -home-olduser-r/z.jsonl (EISDIR: a folder has its name: move the folder) — no marker, nothing judged from them; tried again at every start')) && US.mount1 === '/home/olduser/proj' && US.m2 && US.p2 === '-home-userN-r' && US.mount2 === '/home/userN/proj',
+    ok(!US.m1 && US.p1 === '-home-olduser-r' && gateOf(US.said.some((l) => l.includes('could not be made — -home-olduser-r/z.jsonl (EISDIR: a folder has its name: move the folder) — no marker, nothing judged from them; tried again at every start'))) && US.mount1 === '/home/olduser/proj' && gateOf(US.m2) && US.p2 === '-home-userN-r' && US.mount2 === '/home/userN/proj',
       'B-8033 cure 3: a transcript that cannot be read ⇒ a FAILED move — not marked, said (B-574d follow 3: as a look that failed — owed, tried at every start, no try spent), the stores NOT decided yet; once it reads, the next start moves the folder, marks, and rewrites the stores', US);
     const RE = "    if (cwd === READ_ERR) { if (why) { why.code = budget.err || 'error'; why.file = f; } return 'error'; }";
     ok(CHSRC.split(RE).length === 2, 'ANCHOR: the unreadable verdict, spelled once');
@@ -3706,18 +3706,18 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const tried = (o) => o.said.some((l) => /could not be moved — no marker; tried again at the next start/.test(l)), gave = (o) => o.said.some((l) => /could not be moved in 3 starts — it stays under the old name; marked, not tried again/.test(l));
     const TS = await triesScene(require('../' + HRS), 'real', HOUR);
-    ok(!TS[0].marker && tried(TS[0]) && !TS[1].marker && tried(TS[1]) && TS[2].marker && gave(TS[2]) && TS[3].marker && !tried(TS[3]) && !gave(TS[3]),
+    ok(!TS[0].marker && gateOf(tried(TS[0])) && !TS[1].marker && gateOf(tried(TS[1])) && gateOf(TS[2].marker) && gateOf(gave(TS[2])) && gateOf(TS[3].marker) && !tried(TS[3]) && !gave(TS[3]),
       'B-8033 cure 2: a folder that can never move is tried at 3 starts an hour apart, then the move is MARKED and said once — the 4th start runs nothing', TS.map((o) => ({ marker: o.marker, said: o.said.length })));
     const vsDir = path.join(base, 't-real', 'home', 'userN', '.vibespace');
     ok(!fs.readdirSync(vsDir).some((f) => /\.tries(\.tmp)?$/.test(f)), 'B-8033 cure 3: the tries are written by temp and rename and REMOVED once the move is marked', fs.readdirSync(vsDir));
     const TL = await triesScene(require('../' + HRS), 'loop', 60e3);
-    ok(TL.every((o) => !o.marker && tried(o)), 'B-8033 cure 2: a restart LOOP (4 starts a minute apart) spends one try — it never gives up in minutes', TL.map((o) => o.marker));
+    ok(verdictOf(TL.every((o) => !o.marker && tried(o))), 'B-8033 cure 2: a restart LOOP (4 starts a minute apart) spends one try — it never gives up in minutes', TL.map((o) => o.marker));
     const TRIES = 'const MOVE_TRIES = 3, TRY_GAP_MS = 10 * 60e3;';
     ok(SRC.split(TRIES).length === 2, 'ANCHOR: the bound of tries and their gap, spelled once');
     const TM = await triesScene(MH.load(HRS, SRC.replace(TRIES, 'const MOVE_TRIES = Infinity, TRY_GAP_MS = 10 * 60e3;'), 'tries-unbounded'), 'm7', HOUR);
-    ok(!TM[3].marker && tried(TM[3]), 'MUTANT RED: no bound ⇒ the whole move runs again at every start for ever', TM.map((o) => o.marker));
+    ok(!TM[3].marker && verdictOf(tried(TM[3])), 'MUTANT RED: no bound ⇒ the whole move runs again at every start for ever', TM.map((o) => o.marker));
     const TG = await triesScene(MH.load(HRS, SRC.replace(TRIES, 'const MOVE_TRIES = 3, TRY_GAP_MS = 0;'), 'tries-no-gap'), 'm8', 60e3);
-    ok(TG[2].marker, 'MUTANT RED: every start a try ⇒ a restart loop gives up for good in three minutes', TG.map((o) => o.marker));
+    ok(verdictOf(TG[2].marker), 'MUTANT RED: every start a try ⇒ a restart loop gives up for good in three minutes', TG.map((o) => o.marker));
     // …and a new folder that LACKS a transcript the old one still holds is a FAILED move (tried again), never a same-name leftover
     const lh = path.join(base, 'left', 'home', 'userN'), LP = path.join(lh, '.claude', 'projects');
     fs.mkdirSync(path.join(LP, '-home-olduser-a'), { recursive: true }); fs.mkdirSync(path.join(LP, '-home-userN-a'), { recursive: true });
@@ -3730,7 +3730,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const MLA = MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, FSOME, '    sameName++;   // MUTANT: the transcripts not compared', "src/harnesses/claude-home.js"), 'left-names-unread').leftAfterMove(lh, 'olduser', 'userN');
     ok(MLA.sameName === 1 && MLA.failed === 0, 'MUTANT RED: the transcripts not compared ⇒ the move is called whole, s2.jsonl stranded under the old name for good', MLA);
     const SJ = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
-    ok(/require\('\.\/src\/server\/home-rename\.js'\)\.migrateHomeRename\(\{ dataDir: path\.join\(__dirname, 'data'\), metaDir: META_DIR \}\);/.test(SJ) && !/function migrateHomeRename/.test(SJ),
+    ok(gateOf(/require\('\.\/src\/server\/home-rename\.js'\)\.migrateHomeRename\(\{ dataDir: path\.join\(__dirname, 'data'\), metaDir: META_DIR \}\);/.test(SJ)) && !/function migrateHomeRename/.test(SJ),
       'server.js runs it at boot through the module (its data/, its session metas) and keeps no copy of its own');
   }
 } finally {
@@ -3755,10 +3755,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     return bad;
   };
   const badNow = steppedCensus(MIG);
-  ok(badNow.length === 0 && /return Promise\.resolve\(rep\.write\)\.then\(/.test(MIG), 'B-a09e census: every migration holding a report\'s queued write RETURNS the promise of its landing (a stepped migration) — none is recorded before its write lands', badNow);
+  ok(badNow.length === 0 && verdictOf(/return Promise\.resolve\(rep\.write\)\.then\(/.test(MIG)), 'B-a09e census: every migration holding a report\'s queued write RETURNS the promise of its landing (a stepped migration) — none is recorded before its write lands', badNow);
   const RET = "        return Promise.resolve(rep.write).then(() => ({ stamped: rep.stamped.length, skipped: rep.skipped.length }));\n";
   const planted = anchored(MIG, RET, "        rep.write.catch(() => { });   // MUTANT: the release's road — recorded before the write lands\n", 'the stamp returns its landing');
-  ok(steppedCensus(planted).includes('2026-09-channel-credential-key'), 'B-a09e CONTROL (the stamp\'s write not returned, in a copy of the text): the census names it', steppedCensus(planted));
+  ok(verdictOf(steppedCensus(planted).includes('2026-09-channel-credential-key')), 'B-a09e CONTROL (the stamp\'s write not returned, in a copy of the text): the census names it', steppedCensus(planted));
 }
 // ── r2999 (row B-f276, MG1 first): THE LEDGER's OWN READ — a ledger that is THERE and could not be read is NOT an empty ledger ──
 // NOTHING runs at that start (hub and device alike), the ledger is NOT rewritten, the start goes on and SAYS SO once; only «not
@@ -3775,11 +3775,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   const runWith = (R, f, code) => { const ran = [], warned = []; const go = () => R.runMigrations({ ledgerPath: f, migrations: probe(ran), log: () => { }, warn: (m) => warned.push(m) }); const res = code ? refused(f, code, go) : go(); return { res, ran, warned, bytes: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null }; };
   // (a) THERE AND UNREADABLE (EIO): nothing runs, nothing rewritten, said once
   const fa = world('r2999-eio', LEDGER), a = runWith(require('../src/migration-runner.js'), fa, 'EIO');
-  ok(a.ran.length === 0 && a.bytes === LEDGER && a.res.length === 2 && a.res.every((r) => r.status === 'failed' && r.code === 'ledger-unread') && !!a.res.ledgerUnread && a.warned.filter((m) => /is there and could not be read \(EIO\)/.test(m)).length === 1,
+  ok(a.ran.length === 0 && a.bytes === LEDGER && a.res.length === 2 && gateOf(a.res.every((r) => r.status === 'failed' && r.code === 'ledger-unread')) && !!a.res.ledgerUnread && a.warned.filter((m) => /is there and could not be read \(EIO\)/.test(m)).length === 1,
     'r2999 a ledger THERE and unreadable (EIO): NOTHING runs (not even the one it never recorded), the ledger is NOT rewritten, every migration answers failed by that one cause, said ONCE', { ran: a.ran, res: a.res, warned: a.warned });
   // (b) THERE AND TORN (its bytes do not parse): the same
   const torn = LEDGER.slice(0, 20), fb = world('r2999-torn', torn), b = runWith(require('../src/migration-runner.js'), fb, null);
-  ok(b.ran.length === 0 && b.bytes === torn && b.res.every((r) => r.code === 'ledger-unread') && /its bytes do not parse/.test(b.res.ledgerUnread || ''), 'r2999 a TORN ledger (its bytes do not parse): nothing runs, its bytes stay as they are, said', { ran: b.ran, res: b.res });
+  ok(b.ran.length === 0 && b.bytes === torn && gateOf(b.res.every((r) => r.code === 'ledger-unread')) && verdictOf(/its bytes do not parse/.test(b.res.ledgerUnread || '')), 'r2999 a TORN ledger (its bytes do not parse): nothing runs, its bytes stay as they are, said', { ran: b.ran, res: b.res });
   // (c) NOT THERE: a first start — every migration runs and the ledger is written
   const fc = world('r2999-none', null), c = runWith(require('../src/migration-runner.js'), fc, null);
   ok(c.ran.join() === 'a,b' && !!c.bytes && JSON.parse(c.bytes).applied['r2999-b'] > 0, 'r2999 a ledger NOT THERE is a first start: every migration runs and the ledger is written', { ran: c.ran });
@@ -3808,7 +3808,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     setTimeout(settle, 5);
   });
   const fe = world('r2999-step', LEDGER), e = await stepped(require('../src/migration-runner.js'), fe);
-  ok(e.res[0] && e.res[0].status === 'started' && e.bytes === LEDGER && e.late.length === 1 && e.late[0].status === 'failed' && e.late[0].code === 'ledger-unread' && e.unhandled.length === 0 && e.warned.some((m) => /r2999-step ended but is not recorded/.test(m)),
+  ok(gateOf(e.res[0]) && e.res[0].status === 'started' && e.bytes === LEDGER && e.late.length === 1 && e.late[0].status === 'failed' && e.late[0].code === 'ledger-unread' && e.unhandled.length === 0 && verdictOf(e.warned.some((m) => /r2999-step ended but is not recorded/.test(m))),
     'r2999 a STEPPED migration ending while the ledger cannot be read (EIO): not recorded, the ledger NOT rewritten, said as failed (it runs again next start)', { late: e.late, warned: e.warned, unhandled: e.unhandled });
   const LATE_GUARD = runSrc2.slice(runSrc2.indexOf('          if (late.unread) {'), runSrc2.indexOf('          late.applied[m.id] = Date.now();'));
   const NoGuard = mutantCopies('migrations-ledger-late', REPO_R).load('src/migration-runner.js', anchored(runSrc2, LATE_GUARD, '', 'the late record without its guard'), 'late-no-guard');
@@ -3817,7 +3817,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   // THE SHAPES THAT HOLD NO LEDGER (r3244): an object with no `applied` map (none, a string, a list) is TORN — never «nothing applied»
   for (const [tag, text] of [['no-applied', JSON.stringify({ reports: {} })], ['applied-string', JSON.stringify({ applied: 'x' })], ['applied-list', JSON.stringify({ applied: ['r2999-a'] })]]) {
     const fs1 = world('r2999-shape-' + tag, text), s1 = runWith(require('../src/migration-runner.js'), fs1, null);
-    ok(s1.ran.length === 0 && s1.bytes === text && s1.res.every((r) => r.code === 'ledger-unread') && /holds no list of what ran/.test(s1.res.ledgerUnread || ''), `r3244 a ledger whose bytes hold no list of what ran (${tag}) is TORN: nothing runs, its bytes stay`, { ran: s1.ran, res: s1.res });
+    ok(s1.ran.length === 0 && s1.bytes === text && gateOf(s1.res.every((r) => r.code === 'ledger-unread')) && verdictOf(/holds no list of what ran/.test(s1.res.ledgerUnread || '')), `r3244 a ledger whose bytes hold no list of what ran (${tag}) is TORN: nothing runs, its bytes stay`, { ran: s1.ran, res: s1.res });
   }
   // THE ONE FOR-YOU ITEM (r3244): the boot's notice reaches no page — the runner files ONE item with a fixed key through the failed
   // migration's road: the file by its plain name and the person's way out; the first start whose ledger reads closes it
@@ -3828,14 +3828,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const T1 = forYou(), fe1 = world('r3244-item-eio', LEDGER);
     itemRun(RUN, fe1, 'EIO', T1); itemRun(RUN, fe1, 'EIO', T1);   // two starts, the read still refused: still ONE item
     const it = T1.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM);
-    ok(it.length === 1 && it[0].status === 'open' && /data migrations did not run at startup: r3244-item-eio\/migrations\.json could not be read/i.test(it[0].text) && /Reading it failed \(EIO\); it is read again at the next start\./.test(it[0].detail) && /closes by itself/.test(it[0].detail) && !it[0].text.includes(tmp),
+    ok(it.length === 1 && it[0].status === 'open' && gateOf(/data migrations did not run at startup: r3244-item-eio\/migrations\.json could not be read/i.test(it[0].text)) && gateOf(/Reading it failed \(EIO\); it is read again at the next start\./.test(it[0].detail)) && gateOf(/closes by itself/.test(it[0].detail)) && !it[0].text.includes(tmp),
       'r3244 THE LEDGER UNREAD (EIO), twice: ONE For-you item with its fixed key — the file by its plain name, «read again at the next start», never an absolute path', T1.items);
     itemRun(RUN, fe1, null, T1);   // the read answers
     ok(T1.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM && i.status === 'open').length === 0, 'r3244 …the first start whose ledger reads CLOSES it', T1.items);
     const T2 = forYou(), fe2 = world('r3244-item-torn', LEDGER.slice(0, 15));
     itemRun(RUN, fe2, null, T2);
     const it2 = T2.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM);
-    ok(it2.length === 1 && /does not mend by itself: restore it from a copy, or move it aside/.test(it2[0].detail), 'r3244 A TORN LEDGER: its item says the way out (restore it from a copy, or move it aside) — it does not mend by itself', it2);
+    ok(it2.length === 1 && verdictOf(/does not mend by itself: restore it from a copy, or move it aside/.test(it2[0].detail)), 'r3244 A TORN LEDGER: its item says the way out (restore it from a copy, or move it aside) — it does not mend by itself', it2);
     const NoItem = mutantCopies('migrations-ledger-item', REPO_R).load('src/migration-runner.js', anchored(runSrc2, '    sayLedgerUnread(todos, ledgerPath, ledger, warn);', '    // (r3244 red: no item)', 'the unread ledger without its item'), 'no-ledger-item');
     const T3 = forYou(); itemRun(NoItem, world('r3244-item-red', LEDGER), 'EIO', T3);
     ok(T3.items.length === 0, 'r3244 RED without the item (today): the unread ledger is a journal line only — nothing in For you', T3.items);
@@ -3846,7 +3846,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   const notices = [], TH = forYou();
   const mmH = create({ rootDir: rootH, homeDir: scratchHomeDir, serverNotice: (k) => notices.push(k), userTodos: TH });
   refused(ledH, 'EIO', () => mmH.runLocalMigrations({ only: ['2026-10-vault-always-to-grants'] }));
-  ok(notices.filter((k) => k === 'migrations-ledger-unread').length === 1 && !notices.some((k) => /^migration-failed:/.test(k)) && fs.readFileSync(ledH, 'utf8') === LEDGER && TH.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM).length === 1 && /data\/migrations\.json could not be read/.test(TH.items[0].text),   // stale-pins: kept (the item's words built at run time: «{file} could not be read» with the ledger's plain name)
+  ok(notices.filter((k) => k === 'migrations-ledger-unread').length === 1 && !notices.some((k) => /^migration-failed:/.test(k)) && fs.readFileSync(ledH, 'utf8') === LEDGER && TH.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM).length === 1 && verdictOf(/data\/migrations\.json could not be read/.test(TH.items[0].text)),   // stale-pins: kept (the item's words built at run time: «{file} could not be read» with the ledger's plain name)
     'r2999 THE HUB: its boot\'s migrations over an unreadable ledger — ONE notice (migrations-ledger-unread), no notice an id, the ledger untouched, and ONE For-you item naming data/migrations.json (r3244)', { notices, items: TH.items });
   {
     const MIG_SRC2 = fs.readFileSync(path.join(REPO_R, 'src/server/migrations.js'), 'utf8');
@@ -3856,19 +3856,19 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const ledR = path.join(rootR, 'data', 'migrations.json'); fs.writeFileSync(ledR, LEDGER);
     const nR = [];
     refused(ledR, 'EIO', () => PerId.create({ rootDir: rootR, homeDir: scratchHomeDir, serverNotice: (k) => nR.push(k) }).runLocalMigrations({ only: ['2026-10-vault-always-to-grants'] }));
-    ok(nR.some((k) => /^migration-failed:/.test(k)) && !nR.includes('migrations-ledger-unread'), 'r3244 RED the hub without its one notice (a reader\'s point): one notice an id, never the cause once', nR);
+    ok(gateOf(nR.some((k) => /^migration-failed:/.test(k))) && !nR.includes('migrations-ledger-unread'), 'r3244 RED the hub without its one notice (a reader\'s point): one notice an id, never the cause once', nR);
   }
   // THE VAULT's SETUP over an unread ledger names THAT cause (r3244's should) — pinned: the setup needs a vault world (its suite runs it)
   {
     const VE = fs.readFileSync(path.join(REPO_R, 'src/server/vault-engine.js'), 'utf8');
-    ok(VE.includes("if (res && res.code === 'ledger-unread' && !lost.length) return { ok: false, code: 'migration_failed', why: `${ledgerFileOf(path.join(dataDir, 'migrations.json'))} could not be read (${res.unread || 'unread'}) — no key file was sealed, every file is as it was` };") && VE.includes("const { runMigrations, ledgerFileOf } = require('../migration-runner.js');") && /unread: ledger\.unread \}\)\);/.test(runSrc2),
+    ok(gateOf(VE.includes("if (res && res.code === 'ledger-unread' && !lost.length) return { ok: false, code: 'migration_failed', why: `${ledgerFileOf(path.join(dataDir, 'migrations.json'))} could not be read (${res.unread || 'unread'}) — no key file was sealed, every file is as it was` };")) && gateOf(VE.includes("const { runMigrations, ledgerFileOf } = require('../migration-runner.js');")) && verdictOf(/unread: ledger\.unread \}\)\);/.test(runSrc2)),
       'r3244 PIN: the vault\'s setup over an unread ledger refuses with THAT cause (data/migrations.json could not be read), never «a key file could not be sealed»; the runner hands the cause on each held row');
   }
   // THE DEVICE: its registry goes through the same runner (src/agentd/agentd.js) — its own journal line, nothing rewritten
   const AG = fs.readFileSync(path.join(REPO_R, 'src/agentd/agentd.js'), 'utf8');
   const fd = world('r2999-device', LEDGER), lines = [];
   const dv = refused(fd, 'EIO', () => require('../src/migration-runner.js').runMigrations({ ledgerPath: fd, migrations: [], log: (m) => lines.push(m), warn: (m) => lines.push(m) }));
-  ok(AG.includes("runMigrations({ ledgerPath: path.join(STATE, 'migrations.json'), migrations: DEVICE_MIGRATIONS, log: (m) => process.stderr.write(m + '\\n'), warn: (m) => process.stderr.write(m + '\\n') });") && !!dv.ledgerUnread && lines.filter((m) => /is there and could not be read \(EIO\)/.test(m)).length === 1 && fs.readFileSync(fd, 'utf8') === LEDGER,
+  ok(gateOf(AG.includes("runMigrations({ ledgerPath: path.join(STATE, 'migrations.json'), migrations: DEVICE_MIGRATIONS, log: (m) => process.stderr.write(m + '\\n'), warn: (m) => process.stderr.write(m + '\\n') });")) && !!dv.ledgerUnread && lines.filter((m) => /is there and could not be read \(EIO\)/.test(m)).length === 1 && fs.readFileSync(fd, 'utf8') === LEDGER,
     'r2999 THE DEVICE: its registry\'s ledger goes through the same runner (pinned) — an unreadable one runs nothing, rewrites nothing, and says it once in the device\'s journal (its warn → stderr)', lines);
 }
 // ── MG1 (row B-f276, r2929 / r2944): A MIGRATION WHOSE INPUT COULD NOT BE READ HAS NOT RUN — one leg for each kind of read, each with
@@ -3901,28 +3901,28 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const ID = '2026-08-archive-dormant-task-plans', DOC = JSON.stringify({ tasks: { t1: { plan: ['a', 'b'] } } });
     const a = world('own-eio'), fa = path.join(a.d, 'task-groups.json'); fs.writeFileSync(fa, DOC);
     const ra = refusing(['readFileSync'], fa, () => runOne(MIG, a.r, ID));
-    ok(notRun(ra) && fs.readFileSync(fa, 'utf8') === DOC && /^task-groups\.json is there and could not be read \(EIO\) — not run: the next start tries again/.test(ra.res.error) && !ra.res.error.includes(tmp), 'MG1 ① its OWN read of a store refused (EIO): NOT RUN — failed by that cause, not recorded, the store untouched; the notice names the file plainly and says the next start tries again', ra.res);
+    ok(gateOf(notRun(ra)) && fs.readFileSync(fa, 'utf8') === DOC && gateOf(/^task-groups\.json is there and could not be read \(EIO\) — not run: the next start tries again/.test(ra.res.error)) && !ra.res.error.includes(tmp), 'MG1 ① its OWN read of a store refused (EIO): NOT RUN — failed by that cause, not recorded, the store untouched; the notice names the file plainly and says the next start tries again', ra.res);
     const b = world('own-torn'), fb = path.join(b.d, 'task-groups.json'); fs.writeFileSync(fb, DOC.slice(0, 15));
     const rb = runOne(MIG, b.r, ID);
-    ok(notRun(rb) && /its bytes do not parse — not run: it does not mend by itself; move it aside \(or restore it\)/.test(rb.res.error), 'MG1 ① …its bytes there and TORN: not run (never «no store»), and the notice says the way out — it does not mend by itself: move it aside or restore it (r3246)', rb.res);
+    ok(gateOf(notRun(rb)) && verdictOf(/its bytes do not parse — not run: it does not mend by itself; move it aside \(or restore it\)/.test(rb.res.error)), 'MG1 ① …its bytes there and TORN: not run (never «no store»), and the notice says the way out — it does not mend by itself: move it aside or restore it (r3246)', rb.res);
     const c = world('own-none'), rc = runOne(MIG, c.r, ID);
-    ok(rc.res && rc.res.status === 'ran' && rc.recorded, 'MG1 ① …NOT THERE: nothing to do — recorded as before', rc.res);
+    ok(gateOf(rc.res) && rc.res.status === 'ran' && verdictOf(rc.recorded), 'MG1 ① …NOT THERE: nothing to do — recorded as before', rc.res);
     const Today = today("        const doc = MR.readJson(f, 'task-groups.json'); if (!doc) return; // no store yet = nothing to do; MG1: unread or torn = not run\n",
       "        let doc; try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return; } // no store yet = nothing to do\n", 'mg1-own-today');   // stale-pins: kept (today's read — the red control's line)
     const red = world('own-red'), fr = path.join(red.d, 'task-groups.json'); fs.writeFileSync(fr, DOC);
     const rr = refusing(['readFileSync'], fr, () => runOne(Today, red.r, ID));
-    ok(rr.res && rr.res.status === 'ran' && rr.recorded, 'MG1 ① RED today\'s read: the unreadable store reads as «no store yet» — recorded as run, never tried again', rr.res);
+    ok(gateOf(rr.res) && rr.res.status === 'ran' && verdictOf(rr.recorded), 'MG1 ① RED today\'s read: the unreadable store reads as «no store yet» — recorded as run, never tried again', rr.res);
     // ⑨ AN EARLIER ARCHIVE it adds to, refused: never written over with this run's plans alone
     const e = world('arch-eio'), fe = path.join(e.d, 'task-groups.json'), arch = path.join(e.d, 'archive', 'task-plans-legacy.json');
     fs.writeFileSync(fe, DOC); const ARCH = JSON.stringify({ t0: ['earlier'] }); fs.writeFileSync(arch, ARCH);
     const re = refusing(['readFileSync'], arch, () => runOne(MIG, e.r, ID));
-    ok(notRun(re) && fs.readFileSync(arch, 'utf8') === ARCH && fs.readFileSync(fe, 'utf8') === DOC, 'MG1 ⑨ the earlier ARCHIVE it adds to refused (EIO): not run — the archive and the store as they were', re.res);
+    ok(gateOf(notRun(re)) && fs.readFileSync(arch, 'utf8') === ARCH && fs.readFileSync(fe, 'utf8') === DOC, 'MG1 ⑨ the earlier ARCHIVE it adds to refused (EIO): not run — the archive and the store as they were', re.res);
     const TodayA = today("        const prev = MR.readJson(out, 'archive/' + path.basename(out)) || {};   // MG1: an earlier archive unread is never written over with this run's alone\n",
       "        let prev = {}; try { prev = JSON.parse(fs.readFileSync(out, 'utf-8')); } catch { }\n", 'mg1-arch-today', 'first');   // stale-pins: kept (today's read); 'first': the archived members' read has the same text, after it
     const e2 = world('arch-red'), fe2 = path.join(e2.d, 'task-groups.json'), arch2 = path.join(e2.d, 'archive', 'task-plans-legacy.json');
     fs.writeFileSync(fe2, DOC); fs.writeFileSync(arch2, ARCH);
     const re2 = refusing(['readFileSync'], arch2, () => runOne(TodayA, e2.r, ID));
-    ok(re2.recorded && !JSON.parse(fs.readFileSync(arch2, 'utf8')).t0, 'MG1 ⑨ RED today\'s read: the earlier archive is written over with this run\'s plans alone (its entry lost)', re2.res);
+    ok(gateOf(re2.recorded) && !JSON.parse(fs.readFileSync(arch2, 'utf8')).t0, 'MG1 ⑨ RED today\'s read: the earlier archive is written over with this run\'s plans alone (its entry lost)', re2.res);
   }
   // r3246 (1): A REFUSAL NAMES A FILE PLAINLY — under the run's data folder «data/<its place>», anywhere else its last name alone,
   // never an absolute path (a helper's own catch hands its whole path)
@@ -3932,7 +3932,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const inData = said(() => MRD.during(() => MRD.absentOr(eio(), path.join(D, 'session-meta', 'cw-a.json')), D));
     const elsewhere = said(() => MRD.during(() => MRD.absentOr(eio(), path.join(scratchHomeDir, '.agent-browser', 'config.json')), D));
     const outside = said(() => MRD.absentOr(eio(), path.join(D, 'session-meta', 'cw-a.json')));
-    ok(/^data\/session-meta\/cw-a\.json is there and could not be read \(EIO\)/.test(inData || '') && /^config\.json is there/.test(elsewhere || '') && !String(inData).includes(tmp) && !String(elsewhere).includes(tmp) && outside === null,
+    ok(gateOf(/^data\/session-meta\/cw-a\.json is there and could not be read \(EIO\)/.test(inData || '')) && gateOf(/^config\.json is there/.test(elsewhere || '')) && !String(inData).includes(tmp) && !String(elsewhere).includes(tmp) && outside === null,
       'MG1 r3246 (1): a refusal names a file under the data folder as data/<its place> and any other by its last name — never an absolute path; outside a migration the helper keeps its answer', { inData, elsewhere, outside });
   }
   // ② ITS OWN LISTING (2026-10-usage-ledger-dedup, data/usage-history)
@@ -3940,26 +3940,26 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const ID = '2026-10-usage-ledger-dedup';
     const a = world('list-eio'), dir = path.join(a.d, 'usage-history'); fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, 'events-2026-10.ndjson'), '{"rid":"r1"}\n');
     const ra = refusing(['readdirSync'], dir, () => runOne(MIG, a.r, ID));
-    ok(notRun(ra), 'MG1 ② its own LISTING refused (EIO): not run (never «no shards»)', ra.res);
+    ok(verdictOf(notRun(ra)), 'MG1 ② its own LISTING refused (EIO): not run (never «no shards»)', ra.res);
     const Today = today("        names = (MR.list(dir, 'usage-history') || []).filter((f) => LD.SHARD_RE.test(f)).sort();   // MG1: not there = no shards; any other failed list = not run\n",
       "        try { names = fs.readdirSync(dir).filter((f) => LD.SHARD_RE.test(f)).sort(); } catch { }\n", 'mg1-list-today');   // stale-pins: kept (today's listing)
     const b = world('list-red'), dirb = path.join(b.d, 'usage-history'); fs.mkdirSync(dirb); fs.writeFileSync(path.join(dirb, 'events-2026-10.ndjson'), '{"rid":"r1"}\n');
     const rb = refusing(['readdirSync'], dirb, () => runOne(Today, b.r, ID));
-    ok(rb.recorded && rb.report && rb.report.shards === 0, 'MG1 ② RED today\'s listing: «no shards» — recorded, the dedup never runs', rb.report);
+    ok(gateOf(rb.recorded) && gateOf(rb.report) && rb.report.shards === 0, 'MG1 ② RED today\'s listing: «no shards» — recorded, the dedup never runs', rb.report);
   }
   // ③ ITS OWN STAT (2026-10-vault-always-to-grants, data/vault-run.json — a report that says «nothing waits»)
   {
     const ID = '2026-10-vault-always-to-grants', DOC = JSON.stringify({ always: [{ shape: 'x' }, { shape: 'y' }] });
     const a = world('stat-eio'), f = path.join(a.d, 'vault-run.json'); fs.writeFileSync(f, DOC);
     const ra = refusing(['statSync'], f, () => runOne(MIG, a.r, ID));
-    ok(notRun(ra), 'MG1 ③ its own STAT refused (EIO): not run (never «nothing waits»)', ra.res);
+    ok(verdictOf(notRun(ra)), 'MG1 ③ its own STAT refused (EIO): not run (never «nothing waits»)', ra.res);
     const ok2 = runOne(MIG, world('stat-ok').r, ID);
-    ok(ok2.recorded && ok2.report && ok2.report.alwaysRows === 0 && ok2.report.store === false, 'MG1 ③ …not there: «nothing waits», recorded as before', ok2.report);
+    ok(gateOf(ok2.recorded) && gateOf(ok2.report) && ok2.report.alwaysRows === 0 && ok2.report.store === false, 'MG1 ③ …not there: «nothing waits», recorded as before', ok2.report);
     const Today = today("        { const st = MR.stat(f, 'vault-run.json'); present = !!(st && st.isFile()); if (present && st.size <= 1024 * 1024) { const d = MR.readJson(f, 'vault-run.json'); n = Array.isArray(d && d.always) ? d.always.length : 0; } }   // MG1: not there = nothing waits; unread or torn = not run\n",
       "        try { const st = fs.statSync(f); present = st.isFile(); if (present && st.size <= 1024 * 1024) { const d = JSON.parse(fs.readFileSync(f, 'utf-8')); n = Array.isArray(d && d.always) ? d.always.length : 0; } } catch { /* absent / unreadable: nothing waits */ }\n", 'mg1-stat-today');   // stale-pins: kept (today's read)
     const b = world('stat-red'), fb = path.join(b.d, 'vault-run.json'); fs.writeFileSync(fb, DOC);
     const rb = refusing(['statSync'], fb, () => runOne(Today, b.r, ID));
-    ok(rb.recorded && rb.report && rb.report.alwaysRows === 0, 'MG1 ③ RED today\'s stat: an unreadable file reads «nothing waits» — recorded', rb.report);
+    ok(gateOf(rb.recorded) && gateOf(rb.report) && rb.report.alwaysRows === 0, 'MG1 ③ RED today\'s stat: an unreadable file reads «nothing waits» — recorded', rb.report);
   }
   // ④ A SHARED HELPER'S READ (2026-09-backfill-quota-limits → src/quota-model-migrate.js, the usage-cache folder's listing):
   // strict inside the migration's run, the helper's own answer for every other caller
@@ -3968,14 +3968,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const mk = (name) => { const w = world(name), dir = path.join(w.d, 'usage-cache'); fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, 'sub-a.json'), JSON.stringify({ fetchedAt: 1, fiveHour: { utilization: 0.1, resetsAt: 2 } })); return { ...w, dir }; };
     const a = mk('helper-eio');
     const ra = refusing(['readdirSync'], a.dir, () => runOne(MIG, a.r, ID));
-    ok(notRun(ra), 'MG1 ④ a SHARED HELPER\'s read inside the migration refused (EIO): not run', ra.res);
+    ok(verdictOf(notRun(ra)), 'MG1 ④ a SHARED HELPER\'s read inside the migration refused (EIO): not run', ra.res);
     const QM = require('../src/quota-model-migrate.js');
     let direct = null, threw = null; try { direct = refusing(['readdirSync'], a.dir, () => QM.backfillLimits({ cacheDir: a.dir, archiveDir: path.join(a.d, 'archive') })); } catch (e) { threw = e; }
-    ok(!threw && direct && direct.scanned === 0, 'MG1 ④ …the same helper called OUTSIDE a migration keeps its own answer (no throw)', threw ? threw.message : direct);
+    ok(!threw && gateOf(direct) && direct.scanned === 0, 'MG1 ④ …the same helper called OUTSIDE a migration keeps its own answer (no throw)', threw ? threw.message : direct);
     const Today = today('MIGRATIONS).map(strictRun), todos: userTodos,', 'MIGRATIONS), todos: userTodos,', 'mg1-helper-today');
     const b = mk('helper-red');
     const rb = refusing(['readdirSync'], b.dir, () => runOne(Today, b.r, ID));
-    ok(rb.res && rb.res.status === 'ran' && rb.recorded, 'MG1 ④ RED the registry without its strict runs (today): the helper\'s catch reads «no readings» — recorded', rb.res);
+    ok(gateOf(rb.res) && rb.res.status === 'ran' && verdictOf(rb.recorded), 'MG1 ④ RED the registry without its strict runs (today): the helper\'s catch reads «no readings» — recorded', rb.res);
   }
   // ⑤ THE LIVE ACCOUNT STORE UNREAD (accounts.json, the live AccountManager — 2026-09-pool-manual-priority). On the train the store
   // holds itself when its read fails, and the migration asks that hold (heldThrows, r3044 (3)): MG1's own guard for a store with no
@@ -3989,10 +3989,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const a = mk('acct-loaded-empty');
     ok(!a.am.get('pool-m') && !!(typeof a.am.held === 'function' && a.am.held()), 'MG1 ⑤ the scene is real: the live store\'s load was refused (EIO), it holds nothing, and its hold says so');
     const ra = runOne(MIG, a.r, ID, { accounts: a.am });
-    ok(failedUnrecorded(ra) && /could not be read/.test(ra.res.error) && fs.readFileSync(a.f, 'utf8') === DOC, 'MG1 ⑤ the file reads now but the live store is still held (its read again not yet landed): not run — the file as it was', ra.res);
+    ok(gateOf(failedUnrecorded(ra)) && gateOf(/could not be read/.test(ra.res.error)) && fs.readFileSync(a.f, 'utf8') === DOC, 'MG1 ⑤ the file reads now but the live store is still held (its read again not yet landed): not run — the file as it was', ra.res);
     const b = mk('acct-still-eio');
     const rb = refusing(['readFileSync'], b.f, () => runOne(MIG, b.r, ID, { accounts: b.am }));
-    ok(failedUnrecorded(rb) && /could not be read/.test(rb.res.error), 'MG1 ⑤ …the file still refused (EIO): not run', rb.res);
+    ok(gateOf(failedUnrecorded(rb)) && verdictOf(/could not be read/.test(rb.res.error)), 'MG1 ⑤ …the file still refused (EIO): not run', rb.res);
     const Today = today('        heldThrows(am);   // r3044 (3): never «ran» over an unread list — the runner tries again at the next start\n        accountsReadItsFile(am);   // r3615 (MG1, r2944): a start whose read said «not there» while the file IS there — the list is empty and unheld\n        const rep = am.migrateManualPools();\n', '        const rep = am.migrateManualPools();\n', 'mg1-acct-today');
     const c = mk('acct-red');
     const rc = runOne(Today, c.r, ID, { accounts: c.am });
@@ -4003,7 +4003,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const d = mkNt('acct-not-there');
     ok(!d.am.get('pool-m') && !(typeof d.am.held === 'function' && d.am.held()) && fs.readFileSync(d.f, 'utf8') === DOC, 'r3615 the scene is real: the store\'s read was answered «not there» (ENOENT, placed): it holds nothing and is NOT held, while the file is there');
     const rd = runOne(MIG, d.r, ID, { accounts: d.am });
-    ok(notRun(rd) && /did not load/.test(rd.res.error) && fs.readFileSync(d.f, 'utf8') === DOC, 'r3615 the file there at the step holds a record the live store never loaded: not run, nothing recorded — the file as it was', rd.res);
+    ok(gateOf(notRun(rd)) && gateOf(/did not load/.test(rd.res.error)) && fs.readFileSync(d.f, 'utf8') === DOC, 'r3615 the file there at the step holds a record the live store never loaded: not run, nothing recorded — the file as it was', rd.res);
     const TodayNt = today('        accountsReadItsFile(am);   // r3615 (MG1, r2944): a start whose read said «not there» while the file IS there — the list is empty and unheld\n        const rep = am.migrateManualPools();\n', '        const rep = am.migrateManualPools();\n', 'mg1-acc-not-there');
     const e = mkNt('acct-not-there-red');
     const re = runOne(TodayNt, e.r, ID, { accounts: e.am });
@@ -4011,7 +4011,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // r3615's should (r3246 (2)'s words): TORN bytes in the store-less road say they never mend by themselves, and the way out
     const t = world('acct-torn-words'); fs.writeFileSync(path.join(t.d, 'accounts.json'), '{"accounts": [');
     const rt = runOne(MIG, t.r, ID);
-    ok(failedUnrecorded(rt) && /does not mend by itself/.test(rt.res.error) && /move it aside \(or restore it\)/.test(rt.res.error), 'r3615 torn bytes in accounts.json (no live store): not run, and the words say it does not mend by itself and the way out', rt.res);
+    ok(gateOf(failedUnrecorded(rt)) && gateOf(/does not mend by itself/.test(rt.res.error)) && verdictOf(/move it aside \(or restore it\)/.test(rt.res.error)), 'r3615 torn bytes in accounts.json (no live store): not run, and the words say it does not mend by itself and the way out', rt.res);
   }
   // ⑥ A KEEPER'S STORE (2026-09-runaway-parks-void, data/desktop-apps.json): never recorded «via none» over an unread file
   const OLD_RUNAWAY = 'stopped as a runaway: RSS 9 GB over the limit';
@@ -4020,12 +4020,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const ID = '2026-09-runaway-parks-void';
     const a = world('keeper-eio'), f = path.join(a.d, 'desktop-apps.json'); fs.writeFileSync(f, OLD_APPS());
     const ra = refusing(['readFileSync'], f, () => runOne(MIG, a.r, ID));
-    ok(notRun(ra) && fs.readFileSync(f, 'utf8') === OLD_APPS(), 'MG1 ⑥ a keeper\'s store refused (EIO): not run — never recorded «via none», the store as it was', ra.res);
+    ok(gateOf(notRun(ra)) && fs.readFileSync(f, 'utf8') === OLD_APPS(), 'MG1 ⑥ a keeper\'s store refused (EIO): not run — never recorded «via none», the store as it was', ra.res);
     const Today = today("    disk = MR.readJson(file, path.basename(file));   // MG1: not there = no store; unread or torn = not run (never recorded over a false «none», the keeper never skipped)\n",
       "    try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { disk = null; }\n", 'mg1-keeper-today', 'first');   // stale-pins: kept (today's read)
     const b = world('keeper-red'), fb = path.join(b.d, 'desktop-apps.json'); fs.writeFileSync(fb, OLD_APPS());
     const rb = refusing(['readFileSync'], fb, () => runOne(Today, b.r, ID));
-    ok(rb.recorded && rb.report && rb.report.desktop && rb.report.desktop.via === 'none', 'MG1 ⑥ RED today\'s read: recorded with its report «via none» over a store that is there', rb.report);
+    ok(gateOf(rb.recorded) && gateOf(rb.report) && gateOf(rb.report.desktop) && rb.report.desktop.via === 'none', 'MG1 ⑥ RED today\'s read: recorded with its report «via none» over a store that is there', rb.report);
   }
   // (b) MACHINES ALREADY MARKED: the record tells «ran over nothing» (via none) from «ran» (via keeper / file) — 2026-11-keeper-reshapes-retried
   // reshapes once more each store whose record says none (or has no report: a ledger from before reports) and that is there in the old shape
@@ -4041,11 +4041,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const read = (w, n) => JSON.parse(fs.readFileSync(path.join(w.d, n), 'utf8'));
     const a = marked('retry-none', { '2026-09-runaway-parks-void': { at: 1, desktop: { via: 'none', parks: 0, rewritten: 0 }, browser: { via: 'file', parks: 1, rewritten: 1 } }, '2026-09-desktop-apps-host-key': { at: 1, via: 'none', records: 0, stamped: 0 } });
     const ra = runOne(MIG, a.r, ID), da = read(a, 'desktop-apps.json'), ba = read(a, 'browser-profiles.json');
-    ok(ra.recorded && !('runawayParkedUntil' in da) && da.apps.a1.lastError !== OLD_RUNAWAY && da.apps.a1.hostId === 'local' && ('runawayParkedUntil' in ba),
+    ok(gateOf(ra.recorded) && !('runawayParkedUntil' in da) && da.apps.a1.lastError !== OLD_RUNAWAY && da.apps.a1.hostId === 'local' && ('runawayParkedUntil' in ba),
       'MG1 (b) a store whose record says «via none» and is there in the old shape is reshaped once more (desktop apps: voided and keyed); one whose record says it RAN (via file) is left as it is', { da, ba, report: ra.report });
     const b = marked('retry-noreport', null);
     const rb = runOne(MIG, b.r, ID), db = read(b, 'desktop-apps.json'), bb = read(b, 'browser-profiles.json');
-    ok(rb.recorded && !('runawayParkedUntil' in db) && !('runawayParkedUntil' in bb), 'MG1 (b) THE LIMIT, said: a ledger from before reports cannot tell — both stores are reshaped once more (each reshape is idempotent)', rb.report);
+    ok(gateOf(rb.recorded) && !('runawayParkedUntil' in db) && !('runawayParkedUntil' in bb), 'MG1 (b) THE LIMIT, said: a ledger from before reports cannot tell — both stores are reshaped once more (each reshape is idempotent)', rb.report);
     const c = world('retry-fresh');
     const rc = runOne(MIG, c.r, ID);
     ok(!!(rc.recorded && rc.report && !Object.keys(rc.report).filter((k) => k !== 'at').length), 'MG1 (b) an instance where the two never ran before (they run, read strictly, in the same pass): nothing retried', rc.report);
@@ -4066,11 +4066,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       } finally { undo(); }
     };
     const a = await stepped(MIG, 'step-eio');
-    ok(a.res && a.res.status === 'started' && !a.recorded && a.notices.includes('migration-failed:' + ID), 'MG1 ⑧ a STEPPED migration\'s read refused (EIO, a shard\'s sample): the step fails — not recorded, said (the next start tries again)', a);
+    ok(gateOf(a.res) && a.res.status === 'started' && !a.recorded && verdictOf(a.notices.includes('migration-failed:' + ID)), 'MG1 ⑧ a STEPPED migration\'s read refused (EIO, a shard\'s sample): the step fails — not recorded, said (the next start tries again)', a);
     const Today = today("            let sh; try { sh = LD.shapeOf(path.join(dir, f)); } catch (e) { if (e && e.code === 'ENOENT') { rep.sampled.push({ shard: f, error: 'ENOENT' }); continue; } throw MR.unread('usage-history/' + f, e); }   // MG1: a shard gone since the list is skipped; one unread = the step fails (not recorded)\n",
       "            let sh; try { sh = LD.shapeOf(path.join(dir, f)); } catch (e) { rep.sampled.push({ shard: f, error: e.code || e.message }); continue; }\n", 'mg1-step-today');   // stale-pins: kept (today's sample)
     const b = await stepped(Today, 'step-red');
-    ok(b.recorded, 'MG1 ⑧ RED today\'s sample: the refused shard is an error row of the report — recorded, its dedup never runs', b);
+    ok(verdictOf(b.recorded), 'MG1 ⑧ RED today\'s sample: the refused shard is an error row of the report — recorded, its dedup never runs', b);
   }
 }
 // ── r3288 (MG1's follow, line 703's round w07bu3d00): the unread ledger's item WAITS for a held For you and is filed at its read;
@@ -4111,10 +4111,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const T = forYou(), f = ledgerAt('r3288-stays', LED);
     start(RUN, f, 'EACCES', T); const first = mine(T)[0] ? mine(T)[0].detail : '';
     start(RUN, f, 'EACCES', T); const second = mine(T)[0] ? mine(T)[0].detail : '';
-    ok(!/second start/.test(first) && /It does not read at a second start either: check that r3288-stays\/migrations\.json is a file the server can read, or move it aside/.test(second) && mine(T).length === 1,
+    ok(!/second start/.test(first) && gateOf(/It does not read at a second start either: check that r3288-stays\/migrations\.json is a file the server can read, or move it aside/.test(second)) && mine(T).length === 1,
       'r3288 (3) a read error that STAYS (EACCES twice): the first start says «read again at the next start», the second adds the way out — still ONE item', { first, second });
     const TD = forYou(); start(RUN, ledgerAt('r3288-dir', LED), 'EISDIR', TD);
-    ok(/It does not read at a second start either/.test((mine(TD)[0] || {}).detail || ''), 'r3288 (3) …the ledger\'s name a FOLDER (EISDIR, which never mends): the way out at the first start', TD.items);
+    ok(verdictOf(/It does not read at a second start either/.test((mine(TD)[0] || {}).detail || '')), 'r3288 (3) …the ledger\'s name a FOLDER (EISDIR, which never mends): the way out at the first start', TD.items);
   }
   // (4) THE CLOSING CALL's red; the server hands the For-you store to the registry
   {
@@ -4123,7 +4123,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     start(NoClose, f, 'EIO', T); start(NoClose, f, null, T);
     ok(mine(T).length === 1 && mine(T)[0].status === 'open', 'r3288 (4) RED without the closing call: the ledger reads again and the item stays OPEN for good', T.items);
     const SV = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
-    ok(SV.split('\n').some((l) => l.includes("require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice,") && /\buserTodos \/\* 2\.369\.152/.test(l) && l.includes('.runLocalMigrations(')), 'r3288 (4) PIN: the server hands the registry its LIVE For-you store (the item\'s road on production, never a leg\'s hand)');
+    ok(verdictOf(SV.split('\n').some((l) => l.includes("require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice,") && /\buserTodos \/\* 2\.369\.152/.test(l) && l.includes('.runLocalMigrations('))), 'r3288 (4) PIN: the server hands the registry its LIVE For-you store (the item\'s road on production, never a leg\'s hand)');
   }
   // (2) A SECOND RUN over its own result reopens no closed notice and expires only the notices it was written for
   {
@@ -4141,10 +4141,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const jsItems = (w) => { const sn = w.live.snapshot() || {}; return [...(sn.open || []), ...(sn.resolved || [])].filter((i) => i.sessionKey === 'vault' && i.itemKey === '2026-10-job-secrets-retired'); };
     const jsRun = (mod, w) => mod.create({ rootDir: w.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: w.live }).runLocalMigrations({ only: ['2026-10-job-secrets-retired'] }).find((x) => x.id === '2026-10-job-secrets-retired');
     const wa = jsWorld('cure'), ra = jsRun({ create }, wa), ia = jsItems(wa);
-    ok(ra && ra.status === 'ran' && ia.length === 1 && ia[0].status === 'done' && /kept as the owner left it \(closed\)/.test(JSON.stringify(ra.report || '')), 'r3288 (2a) the retired job secrets\' SECOND run (its file renamed by the first): the notice the person CLOSED stays closed (its sibling\'s rule)', { ra, items: ia.map((i) => i.status) });
+    ok(gateOf(ra) && ra.status === 'ran' && ia.length === 1 && ia[0].status === 'done' && verdictOf(/kept as the owner left it \(closed\)/.test(JSON.stringify(ra.report || ''))), 'r3288 (2a) the retired job secrets\' SECOND run (its file renamed by the first): the notice the person CLOSED stays closed (its sibling\'s rule)', { ra, items: ia.map((i) => i.status) });
     const NoGuard = MUTF.load('src/server/migrations.js', anchored(MIG_SRC3, '        if (!st) {\n          const live = liveTodos();', '        if (false) {\n          const live = liveTodos();', 'the second run without its guard'), 'r3288-js-red');
     const wb = jsWorld('red'); jsRun(NoGuard, wb);
-    ok(jsItems(wb).some((i) => i.status === 'open'), 'r3288 (2a) RED without the guard (today): the second run REOPENS the notice the person closed', jsItems(wb).map((i) => i.status));
+    ok(verdictOf(jsItems(wb).some((i) => i.status === 'open')), 'r3288 (2a) RED without the guard (today): the second run REOPENS the notice the person closed', jsItems(wb).map((i) => i.status));
     // (b) the spending notices' expiry: a setting-holds notice (structured words, no expiry) is not the notices it was written for
     const H = 3600e3, spWorld = (name) => {
       const root = path.join(tmp, 'r3288-sp-' + name), d = path.join(root, 'data'); fs.mkdirSync(d, { recursive: true });
@@ -4157,11 +4157,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const spRun = (mod, w) => { mod.create({ rootDir: w.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations({ only: ['2026-09-spend-notices-expire'] }); const j = JSON.parse(fs.readFileSync(path.join(w.d, 'user-todos.json'), 'utf8')); return Object.fromEntries((j.items || []).map((i) => [i.id, i])); };
     const sa = spRun({ create }, spWorld('cure'));
-    ok(sa['ut-holds'] && sa['ut-holds'].status === 'open' && sa['ut-old'] && sa['ut-old'].status === 'done' && sa['ut-old'].resolvedBy === 'expired',
+    ok(gateOf(sa['ut-holds']) && sa['ut-holds'].status === 'open' && gateOf(sa['ut-old']) && sa['ut-old'].status === 'done' && sa['ut-old'].resolvedBy === 'expired',
       'r3288 (2b) the spending notices\' expiry takes only the notices it was WRITTEN FOR: an old spend notice expires; a setting-holds notice (structured words, no expiry) stays open', { holds: sa['ut-holds'] && sa['ut-holds'].status, old: sa['ut-old'] && sa['ut-old'].status });
     const NoOwn = MUTF.load('src/server/migrations.js', anchored(MIG_SRC3, " && !(it.i18n && typeof it.i18n === 'object');", ';', 'the expiry without its own notices\' test'), 'r3288-sp-red');
     const sb = spRun(NoOwn, spWorld('red'));
-    ok(sb['ut-holds'] && sb['ut-holds'].status === 'done', 'r3288 (2b) RED without the test (today): the expiry closes the setting-holds notice too — older than a day, no expiry of its own', sb['ut-holds'] && sb['ut-holds'].status);
+    ok(gateOf(sb['ut-holds']) && sb['ut-holds'].status === 'done', 'r3288 (2b) RED without the test (today): the expiry closes the setting-holds notice too — older than a day, no expiry of its own', sb['ut-holds'] && sb['ut-holds'].status);
   }
 }
 // ── B-574d, the slice «hub-migrations» (lane nl-migrations, 主开发 r4750): A STORE A MIGRATION REWRITES TAKES ITS NAME ONLY AFTER ONE
@@ -4216,13 +4216,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       'B-574d (a) a migration whose temp\'s SYNC FAILS (EIO) is a failed write: NOT recorded (it runs again at the next start), settings.json byte-identical, no temp left', { status: a1.status, recorded: a1.recorded, tmpLeft: a1.tmpLeft, events: a1.events });
     const a1r = await placed('settings.json.tmp', null, () => create({ rootDir: path.join(base, 'a-eio'), homeDir: home0, serverNotice: () => { } }).runLocalMigrations({ only: [ID_A] }).find((x) => x.id === ID_A));
     const a1t = fs.readFileSync(path.join(a1.d, 'settings.json'), 'utf8');
-    ok(a1r.out && a1r.out.status === 'ran' && !!ledgerOf(a1.d)[ID_A] && JSON.parse(a1t)['chat.collapseKinds'].includes('agent') && a1r.events.join() === 'open,sync,rename',
+    ok(gateOf(a1r.out) && a1r.out.status === 'ran' && !!ledgerOf(a1.d)[ID_A] && gateOf(JSON.parse(a1t)['chat.collapseKinds'].includes('agent')) && a1r.events.join() === 'open,sync,rename',
       'B-574d (a) …and the NEXT start (the sync answering) runs it again over the store as it was: migrated, synced before its name, recorded', { status: a1r.out && a1r.out.status, events: a1r.events.join() });
     const a2 = await sceneA({ create }, 'a-einval', 'EINVAL'), n2 = noSyncLines(a2.said, 'EINVAL');
-    ok(a2.status === 'ran' && a2.recorded && a2.agent && n2.length === 1 && n2[0].startsWith('[migrate] settings.json: ') && !n2[0].includes(a2.d),
+    ok(a2.status === 'ran' && gateOf(a2.recorded) && gateOf(a2.agent) && n2.length === 1 && gateOf(n2[0].startsWith('[migrate] settings.json: ')) && !n2[0].includes(a2.d),
       'B-574d (a) a file system with NO sync (EINVAL): the store takes its name and the migration is recorded; ONE journal line says so — the file\'s name, no path', { status: a2.status, said: n2 });
     const a3 = await sceneA({ create }, 'a-real', null);
-    ok(a3.status === 'ran' && a3.recorded && a3.agent && a3.events === 'open,sync,rename' && !noSyncLines(a3.said, 'EINVAL').length,
+    ok(a3.status === 'ran' && gateOf(a3.recorded) && gateOf(a3.agent) && a3.events === 'open,sync,rename' && !noSyncLines(a3.said, 'EINVAL').length,
       'B-574d (a) the real sync: the temp written, SYNCED, then renamed over settings.json — in that order — and recorded', { status: a3.status, events: a3.events });
     // (b) a helper's own temp (`<store>.<pid>.tmp`, the file's mode kept): desktop-apps.json on the FILE road (no keeper handed in)
     const ID_B = '2026-09-desktop-apps-host-key', DA0 = JSON.stringify({ apps: { a1: { name: 'one' } } }, null, 2);
@@ -4235,7 +4235,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const b1 = await sceneB({ create }, 'b-eio', 'EIO'), b3 = await sceneB({ create }, 'b-real', null);
     ok(b1.status === 'failed' && !b1.recorded && b1.text === DA0 && b1.mode === 0o600 && !b1.tmpLeft && b1.events === 'open,sync',
       'B-574d (b) the file road\'s pid temp: a sync that FAILS (EIO) leaves desktop-apps.json byte-identical, its mode kept, no temp, the migration NOT recorded', { status: b1.status, recorded: b1.recorded, mode: b1.mode.toString(8), tmpLeft: b1.tmpLeft, events: b1.events });
-    ok(b3.status === 'ran' && b3.recorded && b3.stamped && b3.mode === 0o600 && b3.events === 'open,sync,rename',
+    ok(b3.status === 'ran' && gateOf(b3.recorded) && gateOf(b3.stamped) && b3.mode === 0o600 && b3.events === 'open,sync,rename',
       'B-574d (b) the real sync on the file road: stamped, the mode kept (0600), synced before the rename', { status: b3.status, mode: b3.mode.toString(8), events: b3.events });
     // (f) the round's should: a TWO-STORE migration failing HALFWAY — 2026-08-archive-dormant-task-plans writes its archive, then the
     // store; the store's sync refused (EIO) after the archive landed: not recorded; the next start runs it again — the archive MERGES with
@@ -4253,7 +4253,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       };
       const F1 = await fScene({ create }, 'f-half');
       ok(F1.f1 === 'failed' && !F1.rec1 && F1.tg1 === TG0 && F1.ev1 === 'open,sync' && Object.keys(F1.arch1).sort().join() === 't0,t1'
-        && F1.f2 === 'ran' && F1.rec2 && Object.keys(F1.arch2).sort().join() === 't0,t1' && F1.arch2.t0.length === 1 && F1.arch2.t1.length === 2 && !('plan' in F1.tg2.tasks.t1) && F1.tg2.tasks.t2.name === 'two',
+        && F1.f2 === 'ran' && gateOf(F1.rec2) && Object.keys(F1.arch2).sort().join() === 't0,t1' && F1.arch2.t0.length === 1 && F1.arch2.t1.length === 2 && !('plan' in F1.tg2.tasks.t1) && F1.tg2.tasks.t2.name === 'two',
         'B-574d follow (f) a two-store migration failing HALFWAY (its archive landed, the store\'s sync refused): not recorded, the store as it was; the next start MERGES the archive (an earlier run\'s t0 kept, t1\'s two plans never doubled), reshapes the store once, records it',
         { first: [F1.f1, F1.rec1, F1.ev1], archive: F1.arch2, store: F1.tg2 });
       const FM = await fScene(M574.load('src/server/migrations.js', anchored(MIG, 'JSON.stringify({ ...prev, ...archived }, null, 2)', 'JSON.stringify({ ...archived }, null, 2)', 'the archive\'s merge'), 'archive-overwrite'), 'f-red');
@@ -4277,7 +4277,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         return { p1: p1.out && p1.out.status, ev1: p1.events.join(), t1, rec1, tmp1, p2: p2.out && p2.out.status, rec2: !!ledgerOf(path.join(root, 'data'))[ID_P], rids2, archived: archRids(root).join() };
       };
       const P1 = await pScene({ create }, 'p-real');
-      ok(P1.p1 === 'failed' && !P1.rec1 && P1.t1 === SHARD0 && !P1.tmp1 && P1.ev1 === 'open,sync' && P1.p2 === 'ran' && P1.rec2 && P1.rids2.join() === 'real_1,real_2' && P1.archived === 'fx_sid_1',
+      ok(P1.p1 === 'failed' && !P1.rec1 && P1.t1 === SHARD0 && !P1.tmp1 && P1.ev1 === 'open,sync' && P1.p2 === 'ran' && gateOf(P1.rec2) && P1.rids2.join() === 'real_1,real_2' && P1.archived === 'fx_sid_1',
         'B-574d usage-ledger-repairs (s2-a) the fixture purge whose shard sync is refused (EIO): not recorded, the shard byte-identical, no temp; the next start purges the fabricated row and records it — and its ARCHIVE holds that row ONCE (主开发 r4936 (1): a rerun never archives again what an earlier run archived)', { first: [P1.p1, P1.rec1, P1.ev1], second: [P1.p2, P1.rec2, P1.rids2], archived: P1.archived });
       const FLP = fs.readFileSync(path.join(REPO_ROOT, 'src/fixture-ledger-purge.js'), 'utf8');
       const PHELP = "  renameSynced(fp + '.tmp', fp, text, { where: `[migrate] ${path.basename(fp)}`, say: (l) => console.warn(l) });\n";
@@ -4286,7 +4286,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       // a closed world of copies: the migrations copy requires the purge copy by its path (every other require is the real file's)
       const MIG2 = anchored(MIG, "require('../fixture-ledger-purge.js')", `require(${JSON.stringify(pPath)})`, 'the purge\'s require');
       const PM = await pScene(PB.load('src/server/migrations.js', MIG2, 'mig-bare-purge'), 'p-red');
-      ok(PM.p1 === 'ran' && PM.rec1, 'B-574d usage-ledger-repairs RED (anchored copy: the purge\'s helper back to the bare temp + rename): no sync is asked, the refused scene reads «applied»', PM);
+      ok(PM.p1 === 'ran' && verdictOf(PM.rec1), 'B-574d usage-ledger-repairs RED (anchored copy: the purge\'s helper back to the bare temp + rename): no sync is asked, the refused scene reads «applied»', PM);
       // (s2-b) the slice's own read (F3): A RUN THAT FAILED PARTWAY IS RESUMED — two shards, the first lands and the second's sync is refused;
       // an anchor whose interval held ONLY the first shard's fabricated row: the rerun finds that shard clean, and still voids the anchor
       // (the earlier run's removed instants read from its own archive). RED (anchored copy): the archive not read — the anchor keeps its
@@ -4303,12 +4303,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         return { h1: h1.out && h1.out.status, firstLanded: !s08.includes('fx_a'), h2: h2.out && h2.out.status, rec: !!ledgerOf(path.join(root, 'data'))[ID_P], voided: an.find((x) => x.fetchedAt === 2500).costSince, kept: an.find((x) => x.fetchedAt === 8000).costSince, archived: archRids(root).join() };
       };
       const H1 = await hScene({ create }, 'h-real');
-      ok(H1.h1 === 'failed' && H1.firstLanded && H1.h2 === 'ran' && H1.rec && H1.voided === null && H1.kept && H1.kept.total === 4 && H1.archived === 'fx_a,fx_b',
+      ok(H1.h1 === 'failed' && gateOf(H1.firstLanded) && H1.h2 === 'ran' && gateOf(H1.rec) && H1.voided === null && gateOf(H1.kept) && H1.kept.total === 4 && H1.archived === 'fx_a,fx_b',
         'B-574d usage-ledger-repairs (s2-b) a fixture purge that failed PARTWAY (the first shard landed, the second\'s sync refused) is resumed: the rerun voids the anchor whose interval held only the FIRST shard\'s fabricated row (read from its own archive); the anchor that held nothing keeps its cost', H1);
       const RESUME = "        if (a.store === 'usage-history' && a.entry && typeof a.entry.ts === 'number') removedTs.push(a.entry.ts);\n";
       const rPath = PB.write('src/fixture-ledger-purge.js', anchored(FLP, RESUME, "        void a;   // MUTANT: the earlier run's archive not read\n", 'the purge\'s resume'), 'purge-no-resume');
       const HM = await hScene(PB.load('src/server/migrations.js', anchored(MIG, "require('../fixture-ledger-purge.js')", `require(${JSON.stringify(rPath)})`, 'the purge\'s require'), 'mig-no-resume'), 'h-red');
-      ok(HM.h2 === 'ran' && HM.voided && HM.voided.total === 9, 'B-574d usage-ledger-repairs RED (anchored copy: the earlier run\'s archive not read): the anchor keeps its inflated costSince (9) for good — (s2-b) goes red', HM);
+      ok(HM.h2 === 'ran' && gateOf(HM.voided) && HM.voided.total === 9, 'B-574d usage-ledger-repairs RED (anchored copy: the earlier run\'s archive not read): the anchor keeps its inflated costSince (9) for good — (s2-b) goes red', HM);
       const SEEN = '  if (seen) rows = rows.filter((r) => !seen.has(_archKey(r)));\n';
       const dPath = PB.write('src/fixture-ledger-purge.js', anchored(FLP, SEEN, '', 'the archive\'s earlier rows filtered'), 'purge-archives-twice');
       const DM = await pScene(PB.load('src/server/migrations.js', anchored(MIG, "require('../fixture-ledger-purge.js')", `require(${JSON.stringify(dPath)})`, 'the purge\'s require'), 'mig-archives-twice'), 'p-red2');
@@ -4318,7 +4318,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const HELP = "  renameSynced(tmp, file, text, { mode, where: `[migrate] ${path.basename(file)}`, say: (line) => console.warn(line) });\n";
     const bare = M574.load('src/server/migrations.js', anchored(MIG, HELP, "  fs.writeFileSync(tmp, text, mode === undefined ? undefined : { mode }); fs.renameSync(tmp, file);   // MUTANT: the bare temp + rename\n", 'the migrations\' synced replace'), 'bare-replace');
     const ra = await sceneA(bare, 'a-red', 'EIO'), rb = await sceneB(bare, 'b-red', 'EIO');
-    ok(ra.status === 'ran' && ra.recorded && rb.status === 'ran' && rb.recorded && !ra.events.includes('sync') && !rb.events.includes('sync'),
+    ok(ra.status === 'ran' && gateOf(ra.recorded) && rb.status === 'ran' && gateOf(rb.recorded) && !ra.events.includes('sync') && !rb.events.includes('sync'),
       'B-574d RED (anchored copy: replaceSynced back to the bare temp + rename): no sync is asked, the EIO scenes read «applied» — (a) and (b) go red on it', { a: [ra.status, ra.events], b: [rb.status, rb.events] });
     // (c) + (d) the home rename (through migrateHomeRename, the boot's own call): the recorded-path rewrite and the HOME tries
     const MOUNTS0 = JSON.stringify({ m: [{ path: '/home/olduser/proj' }] }), NAME = '.home-migrated-olduser-to-userN';
@@ -4334,25 +4334,25 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const HR = require('../src/server/home-rename.js');
     const c1 = await hrScene(HR, 'c-eio', 'mounts.json.tmp', 'EIO');
-    ok(c1.out.length === 1 && c1.out[0].rewrote === 0 && c1.mounts === MOUNTS0 && !c1.tmpLeft && c1.events === 'open,sync' && c1.warned.length === 1 && c1.warned[0].includes('could not be rewritten — mounts.json (EIO: tried again at the next start)'),
+    ok(c1.out.length === 1 && c1.out[0].rewrote === 0 && c1.mounts === MOUNTS0 && !c1.tmpLeft && c1.events === 'open,sync' && c1.warned.length === 1 && verdictOf(c1.warned[0].includes('could not be rewritten — mounts.json (EIO: tried again at the next start)')),
       'B-574d (c) the recorded-path rewrite: a sync that FAILS (EIO) is that store\'s failed rewrite — mounts.json byte-identical, no temp, said, not counted as rewritten', { out: c1.out, events: c1.events, warned: c1.warned });
     const c2 = await hrScene(HR, 'c-einval', 'mounts.json.tmp', 'EINVAL'), nc2 = noSyncLines(c2.warned, 'EINVAL');
-    ok(c2.out[0].rewrote === 1 && c2.mounts.includes('/home/userN/proj') && nc2.length === 1 && nc2[0].startsWith('[migrate] mounts.json: ') && !nc2[0].includes(c2.root),
+    ok(c2.out[0].rewrote === 1 && gateOf(c2.mounts.includes('/home/userN/proj')) && nc2.length === 1 && gateOf(nc2[0].startsWith('[migrate] mounts.json: ')) && !nc2[0].includes(c2.root),
       'B-574d (c) a file system with NO sync (EINVAL): mounts.json rewritten, ONE line says so (the file\'s name, no path)', { out: c2.out, said: nc2 });
     const c3 = await hrScene(HR, 'c-real', 'mounts.json.tmp', null);
-    ok(c3.out[0].rewrote === 1 && c3.mounts.includes('/home/userN/proj') && c3.events === 'open,sync,rename', 'B-574d (c) the real sync: mounts.json\'s temp synced before its rename', { events: c3.events });
+    ok(c3.out[0].rewrote === 1 && gateOf(c3.mounts.includes('/home/userN/proj')) && c3.events === 'open,sync,rename', 'B-574d (c) the real sync: mounts.json\'s temp synced before its rename', { events: c3.events });
     const TRIES0 = JSON.stringify({ tries: 1, at: 0 });   // one try spent long ago: this start counts the second
     const d1 = await hrScene(HR, 'd-eio', NAME + '.tries.tmp', 'EIO', { failedMove: true, tries0: TRIES0 });
-    ok(d1.tries === TRIES0 && !d1.triesTmpLeft && d1.events === 'open,sync' && d1.warned.some((l) => l.includes('the tries could not be written (EIO')),
+    ok(d1.tries === TRIES0 && !d1.triesTmpLeft && d1.events === 'open,sync' && verdictOf(d1.warned.some((l) => l.includes('the tries could not be written (EIO'))),
       'B-574d (d) the HOME tries (async, off the boot\'s synchronous road): a sync that FAILS (EIO) is a failed write — the old tries file stands, no temp left, said («tried again at the next start»)', { tries: d1.tries, tmpLeft: d1.triesTmpLeft, events: d1.events, warned: d1.warned });
     const d4 = await hrScene(HR, 'd-close', NAME + '.tries.tmp', null, { failedMove: true, tries0: TRIES0, closeCode: 'EIO' });
-    ok(d4.tries === TRIES0 && !d4.triesTmpLeft && d4.events === 'open,sync,close' && d4.warned.some((l) => l.includes('the tries could not be written (EIO')),
+    ok(d4.tries === TRIES0 && !d4.triesTmpLeft && d4.events === 'open,sync,close' && verdictOf(d4.warned.some((l) => l.includes('the tries could not be written (EIO'))),
       'B-574d (d) a CLOSE that fails after the write (a deferred write error, EIO) is a failed write too: the old tries stand, no temp left, said', { tries: d4.tries, tmpLeft: d4.triesTmpLeft, events: d4.events, warned: d4.warned });
     const d2 = await hrScene(HR, 'd-einval', NAME + '.tries.tmp', 'EINVAL', { failedMove: true, tries0: TRIES0 }), nd2 = noSyncLines(d2.warned, 'EINVAL');
-    ok(d2.tries && JSON.parse(d2.tries).tries === 2 && nd2.length === 1 && !nd2[0].includes(d2.root),
+    ok(gateOf(d2.tries) && JSON.parse(d2.tries).tries === 2 && nd2.length === 1 && !nd2[0].includes(d2.root),
       'B-574d (d) a file system with NO sync (EINVAL): the tries take their name (2), ONE line says so, no path', { tries: d2.tries, said: nd2 });
     const d3 = await hrScene(HR, 'd-real', NAME + '.tries.tmp', null, { failedMove: true, tries0: TRIES0 });
-    ok(d3.tries && JSON.parse(d3.tries).tries === 2 && d3.events === 'open,sync,rename', 'B-574d (d) the real sync: the tries\' temp synced before its rename', { tries: d3.tries, events: d3.events });
+    ok(gateOf(d3.tries) && JSON.parse(d3.tries).tries === 2 && d3.events === 'open,sync,rename', 'B-574d (d) the real sync: the tries\' temp synced before its rename', { tries: d3.tries, events: d3.events });
     // (e)–(h) 主开发 r4866 + the follow's own adversarial read: a store whose rewrite FAILED withholds «done» — the data marker says the
     // rewrite OWED (the stores, the verdict, the tries); the next start tries ONLY those stores, cures them, then marks done; said once a
     // start, with what a person can do; a session meta's own backup is never rewritten; a move that is not whole carries the first start's
@@ -4383,48 +4383,48 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return out;
     };
     const [E1, E2, E3] = await eScene(HR, 'e-real', ['EIO', null, null]);
-    ok(E1.out.length === 1 && E1.out[0].rewrote === 2 && E1.out[0].notMarked === 1 && E1.mounts.includes('/home/userN/proj') && E1.meta.includes('/home/userN/proj') && E1.layouts === LAY0
-      && !doneOf(E1.mark) && JSON.stringify(E1.mark.owed) === '["layouts.json"]' && E1.mark.judgedOld === 1 && !('tries' in E1.mark) && E1.warned.length === 1 && E1.failSaid === 1 && E1.warned[0].includes('layouts.json (EIO: tried again at the next start)'),
+    ok(E1.out.length === 1 && E1.out[0].rewrote === 2 && E1.out[0].notMarked === 1 && gateOf(E1.mounts.includes('/home/userN/proj')) && gateOf(E1.meta.includes('/home/userN/proj')) && E1.layouts === LAY0
+      && !doneOf(E1.mark) && JSON.stringify(E1.mark.owed) === '["layouts.json"]' && E1.mark.judgedOld === 1 && !('tries' in E1.mark) && E1.warned.length === 1 && E1.failSaid === 1 && verdictOf(E1.warned[0].includes('layouts.json (EIO: tried again at the next start)')),
       'B-574d follow (e) ONE store\'s rewrite refused (layouts.json\'s sync, EIO), the others landing: the marker says the rewrite OWED (layouts.json, the verdict; no count) — not done; ONE line this start, naming it and what can be done', { out: E1.out, mark: E1.mark, warned: E1.warned });
-    ok(E2.out.length === 1 && E2.out[0].home === false && E2.out[0].data === true && E2.out[0].rewrote === 1 && !E2.out[0].notMarked && E2.layouts.includes('/home/userN/proj') && doneOf(E2.mark) && E2.warned.length === 0
+    ok(E2.out.length === 1 && E2.out[0].home === false && E2.out[0].data === true && E2.out[0].rewrote === 1 && !E2.out[0].notMarked && gateOf(E2.layouts.includes('/home/userN/proj')) && gateOf(doneOf(E2.mark)) && E2.warned.length === 0
       && E2.metaBackup === META0 && E2.twice === 0 && E2.meta === E1.meta,
       'B-574d follow (e) …the NEXT start (the old user named by the HOME marker only) tries ONLY layouts.json: cured, then the marker DONE; the session meta rewritten at the first start is left as it is and its backup is never rewritten (no backup of a backup)', { out: E2.out, mark: E2.mark, backup: E2.metaBackup, twice: E2.twice });
     ok(E3.out.length === 0, 'B-574d follow (e) …and the start after it runs nothing (both halves done)', E3.out);
     // (g) the follow's adversarial read R2: a move that is NOT whole — the later starts judge no folder old (it moved): the first start's
     // verdict carries in the owed marker, so the owed store is still cured
     const [G1, G2] = await eScene(HR, 'g-real', ['EIO', null], { move: 'partial' });
-    ok(!doneOf(G1.mark) && G1.mark.judgedOld === 1 && G2.out.length === 1 && G2.out[0].home === true && G2.layouts.includes('/home/userN/proj') && doneOf(G2.mark) && !G2.mark.kept,
+    ok(!doneOf(G1.mark) && G1.mark.judgedOld === 1 && G2.out.length === 1 && G2.out[0].home === true && gateOf(G2.layouts.includes('/home/userN/proj')) && gateOf(doneOf(G2.mark)) && !G2.mark.kept,
       'B-574d follow (g) a move that is not whole: the second start judges no folder old, yet the owed rewrite runs on the first start\'s verdict — layouts.json cured, marked done (never «kept»)', { first: G1.mark, second: [G2.out, G2.mark] });
     // (h) THE LAW (主开发 r4897): a store refused at EVERY start stays OWED — never marked done, tried and said once at each start —
     // and the start that finds it healed cures it and marks done
     const H = await eScene(HR, 'h-real', ['EIO', 'EIO', 'EIO', 'EIO', null]);
-    ok(H.slice(0, 4).every((x) => !doneOf(x.mark) && JSON.stringify(x.mark.owed) === '["layouts.json"]' && x.warned.length === 1 && x.failSaid === 1 && x.layouts === LAY0) && H.slice(1, 4).every((x) => x.out.length === 1 && x.out[0].rewrote === 0)
-      && H[4].layouts.includes('/home/userN/proj') && doneOf(H[4].mark) && H[4].warned.length === 0,
+    ok(gateOf(H.slice(0, 4).every((x) => !doneOf(x.mark) && JSON.stringify(x.mark.owed) === '["layouts.json"]' && x.warned.length === 1 && x.failSaid === 1 && x.layouts === LAY0)) && gateOf(H.slice(1, 4).every((x) => x.out.length === 1 && x.out[0].rewrote === 0))
+      && gateOf(H[4].layouts.includes('/home/userN/proj')) && gateOf(doneOf(H[4].mark)) && H[4].warned.length === 0,
       'B-574d follow (h) a store refused at every start (four of them): OWED after each — never marked done, one line each start, tried each start — and the fifth start, the store healed, cures it and marks done', { marks: H.map((x) => x.mark), said: H.map((x) => x.failSaid) });
     // (h2) a failure no start can mend by itself — bytes that do not parse: the line says what a person can do; once the store is
     // restored by hand between two starts, the next start cures it (none of the rewrite's failures is a failure by nature)
     const H2 = await eScene(HR, 'h2-real', [null, null], { layouts: '{ "l": { "cwd": "/home/olduser/proj"', between: { 2: (d) => fs.writeFileSync(path.join(d, 'layouts.json'), LAY0) } });
-    ok(!doneOf(H2[0].mark) && H2[0].warned.length === 1 && H2[0].warned[0].includes('layouts.json (unparsable: its bytes do not parse: move it aside or restore it)') && H2[1].layouts.includes('/home/userN/proj') && doneOf(H2[1].mark),
+    ok(!doneOf(H2[0].mark) && H2[0].warned.length === 1 && gateOf(H2[0].warned[0].includes('layouts.json (unparsable: its bytes do not parse: move it aside or restore it)')) && gateOf(H2[1].layouts.includes('/home/userN/proj')) && verdictOf(doneOf(H2[1].mark)),
       'B-574d follow (h2) a store whose bytes do not parse: owed, the line tells a person to move it aside or restore it; restored by hand, the next start cures it and marks done', { first: [H2[0].mark, H2[0].warned], second: [H2[1].mark, H2[1].layouts] });
     // (e1) the second read (R1, R-J): a session meta is a <key>.json FILE — a backup an earlier run left (holding /home/<old>), a folder
     // named like a meta and a set-aside copy are passed by: the first start rewrites the stores and marks done, the backup byte-identical
     const PREB = (d, meta) => { fs.writeFileSync(path.join(meta, 'cw-0.json.pre-home-migrate'), META0); fs.mkdirSync(path.join(meta, 'sub.json')); fs.writeFileSync(path.join(meta, 'cw-2.json.corrupt-1'), META0); };
     const bk0 = (x) => fs.readFileSync(path.join(x.dir, 'session-meta', 'cw-0.json.pre-home-migrate'), 'utf8');
     const [B1] = await eScene(HR, 'e1-real', [null], { pre: PREB });
-    ok(B1.out.length === 1 && B1.out[0].rewrote === 3 && doneOf(B1.mark) && B1.twice === 0 && bk0(B1) === META0 && B1.warned.length === 0,
+    ok(B1.out.length === 1 && B1.out[0].rewrote === 3 && gateOf(doneOf(B1.mark)) && B1.twice === 0 && bk0(B1) === META0 && B1.warned.length === 0,
       'B-574d follow (e1) an earlier backup holding /home/olduser, a folder named sub.json and a set-aside copy in session-meta are NOT stores: three stores rewritten, marked done, the backup byte-identical, nothing owed', { out: B1.out, mark: B1.mark, warned: B1.warned });
     // (e4) the second read (R4, R-C): a retry tries ONLY the owed stores — a /home/<old> path recorded into a store that is not owed
     // between two starts (a paired machine of the old name) stays as recorded
     const NEWP = (d) => fs.writeFileSync(path.join(d, 'mounts.json'), JSON.stringify({ m: [{ path: '/home/userN/proj' }, { path: '/home/olduser/paired' }] }));
     const [, R2] = await eScene(HR, 'e4-real', ['EIO', null], { between: { 2: NEWP } });
-    ok(R2.layouts.includes('/home/userN/proj') && R2.mounts.includes('/home/olduser/paired') && doneOf(R2.mark) && R2.out[0].rewrote === 1,
+    ok(gateOf(R2.layouts.includes('/home/userN/proj')) && gateOf(R2.mounts.includes('/home/olduser/paired')) && gateOf(doneOf(R2.mark)) && R2.out[0].rewrote === 1,
       'B-574d follow (e4) the retry rewrites ONLY the owed layouts.json: the /home/olduser path recorded into mounts.json after the first start stays as recorded', { mounts: R2.mounts, mark: R2.mark });
     // (e5) the second read (R-B): a whole move whose HOME marker never landed — no hook names the old user any more (its folders moved)
     // and no HOME marker does: the OWED data marker names it, so the owed store is still cured (and the HOME marker written, carrying the
     // first start's verdict)
     const NOHM = (d, home) => fs.rmSync(path.join(home, '.vibespace', NAME), { force: true });
     const [, S2] = await eScene(HR, 'e5-real', ['EIO', null], { between: { 2: NOHM } });
-    ok(S2.out.length === 1 && S2.layouts.includes('/home/userN/proj') && doneOf(S2.mark), 'B-574d follow (e5) the HOME marker lost after the first start: the owed data marker names the old user — layouts.json cured, marked done', { out: S2.out, mark: S2.mark });
+    ok(S2.out.length === 1 && gateOf(S2.layouts.includes('/home/userN/proj')) && verdictOf(doneOf(S2.mark)), 'B-574d follow (e5) the HOME marker lost after the first start: the owed data marker names the old user — layouts.json cured, marked done', { out: S2.out, mark: S2.mark });
     // their REDs (anchored copies): the listing without its file rule; the retry without ONLY; the owed marker named by nobody
     const LIST = "  try { for (const e of fs.readdirSync(metaDir, { withFileTypes: true })) if (e.isFile() && e.name.endsWith('.json')) stores.push({ f: path.join(metaDir, e.name), key: 'session-meta/' + e.name }); }\n";
     const [BM1] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, LIST, "  try { for (const n of fs.readdirSync(metaDir)) stores.push({ f: path.join(metaDir, n), key: 'session-meta/' + n }); }   // MUTANT: every name a store\n", 'the metas\' file rule'), 'metas-any-name'), 'e1-red', [null], { pre: PREB });
@@ -4439,7 +4439,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const MARK = '        if (mark) writeDataMarker(dm, mark, log);\n';
     const E_OLD = "        if (mark) writeDataMarker(dm, (judgedOld > 0 || marked) ? { at: Date.now(), rewrote, ...(judgedOld > 0 ? {} : { kept: true }) } : mark, log);   // MUTANT: the tip 93829d26a's line — done whatever failed\n";
     const [EM1, EM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, MARK, E_OLD, 'the owed marker'), 'marker-regardless'), 'e-red', ['EIO', null]);   // stale-pins: kept — the RED copy puts the tip 93829d26a's marker back on purpose
-    ok(doneOf(EM1.mark) && EM2.out.length === 0 && EM2.layouts === LAY0,
+    ok(gateOf(doneOf(EM1.mark)) && EM2.out.length === 0 && EM2.layouts === LAY0,
       'B-574d follow RED (anchored copy: the tip 93829d26a\'s marker — done whatever failed): marked done at the first start, layouts.json keeps /home/olduser for good (the next start runs nothing)', { first: EM1.mark, second: [EM2.out, EM2.layouts] });
     const CARRY = '        const judgedOld = Math.max(!homeDone ? judgedAll : hmState.judged, prior ? prior.judgedOld : 0);\n';
     const [, GM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, CARRY, '        const judgedOld = !homeDone ? judged : hmState.judged;   // MUTANT: the verdict carried by neither the owed marker nor the tries (follow 3)\n', 'the carried verdict'), 'verdict-dropped'), 'g-red', ['EIO', null], { move: 'partial' });
@@ -4476,50 +4476,50 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const LISTR = { 1: ['readdirSync', path.sep + 'session-meta', 'EIO'] }, STATR = { 1: ['statSync', path.sep + 'layouts.json', 'EACCES'] }, MARKR = { 2: ['readFileSync', path.sep + 'data' + path.sep + NAME, 'EIO'] };
     const UNREAD = 'the data marker of /home/olduser could not be read (EIO: tried again at the next start) — not taken as done';
     const [I1, I2] = await rScene(HR, 'i-real', [null, null], LISTR);
-    ok(!doneOf(I1.mark) && JSON.stringify(I1.mark.owed) === '["session-meta/"]' && I1.meta === META0 && I1.layouts.includes('/home/userN/proj') && I1.warned.length === 1 && I1.warned[0].includes('session-meta (its listing) (EIO')
-      && doneOf(I2.mark) && I2.meta.includes('/home/userN/proj'),
+    ok(!doneOf(I1.mark) && JSON.stringify(I1.mark.owed) === '["session-meta/"]' && I1.meta === META0 && gateOf(I1.layouts.includes('/home/userN/proj')) && I1.warned.length === 1 && gateOf(I1.warned[0].includes('session-meta (its listing) (EIO'))
+      && gateOf(doneOf(I2.mark)) && verdictOf(I2.meta.includes('/home/userN/proj')),
       'B-574d follow 2 (i) the session metas\' LISTING refused (EIO) on a whole rewrite: OWED (key session-meta/), never «no metas» — said once; the next start lists again, rewrites the meta and marks done', { first: [I1.mark, I1.warned], second: [I2.mark, I2.meta] });
     const [S1, S2b] = await rScene(HR, 'ii-real', [null, null], STATR);
-    ok(!doneOf(S1.mark) && JSON.stringify(S1.mark.owed) === '["layouts.json"]' && S1.layouts === LAY0 && S1.warned.length === 1 && S1.warned[0].includes('layouts.json (EACCES')
-      && doneOf(S2b.mark) && S2b.layouts.includes('/home/userN/proj'),
+    ok(!doneOf(S1.mark) && JSON.stringify(S1.mark.owed) === '["layouts.json"]' && S1.layouts === LAY0 && S1.warned.length === 1 && gateOf(S1.warned[0].includes('layouts.json (EACCES'))
+      && gateOf(doneOf(S2b.mark)) && verdictOf(S2b.layouts.includes('/home/userN/proj')),
       'B-574d follow 2 (ii) a store\'s STAT refused (EACCES): that store\'s failure, OWED — never skipped as absent; the next start rewrites it and marks done', { first: [S1.mark, S1.warned], second: S2b.mark });
     const [, U2, U3] = await rScene(HR, 'iii-real', ['EIO', null, null], MARKR);
-    ok(!doneOf(U2.mark) && JSON.stringify(U2.mark.owed) === '["layouts.json"]' && U2.layouts === LAY0 && U2.warned.length === 1 && U2.warned[0].includes(UNREAD) && U3.layouts.includes('/home/userN/proj') && doneOf(U3.mark),
+    ok(!doneOf(U2.mark) && JSON.stringify(U2.mark.owed) === '["layouts.json"]' && U2.layouts === LAY0 && U2.warned.length === 1 && gateOf(U2.warned[0].includes(UNREAD)) && gateOf(U3.layouts.includes('/home/userN/proj')) && verdictOf(doneOf(U3.mark)),
       'B-574d follow 2 (iii) the data marker\'s READ refused (EIO): not taken as done and never written over — said ONCE, the data half waits; the next start that can read it cures the owed store and marks done', { second: [U2.mark, U2.warned], third: U3.mark });
     const [, P2] = await rScene(HR, 'iiib-real', ['EIO', null], {}, { between: { 2: (d) => fs.writeFileSync(path.join(d, NAME), '{') } });
-    ok(P2.warned.length === 1 && P2.warned[0].includes('does not parse') && P2.layouts.includes('/home/userN/proj') && doneOf(P2.mark),
+    ok(P2.warned.length === 1 && gateOf(P2.warned[0].includes('does not parse')) && gateOf(P2.layouts.includes('/home/userN/proj')) && verdictOf(doneOf(P2.mark)),
       'B-574d follow 2 (iii) a data marker whose bytes do not parse is NOT done either: said once, the whole rewrite runs (a torn marker keeps no owed list; layouts.json cured), marked done', { second: [P2.mark, P2.warned] });
     // (iv) its own read (F1): a retry that owes NO meta lists no metas — a refused listing there owes nothing, and a /home/<old> path recorded
     // into a meta since the first start stays as recorded
     const PAIRED = (d) => fs.writeFileSync(path.join(d, 'session-meta', 'cw-1.json'), JSON.stringify({ cwd: '/home/userN/proj', paired: '/home/olduser/paired' }));
     const [, V2] = await rScene(HR, 'iv-real', ['EIO', null], { 2: LISTR[1] }, { between: { 2: PAIRED } });
-    ok(doneOf(V2.mark) && V2.layouts.includes('/home/userN/proj') && V2.meta.includes('/home/olduser/paired') && V2.warned.length === 0,
+    ok(gateOf(doneOf(V2.mark)) && gateOf(V2.layouts.includes('/home/userN/proj')) && gateOf(V2.meta.includes('/home/olduser/paired')) && V2.warned.length === 0,
       'B-574d follow 2 (iv) a retry that owes no meta: the metas are not listed (the refused listing never met), the owed store cured, marked done — the meta\'s path recorded since stays as recorded', { second: [V2.mark, V2.meta] });
     // (v) its own read (F2, F3): the HOME marker lost and the data marker unreadable at the next start, the folders long moved (judged 0): the
     // UNREADABLE marker names its old user (said once), the move half re-marks the HOME, and the data half WAITS — never a «kept» over it; the
     // start after, the marker readable, cures the owed store on its own carried verdict
     const LOSE = (d, home) => fs.rmSync(path.join(home, '.vibespace', NAME), { force: true });
     const [, W2, W3] = await rScene(HR, 'v-real', ['EIO', null, null], MARKR, { between: { 2: LOSE }, later: 0 });
-    ok(W2.warned.length === 1 && W2.warned[0].includes(UNREAD) && !W2.homeMark && !doneOf(W2.mark) && JSON.stringify(W2.mark.owed) === '["layouts.json"]' && W3.layouts.includes('/home/userN/proj') && doneOf(W3.mark) && !W3.mark.kept && W3.homeJudged === 1,
+    ok(W2.warned.length === 1 && gateOf(W2.warned[0].includes(UNREAD)) && !W2.homeMark && !doneOf(W2.mark) && JSON.stringify(W2.mark.owed) === '["layouts.json"]' && gateOf(W3.layouts.includes('/home/userN/proj')) && gateOf(doneOf(W3.mark)) && !W3.mark.kept && W3.homeJudged === 1,
       'B-574d follow 2 (v) the HOME marker lost, the data marker unreadable, the folders long moved: the unreadable marker names its old user (said once); the owed marker NEVER written over with «kept», and the HOME marker WAITS with it (no lost verdict written); the next start cures the store on the carried verdict and writes the HOME marker with it (judged 1)', { second: [W2.warned, W2.mark, W2.homeMark], third: [W3.mark, W3.homeJudged] });
     // (vi) the second read (R2, R3): a TORN marker and no verdict surviving (the HOME marker lost, the folders long moved): nothing rewritten
     // and NOTHING written over it (never «kept») — said once, with what a person can do; RED below: «kept» allowed alone
     const TORNLOSE = (d, home) => { LOSE(d, home); fs.writeFileSync(path.join(d, NAME), '{'); };
     const [, T2] = await rScene(HR, 'vi-real', ['EIO', null], {}, { between: { 2: TORNLOSE }, later: 0 });
-    ok(T2.markText === '{' && T2.warned.length === 1 && T2.warned[0].includes('does not parse (its bytes do not parse: move it aside or restore it)') && T2.warned[0].includes('no verdict survives it') && T2.layouts === LAY0,
+    ok(T2.markText === '{' && T2.warned.length === 1 && gateOf(T2.warned[0].includes('does not parse (its bytes do not parse: move it aside or restore it)')) && gateOf(T2.warned[0].includes('no verdict survives it')) && T2.layouts === LAY0,
       'B-574d follow 2 (vi) a TORN marker with no verdict surviving: nothing rewritten, the torn marker never written over (no «kept»), said ONCE with what a person can do', { second: [T2.markText, T2.warned] });
     // (vii) the second read (R4): a retry that owes ONE meta (its write refused at the first start) with the listing refused: it re-owes
     // EXACTLY that meta, never the wildcard; the next start lists, rewrites it and marks done
     const [, X2, X3] = await rScene(HR, 'vii-real', ['EIO', null, null], { 2: LISTR[1] }, { tail: path.sep + 'cw-1.json.tmp' });
-    ok(JSON.stringify(X2.mark.owed) === '["session-meta/cw-1.json"]' && X2.warned.length === 1 && X2.warned[0].includes('cw-1.json (its folder\'s listing) (EIO') && doneOf(X3.mark) && X3.meta.includes('/home/userN/proj'),
+    ok(JSON.stringify(X2.mark.owed) === '["session-meta/cw-1.json"]' && X2.warned.length === 1 && gateOf(X2.warned[0].includes('cw-1.json (its folder\'s listing) (EIO')) && gateOf(doneOf(X3.mark)) && verdictOf(X3.meta.includes('/home/userN/proj')),
       'B-574d follow 2 (vii) a retry owing ONE meta, its listing refused: re-owes exactly session-meta/cw-1.json (never the wildcard), said once; the next start rewrites it and marks done', { second: [X2.mark, X2.warned], third: X3.mark });
     // their REDs (anchored copies: the release's lines, or the follow's first form)
     const LISTC = HRT.slice(HRT.indexOf('  catch (e) {\n    const code = (e && e.code) || \'error\';\n'), HRT.indexOf('  }\n  }\n  const only = retry && retry.only;') + 4);
     const [IM1] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, LISTC, '  catch { }   // MUTANT: the release\'s empty catch\n', 'the listing owed'), 'listing-swallowed'), 'i-red', [null], LISTR);
-    ok(doneOf(IM1.mark) && IM1.meta === META0, 'B-574d follow 2 RED (anchored copy: the release\'s empty catch): the start marks DONE while the meta keeps /home/olduser — (i) goes red', IM1.mark);
+    ok(gateOf(doneOf(IM1.mark)) && IM1.meta === META0, 'B-574d follow 2 RED (anchored copy: the release\'s empty catch): the start marks DONE while the meta keeps /home/olduser — (i) goes red', IM1.mark);
     const STATC = "      try { fs.statSync(f); } catch (e) { if (e && e.code === 'ENOENT') continue; throw e; }";
     const [SM1] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, STATC, '      if (!fs.existsSync(f)) continue;', 'the stat owed'), 'stat-absent'), 'ii-red', [null], STATR);   // stale-pins: kept — the RED copy puts the release's existsSync back on purpose
-    ok(doneOf(SM1.mark) && SM1.layouts === LAY0, 'B-574d follow 2 RED (anchored copy: the release\'s existsSync): the refused stat reads as absent — marked DONE, layouts.json keeps /home/olduser — (ii) goes red', SM1.mark);
+    ok(gateOf(doneOf(SM1.mark)) && SM1.layouts === LAY0, 'B-574d follow 2 RED (anchored copy: the release\'s existsSync): the refused stat reads as absent — marked DONE, layouts.json keeps /home/olduser — (ii) goes red', SM1.mark);
     const READC = "  let text; try { text = fs.readFileSync(dm, 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? { done: false, owed: null } : { done: false, owed: null, unreadable: (e && e.code) || 'error' }; }\n";
     const [, UM2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, READC, "  let text; try { text = fs.readFileSync(dm, 'utf8'); } catch (e) { return { done: !(e && e.code === 'ENOENT'), owed: null }; }   // MUTANT: unread is done\n", 'the unread marker owed'), 'unread-done'), 'iii-red', ['EIO', null], MARKR);   // stale-pins: kept — the RED copy puts the release's answer back on purpose
     ok(UM2.out.length === 0 && UM2.warned.length === 0, 'B-574d follow 2 RED (anchored copy: an unreadable marker read as done): the start takes the rename as done and says NOTHING — (iii)\'s «said once, not done» goes red', { second: [UM2.out, UM2.warned] });
@@ -4528,19 +4528,19 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(PM2.layouts === LAY0 && PM2.out.length === 0, 'B-574d follow 2 RED (anchored copy: a marker that does not parse read as done): the start runs nothing — (iii) goes red', { out: PM2.out });
     const GUARD = '  if (!onlyMetas || onlyMetas.length) {\n', WIDE = "(onlyMetas && !onlyMetas.includes('session-meta/') ? onlyMetas : ['session-meta/'])";
     const [, VM2, VM3] = await rScene(M574.load('src/server/home-rename.js', anchored(anchored(HRT, GUARD, '  if (true) {   // MUTANT: always listed\n', 'the retry lists only owed metas'), WIDE, "['session-meta/']", 'the owed metas only'), 'retry-widens'), 'iv-red', ['EIO', null, null], { 2: LISTR[1] }, { between: { 2: PAIRED } });
-    ok(!doneOf(VM2.mark) && VM3.meta.includes('/home/userN/paired'), 'B-574d follow 2 RED (anchored copy: the follow\'s first form — the listing on every retry, its failure the wildcard): the retry owes every meta and rewrites the path recorded since — (iv) goes red', { second: VM2.mark, third: VM3.meta });
+    ok(!doneOf(VM2.mark) && verdictOf(VM3.meta.includes('/home/userN/paired')), 'B-574d follow 2 RED (anchored copy: the follow\'s first form — the listing on every retry, its failure the wildcard): the retry owes every meta and rewrites the path recorded since — (iv) goes red', { second: VM2.mark, third: VM3.meta });
     const SKIP = '      if (!dataDone && !unread) {\n', KEPT = '        } else if (judgedOld > 0 || (marked && !dmState.unreadable)) mark =';
     const [, WM2, WM3] = await rScene(M574.load('src/server/home-rename.js', anchored(anchored(anchored(HRT, SKIP, '      if (!dataDone) {   // MUTANT: the data half runs over an unread marker\n', 'the data half waits'), KEPT, '        } else if (judgedOld > 0 || marked) mark =', 'never kept over an unread marker'), '          if (!unread) {\n', '          if (true) {   // MUTANT: the HOME marker written over an unread verdict\n', 'the HOME marker waits'), 'kept-over-unread'), 'v-red', ['EIO', null, null], MARKR, { between: { 2: LOSE }, later: 0 });   // stale-pins: kept — the RED copy puts the first form's lines back on purpose
-    ok(doneOf(WM2.mark) && WM2.mark.kept === true && WM3.layouts === LAY0, 'B-574d follow 2 RED (anchored copy: the follow\'s first form whole — the data half run over an unread marker, «kept» allowed, the HOME marker written over it): a false «kept» at the second start, layouts.json keeps /home/olduser for good — (v) goes red', { second: WM2.mark, third: WM3.layouts });
+    ok(gateOf(doneOf(WM2.mark)) && WM2.mark.kept === true && WM3.layouts === LAY0, 'B-574d follow 2 RED (anchored copy: the follow\'s first form whole — the data half run over an unread marker, «kept» allowed, the HOME marker written over it): a false «kept» at the second start, layouts.json keeps /home/olduser for good — (v) goes red', { second: WM2.mark, third: WM3.layouts });
     const [, SK2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, SKIP, '      if (!dataDone) {   // MUTANT: the data half runs over an unread marker\n', 'the data half waits'), 'skip-alone'), 'iii-red2', ['EIO', null], MARKR);   // stale-pins: kept — the RED copy puts the first form's line back on purpose
-    ok(doneOf(SK2.mark) && SK2.layouts.includes('/home/userN/proj') && SK2.mark.owed === undefined, 'B-574d follow 2 RED (anchored copy: the data half run over an unread marker, alone): the unread owed list is dropped and the whole rewrite runs over it — (iii)\'s «waits» goes red', { second: SK2.mark });
+    ok(gateOf(doneOf(SK2.mark)) && gateOf(SK2.layouts.includes('/home/userN/proj')) && SK2.mark.owed === undefined, 'B-574d follow 2 RED (anchored copy: the data half run over an unread marker, alone): the unread owed list is dropped and the whole rewrite runs over it — (iii)\'s «waits» goes red', { second: SK2.mark });
     const [, KE2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, KEPT, '        } else if (judgedOld > 0 || marked) mark =', 'never kept over an unread marker'), 'kept-alone'), 'vi-red', ['EIO', null], {}, { between: { 2: TORNLOSE }, later: 0 });   // stale-pins: kept — the RED copy puts the first form's line back on purpose
-    ok(KE2.mark && KE2.mark.kept === true, 'B-574d follow 2 RED (anchored copy: «kept» allowed over a torn marker, alone): a false «kept» is written over it — (vi) goes red', { second: KE2.markText });
+    ok(gateOf(KE2.mark) && KE2.mark.kept === true, 'B-574d follow 2 RED (anchored copy: «kept» allowed over a torn marker, alone): a false «kept» is written over it — (vi) goes red', { second: KE2.markText });
     const [, XW2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, WIDE, "['session-meta/']", 'the owed metas only'), 'wide-alone'), 'vii-red', ['EIO', null], { 2: LISTR[1] }, { tail: path.sep + 'cw-1.json.tmp' });
     ok(JSON.stringify(XW2.mark.owed) === '["session-meta/"]', 'B-574d follow 2 RED (anchored copy: a failed listing re-owes the wildcard, alone): the retry widens to every meta — (vii) goes red', XW2.mark);
     const HOMEWAIT = '          if (!unread) {\n';
     const [, HW2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, HOMEWAIT, '          if (true) {   // MUTANT: the HOME marker written over an unread verdict\n', 'the HOME marker waits'), 'home-over-unread'), 'v-red3', ['EIO', null], MARKR, { between: { 2: LOSE }, later: 0 });
-    ok(HW2.homeMark && HW2.homeJudged === 0, 'B-574d follow 2 RED (anchored copy: the HOME marker written while the data marker is unread): it is written with a LOST verdict (judged 0) — (v) goes red', { home: [HW2.homeMark, HW2.homeJudged] });
+    ok(gateOf(HW2.homeMark) && HW2.homeJudged === 0, 'B-574d follow 2 RED (anchored copy: the HOME marker written while the data marker is unread): it is written with a LOST verdict (judged 0) — (v) goes red', { home: [HW2.homeMark, HW2.homeJudged] });
     const NAMES = 'return !!st.owed || !!st.unreadable;';
     const [, NM2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, NAMES, 'return !!st.owed;', 'an unread marker names its old user'), 'unread-unnamed'), 'v-red2', ['EIO', null], MARKR, { between: { 2: LOSE }, later: 0 });
     ok(NM2.warned.length === 0 && NM2.out.length === 0, 'B-574d follow 2 RED (anchored copy: an unreadable marker names nobody): with the HOME marker lost the start says nothing at all — (v)\'s «said once» goes red', { second: NM2.warned });
@@ -4550,7 +4550,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const HCLOSE = '  try { await fh.close(); } catch (e) { if (!failed) failed = e; }';
     const HB = M574.load('src/server/home-rename.js', anchored(anchored(anchored(HRT, REW, "      const tmp = f + '.tmp'; fs.writeFileSync(tmp, fixed); fs.renameSync(tmp, f);   // MUTANT: the bare temp + rename", 'the rewrite\'s synced replace'), HSYNC, '', 'the tries\' sync'), HCLOSE, '  try { await fh.close(); } catch (e) { void e; }   // MUTANT: a failed close swallowed', 'the tries\' judged close'), 'bare-home');
     const rc = await hrScene(HB, 'c-red', 'mounts.json.tmp', 'EIO'), rd = await hrScene(HB, 'd-red', NAME + '.tries.tmp', 'EIO', { failedMove: true, tries0: TRIES0 }), rd4 = await hrScene(HB, 'd-close-red', NAME + '.tries.tmp', null, { failedMove: true, tries0: TRIES0, closeCode: 'EIO' });
-    ok(rc.out[0].rewrote === 1 && !rc.events.includes('sync') && rd.tries && JSON.parse(rd.tries).tries === 2 && !rd.events.includes('sync') && rd4.tries && JSON.parse(rd4.tries).tries === 2,
+    ok(rc.out[0].rewrote === 1 && !rc.events.includes('sync') && gateOf(rd.tries) && JSON.parse(rd.tries).tries === 2 && !rd.events.includes('sync') && gateOf(rd4.tries) && JSON.parse(rd4.tries).tries === 2,
       'B-574d RED (anchored copy: the rewrite back to the bare temp + rename, the tries without their sync and with their close swallowed): no sync is asked, the EIO scenes land — (c) and (d) go red on it', { c: [rc.out, rc.events], d: [rd.tries, rd.events], close: [rd4.tries, rd4.events] });
     {   // its own block: its names never meet the legs' above
     const CH = require('../src/harnesses/claude-home.js');
@@ -4560,10 +4560,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // path; a stat refused to existsSync too), each with its RED (anchored copies: follow 2's lines)
     const HMT = '.vibespace' + path.sep + NAME + '.tmp', hmOf = (x) => { const f = path.join(x.root, 'home', 'userN', '.vibespace', NAME); return { mark: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null, tmpLeft: fs.existsSync(f + '.tmp') }; };
     const k1 = await hrScene(HR, 'viii-eio', HMT, 'EIO'), k1h = hmOf(k1);
-    ok(k1.events === 'open,sync' && k1h.mark === null && !k1h.tmpLeft && k1.warned.some((l) => l.includes('the projdirs marker could not be written (EIO')),
+    ok(k1.events === 'open,sync' && k1h.mark === null && !k1h.tmpLeft && verdictOf(k1.warned.some((l) => l.includes('the projdirs marker could not be written (EIO'))),
       'B-574d follow 3 (viii) THE HOME MARKER BY THE SYNCED REPLACE: its temp\'s sync refused (EIO) ⇒ no marker (another install over this HOME moves again: a merge), no temp left, said', { events: k1.events, home: k1h, warned: k1.warned });
     const k2 = await hrScene(HR, 'viii-einval', HMT, 'EINVAL'), k2h = hmOf(k2), nk2 = noSyncLines(k2.warned, 'EINVAL');
-    ok(!!k2h.mark && JSON.parse(k2h.mark).judgedOld === 1 && nk2.length === 1 && nk2[0].startsWith('[migrate] home rename: the HOME marker: ') && !nk2[0].includes(k2.root),
+    ok(!!k2h.mark && JSON.parse(k2h.mark).judgedOld === 1 && nk2.length === 1 && gateOf(nk2[0].startsWith('[migrate] home rename: the HOME marker: ')) && !nk2[0].includes(k2.root),
       'B-574d follow 3 (viii) a file system with NO sync (EINVAL): the HOME marker lands (its verdict, judged 1), ONE line says so by its name, no path', { home: k2h, said: nk2 });
     const k3 = await hrScene(HR, 'viii-real', HMT, null), k3h = hmOf(k3);
     ok(k3.events === 'open,sync,rename' && !!k3h.mark && JSON.parse(k3h.mark).judgedOld === 1 && !k3h.tmpLeft, 'B-574d follow 3 (viii) the real sync: the HOME marker\'s temp synced before its rename, no temp left', { events: k3.events, home: k3h });
@@ -4595,14 +4595,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return out;
     };
     const [P0] = await kScene(HR, 'ix-control', [{ home: HM1 }]);
-    ok(P0.layouts.includes('/home/userN/proj') && doneOf(P0.mark) && !P0.mark.kept && P0.warned.length === 0, 'B-574d follow 3 (ix) control: a READABLE HOME marker carries its verdict to a second install — layouts.json cured, marked done (never «kept»)', { mark: P0.mark, warned: P0.warned });
+    ok(gateOf(P0.layouts.includes('/home/userN/proj')) && gateOf(doneOf(P0.mark)) && !P0.mark.kept && P0.warned.length === 0, 'B-574d follow 3 (ix) control: a READABLE HOME marker carries its verdict to a second install — layouts.json cured, marked done (never «kept»)', { mark: P0.mark, warned: P0.warned });
     const [P1, P2] = await kScene(HR, 'ix-real', [{ home: HM1, refuse: ['readFileSync', HMR, 'EIO'] }, {}]);
-    ok(P1.layouts === LAY0 && P1.mark === null && P1.home === HM1 && P1.warned.length === 1 && P1.warned[0].includes('the HOME marker of /home/olduser could not be read (EIO: tried again at the next start) — not taken as judged')
-      && P2.layouts.includes('/home/userN/proj') && doneOf(P2.mark) && !P2.mark.kept && P2.warned.length === 0 && P2.home === HM1,
+    ok(P1.layouts === LAY0 && P1.mark === null && P1.home === HM1 && P1.warned.length === 1 && gateOf(P1.warned[0].includes('the HOME marker of /home/olduser could not be read (EIO: tried again at the next start) — not taken as judged'))
+      && gateOf(P2.layouts.includes('/home/userN/proj')) && gateOf(doneOf(P2.mark)) && !P2.mark.kept && P2.warned.length === 0 && P2.home === HM1,
       'B-574d follow 3 (ix) the HOME marker\'s READ refused (EIO): HELD — never «judged none»: no data marker (no «kept»), nothing rewritten, the HOME marker never written over, said ONCE; the next start that can read it cures layouts.json on its verdict and marks done', { first: [P1.mark, P1.warned], second: [P2.mark, P2.warned] });
     const [Q1, Q2] = await kScene(HR, 'x-real', [{ home: TORNH }, { home: HM1 }]);
-    ok(Q1.layouts === LAY0 && Q1.mark === null && Q1.home === TORNH && Q1.warned.length === 1 && Q1.warned[0].includes('could not be read (unparsable: its bytes do not parse: restore it from a backup — never move it aside')
-      && Q2.layouts.includes('/home/userN/proj') && doneOf(Q2.mark) && !Q2.mark.kept,
+    ok(Q1.layouts === LAY0 && Q1.mark === null && Q1.home === TORNH && Q1.warned.length === 1 && gateOf(Q1.warned[0].includes('could not be read (unparsable: its bytes do not parse: restore it from a backup — never move it aside'))
+      && gateOf(Q2.layouts.includes('/home/userN/proj')) && gateOf(doneOf(Q2.mark)) && !Q2.mark.kept,
       'B-574d follow 3 (x) a TORN HOME marker (bytes that do not parse): HELD the same — no «kept», nothing rewritten, never written over, said once with the one safe hand (restore it — never move it aside: the move would be judged again over folders already moved); restored, the next start cures and marks done', { first: [Q1.mark, Q1.warned], second: Q2.mark });
     const HELD = '      const unread = dmUnread || (!!hmState.unreadable && !ownVerdict);\n';
     const HMut = M574.load('src/server/home-rename.js', anchored(HRT, HELD, "      const unread = dmUnread;   // MUTANT: follow 2's road — a held HOME marker read as judged none\n", 'a held HOME marker holds the data half'), 'home-held-none');
@@ -4611,16 +4611,16 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // (xi) R6: the OLD HOME's own stat (the default look, no homeGone handed): refused (EACCES) ⇒ NOT gone — nothing acted on, said once;
     // «not there» (ENOENT) ⇒ gone, the rewrite runs
     const [G1] = await kScene(HR, 'xi-eacces', [{ home: HM1, diskGone: true, refuse: ['statSync', '/home/olduser', 'EACCES'] }]), [G2] = await kScene(HR, 'xi-enoent', [{ home: HM1, diskGone: true, refuse: ['statSync', '/home/olduser', 'ENOENT'] }]);
-    ok(G1.layouts === LAY0 && G1.mark === null && G1.warned.length === 1 && G1.warned[0].includes('/home/olduser could not be looked at (EACCES) — not taken as gone') && G2.layouts.includes('/home/userN/proj') && doneOf(G2.mark) && G2.warned.length === 0,
+    ok(G1.layouts === LAY0 && G1.mark === null && G1.warned.length === 1 && gateOf(G1.warned[0].includes('/home/olduser could not be looked at (EACCES) — not taken as gone')) && gateOf(G2.layouts.includes('/home/userN/proj')) && gateOf(doneOf(G2.mark)) && G2.warned.length === 0,
       'B-574d follow 3 (xi) the old home\'s stat refused (EACCES): NOT gone — nothing rewritten, no marker, said once; «not there» (ENOENT) is gone: cured, marked done', { refused: [G1.mark, G1.warned], absent: G2.mark });
     const GONEF = "function homeGoneOnDisk(old, say = null) {\n  try { fs.statSync(`/home/${old}`); return false; }\n  catch (e) { if (e && e.code === 'ENOENT') return true; if (say) say(`[migrate] home rename: /home/${old} could not be looked at (${(e && e.code) || 'error'}) — not taken as gone; its old user waits for a start that can see it`); return false; }\n}\n";
     const GMut = M574.load('src/server/home-rename.js', anchored(HRT, GONEF, "const homeGoneOnDisk = (old) => !fs.existsSync(`/home/${old}`);\n", 'the old home asked by its stat'), 'home-gone-exists');   // stale-pins: kept — the RED copy puts follow 2's existsSync back on purpose
     const [GR1] = await kScene(GMut, 'xi-red', [{ home: HM1, diskGone: true, refuse: ['statSync', '/home/olduser', 'EACCES'] }]);
-    ok(GR1.layouts.includes('/home/userN/proj') && GR1.warned.length === 0, 'B-574d follow 3 RED (anchored copy: follow 2\'s existsSync of the old home): a refused stat reads as GONE — the rewrite acts on an old home that may be there, said nowhere — (xi) goes red', { mark: GR1.mark });
+    ok(gateOf(GR1.layouts.includes('/home/userN/proj')) && GR1.warned.length === 0, 'B-574d follow 3 RED (anchored copy: follow 2\'s existsSync of the old home): a refused stat reads as GONE — the rewrite acts on an old home that may be there, said nowhere — (xi) goes red', { mark: GR1.mark });
     // (xii) R6: the HOME side's listings — ~/.vibespace (the HOME markers) and data/ (the owed markers): refused ⇒ said (their old users
     // wait for a start that can list); «not there» says nothing
     const [L1] = await kScene(HR, 'xii-vs', [{ home: HM1, refuse: ['readdirSync', path.sep + '.vibespace', 'EACCES'] }]), [L2] = await kScene(HR, 'xii-data', [{ refuse: ['readdirSync', path.sep + 'data', 'EACCES'] }]), [L3] = await kScene(HR, 'xii-none', [{ home: HM1, refuse: ['readdirSync', path.sep + '.vibespace', 'ENOENT'] }]);
-    ok(L1.layouts === LAY0 && L1.mark === null && L1.warned.length === 1 && L1.warned[0].includes('~/.vibespace could not be listed (EACCES: its permissions refuse the hub') && L2.warned.length === 1 && L2.warned[0].includes('data/ could not be listed (EACCES') && L3.warned.length === 0,
+    ok(L1.layouts === LAY0 && L1.mark === null && L1.warned.length === 1 && gateOf(L1.warned[0].includes('~/.vibespace could not be listed (EACCES: its permissions refuse the hub')) && L2.warned.length === 1 && gateOf(L2.warned[0].includes('data/ could not be listed (EACCES')) && L3.warned.length === 0,
       'B-574d follow 3 (xii) the HOME markers\' listing (~/.vibespace) and the owed markers\' (data/) refused (EACCES): each SAID, nothing acted on; a ~/.vibespace not there says nothing', { vs: L1.warned, data: L2.warned, none: L3.warned });
     const LV = "catch (e) { if (say && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.vibespace could not be listed", LD = "catch (e) { if (say && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: data/ could not be listed";
     const LMut = M574.load('src/server/home-rename.js', anchored(anchored(HRT, LV, "catch (e) { if (false && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.vibespace could not be listed", 'the HOME markers\' listing said'), LD, "catch (e) { if (false && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: data/ could not be listed", 'the owed markers\' listing said'), 'listings-silent');
@@ -4644,11 +4644,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const CR = chScenes(CH, 'xiii-real');
     ok(CR.refused.length === 0 && CR.gone.join() === 'olduser', 'B-574d follow 3 (xiii) the hook\'s own look at the old home: a refused stat (EACCES) names NO old user (not gone); «not there» names it', { refused: CR.refused, gone: CR.gone });
-    ok(CR.listed.length === 0 && CR.listSaid.length === 1 && CR.listSaid[0].includes('~/.claude/projects could not be listed (EIO)') && CR.noneSaid.length === 0, 'B-574d follow 3 (xiii) the projects listing refused (EIO): said, its old users wait; not there: nothing said', { said: CR.listSaid, none: CR.noneSaid });
+    ok(CR.listed.length === 0 && CR.listSaid.length === 1 && gateOf(CR.listSaid[0].includes('~/.claude/projects could not be listed (EIO)')) && CR.noneSaid.length === 0, 'B-574d follow 3 (xiii) the projects listing refused (EIO): said, its old users wait; not there: nothing said', { said: CR.listSaid, none: CR.noneSaid });
     ok(CR.cand.failed === 1 && CR.cand.unread === 1, 'B-574d follow 3 (xiii) a candidate folder\'s lstat refused while its verdicts are taken: a FAILED move (no marker, tried again) — never «no candidate», never «whole»', CR.cand);
     ok(CR.moved === 1 && CR.after.failed === 1 && CR.after.judged === 1 && CR.after.unread === 1, 'B-574d follow 3 (xiii) the listing refused AFTER the move ran: not whole (tried again) and THIS start\'s verdict kept (judged 1: its rewrite runs now) — never «nothing left, judged none» (a «kept» for good)', { moved: CR.moved, after: CR.after });
     ok(CR.src.failed === 1 && CR.src.unread === 1, 'B-574d follow 3 (xiii) an old folder\'s own lstat refused in the count of what is left: not known moved — failed (tried again)', CR.src);
-    ok(CR.newKept && CR.oldKept, 'B-574d follow 3 (xiii) a merge whose look at a name in the new folder is refused (EIO): the old transcript is NOT renamed over the new folder\'s own (merge, never overwrite) — it stays where it is', { newKept: CR.newKept, oldKept: CR.oldKept });
+    ok(gateOf(CR.newKept) && verdictOf(CR.oldKept), 'B-574d follow 3 (xiii) a merge whose look at a name in the new folder is refused (EIO): the old transcript is NOT renamed over the new folder\'s own (merge, never overwrite) — it stays where it is', { newKept: CR.newKept, oldKept: CR.oldKept });
     const CHM = M574.load('src/harnesses/claude-home.js', anchored(anchored(anchored(anchored(anchored(anchored(CHT,
       'const homeGoneOnDisk = (old) => absentOnDisk(`/home/${old}`);\n', 'const homeGoneOnDisk = (old) => !fs.existsSync(`/home/${old}`);\n', 'the hook\'s old home by its stat'),   // stale-pins: kept — follow 2's lines in the RED copy on purpose
       "catch (e) { if (say && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.claude/projects could not be listed", "catch (e) { if (false && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.claude/projects could not be listed", 'the projects listing said'),
@@ -4683,18 +4683,18 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const LREF = { refuse: ['lstatSync', path.sep + '-home-olduser-a', 'EIO'] };
     const X = await xScene(HR, CH, 'xiv-real', [LREF, LREF, LREF, LREF, {}]);
-    ok(X.slice(0, 4).every((x) => x.home === null && x.mark === null && x.layouts === LAY0 && !x.moved && x.warned.some((l) => l.includes('look(s) for the move of /home/olduser could not be made — -home-olduser-a (EIO: tried again at the next start) — no marker, nothing judged from them; tried again at every start')))
-      && X[4].moved && !!X[4].home && JSON.parse(X[4].home).judgedOld === 1 && X[4].layouts.includes('/home/userN/proj') && doneOf(X[4].mark) && !X[4].mark.kept,
+    ok(gateOf(X.slice(0, 4).every((x) => x.home === null && x.mark === null && x.layouts === LAY0 && !x.moved && x.warned.some((l) => l.includes('look(s) for the move of /home/olduser could not be made — -home-olduser-a (EIO: tried again at the next start) — no marker, nothing judged from them; tried again at every start'))))
+      && gateOf(X[4].moved) && !!X[4].home && JSON.parse(X[4].home).judgedOld === 1 && gateOf(X[4].layouts.includes('/home/userN/proj')) && gateOf(doneOf(X[4].mark)) && !X[4].mark.kept,
       'B-574d follow 3 (xiv) a candidate folder\'s look refused at FOUR starts (past the three tries): never «gave up» — no HOME marker, no data marker (never «kept»), nothing rewritten, said each start; the start that can look judges it old, moves it, marks the move (judged 1), cures the stores, marks done', { marks: X.map((x) => [x.home, x.mark]), said: X.map((x) => x.warned.length) });
     const GIVE = '        const gaveUp = !whole && !lookRefused && tries >= MOVE_TRIES;\n';
     const COUNTED = '          counted = !lookRefused && (!n0 || now() - at0 >= TRY_GAP_MS);   // follow 3: a REFUSED look is owed, never a try spent\n';
     const XMT = anchored(anchored(HRT, COUNTED, "          counted = !n0 || now() - at0 >= TRY_GAP_MS;   // MUTANT: follow 3's first form — a refused look spends a try\n", 'a refused look spends no try'),   // stale-pins: kept — follow 3's first form in the RED copy
       GIVE, "        const gaveUp = !whole && tries >= MOVE_TRIES;   // MUTANT: …and gives up\n", 'a refused look never gives up');   // stale-pins: kept — follow 3's first form in the RED copy
     const XM = await xScene(M574.load('src/server/home-rename.js', XMT, 'gives-up-on-refusal'), CH, 'xiv-red', [LREF, LREF, LREF, LREF, {}]);
-    ok(XM.slice(2).some((x) => !!x.mark && x.mark.kept === true) && XM[4].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: a refused look counts a try and gives up): the third start marks the move with «judged none» and the data half writes «kept» — the stores keep /home/olduser for good, the healed start does nothing — (xiv) goes red', { marks: XM.map((x) => x.mark) });
+    ok(gateOf(XM.slice(2).some((x) => !!x.mark && x.mark.kept === true)) && XM[4].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: a refused look counts a try and gives up): the third start marks the move with «judged none» and the data half writes «kept» — the stores keep /home/olduser for good, the healed start does nothing — (xiv) goes red', { marks: XM.map((x) => x.mark) });
     const CHT2 = fs.readFileSync(path.join(REPO_ROOT, 'src/harnesses/claude-home.js'), 'utf8');
     const XC = await xScene(HR, M574.load('src/harnesses/claude-home.js', anchored(CHT2, "    if (who === 'error') { const w = owners.why && owners.why.get(d); cannot(w ? w.name : d, w ? w.code : 'error'); continue; }\n", "    if (who === 'error') { failed++; continue; }   // MUTANT: a verdict not taken counted as a failed move only\n", 'a verdict not taken is a refused look'), 'ch-error-counted'), 'xiv-red2', [LREF, LREF, LREF, LREF, {}]);
-    ok(XC.slice(2).some((x) => !!x.mark && x.mark.kept === true) && XC[4].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the hook counts a verdict not taken as a failed move only): the move gives up, «kept» for good — (xiv) goes red on the hook\'s side too', { marks: XC.map((x) => x.mark) });
+    ok(gateOf(XC.slice(2).some((x) => !!x.mark && x.mark.kept === true)) && XC[4].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the hook counts a verdict not taken as a failed move only): the move gives up, «kept» for good — (xiv) goes red on the hook\'s side too', { marks: XC.map((x) => x.mark) });
     // (xv) the HOME marker read once a start: its SECOND read refused (a network HOME's EIO) is never asked — cured on the first read's verdict
     const secondRead = () => { const real = fs.readFileSync; let n = 0; fs.readFileSync = function (p, ...a) { if (String(p).endsWith(HMR) && ++n === 2) throw Object.assign(new Error('EIO: a placed refusal of the second read'), { code: 'EIO' }); return real.call(this, p, ...a); }; return () => { fs.readFileSync = real; }; };
     const oneRead = async (Mod, tag) => {   // the refusal placed around the start alone: the leg's own reads after it are the real ones
@@ -4706,7 +4706,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { warned, layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), mark: markOf(d) };
     };
     const O1 = await oneRead(HR, 'xv-real');
-    ok(O1.layouts.includes('/home/userN/proj') && doneOf(O1.mark) && !O1.mark.kept && O1.warned.length === 0, 'B-574d follow 3 (xv) the HOME marker read ONCE a start: a second read that would be refused is never made — cured on its verdict, marked done (never «kept»)', { mark: O1.mark, warned: O1.warned });
+    ok(gateOf(O1.layouts.includes('/home/userN/proj')) && gateOf(doneOf(O1.mark)) && !O1.mark.kept && O1.warned.length === 0, 'B-574d follow 3 (xv) the HOME marker read ONCE a start: a second read that would be refused is never made — cured on its verdict, marked done (never «kept»)', { mark: O1.mark, warned: O1.warned });
     const ONCE = '        const judgedOld = Math.max(!homeDone ? judgedAll : hmState.judged, prior ? prior.judgedOld : 0);\n';
     const OM = await oneRead(M574.load('src/server/home-rename.js', anchored(HRT, ONCE, "        const judgedOld = Math.max(!homeDone ? judgedAll : homeMarkerState(hm).judged, prior ? prior.judgedOld : 0);   // MUTANT: follow 3's first form — read again\n", 'the HOME marker read once'), 'home-read-twice'), 'xv-red');
     ok(!!OM.mark && OM.mark.kept === true && OM.layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the data half reads the HOME marker a second time): the refused second read is «judged none» — «kept» for good — (xv) goes red', { mark: OM.mark });
@@ -4715,10 +4715,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const OWEDM = JSON.stringify({ at: 1, owed: ['layouts.json'], judgedOld: 1 });
     const owedPre = ({ d, P }) => { fs.rmSync(path.dirname(P), { recursive: true, force: true }); fs.writeFileSync(path.join(d, NAME), OWEDM); };
     const [V1] = await xScene(HR, CH, 'xvi-real', [{ pre: owedPre }]);
-    ok(V1.layouts.includes('/home/userN/proj') && doneOf(V1.mark) && !V1.mark.kept && !!V1.home && JSON.parse(V1.home).judgedOld === 1, 'B-574d follow 3 (xvi) an owed rewrite whose projects folder is not there: nothing to move, the start goes on — layouts.json cured on the carried verdict, marked done, the HOME marker written with that verdict (judged 1)', { mark: V1.mark, home: V1.home, warned: V1.warned });
+    ok(gateOf(V1.layouts.includes('/home/userN/proj')) && gateOf(doneOf(V1.mark)) && !V1.mark.kept && !!V1.home && JSON.parse(V1.home).judgedOld === 1, 'B-574d follow 3 (xvi) an owed rewrite whose projects folder is not there: nothing to move, the start goes on — layouts.json cured on the carried verdict, marked done, the HOME marker written with that verdict (judged 1)', { mark: V1.mark, home: V1.home, warned: V1.warned });
     const MLIST = "  let names = []; try { names = fs.readdirSync(projectsDir); } catch { return 0; }\n  for (const d of names) {\n    if (owners.get(d) !== 'old') continue;";
     const [VM1] = await xScene(HR, M574.load('src/harnesses/claude-home.js', anchored(CHT2, MLIST, "  for (const d of fs.readdirSync(projectsDir)) {   // MUTANT: the release's unguarded listing\n    if (owners.get(d) !== 'old') continue;", 'the move\'s listing'), 'ch-move-throws'), 'xvi-red', [{ pre: owedPre }]);   // stale-pins: kept — the release's listing in the RED copy on purpose
-    ok(VM1.layouts === LAY0 && !doneOf(VM1.mark) && VM1.warned.some((l) => l.includes('home-rename check failed')), 'B-574d follow 3 RED (anchored copy: the hook\'s unguarded listing): the start throws and ends — the owed store is never cured, at any start — (xvi) goes red', { mark: VM1.mark, warned: VM1.warned });
+    ok(VM1.layouts === LAY0 && !doneOf(VM1.mark) && verdictOf(VM1.warned.some((l) => l.includes('home-rename check failed'))), 'B-574d follow 3 RED (anchored copy: the hook\'s unguarded listing): the start throws and ends — the owed store is never cured, at any start — (xvi) goes red', { mark: VM1.mark, warned: VM1.warned });
     // (xvii)–(xxii) follow 3's second read: (xvii) the tries record CARRIES the verdict a start took to the start that marks the move, and
     // NAMES its old user (a listing refused after the move ran: the next start finds nothing to name it by — the HOME marker then never
     // written, a second install over this HOME never rewriting); (xviii) a HOME marker that could not be written leaves the verdict in
@@ -4745,16 +4745,16 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const REF1 = { failed: 1, unread: 1, judged: 1, refused: [{ name: '~/.claude/projects', code: 'EIO' }] };
     const CARRYL = [{ named: true, moved: 1, left: REF1 }, { named: false, left: { failed: 0, judged: 0 } }, { named: false, second: true, left: { failed: 0, judged: 0 } }];
     const C3 = await fScene(HR, 'xvii-real', CARRYL);
-    ok(C3[0].home === null && !!C3[0].tries && JSON.parse(C3[0].tries).judgedOld === 1 && doneOf(C3[0].mark) && C3[0].layouts.includes('/home/userN/proj') && C3[0].warned.some((l) => l.includes('~/.claude/projects (EIO: tried again at the next start)'))
+    ok(C3[0].home === null && !!C3[0].tries && JSON.parse(C3[0].tries).judgedOld === 1 && gateOf(doneOf(C3[0].mark)) && gateOf(C3[0].layouts.includes('/home/userN/proj')) && gateOf(C3[0].warned.some((l) => l.includes('~/.claude/projects (EIO: tried again at the next start)')))
       && !!C3[1].home && JSON.parse(C3[1].home).judgedOld === 1 && C3[1].tries === null
-      && C3[2].layouts.includes('/home/userN/proj') && doneOf(C3[2].mark) && !C3[2].mark.kept,
+      && gateOf(C3[2].layouts.includes('/home/userN/proj')) && gateOf(doneOf(C3[2].mark)) && !C3[2].mark.kept,
       'B-574d follow 3 (xvii) the listing refused AFTER the move ran (judged 1): no HOME marker, the verdict in the tries record (said by name); the next start — nothing left to name the old user but the tries — marks the move WITH that verdict and removes the tries; a second install over this HOME then rewrites its stores (never «kept»)', { marks: C3.map((x) => [x.home, x.tries, x.mark]) });
     const NAMEBY = 'n.endsWith(triesTail) ? n.slice(head.length, n.length - triesTail.length) : null';
     const C3a = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, NAMEBY, 'null /* MUTANT: the tries name nobody */', 'the tries name their old user'), 'tries-name-nobody'), 'xvii-red1', CARRYL);
     ok(C3a[1].home === null && C3a[2].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the tries name nobody): the move is never marked and the second install never rewrites — (xvii) goes red', { marks: C3a.map((x) => [x.home, x.mark]) });
     const CARRYV = '        judgedAll = Math.max(judged, prevJudged);\n';
     const C3b = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, CARRYV, '        judgedAll = judged;   // MUTANT: the verdict not carried by the tries\n', 'the tries carry the verdict'), 'tries-verdict-dropped'), 'xvii-red2', CARRYL);
-    ok(!!C3b[1].home && JSON.parse(C3b[1].home).judgedOld === 0 && C3b[2].mark && C3b[2].mark.kept === true, 'B-574d follow 3 RED (anchored copy: the verdict not carried): the start that marks writes «judged none» and the second install writes «kept» — (xvii) goes red', { marks: C3b.map((x) => [x.home, x.mark]) });
+    ok(!!C3b[1].home && JSON.parse(C3b[1].home).judgedOld === 0 && gateOf(C3b[2].mark) && C3b[2].mark.kept === true, 'B-574d follow 3 RED (anchored copy: the verdict not carried): the start that marks writes «judged none» and the second install writes «kept» — (xvii) goes red', { marks: C3b.map((x) => [x.home, x.mark]) });
     // (xviii) the HOME marker's write refused (its sync, EIO): the tries record keeps this start's verdict for the next start
     ok(!!k1.tries && JSON.parse(k1.tries).judgedOld === 1, 'B-574d follow 3 (xviii) a HOME marker that could not be written leaves THIS start\'s verdict in the tries record (judged 1), for the next start to mark with', { tries: k1.tries });
     const FALLB = '              return replaceSyncedAsync(`${tf}.tmp`, tf, triesRecord(), log)   // the verdict kept for the next start (a full disk may refuse it too: said)\n'
@@ -4764,7 +4764,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // (xix) a TORN HOME marker and an OWED data marker with its own verdict (judged 1): the owed store is retried on it — cured, done
     const OWN1 = JSON.stringify({ at: 1, owed: ['layouts.json'], judgedOld: 1 });
     const [Y1] = await kScene(HR, 'xix-real', [{ home: TORNH, dm: OWN1 }]);
-    ok(Y1.layouts.includes('/home/userN/proj') && doneOf(Y1.mark) && !Y1.mark.kept && Y1.home === TORNH && Y1.warned.some((l) => l.includes('— not taken as judged; the owed rewrite runs on its own verdict')) && !Y1.warned.some((l) => l.includes('write {"judgedOld":')),   // follow 5: no hands on the own-verdict road
+    ok(gateOf(Y1.layouts.includes('/home/userN/proj')) && gateOf(doneOf(Y1.mark)) && !Y1.mark.kept && Y1.home === TORNH && gateOf(Y1.warned.some((l) => l.includes('— not taken as judged; the owed rewrite runs on its own verdict'))) && !Y1.warned.some((l) => l.includes('write {"judgedOld":')),   // follow 5: no hands on the own-verdict road
       'B-574d follow 3 (xix) a held HOME marker beside an OWED rewrite that carries its own verdict: the owed store retried on it — cured, marked done (never «kept»), the HOME marker never written over, said', { mark: Y1.mark, warned: Y1.warned });
     const [YR1] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, HELD, "      const unread = dmUnread || !!hmState.unreadable;   // MUTANT: follow 3's first form — a held HOME marker holds an owed rewrite too\n", 'an owed verdict runs past a held HOME marker'), 'owed-held-too'), 'xix-red', [{ home: TORNH, dm: OWN1 }]);
     ok(YR1.layouts === LAY0 && !doneOf(YR1.mark), 'B-574d follow 3 RED (anchored copy: a held HOME marker holds the owed rewrite too): layouts.json never retried, for good — (xix) goes red', { mark: YR1.mark });
@@ -4777,18 +4777,18 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // person can do (follow 3's first form read it as «no tries» and wrote over it at every start)
     const RENF = { named: true, moved: 0, left: { failed: 1, judged: 1 } };
     const Z = await fScene(HR, 'xxi-real', [RENF, RENF, RENF, RENF], { pre: ({ tf }) => fs.mkdirSync(tf) });
-    ok(Z.every((x) => x.home === null && x.tries === 'DIR' && x.warned.some((l) => l.includes(NAME + '.tries (EISDIR: a folder has its name: move the folder)')) && !x.warned.some((l) => l.includes('the tries could not be written'))),
+    ok(verdictOf(Z.every((x) => x.home === null && x.tries === 'DIR' && x.warned.some((l) => l.includes(NAME + '.tries (EISDIR: a folder has its name: move the folder)')) && !x.warned.some((l) => l.includes('the tries could not be written')))),
       'B-574d follow 3 (xxi) a folder in the tries record\'s name: HELD at every start — never written over, never «gave up», said by name with what a person can do', { said: Z.map((x) => x.warned) });
     const HELDT = "if (e && e.code && e.code !== 'ENOENT') triesHeld = e.code; }";
     const ZR = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, HELDT, 'void e; /* MUTANT: an unreadable tries record read as none */ }', 'a tries record that cannot be read is held'), 'tries-read-none'), 'xxi-red', [RENF, RENF], { pre: ({ tf }) => fs.mkdirSync(tf) });
-    ok(ZR.some((x) => x.warned.some((l) => l.includes('the tries could not be written'))), 'B-574d follow 3 RED (anchored copy: an unreadable tries record read as «no tries»): every start tries to write over it — (xxi) goes red', { said: ZR.map((x) => x.warned) });
+    ok(verdictOf(ZR.some((x) => x.warned.some((l) => l.includes('the tries could not be written')))), 'B-574d follow 3 RED (anchored copy: an unreadable tries record read as «no tries»): every start tries to write over it — (xxi) goes red', { said: ZR.map((x) => x.warned) });
     // (xxii) each guard of «a refused look never gives up», red ALONE: (a) refused looks spend no try — four refused starts, then a start
     // whose move truly fails counts its FIRST try (never gives up at once); (b) a refused look over a tries record already at its bound
     // never gives up (with «judged none»: «kept» for good)
     const REFJ = { named: true, moved: 0, left: { failed: 1, unread: 1, judged: 1, refused: [{ name: '-home-olduser-a', code: 'EIO' }] } };
     const GA = [REFJ, REFJ, REFJ, REFJ, RENF];
     const G5 = await fScene(HR, 'xxii-a-real', GA);
-    ok(G5[4].home === null && G5[4].warned.some((l) => l.includes('could not be moved — no marker; tried again at the next start (1 of 3)')), 'B-574d follow 3 (xxii a) four refused starts spend no try: the first start whose move truly fails counts try 1 of 3 — not marked', { said: G5[4].warned, tries: G5[4].tries });
+    ok(G5[4].home === null && verdictOf(G5[4].warned.some((l) => l.includes('could not be moved — no marker; tried again at the next start (1 of 3)'))), 'B-574d follow 3 (xxii a) four refused starts spend no try: the first start whose move truly fails counts try 1 of 3 — not marked', { said: G5[4].warned, tries: G5[4].tries });
     const G5R = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, COUNTED, "          counted = !n0 || now() - at0 >= TRY_GAP_MS;   // MUTANT: a refused look spends a try (the give-up guard kept)\n", 'a refused look spends no try'), 'refused-spends-try'), 'xxii-a-red', GA);   // stale-pins: kept — follow 3's first form in the RED copy
     ok(G5R[4].home !== null, 'B-574d follow 3 RED (anchored copy: refused looks spend tries, the give-up guard alone kept): the first true failure gives up AT ONCE and marks the move — (xxii a) goes red', { home: G5R[4].home });
     const BOUND = ({ tf }) => fs.writeFileSync(tf, JSON.stringify({ tries: 3, at: 0, judgedOld: 0 }));
@@ -4822,14 +4822,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const TDIR = ({ tf }) => fs.mkdirSync(tf), TGONE = ({ tf }) => fs.rmSync(tf, { recursive: true, force: true });
     const HSTARTS = [{}, { before: TGONE }, { second: true }];
     const A = await sScene(HR, 'xxiii-real', HSTARTS, { pre: TDIR });
-    ok(A[0].calls === 0 && A[0].home === null && A[0].tries === 'DIR' && !!A[1].home && JSON.parse(A[1].home).judgedOld === 1 && A[2].layouts.includes('/home/userN/proj') && doneOf(A[2].mark) && !A[2].mark.kept,
+    ok(A[0].calls === 0 && A[0].home === null && A[0].tries === 'DIR' && !!A[1].home && JSON.parse(A[1].home).judgedOld === 1 && gateOf(A[2].layouts.includes('/home/userN/proj')) && gateOf(doneOf(A[2].mark)) && !A[2].mark.kept,
       'B-574d follow 3 (xxiii) a folder in the tries record\'s name: NOTHING MOVES while it is held (no hook asked); the folder moved aside, the next start moves and marks with its real verdict (judged 1); a second install rewrites (never «kept»)', { calls: A.map((x) => x.calls), home: A[1].home });
     const MOVEG = '        if (!triesHeld) for (const hr of hrs) {\n';
     const AR = await sScene(M574.load('src/server/home-rename.js', anchored(HRT, MOVEG, '        for (const hr of hrs) {   // MUTANT: the move runs while the tries record is held\n', 'no move while the tries are held'), 'moves-while-held'), 'xxiii-red', HSTARTS, { pre: TDIR });
     ok(AR[0].calls === 1 && AR[1].home === null && AR[2].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the move runs while the tries record is held): its verdict is kept nowhere — no later start names the old user, the second install never rewrites — (xxiii) goes red', { home: AR.map((x) => x.home), second: AR[2].layouts });
     const DMDIR = ({ d }) => fs.mkdirSync(path.join(d, NAME)), DMGONE = ({ d }) => fs.rmSync(path.join(d, NAME), { recursive: true, force: true });
     const B4 = await sScene(HR, 'xxiv-real', [{}, { before: DMGONE }], { pre: DMDIR });
-    ok(B4[0].calls === 1 && B4[0].home === null && !!B4[0].tries && JSON.parse(B4[0].tries).judgedOld === 1 && B4[0].layouts === LAY0 && !!B4[1].home && JSON.parse(B4[1].home).judgedOld === 1 && B4[1].layouts.includes('/home/userN/proj') && doneOf(B4[1].mark),
+    ok(B4[0].calls === 1 && B4[0].home === null && !!B4[0].tries && JSON.parse(B4[0].tries).judgedOld === 1 && B4[0].layouts === LAY0 && !!B4[1].home && JSON.parse(B4[1].home).judgedOld === 1 && gateOf(B4[1].layouts.includes('/home/userN/proj')) && verdictOf(doneOf(B4[1].mark)),
       'B-574d follow 3 (xxiv) a WHOLE move beside a data marker that cannot be read (a folder in its name): the HOME marker waits and the tries keep its verdict (judged 1) and its old user; the marker made readable, the next start — the folders moved, no hook naming the old user — marks with that verdict and cures the stores', { tries: B4[0].tries, home: B4[1].home, mark: B4[1].mark });
     const WAITT = "            if (!prev || judgedAll > prevJudged || counted) writes.push(fs.promises.mkdir(path.dirname(hm), { recursive: true, mode: 0o700 }).then(() => replaceSyncedAsync(`${tf}.tmp`, tf, triesRecord(), log))   // only when it changed\n"
       + "              .catch((e) => log.warn(`[migrate] home rename: the tries could not be written (${e.message}) — this start's verdict is NOT kept: the next start judges the move again`)));\n";
@@ -4838,7 +4838,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const TORNT = '{"judgedOld":1,"tries":1,"at":0';   // the verdict first, as the product writes it
     const TTL = [{ named: false, left: { failed: 0, judged: 0 } }, { named: false, second: true, left: { failed: 0, judged: 0 } }];
     const TT = await fScene(HR, 'xxv-real', TTL, { pre: ({ tf }) => fs.writeFileSync(tf, TORNT) });
-    ok(TT[0].home === null && TT[0].mark === null && TT[0].tries === TORNT && TT[0].warned.some((l) => l.includes(NAME + '.tries (unparsable: its bytes do not parse: restore it from a backup — never move it aside')) && TT[1].mark === null && TT[1].layouts === LAY0,
+    ok(TT[0].home === null && TT[0].mark === null && TT[0].tries === TORNT && gateOf(TT[0].warned.some((l) => l.includes(NAME + '.tries (unparsable: its bytes do not parse: restore it from a backup — never move it aside'))) && TT[1].mark === null && TT[1].layouts === LAY0,
       'B-574d follow 3 (xxv) a TORN tries record (its verdict may be in it): HELD — nothing moves, no HOME marker with «judged none», no «kept» in either install, never written over, said with the one safe hand', { first: [TT[0].home, TT[0].mark, TT[0].warned], second: TT[1].mark });
     const TTR = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, "if (triesText.startsWith('{\"j')) triesHeld = 'unparsable'; else ", 'if (false) triesHeld = \'unparsable\'; else ', 'a torn tries record is held'), 'torn-tries-none'), 'xxv-red', TTL, { pre: ({ tf }) => fs.writeFileSync(tf, TORNT) });
     ok(!!TTR[0].mark && TTR[0].mark.kept === true, 'B-574d follow 3 RED (anchored copy: a torn tries record read as «no tries»): the move is marked with «judged none» and «kept» is written — (xxv) goes red', { mark: TTR[0].mark });
@@ -4847,7 +4847,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // copy failing is SAID — the HOME marker refused and the tries after it, and the tries while the HOME marker waits
     const LEGACYT = '{"tries":1,"at"';
     const LG = await fScene(HR, 'xxvi-real', [{ named: true, moved: 1, left: { failed: 0, judged: 1 } }], { pre: ({ tf }) => fs.writeFileSync(tf, LEGACYT) });
-    ok(!!LG[0].home && JSON.parse(LG[0].home).judgedOld === 1 && LG[0].tries === null && LG[0].warned.some((l) => l.includes('does not parse and carries no verdict (a count only) — read as none')),
+    ok(!!LG[0].home && JSON.parse(LG[0].home).judgedOld === 1 && LG[0].tries === null && verdictOf(LG[0].warned.some((l) => l.includes('does not parse and carries no verdict (a count only) — read as none'))),
       'B-574d follow 3 (xxvi) a torn tries record of the release (a count only): read as none and said — the move goes on and is marked with its verdict (judged 1), the record gone', { home: LG[0].home, warned: LG[0].warned });
     const TORNRULE = "if (triesText.startsWith('{\"j')) triesHeld = 'unparsable'; else ";
     const LGR = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, TORNRULE, "if (true) triesHeld = 'unparsable'; else ", 'only a record that carried a verdict is held torn'), 'torn-count-held'), 'xxvi-red', [{ named: true, moved: 1, left: { failed: 0, judged: 1 } }], { pre: ({ tf }) => fs.writeFileSync(tf, LEGACYT) });
@@ -4855,7 +4855,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const vsTmpRefused = async (fn) => { const P = fs.promises, o0 = P.open; P.open = async function (p, ...a) { const s = String(p); if (s.includes(path.sep + '.vibespace' + path.sep) && s.endsWith('.tmp')) throw Object.assign(new Error('EIO: a placed refusal of the open'), { code: 'EIO' }); return o0.call(this, p, ...a); }; try { return await fn(); } finally { P.open = o0; } };
     const SA = await vsTmpRefused(() => fScene(HR, 'xxvii-a', [{ named: true, moved: 1, left: { failed: 0, judged: 1 } }]));
     const SB = await vsTmpRefused(() => sScene(HR, 'xxvii-b', [{}], { pre: DMDIR }));
-    ok(SA[0].warned.some((l) => l.includes('the tries could not be written either (EIO')) && SB[0].warned.some((l) => l.includes('the tries could not be written (EIO: a placed refusal of the open) — this start\'s verdict is NOT kept')),
+    ok(gateOf(SA[0].warned.some((l) => l.includes('the tries could not be written either (EIO'))) && verdictOf(SB[0].warned.some((l) => l.includes('the tries could not be written (EIO: a placed refusal of the open) — this start\'s verdict is NOT kept'))),
       'B-574d follow 3 (xxvii) the verdict\'s last copy failing is SAID: the HOME marker refused and the tries after it («either»), and the tries while the HOME marker waits («NOT kept»)', { a: SA[0].warned, b: SB[0].warned });
     const SILA = "                .catch((e2) => log.warn(`[migrate] home rename: the tries could not be written either (${e2.message}) — this start's verdict is NOT kept: the next start judges the move again`));\n";
     const SILB = "              .catch((e) => log.warn(`[migrate] home rename: the tries could not be written (${e.message}) — this start's verdict is NOT kept: the next start judges the move again`)));\n";
@@ -4877,10 +4877,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { hits: p.hits(), moved, oldKept: fs.existsSync(path.join(P, '-home-olduser-a', 's1.jsonl')), destMade: fs.existsSync(path.join(P, '-home-userN-a')) }; };
     const DS = destScene(CH, 'xxviii-real');
     if (!DS.hits) skipF4('follow 4 (xxviii)', 'the destination folder was never looked at');
-    else ok(DS.oldKept && !DS.destMade, 'B-574d follow 4 (xxviii) the claude hook\'s whole-folder move: a refused look (EACCES) at the destination is NO free name — nothing is renamed onto it, the old folder stays (tried again)', DS);
+    else ok(gateOf(DS.oldKept) && !DS.destMade, 'B-574d follow 4 (xxviii) the claude hook\'s whole-folder move: a refused look (EACCES) at the destination is NO free name — nothing is renamed onto it, the old folder stays (tried again)', DS);
     { const DSx = destScene(M574.load('src/harnesses/claude-home.js', anchored(CHT, '      if (absentOnDisk(dst)) { fs.renameSync(src, dst); moved++; }', '      if (!fs.existsSync(dst)) { fs.renameSync(src, dst); moved++; }   /* RED: follow 3\'s exists call */', 'the destination by its stat'), 'f4-dest-exists'), 'xxviii-red');   // stale-pins: kept — follow 3's line in the RED copy
       if (!DSx.hits) skipF4('follow 4 (xxviii) RED', 'the copy never looked at the destination');
-      else ok(!DSx.oldKept && DSx.destMade, 'RED (anchored copy: follow 3\'s exists call): the refused look reads as free and the whole folder is renamed onto it — (xxviii) goes red', DSx); }
+      else ok(!DSx.oldKept && verdictOf(DSx.destMade), 'RED (anchored copy: follow 3\'s exists call): the refused look reads as free and the whole folder is renamed onto it — (xxviii) goes red', DSx); }
     // (xxix) the verdicts' own listing (ownersOf) refused while the count of what is left lists fine: not whole, never «judged none»
     const ownScene = (C, tag) => { const { h } = chWorld(tag); const p = refusingN('readdirSync', path.sep + 'projects', 'EIO'); let owners = null; try { owners = C.ownersOf(h, 'olduser'); } finally { p.undo(); }
       return { hits: p.hits(), left: C.leftAfterMove(h, 'olduser', 'userN', { owners }) }; };
@@ -4897,14 +4897,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const HDIR = { homeDir: true }, HNULL = 'null', HQUOTED = '{"judgedOld":"1"}', HNEG = '{"judgedOld":-1}', HAND = '{"judgedOld":1}', HAND0 = '{"judgedOld":0}';
     const [FD] = await kScene(HR, 'xxx-real', [HDIR]);
     if (!FD.reads) skipF4('follow 4 (xxx)', 'the HOME marker was never read');
-    else ok(FD.layouts === LAY0 && FD.mark === null && FD.warned.length === 1 && FD.warned[0].includes('could not be read (EISDIR: something else stands in its name: restore it from a backup — never move it aside'), 'B-574d follow 4 (xxx) a FOLDER in the HOME marker\'s name: HELD (nothing rewritten, no data marker), said with that case\'s words', { mark: FD.mark, warned: FD.warned });
+    else ok(FD.layouts === LAY0 && FD.mark === null && FD.warned.length === 1 && verdictOf(FD.warned[0].includes('could not be read (EISDIR: something else stands in its name: restore it from a backup — never move it aside')), 'B-574d follow 4 (xxx) a FOLDER in the HOME marker\'s name: HELD (nothing rewritten, no data marker), said with that case\'s words', { mark: FD.mark, warned: FD.warned });
     { const EIS = "code === 'EISDIR' || code === 'ENOTDIR' || code === 'ELOOP' ? `something else stands in its name: ${HOME_KEEP}` : ";
       const [FDx] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, EIS, '', 'the HOME marker\'s other-thing words'), 'f4-eisdir-words'), 'xxx-red', [HDIR]);
       if (!FDx.reads) skipF4('follow 4 (xxx) RED', 'the copy never read the HOME marker');
       else ok(FDx.warned.length === 1 && !FDx.warned[0].includes('something else stands in its name'), 'RED (anchored copy: no words for something else in its name): the folder is said as a refused read — (xxx) goes red', { warned: FDx.warned }); }
     const [NU] = await kScene(HR, 'xxxi-null', [{ home: HNULL }]), [NQ] = await kScene(HR, 'xxxi-quoted', [{ home: HQUOTED }]), [NN] = await kScene(HR, 'xxxi-neg', [{ home: HNEG }]);   // follow 5 (r5258): a count below 0 is no record either
     if (!NU.reads || !NQ.reads || !NN.reads) skipF4('follow 4 (xxxi)', 'the HOME marker was never read');
-    else ok([NU, NQ, NN].every((x) => x.layouts === LAY0 && x.mark === null && x.warned.length === 1 && x.warned[0].includes('could not be read (no-record: its bytes are no marker record')), 'B-574d follow 4 (xxxi) a HOME marker whose bytes are NO marker record — `null`, a count that is no number ({"judgedOld":"1"}), a count below 0 ({"judgedOld":-1}, follow 5) — HELD like torn bytes: never «judged none» (no «kept»)', { null: NU.warned, quoted: NQ.warned, negative: NN.warned });
+    else ok(verdictOf([NU, NQ, NN].every((x) => x.layouts === LAY0 && x.mark === null && x.warned.length === 1 && x.warned[0].includes('could not be read (no-record: its bytes are no marker record'))), 'B-574d follow 4 (xxxi) a HOME marker whose bytes are NO marker record — `null`, a count that is no number ({"judgedOld":"1"}), a count below 0 ({"judgedOld":-1}, follow 5) — HELD like torn bytes: never «judged none» (no «kept»)', { null: NU.warned, quoted: NQ.warned, negative: NN.warned });
     { const NOBJ = "  if (!j || typeof j !== 'object' || Array.isArray(j) || (has('judgedOld') ? !countOk(j.judgedOld) : !countOk(j.moved))) return { exists: true, judged: 0, unreadable: 'no-record' };";
       const MN = M574.load('src/server/home-rename.js', anchored(HRT, NOBJ, '  /* RED: a non-record read as a verdict */', 'a non-record is no verdict'), 'f4-null-marker');
       const [NUx] = await kScene(MN, 'xxxi-red-null', [{ home: HNULL }]), [NQx] = await kScene(MN, 'xxxi-red-quoted', [{ home: HQUOTED }]), [NNx] = await kScene(MN, 'xxxi-red-neg', [{ home: HNEG }]);
@@ -4913,9 +4913,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const [T1, T2] = await kScene(HR, 'xxxii-real', [{ home: TORNH }, { home: HAND }]);
     const T1HM = path.join(base, 'xxxii-real', 'home', 'userN', '.vibespace', NAME), T1DM = path.join(base, 'xxxii-real', 'data', NAME), T1PJ = path.join(base, 'xxxii-real', 'home', 'userN', '.claude', 'projects');   // the files the words must name, as kScene builds them
     if (!T1.reads) skipF4('follow 4 (xxxii)', 'the HOME marker was never read');
-    else ok(T1.mark === null && T1.warned.length === 1 && T1.warned[0].includes('ask the transcripts (a SIGN, not the hub\'s own judgement') && T1.warned[0].includes('an error of the grep is no answer') && T1.warned[0].includes('The marker speaks for EVERY data folder over this HOME') && T1.warned[0].includes(`grep -lF -e '"cwd":"/home/olduser/' -e '"cwd":"/home/olduser"' ${T1PJ}/*/*.jsonl prints a file`) && T1.warned[0].includes('write {"judgedOld":1} into ' + T1HM) && T1.warned[0].includes('<store>.pre-home-migrate') && T1.warned[0].includes('if it prints nothing, write {"judgedOld":0} into it')
-      && T1.warned[0].includes('A wrong 0 is undone by writing 1 into ' + T1HM + ' and removing ' + T1DM) && T1.warned[0].includes('a wrong 1 only with the hub STOPPED') && T1.warned[0].includes('written since that start') && T1.warned[0].includes('remove ' + T1DM + ', write {"judgedOld":0} into ' + T1HM + ', then start it')
-      && T2.reads > 0 && T2.layouts.includes('/home/userN/proj') && doneOf(T2.mark) && !T2.mark.kept,
+    else ok(T1.mark === null && T1.warned.length === 1 && gateOf(T1.warned[0].includes('ask the transcripts (a SIGN, not the hub\'s own judgement')) && gateOf(T1.warned[0].includes('an error of the grep is no answer')) && gateOf(T1.warned[0].includes('The marker speaks for EVERY data folder over this HOME')) && gateOf(T1.warned[0].includes(`grep -lF -e '"cwd":"/home/olduser/' -e '"cwd":"/home/olduser"' ${T1PJ}/*/*.jsonl prints a file`)) && gateOf(T1.warned[0].includes('write {"judgedOld":1} into ' + T1HM)) && gateOf(T1.warned[0].includes('<store>.pre-home-migrate')) && gateOf(T1.warned[0].includes('if it prints nothing, write {"judgedOld":0} into it'))
+      && gateOf(T1.warned[0].includes('A wrong 0 is undone by writing 1 into ' + T1HM + ' and removing ' + T1DM)) && gateOf(T1.warned[0].includes('a wrong 1 only with the hub STOPPED')) && gateOf(T1.warned[0].includes('written since that start')) && gateOf(T1.warned[0].includes('remove ' + T1DM + ', write {"judgedOld":0} into ' + T1HM + ', then start it'))
+      && T2.reads > 0 && gateOf(T2.layouts.includes('/home/userN/proj')) && gateOf(doneOf(T2.mark)) && !T2.mark.kept,
       'B-574d follow 4/5 (xxxii) a TORN HOME marker (an older release\'s plain write) is held with the hands a person can use, by the transcripts\' recorded cwd (the evidence the move judged by) — {"judgedOld":1} into the marker (its path named) when a conversation of the old home is there, the backups named; {"judgedOld":0} when none is; the way back from each wrong one — and the first cures this data folder at the next start (done, never «kept»)', { first: T1.warned, second: T2.mark });
     { const TORNW = "const homeHint = (code, who = null) => { const torn = who ? homeTorn(who.old, who.hm, who.dm, who.projects) : HOME_KEEP;";
       const [T1x] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, TORNW, "const homeHint = (code, who = null) => { const torn = HOME_KEEP;   /* RED: follow 3's words */", 'the torn marker\'s hand'), 'f4-torn-words'), 'xxxii-red', [{ home: TORNH }]);
@@ -4938,7 +4938,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     { const REN = '  try { await fs.promises.rename(tmp, final); } catch (e) { await fs.promises.unlink(tmp).catch(() => { }); throw e; }';
       const RRx = await renameRefused(() => hrScene(M574.load('src/server/home-rename.js', anchored(HRT, REN, '  await fs.promises.rename(tmp, final);   /* RED: follow 3\'s plain rename */', 'the temp removed at a failed rename'), 'f4-rename-tmp'), 'xxxiii-red', 'no-such-tail', null)), RRxh = hmOf(RRx.r);
       if (!RRx.hits) skipF4('follow 4 (xxxiii) RED', 'the copy never asked the HOME marker\'s rename');
-      else ok(RRxh.tmpLeft, 'RED (anchored copy: follow 3\'s plain rename): the temp stays behind — (xxxiii) goes red', { home: RRxh }); }
+      else ok(verdictOf(RRxh.tmpLeft), 'RED (anchored copy: follow 3\'s plain rename): the temp stays behind — (xxxiii) goes red', { home: RRxh }); }
     }
   } catch (e) { ok(false, `B-574d: the synced replace's legs could not run on this tree (${(e && e.stack) || e})`); }
   finally { fs.rmSync(base, { recursive: true, force: true }); }
@@ -4952,4 +4952,4 @@ async function waitLedger(dataDir, id) {   // r4456 (主开发's word): on its f
   let l = {};
   await untilFact(() => { l = read(); return !!(l.applied && l.applied[id]); }, `the stepped migration's ledger row ${id} (recorded at its write's landing)`);
   return l.applied && l.applied[id] ? { applied: l.applied[id], report: l.reports && l.reports[id] } : { applied: undefined, report: undefined };
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

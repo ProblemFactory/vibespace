@@ -49,7 +49,7 @@ const BE = require('../src/server/browser-env.js');
 const express = require('express');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -184,27 +184,27 @@ try {
   let r = await j('POST', '/api/agent/browser/new', { label: 'work' }, as(sA));
   const work = r.json && r.json.profile;
   // identity r3: `new` answers the AGENT's view (no owner / createdBy on the wire); the record the keeper holds is everyone's, created by conversation 1
-  ok(r.status === 200 && work && !('owner' in work) && !('createdBy' in work) && work.scope === 'all' && work.use && work.use.mode === 'all' && work.use.you === true && k.profile(work.id).owner.kind === 'instance' && k.profile(work.id).createdBy === KA, 'path A: conversation 1\'s agent `new work` ⇒ a profile every conversation can use (created by conversation 1; the answer is the agent\'s view)', r.json);
+  ok(r.status === 200 && gateOf(work) && !('owner' in work) && !('createdBy' in work) && work.scope === 'all' && gateOf(work.use) && work.use.mode === 'all' && work.use.you === true && k.profile(work.id).owner.kind === 'instance' && k.profile(work.id).createdBy === KA, 'path A: conversation 1\'s agent `new work` ⇒ a profile every conversation can use (created by conversation 1; the answer is the agent\'s view)', r.json);
   r = await j('POST', '/api/agent/browser/use', { profile: 'work' }, as(sA));
   const envA = r.json && r.json.env;
   ok(r.status === 200 && logOf('launches.log').length === 1 && logOf('launches.log')[0].profile === work.dir, 'conversation 1 attaches: the keeper launched the ONE browser on work\'s directory');
   r = await j('POST', '/api/agent/browser/use', { profile: 'work' }, as(sD));
   const envD = r.json && r.json.env;
-  ok(r.status === 200 && r.json.others === 1 && logOf('launches.log').length === 1 && Array.isArray(envD) && envD.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${work.id}`) && !envD.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')), 'path A: conversation 4 `use work` is ADMITTED (was not_owner) and JOINS the running browser — the same CDP endpoint, others 1, still ONE launch', r.json);
+  ok(r.status === 200 && r.json.others === 1 && logOf('launches.log').length === 1 && gateOf(Array.isArray(envD)) && gateOf(envD.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${work.id}`)) && !envD.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')), 'path A: conversation 4 `use work` is ADMITTED (was not_owner) and JOINS the running browser — the same CDP endpoint, others 1, still ONE launch', r.json);
   const cA = await runAs(envA, ['open', 'https://work.example/a']), cD = await runAs(envD, ['open', 'https://work.example/d']);
   ok(cA.status === 0 && cD.status === 0 && logOf('launches.log').length === 1 && !logOf('refused.log').length && logOf('connects.log').length === 2, 'both conversations\' commands run over the CDP url — two connections, one browser, no SingletonLock');
 
   // ── path B: the USER pins work for conversation 2 (rung D) in Session properties while conversation 1 runs it ──
   ok(sB._browserVariant === 'D' && be.resolvedProfileDir(KB) === be.scratchDirFor(KB), 'path B setup: conversation 2 spawned on rung D, its own config names only its OWN kept directory (lane browser-resume §3.9 — never a profile\'s)');
   r = await j('POST', '/api/browser/pin', { sessionId: 'sess-2', profile: 'work' });
-  ok(r.status === 200 && r.json.pin && r.json.pin.profileId === work.id && r.json.pin.by === 'user' && be.resolvedProfileDir(KB) === be.scratchDirFor(KB) && /opens "work"/.test(r.json.appliesFrom), 'path B: the user\'s pin names the profile and re-points NOTHING at its directory (the config still names only the conversation\'s own kept one)', r.json);
+  ok(r.status === 200 && gateOf(r.json.pin) && r.json.pin.profileId === work.id && r.json.pin.by === 'user' && be.resolvedProfileDir(KB) === be.scratchDirFor(KB) && verdictOf(/opens "work"/.test(r.json.appliesFrom)), 'path B: the user\'s pin names the profile and re-points NOTHING at its directory (the config still names only the conversation\'s own kept one)', r.json);
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://work.example/b'], wrapper: true }, as(sB));
   const envB = r.json && r.json.env;
-  ok(r.status === 200 && r.json.kind === 'attachment' && Array.isArray(envB) && envB.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${work.id}`) && logOf('launches.log').length === 1 && !k.ephemeralFor(KB), 'path B: conversation 2\'s first bare command opens its pin THROUGH THE KEEPER — kind attachment, the same browser\'s CDP url, NO second launch, no temporary browser started', r.json);
+  ok(r.status === 200 && r.json.kind === 'attachment' && gateOf(Array.isArray(envB)) && gateOf(envB.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${work.id}`)) && logOf('launches.log').length === 1 && !k.ephemeralFor(KB), 'path B: conversation 2\'s first bare command opens its pin THROUGH THE KEEPER — kind attachment, the same browser\'s CDP url, NO second launch, no temporary browser started', r.json);
   const cB = await runAs(envB, ['open', 'https://work.example/b']);
   ok(cB.status === 0 && !logOf('refused.log').length && logOf('launches.log').length === 1 && leasesOn(work.id).join() === [KA, KB, KD].sort().join() && k.leasesFor(KB).find((l) => l.profileId === work.id).via === 'pin', 'path B: its command runs in the one browser (no exit 21) — three conversations lease work; conversation 2\'s lease says the pin made it');
   const view = await k.streamPortFor(S.streamTargetFor({ browserKey: KB, set: k.setFor(KB), profiles: k.list().profiles }));
-  ok(view.ok && logOf('launches.log').length === 1 && !logOf('refused.log').length, 'path B: conversation 2\'s live view is answered on the same browser (the study\'s red "SingletonLock" live view)', view);
+  ok(gateOf(view.ok) && logOf('launches.log').length === 1 && !logOf('refused.log').length, 'path B: conversation 2\'s live view is answered on the same browser (the study\'s red "SingletonLock" live view)', view);
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sB));
   ok(r.status === 200 && r.json.kind === 'attachment', '…and its next bare command lands on the attachment the pin made (no pin kind twice, no profile_changed)', r.json);
 
@@ -221,13 +221,13 @@ try {
     ok(!k.pinFor(KFORK), 'CONTROL: before the copy the fork\'s key has no keeper pin — its bare command would open a temporary browser');
     const cp = k.copyPin(KB, KFORK);
     const parentPin = k.pinFor(KB);
-    ok(cp && cp.profileId === work.id && cp.by === parentPin.by && cp.at === parentPin.at && cp.origin === 'conversation' && k.pinFor(KFORK).profileId === work.id, 'copyPin: the fork\'s key now carries the parent\'s pin — the same by and at (no laundering), origin conversation', { cp, parentPin });
+    ok(gateOf(cp) && cp.profileId === work.id && cp.by === parentPin.by && cp.at === parentPin.at && cp.origin === 'conversation' && k.pinFor(KFORK).profileId === work.id, 'copyPin: the fork\'s key now carries the parent\'s pin — the same by and at (no laundering), origin conversation', { cp, parentPin });
     const setF = k.setFor(KFORK);
     ok(setF.pinId === work.id && B.resolveHandle({ set: setF }).kind === 'pin', 'the fork\'s empty set resolves to its pin (kind pin) — its first bare command opens the profile through the keeper');
     // an AGENT's pin copied stays an agent's: never an authorization
     k.setPin(KC, work.id, { origin: 'chosen', by: 'agent' });
     const cp2 = k.copyPin(KC, 'bk-0000d0f2');
-    ok(cp2 && cp2.by === 'agent' && cp2.origin === 'conversation', 'an agent\'s pin copied to a fork is still an agent\'s (a copy never launders who pinned)');
+    ok(gateOf(cp2) && cp2.by === 'agent' && cp2.origin === 'conversation', 'an agent\'s pin copied to a fork is still an agent\'s (a copy never launders who pinned)');
     k.setPin(KC, null); k.setPin('bk-0000d0f2', null); k.setPin(KFORK, null); live.delete(KFORK);
     ok(k.copyPin(KB, KB) === null && k.copyPin('bk-0000d0ff', KFORK) === null && !k.pinFor(KFORK), 'copyPin of a key onto itself / from a key with no pin copies nothing');
     // (the fork-pin wiring pin of src/ws-create.js: MOVED to the fast scripts/test-browser-share-model-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -238,7 +238,7 @@ try {
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
   const preRepoint = editAnchor(editAnchor(rsrc, '  const repoint = clearPinnedDir(k, f);\n', "  let repoint = null;\n  try { repoint = ctx.browserEnv?.()?.repointPin?.(f.browserKey, p ? p.dir : null) || null; } catch (e) { repoint = { ok: false, why: String(e && e.message) }; }\n", "src/routes/browser.js"),
     "    if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v, verb);\n", "    if (v.ok && v.kind === 'pin') v = { ...v, kind: 'none' };\n", "src/routes/browser.js"); // integration 2.369.192: the route threads S2's refused verb through attachPin
-  ok(preRepoint !== rsrc && preRepoint.includes("repointPin?.(f.browserKey, p ? p.dir : null)") && preRepoint.includes("v = { ...v, kind: 'none' };"), 'control: the patched copy carries both pre-ruling edits (the directory re-point, no pin branch)');
+  ok(preRepoint !== rsrc && gateOf(preRepoint.includes("repointPin?.(f.browserKey, p ? p.dir : null)")) && verdictOf(preRepoint.includes("v = { ...v, kind: 'none' };")), 'control: the patched copy carries both pre-ruling edits (the directory re-point, no pin branch)');
   {
     const Rpre = M.load('src/routes/browser.js', preRepoint, 'pre-ruling');
     Rpre.setup(ctxFor(k));
@@ -249,12 +249,12 @@ try {
     const namesDir = be.resolvedProfileDir(KF) === work.dir;
     rc = await jp('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://work.example/f'], wrapper: true }, as(sF));
     const refused = logOf('refused.log');
-    ok(namesDir && rc.status >= 400 && rc.json.code === 'launch_failed' && refused.length === 1 && refused[0].sess === 'vs-' + KF && refused[0].prof === work.dir && logOf('launches.log').length === L0, `CONTROL: the pre-ruling route re-points conversation 6's config at work's directory and its own browser dies on the lock (the binary: "Chrome exited early (exit code: 21) … SingletonLock: File exists"; the route: ${rc.json && rc.json.code}) — the path-B legs above can go red`, rc.json);
+    ok(gateOf(namesDir) && rc.status >= 400 && rc.json.code === 'launch_failed' && refused.length === 1 && refused[0].sess === 'vs-' + KF && refused[0].prof === work.dir && logOf('launches.log').length === L0, `CONTROL: the pre-ruling route re-points conversation 6's config at work's directory and its own browser dies on the lock (the binary: "Chrome exited early (exit code: 21) … SingletonLock: File exists"; the route: ${rc.json && rc.json.code}) — the path-B legs above can go red`, rc.json);
     await new Promise((res) => s2.close(res));
     // put conversation 6 back the way the ruling's boot conversion does (and prove it) for the legs below
     R.setup(ctxFor(k));
     const n = R.convertPinnedDirs();
-    ok(n === 1 && be.resolvedProfileDir(KF) === be.scratchDirFor(KF) && k.pinFor(KF) && k.pinFor(KF).profileId === work.id, 'the boot conversion puts the pre-ruling pinned conversation back on its own browser (the pin stays — it is the default attachment now)');
+    ok(n === 1 && be.resolvedProfileDir(KF) === be.scratchDirFor(KF) && gateOf(k.pinFor(KF)) && k.pinFor(KF).profileId === work.id, 'the boot conversion puts the pre-ruling pinned conversation back on its own browser (the pin stays — it is the default attachment now)');
     await dropEphemeral(KF);
     await j('POST', '/api/browser/pin', { sessionId: 'sess-6', profile: null });
   }
@@ -266,8 +266,8 @@ try {
   await j('POST', '/api/browser/pin', { sessionId: 'sess-6', profile: 'Broken' });
   const L1 = logOf('launches.log').length;
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://x.example/'], wrapper: true }, as(sF));
-  ok(r.status === 502 && r.json.code === 'launch_failed' && r.json.pinned === true && r.json.pinnedProfile && r.json.pinnedProfile.label === 'Broken' && /your pinned profile "Broken" did not open/.test(r.json.error) && /nothing else was opened instead/.test(r.json.error) && !k.ephemeralFor(KF) && logOf('launches.log').length === L1, 'a pin that does not open is a TYPED refusal naming the pin (pinned:true) — no temporary browser is started instead', r.json);
-  ok(k.statusFor(KF).pinFailure && k.statusFor(KF).pinFailure.code === 'launch_failed' && k.statusFor(KF).pinFailure.label === 'Broken', '…and the conversation\'s facts record it (statusFor.pinFailure — the chip / Session properties read it)');
+  ok(r.status === 502 && r.json.code === 'launch_failed' && r.json.pinned === true && gateOf(r.json.pinnedProfile) && r.json.pinnedProfile.label === 'Broken' && gateOf(/your pinned profile "Broken" did not open/.test(r.json.error)) && gateOf(/nothing else was opened instead/.test(r.json.error)) && !k.ephemeralFor(KF) && logOf('launches.log').length === L1, 'a pin that does not open is a TYPED refusal naming the pin (pinned:true) — no temporary browser is started instead', r.json);
+  ok(gateOf(k.statusFor(KF).pinFailure) && k.statusFor(KF).pinFailure.code === 'launch_failed' && k.statusFor(KF).pinFailure.label === 'Broken', '…and the conversation\'s facts record it (statusFor.pinFailure — the chip / Session properties read it)');
   ok(!CMDLINE_RE.test(r.json.error), '…with no command line in its words', r.json.error);
   {
     const loud = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
@@ -288,24 +288,24 @@ try {
   // ── lane browser-windows (U2): NO DRIVER CLAIM — two conversations act on one profile's browser at the same time ──
   facts[KA].turn = 'running'; facts[KB].turn = 'running'; facts[KD].turn = 'idle';
   let v = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(v.ok && v.kind === 'attachment' && !('drivers' in k.list()), 'conversation 1 resolves on work; the digest carries no `drivers` (the claim is gone — nothing to relay)');
+  ok(gateOf(v.ok) && v.kind === 'attachment' && !('drivers' in k.list()), 'conversation 1 resolves on work; the digest carries no `drivers` (the claim is gone — nothing to relay)');
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sB));
   ok(r.status === 200 && r.json.kind === 'attachment' && r.json.code === undefined, 'conversation 2\'s command while conversation 1 is mid-turn on the SAME browser resolves — no browser_busy (measured: one daemon each, 4 ms beside a running wait)', r.json);
   v = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(v.ok, '…and conversation 1 right after it — nobody waits for anybody');
+  ok(verdictOf(v.ok), '…and conversation 1 right after it — nobody waits for anybody');
   const rowB = S.browserListFor(k.statusFor(KB)).find((x) => x.profileId === work.id);
-  ok(rowB && rowB.driver === 'agent' && rowB.driverKey === null && rowB.owners === 2, 'the strip: conversation 2\'s entry is ITS window, held by its agent (never "another conversation drives it"); two others hold the profile', rowB);
+  ok(gateOf(rowB) && rowB.driver === 'agent' && rowB.driverKey === null && rowB.owners === 2, 'the strip: conversation 2\'s entry is ITS window, held by its agent (never "another conversation drives it"); two others hold the profile', rowB);
   // the LEGACY shared window (this keeper opened none — a browser started before this lane): a takeover still takes the
   // others IN that window with it (they share one window: the user's hands move what they see) — fail closed, as before
   const to = k.takeover({ browserKey: KB, profileId: work.id, viewerId: 'viewer-b', sessionId: 'sess-2' });
   const vB = k.resolveFor({ browserKey: KB, handle: 'work' }), vA = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(to && to.ok !== false && vB.code === 'browser_paused' && vA.code === 'browser_paused' && /the shared window of the "work" browser \(your tab is in it\)/.test(vA.error), 'a SHARED window (no window of their own — an older browser run): the takeover from conversation 2\'s view takes conversation 1, in the same window, WITH it (browser_paused, the words name THE SHARED window — verify r2 ⑦, never "your window")', { to, vB: vB.code, vA });
+  ok(gateOf(to) && to.ok !== false && vB.code === 'browser_paused' && vA.code === 'browser_paused' && verdictOf(/the shared window of the "work" browser \(your tab is in it\)/.test(vA.error)), 'a SHARED window (no window of their own — an older browser run): the takeover from conversation 2\'s view takes conversation 1, in the same window, WITH it (browser_paused, the words name THE SHARED window — verify r2 ⑦, never "your window")', { to, vB: vB.code, vA });
   ok((k.statusFor(KA).leases.find((l) => l.profileId === work.id) || {}).driver?.browserKey === KB, 'who drives conversation 1\'s window names conversation 2 — the view the user drives FROM', k.statusFor(KA).leases.map((l) => l.driver));
   const rowA = S.browserListFor(k.statusFor(KA)).find((x) => x.profileId === work.id);
-  ok(rowA && rowA.driver === 'other-user' && rowA.driverKey === KB, 'the strip of conversation 1 says the user drives its (shared) window in conversation 2\'s view', rowA);
+  ok(gateOf(rowA) && rowA.driver === 'other-user' && rowA.driverKey === KB, 'the strip of conversation 1 says the user drives its (shared) window in conversation 2\'s view', rowA);
   k.handback({ browserKey: KB, profileId: work.id, viewerId: 'viewer-b', cause: 'explicit', sessionId: 'sess-2' });
   v = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(v.ok, 'the handback frees it — conversation 1 acts again');
+  ok(verdictOf(v.ok), 'the handback frees it — conversation 1 acts again');
   facts[KA].turn = 'idle'; facts[KB].turn = 'idle';
   // ── lane browser-windows (U1 + U2): A WINDOW PER HOLDER — a keeper whose window seam answers ──
   {
@@ -321,24 +321,24 @@ try {
     const inst = WIN.instanceOf(kw.browserOf(pw.id));
     const lw = kw.leasesOn(pw.id);
     const binds = logOf('binds.log').slice(b0);
-    ok(opened.length === 2 && lw.length === 2 && lw.every((l) => l.windowIn === inst) && binds.length === 2 && binds.map((x) => x.sess).sort().join() === ['vs-' + KA, 'vs-' + KB].sort().join() && binds.every((x) => opened.some((o) => o.targetId === x.targetId)), 'U1: each NEW lease gets a window of its own at its attach — the keeper opens it over the browser\'s own endpoint and binds THAT conversation\'s session to its tab (`tab <targetId>`) before its first command', { opened: opened.map((o) => o.targetId.slice(0, 5)), binds, windowIn: lw.map((l) => l.windowIn) });
+    ok(opened.length === 2 && lw.length === 2 && gateOf(lw.every((l) => l.windowIn === inst)) && binds.length === 2 && binds.map((x) => x.sess).sort().join() === ['vs-' + KA, 'vs-' + KB].sort().join() && verdictOf(binds.every((x) => opened.some((o) => o.targetId === x.targetId))), 'U1: each NEW lease gets a window of its own at its attach — the keeper opens it over the browser\'s own endpoint and binds THAT conversation\'s session to its tab (`tab <targetId>`) before its first command', { opened: opened.map((o) => o.targetId.slice(0, 5)), binds, windowIn: lw.map((l) => l.windowIn) });
     await kw.attach({ profileId: pw.id, browserKey: KA, sessionId: 'sess-1' });
     ok(opened.length === 2, 'a re-attach of a lease that already has its window in this browser run opens nothing more');
     facts[KA].turn = 'running'; facts[KB].turn = 'running';
     const tw = kw.takeover({ browserKey: KB, profileId: pw.id, viewerId: 'viewer-w', sessionId: 'sess-2' });
     const wB = kw.resolveFor({ browserKey: KB, handle: 'windows' }), wA = kw.resolveFor({ browserKey: KA, handle: 'windows' });
-    ok(tw && tw.ok !== false && wB.code === 'browser_paused' && /your window of the "Windows" browser/.test(wB.error) && wA.ok && wA.kind === 'attachment', 'U2: the user takes over conversation 2\'s WINDOW — conversation 2 is browser_paused (named: "your window of the "Windows" browser"), conversation 1 in its own window RUNS ON (userW\'s D-payments)', { tw, wB: wB.code, wA: wA.code });
+    ok(gateOf(tw) && tw.ok !== false && wB.code === 'browser_paused' && gateOf(/your window of the "Windows" browser/.test(wB.error)) && gateOf(wA.ok) && wA.kind === 'attachment', 'U2: the user takes over conversation 2\'s WINDOW — conversation 2 is browser_paused (named: "your window of the "Windows" browser"), conversation 1 in its own window RUNS ON (userW\'s D-payments)', { tw, wB: wB.code, wA: wA.code });
     ok((kw.statusFor(KA).leases.find((l) => l.profileId === pw.id) || {}).driver === null && S.browserListFor(kw.statusFor(KA)).find((x) => x.profileId === pw.id).driver === 'agent', '…conversation 1\'s window is driven by nobody but its agent; its strip entry says so');
     const tw2 = kw.takeover({ browserKey: KA, profileId: pw.id, viewerId: 'viewer-w2', sessionId: 'sess-1' });
-    ok(tw2 && tw2.ok !== false && kw.resolveFor({ browserKey: KA, handle: 'windows' }).code === 'browser_paused', 'ONE WINDOW, ONE HOLDER per window: a second view takes over conversation 1\'s window while the first still drives conversation 2\'s — two windows driven at once, never `held` across windows', tw2);
+    ok(gateOf(tw2) && tw2.ok !== false && kw.resolveFor({ browserKey: KA, handle: 'windows' }).code === 'browser_paused', 'ONE WINDOW, ONE HOLDER per window: a second view takes over conversation 1\'s window while the first still drives conversation 2\'s — two windows driven at once, never `held` across windows', tw2);
     kw.handback({ browserKey: KA, profileId: pw.id, viewerId: 'viewer-w2', cause: 'explicit', sessionId: 'sess-1' });
     // a conversation attached WHILE the user drives another's window gets its own window and is never paused from birth
     await kw.attach({ profileId: pw.id, browserKey: KD, sessionId: 'sess-4' });
     facts[KD].turn = 'running';
     const wD = kw.resolveFor({ browserKey: KD, handle: 'windows' });
-    ok(opened.length === 3 && wD.ok && kw.inputStateFor(KD, pw.id).input !== 'user', 'a lease attached during another window\'s takeover gets a window of its own and is NOT paused from birth (only a lease in the driven window joins it)', { wD: wD.code, input: kw.inputStateFor(KD, pw.id).input });
+    ok(opened.length === 3 && gateOf(wD.ok) && kw.inputStateFor(KD, pw.id).input !== 'user', 'a lease attached during another window\'s takeover gets a window of its own and is NOT paused from birth (only a lease in the driven window joins it)', { wD: wD.code, input: kw.inputStateFor(KD, pw.id).input });
     kw.handback({ browserKey: KB, profileId: pw.id, viewerId: 'viewer-w', cause: 'explicit', sessionId: 'sess-2' });
-    ok(kw.resolveFor({ browserKey: KB, handle: 'windows' }).ok, 'the handback of conversation 2\'s window frees it');
+    ok(verdictOf(kw.resolveFor({ browserKey: KB, handle: 'windows' }).ok), 'the handback of conversation 2\'s window frees it');
     // a window the session could not be bound to is closed again, and the lease is left to its first command (never a stray window)
     const closedT = [];
     const kx = mkKeeper(K, { dataDir: path.join(ROOT, 'data-windows-x'), openWindow: async () => ({ ok: true, targetId: 'E'.repeat(32), windowId: 1 }), closeTarget: async (u, id) => { closedT.push(id); return { ok: true }; } });
@@ -348,7 +348,7 @@ try {
     await kx.attach({ profileId: px.id, browserKey: KF, sessionId: 'sess-6' }).catch(() => null);
     fs.rmSync(path.join(AB, 'refuse-bind'), { force: true });
     const lx = kx.leasesOn(px.id).find((l) => l.browserKey === KF);
-    ok(closedT.length === 1 && closedT[0] === 'E'.repeat(32) && lx && !lx.windowIn, 'a window its session could not be bound to is CLOSED again (never left to nobody) and the lease is left to its first command (no window recorded)', { closedT, windowIn: lx && lx.windowIn });
+    ok(closedT.length === 1 && closedT[0] === 'E'.repeat(32) && gateOf(lx) && !lx.windowIn, 'a window its session could not be bound to is CLOSED again (never left to nobody) and the lease is left to its first command (no window recorded)', { closedT, windowIn: lx && lx.windowIn });
     await kx.stop(px.id).catch(() => { }); kx.shutdown();
     facts[KA].turn = 'idle'; facts[KB].turn = 'idle'; facts[KD].turn = 'idle';
     // CONTROL: the pre-lane rule (every lease of the profile is a mate) — the per-window leg goes red
@@ -373,16 +373,16 @@ try {
   await k.attach({ profileId: other.id, browserKey: KC, sessionId: 'sess-3' });
   k.setCap(KC, 1);
   let e = await threw(() => k.attach({ profileId: work.id, browserKey: KC, sessionId: 'sess-3' }));
-  ok(e && e.code === 'browser_cap' && e.scope === 'conversation' && e.capOwn === 1 && e.capOf === 1, 'the cap: joining the SHARED work browser counts in conversation 3\'s own cap (1 of 1 already running ⇒ browser_cap scope conversation)', e && e.message);
+  ok(gateOf(e) && e.code === 'browser_cap' && e.scope === 'conversation' && e.capOwn === 1 && e.capOf === 1, 'the cap: joining the SHARED work browser counts in conversation 3\'s own cap (1 of 1 already running ⇒ browser_cap scope conversation)', e && e.message);
   k.setCap(KC, null);
   const Lc = logOf('launches.log').length;
   const liveN = Object.values(k.list().browsers).filter((b) => b && (b.state === 'ready' || b.state === 'starting')).length;
   lim.CONCURRENT_CAP = liveN; // the machine is AT its ceiling now
   const jn = await k.attach({ profileId: work.id, browserKey: KC, sessionId: 'sess-3' });
-  ok(jn && jn.others === 3 && logOf('launches.log').length === Lc && k.ownLive(KC) === 2, `a join never trips the MACHINE ceiling (${liveN} live browsers at a ceiling of ${liveN} — work is already one of them): conversation 3 now holds 2 (work + Other), nothing launched`, { others: jn && jn.others, own: k.ownLive(KC) });
+  ok(gateOf(jn) && jn.others === 3 && logOf('launches.log').length === Lc && k.ownLive(KC) === 2, `a join never trips the MACHINE ceiling (${liveN} live browsers at a ceiling of ${liveN} — work is already one of them): conversation 3 now holds 2 (work + Other), nothing launched`, { others: jn && jn.others, own: k.ownLive(KC) });
   r = await j('POST', '/api/browser/profiles', { label: 'Third' });
   e = await threw(() => k.attach({ profileId: r.json.profile.id, browserKey: KC, sessionId: 'sess-3' }));
-  ok(e && e.code === 'cap' && e.scope === 'machine' && logOf('launches.log').length === Lc, 'CONTROL: at the same ceiling a profile whose browser is NOT running is refused (cap, machine) — the join leg above is not a ceiling that never refuses', e && e.message);
+  ok(gateOf(e) && e.code === 'cap' && e.scope === 'machine' && logOf('launches.log').length === Lc, 'CONTROL: at the same ceiling a profile whose browser is NOT running is refused (cap, machine) — the join leg above is not a ceiling that never refuses', e && e.message);
   lim.CONCURRENT_CAP = 6;
 
   // ── lane browser-windows (U4): the machine's ceiling is the SETTING `browser.maxRunning` (read at every start) ──
@@ -395,10 +395,10 @@ try {
     ok(kc.list().cap.cap === LIMITS.CONCURRENT_CAP && kc.list().cap.setting === 'browser.maxRunning' && kc.statusFor(KA).cap.machine.cap === LIMITS.CONCURRENT_CAP, `U4: unset ⇒ the ceiling is the keeper's CONCURRENT_CAP (${LIMITS.CONCURRENT_CAP}); the digest names the setting it reads`, kc.list().cap);
     capSetting = 1;
     const ec = await threw(() => kc.attach({ profileId: c2.id, browserKey: KB, sessionId: 'sess-2' }));
-    ok(ec && ec.code === 'cap' && ec.scope === 'machine' && /\(1\/1 running/.test(ec.message) && kc.list().cap.cap === 1 && kc.statusFor(KA).cap.machine.cap === 1, 'U4: browser.maxRunning = 1 ⇒ a second browser is refused BY NAME at the next start ("1/1 running"), the digest and the strip\'s machine count read 1', ec && ec.message);
+    ok(gateOf(ec) && ec.code === 'cap' && ec.scope === 'machine' && gateOf(/\(1\/1 running/.test(ec.message)) && kc.list().cap.cap === 1 && kc.statusFor(KA).cap.machine.cap === 1, 'U4: browser.maxRunning = 1 ⇒ a second browser is refused BY NAME at the next start ("1/1 running"), the digest and the strip\'s machine count read 1', ec && ec.message);
     capSetting = 2;
     await kc.attach({ profileId: c2.id, browserKey: KB, sessionId: 'sess-2' });
-    ok(kc.browserOf(c2.id) && kc.browserOf(c2.id).state === 'ready' && kc.list().cap.cap === 2, 'U4: raised to 2 ⇒ it starts — the setting is read at every start, no restart');
+    ok(gateOf(kc.browserOf(c2.id)) && kc.browserOf(c2.id).state === 'ready' && kc.list().cap.cap === 2, 'U4: raised to 2 ⇒ it starts — the setting is read at every start, no restart');
     capSetting = 1;
     await sleep(20);
     ok(kc.browserOf(c1.id).state === 'ready' && kc.browserOf(c2.id).state === 'ready' && kc.list().cap.used === 2 && kc.list().cap.cap === 1, 'U4: lowered BELOW what runs ⇒ nothing is stopped (the next start is refused) — 2 running at a ceiling of 1');
@@ -414,14 +414,14 @@ try {
   const n0 = notices.length;
   const useOf = async () => j('GET', `/api/browser/profiles/${work.id}/use`);
   const u0 = await useOf();
-  ok(u0.status === 200 && u0.json.use.mode === 'all' && typeof u0.json.base === 'string' && u0.json.usedBy.filter((x) => x.leased).length === 4 && (u0.json.usedBy.find((x) => x.key === KB) || {}).taskIds.join() === 'T-G' && u0.json.createdBy && u0.json.createdBy.key === KA, 'GET …/use (FRESH): everyone\'s, the base stamp, who uses it now with each holder\'s Task Groups, the conversation that made it', u0.json);
+  ok(u0.status === 200 && u0.json.use.mode === 'all' && typeof u0.json.base === 'string' && u0.json.usedBy.filter((x) => x.leased).length === 4 && (u0.json.usedBy.find((x) => x.key === KB) || {}).taskIds.join() === 'T-G' && gateOf(u0.json.createdBy) && u0.json.createdBy.key === KA, 'GET …/use (FRESH): everyone\'s, the base stamp, who uses it now with each holder\'s Task Groups, the conversation that made it', u0.json);
   // int347: since lane grants-unify (.346) the reader reads the record's ROW (`grantUse`, the grants store's mirror) — a base
   // built from `owner` stamps "nobody"; the stale base is spelled the way the reader reads a list kept to First chat
   const staleBase = B.useStamp({ grantUse: { to: [{ kind: 'conversation', key: KA, browserKey: KA }], except: [] } });
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }] }, base: staleBase });
-  ok(r.status === 409 && r.json.code === 'list-changed' && r.json.added.includes('mode:all') && r.json.removed.includes('session:' + KA) && B.whoMayUse(k.profile(work.id)).mode === 'all' && leasesOn(work.id).length === 4, 'a stale base (the dialog read another list): 409 list-changed naming what differs — NOTHING written, nobody detached', r.json);
+  ok(r.status === 409 && r.json.code === 'list-changed' && gateOf(r.json.added.includes('mode:all')) && gateOf(r.json.removed.includes('session:' + KA)) && B.whoMayUse(k.profile(work.id)).mode === 'all' && leasesOn(work.id).length === 4, 'a stale base (the dialog read another list): 409 list-changed naming what differs — NOTHING written, nobody detached', r.json);
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { scope: 'one', conversation: KA });
-  ok(r.status === 400 && r.json.code === 'bad-request' && /send `use`/.test(r.json.error), 'the 2.369.194 body (`scope` / `conversation`) is refused by name — "send `use`"', r.json);
+  ok(r.status === 400 && r.json.code === 'bad-request' && verdictOf(/send `use`/.test(r.json.error)), 'the 2.369.194 body (`scope` / `conversation`) is refused by name — "send `use`"', r.json);
   const refusedCodes = [];
   for (const who of [[], [{ kind: 'task', id: 'T-NOPE' }], [{ kind: 'session', key: 'bk-0000dead' }], [{ kind: 'session', session: 'sess-nope' }]]) refusedCodes.push((await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who }, base: u0.json.base })).json.code);
   ok(refusedCodes.join() === 'empty_list,unknown_task,unknown_conversation,session-gone' && B.whoMayUse(k.profile(work.id)).mode === 'all', 'refused BY NAME, nothing written: an empty list, a Task Group the store does not list, a key this profile never met, a picked session that is gone', refusedCodes);
@@ -431,13 +431,13 @@ try {
   active.set('sess-remote', { ...mkSession('sess-remote', 'bk-0000c0ee', 'Remote chat'), host: 'box' });
   const rk = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'session', session: 'sess-1' }, { kind: 'session', session: 'sess-nokey' }] }, base: u0.json.base });
   const rr = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'session', session: 'sess-remote' }] }, base: u0.json.base });
-  ok(rk.status === 409 && rk.json.code === 'no_browser_key' && rk.json.name === 'Keyless chat' && /has no browser of its own yet — restart it \(Terminate → Resume\), then add it/.test(rk.json.error) && rr.status === 409 && rr.json.code === 'no_browser_key' && rr.json.why === 'remote' && B.whoMayUse(k.profile(work.id)).mode === 'all', 'the resolver: a key-less live session ⇒ no_browser_key naming it ("restart it, then add it"), a session on another machine ⇒ no_browser_key why remote — and First chat, resolvable, was NOT written either (one refusal, nothing saved)', [rk.json, rr.json]);
+  ok(rk.status === 409 && rk.json.code === 'no_browser_key' && rk.json.name === 'Keyless chat' && gateOf(/has no browser of its own yet — restart it \(Terminate → Resume\), then add it/.test(rk.json.error)) && rr.status === 409 && rr.json.code === 'no_browser_key' && rr.json.why === 'remote' && B.whoMayUse(k.profile(work.id)).mode === 'all', 'the resolver: a key-less live session ⇒ no_browser_key naming it ("restart it, then add it"), a session on another machine ⇒ no_browser_key why remote — and First chat, resolvable, was NOT written either (one refusal, nothing saved)', [rk.json, rr.json]);
   active.delete('sess-nokey'); active.delete('sess-remote');
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', session: 'sess-1' }] }, base: u0.json.base });
   // int347: lane grants-unify's digest row names the conversation key the store holds (`conversationId`; a keeper built
   // alone judges a browser key as its own conversation)
   ok(r.status === 200 && r.json.profile.scope === 'only' && JSON.stringify(r.json.profile.use.who) === JSON.stringify([{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA, conversationId: KA }]) && r.json.detached.map((d) => d.browserKey).join() === KD && r.json.undecided.join() === KC && leasesOn(work.id).join() === [KA, KB, KC].sort().join(), '"Only these: Task Group G, First chat" (First chat picked as a live session — the ONE resolver gives its key): First chat and Second chat (in G) KEEP their tabs; Fourth chat (in H) is detached; Third chat — its Task Groups unreadable — is KEPT and reported undecided', r.json);
-  ok(notices.slice(n0).some((x) => x.sid === 'sess-4' && x.n.kind === 'browser-profile') && !notices.slice(n0).some((x) => x.sid === 'sess-2' || x.sid === 'sess-3' || x.sid === 'sess-1'), '…the detached conversation hears it on its next message; the kept ones hear nothing', notices.slice(n0));
+  ok(gateOf(notices.slice(n0).some((x) => x.sid === 'sess-4' && x.n.kind === 'browser-profile')) && !notices.slice(n0).some((x) => x.sid === 'sess-2' || x.sid === 'sess-3' || x.sid === 'sess-1'), '…the detached conversation hears it on its next message; the kept ones hear nothing', notices.slice(n0));
   for (let i = 0; i < 40 && logOf('closes.log').filter((x) => x.sess === 'vs-' + KD).length < 2; i++) await sleep(50);
   ok(logOf('closes.log').filter((x) => x.sess === 'vs-' + KD && x.ns === 'vs-' + work.id && /^ws:/.test(x.cdp || '')).map((x) => x.verb).join() === 'tab close,close' && !logOf('closes.log').some((x) => [KA, KB, KC].some((kk) => x.sess === 'vs-' + kk)), '…and its TAB closes: the lease session\'s own `tab close` (its bound tab) then `close` (its connection), under its session over the shared browser\'s CDP url — never the browser, never a kept conversation\'s session', logOf('closes.log'));
   ok(r.json.added.length === 2 && r.json.changed.use.was.mode === 'all', '…the answer names the rows added and what it was');
@@ -451,29 +451,29 @@ try {
   const agentRow = async (s) => { const x = (await j('GET', '/api/agent/browser/profiles', undefined, as(s))).json; return { row: x.profiles.find((p) => p.id === work.id), pins: x.pins, all: x }; };
   const aA = await agentRow(sA), aB = await agentRow(sB), aD = await agentRow(sD), aC = await agentRow(sC);
   ok(aA.row.use.via === 'conversation' && aB.row.use.via === 'task' && aD.row.use.you === false && aC.row.use.unreadable === true && aC.row.use.you === false, 'the agent\'s digest: First chat "yours included", Second chat "through its Task Group", Fourth chat "not yours", Third chat "unknown for yours right now"', [aA.row.use, aB.row.use, aD.row.use, aC.row.use]);
-  ok([aA, aB, aC, aD].every((a) => a.all.profiles.every((p) => !('owner' in p) && !('createdBy' in p)) && Object.keys(a.pins).every((kk) => [KA, KB, KC, KD].includes(kk)) && Object.keys(a.pins).length <= 1) && !JSON.stringify(aD.all.profiles).includes(KA) && Object.keys(aB.pins).join() === KB, '…with NO owner / createdBy and only its OWN pin (another conversation\'s key never reaches an agent through the profile rows)');
+  ok(gateOf([aA, aB, aC, aD].every((a) => a.all.profiles.every((p) => !('owner' in p) && !('createdBy' in p)) && Object.keys(a.pins).every((kk) => [KA, KB, KC, KD].includes(kk)) && Object.keys(a.pins).length <= 1)) && !JSON.stringify(aD.all.profiles).includes(KA) && Object.keys(aB.pins).join() === KB, '…with NO owner / createdBy and only its OWN pin (another conversation\'s key never reaches an agent through the profile rows)');
   // VERB TIME (the owner's default 2 — no store subscription): Third chat's groups are readable again and none is listed —
   // its next command is refused AND its tab closed in the same call
   unreadable.delete(KC);
   const aliasC = k.setFor(KC).attachments.find((a) => a.profileId === work.id).alias;
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'], handle: aliasC }, as(sC));
-  ok(r.status === 403 && r.json.code === 'not_owner' && /Your tab in its browser was closed/.test(r.json.error) && !leasesOn(work.id).includes(KC) && !CMDLINE_RE.test(r.json.error), 'verb time: Third chat (no group on the list) — its next command refused not_owner AND its lease gone in the same call (the refusal says the tab closed)', r.json);
+  ok(r.status === 403 && r.json.code === 'not_owner' && gateOf(/Your tab in its browser was closed/.test(r.json.error)) && !leasesOn(work.id).includes(KC) && !CMDLINE_RE.test(r.json.error), 'verb time: Third chat (no group on the list) — its next command refused not_owner AND its lease gone in the same call (the refusal says the tab closed)', r.json);
   // the USER's attach (the UI) WRITES the list: Third chat is added, then attached
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-3', profile: 'work' });
-  ok(r.status === 200 && r.json.added && r.json.added.profileId === work.id && leasesOn(work.id).includes(KC) && B.whoMayUse(k.profile(work.id)).who.some((w) => w.id === KC), 'the USER\'s attach writes the list — Third chat is ADDED (the answer says so) and attached', r.json);
+  ok(r.status === 200 && gateOf(r.json.added) && r.json.added.profileId === work.id && gateOf(leasesOn(work.id).includes(KC)) && verdictOf(B.whoMayUse(k.profile(work.id)).who.some((w) => w.id === KC)), 'the USER\'s attach writes the list — Third chat is ADDED (the answer says so) and attached', r.json);
   await j('POST', '/api/browser/detach', { sessionId: 'sess-3', profile: 'work' });
   // unbind Second chat from G ⇒ its next command refused AND its tab closed
   groupsOf.set(KB, []);
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sB));
-  ok(r.status === 403 && r.json.code === 'not_owner' && /Your tab in its browser was closed/.test(r.json.error) && !leasesOn(work.id).includes(KB), 'Second chat unbound from Task Group G: its next command is refused AND its tab in the shared browser is gone (lease census)', r.json);
+  ok(r.status === 403 && r.json.code === 'not_owner' && gateOf(/Your tab in its browser was closed/.test(r.json.error)) && !leasesOn(work.id).includes(KB), 'Second chat unbound from Task Group G: its next command is refused AND its tab in the shared browser is gone (lease census)', r.json);
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sB));
-  ok(r.status === 403 && r.json.code === 'not_owner' && r.json.pinned === true && /pinned profile "work" did not open/.test(r.json.error) && !k.ephemeralFor(KB), '…and the one after it: its pin (it stays — a preference) opens nothing — not_owner, pinned:true, no temporary browser instead', r.json);
+  ok(r.status === 403 && r.json.code === 'not_owner' && r.json.pinned === true && gateOf(/pinned profile "work" did not open/.test(r.json.error)) && !k.ephemeralFor(KB), '…and the one after it: its pin (it stays — a preference) opens nothing — not_owner, pinned:true, no temporary browser instead', r.json);
   // THE PICK WRITES THE LIST: the user pins work for Fourth chat (not admitted) ⇒ ADDED; its next command opens it
   r = await j('POST', '/api/browser/pin', { sessionId: 'sess-4', profile: 'work' });
   const rD0 = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sD)); // its set changed at the narrowing: told once (§3.8 layer ①)
   ok(rD0.status === 409 && rD0.json.code === 'profile_changed', 'Fourth chat\'s first command after the narrowing that took its tab is told once that its set changed (§3.8 layer ①)', rD0.json);
   const rD = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sD));
-  ok(r.status === 200 && r.json.added && r.json.added.label === 'work' && !('added' in r.json.pin) && B.whoMayUse(k.profile(work.id)).who.some((w) => w.id === KD) && rD.status === 200 && rD.json.kind === 'attachment', 'a USER pin on a conversation the list does not admit ADDS it (`added` on the answer — the toast says it) and its next bare command opens work', { pin: r.json, rD: rD.json && rD.json.kind });
+  ok(r.status === 200 && gateOf(r.json.added) && r.json.added.label === 'work' && !('added' in r.json.pin) && gateOf(B.whoMayUse(k.profile(work.id)).who.some((w) => w.id === KD)) && rD.status === 200 && rD.json.kind === 'attachment', 'a USER pin on a conversation the list does not admit ADDS it (`added` on the answer — the toast says it) and its next bare command opens work', { pin: r.json, rD: rD.json && rD.json.kind });
   ok(logOf('closes.log').filter((x) => x.sess === 'vs-' + KD).map((x) => x.verb).join() === 'tab close,close,tab new' && !k._reg().tabClosed[`${work.id}|${KD}`], '…and it is bound a NEW tab first (its last one was closed at the narrowing — measured on 0.38.1, it would answer tab_gone), the mark dropped', logOf('closes.log').filter((x) => x.sess === 'vs-' + KD));
   // a FORK's copied pin does not add (origin conversation): refused not_owner pinned:true
   live.add(KE); active.set('sess-5', sE); facts[KE] = { turn: 'idle', name: sE.name };
@@ -485,55 +485,55 @@ try {
   // a Task-Group-default pin of a group not on the list: refused by name at the first command, nothing added
   k.setPin(KF, work.id, { origin: 'task-group' });
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sF));
-  ok(r.status === 403 && r.json.code === 'not_owner' && r.json.pinned === true && /your pinned profile "work" did not open/.test(r.json.error) && /"Who can use it"/.test(r.json.error) && B.useStamp(k.profile(work.id)) === before, 'a Task-Group DEFAULT pin (origin task-group) adds nothing: the first command is refused by name (not_owner, the pinned form)', r.json);
+  ok(r.status === 403 && r.json.code === 'not_owner' && r.json.pinned === true && gateOf(/your pinned profile "work" did not open/.test(r.json.error)) && gateOf(/"Who can use it"/.test(r.json.error)) && B.useStamp(k.profile(work.id)) === before, 'a Task-Group DEFAULT pin (origin task-group) adds nothing: the first command is refused by name (not_owner, the pinned form)', r.json);
   // a STOPPED conversation on the list: its conversation id comes from the bindings FILE (the panel names it from its rows)
   bindings.record('conv-stopped-0001', KS);
   k.setPin(KS, work.id, { origin: 'chosen', by: 'user' });
   const u3 = await useOf();
   const rowS = u3.json.use.who.find((w) => w.key === KS), rowD = u3.json.use.who.find((w) => w.key === KD), rowG = u3.json.use.who.find((w) => w.kind === 'task');
-  ok(rowS && rowS.live === false && rowS.conversationId === 'conv-stopped-0001' && rowS.name === null && rowD && rowD.live && rowD.name === 'Fourth chat' && rowD.sessionId === 'sess-4' && rowG && rowG.title === 'Ops' && rowG.deleted === false, 'GET …/use names each row: a stopped conversation by the conversation id the bindings file holds for its key, a live one by its session, a Task Group by its title', u3.json.use);
+  ok(gateOf(rowS) && rowS.live === false && rowS.conversationId === 'conv-stopped-0001' && rowS.name === null && gateOf(rowD) && gateOf(rowD.live) && rowD.name === 'Fourth chat' && rowD.sessionId === 'sess-4' && gateOf(rowG) && rowG.title === 'Ops' && rowG.deleted === false, 'GET …/use names each row: a stopped conversation by the conversation id the bindings file holds for its key, a live one by its session, a Task Group by its title', u3.json.use);
   const WM = await import(path.join(REPO, 'src/lib/browser-who-model.js'));
   const chips = WM.whoChips(u3.json.use, { nameOfConversation: (cid) => (cid === 'conv-stopped-0001' ? 'An old chat' : '') }).chips;
   ok(chips.map((c) => c.name).join('|') === ['Ops', 'First chat', 'Third chat', 'Fourth chat', 'Second chat', 'An old chat'].join('|') && chips.find((c) => c.key === 'session:' + KS).live === false, 'the panel\'s chips from the same structure: the stopped conversation named from the client\'s own rows by its conversation id', chips.map((c) => c.name));
   const hk = await j('GET', '/api/browser/housekeeping');
   const hrow = hk.json.profiles.find((x) => x.id === work.id);
-  ok(hrow && JSON.stringify(hrow.use) === JSON.stringify(u3.json.use) && !('scopeConversation' in hrow), 'the housekeeping row carries the SAME `use` (the panel\'s chips) — no scopeConversation any more');
+  ok(gateOf(hrow) && JSON.stringify(hrow.use) === JSON.stringify(u3.json.use) && !('scopeConversation' in hrow), 'the housekeeping row carries the SAME `use` (the panel\'s chips) — no scopeConversation any more');
   // ── the identity verifier (2026-09-28): three refuted claims, each reproduced on this keeper before the fix ──
   // (1) a STOPPED holder admitted only through its Task Group is not "in no group": a widening keeps it (undecided),
   //     a narrowing to conversations only detaches it (its key alone decides)
   groupsOf.set(KF, ['T-G']);
   r = await j('POST', '/api/agent/browser/use', { profile: 'work' }, as(sF));
-  ok(r.status === 200 && leasesOn(work.id).includes(KF), 'Sixth chat (in Task Group G, not listed by key) holds a tab in work through the group');
+  ok(r.status === 200 && verdictOf(leasesOn(work.id).includes(KF)), 'Sixth chat (in Task Group G, not listed by key) holds a tab in work through the group');
   active.delete('sess-6'); // stopped: its lease — its tab in the shared browser — stays with its key
   const u4 = await useOf();
   const rowF = u4.json.usedBy.find((x) => x.key === KF);
-  ok(rowF && rowF.leased && rowF.live === false && rowF.sessionId === null && !rowF.taskIds.length, 'GET …/use: the stopped holder is listed leased, live:false, no Task Group readable for it now', rowF);
+  ok(gateOf(rowF) && gateOf(rowF.leased) && rowF.live === false && rowF.sessionId === null && !rowF.taskIds.length, 'GET …/use: the stopped holder is listed leased, live:false, no Task Group readable for it now', rowF);
   const drafted = u4.json.use.who.map((w) => (w.kind === 'session' ? { kind: 'session', key: w.key } : { kind: 'task', id: w.id }));
   const draftKeys = drafted.filter((w) => w.kind === 'session').map((w) => w.key), draftTasks = drafted.filter((w) => w.kind === 'task').map((w) => w.id);
   ok(WM.loseCount(u4.json.usedBy, { mode: 'only', keys: draftKeys, taskIds: [...draftTasks, 'T-H'] }) === 0 && WM.loseCount(u4.json.usedBy, { mode: 'only', keys: draftKeys, taskIds: [] }) === 1, 'the dialog\'s "will lose it" count mirrors the keeper: a widening (+H) loses nobody (the stopped holder is undecided); conversations only ⇒ 1 (the stopped holder, decided by its key)');
   const c4 = logOf('closes.log').length;
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [...drafted, { kind: 'task', id: 'T-H' }] }, base: u4.json.base });
-  ok(r.status === 200 && !r.json.detached.some((d) => d.browserKey === KF) && r.json.undecided.join() === KF && leasesOn(work.id).includes(KF) && !logOf('closes.log').slice(c4).some((x) => x.sess === 'vs-' + KF), 'a WIDENING (+ Task Group H) while Sixth chat is stopped: its tab STAYS (undecided — judged at its next command), nothing closed for it (2026-09-28: "stopped" read as "no groups" detached it)', r.json);
+  ok(r.status === 200 && !r.json.detached.some((d) => d.browserKey === KF) && r.json.undecided.join() === KF && gateOf(leasesOn(work.id).includes(KF)) && !logOf('closes.log').slice(c4).some((x) => x.sess === 'vs-' + KF), 'a WIDENING (+ Task Group H) while Sixth chat is stopped: its tab STAYS (undecided — judged at its next command), nothing closed for it (2026-09-28: "stopped" read as "no groups" detached it)', r.json);
   const u5 = await useOf();
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: u5.json.use.who.filter((w) => w.kind === 'session').map((w) => ({ kind: 'session', key: w.key })) }, base: u5.json.base });
   await sleep(150);
-  ok(r.status === 200 && r.json.detached.some((d) => d.browserKey === KF) && !r.json.undecided.length && !leasesOn(work.id).includes(KF) && logOf('closes.log').slice(c4).some((x) => x.sess === 'vs-' + KF && x.verb === 'tab close'), '…narrowed to conversations only (no Task Group row could admit it): the stopped holder is detached now and its tab closed — its key alone decides', r.json);
+  ok(r.status === 200 && gateOf(r.json.detached.some((d) => d.browserKey === KF)) && !r.json.undecided.length && !leasesOn(work.id).includes(KF) && verdictOf(logOf('closes.log').slice(c4).some((x) => x.sess === 'vs-' + KF && x.verb === 'tab close')), '…narrowed to conversations only (no Task Group row could admit it): the stopped holder is detached now and its tab closed — its key alone decides', r.json);
   active.set('sess-6', sF); groupsOf.delete(KF);
   // (2) the agent's `backend` verb names ANY profile by ref: the record it answers is the AGENT's view, never the list
   const bkE = await j('GET', `/api/agent/browser/backend?profile=${work.id}`, undefined, as(sE));
-  ok(bkE.status === 200 && bkE.json.profile && !('owner' in bkE.json.profile) && !('createdBy' in bkE.json.profile) && !('scopeAt' in bkE.json.profile) && bkE.json.profile.use && bkE.json.profile.use.you === false && bkE.json.profile.scope === 'only' && !JSON.stringify(bkE.json.profile).includes(KA), 'GET /api/agent/browser/backend?profile=work asked by the fork (not admitted): the profile is the agent\'s view — no owner / createdBy / scopeAt, no other conversation\'s key, use.you false', bkE.json && bkE.json.profile);
+  ok(bkE.status === 200 && gateOf(bkE.json.profile) && !('owner' in bkE.json.profile) && !('createdBy' in bkE.json.profile) && !('scopeAt' in bkE.json.profile) && gateOf(bkE.json.profile.use) && bkE.json.profile.use.you === false && bkE.json.profile.scope === 'only' && !JSON.stringify(bkE.json.profile).includes(KA), 'GET /api/agent/browser/backend?profile=work asked by the fork (not admitted): the profile is the agent\'s view — no owner / createdBy / scopeAt, no other conversation\'s key, use.you false', bkE.json && bkE.json.profile);
   // (3) a `key` row carried by a session on ANOTHER machine is refused like a picked one (the picker never offers it)
   const KR = 'bk-0000dead', sR = mkSession('sess-9', KR, 'Remote chat'); sR.hostId = 'h1'; active.set('sess-9', sR); live.add(KR);
   const u6 = await useOf();
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [...u6.json.use.who.map((w) => (w.kind === 'session' ? { kind: 'session', key: w.key } : { kind: 'task', id: w.id })), { kind: 'session', key: KR }] }, base: u6.json.base });
-  ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'remote' && /"Remote chat" runs on another machine/.test(r.json.error) && B.useStamp(k.profile(work.id)) === u6.json.base, 'a `key` row carried by a live session on another machine: refused no_browser_key / remote (the picked-session sentence) — nothing written', r.json);
+  ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'remote' && gateOf(/"Remote chat" runs on another machine/.test(r.json.error)) && B.useStamp(k.profile(work.id)) === u6.json.base, 'a `key` row carried by a live session on another machine: refused no_browser_key / remote (the picked-session sentence) — nothing written', r.json);
   // (4) A CONVERSATION ON ANOTHER MACHINE NEVER USES A PROFILE (identity verify r2, 2026-09-28): its agent's `use` took a
   // lease and launched THIS machine's Chrome for a loopback CDP url the other machine cannot reach; the user's pin /
   // attach for it wrote its key into the list (the key the PATCH above refuses and the picker never offers)
   {
     const L0 = logOf('launches.log').length, s0 = B.useStamp(k.profile(work.id));
     let rr = await j('POST', '/api/agent/browser/use', { profile: 'work' }, as(sR));
-    ok(rr.status === 409 && rr.json.code === 'remote_session' && /runs on another machine/.test(rr.json.error) && !leasesOn(work.id).includes(KR) && logOf('launches.log').length === L0 && !CMDLINE_RE.test(rr.json.error), 'a REMOTE session\'s agent `use work`: refused remote_session by name — no lease, no launch of this machine\'s browser', rr.json);
+    ok(rr.status === 409 && rr.json.code === 'remote_session' && gateOf(/runs on another machine/.test(rr.json.error)) && !leasesOn(work.id).includes(KR) && logOf('launches.log').length === L0 && !CMDLINE_RE.test(rr.json.error), 'a REMOTE session\'s agent `use work`: refused remote_session by name — no lease, no launch of this machine\'s browser', rr.json);
     rr = await j('POST', '/api/browser/attach', { sessionId: 'sess-9', profile: 'work' });
     ok(rr.status === 409 && rr.json.code === 'remote_session' && !leasesOn(work.id).includes(KR) && B.useStamp(k.profile(work.id)) === s0, 'the USER\'s attach for a remote session: refused remote_session — nothing added, nothing leased', rr.json);
     rr = await j('POST', '/api/browser/pin', { sessionId: 'sess-9', profile: 'work' });
@@ -542,7 +542,7 @@ try {
     ok(rr.status === 409 && rr.json.code === 'remote_session' && !k.pinFor(KR), 'the remote session\'s own `pin`: refused the same way', rr.json);
     // ws-create's explicit New-Session pick for a REMOTE spawn (the session is not registered yet): `remote: true` adds nothing
     const p0 = k.setPin(KR, work.id, { origin: 'chosen', remote: true });
-    ok(p0 && !('added' in p0) && B.useStamp(k.profile(work.id)) === s0, 'ws-create\'s explicit pick for a remote spawn (setPin remote:true): the pin is recorded, the list untouched');
+    ok(gateOf(p0) && !('added' in p0) && B.useStamp(k.profile(work.id)) === s0, 'ws-create\'s explicit pick for a remote spawn (setPin remote:true): the pin is recorded, the list untouched');
     ok(k.setPin(KR, null) === null && !k.pinFor(KR), '…and an UNPIN of a remote session still works (the delete\'s unpin path)');
     rr = await j('POST', '/api/browser/pin', { sessionId: 'sess-9', profile: null });
     ok(rr.status === 200 && rr.json.pin === null, 'POST /api/browser/pin with profile null for a remote session: allowed (a clearing)');
@@ -554,18 +554,18 @@ try {
     const named = (o) => { const out = []; const walk = (v, pth) => { if (v === KA || v === 'sess-1' || v === 'First chat') out.push(pth); else if (v && typeof v === 'object') for (const [kk, vv] of Object.entries(v)) walk(vv, pth + '.' + kk); }; walk(o, '$'); return out; };
     const dig = await j('GET', '/api/agent/browser/profiles', undefined, as(sE));
     const hits = named(dig.json).filter((pth) => !/^\$\.drivers\./.test(pth)); // owner ruling A (2): `drivers` names who drives, by key — the ONE deliberate exception
-    ok(dig.status === 200 && !hits.length && dig.json.leases.some((l) => l.other === true && !('browserKey' in l) && !('sessionId' in l) && !('alias' in l) && !('label' in l)) && dig.json.leases.filter((l) => l.profileId === work.id).length === leasesOn(work.id).length, 'the fork\'s digest: First chat\'s key / webui id / name ride NOWHERE but `drivers`; another conversation\'s lease is `{profileId, mediated, other}` (the CLI\'s per-profile count keeps working)', hits.length ? hits : dig.json.leases);
+    ok(dig.status === 200 && !hits.length && gateOf(dig.json.leases.some((l) => l.other === true && !('browserKey' in l) && !('sessionId' in l) && !('alias' in l) && !('label' in l))) && dig.json.leases.filter((l) => l.profileId === work.id).length === leasesOn(work.id).length, 'the fork\'s digest: First chat\'s key / webui id / name ride NOWHERE but `drivers`; another conversation\'s lease is `{profileId, mediated, other}` (the CLI\'s per-profile count keeps working)', hits.length ? hits : dig.json.leases);
     const bk2 = await j('GET', `/api/agent/browser/backend?profile=${work.id}`, undefined, as(sE));
     const hits2 = named(bk2.json);
-    ok(bk2.status === 200 && !hits2.length && bk2.json.leases.length === leasesOn(work.id).length && bk2.json.leases.every((l) => l.other === true), 'the fork\'s `backend?profile=work` (not admitted): the lease rows carry no key / webui id / name — counts only', hits2.length ? hits2 : bk2.json.leases);
+    ok(bk2.status === 200 && !hits2.length && bk2.json.leases.length === leasesOn(work.id).length && verdictOf(bk2.json.leases.every((l) => l.other === true)), 'the fork\'s `backend?profile=work` (not admitted): the lease rows carry no key / webui id / name — counts only', hits2.length ? hits2 : bk2.json.leases);
     const useA = await j('POST', '/api/agent/browser/use', { profile: 'work' }, as(sA));
     const resA = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sA));
-    ok(useA.status === 200 && !('owner' in useA.json.profile) && !('createdBy' in useA.json.profile) && !('scopeAt' in useA.json.profile) && useA.json.profile.use && useA.json.profile.use.you === true && resA.status === 200 && resA.json.kind === 'attachment' && !('owner' in resA.json.profile) && !('createdBy' in resA.json.profile) && resA.json.profile.use.via === 'conversation', 'the ADMITTED agent\'s `use` and `resolve` answers carry the record as the agent\'s view (use.you / via, never the list or createdBy)', { use: useA.json.profile && Object.keys(useA.json.profile), res: resA.json.profile && Object.keys(resA.json.profile) });
+    ok(useA.status === 200 && !('owner' in useA.json.profile) && !('createdBy' in useA.json.profile) && !('scopeAt' in useA.json.profile) && gateOf(useA.json.profile.use) && useA.json.profile.use.you === true && resA.status === 200 && resA.json.kind === 'attachment' && !('owner' in resA.json.profile) && !('createdBy' in resA.json.profile) && resA.json.profile.use.via === 'conversation', 'the ADMITTED agent\'s `use` and `resolve` answers carry the record as the agent\'s view (use.you / via, never the list or createdBy)', { use: useA.json.profile && Object.keys(useA.json.profile), res: resA.json.profile && Object.keys(resA.json.profile) });
     // an own ephemeral browser rides the OWN digest; another conversation's does not (its key, webui id, pid, dir)
     const sX = mkSession('sess-8', 'bk-0000c0e8', 'Own browser chat', { rungD: true }); active.set('sess-8', sX); live.add('bk-0000c0e8'); facts['bk-0000c0e8'] = { turn: 'idle', name: sX.name };
     const rx = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://x.example/'] }, as(sX));
     const dOwn = await j('GET', '/api/agent/browser/profiles', undefined, as(sX)), dOther = await j('GET', '/api/agent/browser/profiles', undefined, as(sE));
-    ok(rx.status === 200 && rx.json.kind === 'ephemeral' && dOwn.json.ephemerals.some((e) => e.browserKey === 'bk-0000c0e8') && !dOther.json.ephemerals.some((e) => e.browserKey === 'bk-0000c0e8') && dOther.json.ephemeralsOthers >= 1 && !JSON.stringify(dOther.json.ephemerals).includes('sess-8'), 'a managed ephemeral browser is in its OWN conversation\'s digest and not in another\'s (a count of the others instead)', { own: dOwn.json.ephemerals.length, other: dOther.json.ephemerals.length, others: dOther.json.ephemeralsOthers });
+    ok(rx.status === 200 && rx.json.kind === 'ephemeral' && gateOf(dOwn.json.ephemerals.some((e) => e.browserKey === 'bk-0000c0e8')) && !dOther.json.ephemerals.some((e) => e.browserKey === 'bk-0000c0e8') && dOther.json.ephemeralsOthers >= 1 && !JSON.stringify(dOther.json.ephemerals).includes('sess-8'), 'a managed ephemeral browser is in its OWN conversation\'s digest and not in another\'s (a count of the others instead)', { own: dOwn.json.ephemerals.length, other: dOther.json.ephemerals.length, others: dOther.json.ephemeralsOthers });
     await dropEphemeral('bk-0000c0e8'); active.delete('sess-8'); live.delete('bk-0000c0e8');
   }
   // back to everyone's (every conversation of the legs below uses it), the extra pins cleared
@@ -587,14 +587,14 @@ try {
   const row = r.json && r.json.profiles.find((x) => x.id === work.id);
   const TV = await import(path.join(REPO, 'src/lib/browser-trace-view.js'));
   const users = row ? TV.usersOf(row) : [];
-  ok(row && row.scope === 'all' && row.use && row.use.mode === 'all' && row.createdBy === KA && users.length === 3 && users.filter((u) => u.pinned).map((u) => u.name).sort().join() === 'Fourth chat,Second chat', 'the panel row names who uses it (3 conversations, 2 of them by the user\'s pin) and says who CAN use it (`use` all)', { usedBy: row && row.usedBy, use: row && row.use });
+  ok(gateOf(row) && row.scope === 'all' && gateOf(row.use) && row.use.mode === 'all' && row.createdBy === KA && users.length === 3 && users.filter((u) => u.pinned).map((u) => u.name).sort().join() === 'Fourth chat,Second chat', 'the panel row names who uses it (3 conversations, 2 of them by the user\'s pin) and says who CAN use it (`use` all)', { usedBy: row && row.usedBy, use: row && row.use });
   r = await j('POST', `/api/browser/profiles/${work.id}/forget`, {});
   ok(r.status === 409 && r.json.code === 'leased', 'without the Delete… flags the set-aside keeps refusing a profile in use (the old two-step, unchanged)');
   const dirW = work.dir;
   r = await j('POST', `/api/browser/profiles/${work.id}/forget`, { release: true, unpin: true });
-  ok(r.status === 200 && r.json.ok && r.json.detached === 3 && r.json.unpinned === 2 && r.json.stopped === true && !k.profile(work.id) && !fs.existsSync(dirW) && fs.existsSync(r.json.to), 'Delete… with two pins: every lease detached (3), the browser stopped, both pins cleared, then set aside (the directory moved beside itself — kept until Delete permanently)', r.json);
-  ok(!k.pinFor(KB) && !k.pinFor(KD) && sB._browserProfileId === null && sD._browserProfileId === null && Object.values(k.list().pins).every((x) => x.profileId !== work.id), '…no conversation keeps a pin on it (keeper + the live sessions\' own record)');
-  ok(notices.some((x) => x.sid === 'sess-2' && x.n.kind === 'browser-pin') && notices.some((x) => x.sid === 'sess-1' && x.n.kind === 'browser-profile'), '…each live conversation hears it on its next message (the unpin\'s browser-pin notice, the release\'s browser-profile notice)');
+  ok(r.status === 200 && gateOf(r.json.ok) && r.json.detached === 3 && r.json.unpinned === 2 && r.json.stopped === true && !k.profile(work.id) && !fs.existsSync(dirW) && verdictOf(fs.existsSync(r.json.to)), 'Delete… with two pins: every lease detached (3), the browser stopped, both pins cleared, then set aside (the directory moved beside itself — kept until Delete permanently)', r.json);
+  ok(!k.pinFor(KB) && !k.pinFor(KD) && sB._browserProfileId === null && sD._browserProfileId === null && verdictOf(Object.values(k.list().pins).every((x) => x.profileId !== work.id)), '…no conversation keeps a pin on it (keeper + the live sessions\' own record)');
+  ok(gateOf(notices.some((x) => x.sid === 'sess-2' && x.n.kind === 'browser-pin')) && verdictOf(notices.some((x) => x.sid === 'sess-1' && x.n.kind === 'browser-profile')), '…each live conversation hears it on its next message (the unpin\'s browser-pin notice, the release\'s browser-profile notice)');
 
   // ── the pre-ruling case: a conversation's OWN browser holds a profile's directory (named, never ended) ──
   r = await j('POST', '/api/browser/profiles', { label: 'Old' });
@@ -606,7 +606,7 @@ try {
   fs.symlinkSync(`${os.hostname()}-${holder.pid}`, path.join(old.dir, 'SingletonLock'));
   e = await threw(() => k.attach({ profileId: old.id, browserKey: KC, sessionId: 'sess-3' }));
   let holderAlive = false; try { process.kill(holder.pid, 0); holderAlive = true; } catch { holderAlive = false; }
-  ok(e && e.code === 'profile_locked' && /the conversation "Old chat"'s own browser \(a pin from before this version/.test(e.message) && /press Stop/.test(e.message) && !CMDLINE_RE.test(e.message) && holderAlive, 'a pre-ruling conversation\'s own browser on the directory (its mark names the conversation) ⇒ profile_locked naming that conversation and the Stop button — the keeper never ends it', e && e.message);
+  ok(gateOf(e) && e.code === 'profile_locked' && gateOf(/the conversation "Old chat"'s own browser \(a pin from before this version/.test(e.message)) && gateOf(/press Stop/.test(e.message)) && !CMDLINE_RE.test(e.message) && verdictOf(holderAlive), 'a pre-ruling conversation\'s own browser on the directory (its mark names the conversation) ⇒ profile_locked naming that conversation and the Stop button — the keeper never ends it', e && e.message);
 } catch (err) { ok(false, 'the keeper/routes legs threw', err && (err.stack || err.message)); }
 
 // ═══ ③ THE LATE KEY (B-f7ab) ═══════════════════════════════════════════════
@@ -652,35 +652,35 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   let r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/late'], wrapper: true }, as(sL));
   const K1 = sL._browserKey;
   const nsL = B.sessionNameFor(K1);
-  ok(r.status === 200 && r.json.kind === 'ephemeral' && B.isBrowserKey(K1) && r.json.minted && r.json.minted.key === K1 && r.json.minted.origin === 'new'
-    && sL._browserVariant === 'D' && Array.isArray(sL._browserEnv) && sL._browserEnv.includes(`AGENT_BROWSER_SESSION=${nsL}`)
-    && r.json.env.includes(`AGENT_BROWSER_SESSION=${nsL}`) && r.json.spawnEnv.includes(`AGENT_BROWSER_SESSION=${nsL}`) && fs.existsSync(be.configPathFor(K1)),
+  ok(r.status === 200 && r.json.kind === 'ephemeral' && gateOf(B.isBrowserKey(K1)) && gateOf(r.json.minted) && r.json.minted.key === K1 && r.json.minted.origin === 'new'
+    && sL._browserVariant === 'D' && gateOf(Array.isArray(sL._browserEnv)) && gateOf(sL._browserEnv.includes(`AGENT_BROWSER_SESSION=${nsL}`))
+    && gateOf(r.json.env.includes(`AGENT_BROWSER_SESSION=${nsL}`)) && gateOf(r.json.spawnEnv.includes(`AGENT_BROWSER_SESSION=${nsL}`)) && verdictOf(fs.existsSync(be.configPathFor(K1))),
   '③b its FIRST resolve mints a key (the spawn\'s rung D: the generated config written, the pairs recorded on the session) and answers kind ephemeral with `minted` — the CLI builds its child env from this answer, no respawn', r.json);
   ok(BB.create({ dataDir: DATA }).lookup(CONV_L) === K1 && metas.get(sL.sockName).browserKey === K1 && metas.get(sL.sockName).browserKeyFor === CONV_L && metas.get(sL.sockName).webuiSessionId === 'sess-late',
     '③b bindings.json holds the key for THAT conversation (a second store instance reads it), through the session\'s own record (browserKeyFor = its conversation id, the record kept whole)');
   const rr = await runAs(r.json.env, ['open', 'https://example.test/late']);
-  ok(rr.status === 0 && logOf('cmds.log').some((x) => x.verb === 'open' && x.ns === nsL) && k.ephemeralFor(K1) && BFx.browserFactWords(k.factFor(BFx.sessionFactsOf(sL))).line === 'no profile (temporary browser)',
+  ok(rr.status === 0 && gateOf(logOf('cmds.log').some((x) => x.verb === 'open' && x.ns === nsL)) && gateOf(k.ephemeralFor(K1)) && BFx.browserFactWords(k.factFor(BFx.sessionFactsOf(sL))).line === 'no profile (temporary browser)',
     '③b a command under the answer\'s env lands in the conversation\'s own browser (its namespace), which the keeper manages; the fact now names it', rr.out);
   const mintsBefore = logLines.filter((l) => /had no browser key/.test(l)).length;
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['get', 'title'], wrapper: true }, as(sL));
   const r3 = await j('GET', '/api/agent/browser/status', undefined, as(sL));
-  ok(r.status === 200 && sL._browserKey === K1 && !r.json.minted && r.json.env.includes(`AGENT_BROWSER_SESSION=${nsL}`) && r3.status === 200 && BB.create({ dataDir: DATA }).lookup(CONV_L) === K1
+  ok(r.status === 200 && sL._browserKey === K1 && !r.json.minted && gateOf(r.json.env.includes(`AGENT_BROWSER_SESSION=${nsL}`)) && r3.status === 200 && BB.create({ dataDir: DATA }).lookup(CONV_L) === K1
     && logLines.filter((l) => /had no browser key/.test(l)).length === mintsBefore && mintsBefore === 1,
   '③b a second resolve (and the status route) returns the SAME key — nothing minted, the binding unchanged, ONE mint line in total', { json: r.json && r.json.minted, lines: logLines });
   // (③b's wiring pin of src/server/session-stdout.js: MOVED to the fast scripts/test-browser-share-model-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // the cookie routes mint through the same function
   const sU = keyless('sess-ui', 'UI chat', { conv: 'c0f7ab00-ui00-4000-8000-000000000002' });
   r = await j('POST', '/api/browser/pin', { sessionId: 'sess-ui', profile: null });
-  ok(r.status === 200 && B.isBrowserKey(sU._browserKey) && BB.create({ dataDir: DATA }).lookup('c0f7ab00-ui00-4000-8000-000000000002') === sU._browserKey, '③b a cookie route (the user\'s pin from Session properties) mints the same way', r.json);
+  ok(r.status === 200 && gateOf(B.isBrowserKey(sU._browserKey)) && BB.create({ dataDir: DATA }).lookup('c0f7ab00-ui00-4000-8000-000000000002') === sU._browserKey, '③b a cookie route (the user\'s pin from Session properties) mints the same way', r.json);
   // a conversation that already has a key (and no live holder) gets it back; one another live session holds is refused
   const CONV_B = 'c0f7ab00-back-4000-8000-000000000003', KBACK = 'bk-0000e0b1';
   store.record(CONV_B, KBACK);
   const sBk = keyless('sess-back', 'Back chat', { conv: CONV_B });
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/b'], wrapper: true }, as(sBk));
-  ok(r.status === 200 && sBk._browserKey === KBACK && r.json.minted && r.json.minted.origin === 'conversation' && BB.create({ dataDir: DATA }).lookup(CONV_B) === KBACK, '③b a conversation that already had a key gets THAT key back (the resume rung) — never a second key', r.json && r.json.minted);
+  ok(r.status === 200 && sBk._browserKey === KBACK && gateOf(r.json.minted) && r.json.minted.origin === 'conversation' && BB.create({ dataDir: DATA }).lookup(CONV_B) === KBACK, '③b a conversation that already had a key gets THAT key back (the resume rung) — never a second key', r.json && r.json.minted);
   const sTwin = keyless('sess-twin', 'Twin window', { conv: CONV_B });
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/t'], wrapper: true }, as(sTwin));
-  ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'held_elsewhere' && /"Back chat"/.test(r.json.error) && !sTwin._browserKey, '③b …while another LIVE session holds it, a second session of the same conversation is refused held_elsewhere, naming it (one conversation, one browser)', r.json);
+  ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'held_elsewhere' && gateOf(/"Back chat"/.test(r.json.error)) && !sTwin._browserKey, '③b …while another LIVE session holds it, a second session of the same conversation is refused held_elsewhere, naming it (one conversation, one browser)', r.json);
   // a fork whose id is borrowed — both record shapes: stated (forkSourceId) and an older terminal fork's (forkRequested only)
   const PARENT = 'c0f7ab00-prnt-4000-8000-000000000004', KPARENT = 'bk-0000e0a1';
   store.record(PARENT, KPARENT);
@@ -688,7 +688,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   const sFk2 = keyless('sess-fork2', 'Old terminal fork', { conv: PARENT, meta: { forkRequested: true } });
   const rf = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/f'], wrapper: true }, as(sFk));
   const rf2 = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/f'], wrapper: true }, as(sFk2));
-  ok(rf.status === 409 && rf.json.why === 'fork_pending' && rf2.status === 409 && rf2.json.why === 'fork_pending' && /^restart this session \(Terminate → Resume\) to get a browser key: /.test(rf.json.error)
+  ok(rf.status === 409 && rf.json.why === 'fork_pending' && rf2.status === 409 && rf2.json.why === 'fork_pending' && gateOf(/^restart this session \(Terminate → Resume\) to get a browser key: /.test(rf.json.error))
     && !sFk._browserKey && !sFk2._browserKey && BB.create({ dataDir: DATA }).lookup(PARENT) === KPARENT,
   '③b a fork still carrying the id it was forked from (forkSourceId, and an older terminal fork\'s bare forkRequested) is refused fork_pending — it never gets the PARENT\'s key and never binds the parent', { rf: rf.json, rf2: rf2.json });
   // remote, unknown conversation, the switches, a session gone
@@ -696,7 +696,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   const sNo = keyless('sess-noid', 'No id yet', {});
   const rRm = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'x'] }, as(sRm));
   const rNo = await j('GET', '/api/browser/session/sess-noid');
-  ok(rRm.status === 409 && rRm.json.why === 'remote' && /^restart this session \(Terminate → Resume\) to get a browser key: it runs on another machine/.test(rRm.json.error) && rNo.status === 409 && rNo.json.why === 'conversation_unknown' && !sRm._browserKey && !sNo._browserKey
+  ok(rRm.status === 409 && rRm.json.why === 'remote' && gateOf(/^restart this session \(Terminate → Resume\) to get a browser key: it runs on another machine/.test(rRm.json.error)) && rNo.status === 409 && rNo.json.why === 'conversation_unknown' && !sRm._browserKey && !sNo._browserKey
     && eng.keylessFactOf(sRm) === null && eng.keylessFactOf(sNo) === null, '③b a remote session is refused `remote` (its rung is decided on its host at spawn — restart), a session whose conversation is not known yet `conversation_unknown` — and neither publishes "no browser yet"', { rRm: rRm.json, rNo: rNo.json });
   const beOff = BE.create({ dataDir: DATA, homeDir: HOME, serverSetting: (key) => (key === 'browser.isolateSessions' ? false : undefined), log: { warn() { }, log() { } }, env: { XDG_RUNTIME_DIR: XDG } });
   const sOff = keyless('sess-off', 'Off chat', { conv: 'c0f7ab00-off0-4000-8000-000000000006' });
@@ -704,7 +704,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   const vInt = BK.create({ browserEnv: () => be, keeper: () => k, activeSessions: active, integrationEnabled: () => false, readMeta: (s) => metas.get(s.sockName), persistMeta: persist, log: cap }).ensureBrowserKey(sOff, { sessionId: 'sess-off' });
   const gone = { claudeSessionId: 'c0f7ab00-gone-4000-8000-000000000007', sockName: 'cw-gone' };
   const vGone = eng.ensureBrowserKey(gone, { sessionId: 'sess-gone' });
-  ok(vOff.why === 'isolation_off' && vInt.why === 'integration_off' && vGone.code === 'session-gone' && R.router && !sOff._browserKey && !gone._browserKey,
+  ok(vOff.why === 'isolation_off' && vInt.why === 'integration_off' && vGone.code === 'session-gone' && gateOf(R.router) && !sOff._browserKey && !gone._browserKey,
     '③b per-session browsers off ⇒ isolation_off, integration off ⇒ integration_off (each names its setting — a restart would not help), a session not running any more ⇒ session-gone', { vOff, vInt, vGone });
 
   // (c) CONTROL: an engine that forgets the session's key and decides as a NEW spawn every call mints a SECOND key
@@ -719,11 +719,11 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
     return { pass: !!(a.ok && b.ok && a.minted === true && b.minted === false && a.key === b.key && s._browserKey === a.key && BB.create({ dataDir: DATA }).lookup(conv) === a.key), a: a.key, b: b.key };
   };
   const real2 = idempotent(eng, 'sess-twice-real', 'c0f7ab00-twcr-4000-8000-000000000009');
-  ok(real2.pass, '③c the engine called twice for one session (two routes, two concurrent CLI commands — it is synchronous, so they cannot interleave) mints ONCE: the second answer is the first key, minted:false', real2);
+  ok(verdictOf(real2.pass), '③c the engine called twice for one session (two routes, two concurrent CLI commands — it is synchronous, so they cannot interleave) mints ONCE: the second answer is the first key, minted:false', real2);
   if (ok(twice !== src && !twice.includes(EARLY) && !twice.includes(LADDER), 'CONTROL ③c: the patched copy (no early return, the ladder asked as a NEW spawn) carries both edits')) {
     const engT = mkEngine(M.load('src/server/browser-key.js', twice, 'mints-twice'));
     const t2 = idempotent(engT, 'sess-twice', 'c0f7ab00-twce-4000-8000-000000000008');
-    ok(!t2.pass && t2.a && t2.b && t2.a !== t2.b, 'CONTROL ③c: that copy mints a SECOND key on the second call — the same judge is RED on it (the session moves to another browser; the binding store refuses the move)', t2);
+    ok(!t2.pass && gateOf(t2.a) && gateOf(t2.b) && t2.a !== t2.b, 'CONTROL ③c: that copy mints a SECOND key on the second call — the same judge is RED on it (the session moves to another browser; the binding store refuses the move)', t2);
   }
   // (d) CONTROL: with the fork rule off, an older terminal fork (a bare forkRequested) gets the PARENT's key — two conversations on one browser
   const FORK = '    const forkPending = !!conversationId && (restoredForkPending(view) || BB.bindableIdOf({ ...view, browserKeyFor: conversationId }) !== conversationId);\n';
@@ -731,7 +731,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   if (ok(noFork !== src, 'CONTROL ③d: the patched copy without the fork rule')) {
     const engF = mkEngine(M.load('src/server/browser-key.js', noFork, 'no-fork-rule'));
     const vF = engF.ensureBrowserKey(sFk2, { sessionId: 'sess-fork2' });
-    ok(vF.ok && sFk2._browserKey === KPARENT, 'CONTROL ③d: that copy hands the old terminal fork its PARENT\'s key (the r6 incident — two conversations on one browser); the fork_pending assert above is what refuses it', vF);
+    ok(gateOf(vF.ok) && sFk2._browserKey === KPARENT, 'CONTROL ③d: that copy hands the old terminal fork its PARENT\'s key (the r6 incident — two conversations on one browser); the fork_pending assert above is what refuses it', vF);
     delete sFk2._browserKey;
   }
   // (③e the ONE mint / ONE writer wiring pins of src/ws-create.js, src/routes/browser.js, src/server/mounts-plugins-wiring.js, server.js: MOVED to the fast scripts/test-browser-share-model-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -866,7 +866,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
     const a2K = await openIn(keyedA2), a2L = await openIn(lateA2), a2G = await openIn(legacyA2);
     ok(a2K.status === 200 && a2K.json.kind === 'ephemeral' && k2.groupCapOf(keyedA2._browserKey) === null, 'CONTROL ③f (r2): the spawn-keyed twin in the group got NO default and NO group cap (none at its start) — its own temporary browser');
     ok(a2L.status === 200 && a2L.json.kind === 'ephemeral' && !k2.pinFor(lateA2._browserKey) && k2.groupCapOf(lateA2._browserKey) === null, '③f (r2) A2/A3: the witnessed late key in the group pins nothing and stamps no group cap — the group\'s later default and cap never reach a conversation that started before them', { v: verdict(a2L, lateA2, PB), pin: k2.pinFor(lateA2._browserKey), cap: k2.groupCapOf(lateA2._browserKey) });
-    ok(verdict(a2G, legacyA2, PB) !== 'admitted' && a2G.json && a2G.json.code === 'not_owner' && k2.pinFor(legacyA2._browserKey).origin === 'task-group' && k2.groupCapOf(legacyA2._browserKey) === null, '③f (r2) A2/A3: a record without a witness lands on the group\'s default (the list refuses it: Bank is kept to another conversation) and stamps NO group cap (the group is never read live)', { v: verdict(a2G, legacyA2, PB), cap: k2.groupCapOf(legacyA2._browserKey) });
+    ok(verdict(a2G, legacyA2, PB) !== 'admitted' && gateOf(a2G.json) && a2G.json.code === 'not_owner' && k2.pinFor(legacyA2._browserKey).origin === 'task-group' && k2.groupCapOf(legacyA2._browserKey) === null, '③f (r2) A2/A3: a record without a witness lands on the group\'s default (the list refuses it: Bank is kept to another conversation) and stamps NO group cap (the group is never read live)', { v: verdict(a2G, legacyA2, PB), cap: k2.groupCapOf(legacyA2._browserKey) });
     await retire(keyedA2, lateA2, legacyA2);
     groups2[0].browserProfileId = null; groups2[0].browserCap = null;
     // ── A4: an adopted FORK — the spawn copies the parent's pin verbatim; the fork is not in the list ──
@@ -966,7 +966,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
     // conversation — did ANY profile's owner change, and does the list now admit the key?
     const restoreJudge = (kk, P, key) => { const b = owners(kk); const pin = kk.restorePin(key, { ...WB, profileId: P }); return { pin: !!(pin && pin.profileId === P), widened: owners(kk) !== b, admits: B.mayAttach(kk.profile(P), { browserKey: key }).ok }; };
     const realR = restoreJudge(k2, PB, 'bk-0000f1d1');
-    ok(realR.pin && !realR.widened && !realR.admits, '③f (2.369.196) keeper.restorePin (the real keeper, direct): the pin is written, NO profile\'s owner changes, the list still refuses the key', realR);
+    ok(gateOf(realR.pin) && !realR.widened && !realR.admits, '③f (2.369.196) keeper.restorePin (the real keeper, direct): the pin is written, NO profile\'s owner changes, the list still refuses the key', realR);
     const ksrcR = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const RP = "    reg.pins[browserKey] = { profileId: p.id, origin: witness.origin, at: Math.min(now(), Number(witness.at) || 0), by: witness.by === 'agent' ? 'agent' : 'user' };\n";
     const widens = editAnchor(ksrcR, RP, RP + "    addConversation(p, browserKey, null, {});\n", "src/server/browser-keeper.js");
@@ -976,7 +976,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
       kW.reshapeStore((doc) => { doc.profiles.push(B.newProfileRecord({ id: 'bp-0000f1e1', label: 'Bank', dir: path.join(DATA3, 'p'), now: 1 })); });
       kW.updateProfile('bp-0000f1e1', { use: { mode: 'only', who: [{ kind: 'session', key: KEPT }] } }, { knownKeys: [KEPT] }); // int347: the ONE writer (a row of the grants store)
       const mutR = restoreJudge(kW, 'bp-0000f1e1', 'bk-0000f1d2');
-      ok(mutR.pin && mutR.widened && mutR.admits, 'CONTROL ③f (2.369.196): that copy WIDENS "Who can use it" on a restore (the owner changes, the list now admits the key) — the same judge is RED on it; the real restorePin is what keeps a witness a preference', mutR);
+      ok(gateOf(mutR.pin) && gateOf(mutR.widened) && verdictOf(mutR.admits), 'CONTROL ③f (2.369.196): that copy WIDENS "Who can use it" on a restore (the owner changes, the list now admits the key) — the same judge is RED on it; the real restorePin is what keeps a witness a preference', mutR);
       kW.shutdown();
     }
     try { for (const p of k2.list().profiles) await k2.stop(p.id).catch(() => { }); } catch { /* none */ }
@@ -993,7 +993,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   const profs = [{ id: 'bp-1', label: 'Work', scope: 'all', owner: { kind: 'instance' } }, { id: 'bp-2', label: 'Bank', scope: 'only', owner: { kind: 'only', who: [{ kind: 'session', id: KA }] } }, { id: 'bp-3', label: 'Team', scope: 'all', mediated: true, owner: { kind: 'instance' } }];
   const items = P.pickerItems({ profiles: profs, pinnedId: 'bp-2', onPin() { }, onAdopt() { } });
   const labels = items.map((x) => x.label || '').join('|');
-  ok(/Work/.test(labels) && /✓ Bank \(only some conversations\)/.test(labels) && /Team/.test(labels) && !/First chat/.test(labels), 'the picker offers EVERY named profile — a separate-tabs (mediated) one too — and marks one kept to a list "(only some conversations)" (the list itself is drawn in ONE place, the panel)', labels);
+  ok(gateOf(/Work/.test(labels)) && gateOf(/✓ Bank \(only some conversations\)/.test(labels)) && gateOf(/Team/.test(labels)) && !/First chat/.test(labels), 'the picker offers EVERY named profile — a separate-tabs (mediated) one too — and marks one kept to a list "(only some conversations)" (the list itself is drawn in ONE place, the panel)', labels);
   // the rebuilt switch dialog: the pinned profile's "Browser: <name>; switch…" row ONLY when another browser is available for it
   const noChoice = P.pickerItems({ profiles: profs, pinnedId: 'bp-2', chips: { 'bp-2': 'Chromium' }, onSwitch() { }, onPin() { }, onAdopt() { } }).map((x) => x.label || '').join('|');
   const opened = [];
@@ -1007,11 +1007,11 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   const WM = await import(path.join(REPO, 'src/lib/browser-who-model.js'));
   const t = (x, p) => String(x).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] !== undefined ? p[k] : `{${k}}`));
   const c1 = WM.whoChips({ mode: 'only', who: [{ kind: 'task', id: 'T-X', title: null, deleted: true }] }, { t });
-  ok(c1.chips.length === 1 && c1.chips[0].name === 'a deleted Task Group' && c1.chips[0].amber && c1.chips[0].tooltip !== c1.chips[0].name && /Change…/.test(c1.chips[0].tooltip) && c1.nobody === 'Nobody can use it now: the Task Group it was limited to was deleted', 'whoChips: a list whose only row is a deleted Task Group ⇒ an amber chip and "Nobody can use it now: the Task Group it was limited to was deleted" (never everyone)', c1);
+  ok(c1.chips.length === 1 && c1.chips[0].name === 'a deleted Task Group' && gateOf(c1.chips[0].amber) && c1.chips[0].tooltip !== c1.chips[0].name && gateOf(/Change…/.test(c1.chips[0].tooltip)) && c1.nobody === 'Nobody can use it now: the Task Group it was limited to was deleted', 'whoChips: a list whose only row is a deleted Task Group ⇒ an amber chip and "Nobody can use it now: the Task Group it was limited to was deleted" (never everyone)', c1);
   const c2 = WM.whoChips({ mode: 'only', who: [{ kind: 'task', id: 'T-X', deleted: true }, { kind: 'session', key: KA, live: false, conversationId: 'cid-a' }] }, { t, nameOfConversation: () => '' });
   ok(!c2.nobody && c2.chips[1].name === 'A conversation that is not running now' && c2.chips[1].tooltip === 'not running now', '…a stopped conversation is NOT attrition (it resumes under its key): no "nobody" line; unnamed ⇒ "A conversation that is not running now"', c2);
   const c3 = WM.whoChips({ mode: 'only', who: [{ kind: 'task', id: 'T-A', title: 'A', archived: true }, { kind: 'task', id: 'T-B', deleted: true }] }, { t });
-  ok(/deleted or archived/.test(c3.nobody) && WM.whoChips({ mode: 'all' }, { t }).mode === 'all' && WM.whoChips({ mode: 'unknown', who: [] }, { t }).nobody.startsWith('Nobody can use it now'), '…an archived + a deleted group ⇒ "deleted or archived"; "all" draws no chip; an unknown list says nobody too');
+  ok(gateOf(/deleted or archived/.test(c3.nobody)) && WM.whoChips({ mode: 'all' }, { t }).mode === 'all' && verdictOf(WM.whoChips({ mode: 'unknown', who: [] }, { t }).nobody.startsWith('Nobody can use it now')), '…an archived + a deleted group ⇒ "deleted or archived"; "all" draws no chip; an unknown list says nobody too');
   const f = WM.foldChips([1, 2, 3, 4, 5, 6].map((n) => ({ name: 'c' + n })), 4, { t });
   ok(f.shown.length === 4 && f.more.n === 2 && f.more.text === '+2 more' && f.more.tooltip === 'c5\nc6' && WM.foldChips([{ name: 'a' }], 2).more === null, 'foldChips: past 4 ⇒ "+N more" whose tooltip lists the rest (2 on the phone)');
   const view = { use: { mode: 'only', who: [{ kind: 'session', key: KA, live: true, sessionId: 'w-1', name: 'First chat' }, { kind: 'session', key: KS, live: false, conversationId: 'cid-s' }, { kind: 'task', id: 'T-GONE', title: null, deleted: true }, { kind: 'task', id: 'T-G', title: 'Ops' }] }, createdBy: { key: 'bk-0000c0aa', conversationId: 'cid-made', live: false } };
@@ -1026,7 +1026,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   const usedBy = [{ key: KA, leased: true, taskIds: [] }, { key: KB, leased: true, taskIds: ['T-G'] }, { key: KC, leased: true, taskIds: ['T-H'] }, { key: KD, leased: false, pinned: true, taskIds: [] }];
   ok(WM.loseCount(usedBy, { mode: 'only', keys: [KA], taskIds: ['T-G'] }) === 1 && WM.loseCount(usedBy, { mode: 'all' }) === 0 && WM.loseCount(usedBy, { mode: 'only', keys: [], taskIds: [] }) === 3, 'loseCount: a lease holder in the draft by key or by one of its Task Groups keeps it; pins are not tabs; "All" takes it from nobody');
   const rw = (code, extra = {}) => WM.refusalWords({ code, name: 'Chat', ...extra }, t);
-  ok(rw('no_browser_key') === '“Chat” has no browser of its own yet — restart it (Terminate → Resume), then add it' && /another machine/.test(rw('no_browser_key', { why: 'remote' })) && /nothing was saved/.test(rw('list-changed')) && rw('bad-request') === null && WM.saveWords({ label: 'work', mode: 'only', names: ['Ops', 'First chat'] }, t) === 'Who can use work: Ops, First chat', 'the words by CODE (the device\'s own sentences, never the server\'s); the success toast names the list');
+  ok(rw('no_browser_key') === '“Chat” has no browser of its own yet — restart it (Terminate → Resume), then add it' && gateOf(/another machine/.test(rw('no_browser_key', { why: 'remote' }))) && gateOf(/nothing was saved/.test(rw('list-changed'))) && rw('bad-request') === null && WM.saveWords({ label: 'work', mode: 'only', names: ['Ops', 'First chat'] }, t) === 'Who can use work: Ops, First chat', 'the words by CODE (the device\'s own sentences, never the server\'s); the success toast names the list');
 }
 // ── "WHO CAN USE IT" IS A LIST — the patched-copy CONTROLS (scripts/mutant-copy.mjs, never src/) + the wiring pins ──
 console.log('— the list\'s controls: each rule removed in a patched copy turns its own leg red; the wiring pins');
@@ -1049,7 +1049,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const aNeedle = "  if (u.unknown) return null;\n  const bare = (e) => GM.bareOf(e);\n";
   ok(bsrc.split(aNeedle).length === 2, 'control (a) setup: the fail-closed unknown of grantRowOf (the row the admission judges) is found exactly once');
   const Ba = M.load('src/browser-profiles.js', editAnchor(bsrc, aNeedle, "  if (u.unknown) return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: [{ kind: 'everyone' }], except: [] };\n  const bare = (e) => GM.bareOf(e);\n", "src/browser-profiles.js"), 'who-unknown-all');
-  ok(sig(Ba) !== real && Ba.mayAttach(PROFS[3], { browserKey: KB }).ok, 'CONTROL (a): an admission reading an unknown shape as "all" admits everyone — THE TABLE\'s unknown row goes red', sig(Ba));
+  ok(sig(Ba) !== real && verdictOf(Ba.mayAttach(PROFS[3], { browserKey: KB }).ok), 'CONTROL (a): an admission reading an unknown shape as "all" admits everyone — THE TABLE\'s unknown row goes red', sig(Ba));
   // (b) a mayAttach that ignores Task Group rows
   // lane lg-group-parents U3b: the admission also hands the model the asker's lineage — the mutant drops both lists
   const bNeedle = "groupIds: Array.isArray(taskIds) ? taskIds : [], inheritedGroupIds: Array.isArray(inheritedTaskIds) ? inheritedTaskIds : [], groupsUnreadable: !!groupsUnreadable });\n";
@@ -1071,14 +1071,14 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   };
   // (c) a re-judge that detaches on groups_unreadable
   const cNeedle = /      if \(may\.code === 'groups_unreadable'\) \{ out\.undecided\.push\(l\.browserKey\);[^\n]*\n/;
-  ok(cNeedle.test(ksrc), 'control (c) setup: the re-judge\'s unreadable branch is found');
+  ok(verdictOf(cNeedle.test(ksrc)), 'control (c) setup: the re-judge\'s unreadable branch is found');
   groupsOf.set(KB, ['T-G']); unreadable.add(KC);
   const kReal = seedKeeper(K, 'real-c');
   const rc = kReal.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA }] } });
   const Kc = M.load('src/server/browser-keeper.js', editAnchor(ksrc, cNeedle, '', "src/server/browser-keeper.js"), 'rejudge-detaches-unreadable');
   const kMut = seedKeeper(Kc, 'mut-c');
   const rcm = kMut.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA }] } });
-  ok(rc.undecided.join() === KC && !rc.detached.length && kReal.leasesOn('bp-0000c0d1').some((l) => l.browserKey === KC), 'the re-judge (real keeper): an unreadable Task Group list KEEPS the lease (undecided), detaches nothing', rc);
+  ok(rc.undecided.join() === KC && !rc.detached.length && verdictOf(kReal.leasesOn('bp-0000c0d1').some((l) => l.browserKey === KC)), 'the re-judge (real keeper): an unreadable Task Group list KEEPS the lease (undecided), detaches nothing', rc);
   ok(rcm.detached.map((d) => d.browserKey).join() === KC, 'CONTROL (c): a re-judge that detaches on groups_unreadable takes Third chat\'s tab — the "kept, undecided" leg goes red', rcm);
   unreadable.delete(KC); groupsOf.clear();
   // (d) a PATCH that ignores `base`
@@ -1087,7 +1087,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const stale = B.useStamp({ grantUse: { to: [{ kind: 'conversation', key: KC, browserKey: KC }], except: [] } }); // int347: the reader's spelling (lane grants-unify)
   const kReal2 = seedKeeper(K, 'real-d');
   const ed = await threw(() => kReal2.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] }, base: stale }));
-  ok(ed && ed.code === 'list-changed' && B.whoMayUse(kReal2.profile('bp-0000c0d1')).mode === 'all', 'the keeper RE-ASKS the base (after the route\'s awaits): a stale one is list-changed, nothing written');
+  ok(gateOf(ed) && ed.code === 'list-changed' && B.whoMayUse(kReal2.profile('bp-0000c0d1')).mode === 'all', 'the keeper RE-ASKS the base (after the route\'s awaits): a stale one is list-changed, nothing written');
   const Kd = M.load('src/server/browser-keeper.js', editAnchor(ksrc, dNeedle, '', "src/server/browser-keeper.js"), 'ignores-base');
   const kMut2 = seedKeeper(Kd, 'mut-d');
   const edm = await threw(() => kMut2.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] }, base: stale }));
@@ -1098,7 +1098,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const kReal3 = seedKeeper(K, 'real-e');
   kReal3.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] } });
   const pe = kReal3.setPin(KB, 'bp-0000c0d1', { origin: 'chosen', by: 'user' });
-  ok(pe.added && B.whoMayUse(kReal3.profile('bp-0000c0d1')).who.some((w) => w.id === KB), 'the user\'s pick shows in the list (the panel draws the list — who can use it is never an invisible second reader)');
+  ok(gateOf(pe.added) && verdictOf(B.whoMayUse(kReal3.profile('bp-0000c0d1')).who.some((w) => w.id === KB)), 'the user\'s pick shows in the list (the panel draws the list — who can use it is never an invisible second reader)');
   const Ke = M.load('src/server/browser-keeper.js', editAnchor(ksrc, eNeedle, "    const added = null;\n", "src/server/browser-keeper.js"), 'pin-not-in-list');
   const kMut3 = seedKeeper(Ke, 'mut-e');
   kMut3.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] } });
@@ -1113,7 +1113,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const Kf = M.load('src/server/browser-keeper.js', editAnchor(ksrc, fNeedle, "      const notNow = !!g.unreadable;\n", "src/server/browser-keeper.js"), 'stopped-is-no-group');
   const kMut4 = seedKeeper(Kf, 'mut-f', [KA, KX]);
   const rfm = kMut4.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }] } });
-  ok(rf.undecided.join() === KX && rf.detached.map((d) => d.browserKey).join() === KA && kReal4.leasesOn('bp-0000c0d1').some((l) => l.browserKey === KX), 'the re-judge (real keeper): a list with a Task Group row keeps a STOPPED holder undecided (its groups are judged at its next command); the live one outside the group is detached', rf);
+  ok(rf.undecided.join() === KX && rf.detached.map((d) => d.browserKey).join() === KA && verdictOf(kReal4.leasesOn('bp-0000c0d1').some((l) => l.browserKey === KX)), 'the re-judge (real keeper): a list with a Task Group row keeps a STOPPED holder undecided (its groups are judged at its next command); the live one outside the group is detached', rf);
   ok(rfm.detached.map((d) => d.browserKey).sort().join() === [KA, KX].sort().join() && !rfm.undecided.length, 'CONTROL (f): a re-judge reading "stopped" as "in no group" detaches the stopped holder — the widening leg goes red', rfm);
   for (const kk of [kReal, kMut, kReal2, kMut2, kReal3, kMut3, kReal4, kMut4]) kk.shutdown();
   // (w) ONE WRITE, ONE BROADCAST PER SAVE (verifier 2026-09-28): a narrowing detaches every lease the list no longer
@@ -1155,7 +1155,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   ok(rsrcAll.split(BELT_LINE).length === 2, 'control (g)/(k) setup: the belt line is found once, and is peeled out of the view-layer controls below');
   const rsrcG = editAnchor(rsrcAll, BELT_LINE, '', "src/routes/browser.js");
   const gNeedle = /profile: B\.agentProfileView\(p, agentFactsOf\(f\), \{ mediated: !!\(v\.profile && v\.profile\.mediated\) \}\)/;
-  ok(gNeedle.test(rsrcG), 'control (g) setup: the agent backend route\'s view is found');
+  ok(verdictOf(gNeedle.test(rsrcG)), 'control (g) setup: the agent backend route\'s view is found');
   const Rg = M.load('src/routes/browser.js', editAnchor(rsrcG, gNeedle, 'profile: v.profile', "src/routes/browser.js"), 'backend-raw-record');
   const pG = k.createProfile({ label: 'Ctl G' }, { owner: { kind: 'only', who: [{ kind: 'session', id: KA }] } });
   const sX = mkSession('sess-8', 'bk-0000c0e8', 'Outsider'); active.set('sess-8', sX); live.add('bk-0000c0e8');
@@ -1165,12 +1165,12 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const gReal = await j('GET', `/api/agent/browser/backend?profile=${pG.id}`, undefined, as(sX));
   const gMut = await jG('GET', `/api/agent/browser/backend?profile=${pG.id}`, undefined, as(sX));
   ok(gReal.status === 200 && !('owner' in gReal.json.profile) && !JSON.stringify(gReal.json.profile).includes(KA) && gReal.json.profile.use.you === false, 'the real route: an outsider asking `backend` of a profile kept to First chat gets the agent\'s view (no list, no key)');
-  ok(gMut.status === 200 && gMut.json.profile.owner && JSON.stringify(gMut.json.profile.owner).includes(KA), 'CONTROL (g): a route answering the raw record hands the outsider the list with First chat\'s key — the backend leg goes red');
+  ok(gMut.status === 200 && gateOf(gMut.json.profile.owner) && verdictOf(JSON.stringify(gMut.json.profile.owner).includes(KA)), 'CONTROL (g): a route answering the raw record hands the outsider the list with First chat\'s key — the backend leg goes red');
   srvG.close();
   // (h) a PATCH accepting a `key` row of a session on ANOTHER machine — 2026-09-28
   const tsrcH = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8');
   const hNeedle = /          if \(rs\) return res\.status\(STATUS\.no_browser_key\)\.json\([^\n]*\n/;
-  ok(hNeedle.test(tsrcH), 'control (h) setup: the remote-holder refusal is found');
+  ok(verdictOf(hNeedle.test(tsrcH)), 'control (h) setup: the remote-holder refusal is found');
   const TRh = M.load('src/routes/browser-trace.js', editAnchor(tsrcH, hNeedle, '', "src/routes/browser-trace.js"), 'remote-key-row-accepted');
   // identity verify r2 (2026-09-28): the KEEPER now refuses a remote key too (knownKeysOf skips it) — a second layer,
   // peeled out of THIS control: the route-only mutant runs over a keeper that knows no remote key, so the route's own check
@@ -1186,9 +1186,9 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const hReal = await jHr('PATCH', `/api/browser/profiles/${pH.id}`, { use: { mode: 'only', who: [{ kind: 'session', key: KA }, { kind: 'session', key: 'bk-0000dead' }] } });
   ok(hReal.status === 409 && hReal.json.code === 'no_browser_key' && hReal.json.why === 'remote' && !B.whoMayUse(kH.profile(pH.id)).who.some((w) => w.id === 'bk-0000dead'), 'the real route (over a keeper that knows no remote key): a remote session\'s key as a `key` row is refused by name, nothing written');
   const hMut = await jH('PATCH', `/api/browser/profiles/${pH.id}`, { use: { mode: 'only', who: [{ kind: 'session', key: KA }, { kind: 'session', key: 'bk-0000dead' }] } });
-  ok(hMut.status === 200 && B.whoMayUse(kH.profile(pH.id)).who.some((w) => w.id === 'bk-0000dead'), 'CONTROL (h): a route without the check writes a remote session into the list — the remote-key leg goes red');
+  ok(hMut.status === 200 && verdictOf(B.whoMayUse(kH.profile(pH.id)).who.some((w) => w.id === 'bk-0000dead')), 'CONTROL (h): a route without the check writes a remote session into the list — the remote-key leg goes red');
   const hKeeper = await threw(() => k.updateProfile(pG.id, { use: { mode: 'only', who: [{ kind: 'session', key: KA }, { kind: 'session', key: 'bk-0000dead' }] } }));
-  ok(hKeeper && hKeeper.code === 'unknown_conversation' && !B.whoMayUse(k.profile(pG.id)).who.some((w) => w.id === 'bk-0000dead'), 'the keeper\'s own layer (identity verify r2): a remote key written straight into updateProfile is unknown_conversation (knownKeysOf never lists it)');
+  ok(gateOf(hKeeper) && hKeeper.code === 'unknown_conversation' && !B.whoMayUse(k.profile(pG.id)).who.some((w) => w.id === 'bk-0000dead'), 'the keeper\'s own layer (identity verify r2): a remote key written straight into updateProfile is unknown_conversation (knownKeysOf never lists it)');
   srvH.close(); srvHr.close(); kH.shutdown(); active.delete('sess-9'); live.delete('bk-0000dead'); active.delete('sess-8'); live.delete('bk-0000c0e8');
   // (i) A REMOTE SESSION NEVER HOLDS A LEASE (identity verify r2, 2026-09-28): a keeper copy without the fence at the ONE
   // admission takes the lease and launches this machine's browser for a session on another machine
@@ -1200,16 +1200,16 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const pI = kIreal.createProfile({ label: 'Ctl I' }, { owner: { kind: 'instance', id: null } });
   const eI = await threw(() => kIreal.attach({ profileId: pI.id, browserKey: 'bk-0000dead', sessionId: 'sess-9' }));
   const LI = logOf('launches.log').length;
-  ok(eI && eI.code === 'remote_session' && !kIreal.leasesOn(pI.id).length, 'the real keeper: a remote session\'s attach is refused remote_session at the ONE admission (before any launch)');
+  ok(gateOf(eI) && eI.code === 'remote_session' && !kIreal.leasesOn(pI.id).length, 'the real keeper: a remote session\'s attach is refused remote_session at the ONE admission (before any launch)');
   kIreal.reshapeStore((doc) => { doc.leases.push({ profileId: pI.id, browserKey: 'bk-0000dead', sessionId: 'sess-9', targetId: null, since: 1, input: 'agent', viewers: 0, carrierLostAt: null }); });
   const eI2 = await threw(() => kIreal.attach({ profileId: pI.id, browserKey: 'bk-0000dead', sessionId: 'sess-9' }));
-  ok(eI2 && eI2.code === 'remote_session' && !kIreal.leasesOn(pI.id).some((l) => l.browserKey === 'bk-0000dead'), '…and a lease such a session took BEFORE the fence (planted in the registry) goes with the refusal');
+  ok(gateOf(eI2) && eI2.code === 'remote_session' && !kIreal.leasesOn(pI.id).some((l) => l.browserKey === 'bk-0000dead'), '…and a lease such a session took BEFORE the fence (planted in the registry) goes with the refusal');
   const Ki = M.load('src/server/browser-keeper.js', editAnchor(ksrc, iNeedle, "    if (false) {\n      const rr = B.remoteSessionRefusal({ label: p.label });\n", "src/server/browser-keeper.js"), 'no-remote-fence');
   const dIm = path.join(ROOT, 'data-ctl-im'); fs.mkdirSync(dIm, { recursive: true });
   const kImut = mkKeeper(Ki, { dataDir: dIm });
   const pIm = kImut.createProfile({ label: 'Ctl Im' }, { owner: { kind: 'instance', id: null } });
   const eIm = await threw(() => kImut.attach({ profileId: pIm.id, browserKey: 'bk-0000dead', sessionId: 'sess-9' }));
-  ok(!eIm && kImut.leasesOn(pIm.id).some((l) => l.browserKey === 'bk-0000dead') && logOf('launches.log').length === LI + 1, 'CONTROL (i): a keeper without the fence leases a session on another machine and launches this machine\'s browser for it — the remote `use` leg goes red', eIm && eIm.message);
+  ok(!eIm && gateOf(kImut.leasesOn(pIm.id).some((l) => l.browserKey === 'bk-0000dead')) && logOf('launches.log').length === LI + 1, 'CONTROL (i): a keeper without the fence leases a session on another machine and launches this machine\'s browser for it — the remote `use` leg goes red', eIm && eIm.message);
   await kImut.stop(pIm.id).catch(() => { }); kImut.shutdown();
   // (j) the ONE add ignoring a remote conversation: a keeper copy whose addConversation skips the remote check writes the
   // remote key into the list on a user's pick (ws-create's form)
@@ -1217,15 +1217,15 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   ok(ksrc.split(jNeedle).length === 2, 'control (j) setup: the add\'s remote check is found exactly once');
   kIreal.updateProfile(pI.id, { use: { mode: 'only', who: [{ kind: 'session', key: KA }] } });
   const pj = kIreal.setPin('bk-0000dead', pI.id, { origin: 'chosen', by: 'user', remote: true });
-  ok(pj && !('added' in pj) && !B.whoMayUse(kIreal.profile(pI.id)).who.some((w) => w.id === 'bk-0000dead'), 'the real keeper: the user\'s pick for a remote spawn (remote:true) pins without adding');
+  ok(gateOf(pj) && !('added' in pj) && !B.whoMayUse(kIreal.profile(pI.id)).who.some((w) => w.id === 'bk-0000dead'), 'the real keeper: the user\'s pick for a remote spawn (remote:true) pins without adding');
   const pj2 = kIreal.setPin('bk-0000dead', pI.id, { origin: 'chosen', by: 'user' });
-  ok(pj2 && !('added' in pj2) && !B.whoMayUse(kIreal.profile(pI.id)).who.some((w) => w.id === 'bk-0000dead'), '…and the same pick judged by the wiring\'s remote-key list (no `remote` flag) adds nothing either');
+  ok(gateOf(pj2) && !('added' in pj2) && !B.whoMayUse(kIreal.profile(pI.id)).who.some((w) => w.id === 'bk-0000dead'), '…and the same pick judged by the wiring\'s remote-key list (no `remote` flag) adds nothing either');
   const Kj = M.load('src/server/browser-keeper.js', editAnchor(ksrc, jNeedle, '', "src/server/browser-keeper.js"), 'add-ignores-remote');
   const dJ = path.join(ROOT, 'data-ctl-j'); fs.mkdirSync(dJ, { recursive: true });
   const kJ = mkKeeper(Kj, { dataDir: dJ });
   const pJ = kJ.createProfile({ label: 'Ctl J' }, { owner: { kind: 'only', who: [{ kind: 'session', id: KA }] } });
   const pjm = kJ.setPin('bk-0000dead', pJ.id, { origin: 'chosen', by: 'user', remote: true });
-  ok(pjm && pjm.added && B.whoMayUse(kJ.profile(pJ.id)).who.some((w) => w.id === 'bk-0000dead'), 'CONTROL (j): an add ignoring the remote check writes the remote session into the list — the "adds nothing" legs go red');
+  ok(gateOf(pjm) && gateOf(pjm.added) && verdictOf(B.whoMayUse(kJ.profile(pJ.id)).who.some((w) => w.id === 'bk-0000dead')), 'CONTROL (j): an add ignoring the remote check writes the remote session into the list — the "adds nothing" legs go red');
   kJ.shutdown(); kIreal.shutdown(); active.delete('sess-9'); live.delete('bk-0000dead');
   // (k) THE AGENT'S VIEW (identity verify r2, 2026-09-28): a routes copy answering the raw digest + the raw lease rows
   // hands the fork First chat's key and webui id; a PURE copy of agentDigestView keeping rows whole does the same
@@ -1242,7 +1242,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const kReal5 = await j('GET', '/api/agent/browser/profiles', undefined, as(sO)), kMut5 = await jK('GET', '/api/agent/browser/profiles', undefined, as(sO));
   const kReal6 = await j('GET', `/api/agent/browser/backend?profile=${pG.id}`, undefined, as(sO)), kMut6 = await jK('GET', `/api/agent/browser/backend?profile=${pG.id}`, undefined, as(sO));
   ok(kReal5.status === 200 && !namesA(kReal5.json.leases) && kReal6.status === 200 && !namesA(kReal6.json.leases), 'the real routes: the outsider\'s digest and its `backend?profile=` carry no lease row naming First chat');
-  ok(kMut5.status === 200 && namesA(kMut5.json.leases) && kMut6.status === 200 && namesA(kMut6.json.leases), 'CONTROL (k): routes answering the raw rows hand the outsider First chat\'s key + webui id in both answers — the agent-view legs go red');
+  ok(kMut5.status === 200 && gateOf(namesA(kMut5.json.leases)) && kMut6.status === 200 && verdictOf(namesA(kMut6.json.leases)), 'CONTROL (k): routes answering the raw rows hand the outsider First chat\'s key + webui id in both answers — the agent-view legs go red');
   const kNeedleP = "  if (ownRow(l, myKey)) return { ...l };\n";
   ok(bsrc.split(kNeedleP).length === 2, 'control (k′) setup: agentLeaseRow\'s own-row branch is found exactly once');
   const Bk = M.load('src/browser-profiles.js', editAnchor(bsrc, kNeedleP, "  return { ...l };\n", "src/browser-profiles.js"), 'lease-rows-whole');
@@ -1288,13 +1288,13 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
   const badRows = rows.filter((r) => r[0] !== r[1]);
   ok(!badRows.length, `④a PURE profileLockVerdict: ${rows.length} rows (${rows.map((r) => r[2].split(':')[0]).join(' · ')})`, badRows);
   const prev = V({ lock: { host: 'pod-old', pid: 77 }, holder: DEAD, launchHosts: ['pod-old'] });
-  ok(prev.host === 'pod-old' && /previous name, pod-old/.test(prev.why) && /taken over/.test(prev.why) && /SingletonLock/.test(prev.why), '④a the previous-host verdict names the old hostname and says "taken over"', prev.why);
+  ok(prev.host === 'pod-old' && gateOf(/previous name, pod-old/.test(prev.why)) && gateOf(/taken over/.test(prev.why)) && verdictOf(/SingletonLock/.test(prev.why)), '④a the previous-host verdict names the old hostname and says "taken over"', prev.why);
   const unk = V({ lock: { host: 'stranger', pid: 77 }, holder: DEAD, launchHosts: ['pod-old'] });
   const rf = B.profileLockedRefusal({ label: 'Roll', dir: D, verdict: unk });
-  ok(rf.code === 'profile_locked' && /stranger/.test(rf.error) && rf.error.includes(HOST) && /rm -f '\/h\/\.agent-browser\/vs-bp-00000001\/SingletonLock'/.test(rf.error) && !/held by another browser process/.test(rf.error) && !/it may be your own browser/.test(rf.error) && !CMDLINE_RE.test(rf.error), '④a the foreign-unknown refusal names BOTH hostnames and the ONE command (never "held by a browser process", never "your own browser")', rf.error);
+  ok(rf.code === 'profile_locked' && gateOf(/stranger/.test(rf.error)) && gateOf(rf.error.includes(HOST)) && gateOf(/rm -f '\/h\/\.agent-browser\/vs-bp-00000001\/SingletonLock'/.test(rf.error)) && !/held by another browser process/.test(rf.error) && !/it may be your own browser/.test(rf.error) && !CMDLINE_RE.test(rf.error), '④a the foreign-unknown refusal names BOTH hostnames and the ONE command (never "held by a browser process", never "your own browser")', rf.error);
   ok(B.launchHostsOf({ hosts: ['a', 'b'], host: 'b' }).join() === 'a,b' && B.launchHostsOf({ host: 'c' }).join() === 'c' && B.launchHostsOf({}, 'file-host').join() === 'file-host' && B.launchHostsOf(null, null).length === 0 && B.launchHostsOf({ hosts: ['a'] }, 'file-host').join() === 'a', '④a launchHostsOf: the lineage, the last host, the FILE writer only for a record without a stamp, else nothing');
   ok(JSON.stringify(B.withLaunchHost({ hosts: ['a', 'b'] }, 'b')) === JSON.stringify({ host: 'b', hosts: ['a', 'b'] }) && JSON.stringify(B.withLaunchHost({ hosts: ['a'] }, 'c')) === JSON.stringify({ host: 'c', hosts: ['a', 'c'] }) && B.withLaunchHost({ hosts: Array.from({ length: 12 }, (_, i) => 'h' + i) }, 'z').hosts.length === 8, '④a withLaunchHost: distinct, newest last, bounded at 8');
-  ok(B.renamedFromFact({ renamedFrom: { host: 'pod-old', at: 1000 } }, 1000 + B.RENAMED_SHOWN_MS - 1) && !B.renamedFromFact({ renamedFrom: { host: 'pod-old', at: 1000 } }, 1000 + B.RENAMED_SHOWN_MS + 1) && !B.renamedFromFact({ renamedFrom: { host: '', at: 1000 } }, 1000) && !B.renamedFromFact({}, 1000), '④a renamedFromFact: a day, then nothing');
+  ok(gateOf(B.renamedFromFact({ renamedFrom: { host: 'pod-old', at: 1000 } }, 1000 + B.RENAMED_SHOWN_MS - 1)) && !B.renamedFromFact({ renamedFrom: { host: 'pod-old', at: 1000 } }, 1000 + B.RENAMED_SHOWN_MS + 1) && !B.renamedFromFact({ renamedFrom: { host: '', at: 1000 } }, 1000) && !B.renamedFromFact({}, 1000), '④a renamedFromFact: a day, then nothing');
   // verify r1 (F8): the lock's hostname is a symlink target anybody with the directory can write (any length, any character)
   // and every sentence prints it — reproduced: a 3 000-char host with a bidi override rode the refusal to the agent (15 KB),
   // renamedFromFact and withLaunchHost unbounded. ONE cleaning (the belt, HOST_MAX 255) at every door now.
@@ -1303,7 +1303,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     const vw = B.profileLockVerdict({ lock: { host: wild, pid: 77 }, holder: DEAD, hostname: HOST, dir: D, launchHosts: [] });
     const rw = B.profileLockedRefusal({ label: 'L', dir: D, verdict: vw });
     ok(vw.kind === 'foreign' && vw.host.length <= B.HOST_MAX && !/‮/.test(vw.host) && !/<system-reminder>/.test(vw.host + rw.error) && rw.error.length < 2000 && !/‮/.test(rw.error), '④a a wild lock hostname (3 000 chars, a bidi override, a frame tag) is cleaned and bounded in the verdict and the refusal (the sentence names the host five times: ≤ 5 × HOST_MAX + its words)', { host: vw.host.length, err: rw.error.length });
-    ok(B.renamedFromFact({ renamedFrom: { host: wild, at: 1000 } }, 1000).host.length <= B.HOST_MAX && B.withLaunchHost({ hosts: [wild] }, HOST).hosts.every((h) => h.length <= B.HOST_MAX && !/‮/.test(h)) && B.launchHostsOf({ hosts: [wild] }).every((h) => h.length <= B.HOST_MAX) && B.cleanHost('  pod-old​  ') === 'pod-old', '④a …and renamedFromFact / withLaunchHost / launchHostsOf carry only cleaned, bounded hostnames (cleanHost = the belt)');
+    ok(B.renamedFromFact({ renamedFrom: { host: wild, at: 1000 } }, 1000).host.length <= B.HOST_MAX && gateOf(B.withLaunchHost({ hosts: [wild] }, HOST).hosts.every((h) => h.length <= B.HOST_MAX && !/‮/.test(h))) && gateOf(B.launchHostsOf({ hosts: [wild] }).every((h) => h.length <= B.HOST_MAX)) && B.cleanHost('  pod-old​  ') === 'pod-old', '④a …and renamedFromFact / withLaunchHost / launchHostsOf carry only cleaned, bounded hostnames (cleanHost = the belt)');
     // a lock whose host matches ours only once cleaned is still OUR hostname (never "foreign" for an invisible character)
     ok(B.profileLockVerdict({ lock: { host: HOST + '​', pid: 77 }, holder: DEAD, hostname: HOST, dir: D }).kind === 'free', '④a a lock host equal to ours up to an invisible character is judged as ours (the dead pid ⇒ free)');
   }
@@ -1320,7 +1320,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     const L0 = logOf('launches.log').length;
     await kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' });
     let rec = kL._reg().browsers[roll.id];
-    ok(rec && rec.state === 'ready' && rec.host === HOST && Array.isArray(rec.hosts) && rec.hosts.join() === HOST && logOf('launches.log').length === L0 + 1, '④b a launch stamps the record with THIS machine\'s hostname (the witness the next pod reads)', { host: rec && rec.host, hosts: rec && rec.hosts });
+    ok(gateOf(rec) && rec.state === 'ready' && rec.host === HOST && gateOf(Array.isArray(rec.hosts)) && rec.hosts.join() === HOST && logOf('launches.log').length === L0 + 1, '④b a launch stamps the record with THIS machine\'s hostname (the witness the next pod reads)', { host: rec && rec.host, hosts: rec && rec.hosts });
     const onDisk = JSON.parse((landedU5b(), fs).readFileSync(path.join(DATA_L, 'browser-profiles.json'), 'utf8'));
     ok(onDisk.host === HOST && onDisk.browsers[roll.id].host === HOST, '④b …and the registry file names its writer (the legacy witness of a record written before the stamp)', { host: onDisk.host });
     await kL.stop(roll.id, { why: 'user' });
@@ -1332,17 +1332,17 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     const a2 = await kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' });
     rec = kL._reg().browsers[roll.id];
     const said = lines.slice(n0).find((l) => /taken over/.test(l)) || '';
-    ok(a2 && a2.browser && a2.browser.state === 'ready' && logOf('launches.log').length === L1 + 1 && singletons(roll.dir).length === 0, '④b THE ROLL: a lock naming a hostname this keeper launched on is taken over — the three Singleton symlinks removed, the browser launched, never profile_locked', { state: a2 && a2.browser && a2.browser.state, left: singletons(roll.dir) });
-    ok(/previous name pod-old/.test(said) && /SingletonLock, SingletonSocket, SingletonCookie removed/.test(said) && said.includes(HOST), '④b …said in the journal: the old name, what was removed, this machine\'s name', said);
+    ok(gateOf(a2) && gateOf(a2.browser) && a2.browser.state === 'ready' && logOf('launches.log').length === L1 + 1 && singletons(roll.dir).length === 0, '④b THE ROLL: a lock naming a hostname this keeper launched on is taken over — the three Singleton symlinks removed, the browser launched, never profile_locked', { state: a2 && a2.browser && a2.browser.state, left: singletons(roll.dir) });
+    ok(gateOf(/previous name pod-old/.test(said)) && gateOf(/SingletonLock, SingletonSocket, SingletonCookie removed/.test(said)) && verdictOf(said.includes(HOST)), '④b …said in the journal: the old name, what was removed, this machine\'s name', said);
     ok(rec.host === HOST && rec.hosts.join() === 'pod-old,' + HOST, '④b …the record carries the lineage (pod-old, then this machine)', rec.hosts);
     const pr = kL.profile(roll.id);
-    ok(pr.renamedFrom && pr.renamedFrom.host === 'pod-old' && B.renamedFromFact(pr, clock) && B.renamedFromFact(pr, clock).host === 'pod-old' && kL.list().profiles.find((x) => x.id === roll.id).renamedFrom.host === 'pod-old' && kL.list().machine && kL.list().machine.host === HOST, '④b …the profile says "renamed from pod-old" (the digest carries it, the machine\'s own name beside it)', pr.renamedFrom);
+    ok(gateOf(pr.renamedFrom) && pr.renamedFrom.host === 'pod-old' && gateOf(B.renamedFromFact(pr, clock)) && B.renamedFromFact(pr, clock).host === 'pod-old' && kL.list().profiles.find((x) => x.id === roll.id).renamedFrom.host === 'pod-old' && gateOf(kL.list().machine) && kL.list().machine.host === HOST, '④b …the profile says "renamed from pod-old" (the digest carries it, the machine\'s own name beside it)', pr.renamedFrom);
     await kL.stop(roll.id, { why: 'user' });
     // THE STRANGER: a hostname this keeper never launched on — refused by name, nothing removed, nothing launched
     plant(roll.dir, 'stranger');
     const L2 = logOf('launches.log').length;
     const e = await threw(() => kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' }));
-    ok(e && e.code === 'profile_locked' && /stranger/.test(e.message) && e.message.includes(HOST) && /rm -f '/.test(e.message) && e.message.includes(roll.dir) && !/held by another browser process/.test(e.message) && logOf('launches.log').length === L2 && singletons(roll.dir).length === 3, '④b THE STRANGER: a lock naming a hostname this keeper never launched on is refused by name — both hostnames and the one command; nothing removed, nothing launched', e && e.message);
+    ok(gateOf(e) && e.code === 'profile_locked' && gateOf(/stranger/.test(e.message)) && gateOf(e.message.includes(HOST)) && gateOf(/rm -f '/.test(e.message)) && gateOf(e.message.includes(roll.dir)) && !/held by another browser process/.test(e.message) && logOf('launches.log').length === L2 && singletons(roll.dir).length === 3, '④b THE STRANGER: a lock naming a hostname this keeper never launched on is refused by name — both hostnames and the one command; nothing removed, nothing launched', e && e.message);
     for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(roll.dir, n)); } catch { } }
     // verify r1 (F1) THE LIVE HOLDER UNDER A PREVIOUS NAME: a process alive on THIS machine names the directory (the machine
     // was renamed under it); its lock names the old name + its live pid. Reproduced: the lock was unlinked under the live
@@ -1359,7 +1359,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       const e3 = await threw(() => kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' }));
       const holderAlive = (() => { try { process.kill(hp.pid, 0); return true; } catch { return false; } })();
       const said3 = lines.slice(n3);
-      ok(!e3 && !holderAlive && !said3.some((l) => /taken over/.test(l)) && said3.some((l) => /ended its own orphaned browser pid \d+ before launching/.test(l)) && logOf('launches.log').length === L3 + 1, '④b THE LIVE HOLDER UNDER A PREVIOUS NAME: a process alive here naming the directory is judged by its own facts — our orphan is ENDED (never "taken over" under it), then the launch goes on', { e: e3 && e3.message, holderAlive, said: said3.filter((l) => /taken over|ended|NOT launched/.test(l)) });
+      ok(!e3 && !holderAlive && !said3.some((l) => /taken over/.test(l)) && gateOf(said3.some((l) => /ended its own orphaned browser pid \d+ before launching/.test(l))) && logOf('launches.log').length === L3 + 1, '④b THE LIVE HOLDER UNDER A PREVIOUS NAME: a process alive here naming the directory is judged by its own facts — our orphan is ENDED (never "taken over" under it), then the launch goes on', { e: e3 && e3.message, holderAlive, said: said3.filter((l) => /taken over|ended|NOT launched/.test(l)) });
       try { process.kill(hp.pid, 'SIGKILL'); } catch { }
       await kL.stop(roll.id, { why: 'user' });
       for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(roll.dir, n)); } catch { } }
@@ -1383,7 +1383,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     if (process.getuid && process.getuid() === 0) ok(true, '④b (read-only directory leg SKIPPED: root ignores directory modes)');
     else {
       const ro = await readOnly(kL, roll, 'product');
-      ok(ro.err === 'profile_locked' && /could not remove the lock \(EACCES\)/.test(ro.msg) && new RegExp(`rm -f '${roll.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/SingletonLock'`).test(ro.msg) && ro.launched === 0 && ro.left === 3 && ro.said.some((l) => /could NOT be removed \(EACCES\)/.test(l)) && !ro.said.some((l) => /taken over/.test(l)), '④b THE LOCK THAT CANNOT BE REMOVED: a takeover whose unlink fails is refused by name (the errno, the one command), nothing launched, the journal never says "taken over"', ro);
+      ok(ro.err === 'profile_locked' && gateOf(/could not remove the lock \(EACCES\)/.test(ro.msg)) && gateOf(new RegExp(`rm -f '${roll.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/SingletonLock'`).test(ro.msg)) && ro.launched === 0 && ro.left === 3 && gateOf(ro.said.some((l) => /could NOT be removed \(EACCES\)/.test(l))) && !ro.said.some((l) => /taken over/.test(l)), '④b THE LOCK THAT CANNOT BE REMOVED: a takeover whose unlink fails is refused by name (the errno, the one command), nothing launched, the journal never says "taken over"', ro);
     }
     // int347: lane grants-unify (.346) — a registry from before the unify boots through `2026-10-grants-unify` (the boot runs
     // the migrations before the keeper): its records' lists are carried into THE grants store the admission reads
@@ -1402,7 +1402,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       const Lx = logOf('launches.log').length;
       const ex = await threw(() => kX.attach({ profileId: id, browserKey: KA, sessionId: 'sess-1' }));
       if (expectOk) ok(!ex && logOf('launches.log').length === Lx + 1 && singletons(dir).length === 0 && kX._reg().browsers[id].hosts.join() === 'pod-old,' + HOST, '④c LEGACY + the file\'s writer: a record from before the stamp inherits the hostname the registry file was saved under — the old pod\'s lock is taken over', ex && ex.message);
-      else ok(ex && ex.code === 'profile_locked' && /pod-old/.test(ex.message) && logOf('launches.log').length === Lx && singletons(dir).length === 3, '④c LEGACY without a witness: a file with no writer stamp admits nothing — refused by name, the lock left in place (never guessed)', ex && ex.message);
+      else ok(gateOf(ex) && ex.code === 'profile_locked' && gateOf(/pod-old/.test(ex.message)) && logOf('launches.log').length === Lx && singletons(dir).length === 3, '④c LEGACY without a witness: a file with no writer stamp admits nothing — refused by name, the lock left in place (never guessed)', ex && ex.message);
       try { for (const p of kX.list().profiles) await kX.stop(p.id).catch(() => { }); } catch { /* none */ }
       kX.shutdown();
     }
@@ -1431,7 +1431,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       return r;
     };
     const sb = await secondBoot(K, 'product');
-    ok(sb.fileHost === HOST && Array.isArray(sb.hosts) && sb.hosts.join() === 'pod-old' && !sb.err && sb.launched === 1 && sb.left === 0, '④c THE SECOND BOOT: a boot that saved without a launch re-stamps the file under this name but the legacy record now CARRIES the old pod as its lineage — the next restart still takes the old pod\'s lock over', sb);
+    ok(sb.fileHost === HOST && gateOf(Array.isArray(sb.hosts)) && sb.hosts.join() === 'pod-old' && !sb.err && sb.launched === 1 && sb.left === 0, '④c THE SECOND BOOT: a boot that saved without a launch re-stamps the file under this name but the legacy record now CARRIES the old pod as its lineage — the next restart still takes the old pod\'s lock over', sb);
     // (d) CONTROLS — a patched copy per rule
     const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
     const noLineage = editAnchor(bsrc, "if (ours.includes(lockHost)) return { step: 'hostname', kind: 'stale-previous-host'", "if (false) return { step: 'hostname', kind: 'stale-previous-host'", "src/browser-profiles.js");
@@ -1457,7 +1457,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     const pN = kN.createProfile({ label: 'NoStamp' });
     await kN.attach({ profileId: pN.id, browserKey: KA, sessionId: 'sess-1' });
     const recN = kN._reg().browsers[pN.id];
-    ok(recN && recN.state === 'ready' && !recN.host && !recN.hosts, '④d CONTROL: a keeper that does not stamp the launch host leaves no witness on the record — the ④b stamp leg catches it (the next pod would refuse its own lock)', { host: recN && recN.host });
+    ok(gateOf(recN) && recN.state === 'ready' && !recN.host && !recN.hosts, '④d CONTROL: a keeper that does not stamp the launch host leaves no witness on the record — the ④b stamp leg catches it (the next pod would refuse its own lock)', { host: recN && recN.host });
     await kN.stop(pN.id, { why: 'user' }); kN.shutdown();
     const DATA_R = path.join(ROOT, 'data-noremove'); fs.mkdirSync(DATA_R, { recursive: true });
     const kR = mkKeeper(M.load('src/server/browser-keeper.js', noRemove, 'no-remove'), { dataDir: DATA_R, log: klog });
@@ -1469,7 +1469,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     const eR = await threw(() => kR.attach({ profileId: pR.id, browserKey: KA, sessionId: 'sess-1' }));
     // verify r1 (F5): a takeover that removes nothing is now REFUSED by the post-check (the lock still there) — the ④b
     // "removed" leg catches the missing removal, the ④b read-only leg catches a missing post-check (the control below)
-    ok(eR && eR.code === 'profile_locked' && /could not remove the lock/.test(eR.message) && singletons(pR.dir).length === 3, '④d CONTROL: a takeover that removes nothing leaves the three symlinks and is REFUSED by the post-check — never a launch into the locked directory (the ④b "removed" leg catches the removal)', eR && eR.message);
+    ok(gateOf(eR) && eR.code === 'profile_locked' && gateOf(/could not remove the lock/.test(eR.message)) && singletons(pR.dir).length === 3, '④d CONTROL: a takeover that removes nothing leaves the three symlinks and is REFUSED by the post-check — never a launch into the locked directory (the ④b "removed" leg catches the removal)', eR && eR.message);
     for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(pR.dir, n)); } catch { } }
     kR.shutdown();
     if (!(process.getuid && process.getuid() === 0)) {
@@ -1485,7 +1485,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       // the real Chrome dies on the lock itself: exit 21; either way the copy went ON to a launch instead of refusing)
       // (verify r3: the post-launch judgement (F3) now catches that launch and names the lock — the copy's own tell is the
       // journal's "nothing left to remove" and the ABSENCE of the F5 refusal before the launch)
-      ok(!/could not remove the lock/.test(rp.msg || '') && rp.left === 3 && rp.said.some((l) => /taken over \(nothing left to remove/.test(l)) && !rp.said.some((l) => /could NOT be removed/.test(l)), '④d CONTROL: a takeover without the post-check says "taken over (nothing left to remove)" and goes on to a launch into the directory still locked (it dies there) — the ④b read-only leg catches it', rp);
+      ok(!/could not remove the lock/.test(rp.msg || '') && rp.left === 3 && gateOf(rp.said.some((l) => /taken over \(nothing left to remove/.test(l))) && !rp.said.some((l) => /could NOT be removed/.test(l)), '④d CONTROL: a takeover without the post-check says "taken over (nothing left to remove)" and goes on to a launch into the directory still locked (it dies there) — the ④b read-only leg catches it', rp);
       kP.shutdown();
     }
   } catch (err) { ok(false, '④ the profile-lock-roll legs threw', err && (err.stack || err.message)); }
@@ -1574,12 +1574,12 @@ console.log('— ④e verify r2 T1: the lock verdict as ONE closed table (pid ×
   await leg('a HUMAN\'s Chrome on this directory under the previous name — refused by name, left running', PREV, ['--user-data-dir=<dir>'], { err: 'profile_locked', launched: 0, left: 3 });
   // verify r2 (F4): reproduced here — the ended orphan's lock stayed under the previous name (3 left) and the launch went into it
   await leg('OUR mark on this directory under the previous name — ours, ended, its stale lock removed, launched (never a takeover)', PREV, ['--user-data-dir=<dir>', '--vibespace-keeper=<mark>'], { ended: true });
-  ok(linesE.some((l) => /the ended orphan's lock named this machine's previous name pod-old/.test(l) && /SingletonLock, SingletonSocket, SingletonCookie removed/.test(l)), '④e …said in the journal: the ended orphan\'s previous-name lock removed (the three names)');
+  ok(verdictOf(linesE.some((l) => /the ended orphan's lock named this machine's previous name pod-old/.test(l) && /SingletonLock, SingletonSocket, SingletonCookie removed/.test(l))), '④e …said in the journal: the ended orphan\'s previous-name lock removed (the three names)');
   { // the recorded pid at ANOTHER starttime (a reused pid of the recorded browser), no mark ⇒ refused, left running
     const p = await mkProf('recorded pid reused'); const pr = liveP([`--user-data-dir=${p.dir}`]); await sleep(120); plantE(p.dir, HOST, pr.pid);
     kE._reg().browsers[p.id].browser = { pid: pr.pid, starttime: 1, dir: p.dir }; const L0 = logOf('launches.log').length;
     const e = await threw(() => kE.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
-    ok(e && e.code === 'profile_locked' && logOf('launches.log').length === L0 && isAlive(pr.pid), '④e keeper: the RECORDED pid at another starttime (reused), no mark ⇒ refused by name, left running', e && e.message);
+    ok(gateOf(e) && e.code === 'profile_locked' && logOf('launches.log').length === L0 && verdictOf(isAlive(pr.pid)), '④e keeper: the RECORDED pid at another starttime (reused), no mark ⇒ refused by name, left running', e && e.message);
     try { await kE.stop(p.id, { why: 'user' }); } catch { /* none */ }
   }
   try { for (const p of kE.list().profiles) await kE.stop(p.id).catch(() => { }); } catch { /* none */ } kE.shutdown();
@@ -1589,7 +1589,7 @@ console.log('— ④e verify r2 T1: the lock verdict as ONE closed table (pid ×
   const unreadableAsDead = editAnchor(bsrcE, "if (holder && holder.alive && holder.cmdline == null) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read", "if (false) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read", "src/browser-profiles.js");
   ok(aliveAlone !== bsrcE && unreadableAsDead !== bsrcE, '④e control setup: the directory test and the unreadable rule are where the controls cut');
   const tA = table(M.load('src/browser-profiles.js', aliveAlone, 'alive-alone'));
-  ok(tA.bad.some((x) => /previous\|not-a-chrome\(reuse\): launch/.test(x)) && tA.bad.some((x) => /previous\|chrome\/other-dir: launch/.test(x)), '④e CONTROL: a verdict for which "alive here" alone is a live holder hands a reused pid under the previous name to Chromium as free — the launch hangs on its dialog (measured) — the table catches it', tA.bad.slice(0, 4));
+  ok(gateOf(tA.bad.some((x) => /previous\|not-a-chrome\(reuse\): launch/.test(x))) && verdictOf(tA.bad.some((x) => /previous\|chrome\/other-dir: launch/.test(x))), '④e CONTROL: a verdict for which "alive here" alone is a live holder hands a reused pid under the previous name to Chromium as free — the launch hangs on its dialog (measured) — the table catches it', tA.bad.slice(0, 4));
   // verify r2 (F4) CONTROL: a keeper that ends its orphan under a previous name and launches into the lock it left
   {
     const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
@@ -1605,7 +1605,7 @@ console.log('— ④e verify r2 T1: the lock verdict as ONE closed table (pid ×
     try { await kC.stop(pC.id, { why: 'user' }); } catch { /* none */ } kC.shutdown();
   }
   const tU = table(M.load('src/browser-profiles.js', unreadableAsDead, 'unreadable-as-dead'));
-  ok(tU.bad.some((x) => /unreadable\|previous: stale-previous-host/.test(x)), '④e CONTROL: a verdict that treats an unreadable live pid under the previous name as gone takes its lock over (a holder it could not read) — the table catches it', tU.bad.slice(0, 4));
+  ok(verdictOf(tU.bad.some((x) => /unreadable\|previous: stale-previous-host/.test(x))), '④e CONTROL: a verdict that treats an unreadable live pid under the previous name as gone takes its lock over (a holder it could not read) — the table catches it', tU.bad.slice(0, 4));
   for (const pr of procs) { try { pr.kill('SIGKILL'); } catch { } }
 }
 // ═══ ④f VERIFY r2 (F1): A DIRECTORY TAKEN BETWEEN THE VERDICT AND THE LAUNCH IS NAMED ════════════════════════════
@@ -1639,15 +1639,15 @@ console.log('— ④f verify r2 F1: a holder that takes the directory between th
     return r;
   };
   const r = await run(K, 'product');
-  ok(r.refused >= 1 && r.launched === 0 && r.e1 && r.e1.code === 'profile_locked' && /your own browser/.test(r.e1.message) && !/the browser did not start|crash at startup/.test(r.e1.message), '④f THE RACE: the binary refused the launch on the lock planted after the verdict (exit 21) and the FIRST answer names the holder — profile_locked, "it may be your own browser", never "did not start"', r);
-  ok(r.e2 && r.e2.code === 'profile_locked' && r.left === 3 && r.holderAlive, '④f …the next command says the same; the holder is left running, its lock untouched', r);
-  ok(lines.some((l) => /taken while launching/.test(l) && /profile_locked|your own browser/.test(l)), '④f …said in the journal: the directory was taken while launching', lines.filter((l) => /Race product/.test(l)).slice(-2));
+  ok(r.refused >= 1 && r.launched === 0 && gateOf(r.e1) && r.e1.code === 'profile_locked' && gateOf(/your own browser/.test(r.e1.message)) && !/the browser did not start|crash at startup/.test(r.e1.message), '④f THE RACE: the binary refused the launch on the lock planted after the verdict (exit 21) and the FIRST answer names the holder — profile_locked, "it may be your own browser", never "did not start"', r);
+  ok(gateOf(r.e2) && r.e2.code === 'profile_locked' && r.left === 3 && verdictOf(r.holderAlive), '④f …the next command says the same; the holder is left running, its lock untouched', r);
+  ok(verdictOf(lines.some((l) => /taken while launching/.test(l) && /profile_locked|your own browser/.test(l))), '④f …said in the journal: the directory was taken while launching', lines.filter((l) => /Race product/.test(l)).slice(-2));
   // CONTROL: a keeper that never judges the lock again after a failed launch — the reproduced shape
   const ksrcF = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const noRejudge = editAnchor(ksrcF, 'function lockRefusalAfterLaunch(p, prev) {\n    if (!p || !p.dir) return null;', 'function lockRefusalAfterLaunch(p, prev) {\n    if (p) return null; /* CONTROL: no second judgement */', "src/server/browser-keeper.js");
   ok(noRejudge !== ksrcF, '④f control setup: the second judgement is where the control cuts');
   const c = await run(M.load('src/server/browser-keeper.js', noRejudge, 'no-rejudge-after-launch'), 'control');
-  ok(c.e1 && c.e1.code === 'launch_failed' && c.e2 && c.e2.code === 'profile_locked', '④f CONTROL: without the second judgement the first answer is a generic launch_failed and only the next command names the holder — the ④f race leg catches it', c);
+  ok(gateOf(c.e1) && c.e1.code === 'launch_failed' && gateOf(c.e2) && c.e2.code === 'profile_locked', '④f CONTROL: without the second judgement the first answer is a generic launch_failed and only the next command names the holder — the ④f race leg catches it', c);
   for (const pr of procs) { try { pr.kill('SIGKILL'); } catch { } }
 }
 // ═══ ④g VERIFY r3: THE ONE ORDERED VERDICT, THE CENSUS OF SAID THINGS, AND THE FOUR FINDINGS ═══════════════════════
@@ -1666,7 +1666,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
   const HOSTg = os.hostname(), PREV = 'pod-old', STRANGER = 'stranger';
   const Dg = '/h/.agent-browser/vs-bp-00000001';
   // ── T1 (a) the PURE order: the ladder's steps, in order, and every answer names its step ──
-  ok(JSON.stringify(B.LOCK_LADDER.map((s) => s.step)) === JSON.stringify(['live-holder', 'hostname', 'ended-orphan', 'launch', 'post-launch']) && B.LOCK_LADDER.every((s) => s.phase && s.what), '④g T1 LOCK_LADDER: five steps in ONE order — live-holder, hostname, ended-orphan, launch, post-launch', B.LOCK_LADDER.map((s) => s.step));
+  ok(JSON.stringify(B.LOCK_LADDER.map((s) => s.step)) === JSON.stringify(['live-holder', 'hostname', 'ended-orphan', 'launch', 'post-launch']) && verdictOf(B.LOCK_LADDER.every((s) => s.phase && s.what)), '④g T1 LOCK_LADDER: five steps in ONE order — live-holder, hostname, ended-orphan, launch, post-launch', B.LOCK_LADDER.map((s) => s.step));
   const liveUnderPrev = B.lockVerdict({ lock: { host: PREV, pid: 77 }, holder: { pid: 77, alive: true, cmdline: `chrome\0--user-data-dir=${Dg}\0--vibespace-keeper=bp-00000001`, dirs: [Dg], starttime: 5 }, hostname: HOSTg, dir: Dg, minted: true, mark: 'bp-00000001', preMarkAllowed: false, launchHosts: [PREV] });
   const deadUnderPrev = B.lockVerdict({ lock: { host: PREV, pid: 77 }, holder: { pid: 77, alive: false }, hostname: HOSTg, dir: Dg, launchHosts: [PREV] });
   const noLock = B.lockVerdict({ lock: null, hostname: HOSTg, dir: Dg });
@@ -1676,7 +1676,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
   const endedAlive = B.lockVerdict({ phase: 'ended', lock: { host: PREV, pid: 77 }, hostname: HOSTg, alive: true, endedPid: 77 });
   const endedOurs = B.lockVerdict({ phase: 'ended', lock: { host: HOSTg, pid: 77 }, hostname: HOSTg, alive: false, endedPid: 77 });
   const endedNone = B.lockVerdict({ phase: 'ended', lock: null, hostname: HOSTg, endedPid: 77 });
-  ok(endedOk.step === 'ended-orphan' && endedOk.kind === 'clear' && endedOther.kind === 'leave' && /not the orphan ended \(pid 77\)/.test(endedOther.why) && endedAlive.kind === 'leave' && endedOurs.kind === 'none' && endedNone.kind === 'none', '④g T1 the `ended` phase: THAT lock (the orphan\'s pid, a previous name, dead) ⇒ clear; another pid / alive ⇒ leave (judged again at the launch); ours / none ⇒ nothing', [endedOk.kind, endedOther.kind, endedAlive.kind, endedOurs.kind, endedNone.kind]);
+  ok(endedOk.step === 'ended-orphan' && endedOk.kind === 'clear' && endedOther.kind === 'leave' && gateOf(/not the orphan ended \(pid 77\)/.test(endedOther.why)) && endedAlive.kind === 'leave' && endedOurs.kind === 'none' && endedNone.kind === 'none', '④g T1 the `ended` phase: THAT lock (the orphan\'s pid, a previous name, dead) ⇒ clear; another pid / alive ⇒ leave (judged again at the launch); ours / none ⇒ nothing', [endedOk.kind, endedOther.kind, endedAlive.kind, endedOurs.kind, endedNone.kind]);
   const afterForeign = B.lockVerdict({ phase: 'after-launch', lock: { host: STRANGER, pid: 77 }, holder: { pid: 77, alive: false }, hostname: HOSTg, dir: Dg, launchHosts: [PREV] });
   const afterPrev = B.lockVerdict({ phase: 'after-launch', lock: { host: PREV, pid: 77 }, holder: { pid: 77, alive: false }, hostname: HOSTg, dir: Dg, launchHosts: [PREV] });
   const afterOurs = B.lockVerdict({ phase: 'after-launch', lock: { host: HOSTg, pid: 77 }, holder: { pid: 77, alive: false }, hostname: HOSTg, dir: Dg, launchHosts: [PREV] });
@@ -1712,13 +1712,13 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
   if (isRoot) ok(true, '④g F1 (read-only directory leg SKIPPED: root ignores directory modes)');
   else {
     const r = await runF1(K, 'product');
-    ok(r.err === 'profile_locked' && /could not remove the lock \(EACCES\)/.test(r.msg) && /its own browser, ended now/.test(r.msg) && /rm -f '/.test(r.msg) && r.launched === 0 && r.left === 3 && r.ended && r.said.some((x) => /could NOT be removed \(EACCES\)/.test(x)), '④g F1 our orphan ended under a previous name, its lock could NOT be removed (EACCES) ⇒ profile_locked naming the errno and the one command, no launch, said in the journal', r);
+    ok(r.err === 'profile_locked' && gateOf(/could not remove the lock \(EACCES\)/.test(r.msg)) && gateOf(/its own browser, ended now/.test(r.msg)) && gateOf(/rm -f '/.test(r.msg)) && r.launched === 0 && r.left === 3 && gateOf(r.ended) && verdictOf(r.said.some((x) => /could NOT be removed \(EACCES\)/.test(x))), '④g F1 our orphan ended under a previous name, its lock could NOT be removed (EACCES) ⇒ profile_locked naming the errno and the one command, no launch, said in the journal', r);
     const noPost = editAnchor(ksrcG, "    if (left.includes('SingletonLock')) {\n      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');\n      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable'", "    if (false && left.includes('SingletonLock')) { /* CONTROL: no post-check after the ended orphan's clear */\n      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');\n      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable'", "src/server/browser-keeper.js");
     ok(noPost !== ksrcG, '④g F1 control setup: the post-check is where the control cuts');
     const c = await runF1(M.load('src/server/browser-keeper.js', noPost, 'no-postcheck-ended-clear'), 'control');
     // (the fake binary dies on the read-only directory — its own SingletonLock.fake — and the post-launch judgement (F3) then names
     // the lock; the copy's own tell: the clear said "nothing removed", never refused by its own name before the launch)
-    ok(c.said.some((x) => /the ended orphan's lock .*nothing removed/.test(x)) && !c.said.some((x) => /the ended orphan's lock .*could NOT be removed/.test(x)) && !/its own browser, ended now/.test(c.msg) && c.left === 3, '④g F1 CONTROL: a keeper that does not post-check the ended orphan\'s clear says "nothing removed" and goes on to the launch (the reproduced shape) — the F1 leg catches it', c);
+    ok(gateOf(c.said.some((x) => /the ended orphan's lock .*nothing removed/.test(x))) && !c.said.some((x) => /the ended orphan's lock .*could NOT be removed/.test(x)) && !/its own browser, ended now/.test(c.msg) && c.left === 3, '④g F1 CONTROL: a keeper that does not post-check the ended orphan\'s clear says "nothing removed" and goes on to the launch (the reproduced shape) — the F1 leg catches it', c);
   }
   // ── F2: the clear is keyed on the ORPHAN'S pid — a lock rewritten between the end and the clear is left, never called ours ──
   const runF2 = async (Bmod, tag) => {
@@ -1740,7 +1740,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
     ok(noIdentity !== bsrcG, '④g F2 control setup: the pid identity is where the control cuts');
     const fB = M.write('src/browser-profiles.js', noIdentity, 'no-ended-pid-identity', { esm: false }); const Bc = require(fB); Bc.__file = fB;
     const c2 = Bc.__file ? await runF2(Bc, 'control') : null;
-    ok(c2 && c2.left === 0 && c2.lied === 1, '④g F2 CONTROL: a verdict not keyed on the orphan\'s pid removes the stranger\'s lock and calls it "this machine\'s previous name" — the F2 leg catches it', c2 || 'no control copy');
+    ok(gateOf(c2) && c2.left === 0 && c2.lied === 1, '④g F2 CONTROL: a verdict not keyed on the orphan\'s pid removes the stranger\'s lock and calls it "this machine\'s previous name" — the F2 leg catches it', c2 || 'no control copy');
   }
   // ── F3: a previous name's lock that reached the launch (the ④f race under the roll's shape) is taken over NOW and named ──
   const runF3 = async (Bmod, tag) => {
@@ -1758,21 +1758,21 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
     return r;
   };
   const r3 = await runF3(B, 'product');
-  ok(/^profile_locked: /.test(r3.e1) && /previous name \(pod-old/.test(r3.e1) && /took the lock over now; run the command again/.test(r3.e1) && r3.left1 === 0 && r3.e2 === null && r3.renamed && r3.said === 1, '④g F3 the FIRST answer after a failed launch on a previous name\'s lock names it, takes it over (the lock gone, "renamed from"), says it once in the journal; the next command launches', r3);
+  ok(gateOf(/^profile_locked: /.test(r3.e1)) && gateOf(/previous name \(pod-old/.test(r3.e1)) && gateOf(/took the lock over now; run the command again/.test(r3.e1)) && r3.left1 === 0 && r3.e2 === null && gateOf(r3.renamed) && r3.said === 1, '④g F3 the FIRST answer after a failed launch on a previous name\'s lock names it, takes it over (the lock gone, "renamed from"), says it once in the journal; the next command launches', r3);
   {
     const bsrcG = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
     const noTakeover = editAnchor(bsrcG, "  if (v.kind === 'stale-previous-host') return { step: 'post-launch', kind: 'take-over', verdict: v };", "  /* CONTROL: a previous name's lock after a failed launch is nobody's business */", "src/browser-profiles.js");
     ok(noTakeover !== bsrcG, '④g F3 control setup: the post-launch takeover is where the control cuts');
     const fB = M.write('src/browser-profiles.js', noTakeover, 'no-post-launch-takeover', { esm: false }); const Bc = require(fB); Bc.__file = fB;
     const c3 = Bc.__file ? await runF3(Bc, 'control') : null;
-    ok(c3 && /^launch_failed: /.test(c3.e1) && c3.left1 === 3 && c3.e2 === null && c3.said === 0, '④g F3 CONTROL: without the post-launch takeover the first answer is a generic launch_failed, the lock stays for the next command, the journal says nothing (the reproduced shape) — the F3 leg catches it', c3 || 'no control copy');
+    ok(gateOf(c3) && gateOf(/^launch_failed: /.test(c3.e1)) && c3.left1 === 3 && c3.e2 === null && c3.said === 0, '④g F3 CONTROL: without the post-launch takeover the first answer is a generic launch_failed, the lock stays for the next command, the journal says nothing (the reproduced shape) — the F3 leg catches it', c3 || 'no control copy');
   }
   // ── T1 (c) the SWAP control: the clear BEFORE the end — the ④e shape (a live orphan under a previous name) leaves its lock ──
   {
     const swapped = editAnchor(editAnchor(ksrcG,
       "    if (v.kind === 'own-orphan') {\n      const r = await endProcess(v.pid, facts.holder.starttime);", "    if (v.kind === 'own-orphan') {\n      const c0 = clearEndedOrphanLock(p, p.dir, v.pid); /* CONTROL: the clear swapped before the end */\n      const r = await endProcess(v.pid, facts.holder.starttime);", "src/server/browser-keeper.js"),
       "      if (r === 'ended' || r === 'gone') { const c = clearEndedOrphanLock(p, p.dir, v.pid); if (!c.ok) return { ok: false, ...c.refusal };", "      if (r === 'ended' || r === 'gone') { const c = c0; if (!c.ok) return { ok: false, ...c.refusal };", "src/server/browser-keeper.js");
-    ok(swapped !== ksrcG && swapped.includes('const c = c0;'), '④g T1 swap-control setup: the clear and the end are where the control swaps');
+    ok(swapped !== ksrcG && verdictOf(swapped.includes('const c = c0;')), '④g T1 swap-control setup: the clear and the end are where the control swaps');
     const dd = path.join(ROOT, 'data-g-swap'); fs.mkdirSync(dd, { recursive: true });
     const kk = mkKeeper(M.load('src/server/browser-keeper.js', swapped, 'clear-before-end'), { dataDir: dd, log: klogG });
     const p = await mkProfG(kk, 'Swap'); const h = holderG(p.dir, p.id); await sleep(120); plantG(p.dir, PREV, h.pid);
@@ -1792,27 +1792,27 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
     const envE = beE.envFor({ browserKey: KG, cwd: HOME });
     const ensure = (kk = kE) => kk.ensureEphemeral({ browserKey: KG, sessionId: 'sess-7', envPairs: envE.pairs, sessionName: 'Eph', variant: envE.variant });
     const r0 = await ensure(); const eph = kE.ephemeralFor(KG); const dir = eph && eph.dir;
-    ok(r0.browser.state === 'ready' && dir && fs.existsSync(dir), '④g ephemeral: the conversation\'s browser runs on its KEPT directory', { dir });
+    ok(r0.browser.state === 'ready' && gateOf(dir) && verdictOf(fs.existsSync(dir)), '④g ephemeral: the conversation\'s browser runs on its KEPT directory', { dir });
     const stopE = async () => { try { await kE.stop(eph.profileId, { why: 'user' }); } catch { } };
     const lineage = () => { const r = kE._reg().browsers[eph.profileId]; r.host = PREV; r.hosts = [PREV]; };
     await stopE(); lineage(); plantG(dir, PREV, await deadPidG()); { const l0 = linesG.length; const e = await threw(() => ensure());
       ok(!e && singletonsG(dir).length === 0 && saidG(l0, /previous name pod-old — taken over/).length === 1, '④g ephemeral (a): the roll\'s lock is taken over, said once', { e: e && e.message, left: singletonsG(dir).length }); }
     await stopE(); plantG(dir, STRANGER, await deadPidG()); { const e = await threw(() => ensure());
-      ok(e && e.code === 'profile_locked' && /stranger/.test(e.message) && singletonsG(dir).length === 3, '④g ephemeral (b): a foreign name stays refused by name', e && `${e.code}: ${e.message.slice(0, 160)}`); unplant(dir); }
+      ok(gateOf(e) && e.code === 'profile_locked' && gateOf(/stranger/.test(e.message)) && singletonsG(dir).length === 3, '④g ephemeral (b): a foreign name stays refused by name', e && `${e.code}: ${e.message.slice(0, 160)}`); unplant(dir); }
     { const h = holderG(dir, KG); await sleep(120); plantG(dir, PREV, h.pid); const l0 = linesG.length; const e = await threw(() => ensure());
       ok(!e && !isAliveG(h.pid) && singletonsG(dir).length === 0 && saidG(l0, /the ended orphan's lock named this machine's previous name pod-old/).length === 1, '④g ephemeral (c): our orphan (the conversation\'s mark) ended, its previous-name lock removed, said once, launched', { e: e && e.message, left: singletonsG(dir).length }); }
     { await stopE(); const h = holderG(dir, KG); await sleep(120); plantG(dir, PREV, h.pid); fs.chmodSync(dir, 0o500); const L0 = logOf('launches.log').length;
       const e = await threw(() => ensure()); fs.chmodSync(dir, 0o700);
-      ok(e && e.code === 'profile_locked' && /EACCES/.test(e.message) && logOf('launches.log').length === L0 && singletonsG(dir).length === 3, '④g ephemeral (d): a clear that fails (EACCES) is refused by name with the errno (r3 F1 on this row)', e ? `${e.code}: ${e.message.slice(0, 160)}` : 'launched'); unplant(dir); }
+      ok(gateOf(e) && e.code === 'profile_locked' && gateOf(/EACCES/.test(e.message)) && logOf('launches.log').length === L0 && singletonsG(dir).length === 3, '④g ephemeral (d): a clear that fails (EACCES) is refused by name with the errno (r3 F1 on this row)', e ? `${e.code}: ${e.message.slice(0, 160)}` : 'launched'); unplant(dir); }
     // F5 (verify r3): a REFUSED start on this row kept neither the lineage nor the mark on its new record — after a restart the
     // previous name was gone (its lock refused as FOREIGN) and the pre-mark adoption re-opened (a hand-launched CLI Chrome on the
     // kept directory would be ended as "our orphan"). (d) above was a refusal: the record must still carry both.
     { const r = kE._reg().browsers[eph.profileId];
-      ok(r && r.state === 'failed' && Array.isArray(r.hosts) && r.hosts.includes(PREV) && r.mark === KG, '④g F5 ephemeral: a REFUSED start\'s record still carries the launch-host lineage (pod-old) and the conversation\'s mark', { state: r && r.state, hosts: r && r.hosts, mark: r && r.mark });
+      ok(gateOf(r) && r.state === 'failed' && gateOf(Array.isArray(r.hosts)) && gateOf(r.hosts.includes(PREV)) && r.mark === KG, '④g F5 ephemeral: a REFUSED start\'s record still carries the launch-host lineage (pod-old) and the conversation\'s mark', { state: r && r.state, hosts: r && r.hosts, mark: r && r.mark });
       // a hand-launched CLI Chrome (--remote-debugging-port=0, no mark) on the kept directory after that refusal: refused by name, never ended
       const hu = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', `--user-data-dir=${dir}`, '--remote-debugging-port=0'], { stdio: 'ignore' }); procsG.push(hu); await sleep(120); plantG(dir, HOSTg, hu.pid);
       const e = await threw(() => ensure());
-      ok(e && e.code === 'profile_locked' && /your own browser/.test(e.message) && isAliveG(hu.pid) && singletonsG(dir).length === 3, '④g F5 ephemeral: …so a pre-mark CLI launch on the directory after the refusal is still refused by name and left running (the mark kept)', e ? `${e.code}: ${e.message.slice(0, 160)}` : `launched; holder alive ${isAliveG(hu.pid)}`);
+      ok(gateOf(e) && e.code === 'profile_locked' && gateOf(/your own browser/.test(e.message)) && gateOf(isAliveG(hu.pid)) && singletonsG(dir).length === 3, '④g F5 ephemeral: …so a pre-mark CLI launch on the directory after the refusal is still refused by name and left running (the mark kept)', e ? `${e.code}: ${e.message.slice(0, 160)}` : `launched; holder alive ${isAliveG(hu.pid)}`);
       try { hu.kill('SIGKILL'); } catch { } unplant(dir);
       // lane engine-spi-egress L3 r2: the control cuts the CARRY alone (the two lines; since L1 r2 the record's egress line sits between them and the store write)
       // the control cuts the mark carry and the launch-host lineage carry EACH BY ITSELF — never as one adjacent block: tailnet-names
@@ -1830,7 +1830,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
       await kC.stop(eC.profileId, { why: 'user' }); const rC = kC._reg().browsers[eC.profileId]; rC.host = PREV; rC.hosts = [PREV]; plantG(eC.dir, STRANGER, await deadPidG());
       const eRef = await threw(() => kC.ensureEphemeral({ browserKey: KG, sessionId: 'sess-7', envPairs: envC.pairs, sessionName: 'Eph', variant: envC.variant }));
       const rAfter = kC._reg().browsers[eC.profileId];
-      ok(eRef && eRef.code === 'profile_locked' && rAfter && !rAfter.hosts && !rAfter.mark, '④g F5 CONTROL: a keeper whose refused ephemeral start carries nothing leaves a record with no lineage and no mark (the reproduced shape: the next boot stamps this pod alone, the previous name is foreign) — the F5 leg catches it', { hosts: rAfter && rAfter.hosts, mark: rAfter && rAfter.mark });
+      ok(gateOf(eRef) && eRef.code === 'profile_locked' && gateOf(rAfter) && !rAfter.hosts && !rAfter.mark, '④g F5 CONTROL: a keeper whose refused ephemeral start carries nothing leaves a record with no lineage and no mark (the reproduced shape: the next boot stamps this pod alone, the previous name is foreign) — the F5 leg catches it', { hosts: rAfter && rAfter.hosts, mark: rAfter && rAfter.mark });
       unplant(eC.dir); kC.shutdown(); }
     { const real = F.createBrowserRuntime({ env }); let once = true;
       const rt = new Proxy(real, { get(t, k2) { if (k2 !== 'launch') return t[k2]; return async (ns, o) => { if (once) { once = false; plantG(dir, PREV, await deadPidG()); return { ok: false, stderr: 'Command failed: agent-browser open about:blank', stdout: '', error: null }; } return t.launch(ns, o); }; } });
@@ -1838,7 +1838,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
       let kE2 = null; const keptE2 = KS.create({ dataDir: DATA_E, keeper: () => kE2, liveKeys: () => live, serverSetting: (x) => settings[x], log: quiet, sweepEveryMs: 0 });
       kE2 = mkKeeper(K, { dataDir: DATA_E, kept: keptE2, serverSetting: (x) => settings[x], runtime: rt, log: klogG }); const l0 = linesG.length;
       const e1 = await threw(() => ensure(kE2)); const e2 = await threw(() => ensure(kE2));
-      ok(e1 && e1.code === 'profile_locked' && /took the lock over now/.test(e1.message) && saidG(l0, /ephemeral .*reached the launch \(taken over now\)/).length === 1 && !e2, '④g ephemeral (e): a previous name\'s lock that reached the launch is taken over and named on this row too (said in the journal); the next command launches', { e1: e1 && e1.message.slice(0, 160), e2: e2 && e2.message });
+      ok(gateOf(e1) && e1.code === 'profile_locked' && gateOf(/took the lock over now/.test(e1.message)) && saidG(l0, /ephemeral .*reached the launch \(taken over now\)/).length === 1 && !e2, '④g ephemeral (e): a previous name\'s lock that reached the launch is taken over and named on this row too (said in the journal); the next command launches', { e1: e1 && e1.message.slice(0, 160), e2: e2 && e2.message });
       try { await kE2.stop(kE2.ephemeralFor(KG).profileId, { why: 'user' }); } catch { } kE2.shutdown(); }
   } else ok(true, '④g ephemeral row SKIPPED: under root (directory modes)');
   for (const pr of procsG) { try { pr.kill('SIGKILL'); } catch { } }
@@ -1979,7 +1979,7 @@ console.log('— ④h verify r4: the third judgement — userW\'s scenarios thro
     const noRemember = editAnchor(ksrcH, "    if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }", "    /* CONTROL: a retired record's lineage is nobody's memory */", "src/server/browser-keeper.js"); // (r5: re-anchored to the remember door)
     ok(noRemember !== ksrcH, '④h control setup: the retire-time remember is where the control cuts');
     const c1 = await runEph(M.load('src/server/browser-keeper.js', noRemember, 'no-dir-lineage-at-retire'), 'ctl1');
-    ok(c1.S26a.err === null && c1.S26b.err === 'profile_locked' && /another machine's name \(pod-old/.test(c1.S26b.msg) && c1.S26b.launched === 0 && c1.S26b.left === 3, '④h CONTROL 1: a keeper that forgets a retired record\'s lineage takes the lock over in the first life (the file\'s writer) and REFUSES the conversation\'s own kept directory one restart later as FOREIGN — the reproduced shape (userW\'s class on the ephemeral row); S26b catches it', { a: c1.S26a.err, b: c1.S26b.err, msg: c1.S26b.msg.slice(0, 160) });
+    ok(c1.S26a.err === null && c1.S26b.err === 'profile_locked' && gateOf(/another machine's name \(pod-old/.test(c1.S26b.msg)) && c1.S26b.launched === 0 && c1.S26b.left === 3, '④h CONTROL 1: a keeper that forgets a retired record\'s lineage takes the lock over in the first life (the file\'s writer) and REFUSES the conversation\'s own kept directory one restart later as FOREIGN — the reproduced shape (userW\'s class on the ephemeral row); S26b catches it', { a: c1.S26a.err, b: c1.S26b.err, msg: c1.S26b.msg.slice(0, 160) });
     const noRead = editAnchor(ksrcH, "const byDir = dir ? lineageOf(dir).hosts : []; if (byDir.length) return byDir;", "const byDir = []; /* CONTROL: the directory's lineage is never read */ if (byDir.length) return byDir;", "src/server/browser-keeper.js"); // (r5: re-anchored to the identity-keyed read; r6: the read carries the marker; r7: the read is the ONE lineage verdict)
     ok(noRead !== ksrcH, '④h control setup: the directory read is where the control cuts');
     const c2 = await runEph(M.load('src/server/browser-keeper.js', noRead, 'no-dir-lineage-read'), 'ctl2');
@@ -1988,7 +1988,7 @@ console.log('— ④h verify r4: the third judgement — userW\'s scenarios thro
   { const holderless = editAnchor(ksrcH, "const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: facts.holder,", "const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: null, /* CONTROL: the post-launch judgement drops the holder's facts */", "src/server/browser-keeper.js");
     ok(holderless !== ksrcH, '④h control setup: the post-launch judgement\'s holder facts are where the control cuts');
     const c3 = await runS8(M.load('src/server/browser-keeper.js', holderless, 'post-launch-holderless'), 'ctl3');
-    ok(c3.err === 'profile_locked' && /took the lock over now/.test(c3.msg) && c3.left === 0 && c3.holderAlive === true, '④h CONTROL 3: a post-launch judgement without the holder\'s facts takes a LIVE holder\'s lock over (step ⑤ before step ①: the lock gone under a running browser — two Chromes next) — S8 catches it', { err: c3.err, left: c3.left, alive: c3.holderAlive, msg: c3.msg.slice(0, 140) }); }
+    ok(c3.err === 'profile_locked' && gateOf(/took the lock over now/.test(c3.msg)) && c3.left === 0 && c3.holderAlive === true, '④h CONTROL 3: a post-launch judgement without the holder\'s facts takes a LIVE holder\'s lock over (step ⑤ before step ①: the lock gone under a running browser — two Chromes next) — S8 catches it', { err: c3.err, left: c3.left, alive: c3.holderAlive, msg: c3.msg.slice(0, 140) }); }
   for (const pr of procsH) { try { pr.kill('SIGKILL'); } catch { } }
   k.shutdown();
 }
@@ -2152,7 +2152,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     const anyErr = editAnchor(ksrcI, "try { fs.lstatSync(d); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) gone = true; else err = e; }", "try { fs.lstatSync(d); } catch (e) { gone = true; /* CONTROL: any error prunes */ }", "src/server/browser-keeper.js");
     ok(anyErr !== ksrcI, '④i control setup: the prune\'s error classification is where the control cuts');
     const c4 = await runNamed(M.load('src/server/browser-keeper.js', anyErr, 'prune-on-any-error'), 'ctl4');
-    ok(c4.S36 && c4.S36.kept.length === 0 && c4.S36.err === 'profile_locked' && c4.S36.left === 3 && c4.S36.launched === 0, '④i CONTROL 4: a keeper that prunes on ANY stat error loses the lineage at one unreadable load and refuses the directory as FOREIGN at the next resume — S36 catches it', c4.S36 && { kept: c4.S36.kept, err: c4.S36.err, left: c4.S36.left });
+    ok(gateOf(c4.S36) && c4.S36.kept.length === 0 && c4.S36.err === 'profile_locked' && c4.S36.left === 3 && c4.S36.launched === 0, '④i CONTROL 4: a keeper that prunes on ANY stat error loses the lineage at one unreadable load and refuses the directory as FOREIGN at the next resume — S36 catches it', c4.S36 && { kept: c4.S36.kept, err: c4.S36.err, left: c4.S36.left });
   }
   { const literal = editAnchor(ksrcI, "const id = F.dirIdentity(d); return id ? id.replace(/\\/+$/, '') || id : d; };", "return d; /* CONTROL: the spelling as given */ };", "src/server/browser-keeper.js");
     ok(literal !== ksrcI, '④i control setup: the identity key is where the control cuts');
@@ -2163,7 +2163,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     const c5 = await runSpell(M.load('src/server/browser-keeper.js', literalNoTok, 'literal-dir-key-no-marker'), 'ctl5');
     ok(c5.S42.rememberedUnder === 'LINK' && c5.S42.err === 'profile_locked' && c5.S42.left === 3 && c5.S42b.err === 'profile_locked', '④i CONTROL 5: a keeper that keys the lineage by the spelling as given AND reads no marker orphans it at the personalization (remembered under the symlink spelling, read under the real one — refused as foreign; the r4-era file never re-keyed) — S42 / S42b catch it', { under: c5.S42.rememberedUnder, err: c5.S42.err, left: c5.S42.left, b: c5.S42b.err }); }
   { const noIno = editAnchor(editAnchor(ksrcI, "const dirInoOf = (dir) => { try {", "const dirInoOf = (dir) => { return null; /* CONTROL: no inode witness */ try {", "src/server/browser-keeper.js"), "const mintDirTok = (dir, { fresh = false } = {}) => { const have = fresh ? null : dirTokOf(dir); if (have) return have;", "const mintDirTok = (dir, { fresh = false } = {}) => { return null; /* CONTROL: no marker minted */ const have = fresh ? null : dirTokOf(dir); if (have) return have;", "src/server/browser-keeper.js");
-    ok(noIno !== ksrcI && noIno.includes('no marker minted'), '④i control setup: the inode witness and the marker mint are where the control cuts');
+    ok(noIno !== ksrcI && verdictOf(noIno.includes('no marker minted')), '④i control setup: the inode witness and the marker mint are where the control cuts');
     const c6 = await runNamed(M.load('src/server/browser-keeper.js', noIno, 'no-inode-witness'), 'ctl6');
     ok(c6.S32a.err === null && c6.S32a.launched === 1 && c6.S38b.err === null && c6.S38b.launched === 1, '④i CONTROL 6: a keeper with NEITHER witness (no inode, no marker — the r4 keeper) hands a forgotten directory\'s lineage to a fresh directory at its path (S32a catches it; a copy is taken over there as here)', { a: c6.S32a.err, b: c6.S38b.err }); }
 
@@ -2173,7 +2173,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     const c7 = await runR6(M.load('src/server/browser-keeper.js', noTok, 'no-marker-read'), 'ctl7');
     ok(c7.S44.err === 'profile_locked' && c7.S44.left === 3 && c7.S44.launched === 0 && c7.S54.err === 'profile_locked' && c7.S54.launched === 0, '④i CONTROL 7: a keeper that never reads the directory\'s marker (the inode alone — r5\'s rule) refuses the RESTORED directory and the MOVED one as foreign — S44 / S54 catch it', { a: c7.S44.err, b: c7.S54.err }); }
   { const psrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'); const noMarker = editAnchor(editAnchor(psrc, "if (asked && isLineageToken(e.tok)) {\n      if (e.tok === t) return", "if (false) { /* CONTROL: the marker is not asked */\n      if (e.tok === t) return", "src/browser-profiles.js"), "const k = Object.keys(m).find((x) => x !== d && m[x] && m[x].tok === t);", "const k = null; /* CONTROL: no search by token */", "src/browser-profiles.js");
-    ok(noMarker !== psrc && noMarker.includes('no search by token'), '④i control setup: the marker rule and the search by token are where the control cuts (the r5 rule: the inode alone)');
+    ok(noMarker !== psrc && verdictOf(noMarker.includes('no search by token')), '④i control setup: the marker rule and the search by token are where the control cuts (the r5 rule: the inode alone)');
     const c8 = pureRows(M.load('src/browser-profiles.js', noMarker, 'no-marker-rule'));
     ok(c8.reuse.length === 1 && c8.stranger.length === 1 && c8.restore.length === 0, '④i CONTROL 8: the PURE rule without the marker hands a forgotten directory\'s lineage to a fresh directory with a REUSED inode and to a stranger\'s, and orphans a RESTORED one — S43p catches it', { reuse: c8.reuse, stranger: c8.stranger, restore: c8.restore }); }
 
@@ -2583,15 +2583,15 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     { const cut = 'if (!saveNow()) { reg.dirHosts = before;'; const noSave = editAnchor(ksrc8, cut, 'if (false && !saveNow()) { reg.dirHosts = before; /* CONTROL: the move re-keys in memory only (r8) */', "src/server/browser-keeper.js");   // lane lg-store-writes U5b: the move's save is saveNow() (on disk before the move)
       ok(noSave !== ksrc8, '④k control setup: the move\'s save is where the control cuts');
       const c19 = await runR8(M.load('src/server/browser-keeper.js', noSave, 'move-never-saves'), 'ctl19', ['S76']);
-      ok(c19.S76.crashClean === true && c19.S76.diskNamesNew === false && c19.S76.bootPruned === true && c19.S76.err === 'profile_locked' && (isRoot || (c19.S76b.refusedCode === null && c19.S76b.stillThere === false)), '④k CONTROL 19 (verify r9): a keeper whose move re-keys in memory only (r8) loses the lineage at a crash after a Forget — pruned at the next boot, the adopted-back directory refused by name — and an unwritable data/ refuses nothing (moved, the disk names the old path): S76 / S76b catch it', { d: c19.S76.diskNamesNew, p: c19.S76.bootPruned, e: c19.S76.err, o: c19.S76.owedAtCrash, c: c19.S76.crashClean, b: isRoot ? null : [c19.S76b.refusedCode, c19.S76b.stillThere] }); }
+      ok(c19.S76.crashClean === true && c19.S76.diskNamesNew === false && c19.S76.bootPruned === true && c19.S76.err === 'profile_locked' && (verdictOf(isRoot) || (c19.S76b.refusedCode === null && c19.S76b.stillThere === false)), '④k CONTROL 19 (verify r9): a keeper whose move re-keys in memory only (r8) loses the lineage at a crash after a Forget — pruned at the next boot, the adopted-back directory refused by name — and an unwritable data/ refuses nothing (moved, the disk names the old path): S76 / S76b catch it', { d: c19.S76.diskNamesNew, p: c19.S76.bootPruned, e: c19.S76.err, o: c19.S76.owedAtCrash, c: c19.S76.crashClean, b: isRoot ? null : [c19.S76b.refusedCode, c19.S76b.stillThere] }); }
     // (verify r9 (⑤): the lineage ledger has no product reader — a git grep over src/, data/bin, server.js and a pin of src/server/browser-keeper.js: MOVED to the fast scripts/test-browser-share-model-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
     } finally { W8.afterLanding = afterLanding8; }   // (r284: the writer as it was — the generations end with this block)
   }
 }
-for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 44 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 44 })) ok(verdictOf(x.pass), x.name + (x.pass ? '' : ' — ' + x.detail));
 
 try { for (const p of k.list().profiles) await k.stop(p.id).catch(() => { }); } catch { /* none */ }
 k.shutdown();
 srv.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

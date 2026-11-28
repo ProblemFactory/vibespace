@@ -28,7 +28,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -50,7 +50,7 @@ console.log('① PURE src/conversation-spec.js — the closed open spec, the cal
 {
   const v = SPEC.openSpecVerdict(MKWORKER, TABLES);
   const sorted = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
-  ok(v.ok && sorted(v.spec) === sorted(MKWORKER), "the coordinator's own worker spec (mkworker.mjs: claude chat opus xhigh bypass, a Task Group, the pool) passes unchanged", v);
+  ok(gateOf(v.ok) && sorted(v.spec) === sorted(MKWORKER), "the coordinator's own worker spec (mkworker.mjs: claude chat opus xhigh bypass, a Task Group, the pool) passes unchanged", v);
   ok(JSON.stringify(SPEC.openSpecVerdict({ cwd: '/x' }, TABLES).spec) === JSON.stringify({ backend: 'claude', mode: 'chat', cwd: '/x' }), 'defaults: backend claude, mode chat');
   const code = (spec) => { const r = SPEC.openSpecVerdict(spec, TABLES); return r.ok ? 'ok' : `${r.code}:${r.field}`; };
   const rows = [
@@ -76,9 +76,9 @@ console.log('① PURE src/conversation-spec.js — the closed open spec, the cal
   ok(tv({ webuiId: 'sess-3-17' }) === 'webuiId' && tv({ sessionKey: 'claude:abc' }) === 'sessionKey' && tv({}) === 'bad_target' && tv({ webuiId: 'sess-1', sessionKey: 'claude:x' }) === 'bad_target' && tv({ webuiId: '../x' }) === 'bad_target',
     'targetVerdict: exactly one of webuiId (sess-…) or sessionKey (<backend>:<id>)');
   const mv = SPEC.membersVerdict(['claude:aa11', 'aa11', 'lane foo']);
-  ok(mv.ok && JSON.stringify(mv.members) === JSON.stringify(['aa11', 'lane foo']) && SPEC.membersVerdict([]).code === 'bad_member' && SPEC.membersVerdict(Array.from({ length: 21 }, (_, k) => 'm' + k)).code === 'bad_member',
+  ok(gateOf(mv.ok) && JSON.stringify(mv.members) === JSON.stringify(['aa11', 'lane foo']) && SPEC.membersVerdict([]).code === 'bad_member' && SPEC.membersVerdict(Array.from({ length: 21 }, (_, k) => 'm' + k)).code === 'bad_member',
     'membersVerdict: a sessionKey becomes its conversation id (the groups engine resolves ids / names), duplicates fold, 1..20');
-  ok(SPEC.groupVerdict('g-f52477e5').ok && SPEC.groupVerdict('').code === 'bad_group' && SPEC.taskIdVerdict('T-261002-vibespace').ok, 'groupVerdict / taskIdVerdict');
+  ok(gateOf(SPEC.groupVerdict('g-f52477e5').ok) && SPEC.groupVerdict('').code === 'bad_group' && verdictOf(SPEC.taskIdVerdict('T-261002-vibespace').ok), 'groupVerdict / taskIdVerdict');
   ok(!/require\(|from '/.test(read('src/conversation-spec.js').replace(/^\s*(\/\/|\*).*$/gm, '')), 'conversation-spec.js imports nothing (PURE — test-architecture PURE row)');
 }
 
@@ -128,17 +128,17 @@ for (const kind of [{ kind: 'human', actBy: 'human:abc' }, { kind: 'agent', cid:
 {
   const W = world();
   const r = await W.ops.openConversation(MKWORKER, AUTO);
-  ok(r.ok && /^sess-9-/.test(r.sessionId) && r.pending === true && r.claudeSessionId === null && r.billing.accountId === 'pool-d1e27705257c', 'an automation opens: the ids come back, `pending` until its CLI reports the conversation id', r);
+  ok(gateOf(r.ok) && gateOf(/^sess-9-/.test(r.sessionId)) && r.pending === true && r.claudeSessionId === null && r.billing.accountId === 'pool-d1e27705257c', 'an automation opens: the ids come back, `pending` until its CLI reports the conversation id', r);
   ok(JSON.stringify(W.log.map((l) => l[0])) === JSON.stringify(['authorize', 'create', 'note']) && W.log[0][1] === 'automation-open' && W.log[0][2] === 'automation:ak1' && W.log[2][2] === 'h1',
     'the spend guard is asked FIRST (reason automation-open, the identity automation:<key>), the create runs, the hold is NOTED', W.log);
-  ok(W.lastFrame.type === 'create' && W.lastFrame.reqId.startsWith('auto-') && W.lastFrame.cols === 120 && W.lastFrame.rows === 30 && W.lastFrame.permissionMode === 'bypassPermissions' && W.lastFrame.spawnOriginHint.effort === 'chosen' && !('resumeId' in W.lastFrame) && W.lastFrame.sessionName === MKWORKER.name && !('name' in W.lastFrame),
+  ok(W.lastFrame.type === 'create' && gateOf(W.lastFrame.reqId.startsWith('auto-')) && W.lastFrame.cols === 120 && W.lastFrame.rows === 30 && W.lastFrame.permissionMode === 'bypassPermissions' && W.lastFrame.spawnOriginHint.effort === 'chosen' && !('resumeId' in W.lastFrame) && W.lastFrame.sessionName === MKWORKER.name && !('name' in W.lastFrame),
     "the handler gets the frame the owner's dialog would send for the same choices (a reqId, 120×30, the judged fields only)", W.lastFrame);
   const s = W.activeSessions.get(r.sessionId);
   ok(W.lastSocket._headless === true && W.lastSocket._actBy === 'agent:claude:c0ffee' && W.afterCreatedClients === 0 && s.clients.size === 0,
     "the HEADLESS sink: its device acts name the calling conversation; it left the session's clients the moment `created` arrived (what the session prints next reaches no sink)", { actBy: W.lastSocket._actBy, after: W.afterCreatedClients });
   s.claudeSessionId = s.backendSessionId = 'aa11';
   const st = W.ops.conversationStatus({ webuiId: r.sessionId });
-  ok(st.ok && st.sessionKey === 'claude:aa11' && st.pending === false && W.ops.conversationStatus({ webuiId: 'sess-0-0' }).code === 'not_found', 'conversationStatus: the conversation id once reported (pending → claude:<id>); a gone one is not_found', st);
+  ok(gateOf(st.ok) && st.sessionKey === 'claude:aa11' && st.pending === false && W.ops.conversationStatus({ webuiId: 'sess-0-0' }).code === 'not_found', 'conversationStatus: the conversation id once reported (pending → claude:<id>); a gone one is not_found', st);
 }
 {
   const W = world({ guard: 'refuse' });
@@ -148,14 +148,14 @@ for (const kind of [{ kind: 'human', actBy: 'human:abc' }, { kind: 'agent', cid:
 {
   const W = world({ create: 'error' });
   const r = await W.ops.openConversation(MKWORKER, AUTO);
-  ok(r.code === 'create_failed' && /Unknown backend/.test(r.why) && JSON.stringify(W.log.map((l) => l[0])) === JSON.stringify(['authorize', 'create', 'release']), "the handler's first refusal (it carries no reqId) is the answer, by name; the hold is RELEASED, never noted", { r, log: W.log });
+  ok(r.code === 'create_failed' && gateOf(/Unknown backend/.test(r.why)) && JSON.stringify(W.log.map((l) => l[0])) === JSON.stringify(['authorize', 'create', 'release']), "the handler's first refusal (it carries no reqId) is the answer, by name; the hold is RELEASED, never noted", { r, log: W.log });
 }
 {
   const W = world({ create: 'throw' });
   let threw = null; try { await W.ops.openConversation(MKWORKER, AUTO); } catch (e) { threw = e.message; }
   const W2 = world({ create: 'silent' });
   const r2 = await W2.ops.openConversation(MKWORKER, AUTO);
-  ok((threw === null) && W.log.some((l) => l[0] === 'release') && r2.code === 'no_answer' && W2.log.some((l) => l[0] === 'release'), 'a handler that throws or ends silently: a named refusal (create_threw / no_answer), the hold released', { log: W.log, r2 });
+  ok((threw === null) && gateOf(W.log.some((l) => l[0] === 'release')) && r2.code === 'no_answer' && verdictOf(W2.log.some((l) => l[0] === 'release')), 'a handler that throws or ends silently: a named refusal (create_threw / no_answer), the hold released', { log: W.log, r2 });
 }
 {
   const W = world();
@@ -170,18 +170,18 @@ for (const kind of [{ kind: 'human', actBy: 'human:abc' }, { kind: 'agent', cid:
   await W.ops.openConversation(MKWORKER, AUTO); const id = [...W.activeSessions.keys()][0];
   const frame = { type: 'rename-session', webuiId: id, name: ' n ' };
   const a = W.ops.renameConversation(frame, frame.name, { kind: 'human', actBy: 'human:abc' });
-  ok(W.renames[0] === frame && a.ok, "rename, the owner's frame: the body gets THAT frame object (byte-identical — it reads webuiId / sessionKey / backendSessionId / name)");
+  ok(W.renames[0] === frame && verdictOf(a.ok), "rename, the owner's frame: the body gets THAT frame object (byte-identical — it reads webuiId / sessionKey / backendSessionId / name)");
   const b = W.ops.renameConversation({ webuiId: id }, '  worker one ', AUTO);
   const c = W.ops.renameConversation({ webuiId: 'sess-0-0' }, 'x', AUTO);
   const d = W.ops.renameConversation({ webuiId: id }, 'n'.repeat(61), AUTO);
-  ok(b.ok && W.renames[1].name === 'worker one' && c.code === 'not_found' && d.code === 'bad_name' && W.renames.length === 2, "rename, an automation: the target and the name judged first (trimmed, ≤ 60), a conversation that is not live is named — the body never runs for a refusal", { b, c, d });
+  ok(gateOf(b.ok) && W.renames[1].name === 'worker one' && c.code === 'not_found' && d.code === 'bad_name' && W.renames.length === 2, "rename, an automation: the target and the name judged first (trimmed, ≤ 60), a conversation that is not live is named — the body never runs for a refusal", { b, c, d });
   const replies = [];
   await W.ops.endConversation({ type: 'kill', sessionId: id }, { kind: 'human', actBy: 'human:abc' }, { reply: (m) => replies.push(m) });
   ok(W.ends[0].d.type === 'kill' && W.ends[0].actBy === 'human:abc' && replies[0].type === 'killed', "end, the owner's frame: the body gets the frame, the reply and the sign-in's subject (ws._actBy)");
   W.activeSessions.get(id).backendSessionId = 'bb22';
   const e = await W.ops.endConversation({ sessionKey: 'claude:bb22' }, AUTO);
   const f = await W.ops.endConversation({ sessionKey: 'claude:none' }, AUTO);
-  ok(e.ok && e.sessionId === id && W.ends[1].d.sessionId === id && W.ends[1].actBy === 'agent:claude:c0ffee' && f.code === 'not_found', "end, an automation: its sessionKey resolved to the live session, the teardown's device acts name the calling conversation; a gone one is not_found", { e, f, actBy: W.ends[1].actBy });
+  ok(gateOf(e.ok) && e.sessionId === id && W.ends[1].d.sessionId === id && W.ends[1].actBy === 'agent:claude:c0ffee' && f.code === 'not_found', "end, an automation: its sessionKey resolved to the live session, the teardown's device acts name the calling conversation; a gone one is not_found", { e, f, actBy: W.ends[1].actBy });
 }
 {
   const W = world();
@@ -203,7 +203,7 @@ for (const kind of [{ kind: 'human', actBy: 'human:abc' }, { kind: 'agent', cid:
   const r = await W.ops.inviteToGroup('g-1', ['claude:aa11'], AUTO, { quiet: true });
   const r2 = await W.ops.inviteToGroup('g-1', [], AUTO);
   const r3 = await W.ops.inviteToGroup('g-1', ['x'], { kind: 'automation', key: 'ak1', subject: 'external' });
-  ok(r.ok && W.ge.calls[1].by === 'c0ffee' && JSON.stringify(W.ge.calls[1].members) === JSON.stringify(['aa11']) && r2.code === 'bad_member' && r3.code === 'bad_by' && W.ge.calls.length === 2,
+  ok(gateOf(r.ok) && W.ge.calls[1].by === 'c0ffee' && JSON.stringify(W.ge.calls[1].members) === JSON.stringify(['aa11']) && r2.code === 'bad_member' && r3.code === 'bad_by' && W.ge.calls.length === 2,
     "invite, an automation: the provided engine, the inviter = the calling conversation, a sessionKey member → its id; no member / no conversation behind the key ⇒ refused by name", { r, r2, r3 });
 }
 {
@@ -217,20 +217,20 @@ for (const kind of [{ kind: 'human', actBy: 'human:abc' }, { kind: 'agent', cid:
 console.log('③ the wiring pins');
 {
   const wh = read('src/ws-handler.js'), srv = read('server.js'), ar = read('src/agent-routes.js'), tgw = read('src/server/task-groups-wiring.js'); // tgw: the Task Groups' routes, «make room» 2026-11-17: moved whole out of server.js
-  ok(/case 'create': \{\n\s+await convOps\.openConversation\(data, byOfWs\(ws\), \{ ws, attachedSessions \}\);/.test(wh)
-    && /case 'rename-session': \{\n\s+convOps\.renameConversation\(data, data\.name, byOfWs\(ws\)\);/.test(wh)
-    && /case 'kill': \{\n\s+await convOps\.endConversation\(data, byOfWs\(ws\), \{ reply: \(m\) => ws\.send\(JSON\.stringify\(m\)\) \}\);/.test(wh), 'the three ws cases call the seams (create / rename-session / kill)');
+  ok(gateOf(/case 'create': \{\n\s+await convOps\.openConversation\(data, byOfWs\(ws\), \{ ws, attachedSessions \}\);/.test(wh))
+    && gateOf(/case 'rename-session': \{\n\s+convOps\.renameConversation\(data, data\.name, byOfWs\(ws\)\);/.test(wh))
+    && verdictOf(/case 'kill': \{\n\s+await convOps\.endConversation\(data, byOfWs\(ws\), \{ reply: \(m\) => ws\.send\(JSON\.stringify\(m\)\) \}\);/.test(wh)), 'the three ws cases call the seams (create / rename-session / kill)');
   const co = read('src/server/conversation-ops.js');
   const rb = co.slice(co.indexOf('function renameSession(deps, data) {'), co.indexOf('let shared = {};') > co.indexOf('function renameSession(') ? co.indexOf('let shared = {};') : co.indexOf('/** The harness registry'));
   const kb = wh.slice(wh.indexOf('  const endSessionBody = async (data, { reply, actBy, endTree = false } = {}) => {'), wh.indexOf('  const byOfWs = '));   // B-c134 cure: + endTree (an end that asks for its background tree)
-  ok(rb.length > 1500 && /if \(trimmedName\) \{ session\._nameExplicit = true;/.test(rb) && /if \(!targetId\) return \{ ok: false, code: 'not_found' \};/.test(rb) && !/\bws\./.test(rb) && !/const trimmedName/.test(wh)
-    && /rename: \(data\) => ConversationOps\.renameSession\(\{ activeSessions, setCustomName, writeSessionMeta, readSessionMeta, broadcastActiveSessions, getSessionKey \}, data\),/.test(wh),
+  ok(rb.length > 1500 && gateOf(/if \(trimmedName\) \{ session\._nameExplicit = true;/.test(rb)) && gateOf(/if \(!targetId\) return \{ ok: false, code: 'not_found' \};/.test(rb)) && !/\bws\./.test(rb) && !/const trimmedName/.test(wh)
+    && verdictOf(/rename: \(data\) => ConversationOps\.renameSession\(\{ activeSessions, setCustomName, writeSessionMeta, readSessionMeta, broadcastActiveSessions, getSessionKey \}, data\),/.test(wh)),
     "the rename body is conversation-ops' renameSession (L1 moved it there whole — its customNames marker kept, no socket in it); the ws handler provides it bound to its ctx as `rename`");
-  ok(kb.length > 5000 && !/\bws\./.test(kb) && /reply\(\{ type: 'killed', sessionId: requestedKillId, resolvedId: data\.sessionId, ok: true \}\)/.test(kb) && /by: actBy \|\| 'system:session-end'/.test(kb) && /data\.sessionId = eid; break/.test(kb),
+  ok(kb.length > 5000 && !/\bws\./.test(kb) && gateOf(/reply\(\{ type: 'killed', sessionId: requestedKillId, resolvedId: data\.sessionId, ok: true \}\)/.test(kb)) && gateOf(/by: actBy \|\| 'system:session-end'/.test(kb)) && verdictOf(/data\.sessionId = eid; break/.test(kb)),
     "the kill body: no requester socket left in it (reply / actBy), its stale-id fallback kept verbatim");
-  ok(/ConversationOps\.provide\(convOpsOwn\);/.test(wh) && /const convOps = ConversationOps\.forDeps\(convOpsOwn\);/.test(wh) && (wh.match(/require\('\.\/server\/conversation-ops\.js'\)/g) || []).length === 1, 'ws-handler provides its create / rename / end to the shared seams (one require) and binds its own instance');
-  ok(/convOps\.provide\(\{ tasks, spendGuard \}\);/.test(tgw) && /task: convOps\.bindConversation\(\{ sessionKey: req\.body\?\.sessionKey \}, req\.params\.id, /.test(tgw) && !/tasks\.bind\(req\.params\.id/.test(srv + tgw) && /task-groups-wiring\.js'\)\.mountRoutes\(\{[^}\n]*\bspendGuard \}\)/.test(srv), "server.js: the owner's bind route calls the seam; the task store and THE spend guard are provided (the routes are src/server/task-groups-wiring.js mountRoutes, server.js hands it spendGuard)");
-  ok(/convOps\.forDeps\(\{ tasks \}\)\.bindConversation\(\{ sessionKey: sk \}, bind\.id,/.test(ar) && /r = await convOps\.inviteToGroup\(b\.group, members, \{ kind: 'agent', cid: c\.cid \}, \{ ge: c\.ge,/.test(ar) && /convOps\.provide\(\{ groupsEngine \}\);/.test(ar) && !/c\.ge\.invite\(/.test(ar), "agent-routes: the manager's bind and an agent's group invite call the seams; the groups engine is provided");
+  ok(gateOf(/ConversationOps\.provide\(convOpsOwn\);/.test(wh)) && gateOf(/const convOps = ConversationOps\.forDeps\(convOpsOwn\);/.test(wh)) && (wh.match(/require\('\.\/server\/conversation-ops\.js'\)/g) || []).length === 1, 'ws-handler provides its create / rename / end to the shared seams (one require) and binds its own instance');
+  ok(gateOf(/convOps\.provide\(\{ tasks, spendGuard \}\);/.test(tgw)) && gateOf(/task: convOps\.bindConversation\(\{ sessionKey: req\.body\?\.sessionKey \}, req\.params\.id, /.test(tgw)) && !/tasks\.bind\(req\.params\.id/.test(srv + tgw) && verdictOf(/task-groups-wiring\.js'\)\.mountRoutes\(\{[^}\n]*\bspendGuard \}\)/.test(srv)), "server.js: the owner's bind route calls the seam; the task store and THE spend guard are provided (the routes are src/server/task-groups-wiring.js mountRoutes, server.js hands it spendGuard)");
+  ok(gateOf(/convOps\.forDeps\(\{ tasks \}\)\.bindConversation\(\{ sessionKey: sk \}, bind\.id,/.test(ar)) && gateOf(/r = await convOps\.inviteToGroup\(b\.group, members, \{ kind: 'agent', cid: c\.cid \}, \{ ge: c\.ge,/.test(ar)) && gateOf(/convOps\.provide\(\{ groupsEngine \}\);/.test(ar)) && !/c\.ge\.invite\(/.test(ar), "agent-routes: the manager's bind and an agent's group invite call the seams; the groups engine is provided");
   ok((read('src/server/conversation-ops.js').match(/\bcreateHeadless\s*\(/g) || []).length === 1, 'conversation-ops holds ONE headless-create call (the spend census row `headless-open` — test-spend-paths)');
 }
 
@@ -244,7 +244,7 @@ console.log("④ data/bin/vibespace-api — the typed verbs (L1's keys / call / 
   ok(v(['conversations', 'rename', 'sess-3-17', 'worker one']) === 'conversations.rename {"target":"sess-3-17","name":"worker one"}' && v(['conversations', 'bind', 'claude:aa11', 'T-1-x']) === 'conversations.bind {"target":"claude:aa11","task":"T-1-x"}'
     && v(['conversations', 'end', 'aa11']) === 'conversations.end {"target":"aa11"}' && v(['conversations', 'status', 'sess-3-17']) === 'conversations.status {"target":"sess-3-17"}' && v(['groups', 'invite', 'g-1', 'claude:bb']) === 'groups.invite {"group":"g-1","target":"claude:bb"}',
     'rename / bind / end / status / groups invite: positionals in order (a conversation id, <backend>:<id> or sess-…)');
-  ok(['conversations open', 'conversations open --cwd /x stray', 'conversations open --cwd /x --bogus 1', 'conversations rename sess-1 two words', 'groups invite g-1', 'conversations status', 'conversations frob', 'conversations end sess-1 --name x', 'conversations open --cwd /x --cwd /y'].every((a) => v(a.split(' ')) === 'ERR'),
+  ok(verdictOf(['conversations open', 'conversations open --cwd /x stray', 'conversations open --cwd /x --bogus 1', 'conversations rename sess-1 two words', 'groups invite g-1', 'conversations status', 'conversations frob', 'conversations end sess-1 --name x', 'conversations open --cwd /x --cwd /y'].every((a) => v(a.split(' ')) === 'ERR')),
     'a stray word, an unknown or misplaced flag, a missing argument, a flag twice: refused by name');
   const hits = [];
   let mode = 'door';
@@ -266,12 +266,12 @@ console.log("④ data/bin/vibespace-api — the typed verbs (L1's keys / call / 
   });
   const a = await run(['conversations', 'open', '--cwd', '/x', '--name', 'w', '--key', 'dispatch']);
   let printed = null; try { printed = JSON.parse(a.out); } catch { printed = null; }
-  ok(a.code === 0 && printed && printed.sessionId === 'sess-5-1' && printed.pending === true && printed.key === 'dispatch' && hits.length === 1 && hits[0].m === 'POST' && hits[0].u === '/api/agent/automation/conversations.open?key=dispatch' && hits[0].auth === 'Bearer vsst_test' && JSON.parse(hits[0].body).name === 'w',
+  ok(a.code === 0 && gateOf(printed) && printed.sessionId === 'sess-5-1' && printed.pending === true && printed.key === 'dispatch' && hits.length === 1 && hits[0].m === 'POST' && hits[0].u === '/api/agent/automation/conversations.open?key=dispatch' && hits[0].auth === 'Bearer vsst_test' && JSON.parse(hits[0].body).name === 'w',
     "ONE POST to /api/agent/automation/<verb>?key= carrying only the session's own token; the answer printed as JSON (the ids, pending)", { a, hits });
   mode = 'locked'; const b = await run(['conversations', 'end', 'sess-1']);
   mode = 'spend'; const c = await run(['conversations', 'open', '--cwd', '/x']);
   const d = await run(['conversations', 'open', '--cwd', '/x', 'stray']);
-  ok(b.code === 3 && /vault_locked/.test(b.err) && c.code === 1 && /spend_refused/.test(c.err) && d.code === 2 && hits.length === 3, "the lock exits 3 (L1's), a refusal names its code (exit 1), a usage error sends NOTHING (exit 2)", { b: b.code, c: c.code, d: d.code, hits: hits.length });
+  ok(b.code === 3 && gateOf(/vault_locked/.test(b.err)) && c.code === 1 && gateOf(/spend_refused/.test(c.err)) && d.code === 2 && hits.length === 3, "the lock exits 3 (L1's), a refusal names its code (exit 1), a usage error sends NOTHING (exit 2)", { b: b.code, c: c.code, d: d.code, hits: hits.length });
   srv.close();
 }
 
@@ -308,8 +308,8 @@ console.log('⑤ MUTANTS (patched copies outside the tree)');
     const leftAttached = r2.ok && W2.activeSessions.get(r2.sessionId).clients.size === 1;
     runs.push({ spawnedOnRefusal, leftAttached });
   }
-  ok(runs[0] && runs[0].spawnedOnRefusal === true && runs[0].leftAttached === false, 'MUTANT: the spend gate after a spawn ⇒ a refused key still spawned (the order leg above is RED for it)', runs[0]);
-  ok(runs[1] && runs[1].spawnedOnRefusal === false && runs[1].leftAttached === true, 'MUTANT: the sink never detached ⇒ it stays the session\'s client (the detach leg above is RED for it)', runs[1]);
+  ok(gateOf(runs[0]) && runs[0].spawnedOnRefusal === true && runs[0].leftAttached === false, 'MUTANT: the spend gate after a spawn ⇒ a refused key still spawned (the order leg above is RED for it)', runs[0]);
+  ok(gateOf(runs[1]) && runs[1].spawnedOnRefusal === false && runs[1].leftAttached === true, 'MUTANT: the sink never detached ⇒ it stays the session\'s client (the detach leg above is RED for it)', runs[1]);
 }
 
 console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `verbs`)');
@@ -330,31 +330,31 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   const reachSelf = (t) => (t.conversationId === 'c0ffee' || opened.has(t.webuiId) || opened.has(t.conversationId) ? { ok: true, by: t.conversationId === 'c0ffee' ? 'self' : 'opener' } : { ok: false, code: 'not_granted', why: 'the key did not open that conversation and its grant reaches only what it opened' });
   const ctx = { caller, keyId: 'ak-000000000001', reach: reachSelf, identity: 'automation:ak-000000000001' };
   const o = await V['conversations.open']({ cwd: '/var/tmp/vibespace-lanes', name: 'worker', model: 'opus', effort: 'xhigh', permission: 'bypassPermissions', task: 'T-1-x', pool: 'pool-a' }, ctx);
-  ok(o.ok && o.claudeSessionId === 'ee55' && o.sessionKey === 'claude:ee55' && o.pending === false && ticks === 3 && W.lastFrame.permissionMode === 'bypassPermissions' && W.lastFrame.taskId === 'T-1-x' && W.lastFrame.accountId === 'pool-a' && W.log[0][2] === 'automation:ak-000000000001',
+  ok(gateOf(o.ok) && o.claudeSessionId === 'ee55' && o.sessionKey === 'claude:ee55' && o.pending === false && ticks === 3 && W.lastFrame.permissionMode === 'bypassPermissions' && W.lastFrame.taskId === 'T-1-x' && W.lastFrame.accountId === 'pool-a' && W.log[0][2] === 'automation:ak-000000000001',
     "open: the door's arguments → the spec (permission → permissionMode, task → taskId, pool → accountId), charged to the key, and it WAITS for the conversation id", { o, ticks });
   const id = o.sessionId;
   opened.add(id);
   OPS.provide({ rename: W.rename }); // the rename verb reaches L1's body through the shared `rename` the ws handler provides
   const st = V['conversations.status']({ target: id }, ctx);
   const rn = V['conversations.rename']({ target: id, name: 'worker one' }, ctx);
-  ok(st.ok && st.sessionKey === 'claude:ee55' && rn.ok && rn.target === 'ee55' && W.renames.at(-1).webuiId === id, 'a conversation THIS key opened is within its reach (status, rename) — no grant of its own needed (the engine\'s opened row answers the ONE rule)', { st, rn });
+  ok(gateOf(st.ok) && st.sessionKey === 'claude:ee55' && gateOf(rn.ok) && rn.target === 'ee55' && W.renames.at(-1).webuiId === id, 'a conversation THIS key opened is within its reach (status, rename) — no grant of its own needed (the engine\'s opened row answers the ONE rule)', { st, rn });
   const other = { ...ctx, keyId: 'ak-000000000002', reach: () => ({ ok: false, code: 'not_granted', why: 'another key' }) };
   ok(V['conversations.rename']({ target: id, name: 'x' }, other).code === 'not_granted' && V['conversations.end']({ target: 'dd44' }, ctx) instanceof Promise, 'another key does not reach it; a stranger conversation needs a grant');
   const strangerEnd = await V['conversations.end']({ target: 'dd44' }, ctx);
   ok(strangerEnd.code === 'not_granted' && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'), 'end on a conversation the key does not reach ⇒ not_granted, nothing ended', strangerEnd);
   const bd = await V['conversations.bind']({ target: id, task: 'T-1-x' }, ctx);   // async (the deferred-save census): «bound» once the store holds it
   const bdOut = await V['conversations.bind']({ target: id, task: 'T-other' }, ctx);
-  ok(bd.ok && JSON.stringify(W.tasks.binds.at(-1)) === JSON.stringify(['T-1-x', 'claude:ee55']) && /\[automation\] session ee55 bound by coordinator \(key ak-000000000001\)/.test(W.tasks.notes.at(-1)[1].note) && bdOut.code === 'not_granted',
+  ok(gateOf(bd.ok) && JSON.stringify(W.tasks.binds.at(-1)) === JSON.stringify(['T-1-x', 'claude:ee55']) && gateOf(/\[automation\] session ee55 bound by coordinator \(key ak-000000000001\)/.test(W.tasks.notes.at(-1)[1].note)) && bdOut.code === 'not_granted',
     "bind: into the CALLER's own Task Group (one activity line names it and the key); another Task Group ⇒ not_granted", { bd, bdOut });
   const iv = await V['groups.invite']({ group: 'g-1', target: id }, ctx);
-  ok(iv.ok && W.ge.calls.at(-1).by === 'c0ffee' && JSON.stringify(W.ge.calls.at(-1).members) === JSON.stringify(['ee55']) && W.ge.calls.at(-1).quiet === true, 'invite: the caller invites the conversation\'s id, QUIETLY (no wake — a billed turn of its own)', W.ge.calls.at(-1));
+  ok(gateOf(iv.ok) && W.ge.calls.at(-1).by === 'c0ffee' && JSON.stringify(W.ge.calls.at(-1).members) === JSON.stringify(['ee55']) && W.ge.calls.at(-1).quiet === true, 'invite: the caller invites the conversation\'s id, QUIETLY (no wake — a billed turn of its own)', W.ge.calls.at(-1));
   W.activeSessions.set('sess-0-7', { name: 'young', backend: 'claude', backendSessionId: null, claudeSessionId: null, clients: new Map() });
   const denied = await V['groups.invite']({ group: 'g-1', target: 'sess-0-7' }, { ...ctx, reach: () => ({ ok: false, code: 'not_granted' }) });
   const young = await V['groups.invite']({ group: 'g-1', target: 'sess-0-7' }, { ...ctx, reach: () => ({ ok: true, by: 'grant' }) });
   ok(denied.code === 'not_granted' && young.code === 'pending' && W.ge.calls.length === 1, 'invite: a conversation the key does not reach ⇒ not_granted; one that has no id yet ⇒ pending — the engine is never asked', { denied, young });
   W.activeSessions.get(id).mode = 'chat';   // lane end-obeys-verdict: an idle CHAT conversation (a terminal one is the person's to end)
   const en = await V['conversations.end']({ target: id }, ctx);
-  ok(en.ok && en.target === 'ee55' && W.ends.at(-1).d.sessionId === id && W.ends.at(-1).actBy === 'agent:claude:c0ffee', 'end: the conversation ends, its teardown names the calling conversation', en);
+  ok(gateOf(en.ok) && en.target === 'ee55' && W.ends.at(-1).d.sessionId === id && W.ends.at(-1).actBy === 'agent:claude:c0ffee', 'end: the conversation ends, its teardown names the calling conversation', en);
   // ⑥b lane conversations-archive-verb: THE ARCHIVE VERB over the seams — asks_open / resolveAsks, subject_busy / force, end then archive, a dead target, already_archived
   const archived = [], dismissed = [];
   const asks = new Map([['claude:dd44', [{ id: 'ut-1' }, { id: 'ut-2' }]]]);
@@ -368,18 +368,18 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   const any = { ...ctx, reach: (t) => (t.conversationId === 'nope' ? { ok: false, code: 'not_granted' } : { ok: true, by: 'grant' }) };
   W.activeSessions.get('sess-0-8')._turn = 'running'; W.activeSessions.get('sess-0-8').mode = 'chat';   // a chat conversation (a terminal one is the person's to end)
   const openAsks = await V2['conversations.archive']({ target: 'dd44' }, any);
-  ok(openAsks.code === 'asks_open' && JSON.stringify(openAsks.asks) === '["ut-1","ut-2"]' && /ut-1, ut-2/.test(openAsks.why) && openAsks.noticeName === 'stranger' && !dismissed.length && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'),
+  ok(openAsks.code === 'asks_open' && JSON.stringify(openAsks.asks) === '["ut-1","ut-2"]' && gateOf(/ut-1, ut-2/.test(openAsks.why)) && openAsks.noticeName === 'stranger' && !dismissed.length && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'),
     'archive: the target\'s OPEN For-you asks refuse it by their ids (asks_open — the memory law) before anything is touched; the refusal names the target', openAsks);
   const busy = await V2['conversations.archive']({ target: 'dd44', resolveAsks: true }, any);
-  ok(busy.code === 'subject_busy' && busy.busy.some((b) => b.code === 'turn') && asks.has('claude:dd44') && !dismissed.length, 'a running turn ⇒ subject_busy — the ONE end gate, judged before the asks are dismissed (a refusal changes nothing)', busy);
+  ok(busy.code === 'subject_busy' && gateOf(busy.busy.some((b) => b.code === 'turn')) && gateOf(asks.has('claude:dd44')) && !dismissed.length, 'a running turn ⇒ subject_busy — the ONE end gate, judged before the asks are dismissed (a refusal changes nothing)', busy);
   const done = await V2['conversations.archive']({ target: 'dd44', resolveAsks: true, force: true }, { ...any, reach: () => ({ ok: true, by: 'opener' }) });   // force: only for a conversation this key opened (the ONE gate)
-  ok(done.ok && done.ended === true && done.archived === true && done.already === false && done.sessionKey === 'claude:dd44' && JSON.stringify(done.resolvedAsks) === '["ut-1","ut-2"]' && dismissed[0][1] === 'automation:ak-000000000001' && W.ends.at(-1).d.sessionId === 'sess-0-8' && W.ends.at(-1).actBy === 'agent:claude:c0ffee' && archived.includes('claude:dd44'),
+  ok(gateOf(done.ok) && done.ended === true && done.archived === true && done.already === false && done.sessionKey === 'claude:dd44' && JSON.stringify(done.resolvedAsks) === '["ut-1","ut-2"]' && dismissed[0][1] === 'automation:ak-000000000001' && W.ends.at(-1).d.sessionId === 'sess-0-8' && W.ends.at(-1).actBy === 'agent:claude:c0ffee' && verdictOf(archived.includes('claude:dd44')),
     'archive --resolve-asks --force: the asks dismissed by the key, the conversation ended (its teardown names the caller), then archived — the sidebar\'s own store write, once', done);
   W.activeSessions.delete('sess-0-8');
   const again = await V2['conversations.archive']({ target: 'claude:dd44' }, any);
   ok(again.code === 'already_archived' && archived.filter((k) => k === 'claude:dd44').length === 1, 'a second archive (the conversation gone, its key already listed) ⇒ already_archived', again);
   const dead = await V2['conversations.archive']({ target: 'gone1' }, any);
-  ok(dead.ok && dead.ended === false && dead.archived === true && dead.target === 'gone1' && archived.includes('claude:gone1'), 'an ENDED conversation (not live) is archived by the stores\' facts (deadOf: its key, name, Task Groups) — the opener\'s lifecycle outlives the session', dead);
+  ok(gateOf(dead.ok) && dead.ended === false && dead.archived === true && dead.target === 'gone1' && verdictOf(archived.includes('claude:gone1')), 'an ENDED conversation (not live) is archived by the stores\' facts (deadOf: its key, name, Task Groups) — the opener\'s lifecycle outlives the session', dead);
   const reachSeen = [];
   await V2['conversations.archive']({ target: 'claude:gone1' }, { ...ctx, reach: (t) => { reachSeen.push(t); return { ok: false, code: 'not_granted', why: 'no' }; } });
   ok((await V2['conversations.archive']({ target: 'nowhere' }, any)).code === 'not_found' && reachSeen.length === 1 && reachSeen[0].conversationId === 'gone1' && reachSeen[0].webuiId === null && JSON.stringify(reachSeen[0].groups) === '["T-1-x"]',
@@ -394,4 +394,4 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

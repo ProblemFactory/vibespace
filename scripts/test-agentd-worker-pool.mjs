@@ -132,7 +132,7 @@ const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${d !== undefined ? ' — ' + (typeof d === 'string' ? d : JSON.stringify(d)) : ''}`); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${d !== undefined ? ' — ' + (typeof d === 'string' ? d : JSON.stringify(d)) : ''}`); } };
 const DIR = scratchDir('worker-pool');
 process.on('exit', () => { try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { } });
 
@@ -156,17 +156,17 @@ const run = (modPath, mode, windowMs, stopAt) => {
 
 console.log('— §1 the fixed pool, its worker file deleted, one deadline: bounded —');
 const F = run(POOL, 'fix', 1200, 1000);
-ok(F.echo === 7 && /fs deadline \(hang\)/.test(F.hang || ''), 'setup: the pool answered a job, then a job overran its deadline (the death that starts it)', F);
-ok(F.crashes >= 3 && /MODULE_NOT_FOUND/.test((F.lines || [])[0] || ''), `REACHED: the respawns really crashed at load (${F.crashes} crashes, MODULE_NOT_FOUND) — the bound below is not vacuous`, F.lines);
+ok(F.echo === 7 && verdictOf(/fs deadline \(hang\)/.test(F.hang || '')), 'setup: the pool answered a job, then a job overran its deadline (the death that starts it)', F);
+ok(F.crashes >= 3 && verdictOf(/MODULE_NOT_FOUND/.test((F.lines || [])[0] || '')), `REACHED: the respawns really crashed at load (${F.crashes} crashes, MODULE_NOT_FOUND) — the bound below is not vacuous`, F.lines);
 ok(F.maxLiveSeen <= 2 && F.maxLive <= 2 && F.live >= 0, `FIX: live never above the pool size and never negative (max ${F.maxLiveSeen}, end ${F.live})`);
 ok(F.spawned <= 2 + 1 + F.crashes && F.spawned <= 12, `FIX: ${F.spawned} spawns in ${F.elapsedMs} ms — one per death, never two (deaths ${F.deaths}, crashes ${F.crashes})`);
-ok(F.crashes <= 10 && /in a row, the next respawn in/.test((F.lines || [])[0] || ''), `FIX: consecutive crashes BACK OFF (${F.crashes} in 1.2 s at a 20 ms base, doubling to 320 ms) and each one is SAID`, F.lines);
+ok(F.crashes <= 10 && verdictOf(/in a row, the next respawn in/.test((F.lines || [])[0] || '')), `FIX: consecutive crashes BACK OFF (${F.crashes} in 1.2 s at a 20 ms base, doubling to 320 ms) and each one is SAID`, F.lines);
 ok(F.siblingAnswer === 5 && F.crashesInRowAfterSibling === F.crashesInRowBefore && F.crashesInRowBefore > 0, `FIX: the healthy sibling's answer ends no backoff (crashes in a row ${F.crashesInRowBefore} → ${F.crashesInRowAfterSibling}: it proves nothing about the file a respawn loads)`, F);
 ok(F.liveBack === 2 && JSON.stringify(F.recovered) === '[9,9]' && F.crashesInRowAfter === 0, `FIX: the file back, the pool is at its size again within ${F.recoveredMs} ms, both workers answer, and the backoff is over (crashes in a row: ${F.crashesInRowAfter})`, F);
 
 console.log('— §2 a deadline with the file present keeps the R2 pace (terminate → respawn, no backoff) —');
 const P = run(POOL, 'pace', 300, 1000);
-ok(/fs deadline \(hang\)/.test(P.hang || '') && P.crashes === 0 && P.deaths === 1, `a deadline is a death, not a crash (deaths ${P.deaths}, crashes ${P.crashes})`, P);
+ok(gateOf(/fs deadline \(hang\)/.test(P.hang || '')) && P.crashes === 0 && P.deaths === 1, `a deadline is a death, not a crash (deaths ${P.deaths}, crashes ${P.crashes})`, P);
 ok(P.after === 8 && P.liveEnd === 2 && P.spawned === 3, `the pool is back at its size and answers (spawned ${P.spawned}, live ${P.liveEnd})`, P);
 
 console.log('— §3 CONTROL: the pre-fix pool shape storms under the same trigger —');
@@ -192,18 +192,18 @@ const wedgeRun = (modPath, tag) => {
   try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { error: `child exit ${r.status} ${r.signal || ''}: ${(r.stderr || r.stdout || '').slice(-400)}` }; }
 };
 const G = wedgeRun(POOL, 'fix');
-ok(G.echo === 'answered 1' && (G.hung || []).every((h) => /fs deadline \(fifo\)/.test(h)), 'setup: two jobs blocked in open() of a FIFO overran their deadlines', G);
-ok(/fs deadline \(echo\): never started/.test(G.queued?.r || ''), `FIX: a job queued behind them fails BY NAME at its own 120 ms deadline — it beat the leg's 500 ms NO-ANSWER timer (${G.queued?.ms} ms: ${G.queued?.r})`, G.queued);
+ok(G.echo === 'answered 1' && verdictOf((G.hung || []).every((h) => /fs deadline \(fifo\)/.test(h))), 'setup: two jobs blocked in open() of a FIFO overran their deadlines', G);
+ok(verdictOf(/fs deadline \(echo\): never started/.test(G.queued?.r || '')), `FIX: a job queued behind them fails BY NAME at its own 120 ms deadline — it beat the leg's 500 ms NO-ANSWER timer (${G.queued?.ms} ms: ${G.queued?.r})`, G.queued);
 ok(G.afterTwo?.wedged === 2 && G.afterTwo.live === 2 && G.afterTwo.abandoned === 2, `REACHED + FIX: both terminated workers were still alive past the grace (wedged ${G.afterTwo?.wedged}) — their slots refilled (live ${G.afterTwo?.live})`, G.afterTwo);
 ok(G.served?.r === 'answered 3', `FIX: the refilled pool keeps serving (${G.served?.r})`, G.served);
 ok(G.afterFour?.wedged === 4 && G.afterFour.live === 0 && G.aliveExhausted === true, `FIX: past the cap (2) a wedged slot stays empty — ${G.afterFour?.wedged} wedged, live ${G.afterFour?.live}, threads bounded, alive() stays true (runFs must not go inline onto the hung path)`, G.afterFour);
-ok(/fs pool exhausted \(echo\): 4 workers wedged in the kernel \(last on fifo /.test(G.exhausted?.r || '') && G.exhausted.ms < 100, `FIX: with every slot wedged an op fails BY NAME at once (${G.exhausted?.ms} ms)`, G.exhausted);
+ok(gateOf(/fs pool exhausted \(echo\): 4 workers wedged in the kernel \(last on fifo /.test(G.exhausted?.r || '')) && G.exhausted.ms < 100, `FIX: with every slot wedged an op fails BY NAME at once (${G.exhausted?.ms} ms)`, G.exhausted);
 ok((G.lines || []).filter((l) => /wedged in the kernel on fifo .* (is refilled|stays empty)/.test(l)).length === 4, 'FIX: each wedge is SAID (four lines: two refilled, two past the cap)', G.lines);
 ok(G.recovered?.wedged === 0 && G.recovered.live === 2 && G.back?.r === 'answered 5', `FIX: when the syscall returns the wedged threads exit and the pool is whole again (wedged ${G.recovered?.wedged}, live ${G.recovered?.live}, ${G.back?.r})`, G.recovered);
 const pre5 = src.replace("w._grace = setTimeout(() => abandon(w, `${job.msg.action} ${job.msg.path || ''}`.trim()), wedgeMs);\n      w._grace.unref?.();", '/* lane head: the slot waits for the exit */')
   .replace("if (!w && live === 0 && !pending) return reject(", 'if (false) return reject(')
   .replace("        job.qt = setTimeout(() => {", "        if (false) job.qt = setTimeout(() => {");
-ok(pre5 !== src && !pre5.includes('abandon(w, `') && pre5.includes('if (false) job.qt'), 'PATCH LANDED: the control never abandons a wedged worker and gives a queued job no deadline (the lane head 8bd219dd)');
+ok(pre5 !== src && !pre5.includes('abandon(w, `') && verdictOf(pre5.includes('if (false) job.qt')), 'PATCH LANDED: the control never abandons a wedged worker and gives a queued job no deadline (the lane head 8bd219dd)');
 const GC = wedgeRun(M.write('src/agentd/worker-pool.js', pre5, 'wedge'), 'control');
 ok(GC.queued?.r === 'NO ANSWER' && GC.served?.r === 'NO ANSWER' && GC.afterTwo?.live === 2 && !GC.afterTwo?.abandoned, `CONTROL: the head's pool holds both wedged slots (live ${GC.afterTwo?.live}) and a queued job — even a plain echo — gets NO answer, no error, no line (lines: ${(GC.lines || []).length})`, GC);
 
@@ -217,7 +217,7 @@ const cleanRun = (modPath, tag, stopDeaths) => {
 const K = cleanRun(POOL, 'fix', 4);
 // the backoff in the pool's OWN words: the k-th unasked exit says "k in a row" and a next-respawn delay that never shrinks
 const delays = (K.lines || []).map((l) => Number((/the next respawn in ([\d.]+) s/.exec(l) || [])[1]));
-ok(K.deaths >= 4 && K.crashes === K.deaths && K.spawned <= K.deaths + 2 && (K.lines || []).length === Math.min(6, K.crashes) && (K.lines || []).every((l, k) => l.includes('exited on its own, code 0') && l.includes(`${k + 1} in a row`)) && delays.every((d, k) => !k || d >= delays[k - 1]) && delays[delays.length - 1] > delays[0],
+ok(K.deaths >= 4 && K.crashes === K.deaths && K.spawned <= K.deaths + 2 && (K.lines || []).length === Math.min(6, K.crashes) && gateOf((K.lines || []).every((l, k) => l.includes('exited on its own, code 0') && l.includes(`${k + 1} in a row`))) && gateOf(delays.every((d, k) => !k || d >= delays[k - 1])) && delays[delays.length - 1] > delays[0],
   `FIX: ${K.deaths} unasked exits, every one a CRASH said with its backoff (${K.crashes} crashes, next respawn ${delays.join(' → ')} s), ${K.spawned} spawns — one per death ("${(K.lines || [])[0] || ''}")`, K);
 const pre6 = src.replace("else if (!w._terminated) crashed(`exited on its own, code ${code}`); ", '');
 ok(pre6 !== src, 'PATCH LANDED: the control respawns an unasked exit at the base pace (the lane head 8bd219dd)');
@@ -234,15 +234,15 @@ const exitRun = (how, timeout) => {
 };
 const X = exitRun('pool', 10000);
 // lane race-sweep (B-6b74): ITS OWN SIGKILL is the proof — the harness's net (10 s) kills with SIGTERM; the old `ms < 3000` read 2459 ms on a loaded run
-ok(X.signal === 'SIGKILL' && X.marker && X.marker.stuck === 1 && X.marker.wedged === 1, `FIX: pool.exit with a worker wedged in open() ends the process ITSELF (by SIGKILL, in ${X.ms} ms — the harness's net kills with SIGTERM), its exit handlers RAN first (stuck ${X.marker && X.marker.stuck})`, X);
-ok(/exit 0: 1 fs worker\(s\) blocked in the kernel would hold process\.exit forever/.test(((X.marker && X.marker.lines) || []).join('\n')), 'FIX: …and it is SAID', X.marker);
+ok(X.signal === 'SIGKILL' && gateOf(X.marker) && X.marker.stuck === 1 && X.marker.wedged === 1, `FIX: pool.exit with a worker wedged in open() ends the process ITSELF (by SIGKILL, in ${X.ms} ms — the harness's net kills with SIGTERM), its exit handlers RAN first (stuck ${X.marker && X.marker.stuck})`, X);
+ok(verdictOf(/exit 0: 1 fs worker\(s\) blocked in the kernel would hold process\.exit forever/.test(((X.marker && X.marker.lines) || []).join('\n'))), 'FIX: …and it is SAID', X.marker);
 const XC = exitRun('process', 2500);
-ok(XC.signal === 'SIGTERM' && XC.ms >= 2400 && XC.marker && XC.marker.stuck === 1, `CONTROL: plain process.exit(0) with the same wedged worker ran its handlers and then HUNG until the harness killed it at ${XC.ms} ms (the daemon's SIGTERM / re-exec path before this round)`, XC);
+ok(XC.signal === 'SIGTERM' && XC.ms >= 2400 && gateOf(XC.marker) && XC.marker.stuck === 1, `CONTROL: plain process.exit(0) with the same wedged worker ran its handlers and then HUNG until the harness killed it at ${XC.ms} ms (the daemon's SIGTERM / re-exec path before this round)`, XC);
 
 // (§4 the daemon runs this pool — its wiring pins — MOVED to the fast scripts/test-agentd-worker-pool-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log('\n§tree the patched copy never touches the tree');
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

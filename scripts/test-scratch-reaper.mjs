@@ -37,7 +37,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const FG = require('../src/fixture-guard.js');
 let pass = 0, fail = 0;
-const ok = (cond, name, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
+const ok = (cond, name, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NOW = Date.now(), OLD = NOW - 30 * 60 * 1000, HOUR_AGO = NOW - 60 * 60 * 1000;
@@ -90,11 +90,11 @@ console.log('\n§1 the run record (scripts/scratch-run.mjs)');
   const rec = readRunRecord(MAIN), me = procStat(process.pid);
   ok(!!rec && rec.v === 1 && rec.pid === process.pid && rec.starttime === me.starttime && me.starttime > 0 && rec.bootId === machineBootId() && rec.bootId.length > 0 && typeof rec.run === 'string' && rec.run.length > 0,
     `scratch.mjs scratchDir() creates the dir AND stamps ${RUN_RECORD}: this pid, its starttime, this boot, a run id (${JSON.stringify(rec)})`);
-  ok(runOwnerState(rec).alive === true && /is alive$/.test(runOwnerState(rec).why), `the owner of a root this process made is ALIVE (${runOwnerState(rec).why})`);
+  ok(runOwnerState(rec).alive === true && verdictOf(/is alive$/.test(runOwnerState(rec).why)), `the owner of a root this process made is ALIVE (${runOwnerState(rec).why})`);
   fs.rmSync(path.join(MAIN, RUN_RECORD));
   const home = scratchHome('reaper', fs, ['.vibespace']);
   const hrec = readRunRecord(home);
-  ok(home === MAIN && !!hrec && hrec.pid === process.pid && fs.existsSync(path.join(home, '.vibespace')), 'scratchHome() stamps its home too (the server it hosts detaches its device daemon under it — litter exactly when this suite is gone)');
+  ok(home === MAIN && !!hrec && hrec.pid === process.pid && verdictOf(fs.existsSync(path.join(home, '.vibespace'))), 'scratchHome() stamps its home too (the server it hosts detaches its device daemon under it — litter exactly when this suite is gone)');
   const child = Number(String(spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }).stdout || '').trim());
   const deadRec = makeRunRecord({ pid: child });
   ok(child > 0 && deadRec.starttime === 0, `a record made for a process that has exited carries no starttime (pid ${child}: ${deadRec.starttime})`);
@@ -108,19 +108,19 @@ console.log('\n§1 the run record (scripts/scratch-run.mjs)');
   F.mk(4500, { name: 'node', starttime: 4500, state: 'Z' });
   const st = (r) => runOwnerState(r, { procRoot: F.root });
   ok(st({ run: 'r', pid: 4100, starttime: 5000, bootId: 'boot-now' }).alive === true, 'alive: the pid on this boot with the recorded starttime');
-  ok(/pid 4200 is gone$/.test(st({ run: 'r', pid: 4200, starttime: 7000, bootId: 'boot-now' }).why) && !st({ pid: 4200, starttime: 7000, bootId: 'boot-now' }).alive, 'dead: the pid is gone');
-  ok(/was reused \(starttime 9999 ≠ recorded 3000\)$/.test(st({ run: 'r', pid: 4300, starttime: 3000, bootId: 'boot-now' }).why), 'dead: the pid was REUSED — same number, another starttime (the pid-wrap rule: a pid is not an identity)');
-  ok(/from another boot$/.test(st({ run: 'r', pid: 4100, starttime: 5000, bootId: 'boot-old' }).why), 'dead: a record from another boot, even when this boot has the same pid AND starttime');
-  ok(/has exited \(a zombie\)$/.test(st({ run: 'r', pid: 4500, starttime: 4500, bootId: 'boot-now' }).why), 'dead: a zombie (exited, not yet reaped by its parent)');
+  ok(gateOf(/pid 4200 is gone$/.test(st({ run: 'r', pid: 4200, starttime: 7000, bootId: 'boot-now' }).why)) && !st({ pid: 4200, starttime: 7000, bootId: 'boot-now' }).alive, 'dead: the pid is gone');
+  ok(verdictOf(/was reused \(starttime 9999 ≠ recorded 3000\)$/.test(st({ run: 'r', pid: 4300, starttime: 3000, bootId: 'boot-now' }).why)), 'dead: the pid was REUSED — same number, another starttime (the pid-wrap rule: a pid is not an identity)');
+  ok(verdictOf(/from another boot$/.test(st({ run: 'r', pid: 4100, starttime: 5000, bootId: 'boot-old' }).why)), 'dead: a record from another boot, even when this boot has the same pid AND starttime');
+  ok(verdictOf(/has exited \(a zombie\)$/.test(st({ run: 'r', pid: 4500, starttime: 4500, bootId: 'boot-now' }).why)), 'dead: a zombie (exited, not yet reaped by its parent)');
   // verify r3 (T4): a FORGED record naming pid 1 — init, root's, alive for the whole boot, its starttime real — read as an owner
   // alive for ever (reproduced: a seam under such a root accepted by `--reap --dry-run`, a reparented process under it spared an
   // hour later); the owner must be a process of THIS uid, read off /proc/<pid>/status (real uid, readable whatever the process's dumpable state)
   const init = procStat(1), forged = { run: 'forged', pid: 1, starttime: init.starttime, bootId: machineBootId(), createdAt: NOW };
-  ok(init.starttime > 0 && procUid(1) === 0 && process.getuid() !== 0 && runOwnerState(forged).alive === false && new RegExp(`^run forged pid 1 is another user's process \\(uid 0, not ${process.getuid()}\\)$`).test(runOwnerState(forged).why),
+  ok(init.starttime > 0 && procUid(1) === 0 && process.getuid() !== 0 && runOwnerState(forged).alive === false && verdictOf(new RegExp(`^run forged pid 1 is another user's process \\(uid 0, not ${process.getuid()}\\)$`).test(runOwnerState(forged).why)),
     `dead: a record naming pid 1 (init: uid 0, starttime ${init.starttime}) is another user's process, never an owner (${runOwnerState(forged).why})`);
   ok(runOwnerState(forged, { uid: 0 }).alive === true && runOwnerState({ run: 'r', pid: 4100, starttime: 5000, bootId: 'boot-now' }, { procRoot: F.root }).alive === true && procUid(4100, F.root) === null,
     'the uid is the caller\'s (asked as root, init is an owner); a fake table has no status file, so its rows carry no uid and the other facts decide');
-  ok(SCRATCH_ROOT_RE.source === '^' + (FG.TMP_ROOTS[0] + '/' + FG.FIXTURE_CWD_PREFIX).replace(/\//g, '\\/') + '[A-Za-z0-9._-]+' && SCRATCH_ROOT_RE.test(MAIN) && !SCRATCH_ROOT_RE.test(FAKE_HOME),
+  ok(SCRATCH_ROOT_RE.source === '^' + (FG.TMP_ROOTS[0] + '/' + FG.FIXTURE_CWD_PREFIX).replace(/\//g, '\\/') + '[A-Za-z0-9._-]+' && gateOf(SCRATCH_ROOT_RE.test(MAIN)) && !SCRATCH_ROOT_RE.test(FAKE_HOME),
     `the scratch prefix is src/fixture-guard.js's: ${FG.TMP_ROOTS[0]}/${FG.FIXTURE_CWD_PREFIX}* — what scratch.mjs mints (this suite's own root matches, the lane home does not)`);
 }
 
@@ -223,18 +223,18 @@ const EXPECT = [520, 525, 526, 527, 530, 540, 550, 560, 563, 565, 573, 574, 578,
 const find = (l, pid) => l.find((o) => o.pid === pid) || null;
 {
   ok(JSON.stringify(ids(V.victims)) === JSON.stringify(EXPECT), `exactly the orphans of gone owners + the record-less stale suite executables (got ${JSON.stringify(ids(V.victims))})`);
-  ok(/its root's owner is alive \(run lane-b pid 4100 is alive\)/.test((find(V.spared, 500) || {}).why || '') && find(V.spared, 501) && !find(V.victims, 500),
+  ok(gateOf(/its root's owner is alive \(run lane-b pid 4100 is alive\)/.test((find(V.spared, 500) || {}).why || '')) && gateOf(find(V.spared, 501)) && !find(V.victims, 500),
     'THE BRIEF\'S LEG: a planted foreign process naming /tmp/vs-<other>/x whose owner is alive SURVIVES — stale, orphaned and named `node` though it is');
-  ok(/owner is alive/.test((find(V.spared, 580) || {}).why || ''), 'a process naming ANY root whose owner is alive is spared, whatever else it names (its cwd is a gone root, its HOME a live one)');
-  ok(/is a file, not a directory/.test((find(V.ignored, 510) || {}).why || '') && !find(V.victims, 510), 'THE BRIEF\'S LEG: a shell with a /tmp/vs-*.txt FILE argument SURVIVES — a file is never a root (incident ②)');
-  ok(/is gone and its argv never showed it was a directory/.test((find(V.ignored, 511) || {}).why || '') && /is gone and its argv never showed/.test((find(V.ignored, 562) || {}).why || ''),
+  ok(verdictOf(/owner is alive/.test((find(V.spared, 580) || {}).why || '')), 'a process naming ANY root whose owner is alive is spared, whatever else it names (its cwd is a gone root, its HOME a live one)');
+  ok(gateOf(/is a file, not a directory/.test((find(V.ignored, 510) || {}).why || '')) && !find(V.victims, 510), 'THE BRIEF\'S LEG: a shell with a /tmp/vs-*.txt FILE argument SURVIVES — a file is never a root (incident ②)');
+  ok(gateOf(/is gone and its argv never showed it was a directory/.test((find(V.ignored, 511) || {}).why || '')) && verdictOf(/is gone and its argv never showed/.test((find(V.ignored, 562) || {}).why || '')),
     'a gone /tmp/vs-* name no naming proves was a directory is no root — incident ② as the old sweep read it ("root gone"), and a bare gone argument');
-  ok(/AGENT_BROWSER_CONFIG never showed/.test((find(V.ignored, 564) || {}).why || '') && find(V.victims, 565), 'AGENT_BROWSER_CONFIG names a FILE: equal to the gone root it proves nothing; going on beneath it (<root>/cfg.json) it proves a directory');
-  ok(/is a symlink, not a directory/.test((find(V.ignored, 570) || {}).why || ''), 'a /tmp/vs-* symlink is a lookalike, never a root');
+  ok(gateOf(/AGENT_BROWSER_CONFIG never showed/.test((find(V.ignored, 564) || {}).why || '')) && verdictOf(find(V.victims, 565)), 'AGENT_BROWSER_CONFIG names a FILE: equal to the gone root it proves nothing; going on beneath it (<root>/cfg.json) it proves a directory');
+  ok(verdictOf(/is a symlink, not a directory/.test((find(V.ignored, 570) || {}).why || '')), 'a /tmp/vs-* symlink is a lookalike, never a root');
   const listedAnywhere = (pid) => !!(find(V.victims, pid) || find(V.spared, pid) || find(V.ignored, pid));
   ok(!listedAnywhere(571) && !listedAnywhere(572) && ci_claims_plus() === 0, `a process rooted in ${PLUS}/sub (a directory that EXISTS; ${MAIN} is its own root) names no scratch root — never "${MAIN} is gone" (verify r1 K1: the shape ends at a segment boundary)`);
   const dd = (o) => scratchRootClaims(o).map((c) => `${c.root}|${c.via}|${c.dirProof ? 'dir' : 'nodir'}`).join(' ');
-  ok(/owner is alive/.test((find(V.spared, 575) || {}).why || '') && (find(V.spared, 575) || {}).root === R.other && /owner is alive/.test((find(V.spared, 576) || {}).why || '')
+  ok(gateOf(/owner is alive/.test((find(V.spared, 575) || {}).why || '')) && (find(V.spared, 575) || {}).root === R.other && gateOf(/owner is alive/.test((find(V.spared, 576) || {}).why || ''))
     && dd({ cwd: '/', env: { HOME: `${DOTDOT}/home` } }) === `${R.other}|HOME|dir` && dd({ cwd: '/', env: {}, argv: ['node', `${DOTDOT}/x.js`, `--flag=${DOTDOT}/y`] }) === `${R.other}|argv|dir` && dd({ cwd: '/', env: {}, argv: [`chrome --user-data-dir=${DOTDOT}/p`] }) === `${R.other}|--user-data-dir|dir ${R.other}|argv|dir`
     && dd({ cwd: `/tmp//vs-a/./x`, env: { HOME: '/tmp/vs-b/..' } }) === '/tmp/vs-a|cwd|dir' && dd({ cwd: '/', env: { HOME: '/tmp/vs-a/..' } }) === '',
     `verify r2 (R4): a path is normalized before the shape is read — HOME / argv / --user-data-dir through "<gone>/../<live>" name the LIVE root (its owner spares), "//" and "/." fold, "/tmp/vs-a/.." names nothing (${dd({ cwd: '/', env: { HOME: `${DOTDOT}/home` } })})`);
@@ -249,25 +249,25 @@ const find = (l, pid) => l.find((o) => o.pid === pid) || null;
     `verify r3 (T2): the process whose cwd is the DELETED inode of a path a live run recreated is reaped as dir-gone — the new record at that path is not its owner (${JSON.stringify(find(V.victims, 574) && find(V.victims, 574).root)})`);
   ok((find(V.victims, 578) || {}).why === 'scratch dir gone' && find(V.victims, 578).root === `${R.file} (deleted)` && !find(V.ignored, 578),
     `verify r3 (T7): a reparented hour-old daemon whose cwd the kernel says is gone is reaped as dir-gone even when its PATH now holds a file — never "${path.basename(R.file)} is a file, not a directory" (${JSON.stringify((find(V.victims, 578) || find(V.ignored, 578) || {}).why)})`);
-  ok(!listedAnywhere(579) && !V_STATS.includes(cwdLink(F.root, 579)) && V_STATS.includes(cwdLink(F.root, 573)),
+  ok(!listedAnywhere(579) && !V_STATS.includes(cwdLink(F.root, 579)) && verdictOf(V_STATS.includes(cwdLink(F.root, 573))),
     `verify r4 (X2b): the (deleted) cwd outside the scratch shape (579) is never stat'd through its magic link — a hung mount there cannot hold the sweep — while the scratch-shaped one (573) is (stat'd: ${V_STATS.filter((p) => /\/cwd$/.test(p)).map((p) => path.basename(path.dirname(p))).join(' ')})`);
   const vNs = judgeScratch({ procRoot: F.root, now: NOW, self: 999999, exists: NS_EXISTS });
-  ok(!vNs.victims.some((o) => o.pid === 581) && /not here, but the kernel finds its cwd a linked directory \(another mount namespace/.test((vNs.ignored.find((o) => o.pid === 581) || {}).why || '') && vNs.victims.some((o) => o.pid === 573),
+  ok(!vNs.victims.some((o) => o.pid === 581) && gateOf(/not here, but the kernel finds its cwd a linked directory \(another mount namespace/.test((vNs.ignored.find((o) => o.pid === 581) || {}).why || '')) && verdictOf(vNs.victims.some((o) => o.pid === 573)),
     `verify r4 (X2c): the hour-old reparented daemon whose scratch-shaped cwd this namespace cannot see (gone by path, LINKED by the kernel's stat) names no root — never "scratch dir gone" — while the deleted cwd (573) still is (${JSON.stringify((vNs.ignored.find((o) => o.pid === 581) || vNs.victims.find((o) => o.pid === 581) || {}).why)})`);
   ok(!listedAnywhere(577) && scratchRootClaims({ cwd: LIT, cwdGone: false }).length === 0 && scratchRootClaims({ cwd: LIT }).length === 1,
     `verify r3 (T2): a process in an EXISTING directory literally named "${path.basename(LIT)}" is listed nowhere (the kernel's stat says linked: the marker is the name, the shape does not cover it); a string-only caller still trusts the marker`);
   const w = (pid) => (find(V.victims, pid) || {}).why || '';
-  ok(/^owner gone: run verifier pid 4200 is gone$/.test(w(520)) && find(V.victims, 520).name === 'sleep', 'THE BRIEF\'S LEG: a process under a root whose owner pid is dead is reaped — whatever its name (an unlisted `sleep`)');
-  ok([525, 526, 527].every((p) => /^owner gone: run verifier pid 4200 is gone$/.test(w(p)) && find(V.victims, p).via === 'HOME'), 'incident ③ stays in reach: a finished verifier\'s re-parented `vibespace-device` daemons (rooted by HOME, cwd /) are reaped');
-  ok(/^owner gone: run wrapped pid 4300 was reused \(starttime 9999 ≠ recorded 3000\)$/.test(w(530)), 'THE BRIEF\'S LEG: a root whose owner pid was REUSED (same pid, another starttime) is judged dead — its orphan reaped');
-  ok(/from another boot$/.test(w(540)) && /has exited \(a zombie\)$/.test(w(550)), 'an owner from another boot, and a zombie owner, are dead too');
+  ok(gateOf(/^owner gone: run verifier pid 4200 is gone$/.test(w(520))) && find(V.victims, 520).name === 'sleep', 'THE BRIEF\'S LEG: a process under a root whose owner pid is dead is reaped — whatever its name (an unlisted `sleep`)');
+  ok(verdictOf([525, 526, 527].every((p) => /^owner gone: run verifier pid 4200 is gone$/.test(w(p)) && find(V.victims, p).via === 'HOME')), 'incident ③ stays in reach: a finished verifier\'s re-parented `vibespace-device` daemons (rooted by HOME, cwd /) are reaped');
+  ok(verdictOf(/^owner gone: run wrapped pid 4300 was reused \(starttime 9999 ≠ recorded 3000\)$/.test(w(530))), 'THE BRIEF\'S LEG: a root whose owner pid was REUSED (same pid, another starttime) is judged dead — its orphan reaped');
+  ok(gateOf(/from another boot$/.test(w(540))) && verdictOf(/has exited \(a zombie\)$/.test(w(550))), 'an owner from another boot, and a zombie owner, are dead too');
   ok(w(560) === 'scratch dir gone' && find(V.victims, 560).via === 'cwd' && w(563) === 'scratch dir gone' && find(V.victims, 563).via === 'argv', 'a gone root proven a directory by the cwd, or by a path going on beneath it, is the owner gone with its dir');
-  ok(/^young: /.test((find(V.spared, 561) || {}).why || '') && /^young: /.test((find(V.spared, 521) || {}).why || ''), '(c) a young orphan under a gone dir or a dead owner is SPARED — incident ①: one fast tier took the stray another run had just planted');
-  ok(/owned by a live process outside the root/.test((find(V.spared, 522) || {}).why || ''), 'a member a live process outside the root parents is spared under a dead owner (a user\'s shell in the dir)');
-  ok(/^orphaned 30 min \(no live suite owns /.test(w(590)) && /not an executable a suite starts/.test((find(V.spared, 591) || {}).why || '') && /youngest member/.test((find(V.spared, 595) || {}).why || ''),
+  ok(gateOf(/^young: /.test((find(V.spared, 561) || {}).why || '')) && verdictOf(/^young: /.test((find(V.spared, 521) || {}).why || '')), '(c) a young orphan under a gone dir or a dead owner is SPARED — incident ①: one fast tier took the stray another run had just planted');
+  ok(verdictOf(/owned by a live process outside the root/.test((find(V.spared, 522) || {}).why || '')), 'a member a live process outside the root parents is spared under a dead owner (a user\'s shell in the dir)');
+  ok(gateOf(/^orphaned 30 min \(no live suite owns /.test(w(590))) && gateOf(/not an executable a suite starts/.test((find(V.spared, 591) || {}).why || '')) && verdictOf(/youngest member/.test((find(V.spared, 595) || {}).why || '')),
     'a record-less existing dir keeps the pre-record rule: every member unowned + stale, then only the known executables');
-  ok(/^orphaned/.test(w(620)), 'a torn record is no record: that root is judged by the record-less rule');
-  ok(V.victims.every((o) => o.owner && Number.isFinite(o.ageMs) && o.via && o.root && o.starttime === 12345), 'every victim carries its EVIDENCE: root, what named it, the owner\'s state, its age, the starttime it was judged by');
+  ok(verdictOf(/^orphaned/.test(w(620))), 'a torn record is no record: that root is judged by the record-less rule');
+  ok(verdictOf(V.victims.every((o) => o.owner && Number.isFinite(o.ageMs) && o.via && o.root && o.starttime === 12345)), 'every victim carries its EVIDENCE: root, what named it, the owner\'s state, its age, the starttime it was judged by');
 }
 
 let swapSweep = null, swapA = null;   // verify r3 (T3): the swap leg's sweep, driven again by control (19)
@@ -277,22 +277,22 @@ console.log('\n§3 --reap --dry-run prints the verdict per candidate with its ev
   const lines = []; const code = reapByHand({ dryRun: true, procRoot: F.root, now: NOW, self: 999999, log: (m) => lines.push(m) });
   const has = (re) => lines.some((l) => re.test(l));
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  ok(code === 0 && /^\[ci\] reaping 15 scratch orphan process\(es\) from /.test(lines[0]), `the head line counts the victims (exit ${code}: ${lines[0]})`);
-  ok(has(new RegExp(`^\\[ci\\]   pid 520 \\(ppid 1\\) sleep: sleep 3600 — root ${esc(R.dead)} — owner gone: run verifier pid 4200 is gone — age 30 min — named by cwd$`)),
+  ok(code === 0 && verdictOf(/^\[ci\] reaping 15 scratch orphan process\(es\) from /.test(lines[0])), `the head line counts the victims (exit ${code}: ${lines[0]})`);
+  ok(verdictOf(has(new RegExp(`^\\[ci\\]   pid 520 \\(ppid 1\\) sleep: sleep 3600 — root ${esc(R.dead)} — owner gone: run verifier pid 4200 is gone — age 30 min — named by cwd$`))),
     'a victim line = pid, ppid, command, root, the rule, the OWNER state, the AGE and what named the root', lines.find((l) => l.includes('pid 520 ')));
-  ok(has(new RegExp(`^\\[ci\\]   pid 560 .* — root ${esc(R.goneA)} — scratch dir gone — owner: the dir is gone \\(its run record with it\\) — age 30 min — named by cwd$`)), 'a gone-dir victim says the record went with the dir');
-  ok(has(new RegExp(`^\\[ci\\]   spare pid 500 \\(ppid 1\\) node: .* — root ${esc(R.other)} — its root's owner is alive \\(run lane-b pid 4100 is alive\\) — age 30 min$`)), 'a spared candidate is printed with WHY (the live owner) and its age');
-  ok(has(/^\[ci\]   spare pid 561 .* — young: 0 s < the 10 min stale floor/), '…and a young one says so');
-  ok(has(new RegExp(`^\\[ci\\]   not a root: pid 510 \\(ppid 1\\) sh: sh -c sleep 60; : — ${esc(R.file)} is a file, not a directory$`)), 'a process naming the scratch shape where there is no root is printed as "not a root", with why');
-  ok(/^\[ci\] --dry-run: 15 process\(es\) listed above, none signalled \(\d+ spared, 5 naming no scratch root\)$/.test(lines[lines.length - 1]), `the closing line (${lines[lines.length - 1]})`);
+  ok(verdictOf(has(new RegExp(`^\\[ci\\]   pid 560 .* — root ${esc(R.goneA)} — scratch dir gone — owner: the dir is gone \\(its run record with it\\) — age 30 min — named by cwd$`))), 'a gone-dir victim says the record went with the dir');
+  ok(verdictOf(has(new RegExp(`^\\[ci\\]   spare pid 500 \\(ppid 1\\) node: .* — root ${esc(R.other)} — its root's owner is alive \\(run lane-b pid 4100 is alive\\) — age 30 min$`))), 'a spared candidate is printed with WHY (the live owner) and its age');
+  ok(verdictOf(has(/^\[ci\]   spare pid 561 .* — young: 0 s < the 10 min stale floor/)), '…and a young one says so');
+  ok(verdictOf(has(new RegExp(`^\\[ci\\]   not a root: pid 510 \\(ppid 1\\) sh: sh -c sleep 60; : — ${esc(R.file)} is a file, not a directory$`))), 'a process naming the scratch shape where there is no root is printed as "not a root", with why');
+  ok(verdictOf(/^\[ci\] --dry-run: 15 process\(es\) listed above, none signalled \(\d+ spared, 5 naming no scratch root\)$/.test(lines[lines.length - 1])), `the closing line (${lines[lines.length - 1]})`);
   // the two TEST seams (test-ci-heavy-launch §6): a tier's sweeps judge the test's own table, under the test's own lock
   process.env.VIBESPACE_CI_REAP_PROCFS = F.root; process.env.VIBESPACE_CI_REAPER_LOCK = path.join(MAIN, 'seam.lock');
   const seamed = ids(scratchOrphans({ now: NOW, self: 999999 })), seamLock = defaultReaperLockPath();
   delete process.env.VIBESPACE_CI_REAP_PROCFS; delete process.env.VIBESPACE_CI_REAPER_LOCK;
-  ok(JSON.stringify(seamed) === JSON.stringify(EXPECT) && seamLock === path.join(MAIN, 'seam.lock') && /^\/tmp\/vibespace-ci-reaper-/.test(defaultReaperLockPath()),
+  ok(JSON.stringify(seamed) === JSON.stringify(EXPECT) && seamLock === path.join(MAIN, 'seam.lock') && verdictOf(/^\/tmp\/vibespace-ci-reaper-/.test(defaultReaperLockPath())),
     'VIBESPACE_CI_REAP_PROCFS / VIBESPACE_CI_REAPER_LOCK point a tier\'s sweeps at a test\'s own process table and lock (unset = the machine\'s)');
   const empty = verdictReport({});
-  ok(empty[0] === '[ci] no scratch orphans' && /nothing to reap/.test(empty[1]), 'a dry run with nothing to reap says so');
+  ok(empty[0] === '[ci] no scratch orphans' && verdictOf(/nothing to reap/.test(empty[1])), 'a dry run with nothing to reap says so');
   // VERIFY r1 (K7, 2026-09-29): THE SEAM IS HELD TO A SCRATCH ROOT AND ANNOUNCED. Reproduced on the real `--reap`: a table
   // under the lane's HOME naming a real pid (starttime 12345, never its own) under a gone root, 30 min old, and the real,
   // owned, claim-less `sleep` behind that number was SIGKILLed with nothing said about a fake table; a table that did not
@@ -305,37 +305,37 @@ console.log('\n§3 --reap --dry-run prints the verdict per candidate with its ev
   const withSeam = (v, f) => { const prev = process.env.VIBESPACE_CI_REAP_PROCFS; process.env.VIBESPACE_CI_REAP_PROCFS = v; try { return f(); } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_REAP_PROCFS; else process.env.VIBESPACE_CI_REAP_PROCFS = prev; } };
   const thrown = (f) => { try { f(); return null; } catch (e) { return e.message; } };
   const refusedOut = withSeam(outside, () => thrown(() => reapScratchOrphans({ lockPath: LOCK_SEAM, log: () => { throw new Error('logged'); } })));
-  ok(/^VIBESPACE_CI_REAP_PROCFS=\/var\/tmp\/vs-reaper-seam-.* refused: a fake process table is judged only under a \/tmp\/vs-\* scratch root/.test(refusedOut || ''), `a seam OUTSIDE a scratch root is REFUSED before anything is judged, logged or locked (${refusedOut})`);
+  ok(verdictOf(/^VIBESPACE_CI_REAP_PROCFS=\/var\/tmp\/vs-reaper-seam-.* refused: a fake process table is judged only under a \/tmp\/vs-\* scratch root/.test(refusedOut || '')), `a seam OUTSIDE a scratch root is REFUSED before anything is judged, logged or locked (${refusedOut})`);
   // verify r2 (R1): a seam is judged by its REAL path — a symlink under this suite's root to the outside table, and a symlinked component
   const seamLink = path.join(MAIN, 'seam-link'); fs.symlinkSync(outside, seamLink);
   const refusedLink = withSeam(seamLink, () => thrown(() => reapScratchOrphans({ lockPath: LOCK_SEAM })));
-  ok(new RegExp(`^VIBESPACE_CI_REAP_PROCFS=${esc(seamLink)} refused \\(it resolves to ${esc(outside)}\\): a fake process table is judged only under`).test(refusedLink || ''), `a seam that is a SYMLINK under a scratch root to a table elsewhere is refused by its real path (${refusedLink})`);
+  ok(verdictOf(new RegExp(`^VIBESPACE_CI_REAP_PROCFS=${esc(seamLink)} refused \\(it resolves to ${esc(outside)}\\): a fake process table is judged only under`).test(refusedLink || '')), `a seam that is a SYMLINK under a scratch root to a table elsewhere is refused by its real path (${refusedLink})`);
   const seamLnkDir = path.join(MAIN, 'lnk'); fs.symlinkSync(path.dirname(outside), seamLnkDir);
   const refusedComponent = withSeam(path.join(seamLnkDir, path.basename(outside)), () => thrown(() => reapScratchOrphans({ lockPath: LOCK_SEAM })));
-  ok(/refused \(it resolves to \/var\/tmp\/vs-reaper-seam-.*\): a fake process table/.test(refusedComponent || ''), `…and so is a seam with a symlinked component (${refusedComponent})`);
+  ok(verdictOf(/refused \(it resolves to \/var\/tmp\/vs-reaper-seam-.*\): a fake process table/.test(refusedComponent || '')), `…and so is a seam with a symlinked component (${refusedComponent})`);
   // verify r2 (R1): a stale seam — a table under a scratch root whose owner is DEAD (a finished run's), or that has no record at all
   const staleRoot = mkRoot('staleseam'); writeRecord(staleRoot, { v: 1, run: 'finished-run', pid: 4999990, starttime: 777, bootId: machineBootId(), createdAt: HOUR_AGO });
   const staleTable = seamTable(path.join(staleRoot, 'procfs'), { pid: 4999989, cwd: sib('gone-stale'), born: OLD });
   const refusedStale = withSeam(staleTable, () => thrown(() => reapScratchOrphans({ lockPath: LOCK_SEAM })));
-  ok(new RegExp(`refused: its scratch root ${esc(staleRoot)} has no live owner \\(run finished-run pid 4999990 is gone\\) — a seam is a live test's`).test(refusedStale || ''), `a seam under a scratch root whose owner is dead (a finished run's table) is refused, naming the owner's state (${refusedStale})`);
+  ok(verdictOf(new RegExp(`refused: its scratch root ${esc(staleRoot)} has no live owner \\(run finished-run pid 4999990 is gone\\) — a seam is a live test's`).test(refusedStale || '')), `a seam under a scratch root whose owner is dead (a finished run's table) is refused, naming the owner's state (${refusedStale})`);
   // verify r3 (T4): a seam under a root whose record names pid 1 (init: root's, alive for the boot) was ACCEPTED for ever
   const forgedRoot = mkRoot('forgedseam'); writeRecord(forgedRoot, { v: 1, run: 'forged', pid: 1, starttime: procStat(1).starttime, bootId: machineBootId(), createdAt: HOUR_AGO });
   const forgedTable = seamTable(path.join(forgedRoot, 'procfs'), { pid: 4999988, cwd: sib('gone-forged'), born: OLD });
   const refusedForged = withSeam(forgedTable, () => thrown(() => reapScratchOrphans({ lockPath: LOCK_SEAM })));
-  ok(new RegExp(`refused: its scratch root ${esc(forgedRoot)} has no live owner \\(run forged pid 1 is another user's process \\(uid 0, not ${process.getuid()}\\)\\)`).test(refusedForged || ''), `a seam under a root whose record names pid 1 (a forged owner, alive for the boot) is refused: the owner is not this user's process (${refusedForged})`);
+  ok(verdictOf(new RegExp(`refused: its scratch root ${esc(forgedRoot)} has no live owner \\(run forged pid 1 is another user's process \\(uid 0, not ${process.getuid()}\\)\\)`).test(refusedForged || '')), `a seam under a root whose record names pid 1 (a forged owner, alive for the boot) is refused: the owner is not this user's process (${refusedForged})`);
   const noRecRoot = mkRoot('norecseam'); const noRecTable = seamTable(path.join(noRecRoot, 'procfs'), null);
   const refusedNoRec = withSeam(noRecTable, () => thrown(() => reapScratchOrphans({ lockPath: LOCK_SEAM })));
-  ok(/has no live owner \(no run record\)/.test(refusedNoRec || ''), `…and one under a root with no run record (${refusedNoRec})`);
+  ok(verdictOf(/has no live owner \(no run record\)/.test(refusedNoRec || '')), `…and one under a root with no run record (${refusedNoRec})`);
   const refusedGone = withSeam(path.join(MAIN, 'no-such-table'), () => thrown(() => reapScratchOrphans({ lockPath: LOCK_SEAM })));
-  ok(/refused: not a directory/.test(refusedGone || ''), `a seam naming a table that is not there is refused, never a silent "nothing to reap" (${refusedGone})`);
+  ok(verdictOf(/refused: not a directory/.test(refusedGone || '')), `a seam naming a table that is not there is refused, never a silent "nothing to reap" (${refusedGone})`);
   const refusedAsync = await withSeam(outside, () => reapScratchOrphansAsync({ lockPath: LOCK_SEAM }).then(() => null, (e) => e.message));
-  ok(/refused: a fake process table/.test(refusedAsync || ''), 'the lanes\' async twin refuses it the same way');
+  ok(verdictOf(/refused: a fake process table/.test(refusedAsync || '')), 'the lanes\' async twin refuses it the same way');
   const byHandLines = []; const byHandCode = withSeam(outside, () => reapByHand({ dryRun: true, log: (m) => byHandLines.push(m) }));
-  ok(byHandCode === 2 && byHandLines.length === 1 && /^\[ci\] --reap refused: VIBESPACE_CI_REAP_PROCFS=.* refused: a fake process table/.test(byHandLines[0]), '`--reap --dry-run` under a refused seam prints the refusal and exits 2 (nothing listed)', byHandLines);
+  ok(byHandCode === 2 && byHandLines.length === 1 && verdictOf(/^\[ci\] --reap refused: VIBESPACE_CI_REAP_PROCFS=.* refused: a fake process table/.test(byHandLines[0])), '`--reap --dry-run` under a refused seam prints the refusal and exits 2 (nothing listed)', byHandLines);
   const wetLines = []; const wetCode = withSeam(outside, () => reapByHand({ lockPath: LOCK_SEAM, log: (m) => wetLines.push(m) }));
-  ok(wetCode === 2 && wetLines.length === 1 && /--reap refused/.test(wetLines[0]), '…and so does `--reap` itself: the table\'s pid 4999999 was never signalled');
+  ok(wetCode === 2 && wetLines.length === 1 && verdictOf(/--reap refused/.test(wetLines[0])), '…and so does `--reap` itself: the table\'s pid 4999999 was never signalled');
   const saidLines = []; const said = withSeam(announced, () => reapScratchOrphans({ lockPath: LOCK_SEAM, now: NOW, self: 999999, log: (m) => saidLines.push(m) }));
-  ok(Array.isArray(said) && said.length === 0 && saidLines.length === 1 && saidLines[0] === `[ci] scratch reaper: judging the FAKE process table ${announced} (VIBESPACE_CI_REAP_PROCFS, a test seam) — its verdicts are listed and NOTHING is signalled (a seam is dry)`, 'a sweep under an ACCEPTED seam says first that its table is fake and dry (one line, before any verdict)', saidLines);
+  ok(gateOf(Array.isArray(said)) && said.length === 0 && saidLines.length === 1 && saidLines[0] === `[ci] scratch reaper: judging the FAKE process table ${announced} (VIBESPACE_CI_REAP_PROCFS, a test seam) — its verdicts are listed and NOTHING is signalled (a seam is dry)`, 'a sweep under an ACCEPTED seam says first that its table is fake and dry (one line, before any verdict)', saidLines);
   // verify r3 (T3): THE TABLE ANNOUNCED IS THE TABLE JUDGED. The sweep resolved the seam once for its announce line and the judge's
   // own default resolved it again — a symlink re-pointed in between (here: by the announce line's own log callback) had the sweep
   // list another table's rows under the first table's name. Now the one resolution is handed to the judge (the control (19) below
@@ -345,12 +345,12 @@ console.log('\n§3 --reap --dry-run prints the verdict per candidate with its ev
   const swapTo = (t) => { fs.unlinkSync(swapLink); fs.symlinkSync(t, swapLink); };
   swapSweep = (mod) => { swapTo(swapA); const lines = []; const list = withSeam(swapLink, () => mod.reapScratchOrphans({ lockPath: LOCK_SEAM, now: NOW, self: 999999, log: (m) => { lines.push(m); if (/judging the FAKE process table/.test(m)) swapTo(swapB); } })); return { list, lines }; };
   const swapped = swapSweep({ reapScratchOrphans });
-  ok(swapped.list.length === 0 && swapped.lines.length === 1 && swapped.lines[0].includes(swapA) && !swapped.lines.some((l) => l.includes('4999997')), `the seam re-pointed to another table between the announce line and the judge: the sweep still judges the table it announced (${swapped.lines.length} line(s), ${swapped.list.length} listed)`);
+  ok(swapped.list.length === 0 && swapped.lines.length === 1 && gateOf(swapped.lines[0].includes(swapA)) && !swapped.lines.some((l) => l.includes('4999997')), `the seam re-pointed to another table between the announce line and the judge: the sweep still judges the table it announced (${swapped.lines.length} line(s), ${swapped.list.length} listed)`);
   const cliSeam = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--reap', '--dry-run'], { encoding: 'utf8', cwd: REPO, env: { ...QUIET_ENV, VIBESPACE_CI_REAP_PROCFS: announced }, timeout: 60000 });
   const cliOut = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--reap', '--dry-run'], { encoding: 'utf8', cwd: REPO, env: { ...QUIET_ENV, VIBESPACE_CI_REAP_PROCFS: outside }, timeout: 60000 });
-  ok(cliSeam.status === 0 && /^\[ci\] scratch reaper: judging the FAKE process table /.test(cliSeam.stdout) && /spare pid 4999998 .*owner is alive/.test(cliSeam.stdout) && /--dry-run: nothing to reap/.test(cliSeam.stdout),
+  ok(cliSeam.status === 0 && gateOf(/^\[ci\] scratch reaper: judging the FAKE process table /.test(cliSeam.stdout)) && gateOf(/spare pid 4999998 .*owner is alive/.test(cliSeam.stdout)) && verdictOf(/--dry-run: nothing to reap/.test(cliSeam.stdout)),
     'the CLI as an operator runs it: an accepted seam is announced on the first line of `--reap --dry-run`', cliSeam.stdout.split('\n').slice(0, 3));
-  ok(cliOut.status === 2 && /^\[ci\] --reap refused: VIBESPACE_CI_REAP_PROCFS=/.test(cliOut.stdout) && !/4999999/.test(cliOut.stdout), 'the CLI refuses the outside table (exit 2) and lists nothing from it', cliOut.stdout.split('\n').slice(0, 3));
+  ok(cliOut.status === 2 && gateOf(/^\[ci\] --reap refused: VIBESPACE_CI_REAP_PROCFS=/.test(cliOut.stdout)) && !/4999999/.test(cliOut.stdout), 'the CLI refuses the outside table (exit 2) and lists nothing from it', cliOut.stdout.split('\n').slice(0, 3));
   // VERIFY r2 (R2, 2026-09-29): A SEAM LISTS, NEVER SIGNALS. Reproduced on the real `--reap`: a table under an ACCEPTED scratch
   // root naming a real, owned, claim-less `sleep` of the verifier's (starttime 12345 — never its own) under a gone dir, 30 min
   // old, was SIGKILLed ("reaped 1 of 1"): the signal's re-check reads the SAME table, so no fake row can fail it. Now a real
@@ -363,19 +363,19 @@ console.log('\n§3 --reap --dry-run prints the verdict per candidate with its ev
   const stillIt = () => { const st = procStat(seamVictim.pid); return !!st && st.state !== 'Z' && st.state !== 'X' && st.starttime === seamStart; };
   const dryLines = []; const dryList = withSeam(dryTable, () => reapScratchOrphans({ lockPath: LOCK_SEAM, now: NOW, self: 999999, graceMs: 300, log: (m) => dryLines.push(m) }));
   sleepSync(300);
-  ok(dryList.length === 1 && dryList[0].pid === seamVictim.pid && stillIt() && dryLines.some((l) => l.includes(`pid ${seamVictim.pid} `)) && dryLines[dryLines.length - 1] === "[ci] scratch reaper: 1 victim(s) listed under the test seam, none signalled (verify r2 R2: a table's word about a pid is not the kernel's)",
+  ok(dryList.length === 1 && dryList[0].pid === seamVictim.pid && gateOf(stillIt()) && gateOf(dryLines.some((l) => l.includes(`pid ${seamVictim.pid} `))) && dryLines[dryLines.length - 1] === "[ci] scratch reaper: 1 victim(s) listed under the test seam, none signalled (verify r2 R2: a table's word about a pid is not the kernel's)",
     `THE R2 LEG: a real process this suite owns, named by an accepted seam table under a gone root, is LISTED by the sync sweep and NOT signalled (pid ${seamVictim.pid} still alive with its starttime)`, dryLines);
   // the seam stays set across the twin's awaits (the lock wait): the env is restored once the sweep has resolved
   const dryAsync = await (async () => { const prev = process.env.VIBESPACE_CI_REAP_PROCFS; process.env.VIBESPACE_CI_REAP_PROCFS = dryTable; try { return await reapScratchOrphansAsync({ lockPath: LOCK_SEAM, now: NOW, self: 999999, graceMs: 300, log: () => { } }); } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_REAP_PROCFS; else process.env.VIBESPACE_CI_REAP_PROCFS = prev; } })();
   await sleep(300);
-  ok(dryAsync.length === 1 && stillIt(), 'the lanes\' async twin under the seam lists it and signals nothing');
+  ok(dryAsync.length === 1 && verdictOf(stillIt()), 'the lanes\' async twin under the seam lists it and signals nothing');
   const wetSeamLines = []; const wetSeamCode = withSeam(dryTable, () => reapByHand({ lockPath: LOCK_SEAM, now: NOW, self: 999999, graceMs: 300, log: (m) => wetSeamLines.push(m) }));
   sleepSync(300);
-  ok(wetSeamCode === 0 && stillIt() && wetSeamLines[wetSeamLines.length - 1] === '[ci] test seam: 1 listed, none signalled' && !wetSeamLines.some((l) => /reaped \d+ of/.test(l)),
+  ok(wetSeamCode === 0 && gateOf(stillIt()) && wetSeamLines[wetSeamLines.length - 1] === '[ci] test seam: 1 listed, none signalled' && !wetSeamLines.some((l) => /reaped \d+ of/.test(l)),
     '`--reap` (wet) under the seam exits 0 with a closing line that claims no reap', wetSeamLines);
   const cliWet = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--reap'], { encoding: 'utf8', cwd: REPO, env: { ...QUIET_ENV, VIBESPACE_CI_REAP_PROCFS: dryTable, VIBESPACE_CI_REAPER_LOCK: LOCK_SEAM }, timeout: 60000 });
   sleepSync(300);
-  ok(cliWet.status === 0 && stillIt() && /listed under the test seam, none signalled/.test(cliWet.stdout) && /^\[ci\] test seam: 1 listed, none signalled$/m.test(cliWet.stdout), 'the CLI as an operator runs it: `--reap` under an accepted seam lists the pid and leaves it alive', cliWet.stdout.split('\n').slice(-3));
+  ok(cliWet.status === 0 && gateOf(stillIt()) && gateOf(/listed under the test seam, none signalled/.test(cliWet.stdout)) && verdictOf(/^\[ci\] test seam: 1 listed, none signalled$/m.test(cliWet.stdout)), 'the CLI as an operator runs it: `--reap` under an accepted seam lists the pid and leaves it alive', cliWet.stdout.split('\n').slice(-3));
 }
 
 // ── §3b verify r4 (X4c): A TABLE THAT CANNOT BE READ IS SAID, NEVER "NOTHING TO REAP" ──
@@ -392,56 +392,56 @@ console.log('\n§3b a process table that vanishes mid-sweep is said');
   const T1 = mkVanish('sync'); const l1 = []; let e1 = null;
   try { withSeam(T1, () => reapScratchOrphans({ lockPath: lk, log: vanishOnAnnounce(T1, l1), now: NOW, self: 999999 })); } catch (e) { e1 = e; }
   const L1 = acquireReaperLock({ lockPath: lk, waitMs: 300 }); if (L1.ok) L1.release();
-  ok(!!e1 && /^the process table \S*vanish-sync could not be read \(ENOENT\) — nothing judged, nothing signalled/.test(e1.message) && l1.length === 1 && L1.ok, `the sync sweep under a table that vanished after its announce line THROWS naming the table (the callers print "scratch reaper skipped: …") and its lock is released (${e1 ? e1.message.slice(0, 100) : 'no throw: ' + JSON.stringify(l1)}; lock re-taken: ${L1.ok})`);
+  ok(!!e1 && gateOf(/^the process table \S*vanish-sync could not be read \(ENOENT\) — nothing judged, nothing signalled/.test(e1.message)) && l1.length === 1 && verdictOf(L1.ok), `the sync sweep under a table that vanished after its announce line THROWS naming the table (the callers print "scratch reaper skipped: …") and its lock is released (${e1 ? e1.message.slice(0, 100) : 'no throw: ' + JSON.stringify(l1)}; lock re-taken: ${L1.ok})`);
   const T2 = mkVanish('async'); const l2 = []; let e2 = null;
   try { await withSeam(T2, () => reapScratchOrphansAsync({ lockPath: lk, log: vanishOnAnnounce(T2, l2), now: NOW, self: 999999 })); } catch (e) { e2 = e; }
-  ok(!!e2 && /could not be read \(ENOENT\)/.test(e2.message) && l2.length === 1, `…and so does the async twin (${e2 ? e2.message.slice(0, 60) : 'no throw: ' + JSON.stringify(l2)})`);
+  ok(!!e2 && gateOf(/could not be read \(ENOENT\)/.test(e2.message)) && l2.length === 1, `…and so does the async twin (${e2 ? e2.message.slice(0, 60) : 'no throw: ' + JSON.stringify(l2)})`);
   const T3 = mkVanish('dry'); const l3 = []; const code3 = withSeam(T3, () => reapByHand({ dryRun: true, log: vanishOnAnnounce(T3, l3), now: NOW, self: 999999 }));
-  ok(code3 === 2 && l3.length === 2 && /^\[ci\] --reap refused: the process table \S+ could not be read \(ENOENT\)/.test(l3[1]), `--reap --dry-run under a table that vanished after the announce line exits 2 saying so — never "nothing to reap" (${JSON.stringify(l3[1] || l3)})`);
+  ok(code3 === 2 && l3.length === 2 && verdictOf(/^\[ci\] --reap refused: the process table \S+ could not be read \(ENOENT\)/.test(l3[1])), `--reap --dry-run under a table that vanished after the announce line exits 2 saying so — never "nothing to reap" (${JSON.stringify(l3[1] || l3)})`);
   const T4 = mkVanish('wet'); const l4 = []; const code4 = withSeam(T4, () => reapByHand({ lockPath: lk, log: vanishOnAnnounce(T4, l4), now: NOW, self: 999999 }));
-  ok(code4 === 2 && /^\[ci\] --reap refused: the process table \S+ could not be read/.test(l4[l4.length - 1] || ''), `…and the wet --reap too (exit ${code4}: ${JSON.stringify(l4[l4.length - 1])})`);
+  ok(code4 === 2 && verdictOf(/^\[ci\] --reap refused: the process table \S+ could not be read/.test(l4[l4.length - 1] || '')), `…and the wet --reap too (exit ${code4}: ${JSON.stringify(l4[l4.length - 1])})`);
 }
 
 // ── §4 ONE SWEEP AT A TIME: THE MACHINE-WIDE flock ───────────────────────
 console.log('\n§4 one sweep at a time (flock(1) held by one child; the kernel releases it)');
 const LOCK = path.join(MAIN, 'reaper.lock');
 {
-  ok(REAPER_LOCK_WAIT_MS === 5000 && /^\/tmp\/vibespace-ci-reaper-\d+\.lock$/.test(defaultReaperLockPath()) && !SCRATCH_ROOT_RE.test(defaultReaperLockPath()),
+  ok(REAPER_LOCK_WAIT_MS === 5000 && gateOf(/^\/tmp\/vibespace-ci-reaper-\d+\.lock$/.test(defaultReaperLockPath())) && !SCRATCH_ROOT_RE.test(defaultReaperLockPath()),
     `the tiers wait 5 s for the machine's sweep lock (${defaultReaperLockPath()} — never a /tmp/vs-* name itself)`);
   const A = acquireReaperLock({ lockPath: LOCK, waitMs: 1000 });
-  ok(A.ok && procStat(A.holder) && procStat(A.holder).comm === 'cat', `the lock is taken by ONE holder child (pid ${A.holder}: ${procStat(A.holder) && procStat(A.holder).comm})`);
+  ok(gateOf(A.ok) && gateOf(procStat(A.holder)) && procStat(A.holder).comm === 'cat', `the lock is taken by ONE holder child (pid ${A.holder}: ${procStat(A.holder) && procStat(A.holder).comm})`);
   let t = Date.now(); const B = acquireReaperLock({ lockPath: LOCK, waitMs: 400 }); const waited = Date.now() - t;
   const namedHolder = /^another sweep holds .*reaper\.lock \(waited 0\.4 s\) — held by pid (\d+) \(cat, parent (\d+) \S+, for \d+ s\)$/.exec(B.why || '') || [];   // the parent's comm is node's (`MainThread` on Node 24)
   ok(!B.ok && Number(namedHolder[1]) === A.holder && Number(namedHolder[2]) === process.pid && waited >= 350 && waited < 3000, `a second taker waits its bound, then fails SAYING why — and WHO holds it: the holder's pid, its parent (this suite) and for how long (verify r2 R3; ${waited} ms: ${B.why})`);
   const skipLog = [];
   t = Date.now(); const sk = reapScratchOrphans({ procRoot: F.root, now: NOW, self: 999999, lockPath: LOCK, lockWaitMs: 300, log: (m) => skipLog.push(m) });
-  ok(Array.isArray(sk) && sk.length === 0 && /another sweep holds/.test(sk.skipped || '') && skipLog.length === 1 && /^\[ci\] scratch reaper SKIPPED — another sweep holds .*: nothing judged, nothing signalled$/.test(skipLog[0]),
+  ok(gateOf(Array.isArray(sk)) && sk.length === 0 && gateOf(/another sweep holds/.test(sk.skipped || '')) && skipLog.length === 1 && verdictOf(/^\[ci\] scratch reaper SKIPPED — another sweep holds .*: nothing judged, nothing signalled$/.test(skipLog[0])),
     'a sweep that cannot get the lock SKIPS and says so — one line, nothing judged, nothing signalled (the fake root\'s 12 victims untouched)', skipLog);
   const noProcLog = []; t = Date.now(); const np = reapScratchOrphans({ procRoot: path.join(MAIN, 'no-proc'), lockPath: LOCK, lockWaitMs: 300, log: (m) => noProcLog.push(m) });
-  ok(Array.isArray(np) && np.length === 0 && !np.skipped && noProcLog.length === 0 && Date.now() - t < 250, 'a machine with no /proc (macOS) has nothing to judge: no lock is asked for and no skip is printed after every suite');
+  ok(gateOf(Array.isArray(np)) && np.length === 0 && !np.skipped && noProcLog.length === 0 && Date.now() - t < 250, 'a machine with no /proc (macOS) has nothing to judge: no lock is asked for and no skip is printed after every suite');
   const byHand = []; const code3 = reapByHand({ procRoot: F.root, now: NOW, self: 999999, lockPath: LOCK, lockWaitMs: 200, log: (m) => byHand.push(m) });
-  ok(code3 === 3 && byHand.length === 1 && /SKIPPED/.test(byHand[0]), '`--reap` by hand under the same lock: a skip exits 3 (did not run) and says so');
+  ok(code3 === 3 && byHand.length === 1 && verdictOf(/SKIPPED/.test(byHand[0])), '`--reap` by hand under the same lock: a skip exits 3 (did not run) and says so');
   A.release();
   t = Date.now(); const C = acquireReaperLock({ lockPath: LOCK, waitMs: 3000 });
-  ok(C.ok && Date.now() - t < 1500, `release frees it at once (${Date.now() - t} ms)`); C.release();
+  ok(gateOf(C.ok) && Date.now() - t < 1500, `release frees it at once (${Date.now() - t} ms)`); C.release();
   // verify r1 (K4): a take TOUCHES the lock file — opened for append and never written, its times never moved, and the box's
   // systemd-tmpfiles rule (`q /tmp 1777 root root 10d`) would remove a lock in daily use while it is held; a removed lock file
   // admits a second sweep (rm under a holder ⇒ the next taker is granted — by hand that still holds, and is stated).
   const OLD_LOCK = path.join(MAIN, 'old.lock'); fs.writeFileSync(OLD_LOCK, ''); fs.utimesSync(OLD_LOCK, (NOW - 11 * 86400e3) / 1000, (NOW - 11 * 86400e3) / 1000);
   const T = acquireReaperLock({ lockPath: OLD_LOCK, waitMs: 500 }); const touchedAt = fs.statSync(OLD_LOCK).mtimeMs; T.release();
-  ok(T.ok && touchedAt > NOW - 60e3, `a take refreshes the lock file's mtime (11 days old ⇒ ${Math.round((Date.now() - touchedAt) / 1000)} s old): a lock in use never ages into a tmp cleaner's rule`);
+  ok(gateOf(T.ok) && touchedAt > NOW - 60e3, `a take refreshes the lock file's mtime (11 days old ⇒ ${Math.round((Date.now() - touchedAt) / 1000)} s old): a lock in use never ages into a tmp cleaner's rule`);
   // verify r3 (T6): a lock file this user cannot open (another uid's file of our name — the root-owned tmpfiles case) says so: r2 measured
   // "the lock holder exited 2" because a failed redirection on sh's special builtin `exec` ends the shell with its own status
   // verify r3 (T6): the pid in the file REUSED by an innocent process (here: this suite's own pid written over the holder's) — the
   // note named it as the holder ("held by pid P (MainThread, parent …)"); a holder is `cat`, anything else is said to be not one
   const A3 = acquireReaperLock({ lockPath: LOCK, waitMs: 1000 }); fs.writeFileSync(LOCK, `${process.pid}\n`);
   const B3 = acquireReaperLock({ lockPath: LOCK, waitMs: 300 }); A3.release();
-  ok(A3.ok && !B3.ok && new RegExp(`^another sweep holds .*reaper\\.lock \\(waited 0\\.3 s\\) — the pid ${process.pid} it named now runs \\S+, not a holder \\(the number was reused, or the file is stale; the lock is the kernel's flock, still held by someone\\)$`).test(B3.why || ''), `a skip whose file names a pid that is no longer a \`cat\` says it is not a holder — never "held by" an innocent process (${B3.why})`);
+  ok(gateOf(A3.ok) && !B3.ok && verdictOf(new RegExp(`^another sweep holds .*reaper\\.lock \\(waited 0\\.3 s\\) — the pid ${process.pid} it named now runs \\S+, not a holder \\(the number was reused, or the file is stale; the lock is the kernel's flock, still held by someone\\)$`).test(B3.why || '')), `a skip whose file names a pid that is no longer a \`cat\` says it is not a holder — never "held by" an innocent process (${B3.why})`);
   const RO = path.join(MAIN, 'ro.lock'); fs.writeFileSync(RO, ''); fs.chmodSync(RO, 0o000);
   const roTake = process.getuid() === 0 ? null : acquireReaperLock({ lockPath: RO, waitMs: 300 });
   ok(roTake === null || (!roTake.ok && roTake.why === `cannot open ${RO}`), `a lock file that cannot be opened fails SAYING so (${roTake ? roTake.why : 'skipped: root opens anything'})`);
   const A2 = await acquireReaperLockAsync({ lockPath: LOCK, waitMs: 1000 }); const B2 = await acquireReaperLockAsync({ lockPath: LOCK, waitMs: 300 });
-  ok(A2.ok && !B2.ok && /another sweep holds/.test(B2.why), 'the async twin (the heavy tier\'s lanes) serialises on the same lock'); A2.release();
+  ok(gateOf(A2.ok) && !B2.ok && verdictOf(/another sweep holds/.test(B2.why)), 'the async twin (the heavy tier\'s lanes) serialises on the same lock'); A2.release();
   // THE KERNEL RELEASES IT WHEN THE HOLDER'S OWNER DIES: a node that takes the lock and is then SIGKILLed mid-sweep
   const taker = spawn(process.execPath, ['--input-type=module', '-e', `import(${JSON.stringify(pathToFileURL(path.join(REPO, 'scripts', 'ci.mjs')).href)}).then((m) => { const l = m.acquireReaperLock({ lockPath: process.argv[1], waitMs: 2000 }); console.log(l.ok ? 'HELD ' + l.holder : 'NO ' + l.why); setInterval(() => { }, 1000); });`, LOCK], { cwd: QUIET_CWD, env: QUIET_ENV, stdio: ['ignore', 'pipe', 'ignore'] });
   plant(taker.pid);
@@ -449,10 +449,10 @@ const LOCK = path.join(MAIN, 'reaper.lock');
   for (let i = 0; i < 200 && !/HELD|NO/.test(out); i++) await sleep(25);
   const heldBy = Number((/HELD (\d+)/.exec(out) || [])[1]);
   const D = acquireReaperLock({ lockPath: LOCK, waitMs: 200 });
-  ok(/HELD/.test(out) && !D.ok, `a sweep in another process holds it (${out.trim()})`);
+  ok(gateOf(/HELD/.test(out)) && !D.ok, `a sweep in another process holds it (${out.trim()})`);
   try { process.kill(taker.pid, 'SIGKILL'); } catch { }
   t = Date.now(); const E = acquireReaperLock({ lockPath: LOCK, waitMs: 3000 });
-  ok(E.ok && Date.now() - t < 2500 && !(procStat(heldBy) && procStat(heldBy).state !== 'Z'), `…SIGKILLed mid-sweep, its holder saw EOF and exited: the kernel released the lock (${Date.now() - t} ms) — no owner file, nothing to break`);
+  ok(gateOf(E.ok) && Date.now() - t < 2500 && !(procStat(heldBy) && procStat(heldBy).state !== 'Z'), `…SIGKILLed mid-sweep, its holder saw EOF and exited: the kernel released the lock (${Date.now() - t} ms) — no owner file, nothing to break`);
   E.release();
 }
 
@@ -488,9 +488,9 @@ async function twoSweeps(modPath, tag, { victimIgnoresTerm }) {
 {
   const r = await twoSweeps(path.join(REPO, 'scripts', 'ci.mjs'), 'real', { victimIgnoresTerm: true });
   const swept = r.res.filter((x) => x && Array.isArray(x.reaped) && x.reaped.includes(r.victim)), skipped = r.res.filter((x) => x && x.skipped);
-  ok(swept.length === 1 && skipped.length === 1 && /^another sweep holds .*two-real\.lock \(waited 1 s\) — held by pid \d+ \(cat, parent \d+ \S+, for \d+ s\)$/.test(skipped[0].skipped) && skipped[0].lines.length === 1 && /^\[ci\] scratch reaper SKIPPED — another sweep holds/.test(skipped[0].lines[0]),
+  ok(swept.length === 1 && skipped.length === 1 && gateOf(/^another sweep holds .*two-real\.lock \(waited 1 s\) — held by pid \d+ \(cat, parent \d+ \S+, for \d+ s\)$/.test(skipped[0].skipped)) && skipped[0].lines.length === 1 && verdictOf(/^\[ci\] scratch reaper SKIPPED — another sweep holds/.test(skipped[0].lines[0])),
     'THE BRIEF\'S LEG: two reapers started together — exactly one sweeps, the other waits its bound and SKIPS, saying so in one line', r.res);
-  ok(swept.length === 1 && swept[0].lines.some((l) => l.includes(`pid ${r.victim} (ppid 1) node: node leaked-server.js — root ${sib('gone-two-real')} — scratch dir gone`)) && r.victimGone,
+  ok(swept.length === 1 && gateOf(swept[0].lines.some((l) => l.includes(`pid ${r.victim} (ppid 1) node: node leaked-server.js — root ${sib('gone-two-real')} — scratch dir gone`))) && verdictOf(r.victimGone),
     `…and the one that swept reaped the leak (pid ${r.victim}, which ignored SIGTERM: SIGKILLed after the grace, while the lock was held)`);
 }
 
@@ -527,7 +527,7 @@ async function recycledPid(modPath, tag) {
 }
 {
   const r = await recycledPid(path.join(REPO, 'scripts', 'ci.mjs'), 'real');
-  ok(r.listed && r.lines.some((l) => l.includes(`pid ${r.pid} `)) && r.alive, `the victim was judged and TERMed (it ignored it); its number changed hands during the grace ⇒ NOT SIGKILLed — still alive (pid ${r.pid})`, r.lines);
+  ok(gateOf(r.listed) && gateOf(r.lines.some((l) => l.includes(`pid ${r.pid} `))) && verdictOf(r.alive), `the victim was judged and TERMed (it ignored it); its number changed hands during the grace ⇒ NOT SIGKILLed — still alive (pid ${r.pid})`, r.lines);
 }
 
 // ── §5c `--reap`'s closing line counts a ZOMBIE as reaped (verify r1 K5) ──
@@ -568,16 +568,16 @@ plant(pB, { group: true });
 for (let i = 0; i < 100 && !(procStat(pA) && procStat(pB)); i++) sleepSync(10);
 const isOrphan = (pid) => { const st = procStat(pid); const pp = st && procStat(st.ppid); return !!st && (st.ppid === 1 || (!!pp && pp.comm === 'systemd')); };
 {
-  ok(pA > 0 && pB > 0 && isOrphan(pA) && isOrphan(pB), `both strays are real ORPHANS (re-parented to systemd): nothing but the new evidence rules can spare them (pids ${pA}, ${pB})`);
+  ok(pA > 0 && pB > 0 && gateOf(isOrphan(pA)) && verdictOf(isOrphan(pB)), `both strays are real ORPHANS (re-parented to systemd): nothing but the new evidence rules can spare them (pids ${pA}, ${pB})`);
   const v = judgeScratch({ now: LATER() });
-  ok(!v.victims.some((o) => o.pid === pA) && /its root's owner is alive \(run foreign-run pid \d+ is alive\)/.test((find(v.spared, pA) || {}).why || ''),
+  ok(!v.victims.some((o) => o.pid === pA) && verdictOf(/its root's owner is alive \(run foreign-run pid \d+ is alive\)/.test((find(v.spared, pA) || {}).why || '')),
     `THE BRIEF'S LEG, FOR REAL: a planted foreign process naming ${REAL_OTHER}/x whose owner is alive SURVIVES — even an hour "later" (${(find(v.spared, pA) || {}).why})`);
-  ok(!v.victims.some((o) => o.pid === pB) && /is a file, not a directory/.test((find(v.ignored, pB) || {}).why || ''),
+  ok(!v.victims.some((o) => o.pid === pB) && verdictOf(/is a file, not a directory/.test((find(v.ignored, pB) || {}).why || '')),
     `THE BRIEF'S LEG, FOR REAL: a shell with a /tmp/vs-*.txt argument SURVIVES — a file is never a root (${(find(v.ignored, pB) || {}).why})`);
   // the CLI, as an operator runs it: the same two verdicts in its dry-run report
   const cli = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--reap', '--dry-run'], { encoding: 'utf8', cwd: REPO, env: QUIET_ENV, timeout: 60000, maxBuffer: 256 << 20 }); // B-60d2: the dry run also lists every reapable dir (2.2 MB on the dev box) — the 1 MB default died ENOBUFS
   const cl = (cli.stdout || '').split('\n');
-  ok(cli.status === 0 && cl.some((l) => l.startsWith(`[ci]   spare pid ${pA} `) && l.includes('owner is alive')) && cl.some((l) => l.startsWith(`[ci]   not a root: pid ${pB} `) && l.includes('a file, not a directory')) && cl.some((l) => /^\[ci\] --dry-run: /.test(l)),
+  ok(cli.status === 0 && gateOf(cl.some((l) => l.startsWith(`[ci]   spare pid ${pA} `) && l.includes('owner is alive'))) && gateOf(cl.some((l) => l.startsWith(`[ci]   not a root: pid ${pB} `) && l.includes('a file, not a directory'))) && verdictOf(cl.some((l) => /^\[ci\] --dry-run: /.test(l))),
     '`node scripts/ci.mjs --reap --dry-run` prints both verdicts with their evidence and signals nothing', { status: cli.status, signal: cli.signal, error: cli.error && cli.error.code, bytes: (cli.stdout || '').length, lines: cl.length, last: cl.slice(-3), stderr: (cli.stderr || '').slice(-300), hits: cl.filter((l) => l.includes(String(pA)) || l.includes(String(pB)) || /--dry-run/.test(l)) });
 }
 
@@ -616,7 +616,7 @@ console.log('\n§6b the CLI\'s report reaches a reader that lags (B-8b81: proces
     `CONTROL: the pre-fix \`process.exit(reapByHand(…))\` exits with its queue unread — the reader then gets ${C.ignored} of 2000 "not a root" lines (${C.bytes} bytes), no closing line (§6's red, on purpose)`, { ...C, last: C.last.slice(0, 120) });
   const CISRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8');
   const mainBody = CISRC.slice(CISRC.indexOf('\nfunction main(argv) {'), CISRC.indexOf('\n// Only run when EXECUTED'));
-  ok(/if \(arg\('reap'\)\) return exitFlushed\(reapByHand\(\{ dryRun: !!arg\('dry-run'\) \}\)\);/.test(mainBody) && mainBody.length > 1000 && !/process\.exit\(/.test(mainBody) && (mainBody.match(/exitFlushed\(/g) || []).length >= 15,
+  ok(gateOf(/if \(arg\('reap'\)\) return exitFlushed\(reapByHand\(\{ dryRun: !!arg\('dry-run'\) \}\)\);/.test(mainBody)) && mainBody.length > 1000 && !/process\.exit\(/.test(mainBody) && (mainBody.match(/exitFlushed\(/g) || []).length >= 15,
     `WIRING PIN: every exit of ci.mjs's main() goes through exitFlushed — --reap among them; no bare process.exit( left in main (${(mainBody.match(/exitFlushed\(/g) || []).length} sites)`);
 }
 
@@ -627,7 +627,7 @@ plant(delChild.pid); for (let i = 0; i < 100 && !procStat(delChild.pid); i++) sl
 fs.rmSync(DEL, { recursive: true, force: true });
 {
   const link = fs.readlinkSync(`/proc/${delChild.pid}/cwd`), v = judgeScratch({ now: LATER() }), row = find(v.spared, delChild.pid) || {};
-  ok(link === `${DEL} (deleted)` && /owned by a live process outside the root/.test(row.why || '') && row.root === `${DEL} (deleted)`,
+  ok(link === `${DEL} (deleted)` && gateOf(/owned by a live process outside the root/.test(row.why || '')) && row.root === `${DEL} (deleted)`,
     `THE KERNEL'S MARKER, FOR REAL: readlink(/proc/<pid>/cwd) of an unlinked root reads "${link}" and the sweep names "${DEL} (deleted)" as its gone root (spared only because this suite owns it; reparented and old it is the dir-gone rule's)`);
   // verify r3 (T2), FOR REAL: (a) the path recreated and stamped by ANOTHER live run (the §6 owner) — the child is grouped under the
   // deleted inode's key and spared by ownership alone, never by that record; (b) a reparented process in a directory literally named
@@ -636,13 +636,13 @@ fs.rmSync(DEL, { recursive: true, force: true });
   plant(rrChild.pid); for (let i = 0; i < 100 && !procStat(rrChild.pid); i++) sleepSync(10);
   fs.rmSync(RR, { recursive: true, force: true }); fs.mkdirSync(RR); stampScratchRun(RR, { pid: owner.pid, run: 'foreign-run' });
   const rrRow = find(judgeScratch({ now: LATER() }).spared, rrChild.pid) || {};
-  ok(fs.statSync(`/proc/${rrChild.pid}/cwd`).nlink === 0 && rrRow.root === `${RR} (deleted)` && /owned by a live process outside the root/.test(rrRow.why || '') && !/owner is alive/.test(rrRow.why || ''),
+  ok(fs.statSync(`/proc/${rrChild.pid}/cwd`).nlink === 0 && rrRow.root === `${RR} (deleted)` && gateOf(/owned by a live process outside the root/.test(rrRow.why || '')) && !/owner is alive/.test(rrRow.why || ''),
     `verify r3 (T2) FOR REAL: a child whose directory was removed and the path recreated by another live run (nlink 0) is grouped under "${path.basename(RR)} (deleted)" and spared by ownership, not by the new record (${rrRow.why})`);
   const REAL_LIT = sib('reallit') + ' (deleted)'; fs.mkdirSync(REAL_LIT); made.push(REAL_LIT);
   const pLit2 = Number(String(spawnSync(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => { }, 90000)'], { detached: true, stdio: 'ignore', cwd: process.argv[1] }); c.unref(); console.log(c.pid);", REAL_LIT], { encoding: 'utf8', env: QUIET_ENV, timeout: 10000 }).stdout || '').trim());
   plant(pLit2); for (let i = 0; i < 100 && !procStat(pLit2); i++) sleepSync(10);
   const vLit = judgeScratch({ now: LATER() }), litLink = fs.readlinkSync(`/proc/${pLit2}/cwd`), litNlink = fs.statSync(`/proc/${pLit2}/cwd`).nlink;
-  ok(isOrphan(pLit2) && litLink === REAL_LIT && litNlink > 0 && ![...vLit.victims, ...vLit.spared, ...vLit.ignored].some((o) => o.pid === pLit2) && !!procStat(pLit2),
+  ok(gateOf(isOrphan(pLit2)) && litLink === REAL_LIT && litNlink > 0 && ![...vLit.victims, ...vLit.spared, ...vLit.ignored].some((o) => o.pid === pLit2) && !!procStat(pLit2),
     `verify r3 (T2) FOR REAL: a reparented process in the EXISTING "${path.basename(REAL_LIT)}" (readlink ${JSON.stringify(litLink)}, nlink ${litNlink}) names no root and is listed nowhere an hour "later" — never "${sib('reallit')} is gone"`);
 }
 
@@ -686,24 +686,24 @@ const listed = (mod, pid, opts) => (mod && mod.judgeScratch ? mod.judgeScratch(o
   const c6 = await copy('seam-as-given', [["  const m = SCRATCH_ROOT_RE.exec(p);\n  if (!m || PRODUCT_ROOT_RE.test(m[0])) throw", "  const m = SCRATCH_ROOT_RE.exec(p);\n  if (false) throw"], ["  const own = seamOwner(m[0]);\n  if (!own.alive) throw", "  const own = { alive: true, why: 'control' };\n  if (!own.alive) throw"]]);   // (a table outside the shape has no scratch root to own it: the owner rule is neutralised with the shape rule)
   const outsideTable = made.find((d) => /^\/var\/tmp\/vs-reaper-seam-/.test(d));
   const c6lines = []; const c6code = c6 && !c6.missing ? (() => { const prev = process.env.VIBESPACE_CI_REAP_PROCFS; process.env.VIBESPACE_CI_REAP_PROCFS = outsideTable; try { return c6.reapByHand({ dryRun: true, now: NOW, self: 999999, log: (m) => c6lines.push(m) }); } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_REAP_PROCFS; else process.env.VIBESPACE_CI_REAP_PROCFS = prev; } })() : null;
-  ok(c6code === 0 && c6lines.some((l) => /pid 4999999 .*scratch dir gone/.test(l)) && !c6lines.some((l) => /refused/.test(l)), `CONTROL (the seam taken as given): a copy that skips the scratch-root check judges the table under /var/tmp and lists its pid as a victim — the refusal leg can go red (${JSON.stringify(c6.missing || c6lines.slice(0, 2))})`);
+  ok(c6code === 0 && gateOf(c6lines.some((l) => /pid 4999999 .*scratch dir gone/.test(l))) && !c6lines.some((l) => /refused/.test(l)), `CONTROL (the seam taken as given): a copy that skips the scratch-root check judges the table under /var/tmp and lists its pid as a victim — the refusal leg can go red (${JSON.stringify(c6.missing || c6lines.slice(0, 2))})`);
   // (7) verify r1 K5/K8: the signal by number alone ⇒ a recycled pid is SIGKILLed
   const c7 = await copy('signal-by-number', [["export const sameProcess = (o, procRoot = defaultProcRoot()) => { const st = procStat(o.pid, procRoot); return !!st && st.state !== 'Z' && st.state !== 'X' && o.starttime != null && o.starttime !== '' && st.starttime === o.starttime; };", 'export const sameProcess = (o) => alive(o.pid);']]);
   const r7 = c7 && !c7.missing ? await recycledPid(M.files[M.files.length - 1], 'bynumber') : null;
-  ok(!!r7 && r7.listed && !r7.alive, `CONTROL (the signal by number alone): a copy that never re-reads the starttime SIGKILLs the pid whose number changed hands — the §5b leg can go red (${r7 ? 'pid ' + r7.pid + ' alive=' + r7.alive : JSON.stringify(c7)})`);
+  ok(!!r7 && gateOf(r7.listed) && !r7.alive, `CONTROL (the signal by number alone): a copy that never re-reads the starttime SIGKILLs the pid whose number changed hands — the §5b leg can go red (${r7 ? 'pid ' + r7.pid + ' alive=' + r7.alive : JSON.stringify(c7)})`);
   // (8) verify r1 K5: the closing line by `kill(pid, 0)` ⇒ a zombie reads as "still alive after SIGKILL"
   const c8 = await copy('alive-by-kill0', [['  const left = list.filter((o) => stillRunning(o.pid));', '  const left = list.filter((o) => alive(o.pid));']]);
   const r8 = c8 && !c8.missing ? await zombieVictim(M.files[M.files.length - 1], 'bykill0') : null;
-  ok(!!r8 && r8.state === 'Z' && /1 still alive after SIGKILL/.test(r8.last), `CONTROL (alive by kill(pid, 0)): a copy reads the zombie as alive — the §5c leg can go red (${r8 ? r8.last : JSON.stringify(c8)})`);
+  ok(!!r8 && r8.state === 'Z' && verdictOf(/1 still alive after SIGKILL/.test(r8.last)), `CONTROL (alive by kill(pid, 0)): a copy reads the zombie as alive — the §5c leg can go red (${r8 ? r8.last : JSON.stringify(c8)})`);
   // (9) verify r1 K4: the holder without the touch ⇒ the lock file keeps aging while in use
   const c9 = await copy('no-touch', [['flock -w "$2" 9 || exit 75; echo "$$" > "$1" 2>/dev/null; exec cat', 'flock -w "$2" 9 || exit 75; exec cat']]);
   const OLD9 = path.join(MAIN, 'old9.lock'); fs.writeFileSync(OLD9, ''); fs.utimesSync(OLD9, (NOW - 11 * 86400e3) / 1000, (NOW - 11 * 86400e3) / 1000);
   const T9 = c9 && !c9.missing ? c9.acquireReaperLock({ lockPath: OLD9, waitMs: 500 }) : null; const age9 = fs.statSync(OLD9).mtimeMs; const B9 = T9 && T9.ok ? c9.acquireReaperLock({ lockPath: OLD9, waitMs: 200 }) : null; if (T9 && T9.ok) T9.release();
-  ok(!!T9 && T9.ok && age9 < NOW - 10 * 86400e3 && !!B9 && !B9.ok && / — its holder wrote no pid /.test(B9.why || ''), `CONTROL (no touch, no pid): a copy whose holder never writes the file leaves it 11 days old while held, and a skip under it cannot name the holder — the touch leg and the holder-named leg can go red (${T9 ? Math.round((NOW - age9) / 86400e3) + ' d; ' + (B9 && B9.why) : JSON.stringify(c9)})`);
+  ok(!!T9 && gateOf(T9.ok) && age9 < NOW - 10 * 86400e3 && !!B9 && !B9.ok && verdictOf(/ — its holder wrote no pid /.test(B9.why || '')), `CONTROL (no touch, no pid): a copy whose holder never writes the file leaves it 11 days old while held, and a skip under it cannot name the holder — the touch leg and the holder-named leg can go red (${T9 ? Math.round((NOW - age9) / 86400e3) + ' d; ' + (B9 && B9.why) : JSON.stringify(c9)})`);
   // (10) verify r1 K1: the pre-fix shape — cut at the first excluded character, the rest ignored ⇒ an existing `/tmp/vs-a+b` claims a gone `/tmp/vs-a`
   const c10 = await copy('shape-cut', [["    const next = s.charAt(m[0].length); if (next && next !== '/') continue;\n    const proof = c.dir || next === '/';", "    const next = s.charAt(m[0].length);\n    const proof = c.dir || next === '/';"], ['(\\/tmp\\/vs-[A-Za-z0-9._-]+)(\\/|$)/g', '(\\/tmp\\/vs-[A-Za-z0-9._-]+)(\\/?)/g'], ['(\\/tmp\\/vs-[A-Za-z0-9._-]+)(\\/|$)/.exec(normArg(s))', '(\\/tmp\\/vs-[A-Za-z0-9._-]+)(\\/?)/.exec(normArg(s))']]);
   const v10 = c10 && c10.judgeScratch ? c10.judgeScratch({ procRoot: F.root, now: NOW, self: 999999 }) : null;
-  ok(!!v10 && v10.victims.some((o) => o.pid === 571 && o.root === MAIN) && (c10.scratchRootClaims({ cwd: '/', env: {}, argv: ['node', PLUS + '/y'] }).length === 1),
+  ok(!!v10 && gateOf(v10.victims.some((o) => o.pid === 571 && o.root === MAIN)) && (c10.scratchRootClaims({ cwd: '/', env: {}, argv: ['node', PLUS + '/y'] }).length === 1),
     `CONTROL (the shape cut at an excluded character): a copy convicts the process rooted in the existing ${PLUS}/sub as "${MAIN} is gone" and reads the argv lookalike as a root — the K1 leg can go red (${v10 ? JSON.stringify((v10.victims.find((o) => o.pid === 571) || {}).why) : JSON.stringify(c10)})`);
   // (12) verify r2 R2: the seam SIGNALS ⇒ the real pid a scratch-root table names dies (the re-check reads the same table)
   // verify r3 (T1): THREE walls stand between a seam and a signal — the caller's `if (seam) return`, the signal site's own refusal
@@ -718,7 +718,7 @@ const listed = (mod, pid, opts) => (mod && mod.judgeScratch ? mod.judgeScratch(o
   const P12 = fakeProc('c12'); P12.mk(v12.pid, { name: 'node', argv: ['node', 'leaked-server.js'], cwd: sib('gone-c12'), born: OLD });
   const r12 = c12 && !c12.missing ? (() => { const prev = process.env.VIBESPACE_CI_REAP_PROCFS; process.env.VIBESPACE_CI_REAP_PROCFS = P12.root; try { return c12.reapScratchOrphans({ lockPath: path.join(MAIN, 'c12.lock'), now: NOW, self: 999999, graceMs: 500, log: () => { } }); } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_REAP_PROCFS; else process.env.VIBESPACE_CI_REAP_PROCFS = prev; } })() : null;
   let dead12 = false; for (let i = 0; i < 40 && !(dead12 = !(procStat(v12.pid) && procStat(v12.pid).state !== 'Z')); i++) await sleep(50);
-  ok(!!r12 && r12.length === 1 && dead12, `CONTROL (the seam signals): a copy that signals under the seam kills the real pid the table named (pid ${v12.pid} dead=${dead12}) — the R2 leg can go red (${JSON.stringify((c12 && c12.missing) || '')})`);
+  ok(!!r12 && r12.length === 1 && verdictOf(dead12), `CONTROL (the seam signals): a copy that signals under the seam kills the real pid the table named (pid ${v12.pid} dead=${dead12}) — the R2 leg can go red (${JSON.stringify((c12 && c12.missing) || '')})`);
   // (12b) verify r3 (T1): THE CALLER'S FLAG IS NOT LOAD-BEARING. Reproduced on a copy of r2's product: one NEW caller of
   // signalVictims (judge, then signal — no `if (seam)`) under a seam naming a real child of this suite: SIGKILLed off the fake
   // row (the identity re-check read the seam's own table). Now each wall alone: the sync caller's return removed, the async
@@ -731,9 +731,9 @@ const listed = (mod, pid, opts) => (mod && mod.judgeScratch ? mod.judgeScratch(o
   const r12b = c12b && !c12b.missing ? await (async () => { const prev = process.env.VIBESPACE_CI_REAP_PROCFS; process.env.VIBESPACE_CI_REAP_PROCFS = P12b.root; try { const a = c12b.reapScratchOrphans({ lockPath: path.join(MAIN, 'c12b.lock'), now: NOW, self: 999999, graceMs: 300, log: () => { } }); const b = await c12b.reapScratchOrphansAsync({ lockPath: path.join(MAIN, 'c12b.lock'), now: NOW, self: 999999, graceMs: 300, log: () => { } }); const c = c12b.newCallerSweep({ now: NOW, self: 999999, log: (x) => lines12b.push(x) }); return [a, b, c].map((l) => l.map((o) => o.pid)); } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_REAP_PROCFS; else process.env.VIBESPACE_CI_REAP_PROCFS = prev; } })() : null;
   await sleep(400);
   const still12b = () => { const st = procStat(v12b.pid); return !!st && st.state !== 'Z' && st.state !== 'X' && st.starttime === start12b; };
-  ok(!!r12b && r12b.every((l) => l.length === 1 && l[0] === v12b.pid) && still12b(), `verify r3 (T1): a copy whose sync AND async callers forgot the dry return, plus a third caller that never had one, all LIST the child under the seam and NONE signals it — the signal site is the choke point (pid ${v12b.pid} alive=${still12b()}; ${JSON.stringify((c12b && c12b.missing) || r12b)})`);
-  ok(lines12b.some((l) => /^\[ci\] scratch reaper: 1 victim\(s\) NOT signalled — VIBESPACE_CI_REAP_PROCFS is set and no in-process table was handed in/.test(l)), `verify r4 (X1c): the signal site's refusal is SAID to the forgetful caller's log — never a silent return 0 behind a closing line that counts survivors of a signal never sent (${JSON.stringify(lines12b)})`);
-  ok(/if \(!procRoot && process\.env\.VIBESPACE_CI_REAP_PROCFS\) \{ log\(`\[ci\] scratch reaper: \$\{list\.length\} victim\(s\) NOT signalled/.test(ciSrc) && /sameProcess\(o, procRoot \|\| '\/proc'\)/.test(ciSrc) && !/sameProcess\(o, opts\.procRoot\)\)/.test(ciSrc), 'WIRING: signalVictims refuses under the env seam and re-checks identity against the kernel\'s /proc unless an in-process table was handed in (and so does the grace loop)');
+  ok(!!r12b && gateOf(r12b.every((l) => l.length === 1 && l[0] === v12b.pid)) && verdictOf(still12b()), `verify r3 (T1): a copy whose sync AND async callers forgot the dry return, plus a third caller that never had one, all LIST the child under the seam and NONE signals it — the signal site is the choke point (pid ${v12b.pid} alive=${still12b()}; ${JSON.stringify((c12b && c12b.missing) || r12b)})`);
+  ok(verdictOf(lines12b.some((l) => /^\[ci\] scratch reaper: 1 victim\(s\) NOT signalled — VIBESPACE_CI_REAP_PROCFS is set and no in-process table was handed in/.test(l))), `verify r4 (X1c): the signal site's refusal is SAID to the forgetful caller's log — never a silent return 0 behind a closing line that counts survivors of a signal never sent (${JSON.stringify(lines12b)})`);
+  ok(gateOf(/if \(!procRoot && process\.env\.VIBESPACE_CI_REAP_PROCFS\) \{ log\(`\[ci\] scratch reaper: \$\{list\.length\} victim\(s\) NOT signalled/.test(ciSrc)) && gateOf(/sameProcess\(o, procRoot \|\| '\/proc'\)/.test(ciSrc)) && !/sameProcess\(o, opts\.procRoot\)\)/.test(ciSrc), 'WIRING: signalVictims refuses under the env seam and re-checks identity against the kernel\'s /proc unless an in-process table was handed in (and so does the grace loop)');
   // (13) verify r2 R4: the kernel's (deleted) marker not stripped ⇒ a cwd that WAS the root names no root at all (r1's boundary rule alone)
   const c13 = await copy('deleted-marker-kept', [["  const cands = [{ p: cwdDel ? cwdStr.replace(/ \\(deleted\\)$/, '') : cwdStr, via: 'cwd', dir: true, gone: cwdDel }", "  const cands = [{ p: cwdStr, via: 'cwd', dir: true, gone: false }"]]);
   const v13 = c13 && c13.judgeScratch ? c13.judgeScratch({ procRoot: F.root, now: NOW, self: 999999 }) : null;
@@ -741,52 +741,52 @@ const listed = (mod, pid, opts) => (mod && mod.judgeScratch ? mod.judgeScratch(o
   // (14) verify r2 R1: the seam's path taken lexically ⇒ a symlink under a scratch root to the outside table is accepted
   const c14 = await copy('seam-lexical-path', [["  let p; try { p = fs.realpathSync(v); } catch { p = path.resolve(v); }", "  const p = path.resolve(v);"]]);
   const c14lines = []; const c14code = c14 && !c14.missing ? (() => { const prev = process.env.VIBESPACE_CI_REAP_PROCFS; process.env.VIBESPACE_CI_REAP_PROCFS = path.join(MAIN, 'seam-link'); try { return c14.reapByHand({ dryRun: true, now: NOW, self: 999999, log: (m) => c14lines.push(m) }); } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_REAP_PROCFS; else process.env.VIBESPACE_CI_REAP_PROCFS = prev; } })() : null;
-  ok(c14code === 0 && c14lines.some((l) => /pid 4999999 .*scratch dir gone/.test(l)) && !c14lines.some((l) => /refused/.test(l)), `CONTROL (the seam's path taken lexically): a copy that never resolves the symlink judges the table under /var/tmp through ${path.join(MAIN, 'seam-link')} — the symlink leg can go red (${JSON.stringify((c14 && c14.missing) || c14lines.slice(0, 1))})`);
+  ok(c14code === 0 && gateOf(c14lines.some((l) => /pid 4999999 .*scratch dir gone/.test(l))) && !c14lines.some((l) => /refused/.test(l)), `CONTROL (the seam's path taken lexically): a copy that never resolves the symlink judges the table under /var/tmp through ${path.join(MAIN, 'seam-link')} — the symlink leg can go red (${JSON.stringify((c14 && c14.missing) || c14lines.slice(0, 1))})`);
   // (15) verify r2 R1: the seam's root owner not asked ⇒ a finished run's stale table is accepted
   const c15 = await copy('seam-owner-unasked', [["  const own = seamOwner(m[0]);\n  if (!own.alive) throw", "  const own = { alive: true, why: 'control' };\n  if (!own.alive) throw"]]);
   const c15lines = []; const c15code = c15 && !c15.missing ? (() => { const prev = process.env.VIBESPACE_CI_REAP_PROCFS; process.env.VIBESPACE_CI_REAP_PROCFS = path.join(sib('staleseam'), 'procfs'); try { return c15.reapByHand({ dryRun: true, now: NOW, self: 999999, log: (m) => c15lines.push(m) }); } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_REAP_PROCFS; else process.env.VIBESPACE_CI_REAP_PROCFS = prev; } })() : null;
-  ok(c15code === 0 && c15lines.some((l) => /pid 4999989 .*scratch dir gone/.test(l)) && !c15lines.some((l) => /refused/.test(l)), `CONTROL (the seam's owner unasked): a copy that never reads the root's record judges the finished run's table — the stale-seam leg can go red (${JSON.stringify((c15 && c15.missing) || c15lines.slice(0, 1))})`);
+  ok(c15code === 0 && gateOf(c15lines.some((l) => /pid 4999989 .*scratch dir gone/.test(l))) && !c15lines.some((l) => /refused/.test(l)), `CONTROL (the seam's owner unasked): a copy that never reads the root's record judges the finished run's table — the stale-seam leg can go red (${JSON.stringify((c15 && c15.missing) || c15lines.slice(0, 1))})`);
   // (16) verify r2 R4: no normalization ⇒ "<gone>/../<live>" is read as the gone root and its process convicted after the floor
   const c16 = await copy('path-unnormalized', [["const normPath = (x) => { const s = String(x || ''); return s.startsWith('/') ? path.posix.normalize(s) : s; };", "const normPath = (x) => String(x || '');"]]);
   const v16 = c16 && c16.judgeScratch ? c16.judgeScratch({ procRoot: F.root, now: NOW, self: 999999 }) : null;
-  ok(!!v16 && v16.victims.some((o) => o.pid === 575 && o.root === R.goneA) && v16.victims.some((o) => o.pid === 576 && o.root === R.goneA), `CONTROL (paths unnormalized): a copy that reads the shape off the raw string convicts both under the GONE root the path walks through — the normalization leg can go red (${JSON.stringify((c16 && c16.missing) || (v16 && (v16.victims.find((o) => o.pid === 575) || {}).why))})`);
+  ok(!!v16 && gateOf(v16.victims.some((o) => o.pid === 575 && o.root === R.goneA)) && verdictOf(v16.victims.some((o) => o.pid === 576 && o.root === R.goneA)), `CONTROL (paths unnormalized): a copy that reads the shape off the raw string convicts both under the GONE root the path walks through — the normalization leg can go red (${JSON.stringify((c16 && c16.missing) || (v16 && (v16.victims.find((o) => o.pid === 575) || {}).why))})`);
   // (17) verify r3 (T2): the kernel's stat ignored ⇒ the marker is trusted as a string ⇒ the literal-name directory's process is convicted
   const c17 = await copy('kernel-stat-ignored', [["cwdGone = st ? st.nlink === 0 : code === 'ENOENT'; }", 'cwdGone = true; }']]);
   const v17 = c17 && c17.judgeScratch ? c17.judgeScratch({ procRoot: F.root, now: NOW, self: 999999 }) : null;
-  ok(!!v17 && v17.victims.some((o) => o.pid === 577 && o.why === 'scratch dir gone' && o.root === `${sib('lit')} (deleted)`), `CONTROL (the kernel's stat ignored): a copy that trusts the marker as a string convicts the process in the EXISTING literal-name directory as dir-gone — the T2 literal-name leg can go red (${JSON.stringify((c17 && c17.missing) || (v17 && (v17.victims.find((o) => o.pid === 577) || {}).why))})`);
+  ok(!!v17 && verdictOf(v17.victims.some((o) => o.pid === 577 && o.why === 'scratch dir gone' && o.root === `${sib('lit')} (deleted)`)), `CONTROL (the kernel's stat ignored): a copy that trusts the marker as a string convicts the process in the EXISTING literal-name directory as dir-gone — the T2 literal-name leg can go red (${JSON.stringify((c17 && c17.missing) || (v17 && (v17.victims.find((o) => o.pid === 577) || {}).why))})`);
   // (18) verify r3 (T2): a gone claim read through the PATH ⇒ a new run's record at the recreated path spares the old run's stray
   const c18 = await copy('gone-claim-by-path', [['    const live = claims.map((c) => (c.gone ? null : rootInfo(c.root))).find((ri) => ri && ri.owner && ri.owner.alive);', '    const live = claims.map((c) => rootInfo(c.root)).find((ri) => ri && ri.owner && ri.owner.alive);']]);
   const v18 = c18 && c18.judgeScratch ? c18.judgeScratch({ procRoot: F.root, now: NOW, self: 999999 }) : null;
-  ok(!!v18 && !v18.victims.some((o) => o.pid === 574) && /owner is alive/.test((v18.spared.find((o) => o.pid === 574) || {}).why || ''), `CONTROL (a gone claim read through the path): a copy that asks the recreated path's record spares the stray in the deleted inode — the T2 recreated-path leg can go red (${JSON.stringify((c18 && c18.missing) || (v18 && (v18.spared.find((o) => o.pid === 574) || {}).why))})`);
+  ok(!!v18 && !v18.victims.some((o) => o.pid === 574) && verdictOf(/owner is alive/.test((v18.spared.find((o) => o.pid === 574) || {}).why || '')), `CONTROL (a gone claim read through the path): a copy that asks the recreated path's record spares the stray in the deleted inode — the T2 recreated-path leg can go red (${JSON.stringify((c18 && c18.missing) || (v18 && (v18.spared.find((o) => o.pid === 574) || {}).why))})`);
   // (19) verify r3 (T3): the judge resolves the seam again ⇒ a symlink re-pointed after the announce line is judged in its place
   const c19 = await copy('seam-resolved-twice', [["    const list = scratchOrphans({ ...opts, procRoot: table });\n    if (!list.length) return list;\n    for (const line of reapReport(list)) log(line);\n    if (seam) { log(seamDryLine(list.length)); return list; } // verify r2 R2: a seam lists, never signals\n    signalVictims(list, 'SIGTERM', opts.procRoot);\n    const until = Date.now() + graceMs;\n    while (Date.now() < until && list.some((o) => alive(o.pid) && sameProcess(o, opts.procRoot || '/proc'))) Atomics.wait", "    const list = scratchOrphans(opts);\n    if (!list.length) return list;\n    for (const line of reapReport(list)) log(line);\n    if (seam) { log(seamDryLine(list.length)); return list; } // verify r2 R2: a seam lists, never signals\n    signalVictims(list, 'SIGTERM', opts.procRoot);\n    const until = Date.now() + graceMs;\n    while (Date.now() < until && list.some((o) => alive(o.pid) && sameProcess(o, opts.procRoot || '/proc'))) Atomics.wait"]]);
   const r19 = c19 && !c19.missing ? swapSweep(c19) : null;
-  ok(!!r19 && r19.list.length === 1 && r19.list[0].pid === 4999997 && r19.lines[0].includes(swapA) && r19.lines.some((l) => l.includes('4999997')), `CONTROL (the seam resolved twice): a copy whose judge resolves the seam itself announces table A and lists table B's row — the T3 leg can go red (${JSON.stringify((c19 && c19.missing) || (r19 && r19.list.map((o) => o.pid)))})`);
+  ok(!!r19 && r19.list.length === 1 && r19.list[0].pid === 4999997 && gateOf(r19.lines[0].includes(swapA)) && verdictOf(r19.lines.some((l) => l.includes('4999997'))), `CONTROL (the seam resolved twice): a copy whose judge resolves the seam itself announces table A and lists table B's row — the T3 leg can go red (${JSON.stringify((c19 && c19.missing) || (r19 && r19.list.map((o) => o.pid)))})`);
   // (20) verify r3 (T4): the owner's uid unasked ⇒ a record naming pid 1 is an owner alive for ever (the seam under it accepted, its root's strays spared)
   const c20 = await copy('owner-uid-unasked', [], { runEdits: [['  const puid = uid == null ? null : procUid(rec.pid, procRoot);\n  if (puid != null && puid !== uid) return', '  const puid = null;\n  if (puid != null && puid !== uid) return']] });
   const forgedDir = mkRoot('forgedctl'); writeRecord(forgedDir, { v: 1, run: 'forged', pid: 1, starttime: procStat(1).starttime, bootId: machineBootId(), createdAt: HOUR_AGO });
   const pForged = orphan([process.execPath, '-e', 'setTimeout(() => { }, 90000)', `${forgedDir}/x`]); plant(pForged); for (let i = 0; i < 100 && !procStat(pForged); i++) sleepSync(10);
   const v20 = c20 && c20.judgeScratch ? c20.judgeScratch({ now: LATER() }) : null, v20real = judgeScratch({ now: LATER() });
-  ok(!!v20 && /owner is alive \(run forged pid 1 is alive\)/.test((v20.spared.find((o) => o.pid === pForged) || {}).why || '') && /^owner gone: run forged pid 1 is another user's process/.test((v20real.victims.find((o) => o.pid === pForged) || {}).why || ''),
+  ok(!!v20 && gateOf(/owner is alive \(run forged pid 1 is alive\)/.test((v20.spared.find((o) => o.pid === pForged) || {}).why || '')) && verdictOf(/^owner gone: run forged pid 1 is another user's process/.test((v20real.victims.find((o) => o.pid === pForged) || {}).why || '')),
     `CONTROL (the owner's uid unasked): a copy that never asks whose process pid 1 is spares the reparented stray under the forged root for ever, where the product convicts it an hour later (${JSON.stringify((c20 && c20.missing) || (v20real.victims.find((o) => o.pid === pForged) || {}).why)})`);
   // (21) verify r3 (T6): the holder's open on the bare special builtin ⇒ a file it cannot open ends sh with exit 2, the `cannot open` line never printed
   const c21 = await copy('holder-bare-exec', [["const LOCK_HOLDER_SH = 'command exec 9>>", "const LOCK_HOLDER_SH = 'exec 9>>"]]);
   const RO21 = path.join(MAIN, 'ro21.lock'); fs.writeFileSync(RO21, ''); fs.chmodSync(RO21, 0o000);
   const t21 = c21 && !c21.missing && process.getuid() !== 0 ? c21.acquireReaperLock({ lockPath: RO21, waitMs: 300 }) : null;
-  ok(process.getuid() === 0 || (!!t21 && !t21.ok && /^the lock holder exited 2$/.test(t21.why || '')), `CONTROL (the holder's bare exec): a copy whose holder opens the file on the special builtin reads "the lock holder exited 2" for a file it cannot open — the cannot-open leg can go red (${JSON.stringify((c21 && c21.missing) || (t21 && t21.why))})`);
+  ok(process.getuid() === 0 || (!!t21 && !t21.ok && verdictOf(/^the lock holder exited 2$/.test(t21.why || ''))), `CONTROL (the holder's bare exec): a copy whose holder opens the file on the special builtin reads "the lock holder exited 2" for a file it cannot open — the cannot-open leg can go red (${JSON.stringify((c21 && c21.missing) || (t21 && t21.why))})`);
   // (22) verify r3 (T6): the holder's comm unasked ⇒ a reused pid is named as the holder
   const c22 = await copy('holder-comm-unasked', [["  if (st.comm !== 'cat') return ` — the pid ${pid} it named now runs ${st.comm}, not a holder", "  if (false) return ` — the pid ${pid} it named now runs ${st.comm}, not a holder"]]);
   const A22 = c22 && !c22.missing ? c22.acquireReaperLock({ lockPath: path.join(MAIN, 'c22.lock'), waitMs: 1000 }) : null; if (A22 && A22.ok) fs.writeFileSync(path.join(MAIN, 'c22.lock'), `${process.pid}\n`);
   const B22 = A22 && A22.ok ? c22.acquireReaperLock({ lockPath: path.join(MAIN, 'c22.lock'), waitMs: 300 }) : null; if (A22 && A22.ok) A22.release();
-  ok(!!B22 && !B22.ok && new RegExp(` — held by pid ${process.pid} \\(\\S+, parent \\d+`).test(B22.why || ''), `CONTROL (the holder's comm unasked): a copy names this suite (the reused number) as the holder — the reused-pid leg can go red (${JSON.stringify((c22 && c22.missing) || (B22 && B22.why))})`);
+  ok(!!B22 && !B22.ok && verdictOf(new RegExp(` — held by pid ${process.pid} \\(\\S+, parent \\d+`).test(B22.why || '')), `CONTROL (the holder's comm unasked): a copy names this suite (the reused number) as the holder — the reused-pid leg can go red (${JSON.stringify((c22 && c22.missing) || (B22 && B22.why))})`);
   // (23) verify r4 (X2b): the stat unconfined ⇒ every (deleted) cwd on the box is stat'd through its magic link — a hung mount anywhere holds the sweep
   const c23 = await copy('stat-unconfined', [["  if (/ \\(deleted\\)$/.test(cwd) && SCRATCH_ROOT_RE.test(cwd)) { let st = null, code = null;", "  if (/ \\(deleted\\)$/.test(cwd)) { let st = null, code = null;"]]);
   const s23 = c23 && !c23.missing ? statSpy(() => c23.judgeScratch({ procRoot: F.root, now: NOW, self: 999999 })) : null;
-  ok(!!s23 && s23.seen.includes(cwdLink(F.root, 579)) && s23.seen.includes(cwdLink(F.root, 573)), `CONTROL (the stat unconfined): a copy stats the (deleted) cwd outside the scratch shape too — the X2b leg can go red (${JSON.stringify((c23 && c23.missing) || (s23 && s23.seen.filter((p) => /\/cwd$/.test(p)).length))})`);
+  ok(!!s23 && gateOf(s23.seen.includes(cwdLink(F.root, 579))) && verdictOf(s23.seen.includes(cwdLink(F.root, 573))), `CONTROL (the stat unconfined): a copy stats the (deleted) cwd outside the scratch shape too — the X2b leg can go red (${JSON.stringify((c23 && c23.missing) || (s23 && s23.seen.filter((p) => /\/cwd$/.test(p)).length))})`);
   // (24) verify r4 (X2c): the kernel's answer about the directory itself unasked ⇒ a cwd gone by path is a gone root, whatever namespace holds it
   const c24 = await copy('linked-unasked', [["  const linkedElsewhere = (i) => { try { const st = fs.statSync(path.join(procRoot, String(i.pid), 'cwd')); return st.isDirectory() && st.nlink > 0; } catch { return false; } };", "  const linkedElsewhere = (i) => false;"]]);
   const v24 = c24 && !c24.missing ? c24.judgeScratch({ procRoot: F.root, now: NOW, self: 999999, exists: NS_EXISTS }) : null;
-  ok(!!v24 && v24.victims.some((o) => o.pid === 581 && o.why === 'scratch dir gone' && o.root === NSROOT), `CONTROL (the linked directory unasked): a copy convicts the daemon in another mount namespace as "scratch dir gone" — the X2c leg can go red (${JSON.stringify((c24 && c24.missing) || (v24 && (v24.victims.find((o) => o.pid === 581) || v24.ignored.find((o) => o.pid === 581) || {}).why))})`);
+  ok(!!v24 && verdictOf(v24.victims.some((o) => o.pid === 581 && o.why === 'scratch dir gone' && o.root === NSROOT)), `CONTROL (the linked directory unasked): a copy convicts the daemon in another mount namespace as "scratch dir gone" — the X2c leg can go red (${JSON.stringify((c24 && c24.missing) || (v24 && (v24.victims.find((o) => o.pid === 581) || v24.ignored.find((o) => o.pid === 581) || {}).why))})`);
   // (25) B-442c (2026-10-02, the 16:23 OOM): THE AGE IS THE KERNEL'S — btime + starttime, never the /proc/<pid> dir's mtime. procfs
   // stamps that mtime when it instantiates the inode; the OOM's dentry eviction re-instantiated every one at 16:23:10, and
   // `--reap --dry-run` spared hour-old orphans as "young: 42 s". A table that states its boot (a root `stat` with btime): a row
@@ -800,11 +800,11 @@ const listed = (mod, pid, opts) => (mod && mod.judgeScratch ? mod.judgeScratch(o
     const V = judgeScratch({ procRoot: T.root, now: NOW, self: 999999 });
     const v = V.victims.find((o) => o.pid === 4700), sp = V.spared.find((o) => o.pid === 4701);
     ok(!!v && Math.abs(v.ageMs - 3600 * 1000) < 2000, `B-442c: a process born an hour ago by its starttime is OLD although its /proc dir reads NOW (the post-eviction state) — convicted at ${v ? Math.round(v.ageMs / 60000) : '?'} min`, v || V.spared.find((o) => o.pid === 4700));
-    ok(!!sp && /^young: (?:1 min|60 s) /.test(sp.why), `B-442c: …and one born a minute ago is YOUNG although its dir reads an hour — the age has ONE source (${sp && sp.why})`);
+    ok(!!sp && verdictOf(/^young: (?:1 min|60 s) /.test(sp.why)), `B-442c: …and one born a minute ago is YOUNG although its dir reads an hour — the age has ONE source (${sp && sp.why})`);
     const c25 = await copy('dir-mtime-age', [['  let bornMs = procBornMs({ starttime }, bootMs);\n  if (bornMs == null) try {', '  let bornMs = null;\n  try {']]);
     const v25 = c25 && !c25.missing ? c25.judgeScratch({ procRoot: T.root, now: NOW, self: 999999 }) : null;
     const s25 = v25 && v25.spared.find((o) => o.pid === 4700);
-    ok(!!s25 && /^young: \d+ s < the 10 min stale floor/.test(s25.why), `CONTROL (the pre-fix age, the dir's mtime): a copy spares the hour-old orphan as "${s25 ? s25.why.slice(0, 40) : (c25 && c25.missing) || '?'}" — the incident's words`);
+    ok(!!s25 && verdictOf(/^young: \d+ s < the 10 min stale floor/.test(s25.why)), `CONTROL (the pre-fix age, the dir's mtime): a copy spares the hour-old orphan as "${s25 ? s25.why.slice(0, 40) : (c25 && c25.missing) || '?'}" — the incident's words`);
     // the REAL kernel agrees with this process's OWN clock (node's timeOrigin is its start, measured without /proc)
     const mine = procBornMs(procStat(process.pid), procBootMs());
     ok(mine != null && Math.abs(mine - performance.timeOrigin) < 1500, `B-442c: on the real /proc, btime + starttime / USER_HZ is this process's start by its own clock (Δ ${mine == null ? '?' : Math.round(mine - performance.timeOrigin)} ms; a wrong USER_HZ would be off by its uptime)`);
@@ -826,26 +826,26 @@ const listed = (mod, pid, opts) => (mod && mod.judgeScratch ? mod.judgeScratch(o
     fs.writeFileSync(path.join(DR, 'state', 'agentd.pid'), String(A));
     const alive = (pid) => { const st = procStat(pid); return !!st && st.state !== 'Z' && st.state !== 'X'; };
     // endRootedProcesses LISTS a daemon rooted by nothing but its root env (signal 0): its title hides argv, HOME and cwd are `/`
-    ok(endRootedProcesses(R, { signal: 0 }).includes(A) && !endRootedProcesses(R, { signal: 0 }).includes(D), 'B-442c: endRootedProcesses names a title-rewritten daemon by its VIBESPACE_*_ROOT env (cwd and HOME `/`, argv hidden) — and not another root\'s');
+    ok(gateOf(endRootedProcesses(R, { signal: 0 }).includes(A)) && !endRootedProcesses(R, { signal: 0 }).includes(D), 'B-442c: endRootedProcesses names a title-rewritten daemon by its VIBESPACE_*_ROOT env (cwd and HOME `/`, argv hidden) — and not another root\'s');
     try { process.kill(Number(fs.readFileSync(path.join(DR, 'state', 'agentd.pid'), 'utf8')), 'SIGKILL'); } catch { }   // the pre-fix killDaemons
     sleepSync(150);
-    ok(!alive(A) && alive(B), `CONTROL (the pre-fix suite's kill, the pid file only): the daemon it names is gone and the re-exec child it never named survives (pid ${B}) — the incident's orphan`);
+    ok(!alive(A) && verdictOf(alive(B)), `CONTROL (the pre-fix suite's kill, the pid file only): the daemon it names is gone and the re-exec child it never named survives (pid ${B}) — the incident's orphan`);
     const ended = endDaemonsOf(DR, { passes: 2, settleMs: 50 });
     sleepSync(150);
-    ok(ended.includes(B) && !alive(B), `B-442c: endDaemonsOf ends the re-exec child by its root env + its agentd bundle argv (ended ${JSON.stringify(ended)})`);
-    ok(alive(C) && alive(D) && !ended.includes(C) && !ended.includes(D), 'B-442c: …and leaves a non-daemon with the same env (a session) and another root\'s daemon alive');
+    ok(gateOf(ended.includes(B)) && !alive(B), `B-442c: endDaemonsOf ends the re-exec child by its root env + its agentd bundle argv (ended ${JSON.stringify(ended)})`);
+    ok(gateOf(alive(C)) && gateOf(alive(D)) && !ended.includes(C) && !ended.includes(D), 'B-442c: …and leaves a non-daemon with the same env (a session) and another root\'s daemon alive');
     let refused = null; try { endDaemonsOf('/home'); } catch (e) { refused = e.message; }
-    ok(/refusing root/.test(refused || ''), 'endDaemonsOf refuses a root outside /tmp (a scratch dir only)');
+    ok(verdictOf(/refusing root/.test(refused || '')), 'endDaemonsOf refuses a root outside /tmp (a scratch dir only)');
   }
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 25 })) ok(c.pass, c.name + (c.pass ? '' : ' — ' + c.detail));
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 25 })) ok(verdictOf(c.pass), c.name + (c.pass ? '' : ' — ' + c.detail));
 }
 // the owner record really is what spared the real stray: end the owner, and the same (dry) judgement convicts it
 {
   owner.stdin.end();
   for (let i = 0; i < 100 && procStat(owner.pid) && procStat(owner.pid).state !== 'Z'; i++) await sleep(20);
   const v = judgeScratch({ now: LATER() });
-  ok(/^owner gone: run foreign-run pid \d+ (is gone|has exited \(a zombie\))$/.test((find(v.victims, pA) || {}).why || ''), `…and once its owner has exited the same stray IS convicted (dry: ${(find(v.victims, pA) || {}).why}) — the record, not luck, spared it`);
-  ok(/^young: /.test((find(judgeScratch({}).spared, pA) || {}).why || ''), '…while with the real clock it is seconds old and spared: no sweep on the box can take it before this suite ends it');
+  ok(verdictOf(/^owner gone: run foreign-run pid \d+ (is gone|has exited \(a zombie\))$/.test((find(v.victims, pA) || {}).why || '')), `…and once its owner has exited the same stray IS convicted (dry: ${(find(v.victims, pA) || {}).why}) — the record, not luck, spared it`);
+  ok(verdictOf(/^young: /.test((find(judgeScratch({}).spared, pA) || {}).why || '')), '…while with the real clock it is seconds old and spared: no sweep on the box can take it before this suite ends it');
 }
 
 // ── §8 WIRING: who writes a record, who takes the lock ───────────────────
@@ -853,11 +853,11 @@ console.log('\n§8 wiring');
 {
   const ci = ciSrc, scr = fs.readFileSync(path.join(REPO, 'scripts', 'scratch.mjs'), 'utf8'), mut = fs.readFileSync(path.join(REPO, 'scripts', 'mutant-copy.mjs'), 'utf8');
   const fnBody = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const j = src.indexOf('\n}\n', i); return src.slice(i, j < 0 ? undefined : j); };
-  ok(/stampScratchRun\(wt, \{ run: GIT_ENV\.VIBESPACE_CI_RUN \}\)/.test(fnBody(ci, 'function addScratchWorktree(')), 'ci.mjs stamps its isolated scratch worktree (both tiers) with this run\'s record');
-  ok(/markCiRun\('fast'\)/.test(fnBody(ci, 'function fastGate(')) && /markCiRun\('heavy'\)/.test(fnBody(ci, 'async function heavyGate(')), 'both tiers name their run (VIBESPACE_CI_RUN) for every record their suites write');
+  ok(verdictOf(/stampScratchRun\(wt, \{ run: GIT_ENV\.VIBESPACE_CI_RUN \}\)/.test(fnBody(ci, 'function addScratchWorktree('))), 'ci.mjs stamps its isolated scratch worktree (both tiers) with this run\'s record');
+  ok(gateOf(/markCiRun\('fast'\)/.test(fnBody(ci, 'function fastGate('))) && verdictOf(/markCiRun\('heavy'\)/.test(fnBody(ci, 'async function heavyGate('))), 'both tiers name their run (VIBESPACE_CI_RUN) for every record their suites write');
   ok(!/acquireMachineLock\(/.test(fnBody(ci, 'function fastGate(')), 'the FAST tier does not take the heavy machine lock: two fast tiers may run — only their SWEEPS serialise');
-  ok(/const lock = acquireReaperLock\(/.test(fnBody(ci, 'export function reapScratchOrphans(')) && /const lock = await acquireReaperLockAsync\(/.test(fnBody(ci, 'export async function reapScratchOrphansAsync(')), 'both reapers take the sweep lock first');
-  ok(/stampScratchRun\(dir\)/.test(fnBody(scr, 'export function scratchDir(')) && /stampScratchRun\(home\)/.test(fnBody(scr, 'export function scratchHome(')) && /stampScratchRun\(dir\)/.test(fnBody(mut, 'export function mutantCopies(')),
+  ok(gateOf(/const lock = acquireReaperLock\(/.test(fnBody(ci, 'export function reapScratchOrphans('))) && verdictOf(/const lock = await acquireReaperLockAsync\(/.test(fnBody(ci, 'export async function reapScratchOrphansAsync('))), 'both reapers take the sweep lock first');
+  ok(gateOf(/stampScratchRun\(dir\)/.test(fnBody(scr, 'export function scratchDir('))) && gateOf(/stampScratchRun\(home\)/.test(fnBody(scr, 'export function scratchHome('))) && verdictOf(/stampScratchRun\(dir\)/.test(fnBody(mut, 'export function mutantCopies('))),
     'scratch.mjs scratchDir + scratchHome and mutant-copy\'s dirs stamp their roots');
   // every stub repository the gate's own gates build copies ALL of ci.mjs's relative imports (a missing sibling = a stub whose ci.mjs cannot load)
   const sibs = [...ci.matchAll(/^import [^\n]* from '\.\/([^']+)';$/gm)].map((m) => m[1]).sort();
@@ -874,11 +874,11 @@ console.log('\n§8 wiring');
   ok(JSON.stringify(lazyLoads("  // and createRequire(import.meta.url)('../src/x.js')\n/* createRequire(import.meta.url)('../src/y.js') */\n * createRequire(import.meta.url)('../src/w.js')\nconst re = /\\/\\*/; // a «/*» in code\nconst M = createRequire(import.meta.url)('../src/z.js');\n")) === JSON.stringify(['src/z.js']),
     'CONTROL: a lazy load is read off code lines only — a `//` line, a `/* */` line and a block\'s `*` line that spell one are no load; a code line after a «/*» inside a regex still is');
   for (const s of lazyLoads(ci)) sibs.push(s);
-  ok(sibs.includes('src/mount-path-class.js') && !sibs.includes('src/x.js') && sibs.includes('scratch-run.mjs') && stubbers.every(([, b]) => sibs.every((s) => copies(b, s))), `both stub builders copy every sibling ci.mjs imports or requires (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !copies(b, s))]));
-  ok(/^\.vs-run\.json$/m.test(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8')), '.vs-run.json is gitignored (the isolated worktree\'s record is never a change)');
+  ok(gateOf(sibs.includes('src/mount-path-class.js')) && !sibs.includes('src/x.js') && gateOf(sibs.includes('scratch-run.mjs')) && verdictOf(stubbers.every(([, b]) => sibs.every((s) => copies(b, s)))), `both stub builders copy every sibling ci.mjs imports or requires (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !copies(b, s))]));
+  ok(verdictOf(/^\.vs-run\.json$/m.test(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8'))), '.vs-run.json is gitignored (the isolated worktree\'s record is never a change)');
   // verify r2 (R6): the launcher's pre-launch sweep SAYS a refused seam (r1 K7 replaced a bare `catch { }`) — nothing gated
   // that print (the revert table found it uncaught); a launcher's stderr is the one place a pusher sees the refusal before the tier
-  ok(/try \{ reapScratchOrphans\(\{ log: \(m\) => console\.error\(m\) \}\); \} catch \(e\) \{ console\.error\(`\[ci:heavy\] scratch reaper skipped: \$\{e && e\.message\}`\); \}/.test(fnBody(ci, 'function heavyLaunch(')),
+  ok(verdictOf(/try \{ reapScratchOrphans\(\{ log: \(m\) => console\.error\(m\) \}\); \} catch \(e\) \{ console\.error\(`\[ci:heavy\] scratch reaper skipped: \$\{e && e\.message\}`\); \}/.test(fnBody(ci, 'function heavyLaunch('))),
     'WIRING: the heavy launcher prints a refused seam (`[ci:heavy] scratch reaper skipped: …`) instead of swallowing it');
 }
 // ── §9 THE PACE (B-9ec9, lane ci-sweep-pace, 2.369.280): A TIER SWEEPS THE DIRS ON A PACE, NEVER AFTER EVERY ROW ──
@@ -919,7 +919,7 @@ console.log('\n§9 the dir sweep runs on a pace — a boundary, 60 s or 20 ran r
   const skipped = (n, ms = 0) => Array.from({ length: n }, () => ({ ms, absent: true }));
   const PACER = { dirSweepPacer };
   const p1 = drive(PACER, ran(100));
-  ok(p1.rowsSwept.length === 5 && p1.rowsSwept.every((s) => s.why === '20 rows' && s.ran === 20), `100 ran rows in no time ⇒ 5 sweeps, each after 20 ran rows (${p1.rowsSwept.length})`, p1.rowsSwept);
+  ok(p1.rowsSwept.length === 5 && verdictOf(p1.rowsSwept.every((s) => s.why === '20 rows' && s.ran === 20)), `100 ran rows in no time ⇒ 5 sweeps, each after 20 ran rows (${p1.rowsSwept.length})`, p1.rowsSwept);
   ok(p1.last.why === 'boundary' && p1.last.what === "the tier's end" && p1.last.ran === 0 && p1.swept.length === 6, "the tier's end ALWAYS sweeps — a boundary, even with nothing ran since the last sweep", p1.last);
   const p2 = drive(PACER, ran(10, 7000));
   ok(p2.rowsSwept.length === 1 && p2.rowsSwept[0].why === '60 s' && p2.rowsSwept[0].ran === 9 && p2.rowsSwept[0].sinceMs === 63_000, '10 ran rows 7 s apart ⇒ ONE sweep, after the 9th (63 s ≥ 60 s)', p2.rowsSwept);
@@ -930,7 +930,7 @@ console.log('\n§9 the dir sweep runs on a pace — a boundary, 60 s or 20 ran r
   const p5 = drive(PACER, [...ran(1), ...skipped(13, 5000), ...ran(1)]);
   ok(p5.rowsSwept.length === 1 && p5.rowsSwept[0].why === '60 s' && p5.rowsSwept[0].ran === 2, 'never AFTER a skipped row: 65 s pass over skipped rows with no sweep; the next ran row sweeps (60 s)', p5.rowsSwept);
   const p6 = drive(PACER, [...ran(30), ...skipped(10)], { env: { VIBESPACE_CI_DIR_SWEEP: 'every' } });
-  ok(p6.rowsSwept.length === 40 && p6.rowsSwept.every((s) => s.why === 'every row'), `VIBESPACE_CI_DIR_SWEEP=every keeps the pre-.280 sweep: 40 rows (10 skipped) ⇒ 40 sweeps (${p6.rowsSwept.length})`);
+  ok(p6.rowsSwept.length === 40 && verdictOf(p6.rowsSwept.every((s) => s.why === 'every row')), `VIBESPACE_CI_DIR_SWEEP=every keeps the pre-.280 sweep: 40 rows (10 skipped) ⇒ 40 sweeps (${p6.rowsSwept.length})`);
 
   // sweepDirsNow: `off` judges and says nothing (the pace line neither); a seam says so FIRST and no pace line follows; the pace
   // line leads the verdict lines (a dry sweep over a fixture root — never the box's /tmp)
@@ -940,8 +940,8 @@ console.log('\n§9 the dir sweep runs on a pace — a boundary, 60 s or 20 ran r
   const linesOf = (envVal, opts) => { if (envVal == null) delete process.env.VIBESPACE_CI_DIR_SWEEP; else process.env.VIBESPACE_CI_DIR_SWEEP = envVal; const lines = []; try { const r = sweepDirsNow({ dryRun: true, log: (l) => lines.push(l), pace: { why: '20 rows', ran: 20, sinceMs: 9000 }, prefixes: [{ under: FXL, prefix: 'vs-' }], production: [], readOwner: () => null, ...opts }); return { r, lines }; } finally { if (prevEnv == null) delete process.env.VIBESPACE_CI_DIR_SWEEP; else process.env.VIBESPACE_CI_DIR_SWEEP = prevEnv; } };
   const off = linesOf('off'), seamed = linesOf(null, { procRoot: path.join(MAIN, 'no-such-proc') }), paced = linesOf(null);
   ok(off.r === null && off.lines.length === 0, 'VIBESPACE_CI_DIR_SWEEP=off: nothing judged, nothing said — not even the pace line', off.lines);
-  ok(seamed.r === null && seamed.lines.length === 1 && /^\[ci\] dir sweep: skipped under the fake process table /.test(seamed.lines[0]), 'under a seam the sweep says so first, and no pace line claims a sweep', seamed.lines);
-  ok(paced.r && paced.lines[0] === '[ci] dir sweep due — 20 rows: 20 row(s) ran, 9 s since the last sweep' && paced.lines.some((l) => l.startsWith(`[ci] would reap dir ${FXL}/vs-old-1 — `)) && /^\[ci\] dir sweep: would reap 1 dir\(s\)/.test(paced.lines.at(-1)) && fs.existsSync(path.join(FXL, 'vs-old-1')),
+  ok(seamed.r === null && seamed.lines.length === 1 && verdictOf(/^\[ci\] dir sweep: skipped under the fake process table /.test(seamed.lines[0])), 'under a seam the sweep says so first, and no pace line claims a sweep', seamed.lines);
+  ok(gateOf(paced.r) && paced.lines[0] === '[ci] dir sweep due — 20 rows: 20 row(s) ran, 9 s since the last sweep' && gateOf(paced.lines.some((l) => l.startsWith(`[ci] would reap dir ${FXL}/vs-old-1 — `))) && gateOf(/^\[ci\] dir sweep: would reap 1 dir\(s\)/.test(paced.lines.at(-1))) && verdictOf(fs.existsSync(path.join(FXL, 'vs-old-1'))),
     'the pace line LEADS the verdict lines, which are unchanged (one per reaped root + the summary)', paced.lines);
 
   // THE SAME VICTIMS: a stale dir, a fresh one and one crossing the 24 h line mid-tier — `every` and the pace reap the same two
@@ -979,14 +979,14 @@ console.log('\n§9 the dir sweep runs on a pace — a boundary, 60 s or 20 ran r
   // CONTROLS — the old per-row call restored, on scratch copies
   const PER_ROW = "        dirPace.afterRow(r); // …nor its scratch dir, once nothing holds it (B-60d2) — on the tier's pace (B-9ec9)\n";
   const OLD_ROW = "        try { quietSweep(); } catch (e) { console.log(`  · dir sweep skipped: ${e && e.message}`); } // …nor its scratch dir, once nothing holds it (B-60d2)\n";
-  ok(ciSrc.split(PER_ROW).length === 3 && paceWiring(ciSrc.replace(PER_ROW, OLD_ROW)).some((f) => /fastGate.*(per-row call|once per row)/.test(f)),
+  ok(ciSrc.split(PER_ROW).length === 3 && verdictOf(paceWiring(ciSrc.replace(PER_ROW, OLD_ROW)).some((f) => /fastGate.*(per-row call|once per row)/.test(f))),
     'CONTROL (text): the old per-row `quietSweep()` restored in the fast loop of a copy reads RED', paceWiring(ciSrc.replace(PER_ROW, OLD_ROW)));
   const cRow = await copy('pace-per-row', [["      return v.due ? run(v.why) : v;\n", "      return run(v.why);\n"], ["      if (r && r.absent) return { due: false, why: 'a skipped row' };\n", '']]);
   const r100 = cRow && cRow.dirSweepPacer ? drive(cRow, [...ran(80), ...skipped(20)]) : null;
   ok(!!r100 && r100.rowsSwept.length === 100, `CONTROL (the old per-row sweep restored in a copy of the pacer): N sweeps for N rows — 100 for 100, 20 of them skipped (${r100 && r100.rowsSwept.length}; the pace: ${drive(PACER, [...ran(80), ...skipped(20)]).rowsSwept.length})`, cRow && cRow.missing);
   const cSkip = await copy('pace-skip-counts', [["      if (r && r.absent) return { due: false, why: 'a skipped row' };\n", '']]);
   const r4 = cSkip && cSkip.dirSweepPacer ? drive(cSkip, [...ran(19), ...skipped(50), ...ran(1)]) : null;
-  ok(!!r4 && r4.rowsSwept.length !== 1 && r4.rowsSwept[0] && r4.rowsSwept[0].ran === 20 && r4.rowsSwept[0].why === '20 rows', 'CONTROL (a skipped row counted, in a copy): the sweep lands after the 1st SKIPPED row — the skipped-row leg reads red', r4 && r4.rowsSwept.slice(0, 3));
+  ok(!!r4 && r4.rowsSwept.length !== 1 && gateOf(r4.rowsSwept[0]) && r4.rowsSwept[0].ran === 20 && r4.rowsSwept[0].why === '20 rows', 'CONTROL (a skipped row counted, in a copy): the sweep lands after the 1st SKIPPED row — the skipped-row leg reads red', r4 && r4.rowsSwept.slice(0, 3));
   const cEnd = await copy('pace-no-end', [["    boundary(what) { return run('boundary', what); },\n", "    boundary(what) { return { due: false, why: what }; },\n"]]);
   const rEnd = cEnd && cEnd.dirSweepPacer ? drive(cEnd, skipped(5)) : null;
   ok(!!rEnd && rEnd.swept.length === 0, "CONTROL (the boundary dropped, in a copy): a tier of skipped rows ends with NO sweep — the tier's-end leg reads red", rEnd && rEnd.swept);
@@ -996,4 +996,4 @@ console.log('\n§9 the dir sweep runs on a pace — a boundary, 60 s or 20 ran r
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

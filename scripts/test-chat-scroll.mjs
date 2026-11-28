@@ -72,7 +72,7 @@ const fontsDir = scratch('chat-scroll-fonts');
 const FONT_ENV = FONT === 'dejavu' ? runnerFontEnv(fontsDir) : {};
 const NTH_FILE = path.join(stubDir, 'nth'); // the stub's chat-process counter: the 2nd chat (⑪) gets its own conversation id and script
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── ⑪ census (lane chat-live-tail-pin, inc-mvl02dkn-gop0): THE PIN CHANGES IN ONE PLACE. The owner's capture lost its pin
@@ -96,7 +96,7 @@ console.log('⑪ census: no bare `_pinned =` outside ChatView._setPinned');
   const bare = rows.filter((r) => !inSetter(r));
   check(`the setter exists and holds the ONE assignment (${rows.length - bare.length} inside it)`, !!setter && rows.length - bare.length === 1, rows);
   check(`no bare \`_pinned =\` anywhere else in src/lib (${bare.length}${bare.length ? ': ' + bare.map((r) => `${r.f}:${r.line}`).join(', ') : ''})`, bare.length === 0, bare);
-  check('…and the setter traces every change with its reason (`pin` / `unpin` {why})', !!setter && /this\._trace\(on \? 'pin' : 'unpin', \{ why:/.test(setter[0]));
+  check('…and the setter traces every change with its reason (`pin` / `unpin` {why})', !!setter && verdictOf(/this\._trace\(on \? 'pin' : 'unpin', \{ why:/.test(setter[0])));
   // CONTROL: the census sees a bare assignment (the base's wheel-top site, re-inserted into a scratch copy of the text)
   const ctl = cvSrc.replace("this._setPinned(false, 'wheelUp');\n        this._trace('wheelTop',", "this._pinned = false;\n        this._trace('wheelTop',");
   check('CONTROL: the base\'s silent wheel-top unpin, put back in a copy, is a bare assignment the census counts', ctl !== cvSrc && [...ctl.matchAll(ASSIGN)].length === [...cvSrc.matchAll(ASSIGN)].length + 1);
@@ -254,7 +254,7 @@ try {
   for (let i = 0; i < 80 && !sid; i++) { const f = frames.find((m) => m?.type === 'created'); if (f) sid = f.sessionId; else await sleep(250); }
   check('a live claude chat session is created through the real spawn path', !!sid);
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; app.attachSession(${JSON.stringify(sid)}, 'scroll', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
-  check('the live chat window attaches', await waitFor(`!!(${VIEW}) && !!document.querySelector('.chat-view .chat-input')`, 20000));
+  check('the live chat window attaches', verdictOf(await waitFor(`!!(${VIEW}) && !!document.querySelector('.chat-view .chat-input')`, 20000)));
   await sleep(600);
   await evalJs(`(() => { const v = ${VIEW}; window.__fails = 0; const ot = v._trace?.bind(v); v._trace = (k, d) => { if (k === 'op:failed') window.__fails++; return ot ? ot(k, d) : undefined; }; app._openDiagnostics = () => { window.__diag = (window.__diag || 0) + 1; }; return true; })()`);
   const say = (text) => ws.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text }));
@@ -263,7 +263,7 @@ try {
   console.log('① the record kinds this CLI added are never drawn in the chat — said in Session Properties (no strip chip; ⚙ Diagnostics holds their cause)');
   say('Check the numbers please');
   const played = await waitFor(`/LAST-LINE-1/.test(${LIST}.textContent)`, 60000);
-  check('the stub\'s long turn rendered live (its last line is on screen)', played);
+  check('the stub\'s long turn rendered live (its last line is on screen)', verdictOf(played));
   await sleep(1200);
   // lane mask-value-shape (the strip's step two, page §4): the kinds are no strip chip — the bar holds them (addedKindsWords) for
   // Session Properties' «At its start» row
@@ -272,7 +272,7 @@ try {
       chip: kw ? kw.text : null, title: kw ? kw.title : '', onStrip: !!document.querySelector('.chat-view .chat-status-kinds') }; })()`);
   check('zero failed ops while the turn streamed (every live unknown record used to throw: the create op said `msg`)', c1.fails === 0, c1);
   check('no «Unknown event» / «New fields on a known record» card and none of their words in the chat', c1.unknown === 0 && !c1.words, c1);
-  check('ONE line says «3 record kinds this version added — Diagnostics» (two invented record kinds, the grown result) — and the strip draws no chip for it', c1.chip === '3 record kinds this version added — Diagnostics' && /later-build-blob/.test(c1.title) && /result: new fields/.test(c1.title) && !c1.onStrip, c1);
+  check('ONE line says «3 record kinds this version added — Diagnostics» (two invented record kinds, the grown result) — and the strip draws no chip for it', c1.chip === '3 record kinds this version added — Diagnostics' && gateOf(/later-build-blob/.test(c1.title)) && gateOf(/result: new fields/.test(c1.title)) && !c1.onStrip, c1);
   await png('1-turn-and-bar');
   // its home: Session Properties' «At its start» section says it — opened as the person's doors open it, on the conversation's
   // sidebar ROW (session-card / the command pass the row; a bare webui id finds no row, the hosted run's red)
@@ -280,7 +280,7 @@ try {
   await evalJs(`app.openSessionProps((app.sidebar._allSessions || []).find((s) => s.webuiId === window.__sid)); true`);
   const sp = (await waitFor(`!!document.querySelector('.session-props-start')`, 8000)) ? await evalJs(`document.querySelector('.session-props-start').innerText`) : null;
   console.log(`  the sidebar row seen: ${rowSeen}; «At its start» reads: ${JSON.stringify(sp)}`);
-  check('…and Session Properties says it in «At its start» (the kinds\' home off the strip; ⚙ Diagnostics holds the builds without a record table)', !!sp && /3 record kinds this version added/.test(sp), sp);
+  check('…and Session Properties says it in «At its start» (the kinds\' home off the strip; ⚙ Diagnostics holds the builds without a record table)', !!sp && verdictOf(/3 record kinds this version added/.test(sp)), sp);
   await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._sessionPropsKey); if (w) app.wm.closeWindow(w.id); return true; })()`);
 
   // ── ② ──
@@ -291,14 +291,14 @@ try {
   const cost = () => evalJs(`(() => { const r = ${COSTROW}; if (!r) return null; const face = (${VIEW})._statusBar.element.querySelector('.chat-status-ctx .chat-status-cost'); return { text: r.value, title: r.title, color: r.style, onFace: !!face }; })()`);
   await waitFor(`/subscription/.test((${COSTROW})?.value || '')`, 8000);
   const k1 = await cost();
-  check('a subscription conversation: «This chat ≈ $0.47 · included in your subscription», quiet (the dim colour) — in the context door\'s panel, never on its face', k1 && k1.text === 'This chat ≈ $0.47 · included in your subscription' && /--text-dim/.test(k1.color) && /nothing is billed per use/.test(k1.title) && !k1.onFace, k1);
+  check('a subscription conversation: «This chat ≈ $0.47 · included in your subscription», quiet (the dim colour) — in the context door\'s panel, never on its face', gateOf(k1) && k1.text === 'This chat ≈ $0.47 · included in your subscription' && gateOf(/--text-dim/.test(k1.color)) && gateOf(/nothing is billed per use/.test(k1.title)) && !k1.onFace, k1);
   await evalJs(`${VIEW}.setCostBasis?.({ source: 'api-key' }); true`);
   const k2 = await cost();
-  check('an API key: «This chat ≈ $0.47 · billed per use (API key)» in a tier colour — and on the context door\'s face', k2 && k2.text === 'This chat ≈ $0.47 · billed per use (API key)' && /--green/.test(k2.color) && k2.onFace, k2);
+  check('an API key: «This chat ≈ $0.47 · billed per use (API key)» in a tier colour — and on the context door\'s face', gateOf(k2) && k2.text === 'This chat ≈ $0.47 · billed per use (API key)' && gateOf(/--green/.test(k2.color)) && verdictOf(k2.onFace), k2);
   await evalJs(`${VIEW}.setCostBasis?.(null); true`);
   const k3 = await cost();
   // (主开发's ruling on the strip's cure: a spend whose billing basis is UNKNOWN is inside the context panel and SAID as unknown there)
-  check('nobody knows: «This chat ≈ $0.47 · whether it is billed is not known» — the figure, said as unknown (in the panel, off the face)', k3 && k3.text === 'This chat ≈ $0.47 · whether it is billed is not known' && /depends on the account/.test(k3.title) && !k3.onFace, k3);
+  check('nobody knows: «This chat ≈ $0.47 · whether it is billed is not known» — the figure, said as unknown (in the panel, off the face)', gateOf(k3) && k3.text === 'This chat ≈ $0.47 · whether it is billed is not known' && gateOf(/depends on the account/.test(k3.title)) && !k3.onFace, k3);
   await evalJs(`${VIEW}.setCostBasis?.({ source: 'subscription' }); true`);
 
   // ── ③ ──
@@ -320,7 +320,7 @@ try {
   console.log('④ a press on a message, then the page keys');
   await press(cx, cy);
   const foc = await evalJs(`document.activeElement === ${LIST}`);
-  check('a press in the transcript focuses the LIST (it was its parent, .chat-view — the keys found no scroller)', foc);
+  check('a press in the transcript focuses the LIST (it was its parent, .chat-view — the keys found no scroller)', verdictOf(foc));
   const p0 = await st(); await key('PageUp', 33); const p1 = await st(); await key('PageDown', 34); const p2 = await st();
   const ch = await evalJs(`${LIST}.clientHeight`);
   check('PageUp moves the chat up most of a screen, PageDown back down', p1 < p0 - ch * 0.5 && p2 > p1 + ch * 0.5, { p0, p1, p2, ch });
@@ -340,7 +340,7 @@ try {
   say('Second question'); await waitFor(`/Short answer 2/.test(${LIST}.textContent)`, 20000);
   say('Third question'); await waitFor(`/Short answer 3/.test(${LIST}.textContent)`, 20000);
   const mm = await waitFor(`${LIST}.classList.contains('chat-minimap-active') && !!document.querySelector('.chat-view .chat-minimap:not(.hidden)')`, 10000);
-  check('three user turns ⇒ the minimap replaces the native scrollbar', mm);
+  check('three user turns ⇒ the minimap replaces the native scrollbar', verdictOf(mm));
   const mr = (await rectOf(`document.querySelector('.chat-view .chat-minimap')`)) || { x: 0, y: 0, w: 0, h: 0 };
   const m0 = await st(); await wheelAt(Math.round(mr.x + mr.w / 2), Math.round(mr.y + mr.h / 2), -400); const m1 = await st();
   check('a real wheel over the minimap strip moves the chat (a pin: the compositor scrolls the list under the strip — measured on the base too)', m1 < m0 - 150, { m0, m1, mr });
@@ -356,7 +356,7 @@ try {
   });
   await evalJs(`app._showUpdateConfirmDialog(); true`);
   const dlgOk = await waitFor(`(() => { const b = document.querySelector('#update-confirm-dialog .ucl-list'); return !!b && b.scrollHeight > b.clientHeight + 50; })()`, 10000);
-  check('the Update dialog opens with its changelog taller than its box (40 versions answered by CDP Fetch)', dlgOk);
+  check('the Update dialog opens with its changelog taller than its box (40 versions answered by CDP Fetch)', verdictOf(dlgOk));
   const db = await rectOf(`document.querySelector('#update-confirm-dialog .ucl-list')`);
   const dst = () => evalJs(`document.querySelector('#update-confirm-dialog .ucl-list').scrollTop`);
   const q0 = await dst(); await wheelAt(Math.round(db.x + db.w / 2), Math.round(db.y + db.h / 2), 300); const q1 = await dst();
@@ -371,44 +371,44 @@ try {
   console.log('⑧ the permission card in words; the waiting line above the message box');
   say('Please write the summary');
   const card1 = await waitFor(`!!${LIST}.querySelector('.chat-permission-inline .chat-perm-allow')`, 20000);
-  check('the first permission card arrives', card1);
+  check('the first permission card arrives', verdictOf(card1));
   await sleep(500);
   const c8 = await evalJs(`(() => { const card = [...${LIST}.querySelectorAll('.chat-permission-inline')].pop(); if (!card) return {}; const fold = card.querySelector('details.chat-permission-cmd-fold');
     return { summary: card.querySelector('.chat-permission-summary')?.textContent, folded: !!fold && !fold.open, cmd: fold?.querySelector('pre.chat-permission-cmd')?.textContent, label: card.querySelector('.chat-permission-label')?.textContent, folder: !!card.querySelector('.chat-perm-folder') }; })()`);
   check('the card says «install python-docx · read 3 files» above the command', c8.summary === 'install python-docx · read 3 files', c8);
-  check('…the command folded under «Show the command», whole', c8.folded && c8.cmd === 'pip install python-docx && cat a.pdf b.pdf c.pdf', c8);
+  check('…the command folded under «Show the command», whole', gateOf(c8.folded) && c8.cmd === 'pip install python-docx && cat a.pdf b.pdf c.pdf', c8);
   check('…and the first prompt offers no folder-wide answer', !c8.folder, c8);
   const line = await waitFor(`/Waiting for you to allow: install python-docx · read 3 files/.test(document.querySelector('.chat-view .chat-stream-status .chat-stream-label')?.textContent || '')`, 8000);
-  check('the line above the message box says «Waiting for you to allow: install python-docx · read 3 files»', line, await evalJs(`document.querySelector('.chat-view .chat-stream-status')?.innerText`));
+  check('the line above the message box says «Waiting for you to allow: install python-docx · read 3 files»', verdictOf(line), await evalJs(`document.querySelector('.chat-view .chat-stream-status')?.innerText`));
   await evalJs(`(() => { const c = [...${LIST}.querySelectorAll('.chat-permission-inline')].pop(); if (c) c.scrollIntoView({ block: 'center' }); return true; })()`); await sleep(300);
   await png('8-card-and-waiting-line');
   await evalJs(`${LIST}.scrollTop = 0; true`); await sleep(400);
   const hiddenBefore = await evalJs(`(() => { const l = ${LIST}.getBoundingClientRect(); const c = [...${LIST}.querySelectorAll('.chat-permission-inline')].pop()?.getBoundingClientRect(); return !c || c.bottom < l.top || c.top > l.bottom; })()`);
   await evalJs(`document.querySelector('.chat-view .chat-stream-status .chat-stream-label')?.click(); true`);
   const shown = await waitFor(`(() => { const l = ${LIST}.getBoundingClientRect(); const c = [...${LIST}.querySelectorAll('.chat-permission-inline')].pop()?.getBoundingClientRect(); return !!c && c.bottom > l.top && c.top < l.bottom; })()`, 6000);
-  check('…a press on that line brings the waiting card into view (it was out of view)', hiddenBefore && shown, { hiddenBefore, shown });
+  check('…a press on that line brings the waiting card into view (it was out of view)', gateOf(hiddenBefore) && verdictOf(shown), { hiddenBefore, shown });
   await evalJs(`[...${LIST}.querySelectorAll('.chat-permission-inline .chat-perm-allow')].pop()?.click(); true`);
 
   console.log('⑨ the Write’s document opens before its file exists — it waits, then opens');
   const card2 = await waitFor(`(() => { const c = [...${LIST}.querySelectorAll('.chat-permission-inline')].pop(); return !!c && /write Summary\\.md/.test(c.textContent) && !!c.querySelector('.chat-perm-allow'); })()`, 20000);
-  check('the second card (the Write) says «write Summary.md»', card2);
+  check('the second card (the Write) says «write Summary.md»', verdictOf(card2));
   if (!(await waitFor(`!!document.querySelector('.doc-page')`, 4000))) await evalJs(`app.openFile(${JSON.stringify(SUMMARY)}); true`); // the auto-open is the agent's write record; the same door a card press takes
   const waiting = await waitFor(`/Waiting for the file/.test(document.querySelector('.doc-page')?.textContent || '')`, 8000);
-  check('the document opened before its file exists says «Waiting for the file…» (not «Could not read this document: ENOENT»)', waiting, await evalJs(`document.querySelector('.doc-page')?.textContent?.slice(0, 200) || null`));
+  check('the document opened before its file exists says «Waiting for the file…» (not «Could not read this document: ENOENT»)', verdictOf(waiting), await evalJs(`document.querySelector('.doc-page')?.textContent?.slice(0, 200) || null`));
   await evalJs(`[...${LIST}.querySelectorAll('.chat-permission-inline .chat-perm-allow')].pop()?.click(); true`);
   const landed = await waitFor(`/THE-SUMMARY-LANDED/.test(document.querySelector('.doc-page')?.textContent || '')`, 10000);
-  check('…the write is allowed, the file lands, and the same window opens it by itself', landed, await evalJs(`document.querySelector('.doc-page')?.textContent?.slice(0, 200) || null`));
+  check('…the write is allowed, the file lands, and the same window opens it by itself', verdictOf(landed), await evalJs(`document.querySelector('.doc-page')?.textContent?.slice(0, 200) || null`));
 
   console.log('⑩ the third prompt offers «Let it work in work/ without asking»');
   const card3 = await waitFor(`(() => { const c = [...${LIST}.querySelectorAll('.chat-permission-inline')].pop(); return !!c && /repeat a step for each item/.test(c.textContent) && !!c.querySelector('.chat-perm-allow'); })()`, 20000);
-  check('the third card arrives in words («repeat a step for each item»)', card3);
+  check('the third card arrives in words («repeat a step for each item»)', verdictOf(card3));
   const f3 = await evalJs(`(() => { const c = [...${LIST}.querySelectorAll('.chat-permission-inline')].pop(); if (!c) return {}; const b = c.querySelector('.chat-perm-folder'); return { btn: b ? b.textContent : null, title: b ? b.title : '', what: c.querySelector('.chat-permission-folder-what')?.textContent || '' }; })()`);
-  check('…with «Let it work in work/ without asking», what it sends in its title and its sentence under it', f3.btn === 'Let it work in work/ without asking' && /Always allow Bash, Edit, Write, MultiEdit, NotebookEdit/.test(f3.title) && /without a card each time/.test(f3.what), f3);
+  check('…with «Let it work in work/ without asking», what it sends in its title and its sentence under it', f3.btn === 'Let it work in work/ without asking' && gateOf(/Always allow Bash, Edit, Write, MultiEdit, NotebookEdit/.test(f3.title)) && verdictOf(/without a card each time/.test(f3.what)), f3);
   await evalJs(`[...${LIST}.querySelectorAll('.chat-permission-inline')].pop()?.querySelector('.chat-perm-folder')?.click(); true`);
   const done = await waitFor(`/ASKS-DONE/.test(${LIST}.textContent)`, 15000);
   const resp = stdinLines().filter((m) => m.type === 'control_response' && m.response?.request_id === 'req-ask-2').pop();
   const up = resp?.response?.response?.updatedPermissions;
-  check('a press answers the request with the folder’s allow rules on the CLI’s stdin (Bash, Edit, Write, MultiEdit, NotebookEdit → localSettings)', done && resp?.response?.response?.behavior === 'allow' && Array.isArray(up) && up.length === 1 && up[0].type === 'addRules' && up[0].behavior === 'allow' && up[0].destination === 'localSettings' && JSON.stringify(up[0].rules) === JSON.stringify(['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].map((toolName) => ({ toolName }))), resp);
+  check('a press answers the request with the folder’s allow rules on the CLI’s stdin (Bash, Edit, Write, MultiEdit, NotebookEdit → localSettings)', gateOf(done) && resp?.response?.response?.behavior === 'allow' && gateOf(Array.isArray(up)) && up.length === 1 && up[0].type === 'addRules' && up[0].behavior === 'allow' && up[0].destination === 'localSettings' && JSON.stringify(up[0].rules) === JSON.stringify(['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].map((toolName) => ({ toolName }))), resp);
   const resp0 = stdinLines().filter((m) => m.type === 'control_response' && m.response?.request_id === 'req-ask-0').pop();
   check('…while a plain Allow sent none (the first card)', resp0?.response?.response?.behavior === 'allow' && !resp0.response.response.updatedPermissions, resp0);
 
@@ -431,14 +431,14 @@ try {
   const at2 = async () => { const r = await rectOf(L2); return { x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2) }; };
   const onList = (x, y) => evalJs(`${L2}.contains(document.elementFromPoint(${x}, ${y}))`);
   say2('Hello there');
-  check('the first answer renders live in the created chat', await waitFor(`/HELLO-LIVE/.test(${L2}.textContent)`, 20000));
+  check('the first answer renders live in the created chat', verdictOf(await waitFor(`/HELLO-LIVE/.test(${L2}.textContent)`, 20000)));
   await sleep(900);
   const g1 = await geo2();
   check(`its window is DEFINED with no history load: 0 … the live count (ws ${g1.ws} · we ${g1.we} · total ${g1.total} · rendered ${g1.n}) — the bundle's geom was ws/we/total null`,
-    Number.isFinite(g1.ws) && Number.isFinite(g1.we) && Number.isFinite(g1.total) && g1.ws === 0 && g1.we === g1.total && g1.total === g1.n && g1.n >= 2, g1);
+    gateOf(Number.isFinite(g1.ws)) && gateOf(Number.isFinite(g1.we)) && gateOf(Number.isFinite(g1.total)) && g1.ws === 0 && g1.we === g1.total && g1.total === g1.n && g1.n >= 2, g1);
   check('one screen (scrollHeight ≈ clientHeight), pinned, and ↓ hidden — there is nothing to scroll to', g1.sh <= g1.ch + 1 && g1.pin === true && g1.btn === false, g1);
   const c11 = await at2();
-  check('…the created window is on top where the wheel lands', await onList(c11.x, c11.y), c11);
+  check('…the created window is on top where the wheel lands', verdictOf(await onList(c11.x, c11.y)), c11);
   let m11 = await seq2();
   for (let i = 0; i < 6; i++) { await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: c11.x, y: c11.y }); await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c11.x, y: c11.y, deltaX: 0, deltaY: -100 }); await sleep(120); }
   await sleep(500);
@@ -450,14 +450,14 @@ try {
 
   console.log('⑪ the busy live turn: ~240 records a minute, runs of tool cards, results landing as live edits');
   say2('Now get busy');
-  check('the fast prologue lands and the slow stream begins (TICK-15)', await waitFor(`/TICK-15:/.test(${L2}.textContent)`, 30000));
+  check('the fast prologue lands and the slow stream begins (TICK-15)', verdictOf(await waitFor(`/TICK-15:/.test(${L2}.textContent)`, 30000)));
   await sleep(1500);
   m11 = await seq2();
   const samples = [];
   for (let i = 0; i < 8; i++) { await sleep(500); samples.push(await geo2()); }
   r11 = await ring2(m11);
   check(`it streams on while pinned: the pin holds through ${samples.length} samples, each at the bottom, the window defined (we = total)`,
-    samples.every((g) => g.pin === true && g.sh - g.st - g.ch < 60 && Number.isFinite(g.total) && g.we === g.total) && samples[samples.length - 1].total > samples[0].total && !r11.some((e) => e.tag === 'unpin'), samples);
+    gateOf(samples.every((g) => g.pin === true && g.sh - g.st - g.ch < 60 && Number.isFinite(g.total) && g.we === g.total)) && samples[samples.length - 1].total > samples[0].total && !r11.some((e) => e.tag === 'unpin'), samples);
   check('…the stream\'s tool cards fold under run headers', await evalJs(`${L2}.querySelectorAll('.chat-run-header').length`) > 0);
   // a run header press — open, then close — never unpins. B-1217 (6): ONE run, named by its first card (the header is rebuilt
   // each pass, always before that card), pressed twice through the real-click door (measured, hit-tested at the press, aimed
@@ -503,7 +503,7 @@ try {
   await sleep(1800);
   const gBtn = await geo2(); r11 = await ring2(m11);
   const newest = await evalJs(`(() => { const v = ${V2}; const els = [...v._messageList.querySelectorAll(':scope > .chat-msg')]; const last = els[els.length - 1]; const ticks = [...v._messageList.textContent.matchAll(/TICK-(\\d+)/g)].map((m) => +m[1]); const u = [...new Set(ticks)].sort((a, b) => a - b); return { lastId: last?.dataset.msgId || null, newestId: v._messages[v._messages.length - 1]?.id || null, maxTick: u.length ? u[u.length - 1] : -1, holes: u.filter((x, i) => i && x !== u[i - 1] + 1).length, first: u[0] }; })()`);
-  check(`↓ PINS and hides until a real scroll: pinned, at the bottom, ↓ hidden (pin {why: ${r11.find((e) => e.tag === 'pin')?.why}})`, gBtn.pin === true && gBtn.btn === false && gBtn.sh - gBtn.st - gBtn.ch < 60 && r11.some((e) => e.tag === 'pin' && e.why === 'scrollBtn'), gBtn);
+  check(`↓ PINS and hides until a real scroll: pinned, at the bottom, ↓ hidden (pin {why: ${r11.find((e) => e.tag === 'pin')?.why}})`, gBtn.pin === true && gBtn.btn === false && gBtn.sh - gBtn.st - gBtn.ch < 60 && verdictOf(r11.some((e) => e.tag === 'pin' && e.why === 'scrollBtn')), gBtn);
   check(`…at the LIVE tail, not the conversation's start: the newest record is the last card (TICK-${newest.maxTick}) and the window runs to it unbroken (${newest.holes} holes from TICK-${newest.first}) — the base fetched offset NaN, which the server read as 0, and «pinned» the first fifty messages`, !!newest.lastId && newest.lastId === newest.newestId && newest.maxTick >= 15 && newest.holes === 0, newest);
   // (the base landed the FIRST slab and the stream appended below it: TICK-0 … TICK-11, a hole, then the live ticks)
   check('…without rebuilding a window that already ended at the tail (no tail refetch: no gapReset)', !r11.some((e) => e.tag === 'gapReset' || e.tag === 'tailRefetch'), r11.map((e) => e.tag));
@@ -522,14 +522,14 @@ try {
   const wheels = bundle?.client?.rings?.wheel || []; // the wheel's OWN ring (r2) — never the action ring
   const wheel700 = wheels.find((a) => a.deltaY === -700);
   check(`the −700 wheel-up is ONE record in the WHEEL ring (none in the action ring) {deltaY −700, deltaMode 0, n 1}, its list position before > after (${wheel700?.stBefore} → ${wheel700?.stAfter}), over the chat (${wheel700?.el} — the recorder describes four levels up from the target)`,
-    !!wheel700 && wheel700.deltaMode === 0 && wheel700.n === 1 && wheel700.stBefore > wheel700.stAfter && /chat-(message-list|msg|compact|text)/.test(wheel700.el) && !acts.some((a) => a.k === 'wheel'), wheels);
+    !!wheel700 && wheel700.deltaMode === 0 && wheel700.n === 1 && wheel700.stBefore > wheel700.stAfter && gateOf(/chat-(message-list|msg|compact|text)/.test(wheel700.el)) && !acts.some((a) => a.k === 'wheel'), wheels);
   const btnPtr = acts.filter((a) => a.k === 'ptr' && /chat-scroll-btn/.test(a.el)).pop();
   check(`…the ↓ press is a ptr record with its pointerType (${btnPtr?.pointerType})`, btnPtr?.pointerType === 'mouse', btnPtr);
   const fine = Object.values(bundle?.client?.snapshot?.chatTraces || {}).find((x) => x.sid === sid2)?.fine || [];
   const arms = fine.filter((e) => e.arm).map((e) => e.arm);
   const afterBtn = fine.slice(fine.findIndex((e) => e.arm === 'scrollBtn') + 1).filter((e) => !e.arm);
   check(`…and the window's fine trace: arms ${JSON.stringify(arms)} (the header open + close, the ↓), every scroll event after the ↓ kept with its writer (${afterBtn.length}: ${[...new Set(afterBtn.map((e) => e.by))].join(', ')})`,
-    arms.includes('runOpen') && arms.includes('runClose') && arms.includes('scrollBtn') && afterBtn.length > 0 && afterBtn.every((e) => Number.isFinite(e.st) && Number.isFinite(e.sh) && Number.isFinite(e.ch) && typeof e.by === 'string'), fine.slice(-12));
+    gateOf(arms.includes('runOpen')) && gateOf(arms.includes('runClose')) && gateOf(arms.includes('scrollBtn')) && afterBtn.length > 0 && verdictOf(afterBtn.every((e) => Number.isFinite(e.st) && Number.isFinite(e.sh) && Number.isFinite(e.ch) && typeof e.by === 'string')), fine.slice(-12));
 
   console.log('⑪ the server: a new conversation is born with its history loaded');
   const ids2 = await evalJs(`${V2}._getSessionIds()`);
@@ -537,9 +537,9 @@ try {
   const pg = await (await fetch(`http://127.0.0.1:${PORT}/api/session-messages?${pageQ}`)).json();
   const gNow = await geo2();
   check(`a history page of the created chat is served by its LIVE normalizer (ids ${JSON.stringify((pg.messages || []).map((m) => String(m.id).split(':')[0]))}, total ${pg.total} vs the view's ${gNow.total}) — the base re-converted the transcript under other ids every page`,
-    Array.isArray(pg.messages) && pg.messages.length === 3 && pg.messages.every((m) => String(m.id).startsWith(sid2 + ':')) && Math.abs(pg.total - gNow.total) <= 8, { ids: (pg.messages || []).map((m) => m.id), total: pg.total, view: gNow.total });
+    gateOf(Array.isArray(pg.messages)) && pg.messages.length === 3 && gateOf(pg.messages.every((m) => String(m.id).startsWith(sid2 + ':'))) && Math.abs(pg.total - gNow.total) <= 8, { ids: (pg.messages || []).map((m) => m.id), total: pg.total, view: gNow.total });
   ws.send(JSON.stringify({ type: 'interrupt', sessionId: sid2 }));   // Stop (a typed message mid-turn is held by the wrapper since 2.369.354)
-  check('the turn ends (LIVE-END) and the view is still pinned at the bottom', await waitFor(`/LIVE-END/.test(${L2}.textContent)`, 15000) && (await sleep(800), (await geo2()).pin === true));
+  check('the turn ends (LIVE-END) and the view is still pinned at the bottom', gateOf(await waitFor(`/LIVE-END/.test(${L2}.textContent)`, 15000)) && (await sleep(800), (await geo2()).pin === true));
 
   { // CONTROL (ci358-reds): the base's shrink put back on the cards ⇒ the census finds collapsed cards; taken off ⇒ none
     await evalJs(`(() => { const st = document.createElement('style'); st.id = 'cs-shrink-ctl'; st.textContent = '.chat-msg { flex-shrink: 1 !important; }'; document.head.appendChild(st); return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true)))); })()`);
@@ -554,4 +554,4 @@ try {
   console.error('✗ the suite threw: ' + (e && e.stack || e));
 }
 console.log(`\n${failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`}`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

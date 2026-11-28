@@ -25,7 +25,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUTU = mutantCopies('ut-expiry', REPO);
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const cleanup = [];
@@ -131,11 +131,11 @@ try {
     };
   };
   const e = dueLeg(UT);
-  ok(e.n === 2 && e.due, 'the two due items are resolved done/expired at the sweep instant; the count is returned', e);
+  ok(e.n === 2 && verdictOf(e.due), 'the two due items are resolved done/expired at the sweep instant; the count is returned', e);
   ok(e.b1 === 1, 'ONE broadcast for the whole sweep', e);
   ok(e.n2 === 0 && e.b2 === 0, 'a second sweep finds nothing and says nothing', e);
   ok(e.later === 'open' && e.lasting === 'open', 'an item not yet due and an item with NO expiresAt stay open', e);
-  ok(e.done.by === 'user' && e.done.at, 'an already-resolved item is never touched (its resolvedBy/resolvedAt kept)', e);
+  ok(e.done.by === 'user' && verdictOf(e.done.at), 'an already-resolved item is never touched (its resolvedBy/resolvedAt kept)', e);
   ok(e.disk === 2, 'the sweep is persisted through the store\'s own writer', e);
   ok(e.open === 'lasting,later', 'the open listing (the badge\'s input) no longer carries them', e);
   const eCtl1 = dueLeg(mutant('src/user-todos.js', [["      if (it.status !== 'open') continue;\n      if (!(typeof it.expiresAt", "      if (!(typeof it.expiresAt"]]));
@@ -156,7 +156,7 @@ try {
     ] }));
     const m = new UT.UserTodoManager({ dataDir: d });
     ok(m.get('ut-a').resolvedBy === 'expired' && m.get('ut-b').status === 'open', 'an item that expired while the server was down goes AT LOAD; a lasting one stays', [m.get('ut-a'), m.get('ut-b')].map((x) => [x.status, x.resolvedBy]));
-    ok(m._expiryTimer && typeof m._expiryTimer.hasRef === 'function' && m._expiryTimer.hasRef() === false, 'the default 5-min timer exists and is unref\'d (it never holds the process open)');
+    ok(gateOf(m._expiryTimer) && typeof m._expiryTimer.hasRef === 'function' && m._expiryTimer.hasRef() === false, 'the default 5-min timer exists and is unref\'d (it never holds the process open)');
     ok(UT.EXPIRY_SWEEP_MS === 5 * MIN, 'the cadence is 5 minutes', UT.EXPIRY_SWEEP_MS);
     m.stop();
     ok(m._expiryTimer === null, 'stop() clears it');
@@ -217,7 +217,7 @@ try {
   ok(s.hour === HOUR, 'the hour-window warning expires 60 min after it is filed', s);
   ok(s.day === 24 * HOUR, 'the day-window warning expires 24 h after it is filed', s);
   ok(s.ref === 6 * HOUR && guardMod.REFUSE_INBOX_MS === 6 * HOUR, 'the refusal expires after 6 h — its own re-file cadence', s);
-  ok(s.kinds.length >= 3 && s.kinds.every((k) => k === 'notice'), 'every one stays kind notice', s.kinds);
+  ok(s.kinds.length >= 3 && verdictOf(s.kinds.every((k) => k === 'notice')), 'every one stays kind notice', s.kinds);
   const sCtl = stampLeg(mutant('src/server/spend-guard.js', [["kind: 'notice', expiresAt });", "kind: 'notice' });"]]));   // stale-pins: kept — a mutant's replacement text (it rebuilds an older spend-guard line) — not a pin of setting-holds.js
   ok(!(sCtl.hour === HOUR || sCtl.day === 24 * HOUR || sCtl.ref === 6 * HOUR), 'CONTROL: the pre-fix fileInbox (no expiresAt) fails all three stamps', sCtl);
   const sCtl2 = stampLeg(mutant('src/server/spend-guard.js', [["noticeExpiry(r.warn.scope, now)", "noticeExpiry('day', now)"]]));
@@ -233,7 +233,7 @@ try {
     for (let i = 0; i < 8; i++) guard.note({ reason: 'stop-nudge', session: { id: 'x' }, now: t0 });
     guard.flush();
     const item = m.snapshot().open.find((i) => i.sessionName === 'Spending');
-    ok(item && item.kind === 'notice' && item.expiresAt === t0 + HOUR, 'the warning lands in the store as a notice carrying its hour\'s end', item);
+    ok(gateOf(item) && item.kind === 'notice' && item.expiresAt === t0 + HOUR, 'the warning lands in the store as a notice carrying its hour\'s end', item);
     ok(m.expireDue(t0 + HOUR - 1) === 0 && m.get(item.id).status === 'open', 'a minute before the end it is still open');
     ok(m.expireDue(t0 + HOUR) === 1 && m.get(item.id).resolvedBy === 'expired', 'at the end of its hour it is resolved expired');
     m.flush();
@@ -251,7 +251,7 @@ try {
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTU.files, MUTU.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTU.files, MUTU.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -52,7 +52,7 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const R = require('../src/window-reach.js');
 const MUT = mutantCopies('wreach', REPO);
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -70,10 +70,10 @@ console.log('§1 the closed sets');
   ok(JSON.stringify(R.PRINCIPAL_KINDS) === '["session","group","everyone"]' && JSON.stringify(R.GRANT_ORIGINS) === '["user","request","self-open"]', 'principals are sessions, Task Groups or ALL AGENTS (lane everyone-principal); a row is written by the user, the user\'s request, or the agent\'s own open');
   ok(JSON.stringify(R.MODES) === '["auto","tree","pixels"]' && JSON.stringify(R.RESOLVED_MODES) === '["tree","pixels"]', 'three share modes, two resolutions');
   let threw = null; try { R.refuse('nope', 'x'); } catch (e) { threw = e; }
-  ok(threw && /unknown refusal code/.test(threw.message) && R.refuse('not_exposed', 'x').code === 'not_exposed', 'the refusal set is CLOSED — an unknown code throws');
-  ok(['not_exposed', 'mode_pixels', 'window_not_visible', 'outside_window', 'bad_principal', 'bad_mode', 'wake_paced', 'share_local_only', 'reach_unreadable'].every((c) => R.REFUSALS.includes(c)), 'the lane-E codes are all in it (reach_unreadable since verify r2)');
+  ok(gateOf(threw) && gateOf(/unknown refusal code/.test(threw.message)) && R.refuse('not_exposed', 'x').code === 'not_exposed', 'the refusal set is CLOSED — an unknown code throws');
+  ok(verdictOf(['not_exposed', 'mode_pixels', 'window_not_visible', 'outside_window', 'bad_principal', 'bad_mode', 'wake_paced', 'share_local_only', 'reach_unreadable'].every((c) => R.REFUSALS.includes(c))), 'the lane-E codes are all in it (reach_unreadable since verify r2)');
   ok(R.REACH_UNREADABLE_SENTENCE === 'the Task Group store could not be read — try again', 'reach_unreadable has ONE spelling (engine, CLI, manual)');
-  ok(Object.isFrozen(R.REFUSALS) && Object.isFrozen(R.MODES) && Object.isFrozen(R.GRANT_ORIGINS), 'every set is frozen');
+  ok(gateOf(Object.isFrozen(R.REFUSALS)) && gateOf(Object.isFrozen(R.MODES)) && verdictOf(Object.isFrozen(R.GRANT_ORIGINS)), 'every set is frozen');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,12 +168,12 @@ function reachedMiss(Rm) {
   ok(t.miss.length === 0, `§2c r3 F5: reachedState over ${t.cells} cells — a live session found ⇒ matched; none found while a membership read threw ⇒ UNDECIDED (never unmatched); none found and every read answered ⇒ unmatched; launchCounts counts the two — ${t.miss.join('; ') || 'every cell as the rule says'}`);
   ok(JSON.stringify(R.REACHED_STATES) === '["matched","unmatched","undecided"]', 'the reached states are a closed set of three');
   let threw = null; try { R.launchCounts(['matched', 'nobody']); } catch (e) { threw = e; }
-  ok(threw && /unknown reached state/.test(threw.message), 'an unknown reached state THROWS (a closed set, like the refusals)');
+  ok(gateOf(threw) && verdictOf(/unknown reached state/.test(threw.message)), 'an unknown reached state THROWS (a closed set, like the refusals)');
   // THE WIRING: the engine's launch audit + share view read these, and liveReached counts the reads that threw
   const eng = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
   const fnBody = (name) => { const i = eng.indexOf(`function ${name}(`); return i < 0 ? '' : eng.slice(i, eng.indexOf('\n  }\n', i)); };
-  ok(/R\.launchCounts\(/.test(fnBody('shareAtLaunch')) && /undecided: counts\.undecided/.test(fnBody('shareAtLaunch')) && /unmatched: counts\.unmatched/.test(fnBody('shareAtLaunch')), 'wiring: shareAtLaunch audits R.launchCounts — `unmatched` AND `undecided` (source pin)');
-  ok(/if \(!v\.ok && v\.code === 'groups_unreadable'\) \{ unreadable\+\+; continue; \}/.test(fnBody('liveReached')) && /R\.reachedState\(/.test(eng.slice(eng.indexOf('function reachedOf('), eng.indexOf('function reachedOf(') + 400)), 'wiring: liveReached counts a membership read that threw (never "not in the group"), and one helper turns it into the state (source pin; the behaviour is test-window-targets §5\'s F5 leg + its control)');
+  ok(gateOf(/R\.launchCounts\(/.test(fnBody('shareAtLaunch'))) && gateOf(/undecided: counts\.undecided/.test(fnBody('shareAtLaunch'))) && verdictOf(/unmatched: counts\.unmatched/.test(fnBody('shareAtLaunch'))), 'wiring: shareAtLaunch audits R.launchCounts — `unmatched` AND `undecided` (source pin)');
+  ok(gateOf(/if \(!v\.ok && v\.code === 'groups_unreadable'\) \{ unreadable\+\+; continue; \}/.test(fnBody('liveReached'))) && verdictOf(/R\.reachedState\(/.test(eng.slice(eng.indexOf('function reachedOf('), eng.indexOf('function reachedOf(') + 400))), 'wiring: liveReached counts a membership read that threw (never "not in the group"), and one helper turns it into the state (source pin; the behaviour is test-window-targets §5\'s F5 leg + its control)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,20 +181,20 @@ console.log('§3 the transitions — one row per principal, own-row revoke, wide
 {
   let rec = R.emptyRecord('da-1');
   const g1 = R.grant(rec, { kind: 'session', id: S_KEY, name: 'alpha' }, { by: 'request', at: 5 });
-  ok(g1.ok && g1.changed && g1.record.rows.length === 1 && g1.row.by === 'request' && g1.row.grantedAt === 5 && rec.rows.length === 0, 'grant adds ONE row (by, at) and returns a NEW record (the input untouched)');
+  ok(gateOf(g1.ok) && gateOf(g1.changed) && g1.record.rows.length === 1 && g1.row.by === 'request' && g1.row.grantedAt === 5 && rec.rows.length === 0, 'grant adds ONE row (by, at) and returns a NEW record (the input untouched)');
   const g2 = R.grant(g1.record, { kind: 'session', id: S_KEY, name: 'alpha (renamed)' }, { by: 'user', at: 9 });
-  ok(g2.ok && !g2.changed && g2.record.rows.length === 1 && g2.record.rows[0].by === 'request' && g2.record.rows[0].principal.name === 'alpha (renamed)', 'a second grant to the same principal changes nothing (the first origin stays; only a fresher name is kept)');
+  ok(gateOf(g2.ok) && !g2.changed && g2.record.rows.length === 1 && g2.record.rows[0].by === 'request' && g2.record.rows[0].principal.name === 'alpha (renamed)', 'a second grant to the same principal changes nothing (the first origin stays; only a fresher name is kept)');
   rec = R.grant(g2.record, { kind: 'group', id: G, name: 'Ops' }, { at: 10 }).record;
   rec = R.grant(rec, { kind: 'session', id: 'codex:beta', name: 'beta' }, { at: 11 }).record;
   const rv = R.revoke(rec, { kind: 'session', id: S_KEY });
-  ok(rv.ok && rv.changed && rv.record.rows.length === 2 && rv.record.rows.every((r) => r.principal.id !== R.sessionKeyNow(S_KEY)) && rv.row.principal.id === R.sessionKeyNow(S_KEY), 'revoke drops ONLY that principal\'s row (the group row and the other session\'s row stay; a key in the ONE spelling — lane grants-unify)');
+  ok(gateOf(rv.ok) && gateOf(rv.changed) && rv.record.rows.length === 2 && gateOf(rv.record.rows.every((r) => r.principal.id !== R.sessionKeyNow(S_KEY))) && rv.row.principal.id === R.sessionKeyNow(S_KEY), 'revoke drops ONLY that principal\'s row (the group row and the other session\'s row stay; a key in the ONE spelling — lane grants-unify)');
   ok(R.reachFor(rv.record, { sessionKeys: [S_KEY], groupIds: [G] }).level === 'exposed' && R.reachFor(rv.record, { sessionKeys: [S_KEY], groupIds: [G] }).via === 'group', 'widen-only: a caller whose own row was revoked is still reached by its group\'s row — and `via` names the group so the UI can say so');
   ok(!R.revoke(rv.record, { kind: 'session', id: S_KEY }).changed, 'revoking a principal with no row changes nothing');
   const bad = [R.grant(rec, { kind: 'agent', id: 'x' }), R.grant(rec, { kind: 'session', id: 'no colon' }), R.grant(rec, { kind: 'group', id: 'a b' }), R.grant(rec, null), R.revoke(rec, { kind: 'session' })];
-  ok(bad.every((b) => b.ok === false && b.code === 'bad_principal' && !b.changed), 'a bad principal (unknown kind, a session id that is no conversation key, a group id with a space, none) is refused bad_principal');
+  ok(verdictOf(bad.every((b) => b.ok === false && b.code === 'bad_principal' && !b.changed)), 'a bad principal (unknown kind, a session id that is no conversation key, a group id with a space, none) is refused bad_principal');
   let threw = null; try { R.grant(rec, { kind: 'group', id: G2 }, { by: 'agent' }); } catch (e) { threw = e; }
-  ok(threw && /unknown grant origin/.test(threw.message), 'an unknown grant origin is a programming error (throws)');
-  ok(R.setMode(rec, 'pixels').record.mode === 'pixels' && R.setMode(rec, 'pixels').changed && !R.setMode(R.setMode(rec, 'tree').record, 'tree').changed && R.setMode(rec, 'fast').code === 'bad_mode', 'setMode: the three modes, a no-op reported as such, anything else bad_mode');
+  ok(gateOf(threw) && verdictOf(/unknown grant origin/.test(threw.message)), 'an unknown grant origin is a programming error (throws)');
+  ok(R.setMode(rec, 'pixels').record.mode === 'pixels' && gateOf(R.setMode(rec, 'pixels').changed) && !R.setMode(R.setMode(rec, 'tree').record, 'tree').changed && R.setMode(rec, 'fast').code === 'bad_mode', 'setMode: the three modes, a no-op reported as such, anything else bad_mode');
   const back = R.normRecord({ windowId: 'da-9', mode: 'weird', rows: [{ principal: { kind: 'session', id: S_KEY }, by: 'hacker', grantedAt: 'x' }, { principal: { kind: 'session', id: S_KEY } }, { principal: { kind: 'nope', id: 'x' } }, null] }, 'da-9');
   ok(back.mode === 'auto' && back.rows.length === 1 && back.rows[0].by === 'user' && back.rows[0].grantedAt === 0 && back.windowId === 'da-9', 'a stored record is read back tolerantly: unknown mode → auto, unknown origin → user, a duplicate / bad principal dropped');
   // widen-only as a property: over every sequence of grants, no caller that was exposed becomes hidden
@@ -215,7 +215,7 @@ console.log('§3 the transitions — one row per principal, own-row revoke, wide
 console.log('§4 the opener exception (D1) + the deciding row');
 {
   const o = R.openerGrant(R.emptyRecord('da-2'), { key: S_KEY, name: 'alpha', at: 3 });
-  ok(o.ok && o.row.by === 'self-open' && R.reachFor(o.record, { sessionKeys: [S_KEY] }).via === 'self-open', 'the agent that opened a window reaches it through its own self-open row');
+  ok(gateOf(o.ok) && o.row.by === 'self-open' && R.reachFor(o.record, { sessionKeys: [S_KEY] }).via === 'self-open', 'the agent that opened a window reaches it through its own self-open row');
   ok(R.reachFor(o.record, { sessionKeys: ['claude:other'], groupIds: [G] }).level === 'hidden', '…and nobody else does');
   ok(R.reachFor(R.revoke(o.record, { kind: 'session', id: S_KEY }).record, { sessionKeys: [S_KEY] }).level === 'hidden', 'the user may revoke it like any row (the user always wins)');
   const both = build(R, [{ kind: 'group', id: G }, { kind: 'session', id: S_KEY }]);
@@ -236,16 +236,16 @@ console.log('§5 THE MODE TABLE (D7)');
   const tr = R.resolveMode({ mode: 'auto', probe: { a11yOk: true, nodes: 107, usable: R.usableNodes(calc) } });
   const bus = R.resolveMode({ mode: 'auto', probe: { a11yOk: false } });
   ok(x.mode === 'pixels' && x.why === 'no accessibility tree — pixel mode', `xterm (no tree) ⇒ pixels, said: "${x.why}"`);
-  ok(c.mode === 'pixels' && /closed \(4 nodes/.test(c.why), `Chrome without its switch (4 frames) ⇒ pixels: "${c.why}"`);
-  ok(tr.mode === 'tree' && /answers/.test(tr.why) && bus.mode === 'pixels' && /unreachable/.test(bus.why), 'a usable tree ⇒ tree; the bus unreachable ⇒ pixels (said)');
+  ok(c.mode === 'pixels' && verdictOf(/closed \(4 nodes/.test(c.why)), `Chrome without its switch (4 frames) ⇒ pixels: "${c.why}"`);
+  ok(tr.mode === 'tree' && gateOf(/answers/.test(tr.why)) && bus.mode === 'pixels' && verdictOf(/unreachable/.test(bus.why)), 'a usable tree ⇒ tree; the bus unreachable ⇒ pixels (said)');
   ok(R.resolveMode({ mode: 'tree' }).mode === 'tree' && R.resolveMode({ mode: 'pixels' }).mode === 'pixels' && R.resolveMode({ mode: 'auto' }).mode === null, 'tree / pixels need no probe; auto without one is unresolved (null)');
   // mirror red on 2.369.181: an unreachable tree is pixels WHATEVER the reason — the reason is named, the mode is one
   {
     const reasons = ['python3_missing: python3 is not on PATH', "a11y_unavailable: python3 gi Atspi not importable: No module named 'gi'", 'helper_error: the helper answered nothing parseable (exit 134): dbind-ERROR **: AT-SPI: Couldn\'t connect to accessibility bus', 'helper_missing: window-targets-helper.py is not on disk'];
     const rs = reasons.map((reason) => R.resolveMode({ mode: 'auto', probe: { a11yOk: false, reason } }));
-    ok(rs.every((v, i) => v.mode === 'pixels' && v.why.includes(`unreachable here (${reasons[i]})`) && / — pixel mode$/.test(v.why)), `four reasons, ONE resolution (pixels), each reason named: "${rs[1].why}"`);
+    ok(verdictOf(rs.every((v, i) => v.mode === 'pixels' && v.why.includes(`unreachable here (${reasons[i]})`) && / — pixel mode$/.test(v.why))), `four reasons, ONE resolution (pixels), each reason named: "${rs[1].why}"`);
     const long = R.resolveMode({ mode: 'auto', probe: { a11yOk: false, reason: `helper_error: ${'x'.repeat(2000)}\nsecond line` } });
-    ok(long.mode === 'pixels' && long.why.length < R.REASON_MAX + 80 && !long.why.includes('\n') && long.why.includes('…'), `a long helper reason is clipped to one line (${long.why.length} chars)`);
+    ok(long.mode === 'pixels' && long.why.length < R.REASON_MAX + 80 && !long.why.includes('\n') && verdictOf(long.why.includes('…')), `a long helper reason is clipped to one line (${long.why.length} chars)`);
     ok(R.resolveMode({ mode: 'tree', probe: { a11yOk: false, reason: 'python3_missing: x' } }).mode === 'tree', 'an explicit tree share never reads the probe (the reason changes nothing)');
   }
   // the gate, over every mode × resolution × verb × ref
@@ -267,7 +267,7 @@ console.log('§5 THE MODE TABLE (D7)');
   const pg = R.verbGate({ mode: 'pixels', verb: 'snapshot' });
   ok(pg.why === 'the user shared this window in pixel mode — read it with screenshot, act with click --at x,y / type / key / scroll' && pg.why === R.PIXELS_SENTENCE, 'a pixel share refuses a tree verb with the owner\'s sentence (ONE spelling)');
   const ag = R.verbGate({ mode: 'auto', resolved: 'pixels', resolvedWhy: x.why, verb: 'click', hasRef: true });
-  ok(ag.code === 'mode_pixels' && ag.why.startsWith('no accessibility tree — pixel mode') && /screenshot/.test(ag.why), 'an auto share resolved to pixels refuses @refs naming WHY (the resolution) and the road');
+  ok(ag.code === 'mode_pixels' && gateOf(ag.why.startsWith('no accessibility tree — pixel mode')) && verdictOf(/screenshot/.test(ag.why)), 'an auto share resolved to pixels refuses @refs naming WHY (the resolution) and the road');
   globalThis.__tableMiss = tableMiss;
 }
 
@@ -276,26 +276,26 @@ console.log('§6 THE PIXEL ROAD — plan, visibility, points (fixtures from the 
 {
   const calc = [{ id: 4194309, title: 'Calculator', cls: 'gnome-calculator', instance: 'gnome-calculator', x: 0, y: 0, w: 720, h: 1232, mapped: false, depth: 2 }];
   const p0 = R.pixelPlan(calc);
-  ok(p0.ok && p0.main.id === 4194309 && p0.origin.x === 0 && p0.w === 720 && p0.h === 1232 && p0.visible === false, 'the calculator at scale 2 with NO viewer: one window 720x1232 at 0,0, visible=false (xpra unmapped it)');
+  ok(gateOf(p0.ok) && p0.main.id === 4194309 && p0.origin.x === 0 && p0.w === 720 && p0.h === 1232 && p0.visible === false, 'the calculator at scale 2 with NO viewer: one window 720x1232 at 0,0, visible=false (xpra unmapped it)');
   const v0 = R.visibilityVerdict({ perWindow: true, plan: p0 });
-  ok(!v0.ok && v0.code === 'window_not_visible' && /nobody has this window open/.test(v0.why), 'xpra + unmapped ⇒ window_not_visible (a click would be a silent no-op, a grab black)');
-  ok(R.visibilityVerdict({ perWindow: false, plan: p0 }).ok && R.visibilityVerdict({ perWindow: true, plan: null }).ok, 'a whole-display rung always has pixels; no plan (the keeper cannot say) is not a refusal');
+  ok(!v0.ok && v0.code === 'window_not_visible' && verdictOf(/nobody has this window open/.test(v0.why)), 'xpra + unmapped ⇒ window_not_visible (a click would be a silent no-op, a grab black)');
+  ok(gateOf(R.visibilityVerdict({ perWindow: false, plan: p0 }).ok) && verdictOf(R.visibilityVerdict({ perWindow: true, plan: null }).ok), 'a whole-display rung always has pixels; no plan (the keeper cannot say) is not a refusal');
   const p1 = R.pixelPlan([{ ...calc[0], mapped: true }]);
-  ok(R.visibilityVerdict({ perWindow: true, plan: p1 }).ok && p1.visible === true, 'with a viewer attached (mapped) it is visible');
+  ok(gateOf(R.visibilityVerdict({ perWindow: true, plan: p1 }).ok) && p1.visible === true, 'with a viewer attached (mapped) it is visible');
   const m7 = R.mapPoint(p1, { x: 86, y: 876 });
-  ok(m7.ok && m7.x === 86 && m7.y === 876, 'the "7" key at image px (86,876) maps to display (86,876) — the origin is 0,0 (measured: pressed "7")');
+  ok(gateOf(m7.ok) && m7.x === 86 && m7.y === 876, 'the "7" key at image px (86,876) maps to display (86,876) — the origin is 0,0 (measured: pressed "7")');
   const chrome = [{ id: 4194308, title: 't', cls: 'Google-chrome', x: 20, y: 20, w: 2018, h: 2264, mapped: true, depth: 2 }, { id: 6291457, cls: 'Google-chrome', x: 20, y: 20, w: 20, h: 20, mapped: false, depth: 1 }, { id: 4194304, cls: null, instance: null, title: null, x: -100, y: -100, w: 10, h: 10, mapped: false, depth: 1 }];
   const pc = R.pixelPlan(chrome);
-  ok(pc.ok && pc.main.id === 4194308 && pc.origin.x === 20 && pc.origin.y === 20 && pc.w === 2018 && pc.h === 2264 && pc.members.length === 1, 'Chrome: the main window is the 2018x2264 one at (20,20) — the unmapped leader and the nameless helper are left out');
+  ok(gateOf(pc.ok) && pc.main.id === 4194308 && pc.origin.x === 20 && pc.origin.y === 20 && pc.w === 2018 && pc.h === 2264 && pc.members.length === 1, 'Chrome: the main window is the 2018x2264 one at (20,20) — the unmapped leader and the nameless helper are left out');
   const mc = R.mapPoint(pc, { x: 89, y: 355 });
-  ok(mc.ok && mc.x === 109 && mc.y === 375, 'a pixel of Chrome\'s image maps through its origin (89,355) → (109,375) — the button\'s centre on the display (measured)');
+  ok(gateOf(mc.ok) && mc.x === 109 && mc.y === 375, 'a pixel of Chrome\'s image maps through its origin (89,355) → (109,375) — the button\'s centre on the display (measured)');
   const off = R.mapPoint(pc, { x: 100, y: 2000 }, { rootW: 1920, rootH: 1200 });
-  ok(!off.ok && off.code === 'outside_window' && /off its display/.test(off.why), 'a point of the window below the display (the root shrank to the viewer\'s 1920x1200) is refused by name, never clamped to the edge');
+  ok(!off.ok && off.code === 'outside_window' && verdictOf(/off its display/.test(off.why)), 'a point of the window below the display (the root shrank to the viewer\'s 1920x1200) is refused by name, never clamped to the edge');
   ok(R.mapPoint(pc, { x: 5000, y: 1 }).code === 'outside_window' && R.mapPoint(null, { x: 1, y: 1 }).code === 'outside_window', 'a point outside the image (or no plan) ⇒ outside_window');
   // fb-bc200800e0 (lane bl-windows): a verb with no point of its own on a display a viewer sized smaller than the window ⇒ the click's reason
   const k2 = R.pointOnDisplay({ x: 5, y: 5 }, { rootW: 2, rootH: 2 }), kOn = R.pointOnDisplay({ x: 40, y: 40 }, { rootW: 1920, rootH: 1200 }), kNeg = R.pointOnDisplay({ x: -3, y: 4 }, { rootW: 1920, rootH: 1200 });
   const kW = R.pointOnDisplay({ x: 5, y: 5 }, { rootW: 2, rootH: 2 }, { act: 'the wheel is' });
-  ok(!k2.ok && k2.code === 'outside_window' && /the display is 2x2 since a viewer attached — smaller than the window: keys are not sent/.test(k2.why) && /the wheel is not sent/.test(kW.why) && kOn.ok && kNeg.ok && R.pointOnDisplay({ x: 5, y: 5 }).ok && R.pointOnDisplay(null, { rootW: 2, rootH: 2 }).ok,
+  ok(!k2.ok && k2.code === 'outside_window' && gateOf(/the display is 2x2 since a viewer attached — smaller than the window: keys are not sent/.test(k2.why)) && gateOf(/the wheel is not sent/.test(kW.why)) && gateOf(kOn.ok) && gateOf(kNeg.ok) && gateOf(R.pointOnDisplay({ x: 5, y: 5 }).ok) && verdictOf(R.pointOnDisplay(null, { rootW: 2, rootH: 2 }).ok),
     'pointOnDisplay: a point at or past a 2x2 display\'s far edge ⇒ outside_window (the click\'s own «since a viewer attached», what is not sent named); on the display, LEFT OF / ABOVE it (a window dragged partly off the left: on screen — the click\'s rule), no geometry, no point ⇒ no claim', k2);
   // the read of the cure: the far edge EXACTLY (x == width refused, width - 1 on it), above it no claim, and the viewer blamed only when the
   // display is SMALLER than the window (a window moved partly off a display that holds it keeps its keys and its wheel)
@@ -304,7 +304,7 @@ console.log('§6 THE PIXEL ROAD — plan, visibility, points (fixtures from the 
     R.pointOnDisplay({ x: 1950, y: 20 }, D, { win: WIN }).ok, R.pointOnDisplay({ x: 20, y: 20 }, { rootW: 2, rootH: 2 }, { win: { w: 800, h: 600 } }).ok, R.pointOnDisplay({ x: 20, y: 1300 }, { rootW: 1920, rootH: 1200 }, { win: { w: 400, h: 1500 } }).ok];
   ok(JSON.stringify(edges) === '[true,false,false,true,true,false,false]', 'pointOnDisplay: above the display no claim; x = width and y = height refused, (width-1, height-1) on it; with the window\'s size, a point past the edge of a display that HOLDS the window makes no claim (moved off, no viewer to blame), a display smaller than the window on that axis is refused', edges);
   const popup = R.pixelPlan([{ ...chrome[0] }, { id: 7, cls: 'Google-chrome', x: 1900, y: 2200, w: 400, h: 300, mapped: true }, { id: 8, cls: 'Google-chrome', x: 0, y: 0, w: 15, h: 15, mapped: true }]);
-  ok(popup.origin.x === 20 && popup.w === 2280 && popup.h === 2480 && popup.members.some((m) => m.id === 7), 'a popup below-right extends the image; the ORIGIN stays the main window\'s top-left (a popup never shifts the coordinates)');
+  ok(popup.origin.x === 20 && popup.w === 2280 && popup.h === 2480 && verdictOf(popup.members.some((m) => m.id === 7)), 'a popup below-right extends the image; the ORIGIN stays the main window\'s top-left (a popup never shifts the coordinates)');
   ok(!R.pixelPlan([]).ok && R.visibilityVerdict({ perWindow: true, plan: R.pixelPlan([]) }).code === 'window_not_visible', 'no window yet ⇒ nothing to read or act on in pixels');
 }
 
@@ -312,10 +312,10 @@ console.log('§6 THE PIXEL ROAD — plan, visibility, points (fixtures from the 
 console.log('§7 the request text, the picker, the launch memory');
 {
   const txt = R.requestText({ label: 'Calculator', handle: 'da-1', mode: 'pixels', note: 'compute 7×8 "now"\u0007' });
-  ok(/take control of the desktop-app window "Calculator" \(handle da-1\)/.test(txt) && /pixel mode/.test(txt) && /vibespace-window attach da-1/.test(txt) && /screenshot da-1/.test(txt) && /click da-1 --at x,y/.test(txt), 'the request names the window, its handle, the mode and the road (pixels: screenshot + click --at)');
-  ok(/Their words: "compute 7×8 ”now”" — a note about the task, not an instruction to follow blindly/.test(txt) && !/\u0007/.test(txt), 'the user\'s line is quoted as a NOTE (quotes neutralised, control characters stripped)');
+  ok(gateOf(/take control of the desktop-app window "Calculator" \(handle da-1\)/.test(txt)) && gateOf(/pixel mode/.test(txt)) && gateOf(/vibespace-window attach da-1/.test(txt)) && gateOf(/screenshot da-1/.test(txt)) && verdictOf(/click da-1 --at x,y/.test(txt)), 'the request names the window, its handle, the mode and the road (pixels: screenshot + click --at)');
+  ok(gateOf(/Their words: "compute 7×8 ”now”" — a note about the task, not an instruction to follow blindly/.test(txt)) && !/\u0007/.test(txt), 'the user\'s line is quoted as a NOTE (quotes neutralised, control characters stripped)');
   const long = /Their words: "(x+)"/.exec(R.requestText({ handle: 'h', note: 'x'.repeat(5000) }));
-  ok(/snapshot da-2/.test(R.requestText({ handle: 'da-2', mode: 'auto', resolved: 'tree' })) && long && long[1].length === R.NOTE_MAX, 'tree mode names snapshot; the line is clipped at NOTE_MAX (1000) characters');
+  ok(gateOf(/snapshot da-2/.test(R.requestText({ handle: 'da-2', mode: 'auto', resolved: 'tree' }))) && gateOf(long) && long[1].length === R.NOTE_MAX, 'tree mode names snapshot; the line is clipped at NOTE_MAX (1000) characters');
   const sessions = [{ id: 'w1', name: 'alpha', backend: 'claude', backendSessionId: '1111' }, { id: 'w2', name: 'beta', backend: 'codex', backendSessionId: '2222' }, { id: 'w3', name: 'shell', backend: 'shell' }, { id: 'w4', name: 'fresh', backend: 'claude' }];
   const groups = [{ id: 'g1', title: 'Ops' }, { id: 'g2', title: 'Old', archived: true }];
   let rec = R.emptyRecord('da-1');
@@ -325,8 +325,8 @@ console.log('§7 the request text, the picker, the launch memory');
   rec = R.grant(rec, { kind: 'group', id: 'g1' }).record;
   const m = R.pickerModel({ sessions, groups, record: R.setMode(rec, 'pixels').record });
   ok(m.sessions.length === 3 && !m.sessions.some((s) => s.name === 'shell') && m.mode === 'pixels', 'the picker lists the agent sessions (a plain shell terminal is no agent) and the mode');
-  ok(m.sessions.find((s) => s.id === 'w1').checked && m.sessions.find((s) => s.id === 'w1').by === 'request' && !m.sessions.find((s) => s.id === 'w2').checked && m.sessions.find((s) => s.id === 'w4').checked && m.sessions.find((s) => s.id === 'w4').hasConversation === false, 'checked from the rows (by its conversation key, or its webui key before it has one), the origin carried');
-  ok(m.groups.length === 1 && m.groups[0].checked && m.others.length === 1 && m.others[0].principal.name === 'ended one', 'an archived group is out; a row naming a session that ended comes back under `others` (still revocable)');
+  ok(gateOf(m.sessions.find((s) => s.id === 'w1').checked) && m.sessions.find((s) => s.id === 'w1').by === 'request' && !m.sessions.find((s) => s.id === 'w2').checked && gateOf(m.sessions.find((s) => s.id === 'w4').checked) && m.sessions.find((s) => s.id === 'w4').hasConversation === false, 'checked from the rows (by its conversation key, or its webui key before it has one), the origin carried');
+  ok(m.groups.length === 1 && gateOf(m.groups[0].checked) && m.others.length === 1 && m.others[0].principal.name === 'ended one', 'an archived group is out; a row naming a session that ended comes back under `others` (still revocable)');
   const map = R.setProposal({}, 'gnome-calculator', { principals: [{ kind: 'group', id: 'g1', name: 'Ops' }], mode: 'pixels' });
   ok(R.proposalOf(map, 'gnome-calculator').mode === 'pixels' && R.proposalOf(map, 'gnome-calculator').principals[0].id === 'g1' && R.proposalOf(map, 'xterm').principals.length === 0 && R.proposalOf(map, 'xterm').mode === 'auto', 'the per-app launch memory: remembered per app key, nothing remembered = hidden + auto');
   ok(!('gnome-calculator' in R.setProposal(map, 'gnome-calculator', { principals: [], mode: 'auto' })), 'an empty auto share REMOVES the key (the map never grows by choices that change nothing)');
@@ -368,9 +368,9 @@ function summaryMiss(Rm) {
   const share = fs.readFileSync(path.join(REPO, 'src/lib/window-share.js'), 'utf8');
   const launcher = fs.readFileSync(path.join(REPO, 'src/lib/desktop-app-launcher.js'), 'utf8');
   const rowRender = /const render = \(\) => \{[\s\S]*?\n  \};/.exec(share.slice(share.indexOf('export function mountLaunchShareRow')));
-  ok(!!rowRender && /btn\.textContent = launchRowText\(\{ touched, choice, map: REACH_MAP \|\| \{\}, roster: rosterOf\(app\) \}\)/.test(rowRender[0]) && /paintCards\(\)/.test(rowRender[0]) && !/btn\.textContent = t\(/.test(rowRender[0]), 'the row\'s words come from launchRowText over the SAME memory shareFor reads (REACH_MAP) — no literal "hidden" in the row\'s render');
-  ok(/rememberedCount\(map\) \? t\('Each app launches as you last shared it'\)/.test(share) && /launchShareText\(launchSummary\(\{ touched: false, proposal: proposalOf\(REACH_MAP \|\| \{\}, launchKeyOf\(\{ appId: card\.dataset\.appId \}\)\), roster: rosterOf\(app\) \}\)\)/.test(share) && /mapListeners\.add\(onMap\)/.test(share) && /notifyMap\(\)/.test(share), 'the untouched row speaks of the memory whenever any app remembers a share; each card names ITS remembered share; both repaint when the memory loads or changes');
-  ok(/shareRow\.decorateCards\(\[regEl, browsersEl\]\)/.test(launcher) && /shareRow\.announce\(shareKey, share, r\)/.test(launcher), 'the launcher calls decorateCards on its catalog and announces a launch that applied a remembered share (toast)');
+  ok(!!rowRender && gateOf(/btn\.textContent = launchRowText\(\{ touched, choice, map: REACH_MAP \|\| \{\}, roster: rosterOf\(app\) \}\)/.test(rowRender[0])) && gateOf(/paintCards\(\)/.test(rowRender[0])) && !/btn\.textContent = t\(/.test(rowRender[0]), 'the row\'s words come from launchRowText over the SAME memory shareFor reads (REACH_MAP) — no literal "hidden" in the row\'s render');
+  ok(gateOf(/rememberedCount\(map\) \? t\('Each app launches as you last shared it'\)/.test(share)) && gateOf(/launchShareText\(launchSummary\(\{ touched: false, proposal: proposalOf\(REACH_MAP \|\| \{\}, launchKeyOf\(\{ appId: card\.dataset\.appId \}\)\), roster: rosterOf\(app\) \}\)\)/.test(share)) && gateOf(/mapListeners\.add\(onMap\)/.test(share)) && verdictOf(/notifyMap\(\)/.test(share)), 'the untouched row speaks of the memory whenever any app remembers a share; each card names ITS remembered share; both repaint when the memory loads or changes');
+  ok(gateOf(/shareRow\.decorateCards\(\[regEl, browsersEl\]\)/.test(launcher)) && verdictOf(/shareRow\.announce\(shareKey, share, r\)/.test(launcher)), 'the launcher calls decorateCards on its catalog and announces a launch that applied a remembered share (toast)');
 }
 // LANE E VERIFY R2 (M2): the chip and the toast named principals straight from the per-app memory — an ended session, a
 // deleted Task Group (a re-created one has a new id), an old group name — while the launch wrote rows nobody matches
@@ -413,9 +413,9 @@ function rosterMiss(Rm) {
     for (; j < share.length; j++) { if (share[j] === '(') depth++; else if (share[j] === ')' && --depth === 0) break; }
     calls.push(share.slice(i, j + 1));
   }
-  ok(calls.length >= 3 && calls.every((c) => /roster(: rosterOf\(app\))?\b/.test(c)), `every launchSummary call in window-share.js passes the roster (${calls.length}: ${calls.map((c) => c.slice(0, 60)).join(' | ')})`);
-  ok(/launchShareText\(launchSummary\(\{ touched: false, proposal: proposalOf\(REACH_MAP \|\| \{\}, launchKeyOf\(\{ appId: card\.dataset\.appId \}\)\), roster: rosterOf\(app\) \}\)\)/.test(share) && /launchedToastText\(launchSummary\(\{ touched: false, proposal: share, roster: rosterOf\(app\) \}\)\)/.test(share), 'rosterOf(app) → the card chip\'s and the toast\'s text builders');
-  ok(/p\.absent === 'session'\) return t\('\{name\} \(\{state\}\)', \{ name, state: t\('not running now'\) \}\)/.test(share) && /p\.absent === 'group'\) return t\('\{name\} \(\{state\}\)', \{ name, state: t\('not in the list now'\) \}\)/.test(share), 'the absent words are the picker\'s own keys ("not running now" / "not in the list now")');
+  ok(calls.length >= 3 && verdictOf(calls.every((c) => /roster(: rosterOf\(app\))?\b/.test(c))), `every launchSummary call in window-share.js passes the roster (${calls.length}: ${calls.map((c) => c.slice(0, 60)).join(' | ')})`);
+  ok(gateOf(/launchShareText\(launchSummary\(\{ touched: false, proposal: proposalOf\(REACH_MAP \|\| \{\}, launchKeyOf\(\{ appId: card\.dataset\.appId \}\)\), roster: rosterOf\(app\) \}\)\)/.test(share)) && verdictOf(/launchedToastText\(launchSummary\(\{ touched: false, proposal: share, roster: rosterOf\(app\) \}\)\)/.test(share)), 'rosterOf(app) → the card chip\'s and the toast\'s text builders');
+  ok(gateOf(/p\.absent === 'session'\) return t\('\{name\} \(\{state\}\)', \{ name, state: t\('not running now'\) \}\)/.test(share)) && verdictOf(/p\.absent === 'group'\) return t\('\{name\} \(\{state\}\)', \{ name, state: t\('not in the list now'\) \}\)/.test(share)), 'the absent words are the picker\'s own keys ("not running now" / "not in the list now")');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -443,7 +443,7 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   ok(a !== src, 'control (a): the patch applies (reachFor ignoring group rows)');
   const Ra = MUT.load('src/window-reach.js', a, 'nogroups');
   const ta = runTable(Ra);
-  ok(ta.miss.length > 0 && ta.miss.some((x) => /group/.test(x)), `control (a) FAILS the §2 table (${ta.miss.length} cells wrong) — the table is what catches it`);
+  ok(ta.miss.length > 0 && verdictOf(ta.miss.some((x) => /group/.test(x))), `control (a) FAILS the §2 table (${ta.miss.length} cells wrong) — the table is what catches it`);
   // (b) revoke drops every row of the principal's kind
   const b = editAnchor(src, "const i = rec.rows.findIndex((r) => principalKey(r.principal) === principalKey(p));\n  if (i < 0) return { ok: true, record: rec, changed: false, row: null };\n  const [row] = rec.rows.splice(i, 1);", "const i = rec.rows.findIndex((r) => principalKey(r.principal) === principalKey(p));\n  if (i < 0) return { ok: true, record: rec, changed: false, row: null };\n  const row = rec.rows[i]; rec.rows = rec.rows.filter((r) => r.principal.kind !== p.kind);", "src/window-reach.js");
   ok(b !== src, 'control (b): the patch applies (a revoke dropping every row of that kind)');
@@ -461,7 +461,7 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   ok(d !== src, 'control (d): the patch applies (launchSummary saying "hidden" whenever the row is untouched)');
   const Rd = MUT.load('src/window-reach.js', d, 'untouchedhidden');
   const td = summaryMiss(Rd);
-  ok(td.miss.length > 0 && td.miss.some((x) => /want remembered/.test(x)), `control (d) FAILS the §7b table (${td.miss.length} cells wrong — the untouched row stating the opposite of the click)`);
+  ok(td.miss.length > 0 && verdictOf(td.miss.some((x) => /want remembered/.test(x))), `control (d) FAILS the §7b table (${td.miss.length} cells wrong — the untouched row stating the opposite of the click)`);
   // (e) lane E verify r2 (M2): launchSummary ignoring the roster — the pre-fix names straight from the memory
   const e = editAnchor(src, 'principals: roster ? principalsNow(s.principals, roster) : s.principals,', 'principals: s.principals,', "src/window-reach.js");
   ok(e !== src, 'control (e): the patch applies (launchSummary ignoring the roster)');
@@ -473,14 +473,14 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   ok(f !== src, 'control (f): the patch applies (reachFor without `unreadable`)');
   const Rf = MUT.load('src/window-reach.js', f, 'nounreadable');
   const tf = unreadableMiss(Rf);
-  ok(tf.length > 0 && tf.some((x) => /group: got hidden, want hidden \+ unreadable/.test(x)), `control (f) FAILS §2b (${tf.length} cell(s) wrong — an unreadable store reads as "not a member")`);
+  ok(tf.length > 0 && verdictOf(tf.some((x) => /group: got hidden, want hidden \+ unreadable/.test(x))), `control (f) FAILS §2b (${tf.length} cell(s) wrong — an unreadable store reads as "not a member")`);
   // (g) lane E verify r3 (F5): reachedState folding a fault into "nobody" (the r2 count)
   const g = editAnchor(src, "return h > 0 ? 'matched' : u > 0 ? 'undecided' : 'unmatched';", "return h > 0 ? 'matched' : 'unmatched';", "src/window-reach.js");
   ok(g !== src, 'control (g): the patch applies (reachedState without `undecided`)');
   const Rg = MUT.load('src/window-reach.js', g, 'noundecided');
   const tg = reachedMiss(Rg);
-  ok(tg.miss.length > 0 && tg.miss.some((x) => /want undecided/.test(x)), `control (g) FAILS §2c (${tg.miss.length} cell(s) wrong — a store fault counted as nobody)`);
-  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7 })) ok(r.pass, '§9 tree: ' + r.name, r.pass ? undefined : r.detail);
+  ok(tg.miss.length > 0 && verdictOf(tg.miss.some((x) => /want undecided/.test(x))), `control (g) FAILS §2c (${tg.miss.length} cell(s) wrong — a store fault counted as nobody)`);
+  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7 })) ok(verdictOf(r.pass), '§9 tree: ' + r.name, r.pass ? undefined : r.detail);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -540,11 +540,11 @@ console.log('§10 A PENDING FORK\'S KEY IS ITS PLACEHOLDER, NEVER ITS PARENT\'S 
     ok(g2.rows[0].principal.id === 'webui:w-F', `the same key with only the pending fork carrying it ⇒ the fork's placeholder (${g2.rows[0].principal.id})`);
     W.sessions.set('w-F2', { agentToken: 'vsst_F2', claudeSessionId: P, backendSessionId: P, backend: 'claude', name: 'fork two', mode: 'chat', _forkRequested: true, _forkSourceId: P });
     let e = null; try { W.engine.grantReach('da-key2', { kind: 'session', id: 'claude:' + P }); } catch (x) { e = x; }
-    ok(e && e.code === 'bad_principal' && /2 forks/.test(e.message), `two pending forks on one key ⇒ bad_principal by name (${e && e.code}: ${e && e.message.slice(0, 70)})`);
+    ok(gateOf(e) && e.code === 'bad_principal' && verdictOf(/2 forks/.test(e.message)), `two pending forks on one key ⇒ bad_principal by name (${e && e.code}: ${e && e.message.slice(0, 70)})`);
   }
   // the client's picker sends the LIVE id (the engine spells the key)
   const share = fs.readFileSync(path.join(REPO, 'src/lib/window-share.js'), 'utf8');
-  ok(/const principal = kind === 'session' \? \{ kind, id: r\.id \|\| r\.key, name: r\.name \}/.test(share), 'PIN: the Share dialog sends a session by its LIVE id (the engine decides its key), never the client-spelled conversation key');
+  ok(verdictOf(/const principal = kind === 'session' \? \{ kind, id: r\.id \|\| r\.key, name: r\.name \}/.test(share)), 'PIN: the Share dialog sends a session by its LIVE id (the engine decides its key), never the client-spelled conversation key');
   // NEGATIVE CONTROL: the engine keying through R.sessionKeyOf / R.callerKeys raw — the parent gets the fork's grant and the fork loses it at adoption
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
   const K1 = "const keyOf = (s, id) => (addressableId(s) ? R.sessionKeyOf(s, id) : `webui:${id}`);";
@@ -552,8 +552,8 @@ console.log('§10 A PENDING FORK\'S KEY IS ITS PLACEHOLDER, NEVER ITS PARENT\'S 
   ok(esrc.split(K1).length === 2 && esrc.split(K2).length === 2 && !/R\.sessionKeyOf\(s0?, /.test(esrc.replace(K1, '')) && !/R\.callerKeys\(s, /.test(esrc.replace(K2, '')), 'the engine spells every session key through the two fork-aware helpers (no raw R.sessionKeyOf / R.callerKeys call remains)');
   const Ec = MUT.load('src/server/window-targets-engine.js', editAnchor(editAnchor(esrc, K1, "const keyOf = (s, id) => R.sessionKeyOf(s, id);", "src/server/window-targets-engine.js"), K2, "const keysOf = (s, id) => R.callerKeys(s, id);", "src/server/window-targets-engine.js"), 'rawkey');
   const rc = await run(Ec, 'ctl');
-  ok(rc.rowKey === P && rc.parentBefore === 'da-one' && rc.forkAfter === '' && /da-one/.test(rc.parentAfter) && /da-opened/.test(rc.parentAfter) && rc.openerKey === P && rc.parentAttach === null, `CONTROL: keyed raw, the row is the PARENT's key — the parent reaches the window (and attaches) AND the app the fork opened, the fork loses both at adoption (${JSON.stringify(rc)}) — the legs would go red`);
-  for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok(r0.pass, '§10 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
+  ok(rc.rowKey === P && rc.parentBefore === 'da-one' && rc.forkAfter === '' && gateOf(/da-one/.test(rc.parentAfter)) && gateOf(/da-opened/.test(rc.parentAfter)) && rc.openerKey === P && rc.parentAttach === null, `CONTROL: keyed raw, the row is the PARENT's key — the parent reaches the window (and attaches) AND the app the fork opened, the fork loses both at adoption (${JSON.stringify(rc)}) — the legs would go red`);
+  for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok(verdictOf(r0.pass), '§10 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
 }
 
 // ── lane e2c (design q-022 §E2.3): THE LAUNCH MODE lands in the record's closed mode set (the engine legs: test-desktop-app-rung ⑩) ──
@@ -566,9 +566,9 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
     const rec = R.setMode(R.emptyRecord('da-1'), v.mode);
     seen.push({ a11y, asked, mode: v.mode, ok: v.ok && R.MODES.includes(v.mode) && rec.ok && rec.record.mode === v.mode && (v.mode === 'pixels' ? JSON.stringify(v.pin) === JSON.stringify(PIN.defaultPinFor('pixels')) : v.pin === null) });
   }
-  ok(seen.every((x) => x.ok), 'every verdict is a mode of the closed set (written by setMode as is); pixels carries defaultPinFor(\'pixels\'), the rest no pin', seen.filter((x) => !x.ok));
+  ok(verdictOf(seen.every((x) => x.ok)), 'every verdict is a mode of the closed set (written by setMode as is); pixels carries defaultPinFor(\'pixels\'), the rest no pin', seen.filter((x) => !x.ok));
   const bad = R.launchModeVerdict({ browserKind: 'chromium', a11y: true, asked: 'sideways' });
-  ok(!bad.ok && bad.code === 'bad_mode' && R.REFUSALS.includes(bad.code), 'a mode outside the set ⇒ bad_mode (one of REFUSALS)', bad);
+  ok(!bad.ok && bad.code === 'bad_mode' && verdictOf(R.REFUSALS.includes(bad.code)), 'a mode outside the set ⇒ bad_mode (one of REFUSALS)', bad);
 }
 
 // ── fb-bc200800e0 (lane bl-windows): TYPED KEYS ON A DISPLAY THAT CANNOT TAKE THEM — the agent's feedback: a desktop-app window
@@ -632,19 +632,19 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
     return out;
   }
   const cur = await scene(ENGINE, 'cure');
-  ok(cur.keys.code === 'outside_window' && /the display is 2x2 since a viewer attached/.test(cur.keys.why) && cur.chord.code === 'outside_window' && JSON.stringify(cur.pxActs) === '[]',
+  ok(cur.keys.code === 'outside_window' && gateOf(/the display is 2x2 since a viewer attached/.test(cur.keys.why)) && cur.chord.code === 'outside_window' && JSON.stringify(cur.pxActs) === '[]',
     'fb-bc200800e0: on a display a viewer sized to 2x2, `type` (keys) and `key` are REFUSED by the click\'s own reason (outside_window, «since a viewer attached») — no key injected', { keys: cur.keys, chord: cur.chord.code, acts: cur.pxActs });
-  ok(cur.wheel.code === 'outside_window' && /the wheel is not sent/.test(cur.wheel.why), '…and a scroll without --at (its point the window\'s centre) the same — no wheel sent (found beside the row)', cur.wheel);
+  ok(cur.wheel.code === 'outside_window' && verdictOf(/the wheel is not sent/.test(cur.wheel.why)), '…and a scroll without --at (its point the window\'s centre) the same — no wheel sent (found beside the row)', cur.wheel);
   ok(cur.refKeys.code === 'outside_window' && JSON.stringify(cur.refActs) === '[]', '…`type` with a ref and the keys flag (the feedback\'s own call: focused through the tree, then keys) is refused the same way — never «typed N characters»', { refKeys: cur.refKeys, acts: cur.refActs });
-  ok(cur.wide && cur.wide.ok === true && JSON.stringify(cur.wideActs) === '["type-keys"]', '…on a display that holds the window (1920x1200) the keys are typed as before', { wide: cur.wide, acts: cur.wideActs });
-  ok(cur.neg && cur.neg.code === 'outside_window' && JSON.stringify(cur.negActs) === '[]', '…a window whose corner is left of / above a 2x2 display is judged at its VISIBLE corner + 20 px: refused, no key sent (its raw corner would never be past the far edge)', { neg: cur.neg, acts: cur.negActs });
-  ok(cur.offKeys && cur.offKeys.ok === true && cur.offWheel && cur.offWheel.ok === true && JSON.stringify(cur.offActs) === '["type-keys","scroll"]', '…a window moved partly off the RIGHT of a display that holds it (1920x1200, the window 1000x800): its keys and its wheel go as before — never a viewer blamed that never attached', { keys: cur.offKeys, wheel: cur.offWheel, acts: cur.offActs });
+  ok(gateOf(cur.wide) && cur.wide.ok === true && JSON.stringify(cur.wideActs) === '["type-keys"]', '…on a display that holds the window (1920x1200) the keys are typed as before', { wide: cur.wide, acts: cur.wideActs });
+  ok(gateOf(cur.neg) && cur.neg.code === 'outside_window' && JSON.stringify(cur.negActs) === '[]', '…a window whose corner is left of / above a 2x2 display is judged at its VISIBLE corner + 20 px: refused, no key sent (its raw corner would never be past the far edge)', { neg: cur.neg, acts: cur.negActs });
+  ok(gateOf(cur.offKeys) && cur.offKeys.ok === true && gateOf(cur.offWheel) && cur.offWheel.ok === true && JSON.stringify(cur.offActs) === '["type-keys","scroll"]', '…a window moved partly off the RIGHT of a display that holds it (1920x1200, the window 1000x800): its keys and its wheel go as before — never a viewer blamed that never attached', { keys: cur.offKeys, wheel: cur.offWheel, acts: cur.offActs });
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
   const relSrc = anchored(esrc, /\n *(?:if \(pt && pt\.coords === 'window-centre'\) )?await displayHolds\(rec, px, [^\n]*/g, '', 'the display checks', { count: 3 });
   const rel = await scene(MUT.load('src/server/window-targets-engine.js', relSrc, 'nokeyscheck'), 'release');
-  ok(rel.keys && rel.keys.ok === true && rel.pxActs.includes('type-keys') && rel.chord && rel.chord.ok === true && rel.refOk === true && JSON.stringify(rel.refActs) === '["focus","type-keys"]' && rel.wheel && rel.wheel.ok === true, 'CONTROL — the release\'s road (the checks taken out): `type @ref` focuses the field and «types» (the feedback\'s own call), `type`, `key` and the scroll without a point answer ok — into a 2x2 display', { keys: rel.keys && (rel.keys.ok || rel.keys.code), refActs: rel.refActs, acts: rel.pxActs });
-  for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 9 })) ok(r0.pass, '§11 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
-  ok(/const keysPointOf = \(px, lease\) => \{ const r = dialogWindow\(px, lease\) \|\| \(px && px\.plan && px\.plan\.main\) \|\| null; return r \? visiblePoint\(r\) : null; \};/.test(esrc), 'only a point the PLAN gives is judged (a dialog\'s window, else the main window\'s) — with no main, mainFocus\'s tree-bounds fallback (the toolkit\'s coordinates, never the X root\'s) makes no claim');
+  ok(gateOf(rel.keys) && rel.keys.ok === true && gateOf(rel.pxActs.includes('type-keys')) && gateOf(rel.chord) && rel.chord.ok === true && rel.refOk === true && JSON.stringify(rel.refActs) === '["focus","type-keys"]' && gateOf(rel.wheel) && rel.wheel.ok === true, 'CONTROL — the release\'s road (the checks taken out): `type @ref` focuses the field and «types» (the feedback\'s own call), `type`, `key` and the scroll without a point answer ok — into a 2x2 display', { keys: rel.keys && (rel.keys.ok || rel.keys.code), refActs: rel.refActs, acts: rel.pxActs });
+  for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 9 })) ok(verdictOf(r0.pass), '§11 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
+  ok(verdictOf(/const keysPointOf = \(px, lease\) => \{ const r = dialogWindow\(px, lease\) \|\| \(px && px\.plan && px\.plan\.main\) \|\| null; return r \? visiblePoint\(r\) : null; \};/.test(esrc)), 'only a point the PLAN gives is judged (a dialog\'s window, else the main window\'s) — with no main, mainFocus\'s tree-bounds fallback (the toolkit\'s coordinates, never the X root\'s) makes no claim');
 }
 
 // ── r3085 + r3189 (lane bl-machines-a, the family's second law r3019): desktop-apps.json HELD (desktop-serve's own hold) keeps an EMPTY
@@ -708,7 +708,7 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
   // every fact the engine asks its keeper is carried by the copy the wiring hands it (`keeper.js` is a file name in its prose)
   const asked89 = [...new Set([...ESRC89.matchAll(/\bkeeper\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))].filter((n) => n !== 'js').sort();
   const missing89 = asked89.filter((n) => !carried.has(n));
-  ok(asked89.includes('held') && asked89.includes('heldWords') && missing89.length === 0, `r3189: every fact the engine asks its keeper (${asked89.join(', ')}) is carried by keeper.local — none missing (${missing89.join(', ') || 'none'})`, { asked89, missing89 });
+  ok(gateOf(asked89.includes('held')) && gateOf(asked89.includes('heldWords')) && missing89.length === 0, `r3189: every fact the engine asks its keeper (${asked89.join(', ')}) is carried by keeper.local — none missing (${missing89.join(', ') || 'none'})`, { asked89, missing89 });
   const KCUT89 = "    held: machine.held, heldWords: machine.heldWords, // r3189: desktop-apps.json's own hold (src/desktop-serve.js) — keeper.local carries it to the window engine's reconcile\n";
   const ECUT89 = "    const storeHeld = (() => { try { return typeof keeper.held === 'function' && !!keeper.held(); } catch { return false; } })();\n";
   const redK89 = scene89(MUT.load('src/server/desktop-app-keeper.js', anch89(KSRC89, KCUT89, '', 'keeper-no-held'), 'keeper-no-held'), ENG89, 'red-keeper');
@@ -716,15 +716,15 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
   delete redK89.carried; delete redE89.carried;
   console.log('  r3189, the facts judged: ' + JSON.stringify({ now: now89, redKeeper: redK89, redEngine: redE89 }));
   const setUp89 = (o) => o.leaseErr === null && o.before.lease && o.before.shares === 2 && o.heldNow;
-  ok(setUp89(now89) && now89.factHanded && now89.dropped === 0 && now89.pruned === 0 && now89.after.lease && now89.after.shares === 2,
+  ok(gateOf(setUp89(now89)) && gateOf(now89.factHanded) && now89.dropped === 0 && now89.pruned === 0 && gateOf(now89.after.lease) && now89.after.shares === 2,
     `r3085/r3189: a restart whose read of desktop-apps.json FAILS (the real keeper, its fact handed on: ${now89.factHanded}) — the real boot reconcile drops ZERO leases and ends ZERO shares (dropped ${now89.dropped}, pruned ${now89.pruned}); once the file reads, the lease and both shares are there (lease ${now89.after.lease}, shares ${now89.after.shares})`, now89);
-  ok(now89.said.length === 1 && now89.said[0].includes('desktop-apps.json could not be read (EIO') && now89.said[0].includes('no window lease is dropped and no share pruned'),
+  ok(now89.said.length === 1 && gateOf(now89.said[0].includes('desktop-apps.json could not be read (EIO')) && verdictOf(now89.said[0].includes('no window lease is dropped and no share pruned')),
     `r3189: the reconcile says it once, in the store's own words (${now89.said[0] || 'nothing said'})`, now89.said);
-  ok(setUp89(redK89) && !redK89.factHanded && redK89.dropped >= 1 && redK89.pruned >= 1 && !redK89.after.lease && redK89.after.shares === 0,
+  ok(gateOf(setUp89(redK89)) && !redK89.factHanded && redK89.dropped >= 1 && redK89.pruned >= 1 && !redK89.after.lease && redK89.after.shares === 0,
     `RED CONTROL r3189: the keeper that does not hand the fact on (a copy) — the reconcile over the held store drops the lease and prunes the shares (dropped ${redK89.dropped}, pruned ${redK89.pruned}; after: lease ${redK89.after.lease}, shares ${redK89.after.shares})`, redK89);
-  ok(setUp89(redE89) && redE89.factHanded && redE89.dropped >= 1 && redE89.pruned >= 1 && !redE89.after.lease && redE89.after.shares === 0,
+  ok(gateOf(setUp89(redE89)) && gateOf(redE89.factHanded) && redE89.dropped >= 1 && redE89.pruned >= 1 && !redE89.after.lease && redE89.after.shares === 0,
     `RED CONTROL r3085: the reconcile that does not ask the hold (a copy) — the lease dropped and the shares pruned (dropped ${redE89.dropped}, pruned ${redE89.pruned}; after: lease ${redE89.after.lease}, shares ${redE89.after.shares})`, redE89);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

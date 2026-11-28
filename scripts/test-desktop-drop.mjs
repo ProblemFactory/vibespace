@@ -27,7 +27,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const root = mintRoot('deskdrop-smoke'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + JSON.stringify(e) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + JSON.stringify(e) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -76,7 +76,7 @@ try {
     return { ok: reals.length === dm.desktops.length && reals.every((p, i) => p.dataset.desktopId === dm.desktops[i].id),
              ids: reals.map(p => p.dataset.desktopId), deskIds: dm.desktops.map(d => d.id) };
   })()`);
-  check('every real preview has dataset.desktopId matching its desktop (in order)', mapping.ok, mapping);
+  check('every real preview has dataset.desktopId matching its desktop (in order)', verdictOf(mapping.ok), mapping);
 
   // simulate the Stage preview: prepend a `.desktop-preview.stage-preview` into
   // the switcher container, then prove the OLD index map is off by one while
@@ -107,4 +107,4 @@ try {
   ws.close();
 }
 console.log(failed ? `\n${failed} FAILED` : '\ndesktop-drop test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

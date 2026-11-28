@@ -57,7 +57,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the stub CLI: the measured record shapes, scripted per user message ─────────
@@ -271,41 +271,41 @@ try {
   console.log('C1 two background helpers ask — each a card inside its own Agent card');
   const sid = await create('s1-helpers');
   check('a chat session is created (the stub behind the real chat-wrapper)', !!sid);
-  check('the chat window attaches', await attach(sid, 'T9 helpers'));
+  check('the chat window attaches', verdictOf(await attach(sid, 'T9 helpers')));
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Please use two helper agents in parallel to read example.com and example.org' }));
-  check('THE FINDING: the Bash helper\'s ask is a card in the parent chat', await waitFor(`!!(${ROW(sid, 'req-ui-B')})?.querySelector('.chat-perm-allow')`, 20000));
+  check('THE FINDING: the Bash helper\'s ask is a card in the parent chat', verdictOf(await waitFor(`!!(${ROW(sid, 'req-ui-B')})?.querySelector('.chat-perm-allow')`, 20000)));
   const tAskB = Date.now(); // verify r3: the Bash ask's first-seen instant — the For-you clock across C4's restart is judged against it
-  check('THE FINDING: the WebFetch helper\'s ask too', await waitFor(`!!(${ROW(sid, 'req-ui-A')})?.querySelector('.chat-perm-allow')`, 10000));
+  check('THE FINDING: the WebFetch helper\'s ask too', verdictOf(await waitFor(`!!(${ROW(sid, 'req-ui-A')})?.querySelector('.chat-perm-allow')`, 10000)));
   const c1 = await evalJs(`(() => { const a = ${ROW(sid, 'req-ui-A')}, b = ${ROW(sid, 'req-ui-B')}; return { aIn: !!a && a.closest('[data-tool-id]')?.dataset.toolId, bIn: !!b && b.closest('[data-tool-id]')?.dataset.toolId, aHead: a?.querySelector('.chat-helper-ask-head')?.textContent || '', aWhat: a?.querySelector('.chat-helper-ask-what')?.textContent || '', bWhat: b?.querySelector('.chat-helper-ask-what')?.textContent || '', always: a?.querySelector('.chat-perm-always')?.title || '' }; })()`);
   check('each ask sits inside ITS OWN helper\'s Agent card', c1.aIn === 'toolu_ui_A' && c1.bIn === 'toolu_ui_B', c1);
-  check('the card names the helper and what it wants (the url / the command)', /Helper “Fetch title of example\.com” needs your approval/.test(c1.aHead) && /WebFetch\s+https:\/\/example\.com/.test(c1.aWhat) && /Bash\s+curl -s https:\/\/example\.org/.test(c1.bWhat), c1);
-  check('its Always Allow carries the CLI\'s own suggestion (domain:example.com)', /WebFetch\(domain:example\.com\)/.test(c1.always), c1.always);
+  check('the card names the helper and what it wants (the url / the command)', gateOf(/Helper “Fetch title of example\.com” needs your approval/.test(c1.aHead)) && gateOf(/WebFetch\s+https:\/\/example\.com/.test(c1.aWhat)) && verdictOf(/Bash\s+curl -s https:\/\/example\.org/.test(c1.bWhat)), c1);
+  check('its Always Allow carries the CLI\'s own suggestion (domain:example.com)', verdictOf(/WebFetch\(domain:example\.com\)/.test(c1.always)), c1.always);
 
   // ═══ C2 the chip names who waits and goes there ═════════════════════════
   console.log('C2 the "waiting for you" chip');
-  check('the chip is up (the harness said requires_action)', await waitFor(`!!(${CHIP(sid)})`, 8000));
+  check('the chip is up (the harness said requires_action)', verdictOf(await waitFor(`!!(${CHIP(sid)})`, 8000)));
   const chipTitle = await evalJs(`(${CHIP(sid)})?.title || ''`);
-  check('THE FINDING: the chip NAMES who waits ("2 approvals are waiting (Helper “…”, Helper “…”)")', /^2 approvals are waiting \(Helper “Fetch title of example\.org”, Helper “Fetch title of example\.com”\)/.test(chipTitle), chipTitle);
+  check('THE FINDING: the chip NAMES who waits ("2 approvals are waiting (Helper “…”, Helper “…”)")', verdictOf(/^2 approvals are waiting \(Helper “Fetch title of example\.org”, Helper “Fetch title of example\.com”\)/.test(chipTitle)), chipTitle);
   await evalJs(`(() => { const l = ${LIST(sid)}; l.scrollTop = 0; return true; })()`); // move away so the jump has somewhere to go
-  check('a real click on the chip', await realClickEl(CHIP(sid)));
+  check('a real click on the chip', verdictOf(await realClickEl(CHIP(sid))));
   const landed = await waitFor(`(() => { const r = ${ROW(sid, 'req-ui-B')}; const l = ${LIST(sid)}; if (!r || !l) return false; const a = r.getBoundingClientRect(), b = l.getBoundingClientRect(); return r.classList.contains('chat-ask-flash') && a.top >= b.top - 2 && a.bottom <= b.bottom + 2; })()`, 4000);
-  check('THE FINDING: it lands on the OLDEST ask (Bash) — in view and flashed', landed);
+  check('THE FINDING: it lands on the OLDEST ask (Bash) — in view and flashed', verdictOf(landed));
   await sleep(1200); // the landing re-centres at 180/400/750 ms (_scrollElStable) — a click aimed before it settles hits whatever moved under it
 
   // ═══ C3 the helper's View Log carries the same ask and answers it ═════════
   console.log('C3 the WebFetch helper\'s View Log');
-  check('its View Log button is there', await realClickEl(`(${CARD(sid, 'toolu_ui_A')})?.querySelector('.chat-agent-view-btn')`));
+  check('its View Log button is there', verdictOf(await realClickEl(`(${CARD(sid, 'toolu_ui_A')})?.querySelector('.chat-agent-view-btn')`)));
   const VIEWER = `(() => { const v = (${VIEW(sid)}); const wid = v?._subagentViewers?.get('sub-toolu_ui_A'); return wid ? app.wm.windows.get(wid)?.element : null; })()`;
-  check('THE FINDING: the View Log opens LIVE (sub-<tool_use_id>) while the helper runs', await waitFor(`!!${VIEWER}`, 8000),
+  check('THE FINDING: the View Log opens LIVE (sub-<tool_use_id>) while the helper runs', verdictOf(await waitFor(`!!${VIEWER}`, 8000)),
     await evalJs(`(() => { const v = (${VIEW(sid)}); return { viewers: v?._subagentViewers ? [...v._subagentViewers.keys()] : null, wins: [...app.wm.windows.values()].map((w) => w.title || w.element?.querySelector('.window-title')?.textContent || '?'), btn: (() => { const b = (${CARD(sid, 'toolu_ui_A')})?.querySelector('.chat-agent-view-btn'); return b ? { ...b.dataset } : null; })(), ti: v?._messages?.find((m) => m.toolCallId === 'toolu_ui_A')?.taskInfo || null }; })()`));
-  check('THE FINDING: the helper\'s WebFetch card in its View Log has the Allow button', await waitFor(`!!${VIEWER}?.querySelector('[data-tool-id="toolu_ui_WA"] .chat-perm-allow')`, 10000));
-  check('a real click on Allow IN THE VIEW LOG', await realClickEl(`${VIEWER}?.querySelector('[data-tool-id="toolu_ui_WA"] .chat-perm-allow')`));
+  check('THE FINDING: the helper\'s WebFetch card in its View Log has the Allow button', verdictOf(await waitFor(`!!${VIEWER}?.querySelector('[data-tool-id="toolu_ui_WA"] .chat-perm-allow')`, 10000)));
+  check('a real click on Allow IN THE VIEW LOG', verdictOf(await realClickEl(`${VIEWER}?.querySelector('[data-tool-id="toolu_ui_WA"] .chat-perm-allow')`)));
   const gotA = await waitResponses('req-ui-A');
   check('THE FINDING: the PARENT\'s stdin gets ONE control_response for the helper\'s request id, behavior allow', gotA.length === 1 && gotA[0].response?.subtype === 'success' && gotA[0].response?.response?.behavior === 'allow' && gotA[0].response?.response?.updatedInput?.url === 'https://example.com', gotA);
-  check('the stub resumed the helper (its tool_result reached the View Log)', await waitFor(`/Example Domain/.test(${VIEWER}?.textContent || '')`, 8000));
-  check('the parent\'s card for that ask settles ("Allowed", no buttons)', await waitFor(`(() => { const r = ${ROW(sid, 'req-ui-A')}; return !!r && !r.querySelector('.chat-perm-btn') && /Allowed/.test(r.textContent); })()`, 8000));
+  check('the stub resumed the helper (its tool_result reached the View Log)', verdictOf(await waitFor(`/Example Domain/.test(${VIEWER}?.textContent || '')`, 8000)));
+  check('the parent\'s card for that ask settles ("Allowed", no buttons)', verdictOf(await waitFor(`(() => { const r = ${ROW(sid, 'req-ui-A')}; return !!r && !r.querySelector('.chat-perm-btn') && /Allowed/.test(r.textContent); })()`, 8000)));
   const chip2 = await evalJs(`(${CHIP(sid)})?.title || ''`);
-  check('the chip now names only the Bash helper', /^Helper “Fetch title of example\.org” needs your approval to use Bash/.test(chip2), chip2);
+  check('the chip now names only the Bash helper', verdictOf(/^Helper “Fetch title of example\.org” needs your approval to use Bash/.test(chip2)), chip2);
   await evalJs(`(() => { const v = (${VIEW(sid)}); const wid = v?._subagentViewers?.get('sub-toolu_ui_A'); if (wid) app.wm.closeWindow?.(wid); return true; })()`);
 
   // ═══ C4 restart ═════════════════════════════════════════════════════════
@@ -317,7 +317,7 @@ try {
   try { srv.kill('SIGKILL'); } catch {}
   await sleep(600);
   startServer();
-  check('the server comes back', await waitServer());
+  check('the server comes back', verdictOf(await waitServer()));
   try { liveWs.close(); } catch {}
   await openWs(); // the old socket died with the server
   // A FRESH PAGE on the restarted server: the old page keeps its pre-restart DOM until its ws reconnects and the
@@ -328,7 +328,7 @@ try {
   await waitApp();
   await sleep(500);
   if (!(await waitFor(`!!(${VIEW(sid)})?._messageList`, 6000))) await attach(sid, 'T9 helpers');
-  check('the reloaded page shows the conversation from the restarted server (a new normalizer epoch)', await waitFor(`(() => { const e = (${VIEW(sid)})?._normEpoch || 0; return !!e && e !== ${Number(epochBefore) || 0}; })()`, 30000), { epochBefore });
+  check('the reloaded page shows the conversation from the restarted server (a new normalizer epoch)', verdictOf(await waitFor(`(() => { const e = (${VIEW(sid)})?._normEpoch || 0; return !!e && e !== ${Number(epochBefore) || 0}; })()`, 30000)), { epochBefore });
   // THE LIVE BRIDGE FIRST: a restored dtach session relays nothing until its bridge is judged alive —
   // records the stub writes in that window reach the buffer FILE (the rebuild below reads it) but not the
   // live parse (src/server/session-stdout.js armProbe heals the bridge). Probe with a harmless turn until
@@ -338,10 +338,10 @@ try {
     liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'ping-' + k }));
     alive = await waitFor(`[...((${LIST(sid)})?.querySelectorAll('.chat-msg') || [])].some((m) => /pong-[0-9]+/.test(m.textContent))`, 2500);
   }
-  check('the restored session\'s live bridge answers (a probe turn renders)', alive);
-  check('THE FINDING: after the restart the Bash helper\'s ask is still a live card with its buttons', await waitFor(`!!(${ROW(sid, 'req-ui-B')})?.querySelector('.chat-perm-always')`, 30000));
-  check('…still inside its helper\'s Agent card', await evalJs(`(${ROW(sid, 'req-ui-B')})?.closest('[data-tool-id]')?.dataset.toolId === 'toolu_ui_B'`));
-  check('…and the settled one stayed settled', await evalJs(`(() => { const r = ${ROW(sid, 'req-ui-A')}; return !!r && !r.querySelector('.chat-perm-btn'); })()`));
+  check('the restored session\'s live bridge answers (a probe turn renders)', verdictOf(alive));
+  check('THE FINDING: after the restart the Bash helper\'s ask is still a live card with its buttons', verdictOf(await waitFor(`!!(${ROW(sid, 'req-ui-B')})?.querySelector('.chat-perm-always')`, 30000)));
+  check('…still inside its helper\'s Agent card', verdictOf(await evalJs(`(${ROW(sid, 'req-ui-B')})?.closest('[data-tool-id]')?.dataset.toolId === 'toolu_ui_B'`)));
+  check('…and the settled one stayed settled', verdictOf(await evalJs(`(() => { const r = ${ROW(sid, 'req-ui-A')}; return !!r && !r.querySelector('.chat-perm-btn'); })()`)));
   // verify r3 (round 1's F8): THE 60 s FOR-YOU CLOCK SURVIVES THE RESTART — the ask's first-seen instant rides the
   // session meta (helperAskedAt); the restarted server files the item at ask+60 s, not restart+60 s. Judged only
   // when the restart came late enough for the two clocks to disagree (restart+60 > ask+65).
@@ -349,14 +349,14 @@ try {
   await sleep(Math.max(0, tAskB + 65000 - Date.now()));
   const itemsB = (await todosNow()).filter((t) => t.action && t.action.type === 'helper-ask' && t.action.requestId === 'req-ui-B');
   const clocksDisagree = tRestart + 60000 > tAskB + 65000;
-  check(`(r3) the For-you clock survived the restart: the Bash ask's item is on file at ask+${Math.round((Date.now() - tAskB) / 1000)} s (the restart was at ask+${Math.round((tRestart - tAskB) / 1000)} s — a restarted clock would file only at ask+${Math.round((tRestart - tAskB) / 1000) + 60} s)${clocksDisagree ? '' : ' [inconclusive: the restart came too early for the clocks to disagree]'}`, itemsB.some((t) => t.status === 'open') && clocksDisagree, { items: itemsB.map((t) => [t.status, t.text]), askToRestartS: Math.round((tRestart - tAskB) / 1000) });
+  check(`(r3) the For-you clock survived the restart: the Bash ask's item is on file at ask+${Math.round((Date.now() - tAskB) / 1000)} s (the restart was at ask+${Math.round((tRestart - tAskB) / 1000)} s — a restarted clock would file only at ask+${Math.round((tRestart - tAskB) / 1000) + 60} s)${clocksDisagree ? '' : ' [inconclusive: the restart came too early for the clocks to disagree]'}`, gateOf(itemsB.some((t) => t.status === 'open')) && verdictOf(clocksDisagree), { items: itemsB.map((t) => [t.status, t.text]), askToRestartS: Math.round((tRestart - tAskB) / 1000) });
 
   // ═══ C5 answered from the parent's card ═════════════════════════════════
   console.log('C5 Always Allow on the parent\'s card');
-  check('a real click on Always Allow', await realClickEl(`(${ROW(sid, 'req-ui-B')})?.querySelector('.chat-perm-always')`));
+  check('a real click on Always Allow', verdictOf(await realClickEl(`(${ROW(sid, 'req-ui-B')})?.querySelector('.chat-perm-always')`)));
   const gotB = await waitResponses('req-ui-B');
   check('THE FINDING: the stub gets the answer with updatedPermissions = the CLI\'s suggestion', gotB.length === 1 && gotB[0].response?.response?.behavior === 'allow' && JSON.stringify(gotB[0].response?.response?.updatedPermissions?.[0]?.rules) === JSON.stringify([{ toolName: 'Bash', ruleContent: 'curl -s https://example.org' }]), gotB);
-  check('the card settles and the chip goes (the harness said idle)', await waitFor(`(() => { const r = ${ROW(sid, 'req-ui-B')}; return !!r && !r.querySelector('.chat-perm-btn') && !(${CHIP(sid)}); })()`, 8000),
+  check('the card settles and the chip goes (the harness said idle)', verdictOf(await waitFor(`(() => { const r = ${ROW(sid, 'req-ui-B')}; return !!r && !r.querySelector('.chat-perm-btn') && !(${CHIP(sid)}); })()`, 8000)),
     await evalJs(`(() => { const v = (${VIEW(sid)}); const r = ${ROW(sid, 'req-ui-B')}; return { row: r ? r.textContent.slice(0, 120) : null, chip: (${CHIP(sid)})?.title || null, asks: v?._pendingAsks, turn: v?._statusBar?._turnState }; })()`));
   // verify r1: a SECOND answer for the same request (a stale client, the other window) writes NOTHING to stdin and is said
   {
@@ -366,33 +366,33 @@ try {
     await sleep(400);
     check('(r1) a second answer for a settled request: NO second control_response on stdin', responsesFor('req-ui-B').length === nBefore, responsesFor('req-ui-B'));
     const itemsB2 = (await todosNow()).filter((t) => t.action && t.action.type === 'helper-ask' && t.action.requestId === 'req-ui-B');
-    check('(r3) …and the answer resolved the item the restarted server had filed (the table: asked+press ⇒ resolve-item)', itemsB2.length >= 1 && itemsB2.every((t) => t.status !== 'open'), itemsB2.map((t) => [t.status, t.text]));
-    check('(r1) …and it is SAID to the sender (scope action, code permission-settled, plain words)', !!said && said.scope === 'action' && said.sessionId === sid && /Already answered — allowed/.test(said.message || ''), said);
+    check('(r3) …and the answer resolved the item the restarted server had filed (the table: asked+press ⇒ resolve-item)', itemsB2.length >= 1 && verdictOf(itemsB2.every((t) => t.status !== 'open')), itemsB2.map((t) => [t.status, t.text]));
+    check('(r1) …and it is SAID to the sender (scope action, code permission-settled, plain words)', !!said && said.scope === 'action' && said.sessionId === sid && verdictOf(/Already answered — allowed/.test(said.message || '')), said);
   }
 
   // ═══ C6 stop ════════════════════════════════════════════════════════════
   console.log('C6 stopping helpers that are waiting');
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'again, with two more helpers' }));
-  check('a background (D) and a foreground (C) helper ask', await waitFor(`!!(${ROW(sid, 'req-ui-D')})?.querySelector('.chat-perm-allow') && !!(${ROW(sid, 'req-ui-C')})?.querySelector('.chat-perm-allow')`, 15000),
+  check('a background (D) and a foreground (C) helper ask', verdictOf(await waitFor(`!!(${ROW(sid, 'req-ui-D')})?.querySelector('.chat-perm-allow') && !!(${ROW(sid, 'req-ui-C')})?.querySelector('.chat-perm-allow')`, 15000)),
     await evalJs(`(() => { const views = [...app.sessions.values()].filter((v) => v && v.sessionId === ${JSON.stringify(sid)}); return views.map((v) => ({ n: v._messages?.length, pong: (v._messages || []).some((m) => /pong/.test(JSON.stringify(m.content || ''))), connected: !!v._messageList?.isConnected, disposed: !!v._disposed, epoch: v._normEpoch, tools: (v._messages || []).filter((m) => m.toolCallId).map((m) => m.toolCallId) })); })()`));
-  check('the foreground helper\'s ask sits in its (still running) Agent card', await evalJs(`(${ROW(sid, 'req-ui-C')})?.closest('[data-tool-id]')?.dataset.toolId === 'toolu_ui_C'`));
+  check('the foreground helper\'s ask sits in its (still running) Agent card', verdictOf(await evalJs(`(${ROW(sid, 'req-ui-C')})?.closest('[data-tool-id]')?.dataset.toolId === 'toolu_ui_C'`)));
   liveWs.send(JSON.stringify({ type: 'interrupt', sessionId: sid }));   // Stop (a message typed mid-turn is held by the chat-wrapper since 2.369.354)
-  check('THE FINDING: both asks say "No longer waiting — the helper was stopped" (no buttons)', await waitFor(`['req-ui-C', 'req-ui-D'].every((rid) => { const r = (${LIST(sid)})?.querySelector('.chat-helper-ask[data-request-id="' + rid + '"]'); return !!r && !r.querySelector('.chat-perm-btn') && /No longer waiting — the helper was stopped/.test(r.textContent); })`, 10000));
+  check('THE FINDING: both asks say "No longer waiting — the helper was stopped" (no buttons)', verdictOf(await waitFor(`['req-ui-C', 'req-ui-D'].every((rid) => { const r = (${LIST(sid)})?.querySelector('.chat-helper-ask[data-request-id="' + rid + '"]'); return !!r && !r.querySelector('.chat-perm-btn') && /No longer waiting — the helper was stopped/.test(r.textContent); })`, 10000)));
   const c6 = await evalJs(`(() => { const d = ${CARD(sid, 'toolu_ui_D')}, c = ${CARD(sid, 'toolu_ui_C')}; return { dChip: d?.querySelector('.chat-tool-label .chat-task-status-chip')?.textContent || '', dChipTitle: d?.querySelector('.chat-tool-label .chat-task-status-chip')?.title || '', dLabel: d?.querySelector('.chat-tool-label')?.textContent || '', cText: c?.textContent || '' }; })()`);
   check('THE FINDING: the stopped background helper\'s title chip reads "stopped" (was "⟳ running")', c6.dChip === 'stopped' && c6.dChipTitle === 'Stopped before it finished' && !/running/.test(c6.dLabel), c6);
-  check('THE FINDING: the stopped foreground helper keeps its title and says "Stopped before it finished"', /Agent: Read the README \(foreground\)/.test(c6.cText) && /Stopped before it finished/.test(c6.cText), c6.cText.slice(0, 300));
+  check('THE FINDING: the stopped foreground helper keeps its title and says "Stopped before it finished"', gateOf(/Agent: Read the README \(foreground\)/.test(c6.cText)) && verdictOf(/Stopped before it finished/.test(c6.cText)), c6.cText.slice(0, 300));
   check('…never the CLI\'s canned rejection string', !/doesn't want to proceed|STOP what you are doing/.test(c6.cText));
 
   // ═══ C8 a late Allow says what became of it (B-9ff2's remainder) ════════
   console.log('C8 a late Allow says what became of it');
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'cut the release' }));
-  check('a MAIN-thread ask: its card offers Allow', await waitFor(`!!(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-allow')`, 15000),
+  check('a MAIN-thread ask: its card offers Allow', verdictOf(await waitFor(`!!(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-allow')`, 15000)),
     await evalJs(`(${CARD(sid, 'toolu_ui_L')})?.textContent?.slice(0, 200) || null`));
-  check('a real click on Allow', await realClickEl(`(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-allow')`));
+  check('a real click on Allow', verdictOf(await realClickEl(`(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-allow')`)));
   const gotL = await waitResponses('req-ui-L');
   check('the stub got the Allow (it answers with the crossing cancel and «not run», as 2.1.328 does)', gotL.length === 1 && gotL[0].response?.response?.behavior === 'allow', gotL);
   const lateLine = `((${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-permission-resolved')?.textContent || '')`;
-  check('THE FINDING: the card reads «Allowed too late — not run» (no buttons) — never «Allowed» as if done', await waitFor(`/Allowed too late — not run/.test(${lateLine}) && !(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-btn')`, 10000),
+  check('THE FINDING: the card reads «Allowed too late — not run» (no buttons) — never «Allowed» as if done', verdictOf(await waitFor(`/Allowed too late — not run/.test(${lateLine}) && !(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-btn')`, 10000)),
     await evalJs(lateLine));
   check('no page error during the run', pageErrors.length === 0, pageErrors);
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); } catch {}
@@ -402,24 +402,24 @@ try {
   const mmPath = path.join(wt, 'src', 'message-manager.js');
   const mmSrc = fs.readFileSync(mmPath, 'utf8');
   const needle = 'const helper = this._subView ? null : helperAskOf(raw);';
-  check('the patch site exists in the scratch worktree', mmSrc.includes(needle));
+  check('the patch site exists in the scratch worktree', verdictOf(mmSrc.includes(needle)));
   try { srv.kill('SIGKILL'); } catch {}
   await sleep(500);
   fs.writeFileSync(mmPath, mmSrc.replace(needle, 'const helper = null;')); // the SCRATCH worktree's copy (never the checkout)
   startServer();
-  check('the pre-lane server comes up', await waitServer());
+  check('the pre-lane server comes up', verdictOf(await waitServer()));
   await cdp('Page.reload', {});
   await waitApp();
   await sleep(500);
   try { liveWs.close(); } catch {}
   await openWs();
   const sid2 = await create('s1-control');
-  check('a second session on the pre-lane server', !!sid2 && await attach(sid2, 'control'));
+  check('a second session on the pre-lane server', !!sid2 && verdictOf(await attach(sid2, 'control')));
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid2, text: 'Please use two helper agents in parallel' }));
-  check('CONTROL: the chip still says "waiting for you" (the harness reported it)', await waitFor(`!!(${CHIP(sid2)})`, 15000));
+  check('CONTROL: the chip still says "waiting for you" (the harness reported it)', verdictOf(await waitFor(`!!(${CHIP(sid2)})`, 15000)));
   await sleep(1500);
   const ctl = await evalJs(`(() => { const l = ${LIST(sid2)}; return { rows: l?.querySelectorAll('.chat-helper-ask').length || 0, buttons: l?.querySelectorAll('.chat-perm-btn').length || 0, title: (${CHIP(sid2)})?.title || '' }; })()`);
-  check('CONTROL: on the pre-lane normalizer there is NO card and NO button anywhere (the studies\' state) — the finding legs above can go red', ctl.rows === 0 && ctl.buttons === 0 && /waiting for you — the turn is paused/.test(ctl.title), ctl);
+  check('CONTROL: on the pre-lane normalizer there is NO card and NO button anywhere (the studies\' state) — the finding legs above can go red', ctl.rows === 0 && ctl.buttons === 0 && verdictOf(/waiting for you — the turn is paused/.test(ctl.title)), ctl);
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid2 })); liveWs.close(); } catch {}
 } catch (e) {
   failed++;
@@ -428,4 +428,4 @@ try {
 if ((failed || process.env.S1_KEEP_ALWAYS) && process.env.S1_KEEP_LOG) { try { fs.copyFileSync(SRV_LOG, process.env.S1_KEEP_LOG); fs.copyFileSync(STDIN_LOG, process.env.S1_KEEP_LOG + '.stdin'); } catch {} }
 console.log(`\n${failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`}`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

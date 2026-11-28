@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', typeof info === 'string' ? info.slice(0, 900) : JSON.stringify(info).slice(0, 900)); } };
+const ok = (c, name, info) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', typeof info === 'string' ? info.slice(0, 900) : JSON.stringify(info).slice(0, 900)); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -47,7 +47,7 @@ console.log('① THE PURE RULES — the sites of a login, the user each signs in
   const sameDomain = BL.siteWords(one, SSO), lookalike = BL.siteWords(one, OTHER);
   // a REAL IDN label (Node 22's URL, the hosted runner's, refuses an invented punycode label — the test machine found it)
   const puny = BL.siteWords(one, 'https://xn--bcher-kva.example', { decode: () => 'bücher.example' });
-  ok(!sameDomain.lookalike && lookalike.lookalike && lookalike.lookalike.domain === 'lms-school.example' && lookalike.lookalike.loginDomains.join() === 'school.test' && puny.unicode === 'bücher.example' && puny.ascii === 'xn--bcher-kva.example',
+  ok(!sameDomain.lookalike && gateOf(lookalike.lookalike) && lookalike.lookalike.domain === 'lms-school.example' && lookalike.lookalike.loginDomains.join() === 'school.test' && puny.unicode === 'bücher.example' && puny.ascii === 'xn--bcher-kva.example',
     'A LOOK-ALIKE IS SAID (主开发\'s addition 1): a site under ANOTHER registrable domain than every site of the login names both domains; a host that is not plain ASCII is shown with its ASCII form beside it', { sameDomain, lookalike, puny });
 }
 
@@ -56,9 +56,9 @@ console.log('② THE ADD, THE REMOVE, THE MERGE — PURE verdicts');
   const one = rec();
   const entries = [{ name: BL.entryName(LMS, 'jdoe'), origin: LMS, user: 'jdoe' }, { name: BL.entryName(PORTAL, 'jdoe'), origin: PORTAL, user: 'jdoe' }];
   const add = BL.addSiteVerdict({ rec: one, name: entries[0].name, site: SSO, user: 'JDoe@School.test', entries });
-  ok(add.ok && add.record.origins.join() === SSO && add.record.siteUsers[SSO] === 'JDoe@School.test' && add.record.current.password === one.current.password, 'the add keeps the ONE secret and writes the site (and the name it signs in under there)', add);
+  ok(gateOf(add.ok) && add.record.origins.join() === SSO && add.record.siteUsers[SSO] === 'JDoe@School.test' && add.record.current.password === one.current.password, 'the add keeps the ONE secret and writes the site (and the name it signs in under there)', add);
   const shapes = ['https://*.school.test', `${SSO}/login`, 'sso.school.test', `${SSO}?a=1`, 'http://sso.school.test', LMS].map((x) => BL.addSiteVerdict({ rec: one, name: entries[0].name, site: x, entries }));
-  ok(shapes.every((v) => v.ok === false) && shapes.slice(0, 5).every((v) => v.code === 'login_bad_origin') && shapes[5].code === 'login_site_exists', 'EXACTLY THE SITE: a pattern, a path, a bare host, a query, plain http off this machine — refused by name; the login\'s own site is no second site', shapes.map((v) => v.code));
+  ok(gateOf(shapes.every((v) => v.ok === false)) && gateOf(shapes.slice(0, 5).every((v) => v.code === 'login_bad_origin')) && shapes[5].code === 'login_site_exists', 'EXACTLY THE SITE: a pattern, a path, a bare host, a query, plain http off this machine — refused by name; the login\'s own site is no second site', shapes.map((v) => v.code));
   const clash = BL.addSiteVerdict({ rec: one, name: entries[0].name, site: PORTAL, entries });
   ok(clash.ok === false && clash.code === 'login_exists' && clash.other === entries[1].name, 'A PAIR OF SITE AND USER IN TWO LOGINS IS REFUSED — the other login named (merge them instead)', clash);
   const clashMut = loadMutated('src/browser-login.js', (s) => s.replace("  const other = (entries || []).find((e) => e && e.name !== name && holdsPair(e, o, there));", '  const other = null;')).addSiteVerdict({ rec: one, name: entries[0].name, site: PORTAL, entries });
@@ -66,10 +66,10 @@ console.log('② THE ADD, THE REMOVE, THE MERGE — PURE verdicts');
   const full = BL.addSiteVerdict({ rec: rec({ origins: Array.from({ length: 8 }, (_, i) => `https://s${i}.school.test`) }), name: entries[0].name, site: SSO, entries });
   ok(full.ok === false && full.code === 'login_sites_full', 'a login keeps at most nine sites (the first + eight) — said', full);
   const rm = BL.removeSiteVerdict(add.record, SSO), rmFirst = BL.removeSiteVerdict(add.record, LMS), rmGone = BL.removeSiteVerdict(add.record, PORTAL);
-  ok(rm.ok && !rm.record.origins && !rm.record.siteUsers && rmFirst.code === 'login_site_first' && rmGone.code === 'login_site_absent', 'the REMOVE takes an added site and its name away; the first site is the login itself; a site not on it is said', { rm: rm.ok, rmFirst, rmGone });
+  ok(gateOf(rm.ok) && !rm.record.origins && !rm.record.siteUsers && rmFirst.code === 'login_site_first' && rmGone.code === 'login_site_absent', 'the REMOVE takes an added site and its name away; the first site is the login itself; a site not on it is said', { rm: rm.ok, rmFirst, rmGone });
   const keep = rec(), other = rec({ origin: SSO, username: 'jdoe@school.test', current: { password: 'Other!' + 'y'.repeat(10), source: 'owner', strength: 'unknown', setAt: 2 }, totpName: 'school-2fa', origins: [PORTAL] });
   const m = BL.mergeVerdict({ keep, keepName: entries[0].name, other, otherName: BL.entryName(SSO, 'jdoe@school.test'), entries: [entries[0], { name: BL.entryName(SSO, 'jdoe@school.test'), origin: SSO, user: 'jdoe@school.test', origins: [PORTAL] }] });
-  ok(m.ok && m.record.current.password === keep.current.password && m.record.origins.join() === `${SSO},${PORTAL}` && m.record.siteUsers[SSO] === 'jdoe@school.test' && m.record.siteUsers[PORTAL] === 'jdoe@school.test' && m.record.totpName === 'school-2fa',
+  ok(gateOf(m.ok) && m.record.current.password === keep.current.password && m.record.origins.join() === `${SSO},${PORTAL}` && m.record.siteUsers[SSO] === 'jdoe@school.test' && m.record.siteUsers[PORTAL] === 'jdoe@school.test' && m.record.totpName === 'school-2fa',
     'THE MERGE keeps the kept login\'s secret; the other\'s sites join under the name each signs in under; its two-step code comes along when the kept one has none (law 5)', m);
   const mClash = BL.mergeVerdict({ keep: rec({ origins: [SSO], siteUsers: { [SSO]: 'someone' } }), keepName: entries[0].name, other, otherName: 'x', entries: [] });
   ok(mClash.ok === false && mClash.code === 'login_merge_clash', 'a site on both logins under two names is refused — removed from one first', mClash);
@@ -91,7 +91,7 @@ console.log('③ THE FILL\'S RULE — a site not on the login\'s list never fill
     const res = r.resource;
     const muted = loadMutated('src/browser-login.js', (s) => s.replace('function loginResources(e, origin) {', `function loginResources(e, origin) { return loginResources0(e, origin).filter((x) => x !== ${JSON.stringify(res)}); }\nfunction loginResources0(e, origin) {`)).fillVerdict;
     const vr = verdict(muted, SSO, `${SSO.replace('https://', '')}#jdoe@school.test/password`, [r]);
-    ok(v.ok && v.entry.name === L.name && v.user === 'jdoe@school.test' && vr.ok === false && vr.code === 'login_not_granted', `ON THE ADDED SITE ${name} admits the login (and the name typed is the site's own) — RED CONTROL: that row dropped from the four, refused`, { v: v.ok ? 'ok' : v, vr: vr.code });
+    ok(gateOf(v.ok) && v.entry.name === L.name && v.user === 'jdoe@school.test' && vr.ok === false && vr.code === 'login_not_granted', `ON THE ADDED SITE ${name} admits the login (and the name typed is the site's own) — RED CONTROL: that row dropped from the four, refused`, { v: v.ok ? 'ok' : v, vr: vr.code });
   }
   const none = verdict(fv, SSO, `${SSO.replace('https://', '')}#jdoe@school.test/password`, []);
   ok(none.ok === false && none.code === 'login_not_granted', 'no row ⇒ refused by name');
@@ -107,10 +107,10 @@ console.log('③ THE FILL\'S RULE — a site not on the login\'s list never fill
   const near = ['https://sso.school.test.evil.test', 'https://a.sso.school.test', 'https://sso.school.test:8443', 'http://sso.school.test'];
   const nearV = (FV) => near.map((t) => ({ t, asHeld: verdict(FV, t, `${SSO.replace('https://', '')}#jdoe@school.test/password`, [row('*')]), asItself: verdict(FV, t, `${t.replace(/^https?:\/\//, '')}#jdoe@school.test/password`, [row('*')]) }));
   const nv = nearV(fv);
-  ok(nv.every((x) => x.asHeld.ok === false && x.asItself.ok === false), 'NEAR A HELD SITE IS NOT THE SITE: on a suffix, a subdomain, another port or another scheme of sso.school.test the login fills nothing — named as the held site (the fence) or as itself (no login there), even under «any site»', nv.map((x) => `${x.t}: ${x.asHeld.code} / ${x.asItself.code}`));
+  ok(verdictOf(nv.every((x) => x.asHeld.ok === false && x.asItself.ok === false)), 'NEAR A HELD SITE IS NOT THE SITE: on a suffix, a subdomain, another port or another scheme of sso.school.test the login fills nothing — named as the held site (the fence) or as itself (no login there), even under «any site»', nv.map((x) => `${x.t}: ${x.asHeld.code} / ${x.asItself.code}`));
   const nearMut = loadMutated('src/browser-login.js', (src) => src.replace("function userOnSite(e, origin) { const s = sitesOf(e).find((x) => x.origin === origin); return s ? s.user : null; }", "function userOnSite(e, origin) { const s = sitesOf(e).find((x) => String(origin).includes(x.origin.replace(/^https?:\\/\\//, ''))); return s ? s.user : null; }")).fillVerdict;
   const nvR = nearV(nearMut);
-  ok(nvR.some((x) => x.asItself.ok === true), 'RED CONTROL: a site match by host text (not the exact origin) fills the login on a near site — the leg above would read it', nvR.map((x) => `${x.t}: ${x.asItself.ok}`));
+  ok(verdictOf(nvR.some((x) => x.asItself.ok === true)), 'RED CONTROL: a site match by host text (not the exact origin) fills the login on a near site — the leg above would read it', nvR.map((x) => `${x.t}: ${x.asItself.ok}`));
 }
 
 console.log('④ THE STORE over a REAL vault engine — the add, the fill on the added site, the merge, the remove, the audit lines');
@@ -144,14 +144,14 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
   };
   const w = await run();
   const words = w.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), PORTAL);
-  ok(words.ok && words.site === PORTAL && !words.lookalike && words.widens.login.length === 1 && GM.principalKey(words.widens.login[0]).includes('conv-a'), 'THE WORDS BEFORE THE PRESS name, by their grants, who may then have the login filled on the new site (Q1 — the grant follows the login)', words);
+  ok(gateOf(words.ok) && words.site === PORTAL && !words.lookalike && words.widens.login.length === 1 && verdictOf(GM.principalKey(words.widens.login[0]).includes('conv-a')), 'THE WORDS BEFORE THE PRESS name, by their grants, who may then have the login filled on the new site (Q1 — the grant follows the login)', words);
   const a0 = audit().length;
   const add = w.logins.addSite(BL.entryName(LMS, 'jdoe'), { site: PORTAL }, { who: 'owner' });
   const line = audit().slice(a0);
-  ok(add.ok && add.site === PORTAL && /"event":"vault-web-login-site-added"/.test(line) && line.includes(PORTAL) && !line.includes(PW1), 'THE PERSON\'S ADD writes the site through the store\'s one writer — ONE audit line, never the secret', { add, line });
+  ok(gateOf(add.ok) && add.site === PORTAL && gateOf(/"event":"vault-web-login-site-added"/.test(line)) && gateOf(line.includes(PORTAL)) && !line.includes(PW1), 'THE PERSON\'S ADD writes the site through the store\'s one writer — ONE audit line, never the secret', { add, line });
   const f1 = fill(w.logins, PORTAL, 'portal.school.test#jdoe/password', 'conv-a');
   const fOtp = fill(w.logins, PORTAL, 'portal.school.test#jdoe/otp', 'conv-a');
-  ok(f1.ok && f1.value === PW1 && f1.name === BL.entryName(LMS, 'jdoe') && fOtp.ok && fOtp.value === '482910', 'ONE ACCOUNT, TYPED ONCE (law 1): the login fills on its added site with its one secret; the bound two-step code serves that site too (law 5)', { f1: f1.ok ? 'ok' : f1, fOtp: fOtp.ok ? 'ok' : fOtp });
+  ok(gateOf(f1.ok) && f1.value === PW1 && f1.name === BL.entryName(LMS, 'jdoe') && gateOf(fOtp.ok) && fOtp.value === '482910', 'ONE ACCOUNT, TYPED ONCE (law 1): the login fills on its added site with its one secret; the bound two-step code serves that site too (law 5)', { f1: f1.ok ? 'ok' : f1, fOtp: fOtp.ok ? 'ok' : fOtp });
   const fOff = fill(w.logins, 'https://elsewhere.school.test', 'elsewhere.school.test#jdoe/password', 'conv-a');
   ok(fOff.ok === false, 'a site not on the login\'s list fills nothing', fOff);
   // THE MERGE: the sign-in site's login joins the course site's — its grant row stays on its site
@@ -162,14 +162,14 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
   const viaOwn = fill(w.logins, SSO, 'sso.school.test#jdoe@school.test/password', 'conv-m');
   const userThere = fill(w.logins, SSO, 'sso.school.test#jdoe@school.test/user', 'conv-m');
   const notWidened = fill(w.logins, LMS, 'lms.school.test#jdoe/password', 'conv-m');
-  ok(mg.ok && gone && /"event":"vault-web-login-merged"/.test(mline) && !mline.includes(PW1) && !mline.includes(PW2) && viaOwn.ok && viaOwn.value === PW1 && userThere.value === 'jdoe@school.test' && notWidened.ok === false,
+  ok(gateOf(mg.ok) && gateOf(gone) && gateOf(/"event":"vault-web-login-merged"/.test(mline)) && !mline.includes(PW1) && !mline.includes(PW2) && gateOf(viaOwn.ok) && viaOwn.value === PW1 && userThere.value === 'jdoe@school.test' && notWidened.ok === false,
     'A MERGE LOSES NO GRANT AND WIDENS NONE (law 6): the other login is gone, its grant still admits ITS site (the kept secret, the name it signs in under there), never the kept login\'s first site; one audit line, no secret', { mg, gone, viaOwn: viaOwn.ok ? 'ok' : viaOwn, notWidened: notWidened.ok });
   // THE REMOVE: an added site leaves, and its own row with it (a later login holding that pair must not inherit it)
   const rmv = w.logins.removeSite(BL.entryName(LMS, 'jdoe'), SSO, { who: 'owner' });
   const after = fill(w.logins, SSO, 'sso.school.test#jdoe@school.test/password', 'conv-m');
-  ok(rmv.ok && rmv.grantRemoved === `${SSO}#jdoe@school.test` && after.ok === false && /"event":"vault-web-login-site-removed"/.test(audit()), 'THE REMOVE: the site leaves the login and its own grant row goes with it — one audit line', { rmv, after: after.ok });
+  ok(gateOf(rmv.ok) && rmv.grantRemoved === `${SSO}#jdoe@school.test` && after.ok === false && verdictOf(/"event":"vault-web-login-site-removed"/.test(audit())), 'THE REMOVE: the site leaves the login and its own grant row goes with it — one audit line', { rmv, after: after.ok });
   const listed = w.logins.list().entries.find((e) => e.name === BL.entryName(LMS, 'jdoe'));
-  ok(listed && Array.isArray(listed.sites) && listed.sites.map((x) => x.origin).join() === PORTAL && !JSON.stringify(listed).includes(PW1), 'the owner\'s list names each login\'s added sites (the row\'s sites line lands on lane cli-update-needs-nothing\'s row) — never a secret', listed && listed.sites);
+  ok(gateOf(listed) && gateOf(Array.isArray(listed.sites)) && listed.sites.map((x) => x.origin).join() === PORTAL && !JSON.stringify(listed).includes(PW1), 'the owner\'s list names each login\'s added sites (the row\'s sites line lands on lane cli-update-needs-nothing\'s row) — never a secret', listed && listed.sites);
   // (last: the red control's world re-makes both logins in the same vault)
   const wr = await run((s) => s.replace("        const d = vault.secretDrop(otherName);", "        const d = vault.secretDrop(otherName); try { const g = store(); for (const r of [`${BL.parseName(otherName).origin}#${BL.parseName(otherName).user}`]) g.remove(BL.DOOR, r, 'user'); } catch { }"));
   wr.logins.merge(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'), { who: 'owner' });
@@ -191,7 +191,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
   };
   const p1 = await onePair();
   const names1 = [p1.own, p1.agent, p1.card].map((r) => r && r.other);
-  ok([p1.own, p1.agent, p1.card].every((r) => r && r.ok === false && r.code === 'login_exists') && names1.every((n) => n === BL.entryName(LMS, 'jdoe')) && /change its password at that login's row/.test(p1.own.error) && /--vault https:\/\/portal\.school\.test#jdoe\/password/.test(p1.agent.error) && !p1.second && p1.fillNow.ok && p1.fillNow.value === PW1,
+  ok(gateOf([p1.own, p1.agent, p1.card].every((r) => r && r.ok === false && r.code === 'login_exists')) && gateOf(names1.every((n) => n === BL.entryName(LMS, 'jdoe'))) && gateOf(/change its password at that login's row/.test(p1.own.error)) && gateOf(/--vault https:\/\/portal\.school\.test#jdoe\/password/.test(p1.agent.error)) && !p1.second && gateOf(p1.fillNow.ok) && p1.fillNow.value === PW1,
     'ONE PAIR, ONE LOGIN AT EVERY DOOR (must 1): a pair held as an ADDED site is refused login_exists at the person\'s add, an agent\'s add and the save card — each names the login that holds it (its row is the door; the agent is told the fill); no second login, the fill still types the one secret', { own: p1.own, agent: p1.agent, card: p1.card, second: p1.second });
   const p1r = await onePair((s) => s.replace('  function pairHolder(name, origin, user) {\n    if (vstate() !== \'unlocked\') return null;', '  function pairHolder(name, origin, user) {\n    return null;'));
   ok(p1r.own.ok === true && p1r.second === true, 'RED CONTROL: without the pair rule at those doors a SECOND login is written for a pair the first holds — the leg above would read it', { own: p1r.own, second: p1r.second });
@@ -207,7 +207,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     return { v, g, pendingNow, m, kept: eng.hasEntry(other) };
   };
   const pd = await pend();
-  ok(pd.pendingNow && pd.m.ok === false && pd.m.code === 'login_pending_exists' && /confirm or discard it at its row first/.test(pd.m.error) && pd.kept,
+  ok(gateOf(pd.pendingNow) && pd.m.ok === false && pd.m.code === 'login_pending_exists' && gateOf(/confirm or discard it at its row first/.test(pd.m.error)) && verdictOf(pd.kept),
     'A LOGIN WITH A PENDING VALUE IS NOT MERGED AWAY (must 2 — chosen: refused by name, what to do first said): the other login and its unconfirmed password stay', { pendingNow: pd.pendingNow, m: pd.m, g: pd.g && (pd.g.ok ? 'ok' : pd.g) });
   const pdr = await pend((s) => s.replace("    if (x.rec.pending) return named('login_pending_exists',", "    if (false) return named('login_pending_exists',"));
   ok(!pd.pendingNow || (pdr.m.ok === true && pdr.kept === false), 'RED CONTROL: a merge that ignores the pending value drops the only copy of that site\'s new password — the leg above would read it', { m: pdr.m, kept: pdr.kept });
@@ -219,7 +219,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const ag = v.logins.addAgent({ origin: SSO, username: 'jdoe@school.test', password: PW2 }, { owner: 'conv-d', actor: 'conv-d' });
     const words = v.logins.mergeWordsFor(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'));
     const mg2 = v.logins.merge(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'), { who: 'owner' });
-    ok(ag.ok && words.ok && words.ownerLoses === 'conv-d' && words.joined.map((x) => x.origin).join() === SSO && words.widens.login.length === 1 && GM.principalKey(words.widens.login[0]).includes('conv-a') && mg2.ok && mg2.ownerLoses === 'conv-d',
+    ok(gateOf(ag.ok) && gateOf(words.ok) && words.ownerLoses === 'conv-d' && words.joined.map((x) => x.origin).join() === SSO && words.widens.login.length === 1 && gateOf(GM.principalKey(words.widens.login[0]).includes('conv-a')) && gateOf(mg2.ok) && mg2.ownerLoses === 'conv-d',
       'THE MERGE SAYS WHAT IT CHANGES, before the press and in its answer: the sites that join, by name who may then have the kept login filled there (its own row), and the conversation that stored the other login and loses its own fill there', { words, mg2 });
     const v2 = await run();
     eng.secretPut('totp:sso-2fa', 'JBSWY3DPEHPK3PXQ');
@@ -231,7 +231,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     eng.secretPut('totp:sso-2fa', 'JBSWY3DPEHPK3PXQ'); eng.secretDrop(BL.entryName(SSO, 'jdoe@school.test'));
     wr2.addOwn({ origin: SSO, username: 'jdoe@school.test', password: PW2, totpName: 'sso-2fa' }, { who: 'owner' });
     const w2r = wr2.mergeWordsFor(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'));
-    ok(w2.ok && w2.dropsTotp === 'sso-2fa' && m3.ok && m3.dropsTotp === 'sso-2fa' && !w2.ownerLoses && w2r.ok && !w2r.dropsTotp,
+    ok(gateOf(w2.ok) && w2.dropsTotp === 'sso-2fa' && gateOf(m3.ok) && m3.dropsTotp === 'sso-2fa' && !w2.ownerLoses && gateOf(w2r.ok) && !w2r.dropsTotp,
       'THE TWO-STEP CODE DROPPED when both logins have one is NAMED, before the press and in the answer — RED CONTROL: a plan that does not compare the two says nothing', { w2, m3: { ok: m3.ok, dropsTotp: m3.dropsTotp }, w2r });
   }
 
@@ -242,7 +242,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     v.logins.grant(BL.entryName(LMS, 'jdoe'), 'any-account', 'session:conv-q');
     const L = v.logins.list().entries.find((e) => e.name === BL.entryName(LMS, 'jdoe'));
     const keyed = (L.grants || []).map((g) => `${g.site}|${g.resource}`);
-    ok(keyed.includes(`${LMS}|${LMS}#jdoe`) && keyed.includes(`${SSO}|${SSO}#jdoe@school.test`) && keyed.includes(`${LMS}|${LMS}#*`),
+    ok(gateOf(keyed.includes(`${LMS}|${LMS}#jdoe`)) && gateOf(keyed.includes(`${SSO}|${SSO}#jdoe@school.test`)) && verdictOf(keyed.includes(`${LMS}|${LMS}#*`)),
       '(a) THE LIST answers a login\'s rows for EVERY site of it, each with its site — after a merge the other login\'s kept row is seen (and removable) at the kept login', keyed);
     const Lr = (await run((s) => s.replace("              ...(o && o.ok && o.rec ? BL.sitesOf(o.rec).slice(1).flatMap((x) => [...rowsAt(`${x.origin}#${BL.userOf(x.user)}`, x.origin), ...rowsAt(`${x.origin}#*`, x.origin)]) : []), ...wild],", '              ...wild],')));
     Lr.logins.merge(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'), { who: 'owner' });
@@ -295,7 +295,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const v3 = await run();
     const mfr = fl((s) => s.replace("        const d = vault.secretDrop(otherName);\n        if (d && d.ok === false) throw Object.assign(new Error(d.error || d.code), { code: d.code || 'not_written' });", "        const d = vault.secretDrop(otherName);")).merge(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'), { who: 'owner' });
     const afterR = v3.logins.list().entries.find((e) => e.name === BL.entryName(LMS, 'jdoe'));
-    ok(mf.ok === false && /both logins are as they were/.test(mf.error) && both && !(before.sites && before.sites.length) && mfr.ok === true && afterR.sites && afterR.sites.length === 1,
+    ok(mf.ok === false && gateOf(/both logins are as they were/.test(mf.error)) && gateOf(both) && !(before.sites && before.sites.length) && mfr.ok === true && gateOf(afterR.sites) && afterR.sites.length === 1,
       '(d) A MERGE WHOSE SECOND WRITE FAILS leaves both logins as they were (the kept record restored by the batch) — RED CONTROL: a merge that ignores the failed drop leaves two logins holding one pair', { mf, both, mfr: mfr.ok });
   }
 
@@ -314,7 +314,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const c1r = await pre((src) => src.replace("            const rs = BL.loginResources(e, there).flatMap((r) => rowsOf(r) || []);", "            const rs = BL.grantResources(e.origin, e.user).flatMap((r) => rowsOf(r) || []);"));   // stale-pins: kept — a red control whose mutant rebuilds the first site's three rows
     const c1t = await pre((src) => src.replace("httpMatches.some((e) => e.origin === httpLocal || (Array.isArray(e.origins) && e.origins.includes(httpLocal))) ? httpLocal : httpMatches[0].origin;", "httpMatches.some((e) => e.origin === httpLocal) ? httpLocal : httpMatches[0].origin;"));   // stale-pins: kept — a red control whose mutant rebuilds the old rewrite target
     ok(c1t.r.ok === false, 'RED CONTROL: a rewrite aimed at the matched login\'s FIRST site (not the local site it holds) refuses the fill — the leg below would read it', c1t.r.code);
-    ok(c1.mg.ok && c1.r.ok === true && c1.r.name === BL.entryName(LMS, 'jdoe') && c1r.r.ok === false,
+    ok(gateOf(c1.mg.ok) && c1.r.ok === true && c1.r.name === BL.entryName(LMS, 'jdoe') && c1r.r.ok === false,
       '(c) THE LOCALHOST PRE-PASS asks the login\'s four rows on the local site: a merged login\'s row on the local site (http://localhost:<port>) admits it there — RED CONTROL: the first site\'s three rows refuse it', { r: c1.r.ok ? 'ok' : c1.r, red: c1r.r.ok ? 'ok' : c1r.r.code });
   }
   // (my adversarial read) A HAND SIGN-IN ON A HELD SITE offers the UPDATE of the login that holds it — or nothing, the same password
@@ -330,7 +330,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
       return { same, upd, ans, f, NEWPW, second: eng.hasEntry(BL.entryName(PORTAL, 'jdoe')) };
     };
     const hi = await handIn();
-    ok(hi.same.ok && hi.same.same === true && hi.upd.ok && hi.upd.update === true && hi.ans.ok && hi.ans.updated === true && hi.ans.name === BL.entryName(LMS, 'jdoe') && hi.f.ok && hi.f.value === hi.NEWPW && !hi.second,
+    ok(gateOf(hi.same.ok) && hi.same.same === true && gateOf(hi.upd.ok) && hi.upd.update === true && gateOf(hi.ans.ok) && hi.ans.updated === true && hi.ans.name === BL.entryName(LMS, 'jdoe') && gateOf(hi.f.ok) && hi.f.value === hi.NEWPW && !hi.second,
       'A HAND SIGN-IN ON A HELD SITE: the same password offers nothing; a new one offers the UPDATE of the login that holds the pair (saved there, one secret for every site) — never a new-login card the save would refuse', { same: hi.same, upd: hi.upd, ans: hi.ans });
     const hiR = await handIn((src) => src.replace("    if (holder) { const hx = open(holder.name); if (hx.ok && hx.rec) { n = holder.name; ex = hx; } }\n", ''));
     ok(hiR.same.same !== true && hiR.upd.update === false && hiR.ans.ok === false && hiR.ans.code === 'login_exists', 'RED CONTROL: an offer that looks only at the exact name files a new-login card for a held pair, and the press is refused — the leg above would read it', { same: hiR.same, ans: hiR.ans });
@@ -348,7 +348,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     };
     const fr = await failRm();
     const frR = await failRm((src) => src.replace("        if (!rr || rr.ok === false) return named((rr && rr.code) || 'not_written',", "        if (false) return named((rr && rr.code) || 'not_written',"));
-    ok(fr.r.ok === false && fr.r.code === 'not_written' && fr.onLogin && fr.rowStays && frR.r.ok === true && !frR.onLogin && frR.rowStays,
+    ok(fr.r.ok === false && fr.r.code === 'not_written' && gateOf(fr.onLogin) && gateOf(fr.rowStays) && frR.r.ok === true && !frR.onLogin && verdictOf(frR.rowStays),
       'A FAILED ROW REMOVE IS READ (the grants store answers {ok:false}, it never throws): the remove refuses and nothing changes — RED CONTROL: a remove that trusts it says «removed», the site gone, its row left for a later login', { fr, frR });
   }
   // (my adversarial read) THE KEPT LOGIN must hold a confirmed password: a registration waiting for confirmation is not merged into
@@ -362,7 +362,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     };
     const rm = await regMerge();
     const rmR = await regMerge((src) => src.replace("    if (!k.rec.current) return named('login_pending_exists',", "    if (false) return named('login_pending_exists',"));
-    ok(rm.g.ok && rm.m.ok === false && rm.m.code === 'login_pending_exists' && /no confirmed password yet/.test(rm.m.error) && rm.lmsStays && rmR.m.ok === true && !rmR.lmsStays,
+    ok(gateOf(rm.g.ok) && rm.m.ok === false && rm.m.code === 'login_pending_exists' && gateOf(/no confirmed password yet/.test(rm.m.error)) && gateOf(rm.lmsStays) && rmR.m.ok === true && !rmR.lmsStays,
       'A REGISTRATION WAITING FOR CONFIRMATION IS NOT THE KEPT LOGIN of a merge (the other\'s confirmed password would go) — refused by name; RED CONTROL: without the check the confirmed login is dropped', { g: rm.g.ok ? 'ok' : rm.g, m: rm.m, red: rmR.m.ok });
   }
   // (my adversarial read) THE WORDS NAME THE KEPT LOGIN'S OWNER — the conversation that stored it fills with no grant at all
@@ -375,7 +375,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     };
     const ow = await ownerWords();
     const owR = await ownerWords((src) => src.replace("principalsAt(`${kp.origin}#${kp.user}`), ...(km && km.owner ? { owner: km.owner } : {}) } };", "principalsAt(`${kp.origin}#${kp.user}`) } };"));
-    ok(ow.mw.ok && ow.mw.widens.owner === 'conv-o' && ow.sw.ok && ow.sw.widens.owner === 'conv-o' && owR.mw.ok && owR.mw.widens.owner === undefined,
+    ok(gateOf(ow.mw.ok) && ow.mw.widens.owner === 'conv-o' && gateOf(ow.sw.ok) && ow.sw.widens.owner === 'conv-o' && gateOf(owR.mw.ok) && owR.mw.widens.owner === undefined,
       'THE WORDS BEFORE A MERGE AND BEFORE AN ADD name the kept login\'s OWNER (it fills with no grant on every site) — RED CONTROL: a plan that names only the row\'s principals leaves it out', { mw: ow.mw.widens, sw: ow.sw.widens, red: owR.mw.widens });
   }
   // (my adversarial read) A LOCKED VAULT cannot read a login's sites: its remove is refused by name (their rows would stay behind)
@@ -389,7 +389,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     };
     const ld = await lockedDrop();
     const ldR = await lockedDrop((src) => src.replace("    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then remove the login", "    if (false) return named('vault_locked', 'the vault is locked — unlock it, then remove the login"));
-    ok(ld.d.ok === false && ld.d.code === 'vault_locked' && ld.stays && ldR.d.ok === true && !ldR.stays, 'A LOCKED VAULT\'S REMOVE IS REFUSED BY NAME (its sites cannot be read, so their rows could not go with it) — RED CONTROL: without it the login goes and its added sites\' rows stay', { d: ld.d, red: ldR.d });
+    ok(ld.d.ok === false && ld.d.code === 'vault_locked' && gateOf(ld.stays) && ldR.d.ok === true && !ldR.stays, 'A LOCKED VAULT\'S REMOVE IS REFUSED BY NAME (its sites cannot be read, so their rows could not go with it) — RED CONTROL: without it the login goes and its added sites\' rows stay', { d: ld.d, red: ldR.d });
   }
   // THE WORDS BEFORE «Use a login you already saved…» on the login card (src/lib/use-login-words.js — PURE, the page's `t` handed in),
   // over the store's REAL site-words answer: what the press does, BY NAME who may then have it filled there, a look-alike said
@@ -401,14 +401,14 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const near = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), PORTAL), far = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), OTHER);
     const UW = await load();
     const a = UW(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }), b = UW(far, { site: OTHER, login: `${LMS} · jdoe`, t: tr });
-    ok(a[0].includes(PORTAL) && a[0].includes(`${LMS} · jdoe`) && /nothing is typed again/.test(a[0]) && a.some((x) => /^Then it may be filled on .* by: .*conv-a/.test(x)) && !a.some((x) => /^Careful/.test(x)) && b.some((x) => /^Careful: lms-school\.example is not the domain of this login's other sites \(school\.test\)/.test(x)),
+    ok(gateOf(a[0].includes(PORTAL)) && gateOf(a[0].includes(`${LMS} · jdoe`)) && gateOf(/nothing is typed again/.test(a[0])) && gateOf(a.some((x) => /^Then it may be filled on .* by: .*conv-a/.test(x))) && !a.some((x) => /^Careful/.test(x)) && verdictOf(b.some((x) => /^Careful: lms-school\.example is not the domain of this login's other sites \(school\.test\)/.test(x))),
       'THE WORDS BEFORE THE PRESS on the login card (the page\'s, over the hub\'s real answer): what the press does, BY NAME who may then have it filled on that site (the login\'s own row: conv-a), and a look-alike said', { a, b });
     const must = (from, to) => (src) => { if (!src.includes(from)) throw new Error(`mutant anchor missing: ${from.slice(0, 80)}`); return editAnchor(src, from, to, "the text handed to must()"); };
     const PUSH = "    names.push(out2.length ? t('{who} (except {names})', { who: who.join(', '), names: out2.join(', ') }) : who.join(', '));";
     const WHO = "    for (const p of wd[k] || []) { if (!p || typeof p !== 'object') continue; const id = idOf(p); if (seen.has(id)) continue; seen.add(id); who.push(nameOf(p)); }";
     const UWr = await load(must(PUSH, ''));
     const ar = UWr(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr });
-    ok(ar.some((x) => /^Nobody else may have it filled/.test(x)), 'RED CONTROL: words that leave out the grants say «nobody else» while conv-a may fill it — the leg above would read it', ar);
+    ok(verdictOf(ar.some((x) => /^Nobody else may have it filled/.test(x))), 'RED CONTROL: words that leave out the grants say «nobody else» while conv-a may fill it — the leg above would read it', ar);
     // (主开发 12:17Z, the use door's MUST — the vault's law: a change that WIDENS who may use a login is said BY NAME before the press)
     // EVERY PRINCIPAL IS SAID: the hub names each as the Vault window's chips do (the pickers' subjects); a Task Group too — and one
     // whose name cannot be read is still said («Task group <id>»), never dropped into «Nobody else»
@@ -420,33 +420,33 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const GW = (o) => v.logins.siteWordsFor(BL.entryName(WIKI, 'jdoe'), PORTAL, o);
     const gNamed = UW(GW({ subjects: SUBJ }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
     const gBare = UW(GW(), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
-    ok(/by: Course helper/.test(conv) && !conv.includes('conv-a') && /by: Release crew\./.test(gNamed) && /by: Task group g-release\./.test(gBare) && !/Nobody else/.test(gNamed + gBare),
+    ok(gateOf(/by: Course helper/.test(conv)) && !conv.includes('conv-a') && gateOf(/by: Release crew\./.test(gNamed)) && gateOf(/by: Task group g-release\./.test(gBare)) && !/Nobody else/.test(gNamed + gBare),
       'EVERY PRINCIPAL SAID BY NAME BEFORE THE PRESS: the hub names the conversation («Course helper», not its id) and the Task Group («Release crew») as the Vault window\'s chips do; a group whose name cannot be read is still said — «Task group g-release», never «Nobody else»', { conv, gNamed, gBare });
     const UWold = await load(must(WHO, "    for (const p of wd[k] || []) { const n = p && p.kind === 'everyone' ? t('every conversation') : String((p && (p.name || p.key)) || ''); if (n) who.push(n); }"));
     const gOld = UWold(GW(), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
-    ok(/Nobody else may have it filled on/.test(gOld), 'RED CONTROL: the old words (a name or a key, an empty one dropped) over a nameless group say «Nobody else» while the Task Group may fill it — the leg above would read it', gOld);
+    ok(verdictOf(/Nobody else may have it filled on/.test(gOld)), 'RED CONTROL: the old words (a name or a key, an empty one dropped) over a nameless group say «Nobody else» while the Task Group may fill it — the leg above would read it', gOld);
     // (主开发 13:02Z (1), as if a must — the owner asked for exceptions by name) AN EXCEPT ROW IS SAID AS AN EXCEPTION: «Release crew
     // (except Night shift)», read from the same public row through the same names call
     const SUBJ2 = { sessions: [...SUBJ.sessions, { subject: 'session:conv-night', name: 'Night shift' }], groups: SUBJ.groups };
     const wr = v.grants.set(BL.DOOR, `${WIKI}#jdoe`, { to: [{ kind: 'group', id: 'g-release' }], except: [{ kind: 'conversation', key: 'conv-night' }] }, 'user');
     const exW = UW(GW({ subjects: SUBJ2 }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
-    ok(!!wr && wr.ok !== false && /by: Release crew \(except Night shift\)\./.test(exW), 'AN EXCEPT ROW IS SAID AS AN EXCEPTION before the press: «Release crew (except Night shift)» — the same public row, the same names call', { wr, exW });
+    ok(!!wr && wr.ok !== false && verdictOf(/by: Release crew \(except Night shift\)\./.test(exW)), 'AN EXCEPT ROW IS SAID AS AN EXCEPTION before the press: «Release crew (except Night shift)» — the same public row, the same names call', { wr, exW });
     const UWnoEx = await load(must("    const out2 = (ex[k] || []).filter((p) => p && typeof p === 'object').map(nameOf);", '    const out2 = [];'));
     const exR = UWnoEx(GW({ subjects: SUBJ2 }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
-    ok(/by: Release crew\./.test(exR) && !/except/.test(exR), 'RED CONTROL: words that read only the row\'s principals name the whole group, the exception unsaid — the leg above would read it', exR);
+    ok(gateOf(/by: Release crew\./.test(exR)) && !/except/.test(exR), 'RED CONTROL: words that read only the row\'s principals name the whole group, the exception unsaid — the leg above would read it', exR);
     // (2) A RUNNING CONVERSATION WHOSE GRANT WAS WRITTEN UNDER ITS PAGE ID is named, never «not running»: the pickers' subjects carry it
     v.logins.grant(BL.entryName(WIKI, 'jdoe'), 'this-account', 'session:webui:pg-7');
     const SUBJ3 = { sessions: [...SUBJ2.sessions, { subject: 'session:conv-pg', name: 'Page helper', webuiId: 'pg-7' }], groups: SUBJ.groups };
     const pgW = UW(GW({ subjects: SUBJ3 }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
-    ok(/Page helper/.test(pgW) && !/not running now \(webui:pg-7\)/.test(pgW) && /except Night shift/.test(pgW), 'A RUNNING CONVERSATION GRANTED UNDER ITS PAGE ID is named («Page helper»), never «not running»; the exception still said', pgW);
+    ok(gateOf(/Page helper/.test(pgW)) && !/not running now \(webui:pg-7\)/.test(pgW) && verdictOf(/except Night shift/.test(pgW)), 'A RUNNING CONVERSATION GRANTED UNDER ITS PAGE ID is named («Page helper»), never «not running»; the exception still said', pgW);
     // the owner of a login that is not running is said as such — never a bare id
     const ownW = UW({ ok: true, user: 'jdoe', there: null, widens: { owner: 'conv-o' } }, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }).join(' '), ownN = UW({ ok: true, user: 'jdoe', there: null, widens: { owner: 'conv-o', ownerName: 'Signup helper' } }, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }).join(' ');
-    ok(/by: the conversation that saved it, not running now \(conv-o\)\./.test(ownW) && /by: the conversation that saved it \(Signup helper\)\./.test(ownN), 'THE OWNER who saved the login: by its name when running, «not running now» with its key when not — never a bare id', { ownW, ownN });
+    ok(gateOf(/by: the conversation that saved it, not running now \(conv-o\)\./.test(ownW)) && verdictOf(/by: the conversation that saved it \(Signup helper\)\./.test(ownN)), 'THE OWNER who saved the login: by its name when running, «not running now» with its key when not — never a bare id', { ownW, ownN });
     // A SITE THE LOGIN HOLDS ALREADY is said with the name it signs in under THERE (the hub's `there`); a site it does not hold has none
     v.logins.addSite(BL.entryName(LMS, 'jdoe'), { site: PORTAL, user: 'jd-portal' }, { who: 'owner' });
     const tw = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), PORTAL), tWords = UW(tw, { site: PORTAL, login: `${LMS} · jdoe`, t: tr });
     const tFar = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), OTHER);
-    ok(tw.ok && tw.there === 'jd-portal' && /is one of this login's sites already — it signs in there as jd-portal/.test(tWords[0]) && tFar.ok && tFar.there === null && /^It signs in there as jdoe\.$/.test(UW(tFar, { site: OTHER, login: `${LMS} · jdoe`, t: tr })[1]),
+    ok(gateOf(tw.ok) && tw.there === 'jd-portal' && gateOf(/is one of this login's sites already — it signs in there as jd-portal/.test(tWords[0])) && gateOf(tFar.ok) && tFar.there === null && verdictOf(/^It signs in there as jdoe\.$/.test(UW(tFar, { site: OTHER, login: `${LMS} · jdoe`, t: tr })[1])),
       'A SITE THE LOGIN HOLDS ALREADY is said with the name it signs in under there (the press then changes only who may fill it); on a new site the words say the name it will sign in under', { tw: tw.there, tWords, tFar: tFar.there });
     // RED CONTROL (the hub — LAST here: it re-makes the logins in the shared vault): a hub that does not name the principals leaves the
     // group's name unsaid even with the roster in hand — only its id
@@ -454,11 +454,11 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     vb.logins.addOwn({ origin: WIKI, username: 'jdoe', password: 'Wiki!' + 'w'.repeat(12) }, { who: 'owner' });
     vb.logins.grant(BL.entryName(WIKI, 'jdoe'), 'this-account', 'group:g-release');
     const gHub = UW(vb.logins.siteWordsFor(BL.entryName(WIKI, 'jdoe'), PORTAL, { subjects: SUBJ }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
-    ok(!gHub.includes('Release crew') && gHub.includes('Task group g-release'), 'RED CONTROL: a hub that does not name the principals (no GM.namesNow over the pickers\' subjects) says the group by its id only — the leg above would read it', gHub);
+    ok(!gHub.includes('Release crew') && verdictOf(gHub.includes('Task group g-release')), 'RED CONTROL: a hub that does not name the principals (no GM.namesNow over the pickers\' subjects) says the group by its id only — the leg above would read it', gHub);
     const wikiOn = async (mutate) => { const x = await run(mutate); x.logins.addOwn({ origin: WIKI, username: 'jdoe', password: 'Wiki!' + 'w'.repeat(12) }, { who: 'owner' }); x.grants.set(BL.DOOR, `${WIKI}#jdoe`, { to: [{ kind: 'group', id: 'g-release' }], except: [{ kind: 'conversation', key: 'conv-night' }] }, 'user'); x.logins.grant(BL.entryName(WIKI, 'jdoe'), 'this-account', 'session:webui:pg-7'); return UW(x.logins.siteWordsFor(BL.entryName(WIKI, 'jdoe'), PORTAL, { subjects: SUBJ3 }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' '); };
     const hubEx = await wikiOn(must("        except: { login: named2(exceptAt(`${p.origin}#${p.user}`)), anyAccount: named2(exceptAt(`${w.site}#*`)), anySite: named2(exceptAt('*')) },   // each row's exceptions, named the same way\n", ''));
     const hubPg = await wikiOn(must("return cid ? { id: str(x.webuiId) || cid, name: str(x.name), backendSessionId: cid } : null;", "return cid ? { id: cid, name: str(x.name), backendSessionId: cid } : null;"));   // stale-pins: kept — a red control that rebuilds the roster keyed without the page id (the pre-follow-up line) on purpose
-    ok(!/except/.test(hubEx) && /not running now \(webui:pg-7\)/.test(hubPg) && !/Page helper/.test(hubPg), 'RED CONTROLS (the hub, LAST): a hub that reads no exceptions leaves them unsaid; a roster keyed without the page id calls the running conversation «not running» — the legs above would read them', { hubEx, hubPg });
+    ok(!/except/.test(hubEx) && gateOf(/not running now \(webui:pg-7\)/.test(hubPg)) && !/Page helper/.test(hubPg), 'RED CONTROLS (the hub, LAST): a hub that reads no exceptions leaves them unsaid; a roster keyed without the page id calls the running conversation «not running» — the legs above would read them', { hubEx, hubPg });
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   // (主开发 10:54Z, AS IF A MUST, with the first page door that adds a site) THE GRANT PICKER TOUCHES ONLY ITS OWN LOGIN'S ROWS ON ITS
@@ -478,7 +478,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const own = M.ownRowOf(A, 'any-account'), other = (A.grants || []).find((g) => g.resource === `${SSO}#*`);
     const R = await load((src) => editAnchor(src, "  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope && g.resource === want) || null) : null;", "  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope) || null) : null;", "src/lib/use-login-words.js"));
     const ownR = R.ownRowOf(A, 'any-account');
-    ok(other && own === null && M.chipSiteOf(A, other) === 'sso.school.test' && (A.grants || []).some((g) => g.resource === '*') && M.chipSiteOf(A, (A.grants || []).find((g) => g.resource === '*')) === null && ownR && ownR.resource === `${SSO}#*`,
+    ok(gateOf(other) && own === null && M.chipSiteOf(A, other) === 'sso.school.test' && gateOf((A.grants || []).some((g) => g.resource === '*')) && M.chipSiteOf(A, (A.grants || []).find((g) => g.resource === '*')) === null && gateOf(ownR) && ownR.resource === `${SSO}#*`,
       'THE GRANT PICKER READS ITS OWN ROW ON ITS OWN SITE: another login\'s «any account on sso» row rides this login\'s list, the picker\'s «any account» reads the course site\'s row (none here) and the chip of that row names sso — RED CONTROL: a first-scope match reads (and could untick) the other site\'s row', { own, ownR: ownR && ownR.resource, other: other && other.resource });
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -498,7 +498,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     ];
     const pageId = (w) => /sessions\.push\(\{ subject: `session:\$\{cid\}`[^\n]*webuiId: String\(s\._webuiId \|\| id\)/.test(w);
     real.push(pageId(WIRE)); red.push(pageId(WIRE.replace("webuiId: String(s._webuiId || id) /* lane login-request-card: a grant written under its page id names it too */, ", '')));
-    ok(real.every(Boolean) && red.every((x) => x === false), 'THE PICKER\'S WIRING, PINNED: its own row (ownRowOf), the added site\'s chip (chipSiteOf), the route\'s subjects to site-words, the subjects\' page id — RED CONTROLS: a first-scope match, a chip with no site, a route without the roster, subjects without the page id', { real, red });
+    ok(gateOf(real.every(Boolean)) && verdictOf(red.every((x) => x === false)), 'THE PICKER\'S WIRING, PINNED: its own row (ownRowOf), the added site\'s chip (chipSiteOf), the route\'s subjects to site-words, the subjects\' page id — RED CONTROLS: a first-scope match, a chip with no site, a route without the roster, subjects without the page id', { real, red });
   }
   // (AS IF A MUST) THE MERGE SAYS THE OTHER LOGIN'S PASSWORD IS NOT KEPT, and which of the two was set later — dates only
   {
@@ -511,7 +511,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     };
     const w1 = await pw();
     const w1r = await pw((src) => src.replace("...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), otherPassword: m.otherPassword, widens: m.widens };\n  }\n  function merge(", "...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), widens: m.widens };\n  }\n  function merge("));   // stale-pins: kept — a red control whose mutant REBUILDS the words without the password line
-    ok(w1.ok && w1.otherPassword && w1.otherPassword.kept === false && w1.otherPassword.later === 'other' && w1.otherPassword.setAt > w1.otherPassword.keptSetAt && !JSON.stringify(w1).includes('Newer!') && w1r.ok && w1r.otherPassword === undefined,
+    ok(gateOf(w1.ok) && gateOf(w1.otherPassword) && w1.otherPassword.kept === false && w1.otherPassword.later === 'other' && w1.otherPassword.setAt > w1.otherPassword.keptSetAt && !JSON.stringify(w1).includes('Newer!') && gateOf(w1r.ok) && w1r.otherPassword === undefined,
       'THE MERGE SAYS, BEFORE THE PRESS, THE OTHER LOGIN\'S PASSWORD IS NOT KEPT and that IT was set later (dates only, no byte shown) — RED CONTROL: words without it', { w1: w1.otherPassword, red: w1r.otherPassword });
   }
   // (small) a drop that fails AFTER some grant rows went names them — lost permissions are said
@@ -526,7 +526,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     };
     const df = await dropFail();
     const dfR = await dropFail((src) => src.replace("    if (r && r.ok === false) return named(r.code || 'not_written', `${r.error || 'not removed'} — the login was not removed${goneWords()}`);", "    if (r && r.ok === false) return named(r.code || 'not_written', r.error || 'not removed');"));   // stale-pins: kept — a red control whose mutant REBUILDS the bare «not removed»
-    ok(df.ok === false && /the login was not removed; its grant row https:\/\/lms\.school\.test#jdoe was removed already/.test(df.error) && dfR.ok === false && !/removed already/.test(dfR.error), 'A DROP THAT FAILS after its grant rows went NAMES THEM («removed already») — RED CONTROL: the bare «not removed»', { df: df.error, red: dfR.error });
+    ok(df.ok === false && gateOf(/the login was not removed; its grant row https:\/\/lms\.school\.test#jdoe was removed already/.test(df.error)) && dfR.ok === false && !/removed already/.test(dfR.error), 'A DROP THAT FAILS after its grant rows went NAMES THEM («removed already») — RED CONTROL: the bare «not removed»', { df: df.error, red: dfR.error });
   }
   // (small) THE SAVE CARD on a held added site says the login's other sites change too
   {
@@ -537,7 +537,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const o = st.offerOwnerSaveCard({ origin: PORTAL, username: 'jdoe', password: 'Hand!' + 'q'.repeat(12) });
     const it = items[0] || {};
     const d = (it.i18n && it.i18n.detail && it.i18n.detail[0]) || {};
-    ok(o.ok && o.update === true && /one of this login's sites/.test(d.key || '') && d.params && /lms\.school\.test/.test(d.params.sites) && /portal\.school\.test/.test(d.params.sites) && /every one of them/.test(it.detail || ''),
+    ok(gateOf(o.ok) && o.update === true && gateOf(/one of this login's sites/.test(d.key || '')) && gateOf(d.params) && gateOf(/lms\.school\.test/.test(d.params.sites)) && gateOf(/portal\.school\.test/.test(d.params.sites)) && verdictOf(/every one of them/.test(it.detail || '')),
       'THE SAVE CARD ON A HELD ADDED SITE says the update changes the login\'s ONE password on every one of its sites (named)', { key: d.key, params: d.params });
   }
   // (d) the four new verbs on a LOCKED vault — refused by name, nothing written
@@ -545,7 +545,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const v = await run();
     eng.lock();
     const r4 = [v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), PORTAL), v.logins.addSite(BL.entryName(LMS, 'jdoe'), { site: PORTAL }), v.logins.removeSite(BL.entryName(LMS, 'jdoe'), SSO), v.logins.merge(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test')), v.logins.mergeWordsFor(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'))];
-    ok(r4.every((r) => r && r.ok === false && r.code === 'vault_locked' && /unlock it, then/.test(r.error)), '(d) THE NEW VERBS ON A LOCKED VAULT (the words, the add, the remove, the merge and its words) refuse vault_locked by name', r4.map((r) => r && r.code));
+    ok(verdictOf(r4.every((r) => r && r.ok === false && r.code === 'vault_locked' && /unlock it, then/.test(r.error))), '(d) THE NEW VERBS ON A LOCKED VAULT (the words, the add, the remove, the merge and its words) refuse vault_locked by name', r4.map((r) => r && r.code));
     await eng.unlock(UNLOCK);
   }
 }
@@ -553,9 +553,9 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
 console.log('⑤ THE DOORS — the person\'s only; the words in three languages are the page side\'s (lane cli-update-needs-nothing\'s row)');
 {
   const routes = read('src/routes/vault.js');
-  ok(["app.get('/api/vault/web-logins/site-words', noStoreL(person(", "app.post('/api/vault/web-logins/sites', noStoreL(person(", "app.post('/api/vault/web-logins/sites/remove', noStoreL(person(", "app.post('/api/vault/web-logins/merge', noStoreL(person("].every((x) => routes.includes(x)),
+  ok(verdictOf(["app.get('/api/vault/web-logins/site-words', noStoreL(person(", "app.post('/api/vault/web-logins/sites', noStoreL(person(", "app.post('/api/vault/web-logins/sites/remove', noStoreL(person(", "app.post('/api/vault/web-logins/merge', noStoreL(person("].every((x) => routes.includes(x))),
     'the add, the remove, the merge and the words before an add are the person\'s doors (THE person verdict — a bearer is refused by name)');
 }
 
 console.log(fail ? `✗ test-login-sites: ${pass} passed, ${fail} failed` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

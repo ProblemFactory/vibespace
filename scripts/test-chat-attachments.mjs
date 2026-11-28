@@ -39,7 +39,7 @@ process.env.HOME = HOME; os.homedir = () => HOME;   // BEFORE any src module: th
 const require = createRequire(import.meta.url);
 const T0 = performance.now();
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -98,15 +98,15 @@ console.log('① the place at the record');
     JSON.parse(LINES[2]),
   ]);
   const p = placesOf(mm);
-  ok(p.length === 3 && p.every((x) => x.b === 'claude' && x.tx === TX && x.key === U(2)) && p.map((x) => x.n).join() === '0,1,2',
+  ok(p.length === 3 && gateOf(p.every((x) => x.b === 'claude' && x.tx === TX && x.key === U(2))) && p.map((x) => x.n).join() === '0,1,2',
     'a record\'s pictures carry {b, tx, key = the record\'s uuid, n} — n in DOCUMENT order across its tool results (the order the reader counts)', p);
   const F = JSON.parse(read('scripts/fixtures/claude-cli/2.1.322-picture-records.json'));
   const live = F.live.map((r) => ({ uuid: r.uuid, tx: r.session_id, agent: r.agent_id || null }));
   const disk = F.disk.map((d) => ({ uuid: d.record.uuid, tx: d.record.sessionId, agent: d.record.agentId || null, sub: /\/subagents\/agent-[0-9a-f]+\.jsonl$/.test(d.file) }));
-  ok(F.cli === '2.1.322' && live.length === 2 && live.every((l) => disk.some((d) => d.uuid === l.uuid && d.tx === l.tx && d.agent === l.agent)) && disk.some((d) => d.sub && d.agent && F.disk.find((x) => x.record.uuid === d.uuid).file.endsWith(`agent-${d.agent}.jsonl`)),
+  ok(F.cli === '2.1.322' && live.length === 2 && gateOf(live.every((l) => disk.some((d) => d.uuid === l.uuid && d.tx === l.tx && d.agent === l.agent))) && verdictOf(disk.some((d) => d.sub && d.agent && F.disk.find((x) => x.record.uuid === d.uuid).file.endsWith(`agent-${d.agent}.jsonl`))),
     'LAW 7 (measured on the real 2.1.322): the live stream\'s user record carries the SAME uuid and transcript id as its transcript line — a sub-agent\'s too (agent_id live = agentId on disk = its file\'s name): a live card has its place at once', { live, disk });
   const fromLive = MMmod.pictureBaseOf(F.live.find((r) => r.agent_id)), fromDisk = MMmod.pictureBaseOf(F.disk.find((d) => d.record.agentId).record);
-  ok(JSON.stringify(fromLive) === JSON.stringify(fromDisk) && fromLive.agent && fromLive.key, 'the normalizer\'s place from the live record = from its transcript line (the same {tx, agent, key})', { fromLive, fromDisk });
+  ok(JSON.stringify(fromLive) === JSON.stringify(fromDisk) && gateOf(fromLive.agent) && verdictOf(fromLive.key), 'the normalizer\'s place from the live record = from its transcript line (the same {tx, agent, key})', { fromLive, fromDisk });
   ok(MMmod.pictureBaseOf({ type: 'user', uuid: U(1) }) === null && MMmod.pictureBaseOf({ type: 'user', sessionId: TX }) === null && MMmod.pictureBaseOf({ type: 'user', uuid: U(1) }, TX)?.tx === TX && MMmod.pictureBaseOf({ sessionId: '../x', uuid: U(1) }) === null,
     'no transcript id or no uuid ⇒ no place (a reader that knows its transcript lends its id); an id that is not one ⇒ none');
   const CMM = require(path.join(REPO, 'src/codex-message-manager.js'));
@@ -125,11 +125,11 @@ console.log('② the reader — from the record, by its place');
   const R = TP.create();
   const a = await R.find({ fp: MAIN, backend: 'claude', key: U(2), n: 2 });
   const buf = fs.readFileSync(MAIN);
-  ok(a.ok && Buffer.from(buf.toString('latin1', a.start, a.end), 'base64').equals(PNG(4)) && a.mediaType === 'image/jpeg', 'the n-th picture\'s base64 span is found in the record (a text block holding the marker and escaped quotes is skipped as a string)', a);
+  ok(gateOf(a.ok) && gateOf(Buffer.from(buf.toString('latin1', a.start, a.end), 'base64').equals(PNG(4))) && a.mediaType === 'image/jpeg', 'the n-th picture\'s base64 span is found in the record (a text block holding the marker and escaped quotes is skipped as a string)', a);
   const gone = await Promise.all([R.find({ fp: MAIN, backend: 'claude', key: U(2), n: 3 }), R.find({ fp: MAIN, backend: 'claude', key: U(3), n: 0 }), R.find({ fp: MAIN, backend: 'claude', key: U(98), n: 0 }), R.find({ fp: MAIN, backend: 'claude', key: U(5), n: 0 }), R.find({ fp: path.join(CODEX_DIR, `rollout-2026-11-13T00-00-00-${ZTX}.jsonl.zst`), backend: 'codex', key: 'call_x', n: 0 })]);
   ok(gone.map((g) => g.gone).join() === 'shortened,rescued,missing,no-bytes,compressed', 'gone BY NAME: a record with fewer pictures, one the owner\'s rescue stubbed, one not in the file, a picture block without bytes, a compressed rollout', gone);
   const bad = await Promise.all([R.find({ fp: MAIN, backend: 'claude', key: '../x', n: 0 }), R.find({ fp: MAIN, backend: 'claude', key: U(1), n: -1 }), R.find({ fp: MAIN, backend: 'nope', key: U(1), n: 0 })]);
-  ok(bad.every((g) => g.gone === 'missing'), 'a key that is not one, a bad ordinal, an unknown harness ⇒ nothing read');
+  ok(verdictOf(bad.every((g) => g.gone === 'missing')), 'a key that is not one, a bad ordinal, an unknown harness ⇒ nothing read');
   const d = scratch('cap-grow'); fs.mkdirSync(d, { recursive: true });
   const fp = path.join(d, 't.jsonl'); fs.writeFileSync(fp, LINES.slice(0, 3).join('\n') + '\n');
   const G = TP.create({ chunk: 4096 });
@@ -139,11 +139,11 @@ console.log('② the reader — from the record, by its place');
   fs.appendFileSync(fp, more);
   const g7 = await G.find({ fp, backend: 'claude', key: U(7), n: 0 });
   const s2 = G.held();
-  ok(g7.ok && s1.passes === 1 && s2.passes === 1 && s2.extended === 1 && s2.rebuilt === 0 && s2.bytesScanned - s1.bytesScanned === Buffer.byteLength(more) && Buffer.from(fs.readFileSync(fp).toString('latin1', g7.start, g7.end), 'base64').equals(PNG(10, 9000)),
+  ok(gateOf(g7.ok) && s1.passes === 1 && s2.passes === 1 && s2.extended === 1 && s2.rebuilt === 0 && s2.bytesScanned - s1.bytesScanned === Buffer.byteLength(more) && verdictOf(Buffer.from(fs.readFileSync(fp).toString('latin1', g7.start, g7.end), 'base64').equals(PNG(10, 9000))),
     'LAW 3: a file that only GREW is indexed from where it stopped (only the appended bytes are read — a line longer than a read chunk included), never again from the start', { s1, s2, size1 });
   fs.writeFileSync(fp + '.new', LINES.slice(0, 2).join('\n') + '\n'); fs.renameSync(fp + '.new', fp);   // the rescue's swap: another inode
   const g1 = await G.find({ fp, backend: 'claude', key: U(1), n: 0 }), g2 = await G.find({ fp, backend: 'claude', key: U(2), n: 0 });
-  ok(g1.ok && g2.gone === 'missing' && G.held().rebuilt === 1, 'a REPLACED file (another inode, the rescue\'s swap) is indexed again — its records as they are now', G.held());
+  ok(gateOf(g1.ok) && g2.gone === 'missing' && G.held().rebuilt === 1, 'a REPLACED file (another inode, the rescue\'s swap) is indexed again — its records as they are now', G.held());
   fs.truncateSync(fp, 10);
   const g3 = await G.find({ fp, backend: 'claude', key: U(1), n: 0 });
   ok(g3.gone === 'missing' && G.held().rebuilt === 2, 'a file that SHRANK is indexed again');
@@ -157,7 +157,7 @@ console.log('② the reader — from the record, by its place');
     const fd = fs.openSync(sw, 'r+'); fs.writeSync(fd, Buffer.from(B + '\n' + A + '\n'), 0, undefined, 0); fs.closeSync(fd);   // the two lines swapped in place
     const a2 = await SW.find({ fp: sw, backend: 'claude', key: 'aaaaaaaa-0000-4000-8000-0000000000a1', n: 0 });
     const bytesAt = (r) => (r && r.ok ? Buffer.from(fs.readFileSync(sw).toString('latin1', r.start, r.end), 'base64') : null);
-    ok(a1.ok && a2.ok && bytesAt(a2).equals(PNG(50)) && a2.start !== a1.start, 'the index FAILS CLOSED: an equal-length swap in place (same inode, same size) is caught by the record\'s key — the place is found again, never another record\'s picture', { a1: a1.start, a2: a2.start });
+    ok(gateOf(a1.ok) && gateOf(a2.ok) && gateOf(bytesAt(a2).equals(PNG(50))) && a2.start !== a1.start, 'the index FAILS CLOSED: an equal-length swap in place (same inode, same size) is caught by the record\'s key — the place is found again, never another record\'s picture', { a1: a1.start, a2: a2.start });
   }
   const L = TP.create({ indexMax: 2 });
   const fps = [0, 1, 2].map((i) => { const f = path.join(d, `l${i}.jsonl`); fs.writeFileSync(f, LINES[1] + '\n'); return f; });
@@ -187,25 +187,25 @@ const S1 = await serve({ store, transcripts: svc, hostKnown: (h) => !!fakeHosts.
 const get = async (u, h = {}) => { const r = await fetch(S1.base + u, { headers: h }); const b = Buffer.from(await r.arrayBuffer()); let j = null; try { j = JSON.parse(b.toString()); } catch { } return { s: r.status, t: r.headers.get('content-type'), n: r.headers.get('x-content-type-options'), c: r.headers.get('cache-control'), e: r.headers.get('etag'), b, j }; };
 {
   const a = await get(`/api/chat-picture/${TX}/${U(2)}/1`);
-  ok(a.s === 200 && a.t === 'image/png' && a.n === 'nosniff' && /private/.test(a.c || '') && /immutable/.test(a.c || '') && /^"[0-9a-f]{27}"$/.test(a.e || '') && a.b.equals(PNG(3)),
+  ok(a.s === 200 && a.t === 'image/png' && a.n === 'nosniff' && gateOf(/private/.test(a.c || '')) && gateOf(/immutable/.test(a.c || '')) && gateOf(/^"[0-9a-f]{27}"$/.test(a.e || '')) && verdictOf(a.b.equals(PNG(3))),
     'a picture is read from its record through the hub\'s own locate (no path, no cwd from the page): its type, nosniff, private + immutable, an ETag', { s: a.s, t: a.t, c: a.c, e: a.e, j: a.j });
   const nm = await get(`/api/chat-picture/${TX}/${U(2)}/1`, { 'If-None-Match': a.e });
   ok(nm.s === 304 && nm.b.length === 0, 'the validator answers 304 (a record\'s bytes never change)');
   const sub = await get(`/api/chat-picture/${TX}/${U(6)}/0?agent=${AG}`), notAmong = await get(`/api/chat-picture/${TX}/${U(6)}/0?agent=ffffffffffffffff`), noAgent = await get(`/api/chat-picture/${TX}/${U(6)}/0`);
-  ok(sub.s === 200 && sub.b.equals(PNG(8)) && notAmong.s === 404 && notAmong.j?.code === 'unknown' && noAgent.s === 410, 'a sub-agent\'s picture: its file only when it is AMONG the conversation\'s own sub-agent files — another id answers 404 unknown', [sub.s, notAmong.s, noAgent.s]);
+  ok(sub.s === 200 && gateOf(sub.b.equals(PNG(8))) && notAmong.s === 404 && notAmong.j?.code === 'unknown' && noAgent.s === 410, 'a sub-agent\'s picture: its file only when it is AMONG the conversation\'s own sub-agent files — another id answers 404 unknown', [sub.s, notAmong.s, noAgent.s]);
   const wf = await get(`/api/chat-picture/${TX}/${U(10)}/0?agent=${WAG}`);
-  ok(wf.s === 200 && wf.b.equals(PNG(13)), 'a WORKFLOW agent\'s picture: its file under <session>/subagents/workflows/wf_<run>/ is among the conversation\'s own (the reader\'s minor: it answered 404 «not on this machine»)', { s: wf.s, j: wf.j });
+  ok(wf.s === 200 && verdictOf(wf.b.equals(PNG(13))), 'a WORKFLOW agent\'s picture: its file under <session>/subagents/workflows/wf_<run>/ is among the conversation\'s own (the reader\'s minor: it answered 404 «not on this machine»)', { s: wf.s, j: wf.j });
   const cx = await get(`/api/chat-picture/${CTX}/call_pic1/0?b=codex`);
-  ok(cx.s === 200 && cx.b.equals(PNG(9)), 'a Codex picture from its rollout (the codex harness\'s own locate, the output\'s call_id)', { s: cx.s, j: cx.j });
+  ok(cx.s === 200 && verdictOf(cx.b.equals(PNG(9))), 'a Codex picture from its rollout (the codex harness\'s own locate, the output\'s call_id)', { s: cx.s, j: cx.j });
   const unk = await get(`/api/chat-picture/bbbbbbbb-0000-4000-8000-000000000000/${U(1)}/0`);
   const bad = await Promise.all([`/api/chat-picture/..%2F..%2Fetc/${U(1)}/0`, `/api/chat-picture/${TX}/a%2Fb/0`, `/api/chat-picture/${TX}/${U(1)}/x`, `/api/chat-picture/${TX}/${U(1)}/0?agent=..%2Fx`, `/api/chat-picture/${TX}/${U(1)}/0?b=agy`, `/api/chat-picture/${TX}/${U(1)}/0?host=mac-nowhere`, `/api/chat-picture/${TX}/${U(1)}/99999`].map((u) => get(u)));
-  ok(unk.s === 404 && unk.j?.code === 'unknown' && bad.every((x) => x.s === 400 && x.j?.code === 'bad_place'), 'a conversation the hub does not know ⇒ 404 unknown; a path, a slash, a bad ordinal / agent / harness / host ⇒ 400 bad_place', [unk.s, bad.map((x) => x.s)]);
+  ok(unk.s === 404 && unk.j?.code === 'unknown' && verdictOf(bad.every((x) => x.s === 400 && x.j?.code === 'bad_place')), 'a conversation the hub does not know ⇒ 404 unknown; a path, a slash, a bad ordinal / agent / harness / host ⇒ 400 bad_place', [unk.s, bad.map((x) => x.s)]);
   const g = await Promise.all([get(`/api/chat-picture/${TX}/${U(2)}/3`), get(`/api/chat-picture/${TX}/${U(3)}/0`), get(`/api/chat-picture/${TX}/${U(97)}/0`), get(`/api/chat-picture/${ZTX}/call_x/0?b=codex`)]);
-  ok(g.every((x) => x.s === 410 && x.j?.code === 'gone') && g.map((x) => x.j.why).join() === 'shortened,rescued,missing,compressed', 'a record gone / shortened / stubbed by the rescue / compressed ⇒ 410 `gone` with why (the view says it — never a broken picture)', g.map((x) => [x.s, x.j]));
+  ok(gateOf(g.every((x) => x.s === 410 && x.j?.code === 'gone')) && g.map((x) => x.j.why).join() === 'shortened,rescued,missing,compressed', 'a record gone / shortened / stubbed by the rescue / compressed ⇒ 410 `gone` with why (the view says it — never a broken picture)', g.map((x) => [x.s, x.j]));
   const types = await Promise.all([0, 1, 2].map((n) => get(`/api/chat-picture/${TX}/${U(4)}/${n}`)));
-  ok(types.every((x) => x.s === 415 && x.j?.code === 'type'), 'the type only from an OWN entry of the closed table: «constructor», image/svg+xml, «__proto__» ⇒ 415, no bytes sent', types.map((x) => x.s));
+  ok(verdictOf(types.every((x) => x.s === 415 && x.j?.code === 'type')), 'the type only from an OWN entry of the closed table: «constructor», image/svg+xml, «__proto__» ⇒ 415, no bytes sent', types.map((x) => x.s));
   const bearer = await get(`/api/chat-picture/${TX}/${U(1)}/0`, { Authorization: 'Bearer ' + ['vsst', 'x'.repeat(20)].join('_') });
-  ok(bearer.s === 403 && bearer.j?.code === 'bearer_refused' && /bearer token is refused/.test(bearer.j?.error || ''), 'a request carrying a bearer is refused BY NAME (the owner\'s cookie only)', bearer.j);
+  ok(bearer.s === 403 && bearer.j?.code === 'bearer_refused' && verdictOf(/bearer token is refused/.test(bearer.j?.error || '')), 'a request carrying a bearer is refused BY NAME (the owner\'s cookie only)', bearer.j);
   const auth = read('src/auth.js') + read('src/door.js');   // the auth layer AND its door class (lifted out by B3a): a gone-check must read both
   ok(!/chat-picture|chat-attachments/.test(auth), 'auth.js (and its door class) opens no door for /api/chat-picture or /api/chat-attachments — an agent or job bearer never reaches them');
 }
@@ -216,11 +216,11 @@ console.log('④ the device — never asked without its capability');
   const old = await get(`/api/chat-picture/${TX}/${U(1)}/0?host=mac-old`);
   ok(old.s === 409 && old.j?.code === 'old-agent' && devCalls.length === 0, 'an agent whose hello-ack does not name `transcript-picture` is NEVER asked (an unknown op would hang) ⇒ 409 old-agent (the card keeps today\'s road and says why)', { s: old.s, devCalls });
   const nw = await get(`/api/chat-picture/${TX}/${U(1)}/0?host=mac-new`);
-  ok(nw.s === 200 && nw.b.equals(PNG(11)) && devCalls.length === 1 && devCalls[0].method === 'picture' && devCalls[0].ref.sessionId === TX && devCalls[0].params.key === U(1) && devCalls[0].params.n === 0, 'an agent that names it answers through the same reader; its base64 is decoded block by block and served', devCalls);
+  ok(nw.s === 200 && gateOf(nw.b.equals(PNG(11))) && devCalls.length === 1 && devCalls[0].method === 'picture' && devCalls[0].ref.sessionId === TX && devCalls[0].params.key === U(1) && devCalls[0].params.n === 0, 'an agent that names it answers through the same reader; its base64 is decoded block by block and served', devCalls);
   const ad = read('src/agentd/agentd.js');
-  ok(/capabilities: \['probe', 'transcript-op', 'transcript-picture',/.test(ad) && /else if \(m === 'picture'\) result = await svc\.pictureHere\(ref,/.test(ad), 'the agent names `transcript-picture` in its hello-ack and answers `picture` with the SHARED reader (the agent bundle changes — the cut signs it)');
+  ok(gateOf(/capabilities: \['probe', 'transcript-op', 'transcript-picture',/.test(ad)) && verdictOf(/else if \(m === 'picture'\) result = await svc\.pictureHere\(ref,/.test(ad)), 'the agent names `transcript-picture` in its hello-ack and answers `picture` with the SHARED reader (the agent bundle changes — the cut signs it)');
   const here = await svc.pictureHere({ backend: 'claude', sessionId: TX }, { key: U(2), n: 1 });
-  ok(here.ok && Buffer.from(here.b64, 'base64').equals(PNG(3)) && here.mediaType === 'image/png', 'the device\'s answer (pictureHere) = the same bytes the hub serves for the same place (the parity suite proves it over a real agent)');
+  ok(gateOf(here.ok) && gateOf(Buffer.from(here.b64, 'base64').equals(PNG(3))) && here.mediaType === 'image/png', 'the device\'s answer (pictureHere) = the same bytes the hub serves for the same place (the parity suite proves it over a real agent)');
 }
 
 console.log('⑤ the index\'s cost — measured');
@@ -236,7 +236,7 @@ console.log('⑤ the index\'s cost — measured');
   t = performance.now(); const w = await R.find({ fp, backend: 'claude', key: U(1004), n: 0 }); const warm = performance.now() - t;
   const h = R.held(), mb = fs.statSync(fp).size / 1048576;
   console.log(`    measured: a ${mb.toFixed(0)} MB transcript — cold ${cold.toFixed(0)} ms (one pass), warm ${warm.toFixed(1)} ms, its index ${h.bytes} bytes for ${h.keys} picture lines`);
-  ok(c.ok && w.ok && warm < cold && h.keys === 8 && h.bytes < 4096, 'LAW 3 stated: one pass for the first picture, a warm read in milliseconds, the index ≈ 100 bytes a picture line (the 2 GB numbers: the lane report)', { cold, warm, h });
+  ok(gateOf(c.ok) && gateOf(w.ok) && warm < cold && h.keys === 8 && h.bytes < 4096, 'LAW 3 stated: one pass for the first picture, a warm read in milliseconds, the index ≈ 100 bytes a picture line (the 2 GB numbers: the lane report)', { cold, warm, h });
   const slow = await serve({ store, transcripts: { picture: () => sleep(150).then(() => ({ gone: 'missing' })) }, deadlineMs: 40 });
   const r = await fetch(`${slow.base}/api/chat-picture/${TX}/${U(1)}/0`), j = await r.json();
   slow.close();
@@ -263,9 +263,9 @@ console.log('⑤ the index\'s cost — measured');
   release();
   for (let i = 0; i < 50 && dl.api.stats().running; i++) await sleep(5);
   const dls = dl.api.stats(); dl.close();
-  ok(st12.every((x) => x === 503) && ran === ROUTES.MAX_AT_ONCE && dls.ran === ROUTES.MAX_AT_ONCE && dls.left === 12 - ROUTES.MAX_AT_ONCE, 'a request answered at its DEADLINE withdraws its job if it has not started — twelve asks past a 25 ms deadline run only the 3 readings already started (the reader\'s minor: all 12 ran, 9 for nobody)', { st12, ran, dls });
+  ok(gateOf(st12.every((x) => x === 503)) && ran === ROUTES.MAX_AT_ONCE && dls.ran === ROUTES.MAX_AT_ONCE && dls.left === 12 - ROUTES.MAX_AT_ONCE, 'a request answered at its DEADLINE withdraws its job if it has not started — twelve asks past a 25 ms deadline run only the 3 readings already started (the reader\'s minor: all 12 ran, 9 for nobody)', { st12, ran, dls });
   const cv = read('src/lib/chat-view.js');
-  ok(/r\.status === 503 && tries < 8\) \{\s*say\(t\('Still finding this picture in the conversation…'\)\);\s*setTimeout\(/.test(cv), 'the view says it is still being found and asks again (a few times, then «could not be found in time»)');
+  ok(verdictOf(/r\.status === 503 && tries < 8\) \{\s*say\(t\('Still finding this picture in the conversation…'\)\);\s*setTimeout\(/.test(cv)), 'the view says it is still being found and asks again (a few times, then «could not be found in time»)');
 }
 
 console.log('⑥ many at once');
@@ -281,16 +281,16 @@ console.log('⑥ many at once');
   const st = await Promise.all(kept), lt = await Promise.all(left);
   await sleep(10);
   const s = many.api.stats(); many.close();
-  ok(max === ROUTES.MAX_AT_ONCE && before === ROUTES.MAX_AT_ONCE && st.every((x) => x === 410), `LAW 4: fifteen asks at once — at most ${ROUTES.MAX_AT_ONCE} readings run, the rest wait in order`, { max, before, st });
-  ok(lt.every((x) => x === 'aborted') && calls === 9 && s.left === 6, 'a closed page\'s requests LEAVE the queue: none of the six is read', { calls, s });
+  ok(max === ROUTES.MAX_AT_ONCE && before === ROUTES.MAX_AT_ONCE && verdictOf(st.every((x) => x === 410)), `LAW 4: fifteen asks at once — at most ${ROUTES.MAX_AT_ONCE} readings run, the rest wait in order`, { max, before, st });
+  ok(gateOf(lt.every((x) => x === 'aborted')) && calls === 9 && s.left === 6, 'a closed page\'s requests LEAVE the queue: none of the six is read', { calls, s });
   const dec = ROUTES.base64Decoder(), outs = []; dec.on('data', (b) => outs.push(b));
   const b64 = PNG(12, 777).toString('base64');
   for (const cut of [1, 5, 2, 7, 3, 11, 13, 999999]) dec.write(Buffer.from(b64.slice(0, cut))), dec.write(Buffer.from(''));
   const parts = []; let i = 0; for (const n of [1, 3, 5, 7, 2, 9, 4, 6]) { parts.push(b64.slice(i, i + n)); i += n; } parts.push(b64.slice(i));
   const dec2 = ROUTES.base64Decoder(), o2 = []; dec2.on('data', (b) => o2.push(b)); for (const p of parts) dec2.write(Buffer.from(p)); dec2.end(); await new Promise((r) => dec2.on('end', r));
-  ok(Buffer.concat(o2).equals(PNG(12, 777)), 'the decode is block by block: any split of the base64 into reads gives the same bytes');
+  ok(verdictOf(Buffer.concat(o2).equals(PNG(12, 777))), 'the decode is block by block: any split of the base64 into reads gives the same bytes');
   const rt = read('src/routes/chat-attachments.js');
-  ok(/fh\.createReadStream\(\{ start: p\.start, end: p\.end - 1 \}\)/.test(rt) && /rs\.pipe\(base64Decoder\(\)\)\.pipe\(res\)/.test(rt) && !/readFile/.test(rt.replace(/\/\*[\s\S]*?\*\//g, '')), 'the hub streams the picture\'s byte range of the file through the decoder — never the transcript line held twice');
+  ok(gateOf(/fh\.createReadStream\(\{ start: p\.start, end: p\.end - 1 \}\)/.test(rt)) && gateOf(/rs\.pipe\(base64Decoder\(\)\)\.pipe\(res\)/.test(rt)) && !/readFile/.test(rt.replace(/\/\*[\s\S]*?\*\//g, '')), 'the hub streams the picture\'s byte range of the file through the decoder — never the transcript line held twice');
 }
 
 console.log('⑦ files a person dropped');
@@ -309,30 +309,30 @@ console.log('⑦ files a person dropped');
   const up = async (destDir, name, bytes, extra = {}, sid = 'cw-cap-up') => { const fd = new FormData(); fd.append('files', new Blob([bytes]), name); fd.append('destDir', destDir); fd.append('fileNames', JSON.stringify([name])); if (sid) fd.append('sessionId', sid); for (const [k, v] of Object.entries(extra)) fd.append(k, v); const r = await fetch(base + '/api/upload', { method: 'POST', body: fd }); return { s: r.status, j: await r.json().catch(() => ({})) }; };
   const a = await up(tmpCwd, 'a.png', PNG(21));
   const keptAt = path.join(root, 'cw-cap-up', 'files', 'a.png');
-  ok(a.s === 200 && a.j.keptWithConversation === true && a.j.files[0].path === keptAt && fs.readFileSync(keptAt).equals(PNG(21)) && !fs.existsSync(path.join(tmpCwd, 'a.png')) && (fs.statSync(keptAt).mode & 0o777) === 0o600,
+  ok(a.s === 200 && a.j.keptWithConversation === true && a.j.files[0].path === keptAt && gateOf(fs.readFileSync(keptAt).equals(PNG(21))) && !fs.existsSync(path.join(tmpCwd, 'a.png')) && (fs.statSync(keptAt).mode & 0o777) === 0o600,
     'chat.uploadDir unset + a TEMPORARY cwd ⇒ kept in data/chat-attachments/<the hub\'s conversation id>/files/ (0600), the answer says where', a.j);
   const b = await up(tmpCwd, 'a.png', PNG(22));
-  ok(b.j.files && b.j.files[0].path === path.join(root, 'cw-cap-up', 'files', 'a (1).png') && fs.readFileSync(keptAt).equals(PNG(21)), 'on the KEPT road a same-named file is never overwritten: «a (1).png», the first one untouched', b.j);
+  ok(gateOf(b.j.files) && b.j.files[0].path === path.join(root, 'cw-cap-up', 'files', 'a (1).png') && verdictOf(fs.readFileSync(keptAt).equals(PNG(21))), 'on the KEPT road a same-named file is never overwritten: «a (1).png», the first one untouched', b.j);
   await require(path.join(REPO, 'src/store-writer.js')).storeWriter().durable(path.join(root, 'cw-cap-up', CA.LINK_FILE));
   let link = null; try { link = JSON.parse(fs.readFileSync(path.join(root, 'cw-cap-up', CA.LINK_FILE), 'utf8')); } catch { }
-  ok(link && link.conv === 'cw-cap-up' && link.backend === 'claude' && link.tx === TX && (fs.statSync(path.join(root, 'cw-cap-up', CA.LINK_FILE)).mode & 0o777) === 0o600, 'THE LINK beside the files names their conversation\'s transcript (written at the upload, through the store writer) — it outlives the hub\'s session record', link);
+  ok(gateOf(link) && link.conv === 'cw-cap-up' && link.backend === 'claude' && link.tx === TX && (fs.statSync(path.join(root, 'cw-cap-up', CA.LINK_FILE)).mode & 0o777) === 0o600, 'THE LINK beside the files names their conversation\'s transcript (written at the upload, through the store writer) — it outlives the hub\'s session record', link);
   const c = await up(notTmp, 'w.png', PNG(23)), dd = await up(tmpCwd, 'chosen.png', PNG(24), { uploadDirSet: '1' });
   ok(!c.j.keptWithConversation && c.j.files[0].path === path.join(notTmp, 'w.png') && !dd.j.keptWithConversation && dd.j.files[0].path === path.join(tmpCwd, 'chosen.png'), 'a cwd that is not temporary, and a chosen chat.uploadDir, keep today\'s road');
   // THE MODERATE (reader 13:41Z): every OTHER upload replaces a same-named file, as the release did — the explorer (no
   // conversation) and a chat in an ordinary folder
   fs.writeFileSync(path.join(notTmp, 'report.txt'), 'version 1');
   const ex = await up(notTmp, 'report.txt', Buffer.from('version 2'), {}, null), ch = await up(notTmp, 'w.png', PNG(28));
-  ok(ex.j.files && ex.j.files[0].name === 'report.txt' && fs.readFileSync(path.join(notTmp, 'report.txt'), 'utf8') === 'version 2' && !fs.existsSync(path.join(notTmp, 'report (1).txt')) && ch.j.files[0].name === 'w.png' && fs.readFileSync(path.join(notTmp, 'w.png')).equals(PNG(28)) && !fs.existsSync(path.join(notTmp, 'w (1).png')),
+  ok(gateOf(ex.j.files) && ex.j.files[0].name === 'report.txt' && fs.readFileSync(path.join(notTmp, 'report.txt'), 'utf8') === 'version 2' && !fs.existsSync(path.join(notTmp, 'report (1).txt')) && ch.j.files[0].name === 'w.png' && gateOf(fs.readFileSync(path.join(notTmp, 'w.png')).equals(PNG(28))) && !fs.existsSync(path.join(notTmp, 'w (1).png')),
     'anywhere but the kept road an upload REPLACES a same-named file, as the release did (the explorer\'s report.txt, a chat in an ordinary folder) — the numbering is only the hub\'s own folder\'s', { ex: ex.j, ch: ch.j });
   srv.close();
   const pd = scratch('cap-place'); fs.mkdirSync(pd, { recursive: true });
   const given = path.join(pd, 'given.bin'); fs.writeFileSync(given, PNG(25));
   fs.writeFileSync(path.join(pd, 'x.png'), 'held');
   const both = await Promise.all([CA.placeFile(given, pd, 'x.png'), CA.placeFile(given, pd, 'x.png'), CA.placeFile(given, pd, 'x.png')]);
-  ok(new Set(both).size === 3 && !both.includes('x.png') && fs.readFileSync(path.join(pd, 'x.png'), 'utf8') === 'held' && both.every((n) => fs.readFileSync(path.join(pd, n)).equals(PNG(25))) && !fs.readdirSync(pd).some((n) => CA.isTemp(n)),
+  ok(new Set(both).size === 3 && !both.includes('x.png') && fs.readFileSync(path.join(pd, 'x.png'), 'utf8') === 'held' && gateOf(both.every((n) => fs.readFileSync(path.join(pd, n)).equals(PNG(25)))) && !fs.readdirSync(pd).some((n) => CA.isTemp(n)),
     'placeFile: a temp file LINKED to a free name — three at once for a held name get three new names, the held file untouched, no temp left', both);
   let threw = null; try { await CA.placeFile(given, pd, '../out.png'); } catch (e) { threw = e.message; }
-  ok(/Invalid file name/.test(threw || ''), 'a name that leaves its folder is refused');
+  ok(verdictOf(/Invalid file name/.test(threw || '')), 'a name that leaves its folder is refused');
   // the start's sweep: ONLY the writer's own temp shape; a person's own «draft.vs-tmp» is theirs
   const sr = scratch('cap-sweep'); fs.mkdirSync(path.join(sr, 'cw-s1', 'files'), { recursive: true });
   const F = (n) => path.join(sr, 'cw-s1', 'files', n);
@@ -341,7 +341,7 @@ console.log('⑦ files a person dropped');
   const past = (Date.now() - 60 * 60000) / 1000; fs.utimesSync(oldT, past, past); fs.utimesSync(theirs, past, past);
   const ss = CA.create({ root: sr, knownIds: async () => new Set(['cw-s1']), log: quiet });
   const swept = await ss.sweepTemps();
-  ok(swept === 1 && !fs.existsSync(oldT) && fs.existsSync(youngT) && fs.existsSync(theirs) && fs.existsSync(F('kept.png')), 'AT START: only the WRITER\'S OWN temp shape a crash left (older than a minute) is removed — a write still running stays, and a person\'s own «draft.vs-tmp» (an hour old) is never touched', { swept });
+  ok(swept === 1 && !fs.existsSync(oldT) && gateOf(fs.existsSync(youngT)) && gateOf(fs.existsSync(theirs)) && verdictOf(fs.existsSync(F('kept.png'))), 'AT START: only the WRITER\'S OWN temp shape a crash left (older than a minute) is removed — a write still running stays, and a person\'s own «draft.vs-tmp» (an hour old) is never touched', { swept });
   const u = await ss.usage();
   ok(u.files === 2 && u.bytes === PNG(26).length + Buffer.byteLength('a person\'s own file') && u.conversations === 1, 'the usage counts what a person dropped — their «draft.vs-tmp» included; the writer\'s temps never', u);
   // THE MUST (reader 13:41Z): «no longer exists» is PROVEN — the four rows, with the REAL hub knowledge over a scratch meta
@@ -390,13 +390,13 @@ console.log('⑦ files a person dropped');
     try { fs.writeFileSync(lk, whole.slice(0, 20)); rows.linkHalfWritten = await ask(); } finally { fs.writeFileSync(lk, whole); }
     try { fs.chmodSync(meta, 0o000); rows.recordsUnreadable = await ask(); } finally { fs.chmodSync(meta, 0o755); }
     const offered = Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.ids.join() || '(nothing)']));
-    ok(normal.ids.join() === 'cw-r-deleted' && normal.unchecked === 0 && Object.values(rows).every((r) => r.ids.length === 0 && r.files === 0 && r.unchecked > 0),
+    ok(normal.ids.join() === 'cw-r-deleted' && normal.unchecked === 0 && verdictOf(Object.values(rows).every((r) => r.ids.length === 0 && r.files === 0 && r.unchecked > 0)),
       'THE CLOSURE: a door that cannot READ offers NOTHING it cannot prove — the projects tree unreadable or absent, a link unreadable or half-written, the session records unreadable: nothing offered, each said as «could not check» (the normal answer offers only the deleted conversation)', { normal: normal.ids, offered, unchecked: Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.unchecked])) });
     const ui = read('src/lib/settings-ui.js');
-    ok(/if \(o && Number\(o\.unchecked\) > 0\) \{/.test(ui) && /t\('Could not check whether \{n\} conversations still exist — their files are kept', \{ n: Number\(o\.unchecked\) \}\)/.test(ui) && read('src/lib/i18n-zh.js').includes('"Could not check whether {n} conversations still exist — their files are kept": "'), 'Settings SAYS «could not check» (zh / ja) for the folders a failed read kept');
+    ok(gateOf(/if \(o && Number\(o\.unchecked\) > 0\) \{/.test(ui)) && gateOf(/t\('Could not check whether \{n\} conversations still exist — their files are kept', \{ n: Number\(o\.unchecked\) \}\)/.test(ui)) && verdictOf(read('src/lib/i18n-zh.js').includes('"Could not check whether {n} conversations still exist — their files are kept": "')), 'Settings SAYS «could not check» (zh / ja) for the folders a failed read kept');
   }
   const wrong = await os2.removeOrphans({ files: 3, bytes: ob.bytes }), right = await os2.removeOrphans({ files: ob.files, bytes: ob.bytes });
-  ok(wrong.changed === true && right.removed === 2 && !fs.existsSync(path.join(or, 'cw-deleted')) && ['cw-live', 'cw-kept', 'cw-archived', 'cw-stopped', 'cw-orphan', 'cw-terminated', 'cw-notx', 'cw-noproof'].every((id) => fs.existsSync(path.join(or, id, 'files', `${id}.png`))), 'the Remove door acts ONLY on the count and size it named (anything else ⇒ «changed», nothing removed) — and only on the proven-gone', { wrong, right });
+  ok(wrong.changed === true && right.removed === 2 && !fs.existsSync(path.join(or, 'cw-deleted')) && verdictOf(['cw-live', 'cw-kept', 'cw-archived', 'cw-stopped', 'cw-orphan', 'cw-terminated', 'cw-notx', 'cw-noproof'].every((id) => fs.existsSync(path.join(or, id, 'files', `${id}.png`)))), 'the Remove door acts ONLY on the count and size it named (anything else ⇒ «changed», nothing removed) — and only on the proven-gone', { wrong, right });
   const S2 = await serve({ store: CA.create({ root: or, knownIds: async () => new Set(), log: quiet }), transcripts: svc });
   fs.mkdirSync(path.join(or, 'cw-x', 'files'), { recursive: true }); fs.writeFileSync(path.join(or, 'cw-x', 'files', 'x.png'), PNG(42));
   const oo = await (await fetch(`${S2.base}/api/chat-attachments/orphans`)).json();
@@ -405,10 +405,10 @@ console.log('⑦ files a person dropped');
   ok(oo.files >= 1 && !('ids' in oo) && rm409.status === 409, 'the routes: the orphans\' count and size (never their ids); a removal naming other numbers ⇒ 409 changed');
   const wiring = read('src/server/mounts-plugins-wiring.js');
   const storeSrc = read('src/server/chat-attachments.js');
-  ok(/\.\.\.CAM\.hubKnowledge\(\{ activeSessions, metaDir: path\.join\(rootDir, 'data', 'session-meta'\) \}\)/.test(wiring) && /transcripts = transcriptIndexes, proofOf = locateIsProof,/.test(storeSrc) && /claudeTranscriptIndex\(\), require\('\.\.\/adapters\/codex\.js'\)\.codexTranscriptIndex\(\)/.test(storeSrc) && /c\.ok && c\.topReadable === true && x\.ok \? false : null/.test(storeSrc) && /chatAttachments\.sweepTemps\(\)/.test(wiring) && String(CA.RECORD_RE) === String(/^(.+)\.json(?:\.orphan|\.stopped)?$/),
+  ok(gateOf(/\.\.\.CAM\.hubKnowledge\(\{ activeSessions, metaDir: path\.join\(rootDir, 'data', 'session-meta'\) \}\)/.test(wiring)) && gateOf(/transcripts = transcriptIndexes, proofOf = locateIsProof,/.test(storeSrc)) && gateOf(/claudeTranscriptIndex\(\), require\('\.\.\/adapters\/codex\.js'\)\.codexTranscriptIndex\(\)/.test(storeSrc)) && gateOf(/c\.ok && c\.topReadable === true && x\.ok \? false : null/.test(storeSrc)) && gateOf(/chatAttachments\.sweepTemps\(\)/.test(wiring)) && String(CA.RECORD_RE) === String(/^(.+)\.json(?:\.orphan|\.stopped)?$/),
     'the hub wires THAT knowledge (live sessions, the session records in every form, the transcript trees read WHOLE — the channels\' pair-sweep walks — and each harness\'s proof); the sweep runs at start');
   const agy = read('data/bin/agy-wrapper.js');
-  ok(/Object\.prototype\.hasOwnProperty\.call\(PICTURE_EXT, mt\) \? PICTURE_EXT\[mt\] : null/.test(agy) && /fs\.linkSync\(tmp, fp\)/.test(agy) && /backend: 'antigravity', tx: null/.test(agy), 'the Antigravity wrapper: an extension only from an OWN entry; a pasted picture written as a temp file linked to its name; its folder\'s link written (the hub fills the transcript)');
+  ok(gateOf(/Object\.prototype\.hasOwnProperty\.call\(PICTURE_EXT, mt\) \? PICTURE_EXT\[mt\] : null/.test(agy)) && gateOf(/fs\.linkSync\(tmp, fp\)/.test(agy)) && verdictOf(/backend: 'antigravity', tx: null/.test(agy)), 'the Antigravity wrapper: an extension only from an OWN entry; a pasted picture written as a temp file linked to its name; its folder\'s link written (the hub fills the transcript)');
 }
 
 console.log('⑧ the words + the deletion list');
@@ -429,20 +429,20 @@ console.log('⑧ the words + the deletion list');
     return bound.length ? { ok: false, why: 'a bound named', bound } : { ok: true, bullets };
   };
   const wv = wordsVerdict(read('CHANGELOG.md'));
-  ok(wv.ok, 'the words say what is covered — «a picture Claude Code or Codex showed», «a file you dropped» — and nothing about a bound (the lane\'s OWN bullets, by their first words, under whichever release heading)', wv);
+  ok(verdictOf(wv.ok), 'the words say what is covered — «a picture Claude Code or Codex showed», «a file you dropped» — and nothing about a bound (the lane\'s OWN bullets, by their first words, under whichever release heading)', wv);
   // its control: one of OUR bullets with a size bound added is red; ANOTHER unit's «limits» / «members» in the same block is not
   const fakeLog = (extra, bounded) => ['# Changelog', '', '## 9.9.9 — 2099-01-01', '', '### Fixed', ...(wv.bullets || []).map((l, k) => (k === 0 && bounded ? l.replace(/\.$/, ', up to 500 MB per conversation.') : l)), ...extra, '', '## 9.9.8 — 2099-01-01', '', '- An older line.'].join('\n');
   const bounded = wordsVerdict(fakeLog([], true)), neighbour = wordsVerdict(fakeLog(['- Unattended turns keep their limits, and every member of a pool sees them.'], false));
-  ok(wv.ok && wv.bullets.length === 3 && !bounded.ok && bounded.why === 'a bound named' && neighbour.ok, 'the words leg\'s control: our bullet with «500 MB» added is red; another unit\'s «limits» and «members» in the same block are not', { bounded, neighbour });
+  ok(gateOf(wv.ok) && wv.bullets.length === 3 && !bounded.ok && bounded.why === 'a bound named' && verdictOf(neighbour.ok), 'the words leg\'s control: our bullet with «500 MB» added is red; another unit\'s «limits» and «members» in the same block are not', { bounded, neighbour });
   const GONE = ['keepPicture', 'usePictureKeeper', 'PICTURE_KEEPER', 'keptPicturesMB', 'kept-pictures', 'kept.json', 'LEDGER_FILE', 'trimNow', 'wasTrimmed', 'whenKept', 'PENDING_MAX_CHARS', 'conversationBytes', 'CONVERSATION_MB_', 'chat-attachments-ledger', 'keptPictureUrl', 'data-kept-src', '_keptPictureGone', 'Pictures kept per conversation', 'Removed to stay within', '.trimmed.json'];
   const files = ['src/server/chat-attachments.js', 'src/routes/chat-attachments.js', 'src/message-manager.js', 'src/codex-message-manager.js', 'src/server/mounts-plugins-wiring.js', 'src/timed-sync.js', 'src/lib/chat-renderers.js', 'src/lib/chat-view.js', 'src/lib/settings-ui.js', 'src/lib/settings-schema.js', 'src/lib/i18n-zh.js', 'src/lib/i18n-ja.js', 'src/server/stdout/claude-stream-json.js', 'src/ws-handler.js', 'docs/settings.md', 'docs/kb-api.md', 'docs/kb-features.md', 'docs/kb-file-structure.md', 'CHANGELOG.md', 'CHANGELOG.zh.md', 'CHANGELOG.ja.md'];
   // in the docs and changelogs the ledger is named as it was spelled there («<conv>/kept.json»; another feature has a kept.json of its own)
   const gonesOf = (f) => (/^src\//.test(f) ? GONE : GONE.map((g) => (g === 'kept.json' ? '<conv>/kept.json' : g)));
   const left = files.flatMap((f) => { const t = read(f); return gonesOf(f).filter((g) => t.includes(g)).map((g) => `${f}: ${g}`); });
   ok(left.length === 0, 'THE DELETION LIST: none of d41dc0496\'s store names is left (the keeper, the ledger, the bound, the queue, the setting, their words)', left);
-  ok(/fact: 'kept-files'/.test(read('src/lib/settings-schema.js')) && /const files = Number\(o\.files\), bytes = Number\(o\.bytes\);[^\n]*captured BEFORE the dialog/.test(read('src/lib/settings-ui.js')) && /message: t\('Remove \{n\} files \(\{size\}\) of conversations that no longer exist\? This cannot be undone\.', \{ n: files, size: mb\(bytes\) \}\)/.test(read('src/lib/settings-ui.js')),
+  ok(gateOf(/fact: 'kept-files'/.test(read('src/lib/settings-schema.js'))) && gateOf(/const files = Number\(o\.files\), bytes = Number\(o\.bytes\);[^\n]*captured BEFORE the dialog/.test(read('src/lib/settings-ui.js'))) && verdictOf(/message: t\('Remove \{n\} files \(\{size\}\) of conversations that no longer exist\? This cannot be undone\.', \{ n: files, size: mb\(bytes\) \}\)/.test(read('src/lib/settings-ui.js'))),
     'Settings › Chat SAYS what is kept (count, size) beside where files go, and the Remove door names the count and the size before it acts');
-  ok(['"Files you dropped into a temporary folder, kept with their conversations: {n} files, {size}": "', '"Still finding this picture in the conversation…": "', '"This picture was removed from the conversation\'s record when the record was rescued": "'].every((k) => read('src/lib/i18n-zh.js').includes(k) && read('src/lib/i18n-ja.js').includes(k)), 'the new words are in zh and ja');
+  ok(verdictOf(['"Files you dropped into a temporary folder, kept with their conversations: {n} files, {size}": "', '"Still finding this picture in the conversation…": "', '"This picture was removed from the conversation\'s record when the record was rescued": "'].every((k) => read('src/lib/i18n-zh.js').includes(k) && read('src/lib/i18n-ja.js').includes(k))), 'the new words are in zh and ja');
 }
 
 console.log('⑨ the view — the real renderer');
@@ -456,19 +456,19 @@ console.log('⑨ the view — the real renderer');
   const pl = { b: 'claude', tx: TX, key: U(2), n: 1 };
   const url = R.placePictureUrl(pl), urlSub = R.placePictureUrl({ ...pl, agent: AG }, 'mac-new'), urlCx = R.placePictureUrl({ b: 'codex', tx: CTX, key: 'call_pic1', n: 0 });
   ok(url === `/api/chat-picture/${TX}/${U(2)}/1?b=claude` && urlSub === `/api/chat-picture/${TX}/${U(2)}/1?b=claude&agent=${AG}&host=mac-new` && urlCx === `/api/chat-picture/${CTX}/call_pic1/0?b=codex`, 'the record URL from a place (a sub-agent, a machine, Codex) — never a path', [url, urlSub, urlCx]);
-  ok(['', R.placePictureUrl({ ...pl, tx: '../x' }), R.placePictureUrl({ ...pl, key: 'a/b' }), R.placePictureUrl({ ...pl, n: -1 }), R.placePictureUrl({ ...pl, b: 'Not An Id!' }), R.placePictureUrl(null)].every((u) => u === ''), 'a traversal, a slash, a bad ordinal, a harness that is not an id, nothing ⇒ no URL (a harness with no picture shape: the route\'s 400)');
+  ok(verdictOf(['', R.placePictureUrl({ ...pl, tx: '../x' }), R.placePictureUrl({ ...pl, key: 'a/b' }), R.placePictureUrl({ ...pl, n: -1 }), R.placePictureUrl({ ...pl, b: 'Not An Id!' }), R.placePictureUrl(null)].every((u) => u === '')), 'a traversal, a slash, a bad ordinal, a harness that is not an id, nothing ⇒ no URL (a harness with no picture shape: the route\'s 400)');
   const h1 = R.imageMediaHtml({ path: '/tmp/shot-1.png', mediaType: 'image/png', bytes: 40, place: pl });
-  ok(h1.includes(`data-record-src="${url}"`) && h1.includes('/api/file/raw?path=%2Ftmp%2Fshot-1.png'), 'a card with a path draws the file and carries the record\'s URL for when the path stops answering');
+  ok(gateOf(h1.includes(`data-record-src="${url}"`)) && verdictOf(h1.includes('/api/file/raw?path=%2Ftmp%2Fshot-1.png')), 'a card with a path draws the file and carries the record\'s URL for when the path stops answering');
   const h2 = R.imageMediaHtml({ mediaType: 'image/png', bytes: 40, place: pl });
-  ok(h2.includes(`src="${url}"`) && !h2.includes('data-record-src'), 'no path (an inline screenshot) ⇒ drawn from the record at once');
+  ok(gateOf(h2.includes(`src="${url}"`)) && !h2.includes('data-record-src'), 'no path (an inline screenshot) ⇒ drawn from the record at once');
   const cv = read('src/lib/chat-view.js');
-  ok(/if \(this\._recordPictureNext\(img\)\) return;/.test(cv) && /if \(src !== rec && !img\.dataset\.recordTried\) \{ img\.dataset\.recordTried = '1'; img\.src = rec; return true; \}/.test(cv), 'the error delegate swaps the record\'s copy in ONCE, through .src (never innerHTML), then reads the record\'s answer');
-  ok(/if \(r\.status === 410 && j\.why === 'missing' && !img\.dataset\.recordAgain\) \{/.test(cv) && /if \(r\.status === 415\) return say\(t\('This picture\\'s type is not one this page shows'\)\);/.test(cv) && /say\(t\('This picture could not be read from the conversation\\'s record'\)\);/.test(cv) && /\}\)\.catch\(\(\) => say\(t\('This picture could not be reached — the hub did not answer'\)\)\);/.test(cv),
+  ok(gateOf(/if \(this\._recordPictureNext\(img\)\) return;/.test(cv)) && verdictOf(/if \(src !== rec && !img\.dataset\.recordTried\) \{ img\.dataset\.recordTried = '1'; img\.src = rec; return true; \}/.test(cv)), 'the error delegate swaps the record\'s copy in ONCE, through .src (never innerHTML), then reads the record\'s answer');
+  ok(gateOf(/if \(r\.status === 410 && j\.why === 'missing' && !img\.dataset\.recordAgain\) \{/.test(cv)) && gateOf(/if \(r\.status === 415\) return say\(t\('This picture\\'s type is not one this page shows'\)\);/.test(cv)) && gateOf(/say\(t\('This picture could not be read from the conversation\\'s record'\)\);/.test(cv)) && verdictOf(/\}\)\.catch\(\(\) => say\(t\('This picture could not be reached — the hub did not answer'\)\)\);/.test(cv)),
     'true words for every answer: a 415, a 500 and a network failure each say what happened; a 410 «missing» on a live line is asked ONCE more before it is called gone (the reader\'s minor)');
-  ok(/r\.status === 410\) return say\(j\.why === 'rescued'/.test(cv) && /r\.status === 409\) return say\(t\('That machine\\'s agent is older/.test(cv) && /r\.status === 404\) return say\(t\('This conversation\\'s record is not on this machine'\)\)/.test(cv), 'the record\'s answer is said in words: gone (the rescue named), an older agent, not on this machine');
+  ok(gateOf(/r\.status === 410\) return say\(j\.why === 'rescued'/.test(cv)) && gateOf(/r\.status === 409\) return say\(t\('That machine\\'s agent is older/.test(cv)) && verdictOf(/r\.status === 404\) return say\(t\('This conversation\\'s record is not on this machine'\)\)/.test(cv)), 'the record\'s answer is said in words: gone (the rescue named), an older agent, not on this machine');
   const r = new R.ChatRenderers({ ws: null, sessionId: 'cw-1', app: null, messageList: { addEventListener() {} }, getSessionCtx: () => ({ cwd: '/w', host: null }) });
   const note = r._renderNotificationMsg('[Image source: /tmp/claude-1000/-p/conv/images/16.png]');
-  ok(/kept in this conversation(&#39;|')s history/.test(note.innerHTML) && !note.innerHTML.includes('/tmp/'), 'the CLI\'s «[Image source: /tmp/…]» note says the picture is kept in the conversation\'s history');
+  ok(gateOf(/kept in this conversation(&#39;|')s history/.test(note.innerHTML)) && !note.innerHTML.includes('/tmp/'), 'the CLI\'s «[Image source: /tmp/…]» note says the picture is kept in the conversation\'s history');
   if (!hadDoc) delete globalThis.document;
 }
 
@@ -476,14 +476,14 @@ console.log('⑩ the sync-fs guard + RED controls');
 {
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   const own = ['src/server/chat-attachments.js', 'src/routes/chat-attachments.js', 'src/transcript-picture.js'].map((f) => [f, strip(read(f))]);
-  ok(own.every(([, s]) => !/\bfs\.\w+Sync\(/.test(s)), 'no synchronous file call in the store, the route or the reader', own.filter(([, s]) => /\bfs\.\w+Sync\(/.test(s)).map(([f]) => f));
+  ok(verdictOf(own.every(([, s]) => !/\bfs\.\w+Sync\(/.test(s))), 'no synchronous file call in the store, the route or the reader', own.filter(([, s]) => /\bfs\.\w+Sync\(/.test(s)).map(([f]) => f));
   const ts = read('src/transcript-service.js');
-  ok(/return picturePool\(\)\.call\('picture', q\);/.test(ts) && /poolSize: 1/.test(ts) && /case 'picture':/.test(read('src/transcript-worker.js')), 'on the hub every reading runs in ONE transcript worker of its own (one copy of each index)');
+  ok(gateOf(/return picturePool\(\)\.call\('picture', q\);/.test(ts)) && gateOf(/poolSize: 1/.test(ts)) && verdictOf(/case 'picture':/.test(read('src/transcript-worker.js'))), 'on the hub every reading runs in ONE transcript worker of its own (one copy of each index)');
   // RED CONTROL 1: a reader that reads every file again from the start — the LAW 3 leg's count must see it
   // a mutant copy lives in a scratch dir: its harness registry is the tree's own (absolute), or it would find no shape at all
   const src = read('src/transcript-picture.js').split("require('./harnesses')").join(`require(${JSON.stringify(path.join(REPO, 'src/harnesses'))})`), anchor = 'let pos = ix.to, lineAt = ix.to, skipping = false;';
   const mdir = scratch('cap-mutant'); fs.mkdirSync(mdir, { recursive: true });
-  ok(src.includes(anchor), 'the mutant\'s anchor is in the reader (where a pass starts)');
+  ok(verdictOf(src.includes(anchor)), 'the mutant\'s anchor is in the reader (where a pass starts)');
   fs.writeFileSync(path.join(mdir, 'tp.js'), editAnchor(src, anchor, 'let pos = 0, lineAt = 0, skipping = false;', "src/transcript-picture.js"));
   const M = require(path.join(mdir, 'tp.js')).create({ chunk: 4096 });
   const fp = path.join(mdir, 't.jsonl'); fs.writeFileSync(fp, LINES.slice(0, 2).join('\n') + '\n');
@@ -492,7 +492,7 @@ console.log('⑩ the sync-fs guard + RED controls');
   // RED CONTROL 3: a reader with no key check — the swap leg must see it (the reader's M3)
   {
     const KEYCHK = "if (keyOf(shape, buf, root) !== key) { ix.ino = null; continue; }";
-    ok(src.includes(KEYCHK), 'the key check is in the reader (the third mutant\'s anchor)');
+    ok(verdictOf(src.includes(KEYCHK)), 'the key check is in the reader (the third mutant\'s anchor)');
     fs.writeFileSync(path.join(mdir, 'tp3.js'), editAnchor(src, KEYCHK, '', "src/transcript-picture.js"));
     const M3 = require(path.join(mdir, 'tp3.js')).create();
     const sw = path.join(mdir, 'swap.jsonl');
@@ -501,7 +501,7 @@ console.log('⑩ the sync-fs guard + RED controls');
     await M3.find({ fp: sw, backend: 'claude', key: 'aaaaaaaa-0000-4000-8000-0000000000a1', n: 0 });
     const fd = fs.openSync(sw, 'r+'); fs.writeSync(fd, Buffer.from(B + '\n' + A + '\n'), 0, undefined, 0); fs.closeSync(fd);
     const r = await M3.find({ fp: sw, backend: 'claude', key: 'aaaaaaaa-0000-4000-8000-0000000000a1', n: 0 });
-    ok(r.ok && Buffer.from(fs.readFileSync(sw).toString('latin1', r.start, r.end), 'base64').equals(PNG(51)), 'RED CONTROL: a reader without the key check serves ANOTHER record\'s picture after the swap — what the swap leg catches');
+    ok(gateOf(r.ok) && verdictOf(Buffer.from(fs.readFileSync(sw).toString('latin1', r.start, r.end), 'base64').equals(PNG(51))), 'RED CONTROL: a reader without the key check serves ANOTHER record\'s picture after the swap — what the swap leg catches');
   }
   // RED CONTROL 2: a route with no limit — the LAW 4 leg's count must see it
   let cur = 0, max = 0, open; const gate = new Promise((r) => { open = r; });
@@ -532,13 +532,13 @@ console.log('⑩ the sync-fs guard + RED controls');
   };
   const leg = async (Mod, mode, conv) => { const W = standIn(mode); const r = await Mod.linkOnDisk(root, conv, { backend: 'claude', tx: null }, () => W); return { ...r, dirties: W.dirties, onDisk: fs.existsSync(path.join(root, conv, CA.LINK_FILE)) }; };
   const landed = await leg(CA, 'lands', 'c-lands');
-  ok(landed.ok && landed.wrote && landed.dirties === 1 && landed.onDisk, 'B-a09e: a link that LANDS ⇒ ok (written once, on disk) — the files may follow', landed);
+  ok(gateOf(landed.ok) && gateOf(landed.wrote) && landed.dirties === 1 && verdictOf(landed.onDisk), 'B-a09e: a link that LANDS ⇒ ok (written once, on disk) — the files may follow', landed);
   const again = await leg(CA, 'lands', 'c-lands');
-  ok(again.ok && again.wrote === false && again.dirties === 0, 'B-a09e small: the SAME link already on disk is not written again (no write, no wait)', again);
+  ok(gateOf(again.ok) && again.wrote === false && again.dirties === 0, 'B-a09e small: the SAME link already on disk is not written again (no write, no wait)', again);
   const rej = await leg(CA, 'rejects', 'c-rejects');
-  ok(rej.ok === false && /failed/.test(rej.why || '') && !rej.onDisk, 'B-a09e small: a writer that REJECTS ⇒ not ok, said (the route places no file)', rej);
+  ok(rej.ok === false && gateOf(/failed/.test(rej.why || '')) && !rej.onDisk, 'B-a09e small: a writer that REJECTS ⇒ not ok, said (the route places no file)', rej);
   const never = await leg(CA, 'never', 'c-never');
-  ok(never.ok === false && /not on disk/.test(never.why || '') && !never.onDisk, 'B-a09e small: a writer that NEVER LANDS (held past its bound) ⇒ not ok, said (the route places no file)', never);
+  ok(never.ok === false && gateOf(/not on disk/.test(never.why || '')) && !never.onDisk, 'B-a09e small: a writer that NEVER LANDS (held past its bound) ⇒ not ok, said (the route places no file)', never);
   const CAsrc = fs.readFileSync(path.join(REPO, 'src/server/chat-attachments.js'), 'utf8');
   const READS = "  try { return (await w.durable(file)) === true ? { ok: true, file, wrote: true } : { ok: false, file, why: 'not on disk inside the writer\\'s bound' }; }\n";
   const Dead = mutantCopies('chat-attach-link', REPO).load('src/server/chat-attachments.js', anchored(CAsrc, READS, "  try { await w.durable(file); } catch { /* MUTANT: the old dead catch — the answer never read */ }\n  return { ok: true, file, wrote: true };\n  try { return null; }\n", 'the door reads the landing\'s answer'), 'link-dead-catch');
@@ -549,9 +549,9 @@ console.log('⑩ the sync-fs guard + RED controls');
   const LOOP = '    for (let i = 0; i < req.files.length; i++) {\n      const file = req.files[i];\n      const name = rename(names[i]);';
   const REFUSE = "      if (!L.ok) { const msg = `nothing was uploaded: this conversation's folder link is not on disk yet (${L.why}) — upload again in a moment`; throw Object.assign(new Error(msg), { status: 503, pullBody: { error: msg, code: 'not-on-disk', notOnDisk: true } }); }\n";
   const refusesFirst = (t) => { const d = t.indexOf('const L = await CA.linkOnDisk('), r = t.indexOf(REFUSE), loop = t.indexOf(LOOP); return d > 0 && r > d && loop > r; };
-  ok(refusesFirst(FILES), 'B-a09e: the upload asks linkOnDisk and REFUSES (503 not-on-disk, nothing placed) before its copy loop when the link is not on disk');
+  ok(verdictOf(refusesFirst(FILES)), 'B-a09e: the upload asks linkOnDisk and REFUSES (503 not-on-disk, nothing placed) before its copy loop when the link is not on disk');
   ok(!refusesFirst(anchored(FILES, REFUSE, '', 'the route reads the door\'s answer')), 'CONTROL (the route that places the files whatever the link\'s answer, in a copy of the text): red');
 }
 S1.close();
 console.log(`\n${fail ? '✗' : '✓'} test-chat-attachments: ${pass} passed, ${fail} failed`);
-if (fail) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${pass}) — ${Math.round(performance.now() - T0)} ms`); process.exit(0); }
+if (fail) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${pass}) — ${Math.round(performance.now() - T0)} ms`); process.exit(0); };import { verdictOf, gateOf } from './lib/check.mjs';

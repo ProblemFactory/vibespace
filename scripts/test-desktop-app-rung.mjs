@@ -27,7 +27,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -55,11 +55,11 @@ console.log('① the row + the door (PURE)');
   ok(B.providerControl('desktop-app').ok === true && B.providerControl('desktop-app', { host: 'box-2' }).ok === false, 'usable on this machine; a paired machine refused (remote null — v1)');
   const fenced = { id: 'p1', provider: 'chromium', allowedDomains: ['example.com'] };
   const sv = S.switchVerdict({ profile: fenced, target: 'desktop-app', rowOf: B.providerRow, controlOf: (id) => B.providerControl(id), capabilityRefusalOf: B.capabilityRefusal });
-  ok(!sv.ok && sv.code === 'switch_refused' && /no profile, fenced or not, switches into it/.test(sv.error) && /--backend desktop-app/.test(sv.error), 'a FENCED profile cannot switch into the rung — refused by the row, the words name the door', sv);
-  ok(S.switchChoices({ profile: { id: 'p1', provider: 'chromium' }, providerIds: ids, rowOf: B.providerRow, controlOf: (id) => B.providerControl(id) }).every((c) => (c.id || c.provider || c) !== 'desktop-app'), 'the switcher never offers it');
+  ok(!sv.ok && sv.code === 'switch_refused' && gateOf(/no profile, fenced or not, switches into it/.test(sv.error)) && verdictOf(/--backend desktop-app/.test(sv.error)), 'a FENCED profile cannot switch into the rung — refused by the row, the words name the door', sv);
+  ok(verdictOf(S.switchChoices({ profile: { id: 'p1', provider: 'chromium' }, providerIds: ids, rowOf: B.providerRow, controlOf: (id) => B.providerControl(id) }).every((c) => (c.id || c.provider || c) !== 'desktop-app')), 'the switcher never offers it');
   const vp = B.validateProfileInput({ label: 'x', provider: 'desktop-app' }, []);
-  ok(!vp.ok && vp.code === 'desktop_app_not_a_profile' && /--backend desktop-app/.test(vp.error), 'not a profile: createProfile refuses it by name with the door', vp);
-  ok(B.capabilityRefusal('desktop-app', 'cdp') && B.capabilityRefusal('desktop-app', 'cdp').code === 'provider_lacks_capability' && B.capabilityRefusal('desktop-app', 'allowed-domains'), 'cdp / allowed-domains: the row lacks them by name');
+  ok(!vp.ok && vp.code === 'desktop_app_not_a_profile' && verdictOf(/--backend desktop-app/.test(vp.error)), 'not a profile: createProfile refuses it by name with the door', vp);
+  ok(gateOf(B.capabilityRefusal('desktop-app', 'cdp')) && B.capabilityRefusal('desktop-app', 'cdp').code === 'provider_lacks_capability' && verdictOf(B.capabilityRefusal('desktop-app', 'allowed-domains')), 'cdp / allowed-domains: the row lacks them by name');
   const V = (x) => B.desktopAppNewVerdict(x);
   const table = [
     [{ label: 'site', backend: 'desktop-app', url: 'https://example.com/a' }, (v) => v.ok && v.door === 'desktop-app' && v.url === 'https://example.com/a' && v.keepProfile === false, 'the door: label + url'],
@@ -78,7 +78,7 @@ console.log('① the row + the door (PURE)');
     [{ label: '', backend: 'desktop-app' }, (v) => !v.ok && v.code === 'bad-request', 'a label is required'],
     [{ label: 'site', backend: 'chromium' }, (v) => v.ok && v.door === 'profile', 'another row stays createProfile\'s'],
   ];
-  for (const [inp, pred, name] of table) { const v = V(inp); ok(pred(v), `desktopAppNewVerdict: ${name}`, v); }
+  for (const [inp, pred, name] of table) { const v = V(inp); ok(verdictOf(pred(v)), `desktopAppNewVerdict: ${name}`, v); }
 }
 
 console.log('② the REAL engine over a fake keeper');
@@ -133,31 +133,31 @@ const ENGINE = require(path.join(REPO, ENGINE_REL));
   const L = W.launches[0];
   ok(W.launches.length === 1 && L.body.appId === 'chromium' && L.body.url === 'https://example.com/' && !('keepProfile' in L.body) && L.opts.label === 'Site login', 'the keeper launches the registry\'s CHROMIUM row (the chromium family before firefox) with the url; the agent\'s label rides the opts', L && L);
   ok(W.records.get('da-1').label === 'Site login' && W.records.get('da-1').by.name === 'A', 'r3 (#11): the record carries the agent\'s label and the opener\'s name (the chip says whose)', W.records.get('da-1'));
-  ok(L.opts.origin === 'agent-browser' && L.opts.by && L.opts.by.sessionId === 'w-A', 'the launch carries origin agent-browser + the opener session (the keeper stamps the record from it)', L && L.opts);
+  ok(L.opts.origin === 'agent-browser' && gateOf(L.opts.by) && L.opts.by.sessionId === 'w-A', 'the launch carries origin agent-browser + the opener session (the keeper stamps the record from it)', L && L.opts);
   ok(r.handle === 'da-1' && r.attached === true && r.origin === 'agent-browser' && r.next === 'vibespace-window snapshot da-1', 'the answer: the handle, attached, the next window verb', r);
-  ok(r.lease && r.lease.origin === 'agent-browser' && r.lease.sessionId === 'w-A', 'the lease is the opener\'s, origin agent-browser (visible in the API)', r.lease);
+  ok(gateOf(r.lease) && r.lease.origin === 'agent-browser' && r.lease.sessionId === 'w-A', 'the lease is the opener\'s, origin agent-browser (visible in the API)', r.lease);
   const rows = W.engine.reachOf('da-1').rows;   // lane grants-unify: the share rows live in the ONE grants store (read back as the record)
-  ok(rows.length === 1 && rows[0].by === 'self-open' && /w-A|aaaaaaaa/.test(String(rows[0].principal.id)), 'the opener grant: ONE reach row, by self-open, the opener\'s own key', rows);
+  ok(rows.length === 1 && rows[0].by === 'self-open' && verdictOf(/w-A|aaaaaaaa/.test(String(rows[0].principal.id))), 'the opener grant: ONE reach row, by self-open, the opener\'s own key', rows);
   const bc = W.sent.filter((m) => m.type === 'desktop-app-opened');
   ok(bc.length === 1 && bc[0].sessionId === 'w-A' && bc[0].appId === 'da-1' && bc[0].origin === 'agent-browser' && Object.keys(bc[0]).sort().join() === 'appId,origin,sessionId,type', 'the broadcast desktop-app-opened {sessionId, appId, origin} — nothing else rides it', bc);
   const audit = fs.readFileSync(path.join(W.dir, 'data', ENGINE.AUDIT_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.verb === 'open' && l.ok);
   ok(audit.length === 1 && audit[0].origin === 'agent-browser' && audit[0].backend === 'desktop-app' && audit[0].handle === 'da-1' && audit[0].reach === 'self-open', 'the audit row (this rung\'s action trace): origin agent-browser, backend desktop-app, self-open', audit);
-  ok(humanRefused && /--backend desktop-app/.test(human.message), '`vibespace-window open chromium` stays browser_is_human — and its words point at the new door', human && human.message);
+  ok(gateOf(humanRefused) && verdictOf(/--backend desktop-app/.test(human.message)), '`vibespace-window open chromium` stays browser_is_human — and its words point at the new door', human && human.message);
   let urlH = null; try { await W.engine.open({ appId: 'gedit', url: 'https://x.y/' }, W.fA); } catch (e) { urlH = e; }
-  ok(urlH && urlH.code === 'browser_is_human' && /--backend desktop-app/.test(urlH.message), '`open` with a url stays browser_is_human (the door named)');
-  ok(cdpFound && !W.engine.agentBrowserFor('da-1', W.fB.browserKey) && !W.engine.agentBrowserFor('da-1', null) && !W.engine.agentBrowserFor('da-nope', W.fA.browserKey), 'the CDP lookup answers ONLY for the holder\'s own key (another conversation\'s window is never confirmed)');
+  ok(gateOf(urlH) && urlH.code === 'browser_is_human' && verdictOf(/--backend desktop-app/.test(urlH.message)), '`open` with a url stays browser_is_human (the door named)');
+  ok(gateOf(cdpFound) && !W.engine.agentBrowserFor('da-1', W.fB.browserKey) && !W.engine.agentBrowserFor('da-1', null) && !W.engine.agentBrowserFor('da-nope', W.fA.browserKey), 'the CDP lookup answers ONLY for the holder\'s own key (another conversation\'s window is never confirmed)');
   let held = null; try { W.engine.attach('da-1', W.fB); } catch (e) { held = e.code; }
   ok(held === 'not_exposed' || held === 'window_leased', `another conversation cannot take it (one window, one holder; not shared) — ${held}`);
   const att = W.engine.attach('da-1', W.fA);
   ok(att.resumed === true && !att.browser && !att.browserNote, 'the opener re-attaches; the answer never calls it the user\'s browser', att);
   W.engine.storesLanded();   // B-574d browser-stores 5/8: the lease handed to the store writer, on disk once it landed
   const lf = JSON.parse(fs.readFileSync(path.join(W.dir, 'data', ENGINE.LEASE_FILE), 'utf8'));
-  ok(lf.leases['da-1'] && lf.leases['da-1'].origin === 'agent-browser', 'the persisted lease keeps origin agent-browser', lf.leases['da-1']);
+  ok(gateOf(lf.leases['da-1']) && lf.leases['da-1'].origin === 'agent-browser', 'the persisted lease keeps origin agent-browser', lf.leases['da-1']);
   const W2e = ENGINE.create({ keeper: W.keeper, dataDir: path.join(W.dir, 'data'), env: () => ({}), activeSessions: W.sessions, broadcast: () => { }, bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null });
   ok(!!W2e.agentBrowserFor('da-1', W.fA.browserKey), 'after a restart (a second engine over the same files) the lease is still the agent-browser one');
   // mode reserved on the lease record (E2c), never set here; the pin is the RECORD's fact (lane e2b), never the lease's
   const src = read(ENGINE_REL);
-  ok(/E2b's pin is the RECORD's fact[^*]*\*\/, mode: null \/\* E2c/.test(src) && !/pin: null/.test(src), 'the lease record reserves `mode` (E2c) as null; E2b\'s pin lives on the record, not the lease');
+  ok(gateOf(/E2b's pin is the RECORD's fact[^*]*\*\/, mode: null \/\* E2c/.test(src)) && !/pin: null/.test(src), 'the lease record reserves `mode` (E2c) as null; E2b\'s pin lives on the record, not the lease');
   // keepProfile reaches the keeper only when asked
   const W3 = world(ENGINE, 'keep');
   await W3.engine.openAgentBrowser(doorOf({ keepProfile: true, url: undefined }), W3.fA);
@@ -172,10 +172,10 @@ const ENGINE = require(path.join(REPO, ENGINE_REL));
   W6.sessions.delete('w-A');
   const rc = W6.engine.reconcile({ graceMs: 0 });
   await new Promise((r) => setTimeout(r, 20));
-  ok(rc.dropped.some((d) => d.handle === r6.handle) && W6.stops.length === 1 && W6.stops[0].id === r6.handle && W6.stops[0].o.why === 'opener-ended', 'D6: the opener\'s conversation ended ⇒ the lease dropped AND the desktop browser stopped (why opener-ended)', { rc, stops: W6.stops });
+  ok(gateOf(rc.dropped.some((d) => d.handle === r6.handle)) && W6.stops.length === 1 && W6.stops[0].id === r6.handle && W6.stops[0].o.why === 'opener-ended', 'D6: the opener\'s conversation ended ⇒ the lease dropped AND the desktop browser stopped (why opener-ended)', { rc, stops: W6.stops });
   const DA = require(path.join(REPO, 'src/desktop-apps.js'));
   retireOk = (DAm) => { const base = { profileDir: '/x/p', state: 'exited', pids: { app: 1 } }; const ag = { ...base, origin: 'agent-browser' }; return DAm.profileRetireVerdict({ ...ag, stoppedBy: 'opener-ended' }).remove === true && DAm.profileRetireVerdict({ ...ag, stoppedBy: 'idle' }).remove === true && DAm.profileRetireVerdict({ ...ag, stoppedBy: 'opener-stopped' }).remove === true && DAm.profileRetireVerdict({ ...ag, stoppedBy: 'idle', keepProfile: true }).remove === false && DAm.profileRetireVerdict({ ...base, stoppedBy: 'idle' }).remove === false; };
-  ok(retireOk(DA), 'D6 + r3 (#7): an agent browser\'s profile is removed on EVERY ending (its conversation, idle, its own stop) unless --keep-profile; a person\'s browser idle-stopped keeps its profile');
+  ok(verdictOf(retireOk(DA)), 'D6 + r3 (#7): an agent browser\'s profile is removed on EVERY ending (its conversation, idle, its own stop) unless --keep-profile; a person\'s browser idle-stopped keeps its profile');
   // an app nobody launched through the door (a human's launch) is never an agent-browser one
   const W5 = world(ENGINE, 'human');
   await W5.keeper.launch({ appId: 'chromium' }, {});
@@ -190,14 +190,14 @@ console.log('③ the route + keeper seams (source)');
   ok(iFacts > 0 && iRemote > iFacts && iDoor > iRemote && iDoor < newRoute.indexOf('k.createProfile('), 'the door sits in /api/agent/browser/new AFTER the belt\'s facts and the remote-session refusal, before createProfile');
   const res = rs.slice(rs.indexOf("router.post('/api/agent/browser/resolve'"));
   ok(res.indexOf("code: 'no_cdp_on_this_backend'") > res.indexOf('agentFacts(req, res)') && res.indexOf("code: 'no_cdp_on_this_backend'") < res.indexOf('auditVerbOf'), 'resolve: a handle naming the caller\'s desktop-app browser answers no_cdp_on_this_backend before any verb runs');
-  ok(/windowEngine\.agentBrowserFor\(String\(req\.body\.handle\), f\.browserKey\)/.test(rs), 'resolve asks the engine with the CALLER\'s browser key');
+  ok(verdictOf(/windowEngine\.agentBrowserFor\(String\(req\.body\.handle\), f\.browserKey\)/.test(rs)), 'resolve asks the engine with the CALLER\'s browser key');
   const ds = read('src/desktop-serve.js');
-  ok(/if \(browser && opts\.origin === AGENT_BROWSER_ORIGIN\) \{\n\s+rec\.origin = AGENT_BROWSER_ORIGIN;/.test(ds) && !/body\.origin|p\.body\.origin/.test(ds), 'the keeper stamps the origin only from the engine\'s opts (a launch body / the device op never carries it)');
-  ok(/const lopts = \{ scaleChoice: rv\.choice, replacing: id, \.\.\.\(rec\.origin === AGENT_BROWSER_ORIGIN \? \{ origin: rec\.origin, by: rec\.by, label: rec\.label \} : \{\}\), \.\.\.\(pinOf\(rec\.pin\) \? \{ pin: rec\.pin \} : \{\}\) \};/.test(ds), 'r3 (#2/#6): a Scale ▸ relaunch carries the agent\'s rung (origin + opener + label) to the successor (the real keeper: the heavy suite)');
-  ok(/'opener-ended': 'closed with the conversation that opened it'/.test(ds) && /rec\.lastError = AGENT_BROWSER_ENDING_WORDS\[why\] \|\| why;/.test(ds) && /rec\.stoppedBy === 'opener-ended' \|\| rec\.stoppedBy === 'opener-gone'\) return t\('\{app\} closed with the conversation that opened it'/.test(read('src/lib/desktop-app-window.js')), 'r3 (#12): the endings in words — rec.lastError + the exit toast\'s own sentence');
+  ok(gateOf(/if \(browser && opts\.origin === AGENT_BROWSER_ORIGIN\) \{\n\s+rec\.origin = AGENT_BROWSER_ORIGIN;/.test(ds)) && !/body\.origin|p\.body\.origin/.test(ds), 'the keeper stamps the origin only from the engine\'s opts (a launch body / the device op never carries it)');
+  ok(verdictOf(/const lopts = \{ scaleChoice: rv\.choice, replacing: id, \.\.\.\(rec\.origin === AGENT_BROWSER_ORIGIN \? \{ origin: rec\.origin, by: rec\.by, label: rec\.label \} : \{\}\), \.\.\.\(pinOf\(rec\.pin\) \? \{ pin: rec\.pin \} : \{\}\) \};/.test(ds)), 'r3 (#2/#6): a Scale ▸ relaunch carries the agent\'s rung (origin + opener + label) to the successor (the real keeper: the heavy suite)');
+  ok(gateOf(/'opener-ended': 'closed with the conversation that opened it'/.test(ds)) && gateOf(/rec\.lastError = AGENT_BROWSER_ENDING_WORDS\[why\] \|\| why;/.test(ds)) && verdictOf(/rec\.stoppedBy === 'opener-ended' \|\| rec\.stoppedBy === 'opener-gone'\) return t\('\{app\} closed with the conversation that opened it'/.test(read('src/lib/desktop-app-window.js'))), 'r3 (#12): the endings in words — rec.lastError + the exit toast\'s own sentence');
   const rsrc = read('src/routes/browser.js'); const nr = rsrc.slice(rsrc.indexOf("router.post('/api/agent/browser/new'"));
   ok(nr.indexOf('B.desktopAppNewVerdict(req.body || {})') > 0 && nr.indexOf('B.desktopAppNewVerdict(req.body || {})') < nr.indexOf("const adoptDir = req.body?.adoptDir"), 'r3 (#4): the door\'s verdict runs BEFORE the adopt block (`--adopt` never pre-empts it)');
-  ok(/require\('\.\.\/routes\/browser'\)\.setWindowEngine\(engine\)/.test(read('src/server/window-live-wiring.js')), 'the wiring hands the engine to the browser routes');
+  ok(verdictOf(/require\('\.\.\/routes\/browser'\)\.setWindowEngine\(engine\)/.test(read('src/server/window-live-wiring.js'))), 'the wiring hands the engine to the browser routes');
   const wr = read('src/routes/window-targets.js');
   ok(!/openAgentBrowser/.test(wr), '/api/agent/window/* never reaches openAgentBrowser (the ONE door is the browser tool\'s)');
 }
@@ -224,19 +224,19 @@ console.log('④ the CLI against a stub server');
   const run = (bin, args) => new Promise((resolve) => execFile(process.execPath, [path.join(REPO, 'data/bin', bin), ...args], { env: { PATH: `${BIN}:${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: home, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: 'vsst_' + 't'.repeat(24), VIBESPACE_SESSION_CWD: home, LANG: 'C.UTF-8' }, cwd: home, timeout: 20000 }, (e, out, err) => resolve({ code: e ? (e.code ?? 1) : 0, out, err })));
   const a = await run('vibespace-browser', ['new', 'Site login', '--backend', 'desktop-app', '--url', 'https://example.com/', '--keep-profile']);
   const sent = seen.find((x) => x.url === '/api/agent/browser/new');
-  ok(a.code === 0 && sent && sent.j.backend === 'desktop-app' && sent.j.url === 'https://example.com/' && sent.j.keepProfile === true && sent.j.label === 'Site login', 'new --backend desktop-app sends the door\'s fields', { a, sent: sent && sent.j });
-  ok(/handle da-7/.test(a.out) && /beside your chat/.test(a.out) && /vibespace-window snapshot da-7/.test(a.out) && /no_cdp_on_this_backend/.test(a.out) && /no egress policy/.test(a.out) && /kept: --keep-profile/.test(a.out), 'the answer names the handle, beside the chat, the window verbs, no CDP, no egress policy, the kept profile', a.out);
+  ok(a.code === 0 && gateOf(sent) && sent.j.backend === 'desktop-app' && sent.j.url === 'https://example.com/' && sent.j.keepProfile === true && sent.j.label === 'Site login', 'new --backend desktop-app sends the door\'s fields', { a, sent: sent && sent.j });
+  ok(gateOf(/handle da-7/.test(a.out)) && gateOf(/beside your chat/.test(a.out)) && gateOf(/vibespace-window snapshot da-7/.test(a.out)) && gateOf(/no_cdp_on_this_backend/.test(a.out)) && gateOf(/no egress policy/.test(a.out)) && verdictOf(/kept: --keep-profile/.test(a.out)), 'the answer names the handle, beside the chat, the window verbs, no CDP, no egress policy, the kept profile', a.out);
   const b = await run('vibespace-browser', ['new', 'Site login', '--backend', 'desktop-app', '--size', '1920x1080']);
-  ok(b.code === 0 && seen.some((x) => x.url === '/api/agent/browser/new' && x.j.size === '1920x1080') && /pinned 1920×1080/.test(b.out), 'lane e2b: --size reaches the server (never dropped) and the answer says pinned', b);
+  ok(b.code === 0 && gateOf(seen.some((x) => x.url === '/api/agent/browser/new' && x.j.size === '1920x1080')) && verdictOf(/pinned 1920×1080/.test(b.out)), 'lane e2b: --size reaches the server (never dropped) and the answer says pinned', b);
   const c = await run('vibespace-browser', ['--profile', 'da-7', 'get', 'url']);
-  ok(c.code === 1 && /no_cdp_on_this_backend/.test(c.err) && /vibespace-window snapshot da-7/.test(c.err) && !/fake browser CLI was run/.test(c.err), '`--profile <handle> get url` prints no_cdp_on_this_backend with the window recipe', c);
+  ok(c.code === 1 && gateOf(/no_cdp_on_this_backend/.test(c.err)) && gateOf(/vibespace-window snapshot da-7/.test(c.err)) && !/fake browser CLI was run/.test(c.err), '`--profile <handle> get url` prints no_cdp_on_this_backend with the window recipe', c);
   const u = await run('vibespace-browser', ['help']);
-  ok(/new <label> --backend desktop-app \[--url <https:\/\/…>\] \[--keep-profile\]/.test(u.out), 'the usage teaches the door', u.out.slice(0, 200));
+  ok(verdictOf(/new <label> --backend desktop-app \[--url <https:\/\/…>\] \[--keep-profile\]/.test(u.out)), 'the usage teaches the door', u.out.slice(0, 200));
   const w = await run('vibespace-window', ['help']);
-  ok(/browser_is_human/.test(w.out + w.err) && /--backend desktop-app/.test(w.out + w.err), 'vibespace-window\'s usage: a browser row is the user\'s, the agent\'s own is the new door', (w.out + w.err).slice(0, 300));
+  ok(gateOf(/browser_is_human/.test(w.out + w.err)) && verdictOf(/--backend desktop-app/.test(w.out + w.err)), 'vibespace-window\'s usage: a browser row is the user\'s, the agent\'s own is the new door', (w.out + w.err).slice(0, 300));
   srv.close();
   const R = require(path.join(REPO, 'src/browser-recipes.js'));
-  ok(R.RECIPE_POINTER.includes(R.DESKTOP_APP_POINTER) && R.FIRST_VERB_NEXT.includes(R.DESKTOP_APP_POINTER) && /--backend desktop-app/.test(R.DESKTOP_APP_POINTER) && !R.REMOTE_POINTER.includes('desktop-app'), 'the `status` pointer and the first-verb pointer name the door (browser-recipes) — never for a conversation on another machine');
+  ok(gateOf(R.RECIPE_POINTER.includes(R.DESKTOP_APP_POINTER)) && gateOf(R.FIRST_VERB_NEXT.includes(R.DESKTOP_APP_POINTER)) && gateOf(/--backend desktop-app/.test(R.DESKTOP_APP_POINTER)) && !R.REMOTE_POINTER.includes('desktop-app'), 'the `status` pointer and the first-verb pointer name the door (browser-recipes) — never for a conversation on another machine');
 }
 
 console.log('⑤ the placement model (PURE)');
@@ -262,10 +262,10 @@ const placeGreen = (p) => p.showing.act === 'beside' && p.showing.fromWin === 'w
   ok(p.notShowing.act === 'none' && p.minimized.act === 'none' && p.otherDesk.act === 'none' && p.hiddenPage.act === 'none', 'not showing (no window / minimized / another desktop / the page hidden) ⇒ nothing opens');
   ok(p.phone.act === 'own', 'a phone showing the chat ⇒ its own window (R6)');
   ok(p.human.act === 'none', 'a launch without the agent-browser origin opens nothing here');
-  ok(placeGreen(p), 'the placement table is green');
+  ok(verdictOf(placeGreen(p)), 'the placement table is green');
   const app = read('src/lib/app.js');
-  ok(/if \(p\.act === 'beside'\) this\.openDesktopApp\(msg\.appId, \{ intoChain: this\.linkPlacement\(p\.fromWin\) \}\);/.test(app), 'app.js opens it through lane F\'s split door (linkPlacement) — no new placement path');
-  ok(/openSpec: \{ action: 'openDesktopApp', id \}, \.\.\.\(intoChain \? \{ intoChain \} : \{\}\)/.test(read('src/lib/desktop-app-window.js')), 'openDesktopApp hands intoChain to createWindow');
+  ok(verdictOf(/if \(p\.act === 'beside'\) this\.openDesktopApp\(msg\.appId, \{ intoChain: this\.linkPlacement\(p\.fromWin\) \}\);/.test(app)), 'app.js opens it through lane F\'s split door (linkPlacement) — no new placement path');
+  ok(verdictOf(/openSpec: \{ action: 'openDesktopApp', id \}, \.\.\.\(intoChain \? \{ intoChain \} : \{\}\)/.test(read('src/lib/desktop-app-window.js'))), 'openDesktopApp hands intoChain to createWindow');
 }
 
 console.log('r3 — the verify r1 findings (each leg re-run on a patched copy below)');
@@ -339,25 +339,25 @@ async function idleChecks(ENG, sub) {
 }
 {
   const d = await d6Checks(ENGINE, 'r3');
-  ok(d.detachedStopped, 'r3 #0: a DETACHED agent browser still ends with its conversation (keyed on the record\'s opener, why opener-ended)');
-  ok(d.nonOpenerSpared, 'r3 #1: a NON-opener holder\'s end only drops ITS lease — the opener\'s browser keeps running');
-  ok(d.doorRefused && d.doorOk, 'r3 #0 door: `vibespace-window stop <h>` stops the opener\'s own browser (opener-stopped); another conversation is refused not_your_browser');
+  ok(verdictOf(d.detachedStopped), 'r3 #0: a DETACHED agent browser still ends with its conversation (keyed on the record\'s opener, why opener-ended)');
+  ok(verdictOf(d.nonOpenerSpared), 'r3 #1: a NON-opener holder\'s end only drops ITS lease — the opener\'s browser keeps running');
+  ok(gateOf(d.doorRefused) && verdictOf(d.doorOk), 'r3 #0 door: `vibespace-window stop <h>` stops the opener\'s own browser (opener-stopped); another conversation is refused not_your_browser');
   const rl = await relaunchChecks(ENGINE, 'r3-rl');
-  ok(rl.carried && rl.origin, 'r3 #2/#6: after a Scale ▸ relaunch the successor is still the agent\'s (origin, not a human\'s browser); an ORPHANED lease is carried along replacedBy (r4 #6: the route refuses a relaunch while a lease exists — the door path is detach → relaunch → re-attach, the r4 #6 leg)', rl);
-  ok(rl.stopped, 'r3 #2/#6: D6 still stops the successor when the conversation ends');
+  ok(gateOf(rl.carried) && verdictOf(rl.origin), 'r3 #2/#6: after a Scale ▸ relaunch the successor is still the agent\'s (origin, not a human\'s browser); an ORPHANED lease is carried along replacedBy (r4 #6: the route refuses a relaunch while a lease exists — the door path is detach → relaunch → re-attach, the r4 #6 leg)', rl);
+  ok(verdictOf(rl.stopped), 'r3 #2/#6: D6 still stops the successor when the conversation ends');
   const b = await busyChecks(ENGINE, 'r3-busy');
-  ok(b.waited && b.toldOnce, 'r3 #3/#10: the user driving it (a takeover) ⇒ the stop WAITS, said once (audit + desktop-app-ending)', b);
-  ok(b.boundedStop, 'r3 #3/#10: …at most one grace more — then it closes (the conversation is gone)');
-  ok(b.viewerWaits, 'r3 #3/#10: a viewer with it open ⇒ the stop waits too');
+  ok(gateOf(b.waited) && verdictOf(b.toldOnce), 'r3 #3/#10: the user driving it (a takeover) ⇒ the stop WAITS, said once (audit + desktop-app-ending)', b);
+  ok(verdictOf(b.boundedStop), 'r3 #3/#10: …at most one grace more — then it closes (the conversation is gone)');
+  ok(verdictOf(b.viewerWaits), 'r3 #3/#10: a viewer with it open ⇒ the stop waits too');
   const c = await capChecks(ENGINE, 'r3-cap');
-  ok(c.capped && c.otherOk, 'r3 #5/#9: a third desktop browser of ONE conversation is refused desktop_app_cap naming its handles + the stop verb; another conversation still opens', c);
+  ok(gateOf(c.capped) && verdictOf(c.otherOk), 'r3 #5/#9: a third desktop browser of ONE conversation is refused desktop_app_cap naming its handles + the stop verb; another conversation still opens', c);
   const i = await idleChecks(ENGINE, 'r3-idle');
-  ok(i.credited, 'r3 #7: a window verb on the agent\'s own browser credits the keeper\'s idle clock (an agent mid-task is not idle-stopped)');
+  ok(verdictOf(i.credited), 'r3 #7: a window verb on the agent\'s own browser credits the keeper\'s idle clock (an agent mid-task is not idle-stopped)');
   const V = (x) => B.desktopAppNewVerdict(x);
   const cred = V({ label: 'S', backend: 'desktop-app', url: 'https://alice:pw@example.com/' });
-  ok(!cred.ok && cred.code === 'bad-url' && /credentials never ride a command line/.test(cred.error) && !require(path.join(REPO, 'src/desktop-browser-app.js')).validateBrowserUrl('https://u@example.com/').ok, 'r3 #8: a url with a user name / password is refused BY NAME (the door and the human dialog\'s verdict)', cred);
+  ok(!cred.ok && cred.code === 'bad-url' && gateOf(/credentials never ride a command line/.test(cred.error)) && !require(path.join(REPO, 'src/desktop-browser-app.js')).validateBrowserUrl('https://u@example.com/').ok, 'r3 #8: a url with a user name / password is refused BY NAME (the door and the human dialog\'s verdict)', cred);
   const lacks = ['proxy', 'sharing', 'cdpPort', 'notes', 'adoptDir'].map((k) => V({ label: 'S', backend: 'desktop-app', [k]: k === 'cdpPort' ? 9222 : 'x' }));
-  ok(lacks.every((v) => !v.ok && v.code === 'desktop_app_lacks' && /no egress policy/.test(v.error)), 'r3 #4: --proxy / --sharing / --cdp-port / --notes / --adopt are refused BY NAME on the desktop-app door', lacks.map((v) => v.code));
+  ok(verdictOf(lacks.every((v) => !v.ok && v.code === 'desktop_app_lacks' && /no egress policy/.test(v.error))), 'r3 #4: --proxy / --sharing / --cdp-port / --notes / --adopt are refused BY NAME on the desktop-app door', lacks.map((v) => v.code));
 }
 
 console.log('r4 — the verify r2 findings');
@@ -419,20 +419,20 @@ async function wordsChecks(ENG, sub) {
 }
 {
   const d = await dropChecks(ENGINE, 'r4-drop');
-  ok(d.stopped, 'r4 #4/#9 (MUST_FIX): dropSession — the kill path — ends the agent\'s desktop browsers itself (opener-ended), not only the tick');
+  ok(verdictOf(d.stopped), 'r4 #4/#9 (MUST_FIX): dropSession — the kill path — ends the agent\'s desktop browsers itself (opener-ended), not only the tick');
   const c = await capR4Checks(ENGINE, 'r4-cap');
-  ok(c.relaunchCountsOnce, 'r4 #5: a relaunch in flight (old + successor both live) is counted ONCE — a second browser still opens');
+  ok(verdictOf(c.relaunchCountsOnce), 'r4 #5: a relaunch in flight (old + successor both live) is counted ONCE — a second browser still opens');
   ok(c.live === 2 && c.refused === 2, `r4 #1/#7: 1 open + 3 CONCURRENT \`new\` ⇒ exactly 2 live, 2 refused desktop_app_cap (the ceiling reserved before the keeper's await) — ${c.live} live`, c);
   const o = await ownStopChecks(ENGINE, 'r4-own');
-  ok(o.waited, 'r4 #0/#8: `vibespace-window stop` while the user drives it WAITS — the lease kept, told once (desktop-app-ending opener-stopped), nothing stopped', o);
-  ok(o.closed, 'r4 #0/#8: …and closes after at most one grace (opener-stopped)');
+  ok(verdictOf(o.waited), 'r4 #0/#8: `vibespace-window stop` while the user drives it WAITS — the lease kept, told once (desktop-app-ending opener-stopped), nothing stopped', o);
+  ok(verdictOf(o.closed), 'r4 #0/#8: …and closes after at most one grace (opener-stopped)');
   const rs = await restartChecks(ENGINE, 'r4-boot');
-  ok(rs.toldBefore === 1 && rs.keptAtBoot, 'r4 #2: the pending end survives a restart — the booted engine does NOT stop it (no viewer has re-joined yet)', rs);
-  ok(rs.closedAfter, 'r4 #2: …it closes one grace after the boot');
+  ok(rs.toldBefore === 1 && verdictOf(rs.keptAtBoot), 'r4 #2: the pending end survives a restart — the booted engine does NOT stop it (no viewer has re-joined yet)', rs);
+  ok(verdictOf(rs.closedAfter), 'r4 #2: …it closes one grace after the boot');
   const w = await wordsChecks(ENGINE, 'r4-words');
-  ok(w.profileTrue, 'r4 #3: stopOwn answers the keeper\'s own profile view — removed / NOT removed: <why> / kept (why)', w);
-  ok(w.pointer && w.reattach, 'r4 #6: after a relaunch the old handle points at its successor; the opener re-attaches to it (the grant followed — the door path: detach first)', w);
-  ok(w.detachNote, 'r4 #10: detach tells the agent its own browser runs until its conversation ends, and names stop / attach');
+  ok(verdictOf(w.profileTrue), 'r4 #3: stopOwn answers the keeper\'s own profile view — removed / NOT removed: <why> / kept (why)', w);
+  ok(gateOf(w.pointer) && verdictOf(w.reattach), 'r4 #6: after a relaunch the old handle points at its successor; the opener re-attaches to it (the grant followed — the door path: detach first)', w);
+  ok(verdictOf(w.detachNote), 'r4 #10: detach tells the agent its own browser runs until its conversation ends, and names stop / attach');
 }
 
 // ── ⑩ lane e2c (design q-022 §E2.3, B-830d ③): THE LAUNCH MODE — the agent decides tree | pixels | auto ──
@@ -493,17 +493,17 @@ console.log('⑩ lane e2c: the launch mode (--mode auto | tree | pixels, vibespa
   }
   const bad = cells.filter((c) => !c.pass);
   ok(cells.length === 30 && !bad.length, `launchModeVerdict: all ${cells.length} cells (chromium / firefox / unknown × a11y yes / no × unset / auto / tree / pixels / bogus) — no tree ⇒ pixels + 1920×1080 whatever was asked, else as asked; the why names it`, bad.slice(0, 3));
-  ok(RE.MODES.join() === 'auto,tree,pixels' && B.NOT_YET_FLAGS && !('mode' in B.NOT_YET_FLAGS) && /\[--mode auto\|tree\|pixels\]/.test(B.DESKTOP_APP_DOOR), 'the door\'s words name --mode auto|tree|pixels; --mode is no longer not_yet');
+  ok(RE.MODES.join() === 'auto,tree,pixels' && gateOf(B.NOT_YET_FLAGS) && !('mode' in B.NOT_YET_FLAGS) && verdictOf(/\[--mode auto\|tree\|pixels\]/.test(B.DESKTOP_APP_DOOR)), 'the door\'s words name --mode auto|tree|pixels; --mode is no longer not_yet');
   const x = await e2cChecks(ENGINE, B, 'e2c');
-  ok(x.door, 'the door: --mode pixels ⇒ the 1920×1080 default pin; tree ⇒ no pin; a bogus mode ⇒ bad_mode; --size beats the default; --mode on a profile row ⇒ desktop_app_only', x.doorSeen);
-  ok(x.launchPixels, 'launch --mode pixels on chromium: the keeper launches it pinned 1920×1080, the reach record says pixels (broadcast), why = "pixel mode as asked…", next = screenshot', x.launchSeen);
-  ok(x.launchTree, 'launch --mode tree on chromium: no pin, the reach record says tree, next = snapshot', x.launchSeen);
-  ok(x.firefoxPinned, 'a firefox (its switch unmeasured here) is pixels-only: pinned 1920×1080 with no --size, the record says pixels, why names firefox + what was asked', x.launchSeen);
-  ok(x.sizeWins, 'pixels-only with an explicit --size 1280x720: --size wins over the default pin; why says tree was asked', x.launchSeen);
-  ok(x.nonOpenerRefused && x.userRefused, 'vibespace-window mode: another conversation ⇒ not_your_window; a window the user shared ⇒ not_your_window naming the window menu', x.verbSeen);
-  ok(x.verbSets, 'the opener switches tree → pixels: the reach record changes and is broadcast; E2b\'s pin untouched', x.verbSeen);
-  ok(x.autoReprobes && x.badMode, 'mode auto re-runs the probe now (its answer + why recorded: the bus is down ⇒ pixels); a bogus mode ⇒ bad_mode', x.verbSeen);
-  ok(x.firefoxStays, 'mode tree on the firefox stays pixels and says why', x.verbSeen);
+  ok(verdictOf(x.door), 'the door: --mode pixels ⇒ the 1920×1080 default pin; tree ⇒ no pin; a bogus mode ⇒ bad_mode; --size beats the default; --mode on a profile row ⇒ desktop_app_only', x.doorSeen);
+  ok(verdictOf(x.launchPixels), 'launch --mode pixels on chromium: the keeper launches it pinned 1920×1080, the reach record says pixels (broadcast), why = "pixel mode as asked…", next = screenshot', x.launchSeen);
+  ok(verdictOf(x.launchTree), 'launch --mode tree on chromium: no pin, the reach record says tree, next = snapshot', x.launchSeen);
+  ok(verdictOf(x.firefoxPinned), 'a firefox (its switch unmeasured here) is pixels-only: pinned 1920×1080 with no --size, the record says pixels, why names firefox + what was asked', x.launchSeen);
+  ok(verdictOf(x.sizeWins), 'pixels-only with an explicit --size 1280x720: --size wins over the default pin; why says tree was asked', x.launchSeen);
+  ok(gateOf(x.nonOpenerRefused) && verdictOf(x.userRefused), 'vibespace-window mode: another conversation ⇒ not_your_window; a window the user shared ⇒ not_your_window naming the window menu', x.verbSeen);
+  ok(verdictOf(x.verbSets), 'the opener switches tree → pixels: the reach record changes and is broadcast; E2b\'s pin untouched', x.verbSeen);
+  ok(gateOf(x.autoReprobes) && verdictOf(x.badMode), 'mode auto re-runs the probe now (its answer + why recorded: the bus is down ⇒ pixels); a bogus mode ⇒ bad_mode', x.verbSeen);
+  ok(verdictOf(x.firefoxStays), 'mode tree on the firefox stays pixels and says why', x.verbSeen);
 }
 
 console.log('CONTROLS (patched copies)');
@@ -550,7 +550,7 @@ console.log('CONTROLS (patched copies)');
   { const M = mutE('e2c-nopin', " || mv.pin || null;", " || null;"); ok(!(await e2cChecks(M, B, 'mut-e2c-nopin')).firefoxPinned, 'CONTROL e2c (a): pixels-only without E2b\'s default pin ⇒ the firefox-pinned leg goes RED'); }
   { const M = mutE('e2c-anyone', "    if (!rec.by || rec.by.sessionId !== facts.sessionId) throw namedError('not_your_window',", "    if (false) throw namedError('not_your_window',"); ok(!(await e2cChecks(M, B, 'mut-e2c-anyone')).nonOpenerRefused, 'CONTROL e2c (b): a non-opener allowed to set the mode ⇒ the verb\'s permission leg goes RED'); }
   { const bp = read('src/browser-profiles.js'); const line = "const NOT_YET_FLAGS = Object.freeze({});"; assert1(bp.includes(line), 'e2c control (c) planted'); const Bm = MUT.load('src/browser-profiles.js', editAnchor(bp, line, "const NOT_YET_FLAGS = Object.freeze({ mode: 'E2c (the interaction mode)' });", "src/browser-profiles.js"), 'e2c-not-yet'); ok(!(await e2cChecks(ENGINE, Bm, 'mut-e2c-notyet')).door, 'CONTROL e2c (c): --mode still refused not_yet ⇒ the door leg goes RED'); }
-  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 22, label: 'desktop-app-rung' })) ok(x.pass, x.name, x.detail);
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 22, label: 'desktop-app-rung' })) ok(verdictOf(x.pass), x.name, x.detail);
 }
 
 // ── ⑨ B-4be3 (主开发 r1165 / r1176 / r1179): a LARGE page read PART BY PART — ONE subtree by its ref, ONE node's WHOLE
@@ -645,26 +645,26 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
   ok(!!(s1 && s1.subtree && s1.subtree.of === '@e3' && /REPLACE the last snapshot's — every older ref is gone/.test(s1.subtree.note) && /`vibespace-window snapshot da-1` reads the whole window again/.test(s1.subtree.note)), 'THE SUBTREE\'S ANSWER says its refs REPLACE the last snapshot\'s, every older ref is gone, and the one-line road back to the whole window', s1 && s1.subtree);
   ok(!!(s1 && s1.nodes.map((n) => n.ref).join() === '@e6,@e7,@e8,@e9' && s1.subtree.refs === '@e6–@e9'), 'its refs are numbered ABOVE the last table\'s (@e6–@e9), so no older ref can name one of its nodes', s1 && s1.nodes.map((n) => n.ref));
   ok(!D.old.ok && D.old.e.code === 'ref_unknown', 'an OLDER ref (@e3) after a subtree read is gone: refused ref_unknown by name — never a different node', D.old.ok ? D.old.v : D.old.e.code);
-  ok(D.sub1.ok, 'THE AUTO MODE IS NOT RE-PROBED by a subtree read (its cells have nothing to act on; the whole window resolved to tree)', D.sub1.ok ? null : D.sub1.e.code);
-  ok(D.tx.ok && D.txReq && D.txReq.maxBytes === 65536 && D.tx.v.did.cut === true && D.tx.v.did.bytes === 65536 && D.tx.v.did.chars > 65536, 'THE WHOLE TEXT: one node\'s text through the act door, 64 KiB by default, the cut SAID (bytes, of how many characters)', D.txReq && { maxBytes: D.txReq.maxBytes, did: D.tx.ok && { bytes: D.tx.v.did.bytes, chars: D.tx.v.did.chars, cut: D.tx.v.did.cut } });
-  ok(D.big.ok && D.bigReq && D.bigReq.maxBytes === 262144, 'an asked bound past the cap is held to 256 KiB', D.bigReq && D.bigReq.maxBytes);
-  ok(!/q{50}/.test(D.audit) && /"verb":"text"[^\n]*"bytes":65536[^\n]*"cut":true/.test(D.audit), 'the audit names the node and the bytes, NEVER the text', D.audit.split('\n').filter((l) => l.includes('"text"')).slice(-1)[0]);
+  ok(verdictOf(D.sub1.ok), 'THE AUTO MODE IS NOT RE-PROBED by a subtree read (its cells have nothing to act on; the whole window resolved to tree)', D.sub1.ok ? null : D.sub1.e.code);
+  ok(gateOf(D.tx.ok) && gateOf(D.txReq) && D.txReq.maxBytes === 65536 && D.tx.v.did.cut === true && D.tx.v.did.bytes === 65536 && D.tx.v.did.chars > 65536, 'THE WHOLE TEXT: one node\'s text through the act door, 64 KiB by default, the cut SAID (bytes, of how many characters)', D.txReq && { maxBytes: D.txReq.maxBytes, did: D.tx.ok && { bytes: D.tx.v.did.bytes, chars: D.tx.v.did.chars, cut: D.tx.v.did.cut } });
+  ok(gateOf(D.big.ok) && gateOf(D.bigReq) && D.bigReq.maxBytes === 262144, 'an asked bound past the cap is held to 256 KiB', D.bigReq && D.bigReq.maxBytes);
+  ok(!/q{50}/.test(D.audit) && verdictOf(/"verb":"text"[^\n]*"bytes":65536[^\n]*"cut":true/.test(D.audit)), 'the audit names the node and the bytes, NEVER the text', D.audit.split('\n').filter((l) => l.includes('"text"')).slice(-1)[0]);
   ok(!D.px.ok && D.px.e.code === 'mode_pixels', 'a pixel share refuses the whole-text read by name (a tree read, the same door as snapshot)', D.px.ok ? 'read' : D.px.e.code);
-  ok(D.tk && D.tk.ok !== false && !D.during.ok && D.during.e.code === 'window_paused' && !J(D.during.e).includes('the-whole-field-value') && /"verb":"text"[^\n]*"code":"window_paused"[^\n]*"dropped":true/.test(D.audit), 'r2 THE MUST: the person takes the window over WHILE the helper reads — the text is DROPPED, refused window_paused by name, the audit says dropped (the same re-check after the await as the snapshot\'s)', D.during.ok ? D.during.v.did : { code: D.during.e.code });
+  ok(gateOf(D.tk) && D.tk.ok !== false && !D.during.ok && D.during.e.code === 'window_paused' && !J(D.during.e).includes('the-whole-field-value') && verdictOf(/"verb":"text"[^\n]*"code":"window_paused"[^\n]*"dropped":true/.test(D.audit)), 'r2 THE MUST: the person takes the window over WHILE the helper reads — the text is DROPPED, refused window_paused by name, the audit says dropped (the same re-check after the await as the snapshot\'s)', D.during.ok ? D.during.v.did : { code: D.during.e.code });
   ok(!D.closedWhole.ok && D.closedWhole.e.code === 'mode_pixels' && !D.underPx.ok && D.underPx.e.code === 'mode_pixels', 'r2: once `auto` resolved to pixels, --under over refs that survived is refused mode_pixels too (as text is)', { whole: D.closedWhole.ok || D.closedWhole.e.code, under: D.underPx.ok || D.underPx.e.code });
-  ok(/\(verb === 'click' \|\| verb === 'type' \|\| verb === 'text'\) && body\.ref\) refuse\('mode_pixels'/.test(read('src/server/desktop-handover-engine.js')), 'r2: a machine\'s desktop refuses `text @ref` mode_pixels by name, as click / type with a ref (source pin)');
+  ok(verdictOf(/\(verb === 'click' \|\| verb === 'type' \|\| verb === 'text'\) && body\.ref\) refuse\('mode_pixels'/.test(read('src/server/desktop-handover-engine.js'))), 'r2: a machine\'s desktop refuses `text @ref` mode_pixels by name, as click / type with a ref (source pin)');
   // CONTROLS (RED): refs minted from @e1 again (no base) — an older ref silently names a subtree node; the subtree re-probing
   // the auto mode — a page's table refused mode_pixels; the audit carrying the text
   const esrc = read(ENGINE_REL);
   const mutEng = (tag, from, to) => { assert1(esrc.includes(from), `B-4be3 control ${tag} planted`); return MUT.load(ENGINE_REL, esrc.replace(from, to), tag); };
-  { const D2 = await doorChecks(mutEng('b4be3-nobase', "...(root ? { root, refBase } : {})", "...(root ? { root } : {})"), 'b4be3-nobase'); ok(D2.old.ok && D2.old.v.did.name === 'row 2', 'CONTROL (refs from @e1 again): the older ref @e3 silently reads a node of the subtree (row 2, not the table) — the leg above can fail', D2.old.ok ? D2.old.v.did : D2.old.e.code); }
+  { const D2 = await doorChecks(mutEng('b4be3-nobase', "...(root ? { root, refBase } : {})", "...(root ? { root } : {})"), 'b4be3-nobase'); ok(gateOf(D2.old.ok) && D2.old.v.did.name === 'row 2', 'CONTROL (refs from @e1 again): the older ref @e3 silently reads a node of the subtree (row 2, not the table) — the leg above can fail', D2.old.ok ? D2.old.v.did : D2.old.e.code); }
   { const D3 = await doorChecks(mutEng('b4be3-reprobe', "if (!root && rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto') {", "if (rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto') {"), 'b4be3-reprobe'); ok(!D3.sub1.ok && D3.sub1.e.code === 'mode_pixels', 'CONTROL (the subtree re-probes the auto mode): a table of cells is refused mode_pixels', D3.sub1.ok ? 'read' : D3.sub1.e.code); }   // stale-pins: kept (the control puts the old text back)
-  { const D5 = await doorChecks(mutEng('b4be3-norecheck', "      if (r.ok) { try { stillHeld(rec, facts, 'text'); } catch (err) {", "      if (false) { try { stillHeld(rec, facts, 'text'); } catch (err) {"), 'b4be3-norecheck'); ok(D5.during.ok && D5.during.v.did.text === 'the-whole-field-value', 'CONTROL (no re-check after the await): the text reaches the conversation that lost the window — the leg above can fail', D5.during.ok ? 'handed' : D5.during.e.code); }
-  { const D6 = await doorChecks(mutEng('b4be3-underpx', "      if (res0 && res0.mode === 'pixels') {", "      if (false) {"), 'b4be3-underpx'); ok(D6.underPx.ok, 'CONTROL (no pixel check for --under): the subtree reads the tree under a pixel resolution — the leg above can fail', D6.underPx.ok ? 'read' : D6.underPx.e.code); }
-  { const D4 = await doorChecks(mutEng('b4be3-audit', "...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut } : {})", "...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut, text: r.did.text } : {})"), 'b4be3-audit'); ok(/q{50}/.test(D4.audit), 'CONTROL (the audit carries the text): the text is in the audit file — the leg above can fail'); }
+  { const D5 = await doorChecks(mutEng('b4be3-norecheck', "      if (r.ok) { try { stillHeld(rec, facts, 'text'); } catch (err) {", "      if (false) { try { stillHeld(rec, facts, 'text'); } catch (err) {"), 'b4be3-norecheck'); ok(gateOf(D5.during.ok) && D5.during.v.did.text === 'the-whole-field-value', 'CONTROL (no re-check after the await): the text reaches the conversation that lost the window — the leg above can fail', D5.during.ok ? 'handed' : D5.during.e.code); }
+  { const D6 = await doorChecks(mutEng('b4be3-underpx', "      if (res0 && res0.mode === 'pixels') {", "      if (false) {"), 'b4be3-underpx'); ok(verdictOf(D6.underPx.ok), 'CONTROL (no pixel check for --under): the subtree reads the tree under a pixel resolution — the leg above can fail', D6.underPx.ok ? 'read' : D6.underPx.e.code); }
+  { const D4 = await doorChecks(mutEng('b4be3-audit', "...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut } : {})", "...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut, text: r.did.text } : {})"), 'b4be3-audit'); ok(verdictOf(/q{50}/.test(D4.audit)), 'CONTROL (the audit carries the text): the text is in the audit file — the leg above can fail'); }
   { const Rm = MUT.load('src/window-reach.js', read('src/window-reach.js').replace("const TREE_VERBS = Object.freeze(['snapshot', 'text']);", "const TREE_VERBS = Object.freeze(['snapshot']);"), 'b4be3-reach');   // stale-pins: kept (the control puts the old text back)
     const real = require(path.join(REPO, 'src/window-reach.js')).verbGate({ mode: 'pixels', verb: 'text', hasRef: true }), mut = Rm.verbGate({ mode: 'pixels', verb: 'text', hasRef: true });
-    ok(!real.ok && real.code === 'mode_pixels' && mut.ok, 'CONTROL (text not a tree verb in the mode table): a pixel share lets the tree read through — the mode table is what refuses it', { real, mut }); }
+    ok(!real.ok && real.code === 'mode_pixels' && verdictOf(mut.ok), 'CONTROL (text not a tree verb in the mode table): a pixel share lets the tree read through — the mode table is what refuses it', { real, mut }); }
   // (B) THE REAL HELPER (python) against a stand-in `gi` — the walk from a root path, the byte bound, the hidden-text rule.
   const py = spawnSync('python3', ['-c', 'print(1)'], { encoding: 'utf8' });
   ok(py.status === 0, 'SETUP: python3 runs here (the helper is python)', py.error ? String(py.error) : py.stderr);
@@ -751,40 +751,40 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
   };
   const P = helperChecks(HSRC, 'real');
   const pw = (P.whole.nodes || []).find((n) => n.role === 'password text');
-  ok(P.whole.ok && (P.whole.nodes || []).length === 19, 'SETUP: the real helper walks the stand-in tree (19 nodes)', P.whole.ok ? P.whole.nodes.length : P.whole);
-  ok(P.sub.ok && P.sub.nodes.length === 4 && J(P.sub.nodes.map((n) => n.path)) === '[[0,0],[0,0,0],[0,0,1],[0,0,2]]' && P.sub.truncated === true && P.sub.root && P.sub.root.role === 'table', 'THE HELPER\'S SUBTREE: the walk starts at the root path, paths stay ABSOLUTE (an act re-resolves them), the budget (4) is spent below that node and the truncation said', P.sub.ok ? P.sub.nodes.map((n) => n.path) : P.sub);
+  ok(gateOf(P.whole.ok) && (P.whole.nodes || []).length === 19, 'SETUP: the real helper walks the stand-in tree (19 nodes)', P.whole.ok ? P.whole.nodes.length : P.whole);
+  ok(gateOf(P.sub.ok) && P.sub.nodes.length === 4 && J(P.sub.nodes.map((n) => n.path)) === '[[0,0],[0,0,0],[0,0,1],[0,0,2]]' && P.sub.truncated === true && gateOf(P.sub.root) && P.sub.root.role === 'table', 'THE HELPER\'S SUBTREE: the walk starts at the root path, paths stay ABSOLUTE (an act re-resolves them), the budget (4) is spent below that node and the truncation said', P.sub.ok ? P.sub.nodes.map((n) => n.path) : P.sub);
   ok(!P.stale.ok && P.stale.code === 'ref_stale', 'a subtree whose node at that path is no longer the one named is refused ref_stale (as an act is)', P.stale);
   const enc = (P.tx.ok && P.tx.did.text) ? Buffer.byteLength(P.tx.did.text) : -1;
-  ok(P.tx.ok && P.tx.did.cut === true && P.tx.did.bytes === enc && enc <= 1000 && enc >= 998 && P.tx.did.chars === LONG.length && P.tx.did.text.startsWith('https://example.test/report?id=1&'), 'THE HELPER\'S WHOLE TEXT: bounded by BYTES (1000 asked; a 2-byte character never split), the characters there were said, the cut said', P.tx.ok ? { bytes: P.tx.did.bytes, chars: P.tx.did.chars, cut: P.tx.did.cut } : P.tx);
+  ok(gateOf(P.tx.ok) && P.tx.did.cut === true && P.tx.did.bytes === enc && enc <= 1000 && enc >= 998 && P.tx.did.chars === LONG.length && verdictOf(P.tx.did.text.startsWith('https://example.test/report?id=1&')), 'THE HELPER\'S WHOLE TEXT: bounded by BYTES (1000 asked; a 2-byte character never split), the characters there were said, the cut said', P.tx.ok ? { bytes: P.tx.did.bytes, chars: P.tx.did.chars, cut: P.tx.did.cut } : P.tx);
   ok(!!pw && pw.textHidden === true && pw.text === undefined && !J(P.whole).includes(SECRET), 'THE HIDDEN-TEXT RULE (ALSO CURED): a password field (the tree\'s hidden-text role) carries NO text in the snapshot, said by textHidden', pw);
   ok(!P.hid.ok && P.hid.code === 'text_hidden' && !J(P.hid).includes(SECRET), '…and the whole-text verb refuses it by name, text_hidden — the value never leaves the helper', P.hid);
-  ok(P.rd.ok && P.rd.did.text === null && !J(P.rd).includes(SECRET), '…and the helper\'s read verb answers no text for it either', P.rd);
+  ok(gateOf(P.rd.ok) && P.rd.did.text === null && !J(P.rd).includes(SECRET), '…and the helper\'s read verb answers no text for it either', P.rd);
   const lk = (P.whole.nodes || []).find((n) => n.role === 'link'), ur = (P.whole.nodes || []).find((n) => n.name === 'unreadable role');
   ok(!!lk && lk.name.length === 200, 'SETUP r2: the snapshot keeps 200 characters of the 250-character name', lk && lk.name.length);
-  ok(P.press.ok && P.press.did.action === 'jump', 'r2 THE MUST — ALSO CURED ON THE RELEASE\'S ACT: a press on the long-named node (its ref carrying the cut name) is THAT node, never ref_stale for ever', P.press);
-  ok(P.longTx.ok && P.longTx.did.nameChars === 250 && P.longTx.did.name.length === 250, 'r2: the whole-text verb on it answers — with its WHOLE name (250 characters)', P.longTx.ok ? P.longTx.did.nameChars : P.longTx);
-  ok(P.longSub.ok && P.longSub.root && P.longSub.root.name.length === 200 && P.longSub.nodes.length === 2, 'r2: a subtree rooted at a long-named node is read (its root named as the snapshot names it)', P.longSub.ok ? P.longSub.nodes.length : P.longSub);
+  ok(gateOf(P.press.ok) && P.press.did.action === 'jump', 'r2 THE MUST — ALSO CURED ON THE RELEASE\'S ACT: a press on the long-named node (its ref carrying the cut name) is THAT node, never ref_stale for ever', P.press);
+  ok(gateOf(P.longTx.ok) && P.longTx.did.nameChars === 250 && P.longTx.did.name.length === 250, 'r2: the whole-text verb on it answers — with its WHOLE name (250 characters)', P.longTx.ok ? P.longTx.did.nameChars : P.longTx);
+  ok(gateOf(P.longSub.ok) && gateOf(P.longSub.root) && P.longSub.root.name.length === 200 && P.longSub.nodes.length === 2, 'r2: a subtree rooted at a long-named node is read (its root named as the snapshot names it)', P.longSub.ok ? P.longSub.nodes.length : P.longSub);
   ok(!!ur && ur.role === 'unknown' && ur.text === undefined, 'r2: a node whose role did not answer carries no text in the snapshot (it may be a hidden field: fail closed)', ur);
-  ok(!P.urTx.ok && P.urTx.code === 'text_hidden' && P.urRd.ok && P.urRd.did.text === null && !J([P.urTx, P.urRd]).includes('hidden field could hold'), '…and the text verb refuses it text_hidden, the read verb answers no text (the act fails closed the same way)', { text: P.urTx.code || 'read', read: P.urRd.ok && P.urRd.did.text });
+  ok(!P.urTx.ok && P.urTx.code === 'text_hidden' && gateOf(P.urRd.ok) && P.urRd.did.text === null && !J([P.urTx, P.urRd]).includes('hidden field could hold'), '…and the text verb refuses it text_hidden, the read verb answers no text (the act fails closed the same way)', { text: P.urTx.code || 'read', read: P.urRd.ok && P.urRd.did.text });
   // CONTROLS (RED), each a copy of the helper with ONE edit
   // fb-4d25432476 (主开发 r2243): THE SUMMARY NAMES THE BOUND THAT CUT IT — the helper says which (`truncatedBy`), the ONE sentence
   // (src/window-targets.js truncationSays) words it, the engine hands it on, the CLI prints it
-  ok(P.bud.ok && P.bud.truncated === true && J(P.bud.truncatedBy) === J(['budget']) && P.dl.ok && P.dl.truncated === true && J(P.dl.truncatedBy) === J(['deadline']) && P.dl.wallMs === 1 && (P.dl.unreadable || []).some((u) => u.why === 'traversal deadline') && P.whole.truncated === false && J(P.whole.truncatedBy) === '[]',
+  ok(gateOf(P.bud.ok) && P.bud.truncated === true && J(P.bud.truncatedBy) === J(['budget']) && gateOf(P.dl.ok) && P.dl.truncated === true && J(P.dl.truncatedBy) === J(['deadline']) && P.dl.wallMs === 1 && gateOf((P.dl.unreadable || []).some((u) => u.why === 'traversal deadline')) && P.whole.truncated === false && J(P.whole.truncatedBy) === '[]',
     'fb-4d25432476: the helper says WHICH bound cut a snapshot — the node budget (3 nodes) or the traversal deadline (a busy machine past its wall), and nothing when nothing cut it', { bud: P.bud.truncatedBy, dl: P.dl.truncatedBy, whole: P.whole.truncatedBy });
   { const WTm = require(path.join(REPO, 'src/window-targets.js')), says = (x) => WTm.truncationSays(x);
     const dlS = says(P.dl), budS = says(P.bud), both = says({ truncated: true, truncatedBy: ['budget', 'deadline'], budget: 600, wallMs: 20000 }), old = says({ truncated: true, budget: 600 });
-    ok(/^TRUNCATED at the traversal deadline \(0 s: the machine answered slowly — read one part at a time with --under @ref\)$/.test(dlS) && !/budget/.test(dlS) && budS === 'TRUNCATED at the 3-node budget — --budget N up to 3000' && /traversal deadline \(20 s/.test(both) && /600-node budget/.test(both) && old === 'TRUNCATED at the 600-node budget — --budget N up to 3000' && says({ truncated: false }) === null
+    ok(gateOf(/^TRUNCATED at the traversal deadline \(0 s: the machine answered slowly — read one part at a time with --under @ref\)$/.test(dlS)) && !/budget/.test(dlS) && budS === 'TRUNCATED at the 3-node budget — --budget N up to 3000' && gateOf(/traversal deadline \(20 s/.test(both)) && gateOf(/600-node budget/.test(both)) && old === 'TRUNCATED at the 600-node budget — --budget N up to 3000' && says({ truncated: false }) === null
       && read('src/server/window-targets-engine.js').split('truncatedSays: WT.truncationSays(s)').length === 2 && read('data/bin/vibespace-window').split('${r.truncatedSays || `TRUNCATED at the ${r.budget}-node budget').length === 2,
       'fb-4d25432476: the summary says «TRUNCATED at the traversal deadline (N s: the machine answered slowly — read one part at a time with --under @ref)» when the deadline cut it and «at the N-node budget» when the budget did (both when both; an older helper\'s reply, naming no cause, keeps the budget\'s words); the engine hands the sentence on and the CLI prints it', { dlS, budS, both, old }); }
   const plantH = (from, to, tag, only) => { assert1(HSRC.includes(from), `B-4be3 helper control ${tag} planted`); return helperChecks(HSRC.replace(from, to), tag, only); };
-  { const C = plantH('    queue = [(app, list(base_path or []), 0, None)]', '    queue = [(app, [], 0, None)]', 'relpath', ['sub']); ok(C.sub.ok && J(C.sub.nodes.map((n) => n.path)) !== '[[0,0],[0,0,0],[0,0,1],[0,0,2]]', 'CONTROL (paths relative to the subtree): an act would re-resolve the wrong node — the leg above can fail', C.sub.ok && C.sub.nodes.map((n) => n.path)); }   // stale-pins: kept (the control puts the old text back)
-  { const C = plantH('            return b[:cap].decode("utf-8", "ignore"), True', '            return s, True', 'nobound', ['tx']); ok(C.tx.ok && Buffer.byteLength(C.tx.did.text) > 1000, 'CONTROL (the bound not applied): the whole value comes back past the asked bytes'); }
+  { const C = plantH('    queue = [(app, list(base_path or []), 0, None)]', '    queue = [(app, [], 0, None)]', 'relpath', ['sub']); ok(gateOf(C.sub.ok) && J(C.sub.nodes.map((n) => n.path)) !== '[[0,0],[0,0,0],[0,0,1],[0,0,2]]', 'CONTROL (paths relative to the subtree): an act would re-resolve the wrong node — the leg above can fail', C.sub.ok && C.sub.nodes.map((n) => n.path)); }   // stale-pins: kept (the control puts the old text back)
+  { const C = plantH('            return b[:cap].decode("utf-8", "ignore"), True', '            return s, True', 'nobound', ['tx']); ok(gateOf(C.tx.ok) && Buffer.byteLength(C.tx.did.text) > 1000, 'CONTROL (the bound not applied): the whole value comes back past the asked bytes'); }
   { const C = plantH('    return expect.get("name") is None or expect["name"] == (name or "")[:NAME_CUT]', '    return expect.get("name") is None or expect["name"] == (name or "")', 'wholename', ['press', 'longTx', 'longSub']); ok(!C.press.ok && C.press.code === 'ref_stale' && !C.longTx.ok && C.longTx.code === 'ref_stale' && !C.longSub.ok && C.longSub.code === 'ref_stale', 'CONTROL (the cut name compared with the WHOLE live name — the release\'s act): the press, the text and the subtree are ref_stale for ever', { press: C.press.code, text: C.longTx.code, sub: C.longSub.code }); }
   { const C = plantH('            if role_raw is None:\n                pass', '            if False:\n                pass', 'roleopen', ['whole']); const u2 = (C.whole.nodes || []).find((n) => n.name === 'unreadable role'); ok(!!u2 && u2.text === 'what a hidden field could hold', 'CONTROL (a role that did not answer read anyway): its text is handed out', u2); }
-  { const C = plantH('    hidden = role_raw is None or text_hidden(role)', '    hidden = text_hidden(role)', 'actopen', ['urTx', 'urRd']); ok(C.urTx.ok && C.urRd.ok && C.urRd.did.text === 'what a hidden field could hold', 'CONTROL (the act reads a role that did not answer): the text and read verbs hand its text out', { text: C.urTx.ok ? 'read' : C.urTx.code }); }
-  { const C = plantH('        if not same_node(expect, rrole, rname):', '        if False:', 'nostale', ['stale']); ok(C.stale.ok, 'CONTROL (no root check): a subtree whose node moved is read as if it were the one named — the ref_stale leg can fail', C.stale.ok ? 'read' : C.stale.code); }
-  { const C = plantH('            cut.add("deadline")\n', '            cut.add("budget")\n', 'deadline-as-budget', ['dl']); ok(C.dl.ok && C.dl.truncated === true && J(C.dl.truncatedBy) === J(['budget']), 'CONTROL (the deadline\'s cut said as the budget\'s, in a copy — the release\'s summary): a busy machine\'s snapshot is told it hit the node budget — the leg above is red on it', C.dl.truncatedBy); }
-  { const C = plantH('HIDDEN_TEXT_ROLES = ("password text",)', 'HIDDEN_TEXT_ROLES = ()', 'nohide', ['whole', 'hid', 'rd']); ok(J(C.whole).includes(SECRET) && C.hid.ok && J(C.hid).includes(SECRET) && J(C.rd).includes(SECRET), 'CONTROL (no hidden-text rule — r1179\'s find): the snapshot, the text verb AND the read verb hand the password field\'s value out'); }
+  { const C = plantH('    hidden = role_raw is None or text_hidden(role)', '    hidden = text_hidden(role)', 'actopen', ['urTx', 'urRd']); ok(gateOf(C.urTx.ok) && gateOf(C.urRd.ok) && C.urRd.did.text === 'what a hidden field could hold', 'CONTROL (the act reads a role that did not answer): the text and read verbs hand its text out', { text: C.urTx.ok ? 'read' : C.urTx.code }); }
+  { const C = plantH('        if not same_node(expect, rrole, rname):', '        if False:', 'nostale', ['stale']); ok(verdictOf(C.stale.ok), 'CONTROL (no root check): a subtree whose node moved is read as if it were the one named — the ref_stale leg can fail', C.stale.ok ? 'read' : C.stale.code); }
+  { const C = plantH('            cut.add("deadline")\n', '            cut.add("budget")\n', 'deadline-as-budget', ['dl']); ok(gateOf(C.dl.ok) && C.dl.truncated === true && J(C.dl.truncatedBy) === J(['budget']), 'CONTROL (the deadline\'s cut said as the budget\'s, in a copy — the release\'s summary): a busy machine\'s snapshot is told it hit the node budget — the leg above is red on it', C.dl.truncatedBy); }
+  { const C = plantH('HIDDEN_TEXT_ROLES = ("password text",)', 'HIDDEN_TEXT_ROLES = ()', 'nohide', ['whole', 'hid', 'rd']); ok(gateOf(J(C.whole).includes(SECRET)) && gateOf(C.hid.ok) && gateOf(J(C.hid).includes(SECRET)) && verdictOf(J(C.rd).includes(SECRET)), 'CONTROL (no hidden-text rule — r1179\'s find): the snapshot, the text verb AND the read verb hand the password field\'s value out'); }
 }
 
 // ── B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): THE WINDOW STORES ON THE STORE WRITER — an agent's act (the open,
@@ -985,7 +985,7 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
   const NEVER = 'the folder in window-reach.json\'s name: the writer\'s write of it never failed';
   const NEVERL = 'the folder in window-leases.json\'s name: the writer\'s write of it never failed';
   const SB = await shareScene(ENGINE, 'bs5-real', ['base']);
-  if (!SB.planted) skip5('5/8', NEVER); else ok(SB.leaseNow && SB.mode === 'pixels' && SB.disk === 'pixels' && SB.refused === 'notOnDisk',
+  if (!SB.planted) skip5('5/8', NEVER); else ok(gateOf(SB.leaseNow) && SB.mode === 'pixels' && SB.disk === 'pixels' && SB.refused === 'notOnDisk',
     'B-574d browser-stores 5/8: an agent\'s open and attach are handed (the lease in memory at once); a person\'s share act answers AFTER its landing (the file holds the mode when the answer comes), and a landing that FAILS answers notOnDisk — the act is in effect, never a false «refused»', SB);
   const src5 = read(ENGINE_REL), WAITS = "      respond(null, !missed.size ? out : { ...out, notOnDisk: true, code: missed.size > 1 ? 'share-not-on-disk' : missed.has(leaseFile) ? 'share-hold-not-on-disk' : 'share-mode-not-on-disk' });\n";
   const red = async (anchor, mutant, tag, legs) => shareScene(MUT.load(ENGINE_REL, editAnchor(src5, anchor, mutant, ENGINE_REL), tag), `${tag}-red`, legs);
@@ -996,37 +996,37 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
   // notOnDisk with a code naming which (the page: in effect; the mode may be lost / a conversation that held the window before may hold
   // it again / both). Each judged on the writer's failed write of its file; each with its RED
   if (!SB.basePlanted) skip5('follow 1 (the mode asked again)', NEVER);
-  else ok(SB.again === 'share-mode-not-on-disk' && SB.againSync, 'B-574d browser-stores follow 1: the SAME mode asked again once its own write failed answers the mode\'s code (the disk holds the old mode — never «saved» from memory alone), at once: a file whose writer state is «failed» is not waited for', { again: SB.again, sync: SB.againSync });
+  else ok(SB.again === 'share-mode-not-on-disk' && verdictOf(SB.againSync), 'B-574d browser-stores follow 1: the SAME mode asked again once its own write failed answers the mode\'s code (the disk holds the old mode — never «saved» from memory alone), at once: a file whose writer state is «failed» is not waited for', { again: SB.again, sync: SB.againSync });
   const S5 = await shareScene(ENGINE, 'bsf1-real'), SL = await shareScene(ENGINE, 'bsf1-lease-real', ['lease']);
   if (!SL.leaseRevoke.planted) skip5('follow 1 (the dropped hold)', NEVERL);
-  else ok(SL.leaseRevoke.dropped && SL.leaseRevoke.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1: a revoke that DROPS a hold that landed, while window-leases.json cannot land, answers notOnDisk with the hold\'s code (in effect; a conversation that held the window before may hold it again after a restart)', SL.leaseRevoke);
+  else ok(gateOf(SL.leaseRevoke.dropped) && SL.leaseRevoke.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1: a revoke that DROPS a hold that landed, while window-leases.json cannot land, answers notOnDisk with the hold\'s code (in effect; a conversation that held the window before may hold it again after a restart)', SL.leaseRevoke);
   if (!S5.planted) skip5('follow 1 (the mode file)', NEVER);
-  else ok(S5.granted && S5.revoked === 'plain', 'B-574d browser-stores follow 1: a revoke that drops no hold, its window\'s mode on disk, answers at once while window-reach.json cannot land — nothing it did lives in that file (its record is the grants store\'s)', { revoked: S5.revoked });
+  else ok(gateOf(S5.granted) && S5.revoked === 'plain', 'B-574d browser-stores follow 1: a revoke that drops no hold, its window\'s mode on disk, answers at once while window-reach.json cannot land — nothing it did lives in that file (its record is the grants store\'s)', { revoked: S5.revoked });
   if (!S5.quietPlanted) skip5('follow 1 (after a failed write)', NEVER);
   else ok(S5.quiet === 'plain', 'B-574d browser-stores follow 1 (its read): once a write of window-reach.json FAILED, a grant that moves no mode still answers plain — the old file holds its window\'s mode (never «that mode may be lost» for every act while the storage fails)', { quiet: S5.quiet });
   if (!(S5.other && S5.other.planted)) skip5('follow 1 (another window\'s write)', NEVER);
   else ok(S5.other.da2 === 'share-mode-not-on-disk' && S5.other.da1 === 'plain', 'B-574d browser-stores follow 1 (its read): ANOTHER window\'s mode write failed (said for that window) — a grant on this window, its own mode on disk, answers plain (the words speak of the act\'s window)', S5.other);
   const S15 = await shareScene(ENGINE, 'bsf1-unheld-real', ['unheld']);
   if (!(S15.unheld && S15.unheld.failed && S15.unheld.attached)) skip5('follow 1 (a hold that never landed)', 'the attach took no lease, or its own write of window-leases.json did not fail');
-  else ok(S15.unheld.dropped && S15.unheld.said === 'plain', 'B-574d browser-stores follow 1 (its read): a revoke that drops a hold which NEVER landed answers plain — a restart cannot bring it back (the words speak of the act\'s window)', S15.unheld);
+  else ok(gateOf(S15.unheld.dropped) && S15.unheld.said === 'plain', 'B-574d browser-stores follow 1 (its read): a revoke that drops a hold which NEVER landed answers plain — a restart cannot bring it back (the words speak of the act\'s window)', S15.unheld);
   const S16 = await shareScene(ENGINE, 'bsf1-lflight-real', ['lflight']);
   if (!(S16.lflight && S16.lflight.failed && S16.lflight.staged)) skip5('follow 1 (a hold in flight)', 'the attach took no lease, its write did not fail, or the engine\'s record was not there to stage');
-  else ok(S16.lflight.dropped && S16.lflight.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): a hold that never landed but rides a write IN FLIGHT — the revoke that drops it waits (that write may land it): the hold\'s code while window-leases.json cannot land', S16.lflight);
+  else ok(gateOf(S16.lflight.dropped) && S16.lflight.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): a hold that never landed but rides a write IN FLIGHT — the revoke that drops it waits (that write may land it): the hold\'s code while window-leases.json cannot land', S16.lflight);
   const S17 = await shareScene(ENGINE, 'bsf1-lcarry-real', ['lcarry']);
   if (!(S17.lcarry && S17.lcarry.failed && S17.lcarry.carried)) skip5('follow 1 (a hold carried along replacedBy)', 'the reconcile carried no lease, or its write of window-leases.json did not fail');
-  else ok(S17.lcarry.dropped && S17.lcarry.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): an agent browser relaunched — the reconcile carries its LANDED lease to the successor (that write fails); the revoke there that drops it answers the hold\'s code: a restart carries the landed lease again', S17.lcarry);
+  else ok(gateOf(S17.lcarry.dropped) && S17.lcarry.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): an agent browser relaunched — the reconcile carries its LANDED lease to the successor (that write fails); the revoke there that drops it answers the hold\'s code: a restart carries the landed lease again', S17.lcarry);
   const S11 = await shareScene(ENGINE, 'bsf1-getcarry-real', ['getcarry']);
   if (!S11.planted) skip5('follow 1 (the dialog\'s carry)', NEVER);
-  else ok(S11.getCarried && S11.getCarried.said === 'share-mode-not-on-disk' && S11.getCarried.mode === 'pixels', 'B-574d browser-stores follow 1: the Share dialog\'s read carries a relaunched window\'s mode (its write failed, waited by nobody); the grant that follows waits for it — the mode\'s code while it cannot land (a restart before it lands loses the mode)', S11.getCarried);
+  else ok(gateOf(S11.getCarried) && S11.getCarried.said === 'share-mode-not-on-disk' && S11.getCarried.mode === 'pixels', 'B-574d browser-stores follow 1: the Share dialog\'s read carries a relaunched window\'s mode (its write failed, waited by nobody); the grant that follows waits for it — the mode\'s code while it cannot land (a restart before it lands loses the mode)', S11.getCarried);
   const S9 = await shareScene(ENGINE, 'bsf1-carry-real', ['carry']);
   if (!S9.planted) skip5('follow 1 (the mode carried inside the act)', NEVER);
-  else ok(S9.carried && S9.carried.said === 'share-mode-not-on-disk' && S9.carried.mode === 'pixels', 'B-574d browser-stores follow 1: a grant that CARRIES a relaunched window\'s mode inside the act waits for window-reach.json — the mode\'s code while it cannot land', S9.carried);
+  else ok(gateOf(S9.carried) && S9.carried.said === 'share-mode-not-on-disk' && S9.carried.mode === 'pixels', 'B-574d browser-stores follow 1: a grant that CARRIES a relaunched window\'s mode inside the act waits for window-reach.json — the mode\'s code while it cannot land', S9.carried);
   const S14 = await shareScene(ENGINE, 'bsf1-bare-real', ['bare']);
   if (!S14.planted) skip5('follow 1 (a mode-only share carried)', NEVER);
-  else ok(S14.bare && S14.bare.rows === 0 && S14.bare.said === 'share-mode-not-on-disk', 'B-574d browser-stores follow 1 (its read): a MODE-ONLY share carried to a relaunched window (its write failed), then set to Auto there, answers the mode\'s code — with no rows of its own, a restart carries the old mode to it again', S14.bare);
+  else ok(gateOf(S14.bare) && S14.bare.rows === 0 && S14.bare.said === 'share-mode-not-on-disk', 'B-574d browser-stores follow 1 (its read): a MODE-ONLY share carried to a relaunched window (its write failed), then set to Auto there, answers the mode\'s code — with no rows of its own, a restart carries the old mode to it again', S14.bare);
   const S10 = await shareScene(ENGINE, 'bsf1-both-real', ['both']);
   if (!S10.planted || !(S10.both && S10.both.leasePlanted)) skip5('follow 1 (the hold and the mode both owed)', 'the folders in the two files\' names: the writer\'s writes of them never both failed');
-  else ok(S10.both.dropped && S10.both.said === 'share-not-on-disk', 'B-574d browser-stores follow 1: a revoke that drops a hold while the mode file is owed too answers notOnDisk with the code for both (the mode may be lost AND a conversation that held the window before may hold it again)', S10.both);
+  else ok(gateOf(S10.both.dropped) && S10.both.said === 'share-not-on-disk', 'B-574d browser-stores follow 1: a revoke that drops a hold while the mode file is owed too answers notOnDisk with the code for both (the mode may be lost AND a conversation that held the window before may hold it again)', S10.both);
   const S12 = await shareScene(ENGINE, 'bsf1-flight-real', ['flight', 'lost', 'lostkeep']);
   if (!S12.planted || !S12.flightStaged) skip5('follow 1 (a write in flight / one never answered)', 'the engine\'s record of window-reach.json was not there to stage, or its write never failed');
   else ok(S12.flight === 'share-mode-not-on-disk' && S12.lost === 'share-mode-not-on-disk' && S12.lostkeep === 'plain', 'B-574d browser-stores follow 1 (its read): a write in flight carrying another mode makes a grant wait (the mode\'s code while it cannot land); once that write never answered (its thread lost), the window whose mode differs between the two possible disks waits too, and a window the same in both answers plain', { flight: S12.flight, lost: S12.lost, lostkeep: S12.lostkeep });
@@ -1036,13 +1036,13 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
   else ok(S13.read === 'pixels' && S13.said === 'plain', 'B-574d browser-stores follow 1 (its read): a START reads what the disk holds — a grant there, its window\'s mode as read, answers plain while window-reach.json cannot land', S13);
   const S18 = await seedScene(FRESH, 'bsf1-seedl-real', 'lease');
   if (!S18.planted || !S18.attached) skip5('follow 1 (a start\'s read of the holds)', 'the second engine\'s attach took no lease, or its write of window-leases.json never failed');
-  else ok(S18.read && S18.said === 'plain' && S18.readHold === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): a START reads the holds the disk holds — the revoke of a hold that never landed there answers plain, and the revoke that drops the hold it READ (A\'s) answers the hold\'s code, while window-leases.json cannot land', S18);
+  else ok(gateOf(S18.read) && S18.said === 'plain' && S18.readHold === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): a START reads the holds the disk holds — the revoke of a hold that never landed there answers plain, and the revoke that drops the hold it READ (A\'s) answers the hold\'s code, while window-leases.json cannot land', S18);
   const S20 = await shareScene(ENGINE, 'bsf1-gain-real', ['gain']);
   if (!(S20.gain && S20.gain.attached && S20.gain.failed)) skip5('follow 1 (a hold memory has, the disk not)', 'the attach took no lease, or its own write of window-leases.json did not fail');
-  else ok(S20.gain.held && S20.gain.said === 'plain', 'B-574d browser-stores follow 1 (its read): B\'s hold NEVER landed (memory names B, the disk nobody) — a mode change on that window answers plain: no conversation the disk names could hold it after a restart', S20.gain);
+  else ok(gateOf(S20.gain.held) && S20.gain.said === 'plain', 'B-574d browser-stores follow 1 (its read): B\'s hold NEVER landed (memory names B, the disk nobody) — a mode change on that window answers plain: no conversation the disk names could hold it after a restart', S20.gain);
   const S21 = await shareScene(ENGINE, 'bsf1-gainfl-real', ['gainfl']);
   if (!(S21.gainfl && S21.gainfl.attached && S21.gainfl.failed && S21.gainfl.staged)) skip5('follow 1 (a gain while a write in flight names nobody)', 'the attach took no lease, its write did not fail, or the engine\'s record was not there to stage');
-  else ok(S21.gainfl.held && S21.gainfl.said === 'plain', 'B-574d browser-stores follow 1 (its read): B\'s unlanded hold while a write in flight names nobody for the window — the mode change still answers plain on the lease side (neither disk the writer may leave names another conversation)', S21.gainfl);
+  else ok(gateOf(S21.gainfl.held) && S21.gainfl.said === 'plain', 'B-574d browser-stores follow 1 (its read): B\'s unlanded hold while a write in flight names nobody for the window — the mode change still answers plain on the lease side (neither disk the writer may leave names another conversation)', S21.gainfl);
   const S22 = await shareScene(ENGINE, 'bsf1-swap-real', ['swap']);
   if (!(S22.landedA && S22.swap && S22.swap.heldA && S22.swap.detached && S22.swap.heldB && S22.swap.failed)) skip5('follow 1 (the disk names A, memory B)', 'A\'s hold did not land before the plant, the detach or B\'s attach did not take, or the write did not fail');
   else ok(S22.swap.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): the disk names A while memory names B — a mode change answers the hold\'s code: a restart gives the window to A, a conversation that held it before', S22.swap);
@@ -1050,7 +1050,7 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
   if (!(S19.stale && S19.stale.detached && S19.stale.failed)) skip5('follow 1 (a drop not landed)', 'the detach did not drop the lease, or its write of window-leases.json did not fail');
   else ok(!S19.stale.dropped && S19.stale.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): A DETACHED while window-leases.json could not land — the person\'s revoke of A drops nothing, yet answers the hold\'s code: the disk still names A, and a restart gives A the window back', S19.stale);
   { const UT = read('src/lib/utils.js');
-    ok(/if \(body\.code === 'share-hold-not-on-disk' \|\| body\.code === 'share-mode-not-on-disk' \|\| body\.code === 'share-not-on-disk'\) \{ try \{ showToast\(body\.code === 'share-hold-not-on-disk' \? t\('This change is in effect, but the window[^\n]*holder is not on disk yet[^\n]*held the window before may hold it again \(until its next step, if the window is no longer shared with it\)[^\n]*: body\.code === 'share-mode-not-on-disk' \? t\('This change is in effect, but the window[^\n]*mode \(how the agent sees it\) is not on disk yet[^\n]*that mode may be lost[^\n]*: t\('This change is in effect, but the window[^\n]*mode \(how the agent sees it\) and its holder are not on disk yet[^\n]*\} catch \{ \} return true; \}/.test(UT),
+    ok(verdictOf(/if \(body\.code === 'share-hold-not-on-disk' \|\| body\.code === 'share-mode-not-on-disk' \|\| body\.code === 'share-not-on-disk'\) \{ try \{ showToast\(body\.code === 'share-hold-not-on-disk' \? t\('This change is in effect, but the window[^\n]*holder is not on disk yet[^\n]*held the window before may hold it again \(until its next step, if the window is no longer shared with it\)[^\n]*: body\.code === 'share-mode-not-on-disk' \? t\('This change is in effect, but the window[^\n]*mode \(how the agent sees it\) is not on disk yet[^\n]*that mode may be lost[^\n]*: t\('This change is in effect, but the window[^\n]*mode \(how the agent sees it\) and its holder are not on disk yet[^\n]*\} catch \{ \} return true; \}/.test(UT)),
       'browser-stores follow 1: sayNotOnDisk says each share code in its own words (in effect; a conversation that held the window before may hold it again — until its next step, if no longer shared / the mode may be lost / both), then returns'); }
   { const CODE = WAITS;
     const S1x = await red(CODE, "      respond(null, !missed.size ? out : { ...out, notOnDisk: true, code: 'share-mode-not-on-disk' });   // MUTANT: every miss said as the mode's\n", 'bsf1-modecode', ['lease']);
@@ -1062,7 +1062,7 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
     const LEASEW = '    const files = [...(reachOwed ? [reachFile] : []), ...(leaseOwed ? [leaseFile] : [])];';
     const S3x = await red(LEASEW, '    const files = [...(reachOwed ? [reachFile] : [])];   // MUTANT: a dropped lease waits for nothing', 'bsf1-lease-unwaited', ['lease']);
     if (!S3x.leaseRevoke.planted) skip5('follow 1 RED (the dropped lease)', 'the copy\'s write of window-leases.json never failed');
-    else ok(S3x.leaseRevoke.dropped && S3x.leaseRevoke.said === 'plain', 'RED (anchored copy: a dropped lease waits for nothing): the revoke is answered as on disk while its lease file is owed — follow 1 goes red', S3x.leaseRevoke);
+    else ok(gateOf(S3x.leaseRevoke.dropped) && S3x.leaseRevoke.said === 'plain', 'RED (anchored copy: a dropped lease waits for nothing): the revoke is answered as on disk while its lease file is owed — follow 1 goes red', S3x.leaseRevoke);
     const LOWED = '    const leaseOwed = (handedCount(leaseFile) !== nL || owedNow(leaseFile)) && !(handle && holdsLease(handle));   // also an EARLIER drop not landed (a detach, the tick\'s)';
     const Sux = await red(LOWED, '    const leaseOwed = handedCount(leaseFile) !== nL;   // MUTANT: the whole lease file waited', 'bsf1-lease-whole', ['unheld']);
     if (!(Sux.unheld && Sux.unheld.failed && Sux.unheld.attached)) skip5('follow 1 RED (a hold that never landed)', 'the copy\'s attach took no lease, or its write of window-leases.json never failed');
@@ -1087,7 +1087,7 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
     const HANDEDM = '    onWritten: (ok) => { const x = HANDED.get(file); if (!x) return; x.landedMeta = x.flightMeta; x.inFlight = false; } });   // MUTANT: the bytes HANDED read as landed';
     const S7x = await red(LANDED, HANDEDM, 'bsf1-handed', ['base']), S7y = await red(LANDED, HANDEDM, 'bsf1-handed2', ['getcarry']);
     if (!S7x.basePlanted || !S7y.planted) skip5('follow 1 RED (the failed write read as landed)', 'the copy\'s write of window-reach.json never failed');
-    else ok(S7x.again === 'plain' && S7y.getCarried && S7y.getCarried.said === 'plain', 'RED (anchored copy: the bytes handed read as landed, whatever the landing): the mode asked again and the grant after the dialog\'s carry are answered «saved» while the disk holds the old mode — follow 1 goes red', { again: S7x.again, getCarried: S7y.getCarried });
+    else ok(S7x.again === 'plain' && gateOf(S7y.getCarried) && S7y.getCarried.said === 'plain', 'RED (anchored copy: the bytes handed read as landed, whatever the landing): the mode asked again and the grant after the dialog\'s carry are answered «saved» while the disk holds the old mode — follow 1 goes red', { again: S7x.again, getCarried: S7y.getCarried });
     const SHORT = "      try { const nd = writerOf().whyNotDurable(f); if (nd && nd.why === 'failed') { asked = true; one(f, false); continue; } writerOf().durable(f, { timeoutMs: shareWaitMs || undefined, answer: (ok) => { asked = true; one(f, ok); } }); } catch { if (!asked) one(f, false); }";
     const Sax = await red(SHORT, "      try { writerOf().durable(f, { timeoutMs: shareWaitMs || undefined, answer: (ok) => { asked = true; one(f, ok); } }); } catch { if (!asked) one(f, false); }   // MUTANT: a failed file waited for its retry", 'bsf1-short', ['base']);
     if (!Sax.basePlanted) skip5('follow 1 RED (the failed-state road)', 'the copy\'s write of window-reach.json never failed');
@@ -1095,7 +1095,7 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
     const PRED = '    if (!rowsOf(h).length) for (const k of Object.keys(o)) if (k !== h && successorOf(k) === h) return o[k];\n';
     const Spx = await red(PRED, '    // MUTANT: no predecessor read for a window with no rows\n', 'bsf1-pred', ['bare']);
     if (!Spx.planted) skip5('follow 1 RED (a mode-only share carried)', 'the copy\'s write of window-reach.json never failed');
-    else ok(Spx.bare && Spx.bare.said === 'plain', 'RED (anchored copy: no predecessor read): Auto on the relaunched window is answered «saved» though a restart carries the old mode to it again — follow 1 goes red', Spx.bare);
+    else ok(gateOf(Spx.bare) && Spx.bare.said === 'plain', 'RED (anchored copy: no predecessor read): Auto on the relaunched window is answered «saved» though a restart carries the old mode to it again — follow 1 goes red', Spx.bare);
     const FLIGHT = '  function holdsMode(h) { const r = HANDED.get(reachFile); if (!r) return false; const m = modeOf(h), d = diskModeIn(r.landedMeta, h); return d === m && !(r.inFlight && diskModeIn(r.flightMeta, h) !== m); }';
     const Sfx = await red(FLIGHT, '  function holdsMode(h) { const r = HANDED.get(reachFile); if (!r) return false; const m = modeOf(h), d = diskModeIn(r.landedMeta, h); return d === m; }   // MUTANT: a write in flight not read', 'bsf1-flight', ['flight', 'lost', 'lostkeep']);
     if (!Sfx.planted || !Sfx.flightStaged) skip5('follow 1 RED (a write in flight)', 'the copy\'s record was not there to stage, or its write never failed');
@@ -1179,4 +1179,4 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

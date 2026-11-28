@@ -25,7 +25,7 @@ const RCLONE = which('rclone'), FUSERMOUNT = which('fusermount3') || which('fuse
 if (!RCLONE || !FUSERMOUNT || !fs.existsSync('/dev/fuse')) { console.log(`SKIP: a real FUSE mount needs rclone + fusermount3 + /dev/fuse (rclone ${!!RCLONE}, fusermount ${!!FUSERMOUNT}, /dev/fuse ${fs.existsSync('/dev/fuse')})`); console.log('ALL PASS (0)'); process.exit(0); }
 const REFUSAL = 'refused: a synchronous fs call on a storage mount from the main thread';
 let passed = 0, failed = 0;
-const ok = (c, n, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -79,9 +79,9 @@ const untilLog = async (re, ms = 15000) => { const t0 = Date.now(); for (;;) { c
 
 console.log('① the guard refuses a storage mount by name (on by default)');
 start('guard');
-ok(await untilUp(), 'the scratch server answers (guard on: the default)');
+ok(verdictOf(await untilUp()), 'the scratch server answers (guard on: the default)');
 const a = await importTask();
-ok(a.status === 400 && a.body && a.body.error === REFUSAL && a.ms < 2000, `POST /api/tasks/import of a file on the storage mount answers the refusal by name in ${a.ms} ms`, a);
+ok(a.status === 400 && gateOf(a.body) && a.body.error === REFUSAL && a.ms < 2000, `POST /api/tasks/import of a file on the storage mount answers the refusal by name in ${a.ms} ms`, a);
 const said = await untilLog(new RegExp(`\\[mount-guard\\] readFileSync\\(${esc(TASK)}\\) from src/task-groups\\.js:\\d+ TaskGroupManager\\.importFromFile refused — use SafeFs/async; the mount «${esc(MNT)}»`));
 ok(!!said, `the journal names the call, its site and the mount: ${said}`, log().split('\n').filter((l) => /mount-guard/.test(l)));
 
@@ -90,7 +90,7 @@ process.kill(rclone.pid, 'SIGSTOP');
 const probe = spawnSync('timeout', ['-s', 'KILL', '2', 'stat', TASK], { encoding: 'utf8' }); // a CHILD asks the mount (never this process)
 ok(probe.status !== 0 && !/Size:/.test(probe.stdout || ''), `PREMISE: the mount is hung (a child's stat got no answer in 2 s: exit ${probe.status} ${probe.signal || ''})`);
 const [b, during] = await Promise.all([importTask(), (async () => { await sleep(50); return get('/api/boot'); })()]);
-ok(b.status === 400 && b.body && b.body.error === REFUSAL && b.ms < 1500, `the same door on the HUNG mount answers the refusal at once (${b.ms} ms)`, b);
+ok(b.status === 400 && gateOf(b.body) && b.body.error === REFUSAL && b.ms < 1500, `the same door on the HUNG mount answers the refusal at once (${b.ms} ms)`, b);
 ok(during.status === 200 && during.ms < 2000, `GET /api/boot during the refusal answers in ${during.ms} ms`, during);
 ok((log().match(/\[mount-guard\] readFileSync\(/g) || []).length === 1, 'the refusal is said ONCE per call site (two refusals, one line)');
 await stop();
@@ -98,7 +98,7 @@ await stop();
 console.log('③ CONTROL — the guard off (log only): the same call holds the whole server, and the witness names it');
 start('logonly', { 'mounts.mainThreadSyncGuard': false });
 process.kill(rclone.pid, 'SIGCONT');
-ok(await untilUp(), 'the scratch server answers (mounts.mainThreadSyncGuard = false)');
+ok(verdictOf(await untilUp()), 'the scratch server answers (mounts.mainThreadSyncGuard = false)');
 process.kill(rclone.pid, 'SIGSTOP');
 const held = importTask(30000);
 await sleep(300);
@@ -115,11 +115,11 @@ const canary = await untilLog(new RegExp(`\\[canary\\] the main loop was held (\
 ok(!!canary && Number(/held (\d+) ms/.exec(canary)[1]) >= 5000, `at its return the canary names fn, path, ms, the storage mount and the caller: ${canary}`);
 let item = null;
 for (let i = 0; i < 60 && !item; i++) { const r = await get('/api/user-todos'); item = r.body && r.body.todos && (r.body.todos.open || []).find((t) => /waited \d+ s on the folder/.test(t.text || '')); if (!item) await sleep(250); }
-ok(item && item.origin === 'server' && new RegExp(`VibeSpace's server waited \\d+ s on the folder ${esc(MNT)} — readFileSync on ${esc(TASK)} from src/task-groups\\.js:\\d+ TaskGroupManager\\.importFromFile`).test(item.text) && /The call came from:/.test(item.detail || ''),
+ok(gateOf(item) && item.origin === 'server' && gateOf(new RegExp(`VibeSpace's server waited \\d+ s on the folder ${esc(MNT)} — readFileSync on ${esc(TASK)} from src/task-groups\\.js:\\d+ TaskGroupManager\\.importFromFile`).test(item.text)) && verdictOf(/The call came from:/.test(item.detail || '')),
   `the For-you item («This machine») names the call beside who presses the mount: ${item && item.text}`, item);
 const after = await get('/api/boot');
 ok(after.status === 200, 'and the server answers again');
 await stop();
 
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

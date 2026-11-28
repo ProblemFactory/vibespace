@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 const C = require(path.join(REPO, 'src/channel-caps.js'));
 const NOW = 1789000000000;
@@ -138,7 +138,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   ok(C.identityWarning({ identityMarking: 'nonsense' }).marking === 'unknown', 'an unreadable declaration is `unknown`, never `none`');
   ok(C.identityWarningText(C.identityWarning({ identityMarking: 'marked', identityMarkingText: 'Recipients see the app.' })) === 'Recipients see the app.',
     'the adapter\'s own sentence is shown VERBATIM (it is a statement about a vendor\'s UI, not product chrome)');
-  ok(C.identityWarningText(C.identityWarning({ identityMarking: 'unknown' }), { t: (s) => 'ZH:' + s }).startsWith('ZH:'), 'our own fallback sentence goes through the injected translator');
+  ok(verdictOf(C.identityWarningText(C.identityWarning({ identityMarking: 'unknown' }), { t: (s) => 'ZH:' + s }).startsWith('ZH:')), 'our own fallback sentence goes through the injected translator');
   // r2: the RESOLVER returns structure and never a sentence — the server
   // calls it with no translator (it cannot have one: the digest is broadcast
   // to every client while the language is per DEVICE), so a sentence composed
@@ -160,7 +160,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   const b = C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: true, grant: 'granted', storePath: '/x', at: NOW + 600e3 }, NOW + 600e3), entry, NOW + 600e3);
   ok(a.kind === 'scanned' && a.seconds === 240 && b.seconds === 840,
     'the SAME entry at two different `now`s gives two different ages — a resolver that cannot see a clock cannot answer "how long ago"', JSON.stringify([a, b]));
-  ok(/4m/.test(C.freshnessText(a)), 'the SENTENCE carries the human age', C.freshnessText(a));
+  ok(verdictOf(/4m/.test(C.freshnessText(a))), 'the SENTENCE carries the human age', C.freshnessText(a));
 
   const livePush = C.freshnessClaim(pushCaps, C.laneState(pushCaps, rec({ claimedExclusive: 'exclusive' }), entry, NOW), entry, NOW);
   ok(livePush.kind === 'live', 'a live, content-carrying push lane says "live"');
@@ -172,11 +172,11 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   const legacyUntracked = C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { tracked: false, lastAt: NOW - 60e3, lane: {} }, NOW);
   ok(legacyUntracked.state === 'bound' && legacyUntracked.seconds === 30, 'a stale `tracked:false` on an entry gates NOTHING any more (every conversation is fetched)', JSON.stringify(legacyUntracked));
   const noSource = C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: false, at: NOW }, NOW), entry, NOW);
-  ok(noSource.seconds === null && /not scanning/.test(C.freshnessText(noSource)), 'a scan lane with no source says so rather than printing an age for a lane that is not running');
+  ok(noSource.seconds === null && verdictOf(/not scanning/.test(C.freshnessText(noSource))), 'a scan lane with no source says so rather than printing an age for a lane that is not running');
   const paused = C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { lastAt: NOW - 60e3, refresh: { every: 'paused' }, lane: {} }, NOW);
-  ok(paused.state === 'paused' && /paused/.test(C.freshnessText(paused)), 'a PAUSED override says so, never an age it will not keep', JSON.stringify(paused));
+  ok(paused.state === 'paused' && verdictOf(/paused/.test(C.freshnessText(paused))), 'a PAUSED override says so, never an age it will not keep', JSON.stringify(paused));
   const off = C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), entry, NOW, { enabled: false });
-  ok(off.state === 'off' && /not polling/.test(C.freshnessText(off)), 'a DISABLED account\'s rows say "not polling"');
+  ok(off.state === 'off' && verdictOf(/not polling/.test(C.freshnessText(off))), 'a DISABLED account\'s rows say "not polling"');
 }
 
 // ── ⑥b THE CLAIM IS STRUCTURE; THE SENTENCE IS THE CLIENT'S (r2) ──
@@ -190,10 +190,10 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { lane: {} }, NOW),
     C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { refresh: { every: 'paused' }, lane: {} }, NOW),
   ];
-  ok(claims.every((c) => !('text' in c)),
+  ok(verdictOf(claims.every((c) => !('text' in c))),
     'NO claim carries a composed sentence — the resolver answers {kind, state, seconds} and nothing else', JSON.stringify(claims[0]));
   const states = claims.map((c) => c.state);
-  ok(states.includes('off') && states.includes('never') && states.includes('aged') && states.includes('live') && states.includes('bound') && states.includes('paused'),
+  ok(gateOf(states.includes('off')) && gateOf(states.includes('never')) && gateOf(states.includes('aged')) && gateOf(states.includes('live')) && gateOf(states.includes('bound')) && verdictOf(states.includes('paused')),
     'every state a row can be in is produced by the table', JSON.stringify(states));
   ok(C.PUSH_CLAIMS.join() === 'exclusive,shared,unknown', 'the three claims are a closed set');
 }
@@ -221,14 +221,14 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   ];
   for (const [label, entry, opts, want] of table) {
     const got = cad(entry, opts);
-    ok(Object.entries(want).every(([k, v]) => got[k] === v), label, JSON.stringify(got));
+    ok(verdictOf(Object.entries(want).every(([k, v]) => got[k] === v)), label, JSON.stringify(got));
   }
   const floor = C.cadenceFor({ ...pollCaps, pollInterval: { floor: 45 } }, poll, { lastAt: NOW - 60e3 }, NOW, { tiers: T });
   ok(floor.seconds === 45, 'the vendor floor clamps a faster tier (Gmail\'s floor is 30, a hot 10 s setting cannot go below it)', JSON.stringify(floor));
   const capped = C.cadenceFor(pollCaps, poll, {}, NOW, { tiers: { ...T, coldSec: 3600 } });
   ok(capped.seconds === C.COLD_MAX_SEC && C.COLD_MAX_SEC === 900, 'a cold setting above 15 min is clamped to 900 (the owner: "15 minutes at most")', JSON.stringify(capped));
   ok(C.REFRESH_CHOICES.join() === '30,60,300,900,paused', 'the override choices are a closed set', String(C.REFRESH_CHOICES));
-  ok(C.validRefresh(60) && C.validRefresh('paused') && !C.validRefresh(45) && !C.validRefresh('fast'), 'validRefresh accepts only the declared choices');
+  ok(gateOf(C.validRefresh(60)) && gateOf(C.validRefresh('paused')) && !C.validRefresh(45) && !C.validRefresh('fast'), 'validRefresh accepts only the declared choices');
   const dflt = C.cadenceFor(pollCaps, poll, { lastAt: NOW - 60e3 }, NOW);
   ok(dflt.seconds === 30 && dflt.tier === 'hot', 'with no tiers handed in, the design defaults apply (hot 30 / warm 300 / cold 900)', JSON.stringify(dflt));
 }
@@ -239,22 +239,22 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   // lane dc-channels-blocks (C6): the words are the LIVE LANE's declaration (the account view carries them while parked)
   const LW = require(path.join(REPO, 'src/channels/live/lark.js')).UNAVAILABLE_WORDS, GW = require(path.join(REPO, 'src/channels/live/gmail.js')).UNAVAILABLE_WORDS;
   const sdk = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'sdk-not-installed', unavailableWords: LW, lastStateWhy: 'the official Lark SDK (@larksuiteoapi/node-sdk) is not installed …' }, { via: 'poll' }, { t });
-  ok(/npm install @larksuiteoapi\/node-sdk/.test(sdk) && /restart/.test(sdk) && /im:message\.group_msg/.test(sdk) && /polled|polling/.test(sdk), 'the SDK-missing push lane says the exact remedy (install, restart, the event subscription, the scope) and that polling carries it meanwhile', sdk);
+  ok(gateOf(/npm install @larksuiteoapi\/node-sdk/.test(sdk)) && gateOf(/restart/.test(sdk)) && gateOf(/im:message\.group_msg/.test(sdk)) && verdictOf(/polled|polling/.test(sdk)), 'the SDK-missing push lane says the exact remedy (install, restart, the event subscription, the scope) and that polling carries it meanwhile', sdk);
   const g = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'push-not-configured', unavailableWords: GW }, { via: 'poll' }, { t });
   const bare = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'sdk-not-installed', lastStateWhy: 'lane words' }, { via: 'poll' }, { t });
   ok(bare === 'push unavailable: lane words' && C.pushUnavailableText('watch-refused', { t }) === '', 'channel-caps knows NO lane\'s code: undeclared words fall back to the lane\'s own sentence', bare);
-  ok(/topic/i.test(g) && /subscription/i.test(g), 'a Gmail push without its Pub/Sub options says which two options', g);
+  ok(gateOf(/topic/i.test(g)) && verdictOf(/subscription/i.test(g)), 'a Gmail push without its Pub/Sub options says which two options', g);
   const unknownCode = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'something-new', lastStateWhy: 'vendor words' }, { via: 'poll' }, { t });
-  ok(/vendor words/.test(unknownCode), 'an unknown code falls back to the lane\'s own words (a new code is a new row, never silence)', unknownCode);
+  ok(verdictOf(/vendor words/.test(unknownCode)), 'an unknown code falls back to the lane\'s own words (a new code is a new row, never silence)', unknownCode);
   const live = C.pushLaneText({ enabled: true, state: 'live', claimedExclusive: 'exclusive' }, { via: 'push', live: true, carryContent: true }, { t, coldSeconds: 900 });
-  ok(/15 min|15m/.test(live), 'a live content lane names the safety-net cadence', live);
+  ok(verdictOf(/15 min|15m/.test(live)), 'a live content lane names the safety-net cadence', live);
   const b = C.budgetText({ unit: 'request', limit: 60, exhausted: true, waiting: 37, resetInSeconds: 23 }, { t });
-  ok(/60/.test(b) && /37/.test(b) && /23/.test(b) && /request/.test(b), 'the budget sentence names the cap, the queue and the wait', b);
+  ok(gateOf(/60/.test(b)) && gateOf(/37/.test(b)) && gateOf(/23/.test(b)) && verdictOf(/request/.test(b)), 'the budget sentence names the cap, the queue and the wait', b);
   ok(C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: false }, { t }) === '', 'a budget that is not exhausted says nothing');
-  ok(/quota unit/.test(C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: true, waiting: 1, resetInSeconds: 5 }, { t })), 'Gmail\'s budget is worded in quota units');
+  ok(verdictOf(/quota unit/.test(C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: true, waiting: 1, resetInSeconds: 5 }, { t }))), 'Gmail\'s budget is worded in quota units');
   // lane R5: the per-second figure, the vendor's rate words, the first read
   const bp = C.budgetText({ unit: 'quota-unit', limit: 3000, perSec: 40, exhausted: true, waiting: 2, resetInSeconds: 9, spentBy: { agent: 5 } }, { t });
-  ok(/3000 quota units\/min/.test(bp) && /at most 40\/s/.test(bp) && /5 of them by agent/.test(bp), 'a PACED account\'s budget sentence names units/min AND units/s (and the agents\' part)', bp);
+  ok(gateOf(/3000 quota units\/min/.test(bp)) && gateOf(/at most 40\/s/.test(bp)) && verdictOf(/5 of them by agent/.test(bp)), 'a PACED account\'s budget sentence names units/min AND units/s (and the agents\' part)', bp);
   const NOW = 1_800_000_000_000;
   const rl = (extra) => ({ lastPass: { ok: false, code: 'rate-limited' }, backoffUntil: NOW + 12_000, ...extra });
   const gr = C.passStateText(rl({ vendor: 'Google' }), { t, now: NOW });
@@ -273,10 +273,10 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   const ZH = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default;
   const zh = (s2, p) => t(ZH[s2] || s2, p);
   const zb = C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: true, waiting: 12, resetInSeconds: 30, spentBy: { agent: 400 }, perSec: 40 }, { t: zh });
-  ok(zb.includes('其中 400 来自 agent 主动刷新') && !zb.includes('次是') && ZH['about {h} h {min} min left'] && ZH['about {h} h left'], `the zh budget sentence names the agents' units without 次 ("${zb}"), and the hours ETA has its zh entries`, zb);
+  ok(gateOf(zb.includes('其中 400 来自 agent 主动刷新')) && !zb.includes('次是') && gateOf(ZH['about {h} h {min} min left']) && verdictOf(ZH['about {h} h left']), `the zh budget sentence names the agents' units without 次 ("${zb}"), and the hours ETA has its zh entries`, zb);
   const pillSrc = require('node:fs').readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
   const pausedReturns = (pillSrc.match(/state: 'paused'/g) || []).length;
-  ok(pausedReturns === 1 && /if \(cad\.paused\) return \{ kind: 'within', state: 'paused'/.test(pillSrc), 'the row pill\'s "paused" has ONE producer — the owner\'s own override (cadenceFor) — so a vendor\'s rate wait can never read "refresh paused"');
+  ok(pausedReturns === 1 && verdictOf(/if \(cad\.paused\) return \{ kind: 'within', state: 'paused'/.test(pillSrc)), 'the row pill\'s "paused" has ONE producer — the owner\'s own override (cadenceFor) — so a vendor\'s rate wait can never read "refresh paused"');
 }
 
 // ── ⑩ THREADS + REACTIONS (lane channel-threads, spec §2): four controls × {declared, narrowed, unknown, stale},
@@ -290,15 +290,15 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   const full = { ...pollCaps, threads: TH, reactions: RX };
   const fresh = (extra = {}) => ({ read: 'yes', sendAs: ['user'], why: null, at: NOW - 1000, threads: { replyInto: true, mode: 'chat', why: null }, reactions: { read: true, add: true, why: null }, ...extra });
   const o = (caps, cc, what) => C.offers(caps, cc, what, NOW);
-  ok(['thread-reply', 'react', 'unreact', 'read-reactions'].every((w) => C.OFFER_WHAT.includes(w)), 'OFFER_WHAT learns the four controls');
+  ok(verdictOf(['thread-reply', 'react', 'unreact', 'read-reactions'].every((w) => C.OFFER_WHAT.includes(w))), 'OFFER_WHAT learns the four controls');
   // declared + resolved ⇒ offered
-  ok(['thread-reply', 'react', 'unreact', 'read-reactions'].every((w) => o(full, fresh(), w).offered), 'declared AND resolved ⇒ every control offered');
+  ok(verdictOf(['thread-reply', 'react', 'unreact', 'read-reactions'].every((w) => o(full, fresh(), w).offered)), 'declared AND resolved ⇒ every control offered');
   // NOT declared ⇒ never offered whatever the resolution says (the NARROW law)
   ok(o(pollCaps, fresh(), 'thread-reply').why === 'no-threads' && o(pollCaps, fresh(), 'react').why === 'no-reactions' && o(pollCaps, fresh(), 'read-reactions').why === 'no-reactions', 'an adapter that declares no row offers nothing — the resolution cannot widen it');
   ok(o({ ...full, reactions: { ...RX, remove: 'none' } }, fresh(), 'unreact').why === 'react-not-declared', 'remove none ⇒ unreact not offered by name');
   // narrowed
   ok(o(full, fresh({ threads: { replyInto: false, mode: 'chat', why: 'topic-forbidden' } }), 'thread-reply').why === 'topic-forbidden', 'a group that refused replies in threads (230071, remembered) narrows thread-reply with its reason');
-  ok(o(full, fresh({ reactions: { read: false, add: true, why: 'reactions-scope-not-granted' } }), 'read-reactions').why === 'reactions-scope-not-granted' && o(full, fresh({ reactions: { read: false, add: true, why: 'reactions-scope-not-granted' } }), 'react').offered, 'reading needs its scope (not held ⇒ named), adding does not (im:message is held)');
+  ok(o(full, fresh({ reactions: { read: false, add: true, why: 'reactions-scope-not-granted' } }), 'read-reactions').why === 'reactions-scope-not-granted' && verdictOf(o(full, fresh({ reactions: { read: false, add: true, why: 'reactions-scope-not-granted' } }), 'react').offered), 'reading needs its scope (not held ⇒ named), adding does not (im:message is held)');
   ok(o(full, fresh({ sendAs: [], why: 'send-scope-not-granted' }), 'thread-reply').why === 'send-scope-not-granted', 'replying into a thread is a SEND — no send identity ⇒ not offered with the send reason');
   ok(o(full, fresh({ read: 'no', why: 'not-a-member', reactions: { read: false, add: false, why: 'not-a-member' } }), 'react').why === 'not-a-member', 'not a member ⇒ no reaction control, the reason named');
   // unknown / stale / predating the rows
@@ -309,7 +309,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   ok(C.convCapsState(fresh(), NOW).threads.replyInto === true && C.convCapsState(old, NOW).threads === null && C.convCapsState(null, NOW).reactions === null, 'convCapsState carries the narrowed rows (null when unknown)');
   // validateCaps: the two rows, every refusal named
   const good = { receive: 'poll', history: 'page', sendAs: ['user'], identityMarking: 'none' };
-  const refuse = (caps, re, name) => { let m = null; try { CH.validateCaps('x', caps); } catch (e) { m = e.message; } ok(m && re.test(m), name, m); };
+  const refuse = (caps, re, name) => { let m = null; try { CH.validateCaps('x', caps); } catch (e) { m = e.message; } ok(gateOf(m) && verdictOf(re.test(m)), name, m); };
   ok(CH.validateCaps('x', { ...good, threads: TH, reactions: RX }) === true, 'a complete threads + reactions declaration validates');
   refuse({ ...good, sendAs: [], threads: TH }, /replyInto on a read-only adapter/, 'threads.replyInto on a sendAs:[] adapter is refused (replying into a thread is a send)');
   refuse({ ...good, reactions: { ...RX, read: 'none' } }, /add with read 'none'/, 'reactions.add with read none is refused (a control whose result can never be shown)');
@@ -318,14 +318,14 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   refuse({ ...good, reactions: { ...RX, vocabulary: 'klingon' } }, /vocabulary must be one of/, 'an unknown vocabulary is refused');
   refuse({ ...good, reactions: { ...RX, perMessageMax: 0 } }, /perMessageMax/, 'perMessageMax must be a positive integer or null');
   refuse({ ...good, reactions: { ...RX, add: false } }, /remove 'own' without add/, "remove 'own' without add is refused");
-  ok(CH.METHOD_GATES.threadHistory({ threads: TH }) && !CH.METHOD_GATES.threadHistory({ threads: { ...TH, listing: 'inline' } }) && CH.METHOD_GATES.reactions({ reactions: RX }) && CH.METHOD_GATES.react({ reactions: RX }) && CH.METHOD_GATES.unreact({ reactions: RX }) && !CH.METHOD_GATES.emojiImage({ reactions: RX }) && CH.METHOD_GATES.reactionSet({ reactions: RX }) && !CH.METHOD_GATES.reactions({}), 'the six METHOD_GATES rows follow the capability rows (spec §2.1); a module with no row declares none');
+  ok(gateOf(CH.METHOD_GATES.threadHistory({ threads: TH })) && !CH.METHOD_GATES.threadHistory({ threads: { ...TH, listing: 'inline' } }) && gateOf(CH.METHOD_GATES.reactions({ reactions: RX })) && gateOf(CH.METHOD_GATES.react({ reactions: RX })) && gateOf(CH.METHOD_GATES.unreact({ reactions: RX })) && !CH.METHOD_GATES.emojiImage({ reactions: RX }) && gateOf(CH.METHOD_GATES.reactionSet({ reactions: RX })) && !CH.METHOD_GATES.reactions({}), 'the six METHOD_GATES rows follow the capability rows (spec §2.1); a module with no row declares none');
   // Lark's scope verdict (capsOfScopes) — the credential-change re-judge narrows reactions like sending
   const v0 = lark.capsOfScopes(lark.SCOPES);
-  ok(eq(v0.sendAs, ['user']) && v0.reactions.add === true && v0.reactions.read === false && v0.reactions.why === 'reactions-scope-not-granted', 'Lark with today\'s consent: send + ADD a reaction (im:message), READ not granted (by name)');
+  ok(gateOf(eq(v0.sendAs, ['user'])) && v0.reactions.add === true && v0.reactions.read === false && v0.reactions.why === 'reactions-scope-not-granted', 'Lark with today\'s consent: send + ADD a reaction (im:message), READ not granted (by name)');
   const v1 = lark.capsOfScopes([...lark.SCOPES, 'im:message.reactions:read']);
-  ok(v1.reactions.read && v1.reactions.add && v1.reactions.why === null, '…with im:message.reactions:read held: read + add');
+  ok(gateOf(v1.reactions.read) && gateOf(v1.reactions.add) && v1.reactions.why === null, '…with im:message.reactions:read held: read + add');
   const v2 = lark.capsOfScopes(['im:chat:readonly']);
-  ok(eq(v2.sendAs, []) && !v2.reactions.add && !v2.reactions.read, 'a read-only consent: neither');
+  ok(gateOf(eq(v2.sendAs, [])) && !v2.reactions.add && !v2.reactions.read, 'a read-only consent: neither');
   ok(lark.REACTIONS_GRANT.scopes.join() === 'im:message.reactions:read' && lark.REACTIONS_GRANT.console === true, 'the reactions grant names the scope and the console step (like sendGrant)');
   // the words
   ok(C.threadWhyText('topic-forbidden') === 'This group does not allow replies in threads' && C.reactWhyText('reactions-scope-not-granted', { scopes: ['im:message.reactions:read'] }) === 'Reactions can be read after one Re-authorize (im:message.reactions:read)' && C.reactWhyText('policy-off') === 'agent reactions are turned off for this account' && C.reactWhyText('not-a-member') === C.sendWhyText('not-a-member'), 'every new reason has words (a shared reason reuses the send sentence)');
@@ -340,7 +340,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
       [null, ''],
     ];
     const got = rows.map(([g]) => C.reactReadText(g, { vendor: 'Lark' }));
-    ok(rows.every(([, want], i) => got[i] === want), 'reactReadText: missing ⇒ "can be read after one Re-authorize (scope)"; refused ⇒ the vendor\'s refusal by name; the option off or nothing missing ⇒ silent', JSON.stringify(got));
+    ok(verdictOf(rows.every(([, want], i) => got[i] === want)), 'reactReadText: missing ⇒ "can be read after one Re-authorize (scope)"; refused ⇒ the vendor\'s refusal by name; the option off or nothing missing ⇒ silent', JSON.stringify(got));
     ok(C.reactWhyText('reactions-scope-not-granted', { refused: [S] }) === `The vendor refused ${S} — enable it in the app console and Re-authorize` && C.reactWhyText('reactions-scope-not-granted') === 'Reactions can be read after one Re-authorize', 'reactWhyText without a vendor / without scopes still says a whole sentence');
   }
 }
@@ -460,8 +460,8 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   {
     const OLDW = /Search miss(ed|es) \d+ of \d+|checked on its own again|messages missed —/;
     const lines = ['measuring', 'carrying', 'measuringMiss', 'measuringFull', 'demoted', 'demotedLive', 'demotedNoFlip'].map((k) => W1[k]);
-    ok(lines.every((x) => x && !OLDW.test(x)) && new Set(lines).size === 3, 'feedText (lane lark-search-miss): the search\'s state is ONE quiet line in 3 spellings (confirming / misses nothing / missed N %, class) — never a miss count, never "again"', lines.join(' | '));
-    ok(OLDW.test('Search missed 7 of 200 messages (3.5%) — each chat is checked on its own again'), 'CONTROL: the judge flags the owner\'s old warning line (搜索漏掉了 200 条中的 7 条 …) — the leg above would be red on it');
+    ok(gateOf(lines.every((x) => x && !OLDW.test(x))) && new Set(lines).size === 3, 'feedText (lane lark-search-miss): the search\'s state is ONE quiet line in 3 spellings (confirming / misses nothing / missed N %, class) — never a miss count, never "again"', lines.join(' | '));
+    ok(verdictOf(OLDW.test('Search missed 7 of 200 messages (3.5%) — each chat is checked on its own again')), 'CONTROL: the judge flags the owner\'s old warning line (搜索漏掉了 200 条中的 7 条 …) — the leg above would be red on it');
     // THE TOOLTIP: the live numbers, how each chat is checked, the learned overlap, the classes not counted, the last
     // misses with their class (newest first), and the topic checks that left the row
     const fv = { state: 'demoted', everySec: 30, overlapSec: 223, overlapSettingSec: 60, lagLearned: { sec: 223, n: 1 }, measured: { missed: 1, total: 120, rate: 1 / 120 },
@@ -480,7 +480,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     // and the topic-check line left the row
     const panelSrc2 = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
     const warnL = /const n = noteLine\('chan-sec-note', fl, \{ warn: ([^\n]*) \}\);\n\s*n\.dataset\.chanFeed = a\.id;/.exec(panelSrc2);
-    ok(warnL && !/demoted/.test(warnL[1]) && /refused/.test(warnL[1]) && /chanCaps\.feedFactsText\(a\.feed, \{ t, clock \}\);\n\s*if \(facts\) n\.title = facts;/.test(panelSrc2) && !/chanFeedThreads/.test(panelSrc2), 'the panel: the feed line is no warning when demoted, its tooltip is feedFactsText, no separate topic-check line', warnL && warnL[1]);
+    ok(gateOf(warnL) && !/demoted/.test(warnL[1]) && gateOf(/refused/.test(warnL[1])) && gateOf(/chanCaps\.feedFactsText\(a\.feed, \{ t, clock \}\);\n\s*if \(facts\) n\.title = facts;/.test(panelSrc2)) && !/chanFeedThreads/.test(panelSrc2), 'the panel: the feed line is no warning when demoted, its tooltip is feedFactsText, no separate topic-check line', warnL && warnL[1]);
   }
   // verify r3 (the revert table: r2's quiet-feed sentences lost their zh / ja entries and no gate noticed — i18n-check only
   // WARNS on a gap, the chrome census is heavy): EVERY word this module says — each `t('…')` literal in its source,
@@ -492,7 +492,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     const keys = new Set([...csrc.matchAll(/\bt\(\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'")));
     const gaps = (zh, ja) => [...keys].filter((k) => !zh[k] || !ja[k]);
     const k0 = 'New messages: a search every {s} s + each chat checked (the search missed {pct}%, {cls})';
-    ok(keys.size >= 100 && keys.has(k0) && !gaps(ZHd, JAd).length, `every word channel-caps says (${keys.size} t() keys, grep-derived) has its zh AND ja entry`, gaps(ZHd, JAd).join(' | '));
+    ok(keys.size >= 100 && gateOf(keys.has(k0)) && !gaps(ZHd, JAd).length, `every word channel-caps says (${keys.size} t() keys, grep-derived) has its zh AND ja entry`, gaps(ZHd, JAd).join(' | '));
     const { [k0]: _drop, ...zhLess } = ZHd;
     ok(gaps(zhLess, JAd).join('|') === k0, 'CONTROL: the judge flags a dictionary missing the quiet feed\'s sentence');
   }
@@ -509,14 +509,14 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     // lane lark-p2p verify r1 (the wiring pin): the panel draws that sentence as its OWN visible line (`chanFeedUnreadable`),
     // never only a tooltip — a feed dropping most of what it finds must be readable on a phone too
     const panelSrc = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
-    ok(/const un = [^\n]*feedUnreadableText\(a\.feed, \{ t \}\);\n\s*if \(un\) \{ const u = noteLine\('chan-sec-note', un\); u\.dataset\.chanFeedUnreadable = a\.id; out\.push\(u\); \}/.test(panelSrc) && !/tips\.push\(un\)/.test(panelSrc), 'the panel draws feedUnreadableText as its own note line (data-chan-feed-unreadable), not a tooltip');
+    ok(gateOf(/const un = [^\n]*feedUnreadableText\(a\.feed, \{ t \}\);\n\s*if \(un\) \{ const u = noteLine\('chan-sec-note', un\); u\.dataset\.chanFeedUnreadable = a\.id; out\.push\(u\); \}/.test(panelSrc)) && !/tips\.push\(un\)/.test(panelSrc), 'the panel draws feedUnreadableText as its own note line (data-chan-feed-unreadable), not a tooltip');
     const fs1 = C.feedState(feedCaps, acct({ feed: { refused: { at: NOW - 60e3, code: 'shape', retryAt: NOW + 3600e3, fields: [['meta_data.create_time'], ['x y'], ...Array.from({ length: 9 }, (_, i) => [`f${i}`])] } } }), NOW);
     ok(fs1.state === 'refused' && fs1.why === 'shape' && fs1.on === false && fs1.fields.length === 3 && JSON.stringify(fs1.fields[0]) === JSON.stringify(['meta_data.create_time']), 'feedState: a SHAPE park is refused (nothing carried) and hands its fields, bounded to 3 lists in the field alphabet', JSON.stringify(fs1));
     // verify r1: a LONE missed answer while the last good page is fresh keeps the mode's state (the feed delivered); a
     // row of three, a stale last page, or a 429 is the wait it is
     const bo = (over) => C.feedState(feedCaps, acct({ feed: { mode: 'carrying', lastOkAt: NOW - 40e3, backoffUntil: NOW + 30e3, backoffWhy: 'failed', strikes: 1, strikeWhy: 'transport', ...over } }), NOW);
     const lone = bo({}), two = bo({ strikes: 2 }), three = bo({ strikes: 3 }), stale = bo({ lastOkAt: NOW - 10 * 60e3 }), rate = bo({ backoffWhy: 'rate-limited' }), over = bo({ backoffUntil: NOW - 1 });
-    ok(C.FEED_LOUD_STRIKES === 3 && lone.state === 'carrying' && lone.carrying && lone.fresh && two.state === 'carrying' && three.state === 'backoff' && three.why === 'failed' && stale.state === 'backoff' && rate.state === 'backoff' && rate.why === 'rate-limited' && over.state === 'carrying', 'feedState (verify r1): one or two missed answers with a fresh last page keep the mode (carrying, fresh); the third in a row, a stale last page, a 429 are the wait they are; a wait that ended is nothing', JSON.stringify({ lone: lone.state, two: two.state, three: three.state, stale: stale.state, rate: rate.why, over: over.state }));
+    ok(C.FEED_LOUD_STRIKES === 3 && lone.state === 'carrying' && gateOf(lone.carrying) && gateOf(lone.fresh) && two.state === 'carrying' && three.state === 'backoff' && three.why === 'failed' && stale.state === 'backoff' && rate.state === 'backoff' && rate.why === 'rate-limited' && over.state === 'carrying', 'feedState (verify r1): one or two missed answers with a fresh last page keep the mode (carrying, fresh); the third in a row, a stale last page, a 429 are the wait they are; a wait that ended is nothing', JSON.stringify({ lone: lone.state, two: two.state, three: three.state, stale: stale.state, rate: rate.why, over: over.state }));
   }
   const cu = [C.feedCatchUpText({ done: false, days: 7 }), C.feedCatchUpText({ done: true, found: 4, days: 7 }), C.feedCatchUpText({ done: true, found: 20, days: 7, bounded: true }), C.feedCatchUpText({ done: true, found: 0 })];
   ok(cu[0] === 'Looking for single chats from the last 7 days…' && cu[1] === 'Found 4 single chats from the last 7 days' && cu[2] === 'Found 20 single chats from the last 7 days — quieter ones appear with their next message' && cu[3] === '', 'feedCatchUpText: in progress / found / bounded / nothing found (silent)', JSON.stringify(cu));
@@ -531,7 +531,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   };
   ok(G.both.text === 'One more re-authorization adds: reading reactions · new-message search and single chats — sending and receiving work without it' && !G.both.warn, 'grantsText: an account predating both lanes says ONE line with ONE Re-authorize', JSON.stringify(G.both));
   ok(G.one.text === 'One more re-authorization adds: new-message search and single chats — sending and receiving work without it' && G.off.text === '' && G.none.text === '', 'grantsText: only what is missing and WANTED (an option switched off says nothing)', JSON.stringify([G.one, G.off]));
-  ok(G.refused.text === `Lark refused ${RX} — enable it in the app console and Re-authorize · One more re-authorization adds: new-message search and single chats — sending and receiving work without it` && G.refused.warn, 'grantsText: a scope the vendor refused at the consent is named with the console step, the rest still one Re-authorize', JSON.stringify(G.refused));
+  ok(G.refused.text === `Lark refused ${RX} — enable it in the app console and Re-authorize · One more re-authorization adds: new-message search and single chats — sending and receiving work without it` && verdictOf(G.refused.warn), 'grantsText: a scope the vendor refused at the consent is named with the console step, the rest still one Re-authorize', JSON.stringify(G.refused));
   ok(C.untitledText('dm') === 'Single chat' && C.untitledText('group') === 'New conversation' && C.laneWhyText('feed') === 'new-message search', 'a born conversation without a title is worded ("Single chat"), never its raw id; the lane reason "feed" has words');
 }
 
@@ -551,7 +551,7 @@ console.log("lane channel-feed-authority: the feed's AUTHORITY (authoritative �
   const fresh = { lastOkAt: NOW - 10e3 };
   const cad = (c, r, en, watched = false) => C.cadenceFor(c, C.laneState(c, r, en, NOW), en, NOW, { watched });
   const cold = { lastAt: NOW - 3 * 86400e3 }, hot = { lastAt: NOW - 60e3 };
-  ok(C.feedAuthoritative(auth) && !C.feedAuthoritative(meas) && C.FEED_AUTHORITIES.join() === 'authoritative,measured', 'feedAuthoritative: only the declared authoritative row');
+  ok(gateOf(C.feedAuthoritative(auth)) && !C.feedAuthoritative(meas) && C.FEED_AUTHORITIES.join() === 'authoritative,measured', 'feedAuthoritative: only the declared authoritative row');
   ok(C.feedState(auth, rec(fresh), NOW).carrying === true && C.feedState(auth, rec(fresh), NOW).mode === 'carrying', 'an authoritative feed carries from a fresh good answer — never measured');
   ok(C.laneState(auth, rec(fresh), {}, NOW).pollCadence === 'feed-only' && C.laneState(meas, rec({ ...fresh, mode: 'carrying' }), {}, NOW).pollCadence === 'feed', 'carrying: authoritative ⇒ feed-only; measured ⇒ feed');
   ok(cad(auth, rec(fresh), cold).seconds === 0 && cad(auth, rec(fresh), hot).seconds === 0 && cad(auth, rec(fresh), cold).source === 'feed', 'feed-only: an unwatched row is never due by the clock (0 s, hot or cold)');
@@ -563,8 +563,8 @@ console.log("lane channel-feed-authority: the feed's AUTHORITY (authoritative �
   const held = { carrying: { since: NOW - 86400e3 } }, G20 = NOW - 20 * 60e3;
   const gapR = rec({ ...held, lastOkAt: G20 }), parkR = rec({ ...held, lastOkAt: G20, backoffUntil: NOW + 60e3, backoffWhy: 'rate-limited' });
   const gap = C.feedState(auth, gapR, NOW), park = C.feedState(auth, parkR, NOW);
-  ok(gap.state === 'catching-up' && gap.carrying && gap.gapSince === G20 && gap.since === NOW - 86400e3 && C.laneState(auth, gapR, {}, NOW).pollCadence === 'feed-only' && cad(auth, gapR, cold).seconds === 0, 'a 20-min gap with the cursor held: CATCHING UP, still carrying — feed-only, no row due by the clock', JSON.stringify(gap));
-  ok(park.state === 'backoff' && park.why === 'rate-limited' && park.carrying && cad(auth, parkR, cold).seconds === 0, 'a rate park mid-walk: parked by name, still carrying (the tiers stay parked)', JSON.stringify(park));
+  ok(gap.state === 'catching-up' && gateOf(gap.carrying) && gap.gapSince === G20 && gap.since === NOW - 86400e3 && C.laneState(auth, gapR, {}, NOW).pollCadence === 'feed-only' && cad(auth, gapR, cold).seconds === 0, 'a 20-min gap with the cursor held: CATCHING UP, still carrying — feed-only, no row due by the clock', JSON.stringify(gap));
+  ok(park.state === 'backoff' && park.why === 'rate-limited' && gateOf(park.carrying) && cad(auth, parkR, cold).seconds === 0, 'a rate park mid-walk: parked by name, still carrying (the tiers stay parked)', JSON.stringify(park));
   const measGap = C.feedState(meas, rec({ ...held, mode: 'carrying', lastOkAt: G20 }), NOW);
   const refusedHeld = C.feedState(auth, rec({ ...held, lastOkAt: G20, refused: { at: NOW - 60e3, code: 'forbidden' } }), NOW);
   ok(measGap.state === 'behind' && !measGap.carrying && refusedHeld.state === 'refused' && !refusedHeld.carrying, 'a MEASURED feed after a gap is behind (no cursor to resume — its net is the tiers); a refused feed carries nothing', JSON.stringify([measGap.state, refusedHeld.state]));
@@ -589,7 +589,7 @@ console.log("lane channel-feed-authority: the feed's AUTHORITY (authoritative �
   const badR = RT.filter(([, lc, n, want]) => said(lc, n) !== want).map(([name, lc, n]) => `${name} → «${said(lc, n)}»`);
   ok(!badR.length && C.CATCHUP_SAY_GAP_MS === 30 * 60e3 && C.CATCHUP_SAY_FOR_MS === 24 * 3600e3 && C.feedResumeText(null) === '', `feedResumeText: ${RT.length} shapes — from the gap's start, the conversations it touched (a reseed: the walk), a gap ≥ 30 min, said for 24 h`, badR.join('; '));
   const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
-  ok(PANEL.split("chanCaps.feedResumeText(a.feed, { t, stamp: (ms) => when(ms, { words: true }), now: Date.now() })").length === 2 && /dataset\.chanFeedResume = a\.id/.test(PANEL), 'WIRING: the account card says it under the feed\'s lines (one call, the device clock\'s words)');
+  ok(PANEL.split("chanCaps.feedResumeText(a.feed, { t, stamp: (ms) => when(ms, { words: true }), now: Date.now() })").length === 2 && verdictOf(/dataset\.chanFeedResume = a\.id/.test(PANEL)), 'WIRING: the account card says it under the feed\'s lines (one call, the device clock\'s words)');
 }
 
 // ── lane lark-upload-preflight (userW inc-muxsy69b-mjg1): THE send-attachment OFFER — the declared row AND the held scopes ──
@@ -613,7 +613,7 @@ console.log('lane lark-upload-preflight: the send-attachment offer table');
   for (const [n, c, x, want, why] of T) { const o = C.offers(c, x, 'send-attachment', NOW); ok(o.offered === want && o.why === why, `send-attachment: ${n}`, JSON.stringify(o)); }
   const m = C.offers({ sendAttachments: row }, cc(LK.capsOfScopes(SEND).files), 'send-attachment', NOW);
   ok(JSON.stringify(m.requiredScopes) === JSON.stringify(['im:resource']), 'the refusal names the scope to enable (requiredScopes = im:resource — lane lark-upload-scope-split: never the deprecated V2 of the 99991679 pair)', JSON.stringify(m));
-  ok(C.OFFER_WHAT.includes('send-attachment') && JSON.stringify(C.convCapsState(cc({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), NOW).files) === JSON.stringify({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), 'OFFER_WHAT lists it; the cached state carries the files row');
+  ok(gateOf(C.OFFER_WHAT.includes('send-attachment')) && JSON.stringify(C.convCapsState(cc({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), NOW).files) === JSON.stringify({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), 'OFFER_WHAT lists it; the cached state carries the files row');
   ok(C.grantsText([{ what: 'files', missing: ['im:resource:upload', 'im:resource'], refused: [], wanted: true }]).text === 'One more re-authorization adds: sending files — sending and receiving work without it', 'the account row: "One more re-authorization adds: sending files — sending and receiving work without it"');
   // lane lark-upload-scope-split: the consent asks im:resource only (V2 is deprecated); a narrowed consent that dropped it
   // while a HELD legacy V2 still carries files says so (no warning); none held ⇒ files are off, naming im:resource
@@ -622,7 +622,7 @@ console.log('lane lark-upload-preflight: the send-attachment offer table');
   const both = C.grantsText([{ what: 'files', missing: [V1], refused: [V1], dropped: [], wanted: true }], { vendor: 'Lark' });
   const mix = C.grantsText([{ what: 'feed', missing: ['search:message'], refused: [], wanted: true }, { what: 'files', missing: [], refused: [], dropped: [V1], wanted: true }], { vendor: 'Lark' });
   ok(kept.text === 'Lark refused im:resource — sending files still works' && !kept.warn, 'files carried by a held legacy V2, im:resource refused: "Lark refused im:resource — sending files still works", no warning', JSON.stringify(kept));
-  ok(both.text === 'Sending files is off: Lark refused im:resource — enable it in the app console and Re-authorize' && both.warn, 'none held, im:resource refused: sending files is off, by name, a warning', JSON.stringify(both));
+  ok(both.text === 'Sending files is off: Lark refused im:resource — enable it in the app console and Re-authorize' && verdictOf(both.warn), 'none held, im:resource refused: sending files is off, by name, a warning', JSON.stringify(both));
   ok(mix.text === 'One more re-authorization adds: new-message search and single chats — sending and receiving work without it · Lark refused im:resource — sending files still works' && C.grantsText([{ what: 'files', missing: [], refused: [], dropped: [V1], wanted: false }]).text === '', 'the kept line follows another grant\'s; an unwanted grant says nothing', JSON.stringify(mix));
   ok(LK.capsOfScopes([...SEND, V1]).files.send === true && LK.capsOfScopes([...SEND, V2]).files.send === true && LK.capsOfScopes(SEND).files.send === false, 'caps.files.send: V1 alone ⇒ true, V2 alone ⇒ true, neither ⇒ false');
 }
@@ -638,11 +638,11 @@ console.log('lane webhook-l2-ui: no clip where the row offers no files');
   const fsx = require('node:fs');
   const eng = fsx.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
   const win = fsx.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
-  ok(eng.includes('      sendAttachments: c.sendAttachments || null,') && win.includes('const cf = ad0.sendAttachments && c.offers && c.offers.sendAttachment'), 'the clip is built only from the account view\'s sendAttachments row (null here) AND the conversation\'s offer — the composer never asks a kind');
+  ok(gateOf(eng.includes('      sendAttachments: c.sendAttachments || null,')) && verdictOf(win.includes('const cf = ad0.sendAttachments && c.offers && c.offers.sendAttachment')), 'the clip is built only from the account view\'s sendAttachments row (null here) AND the conversation\'s offer — the composer never asks a kind');
   const kindGate = /kind\s*===\s*'webhook'|adapterId\s*===\s*'webhook'|\.kind\s*!==\s*'webhook'/;
   const files = ['src/lib/channel-window.js', 'src/lib/channels-panel.js', 'src/lib/channel-webhook.js', 'src/lib/webhook-view.js', 'src/lib/channel-filter-editor.js'];
   const hits = files.filter((f) => kindGate.test(fsx.readFileSync(path.join(REPO, f), 'utf-8')));
-  ok(hits.length === 0 && kindGate.test("if (a.kind === 'webhook') x();"), 'the owner surface gates on the capability row (pushTransport http-inbound) — no client file tests the kind (control: the pattern catches one)', hits);
+  ok(hits.length === 0 && verdictOf(kindGate.test("if (a.kind === 'webhook') x();")), 'the owner surface gates on the capability row (pushTransport http-inbound) — no client file tests the kind (control: the pattern catches one)', hits);
 }
 
 // ── lane composer-file-only-send (B-dce6): THE `alone` CELL of `sendAttachments` — a file by itself is a message where the
@@ -653,7 +653,7 @@ console.log('lane composer-file-only-send: the sendAttachments row\'s `alone` ce
   const CH = require(path.join(REPO, 'src/channels/index.js'));
   const fake = require(path.join(REPO, 'src/channels/fake.js'));
   const rows = ['lark', 'gmail', 'slack', 'webhook'].map((k) => [k, require(path.join(REPO, `src/channels/${k}.js`)).caps.sendAttachments]);
-  ok(rows.every(([k, r]) => (k === 'webhook' ? r === null : r && r.alone === true && r.withText === true)) && rows.slice(0, 3).every(([, r]) => P.fileAloneOf(r)) && !P.fileAloneOf(rows[3][1]), 'Lark, Gmail and Slack declare `alone: true` beside `withText: true` (text + files in one send, OR a file by itself); the webhook row (null) carries none', JSON.stringify(rows));
+  ok(gateOf(rows.every(([k, r]) => (k === 'webhook' ? r === null : r && r.alone === true && r.withText === true))) && gateOf(rows.slice(0, 3).every(([, r]) => P.fileAloneOf(r))) && !P.fileAloneOf(rows[3][1]), 'Lark, Gmail and Slack declare `alone: true` beside `withText: true` (text + files in one send, OR a file by itself); the webhook row (null) carries none', JSON.stringify(rows));
   const ROW = { maxCount: 10, maxTotalBytes: 25e6, withText: true };
   const SPLIT = { images: { maxCount: 1, maxBytes: 1e7, withText: false }, files: { maxCount: 2, maxBytes: 3e7, withText: true } };
   const table = [
@@ -670,7 +670,7 @@ console.log('lane composer-file-only-send: the sendAttachments row\'s `alone` ce
   const reg = (row) => { try { CH.createChannelRegistry().register({ ...fake.fakePoll, kind: 'fx-alone', caps: { ...fake.fakePoll.caps, sendAttachments: row } }); return null; } catch (e) { return String(e.message); } };
   const accepted = [{ ...ROW, alone: true }, ROW, { ...ROW, alone: false }, { ...ROW, withText: false, alone: true }, { images: { ...SPLIT.images, alone: true }, files: { ...SPLIT.files, alone: false } }].map(reg);
   const refused = [{ ...ROW, alone: 'yes' }, { ...ROW, withText: false, alone: false }, { images: { ...SPLIT.images, alone: 1 } }].map(reg);
-  ok(accepted.every((x) => x === null) && refused.every((x) => x && /alone/.test(x)), 'the registry contract: `alone` is a boolean on the row or a group (absent allowed); a non-boolean, or alone:false on a withText:false group (it could carry nothing), is refused by name', JSON.stringify({ accepted, refused }));
+  ok(gateOf(accepted.every((x) => x === null)) && verdictOf(refused.every((x) => x && /alone/.test(x))), 'the registry contract: `alone` is a boolean on the row or a group (absent allowed); a non-boolean, or alone:false on a withText:false group (it could carry nothing), is refused by name', JSON.stringify({ accepted, refused }));
 }
 
 // ── lane channel-row-notices (the owner 2026-10-23, his Channels window: 「这个提示最好不要常驻了，很丑陋；然后为啥我这里提示需要
@@ -687,23 +687,23 @@ console.log('lane channel-row-notices: the push notice + the re-authorization wo
   // ① the owner's Lark push lane (adapters.json: state 'unavailable', code sdk-not-installed, the lane's words + causes)
   const OWNER_PUSH = { enabled: true, claimedExclusive: 'unknown', state: 'unavailable', lastStateCode: 'sdk-not-installed', lastStateWhy: 'the official Lark SDK (@larksuiteoapi/node-sdk) is not installed on this instance — `npm install @larksuiteoapi/node-sdk` and restart; until then the poll carries everything', unavailableWords: lark.unavailableWords, unavailableCauses: lark.unavailableCauses };
   const pz = C.pushLaneNotice(OWNER_PUSH, { via: 'poll' }, { t: T.zh, steps: true });
-  ok(pz && pz.line === '实时推送未开启 — 消息靠轮询（30 秒–15 分钟）' && pz.sig === 'unavailable:sdk-not-installed' && pz.verb === null, `① the owner's parked Lark lane is ONE short line «${pz && pz.line}» (sig ${pz && pz.sig}), no verb`, JSON.stringify(pz));
+  ok(gateOf(pz) && pz.line === '实时推送未开启 — 消息靠轮询（30 秒–15 分钟）' && pz.sig === 'unavailable:sdk-not-installed' && pz.verb === null, `① the owner's parked Lark lane is ONE short line «${pz && pz.line}» (sig ${pz && pz.sig}), no verb`, JSON.stringify(pz));
   const ALL = (n) => [n.line, ...n.details].join('\n');
-  ok(pz && !/npm|install @|im:message|`/.test(ALL(pz)) && pz.details[0] === '本实例没有安装飞书官方 SDK。' && pz.details.some((d) => /实时推送（可选）|设置卡/.test(d)), '① …its ⓘ lines say the CAUSE and where the steps are — never a command (no npm, no scope, no backtick)', JSON.stringify(pz && pz.details));
+  ok(gateOf(pz) && !/npm|install @|im:message|`/.test(ALL(pz)) && pz.details[0] === '本实例没有安装飞书官方 SDK。' && verdictOf(pz.details.some((d) => /实时推送（可选）|设置卡/.test(d))), '① …its ⓘ lines say the CAUSE and where the steps are — never a command (no npm, no scope, no backtick)', JSON.stringify(pz && pz.details));
   for (const [lang, t] of Object.entries(T)) {
     const n = C.pushLaneNotice(OWNER_PUSH, { via: 'poll' }, { t, steps: true });
-    ok(n && n.line && n.line.length <= 72 && n.details.length === 3 && (lang === 'en' || n.line !== C.pushLaneNotice(OWNER_PUSH, { via: 'poll' }, {}).line), `① ${lang}: «${n && n.line}» (${n && n.line.length} chars)`);
+    ok(gateOf(n) && gateOf(n.line) && n.line.length <= 72 && n.details.length === 3 && (lang === 'en' || n.line !== C.pushLaneNotice(OWNER_PUSH, { via: 'poll' }, {}).line), `① ${lang}: «${n && n.line}» (${n && n.line.length} chars)`);
   }
   const healthy = [{ enabled: true, state: 'live' }, { enabled: false, state: 'unavailable' }, { enabled: true, state: null }, null].map((p) => C.pushLaneNotice(p, { via: 'push', live: true }, { t: T.zh }));
-  ok(healthy.every((x) => x === null), '① a healthy, switched-off or unstarted push lane says NOTHING on the row');
+  ok(verdictOf(healthy.every((x) => x === null)), '① a healthy, switched-off or unstarted push lane says NOTHING on the row');
   const later = C.pushLaneNotice({ ...OWNER_PUSH, lastStateCode: 'needs-credentials', lastStateAt: 9 }, { via: 'poll' }, { t: T.zh });
   const restart = C.pushLaneNotice({ ...OWNER_PUSH, lastStateAt: 12345 }, { via: 'poll' }, { t: T.zh });
   const dem = C.pushLaneNotice({ enabled: true, state: 'live', demotedAt: 1700, demoted: { missed: 3, total: 40, rate: 0.075 } }, { via: 'poll' }, { t: T.zh });
-  ok(later.sig !== pz.sig && restart.sig === pz.sig && dem.sig === 'demoted:1700' && dem.verb === 'redeclare' && /40/.test(dem.details[0]) && /3/.test(dem.details[0]), '① the sig: a CHANGED state (another code, a demotion) is shown again; a restart parking the same code is not; a demotion keeps its numbers under ⓘ and its verb', JSON.stringify([later.sig, restart.sig, dem]));
-  ok(C.pushLaneNotice({ ...OWNER_PUSH, unavailableCauses: null }, { via: 'poll' }, { t: T.en }).details[0] === T.en(lark.unavailableWords['sdk-not-installed']) && Object.keys(LIVE.UNAVAILABLE_CAUSES).every((k) => k in LIVE.UNAVAILABLE_WORDS), '① a code without a declared cause falls back to the lane\'s words; every cause names a declared code');
+  ok(later.sig !== pz.sig && restart.sig === pz.sig && dem.sig === 'demoted:1700' && dem.verb === 'redeclare' && gateOf(/40/.test(dem.details[0])) && verdictOf(/3/.test(dem.details[0])), '① the sig: a CHANGED state (another code, a demotion) is shown again; a restart parking the same code is not; a demotion keeps its numbers under ⓘ and its verb', JSON.stringify([later.sig, restart.sig, dem]));
+  ok(C.pushLaneNotice({ ...OWNER_PUSH, unavailableCauses: null }, { via: 'poll' }, { t: T.en }).details[0] === T.en(lark.unavailableWords['sdk-not-installed']) && verdictOf(Object.keys(LIVE.UNAVAILABLE_CAUSES).every((k) => k in LIVE.UNAVAILABLE_WORDS)), '① a code without a declared cause falls back to the lane\'s words; every cause names a declared code');
   // ② the re-authorization words table — every case, every language; the RED control: never a bare "needs re-authorization"
   const FAM = C.scopeFamilies(['calendar:calendar:readonly', 'docx:document', 'bitable:app', 'contact:user.base:readonly', 'approval:approval', 'zz:unknown'], lark.scopeFamily);
-  ok(JSON.stringify(FAM) === JSON.stringify([{ family: 'docs', n: 2 }, { family: 'calendar', n: 1 }, { family: 'contacts', n: 1 }, { family: 'approval', n: 1 }, { family: 'other', n: 1 }]) && FAM.every((f) => C.SCOPE_FAMILIES.includes(f.family)), '② Lark\'s permissions by FEATURE FAMILY (docx + bitable = docs and sheets; an unknown namespace = other), most first', JSON.stringify(FAM));
+  ok(JSON.stringify(FAM) === JSON.stringify([{ family: 'docs', n: 2 }, { family: 'calendar', n: 1 }, { family: 'contacts', n: 1 }, { family: 'approval', n: 1 }, { family: 'other', n: 1 }]) && verdictOf(FAM.every((f) => C.SCOPE_FAMILIES.includes(f.family))), '② Lark\'s permissions by FEATURE FAMILY (docx + bitable = docs and sheets; an unknown namespace = other), most first', JSON.stringify(FAM));
   const CASES = [
     ['read-only', 'send-scope-not-granted', { scopes: ['https://www.googleapis.com/auth/gmail.send'] }, { zh: '可读，回复需要再授权一次（缺 gmail.send 权限）' }],
     ['more-pending', 'paged-consent', { n: 248 }, { zh: '继续授权以获取应用下一组权限，总计剩余 248 个权限（具体是哪些，授权时才知道）；现在的收发消息不受影响' }],
@@ -716,20 +716,20 @@ console.log('lane channel-row-notices: the push notice + the re-authorization wo
   ];
   for (const [kind, reason, facts, want] of CASES) {
     const got = Object.fromEntries(Object.entries(T).map(([l, t]) => [l, C.reauthWhyText(kind, reason, facts, { t })]));
-    ok(got.zh.text === want.zh && got.en.text && got.ja.text && got.en.text !== got.zh.text && got.ja.text !== got.en.text && !/\{\w+\}/.test(got.en.text + got.zh.text + got.ja.text), `② ${kind}/${reason}: «${got.zh.text}»`, JSON.stringify(got));
+    ok(got.zh.text === want.zh && gateOf(got.en.text) && gateOf(got.ja.text) && got.en.text !== got.zh.text && got.ja.text !== got.en.text && !/\{\w+\}/.test(got.en.text + got.zh.text + got.ja.text), `② ${kind}/${reason}: «${got.zh.text}»`, JSON.stringify(got));
   }
   const W = (k, r, f) => C.reauthWhyText(k, r, f, { t: T.zh });
-  ok(W('more-pending', 'paged-consent', { n: 248 }).fold && W('more-pending', 'paged-consent', { n: 248, next: 115, families: FAM }).fold && !W('more-pending', 'paged-consent', { n: 248, next: 115, families: FAM, api: true }).fold && W('more-pending', 'paged-consent', { n: 248, api: true }).fold, '② ADDENDUM 1: the paged consent is LED (shown) only when an agent holds the raw API and the gain is known; else it waits under ⓘ');
-  ok(!W('expiring', 'expires', { eta: '3d' }).warn && !W('expiring', 'renewals-stopped', { eta: '5h' }).warn && W('expiring', 'overdue', {}).warn && !W('read-only', 'send-scope-not-granted', {}).warn && !W('more-pending', 'paged-consent', { n: 1 }).warn, '② no warn colour until it is overdue (a countdown, a read-only reply gate, an optional consent are plain)');
+  ok(gateOf(W('more-pending', 'paged-consent', { n: 248 }).fold) && gateOf(W('more-pending', 'paged-consent', { n: 248, next: 115, families: FAM }).fold) && !W('more-pending', 'paged-consent', { n: 248, next: 115, families: FAM, api: true }).fold && verdictOf(W('more-pending', 'paged-consent', { n: 248, api: true }).fold), '② ADDENDUM 1: the paged consent is LED (shown) only when an agent holds the raw API and the gain is known; else it waits under ⓘ');
+  ok(!W('expiring', 'expires', { eta: '3d' }).warn && !W('expiring', 'renewals-stopped', { eta: '5h' }).warn && gateOf(W('expiring', 'overdue', {}).warn) && !W('read-only', 'send-scope-not-granted', {}).warn && !W('more-pending', 'paged-consent', { n: 1 }).warn, '② no warn colour until it is overdue (a countdown, a read-only reply gate, an optional consent are plain)');
   ok(C.grantsText([{ what: 'more', n: 248, scopes: [], missing: [], refused: [], wanted: true }], { t: T.zh }).text === CASES[1][3].zh && C.grantsText([{ what: 'more', n: 248, next: 115 }, { what: 'files', missing: ['im:resource'], refused: [], wanted: true }], { t: T.zh }).text === '再授权一次可开启：发送文件 · 应用的下一组权限（剩余 248 个中的 115 个） — 现在不做也能照常收发', '② the account row\'s grants line: the paged consent alone is the case above; beside a feature it says the NEXT group, never «另外 248 项»');
   // RED CONTROL: every case × every reason × every language, and a case / reason the table does not know — never bare
   const BARE = /^(needs re-authorization|需要重新授权|再認証が必要です|re-authorize|重新授权)\s*[.。]?$/i;
   const words = [];
   for (const [k, rs] of Object.entries(C.REAUTH_WHYS)) for (const r of [...rs, 'zz-unknown']) for (const t of Object.values(T)) for (const f of [{}, { n: 3 }, { eta: '1h' }, { scopes: ['x'] }]) words.push(C.reauthWhyText(k, r, f, { t }).text);
   for (const t of Object.values(T)) words.push(C.reauthWhyText('zz', 'needs-reauth', { n: 1 }, { t }).text, C.reauthWhyText('', '', null, { t }).text);
-  ok(words.length > 100 && words.every((w) => !BARE.test(String(w).trim())) && C.reauthWhyText('zz', 'needs-reauth', {}).text === '' && C.reauthWhyText('expiring', 'zz', { eta: '1h' }).text === '', `② RED CONTROL: ${words.length} words over every case, reason and language — none is a bare «needs re-authorization»; an unknown case or reason says '' (nowhere), never bare`);
-  ok(BARE.test('需要重新授权') && BARE.test('needs re-authorization'), '② …the control\'s own pattern catches the bare words it bans (a pattern that matched nothing would prove nothing)');
+  ok(words.length > 100 && gateOf(words.every((w) => !BARE.test(String(w).trim()))) && C.reauthWhyText('zz', 'needs-reauth', {}).text === '' && C.reauthWhyText('expiring', 'zz', { eta: '1h' }).text === '', `② RED CONTROL: ${words.length} words over every case, reason and language — none is a bare «needs re-authorization»; an unknown case or reason says '' (nowhere), never bare`);
+  ok(gateOf(BARE.test('需要重新授权')) && verdictOf(BARE.test('needs re-authorization')), '② …the control\'s own pattern catches the bare words it bans (a pattern that matched nothing would prove nothing)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

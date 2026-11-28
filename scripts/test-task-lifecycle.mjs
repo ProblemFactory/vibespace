@@ -15,7 +15,7 @@ import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out sa
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const { parseBackgroundLaunch } = require(path.join(REPO, 'src/message-manager.js'));
 const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
@@ -23,23 +23,23 @@ const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 // ── the PURE parser, on real ack shapes ──
 const AGENT_ACK = 'Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: afebc69a80454c5a0 (internal)';
 const p1 = parseBackgroundLaunch('Agent', { description: 'Recon prepaid-mode touchpoints' }, AGENT_ACK);
-ok('Agent launch ack → {type agent, id, description} (real transcript shape)', p1 && p1.type === 'agent' && p1.id === 'afebc69a80454c5a0' && /Recon/.test(p1.description), JSON.stringify(p1));
+ok('Agent launch ack → {type agent, id, description} (real transcript shape)', gateOf(p1) && p1.type === 'agent' && p1.id === 'afebc69a80454c5a0' && verdictOf(/Recon/.test(p1.description)), JSON.stringify(p1));
 const p2 = parseBackgroundLaunch('Workflow', {}, 'Workflow "review-changes" started in the background.\nRun ID: wf_abc123-def\nUse /workflows to watch.');
-ok('Workflow launch ack → {type workflow, id=runId, name}', p2 && p2.type === 'workflow' && p2.id === 'wf_abc123-def' && p2.description === 'review-changes', JSON.stringify(p2));
+ok('Workflow launch ack → {type workflow, id=runId, name}', gateOf(p2) && p2.type === 'workflow' && p2.id === 'wf_abc123-def' && p2.description === 'review-changes', JSON.stringify(p2));
 // 2.369.136 (owner: "这个workflow没有展示正确的名称"): a scriptPath launch has no
 // input.name and its ack carries the run's description on a "Summary:" line
 // (verbatim ack shape from a real launch on 2026-09-21) — that line is the name.
 const SCRIPTPATH_ACK = 'Workflow launched in background. Task ID: w6v2xvee7\nSummary: inc-mubu23bd-5vxi: the CLI rate_limit_event type seven_day_overage_included is the PER-MODEL weekly bucket (Fable), not the plan 7d — the capture wrote 86% into the plan lane.\nTranscript dir: /home/u/.claude/projects/x/subagents/workflows/wf_f1347581-5e6\nScript file: /tmp/vs-work/weekly-lanes-wf.js\n(Edit this file with Write/Edit and re-invoke Workflow with {scriptPath: "/tmp/vs-work/weekly-lanes-wf.js"} to iterate without resending the script.)\nRun ID: wf_f1347581-5e6\nTo resume after editing the script: Workflow({scriptPath: "/tmp/vs-work/weekly-lanes-wf.js", resumeFromRunId: "wf_f1347581-5e6"})';
 const p2b = parseBackgroundLaunch('Workflow', { scriptPath: '/tmp/vs-work/weekly-lanes-wf.js' }, SCRIPTPATH_ACK);
-ok('a scriptPath launch ack → the Summary line names the run: the chip gets the SHORT id-like head, the whole line rides `summary` (never the bare "workflow" placeholder)', p2b && p2b.id === 'wf_f1347581-5e6' && p2b.description === 'inc-mubu23bd-5vxi' && p2b.summary.startsWith('inc-mubu23bd-5vxi: the CLI rate_limit_event type') && p2b.description !== 'workflow', JSON.stringify(p2b));
+ok('a scriptPath launch ack → the Summary line names the run: the chip gets the SHORT id-like head, the whole line rides `summary` (never the bare "workflow" placeholder)', gateOf(p2b) && p2b.id === 'wf_f1347581-5e6' && p2b.description === 'inc-mubu23bd-5vxi' && gateOf(p2b.summary.startsWith('inc-mubu23bd-5vxi: the CLI rate_limit_event type')) && p2b.description !== 'workflow', JSON.stringify(p2b));
 const { shortWorkflowName } = require('../src/workflow-name.js');
 ok('shortWorkflowName: a short name stays whole; a prose description is cut at its first clause or a word boundary ≤ 60 chars; an id-like head wins', shortWorkflowName('fix-weekly-lanes') === 'fix-weekly-lanes' && shortWorkflowName('B-22ba: P8-2 of docs/design-desktop-apps.zh.md — the xpra seamless rung end-to-end (per-window)') === 'B-22ba' && shortWorkflowName('the desktop paste button gets a way out, a workflow chip shows the run name, and the sidebar hides its search') .length <= 61, JSON.stringify([shortWorkflowName('B-22ba: P8-2 of docs — x'), shortWorkflowName('the desktop paste button gets a way out, a workflow chip shows the run name, and the sidebar hides its search')]));
 const p2c = parseBackgroundLaunch('Workflow', { script: "export const meta = {\n  name: 'fix-weekly-lanes',\n  description: 'x',\n}\nphase('Build')" }, 'Workflow launched in background. Task ID: t1\nRun ID: wf_inline-1');
-ok('an inline script with no Summary line → meta.name', p2c && p2c.description === 'fix-weekly-lanes', JSON.stringify(p2c));
+ok('an inline script with no Summary line → meta.name', gateOf(p2c) && p2c.description === 'fix-weekly-lanes', JSON.stringify(p2c));
 const p2d = parseBackgroundLaunch('Workflow', { scriptPath: '/tmp/vs-work/xpra-p82-wf.js' }, 'Workflow launched in background. Task ID: t2\nRun ID: wf_path-1');
-ok('a scriptPath launch with no Summary line → the script basename (pre-fix control: "workflow")', p2d && p2d.description === 'xpra-p82-wf', JSON.stringify(p2d));
+ok('a scriptPath launch with no Summary line → the script basename (pre-fix control: "workflow")', gateOf(p2d) && p2d.description === 'xpra-p82-wf', JSON.stringify(p2d));
 const p3 = parseBackgroundLaunch('Bash', { description: 'Watch entry-point PR CI' }, 'Command running in background with ID: b66o53t0o. Output is being written to: /tmp/x.output');
-ok('background Bash ack → {type command, id=taskId}', p3 && p3.type === 'command' && p3.id === 'b66o53t0o', JSON.stringify(p3));
+ok('background Bash ack → {type command, id=taskId}', gateOf(p3) && p3.type === 'command' && p3.id === 'b66o53t0o', JSON.stringify(p3));
 ok('a FOREGROUND result synthesizes nothing (negative control)', parseBackgroundLaunch('Bash', {}, 'total 12\ndrwxr-x foo') === null && parseBackgroundLaunch('Agent', {}, 'Here is my report: …') === null);
 
 // ── end-to-end through the normalizer, HISTORY conversion (real record shapes) ──
@@ -55,7 +55,7 @@ ok('history conversion synthesizes taskInfo running from the ack (no task_starte
 // the persisted wakeup record closes it — real shape from the transcript
 const NOTIF = `<task-notification>\n<task-id>b66o53t0o</task-id>\n<tool-use-id>${TU}</tool-use-id>\n<output-file>/tmp/x.output</output-file>\n<status>completed</status>\n<summary>Background agent "Recon prepaid-mode touchpoints" completed</summary>\n</task-notification>`;
 mm.convertHistory([{ type: 'user', message: { role: 'user', content: NOTIF } }]);
-ok('the persisted <task-notification> user record closes it (status + summary captured)', toolMsg.taskInfo.status === 'completed' && /Recon prepaid-mode/.test(toolMsg.taskInfo.summary || ''), JSON.stringify(toolMsg.taskInfo));
+ok('the persisted <task-notification> user record closes it (status + summary captured)', toolMsg.taskInfo.status === 'completed' && verdictOf(/Recon prepaid-mode/.test(toolMsg.taskInfo.summary || '')), JSON.stringify(toolMsg.taskInfo));
 
 // Workflow lifecycle end-to-end
 const TUW = 'toolu_wf001';
@@ -69,17 +69,17 @@ ok('a Workflow run gets the same lifecycle (running, id=runId → joins the task
 
 // ── wiring pins (2.355.0 lesson) ──
 const ss = read('src/session-store.js');
-ok('session-store taskState scan uses the SAME parser (no twin)', /require\('\.\/message-manager\.js'\)/.test(ss) && /parseBackgroundLaunch\(lu\.name, lu\.input, txt\)/.test(ss));
-ok('phantom cut: a synthesized running task launched BEFORE the current wrapper start is dropped (an OS task cannot outlive the CLI process)', /tk\.status === 'running' && tk\._launchTs && tk\._launchTs < wStart\) delete tasks\[tuid\]/.test(ss));
-ok('…and closes from persisted <task-notification> records with summary', /<task-notification>/.test(ss) && /tasks\[tu\]\.summary = sm\.slice\(0, 200\)/.test(ss));
+ok('session-store taskState scan uses the SAME parser (no twin)', gateOf(/require\('\.\/message-manager\.js'\)/.test(ss)) && verdictOf(/parseBackgroundLaunch\(lu\.name, lu\.input, txt\)/.test(ss)));
+ok('phantom cut: a synthesized running task launched BEFORE the current wrapper start is dropped (an OS task cannot outlive the CLI process)', verdictOf(/tk\.status === 'running' && tk\._launchTs && tk\._launchTs < wStart\) delete tasks\[tuid\]/.test(ss)));
+ok('…and closes from persisted <task-notification> records with summary', gateOf(/<task-notification>/.test(ss)) && verdictOf(/tasks\[tu\]\.summary = sm\.slice\(0, 200\)/.test(ss)));
 const cr = read('src/lib/chat-renderers.js');
 // the chip is ONE helper since 2026-09-21 (taskStatusChipHtml: running ⟳ / soft `finished` / err), called by BOTH cards;
 // since 2026-09-26 it also takes the server's stalled verdict for a Workflow run (src/workflow-disk.js)
-ok('Agent + Workflow cards show the lifecycle chip (the ONE taskStatusChipHtml helper, two call sites) and prefer the completion summary', /const taskStatusChipHtml = \(ti, verdict = null\) =>/.test(cr) && (cr.match(/taskStatusChipHtml\(/g) || []).length === 2 && (cr.match(/chat-task-status-chip/g) || []).length >= 3 && /ti\?\.summary/.test(cr) && /tiW\?\.summary/.test(cr));
+ok('Agent + Workflow cards show the lifecycle chip (the ONE taskStatusChipHtml helper, two call sites) and prefer the completion summary', gateOf(/const taskStatusChipHtml = \(ti, verdict = null\) =>/.test(cr)) && (cr.match(/taskStatusChipHtml\(/g) || []).length === 2 && (cr.match(/chat-task-status-chip/g) || []).length >= 3 && gateOf(/ti\?\.summary/.test(cr)) && verdictOf(/tiW\?\.summary/.test(cr)));
 const sb = read('src/lib/chat-status-bar.js');
 // lane mask-value-shape (the strip's step two): tasks AND running workflows are ONE «后台» door; its panel lists each run
-ok('running workflows are rows of the ONE «后台» door (with the tasks), its press opening the panel', /chat-status-wf-row/.test(sb) && /item\.dataset\.wfRun = w\.runId;/.test(sb) && /taskEl && \(this\._activeTasks\?\.size \|\| this\._bgTasks\?\.length \|\| this\._runningWorkflows\(\)\.length\)/.test(sb) /* lane Q verify: a stalled run stays tracked, never drawn as running */);
-ok('a workflow row opens its run directly (as the single-workflow chip did)', /item\.onclick = \(ev\) => \{ ev\.stopPropagation\(\); dropdown\.remove\(\); this\._onOpenWorkflow\?\.\(w\.runId, w\.name\); \};/.test(sb));
+ok('running workflows are rows of the ONE «后台» door (with the tasks), its press opening the panel', gateOf(/chat-status-wf-row/.test(sb)) && gateOf(/item\.dataset\.wfRun = w\.runId;/.test(sb)) && verdictOf(/taskEl && \(this\._activeTasks\?\.size \|\| this\._bgTasks\?\.length \|\| this\._runningWorkflows\(\)\.length\)/.test(sb)) /* lane Q verify: a stalled run stays tracked, never drawn as running */);
+ok('a workflow row opens its run directly (as the single-workflow chip did)', verdictOf(/item\.onclick = \(ev\) => \{ ev\.stopPropagation\(\); dropdown\.remove\(\); this\._onOpenWorkflow\?\.\(w\.runId, w\.name\); \};/.test(sb)));
 
 
 // ── 2.368.31 (owner: "又开始出现大量已经完成的任务显示成在进行了"): a BUSY
@@ -99,7 +99,7 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
   const mq = createMessageManager('claude', 't-q');
   mq.convertHistory([...mkHist(), { type: 'queue-operation', operation: 'enqueue', content: NOTIF3 }]);
   const tmq = mq.messages.find((m) => m.content?.[0]?.toolCallId === TU3);
-  ok('a queue-operation record CLOSES the task (completion while the agent was busy)', tmq?.taskInfo?.status === 'completed' && /Production build/.test(tmq.taskInfo.summary || ''), JSON.stringify(tmq?.taskInfo));
+  ok('a queue-operation record CLOSES the task (completion while the agent was busy)', tmq?.taskInfo?.status === 'completed' && verdictOf(/Production build/.test(tmq.taskInfo.summary || '')), JSON.stringify(tmq?.taskInfo));
   // transport 2: queued_command attachment (the delivered copy)
   const ma = createMessageManager('claude', 't-a');
   ma.convertHistory([...mkHist(), { type: 'attachment', attachment: { type: 'queued_command', prompt: NOTIF3 } }]);
@@ -131,8 +131,8 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
   ok('a resume under the SAME run id SUPERSEDES the original launch card (the wf_768b7abd residual)', w1?.taskInfo?.status === 'completed' && w2?.taskInfo?.status === 'running', JSON.stringify([w1?.taskInfo?.status, w2?.taskInfo?.status]));
   // wiring pins
   const ss3 = read('src/session-store.js');
-  ok('the scan reads all three notification transports', /queue-operation' && typeof msg\.content === 'string'/.test(ss3) && /attachment' && typeof msg\.attachment\?\.prompt === 'string'/.test(ss3));
-  ok('taskState MERGES wrapper live tasks over scanned history — never fallback (one live entry used to hide the whole set)', /tasks: \{ \.\.\.scanned\.tasks, \.\.\.base\.tasks \}/.test(ss3));
+  ok('the scan reads all three notification transports', gateOf(/queue-operation' && typeof msg\.content === 'string'/.test(ss3)) && verdictOf(/attachment' && typeof msg\.attachment\?\.prompt === 'string'/.test(ss3)));
+  ok('taskState MERGES wrapper live tasks over scanned history — never fallback (one live entry used to hide the whole set)', verdictOf(/tasks: \{ \.\.\.scanned\.tasks, \.\.\.base\.tasks \}/.test(ss3)));
 }
 
 
@@ -145,7 +145,7 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
     { type: "workflow_agent", index: 1, label: "repair:<b>x</b>", phaseIndex: 1, phaseTitle: "Repair", agentId: "bbb222", model: "claude-fable-5-1", state: "running", attempt: 2, lastToolName: "Bash", lastToolSummary: "npm test" },
   ];
   const wf = normalizeWorkflowProgress(TREE);
-  ok("normalizeWorkflowProgress: phases + agents, prompt preview DROPPED, fields bounded", wf && wf.phases.length === 2 && wf.agents.length === 2 && !("promptPreview" in wf.agents[0]) && wf.agents[1].state === "running" && wf.agents[1].attempt === 2 && wf.agents[0].lastToolSummary === "grep -n foo", JSON.stringify(wf));
+  ok("normalizeWorkflowProgress: phases + agents, prompt preview DROPPED, fields bounded", gateOf(wf) && wf.phases.length === 2 && wf.agents.length === 2 && !("promptPreview" in wf.agents[0]) && wf.agents[1].state === "running" && wf.agents[1].attempt === 2 && wf.agents[0].lastToolSummary === "grep -n foo", JSON.stringify(wf));
   ok("a heartbeat payload (no tree / empty / not an array) normalizes to null so the caller keeps its tree", normalizeWorkflowProgress(undefined) === null && normalizeWorkflowProgress([]) === null && normalizeWorkflowProgress("x") === null && normalizeWorkflowProgress([{ type: "other" }]) === null);
   const big = normalizeWorkflowProgress(Array.from({ length: 260 }, (_, i) => ({ type: "workflow_agent", index: i, label: "L".repeat(500), state: "queued" })));
   ok("agents are capped at 200 and labels at 80 chars", big.agents.length === 200 && big.agents[0].label.length === 80);
@@ -158,7 +158,7 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
   mm3.onOp((e) => edits.push(e));
   const liveMsg = mm3.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_live");
   mm3.processLive({ type: "system", subtype: "task_started", task_id: "wf_live1", tool_use_id: "toolu_wf_live", task_type: "local_workflow", description: "audit" });
-  ok("the CLI's `local_workflow` task_type is normalized to 'workflow' on the card (2.369.139, inc-muc1hfeg-0qn2: the live re-render gate compared 'local_workflow' with 'workflow' and dropped every task_progress until a reload)", liveMsg?.taskInfo?.type === 'workflow' && edits.some((e) => e.op === 'edit' && e.fields?.taskInfo?.type === 'workflow'), JSON.stringify(liveMsg?.taskInfo));
+  ok("the CLI's `local_workflow` task_type is normalized to 'workflow' on the card (2.369.139, inc-muc1hfeg-0qn2: the live re-render gate compared 'local_workflow' with 'workflow' and dropped every task_progress until a reload)", liveMsg?.taskInfo?.type === 'workflow' && verdictOf(edits.some((e) => e.op === 'edit' && e.fields?.taskInfo?.type === 'workflow')), JSON.stringify(liveMsg?.taskInfo));
   mm3.processLive({ type: "system", subtype: "task_progress", task_id: "wf_live1", tool_use_id: "toolu_wf_live", description: "audit", usage: { total_tokens: 1105301, tool_uses: 262, duration_ms: 2122694 }, last_tool_name: "Bash", workflow_progress: TREE });
   ok("a task_progress with the tree lands on taskInfo.workflow + usage", liveMsg?.taskInfo?.workflow?.agents?.length === 2 && liveMsg.taskInfo.usage.totalTokens === 1105301 && liveMsg.taskInfo.usage.toolUses === 262 && liveMsg.taskInfo.lastTool === "Bash", JSON.stringify(liveMsg?.taskInfo));
   mm3.processLive({ type: "system", subtype: "task_progress", task_id: "wf_live1", tool_use_id: "toolu_wf_live", description: "audit", usage: { total_tokens: 1200000, tool_uses: 270, duration_ms: 2200000 } });
@@ -178,7 +178,7 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
     ok("live order: task_started before the ack — the first taskInfo edit already carries type 'workflow' (pre-fix: 'local_workflow', the gate dropped it)", firstType === 'workflow' && cardMsg?.taskInfo?.type === 'workflow', JSON.stringify({ firstType, ti: cardMsg?.taskInfo }));
     mm4.processLive({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_wf_order", content: "Workflow launched in background. Task ID: wu9order1\nSummary: lane: the thing\nRun ID: wf_order-1" }] } });
     mm4.processLive({ type: "system", subtype: "task_progress", task_id: "wu9order1", tool_use_id: "toolu_wf_order", description: "Build: b1", workflow_progress: TREE });
-    ok("…the ack registers the wf_ run id and a later task_progress edit carries the tree with type 'workflow'", cardMsg?.taskInfo?.runId === 'wf_order-1' && cardMsg.taskInfo.type === 'workflow' && cardMsg.taskInfo.workflow?.agents?.length === 2 && edits4.filter((e) => e.fields?.taskInfo?.workflow).every((e) => e.fields.taskInfo.type === 'workflow'), JSON.stringify(cardMsg?.taskInfo).slice(0, 300));
+    ok("…the ack registers the wf_ run id and a later task_progress edit carries the tree with type 'workflow'", cardMsg?.taskInfo?.runId === 'wf_order-1' && cardMsg.taskInfo.type === 'workflow' && cardMsg.taskInfo.workflow?.agents?.length === 2 && verdictOf(edits4.filter((e) => e.fields?.taskInfo?.workflow).every((e) => e.fields.taskInfo.type === 'workflow')), JSON.stringify(cardMsg?.taskInfo).slice(0, 300));
   }
   // REPLAY AFTER A RESTART (2.369.140, inc-muc2fmtt-5jat): the server persists the latest
   // task_started / task_progress (tree kept) / task_notification per task and replays them
@@ -194,11 +194,11 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
     const persisted = { toolu_wf_rep: { started: { type: "system", subtype: "task_started", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", task_type: "local_workflow", description: "lane" },
       progress: { type: "system", subtype: "task_progress", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", description: "Build: b1", usage: { total_tokens: 5, tool_uses: 1, duration_ms: 9 }, workflow_progress: TREE }, at: 1 } };
     const recs = taskReplayRecords(persisted);
-    ok("taskReplayRecords orders started → progress (→ notification) per task, each with the task's persisted arrival time `at` (lane Q verify)", recs.length === 2 && recs[0].record.subtype === 'task_started' && recs[1].record.subtype === 'task_progress' && recs.every((r) => r.at === 1));
+    ok("taskReplayRecords orders started → progress (→ notification) per task, each with the task's persisted arrival time `at` (lane Q verify)", recs.length === 2 && recs[0].record.subtype === 'task_started' && recs[1].record.subtype === 'task_progress' && verdictOf(recs.every((r) => r.at === 1)));
     // the tree's clock (lane Q verify, 2026-09-26): a HISTORY conversion stamps nothing (the rebuild converts the
     // stdout ring too — task records with no arrival time, possibly days old) …
     const ringCard = mm5.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_rep");
-    ok("a history conversion leaves taskInfo.aliveAt UNSET (no arrival time is known)", ringCard?.taskInfo && ringCard.taskInfo.aliveAt === undefined, ringCard?.taskInfo);
+    ok("a history conversion leaves taskInfo.aliveAt UNSET (no arrival time is known)", gateOf(ringCard?.taskInfo) && ringCard.taskInfo.aliveAt === undefined, ringCard?.taskInfo);
     const AT = Date.now() - 2 * 86400e3;
     for (const r of recs) mm5.replay(r.record, { at: AT });
     const card5 = mm5.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_rep");
@@ -215,10 +215,10 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
   // renderer + wiring pins
   const cr = read("src/lib/chat-renderers.js"), cv = read("src/lib/chat-view.js"), css = read("public/chat.css");
   const sb = read("src/lib/chat-status-bar.js");
-  ok("the status bar's single-task chip shows shortWorkflowName(description) (2.369.141: a Workflow's task description is its whole meta.description)", /import \{ shortWorkflowName \} from '\.\.\/workflow-name\.js'/.test(sb) && /const tasks = this\._bgTasks\?\.length \? this\._bgTasks\.map\(/.test(sb) && /shortWorkflowName\(tasks\[0\]\.description\)/.test(sb));   // (lane mask-value-shape) the «后台» door: the level signal first, its one item's sentence
-  ok("chat-renderers renders phases + agent chips (label · state dot · last tool) from taskInfo.workflow, every string escaped; the chip's state AND the tally read the ONE vocabulary mapping (workflowAgentState)", /renderWorkflowLive\(ti\)/.test(cr) && /class=\"chat-wf-agent\" data-state=\"\$\{escHtml\(st\)\}\"/.test(cr) && /\$\{escHtml\(a\.label \|\| a\.agentId \|\| \x27\?\x27\)\}/.test(cr) && /\$\{wfLiveHtml\}<details/.test(cr) && /const st = workflowAgentState\(a\.state\);/.test(cr) && /const states = wf\.agents\.map\(\(a\) => workflowAgentState\(a\.state\)\);/.test(cr));
-    ok("chat-view PATCHES a WORKFLOW tool card in place on its taskInfo edit (inc-mudv05ja-n5rv: _scheduleWorkflowPatch → _patchWorkflowCard, no swap; agent cards excluded — their live line is drawn elsewhere; a card the renderer draws no Workflow result for — pending, error — is left alone); the gate also admits any card that carries the tree", /\(fields\.taskInfo\.type === \x27workflow\x27 \|\| fields\.taskInfo\.workflow\) && msg\.role === \x27tool\x27\) \{\n\s*this\._scheduleWorkflowPatch\(id\);/.test(cv) && /if \(!this\._renderers\.drawsWorkflowCard\(msg\)\) return;/.test(cv));
-  ok("chat.css styles the chips with theme vars (dot by state)", /\.chat-wf-agent\[data-state="running"\] \.chat-wf-dot \{ background: var\(--accent\)/.test(css) && /\.chat-wf-agent\[data-state="error"\] \.chat-wf-dot \{ background: var\(--red/.test(css));
+  ok("the status bar's single-task chip shows shortWorkflowName(description) (2.369.141: a Workflow's task description is its whole meta.description)", gateOf(/import \{ shortWorkflowName \} from '\.\.\/workflow-name\.js'/.test(sb)) && gateOf(/const tasks = this\._bgTasks\?\.length \? this\._bgTasks\.map\(/.test(sb)) && verdictOf(/shortWorkflowName\(tasks\[0\]\.description\)/.test(sb)));   // (lane mask-value-shape) the «后台» door: the level signal first, its one item's sentence
+  ok("chat-renderers renders phases + agent chips (label · state dot · last tool) from taskInfo.workflow, every string escaped; the chip's state AND the tally read the ONE vocabulary mapping (workflowAgentState)", gateOf(/renderWorkflowLive\(ti\)/.test(cr)) && gateOf(/class=\"chat-wf-agent\" data-state=\"\$\{escHtml\(st\)\}\"/.test(cr)) && gateOf(/\$\{escHtml\(a\.label \|\| a\.agentId \|\| \x27\?\x27\)\}/.test(cr)) && gateOf(/\$\{wfLiveHtml\}<details/.test(cr)) && gateOf(/const st = workflowAgentState\(a\.state\);/.test(cr)) && verdictOf(/const states = wf\.agents\.map\(\(a\) => workflowAgentState\(a\.state\)\);/.test(cr)));
+    ok("chat-view PATCHES a WORKFLOW tool card in place on its taskInfo edit (inc-mudv05ja-n5rv: _scheduleWorkflowPatch → _patchWorkflowCard, no swap; agent cards excluded — their live line is drawn elsewhere; a card the renderer draws no Workflow result for — pending, error — is left alone); the gate also admits any card that carries the tree", gateOf(/\(fields\.taskInfo\.type === \x27workflow\x27 \|\| fields\.taskInfo\.workflow\) && msg\.role === \x27tool\x27\) \{\n\s*this\._scheduleWorkflowPatch\(id\);/.test(cv)) && verdictOf(/if \(!this\._renderers\.drawsWorkflowCard\(msg\)\) return;/.test(cv)));
+  ok("chat.css styles the chips with theme vars (dot by state)", gateOf(/\.chat-wf-agent\[data-state="running"\] \.chat-wf-dot \{ background: var\(--accent\)/.test(css)) && verdictOf(/\.chat-wf-agent\[data-state="error"\] \.chat-wf-dot \{ background: var\(--red/.test(css)));
 }
 
 // ── THE LIVE CARD IS PATCHED IN PLACE, NEVER SWAPPED, WHILE THE RUN IS LIVE (inc-mudv05ja-n5rv) ──
@@ -249,7 +249,7 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
   // statement VERBATIM (every Workflow taskInfo edit re-renders the card through the swap point)
   const FIXED_BRANCH = /(msg\.role === 'tool'\) \{\n)(\s*)this\._scheduleWorkflowPatch\(id\);\n/;
   const neutered = cvSrc.replace(FIXED_BRANCH, (_, head, ind) => `${head}${ind}const oldEl = this._elements.get(id);\n${ind}if (oldEl) { try { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(oldEl, newEl, id); } catch { /* the status bar already has it */ } }\n`);
-  ok('the negative control applies (the fixed branch is found and replaced by the pre-fix statement)', neutered !== cvSrc && neutered.includes("if (oldEl) { try { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(oldEl, newEl, id); } catch"));
+  ok('the negative control applies (the fixed branch is found and replaced by the pre-fix statement)', neutered !== cvSrc && verdictOf(neutered.includes("if (oldEl) { try { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(oldEl, newEl, id); } catch")));
   // import BEFORE the fake document exists: the module tree wires DOM-dependent helpers only when one is present
   const fixedMod = await import(await bundle('chat-view-under-test', cvSrc));
   const preFixMod = await import(await bundle('chat-view-pre-fix', neutered));
@@ -516,18 +516,18 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
   };
 
   const { r, card0, chip1, dot1, after } = await run(fixedMod);
-  ok('the launch renders ONE Workflow card with the live tree (fixture sanity: 3 agents, the ⟳ running chip)', after.launch.chips === 3 && after.launch.runningChip && !!chip1, after.launch.live.slice(0, 200));
+  ok('the launch renders ONE Workflow card with the live tree (fixture sanity: 3 agents, the ⟳ running chip)', after.launch.chips === 3 && gateOf(after.launch.runningChip) && !!chip1, after.launch.live.slice(0, 200));
   ok('a PENDING Workflow tool_call is left alone by its task_started taskInfo edit — it draws exactly what a fresh render of it draws (no ⟳ chip, no tree: the pending card reads nothing from taskInfo)', r.pendingDrawn !== '' && r.pendingDrawn === r.pendingFresh && !/chat-task-status-chip|chat-wf-live/.test(r.pendingDrawn), `patched: ${r.pendingDrawn.slice(0, 300)}\n      fresh:   ${r.pendingFresh.slice(0, 300)}`);
-  ok('(a) 30 task_progress edits leave the card the SAME element, still in the list, with ZERO swaps (pre-fix: one whole-card swap per edit)', after.inList && after.swaps === 0, JSON.stringify({ same: after.card === card0, inList: after.inList, swaps: after.swaps }));
+  ok('(a) 30 task_progress edits leave the card the SAME element, still in the list, with ZERO swaps (pre-fix: one whole-card swap per edit)', gateOf(after.inList) && after.swaps === 0, JSON.stringify({ same: after.card === card0, inList: after.inList, swaps: after.swaps }));
   ok('(b) the chip that stayed live throughout is the SAME node, and so is its dot (an infinite animation restarts only on a new element) — drawn `running` from the CLI\'s `progress`', !!chip1 && after.chip1 === chip1 && after.dot1 === dot1 && chip1.getAttribute('data-state') === 'running', JSON.stringify({ sameChip: after.chip1 === chip1, sameDot: after.dot1 === dot1, state: chip1?.getAttribute('data-state') }));
-  ok('(c) the patched tree is EXACTLY what a fresh render of the last edit draws (states, labels, last tools, the new chip, tally, usage)', after.parity, `patched: ${after.live.slice(0, 400)}\n      fresh:   ${after.fresh.slice(0, 400)}`);
-  ok("(c) …the CLI's live words (start / progress) draw as the card's `running` — its pulse and the tally's running count exist in production (0 'running' among 496 real agent records)", /data-state="done"[^>]*>(?:<[^>]*>)*build:core/.test(after.live) && /data-state="error"/.test(after.live) && (after.live.match(/data-state="running"/g) || []).length === 2 && /1\/4 · 1 failed · 2 running/.test(after.live), after.live.slice(0, 600));
+  ok('(c) the patched tree is EXACTLY what a fresh render of the last edit draws (states, labels, last tools, the new chip, tally, usage)', verdictOf(after.parity), `patched: ${after.live.slice(0, 400)}\n      fresh:   ${after.fresh.slice(0, 400)}`);
+  ok("(c) …the CLI's live words (start / progress) draw as the card's `running` — its pulse and the tally's running count exist in production (0 'running' among 496 real agent records)", gateOf(/data-state="done"[^>]*>(?:<[^>]*>)*build:core/.test(after.live)) && gateOf(/data-state="error"/.test(after.live)) && (after.live.match(/data-state="running"/g) || []).length === 2 && verdictOf(/1\/4 · 1 failed · 2 running/.test(after.live)), after.live.slice(0, 600));
   ok('(c) N edits inside one pass ⇒ ONE patch (coalesced per message id, one pass per frame / 150 ms): 30 edits over 10 passes = 10 patches', after.passes === 10 && after.patches === after.passes, JSON.stringify({ patches: after.patches, passes: after.passes }));
   ok('(c) a no-change update touches NOTHING in the document (compare before writing)', after.noChangeWrites === 0, `writes: ${after.noChangeWrites}`);
   ok("(c) the reader's opened Script <details> stays open across the run (a swap re-created it closed)", after.scriptOpen === true);
-  ok('(d) the OUTCOME: a terminal task_notification is applied to the SAME card in ONE pass (0 swaps, 1 patch) — the ⟳ running chip is gone, the Script stays open', after.end.same && after.end.swaps === 0 && after.end.patches === 1 && after.end.chipGone && after.end.scriptOpen, JSON.stringify({ ...after.end, drawn: undefined, fresh: undefined }));
+  ok('(d) the OUTCOME: a terminal task_notification is applied to the SAME card in ONE pass (0 swaps, 1 patch) — the ⟳ running chip is gone, the Script stays open', gateOf(after.end.same) && after.end.swaps === 0 && after.end.patches === 1 && gateOf(after.end.chipGone) && verdictOf(after.end.scriptOpen), JSON.stringify({ ...after.end, drawn: undefined, fresh: undefined }));
   ok('(d) …and the patched card draws exactly what a fresh render of the terminal message draws (the label row without the ⟳ chip, the tree, the ✓ line)', after.end.drawn === after.end.fresh && after.end.drawn !== '' && !/chat-task-status-chip/.test(after.end.drawn), `patched: ${after.end.drawn.slice(0, 500)}\n      fresh:   ${after.end.fresh.slice(0, 500)}`);
-  ok(`the status bar side rebuilds nothing per progress: every chip (${after.barKeys}) is the same node with the same markup across the 30 edits (keyed since a3)`, after.barSame && /tasks/.test(after.barKeys) && !/\bwf\b/.test(after.barKeys));   // (lane mask-value-shape) the run rides the ONE «后台» door — no ⛭ chip of its own
+  ok(`the status bar side rebuilds nothing per progress: every chip (${after.barKeys}) is the same node with the same markup across the 30 edits (keyed since a3)`, gateOf(after.barSame) && gateOf(/tasks/.test(after.barKeys)) && !/\bwf\b/.test(after.barKeys));   // (lane mask-value-shape) the run rides the ONE «后台» door — no ⛭ chip of its own
   // XSS: agent-authored strings reach the tree through BOTH paths — a NEW chip / phase is built from the
   // escaped markup, an EXISTING chip's label / tool is replaced in place — and neither parses a tag
   {
@@ -555,4 +555,4 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -17,7 +17,7 @@ import { scratchDir } from './scratch.mjs';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LIB = path.join(REPO, 'src/lib');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + JSON.stringify(e) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + JSON.stringify(e) : '')); } };
 const esbuild = (await import(pathToFileURL(path.join(REPO, 'node_modules/esbuild/lib/main.js')).href)).default;
 const SRC = fs.readFileSync(path.join(LIB, 'session-lifecycle.js'), 'utf8');
 
@@ -98,13 +98,13 @@ const { installSessionLifecycle } = await load(SRC);
 console.log('— ④ CONTROL: the door without the guard');
 {
   const guard = "    if (this._focusPendingAttach(serverId, { replay: !!(syncId || machine) })) return null; // B-0cc8: the attach in flight IS the answer — no second frame\n";
-  ok(SRC.includes(guard), '④ control anchor: the guard line is in attachSession');
+  ok(verdictOf(SRC.includes(guard)), '④ control anchor: the guard line is in attachSession');
   const { installSessionLifecycle: Unguarded } = await load(SRC.replace(guard, '\n'));
   const { app, frames } = rig(Unguarded);
   attach(app); attach(app);
   ok(frames.filter((m) => m.type === 'attach').length === 2 && app.wm.windows.size === 2, '④ without the guard a double-click sends TWO attach frames and builds two windows (① can fail)');
-  ok(/\{ name: 'test-attach-dedupe', tier: 'fast'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')), '④ ci.mjs carries test-attach-dedupe in the fast tier');
+  ok(verdictOf(/\{ name: 'test-attach-dedupe', tier: 'fast'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8'))), '④ ci.mjs carries test-attach-dedupe in the fast tier');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

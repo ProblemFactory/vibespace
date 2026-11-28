@@ -50,7 +50,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = 'b06f36e90'; // 2.369.407 — no checkpoints row, no door
 const require = createRequire(import.meta.url);
 let passed = 0, failed = 0, skipped = 0;
-const ok = (c, msg, why = '') => { if (c) { passed++; console.log('  ✓ ' + msg); } else { failed++; console.log('  ✗ ' + msg + (why ? ' — ' + why : '')); } return !!c; };
+const ok = (c, msg, why = '') => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log('  ✓ ' + msg); } else { failed++; console.log('  ✗ ' + msg + (why ? ' — ' + why : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -86,13 +86,13 @@ say('— §1 the row');
       && (row.conversation === true
         ? door.GRANULARITIES.includes(row.granularity) && typeof row.verb === 'string' && row.verb.length > 0
         : row.conversation === false && row.granularity === null && row.verb === null);
-    ok(law, `${id}: checkpoints has the closed key set, files:false (tier one), a true row names granularity + verb, a false row neither`, JSON.stringify(row));
+    ok(verdictOf(law), `${id}: checkpoints has the closed key set, files:false (tier one), a true row names granularity + verb, a false row neither`, JSON.stringify(row));
   }
-  ok(ids.length >= 5 && ['claude', 'codex', 'opencode', 'antigravity', 'shell'].every((id) => ids.includes(id)), 'the census saw every declared harness', ids.join(','));
+  ok(ids.length >= 5 && verdictOf(['claude', 'codex', 'opencode', 'antigravity', 'shell'].every((id) => ids.includes(id))), 'the census saw every declared harness', ids.join(','));
   // A row turns true with its road (never a dead control): claude's road is U2; codex's (thread/revert) is U3.
   ok(caps.capsOf('claude').checkpoints === caps.CLAUDE_CHECKPOINTS && JSON.stringify(caps.CLAUDE_CHECKPOINTS) === JSON.stringify(MSG_ROW),
     'claude offers the door — the row is the shape the model was proven on (message granularity, rewind_conversation)');
-  ok(rows.filter(([id]) => id !== 'claude').every(([, r]) => r && r.conversation === false), 'every other harness is off until its road is built (codex: U3)');
+  ok(verdictOf(rows.filter(([id]) => id !== 'claude').every(([, r]) => r && r.conversation === false)), 'every other harness is off until its road is built (codex: U3)');
   const bent = caps.contributeCaps('test-checkpoints-bent', { checkpoints: { conversation: true, files: true, granularity: 'message', redo: false, verb: 'x' } });
   const partial = caps.contributeCaps('test-checkpoints-partial', { checkpoints: { conversation: true } });
   const fine = caps.contributeCaps('test-checkpoints-fine', { checkpoints: { conversation: true, files: false, granularity: 'turn', redo: false, verb: 'x/revert' } });
@@ -102,7 +102,7 @@ say('— §1 the row');
     && caps.checkpointsRowOf({ conversation: true, files: true, granularity: 'message', redo: false, verb: 'x' }) === caps.NO_CHECKPOINTS
     && caps.setVerifiedCap('opencode', 'checkpoints', { conversation: true }) === false && caps.capsOf('opencode').checkpoints === caps.NO_CHECKPOINTS,
     'a contributed harness\'s row stays OFF (the page has no road for it yet); the shape judge keeps only a well-formed row; no prober flips a row (setVerifiedCap refuses)');
-  ok(Object.isFrozen(caps.NO_CHECKPOINTS) && caps.capsOf('opencode').checkpoints === caps.NO_CHECKPOINTS,
+  ok(gateOf(Object.isFrozen(caps.NO_CHECKPOINTS)) && caps.capsOf('opencode').checkpoints === caps.NO_CHECKPOINTS,
     'the off row is ONE frozen object (opencode: its revert takes the FILES with the messages — no conversation-only door)');
   // ONE TABLE, NOT TWO (entry condition 1): the page's row IS the server's — compared by value over every page row
   const { BACKEND_META, backendFeatureCaps } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
@@ -115,7 +115,7 @@ say('— §1 the row');
     `the page's row is the server's, by value, on every page row (${metaIds.join(', ')}) and for an unknown harness — claude's is on there too`, off.join(','));
   const meta = read('src/lib/agent-meta.js');
   const literals = meta.split('\n').filter((l) => /^\s+caps: \{/.test(l));
-  ok(literals.length >= 4 && literals.every((l) => /\bcheckpoints: serverCapsOf\('[a-z-]+'\)\.checkpoints,/.test(l)),
+  ok(literals.length >= 4 && verdictOf(literals.every((l) => /\bcheckpoints: serverCapsOf\('[a-z-]+'\)\.checkpoints,/.test(l))),
     `the page's caps literals DERIVE the row (checkpoints: serverCapsOf(<id>).checkpoints) — never a second copy (${literals.length})`,
     literals.filter((l) => !/serverCapsOf\('[a-z-]+'\)\.checkpoints/.test(l)).map((l) => l.trim().slice(0, 70)).join(' | '));
 }
@@ -244,18 +244,18 @@ say('— §2–§4 the verdict, the plan, the answer');
   const bad = laws(door);
   ok(bad.length === 0, 'every law holds on the tree: the verdict table (each refusal reached; two reasons at once say the first in order; only the person\'s own messages; the drawn door agrees), the plan (cut before the target, rewound skipped, newest live uuid, the composer words, no stated state = stopped; the turn road by turn id), the answer (13 measured reasons with the CLI\'s own words, unknown + error texts kept, no answer is never resent, the JSON-RPC road)', bad.join(' | '));
   ok(JSON.stringify(Object.keys(door.CLAUDE_REWIND_REASONS).sort()) === JSON.stringify(Object.keys(CAPTURE.reasons).sort())
-    && Object.entries(CAPTURE.reasons).every(([k, v]) => door.CLAUDE_REWIND_REASONS[k].retry === v.retry),
+    && verdictOf(Object.entries(CAPTURE.reasons).every(([k, v]) => door.CLAUDE_REWIND_REASONS[k].retry === v.retry)),
     `the module's reasons and their «may be sent again» are exactly the CAPTURE's (${CAPTURE.cli}, sha256 ${String(CAPTURE.programSha256).slice(0, 12)}) — no more, none missing, none moved`, Object.keys(door.CLAUDE_REWIND_REASONS).join(','));
-  ok(CAPTURE.cli === '2.1.322' && /^[0-9a-f]{64}$/.test(CAPTURE.programSha256) && CAPTURE.request.subtype === caps.CLAUDE_CHECKPOINTS.verb
-    && ['target_message_uuid', 'last_seen_user_message_uuid', 'interrupt_if_running'].every((f) => CAPTURE.request.fields.includes(f))
-    && ['rewound', 'targetMessageUuid', 'prefillText'].every((f) => CAPTURE.reply.done.includes(f)) && ['rewound', 'reason', 'error'].every((f) => CAPTURE.reply.refused.includes(f))
-    && CAPTURE.persist.row === 'last-prompt' && CAPTURE.persist.writtenBeforeTheLastCheck === true && CAPTURE.persist.healRow.explicit === true && /^tengu_/.test(CAPTURE.persist.cutUuidFlag)
-    && typeof CAPTURE.persist.healRow.writtenBy === 'string' && CAPTURE.persist.ordinaryRowExplicit === false && CAPTURE.persist.writers.some((w) => w.explicit && w.leafUuid === 'null')
-    && CAPTURE.request.fields.includes('expires_at'),
+  ok(CAPTURE.cli === '2.1.322' && gateOf(/^[0-9a-f]{64}$/.test(CAPTURE.programSha256)) && CAPTURE.request.subtype === caps.CLAUDE_CHECKPOINTS.verb
+    && gateOf(['target_message_uuid', 'last_seen_user_message_uuid', 'interrupt_if_running'].every((f) => CAPTURE.request.fields.includes(f)))
+    && gateOf(['rewound', 'targetMessageUuid', 'prefillText'].every((f) => CAPTURE.reply.done.includes(f))) && gateOf(['rewound', 'reason', 'error'].every((f) => CAPTURE.reply.refused.includes(f)))
+    && CAPTURE.persist.row === 'last-prompt' && CAPTURE.persist.writtenBeforeTheLastCheck === true && CAPTURE.persist.healRow.explicit === true && gateOf(/^tengu_/.test(CAPTURE.persist.cutUuidFlag))
+    && typeof CAPTURE.persist.healRow.writtenBy === 'string' && CAPTURE.persist.ordinaryRowExplicit === false && gateOf(CAPTURE.persist.writers.some((w) => w.explicit && w.leafUuid === 'null'))
+    && verdictOf(CAPTURE.request.fields.includes('expires_at')),
     'the capture names the verb the claude row names, the request fields the door writes, the reply fields the normalizer reads, the transcript row it cuts from and the heal row after it');
-  ok(/MEASURED by scripts\/measure-claude-rewind\.mjs/.test(CAPTURE._note) && fs.existsSync(path.join(REPO, 'scripts/measure-claude-rewind.mjs')) && !/child_process|worker_threads|\b(?:spawn|spawnSync|execFile|execFileSync|execSync|fork)\(/.test(read('scripts/measure-claude-rewind.mjs')),
+  ok(gateOf(/MEASURED by scripts\/measure-claude-rewind\.mjs/.test(CAPTURE._note)) && gateOf(fs.existsSync(path.join(REPO, 'scripts/measure-claude-rewind.mjs'))) && !/child_process|worker_threads|\b(?:spawn|spawnSync|execFile|execFileSync|execSync|fork)\(/.test(read('scripts/measure-claude-rewind.mjs')),
     'the capture is the measuring script\'s (it READS the program file; it starts no process)');
-  ok(Object.values(door.REWIND_REFUSALS).every((c) => door.ANSWER_CLASSES.includes(c)) && Object.values(door.CLAUDE_REWIND_REASONS).every((r) => door.ANSWER_CLASSES.includes(r.cls)),
+  ok(gateOf(Object.values(door.REWIND_REFUSALS).every((c) => door.ANSWER_CLASSES.includes(c))) && verdictOf(Object.values(door.CLAUDE_REWIND_REASONS).every((r) => door.ANSWER_CLASSES.includes(r.cls))),
     'every refusal and every CLI reason lands in the closed class set the page words');
   const src = read('src/rewind-door.js');
   const reqs = [...src.replace(/^\s*\/\/.*$/gm, '').matchAll(/require\('([^']+)'\)/g)].map((x) => x[1]);
@@ -282,7 +282,7 @@ say('— §5 red controls');
     if (!fs.existsSync(path.join(T, 'rewind-cut.js'))) fs.copyFileSync(path.join(REPO, 'src/rewind-cut.js'), path.join(T, 'rewind-cut.js'));
     fs.writeFileSync(f, editAnchor(SRC, from, to, "src/rewind-door.js", 'join'));
     const bad = laws(require(f));
-    ok(bad.some((b) => b.startsWith(law)), `RED CONTROL «${name}» ⇒ the law «${law}» is red`, bad.join(' | ') || 'all green');
+    ok(verdictOf(bad.some((b) => b.startsWith(law))), `RED CONTROL «${name}» ⇒ the law «${law}» is red`, bad.join(' | ') || 'all green');
   }
   const g = spawnSync('git', ['-C', REPO, 'show', `${BASE}:src/backend-caps.js`], { encoding: 'utf8', maxBuffer: 16 << 20 });
   if (g.status === 0 && g.stdout) ok(!/\bcheckpoints\b/.test(g.stdout), `RED CONTROL the release ${BASE} has no checkpoints row (§1 is red there)`);
@@ -579,15 +579,15 @@ say('— §6 the claude road');
   const bad = roadLaws();
   ok(bad.length === 0, 'the road holds: stamp → uuid on the bubble (once, never re-pointed), the door refuses by name and writes nothing, ONE request naming the target + the newest uuid, the answer cuts exactly the plan (one notice, one rewound op, one rewind-answer with the composer words), twice cuts once, a refusal / an error keep reason + text, not-ours unread; the reload cuts the same from the transcript row (cutUuid, leaf-only, twins once, unplaced said, to the start), a plain last-prompt row is still no card', bad.join(' | '));
   let threw = false; try { ClaudeCodeAdapter.rewindRequest({ targetId: null }); } catch { threw = true; }
-  ok(threw, 'the claude request refuses to be built with no target uuid');
+  ok(verdictOf(threw), 'the claude request refuses to be built with no target uuid');
   const named = ClaudeCodeAdapter.rewindRequest({ targetId: U(3) }, { id: 'rw-ok123' }).requestId, own = ClaudeCodeAdapter.rewindRequest({ targetId: U(3) }, { id: 'bad id!' }).requestId;
-  ok(named === door.REWIND_REQUEST_PREFIX + 'rw-ok123' && /^vsr-[a-z0-9]+$/.test(own), 'the request is named by the page\'s own id (so the page binds it before it sends); a malformed id is never sent — the adapter names its own', `${named} · ${own}`);
+  ok(named === door.REWIND_REQUEST_PREFIX + 'rw-ok123' && verdictOf(/^vsr-[a-z0-9]+$/.test(own)), 'the request is named by the page\'s own id (so the page binds it before it sends); a malformed id is never sent — the adapter names its own', `${named} · ${own}`);
   // THE ROAD IS THE DESCRIPTOR'S: every built-in row on ⇔ its descriptor names a road; validate() refuses a row on without one
   const roads = H.chatHarnessIds().map((id) => [id, caps.capsOf(id).checkpoints.conversation === true, !!H.rewindRoad(id)]);
   let refused = null;
   try { H.assertRewindContract({ id: 'test-plug', caps: { checkpoints: MSG_ROW } }); } catch (e) { refused = e.message; }
-  ok(roads.every(([, on, road]) => on === road) && H.rewindRoad('claude') && H.get('claude').rewind.request === H.rewindRoad('claude').request
-    && /declares a conversation rewind .* but no rewind\.request road/.test(refused || '') && (() => { try { H.assertRewindContract({ id: 'x', caps: { checkpoints: caps.NO_CHECKPOINTS } }); return true; } catch { return false; } })(),
+  ok(gateOf(roads.every(([, on, road]) => on === road)) && gateOf(H.rewindRoad('claude')) && H.get('claude').rewind.request === H.rewindRoad('claude').request
+    && gateOf(/declares a conversation rewind .* but no rewind\.request road/.test(refused || '')) && verdictOf((() => { try { H.assertRewindContract({ id: 'x', caps: { checkpoints: caps.NO_CHECKPOINTS } }); return true; } catch { return false; } })()),
     `the road is the harness descriptor's: row on ⇔ road (${roads.map(([id, on, rd]) => `${id} ${on ? 'on' : 'off'}/${rd ? 'road' : 'none'}`).join(', ')}); a row on without one is refused at registration`, refused || '');
   // WHO MAY ASK (entry condition 4): the ONE caller is the owner's /ws case with the socket's own person; no automation
   // verb, no route, no agent door names a rewind. B-437e files tier: the files door (src/server/rewind-files-door.js) presses
@@ -600,16 +600,16 @@ say('— §6 the claude road');
   // a road that PRESSES one (the door, its module, the CLI verb, the ws frame) — the For-you reply route only maps the typing
   // path's refusal code `rewind_out` (one life), it presses nothing
   const routeHits = spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', '-e', 'requestRewind', '-e', 'rewind-requests', '-e', 'rewind_conversation', '-e', "type: 'rewind'", '-e', 'type: "rewind"', '-e', 'rewindRoad', '-e', 'rewindRequest', '-e', 'buildRewind', '-e', 'REWIND_REQUEST_PREFIX', '-e', 'rewind_files', '-e', 'REWIND_FILES_PREFIX', '-e', 'rewindFilesRoad', '-e', 'rewindFilesRequest', '--', 'src/routes', 'src/server/automation-engine.js', 'data/bin/vibespace-msg', 'data/bin/vibespace-task'], { encoding: 'utf8' }).stdout.trim();
-  ok(JSON.stringify(callers.sort()) === JSON.stringify(['src/server/rewind-files-door.js', 'src/server/rewind-requests.js', 'src/ws-handler.js']) && /by: ws\._personPage === true \? byOfWs\(ws\) : null/.test(wsCase)
-    && /by = ws\._personPage === true \? byOfWs\(ws\) : null/.test(filesCase) && JSON.stringify(filesCallers) === '["src/ws-handler.js"]'
-    && /reqId: typeof data\.reqId === 'string' \? data\.reqId : null/.test(wsCase)
-    && /ws\._personPage = require\('\.\/server\/rewind-requests\.js'\)\.personOfUpgrade\(req\)/.test(read('src/ws-handler.js'))
+  ok(JSON.stringify(callers.sort()) === JSON.stringify(['src/server/rewind-files-door.js', 'src/server/rewind-requests.js', 'src/ws-handler.js']) && gateOf(/by: ws\._personPage === true \? byOfWs\(ws\) : null/.test(wsCase))
+    && gateOf(/by = ws\._personPage === true \? byOfWs\(ws\) : null/.test(filesCase)) && JSON.stringify(filesCallers) === '["src/ws-handler.js"]'
+    && gateOf(/reqId: typeof data\.reqId === 'string' \? data\.reqId : null/.test(wsCase))
+    && gateOf(/ws\._personPage = require\('\.\/server\/rewind-requests\.js'\)\.personOfUpgrade\(req\)/.test(read('src/ws-handler.js')))
     && verbs.length > 5 && !verbs.some((v) => /rewind/i.test(v)) && routeHits === '',
     'the door\'s ONE caller is the owner\'s /ws case with the socket\'s person (byOfWs, only on a socket personOfUpgrade proved at its handshake) — and the files door, whose one caller is its own /ws case with the same person; no automation verb, no route and no agent CLI names a rewind', `${callers.join(',')} | files door: ${filesCallers.join(',')} | verbs ${verbs.filter((v) => /rewind/i.test(v))} | ${routeHits}`);
 }
 
-ok(/'queue_settle', 'frame_stamp', 'rewind_out',/.test(read('server.js')) && /fail\(res, code, \(r && r\.error\) \|\| 'the reply was not sent', r && r\.i18n \? \{ i18n: r\.i18n \} : null\)/.test(read('src/routes/user-todos-reply.js'))
-  && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\), reopened: true/.test(read('src/routes/user-todos-reply.js')),
+ok(gateOf(/'queue_settle', 'frame_stamp', 'rewind_out',/.test(read('server.js'))) && gateOf(/fail\(res, code, \(r && r\.error\) \|\| 'the reply was not sent', r && r\.i18n \? \{ i18n: r\.i18n \} : null\)/.test(read('src/routes/user-todos-reply.js')))
+  && verdictOf(/\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\), reopened: true/.test(read('src/routes/user-todos-reply.js'))),
   'the claude stream knows the wrapper\'s two rewind records (frame_stamp, rewind_out: no «unhandled type» breadcrumb); BOTH For-you reply roads (a live conversation, a reopened one) carry the refusal\'s words as an i18n key');
 
 // THE GROUP HAND-OVER MEETS THE FENCE (B-02a3 — int361's must-check while seaming line 87, 2026-11-19): during the minute a
@@ -633,7 +633,7 @@ else {
   const pressed = WO.pressOf({ headers: { host: 'hub.example', 'sec-fetch-site': 'same-origin' }, socket: {} });
   let hg = null;
   try { hg = await sh.handOverGroups('w-group', { pressed }); } catch (e) { hg = { threw: e.message }; }
-  ok(rg.ok && !!pressed && typedG.length === 1 && hg && hg.ok === false && commits === 0 && !sg._groupHandover && /keep waiting|ride its next turn/.test(String(hg.error || '')),   // the fence's words, or the hand-over's own if a seam puts its turn check first
+  ok(gateOf(rg.ok) && !!pressed && typedG.length === 1 && gateOf(hg) && hg.ok === false && commits === 0 && !sg._groupHandover && verdictOf(/keep waiting|ride its next turn/.test(String(hg.error || ''))),   // the fence's words, or the hand-over's own if a seam puts its turn check first
     'the group hand-over meets the fence: refused while a rewind is out — nothing written, the group messages NOT committed (they keep waiting for the next turn), the presser told so', JSON.stringify({ rg: rg.reason, hg, commits, typed: typedG.length }));
   try { sh.close && sh.close(); } catch { }
 }
@@ -731,7 +731,7 @@ say('— §8 red controls (U2)');
     const bad = await wrapperLaws(path.join(T, 'old/data/bin/chat-wrapper.js'), { absent: 400 });   // its source says none of them (proven below): no full wait
     // the control proves its plant first: the release's wrapper says no rewind_out
     if (/record\('rewind_out'/.test(g.stdout) || /record\('frame_stamp'/.test(g.stdout)) bad.length = 0;   // BOTH absent, or the brief waits prove nothing
-    ok(bad.some((b) => b.startsWith('wrapper:idle-frame-stamped')) && bad.some((b) => b.startsWith('wrapper:frame_stamp-says-it')) && bad.some((b) => b.startsWith('wrapper:a-held-frame')) && bad.some((b) => b.startsWith('wrapper:rewind-out-said')), `RED CONTROL the release ${BASE}'s wrapper sends an idle frame unstamped, says no stamp and no rewind_out`, bad.join(' | ') || 'all green');
+    ok(gateOf(bad.some((b) => b.startsWith('wrapper:idle-frame-stamped'))) && gateOf(bad.some((b) => b.startsWith('wrapper:frame_stamp-says-it'))) && gateOf(bad.some((b) => b.startsWith('wrapper:a-held-frame'))) && verdictOf(bad.some((b) => b.startsWith('wrapper:rewind-out-said'))), `RED CONTROL the release ${BASE}'s wrapper sends an idle frame unstamped, says no stamp and no rewind_out`, bad.join(' | ') || 'all green');
   } else { skipped++; say(`  - SKIP the release ${BASE} wrapper control: not in this clone`); }
   // normalizer mutants: a scratch copy of src/ with one line changed
   const MSRC = read('src/message-manager.js');
@@ -785,7 +785,7 @@ say('— §8 red controls (U2)');
       const ui = compileAt('src/server/user-input.js', file === 'src/server/user-input.js' ? planted : read('src/server/user-input.js'), { './rewind-requests.js': door });
       bad = roadLaws(MM, { requestRewind: door.requestRewind, rewindOut: door.rewindOut, rewindFenceLeft: door.rewindFenceLeft, createUserInputSender: ui.createUserInputSender });
     } catch (e) { bad = [`threw: ${e.message}`]; }
-    ok(bad.some((b) => b.startsWith(law)), `RED CONTROL «${name}» ⇒ the law «${law}» is red`, bad.join(' | ') || 'all green');
+    ok(verdictOf(bad.some((b) => b.startsWith(law))), `RED CONTROL «${name}» ⇒ the law «${law}» is red`, bad.join(' | ') || 'all green');
   }
 }
 
@@ -1125,7 +1125,7 @@ say('— §9 the page\'s door');
     'rewind-requests': read('src/server/rewind-requests.js'),
   };
   const idGate = /backend(?:\s*(?:\|\||\?\?)\s*'[a-z-]+'\s*\))?\s*[!=]==\s*'(?:codex|claude|opencode|antigravity|shell)'/;
-  ok(Object.values(blocks).every((b) => b.length > 50 && !idGate.test(b)) && idGate.test("x.backend === 'claude'"), 'no backend id decides the door — the button, the view, the ws case, the server door (the checker proven on a planted gate)', Object.entries(blocks).filter(([, b]) => idGate.test(b) || b.length <= 50).map(([k]) => k).join(','));
+  ok(gateOf(Object.values(blocks).every((b) => b.length > 50 && !idGate.test(b))) && verdictOf(idGate.test("x.backend === 'claude'")), 'no backend id decides the door — the button, the view, the ws case, the server door (the checker proven on a planted gate)', Object.entries(blocks).filter(([, b]) => idGate.test(b) || b.length <= 50).map(([k]) => k).join(','));
   // every word the door says, in both dictionaries
   const nb = cr.indexOf("Number.isFinite(msg.content[0].rewindData?.taken)"), mb = cv.indexOf('// «Rewind to here» (B-437e): the hover button');
   if (nb < 0 || mb < 0) bad.push('census:markers');
@@ -1135,10 +1135,10 @@ say('— §9 the page\'s door');
   const missing = keys.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
   ok(nb > 0 && mb > 0 && keys.length >= 28 && missing.length === 0, `every word the door says (${keys.length}) has its zh and ja entry`, missing.join(' | '));
   const css = read('public/chat.css');
-  ok(/\.chat-rewind-btn \{ right: 30px; \}/.test(css) && /@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-open-editor-btn, \.chat-msg > \.chat-fork-btn \{ display: none; \} \}/.test(css)
-    && /@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-rewind-btn \{ display: none; \} \}/.test(css) && /:has\(> \.chat-rewind-btn\)[^{]*\{ padding-right: 56px; \}/.test(css),
+  ok(gateOf(/\.chat-rewind-btn \{ right: 30px; \}/.test(css)) && gateOf(/@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-open-editor-btn, \.chat-msg > \.chat-fork-btn \{ display: none; \} \}/.test(css))
+    && gateOf(/@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-rewind-btn \{ display: none; \} \}/.test(css)) && verdictOf(/:has\(> \.chat-rewind-btn\)[^{]*\{ padding-right: 56px; \}/.test(css)),
     'the CSS: the fork\'s slot (a person\'s message never has a fork button), the words keep the column free, a touch client hides it in its OWN rule (the pinned touch line untouched; the … menu row serves touch)');
-  ok(/rewind: +_s\('<path/.test(read('src/lib/icons.js')), 'the button is an SVG icon (UI_ICONS.rewind)');
+  ok(verdictOf(/rewind: +_s\('<path/.test(read('src/lib/icons.js'))), 'the button is an SVG icon (UI_ICONS.rewind)');
 }
 
 say('— §10 the person\'s goal press behind the same fence (r2682)');
@@ -1163,11 +1163,11 @@ say('— §10 the person\'s goal press behind the same fence (r2682)');
   const set = press(live, { goal: 'ship it' }, { out: now }), clear = press(live, { goal: null }, { out: now }), resume = press(live, { action: 'resume' }, { out: now });
   const refused = (r) => r.typed.length === 0 && r.told.length === 0 && r.goal === 'the old goal' && r.sent.length === 1 && r.sent[0].type === 'error' && r.sent[0].code === 'rewind-out' && r.sent[0].scope === 'goal'
     && r.sent[0].left > 0 && r.sent[0].left <= LIFE10 / 1000 && /the goal was not changed/.test(r.sent[0].error || '');
-  ok(refused(set) && refused(clear) && refused(resume), '§10 WHILE A REWIND IS OUT a person\'s goal set, clear and resume are refused BY NAME (rewind-out, scope goal, the seconds left) — nothing written to the CLI, the goal unchanged, nobody told a goal moved', JSON.stringify(set.sent));
+  ok(gateOf(refused(set)) && gateOf(refused(clear)) && verdictOf(refused(resume)), '§10 WHILE A REWIND IS OUT a person\'s goal set, clear and resume are refused BY NAME (rewind-out, scope goal, the seconds left) — nothing written to the CLI, the goal unchanged, nobody told a goal moved', JSON.stringify(set.sent));
   const status = press(live, { action: 'status' }, { out: now });
-  ok(status.typed.length === 0 && status.sent.length === 1 && status.sent[0].type === 'goal-updated' && /Goal active: the old goal/.test(status.sent[0].statusMsg || ''), '§10 reading the goal (status) is never stopped by the fence', JSON.stringify(status.sent));
+  ok(status.typed.length === 0 && status.sent.length === 1 && status.sent[0].type === 'goal-updated' && verdictOf(/Goal active: the old goal/.test(status.sent[0].statusMsg || '')), '§10 reading the goal (status) is never stopped by the fence', JSON.stringify(status.sent));
   const free = press(live, { goal: 'ship it' }), late = press(live, { goal: 'ship it' }, { out: now - LIFE10 - 1 });
-  ok([free, late].every((r) => r.typed.length === 1 && JSON.parse(r.typed[0]).type === 'set-goal' && r.goal === 'ship it' && r.told.length === 1 && r.told[0].type === 'goal-updated'),
+  ok(verdictOf([free, late].every((r) => r.typed.length === 1 && JSON.parse(r.typed[0]).type === 'set-goal' && r.goal === 'ship it' && r.told.length === 1 && r.told[0].type === 'goal-updated')),
     '§10 with no rewind out — or once its stated minute has passed — the goal press goes through as before (one frame to the CLI, every client told)', JSON.stringify([free.typed, late.typed]));
   // the page: the typed /goal back into a free box, and the words (the composer's and the view's own methods, lifted)
   const CI = read('src/lib/chat-input.js'), CV = read('src/lib/chat-view.js');
@@ -1180,8 +1180,8 @@ say('— §10 the person\'s goal press behind the same fence (r2682)');
   const b3 = box(null, ''), r3 = b3.refusedGoal(); b3._sayRefusedGoal(r3, 42);
   const line = CV.split('\n').find((l) => l.includes("msg.code === 'rewind-out' && msg.scope === 'goal'")) || '';
   const routed = []; new Function('msg', line).call({ _chatInput: { refusedGoal: () => 'restored' }, _sayRefusedGoal: (put, left) => routed.push([put, left]) }, { code: 'rewind-out', scope: 'goal', left: 9 });
-  ok(r1 === 'restored' && b1._textarea.value === '/goal ship it' && b1._pendingGoal === null && b1.cleared && r2 === 'kept' && b2._textarea.value === 'a draft' && r3 === null
-    && /your \/goal is back in the box/.test(toasts[0][0]) && /in 42 s at the latest/.test(toasts[0][0]) && toasts[0][1] === 'error' && /the goal was not changed\. Change it/.test(toasts[1][0]) && JSON.stringify(routed) === '[["restored",9]]',
+  ok(r1 === 'restored' && b1._textarea.value === '/goal ship it' && b1._pendingGoal === null && gateOf(b1.cleared) && r2 === 'kept' && b2._textarea.value === 'a draft' && r3 === null
+    && gateOf(/your \/goal is back in the box/.test(toasts[0][0])) && gateOf(/in 42 s at the latest/.test(toasts[0][0])) && toasts[0][1] === 'error' && gateOf(/the goal was not changed\. Change it/.test(toasts[1][0])) && JSON.stringify(routed) === '[["restored",9]]',
     '§10 THE PAGE: the hub\'s goal refusal ends the «Setting goal…» line and puts the typed /goal back into a FREE box (a box with text is left alone; a status-bar press has none), said with the seconds left', JSON.stringify(toasts));
   const unfenced = liftGoal(anchored(read('src/ws-handler.js'), "            if (fenced) { try { ws.send(JSON.stringify({ type: 'error', code: 'rewind-out', scope: 'goal', sessionId: data.sessionId, left: fenced.left, error: fenced.error, message: fenced.error })); } catch { } break; }\n", '', 'checkpoints: the goal case unfenced'));
   const u = press(unfenced, { goal: 'ship it' }, { out: now });
@@ -1189,4 +1189,4 @@ say('— §10 the person\'s goal press behind the same fence (r2682)');
 }
 
 say(failed ? `\n${failed} FAILED (${passed} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${passed}${skipped ? `; ${skipped} red control SKIPPED — not in this clone` : ''})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

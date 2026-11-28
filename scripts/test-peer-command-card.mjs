@@ -24,7 +24,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -129,7 +129,7 @@ console.log('— the incident shape: SendMessage delivery → card at turn START
   ok('the card is on screen right after command_lifecycle started (not at turn end)', c1.length === 1, `got ${c1.length}`);
   ok('…attributed to the sender by name (origin.name, never the socket path)', c1[0]?.peerFrom === 'Sender Session', c1[0]?.peerFrom);
   ok('…carrying the sender\'s words', (c1[0]?.content || []).map((b) => b.text).join('') === BODY);
-  ok('…emitted as a live create op (a client attached mid-turn sees it)', s._ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message'));
+  ok('…emitted as a live create op (a client attached mid-turn sees it)', verdictOf(s._ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message')));
   p.data(J({ type: 'assistant', message: { id: 'm1', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'on it' }] }, uuid: 'a1', timestamp: new Date().toISOString() }));
   p.data(J(result(M)));
   await sleep(30);
@@ -148,7 +148,7 @@ console.log('— the write races the frame: the record lands AFTER started → t
   p.data(J(started(U)));
   const missed = await (async () => { const end = Date.now() + 15000; while (!(ioOf(IO.closes, jsonl) >= 1) && Date.now() < end) await sleep(10); return ioOf(IO.closes, jsonl) >= 1; })();   // its first attempt READ the transcript and missed
   if (!missed) ok('HARNESS (the write races the frame): the lookup\'s first attempt read the transcript within 15000 ms', false);
-  ok('nothing yet while the transcript has no such record (its first read missed it, no answer kept)', missed && cards(s).length === 0 && !answered(s, U));
+  ok('nothing yet while the transcript has no such record (its first read missed it, no answer kept)', gateOf(missed) && cards(s).length === 0 && !answered(s, U));
   fs.appendFileSync(jsonl, J(peerRecord(U, M)));
   await lookupDone(s, U, 'the write races the frame');
   ok('…and the card appears once the record is written (bounded retries)', cards(s).length === 1, `got ${cards(s).length}`);
@@ -216,7 +216,7 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
     if (label === 'plan approval') {
       // NEGATIVE CONTROL for the "handed nothing" half: the recorder is live on this very session
       px.data(J({ type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'b', cwd: CWD, session_id: 'x', uuid: 'v-' + U }));
-      ok('…NEGATIVE CONTROL: the same recording brain DOES see a record the consumer hands it (the silence is a measurement)', brainLog.some((c) => c[0] === 'noteVcsState'), JSON.stringify(brainLog));
+      ok('…NEGATIVE CONTROL: the same recording brain DOES see a record the consumer hands it (the silence is a measurement)', verdictOf(brainLog.some((c) => c[0] === 'noteVcsState')), JSON.stringify(brainLog));
     }
   }
 }
@@ -235,7 +235,7 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   fs.writeFileSync(jsonl, J({ type: 'user', uuid: 'zzz', message: { role: 'user', content: 'x' } }));
   p.data(J(started('99999999-0000-4000-8000-000000000001')));
   await lookupDone(s, '99999999-0000-4000-8000-000000000001', 'a uuid the transcript never carries');
-  ok('a uuid the transcript never carries gives up after the bounded retries — no card, no throw (its answer kept as none)', cards(s).length === 0 && answered(s, '99999999-0000-4000-8000-000000000001') && s._turnOpen.cmdRecs.get('99999999-0000-4000-8000-000000000001') === null);
+  ok('a uuid the transcript never carries gives up after the bounded retries — no card, no throw (its answer kept as none)', cards(s).length === 0 && gateOf(answered(s, '99999999-0000-4000-8000-000000000001')) && s._turnOpen.cmdRecs.get('99999999-0000-4000-8000-000000000001') === null);
 }
 {
   // a device-fed copy of the JSONL record after the turn-start card: same msg_id, one card
@@ -258,15 +258,15 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
 
 console.log('— wiring pins (the unstaged-wiring class)');
 {
-  ok('the consumer calls the lookup on command_lifecycle started, local sessions only', /msg\.type === 'command_lifecycle' && msg\.state === 'started' && typeof msg\.command_uuid === 'string' && msg\.command_uuid && !session\.host\) peerCommandCard\(msg\.command_uuid\);/.test(consumerSrc));
-  ok('…through the rebuild-gated peer-card writer (feedPeerCard), never processLive', /const po = peerOriginOf\(o, text\);[^\n]*\n\s*feedPeerCard\(session, \{ fromName: po\.name, text: o\.body, msgId: o\.msg_id \|\| null, kind: po\.via \}\);/.test(consumerSrc) && !/_normalizer\.injectPeerCard/.test(consumerSrc));
-  ok('…bounded: a ≤512 KB tail read and a finite retry ladder', /512 \* 1024/.test(consumerSrc) && /const PEER_CMD_RETRY_MS = \[0, 150, 600, 2000\];/.test(consumerSrc));
+  ok('the consumer calls the lookup on command_lifecycle started, local sessions only', verdictOf(/msg\.type === 'command_lifecycle' && msg\.state === 'started' && typeof msg\.command_uuid === 'string' && msg\.command_uuid && !session\.host\) peerCommandCard\(msg\.command_uuid\);/.test(consumerSrc)));
+  ok('…through the rebuild-gated peer-card writer (feedPeerCard), never processLive', gateOf(/const po = peerOriginOf\(o, text\);[^\n]*\n\s*feedPeerCard\(session, \{ fromName: po\.name, text: o\.body, msgId: o\.msg_id \|\| null, kind: po\.via \}\);/.test(consumerSrc)) && !/_normalizer\.injectPeerCard/.test(consumerSrc));
+  ok('…bounded: a ≤512 KB tail read and a finite retry ladder', gateOf(/512 \* 1024/.test(consumerSrc)) && verdictOf(/const PEER_CMD_RETRY_MS = \[0, 150, 600, 2000\];/.test(consumerSrc)));
   const sv = read('server.js');
-  ok('server.js lists command_lifecycle as a HANDLED stream type (the breadcrumb must not cry unhandled for a handled type)', /'command_lifecycle',/.test(sv));
+  ok('server.js lists command_lifecycle as a HANDLED stream type (the breadcrumb must not cry unhandled for a handled type)', verdictOf(/'command_lifecycle',/.test(sv)));
   const mm = read('src/message-manager.js');
-  ok('injectPeerCard notes msgId and refuses a msg_id already on screen', /injectPeerCard\(\{ fromName, text, msgId = null(, resetCredit = null)?(, kind = null)?(, group = null)?(, exitRun = null)?(, channel = null)?(, belongsTo = null)? \}\)/.test(mm) && /if \(msgId && this\._peerMsgIds\.has\(msgId\)\) return null;\s*\n\s*this\._notePeerMsgId\(msgId\);/.test(mm));
+  ok('injectPeerCard notes msgId and refuses a msg_id already on screen', gateOf(/injectPeerCard\(\{ fromName, text, msgId = null(, resetCredit = null)?(, kind = null)?(, group = null)?(, exitRun = null)?(, channel = null)?(, belongsTo = null)? \}\)/.test(mm)) && verdictOf(/if \(msgId && this\._peerMsgIds\.has\(msgId\)\) return null;\s*\n\s*this\._notePeerMsgId\(msgId\);/.test(mm)));
   ok('the user-record and attachment peer sites skip a msg_id already rendered', (mm.match(/origin\.msg_id && this\._peerMsgIds\.has\([a-z]+\.origin\.msg_id\)\) return;/g) || []).length === 2);
-  ok('ci.mjs runs this suite', /'test-peer-command-card'/.test(read('scripts/ci.mjs')));
+  ok('ci.mjs runs this suite', verdictOf(/'test-peer-command-card'/.test(read('scripts/ci.mjs'))));
 }
 
 console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (session._turnBy), decided at the turn\'s init, the REAL consumer');
@@ -335,20 +335,20 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   const askAfter = MM0.turnByForAsk(s._turnBy, s._turnByBackground);
   p.data(J(result(M3)));
   ok(`B-d868 (the delta reads' must): a helper a peer's turn launched still runs when the person's turn asks ⇒ «${askDuring && askDuring.by}» (${askDuring && askDuring.why}), never «you» — also after the set drops and re-names it (${askBlip && askBlip.by}); the set empties ⇒ «${askAfter && askAfter.by}»`,
-    bgPeer.by === 'peer' && askDuring && askDuring.by === 'unrecorded' && askDuring.why === 'background' && askBlip && askBlip.by === 'unrecorded' && askAfter && askAfter.by === 'person', JSON.stringify({ bgPeer, askDuring, askBlip, askAfter, bg: s._turnByBackground }));
+    bgPeer.by === 'peer' && gateOf(askDuring) && askDuring.by === 'unrecorded' && askDuring.why === 'background' && gateOf(askBlip) && askBlip.by === 'unrecorded' && gateOf(askAfter) && askAfter.by === 'person', JSON.stringify({ bgPeer, askDuring, askBlip, askAfter, bg: s._turnByBackground }));
   // a FRESH attach (a hub restart): the set names a task this attach never saw start ⇒ «unknown» ⇒ the person's turn asks «not recorded»
   const fr = mkSession('w-turnby-fresh');
   fr.p.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'bg-old', task_type: 'local_agent' }] }));
   fr.p.data(J({ type: 'frame_stamp', msg_id: 'web-f', cli_uuid: U('f') })); fr.p.data(J(init([U('f')])));
   const askFresh = MM0.turnByForAsk(fr.s._turnBy, fr.s._turnByBackground);
-  ok(`B-d868: after a restart, a helper nobody saw start is «unknown» ⇒ the person's turn asks «${askFresh && askFresh.by}», never «you» (${JSON.stringify(fr.s._turnByBackground)})`, fr.s._turnBy.by === 'person' && askFresh && askFresh.by === 'unrecorded' && JSON.stringify(fr.s._turnByBackground) === '["unknown"]', JSON.stringify({ tb: fr.s._turnBy, bg: fr.s._turnByBackground }));
+  ok(`B-d868: after a restart, a helper nobody saw start is «unknown» ⇒ the person's turn asks «${askFresh && askFresh.by}», never «you» (${JSON.stringify(fr.s._turnByBackground)})`, fr.s._turnBy.by === 'person' && gateOf(askFresh) && askFresh.by === 'unrecorded' && JSON.stringify(fr.s._turnByBackground) === '["unknown"]', JSON.stringify({ tb: fr.s._turnBy, bg: fr.s._turnByBackground }));
   // (8) the REAL record order (the delta read's should): the real 2.1.312's own task-notification turn — init, the model, its
   // result, no user record on stdout (scripts/fixtures/claude-cli/2.1.312-frames.jsonl lines 23–25) ⇒ «not recorded»
   const real = fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.312-frames.jsonl'), 'utf8').split('\n').slice(22, 24);
   for (const l of real) p.data(l + '\n');
   const realTask = said(s);
   p.data(J(result(M3)));
-  ok(`B-d868: the real CLI's own task-notification turn (init → the model, no stdout user record) reads «${realTask.by}» (${realTask.source}) — honest, never a guess`, realTask.by === 'unrecorded' && realTask.source === 'no-record' && real.length === 2 && /"subtype":"init"/.test(real[0]), JSON.stringify(realTask));
+  ok(`B-d868: the real CLI's own task-notification turn (init → the model, no stdout user record) reads «${realTask.by}» (${realTask.source}) — honest, never a guess`, realTask.by === 'unrecorded' && realTask.source === 'no-record' && real.length === 2 && verdictOf(/"subtype":"init"/.test(real[0])), JSON.stringify(realTask));
   const PURE2 = [MM0.turnByForAsk({ by: 'person' }, []), MM0.turnByForAsk({ by: 'person' }, ['person']), MM0.turnByForAsk({ by: 'person' }, ['peer|N']), MM0.turnByForAsk({ by: 'peer', name: 'N' }, ['peer|N']), MM0.turnByForAsk({ by: 'peer', name: 'B' }, ['peer|A']), MM0.turnByForAsk({ by: 'person' }, ['unknown']), MM0.turnByForAsk(null, ['peer|N'])];
   ok(`B-d868 PURE turnByForAsk: no background, or only this opener's (its kind AND name) ⇒ the opener; another opener's, another peer's, or an unknown one ⇒ «not recorded» (background); no fact ⇒ null (${JSON.stringify(PURE2)})`,
     JSON.stringify(PURE2) === '[{"by":"person"},{"by":"person"},{"by":"unrecorded","why":"background"},{"by":"peer","name":"N"},{"by":"unrecorded","why":"background"},{"by":"unrecorded","why":"background"},null]', JSON.stringify(PURE2));
@@ -419,8 +419,8 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   // record it sees) and the device stream (claudeSideEffects: the records the parse has not seen); the parse holds no inline twin
   const SBsrc = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8');
   ok('B-d868: ONE opener for both feeds — the parse feeds session-brain\'s noteTurnOpener (and its attach resets it), the device feed\'s claudeSideEffects feeds the same; the lookups keep a VERDICT; one transcript lookup in the parse',
-    CSsrc.includes("try { TO.noteTurnOpener(session, msg, 'parse'); } catch { }") && CSsrc.includes("try { require('../session-brain.js').noteTurnAttach(session); } catch { }") && CSsrc.includes('TO.noteTurnCmdRecord(session, cmdUuid, rec);')
-    && !/personUuids|noteTurnInit|turnOpen\./.test(CSsrc) && SBsrc.includes("    openerFed = true; try { noteTurnOpener(session, msg, 'device'); } catch { }") && SBsrc.includes('  st.cmdRecs.set(cmdUuid, v);') && (CSsrc.match(/findSessionJsonlPath\(/g) || []).length === 1);
+    gateOf(CSsrc.includes("try { TO.noteTurnOpener(session, msg, 'parse'); } catch { }")) && gateOf(CSsrc.includes("try { require('../session-brain.js').noteTurnAttach(session); } catch { }")) && gateOf(CSsrc.includes('TO.noteTurnCmdRecord(session, cmdUuid, rec);'))
+    && !/personUuids|noteTurnInit|turnOpen\./.test(CSsrc) && gateOf(SBsrc.includes("    openerFed = true; try { noteTurnOpener(session, msg, 'device'); } catch { }")) && gateOf(SBsrc.includes('  st.cmdRecs.set(cmdUuid, v);')) && (CSsrc.match(/findSessionJsonlPath\(/g) || []).length === 1);
   // PARITY, record for record: the same stream through the parse alone, the device feed alone, and the two interleaved (each
   // record first through one feed, then the other — the opener takes it once)
   const SB = require(path.join(REPO, 'src/server/session-brain.js'));
@@ -459,7 +459,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   // copy follows: the turn is decided exactly as the parse alone decides it)
   const beltOf = (x) => x.replace(/person/g, 'unrecorded');
   ok(`B-d868 PARITY (as-if-must (2), restated to B-3336's belt): the same stream through the parse alone and both interleaved gives the same opener record for record; the device feed alone the same — but an init the parse never brings never the person's (${fP.join(' · ')})`,
-    JSON.stringify(fD) === JSON.stringify(fP.map(beltOf)) && JSON.stringify(fM) === JSON.stringify(fP) && fP[1].startsWith('person|') && fP[5].startsWith('unrecorded|') && fP[7].startsWith('task|') && fP[12].startsWith('unrecorded|') && fP[15].startsWith('person|')
+    JSON.stringify(fD) === JSON.stringify(fP.map(beltOf)) && JSON.stringify(fM) === JSON.stringify(fP) && gateOf(fP[1].startsWith('person|')) && gateOf(fP[5].startsWith('unrecorded|')) && gateOf(fP[7].startsWith('task|')) && gateOf(fP[12].startsWith('unrecorded|')) && gateOf(fP[15].startsWith('person|'))
       && !fD.some((x) => x.includes('person')) && viaDev._turnBy.source === 'device-init', JSON.stringify({ fP, fD, fM, devSource: viaDev._turnBy.source }));
   const brainCopy = (src, name) => MU.load('src/server/session-brain.js', src, name);
   // 主开发's as-if-must (12:09Z): A LATE BACKLOG FROM THE DEVICE FEED NEVER TAKES AN OLD TURN'S START AGAIN. (a) the stream's own
@@ -684,7 +684,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     const it = inside(brainCopy(placeIn(SBsrc), 'opener-throw'));
     console.log('  B-3336 the opener\'s own throw (the facts judged): ' + JSON.stringify(it));
     ok(`B-3336: a throw inside the opener is SAID once per session (${it.said.length} line) and counted (${it.faults}) — nothing escapes to its callers' empty catches`,
-      it.escaped === null && it.faults === 3 && it.said.length === 1 && /the turn opener failed on a result record \(parse\): a placed throw inside the opener/.test(it.said[0]), JSON.stringify(it));
+      it.escaped === null && it.faults === 3 && it.said.length === 1 && verdictOf(/the turn opener failed on a result record \(parse\): a placed throw inside the opener/.test(it.said[0])), JSON.stringify(it));
     const i0 = inside(brainCopy(anchored(placeIn(SBsrc), '    if (session._turnOpenerFaults === 1) console.warn(', '    if (false) console.warn(', 'B-3336 the opener says its fault'), 'opener-throw-unsaid'));
     ok(`CONTROL (B-3336): the copy whose opener does not say its fault leaves it unsaid (${i0.said.length} lines) — the leg goes red`, i0.said.length === 0 && i0.escaped === null, JSON.stringify(i0));
   }
@@ -730,7 +730,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     const dt = devThrow(brainCopy(placeDev(SBsrc), 'device-placed-throw'));
     console.log('  B-3336 device placed throw (the facts judged): ' + JSON.stringify(dt));
     ok(`B-3336 THE DEVICE FEED'S HAND-OVER: a result whose device handling THREW before the opener's call still ends the turn (live ${dt.before.live} → ${dt.after.live}, ${dt.after.source}) and the failure is still said`,
-      dt.before.live === true && dt.after.live === false && dt.after.source === 'turn-ended' && /device side-effects failed: a placed throw/.test(dt.said), JSON.stringify(dt));
+      dt.before.live === true && dt.after.live === false && dt.after.source === 'turn-ended' && verdictOf(/device side-effects failed: a placed throw/.test(dt.said)), JSON.stringify(dt));
     const d0 = devThrow(brainCopy(anchored(placeDev(SBsrc), "    if (!openerFed) { try { noteTurnOpener(session, msg, 'device'); } catch { } }", '', 'B-3336 the device catch hands the record'), 'device-placed-throw-no-guard'));
     ok(`CONTROL (B-3336): the same placed throw in the copy without the device catch's hand-over — the opener never hears the result: live ${d0.after.live}`, d0.after.live === true, JSON.stringify(d0));
   }
@@ -780,7 +780,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     const f1 = fuzz(brainCopy(noUpgrade(SBsrc), 'fuzz-no-upgrade'));
     console.log(`  B-3336 fuzz controls (the facts judged): without the once-memory ${f0.bad.length} mismatches${f0.bad.length ? ' — first ' + JSON.stringify(f0.bad[0]) : ''}; without the parse copy's decision ${f1.bad.length}${f1.bad.length ? ' — first ' + JSON.stringify(f1.bad[0]) : ''}`);
     ok(`CONTROL (B-3336): the copy without the once-memory — the fuzz names mismatches at its level points (${f0.bad.length})`, f0.bad.length > 0, JSON.stringify(f0.bad.slice(0, 1)));
-    ok(`CONTROL (B-3336, r847): the copy without the parse copy's decision — the fuzz names mismatches at its level points (${f1.bad.length}): a person's turn the device won the race for left «not recorded»`, f1.bad.length > 0 && f1.bad.some((x) => x.want.includes('"by":"person"') && x.got.includes('"by":"unrecorded"')), JSON.stringify(f1.bad.slice(0, 1)));
+    ok(`CONTROL (B-3336, r847): the copy without the parse copy's decision — the fuzz names mismatches at its level points (${f1.bad.length}): a person's turn the device won the race for left «not recorded»`, f1.bad.length > 0 && verdictOf(f1.bad.some((x) => x.want.includes('"by":"person"') && x.got.includes('"by":"unrecorded"'))), JSON.stringify(f1.bad.slice(0, 1)));
   }
   // 4. THE COUPLING PIN — the group hand-over press refuses a conversation on another machine (the ONLY road with two feeds) WITH ITS
   //    REASON, and that refusal is lifted only together with a stream sequence; the readers of the turn-live flag are a NAMED list,
@@ -797,7 +797,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     const hogNode = fnNamed(require(path.join(REPO, 'node_modules/acorn')).parse(SH, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true }), 'handOverGroups');
     const hog = hogNode ? SH.slice(hogNode.start, hogNode.end) : '';
     ok('B-3336 COUPLING: the group hand-over press (handOverGroups) refuses every conversation on another machine by name, BEFORE its spend gate — and its line says it is lifted only together with a stream sequence (row B-3336\'s design (B))',
-      hog.length > 500 && SH.split(refusal).length === 2 && hog.includes(refusal) && hog.includes('spendGuard.authorize(') && hog.indexOf(refusal) < hog.indexOf('spendGuard.authorize(') && /B-3336 COUPLING[^\n]*lifted ONLY together with a stream sequence/.test(SH), { bodyBytes: hog.length, inBody: hog.includes(refusal), refusalAt: hog.indexOf(refusal), gateAt: hog.indexOf('spendGuard.authorize(') });
+      hog.length > 500 && SH.split(refusal).length === 2 && gateOf(hog.includes(refusal)) && gateOf(hog.includes('spendGuard.authorize(')) && hog.indexOf(refusal) < hog.indexOf('spendGuard.authorize(') && verdictOf(/B-3336 COUPLING[^\n]*lifted ONLY together with a stream sequence/.test(SH)), { bodyBytes: hog.length, inBody: hog.includes(refusal), refusalAt: hog.indexOf(refusal), gateAt: hog.indexOf('spendGuard.authorize(') });
     const TURN_LIVE_READERS = Object.freeze({   // file → [reads, can it start a turn, what]
       'src/server/user-input.js': [1, true, 'the group hand-over (not_mid_turn) — behind the press\'s remote refusal'],
       'src/adapters/claude-code.js': [1, false, 'a Stop\'s settle stamp (_stopAskedAt) — a label, never a turn'],
@@ -813,19 +813,19 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     console.log('  B-3336 turn-live readers (the facts judged): ' + JSON.stringify(found));
     ok(`B-3336 COUPLING: the readers of the turn-live flag are the named list (${Object.entries(TURN_LIVE_READERS).map(([f, [, st, w]]) => `${f.split('/').pop()} — ${st ? 'CAN START A TURN' : 'a label'}: ${w}`).join('; ')})`, wrong.length === 0 && srcFiles.length > 100, wrong);
     ok('B-3336 COUPLING: the readers that can start a turn are exactly the group hand-over — the one behind the remote refusal', JSON.stringify(Object.entries(TURN_LIVE_READERS).filter(([, [, st]]) => st).map(([f]) => f)) === '["src/server/user-input.js"]'
-      && /if \(session\._turnLive !== true\) return \{ ok: false, code: 'not_mid_turn'/.test(texts['src/server/user-input.js'] || ''), 'the starting reader moved');
+      && verdictOf(/if \(session\._turnLive !== true\) return \{ ok: false, code: 'not_mid_turn'/.test(texts['src/server/user-input.js'] || '')), 'the starting reader moved');
     const planted = judgeReaders(readersOf({ ...texts, 'src/server/zz-new-reader.js': "function go(session) { if (session?._turnLive) startTurn(session); const url = 'http://x'; if (session['_turnLive']) go2(); const { _turnLive } = session; }\n" }));
-    ok('CONTROL (B-3336): a planted NEW reader of the turn-live flag is red BY NAME — the shapes counted besides `.` (`?.`, a bracket, a one-line destructuring, after a `://` string)', planted.some((w) => /zz-new-reader\.js: 3 read\(s\) of the turn-live flag — a NEW reader/.test(w)), planted);
+    ok('CONTROL (B-3336): a planted NEW reader of the turn-live flag is red BY NAME — the shapes counted besides `.` (`?.`, a bracket, a one-line destructuring, after a `://` string)', verdictOf(planted.some((w) => /zz-new-reader\.js: 3 read\(s\) of the turn-live flag — a NEW reader/.test(w))), planted);
     // …and the turn-starting reader has ONE caller: the press — a second caller of the group hand-over origin would pass by the remote refusal
     const callersOf = (texts) => Object.entries(texts).flatMap(([f, t]) => (t.match(/origin:\s*'group-handover'/g) || []).map(() => f));
     const cal = callersOf(texts);
-    ok(`B-3336 COUPLING: the group hand-over origin has ONE caller, the press behind the remote refusal (${cal.join(', ')})`, JSON.stringify(cal) === '["src/server/stash-handover.js"]' && hog.includes("origin: 'group-handover'"), cal);
+    ok(`B-3336 COUPLING: the group hand-over origin has ONE caller, the press behind the remote refusal (${cal.join(', ')})`, JSON.stringify(cal) === '["src/server/stash-handover.js"]' && verdictOf(hog.includes("origin: 'group-handover'")), cal);
     const cal2 = callersOf({ ...texts, 'src/server/zz-second-caller.js': "send(id, text, { origin: 'group-handover', steer: true });\n" });
-    ok('CONTROL (B-3336): a planted second caller of the group hand-over origin is named', cal2.includes('src/server/zz-second-caller.js'), cal2);
+    ok('CONTROL (B-3336): a planted second caller of the group hand-over origin is named', verdictOf(cal2.includes('src/server/zz-second-caller.js')), cal2);
     // the parse's hand-over is ONCE: the flag set right before the opener's call, the catch guarded by it
     const CSt = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
     const oncePin = (t) => /openerFed = true; try \{ TO\.noteTurnOpener\(session, msg, 'parse'\); \} catch \{ \}/.test(t) && /if \(parsedMsg && !openerFed && parsedMsg\.type !== 'command_lifecycle'\) \{ try \{ TO\.noteTurnOpener\(session, parsedMsg, 'parse'\); \} catch \{ \} \}/.test(t);
-    ok('B-3336 the parse\'s hand-over is ONCE: `openerFed` is set right before the opener\'s call, and the catch hands a record only when it was not (never a command_lifecycle, whose fact waits on the skipped lookup)', oncePin(CSt), 'the hand-over\'s once-flag moved');
+    ok('B-3336 the parse\'s hand-over is ONCE: `openerFed` is set right before the opener\'s call, and the catch hands a record only when it was not (never a command_lifecycle, whose fact waits on the skipped lookup)', verdictOf(oncePin(CSt)), 'the hand-over\'s once-flag moved');
     ok('CONTROL (B-3336): the copy whose catch is not guarded by the once-flag fails the pin', !oncePin(anchored(CSt, 'if (parsedMsg && !openerFed && ', 'if (parsedMsg && ', 'B-3336 the once-flag')), 'the pin did not see the plant');
   }
   // (as-if-must (1)) AFTER A RE-ATTACH THE OPENER IS UNKNOWN until a turn starts in its sight: the person's turn, then a fresh
@@ -899,4 +899,4 @@ console.log('— B-02a3: the consumer\'s facts for the group press — the live 
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -48,7 +48,7 @@ const { TaskGroupManager } = require('../src/task-groups.js');
 const { setupAgentRoutes } = require('../src/agent-routes.js');
 
 let failed = 0, passed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -90,7 +90,7 @@ const pureLegs = (m) => {
   // a stored value of the WRONG TYPE is the default — Number(true) = 1 would
   // nudge every session holding a single item; a numeric string still counts
   const typeLeg = (m) => [true, false, {}, [], [5], ' ', () => 3].every((v) => m.nudgeThreshold(v) === 20) && m.nudgeThreshold('7') === 7 && m.nudgeThreshold(' 12 ') === 12 && m.nudgeThreshold('0') === 0;
-  check('nudgeThreshold: boolean / object / array / function / whitespace ⇒ 20; a numeric string counts', typeLeg(sel), [true, false, {}, [], [5], ' '].map((v) => sel.nudgeThreshold(v)).join(','));
+  check('nudgeThreshold: boolean / object / array / function / whitespace ⇒ 20; a numeric string counts', verdictOf(typeLeg(sel)), [true, false, {}, [], [5], ' '].map((v) => sel.nudgeThreshold(v)).join(','));
   const coerce = loadPatched('src/backlog-select.js', [["else if (typeof v === 'string' && v.trim() !== '') n = Number(v);\n  else return NUDGE_DEFAULT;", "else if (v === undefined || v === null || v === '') return NUDGE_DEFAULT;\n  else n = Number(v);"]]);
   check('negative control: a copy that coerces any type with Number() FAILS the type leg', !typeLeg(coerce) && coerce.nudgeThreshold(true) === 1);
   const both = [{ id: 'B-0001', status: 'open', addedBy: 'k', claimedBy: ['k'] }, { id: 'B-0002', status: 'open', addedBy: 'k', claimedBy: [] }, { id: 'B-0003', status: 'open', addedBy: 'x', claimedBy: ['k'] }, { id: 'B-0004', status: 'done', addedBy: 'k', claimedBy: ['k'] }, { id: 'B-0005', status: 'open', addedBy: 'x', claimedBy: ['y'] }];
@@ -98,16 +98,16 @@ const pureLegs = (m) => {
   check('ownedOpen with no session key = nothing', sel.ownedOpen(both, null).length === 0);
   const r = pureLegs(sel);
   check('below the threshold (19 < 20) ⇒ null', r.below === null);
-  check('at the threshold ⇒ a nudge {owned, stale, oldest, threshold}', r.at && r.at.owned === 20 && r.at.threshold === 20, JSON.stringify(r.at));
-  check('stale = items older than 14 d (ages 0,2,…,38 d ⇒ 12 older than 14)', r.at && r.at.stale === 12, r.at && r.at.stale);
-  check('oldest = the 3 oldest, oldest first, with whole-day ages', r.at && r.at.oldest.map((o) => `${o.id}:${o.ageDays}`).join(',') === 'B-a019:38,B-a018:36,B-a017:34', r.at && JSON.stringify(r.at.oldest));
-  check('an item PARKED by the session (addedBy, not claimed) counts as held', r.addedBy && r.addedBy.owned === 20);
+  check('at the threshold ⇒ a nudge {owned, stale, oldest, threshold}', gateOf(r.at) && r.at.owned === 20 && r.at.threshold === 20, JSON.stringify(r.at));
+  check('stale = items older than 14 d (ages 0,2,…,38 d ⇒ 12 older than 14)', gateOf(r.at) && r.at.stale === 12, r.at && r.at.stale);
+  check('oldest = the 3 oldest, oldest first, with whole-day ages', gateOf(r.at) && r.at.oldest.map((o) => `${o.id}:${o.ageDays}`).join(',') === 'B-a019:38,B-a018:36,B-a017:34', r.at && JSON.stringify(r.at.oldest));
+  check('an item PARKED by the session (addedBy, not claimed) counts as held', gateOf(r.addedBy) && r.addedBy.owned === 20);
   check('threshold 0 = never, however many are held', r.zero === null);
   check('text ≤ 500 B with 50 items of 500-char CJK text', bytes(r.bigText) <= 500, `${bytes(r.bigText)} B`);
   const txt = sel.nudgeText(r.at, '');
-  check('the text names the count, the stale count and the oldest ids', /^You hold 20 open backlog items in this group \(12 older than 14 d; oldest: \[B-a019\] 38d "o item 19", \[B-a018\] 36d/.test(txt), txt);
-  check('the text names the three cleanup verbs', txt.includes('`vibespace-task backlog-done <id>`') && txt.includes('`backlog-drop <id>`') && txt.includes('`backlog-edit <id> --detail`'), txt);
-  check('the --group prefix rides the command', sel.nudgeText(r.at, '--group g-1 ').includes('`vibespace-task --group g-1 backlog-done <id>`'));
+  check('the text names the count, the stale count and the oldest ids', verdictOf(/^You hold 20 open backlog items in this group \(12 older than 14 d; oldest: \[B-a019\] 38d "o item 19", \[B-a018\] 36d/.test(txt)), txt);
+  check('the text names the three cleanup verbs', gateOf(txt.includes('`vibespace-task backlog-done <id>`')) && gateOf(txt.includes('`backlog-drop <id>`')) && verdictOf(txt.includes('`backlog-edit <id> --detail`')), txt);
+  check('the --group prefix rides the command', verdictOf(sel.nudgeText(r.at, '--group g-1 ').includes('`vibespace-task --group g-1 backlog-done <id>`')));
   check('a multi-line item text is one line in the paragraph', !sel.nudgeText(sel.backlogNudge(owned(3, 'k', { text: 'a\nb\n\nc' }), 'k', { threshold: 3, nowMs: NOW }), '').includes('\n'));
   check('nudgeText(null) = ""', sel.nudgeText(null) === '');
   // nudgeTextAll — the several-groups form
@@ -115,9 +115,9 @@ const pureLegs = (m) => {
   const e1 = ent(25, 'g-a'), e2 = ent(30, 'g-b');
   check('nudgeTextAll of ONE entry = nudgeText of it (one wording)', sel.nudgeTextAll([e1]) === sel.nudgeText(e1.nudge, e1.gid));
   const two = sel.nudgeTextAll([e1, e2]);
-  check('nudgeTextAll of two = ONE paragraph naming both groups, the total, the verbs', /^You hold 55 open backlog items across 2 Task Groups/.test(two) && two.includes('g-a: 25 (') && two.includes('g-b: 30 (') && two.includes('`vibespace-task --group <group> backlog-done <id>`') && !two.includes('\n'), two);
+  check('nudgeTextAll of two = ONE paragraph naming both groups, the total, the verbs', gateOf(/^You hold 55 open backlog items across 2 Task Groups/.test(two)) && gateOf(two.includes('g-a: 25 (')) && gateOf(two.includes('g-b: 30 (')) && gateOf(two.includes('`vibespace-task --group <group> backlog-done <id>`')) && !two.includes('\n'), two);
   const many = sel.nudgeTextAll(Array.from({ length: 40 }, (_, i) => ent(25, `g-${'x'.repeat(40)}-${i}`)));
-  check('nudgeTextAll stays ≤ 500 B with 40 long-named groups (groups collapse into "+N more")', bytes(many) <= 500 && /\+\d+ more groups/.test(many), `${bytes(many)} B ${many}`);
+  check('nudgeTextAll stays ≤ 500 B with 40 long-named groups (groups collapse into "+N more")', bytes(many) <= 500 && verdictOf(/\+\d+ more groups/.test(many)), `${bytes(many)} B ${many}`);
   check('nudgeTextAll of nothing / null nudges = ""', sel.nudgeTextAll([]) === '' && sel.nudgeTextAll([{ nudge: null }]) === '');
   // NEGATIVE CONTROLS
   const noAddedBy = pureLegs(loadPatched('src/backlog-select.js', [["if (!claimed && b.addedBy !== sessionKey) continue;", 'if (!claimed) continue;']]));
@@ -190,17 +190,17 @@ const routeLegs = (mod) => {
   const reads = [];
   mkRoutes({ setupAgentRoutes }, reads);
   const r = routeLegs({ setupAgentRoutes });
-  check('add by a session holding 24 (→ 25) answers with nudge {text, owned, stale, threshold} beside the item', r.add.code === 200 && r.add.out.item && r.add.out.nudge && r.add.out.nudge.owned === 25 && r.add.out.nudge.threshold === 20 && typeof r.add.out.nudge.stale === 'number' && /^You hold 25 open backlog items/.test(r.add.out.nudge.text), JSON.stringify(r.add.out.nudge));
-  check('the route text IS nudgeText of the stored backlog (one wording)', r.add.out.nudge && r.add.out.nudge.text === sel.nudgeText(sel.backlogNudge(r.afterAdd, 'claude:big', { threshold: 20 }), ''), r.add.out.nudge && r.add.out.nudge.text);
+  check('add by a session holding 24 (→ 25) answers with nudge {text, owned, stale, threshold} beside the item', r.add.code === 200 && gateOf(r.add.out.item) && gateOf(r.add.out.nudge) && r.add.out.nudge.owned === 25 && r.add.out.nudge.threshold === 20 && typeof r.add.out.nudge.stale === 'number' && verdictOf(/^You hold 25 open backlog items/.test(r.add.out.nudge.text)), JSON.stringify(r.add.out.nudge));
+  check('the route text IS nudgeText of the stored backlog (one wording)', gateOf(r.add.out.nudge) && r.add.out.nudge.text === sel.nudgeText(sel.backlogNudge(r.afterAdd, 'claude:big', { threshold: 20 }), ''), r.add.out.nudge && r.add.out.nudge.text);
   check('edit carries the nudge', r.edit.code === 200 && !!r.edit.out.nudge);
-  check('claim carries the nudge (26 held)', r.claim.code === 200 && r.claim.out.nudge && r.claim.out.nudge.owned === 26, JSON.stringify(r.claim.out.nudge));
+  check('claim carries the nudge (26 held)', r.claim.code === 200 && gateOf(r.claim.out.nudge) && r.claim.out.nudge.owned === 26, JSON.stringify(r.claim.out.nudge));
   check('unclaim never nudges', r.unclaim.code === 200 && !('nudge' in r.unclaim.out));
   check('show never nudges', r.show.code === 200 && !('nudge' in r.show.out));
   check('done never nudges', r.done.code === 200 && !('nudge' in r.done.out));
   check('drop never nudges', r.drop.code === 200 && !('nudge' in r.drop.out));
   check('a session holding 3 (→ 4) gets no nudge', r.small.code === 200 && !('nudge' in r.small.out));
-  check('an explicit --group puts the prefix in the commands', r.groupArg.out.nudge && r.groupArg.out.nudge.text.includes(`vibespace-task --group ${g.id} backlog-done <id>`), r.groupArg.out.nudge && r.groupArg.out.nudge.text);
-  check('serverSetting 5 ⇒ the small session (5 held) is nudged with threshold 5', r.small5.out.nudge && r.small5.out.nudge.threshold === 5 && r.small5.out.nudge.owned === 5, JSON.stringify(r.small5.out.nudge));
+  check('an explicit --group puts the prefix in the commands', gateOf(r.groupArg.out.nudge) && verdictOf(r.groupArg.out.nudge.text.includes(`vibespace-task --group ${g.id} backlog-done <id>`)), r.groupArg.out.nudge && r.groupArg.out.nudge.text);
+  check('serverSetting 5 ⇒ the small session (5 held) is nudged with threshold 5', gateOf(r.small5.out.nudge) && r.small5.out.nudge.threshold === 5 && r.small5.out.nudge.owned === 5, JSON.stringify(r.small5.out.nudge));
   check('serverSetting 100 ⇒ no nudge at 25', !('nudge' in r.big100.out));
   check('serverSetting 0 ⇒ off', !('nudge' in r.big0.out));
   // NEGATIVE CONTROLS
@@ -233,16 +233,16 @@ const reminderLegs = (TGM) => {
 {
   const r = reminderLegs(TaskGroupManager);
   const last = r.over[r.over.length - 1];
-  check('over the threshold the note ENDS with the nudge paragraph, one line', /^You hold 25 open backlog items in this group/.test(last) && !last.includes('\n'), last);
-  check('the paragraph comes after the count line', /^\(group backlog holds 25 open/.test(r.over[r.over.length - 2]), r.over[r.over.length - 2]);
-  check('multi-group gid prefix rides the reminder too', r.overGid[r.overGid.length - 1].includes(`vibespace-task --group ${r.gid} backlog-done`));
+  check('over the threshold the note ENDS with the nudge paragraph, one line', gateOf(/^You hold 25 open backlog items in this group/.test(last)) && !last.includes('\n'), last);
+  check('the paragraph comes after the count line', verdictOf(/^\(group backlog holds 25 open/.test(r.over[r.over.length - 2])), r.over[r.over.length - 2]);
+  check('multi-group gid prefix rides the reminder too', verdictOf(r.overGid[r.overGid.length - 1].includes(`vibespace-task --group ${r.gid} backlog-done`)));
   check('the store setting (getSetting) is honoured: 30 ⇒ no paragraph at 25', !r.settingHigh.some((l) => /^You hold/.test(l)));
-  check('an explicit nudgeAt overrides the setting', /^You hold 25/.test(r.override[r.override.length - 1]));
+  check('an explicit nudgeAt overrides the setting', verdictOf(/^You hold 25/.test(r.override[r.override.length - 1])));
   check('under the threshold no paragraph', !r.under.some((l) => /^You hold/.test(l)), r.under.join(' | '));
-  check('renderContext (a full context injection) carries it for a session over the threshold', (() => {
+  check('renderContext (a full context injection) carries it for a session over the threshold', verdictOf((() => {
     r.store.update(r.gid, { backlog: owned(22, 'claude:me', { prefix: 'f' }) });
     return /You hold 22 open backlog items/.test(r.store.renderContext(r.gid, { sessionKey: 'claude:me' }));
-  })());
+  })()));
   const cut = reminderLegs(loadPatched('src/task-groups.js', [['      if (e) out.push(nudgeTextAll([e]));\n', '']]).TaskGroupManager);
   check('negative control: a copy without the push FAILS the over-threshold leg', !/^You hold/.test(cut.over[cut.over.length - 1]));
 }
@@ -311,15 +311,15 @@ const turnLegs = async (routesMod, TGM) => {
 {
   const r = await turnLegs({ setupAgentRoutes }, TaskGroupManager);
   check('SessionStart (task-context) carries the paragraph once', paragraphs(r.tc) === 1, paragraphs(r.tc));
-  check('a quiet prompt carries it (turn 1) — inside the per-turn reminder, which still names the tools', paragraphs(r.p1) === 1 && r.p1.includes('Tools on PATH') && /^<vibespace-reminder>[\s\S]*You hold 25 open backlog items[\s\S]*<\/vibespace-reminder>$/.test(r.p1), r.p1);
+  check('a quiet prompt carries it (turn 1) — inside the per-turn reminder, which still names the tools', paragraphs(r.p1) === 1 && gateOf(r.p1.includes('Tools on PATH')) && verdictOf(/^<vibespace-reminder>[\s\S]*You hold 25 open backlog items[\s\S]*<\/vibespace-reminder>$/.test(r.p1)), r.p1);
   check('…and again on turn 2 (every turn, not once per session)', paragraphs(r.p2) === 1, r.p2);
-  check('a diff turn carries the update AND the paragraph', r.p3.includes('<vibespace-task-update>') && paragraphs(r.p3) === 1, r.p3.slice(0, 200));
-  check('threshold 0 (via serverSetting) ⇒ no paragraph on the turn', paragraphs(r.off) === 0 && r.off.includes('Tools on PATH'), r.off);
+  check('a diff turn carries the update AND the paragraph', gateOf(r.p3.includes('<vibespace-task-update>')) && paragraphs(r.p3) === 1, r.p3.slice(0, 200));
+  check('threshold 0 (via serverSetting) ⇒ no paragraph on the turn', paragraphs(r.off) === 0 && verdictOf(r.off.includes('Tools on PATH')), r.off);
   check('threshold 30 ⇒ none at 25', paragraphs(r.high) === 0);
   check('the task tool off ⇒ none', paragraphs(r.taskOff) === 0, r.taskOff);
-  check('codex first prompt (the full delivery) carries it exactly once — never twice', paragraphs(r.cx1) === 1 && r.cx1.includes('<vibespace-task-context>'), paragraphs(r.cx1));
+  check('codex first prompt (the full delivery) carries it exactly once — never twice', paragraphs(r.cx1) === 1 && verdictOf(r.cx1.includes('<vibespace-task-context>')), paragraphs(r.cx1));
   check('codex second prompt carries it too', paragraphs(r.cx2) === 1);
-  check('two groups over ⇒ ONE aggregated paragraph per turn', paragraphs(r.two) === 1 && /You hold 50 open backlog items across 2 Task Groups/.test(r.two), r.two);
+  check('two groups over ⇒ ONE aggregated paragraph per turn', paragraphs(r.two) === 1 && verdictOf(/You hold 50 open backlog items across 2 Task Groups/.test(r.two)), r.two);
   check('a session holding 3 ⇒ none', paragraphs(r.small) === 0);
   // NEGATIVE CONTROLS — the pre-fix route (the nudge rode only full contexts)
   const pre = await turnLegs(loadPatched('src/agent-routes.js', [
@@ -339,9 +339,9 @@ const sizeLegs = (routesMod, TGM) => {
 };
 {
   const r = sizeLegs({ setupAgentRoutes }, TaskGroupManager);
-  for (const g of [1, 2, 3]) check(`${g} group(s) × 60 owned CJK items: task-context ≤ 9600 B UNTRIMMED with exactly ONE paragraph`, bytes(r[g]) <= 9600 && !r[g].includes('context trimmed') && paragraphs(r[g]) === 1 && r[g].trimEnd().endsWith('</vibespace-task-context>'), `${bytes(r[g])} B, ${paragraphs(r[g])} paragraph(s)`);
-  check('the multi-group paragraph names every group (aggregated)', /across 3 Task Groups/.test(r[3]));
-  check('5 groups: task-context is capped inline (≤ 9600 B, the trim pointer names show --full)', bytes(r[5]) <= 9600 && r[5].includes('context trimmed to stay inline — run `vibespace-task --group <id> show --full`'), `${bytes(r[5])} B`);
+  for (const g of [1, 2, 3]) check(`${g} group(s) × 60 owned CJK items: task-context ≤ 9600 B UNTRIMMED with exactly ONE paragraph`, bytes(r[g]) <= 9600 && !r[g].includes('context trimmed') && paragraphs(r[g]) === 1 && verdictOf(r[g].trimEnd().endsWith('</vibespace-task-context>')), `${bytes(r[g])} B, ${paragraphs(r[g])} paragraph(s)`);
+  check('the multi-group paragraph names every group (aggregated)', verdictOf(/across 3 Task Groups/.test(r[3])));
+  check('5 groups: task-context is capped inline (≤ 9600 B, the trim pointer names show --full)', bytes(r[5]) <= 9600 && verdictOf(r[5].includes('context trimmed to stay inline — run `vibespace-task --group <id> show --full`')), `${bytes(r[5])} B`);
   // NEGATIVE CONTROLS
   const perGroup = sizeLegs({ setupAgentRoutes }, loadPatched('src/task-groups.js', [
     ['isLiveClaim, highBudget, mineBudget, nudge: false })', 'isLiveClaim, highBudget, mineBudget })'],
@@ -349,7 +349,7 @@ const sizeLegs = (routesMod, TGM) => {
   ]).TaskGroupManager);
   check('negative control: the pre-fix per-group paragraph FAILS the one-paragraph leg (2 groups ⇒ 2)', paragraphs(perGroup[2]) === 2, paragraphs(perGroup[2]));
   const noMine = sizeLegs({ setupAgentRoutes }, loadPatched('src/task-groups.js', [['const MINE_LINE_TEXT_BYTES = 1500;', 'const MINE_LINE_TEXT_BYTES = 1e9;']]).TaskGroupManager);
-  check('negative control: a copy without the shared item-text budget FAILS the 3-group untrimmed leg', noMine[3].includes('context trimmed') || bytes(noMine[3]) > 9600, `${bytes(noMine[3])} B`);
+  check('negative control: a copy without the shared item-text budget FAILS the 3-group untrimmed leg', verdictOf(noMine[3].includes('context trimmed')) || bytes(noMine[3]) > 9600, `${bytes(noMine[3])} B`);
   const noCap = sizeLegs(loadPatched('src/agent-routes.js', [['const ctx = capInline(carry.wrap(context), injectGroups.length > 1);', 'const ctx = carry.wrap(context);']])   /* lane report-mark-on-ack: the answer is composed, then closed by its carry */, TaskGroupManager);
   check('negative control: task-context without capInline FAILS the 5-group leg', bytes(noCap[5]) > 9600, `${bytes(noCap[5])} B`);
 }
@@ -376,7 +376,7 @@ console.log('(4) CLI');
   setting = undefined; seed();
   const noteLine = (out) => out.split('\n').find((l) => l.startsWith('note: You hold'));
   const a = await run('backlog-add', 'cli item');
-  check('backlog-add prints `note: <nudge text>` on its own line, exit 0', a.code === 0 && /^parked as \[B-/.test(a.out) && /^note: You hold 25 open backlog items in this group/.test(noteLine(a.out) || ''), a.out);
+  check('backlog-add prints `note: <nudge text>` on its own line, exit 0', a.code === 0 && gateOf(/^parked as \[B-/.test(a.out)) && verdictOf(/^note: You hold 25 open backlog items in this group/.test(noteLine(a.out) || '')), a.out);
   const id = tasks.get(g.id).backlog.find((b) => b.text === 'cli item').id;
   const e = await run('backlog-edit', id, '--text', 'cli item 2');
   check('backlog-edit prints the note, exit 0', e.code === 0 && !!noteLine(e.out), e.out);
@@ -400,10 +400,10 @@ console.log('(4) CLI');
   };
   const CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-task'), 'utf8');
   const p = pins(CLI);
-  check('CLI pin: printNudge prints `note: ` + r.nudge.text', p.helper);
-  check('CLI pin: add / claim / edit call printNudge(r); done/drop do not', p.add && p.claim && p.edit && p.doneNot, JSON.stringify(p));
+  check('CLI pin: printNudge prints `note: ` + r.nudge.text', verdictOf(p.helper));
+  check('CLI pin: add / claim / edit call printNudge(r); done/drop do not', gateOf(p.add) && gateOf(p.claim) && gateOf(p.edit) && verdictOf(p.doneNot), JSON.stringify(p));
   const cutP = pins(CLI.replace("      printNudge(r);\n    } else {\n      console.log('unclaimed", "    } else {\n      console.log('unclaimed"));
-  check('negative control: the claim pin fails on a copy without its printNudge', !cutP.claim && cutP.add);
+  check('negative control: the claim pin fails on a copy without its printNudge', !cutP.claim && verdictOf(cutP.add));
 }
 
 // ── (5) setting + wiring ──
@@ -412,25 +412,25 @@ console.log('(5) setting + wiring');
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
   const SCHEMA = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8');
   const row = (SCHEMA.match(/'tasks\.backlogNudgeAt': \{[\s\S]*?\n {2}\},/) || [''])[0];
-  check("settings-schema row: number, default 20, min 0, category Integration, t() label + description", /type: 'number', default: 20, min: 0,/.test(row) && /category: t\('Integration'\)/.test(row) && /label: t\('Backlog cleanup nudge: items per session'\)/.test(row) && /description: t\('/.test(row), row);
+  check("settings-schema row: number, default 20, min 0, category Integration, t() label + description", gateOf(/type: 'number', default: 20, min: 0,/.test(row)) && gateOf(/category: t\('Integration'\)/.test(row)) && gateOf(/label: t\('Backlog cleanup nudge: items per session'\)/.test(row)) && verdictOf(/description: t\('/.test(row)), row);
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
   const ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const keys = [row.match(/label: t\('([^']+)'\)/)?.[1], row.match(/description: t\('([^']+)'\)/)?.[1]].filter(Boolean);
-  check('zh + ja carry the label and the description', keys.length === 2 && keys.every((k) => zh.includes(`  ${JSON.stringify(k)}: `) && ja.includes(`  ${JSON.stringify(k)}: `)));
+  check('zh + ja carry the label and the description', keys.length === 2 && verdictOf(keys.every((k) => zh.includes(`  ${JSON.stringify(k)}: `) && ja.includes(`  ${JSON.stringify(k)}: `))));
   const AR = strip(fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8'));
-  check("agent-routes pin: the route reads serverSetting('tasks.backlogNudgeAt') through nudgeThreshold into backlogNudge", /raw = serverSetting\('tasks\.backlogNudgeAt'\)/.test(AR) && /backlogNudge\(updated\.backlog, key, \{ threshold: nudgeThreshold\(raw\) \}\)/.test(AR) && /text: nudgeText\(n, /.test(AR));
+  check("agent-routes pin: the route reads serverSetting('tasks.backlogNudgeAt') through nudgeThreshold into backlogNudge", gateOf(/raw = serverSetting\('tasks\.backlogNudgeAt'\)/.test(AR)) && gateOf(/backlogNudge\(updated\.backlog, key, \{ threshold: nudgeThreshold\(raw\) \}\)/.test(AR)) && verdictOf(/text: nudgeText\(n, /.test(AR)));
   const TG = strip(fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8'));
-  check("task-groups pin: backlogNudgeAt reads getSetting('tasks.backlogNudgeAt'); the note pushes nudgeTextAll([e]); renderMultiContext aggregates once", /nudgeThreshold\(this\._getSetting\?\.\('tasks\.backlogNudgeAt'\)\)/.test(TG) && /if \(e\) out\.push\(nudgeTextAll\(\[e\]\)\);/.test(TG) && /isLiveClaim, highBudget, mineBudget, nudge: false \}\)/.test(TG) && /const nudge = this\.backlogNudgeFor\(ids, sessionKey, \{ multi: true, tools \}\);\s*if \(nudge\) head\.push\('', nudge\);/.test(TG));
-  check('agent-routes pin: prompt-context computes backlogNudgeFor over the groups no full block covers, rides the reminder body or its own block; BOTH hook payloads pass capInline', /tasks\.backlogNudgeFor\(nudgeIds, key, \{ multi: injectGroups\.length > 1, tools: toolFlags \}\)/.test(AR) && /const body = \[extra, std, backlogNudge\]/.test(AR) && /let nudgeBlock = backlogNudge \? `<vibespace-reminder>\$\{backlogNudge\}<\/vibespace-reminder>` : '';\n    if \(nudgeBlock && fits\(nudgeBlock\)\) tailHeld \+= B\(nudgeBlock\) \+ 2; else nudgeBlock = '';/.test(AR) && /if \(outParts\.length && nudgeBlock\) outParts\.push\(nudgeBlock\);/.test(AR) && /const ctx = capInline\(carry\.wrap\(context\), injectGroups\.length > 1\);/.test(AR) && /const ctx = capInline\(carry\.wrap\(outParts\.join\('\\n\\n'\)\), injectGroups\.length > 1\);/.test(AR));
+  check("task-groups pin: backlogNudgeAt reads getSetting('tasks.backlogNudgeAt'); the note pushes nudgeTextAll([e]); renderMultiContext aggregates once", gateOf(/nudgeThreshold\(this\._getSetting\?\.\('tasks\.backlogNudgeAt'\)\)/.test(TG)) && gateOf(/if \(e\) out\.push\(nudgeTextAll\(\[e\]\)\);/.test(TG)) && gateOf(/isLiveClaim, highBudget, mineBudget, nudge: false \}\)/.test(TG)) && verdictOf(/const nudge = this\.backlogNudgeFor\(ids, sessionKey, \{ multi: true, tools \}\);\s*if \(nudge\) head\.push\('', nudge\);/.test(TG)));
+  check('agent-routes pin: prompt-context computes backlogNudgeFor over the groups no full block covers, rides the reminder body or its own block; BOTH hook payloads pass capInline', gateOf(/tasks\.backlogNudgeFor\(nudgeIds, key, \{ multi: injectGroups\.length > 1, tools: toolFlags \}\)/.test(AR)) && gateOf(/const body = \[extra, std, backlogNudge\]/.test(AR)) && gateOf(/let nudgeBlock = backlogNudge \? `<vibespace-reminder>\$\{backlogNudge\}<\/vibespace-reminder>` : '';\n    if \(nudgeBlock && fits\(nudgeBlock\)\) tailHeld \+= B\(nudgeBlock\) \+ 2; else nudgeBlock = '';/.test(AR)) && gateOf(/if \(outParts\.length && nudgeBlock\) outParts\.push\(nudgeBlock\);/.test(AR)) && gateOf(/const ctx = capInline\(carry\.wrap\(context\), injectGroups\.length > 1\);/.test(AR)) && verdictOf(/const ctx = capInline\(carry\.wrap\(outParts\.join\('\\n\\n'\)\), injectGroups\.length > 1\);/.test(AR)));
   const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const TGW = fs.readFileSync(path.join(REPO, 'src/server/task-groups-wiring.js'), 'utf8'); // «make room» 2026-11-17: moved whole out of server.js — the store is built there, server.js hands it serverSetting // raw: server.js carries '/*' inside strings, the comment stripper would eat code
-  check('server.js pin: the store is built with getSetting = serverSetting (in src/server/task-groups-wiring.js createStore — server.js hands it serverSetting); agent-routes gets serverSetting', /new TaskGroupManager\(\{[\s\S]{0,200}getSetting: \(k\) => serverSetting\(k\)/.test(TGW) && /task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bserverSetting,/.test(SV) && /setupAgentRoutes\(\{[^}]*serverSetting,/.test(SV));
+  check('server.js pin: the store is built with getSetting = serverSetting (in src/server/task-groups-wiring.js createStore — server.js hands it serverSetting); agent-routes gets serverSetting', gateOf(/new TaskGroupManager\(\{[\s\S]{0,200}getSetting: \(k\) => serverSetting\(k\)/.test(TGW)) && gateOf(/task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bserverSetting,/.test(SV)) && verdictOf(/setupAgentRoutes\(\{[^}]*serverSetting,/.test(SV)));
   const BS = fs.readFileSync(path.join(REPO, 'src/backlog-select.js'), 'utf8');
   // lane peer-census verify r4 F1: the ONE import allowed is the PURE belt (src/peer-text.js — itself PURE and bundled: the
   // nudge quotes other sessions' item texts and cuts them, and a cut must be followed by the rule where the cut is)
-  check('backlog-select stays PURE (no require but the PURE belt ./peer-text.js, no Buffer — the bundle shares it)', (strip(BS).match(/\brequire\(/g) || []).length === 1 && /require\('\.\/peer-text\.js'\)/.test(strip(BS)) && !/\bBuffer\./.test(strip(BS)));
+  check('backlog-select stays PURE (no require but the PURE belt ./peer-text.js, no Buffer — the bundle shares it)', (strip(BS).match(/\brequire\(/g) || []).length === 1 && gateOf(/require\('\.\/peer-text\.js'\)/.test(strip(BS))) && !/\bBuffer\./.test(strip(BS)));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED (${passed} passed)`); process.exit(1); }
-console.log(`\nALL PASS (${passed})`);
+console.log(`\nALL PASS (${passed})`); import { verdictOf, gateOf } from './lib/check.mjs';

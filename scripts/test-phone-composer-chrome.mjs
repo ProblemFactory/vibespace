@@ -32,7 +32,7 @@ const require = createRequire(import.meta.url);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700) : ''}`); }
 };
@@ -170,7 +170,7 @@ async function cameraLeg(p) {
   const attrs = await p.ev(`(() => { const ins = [...document.querySelectorAll('#frame .chat-input-wrap > input[type=file]')]; return ins.map((e) => ({ accept: e.accept, capture: e.getAttribute('capture'), multiple: e.multiple, dir: e.hasAttribute('webkitdirectory') })); })()`);
   const cam = attrs.filter((a) => a.capture !== null), gal = attrs.filter((a) => a.capture === null && a.accept === 'image/*');
   ok('390: ONE camera input — image/*, capture="environment", one shot', cam.length === 1 && cam[0].accept === 'image/*' && cam[0].capture === 'environment' && !cam[0].multiple, attrs);
-  ok('390: the gallery input has NO capture and keeps multiple', gal.length === 1 && gal[0].multiple, attrs);
+  ok('390: the gallery input has NO capture and keeps multiple', gal.length === 1 && verdictOf(gal[0].multiple), attrs);
   if (cam.length !== 1) { // no camera door to drive: the rest of the leg fails BY NAME (the base's RED), never a page throw
     for (const n of ['390: a cancelled camera adds nothing and says nothing', '390: CDP set the shot on the camera input', '390: the shot becomes ONE attachment chip (the picked image\'s chip, its name) and nothing is said', '390: the shot is sent WITH the message — one image block (image/jpeg) + the words; the chip row clears']) ok(n, false, 'no camera input');
     return;
@@ -187,14 +187,14 @@ async function cameraLeg(p) {
   ok('390: CDP set the shot on the camera input', !set.error && !!q.result.nodeId, set.error || q);
   const chip = await p.until(`document.querySelectorAll('#frame .chat-attach-item').length === 1 && !!document.querySelector('#frame .chat-attach-item img')`, 5000);
   const one = await p.ev(`({ chips: document.querySelectorAll('#frame .chat-attach-item').length, name: (document.querySelector('#frame .chat-attach-name') || {}).textContent, toasts: window.__toasts })`);
-  ok('390: the shot becomes ONE attachment chip (the picked image\'s chip, its name) and nothing is said', chip && one.chips === 1 && one.name === 'shot.jpg' && one.toasts === 0, one);
+  ok('390: the shot becomes ONE attachment chip (the picked image\'s chip, its name) and nothing is said', gateOf(chip) && one.chips === 1 && one.name === 'shot.jpg' && one.toasts === 0, one);
   await p.shot(`${TAG}-390-shot.png`);
   await p.ev(`(() => { const t = document.querySelector('#frame textarea'); t.value = 'the label on the switch'; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   const n0 = await p.ev('window.__sent.length');
   await p.tap('#frame .chat-send-btn');
   await p.until(`window.__sent.length > ${n0}`, 3000);
   const sent = await p.ev(`(() => { try { const m = JSON.parse(window.__sent[window.__sent.length - 1]); const c = m.message.content; return { images: c.filter((b) => b.type === 'image').map((b) => b.source.media_type + ':' + b.source.data.length), text: (c.find((b) => b.type === 'text') || {}).text, chips: document.querySelectorAll('#frame .chat-attach-item').length }; } catch (e) { return { raw: window.__sent.slice(-1), err: String(e) }; } })()`);
-  ok('390: the shot is sent WITH the message — one image block (image/jpeg) + the words; the chip row clears', sent.images && sent.images.length === 1 && /^image\/jpeg:\d+$/.test(sent.images[0]) && sent.text === 'the label on the switch' && sent.chips === 0, sent);
+  ok('390: the shot is sent WITH the message — one image block (image/jpeg) + the words; the chip row clears', gateOf(sent.images) && sent.images.length === 1 && gateOf(/^image\/jpeg:\d+$/.test(sent.images[0])) && sent.text === 'the label on the switch' && sent.chips === 0, sent);
 }
 
 /** piece 7's resumed line (16c64ec4d): {hidden, display, h} of #frame's .chat-resumed-line, or null when the composer has none */
@@ -226,11 +226,11 @@ async function phoneLeg(w, minRatio) {
   ok(`${w}: the field is ≥ 44 px tall at rest`, m.taH >= 44 && m.taH < 60, m.taH);
   ok(`${w}: the row shows ONE leading door and the field — no image / upload / mic buttons beside it`, JSON.stringify(m.shown) === JSON.stringify(['chat-plus-btn', 'chat-input-field']), m.shown);
   const plus = await p.ev(rect('#frame .chat-plus-btn')), send = await p.ev(rect('#frame .chat-send-btn')), field = await p.ev(rect('#frame .chat-input-field textarea')), mic = await p.ev(rect('#frame .chat-input-field .chat-voice-btn'));
-  ok(`${w}: the + door is 36×36`, plus && Math.round(plus.w) === 36 && Math.round(plus.h) === 36, plus);
-  ok(`${w}: send is 40×40`, send && Math.round(send.w) === 40 && Math.round(send.h) === 40, send);
-  ok(`${w}: the mic sits INSIDE the field at its trailing edge (a 40×40 hit area — lane voice-everywhere)`, inside(mic, field) && field.r - mic.r <= 8 && Math.round(mic.h) === 40, { mic, field });
+  ok(`${w}: the + door is 36×36`, gateOf(plus) && Math.round(plus.w) === 36 && Math.round(plus.h) === 36, plus);
+  ok(`${w}: send is 40×40`, gateOf(send) && Math.round(send.w) === 40 && Math.round(send.h) === 40, send);
+  ok(`${w}: the mic sits INSIDE the field at its trailing edge (a 40×40 hit area — lane voice-everywhere)`, gateOf(inside(mic, field)) && field.r - mic.r <= 8 && Math.round(mic.h) === 40, { mic, field });
   ok(`${w}: the status bar is the strip's TWO rows ≤ 84 px (${m.rows} rows, ${Math.round(m.barH)} px)`, m.rows === 2 && m.barH <= 84, { rows: m.rows, barH: m.barH });
-  ok(`${w}: no horizontal overflow with the agent-browser chip present`, m.browser && m.sw <= m.cw, m);
+  ok(`${w}: no horizontal overflow with the agent-browser chip present`, gateOf(m.browser) && m.sw <= m.cw, m);
   console.log(`    ${w}: the gaps judged (neighbours on one row): ${JSON.stringify(m.gaps)}`);
   ok(`${w}: no gap between neighbouring bar chips > 8 px (⚙ pushed to row 2's end is the arrangement's), nothing behind ⋯ (no ⋯, nothing folded)`, m.gap <= 8 && !m.more && m.folded === 0, m);
   // the + sheet: four rows (lane phone-take-photo: 拍照 first, on a finger device), each reaching its own hidden input
@@ -241,7 +241,7 @@ async function phoneLeg(w, minRatio) {
     if (i === 0) {
       if (w === 390) await p.shot(`${TAG}-390-sheet.png`, 420);
       ok(`${w}: the + sheet says what each row opens — 拍照 / 照片 / 文件 / 文件夹`, JSON.stringify(rows.map((r) => r.text)) === JSON.stringify(['拍照', '照片', '文件', '文件夹']), rows);
-      ok(`${w}: every sheet row wears its glyph and is ≥ 44 px tall (the phone sheets' row)`, rows.length === 4 && rows.every((r) => r.svg && r.h >= 44), rows);
+      ok(`${w}: every sheet row wears its glyph and is ≥ 44 px tall (the phone sheets' row)`, rows.length === 4 && verdictOf(rows.every((r) => r.svg && r.h >= 44)), rows);
     }
     await p.tap(`.context-menu .context-menu-item:nth-child(${i + 1})`);
     picked.push(...(await p.ev('window.__picked.splice(0)')));
@@ -253,35 +253,35 @@ async function phoneLeg(w, minRatio) {
   await p.ev(`(() => { const t = document.querySelector('#frame textarea'); t.focus(); t.value = 'one\\ntwo\\nthree\\nfour'; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await sleep(100);
   const exp2 = await p.ev(rect('#frame .chat-expand-btn')), field2 = await p.ev(rect('#frame .chat-input-field textarea'));
-  ok(`${w}: ⤢ hidden at one line, inside the field past two lines`, exp1 === 0 && exp2 && exp2.w > 0 && inside(exp2, field2), { exp1, exp2, field2 });
+  ok(`${w}: ⤢ hidden at one line, inside the field past two lines`, exp1 === 0 && gateOf(exp2) && exp2.w > 0 && verdictOf(inside(exp2, field2)), { exp1, exp2, field2 });
   // send
   await p.ev(`(() => { const t = document.querySelector('#frame textarea'); t.value = 'hello from the phone'; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await p.tap('#frame .chat-send-btn');
-  ok(`${w}: the send button sends`, await p.until(`window.__sent.includes('hello from the phone')`, 3000), await p.ev('window.__sent'));
+  ok(`${w}: the send button sends`, verdictOf(await p.until(`window.__sent.includes('hello from the phone')`, 3000)), await p.ev('window.__sent'));
   // the mic: capsule in place inside the field, the words land
   await p.ev(`(() => { const t = document.querySelector('#frame textarea'); t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })); t.focus(); return true; })()`);
   await p.tap('#frame .chat-voice-btn');
   const rec = await p.until(`!!document.querySelector('#frame .chat-input-field .chat-voice-btn.recording') && window.__gum > 0`, 5000);
   const cap = await p.ev(rect('#frame .chat-voice-btn.recording')), field3 = await p.ev(rect('#frame .chat-input-field textarea'));
-  ok(`${w}: the mic records — the capsule replaces it in place, inside the field`, rec && inside(cap, field3), { rec, cap, field3 });
+  ok(`${w}: the mic records — the capsule replaces it in place, inside the field`, gateOf(rec) && verdictOf(inside(cap, field3)), { rec, cap, field3 });
   if (w === 390) await p.shot(`${TAG}-390-rec.png`);
   await p.tap('#frame .chat-voice-btn.recording');
-  ok(`${w}: the dictated words land in the field`, await p.until(`document.querySelector('#frame textarea').value.includes('DICTATED ON THE PHONE')`, 6000), await p.ev(`document.querySelector('#frame textarea').value`));
+  ok(`${w}: the dictated words land in the field`, verdictOf(await p.until(`document.querySelector('#frame textarea').value.includes('DICTATED ON THE PHONE')`, 6000)), await p.ev(`document.querySelector('#frame textarea').value`));
   // nothing to open first (lane mask-value-shape): the agent-browser chip and the thinking level (inside the model door) are
   // on the bar; the output style is a row of «⚙ 对话设置» whose press opens the style's own menu at the door
   const doors = await p.ev(`(() => { const b = document.querySelector('#frame .chat-status-bar'); const br = b.querySelector('.chat-status-browser'); const ef = b.querySelector('.chat-status-model .chat-status-effort'); return { browserW: br ? br.offsetWidth : 0, effortW: ef ? ef.offsetWidth : 0, settings: !!b.querySelector('.chat-status-settings') }; })()`);
-  ok(`${w}: nothing to open first — the agent-browser chip and the thinking level (inside the model door) are on the bar, «⚙ 对话设置» last`, doors.browserW > 0 && doors.effortW > 0 && doors.settings, doors);
+  ok(`${w}: nothing to open first — the agent-browser chip and the thinking level (inside the model door) are on the bar, «⚙ 对话设置» last`, doors.browserW > 0 && doors.effortW > 0 && verdictOf(doors.settings), doors);
   await p.tap('#frame .chat-status-settings');
   const rows = await p.ev(`[...document.querySelectorAll('.chat-status-dropdown .chat-status-settings-row')].map((e) => ({ row: e.dataset.row, text: e.textContent }))`).catch(() => []);
   if (w === 390) await p.shot(`${TAG}-390-settings.png`);
-  ok(`${w}: «⚙ 对话设置» lists its rows, each with its present value — the output style among them`, rows.some((r) => r.row === 'style' && /输出风格/.test(r.text)), rows);
+  ok(`${w}: «⚙ 对话设置» lists its rows, each with its present value — the output style among them`, verdictOf(rows.some((r) => r.row === 'style' && /输出风格/.test(r.text))), rows);
   await p.tap('.chat-status-dropdown .chat-status-settings-row[data-row="style"]');
   const sty = await p.ev(`(() => { const d = document.querySelector('.chat-status-dropdown'); return { dd: !!d, settings: !!(d && d.querySelector('.chat-status-settings-row')), rows: d ? d.querySelectorAll('.chat-status-dropdown-item').length : 0 }; })()`);
-  ok(`${w}: the style row opens the style's own menu, at the door`, sty.dd && !sty.settings && sty.rows >= 2, sty);
+  ok(`${w}: the style row opens the style's own menu, at the door`, gateOf(sty.dd) && !sty.settings && sty.rows >= 2, sty);
   await p.ev(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
   await p.tap('#frame .chat-status-model .chat-status-effort');
   const eff = await p.ev(`(() => { const d = document.querySelector('.chat-status-dropdown'); return { dd: !!d && /high|max|low|medium/i.test(d.textContent) }; })()`);
-  ok(`${w}: the thinking level's press (inside the model door) opens its own menu`, eff.dd, eff);
+  ok(`${w}: the thinking level's press (inside the model door) opens its own menu`, verdictOf(eff.dd), eff);
   p.close();
   if (w === 412) {
     const l = await page(412, 860, { phone: true, theme: 'light' });
@@ -353,4 +353,4 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-end(fail ? 1 : 0);
+end(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

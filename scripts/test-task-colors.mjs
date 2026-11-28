@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 
 // utils is an ES module — read+eval the pure functions
 const src = fs.readFileSync('src/lib/utils.js', 'utf8');
@@ -52,15 +52,15 @@ check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
   check('prefix 36 (12/band): same-plane ≥18°', minSamePlane(36) >= 18, `min=${minSamePlane(36)}`);
   check('textures engage from slot 3 (v5: all dimensions from the start)',
     seqTaskColor(0).pattern === null && seqTaskColor(3).pattern === 'dash' && seqTaskColor(6).pattern === 'dot' && seqTaskColor(9).pattern === 'diag');
-  check('first 12 slots occupy 12 DISTINCT planes', (() => {
+  check('first 12 slots occupy 12 DISTINCT planes', verdictOf((() => {
     const seen = new Set();
     for (let k = 0; k < 12; k++) { const s = seqTaskColor(k); seen.add(`${s.pattern}|${s.lightness}`); }
     return seen.size === 12;
-  })());
+  })()));
   check('20 groups (the reported case) include textured ones', Array.from({ length: 20 }, (_, k) => seqTaskColor(k)).filter((s) => s.pattern).length >= 10);
   // the order SETTING (2.232.1): solid-first restores the pre-v5 layout
   check("order 'solid-first': first 36 slots all solid, textures at 36",
-    Array.from({ length: 36 }, (_, k) => seqTaskColor(k, 'solid-first')).every((s) => s.pattern === null)
+    gateOf(Array.from({ length: 36 }, (_, k) => seqTaskColor(k, 'solid-first')).every((s) => s.pattern === null))
       && seqTaskColor(36, 'solid-first').pattern === 'dash');
   check("order 'solid-first' allocator masks with matching renderings",
     pickColorSeq([{ colorSeq: 0 }, { color: seqTaskColor(1, 'solid-first').color }], 'solid-first') !== 1);
@@ -100,10 +100,10 @@ check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
   // masking: a manual color equal to slot 1's rendering blocks slot 1
   const s1 = seqTaskColor(1);
   const masked = maskedSlotsFor(s1.color, null);
-  check('manual pick masks its nearby slot(s)', masked.includes(1), JSON.stringify(masked));
+  check('manual pick masks its nearby slot(s)', verdictOf(masked.includes(1)), JSON.stringify(masked));
   check('allocator skips masked slots', pickColorSeq([{ colorSeq: 0 }, { color: s1.color }]) !== 1);
   // hex parsing path for masks
-  check('hex manual colors parse for masking', maskedSlotsFor('#ff0000', null).length >= 0 && Array.isArray(maskedSlotsFor('#f00', null)));
+  check('hex manual colors parse for masking', maskedSlotsFor('#ff0000', null).length >= 0 && verdictOf(Array.isArray(maskedSlotsFor('#f00', null))));
 }
 
 // ── server integration: create assigns colorSeq, delete frees it ──
@@ -133,7 +133,7 @@ check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
   check('pattern null = back to auto', g3.pattern === null);
   let bad = false;
   try { tm2.update(g.id, { pattern: 'zigzag' }); } catch { bad = true; }
-  check('invalid pattern rejected', bad);
+  check('invalid pattern rejected', verdictOf(bad));
   fs.rmSync(dir2, { recursive: true, force: true });
 }
 
@@ -147,8 +147,8 @@ const t2 = tm.create({ title: 'c2', color: 'none' });
 check("sanitizer accepts 'none' sentinel", t2.color === 'none');
 let threw = false;
 try { tm.create({ title: 'c3', color: 'red;}body{' }); } catch { threw = true; }
-check('sanitizer rejects css injection', threw);
+check('sanitizer rejects css injection', verdictOf(threw));
 fs.rmSync(dir, { recursive: true, force: true });
 
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

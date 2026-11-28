@@ -59,8 +59,8 @@ let pass = 0, fail = 0;
 // exactly that page during the road (a product that never goes there leaves none: its leg stays a red).
 const auxKept = []; let skipped = 0;
 const keptSince = (k0, url) => auxKept.slice(k0).some((x) => x.url === url);
-const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, c, e); };
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, verdictOf(c), e); };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (no rebuild: overlays the built public/) ──
@@ -344,30 +344,30 @@ try {
     console.log(`  · shipped ${JSON.stringify(G).slice(0, 2400)}`);
     const C = cache === 'off' ? 'I' : 'II';
     check(`${C}⑤ RED (round 3): the exit on a slow link (the older document's HTML at 3.5 s) — the bound dropped the intent; the older document booted with none and filed NOTHING (the owner's silent load)`,
-      !!R.late && R.late.armed && R.late.held >= 1 && R.late.onApp && R.late.booted && R.late.incidents.length === 0 && !/slow:/.test(R.late.rows), R.late);
+      !!R.late && gateOf(R.late.armed) && R.late.held >= 1 && gateOf(R.late.onApp) && gateOf(R.late.booted) && R.late.incidents.length === 0 && !/slow:/.test(R.late.rows), R.late);
     check(`${C}⑤ the shipped rules: the same road — the page stayed at the bound and re-armed, the late commit told (leave slow ≈3.5 s), and the older document WENT ON: the tab on the page before VibeSpace, nothing filed`,
-      G.late.armed && G.late.held >= 1 && G.late.outside && G.late.loads === 1 && /^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.late.rows) && G.late.slow >= 3400 && G.late.slow < 5000 && G.late.incidents.length === 0, G.late);
+      gateOf(G.late.armed) && G.late.held >= 1 && gateOf(G.late.outside) && G.late.loads === 1 && gateOf(/^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.late.rows)) && G.late.slow >= 3400 && G.late.slow < 5000 && G.late.incidents.length === 0, G.late);
     check(`${C}⑥ RED (round 3): the same at 12 s, past the intent's window — the older document booted and filed nothing`,
-      !!R.later && R.later.held >= 1 && R.later.onApp && R.later.booted && R.later.incidents.length === 0, R.later);
+      !!R.later && R.later.held >= 1 && gateOf(R.later.onApp) && gateOf(R.later.booted) && R.later.incidents.length === 0, R.later);
     check(`${C}⑥ the shipped rules: at 12 s the older document boots and files ONE incident «a slow exit» (the diary: leave slow ≈12 s, then its cost row why slow)`,
-      G.later.held >= 1 && G.later.onApp && G.later.booted && G.later.incidents.length === 1 && /a slow exit/.test(G.later.incidents[0]) && /slow:\d+/.test(G.later.rows) && /cost:slow/.test(G.later.rows) && G.later.slow >= 11900, G.later);
+      G.later.held >= 1 && gateOf(G.later.onApp) && gateOf(G.later.booted) && G.later.incidents.length === 1 && gateOf(/a slow exit/.test(G.later.incidents[0])) && gateOf(/slow:\d+/.test(G.later.rows)) && gateOf(/cost:slow/.test(G.later.rows)) && G.later.slow >= 11900, G.later);
     judged(`${C}⑦ RED (round 3): a cancelled exit (the page before VibeSpace answers 204), then a back — no sentinel above the page: the browser's own back LOADED the older document`,
       R.back, !!R.back && R.back.armed && R.back.asked === 2 && !R.back.same && R.back.loads + R.back.restored === 1, R.back);
     judged(`${C}⑦ the shipped rules: after the stay the page stands on a sentinel again (rearm why cancelled), and the next back is ours — the 「再返回一次退出」 toast on the same document, no load`,
       G.back, G.back.armed && G.back.asked === 2 && G.back.stayed?.st?.vs === 1 && G.back.same && G.back.said && G.back.loads === 0 && /cancelled rearm:cancelled/.test(G.back.rows), G.back);
     check(`${C}⑧ RED (round 3): a tap 1 s into the exit's pending go() (the older document at 6 s) — the traversal went on: the older document LOADED and booted, the tap lost`,
-      !!R.tap && R.tap.armed && !R.tap.same && R.tap.onApp && R.tap.loads === 1, R.tap);
+      !!R.tap && gateOf(R.tap.armed) && !R.tap.same && gateOf(R.tap.onApp) && R.tap.loads === 1, R.tap);
     check(`${C}⑧ the shipped rules: the tap ABORTS the pending go() by the step onto the sentinel above — the page stays, re-armed (leave why input, rearm why input), the older document never loads`,
-      G.tap.armed && G.tap.same && G.tap.st?.vs === 1 && G.tap.loads === 0 && /input rearm:input/.test(G.tap.rows), G.tap);
+      gateOf(G.tap.armed) && gateOf(G.tap.same) && G.tap.st?.vs === 1 && G.tap.loads === 0 && verdictOf(/input rearm:input/.test(G.tap.rows)), G.tap);
     // round 7 — the press sent by CDP while the go() is pending, answered at once (sent → answered)
     check(`${C}⑨ RED (round 6, cb8c0a86): a pan 1 s into the exit's pending go() (a pointerdown, then the pointercancel of the touch the browser took) — the pointerdown was the tap: the step up CANCELLED the exit (leave why input, rearm why input), the page stays`,
-      !!R.pan && R.pan.armed && /^pointerdown:0 pointercancel:/.test(R.pan.ptr) && R.pan.same && R.pan.loads === 0 && /^3\/0 input rearm:input\b/.test(R.pan.rows) && R.pan.answered - R.pan.sent < 1500, R.pan);
+      !!R.pan && gateOf(R.pan.armed) && gateOf(/^pointerdown:0 pointercancel:/.test(R.pan.ptr)) && gateOf(R.pan.same) && R.pan.loads === 0 && gateOf(/^3\/0 input rearm:input\b/.test(R.pan.rows)) && R.pan.answered - R.pan.sent < 1500, R.pan);
     check(`${C}⑨ the shipped rules: the pan is no tap — no step; the stay at 3 s, the commit at 6 s told (leave slow): the older document goes on, the tab outside, nothing filed`,
-      G.pan.armed && G.pan.held >= 1 && /^pointerdown:0 pointercancel:/.test(G.pan.ptr) && !/pointerup/.test(G.pan.ptr) && G.pan.outside && G.pan.loads === 1 && /^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.pan.rows) && !/\binput/.test(G.pan.rows) && G.pan.incidents.length === 0, G.pan);
+      gateOf(G.pan.armed) && G.pan.held >= 1 && gateOf(/^pointerdown:0 pointercancel:/.test(G.pan.ptr)) && !/pointerup/.test(G.pan.ptr) && gateOf(G.pan.outside) && G.pan.loads === 1 && gateOf(/^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.pan.rows)) && !/\binput/.test(G.pan.rows) && G.pan.incidents.length === 0, G.pan);
     check(`${C}⑩ RED (round 6, cb8c0a86): a mouse's back button 1 s into the exit's pending go() (pointerdown and pointerup, button 3) — read as a tap: the step up ran (leave why input, rearm why input), the exit cancelled`,
-      !!R.mouse && R.mouse.armed && /^pointerdown:3 pointerup:3\b/.test(R.mouse.ptr) && /^3\/0 input rearm:input\b/.test(R.mouse.rows) && R.mouse.answered - R.mouse.sent < 1500, R.mouse);
+      !!R.mouse && gateOf(R.mouse.armed) && gateOf(/^pointerdown:3 pointerup:3\b/.test(R.mouse.ptr)) && gateOf(/^3\/0 input rearm:input\b/.test(R.mouse.rows)) && R.mouse.answered - R.mouse.sent < 1500, R.mouse);
     check(`${C}⑩ the shipped rules: the mouse's back button is no tap — no step; the browser's own back at the release: the tab outside on the page before VibeSpace, the older document never loads, nothing filed`,
-      G.mouse.armed && /^pointerdown:3 pointerup:3\b/.test(G.mouse.ptr) && !/\binput/.test(G.mouse.rows) && G.mouse.outside && G.mouse.loads === 0 && G.mouse.incidents.length === 0, G.mouse);
+      gateOf(G.mouse.armed) && gateOf(/^pointerdown:3 pointerup:3\b/.test(G.mouse.ptr)) && !/\binput/.test(G.mouse.rows) && gateOf(G.mouse.outside) && G.mouse.loads === 0 && G.mouse.incidents.length === 0, G.mouse);
     await quit();
   }
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));
@@ -377,4 +377,4 @@ try {
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`}`);
 await quit();
 await sleep(300);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

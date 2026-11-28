@@ -34,7 +34,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('jobs-panel-smoke');
 const home = scratchHome('jobs-panel-home', fs);
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 
@@ -83,13 +83,13 @@ process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 
 const waitServer = async () => { for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-check('worktree server boots over the seeded fixture', await waitServer());
+check('worktree server boots over the seeded fixture', verdictOf(await waitServer()));
 // the engine boots ASYNCHRONOUSLY after /api/home answers (adopt-first boot + the single-engine lock):
 // GET /api/jobs is 503 {error:'jobs engine starting'} until then — wait for the engine, not the http server
 const api = await (async () => { let last = null; for (let i = 0; i < 120; i++) { const r = await fetch(`http://127.0.0.1:${PORT}/api/jobs`); last = await r.json(); if (r.status === 200 && last.jobs) return last; await sleep(250); } return markTimedOut(last, 120 * 250, 'GET /api/jobs'); })();
 check('the jobs engine reports ready (GET /api/jobs answers 200 with jobs)', !!(api && api.jobs), api);
-check(`the server serves every fixture record live (${api.jobs && api.jobs.length} = ${fx.jobs.length}; the boot sweep archived nothing)`, api.jobs && api.jobs.length === fx.jobs.length, api.jobs && api.jobs.length);
-check(`…with ${archived.length} archived + ${heldTotal} held in the same answer`, api.archivedCount === archived.length && api.held && api.held.total === heldTotal, { archivedCount: api.archivedCount, held: api.held && api.held.total });
+check(`the server serves every fixture record live (${api.jobs && api.jobs.length} = ${fx.jobs.length}; the boot sweep archived nothing)`, gateOf(api.jobs) && api.jobs.length === fx.jobs.length, api.jobs && api.jobs.length);
+check(`…with ${archived.length} archived + ${heldTotal} held in the same answer`, api.archivedCount === archived.length && gateOf(api.held) && api.held.total === heldTotal, { archivedCount: api.archivedCount, held: api.held && api.held.total });
 const layout = L.foldTasks(api.jobs.filter((j) => j.kind === 'task'), {});
 const counts = L.badgeCounts(api.jobs);
 check(`the PURE counter over the served list reads ${expectBadge} (attention = ${unacked} unacked + 1 awaiting)`, L.badgeText(counts).text === expectBadge, L.badgeText(counts));
@@ -132,26 +132,26 @@ try {
   await openPage();
   await p.evalJs(INSTRUMENT);
   const badge = await until(() => p.evalJs(`(() => { const b = document.querySelector('.rail-item[data-rail="jobs"]'); const t = b && b.querySelector('.rail-badge'); return t ? { text: t.textContent, danger: b.classList.contains('rail-danger'), title: b.title } : null; })()`), 15000, 250);
-  check(`the rail badge reads ${expectBadge} — awaiting-user + UNACKNOWLEDGED failures only, never the 36 the incident showed`, badge && badge.text === expectBadge && badge.danger === true, badge);
-  check('…and its tooltip names the held notifications and why they are held', badge && /notifications held/.test(badge.title) && /hourly ceiling \(12\)/.test(badge.title), badge && badge.title);
+  check(`the rail badge reads ${expectBadge} — awaiting-user + UNACKNOWLEDGED failures only, never the 36 the incident showed`, gateOf(badge) && badge.text === expectBadge && badge.danger === true, badge);
+  check('…and its tooltip names the held notifications and why they are held', gateOf(badge) && gateOf(/notifications held/.test(badge.title)) && verdictOf(/hourly ceiling \(12\)/.test(badge.title)), badge && badge.title);
   await p.evalJs('app.openJobs(); true');
   const rail = await panelReady('.rail-panel-jobs .jobs-rail-list');
   check('the Background Work rail panel renders fold groups', !!rail && rail.groups.length > 0, rail && rail.groups.length);
   const oneShots = api.jobs.filter((j) => j.kind === 'task').length;
-  check(`EXIT: the Tasks section shows ${rail && rail.groups.length} group rows for ${oneShots} one-shots (= foldTasks over the served list: ${layout.groups.length})`, rail && rail.groups.length === layout.groups.length && rail.groups.length < oneShots / 5, { groups: rail && rail.groups.length, oneShots });
-  check('every group row is a BUTTON with aria-expanded (keyboard-reachable)', rail && rail.groups.every((g) => g.tag === 'BUTTON' && (g.expanded === 'true' || g.expanded === 'false')));
+  check(`EXIT: the Tasks section shows ${rail && rail.groups.length} group rows for ${oneShots} one-shots (= foldTasks over the served list: ${layout.groups.length})`, gateOf(rail) && rail.groups.length === layout.groups.length && rail.groups.length < oneShots / 5, { groups: rail && rail.groups.length, oneShots });
+  check('every group row is a BUTTON with aria-expanded (keyboard-reachable)', gateOf(rail) && verdictOf(rail.groups.every((g) => g.tag === 'BUTTON' && (g.expanded === 'true' || g.expanded === 'false'))));
   const attn = rail && rail.groups.filter((g) => g.attn);
-  check('a group holding an UNACKNOWLEDGED failure is expanded by default, with its cards under it', attn && attn.length > 0 && attn.every((g) => g.expanded === 'true' && g.cards > 0), attn && attn.map((g) => ({ key: g.key, expanded: g.expanded, cards: g.cards })));
+  check('a group holding an UNACKNOWLEDGED failure is expanded by default, with its cards under it', gateOf(attn) && attn.length > 0 && verdictOf(attn.every((g) => g.expanded === 'true' && g.cards > 0)), attn && attn.map((g) => ({ key: g.key, expanded: g.expanded, cards: g.cards })));
   const doneOnly = rail && rail.groups.filter((g) => !g.attn && !/running|awaiting you/.test(g.text));
-  check('a done-only group is COLLAPSED by default (no cards under it)', doneOnly && doneOnly.length > 0 && doneOnly.every((g) => g.expanded === 'false' && g.cards === 0), doneOnly && doneOnly.map((g) => ({ key: g.key, expanded: g.expanded, cards: g.cards })));
-  check('the failed rows show their LAST LOG LINE', rail && rail.lastLines.length > 0 && rail.lastLines.every((l) => /failed to render/.test(l)), rail && rail.lastLines.slice(0, 3));
-  check(`the summary names the failed/seen split and the ${heldTotal} held notifications`, rail && new RegExp(`${counts.failed} failed · ${counts.ackedFailed} seen`).test(rail.summary) && new RegExp(`${heldTotal} held`).test(rail.summary), rail && rail.summary);
-  check(`the "Archived · ${archived.length}" row is there, collapsed, and NOTHING has fetched the archive yet`, rail && rail.archived && rail.archived.text.includes(`· ${archived.length}`) && rail.archived.expanded === 'false' && (await archiveFetches()) === 0, rail && rail.archived);
+  check('a done-only group is COLLAPSED by default (no cards under it)', gateOf(doneOnly) && doneOnly.length > 0 && verdictOf(doneOnly.every((g) => g.expanded === 'false' && g.cards === 0)), doneOnly && doneOnly.map((g) => ({ key: g.key, expanded: g.expanded, cards: g.cards })));
+  check('the failed rows show their LAST LOG LINE', gateOf(rail) && rail.lastLines.length > 0 && verdictOf(rail.lastLines.every((l) => /failed to render/.test(l))), rail && rail.lastLines.slice(0, 3));
+  check(`the summary names the failed/seen split and the ${heldTotal} held notifications`, gateOf(rail) && gateOf(new RegExp(`${counts.failed} failed · ${counts.ackedFailed} seen`).test(rail.summary)) && verdictOf(new RegExp(`${heldTotal} held`).test(rail.summary)), rail && rail.summary);
+  check(`the "Archived · ${archived.length}" row is there, collapsed, and NOTHING has fetched the archive yet`, gateOf(rail) && gateOf(rail.archived) && gateOf(rail.archived.text.includes(`· ${archived.length}`)) && rail.archived.expanded === 'false' && (await archiveFetches()) === 0, rail && rail.archived);
   // click the Archived row ⇒ exactly one fetch, rows appear
   await p.evalJs(`document.querySelector('.rail-panel-jobs .jobs-archived-toggle').click(); true`);
   const arcRows = await until(() => p.evalJs(`document.querySelectorAll('.rail-panel-jobs .jobs-archived-list .jobs-card').length || null`), 10000, 200);
   check(`clicking it fetches the archive ONCE and renders its ${archived.length} rows`, arcRows === archived.length && (await archiveFetches()) === 1, { rows: arcRows, fetches: await archiveFetches() });
-  check('an archived row carries only ✕ (no Start/Stop) and says "archived"', await p.evalJs(`(() => { const c = document.querySelector('.rail-panel-jobs .jobs-archived-list .jobs-card'); const btns = [...c.querySelectorAll('button.jobs-btn')].map((b) => b.textContent); return btns.length === 1 && btns[0] === '✕' && /archived/.test(c.querySelector('.jobs-state').textContent); })()`));
+  check('an archived row carries only ✕ (no Start/Stop) and says "archived"', verdictOf(await p.evalJs(`(() => { const c = document.querySelector('.rail-panel-jobs .jobs-archived-list .jobs-card'); const btns = [...c.querySelectorAll('button.jobs-btn')].map((b) => b.textContent); return btns.length === 1 && btns[0] === '✕' && /archived/.test(c.querySelector('.jobs-state').textContent); })()`)));
   // collapse a default-expanded group ⇒ persisted ⇒ survives a reload
   const victim = attn[0].key;
   await p.evalJs(`document.querySelector('.rail-panel-jobs .jobs-group[data-group=' + ${JSON.stringify(JSON.stringify(victim))} + ']').click(); true`);
@@ -164,8 +164,8 @@ try {
   await p.evalJs('app.openJobs(); true');
   const rail2 = await panelReady('.rail-panel-jobs .jobs-rail-list');
   const again = rail2 && rail2.groups.find((g) => g.key === victim);
-  check('after a RELOAD the collapsed group stays collapsed (the persisted fold outranks the default)', again && again.expanded === 'false' && again.cards === 0, again);
-  check('…while its siblings keep their defaults', rail2 && rail2.groups.filter((g) => g.attn && g.key !== victim).every((g) => g.expanded === 'true'));
+  check('after a RELOAD the collapsed group stays collapsed (the persisted fold outranks the default)', gateOf(again) && again.expanded === 'false' && again.cards === 0, again);
+  check('…while its siblings keep their defaults', gateOf(rail2) && verdictOf(rail2.groups.filter((g) => g.attn && g.key !== victim).every((g) => g.expanded === 'true')));
   check('a reload fetches the archive ZERO times until the row is clicked again', (await archiveFetches()) === 0);
   // lane job-notify-user: a job's detail says whether it ALSO tells you in For you, as what the flag DOES for its kind (r2:
   // a service has no such row — nothing tells at its end), and beside it what reaches you whatever the flag — only what the
@@ -193,13 +193,13 @@ try {
   await p.evalJs('app.openJobs({ forceWindow: true }); true');
   const win = await panelReady('.jobs-win .jobs-body');
   check('375×667: the Background Work window renders the same fold groups', !!win && win.groups.length === layout.groups.length, win && win.groups.length);
-  check('375×667: the persisted fold still holds; the attention groups are expanded', win && win.groups.find((g) => g.key === victim)?.expanded === 'false' && win.groups.filter((g) => g.attn && g.key !== victim).every((g) => g.expanded === 'true'));
-  check('375×667: the failed rows show their last line; the archive is unfetched until clicked', win && win.lastLines.some((l) => /failed to render/.test(l)) && win.archived && win.archived.expanded === 'false' && (await archiveFetches()) === 0, win && { lastLines: win.lastLines.length, archived: win.archived });
-  check('375×667: no group row overflows the viewport width', await p.evalJs(`[...document.querySelectorAll('.jobs-win .jobs-group')].every((b) => b.getBoundingClientRect().right <= innerWidth + 1)`));
+  check('375×667: the persisted fold still holds; the attention groups are expanded', gateOf(win) && win.groups.find((g) => g.key === victim)?.expanded === 'false' && verdictOf(win.groups.filter((g) => g.attn && g.key !== victim).every((g) => g.expanded === 'true')));
+  check('375×667: the failed rows show their last line; the archive is unfetched until clicked', gateOf(win) && gateOf(win.lastLines.some((l) => /failed to render/.test(l))) && gateOf(win.archived) && win.archived.expanded === 'false' && (await archiveFetches()) === 0, win && { lastLines: win.lastLines.length, archived: win.archived });
+  check('375×667: no group row overflows the viewport width', verdictOf(await p.evalJs(`[...document.querySelectorAll('.jobs-win .jobs-group')].every((b) => b.getBoundingClientRect().right <= innerWidth + 1)`)));
 } catch (e) {
   failed++; console.error('  ✗ threw:', e.stack || e.message);
 } finally {
   p.close();
 }
 console.log(failed ? `\n${failed} FAILED` : '\njobs panel test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

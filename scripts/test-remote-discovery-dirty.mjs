@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const { HostManager } = require('../src/hosts.js');
 
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 
 const h = new HostManager({ dataDir: scratch('disc-dirty') });
 const seen = [];
@@ -47,13 +47,13 @@ ok(raw.length <= 2, `raw _discoveryCache.delete confined to invalidate+remove (f
 // The client must react to the broadcast — and must NOT fan out ssh scans for
 // hosts nobody is displaying.
 const wb = readFileSync(new URL('../src/lib/sidebar-workbench.js', import.meta.url), 'utf-8');
-ok(/'remote-sessions'/.test(wb), 'client applies the pushed session list');
+ok(verdictOf(/'remote-sessions'/.test(wb)), 'client applies the pushed session list');
 ok(!/_loadRemoteHost\(id, \{ fresh: true \}\)[\s\S]{0,80}remote-sessions/.test(wb) && !/remote-discovery-dirty/.test(wb),
    'client does NOT re-fetch on the signal (the computation is not the orchestrator-side clients\' job)');
-ok(/msg\.error[\s\S]{0,200}sessions: cur\?\.sessions \|\| null/.test(wb), 'an unreachable machine degrades to the labelled last-known list');
+ok(verdictOf(/msg\.error[\s\S]{0,200}sessions: cur\?\.sessions \|\| null/.test(wb)), 'an unreachable machine degrades to the labelled last-known list');
 const srv = readFileSync(new URL('../server.js', import.meta.url), 'utf-8');
-ok(/onDiscoveryDirty[\s\S]{0,900}discoverSessions[\s\S]{0,300}remote-sessions/.test(srv), 'server computes once and pushes the RESULT');
-ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation when nobody is connected');
+ok(verdictOf(/onDiscoveryDirty[\s\S]{0,900}discoverSessions[\s\S]{0,300}remote-sessions/.test(srv)), 'server computes once and pushes the RESULT');
+ok(verdictOf(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv)), 'no computation when nobody is connected');
 
 // ── SWR cold start (2.320.0, inc-msp2srj2): a cold discoverSessions with a
 // persisted last-known list returns it INSTANTLY (stale-marked) and kicks the
@@ -70,7 +70,7 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
   const pr = h2.discoverSessions('hX', {});
   const now = await Promise.race([pr.then(() => true, () => true), new Promise((res) => setImmediate(() => res(false)))]);
   const r = await pr;
-  ok(now && r.length === 1 && r[0].stale === true, `cold call serves the persisted list instantly — before the loop turned (${Date.now() - t0} ms) — stale-marked`);
+  ok(gateOf(now) && r.length === 1 && r[0].stale === true, `cold call serves the persisted list instantly — before the loop turned (${Date.now() - t0} ms) — stale-marked`);
   ok(kicked === 'hX', 'and kicks the background refresh through the dirty channel');
   // ttlMs 0 must NOT serve stale (the ⟳ contract) — it runs the real ladder,
   // which for a fake host fails into the stale-cache rung of the ladder
@@ -78,7 +78,7 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
   // instant return (we assert it does not return the instant-stale shape
   // by checking the SWR branch is gated on ttlMs > 0 in source).
   const src2 = readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf-8');
-  ok(/ttlMs > 0 && !hit && this\._persistedDisc/.test(src2), 'SWR branch is gated on ttlMs > 0 (explicit ⟳ still scans)');
+  ok(verdictOf(/ttlMs > 0 && !hit && this\._persistedDisc/.test(src2)), 'SWR branch is gated on ttlMs > 0 (explicit ⟳ still scans)');
 }
 
 // B-574d (lane nl-paired, 主开发 r4752): THE LAST-KNOWN SESSIONS GO THROUGH THE STORE WRITER — a write at a cadence (after every
@@ -104,7 +104,7 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
     return { handed: handed.length, file: !!last && last[0] === hm._discFile, name: last && last[1].name, both: !!(bytes && bytes.hA && bytes.hB && bytes.hB.sessions[0].sessionId === 'sB'), syncWrites };
   };
   const r = scene(HostManager, 'real');
-  ok(r.handed === 2 && r.file && r.name === 'remote-sessions-cache.write' && r.both && r.syncWrites === 0, 'B-574d: the last-known sessions are handed to THE STORE WRITER under their row\'s name at every result (the bytes made at the write: both lists), with no synchronous write of the file on the loop — ' + JSON.stringify(r));
+  ok(r.handed === 2 && gateOf(r.file) && r.name === 'remote-sessions-cache.write' && gateOf(r.both) && r.syncWrites === 0, 'B-574d: the last-known sessions are handed to THE STORE WRITER under their row\'s name at every result (the bytes made at the write: both lists), with no synchronous write of the file on the loop — ' + JSON.stringify(r));
   const dir = scratch('disc-cache-landed'); fsm.mkdirSync(dir, { recursive: true });   // the writer writes into the data folder; the hub's always exists
   const hm1 = new HostManager({ dataDir: dir });
   hm1._persistDiscovery('hC', [{ sessionId: 'sC' }]);
@@ -117,4 +117,4 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
 }
 
 console.log(fail ? `\n${fail} FAILED` : '\nALL PASS');
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

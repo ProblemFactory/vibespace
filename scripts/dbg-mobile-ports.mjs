@@ -21,7 +21,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const PORT = 3989, CDP_PORT = 9339;
 const wt = '/tmp/vs-mports-smoke';
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -77,21 +77,21 @@ try {
   await evalJs('window.app ? app.ready : Promise.reject(new Error("no app"))');
   await sleep(800);
 
-  check('app is in mobile mode', await evalJs('app.isMobile === true'));
+  check('app is in mobile mode', verdictOf(await evalJs('app.isMobile === true')));
   // open the sidebar (mobile hamburger)
   await evalJs(`app.sidebar.toggle(true)`);
   await sleep(400);
-  check('sidebar open (mobile overlay)', await evalJs(`document.getElementById('sidebar').classList.contains('open')`));
+  check('sidebar open (mobile overlay)', verdictOf(await evalJs(`document.getElementById('sidebar').classList.contains('open')`)));
 
   // rail must NOT render on mobile; classic tabs must be visible
-  check('rail absent on mobile', await evalJs(`!document.getElementById('sidebar-rail')`));
+  check('rail absent on mobile', verdictOf(await evalJs(`!document.getElementById('sidebar-rail')`)));
   const tabsVisible = await evalJs(`(() => { const t = document.querySelector('.sidebar-tabs'); return t ? getComputedStyle(t).display !== 'none' : false; })()`);
-  check('classic tab bar visible on mobile', tabsVisible);
+  check('classic tab bar visible on mobile', verdictOf(tabsVisible));
 
   // switch to Remote tab
   await evalJs(`app.sidebar._activeTab = 'mounts'; app.sidebar._tabTouched = true; app.sidebar._updateTabs?.(); app.sidebar._render();`);
   await sleep(900);
-  check('mounts panel rendered', await evalJs(`!!document.querySelector('#sidebar .mounts-panel')`));
+  check('mounts panel rendered', verdictOf(await evalJs(`!!document.querySelector('#sidebar .mounts-panel')`)));
 
   // This-machine row + its ports (🔌) button
   const rowInfo = await evalJs(`(() => {
@@ -101,10 +101,10 @@ try {
     const btns = [...local.querySelectorAll('button')].map(b => b.dataset.tip || b.title || b.textContent.trim());
     return { found: true, btns };
   })()`);
-  check('This-machine row present', rowInfo.found, JSON.stringify(rowInfo));
+  check('This-machine row present', verdictOf(rowInfo.found), JSON.stringify(rowInfo));
   console.log('    row buttons:', JSON.stringify(rowInfo.btns || []));
   const hasPortsBtn = (rowInfo.btns || []).some((t) => /port/i.test(t));
-  check('ports button on the row', hasPortsBtn, JSON.stringify(rowInfo.btns));
+  check('ports button on the row', verdictOf(hasPortsBtn), JSON.stringify(rowInfo.btns));
 
   // the ports button icon must be the CONNECTOR, not the IEC power symbol
   // (real report: "电源开关" — users didn't recognize it as port forwarding).
@@ -117,7 +117,7 @@ try {
     const svg = btn?.querySelector('svg');
     return !!svg && !!svg.querySelector('rect') && !/a4\\.9/.test(svg.innerHTML);
   })()`);
-  check('ports icon is a connector, not the power symbol', iconIsConnector);
+  check('ports icon is a connector, not the power symbol', verdictOf(iconIsConnector));
 
   // open the ports dialog for the local machine
   await evalJs(`app.sidebar._showPortsDialog({ id: '__local__', name: 'This machine', transport: 'local' })`);
@@ -132,10 +132,10 @@ try {
     const dlgZ = parseInt(cs.zIndex) || 0;
     return { present: true, w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.x), display: cs.display, dlgZ, sidebarZ, onScreen: r.width > 0 && r.x >= 0 && r.x < 390 };
   })()`);
-  check('ports dialog opens', dlg.present, JSON.stringify(dlg));
+  check('ports dialog opens', verdictOf(dlg.present), JSON.stringify(dlg));
   console.log('    dialog geometry:', JSON.stringify(dlg));
-  check('dialog above the mobile sidebar overlay', dlg.present && dlg.dlgZ > dlg.sidebarZ, `dlgZ=${dlg.dlgZ} sidebarZ=${dlg.sidebarZ}`);
-  check('dialog fits the phone viewport', dlg.present && dlg.onScreen && dlg.w <= 390, JSON.stringify(dlg));
+  check('dialog above the mobile sidebar overlay', gateOf(dlg.present) && dlg.dlgZ > dlg.sidebarZ, `dlgZ=${dlg.dlgZ} sidebarZ=${dlg.sidebarZ}`);
+  check('dialog fits the phone viewport', gateOf(dlg.present) && gateOf(dlg.onScreen) && dlg.w <= 390, JSON.stringify(dlg));
 
   // forward the dev server port via the dialog's manual input
   await evalJs(`(() => {
@@ -147,7 +147,7 @@ try {
   })()`);
   await sleep(1500);
   const fwd = await evalJs(`fetch('/api/port-forwards').then(r => r.json()).then(d => d.forwards.find(f => f.remotePort === ${DEV_PORT}) || null)`);
-  check('forward created from the dialog', !!fwd && fwd.active, JSON.stringify(fwd));
+  check('forward created from the dialog', !!fwd && verdictOf(fwd.active), JSON.stringify(fwd));
 
   // Open → embedded browser window through the proxy (works on mobile?)
   const winCount0 = await evalJs(`app.wm.windows.size`);
@@ -157,7 +157,7 @@ try {
   check('Open creates a browser window on mobile', winCount1 === winCount0 + 1, `${winCount0} -> ${winCount1}`);
   const iframeUrl = await evalJs(`(() => { const w = [...app.wm.windows.values()].pop(); const f = w.element.querySelector('iframe'); return f ? f.src : null; })()`);
   console.log('    browser iframe src:', iframeUrl);
-  check('browser window went through the proxy', (iframeUrl || '').includes('/proxy/'), iframeUrl);
+  check('browser window went through the proxy', verdictOf((iframeUrl || '').includes('/proxy/')), iframeUrl);
   // Informational only: reaching the port through node-unblocker with a
   // nested-http URL is unreliable in this throwaway server (SSRF/loopback
   // handling differs from a real deploy); the flow above already proves the
@@ -170,4 +170,4 @@ try {
   ws.close();
 }
 console.log(failed ? `\n${failed} FAILED` : '\nmobile ports flow OK');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

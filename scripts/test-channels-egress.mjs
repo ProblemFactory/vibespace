@@ -47,7 +47,7 @@ const require = createRequire(import.meta.url);
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 // ── THE RULE, as a function over injected inputs (the controls drive it over
 //    synthetic files; the census drives it over the tree) ──────────────────
@@ -166,7 +166,7 @@ if (!files) {
       // request itself: an EMPTY declaration is honest there, and the census
       // still holds it to it (a literal that appears later is undeclared).
       const constructs = PRIMITIVE.test(blankComments(text));
-      ok(Array.isArray(mod.EGRESS) && (mod.EGRESS.length > 0 || !constructs), `${rel} declares ${constructs ? 'a non-empty' : 'its'} EGRESS (${constructs ? 'an adapter that constructs requests names its hosts' : 'it constructs no request of its own, so an empty declaration is the truth'})`);
+      ok(gateOf(Array.isArray(mod.EGRESS)) && (mod.EGRESS.length > 0 || !constructs), `${rel} declares ${constructs ? 'a non-empty' : 'its'} EGRESS (${constructs ? 'an adapter that constructs requests names its hosts' : 'it constructs no request of its own, so an empty declaration is the truth'})`);
     }
     input.push({ rel, text, egress, api });
   }
@@ -174,7 +174,7 @@ if (!files) {
   const egressFiles = r.rows.filter((x) => x.primitive || x.adapter);
   console.log(`  … ${input.length} files walked; ${egressFiles.length} construct requests:`);
   for (const x of egressFiles) console.log(`     ${x.adapter ? '[adapter] ' : ''}${x.rel}: ${x.hosts.length ? x.hosts.join(', ') : '(no vendor host literal)'}`);
-  ok(input.some((f) => f.rel === 'src/channels/lark.js') && input.some((f) => f.rel === 'src/channels/gmail.js') && input.some((f) => f.rel === 'src/channels/live/gmail.js' && Array.isArray(f.egress)) && input.some((f) => f.rel === 'src/gmail-sync.js') && input.some((f) => f.rel === 'src/mounts.js') && input.some((f) => f.rel === 'server.js'),
+  ok(gateOf(input.some((f) => f.rel === 'src/channels/lark.js')) && gateOf(input.some((f) => f.rel === 'src/channels/gmail.js')) && gateOf(input.some((f) => f.rel === 'src/channels/live/gmail.js' && Array.isArray(f.egress))) && gateOf(input.some((f) => f.rel === 'src/gmail-sync.js')) && gateOf(input.some((f) => f.rel === 'src/mounts.js')) && verdictOf(input.some((f) => f.rel === 'server.js')),
     'SCOPE: the walk really covers the two adapters, the Gmail push lane (judged as an adapter), the two seeded files and server.js (a census that can pass vacuously is not a census)');
   ok(r.undeclared.length === 0, `every host a channel adapter constructs a request to is in its own EGRESS (${r.undeclared.length} undeclared)`, r.undeclared.map((x) => `${x.rel} → ${x.host}`).join('\n    '));
   ok(r.deadDeclared.length === 0, `every EGRESS entry is a host the adapter really names (${r.deadDeclared.length} dead declarations)`, r.deadDeclared.map((x) => `${x.rel} declares ${x.host} but never names it`).join('\n    '));
@@ -182,12 +182,12 @@ if (!files) {
     r.offenders.map((x) => `${x.rel} → ${x.host}   ⇒ add ALLOW['${x.rel}|${x.host}'] = '<why this request is a decision>'`).join('\n    '));
   ok(r.deadAllow.length === 0, `no dead allowlist entry (${r.deadAllow.length}) — a file that stopped constructing its allowlisted request must lose its row`, r.deadAllow.join('\n    '));
   // The two seeds §3.1 names are still the reason the allowlist is not a ban.
-  ok(Object.keys(ALLOW).some((k) => k.startsWith('src/gmail-sync.js|')) && Object.keys(ALLOW).some((k) => k.startsWith('src/mounts.js|')),
+  ok(gateOf(Object.keys(ALLOW).some((k) => k.startsWith('src/gmail-sync.js|'))) && verdictOf(Object.keys(ALLOW).some((k) => k.startsWith('src/mounts.js|'))),
     'the allowlist was seeded at birth with src/gmail-sync.js and src/mounts.js (§3.1: an absolute ban would have been red on its first commit)');
   // A channel adapter's hosts and gmail-sync's overlap ON PURPOSE (the same
   // Google endpoints, two consumers); the census must see both, not collapse them.
   const gm = r.rows.find((x) => x.rel === 'src/channels/gmail.js'), gs = r.rows.find((x) => x.rel === 'src/gmail-sync.js');
-  ok(gm && gs && gm.hosts.some((h) => gs.hosts.includes(h)), 'the Gmail adapter and gmail-sync name the same vendor hosts and each is judged by its own rule (adapter: EGRESS; gmail-sync: the allowlist)');
+  ok(gateOf(gm) && gateOf(gs) && verdictOf(gm.hosts.some((h) => gs.hosts.includes(h))), 'the Gmail adapter and gmail-sync name the same vendor hosts and each is judged by its own rule (adapter: EGRESS; gmail-sync: the allowlist)');
 }
 
 // ── 2. CONTROLS over synthetic files — the rule's own edges ──────────────
@@ -223,7 +223,7 @@ console.log('§2 controls: the rule over synthetic files');
   ok(r8.undeclared.length === 0 && r8.deadDeclared.length === 0, "an adapter's literals are checked whether or not the file holds a primitive today (the declaration must be trustworthy before the first fetch lands)");
   const r9 = census([mk('src/x.js', "const u = `https://${host}/api`;\nawait fetch(u);\n")], {});
   ok(r9.offenders.length === 0, 'BOUNDARY, stated: a host held in a VARIABLE is invisible to a literal census — the adapter contract (fence 3, in-process fetch) and review carry that case');
-  ok(PRIMITIVE.test("https.request({") && PRIMITIVE.test("await fetch(") && PRIMITIVE.test("import got from 'got'; got(") && !PRIMITIVE.test("fetchJson(") && !PRIMITIVE.test("prefetch("),
+  ok(gateOf(PRIMITIVE.test("https.request({")) && gateOf(PRIMITIVE.test("await fetch(")) && gateOf(PRIMITIVE.test("import got from 'got'; got(")) && !PRIMITIVE.test("fetchJson(") && !PRIMITIVE.test("prefetch("),
     'the primitive detector matches the request shapes and not fetchJson/prefetch');
 }
 
@@ -236,10 +236,10 @@ console.log('§2 controls: the rule over synthetic files');
   const wh = fs.readFileSync(path.join(REPO, 'src/channels/webhook.js'), 'utf-8');
   const at = (t, n) => t.indexOf(n);
   const fetchBody = ef.slice(at(ef, 'async function fenceFetch('));
-  ok(at(fetchBody, 'resolveOnce(') > 0 && at(fetchBody, 'mod.request(') > at(fetchBody, 'resolveOnce(') && /lookup: pinned/.test(fetchBody) && (fetchBody.match(/mod\.request\(/g) || []).length === 1, 'owner-configured host: the fence resolves ONCE, then makes its ONE request with the lookup pinned to the judged address');
-  ok(/const why = addressVerdict\(a\.address\); if \(why\) return \{ ok: false, code: 'private-address'/.test(ef) && /for \(const a of all\)/.test(ef), 'owner-configured host: EVERY resolved answer is judged by addressVerdict (private refused unless the switch says so)');
-  ok(!/statusCode >= 300[^\n]*location/i.test(fetchBody) && /code: 'redirect'/.test(fetchBody), 'owner-configured host: a 3xx is an answer — never followed');
-  ok(!PRIMITIVE.test(wh.replace(/fetchFence\(/g, 'X(')) && /fetchFence\(c\.delivery\.replyUrl, /.test(wh) && /EGRESS = Object\.freeze\(\[\]\)/.test(wh), 'the webhook adapter constructs no request: its one send goes through the fence (EGRESS = [] — no vendor host)');
+  ok(at(fetchBody, 'resolveOnce(') > 0 && at(fetchBody, 'mod.request(') > at(fetchBody, 'resolveOnce(') && gateOf(/lookup: pinned/.test(fetchBody)) && (fetchBody.match(/mod\.request\(/g) || []).length === 1, 'owner-configured host: the fence resolves ONCE, then makes its ONE request with the lookup pinned to the judged address');
+  ok(gateOf(/const why = addressVerdict\(a\.address\); if \(why\) return \{ ok: false, code: 'private-address'/.test(ef)) && verdictOf(/for \(const a of all\)/.test(ef)), 'owner-configured host: EVERY resolved answer is judged by addressVerdict (private refused unless the switch says so)');
+  ok(!/statusCode >= 300[^\n]*location/i.test(fetchBody) && verdictOf(/code: 'redirect'/.test(fetchBody)), 'owner-configured host: a 3xx is an answer — never followed');
+  ok(!PRIMITIVE.test(wh.replace(/fetchFence\(/g, 'X(')) && gateOf(/fetchFence\(c\.delivery\.replyUrl, /.test(wh)) && verdictOf(/EGRESS = Object\.freeze\(\[\]\)/.test(wh)), 'the webhook adapter constructs no request: its one send goes through the fence (EGRESS = [] — no vendor host)');
 }
 
 // ── the exit check (lane cli-update-needs-nothing; the owner 2026-11-17 «A就行»): THE OWNER-CONFIGURED CHECK ADDRESS — no vendor's host
@@ -253,13 +253,13 @@ console.log('§2 controls: the rule over synthetic files');
   const ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf-8');
   const rb = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf-8');
   const ex = fs.readFileSync(path.join(REPO, 'src/browser-exit.js'), 'utf-8');
-  ok((ec.match(/https?\.request\(/g) || []).length === 1 && /sock = net\.connect\(\{ host: fw\.hostname, port: Number\(fw\.port\) \}\);/.test(ec) && (ec.match(/net\.connect\(/g) || []).length === 1 && /CONNECT \$\{target\} HTTP\/1\.1/.test(ec) && hostsOf(blankComments(ec)).size === 0,
+  ok((ec.match(/https?\.request\(/g) || []).length === 1 && gateOf(/sock = net\.connect\(\{ host: fw\.hostname, port: Number\(fw\.port\) \}\);/.test(ec)) && (ec.match(/net\.connect\(/g) || []).length === 1 && gateOf(/CONNECT \$\{target\} HTTP\/1\.1/.test(ec)) && hostsOf(blankComments(ec)).size === 0,
     'the exit check: ONE request, its only socket to the profile\'s forwarder (CONNECT host:port — the name the proxy\'s to resolve), no host literal in the file');
-  ok(/if \(status >= 300 && status < 400\) \{ finish\(\{ ok: true, status, contentType, body: Buffer\.alloc\(0\) \}\); return; \}/.test(ec) && /n > capBytes/.test(ec) && /deadlineMs = X\.DEADLINE_MS/.test(ec) && /servername: net\.isIP\(host\) \? undefined : host/.test(ec),
+  ok(gateOf(/if \(status >= 300 && status < 400\) \{ finish\(\{ ok: true, status, contentType, body: Buffer\.alloc\(0\) \}\); return; \}/.test(ec)) && gateOf(/n > capBytes/.test(ec)) && gateOf(/deadlineMs = X\.DEADLINE_MS/.test(ec)) && verdictOf(/servername: net\.isIP\(host\) \? undefined : host/.test(ec)),
     'the exit check: a redirect is an answer (never followed), the body capped, a deadline, TLS verified as the check host itself');
-  ok((ks.match(/EXC\.requestThrough\(/g) || []).length === 1 && /const url = EXIT\.checkUrlVerdict\(readSetting\(EXIT\.EXIT_URL_KEY\)\.v\);/.test(ks) && /const readSetting = \(k\) => \{[\s\S]{0,200}v = serverSetting\(k\)/.test(ks) && /router\.post\('\/api\/browser\/profiles\/:id\/exit-check'[\s\S]{0,200}refuseAgentBearer\(req, res, EXIT_IS_USERS\)/.test(rb) && /const DEADLINE_MS = 8000;/.test(ex),
+  ok((ks.match(/EXC\.requestThrough\(/g) || []).length === 1 && gateOf(/const url = EXIT\.checkUrlVerdict\(readSetting\(EXIT\.EXIT_URL_KEY\)\.v\);/.test(ks)) && gateOf(/const readSetting = \(k\) => \{[\s\S]{0,200}v = serverSetting\(k\)/.test(ks)) && gateOf(/router\.post\('\/api\/browser\/profiles\/:id\/exit-check'[\s\S]{0,200}refuseAgentBearer\(req, res, EXIT_IS_USERS\)/.test(rb)) && verdictOf(/const DEADLINE_MS = 8000;/.test(ex)),
     'the exit check\'s gates: its one caller the keeper\'s exitCheck, the address read from the owner\'s setting (judged by checkUrlVerdict), the route a person\'s (an agent\'s token refused) — never a timer');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -35,7 +35,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const PIN_REL = 'src/desktop-pin.js', ENGINE_REL = 'src/server/window-targets-engine.js', DOOR_REL = 'src/browser-profiles.js';
@@ -94,16 +94,16 @@ function pureChecks(PP) {
 console.log('① PURE (src/desktop-pin.js)');
 {
   const r = pureChecks(P);
-  ok(r.parseOk, 'parsePin: WxH with x / X / ×, spaces trimmed, {w,h}, the bound edges 320×240 and 7680×4320 accepted; auto = null');
-  ok(r.refuseOk, 'parsePin: out of bounds refused by name (size_out_of_bounds, naming the side), not WxH refused bad-size');
-  ok(r.whoOk, 'pinVerdict: the opener on its own window ✓, another conversation ✗ not_your_window, an agent on the user\'s window ✗, the user on any ✓ (auto ⇒ null), a bad size refused before who', r.who);
-  ok(r.upscale, 'fitForPin UPSCALES: 1600×900 in 3200×1800 ⇒ scale 2 (a pin always rescales — never capped at 1)', r.up);
-  ok(r.downOk && r.letterbox, 'fitForPin: contain + centred (700×500 ⇒ 0.4375, y offset whole px; 1280×720 in 640×720 ⇒ 0.5 letterboxed at y 180)', { down: r.down, tall: r.tall });
-  ok(r.noPin, 'fitForPin: no pin / no pane ⇒ null (the caller keeps its own fit)');
-  ok(same(r.chips, ['1920×1080 (pinned)', '1920×1080（钉住）', '1280×720（固定）', '', '', '1920×1080 (pinned)']), 'pinChipText: "1920×1080 (pinned)" / 钉住 / 固定; unpinned or invalid ⇒ ""; an unknown language ⇒ en', r.chips);
-  ok(same(r.defaults, [{ w: 1920, h: 1080 }, null, null, null]), 'defaultPinFor (E2c calls it): pixels ⇒ 1920×1080, tree / none ⇒ unpinned', r.defaults);
-  ok(same(P.SIZE_CHOICES.map((c) => [c.id, c.pin, !!c.custom]), [['pane', null, false], ['1280x720', { w: 1280, h: 720 }, false], ['1920x1080', { w: 1920, h: 1080 }, false], ['2560x1440', { w: 2560, h: 1440 }, false], ['custom', null, true]])
-    && Object.isFrozen(P.SIZE_CHOICES) && P.SIZE_CHOICES.every((c) => Object.isFrozen(c) && (!c.pin || Object.isFrozen(c.pin))) && same(P.PIN_BOUNDS, { minW: 320, maxW: 7680, minH: 240, maxH: 4320 }),
+  ok(verdictOf(r.parseOk), 'parsePin: WxH with x / X / ×, spaces trimmed, {w,h}, the bound edges 320×240 and 7680×4320 accepted; auto = null');
+  ok(verdictOf(r.refuseOk), 'parsePin: out of bounds refused by name (size_out_of_bounds, naming the side), not WxH refused bad-size');
+  ok(verdictOf(r.whoOk), 'pinVerdict: the opener on its own window ✓, another conversation ✗ not_your_window, an agent on the user\'s window ✗, the user on any ✓ (auto ⇒ null), a bad size refused before who', r.who);
+  ok(verdictOf(r.upscale), 'fitForPin UPSCALES: 1600×900 in 3200×1800 ⇒ scale 2 (a pin always rescales — never capped at 1)', r.up);
+  ok(gateOf(r.downOk) && verdictOf(r.letterbox), 'fitForPin: contain + centred (700×500 ⇒ 0.4375, y offset whole px; 1280×720 in 640×720 ⇒ 0.5 letterboxed at y 180)', { down: r.down, tall: r.tall });
+  ok(verdictOf(r.noPin), 'fitForPin: no pin / no pane ⇒ null (the caller keeps its own fit)');
+  ok(verdictOf(same(r.chips, ['1920×1080 (pinned)', '1920×1080（钉住）', '1280×720（固定）', '', '', '1920×1080 (pinned)'])), 'pinChipText: "1920×1080 (pinned)" / 钉住 / 固定; unpinned or invalid ⇒ ""; an unknown language ⇒ en', r.chips);
+  ok(verdictOf(same(r.defaults, [{ w: 1920, h: 1080 }, null, null, null])), 'defaultPinFor (E2c calls it): pixels ⇒ 1920×1080, tree / none ⇒ unpinned', r.defaults);
+  ok(gateOf(same(P.SIZE_CHOICES.map((c) => [c.id, c.pin, !!c.custom]), [['pane', null, false], ['1280x720', { w: 1280, h: 720 }, false], ['1920x1080', { w: 1920, h: 1080 }, false], ['2560x1440', { w: 2560, h: 1440 }, false], ['custom', null, true]]))
+    && gateOf(Object.isFrozen(P.SIZE_CHOICES)) && gateOf(P.SIZE_CHOICES.every((c) => Object.isFrozen(c) && (!c.pin || Object.isFrozen(c.pin)))) && verdictOf(same(P.PIN_BOUNDS, { minW: 320, maxW: 7680, minH: 240, maxH: 4320 })),
   'THE size table (lane launch-picture-size): follow the pane / 1280×720 / 1920×1080 / 2560×1440 / custom, frozen — and the bounds');
   ok(!/require\(|import /.test(read(PIN_REL).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')), 'src/desktop-pin.js imports nothing (PURE)');
 }
@@ -138,20 +138,20 @@ console.log('⑧ lane launch-picture-size — THE ONE SIZE TABLE');
   const L = [['', null], [null, null], ['pane', null], ['1280x720', { w: 1280, h: 720 }], ['1920x1080', { w: 1920, h: 1080 }], ['2560x1440', { w: 2560, h: 1440 }], ['1600x900', { w: 1600, h: 900 }], ['auto', null]];
   const lOk = L.every(([c, want]) => { const v = P.launchPinOf(c); return v.ok && same(v.pin, want); });
   const lc = P.launchPinOf('custom'), lb = P.launchPinOf('100x100');
-  ok(lOk && !lc.ok && lc.code === 'bad-size' && lc.error === P.parsePin('custom').error && !lb.ok && lb.code === 'size_out_of_bounds', 'launchPinOf: pane / \'\' / null ⇒ none, a table id ⇒ its pin, a typed WxH ⇒ parsed, `custom` with no size and an out-of-bounds size refused in parsePin\'s OWN words', { lc, lb });
+  ok(gateOf(lOk) && !lc.ok && lc.code === 'bad-size' && lc.error === P.parsePin('custom').error && !lb.ok && lb.code === 'size_out_of_bounds', 'launchPinOf: pane / \'\' / null ⇒ none, a table id ⇒ its pin, a typed WxH ⇒ parsed, `custom` with no size and an out-of-bounds size refused in parsePin\'s OWN words', { lc, lb });
   const r = pureChecks(P);
-  ok(r.supportOk, 'pinSupportVerdict over the REAL rung table: xpra (client) and Xvfb+x11vnc (keeper-fixed) hold a pin; Xvnc (follows), the shared desktop and an unknown rung ⇒ pin_unsupported naming the backend, that the picture follows the pane, and the way out', r.support);
+  ok(verdictOf(r.supportOk), 'pinSupportVerdict over the REAL rung table: xpra (client) and Xvfb+x11vnc (keeper-fixed) hold a pin; Xvnc (follows), the shared desktop and an unknown rung ⇒ pin_unsupported naming the backend, that the picture follows the pane, and the way out', r.support);
   const m0 = P.pinMenuModel(null), m1 = P.pinMenuModel({ w: 1920, h: 1080 }), m2 = P.pinMenuModel({ w: 1600, h: 900 });
-  ok(same(m0.map((x) => [x.kind, x.id, x.checked]), [['size', '1280x720', false], ['size', '1920x1080', false], ['size', '2560x1440', false], ['custom', 'custom', false], ['auto', 'auto', true]])
-    && m1.find((x) => x.checked).id === '1920x1080' && m2.find((x) => x.checked).kind === 'custom' && same(m2.find((x) => x.kind === 'custom').pin, { w: 1600, h: 900 }),
+  ok(gateOf(same(m0.map((x) => [x.kind, x.id, x.checked]), [['size', '1280x720', false], ['size', '1920x1080', false], ['size', '2560x1440', false], ['custom', 'custom', false], ['auto', 'auto', true]]))
+    && m1.find((x) => x.checked).id === '1920x1080' && m2.find((x) => x.checked).kind === 'custom' && verdictOf(same(m2.find((x) => x.kind === 'custom').pin, { w: 1600, h: 900 })),
   'pinMenuModel: the table\'s sizes in its order, Custom…, Auto — ✓ on the current (unpinned ⇒ Auto; a custom pin ⇒ Custom… carrying its size)', { m0, m2 });
   const c = sizeCensus(P, trackedTexts());
-  ok(c.ok && same(c.lists.slice().sort(), [SIZE_HOME, ...SIZE_MIRRORS].sort()), `THE CENSUS: no second list of sizes in src/ or data/bin/ — only the table and the two CLI help mirrors, each saying "${c.want}"`, c);
+  ok(gateOf(c.ok) && verdictOf(same(c.lists.slice().sort(), [SIZE_HOME, ...SIZE_MIRRORS].sort())), `THE CENSUS: no second list of sizes in src/ or data/bin/ — only the table and the two CLI help mirrors, each saying "${c.want}"`, c);
   const ui = read('src/lib/pin-size-ui.js'), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), live = read('src/lib/browser-live-window.js');
-  ok(/import \{ SIZE_CHOICES, launchPinOf \} from '\.\.\/desktop-pin\.js';/.test(launcher) && /for \(const c of SIZE_CHOICES\) \{/.test(launcher) && /pinMenuModel\(cur\)\.map\(/.test(ui)
-    && /const pinItems = \(\) => pinSizeItems\(pinOf\(rec && rec\.pin\), /.test(win) && /const pinItems = \(\) => pinSizeItems\(fixedNow\(\), /.test(live),
+  ok(gateOf(/import \{ SIZE_CHOICES, launchPinOf \} from '\.\.\/desktop-pin\.js';/.test(launcher)) && gateOf(/for \(const c of SIZE_CHOICES\) \{/.test(launcher)) && gateOf(/pinMenuModel\(cur\)\.map\(/.test(ui))
+    && gateOf(/const pinItems = \(\) => pinSizeItems\(pinOf\(rec && rec\.pin\), /.test(win)) && verdictOf(/const pinItems = \(\) => pinSizeItems\(fixedNow\(\), /.test(live)),
   'the Apps dialog\'s select draws its options from SIZE_CHOICES; both windows\' Pin size… rows come from pinMenuModel (pin-size-ui pinSizeItems)');
-  ok(/validate: \(v\) => \{ const r = parsePin\(v\); return !r\.ok \? r\.error :/.test(ui) && /await showInputDialog\(\{/.test(ui) && !/\bprompt\(/.test(ui),
+  ok(gateOf(/validate: \(v\) => \{ const r = parsePin\(v\); return !r\.ok \? r\.error :/.test(ui)) && gateOf(/await showInputDialog\(\{/.test(ui)) && !/\bprompt\(/.test(ui),
     'Custom… is a showInputDialog (never a native prompt) refused INLINE in parsePin\'s own words');
 }
 
@@ -165,8 +165,8 @@ function doorChecks(BB) {
 console.log('② the door (desktopAppNewVerdict)');
 {
   const r = doorChecks(B);
-  ok(r.ok, 'the door takes --size: 1600x900 ⇒ pin, auto / absent ⇒ null, out of bounds / not WxH refused by name, on a profile row desktop_app_only', r.v);
-  ok(/\[--size WxH\]/.test(B.DESKTOP_APP_DOOR) && !('size' in B.NOT_YET_FLAGS) && !('mode' in B.NOT_YET_FLAGS), 'the door\'s words name --size WxH; --mode is no longer not_yet either (lane e2c)');
+  ok(verdictOf(r.ok), 'the door takes --size: 1600x900 ⇒ pin, auto / absent ⇒ null, out of bounds / not WxH refused by name, on a profile row desktop_app_only', r.v);
+  ok(gateOf(/\[--size WxH\]/.test(B.DESKTOP_APP_DOOR)) && !('size' in B.NOT_YET_FLAGS) && !('mode' in B.NOT_YET_FLAGS), 'the door\'s words name --size WxH; --mode is no longer not_yet either (lane e2c)');
 }
 
 const SESS_A = { agentToken: 'vsst_A', _browserKey: 'bk-0000000a', claudeSessionId: 'aaaaaaaa-1111-4000-8000-0000000000a1', backendSessionId: 'aaaaaaaa-1111-4000-8000-0000000000a1', backend: 'claude', name: 'A', mode: 'chat' };
@@ -202,14 +202,14 @@ console.log('③ the REAL engine over a fake keeper');
 {
   const W = world(ENGINE, 'eng');
   const r = await W.engine.openAgentBrowser(B.desktopAppNewVerdict({ label: 'Site', backend: 'desktop-app', size: '1600x900' }), W.fA);
-  ok(same(W.launches[0].opts.pin, { w: 1600, h: 900 }) && same(W.records.get(r.handle).pin, { w: 1600, h: 900 }), '`new … --size 1600x900` ⇒ the keeper\'s launch opts carry the pin ⇒ the record\'s fact', W.launches[0].opts);
+  ok(gateOf(same(W.launches[0].opts.pin, { w: 1600, h: 900 })) && verdictOf(same(W.records.get(r.handle).pin, { w: 1600, h: 900 })), '`new … --size 1600x900` ⇒ the keeper\'s launch opts carry the pin ⇒ the record\'s fact', W.launches[0].opts);
   const r0 = await W.engine.openAgentBrowser(B.desktopAppNewVerdict({ label: 'Plain', backend: 'desktop-app' }), W.fA);
   ok(!('pin' in W.launches[1].opts) && !('pin' in W.records.get(r0.handle)), 'no --size ⇒ no pin in the opts, none on the record (tree mode stays unpinned)');
   const a = await W.engine.setSize(r.handle, '1280x720', W.fA);
-  ok(same(a, { handle: r.handle, pin: { w: 1280, h: 720 } }) && same(W.pins.slice(-1)[0], { id: r.handle, pin: { w: 1280, h: 720 } }) && same(W.records.get(r.handle).pin, { w: 1280, h: 720 }), 'the OPENER: `size <h> 1280x720` ⇒ written through keeper.setPin (the one writer), answered from the keeper\'s record', a);
+  ok(gateOf(same(a, { handle: r.handle, pin: { w: 1280, h: 720 } })) && gateOf(same(W.pins.slice(-1)[0], { id: r.handle, pin: { w: 1280, h: 720 } })) && verdictOf(same(W.records.get(r.handle).pin, { w: 1280, h: 720 })), 'the OPENER: `size <h> 1280x720` ⇒ written through keeper.setPin (the one writer), answered from the keeper\'s record', a);
   const other = await codeOf(W.engine.setSize(r.handle, '1920x1080', W.fB));
   const n = W.pins.length;
-  ok(other === 'not_your_window' && W.pins.length === n && same(W.records.get(r.handle).pin, { w: 1280, h: 720 }), 'another conversation ⇒ not_your_window, nothing written', other);
+  ok(other === 'not_your_window' && W.pins.length === n && verdictOf(same(W.records.get(r.handle).pin, { w: 1280, h: 720 })), 'another conversation ⇒ not_your_window, nothing written', other);
   const g = await W.keeper.launch({ appId: 'gedit' }, {});
   const usersWin = await codeOf(W.engine.setSize(g.id, '1280x720', W.fA));
   ok(usersWin === 'not_your_window', 'an agent on a window it did not open (the user\'s gedit) ⇒ not_your_window — the user pins it from its menu', usersWin);
@@ -217,13 +217,13 @@ console.log('③ the REAL engine over a fake keeper');
   const gone = await codeOf(W.engine.setSize('da-nope', '1280x720', W.fA));
   ok(bad === 'size_out_of_bounds' && gone === 'not-found', 'a bad size ⇒ refused by name; an unknown handle ⇒ not-found', { bad, gone });
   const rl = await W.keeper.relaunch(r.handle);
-  ok(same(rl.app.pin, { w: 1280, h: 720 }) && rl.app.origin === 'agent-browser', 'a relaunch KEEPS the pin (the successor\'s opts carry it, beside origin/opener/label)', rl.app);
+  ok(gateOf(same(rl.app.pin, { w: 1280, h: 720 })) && rl.app.origin === 'agent-browser', 'a relaunch KEEPS the pin (the successor\'s opts carry it, beside origin/opener/label)', rl.app);
   const off = await W.engine.setSize(rl.app.id, 'auto', W.fA);
   ok(off.pin === null && !('pin' in W.records.get(rl.app.id)), '`size <h> auto` ⇒ unpinned (the fact removed — the window fits the pane again)', off);
   // lane launch-picture-size: `vibespace-window open <app> --size WxH` — born pinned; the opener's right by pinVerdict
   const n0 = W.launches.length;
   const o1 = await W.engine.open({ appId: 'gedit', size: '1280x720' }, W.fA);
-  ok(same(W.launches[n0].body.pin, { w: 1280, h: 720 }) && same(W.records.get(o1.handle).pin, { w: 1280, h: 720 }) && o1.attached === true, '⑧ `open gedit --size 1280x720` ⇒ the keeper\'s launch body carries the pin ⇒ the window is BORN pinned (and attached)', W.launches[n0]);
+  ok(gateOf(same(W.launches[n0].body.pin, { w: 1280, h: 720 })) && gateOf(same(W.records.get(o1.handle).pin, { w: 1280, h: 720 })) && o1.attached === true, '⑧ `open gedit --size 1280x720` ⇒ the keeper\'s launch body carries the pin ⇒ the window is BORN pinned (and attached)', W.launches[n0]);
   const o2 = await W.engine.open({ appId: 'gedit', size: 'auto' }, W.fA);
   ok(!('pin' in W.launches[n0 + 1].body) && !('pin' in W.records.get(o2.handle)), '⑧ `--size auto` ⇒ no pin (it fits the pane)');
   const n1 = W.launches.length;
@@ -235,26 +235,26 @@ console.log('③ the REAL engine over a fake keeper');
 console.log('④ the keeper + route + window seams (source)');
 {
   const ds = read('src/desktop-serve.js'), keeper = read('src/server/desktop-app-keeper.js'), routes = read('src/routes/desktop-apps.js'), wt = read('src/routes/window-targets.js'), win = read('src/lib/desktop-app-window.js'), view = read('src/lib/xpra-view.js');
-  ok(/function setPin\(id, pin\) \{\n    const rec = store\.apps\[id\];[\s\S]{0,200}const p = stampPin\(rec, pin\);\n    commit\(\);/.test(ds) && /function stampPin\(rec, pin\) \{ const p = pinOf\(pin\); if \(p\) rec\.pin = p; else delete rec\.pin; return p; \}/.test(ds) && (ds.match(/\brec\.pin = /g) || []).length === 1 && (ds.match(/delete rec\.pin\b/g) || []).length === 1, 'desktop-serve setPin is the one writer: the fact set or removed, then commit() (saved + broadcast — a restart restores it, every client hears it)');
-  ok(/const pinAsked = pv\.pin \|\| pinOf\(opts\.pin\);/.test(ds) && /stampPin\(rec, pinAsked\);/.test(ds) && /\.\.\.\(pinOf\(rec\.pin\) \? \{ pin: rec\.pin \} : \{\}\) \}; \/\/ lane e2b: the pin rides the relaunch/.test(ds), 'the launch stamps opts.pin; the relaunch\'s opts carry rec.pin (the real keeper; the heavy suite drives it)');
-  ok(/'keep-alive', 'pin', 'relaunch'/.test(ds) && /if \(op === 'pin'\) \{ const v = parsePin\(p\.pin\);/.test(ds) && /acc\(\)\.call\(ro\.hostId, 'pin', \{ id, pin \}\)/.test(keeper), 'the `pin` op (a paired machine\'s window) and the hub keeper\'s setPin routing to it');
-  ok(/router\.post\('\/api\/desktop\/apps\/:id\/pin'[\s\S]{0,300}pinVerdict\(\{ record: ctx\.keeper\.get\(req\.params\.id\), who: 'user',/.test(routes), 'the user route (the window menu) judges who: \'user\' — any window');
+  ok(gateOf(/function setPin\(id, pin\) \{\n    const rec = store\.apps\[id\];[\s\S]{0,200}const p = stampPin\(rec, pin\);\n    commit\(\);/.test(ds)) && gateOf(/function stampPin\(rec, pin\) \{ const p = pinOf\(pin\); if \(p\) rec\.pin = p; else delete rec\.pin; return p; \}/.test(ds)) && (ds.match(/\brec\.pin = /g) || []).length === 1 && (ds.match(/delete rec\.pin\b/g) || []).length === 1, 'desktop-serve setPin is the one writer: the fact set or removed, then commit() (saved + broadcast — a restart restores it, every client hears it)');
+  ok(gateOf(/const pinAsked = pv\.pin \|\| pinOf\(opts\.pin\);/.test(ds)) && gateOf(/stampPin\(rec, pinAsked\);/.test(ds)) && verdictOf(/\.\.\.\(pinOf\(rec\.pin\) \? \{ pin: rec\.pin \} : \{\}\) \}; \/\/ lane e2b: the pin rides the relaunch/.test(ds)), 'the launch stamps opts.pin; the relaunch\'s opts carry rec.pin (the real keeper; the heavy suite drives it)');
+  ok(gateOf(/'keep-alive', 'pin', 'relaunch'/.test(ds)) && gateOf(/if \(op === 'pin'\) \{ const v = parsePin\(p\.pin\);/.test(ds)) && verdictOf(/acc\(\)\.call\(ro\.hostId, 'pin', \{ id, pin \}\)/.test(keeper)), 'the `pin` op (a paired machine\'s window) and the hub keeper\'s setPin routing to it');
+  ok(verdictOf(/router\.post\('\/api\/desktop\/apps\/:id\/pin'[\s\S]{0,300}pinVerdict\(\{ record: ctx\.keeper\.get\(req\.params\.id\), who: 'user',/.test(routes)), 'the user route (the window menu) judges who: \'user\' — any window');
   // lane launch-picture-size: the launch's `pin` — judged at the route (before a paired machine is asked), the support verdict
   // once the rung is resolved (a relaunch never re-judged), the Xvfb rung born at the pin, the codes by status
   const launchRoute = (routes.split("router.post('/api/desktop/apps', async (req, res) => {")[1] || '').split('\n});')[0];
-  ok(/const pv = parsePin\(req\.body && req\.body\.pin !== undefined && req\.body\.pin !== '' \? req\.body\.pin : null\);\n  if \(!pv\.ok\) return fail\(res, \{ code: pv\.code, message: pv\.error \}\);/.test(launchRoute)
-    && /code === 'bad-size' \|\| code === 'size_out_of_bounds' \|\| code === 'pin_unsupported'/.test(routes),
+  ok(gateOf(/const pv = parsePin\(req\.body && req\.body\.pin !== undefined && req\.body\.pin !== '' \? req\.body\.pin : null\);\n  if \(!pv\.ok\) return fail\(res, \{ code: pv\.code, message: pv\.error \}\);/.test(launchRoute))
+    && verdictOf(/code === 'bad-size' \|\| code === 'size_out_of_bounds' \|\| code === 'pin_unsupported'/.test(routes)),
   '⑧ POST /api/desktop/apps judges `pin` in parsePin\'s words before any machine is asked; bad-size / size_out_of_bounds / pin_unsupported answer 400');
   const lsrc = (ds.split('  async function launch(body, opts = {}) {')[1] || '').split('\n  function startDeferred')[0];
   ok(lsrc.indexOf('const pv = parsePin(') > -1 && lsrc.indexOf('const pv = parsePin(') < lsrc.indexOf('const resolved = resolve(') && lsrc.indexOf('if (pv.pin) { const sv = pinSupportVerdict(M.fitPolicyOf({ backend: resolved.backend, via: resolved.via }, backends)') > lsrc.indexOf('const resolved = resolve(')
-    && lsrc.indexOf('pinSupportVerdict(') < lsrc.indexOf('store.apps[id] = rec;') && /geometry: bornGeometry\(rec\),/.test(ds) && /return p && pol && pol\.mode === 'fixed' \? `\$\{p\.w\}x\$\{p\.h\}` : geometry;/.test(ds),
+    && lsrc.indexOf('pinSupportVerdict(') < lsrc.indexOf('store.apps[id] = rec;') && gateOf(/geometry: bornGeometry\(rec\),/.test(ds)) && verdictOf(/return p && pol && pol\.mode === 'fixed' \? `\$\{p\.w\}x\$\{p\.h\}` : geometry;/.test(ds)),
   '⑧ desktop-serve launch: the body\'s pin parsed first, the support verdict on it right after the rung is resolved and before the record exists (the door\'s / a relaunch\'s opts.pin keep e2b\'s road); a keeper-fixed rung\'s X server is born at the pin');
   const eng = read(ENGINE_REL);
-  ok(/const pv = PIN\.pinVerdict\(\{ facts, record: \{ id: String\(appId \|\| 'the app'\), by: \{ sessionId: facts\.sessionId \} \}, who: 'agent', size: b\.size \}\);/.test(eng) && /'bad-size': 400, size_out_of_bounds: 400, pin_unsupported: 400, not_your_window: 403/.test(wt),
+  ok(gateOf(/const pv = PIN\.pinVerdict\(\{ facts, record: \{ id: String\(appId \|\| 'the app'\), by: \{ sessionId: facts\.sessionId \} \}, who: 'agent', size: b\.size \}\);/.test(eng)) && verdictOf(/'bad-size': 400, size_out_of_bounds: 400, pin_unsupported: 400, not_your_window: 403/.test(wt)),
     '⑧ the engine\'s open judges --size by pinVerdict (the caller IS the opener); the agent routes answer the size codes 400 / 403');
-  ok(/router\.post\('\/api\/agent\/window\/size'[\s\S]{0,200}refuseHost\(req, res\)[\s\S]{0,200}agentFacts\(req, res, engine\)[\s\S]{0,200}engine\.setSize\(h,/.test(wt), 'the agent route sits behind the agent belt and calls engine.setSize (the opener verdict is the engine\'s)');
-  ok(/view\?\.setPin\?\.\(pinOf\(rec\.pin\)\);/.test(win) && /pinChipText\(rec\.pin, resolveLang\(\)\)/.test(win) && /label: t\('Pin size…'\), children: pinItems\(\)/.test(win) && !/setFixedSize\([^)]*pin/i.test(win), 'the window: every record re-fits the view IN PLACE + the chip "(pinned)" + the menu Pin size… — never setFixedSize');
-  ok(/const pf = pinNow \? fitForPin\(\{ w: pinNow\.w \/ drawRatio, h: pinNow\.h \/ drawRatio \}, paneSize\(\)\) : null;/.test(view) && /if \(client\) client\.setPin\(n\);/.test(view), 'the view scales a pinned stage with fitForPin (upscale allowed) and hands the pin to the client');
+  ok(verdictOf(/router\.post\('\/api\/agent\/window\/size'[\s\S]{0,200}refuseHost\(req, res\)[\s\S]{0,200}agentFacts\(req, res, engine\)[\s\S]{0,200}engine\.setSize\(h,/.test(wt)), 'the agent route sits behind the agent belt and calls engine.setSize (the opener verdict is the engine\'s)');
+  ok(gateOf(/view\?\.setPin\?\.\(pinOf\(rec\.pin\)\);/.test(win)) && gateOf(/pinChipText\(rec\.pin, resolveLang\(\)\)/.test(win)) && gateOf(/label: t\('Pin size…'\), children: pinItems\(\)/.test(win)) && !/setFixedSize\([^)]*pin/i.test(win), 'the window: every record re-fits the view IN PLACE + the chip "(pinned)" + the menu Pin size… — never setFixedSize');
+  ok(gateOf(/const pf = pinNow \? fitForPin\(\{ w: pinNow\.w \/ drawRatio, h: pinNow\.h \/ drawRatio \}, paneSize\(\)\) : null;/.test(view)) && verdictOf(/if \(client\) client\.setPin\(n\);/.test(view)), 'the view scales a pinned stage with fitForPin (upscale allowed) and hands the pin to the client');
 }
 
 console.log('⑤ the CLI against a stub server');
@@ -280,34 +280,34 @@ console.log('⑤ the CLI against a stub server');
   const BIN = path.join(home, 'bin'); fs.mkdirSync(BIN, { recursive: true });
   const run = (bin, args) => new Promise((resolve) => execFile(process.execPath, [path.join(REPO, 'data/bin', bin), ...args], { env: { PATH: `${BIN}:${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: home, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: 'vsst_' + 't'.repeat(24), VIBESPACE_SESSION_CWD: home, LANG: 'C.UTF-8' }, cwd: home, timeout: 20000 }, (e, out, err) => resolve({ code: e ? (e.code ?? 1) : 0, out, err })));
   const a = await run('vibespace-window', ['size', 'da-7', '1600x900']);
-  ok(a.code === 0 && same(seen.slice(-1)[0], { url: '/api/agent/window/size', j: { handle: 'da-7', size: '1600x900' } }) && /pinned da-7 to 1600×900/.test(a.out) && /click --at/.test(a.out), '`vibespace-window size da-7 1600x900` ⇒ POST /api/agent/window/size {handle, size}; the answer names the pixels', a);
+  ok(a.code === 0 && gateOf(same(seen.slice(-1)[0], { url: '/api/agent/window/size', j: { handle: 'da-7', size: '1600x900' } })) && gateOf(/pinned da-7 to 1600×900/.test(a.out)) && verdictOf(/click --at/.test(a.out)), '`vibespace-window size da-7 1600x900` ⇒ POST /api/agent/window/size {handle, size}; the answer names the pixels', a);
   const b = await run('vibespace-window', ['size', 'da-7', 'auto']);
-  ok(b.code === 0 && /unpinned da-7/.test(b.out), '`size da-7 auto` ⇒ unpinned', b);
+  ok(b.code === 0 && verdictOf(/unpinned da-7/.test(b.out)), '`size da-7 auto` ⇒ unpinned', b);
   const c = await run('vibespace-window', ['size', 'da-7', '9x9']);
-  ok(c.code !== 0 && /size_out_of_bounds/.test(c.err), 'a refusal is printed with its code', c);
+  ok(c.code !== 0 && verdictOf(/size_out_of_bounds/.test(c.err)), 'a refusal is printed with its code', c);
   const d = await run('vibespace-window', ['size', 'da-7']);
-  ok(d.code !== 0 && /vibespace-window size <handle> <WxH\|auto>/.test(d.err + d.out), 'no size ⇒ the usage line', d);
+  ok(d.code !== 0 && verdictOf(/vibespace-window size <handle> <WxH\|auto>/.test(d.err + d.out)), 'no size ⇒ the usage line', d);
   // lane launch-picture-size: `vibespace-window open <app> --size WxH`
   const o = await run('vibespace-window', ['open', 'gedit', '--size', '1280x720']);
-  ok(o.code === 0 && same(seen.slice(-1)[0], { url: '/api/agent/window/open', j: { appId: 'gedit', size: '1280x720' } }) && /picture pinned at 1280×720/.test(o.out), '⑧ `vibespace-window open gedit --size 1280x720` ⇒ POST …/open {appId, size}; the line says the picture is pinned', o);
+  ok(o.code === 0 && gateOf(same(seen.slice(-1)[0], { url: '/api/agent/window/open', j: { appId: 'gedit', size: '1280x720' } })) && verdictOf(/picture pinned at 1280×720/.test(o.out)), '⑧ `vibespace-window open gedit --size 1280x720` ⇒ POST …/open {appId, size}; the line says the picture is pinned', o);
   const o2 = await run('vibespace-window', ['open', 'gedit', '--size', '9x9']);
-  ok(o2.code === 2 && /width 9 is outside 320–7680 pixels \[size_out_of_bounds\]/.test(o2.err), '⑧ a refused size ⇒ the server\'s words (parsePin\'s) and exit 2', o2);
+  ok(o2.code === 2 && verdictOf(/width 9 is outside 320–7680 pixels \[size_out_of_bounds\]/.test(o2.err)), '⑧ a refused size ⇒ the server\'s words (parsePin\'s) and exit 2', o2);
   const o3 = await run('vibespace-window', ['open', 'gedit', '--size']);
-  ok(o3.code === 2 && /--size WxH \(1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH\)/.test(o3.err), '⑧ `--size` with no size ⇒ the usage line naming the table, exit 2', o3);
+  ok(o3.code === 2 && verdictOf(/--size WxH \(1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH\)/.test(o3.err)), '⑧ `--size` with no size ⇒ the usage line naming the table, exit 2', o3);
   const h = await run('vibespace-window', ['help']);
-  ok(/open <app-id> \[--title <t>\] \[--size WxH\]/.test(h.out + h.err) && /--size fixes its picture \(1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH\)/.test(h.out + h.err), '⑧ the window CLI\'s help names --size and the table', h.out.slice(0, 200));
+  ok(gateOf(/open <app-id> \[--title <t>\] \[--size WxH\]/.test(h.out + h.err)) && verdictOf(/--size fixes its picture \(1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH\)/.test(h.out + h.err)), '⑧ the window CLI\'s help names --size and the table', h.out.slice(0, 200));
   // lane launch-picture-size: `vibespace-browser size <WxH|auto>` (the CDP rung's fixed size)
   const b1 = await run('vibespace-browser', ['size', '1920x1080']);
-  ok(b1.code === 0 && same(seen.slice(-1)[0], { url: '/api/agent/browser/size', j: { size: '1920x1080' } }) && /picture size fixed at 1920×1080/.test(b1.out), '⑧ `vibespace-browser size 1920x1080` ⇒ POST /api/agent/browser/size; it says the size is fixed', b1);
+  ok(b1.code === 0 && gateOf(same(seen.slice(-1)[0], { url: '/api/agent/browser/size', j: { size: '1920x1080' } })) && verdictOf(/picture size fixed at 1920×1080/.test(b1.out)), '⑧ `vibespace-browser size 1920x1080` ⇒ POST /api/agent/browser/size; it says the size is fixed', b1);
   const b2 = await run('vibespace-browser', ['size', 'auto']);
-  ok(b2.code === 0 && /picture size unfixed/.test(b2.out), '⑧ `size auto` ⇒ unfixed (the page follows the view again)', b2);
+  ok(b2.code === 0 && verdictOf(/picture size unfixed/.test(b2.out)), '⑧ `size auto` ⇒ unfixed (the page follows the view again)', b2);
   const b3 = await run('vibespace-browser', ['size', '1x1']);
-  ok(b3.code === 2 && /width 1 is outside 320–7680 pixels \[size_out_of_bounds\]/.test(b3.err), '⑧ a refused size ⇒ parsePin\'s words, exit 2', b3);
+  ok(b3.code === 2 && verdictOf(/width 1 is outside 320–7680 pixels \[size_out_of_bounds\]/.test(b3.err)), '⑧ a refused size ⇒ parsePin\'s words, exit 2', b3);
   const nSeen = seen.length;
   const b4 = await run('vibespace-browser', ['open', 'https://example.com/', '--size', '9x9']);
-  ok(b4.code === 2 && /nothing was opened/.test(b4.err) && seen.length === nSeen + 1 && seen[nSeen].j.check === true, '⑧ `open <url> --size 9x9` ⇒ judged BEFORE the open (one check call), refused with exit 2 — nothing opened', { b4, seen: seen.slice(nSeen) });
+  ok(b4.code === 2 && gateOf(/nothing was opened/.test(b4.err)) && seen.length === nSeen + 1 && seen[nSeen].j.check === true, '⑧ `open <url> --size 9x9` ⇒ judged BEFORE the open (one check call), refused with exit 2 — nothing opened', { b4, seen: seen.slice(nSeen) });
   const bh = await run('vibespace-browser', ['help']);
-  ok(/size <WxH\|auto>/.test(bh.out + bh.err) && /open <url> --size WxH/.test(bh.out + bh.err) && /1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH/.test(bh.out + bh.err), '⑧ the browser CLI\'s help names `size`, `open … --size` and the table');
+  ok(gateOf(/size <WxH\|auto>/.test(bh.out + bh.err)) && gateOf(/open <url> --size WxH/.test(bh.out + bh.err)) && verdictOf(/1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH/.test(bh.out + bh.err)), '⑧ the browser CLI\'s help names `size`, `open … --size` and the table');
   srv.close();
 }
 
@@ -332,28 +332,28 @@ function fenceChecks(XR) {
 }
 {
   const r = fenceChecks(require(path.join(REPO, RELAY_REL)));
-  ok(r.activeDrops, 'pinned: an ACTIVE viewer\'s display-configure + configure-window are dropped (pinCut 2), its input and damage acks still relayed');
-  ok(r.watchNotHeld && r.replayDropped, 'pinned: a Watch viewer\'s geometry is dropped, never held — and nothing held before the pin replays at a takeover');
-  ok(r.freeKeeps && r.replayFree, 'unpinned: today\'s rule — an active viewer\'s geometry relayed, a Watch viewer\'s held and replayed at its takeover (x5)');
+  ok(verdictOf(r.activeDrops), 'pinned: an ACTIVE viewer\'s display-configure + configure-window are dropped (pinCut 2), its input and damage acks still relayed');
+  ok(gateOf(r.watchNotHeld) && verdictOf(r.replayDropped), 'pinned: a Watch viewer\'s geometry is dropped, never held — and nothing held before the pin replays at a takeover');
+  ok(gateOf(r.freeKeeps) && verdictOf(r.replayFree), 'unpinned: today\'s rule — an active viewer\'s geometry relayed, a Watch viewer\'s held and replayed at its takeover (x5)');
   const ds = read('src/desktop-serve.js'), wiring = read('src/server/window-live-wiring.js'), dsp = read('src/desktop-display.js');
-  ok(/\(M\.keeperFits\(M\.fitPolicyOf\(rec, backends\)\) \|\| !!pinOf\(rec\.pin\)\)/.test(ds) && /if \(pin && !xpraRoot && \(size\.w !== pin\.w \|\| size\.h !== pin\.h\)\) \{ \/\/ a keeper-fitted \(no-xpra\) rung/.test(ds) && /const target = xpraRoot \? \{ w: pin\.w, h: pin\.h \} : rec\.fb;/.test(ds), 'the keeper owns a pinned window\'s geometry: fitApplies takes a pin on every rung; on the xpra rung NO xrandr (r3) — the plan maximises the main window to the PIN; xrandr --fb only on a keeper-fitted rung');
-  ok(/if \(p && fitApplies\(rec\)\) scheduleFit\(id, `pinned \$\{p\.w\}x\$\{p\.h\}`, 0\);/.test(ds) && /\['--fb', `\$\{Number\(w\)\}x\$\{Number\(h\)\}`\]/.test(dsp), 'setPin fits at once (a launch\'s ready, a restart\'s adopt and the belt go through fitApplies too)');
-  ok(/pinned: \(id\) => \(!own\(id\) && keeper\.get\(id\) && keeper\.get\(id\)\.pin\) \|\| null,/.test(wiring), 'the stream wiring hands the bridge the keeper\'s record pin');
+  ok(gateOf(/\(M\.keeperFits\(M\.fitPolicyOf\(rec, backends\)\) \|\| !!pinOf\(rec\.pin\)\)/.test(ds)) && gateOf(/if \(pin && !xpraRoot && \(size\.w !== pin\.w \|\| size\.h !== pin\.h\)\) \{ \/\/ a keeper-fitted \(no-xpra\) rung/.test(ds)) && verdictOf(/const target = xpraRoot \? \{ w: pin\.w, h: pin\.h \} : rec\.fb;/.test(ds)), 'the keeper owns a pinned window\'s geometry: fitApplies takes a pin on every rung; on the xpra rung NO xrandr (r3) — the plan maximises the main window to the PIN; xrandr --fb only on a keeper-fitted rung');
+  ok(gateOf(/if \(p && fitApplies\(rec\)\) scheduleFit\(id, `pinned \$\{p\.w\}x\$\{p\.h\}`, 0\);/.test(ds)) && verdictOf(/\['--fb', `\$\{Number\(w\)\}x\$\{Number\(h\)\}`\]/.test(dsp)), 'setPin fits at once (a launch\'s ready, a restart\'s adopt and the belt go through fitApplies too)');
+  ok(verdictOf(/pinned: \(id\) => \(!own\(id\) && keeper\.get\(id\) && keeper\.get\(id\)\.pin\) \|\| null,/.test(wiring)), 'the stream wiring hands the bridge the keeper\'s record pin');
   // r3: the bridge ASKS xpra for the pin (its own desktop_size packet, rencodeplus) — byte-exact against the suite's packet shape
   const XR = require(path.join(REPO, RELAY_REL));
   const pk = XR.pinDesktopPacket({ w: 1600, h: 900 });
-  ok(same([...XR.rencodePlus(['ping', 0])], [...rpkt('ping')]) && XR.xpraPacketType(pk.subarray(8)) === 'desktop_size' && pk[0] === 0x50 && pk[1] === 0x10 && pk.readUInt32BE(4) === pk.length - 8, 'r3: rencodePlus writes the suite\'s own packet bytes (P / rencodeplus / size); the pin packet is a desktop_size');
-  ok(same([...XR.rencodePlus([1600, 900, 43, 44, -5, 'ab', {}]).subarray(8)], [199, 63, 0x06, 0x40, 63, 0x03, 0x84, 43, 62, 44, 62, 0xfb, 130, 97, 98, 102]), 'r3: ints fixed 0..43 / INT1 / INT2, a short string, an empty dict — python-rencode\'s codes');
+  ok(gateOf(same([...XR.rencodePlus(['ping', 0])], [...rpkt('ping')])) && XR.xpraPacketType(pk.subarray(8)) === 'desktop_size' && pk[0] === 0x50 && pk[1] === 0x10 && pk.readUInt32BE(4) === pk.length - 8, 'r3: rencodePlus writes the suite\'s own packet bytes (P / rencodeplus / size); the pin packet is a desktop_size');
+  ok(verdictOf(same([...XR.rencodePlus([1600, 900, 43, 44, -5, 'ab', {}]).subarray(8)], [199, 63, 0x06, 0x40, 63, 0x03, 0x84, 43, 62, 44, 62, 0xfb, 130, 97, 98, 102])), 'r3: ints fixed 0..43 / INT1 / INT2, a short string, an empty dict — python-rencode\'s codes');
   const rx = read(RELAY_REL);
-  ok(/relayUp\(pinDesktopPacket\(p\)\)/.test(rx) && /=== 'desktop_size'\) \{ assertPin\('xpra answered'\)/.test(rx) && /assertPin\('after the held hello'\)/.test(rx) && /onDesktopSize\?\.\(id, p\.w, p\.h, viewerId\)/.test(rx), 'r3: the bridge asks after the hello (and the held hello), when the pin changes, and when xpra answers another desktop_size — then the keeper re-fits');
-  ok(/const plan = clamps\.length \? \{ \.\.\.plan0, clamps, settled: false \} : plan0;/.test(ds) && /for \(const c of plan\.clamps \|\| \[\]\) args\.push\('windowsize', '--sync', String\(c\.id\), String\(c\.w\), String\(c\.h\)\)/.test(dsp), 'r3: a pinned window\'s other top-levels larger than the pin are clamped into it (the screenshot\'s box = the pin)');
-  ok(/\/\^Xpra-CorralWindow-\(0x\[0-9a-f\]\+\)\$\/i\.exec/.test(ds) && /clamps\.push\(\{ id: client\.id, w: target\.w, h: target\.h \}\)/.test(ds), 'r3: xpra\'s corral — the client window inside it is sized to the pin too (measured: the corral alone left Chrome at its first size)');
+  ok(gateOf(/relayUp\(pinDesktopPacket\(p\)\)/.test(rx)) && gateOf(/=== 'desktop_size'\) \{ assertPin\('xpra answered'\)/.test(rx)) && gateOf(/assertPin\('after the held hello'\)/.test(rx)) && verdictOf(/onDesktopSize\?\.\(id, p\.w, p\.h, viewerId\)/.test(rx)), 'r3: the bridge asks after the hello (and the held hello), when the pin changes, and when xpra answers another desktop_size — then the keeper re-fits');
+  ok(gateOf(/const plan = clamps\.length \? \{ \.\.\.plan0, clamps, settled: false \} : plan0;/.test(ds)) && verdictOf(/for \(const c of plan\.clamps \|\| \[\]\) args\.push\('windowsize', '--sync', String\(c\.id\), String\(c\.w\), String\(c\.h\)\)/.test(dsp)), 'r3: a pinned window\'s other top-levels larger than the pin are clamped into it (the screenshot\'s box = the pin)');
+  ok(gateOf(/\/\^Xpra-CorralWindow-\(0x\[0-9a-f\]\+\)\$\/i\.exec/.test(ds)) && verdictOf(/clamps\.push\(\{ id: client\.id, w: target\.w, h: target\.h \}\)/.test(ds)), 'r3: xpra\'s corral — the client window inside it is sized to the pin too (measured: the corral alone left Chrome at its first size)');
   const RR = require(path.join(REPO, 'src/window-reach.js'));
   const wins = [{ id: 1, x: 0, y: 0, w: 1600, h: 900, cls: 'chrome', mapped: true }, { id: 2, x: 0, y: 0, w: 2033, h: 2284, cls: 'chrome', mapped: true }];
   const pp = RR.pixelPlan(wins, { pin: { w: 1600, h: 900 } }), pu = RR.pixelPlan(wins);
-  ok(pp.ok && pp.w === 1600 && pp.h === 900 && pu.w === 2033 && pu.h === 2284, 'r3: a PINNED window\'s pixel plan (the screenshot\'s box) is the pin — another top-level at 2033×2284 never widens it; unpinned unchanged', { pp: [pp.w, pp.h], pu: [pu.w, pu.h] });
-  ok(/R\.pixelPlan\(r\.windows, \{ pin: PIN\.pinOf\(rec\.pin\) \}\)/.test(read(ENGINE_REL)), 'r3: the engine hands the record\'s pin to the pixel plan');
-  ok(/mapped: xpraRoot \? null : visible \? visible\.has\(r\.id\) : null/.test(ds), 'r3: a pinned window on the xpra rung is fitted mapped or not (no viewer ⇒ xpra leaves it unmapped)');
+  ok(gateOf(pp.ok) && pp.w === 1600 && pp.h === 900 && pu.w === 2033 && pu.h === 2284, 'r3: a PINNED window\'s pixel plan (the screenshot\'s box) is the pin — another top-level at 2033×2284 never widens it; unpinned unchanged', { pp: [pp.w, pp.h], pu: [pu.w, pu.h] });
+  ok(verdictOf(/R\.pixelPlan\(r\.windows, \{ pin: PIN\.pinOf\(rec\.pin\) \}\)/.test(read(ENGINE_REL))), 'r3: the engine hands the record\'s pin to the pixel plan');
+  ok(verdictOf(/mapped: xpraRoot \? null : visible \? visible\.has\(r\.id\) : null/.test(ds)), 'r3: a pinned window on the xpra rung is fitted mapped or not (no viewer ⇒ xpra leaves it unmapped)');
 }
 
 // ⑦ LANE e2-canvas (int243 2026-10-09, THE SECOND E2 CHROME PATH — a desktop-app window shown on every client with no canvas):
@@ -403,9 +403,9 @@ async function helloGateChecks(S, XR) {
 }
 {
   const r = await helloGateChecks(require(path.join(REPO, DS_REL)), require(path.join(REPO, RELAY_REL)));
-  ok(r.opened && r.hellos === 1 && r.early.length === 0, `e2-canvas: a PINNED window's viewer says hello ⇒ xpra hears NOTHING else before it answers (early: ${JSON.stringify(r.early)})`, r);
-  ok(r.answered && r.open && r.closeCode === null, 'e2-canvas: so xpra keeps the connection — the viewer gets the answer and stays open (no 1005, a view that can paint)', r);
-  ok(same(r.after, ['desktop_size']), `e2-canvas: the bridge's pin ask waited for the answer and went up right after it (after: ${JSON.stringify(r.after)})`, r);
+  ok(gateOf(r.opened) && r.hellos === 1 && r.early.length === 0, `e2-canvas: a PINNED window's viewer says hello ⇒ xpra hears NOTHING else before it answers (early: ${JSON.stringify(r.early)})`, r);
+  ok(gateOf(r.answered) && gateOf(r.open) && r.closeCode === null, 'e2-canvas: so xpra keeps the connection — the viewer gets the answer and stays open (no 1005, a view that can paint)', r);
+  ok(verdictOf(same(r.after, ['desktop_size'])), `e2-canvas: the bridge's pin ask waited for the answer and went up right after it (after: ${JSON.stringify(r.after)})`, r);
 }
 
 console.log('CONTROLS (patched copies)');
@@ -434,22 +434,22 @@ console.log('CONTROLS (patched copies)');
   const relaysSrc = read(RELAYS_REL), dsSrc = read(DS_REL);
   const relaysCopy = MUT.write(RELAYS_REL, relaysSrc.replace("require('./stream-relay-xpra.js')", `require(${JSON.stringify(relayCopy)})`), 'no-hello-gate');
   const dsMut = dsSrc.replace("require('./stream-relays.js')", `require(${JSON.stringify(relaysCopy)})`);
-  ok(dsMut !== dsSrc && relaysSrc.includes("require('./stream-relay-xpra.js')"), 'control (e): the copies chain desktop-stream → stream-relays → the patched relay');
+  ok(dsMut !== dsSrc && verdictOf(relaysSrc.includes("require('./stream-relay-xpra.js')")), 'control (e): the copies chain desktop-stream → stream-relays → the patched relay');
   const re = await helloGateChecks(MUT.load(DS_REL, dsMut, 'no-hello-gate'), require(path.join(REPO, RELAY_REL)));
-  ok(re.early.includes('desktop_size') && !re.open && re.closeCode === 1005, `CONTROL (e): the pin ask behind the hello ⇒ xpra drops the viewer (early ${JSON.stringify(re.early)}, close ${re.closeCode}) ⇒ the gate leg goes RED`, re);
+  ok(gateOf(re.early.includes('desktop_size')) && !re.open && re.closeCode === 1005, `CONTROL (e): the pin ask behind the hello ⇒ xpra drops the viewer (early ${JSON.stringify(re.early)}, close ${re.closeCode}) ⇒ the gate leg goes RED`, re);
   // (f) lane launch-picture-size: a SECOND LIST planted in the launcher ⇒ the census goes RED (by the file it names)
   const texts = trackedTexts();
   const lrel = 'src/lib/desktop-app-launcher.js';
   const planted = { ...texts, [lrel]: texts[lrel] + "\nconst SIZES = ['1280x720', '1920x1080']; // a second list\n" };
   const cf = sizeCensus(P, planted);
-  ok(!cf.ok && same(cf.strays, [lrel]), 'CONTROL (f): a second list of sizes planted in the launcher ⇒ the census RED, naming it', cf.strays);
+  ok(!cf.ok && verdictOf(same(cf.strays, [lrel])), 'CONTROL (f): a second list of sizes planted in the launcher ⇒ the census RED, naming it', cf.strays);
   const mirrorOff = { ...texts, 'data/bin/vibespace-window': texts['data/bin/vibespace-window'].replace("const SIZE_HELP = '1280x720 | 1920x1080 | 2560x1440 | your own WxH';", "const SIZE_HELP = '1920x1080 | 1280x720 | your own WxH';") };
   ok(!sizeCensus(P, mirrorOff).ok, 'CONTROL (f2): a help mirror out of step with the table (order / a row missing) ⇒ the census RED');
   // (g) pinSupportVerdict admitting Xvnc's 'follows' (a fit the viewer moves) ⇒ the support leg RED
   const xv = ps.replace("if (policy && (policy.mode === 'client' || policy.mode === 'fixed')) return { ok: true };", "if (policy && (policy.mode === 'client' || policy.mode === 'fixed' || policy.mode === 'follows')) return { ok: true };");
   ok(xv !== ps, 'control (g) planted: Xvnc admitted');
   ok(!pureChecks(MUT.load(PIN_REL, xv, 'xvnc-pins')).supportOk, 'CONTROL (g): Xvnc\'s follows admitted ⇒ the support leg goes RED');
-  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7, label: 'desktop-pin' })) ok(x.pass, x.name, x.detail);
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7, label: 'desktop-pin' })) ok(verdictOf(x.pass), x.name, x.detail);
 }
 
 // ═══ B-dbb4 (the coordinator's r756 / r772): THE APP'S WINDOWS THE IMAGE DOES NOT SHOW ARE NAMED — never a silent stay ═══
@@ -480,7 +480,7 @@ console.log('CONTROLS (patched copies)');
   ok(uPin.length === 1 && uPin[0].id === 6 && uPin[0].why === 'clipped' && uPin[0].x === 1400 && uPin[0].y === 700, 'unshownOf: a popup over the pinned main that reaches past the pin\'s box is named clipped', { uPin, main: pPin.main, w: pPin.w, h: pPin.h });
   ok(UN.unshownOf([over, main], R.pixelPlan([over, main])).length === 0 && UN.unshownText([], 'da-x') === '' && UN.unshownOf([main], { ok: false }).length === 0, 'CONTROL: nothing left out ⇒ nothing named, no words; a plan that failed names nothing');
   const words = UN.unshownText(u1, 'da-pop');
-  ok(words.startsWith('this app has 2 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image: it sits up-left of the main window without covering it') && words.includes('its own handle `da-pop.w2`') && words.includes('«Hidden» 400x300 at 100,100 of this image: it has no pixels on the display yet') && words.includes('`vibespace-window watch da-pop`') && words.includes('A window\'s own handle makes it the subject: `vibespace-window screenshot <its handle>`') && !/alt\+tab|move it yourself/.test(words),
+  ok(gateOf(words.startsWith('this app has 2 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image: it sits up-left of the main window without covering it')) && gateOf(words.includes('its own handle `da-pop.w2`')) && gateOf(words.includes('«Hidden» 400x300 at 100,100 of this image: it has no pixels on the display yet')) && gateOf(words.includes('`vibespace-window watch da-pop`')) && gateOf(words.includes('A window\'s own handle makes it the subject: `vibespace-window screenshot <its handle>`')) && !/alt\+tab|move it yourself/.test(words),
     'unshownText: each window by title, size and place, why the image leaves it out, and ITS OWN HANDLE (unit 2: the agent chooses it as the subject); an unmapped one waits for the user\'s live view', words);
   ok(UN.subHandle('da-pop', 0x2a00004) === 'da-pop.w2a00004' && UN.SUB_RE.exec('da-pop.w2a00004')[1] === 'da-pop' && parseInt(UN.SUB_RE.exec('da-pop.w2a00004')[2], 16) === 0x2a00004 && !UN.SUB_RE.test('da-pop'), 'unit 2: a window\'s handle is `<handle>.w<hex X id>` and reads back (the route\'s handle rule already admits it)');
   ok(UN.UNSHOWN_MIN_PX === 100, 'the smallest window named is 100×100 (Chrome\'s helper is 15×15)');
@@ -499,9 +499,9 @@ console.log('CONTROLS (patched copies)');
   EP.grantReach('da-pop', { kind: 'session', id: 's1' }); EP.setShareMode('da-pop', 'pixels'); EP.attach('da-pop', fP);
   try {
     const sh = await EP.screenshot('da-pop', fP);
-    ok(sh.windows === 1 && Array.isArray(sh.unshown) && sh.unshown.length === 1 && sh.unshown[0].id === 2 && sh.unshown[0].why === 'outside' && typeof sh.note === 'string' && sh.note.includes('«Sign in – Google Accounts» 500x600 at -600,-400'),
+    ok(sh.windows === 1 && gateOf(Array.isArray(sh.unshown)) && sh.unshown.length === 1 && sh.unshown[0].id === 2 && sh.unshown[0].why === 'outside' && typeof sh.note === 'string' && verdictOf(sh.note.includes('«Sign in – Google Accounts» 500x600 at -600,-400')),
       'the engine\'s screenshot NAMES the popup its image leaves out (unshown + the words) — the image itself unchanged (1 window, the origin the main\'s)', { windows: sh.windows, unshown: sh.unshown, note: sh.note });
-    ok(/"verb":"screenshot"[^\n]*"unshown":1/.test(fs.readFileSync(EP.auditFile, 'utf8')), 'audited: the screenshot\'s unshown count');
+    ok(verdictOf(/"verb":"screenshot"[^\n]*"unshown":1/.test(fs.readFileSync(EP.auditFile, 'utf8'))), 'audited: the screenshot\'s unshown count');
     // UNIT 2 (r772): the window's OWN handle is the call's subject — its image, its origin, its --at; CONTROL the app's own handle
     const sub = await EP.screenshot('da-pop.w2', fP);
     ok(!!(sub.subject && sub.subject.id === 2 && sub.subject.handle === 'da-pop.w2' && sub.windows === 1 && sub.w === 500 && sub.h === 600 && sub.originX === 0 && sub.originY === 0 && !sub.unshown),
@@ -600,17 +600,17 @@ console.log('CONTROLS (patched copies)');
       });
       const S = await runScenes(EP);
       const none = (x) => !!x && !x.code && x.windows.length === 1 && x.windows[0] == null && !x.note;
-      ok(none(S.A) && S.A.calls === 0, 'M3 shape (A): a window DRAWN in this handle\'s image holds the keyboard — no window sent, no look made, nothing said (the release\'s road: the app\'s own focus decides)', S.A);
-      ok(none(S.B), 'M3 shape (B): after an aim INTO the popup (its own handle) a key on the main handle sends no window and says nothing — the aim stands', S.B);
+      ok(gateOf(none(S.A)) && S.A.calls === 0, 'M3 shape (A): a window DRAWN in this handle\'s image holds the keyboard — no window sent, no look made, nothing said (the release\'s road: the app\'s own focus decides)', S.A);
+      ok(verdictOf(none(S.B)), 'M3 shape (B): after an aim INTO the popup (its own handle) a key on the main handle sends no window and says nothing — the aim stands', S.B);
       const named = (x) => !!x && !x.code && x.windows.length === 1 && x.windows[0] == null && !!x.note && x.note.includes('`da-pop.w2`') && x.note.includes('«Sign in – Google Accounts»') && /^when this was sent, the keyboard was in /.test(x.note) && x.keyboard && x.keyboard.handle === 'da-pop.w2';
-      ok(named(S.C) && named(S.Ct), 'M3 shape (C): the popup OUTSIDE the image holds the keyboard after a click aimed at the main (the box\'s scene) — NOTHING forced (no window sent), and the reply SAYS where the keyboard was, by its title and its own handle, with the two ways on; a key and a text alike', { C: S.C, Ct: S.Ct });
+      ok(gateOf(named(S.C)) && verdictOf(named(S.Ct)), 'M3 shape (C): the popup OUTSIDE the image holds the keyboard after a click aimed at the main (the box\'s scene) — NOTHING forced (no window sent), and the reply SAYS where the keyboard was, by its title and its own handle, with the two ways on; a key and a text alike', { C: S.C, Ct: S.Ct });
       const audS = fs.readFileSync(EP.auditFile, 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } });
-      ok(audS.some((l) => l.verb === 'key' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2') && audS.some((l) => l.verb === 'type' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2'), 'M3 shape (C): the audit names the handle where the keyboard was (keyboardIn)');
-      ok(none(S.one) && S.one.calls === 0, 'M3 shape (1): an app with ONE window a person sees (Chrome\'s 15×15 helper aside) — no look made, no extra call', S.one);
-      ok(!!S.opensUnder.note && S.opensUnder.note.includes('`da-pop.w6`'), 'M3 shape (a, r2157): a click on the main that OPENS a popup over its own point — the popup was not in the click\'s plan, so it was no aim into it: the next key IS told where the keyboard was', S.opensUnder);
-      ok(none(S.clipIn) && !!S.clipOut.note && S.clipOut.note.includes('`da-pop.w6`'), 'M3 shape (a, round wd6ogrta0): a click on the visible part of a CLIPPED popup aimed into it — nothing said; a click elsewhere did not — the note names it', { clipIn: S.clipIn, clipOut: S.clipOut });
-      ok(none(S.refused), 'M3 shape (b, round wd6ogrta0): a REFUSED act (a click at a point outside the image, refused after the door) does not move the last aim — the aim into the popup stands, nothing said', S.refused);
-      ok(none(S.unread) && none(S.late) && S.late.lookDone === false, `M3 shape (2): a look that failed, or one that did not answer within its bound — the key lands as at the release and NOTHING is said (never a guess, never a refusal); the late one's act ANSWERED BEFORE the look did (by order, never a clock bound: ${S.late.ms} ms said)`, { unread: S.unread, late: S.late });
+      ok(gateOf(audS.some((l) => l.verb === 'key' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2')) && verdictOf(audS.some((l) => l.verb === 'type' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2')), 'M3 shape (C): the audit names the handle where the keyboard was (keyboardIn)');
+      ok(gateOf(none(S.one)) && S.one.calls === 0, 'M3 shape (1): an app with ONE window a person sees (Chrome\'s 15×15 helper aside) — no look made, no extra call', S.one);
+      ok(!!S.opensUnder.note && verdictOf(S.opensUnder.note.includes('`da-pop.w6`')), 'M3 shape (a, r2157): a click on the main that OPENS a popup over its own point — the popup was not in the click\'s plan, so it was no aim into it: the next key IS told where the keyboard was', S.opensUnder);
+      ok(gateOf(none(S.clipIn)) && !!S.clipOut.note && verdictOf(S.clipOut.note.includes('`da-pop.w6`')), 'M3 shape (a, round wd6ogrta0): a click on the visible part of a CLIPPED popup aimed into it — nothing said; a click elsewhere did not — the note names it', { clipIn: S.clipIn, clipOut: S.clipOut });
+      ok(verdictOf(none(S.refused)), 'M3 shape (b, round wd6ogrta0): a REFUSED act (a click at a point outside the image, refused after the door) does not move the last aim — the aim into the popup stands, nothing said', S.refused);
+      ok(gateOf(none(S.unread)) && gateOf(none(S.late)) && S.late.lookDone === false, `M3 shape (2): a look that failed, or one that did not answer within its bound — the key lands as at the release and NOTHING is said (never a guess, never a refusal); the late one's act ANSWERED BEFORE the look did (by order, never a clock bound: ${S.late.ms} ms said)`, { unread: S.unread, late: S.late });
       // RED CONTROLS (anchored, each anchor found exactly once — or twice where said)
       const SS = read(ENGINE_REL);
       const scenesOn = async (src, tag) => { const EC = MUT.load(ENGINE_REL, src, tag); const E3 = EC.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-shape-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); E3.grantReach('da-pop', { kind: 'session', id: 's1' }); E3.setShareMode('da-pop', 'pixels'); E3.attach('da-pop', fP); return runScenes(E3); };
@@ -654,7 +654,7 @@ console.log('CONTROLS (patched copies)');
       ok(!sk.code && !sk.note && sk.calls === 0, 'round wd6ogrta0 MUST: on a SHARED desktop a window outside the image holds the keyboard — a key on the app\'s own handle makes no look and says no note (no window handle exists there)', sk);
       const SSh = read(ENGINE_REL);
       const skRed = await sharedKey(MUT.load(ENGINE_REL, anchored(SSh, '    if (!ownsItsDisplay(rec)) return null;\n', '', 'shared-desktop control: the own-display test cut'), 'shared-look'), 'red');
-      ok(!!skRed.note && skRed.calls >= 1 && /da-sh\.w2/.test(skRed.note), 'RED CONTROL (the MUST): the line as it stood — on the shared desktop the look is made and the note names `da-sh.w2`, a handle the door refuses (window_subject_shared)', skRed);
+      ok(!!skRed.note && skRed.calls >= 1 && verdictOf(/da-sh\.w2/.test(skRed.note)), 'RED CONTROL (the MUST): the line as it stood — on the shared desktop the look is made and the note names `da-sh.w2`, a handle the door refuses (window_subject_shared)', skRed);
       wtP.keyboardWindow = keepKw;
     }
     // B-dbb4 M3, the coordinator's r2220 (int361's box row 236: on the real xpra an ENGINE click moved no keyboard — the aim into the
@@ -694,12 +694,12 @@ console.log('CONTROLS (patched copies)');
         const C = await runClicks(mkE(ENGINE, 'now'));
         const Et = mkE(ENGINE, 'takeover'); const tk = Et.takeover({ handle: 'da-pop', viewerId: 'v-r2220', holderAlive: true });
         const takeover = await click(Et, { rows: [pop, helper, main], at: '10,20' });
-        ok(C.main.window === 1 && C.dialog.window === 5 && C.under.window === 1 && C.own.window === 2 && C.clipped.window === 6 && [C.main, C.dialog, C.under, C.own, C.clipped].every((x) => !x.code && x.sent === 1),
+        ok(C.main.window === 1 && C.dialog.window === 5 && C.under.window === 1 && C.own.window === 2 && C.clipped.window === 6 && verdictOf([C.main, C.dialog, C.under, C.own, C.clipped].every((x) => !x.code && x.sent === 1)),
           'M3 r2220: a click gives the keyboard to the window it LANDS IN, in the same call — the main page (1), a popup drawn over the main under the point (5), the main beside it (1), a window\'s own handle (2), the visible part of a popup reaching past the pin (6: on top there)', C);
         ok(!C.away.code && C.away.sent === 1 && C.away.window === null, 'M3 r2220 (the coordinator\'s bound): a point the plan CLIPS AWAY (in the image, in no window of the app) — the click is sent as before and moves NOTHING', C.away);
         ok(!!C.lease.code && C.lease.sent === 0 && !!tk && tk.ok === true && takeover.code === 'window_paused' && takeover.sent === 0, `M3 r2220 (the coordinator's bound): a REFUSED click moves nothing — the lease revoked (${C.lease.code}), the person's takeover (${takeover.code}): nothing sent, no focus`, { lease: C.lease, takeover, tk: tk && tk.ok });
         ok(C.aim.heard === 1 && C.aim.window == null && !C.aim.note, 'M3 r2220: the box\'s scene — the popup held the keyboard, the agent clicked into the main page, `key <app> x` lands in the MAIN (the key forces no window, nothing is said)', C.aim);
-        ok(!!C.child.note && C.child.note.includes('`da-pop.w2`'), 'M3 r2220 (2): X\'s focus on a CHILD of the unseen popup (99 under 2) — the look names the popup, the plan window whose subtree holds it', C.child);
+        ok(!!C.child.note && verdictOf(C.child.note.includes('`da-pop.w2`')), 'M3 r2220 (2): X\'s focus on a CHILD of the unseen popup (99 under 2) — the look names the popup, the plan window whose subtree holds it', C.child);
         // on a desktop the app does NOT own the click moves nothing (its own window manager decides there)
         const sharedClick = { code: null, window: undefined }; { const c0 = clicksP.length; try { await ES2.act('da-sh', fP, { verb: 'click', at: '10,20' }); } catch (e) { sharedClick.code = e && e.code; } const s = clicksP.slice(c0); sharedClick.window = s.length ? s[0].window : undefined; sharedClick.sent = s.length; }
         ok(!sharedClick.code && sharedClick.sent === 1 && sharedClick.window === null, 'M3 r2220: on a SHARED desktop (the app does not own the display) a click is sent as before and moves no keyboard', sharedClick);
@@ -708,18 +708,18 @@ console.log('CONTROLS (patched copies)');
         fs.writeFileSync(fakeX, `#!/bin/sh\nprintf '%s ' "$@" >> ${JSON.stringify(argF)}\nprintf '\\n' >> ${JSON.stringify(argF)}\n`); fs.chmodSync(fakeX, 0o755);
         const r1 = await WT.injectClick({ bins: { xdotool: fakeX }, xenv: {}, x: 5, y: 6, window: 7 }), r0 = await WT.injectClick({ bins: { xdotool: fakeX }, xenv: {}, x: 5, y: 6 });
         const lines = fs.readFileSync(argF, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean);
-        ok(lines[0] === 'mousemove 5 6 windowfocus 7 click 1' && lines[1] === 'mousemove 5 6 click 1' && r1.ok && r1.did.focused === 7 && r0.ok && r0.did.focused === undefined, `M3 r2220: ONE xdotool call — «${lines[0]}» (the focus after the move, before the button); with no window «${lines[1]}», as before`, { lines, r1: r1.did, r0: r0.did });
+        ok(lines[0] === 'mousemove 5 6 windowfocus 7 click 1' && lines[1] === 'mousemove 5 6 click 1' && gateOf(r1.ok) && r1.did.focused === 7 && gateOf(r0.ok) && r0.did.focused === undefined, `M3 r2220: ONE xdotool call — «${lines[0]}» (the focus after the move, before the button); with no window «${lines[1]}», as before`, { lines, r1: r1.did, r0: r0.did });
         // PURE focusChain over a captured `xwininfo -root -tree` (xpra's corral wraps each client; Chrome's popup holds a child)
         const DDm = require(path.join(REPO, 'src/desktop-display.js'));
         const TREE = ['xwininfo: Window id: 0x25d (the root window) (has no name)', '', '  Root window id: 0x25d (the root window) (has no name)', '  Parent window id: 0x0 (none)', '     2 children:',
           '     0x200006 "Xpra-CorralWindow-0x400016": ()  520x654+0+0  +0+0', '        1 child:', '        0x400016 "Sign in – stand-in 1 - Google Chrome": ("google-chrome" "Google-chrome")  520x654+0+0  +0+0', '           1 child:', '           0x400099 (has no name): ()  520x654+0+0  +0+0',
           '     0x200008 "Xpra-CorralWindow-0x400003": ()  1920x1080+10+10  +10+10', '        1 child:', '        0x400003 "E2A rung page - Google Chrome": ("google-chrome" "Google-chrome")  1920x1080+0+0  +10+10'].join('\n');
         const rowsT = DDm.parseWininfoTree(TREE);
-        ok(same(WT.focusChain(rowsT, 0x400099), [0x400099, 0x400016, 0x200006]) && same(WT.focusChain(rowsT, 0x400003), [0x400003, 0x200008]) && same(WT.focusChain(rowsT, 0x7777), [0x7777]), 'M3 r2220 (PURE focusChain): a child of the popup climbs to the popup and its corral; the main to its corral; an id the tree does not hold stays alone', { a: WT.focusChain(rowsT, 0x400099), b: WT.focusChain(rowsT, 0x400003) });
+        ok(gateOf(same(WT.focusChain(rowsT, 0x400099), [0x400099, 0x400016, 0x200006])) && gateOf(same(WT.focusChain(rowsT, 0x400003), [0x400003, 0x200008])) && verdictOf(same(WT.focusChain(rowsT, 0x7777), [0x7777])), 'M3 r2220 (PURE focusChain): a child of the popup climbs to the popup and its corral; the main to its corral; an id the tree does not hold stays alone', { a: WT.focusChain(rowsT, 0x400099), b: WT.focusChain(rowsT, 0x400003) });
         // RED CONTROLS (anchored once each)
         const SC = read(ENGINE_REL);
         const noFocusClick = await runClicks(mkE(MUT.load(ENGINE_REL, anchored(SC, 'button: body.button, window: kbTo, signal, python', 'button: body.button, signal, python', 'r2220 control: 8853d0767\'s click'), 'r2220-no-focus'), 'red-nofocus')); // stale-pins: kept (a RED control plants the pre-cure text)
-        ok(noFocusClick.main.window === null && noFocusClick.aim.heard === 2 && /`da-pop\.w2`/.test(noFocusClick.aim.note || ''), 'RED CONTROL (r2220, 8853d0767\'s click: no window): the key after the aim into the main goes to the POPUP, and the note says so — the box\'s ✗', noFocusClick.aim);
+        ok(noFocusClick.main.window === null && noFocusClick.aim.heard === 2 && verdictOf(/`da-pop\.w2`/.test(noFocusClick.aim.note || '')), 'RED CONTROL (r2220, 8853d0767\'s click: no window): the key after the aim into the main goes to the POPUP, and the note says so — the box\'s ✗', noFocusClick.aim);
         const mainFallback = await runClicks(mkE(MUT.load(ENGINE_REL, anchored(SC, '    return null;\n  }\n  function mainFocus(px, lease) {', '    return px.plan && px.plan.main ? px.plan.main.id : null;\n  }\n  function mainFocus(px, lease) {', 'r2220 control: the main when no window holds the point'), 'r2220-main-fallback'), 'red-fallback'));
         ok(mainFallback.away.window === 1, 'RED CONTROL (r2220 bound): a click in no window of the app gives the keyboard to the main anyway', mainFallback.away);
         const bottomFirst = await runClicks(mkE(MUT.load(ENGINE_REL, anchored(SC, '    for (let i = ms.length - 1; i >= 0; i--) { const w = ms[i];', '    for (let i = 0; i < ms.length; i++) { const w = ms[i];', 'r2220 control: the bottom window first'), 'r2220-bottom'), 'red-bottom'));
@@ -846,7 +846,7 @@ console.log('CONTROLS (patched copies)');
       };
       const SRCL = read(ENGINE_REL);
       const i1 = await sideI(world(ENGINE, 'now-i'));
-      ok(i1.ran && i1.acts.includes('do_action') && i1.after.act === 'not_exposed' && i1.after.snapshot === 'not_exposed' && i1.after.screenshot === 'not_exposed',
+      ok(gateOf(i1.ran) && gateOf(i1.acts.includes('do_action')) && i1.after.act === 'not_exposed' && i1.after.snapshot === 'not_exposed' && i1.after.screenshot === 'not_exposed',
         'r1623 (i): a TREE act called, then the revoke in the SAME tick — the act RAN (do_action, it was wholly before the revoke); every verb called AFTER the revoke (act, snapshot, screenshot) is refused not_exposed by name', i1);
       const ii1 = await sideII(world(ENGINE, 'now-ii'));
       ok(ii1.code === 'not_exposed' && ii1.keys === 0, 'r1623 (ii): a PIXEL road (key: the input-backend probe is a real await before its injection), the revoke made DURING that await — refused not_exposed and the injector saw NOTHING (never across a revoke)', ii1);
@@ -869,12 +869,12 @@ console.log('CONTROLS (patched copies)');
     const c2 = await cliP('screenshot', 'da-pop');
     const c3 = await cliP('screenshot', 'da-pop.w2'); // unit 2: the window's own handle through the route and the CLI
     srvP.close();
-    ok(c1.status === 0 && c1.stdout.includes('this app has 1 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image') && c1.stdout.includes('its own handle `da-pop.w2`') && c2.status === 0 && !/does not show/.test(c2.stdout),
+    ok(c1.status === 0 && gateOf(c1.stdout.includes('this app has 1 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image')) && gateOf(c1.stdout.includes('its own handle `da-pop.w2`')) && c2.status === 0 && !/does not show/.test(c2.stdout),
       'the shipped CLI prints the words under the image line (the title with its en dash through the escaped header); CONTROL: the popup over the main ⇒ in the image, nothing said', { c1: c1.stdout.slice(-400) + c1.stderr.slice(-300), c2: c2.stdout.slice(-300) });
-    ok(c3.status === 0 && c3.stdout.includes('this image is ONE window of the app: da-pop.w2 «Sign in – Google Accounts» — --at, keys and typing on this handle go to it') && c2.stdout.includes('2 windows of the app composed in this image'),
+    ok(c3.status === 0 && gateOf(c3.stdout.includes('this image is ONE window of the app: da-pop.w2 «Sign in – Google Accounts» — --at, keys and typing on this handle go to it')) && verdictOf(c2.stdout.includes('2 windows of the app composed in this image')),
       'unit 2 through the route + the CLI: `screenshot da-pop.w2` says it is ONE window of the app (its title back through the escaped header); the app\'s own image counts the windows it composed (CONTROL: the popup over the main ⇒ 2)', { c3: c3.stdout.slice(-300) + c3.stderr.slice(-200), c2: c2.stdout.slice(-200) });
   } catch (e) { ok(false, '§DBB4: the engine / route / CLI legs threw', String((e && e.stack) || e).slice(0, 600)); }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -21,7 +21,7 @@ import { census, scanSet, harnessNames, loadRegistry, formatChecklist, FENCE_EXE
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 const H = loadRegistry(REPO);
@@ -31,21 +31,21 @@ const FILES = scanSet(REPO);
 // ── §1 the real registry ────────────────────────────────────────────────────────────────────────────────────────────
 console.log('§1 the real registry over the real tree');
 const real = census({ repo: REPO, descriptors: DESCS, builtin: BUILTIN, files: FILES });
-ok(FILES.length > 900 && FILES.every((f) => /^(?:scripts|src)\//.test(f)) && !FILES.some((f) => f.startsWith('scripts/fixtures/')), `the scan set is git ls-files over scripts/** + src/** (${FILES.length} files; fixtures excepted)`);
+ok(FILES.length > 900 && gateOf(FILES.every((f) => /^(?:scripts|src)\//.test(f))) && !FILES.some((f) => f.startsWith('scripts/fixtures/')), `the scan set is git ls-files over scripts/** + src/** (${FILES.length} files; fixtures excepted)`);
 ok(real.sites.length >= 30, `the tree holds ${real.sites.length} harness-keyed table sites (≥ 30: the census is non-vacuous)`, real.sites.length);
-ok(real.ok, `every registered harness (${IDS.join(', ')}) is in every fence, or exempt with a reason — ${real.missing.length} missing, ${real.rows.length} row(s), ${real.dead.length} dead exemption(s), rules alive ${real.rules.filter((r) => r.alive).length}/${real.rules.length}`, real.checklist.filter((l) => !l.startsWith('rule · ')));
+ok(verdictOf(real.ok), `every registered harness (${IDS.join(', ')}) is in every fence, or exempt with a reason — ${real.missing.length} missing, ${real.rows.length} row(s), ${real.dead.length} dead exemption(s), rules alive ${real.rules.filter((r) => r.alive).length}/${real.rules.length}`, real.checklist.filter((l) => !l.startsWith('rule · ')));
 const byShape = {}; for (const s of real.sites) byShape[s.shape] = (byShape[s.shape] || 0) + 1;
 console.log(`    the fence table (${real.sites.length} sites; shapes ${JSON.stringify(byShape)}):`);
 for (const s of real.sites) console.log(`      ${s.file}:${s.line}  ${s.shape.padEnd(11)} ${s.decl.slice(0, 32).padEnd(32)} [${s.found.join(' ')}]${s.countPins.length ? '  pin ' + s.countPins.map((p) => p.text).join(',') : ''}`);
 console.log(`    the row kinds (${ROW_KINDS.length}): ${ROW_KINDS.map((k) => k.kind).join(' · ')}`);
 console.log(`    the rules (${RULES.length}): ${RULES.map((r) => path.basename(r.suite)).join(' · ')}`);
-ok(FENCE_EXEMPT.every((e) => e.file && e.needle && Array.isArray(e.ids) && e.ids.length && e.ids.every((id) => IDS.includes(id)) && e.why && e.why.length > 20), `every exemption names a file, a needle, registered ids and a reason (${FENCE_EXEMPT.length} rows)`);
-ok(real.rules.every((r) => r.alive), 'every rule\'s needle is alive in its suite (a renamed rule is noticed)', real.rules.filter((r) => !r.alive).map((r) => r.suite));
-ok(real.sites.some((s) => s.file === 'scripts/id-branch-census.mjs') && real.sites.some((s) => s.file === 'scripts/ci.mjs' && s.decl === 'REAL_PROGRAMS') && real.sites.some((s) => s.file === 'src/backend-caps.js'), 'the fences the Antigravity lane never saw are sites: the §78 family list, the gate\'s real-program alternation, the caps registry');
-ok(real.sites.some((s) => s.file === 'scripts/test-quota-source.mjs' && s.countPins.some((p) => p.n === IDS.length)), `a count pin beside a table is named with it (test-quota-source's ids().length === ${IDS.length})`);
+ok(verdictOf(FENCE_EXEMPT.every((e) => e.file && e.needle && Array.isArray(e.ids) && e.ids.length && e.ids.every((id) => IDS.includes(id)) && e.why && e.why.length > 20)), `every exemption names a file, a needle, registered ids and a reason (${FENCE_EXEMPT.length} rows)`);
+ok(verdictOf(real.rules.every((r) => r.alive)), 'every rule\'s needle is alive in its suite (a renamed rule is noticed)', real.rules.filter((r) => !r.alive).map((r) => r.suite));
+ok(gateOf(real.sites.some((s) => s.file === 'scripts/id-branch-census.mjs')) && gateOf(real.sites.some((s) => s.file === 'scripts/ci.mjs' && s.decl === 'REAL_PROGRAMS')) && verdictOf(real.sites.some((s) => s.file === 'src/backend-caps.js')), 'the fences the Antigravity lane never saw are sites: the §78 family list, the gate\'s real-program alternation, the caps registry');
+ok(verdictOf(real.sites.some((s) => s.file === 'scripts/test-quota-source.mjs' && s.countPins.some((p) => p.n === IDS.length))), `a count pin beside a table is named with it (test-quota-source's ids().length === ${IDS.length})`);
 { // §1b the shapes by example: object / list / rows / regex / alternation
   const want = { object: 'src/backend-caps.js', list: 'scripts/test-quota-source.mjs', rows: 'src/lib/manage-agents.js', regex: 'scripts/test-global-search.mjs', alternation: 'scripts/ci.mjs' };
-  ok(Object.entries(want).every(([shape, file]) => real.sites.some((s) => s.shape === shape && s.file === file)), `every table shape is found by example: ${Object.entries(want).map(([s, f]) => `${s} (${f})`).join(', ')}`);
+  ok(verdictOf(Object.entries(want).every(([shape, file]) => real.sites.some((s) => s.shape === shape && s.file === file))), `every table shape is found by example: ${Object.entries(want).map(([s, f]) => `${s} (${f})`).join(', ')}`);
 }
 
 // ── §2 the RED control: zz-probe in a child ─────────────────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ ok(real.sites.some((s) => s.file === 'scripts/test-quota-source.mjs' && s.countP
 {
   const tpl = fs.readFileSync(path.join(REPO, 'scripts/harness-new.mjs'), 'utf8');
   const { BACKEND_CAPS } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/backend-caps.js'));
-  ok((tpl.match(/'modelFacts'/g) || []).length >= 2 && Object.values(BACKEND_CAPS).every((r) => typeof r.modelFacts === 'boolean'), 'the harness-add checklist names the `modelFacts` capability (both harness-new templates) and every built-in caps row declares it as a boolean', Object.keys(BACKEND_CAPS).filter((id) => typeof BACKEND_CAPS[id].modelFacts !== 'boolean'));
+  ok((tpl.match(/'modelFacts'/g) || []).length >= 2 && verdictOf(Object.values(BACKEND_CAPS).every((r) => typeof r.modelFacts === 'boolean')), 'the harness-add checklist names the `modelFacts` capability (both harness-new templates) and every built-in caps row declares it as a boolean', Object.keys(BACKEND_CAPS).filter((id) => typeof BACKEND_CAPS[id].modelFacts !== 'boolean'));
 }
 console.log('§2 THE RED CONTROL: a planted descriptor in a FRESH registry — the checklist');
 const PROBE = { id: 'zz-probe', label: 'ZZ Probe', kind: 'chat', wrapper: 'data/bin/zz-wrapper.js' };
@@ -81,11 +81,11 @@ ok(!!P, 'the FRESH registry registered zz-probe beside the built-ins and ran the
 ok(!H.ids().includes(PROBE.id) && H.ids().join() === IDS.join() && H.list().length === DESCS.length, 'this process\'s own registry is untouched by it (the module cache put back as it was): no zz-probe here, the same ids and descriptors', H.ids());
 if (P) {
   const mine = P.missing.filter((m) => m.id === PROBE.id), others = P.missing.filter((m) => m.id !== PROBE.id);
-  ok(P.ids.includes(PROBE.id) && P.sites === real.sites.length, `the fresh registry's census saw the same ${P.sites} table sites and six harnesses`);
+  ok(gateOf(P.ids.includes(PROBE.id)) && P.sites === real.sites.length, `the fresh registry's census saw the same ${P.sites} table sites and six harnesses`);
   ok(!P.ok && mine.length === P.sites && others.length === 0 && P.dead.length === 0, `RED: zz-probe is missing from EXACTLY every table site (${mine.length} of ${P.sites}); the built-ins stay green beside it; no exemption names it`, { others: others.slice(0, 3), dead: P.dead });
   const kinds = P.rows.filter((r) => r.id === PROBE.id).map((r) => r.kind);
   const expectKinds = ['cli-registry-excluded', 'peer-text-declared', 'brand-svg', 'i18n-category', 'i18n-category', 'backend-option', 'own-suite-ci-row', 'kb-features'];
-  ok(expectKinds.every((k) => kinds.includes(k)) && !kinds.includes('settings-group') && !kinds.includes('registry-require') && P.rows.every((r) => r.id === PROBE.id), `the row kinds a chat harness owes are all named (${[...new Set(kinds)].join(', ')}); none for a settings table it has not declared, none for a built-in require (it is register()ed)`, kinds);
+  ok(gateOf(expectKinds.every((k) => kinds.includes(k))) && !kinds.includes('settings-group') && !kinds.includes('registry-require') && verdictOf(P.rows.every((r) => r.id === PROBE.id)), `the row kinds a chat harness owes are all named (${[...new Set(kinds)].join(', ')}); none for a settings table it has not declared, none for a built-in require (it is register()ed)`, kinds);
   ok(P.rows.filter((r) => r.kind === 'kb-features').length >= 3, 'kb-features: a row in each harness-keyed table + a feature entry naming the label');
   // THE ELEVEN (lane antigravity-harness report §7 «Traps hit») — every one is on the probe's checklist, by file
   const TRAPS = [
@@ -98,8 +98,8 @@ if (P) {
   ];
   const absent = TRAPS.filter(([f]) => !P.text.includes(f));
   ok(absent.length === 0, `THE ELEVEN TRAPS are all on the checklist, by file (${TRAPS.length} files named)`, absent.map(([f, w]) => `${f} (${w})`));
-  ok(/test-quota-source\.mjs:\d+: add 'zz-probe'.*count pin .length === \d+ → \d+/.test(P.text), 'the count pin beside the registry roster is named with its next value');
-  ok(P.text.includes("'zz-probe' (or its program 'zz-probe')") === false && P.text.includes("add 'zz-probe' to REAL_PROGRAMS"), 'a chat harness with no exe/acp row is keyed by its id alone (the program IS the id); the gate\'s real-program alternation is on the list');
+  ok(verdictOf(/test-quota-source\.mjs:\d+: add 'zz-probe'.*count pin .length === \d+ → \d+/.test(P.text)), 'the count pin beside the registry roster is named with its next value');
+  ok(P.text.includes("'zz-probe' (or its program 'zz-probe')") === false && verdictOf(P.text.includes("add 'zz-probe' to REAL_PROGRAMS")), 'a chat harness with no exe/acp row is keyed by its id alone (the program IS the id); the gate\'s real-program alternation is on the list');
   console.log('    ── the checklist a zz-probe lane reads (verbatim) ──');
   for (const l of P.text.split('\n')) console.log('    ' + l);
 }
@@ -111,13 +111,13 @@ const mutant = (override, exempt) => census({ repo: REPO, descriptors: DESCS, bu
   const rel = 'scripts/test-quota-source.mjs', src = read(rel), cut = src.replace("'opencode', 'antigravity']", "'opencode']");
   ok(cut !== src, '(a) the mutant text differs (the roster list loses antigravity)');
   const m = mutant({ [rel]: cut });
-  ok(!m.ok && m.missing.length === 1 && m.missing[0].file === rel && m.missing[0].id === 'antigravity' && m.checklist[0].startsWith(`${rel}:`) && m.checklist[0].includes("add 'antigravity'"), '(a) RED: the file and the row are named, nothing else moves', m.checklist.slice(0, 2));
+  ok(!m.ok && m.missing.length === 1 && m.missing[0].file === rel && m.missing[0].id === 'antigravity' && gateOf(m.checklist[0].startsWith(`${rel}:`)) && verdictOf(m.checklist[0].includes("add 'antigravity'")), '(a) RED: the file and the row are named, nothing else moves', m.checklist.slice(0, 2));
 }
 { // (b) a cli-registry EXCLUDED row (a row KIND)
   const rel = 'scripts/test-cli-registry.mjs', src = read(rel), cut = src.split('\n').filter((l) => !l.includes("'agy-wrapper.js':")).join('\n');
   ok(cut.length < src.length, '(b) the mutant text differs (the agy-wrapper EXCLUDED row is gone)');
   const m = mutant({ [rel]: cut });
-  ok(!m.ok && m.missing.length === 0 && m.rows.length === 1 && m.rows[0].kind === 'cli-registry-excluded' && m.rows[0].id === 'antigravity' && m.rows[0].row.includes("'agy-wrapper.js':"), '(b) RED: the row kind names the file and the row text to add', m.rows);
+  ok(!m.ok && m.missing.length === 0 && m.rows.length === 1 && m.rows[0].kind === 'cli-registry-excluded' && m.rows[0].id === 'antigravity' && verdictOf(m.rows[0].row.includes("'agy-wrapper.js':")), '(b) RED: the row kind names the file and the row text to add', m.rows);
 }
 { // (c) a kb-features table row
   const rel = 'docs/kb-features.md', src = read(rel), lines = src.split('\n');
@@ -125,7 +125,7 @@ const mutant = (override, exempt) => census({ repo: REPO, descriptors: DESCS, bu
   ok(i > 0, '(c) the auto-resume table has an antigravity row to delete');
   const cut = [...lines.slice(0, i), ...lines.slice(i + 1)].join('\n');
   const m = mutant({ [rel]: cut });
-  ok(!m.ok && m.rows.length === 1 && m.rows[0].kind === 'kb-features' && m.rows[0].id === 'antigravity' && /^docs\/kb-features\.md:\d+$/.test(m.rows[0].file) && m.rows[0].row.includes('a row for antigravity'), '(c) RED: the table (by line) and the missing row are named', m.rows);
+  ok(!m.ok && m.rows.length === 1 && m.rows[0].kind === 'kb-features' && m.rows[0].id === 'antigravity' && gateOf(/^docs\/kb-features\.md:\d+$/.test(m.rows[0].file)) && verdictOf(m.rows[0].row.includes('a row for antigravity')), '(c) RED: the table (by line) and the missing row are named', m.rows);
 }
 { // (d) the §78 family list — the fence nobody saw before this census
   const rel = 'scripts/id-branch-census.mjs', src = read(rel), cut = src.replace("'opencode', 'antigravity', 'acp', 'shell'", "'opencode', 'acp', 'shell'");
@@ -135,17 +135,17 @@ const mutant = (override, exempt) => census({ repo: REPO, descriptors: DESCS, bu
 }
 { // (e) a dead exemption: a row that exempts nothing
   const m = mutant({}, [...FENCE_EXEMPT, { file: 'scripts/ci.mjs', needle: 'REAL_PROGRAMS', ids: ['codex'], why: 'a planted row — codex is present there' }]);
-  ok(!m.ok && m.missing.length === 0 && m.dead.length === 1 && m.dead[0].ids[0] === 'codex' && m.checklist.some((l) => /DEAD exemption/.test(l)), '(e) RED: a dead exemption is named (an exemption that hides nothing would hide the next gap)', m.dead);
+  ok(!m.ok && m.missing.length === 0 && m.dead.length === 1 && m.dead[0].ids[0] === 'codex' && verdictOf(m.checklist.some((l) => /DEAD exemption/.test(l))), '(e) RED: a dead exemption is named (an exemption that hides nothing would hide the next gap)', m.dead);
 }
 { // (f) a rule whose needle died
   const rel = 'scripts/test-ci-gate-scripts.mjs', src = read(rel), cut = src.split('Date.now() delta').join('a renamed rule');
   const m = mutant({ [rel]: cut });
   const r = m.rules.find((x) => x.suite === rel);
-  ok(!m.ok && r && !r.alive && m.checklist.some((l) => l.includes(rel) && /NEEDLE IS GONE/.test(l)), '(f) RED: a rule whose needle moved or died is named (the checklist never lists a rule that is no longer checked)', m.checklist.filter((l) => /NEEDLE/.test(l)));
+  ok(!m.ok && gateOf(r) && !r.alive && verdictOf(m.checklist.some((l) => l.includes(rel) && /NEEDLE IS GONE/.test(l))), '(f) RED: a rule whose needle moved or died is named (the checklist never lists a rule that is no longer checked)', m.checklist.filter((l) => /NEEDLE/.test(l)));
 }
 { // (g) a harness gone from the registry: the census is over the REGISTERED ids — a descriptor removed ⇒ nothing is asked of it
   const m = census({ repo: REPO, descriptors: DESCS.filter((d) => d.id !== 'antigravity'), builtin: BUILTIN.filter((id) => id !== 'antigravity'), files: FILES });
-  ok(m.missing.every((x) => x.id !== 'antigravity') && m.rows.every((x) => x.id !== 'antigravity'), '(g) the ids come from the registry: an unregistered id is never demanded (the fences keep its rows; the exemptions naming it are not dead — they still match sites)');
+  ok(gateOf(m.missing.every((x) => x.id !== 'antigravity')) && verdictOf(m.rows.every((x) => x.id !== 'antigravity')), '(g) the ids come from the registry: an unregistered id is never demanded (the fences keep its rows; the exemptions naming it are not dead — they still match sites)');
 }
 
 // ── §4 derivations + the scan's own controls ────────────────────────────────────────────────────────────────────────
@@ -154,11 +154,11 @@ console.log('§4 the derivations cross-checked; the scan\'s controls; this suite
   const names = DESCS.map(harnessNames);
   const roster = RULES.find((r) => r.suite === 'scripts/test-codex-pool.mjs');
   const pinned = /count\(ma, \/\\\.sort\\\(rosterSort\\\)\/g\) === (\d+)/.exec(read(roster.suite));
-  ok(pinned && Number(pinned[1]) === roster.derive(names), `the roster count test-codex-pool pins (${pinned && pinned[1]}) = the harnesses with creds (${roster.derive(names)}: ${names.filter((n) => n.hasCreds).map((n) => n.id).join(', ')})`);
+  ok(gateOf(pinned) && Number(pinned[1]) === roster.derive(names), `the roster count test-codex-pool pins (${pinned && pinned[1]}) = the harnesses with creds (${roster.derive(names)}: ${names.filter((n) => n.hasCreds).map((n) => n.id).join(', ')})`);
   const ag = names.find((n) => n.id === 'antigravity'), cl = names.find((n) => n.id === 'claude'), sh = names.find((n) => n.id === 'shell');
   ok(ag.program === 'agy' && ag.keys.join(',') === 'antigravity,agy' && cl.program === 'claude' && cl.keys.join(',') === 'claude' && sh.program === null && sh.keys.join(',') === 'shell', 'harnessNames: the program is exe.command / acp.command (agy), the id for a chat harness without one, none for a terminal');
   ok(ag.category === 'Antigravity CLI' && cl.category === 'Claude' && sh.category === null && ag.brand === '/brand/antigravity.svg', 'harnessNames: the settings category (the i18n key the Settings window needs) and the brand come off the descriptor');
-  ok(real.sites.find((s) => s.file === 'scripts/ci.mjs' && s.decl === 'REAL_PROGRAMS').found.includes('antigravity'), "a site keyed by PROGRAM names (ci.mjs REAL_PROGRAMS: agy) credits the harness whose program it is");
+  ok(verdictOf(real.sites.find((s) => s.file === 'scripts/ci.mjs' && s.decl === 'REAL_PROGRAMS').found.includes('antigravity')), "a site keyed by PROGRAM names (ci.mjs REAL_PROGRAMS: agy) credits the harness whose program it is");
 }
 { // the scan's controls
   const names = DESCS.map(harnessNames), four = IDS.slice(0, 4);
@@ -188,10 +188,10 @@ console.log('§5 the generator: its plan satisfies every row kind in memory; the
   const p = G.plan(o, ctx), gen = G.descriptorOf(o);
   const files2 = [...FILES, ...Object.keys(p.writes).filter((f) => /\.(?:m?js|cjs)$/.test(f))];
   const run2 = (override) => census({ repo: REPO, descriptors: [...DESCS, gen], builtin: [...BUILTIN, gen.id], files: files2, override });
-  ok(Object.keys(p.writes).length >= 6 && Object.keys(p.edits).length >= 8 && Object.keys(p.edits).every((f) => fs.existsSync(path.join(REPO, f))), `the plan (in memory, nothing written): ${Object.keys(p.writes).length} new files, ${Object.keys(p.edits).length} edited tracked files — row kinds ${p.kinds.join(' · ')}`);
+  ok(Object.keys(p.writes).length >= 6 && Object.keys(p.edits).length >= 8 && verdictOf(Object.keys(p.edits).every((f) => fs.existsSync(path.join(REPO, f)))), `the plan (in memory, nothing written): ${Object.keys(p.writes).length} new files, ${Object.keys(p.edits).length} edited tracked files — row kinds ${p.kinds.join(' · ')}`);
   const r = run2({ ...p.writes, ...p.edits });
-  ok(r.rows.length === 0 && r.dead.length === 0 && r.rules.every((x) => x.alive), 'the plan satisfies EVERY row kind (no row left for zz-gen; the built-ins untouched; no exemption died)', r.rows);
-  ok(r.missing.length > 0 && r.missing.every((m) => m.id === gen.id) && r.missing.length === r.sites.length, `what is LEFT is exactly the id-keyed tables (${r.missing.length} sites — judgment no generator fakes: caps, META, settings, the suites' rosters)`);
+  ok(r.rows.length === 0 && r.dead.length === 0 && verdictOf(r.rules.every((x) => x.alive)), 'the plan satisfies EVERY row kind (no row left for zz-gen; the built-ins untouched; no exemption died)', r.rows);
+  ok(r.missing.length > 0 && gateOf(r.missing.every((m) => m.id === gen.id)) && r.missing.length === r.sites.length, `what is LEFT is exactly the id-keyed tables (${r.missing.length} sites — judgment no generator fakes: caps, META, settings, the suites' rosters)`);
   const kindsOf = (x) => [...new Set(x.rows.map((y) => y.kind))].sort();
   // the mutant: the skeleton files stay, every fence row the plan wrote is gone (the edits, the brand file)
   const { [`public/brand/${gen.id}.svg`]: _brand, ...skeleton } = p.writes;
@@ -199,9 +199,9 @@ console.log('§5 the generator: its plan satisfies every row kind in memory; the
   const probeKinds = P ? kindsOf(P) : [];
   ok(!m.ok && m.rows.length > 0 && JSON.stringify(kindsOf(m)) === JSON.stringify([...probeKinds, 'registry-require'].sort()), `MUTANT: the generated skeleton with its fence rows deleted ⇒ RED with the probe's checklist kind for kind, plus the require line a BUILT-IN owes (${kindsOf(m).join(', ')})`, { mutant: kindsOf(m), probe: probeKinds });
   const refuses = (args) => { try { G.parseArgs(args); return false; } catch { return true; } };
-  ok(refuses(['ZZ-gen', '--label', 'x', '--wrapper', 'data/bin/x.js']) && refuses(['zz', '--wrapper', 'data/bin/x.js']) && refuses(['zz', '--label', 'x', '--kind', 'chat']) && refuses(['zz', '--label', 'x', '--kind', 'pty', '--bogus']) && !refuses(['zz', '--label', 'x', '--kind', 'pty']) && G.descriptorOf(G.parseArgs(['zz', '--label', 'x', '--kind', 'pty'])).kind === 'terminal', 'the arguments are judged: a slug id, a label, a data/bin wrapper for a chat / acp harness, no unknown flag; pty = a terminal descriptor');
+  ok(gateOf(refuses(['ZZ-gen', '--label', 'x', '--wrapper', 'data/bin/x.js'])) && gateOf(refuses(['zz', '--wrapper', 'data/bin/x.js'])) && gateOf(refuses(['zz', '--label', 'x', '--kind', 'chat'])) && gateOf(refuses(['zz', '--label', 'x', '--kind', 'pty', '--bogus'])) && !refuses(['zz', '--label', 'x', '--kind', 'pty']) && G.descriptorOf(G.parseArgs(['zz', '--label', 'x', '--kind', 'pty'])).kind === 'terminal', 'the arguments are judged: a slug id, a label, a data/bin wrapper for a chat / acp harness, no unknown flag; pty = a terminal descriptor');
   const sk = G.skeletons(o);
-  ok(/module\.exports = \{/.test(sk['src/harnesses/zz-gen.js']) && ['id', 'label', 'kind', 'caps', 'Adapter', 'adapterConfig', 'wrapper'].every((k) => new RegExp(`^  ${k}:`, 'm').test(sk['src/harnesses/zz-gen.js'])) && (sk['src/harnesses/zz-gen.js'].match(/TODO/g) || []).length >= 8 && /test-harness-contract/.test(sk['src/harnesses/zz-gen.js']), 'the descriptor skeleton declares the REQUIRED keys and names the contract at every TODO');
+  ok(gateOf(/module\.exports = \{/.test(sk['src/harnesses/zz-gen.js'])) && gateOf(['id', 'label', 'kind', 'caps', 'Adapter', 'adapterConfig', 'wrapper'].every((k) => new RegExp(`^  ${k}:`, 'm').test(sk['src/harnesses/zz-gen.js']))) && (sk['src/harnesses/zz-gen.js'].match(/TODO/g) || []).length >= 8 && verdictOf(/test-harness-contract/.test(sk['src/harnesses/zz-gen.js'])), 'the descriptor skeleton declares the REQUIRED keys and names the contract at every TODO');
   // B-1747 part 2 (the coordinator's r1347): the generated suite takes THE ONE GUARDED HELPER — it imports checker() and defines
   // no inline helper the census reads. RED: the generator's earlier template (an inline ok), anchored.
   const CC = await import('./lib/check.mjs'), { anchored } = await import('./scratch.mjs'), { mutantCopies } = await import('./mutant-copy.mjs');
@@ -209,7 +209,7 @@ console.log('§5 the generator: its plan satisfies every row kind in memory; the
   const guardedSk = (S) => /^import \{ checker \} from '\.\/lib\/check\.mjs';$/m.test(testSk(S)) && CC.helperDefs(testSk(S)).length === 0;
   const oldTpl = anchored(fs.readFileSync(path.join(REPO, 'scripts/harness-new.mjs'), 'utf8'), 'const { ok, report } = checker();', `let pass = 0, fail = 0;\n${K} ok = (c, n, e) => { if (c) { pass++; } else { fail++; console.error('  ✗ ' + n); } };`, 'the earlier template: an inline ok');
   const Gold = await import(pathToFileURL(mutantCopies('harness-add-tpl', REPO).write('scripts/harness-new.mjs', oldTpl, 'inline-ok')).href);
-  ok(guardedSk(sk) && !guardedSk(Gold.skeletons(o)), 'the generated suite imports checker() and defines no inline helper (RED: the earlier template\'s inline ok)', { now: testSk(sk).split('\n').filter((l) => /checker|ok = /.test(l)), old: testSk(Gold.skeletons(o)).split('\n').filter((l) => /checker|ok = /.test(l)) });
+  ok(gateOf(guardedSk(sk)) && !guardedSk(Gold.skeletons(o)), 'the generated suite imports checker() and defines no inline helper (RED: the earlier template\'s inline ok)', { now: testSk(sk).split('\n').filter((l) => /checker|ok = /.test(l)), old: testSk(Gold.skeletons(o)).split('\n').filter((l) => /checker|ok = /.test(l)) });
 }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

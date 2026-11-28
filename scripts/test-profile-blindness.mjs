@@ -40,7 +40,7 @@ const BE = require('../src/server/browser-env.js');
 const LIMITS = require('../src/keeper-limits.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
 const threw = (fn) => { try { fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -64,16 +64,16 @@ console.log('— ① the notice slot is a QUEUE of typed notices (src/session-st
   ok(st.pendingNotices(KEY).length === 1 && st.pendingNotices(KEY)[0].kind === 'status-override', 'a user override of an agent-set status queues ONE status-override notice');
   const n = st.pushNotice(KEY, B.profileChangeNotice({ was: 'ephemeral', now: 'Work', by: 'user', handles: ['work'] }));
   ok(n === 2 && st.pendingNotices(KEY).length === 2 && st.pendingNotices(KEY)[1].kind === 'browser-profile', 'a browser-profile notice pushed beside it makes TWO pending — neither overwrote the other');
-  ok(NOTICE_KINDS.includes('status-override') && NOTICE_KINDS.includes('browser-profile') && NOTICE_KINDS.includes('browser-pin'), 'the closed kind set names status-override / browser-profile / browser-pin');
+  ok(gateOf(NOTICE_KINDS.includes('status-override')) && gateOf(NOTICE_KINDS.includes('browser-profile')) && verdictOf(NOTICE_KINDS.includes('browser-pin')), 'the closed kind set names status-override / browser-profile / browser-pin');
   const bad = threw(() => st.pushNotice(KEY, { kind: 'nope', at: 1 }));
-  ok(bad && /unknown notice kind "nope"/.test(bad.message) && st.pendingNotices(KEY).length === 2, 'an unknown kind is refused LOUDLY at push time (never rendered as garbage)');
+  ok(gateOf(bad) && gateOf(/unknown notice kind "nope"/.test(bad.message)) && st.pendingNotices(KEY).length === 2, 'an unknown kind is refused LOUDLY at push time (never rendered as garbage)');
   const rendered = SessionStatusManager.renderNotices(st.pendingNotices(KEY));
-  ok(/manually changed this session's status indicator/.test(rendered) && /Yours: state=working, urgency=normal, reason="building"/.test(rendered) && /browser profile changed: ephemeral → Work \(by user\)/.test(rendered) && (rendered.match(/<system-reminder>/g) || []).length === 2, 'renderNotices dispatches on kind: today\'s status-override sentence VERBATIM + the browser-profile reminder, one <system-reminder> each');
-  ok(SessionStatusManager.renderNotice({ agent: { state: 'done', urgency: 'low' }, user: null, at: 1 }).includes('cleared the status indicator'), 'a notice with NO kind (an older build\'s shape) renders as the legacy status-override');
-  ok(SessionStatusManager.renderNotice({ kind: 'browser-pin', was: null, now: 'Work', by: 'user', handles: ['work'] }).includes('ephemeral (no profile) → Work'), 'browser-pin renders through the same profile-change sentence with the ephemeral spelling for "no profile"');
+  ok(gateOf(/manually changed this session's status indicator/.test(rendered)) && gateOf(/Yours: state=working, urgency=normal, reason="building"/.test(rendered)) && gateOf(/browser profile changed: ephemeral → Work \(by user\)/.test(rendered)) && (rendered.match(/<system-reminder>/g) || []).length === 2, 'renderNotices dispatches on kind: today\'s status-override sentence VERBATIM + the browser-profile reminder, one <system-reminder> each');
+  ok(verdictOf(SessionStatusManager.renderNotice({ agent: { state: 'done', urgency: 'low' }, user: null, at: 1 }).includes('cleared the status indicator')), 'a notice with NO kind (an older build\'s shape) renders as the legacy status-override');
+  ok(verdictOf(SessionStatusManager.renderNotice({ kind: 'browser-pin', was: null, now: 'Work', by: 'user', handles: ['work'] }).includes('ephemeral (no profile) → Work')), 'browser-pin renders through the same profile-change sentence with the ephemeral spelling for "no profile"');
   const drained = st.consumeNotices(KEY);
   ok(drained.length === 2 && drained[0].kind === 'status-override' && drained[1].kind === 'browser-profile' && st.pendingNotices(KEY).length === 0 && st.consumeNotices(KEY).length === 0, 'consumeNotices drains EVERYTHING in order, once');
-  ok(st.get(KEY) && st.get(KEY).state === 'blocked', '…and the status record itself stays');
+  ok(gateOf(st.get(KEY)) && st.get(KEY).state === 'blocked', '…and the status record itself stays');
   // bounded
   for (let i = 0; i < 12; i++) st.pushNotice(KEY, { kind: 'browser-profile', was: 'p' + i, now: 'p' + (i + 1), by: 'user', handles: [] });
   const q = st.pendingNotices(KEY);
@@ -82,7 +82,7 @@ console.log('— ① the notice slot is a QUEUE of typed notices (src/session-st
   const two = st.consumeNotices(KEY, 2);
   ok(two.length === 2 && two[0].was === 'p4' && two[1].was === 'p5' && st.pendingNotices(KEY).length === 6 && st.pendingNotices(KEY)[0].was === 'p6' && st.consumeNotices(KEY, 0).length === 0 && st.consumeNotices(KEY, 'x').length === 0 && st.pendingNotices(KEY).length === 6,
     'consumeNotices(key, count) takes the OLDEST `count` and leaves the rest (0 / a non-number take nothing)');
-  ok(st.consumeNotices(KEY, 99).length === 6 && st.pendingNotices(KEY).length === 0 && st.get(KEY) && st.get(KEY).state === 'blocked', 'a count past the queue takes it all; the status record stays');
+  ok(st.consumeNotices(KEY, 99).length === 6 && st.pendingNotices(KEY).length === 0 && gateOf(st.get(KEY)) && st.get(KEY).state === 'blocked', 'a count past the queue takes it all; the status record stays');
   // an agent's own clear keeps a queued notice
   st.setByAgent(KEY, { state: 'working', urgency: 'normal' });
   st.pushNotice(KEY, { kind: 'browser-pin', was: null, now: 'Work', by: 'user', handles: ['work'] });
@@ -97,14 +97,14 @@ console.log('— ① the notice slot is a QUEUE of typed notices (src/session-st
   ok(st.pendingNotices(KEY).length === 1, 'an agent re-set keeps the undelivered notices');
   st.consumeNotices(KEY);
   // a key with no record at all
-  ok(st.pushNotice('claude:fresh', { kind: 'browser-pin', now: 'X', by: 'user', handles: [] }) === 1 && st.get('claude:fresh') && st.get('claude:fresh').setBy === null, 'pushing to a key with no status record creates a state-less record that carries only the queue');
+  ok(st.pushNotice('claude:fresh', { kind: 'browser-pin', now: 'X', by: 'user', handles: [] }) === 1 && gateOf(st.get('claude:fresh')) && st.get('claude:fresh').setBy === null, 'pushing to a key with no status record creates a state-less record that carries only the queue');
   // legacy lift
   const d2 = path.join(ROOT, 'q2'); fs.mkdirSync(d2, { recursive: true });
   fs.writeFileSync(path.join(d2, 'session-status.json'), JSON.stringify({ statuses: { 'claude:old': { state: 'blocked', urgency: 'high', reason: null, setBy: 'user', at: 1, pendingNotice: { agent: { state: 'working', urgency: 'normal', reason: 'x' }, user: { state: 'blocked', urgency: 'high' }, at: 1 } } } }));
   const st2 = new SessionStatusManager({ dataDir: d2, onChange: () => { } });
   const lifted = st2.pendingNotices('claude:old');
   ok(lifted.length === 1 && lifted[0].kind === 'status-override' && lifted[0].agent.reason === 'x' && !('pendingNotice' in st2.get('claude:old')), 'a file an OLDER build wrote (one fixed-shape pendingNotice) is lifted into the queue once at load');
-  ok(/manually changed/.test(SessionStatusManager.renderNotices(st2.consumeNotices('claude:old'))), '…and renders as the status-override it was');
+  ok(verdictOf(/manually changed/.test(SessionStatusManager.renderNotices(st2.consumeNotices('claude:old')))), '…and renders as the status-override it was');
 }
 
 // ═══ ② the injection site drains ═════════════════════════════════════════
@@ -128,13 +128,13 @@ console.log('— ② /api/agent/prompt-context DRAINS the queue (both notices re
   sessionStatus.setByUser(KEY, { state: 'blocked', urgency: 'high' });
   sessionStatus.pushNotice(KEY, B.profileChangeNotice({ was: 'ephemeral', now: 'Work', by: 'user', handles: ['work'] }));
   const c1 = prompt();
-  ok(/manually changed this session's status indicator/.test(c1) && /browser profile changed: ephemeral → Work/.test(c1), 'BOTH pending notices reach the same next prompt (the old site consumed one and broke)');
+  ok(gateOf(/manually changed this session's status indicator/.test(c1)) && verdictOf(/browser profile changed: ephemeral → Work/.test(c1)), 'BOTH pending notices reach the same next prompt (the old site consumed one and broke)');
   const c2 = prompt();
   ok(!/status indicator/.test(c2) && !/browser profile changed/.test(c2), 'the following prompt carries neither (drained once)');
   // the record still under webui:<id> (before the agent's first call re-keys it) drains too
   sessionStatus.pushNotice('webui:sess1', { kind: 'browser-pin', was: null, now: 'Personal', by: 'user', handles: ['personal'] });
   const c3 = prompt();
-  ok(/browser profile changed: ephemeral \(no profile\) → Personal/.test(c3), 'a notice queued under webui:<id> is drained as well');
+  ok(verdictOf(/browser profile changed: ephemeral \(no profile\) → Personal/.test(c3)), 'a notice queued under webui:<id> is drained as well');
   ok(!/browser profile changed/.test(prompt()), '…once');
 }
 
@@ -143,13 +143,13 @@ console.log('— ③ the session-start context lists the CURRENT attachment set 
 {
   const set = B.attachmentsFor({ leases: [{ profileId: 'bp-00000001', browserKey: 'bk-0000000a', since: 1, alias: 'personal' }, { profileId: 'bp-00000002', browserKey: 'bk-0000000a', since: 2, alias: 'work' }], profiles: [{ id: 'bp-00000001', label: 'Personal', dir: '/p' }, { id: 'bp-00000002', label: 'Work', dir: '/w' }], browserKey: 'bk-0000000a', pin: { profileId: 'bp-00000002' } });
   const line = browserSetLine(set);
-  ok(/personal, work \(default\)/.test(line) && /must name one with `--profile <handle>`/.test(line) && /profile_required/.test(line) && /profile_changed/.test(line), 'the line names every attachment, marks the default, and states the ≥2 rule + the one-time refusal');
+  ok(gateOf(/personal, work \(default\)/.test(line)) && gateOf(/must name one with `--profile <handle>`/.test(line)) && gateOf(/profile_required/.test(line)) && verdictOf(/profile_changed/.test(line)), 'the line names every attachment, marks the default, and states the ≥2 rule + the one-time refusal');
   const one = B.attachmentsFor({ leases: [{ profileId: 'bp-00000001', browserKey: 'bk-0000000a', since: 1 }], profiles: [{ id: 'bp-00000001', label: 'Personal', dir: '/p' }], browserKey: 'bk-0000000a' });
-  ok(/personal \(default\)/.test(browserSetLine(one)) && !/profile_required/.test(browserSetLine(one)), 'with ONE attachment the line says a bare command lands on it (no refusal rule — the commonest shape stays one command)');
+  ok(gateOf(/personal \(default\)/.test(browserSetLine(one))) && !/profile_required/.test(browserSetLine(one)), 'with ONE attachment the line says a bare command lands on it (no refusal rule — the commonest shape stays one command)');
   const T = { status: true, ask: true, task: true, jobs: true, msg: true, pages: true, browser: true };
   const withSet = sessionToolsIntro(T, { browserVariant: 'D', browserSet: set });
   const without = sessionToolsIntro(T, { browserVariant: 'D' });
-  ok(/Browser profiles attached to THIS session: personal, work \(default\)/.test(withSet) && !/Browser profiles attached/.test(without), 'sessionToolsIntro carries the set line only when the session holds a set');
+  ok(gateOf(/Browser profiles attached to THIS session: personal, work \(default\)/.test(withSet)) && !/Browser profiles attached/.test(without), 'sessionToolsIntro carries the set line only when the session holds a set');
 }
 
 // ═══ ④ end to end: a mid-task pin, no restart, zero billed turns ══════════
@@ -207,21 +207,21 @@ out({ success: false, error: 'fake: unknown ' + a }); process.exit(1);
   await k.attach({ profileId: work.id, browserKey: KEY, sessionId: 'sess-9' });
   await k.attach({ profileId: pers.id, browserKey: KEY, sessionId: 'sess-9' });
   try { for (const l of fs.readFileSync(path.join(AB, 'pids'), 'utf8').trim().split('\n')) spawned.add(Number(l)); } catch { }
-  ok(k.resolveFor({ browserKey: KEY, handle: 'work' }).ok, 'the agent has issued a command (told: two attachments, no default)');
+  ok(verdictOf(k.resolveFor({ browserKey: KEY, handle: 'work' }).ok), 'the agent has issued a command (told: two attachments, no default)');
   const p0 = prompt(); // the FIRST prompt delivers the intro context; the second is the per-turn reminder — neither may carry a browser notice yet
   ok(be.resolvedProfileDir(KEY) === be.scratchDirFor(KEY) && !/browser profile changed/.test(p0) && !/browser profile changed/.test(prompt()), 'before the pin: the config names only the conversation\'s own kept directory (lane browser-resume §3.9) and no prompt carries a browser notice');
   const r = await j('POST', '/api/browser/pin', { sessionId: 'sess-9', profile: 'Work' });
-  ok(r.status === 200 && r.json.pin.profileId === work.id && /applies/.test(r.json.appliesFrom), 'the USER pins Work mid-task through the UI route');
+  ok(r.status === 200 && r.json.pin.profileId === work.id && verdictOf(/applies/.test(r.json.appliesFrom)), 'the USER pins Work mid-task through the UI route');
   // OWNER RULING A (2026-09-26): the pin is the DEFAULT ATTACHMENT — the config is NOT re-pointed at Work's directory (a
   // second Chrome there dies on SingletonLock — the study's path B); the set's default is Work, reached through the keeper
   ok(be.resolvedProfileDir(KEY) === be.scratchDirFor(KEY) && k.setFor(KEY).defaultId === work.id && session._browserProfileId === work.id && persisted[0].id === work.id, 'NO RESTART: the same browserKey\'s config names only its own kept directory (never the profile\'s), the set\'s default is Work, the live session is stamped, the meta write was asked');
   ok(sessionStatus.pendingNotices(sessionStatusKey(session, 'sess-9')).length === 1 && sessionStatus.pendingNotices(sessionStatusKey(session, 'sess-9'))[0].kind === 'browser-pin', 'ONE typed browser-pin notice is queued in the REAL session-status store');
   const c = prompt();
-  ok(/browser profile changed: ephemeral \(no profile\) → Work \(by user\)/.test(c) && /Attached now: work, personal/.test(c) && (c.match(/<system-reminder>/g) || []).length === 1, 'the user\'s next prompt carries the notice as one <system-reminder> naming the set — zero billed turns (it rides the user\'s own message)');
+  ok(gateOf(/browser profile changed: ephemeral \(no profile\) → Work \(by user\)/.test(c)) && gateOf(/Attached now: work, personal/.test(c)) && (c.match(/<system-reminder>/g) || []).length === 1, 'the user\'s next prompt carries the notice as one <system-reminder> naming the set — zero billed turns (it rides the user\'s own message)');
   ok(!/browser profile changed/.test(prompt()), '…once');
   const v = k.resolveFor({ browserKey: KEY, handle: 'work' });
   ok(!v.ok && v.code === 'profile_changed' && v.now.default === 'work', 'layer ①: the agent\'s next CLI command is refused ONCE with profile_changed');
-  ok(k.resolveFor({ browserKey: KEY, handle: 'work' }).ok, '…and then runs');
+  ok(verdictOf(k.resolveFor({ browserKey: KEY, handle: 'work' }).ok), '…and then runs');
   // no spend site: the pin path never touches the spend guard (the notice is free by construction)
   const routeSrc = fs.readFileSync(new URL('../src/routes/browser.js', import.meta.url), 'utf8');
   const keeperSrc = fs.readFileSync(new URL('../src/server/browser-keeper.js', import.meta.url), 'utf8');
@@ -237,12 +237,12 @@ console.log('— ⑤ the chip says WHOSE browser it is (design-browser-faces dir
   const bar = fs.readFileSync(new URL('../src/lib/chat-status-bar.js', import.meta.url), 'utf8');
   const i = bar.indexOf("chip('browser',");
   const blk = bar.slice(bar.lastIndexOf('if (this._browserProfile &&', i), bar.indexOf('\n', i));
-  ok(i > 0 && /UI_ICONS\.browserLive\b/.test(blk) && !/UI_ICONS\.(web|globe)\b/.test(blk), "the chip wears UI_ICONS.browserLive — the globe is the web view's alone", blk.slice(-220));
-  ok(/const face = t\('Agent browser'\) \+ ' · ';/.test(blk) && /escHtml\(face \+ String\(shown \|\| ''\)\)/.test(blk) && /chip\('browser', [^,]+, face \+ tip,/.test(blk),
+  ok(i > 0 && gateOf(/UI_ICONS\.browserLive\b/.test(blk)) && !/UI_ICONS\.(web|globe)\b/.test(blk), "the chip wears UI_ICONS.browserLive — the globe is the web view's alone", blk.slice(-220));
+  ok(gateOf(/const face = t\('Agent browser'\) \+ ' · ';/.test(blk)) && gateOf(/escHtml\(face \+ String\(shown \|\| ''\)\)/.test(blk)) && verdictOf(/chip\('browser', [^,]+, face \+ tip,/.test(blk)),
     "the chip text AND its tooltip's first line are prefixed 'Agent browser · ' (one t() call, escHtml kept around it); the amber rule is untouched", blk.slice(0, 400));
   // lane S2: the amber rule is THE browser fact's (`words.amber` = the pin and the browser in use differ — src/browser-fact.js), the driving state unchanged
-  ok(/driving \? ' driving' : \(w\.amber \? ' amber' : ''\)/.test(blk) && /const driving = f\.input === 'user';/.test(blk), 'the amber rule (THE fact: the pin and the browser in use differ) and the driving state survive the rename');
+  ok(gateOf(/driving \? ' driving' : \(w\.amber \? ' amber' : ''\)/.test(blk)) && verdictOf(/const driving = f\.input === 'user';/.test(blk)), 'the amber rule (THE fact: the pin and the browser in use differ) and the driving state survive the rename');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

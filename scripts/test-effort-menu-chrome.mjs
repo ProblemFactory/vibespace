@@ -22,7 +22,7 @@ import { ONBOARDED_SOURCE, scratchDir, CHROME_STORE, CHROME_QUIET } from './scra
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 const FIVE = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -127,16 +127,16 @@ try {
   })()`);
   const words = (rows) => (rows || []).map((r) => r.split(' — ')[0]);
 
-  ok(await open('/'), 'the page loads the REAL bundled bar');
+  ok(verdictOf(await open('/')), 'the page loads the REAL bundled bar');
   console.log('— ① antigravity (the owner\'s conversation: gemini-4-argon-high)');
   const n0 = asked.length;
   const a = await probe('antigravity', { model: 'gemini-4-argon-high', effort: 'high' }, 'max');
   ok(J(words(a.rows)) === J(['默认（重置）', ...FIVE]), 'the menu = 默认（重置） + low … max — agy\'s five, NO ultracode', a.rows);
-  ok(asked.slice(n0).includes('?backend=antigravity'), 'the bar asked /api/session-options for ITS backend', asked.slice(n0));
-  ok(a.chip === '高' && a.raw === 'high' && a.title.startsWith('high — 推理强度（启动时指定的值 — 该 CLI 不报告每轮的强度）'), 'the thinking level shows the COMMANDED effort as its WORD («高»), its raw value «high» first in its title, titled «as asked at start (the CLI reports no per-turn effort)»', [a.chip, a.raw, a.title]);
+  ok(verdictOf(asked.slice(n0).includes('?backend=antigravity')), 'the bar asked /api/session-options for ITS backend', asked.slice(n0));
+  ok(a.chip === '高' && a.raw === 'high' && verdictOf(a.title.startsWith('high — 推理强度（启动时指定的值 — 该 CLI 不报告每轮的强度）')), 'the thinking level shows the COMMANDED effort as its WORD («高»), its raw value «high» first in its title, titled «as asked at start (the CLI reports no per-turn effort)»', [a.chip, a.raw, a.title]);
   ok(J(a.sent) === '["max"]' && a.chipAfter === 'max' && a.faceAfter === '最高', 'picking max sends set-effort max and the level follows («最高», raw max)', [a.sent, a.chipAfter, a.faceAfter]);
   const q = await probe('antigravity', { model: 'gemini-4-argon-high' });
-  ok(q.chip === '推理强度：未报告' && q.title.startsWith('启动时未指定推理强度，CLI 也不报告'), '«推理强度：未报告» only when nothing was asked (was «推理强度：?» — lane ui-language: the absence in words) — and the title says agy\'s own default applies', [q.chip, q.title]);
+  ok(q.chip === '推理强度：未报告' && verdictOf(q.title.startsWith('启动时未指定推理强度，CLI 也不报告')), '«推理强度：未报告» only when nothing was asked (was «推理强度：?» — lane ui-language: the absence in words) — and the title says agy\'s own default applies', [q.chip, q.title]);
   console.log('— ② claude');
   const c = await probe('claude', { model: 'claude-fable-5-1', effort: 'xhigh' });
   ok(J(words(c.rows)) === J(['默认（重置）', ...FIVE, 'ultracode']), 'the menu = 默认（重置） + low … max + ultracode (claude\'s own extra)', c.rows);
@@ -146,9 +146,9 @@ try {
   console.log('— ④ MUTANT: the bar asking without its backend (2.369.336)');
   if (!mutantSrc) ok(false, 'setup: the per-backend ask is ONE identifiable expression in the bar (this tree predates it — the base)', ASK);
   else {
-    ok(await open('/mutant'), 'the mutant page loads');
+    ok(verdictOf(await open('/mutant')), 'the mutant page loads');
     const m = await probe('antigravity', { model: 'gemini-4-argon-high' });
-    ok(words(m.rows).includes('ultracode'), 'MUTANT ⇒ ① RED: antigravity is offered ultracode again', m.rows);
+    ok(verdictOf(words(m.rows).includes('ultracode')), 'MUTANT ⇒ ① RED: antigravity is offered ultracode again', m.rows);
   }
 } catch (e) {
   ok(false, 'the chrome leg ran', String(e.stack || e).slice(0, 900));
@@ -158,4 +158,4 @@ try {
   srv.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

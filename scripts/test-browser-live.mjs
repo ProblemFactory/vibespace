@@ -116,7 +116,7 @@ const AB_ROW = require('../src/browser-verbs.js').AGENT_BROWSER_CLI, { driverAtL
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -232,12 +232,12 @@ async function legAttach() {
     const startMs = Date.now() - t0;
     const rec = k._reg().browsers[p.id];
     const drec = rec.displaySession ? ds.get(rec.displaySession.id) : null;
-    ok(v.state === 'ready' && rec.launch === 'attach' && drec && drec.state === 'ready' && DA9.isDisplayForBrowser(drec) && drec.forBrowser === p.id && drec.backend === 'xpra', `⑨ start: the ATTACH road — a display-only xpra session (${drec && drec.display}, port ${drec && drec.port}) and the keeper's own Chrome on it (${startMs} ms)`, JSON.stringify({ state: v.state, launch: rec.launch, why: rec.launchWhy, err: rec.lastError, d: drec && { state: drec.state, err: drec.lastError } }));
+    ok(v.state === 'ready' && rec.launch === 'attach' && gateOf(drec) && drec.state === 'ready' && gateOf(DA9.isDisplayForBrowser(drec)) && drec.forBrowser === p.id && drec.backend === 'xpra', `⑨ start: the ATTACH road — a display-only xpra session (${drec && drec.display}, port ${drec && drec.port}) and the keeper's own Chrome on it (${startMs} ms)`, JSON.stringify({ state: v.state, launch: rec.launch, why: rec.launchWhy, err: rec.lastError, d: drec && { state: drec.state, err: drec.lastError } }));
     if (!(v.state === 'ready' && rec.launch === 'attach' && drec)) return;
     const argv = fs.readFileSync(`/proc/${rec.pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
-    ok(!!NP && rec.executable === NP.program && argv.includes(NP.rule), `⑨ the attach Chrome came through the harness's Chrome program (B-8695): the keeper ran it (its recorded executable) and the names rule stands on the real Chrome's own command line, the product's argv beside it`, { exe: rec.executable, program: NP && NP.program, ruled: argv.includes(NP && NP.rule) });
-    ok(AT9.ATTACH_REQUIRED.every((f) => argv.includes(f)) && !argv.some((a) => a.startsWith('--disable-sync')) && argv.includes(`--user-data-dir=${p.dir}`) && /chrome$/.test(argv[0]), `⑨ the REAL Chrome's own command line: every required flag, its profile dir, NO --disable-sync (${path.basename(argv[0])}, ${argv.length} args)`, argv.join(' '));
-    ok(/^Chrome\/\d+\./.test(rec.cdpBrowser || '') && rec.cdpPort === Number(fs.readFileSync(path.join(p.dir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) && fs.readFileSync(`/proc/${rec.pid}/environ`, 'utf8').split('\0').includes(`DISPLAY=${drec.display}`), `⑨ its port = the NEW DevToolsActivePort (${rec.cdpPort}); it answers as ${rec.cdpBrowser}; it runs on the session's display`);
+    ok(!!NP && rec.executable === NP.program && verdictOf(argv.includes(NP.rule)), `⑨ the attach Chrome came through the harness's Chrome program (B-8695): the keeper ran it (its recorded executable) and the names rule stands on the real Chrome's own command line, the product's argv beside it`, { exe: rec.executable, program: NP && NP.program, ruled: argv.includes(NP && NP.rule) });
+    ok(gateOf(AT9.ATTACH_REQUIRED.every((f) => argv.includes(f))) && !argv.some((a) => a.startsWith('--disable-sync')) && gateOf(argv.includes(`--user-data-dir=${p.dir}`)) && verdictOf(/chrome$/.test(argv[0])), `⑨ the REAL Chrome's own command line: every required flag, its profile dir, NO --disable-sync (${path.basename(argv[0])}, ${argv.length} args)`, argv.join(' '));
+    ok(gateOf(/^Chrome\/\d+\./.test(rec.cdpBrowser || '')) && rec.cdpPort === Number(fs.readFileSync(path.join(p.dir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) && verdictOf(fs.readFileSync(`/proc/${rec.pid}/environ`, 'utf8').split('\0').includes(`DISPLAY=${drec.display}`)), `⑨ its port = the NEW DevToolsActivePort (${rec.cdpPort}); it answers as ${rec.cdpBrowser}; it runs on the session's display`);
     // THE AGENT: the real driver as the shipped CLI runs it — the attach answer's pairs (the CDP url + the config's socket
     // root) and the config /resolve names (the lease file)
     const pairs = B9.attachedEnvFor({ browserKey: 'bk-0000b901', profileId: p.id, cdpUrl: rec.cdpUrl, socketDir: rec.socketDir });
@@ -245,7 +245,7 @@ async function legAttach() {
     const o1 = await abRun(['open', PAGE], penv);
     const snap = await abRun(['snapshot', '-i'], penv);
     const wd = await abRun(['eval', 'String(navigator.webdriver)'], penv);
-    ok(o1.ok && /button "B1 big button" \[ref=e\d+\]/.test(snap.out) && /"?false"?/.test(wd.out) && !/true/.test(wd.out), `⑨ the agent (the real driver, attached): open a LOCAL page, \`snapshot -i\` names its button with a ref, navigator.webdriver = ${wd.out}`, JSON.stringify({ o1, snap: snap.out.slice(0, 200), wd }));
+    ok(gateOf(o1.ok) && gateOf(/button "B1 big button" \[ref=e\d+\]/.test(snap.out)) && gateOf(/"?false"?/.test(wd.out)) && !/true/.test(wd.out), `⑨ the agent (the real driver, attached): open a LOCAL page, \`snapshot -i\` names its button with a ref, navigator.webdriver = ${wd.out}`, JSON.stringify({ o1, snap: snap.out.slice(0, 200), wd }));
     const chromes = () => mine().filter((pid) => { try { const a = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); return /chrome$/.test(a[0]) && !a.some((y) => y.startsWith('--type=')); } catch { return false; } });
     ok(chromes().length === 1 && chromes()[0] === rec.pid, `⑨ ONE Chrome in the world — the driver attached, it launched nothing (pid ${rec.pid})`, JSON.stringify(chromes()));
     // THE STREAM: the driver's own stream server under the lease's session, through the keeper's attach call
@@ -260,7 +260,7 @@ async function legAttach() {
       await until(() => frames.length >= 2, 4000, 50);
     }
     const stamps = new Set(frames.map((f) => f.metadata && f.metadata.timestamp));
-    ok(sp.ok && frames.length >= 2 && stamps.size >= 2, `⑨ stream frames arrive from the attached Chrome (port ${sp.port}: ${frames.length} frames, ${stamps.size} distinct timestamps)`, JSON.stringify({ sp, n: frames.length }));
+    ok(gateOf(sp.ok) && frames.length >= 2 && stamps.size >= 2, `⑨ stream frames arrive from the attached Chrome (port ${sp.port}: ${frames.length} frames, ${stamps.size} distinct timestamps)`, JSON.stringify({ sp, n: frames.length }));
     // the keeper's own call between the agent's (the view's status, a tab list) names the SAME url + config: the session's
     // connection is never re-launched under the stream (another spelling drops it every call — tools/probe4.sh b/d)
     await k._runtime.exec(k.nsOf(p.id), ['tab', 'list', '--json'], { session: B9.sessionNameFor('bk-0000b901'), extraEnv: { AGENT_BROWSER_CDP: rec.cdpUrl, AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } });
@@ -293,7 +293,7 @@ async function legAttach() {
     await abRun(['eval', 'document.getElementById("big").style.background="#fff0c0";1'], penv);
     await until(() => frames.length > fBefore, 4000, 50);
     if (!VD) skip('⑨ the X click: no free pinned viewer display (:2731/:2733/:2735)');
-    else ok(wid && clicked && clicked.n >= 1 && clicked.trusted >= 1 && /clicked/.test(t1.out) && frames.length > fBefore, `⑨ an X click (xdotool on ${drec.display}, window ${wid} ${geo ? geo.WIDTH + '×' + geo.HEIGHT + '+' + geo.X + '+' + geo.Y : ''}) lands on the page as a TRUSTED click — and CDP stays live (title "${t1.out}", a new stream frame after it)`, JSON.stringify({ wid, clicked, t1, frames: frames.length, fBefore }));
+    else ok(gateOf(wid) && gateOf(clicked) && clicked.n >= 1 && clicked.trusted >= 1 && gateOf(/clicked/.test(t1.out)) && frames.length > fBefore, `⑨ an X click (xdotool on ${drec.display}, window ${wid} ${geo ? geo.WIDTH + '×' + geo.HEIGHT + '+' + geo.X + '+' + geo.Y : ''}) lands on the page as a TRUSTED click — and CDP stays live (title "${t1.out}", a new stream frame after it)`, JSON.stringify({ wid, clicked, t1, frames: frames.length, fBefore }));
     if (PNG) { x(['import', '-window', 'root', path.join(PNG, 'b1-session-display.png')], sx, 15000); if (VD) x(['import', '-window', 'root', path.join(PNG, 'b1-viewer.png')], { DISPLAY: `:${VD}`, XAUTHORITY: path.join(R9, 'viewer.xauth') }, 15000); }
     try { wsS && wsS.close(); } catch { }
     // RED CONTROL: the same argv WITHOUT AutomationControlled, spawned the same way on the same display ⇒ webdriver true
@@ -303,14 +303,14 @@ async function legAttach() {
       const rc = await ATL9.spawnChrome({ exe: NP ? NP.program : need['google-chrome'], argv: avc, env: { ...env, ...sx }, profileDir: pd, logFile: path.join(R9, 'noac.log') });
       let wd2 = null;
       if (rc.ok) { wd2 = await abRun(['--cdp', String(rc.port), 'eval', 'String(navigator.webdriver)'], { AGENT_BROWSER_SOCKET_DIR: path.join(SB, 'noac'), AGENT_BROWSER_SESSION: 'noac', AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' }); await abRun(['close', '--all'], { AGENT_BROWSER_SOCKET_DIR: path.join(SB, 'noac'), AGENT_BROWSER_SESSION: 'noac' }); try { process.kill(rc.pid, 'SIGTERM'); } catch { } }
-      ok(rc.ok && wd2 && /true/.test(wd2.out), `⑨ CONTROL (RED): the attach argv minus AutomationControlled ⇒ navigator.webdriver = ${wd2 && wd2.out} (the debugging port alone sets it — the flag is load-bearing)`, JSON.stringify({ rc: { ...rc, child: undefined }, wd2 }));
+      ok(gateOf(rc.ok) && gateOf(wd2) && verdictOf(/true/.test(wd2.out)), `⑨ CONTROL (RED): the attach argv minus AutomationControlled ⇒ navigator.webdriver = ${wd2 && wd2.out} (the debugging port alone sets it — the flag is load-bearing)`, JSON.stringify({ rc: { ...rc, child: undefined }, wd2 }));
     }
     // THE STOP: Chrome ended by its identity, the display session with it
     const cpid = rec.pid; const xpid = drec.pids && drec.pids.x;
     const sv = await k.stop(p.id, { why: 'user' });
     await until(() => !alive9(cpid) && !(xpid && alive9(xpid)), 8000, 100);
     const d2 = ds.get(drec.id);
-    ok(sv.state === 'stopped' && !alive9(cpid) && d2 && !DA9.isLiveState(d2.state) && !(xpid && alive9(xpid)), `⑨ stop: the Chrome (pid ${cpid}) is gone and its display session ${drec.id} ended (${d2 && d2.state}) — xpra ${xpid} gone`, JSON.stringify({ state: sv.state, chrome: alive9(cpid), d: d2 && d2.state, xpra: xpid && alive9(xpid) }));
+    ok(sv.state === 'stopped' && !alive9(cpid) && gateOf(d2) && !DA9.isLiveState(d2.state) && !(xpid && alive9(xpid)), `⑨ stop: the Chrome (pid ${cpid}) is gone and its display session ${drec.id} ended (${d2 && d2.state}) — xpra ${xpid} gone`, JSON.stringify({ state: sv.state, chrome: alive9(cpid), d: d2 && d2.state, xpra: xpid && alive9(xpid) }));
     // CONTROL — the DRIVER road on the same box (no display keeper wired ⇒ agent-browser launches Chrome itself)
     for (const [flag, want] of [[false, 'true'], [true, 'false']]) {
       settings['browser.automationFlag'] = flag;
@@ -324,7 +324,7 @@ async function legAttach() {
         await k3.stop(p3.id, { why: 'user' });
       } catch (e) { wd3 = { out: 'threw ' + (e && e.message) }; }
       k3.shutdown?.();
-      ok(r3 && r3.launch === 'driver' && wd3 && new RegExp(want).test(wd3.out), `⑨ CONTROL: the DRIVER road (agent-browser's own launch, ${r3 && r3.launchWhy ? '"' + r3.launchWhy.slice(0, 40) + '…"' : '?'}) with browser.automationFlag ${flag ? 'ON (the default: the flag rides its config)' : 'OFF'} ⇒ navigator.webdriver = ${wd3 && wd3.out}`, JSON.stringify({ launch: r3 && r3.launch, why: r3 && r3.launchWhy, wd3 }));
+      ok(gateOf(r3) && r3.launch === 'driver' && gateOf(wd3) && verdictOf(new RegExp(want).test(wd3.out)), `⑨ CONTROL: the DRIVER road (agent-browser's own launch, ${r3 && r3.launchWhy ? '"' + r3.launchWhy.slice(0, 40) + '…"' : '?'}) with browser.automationFlag ${flag ? 'ON (the default: the flag rides its config)' : 'OFF'} ⇒ navigator.webdriver = ${wd3 && wd3.out}`, JSON.stringify({ launch: r3 && r3.launch, why: r3 && r3.launchWhy, wd3 }));
     }
     delete settings['browser.automationFlag'];
   } catch (e) {
@@ -415,14 +415,14 @@ async function legSharedFreeze() {
     // a
     const t1 = await born('spin'); const tb1 = Date.now(); await sleep(300);
     const [b1, c1] = await Promise.all([Bc(['eval', '1+1']), ctl(['eval', '1+1'], HOLD + 8000)]);
-    ok(b1.code === 0 && /\b2\b/.test(b1.out) && b1.ms <= 2000, `⑩ a: a NEW tab born holding its main thread ${HOLD / 1000} s — B's own-tab \`eval 1+1\` answers in ${b1.ms} ms (≤ 2 s)`, b1.out + b1.err);
+    ok(b1.code === 0 && gateOf(/\b2\b/.test(b1.out)) && b1.ms <= 2000, `⑩ a: a NEW tab born holding its main thread ${HOLD / 1000} s — B's own-tab \`eval 1+1\` answers in ${b1.ms} ms (≤ 2 s)`, b1.out + b1.err);
     ok(c1.ms >= HOLD / 2, `⑩ a RED CONTROL: the same eval through a driver on the RAW url (the base road's env) waited ${c1.ms} ms on that tab${c1.held ? ' (still held — killed)' : ''}`, JSON.stringify(c1));
     await sleep(Math.max(0, HOLD + 800 - (Date.now() - tb1))); await raw.send('Target.closeTarget', { targetId: t1 });
     // b
     const t2 = await born('ask'); await sleep(300);
     const [b2, c2] = await Promise.all([Bc(['eval', '2+2']), ctl(['eval', '2+2'], 12000)]);
-    ok(b2.code === 0 && /\b4\b/.test(b2.out) && b2.ms <= 2000, `⑩ b: a NEW tab born with a confirm() — B answers in ${b2.ms} ms (≤ 2 s)`, b2.out + b2.err);
-    ok(c2.held || c2.ms >= 10000, `⑩ b RED CONTROL: the raw-url driver is still held at ${c2.ms} ms (measured on the base road: 59.8 s — two 30 s Page.enable tries)`, JSON.stringify(c2));
+    ok(b2.code === 0 && gateOf(/\b4\b/.test(b2.out)) && b2.ms <= 2000, `⑩ b: a NEW tab born with a confirm() — B answers in ${b2.ms} ms (≤ 2 s)`, b2.out + b2.err);
+    ok(verdictOf(c2.held) || c2.ms >= 10000, `⑩ b RED CONTROL: the raw-url driver is still held at ${c2.ms} ms (measured on the base road: 59.8 s — two 30 s Page.enable tries)`, JSON.stringify(c2));
     await raw.send('Target.closeTarget', { targetId: t2 }); await sleep(500);
     // c
     const ao = await A(['open', SITE('/spin')]);
@@ -441,10 +441,10 @@ async function legSharedFreeze() {
         held = { silent: !!ev.silent, ms: Date.now() - t0p };
       }
     }
-    ok(ao.code === 0 && spinTab && held && held.silent, `⑩ c precondition: A's page answers NOTHING to a raw ask within 1.5 s (its main thread held ${HOLD / 1000} s from the raw client)`, JSON.stringify({ open: ao.out.slice(-160) + ao.err.slice(-160), spinTab, held }));
+    ok(ao.code === 0 && gateOf(spinTab) && gateOf(held) && verdictOf(held.silent), `⑩ c precondition: A's page answers NOTHING to a raw ask within 1.5 s (its main thread held ${HOLD / 1000} s from the raw client)`, JSON.stringify({ open: ao.out.slice(-160) + ao.err.slice(-160), spinTab, held }));
     const [a3, b3] = await Promise.all([A(['eval', '1+1']), (async () => { await sleep(600); return Bc(['eval', '3+3']); })()]);
-    ok(a3.code === 1 && /\[page_busy\]/.test(a3.err) && /\/spin\) is not answering — it answered nothing in 5 s/.test(a3.out) && /nothing ran: the command was not handed to the browser/.test(a3.out) && a3.ms <= ST10.PAGE_ANSWER_MS + 3000, `⑩ c: A's OWN page holds its main thread — A's next verb is answered page_busy BY NAME in ${a3.ms} ms (bound ${ST10.PAGE_ANSWER_MS} ms; the page's own hold ${HOLD} ms)`, a3.out + a3.err);
-    ok(b3.code === 0 && /\b6\b/.test(b3.out) && b3.ms <= 2000, `⑩ c: …while B answers in ${b3.ms} ms`, b3.out + b3.err);
+    ok(a3.code === 1 && gateOf(/\[page_busy\]/.test(a3.err)) && gateOf(/\/spin\) is not answering — it answered nothing in 5 s/.test(a3.out)) && gateOf(/nothing ran: the command was not handed to the browser/.test(a3.out)) && a3.ms <= ST10.PAGE_ANSWER_MS + 3000, `⑩ c: A's OWN page holds its main thread — A's next verb is answered page_busy BY NAME in ${a3.ms} ms (bound ${ST10.PAGE_ANSWER_MS} ms; the page's own hold ${HOLD} ms)`, a3.out + a3.err);
+    ok(b3.code === 0 && gateOf(/\b6\b/.test(b3.out)) && b3.ms <= 2000, `⑩ c: …while B answers in ${b3.ms} ms`, b3.out + b3.err);
     const a4 = await A(['open', OTHER('/light?t=A2')]);
     ok(a4.code === 0 && a4.ms <= 3000, `⑩ c: A's \`open\` of another site leaves the busy page at once (${a4.ms} ms — a new page process)`, a4.out + a4.err);
   } catch (e) {
@@ -518,14 +518,14 @@ async function legPasskeyRoads() {
     const b = await kk.browse(PID);
     key = b.key;
     const w0 = watch(); const own0 = kk.holderTabs(PID, key)[0]; const e0 = w0 && own0 ? w0.targets.get(own0) : null;
-    ok(b.how === 'launch' && (kk.browserOf(PID) || {}).startedBy === 'browse yourself' && w0 && w0.state === 'open' && e0 && e0.enabled && e0.pk.armed, `⑪ a: his press launched the browser and the watch is OPEN before any verb or window — his own tab tracked, enabled, its hook armed`, JSON.stringify({ how: b.how, watch: w0 && w0.state, tab: e0 && { enabled: e0.enabled, armed: e0.pk.armed } }));
+    ok(b.how === 'launch' && (kk.browserOf(PID) || {}).startedBy === 'browse yourself' && gateOf(w0) && w0.state === 'open' && gateOf(e0) && gateOf(e0.enabled) && verdictOf(e0.pk.armed), `⑪ a: his press launched the browser and the watch is OPEN before any verb or window — his own tab tracked, enabled, its hook armed`, JSON.stringify({ how: b.how, watch: w0 && w0.state, tab: e0 && { enabled: e0.enabled, armed: e0.pk.armed } }));
     // b  his page in a ceremony ⇒ HIS WINDOW's socket gets the fact; a later window of his gets it replayed
     V1 = viewer(key, b.fresh); await V1.open;
     await untilV(() => V1.recs.some((x) => x.type === 'status' && x.state === 'upstream-open'), 20000, 50);
     await kk.navigateHuman(key, { url: PKURL('b') });
     const got = await untilV(() => pkOpen(V1), PK11.PENDING_SAID_MS + 10000, 50);
     const words = got ? PK11.passkeyWords(got.fact.passkey, null, { headed: got.fact.headed === true, display: got.fact.display || null }) : null;
-    ok(!!got && got.fact.passkey.rpId === 'localhost' && /^This page is waiting for a passkey \(localhost\)/.test(got.fact.passkey.text) && words && words.title === 'This page is waiting for a passkey (localhost)' && !!words.cancel, `⑪ b: his page in a ceremony ⇒ HIS WINDOW's socket gets the passkey fact (passkey_open + THE SENTENCE) — the banner reads "${words && words.title}"`, JSON.stringify(V1.recs.filter((x) => x.type === 'passkey').slice(-2)));
+    ok(!!got && got.fact.passkey.rpId === 'localhost' && gateOf(/^This page is waiting for a passkey \(localhost\)/.test(got.fact.passkey.text)) && gateOf(words) && words.title === 'This page is waiting for a passkey (localhost)' && !!words.cancel, `⑪ b: his page in a ceremony ⇒ HIS WINDOW's socket gets the passkey fact (passkey_open + THE SENTENCE) — the banner reads "${words && words.title}"`, JSON.stringify(V1.recs.filter((x) => x.type === 'passkey').slice(-2)));
     const V2 = viewer(key); await V2.open;
     const late = await untilV(() => pkOpen(V2), 6000, 50);
     ok(!!late && late.fact.passkey.id === (got && got.fact.passkey.id), '⑪ b: a window of his that attaches later gets the same fact replayed', JSON.stringify(V2.recs.filter((x) => x.type === 'passkey')));
@@ -540,9 +540,9 @@ async function legPasskeyRoads() {
     await kk.navigateHuman(key, { url: PKURL('d') });
     const gd = await untilV(() => { const r = pkOpen(V1); return r && r.fact.display ? r : null; }, PK11.PENDING_SAID_MS + 10000, 50);
     const wd = gd ? PK11.passkeyWords(gd.fact.passkey, null, { headed: gd.fact.headed === true, display: gd.fact.display }) : null;
-    ok(!!gd && gd.fact.headed === true && gd.fact.display === ':97' && wd && /virtual display :97/.test(wd.desktop) && /from Desktop/.test(wd.desktop) && /passkey register localhost/.test(wd.desktop), `⑪ d: a headed browser on a virtual display — his fact names :97, the banner names it + Desktop + \`passkey register localhost\``, JSON.stringify({ fact: gd && { headed: gd.fact.headed, display: gd.fact.display }, desktop: wd && wd.desktop }));
+    ok(!!gd && gd.fact.headed === true && gd.fact.display === ':97' && gateOf(wd) && gateOf(/virtual display :97/.test(wd.desktop)) && gateOf(/from Desktop/.test(wd.desktop)) && verdictOf(/passkey register localhost/.test(wd.desktop)), `⑪ d: a headed browser on a virtual display — his fact names :97, the banner names it + Desktop + \`passkey register localhost\``, JSON.stringify({ fact: gd && { headed: gd.fact.headed, display: gd.fact.display }, desktop: wd && wd.desktop }));
     const item = await untilV(() => fy.find((x) => x.i18n && x.i18n.detail && x.i18n.detail[0] && x.i18n.detail[0].key === PK11.DOORS_WORDS), PK11.FOR_YOU_AFTER_MS + 10000, 200);
-    ok(!!item && item.i18n.detail[0].params.display === ':97' && /waiting for a passkey \(localhost\)/.test(item.text), `⑪ d: the For-you item after FOR_YOU_AFTER_MS carries the same doors ("${item ? item.detail.split('\n')[0].slice(0, 80) : 'none'}…")`, JSON.stringify(fy.map((x) => x.i18n)));
+    ok(!!item && item.i18n.detail[0].params.display === ':97' && verdictOf(/waiting for a passkey \(localhost\)/.test(item.text)), `⑪ d: the For-you item after FOR_YOU_AFTER_MS carries the same doors ("${item ? item.detail.split('\n')[0].slice(0, 80) : 'none'}…")`, JSON.stringify(fy.map((x) => x.i18n)));
     // e  the watch's socket closed under him ⇒ opened again by itself; his next ceremony is said again
     // ready = the watch's own `watched` (emitted once its tabs carry the hook again — `state` is 'open' before that)
     let rewatched = false; const unw = dialogs.onChange((ev) => { if (ev && ev.kind === 'watched' && ev.profileId === PID) rewatched = true; });
@@ -551,7 +551,7 @@ async function legPasskeyRoads() {
     unw();
     await kk.navigateHuman(key, { url: PKURL('e') });
     const ge = await untilV(() => { const r = pkOpen(V1); return r && /n=e|:/.test(String(r.fact.passkey.id)) && r.fact.passkey.id !== (gd && gd.fact.passkey.id) ? r : null; }, PK11.PENDING_SAID_MS + 10000, 50);
-    ok(re && !!ge, '⑪ e: the watch\'s socket closed under his browsing ⇒ re-opened by itself (no verb, no window act), and his next ceremony is said in his window again', JSON.stringify({ re, last: V1.pk() }));
+    ok(gateOf(re) && !!ge, '⑪ e: the watch\'s socket closed under his browsing ⇒ re-opened by itself (no verb, no window act), and his next ceremony is said in his window again', JSON.stringify({ re, last: V1.pk() }));
     // f  THE CENSUS on one browser in a ceremony — a conversation's own tab beside his (made LAST by a raw client: a target born
     //    outside his driver session moves that session's current tab — his address row would then drive the newcomer)
     await kk.attach({ profileId: PID, browserKey: KA, sessionId: 'sess-pk', by: 'user' });
@@ -567,7 +567,7 @@ async function legPasskeyRoads() {
     const row = kk.factFor({ browserKey: KA, variant: 'D', pinId: null, active: null, remote: false });
     const census = { ordinary: dialogs.factFor({ profileId: PID, browserKey: KA, sessionId: 'sess-pk', consume: false }).passkey, takeover: row && row.stuck ? row.stuck.passkey : null, 'browse-yourself': (V1.pk() || {}).fact ? V1.pk().fact.passkey : null, attach: dialogs.factFor({ profileId: PID, browserKey: key, consume: false }).passkey };
     const chip = row ? BF11.browserFactWords(row, null) : null;
-    ok(Object.values(census).every((x) => x && x.state === 'passkey_open') && chip && chip.stuck === 'page waits for a passkey', `⑪ f: THE CENSUS on one browser in a ceremony — ${Object.entries(census).map(([k, x]) => k + '=' + (x && x.state)).join(', ')}; the takeover's is the conversation's SESSION ROW fact (its chip: "${chip && chip.stuck}")`, JSON.stringify(census));
+    ok(gateOf(Object.values(census).every((x) => x && x.state === 'passkey_open')) && gateOf(chip) && chip.stuck === 'page waits for a passkey', `⑪ f: THE CENSUS on one browser in a ceremony — ${Object.entries(census).map(([k, x]) => k + '=' + (x && x.state)).join(', ')}; the takeover's is the conversation's SESSION ROW fact (its chip: "${chip && chip.stuck}")`, JSON.stringify(census));
     // c  his window's Cancel — HIS page only (a named profile's tab, never every tab of the browser)
     V1.ws.send(JSON.stringify({ type: 'passkey-cancel' }));
     const ack = await untilV(() => V1.recs.find((x) => x.type === 'passkey-ack'), 8000, 50);
@@ -575,7 +575,7 @@ async function legPasskeyRoads() {
     const aborted = await untilV(async () => (await raw.evalIn(hisTab, 'window.__pk')) === 'AbortError', 8000, 100);
     const cleared = await untilV(() => { const r = V1.pk(); return r && r.fact === null; }, 8000, 50);
     const convStill = await raw.evalIn(ctid, 'window.__pk');
-    ok(!!(ack && ack.ok) && aborted && cleared && convStill === 'pending', `⑪ c: his window's Cancel ⇒ HIS page's own promise rejects AbortError and his fact clears; the conversation's page still waits (${convStill})`, JSON.stringify({ ack, aborted, cleared, convStill, last: V1.pk() }));
+    ok(!!(ack && ack.ok) && gateOf(aborted) && gateOf(cleared) && convStill === 'pending', `⑪ c: his window's Cancel ⇒ HIS page's own promise rejects AbortError and his fact clears; the conversation's page still waits (${convStill})`, JSON.stringify({ ack, aborted, cleared, convStill, last: V1.pk() }));
     // g  acceptance r1: the conversation lets go (detach) ⇒ the person's watch again, on the SAME socket — the overrides reset
     const wBefore = watch();
     kk.detach({ profileId: PID, browserKey: KA, by: 'user' });
@@ -680,23 +680,23 @@ async function legTypedKinds() {
     ok(p.n === DIG && keysOf(p, 'n').join('') === DIG, `⑫ a: a press of each digit into a number field — ten keys the page saw, the zero first (${JSON.stringify(keysOf(p, 'n'))} → ${JSON.stringify(p.n)})`, JSON.stringify(p));
     // b
     await reset(); await A(['focus', '#d']); k = await A(['keyboard', 'type', '01072027']); p = await page();
-    ok(k.code === 0 && /\[field_form\]/.test(k.err) && /^note: keyboard type ran, but a date field takes no typed text and holds its value as 2027-01-07/.test(k.out) && !/Done/.test(k.out) && p.d === '', `⑫ b: the owner's act — keyboard type 01072027 into the focused native date field is SAID [field_form] (exit 0: a bare keyboard type is never refused) with the form — never «Done», nothing set`, JSON.stringify({ k, d: p.d }));
+    ok(k.code === 0 && gateOf(/\[field_form\]/.test(k.err)) && gateOf(/^note: keyboard type ran, but a date field takes no typed text and holds its value as 2027-01-07/.test(k.out)) && !/Done/.test(k.out) && p.d === '', `⑫ b: the owner's act — keyboard type 01072027 into the focused native date field is SAID [field_form] (exit 0: a bare keyboard type is never refused) with the form — never «Done», nothing set`, JSON.stringify({ k, d: p.d }));
     await reset(); k = await A(['fill', '#d', '2027-01-07']); p = await page();
-    ok(k.code === 0 && k.out.includes('✓ Done — the date field holds 2027-01-07, set through the field\'s own setter') && p.d === '2027-01-07' && (p.log || []).some((l) => l[0] === 'input' && l[1] === 'd') && (p.log || []).some((l) => l[0] === 'change' && l[1] === 'd'), `⑫ b: fill 2027-01-07 sets the date field through its own setter, read back — the page saw input and change (value ${JSON.stringify(p.d)})`, JSON.stringify({ k, p }));
+    ok(k.code === 0 && gateOf(k.out.includes('✓ Done — the date field holds 2027-01-07, set through the field\'s own setter')) && p.d === '2027-01-07' && gateOf((p.log || []).some((l) => l[0] === 'input' && l[1] === 'd')) && verdictOf((p.log || []).some((l) => l[0] === 'change' && l[1] === 'd')), `⑫ b: fill 2027-01-07 sets the date field through its own setter, read back — the page saw input and change (value ${JSON.stringify(p.d)})`, JSON.stringify({ k, p }));
     await reset(); await A(['focus', '#d']); for (const d of '01072027') await A(['press', d]); p = await page();
-    ok(/^2027-/.test(p.d) && keysOf(p, 'd').join('') === '01072027', `⑫ b: eight presses 0 1 0 7 2 0 2 7 into the date field — every key arrives and the year is 2027, never 0227 (${JSON.stringify(p.d)})`, JSON.stringify(p));
+    ok(gateOf(/^2027-/.test(p.d)) && keysOf(p, 'd').join('') === '01072027', `⑫ b: eight presses 0 1 0 7 2 0 2 7 into the date field — every key arrives and the year is 2027, never 0227 (${JSON.stringify(p.d)})`, JSON.stringify(p));
     // c
     await reset(); k = await A(['fill', '#tm', '09:05']); p = await page();
-    ok(k.code === 0 && p.tm === '09:05' && /set through the field's own setter/.test(k.out), `⑫ c: fill 09:05 sets the time field the same way (${JSON.stringify(p.tm)})`, k.out + k.err);
+    ok(k.code === 0 && p.tm === '09:05' && verdictOf(/set through the field's own setter/.test(k.out)), `⑫ c: fill 09:05 sets the time field the same way (${JSON.stringify(p.tm)})`, k.out + k.err);
     await reset(); k = await A(['fill', '#tm', '0905']); p = await page();
-    ok(k.code === 1 && /\[field_form\]/.test(k.err) && k.out.includes('09:05') && p.tm === '', '⑫ c: fill 0905 into the time field is refused [field_form] with its form', k.out + k.err);
+    ok(k.code === 1 && gateOf(/\[field_form\]/.test(k.err)) && gateOf(k.out.includes('09:05')) && p.tm === '', '⑫ c: fill 0905 into the time field is refused [field_form] with its form', k.out + k.err);
     await reset(); k = await A(['fill', '#tm', '09:05:00']); p = await page();
-    ok(k.code === 0 && /set through the field's own setter/.test(k.out) && (p.tm === '09:05' || p.tm === '09:05:00') && k.out.includes(`holds ${p.tm},`), `⑫ c: fill 09:05:00 — the time field takes it (this browser keeps ${JSON.stringify(p.tm)}) and the answer names EXACTLY what the field holds: Done`, k.out + k.err);
+    ok(k.code === 0 && gateOf(/set through the field's own setter/.test(k.out)) && (p.tm === '09:05' || p.tm === '09:05:00') && verdictOf(k.out.includes(`holds ${p.tm},`)), `⑫ c: fill 09:05:00 — the time field takes it (this browser keeps ${JSON.stringify(p.tm)}) and the answer names EXACTLY what the field holds: Done`, k.out + k.err);
     await reset(); await A(['fill', '#d', '2027-01-07']); k = await A(['fill', '#d', '']); p = await page();
     ok(k.code === 0 && p.d === '' && !/\[(field_refused|field_form|field_locked|nothing_landed)\]/.test(k.err), `⑫ c: an EMPTY fill leaves the date field EMPTY (${JSON.stringify(p.d)}) and is no refusal — the real driver's own fill clears it, so the read-back finds the field already holding what was asked and the driver's answer stands («cleared» is said only when the setter had to clear)`, k.out + k.err);
     // the must (r2): the TARGET is judged, never what holds the focus after the verb
     await reset(); k = await A(['fill', '#a1', '4']); p = await page();
-    ok(typeof p.a1 === 'string' && ((p.a1 === '4' && k.code === 0 && !/nothing_landed|field_differs/.test(k.err)) || (p.a1 === '' && k.code === 1 && /\[nothing_landed\]/.test(k.err))), `⑫ r2: a code box whose input moves the focus on — the answer agrees with the TARGET, never the focus: #a1 holds ${JSON.stringify(p.a1)} ⇒ ${p.a1 === '4' ? 'Done' : 'the named refusal [nothing_landed]'} (the focus on #${p.focused}; the real driver clears #a1 with an input event, the page moves the focus, and its insertText lands in the FOCUSED box: #a2 holds ${JSON.stringify(p.a2)})`, JSON.stringify({ k, p }));
+    ok(typeof p.a1 === 'string' && ((p.a1 === '4' && k.code === 0 && !/nothing_landed|field_differs/.test(k.err)) || (p.a1 === '' && k.code === 1 && verdictOf(/\[nothing_landed\]/.test(k.err)))), `⑫ r2: a code box whose input moves the focus on — the answer agrees with the TARGET, never the focus: #a1 holds ${JSON.stringify(p.a1)} ⇒ ${p.a1 === '4' ? 'Done' : 'the named refusal [nothing_landed]'} (the focus on #${p.focused}; the real driver clears #a1 with an input event, the page moves the focus, and its insertText lands in the FOCUSED box: #a2 holds ${JSON.stringify(p.a2)})`, JSON.stringify({ k, p }));
     const snap = await A(['snapshot', '-i']);
     // the date field by its @ref, in a way THIS Chrome's tree supports: a ref of its own named «Due date» when the tree gives
     // one; else the ref of its Month part (box 3ead32c8c, Chrome on the box: the -i tree gives the date field NO ref of its
@@ -705,8 +705,8 @@ async function legTypedKinds() {
     const dueRef = refs12.find((x) => x.name === 'Due date');
     const monthRef = dueRef ? null : refs12.find((x) => x.role === 'spinbutton' && /^Month\b/.test(x.name));
     await reset(); k = dueRef || monthRef ? await A(['fill', (dueRef || monthRef).ref, '2027-01-07']) : { code: -1, out: snap.out.slice(0, 600), err: 'no ref named «Due date» and no Month part' }; p = await page();
-    if (dueRef) ok(k.code === 0 && /set through the field's own setter/.test(k.out) && p.d === '2027-01-07', `⑫ r2: fill ${dueRef.ref} (the date field by its own @ref «Due date») — read through the driver's own value and kind, set through its own setter, read back (${JSON.stringify(p.d)})`, JSON.stringify({ k, d: p.d }));
-    else if (monthRef) ok(p.d === '2027-01-07' ? k.code === 0 : (k.code !== 0 || /\[read_back_unavailable\]|\[field_[a-z_]+\]|\[nothing_landed\]/.test(k.err)), `⑫ r2: this Chrome gives the date field no @ref of its own — fill ${monthRef.ref} (its Month part, «${monthRef.name}»): the answer agrees with the page, never a bare «Done» over the EMPTY date field (the field holds ${JSON.stringify(p.d)}; exit ${k.code}${(k.err.match(/\[[a-z_]+\]/g) || []).filter((c) => c !== '[default]').map((c) => ' ' + c).join('')})`, JSON.stringify({ k, d: p.d }));
+    if (dueRef) ok(k.code === 0 && gateOf(/set through the field's own setter/.test(k.out)) && p.d === '2027-01-07', `⑫ r2: fill ${dueRef.ref} (the date field by its own @ref «Due date») — read through the driver's own value and kind, set through its own setter, read back (${JSON.stringify(p.d)})`, JSON.stringify({ k, d: p.d }));
+    else if (monthRef) ok(p.d === '2027-01-07' ? k.code === 0 : (k.code !== 0 || verdictOf(/\[read_back_unavailable\]|\[field_[a-z_]+\]|\[nothing_landed\]/.test(k.err))), `⑫ r2: this Chrome gives the date field no @ref of its own — fill ${monthRef.ref} (its Month part, «${monthRef.name}»): the answer agrees with the page, never a bare «Done» over the EMPTY date field (the field holds ${JSON.stringify(p.d)}; exit ${k.code}${(k.err.match(/\[[a-z_]+\]/g) || []).filter((c) => c !== '[default]').map((c) => ' ' + c).join('')})`, JSON.stringify({ k, d: p.d }));
     else ok(false, '⑫ r2: the date field by @ref — this Chrome\'s tree gave NO ref named «Due date» and NO Month part to fill: RED, never a silent skip', snap.out.slice(0, 600));
     // (e) the cost: the same fill with and without the read-back (one more driver run on a text field, two on a date field)
     { const t0 = Date.now(); await A(['fill', '#t', '0123456789']); const withRb = Date.now() - t0; const t1 = Date.now(); await Ctl(['fill', '#t', '0123456789']); const without = Date.now() - t1;
@@ -714,7 +714,7 @@ async function legTypedKinds() {
       ok(withRb > 0 && without > 0, `⑫ (e) the cost, measured: a text fill ${withRb} ms with the read-back, ${without} ms without; a date fill ${dateRb} ms with it (the setter), ${dateNo} ms without (Done over empty)`, { withRb, without, dateRb, dateNo }); }
     // d
     await reset(); await A(['focus', '#t']); k = await A(['press', 'Digit0']); p = await page();
-    ok(k.code === 1 && /\[key_code_name\]/.test(k.err) && k.err.includes('vibespace-browser press 0') && p.t === '' && keysOf(p, 't').length === 0, '⑫ d: press Digit0 (a key\'s code) is refused [key_code_name] with `press 0` — before anything runs: the page saw no key', k.out + k.err);
+    ok(k.code === 1 && gateOf(/\[key_code_name\]/.test(k.err)) && gateOf(k.err.includes('vibespace-browser press 0')) && p.t === '' && keysOf(p, 't').length === 0, '⑫ d: press Digit0 (a key\'s code) is refused [key_code_name] with `press 0` — before anything runs: the page saw no key', k.out + k.err);
     // e
     const FILE = path.join(CWD, 'frame-upload.txt'); fs.writeFileSync(FILE, 'one file\n');
     const u0 = await A(['upload', '#up2', FILE]); p = await page();
@@ -723,7 +723,7 @@ async function legTypedKinds() {
     ok(f1.code === 0 && u1.code === 0 && f0.code === 0 && p.up === 1, `⑫ e: frame #f → upload #up <file> → frame main puts the file in the frame's input (${p.up} file)`, JSON.stringify({ f1: f1.out + f1.err, u1: u1.out + u1.err, f0: f0.out + f0.err, up: p.up }));
     // RED CONTROL
     await reset(); k = await Ctl(['fill', '#d', '2027-01-07']); p = await page();
-    ok(k.code === 0 && /✓ Done/.test(k.out) && p.d === '', `⑫ RED CONTROL: the CLI without its read-back answers «✓ Done» over the EMPTY date field — the release's road (value ${JSON.stringify(p.d)})`, JSON.stringify({ k, d: p.d }));
+    ok(k.code === 0 && gateOf(/✓ Done/.test(k.out)) && p.d === '', `⑫ RED CONTROL: the CLI without its read-back answers «✓ Done» over the EMPTY date field — the release's road (value ${JSON.stringify(p.d)})`, JSON.stringify({ k, d: p.d }));
   } catch (e) {
     ok(false, '⑫ the typed-kinds leg threw', e && (e.stack || e.message));
   } finally {
@@ -751,41 +751,41 @@ console.log('— ① the PURE rules over the captured 0.32.0 shapes');
   const x = PIC.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'da-1', display: ':2' } });
   const sc = PIC.pictureSourceOf({ launch: 'driver', state: 'ready', launchWhy: require('../src/browser-attach.js').HIDDEN_WINDOW_WHY });
   ok(x.source === 'x' && x.words === "the browser's own window" && sc.source === 'screencast' && sc.words === "the page's picture — this machine has no display", `the source verdict: the attach road ⇒ "${x.words}", no display ⇒ "${sc.words}"`);
-  ok(['driver', 'remote', 'not-running', 'no-display-session'].every((why) => PIC.SOURCE_WORDS[why] && PIC.SOURCE_WORDS[why].startsWith("the page's picture")), 'every other road says it shows the page\'s picture (the screencast, as before)');
+  ok(verdictOf(['driver', 'remote', 'not-running', 'no-display-session'].every((why) => PIC.SOURCE_WORDS[why] && PIC.SOURCE_WORDS[why].startsWith("the page's picture"))), 'every other road says it shows the page\'s picture (the screencast, as before)');
 }
 {
   const st = S.parseStreamStatus(FIX.cli['stream status --json'].json);
-  ok(st.ok && st.enabled && st.port === FIX.cli['stream status --json'].json.data.port, `stream status → enabled with the port (${st.port})`);
+  ok(gateOf(st.ok) && gateOf(st.enabled) && st.port === FIX.cli['stream status --json'].json.data.port, `stream status → enabled with the port (${st.port})`);
   const en = S.parseStreamStatus(FIX.cli['stream enable --json (already enabled)'].json);
-  ok(en.ok && en.alreadyEnabled && !en.error, '`stream enable` on an enabled session (exit 1, "already enabled") is NOT a failure');
+  ok(gateOf(en.ok) && gateOf(en.alreadyEnabled) && !en.error, '`stream enable` on an enabled session (exit 1, "already enabled") is NOT a failure');
   const bad = S.parseStreamStatus(FIX.cli['stream status --json (no browser yet, config broken)'].json);
-  ok(!bad.ok && /Chrome exited/.test(bad.error), 'a launch failure inside `stream status` is a failure with the CLI\'s own reason');
+  ok(!bad.ok && verdictOf(/Chrome exited/.test(bad.error)), 'a launch failure inside `stream status` is a failure with the CLI\'s own reason');
   ok(S.streamPlan(st).step === 'ready' && S.streamPlan({ ok: true, enabled: false, port: null }).step === 'enable' && S.streamPlan(bad).step === 'failed', 'streamPlan: ready / enable / failed');
   ok(!S.parseStreamStatus(null).ok && !S.parseStreamStatus({ success: true, data: { enabled: true, port: 70000 } }).enabled, 'no JSON / an impossible port ⇒ not enabled');
   for (const t of ['status', 'tabs', 'frame', 'command', 'result']) ok(S.classifyUpstream(FIX.server_to_client[t]) === (t === 'frame' ? 'frame' : 'ordered'), `fixture ${t} classified ${t === 'frame' ? 'frame (latest-wins)' : 'ordered'}`);
   ok(S.classifyUpstream({ type: 'something-new' }) === 'ordered' && S.classifyUpstream('x') === 'invalid' && S.classifyUpstream({}) === 'invalid', 'an unknown type is relayed ordered (a newer upstream is not silenced); a non-record is invalid');
   ok(FRAME.metadata.deviceWidth === 1280 && FRAME.metadata.deviceHeight === 720 && Buffer.from(JPEG, 'base64').slice(0, 3).toString('hex') === 'ffd8ff' && FRAME.seq === undefined, 'the captured frame is a real JPEG with device dimensions in `metadata` and NO seq (0.32.0)');
-  { const js = S.jpegSize(JPEG); ok(js && js.width === 1280 && js.height === 577 && FRAME.metadata.timestamp === 0, `lane J: the captured JPEG itself is ${js && js.width}×${js && js.height} while its metadata claims 1280×720 (timestamp 0 — synthesized by the stream server): the metadata is not the picture`); }
-  ok(FIX.origin['http://example.com'].startsWith('403') && FIX.origin.absent === 'accepted' && S.originHeaderFor(39927) === 'http://127.0.0.1:39927', 'origin rule pinned: foreign 403, loopback/absent accepted; the bridge presents a loopback Origin');
+  { const js = S.jpegSize(JPEG); ok(gateOf(js) && js.width === 1280 && js.height === 577 && FRAME.metadata.timestamp === 0, `lane J: the captured JPEG itself is ${js && js.width}×${js && js.height} while its metadata claims 1280×720 (timestamp 0 — synthesized by the stream server): the metadata is not the picture`); }
+  ok(gateOf(FIX.origin['http://example.com'].startsWith('403')) && FIX.origin.absent === 'accepted' && S.originHeaderFor(39927) === 'http://127.0.0.1:39927', 'origin rule pinned: foreign 403, loopback/absent accepted; the bridge presents a loopback Origin');
 
   // the target ladder
   const profiles = [{ id: 'bp-00000001', label: 'Work', dir: '/tmp/vs-example/work' }, { id: 'bp-00000002', label: 'Personal', dir: '/tmp/vs-example/personal' }];
   const att = (id, alias, isDefault) => ({ profileId: id, alias, label: profiles.find((p) => p.id === id).label, isDefault });
   const two = { attachments: [att('bp-00000001', 'work', false), att('bp-00000002', 'personal', true)] };
   let t = S.streamTargetFor({ browserKey: 'bk-0000000a', set: two, profileRef: 'work', profiles });
-  ok(t.ok && t.kind === 'attachment' && t.chosen === 'named' && t.profileId === 'bp-00000001' && t.ns === 'vs-bp-00000001' && t.sessionName === 'vs-bk-0000000a' && t.dir === '/tmp/vs-example/work', 'a handle names the pane: namespace = the profile\'s, session = the lease\'s tab (vs-<browserKey>)');
+  ok(gateOf(t.ok) && t.kind === 'attachment' && t.chosen === 'named' && t.profileId === 'bp-00000001' && t.ns === 'vs-bp-00000001' && t.sessionName === 'vs-bk-0000000a' && t.dir === '/tmp/vs-example/work', 'a handle names the pane: namespace = the profile\'s, session = the lease\'s tab (vs-<browserKey>)');
   t = S.streamTargetFor({ browserKey: 'bk-0000000a', set: two, profileRef: 'bp-00000001', profiles });
-  ok(t.ok && t.chosen === 'named' && t.alias === 'work', 'a profile id names it too');
+  ok(gateOf(t.ok) && t.chosen === 'named' && t.alias === 'work', 'a profile id names it too');
   t = S.streamTargetFor({ browserKey: 'bk-0000000a', set: two, profiles });
-  ok(t.ok && t.chosen === 'default' && t.profileId === 'bp-00000002', 'no handle ⇒ the DEFAULT attachment');
+  ok(gateOf(t.ok) && t.chosen === 'default' && t.profileId === 'bp-00000002', 'no handle ⇒ the DEFAULT attachment');
   t = S.streamTargetFor({ browserKey: 'bk-0000000a', set: { attachments: [att('bp-00000001', 'work', false), att('bp-00000002', 'personal', false)] }, profiles });
-  ok(t.ok && t.chosen === 'first' && t.profileId === 'bp-00000001', 'two attachments and no default ⇒ the FIRST (a view is not a command: no profile_required for a window)');
+  ok(gateOf(t.ok) && t.chosen === 'first' && t.profileId === 'bp-00000001', 'two attachments and no default ⇒ the FIRST (a view is not a command: no profile_required for a window)');
   t = S.streamTargetFor({ browserKey: 'bk-0000000a', set: { attachments: [att('bp-00000002', 'personal', false)] }, profiles });
-  ok(t.ok && t.chosen === 'only', 'one attachment ⇒ it');
+  ok(gateOf(t.ok) && t.chosen === 'only', 'one attachment ⇒ it');
   t = S.streamTargetFor({ browserKey: 'bk-0000000a', set: two, profileRef: 'nope', profiles });
   ok(!t.ok && t.code === 'not_attached' && t.handles.join(',') === 'work,personal [default]', 'an unknown handle ⇒ not_attached listing the handles with the default marked');
   t = S.streamTargetFor({ browserKey: 'bk-0000000a', set: { attachments: [] }, envPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a', 'AGENT_BROWSER_NAMESPACE=vs-bk-0000000a', 'AGENT_BROWSER_CONFIG=/tmp/vs-example/cfg.json', 'HOME=/nope'] });
-  ok(t.ok && t.kind === 'ephemeral' && t.ns === 'vs-bk-0000000a' && t.envPairs.length === 3 && !t.envPairs.some((p) => p.startsWith('HOME=')), 'no attachment ⇒ the session\'s EPHEMERAL browser under its own AGENT_BROWSER_* pairs (and only those)');
+  ok(gateOf(t.ok) && t.kind === 'ephemeral' && t.ns === 'vs-bk-0000000a' && t.envPairs.length === 3 && !t.envPairs.some((p) => p.startsWith('HOME=')), 'no attachment ⇒ the session\'s EPHEMERAL browser under its own AGENT_BROWSER_* pairs (and only those)');
   t = S.streamTargetFor({ browserKey: 'bk-0000000a', set: { attachments: [] }, envPairs: [] });
   ok(!t.ok && t.code === 'no-browser', 'no attachment and no pairs (rung none / integration off) ⇒ no-browser, typed');
   ok(!S.streamTargetFor({ browserKey: '' }).ok && S.streamTargetFor({ browserKey: '' }).code === 'no-key', 'no browser key ⇒ no-key');
@@ -804,19 +804,19 @@ console.log('— ① the PURE rules over the captured 0.32.0 shapes');
   // frame gate + backpressure
   const L = S.BACKPRESSURE;
   ok(L.pauseAbove === 8 * 1024 * 1024 && L.resumeBelow === 1024 * 1024, 'the VNC bridge\'s numbers: pause above 8 MiB, resume under 1 MiB');
-  ok(S.frameGate({ maxFps: 10, lastFrameAt: 0, bufferedAmount: 0 }, 1000) && !S.frameGate({ maxFps: 10, lastFrameAt: 950, bufferedAmount: 0 }, 1000) && S.frameGate({ maxFps: 10, lastFrameAt: 900, bufferedAmount: 0 }, 1000), 'a viewer\'s own fps cap gates its frames');
-  ok(!S.frameGate({ maxFps: 60, lastFrameAt: 0, bufferedAmount: L.resumeBelow + 1 }, 5000) && S.frameGate({ maxFps: 60, lastFrameAt: 0, bufferedAmount: L.resumeBelow - 1 }, 5000), 'a viewer with more than the low-water mark still queued gets the frame DROPPED (latest-wins per viewer); under it, sent');
-  ok(S.backpressureVerdict([0, L.pauseAbove + 1], false).pause && !S.backpressureVerdict([0, L.pauseAbove - 1], false).pause, 'pause when ANY viewer is over the mark');
-  ok(!S.backpressureVerdict([L.resumeBelow + 1, 0], true).resume && S.backpressureVerdict([L.resumeBelow - 1, 0], true).resume, 'resume only when EVERY viewer is under the low-water mark');
+  ok(gateOf(S.frameGate({ maxFps: 10, lastFrameAt: 0, bufferedAmount: 0 }, 1000)) && !S.frameGate({ maxFps: 10, lastFrameAt: 950, bufferedAmount: 0 }, 1000) && verdictOf(S.frameGate({ maxFps: 10, lastFrameAt: 900, bufferedAmount: 0 }, 1000)), 'a viewer\'s own fps cap gates its frames');
+  ok(!S.frameGate({ maxFps: 60, lastFrameAt: 0, bufferedAmount: L.resumeBelow + 1 }, 5000) && verdictOf(S.frameGate({ maxFps: 60, lastFrameAt: 0, bufferedAmount: L.resumeBelow - 1 }, 5000)), 'a viewer with more than the low-water mark still queued gets the frame DROPPED (latest-wins per viewer); under it, sent');
+  ok(gateOf(S.backpressureVerdict([0, L.pauseAbove + 1], false).pause) && !S.backpressureVerdict([0, L.pauseAbove - 1], false).pause, 'pause when ANY viewer is over the mark');
+  ok(!S.backpressureVerdict([L.resumeBelow + 1, 0], true).resume && verdictOf(S.backpressureVerdict([L.resumeBelow - 1, 0], true).resume), 'resume only when EVERY viewer is under the low-water mark');
 
   // DPI: viewport px in, device px out — at three zooms
   for (const zoom of [1, 0.8, 1.25]) {
     // an element 640×360 LAYOUT px drawn under body zoom ⇒ its viewport rect is scaled
     const el = { left: 100 * zoom, top: 50 * zoom, width: 640 * zoom, height: 360 * zoom };
     const centre = S.pointerToDevice({ clientX: (100 + 320) * zoom, clientY: (50 + 180) * zoom, elRect: el, frameW: 1280, frameH: 720 });
-    ok(centre && centre.x === 640 && centre.y === 360, `zoom ${zoom}: the element's centre maps to the frame's centre (640,360)`);
+    ok(gateOf(centre) && centre.x === 640 && centre.y === 360, `zoom ${zoom}: the element's centre maps to the frame's centre (640,360)`);
     const corner = S.pointerToDevice({ clientX: (100 + 640) * zoom, clientY: (50 + 360) * zoom, elRect: el, frameW: 1280, frameH: 720 });
-    ok(corner && corner.x === 1280 && corner.y === 720, `zoom ${zoom}: the bottom-right corner maps to (1280,720)`);
+    ok(gateOf(corner) && corner.x === 1280 && corner.y === 720, `zoom ${zoom}: the bottom-right corner maps to (1280,720)`);
   }
   {
     // letterboxing: a 16:9 frame in a 4:3 box is drawn with bars top and bottom
@@ -837,10 +837,10 @@ console.log('— ① the PURE rules over the captured 0.32.0 shapes');
     const dig = { browsers: { 'bp-00000001': { state: 'ready' }, 'bp-00000002': { state: 'stopped' } }, ephemerals: [{ browserKey: 'bk-0000000a', state: 'ready' }, { browserKey: 'bk-0000000b', state: 'stopped' }] };
     ok(S.viewTargetRunning({ target: { kind: 'attachment', profileId: 'bp-00000001' }, digest: dig }) === true && S.viewTargetRunning({ target: { kind: 'attachment', profileId: 'bp-00000002' }, digest: dig }) === false && S.viewTargetRunning({ target: { kind: 'ephemeral', ns: 'vs-bk-0000000a' }, digest: dig }) === true && S.viewTargetRunning({ target: { kind: 'ephemeral', ns: 'vs-bk-0000000b' }, digest: dig }) === false && S.viewTargetRunning({ target: null, digest: dig }) === null, 'finding 3: a STOPPED view resumes only when the digest says ITS browser runs again (a view never starts one)');
     const ht = S.hello({ target: S.streamTargetFor({ browserKey: 'bk-0000000a', envPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a'], profileRef: S.EPHEMERAL_REF }) });
-    ok(ht.target && ht.target.ns === 'vs-bk-0000000a', 'the hello names the target\'s namespace (what a stopped ephemeral view waits for)');
+    ok(gateOf(ht.target) && ht.target.ns === 'vs-bk-0000000a', 'the hello names the target\'s namespace (what a stopped ephemeral view waits for)');
     const ck = S.childRefFor('bk-0000000a.2');
     const tc = S.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.2', 'AGENT_BROWSER_NAMESPACE=vs-bk-0000000a.2'] });
-    ok(tc.ok && tc.kind === 'ephemeral' && tc.child === true && tc.browserKey === 'bk-0000000a.2' && tc.ns === 'vs-bk-0000000a.2' && tc.envPairs.length === 2 && S.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck }).code === 'no-browser' && S.streamTargetFor({ browserKey: 'bk-0000000b', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=x'] }).code === 'not_attached' && S.childKeyOfRef('~child:bk-0000000a.x') === null, 'finding 4: `~child:<key>` names a SUB-AGENT\'s browser only with its own pairs (the recorder\'s tap); no pairs (a viewer) ⇒ no-browser; another conversation\'s child ⇒ not_attached');
+    ok(gateOf(tc.ok) && tc.kind === 'ephemeral' && tc.child === true && tc.browserKey === 'bk-0000000a.2' && tc.ns === 'vs-bk-0000000a.2' && tc.envPairs.length === 2 && S.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck }).code === 'no-browser' && S.streamTargetFor({ browserKey: 'bk-0000000b', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=x'] }).code === 'not_attached' && S.childKeyOfRef('~child:bk-0000000a.x') === null, 'finding 4: `~child:<key>` names a SUB-AGENT\'s browser only with its own pairs (the recorder\'s tap); no pairs (a viewer) ⇒ no-browser; another conversation\'s child ⇒ not_attached');
     // controls: the pre-fix rules in patched copies of the PURE module
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const MS = mutantCopies('browser-live-pure', repo);
@@ -848,10 +848,10 @@ console.log('— ① the PURE rules over the captured 0.32.0 shapes');
     const m1 = editAnchor(ssrc, "  if (syncId) return { act: 'create', syncId };", "  return { act: 'create', syncId: syncId || null };", "src/browser-stream.js");
     const m2 = editAnchor(ssrc, "  if (String(profileRef || '').startsWith(CHILD_REF_PREFIX)) {", "  if (false) {", "src/browser-stream.js");
     const S1 = m1 !== ssrc ? MS.load('src/browser-stream.js', m1, 'open-new') : null, S2 = m2 !== ssrc ? MS.load('src/browser-stream.js', m2, 'no-child') : null;
-    ok(S1 && S1.liveViewPlan({ views: V, sessionId: 's1' }).act === 'create', 'CONTROL: the pre-fix open (every click creates a window) in a patched copy ⇒ the focus leg goes red');
-    ok(S2 && S2.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.2'] }).child !== true, 'CONTROL: a copy without the child ref resolves `~child:` to something else (not the helper\'s browser) ⇒ the finding-4 leg goes red');
+    ok(gateOf(S1) && S1.liveViewPlan({ views: V, sessionId: 's1' }).act === 'create', 'CONTROL: the pre-fix open (every click creates a window) in a patched copy ⇒ the focus leg goes red');
+    ok(gateOf(S2) && S2.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.2'] }).child !== true, 'CONTROL: a copy without the child ref resolves `~child:` to something else (not the helper\'s browser) ⇒ the finding-4 leg goes red');
     const { copiesCensus } = await import('./mutant-copy.mjs');
-    for (const r of copiesCensus(MS.files, MS.dir, repo, { minCopies: 2, label: '① naive study 2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+    for (const r of copiesCensus(MS.files, MS.dir, repo, { minCopies: 2, label: '① naive study 2 ' })) ok(verdictOf(r.pass), r.name + (r.pass ? '' : ' — ' + r.detail));
   }
 }
 
@@ -922,10 +922,10 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   const a = viewer(PORT, 'session=sess-1');
   await a.until((v) => v.byType('status').some((m) => m.state === 'upstream-open'), 4000);
   const hello = a.byType('hello')[0];
-  ok(hello && hello.viewers === 1 && hello.mode === 'watch' && hello.target.kind === 'attachment' && hello.target.profileId === 'bp-00000001' && hello.target.chosen === 'default', 'hello names the default attachment as the target, Watch mode, 1 viewer');
+  ok(gateOf(hello) && hello.viewers === 1 && hello.mode === 'watch' && hello.target.kind === 'attachment' && hello.target.profileId === 'bp-00000001' && hello.target.chosen === 'default', 'hello names the default attachment as the target, Watch mode, 1 viewer');
   ok(asked.length === 1 && asked[0].sessionName === 'vs-bk-0000000a' && asked[0].ns === 'vs-bp-00000001', 'the keeper was asked for the port ONCE, under the lease\'s session name in the profile\'s namespace');
   await a.until((v) => v.byType('tabs').length && v.byType('url').length, 3000);
-  ok(a.byType('status').some((m) => m.connected === true && m.viewportWidth === 1280) && a.byType('tabs')[0].tabs[0].tabId === 't1' && a.byType('url')[0].url === 'https://example.com/first', 'the upstream status / tabs / url reach the viewer verbatim');
+  ok(gateOf(a.byType('status').some((m) => m.connected === true && m.viewportWidth === 1280)) && a.byType('tabs')[0].tabs[0].tabId === 't1' && a.byType('url')[0].url === 'https://example.com/first', 'the upstream status / tabs / url reach the viewer verbatim');
   ok(up.configs.length >= 1 && up.configs[up.configs.length - 1].maxFps === S.MAX_FPS_DEFAULT, `the bridge sent upstream config maxFps = the default (${S.MAX_FPS_DEFAULT}) on open`);
   up.blast(1);
   await a.until((v) => v.frames >= 1, 2000);
@@ -936,9 +936,9 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   await b.until((v) => v.frames >= 1 && v.byType('tabs').length, 3000);
   ok(up.clients.size === 1 && asked.length === 1, 'the second viewer shares the ONE upstream connection (no second port ask, no second upstream client)');
   ok(b.frames === 1 && b.byType('tabs').length === 1 && b.byType('url').length === 1 && b.byType('hello')[0].viewers === 2, 'the late viewer is replayed the last status/tabs/url AND the last frame at once; its hello counts 2');
-  ok(b.byType('status').some((m) => m.state === 'upstream-open'), 'the late viewer is told the upstream is ALREADY open (2.369.180: lane H\'s recorder taps a relay before any view joins; lane J\'s keyboard ownership reads `connected` off this record)');
+  ok(verdictOf(b.byType('status').some((m) => m.state === 'upstream-open')), 'the late viewer is told the upstream is ALREADY open (2.369.180: lane H\'s recorder taps a relay before any view joins; lane J\'s keyboard ownership reads `connected` off this record)');
   await a.until((v) => v.byType('viewers').some((m) => m.n === 2), 2000);
-  ok(a.byType('viewers').some((m) => m.n === 2), 'the first viewer hears the viewer count rise to 2');
+  ok(verdictOf(a.byType('viewers').some((m) => m.n === 2)), 'the first viewer hears the viewer count rise to 2');
   await sleep(120);                                            // past both viewers' fps gate (default 15 ⇒ 67 ms)
   up.blast(1);
   await until(() => a.frames === 2 && b.frames === 2, 2000);
@@ -987,8 +987,8 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   for (let i = 0; i < 3; i++) { up.blast(1, 40 * 1024); blasted++; await sleep(20); }
   await until(() => { bStat = bridge.stats()[0]?.viewers.find((v) => v.id === 2); return !!bStat && bStat.dropped > d0; }, 3000);
   const st0 = bridge.stats()[0];
-  ok(bStat && bStat.dropped > d0 && bStat.bufferedAmount > LIM.resumeBelow, `the slow viewer gets frames DROPPED once it has more than ${LIM.resumeBelow} bytes queued (B: ${bStat && bStat.bufferedAmount} queued, ${bStat && bStat.dropped - d0} dropped past the mark after ${blasted} frames)`);
-  ok(st0 && st0.paused === false, 'and the upstream is NOT paused for that — one slow tab does not stall the others');
+  ok(gateOf(bStat) && bStat.dropped > d0 && bStat.bufferedAmount > LIM.resumeBelow, `the slow viewer gets frames DROPPED once it has more than ${LIM.resumeBelow} bytes queued (B: ${bStat && bStat.bufferedAmount} queued, ${bStat && bStat.dropped - d0} dropped past the mark after ${blasted} frames)`);
+  ok(gateOf(st0) && st0.paused === false, 'and the upstream is NOT paused for that — one slow tab does not stall the others');
   ok(a.frames > aBefore, `the fast viewer kept receiving (${a.frames - aBefore} frames) while the slow one was dropped`);
   // phase 2: ORDERED records are never dropped (every viewer must see every
   // one), so a burst of big `console` records is the path a slow viewer's
@@ -997,11 +997,11 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   let st1 = null; blasted = 0;
   while (blasted < 200 && !(st1 = bridge.stats()[0])?.paused) { up.send({ type: 'console', level: 'log', text: 'x'.repeat(64 * 1024), timestamp: Date.now() }); blasted++; await sleep(20); }
   st1 = bridge.stats()[0]; bStat = st1 && st1.viewers.find((v) => v.id === 2);
-  ok(st1 && st1.paused === true && bStat && bStat.bufferedAmount > LIM.pauseAbove, `the upstream is PAUSED once a viewer buffers past ${LIM.pauseAbove} bytes of ORDERED records (B: ${bStat && bStat.bufferedAmount} after ${blasted} console records)`);
+  ok(gateOf(st1) && st1.paused === true && gateOf(bStat) && bStat.bufferedAmount > LIM.pauseAbove, `the upstream is PAUSED once a viewer buffers past ${LIM.pauseAbove} bytes of ORDERED records (B: ${bStat && bStat.bufferedAmount} after ${blasted} console records)`);
   ok(a.byType('console').length > aCons, 'the fast viewer received the ordered records up to the pause');
   b.ws.resume();
   await until(() => !bridge.stats()[0]?.paused, 6000);
-  ok(bridge.stats()[0] && bridge.stats()[0].paused === false, 'the upstream is RESUMED once every viewer drains under the low-water mark');
+  ok(gateOf(bridge.stats()[0]) && bridge.stats()[0].paused === false, 'the upstream is RESUMED once every viewer drains under the low-water mark');
   up.blast(1);
   await until(() => b.frames > 2, 3000);
   ok(b.frames > 2, 'and frames flow to the slow viewer again');
@@ -1014,13 +1014,13 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   const r3 = viewer(PORT, 'session=sess-nokey'); await r3.until((v) => v.closed !== null, 3000);
   ok(r3.byType('status')[0]?.code === 'no-key', 'a session without a browser key ⇒ no-key, typed');
   const r4 = viewer(PORT, 'session=sess-1&profile=personal'); await r4.until((v) => v.closed !== null, 4000);
-  ok(r4.byType('status').some((m) => m.code === 'launch_failed' && /would not launch/.test(m.error)) && r4.closed === 1011, 'a target whose browser cannot start ⇒ the keeper\'s own code + reason, then close 1011');
+  ok(gateOf(r4.byType('status').some((m) => m.code === 'launch_failed' && /would not launch/.test(m.error))) && r4.closed === 1011, 'a target whose browser cannot start ⇒ the keeper\'s own code + reason, then close 1011');
   const r5 = viewer(PORT, 'session=sess-1&profile=nope'); await r5.until((v) => v.closed !== null, 3000);
   ok(r5.byType('status')[0]?.code === 'not_attached' && r5.byType('status')[0].handles.length === 2, 'an unknown handle ⇒ not_attached listing the handles');
 
   // teardown: the last viewer leaving closes the upstream; the upstream dying tells the viewers
   b.ws.close(); await until(() => a.byType('viewers').some((m) => m.n === 1), 2000);
-  ok(a.byType('viewers').some((m) => m.n === 1) && up.clients.size === 1, 'one viewer left ⇒ count 1, the upstream stays');
+  ok(gateOf(a.byType('viewers').some((m) => m.n === 1)) && up.clients.size === 1, 'one viewer left ⇒ count 1, the upstream stays');
   a.ws.close(); await until(() => up.clients.size === 0, 3000);
   ok(up.clients.size === 0 && bridge.stats().length === 0, 'the last viewer leaving closes the upstream and forgets the relay');
   const c = viewer(PORT, 'session=sess-1');
@@ -1028,13 +1028,13 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   ok(up.clients.size === 1, 'a new viewer reconnects a fresh upstream');
   for (const cl of up.clients) cl.terminate();
   await c.until((v) => v.closed !== null, 3000);
-  ok(c.byType('status').some((m) => m.state === 'upstream-closed') && c.closed === 1001, 'the upstream dying ⇒ a typed upstream-closed status, then close 1001');
+  ok(gateOf(c.byType('status').some((m) => m.state === 'upstream-closed')) && c.closed === 1001, 'the upstream dying ⇒ a typed upstream-closed status, then close 1001');
   // the session ending closes its relays with a reason
   const d = viewer(PORT, 'session=sess-1');
   await d.until((v) => v.byType('status').some((m) => m.state === 'upstream-open'), 4000);
   bridge.closeForSession('sess-1', 'the session ended');
   await d.until((v) => v.closed !== null, 3000);
-  ok(d.byType('status').some((m) => m.state === 'ended' && /session ended/.test(m.error)) && bridge.viewerCount('sess-1') === 0, 'closeForSession ⇒ every viewer told why, then closed');
+  ok(gateOf(d.byType('status').some((m) => m.state === 'ended' && /session ended/.test(m.error))) && bridge.viewerCount('sess-1') === 0, 'closeForSession ⇒ every viewer told why, then closed');
   bridge.shutdown();
   await up.close();
   srv.close();
@@ -1094,20 +1094,20 @@ console.log('— ②b MULTIVIEW: a helper\'s browser through the real bridge (it
   upKid.blast(1);
   await vk.until((v) => v.frames >= 1, 3000);
   const hk = vk.byType('hello')[0];
-  ok(hk && hk.target && hk.target.kind === 'child' && hk.target.handle === kid && vk.frames >= 1 && upKid.clients.size === 1 && upOwn.clients.size === 0, 'a viewer asking for the helper\'s handle gets hello kind:"child" and the HELPER\'s picture (its upstream, not the parent\'s)', JSON.stringify(hk && hk.target));
+  ok(gateOf(hk) && gateOf(hk.target) && hk.target.kind === 'child' && hk.target.handle === kid && vk.frames >= 1 && upKid.clients.size === 1 && upOwn.clients.size === 0, 'a viewer asking for the helper\'s handle gets hello kind:"child" and the HELPER\'s picture (its upstream, not the parent\'s)', JSON.stringify(hk && hk.target));
   ok(asked.length === 1 && asked[0].kind === 'child' && asked[0].ns === 'vs-' + kid && !('envPairs' in asked[0]), 'the keeper is asked for the CHILD target (ns vs-<handle>), which carries no pairs of the parent');
   const rel = bridge._relays.get('sess-k|child:' + kid);
-  ok(rel && rel.browserKey === kid && JSON.stringify(rel.envPairs) === JSON.stringify(kidPairs), 'the relay answers under the helper\'s OWN recorded pairs, keyed on its handle (never the parent\'s pairs)', rel && JSON.stringify({ bk: rel.browserKey, pairs: rel.envPairs }));
+  ok(gateOf(rel) && rel.browserKey === kid && JSON.stringify(rel.envPairs) === JSON.stringify(kidPairs), 'the relay answers under the helper\'s OWN recorded pairs, keyed on its handle (never the parent\'s pairs)', rel && JSON.stringify({ bk: rel.browserKey, pairs: rel.envPairs }));
   vk.ws.send(JSON.stringify({ type: 'takeover' }));
   await vk.until((v) => v.byType('mode-ack').length || v.byType('mode').length, 2000);
   ok(inputs.length === 1 && inputs[0].browserKey === kid && inputs[0].profileId === null, 'a takeover of the helper\'s browser asks the keeper under the HELPER\'s key (it pauses the helper — never the parent)', JSON.stringify(inputs));
-  ok(viewersNoted.some((x) => x.bkey === kid && x.n === 1), 'the bridge tells the keeper a live view WATCHES the helper\'s browser (so it is not released under the user)');
+  ok(verdictOf(viewersNoted.some((x) => x.bkey === kid && x.n === 1)), 'the bridge tells the keeper a live view WATCHES the helper\'s browser (so it is not released under the user)');
   const vo = viewer(P, 'session=sess-k');
   await vo.until((v) => v.byType('status').some((m) => m.state === 'upstream-open'), 4000);
   ok(vo.byType('hello')[0]?.target?.kind === 'ephemeral' && upOwn.clients.size === 1 && bridge._relays.size === 2, 'the parent\'s own browser is a SEPARATE relay beside it (two targets, two upstreams)');
   vk.ws.close(); vo.ws.close();
   await until(() => bridge._relays.size === 0, 3000);
-  ok(viewersNoted.some((x) => x.bkey === kid && x.n === 0), 'the last viewer leaving tells the keeper nobody watches any more');
+  ok(verdictOf(viewersNoted.some((x) => x.bkey === kid && x.n === 0)), 'the last viewer leaving tells the keeper nobody watches any more');
   bridge.shutdown(); srv.close(); await upKid.close(); await upOwn.close();
 }
 
@@ -1182,7 +1182,7 @@ else await (async () => {
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
   const booted = await until(() => journal.includes('Ready.'), 40000, 100);
-  if (!ok(booted, 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(booted), 'the worktree server booted', journal.slice(-800))) return;
   const j = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   // two profiles, their fake namespaces → the two fake upstreams
   const work = (await j('POST', '/api/browser/profiles', { label: 'Work' })).json.profile;
@@ -1195,7 +1195,7 @@ else await (async () => {
   wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: ROOT, cols: 80, rows: 24, reqId: 'r1', name: 'live-one' }));
   await until(() => msgs.some((m) => m.type === 'created'), 15000);
   const created = msgs.find((m) => m.type === 'created');
-  if (!ok(created && created.sessionId, 'a chat session was created', journal.slice(-600))) return;
+  if (!ok(gateOf(created) && verdictOf(created.sessionId), 'a chat session was created', journal.slice(-600))) return;
   const sessionId = created.sessionId;
   await sleep(1500);
   // MULTIVIEW (design-browser-multiview §2 A1 / §4): BEFORE the attachments, the agent's first page verb records the
@@ -1218,9 +1218,9 @@ else await (async () => {
   ok(!!TOKEN && own.status === 200 && own.json.kind === 'ephemeral', 'MULTIVIEW: the agent\'s first page verb records the session\'s OWN browser (kind ephemeral)', JSON.stringify(own.json || meta).slice(0, 300));
   const nc = TOKEN ? await aj('/api/agent/browser/new-child', {}) : { json: null };
   const kidR = TOKEN ? await aj('/api/agent/browser/resolve', { handle: KID1, argv: ['snapshot'] }) : { status: 0, json: null };
-  ok(nc.json && nc.json.handle === KID1 && kidR.status === 200 && kidR.json.kind === 'child', 'MULTIVIEW: a helper mints its handle and browses in ITS OWN browser', JSON.stringify(kidR.json || nc.json).slice(0, 300));
+  ok(gateOf(nc.json) && nc.json.handle === KID1 && kidR.status === 200 && kidR.json.kind === 'child', 'MULTIVIEW: a helper mints its handle and browses in ITS OWN browser', JSON.stringify(kidR.json || nc.json).slice(0, 300));
   let att = await j('POST', '/api/browser/attach', { sessionId, profile: 'Work' });
-  ok(att.status === 200 && att.json.lease, 'attached Work', JSON.stringify(att.json).slice(0, 300));
+  ok(att.status === 200 && verdictOf(att.json.lease), 'attached Work', JSON.stringify(att.json).slice(0, 300));
   att = await j('POST', '/api/browser/attach', { sessionId, profile: 'Personal' });
   ok(att.status === 200 && att.json.attachments.length === 2, 'attached Personal — the session holds TWO attachments');
   try { for (const l of fs.readFileSync(path.join(AB_STATE, 'pids'), 'utf8').trim().split('\n')) { const pid = Number(l); if (pid) procs.add({ kill: () => process.kill(pid, 'SIGKILL') }); } } catch { }
@@ -1232,7 +1232,7 @@ else await (async () => {
     let dpids = []; try { dpids = fs.readFileSync(path.join(AB_STATE, 'pids'), 'utf8').trim().split('\n').map(Number).filter(Boolean); } catch { }
     const cwds = dpids.map((pid) => { try { return fs.readlinkSync(`/proc/${pid}/cwd`); } catch { return null; } });
     const wtReal = fs.realpathSync(wt);
-    ok(dpids.length >= 1 && cwds.every((c) => c && c === F.runDir().dir && c !== wtReal && !c.startsWith(wtReal + '/') && !wtReal.startsWith(c + '/')), `lane L r5 F1(b): the worktree server's KEEPER launched ${dpids.length} daemon(s), each running in the private directory (${[...new Set(cwds)].join(', ')}) — never its checkout ${wtReal}`, JSON.stringify({ dpids, cwds }));
+    ok(dpids.length >= 1 && verdictOf(cwds.every((c) => c && c === F.runDir().dir && c !== wtReal && !c.startsWith(wtReal + '/') && !wtReal.startsWith(c + '/'))), `lane L r5 F1(b): the worktree server's KEEPER launched ${dpids.length} daemon(s), each running in the private directory (${[...new Set(cwds)].join(', ')}) — never its checkout ${wtReal}`, JSON.stringify({ dpids, cwds }));
   }
   await j('POST', '/api/browser/pin', { sessionId, profile: 'Work' });
   // pin Work ⇒ the default; the strip shows both
@@ -1253,64 +1253,64 @@ else await (async () => {
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   const ready = await until(() => false, 0) || await (async () => { for (let i = 0; i < 120; i++) { try { if (await evaluate('!!(window.app && window.app.wm && window.app.sidebar)')) return true; } catch { } await sleep(250); } return false; })();
-  if (!ok(ready, 'the app booted in headless chrome')) return;
+  if (!ok(verdictOf(ready), 'the app booted in headless chrome')) return;
   await evaluate('window.app.ready');
   await evaluate('window.app.refreshBrowserProfiles()');
   const opened = await evaluate(`(() => { const w = window.app.openBrowserLive({ sessionId: ${JSON.stringify(sessionId)} }); return !!(w && w._browserLive); })()`);
-  ok(opened, 'app.openBrowserLive({sessionId}) opens a browser-live window');
+  ok(verdictOf(opened), 'app.openBrowserLive({sessionId}) opens a browser-live window');
   const q = (js) => evaluate(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); const L = w && w._browserLive; ${js} })()`);
   const drawn = await (async () => { for (let i = 0; i < 60; i++) { if (await q('return !!(L && L.state().frames >= 1 && L.img().naturalWidth === 1280)')) return true; await sleep(200); } return false; })();
-  ok(drawn, 'frames are DRAWN (the <img> decoded the 1280×720 JPEG through the cookie-authed bridge)');
+  ok(verdictOf(drawn), 'frames are DRAWN (the <img> decoded the 1280×720 JPEG through the cookie-authed bridge)');
   const st = await q('return L.state()');
-  ok(st.target && st.target.profileId === work.id && st.target.chosen === 'default' && st.mode === 'watch', 'the pane shows the DEFAULT (pinned) attachment, Watch mode', JSON.stringify(st).slice(0, 300));
+  ok(gateOf(st.target) && st.target.profileId === work.id && st.target.chosen === 'default' && st.mode === 'watch', 'the pane shows the DEFAULT (pinned) attachment, Watch mode', JSON.stringify(st).slice(0, 300));
   // lane browser-x-in-window: THE SCREENCAST LEG UNCHANGED — this suite's fake driver (≤ 0.38.1) keeps the driver road, so the
   // picture is the page's frames: no X view mounted, the screencast canvas shown, the badge's tooltip says which picture
   const px = await q("return { x: L.x(), canvas: L.el().querySelector('.browser-live-canvas').style.display, xHost: L.el().querySelector('.browser-live-xpicture').style.display };");
-  ok(px && px.x && px.x.source && px.x.source.source === 'screencast' && !px.x.mounted && px.x.wid === null && px.canvas !== 'none' && px.xHost === 'none' && /the page's picture/.test(px.x.badgeTitle || ''), `the SCREENCAST stays this browser's picture (${px && px.x && px.x.source && px.x.source.why}): no X view, the canvas shown, the badge says "${px && px.x && px.x.words}"`, JSON.stringify(px));
+  ok(gateOf(px) && gateOf(px.x) && gateOf(px.x.source) && px.x.source.source === 'screencast' && !px.x.mounted && px.x.wid === null && px.canvas !== 'none' && px.xHost === 'none' && verdictOf(/the page's picture/.test(px.x.badgeTitle || '')), `the SCREENCAST stays this browser's picture (${px && px.x && px.x.source && px.x.source.why}): no X view, the canvas shown, the badge says "${px && px.x && px.x.words}"`, JSON.stringify(px));
   ok(st.url === 'https://example.com/first' && st.tabs.length === 1 && st.tabs[0].tabId === 't1', 'the URL line and the tab list are filled from the stream');
-  ok(await q("return L.el().querySelector('.browser-live-url').textContent.includes('example.com/first') && L.el().querySelectorAll('.browser-live-tab').length === 1"), 'the URL pane and the tabs pane render them (text, escaped)');
+  ok(verdictOf(await q("return L.el().querySelector('.browser-live-url').textContent.includes('example.com/first') && L.el().querySelectorAll('.browser-live-tab').length === 1")), 'the URL pane and the tabs pane render them (text, escaped)');
   // MULTIVIEW §2 A1: the strip lists EVERY browser of the session — two attachments, its own, its helper's
   const stripOk = await (async () => { for (let i = 0; i < 40; i++) { if (await q("return L.el().querySelectorAll('.browser-live-strip-tab').length === 4")) return true; await sleep(150); } return false; })();
   const stripRows = await q("return [...L.el().querySelectorAll('.browser-live-strip-tab')].map((b) => ({ ref: b.dataset.ref, kind: b.dataset.kind, text: b.textContent.trim(), active: b.classList.contains('active') }))");
-  ok(stripOk && stripRows.map((r) => r.kind).join() === 'attachment,attachment,ephemeral,child' && stripRows[0].active && stripRows[0].text.startsWith('Work') && /^Temp browser/.test(stripRows[2].text) && /Helper 1/.test(stripRows[3].text) && stripRows[3].ref === KID1, 'MULTIVIEW: the strip shows FOUR tabs — Work (in use, active), Personal, this conversation\'s own browser ("Temp browser" — lane S2: THE fact\'s name, the pin being attached), Helper 1 (no witness from a fake claude ⇒ numbered)', JSON.stringify(stripRows));
-  ok(await q("return /\\d\\/6/.test(L.el().querySelector('.browser-live-strip-cap').textContent)"), 'MULTIVIEW D4: the own/cap chip reads N/6 (the conversation\'s raised cap)');
+  ok(gateOf(stripOk) && stripRows.map((r) => r.kind).join() === 'attachment,attachment,ephemeral,child' && gateOf(stripRows[0].active) && gateOf(stripRows[0].text.startsWith('Work')) && gateOf(/^Temp browser/.test(stripRows[2].text)) && gateOf(/Helper 1/.test(stripRows[3].text)) && stripRows[3].ref === KID1, 'MULTIVIEW: the strip shows FOUR tabs — Work (in use, active), Personal, this conversation\'s own browser ("Temp browser" — lane S2: THE fact\'s name, the pin being attached), Helper 1 (no witness from a fake claude ⇒ numbered)', JSON.stringify(stripRows));
+  ok(verdictOf(await q("return /\\d\\/6/.test(L.el().querySelector('.browser-live-strip-cap').textContent)")), 'MULTIVIEW D4: the own/cap chip reads N/6 (the conversation\'s raised cap)');
   const title = await q('return w.element.querySelector(".window-title")?.textContent || w.title || ""');
-  ok(/Work/.test(title), `the title names the profile of the pane you are looking at (${JSON.stringify(title).slice(0, 60)})`);
-  ok(await q("return getComputedStyle(L.el().querySelector('.browser-live-canvas')).zoom !== undefined"), 'the picture container carries the counter-zoom rule (zoom is a live CSS property)');
+  ok(verdictOf(/Work/.test(title)), `the title names the profile of the pane you are looking at (${JSON.stringify(title).slice(0, 60)})`);
+  ok(verdictOf(await q("return getComputedStyle(L.el().querySelector('.browser-live-canvas')).zoom !== undefined")), 'the picture container carries the counter-zoom rule (zoom is a live CSS property)');
   // DPI pointer helper: at ui-scale 1 and 0.8, the image centre maps to the PAGE's centre. The fixture's frame is the
   // real 0.32.0 capture — a 1280×577 JPEG under a 1280×720 metadata claim (lane J: the page is 1280×577; the fake
   // upstream has no CDP to read, so the view maps by the picture 1:1) ⇒ (640, 289), never the claim's (640, 360)
   for (const scale of [1, 0.8]) {
     const r = await q(`document.documentElement.style.setProperty('--ui-scale', '${scale}'); document.body.style.zoom = '${scale}'; const img = L.img(); const rect = img.getBoundingClientRect(); const d = L.drawn(); const p = L.pointerAt({ clientX: d.left + d.width / 2, clientY: d.top + d.height / 2 }); document.body.style.zoom = ''; document.documentElement.style.removeProperty('--ui-scale'); return { p, w: rect.width, g: L.geometry() };`); // lane J r2: the DRAWN picture's centre (top-aligned — no longer the element's centre)
-    ok(r.p && r.p.x === 640 && r.p.y === 289 && r.g.source === 'picture', `ui-scale ${scale}: the picture's centre maps to the page's centre (640,289) — the picture's 1280×577, not the metadata's 1280×720 (rect width ${Math.round(r.w)}, geometry ${r.g && r.g.source})`, JSON.stringify(r));
+    ok(gateOf(r.p) && r.p.x === 640 && r.p.y === 289 && r.g.source === 'picture', `ui-scale ${scale}: the picture's centre maps to the page's centre (640,289) — the picture's 1280×577, not the metadata's 1280×720 (rect width ${Math.round(r.w)}, geometry ${r.g && r.g.source})`, JSON.stringify(r));
   }
   // a second viewer (a second window in the same page) ⇒ viewer count 2 — opened the way a layout REPLAY / another client's
   // window is (an explicit syncId): a MANUAL open now goes to the session's existing view (naive study 2, finding 2)
   await evaluate(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(sessionId)}, profileId: ${JSON.stringify(work.id)}, syncId: 'win-blive-second-viewer' })`);
   const two = await (async () => { for (let i = 0; i < 40; i++) { if (await q('return L.state().viewers === 2')) return true; await sleep(200); } return false; })();
-  ok(two && upA.clients.size === 1, 'a second window on the same target is a second VIEWER on the ONE upstream connection (viewers = 2)');
+  ok(gateOf(two) && upA.clients.size === 1, 'a second window on the same target is a second VIEWER on the ONE upstream connection (viewers = 2)');
   // switch the strip to Personal ⇒ reconnects to the other profile's port
   await q("L.el().querySelectorAll('.browser-live-strip-tab')[1].click(); return true;");
   const switched = await (async () => { for (let i = 0; i < 60; i++) { if (await q(`return L.state().target && L.state().target.profileId === ${JSON.stringify(pers.id)} && L.state().frames >= 1`)) return true; await sleep(200); } return false; })();
-  ok(switched && upB.clients.size === 1, 'clicking the strip\'s other tab reconnects the SAME window to the other profile\'s stream');
+  ok(gateOf(switched) && upB.clients.size === 1, 'clicking the strip\'s other tab reconnects the SAME window to the other profile\'s stream');
   // MULTIVIEW: the helper's tab shows the HELPER's picture (its own upstream), then back to Personal
   await q(`[...L.el().querySelectorAll('.browser-live-strip-tab')].find((b) => b.dataset.ref === ${JSON.stringify(KID1)}).click(); return true;`);
   const onKid = await (async () => { for (let i = 0; i < 60; i++) { if (await q(`return L.state().target && L.state().target.kind === 'child' && L.state().target.handle === ${JSON.stringify(KID1)} && L.state().frames >= 1`)) return true; await sleep(200); } return false; })();
-  ok(onKid && upD.clients.size === 1, 'MULTIVIEW §4: clicking Helper 1 shows the HELPER\'s picture — its own upstream (a helper\'s browser is watchable)');
+  ok(gateOf(onKid) && upD.clients.size === 1, 'MULTIVIEW §4: clicking Helper 1 shows the HELPER\'s picture — its own upstream (a helper\'s browser is watchable)');
   await q(`[...L.el().querySelectorAll('.browser-live-strip-tab')].find((b) => b.dataset.profileId === ${JSON.stringify(pers.id)}).click(); return true;`);
   await (async () => { for (let i = 0; i < 60; i++) { if (await q(`return L.state().target && L.state().target.profileId === ${JSON.stringify(pers.id)} && L.state().connected`)) return; await sleep(200); } })();
   // MULTIVIEW §2 (a): a NEW browser mid-TAKEOVER is a new tab at the tail — never a switch of the pane you drive
   await q("L.send({ type: 'takeover' }); return true;");
   const taking = await (async () => { for (let i = 0; i < 40; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine')) return true; await sleep(150); } return false; })();
-  ok(taking, 'MULTIVIEW: the user takes over Personal in this window');
+  ok(verdictOf(taking), 'MULTIVIEW: the user takes over Personal in this window');
   await q('window.__vsWs0 = L.ws(); return true;');
   const nc2 = await aj('/api/agent/browser/new-child', {});
   let kid2 = await aj('/api/agent/browser/resolve', { handle: nc2.json && nc2.json.handle, argv: ['snapshot'] });
   if (kid2.status === 409 && kid2.json && kid2.json.code === 'profile_changed') kid2 = await aj('/api/agent/browser/resolve', { handle: nc2.json && nc2.json.handle, argv: ['snapshot'] }); // the user's attaches moved the set: told once
-  ok(nc2.json && nc2.json.handle === bk + '.2' && kid2.status === 200 && kid2.json.kind === 'child', 'MULTIVIEW: meanwhile a SECOND helper starts its own browser', JSON.stringify(kid2.json).slice(0, 200));
+  ok(gateOf(nc2.json) && nc2.json.handle === bk + '.2' && kid2.status === 200 && kid2.json.kind === 'child', 'MULTIVIEW: meanwhile a SECOND helper starts its own browser', JSON.stringify(kid2.json).slice(0, 200));
   const grew = await (async () => { for (let i = 0; i < 50; i++) { if (await q("return L.el().querySelectorAll('.browser-live-strip-tab').length === 5")) return true; await sleep(150); } return false; })();
   const after = await q(`return { refs: [...L.el().querySelectorAll('.browser-live-strip-tab')].map((b) => b.dataset.ref), target: L.state().target && L.state().target.profileId, mode: L.state().mode, mine: L.state().mine, sameWs: L.ws() === window.__vsWs0, active: L.el().querySelector('.browser-live-strip-tab.active')?.dataset.ref }`);
-  ok(grew && after.refs[4] === bk + '.2' && after.target === pers.id && after.active === pers.id && after.mode === 'takeover' && after.mine && after.sameWs, 'MULTIVIEW: the new helper\'s browser is a NEW TAB AT THE TAIL — the pane you drive stays Personal, still yours, on the SAME socket (never switched, never reconnected)', JSON.stringify(after));
+  ok(gateOf(grew) && after.refs[4] === bk + '.2' && after.target === pers.id && after.active === pers.id && after.mode === 'takeover' && gateOf(after.mine) && verdictOf(after.sameWs), 'MULTIVIEW: the new helper\'s browser is a NEW TAB AT THE TAIL — the pane you drive stays Personal, still yours, on the SAME socket (never switched, never reconnected)', JSON.stringify(after));
   await q("L.send({ type: 'handback' }); return true;");
   await (async () => { for (let i = 0; i < 40; i++) { if (await q('return L.state().mode === "watch"')) return; await sleep(150); } })();
   // lane P verify (finding 1, 2026-09-26): a click on a HOLLOW attachment tab never starts its browser — P2's "viewing a
@@ -1324,22 +1324,22 @@ else await (async () => {
     await (async () => { for (let i = 0; i < 60; i++) { if (await q(`return L.state().target && L.state().target.profileId === ${JSON.stringify(work.id)} && L.state().connected`)) return; await sleep(200); } })();
     const stopR = await j('POST', `/api/browser/profiles/${pers.id}/stop`);
     const hollow = await (async () => { for (let i = 0; i < 50; i++) { const v = await q(`const b = [...L.el().querySelectorAll('.browser-live-strip-tab')].find((x) => x.dataset.profileId === ${JSON.stringify(pers.id)}); return b ? { released: b.classList.contains('state-released'), title: b.title } : null;`); if (v && v.released) return v; await sleep(150); } return null; })();
-    ok(stopR.status === 200 && hollow && /Released — the next command starts it again/.test(hollow.title), 'lane P verify: Personal stopped ⇒ its tab is HOLLOW ("Released — the next command starts it again")', JSON.stringify({ stop: stopR.status, hollow }));
+    ok(stopR.status === 200 && gateOf(hollow) && verdictOf(/Released — the next command starts it again/.test(hollow.title)), 'lane P verify: Personal stopped ⇒ its tab is HOLLOW ("Released — the next command starts it again")', JSON.stringify({ stop: stopR.status, hollow }));
     const p0 = pidsNow(), s0 = streamAsks();
     await q(`[...L.el().querySelectorAll('.browser-live-strip-tab')].find((b) => b.dataset.profileId === ${JSON.stringify(pers.id)}).click(); return true;`);
     const rel = await (async () => { for (let i = 0; i < 50; i++) { const v = await q('const s = L.state(); return { released: s.released, status: s.statusText, profileId: s.target && s.target.profileId };'); if (v && v.released) return v; await sleep(150); } return null; })();
     await sleep(600);
-    ok(rel && rel.released && /Released — the next command starts it again/.test(rel.status || '') && pidsNow() === p0 && streamAsks() === s0, 'lane P verify: a CLICK on the hollow attachment tab starts nothing — no `open` reached the binary, no stream port was asked for it, the view reads Released', JSON.stringify({ rel, opens: pidsNow() - p0, asks: streamAsks() - s0 }));
+    ok(gateOf(rel) && gateOf(rel.released) && gateOf(/Released — the next command starts it again/.test(rel.status || '')) && pidsNow() === p0 && streamAsks() === s0, 'lane P verify: a CLICK on the hollow attachment tab starts nothing — no `open` reached the binary, no stream port was asked for it, the view reads Released', JSON.stringify({ rel, opens: pidsNow() - p0, asks: streamAsks() - s0 }));
     const re = await j('POST', '/api/browser/attach', { sessionId, profile: 'Personal' });
     try { for (const l of fs.readFileSync(path.join(AB_STATE, 'pids'), 'utf8').trim().split('\n')) { const pid = Number(l); if (pid) procs.add({ kill: () => process.kill(pid, 'SIGKILL') }); } } catch { }
     const picked = await (async () => { for (let i = 0; i < 60; i++) { if (await q(`return !L.state().released && L.state().target && L.state().target.profileId === ${JSON.stringify(pers.id)} && L.state().connected`)) return true; await sleep(200); } return false; })();
-    ok(re.status === 200 && pidsNow() === p0 + 1 && picked, 'lane P verify: the next command on it (an attach) starts it — ONE open — and the view picks it up by itself', JSON.stringify({ attach: re.status, opens: pidsNow() - p0 }));
+    ok(re.status === 200 && pidsNow() === p0 + 1 && verdictOf(picked), 'lane P verify: the next command on it (an attach) starts it — ONE open — and the view picks it up by itself', JSON.stringify({ attach: re.status, opens: pidsNow() - p0 }));
   }
   const streamLog = fs.readFileSync(path.join(AB_STATE, 'stream.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  ok(streamLog.every((l) => l.session === 'vs-' + created.browserKey || l.session === null || /^vs-bk-/.test(l.session)) && streamLog.some((l) => l.ns === 'vs-' + pers.id), 'the port was asked under the lease\'s session name in each profile\'s namespace');
+  ok(gateOf(streamLog.every((l) => l.session === 'vs-' + created.browserKey || l.session === null || /^vs-bk-/.test(l.session))) && verdictOf(streamLog.some((l) => l.ns === 'vs-' + pers.id)), 'the port was asked under the lease\'s session name in each profile\'s namespace');
   // openSpec replay: the window's spec names the action and the target
   const spec = await q('return w._openSpec || w.openSpec || null');
-  ok(spec && spec.action === 'openBrowserLive' && spec.sessionId === sessionId, 'the window carries openSpec {action: openBrowserLive, sessionId} for layout replay', JSON.stringify(spec));
+  ok(gateOf(spec) && spec.action === 'openBrowserLive' && spec.sessionId === sessionId, 'the window carries openSpec {action: openBrowserLive, sessionId} for layout replay', JSON.stringify(spec));
   // 375×667: a PHONE load (metrics set BEFORE the page boots — the window
   // manager lays windows out at boot, an emulation change after the fact
   // re-lays out nothing): the window opens full-screen, the strip fits the
@@ -1347,14 +1347,14 @@ else await (async () => {
   await send('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });
   await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/?m=1` });
   const readyM = await (async () => { for (let i = 0; i < 120; i++) { try { if (await evaluate('(async () => { if (!window.app || !window.app.ready) return false; return await Promise.race([window.app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 100))]); })()')) return true; } catch { } await sleep(250); } return false; })();
-  if (ok(readyM, 'the app booted at 375×667')) {
+  if (ok(verdictOf(readyM), 'the app booted at 375×667')) {
     await evaluate('window.app.refreshBrowserProfiles()');
     await evaluate(`(() => { const w = window.app.openBrowserLive({ sessionId: ${JSON.stringify(sessionId)} }); return !!(w && w._browserLive); })()`);
     const drawnM = await (async () => { for (let i = 0; i < 60; i++) { if (await q('return !!(L && L.state().frames >= 1 && L.img().getBoundingClientRect().width > 0)')) return true; await sleep(200); } return false; })();
-    ok(drawnM, 'at 375×667 the picture is drawn');
+    ok(verdictOf(drawnM), 'at 375×667 the picture is drawn');
     const phoneStrip = await (async () => { for (let i = 0; i < 40; i++) { const v = await q("const s = L.el().querySelector('.browser-live-strip'); const r = s && s.getBoundingClientRect(); const tabs = [...L.el().querySelectorAll('.browser-live-strip-tab')]; const shown = tabs.filter((b) => b.style.display !== 'none'); const more = L.el().querySelector('.browser-live-strip-more'); return { ok: !!r && r.width > 0 && r.right <= 375.5 && tabs.length === 5 && shown.every((b) => b.getBoundingClientRect().right <= r.right + 0.5), shown: shown.length, folded: L.state().stripFolded.length, more: more && more.style.display !== 'none' ? more.textContent : null, current: L.state().currentRef, shownRefs: shown.map((b) => b.dataset.ref) };"); if (v && v.ok && v.folded > 0) return v; await sleep(150); } return null; })();
-    ok(phoneStrip && phoneStrip.folded > 0 && phoneStrip.more === '▾+' + phoneStrip.folded && phoneStrip.shownRefs.includes(phoneStrip.current), 'at 375×667 the five-tab strip FOLDS into ▾+N inside the viewport — the tab you look at stays', JSON.stringify(phoneStrip));
-    ok(await q("const bar = L.el().querySelector('.browser-live-bar'); return bar.getBoundingClientRect().right <= 375.5"), 'at 375×667 the bar does not overflow the viewport');
+    ok(gateOf(phoneStrip) && phoneStrip.folded > 0 && phoneStrip.more === '▾+' + phoneStrip.folded && verdictOf(phoneStrip.shownRefs.includes(phoneStrip.current)), 'at 375×667 the five-tab strip FOLDS into ▾+N inside the viewport — the tab you look at stays', JSON.stringify(phoneStrip));
+    ok(verdictOf(await q("const bar = L.el().querySelector('.browser-live-bar'); return bar.getBoundingClientRect().right <= 375.5")), 'at 375×667 the bar does not overflow the viewport');
   }
   try { cdp.close(); } catch { }
   try { chrome.kill('SIGKILL'); } catch { }
@@ -1591,44 +1591,44 @@ if (!CHROME) skip('no chrome/chromium on this box — the lane H leg needs one')
 else if (!dtachOk) skip('dtach is not installed — a local session cannot be created here');
 else await (async () => {
   const o = await ephemeralLeg({ tag: 'real' });
-  if (!ok(o.booted && o.created && o.agentEnv && o.appBooted && o.chatUp, 'lane H: a worktree server, a chat session with NO attachment, its chat window open in headless chrome, the agent\'s env read', JSON.stringify(o).slice(0, 900))) return;
+  if (!ok(gateOf(o.booted) && gateOf(o.created) && gateOf(o.agentEnv) && gateOf(o.appBooted) && verdictOf(o.chatUp), 'lane H: a worktree server, a chat session with NO attachment, its chat window open in headless chrome, the agent\'s env read', JSON.stringify(o).slice(0, 900))) return;
   ok(o.liveBefore === 0 && o.cli.status === 0, 'the agent ran the SHIPPED `vibespace-browser open <url>` — its first browser command (no live view existed before it)', JSON.stringify(o.cli));
-  ok(o.bound && o.boundMs <= 5000, `within 5 s a browser-live window appeared, BORN in the chat window's chain as a split (${o.boundMs} ms)`, o.journalTail);
-  ok(o.chain && o.chain.same && o.chain.host === o.chatId && o.chain.pair && o.chain.pair[0] === o.chatId && o.chain.pair[1] === o.chain.liveId && o.chain.liveId === 'win-blive-' + o.sessionId, 'ONE chain: [chat, live], the chat the host, the deterministic syncId win-blive-<session>', JSON.stringify(o.chain));
-  ok(o.chain && o.chain.target && o.chain.target.kind === 'ephemeral' && o.chain.spec && o.chain.spec.profileId === S.EPHEMERAL_REF, 'the view streams THAT browser: target kind ephemeral, its openSpec names EPHEMERAL_REF (a replay reopens the same pane)', JSON.stringify(o.chain));
-  ok(o.frames, 'frames are DRAWN in the bound pane (the fake stream server through the bridge)');
+  ok(gateOf(o.bound) && o.boundMs <= 5000, `within 5 s a browser-live window appeared, BORN in the chat window's chain as a split (${o.boundMs} ms)`, o.journalTail);
+  ok(gateOf(o.chain) && gateOf(o.chain.same) && o.chain.host === o.chatId && gateOf(o.chain.pair) && o.chain.pair[0] === o.chatId && o.chain.pair[1] === o.chain.liveId && o.chain.liveId === 'win-blive-' + o.sessionId, 'ONE chain: [chat, live], the chat the host, the deterministic syncId win-blive-<session>', JSON.stringify(o.chain));
+  ok(gateOf(o.chain) && gateOf(o.chain.target) && o.chain.target.kind === 'ephemeral' && gateOf(o.chain.spec) && o.chain.spec.profileId === S.EPHEMERAL_REF, 'the view streams THAT browser: target kind ephemeral, its openSpec names EPHEMERAL_REF (a replay reopens the same pane)', JSON.stringify(o.chain));
+  ok(verdictOf(o.frames), 'frames are DRAWN in the bound pane (the fake stream server through the bridge)');
   ok(!(o.toasts || []).some((t) => /Undo|side by side/i.test(t)), 'the auto-bind is SILENT — no Undo / side-by-side toast (split UX: only a user\'s own bind announces)', JSON.stringify(o.toasts));
   const e0 = (o.entries || [])[0];
-  ok(o.entries && o.entries.length >= 1 && e0.action === 'navigate' && e0.sessionId === o.sessionId && /lane-h-real/.test(JSON.stringify(e0)) && e0.profileId === null, `data/browser-trace/ephemeral holds the navigation (${(o.entries || []).length} entr${(o.entries || []).length === 1 ? 'y' : 'ies'}) — recorded by the viewer-less tap armed at the browser's start`, JSON.stringify(e0).slice(0, 400));
-  ok(o.thumb && o.thumbFrame && o.thumbFrame.status === 200 && /image\/jpeg/.test(o.thumbFrame.type || '') && o.thumbFrame.magic === 'ffd8' && (o.entries || []).some((e) => o.thumbFrame.src.includes('/' + e.id + '/')) && /1 action/.test((o.traceRow && o.traceRow.text) || ''), `the tool card's Browser actions row shows the entry's thumbnail — "${o.traceRow && o.traceRow.text}", ${o.thumbFrame && o.thumbFrame.src} = ${o.thumbFrame && o.thumbFrame.bytes} bytes of JPEG`, JSON.stringify({ row: o.traceRow, frame: o.thumbFrame }));
+  ok(gateOf(o.entries) && o.entries.length >= 1 && e0.action === 'navigate' && e0.sessionId === o.sessionId && gateOf(/lane-h-real/.test(JSON.stringify(e0))) && e0.profileId === null, `data/browser-trace/ephemeral holds the navigation (${(o.entries || []).length} entr${(o.entries || []).length === 1 ? 'y' : 'ies'}) — recorded by the viewer-less tap armed at the browser's start`, JSON.stringify(e0).slice(0, 400));
+  ok(gateOf(o.thumb) && gateOf(o.thumbFrame) && o.thumbFrame.status === 200 && gateOf(/image\/jpeg/.test(o.thumbFrame.type || '')) && o.thumbFrame.magic === 'ffd8' && gateOf((o.entries || []).some((e) => o.thumbFrame.src.includes('/' + e.id + '/'))) && verdictOf(/1 action/.test((o.traceRow && o.traceRow.text) || '')), `the tool card's Browser actions row shows the entry's thumbnail — "${o.traceRow && o.traceRow.text}", ${o.thumbFrame && o.thumbFrame.src} = ${o.thumbFrame && o.thumbFrame.bytes} bytes of JPEG`, JSON.stringify({ row: o.traceRow, frame: o.thumbFrame }));
   // lane S2 (naive study 2): THE browser fact's words — the conversation's own browser in plain words (the chip sits in
   // that conversation's own status bar / card, so its name is never repeated there; "ephemeral" is gone from these surfaces)
   ok(!!o.rowName && o.statusChip === 'Agent browser · no profile (temporary browser)', `the status-bar chip: "${o.statusChip}" (the session is "${o.rowName}")`);
   ok(!!o.rowName && o.cardChip === 'Agent browser · no profile (temporary browser)', `the session card's chip: "${o.cardChip}"`);
-  ok(o.greyed && /^Stopped — its logins are kept\. Resume starts it again; the agent’s next command also does/.test(o.greyedText || ''), // lane browser-resume B: the conversation's own browser is KEPT — the stopped words name Resume (2.369.199 integration)
+  ok(gateOf(o.greyed) && verdictOf(/^Stopped — its logins are kept\. Resume starts it again; the agent’s next command also does/.test(o.greyedText || '')), // lane browser-resume B: the conversation's own browser is KEPT — the stopped words name Resume (2.369.199 integration)
      `the browser stopped ⇒ the view GREYS by name (browser_stopped: "${String(o.greyedText || '').slice(0, 120)}")`);
-  ok(o.stoppedView && o.stoppedView.stopped === true && o.stoppedView.badge === 'Browser stopped' && o.stoppedView.frameKept && o.stoppedView.rootStopped, 'naive study 2 (finding 3): the stopped view keeps its LAST frame (greyed) and the badge says "Browser stopped" — never "Agent is driving" over a blank page as if a new browser had started', JSON.stringify(o.stoppedView));
-  ok(o.menuFound && o.menuFound2 && o.liveAfterOpens === 1 && o.activeIsLive, `naive study 2 (finding 2): "Open live view" from the status-bar chip, clicked twice, FOCUSES the one live view — ${o.liveAfterOpens} window(s) (every click opened a new one)`, JSON.stringify({ menu: [o.menuFound, o.menuFound2], windows: o.liveAfterOpens, active: o.activeIsLive }));
-  ok(o.again === 0 && o.reconnected && o.resumed && o.resumed.stopped === false && o.resumed.badge === 'Agent is driving', 'its next verb restarts it ⇒ the SAME view reconnects (the holder row returned; still one window) and the stopped state clears', JSON.stringify(o.resumed));
+  ok(gateOf(o.stoppedView) && o.stoppedView.stopped === true && o.stoppedView.badge === 'Browser stopped' && gateOf(o.stoppedView.frameKept) && verdictOf(o.stoppedView.rootStopped), 'naive study 2 (finding 3): the stopped view keeps its LAST frame (greyed) and the badge says "Browser stopped" — never "Agent is driving" over a blank page as if a new browser had started', JSON.stringify(o.stoppedView));
+  ok(gateOf(o.menuFound) && gateOf(o.menuFound2) && o.liveAfterOpens === 1 && verdictOf(o.activeIsLive), `naive study 2 (finding 2): "Open live view" from the status-bar chip, clicked twice, FOCUSES the one live view — ${o.liveAfterOpens} window(s) (every click opened a new one)`, JSON.stringify({ menu: [o.menuFound, o.menuFound2], windows: o.liveAfterOpens, active: o.activeIsLive }));
+  ok(o.again === 0 && gateOf(o.reconnected) && gateOf(o.resumed) && o.resumed.stopped === false && o.resumed.badge === 'Agent is driving', 'its next verb restarts it ⇒ the SAME view reconnects (the holder row returned; still one window) and the stopped state clears', JSON.stringify(o.resumed));
   const c = await ephemeralLeg({ tag: 'mut', mutate: true });
-  ok(c.mutated && c.booted && c.created && c.chatUp && c.cli && c.cli.status === 0, 'CONTROL: the same world on a server whose keeper copy drops the ephemeral from its holder rows (the pre-lane digest); the agent\'s command still runs', JSON.stringify(c).slice(0, 600));
+  ok(gateOf(c.mutated) && gateOf(c.booted) && gateOf(c.created) && gateOf(c.chatUp) && gateOf(c.cli) && c.cli.status === 0, 'CONTROL: the same world on a server whose keeper copy drops the ephemeral from its holder rows (the pre-lane digest); the agent\'s command still runs', JSON.stringify(c).slice(0, 600));
   ok(!c.bound && c.liveWindows === 0, 'CONTROL: …no live view appears (the auto-bind had no row to open on) — the leg above can go red', JSON.stringify({ bound: c.bound, windows: c.liveWindows }));
   ok((c.entries || []).length === 0 && !c.thumb, 'CONTROL: …and NOTHING is recorded (the recorder arms only on a holder row) — the trace leg can go red', JSON.stringify(c.entries).slice(0, 200));
   ok(!c.cardChip, 'CONTROL: …and the card has no Agent browser chip (browserLive comes from the same rows)', String(c.cardChip));
   const u = await ephemeralLeg({ tag: 'ui', clientPrefix: true });
-  ok(u.clientMutated && u.rebuilt && u.booted && u.chatUp && u.bound, `CONTROL (naive study 2): the same world with the PRE-FIX live-view client (a manual open always creates; no stopped state), its bundle rebuilt in the leg's own worktree (rebuild ${u.rebuildMs} ms, chrome up in ${u.chromeMs} ms on DevToolsActivePort ${u.cdpPort}, deadline ${chromeDeadline(u.rebuildMs)} ms)`, JSON.stringify(u).slice(0, 600));
-  ok(u.menuFound && u.liveAfterOpens >= 3, `CONTROL: …"Open live view" twice opens ${u.liveAfterOpens} windows (the auto-bound one + one per click) — the finding-2 leg can go red`);
-  ok(u.stoppedView && u.stoppedView.badge === 'Agent is driving' && !u.stoppedView.stopped, `CONTROL: …and the stopped browser's view says "${u.stoppedView && u.stoppedView.badge}" — the finding-3 leg can go red`, JSON.stringify(u.stoppedView));
+  ok(gateOf(u.clientMutated) && gateOf(u.rebuilt) && gateOf(u.booted) && gateOf(u.chatUp) && verdictOf(u.bound), `CONTROL (naive study 2): the same world with the PRE-FIX live-view client (a manual open always creates; no stopped state), its bundle rebuilt in the leg's own worktree (rebuild ${u.rebuildMs} ms, chrome up in ${u.chromeMs} ms on DevToolsActivePort ${u.cdpPort}, deadline ${chromeDeadline(u.rebuildMs)} ms)`, JSON.stringify(u).slice(0, 600));
+  ok(gateOf(u.menuFound) && u.liveAfterOpens >= 3, `CONTROL: …"Open live view" twice opens ${u.liveAfterOpens} windows (the auto-bound one + one per click) — the finding-2 leg can go red`);
+  ok(gateOf(u.stoppedView) && u.stoppedView.badge === 'Agent is driving' && !u.stoppedView.stopped, `CONTROL: …and the stopped browser's view says "${u.stoppedView && u.stoppedView.badge}" — the finding-3 leg can go red`, JSON.stringify(u.stoppedView));
   // lane agent-window-no-pop (owner incident inc-mvhebl4n-rkvr) — THE AGENT BROWSER'S TWIN ROW: the same world, the person in
   // ANOTHER window of this desk when the agent's browser starts (the chat shows, not active) ⇒ no live view, nothing moves,
   // the chat's badge; the status-bar chip's "Open live view" (the person's press) opens it and focuses it
   const q = await ephemeralLeg({ tag: 'away', away: true });
-  ok(q.booted && q.created && q.appBooted && q.chatUp && q.away === true && q.cli && q.cli.status === 0, 'agent-window-no-pop: the same world; the chat SHOWS but another window of this desk is the active one; the agent ran `vibespace-browser open`', JSON.stringify(q).slice(0, 600));
+  ok(gateOf(q.booted) && gateOf(q.created) && gateOf(q.appBooted) && gateOf(q.chatUp) && q.away === true && gateOf(q.cli) && q.cli.status === 0, 'agent-window-no-pop: the same world; the chat SHOWS but another window of this desk is the active one; the agent ran `vibespace-browser open`', JSON.stringify(q).slice(0, 600));
   ok(!q.bound && q.liveAtWait === 0, `…NO live view opened within 5 s (lane H's row, the chat active, opened one in ${o.boundMs} ms; the base opened one here too)`, JSON.stringify({ bound: q.bound, live: q.liveAtWait }));
-  ok(q.awayAfter && q.awayAfter.active && q.awayAfter.box === q.chatBox0, '…nothing moved: the other window is still the active one, the chat\'s pane keeps its exact box (the base split it in half)', JSON.stringify({ before: q.chatBox0, after: q.awayAfter }));
-  ok(q.awayAfter && q.awayAfter.arrived && q.awayAfter.itemArrived, '…the chat\'s taskbar entry carries the badge (the arrived mark)', JSON.stringify(q.awayAfter));
+  ok(gateOf(q.awayAfter) && gateOf(q.awayAfter.active) && q.awayAfter.box === q.chatBox0, '…nothing moved: the other window is still the active one, the chat\'s pane keeps its exact box (the base split it in half)', JSON.stringify({ before: q.chatBox0, after: q.awayAfter }));
+  ok(gateOf(q.awayAfter) && gateOf(q.awayAfter.arrived) && verdictOf(q.awayAfter.itemArrived), '…the chat\'s taskbar entry carries the badge (the arrived mark)', JSON.stringify(q.awayAfter));
   ok(q.statusChip === 'Agent browser · no profile (temporary browser)', `…the chat's status-bar chip names the browser: "${q.statusChip}"`);
-  ok(q.menuFound && q.liveAfterOpens === 1 && q.activeIsLive, '…the person\'s "Open live view" on that chip opens ONE live view and it takes the focus (the human origin)', JSON.stringify({ menu: q.menuFound, windows: q.liveAfterOpens, active: q.activeIsLive }));
+  ok(gateOf(q.menuFound) && q.liveAfterOpens === 1 && verdictOf(q.activeIsLive), '…the person\'s "Open live view" on that chip opens ONE live view and it takes the focus (the human origin)', JSON.stringify({ menu: q.menuFound, windows: q.liveAfterOpens, active: q.activeIsLive }));
 })().catch((e) => ok(false, 'the lane H leg threw', e && (e.stack || e.message)));
 
 // ═══ ④ the REAL binary ═══════════════════════════════════════════════════
@@ -1657,12 +1657,12 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
       const v = await keeper.streamPortFor({ ok: true, kind: 'ephemeral', sessionName: ns, envPairs: pairs });
       await sleep(500);
       const info = await rt.info(null, { extraEnv: S.pairsToEnv(pairs) });
-      ok(!v.ok && v.code === 'no-browser' && v.state === 'not-started' && info.ok && !info.active && underD().length === 0, `lane P verify (REAL ${ver}): a live view of a conversation with no browser yet starts NOTHING — no-browser, \`session info\` active:false, no process under its socket dir`, JSON.stringify({ v, active: info.active, procs: underD() }));
+      ok(!v.ok && v.code === 'no-browser' && v.state === 'not-started' && gateOf(info.ok) && !info.active && underD().length === 0, `lane P verify (REAL ${ver}): a live view of a conversation with no browser yet starts NOTHING — no-browser, \`session info\` active:false, no process under its socket dir`, JSON.stringify({ v, active: info.active, procs: underD() }));
       keeper.shutdown();
       const ctl = await rt.streamPort(null, { extraEnv: S.pairsToEnv(pairs) });
       await sleep(500);
       const info2 = await rt.info(null, { extraEnv: S.pairsToEnv(pairs) });
-      ok(info2.active && underD().length >= 1, `lane P verify CONTROL (REAL ${ver}): the as-shipped \`stream status\` under the same pairs spawns a background daemon nobody recorded (port ${ctl.port}, pid ${info2.pid}) — the leg above is red on it`, JSON.stringify({ ctl, active: info2.active, procs: underD() }));
+      ok(gateOf(info2.active) && underD().length >= 1, `lane P verify CONTROL (REAL ${ver}): the as-shipped \`stream status\` under the same pairs spawns a background daemon nobody recorded (port ${ctl.port}, pid ${info2.pid}) — the leg above is red on it`, JSON.stringify({ ctl, active: info2.active, procs: underD() }));
     } finally {
       await rt.closeAll(null, { extraEnv: S.pairsToEnv(pairs) }).catch(() => { });
       await sleep(300); reap();
@@ -1689,7 +1689,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     const MKL = mutantCopies('browser-live-r2', repo);
     const ksrc = fs.readFileSync(path.join(repo, 'src/server/browser-keeper.js'), 'utf8');
     const W2 = '        const launchIdle = B.pairsIdleMs(pairs) ?? idleMs();\n';
-    ok(ksrc.includes(W2), 'F2 real leg setup: the launch\'s pairs idle is found in src/server/browser-keeper.js');
+    ok(verdictOf(ksrc.includes(W2)), 'F2 real leg setup: the launch\'s pairs idle is found in src/server/browser-keeper.js');
     const run = async (Kmod, tag, pairIdle = 900000) => {
       const D = path.join(ROOT, 'real-r2-' + tag);
       for (const d of ['sock', 'data', 'home']) fs.mkdirSync(path.join(D, d), { recursive: true, mode: 0o700 });
@@ -1726,18 +1726,18 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     };
     const r = await run(K0, 'fix');
     if (r.launchFailed) { skip(`F2 real leg: the real browser did not launch on this box: ${String(r.launchFailed).replace(/\s+/g, ' ').slice(0, 180)}`); return; }
-    ok(r.mid === 'starting' && r.v.ok && r.ssAfterOpen, `lane P verify r2 F2 (REAL ${ver}): a view picked up mid-launch asks \`stream status\` only after \`open\` ended (${r.order.join(' → ')})`, JSON.stringify(r));
+    ok(r.mid === 'starting' && gateOf(r.v.ok) && verdictOf(r.ssAfterOpen), `lane P verify r2 F2 (REAL ${ver}): a view picked up mid-launch asks \`stream status\` only after \`open\` ended (${r.order.join(' → ')})`, JSON.stringify(r));
     ok(!r.ssRestarted && !r.verbRestarted && r.daemons.length === 1 && r.daemons[0].pid === r.recordedPid && r.launchIdle === 900000 && r.daemons[0].idle === '900000', `lane P verify r2 F2 (REAL ${ver}): neither the view's \`stream status\` nor the agent's own verb restarts the daemon (restartedBackground never true) — ONE daemon, the RECORDED pid, carrying the idle the launch passed (the pairs' ${r.launchIdle})`, JSON.stringify(r));
     // the product's DEFAULT shape (the setting unchanged since the spawn: the pairs name the setting's 600000)
     const rd = await run(K0, 'default', 600000);
     if (rd.launchFailed) skip(`F2 real leg (default shape): the real browser did not launch: ${String(rd.launchFailed).slice(0, 160)}`);
-    else ok(rd.mid === 'starting' && rd.v.ok && rd.ssAfterOpen && !rd.ssRestarted && !rd.verbRestarted && rd.daemons.length === 1 && rd.daemons[0].pid === rd.recordedPid && rd.launchIdle === 600000 && rd.daemons[0].idle === '600000', `lane P verify r2 F2 (REAL ${ver}, the default shape): the view mid-launch, then the agent's verb — ONE daemon, the recorded pid, carrying the 600000 the launch passed, never restarted (${rd.order.join(' → ')})`, JSON.stringify(rd));
+    else ok(rd.mid === 'starting' && gateOf(rd.v.ok) && gateOf(rd.ssAfterOpen) && !rd.ssRestarted && !rd.verbRestarted && rd.daemons.length === 1 && rd.daemons[0].pid === rd.recordedPid && rd.launchIdle === 600000 && rd.daemons[0].idle === '600000', `lane P verify r2 F2 (REAL ${ver}, the default shape): the view mid-launch, then the agent's verb — ONE daemon, the recorded pid, carrying the 600000 the launch passed, never restarted (${rd.order.join(' → ')})`, JSON.stringify(rd));
     if (ksrc.includes(W2)) {
       const rc = await run(MKL.load('src/server/browser-keeper.js', editAnchor(ksrc, W2, '        const launchIdle = idleMs();\n', "src/server/browser-keeper.js"), 'launch-idle-setting'), 'ctl');
       if (rc.launchFailed) skip(`F2 real CONTROL: the real browser did not launch: ${String(rc.launchFailed).slice(0, 160)}`);
-      else ok(rc.ssRestarted && !rc.daemons.some((d) => d.pid === rc.recordedPid), `lane P verify r2 F2 CONTROL (REAL ${ver}): the pre-fix launch (the setting, 600000) under pairs naming 900000 — the view's \`stream status\` RESTARTS the daemon the keeper just launched (restartedBackground:true; the recorded pid ${rc.recordedPid} is gone, the survivor carries ${rc.daemons.map((d) => d.idle).join()}) — the leg above is red on it`, JSON.stringify(rc));
+      else ok(gateOf(rc.ssRestarted) && !rc.daemons.some((d) => d.pid === rc.recordedPid), `lane P verify r2 F2 CONTROL (REAL ${ver}): the pre-fix launch (the setting, 600000) under pairs naming 900000 — the view's \`stream status\` RESTARTS the daemon the keeper just launched (restartedBackground:true; the recorded pid ${rc.recordedPid} is gone, the survivor carries ${rc.daemons.map((d) => d.idle).join()}) — the leg above is red on it`, JSON.stringify(rc));
     }
-    for (const c of copiesCensus(MKL.files, MKL.dir, repo, { label: 'browser-live r2 controls: ' })) ok(c.pass, c.name, c.detail);
+    for (const c of copiesCensus(MKL.files, MKL.dir, repo, { label: 'browser-live r2 controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
   })().catch((e) => ok(false, 'the F2 real leg threw', e && (e.stack || e.message)));
   if (!ver) skip(`${DRIVER.skip} agent-browser is not on PATH`);
   else if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(ver)) skip(`agent-browser ${ver} is below 0.32 — no stream server`);
@@ -1761,7 +1761,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
         const inf = await rt.info(ns, { dir: path.join(D, 'prof'), extraEnv });
         let dcwd = null; try { dcwd = fs.readlinkSync(`/proc/${inf.pid}/cwd`); } catch { }
         const co = fs.realpathSync(repo);
-        ok(launched.ok && inf.pid && dcwd === F.runDir().dir && dcwd !== co && !dcwd.startsWith(co + '/') && !co.startsWith(dcwd + '/'), `lane L r5 F1(b): the REAL daemon (pid ${inf.pid}) launched through the runtime runs in ${dcwd} — not the checkout ${co}`, JSON.stringify({ launched: launched.ok, launchErr: String(launched.stderr || launched.error || '').slice(0, 200), pid: inf.pid, dcwd }));
+        ok(gateOf(launched.ok) && gateOf(inf.pid) && dcwd === F.runDir().dir && dcwd !== co && !dcwd.startsWith(co + '/') && !co.startsWith(dcwd + '/'), `lane L r5 F1(b): the REAL daemon (pid ${inf.pid}) launched through the runtime runs in ${dcwd} — not the checkout ${co}`, JSON.stringify({ launched: launched.ok, launchErr: String(launched.stderr || launched.error || '').slice(0, 200), pid: inf.pid, dcwd }));
       }
       const port = await rt.streamPort(ns, { dir: path.join(D, 'prof'), session: ns, extraEnv });
       // THE LAUNCH SHAPE IS EVIDENCE (2026-09-21): on a box whose chromium exits before
@@ -1769,7 +1769,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
       // not the bridge under test) this leg SKIPs with the vendor's own words, as the
       // ci.mjs row promises; a stream server that answered without a port still FAILS
       if (!port.ok && /exited early|DevToolsActivePort|crash|exit code/i.test(String(port.error || ''))) { skip(`the real stream server's chromium did not launch on this box: ${String(port.error || '').replace(/\s+/g, ' ').slice(0, 180)}`); return; }
-      if (!ok(port.ok && port.port, `the real stream port came back (${JSON.stringify(port).slice(0, 120)})`)) return;
+      if (!ok(gateOf(port.ok) && verdictOf(port.port), `the real stream port came back (${JSON.stringify(port).slice(0, 120)})`)) return;
       const activeSessions = new Map([['sess-real', { _browserKey: ns.slice(3) }]]);
       const keeper = { setFor: () => ({ attachments: [] }), list: () => ({ profiles: [] }), streamPortFor: async () => ({ ok: true, port: port.port }) };
       // no attachment ⇒ the ephemeral target needs pairs; hand the session its pairs
@@ -1781,7 +1781,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
       const P = await freePort(); await new Promise((r) => srv.listen(P, '127.0.0.1', r));
       const v = viewer(P, 'session=sess-real');
       await v.until((x) => x.frames >= 1, 15000);
-      ok(v.frames >= 1 && v.byType('status').some((m) => m.viewportWidth > 0) && v.byType('tabs').length >= 1, `a REAL frame, status and tabs reached the viewer through the real bridge (${v.frames} frame(s))`);
+      ok(v.frames >= 1 && gateOf(v.byType('status').some((m) => m.viewportWidth > 0)) && v.byType('tabs').length >= 1, `a REAL frame, status and tabs reached the viewer through the real bridge (${v.frames} frame(s))`);
       ok(v.byType('hello')[0]?.target?.kind === 'ephemeral', 'the target was the session\'s own (ephemeral) browser');
       // lane H: THE RECORDER over the REAL stream server — a viewer-less-style tap on the session's own ephemeral
       // browser (EPHEMERAL_REF), then a REAL command the daemon runs: its own `command` / `result` mirrors are the
@@ -1793,13 +1793,13 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
         const tk = { ...keeper, holdersFor: () => [{ ephemeral: true, child: false, browserKey: bk, sessionId: 'sess-real' }], browserOf: () => null, leasesOn: () => [] };
         const trc = TRC.create({ dataDir: tdir, keeper: tk, bridge, serverSetting: () => undefined, runtime: rt, log: { log() { }, warn() { } }, sweepEveryMs: 0 });
         const armed = await trc.watch({ sessionId: 'sess-real', profileId: null, browserKey: bk });
-        ok(armed.ok, 'lane H (real binary): the recorder armed a tap on the session\'s own ephemeral browser (EPHEMERAL_REF)', JSON.stringify(armed));
+        ok(verdictOf(armed.ok), 'lane H (real binary): the recorder armed a tap on the session\'s own ephemeral browser (EPHEMERAL_REF)', JSON.stringify(armed));
         const OPEN = 'data:text/html,<title>traced-real</title><h1>traced</h1>';
         const ran = await rt.exec(ns, ['open', OPEN], { dir: path.join(D, 'prof'), session: ns, extraEnv, timeout: 30000 });
         let es = [];
         for (let i = 0; i < 80 && !es.length; i++) { await sleep(100); es = trc.list({ sessionId: 'sess-real', profileId: null }); }
         const e0 = es[0];
-        ok(ran.ok && e0 && ['open', 'navigate'].includes(e0.action) && /traced-real/.test(JSON.stringify(e0)) && e0.after && fs.existsSync(path.join(tdir, 'browser-trace', 'ephemeral', e0.after.file)), `lane H (real binary ${String(ver || '').trim()}): the daemon's own mirror of a REAL \`open\` is RECORDED under browser-trace/ephemeral (action ${e0 && e0.action}, an after-frame on disk)`, JSON.stringify({ ran: ran.ok, stderr: String(ran.stderr || '').slice(0, 200), e0 }).slice(0, 600));
+        ok(gateOf(ran.ok) && gateOf(e0) && gateOf(['open', 'navigate'].includes(e0.action)) && gateOf(/traced-real/.test(JSON.stringify(e0))) && gateOf(e0.after) && verdictOf(fs.existsSync(path.join(tdir, 'browser-trace', 'ephemeral', e0.after.file))), `lane H (real binary ${String(ver || '').trim()}): the daemon's own mirror of a REAL \`open\` is RECORDED under browser-trace/ephemeral (action ${e0 && e0.action}, an after-frame on disk)`, JSON.stringify({ ran: ran.ok, stderr: String(ran.stderr || '').slice(0, 200), e0 }).slice(0, 600));
         trc.shutdown();
       }
       // lane stream-ping (browser-windows BL-r5-2): A HALF-OPEN VIEWER on the REAL stream server — a second live view that
@@ -1817,7 +1817,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
         const gone = await until(() => bridge.viewerCount('sess-real') === 1, 2 * KA.PING_MS + 5000, 200);
         const took = Date.now() - t0;
         const named = realLines.filter((l) => new RegExp(`viewer \\d+ closed \\(no pong for ${2 * KA.PING_MS} ms${KA.NOTHING_ACKED}\\) after \\d+s, code 1006`).test(l));
-        ok(two === 2 && gone && took <= 2 * KA.PING_MS + 2000 && named.length === 1, `lane stream-ping (REAL): a half-open viewer is dropped by the production keepalive in ${Math.round(took / 1000)} s (≤ 40 s), the count 2 → ${bridge.viewerCount('sess-real')}, ONE named line`, JSON.stringify({ two, took, named, last: realLines.slice(-3) }));
+        ok(two === 2 && gateOf(gone) && took <= 2 * KA.PING_MS + 2000 && named.length === 1, `lane stream-ping (REAL): a half-open viewer is dropped by the production keepalive in ${Math.round(took / 1000)} s (≤ 40 s), the count 2 → ${bridge.viewerCount('sess-real')}, ONE named line`, JSON.stringify({ two, took, named, last: realLines.slice(-3) }));
         const f0 = v.frames;
         await rt.exec(ns, ['open', 'data:text/html,<title>after</title><h1>after the drop</h1>'], { dir: path.join(D, 'prof'), session: ns, extraEnv, timeout: 30000 });
         await v.until((x) => x.frames > f0, 15000);
@@ -1944,11 +1944,11 @@ await (async () => {
     const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT5) }, stdio: ['ignore', 'pipe', 'pipe'] });
     procs.add(srv); procs5.push(srv);
     srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-    if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), '⑤ the worktree server booted (real agent-browser on its PATH)', journal.slice(-600))) return;
+    if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000, 100)), '⑤ the worktree server booted (real agent-browser on its PATH)', journal.slice(-600))) return;
     // lane S4: ⑤/⑥ judge the LETTERBOX (the picture vs the page — two sizes): the view must not size the page to its pane
     // (`browser.fitPageToView` off = the page keeps its own size, as for a size the agent chose); the fit is judged by
     // scripts/test-browser-live-fit.mjs on the same rung
-    { const r = await fetch(`http://127.0.0.1:${PORT5}/api/settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'browser.fitPageToView': false }) }); ok(r.ok, '⑤ setup: browser.fitPageToView off for the letterbox legs'); }
+    { const r = await fetch(`http://127.0.0.1:${PORT5}/api/settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'browser.fitPageToView': false }) }); ok(verdictOf(r.ok), '⑤ setup: browser.fitPageToView off for the letterbox legs'); }
     const wsMain = new WebSocket(`ws://127.0.0.1:${PORT5}/ws`);
     const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
     await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });
@@ -1972,7 +1972,7 @@ await (async () => {
     await metrics(2);
     await send('Page.navigate', { url: `http://127.0.0.1:${PORT5}/` });
     const ready = await (async () => { for (let i = 0; i < 160; i++) { try { if (await evaluate('!!(window.app && window.app.wm && window.app.sidebar)')) return true; } catch { } await sleep(250); } return false; })();
-    if (!ok(ready, '⑤ the app booted in the client chrome (1920×963, DPR 2)')) return;
+    if (!ok(verdictOf(ready), '⑤ the app booted in the client chrome (1920×963, DPR 2)')) return;
     await evaluate('window.app.ready');
     /** ⑥ lane J r2 on the real rung (headless shape): letterbox pixels, input feedback, THE KEYBOARD, the stale card, and the control. */
     const laneJ2 = async ({ q, clickOnce, created, vb, senv }) => {
@@ -1990,36 +1990,36 @@ await (async () => {
         // bar are not white — so the first and last WHITE rows of one column are the drawn picture's top and bottom
       };
       const b1 = await band();
-      ok(b1 && b1.top >= 0 && b1.above <= 3 && b1.below > 100, `⑥ the letterbox measured in pixels: the picture starts ${b1 && b1.above} px from the pane's top (a ${b1 && b1.W}×${b1 && b1.H} pane; ${b1 && b1.below} px of spare room all BELOW it, none above)`, JSON.stringify(b1));
+      ok(gateOf(b1) && b1.top >= 0 && b1.above <= 3 && b1.below > 100, `⑥ the letterbox measured in pixels: the picture starts ${b1 && b1.above} px from the pane's top (a ${b1 && b1.W}×${b1 && b1.H} pane; ${b1 && b1.below} px of spare room all BELOW it, none above)`, JSON.stringify(b1));
       await q(`L.img().style.objectPosition = '50% 50%'; return true;`); // CONTROL: the pre-fix CSS (object-fit's centred default)
       const b0 = await band();
       await q(`L.img().style.objectPosition = ''; return true;`);
-      ok(b0 && b0.above > 100 && Math.abs(b0.above - b0.below) <= 6, `⑥ control: the pre-fix centred picture measures ${b0 && b0.above} px of band ABOVE and ${b0 && b0.below} below with the same measure (the study's "a third of the pane")`, JSON.stringify(b0));
+      ok(gateOf(b0) && b0.above > 100 && Math.abs(b0.above - b0.below) <= 6, `⑥ control: the pre-fix centred picture measures ${b0 && b0.above} px of band ABOVE and ${b0 && b0.below} below with the same measure (the study's "a third of the pane")`, JSON.stringify(b0));
       // ── a form page; the user takes over and clicks its input ──
       await q('L.send({ type: "handback" }); return true;');
       await untilQ(q, 'return L.state().mode !== "takeover"'); // the handback's own mode record: the agent's `open` is never refused browser_paused by a late one
       const fr0 = await q('return L.state().frames');
       const fo = await vb(['open', `http://127.0.0.1:${CP}/form?n=kb1`]);
       await until(() => vps.has('kb1'), 20000, 100);
-      ok(fo.ok && vps.has('kb1'), `⑥ the agent opened a form page (${vps.get('kb1') ? vps.get('kb1').w + '×' + vps.get('kb1').h : 'no report'})`, (fo.stderr || fo.stdout).slice(0, 300));
+      ok(gateOf(fo.ok) && verdictOf(vps.has('kb1')), `⑥ the agent opened a form page (${vps.get('kb1') ? vps.get('kb1').w + '×' + vps.get('kb1').h : 'no report'})`, (fo.stderr || fo.stdout).slice(0, 300));
       await (async () => { for (let i = 0; i < 60; i++) { const g = await q('const g = L.geometry(); return g && { w: g.cssW, h: g.cssH }'); const v = vps.get('kb1'); if (g && v && Math.abs(g.w - v.w) <= 1 && Math.abs(g.h - v.h) <= 1) return; await sleep(150); } })();
       await untilQ(q, `return L.state().frames > ${fr0} && /\\/form\\?n=kb1/.test(L.state().url || '')`, 5000, 100); // a frame drawn after the form page's navigation (the view's own url + frame count)
       await q('L.send({ type: "takeover" }); return true;');
       const mineAgain = await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine && L.ownsKeyboard()')) return true; await sleep(100); } return false; })();
-      ok(mineAgain, '⑥ Take over ⇒ this view OWNS the keyboard (the claim, the ring, "Typing goes to the browser")');
+      ok(verdictOf(mineAgain), '⑥ Take over ⇒ this view OWNS the keyboard (the claim, the ring, "Typing goes to the browser")');
       // ⑧ the owner's ruling (2026-09-27): the agent's verb while the user drives is refused — and goes on the handback's re-run list
       const snap8 = await vb(['snapshot'], 30000);
-      ok(!snap8.ok && /\[browser_paused\]/.test(snap8.stderr) && /what to re-run/.test(snap8.stderr), '⑧ the agent\'s `snapshot` while the user drives is refused [browser_paused] (it did not run) — the CLI says the handback names what to re-run', (snap8.stderr || '').slice(0, 400));
+      ok(!snap8.ok && gateOf(/\[browser_paused\]/.test(snap8.stderr)) && verdictOf(/what to re-run/.test(snap8.stderr)), '⑧ the agent\'s `snapshot` while the user drives is refused [browser_paused] (it did not run) — the CLI says the handback names what to re-run', (snap8.stderr || '').slice(0, 400));
       const own0 = await q(`const s = L.state(); return { chip: s.kbdChip, ring: L.el().classList.contains('kbd-owned'), sink: document.activeElement === L.kbd(), text: L.el().querySelector('.browser-live-kbd-chip').textContent };`);
       // verify S2 r3 (r2 F3): this rung is a DIRECT lease (the ephemeral browser's own stream, `via:'stream'`) — the chip claims only what the last delivered receipt proved: "Typing is sent to the browser" (a mediated lease says "goes" — test-browser-identity 5)
-      ok(own0.chip && own0.ring && own0.sink && /Typing (is sent|goes) to the browser/.test(own0.text), `⑥ …the bar says "${own0.text}" (a direct lease: "is sent" — VibeSpace sees its own write, not the page's answer), the picture wears the ring, and focus sits in the view's own sink`, JSON.stringify(own0));
+      ok(gateOf(own0.chip) && gateOf(own0.ring) && gateOf(own0.sink) && verdictOf(/Typing (is sent|goes) to the browser/.test(own0.text)), `⑥ …the bar says "${own0.text}" (a direct lease: "is sent" — VibeSpace sees its own write, not the page's answer), the picture wears the ring, and focus sits in the view's own sink`, JSON.stringify(own0));
       const sent0 = await q('return L.state().sent');
       const hit = await clickOnce({ dsf: 1, scale: 1, win: [1000, 800], px: 170, py: 40, n: 'kb1' });
       ok(!hit.lost && hit.off <= 2, `⑥ a click on the form's input lands on it (${hit.lost ? 'LOST' : `(${hit.x},${hit.y}), off ${hit.off.toFixed(1)} px`})`);
       const fb = await q(`const s = L.state(); const rp = s.ripples[s.ripples.length - 1] || null; const canvas = L.el().querySelector('.browser-live-canvas'); const cr = canvas.getBoundingClientRect(); const d = L.drawn(); const g = L.geometry(); const exp = { left: (d.left + 170 * d.width / g.cssW - cr.left) * canvas.clientWidth / cr.width, top: (d.top + 40 * d.height / g.cssH - cr.top) * canvas.clientHeight / cr.height }; return { rp, exp, echo: s.echo, sent: s.sent, you: s.youShown, youPt: s.youPt };`);
-      ok(fb.rp && Math.abs(fb.rp.x - 170) <= 2 && Math.abs(fb.rp.y - 40) <= 2 && Math.abs(fb.rp.left - fb.exp.left) <= 2 && Math.abs(fb.rp.top - fb.exp.top) <= 2,
+      ok(gateOf(fb.rp) && Math.abs(fb.rp.x - 170) <= 2 && Math.abs(fb.rp.y - 40) <= 2 && Math.abs(fb.rp.left - fb.exp.left) <= 2 && Math.abs(fb.rp.top - fb.exp.top) <= 2,
         `⑥ the click RIPPLES at the page point it was sent to — (${fb.rp && fb.rp.x},${fb.rp && fb.rp.y}) drawn at (${fb.rp && Math.round(fb.rp.left)},${fb.rp && Math.round(fb.rp.top)}) in the picture, where the page got it`, JSON.stringify(fb));
-      ok(fb.sent === sent0 + 1 && /^input sent · \d+$/.test(fb.echo || '') && fb.you && fb.youPt && Math.abs(fb.youPt.x - 170) <= 2, `⑥ …the bar echoes "${fb.echo}" and the "you" marker shows where the page has your pointer`, JSON.stringify(fb));
+      ok(fb.sent === sent0 + 1 && gateOf(/^input sent · \d+$/.test(fb.echo || '')) && gateOf(fb.you) && gateOf(fb.youPt) && Math.abs(fb.youPt.x - 170) <= 2, `⑥ …the bar echoes "${fb.echo}" and the "you" marker shows where the page has your pointer`, JSON.stringify(fb));
       // ── the steal: the session's chat window is ATTACHED (session-lifecycle: chatView.focus()), then its composer focused by hand ──
       const composerQ = `const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(sid)}); const cv = cw && window.app.sessions.get(cw.id); const ta = cv && cv._chatInput && cv._chatInput._textarea;`;
       const steal = async () => {
@@ -2032,8 +2032,8 @@ await (async () => {
         return { hasComposer, after1, after2 };
       };
       const st1 = await steal();
-      ok(st1.hasComposer, '⑥ the session\'s chat window is attached — a live composer exists on the page');
-      ok(!st1.after1.onComposer && !st1.after2.onComposer && /browser-live-kbd/.test(st1.after2.cls || ''), `⑥ neither the attach's chatView.focus() nor a raw composer.focus() takes the keyboard while you drive (focus is back in "${st1.after2.cls}")`, JSON.stringify(st1));
+      ok(verdictOf(st1.hasComposer), '⑥ the session\'s chat window is attached — a live composer exists on the page');
+      ok(!st1.after1.onComposer && !st1.after2.onComposer && verdictOf(/browser-live-kbd/.test(st1.after2.cls || '')), `⑥ neither the attach's chatView.focus() nor a raw composer.focus() takes the keyboard while you drive (focus is back in "${st1.after2.cls}")`, JSON.stringify(st1));
       const rc = await q('return L.state().reclaims');
       ok(rc >= 1, `⑥ …the raw focus was RECLAIMED (${rc} reclaim(s)) — the backstop for every focus site the guard does not sit on`);
       // ── type into the CLIENT: real key events, an IME commit, a paste ──
@@ -2059,7 +2059,7 @@ await (async () => {
       ok(fin.sent >= sent0 + 11, `⑥ every act was echoed: ${fin.sent - sent0} input(s) sent since the takeover ("${fin.echo}")`);
       // ── the stale card, where the user looks ──
       const card = await (async () => { for (let i = 0; i < 40; i++) { const c = await evaluate(`(() => { ${composerQ} const el = cw && cw.element.querySelector('.chat-permission-stale'); return el ? el.textContent : null; })()`); if (c) return c; await sleep(150); } return null; })();
-      ok(card && /Not run — you took over the browser, so this step went stale/.test(card) && !(await evaluate(`(() => { ${composerQ} return !!(cw && cw.element.querySelector('.chat-perm-allow')); })()`)),
+      ok(gateOf(card) && gateOf(/Not run — you took over the browser, so this step went stale/.test(card)) && !(await evaluate(`(() => { ${composerQ} return !!(cw && cw.element.querySelector('.chat-perm-allow')); })()`)),
         `⑥ the chat card of the queued click says so — "${card}" — and offers no Allow`);
       // ── CONTROL: the same client with the keyboard owner neutered (one edit, rebuilt here) ⇒ the composer gets it ──
       // integration 2.369.192: a Hand back is waited for by its OWN records — the view's mode record (it left takeover) and the
@@ -2090,21 +2090,21 @@ await (async () => {
       const took8 = await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine')) return true; await sleep(100); } return false; })();
       // …and the live view's own toast says what the takeover interrupted (the human's words, t()-wrapped — the bundle's English here)
       const toast8 = await (async () => { for (let i = 0; i < 30; i++) { const t = await evaluate(`(() => { const s = document.getElementById('global-toasts'); return s ? s.textContent : ''; })()`); if (/agent operation\(s\) interrupted: wait/.test(t)) return t; await sleep(100); } return null; })();
-      ok(!!toast8 && /You took over — 1 agent operation\(s\) interrupted: wait\. The agent waits until you hand back/.test(toast8), `⑧ the live view's toast names what the takeover interrupted: "${toast8 ? toast8.replace(/\s+/g, ' ').slice(0, 160) : 'none'}"`);
+      ok(!!toast8 && verdictOf(/You took over — 1 agent operation\(s\) interrupted: wait\. The agent waits until you hand back/.test(toast8)), `⑧ the live view's toast names what the takeover interrupted: "${toast8 ? toast8.replace(/\s+/g, ' ').slice(0, 160) : 'none'}"`);
       const tcard8 = await (async () => { for (let i = 0; i < 60; i++) { const c = ((await chatMsgs()) || []).slice(cardsBefore.length).filter((t) => /The user took over your browser; /.test(t)); if (c.length) return c; await sleep(150); } return null; })();
-      ok(took8 && tcard8 && tcard8.length === 1 && /The user took over your browser; 1 operation was interrupted: wait\. Wait for the handback, then run it again\./.test(tcard8[0]) && /(^|\s)VibeSpace · The user took over your browser/.test(tcard8[0]), `⑧ the TAKEOVER TELLS: the conversation shows VibeSpace's card at once — "${tcard8 ? tcard8[0].slice(0, 220) : 'none'}" (the agent's \`wait\`, in flight on the trace, named; nothing delivered, no billed turn)`, JSON.stringify(((await chatMsgs()) || []).slice(-4)) + '\n' + (journal || '').split('\n').filter((l) => /\[browser\] .*(takeover|took over)/.test(l)).slice(-3).join('\n'));
+      ok(gateOf(took8) && gateOf(tcard8) && tcard8.length === 1 && gateOf(/The user took over your browser; 1 operation was interrupted: wait\. Wait for the handback, then run it again\./.test(tcard8[0])) && verdictOf(/(^|\s)VibeSpace · The user took over your browser/.test(tcard8[0])), `⑧ the TAKEOVER TELLS: the conversation shows VibeSpace's card at once — "${tcard8 ? tcard8[0].slice(0, 220) : 'none'}" (the agent's \`wait\`, in flight on the trace, named; nothing delivered, no billed turn)`, JSON.stringify(((await chatMsgs()) || []).slice(-4)) + '\n' + (journal || '').split('\n').filter((l) => /\[browser\] .*(takeover|took over)/.test(l)).slice(-3).join('\n'));
       const w8 = await wait8;
-      ok(!w8.ok && /\[browser_interrupted\]/.test(w8.stderr) && /The user took over your window of this browser — your operation was interrupted/.test(w8.stderr) && /ran to its end/.test(w8.stderr), '⑧ the `wait` the takeover caught ends [browser_interrupted] (exit 1): THE sentence, and — the ephemeral browser has no proxy — that it ran to its end while the user drove', (w8.stderr || '').slice(-500));
+      ok(!w8.ok && gateOf(/\[browser_interrupted\]/.test(w8.stderr)) && gateOf(/The user took over your window of this browser — your operation was interrupted/.test(w8.stderr)) && verdictOf(/ran to its end/.test(w8.stderr)), '⑧ the `wait` the takeover caught ends [browser_interrupted] (exit 1): THE sentence, and — the ephemeral browser has no proxy — that it ran to its end while the user drove', (w8.stderr || '').slice(-500));
       const jHb9 = journal.length;
       await q('L.send({ type: "handback" }); return true;');
       const toast9 = await (async () => { for (let i = 0; i < 30; i++) { const t = await evaluate(`(() => { const s = document.getElementById('global-toasts'); return s ? s.textContent : ''; })()`); if (/it was told to re-run: wait/.test(t)) return t; await sleep(100); } return null; })();
-      ok(!!toast9 && /Control handed back to the agent — it was told to re-run: wait/.test(toast9), `⑧ the Hand back's toast says what the agent was told to re-run: "${toast9 ? toast9.replace(/\s+/g, ' ').slice(-120) : 'none'}"`);
+      ok(!!toast9 && verdictOf(/Control handed back to the agent — it was told to re-run: wait/.test(toast9)), `⑧ the Hand back's toast says what the agent was told to re-run: "${toast9 ? toast9.replace(/\s+/g, ' ').slice(-120) : 'none'}"`);
       await handedBack(jHb9); // integration 2.369.192: the Hand back's own records, never a 900 ms nap
       const pc9 = await fetch(senv.VIBESPACE_API + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + senv.VIBESPACE_SESSION_TOKEN } }).then((r) => r.json()).catch((e) => ({ error: e.message }));
       const ctx9 = String((pc9 && pc9.context) || '');
       ok((ctx9.match(/Re-run what was interrupted: wait/g) || []).length === 1 && (ctx9.match(/The user handed your browser back to you after/g) || []).length === 1, '⑧ …and its explicit Hand back reminds the agent ONCE: "Re-run what was interrupted: wait" in its next prompt (one carrier — never the stash AND a notice)', ctx9.slice(0, 700));
       const hcard9 = await (async () => { for (let i = 0; i < 40; i++) { const c = ((await chatMsgs()) || []).filter((t) => /Re-run what was interrupted: wait/.test(t)); if (c.length) return c; await sleep(150); } return null; })();
-      ok(hcard9 && hcard9.length === 1, '⑧ …the words the agent was given show in the conversation once (the held delivery\'s card at the drain)', JSON.stringify(((await chatMsgs()) || []).slice(-3)));
+      ok(gateOf(hcard9) && hcard9.length === 1, '⑧ …the words the agent was given show in the conversation once (the held delivery\'s card at the drain)', JSON.stringify(((await chatMsgs()) || []).slice(-3)));
       const KO = path.join(wt, 'src/lib/keyboard-owner.js');
       const koSrc = fs.readFileSync(KO, 'utf8');
       const mark = 'export function keyboardOwner() {\n';
@@ -2119,11 +2119,11 @@ await (async () => {
         try { await evaluate('window.app.ready'); } catch { }
       };
       try {
-        if (!ok(built, '⑥ control: the neutered client was rebuilt')) return;
+        if (!ok(verdictOf(built), '⑥ control: the neutered client was rebuilt')) return;
         await send('Page.navigate', { url: `http://127.0.0.1:${PORT5}/` });
         let up = false; for (let i = 0; i < 160 && !up; i++) { try { up = await evaluate('!!(window.app && window.app.wm && window.app.sidebar)'); } catch { } if (!up) await sleep(250); }
         await evaluate('window.app.ready');
-        if (!ok(up, '⑥ control: the neutered client booted')) return;
+        if (!ok(verdictOf(up), '⑥ control: the neutered client booted')) return;
         await evaluate(`(() => { if (![...window.app.wm.windows.values()].some((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(sid)})) window.app.openBrowserLive({ sessionId: ${JSON.stringify(sid)} }); return true; })()`);
         await (async () => { for (let i = 0; i < 100; i++) { if (await q('return !!(L && L.state().frames >= 1 && L.geometry())')) return; await sleep(150); } })();
         await q('L.send({ type: "takeover" }); return true;');
@@ -2139,7 +2139,7 @@ await (async () => {
         const compC = await (async () => { let last = null; const t0 = Date.now(); while (Date.now() - t0 < 8000) { const v = await evaluate(`(() => { ${composerQ} return ta ? ta.value : null; })()`); if (v && v === last) return v; last = v; await sleep(100); } return last; })();
         const spoke = await until(() => (newest.get('kbd:kb1') || { q: 0 }).q > qEnd, 5000, 25);
         const sentAfterC = await q('return L.state().sent');
-        ok(!hitC.lost && stC.after1.onComposer && compC === 'tomsmith' && spoke && sentAfterC === sentC && kbds.get('kb1') === before,
+        ok(!hitC.lost && gateOf(stC.after1.onComposer) && compC === 'tomsmith' && gateOf(spoke) && sentAfterC === sentC && kbds.get('kb1') === before,
           `⑥ NEGATIVE CONTROL (the keyboard owner neutered — the pre-fix client): the attach puts the caret in the composer and "tomsmith" lands in the CHAT COMPOSER (${JSON.stringify(compC)}) while the page keeps ${JSON.stringify(kbds.get('kb1'))} — the study's password-in-the-chat-box`, JSON.stringify({ hitC, stC, compC, page: kbds.get('kb1'), pageSpokeAfter: spoke, viewSent: sentAfterC - sentC }));
         await evaluate(`(() => { ${composerQ} if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } return true; })()`); // never sent: cleared in place
         await q('L.send({ type: "handback" }); return true;');
@@ -2160,7 +2160,7 @@ await (async () => {
       wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: D5, cols: 80, rows: 24, reqId: 'r5-' + shape.key, name: 'live-' + shape.key }));
       await until(() => msgs.filter((m) => m.type === 'created').length > nCreated, 20000);
       const created = msgs.filter((m) => m.type === 'created').length > nCreated ? msgs.filter((m) => m.type === 'created').at(-1) : null;
-      if (!ok(created && created.sessionId, `⑤ ${shape.name}: a chat session was created`, journal.slice(-500))) continue;
+      if (!ok(gateOf(created) && verdictOf(created.sessionId), `⑤ ${shape.name}: a chat session was created`, journal.slice(-500))) continue;
       createdIds.push(created.sessionId);
       // verify r5 (B-b122 class): the fake `claude` writes its env with a shell `env > $$.env` — the file EXISTS
       // (truncated, empty) before env finishes writing it; wait for the SETTLE marker (the pair the assert reads), not
@@ -2173,21 +2173,21 @@ await (async () => {
       const senv = {}; for (const line of fs.readFileSync(path.join(ENVS, envFile), 'utf8').split('\n')) { const i = line.indexOf('='); if (i > 0) senv[line.slice(0, i)] = line.slice(i + 1); }
       const pairs = Object.fromEntries(Object.entries(senv).filter(([k]) => k.startsWith('AGENT_BROWSER_')));
       if (pairs.AGENT_BROWSER_SESSION) sessionNames.add(pairs.AGENT_BROWSER_SESSION);
-      if (!ok(pairs.AGENT_BROWSER_SESSION && senv.VIBESPACE_SESSION_TOKEN && senv.VIBESPACE_API, `⑤ ${shape.name}: the session was spawned with its own browser pairs (rung ${senv.VIBESPACE_BROWSER_VARIANT || '?'})`, JSON.stringify(Object.keys(pairs)))) continue;
+      if (!ok(gateOf(pairs.AGENT_BROWSER_SESSION) && gateOf(senv.VIBESPACE_SESSION_TOKEN) && verdictOf(senv.VIBESPACE_API), `⑤ ${shape.name}: the session was spawned with its own browser pairs (rung ${senv.VIBESPACE_BROWSER_VARIANT || '?'})`, JSON.stringify(Object.keys(pairs)))) continue;
       const vb = (args, timeout = 120000) => new Promise((resolve) => { const { execFile } = require('child_process'); execFile(process.execPath, [path.join(wt, 'data/bin/vibespace-browser'), ...args], { env: { ...baseEnv, ...pairs, VIBESPACE_API: senv.VIBESPACE_API, VIBESPACE_SESSION_TOKEN: senv.VIBESPACE_SESSION_TOKEN }, timeout, encoding: 'utf8' }, (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || ''), code: err && err.code })); });
       const tag = shape.key + '1';
       const opened = await vb(['open', `http://127.0.0.1:${CP}/grid?n=${tag}`]);
       if (!opened.ok && /exited early|DevToolsActivePort|crash|exit code|Missing X server|cannot open display/i.test(opened.stderr + opened.stdout)) { skip(`⑤ ${shape.name}: the real chromium did not launch here: ${(opened.stderr || opened.stdout).replace(/\s+/g, ' ').slice(0, 200)}`); continue; }
-      if (!ok(opened.ok, `⑤ ${shape.name}: \`vibespace-browser open\` started the session's own ephemeral browser on the grid page`, (opened.stderr || opened.stdout).slice(0, 400))) continue;
+      if (!ok(verdictOf(opened.ok), `⑤ ${shape.name}: \`vibespace-browser open\` started the session's own ephemeral browser on the grid page`, (opened.stderr || opened.stdout).slice(0, 400))) continue;
       await until(() => vps.has(tag), 20000, 100);
       const truth = vps.get(tag);
-      if (!ok(truth && truth.w > 0, `⑤ ${shape.name}: the page reports its own viewport (${truth ? truth.w + '×' + truth.h + ' @' + truth.dpr : 'none'})`)) continue;
+      if (!ok(gateOf(truth) && truth.w > 0, `⑤ ${shape.name}: the page reports its own viewport (${truth ? truth.w + '×' + truth.h + ' @' + truth.dpr : 'none'})`)) continue;
       // the live view
       const opened2 = await evaluate(`(() => { const w = window.app.openBrowserLive({ sessionId: ${JSON.stringify(created.sessionId)} }); w.gridBounds = null; return !!(w && w._browserLive); })()`);
-      ok(opened2, `⑤ ${shape.name}: the live view opened`);
+      ok(verdictOf(opened2), `⑤ ${shape.name}: the live view opened`);
       const q = (js) => evaluate(`(() => { const w = [...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(created.sessionId)})[0]; const L = w && w._browserLive; ${js} })()`);
       const live = await (async () => { for (let i = 0; i < 150; i++) { const st = await q('const g = L && L.geometry(); return L ? { frames: L.state().frames, nat: L.img().naturalWidth, src: g && g.source } : null'); if (st && st.frames >= 1 && st.nat > 0 && st.src === 'page') return st; await sleep(200); } return markTimedOut(await q('const g = L && L.geometry(); return L ? { frames: L.state().frames, nat: L.img().naturalWidth, src: g && g.source, err: L.state().error } : null'), 150 * 200, '⑤ the frames of the page'); })();   // a wait that runs out says so (主开发 r1141; test-ci-gate §2p)
-      if (!ok(live && live.frames >= 1 && live.src === 'page', `⑤ ${shape.name}: frames drawn and the page's own viewport read (geometry source "${live && live.src}")${live && live.timedOut ? ` — THE STATE NEVER CAME: ${live.timedOut}, so this red is that, not a verdict on the product` : ''}`, JSON.stringify(live))) continue;
+      if (!ok(gateOf(live) && live.frames >= 1 && live.src === 'page', `⑤ ${shape.name}: frames drawn and the page's own viewport read (geometry source "${live && live.src}")${live && live.timedOut ? ` — THE STATE NEVER CAME: ${live.timedOut}, so this red is that, not a verdict on the product` : ''}`, JSON.stringify(live))) continue;
       const geo0 = await q('return { g: L.geometry(), claim: L.frameClaim() }');
       ok(Math.abs(geo0.g.cssW - truth.w) <= 1 && Math.abs(geo0.g.cssH - truth.h) <= 1, `⑤ ${shape.name}: the view's page size ${Math.round(geo0.g.cssW)}×${Math.round(geo0.g.cssH)} IS the page's (${truth.w}×${truth.h}); the picture is ${geo0.g.picW}×${geo0.g.picH}; the stream's metadata claims ${geo0.claim && geo0.claim.width}×${geo0.claim && geo0.claim.height}`);
       shape.picture = `${geo0.g.picW}×${geo0.g.picH}`; shape.page = `${truth.w}×${truth.h}`; shape.claim = geo0.claim ? `${geo0.claim.width}×${geo0.claim.height}` : '?';
@@ -2196,16 +2196,16 @@ await (async () => {
       {
         const queued = () => msgs.some((m) => m.type === 'msg' && m.sessionId === created.sessionId && m.op === 'edit' && m.fields && m.fields.permission && m.fields.permission.requestId === 'req_lj2_click' && !m.fields.permission.resolved);
         await until(queued, 15000, 50);
-        ok(queued(), `⑥ ${shape.name}: the agent's approval for \`vibespace-browser click @e3\` is pending on the server (its card published) BEFORE the takeover`);
+        ok(verdictOf(queued()), `⑥ ${shape.name}: the agent's approval for \`vibespace-browser click @e3\` is pending on the server (its card published) BEFORE the takeover`);
       }
       await q('L.send({ type: "takeover" }); return true;');
-      if (!ok(await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine')) return true; await sleep(100); } return false; })(), `⑤ ${shape.name}: Take over — this viewer drives`)) continue;
+      if (!ok(verdictOf(await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine')) return true; await sleep(100); } return false; })()), `⑤ ${shape.name}: Take over — this viewer drives`)) continue;
       {
         // ⑥ lane J r2: the approval the agent queued at spawn (a browser `click`) is answered STALE by this takeover
         const denied = () => { try { return fs.readFileSync(stdinFile, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((x) => x && x.type === 'control_response' && x.response && x.response.request_id === 'req_lj2_click') || null; } catch { return null; } };
         await until(() => !!denied(), 8000, 100);
         const d = denied();
-        ok(d && d.response.response.behavior === 'deny' && /^browser_paused — the user took over your browser before this step ran, so it did NOT run/.test(d.response.response.message),
+        ok(gateOf(d) && d.response.response.behavior === 'deny' && verdictOf(/^browser_paused — the user took over your browser before this step ran, so it did NOT run/.test(d.response.response.message)),
           `⑥ ${shape.name}: the TAKEOVER answered the approval the agent queued before it (vibespace-browser click @e3) — the CLI's stdin received a deny naming browser_paused, never a stale Allow`, d ? JSON.stringify(d).slice(0, 300) : `stdin: ${fs.existsSync(stdinFile) ? JSON.stringify(fs.readFileSync(stdinFile, 'utf8').slice(0, 300)) : 'no file'} · journal: ${journal.split('\n').filter((l) => /approval|stale|took over|handed back/i.test(l)).slice(-6).join(' | ').slice(0, 1500)}`);
       }
       /** One click where page point (px, py) is DRAWN, by the judge's own object-fit arithmetic over the page's reported viewport. */
@@ -2257,11 +2257,11 @@ await (async () => {
       }
       const mine = results.filter((r) => r.kind === 'combo' && r.shape === shape.name);
       console.log(`    ⑤ ${shape.name}: page ${shape.page}, picture ${shape.picture}, metadata claims ${shape.claim} — click on grid cell (10,5) = page (525,275):\n` + mine.map((r) => `      DSF ${r.dsf} · UI ${Math.round(r.scale * 100)}% · window ${r.win}: FIXED ${r.fixed.lost ? 'LOST' : `(${r.fixed.x},${r.fixed.y}) off ${r.fixed.off.toFixed(1)}px`} · PRE-FIX ${r.pre.dropped ? 'dropped (mapped outside the picture)' : r.pre.lost ? 'LOST' : `(${r.pre.x},${r.pre.y}) off ${r.pre.off.toFixed(0)}px`}`).join('\n'));
-      ok(mine.length === 8 && mine.every((r) => !r.fixed.lost && r.fixed.off <= 2), `⑤ ${shape.name}: at DPR 2/1 × UI scale 100/125 % × a 1400×800 and a 700×900 window, the click lands within 2 px of the drawn grid cell (worst ${Math.max(...mine.map((r) => (r.fixed.lost ? Infinity : r.fixed.off))).toFixed(1)} px)`, JSON.stringify(mine.filter((r) => r.fixed.lost || r.fixed.off > 2)));
+      ok(mine.length === 8 && verdictOf(mine.every((r) => !r.fixed.lost && r.fixed.off <= 2)), `⑤ ${shape.name}: at DPR 2/1 × UI scale 100/125 % × a 1400×800 and a 700×900 window, the click lands within 2 px of the drawn grid cell (worst ${Math.max(...mine.map((r) => (r.fixed.lost ? Infinity : r.fixed.off))).toFixed(1)} px)`, JSON.stringify(mine.filter((r) => r.fixed.lost || r.fixed.off > 2)));
       // a rung proves the old mapping wrong when its press DROPS, or lands where the old geometry predicts (within 3 px) and that point is
       // off the cell by more than twice the fixed mapping's 2-px tolerance — the claim-vs-picture ratio's own miss, measured per rung
       const oldWrong = (p) => p.dropped || (!p.lost && p.exp > 4 && Math.abs(p.off - p.exp) <= 3);
-      ok(mine.every((r) => oldWrong(r.pre)), `⑤ ${shape.name}: control — the PRE-FIX mapping (the claim ${[...new Set(mine.map((r) => r.pre.claim).filter(Boolean))].join(' / ') || shape.claim} over the picture ${[...new Set(mine.map((r) => r.pre.pic).filter(Boolean))].join(' / ')}) lands where its own geometry puts it — off the cell by that geometry's miss (each rung > 4 px, within 3 px of its prediction) — or drops the click (rungs ${mine.map((r) => (r.pre.dropped ? 'dropped' : r.pre.lost ? 'LOST' : `${r.pre.off.toFixed(0)}≈${r.pre.exp.toFixed(0)}`)).join(', ')})`, JSON.stringify(mine.map((r) => r.pre)));
+      ok(verdictOf(mine.every((r) => oldWrong(r.pre))), `⑤ ${shape.name}: control — the PRE-FIX mapping (the claim ${[...new Set(mine.map((r) => r.pre.claim).filter(Boolean))].join(' / ') || shape.claim} over the picture ${[...new Set(mine.map((r) => r.pre.pic).filter(Boolean))].join(' / ')}) lands where its own geometry puts it — off the cell by that geometry's miss (each rung > 4 px, within 3 px of its prediction) — or drops the click (rungs ${mine.map((r) => (r.pre.dropped ? 'dropped' : r.pre.lost ? 'LOST' : `${r.pre.off.toFixed(0)}≈${r.pre.exp.toFixed(0)}`)).join(', ')})`, JSON.stringify(mine.map((r) => r.pre)));
       if (shape.key === 'hl') {
         // the ephemeral browser's viewport after the agent opens a tab and after it resizes the page
         await q('L.send({ type: "handback" }); return true;');
@@ -2272,7 +2272,7 @@ await (async () => {
         await until(() => vps.get('hl2') && vps.get('hl2').w === 1000, 15000, 100);
         const tv = vps.get('hl2');
         const settled = await (async () => { for (let i = 0; i < 100; i++) { const g = await q('const g = L.geometry(); return g && { w: g.cssW, h: g.cssH, src: g.source, nat: L.img().naturalWidth }'); if (g && tv && Math.abs(g.w - tv.w) <= 1 && Math.abs(g.h - tv.h) <= 1 && g.src !== 'picture-stale') return g; await sleep(150); } return null; })();
-        ok(tabRes.ok && setRes.ok && tv && tv.w === 1000 && settled, `⑤ a NEW TAB then \`set viewport 1000 700\`: the view re-reads the page (${settled ? Math.round(settled.w) + '×' + Math.round(settled.h) + ' from ' + settled.src : 'no'}; the page says ${tv ? tv.w + '×' + tv.h : '?'})`, JSON.stringify({ tab: tabRes.stderr.slice(0, 200), set: setRes.stderr && setRes.stderr.slice(0, 200) }));
+        ok(gateOf(tabRes.ok) && gateOf(setRes.ok) && gateOf(tv) && tv.w === 1000 && verdictOf(settled), `⑤ a NEW TAB then \`set viewport 1000 700\`: the view re-reads the page (${settled ? Math.round(settled.w) + '×' + Math.round(settled.h) + ' from ' + settled.src : 'no'}; the page says ${tv ? tv.w + '×' + tv.h : '?'})`, JSON.stringify({ tab: tabRes.stderr.slice(0, 200), set: setRes.stderr && setRes.stderr.slice(0, 200) }));
         await q('L.send({ type: "takeover" }); return true;');
         await untilQ(q, 'return L.state().mode === "takeover" && L.state().mine'); // the takeover's own mode record
         const after = await clickOnce({ dsf: 2, scale: 1.25, win: [700, 900], n: 'hl2' });
@@ -2301,4 +2301,4 @@ await legSharedFreeze(); // ⑩ lane browser-shared-profile-freeze
 await legAttach(); // ⑨ lane one-browser-b1
 await legPasskeyRoads(); // ⑪ lane passkey-browse-yourself
 await legTypedKinds(); // ⑫ lane digit-zero
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

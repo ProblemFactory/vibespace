@@ -42,7 +42,7 @@ import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0, skipped = 0;
-const ok = (name, cond, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : ''}`); } return !!cond; };
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : ''}`); } return !!cond; };
 const skip = (why) => { skipped++; console.log(`  - SKIP ${why}`); };
 const done = () => { console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`); process.exit(fail ? 1 : 0); };
 const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));
@@ -100,7 +100,7 @@ const SAMPLER = makeSampler({ roots, outside });
 // name, never a silent «none seen» (③ before the driver's close, ⑤ before its verdict, the positive control's two). the judgement is turned
 // off for the placed red control alone, and ⑥ reads this file's own text so that a third place cannot take a final sample around the door.
 const finalVerdict = (read, where) => ({ pass: read === true, name: `the final sample ${where} READ its socket listing (a failed listing is never «none seen»)` });
-const finalSample = async (where, s = SAMPLER, { judge = true } = {}) => { const read = await s.final(); if (judge) { const v = finalVerdict(read, where); ok(v.name, v.pass, { where, read, failed: s.stats().failed }); } return read; };
+const finalSample = async (where, s = SAMPLER, { judge = true } = {}) => { const read = await s.final(); if (judge) { const v = finalVerdict(read, where); ok(v.name, verdictOf(v.pass), { where, read, failed: s.stats().failed }); } return read; };
 sampler = SAMPLER.interval;
 
 // ── the minted tailnet ──
@@ -220,7 +220,7 @@ console.log('① KERNEL mode — the attach road\'s argv + the PAC → the hub\'
   fs.mkdirSync(path.join(ROOT, 'dk'), { recursive: true });
   const door = DOOR.create({ dataDir: path.join(ROOT, 'dk'), reach: () => reach, dial, cacheMs: 0, log: quietLog });
   const { v, av, br } = await profileChrome('kernel', door, [RULES, '--ignore-certificate-errors']);
-  ok('the profile\'s argv carries THE switch whole (the builder\'s census passed it; r3: the PAC on its token path)', v.on && av.argv.includes(v.arg) && /^--proxy-pac-url=http:\/\/127\.0\.0\.1:\d+\/tailnet-[0-9a-f]{32}\.pac$/.test(v.arg), v);
+  ok('the profile\'s argv carries THE switch whole (the builder\'s census passed it; r3: the PAC on its token path)', gateOf(v.on) && gateOf(av.argv.includes(v.arg)) && verdictOf(/^--proxy-pac-url=http:\/\/127\.0\.0\.1:\d+\/tailnet-[0-9a-f]{32}\.pac$/.test(v.arg)), v);
   const a = await br.open(`http://peer-alpha:${PEER_PORT}/`);
   const b = await br.open(`http://peer-alpha.${SUF}:${PEER_PORT}/`);
   ok('`http://peer-alpha:<port>/` and its FQDN LOAD (the door resolved the name from the plugin\'s table — no resolver knows it)', a.text === `PEER-OK peer-alpha:${PEER_PORT}` && b.text === `PEER-OK peer-alpha.${SUF}:${PEER_PORT}`, { a, b });
@@ -236,11 +236,11 @@ console.log('① KERNEL mode — the attach road\'s argv + the PAC → the hub\'
     const size = await br.shot(path.join(SHOTS, 'kernel-peer-down-https.png'));
     const told = door.missFor(`https://peer-beta:${CLOSED}/`, { failed: true, cause: dn.errorText, launched: { arg: v.arg, mode: 'kernel', why: null } });
     ok('N7 — a device that is DOWN over https: the person sees Chrome\'s own tunnel error (screenshotted); the agent\'s note names the cause the door saw — «peer-beta answered through Tailscale, but refused the connection on port N»',
-      dn.errorText === 'net::ERR_TUNNEL_CONNECTION_FAILED' && size > 1000 && !!told && told.why === 'refused' && told.text.startsWith(`peer-beta answered through Tailscale, but refused the connection on port ${CLOSED}`), { dn, told });
+      dn.errorText === 'net::ERR_TUNNEL_CONNECTION_FAILED' && size > 1000 && !!told && told.why === 'refused' && verdictOf(told.text.startsWith(`peer-beta answered through Tailscale, but refused the connection on port ${CLOSED}`)), { dn, told });
   }
   const dh = await br.open(`http://peer-beta:${CLOSED}/`);
   const sizeH = await br.shot(path.join(SHOTS, 'kernel-peer-down-http.png'));
-  ok('N7 — the same over http: the door\'s answer IS LAW 2\'s page by the cause, rendered by Chrome (screenshotted)', dh.text.startsWith(`peer-beta answered through Tailscale, but refused the connection on port ${CLOSED}`) && sizeH > 1000, dh);
+  ok('N7 — the same over http: the door\'s answer IS LAW 2\'s page by the cause, rendered by Chrome (screenshotted)', gateOf(dh.text.startsWith(`peer-beta answered through Tailscale, but refused the connection on port ${CLOSED}`)) && sizeH > 1000, dh);
   await br.close();
   if (TLS_PORT) {
     // r3 N6: a Chrome that CHECKS certificates (no --ignore-certificate-errors — the person's live view) on the self-signed device
@@ -249,7 +249,7 @@ console.log('① KERNEL mode — the attach road\'s argv + the PAC → the hub\'
     const sizeC = await bc.shot(path.join(SHOTS, 'kernel-cert-warning-chrome.png'));
     const toldC = door.missFor(`https://peer-alpha:${TLS_PORT}/`, { failed: true, cause: cw.errorText, launched: { arg: vc.arg, mode: 'kernel', why: null } });
     ok('r3 N6 — a self-signed device in a Chrome that checks certificates: Chrome\'s OWN warning (net::ERR_CERT_*; screenshotted — the person can accept it in the live view); the agent\'s note says exactly that — «Chrome shows a certificate warning: accept it in the live view, or give the device a trusted certificate (tailscale cert)», never «this browser opens only…»',
-      /^net::ERR_CERT_/.test(String(cw.errorText)) && sizeC > 1000 && !!toldC && toldC.why === 'cert-warning' && toldC.text.startsWith('peer-alpha answered through Tailscale, but with a certificate Chrome does not trust (self-signed?) — Chrome shows a certificate warning: accept it in the live view, or give the device a trusted certificate (tailscale cert)'), { cw, toldC });
+      gateOf(/^net::ERR_CERT_/.test(String(cw.errorText))) && sizeC > 1000 && !!toldC && toldC.why === 'cert-warning' && verdictOf(toldC.text.startsWith('peer-alpha answered through Tailscale, but with a certificate Chrome does not trust (self-signed?) — Chrome shows a certificate warning: accept it in the live view, or give the device a trusted certificate (tailscale cert)')), { cw, toldC });
     await bc.close();
   } else skip('no openssl: the certificate-warning leg');
   await door.close();
@@ -262,14 +262,14 @@ console.log('② USERSPACE mode — the PAC sends ONLY the devices (names + addr
   const { v, br } = await profileChrome('userspace', door, [RULES, '--ignore-certificate-errors']);
   const s0 = socksSeen.length;
   const a = await br.open(`http://peer-alpha:${PEER_PORT}/`);
-  ok('`http://peer-alpha:<port>/` LOADS through the plugin\'s SOCKS5 (the stub was handed the NAME — tailscaled resolves it)', v.on && /^PEER-OK /.test(a.text) && socksSeen.slice(s0).includes(`peer-alpha:${PEER_PORT}`), { a, seen: socksSeen.slice(s0) });
+  ok('`http://peer-alpha:<port>/` LOADS through the plugin\'s SOCKS5 (the stub was handed the NAME — tailscaled resolves it)', gateOf(v.on) && gateOf(/^PEER-OK /.test(a.text)) && verdictOf(socksSeen.slice(s0).includes(`peer-alpha:${PEER_PORT}`)), { a, seen: socksSeen.slice(s0) });
   const ad = await br.open(`http://${PEER_IP}:${PEER_PORT}/`);
-  ok('a device\'s tailnet ADDRESS loads through it too (the PAC lists the devices\' addresses — never all of 100.64/10)', /^PEER-OK /.test(ad.text) && socksSeen.includes(`${PEER_IP}:${PEER_PORT}`), ad);
-  if (TLS_PORT) { const t = await br.open(`https://peer-alpha.${SUF}:${TLS_PORT}/`); ok('`https://<device FQDN>:<port>/` LOADS through it too', /^PEERTLS-OK /.test(t.text) && socksSeen.includes(`peer-alpha.${SUF}:${TLS_PORT}`), t); }
+  ok('a device\'s tailnet ADDRESS loads through it too (the PAC lists the devices\' addresses — never all of 100.64/10)', gateOf(/^PEER-OK /.test(ad.text)) && verdictOf(socksSeen.includes(`${PEER_IP}:${PEER_PORT}`)), ad);
+  if (TLS_PORT) { const t = await br.open(`https://peer-alpha.${SUF}:${TLS_PORT}/`); ok('`https://<device FQDN>:<port>/` LOADS through it too', gateOf(/^PEERTLS-OK /.test(t.text)) && verdictOf(socksSeen.includes(`peer-alpha.${SUF}:${TLS_PORT}`)), t); }
   const s1 = socksSeen.length;
   const f = await br.open(`http://${FUNNEL}:${PUB_PORT}/`);
   const p = await br.open(`http://public.example:${PUB_PORT}/`);
-  ok('a Funnel name and the public URL went DIRECT — the SOCKS5 stub saw ONLY the devices', f.text === `PUBLIC-OK ${FUNNEL}:${PUB_PORT}` && p.text === `PUBLIC-OK public.example:${PUB_PORT}` && socksSeen.slice(s1).length === 0 && socksSeen.every((x) => x.startsWith('peer-alpha') || x.startsWith(PEER_IP)), { f, p, seen: socksSeen });
+  ok('a Funnel name and the public URL went DIRECT — the SOCKS5 stub saw ONLY the devices', f.text === `PUBLIC-OK ${FUNNEL}:${PUB_PORT}` && p.text === `PUBLIC-OK public.example:${PUB_PORT}` && socksSeen.slice(s1).length === 0 && verdictOf(socksSeen.every((x) => x.startsWith('peer-alpha') || x.startsWith(PEER_IP))), { f, p, seen: socksSeen });
   await br.close(); await door.close();
 }
 
@@ -310,9 +310,9 @@ console.log('③ THE DRIVER\'S ROAD — the real agent-browser launches Chrome w
     await run(['close', '--all']);
     // the daemon this leg started: only a process whose cmdline names THIS leg's socket dir (never a pid by pattern alone)
     for (const d of await daemons()) { try { process.kill(d, 'SIGKILL'); } catch { } }
-    ok('the driver reads its ONE args line back with the switch whole (comma-free)', line.ok && V.driverArgsList(line.args).includes(v.arg), line);
-    ok('the real agent-browser\'s Chrome LOADS `http://peer-alpha:<port>/` — through the plugin\'s SOCKS5 (it saw the name)', o.ok && t.ok && /PEER-OK peer-alpha/.test(t.out) && socksSeen.slice(s0, s1).includes(`peer-alpha:${PEER_PORT}`), { o: o.out.slice(0, 300), t: t.out.slice(0, 300), seen: socksSeen.slice(s0) });
-    ok('…and the public URL DIRECT (the SOCKS5 stub saw nothing more)', o2.ok && /PUBLIC-OK/.test(t2.out) && socksSeen.length === s1, { o2: o2.out.slice(0, 300), t2: t2.out.slice(0, 300) });
+    ok('the driver reads its ONE args line back with the switch whole (comma-free)', gateOf(line.ok) && verdictOf(V.driverArgsList(line.args).includes(v.arg)), line);
+    ok('the real agent-browser\'s Chrome LOADS `http://peer-alpha:<port>/` — through the plugin\'s SOCKS5 (it saw the name)', gateOf(o.ok) && gateOf(t.ok) && gateOf(/PEER-OK peer-alpha/.test(t.out)) && verdictOf(socksSeen.slice(s0, s1).includes(`peer-alpha:${PEER_PORT}`)), { o: o.out.slice(0, 300), t: t.out.slice(0, 300), seen: socksSeen.slice(s0) });
+    ok('…and the public URL DIRECT (the SOCKS5 stub saw nothing more)', gateOf(o2.ok) && gateOf(/PUBLIC-OK/.test(t2.out)) && socksSeen.length === s1, { o2: o2.out.slice(0, 300), t2: t2.out.slice(0, 300) });
     ok('⑤ the sampler watched the driver\'s daemon + its Chrome (found by this leg\'s socket dir in their environment)', roots.size > r0, { roots: roots.size, r0 });
     try { fs.rmSync(sock, { recursive: true, force: true }); } catch { }
     await door.close();
@@ -337,7 +337,7 @@ console.log('④ LAW 2\'s page in the in-page browser (/proxy) AFTER the ordinar
     lang = l;
     const r = await br.open(`http://127.0.0.1:${EMB}/proxy/https://peer-alpha:8006/`);
     const size = await br.shot(path.join(SHOTS, `embedded-plugin-off-${l}.png`));
-    ok(`the in-page browser, the person's own device with the plugin off (${l}): «${want[l]}…» — by name, never «cannot resolve»; the error's own text under it`, r.text.startsWith(want[l]) && r.text.includes('ENOTFOUND') && !/cannot resolve|无法解析|解決できません/.test(r.text) && size > 1000, r);
+    ok(`the in-page browser, the person's own device with the plugin off (${l}): «${want[l]}…» — by name, never «cannot resolve»; the error's own text under it`, gateOf(r.text.startsWith(want[l])) && gateOf(r.text.includes('ENOTFOUND')) && !/cannot resolve|无法解析|解決できません/.test(r.text) && size > 1000, r);
   }
   // r5: the person's own device with «Reach tailnet hosts from browsers» OFF (the plugin up): the row's words — the person's
   const rowOff = { en: 'peer-alpha is a Tailscale name — reaching Tailscale devices from browsers is off: turn on «Reach tailnet hosts from browsers» in ⚙ → Plugins → Tailscale', zh: 'peer-alpha 是 Tailscale 里的名字 — 从浏览器访问 Tailscale 设备已关闭：在 ⚙ → 插件 → Tailscale 打开「从浏览器访问 tailnet 里的机器」', ja: 'peer-alpha は Tailscale の名前です — ブラウザーから Tailscale のデバイスへの接続がオフです：⚙ → プラグイン → Tailscale で「ブラウザーから tailnet のマシンに接続」をオンにしてください' };
@@ -346,19 +346,19 @@ console.log('④ LAW 2\'s page in the in-page browser (/proxy) AFTER the ordinar
     lang = l;
     const r = await br.open(`http://127.0.0.1:${EMB}/proxy/https://peer-alpha:8006/`);
     const size = await br.shot(path.join(SHOTS, `embedded-row-off-${l}.png`));
-    ok(`r5 — the in-page browser, the person's own device with «Reach tailnet hosts from browsers» OFF (${l}): «${rowOff[l]}» — the row by its own label, no jargon, never «online»; the error's own text under it (screenshotted)`, r.text.startsWith(rowOff[l]) && r.text.includes('ENOTFOUND') && !/road|的路|経路|online|在线|オンライン/.test(r.text.split('\n')[0]) && size > 1000, r);
+    ok(`r5 — the in-page browser, the person's own device with «Reach tailnet hosts from browsers» OFF (${l}): «${rowOff[l]}» — the row by its own label, no jargon, never «online»; the error's own text under it (screenshotted)`, gateOf(r.text.startsWith(rowOff[l])) && gateOf(r.text.includes('ENOTFOUND')) && !/road|的路|経路|online|在线|オンライン/.test(r.text.split('\n')[0]) && size > 1000, r);
   }
   lang = 'en';
   reach = { ...UP, mode: 'userspace' };
   const r2 = await br.open(`http://127.0.0.1:${EMB}/proxy/https://ghost.${SUF}/`);
   await br.shot(path.join(SHOTS, 'embedded-not-a-device-en.png'));
-  ok('the in-page browser, a name no device holds (the ordinary road failed first): «ghost.… is not a device on your tailnet (known: peer-alpha, peer-beta, hub)» — the list on the owner\'s own page', r2.text.startsWith(`ghost.${SUF} is not a device on your tailnet (known: peer-alpha, peer-beta, hub)`), r2);
+  ok('the in-page browser, a name no device holds (the ordinary road failed first): «ghost.… is not a device on your tailnet (known: peer-alpha, peer-beta, hub)» — the list on the owner\'s own page', verdictOf(r2.text.startsWith(`ghost.${SUF} is not a device on your tailnet (known: peer-alpha, peer-beta, hub)`)), r2);
   if (TLS_PORT) {
     reach = { ...UP, mode: 'kernel' };
     const r3 = await br.open(`http://127.0.0.1:${EMB}/proxy/https://peer-alpha:${TLS_PORT}/`);
     await br.shot(path.join(SHOTS, 'embedded-untrusted-cert-en.png'));
     ok('N5 + r3 N6 — the user\'s own shape (a self-signed certificate): «peer-alpha answered through Tailscale, but with a certificate the in-page browser does not trust (self-signed?) — it cannot open it from here: give the device a trusted certificate (tailscale cert)»; the detail line the code + plain words (no Node hint, no backticks) — never «is that device online?»',
-      r3.text.startsWith('peer-alpha answered through Tailscale, but with a certificate the in-page browser does not trust (self-signed?) — it cannot open it from here: give the device a trusted certificate (tailscale cert)') && /DEPTH_ZERO_SELF_SIGNED_CERT — self-signed certificate/.test(r3.text) && !/use-system-ca|Node\.js|`|online\?/.test(r3.text), r3);
+      gateOf(r3.text.startsWith('peer-alpha answered through Tailscale, but with a certificate the in-page browser does not trust (self-signed?) — it cannot open it from here: give the device a trusted certificate (tailscale cert)')) && gateOf(/DEPTH_ZERO_SELF_SIGNED_CERT — self-signed certificate/.test(r3.text)) && !/use-system-ca|Node\.js|`|online\?/.test(r3.text), r3);
   }
   {
     // ④ CONTROL (open()'s tie to its own navigation): a page whose words come 1.5 s after its first bytes, opened with a STALE
@@ -427,7 +427,7 @@ console.log('⑥ CONTROL: the sampler with its sample HELD (a stand-in `ss` that
   withKid.stop(); withoutKid.stop();
   const readWith = await finalSample('of the positive control (its roots hold the child)', withKid), readWithout = await finalSample('of the negative control (its roots do not hold the child)', withoutKid);
   try { process.kill(kid.pid, 'SIGKILL'); } catch { } try { process.kill(other.pid, 'SIGKILL'); } catch { }
-  ok(`POSITIVE CONTROL: a child of the suite holding a socket connected to 192.0.2.1 (a documentation address; no packet sent) is SEEN outside the loopback by the sampler whose roots hold it (${said})`, said === 'held' && readWith === true && seen.some((x) => x.includes('192.0.2.1')), { said, readWith, seen: seen.slice(0, 3) });
+  ok(`POSITIVE CONTROL: a child of the suite holding a socket connected to 192.0.2.1 (a documentation address; no packet sent) is SEEN outside the loopback by the sampler whose roots hold it (${said})`, said === 'held' && readWith === true && verdictOf(seen.some((x) => x.includes('192.0.2.1'))), { said, readWith, seen: seen.slice(0, 3) });
   ok('…and NOT by a sampler whose roots do not hold that child (the walk decides what is the suite\'s)', readWithout === true && !unseen.some((x) => x.includes('192.0.2.1')), { readWithout, unseen: unseen.slice(0, 3) });
   // r4704 RED: a final sample whose listing FAILS (a stand-in `ss` that exits 1: placed, never load) is a failing line by the same verdict
   const failSs = path.join(dir, 'ss-fails'); fs.writeFileSync(failSs, '#!/bin/sh\nexit 1\n', { mode: 0o700 });
@@ -438,4 +438,4 @@ console.log('⑥ CONTROL: the sampler with its sample HELD (a stand-in `ss` that
   const ownText = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8'), finalsTaken = ownText.split('.fin' + 'al()').length - 1, unjudged = ownText.split('judge: ' + 'false').length - 1;
   ok(`every final sample goes through finalSample: the file's one call that takes a final sample is the door's (${finalsTaken}), and the judgement is turned off once, in the placed red (${unjudged})`, finalsTaken === 1 && unjudged === 1, { finalsTaken, unjudged });
 }
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

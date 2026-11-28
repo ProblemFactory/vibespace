@@ -28,7 +28,7 @@ const require = createRequire(import.meta.url);
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const MUT = mutantCopies('exit-call', REPO);
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -154,7 +154,7 @@ for (const c of CASES) {
     && (!c.live || words === c.live) && (!c.words || words.includes(c.words)) && (!c.out || outText.includes(c.out))
     && (!c.noSecret || (!outText.includes('s3cretpass') && outText.includes(`127.0.0.1:${DEAD_EXIT}`)))
     && card.exitCall.failed === (c.outcome !== 'ok') && card.exitCall.verb === (c.verb === 'run' ? 'run' : ['push', 'pull'].includes(c.verb) ? 'copy' : 'info');
-  ok(good, `${c.name}: ${c.verb} · ${c.machine || '(no machine named)'} · ${c.outcome}${c.live ? ' · words = the live card\'s' : ''}`, { p: p && { ...p, output: p.output.slice(0, 120) }, words, rc: r.code, content: r.content.slice(-300) });
+  ok(verdictOf(good), `${c.name}: ${c.verb} · ${c.machine || '(no machine named)'} · ${c.outcome}${c.live ? ' · words = the live card\'s' : ''}`, { p: p && { ...p, output: p.output.slice(0, 120) }, words, rc: r.code, content: r.content.slice(-300) });
 }
 { // int209: a lookup's words are OURS (no live card; the CLI prints a table) — every INFO_WORDS row is a zh + ja dictionary
   // key, the card carries {key, params} for the chat's t(), and filled they are exactly its English words
@@ -164,24 +164,24 @@ for (const c of CASES) {
   ok(keys.length === 12 && !missing.length, `int209: the ${keys.length} lookup words are zh + ja dictionary keys`, missing);
   const info = CASES.filter((c) => XC.INFO_VERBS.includes(c.verb)).map((c) => RESULTS[c.name].card);
   const fill = (w) => w.key.replace(/\{(\w+)\}/g, (_, k) => w.params[k]);
-  ok(info.length === 4 && info.every((c) => c.exitCall.words && keys.includes(c.exitCall.words.key) && c.content[0].text === fill(c.exitCall.words)), 'int209: a lookup card carries its words as a key + params (the chat translates them); filled, they are its English words', info.map((c) => c.exitCall.words));
+  ok(info.length === 4 && verdictOf(info.every((c) => c.exitCall.words && keys.includes(c.exitCall.words.key) && c.content[0].text === fill(c.exitCall.words))), 'int209: a lookup card carries its words as a key + params (the chat translates them); filled, they are its English words', info.map((c) => c.exitCall.words));
   const refused = XC.callWords({ kind: 'info', verb: 'runs', machine: '', ref: 'box1', said: 'no such machine' });
   ok(refused === "could not list this conversation's commands on box1 — no such machine", 'int209: a refused lookup keeps the hub\'s sentence after the dash', refused);
-  ok(RESULTS['run ok'].card && !('words' in RESULTS['run ok'].card.exitCall), "int209: a run card has no words key (its words are the live card's, as the hub wrote them)");
+  ok(gateOf(RESULTS['run ok'].card) && !('words' in RESULTS['run ok'].card.exitCall), "int209: a run card has no words key (its words are the live card's, as the hub wrote them)");
 }
 { // the decoded script, as the live card shows it: exitRun.cmd = the whole command, exitCmdBlock decodes it
   const c = RESULTS['cmd.exe + EncodedCommand (decoded on the card)'].card;
-  ok(c && c.exitRun && c.exitRun.cmd === PS && c.exitRun.merged === true, 'cmd.exe + EncodedCommand: the card carries the WHOLE command (decoded by the card, as live) and its output as one text', c && c.exitRun);
+  ok(gateOf(c) && gateOf(c.exitRun) && c.exitRun.cmd === PS && c.exitRun.merged === true, 'cmd.exe + EncodedCommand: the card carries the WHOLE command (decoded by the card, as live) and its output as one text', c && c.exitRun);
   const crlf = RESULTS['run ok'].card;
-  ok(crlf && crlf.exitRun.stdout === 'BOX-STUDIO' && !/\r/.test(crlf.content[0].text), 'a Windows CRLF output reads as text (no CR on the card)', crlf && crlf.exitRun);
+  ok(gateOf(crlf) && crlf.exitRun.stdout === 'BOX-STUDIO' && !/\r/.test(crlf.content[0].text), 'a Windows CRLF output reads as text (no CR on the card)', crlf && crlf.exitRun);
   const tail = await runLine(`cd /tmp && vibespace-exit run ${M} -- hostname`);
   ok(!!XC.exitCallOf(`cd /tmp && vibespace-exit run ${M} -- hostname`, tail.content + '\nShell cwd was reset to /var/tmp/x', { error: false }), "claude's own \"Shell cwd was reset\" tail is not the call's output");
 }
 // the CLI's own lines are the ones this module knows (data/bin/vibespace-exit)
 const CLI = read('data/bin/vibespace-exit');
-ok(CLI.includes(`const WAY_OUT = '${XC.WAY_OUT_LINE}';`), 'the way-out line is the CLI\'s own');
-ok(XC.WAIT_NOTES.length === 1 && XC.WAIT_NOTES.every((n) => CLI.includes(JSON.stringify(n))), 'the waiting note is the CLI\'s own (B-48a4 U3: run and pull / push say one note, asking the hub nothing)');
-ok(XC.WAIT_NOTES_BEFORE.length === 3 && XC.WAIT_NOTES_BEFORE.every((n) => !CLI.includes(JSON.stringify(n))) && /!WAIT_NOTES\.includes\(l\) && !WAIT_NOTES_BEFORE\.includes\(l\)/.test(fs.readFileSync(path.join(REPO, 'src/exit-call.js'), 'utf8')), 'lane chat-needs-you-card: the notes BEFORE they named the card are no longer printed and still filtered from a call card in history');
+ok(verdictOf(CLI.includes(`const WAY_OUT = '${XC.WAY_OUT_LINE}';`)), 'the way-out line is the CLI\'s own');
+ok(XC.WAIT_NOTES.length === 1 && verdictOf(XC.WAIT_NOTES.every((n) => CLI.includes(JSON.stringify(n)))), 'the waiting note is the CLI\'s own (B-48a4 U3: run and pull / push say one note, asking the hub nothing)');
+ok(XC.WAIT_NOTES_BEFORE.length === 3 && gateOf(XC.WAIT_NOTES_BEFORE.every((n) => !CLI.includes(JSON.stringify(n)))) && verdictOf(/!WAIT_NOTES\.includes\(l\) && !WAIT_NOTES_BEFORE\.includes\(l\)/.test(fs.readFileSync(path.join(REPO, 'src/exit-call.js'), 'utf8'))), 'lane chat-needs-you-card: the notes BEFORE they named the card are no longer printed and still filtered from a call card in history');
 
 // ── ② shapes that stay a Bash card ──
 console.log('② never guess');
@@ -252,11 +252,11 @@ const HISTORY = (rs) => {
 };
 const H = HISTORY(RS);
 ok(H.tools.length === HIST.length + 1, `the rebuild has the ${HIST.length + 1} tool calls`, H.tools.length);
-ok(H.kinds.slice(0, HIST.length).every((k) => k === 'machine') && H.kinds[HIST.length] === 'bash', 'every vibespace-exit call is a Machines card; the plain `ls -la` stays Bash', H.kinds);
+ok(gateOf(H.kinds.slice(0, HIST.length).every((k) => k === 'machine')) && H.kinds[HIST.length] === 'bash', 'every vibespace-exit call is a Machines card; the plain `ls -la` stays Bash', H.kinds);
 ok(H.runs.length === 1 && H.runs[0].length === HIST.length, 'the calls are ONE machine run (list and the refusal join their machine)', H.runs.map((r) => r.length));
 ok(!!H.part && H.part.text === `${M} · 4 commands · 1 files · 2 lookups · 3 failed · last: timed out` && H.part.failed === 3, 'the head: the machine, the counts, the lookups apart, the failures, the last outcome', H.part);
-ok(H.cards.filter(Boolean).filter((c) => c.failed).length === 3 && H.cards[2].failed && H.cards[3].failed && H.cards[6].failed, 'exit 3, the refusal and the timeout are failures (on screen in a closed fold)', H.cards);
-ok(H.lines[1] && H.lines[1].text === 'hostname · exit 0 · 0.4 s' && H.lines[2].error === 'boom: no such thing' && H.lines[3].outcome.startsWith('did not run — the user did not allow'), 'the compact lines: command · outcome, the first error line, the refusal said', H.lines.slice(1, 4));
+ok(H.cards.filter(Boolean).filter((c) => c.failed).length === 3 && gateOf(H.cards[2].failed) && gateOf(H.cards[3].failed) && verdictOf(H.cards[6].failed), 'exit 3, the refusal and the timeout are failures (on screen in a closed fold)', H.cards);
+ok(gateOf(H.lines[1]) && H.lines[1].text === 'hostname · exit 0 · 0.4 s' && H.lines[2].error === 'boom: no such thing' && verdictOf(H.lines[3].outcome.startsWith('did not run — the user did not allow')), 'the compact lines: command · outcome, the first error line, the refusal said', H.lines.slice(1, 4));
 ok(RS.exitCallCardOf(H.tools[HIST.length]) === null && RS.machineLineOf(H.tools[HIST.length]) === null, 'a plain Bash call draws no machine card');
 
 // ── ⑤ live ──
@@ -287,12 +287,12 @@ const LIVE = (MM) => {
 const { MessageManager } = require(path.join(REPO, 'src/message-manager.js'));
 const L = LIVE(MessageManager);
 ok(L.mid.length === L.before && L.ret === L.tool && !L.ops.some((o) => o.op === 'create' && o.message && o.message.originKind === 'peer-message'), 'the injected card creates NO second message — it upgrades the pending Bash card', { before: L.before, mid: L.mid.length });
-ok(L.ops.some((o) => o.op === 'edit' && o.id === L.tool.id && o.fields && o.fields.exitCard), 'one edit op carries the live card onto the Bash card');
-ok(L.pendingCard && L.pendingCard.content[0].text === liveRun.text && L.pendingCard.exitRun === liveRun.exitRun, 'while the call runs, the Bash card draws the live card\'s words and output block');
+ok(verdictOf(L.ops.some((o) => o.op === 'edit' && o.id === L.tool.id && o.fields && o.fields.exitCard)), 'one edit op carries the live card onto the Bash card');
+ok(gateOf(L.pendingCard) && L.pendingCard.content[0].text === liveRun.text && L.pendingCard.exitRun === liveRun.exitRun, 'while the call runs, the Bash card draws the live card\'s words and output block');
 ok(L.drawn.length === 1 && RS.exitCallCardOf(L.drawn[0]).content[0].text === liveRun.text, 'after the result: ONE Machines card, its words = the live card\'s (= history\'s)', L.drawn.length);
-ok(L.c2 && L.c2.originKind === 'peer-message' && L.c2.exitRun, 'no Bash card for it (a terminal session, a script): the injected card still appears');
-ok(L.c3 && L.c3.originKind === 'peer-message', 'two identical pending calls: never guess — the injected card appears');
-ok(read('server.js').includes("emitCard: (s, card) => feedPeerCard(s, { ...card, belongsTo: require('./src/exit-call.js').cardMatcher(card) })"), 'server.js hands the exit proxy\'s cards their matcher (the wiring the live leg stands for)');
+ok(gateOf(L.c2) && L.c2.originKind === 'peer-message' && verdictOf(L.c2.exitRun), 'no Bash card for it (a terminal session, a script): the injected card still appears');
+ok(gateOf(L.c3) && L.c3.originKind === 'peer-message', 'two identical pending calls: never guess — the injected card appears');
+ok(verdictOf(read('server.js').includes("emitCard: (s, card) => feedPeerCard(s, { ...card, belongsTo: require('./src/exit-call.js').cardMatcher(card) })")), 'server.js hands the exit proxy\'s cards their matcher (the wiring the live leg stands for)');
 ok(!/require\(['"]\.\/exit-(call|reach)/.test(read('src/message-manager.js')), 'message-manager names no exit module (it is bundled into the device agent — test-architecture §52b)');
 
 // ── ⑥ controls ──
@@ -302,7 +302,7 @@ const xcControl = (tag, from, to, why, want) => {
   if (!XSRC.includes(from)) { ok(false, `CONTROL ${tag}: the anchor is gone`, from); return; }
   const X = require(MUT.write('src/exit-call.js', editAnchor(XSRC, from, to, "src/exit-call.js"), tag));
   const red = want(X);
-  ok(red, `CONTROL ${tag}: ${why} — goes red`);
+  ok(verdictOf(red), `CONTROL ${tag}: ${why} — goes red`);
 };
 xcControl('no-rebuild', "if (E.cliLine({ outcome: 'ran', code, ms, timedOut, truncated }, { machine }) !== last) return null;", '', 'the last line is not rebuilt by the CLI\'s producer', (X) => X.exitCallOf('vibespace-exit run studio -- hostname', ran.replace(' (recorded)', ' — OUTPUT CUT (forged) (recorded)'), { error: false }) !== null);
 xcControl('no-exit-check', 'if (exitCode !== (timedOut ? 124 : code)) return null;', '', 'claude\'s exit code is not compared', (X) => X.exitCallOf('vibespace-exit run studio -- hostname', ran.replace('exit 0', 'exit 3'), { error: false }) !== null);
@@ -325,11 +325,11 @@ const RSSRC = read('src/lib/chat-run-summary.js');
   else {
     const rs = await import(pathToFileURL(MUT.write('src/lib/chat-run-summary.js', editAnchor(RSSRC, from, '  return null;', "src/lib/chat-run-summary.js"), 'no-recognition', { esm: true })).href);
     const Hx = HISTORY(rs);
-    ok(Hx.kinds.every((k) => k === 'bash'), 'CONTROL no-recognition (the base): every call is a plain Bash card — ④ goes red', Hx.kinds);
+    ok(verdictOf(Hx.kinds.every((k) => k === 'bash')), 'CONTROL no-recognition (the base): every call is a plain Bash card — ④ goes red', Hx.kinds);
   }
 }
 
 server.close();
 fs.rmSync(SCR, { recursive: true, force: true });
 console.log(`\n${fail ? `✗ ${fail} FAILED` : `ALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

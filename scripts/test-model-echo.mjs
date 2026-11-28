@@ -25,7 +25,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -49,22 +49,22 @@ const R = { envelope: 'required' };
 
 console.log('— ① the PURE parser');
 {
-  ok('backticked opus echo (2.1.280 row) → alias opus[1m], resolved id claude-opus-5-5[1m]', same(parse(BT_OPUS, R), { alias: 'opus[1m]', id: 'claude-opus-5-5[1m]', quoted: true }), parse(BT_OPUS, R));
-  ok('backticked fable echo (2.1.280 row) → alias fable[1m], resolved id claude-fable-5-1', same(parse(BT_FABLE, R), { alias: 'fable[1m]', id: 'claude-fable-5-1', quoted: true }), parse(BT_FABLE, R));
-  ok('backticked bare id (2.1.263 row) → alias = the id, no parenthesised id', same(parse(BT_BARE_ID, R), { alias: 'claude-opus-5', id: null, quoted: true }), parse(BT_BARE_ID, R));
-  ok('CONTROL: the plain echo (≤2.1.226; backticked since 2.1.257) parses to the same shape', same(parse(OLD_ALIAS_ID, R), { alias: 'fable[1m]', id: 'claude-fable-5', quoted: false }) && same(parse(OLD_OPUS_ID, R), { alias: 'opus[1m]', id: 'claude-opus-5[1m]', quoted: false }), [parse(OLD_ALIAS_ID, R), parse(OLD_OPUS_ID, R)]);
-  ok('old bare id / alias-only echoes → id null, alias the token', same(parse(OLD_BARE_ID, R), { alias: 'claude-fable-5', id: null, quoted: false }) && same(parse(OLD_ALIAS_ONLY, R), { alias: 'fable[1m]', id: null, quoted: false }));
+  ok('backticked opus echo (2.1.280 row) → alias opus[1m], resolved id claude-opus-5-5[1m]', verdictOf(same(parse(BT_OPUS, R), { alias: 'opus[1m]', id: 'claude-opus-5-5[1m]', quoted: true })), parse(BT_OPUS, R));
+  ok('backticked fable echo (2.1.280 row) → alias fable[1m], resolved id claude-fable-5-1', verdictOf(same(parse(BT_FABLE, R), { alias: 'fable[1m]', id: 'claude-fable-5-1', quoted: true })), parse(BT_FABLE, R));
+  ok('backticked bare id (2.1.263 row) → alias = the id, no parenthesised id', verdictOf(same(parse(BT_BARE_ID, R), { alias: 'claude-opus-5', id: null, quoted: true })), parse(BT_BARE_ID, R));
+  ok('CONTROL: the plain echo (≤2.1.226; backticked since 2.1.257) parses to the same shape', gateOf(same(parse(OLD_ALIAS_ID, R), { alias: 'fable[1m]', id: 'claude-fable-5', quoted: false })) && verdictOf(same(parse(OLD_OPUS_ID, R), { alias: 'opus[1m]', id: 'claude-opus-5[1m]', quoted: false })), [parse(OLD_ALIAS_ID, R), parse(OLD_OPUS_ID, R)]);
+  ok('old bare id / alias-only echoes → id null, alias the token', gateOf(same(parse(OLD_BARE_ID, R), { alias: 'claude-fable-5', id: null, quoted: false })) && verdictOf(same(parse(OLD_ALIAS_ONLY, R), { alias: 'fable[1m]', id: null, quoted: false })));
   ok('backticks and no backticks name the SAME model (only `quoted` differs)', parse(BT_FABLE).alias === parse(ENV('Set model to fable[1m] (claude-fable-5-1)')).alias && parse(BT_FABLE).id === parse(ENV('Set model to fable[1m] (claude-fable-5-1)')).id);
-  ok('raw ANSI bold around the alias is stripped inside → alias opus', same(parse(TUI_BOLD_ALIAS, R), { alias: 'opus', id: null, quoted: true }), parse(TUI_BOLD_ALIAS, R));
+  ok('raw ANSI bold around the alias is stripped inside → alias opus', verdictOf(same(parse(TUI_BOLD_ALIAS, R), { alias: 'opus', id: null, quoted: true })), parse(TUI_BOLD_ALIAS, R));
   ok('a pre-stripped string keeps the literal 1M suffix `[1m]` (not ANSI)', parse('Set model to opus[1m]')?.alias === 'opus[1m]' && parse(`Set model to ${ESC}[1mopus[1m]${ESC}[22m`)?.alias === 'opus[1m]');
   ok('the TUI picker echo names a DISPLAY NAME, not a model id → null (the bar must not show "Fable")', parse(TUI_DISPLAY_SAVED) === null && parse(TUI_DISPLAY_SESSION) === null, [parse(TUI_DISPLAY_SAVED), parse(TUI_DISPLAY_SESSION)]);
   ok('a quoted token may carry trailing prose; an unquoted one may not', parse('Set model to `opus (claude-opus-5-5)` for this session')?.id === 'claude-opus-5-5' && parse('Set model to opus (claude-opus-5-5) for this session') === null);
   ok('without the envelope: accepted by default, REFUSED when required (a user typing the words is not an echo)', parse('Set model to `opus[1m] (claude-opus-5-5[1m])`')?.id === 'claude-opus-5-5[1m]' && parse('Set model to `opus[1m] (claude-opus-5-5[1m])`', R) === null && parse('Set model to claude-fable-5', R) === null);
   ok('surrounding whitespace is tolerated', parse('  ' + BT_OPUS + '\n', R)?.id === 'claude-opus-5-5[1m]');
   ok('non-echo lines → null', parse(ENV('Compacted. ctrl+o to see full summary'), R) === null && parse('<command-name>/model</command-name>', R) === null && parse(ENV('Set model to'), R) === null && parse(ENV('Set model to `unterminated'), R) === null);
-  ok('garbage input → null (never throws)', [undefined, null, 42, {}, '', '<local-command-stdout></local-command-stdout>'].every((x) => parse(x) === null && parse(x, R) === null));
+  ok('garbage input → null (never throws)', verdictOf([undefined, null, 42, {}, '', '<local-command-stdout></local-command-stdout>'].every((x) => parse(x) === null && parse(x, R) === null)));
   ok('the card label: the backtick pair removed, a non-echo label untouched', strip('Set model to `opus[1m] (claude-opus-5-5[1m])`') === 'Set model to opus[1m] (claude-opus-5-5[1m])' && strip('Set model to fable[1m] (claude-fable-5)') === 'Set model to fable[1m] (claude-fable-5)' && strip('run `ls`') === 'run `ls`' && strip(null) === null);
-  ok('module is PURE (no requires) and registered in the PURE tier', !/require\(/.test(read('src/model-echo.js')) && /'src\/model-echo\.js'/.test(read('scripts/test-architecture.mjs')));
+  ok('module is PURE (no requires) and registered in the PURE tier', !/require\(/.test(read('src/model-echo.js')) && verdictOf(/'src\/model-echo\.js'/.test(read('scripts/test-architecture.mjs'))));
 }
 
 console.log('— ② the real renderer (esbuild → node, DOM shimmed): the command card label');
@@ -100,8 +100,8 @@ console.log('— ③ wiring pins');
   const cr = read('src/lib/chat-renderers.js');
   const sj = read('src/server/stdout/claude-stream-json.js');
   ok('chat-view reads NO `/model` echo for the status bar (lane fable-52-cli-321 r4, law A: the chip shows the SERVER\'s facts — a record the view draws moves nothing): no parser import, no echo parse, no model setter fed from it', !/parseSetModelEcho/.test(cv) && !/noteEchoAsk/.test(cv) && !/_statusBar\.setModel\(echo/.test(cv));
-  ok('chat-renderers imports the label helper and runs the stdout label through it', /import \{ stripSetModelBackticks \} from '\.\.\/model-echo\.js';/.test(cr) && /const so = stripSetModelBackticks\(stripAnsi\(stdoutMatch\[1\]\)\.trim\(\)\);/.test(cr));
-  ok('the lock repin takes the resolved id from the parser (master\'s A5, back in round 14 — lane fable-52-cli-321), and the same LIVE record is the CLI\'s report of the pick in flight (model-ask noteEcho)', /require\('\.\.\/\.\.\/model-echo\.js'\)/.test(sj) && /const echo = parseSetModelEcho\(uText, \{ envelope: 'required' \}\);\s*if \(echo && echo\.id && modelsMatch\(session\._lockedModel, echo\.id\)\)/.test(sj) && /session\._lockedModel = echo\.id;/.test(sj) && /MA\.noteEcho\(session, parseSetModelEcho\(uText, \{ envelope: 'required' \}\)/.test(sj));
+  ok('chat-renderers imports the label helper and runs the stdout label through it', gateOf(/import \{ stripSetModelBackticks \} from '\.\.\/model-echo\.js';/.test(cr)) && verdictOf(/const so = stripSetModelBackticks\(stripAnsi\(stdoutMatch\[1\]\)\.trim\(\)\);/.test(cr)));
+  ok('the lock repin takes the resolved id from the parser (master\'s A5, back in round 14 — lane fable-52-cli-321), and the same LIVE record is the CLI\'s report of the pick in flight (model-ask noteEcho)', gateOf(/require\('\.\.\/\.\.\/model-echo\.js'\)/.test(sj)) && gateOf(/const echo = parseSetModelEcho\(uText, \{ envelope: 'required' \}\);\s*if \(echo && echo\.id && modelsMatch\(session\._lockedModel, echo\.id\)\)/.test(sj)) && gateOf(/session\._lockedModel = echo\.id;/.test(sj)) && verdictOf(/MA\.noteEcho\(session, parseSetModelEcho\(uText, \{ envelope: 'required' \}\)/.test(sj)));
   // census: no inline `Set model to` REGEX left anywhere in src/ (comments and the module itself excepted)
   const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : (/\.(m?js|cjs)$/.test(e.name) ? [path.join(d, e.name)] : []));
   const files = walk('src').filter((f) => f !== path.join('src', 'model-echo.js'));
@@ -115,9 +115,9 @@ console.log('— ③ wiring pins');
   ok(`no inline "Set model to" matcher left in src/ (${files.length} files scanned)`, files.length > 100 && offenders.length === 0, offenders);
   // negative control: the census catches the pre-fix line
   const pre = "      const m = txt.match(/^<local-command-stdout>Set model to (\\S+?)(?: \\(([^)]+)\\))?<\\/local-command-stdout>/);";
-  ok('NEGATIVE CONTROL: the census flags the pre-fix status-bar regex', /Set model to/.test(pre.replace(/^\s*\/\/.*$/, '')));
+  ok('NEGATIVE CONTROL: the census flags the pre-fix status-bar regex', verdictOf(/Set model to/.test(pre.replace(/^\s*\/\/.*$/, ''))));
   ok('NEGATIVE CONTROL: the pre-fix regex really misses the backticked echo (every /model since 2.1.257) (why this module exists)', !new RegExp('^<local-command-stdout>Set model to (\\S+?)(?: \\(([^)]+)\\))?<\\/local-command-stdout>').test(BT_OPUS));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

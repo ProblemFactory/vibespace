@@ -31,7 +31,7 @@ const PORT = await freePort();
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ack-smoke-'));
 const wt = path.join(tmpRoot, 'wt');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -82,7 +82,7 @@ const probe = (sessionId) => new Promise((resolve) => {
 
 const dead = await probe('sess-does-not-exist-123');
 check('nonexistent id: ack precedes the error reply', dead[0] === 'attach-ack', JSON.stringify(dead));
-check('nonexistent id: still gets a terminal reply', dead.includes('error') || dead.includes('attached'), JSON.stringify(dead));
+check('nonexistent id: still gets a terminal reply', verdictOf(dead.includes('error')) || verdictOf(dead.includes('attached')), JSON.stringify(dead));
 
 const sub = await probe('sub-agent-deadbeef00000000');
 check('sub- viewer attach also acked first', sub[0] === 'attach-ack', JSON.stringify(sub));
@@ -112,17 +112,17 @@ check('sub- viewer attach also acked first', sub[0] === 'attach-ack', JSON.strin
     });
     const plain = await seqProbe({});
     const att = plain.find((m) => m.type === 'attached');
-    check('a plain capable attach: ack first, then the full attached WITH the opSeq advert', plain[0]?.type === 'attach-ack' && att && Array.isArray(att.messages) && typeof att.opSeq === 'number' && !att.slab, JSON.stringify(plain.map((m) => [m.type, m.opSeq, m.slab, Array.isArray(m.messages)])));
+    check('a plain capable attach: ack first, then the full attached WITH the opSeq advert', plain[0]?.type === 'attach-ack' && gateOf(att) && gateOf(Array.isArray(att.messages)) && typeof att.opSeq === 'number' && !att.slab, JSON.stringify(plain.map((m) => [m.type, m.opSeq, m.slab, Array.isArray(m.messages)])));
     if (att) {
       const unknown = await seqProbe({ sinceSeq: att.opSeq, sinceEpoch: (att.normEpoch || 1) - 1 });
       const ua = unknown.find((m) => m.type === 'attached');
-      check('sinceSeq on an UNKNOWN epoch: still attach-ack first, then a PLAIN attached (messages, no replay)', unknown[0]?.type === 'attach-ack' && ua && Array.isArray(ua.messages) && !('replay' in ua) && !ua.slab, JSON.stringify(unknown.map((m) => [m.type, m.slab, Array.isArray(m.messages)])));
+      check('sinceSeq on an UNKNOWN epoch: still attach-ack first, then a PLAIN attached (messages, no replay)', unknown[0]?.type === 'attach-ack' && gateOf(ua) && gateOf(Array.isArray(ua.messages)) && !('replay' in ua) && !ua.slab, JSON.stringify(unknown.map((m) => [m.type, m.slab, Array.isArray(m.messages)])));
       const future = await seqProbe({ sinceSeq: att.opSeq + 1000, sinceEpoch: att.normEpoch });
       const fa = future.find((m) => m.type === 'attached');
-      check('a seq this server never handed out (same epoch): ack, then the plain attached', future[0]?.type === 'attach-ack' && fa && Array.isArray(fa.messages) && !fa.slab);
+      check('a seq this server never handed out (same epoch): ack, then the plain attached', future[0]?.type === 'attach-ack' && gateOf(fa) && gateOf(Array.isArray(fa.messages)) && !fa.slab);
       const held = await seqProbe({ sinceSeq: att.opSeq, sinceEpoch: att.normEpoch });
       const ha = held.find((m) => m.type === 'attached');
-      check('the SAME epoch and a covered seq: ack first, then attached {slab:\'held\', replay} with no messages', held[0]?.type === 'attach-ack' && ha && ha.slab === 'held' && Array.isArray(ha.replay) && !('messages' in ha) && ha.opSeq >= att.opSeq, JSON.stringify(held.map((m) => [m.type, m.slab, m.replay?.length])));
+      check('the SAME epoch and a covered seq: ack first, then attached {slab:\'held\', replay} with no messages', held[0]?.type === 'attach-ack' && gateOf(ha) && ha.slab === 'held' && gateOf(Array.isArray(ha.replay)) && !('messages' in ha) && ha.opSeq >= att.opSeq, JSON.stringify(held.map((m) => [m.type, m.slab, m.replay?.length])));
     }
     ws.send(JSON.stringify({ type: 'kill', sessionId: sid }));
     for (let i = 0; i < 40 && !frames.some((m) => (m.type === 'killed' || m.type === 'exited') && m.sessionId === sid); i++) await sleep(100);
@@ -131,4 +131,4 @@ check('sub- viewer attach also acked first', sub[0] === 'attach-ack', JSON.strin
 
 ws.close();
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

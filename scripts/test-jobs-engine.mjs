@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const { JobManager } = require('../src/jobs.js');
 const jobModel = require('../src/job-model.js');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -40,11 +40,11 @@ const owner = { conversation: { backend: 'claude', id: 'conv-T' }, sessionId: 's
 try {
   // 1. spawn + stamp
   const A = new JobManager(deps); A.init();
-  ok(A.ready && !A.readOnly, 'engine A takes the lock and initializes');
+  ok(gateOf(A.ready) && !A.readOnly, 'engine A takes the lock and initializes');
   const r1 = A.create({ kind: 'task', name: 'sleeper', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller);
-  ok(r1.job && !r1.error, 'task created', r1.error);
+  ok(gateOf(r1.job) && !r1.error, 'task created', r1.error);
   const j1 = A.jobs.get(r1.job.id);
-  ok(await until(() => A._verifyAlive(A._readStamp(j1))), 'wrapper wrote a verifiable pid+starttime+bootId stamp');
+  ok(verdictOf(await until(() => A._verifyAlive(A._readStamp(j1)))), 'wrapper wrote a verifiable pid+starttime+bootId stamp');
 
   // 2. single-engine lock: fake a FOREIGN live engine
   const decoy = spawn('sleep', ['20']);
@@ -54,7 +54,7 @@ try {
   fs.writeFileSync(path.join(dir, 'jobs.lock'), JSON.stringify({ pid: decoy.pid, starttime }));
   const B = new JobManager(deps); B.init();
   ok(B.readOnly === true, 'second engine against a live foreign lock goes READ-ONLY');
-  ok(B.create({ kind: 'task', name: 'x', cmd: { argv: ['true'] }, owner }, caller).error, 'read-only engine refuses creates');
+  ok(verdictOf(B.create({ kind: 'task', name: 'x', cmd: { argv: ['true'] }, owner }, caller).error), 'read-only engine refuses creates');
   decoy.kill('SIGKILL');
 
   // 3. adopt across an engine generation (simulated restart)
@@ -62,22 +62,22 @@ try {
   fs.rmSync(path.join(dir, 'jobs.lock'), { force: true });
   const C = new JobManager(deps); C.init();
   const j1c = C.jobs.get(r1.job.id);
-  ok(j1c && j1c.state === 'up' && C._verifyAlive(C._readStamp(j1c)), 'new engine ADOPTS the live task by stamp (no respawn, no kill)');
+  ok(gateOf(j1c) && j1c.state === 'up' && verdictOf(C._verifyAlive(C._readStamp(j1c))), 'new engine ADOPTS the live task by stamp (no respawn, no kill)');
 
   // 4. rm refuses live; GC never touches live
-  ok(C.rm(j1c).error && C.jobs.has(j1c.id), 'rm on a running job refuses with guidance');
+  ok(gateOf(C.rm(j1c).error) && verdictOf(C.jobs.has(j1c.id)), 'rm on a running job refuses with guidance');
   await C._gc();
-  ok(C.jobs.has(j1c.id), 'GC never collects a record whose stamp verifies alive');
+  ok(verdictOf(C.jobs.has(j1c.id)), 'GC never collects a record whose stamp verifies alive');
 
   // 5. verified stop
   C.stop(j1c);
-  ok(await until(() => ['interrupted', 'failed'].includes(j1c.state)), 'stop kills the group and finalizes the run', j1c.state);
+  ok(verdictOf(await until(() => ['interrupted', 'failed'].includes(j1c.state))), 'stop kills the group and finalizes the run', j1c.state);
   ok((j1c.runs[j1c.runs.length - 1].cause || '') === 'interrupted', 'stop records cause=interrupted');
 
   // 6. until-output completion (grace shrunk via env)
   const r2 = C.create({ kind: 'task', name: 'marker', cmd: { argv: ['sh', '-c', 'echo START; echo THE_MARKER; sleep 60'] }, untilOutput: 'THE_MARKER', owner }, caller);
   const j2 = C.jobs.get(r2.job.id);
-  ok(await until(() => j2.state === 'done', 30000), 'until-output marker completes the task', j2.state);
+  ok(verdictOf(await until(() => j2.state === 'done', 30000)), 'until-output marker completes the task', j2.state);
   ok(j2.runs[j2.runs.length - 1].cause === 'ok(until-output)', 'cause=ok(until-output)', j2.runs[j2.runs.length - 1].cause);
 
   // 7. cron notify fire (forced past nextFireAt)
@@ -95,7 +95,7 @@ try {
   const j4 = C.jobs.get(r4.job.id);
   j4.nextFireAt = Date.now() - 1000; j4.schedule = { everyMs: 3600e3 }; // recurring so it can fire twice
   await C._cronTick();
-  ok(await until(() => [...C.jobs.values()].some((x) => x.cronParent === j4.id && x.state === 'done'), 15000), 'first cron fire spawns and completes a child');
+  ok(verdictOf(await until(() => [...C.jobs.values()].some((x) => x.cronParent === j4.id && x.state === 'done'), 15000)), 'first cron fire spawns and completes a child');
   const evCount = C.events.length;
   j4.nextFireAt = Date.now() - 1000;
   await C._cronTick();
@@ -112,22 +112,22 @@ try {
   C.d.deliverToConversation = async (cid, text, opts) => { delivered.push({ cid, text, opts }); return { ok: true, lane: 'message', peerName: 'peer-X' }; };
   const rn1 = C.create({ kind: 'task', name: 'notif-ok', cmd: { argv: ['sh', '-c', 'exit 1'] }, owner }, caller);
   const jn1 = C.jobs.get(rn1.job.id);
-  ok(await until(() => jn1.state === 'failed' && jn1.lastNotify && jn1.lastNotify.lane === 'message' && jn1.lastNotify.ok, 15000), 'failed task messages the owner conversation (lastNotify lane=message)', JSON.stringify(jn1.lastNotify));
-  ok(delivered.length === 1 && delivered[0].cid === 'conv-T' && delivered[0].text.includes(jn1.id), 'delivery targeted the owner conversation lineage id and named the job');
+  ok(verdictOf(await until(() => jn1.state === 'failed' && jn1.lastNotify && jn1.lastNotify.lane === 'message' && jn1.lastNotify.ok, 15000)), 'failed task messages the owner conversation (lastNotify lane=message)', JSON.stringify(jn1.lastNotify));
+  ok(delivered.length === 1 && delivered[0].cid === 'conv-T' && verdictOf(delivered[0].text.includes(jn1.id)), 'delivery targeted the owner conversation lineage id and named the job');
   // TYPED ORIGIN (2026-09-07, owner: 系统通知默认应该是steering的): every owner
   // notification says on the wire that it is a NOTIFICATION, so a busy codex
   // session steers it into the running turn instead of opening its own billed
   // turn afterwards. The ENGINE never picks the lane — the wrapper does.
-  ok(delivered[0].opts && delivered[0].opts.kind === 'notification', "…and is TYPED kind:'notification' (a person's vibespace-msg is 'peer' and keeps queueing)", JSON.stringify(delivered[0].opts));
+  ok(gateOf(delivered[0].opts) && delivered[0].opts.kind === 'notification', "…and is TYPED kind:'notification' (a person's vibespace-msg is 'peer' and keeps queueing)", JSON.stringify(delivered[0].opts));
   // stash lane: delivery fails → durable per-conversation queue, drained at injection
   C.d.deliverToConversation = async () => ({ ok: false, reason: 'no live inbox' });
   C._notifyRate.clear();
   const rn2 = C.create({ kind: 'task', name: 'notif-stash', cmd: { argv: ['sh', '-c', 'exit 1'] }, owner }, caller);
   const jn2 = C.jobs.get(rn2.job.id);
-  ok(await until(() => jn2.lastNotify && jn2.lastNotify.lane === 'stash', 15000), 'unreachable owner → notification stashed (lastNotify lane=stash)', JSON.stringify(jn2.lastNotify));
+  ok(verdictOf(await until(() => jn2.lastNotify && jn2.lastNotify.lane === 'stash', 15000)), 'unreachable owner → notification stashed (lastNotify lane=stash)', JSON.stringify(jn2.lastNotify));
   C._save(); try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U4: landed before the file is read
   const persisted = JSON.parse(fs.readFileSync(path.join(dir, 'job-notifications.json'), 'utf-8'));
-  ok(Array.isArray(persisted['conv-T']) && persisted['conv-T'].some((n) => n.jobId === jn2.id), 'stash persists to job-notifications.json keyed by conversation');
+  ok(gateOf(Array.isArray(persisted['conv-T'])) && verdictOf(persisted['conv-T'].some((n) => n.jobId === jn2.id)), 'stash persists to job-notifications.json keyed by conversation');
   const drained = C.drainNotifs('conv-T');
   ok(drained.length >= 1 && C.drainNotifs('conv-T').length === 0, 'drainNotifs returns the queue once and clears it');
   // toggle: job-level off → no delivery, no stash
@@ -135,7 +135,7 @@ try {
   C._notifyRate.clear();
   const rn3 = C.create({ kind: 'task', name: 'notif-off', notify: 'off', cmd: { argv: ['sh', '-c', 'exit 1'] }, owner }, caller);
   const jn3 = C.jobs.get(rn3.job.id);
-  ok(await until(() => jn3.state === 'failed', 15000) && (await sleep(300), !jn3.lastNotify || jn3.lastNotify.lane === 'off'), 'notify:off job never posts (lastNotify lane=off)', JSON.stringify(jn3.lastNotify));
+  ok(gateOf(await until(() => jn3.state === 'failed', 15000)) && (await sleep(300), !jn3.lastNotify || jn3.lastNotify.lane === 'off'), 'notify:off job never posts (lastNotify lane=off)', JSON.stringify(jn3.lastNotify));
   // 7c-bis. THE FLOOD FLOOR + THE DRAIN ARE **ONE FRAME**, not N (2026-09-07).
   // The floor is what turns a burst into a batch: only the FIRST distinct event
   // in 30s is posted, every other one is STASHED. And the stash is drained by
@@ -153,22 +153,22 @@ try {
     const jb = { id: 'jb-burst', name: 'burst', kind: 'task', state: 'done', owner: { conversation: { id: 'conv-T' } } };
     for (const n of [1, 2, 3, 4, 5, 6]) C._notifyOwner(jb, { what: `step ${n} finished` });
     await sleep(200);
-    ok(posts.length === 1 && /step 1 finished/.test(posts[0].text), `a burst of six events posts ONCE — the 30s floor holds the rest (${posts.length} posts)`, JSON.stringify(posts.map((p) => p.text.slice(0, 60))));
+    ok(posts.length === 1 && verdictOf(/step 1 finished/.test(posts[0].text)), `a burst of six events posts ONCE — the 30s floor holds the rest (${posts.length} posts)`, JSON.stringify(posts.map((p) => p.text.slice(0, 60))));
     const stashed = C.pendingNotifs.get('conv-T') || [];
-    ok(stashed.length === 5 && stashed.every((e) => e.jobId === jb.id), `the five floored events are STASHED, not dropped (${stashed.length})`, JSON.stringify(stashed.map((e) => e.text)));
+    ok(stashed.length === 5 && verdictOf(stashed.every((e) => e.jobId === jb.id)), `the five floored events are STASHED, not dropped (${stashed.length})`, JSON.stringify(stashed.map((e) => e.text)));
     ok(!(jb.notifyLog || []).some((e) => e.lane === 'message' && e.ok && (jb.notifyLog || []).filter((x) => x.lane === 'message').length > 1), 'the journal shows ONE socket post for the burst', JSON.stringify((jb.notifyLog || []).map((e) => e.lane)));
     const drained = C.drainNotifs('conv-T');
     ok(drained.length === 5 && C.drainNotifs('conv-T').length === 0, 'the drain hands over the whole batch AT ONCE and clears', String(drained.length));
     ok(posts.length === 1, 'draining posts NOTHING through the delivery ladder — the batch rides the next injection, it never becomes five more frames', String(posts.length));
     const block = jobModel.renderNotifStash(drained);
     const heads = (block.match(/<vibespace-jobs-missed-while-away>/g) || []).length;
-    ok(heads === 1 && block.includes('step 2 finished') && block.includes('step 6 finished'), `…and it renders as ONE block carrying every entry (${heads} block(s), ${block.length}B)`, block.slice(0, 200));
+    ok(heads === 1 && gateOf(block.includes('step 2 finished')) && verdictOf(block.includes('step 6 finished')), `…and it renders as ONE block carrying every entry (${heads} block(s), ${block.length}B)`, block.slice(0, 200));
     // the injection site is the ONLY consumer of that stash (a second consumer
     // that re-delivered per entry is exactly the failure this pins against)
     const ar = fs.readFileSync(new URL('../src/agent-routes.js', import.meta.url), 'utf-8');
     // channel-jump verify r5: the ONE drain site is the fit-or-wait helper (drainNotifsUnderCap) both hook routes call
     // .390 train seam: report-mark-on-ack wrapped the drain in take() (drained = carry ? waiting : take()) — the anchor follows take()
-    ok(/const got = \[\.\.\.\(stashed\.length \? jm\.drainNotifs\(cid, new Set\(stashed\)\) : \[\]\)[\s\S]{0,1500}?const drained = carry \? waiting : take\(\);[\s\S]{0,900}?\.renderNotifStash\(drained/.test(ar) && !/for \(const [a-z] of drained\) [\s\S]{0,80}deliverToConversation/.test(ar) && ar.split('= drainNotifsUnderCap(jm, deliver, ').length === 3,
+    ok(gateOf(/const got = \[\.\.\.\(stashed\.length \? jm\.drainNotifs\(cid, new Set\(stashed\)\) : \[\]\)[\s\S]{0,1500}?const drained = carry \? waiting : take\(\);[\s\S]{0,900}?\.renderNotifStash\(drained/.test(ar)) && !/for \(const [a-z] of drained\) [\s\S]{0,80}deliverToConversation/.test(ar) && ar.split('= drainNotifsUnderCap(jm, deliver, ').length === 3,
       'wiring pin: the drain sites render ONE block and never re-enter the delivery ladder per entry (r5: one helper, two routes)');
   }
 
@@ -183,16 +183,16 @@ try {
   const jc = C.jobs.get(rc.job.id);
   jc.nextFireAt = Date.now() - 1000;
   await C._cronTick();
-  ok(delivered2.length === 1 && delivered2[0].cid === 'conv-T' && delivered2[0].text.includes('提醒正文XYZ'), 'notify-cron fire MESSAGES the owner conversation (not just the user inbox)', JSON.stringify(delivered2));
-  ok((jc.notifyLog || []).some((e) => e.lane === 'message' && e.ok) && !(jc.notifyLog || []).some((e) => e.lane === 'user-inbox'), 'default journal shows the owner lane ONLY (no user-inbox copy)', JSON.stringify(jc.notifyLog));
+  ok(delivered2.length === 1 && delivered2[0].cid === 'conv-T' && verdictOf(delivered2[0].text.includes('提醒正文XYZ')), 'notify-cron fire MESSAGES the owner conversation (not just the user inbox)', JSON.stringify(delivered2));
+  ok(gateOf((jc.notifyLog || []).some((e) => e.lane === 'message' && e.ok)) && !(jc.notifyLog || []).some((e) => e.lane === 'user-inbox'), 'default journal shows the owner lane ONLY (no user-inbox copy)', JSON.stringify(jc.notifyLog));
   // --notify-user opts the inbox copy back in (both lanes journaled)
   C._notifyRate.clear();
   const rcU = C.create({ kind: 'cron', name: 'remind-user', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: '给用户的提醒ABC', urgency: 'low' }, notifyUser: true, owner }, caller);
   const jcU = C.jobs.get(rcU.job.id);
   jcU.nextFireAt = Date.now() - 1000;
   await C._cronTick();
-  ok(notifications.some((n) => n.text === '给用户的提醒ABC'), '--notify-user notify-cron DOES copy the user inbox');
-  ok((jcU.notifyLog || []).some((e) => e.lane === 'user-inbox' && e.ok) && (jcU.notifyLog || []).some((e) => e.lane === 'message' && e.ok), 'opt-in journal records BOTH lanes', JSON.stringify(jcU.notifyLog));
+  ok(verdictOf(notifications.some((n) => n.text === '给用户的提醒ABC')), '--notify-user notify-cron DOES copy the user inbox');
+  ok(gateOf((jcU.notifyLog || []).some((e) => e.lane === 'user-inbox' && e.ok)) && verdictOf((jcU.notifyLog || []).some((e) => e.lane === 'message' && e.ok)), 'opt-in journal records BOTH lanes', JSON.stringify(jcU.notifyLog));
   // lane job-notify-user: the legs above hand the engine a top-level field the CLI never wrote (notify-cron sent no
   // notifyUser at all; a scheduled run hid it inside action.task). Here the body is the REAL CLI's, captured against a
   // loopback recorder (a drift in its builder reds here; test-jobs-cli-body pins every flag + the route's hop), and a
@@ -212,30 +212,30 @@ try {
     });
     const [bYes, bNo] = await Promise.all([cliBody(['run', 'true', '--name', 'cli-at-user', '--at', '+1h', '--notify-user']), cliBody(['run', 'true', '--name', 'cli-at-plain', '--at', '+1h'])]);
     rec.close();
-    ok(bYes && bYes.notifyUser === true && bYes.action && bYes.action.type === 'spawn-task' && bYes.action.task.notifyUser === true && bNo && bNo.notifyUser === false && bNo.action.task.notifyUser === false,
+    ok(gateOf(bYes) && bYes.notifyUser === true && gateOf(bYes.action) && bYes.action.type === 'spawn-task' && bYes.action.task.notifyUser === true && gateOf(bNo) && bNo.notifyUser === false && bNo.action.task.notifyUser === false,
       'the CLI\'s scheduled-run body: the top-level notifyUser (true with --notify-user, false without) + the same in the task — the compatibility copy for an engine ≤ 2.369.360 (r2)', JSON.stringify([bYes, bNo]));
     const legacy = bYes && { ...bYes, name: 'cli-at-legacy', notifyUser: undefined, action: { ...bYes.action, task: { ...bYes.action.task, notifyUser: true } } };
     const made = [bYes, bNo, legacy].filter(Boolean).map((b) => C.jobs.get(C.create({ ...b, owner }, caller).job.id));
-    ok(made.length === 3 && made.every((j) => j.action && j.action.task && !('notifyUser' in j.action.task)) && made.map((j) => j.notifyUser).join() === 'true,false,true', 'the STORE keeps one field: each cron record holds notifyUser at the top (the older body\'s nested flag read once), its task none', JSON.stringify(made.map((j) => [j.notifyUser, j.action && j.action.task && j.action.task.notifyUser])));
+    ok(made.length === 3 && gateOf(made.every((j) => j.action && j.action.task && !('notifyUser' in j.action.task))) && made.map((j) => j.notifyUser).join() === 'true,false,true', 'the STORE keeps one field: each cron record holds notifyUser at the top (the older body\'s nested flag read once), its task none', JSON.stringify(made.map((j) => [j.notifyUser, j.action && j.action.task && j.action.task.notifyUser])));
     for (const j of made) j.nextFireAt = Date.now() - 1000;
     const before = notifications.length;
     await C._cronTick();
     const kids = made.map((j) => [...C.jobs.values()].find((x) => x.cronParent === j.id));
-    ok(await until(() => kids.every((k) => k && ['done', 'failed'].includes(k.state))), 'each scheduled run\'s fire spawned a REAL child that ended', kids.map((k) => k && k.state).join(','));
+    ok(verdictOf(await until(() => kids.every((k) => k && ['done', 'failed'].includes(k.state)))), 'each scheduled run\'s fire spawned a REAL child that ended', kids.map((k) => k && k.state).join(','));
     const toldFor = (k) => !!k && notifications.slice(before).some((n) => n.jobId === k.id && /: done \(ok\)$/.test(n.text));
     // (lane lg-store-writes, 主开发 r221: a run's end is RECORDED first and its For-you item rides that record's landing — a kill
     // first re-judges the end at boot and says it once) the leg waits for WHAT HAPPENED — the item itself, bounded, red by name
     await until(() => toldFor(kids[0]) && toldFor(kids[2]), 10000);
     { const r = require('../src/store-writer.js').storeWriter().flushSync([C.file, C.notifsFile]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the jobs store did not land before the silence control: ${JSON.stringify(r.left)}`); }   // every end LANDED — so the control's silence below is a silence, not a ride still out (a write left owed is red by name, as 7e)
-    ok(toldFor(kids[0]) && C.snapshot(made[0]).notifyUser === true, 'run --at … --notify-user (the CLI\'s body): the child\'s end tells the user, and the cron\'s own record says notifyUser=true', JSON.stringify(notifications.slice(before)));
+    ok(gateOf(toldFor(kids[0])) && C.snapshot(made[0]).notifyUser === true, 'run --at … --notify-user (the CLI\'s body): the child\'s end tells the user, and the cron\'s own record says notifyUser=true', JSON.stringify(notifications.slice(before)));
     ok(!toldFor(kids[1]) && C.snapshot(made[1]).notifyUser === false, 'CONTROL: without the flag the child ends silently for the user, notifyUser=false');
-    ok(toldFor(kids[2]) && C.snapshot(made[2]).notifyUser === true, 'an older CLI\'s body (the flag only inside action.task) is still honoured — and shown', JSON.stringify(made[2] && C.snapshot(made[2]).notifyUser));
+    ok(gateOf(toldFor(kids[2])) && C.snapshot(made[2]).notifyUser === true, 'an older CLI\'s body (the flag only inside action.task) is still honoured — and shown', JSON.stringify(made[2] && C.snapshot(made[2]).notifyUser));
   }
 
   // preview honesty
   C.d.peerReachable = () => false;
   const pv = C.notifyPreview(jn1);
-  ok(pv && pv.enabled === true && pv.mode === 'resume-inject', 'notifyPreview: enabled but unreachable → resume-inject mode');
+  ok(gateOf(pv) && pv.enabled === true && pv.mode === 'resume-inject', 'notifyPreview: enabled but unreachable → resume-inject mode');
   ok(C.notifyPreview(jn3).enabled === false, 'notifyPreview: job-level off reported disabled');
 
   // 7d. 2.344.1 review fixes: missed-{at} is terminal-once; rate floor stashes distinct events
@@ -251,7 +251,7 @@ try {
   C.pendingNotifs.clear();
   C.d.deliverToConversation = async () => { throw new Error('floored events must not hit the socket'); };
   C._notifyOwner({ id: 'jb-floor', name: 'floor-test', state: 'failed', kind: 'task', owner: { conversation: { id: 'conv-T' } } }, { what: 'failed exit=1' });
-  ok((C.pendingNotifs.get('conv-T') || []).some((n) => n.jobId === 'jb-floor'), 'rate-floored DISTINCT event is stashed, not dropped');
+  ok(verdictOf((C.pendingNotifs.get('conv-T') || []).some((n) => n.jobId === 'jb-floor')), 'rate-floored DISTINCT event is stashed, not dropped');
 
   // 7e. subscriptions (2.345.0): a second conversation opts into a visible job
   const cids = [];
@@ -263,11 +263,11 @@ try {
   const rs1 = C.create({ kind: 'task', name: 'sub-test', cmd: { argv: ['sh', '-c', 'exit 1'] }, context: { payload: '订阅测试context说明' }, owner }, caller);
   const js1 = C.jobs.get(rs1.job.id);
   const subCaller = { conversationId: 'conv-SUB', sessionId: 'sess-SUB', sessionCreatedAt: 2, groups: new Set(['T-g']) };
-  ok(C.subscribe(js1, subCaller).ok && C.subscribe(js1, subCaller).already, 'subscribe is idempotent by conversation lineage');
+  ok(gateOf(C.subscribe(js1, subCaller).ok) && verdictOf(C.subscribe(js1, subCaller).already), 'subscribe is idempotent by conversation lineage');
   await until(() => js1.state === 'failed' && cids.some((c) => c.cid === 'conv-T') && cids.some((c) => c.cid === 'conv-SUB') && !!js1.lastNotify, 15000);   // (r221: the owner's message rides the end's landing — waited for itself)
-  ok(cids.some((c) => c.cid === 'conv-T') && cids.some((c) => c.cid === 'conv-SUB'), 'failure notifies OWNER and SUBSCRIBER conversations', JSON.stringify(cids));
-  ok(cids.every((c) => c.hasCtx), 'notification text carries the {payload} context echo (E2E-caught bug pinned)', JSON.stringify(cids));
-  ok(js1.lastNotify && js1.lastNotify.lane === 'message' && C.snapshot(js1).subscribersCount === 1, 'lastNotify narrates the owner lane; snapshot counts subscribers', JSON.stringify({ lastNotify: js1.lastNotify || null, subscribers: C.snapshot(js1).subscribersCount }));
+  ok(gateOf(cids.some((c) => c.cid === 'conv-T')) && verdictOf(cids.some((c) => c.cid === 'conv-SUB')), 'failure notifies OWNER and SUBSCRIBER conversations', JSON.stringify(cids));
+  ok(verdictOf(cids.every((c) => c.hasCtx)), 'notification text carries the {payload} context echo (E2E-caught bug pinned)', JSON.stringify(cids));
+  ok(gateOf(js1.lastNotify) && js1.lastNotify.lane === 'message' && C.snapshot(js1).subscribersCount === 1, 'lastNotify narrates the owner lane; snapshot counts subscribers', JSON.stringify({ lastNotify: js1.lastNotify || null, subscribers: C.snapshot(js1).subscribersCount }));
   ok(C.unsubscribe(js1, subCaller).removed === 1, 'unsubscribe removes the conversation');
 
   // 7f. recurring cron: repeated distinct failures notify EACH time (multi-fire)
@@ -282,7 +282,7 @@ try {
   C._notifyRate.clear(); // both fires produce byte-identical failure text — clear the dedupe as a 15min-apart fire would be
   jc1.nextFireAt = Date.now() - 1000;
   await C._cronTick();
-  ok(await until(() => cronNotifs.length >= 2, 15000), 'a recurring cron child failing on TWO fires notifies twice (multi-fire callbacks work)', `got ${cronNotifs.length}`);
+  ok(verdictOf(await until(() => cronNotifs.length >= 2, 15000)), 'a recurring cron child failing on TWO fires notifies twice (multi-fire callbacks work)', `got ${cronNotifs.length}`);
 
   // 7g. 2.346.0: notifyOk opts scheduled successes in; announce decouples news from exit codes; spill file
   const okNotifs = [];
@@ -292,9 +292,9 @@ try {
   const jo1 = C.jobs.get(ro1.job.id);
   jo1.schedule = { everyMs: 3600e3 }; jo1.nextFireAt = Date.now() - 1000;
   await C._cronTick();
-  ok(await until(() => okNotifs.some((n) => n.text.includes('done')), 15000), '--notify-ok cron child SUCCESS notifies (quiet-success is default, not law)');
+  ok(verdictOf(await until(() => okNotifs.some((n) => n.text.includes('done')), 15000)), '--notify-ok cron child SUCCESS notifies (quiet-success is default, not law)');
   const okChild = [...C.jobs.values()].find((x) => x.cronParent === jo1.id);
-  ok(C.events.some((e) => e.jobId === okChild.id && /done/.test(e.what)), 'notify-ok success also emits the event (panel + injection see it)');
+  ok(verdictOf(C.events.some((e) => e.jobId === okChild.id && /done/.test(e.what))), 'notify-ok success also emits the event (panel + injection see it)');
   // B-644d (2026-10-02, jb-ab77fd67): `vibespace-job run … --at … --notify-ok` — the CLI embeds notifyOk in the
   // cron's spawn-task (the child inherits it: the leg above), but the cron PARENT's record said notifyOk=false, so
   // `show` printed notifyOk=false and the create line said successful fires are SILENT. The parent's snapshot is what
@@ -312,21 +312,21 @@ try {
     const viaEngine = () => { const r = C.create({ ...sent, owner }, caller); return { success: true, job: C.snapshot(C.jobs.get(r.job.id)) }; };
     answer = { success: true, job: { id: 'jb-x', kind: 'cron', name: 'x', nextFireAt: Date.now() + 3600e3 } };
     await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h', '--notify-ok']);
-    ok(sent && sent.action && sent.action.task && sent.action.task.notifyOk === true, 'B-644d: the CLI sends --notify-ok inside the --at spawn-task', JSON.stringify(sent && sent.action));
+    ok(gateOf(sent) && gateOf(sent.action) && gateOf(sent.action.task) && sent.action.task.notifyOk === true, 'B-644d: the CLI sends --notify-ok inside the --at spawn-task', JSON.stringify(sent && sent.action));
     answer = viaEngine();
     ok(answer.job.notifyOk === true, 'B-644d: the engine stores + answers notifyOk=true for that exact body', JSON.stringify({ notifyOk: answer.job.notifyOk }));
     const c1 = await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h', '--notify-ok']);
-    ok(/per-fire notify: ON/.test(c1.out) && !/SUCCESSFUL fires are SILENT/.test(c1.out), 'B-644d: the create line says every fire notifies — never "add --notify-ok"', c1.out);
+    ok(gateOf(/per-fire notify: ON/.test(c1.out)) && !/SUCCESSFUL fires are SILENT/.test(c1.out), 'B-644d: the create line says every fire notifies — never "add --notify-ok"', c1.out);
     await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h']);
     answer = viaEngine();
     const c2 = await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h']);
-    ok(answer.job.notifyOk === false && /SUCCESSFUL fires are SILENT/.test(c2.out) && !/per-fire notify: ON/.test(c2.out), 'B-644d: without --notify-ok the line still says successful fires are silent', c2.out);
+    ok(answer.job.notifyOk === false && gateOf(/SUCCESSFUL fires are SILENT/.test(c2.out)) && !/per-fire notify: ON/.test(c2.out), 'B-644d: without --notify-ok the line still says successful fires are silent', c2.out);
     // verify r1 (N2): with auto-notify OFF (Settings / the group / the job's own --notify off) no fire messages anyone —
     // the per-fire line must say so, never "every fire messages this conversation"
     for (const source of ['global', 'job']) {
       answer = { success: true, job: { id: 'jb-y', kind: 'cron', name: 'y', notifyOk: true, nextFireAt: Date.now() + 3600e3 }, notify: { enabled: false, mode: 'off', source, reason: `auto-notify is OFF at the ${source} level` } };
       const c3 = await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h', '--notify-ok', ...(source === 'job' ? ['--notify', 'off'] : [])]);
-      ok(!/every fire messages this conversation/.test(c3.out) && /NO fire will message this conversation/.test(c3.out) && (source !== 'job' || /vibespace-job notify jb-y on/.test(c3.out)), `B-644d r1: --notify-ok with auto-notify OFF (${source}) — the line says no fire will message, never "every fire messages"`, c3.out);
+      ok(!/every fire messages this conversation/.test(c3.out) && gateOf(/NO fire will message this conversation/.test(c3.out)) && (source !== 'job' || verdictOf(/vibespace-job notify jb-y on/.test(c3.out))), `B-644d r1: --notify-ok with auto-notify OFF (${source}) — the line says no fire will message, never "every fire messages"`, c3.out);
     }
     srv.close();
   }
@@ -340,20 +340,20 @@ try {
     await C._cronTick();
     const fired = await until(() => [...C.jobs.values()].some((x) => x.cronParent === joff.id && x.state === 'done'), 15000);
     await sleep(800);
-    ok(fired && C.notifyPreview(joff).enabled === false && !okNotifs.some((n) => n.text.includes('quiet-off')), 'B-644d r1: a --notify-ok schedule made with --notify off — its fire messages nobody (the child follows its parent\'s switch)', JSON.stringify(okNotifs.map((n) => n.text.slice(0, 80))));
+    ok(gateOf(fired) && C.notifyPreview(joff).enabled === false && !okNotifs.some((n) => n.text.includes('quiet-off')), 'B-644d r1: a --notify-ok schedule made with --notify off — its fire messages nobody (the child follows its parent\'s switch)', JSON.stringify(okNotifs.map((n) => n.text.slice(0, 80))));
     C.jobs.get(joff.id).notify = 'on'; C._notifyRate.clear(); okNotifs.length = 0;
     joff.nextFireAt = Date.now() - 1000;
     await C._cronTick();
-    ok(await until(() => okNotifs.some((n) => n.text.includes('quiet-off')), 15000), 'B-644d r1: …and `vibespace-job notify <cron> on` turns its fires back on (the switch is read at fire time)');
+    ok(verdictOf(await until(() => okNotifs.some((n) => n.text.includes('quiet-off')), 15000)), 'B-644d r1: …and `vibespace-job notify <cron> on` turns its fires back on (the switch is read at fire time)');
   }
   C._notifyRate.clear(); okNotifs.length = 0;
   const annSub = { conversationId: 'conv-ANN', sessionId: 's', sessionCreatedAt: 3, groups: new Set(['T-g']) };
   C.subscribe(jo1, annSub);
   const ann = C.announce(okChild, '页面出现新条目: Fable 5 发布');
-  ok(ann.ok && await until(() => okNotifs.length >= 2, 15000) && okNotifs.some((n) => n.cid === 'conv-T' && n.text.includes('页面出现新条目')) && okNotifs.some((n) => n.cid === 'conv-ANN'), 'announce reaches owner AND cron-parent subscribers with the custom text', JSON.stringify(okNotifs.map((n) => n.cid)));
+  ok(gateOf(ann.ok) && gateOf(await until(() => okNotifs.length >= 2, 15000)) && gateOf(okNotifs.some((n) => n.cid === 'conv-T' && n.text.includes('页面出现新条目'))) && verdictOf(okNotifs.some((n) => n.cid === 'conv-ANN')), 'announce reaches owner AND cron-parent subscribers with the custom text', JSON.stringify(okNotifs.map((n) => n.cid)));
   ok(!C.announce(okChild, '').ok, 'announce refuses empty text');
   const sp = C.spillNotifs('conv-T', [{ jobId: 'jb-x', jobName: 'n', text: 'done', ts: Date.now() }]);
-  ok(sp && fs.readFileSync(sp, 'utf-8').includes('jb-x'), 'spill file written with the full history');
+  ok(gateOf(sp) && verdictOf(fs.readFileSync(sp, 'utf-8').includes('jb-x')), 'spill file written with the full history');
 
   // 7h. 2.347.0: subscription regex filters
   const filtNotifs = [];
@@ -363,18 +363,18 @@ try {
   const jf1 = C.jobs.get(rf1.job.id);
   const spaceSub = { conversationId: 'conv-SPACEX', sessionId: 's2', sessionCreatedAt: 4, groups: new Set(['T-g']) };
   const sres = C.subscribe(jf1, spaceSub, { filter: 'SpaceX|Starship' });
-  ok(sres.ok && sres.filter === 'SpaceX|Starship', 'subscribe stores the filter');
-  ok(C.subscribe(jf1, spaceSub, { filter: 'onlyThis' }).updated, 're-subscribe UPDATES the filter in place');
+  ok(gateOf(sres.ok) && sres.filter === 'SpaceX|Starship', 'subscribe stores the filter');
+  ok(verdictOf(C.subscribe(jf1, spaceSub, { filter: 'onlyThis' }).updated), 're-subscribe UPDATES the filter in place');
   C.subscribe(jf1, spaceSub, { filter: 'SpaceX' });
   ok(!C.subscribe(jf1, spaceSub, { filter: '(' }).ok, 'invalid regex refused');
   C._notifyRate.clear(); filtNotifs.length = 0;
   C.announce(jf1, '普通新闻: 今天天气不错');
   await sleep(400);
-  ok(filtNotifs.includes('conv-T') && !filtNotifs.includes('conv-SPACEX'), 'non-matching announce reaches owner but NOT the filtered subscriber', JSON.stringify(filtNotifs));
+  ok(gateOf(filtNotifs.includes('conv-T')) && !filtNotifs.includes('conv-SPACEX'), 'non-matching announce reaches owner but NOT the filtered subscriber', JSON.stringify(filtNotifs));
   C._notifyRate.clear(); filtNotifs.length = 0;
   C.announce(jf1, 'BREAKING: spacex Starship 第七次试飞成功');
   await sleep(400);
-  ok(filtNotifs.includes('conv-SPACEX'), 'matching announce (case-insensitive) reaches the filtered subscriber', JSON.stringify(filtNotifs));
+  ok(verdictOf(filtNotifs.includes('conv-SPACEX')), 'matching announce (case-insensitive) reaches the filtered subscriber', JSON.stringify(filtNotifs));
   C.stop(jf1, { force: true });
 
   // 7i. 2.350.0: answering a panel clears its inbox entry; rm clears everything
@@ -385,19 +385,19 @@ try {
   const ask1 = C.ask(jp1, { title: 't', blocks: [{ type: 'md', text: 'x' }, { type: 'buttons', options: [{ id: 's', label: 'ok' }] }] });
   C.answerPanel(jp1, { button: 's', version: ask1.version }); // r6 D-F5: an answer names the panel it answers
   await until(() => resolved.some((r) => r.jobId === jp1.id), 5000);   // (r221: the answer's resolve rides the record's landing — waited for itself)
-  ok(resolved.some((r) => r.jobId === jp1.id), 'answerPanel resolves the needs-your-input inbox entry', JSON.stringify(resolved));
+  ok(verdictOf(resolved.some((r) => r.jobId === jp1.id)), 'answerPanel resolves the needs-your-input inbox entry', JSON.stringify(resolved));
   C.stop(jp1, { force: true });
   const settled = await until(() => ['interrupted', 'failed'].includes(jp1.state));
   const rmr = C.rm(jp1, {});
   await until(() => resolved.some((r) => r.jobId === jp1.id && r.opts && r.opts.onlyAsk === false), 5000);   // (r221: the removal's resolve rides its landing — waited for itself)
-  ok(resolved.some((r) => r.jobId === jp1.id && r.opts && r.opts.onlyAsk === false), 'rm clears ALL of the job inbox items', `settled=${settled} state=${jp1.state} rm=${JSON.stringify(rmr)} resolved=${JSON.stringify(resolved)}`);
+  ok(verdictOf(resolved.some((r) => r.jobId === jp1.id && r.opts && r.opts.onlyAsk === false)), 'rm clears ALL of the job inbox items', `settled=${settled} state=${jp1.state} rm=${JSON.stringify(rmr)} resolved=${JSON.stringify(resolved)}`);
 
   // 8. store hygiene: raw token never persisted
   C._save(); try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U4: landed before the file is read
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');
 
   // 9. rm --stop on terminal + cleanup
-  ok(C.rm(j2, {}).ok, 'rm on a terminal task succeeds');
+  ok(verdictOf(C.rm(j2, {}).ok), 'rm on a terminal task succeeds');
   C.shutdown();
 
   // 10. B-f8c7 census (lane job-vendor-ban): EVERY command a job can run passes the ONE vet — a planted vendor command in
@@ -415,21 +415,21 @@ try {
   for (const [who, cl] of [['agent', caller], ['owner', { isUser: true, groups: new Set() }]]) {
     for (const schedule of [{ cron: '7 * * * *' }, { at: Date.now() + 3600e3 }, { everyMs: 3600e3 }]) {
       const r = D.create({ kind: 'cron', name: `vend-${who}`, schedule, action: { type: 'spawn-task', task: { cmd: vend('create') } }, owner }, cl);
-      ok(/vendor\/credential/.test(r.error || '') && D.jobs.size === 0, `census: ${who} scheduling (${Object.keys(schedule)[0]}) the vendor command in action.task.cmd is refused, no record`, r.error || `CREATED ${r.job && r.job.id}`);
+      ok(gateOf(/vendor\/credential/.test(r.error || '')) && D.jobs.size === 0, `census: ${who} scheduling (${Object.keys(schedule)[0]}) the vendor command in action.task.cmd is refused, no record`, r.error || `CREATED ${r.job && r.job.id}`);
     }
   }
   // control: the harness sees a run — the CLEAN twin of the same scheduled shape fires and writes its marker
   const rcl = D.create({ kind: 'cron', name: 'clean-twin', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', `echo ok >> ${CLEAN}`] } } }, owner }, caller);
   D.jobs.get(rcl.job.id).nextFireAt = Date.now() - 1000;
   await D._cronTick();
-  ok(await until(() => fs.existsSync(CLEAN), 15000), 'census control: the clean twin of the scheduled shape fires and runs');
+  ok(verdictOf(await until(() => fs.existsSync(CLEAN), 15000)), 'census control: the clean twin of the scheduled shape fires and runs');
   // (b) a scheduled record persisted BEFORE the census widened (an older engine stored it): its fire refuses, the timer parks
   const legacy = { id: 'jb-legacy-cron', kind: 'cron', name: 'legacy-vendor-timer', schedule: { everyMs: 3600e3 }, catchUp: 'once', action: { type: 'spawn-task', task: { cmd: vend('cron-fire') } }, owner, access: { view: 'group', control: 'session' }, desiredUp: true, state: 'scheduled', supervise: { consecutiveFails: 0, parkedAt: null }, runs: [], createdAt: Date.now(), nextFireAt: Date.now() - 1000 };
   D.jobs.set(legacy.id, legacy);
   await D._cronTick();
   await sleep(1500);
   const lkid = [...D.jobs.values()].find((x) => x.cronParent === legacy.id);
-  ok(!ran() && legacy.state === 'failed' && legacy.desiredUp === false && legacy.nextFireAt == null && lkid && lkid.state === 'failed' && !(lkid.runs || []).length, "census: a pre-census record's cron fire never runs its vendor child — child and timer park", `ran=${ran()} state=${legacy.state} up=${legacy.desiredUp} kid=${lkid && lkid.state}`);
+  ok(!ran() && legacy.state === 'failed' && legacy.desiredUp === false && legacy.nextFireAt == null && gateOf(lkid) && lkid.state === 'failed' && !(lkid.runs || []).length, "census: a pre-census record's cron fire never runs its vendor child — child and timer park", `ran=${ran()} state=${legacy.state} up=${legacy.desiredUp} kid=${lkid && lkid.state}`);
   const refusals = D.events.filter((e) => /refused to run/.test(e.what || '')).length;
   legacy.nextFireAt = Date.now() - 1000;
   await D._cronTick();
@@ -442,7 +442,7 @@ try {
   jed.cmd = vend('edit');
   const rst = D.start(jed);
   await sleep(800);
-  ok(/vendor\/credential/.test(rst.error || '') && jed.runs.length === runsBefore && !ran() && jed.state === 'failed', 'census: start of an edited job now carrying the vendor command refuses — no run', JSON.stringify(rst));
+  ok(gateOf(/vendor\/credential/.test(rst.error || '')) && jed.runs.length === runsBefore && !ran() && jed.state === 'failed', 'census: start of an edited job now carrying the vendor command refuses — no run', JSON.stringify(rst));
   // (c2) start on a LIVE job whose stored command now matches answers "already running" — the live process is never
   //      re-judged into 'failed' (it would drop out of the sweep's tracking)
   const rlv = D.create({ kind: 'task', name: 'live-edit', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller);
@@ -450,7 +450,7 @@ try {
   await until(() => D._verifyAlive(D._readStamp(jlv)), 15000);
   jlv.cmd = vend('live');
   const rlvs = D.start(jlv);
-  ok(/already running/.test(rlvs.error || '') && jlv.state === 'up' && jlv.desiredUp === true, 'census: start on a LIVE job is "already running" — never parked under a live process', `${JSON.stringify(rlvs)} state=${jlv.state}`);
+  ok(gateOf(/already running/.test(rlvs.error || '')) && jlv.state === 'up' && jlv.desiredUp === true, 'census: start on a LIVE job is "already running" — never parked under a live process', `${JSON.stringify(rlvs)} state=${jlv.state}`);
   D.stop(jlv, { force: true });
   await until(() => ['interrupted', 'failed'].includes(jlv.state), 15000);
   // (d) keep-up restart: the supervisor re-spawns the STORED record — refused at the door, the service parks
@@ -459,7 +459,7 @@ try {
   let threw = null;
   try { D._spawn(svc, 'restart-policy'); } catch (e) { threw = e.message; }
   await sleep(800);
-  ok(/vendor\/credential/.test(threw || '') && !ran() && svc.state === 'failed' && svc.desiredUp === false && !svc.runs.length, 'census: a keep-up restart of a vendor service is refused at the door and parks', `threw=${threw} state=${svc.state}`);
+  ok(gateOf(/vendor\/credential/.test(threw || '')) && !ran() && svc.state === 'failed' && svc.desiredUp === false && !svc.runs.length, 'census: a keep-up restart of a vendor service is refused at the door and parks', `threw=${threw} state=${svc.state}`);
   // (e) boot replay: a desiredUp service persisted pre-census is NOT respawned by the next engine generation
   D.jobs.set('jb-legacy-svc2', { ...svc, id: 'jb-legacy-svc2', name: 'legacy-vendor-svc2', cmd: vend('boot'), desiredUp: true, state: 'down', supervise: { consecutiveFails: 0, parkedAt: null }, runs: [] });
   D._save();
@@ -468,12 +468,12 @@ try {
   const E = new JobManager(bdeps); E.init();
   await sleep(1500);
   const es2 = E.jobs.get('jb-legacy-svc2');
-  ok(E.ready && !E.readOnly && !ran() && es2 && es2.state === 'failed' && es2.desiredUp === false && !(es2.runs || []).length, 'census: boot replay of a pre-census vendor service refuses — nothing runs', `ran=${ran()} state=${es2 && es2.state}`);
+  ok(gateOf(E.ready) && !E.readOnly && !ran() && gateOf(es2) && es2.state === 'failed' && es2.desiredUp === false && !(es2.runs || []).length, 'census: boot replay of a pre-census vendor service refuses — nothing runs', `ran=${ran()} state=${es2 && es2.state}`);
   // (f) verify r3 (owner decision 2026-10-03): ONLY an obvious read of a subscription sign-in is refused. An agent's --every
   //     reading codex's login file is refused at create; an agent's --every of an API call with its own key, of `claude -p` and
   //     of `codex exec` is CREATED and FIRES (r1/r2's host and timer rules refused each).
   const cred = E.create({ kind: 'cron', name: 'r3-cred', schedule: { everyMs: 1800e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', `echo cred >> ${MARK} # jq . ~/.codex/auth.json`] } } }, owner }, caller);
-  ok(cred.error && cred.error.includes('vendor/credential pattern (.codex/auth.json)') && ![...E.jobs.values()].some((j) => j.name === 'r3-cred'), "r3: an agent's --every reading ~/.codex/auth.json is refused at create, named in words", cred.error || 'CREATED');
+  ok(gateOf(cred.error) && gateOf(cred.error.includes('vendor/credential pattern (.codex/auth.json)')) && ![...E.jobs.values()].some((j) => j.name === 'r3-cred'), "r3: an agent's --every reading ~/.codex/auth.json is refused at create, named in words", cred.error || 'CREATED');
   const PASS = path.join(bdir, 'R3-PASS');
   const tags = { key: 'curl -s https://api.anthropic.com/v1/messages -H "x-api-key: $ANTHROPIC_API_KEY"', print: 'claude -p "summarize the log"', codex: 'codex exec "summarize"' };
   for (const [tag, shape] of Object.entries(tags)) {
@@ -483,7 +483,7 @@ try {
   }
   await E._cronTick();
   const passed = () => (fs.existsSync(PASS) ? fs.readFileSync(PASS, 'utf8') : '');
-  ok(await until(() => Object.keys(tags).every((t) => passed().includes(t)), 15000), 'r3 pass leg: each of them FIRES at the tick', passed() || 'never ran');
+  ok(verdictOf(await until(() => Object.keys(tags).every((t) => passed().includes(t)), 15000)), 'r3 pass leg: each of them FIRES at the tick', passed() || 'never ran');
   for (const t of E._timers) clearInterval(t);
   E.shutdown();
   // 11. lane job-publish-stable: a published service whose process listens LATE is published http (the publish waits for
@@ -522,9 +522,9 @@ try {
     await sleep(600);
     const early = F.snapshot(job);
     ok(early.publishState === 'publishing' && !early.publishedUrl && !calls.length, 'while the service is still starting: publishState=publishing, nothing published yet', JSON.stringify({ s: early.publishState, calls }));
-    ok(await until(() => !!job.publishedUrl, 20000), 'the late listener gets a public URL');
+    ok(verdictOf(await until(() => !!job.publishedUrl, 20000)), 'the late listener gets a public URL');
     const U = job.publishedUrl;
-    ok(calls.length === 1 && calls[0].answered && calls[0].proto === 'http' && /^https:\/\//.test(U), 'the probe ran only once the port answered → http, https://<sub> (no TCP)', JSON.stringify(calls));
+    ok(calls.length === 1 && gateOf(calls[0].answered) && calls[0].proto === 'http' && verdictOf(/^https:\/\//.test(U)), 'the probe ran only once the port answered → http, https://<sub> (no TCP)', JSON.stringify(calls));
     // the CLI prints it — show / list / poll against a stand-in agent API serving the engine's own snapshot
     const api = http.createServer((q, s) => {
       const snap = { ...jobModel.agentJobView(F.snapshot(job, { tail: 5 }), { mine: true }), mine: true, mySubscription: null };
@@ -537,24 +537,24 @@ try {
       let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', () => res(out));
     });
     const showOut = await cli('show', job.id), listOut = await cli('list'), pollOut = await cli('poll', job.id);
-    ok(showOut.includes(`public URL: ${U}`) && /anyone with the link/.test(showOut), 'vibespace-job show prints the public URL (with the public caution)', showOut);
-    ok(listOut.includes(`↗ ${U}`), 'vibespace-job list appends ↗ <url>', listOut);
-    ok(pollOut.includes(`public URL: ${U}`), 'vibespace-job poll prints the public URL', pollOut);
+    ok(gateOf(showOut.includes(`public URL: ${U}`)) && verdictOf(/anyone with the link/.test(showOut)), 'vibespace-job show prints the public URL (with the public caution)', showOut);
+    ok(verdictOf(listOut.includes(`↗ ${U}`)), 'vibespace-job list appends ↗ <url>', listOut);
+    ok(verdictOf(pollOut.includes(`public URL: ${U}`)), 'vibespace-job poll prints the public URL', pollOut);
     // stop → start: the same URL comes back, no notice
     F.stop(job);
-    ok(await until(() => !job.publishedUrl && job.state !== 'up', 15000), 'stop takes the URL down');
+    ok(verdictOf(await until(() => !job.publishedUrl && job.state !== 'up', 15000)), 'stop takes the URL down');
     const downOut = await cli('show', job.id);
-    ok(downOut.includes(`the next start publishes ${U} again`), 'show of a stopped service names the URL its next start brings back', downOut);
+    ok(verdictOf(downOut.includes(`the next start publishes ${U} again`)), 'show of a stopped service names the URL its next start brings back', downOut);
     F.start(job);
-    ok(await until(() => !!job.publishedUrl, 20000) && job.publishedUrl === U && !said.length, 'stop → start (a late listener again) republishes the SAME URL — no change notice', JSON.stringify({ u: job.publishedUrl, said }));
+    ok(gateOf(await until(() => !!job.publishedUrl, 20000)) && job.publishedUrl === U && !said.length, 'stop → start (a late listener again) republishes the SAME URL — no change notice', JSON.stringify({ u: job.publishedUrl, said }));
     // a URL that changes is said: the user explicitly unpublishes (the name is forgotten), the next start gets a new one
     goneUrl = U; await pf.unpublish(job._pfId);
     F.stop(job);
     await until(() => job.state !== 'up', 15000);
     F.start(job);
-    ok(await until(() => !!job.publishedUrl, 20000) && job.publishedUrl !== U, 'after an explicit unpublish the next start has a NEW URL', job.publishedUrl);
+    ok(gateOf(await until(() => !!job.publishedUrl, 20000)) && job.publishedUrl !== U, 'after an explicit unpublish the next start has a NEW URL', job.publishedUrl);
     await until(() => said.length >= 1, 5000); // B-74f5: said once the check found the new address answering and the old one gone
-    ok(said.length === 1 && said[0].includes(U) && said[0].includes(job.publishedUrl) && /CHANGED/.test(said[0]), 'the owner conversation gets ONE notice naming the old and the new URL (B-74f5: once the new answered and the old failed)', JSON.stringify(said));
+    ok(said.length === 1 && gateOf(said[0].includes(U)) && gateOf(said[0].includes(job.publishedUrl)) && verdictOf(/CHANGED/.test(said[0])), 'the owner conversation gets ONE notice naming the old and the new URL (B-74f5: once the new answered and the old failed)', JSON.stringify(said));
     F.stop(job);
     await until(() => job.state !== 'up', 15000);
     // NEGATIVE CONTROL (patched copy, outside the tree): without the wait the publish probes a port that does not answer yet
@@ -569,7 +569,7 @@ try {
     const cg = G.create({ kind: 'service', name: 'late-web-ctl', cmd: late(2500), ports: [P], publish: true, restart: 'never', owner }, caller);
     const gj = G.jobs.get(cg.job.id);
     await until(() => calls.length > 0, 10000);
-    ok(calls.length && !calls[0].answered, 'NEGATIVE CONTROL: without the wait the first publish runs while the port is still silent', JSON.stringify(calls));
+    ok(gateOf(calls.length) && !calls[0].answered, 'NEGATIVE CONTROL: without the wait the first publish runs while the port is still silent', JSON.stringify(calls));
     G.stop(gj);
     await until(() => gj.state !== 'up', 15000);
     api.close();
@@ -710,10 +710,10 @@ setInterval(() => { }, 1000);
     // ── the build ──
     const realRun = await measure('real');
     if (realRun.cmdline) console.log('    wrapper cmdline (real): ' + argsOf(realRun.cmdline).map((a, i) => (i === 0 ? 'node' : a.replace(dir, '<tmp>'))).join(' '));
-    for (const r of judgeRun(realRun)) ok(r.good, 'spec-off-argv: ' + r.name, r.why);
-    for (const r of judgeNoEnv(direct('noenv', WRAP, {}))) ok(r.good, 'spec-off-argv: ' + r.name);
+    for (const r of judgeRun(realRun)) ok(verdictOf(r.good), 'spec-off-argv: ' + r.name, r.why);
+    for (const r of judgeNoEnv(direct('noenv', WRAP, {}))) ok(verdictOf(r.good), 'spec-off-argv: ' + r.name);
     const out = direct('outside', WRAP, { env: { PATH: process.env.PATH } }, { outside: true });
-    ok(out.status === 2 && /refused: the spec path names no file of the ctl dir/.test(out.stderr) && out.specLeft && out.child === null, 'spec-off-argv: a spec path outside the ctl dir is neither read nor removed — refused, named', JSON.stringify({ status: out.status, stderr: out.stderr.slice(0, 120) }));
+    ok(out.status === 2 && gateOf(/refused: the spec path names no file of the ctl dir/.test(out.stderr)) && gateOf(out.specLeft) && out.child === null, 'spec-off-argv: a spec path outside the ctl dir is neither read nor removed — refused, named', JSON.stringify({ status: out.status, stderr: out.stderr.slice(0, 120) }));
 
     // ── lane job-wrapper-update-window (fb-7f7be1e24e): THE PROTOCOL IS VERSIONED, NEVER ASSUMED. An update writes the new
     // wrapper to disk before it restarts the server, and the server still running spawns it: on the owner's hub a .330
@@ -732,9 +732,9 @@ setInterval(() => { }, 1000);
         b64: b64(), files: fs.readdirSync(ctl).sort().map((n) => [n, fs.readFileSync(path.join(ctl, n), 'latin1')]) };
     }
     const pNew = byHand('new', WRAP, ({ file }) => [file(), '--proto=' + WRAPPER_PROTO]);
-    ok(pNew.ran && pNew.status === 3 && pNew.exit && pNew.exit.code === 3 && !/warning/.test(pNew.log) && !pNew.specLeft, `protocol: THIS server's call (a spec file + --proto=${WRAPPER_PROTO}) runs the job; its exit is the job's (3)`, JSON.stringify(pNew));
+    ok(gateOf(pNew.ran) && pNew.status === 3 && gateOf(pNew.exit) && pNew.exit.code === 3 && !/warning/.test(pNew.log) && !pNew.specLeft, `protocol: THIS server's call (a spec file + --proto=${WRAPPER_PROTO}) runs the job; its exit is the job's (3)`, JSON.stringify(pNew));
     const p331 = byHand('331', WRAP, ({ file }) => [file()]);
-    ok(p331.ran && p331.status === 3 && p331.exit && p331.exit.code === 3 && !/warning/.test(p331.log), 'protocol: a .331/.332 server\'s call (a spec file, no protocol said) runs the job — known by its shape', JSON.stringify(p331));
+    ok(gateOf(p331.ran) && p331.status === 3 && gateOf(p331.exit) && p331.exit.code === 3 && !/warning/.test(p331.log), 'protocol: a .331/.332 server\'s call (a spec file, no protocol said) runs the job — known by its shape', JSON.stringify(p331));
     // lane job-wrapper-proto1-retire (2.369.340 — the expiry test-job-model set): PROTOCOL 1 IS NEVER READ. A ≤ .330
     // server's call (the spec base64 on argv) meets this wrapper only on a hub that skipped nine releases mid-update: the
     // run ends «not started» (exit 75, update_window — the road of any protocol this wrapper does not speak), the argument
@@ -746,20 +746,20 @@ setInterval(() => { }, 1000);
     const quiet = (p) => p.stderr === LINE330 && p.log === LINE330 && !specBytes(p, p.stderr) && JSON.stringify(p.files.map(([n]) => n)) === '["current.log","exit.json","pid.json"]' && !p.files.some(([, t]) => specBytes(p, t));
     const p330 = byHand('330', WRAP, ({ b64 }) => [b64()], CANARY);
     console.log(`    a .330 call (node <wrapper> <ctl> <${p330.b64.length} base64 chars>, a canary in its env) — stderr: ${JSON.stringify(p330.stderr)}; the ctl dir: ${p330.files.map(([n]) => n).join(' ')}`);
-    ok(notStarted(p330), `protocol: a .330 server's call (the spec base64 on argv) never starts the job — exit 75, exit.json reason update_window (server 1, wrapper ${WRAPPER_PROTO}): the road of any protocol this wrapper does not speak`, JSON.stringify({ status: p330.status, exit: p330.exit, ran: p330.ran }));
-    ok(quiet(p330), 'protocol: …said by name, the spec never read — stderr and the job\'s log are exactly «not started: the server spoke protocol 1 …», no byte of the spec (the canary, its name, any 16 chars of the argument) on stderr or in the ctl dir, which holds only the run\'s pid.json, exit.json and current.log', JSON.stringify({ stderr: p330.stderr, files: p330.files.map(([n, t]) => [n, t.slice(0, 80)]) }));
+    ok(verdictOf(notStarted(p330)), `protocol: a .330 server's call (the spec base64 on argv) never starts the job — exit 75, exit.json reason update_window (server 1, wrapper ${WRAPPER_PROTO}): the road of any protocol this wrapper does not speak`, JSON.stringify({ status: p330.status, exit: p330.exit, ran: p330.ran }));
+    ok(verdictOf(quiet(p330)), 'protocol: …said by name, the spec never read — stderr and the job\'s log are exactly «not started: the server spoke protocol 1 …», no byte of the spec (the canary, its name, any 16 chars of the argument) on stderr or in the ctl dir, which holds only the run\'s pid.json, exit.json and current.log', JSON.stringify({ stderr: p330.stderr, files: p330.files.map(([n, t]) => [n, t.slice(0, 80)]) }));
     const pFut = byHand('future', WRAP, ({ file }) => [file(), '--proto=' + (WRAPPER_PROTO + 1)]);
-    ok(!pFut.ran && pFut.status === 75 && pFut.exit && pFut.exit.reason === 'update_window' && pFut.exit.code === 75 && pFut.exit.proto && pFut.exit.proto.server === WRAPPER_PROTO + 1 && pFut.exit.proto.wrapper === WRAPPER_PROTO && /^\[job-wrapper\] not started: the server speaks protocol \d+, this wrapper \d+/.test(pFut.log) && !pFut.specLeft,
+    ok(!pFut.ran && pFut.status === 75 && gateOf(pFut.exit) && pFut.exit.reason === 'update_window' && pFut.exit.code === 75 && gateOf(pFut.exit.proto) && pFut.exit.proto.server === WRAPPER_PROTO + 1 && pFut.exit.proto.wrapper === WRAPPER_PROTO && gateOf(/^\[job-wrapper\] not started: the server speaks protocol \d+, this wrapper \d+/.test(pFut.log)) && !pFut.specLeft,
       'protocol: a protocol this wrapper does not speak never starts the job — exit.json says update_window (exit 75, both protocols), the named line, the spec file removed UNREAD', JSON.stringify({ status: pFut.status, exit: pFut.exit, ran: pFut.ran, specLeft: pFut.specLeft }));
     const pBad = byHand('garbage', WRAP, ({ file }) => [file(), '--proto=two']);
-    ok(!pBad.ran && pBad.status === 2 && /refused: the protocol argument is unreadable/.test(pBad.log) && !pBad.specLeft, 'protocol: an unreadable protocol argument is refused by name — the spec file removed unread', JSON.stringify(pBad));
+    ok(!pBad.ran && pBad.status === 2 && gateOf(/refused: the protocol argument is unreadable/.test(pBad.log)) && !pBad.specLeft, 'protocol: an unreadable protocol argument is refused by name — the spec file removed unread', JSON.stringify(pBad));
     const protoOf = (/^const PROTO = (\d+);$/m.exec(WRAP) || [])[1];
     ok(Number(protoOf) === WRAPPER_PROTO, `protocol: the server's WRAPPER_PROTO (${WRAPPER_PROTO}) is the wrapper's own PROTO (${protoOf}) — the pair moves together`);
     // the CONTROL: the protocol-1 read patched back in (the ≤ .339 compat: the argument decoded into the spec) — the .330
     // call RUNS, the canary reaches the job: both legs above are RED on it
     const V1 = 'else if (v1) { // nothing read, nothing removed: the argument is no file, and its bytes are the job\'s secrets';
     const pOld = byHand('compat-back', swap(WRAP, V1, "else if (v1) { spec = JSON.parse(Buffer.from(specPath, 'base64').toString('utf-8')); } else if (false) {"), ({ b64 }) => [b64()], CANARY);
-    ok(pOld.ran && pOld.status === 3 && pOld.jobSaw === CANARY && !notStarted(pOld) && !quiet(pOld), 'NEGATIVE CONTROL: the protocol-1 read patched back in ⇒ the .330 call RUNS the job (exit 3) with the canary from the command line — both legs above are RED on it', JSON.stringify({ status: pOld.status, exit: pOld.exit, ran: pOld.ran }));
+    ok(gateOf(pOld.ran) && pOld.status === 3 && pOld.jobSaw === CANARY && !notStarted(pOld) && !quiet(pOld), 'NEGATIVE CONTROL: the protocol-1 read patched back in ⇒ the .330 call RUNS the job (exit 3) with the canary from the command line — both legs above are RED on it', JSON.stringify({ status: pOld.status, exit: pOld.exit, ran: pOld.ran }));
 
     // O_EXCL: a name already at the next run's spec path (here a planted link) refuses the start — never written through
     // (an open that followed it would write the job's token into whatever it names), never removed. The engine in-process,
@@ -785,7 +785,7 @@ setInterval(() => { }, 1000);
       return f;
     }
     const ex = await exclLeg(JobManager, 'real');
-    ok(/EEXIST/.test(ex.error) && ex.bait === 'not the spec' && ex.link, 'spec-off-argv: a name already at the spec path (a planted link) refuses the start — never written through, never removed', JSON.stringify(ex));
+    ok(gateOf(/EEXIST/.test(ex.error)) && ex.bait === 'not the spec' && verdictOf(ex.link), 'spec-off-argv: a name already at the spec path (a planted link) refuses the start — never written through, never removed', JSON.stringify(ex));
 
     // ── RED controls: each mutant copy turns ITS rows red (and the build above held them green) ──
     const MC = mutantCopies('jobs-spec', ROOT);
@@ -799,20 +799,20 @@ setInterval(() => { }, 1000);
     });
     const m1r = reds(judgeRun(m1));
     if (m1.cmdline) { const a = argsOf(m1.cmdline)[3] || ''; console.log(`    wrapper cmdline (M1): node <wrapper> <ctl> <${a.length} base64 chars> — decodes to a spec carrying ${['PROBE_SECRET', 'VIBESPACE_JOB_TOKEN'].filter((k) => Buffer.from(a, 'base64').toString('utf8').includes(k)).join(' + ')}; rows red: ${m1r.join(' ')}`); }
-    ok(['argv', 'secret', 'jbt', 'exit'].every((k) => m1r.includes(k)) && !m1.child && !!m1.exit && m1.exit.reason === 'update_window' && m1.exit.code === 75, 'NEGATIVE CONTROL M1: the spec on argv again (the .330 call) ⇒ the cmdline rows go RED (the secret and the jbt_ token read back out of the wrapper\'s cmdline), and the real wrapper never starts the job (exit 75, update_window)', m1r.join(' ') + ' ' + JSON.stringify(m1.exit || m1.error));
+    ok(gateOf(['argv', 'secret', 'jbt', 'exit'].every((k) => m1r.includes(k))) && !m1.child && !!m1.exit && m1.exit.reason === 'update_window' && m1.exit.code === 75, 'NEGATIVE CONTROL M1: the spec on argv again (the .330 call) ⇒ the cmdline rows go RED (the secret and the jbt_ token read back out of the wrapper\'s cmdline), and the real wrapper never starts the job (exit 75, update_window)', m1r.join(' ') + ' ' + JSON.stringify(m1.exit || m1.error));
     // M2 — the wrapper inherits the hub's env again (the spawn passes no env). B-91aa's remainder (r4591): a job's wrapper is a start of
     // THE STARTER, born with the service env — the hub's own env cannot reach it there; the inheriting spawn is the HUB's road (a vault
     // job's alone today): the copy puts every job back on it (the starter line cut) AND drops its env
     const ASK = "      if (!vj) { this._askStart(job, argv, specPath, trigger); return; }   // B-91aa's remainder: THE STARTER starts it (below) — a VAULT job alone keeps this road (its values ride fd 3: r4591 (A))\n";
     const m2r = reds(judgeRun(await measure('m2-inherit', { jobsJs: MC.write('src/jobs.js', swap(swap(JS, ASK, ''), ", env: wrapperEnv(job.id) }", ' }'), 'inherit') })));
-    ok(['wallow', 'wplant'].every((k) => m2r.includes(k)) && !m2r.includes('cplant'), 'NEGATIVE CONTROL M2: the wrapper spawned with no env ⇒ the planted tokens are in ITS /proc/<pid>/environ (the job stays clean: jobEnv strips them)', m2r.join(' '));
+    ok(gateOf(['wallow', 'wplant'].every((k) => m2r.includes(k))) && !m2r.includes('cplant'), 'NEGATIVE CONTROL M2: the wrapper spawned with no env ⇒ the planted tokens are in ITS /proc/<pid>/environ (the job stays clean: jobEnv strips them)', m2r.join(' '));
     // M3 — the wrapper falls back to its own env again (the pre-fix `spec.env || process.env`, no refusal)
     const m3 = direct('m3-fallback', swap(swap(WRAP, "if (!refusal && !(spec.env && typeof spec.env === 'object')) refusal = 'the spec carries no env (a job never runs on the wrapper\\'s own)';", ''), '  env: spec.env,', '  env: spec.env || process.env,'), {});
     const m3r = reds(judgeNoEnv(m3));
-    ok(['nz', 'line', 'noplant'].every((k) => m3r.includes(k)) && !!(m3.child && Object.keys(PLANT).every((k) => k in m3.child.env)), 'NEGATIVE CONTROL M3: the fallback restored ⇒ a spec without env RUNS, and the job sees both planted tokens', m3r.join(' '));
+    ok(gateOf(['nz', 'line', 'noplant'].every((k) => m3r.includes(k))) && !!(m3.child && Object.keys(PLANT).every((k) => k in m3.child.env)), 'NEGATIVE CONTROL M3: the fallback restored ⇒ a spec without env RUNS, and the job sees both planted tokens', m3r.join(' '));
     // M4 — the spec opened with a plain 'w' (no O_EXCL): the planted link is followed and the job's token lands in its target
     const m4 = await exclLeg(MC.load('src/jobs.js', swap(JS, 'fs.openSync(specPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600)', "fs.openSync(specPath, 'w', 0o600)"), 'no-excl').JobManager, 'm4');
-    ok(!m4.error && m4.bait.includes('jbt_'), 'NEGATIVE CONTROL M4: no O_EXCL ⇒ the start goes through the planted link and writes the job token into its target', JSON.stringify({ error: m4.error, bait: m4.bait.slice(0, 20) }));
+    ok(!m4.error && verdictOf(m4.bait.includes('jbt_')), 'NEGATIVE CONTROL M4: no O_EXCL ⇒ the start goes through the planted link and writes the job token into its target', JSON.stringify({ error: m4.error, bait: m4.bait.slice(0, 20) }));
   }
   // 13. lane job-wrapper-update-window (fb-7f7be1e24e): AN UPDATE'S WINDOW IS NOT A FAILURE. The REAL engine over scratch
   //     dataDirs whose bin/job-wrapper.js speaks ANOTHER protocol (a copy, PROTO + 1). Written after the engine booted (an
@@ -851,16 +851,16 @@ setInterval(() => { }, 1000);
     const ja = task(XA, 'uw-task');
     await settle(XA, ja);
     const ra = lastRun(ja), exA = (() => { try { return JSON.parse(fs.readFileSync(exitOf(ja), 'utf8')); } catch { return null; } })();
-    ok(exA && exA.reason === 'update_window' && exA.code === 75, 'update-window: the wrapper of another protocol ended the run BEFORE the job started (exit.json reason update_window)', JSON.stringify(exA));
+    ok(gateOf(exA) && exA.reason === 'update_window' && exA.code === 75, 'update-window: the wrapper of another protocol ended the run BEFORE the job started (exit.json reason update_window)', JSON.stringify(exA));
     ok(ja.state === 'interrupted' && ra.cause === 'update_window' && ra.exit === null, 'update-window: the run is INTERRUPTED (cause update_window, no exit — no process of the job ran), never failed', JSON.stringify({ state: ja.state, cause: ra.cause, exit: ra.exit }));
     ok(A.told.length === 0 && A.inbox.length === 0, 'update-window: NO failure notice — the owner conversation is not told, the user inbox gets nothing (fb-7f7be1e24e)', JSON.stringify({ told: A.told, inbox: A.inbox }));
-    ok(evOf(XA, ja).some((t) => /^interrupted \(update_window: it started while VibeSpace was updating itself and never ran — the restarted server runs it again\)$/.test(t)), 'update-window: the job\'s event names the window and what follows it', JSON.stringify(evOf(XA, ja)));
+    ok(verdictOf(evOf(XA, ja).some((t) => /^interrupted \(update_window: it started while VibeSpace was updating itself and never ran — the restarted server runs it again\)$/.test(t))), 'update-window: the job\'s event names the window and what follows it', JSON.stringify(evOf(XA, ja)));
     XA.shutdown();
     A.wrapper(WRAP); // the update's restart: the new server and the wrapper on disk agree again
     const YA = A.boot(), ya = YA.jobs.get(ja.id);
-    ok(ya && lastRun(ya).trigger === 'update-rerun' && ya.runs.length === 2, 'update-window: the restarted server runs the one-shot task AGAIN at boot (trigger update-rerun)', JSON.stringify(ya && ya.runs.map((r) => r.trigger)));
+    ok(gateOf(ya) && lastRun(ya).trigger === 'update-rerun' && ya.runs.length === 2, 'update-window: the restarted server runs the one-shot task AGAIN at boot (trigger update-rerun)', JSON.stringify(ya && ya.runs.map((r) => r.trigger)));
     if (ya) await settle(YA, ya);
-    ok(ya && ya.state === 'done' && lastRun(ya).cause === 'ok' && A.told.length === 1 && /: done exit=0 ok /.test(A.told[0]), 'update-window: …and its success clears the window (done, cause ok) — the owner hears the job\'s REAL end, never a failure', JSON.stringify(ya && { state: ya.state, cause: lastRun(ya).cause, told: A.told }));
+    ok(gateOf(ya) && ya.state === 'done' && lastRun(ya).cause === 'ok' && A.told.length === 1 && verdictOf(/: done exit=0 ok /.test(A.told[0])), 'update-window: …and its success clears the window (done, cause ok) — the owner hears the job\'s REAL end, never a failure', JSON.stringify(ya && { state: ya.state, cause: lastRun(ya).cause, told: A.told }));
     A.end();
 
     // ── a cron child in the window: interrupted, said nowhere; NOT re-run at boot; its next fire runs it ──
@@ -871,15 +871,15 @@ setInterval(() => { }, 1000);
     await XC._cronTick();
     const kc = [...XC.jobs.values()].find((x) => x.cronParent === jc.id);
     if (kc) await settle(XC, kc);
-    ok(kc && kc.state === 'interrupted' && lastRun(kc).cause === 'update_window' && C2.told.length === 0 && evOf(XC, kc).some((t) => /its next fire runs it\)$/.test(t)), 'update-window: a cron child fired in the window is interrupted (update_window), no failure notice — its event says its next fire runs it', JSON.stringify(kc && { state: kc.state, cause: lastRun(kc).cause, told: C2.told }));
+    ok(gateOf(kc) && kc.state === 'interrupted' && lastRun(kc).cause === 'update_window' && C2.told.length === 0 && verdictOf(evOf(XC, kc).some((t) => /its next fire runs it\)$/.test(t))), 'update-window: a cron child fired in the window is interrupted (update_window), no failure notice — its event says its next fire runs it', JSON.stringify(kc && { state: kc.state, cause: lastRun(kc).cause, told: C2.told }));
     XC.shutdown();
     C2.wrapper(WRAP);
     const YC = C2.boot(), yk = kc && YC.jobs.get(kc.id);
-    ok(yk && yk.state === 'interrupted' && yk.runs.length === 1, 'update-window: the restarted server does NOT re-run a cron child — its schedule owns when it runs', JSON.stringify(yk && { state: yk.state, runs: yk.runs.length }));
+    ok(gateOf(yk) && yk.state === 'interrupted' && yk.runs.length === 1, 'update-window: the restarted server does NOT re-run a cron child — its schedule owns when it runs', JSON.stringify(yk && { state: yk.state, runs: yk.runs.length }));
     const yc = YC.jobs.get(jc.id); if (yc) yc.nextFireAt = Date.now() - 1000;
     await YC._cronTick();
     if (yk) await settle(YC, yk);
-    ok(yk && yk.state === 'done' && yk.runs.length === 2 && C2.told.length === 0, 'update-window: …the next fire runs it (done)', JSON.stringify(yk && { state: yk.state, runs: yk.runs.length }));
+    ok(gateOf(yk) && yk.state === 'done' && yk.runs.length === 2 && C2.told.length === 0, 'update-window: …the next fire runs it (done)', JSON.stringify(yk && { state: yk.state, runs: yk.runs.length }));
     C2.end();
 
     // ── a service in the window: down, never a crash of the supervisor's count; the restarted server starts it ──
@@ -892,7 +892,7 @@ setInterval(() => { }, 1000);
     XS.shutdown();
     S.wrapper(WRAP);
     const YS = S.boot(), ys = YS.jobs.get(js.id);
-    ok(ys && ['up', 'starting'].includes(ys.state) && lastRun(ys).trigger === 'boot', 'update-window: the restarted server starts the service again (the boot replay)', JSON.stringify(ys && { state: ys.state, trigger: lastRun(ys).trigger }));
+    ok(gateOf(ys) && gateOf(['up', 'starting'].includes(ys.state)) && lastRun(ys).trigger === 'boot', 'update-window: the restarted server starts the service again (the boot replay)', JSON.stringify(ys && { state: ys.state, trigger: lastRun(ys).trigger }));
     S.end();
 
     // ── the install's own fault: the mismatch was on disk when the server booted ──
@@ -901,7 +901,7 @@ setInterval(() => { }, 1000);
     const XF = F.boot(), jf = task(XF, 'uw-fault');
     await settle(XF, jf);
     await until(() => F.told.length > 0, 3000);
-    ok(jf.state === 'failed' && lastRun(jf).cause === 'wrapper-mismatch' && F.told.length === 1 && /never started — data\/bin\/job-wrapper\.js speaks another protocol than this server/.test(F.told[0]), 'update-window: a mismatch with the wrapper the server BOOTED with is no window — failed (wrapper-mismatch), said once, naming the cause', JSON.stringify({ state: jf.state, cause: lastRun(jf).cause, told: F.told }));
+    ok(jf.state === 'failed' && lastRun(jf).cause === 'wrapper-mismatch' && F.told.length === 1 && verdictOf(/never started — data\/bin\/job-wrapper\.js speaks another protocol than this server/.test(F.told[0])), 'update-window: a mismatch with the wrapper the server BOOTED with is no window — failed (wrapper-mismatch), said once, naming the cause', JSON.stringify({ state: jf.state, cause: lastRun(jf).cause, told: F.told }));
     F.end();
     // …and a wrapper changed after the boot but longer ago than the window (a pull never restarted)
     const G2 = world('stale'), XG = G2.boot();
@@ -922,7 +922,7 @@ setInterval(() => { }, 1000);
     const jn = task(XN, 'uw-mutant');
     await settle(XN, jn);
     await until(() => N.told.length > 0, 3000);
-    ok(jn.state === 'failed' && N.told.length === 1 && /: failed exit=75 error /.test(N.told[0]) && N.inbox.length === 1, 'NEGATIVE CONTROL: an engine WITHOUT the window (the ≤ .332 judgment) ⇒ failed exit=75 + a failure notice + the user inbox — the legs above are RED on it', JSON.stringify({ state: jn.state, told: N.told, inbox: N.inbox.length }));
+    ok(jn.state === 'failed' && N.told.length === 1 && gateOf(/: failed exit=75 error /.test(N.told[0])) && N.inbox.length === 1, 'NEGATIVE CONTROL: an engine WITHOUT the window (the ≤ .332 judgment) ⇒ failed exit=75 + a failure notice + the user inbox — the legs above are RED on it', JSON.stringify({ state: jn.state, told: N.told, inbox: N.inbox.length }));
     N.end();
   }
 
@@ -967,18 +967,18 @@ setInterval(() => { }, 1000);
       const job = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'build-x', cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own }, who).job.id);
       let v; try { v = X.jm.d.notifyUser({ text: 'build-x: parked — out of memory twice', urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: CID }); } catch (e) { v = { threw: e.message }; }
       const e = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop(), it = X.items().find((i) => i.jobId === job.id);
-      ok(v && v.ok === true && e && e.ok === true && e.copy === 'stray' && it && it.jobFact === 'stray' && it.text === 'Background job build-x has a notice for you — open it in the Jobs panel' && !X.items().some((i) => /out of memory/.test(i.text)),
+      ok(gateOf(v) && v.ok === true && gateOf(e) && e.ok === true && e.copy === 'stray' && gateOf(it) && it.jobFact === 'stray' && it.text === 'Background job build-x has a notice for you — open it in the Jobs panel' && !X.items().some((i) => /out of memory/.test(i.text)),
         'r4 → r6 THE STRAY DOOR: a direct `this.d.notifyUser({ text, … })` files the STRAY copy — the engine\'s own words + the fact «stray», journaled on its job — never its own shape (140205ee carried any shape through the one door)', JSON.stringify({ v, e, it }));
-      ok(X.logs.some((l) => /a For-you filing outside the one door \(src\/jobs\.js _forYou\) — caller scripts\/test-jobs-engine\.mjs:\d+/.test(l) && l.includes(job.id)) && forYouLine(X.jm.snapshot(job)) === '',
+      ok(gateOf(X.logs.some((l) => /a For-you filing outside the one door \(src\/jobs\.js _forYou\) — caller scripts\/test-jobs-engine\.mjs:\d+/.test(l) && l.includes(job.id))) && forYouLine(X.jm.snapshot(job)) === '',
         '…the server log names the door it skipped AND its caller (file:line); poll / show stay quiet (the stray copy landed)', X.logs.filter((l) => /one door/.test(l)));
       // (2) a kind forYouCopy does not know: a NAMED refusal journaled — never a TypeError into its caller (claim r3-2 minor 7)
       let u, threw = null; try { u = X.jm._forYou(job, M.forYouCopy(job, 'parked-mem0ry')); } catch (err) { threw = err.message; }
       const ue = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
-      ok(!threw && u && u.ok === false && /^no For-you copy of kind «parked-mem0ry» — the copies are end, ask, parked, missed, fire/.test(u.why) && ue && ue.copy === 'parked-mem0ry' && ue.ok === false, 'r4 an UNKNOWN copy kind answers a named refusal, journaled — never a TypeError', JSON.stringify({ threw, u, ue }));
+      ok(!threw && gateOf(u) && u.ok === false && gateOf(/^no For-you copy of kind «parked-mem0ry» — the copies are end, ask, parked, missed, fire/.test(u.why)) && gateOf(ue) && ue.copy === 'parked-mem0ry' && ue.ok === false, 'r4 an UNKNOWN copy kind answers a named refusal, journaled — never a TypeError', JSON.stringify({ threw, u, ue }));
       // (3) the engine's own notices come through the same door (no job: filed, never a fact)
       X.jm._forYou(null, M.forYouCopy(null, 'engine-failed', { error: 'EACCES' }));
       const en = X.items().find((i) => /^Background Work engine failed to start: EACCES$/.test(i.text));
-      ok(en && en.origin === 'jobs' && !en.jobId && !en.jobFact && en.i18n && en.i18n.text.key === 'Background Work engine failed to start: {error}', 'r4 the engine\'s own notices file through _forYou too (a template + its field; no job, no fact)', JSON.stringify(en));
+      ok(gateOf(en) && en.origin === 'jobs' && !en.jobId && !en.jobFact && gateOf(en.i18n) && en.i18n.text.key === 'Background Work engine failed to start: {error}', 'r4 the engine\'s own notices file through _forYou too (a template + its field; no job, no fact)', JSON.stringify(en));
       X.end();
     }
 
@@ -1013,9 +1013,9 @@ setInterval(() => { }, 1000);
       ok(per.end === 1 && per.park === 1 && per.missed === 1 && per.fire === 1, 'r4 …and the next copy of each re-files INTO the legacy item — ONE item per job and copy (r3: two identical items after the upgrade)', JSON.stringify(per));
       // r8 (accept-r7 confirmed 1 — skeptic-leg4-vacuous.cjs): the re-file HAPPENED — r7's mint compared job OBJECTS, so every filing
       // above was refused «minted for another job» and the count still read the seeded 1 (green whether the store re-filed, refused or duplicated)
-      ok(v4.every((v, k) => v && v.ok === true && v.id === LEG4[k]) && f0 === 0 && filed4() === 4, 'r8 …each re-file HAPPENED: every verdict ✓ names its legacy item, and the re-filed items (the template they now carry) move 0 → 4 — the mint is the job\'s ID, one record read twice is one job', JSON.stringify({ v4, f0, f1: filed4() }));
+      ok(gateOf(v4.every((v, k) => v && v.ok === true && v.id === LEG4[k])) && f0 === 0 && filed4() === 4, 'r8 …each re-file HAPPENED: every verdict ✓ names its legacy item, and the re-filed items (the template they now carry) move 0 → 4 — the mint is the job\'s ID, one record read twice is one job', JSON.stringify({ v4, f0, f1: filed4() }));
       const n4 = X.items().length, cross = X.jm._forYou(job(L.end, 'nightly run', 'failed'), M.forYouCopy(job(L.park, 'db', 'failed'), 'parked'));
-      ok(cross && cross.ok === false && /minted for another job/.test(cross.why) && X.items().length === n4 && X.items().filter((i) => i.jobId === L.end && i.jobFact === 'parked').length === 0, 'r8 …and a copy minted for ANOTHER job\'s id is refused by name — nothing filed under the job it was handed', JSON.stringify(cross));
+      ok(gateOf(cross) && cross.ok === false && gateOf(/minted for another job/.test(cross.why)) && X.items().length === n4 && X.items().filter((i) => i.jobId === L.end && i.jobFact === 'parked').length === 0, 'r8 …and a copy minted for ANOTHER job\'s id is refused by name — nothing filed under the job it was handed', JSON.stringify(cross));
       ok(X.todos.resolveByJob(L.old) === 1 && X.todos.resolveByJob(L.fire) === 0, 'r4 …a pre-B-328d ask (no stored origin) closes when its panel is answered; a fire copy never does', JSON.stringify(X.items().filter((i) => i.jobId === L.old || i.jobId === L.fire).map((i) => [i.jobFact, i.status])));
       X.end();
     }
@@ -1033,7 +1033,7 @@ setInterval(() => { }, 1000);
       X.jm._event(job, 'started');
       await X.jm._ensurePublish(job);
       const sn = X.jm.snapshot(job), other = jobModel.agentJobView(X.jm.snapshot(job), { mine: false }), dig = X.jm.updatesFor({ ...who, conversationId: 'someone-else', isUser: true }, 0).text;
-      ok(!raw(sn.name) && !raw(other.name) && !raw(X.jm.events[X.jm.events.length - 1].name) && !raw(dig) && X.labels.length === 1 && !raw(X.labels[0]) && /^service: deploy-ghp_«redacted»/.test(X.labels[0]),
+      ok(!raw(sn.name) && !raw(other.name) && !raw(X.jm.events[X.jm.events.length - 1].name) && !raw(dig) && X.labels.length === 1 && !raw(X.labels[0]) && verdictOf(/^service: deploy-ghp_«redacted»/.test(X.labels[0])),
         'r4 a token-shaped job NAME is belted on the snapshot a person reads (card title, ask window), another lineage\'s view, the events ring + the digest it injects, the Ports label', JSON.stringify({ sn: sn.name, other: other.name, label: X.labels[0], dig: dig.slice(0, 160) }));
       ok(!raw(r.job.name) && r.job.name === job.name && X.jm.snapshot(job, { author: true }).name === job.name && job.name === 'deploy-ghp_«redacted»', '…r7: its AUTHOR reads the record (the create echo, its own views) and the record keeps the BELTED name — no token reaches jobs.json, the archive or the echo', JSON.stringify({ echo: r.job.name }));
       // (6) a notify cron with no --text: the body the author gets is the same LABEL the header carries (claim r3-2 minor 6)
@@ -1041,7 +1041,7 @@ setInterval(() => { }, 1000);
       X.jm._fireCron(c, 'cron');
       await sleep(30);
       const t = X.told.filter((x) => x.cid === CID).pop();
-      ok(t && !raw(t.text) && !raw(t.meta && t.meta.fromName) && /: remind-ghp_«redacted»/.test(t.text), 'r4 a notify cron without --text: the author\'s body is the belted LABEL the header and the card carry — never the raw name beside a masked header', JSON.stringify(t && { text: t.text.slice(0, 220), from: t.meta && t.meta.fromName }));
+      ok(gateOf(t) && !raw(t.text) && !raw(t.meta && t.meta.fromName) && verdictOf(/: remind-ghp_«redacted»/.test(t.text)), 'r4 a notify cron without --text: the author\'s body is the belted LABEL the header and the card carry — never the raw name beside a masked header', JSON.stringify(t && { text: t.text.slice(0, 220), from: t.meta && t.meta.fromName }));
       X.end();
     }
 
@@ -1056,7 +1056,7 @@ setInterval(() => { }, 1000);
       const lit = I.noticeKeyFailures([srcs[0].replace("{ key: 'Background job {id}', params: { id: jobId } }", "{ key: 'Background job {id} planted, never translated', params: { id: jobId } }")], dicts);
       const tab = I.noticeKeyFailures([], dicts, [{ name: 'planted', keys: [...I.noticeKeyTables()[0].keys, 'Task {name} was planted untranslated'] }]);
       ok(!real.length && I.noticeKeyTables()[0].keys.length >= 7, `r4 the i18n road: every server key the jobs engine files has zh + ja (${I.noticeKeyTables()[0].keys.length} table keys + the wiring's literals)`, JSON.stringify(real));
-      ok(lit.length === 2 && tab.length === 2 && lit.every((f) => /planted, never translated/.test(f.key)) && tab.every((f) => f.table === 'planted'), 'CONTROL: a planted bare key — a wiring {key} literal or a FOR_YOU_WORDS row — is red in BOTH dicts', JSON.stringify([...lit, ...tab]));
+      ok(lit.length === 2 && tab.length === 2 && gateOf(lit.every((f) => /planted, never translated/.test(f.key))) && verdictOf(tab.every((f) => f.table === 'planted')), 'CONTROL: a planted bare key — a wiring {key} literal or a FOR_YOU_WORDS row — is red in BOTH dicts', JSON.stringify([...lit, ...tab]));
     }
 
     // ── lane job-notify-user r5 (accept-r4 confirmed 0 + refuted 0, confirmed 1, unverified 0): (8) THE ONE NAME ACCESSOR AT EVERY
@@ -1083,7 +1083,7 @@ setInterval(() => { }, 1000);
       const J = require('../src/browser-job-principal.js');
       const bl = J.jobLabelOf(job, M.labelVia(X.jm)), stub = J.jobLabelOf(job, M.labelVia({ jobs: X.jm.jobs }));
       const L5 = X.jm.labelOf(job);   // create() names it `deploy-ghp_…`; its label is that name belted
-      ok(/^deploy-ghp_«redacted»$/.test(L5) && scan && scan.service === L5 && card && card.name === L5 && row && row.name === L5 && bl === 'job ' + L5 && !raw(scan.service) && !raw(card.name) && !raw(row.name) && !raw(bl),
+      ok(gateOf(/^deploy-ghp_«redacted»$/.test(L5)) && gateOf(scan) && scan.service === L5 && gateOf(card) && card.name === L5 && gateOf(row) && row.name === L5 && bl === 'job ' + L5 && !raw(scan.service) && !raw(card.name) && !raw(row.name) && !raw(bl),
         'r5 THE ONE NAME ACCESSOR: the Ports scan row, the Artifacts service row and the chat card it feeds, the browser\'s job label read the engine\'s labelOf — never the record (76ffc823: all four raw beside a belted twin)', JSON.stringify({ scan: scan && scan.service, card: card && card.name, row: row && row.name, bl }));
       ok(stub === 'job ' + job.id && job.name === L5, '…a holder with no engine shows the job\'s id, never the record\'s words; r7: the record keeps the belted name', stub);
       // (9) the stray door files THROUGH _forYou (the dep's one call): same verdict, same journal line
@@ -1091,7 +1091,7 @@ setInterval(() => { }, 1000);
       const sv = X.jm.d.notifyUser({ text: 'raw words', urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: CID });
       X.jm._forYou = door;
       const se = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
-      ok(seen.join() === 'stray' && sv && sv.ok === true && se && se.copy === 'stray' && se.ok === true, 'r5 → r6 the stray door files THROUGH _forYou (its one call reaches the dep) — the stray copy, journaled as `stray`', JSON.stringify({ seen, sv }));
+      ok(seen.join() === 'stray' && gateOf(sv) && sv.ok === true && gateOf(se) && se.copy === 'stray' && se.ok === true, 'r5 → r6 the stray door files THROUGH _forYou (its one call reaches the dep) — the stray copy, journaled as `stray`', JSON.stringify({ seen, sv }));
       // (10) the wiring's real filing hands the store the key it took at create; a frameless filing without that key is refused
       const args = []; const add = X.todos.add; X.todos.add = function (k, a) { args.push(a); return add.call(this, k, a); };
       X.jm._forYou(job, M.forYouCopy(job, 'parked'));
@@ -1099,7 +1099,7 @@ setInterval(() => { }, 1000);
       const key = args[0] && args[0].filerKey;
       const nokey = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa55', jobFact: 'ask', i18n: { text: { key: '{name} needs your input', params: { name: 'x' } } } })).then(() => res(null), (e) => res(e.message)); });
       const withKey = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa56', jobFact: 'ask', filerKey: key, i18n: { text: { key: '{name} needs your input', params: { name: 'x' } } } })).then(() => res(null), (e) => res(e.message)); });
-      ok(key && typeof key === 'object' && Object.isFrozen(key) && /needs a caller the store can name/.test(nokey || '') && withKey === null, 'r5 the wiring files with the store\'s filer key (taken at create); a frameless filing is refused without it and files with it', JSON.stringify({ key: !!key, nokey, withKey }));
+      ok(gateOf(key) && typeof key === 'object' && gateOf(Object.isFrozen(key)) && gateOf(/needs a caller the store can name/.test(nokey || '')) && withKey === null, 'r5 the wiring files with the store\'s filer key (taken at create); a frameless filing is refused without it and files with it', JSON.stringify({ key: !!key, nokey, withKey }));
       // (11) r6 THE DIGEST (accept-r5 confirmed 0 — names-digest.cjs): another conversation that reads a job's row reads labelOf's
       // label in its injected «Background jobs visible to this session» rows — belted WHOLE, then cut (140205ee cut the raw name to
       // 24). lane jobs-addressed-push: a row reaches another conversation only as its SUBSCRIBER's («(subscribed)») — the belt leg
@@ -1110,7 +1110,7 @@ setInterval(() => { }, 1000);
       const dView = txt(X.jm.digestFor(other, 0));
       X.jm.subscribe(dj, other, {});
       const dOther = txt(X.jm.digestFor(other, 0)), dOwn = txt(X.jm.digestFor(who, 0)), dLine = dOther.split('\n').find((l) => l.includes(dj.id)) || '';
-      ok(dLine.includes(' — ' + X.jm.labelOf(dj) + ' (subscribed) — ') && /«redacted»/.test(dLine) && !dOther.includes(MAT.slice(4, 12)) && !dOwn.includes(MAT.slice(4, 12)) && !raw(dj.name),
+      ok(gateOf(dLine.includes(' — ' + X.jm.labelOf(dj) + ' (subscribed) — ')) && gateOf(/«redacted»/.test(dLine)) && !dOther.includes(MAT.slice(4, 12)) && !dOwn.includes(MAT.slice(4, 12)) && !raw(dj.name),
         'r6 THE DIGEST: another conversation — its SUBSCRIBER (lane jobs-addressed-push) — and the owner read labelOf\'s label in the injected digest — no head of the token survives the cut; r7: the record keeps the belted name', dLine);
       ok(!dView.includes(dj.id) && !dView.includes(MAT.slice(4, 12)), 'lane jobs-addressed-push: a conversation that may merely VIEW the job (not subscribed) reads no row of it', dView.split('\n').slice(-1));
       // (12) r6 a hand-built copy handed to the stray kind (accept-r5 confirmed 1 — stray-launder-files.cjs): refused BY NAME,
@@ -1118,8 +1118,8 @@ setInterval(() => { }, 1000);
       const n12 = X.items().length, l12 = X.logs.length;
       const lv = X.jm._forYou(job, M.forYouCopy(job, 'stray', { shape: { words: { key: 'Task {name} was parked', params: { name: 'HAND-BUILT words' } }, fact: 'parked', jobId: job.id, jobName: job.name } }));
       const le = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
-      ok(lv && lv.ok === false && /a shape handed to forYouCopy is refused/.test(lv.why) && le && le.copy === 'stray' && le.ok === false && X.items().length === n12 && !X.items().some((i) => /HAND-BUILT/.test(i.text))
-        && X.logs.slice(l12).some((l) => /outside the one door .*caller scripts\/test-jobs-engine\.mjs:\d+/.test(l)), 'r6 a SHAPE handed to forYouCopy is refused by name — journaled as `stray`, its caller in the log, nothing filed', JSON.stringify({ lv, le }));
+      ok(gateOf(lv) && lv.ok === false && gateOf(/a shape handed to forYouCopy is refused/.test(lv.why)) && gateOf(le) && le.copy === 'stray' && le.ok === false && X.items().length === n12 && !X.items().some((i) => /HAND-BUILT/.test(i.text))
+        && verdictOf(X.logs.slice(l12).some((l) => /outside the one door .*caller scripts\/test-jobs-engine\.mjs:\d+/.test(l))), 'r6 a SHAPE handed to forYouCopy is refused by name — journaled as `stray`, its caller in the log, nothing filed', JSON.stringify({ lv, le }));
       // (13) r6 THE PROTOTYPE ROAD (accept-r5 unverified 2 — r5skeptic-proto-door.cjs): nothing reachable from the engine is its raw
       // For-you dep — `this.d` has no prototype, no own copy, no reflective road; the dep is still the one _forYou files through,
       // and every other dep reads live off the wiring's object (a write lands on the view)
@@ -1135,7 +1135,7 @@ setInterval(() => { }, 1000);
         walkObj(PJ, 'jm', 0);
         const filed = PJ._forYou(null, M.forYouCopy(null, 'store-corrupt'));
         deps13.later = 'live'; PJ.d.log = () => 'mine';
-        ok(!reach.length && Object.getPrototypeOf(PJ.d) === null && PJ._forYouDep === undefined && Reflect.get(PJ.d, 'notifyUser') !== rawDep && filed && filed.raw && filed.raw.words.key === M.FOR_YOU_WORDS['store-corrupt'] && PJ.d.later === 'live' && deps13.log() === undefined,
+        ok(!reach.length && Object.getPrototypeOf(PJ.d) === null && PJ._forYouDep === undefined && Reflect.get(PJ.d, 'notifyUser') !== rawDep && gateOf(filed) && gateOf(filed.raw) && filed.raw.words.key === M.FOR_YOU_WORDS['store-corrupt'] && PJ.d.later === 'live' && deps13.log() === undefined,
           'r6 THE PROTOTYPE ROAD is gone: no own property, prototype or reflective read from the engine reaches its raw For-you dep (140205ee: Object.getPrototypeOf(jm.d).notifyUser) — _forYou alone files through it; other deps stay live', JSON.stringify({ reach, filed: !!filed }));
         try { PJ.shutdown(); } catch { } }
       // (14) r6 THE KEY HOLDER (accept-r5 unverified 0 + 3 — lifted-key-filer.cjs): no property of the store holds its filer key, so
@@ -1143,7 +1143,7 @@ setInterval(() => { }, 1000);
       const holds = [], found14 = [];
       for (const k of Reflect.ownKeys(X.todos)) { const val = X.todos[k]; for (const x of val instanceof Map ? [...val.values()] : [val]) if (x && typeof x === 'object' && Object.isFrozen(x) && x.origin === 'jobs') { holds.push(String(k)); found14.push(x); } }
       const lift = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa57', jobFact: 'ask', filerKey: found14[0], i18n: { text: { key: '{name} needs your input', params: { name: 'lifted' } } } })).then(() => res('FILED'), (e2) => res(e2.message)); });
-      ok(X.todos._filerKeys === undefined && !holds.length && /needs a caller the store can name/.test(lift) && key && key.origin === 'jobs', 'r6 THE KEY HOLDER: no property of the store holds its filer key — a holder that walks the store finds none and its frameless filing is refused; the wiring filed with it above', JSON.stringify({ holds, lift }));
+      ok(X.todos._filerKeys === undefined && !holds.length && gateOf(/needs a caller the store can name/.test(lift)) && gateOf(key) && key.origin === 'jobs', 'r6 THE KEY HOLDER: no property of the store holds its filer key — a holder that walks the store finds none and its frameless filing is refused; the wiring filed with it above', JSON.stringify({ holds, lift }));
       // (15) r7 THE MINT (accept-r6 unverified 2 — hyg-door-call.cjs): the door files a copy forYouCopy minted for ITS job — a
       // hand-built {words, fact} handed through `.call` (ff3c8a20f filed it and journaled ✓, no log line) or a copy minted for
       // another job is refused by name, journaled `hand-built`, its caller in the log, nothing filed
@@ -1151,7 +1151,7 @@ setInterval(() => { }, 1000);
         const hv = door.call(X.jm, job, { fact: 'parked', words: { key: 'HAND-BUILT words, no template of the engine' }, urgency: 'high' });
         const he = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
         const ov = X.jm._forYou(job, M.forYouCopy(dj, 'ask'));
-        ok(hv && hv.ok === false && /a hand-built copy is refused/.test(hv.why) && he && he.copy === 'hand-built' && he.ok === false && ov && ov.ok === false && /minted for another job/.test(ov.why) && X.items().length === n15 && !X.items().some((i) => /HAND-BUILT/.test(i.text))
+        ok(gateOf(hv) && hv.ok === false && gateOf(/a hand-built copy is refused/.test(hv.why)) && gateOf(he) && he.copy === 'hand-built' && he.ok === false && gateOf(ov) && ov.ok === false && gateOf(/minted for another job/.test(ov.why)) && X.items().length === n15 && !X.items().some((i) => /HAND-BUILT/.test(i.text))
           && X.logs.slice(l15).filter((l) => /outside the one door .*caller scripts\/test-jobs-engine\.mjs:\d+/.test(l)).length === 2, 'r7 THE MINT: a hand-built copy (`.call`) and a copy minted for another job are refused by name — journaled `hand-built`, the caller in the log, nothing filed', JSON.stringify({ hv, he, ov })); }
       // (16) r7 THE RECORD'S NAME (accept-r6, the second reviewer — hyg-name-cut64.cjs): the belt on the WHOLE name, then the cut —
       // ff3c8a20f cut to 64 first and a token the cut split showed up to 19 of its 36 characters to every viewer
@@ -1169,7 +1169,7 @@ setInterval(() => { }, 1000);
         const W17 = { 'password reset': 'password-reset', 'auth: fix login flow': 'auth-fix-login-flow', 'bearer of bad news': 'bearer-of-bad-news', 'token refresh': 'token-refresh', 'password change': 'password-change' };
         const made17 = Object.keys(W17).map((nm) => mk(nm)), disk17 = JSON.parse(landedJobs()).map((j) => j.name);
         const read17 = made17.map((r) => { const j = X.jm.jobs.get(r.job.id); return [r.job.name, j.name, X.jm.labelOf(j), X.jm.snapshot(j).name, r.renamed ? 'renamed' : '']; });
-        ok(read17.every((row, k) => row.slice(0, 4).every((n) => n === Object.values(W17)[k]) && !row[4] && disk17.includes(Object.values(W17)[k])),
+        ok(verdictOf(read17.every((row, k) => row.slice(0, 4).every((n) => n === Object.values(W17)[k]) && !row[4] && disk17.includes(Object.values(W17)[k]))),
           'r8 THE NAME BY ITS VALUE: «password reset», «auth: fix login flow», «bearer of bad news», «token refresh» stored WHOLE — the record, jobs.json, the create echo, the label another conversation reads; «password change» beside «password reset» is no collision', JSON.stringify(read17));
         const PV17 = ['Q7w8E9', 'r0T1y2!x'].join(''), v17 = mk('password: ' + PV17 + ' rotation'), j17 = X.jm.jobs.get(v17.job.id);   // built at run time (secret-scan)
         ok(v17.job.name === 'password-«redacted»-rotation' && X.jm.labelOf(j17) === v17.job.name && !JSON.stringify(JSON.parse(landedJobs())).includes(PV17), 'r8 …a VALUE after the word is hidden at the record (`password: <value>` — the word stays; r9: the ONE token, the words after it too)', v17.job.name);
@@ -1177,7 +1177,7 @@ setInterval(() => { }, 1000);
         const old17 = { id: 'jb-0000c7c7', kind: 'cron', name: 'nightly-' + MAT, schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'] } } }, owner: own, access: { view: 'session', control: 'session' }, desiredUp: true, state: 'scheduled', runs: [], createdAt: Date.now() };
         X.jm.jobs.set(old17.id, old17); X.jm._fireCron(old17, 'cron');
         const kid17 = [...X.jm.jobs.values()].find((x) => x.cronParent === old17.id);
-        ok(kid17 && kid17.name === 'nightly-ghp_«redacted» run' && !kid17.name.includes(MAT.slice(4, 16)), 'r8 …a scheduled run\'s NEW record is belted too — the run of a cron an older engine stored raw (the cron keeps what it stored; its run\'s record does not)', kid17 && kid17.name);
+        ok(gateOf(kid17) && kid17.name === 'nightly-ghp_«redacted» run' && !kid17.name.includes(MAT.slice(4, 16)), 'r8 …a scheduled run\'s NEW record is belted too — the run of a cron an older engine stored raw (the cron keeps what it stored; its run\'s record does not)', kid17 && kid17.name);
         // r9 THE NAME RULE through the real engine (accept-r8 confirmed 0 + 2 — skeptic-r8v-engine.cjs, skeptic-r8v-negatives.cjs): 4cc7f037a
         // stored «Run e2e for PR 1234 on iOS 17 and M2 Max» as `«redacted»` (the next `«redacted»-2`, renamed), labelled a .360 record
         // of that shape `«redacted»`, and stored «rotate password: Correct-Horse-Battery-Staple» in clear
@@ -1187,14 +1187,14 @@ setInterval(() => { }, 1000);
         const read9 = made9.map((r) => { const j = X.jm.jobs.get(r.job.id); return [r.job.name, j.name, X.jm.labelOf(j), X.jm.snapshot(j).name, r.renamed ? 'renamed' : '']; });
         const legacy9 = { id: 'jb-0000c9c9', kind: 'task', name: 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac', owner: own, access: { view: 'all' }, state: 'done', runs: [], createdAt: Date.now() };
         X.jm.jobs.set(legacy9.id, legacy9);
-        ok(read9.every((row, k) => row.slice(0, 4).every((n) => n === Object.values(W9)[k]) && !row[4]) && !/Correct-Horse|Summer1/.test(disk9) && X.jm.labelOf(legacy9) === legacy9.name && X.jm.snapshot(legacy9).name === legacy9.name,
+        ok(gateOf(read9.every((row, k) => row.slice(0, 4).every((n) => n === Object.values(W9)[k]) && !row[4])) && !/Correct-Horse|Summer1/.test(disk9) && X.jm.labelOf(legacy9) === legacy9.name && X.jm.snapshot(legacy9).name === legacy9.name,
           'r9 THE NAME RULE: names of short words stored WHOLE and never renamed (the record, jobs.json, the echo, the label), a Capitalized passphrase and Summer1! hidden, a date after the words kept; a .360 record of that shape labelled whole (never the run row on a stored slug)', JSON.stringify(read9)); }
       // (18) r9 THE MINT'S ID IS A NON-EMPTY STRING (accept-r8 unverified 2 + 6 — skeptic-r8v-mint-idless.cjs, skeptic-mint-noid.cjs): 4cc7f037a
       // read `undefined === undefined` and FILED a hand-built copy handed with a job that has no id («HAND-BUILT words needs your input»)
       { const n18 = X.items().length, l18 = X.logs.length;
         const idless = { jobId: 'jb-0000beef', kind: 'task', name: 'x', state: 'awaiting-user', owner: own }, hb = { fact: 'ask', words: { key: '{name} needs your input', params: { name: 'HAND-BUILT words' } } };
         const v18 = [X.jm._forYou(idless, hb), X.jm._forYou(idless, M.forYouCopy(idless, 'ask')), X.jm._forYou({ ...idless, id: '' }, M.forYouCopy({ ...idless, id: '' }, 'ask')), X.jm._forYou(null, M.forYouCopy(idless, 'ask'))];
-        ok(v18.slice(0, 3).every((v) => v && v.ok === false && /a job with no id gets no For-you copy/.test(v.why)) && v18[3] && v18[3].ok === false && /minted for another job/.test(v18[3].why)
+        ok(gateOf(v18.slice(0, 3).every((v) => v && v.ok === false && /a job with no id gets no For-you copy/.test(v.why))) && gateOf(v18[3]) && v18[3].ok === false && gateOf(/minted for another job/.test(v18[3].why))
           && X.items().length === n18 && !X.items().some((i) => /HAND-BUILT/.test(i.text)) && X.logs.slice(l18).filter((l) => /a job with no id gets no For-you copy/.test(l)).length === 3,
           'r9 THE MINT: a job with NO id (none, \'\') gets no For-you copy — a hand-built one and even a minted one refused BY NAME, said in the log; its minted copy is no engine notice either — nothing filed', JSON.stringify(v18));
         // MUTANT: r8's door (`minted !== (job ? job.id : null)`) over the same hand-built copy — FILED: RED by name
@@ -1203,7 +1203,7 @@ setInterval(() => { }, 1000);
         const JM18 = mutantCopies('jobs-r9-door', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/jobs.js', JS18.replace(DOOR18, 'if (minted !== (job ? job.id : null)) {'), 'door-r8').JobManager;
         const d18 = path.join(R4, 'mut18'); fs.mkdirSync(d18, { recursive: true }); const filed18 = [];
         const mv = new JM18({ dataDir: d18, broadcast() { }, notifyUser: (n) => { filed18.push(n); return { ok: true, id: 'ut-mut18' }; }, log() { } })._forYou(idless, hb);
-        ok(JS18.includes(DOOR18) && mv && mv.ok === true && filed18.length === 1 && filed18[0].words.params.name === 'HAND-BUILT words', 'r9 MUTANT — r8\'s door (the id compared as it is): RED by name — the hand-built copy handed with an id-less job is FILED', JSON.stringify({ mv, filed18 })); }
+        ok(gateOf(JS18.includes(DOOR18)) && gateOf(mv) && mv.ok === true && filed18.length === 1 && filed18[0].words.params.name === 'HAND-BUILT words', 'r9 MUTANT — r8\'s door (the id compared as it is): RED by name — the hand-built copy handed with an id-less job is FILED', JSON.stringify({ mv, filed18 })); }
       X.end();
     }
   }
@@ -1278,8 +1278,8 @@ setInterval(() => { }, 1000);
       await R0._cronTick();
       await sleep(800);
       const kid = [...R0.jobs.values()].find((x) => x.cronParent === cron.id);
-      ok(cron.state === 'failed' && cron.desiredUp === false && cron.nextFireAt == null && kid && kid.state === 'failed' && !(kid.runs || []).length && !fs.existsSync(DUMP('fire'))
-        && R0.events.some((e) => e.jobId === kid.id && /^refused to run \((cron|boot)\): /.test(e.what || '') && (e.what || '').endsWith(WORDS)), 'envfrom_retired: a cron\'s fire of an older record naming envFrom is refused BY NAME at the spawn — child and timer park, nothing runs', `cron=${cron.state} kid=${kid && kid.state} runs=${kid && (kid.runs || []).length}`);
+      ok(cron.state === 'failed' && cron.desiredUp === false && cron.nextFireAt == null && gateOf(kid) && kid.state === 'failed' && !(kid.runs || []).length && !fs.existsSync(DUMP('fire'))
+        && verdictOf(R0.events.some((e) => e.jobId === kid.id && /^refused to run \((cron|boot)\): /.test(e.what || '') && (e.what || '').endsWith(WORDS))), 'envfrom_retired: a cron\'s fire of an older record naming envFrom is refused BY NAME at the spawn — child and timer park, nothing runs', `cron=${cron.state} kid=${kid && kid.state} runs=${kid && (kid.runs || []).length}`);
       // (d) A KEEP-UP RESTART — the supervisor re-spawns the stored record: refused at the door, the service parks
       const svc = { ...stamp, id: 'jb-0ld0e0f5', kind: 'service', name: 'old-envfrom-keepup', cmd: probe('restart'), envFrom: ['PROBE_SECRET'], restart: 'always', desiredUp: true, state: 'down' };
       R0.jobs.set(svc.id, svc);
@@ -1287,7 +1287,7 @@ setInterval(() => { }, 1000);
       try { R0._spawn(svc, 'restart-policy'); } catch (e) { threw = e.message; }
       await sleep(300);
       ok(threw === WORDS && svc.state === 'failed' && svc.desiredUp === false && !svc.runs.length && !fs.existsSync(DUMP('restart')), 'envfrom_retired: a keep-up restart of an older service naming envFrom is refused BY NAME at the door — parked', `threw=${threw} state=${svc.state}`);
-      ok(rlog.some((l) => /refused to run \(restart-policy\) — envfrom_retired$/.test(l)) && !rlog.some((l) => /refused to run .*vendor\/credential/.test(l)), 'envfrom_retired: the journal names the retired road, never the vendor pattern', rlog.filter((l) => /refused/.test(l)).join(' | '));
+      ok(gateOf(rlog.some((l) => /refused to run \(restart-policy\) — envfrom_retired$/.test(l))) && !rlog.some((l) => /refused to run .*vendor\/credential/.test(l)), 'envfrom_retired: the journal names the retired road, never the vendor pattern', rlog.filter((l) => /refused/.test(l)).join(' | '));
       // (e) A BOOT REPLAY — a desiredUp service persisted before is not respawned by the next engine; and THE OLD SHAPE LOADS:
       //     a record with the empty list (every fixture, every record written before) runs unchanged under the next engine
       R0.jobs.set('jb-0ld0e0f6', { ...stamp, id: 'jb-0ld0e0f6', kind: 'service', name: 'old-envfrom-boot', cmd: probe('boot'), envFrom: ['PROBE_SECRET'], restart: 'always', desiredUp: true, state: 'down' });
@@ -1298,13 +1298,13 @@ setInterval(() => { }, 1000);
       const R1 = boot14();
       await sleep(1500);
       const boot = R1.jobs.get('jb-0ld0e0f6');
-      ok(R1.ready && boot && boot.state === 'failed' && boot.desiredUp === false && !(boot.runs || []).length && !fs.existsSync(DUMP('boot')), 'envfrom_retired: the boot replay of an older desiredUp service naming envFrom is refused BY NAME — nothing runs', `state=${boot && boot.state} runs=${boot && (boot.runs || []).length}`);
+      ok(gateOf(R1.ready) && gateOf(boot) && boot.state === 'failed' && boot.desiredUp === false && !(boot.runs || []).length && !fs.existsSync(DUMP('boot')), 'envfrom_retired: the boot replay of an older desiredUp service naming envFrom is refused BY NAME — nothing runs', `state=${boot && boot.state} runs=${boot && (boot.runs || []).length}`);
       const empty = R1.jobs.get('jb-0ld0e0f7');
       const st = R1.start(empty);
-      ok(!st.error && await until(() => empty.state === 'done' && fs.existsSync(DUMP('empty')), 15000), 'THE OLD SHAPE LOADS: a record with `envFrom: []` loads and runs unchanged — no migration', JSON.stringify(st) + ' state=' + (empty && empty.state));
+      ok(!st.error && verdictOf(await until(() => empty.state === 'done' && fs.existsSync(DUMP('empty')), 15000)), 'THE OLD SHAPE LOADS: a record with `envFrom: []` loads and runs unchanged — no migration', JSON.stringify(st) + ' state=' + (empty && empty.state));
       ok(leakOf('empty') === false, 'THE OLD SHAPE LOADS: …and the planted store reaches none of its env', `leak=${leakOf('empty')}`);
       const snap = R1.snapshot(empty, { tail: 5 });
-      ok(Array.isArray(snap.envFrom) && !snap.envFrom.length && (snap.logTail || '').split('\n').includes('said: ' + PLANTED) && !/\[secret\]/.test(snap.logTail || ''),
+      ok(gateOf(Array.isArray(snap.envFrom)) && !snap.envFrom.length && gateOf((snap.logTail || '').split('\n').includes('said: ' + PLANTED)) && !/\[secret\]/.test(snap.logTail || ''),
         'NOTHING READS THE FILE: the job\'s own words reach its log tail as written — the retired store shapes no answer', JSON.stringify({ envFrom: snap.envFrom, tail: snap.logTail }));
       ok(opened.length === 0, 'NOTHING READS THE FILE: through every door above (create, start, fire, restart, boot, a run, its log tail and last line) the engine opened data/job-secrets.json 0 times', `opened ${opened.length}× (${[...new Set(opened)].join(', ')})`);
     } finally {
@@ -1318,4 +1318,4 @@ setInterval(() => { }, 1000);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -24,7 +24,7 @@ const wt = scratch('chan-list-polish');
 const fakeHome = scratchHome('chan-list-polish-home', fs);
 const chromeDir = scratch('chan-list-polish-chrome');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 /** The redraw bound: measured 2–4 ms here after the fix (90–115 before), ×10 slack for a loaded runner. */
@@ -76,7 +76,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 const waitServer = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-ok(await waitServer(), 'the worktree server booted on the seeded store');
+ok(verdictOf(await waitServer()), 'the worktree server booted on the seeded store');
 const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch {} return { status: r.status, json: j }; };
 const WebSocket = require(path.join(repo, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
@@ -124,17 +124,17 @@ async function probe(p, conv) {
 const red = (c) => c && c[0] > 150 && c[1] < 90 && c[2] < 90, green = (c) => c && c[1] > 150 && c[0] < 90, blue = (c) => c && c[2] > 150 && c[0] < 90;
 const p1 = await newPage();
 await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
-ok(await p1.load(), 'the app loaded (zh)');
-ok(await p1.evaljs(OPEN), 'the Channels panel shows the per-account list');
+ok(verdictOf(await p1.load()), 'the app loaded (zh)');
+ok(verdictOf(await p1.evaljs(OPEN)), 'the Channels panel shows the per-account list');
 const DM = await probe(p1, 'lark/oc_dm');
-ok(DM && /author=ou_bob/.test(DM.src || ''), '① the Bob DM row asks the PEER\'s picture (ou_bob), never the owner\'s', J(DM && DM.src));
-ok(DM && red(DM.px && DM.px.av), '① PIXEL: the avatar centre is the peer\'s face (red), not the owner\'s (green)', J(DM && DM.px));
-ok(DM && DM.px && DM.px.badge && !red(DM.px.badge), '② PIXEL: the account badge at the corner is painted ON TOP of the picture', J(DM && DM.px));
-ok(DM && DM.mark === 'lark', '③ the badge wears the vendor\'s own mark (public/brand/lark.svg)', J(DM && DM.mark));
+ok(gateOf(DM) && verdictOf(/author=ou_bob/.test(DM.src || '')), '① the Bob DM row asks the PEER\'s picture (ou_bob), never the owner\'s', J(DM && DM.src));
+ok(gateOf(DM) && verdictOf(red(DM.px && DM.px.av)), '① PIXEL: the avatar centre is the peer\'s face (red), not the owner\'s (green)', J(DM && DM.px));
+ok(gateOf(DM) && gateOf(DM.px) && gateOf(DM.px.badge) && !red(DM.px.badge), '② PIXEL: the account badge at the corner is painted ON TOP of the picture', J(DM && DM.px));
+ok(gateOf(DM) && DM.mark === 'lark', '③ the badge wears the vendor\'s own mark (public/brand/lark.svg)', J(DM && DM.mark));
 const GR = await probe(p1, 'lark/oc_grp');
-ok(GR && blue(GR.px && GR.px.av) && /author=chat~oc_grp/.test(GR.src || ''), '④ the group row wears the GROUP\'s own picture (chat~ key, blue)', J(GR));
-ok(GR && GR.last === 'Mia (Marketing): the deck is ready', '⑤⑥ the list row\'s last line = "author: first line", the author by her org nickname', J(GR && GR.last));
-ok(DM && !DM.assign && GR && !GR.assign, '⑥ an inherited row prints NO access/notify line');
+ok(gateOf(GR) && gateOf(blue(GR.px && GR.px.av)) && verdictOf(/author=chat~oc_grp/.test(GR.src || '')), '④ the group row wears the GROUP\'s own picture (chat~ key, blue)', J(GR));
+ok(gateOf(GR) && GR.last === 'Mia (Marketing): the deck is ready', '⑤⑥ the list row\'s last line = "author: first line", the author by her org nickname', J(GR && GR.last));
+ok(gateOf(DM) && !DM.assign && gateOf(GR) && !GR.assign, '⑥ an inherited row prints NO access/notify line');
 const rowsZh = await p1.evaljs(`[...document.querySelectorAll('.chan-row-chat')].length`);
 ok(rowsZh >= 10, '⑥ every per-account row is the chat row (avatar · name · last line)', String(rowsZh));
 const TW = await p1.evaljs(`Math.round(document.querySelector('.chan-row[data-conv="lark/oc_dm"] .chan-row-title').getBoundingClientRect().width)`);
@@ -148,10 +148,10 @@ await p2.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE
 await p2.cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'ja'); } catch {}" });
 await p2.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
 let up2 = false; for (let i = 0; i < 160 && !up2; i++) { try { up2 = await p2.evaljs("!!(window.app && window.app.openChannels) && !document.getElementById('loading-screen')"); } catch {} if (!up2) await sleep(250); }
-ok(up2, 'the app loaded at 390 px in 日本語');
+ok(verdictOf(up2), 'the app loaded at 390 px in 日本語');
 await p2.evaljs(`(async () => { window.app.openChannels(); for (let i = 0; i < 100 && !document.querySelector('.chan-row[data-conv="lark/oc_dm"]'); i++) await new Promise((r) => setTimeout(r, 100)); return true; })()`);
 const PH = await p2.evaljs(`(() => { const r = document.querySelector('.chan-row[data-conv="lark/oc_dm"]'); if (!r) return null; const b = r.getBoundingClientRect(), av = r.querySelector('.chan-av').getBoundingClientRect(), last = r.querySelector('.chan-row-last').getBoundingClientRect(), ti = r.querySelector('.chan-row-title').getBoundingClientRect(); return { inside: b.right <= innerWidth + 1, avIn: av.left >= b.left - 1 && av.right <= b.right, lastIn: last.right <= b.right + 1 && last.width > 20, title: Math.round(ti.width), you: (r.querySelector('.chan-row-lastwho') || {}).textContent || '' }; })()`);
-ok(PH && PH.inside && PH.avIn && PH.lastIn && PH.title >= 40 && PH.you === 'あなた: ', '⑥ 390 px ja: the row, its avatar, its title and its last line ("あなた: …") fit', J(PH));
+ok(gateOf(PH) && gateOf(PH.inside) && gateOf(PH.avIn) && gateOf(PH.lastIn) && PH.title >= 40 && PH.you === 'あなた: ', '⑥ 390 px ja: the row, its avatar, its title and its last line ("あなた: …") fit', J(PH));
 p2.close();
 // CONTROL: the old peerOf (the first author without isSelf, no stamp) on a scratch copy ⇒ the owner's face ⇒ red
 // r4456 (the flake census, round 2): the patched copy boots once the FIRST server has EXITED (its own `exit`, a generous bound whose
@@ -161,7 +161,7 @@ p2.close();
 // leg stood, «booted» is true while no copy was started; let go, the kill lands, its exit is awaited, then the copy boots
 const engRel = 'src/server/channels-engine.js', engSrc = fs.readFileSync(path.join(wt, engRel), 'utf-8');
 const NEW_PEER = 'const id = Av.peerOf(authors, selfIdOf(rec));';
-ok(engSrc.includes(NEW_PEER), 'CONTROL: the lane\'s peer line is where the control patches it');
+ok(verdictOf(engSrc.includes(NEW_PEER)), 'CONTROL: the lane\'s peer line is where the control patches it');
 fs.writeFileSync(path.join(wt, engRel), engSrc.replace(NEW_PEER, 'const id = ((en.authors || []).find((a) => a && a.id && !a.isSelf) || {}).id || null;'));   // the SCRATCH copy only
 await sleep(500);   // the leg as it stood — the kill held
 const asStood = { alive: srv.exitCode === null && srv.signalCode === null, answers: await fetch(`http://127.0.0.1:${PORT}/api/home`).then((r) => r.status, () => null) };
@@ -169,14 +169,14 @@ const exited = new Promise((r) => { if (srv.exitCode !== null || srv.signalCode 
 try { srv.kill('SIGKILL'); } catch {}
 const gone = await Promise.race([exited, sleep(20000).then(() => false)]);
 if (!gone) ok(false, 'HARNESS (CONTROL): the first server exited within 20000 ms of its SIGKILL');
-ok(asStood.alive && asStood.answers === 200 && gone, `CONTROL PLACED (r4456): the kill HELD past the old fixed wait, the first server is alive (${asStood.alive}) and answers /api/home (${asStood.answers}) — read as the leg stood «the patched copy booted» is true with no copy started; let go, the first server exited (${gone}) before the copy boots`, J(asStood));
+ok(gateOf(asStood.alive) && asStood.answers === 200 && verdictOf(gone), `CONTROL PLACED (r4456): the kill HELD past the old fixed wait, the first server is alive (${asStood.alive}) and answers /api/home (${asStood.answers}) — read as the leg stood «the patched copy booted» is true with no copy started; let go, the first server exited (${gone}) before the copy boots`, J(asStood));
 srv2 = boot();
-ok(await waitServer(), 'CONTROL: the patched copy booted');
+ok(verdictOf(await waitServer()), 'CONTROL: the patched copy booted');
 const p3 = await newPage();
 await p3.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
 await p3.load(); await p3.evaljs(OPEN);
 const C = await probe(p3, 'lark/oc_dm');
-ok(C && green(C.px && C.px.av) && !red(C.px && C.px.av), 'CONTROL: the old peerOf draws the OWNER\'s face (green) on the Bob row — the probe that judges ① tells them apart', J(C));
+ok(gateOf(C) && gateOf(green(C.px && C.px.av)) && !red(C.px && C.px.av), 'CONTROL: the old peerOf draws the OWNER\'s face (green) on the Bob row — the probe that judges ① tells them apart', J(C));
 p3.close();
 console.log(`\n${pass}/${pass + fail} passed (${Math.round((Date.now() - T0) / 1000)} s)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

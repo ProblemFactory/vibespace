@@ -30,7 +30,7 @@ const express = require('express');
 const esbuild = require('esbuild');
 const WSI = require('ws').WebSocket;
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? '\n      ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? '\n      ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms = 5000, step = 25) { const t0 = Date.now(); for (;;) { let v; try { v = await fn(); } catch { v = false; } if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(step); } }
 const CHROME = '/opt/google/chrome/chrome';
@@ -119,19 +119,19 @@ window.H = { createPasskeysSection, isPhoneWidth, renderProposalCard, patchPropo
   const since = (n) => reqs.slice(n).filter((q) => q.m !== 'GET');
 
   console.log('— ① desk 1100: the Passkeys table on the real routes');
-  ok(await open(1100, 900, false), 'the harness page loaded the bundled client modules');
+  ok(verdictOf(await open(1100, 900, false)), 'the harness page loaded the bundled client modules');
   await ev(`window.S = H.createPasskeysSection({ profileId: ${JSON.stringify(PID)}, label: 'Mail', phone: H.isPhoneWidth() }); document.getElementById('panel').appendChild(S.sec); S.load(); true`);
-  ok(await until(() => ev(`document.querySelectorAll('.bprof-pk-row[data-pk]').length === 2`), 5000), 'Passkeys (2): the table with both rows from GET /api/browser/passkeys');
+  ok(verdictOf(await until(() => ev(`document.querySelectorAll('.bprof-pk-row[data-pk]').length === 2`), 5000)), 'Passkeys (2): the table with both rows from GET /api/browser/passkeys');
   const cells = await ev(`[...document.querySelectorAll('.bprof-pk-row[data-pk]')].map((r) => [...r.querySelectorAll('.bprof-pk-cell')].map((c) => c.textContent.trim()).join(' | '))`);
-  ok(Array.isArray(cells) && /^github\.com \| alice \| agent · .+ \| never \| Allow ?Ask each time ?Never$/.test(cells[0]) && /^vercel\.com \| bob \| you · .+ \| \S.* \| Allow/.test(cells[1]), 'the columns: Site · User · Source (agent / you, with the date) · Last used · Policy', cells);
-  ok(await ev(`document.querySelector('.bprof-pk-switch-text').textContent === 'Agents never sign in with passkeys' && /deleting the profile deletes them/.test(document.querySelector('.bprof-pk-note').textContent) && !document.querySelector('.bprof-pk-switch-box').checked`), 'the head row: the agents-never switch (off by default) + its one sentence');
+  ok(gateOf(Array.isArray(cells)) && gateOf(/^github\.com \| alice \| agent · .+ \| never \| Allow ?Ask each time ?Never$/.test(cells[0])) && verdictOf(/^vercel\.com \| bob \| you · .+ \| \S.* \| Allow/.test(cells[1])), 'the columns: Site · User · Source (agent / you, with the date) · Last used · Policy', cells);
+  ok(verdictOf(await ev(`document.querySelector('.bprof-pk-switch-text').textContent === 'Agents never sign in with passkeys' && /deleting the profile deletes them/.test(document.querySelector('.bprof-pk-note').textContent) && !document.querySelector('.bprof-pk-switch-box').checked`)), 'the head row: the agents-never switch (off by default) + its one sentence');
   await ev(`window.ROW0 = document.querySelector('.bprof-pk-row[data-pk]'); ROW0._mark = 'same'; true`);
   let n0 = reqs.length;
   await clickSel(`.bprof-pk-row[data-pk] .bprof-pk-seg[data-policy="yes"]`);
   await until(() => storeOf().rows.find((r) => r.userName === 'alice').policy === 'yes', 3000); await sleep(150);
   const id0 = await ev('ROW0.dataset.pk');
   ok(since(n0).length === 1 && since(n0)[0].m === 'PATCH' && since(n0)[0].u === `/api/browser/passkeys/${PID}/${id0}` && since(n0)[0].b.policy === 'yes', 'a policy change ⇒ ONE PATCH {policy: yes}', since(n0));
-  ok(await ev(`document.querySelector('.bprof-pk-row[data-pk]')._mark === 'same' && ROW0.querySelector('.bprof-pk-seg.on').dataset.policy === 'yes' && ROW0.dataset.policy === 'yes'`) && storeOf().rows.find((r) => r.userName === 'alice').policy === 'yes', 'the row is patched IN PLACE (the same node), its control reads Allow; the store agrees');
+  ok(gateOf(await ev(`document.querySelector('.bprof-pk-row[data-pk]')._mark === 'same' && ROW0.querySelector('.bprof-pk-seg.on').dataset.policy === 'yes' && ROW0.dataset.policy === 'yes'`)) && storeOf().rows.find((r) => r.userName === 'alice').policy === 'yes', 'the row is patched IN PLACE (the same node), its control reads Allow; the store agrees');
   n0 = reqs.length;
   await clickSel('.bprof-pk-switch-box');
   await until(() => storeOf().agentsOff === true, 3000);
@@ -140,16 +140,16 @@ window.H = { createPasskeysSection, isPhoneWidth, renderProposalCard, patchPropo
   await shot('table.png');
   n0 = reqs.length;
   await ev(`[...document.querySelectorAll('.bprof-pk-row[data-pk]')][1].querySelector('.bprof-pk-more').click(); true`);
-  ok(await until(() => ev(`!!document.querySelector('.bprof-pk-delete')`), 2000), 'the row\'s ⋯ offers Delete…');
+  ok(verdictOf(await until(() => ev(`!!document.querySelector('.bprof-pk-delete')`), 2000)), 'the row\'s ⋯ offers Delete…');
   await ev(`(document.querySelector('.bprof-pk-delete').closest('.context-menu-item, [role=menuitem], div') || document.querySelector('.bprof-pk-delete')).click(); true`);
   const dlg = await until(() => ev(`(() => { const d = [...document.querySelectorAll('.modal, .dialog, [role=dialog]')].pop(); return d && /vercel\\.com/.test(d.textContent) ? d.textContent : null; })()`), 3000);
-  ok(dlg && /Delete the passkey for vercel\.com\?/.test(dlg) && /bob on vercel\.com/.test(dlg), 'Delete… ⇒ the confirm names the site and the user', dlg);
+  ok(gateOf(dlg) && gateOf(/Delete the passkey for vercel\.com\?/.test(dlg)) && verdictOf(/bob on vercel\.com/.test(dlg)), 'Delete… ⇒ the confirm names the site and the user', dlg);
   await ev(`(() => { const d = [...document.querySelectorAll('.modal, .dialog, [role=dialog]')].pop(); const b = [...d.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Delete'); b.click(); return true; })()`);
   await until(() => rows().length === 1, 3000); await sleep(200);
-  ok(since(n0).filter((q) => q.m === 'DELETE').length === 1 && rows().length === 1 && rows()[0].userName === 'alice' && await ev(`document.querySelectorAll('.bprof-pk-row[data-pk]').length === 1`), 'confirmed ⇒ ONE DELETE ⇒ the row leaves (the store keeps one)', since(n0));
+  ok(since(n0).filter((q) => q.m === 'DELETE').length === 1 && rows().length === 1 && rows()[0].userName === 'alice' && verdictOf(await ev(`document.querySelectorAll('.bprof-pk-row[data-pk]').length === 1`)), 'confirmed ⇒ ONE DELETE ⇒ the row leaves (the store keeps one)', since(n0));
 
   console.log('— ② the cards: the tray (register), the chat (sign-in), the live banner (passkey_ask)');
-  ok((await W.arm(PID, { budgetMs: 6000 })).ok, 'the watch armed on the headed Chrome (' + disp + ')');
+  ok(verdictOf((await W.arm(PID, { budgetMs: 6000 })).ok), 'the watch armed on the headed Chrome (' + disp + ')');
   const D0 = await cdp(BWS);
   const t1 = await D0.call('Target.createTarget', { url: PAGE }); const tid = t1.result.targetId; const sid = (await D0.call('Target.attachToTarget', { targetId: tid, flatten: true })).result.sessionId;
   await until(async () => (await D0.call('Runtime.evaluate', { expression: 'typeof window.signin', returnByValue: true }, sid)).result.result.value === 'function', 8000);
@@ -159,7 +159,7 @@ window.H = { createPasskeysSection, isPhoneWidth, renderProposalCard, patchPropo
   const it1 = items[items.length - 1];
   const UT = require('../src/user-todos.js');
   let normOk = true; try { UT.normalizeAction(it1.action); } catch (e) { normOk = String(e.message); }
-  ok(g.ok && it1 && it1.action.id === g.proposal.id && normOk === true && it1.i18n && Array.isArray(it1.i18n.detail), 'the agent\'s `passkey register` ⇒ ONE card whose For-you item the tray store accepts (choices as one string, detail lines)', normOk);
+  ok(gateOf(g.ok) && gateOf(it1) && it1.action.id === g.proposal.id && normOk === true && gateOf(it1.i18n) && verdictOf(Array.isArray(it1.i18n.detail)), 'the agent\'s `passkey register` ⇒ ONE card whose For-you item the tray store accepts (choices as one string, detail lines)', normOk);
   const trayErr = await ev(`try { window.IT1 = ${JSON.stringify({ ...it1, id: 'ut-1', status: 'open', createdAt: Date.now(), sessionKey: 's1' })};
     window.CTX = { t: H.t, wordsOf: (i) => i.text, detailOf: (i) => i.detail, nameFor: () => 'Chat', lang: 'en', replyState: () => ({ show: false }) };
     window.M = H.inboxModel({ ws: { onGlobal: () => {}, offGlobal: () => {}, send: () => {} } });
@@ -168,31 +168,31 @@ window.H = { createPasskeysSection, isPhoneWidth, renderProposalCard, patchPropo
   if (trayErr !== 'ok') console.log('      tray harness: ' + JSON.stringify(trayErr).slice(0, 400));
   const trayWords = await ev(`document.getElementById('tray').textContent`);
   const trayBtns = await ev(`[...document.querySelectorAll('#tray .ut-action-proposal')].map((b) => b.dataset.answer + ':' + b.textContent.trim())`);
-  ok(/Mail wants to register a passkey on localhost for carol/.test(trayWords) && /create ONE passkey on localhost in the next 10 minutes/.test(trayWords) && JSON.stringify(trayBtns) === JSON.stringify(['pk:once:Allow once', 'pk:no:Not now']), 'the tray row: who asks for what, what the agent may do after, Allow once / Not now', [trayWords, trayBtns]);
+  ok(gateOf(/Mail wants to register a passkey on localhost for carol/.test(trayWords)) && gateOf(/create ONE passkey on localhost in the next 10 minutes/.test(trayWords)) && JSON.stringify(trayBtns) === JSON.stringify(['pk:once:Allow once', 'pk:no:Not now']), 'the tray row: who asks for what, what the agent may do after, Allow once / Not now', [trayWords, trayBtns]);
   await ev(`window.CHAT1 = H.renderProposalCard({ id: 'm1', role: 'system', noticeKind: 'browser-proposal', content: [${JSON.stringify({ type: 'browser_proposal', id: g.proposal.id, kind: 'passkey', state: 'open', passkey: g.proposal })}] }, {}); document.getElementById('chat').appendChild(CHAT1); true`);
-  ok(await ev(`/register a passkey on localhost for carol/.test(CHAT1.textContent) && [...CHAT1.querySelectorAll('.chat-browser-pk-choice')].map((b) => b.textContent).join() === 'Allow once,Not now'`), 'the chat card: the SAME words and choices');
+  ok(verdictOf(await ev(`/register a passkey on localhost for carol/.test(CHAT1.textContent) && [...CHAT1.querySelectorAll('.chat-browser-pk-choice')].map((b) => b.textContent).join() === 'Allow once,Not now'`)), 'the chat card: the SAME words and choices');
   n0 = reqs.length;
   await clickSel('#tray .ut-passkey-once');
   await until(() => since(n0).length, 3000);
   ok(since(n0).length === 1 && since(n0)[0].u === `/api/browser/proposals/${g.proposal.id}/approve` && since(n0)[0].b.choice === 'once' && since(n0)[0].b.shown === g.proposal.shown, 'the tray\'s Allow once ⇒ POST approve {shown, choice: once}', since(n0));
   let r = await run("reg('carol')");
   await until(() => rows().some((x) => x.userName === 'carol'), 3000);
-  ok(r === 'ok' && rows().some((x) => x.userName === 'carol' && x.policy === 'ask'), 'the granted create goes through: carol\'s key stored, policy ask', r);
+  ok(r === 'ok' && verdictOf(rows().some((x) => x.userName === 'carol' && x.policy === 'ask')), 'the granted create goes through: carol\'s key stored, policy ask', r);
   const decided = W.passkeyList(PID); void decided;
   await ev(`H.patchProposalCard(CHAT1, { id: 'm1', role: 'system', noticeKind: 'browser-proposal', content: [${JSON.stringify({ type: 'browser_proposal', id: g.proposal.id, kind: 'passkey', state: 'answered', passkey: { ...g.proposal, state: 'answered', answer: 'once' } })}] }); true`);
-  ok(await ev(`/Allowed once — the agent may register the passkey now/.test(CHAT1.textContent) && CHAT1.querySelector('.chat-browser-pk-actions').style.display === 'none'`), 'a decided card shows its outcome, no buttons');
+  ok(verdictOf(await ev(`/Allowed once — the agent may register the passkey now/.test(CHAT1.textContent) && CHAT1.querySelector('.chat-browser-pk-actions').style.display === 'none'`)), 'a decided card shows its outcome, no buttons');
   // the sign-in card: a REAL ceremony on carol's key (policy ask)
   const nI = items.length; const pS = run('signin()');
   await until(() => items.length > nI && W.passkeyIn(PID, null).state === 'passkey_ask', 8000);
   const it2 = items[items.length - 1]; const card2 = it2 && it2.passkey;
-  ok(card2 && card2.kind === 'sign-in' && /sign in to localhost with carol's passkey/.test(it2.text), 'a sign-in on a key with policy ask ⇒ ONE sign-in card', it2 && it2.text);
+  ok(gateOf(card2) && card2.kind === 'sign-in' && verdictOf(/sign in to localhost with carol's passkey/.test(it2.text)), 'a sign-in on a key with policy ask ⇒ ONE sign-in card', it2 && it2.text);
   await ev(`document.getElementById('chat').textContent = ''; window.CHAT2 = H.renderProposalCard({ id: 'm2', role: 'system', noticeKind: 'browser-proposal', content: [${JSON.stringify({ type: 'browser_proposal', id: card2.id, kind: 'passkey', state: 'open', passkey: card2 })}] }, {}); document.getElementById('chat').appendChild(CHAT2);
     const blk = ${JSON.stringify(W.passkeyIn(PID, null).state === 'passkey_ask' ? { state: 'passkey_ask', rpId: 'localhost', id: 1 } : null)};
     const w = H.passkeyWords(blk, H.t, { card: ${JSON.stringify(card2)} }); const bar = document.getElementById('live');
     const ti = document.createElement('div'); ti.className = 'browser-live-dialog-title'; ti.textContent = w.title; const ln = document.createElement('div'); ln.className = 'browser-live-dialog-body'; ln.textContent = w.line;
     const row = document.createElement('div'); row.className = 'browser-live-dialog-actions browser-live-passkey-ask'; H.patchPasskeyButtons(row, ${JSON.stringify(card2)}); bar.append(ti, ln, row); true`);
-  ok(await ev(`/sign in to localhost with carol's passkey/.test(CHAT2.textContent) && /as carol until you change the policy/.test(CHAT2.textContent) && [...CHAT2.querySelectorAll('.chat-browser-pk-choice')].map((b) => b.textContent).join() === 'Allow once,Always allow,Not now,Never'`), 'the chat card: the sign-in words, what the agent may do after, its four choices');
-  ok(await ev(`/waiting for you to allow the passkey for localhost/.test(document.getElementById('live').textContent) && document.querySelectorAll('#live .chat-browser-pk-choice').length === 4`), 'the live banner (passkey_ask): the page waits for you + the card\'s four choices inline');
+  ok(verdictOf(await ev(`/sign in to localhost with carol's passkey/.test(CHAT2.textContent) && /as carol until you change the policy/.test(CHAT2.textContent) && [...CHAT2.querySelectorAll('.chat-browser-pk-choice')].map((b) => b.textContent).join() === 'Allow once,Always allow,Not now,Never'`)), 'the chat card: the sign-in words, what the agent may do after, its four choices');
+  ok(verdictOf(await ev(`/waiting for you to allow the passkey for localhost/.test(document.getElementById('live').textContent) && document.querySelectorAll('#live .chat-browser-pk-choice').length === 4`)), 'the live banner (passkey_ask): the page waits for you + the card\'s four choices inline');
   {   // ②b (int258) a RELOAD keeps the card: the history rebuilt through the REAL source (the wiring's own factory)
     const N = require('../src/normalizers.js'), BP = require('../src/server/browser-propose.js');
     const sess = (id) => ({ _browserKey: 'bk-aaaaaaaa', name: 'Mail', webuiName: 'Mail', mode: 'chat', backend: 'claude', claudeSessionId: 'c0ffee00-0000-4000-8000-0000aaaaaaaa', _historyLoaded: false, id });
@@ -202,9 +202,9 @@ window.H = { createPasskeysSection, isPhoneWidth, renderProposalCard, patchPropo
     const s1 = sess('s1'); await N.rebuildHistory(s1, 's1', [], {});
     const mine = s1._normalizer.messages.filter((m) => m.noticeKind === 'browser-proposal');
     const m2 = mine.find((m) => m.id === `s1:bp:${card2.id}`), m1 = mine.find((m) => m.id === `s1:bp:${g.proposal.id}`);
-    ok(mine.length === 2 && m2 && m2.content[0].state === 'open' && m1 && m1.content[0].state === 'answered' && m1.ts <= m2.ts, 'a reload (the history rebuilt) draws both passkey cards from the watch, in order: the register card decided, the sign-in card open', mine.map((m) => [m.id, m.content[0].state]));
+    ok(mine.length === 2 && gateOf(m2) && m2.content[0].state === 'open' && gateOf(m1) && m1.content[0].state === 'answered' && m1.ts <= m2.ts, 'a reload (the history rebuilt) draws both passkey cards from the watch, in order: the register card decided, the sign-in card open', mine.map((m) => [m.id, m.content[0].state]));
     await ev(`window.CHAT3 = H.renderProposalCard(${JSON.stringify(m2 || {})}, {}); document.getElementById('chat').appendChild(CHAT3); true`);
-    ok(await ev(`/sign in to localhost with carol's passkey/.test(CHAT3.textContent) && [...CHAT3.querySelectorAll('.chat-browser-pk-choice')].map((b) => b.textContent).join() === 'Allow once,Always allow,Not now,Never'`), 'the rebuilt sign-in card: the same words and its four buttons');
+    ok(verdictOf(await ev(`/sign in to localhost with carol's passkey/.test(CHAT3.textContent) && [...CHAT3.querySelectorAll('.chat-browser-pk-choice')].map((b) => b.textContent).join() === 'Allow once,Always allow,Not now,Never'`)), 'the rebuilt sign-in card: the same words and its four buttons');
     await ev(`CHAT3.remove(); true`);
     N.setProposalCardSource(BP.cardSource({ dialogs: null }));
     const s2 = sess('s2'); await N.rebuildHistory(s2, 's2', [], {});
@@ -218,9 +218,9 @@ window.H = { createPasskeysSection, isPhoneWidth, renderProposalCard, patchPropo
   await until(() => rows().find((x) => x.userName === 'carol').policy === 'yes', 3000);
   ok(since(n0).length === 1 && since(n0)[0].u === `/api/browser/proposals/${card2.id}/approve` && since(n0)[0].b.choice === 'always' && r === 'ok', 'the chat card\'s Always allow ⇒ POST {choice: always} ⇒ the sign-in goes through', [since(n0), r]);
   await ev('S.load(); true');
-  ok(await until(() => ev(`(() => { const r = [...document.querySelectorAll('.bprof-pk-row[data-pk]')].find((x) => x.querySelector('.bprof-pk-user').textContent === 'carol'); return !!r && r.querySelector('.bprof-pk-seg.on').textContent === 'Allow'; })()`), 3000), 'the table\'s policy now reads Allow for carol');
+  ok(verdictOf(await until(() => ev(`(() => { const r = [...document.querySelectorAll('.bprof-pk-row[data-pk]')].find((x) => x.querySelector('.bprof-pk-user').textContent === 'carol'); return !!r && r.querySelector('.bprof-pk-seg.on').textContent === 'Allow'; })()`), 3000)), 'the table\'s policy now reads Allow for carol');
   // the banner's own Allow once: policy back to ask, a second sign-in
-  ok(W.passkeyPolicy(PID, rows().find((x) => x.userName === 'carol').credentialId.slice(0, 8), 'ask').ok, 'carol\'s policy back to ask');
+  ok(verdictOf(W.passkeyPolicy(PID, rows().find((x) => x.userName === 'carol').credentialId.slice(0, 8), 'ask').ok), 'carol\'s policy back to ask');
   const nJ = items.length; const pS2 = run('signin()');
   await until(() => items.length > nJ && W.passkeyIn(PID, null).state === 'passkey_ask', 8000);
   const card3 = items[items.length - 1].passkey;
@@ -232,14 +232,14 @@ window.H = { createPasskeysSection, isPhoneWidth, renderProposalCard, patchPropo
   ok(since(n0).length === 1 && since(n0)[0].u === `/api/browser/proposals/${card3.id}/approve` && since(n0)[0].b.choice === 'once' && r === 'ok' && rows().find((x) => x.userName === 'carol').policy === 'ask', 'the banner\'s Allow once ⇒ POST {choice: once} ⇒ the sign-in goes through; the policy stays ask', [since(n0), r]);
 
   console.log('— ③ phone 390: the bottom sheet');
-  ok(await open(390, 844, true), 'the page at 390 × 844 (mobile)');
+  ok(verdictOf(await open(390, 844, true)), 'the page at 390 × 844 (mobile)');
   await ev(`window.S = H.createPasskeysSection({ profileId: ${JSON.stringify(PID)}, label: 'Mail', phone: H.isPhoneWidth() }); S.load(); true`);
   await until(() => ev(`document.querySelectorAll('.bprof-pk-sheet .bprof-pk-row[data-pk]').length === 2`), 5000);
   const geo = await ev(`(() => { const s = document.querySelector('.bprof-pk-in-sheet').getBoundingClientRect(); const segs = [...document.querySelectorAll('.bprof-pk-sheet .bprof-pk-seg, .bprof-pk-sheet .bprof-pk-more')].map((b) => b.getBoundingClientRect()); return { bottom: Math.round(s.bottom), vh: innerHeight, left: Math.round(s.left), right: Math.round(s.right), minH: Math.round(Math.min(...segs.map((b) => b.height))), over: segs.some((b) => b.right > innerWidth + 0.5) }; })()`);
-  ok(geo && Math.abs(geo.bottom - geo.vh) <= 1 && geo.left === 0 && geo.right === 390 && geo.minH >= 36 && !geo.over, 'a bottom sheet across the screen; every target ≥ 36 px, none off-screen', geo);
+  ok(gateOf(geo) && Math.abs(geo.bottom - geo.vh) <= 1 && geo.left === 0 && geo.right === 390 && geo.minH >= 36 && !geo.over, 'a bottom sheet across the screen; every target ≥ 36 px, none off-screen', geo);
   await shot('phone.png');
 } catch (e) { fail++; console.log('  ✗ the suite threw: ' + (e && e.stack || e)); }
 end();
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

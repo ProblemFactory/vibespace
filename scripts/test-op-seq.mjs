@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 
 const modPath = path.join(REPO, 'src/op-seq.js');
 if (!fs.existsSync(modPath)) { console.error('  ✗ src/op-seq.js does not exist — no op sequence, every reconnect ships a slab'); console.log('\n1 FAILED (0 passed)'); process.exit(1); }
@@ -43,9 +43,9 @@ console.log('— since: inside the ring ⇒ exactly the frames after it');
   const r = createOpRing({ cap: 100 });
   const sent = []; for (let i = 1; i <= 10; i++) sent.push(r.push(op(i)).frame);
   const s4 = r.since(4);
-  ok('since(4) = frames 5..10 in order, byte-identical to what push returned', Array.isArray(s4.ops) && s4.ops.length === 6 && s4.ops.join('\n') === sent.slice(4).join('\n') && s4.seq === 10);
+  ok('since(4) = frames 5..10 in order, byte-identical to what push returned', gateOf(Array.isArray(s4.ops)) && s4.ops.length === 6 && s4.ops.join('\n') === sent.slice(4).join('\n') && s4.seq === 10);
   ok('since(0) on a ring still holding seq 1 = everything', r.since(0).ops.length === 10);
-  ok('since(current) = [] (nothing missed — a HELD resume with an empty replay)', Array.isArray(r.since(10).ops) && r.since(10).ops.length === 0);
+  ok('since(current) = [] (nothing missed — a HELD resume with an empty replay)', gateOf(Array.isArray(r.since(10).ops)) && r.since(10).ops.length === 0);
   ok('since(a future seq) is NOT covered (not one of ours ⇒ the full attach)', r.since(11).ops === null && r.since(11).lagged === true);
   ok('since(garbage) is not covered', r.since(-1).ops === null && r.since('x').ops === null && r.since(2.5).ops === null && r.since(undefined).ops === null);
 }
@@ -58,7 +58,7 @@ console.log('— cap eviction: older than the ring ⇒ lagged with the oldest he
   const old = r.since(6);
   ok('since(6) — frame 7 fell off — is lagged, naming oldest 8', old.ops === null && old.lagged === true && old.oldest === 8 && old.seq === 12);
   const edge = r.since(7);
-  ok('since(7) — the frame right before the oldest — is covered (8..12)', Array.isArray(edge.ops) && edge.ops.length === 5 && JSON.parse(edge.ops[0]).seq === 8);
+  ok('since(7) — the frame right before the oldest — is covered (8..12)', gateOf(Array.isArray(edge.ops)) && edge.ops.length === 5 && JSON.parse(edge.ops[0]).seq === 8);
   // many pushes: the amortized head compaction keeps order
   const big = createOpRing({ cap: 50 });
   for (let i = 1; i <= 5000; i++) big.push(op(i));
@@ -134,11 +134,11 @@ console.log('— attachedWithReplay: the frames spliced in verbatim');
   const frames = [r.push(op(1)).frame, r.push({ type: 'msg', sessionId: 's', op: 'edit', id: 's:1', fields: { content: [{ type: 'text', text: 'ünïcødé   "q"' }] } }).frame];
   const text = attachedWithReplay({ type: 'attached', sessionId: 's', slab: 'held', opSeq: 2 }, frames);
   const parsed = JSON.parse(text);
-  ok('the payload parses, carries its own keys and a replay array', parsed.type === 'attached' && parsed.slab === 'held' && parsed.opSeq === 2 && Array.isArray(parsed.replay) && parsed.replay.length === 2);
+  ok('the payload parses, carries its own keys and a replay array', parsed.type === 'attached' && parsed.slab === 'held' && parsed.opSeq === 2 && gateOf(Array.isArray(parsed.replay)) && parsed.replay.length === 2);
   ok('each replayed op re-serializes to the EXACT text the ring sent (byte-compare)', parsed.replay.map((x) => JSON.stringify(x)).join('\n') === frames.join('\n'));
   ok('no `messages` key (a held resume is not a slab)', !('messages' in parsed));
   ok('an empty replay is an empty array', JSON.parse(attachedWithReplay({ type: 'attached' }, [])).replay.length === 0);
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { gateOf } from './lib/check.mjs';

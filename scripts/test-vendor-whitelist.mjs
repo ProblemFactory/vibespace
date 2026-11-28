@@ -35,7 +35,7 @@ const require = createRequire(import.meta.url);
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -151,7 +151,7 @@ for (const [rel, n] of Object.entries(constructions)) {
 // lane runtime-floor: nodejs.org is NOT an API vendor — the node release download (src/node-runtime.js, the one downloader:
 // a public archive, no credential, nothing spent, sha256-checked against the mirror's SHASUMS256.txt before it is
 // unpacked) is never a construction here; its egress row is test-channels-egress's
-ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org\/dist'/.test(fs.readFileSync(path.join(REPO, 'src/node-runtime.js'), 'utf-8')) && !constructions['src/node-runtime.js'],
+ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && gateOf(/'https:\/\/nodejs\.org\/dist'/.test(fs.readFileSync(path.join(REPO, 'src/node-runtime.js'), 'utf-8'))) && !constructions['src/node-runtime.js'],
   'nodejs.org is no vendor host: the node release download (src/node-runtime.js, sha256-gated) is not a vendor construction (its egress row: test-channels-egress)');
 // CONTROL: a raw vendor fetch planted beside the codex live read (quota.readLive) is a construction in a file outside
 // the rows — the census counts it, so the allowlist check above would go red
@@ -183,13 +183,13 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   });
   const texts = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), readSrc(f)]; } catch { return [path.relative(REPO, f), '']; } }));
   const names = urlExportsOf('src/server/dropline-client.js');
-  ok(['DROPLINE_BASE', 'OAUTH_BASE', 'AUTHORIZE_URL'].every((n) => names.includes(n)), `the vendor module's exported URL constants are derived (${names.join(', ')})`, names.join());
+  ok(verdictOf(['DROPLINE_BASE', 'OAUTH_BASE', 'AUTHORIZE_URL'].every((n) => names.includes(n))), `the vendor module's exported URL constants are derived (${names.join(', ')})`, names.join());
   const readers = baseReaders(texts);
   ok(readers.length === 0, 'no server file outside the vendor module reads its exported URL constants', readers.join('; '));
   const rel = 'src/server/voice-teach-engine.js', t = texts[rel] || '';
   const planted = t.replace("'use strict';\n", "'use strict';\nconst sneak = (body) => fetch(require('./dropline-client.js').DROPLINE_BASE + '/v1/terms', { method: 'POST', body });\n");
   const hostLines = (s) => s.split('\n').filter((l) => CONSTRUCT_HOSTS.test(l)).length;
-  ok(planted !== t && hostLines(planted) === hostLines(t) && baseReaders({ ...texts, [rel]: planted }).includes(`${rel} ← src/server/dropline-client.js`), 'CONTROL (voice-verify m2): a fetch in the teach engine built from the exported DROPLINE_BASE adds no host literal (the count above stays green) but is RED here');
+  ok(planted !== t && hostLines(planted) === hostLines(t) && verdictOf(baseReaders({ ...texts, [rel]: planted }).includes(`${rel} ← src/server/dropline-client.js`)), 'CONTROL (voice-verify m2): a fetch in the teach engine built from the exported DROPLINE_BASE adds no host literal (the count above stays green) but is RED here');
 }
 // CONTROL (lane decision-core): a copy of the decisions fetch planted anywhere else — beside the PURE model's own URLs,
 // or a marker-carrying fetch in another server file — is a construction outside the allowlist (RED); the engine with
@@ -211,7 +211,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   const dmText = fs.readFileSync(path.join(REPO, 'src/decision-model.js'), 'utf-8');
   const pre = ce.slice(ce.indexOf('async function preInfer('), ce.indexOf('/** THE FUNNEL ENTRY.'));
   const viaJudge = ce.split('\n').filter((l) => /decisionEngine\.judge\('reply-infer'/.test(l)).length;
-  ok(Object.keys(ALLOW).length === 6 /* int332: 5 on the lane's .328 base; .329 added the provider-models row */ && ALLOW['src/server/decision-engine.js'].max === 1 && !ALLOW['src/server/channels-engine.js'] && !constructions['src/server/channels-engine.js'] && viaJudge === 1 && pre.length > 500 && !/\bfetch\s*\(|https?\.request\(|\.textModel\b/.test(pre) && dmText.includes("'reply-infer': Object.freeze({"),
+  ok(Object.keys(ALLOW).length === 6 /* int332: 5 on the lane's .328 base; .329 added the provider-models row */ && ALLOW['src/server/decision-engine.js'].max === 1 && !ALLOW['src/server/channels-engine.js'] && !constructions['src/server/channels-engine.js'] && viaJudge === 1 && pre.length > 500 && !/\bfetch\s*\(|https?\.request\(|\.textModel\b/.test(pre) && verdictOf(dmText.includes("'reply-infer': Object.freeze({")),
     `lane dm-reply-infers: use reply-infer adds NO vendor site — the allowlist keeps its ${Object.keys(ALLOW).length} rows (the decisions row: decision-engine.js, max 1); the channels engine's pre-pass calls decisionEngine.judge('reply-infer', …) once and holds no request primitive`);
 }
 // lane vault-use-grants (R4): the vault's policy judge is a USE of the ONE decisions caller, never a new site — the ALLOW table
@@ -221,7 +221,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   const wire = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
   const door = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf-8');
   const viaJudge = wire.split('\n').filter((l) => /decisionEngine\.judge\('vault-use-policy'/.test(l)).length;
-  ok(Object.keys(ALLOW).length === 6 && ALLOW['src/server/decision-engine.js'].max === 1 && !ALLOW['src/server/vault-run-door.js'] && !constructions['src/server/vault-run-door.js'] && !constructions['src/server/mounts-plugins-wiring.js'] && viaJudge === 1 && /policyOn: \(\) => serverSetting\('vault\.policyJudge'\) === true/.test(wire) && !/\bfetch\s*\(|https?\.request\(/.test(door),
+  ok(Object.keys(ALLOW).length === 6 && ALLOW['src/server/decision-engine.js'].max === 1 && !ALLOW['src/server/vault-run-door.js'] && !constructions['src/server/vault-run-door.js'] && !constructions['src/server/mounts-plugins-wiring.js'] && viaJudge === 1 && gateOf(/policyOn: \(\) => serverSetting\('vault\.policyJudge'\) === true/.test(wire)) && !/\bfetch\s*\(|https?\.request\(/.test(door),
     `lane vault-use-grants: use vault-use-policy adds NO vendor site — the allowlist keeps its ${Object.keys(ALLOW).length} rows; the wiring calls decisionEngine.judge('vault-use-policy', …) once behind vault.policyJudge (default off); the run door holds no request primitive`);
 }
 // lane rule-learning: the chat completions call is EXACTLY one site in ONE file (count exact); the gates live in the CODE (a
@@ -247,7 +247,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   const twice = tm.replace('    const u = json ? usageOf(json)', "    // TEXT_ENDPOINT — a second call (a retry without the routing)\n    await fetch(url, { method: 'POST' });\n    const u = json ? usageOf(json)");
   ok(twice !== tm && constructionsIn(twice) === 2 && constructionsIn(twice) > ALLOW[REL].max, 'CONTROL: a SECOND chat completions call in the client itself is over its count (RED)', String(constructionsIn(twice)));
   const noZdr = tm.replace(ROUTING + ',', 'provider: {},'), offZdr = tm.replace(ROUTING, "provider: { zdr: false, data_collection: 'deny' }"), allow = tm.replace(ROUTING, "provider: { zdr: true, data_collection: 'allow' }");
-  ok([noZdr, offZdr, allow].every((x) => x !== tm && missing(x).join() === ROUTING), 'CONTROL: the client with its routing literal taken out, with zdr: false, or with data_collection: allow loses the zero-data-retention gate (RED ×3) — a header or a journal row naming them does not count', [noZdr, offZdr, allow].map((x) => missing(x).join()));
+  ok(verdictOf([noZdr, offZdr, allow].every((x) => x !== tm && missing(x).join() === ROUTING)), 'CONTROL: the client with its routing literal taken out, with zdr: false, or with data_collection: allow loses the zero-data-retention gate (RED ×3) — a header or a journal row naming them does not count', [noZdr, offZdr, allow].map((x) => missing(x).join()));
   const noBudget = tm.replace('const v = M.budgetVerdict(', 'const v = ({ ok: true }) || (');
   ok(noBudget !== tm && missing(noBudget).join() === 'budgetVerdict(', 'CONTROL: the client with its budget verdict taken out loses the money gate (RED)', missing(noBudget).join());
 
@@ -277,20 +277,20 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   const routedOnBody = (text) => { const c = code(text); return bodyLiteral(text).split('\n').some((l) => l.trim() === ROUTING + ',') && count(c, SERIAL) === 1 && count(c, ONE_SHOT) === 1 && (c.match(/\bbytes\b/g) || []).length === 3; };
   ok(primCount(tm) === ALLOW[REL].max, `${REL}: ${primCount(tm)} request primitive token(s) in its code = the row's max ${ALLOW[REL].max} (counted as tokens, not as marker lines)`, primCount(tm));
   const reachers = Object.entries(texts).filter(([rel, t]) => rel !== REL && reaches(t)).map(([rel]) => rel);
-  ok(reachers.includes('src/server/decision-engine.js') && reachers.includes('src/server/channels-attention.js') && reachSites(texts).length === 0, `the files that reach the text client (${reachers.join(', ')}) hold no request primitive beyond their own allowlisted count`, reachSites(texts));
-  ok(bodyWrites(tm) === 0 && routedOnBody(tm), `${REL}: the request's body is never written after it is built, and the routing literal is a direct line of it`, { writes: bodyWrites(tm), routed: routedOnBody(tm) });
+  ok(gateOf(reachers.includes('src/server/decision-engine.js')) && gateOf(reachers.includes('src/server/channels-attention.js')) && reachSites(texts).length === 0, `the files that reach the text client (${reachers.join(', ')}) hold no request primitive beyond their own allowlisted count`, reachSites(texts));
+  ok(bodyWrites(tm) === 0 && verdictOf(routedOnBody(tm)), `${REL}: the request's body is never written after it is built, and the routing literal is a direct line of it`, { writes: bodyWrites(tm), routed: routedOnBody(tm) });
   const U = '    const u = json ? usageOf(json)';
   const retry = tm.replace(U, "    if (status === 0) { try { const r2 = await fetch(url, { method: 'POST', body: JSON.stringify({ ...body, provider: undefined }) }); status = r2.status; } catch { } }\n" + U);
   ok(retry !== tm && primCount(retry) === 2 && constructionsIn(retry) === 1, 'CONTROL (M3): a non-ZDR retry with NO marker comment — invisible to the ±4-line host census (still 1) — is 2 primitive tokens (RED)', [constructionsIn(retry), primCount(retry)]);
   const ca = texts['src/server/channels-attention.js'] || '';
   const viaUrl = ca.replace('  /** lane rule-learning: is the text-model drafter there?', "  async function quickDraft(messages) { const tm = decision && decision.textModel; return fetch(tm.url, { method: 'POST', body: JSON.stringify({ messages }) }); }\n  /** lane rule-learning: is the text-model drafter there?");
-  ok(viaUrl !== ca && reachSites({ ...texts, 'src/server/channels-attention.js': viaUrl }).some((s) => s.startsWith('src/server/channels-attention.js')), 'CONTROL (M4): a chat completions copy in channels-attention built from the client\'s own url (no host literal) is a construction site outside the allowlist (RED)');
+  ok(viaUrl !== ca && verdictOf(reachSites({ ...texts, 'src/server/channels-attention.js': viaUrl }).some((s) => s.startsWith('src/server/channels-attention.js'))), 'CONTROL (M4): a chat completions copy in channels-attention built from the client\'s own url (no host literal) is a construction site outside the allowlist (RED)');
   const de = texts['src/server/decision-engine.js'] || '';
   const engCopy = de.replace("  const textModel = require('./text-model-client.js').create(", "  const peek = (m) => fetch(String(textModel && textModel.url), { method: 'POST', body: JSON.stringify({ m }) });\n  const textModel = require('./text-model-client.js').create(");
-  ok(engCopy !== de && reachSites({ ...texts, 'src/server/decision-engine.js': engCopy }).some((s) => s.startsWith('src/server/decision-engine.js')), 'CONTROL: a second request in the decision engine (which builds the client) is over its own count (RED)');
+  ok(engCopy !== de && verdictOf(reachSites({ ...texts, 'src/server/decision-engine.js': engCopy }).some((s) => s.startsWith('src/server/decision-engine.js'))), 'CONTROL: a second request in the decision engine (which builds the client) is over its own count (RED)');
   const LET = "    let status = 0, json = null, message = '', failed = null, sending = null;";
   const over = tm.replace(LET, "    Object.assign(body, { provider: { data_collection: 'allow' } });\n" + LET), prop = tm.replace(LET, '    body.provider = {};\n' + LET), del = tm.replace(LET, '    delete body.provider;\n' + LET);
-  ok([over, prop, del].every((x) => x !== tm && bodyWrites(x) === 1 && missing(x).length === 0), 'CONTROL (M2): the literal kept and then overridden (Object.assign / a property write / a delete) — every text gate still green — is a body write (RED ×3)', [over, prop, del].map(bodyWrites));
+  ok(verdictOf([over, prop, del].every((x) => x !== tm && bodyWrites(x) === 1 && missing(x).length === 0)), 'CONTROL (M2): the literal kept and then overridden (Object.assign / a property write / a delete) — every text gate still green — is a body write (RED ×3)', [over, prop, del].map(bodyWrites));
   const dead = tm.replace(ROUTING + ',', `...(false ? { ${ROUTING}, } : {}),`);
   ok(dead !== tm && missing(dead).length === 0 && !routedOnBody(dead), 'CONTROL (M8b): the routing literal moved into a dead branch — the text gate still green — is no direct line of the body (RED)');
 
@@ -313,7 +313,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   const readsRouting = (text) => /\.\s*provider\b|\[\s*['"`]provider['"`]\s*\]/.test(code(text));
   const sealed = (text) => frozen(text) && bodyRefs(text) === 2 && serials(text) === 1 && routedOnBody(text) && !readsRouting(text);
   const sealOf = (text) => ({ frozen: frozen(text), bodyRefs: bodyRefs(text), serials: serials(text), routed: routedOnBody(text), readsRouting: readsRouting(text) });
-  ok(sealed(tm), `${REL}: the request body and its routing are Object.freeze'd where they are built (strict module), \`body\` is named twice (built · serialized), ONE JSON.stringify — in the request — and the routing is never read back`, sealOf(tm));
+  ok(verdictOf(sealed(tm)), `${REL}: the request body and its routing are Object.freeze'd where they are built (strict module), \`body\` is named twice (built · serialized), ONE JSON.stringify — in the request — and the routing is never read back`, sealOf(tm));
   // lane learn-card-untick (verify r3 R3-F4): + `module` (`require('module')._load` = a createRequire) and Node's internal
   // aliases `_http_*` / `_tls_*` / `_stream_*` (`require('_http_client')` is the HTTP client itself)
   const NET_MODULE = /^(?:node:)?(?:http|https|http2|net|tls|dgram|dns|child_process|worker_threads|cluster|inspector|module|_(?:http|tls|stream)_\w+|undici|node-fetch|axios|got|ws|request|superagent)$/;
@@ -349,7 +349,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
     return { files: cl.files, prims, names, bad: cl.bad, ok: prims.length === 1 && names.length === 0 && cl.bad.length === 0 };
   };
   const cc = closureCensus();
-  ok(cc.ok && cc.files.includes('src/rule-learning.js') && cc.files.includes('src/decision-model.js') && cc.files.length >= 3, `${REL} + the ${cc.files.length - 1} src-local modules it requires (transitively): EXACTLY 1 request primitive in all (${cc.prims.join('; ')}), the primitive named only where it is bound, every load followed, no network module`, { prims: cc.prims, names: cc.names, bad: cc.bad });
+  ok(gateOf(cc.ok) && gateOf(cc.files.includes('src/rule-learning.js')) && gateOf(cc.files.includes('src/decision-model.js')) && cc.files.length >= 3, `${REL} + the ${cc.files.length - 1} src-local modules it requires (transitively): EXACTLY 1 request primitive in all (${cc.prims.join('; ')}), the primitive named only where it is bound, every load followed, no network module`, { prims: cc.prims, names: cc.names, bad: cc.bad });
   // CONTROLS — verify r2's own roads, each as a plant: every one RED on the census alone (the wire sweep of
   // test-rule-learning ⑪b catches them by behaviour too)
   const U2 = '    const u = json ? usageOf(json)';
@@ -407,7 +407,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
     return { keys: topKeys(lit), providerKeys: (c.match(/\bprovider\s*:/g) || []).length, closed: i >= 0 && /^\s*\)\s*;/.test(c.slice(i + lit.length)), measured: count(c, 'String(bytes.length)') };
   };
   const shaped = (text) => { const x = shapeOf(text); return JSON.stringify(x.keys) === JSON.stringify(BODY_KEYS) && x.providerKeys === 1 && x.closed && x.measured === 1; };
-  ok(shaped(tm), `${REL}: the request literal's keys are exactly ${BODY_KEYS.join(' · ')} (no spread, \`provider\` once in the client), nothing follows it but \`;\`, the bytes measured only as String(bytes.length)`, shapeOf(tm));
+  ok(verdictOf(shaped(tm)), `${REL}: the request literal's keys are exactly ${BODY_KEYS.join(' · ')} (no spread, \`provider\` once in the client), nothing follows it but \`;\`, the bytes measured only as String(bytes.length)`, shapeOf(tm));
   const CLOSE = '      usage: { include: true },\n    });', CL = "String(bytes.length)";
   const LIT_AGAIN = "Object.freeze({ model: tier.id, messages, temperature: 0, max_tokens: outMax, response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } }, usage: { include: true } })";
   const shapes = {
@@ -464,8 +464,8 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
     return { ...f, ok: Object.values(f).every(Boolean), broken: Object.keys(f).filter((k) => !f[k]) };
   };
   const rowText = Object.fromEntries(ROWS.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf-8')]));
-  ok(ROWS.length === 2 && ROWS.includes('src/server/decision-engine.js') && ROWS.includes('src/server/text-model-client.js'), `the rows marked oneShot are BOTH vendor callers of the Language model row (${ROWS.join(', ')})`);
-  for (const rel of ROWS) ok(oneShotOf(rowText[rel]).ok, `${rel}: its ONE request carries \`${ONE_SHOT}\` (no other body), its length and redirect: 'error'; the body frozen, serialized ONCE (bytes ×3, body ×2), no stream of its own`, oneShotOf(rowText[rel]));
+  ok(ROWS.length === 2 && gateOf(ROWS.includes('src/server/decision-engine.js')) && verdictOf(ROWS.includes('src/server/text-model-client.js')), `the rows marked oneShot are BOTH vendor callers of the Language model row (${ROWS.join(', ')})`);
+  for (const rel of ROWS) ok(verdictOf(oneShotOf(rowText[rel]).ok), `${rel}: its ONE request carries \`${ONE_SHOT}\` (no other body), its length and redirect: 'error'; the body frozen, serialized ONCE (bytes ×3, body ×2), no stream of its own`, oneShotOf(rowText[rel]));
   // the helper: ONE implementation in the PURE model, and it IS a one-shot stream of the bytes (a behaviour read)
   const DM_REL = 'src/decision-model.js', dmCode = code(fs.readFileSync(path.join(REPO, DM_REL), 'utf-8'));
   const STREAM = 'return new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });';
@@ -474,7 +474,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   const probe = new TextEncoder().encode('{"q":1}');
   const st = DMod.oneShotBody(probe), rd = st instanceof ReadableStream ? st.getReader() : null, r1 = rd ? await rd.read() : {}, r2 = rd ? await rd.read() : {};   // no stream ⇒ RED by name, never a crash
   let refused = false; try { DMod.oneShotBody('{"q":1}'); } catch (e) { refused = e instanceof TypeError; }
-  ok(count(dmCode, STREAM) === 1 && /function oneShotBody\(bytes\) \{/.test(dmCode) && streams.join() === DM_REL && st instanceof ReadableStream && r1.value === probe && r2.done === true && refused,
+  ok(count(dmCode, STREAM) === 1 && gateOf(/function oneShotBody\(bytes\) \{/.test(dmCode)) && streams.join() === DM_REL && st instanceof ReadableStream && r1.value === probe && r2.done === true && verdictOf(refused),
     `the ONE implementation: ${DM_REL}'s oneShotBody (the only server-tier file that builds a request stream: ${streams.join(', ')}) — a stream that hands the bytes over ONCE (then done), and a string is refused (TypeError: nothing is sent)`, { streams, once: r1.value === probe, done: r2.done, refused });
   // CONTROLS — each shape planted in EACH row is RED (the matrix): the four bodies with a source Node re-sends on a 421, a
   // stream of the row's own, the length dropped (chunked), redirects followed, a second body key after the one-shot one
@@ -511,7 +511,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
 for (const [rel, a] of Object.entries(ALLOW)) {
   ok(constructions[rel] > 0, `${rel} still holds its allowlisted vendor call (moved/renamed ⇒ update the allowlist)`);
   const text = fs.readFileSync(path.join(REPO, rel), 'utf-8');
-  for (const g of a.gates) ok(text.includes(g), `${rel} keeps gate marker '${g}' (§ban-safety gate deleted?)`);
+  for (const g of a.gates) ok(verdictOf(text.includes(g)), `${rel} keeps gate marker '${g}' (§ban-safety gate deleted?)`);
 }
 
 // ── 3: the device protocol's vendor surface is EXACTLY the quota-refresh op ──
@@ -523,7 +523,7 @@ for (const [rel, a] of Object.entries(ALLOW)) {
   const hits = (text.match(/api\.anthropic\.com/g) || []).length;
   ok(hits === 1, `src/agentd/agentd.js: exactly ONE vendor host literal (the quota-refresh op; found ${hits})`);
   for (const g of ["humanGated !== true", '_quotaAt', 'never refreshes', 'const bearerOk = !!oauth.refreshToken;', 'if (bearerOk) {' /* B-5e0d: THE USAGE BEARER LAW — a long-lived token is never this op's Bearer: no request */]) {
-    ok(text.includes(g), `agentd quota-refresh keeps gate marker '${g}'`);
+    ok(verdictOf(text.includes(g)), `agentd quota-refresh keeps gate marker '${g}'`);
   }
   ok(!/oauth\/token|platform\.claude\.com/.test(text), 'agentd never touches the token-refresh endpoint (read-only peek only)');
   // B-5e0d: THE ORDER of the op's usage bearer law — the shape decided first; the throttle stamp and the vendor host only INSIDE
@@ -533,7 +533,7 @@ for (const [rel, a] of Object.entries(ALLOW)) {
     const law = b.indexOf('const bearerOk = !!oauth.refreshToken;'), gate = b.indexOf('if (bearerOk) {'), stamp = b.indexOf('_quotaAt.set(credsPath, Date.now())'), host = b.indexOf('api.anthropic.com'), pass = b.indexOf('const { passive, left: passiveLeft } = readPassive(');   // B-5278 (r1135): the passive read is one function now
     return law > 0 && law < gate && gate < stamp && stamp < host && host < pass && !/\bthrow\b/.test(b.slice(law, pass));
   };
-  ok(bearerOrder(text), 'agentd quota-refresh (B-5e0d): the bearer law decided before the throttle stamp and the vendor host, both inside `if (bearerOk) {`, nothing thrown between the law and the passive cache');
+  ok(verdictOf(bearerOrder(text)), 'agentd quota-refresh (B-5e0d): the bearer law decided before the throttle stamp and the vendor host, both inside `if (bearerOk) {`, nothing thrown between the law and the passive cache');
   ok(!bearerOrder(anchored(text, "            const bearerOk = !!oauth.refreshToken;\n", "            const bearerOk = !!oauth.refreshToken;\n            if (!bearerOk) throw new Error('long-lived');\n", 'B-5e0d: the refusal by throw')),
     'RED control (B-5e0d): a refusal by THROW after the law (the passive cache dropped — 10ab66486\'s shape) is red');
   ok(!bearerOrder(anchored(text, "            if (bearerOk) {\n", "            if (true) {\n", 'B-5e0d: the request whatever the shape')),
@@ -545,7 +545,7 @@ for (const [rel, a] of Object.entries(ALLOW)) {
     const b = t.slice(t.indexOf("msg.op === 'quota-refresh'"), t.indexOf("msg.op === 'probe-cli'"));
     return (b.match(/\{ refused: 'no-valid-login' \}/g) || []).length === 2 && b.includes("passive, ...(passiveLeft ? { passiveLeft } : {}), ...(bearerOk ? {} : { refused: 'long-lived' }) });") && b.includes("error: e.message, ...(e.refused ? { refused: e.refused } : {}) });");
   };
-  ok(reasons(text), 'agentd quota-refresh (B-5e0d): its answer names its reason — «long-lived» beside the passive cache, «no-valid-login» on both no-login errors');
+  ok(verdictOf(reasons(text)), 'agentd quota-refresh (B-5e0d): its answer names its reason — «long-lived» beside the passive cache, «no-valid-login» on both no-login errors');
   ok(!reasons(anchored(text, "error: e.message, ...(e.refused ? { refused: e.refused } : {}) });", 'error: e.message });', 'B-5e0d: the reason dropped from the error answer')),
     'RED control (B-5e0d): an error answer without its reason (the recorded op) is red');
 }
@@ -557,7 +557,7 @@ for (const rel of ['src/agentd/client.js', 'src/agentd/ws-min.js', 'src/agentd/m
 for (const b of ['data/bin/vibespace-agentd.js']) {
   try {
     const text = fs.readFileSync(path.join(REPO, b), 'utf-8');
-    ok((text.match(/api\.anthropic\.com/g) || []).length <= 2 && text.includes('humanGated'),
+    ok((text.match(/api\.anthropic\.com/g) || []).length <= 2 && verdictOf(text.includes('humanGated')),
       `${b}: bundle vendor surface = the gated quota-refresh op only`);
   } catch { ok(true, `${b} not built here — source asserted above`); }
 }
@@ -581,7 +581,7 @@ try {
 
 // ── 5: the CLI-native quota channel stays write-to-STDIN (first-party call) ──
 const adapter = fs.readFileSync(path.join(REPO, 'src/adapters/claude-code.js'), 'utf-8');
-ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get_usage rides the CLI control channel, never a direct vendor call');
+ok(gateOf(/get_usage/.test(adapter)) && !VENDOR.test(adapter), 'claude-code adapter: get_usage rides the CLI control channel, never a direct vendor call');
 
 // ── 5b: THE /usage PANEL PROBE MAKES ITS ONE VENDOR CALL AND NO OTHER (B-9b40) ──
 // claude 2.1.288 print mode loads the account's claude.ai connectors unless the MCP config is strict
@@ -589,9 +589,9 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 // and opened the mcp-proxy for each (production: five mcp-logs-claude-ai-* dirs per member, one file per probe).
 {
   const { PANEL_PROBE_ARGS } = require(path.join(REPO, 'src/usage-routes.js'));
-  ok(Array.isArray(PANEL_PROBE_ARGS) && PANEL_PROBE_ARGS.includes('--strict-mcp-config') && !PANEL_PROBE_ARGS.some((a) => /^--mcp-config/.test(a)),
+  ok(gateOf(Array.isArray(PANEL_PROBE_ARGS)) && gateOf(PANEL_PROBE_ARGS.includes('--strict-mcp-config')) && !PANEL_PROBE_ARGS.some((a) => /^--mcp-config/.test(a)),
     'B-9b40: the auto-cli /usage probe loads NO MCP server (--strict-mcp-config, no --mcp-config)', JSON.stringify(PANEL_PROBE_ARGS));
-  ok(Array.isArray(PANEL_PROBE_ARGS) && PANEL_PROBE_ARGS[0] === '-p' && PANEL_PROBE_ARGS[1] === '/usage' && PANEL_PROBE_ARGS.length === 3, 'B-9b40: …and asks for /usage and nothing else');
+  ok(gateOf(Array.isArray(PANEL_PROBE_ARGS)) && PANEL_PROBE_ARGS[0] === '-p' && PANEL_PROBE_ARGS[1] === '/usage' && PANEL_PROBE_ARGS.length === 3, 'B-9b40: …and asks for /usage and nothing else');
   const ur = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf-8');
   ok((ur.match(/execFile\(bin, \[\.\.\.PANEL_PROBE_ARGS\]/g) || []).length === 1 && !/'-p', '\/usage'/.test(ur.replace(/const PANEL_PROBE_ARGS = [^\n]*/, '')),
     'B-9b40: the probe spawns exactly PANEL_PROBE_ARGS — no second spelling of the argv');
@@ -630,7 +630,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const callsIn = (t) => (strip(t).match(/\b(?:usageDoor|door)\.read\(/g) || []).length;
   const found = {};
   for (const f of [...srcFiles('src'), 'server.js']) { const t = readSrc(path.join(REPO, f)); if (/cli-usage-door|createCliUsageDoor|door: usageDoor|\bdoor\.read\(/.test(t) && callsIn(t)) found[f] = callsIn(t); }
-  ok(JSON.stringify(Object.keys(found).sort()) === JSON.stringify(Object.keys(CALLERS).sort()) && Object.entries(CALLERS).every(([f, c]) => found[f] === c.n),
+  ok(JSON.stringify(Object.keys(found).sort()) === JSON.stringify(Object.keys(CALLERS).sort()) && verdictOf(Object.entries(CALLERS).every(([f, c]) => found[f] === c.n)),
     '5c: the usage door has exactly THREE callers — a person\'s press (account-usage-routes), the wall one-shot (stream-wall) and the read after a stretch of work (after-turn-read) — one call each', JSON.stringify(found));
   for (const [f, c] of Object.entries(CALLERS)) {
     const t = readSrc(path.join(REPO, f));
@@ -639,11 +639,11 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   }
   const door = fs.readFileSync(path.join(REPO, 'src/server/cli-usage-door.js'), 'utf-8'), wall = fs.readFileSync(path.join(REPO, 'src/server/stream-wall.js'), 'utf-8');
   const atr = fs.readFileSync(path.join(REPO, 'src/server/after-turn-read.js'), 'utf-8'), acp = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf-8');
-  ok(/const caller = person \? 'person' : wall === true \? 'wall' : afterTurn === true \? 'afterTurn' : null;/.test(door) && /if \(!caller\) return \{ ok: false, status: 403/.test(door)
-    && /if \(caller === 'wall' && od\.onWallSignal !== true\) return \{ ok: false, status: 400, code: 'no-wall-read'/.test(door)
-    && /if \(caller === 'afterTurn' && od\.afterTurn !== true\) return \{ ok: false, status: 400, code: 'no-after-turn-read'/.test(door) && /if \(j\.verdict === 'turn-started'\) \{\n\s*stopped\.set\(id, j\.why\);/.test(door)
-    && /if \(caller !== 'person' && stopped\.has\(id\)\) return \{ ok: false, status: 409, code: 'stopped'/.test(door) && /if \(!counted\) \{[^\n]*return \{ ok: false, status: 503, code: 'count-failed'/.test(door)
-    && /if \(today\.afterTurn >= AFTER_TURN_DAY_MAX\)/.test(door),
+  ok(gateOf(/const caller = person \? 'person' : wall === true \? 'wall' : afterTurn === true \? 'afterTurn' : null;/.test(door)) && gateOf(/if \(!caller\) return \{ ok: false, status: 403/.test(door))
+    && gateOf(/if \(caller === 'wall' && od\.onWallSignal !== true\) return \{ ok: false, status: 400, code: 'no-wall-read'/.test(door))
+    && gateOf(/if \(caller === 'afterTurn' && od\.afterTurn !== true\) return \{ ok: false, status: 400, code: 'no-after-turn-read'/.test(door)) && gateOf(/if \(j\.verdict === 'turn-started'\) \{\n\s*stopped\.set\(id, j\.why\);/.test(door))
+    && gateOf(/if \(caller !== 'person' && stopped\.has\(id\)\) return \{ ok: false, status: 409, code: 'stopped'/.test(door)) && gateOf(/if \(!counted\) \{[^\n]*return \{ ok: false, status: 503, code: 'count-failed'/.test(door))
+    && verdictOf(/if \(today\.afterTurn >= AFTER_TURN_DAY_MAX\)/.test(door)),
     '5c: the DOOR refuses any other caller (403), a wall read or an after-turn read the descriptor does not declare (400), keeps the judge\'s STOP as ONE stop for every automatic caller (409), counts first and refuses an uncounted read (503), and refuses a day past the ruling\'s arithmetic');
   // THE ONE TIMER of the after-turn road: the quiet wait, set in onTurnEnd alone; fire() runs only from it
   const bodyOf = (t, head) => { const i = t.indexOf(head); if (i < 0) return ''; let j = t.indexOf('{', i + head.length), d = 0; for (let k = j; k < t.length; k++) { if (t[k] === '{') d++; else if (t[k] === '}' && --d === 0) return t.slice(j, k + 1); } return ''; };
@@ -651,7 +651,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     return !/setInterval/.test(c) && (c.match(/\bsetTimeout\(/g) || []).length === 1 && /setTimer = \(fn, ms\) => \{ const t = setTimeout\(fn, ms\);/.test(c)
       && (c.match(/\bsetTimer\(/g) || []).length === 1 && /const timer = setTimer\(\(\) => fire\(key, endAt\), quietMs\);/.test(inEnd)
       && (c.match(/\bfire\(/g) || []).length === 2 && (c.match(/\bonTurnEnd\(/g) || []).length === 3; };
-  ok(!/setInterval|setTimeout/.test(wall) && !/setInterval/.test(door) && (door.match(/setTimeout\(/g) || []).length === 1 && timerLaw(atr),
+  ok(!/setInterval|setTimeout/.test(wall) && !/setInterval/.test(door) && (door.match(/setTimeout\(/g) || []).length === 1 && verdictOf(timerLaw(atr)),
     '5c: never a cadence — the wall road holds no timer, the door only its own child\'s 30 s kill, the after-turn road ONE: the quiet wait set in onTurnEnd alone (fire() only from it; no interval)');
   // THE ONE ARMING SITE: the ACP consumer's prompt_end branch calls onTurnEnd, its prompt_start branch onTurnStart — once each,
   // nowhere else in the tree; the road is configured once, beside the door
@@ -660,11 +660,11 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     return (c.match(/after-turn-read\.js'\)\.onTurnEnd\(session, msg\)/g) || []).length === 1 && /after-turn-read\.js'\)\.onTurnEnd\(session, msg\)/.test(branch(c, 'prompt_end'))
       && (c.match(/\bonTurnEnd\(/g) || []).length === 1 && (c.match(/after-turn-read\.js'\)\.onTurnStart\(session, msg\)/g) || []).length === 1 && /after-turn-read\.js'\)\.onTurnStart\(session, msg\)/.test(branch(c, 'prompt_start')); };
   const users = [...srcFiles('src'), 'server.js'].filter((f) => f !== 'src/server/after-turn-read.js' && /after-turn-read\.js/.test(strip(readSrc(path.join(REPO, f))))).sort();
-  ok(armLaw(acp) && JSON.stringify(users) === JSON.stringify(['src/server/account-usage-routes.js', 'src/server/stdout/acp-events.js']),
+  ok(gateOf(armLaw(acp)) && JSON.stringify(users) === JSON.stringify(['src/server/account-usage-routes.js', 'src/server/stdout/acp-events.js']),
     '5c: the after-turn read is ARMED at a turn\'s end alone — the consumer\'s prompt_end branch (and cancelled by prompt_start); no other file reaches the road but the hub\'s configure', JSON.stringify({ arm: armLaw(acp), users }));
   // CONTROLS: a third caller, a timer, a session start, an idle tick and a restart catch-up, planted, are RED by the same reads
   const planted = wall.replace('function readOnce(', "setInterval(() => door.read('x', { wall: true }), 3600e3);\n  function readOnce(");
-  ok(planted !== wall && callsIn(planted) === 2 && /setInterval/.test(planted), 'CONTROL 5c: a timer-driven re-check planted in the wall road is a second call AND a timer (RED by both rows)', String(callsIn(planted)));
+  ok(planted !== wall && callsIn(planted) === 2 && verdictOf(/setInterval/.test(planted)), 'CONTROL 5c: a timer-driven re-check planted in the wall road is a second call AND a timer (RED by both rows)', String(callsIn(planted)));
   const CONTROLS = [
     ['a timer (an hourly read planted in the road)', () => !timerLaw(atr.replace('  function fire(key, endAt) {', "  setInterval(() => fire('x', 0), 3600e3);\n  function fire(key, endAt) {"))],
     ['a session start (the consumer\'s `session` record arms the wait)', () => !armLaw(acp.replace("if (msg.kind === 'session') {", "if (msg.kind === 'session') {\n            require('../after-turn-read.js').onTurnEnd(session, msg);"))],
@@ -672,7 +672,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     ['a restart catch-up (configure arms the accounts it finds)', () => !timerLaw(atr.replace('function configure(deps) { road = createAfterTurnRead(deps); return road; }', "function configure(deps) { road = createAfterTurnRead(deps); for (const s of deps.sessions || []) road.onTurnEnd(s, { ts: new Date().toISOString() }); return road; }"))],
     ['the replay guard dropped (a record older than the hub arms)', () => !CALLERS['src/server/after-turn-read.js'].gates.every((g) => g.test(atr.replace('    if (!(endAt >= born)) return null;\n', '')))],
   ];
-  for (const [what, red] of CONTROLS) ok(red(), `CONTROL 5c: ${what} — RED by the reads above`);
+  for (const [what, red] of CONTROLS) ok(verdictOf(red()), `CONTROL 5c: ${what} — RED by the reads above`);
 }
 
 // ── 5d: THE CLI MODELS DOOR'S CALLERS (lane agy-models-report; the owner 2026-11-10, rulings R1 / E1, round 2 law A) ──
@@ -705,12 +705,12 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     '5d: the models door is made ONCE (account-usage-routes), its MINT referenced only there (2) and by the ONE registrar (2), no `.press(` anywhere, asked ONCE (provider-models cliDoor), modelsReport read by the door alone', JSON.stringify({ found, mints, makers, readers, presses }));
   const pm = fs.readFileSync(path.join(REPO, 'src/routes/provider-models.js'), 'utf-8'), door = fs.readFileSync(path.join(REPO, 'src/server/cli-models-door.js'), 'utf-8');
   const body = (pm.match(/const cliDoor = \(kind\) => async \(req, res\) => \{[\s\S]*?\n {2}\};/) || [''])[0];
-  ok(/const m = modelsMint\(req, [^\n]*\);\s*\n\s*if \(!m\.ok\) return res\.status\(403\)/.test(body) && /modelsDoor\.ask\([^\n]*\{ press: m\.press, kind \}\)/.test(body)
+  ok(gateOf(/const m = modelsMint\(req, [^\n]*\);\s*\n\s*if \(!m\.ok\) return res\.status\(403\)/.test(body)) && gateOf(/modelsDoor\.ask\([^\n]*\{ press: m\.press, kind \}\)/.test(body))
     && (pm.match(/app\.post\('\/api\/cli-models\/(open|refresh)', cliDoor\('(open|refresh)'\)\)/g) || []).length === 2 && !/app\.get\([^\n]*cliDoor/.test(pm),
     '5d: the one caller is the POST door that MINTS first (the registrar\'s mint: the person gate, the press bound to this menu) and hands that press to its ask — mounted twice, the opening and the explicit row, never on a GET');
-  ok(/const presses = new WeakSet\(\);/.test(door) && /if \(!press \|\| typeof press !== 'object' \|\| !presses\.has\(press\)\) return \{ ok: false, status: 403, code: 'no-press'/.test(door) && /presses\.delete\(press\);/.test(door)
-    && /return \{ door, mint \};/.test(door) && /code: 'press-not-for-this'/.test(door) && /code: 'press-expired'/.test(door)
-    && /if \(t - last < paceMs\) return \{ ok: false, status: 429, code: 'throttled'/.test(door) && /if \(asks\.length >= dailyMax\) return \{ ok: false, status: 429, code: 'daily-bound'/.test(door) && /const DAILY_MAX = 24;/.test(door) && /failFloorMs/.test(door) && /floorMs/.test(door),
+  ok(gateOf(/const presses = new WeakSet\(\);/.test(door)) && gateOf(/if \(!press \|\| typeof press !== 'object' \|\| !presses\.has\(press\)\) return \{ ok: false, status: 403, code: 'no-press'/.test(door)) && gateOf(/presses\.delete\(press\);/.test(door))
+    && gateOf(/return \{ door, mint \};/.test(door)) && gateOf(/code: 'press-not-for-this'/.test(door)) && gateOf(/code: 'press-expired'/.test(door))
+    && gateOf(/if \(t - last < paceMs\) return \{ ok: false, status: 429, code: 'throttled'/.test(door)) && gateOf(/if \(asks\.length >= dailyMax\) return \{ ok: false, status: 429, code: 'daily-bound'/.test(door)) && gateOf(/const DAILY_MAX = 24;/.test(door)) && gateOf(/failFloorMs/.test(door)) && verdictOf(/floorMs/.test(door)),
     '5d: the DOOR lists only on a press its mint made (a WeakSet, used once, bound to its menu and age — a caller\'s flag is refused 403 no-press), the maker returns the mint APART from the door, the floors kept, the explicit row bounded (a minute, 24 a day, persisted)');
   ok(!/setInterval/.test(door) && (strip(door).match(/setTimeout\(/g) || []).length === 2 && !/Sync\(/.test(door),
     '5d: never a timer — the door holds only its own child\'s two (the 20 s kill, the drain after exit), and no synchronous fs call');
@@ -746,7 +746,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   // chatgpt.com. The companion assert below is the one that covers children.
   ok(!VENDOR.test(runner) && !REQUESTY.test(runner.split('\n').filter((l) => VENDOR.test(l)).join('\n')),
     'src/server/permission-rules.js (the oracle runner + rule reader) constructs NO vendor request IN-PROCESS');
-  ok(/spawn\(cmd, o\.argv\.slice\(\)/.test(runner),
+  ok(verdictOf(/spawn\(cmd, o\.argv\.slice\(\)/.test(runner)),
     'the oracle runner spawns the REGISTRY\'s frozen argv — a caller cannot supply its own command');
   // …AND that is the ONLY child it starts. A file that may spawn a vendor CLI
   // needs every such spawn to come from the measured registry, because the
@@ -780,21 +780,21 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       const live = dig(capsOf(backend), capPath);
       ok(live === false, `${r.id}: the capability it blocks (${r.blocks}) is really OFF — re-enabling it needs a NEW measurement, not just a caps edit (found ${JSON.stringify(live)})`);
       ok(blockedCapability(backend, capPath) === r, `${r.id}: is reachable through blockedCapability('${backend}', '${capPath}') — the server's refusal and the menu's note read the SAME record`);
-      ok(blockingRejectionsFor(backend).includes(r), `${r.id}: appears in blockingRejectionsFor('${backend}') so the menu shows it EVEN THOUGH ${backend} has shipped oracles (a missing button must be explained)`);
+      ok(verdictOf(blockingRejectionsFor(backend).includes(r)), `${r.id}: appears in blockingRejectionsFor('${backend}') so the menu shows it EVEN THOUGH ${backend} has shipped oracles (a missing button must be explained)`);
     }
     // the client mirror must agree, or the chrome offers a door the server refuses
     const meta = fs.readFileSync(path.join(REPO, 'src/lib/agent-meta.js'), 'utf-8');
-    ok(/permissionRules: \{ source: 'config-read', session: true, instance: false, liveVerb: true \}/.test(meta),
+    ok(verdictOf(/permissionRules: \{ source: 'config-read', session: true, instance: false, liveVerb: true \}/.test(meta)),
       'src/lib/agent-meta.js mirrors codex permissionRules.instance:false (a client that still offered the row would fetch a refusal)');
   }
-  ok(!/setInterval|setTimeout\([^)]*runOracle/.test(runner) && /app\.post\('\/api\/local-oracle/.test(runner),
+  ok(!/setInterval|setTimeout\([^)]*runOracle/.test(runner) && verdictOf(/app\.post\('\/api\/local-oracle/.test(runner)),
     'an oracle runs ONLY on a POST (a button): nothing schedules one, and the route is not a pre-fetchable GET');
   ok(ORACLES.length > 0, `at least one measured-clean oracle ships (${ORACLES.map((o) => o.id).join(', ') || 'none'})`);
   const rejectedIds = new Set(NOT_ORACLES.map((o) => o.id));
   for (const o of ORACLES) {
-    ok(PROOF_KEYS.every((k) => o.proof && o.proof[k] != null) && Array.isArray(o.proof.runs) && o.proof.runs.length > 0,
+    ok(gateOf(PROOF_KEYS.every((k) => o.proof && o.proof[k] != null)) && gateOf(Array.isArray(o.proof.runs)) && o.proof.runs.length > 0,
       `oracle ${o.id}: carries a proof (tool + date + CLI version + at least one measured run)`);
-    ok(o.proof.runs.every((r) => r.inetConnects === 0),
+    ok(verdictOf(o.proof.runs.every((r) => r.inetConnects === 0)),
       `oracle ${o.id}: EVERY recorded run measured ZERO INET connects (${o.proof.runs.map((r) => `${r.what}=${r.inetConnects}`).join('; ')})`);
     ok(!rejectedIds.has(o.id), `oracle ${o.id}: is not also on the rejected list`);
     // program-use billing law: an oracle is a READ, never an inference channel
@@ -802,11 +802,11 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       `oracle ${o.id}: argv carries no print/exec/inference flag (${o.argv.join(' ')})`);
   }
   for (const r of NOT_ORACLES) {
-    ok(r.measured && r.measured.inetConnects > 0 && typeof r.verdict === 'string' && r.verdict.length > 20,
+    ok(gateOf(r.measured) && r.measured.inetConnects > 0 && typeof r.verdict === 'string' && r.verdict.length > 20,
       `rejected candidate ${r.id}: keeps its measurement (${r.measured?.inetConnects} INET connects) and the reason it is not offered`);
     ok(!oracle(r.id) && !!rejected(r.id), `rejected candidate ${r.id}: cannot be looked up as a shipped oracle`);
   }
-  ok(NOT_ORACLES.some((r) => r.id === 'claude-auth-status') && NOT_ORACLES.some((r) => r.id === 'claude-agents-list') && NOT_ORACLES.some((r) => r.id === 'codex-doctor'),
+  ok(gateOf(NOT_ORACLES.some((r) => r.id === 'claude-auth-status')) && gateOf(NOT_ORACLES.some((r) => r.id === 'claude-agents-list')) && verdictOf(NOT_ORACLES.some((r) => r.id === 'codex-doctor')),
     'the three candidates the design proposed (claude auth status / claude agents / codex doctor) are all recorded as MEASURED AND REJECTED — the negative control that keeps them out');
   ok(!ORACLES.some((o) => o.backend === 'claude'),
     'no claude oracle ships: every measured claude subcommand reached api.anthropic.com, including with every traffic-suppressing env set');
@@ -821,7 +821,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     const ctr = fs.readFileSync(path.join(REPO, 'src/codex-thread-read.js'), 'utf-8');
     ok(!/no\s+network\s+of\s+ours/.test(ctr),
       'src/codex-thread-read.js no longer claims its `codex app-server` child makes no network calls (measured: it connects to chatgpt.com even logged out)');
-    ok(/strace/.test(ctr) && /chatgpt\.com/.test(ctr) && /B-af31/.test(ctr),
+    ok(gateOf(/strace/.test(ctr)) && gateOf(/chatgpt\.com/.test(ctr)) && verdictOf(/B-af31/.test(ctr)),
       'src/codex-thread-read.js records the measurement + the tool + the backlog id that owns the §ban-safety decision, instead of a reassurance nobody checked');
   }
 
@@ -832,9 +832,9 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     const twin = fs.readFileSync(path.join(REPO, 'scripts/test-vendor-whitelist-live.mjs'), 'utf8');
     const ciT = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
     const code = twin.split('\n').filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).join('\n');   // its CODE: a gutted leg cannot stay green by its comments
-    ok(/for \(const o of ORACLES\)/.test(code) && /execFileSync\('strace', \['-f'/.test(code) && /ok\(!!ctl && ctl\.n >= 1,/.test(code) && /ok\(!!cut && cut\.timedOut === true,/.test(code)
-      && /ok\(!!got && got\.n === 0,/.test(code) && /process\.env\.VS_NO_REAL_CLI === '1'/.test(code) && /ok\(!onCI, onCI \? '[^']*strace is REQUIRED on a CI runner/.test(code)
-      && /\{\s*name:\s*'test-vendor-whitelist-live',\s*tier:\s*'heavy'/.test(ciT),
+    ok(gateOf(/for \(const o of ORACLES\)/.test(code)) && gateOf(/execFileSync\('strace', \['-f'/.test(code)) && gateOf(/ok\(!!ctl && ctl\.n >= 1,/.test(code)) && gateOf(/ok\(!!cut && cut\.timedOut === true,/.test(code))
+      && gateOf(/ok\(!!got && got\.n === 0,/.test(code)) && gateOf(/process\.env\.VS_NO_REAL_CLI === '1'/.test(code)) && gateOf(/ok\(!onCI, onCI \? '[^']*strace is REQUIRED on a CI runner/.test(code))
+      && verdictOf(/\{\s*name:\s*'test-vendor-whitelist-live',\s*tier:\s*'heavy'/.test(ciT)),
       '§6 (b) LIVES IN THE HEAVY TWIN: test-vendor-whitelist-live re-measures every shipped oracle under strace, its two controls with it, strace required on a runner, a HEAVY row of scripts/ci.mjs');
   }
 }
@@ -904,7 +904,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = readSrc(f); } catch { } }
   const engineRel = 'src/server/channels-engine.js', routesRel = 'src/routes/channels.js';
   const engineSrc = serverTexts[engineRel], routesSrc = serverTexts[routesRel];
-  for (const [name, pass, detail] of attachmentCensus(engineSrc, routesSrc, serverTexts)) ok(pass, `§7 ${name}`, detail);
+  for (const [name, pass, detail] of attachmentCensus(engineSrc, routesSrc, serverTexts)) ok(verdictOf(pass), `§7 ${name}`, detail);
   // the PURE verdict's table — the gate's own semantics, run (not read)
   const AttSrc = fs.readFileSync(path.join(REPO, 'src/channel-attachments.js'), 'utf-8');
   const verdictTable = (A) => {
@@ -919,7 +919,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       ['only every gate open answers `fetch`', A.fetchVerdict(full).act === 'fetch'],
     ];
   };
-  for (const [name, pass] of verdictTable(require(path.join(REPO, 'src/channel-attachments.js')))) ok(pass, `§7 verdict: ${name}`);
+  for (const [name, pass] of verdictTable(require(path.join(REPO, 'src/channel-attachments.js')))) ok(verdictOf(pass), `§7 verdict: ${name}`);
   // lane channel-threads (spec §6.1): a CUSTOM EMOJI's picture is the second picture a window can cause a vendor to
   // serve — the same three gates, read off the engine's `emojiImage()`: ON-DEMAND (`.emojiImage(` called from exactly
   // that function; the engine's function called only by the GET emoji route), CACHE-FIRST (the account's picture
@@ -944,13 +944,13 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     rows.push(['EMOJI ON-DEMAND: `.emojiImage(` is called by the engine once (its vendor call) and by the GET emoji route once — nowhere else in the server tree', callers.sort().join() === 'src/routes/channels.js:1,src/server/channels-engine.js:1' && /engine\(\)\.emojiImage\(/.test(rBody), callers.join(', ')]);
     return rows;
   };
-  for (const [name, pass, detail] of emojiCensus(engineSrc, routesSrc, serverTexts)) ok(pass, `§7 ${name}`, detail);
+  for (const [name, pass, detail] of emojiCensus(engineSrc, routesSrc, serverTexts)) ok(verdictOf(pass), `§7 ${name}`, detail);
   {
     const from = 'inflight: emojiFlights.has(fk), backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t, affordable: affordable(rec, e) });';
     ok(engineSrc.split(from).length === 2, '§7 CONTROL emoji: the budget fact of emojiImage()\'s verdict is spelled once');
     const mut = engineSrc.replace(from, 'inflight: emojiFlights.has(fk), backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t });');
     const r = emojiCensus(mut, routesSrc, { ...serverTexts, [engineRel]: mut }).filter(([, p]) => !p).map(([n]) => n);
-    ok(r.some((n) => /EMOJI CACHE-FIRST \+ BUDGET-CHARGED/.test(n)), `§7 CONTROL: an emojiImage() that skips the budget is RED (${r.join(' | ')})`);
+    ok(verdictOf(r.some((n) => /EMOJI CACHE-FIRST \+ BUDGET-CHARGED/.test(n))), `§7 CONTROL: an emojiImage() that skips the budget is RED (${r.join(' | ')})`);
   }
   // §7b lane channel-avatars (B-5fe1, 2026-10-04): A PERSON'S PICTURE — allowlisted HERE deliberately: Lark
   // `contact/v3/users/:id` + the picture host's bytes, Slack `users.info` + avatars.slack-edge.com. ON-DEMAND (the
@@ -972,55 +972,55 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       ['AVATAR ON-DEMAND: `.avatarImage(` is called by the engine once (its vendor call) and by the GET avatar route once — nowhere else in the server tree', callers.sort().join() === 'src/routes/channels.js:1,src/server/channels-engine.js:1' && /engine\(\)\.avatarImage\(/.test(rBody), callers.join(', ')],
     ];
   };
-  for (const [name, pass, detail] of avatarCensus(engineSrc, routesSrc, serverTexts)) ok(pass, `§7b ${name}`, detail);
+  for (const [name, pass, detail] of avatarCensus(engineSrc, routesSrc, serverTexts)) ok(verdictOf(pass), `§7b ${name}`, detail);
   {
     const from = 'backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t, affordable: affordable(rec, e) });\n    switch (v.act) {\n      case \'join\': return avatarFlights';
     ok(engineSrc.split(from).length === 2, '§7b CONTROL avatar: the budget fact of avatarImage()\'s verdict is spelled once');
     const mut = engineSrc.replace(from, from.replace(', affordable: affordable(rec, e)', ''));
     const r = avatarCensus(mut, routesSrc, { ...serverTexts, [engineRel]: mut }).filter(([, q]) => !q).map(([n]) => n);
-    ok(r.some((n) => /AVATAR MEMO-FIRST/.test(n)), `§7b CONTROL: an avatarImage() that skips the budget is RED (${r.join(' | ')})`);
+    ok(verdictOf(r.some((n) => /AVATAR MEMO-FIRST/.test(n))), `§7b CONTROL: an avatarImage() that skips the budget is RED (${r.join(' | ')})`);
     const wf2 = 'src/server/channels-wiring.js';
     const sweep = serverTexts[wf2] + '\nfunction sweepFaces(engine, rows) { for (const r of rows) engine.avatarImage(r.adapterId, r.author).catch(() => {}); }\n';
     const r2 = avatarCensus(engineSrc, routesSrc, { ...serverTexts, [wf2]: sweep }).filter(([, q]) => !q).map(([n]) => n);
-    ok(r2.some((n) => /AVATAR ON-DEMAND/.test(n)), `§7b CONTROL: a wiring-file copy that sweeps every author's picture is RED (${r2.join(' | ')})`);
+    ok(verdictOf(r2.some((n) => /AVATAR ON-DEMAND/.test(n))), `§7b CONTROL: a wiring-file copy that sweeps every author's picture is RED (${r2.join(' | ')})`);
   }
   // THE CONTROLS: ungated copies, written by scripts/mutant-copy.mjs into this run's scratch dir
   const MUT = mutantCopies('vendor-whitelist-att', REPO);
   const reds = (rows) => rows.filter(([, p]) => !p).map(([n]) => n);
   const mutEngine = (label, from, to) => {
-    ok(engineSrc.includes(from), `§7 CONTROL ${label}: the edit's anchor is in the engine`);
+    ok(verdictOf(engineSrc.includes(from)), `§7 CONTROL ${label}: the edit's anchor is in the engine`);
     const f = MUT.write(engineRel, engineSrc.replace(from, to), label);
     return reds(attachmentCensus(fs.readFileSync(f, 'utf-8'), routesSrc, { ...serverTexts, [engineRel]: fs.readFileSync(f, 'utf-8') }));
   };
   const noBudget = mutEngine('no-budget', 'affordable: affordable(rec, e),', '');
-  ok(noBudget.length >= 1 && noBudget.some((n) => /BUDGET-CHARGED/.test(n)), `§7 CONTROL: a copy that drops the budget fact is RED (${noBudget.join(' | ')})`);
+  ok(noBudget.length >= 1 && verdictOf(noBudget.some((n) => /BUDGET-CHARGED/.test(n))), `§7 CONTROL: a copy that drops the budget fact is RED (${noBudget.join(' | ')})`);
   // lane channel-attach-read: the agent caller's two conditions, each removed in a copy — and a route that asks as the owner
   const noReach = mutEngine('agent-no-reach', "if (agent && !(ctx && ctx.kind === 'agent' && stillSees(ctx, adapterId, convId))) return ACL.notFound();", '');
-  ok(noReach.some((n) => /AGENT REACH FIRST/.test(n)), `§7 CONTROL: a copy whose agent call skips the reach check is RED (${noReach.join(' | ')})`);
+  ok(verdictOf(noReach.some((n) => /AGENT REACH FIRST/.test(n))), `§7 CONTROL: a copy whose agent call skips the reach check is RED (${noReach.join(' | ')})`);
   const noShare = mutEngine('agent-no-share', 'if (agent) { const sh = agentShareRefusal(rec, e); if (sh) return sh; }', '');
-  ok(noShare.some((n) => /AGENT SHARE/.test(n)), `§7 CONTROL: a copy whose agent fetch skips the agents' share is RED (${noShare.join(' | ')})`);
+  ok(verdictOf(noShare.some((n) => /AGENT SHARE/.test(n))), `§7 CONTROL: a copy whose agent fetch skips the agents' share is RED (${noShare.join(' | ')})`);
   {
     const arRel = 'src/agent-routes.js', from = "{ msg, by: 'agent', principal: channelPrincipal(s, id) }";
     ok(serverTexts[arRel].split(from).length === 2, '§7 CONTROL agent-as-owner: the anchor is spelled once in the agent route');
     const af = MUT.write(arRel, serverTexts[arRel].replace(from, '{ msg }'), 'agent-as-owner');
     const asOwner = reds(attachmentCensus(engineSrc, routesSrc, { ...serverTexts, [arRel]: fs.readFileSync(af, 'utf-8') }));
-    ok(asOwner.some((n) => /AGENT DOOR/.test(n)), `§7 CONTROL: an agent route that asks as the OWNER (no by / principal) is RED (${asOwner.join(' | ')})`);
+    ok(verdictOf(asOwner.some((n) => /AGENT DOOR/.test(n))), `§7 CONTROL: an agent route that asks as the OWNER (no by / principal) is RED (${asOwner.join(' | ')})`);
   }
   const noCache = mutEngine('no-cache', 'const legacy = () => {\n      const o = store.attachmentGet(adapterId, convId, attId);\n      if (!o || (o.meta && o.meta.msg)) return null;\n      const carriers = store.readTail(adapterId, convId, { limit: 5000 }).filter((r) => r && Array.isArray(r.attachments) && r.attachments.some((a) => a && String(a.id) === String(attId)));\n      return carriers.length === 1 && String(carriers[0].vendorId) === scope ? o : null;\n    };\n    const hit = store.attachmentGet(adapterId, convId, attId, scope) || (scope && !agent ? legacy() : null);', 'const hit = null;');   // verify r2: the bare-id `legacy` asks the cache too — the copy drops both
-  ok(noCache.some((n) => /CACHE-FIRST/.test(n)), `§7 CONTROL: a copy that never asks the cache is RED (${noCache.join(' | ')})`);
+  ok(verdictOf(noCache.some((n) => /CACHE-FIRST/.test(n))), `§7 CONTROL: a copy that never asks the cache is RED (${noCache.join(' | ')})`);
   const second = mutEngine('ingest-fetch', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts));', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts)); for (const x of r.records || []) for (const a of x.attachments || []) await e.adapter.fetchAttachment(convId, { messageId: x.vendorId, attachmentId: a.id });');
-  ok(second.some((n) => /ON-DEMAND/.test(n)), `§7 CONTROL: a copy whose INGEST fetches every picture is RED (${second.join(' | ')})`);
+  ok(verdictOf(second.some((n) => /ON-DEMAND/.test(n))), `§7 CONTROL: a copy whose INGEST fetches every picture is RED (${second.join(' | ')})`);
   // r-verify: the two callers the first census missed — an INTERNAL prefetch at ingest, a wiring file's own receiver name
   const prefetch = mutEngine('ingest-prefetch', 'if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs);', 'if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs); for (const x of freshRecs) for (const at of x.attachments || []) setTimeout(() => attachment(rec.id, convId, at.id).catch(() => {}), 0);');
-  ok(prefetch.some((n) => /never INVOKED/.test(n)), `§7 CONTROL: a copy whose INGEST prefetches every picture through the engine's OWN attachment() is RED (${prefetch.join(' | ')})`);
+  ok(verdictOf(prefetch.some((n) => /never INVOKED/.test(n))), `§7 CONTROL: a copy whose INGEST prefetches every picture through the engine's OWN attachment() is RED (${prefetch.join(' | ')})`);
   const wiringRel = 'src/server/channels-wiring.js';
   ok(typeof serverTexts[wiringRel] === 'string', '§7 CONTROL wiring-prefetch: the wiring file is in the census');
   const wf = MUT.write(wiringRel, serverTexts[wiringRel] + '\nfunction prefetchPictures(engine, rows) { for (const r of rows) engine.attachment(r.adapterId, r.id, r.attId).catch(() => {}); }\n', 'wiring-prefetch');
   const wiring = reds(attachmentCensus(engineSrc, routesSrc, { ...serverTexts, [wiringRel]: fs.readFileSync(wf, 'utf-8') }));
-  ok(wiring.some((n) => /every `\.attachment\(` in the server tree/.test(n)), `§7 CONTROL: a wiring-file copy calling \`engine.attachment(\` (a receiver the old list did not name) is RED (${wiring.join(' | ')})`);
+  ok(verdictOf(wiring.some((n) => /every `\.attachment\(` in the server tree/.test(n))), `§7 CONTROL: a wiring-file copy calling \`engine.attachment(\` (a receiver the old list did not name) is RED (${wiring.join(' | ')})`);
   const Amut = MUT.load('src/channel-attachments.js', editAnchor(AttSrc, "if (f.affordable === false) return { act: 'refuse', code: 'vendor-budget' };", '', "src/channel-attachments.js"), 'no-budget-verdict');
-  ok(AttSrc.includes("if (f.affordable === false) return { act: 'refuse', code: 'vendor-budget' };") && reds(verdictTable(Amut)).length >= 1, `§7 CONTROL: a PURE verdict without its budget gate is RED (${reds(verdictTable(Amut)).join(' | ')})`);
-  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 9, label: '§7 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  ok(gateOf(AttSrc.includes("if (f.affordable === false) return { act: 'refuse', code: 'vendor-budget' };")) && reds(verdictTable(Amut)).length >= 1, `§7 CONTROL: a PURE verdict without its budget gate is RED (${reds(verdictTable(Amut)).join(' | ')})`);
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 9, label: '§7 ' })) ok(verdictOf(x.pass), x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // ── 8: THE BROWSER-TOOLS INSTALL SLOT (lane browser-admin 2b, 2026-10-01) ──
@@ -1069,20 +1069,20 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     return rows;
   };
   const reds = (rows) => rows.filter(([, p]) => !p).map(([n, , d]) => n + (d ? ' [' + d + ']' : ''));
-  for (const [n, p, d] of slotCensus(keeperSrc, routesSrc, serverTexts)) ok(p, '§8 ' + n + (p || !d ? '' : ' — ' + d));
+  for (const [n, p, d] of slotCensus(keeperSrc, routesSrc, serverTexts)) ok(verdictOf(p), '§8 ' + n + (p || !d ? '' : ' — ' + d));
   const V = require(path.join(REPO, 'src/browser-verbs.js'));
   ok(V.CLI_PIN_RECORD.registryHost === 'registry.npmjs.org' && V.cliInstallVerdict({}).spec === `${V.CLI_PACKAGE}@${V.TABLE_VERSION}` && V.cliInstallVerdict({ version: 'https://evil.example/x.tgz' }).ok === false, '§8 the CLI spec is the package at a dotted version (never a URL / a tarball / another package); the measured record names the ONE host');
   // CONTROLS
   const MUT = mutantCopies('vendor-whitelist-slot', REPO);
-  const mut = (label, rel, src, from, to) => { ok(src.includes(from), `§8 CONTROL ${label}: the edit's anchor is in ${rel}`); const f = MUT.write(rel, editAnchor(src, from, to, "the text handed to mut()"), label); return fs.readFileSync(f, 'utf-8'); };
+  const mut = (label, rel, src, from, to) => { ok(verdictOf(src.includes(from)), `§8 CONTROL ${label}: the edit's anchor is in ${rel}`); const f = MUT.write(rel, editAnchor(src, from, to, "the text handed to mut()"), label); return fs.readFileSync(f, 'utf-8'); };
   const scripts = mut('scripts-run', keeperRel, keeperSrc, "    const argv = [...SW.installArgv({ spec: v0.spec, prefix }), '--ignore-scripts'];", '    const argv = [...SW.installArgv({ spec: v0.spec, prefix })];');
-  ok(reds(slotCensus(scripts, routesSrc, { ...serverTexts, [keeperRel]: scripts })).some((n) => /REGISTRY|ONE SPAWN/.test(n)), '§8 CONTROL: a CLI install that lets the package\'s scripts run is RED');
+  ok(verdictOf(reds(slotCensus(scripts, routesSrc, { ...serverTexts, [keeperRel]: scripts })).some((n) => /REGISTRY|ONE SPAWN/.test(n))), '§8 CONTROL: a CLI install that lets the package\'s scripts run is RED');
   const timer = mut('timer', keeperRel, keeperSrc, '  const reattached = installs.reattach();', '  const reattached = installs.reattach(); setInterval(() => { try { api.installCli({}); } catch { /* none */ } }, 3600e3);');
-  ok(reds(slotCensus(timer, routesSrc, { ...serverTexts, [keeperRel]: timer })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a keeper that installs on a timer is RED');
+  ok(verdictOf(reds(slotCensus(timer, routesSrc, { ...serverTexts, [keeperRel]: timer })).some((n) => /USER-ONLY/.test(n))), '§8 CONTROL: a keeper that installs on a timer is RED');
   const open = mut('agent-token', routesRel, routesSrc, "  if (refuseAgentBearer(req, res, INSTALL_IS_USERS)) return;\n  const k = keeperOr503(res); if (!k) return;\n  if (typeof k.installCli", "  const k = keeperOr503(res); if (!k) return;\n  if (typeof k.installCli");
-  ok(reds(slotCensus(keeperSrc, open, { ...serverTexts, [routesRel]: open })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a CLI install route an agent token reaches is RED');
+  ok(verdictOf(reds(slotCensus(keeperSrc, open, { ...serverTexts, [routesRel]: open })).some((n) => /USER-ONLY/.test(n))), '§8 CONTROL: a CLI install route an agent token reaches is RED');
   const twoSlots = mut('two-slots', keeperRel, keeperSrc, "VERBS.cliInstallVerdict({ version: String(version || ''), running: installState.running,", "VERBS.cliInstallVerdict({ version: String(version || ''), running: false,");
-  ok(reds(slotCensus(twoSlots, routesSrc, { ...serverTexts, [keeperRel]: twoSlots })).some((n) => /ONE SLOT/.test(n)), '§8 CONTROL: a CLI install that ignores the slot is RED');
+  ok(verdictOf(reds(slotCensus(twoSlots, routesSrc, { ...serverTexts, [keeperRel]: twoSlots })).some((n) => /ONE SLOT/.test(n))), '§8 CONTROL: a CLI install that ignores the slot is RED');
   // lane chrome-builds-download (design 004, B-80c1): THE SLOT'S THIRD KIND — a Chrome for Testing build into the CLI's own
   // builds folder. OUR fetch (no child downloads), so the census reads the fetch itself:
   //   ONE FETCH   the keeper has exactly ONE `fetch(` — inside `buildFetch`, AFTER egressVerdict over the hosts of
@@ -1110,16 +1110,16 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     rows.push(['ONE SLOT: the download asks the slot\'s running state and takes it as its row\'s id (`chrome-build`)', /if \(installState\.running\) throw namedError\('install_running',/.test(inst) && /Object\.assign\(installState, \{ running: true, kind: ROW\.id,/.test(inst) && /const ROW = \{ id: 'chrome-build',/.test(keeperSrc), '']);
     return rows;
   };
-  for (const [n, p, d] of buildCensus(keeperSrc, routesSrc, serverTexts)) ok(p, '§8 ' + n + (p || !d ? '' : ' — ' + d));
+  for (const [n, p, d] of buildCensus(keeperSrc, routesSrc, serverTexts)) ok(verdictOf(p), '§8 ' + n + (p || !d ? '' : ' — ' + d));
   const noVerdict = mut('build-no-verdict', keeperRel, keeperSrc, '      const ev = B.egressVerdict(x.hostname, buildHosts());', '      const ev = { allow: true };');
-  ok(reds(buildCensus(noVerdict, routesSrc, { ...serverTexts, [keeperRel]: noVerdict })).some((n) => /ONE FETCH/.test(n)), '§8 CONTROL: a build fetch without the egress verdict is RED');
+  ok(verdictOf(reds(buildCensus(noVerdict, routesSrc, { ...serverTexts, [keeperRel]: noVerdict })).some((n) => /ONE FETCH/.test(n))), '§8 CONTROL: a build fetch without the egress verdict is RED');
   const secondFetch = mut('build-second-fetch', keeperRel, keeperSrc, '  async function jsonBody(res, max) {', '  async function headOf(u) { return fetch(u, { method: \'HEAD\' }); }\n  async function jsonBody(res, max) {');
-  ok(reds(buildCensus(secondFetch, routesSrc, { ...serverTexts, [keeperRel]: secondFetch })).some((n) => /ONE FETCH/.test(n)), '§8 CONTROL: a second fetch site beside buildFetch is RED');
+  ok(verdictOf(reds(buildCensus(secondFetch, routesSrc, { ...serverTexts, [keeperRel]: secondFetch })).some((n) => /ONE FETCH/.test(n))), '§8 CONTROL: a second fetch site beside buildFetch is RED');
   const openDl = mut('build-agent-token', routesRel, routesSrc, "router.post('/api/browser/builds/download', async (req, res) => {\n  if (refuseHost(req, res)) return;\n  if (refuseAgentBearer(req, res, BUILDS_DOWNLOAD_IS_USERS)) return;", "router.post('/api/browser/builds/download', async (req, res) => {\n  if (refuseHost(req, res)) return;");
-  ok(reds(buildCensus(keeperSrc, openDl, { ...serverTexts, [routesRel]: openDl })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a download route an agent token reaches is RED');
+  ok(verdictOf(reds(buildCensus(keeperSrc, openDl, { ...serverTexts, [routesRel]: openDl })).some((n) => /USER-ONLY/.test(n))), '§8 CONTROL: a download route an agent token reaches is RED');
   const atBoot = mut('build-at-boot', keeperRel, keeperSrc, '  const reattached = installs.reattach();', "  const reattached = installs.reattach(); setTimeout(() => { api.installChromeBuild({ version: VERBS.CHROME_BUILDS_RECORD.measured.stable }).catch(() => {}); }, 0);");
-  ok(reds(buildCensus(atBoot, routesSrc, { ...serverTexts, [keeperRel]: atBoot })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a keeper that downloads a build at boot is RED');
-  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§8 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  ok(verdictOf(reds(buildCensus(atBoot, routesSrc, { ...serverTexts, [keeperRel]: atBoot })).some((n) => /USER-ONLY/.test(n))), '§8 CONTROL: a keeper that downloads a build at boot is RED');
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§8 ' })) ok(verdictOf(x.pass), x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // ── 9: A THREAD BORN AFTER ITS ROOT WAS STORED (lane lark-threads, 2026-10-01 — the owner's post) ──
@@ -1158,24 +1158,24 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const engineRel = 'src/server/channels-engine.js';
   const engineSrc = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files as one text
   ok(typeof engineSrc === 'string', '§9 the engine is in the server census');
-  for (const [name, pass0, detail] of census(engineSrc, serverTexts)) ok(pass0, `§9 ${name}`, detail);
+  for (const [name, pass0, detail] of census(engineSrc, serverTexts)) ok(verdictOf(pass0), `§9 ${name}`, detail);
   const MUT = mutantCopies('vendor-whitelist-lkt', REPO);
   const reds = (rows) => rows.filter(([, p]) => !p).map(([n]) => n);
   const mutEngine = (label, from, to) => {
-    ok(engineSrc.includes(from), `§9 CONTROL ${label}: the edit's anchor is in the engine`);
+    ok(verdictOf(engineSrc.includes(from)), `§9 CONTROL ${label}: the edit's anchor is in the engine`);
     const f = MUT.write(engineRel, engineSrc.replace(from, to), label);
     const t = fs.readFileSync(f, 'utf-8');
     return reds(census(t, { ...serverTexts, [engineRel]: t }));
   };
   const ingestRecheck = mutEngine('ingest-recheck', 'if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs);', 'if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs); setTimeout(() => recheckOne(rec, e, convId, { by: \'timer\' }).catch(() => {}), 0);');
-  ok(ingestRecheck.some((n) => /RECHECK: recheckOne is invoked only/.test(n)), `§9 CONTROL: a copy whose INGEST rechecks every conversation it reads is RED (${ingestRecheck.join(' | ')})`);
+  ok(verdictOf(ingestRecheck.some((n) => /RECHECK: recheckOne is invoked only/.test(n))), `§9 CONTROL: a copy whose INGEST rechecks every conversation it reads is RED (${ingestRecheck.join(' | ')})`);
   const unbounded = mutEngine('byid-unbounded', 'if (e.byIdTick.n >= BYID_PER_TICK || !affordable(rec, e) || outlived(rec, e)) break;', 'if (outlived(rec, e)) break;');
-  ok(unbounded.some((n) => /BY-ID: `\.messageById\(`/.test(n)), `§9 CONTROL: a by-id loop without its per-tick bound and the budget is RED (${unbounded.join(' | ')})`);
+  ok(verdictOf(unbounded.some((n) => /BY-ID: `\.messageById\(`/.test(n))), `§9 CONTROL: a by-id loop without its per-tick bound and the budget is RED (${unbounded.join(' | ')})`);
   const ingestById = mutEngine('ingest-byid', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts));', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts)); for (const x of r.records || []) await e.adapter.messageById(convId, { messageId: x.vendorId });');
-  ok(ingestById.some((n) => /BY-ID: `\.messageById\(`/.test(n)), `§9 CONTROL: a copy whose INGEST reads every message by id is RED (${ingestById.join(' | ')})`);
+  ok(verdictOf(ingestById.some((n) => /BY-ID: `\.messageById\(`/.test(n))), `§9 CONTROL: a copy whose INGEST reads every message by id is RED (${ingestById.join(' | ')})`);
   const forgets = mutEngine('byid-forgets', "rememberById(e, vid, 'refused'); f.counters.missingRefused++;", 'f.counters.missingRefused++;');
-  ok(forgets.some((n) => /remembered/.test(n)), `§9 CONTROL: a by-id read that forgets a refusal (asked again every tick) is RED (${forgets.join(' | ')})`);
-  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§9 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  ok(verdictOf(forgets.some((n) => /remembered/.test(n))), `§9 CONTROL: a by-id read that forgets a refusal (asked again every tick) is RED (${forgets.join(' | ')})`);
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§9 ' })) ok(verdictOf(x.pass), x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // ── 10: THE CODEX APP-SERVER SPAWNS + THE RESET-CREDIT HELPER (lane reset-path, 2026-10-01) ──
@@ -1231,26 +1231,26 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   };
   const engRel = 'src/server/usage-pool-engine.js', routeRel = 'src/routes/reset-credit.js', helperRel = 'src/codex-reset-helper.js';
   const engT = fs.readFileSync(path.join(REPO, engRel), 'utf8'), routeT = fs.readFileSync(path.join(REPO, routeRel), 'utf8'), helperT = fs.readFileSync(path.join(REPO, helperRel), 'utf8');
-  for (const [name, pass8, detail] of helperCensus(engT, routeT, helperT)) ok(pass8, `§10 ${name}`, detail);
+  for (const [name, pass8, detail] of helperCensus(engT, routeT, helperT)) ok(verdictOf(pass8), `§10 ${name}`, detail);
   const H = require(path.join(REPO, helperRel));
   const M = H.MEASURED_CONNECTS;
-  ok(M && /strace/.test(M.tool) && /^\d{4}-\d\d-\d\d$/.test(M.date) && /codex-cli \d+\.\d+\.\d+/.test(M.version) && /unshare -n/.test(M.runner) && M.ours.inet === 0 && M.appServer.inetOk === 0 && M.appServer.inet === M.appServer.dns + M.appServer.https + M.appServer.other,
+  ok(gateOf(M) && gateOf(/strace/.test(M.tool)) && gateOf(/^\d{4}-\d\d-\d\d$/.test(M.date)) && gateOf(/codex-cli \d+\.\d+\.\d+/.test(M.version)) && gateOf(/unshare -n/.test(M.runner)) && M.ours.inet === 0 && M.appServer.inetOk === 0 && M.appServer.inet === M.appServer.dns + M.appServer.https + M.appServer.other,
     '§10 MEASURED: the helper\'s connect set is a measurement (tool, date, CLI version, runner) — our own process 0 internet-family calls, none succeeded in the empty namespace', JSON.stringify(M));
   // CONTROLS — the census over patched TEXT
   const red8 = (rows) => rows.filter(([, p8]) => !p8).map(([n]) => n);
-  const swapEng = (from, to) => { ok(engT.includes(from), `§10 CONTROL: the anchor is in the engine (${from.slice(0, 50).trim()}…)`); return engT.replace(from, to); };
+  const swapEng = (from, to) => { ok(verdictOf(engT.includes(from)), `§10 CONTROL: the anchor is in the engine (${from.slice(0, 50).trim()}…)`); return engT.replace(from, to); };
   const before = swapEng("  const t = openResetCreditTry({ key, sid: null, via: 'helper', origin: 'user', resetsAtSec, lane: null, now, idemKey, av, creditsAt: resetCreditsLeft(null, key), reportsSent: true, window: spentWindowOf(readRawUsageCache(key)) });", "  codexResetHelper.consumeResetCreditViaAppServer({ idempotencyKey: 'x' });\n  const t = openResetCreditTry({ key, sid: null, via: 'helper', origin: 'user', resetsAtSec, lane: null, now, idemKey, av, creditsAt: resetCreditsLeft(null, key), reportsSent: true, window: spentWindowOf(readRawUsageCache(key)) });");
-  ok(red8(helperCensus(before, routeT, helperT)).some((n) => /ONE CALLER/.test(n)), '§10 CONTROL: a second helper call BEFORE the attempt record is RED');
+  ok(verdictOf(red8(helperCensus(before, routeT, helperT)).some((n) => /ONE CALLER/.test(n))), '§10 CONTROL: a second helper call BEFORE the attempt record is RED');
   const auto = swapEng("    // AUTO — through the ONE writer the manual button uses too (writeResetCredit).", "    if (!session.pty) writeResetCreditViaHelper(key, { resetsAtSec: R });\n    // AUTO — through the ONE writer the manual button uses too (writeResetCredit).");
-  ok(red8(helperCensus(auto, routeT, helperT)).some((n) => /NEVER THE AUTO RUNG/.test(n)), '§10 CONTROL: an auto rung that falls to the helper is RED');
+  ok(verdictOf(red8(helperCensus(auto, routeT, helperT)).some((n) => /NEVER THE AUTO RUNG/.test(n))), '§10 CONTROL: an auto rung that falls to the helper is RED');
   const timer = swapEng("function writeResetCreditViaHelper(", "function _retry(k) { setTimeout(() => writeResetCreditViaHelper(k), 60e3); }\nfunction writeResetCreditViaHelper(");
-  ok(red8(helperCensus(timer, routeT, helperT)).some((n) => /NEVER A TIMER/.test(n)), '§10 CONTROL: a helper call under a timer is RED');
+  ok(verdictOf(red8(helperCensus(timer, routeT, helperT)).some((n) => /NEVER A TIMER/.test(n))), '§10 CONTROL: a helper call under a timer is RED');
   const deferred = swapEng("  Promise.resolve(codexResetHelper.consumeResetCreditViaAppServer({", "  setTimeout(() => {\n  Promise.resolve(codexResetHelper.consumeResetCreditViaAppServer({");
-  ok(red8(helperCensus(deferred, routeT, helperT)).some((n) => /NEVER A TIMER/.test(n)), '§10 CONTROL (verify r1): the press\'s own spawn deferred under a MULTI-LINE timer is RED (the same-line census let it through)');
+  ok(verdictOf(red8(helperCensus(deferred, routeT, helperT)).some((n) => /NEVER A TIMER/.test(n))), '§10 CONTROL (verify r1): the press\'s own spawn deferred under a MULTI-LINE timer is RED (the same-line census let it through)');
   const routeOpen = routeT.replace("      if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });\n", '');
-  ok(routeOpen !== routeT && red8(helperCensus(engT, routeOpen, helperT)).some((n) => /agent's session \/ job token/.test(n)), '§10 CONTROL: a POST that lets an agent token through is RED');
+  ok(routeOpen !== routeT && verdictOf(red8(helperCensus(engT, routeOpen, helperT)).some((n) => /agent's session \/ job token/.test(n))), '§10 CONTROL: a POST that lets an agent token through is RED');
   const fetchy = helperT.replace("const { spawn } = require('child_process');", "const { spawn } = require('child_process');\nconst https = require('https');");
-  ok(fetchy !== helperT && red8(helperCensus(engT, routeT, fetchy)).some((n) => /builds no request/.test(n)), '§10 CONTROL: a helper that loads an http client is RED');
+  ok(fetchy !== helperT && verdictOf(red8(helperCensus(engT, routeT, fetchy)).some((n) => /builds no request/.test(n))), '§10 CONTROL: a helper that loads an http client is RED');
   // verify r2 (Q5): the timer census above is LEXICAL and ENGINE-ONLY — a timer two files away reaching the helper
   // through the EXPORTED consumeResetCreditFor (server.js hands it to the routes; any module could call it) escaped
   // it. A TREE-WIDE census of every CALL of consumeResetCreditFor: the route's POST (twice — the press, and the press
@@ -1292,16 +1292,16 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const treeTexts = {}; for (const f of files) { const rel = path.relative(REPO, f); if (rel.startsWith('data/bin/vibespace-agentd')) continue; try { treeTexts[rel] = readSrc(f); } catch { } }
   const badCalls = callCensus(treeTexts);
   ok(badCalls.length === 0, '§10 TREE CENSUS (verify r2): consumeResetCreditFor is CALLED only by the route\'s POST (twice) and defined once in the engine — no other caller, none under a timer anywhere in the server tree', badCalls.join(' | '));
-  ok(Object.keys(ALLOW_CONSUME_CALLS).every((rel) => consumeCalls(treeTexts[rel] || '') === ALLOW_CONSUME_CALLS[rel]), '§10 TREE CENSUS: the allowlist rows still match (route 2, engine 1)');
-  ok(Object.keys(ALLOW_CONSUME_REFS).every((rel) => consumeRefs(treeTexts[rel] || '') === ALLOW_CONSUME_REFS[rel]), '§10 TREE CENSUS (verify r3): the reference rows still match (route 3, engine 2, server.js 1)', JSON.stringify(Object.fromEntries(Object.keys(ALLOW_CONSUME_REFS).map((rel) => [rel, consumeRefs(treeTexts[rel] || '')]))));
+  ok(verdictOf(Object.keys(ALLOW_CONSUME_CALLS).every((rel) => consumeCalls(treeTexts[rel] || '') === ALLOW_CONSUME_CALLS[rel])), '§10 TREE CENSUS: the allowlist rows still match (route 2, engine 1)');
+  ok(verdictOf(Object.keys(ALLOW_CONSUME_REFS).every((rel) => consumeRefs(treeTexts[rel] || '') === ALLOW_CONSUME_REFS[rel])), '§10 TREE CENSUS (verify r3): the reference rows still match (route 3, engine 2, server.js 1)', JSON.stringify(Object.fromEntries(Object.keys(ALLOW_CONSUME_REFS).map((rel) => [rel, consumeRefs(treeTexts[rel] || '')]))));
   const plantedAlias = { ...treeTexts, 'server.js': (treeTexts['server.js'] || '') + "\nconst nudgeFn = engine.consumeResetCreditFor;\nsetInterval(nudgeFn, 60e3);\n" };
-  ok(callCensus(plantedAlias).some((b) => /^server\.js: 2 reference\(s\), allowed 1/.test(b)) && !callCensus(plantedAlias).some((b) => /server\.js: \d+ call/.test(b)), '§10 TREE CENSUS CONTROL (verify r3): a call through a VARIABLE (const f = engine.consumeResetCreditFor; setInterval(f)) is RED by the reference census — the call census alone saw nothing', callCensus(plantedAlias).join(' | '));
+  ok(gateOf(callCensus(plantedAlias).some((b) => /^server\.js: 2 reference\(s\), allowed 1/.test(b))) && !callCensus(plantedAlias).some((b) => /server\.js: \d+ call/.test(b)), '§10 TREE CENSUS CONTROL (verify r3): a call through a VARIABLE (const f = engine.consumeResetCreditFor; setInterval(f)) is RED by the reference census — the call census alone saw nothing', callCensus(plantedAlias).join(' | '));
   const plantedBind = { ...treeTexts, 'src/ws-handler.js': (treeTexts['src/ws-handler.js'] || '') + "\nconst spend = engine.consumeResetCreditFor.bind(engine);\n" };
-  ok(callCensus(plantedBind).some((b) => /bound with bind\/call\/apply/.test(b)) && callCensus(plantedBind).some((b) => /^src\/ws-handler\.js: 1 reference/.test(b)), '§10 TREE CENSUS CONTROL (verify r3): a `.bind(` on it is RED twice (the bind, and a reference in a file with none allowed)', callCensus(plantedBind).join(' | '));
+  ok(gateOf(callCensus(plantedBind).some((b) => /bound with bind\/call\/apply/.test(b))) && verdictOf(callCensus(plantedBind).some((b) => /^src\/ws-handler\.js: 1 reference/.test(b))), '§10 TREE CENSUS CONTROL (verify r3): a `.bind(` on it is RED twice (the bind, and a reference in a file with none allowed)', callCensus(plantedBind).join(' | '));
   const plantedTimer = { ...treeTexts, 'server.js': (treeTexts['server.js'] || '') + "\nsetInterval(() => {\n  engine.consumeResetCreditFor('x');\n}, 60e3);\n" };
-  ok(callCensus(plantedTimer).some((b) => /^server\.js: a consumeResetCreditFor call under a timer/.test(b)), '§10 TREE CENSUS CONTROL: a timer TWO FILES AWAY (a setInterval in server.js calling engine.consumeResetCreditFor) is RED');
+  ok(verdictOf(callCensus(plantedTimer).some((b) => /^server\.js: a consumeResetCreditFor call under a timer/.test(b))), '§10 TREE CENSUS CONTROL: a timer TWO FILES AWAY (a setInterval in server.js calling engine.consumeResetCreditFor) is RED');
   const plantedCaller = { ...treeTexts, 'src/ws-handler.js': (treeTexts['src/ws-handler.js'] || '') + "\nfunction nudge(e) { return e.consumeResetCreditFor('x'); }\n" };
-  ok(callCensus(plantedCaller).some((b) => /^src\/ws-handler\.js: 1 call/.test(b)), '§10 TREE CENSUS CONTROL: a new caller in another file is RED until it is allowlisted with its reason');
+  ok(verdictOf(callCensus(plantedCaller).some((b) => /^src\/ws-handler\.js: 1 call/.test(b))), '§10 TREE CENSUS CONTROL: a new caller in another file is RED until it is allowlisted with its reason');
   for (const [what, line] of [['a dynamic property (engine[\'consume\' + \'ResetCreditFor\'])', "setInterval(() => engine['consume' + 'ResetCreditFor']('x'), 60e3);"], ['Reflect.get(engine, k)', "const k = 'consume' + 'ResetCreditFor'; setInterval(Reflect.get(engine, k), 60e3);"], ['a spread re-export ({ ...engine })', 'module.exports = { ...engine };'],
     // verify r5: the aliasing shapes the r4 census let through — the key is assembled from fragments the fragment rule does
     // not know ('cons' + 'umeResetCreditFor'), so only the ALIAS rule can catch them
@@ -1313,7 +1313,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     ['an optional chain (engine?.[k])', "const k = 'cons' + 'umeResetCreditFor'; setInterval(() => engine?.[k]('x'), 60e3);"],
     ['a template literal (`consume${…}`)', "const tail = 'ResetCreditFor'; setInterval(() => engine[`consume${tail}`]('x'), 60e3);"]]) {
     const planted = { ...treeTexts, 'server.js': (treeTexts['server.js'] || '') + '\n' + line + '\n' };
-    ok(callCensus(planted).some((b) => /^server\.js: a dynamic reach into the engine object/.test(b)), `§10 TREE CENSUS CONTROL (verify r4): ${what} spells no name the reference census could count — RED by shape`, callCensus(planted).join(' | '));
+    ok(verdictOf(callCensus(planted).some((b) => /^server\.js: a dynamic reach into the engine object/.test(b))), `§10 TREE CENSUS CONTROL (verify r4): ${what} spells no name the reference census could count — RED by shape`, callCensus(planted).join(' | '));
   }
   // ── THE READ CENSUS (verify r9 ⑥): every `account/rateLimits/read` REQUEST site in the tree is a ROW with its gate — the
   //    owner's yes (ut-cdaa01aff0) bought "+1 read per human press, both paths" and nothing more; a new site is RED until it is
@@ -1326,7 +1326,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     };
     const hitsR = {};
     for (const f of files) { const rel = path.relative(REPO, f); if (rel.startsWith('data/bin/vibespace-agentd')) continue; let t = ''; try { t = strip8(readSrc(f)); } catch { continue; } const n = (t.match(READ) || []).length; if (n) hitsR[rel] = n; }
-    ok(JSON.stringify(Object.keys(hitsR).sort()) === JSON.stringify(Object.keys(ALLOW_READ).sort()) && Object.entries(ALLOW_READ).every(([rel, r]) => hitsR[rel] === r.n), `§10 READ CENSUS (verify r9 ⑥): the account/rateLimits/read request sites are exactly the allowlisted rows, by file and count (${JSON.stringify(hitsR)})`, JSON.stringify(hitsR));
+    ok(JSON.stringify(Object.keys(hitsR).sort()) === JSON.stringify(Object.keys(ALLOW_READ).sort()) && verdictOf(Object.entries(ALLOW_READ).every(([rel, r]) => hitsR[rel] === r.n)), `§10 READ CENSUS (verify r9 ⑥): the account/rateLimits/read request sites are exactly the allowlisted rows, by file and count (${JSON.stringify(hitsR)})`, JSON.stringify(hitsR));
     const wrapperRaw = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8'), wrapperT = strip8(wrapperRaw);
     const rc = wrapperT.indexOf("msg.type === 'codex-reset-credit')"), rf = wrapperT.indexOf('if (msg.readFirst === true) {', rc), rd = wrapperT.indexOf("request('account/rateLimits/read'", rf), go = wrapperT.indexOf('resetCreditGoWaiters.set(idempotencyKey', rd), cons = wrapperT.indexOf("request('account/rateLimitResetCredit/consume'", go);
     ok(rc > 0 && rf > rc && rd > rf && go > rd && cons > go, '§10 READ CENSUS: the wrapper\'s read before a consume sits inside the readFirst gate of the codex-reset-credit handler, the wait for the go follows it, and the consume comes after the wait (the order in the source)', JSON.stringify({ rc, rf, rd, go, cons }));
@@ -1343,7 +1343,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       const NONLIT = /(?<!function )\brequest\(\s*(?!['"`])([^,)]+)/g; // a CALL whose first argument is not a string literal (the `function request(method, …)` definition is not a call)
       const nonLit = (t) => [...strip8(t).matchAll(NONLIT)].map((m) => m[1].trim());
       const ternaryOk = /const method = resumeId \? \(isFork \? 'thread\/fork' : 'thread\/resume'\) : 'thread\/start';\n  if \(resumeId\) params\.threadId = resumeId;\n  const resp = await request\(method, params, 120000\);/.test(wrapperRaw);
-      ok(ternaryOk && JSON.stringify(nonLit(wrapperRaw)) === JSON.stringify(['method']), '§10 SHAPE CENSUS (verify r10 ⑥): every request() in the wrapper names a literal method except startThread\'s closed ternary (thread/start | resume | fork) — a method spelled through a variable elsewhere is RED by shape', JSON.stringify(nonLit(wrapperRaw)));
+      ok(gateOf(ternaryOk) && JSON.stringify(nonLit(wrapperRaw)) === JSON.stringify(['method']), '§10 SHAPE CENSUS (verify r10 ⑥): every request() in the wrapper names a literal method except startThread\'s closed ternary (thread/start | resume | fork) — a method spelled through a variable elsewhere is RED by shape', JSON.stringify(nonLit(wrapperRaw)));
       ok(nonLit(helperRaw).length === 0, '§10 SHAPE CENSUS: every request() in the helper names a literal method', JSON.stringify(nonLit(helperRaw)));
       const planted = "\nconst m2 = 'account/rateLimits/' + 'read'; const r9 = await request(m2, {}, 20000);\n";
       ok(JSON.stringify(nonLit(wrapperRaw + planted)) === JSON.stringify(['method', 'm2']) && countR(wrapperRaw + planted) === 3, '§10 SHAPE CENSUS CONTROL: a read spelled through a variable keeps the LITERAL count at 3 (the text census is blind to it) and is RED by shape (a non-literal method name)', JSON.stringify(nonLit(wrapperRaw + planted)));
@@ -1352,7 +1352,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   // verify r2 (Q5): the strace leg below is the REAL witness of the census — it must run in the tier that gates a
   // push. This suite is in ci.mjs's FAST tier (the pre-push tier); on a CI runner a missing strace is RED, never a SKIP
   const ciRows = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
-  ok(/\{\s*name:\s*'test-vendor-whitelist',\s*tier:\s*'fast'/.test(ciRows), '§10 TIER PIN: test-vendor-whitelist is in the FAST tier of scripts/ci.mjs (the tier that gates a push) — its strace leg runs before every push');
+  ok(verdictOf(/\{\s*name:\s*'test-vendor-whitelist',\s*tier:\s*'fast'/.test(ciRows)), '§10 TIER PIN: test-vendor-whitelist is in the FAST tier of scripts/ci.mjs (the tier that gates a push) — its strace leg runs before every push');
   // LIVE: the helper over the STUB app-server, an EMPTY CODEX_HOME, under strace — zero internet connections
   const has8 = (bin) => { try { execFileSync('sh', ['-c', `command -v ${bin}`], { stdio: 'pipe' }); return true; } catch { return false; } };
   const onCI = !!(process.env.CI || process.env.GITHUB_ACTIONS);
@@ -1372,7 +1372,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
         return { result: (() => { try { return JSON.parse(res); } catch { return null; } })(), inet: text.split('\n').filter((l) => /\bconnect\(/.test(l) && /AF_INET6?/.test(l)).length };
       };
       const live = traced(drv(''));
-      ok(live.result && live.result.sent === true && live.result.outcome === 'reset' && live.inet === 0, '§10 LIVE: the helper over the stub (EMPTY CODEX_HOME) consumed and read — and the whole tree opened ZERO internet connections', JSON.stringify(live));
+      ok(gateOf(live.result) && live.result.sent === true && live.result.outcome === 'reset' && live.inet === 0, '§10 LIVE: the helper over the stub (EMPTY CODEX_HOME) consumed and read — and the whole tree opened ZERO internet connections', JSON.stringify(live));
       const ctl8 = traced(drv("const s=require('net').connect(1,'127.0.0.1');s.on('error',()=>{});"));
       ok(ctl8.inet >= 1, '§10 LIVE CONTROL: the same run with one deliberate loopback connect is SEEN (the zero above is a measurement)', JSON.stringify(ctl8));
     } finally { try { fs.rmSync(tmp8, { recursive: true, force: true }); } catch { } }
@@ -1393,7 +1393,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const routes = ['src/routes/channels.js', 'src/agent-routes.js', 'src/routes/agent-channels.js'].filter((f) => fs.existsSync(path.join(REPO, f))).map((f) => [f, (fs.readFileSync(path.join(REPO, f), 'utf-8').match(/messageFacts\(/g) || []).length]);
   ok(callers === 1 && routes.filter(([, n]) => n).length === 1 && routes.find(([f]) => f === 'src/routes/channels.js')[1] === 1, 'message-facts: messageFacts is reached only from the owner\'s route (src/routes/channels.js), never an agent route', JSON.stringify({ callers, routes }));
   const gm = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
-  ok(!/\.factsOf\(/.test(gm) && /async factsOf\(convId\) \{\n[^\n]*\n\s*const t = await api\(/.test(gm), 'message-facts: gmail\'s factsOf reads through the gate (api: token → pace → meter)');
+  ok(!/\.factsOf\(/.test(gm) && verdictOf(/async factsOf\(convId\) \{\n[^\n]*\n\s*const t = await api\(/.test(gm)), 'message-facts: gmail\'s factsOf reads through the gate (api: token → pace → meter)');
 }
 
 // §FS design 010 (B-c9be, lane channels-full-search): THE VENDOR'S OWN SEARCH IS ASKED ONLY ON A PERSON'S ACT. Its one
@@ -1423,12 +1423,12 @@ console.log('§FS the full search: the call sites (a press, an explicit --full �
   const j = judge(ENGS, PANEL);
   ok(JSON.stringify(j) === JSON.stringify(want), 'the full search\'s ONE adapter call is reached only from the press route and the agent\'s --full; around only from the sheet and --around; the client asks only on a press / the scroll sentinel / the once-retry / Search again; the open only peeks', JSON.stringify(j));
   const rc = read('src/routes/channels.js'), ar = read('src/agent-routes.js');
-  ok((rc.match(/engine\(\)\.searchVendor\(/g) || []).length === 1 && /router\.get\('\/api\/channels\/search\/full'[\s\S]{0,400}engine\(\)\.searchVendor\(/.test(rc) && (rc.match(/engine\(\)\.aroundOwner\(/g) || []).length === 1 && (ar.match(/full: req\.query\.full === '1'/g) || []).length === 1, 'the owner\'s two routes and the agent\'s one flag are the only doors');
+  ok((rc.match(/engine\(\)\.searchVendor\(/g) || []).length === 1 && gateOf(/router\.get\('\/api\/channels\/search\/full'[\s\S]{0,400}engine\(\)\.searchVendor\(/.test(rc)) && (rc.match(/engine\(\)\.aroundOwner\(/g) || []).length === 1 && (ar.match(/full: req\.query\.full === '1'/g) || []).length === 1, 'the owner\'s two routes and the agent\'s one flag are the only doors');
   const tickSpot = ENGS.indexOf('  function feedDue(rec, e, t = now()) {');
   const planted = ENGS.slice(0, tickSpot) + "  function feedDue(rec, e, t = now()) {\n    vendorSearch(rec, 'x', {});" + ENGS.slice(tickSpot + '  function feedDue(rec, e, t = now()) {'.length);
   const keyed = PANEL.replace("  go.onclick = run;\n", "  go.onclick = run;\n  input.addEventListener('input', () => { for (const st of []) ask(st); });\n");
   const jp = judge(planted, PANEL), jk = judge(ENGS, keyed);
-  ok(tickSpot > 0 && jp.vendorSearch.includes('feedDue') && keyed !== PANEL && jk.keystroke === true && jk.askCalls === 5, 'CONTROL: a vendor search planted in the feed\'s tick, and a keystroke listener in the dialog, are each caught by name', JSON.stringify({ tick: jp.vendorSearch, keystroke: jk.keystroke }));
+  ok(tickSpot > 0 && gateOf(jp.vendorSearch.includes('feedDue')) && keyed !== PANEL && jk.keystroke === true && jk.askCalls === 5, 'CONTROL: a vendor search planted in the feed\'s tick, and a keystroke listener in the dialog, are each caught by name', JSON.stringify({ tick: jp.vendorSearch, keystroke: jk.keystroke }));
 }
 
 // §FS-G design 010 S6 (lane channels-followups): GMAIL'S FULL SEARCH IS ASKED ONLY THROUGH ITS `search` / `around`. The
@@ -1469,7 +1469,7 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
   const planted = GS.split(L0).length === 2 ? GS.replace(L0, L0 + "      await this.search({ query: 'x' });\n") : null;
   const wordsInHistory = GS.split(H0).length === 2 ? GS.replace(H0, H0 + "      await api(`/messages?${new URLSearchParams({ q: String(convId) })}`, { what: 'x' });\n") : null;
   const jp = planted && judge(planted), jw = wordsInHistory && judge(wordsInHistory);
-  ok(jp && jp.searchCallers === 'listConversations' && jw && jw.words === 'history,search', 'CONTROL: a search planted in the listing, and a words query planted in the history read, are each caught by name', JSON.stringify({ planted: jp && jp.searchCallers, words: jw && jw.words }));
+  ok(gateOf(jp) && jp.searchCallers === 'listConversations' && gateOf(jw) && jw.words === 'history,search', 'CONTROL: a search planted in the listing, and a words query planted in the history read, are each caught by name', JSON.stringify({ planted: jp && jp.searchCallers, words: jw && jw.words }));
 }
 
 // ── 12: SLACK'S APP CREATE WITH A PASTED SETUP TOKEN (lane slack-connect-easy, design 017) ──
@@ -1507,16 +1507,16 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
   const slackRel = 'src/channels/slack.js';
   const slackSrc = serverTexts[slackRel];
   ok(typeof slackSrc === 'string' && typeof serverTexts['src/channels/slack-manifest.js'] === 'string', '§12 slack.js and slack-manifest.js are in the server census');
-  for (const [name, pass_, detail] of census(slackSrc, serverTexts)) ok(pass_, '§12 ' + name, detail);
+  for (const [name, pass_, detail] of census(slackSrc, serverTexts)) ok(verdictOf(pass_), '§12 ' + name, detail);
   const MUT = mutantCopies('vendor-whitelist-slack', REPO);
   const reds = (rows) => rows.filter((r) => !r[1]).map((r) => r[0]);
   const mut = (tag, from, to) => { if (!slackSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = MUT.write(slackRel, slackSrc.replace(from, to), tag); return fs.readFileSync(f, 'utf-8'); };
   const keeps = mut('keeps-credentials', '    const appId = typeof a.app_id', '    const kept = a.credentials && a.credentials.client_secret; void kept;\n    const appId = typeof a.app_id');
-  ok(keeps && reds(census(keeps, { ...serverTexts, [slackRel]: keeps })).some((n) => /KEPT/.test(n)), '§12 CONTROL: a copy that reads the create\'s credentials is RED');
+  ok(gateOf(keeps) && verdictOf(reds(census(keeps, { ...serverTexts, [slackRel]: keeps })).some((n) => /KEPT/.test(n))), '§12 CONTROL: a copy that reads the create\'s credentials is RED');
   const twice = mut('second-caller', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n      if (cursor === \'x\') await createApp(\'\', \'\');\n');
-  ok(twice && reds(census(twice, { ...serverTexts, [slackRel]: twice })).some((n) => /ONE PER HUMAN ACT/.test(n)), '§12 CONTROL: a copy that also creates from the conversation listing is RED');
+  ok(gateOf(twice) && verdictOf(reds(census(twice, { ...serverTexts, [slackRel]: twice })).some((n) => /ONE PER HUMAN ACT/.test(n))), '§12 CONTROL: a copy that also creates from the conversation listing is RED');
   const keepsToken = mut('no-drop', 'try { return await createApp(pasted, label); } finally { pasted = null; }', 'return await createApp(pasted, label);');
-  ok(keepsToken && reds(census(keepsToken, { ...serverTexts, [slackRel]: keepsToken })).some((n) => /ONE PER HUMAN ACT/.test(n)), '§12 CONTROL: a copy that does not drop the setup token is RED');
+  ok(gateOf(keepsToken) && verdictOf(reds(census(keepsToken, { ...serverTexts, [slackRel]: keepsToken })).some((n) => /ONE PER HUMAN ACT/.test(n))), '§12 CONTROL: a copy that does not drop the setup token is RED');
   // ── 13: THE WORKSPACE APP'S CODE EXCHANGE (lane slack-workspace-app, design 018) ──
   //   ONE SITE   `oauth.v2.access` lives only in slack-manifest.js (`EXCHANGE_METHOD`); slack.js calls it once, inside
   //              `exchangeCode`, the app's id + secret as HTTP Basic and the consent's own redirect_uri beside the code
@@ -1536,14 +1536,14 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
     rows.push(['THE SECRET: read once, inside the exchange call\'s arguments', (S.match(/\.secret\(\)/g) || []).length === 1 && !/=\s*c\.secret\(\)/.test(S), '']);
     return rows;
   };
-  for (const [name, pass_, detail] of census13(slackSrc, serverTexts)) ok(pass_, '§13 ' + name, detail);
+  for (const [name, pass_, detail] of census13(slackSrc, serverTexts)) ok(verdictOf(pass_), '§13 ' + name, detail);
   const noRedirect = mut('no-redirect', '{ code: String(code), ...(redirectUri ? { redirect_uri: redirectUri } : {}) }', '{ code: String(code) }');
-  ok(noRedirect && reds(census13(noRedirect, { ...serverTexts, [slackRel]: noRedirect })).some((n) => /ONE SITE: exchangeCode/.test(n)), '§13 CONTROL: a copy that drops the redirect_uri from the exchange is RED');
+  ok(gateOf(noRedirect) && verdictOf(reds(census13(noRedirect, { ...serverTexts, [slackRel]: noRedirect })).some((n) => /ONE SITE: exchangeCode/.test(n))), '§13 CONTROL: a copy that drops the redirect_uri from the exchange is RED');
   const twice13 = mut('exchange-twice', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n      if (cursor === \'x\') await exchangeCode(\'c\', null, null);\n');
-  ok(twice13 && reds(census13(twice13, { ...serverTexts, [slackRel]: twice13 })).some((n) => /ONE PER HUMAN ACT/.test(n)), '§13 CONTROL: a copy that also exchanges from the conversation listing is RED');
+  ok(gateOf(twice13) && verdictOf(reds(census13(twice13, { ...serverTexts, [slackRel]: twice13 })).some((n) => /ONE PER HUMAN ACT/.test(n))), '§13 CONTROL: a copy that also exchanges from the conversation listing is RED');
   const keeps13 = mut('keeps-secret', '    const c = workspaceClient();\n    let r;\n    try { r = await callSlack(fetchFn, Manifest.EXCHANGE_METHOD', '    const c = workspaceClient();\n    const kept = c.secret(); void kept;\n    let r;\n    try { r = await callSlack(fetchFn, Manifest.EXCHANGE_METHOD');
-  ok(keeps13 && reds(census13(keeps13, { ...serverTexts, [slackRel]: keeps13 })).some((n) => /THE SECRET/.test(n)), '§13 CONTROL: a copy that keeps the secret in a variable is RED');
-  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3, label: '§12 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  ok(gateOf(keeps13) && verdictOf(reds(census13(keeps13, { ...serverTexts, [slackRel]: keeps13 })).some((n) => /THE SECRET/.test(n))), '§13 CONTROL: a copy that keeps the secret in a variable is RED');
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3, label: '§12 ' })) ok(verdictOf(x.pass), x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // §14 B-2198 THE CHANNELS RAW API (docs/design-channel-raw-api.md) — the ONE allow-listed pass-through vendor surface:
@@ -1578,7 +1578,7 @@ console.log('§14 the Channels raw API: ONE fetch site, the host table, the gran
     return bad;
   };
   ok(census14(src0).length === 0, '§14 the raw API: ONE fetch site behind the host table, no redirect, the grant, the account meter', census14(src0).join('; '));
-  ok(src0.includes('await vendorFetch(row.refresh,') && census14(src0.replace('await vendorFetch(row.refresh,', 'await fetch(row.refresh,')).length > 0, 'CONTROL: §14 a raw fetch( planted beside vendorFetch (the mount refresh) is red (verify r1)');
+  ok(gateOf(src0.includes('await vendorFetch(row.refresh,')) && census14(src0.replace('await vendorFetch(row.refresh,', 'await fetch(row.refresh,')).length > 0, 'CONTROL: §14 a raw fetch( planted beside vendorFetch (the mount refresh) is red (verify r1)');
   // THE HOSTS ARE DERIVED FROM THE DECLARATIONS (never a second hand list): every adapter module's `api` row + the mounts'
   const chDir = path.join(REPO, 'src/channels');
   const declared = [...fs.readdirSync(chDir).filter((f) => /\.js$/.test(f)).map((f) => require(path.join(chDir, f))).filter((m) => m && m.adapter && m.adapter.api).map((m) => ({ who: m.adapter.kind, row: m.adapter.api })),
@@ -1597,7 +1597,7 @@ console.log('§14 the Channels raw API: ONE fetch site, the host table, the gran
     ['the charge cut', cut("        c.charge();\n", ""), /charged/],
   ];
   const r = ctl.map(([n, s, re]) => ({ n, red: !!s && census14(s).some((x) => re.test(x)) }));
-  ok(r.every((x) => x.red), `§14 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+  ok(verdictOf(r.every((x) => x.red)), `§14 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
 }
 
 // §15 THE LISTED-PROVIDER REFRESH (lane models-at-session, design q-053 r1 §3 — the owner 2026-10-20: a provider's model list,
@@ -1646,7 +1646,7 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
   };
   const found = census15(texts0);
   ok(found.length === 0, '§15 the census on the tree: ONE caller (the door), a person\'s press, no timer, the verdict before the key and the request, the cache', found.join('; '));
-  ok(constructions[MOD] === 1 && ALLOW[MOD] && ALLOW[MOD].max === 1, `§15 ${MOD}: exactly ONE vendor request construction (the PROVIDER_MODELS marker beside it: ${constructions[MOD]})`);
+  ok(constructions[MOD] === 1 && gateOf(ALLOW[MOD]) && ALLOW[MOD].max === 1, `§15 ${MOD}: exactly ONE vendor request construction (the PROVIDER_MODELS marker beside it: ${constructions[MOD]})`);
   const plant = (rel, from, to) => { const t = texts0[rel] || ''; const n = t.split(from).length - 1; return n === 1 ? { ...texts0, [rel]: t.replace(from, to) } : null; };
   const WIRE_AT = "  require('../routes/provider-models.js').registerProviderModelRoutes(";
   const DOOR_AT = "  app.post('/api/providers/:id/models/refresh',";
@@ -1659,7 +1659,7 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
     ['the module that takes any caller', plant(MOD, "    if (by !== 'human') return { ok: false, code: 'human_only' };\n", ''), /A PERSON/],
   ];
   const r15 = controls.map(([n, t, re]) => ({ n, red: !!t && census15(t).some((x) => re.test(x)) }));
-  ok(r15.every((x) => x.red), `§15 CONTROLS: ${r15.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(' · ')}`);
+  ok(verdictOf(r15.every((x) => x.red)), `§15 CONTROLS: ${r15.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(' · ')}`);
 
   // (b) + (c): the RUNNING module against a loopback fake of a provider's list — the hit count is the witness
   // r2155 (lane bl-tests-e): EACH REQUEST MARKED BY THE LEG THAT SENT IT. One sighting at 838036995 (the whole-tree row, under
@@ -1697,7 +1697,7 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
       return { leg, hits: got15.filter((g) => g.leg === leg).length, out, ms, kept: store.get('pv-openrouter') };
     };
     const real = await run(mpOf());
-    ok(real.hits === 1 && real.out[0].ok && real.out[1].code === 'cooldown' && real.kept.fetchedAt === 1792494000000 && real.kept.models[0].id === 'vendor/model-a', '§15 (c)+(d) THE REAL MODULE: two presses inside the minute ⇒ ONE request; the second refused (cooldown); the answer kept with fetchedAt', who15(real));
+    ok(real.hits === 1 && gateOf(real.out[0].ok) && real.out[1].code === 'cooldown' && real.kept.fetchedAt === 1792494000000 && real.kept.models[0].id === 'vendor/model-a', '§15 (c)+(d) THE REAL MODULE: two presses inside the minute ⇒ ONE request; the second refused (cooldown); the answer kept with fetchedAt', who15(real));
     const loose = await run(mpOf('  if (wait > 0) return { ok: false, code: \'cooldown\', retryAfterMs: wait };\n', ''));
     ok(loose.hits === 2, '§15 CONTROL: an UNTHROTTLED refresh (the verdict\'s cooldown taken out) asks the provider TWICE inside the minute (RED: > 1)', who15(loose));
     const locked = await run(mpOf(), { vault: 'locked', presses: 1 });
@@ -1764,7 +1764,7 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
     return { bases, checked, noVendor, oneRun, launchRuns: lr };
   };
   const j = judge13(PROBE_SRC);
-  ok(j.bases && j.checked && j.noVendor && j.oneRun, `every base of every run is the loopback mock, the ONE launcher checks the env (assertEnv) before the binary starts, the module names no vendor host, and of its ${j.launchRuns.calls} child-process calls exactly ONE runs the binary (the launcher) and none runs a shell`, JSON.stringify(j));
+  ok(gateOf(j.bases) && gateOf(j.checked) && gateOf(j.noVendor) && verdictOf(j.oneRun), `every base of every run is the loopback mock, the ONE launcher checks the env (assertEnv) before the binary starts, the module names no vendor host, and of its ${j.launchRuns.calls} child-process calls exactly ONE runs the binary (the launcher) and none runs a shell`, JSON.stringify(j));
   const m1 = judge13(PROBE_SRC.replace('ANTHROPIC_BASE_URL: BASE', "ANTHROPIC_BASE_URL: 'https://api.anthropic.com'"));
   ok(!m1.bases && !m1.noVendor, 'RED CONTROL: the real API host as a base is caught', JSON.stringify(m1));
   const m2 = judge13(PROBE_SRC.replace(/\n    assertEnv\(env, \{ base: BASE[^\n]*\n/, '\n'));
@@ -1773,7 +1773,7 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
   // stdout (0, 1) and its OWN stderr file, never the tracer's stderr (the record); and only the launcher names the trampoline
   const TRAMP_SRC = fs.readFileSync(path.join(REPO, 'src/claude-oat-trampoline.js'), 'utf-8');
   const trampOk = (t) => { const lr = launchRuns(t.replace(/\bbin\b/g, 'CLAUDE')); return lr.calls === 1 && /spawn\(bin, args, \{ stdio: \[0, 1, err\] \}\)/.test(t) && !/stdio:\s*\[[^\]]*\b2\b|'inherit'/.test(t); };
-  ok(trampOk(TRAMP_SRC) && (PROBE_SRC.match(/\bTRAMP\b/g) || []).length === 4 && /process\.execPath, '--no-warnings', TRAMP, errFile, \.\.\.\(pty \? \['--pty'\] : \[\]\), CLAUDE, \.\.\.args\]/.test(PROBE_SRC), 'the trampoline (src/claude-oat-trampoline.js) starts the binary ONCE (lane oat-add-door: or util-linux script around it, the mint\'s --pty — still one spawn, the launcher names the binary on every run) with the tracer\'s stdin / stdout and its own stderr file — never the record — and only the launcher runs it (TRAMP named 4×: made, written, compared with the shipped bytes before every launch, run)');
+  ok(gateOf(trampOk(TRAMP_SRC)) && (PROBE_SRC.match(/\bTRAMP\b/g) || []).length === 4 && verdictOf(/process\.execPath, '--no-warnings', TRAMP, errFile, \.\.\.\(pty \? \['--pty'\] : \[\]\), CLAUDE, \.\.\.args\]/.test(PROBE_SRC)), 'the trampoline (src/claude-oat-trampoline.js) starts the binary ONCE (lane oat-add-door: or util-linux script around it, the mint\'s --pty — still one spawn, the launcher names the binary on every run) with the tracer\'s stdin / stdout and its own stderr file — never the record — and only the launcher runs it (TRAMP named 4×: made, written, compared with the shipped bytes before every launch, run)');
   ok(!trampOk(TRAMP_SRC.replace('stdio: [0, 1, err]', "stdio: 'inherit'")) && !trampOk(TRAMP_SRC.replace('stdio: [0, 1, err]', 'stdio: [0, 1, 2]')), 'RED CONTROL: a trampoline that hands the binary the tracer\'s stderr (inherit, or fd 2) is caught');
   // acceptance r2 (a): the three spellings r1's census missed, each planted in the module — RED
   for (const [what, plant] of [
@@ -1808,12 +1808,12 @@ console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_
 {
   const archLine = fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8').split('\n').find((l) => l.trim().startsWith('const REAL_CLI = /'));
   const REAL_CLI = archLine ? new Function(`return ${archLine.trim().replace(/^const REAL_CLI = /, '').replace(/;$/, '')};`)() : null;
-  ok(REAL_CLI instanceof RegExp && REAL_CLI.test("spawnSync(" + "'codex', ['--version'])"), 'the universe reads test-architecture §50\'s REAL_CLI shape (one shape, not a copy)');
+  ok(REAL_CLI instanceof RegExp && verdictOf(REAL_CLI.test("spawnSync(" + "'codex', ['--version'])")), 'the universe reads test-architecture §50\'s REAL_CLI shape (one shape, not a copy)');
   // the PROGRAM names come from §50's own `command -v (…)` alternative — one list, read, never retyped (a typed list here would be a
   // harness-keyed table to test-harness-add-census, and it would drift from §50's)
   const LOOKUP = REAL_CLI ? /^command -v \(([^()]*)\)\\b\|/.exec(REAL_CLI.source) : null;
   const PROGS = LOOKUP ? LOOKUP[1].split('|') : [];
-  ok(PROGS.length >= 2 && PROGS.every((p) => /^[a-z]+$/.test(p)), `the program names are §50's lookup's own (${PROGS.join(', ')})`);
+  ok(PROGS.length >= 2 && verdictOf(PROGS.every((p) => /^[a-z]+$/.test(p))), `the program names are §50's lookup's own (${PROGS.join(', ')})`);
   const WALK = [
     new RegExp(String.raw`\bsplit\(\s*['"]:['"]\s*\)[^;\n]*path\.join\(\s*[\w$]+\s*,\s*['"](?:${PROGS.join('|')})['"]\s*\)`),
     new RegExp(String.raw`\bprocess\.env\.VS_(?:${PROGS.map((p) => p.toUpperCase()).join('|')})_BIN\b`),
@@ -1825,7 +1825,7 @@ console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_
   const looksUp = (src) => byName(src) || code(src).some((l) => WALK.some((r) => r.test(l)));
   // what STARTS it by name: §50's shape without its `command -v` lookup alternative (derived from the same source, never retyped)
   const START = LOOKUP ? new RegExp(REAL_CLI.source.slice(LOOKUP[0].length)) : null;
-  ok(!!START && START.source !== REAL_CLI.source && !START.test('command -v ' + 'claude') && START.test("execSync(" + "'codex --version')"), 'START is §50\'s shape without its command -v lookup');
+  ok(!!START && START.source !== REAL_CLI.source && !START.test('command -v ' + 'claude') && verdictOf(START.test("execSync(" + "'codex --version')")), 'START is §50\'s shape without its command -v lookup');
   const starts = (src) => !!START && code(src).some((l) => START.test(l));
   const HONOURS = /process\.env\.VS_NO_REAL_CLI\s*===\s*'1'/;
   const CLI_ROWS = {
@@ -1861,11 +1861,11 @@ console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_
   ok(!bad.length, 'each row is what it says: a run row skips under VS_NO_REAL_CLI=1, a read / hide row never starts the CLI by name, a debt row is still owed', bad.map(([f, w]) => `${f}: ${w}`).join('; '));
   ok(judgeRow('test-queue-steer.mjs', "  const which = spawnSync(" + "'codex', ['--version'], { encoding: 'utf8' });") !== null,
     "RED CONTROL: test-queue-steer's ⑥ lookup as the release shipped it (a bare spawnSync(" + "'codex') with no flag test) fails its run row");
-  ok(judgeRow('test-pricing-tiers.mjs', "spawnSync(" + "'claude', ['--version'])") !== null && (() => { const d = CLI_ROWS['test-x-debt.mjs'] = ['debt', 'a planted debt row']; const r = judgeRow('test-x-debt.mjs', "if (process.env.VS_NO_REAL_CLI === '1') skip();"); delete CLI_ROWS['test-x-debt.mjs']; return d && r !== null; })(),
+  ok(judgeRow('test-pricing-tiers.mjs', "spawnSync(" + "'claude', ['--version'])") !== null && verdictOf((() => { const d = CLI_ROWS['test-x-debt.mjs'] = ['debt', 'a planted debt row']; const r = judgeRow('test-x-debt.mjs', "if (process.env.VS_NO_REAL_CLI === '1') skip();"); delete CLI_ROWS['test-x-debt.mjs']; return d && r !== null; })()),
     'RED CONTROL: a read row that starts the CLI by name, and a debt row that has learned the flag, are both red');
-  ok(looksUp("const cands = String(process.env.PATH || '').split(':').map((d) => path.join(d, " + "'claude'));") && looksUp("execSync(" + "'codex --version')") && !looksUp("// spawnSync(" + "'claude', ['-p'])") && !looksUp("const f = path.join(tmp, " + "'claude'); fs.writeFileSync(f, STUB);"),
+  ok(gateOf(looksUp("const cands = String(process.env.PATH || '').split(':').map((d) => path.join(d, " + "'claude'));")) && gateOf(looksUp("execSync(" + "'codex --version')")) && !looksUp("// spawnSync(" + "'claude', ['-p'])") && !looksUp("const f = path.join(tmp, " + "'claude'); fs.writeFileSync(f, STUB);"),
     'RED CONTROL: a PATH walk and an execSync string are lookups; a comment and a stand-in written into a scratch dir are not');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

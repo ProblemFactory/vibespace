@@ -29,7 +29,7 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const T0 = Date.now();
 let pass = 0, failed = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + String(e).slice(0, 600) : ''}`); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + String(e).slice(0, 600) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── ① THE CENSUS ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ const openable = [...reg.types].filter(([t]) => !Object.prototype.hasOwnProperty
 const noAction = openable.filter(([, r]) => !r.actions.length).map(([t, r]) => `${t} (${r.file})`);
 ok(reg.types.size >= 30 && !noAction.length, `every registered window type is opened here or skipped with a reason (${reg.types.size}: ${openable.length} opened, ${reg.types.size - openable.length} skipped)`, noAction.length ? 'no open action and no windows.skip row: ' + noAction.join(', ') : '');
 const deadWin = Object.keys(winSkip).filter((t) => !reg.types.has(t));
-ok(!deadWin.length && Object.values(winSkip).every((w) => String(w || '').trim()), 'every windows.skip row names a registered type and says why', deadWin.join(' '));
+ok(!deadWin.length && verdictOf(Object.values(winSkip).every((w) => String(w || '').trim())), 'every windows.skip row names a registered type and says why', deadWin.join(' '));
 
 // ── ② A REAL BOOT ────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('② a real boot (a scratch worktree of this tree, its own HOME)');
@@ -83,12 +83,12 @@ for (const s of [srv.stdout, srv.stderr]) s.on('data', (d) => { if (srvLog.lengt
 let up = false;
 const tBoot = Date.now();
 for (let i = 0; i < 240 && !up; i++) { try { up = (await fetch(`http://127.0.0.1:${PORT}/api/home`)).status < 500; } catch { await sleep(250); } }
-ok(up, `the server boots and answers (${Date.now() - tBoot} ms)`, up ? '' : srvLog.join('').slice(-1500));
+ok(verdictOf(up), `the server boots and answers (${Date.now() - tBoot} ms)`, up ? '' : srvLog.join('').slice(-1500));
 if (!up) { console.log(`\n${failed} FAILED`); await finish(1); }
 // the jobs engine settles after the listen (its routes answer 503 'starting' until then): wait ≤ 20 s, then judge
 let jobsUp = false;
 for (let i = 0; i < 80 && !jobsUp; i++) { try { jobsUp = (await fetch(`http://127.0.0.1:${PORT}/api/jobs`)).status !== 503; } catch { } if (!jobsUp) await sleep(250); }
-ok(jobsUp, `the jobs engine settles (${Date.now() - tBoot} ms after the spawn)`);
+ok(verdictOf(jobsUp), `the jobs engine settles (${Date.now() - tBoot} ms after the spawn)`);
 
 // ── ③ EVERY GET ──────────────────────────────────────────────────────────────────────────────────────────────────
 console.log(`③ every GET of the census (${census.smoke.length} routes, ≤ ${TABLE.budgetMs || 2000} ms each)`);
@@ -183,10 +183,10 @@ ok(!winBad.length, `every window type opens with no console error and no uncaugh
   const [type, rec] = openable.find(([t]) => t === 'usage') || openable[0];
   const c1 = RM.windowVerdict({ type, ...(await openOne(type, rec.actions[0], fillSpec(specs[rec.actions[0]]), "console.error('sentinel control: a planted console error');")) });
   const c2 = RM.windowVerdict({ type, ...(await openOne(type, rec.actions[0], fillSpec(specs[rec.actions[0]]), "setTimeout(() => { throw new Error('sentinel control: a planted uncaught throw'); }, 0);")) });
-  ok(!c1.ok && /console\.error/.test(c1.why) && !c2.ok && /uncaught/.test(c2.why), `CONTROL: a planted console.error and a planted uncaught throw inside one open are both RED (${c1.why.slice(0, 80)} · ${c2.why.slice(0, 80)})`);
+  ok(!c1.ok && gateOf(/console\.error/.test(c1.why)) && !c2.ok && verdictOf(/uncaught/.test(c2.why)), `CONTROL: a planted console.error and a planted uncaught throw inside one open are both RED (${c1.why.slice(0, 80)} · ${c2.why.slice(0, 80)})`);
 }
 ws.close();
 const total = Date.now() - T0;
 ok(total <= 240000, `the sentinel's budget: ≤ 4 min (${Math.round(total / 1000)} s)`);
 console.log(`\n${failed ? `${failed} FAILED` : `ALL PASS (${pass})`} · ${Math.round(total / 1000)} s`);
-await finish(failed ? 1 : 0);
+await finish(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

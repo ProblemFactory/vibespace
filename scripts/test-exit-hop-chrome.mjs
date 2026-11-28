@@ -56,8 +56,8 @@ let pass = 0, fail = 0;
 // exactly that page during the road (a product that never goes there leaves none: its leg stays a red).
 const auxKept = [], auxLoaded = []; let skipped = 0;
 const keptSince = (k0, url) => auxKept.slice(k0).some((x) => x.url === url);
-const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, c, e); };
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, verdictOf(c), e); };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (no rebuild: overlays the built public/) ──
@@ -311,12 +311,12 @@ try {
     judged(`${C}① the shipped rules: the same 204 — the App boots within 4 s of the hop's go() (the diary: hop stay why cancelled), no beforeunload listener of the module left, the intent kept for a late commit (round 4)`, G.c204, green(G.c204), G.c204);
     judged(`${C}② RED (round 2): the hop's go() onto a slow page, stopped while it loads — the splash for good, the listener held, the intent kept`, R.stop, red(R.stop), R.stop);
     judged(`${C}② the shipped rules: the same stop — the App boots within 4 s of the hop's go(), no beforeunload listener of the module left, the intent kept (round 4)`, G.stop, green(G.stop), G.stop);
-    check(`${C}③ RED (round 2): navigation.activation removed (entries() kept) — the exit, then a FORWARD press inside 10 s: the person is hopped back OUT of the page they went forward onto`, !!R.fwd && R.fwd.api.activation === 'absent' && R.fwd.api.entries && R.fwd.left && !R.fwd.stays && R.fwd.url.startsWith(AUX), R.fwd);
-    check(`${C}③ the shipped rules: no key, no hop — the exit writes no intent there, and the page the person went forward onto boots and stays (${G.fwd.restored ? 'kept by the cache and shown again' : 'loaded'})`, G.fwd.api.activation === 'absent' && G.fwd.left && G.fwd.stays && !G.fwd.hops.some((h) => /^n/.test(h)), G.fwd);
-    if (G.kept) check(`II④ the cache ON, G7's road as shipped: the exit ends on the page before VibeSpace; the older document it went through was ${G.kept.restored ? 'KEPT by the cache and went on' : `LOADED (the cache said: ${G.kept.cache.join(' · ') || 'nothing'})`}`, G.kept.armed && G.kept.outside && G.kept.loads + G.kept.restored === 1, G.kept);
+    check(`${C}③ RED (round 2): navigation.activation removed (entries() kept) — the exit, then a FORWARD press inside 10 s: the person is hopped back OUT of the page they went forward onto`, !!R.fwd && R.fwd.api.activation === 'absent' && gateOf(R.fwd.api.entries) && gateOf(R.fwd.left) && !R.fwd.stays && verdictOf(R.fwd.url.startsWith(AUX)), R.fwd);
+    check(`${C}③ the shipped rules: no key, no hop — the exit writes no intent there, and the page the person went forward onto boots and stays (${G.fwd.restored ? 'kept by the cache and shown again' : 'loaded'})`, G.fwd.api.activation === 'absent' && gateOf(G.fwd.left) && gateOf(G.fwd.stays) && !G.fwd.hops.some((h) => /^n/.test(h)), G.fwd);
+    if (G.kept) check(`II④ the cache ON, G7's road as shipped: the exit ends on the page before VibeSpace; the older document it went through was ${G.kept.restored ? 'KEPT by the cache and went on' : `LOADED (the cache said: ${G.kept.cache.join(' · ') || 'nothing'})`}`, gateOf(G.kept.armed) && gateOf(G.kept.outside) && G.kept.loads + G.kept.restored === 1, G.kept);
     if (G.keptFwd && G.keptFwd.loaded) { skipped++; console.log(`  ⊘ SKIP II⑤ the person's question: PRECONDITION NOT MET (the page before VibeSpace was LOADED by the exit — ${G.keptFwd.askedAgain ? 'the other site asked again ' + G.keptFwd.askedAgain + ' time(s)' : 'a main-frame load of it, no restore'} — not shown again from the cache; the scene is a page the browser kept) — not judged in this run`); }
     else if (G.keptFwd) check(`II⑤ THE PERSON'S QUESTION (r5133), the cache ON: the exit as shipped onto a page the browser keeps (${G.keptFwd.kept ? 'shown again from the cache' : 'its restore not seen, no load seen either'}) ends on it; a FORWARD press brings VibeSpace back with the App shown (no splash left${G.keptFwd.shownIn !== null ? ', in ' + G.keptFwd.shownIn + ' ms' : ''}), it stays past the intent's 10 s, and NOTHING is filed (no cost or capture row, no incident)`,
-      G.keptFwd.armed && G.keptFwd.outside && G.keptFwd.shownIn !== null && G.keptFwd.stays && G.keptFwd.filed.length === 0 && G.keptFwd.incidents === 0, G.keptFwd);
+      gateOf(G.keptFwd.armed) && gateOf(G.keptFwd.outside) && G.keptFwd.shownIn !== null && gateOf(G.keptFwd.stays) && G.keptFwd.filed.length === 0 && G.keptFwd.incidents === 0, G.keptFwd);
     await quit();
   }
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));
@@ -326,4 +326,4 @@ try {
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`}`);
 await quit();
 await sleep(300);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

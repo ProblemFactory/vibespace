@@ -27,7 +27,7 @@ const freePort = () => new Promise((res) => { const s = require('net').createSer
 const PORT = await freePort(), CDP_PORT = await freePort();
 const wt = scratch('cap-chrome-wt'), fakeHome = scratch('cap-chrome-home'), profile = scratch('cap-chrome-profile'), tmpDir = scratch('cap-chrome-tmp');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
@@ -85,7 +85,7 @@ const view = () => evalJs(`(() => { const before = new Set(app.wm.windows.keys()
 const card = (win, n = 0) => `(() => { const w = app.wm.windows.get(${JSON.stringify(win)}); const img = w && w.element.querySelectorAll('img.chat-tool-img')[${n}]; if (!img || !img.complete) return null; const box = img.closest('.chat-media'); const miss = box && box.querySelector('.chat-media-missing'); return { src: img.getAttribute('src'), rec: img.dataset.recordSrc || '', tried: img.dataset.recordTried || '', w: img.naturalWidth, broken: !!(box && box.classList.contains('chat-media-broken')), missing: miss ? miss.textContent : '' }; })()`;
 
 try {
-  check('the hub boots', await ready());
+  check('the hub boots', verdictOf(await ready()));
   await cdp('Page.enable'); await cdp('Runtime.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   const openPage = async () => {
@@ -96,7 +96,7 @@ try {
   console.log('① the picture drawn from its file; the card names its record — nothing is copied');
   const w1 = await view();
   const c1 = await until(`(() => { const c = ${card(w1)}; return c && c.w > 0 ? c : null; })()`, 20000);
-  check('the old message draws the agent\'s screenshot from its file (/api/file/raw)', !!c1 && /\/api\/file\/raw\?path=/.test(c1.src) && c1.w === 1, c1);
+  check('the old message draws the agent\'s screenshot from its file (/api/file/raw)', !!c1 && gateOf(/\/api\/file\/raw\?path=/.test(c1.src)) && c1.w === 1, c1);
   check('…and the card carries its RECORD\'s URL for later (data-record-src = /api/chat-picture/<transcript id>/<uuid>/<n>)', !!c1 && c1.rec === RECORD_URL, c1);
   await sleep(500);
   check('NOTHING is copied: no data/chat-attachments folder appears for a picture a message showed', !fs.existsSync(path.join(wt, 'data', 'chat-attachments')) || fs.readdirSync(path.join(wt, 'data', 'chat-attachments')).length === 0);
@@ -104,20 +104,20 @@ try {
   console.log('② the temp file CLEANED and the hub RESTARTED ⇒ the old message still draws its picture');
   fs.rmSync(SHOT, { force: true });
   await stopServer(); startServer();
-  check('the hub is back', await ready());
+  check('the hub is back', verdictOf(await ready()));
   await openPage();
   const w2 = await view();
   const c2 = await until(`(() => { const c = ${card(w2)}; return c && c.tried && c.w > 0 ? c : null; })()`, 20000);
   check('the file gone ⇒ the view swapped in the RECORD\'s copy (through .src) and it draws — read from the transcript', !!c2 && c2.src === RECORD_URL && c2.w === 1 && !c2.broken, c2 || await evalJs(card(w2)));
   const direct = await fetch(`http://127.0.0.1:${PORT}${RECORD_URL}`).then(async (r) => ({ s: r.status, b: Buffer.from(await r.arrayBuffer()) })).catch(() => null);
-  check('…its bytes are the record\'s, byte for byte (the owner\'s page; no password set on this throwaway hub)', !!direct && direct.s === 200 && direct.b.equals(PNG), direct && direct.s);
+  check('…its bytes are the record\'s, byte for byte (the owner\'s page; no password set on this throwaway hub)', !!direct && direct.s === 200 && verdictOf(direct.b.equals(PNG)), direct && direct.s);
 
   console.log('③ a record that never carried the bytes, its temp file gone ⇒ a true word, not a broken image');
   const c3 = await until(`(() => { const c = ${card(w2, 1)}; return c && c.broken ? c : null; })()`, 20000);
-  check('no bytes and no file ⇒ «This picture was stored in a temporary folder and is gone» (the card, not a broken image)', !!c3 && c3.broken && !c3.rec && /stored in a temporary folder and is gone/.test(c3.missing), c3 || await evalJs(card(w2, 1)));
+  check('no bytes and no file ⇒ «This picture was stored in a temporary folder and is gone» (the card, not a broken image)', !!c3 && gateOf(c3.broken) && !c3.rec && verdictOf(/stored in a temporary folder and is gone/.test(c3.missing)), c3 || await evalJs(card(w2, 1)));
 } catch (e) {
   check('the run did not throw', false, e && e.stack);
 } finally { await stopServer(); }
 console.log(`\n${failed ? '✗' : '✓'} test-chat-attachments-chrome: ${passed} passed, ${failed} failed`);
 console.log(failed ? 'FAIL' : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

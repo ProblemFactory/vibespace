@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CC = require(path.join(REPO, 'src/cli-call.js'));
 let failed = 0, passed = 0;
-const ok = (c, name, extra) => { if (c) { passed++; console.log('  ✓ ' + name); } else { failed++; console.error('  ✗ ' + name + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log('  ✓ ' + name); } else { failed++; console.error('  ✗ ' + name + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -53,16 +53,16 @@ ok(CC.parseDuration('30') === 30000 && CC.parseDuration('90s') === 90000 && CC.p
   ok(a.ms === 45000 && a.argv.join(' ') === 'progress note --detail d' && b.ms === 7000 && b.argv.join(' ') === 'show', '① --timeout <s> / --call-timeout=<s> leave argv without them');
   ok(c.ms === null && c.argv.join(' ') === 'run --timeout 6h' && c.flag === '--call-timeout', '① a CLI whose --timeout means something else (a job\'s run time) keeps it: only --call-timeout is taken');
   ok(d.ms === null && d.argv.join(' ') === 'run mac -- curl --timeout 2', '① nothing after `--` is taken (a command\'s own argv)');
-  ok(/--timeout wants a duration in seconds/.test(e.error || '') && /got nothing/.test(f.error || ''), '① a bad or missing value is an error by name', [e.error, f.error]);
+  ok(gateOf(/--timeout wants a duration in seconds/.test(e.error || '')) && verdictOf(/got nothing/.test(f.error || '')), '① a bad or missing value is an error by name', [e.error, f.error]);
 }
 ok(CC.phaseOf({}) === 'connect' && CC.phaseOf({ connected: true }) === 'answer' && CC.phaseOf({ connected: true, step: 'folder-write' }) === 'step' && CC.phaseOf({ connected: true, answered: true }) === 'body', '① the phase: connect → answer (→ step, when the hub named one) → body');
 {
   const L = (o) => CC.expiryLine({ tool: 'vibespace-task', ms: 30000, cls: 'write', ...o });
-  ok(L({ phase: 'step', step: 'folder-write' }).startsWith('vibespace-task: the hub answered the request but the shared folder write did not return in 30 s'), '① THE STEP WORDS: «the hub answered the request but the shared folder write did not return in 30 s»', L({ phase: 'step', step: 'folder-write' }));
+  ok(verdictOf(L({ phase: 'step', step: 'folder-write' }).startsWith('vibespace-task: the hub answered the request but the shared folder write did not return in 30 s')), '① THE STEP WORDS: «the hub answered the request but the shared folder write did not return in 30 s»', L({ phase: 'step', step: 'folder-write' }));
   ok(CC.expiryLine({ tool: 'vibespace-task', phase: 'answer', ms: 15000, cls: 'read' }) === 'vibespace-task: the hub did not answer in 15 s (--timeout <seconds> waits longer)', '① THE ANSWER WORDS: «the hub did not answer in 15 s» (a read: nothing more)');
-  ok(/^vibespace-task: the hub at hub\.test:3456 did not take the connection in 30 s — nothing was sent/.test(L({ phase: 'connect', origin: 'hub.test:3456' })), '① THE CONNECT WORDS: the hub never took the connection — nothing was sent');
-  ok(/the hub answered \(HTTP 200\) but the rest of its answer did not arrive in 30 s/.test(L({ phase: 'body', status: 200 })) && / — it may still take effect: look before you repeat it/.test(L({ phase: 'answer' })), '① the body words; a write / wake says it may still take effect');
-  ok(/the hub answered the request but its "brand-new" step did not return/.test(L({ phase: 'step', step: 'Brand-New!' })) && /\(--call-timeout <seconds> waits longer\)$/.test(L({ phase: 'answer', flag: '--call-timeout' })), '① a step key this copy does not know is still named; the line teaches the CLI\'s own flag');
+  ok(verdictOf(/^vibespace-task: the hub at hub\.test:3456 did not take the connection in 30 s — nothing was sent/.test(L({ phase: 'connect', origin: 'hub.test:3456' }))), '① THE CONNECT WORDS: the hub never took the connection — nothing was sent');
+  ok(gateOf(/the hub answered \(HTTP 200\) but the rest of its answer did not arrive in 30 s/.test(L({ phase: 'body', status: 200 }))) && verdictOf(/ — it may still take effect: look before you repeat it/.test(L({ phase: 'answer' }))), '① the body words; a write / wake says it may still take effect');
+  ok(gateOf(/the hub answered the request but its "brand-new" step did not return/.test(L({ phase: 'step', step: 'Brand-New!' }))) && verdictOf(/\(--call-timeout <seconds> waits longer\)$/.test(L({ phase: 'answer', flag: '--call-timeout' }))), '① a step key this copy does not know is still named; the line teaches the CLI\'s own flag');
   ok(!/\n/.test(L({ phase: 'step', step: 'a\nb' })), '① ONE line, always');
 }
 
@@ -86,11 +86,11 @@ CC.configure({ override: 300 });
 {
   const t0 = Date.now();
   const e = await T(SILENT + '/x', { method: 'POST', body: '{}' }).then(() => null, (x) => x);
-  ok(e && e.code === 'CLI_CALL_EXPIRED' && e.phase === 'answer' && /vibespace-test: the hub did not answer in 0\.3 s — it may still take effect/.test(e.line), `② a hub that takes the request and never answers: ended BY ITS BUDGET (CLI_CALL_EXPIRED) in the ANSWER words (${Date.now() - t0} ms)`, e && e.line);
+  ok(gateOf(e) && e.code === 'CLI_CALL_EXPIRED' && e.phase === 'answer' && verdictOf(/vibespace-test: the hub did not answer in 0\.3 s — it may still take effect/.test(e.line)), `② a hub that takes the request and never answers: ended BY ITS BUDGET (CLI_CALL_EXPIRED) in the ANSWER words (${Date.now() - t0} ms)`, e && e.line);
   const s = await T(STEP + '/x', { method: 'POST', body: '{}' }).then(() => null, (x) => x);
-  ok(s && s.phase === 'step' && s.step === 'folder-write' && /the hub answered the request but the shared folder write did not return in 0\.3 s/.test(s.line), '② a hub whose 103 named its step: the line names THAT step', s && s.line);
+  ok(gateOf(s) && s.phase === 'step' && s.step === 'folder-write' && verdictOf(/the hub answered the request but the shared folder write did not return in 0\.3 s/.test(s.line)), '② a hub whose 103 named its step: the line names THAT step', s && s.line);
   const p = await T(PARTIAL + '/x').then(() => null, (x) => x);
-  ok(p && p.phase === 'body' && /the hub answered \(HTTP 200\) but the rest of its answer did not arrive in 0\.3 s/.test(p.line) && !/may still take effect/.test(p.line), '② a hub that answered half: the BODY words (a read says no more)', p && p.line);
+  ok(gateOf(p) && p.phase === 'body' && gateOf(/the hub answered \(HTTP 200\) but the rest of its answer did not arrive in 0\.3 s/.test(p.line)) && !/may still take effect/.test(p.line), '② a hub that answered half: the BODY words (a read says no more)', p && p.line);
   // B-9dd0: an address that never TAKES the connection, on the loopback — a listener with a one-slot backlog whose process never
   // accepts (its loop blocked), its queue filled first: the kernel drops the dial's SYN, so the connect hangs. It used to be a SYN
   // to a blackhole address off the box (10.255.255.1 — on a hosted runner, its network's own range)
@@ -109,13 +109,13 @@ CC.configure({ override: 300 });
   console.log(`  (② the deaf listener: port ${deafPort}, alive through the dial: ${deafAlive}; the dial ended ${k ? `${k.code} / ${k.phase || '-'}` : 'with no error'})`);
   // B-9dd0 (r321 should 2): ONLY the connect words — a refused or unreachable dial is the broken setup's own shape here (the
   // loopback listener gone), never a pass
-  ok(deafAlive && k && k.code === 'CLI_CALL_EXPIRED' && k.phase === 'connect' && /did not take the connection in 0\.3 s — nothing was sent/.test(k.line), `② an address that never takes the connection: the CONNECT words, by the budget (${k && (k.phase || k.code)}, ${Date.now() - c0} ms)`, k && (k.line || k.message));
+  ok(gateOf(deafAlive) && gateOf(k) && k.code === 'CLI_CALL_EXPIRED' && k.phase === 'connect' && verdictOf(/did not take the connection in 0\.3 s — nothing was sent/.test(k.line)), `② an address that never takes the connection: the CONNECT words, by the budget (${k && (k.phase || k.code)}, ${Date.now() - c0} ms)`, k && (k.line || k.message));
 }
 CC.configure({ override: null });
 {
   const r = await T(ANSWER + '/x', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ a: 1 }) });
   const j = await r.json();
-  ok(r.ok && r.status === 200 && j.method === 'POST' && j.body === '{"a":1}' && j.len === '7' && r.headers.get('x-echo') === 'application/json', '② an answering hub: a real Response (ok / status / headers / json), the body sent with its length');
+  ok(gateOf(r.ok) && r.status === 200 && j.method === 'POST' && j.body === '{"a":1}' && j.len === '7' && r.headers.get('x-echo') === 'application/json', '② an answering hub: a real Response (ok / status / headers / json), the body sent with its length');
   const n = await T(ANSWER + '/404');
   ok(!n.ok && n.status === 404 && (await n.json()).method === 'GET', '② a 4xx passes through as an answer (the call sites word it), never an expiry');
   const late = await T(ANSWER + '/late', { method: 'POST', body: '{}' });
@@ -123,7 +123,7 @@ CC.configure({ override: null });
   const fd = new FormData(); fd.append('f', new Blob(['hello']), 'a.txt');
   const m = await (await T(ANSWER + '/fd', { method: 'POST', body: fd })).json();
   const echoed = await T(ANSWER + '/fd', { method: 'POST', body: fd });
-  ok(/hello/.test(m.body) && /multipart\/form-data; boundary=/.test(echoed.headers.get('x-echo')), '② a FormData body goes through the platform\'s own encoder (the boundary named)');
+  ok(gateOf(/hello/.test(m.body)) && verdictOf(/multipart\/form-data; boundary=/.test(echoed.headers.get('x-echo'))), '② a FormData body goes through the platform\'s own encoder (the boundary named)');
   const file = path.join(tmp, 'up.bin'); fs.writeFileSync(file, 'piped-bytes');
   const up = await (await T(ANSWER + '/up', { method: 'POST', body: fs.createReadStream(file) })).json();
   ok(up.body === 'piped-bytes', '② a node stream body (a file upload) is piped, never buffered whole');
@@ -132,9 +132,9 @@ CC.configure({ override: null });
   ok(got === 'abcdef', '② stream: resolved at the headers, the body read as it arrives');
   const ac = new AbortController(); setTimeout(() => ac.abort(), 50);
   const ab = await T(SILENT + '/poll', { signal: ac.signal, extraMs: 20000 }).then(() => null, (x) => x);
-  ok(ab && ab.name === 'AbortError', '② an AbortSignal ends a long-poll at once (AbortError), never the process', ab && ab.message);
+  ok(gateOf(ab) && ab.name === 'AbortError', '② an AbortSignal ends a long-poll at once (AbortError), never the process', ab && ab.message);
   const gone = await T('http://127.0.0.1:1/x').then(() => null, (x) => x);
-  ok(gone && gone.code === 'ECONNREFUSED' && /ECONNREFUSED/.test(gone.message), '② a refused connection REJECTS by its code (the call sites word «unreachable»)', gone && gone.message);
+  ok(gateOf(gone) && gone.code === 'ECONNREFUSED' && verdictOf(/ECONNREFUSED/.test(gone.message)), '② a refused connection REJECTS by its code (the call sites word «unreachable»)', gone && gone.message);
 }
 
 // ── ③ the real CLIs ──
@@ -158,11 +158,11 @@ const run = (bin, args, env = {}, ms = 8000) => new Promise((resolve) => {
     run('data/bin/vibespace-task', ['show', '--timeout', 'soon'], { VIBESPACE_API: SILENT }),
   ]);
   ok(a.code === 124 && a.err.trim() === 'vibespace-task: the hub did not answer in 0.6 s — it may still take effect: look before you repeat it (--timeout <seconds> waits longer)', `③ vibespace-task progress against a hub that never answers: ONE line, exit 124 (${a.ms} ms)`, a);
-  ok(s.code === 124 && /^vibespace-task: the hub answered the request but the shared folder write did not return in 0\.6 s/.test(s.err) && s.err.trim().split('\n').length === 1, '③ …against a hub that named its step: «the shared folder write did not return»', s);
+  ok(s.code === 124 && gateOf(/^vibespace-task: the hub answered the request but the shared folder write did not return in 0\.6 s/.test(s.err)) && s.err.trim().split('\n').length === 1, '③ …against a hub that named its step: «the shared folder write did not return»', s);
   ok(m.code === 124 && m.err.trim() === 'vibespace-msg: the hub did not answer in 0.6 s (--timeout <seconds> waits longer)', '③ vibespace-msg list (a read): the read words, exit 124', m);
-  ok(f.code === 124 && /^vibespace-feedback: the hub did not answer in 0\.6 s/.test(f.err), '③ vibespace-feedback: the same one line', f);
-  ok(j.code === 124 && /^vibespace-job: the hub did not answer in 0\.6 s \(--call-timeout <seconds> waits longer\)/.test(j.err), '③ vibespace-job (its --timeout is the job\'s): --call-timeout overrides and the line teaches it', j);
-  ok(b.code === 2 && /refused — --timeout wants a duration in seconds .* nothing was sent/.test(b.err), '③ a bad --timeout is refused by name, exit 2, nothing sent', b);
+  ok(f.code === 124 && verdictOf(/^vibespace-feedback: the hub did not answer in 0\.6 s/.test(f.err)), '③ vibespace-feedback: the same one line', f);
+  ok(j.code === 124 && verdictOf(/^vibespace-job: the hub did not answer in 0\.6 s \(--call-timeout <seconds> waits longer\)/.test(j.err)), '③ vibespace-job (its --timeout is the job\'s): --call-timeout overrides and the line teaches it', j);
+  ok(b.code === 2 && verdictOf(/refused — --timeout wants a duration in seconds .* nothing was sent/.test(b.err)), '③ a bad --timeout is refused by name, exit 2, nothing sent', b);
   // CONTROL: the same helper with its timer cut (the pre-lane shape: an unbounded wait) is still waiting at twice the budget
   const mutDir = path.join(tmp, 'mut'); fs.mkdirSync(path.join(mutDir, 'data', 'bin'), { recursive: true });
   const src = fs.readFileSync(path.join(REPO, 'src/cli-call.js'), 'utf8');
@@ -205,13 +205,13 @@ const routeHub = async (TaskStore, mirrorOpts) => {
   await H.tasks.mirrorIdle(50);
   const a = await run('data/bin/vibespace-task', ['progress', 'logged while the folder is slow', '--timeout', '5'], { VIBESPACE_API: H.url });
   const kept = (H.tasks.get(H.g.id).progress || []).map((p) => p.note);
-  ok(a.code === 0 && /^progress recorded as \[P-[0-9a-f]+\]/.test(a.out) && kept.includes('logged while the folder is slow'), `④ the answer came after the STORE write while the folder write hangs — exit 0 INSIDE the CLI's own 5 s budget (else 124; ${a.ms} ms), the entry kept`, a);
-  ok(asked.includes('mkdir') && !fs.existsSync(path.join(H.ctx, '.vibespace', 'TASK.md')), '④ the folder copy was asked for through the mirror fs, and has not landed (the fake holds it)', asked);
+  ok(a.code === 0 && gateOf(/^progress recorded as \[P-[0-9a-f]+\]/.test(a.out)) && verdictOf(kept.includes('logged while the folder is slow')), `④ the answer came after the STORE write while the folder write hangs — exit 0 INSIDE the CLI's own 5 s budget (else 124; ${a.ms} ms), the entry kept`, a);
+  ok(gateOf(asked.includes('mkdir')) && !fs.existsSync(path.join(H.ctx, '.vibespace', 'TASK.md')), '④ the folder copy was asked for through the mirror fs, and has not landed (the fake holds it)', asked);
   await sleep(500);
   const st = H.tasks.mirrorStateOf(H.g.id);
-  ok(st && st.behind === true && st.why === 'timeout', '④ past its own bound the mirror is BEHIND by name (a timeout), kept for a retry', st);
+  ok(gateOf(st) && st.behind === true && st.why === 'timeout', '④ past its own bound the mirror is BEHIND by name (a timeout), kept for a retry', st);
   const b = await run('data/bin/vibespace-task', ['progress', 'a second entry', '--timeout', '5'], { VIBESPACE_API: H.url });
-  ok(b.code === 0 && /the shared folder copy \(\.vibespace\/TASK\.md\) is behind — its write has not returned yet; the entry above is recorded/.test(b.out), '④ the next answer SAYS the copy is behind (the CLI prints it under the receipt)', b.out);
+  ok(b.code === 0 && verdictOf(/the shared folder copy \(\.vibespace\/TASK\.md\) is behind — its write has not returned yet; the entry above is recorded/.test(b.out)), '④ the next answer SAYS the copy is behind (the CLI prints it under the receipt)', b.out);
   // the slow fs now answers: a later mirror pass lands the copy and the state clears
   const fast = { call: (op, p) => { if (op === 'mkdir') { fs.mkdirSync(p.path, { recursive: true }); return Promise.resolve({ success: true }); } if (op === 'readText') return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })); if (op === 'writeFile') { fs.writeFileSync(p.path, p.content); return Promise.resolve({ success: true }); } if (op === 'rename') { fs.renameSync(p.oldPath, p.newPath); return Promise.resolve({ success: true }); } return Promise.resolve(null); } };
   H.tasks._mirrorFs = () => fast;
@@ -219,7 +219,7 @@ const routeHub = async (TaskStore, mirrorOpts) => {
   H.tasks.syncAllContextMd();
   await H.tasks.mirrorIdle(3000);
   const md = fs.existsSync(path.join(H.ctx, '.vibespace', 'TASK.md')) ? fs.readFileSync(path.join(H.ctx, '.vibespace', 'TASK.md'), 'utf8') : '';
-  ok(/a second entry/.test(md) && /logged while the folder is slow/.test(md) && !(H.tasks.mirrorStateOf(H.g.id) || {}).behind, '④ once the folder answers, the copy lands with every entry and the state clears');
+  ok(gateOf(/a second entry/.test(md)) && gateOf(/logged while the folder is slow/.test(md)) && !(H.tasks.mirrorStateOf(H.g.id) || {}).behind, '④ once the folder answers, the copy lands with every entry and the state clears');
 }
 {
   // CONTROL: the BASE store (c8aa8820 — its _save wrote TASK.md on the caller's turn) with that write slowed by 1.2 s
@@ -234,7 +234,7 @@ const routeHub = async (TaskStore, mirrorOpts) => {
     fs.writeFileSync = function (p, ...rest) { if (String(p).startsWith(H.ctx) && /TASK\.md/.test(String(p))) { const until = Date.now() + 1200; while (Date.now() < until) { /* the stalled mount */ } } return realWrite.call(this, p, ...rest); };
     try {
       const c = await run('data/bin/vibespace-task', ['progress', 'logged on the base store', '--timeout', '0.6'], { VIBESPACE_API: H.url });
-      ok(c.code === 124 && /^vibespace-task: the hub did not answer in 0\.6 s/.test(c.err), '④ CONTROL: the base store held the answer on the folder write — the CLI expired, exit 124 (and before this lane: it waited)', c);
+      ok(c.code === 124 && verdictOf(/^vibespace-task: the hub did not answer in 0\.6 s/.test(c.err)), '④ CONTROL: the base store held the answer on the folder write — the CLI expired, exit 124 (and before this lane: it waited)', c);
     } finally { fs.writeFileSync = realWrite; }
   }
 }
@@ -255,11 +255,11 @@ console.log('⑤ an answer whose act is not on disk yet is SAID on stderr (once)
   try { a = await CC.call(url + '/act', { method: 'POST', body: '{}', tool: 'vibespace-job' }); b = await CC.call(url + '/saved', { method: 'POST', body: '{}', tool: 'vibespace-job' }); }
   finally { process.stderr.write = realErr; }
   const bodyA = a ? await a.json() : null;
-  ok(said.length === 1 && /^vibespace-job: done, but not on disk yet — /.test(said[0]) && bodyA && bodyA.notOnDisk === true && b && b.status === 200,
+  ok(said.length === 1 && gateOf(/^vibespace-job: done, but not on disk yet — /.test(said[0])) && gateOf(bodyA) && bodyA.notOnDisk === true && gateOf(b) && b.status === 200,
     '⑤ call(): an answer with notOnDisk prints the line ONCE on stderr (the body still reaches the CLI whole); an answer without it prints nothing', { said, bodyA });
 }
 
 for (const s of servers) { try { s.closeAllConnections?.(); s.close(); } catch { } }
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(failed ? `\n${failed} FAILED, ${passed} passed` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

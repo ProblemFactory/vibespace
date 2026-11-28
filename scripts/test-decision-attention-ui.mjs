@@ -51,7 +51,7 @@ const SHOTS = process.env.DECISION_ATTENTION_PNG_DIR || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + String(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + String(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const quiet = { log() { }, warn() { }, error() { } };
 const ENG = require(path.join(repo, 'src/server/channels-engine.js'));
@@ -205,16 +205,16 @@ await d.go();
 const painted = await until(d, (rows) => rows.some((r) => r.key === 'im/c1' && r.vis));
 const paintAt = Date.now();
 const answeredBefore = got.filter((g) => g.answeredAt && g.answeredAt <= paintAt).length;
-ok(painted.some((r) => r.key === 'im/c1' && r.tag === 'assigned') && answeredBefore === 0, `the first screen is painted (the fact rows) while NO judgment has come back yet (${answeredBefore} answered at paint; the provider answers after ${DELAY} ms)`, painted);
+ok(gateOf(painted.some((r) => r.key === 'im/c1' && r.tag === 'assigned')) && answeredBefore === 0, `the first screen is painted (the fact rows) while NO judgment has come back yet (${answeredBefore} answered at paint; the provider answers after ${DELAY} ms)`, painted);
 const judged = await until(d, (rows) => judgedKeys(rows) === 'im/c0,im/c4', 10000);
 const chipAt = Date.now();
 ok(judgedKeys(judged) === 'im/c0,im/c4', `the two rows judged 0.86 wear the judged chip ${chipAt - paintAt} ms after the paint (patched in by the broadcast)`, judged);
 const c0 = judged.find((r) => r.key === 'im/c0') || {};
-ok(/需要你 · 0\.86/.test(c0.text) && c0.text.includes('问你') && c0.text.includes('截止或钱款') && !/URGENT|probability|needs_now/.test(c0.text), 'the chip says 需要你 · 0.86 · 问你、截止或钱款 — our words, nothing of the vendor\'s', c0.text);
-ok(c0.btns.length === 2 && c0.btns[0].startsWith('needs:') && c0.btns[1].startsWith('not:'), 'a judged row carries the ✓ / ✗ pair (with tooltips)', c0.btns);
+ok(gateOf(/需要你 · 0\.86/.test(c0.text)) && gateOf(c0.text.includes('问你')) && gateOf(c0.text.includes('截止或钱款')) && !/URGENT|probability|needs_now/.test(c0.text), 'the chip says 需要你 · 0.86 · 问你、截止或钱款 — our words, nothing of the vendor\'s', c0.text);
+ok(c0.btns.length === 2 && gateOf(c0.btns[0].startsWith('needs:')) && verdictOf(c0.btns[1].startsWith('not:')), 'a judged row carries the ✓ / ✗ pair (with tooltips)', c0.btns);
 ok(!judged.some((r) => r.key === 'im/c2' && r.tag === 'judged'), 'Lunch plans (judged 0.22) has no chip');
 await sleep(300);
-ok(got.length === 4 && got.every((g) => g.body.questions.length === 8 && (String(g.body.input).match(/\[record\]/g) || []).length === 1) && !got.some((g) => /Handed/.test(g.body.input)), `four records ⇒ four calls (${got.length}), each ONE record with the full 8-question rubric; no fact-tagged row was sent`, got.map((g) => recordPart(g.body.input).slice(0, 40)));
+ok(got.length === 4 && gateOf(got.every((g) => g.body.questions.length === 8 && (String(g.body.input).match(/\[record\]/g) || []).length === 1)) && !got.some((g) => /Handed/.test(g.body.input)), `four records ⇒ four calls (${got.length}), each ONE record with the full 8-question rubric; no fact-tagged row was sent`, got.map((g) => recordPart(g.body.input).slice(0, 40)));
 await d.shot('desk.png');
 
 console.log('② a reload re-renders the chips with no new call');
@@ -238,22 +238,22 @@ for (let i = 0; i < 160 && got.length - n < 3; i++) await sleep(50);
 await idle();
 await sleep(300);
 const re = got.slice(n);
-ok(re.length === 3 && re.every((g) => String(g.body.input).includes('→ not')) && !re.some((g) => /Handed|Invoice/.test(recordPart(g.body.input))), `the next first read judged the 3 other untagged rows again, each input carrying the example; no fact row, not the labeled row (${re.length})`, re.map((g) => recordPart(g.body.input).slice(0, 40)));
+ok(re.length === 3 && gateOf(re.every((g) => String(g.body.input).includes('→ not'))) && !re.some((g) => /Handed|Invoice/.test(recordPart(g.body.input))), `the next first read judged the 3 other untagged rows again, each input carrying the example; no fact row, not the labeled row (${re.length})`, re.map((g) => recordPart(g.body.input).slice(0, 40)));
 await d.ev(`document.querySelector('.chan-grow[data-grow="im/c4"] .chan-judge-btn[data-judge="needs"]').click()`);
 await sleep(500);
 const afterYes = await d.ev(ROWS);
-ok(afterYes.some((r) => r.key === 'im/c4' && r.tag === 'judged') && JSON.parse(fs.readFileSync(exFile, 'utf8')).examples[0].verdict === 'needs', '✓ on Contract URGENT keeps its chip and is the newest example');
+ok(gateOf(afterYes.some((r) => r.key === 'im/c4' && r.tag === 'judged')) && JSON.parse(fs.readFileSync(exFile, 'utf8')).examples[0].verdict === 'needs', '✓ on Contract URGENT keeps its chip and is the newest example');
 
 console.log('④ never judge this account (the real PUT route)');
 const put = (body) => fetch(`http://127.0.0.1:${PORT}/api/channels/adapters/im`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
 const pj = await put({ judge: 'never' });
 await d.go();
 const never = await until(d, (rows) => rows.some((r) => r.key === 'im/c1') && !rows.some((r) => r.tag === 'judged'));
-ok(pj.ok && pj.judge === 'never' && !never.some((r) => r.tag === 'judged'), '"never judge": the account\'s chips are gone', pj);
+ok(gateOf(pj.ok) && pj.judge === 'never' && !never.some((r) => r.tag === 'judged'), '"never judge": the account\'s chips are gone', pj);
 await put({ judge: null });
 await d.go();
 const back = await until(d, (rows) => rows.some((r) => r.key === 'im/c4' && r.tag === 'judged'));
-ok(back.some((r) => r.key === 'im/c4' && r.tag === 'judged'), 'cleared: the chip is back');
+ok(verdictOf(back.some((r) => r.key === 'im/c4' && r.tag === 'judged')), 'cleared: the chip is back');
 d.close();
 
 console.log('⑤ phone 390 px');
@@ -261,7 +261,7 @@ const ph = await page(390, 844, 'w=100%25');
 await ph.go();
 const prow = await until(ph, (rows) => rows.some((r) => r.key === 'im/c4' && r.tag === 'judged'));
 const vw = await ph.ev('[document.documentElement.clientWidth, document.documentElement.scrollWidth]');
-ok(prow.some((r) => r.key === 'im/c4' && r.tag === 'judged' && r.btns.length === 2) && vw[1] <= vw[0] && prow.every((r) => r.right <= vw[0]), 'the judged chip and its pair on a phone; nothing wider than the screen', { vw, prow });
+ok(gateOf(prow.some((r) => r.key === 'im/c4' && r.tag === 'judged' && r.btns.length === 2)) && vw[1] <= vw[0] && verdictOf(prow.every((r) => r.right <= vw[0])), 'the judged chip and its pair on a phone; nothing wider than the screen', { vw, prow });
 await ph.shot('phone.png');
 ph.close();
 
@@ -274,12 +274,12 @@ for (let i = 0; i < 80; i++) { if (await sp.ev(`!!document.querySelector('[data-
 await sp.ev(`document.querySelector('[data-draft="decision"]').click()`);
 let st = null;
 for (let i = 0; i < 100; i++) { st = await sp.ev(`(() => { const ta = document.querySelector('.settings-multiline-text'); const sv = [...document.querySelectorAll('.settings-multiline .settings-link-btn')].find((b) => !b.dataset.draft); return { value: ta.value, sets: window.__sets.length, save: sv && !sv.hidden }; })()`); if (st.value.split('\n').length > 1) break; await sleep(100); }
-ok(st.value.startsWith('Anything from my manager.') && /money, invoices or payments/i.test(st.value) && st.sets === 0 && st.save, 'the proposed lines land in the box under the person\'s own text — NOT saved (0 sets), the Save button shown', st);
-ok(got.slice(n).length === 2 && got.slice(n).every((g) => g.body.questions.length === 20), `the draft asked the 20 catalogue questions of each of the 2 labeled examples (${got.slice(n).length} calls)`);
+ok(gateOf(st.value.startsWith('Anything from my manager.')) && gateOf(/money, invoices or payments/i.test(st.value)) && st.sets === 0 && verdictOf(st.save), 'the proposed lines land in the box under the person\'s own text — NOT saved (0 sets), the Save button shown', st);
+ok(got.slice(n).length === 2 && verdictOf(got.slice(n).every((g) => g.body.questions.length === 20)), `the draft asked the 20 catalogue questions of each of the 2 labeled examples (${got.slice(n).length} calls)`);
 await sp.shot('block.png');
 await sp.ev(`[...document.querySelectorAll('.settings-multiline .settings-link-btn')].find((b) => !b.dataset.draft).click()`);
 const saved = await sp.ev('window.__sets');
-ok(saved.length === 1 && saved[0][0] === 'decision.attentionBlock' && /money/i.test(saved[0][1]), 'Save saves the edited block (one set)', saved);
+ok(saved.length === 1 && saved[0][0] === 'decision.attentionBlock' && verdictOf(/money/i.test(saved[0][1])), 'Save saves the edited block (one set)', saved);
 sp.close();
 
 console.log('⑦ 「从我的判定起草」 (lane rule-learning): no OpenRouter key ⇒ no button, no route; with one ⇒ the proposal card, saved only by 保存');
@@ -292,14 +292,14 @@ await np.go();
 for (let i = 0; i < 80; i++) { if (await np.ev(`!!document.querySelector('[data-draft]')`).catch(() => false)) break; await sleep(100); }
 await sleep(800);   // the GET has answered (404)
 const noKeyBtns = await drafts(np);
-ok(noKeyBtns.length === 1 && noKeyBtns[0].startsWith('decision:') && !(await np.ev(`!!document.querySelector('[data-draft="learn"], [data-learn-card]')`)), 'and the row draws NO drafter button — the catalogue draft stays the only door (census of [data-draft])', noKeyBtns);
+ok(noKeyBtns.length === 1 && gateOf(noKeyBtns[0].startsWith('decision:')) && !(await np.ev(`!!document.querySelector('[data-draft="learn"], [data-learn-card]')`)), 'and the row draws NO drafter button — the catalogue draft stays the only door (census of [data-draft])', noKeyBtns);
 np.close();
 keyRow.provider = 'openrouter'; keyRow.apiKey = ['sk-or-v1-', 'a'.repeat(48)].join('');
 const ag = await api('POST', '/api/channels/decision/learn', { authorization: 'Bearer vsst_' + 'b'.repeat(24) });
 const agG = await api('GET', '/api/channels/decision/learn', { authorization: 'Bearer vsst_' + 'b'.repeat(24) });
 ok(ag.status === 403 && agG.status === 403 && chats.length === 0, 'an agent token ⇒ 403 on both verbs — the owner\'s block is never drafted for an agent; 0 chat requests', [ag.status, agG.status]);
 const g200 = await api('GET', '/api/channels/decision/learn');
-ok(g200.status === 200 && g200.body.exists && g200.body.label === 'Gemini 3.8 Flash' && g200.body.model === 'google/gemini-3.8-flash', 'an OpenRouter row with a key ⇒ GET answers the drafter (Gemini 3.8 Flash by default)', g200);
+ok(g200.status === 200 && gateOf(g200.body.exists) && g200.body.label === 'Gemini 3.8 Flash' && g200.body.model === 'google/gemini-3.8-flash', 'an OpenRouter row with a key ⇒ GET answers the drafter (Gemini 3.8 Flash by default)', g200);
 const CARD = `(() => { const c = document.querySelector('[data-learn-card]'); if (!c) return null; const vw = document.documentElement.clientWidth; return {
   head: c.querySelector('.learn-card-head').textContent, sub: c.querySelector('.learn-card-sub').textContent, text: c.innerText,
   rows: [...c.querySelectorAll('.learn-rows:not(.learn-removed) > .learn-row')].map((r) => ({ op: r.dataset.op, un: r.dataset.unsupported === '1', tick: r.querySelector('.learn-tick').checked, text: r.querySelector('.learn-text').value, chip: (r.querySelector('.learn-chip') || {}).textContent, ev: (r.querySelector('.learn-evidence') || {}).textContent || '', evTitle: (r.querySelector('.learn-evidence') || {}).title || '', none: (r.querySelector('.learn-none') || {}).textContent || '', why: (r.querySelector('.learn-why') || {}).textContent || '' })),
@@ -321,13 +321,13 @@ const { btns: keyBtns, c } = await press(lp);
 ok(keyBtns.length === 1 && keyBtns[0] === 'learn:从我的判定起草', 'with the key the catalogue button GAVE WAY to 「从我的判定起草」 (one draft door)', keyBtns);
 ok(chats.length === 1 && JSON.stringify(chats[0].body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' }) && chats[0].body.model === 'google/gemini-3.8-flash' && chats[0].body.response_format.json_schema.strict === true, 'a press = ONE chat request to the fake: the zero-data-retention routing, the strict schema, the Flash tier', chats.map((x) => x.body.provider));
 const sentUser = chats[0] ? chats[0].body.messages[1].content : '';
-ok(/\[block\] 1 line\n1\. Invoices and contracts matter to me\./.test(sentUser) && /#1 (needs|not) · /.test(sentUser) && /Contract URGENT/.test(sentUser) && !/earlier line/.test(chats[0] ? chats[0].raw : 'earlier line') && !/sk-or-v1/.test(chats[0] ? chats[0].raw : ''), 'it carried the block + the examples\' digests ONLY — the older message of the conversation (never in a digest) and the key are not in the body', sentUser.slice(0, 260));
+ok(gateOf(/\[block\] 1 line\n1\. Invoices and contracts matter to me\./.test(sentUser)) && gateOf(/#1 (needs|not) · /.test(sentUser)) && gateOf(/Contract URGENT/.test(sentUser)) && !/earlier line/.test(chats[0] ? chats[0].raw : 'earlier line') && !/sk-or-v1/.test(chats[0] ? chats[0].raw : ''), 'it carried the block + the examples\' digests ONLY — the older message of the conversation (never in a digest) and the key are not in the body', sentUser.slice(0, 260));
 // lane ui-plain-words (channels-policy-15): the sub says what the draft stands on + the price; the routing sentence rides the ONE fold (below)
-ok(c && c.head === 'Gemini 3.8 Flash 读了你的 2 个判定，提议 3 行' && /依据你标的 2 个、推断的 0 个判定/.test(c.sub) && !/OpenRouter/.test(c.sub) && /\$0\.006/.test(c.sub), 'the head says who did what to which thing (the model read 2 of your decisions, proposes 3 lines); the sub: own / inferred, the price', c && [c.head, c.sub]);
-ok(c && c.rows.length === 3 && c.rows[0].op === 'edit' && c.rows[0].tick && c.rows[0].chip === '改写' && c.rows[0].ev.startsWith('依据 2 个判定') && /[✓✗] /.test(c.rows[0].ev) && !/#\d/.test(c.rows[0].ev) && /原来：Invoices and contracts matter to me\./.test(c.rows[0].why)
-  && c.rows[1].op === 'add' && c.rows[1].tick && c.rows[1].chip === '新增' && c.rows[1].ev.startsWith('依据 1 个判定')
-  && c.rows[2].un && !c.rows[2].tick && c.rows[2].none === '无依据' && !c.rows[2].ev, 'the 3 lines: an edit (改写 · 依据 2 个判定, opening to the decisions themselves — no #numbers, what it was), a new line (新增 · 依据 1 个判定), and the UNSUPPORTED one — 「无依据」, NOT ticked', c && c.rows);
-ok(c && c.folds.length === 1 && !c.folds[0].open && c.folds[0].text.includes('One line has no example behind it.') && c.folds[0].text.includes('摘要经 OpenRouter 送到零数据保留端点') && !/[{}]|"lines"|\bkind\b|unsupported|json/i.test(c.text.replace(c.folds[0].text, '')) && c.btns.join() === '放弃,保存', 'card grammar: the model\'s note only under ONE closed 技术细节 fold, no raw JSON anywhere; 放弃 · 保存', c && { folds: c.folds, btns: c.btns });
+ok(gateOf(c) && c.head === 'Gemini 3.8 Flash 读了你的 2 个判定，提议 3 行' && gateOf(/依据你标的 2 个、推断的 0 个判定/.test(c.sub)) && !/OpenRouter/.test(c.sub) && verdictOf(/\$0\.006/.test(c.sub)), 'the head says who did what to which thing (the model read 2 of your decisions, proposes 3 lines); the sub: own / inferred, the price', c && [c.head, c.sub]);
+ok(gateOf(c) && c.rows.length === 3 && c.rows[0].op === 'edit' && gateOf(c.rows[0].tick) && c.rows[0].chip === '改写' && gateOf(c.rows[0].ev.startsWith('依据 2 个判定')) && gateOf(/[✓✗] /.test(c.rows[0].ev)) && !/#\d/.test(c.rows[0].ev) && gateOf(/原来：Invoices and contracts matter to me\./.test(c.rows[0].why))
+  && c.rows[1].op === 'add' && gateOf(c.rows[1].tick) && c.rows[1].chip === '新增' && gateOf(c.rows[1].ev.startsWith('依据 1 个判定'))
+  && gateOf(c.rows[2].un) && !c.rows[2].tick && c.rows[2].none === '无依据' && !c.rows[2].ev, 'the 3 lines: an edit (改写 · 依据 2 个判定, opening to the decisions themselves — no #numbers, what it was), a new line (新增 · 依据 1 个判定), and the UNSUPPORTED one — 「无依据」, NOT ticked', c && c.rows);
+ok(gateOf(c) && c.folds.length === 1 && !c.folds[0].open && gateOf(c.folds[0].text.includes('One line has no example behind it.')) && gateOf(c.folds[0].text.includes('摘要经 OpenRouter 送到零数据保留端点')) && !/[{}]|"lines"|\bkind\b|unsupported|json/i.test(c.text.replace(c.folds[0].text, '')) && c.btns.join() === '放弃,保存', 'card grammar: the model\'s note only under ONE closed 技术细节 fold, no raw JSON anywhere; 放弃 · 保存', c && { folds: c.folds, btns: c.btns });
 ok(await lp.ev('window.__sets.length') === 0, 'nothing is saved by the proposal (0 sets) — the route never writes');
 await lp.shot('learn-desk.png');
 await lp.ev(`(() => { const t = document.querySelector('[data-learn-card] .learn-text'); t.value = 'Invoices, contracts and payments due'; t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -342,7 +342,7 @@ ok(jl.length === 1 && jl[0].outcome === 'ok' && jl[0].zdr === true && jl[0].usd 
 const pp = await page(390, 844, 'b=block&w=100%25');
 await pp.go();
 const { c: pc } = await press(pp);
-ok(pc && pc.rows.length === 3 && pc.wide === 0 && pc.sw <= pc.vw && pc.ticks.every((h) => h >= 20) && pc.act.every((h) => h >= 32), `phone 390: the card fits (nothing past ${pc && pc.vw} px, scrollWidth ${pc && pc.sw}); ticks ≥ 20 px, 放弃 / 保存 ≥ 32 px tall`, pc && { wide: pc.wide, sw: pc.sw, ticks: pc.ticks, act: pc.act });
+ok(gateOf(pc) && pc.rows.length === 3 && pc.wide === 0 && pc.sw <= pc.vw && gateOf(pc.ticks.every((h) => h >= 20)) && verdictOf(pc.act.every((h) => h >= 32)), `phone 390: the card fits (nothing past ${pc && pc.vw} px, scrollWidth ${pc && pc.sw}); ticks ≥ 20 px, 放弃 / 保存 ≥ 32 px tall`, pc && { wide: pc.wide, sw: pc.sw, ticks: pc.ticks, act: pc.act });
 await pp.shot('learn-phone.png');
 await pp.ev(`document.querySelector('[data-learn-card] .learn-discard').click()`);
 await sleep(150);
@@ -358,7 +358,7 @@ const fp = await page(1100, 900, 'b=block&w=720px');
 await fp.go();
 const { c: fc } = await press(fp);
 const ff = await fp.ev(FIT);
-ok(fc && fc.rows.length === 1 && fc.rows[0].op === 'keep' && fc.rows[0].tick && !fc.rows[0].un && fc.rows[0].chip === '原样保留' && fc.rows[0].text === LONG_LINE && !fc.rows[0].none && ff && !ff.shown && ff.save === '保存' && !ff.disabled,
+ok(gateOf(fc) && fc.rows.length === 1 && fc.rows[0].op === 'keep' && gateOf(fc.rows[0].tick) && !fc.rows[0].un && fc.rows[0].chip === '原样保留' && fc.rows[0].text === LONG_LINE && !fc.rows[0].none && gateOf(ff) && !ff.shown && ff.save === '保存' && !ff.disabled,
   `F2: the ${LONG_LINE.length}-character line the model kept (its copy cut at 120 with an elision) ⇒ ONE row, ticked 原样保留, the box holds the WHOLE line — no 无依据, no notice, 「保存」`, { row: fc && fc.rows[0], fit: ff });
 await fp.shot('learn-long-kept.png');
 const setsF2 = await fp.ev('window.__sets.length');
@@ -375,23 +375,23 @@ await op.go();
 const { c: oc } = await press(op);
 const of1 = await op.ev(FIT);
 const nOver = Number((/（(\d+)）/.exec((of1 && of1.text) || '') || [])[1]);
-ok(oc && oc.rows.length === 12 && of1 && of1.shown && of1.state === 'over' && of1.text === `超出 1 500 字符（${nOver}）——去掉几行或缩短后再保存` && nOver > 1500 && of1.disabled && of1.ticks.filter(Boolean).length === 23,
+ok(gateOf(oc) && oc.rows.length === 12 && gateOf(of1) && gateOf(of1.shown) && of1.state === 'over' && of1.text === `超出 1 500 字符（${nOver}）——去掉几行或缩短后再保存` && nOver > 1500 && gateOf(of1.disabled) && of1.ticks.filter(Boolean).length === 23,
   `F3: 11 kept lines + 12 new ⇒ the card counts what 保存 would write (${nOver}) and says 「超出 1 500 字符（${nOver}）——去掉几行或缩短后再保存」; 保存 is disabled`, of1);
 await op.shotBottom('learn-over.png', '[data-learn-card]');
 const setsF3 = await op.ev('window.__sets.length');
 await op.ev(`document.querySelector('[data-learn-card] .learn-save').click()`);
 await sleep(100);
-ok((await op.ev('window.__sets.length')) === setsF3 && (await op.ev(`!!document.querySelector('[data-learn-card]')`)), 'F3: a press on the disabled 保存 writes NOTHING (never a slice) and the card stays');
+ok((await op.ev('window.__sets.length')) === setsF3 && (verdictOf(await op.ev(`!!document.querySelector('[data-learn-card]')`))), 'F3: a press on the disabled 保存 writes NOTHING (never a slice) and the card stays');
 await op.ev(`[...document.querySelectorAll('[data-learn-card] .learn-rows:not(.learn-removed) .learn-tick')].slice(1).forEach((t) => t.click())`);
 const of2 = await op.ev(FIT);
-ok(of2 && !of2.shown && !of2.disabled && of2.save === '保存', 'F3: unticking 11 of the new lines (real clicks ⇒ the change events) brings it under — the notice goes, 保存 is pressable', of2);
+ok(gateOf(of2) && !of2.shown && !of2.disabled && of2.save === '保存', 'F3: unticking 11 of the new lines (real clicks ⇒ the change events) brings it under — the notice goes, 保存 is pressable', of2);
 await op.ev(`document.querySelector('[data-learn-card] .learn-save').click()`);
 await sleep(150);
 const savedF3 = (await op.ev('window.__sets')).slice(setsF3);
-ok(savedF3.length === 1 && OWN11.every((l) => savedF3[0][1].split('\n').includes(l)) && savedF3[0][1].length <= 1500 && !(await op.ev(`!!document.querySelector('[data-learn-card]')`)), `F3: 保存 writes the one new line + ALL 11 kept lines (${savedF3[0] ? savedF3[0][1].length : 0} chars) — nothing cut; the card closes`, savedF3.map((x) => x[1].length));
+ok(savedF3.length === 1 && gateOf(OWN11.every((l) => savedF3[0][1].split('\n').includes(l))) && savedF3[0][1].length <= 1500 && !(await op.ev(`!!document.querySelector('[data-learn-card]')`)), `F3: 保存 writes the one new line + ALL 11 kept lines (${savedF3[0] ? savedF3[0][1].length : 0} chars) — nothing cut; the card closes`, savedF3.map((x) => x[1].length));
 const setsDoor = await op.ev('window.__sets.length');
 const door = await op.ev(`(async () => { const ta = document.querySelector('.settings-multiline-text'); ta.value = 'z'.repeat(1600); ta.dispatchEvent(new Event('change')); await new Promise((r) => setTimeout(r, 100)); return { sets: window.__sets.length, toasts: [...document.querySelectorAll('.global-toast-body')].map((x) => x.textContent) }; })()`);
-ok(door.sets === setsDoor && door.toasts.some((x) => x === '没有保存——1600 个字符，最多 1500'), 'the row\'s write door refuses a 1 600-character value BY NAME (「没有保存——1600 个字符，最多 1500」) and writes nothing — the old door sliced it silently', door);
+ok(door.sets === setsDoor && verdictOf(door.toasts.some((x) => x === '没有保存——1600 个字符，最多 1500')), 'the row\'s write door refuses a 1 600-character value BY NAME (「没有保存——1600 个字符，最多 1500」) and writes nothing — the old door sliced it silently', door);
 op.close();
 
 console.log('⑨ lane rule-learning-fix-r2 (verify r2 F4 / F5 / F6 / G7): a cut line unticked with its own fold, one header per kind, a block stored over 1 500 said');
@@ -412,20 +412,20 @@ const kp = await page(1100, 1100, 'b=block&w=720px');
 await kp.go();
 await press(kp);
 const k1 = await kp.ev(R9);
-ok(k1 && k1.rows.length === 2 && k1.rows[0].op === 'keep' && k1.rows[0].tick && k1.rows[0].text === LONG_LINE
-  && k1.rows[1].op === 'edit' && k1.rows[1].long && !k1.rows[1].tick && k1.rows[1].chip === '太长——已截短' && CUT_EDIT.startsWith(k1.rows[1].text) && k1.rows[1].text.length <= 120 && CUT_EDIT[k1.rows[1].text.length] === ' ' && !/omitted|…\[/.test(k1.rows[1].text)
+ok(gateOf(k1) && k1.rows.length === 2 && k1.rows[0].op === 'keep' && gateOf(k1.rows[0].tick) && k1.rows[0].text === LONG_LINE
+  && k1.rows[1].op === 'edit' && gateOf(k1.rows[1].long) && !k1.rows[1].tick && k1.rows[1].chip === '太长——已截短' && gateOf(CUT_EDIT.startsWith(k1.rows[1].text)) && k1.rows[1].text.length <= 120 && CUT_EDIT[k1.rows[1].text.length] === ' ' && !/omitted|…\[/.test(k1.rows[1].text)
   && k1.rows[1].folds.length === 1 && !k1.rows[1].folds[0].open && k1.rows[1].folds[0].text === CUT_EDIT,
   `F4: the ${CUT_EDIT.length}-character edit ⇒ 「太长——已截短」, NOT ticked, its box cut at a word boundary (${k1 && k1.rows[1] ? k1.rows[1].text.length : 0} characters, no marker), the model's whole text under the row's own closed 技术细节 fold`, k1 && k1.rows);
-ok(k1 && same(k1.heads, [['提议删掉的行', 'remove'], ['保留的原文', 'kept']]) && same(k1.lists.map(([l, rs]) => [l, rs.map((r) => [r.op, r.tick])]), [['remove', [['remove', false]]], ['kept', [['shortened', true]]]]) && k1.lists[1][1][0].why === '上面的改写太长、已截短——这一行保留',
+ok(gateOf(k1) && gateOf(same(k1.heads, [['提议删掉的行', 'remove'], ['保留的原文', 'kept']])) && gateOf(same(k1.lists.map(([l, rs]) => [l, rs.map((r) => [r.op, r.tick])]), [['remove', [['remove', false]]], ['kept', [['shortened', true]]]])) && k1.lists[1][1][0].why === '上面的改写太长、已截短——这一行保留',
   'F5: ONE header per kind — 「提议删掉的行」 over the named removal only (unticked), 「保留的原文」 over the line the cut edit rewords (ticked, 「上面的改写太长、已截短——这一行保留」)', k1 && { heads: k1.heads, lists: k1.lists });
 await kp.shot('learn-cut-headers.png');
 const CUT_TICK = `document.querySelectorAll('[data-learn-card] .learn-rows:not(.learn-removed) .learn-tick')[1].click()`;
 await kp.ev(CUT_TICK);
 const k2 = await kp.ev(R9);
-ok(k2 && k2.rows[1].tick && !k2.lists[1][1][0].tick && k2.lists[1][1][0].why === '已由上面的改写替换——要留原文就取消上面的勾', 'G7: ticking the cut rewording (a real click) unticks the line it rewords, and that row says 「已由上面的改写替换——要留原文就取消上面的勾」', k2 && [k2.rows[1].tick, k2.lists[1][1][0]]);
+ok(gateOf(k2) && gateOf(k2.rows[1].tick) && !k2.lists[1][1][0].tick && k2.lists[1][1][0].why === '已由上面的改写替换——要留原文就取消上面的勾', 'G7: ticking the cut rewording (a real click) unticks the line it rewords, and that row says 「已由上面的改写替换——要留原文就取消上面的勾」', k2 && [k2.rows[1].tick, k2.lists[1][1][0]]);
 await kp.ev(CUT_TICK);
 const k2b = await kp.ev(R9);
-ok(k2b && !k2b.rows[1].tick && k2b.lists[1][1][0].tick && k2b.lists[1][1][0].why === '上面的改写太长、已截短——这一行保留', 'G7: unticking it again gives the line back, with its own words', k2b && k2b.lists[1][1][0]);
+ok(gateOf(k2b) && !k2b.rows[1].tick && gateOf(k2b.lists[1][1][0].tick) && k2b.lists[1][1][0].why === '上面的改写太长、已截短——这一行保留', 'G7: unticking it again gives the line back, with its own words', k2b && k2b.lists[1][1][0]);
 await kp.ev(`document.querySelector('[data-learn-card] .learn-rows:not(.learn-removed) details[data-fold="tech"]').open = true`);
 await kp.shot('learn-cut-fold.png');
 const sets9 = await kp.ev('window.__sets.length');
@@ -438,7 +438,7 @@ const kq = await page(390, 1400, 'b=block&w=100%25');
 await kq.go();
 await press(kq);
 const k3 = await kq.ev(R9);
-ok(k3 && k3.wide === 0 && k3.sw <= k3.vw && k3.rows[1] && k3.rows[1].chip === '太长——已截短' && k3.heads.length === 2, `phone 390: the cut row with its chip and fold and the two headers fit (nothing past ${k3 && k3.vw} px)`, k3 && { wide: k3.wide, sw: k3.sw });
+ok(gateOf(k3) && k3.wide === 0 && k3.sw <= k3.vw && gateOf(k3.rows[1]) && k3.rows[1].chip === '太长——已截短' && k3.heads.length === 2, `phone 390: the cut row with its chip and fold and the two headers fit (nothing past ${k3 && k3.vw} px)`, k3 && { wide: k3.wide, sw: k3.sw });
 await kq.shot('learn-cut-phone.png');
 kq.close();
 const words9 = (n, seed) => { let s = ''; let i = 0; while (s.length < n) s += `${seed}${i++} `; return s.slice(0, n).replace(/\s+$/, (m) => 'x'.repeat(m.length)); };
@@ -451,7 +451,7 @@ const nChat = chats.length;
 await press(sq);
 const k4 = await sq.ev(R9);
 const sent9 = chats[nChat] ? chats[nChat].body.messages[1].content : '';
-ok(k4 && k4.stored && k4.stored.shown && k4.stored.text === `原文已超过 1 500 字符（${STORED9.length}）——保存前要截掉 ${STORED9.length - 1500} 字` && k4.fit.shown && k4.save.disabled && k4.lists.length === 1 && k4.lists[0][1].length === 13 && k4.lists[0][1].every((r) => r.tick) && k4.lists[0][1].map((r) => r.text).join('\n') === STORED9.split('\n').slice(1).join('\n') && /1\. stored rule 1:/.test(sent9) && !/stored rule 13:/.test(sent9),
+ok(gateOf(k4) && gateOf(k4.stored) && gateOf(k4.stored.shown) && k4.stored.text === `原文已超过 1 500 字符（${STORED9.length}）——保存前要截掉 ${STORED9.length - 1500} 字` && gateOf(k4.fit.shown) && gateOf(k4.save.disabled) && k4.lists.length === 1 && k4.lists[0][1].length === 13 && gateOf(k4.lists[0][1].every((r) => r.tick)) && k4.lists[0][1].map((r) => r.text).join('\n') === STORED9.split('\n').slice(1).join('\n') && gateOf(/1\. stored rule 1:/.test(sent9)) && !/stored rule 13:/.test(sent9),
   `F6: a block stored at ${STORED9.length} characters ⇒ 「${k4 && k4.stored ? k4.stored.text : '-'}」 at the card's top; all 13 other lines are rows (the tail kept, ticked), the count is over and 保存 waits; the model was sent only the judge's read`, k4 && { stored: k4.stored, fit: k4.fit, kept: k4.lists[0] && k4.lists[0][1].length });
 await sq.shot('learn-stored-over.png');
 await sq.ev(`[...document.querySelectorAll('[data-learn-card] .learn-rows.learn-removed .learn-tick')].slice(-3).forEach((t) => t.click())`);
@@ -460,7 +460,7 @@ const sets10 = await sq.ev('window.__sets.length');
 await sq.ev(`document.querySelector('[data-learn-card] .learn-save').click()`);
 await sleep(150);
 const saved10 = (await sq.ev('window.__sets')).slice(sets10);
-ok(k5 && !k5.fit.shown && !k5.save.disabled && saved10.length === 1 && saved10[0][1].length <= 1500 && saved10[0][1].split('\n').length === 11 && saved10[0][1].split('\n').every((l) => STORED9.split('\n').includes(l)), 'F6: unticking 3 stored lines (real clicks) brings it under 1 500 — 保存 writes 11 whole stored lines; which ones left was the person\'s choice', saved10.map((x) => x[1].length));
+ok(gateOf(k5) && !k5.fit.shown && !k5.save.disabled && saved10.length === 1 && saved10[0][1].length <= 1500 && saved10[0][1].split('\n').length === 11 && verdictOf(saved10[0][1].split('\n').every((l) => STORED9.split('\n').includes(l))), 'F6: unticking 3 stored lines (real clicks) brings it under 1 500 — 保存 writes 11 whole stored lines; which ones left was the person\'s choice', saved10.map((x) => x[1].length));
 sq.close();
 
 console.log('⑩ lane learn-card-untick (verify r3 R3-F1): unticking a PRE-TICKED rewording keeps the person\'s line — both rows say so (real clicks)');
@@ -475,11 +475,11 @@ const up = await page(1100, 900, 'b=block&w=720px');
 await up.go();
 await press(up);
 const u1 = await up.ev(R10);
-ok(u1 && u1.rw.tick && u1.rw.state === '已勾选：这一行将被改写' && u1.rw.shown && u1.line && u1.line.op === 'replaced' && !u1.line.tick && u1.line.text === 'Invoices due this week matter to me' && u1.line.why === '已由上面的改写替换——要留原文就取消上面的勾' && u1.line.list === 'kept',
+ok(gateOf(u1) && gateOf(u1.rw.tick) && u1.rw.state === '已勾选：这一行将被改写' && gateOf(u1.rw.shown) && gateOf(u1.line) && u1.line.op === 'replaced' && !u1.line.tick && u1.line.text === 'Invoices due this week matter to me' && u1.line.why === '已由上面的改写替换——要留原文就取消上面的勾' && u1.line.list === 'kept',
   'R3-F1: a supported rewording comes pre-ticked, saying 「已勾选：这一行将被改写」; the line it rewords has its own row under 保留的原文 — unticked, 「已由上面的改写替换——要留原文就取消上面的勾」', u1);
 await up.ev(`document.querySelector('[data-learn-card] .learn-rows:not(.learn-removed) .learn-tick').click()`);
 const u2 = await up.ev(R10);
-ok(u2 && !u2.rw.tick && u2.rw.state === '未勾选：原文不会被改写' && u2.line && u2.line.tick && u2.line.why === '上面的改写未勾选——这一行保留' && u2.wide === 0,
+ok(gateOf(u2) && !u2.rw.tick && u2.rw.state === '未勾选：原文不会被改写' && gateOf(u2.line) && gateOf(u2.line.tick) && u2.line.why === '上面的改写未勾选——这一行保留' && u2.wide === 0,
   'R3-F1: a real click unticks the rewording ⇒ the person\'s line is ticked again, both rows saying so (「未勾选：原文不会被改写」 / 「上面的改写未勾选——这一行保留」); nothing past the card', u2);
 await up.shotBottom('learn-untick.png', '[data-learn-card]');
 const sets11 = await up.ev('window.__sets.length');
@@ -490,4 +490,4 @@ ok(saved11.length === 1 && saved11[0][1] === 'Invoices due this week matter to m
 up.close();
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

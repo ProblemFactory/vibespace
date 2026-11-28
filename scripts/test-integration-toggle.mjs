@@ -30,7 +30,7 @@ const PORT = await freePort(); // per-process (scripts/scratch.mjs) — fixed po
 const wt = scratch('integ-toggle');
 const home = scratch('integ-home');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const api = (p, opts) => fetch(`http://127.0.0.1:${PORT}${p}`, opts);
 
@@ -132,8 +132,8 @@ const dtachArgv = (sessionId) => {
 // ═══ Phase 1: boot ON (default) ═════════════════════════════════════════════
 console.log('Phase 1: boot with integration ON (default)');
 await bootServer();
-check('claude settings.json has the hook registered', await landed(() => hookIn(claudeCfg)));
-check('codex hooks.json created + hook registered', await landed(() => hookIn(codexCfg)));
+check('claude settings.json has the hook registered', verdictOf(await landed(() => hookIn(claudeCfg))));
+check('codex hooks.json created + hook registered', verdictOf(await landed(() => hookIn(codexCfg))));
 const hs1 = await (await api('/api/agent-hooks')).json();
 check('/api/agent-hooks integrationOff=false', hs1.integrationOff === false);
 
@@ -141,9 +141,9 @@ await openWs();
 const sid1 = await createShellSession();
 await sleep(800);
 const argv1 = dtachArgv(sid1);
-check('ON-spawn env has VIBESPACE_API', !!argv1 && argv1.includes('VIBESPACE_API='));
-check('ON-spawn env names THIS hub, never the outer one in its env', !!argv1 && argv1.includes(`VIBESPACE_API=http://127.0.0.1:${PORT}`) && !argv1.includes(OUTER_API), (argv1 || 'no argv').slice(0, 400));
-check('ON-spawn env has the tools PATH prefix', !!argv1 && argv1.includes(`PATH=${path.join(wt, 'data', 'bin')}`));
+check('ON-spawn env has VIBESPACE_API', !!argv1 && verdictOf(argv1.includes('VIBESPACE_API=')));
+check('ON-spawn env names THIS hub, never the outer one in its env', !!argv1 && gateOf(argv1.includes(`VIBESPACE_API=http://127.0.0.1:${PORT}`)) && !argv1.includes(OUTER_API), (argv1 || 'no argv').slice(0, 400));
+check('ON-spawn env has the tools PATH prefix', !!argv1 && verdictOf(argv1.includes(`PATH=${path.join(wt, 'data', 'bin')}`)));
 const tok1 = argv1 && (argv1.match(/VIBESPACE_SESSION_TOKEN=(vsst_[\w-]+)/) || [])[1];
 check('ON-spawn env has the session token', !!tok1);
 const auth = { headers: { Authorization: `Bearer ${tok1}` } };
@@ -161,8 +161,8 @@ check('prompt-context delivers content while ON (the delivery this token gets)',
 // ═══ Phase 2: toggle OFF live ═══════════════════════════════════════════════
 console.log('Phase 2: PATCH agents.vibespaceIntegration=false');
 await api('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'agents.vibespaceIntegration': false }) });
-check('claude hook entries stripped live', await landed(() => !hookIn(claudeCfg)));
-check('codex hook entries stripped live', await landed(() => !hookIn(codexCfg)));
+check('claude hook entries stripped live', verdictOf(await landed(() => !hookIn(claudeCfg))));
+check('codex hook entries stripped live', verdictOf(await landed(() => !hookIn(codexCfg))));
 const hs2 = await (await api('/api/agent-hooks')).json();
 check('/api/agent-hooks integrationOff=true', hs2.integrationOff === true);
 const inst = await api('/api/agent-hooks/install', { method: 'POST' });
@@ -181,13 +181,13 @@ await sleep(800);
 const argv2 = dtachArgv(sid2);
 check('OFF-spawn env has NO VIBESPACE_API', !!argv2 && !argv2.includes('VIBESPACE_API='), (argv2 || 'no argv').slice(0, 400));
 check('OFF-spawn env has NO tools PATH prefix', !!argv2 && !argv2.includes(`PATH=${path.join(wt, 'data', 'bin')}`));
-check('OFF-spawn env KEEPS the session token (Ctrl+G auth)', !!argv2 && argv2.includes('VIBESPACE_SESSION_TOKEN=vsst_'));
+check('OFF-spawn env KEEPS the session token (Ctrl+G auth)', !!argv2 && verdictOf(argv2.includes('VIBESPACE_SESSION_TOKEN=vsst_')));
 
 // ═══ Phase 3: toggle back ON ════════════════════════════════════════════════
 console.log('Phase 3: PATCH back true');
 await api('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'agents.vibespaceIntegration': null }) }); // null deletes → default ON
-check('claude hook re-registered on re-enable', await landed(() => hookIn(claudeCfg)));
-check('codex hook re-registered on re-enable', await landed(() => hookIn(codexCfg)));
+check('claude hook re-registered on re-enable', verdictOf(await landed(() => hookIn(claudeCfg))));
+check('codex hook re-registered on re-enable', verdictOf(await landed(() => hookIn(codexCfg))));
 
 // ═══ Phase 4: boot convergence (flipped OFF while server down) ══════════════
 console.log('Phase 4: boot with the switch already OFF');
@@ -198,11 +198,11 @@ const settingsFile = path.join(wt, 'data', 'settings.json');
 const cur = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
 cur['agents.vibespaceIntegration'] = false;
 fs.writeFileSync(settingsFile, JSON.stringify(cur));
-check('precondition: hook present before boot', hookIn(claudeCfg));
+check('precondition: hook present before boot', verdictOf(hookIn(claudeCfg)));
 await bootServer();
-check('boot strips hook entries when switch is OFF', await landed(() => !hookIn(claudeCfg)));
-check('boot strips codex entries too', await landed(() => !hookIn(codexCfg)));
+check('boot strips hook entries when switch is OFF', verdictOf(await landed(() => !hookIn(claudeCfg))));
+check('boot strips codex entries too', verdictOf(await landed(() => !hookIn(codexCfg))));
 
 srv.kill('SIGKILL');
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

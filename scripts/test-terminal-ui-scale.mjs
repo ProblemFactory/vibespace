@@ -14,28 +14,28 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const term = read('src/lib/terminal.js'), utils = read('src/lib/utils.js'), app = read('src/lib/app.js'), panel = read('src/lib/appearance-panel.js'), vv = read('src/lib/vnc-view.js'), rec = read('src/lib/incident-recorder.js');
 
 console.log('§1 ONE counter-zoom rule, ONE definition');
-ok('utils.js defines COUNTER_ZOOM verbatim (var-reactive, net zoom 1)', /export const COUNTER_ZOOM = 'calc\(1 \/ var\(--ui-scale, 1\)\)';/.test(utils));
-ok('vnc-view.js re-exports it instead of spelling the calc() again', /export \{ COUNTER_ZOOM \};/.test(vv) && !/const COUNTER_ZOOM = /.test(vv));
+ok('utils.js defines COUNTER_ZOOM verbatim (var-reactive, net zoom 1)', verdictOf(/export const COUNTER_ZOOM = 'calc\(1 \/ var\(--ui-scale, 1\)\)';/.test(utils)));
+ok('vnc-view.js re-exports it instead of spelling the calc() again', gateOf(/export \{ COUNTER_ZOOM \};/.test(vv)) && !/const COUNTER_ZOOM = /.test(vv));
 ok('the calc() literal appears in exactly one src/lib file', fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js') && /calc\(1 \/ var\(--ui-scale/.test(read('src/lib/' + f))).join() === 'utils.js');
 
 console.log('§2 the terminal container is counter-zoomed and every font-size writer scales by uiScale()');
-ok('terminal.js imports uiScale + COUNTER_ZOOM from utils', /import \{[^}]*\buiScale\b[^}]*\bCOUNTER_ZOOM\b[^}]*\} from '\.\/utils\.js'/.test(term));
-ok('the container gets style.zoom = COUNTER_ZOOM before xterm opens in it', /container\.style\.zoom = COUNTER_ZOOM;[\s\S]{0,4000}this\.terminal\.open\(container\)/.test(term) && term.indexOf('container.style.zoom = COUNTER_ZOOM') < term.indexOf('this.terminal.open(container)'));
-ok('_xtermPx = visual px × uiScale() (2-decimal, 14 when unset)', /_xtermPx\(visualPx\) \{ const s = uiScale\(\) \|\| 1; return Math\.round\(\(visualPx \|\| 14\) \* s \* 100\) \/ 100; \}/.test(term));
+ok('terminal.js imports uiScale + COUNTER_ZOOM from utils', verdictOf(/import \{[^}]*\buiScale\b[^}]*\bCOUNTER_ZOOM\b[^}]*\} from '\.\/utils\.js'/.test(term)));
+ok('the container gets style.zoom = COUNTER_ZOOM before xterm opens in it', gateOf(/container\.style\.zoom = COUNTER_ZOOM;[\s\S]{0,4000}this\.terminal\.open\(container\)/.test(term)) && term.indexOf('container.style.zoom = COUNTER_ZOOM') < term.indexOf('this.terminal.open(container)'));
+ok('_xtermPx = visual px × uiScale() (2-decimal, 14 when unset)', verdictOf(/_xtermPx\(visualPx\) \{ const s = uiScale\(\) \|\| 1; return Math\.round\(\(visualPx \|\| 14\) \* s \* 100\) \/ 100; \}/.test(term)));
 const writers = [...term.matchAll(/(?:^\s*fontSize:|options\.fontSize =)\s*([^,\n]+)/gm)].map((m) => m[1].trim()); // the Terminal option (line-leading) + every options.fontSize assignment; the overrides default `fontSize: null` is mid-line
-ok(`every fontSize writer in terminal.js goes through _xtermPx (${writers.length} writers)`, writers.length >= 3 && writers.every((w) => /^this\._xtermPx\(/.test(w)), writers);
-ok('rescale() re-derives from the override or the global size, clears the atlas and fits', /rescale\(\) \{\n\s*this\.terminal\.options\.fontSize = this\._xtermPx\(this\.overrides\.fontSize \|\| this\._getGlobalFontSize\(\)\);\n\s*try \{ this\.terminal\.clearTextureAtlas\(\); \} catch \{\}\n\s*this\.fit\(\);/.test(term));
-ok('app.js: a UI-scale change calls rescale() on every TerminalSession (a bare fit() would keep the old glyph size)', /_refitAllTerminals\(\) \{[\s\S]{0,600}session\.rescale\(\)/.test(app));
+ok(`every fontSize writer in terminal.js goes through _xtermPx (${writers.length} writers)`, writers.length >= 3 && verdictOf(writers.every((w) => /^this\._xtermPx\(/.test(w))), writers);
+ok('rescale() re-derives from the override or the global size, clears the atlas and fits', verdictOf(/rescale\(\) \{\n\s*this\.terminal\.options\.fontSize = this\._xtermPx\(this\.overrides\.fontSize \|\| this\._getGlobalFontSize\(\)\);\n\s*try \{ this\.terminal\.clearTextureAtlas\(\); \} catch \{\}\n\s*this\.fit\(\);/.test(term)));
+ok('app.js: a UI-scale change calls rescale() on every TerminalSession (a bare fit() would keep the old glyph size)', verdictOf(/_refitAllTerminals\(\) \{[\s\S]{0,600}session\.rescale\(\)/.test(app)));
 // 2.369.124: the global font-size row moved VERBATIM from app.js into appearance-panel.js (the Appearance ▸ head's panel) — the invariant follows the row
-ok('appearance-panel.js: the global font-size row applies through applyOverride (no raw options.fontSize write in app.js or the panel)', /session\.applyOverride\('fontSize', null\)/.test(panel) && !/session\.terminal\.options\.fontSize =/.test(app) && !/session\.terminal\.options\.fontSize =/.test(panel));
+ok('appearance-panel.js: the global font-size row applies through applyOverride (no raw options.fontSize write in app.js or the panel)', gateOf(/session\.applyOverride\('fontSize', null\)/.test(panel)) && !/session\.terminal\.options\.fontSize =/.test(app) && !/session\.terminal\.options\.fontSize =/.test(panel));
 
 console.log('§3 forensics: the incident snapshot now says whether a UI scale was on');
-ok('incident-recorder snapshot carries uiScale + dpr + bodyZoom (the report that started this had no way to tell)', /out\.uiScale = uiScale\(\); out\.dpr = window\.devicePixelRatio; out\.bodyZoom = document\.body\.style\.zoom/.test(rec) && /\buiScale\b[^\n]*from '\.\/utils\.js'/.test(rec));
+ok('incident-recorder snapshot carries uiScale + dpr + bodyZoom (the report that started this had no way to tell)', gateOf(/out\.uiScale = uiScale\(\); out\.dpr = window\.devicePixelRatio; out\.bodyZoom = document\.body\.style\.zoom/.test(rec)) && verdictOf(/\buiScale\b[^\n]*from '\.\/utils\.js'/.test(rec)));
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

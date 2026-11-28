@@ -34,7 +34,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const T0 = Date.now();
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -118,22 +118,22 @@ console.log('--dial-check: the exit code by class (the REAL bundle)');
 {
   const castsBefore = casts.length;
   const r0 = await dialCheck(DIAL, pair.dialToken);
-  ok(r0.code === 0 && /^dial-check ok — 127\.0\.0\.1:\d+ is a VibeSpace [\d.]+ and accepts device "icdev"/.test(r0.out), 'exit 0 — the live server accepts the device', r0);
+  ok(r0.code === 0 && verdictOf(/^dial-check ok — 127\.0\.0\.1:\d+ is a VibeSpace [\d.]+ and accepts device "icdev"/.test(r0.out)), 'exit 0 — the live server accepts the device', r0);
   ok(!DP.agentdDials.has('icdev') && casts.length === castsBefore && !H.list().find((h) => h.deviceId === 'icdev').online && H.list().find((h) => h.deviceId === 'icdev').dial.lastProbeAt > 0, 'the probe registered NOTHING — no dial entry, no hosts-updated, the row offline — and stamped lastProbeAt (attack 22)');
   const r10 = await dialCheck('ws://nonexistent.invalid:3456/api/device-dial?device=icdev', pair.dialToken);
-  ok(r10.code === 10 && /dial-check failed — dns: .*ENOTFOUND nonexistent\.invalid/.test(r10.out) && /this device cannot resolve nonexistent\.invalid\. In the pairing dialog pick another address/.test(r10.out), 'exit 10 — dns, with the remedy', r10);
+  ok(r10.code === 10 && gateOf(/dial-check failed — dns: .*ENOTFOUND nonexistent\.invalid/.test(r10.out)) && verdictOf(/this device cannot resolve nonexistent\.invalid\. In the pairing dialog pick another address/.test(r10.out)), 'exit 10 — dns, with the remedy', r10);
   const r11 = await dialCheck(`wss://127.0.0.1:${PORT}/api/device-dial?device=icdev`, pair.dialToken);
-  ok(r11.code === 11 && /dial-check failed — tls:/.test(r11.out) && /does not speak TLS/.test(r11.out), 'exit 11 — wss:// to the plain port (the owner\'s typo class)', r11);
+  ok(r11.code === 11 && gateOf(/dial-check failed — tls:/.test(r11.out)) && verdictOf(/does not speak TLS/.test(r11.out)), 'exit 11 — wss:// to the plain port (the owner\'s typo class)', r11);
   const r12 = await dialCheck(`ws://127.0.0.1:${closedPort}/api/device-dial?device=icdev`, pair.dialToken);
-  ok(r12.code === 12 && /dial-check failed — refused-connect:/.test(r12.out) && /nothing answers at 127\.0\.0\.1:\d+ from this network/.test(r12.out), 'exit 12 — a closed port', r12);
+  ok(r12.code === 12 && gateOf(/dial-check failed — refused-connect:/.test(r12.out)) && verdictOf(/nothing answers at 127\.0\.0\.1:\d+ from this network/.test(r12.out)), 'exit 12 — a closed port', r12);
   const r13 = await dialCheck(`ws://127.0.0.1:${plain.address().port}/api/device-dial?device=icdev`, pair.dialToken);
-  ok(r13.code === 13 && /dial-check failed — http-404:/.test(r13.out) && /not as a VibeSpace dial endpoint \(status 404\)/.test(r13.out), 'exit 13 — an http server that is not VibeSpace', r13);
+  ok(r13.code === 13 && gateOf(/dial-check failed — http-404:/.test(r13.out)) && verdictOf(/not as a VibeSpace dial endpoint \(status 404\)/.test(r13.out)), 'exit 13 — an http server that is not VibeSpace', r13);
   const r14 = await dialCheck(DIAL, 'vsdt_' + 'e'.repeat(36));
-  ok(r14.code === 14 && /dial-check failed — refused-token-mismatch: the dial token does not match the pairing on record for "icdev"/.test(r14.out) && /generate a new command in the pairing dialog/.test(r14.out), 'exit 14 — a wrong token (the server\'s sentence)', r14);
+  ok(r14.code === 14 && gateOf(/dial-check failed — refused-token-mismatch: the dial token does not match the pairing on record for "icdev"/.test(r14.out)) && verdictOf(/generate a new command in the pairing dialog/.test(r14.out)), 'exit 14 — a wrong token (the server\'s sentence)', r14);
   const r14b = await dialCheck(`ws://127.0.0.1:${PORT}/api/device-dial?device=nosuch`, pair.dialToken);
   // verify-r2 (the dial endpoint): an unknown name hears the SAME answer as a wrong token — `no-pairing` on the wire told
   // anyone reaching the port which device names are paired here; the sentence covers both roads (a new command, or pair again)
-  ok(r14b.code === 14 && /refused-token-mismatch: the dial token does not match the pairing on record for "nosuch"/.test(r14b.out) && /or pair again if it is no longer listed/.test(r14b.out) && !/no-pairing/.test(r14b.out), 'exit 14 — no pairing on record, answered exactly as a wrong token (no enumeration)', r14b);
+  ok(r14b.code === 14 && gateOf(/refused-token-mismatch: the dial token does not match the pairing on record for "nosuch"/.test(r14b.out)) && gateOf(/or pair again if it is no longer listed/.test(r14b.out)) && !/no-pairing/.test(r14b.out), 'exit 14 — no pairing on record, answered exactly as a wrong token (no enumeration)', r14b);
   ok(!fs.existsSync(path.join(checkRoot, 'state', 'agentd.lock')) && !fs.existsSync(path.join(checkRoot, 'state', 'dial.json')) && !fs.existsSync(path.join(checkRoot, 'state', 'dial-status.json')), '--dial-check wrote nothing under state/ (no lock, no dial.json, no status)');
 }
 
@@ -172,14 +172,14 @@ console.log('the installer checks BEFORE it writes');
   preparePty();
   const bad = await install(['--dial', DIAL, '--dial-token', 'vsdt_' + 'e'.repeat(36), '--host-token', HOST_TOKEN]);
   ok(bad.code === 14, 'a wrong token ⇒ the installer exits 14', bad.out.slice(-800));
-  ok(/✗ nothing was installed — the device cannot dial 127\.0\.0\.1:\d+: dial-check failed — refused-token-mismatch/.test(bad.out), '…printing "nothing was installed — the device cannot dial <host:port>: <the check\'s line>"', bad.out.slice(-600));
+  ok(verdictOf(/✗ nothing was installed — the device cannot dial 127\.0\.0\.1:\d+: dial-check failed — refused-token-mismatch/.test(bad.out)), '…printing "nothing was installed — the device cannot dial <host:port>: <the check\'s line>"', bad.out.slice(-600));
   ok(!fs.existsSync(path.join(ROOT, 'state', 'dial.json')) && !fs.existsSync(path.join(ROOT, 'state', 'token')), 'FILE CENSUS: no state/dial.json, no state/token');
   ok(unitFiles().length === 0 && !fs.existsSync(calls), 'FILE CENSUS: no systemd unit, systemctl never called (the stub would have recorded it)');
   ok(!lockPid(), 'no daemon started');
   const scheme = await install(['--dial', `http://127.0.0.1:${PORT}/api/device-dial?device=icdev`, '--dial-token', pair.dialToken, '--host-token', HOST_TOKEN]);
-  ok(scheme.code === 2 && /✗ the dial address must start with ws:\/\/ or wss:\/\/ — got: http:/.test(scheme.out) && !/fetching agentd bundle/.test(scheme.out), 'a non-ws scheme ⇒ exit 2 before anything is fetched', scheme.out.slice(-400));
+  ok(scheme.code === 2 && gateOf(/✗ the dial address must start with ws:\/\/ or wss:\/\/ — got: http:/.test(scheme.out)) && !/fetching agentd bundle/.test(scheme.out), 'a non-ws scheme ⇒ exit 2 before anything is fetched', scheme.out.slice(-400));
   const typo = await install(['--dial', 'ws://nonexistent.invalid:3456/api/device-dial?device=icdev', '--dial-token', pair.dialToken, '--host-token', HOST_TOKEN]);
-  ok(typo.code === 10 && /cannot resolve nonexistent\.invalid/.test(typo.out) && !fs.existsSync(path.join(ROOT, 'state', 'dial.json')), 'a typo host ⇒ exit 10, nothing written (the owner\'s incident)', typo.out.slice(-400));
+  ok(typo.code === 10 && gateOf(/cannot resolve nonexistent\.invalid/.test(typo.out)) && !fs.existsSync(path.join(ROOT, 'state', 'dial.json')), 'a typo host ⇒ exit 10, nothing written (the owner\'s incident)', typo.out.slice(-400));
 }
 console.log('--no-check writes them; the right token installs and dials in');
 {
@@ -188,9 +188,9 @@ console.log('--no-check writes them; the right token installs and dials in');
   try { fs.unlinkSync(argvLog); } catch { }
   const nc = await install(['--dial', DIAL, '--dial-token', 'vsdt_' + 'e'.repeat(36), '--host-token', HOST_TOKEN, '--no-check', '--node', SHIM]);
   const ncArgv = (() => { try { return fs.readFileSync(argvLog, 'utf8'); } catch { return ''; } })();
-  ok(ncArgv.includes('-e') && !/vs[dh]t_/.test(ncArgv), 'verify-r3 B-inst: the flags shape still installs (commands users already hold) and no node the installer starts carries a token in its argv (the dial.json writer reads it from its environment)', ncArgv.split('\n').map((l) => l.replace(/-e \S.{0,60}/, '-e …').slice(0, 200)));
+  ok(gateOf(ncArgv.includes('-e')) && !/vs[dh]t_/.test(ncArgv), 'verify-r3 B-inst: the flags shape still installs (commands users already hold) and no node the installer starts carries a token in its argv (the dial.json writer reads it from its environment)', ncArgv.split('\n').map((l) => l.replace(/-e \S.{0,60}/, '-e …').slice(0, 200)));
   if (lockPid()) pids.push(lockPid());
-  ok(nc.code === 0 && fs.existsSync(path.join(ROOT, 'state', 'dial.json')) && fs.existsSync(path.join(ROOT, 'state', 'token')) && !/checking that this device can dial/.test(nc.out), 'with --no-check the installer skips the check and writes dial.json + the token (the daemon starts)', nc.out.slice(-600));
+  ok(nc.code === 0 && gateOf(fs.existsSync(path.join(ROOT, 'state', 'dial.json'))) && gateOf(fs.existsSync(path.join(ROOT, 'state', 'token'))) && !/checking that this device can dial/.test(nc.out), 'with --no-check the installer skips the check and writes dial.json + the token (the daemon starts)', nc.out.slice(-600));
   const refused = await waitFor(() => { const j = JSON.parse(fs.readFileSync(path.join(ROOT, 'state', 'dial-status.json'), 'utf8')); return j.last && j.last.code === 'refused-token-mismatch' ? j : null; }, 20000);
   ok(!!refused, '…and the started daemon records WHY it is refused (state/dial-status.json: refused-token-mismatch)');
   try { process.kill(lockPid(), 'SIGTERM'); } catch { }
@@ -201,13 +201,13 @@ console.log('--no-check writes them; the right token installs and dials in');
   if (lockPid()) pids.push(lockPid());
   await sleep(300); sampling = false; sampleArgv();
   const goodArgv = (() => { try { return fs.readFileSync(argvLog, 'utf8'); } catch { return ''; } })();
-  ok(/--dial-check/.test(goodArgv) && !goodArgv.includes(pair.dialToken) && !goodArgv.includes(HOST_TOKEN), 'verify-r3 B-inst: the pasted command\'s NEW shape (tokens in the environment): the dial check, the dial.json writer and the daemon carry no token in their argv', goodArgv.split('\n').map((l) => l.slice(0, 160)));
+  ok(gateOf(/--dial-check/.test(goodArgv)) && !goodArgv.includes(pair.dialToken) && !goodArgv.includes(HOST_TOKEN), 'verify-r3 B-inst: the pasted command\'s NEW shape (tokens in the environment): the dial check, the dial.json writer and the daemon carry no token in their argv', goodArgv.split('\n').map((l) => l.slice(0, 160)));
   ok(!argvSeen.has(pair.dialToken) && !argvSeen.has(HOST_TOKEN), 'verify-r3 B-inst: no process on this machine showed either token in its argv during the whole install (sampled every 40 ms)', [...argvSeen].map((t) => t.slice(0, 9)));
   const dj = path.join(ROOT, 'state', 'dial.json');
   ok(JSON.parse(fs.readFileSync(dj, 'utf8')).token === pair.dialToken && (fs.statSync(dj).mode & 0o777) === 0o600 && (fs.statSync(path.join(ROOT, 'state', 'token')).mode & 0o777) === 0o600 && fs.readFileSync(path.join(ROOT, 'state', 'token'), 'utf8') === HOST_TOKEN, 'the tokens landed where they belong — state/dial.json + state/token, 0600');
   const denv = (() => { try { return fs.readFileSync(`/proc/${lockPid()}/environ`, 'latin1'); } catch { return null; } })();
   ok(denv !== null && !denv.includes(pair.dialToken) && !denv.includes(HOST_TOKEN) && !/VIBESPACE_(DIAL|HOST)_TOKEN=/.test(denv), 'verify-r3 B-inst: the started daemon\'s ENVIRONMENT holds no token (its sessions inherit it — the installer unsets what the pasted command handed it)', denv === null ? 'no daemon' : denv.split('\0').filter((kv) => /TOKEN/.test(kv)));
-  ok(good.code === 0 && /dial-check ok — 127\.0\.0\.1:\d+ is a VibeSpace/.test(good.out) && /✓ vibespace device agent running/.test(good.out), 'the right token: "dial-check ok", then the install completes', good.out.slice(-600));
+  ok(good.code === 0 && gateOf(/dial-check ok — 127\.0\.0\.1:\d+ is a VibeSpace/.test(good.out)) && verdictOf(/✓ vibespace device agent running/.test(good.out)), 'the right token: "dial-check ok", then the install completes', good.out.slice(-600));
   const up = await waitFor(() => DP.agentdDials.has('icdev'), 30000);
   ok(!!up && DF.dialRowState(H.list().find((h) => h.deviceId === 'icdev')).state === 'connected', 'the device dials in; the row reads connected');
   // the manual daemon form the pair route's `command` field now names: `VIBESPACE_DIAL_TOKEN=… node vibespace-device.js --dial <url>`
@@ -220,7 +220,7 @@ console.log('--no-check writes them; the right token installs and dials in');
     md.unref(); pids.push(md.pid);
     const mj = await waitFor(() => { try { return JSON.parse(fs.readFileSync(path.join(mroot, 'state', 'dial.json'), 'utf8')); } catch { return null; } }, 8000);
     const mup = await waitFor(() => DP.agentdDials.has('icdev'), 20000);
-    ok(mj && mj.token === pair.dialToken && (fs.statSync(path.join(mroot, 'state', 'dial.json')).mode & 0o777) === 0o600 && !!mup, 'verify-r3 B-inst: the manual form (the token in the daemon\'s environment, `--dial <url>` alone) persists the token at 0600 and dials in — r2 read argv[0] (the node binary\'s path) as the token when the flag was absent', mj);
+    ok(gateOf(mj) && mj.token === pair.dialToken && (fs.statSync(path.join(mroot, 'state', 'dial.json')).mode & 0o777) === 0o600 && !!mup, 'verify-r3 B-inst: the manual form (the token in the daemon\'s environment, `--dial <url>` alone) persists the token at 0600 and dials in — r2 read argv[0] (the node binary\'s path) as the token when the flag was absent', mj);
     try { process.kill(md.pid, 'SIGTERM'); } catch { }
     await waitFor(() => !DP.agentdDials.has('icdev'), 8000);
     // B-inst r2: its SELF-UPGRADE RE-EXEC carries the flags (`--dial <url>`) and not the token (removed from the environment
@@ -244,7 +244,7 @@ console.log('--no-check writes them; the right token installs and dials in');
       const clob = await waitFor(() => { try { return JSON.parse(fs.readFileSync(path.join(mroot, 'state', 'dial.json'), 'utf8')).token === '' ? true : null; } catch { return null; } }, 8000);
       ok(!!clob, 'CONTROL (o): the unguarded daemon writes `token: \'\'` over the pairing in the re-exec shape — the r2 leg above goes red');
       try { process.kill(cd.pid, 'SIGTERM'); } catch { }
-      for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(x.pass, x.name, x.detail);
+      for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(verdictOf(x.pass), x.name, x.detail);
     }
   }
   // CONTROL (n): the installer with r2's children — the check's token as a FLAG and the dial.json writer's as an ARGUMENT —
@@ -255,14 +255,14 @@ console.log('--no-check writes them; the right token installs and dials in');
     const isrc = fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.sh'), 'utf8');
     const r2 = isrc.replace('CHECK_OUT=$(VIBESPACE_DIAL_TOKEN="$DIAL_TOKEN" VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --dial-check "$DIAL_URL" 2>&1)', 'CHECK_OUT=$(VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --dial-check "$DIAL_URL" --dial-token "$DIAL_TOKEN" 2>&1)')
       .replace('token:process.env.VIBESPACE_DIAL_TOKEN||"",', 'token:process.argv[4],').replace('    "$ROOT/state/dial.json" "$DIAL_URL" "$HUB_ID"\n', '    "$ROOT/state/dial.json" "$DIAL_URL" "$HUB_ID" "$DIAL_TOKEN"\n');
-    ok(r2 !== isrc && r2.split('--dial-token "$DIAL_TOKEN"').length === 2 && r2.includes('"$HUB_ID" "$DIAL_TOKEN"') && r2.includes('token:process.argv[4],'), '(n) the patch applies (both children back to r2)');
+    ok(r2 !== isrc && r2.split('--dial-token "$DIAL_TOKEN"').length === 2 && gateOf(r2.includes('"$HUB_ID" "$DIAL_TOKEN"')) && verdictOf(r2.includes('token:process.argv[4],')), '(n) the patch applies (both children back to r2)');
     const copy = path.join(M.dir, 'vibespace-agentd-install-r2children.sh'); fs.writeFileSync(copy, r2, { mode: 0o755 }); M.files.push(copy);
     try { fs.unlinkSync(argvLog); } catch { }
     const cr = await installEnv({ dial: pair.dialToken, host: HOST_TOKEN }, ['--dial', DIAL], copy);
     if (lockPid()) pids.push(lockPid());
     const cArgv = (() => { try { return fs.readFileSync(argvLog, 'utf8'); } catch { return ''; } })();
     ok(cr.code === 0 && cArgv.split('\n').filter((l) => l.includes(pair.dialToken)).length === 2, 'CONTROL (n): with r2\'s children the dial check and the dial.json writer carry the dial token in their argv — the B-inst argv legs go red', cArgv.split('\n').map((l) => l.replace(/-e \S.{0,40}/, '-e …').slice(0, 160)));
-    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(x.pass, x.name, x.detail);
+    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(verdictOf(x.pass), x.name, x.detail);
     try { process.kill(lockPid(), 'SIGTERM'); } catch { }
   }
 }
@@ -280,9 +280,9 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
 {
   await waitFor(() => !DP.agentdDials.has('icdev'), 10000);
   const HUB = DP.hubId();
-  ok(/^vh-[0-9a-f]{16}$/.test(HUB) && fs.readFileSync(path.join(dataDir, 'agentd', 'hub-id'), 'utf8').trim() === HUB && (fs.statSync(path.join(dataDir, 'agentd', 'hub-id')).mode & 0o777) === 0o600, 'the hub mints its id ONCE (data/agentd/hub-id, 0600, `vh-` + 16 hex)', HUB);
+  ok(gateOf(/^vh-[0-9a-f]{16}$/.test(HUB)) && fs.readFileSync(path.join(dataDir, 'agentd', 'hub-id'), 'utf8').trim() === HUB && (fs.statSync(path.join(dataDir, 'agentd', 'hub-id')).mode & 0o777) === 0o600, 'the hub mints its id ONCE (data/agentd/hub-id, 0600, `vh-` + 16 hex)', HUB);
   const r0 = await dialCheck(DIAL, pair.dialToken);
-  ok(r0.code === 0 && r0.out.split('\n').includes(`hub id: ${HUB}`), 'the probe\'s answer names the hub: --dial-check prints `hub id: vh-…` under its ok line', r0.out);
+  ok(r0.code === 0 && verdictOf(r0.out.split('\n').includes(`hub id: ${HUB}`)), 'the probe\'s answer names the hub: --dial-check prints `hub id: vh-…` under its ok line', r0.out);
   const OTHER_HUB = 'vh-' + (HUB.slice(3) === 'f'.repeat(16) ? 'e' : 'f').repeat(16);
   const stampStub = (dir, mode) => {
     fs.mkdirSync(dir, { recursive: true });
@@ -330,23 +330,23 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
   const r = await installIn(w);
   const calls = w.stub.calls();
   const st = (() => { try { return JSON.parse(fs.readFileSync(path.join(w.root, 'state', 'dial-status.json'), 'utf8')); } catch { return {}; } })();
-  ok(r.code === 0 && /✓ vibespace device agent running/.test(r.out), 'R-1: the install completes (the dial check, the daemon up)', r.out.slice(-900));
+  ok(r.code === 0 && verdictOf(/✓ vibespace device agent running/.test(r.out)), 'R-1: the install completes (the dial check, the daemon up)', r.out.slice(-900));
   console.log('    · the install said:\n' + r.out.split('\n').filter((l) => /^(→ (retired|older installs|kept)|    device@|  ⚠)/.test(l)).map((l) => '      ' + l).join('\n'));
   ok(JSON.parse(fs.readFileSync(path.join(w.root, 'state', 'dial.json'), 'utf8')).hub === HUB, 'R-2: the new install\'s dial.json carries the hub id the check learned');
   const retiredLine = `→ retired 3 older installs of this hub: ${SIB.A}, ${SIB.C}, ${SIB.B} (kept under ~/.vibespace; their launch items moved to ~/.vibespace/disabled-launchagents/)`;
-  ok(r.out.split('\n').includes(retiredLine) && r.out.indexOf(retiredLine) > r.out.indexOf('✓ vibespace device agent running'), 'R-3: the install SAYS it: «→ retired 3 older installs of this hub: <the dirs> (kept under ~/.vibespace; their launch items moved to …/disabled-launchagents/)» — after the daemon is up', r.out.slice(-900));
-  ok(!fs.existsSync(w.sibs.A.item) && fs.readFileSync(path.join(dis(w), path.basename(w.sibs.A.item)), 'utf8').includes(SIB.A) && !fs.existsSync(w.sibs.C.item) && fs.existsSync(path.join(dis(w), path.basename(w.sibs.C.item))) && !fs.existsSync(w.sibs.B.item) && fs.readFileSync(path.join(dis(w), path.basename(w.sibs.B.item)), 'utf8').includes(SIB.B), 'R-4: the same-hub siblings\' launch items (two plists, one systemd unit) MOVED to ~/.vibespace/disabled-launchagents/ — not deleted', fs.existsSync(dis(w)) ? fs.readdirSync(dis(w)) : null);
-  ok(['A', 'B', 'C'].every((k) => fs.existsSync(path.join(w.vs, SIB[k], 'state', 'dial.json'))), 'R-5: their roots and state stay on disk (nothing is lost)');
+  ok(gateOf(r.out.split('\n').includes(retiredLine)) && r.out.indexOf(retiredLine) > r.out.indexOf('✓ vibespace device agent running'), 'R-3: the install SAYS it: «→ retired 3 older installs of this hub: <the dirs> (kept under ~/.vibespace; their launch items moved to …/disabled-launchagents/)» — after the daemon is up', r.out.slice(-900));
+  ok(!fs.existsSync(w.sibs.A.item) && gateOf(fs.readFileSync(path.join(dis(w), path.basename(w.sibs.A.item)), 'utf8').includes(SIB.A)) && !fs.existsSync(w.sibs.C.item) && gateOf(fs.existsSync(path.join(dis(w), path.basename(w.sibs.C.item)))) && !fs.existsSync(w.sibs.B.item) && verdictOf(fs.readFileSync(path.join(dis(w), path.basename(w.sibs.B.item)), 'utf8').includes(SIB.B)), 'R-4: the same-hub siblings\' launch items (two plists, one systemd unit) MOVED to ~/.vibespace/disabled-launchagents/ — not deleted', fs.existsSync(dis(w)) ? fs.readdirSync(dis(w)) : null);
+  ok(verdictOf(['A', 'B', 'C'].every((k) => fs.existsSync(path.join(w.vs, SIB[k], 'state', 'dial.json')))), 'R-5: their roots and state stay on disk (nothing is lost)');
   const bootA = calls.find((c) => c.line === `launchctl bootout gui/${process.getuid()}/cc.vibespace.device.${keyOf(SIB.A)}`), bootC = calls.find((c) => c.line === `launchctl bootout gui/${process.getuid()}/cc.vibespace.device.${keyOf(SIB.C)}`);
   const disB = calls.find((c) => c.line === `systemctl --user disable --now vibespace-device-${keyOf(SIB.B)}.service`);
-  ok(bootA && bootC && disB, 'R-6: the supervisors were stopped first — launchctl bootout gui/<uid>/cc.vibespace.device.<key> (A, C), systemctl --user disable --now vibespace-device-<key>.service (B), recorded by the stubs', calls.map((c) => c.line));
-  ok(bootA && Number(st.connectedAt) > 0 && bootA.at >= Number(st.connectedAt), 'R-7: NEVER BEFORE the new install was live — the first retire call comes after the new daemon\'s own record says connected', { connectedAt: st.connectedAt, bootout: bootA && bootA.at });
+  ok(gateOf(bootA) && gateOf(bootC) && verdictOf(disB), 'R-6: the supervisors were stopped first — launchctl bootout gui/<uid>/cc.vibespace.device.<key> (A, C), systemctl --user disable --now vibespace-device-<key>.service (B), recorded by the stubs', calls.map((c) => c.line));
+  ok(gateOf(bootA) && Number(st.connectedAt) > 0 && bootA.at >= Number(st.connectedAt), 'R-7: NEVER BEFORE the new install was live — the first retire call comes after the new daemon\'s own record says connected', { connectedAt: st.connectedAt, bootout: bootA && bootA.at });
   const gone = await waitFor(() => !alive(w.sibs.A.pid) && !alive(w.sibs.B.pid), 10000);
-  ok(!!gone && alive(w.sibs.C.pid), 'R-8: the detached agents holding A\'s and B\'s locks (argv names vibespace-device) were stopped; C\'s lock named an innocent process (a recycled pid) — it is NOT killed', { A: alive(w.sibs.A.pid), B: alive(w.sibs.B.pid), C: alive(w.sibs.C.pid) });
-  ok(fs.existsSync(w.sibs.D.item) && alive(w.sibs.D.pid) && !calls.some((c) => c.line.includes(keyOf(SIB.D))) && r.out.includes(`→ kept: ${SIB.D} (another VibeSpace's install on this machine)`), 'R-9: ANOTHER hub\'s install is untouched — its plist in place, its agent running, no call names it; the output says it is kept');
+  ok(!!gone && verdictOf(alive(w.sibs.C.pid)), 'R-8: the detached agents holding A\'s and B\'s locks (argv names vibespace-device) were stopped; C\'s lock named an innocent process (a recycled pid) — it is NOT killed', { A: alive(w.sibs.A.pid), B: alive(w.sibs.B.pid), C: alive(w.sibs.C.pid) });
+  ok(gateOf(fs.existsSync(w.sibs.D.item)) && gateOf(alive(w.sibs.D.pid)) && !calls.some((c) => c.line.includes(keyOf(SIB.D))) && verdictOf(r.out.includes(`→ kept: ${SIB.D} (another VibeSpace's install on this machine)`)), 'R-9: ANOTHER hub\'s install is untouched — its plist in place, its agent running, no call names it; the output says it is kept');
   const unknownLine = `    ${SIB.E} — stop it with: launchctl bootout gui/$(id -u)/cc.vibespace.device.${keyOf(SIB.E)}; kill $(cat ~/.vibespace/${SIB.E}/state/agentd.lock)`;
-  ok(fs.existsSync(w.sibs.E.item) && alive(w.sibs.E.pid) && !calls.some((c) => c.line.includes(keyOf(SIB.E))) && r.out.includes('→ older installs I cannot attribute, not touched:\n' + unknownLine + '\n'), 'R-10: an install whose hub is UNKNOWN (pre-change) is not touched — LISTED with its exact stop command', r.out.slice(-700));
-  ok(DP.agentdDials.has('icdev') && fs.existsSync(path.join(w.root, 'state', 'dial.json')), 'R-11: the new install stays dialed in');
+  ok(gateOf(fs.existsSync(w.sibs.E.item)) && gateOf(alive(w.sibs.E.pid)) && !calls.some((c) => c.line.includes(keyOf(SIB.E))) && verdictOf(r.out.includes('→ older installs I cannot attribute, not touched:\n' + unknownLine + '\n')), 'R-10: an install whose hub is UNKNOWN (pre-change) is not touched — LISTED with its exact stop command', r.out.slice(-700));
+  ok(gateOf(DP.agentdDials.has('icdev')) && verdictOf(fs.existsSync(path.join(w.root, 'state', 'dial.json'))), 'R-11: the new install stays dialed in');
   // R-8b (B-8475's rule, beside R-8): a lock whose pid is an agent of ANOTHER root (a recreated container's fresh pids) is never
   // stopped — A's lock names an agent whose environment names another root; B's names its own agent and is stopped as in R-8.
   // Linux only, as the suite is: the installer reads an agent's root from /proc/<pid>/environ (without /proc its old rule stands)
@@ -358,7 +358,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     const warn = `  ⚠ ${SIB.A}'s lock names pid ${wf.sibs.A.pid}, an agent of another root (${other}) — not stopped`;
     const goneB = await waitFor(() => !alive(wf.sibs.B.pid), 10000);
     console.log('    · the install said:\n' + rf.out.split('\n').filter((l) => /^(→ (retired|older installs|kept)|    device@|  ⚠)/.test(l)).map((l) => '      ' + l).join('\n'));
-    ok(rf.code === 0 && rf.out.split('\n').includes(warn) && alive(wf.sibs.A.pid) && !!goneB && !fs.existsSync(wf.sibs.A.item) && fs.existsSync(path.join(dis(wf), path.basename(wf.sibs.A.item))), 'R-8b: an agent of ANOTHER root at a sibling\'s lock pid survives and the install says so («⚠ <sibling>\'s lock names pid <pid>, an agent of another root (<root>) — not stopped»); the sibling whose agent is its own is stopped (R-8); A is still retired (its launch item moved aside)', { code: rf.code, warned: rf.out.includes('an agent of another root'), A: alive(wf.sibs.A.pid), B: alive(wf.sibs.B.pid), out: rf.out.slice(-700) });
+    ok(rf.code === 0 && gateOf(rf.out.split('\n').includes(warn)) && gateOf(alive(wf.sibs.A.pid)) && !!goneB && !fs.existsSync(wf.sibs.A.item) && verdictOf(fs.existsSync(path.join(dis(wf), path.basename(wf.sibs.A.item)))), 'R-8b: an agent of ANOTHER root at a sibling\'s lock pid survives and the install says so («⚠ <sibling>\'s lock names pid <pid>, an agent of another root (<root>) — not stopped»); the sibling whose agent is its own is stopped (R-8); A is still retired (its launch item moved aside)', { code: rf.code, warned: rf.out.includes('an agent of another root'), A: alive(wf.sibs.A.pid), B: alive(wf.sibs.B.pid), out: rf.out.slice(-700) });
     await stopRoot(wf);   // ② (learn) restarts the first world's daemon itself — it stops that root first in any case
   }
 
@@ -378,7 +378,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     return { up: !!up, hello: !!(dm && !dm.error), hub, cfg: JSON.parse(fs.readFileSync(dj, 'utf8')) };
   };
   const L1 = await learn(bundle);
-  ok(L1.up && L1.hello && L1.hub === HUB && L1.cfg.url === DIAL && L1.cfg.token === pair.dialToken, 'R-12: an install that never learned its hub learns it at its next ACCEPTED dial — the hello (the host token proved the hub) names it, and dial.json keeps url + token beside it', L1);
+  ok(gateOf(L1.up) && gateOf(L1.hello) && L1.hub === HUB && L1.cfg.url === DIAL && L1.cfg.token === pair.dialToken, 'R-12: an install that never learned its hub learns it at its next ACCEPTED dial — the hello (the host token proved the hub) names it, and dial.json keeps url + token beside it', L1);
   {
     const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
     const M = mutantCopies('installlearn', REPO);
@@ -386,8 +386,8 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     const deaf = editAnchor(asrc, "serveConnection(ws, { dialed: true, onAuthed: (m) => learnHub(m && m.hub, via) });", 'serveConnection(ws, { dialed: true });', "src/agentd/agentd.js");
     ok(deaf !== asrc, '(p) the patch applies');
     const L2 = await learn(M.write('src/agentd/agentd.js', deaf, 'nolearn'));
-    ok(L2.up && L2.hello && L2.hub === null, 'CONTROL (p): a daemon that does not keep the hello\'s hub never learns it — R-12 goes red', L2);
-    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(x.pass, x.name, x.detail);
+    ok(gateOf(L2.up) && gateOf(L2.hello) && L2.hub === null, 'CONTROL (p): a daemon that does not keep the hello\'s hub never learns it — R-12 goes red', L2);
+    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(verdictOf(x.pass), x.name, x.detail);
   }
 
   // ③ RED CONTROL: the installer without the retire step (the base) — the same five siblings, nothing retired
@@ -401,9 +401,9 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     const wq = world('noretire');
     const rq = await installIn(wq, copy);
     const qcalls = wq.stub.calls();
-    ok(rq.code === 0 && !/retired/.test(rq.out) && Object.values(wq.sibs).every((x) => fs.existsSync(x.item) && alive(x.pid)) && !qcalls.some((c) => /bootout|disable --now/.test(c.line)), 'CONTROL (q): the installer without the retire step (the base) leaves all five siblings as they were — every launch item in place, every agent running: the older installs of this hub keep re-dialing (R-3…R-8 red)', { out: rq.out.slice(-300), calls: qcalls.map((c) => c.line) });
+    ok(rq.code === 0 && !/retired/.test(rq.out) && gateOf(Object.values(wq.sibs).every((x) => fs.existsSync(x.item) && alive(x.pid))) && !qcalls.some((c) => /bootout|disable --now/.test(c.line)), 'CONTROL (q): the installer without the retire step (the base) leaves all five siblings as they were — every launch item in place, every agent running: the older installs of this hub keep re-dialing (R-3…R-8 red)', { out: rq.out.slice(-300), calls: qcalls.map((c) => c.line) });
     await stopRoot(wq);
-    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(x.pass, x.name, x.detail);
+    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(verdictOf(x.pass), x.name, x.detail);
   }
 
   // ④ never before the new install is live: the hub refuses the new daemon's LINK (the check still passes) ⇒ nothing retired
@@ -413,7 +413,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     const rn = await installIn(wn);
     refuseLinks = false;
     const ncalls = wn.stub.calls();
-    ok(rn.code === 0 && rn.out.includes('→ older installs on this machine were NOT retired: this install has not dialed in yet — run this command again once its row reads connected') && Object.values(wn.sibs).every((x) => fs.existsSync(x.item)) && alive(wn.sibs.A.pid) && alive(wn.sibs.B.pid) && !ncalls.some((c) => /bootout|disable --now/.test(c.line)), 'R-13: a new install that has NOT dialed in retires nothing — it says so, every sibling stays', { out: rn.out.slice(-400), calls: ncalls.map((c) => c.line) });
+    ok(rn.code === 0 && gateOf(rn.out.includes('→ older installs on this machine were NOT retired: this install has not dialed in yet — run this command again once its row reads connected')) && gateOf(Object.values(wn.sibs).every((x) => fs.existsSync(x.item))) && gateOf(alive(wn.sibs.A.pid)) && gateOf(alive(wn.sibs.B.pid)) && !ncalls.some((c) => /bootout|disable --now/.test(c.line)), 'R-13: a new install that has NOT dialed in retires nothing — it says so, every sibling stays', { out: rn.out.slice(-400), calls: ncalls.map((c) => c.line) });
     await stopRoot(wn);
   }
 
@@ -435,7 +435,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
       fs.mkdirSync(path.join(b, 'agentd')); fs.mkdirSync(path.join(b, 'disabled-launchagents'));
       return execFileSync(process.execPath, ['-e', m ? m[1] : '', b, 'device@me.invalid'], { encoding: 'utf8' }).trim();
     });
-    ok(got.every((g, i) => g === `${T[i][2]}\tdevice@them.invalid`), 'R-14: the rule table — same hub ⇒ retire · another hub ⇒ other · a hub on one side only ⇒ unknown · no hub on either side: same device id ⇒ retire, another ⇒ unknown · a malformed hub ⇒ unknown (never agentd/ nor disabled-launchagents/)', got);
+    ok(verdictOf(got.every((g, i) => g === `${T[i][2]}\tdevice@them.invalid`)), 'R-14: the rule table — same hub ⇒ retire · another hub ⇒ other · a hub on one side only ⇒ unknown · no hub on either side: same device id ⇒ retire, another ⇒ unknown · a malformed hub ⇒ unknown (never agentd/ nor disabled-launchagents/)', got);
   }
 
   // ⑥ the Windows twin (no PowerShell on this box — the road is pinned, the real Windows leg is an owner-run recipe)
@@ -444,7 +444,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     const iRet = ps.indexOf('# RETIRE THE OLDER INSTALLS OF THIS HUB'), iOk = ps.indexOf('Write-Host "OK vibespace device agent running');
     const verdict = "$verdict = if ($them.hub -and $me.hub) { if ($them.hub -eq $me.hub) { 'retire' } else { 'other' } } elseif (-not $them.hub -and -not $me.hub -and $them.dev -and $them.dev -eq $me.dev) { 'retire' } else { 'unknown' }";
     const iExp = ps.indexOf('Export-ScheduledTask -TaskName $tn'), iUnreg = ps.indexOf('Unregister-ScheduledTask -TaskName $tn -Confirm:$false'), iGuard = ps.indexOf("if ($cl -like '*vibespace-device*') { Stop-Process -Id $sp -Force");
-    ok(iRet > iOk && ps.includes(verdict) && iExp > 0 && iUnreg > iExp && iGuard > iUnreg && ps.includes("if (-not $NoCheck) {\n  $vsDir") && ps.includes("while ($i -lt 20 -and -not (Test-VsDialedIn))") && /\$dialCfg = @\{ url = \$Dial; token = \$DialToken \}; if \(\$hubId\) \{ \$dialCfg\.hub = \$hubId \}/.test(ps) && ps.includes("if (\"$l\" -match '^hub id: (vh-[0-9a-f]{16})$') { $hubId = $Matches[1]; break }"), 'R-15: install.ps1 — the hub id from the check into dial.json, the SAME rule, after the daemon dialed in, the task exported to disabled-launchagents\\ BEFORE it is unregistered, the agent stopped only when its command line names vibespace-device');
+    ok(iRet > iOk && gateOf(ps.includes(verdict)) && iExp > 0 && iUnreg > iExp && iGuard > iUnreg && gateOf(ps.includes("if (-not $NoCheck) {\n  $vsDir")) && gateOf(ps.includes("while ($i -lt 20 -and -not (Test-VsDialedIn))")) && gateOf(/\$dialCfg = @\{ url = \$Dial; token = \$DialToken \}; if \(\$hubId\) \{ \$dialCfg\.hub = \$hubId \}/.test(ps)) && verdictOf(ps.includes("if (\"$l\" -match '^hub id: (vh-[0-9a-f]{16})$') { $hubId = $Matches[1]; break }")), 'R-15: install.ps1 — the hub id from the check into dial.json, the SAME rule, after the daemon dialed in, the task exported to disabled-launchagents\\ BEFORE it is unregistered, the agent stopped only when its command line names vibespace-device');
     const bal = (() => { let d = { '{': 0, '(': 0 }, q = null; for (const line of ps.split('\n')) { if (/^\s*#/.test(line)) continue; for (let i = 0; i < line.length; i++) { const ch = line[i]; if (q) { if (ch === '`') { i++; continue; } if (ch === q) q = null; continue; } if (ch === '#') break; if (ch === "'" || ch === '"') { q = ch; continue; } if (ch === '`') { i++; continue; } if (ch === '{') d['{']++; if (ch === '}') d['{']--; if (ch === '(') d['(']++; if (ch === ')') d['(']--; if (d['{'] < 0 || d['('] < 0) return { line, d }; } if (q === "'") continue; } return d; })();
     ok(bal['{'] === 0 && bal['('] === 0, 'R-16: install.ps1 balances its braces and parentheses outside strings and comments (a structural check — no PowerShell parser here)', bal);
   }
@@ -453,6 +453,6 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
 
 srv.close(); plain.close();
 for (const d of DP.agentdDialDevices.values()) { try { d.stop(); } catch { } }
-{ const end = endDaemonsAndWait(S); ok(end.gone && !end.killed, `r5404: every device daemon rooted under the scratch dir (${end.pids.length} still running at the end) ends on SIGTERM and is gone before the dir is removed`, end); }
+{ const end = endDaemonsAndWait(S); ok(gateOf(end.gone) && !end.killed, `r5404: every device daemon rooted under the scratch dir (${end.pids.length} still running at the end) ends on SIGTERM and is gone before the dir is removed`, end); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

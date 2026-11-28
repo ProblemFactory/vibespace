@@ -59,7 +59,7 @@ let pass = 0, fail = 0, skipped = 0;
 // through to is never read as the product's verdict (the 2.369.414 mirror's red in test-browser-resume-ui §9 was one)
 const waits = { missed: [], judged: false };
 const missNote = () => waits.missed.length ? ` — THE STATE NEVER CAME: the wait before this judge timed out (${waits.missed.map((ms) => `${ms / 1000} s`).join(', ')}), so this red is that, not a verdict on the product` : '';
-const ok = (c, n, extra) => { const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 1400) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 1400) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 80) => { if (waits.judged) { waits.missed = []; waits.judged = false; } const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await pred()) return true; } catch { } await sleep(every); } let r = false; try { r = !!(await pred()); } catch { } if (!r) waits.missed.push(ms); return r; };
@@ -150,7 +150,7 @@ else if (!dtachOk) skip('dtach is not installed — a local session cannot be cr
 else await (async () => {
   { // r1100 CONTROL: the mark can be read — a wait that times out is named by the next red judge
     await until(() => false, 30, 10); const note = missNote(); waits.missed = []; waits.judged = false;
-    ok(/THE STATE NEVER CAME/.test(note) && note.includes('0.03 s'), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
+    ok(gateOf(/THE STATE NEVER CAME/.test(note)) && verdictOf(note.includes('0.03 s')), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
   }
   fakeHome = scratchHome('browser-resume-ui-home', fs);
   const wt = path.join(ROOT, 'wt'); const BIN = path.join(ROOT, 'bin'); fs.mkdirSync(BIN, { recursive: true });
@@ -171,7 +171,7 @@ else await (async () => {
   let journal = '';
   const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000, 100)), 'the worktree server booted', journal.slice(-800))) return;
   const j = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   const wsMain = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });
@@ -202,7 +202,7 @@ else await (async () => {
     console.log('— ① the agent opens three pages (the shipped vibespace-browser: open / tab new / tab t2)');
     const c1 = await cli(['open', 'https://a.test/']); const c2 = await cli(['tab', 'new', 'https://b.test/']); const c3 = await cli(['tab', 'new', 'https://c.test/']); const c4 = await cli(['tab', 't2']);
     const t1 = tabsOf();
-    ok([c1, c2, c3, c4].every((c) => c.code === 0) && t1.map((t) => t.url).join() === 'https://a.test/,https://b.test/,https://c.test/' && t1.find((t) => t.active).url === 'https://b.test/', 'the agent\'s browser runs three pages, the second on show', JSON.stringify({ codes: [c1, c2, c3, c4].map((c) => c.code), err: [c1, c2, c3, c4].map((c) => c.stderr.slice(0, 200)), tabs: t1 }));
+    ok(gateOf([c1, c2, c3, c4].every((c) => c.code === 0)) && t1.map((t) => t.url).join() === 'https://a.test/,https://b.test/,https://c.test/' && t1.find((t) => t.active).url === 'https://b.test/', 'the agent\'s browser runs three pages, the second on show', JSON.stringify({ codes: [c1, c2, c3, c4].map((c) => c.code), err: [c1, c2, c3, c4].map((c) => c.stderr.slice(0, 200)), tabs: t1 }));
 
     chromeProc = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'ignore'] });
     procs.add(chromeProc);
@@ -232,13 +232,13 @@ else await (async () => {
     };
     await send('Page.enable'); await send('Runtime.enable');
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
-    if (!ok(await boot(), 'the app booted in headless chrome (1280×900)')) return;
+    if (!ok(verdictOf(await boot()), 'the app booted in headless chrome (1280×900)')) return;
     await sleep(800);
     await ev(`await app.refreshBrowserProfiles(); app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
     await until(() => ev('return !!chatWin();'), 10000);
     await ev(`app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
     const drawn = await until(() => ev('const l = L(); return !!(l && l.state().frames >= 2 && l.state().connected && l.state().tabs.length === 3);'), 15000);
-    ok(drawn, 'the live view draws the agent\'s browser and lists its three tabs', S(await ev('const l = L(); return l ? { frames: l.state().frames, tabs: l.state().tabs.map((t) => t.url), error: l.state().error } : null;')));
+    ok(verdictOf(drawn), 'the live view draws the agent\'s browser and lists its three tabs', S(await ev('const l = L(); return l ? { frames: l.state().frames, tabs: l.state().tabs.map((t) => t.url), error: l.state().error } : null;')));
 
     // ── ② the user's Stop ⇒ RESUME in place of Reconnect; a REAL click resumes with the three tabs ──
     console.log('— ② Stop: the live view offers Resume in place; a REAL click reopens the three tabs, the view follows');
@@ -246,11 +246,11 @@ else await (async () => {
     ok(r.status === 200, 'the user stops the conversation\'s browser (a deliberate stop: its logins and tabs are kept)', S(r.json).slice(0, 300));
     up.drop(); // its stream server dies with its daemon
     const kept = await until(async () => { const k = (await j('GET', '/api/browser/kept')).json; const e = k && (k.kept || []).find((x) => x.browserKey === bk); return !!(e && e.tabs.length === 3 && e.stoppedWhy === 'user'); }, 8000);
-    ok(kept, 'the kept store holds its three tabs (stopped by the user)', S((await j('GET', '/api/browser/kept')).json).slice(0, 600));
+    ok(verdictOf(kept), 'the kept store holds its three tabs (stopped by the user)', S((await j('GET', '/api/browser/kept')).json).slice(0, 600));
     const offered = await until(() => ev('const l = L(); const s = l && l.state(); return !!(s && s.stopped && s.resumeOffer && s.resumeText);'), 12000, 150);
     const s2 = await ev('const l = L(); const s = l.state(); const b = l.el().querySelector(".browser-live-reconnect"); return { stopped: s.stopped, frames: s.frames, resumeOffer: s.resumeOffer, resumeText: s.resumeText, statusText: s.statusText, btn: b && b.style.display !== "none" ? { rect: rect(b), sw: b.scrollWidth, cw: b.clientWidth, right: rect(b).left + rect(b).width, barRight: (rect(l.el().querySelector(".browser-live-bar")).left + rect(l.el().querySelector(".browser-live-bar")).width), svg: !!b.querySelector("svg"), mode: b.dataset.mode } : null, fact: row() && row().browserFact && row().browserFact.own };');
-    ok(offered && s2.resumeText === 'Resume' && s2.btn && s2.btn.mode === 'resume' && s2.btn.svg && s2.btn.sw <= s2.btn.cw + 1 && s2.btn.right <= s2.btn.barRight + 1, 'the stopped view keeps its last frame and offers RESUME in place of Reconnect — the play glyph + its word, whole and INSIDE the bar (no greyed control)', S(s2));
-    ok(/3 tab\(s\) and its logins are kept/.test(s2.statusText || '') && s2.fact && s2.fact.kept && s2.fact.kept.tabs === 3, 'its status line says what is kept ("… 3 tab(s) and its logins are kept …") — THE fact\'s own.kept', S({ status: s2.statusText, own: s2.fact }));
+    ok(gateOf(offered) && s2.resumeText === 'Resume' && gateOf(s2.btn) && s2.btn.mode === 'resume' && gateOf(s2.btn.svg) && s2.btn.sw <= s2.btn.cw + 1 && s2.btn.right <= s2.btn.barRight + 1, 'the stopped view keeps its last frame and offers RESUME in place of Reconnect — the play glyph + its word, whole and INSIDE the bar (no greyed control)', S(s2));
+    ok(gateOf(/3 tab\(s\) and its logins are kept/.test(s2.statusText || '')) && gateOf(s2.fact) && gateOf(s2.fact.kept) && s2.fact.kept.tabs === 3, 'its status line says what is kept ("… 3 tab(s) and its logins are kept …") — THE fact\'s own.kept', S({ status: s2.statusText, own: s2.fact }));
     const nBefore = cmds().length;
     fs.writeFileSync(path.join(AB, 'hold-switch'), ''); // the Resume's LAST step (the switch back to the tab on show) waits in the fake
     if (s2.btn) await click(centre(s2.btn.rect));
@@ -265,7 +265,7 @@ else await (async () => {
     // its reopen and c.test's, c.test after the last «tab new», none before the relaunch writes its file) is the fake's own
     // pace against the view's count of three, and is not asserted (2.369.405's release mirror read a.test).
     const switchedBack = mid.fakeTabs === 3 && mid.onShow === 'https://b.test/';
-    ok(oldSaid && mid.view.resuming && !mid.view.resumedHere && !switchedBack,
+    ok(gateOf(oldSaid) && gateOf(mid.view.resuming) && !mid.view.resumedHere && !switchedBack,
       'RED CONTROL (the old wait): with the switch back held, the view is already connected with three tabs while the Resume has not answered — the tab on show is not yet the one the Resume switches back to (the mirror\'s red read here)', S(mid));
     fs.unlinkSync(path.join(AB, 'hold-switch'));
     // the Resume's own answer: the POST came back after its last step (resumedHere, resuming over)
@@ -273,21 +273,21 @@ else await (async () => {
     const after = cmds().slice(nBefore);
     const t2 = tabsOf();
     const bId = t2[1] && t2[1].targetId;
-    ok(resumed, 'the view reconnected BY ITSELF and draws the resumed browser with its three tabs', S(await ev('const s = L().state(); return { connected: s.connected, stopped: s.stopped, frames: s.frames, tabs: s.tabs.map((t) => t.url), error: s.error };')));
+    ok(verdictOf(resumed), 'the view reconnected BY ITSELF and draws the resumed browser with its three tabs', S(await ev('const s = L().state(); return { connected: s.connected, stopped: s.stopped, frames: s.frames, tabs: s.tabs.map((t) => t.url), error: s.error };')));
     const seqNeed = ['open about:blank', 'open https://a.test/', 'tab new https://b.test/', 'tab new https://c.test/', `tab ${bId}`];
-    ok(seqNeed.every((x) => after.includes(x)) && after.indexOf('open https://a.test/') < after.indexOf('tab new https://b.test/') && after.indexOf('tab new https://c.test/') < after.indexOf(`tab ${bId}`) && !after.some((x) => x.startsWith('tab close')), 'the fake browser was relaunched and reopened the pages IN ORDER, the first into its launch tab, then switched back to the second BY ITS TARGET ID — never a tab close', S(after));
+    ok(gateOf(seqNeed.every((x) => after.includes(x))) && after.indexOf('open https://a.test/') < after.indexOf('tab new https://b.test/') && after.indexOf('tab new https://c.test/') < after.indexOf(`tab ${bId}`) && !after.some((x) => x.startsWith('tab close')), 'the fake browser was relaunched and reopened the pages IN ORDER, the first into its launch tab, then switched back to the second BY ITS TARGET ID — never a tab close', S(after));
     ok(t2.map((t) => t.url).join() === 'https://a.test/,https://b.test/,https://c.test/' && t2.find((t) => t.active).url === 'https://b.test/', 'the resumed browser shows the SAME three tabs, the SAME one on show', S(t2));
 
     // ── ③ "Hand back with a note…" — the note box, its words, the card, the stash + the strip, no billed turn, the agent's next command ──
     console.log('— ③ Hand back with a note: a REAL Take over, the note box takes the keys and says what the press does, the card in the chat, nothing billed');
     const contOffered = await until(() => ev('return !!L().state().contShown;'), 6000);
-    ok(contOffered, '"Hand back with a note…" is offered after the Resume (the view resumed it — never greyed)', S(await ev('const s = L().state(); return { contShown: s.contShown, fact: row().browserFact && row().browserFact.own };')));
+    ok(verdictOf(contOffered), '"Hand back with a note…" is offered after the Resume (the view resumed it — never greyed)', S(await ev('const s = L().state(); return { contShown: s.contShown, fact: row().browserFact && row().browserFact.own };')));
     await ev('const w = live(); app.goToWinId ? app.goToWinId(w.id) : wm.focusWindow(w.id); return true;');
     await sleep(300);
     const tk = await ev('const b = L().el().querySelector(".browser-live-mode-btn"); return b && b.offsetParent ? rect(b) : null;');
     if (tk) await click(centre(tk));
     const driving = await until(() => ev('const s = L().state(); return s.mode === "takeover" && s.mine && s.ownsKeyboard;'), 6000);
-    ok(driving, 'a REAL click on Take over: the user drives and the view owns the keyboard');
+    ok(verdictOf(driving), 'a REAL click on Take over: the user drives and the view owns the keyboard');
     const cb = await ev('const b = L().el().querySelector(".browser-live-continue"); return b && b.offsetParent ? rect(b) : null;');
     ok(!!cb, 'while driving, "Hand back with a note…" is on the bar', S(await ev('return L().state().folded;')));
     const inputs0 = up.inputs.length;
@@ -295,7 +295,7 @@ else await (async () => {
     // the note box = the input of the dialog that holds the focus (index.html keeps static dialogs of the same class); lane dialog-yield r2:
     // showInputDialog is a FORM — its root is .dialog-form in its window (it holds the keys of the takeover like the overlay did)
     const dlg = await until(() => ev('const a = document.activeElement; return !!(a && a.tagName === "INPUT" && a.closest(".dialog-overlay, .dialog-form"));'), 5000);
-    ok(dlg && (await ev('return L().state().noteOpen && !L().state().ownsKeyboard;')), 'the note box opens WITH the keyboard (the view let the keys go first — a dialog never types into the page)', S(await ev('const a = document.activeElement; return { active: a && a.tagName, cls: a && a.className, st: L().state().noteOpen, owns: L().state().ownsKeyboard };')));
+    ok(gateOf(dlg) && (verdictOf(await ev('return L().state().noteOpen && !L().state().ownsKeyboard;'))), 'the note box opens WITH the keyboard (the view let the keys go first — a dialog never types into the page)', S(await ev('const a = document.activeElement; return { active: a && a.tagName, cls: a && a.className, st: L().state().noteOpen, owns: L().state().ownsKeyboard };')));
     // lane handback-words (the owner, 2026-10-31: «继续» read as «continue now»): the dialog SAYS what the press does — its title
     // when the agent reads it, its label that nothing is sent now and the recipe for continuing right away (the strip's Hand over
     // now, checked below; or a message). A form window hides the dialog's own header: the title is the window's, and it must be
@@ -305,9 +305,9 @@ else await (async () => {
     const TITLE_EN = 'Hand back — the agent reads it when its next turn starts';
     const TITLES = { en: TITLE_EN, zh: dictWord('zh', TITLE_EN), ja: dictWord('ja', TITLE_EN) };
     const dw = await ev(`const a = document.activeElement; const o = a && a.closest('.dialog-overlay, .dialog-form'); const lab = a && a.closest('label'); const fw = o && o.closest('.window'); const tt = fw ? fw.querySelector('.window-titlebar .window-title') : (o && o.querySelector('.dialog-header h3')); const cx = document.createElement('canvas').getContext('2d'); if (tt) cx.font = getComputedStyle(tt).font; const mw = (x) => Math.ceil(cx.measureText(x).width); const tb = tt && tt.closest('.window-titlebar, .dialog-header'); return { title: tt && tt.textContent, sw: tt && tt.scrollWidth, cw: tt && tt.clientWidth, right: tt ? rect(tt).left + rect(tt).width : null, barRight: tb ? rect(tb).left + rect(tb).width : null, font: tt && getComputedStyle(tt).font, label: lab && lab.textContent.trim(), ok: o && (o.querySelector('button.btn-create') || {}).textContent, w: Object.fromEntries(Object.entries(${S(TITLES)}).map(([k, x]) => [k, mw(x)])), box: fw ? rect(fw) : (o ? rect(o) : null) };`);
-    ok(dw && dw.title === TITLES.en && dw.sw <= dw.cw + 1 && dw.barRight !== null && dw.right <= dw.barRight + 1, '…the dialog\'s title says when the agent reads it, whole and inside its window\'s title bar: "' + TITLES.en + '"', S(dw && { title: dw.title, sw: dw.sw, cw: dw.cw, right: dw.right, barRight: dw.barRight }));
-    ok(dw && TITLES.zh && TITLES.ja && dw.w.zh <= dw.cw + 1 && dw.w.ja <= dw.cw + 1, '…and the zh / ja titles fit the same bar in its font (' + S(dw && dw.w) + ' ≤ ' + (dw && dw.cw) + ' px)', S(dw && { w: dw.w, cw: dw.cw, font: dw.font }));
-    ok(dw && dw.label === 'A note for the agent (optional). Nothing is sent now. To have the agent continue right away: hand back, then press “Hand over now” on the strip above the composer (it starts a turn), or send it a message.' && dw.ok === 'Hand back', '…its label says that nothing is sent now and how to make the agent continue right away (the strip\'s Hand over now, or a message); the confirm says Hand back', S(dw && { label: dw.label, ok: dw.ok }));
+    ok(gateOf(dw) && dw.title === TITLES.en && dw.sw <= dw.cw + 1 && dw.barRight !== null && dw.right <= dw.barRight + 1, '…the dialog\'s title says when the agent reads it, whole and inside its window\'s title bar: "' + TITLES.en + '"', S(dw && { title: dw.title, sw: dw.sw, cw: dw.cw, right: dw.right, barRight: dw.barRight }));
+    ok(gateOf(dw) && gateOf(TITLES.zh) && gateOf(TITLES.ja) && dw.w.zh <= dw.cw + 1 && dw.w.ja <= dw.cw + 1, '…and the zh / ja titles fit the same bar in its font (' + S(dw && dw.w) + ' ≤ ' + (dw && dw.cw) + ' px)', S(dw && { w: dw.w, cw: dw.cw, font: dw.font }));
+    ok(gateOf(dw) && dw.label === 'A note for the agent (optional). Nothing is sent now. To have the agent continue right away: hand back, then press “Hand over now” on the strip above the composer (it starts a turn), or send it a message.' && dw.ok === 'Hand back', '…its label says that nothing is sent now and how to make the agent continue right away (the strip\'s Hand over now, or a message); the confirm says Hand back', S(dw && { label: dw.label, ok: dw.ok }));
     if (PNG_DIR && dw && dw.box) await png('handback-dialog-en.png', dw.box);
     const NOTE = 'I logged in — continue from the cart';
     await send('Input.insertText', { text: NOTE });
@@ -318,23 +318,23 @@ else await (async () => {
     const okBtn = await ev('const a = document.activeElement; const o = a && a.closest(".dialog-overlay, .dialog-form"); const b = o && o.querySelector("button.btn-create"); return b && b.textContent.trim() === "Hand back" ? rect(b) : null;');
     if (okBtn) await click(centre(okBtn));
     const handed = await until(() => ev('const s = L().state(); return s.mode === "watch" && !s.mine && !s.ownsKeyboard;'), 8000);
-    ok(handed, 'a REAL click on Hand back: the takeover ended (the view is in watch mode, the keyboard released)', S(await ev('const s = L().state(); return { mode: s.mode, mine: s.mine, owns: s.ownsKeyboard, cont: s.contShown };')));
+    ok(verdictOf(handed), 'a REAL click on Hand back: the takeover ended (the view is in watch mode, the keyboard released)', S(await ev('const s = L().state(); return { mode: s.mode, mine: s.mine, owns: s.ownsKeyboard, cont: s.contShown };')));
     const card = await until(() => ev('const w = chatWin(); const v = w && app.sessions.get(w.id); const m = v && (v._messages || []).find((x) => x.peerFrom === "VibeSpace browser" && x.peerVia === "notification" && /handed the browser back for the agent/.test((x.content && x.content[0] && x.content[0].text) || "")); return !!m;'), 8000);
     const cardMsg = await ev('const v = app.sessions.get(chatWin().id); const m = (v._messages || []).find((x) => x.peerFrom === "VibeSpace browser" && /handed the browser back/.test(x.content[0].text || "")); return m ? { text: m.content[0].text, n: (v._messages || []).filter((x) => x.peerFrom === "VibeSpace browser" && /handed the browser back/.test(x.content[0].text || "")).length, el: !!(v._elements && v._elements.get(m.id)) } : null;');
-    ok(card && cardMsg && cardMsg.n === 1 && cardMsg.text.includes(NOTE) && /nothing was sent now/.test(cardMsg.text) && /on show: Page b\.test\//.test(cardMsg.text) && cardMsg.el, 'ONE card in the chat, drawn: "You handed the browser back for the agent\'s next turn: “…” — 3 tab(s); on show: Page b.test/ … nothing was sent now"', S(cardMsg));
+    ok(gateOf(card) && gateOf(cardMsg) && cardMsg.n === 1 && gateOf(cardMsg.text.includes(NOTE)) && gateOf(/nothing was sent now/.test(cardMsg.text)) && gateOf(/on show: Page b\.test\//.test(cardMsg.text)) && verdictOf(cardMsg.el), 'ONE card in the chat, drawn: "You handed the browser back for the agent\'s next turn: “…” — 3 tab(s); on show: Page b.test/ … nothing was sent now"', S(cardMsg));
     const stash = await until(() => ev('const r = row(); return !!(r && r.stash && (r.stash.items || []).some((i) => i.kind === "handback"));'), 8000);
-    ok(stash, 'the conversation\'s stash holds it: "a browser handback" (the strip above the composer — its next turn reads it)', S(await ev('return row() && row().stash;')));
+    ok(verdictOf(stash), 'the conversation\'s stash holds it: "a browser handback" (the strip above the composer — its next turn reads it)', S(await ev('return row() && row().stash;')));
     // lane handback-words: the dialog's recipe is TRUE — the strip above the composer offers THIS hand-back with its Hand over now
     // ("· starts a turn": the agent is idle). Not pressed: the ledger check below proves nothing was billed
     const STRIP = 'app.sessions.get(chatWin().id)._chatInput._stashStrip.el';
     const stripUp = await until(() => ev(`const el = ${STRIP}; const go = el && el.querySelector('.chat-stash-go'); return !!(el && !el.hidden && go && !go.disabled && go.querySelector('.chat-stash-go-label').textContent === 'Hand over now');`), 8000);
     const strip = await ev(`const el = ${STRIP}; const go = el.querySelector('.chat-stash-go'); return { hidden: el.hidden, go: go.textContent, disabled: go.disabled, shown: !!go.offsetParent, parts: el.querySelector('.chat-stash-parts').textContent, box: rect(el) };`);
-    ok(stripUp && strip.shown && strip.go === 'Hand over now · starts a turn' && /a browser handback/.test(strip.parts), 'the strip above the composer offers it: "Hand over now · starts a turn" with "a browser handback" waiting — the dialog\'s recipe holds', S(strip));
+    ok(gateOf(stripUp) && gateOf(strip.shown) && strip.go === 'Hand over now · starts a turn' && verdictOf(/a browser handback/.test(strip.parts)), 'the strip above the composer offers it: "Hand over now · starts a turn" with "a browser handback" waiting — the dialog\'s recipe holds', S(strip));
     if (PNG_DIR && strip.box && strip.box.width) { await ev('const w = chatWin(); app.goToWinId ? app.goToWinId(w.id) : wm.focusWindow(w.id); return true;'); await sleep(300); await png('handback-strip-en.png', await ev(`return rect(${STRIP});`)); await ev('const w = live(); app.goToWinId ? app.goToWinId(w.id) : wm.focusWindow(w.id); return true;'); await sleep(300); }   // the live view on top again, as ③ left it (④'s REAL clicks land on its bar)
     const ledger = (() => { try { return fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8'); } catch { return ''; } })();
-    ok(!/browser-handback/.test(ledger) && /handed back for the next turn — stashed/.test(journal) && !/announced into the conversation/.test(journal), 'NOTHING was billed: no spend-ledger row for a browser handback, the journal says "stashed" and never "announced into the conversation"', S({ ledger: ledger.slice(0, 300), tail: journal.split('\n').filter((l) => /handed back|handback/.test(l)).slice(-4) }));
+    ok(!/browser-handback/.test(ledger) && gateOf(/handed back for the next turn — stashed/.test(journal)) && !/announced into the conversation/.test(journal), 'NOTHING was billed: no spend-ledger row for a browser handback, the journal says "stashed" and never "announced into the conversation"', S({ ledger: ledger.slice(0, 300), tail: journal.split('\n').filter((l) => /handed back|handback/.test(l)).slice(-4) }));
     const next = await cli(['get', 'url']);
-    ok(/\[browser_resumed\]/.test(next.stderr) && /handed it back/.test(next.stderr) && /current: Page b\.test\/ — https:\/\/b\.test\//.test(next.stderr) && !next.stderr.includes(NOTE), 'the agent\'s next command (the shipped CLI) is told once: "[browser_resumed] … handed it back … current: Page b.test/ — https://b.test/" (the note came with its turn, never twice)', S(next.stderr.slice(0, 600)));
+    ok(gateOf(/\[browser_resumed\]/.test(next.stderr)) && gateOf(/handed it back/.test(next.stderr)) && gateOf(/current: Page b\.test\/ — https:\/\/b\.test\//.test(next.stderr)) && !next.stderr.includes(NOTE), 'the agent\'s next command (the shipped CLI) is told once: "[browser_resumed] … handed it back … current: Page b.test/ — https://b.test/" (the note came with its turn, never twice)', S(next.stderr.slice(0, 600)));
     const next2 = await cli(['get', 'url']);
     ok(!/\[browser_resumed\]/.test(next2.stderr), '…and the command after it is told nothing', S(next2.stderr.slice(0, 300)));
 
@@ -342,7 +342,7 @@ else await (async () => {
     console.log('— ④ zh + ja: Resume and "Hand back with a note…" in the device\'s language, whole at 360 px');
     for (const [lang, resumeWord, contWord] of [['zh', '恢复', '交还并留言…'], ['ja', '再開', 'メモで戻す…']]) {
       await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
-      if (!ok(await boot(), `${lang}: the app booted again in ${lang}`)) continue;
+      if (!ok(verdictOf(await boot()), `${lang}: the app booted again in ${lang}`)) continue;
       await sleep(600);
       await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
       await until(() => ev('return !!chatWin();'), 10000);
@@ -354,13 +354,13 @@ else await (async () => {
       const offer = await until(() => ev('const s = L().state(); return !!(s.stopped && s.resumeOffer && s.resumeText);'), 12000, 150);
       await sleep(400);
       const z = await ev('const l = L(); l.layoutBar && l.layoutBar(); const s = l.state(); const b = l.el().querySelector(".browser-live-reconnect"); return { resumeText: s.resumeText, folded: s.folded, btn: b && b.style.display !== "none" ? { sw: b.scrollWidth, cw: b.clientWidth, w: rect(b).width, h: rect(b).height, right: rect(b).left + rect(b).width, barRight: rect(l.el().querySelector(".browser-live-bar")).left + rect(l.el().querySelector(".browser-live-bar")).width } : null, width: rect(live().element).width };');
-      ok(offer && z.resumeText === resumeWord && z.btn && z.btn.sw <= z.btn.cw + 1 && z.btn.right <= z.btn.barRight + 1 && !z.folded.includes('reconnect'), `${lang}: Resume says "${resumeWord}", whole and inside the bar of a ${Math.round(z.width)} px window (it never folds)`, S(z));
+      ok(gateOf(offer) && z.resumeText === resumeWord && gateOf(z.btn) && z.btn.sw <= z.btn.cw + 1 && z.btn.right <= z.btn.barRight + 1 && !z.folded.includes('reconnect'), `${lang}: Resume says "${resumeWord}", whole and inside the bar of a ${Math.round(z.width)} px window (it never folds)`, S(z));
       const b2 = await ev('const b = L().el().querySelector(".browser-live-reconnect"); return rect(b);');
       await click(centre(b2));
       await until(() => ev('const s = L().state(); return s.connected && !s.stopped && s.contShown;'), 20000, 150);
       await sleep(400);
       const zc = await ev('const l = L(); l.layoutBar && l.layoutBar(); const s = l.state(); const c = l.el().querySelector(".browser-live-continue"); const onBar = c && c.style.display !== "none" && !s.folded.includes("continue"); return { contShown: s.contShown, contText: s.contText, onBar, fit: onBar ? c.scrollWidth <= c.clientWidth + 1 && rect(c).left + rect(c).width <= (rect(l.el().querySelector(".browser-live-bar")).left + rect(l.el().querySelector(".browser-live-bar")).width) + 1 : null, row: s.foldedRows.find((x) => x.label === s.contText) || null, folded: s.folded };');
-      ok(zc.contShown && zc.contText === contWord && zc.onBar && zc.fit, `${lang}: "${contWord}" is offered after the Resume — WHOLE ON THE BAR of the 360 px window (never folded into the ⋯ row)`, S(zc));
+      ok(gateOf(zc.contShown) && zc.contText === contWord && gateOf(zc.onBar) && verdictOf(zc.fit), `${lang}: "${contWord}" is offered after the Resume — WHOLE ON THE BAR of the 360 px window (never folded into the ⋯ row)`, S(zc));
       if (PNG_DIR) await png(`handback-bar-${lang}.png`, await ev('return rect(L().el().querySelector(".browser-live-bar"));'));
     }
     await send('Runtime.evaluate', { expression: `localStorage.removeItem('vibespace.lang'); true` });
@@ -370,33 +370,33 @@ else await (async () => {
     const det = await cli(['detach']);
     up.drop();
     const retired = await until(async () => { const st5 = (await j('GET', `/api/browser/session/${SID}`)).json; return !!(st5 && !st5.ephemeral); }, 10000);
-    ok(det.code === 0 && retired, 'the agent\'s `vibespace-browser detach`: its browser stopped and its record retired (the kept entry stays)', S({ det: det.stdout.slice(0, 200) + det.stderr.slice(0, 200) }));
-    if (!ok(await boot(), 'the app booted again (a fresh page: the view has no browser of its own to remember)')) return;
+    ok(det.code === 0 && verdictOf(retired), 'the agent\'s `vibespace-browser detach`: its browser stopped and its record retired (the kept entry stays)', S({ det: det.stdout.slice(0, 200) + det.stderr.slice(0, 200) }));
+    if (!ok(verdictOf(await boot()), 'the app booted again (a fresh page: the view has no browser of its own to remember)')) return;
     await sleep(600);
     await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); if (!live()) app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
     const off5 = await until(() => ev('const l = L(); const s = l && l.state(); return !!(s && s.resumeOffer && s.resumeText);'), 15000, 150);
     const s5 = await ev('const s = L().state(); return { resumeOffer: s.resumeOffer, resumeText: s.resumeText, statusText: s.statusText, target: s.target, notStarted: s.notStarted, own: row() && row().browserFact && row().browserFact.own };');
-    ok(off5 && /3 tab\(s\) and its logins are kept/.test(s5.statusText || ''), 'a view that never saw this browser (its record retired) offers Resume — read off THE fact (the conversation uses its own browser, kept, not running)', S(s5));
+    ok(gateOf(off5) && verdictOf(/3 tab\(s\) and its logins are kept/.test(s5.statusText || '')), 'a view that never saw this browser (its record retired) offers Resume — read off THE fact (the conversation uses its own browser, kept, not running)', S(s5));
     const n5 = cmds().length;
     const b5 = await ev('const b = L().el().querySelector(".browser-live-reconnect"); return b && b.style.display !== "none" ? rect(b) : null;');
     if (b5) await click(centre(b5));
     const back5 = await until(() => ev('const s = L().state(); return !!(s.connected && !s.stopped && s.frames >= 1 && s.tabs.length === 3);'), 20000, 150);
     const after5 = cmds().slice(n5);
-    ok(back5 && after5.includes('open https://a.test/') && after5.filter((x) => x.startsWith('tab new ')).length === 2, 'a REAL click: a new record, the three kept tabs reopened, the view connected by itself', S({ after5, st: await ev('const s = L().state(); return { connected: s.connected, tabs: s.tabs.length, error: s.error };') }));
+    ok(gateOf(back5) && gateOf(after5.includes('open https://a.test/')) && after5.filter((x) => x.startsWith('tab new ')).length === 2, 'a REAL click: a new record, the three kept tabs reopened, the view connected by itself', S({ after5, st: await ev('const s = L().state(); return { connected: s.connected, tabs: s.tabs.length, error: s.error };') }));
 
     // ── ⑥ lane browser-resume C: THE TAB ROW ──
     console.log('— ⑥ the tab row: owners, no control while the agent drives, REAL switch / ✕ while you drive, the last tab, the handback, Close all…');
     const row6 = () => ev('const s = L().state(); return s.tabRow;');
     const rowOk = await until(async () => { const r6 = await row6(); return !!(r6 && r6.shown && r6.rows.length === 3 && r6.rows.every((x) => x.owner === 'agent')); }, 10000, 150);
     let R6 = await row6();
-    ok(rowOk && R6.rows.every((x) => !x.canSwitch && !x.canClose) && R6.rows.filter((x) => x.active).length === 1 && R6.quit, 'the TAB ROW: one chip per tab of the agent\'s browser, each "The agent’s" (the bridge\'s `tab-owners`); while the agent drives NOTHING is drawn on them; "Close all…" at the row\'s end', S(R6));
+    ok(gateOf(rowOk) && gateOf(R6.rows.every((x) => !x.canSwitch && !x.canClose)) && R6.rows.filter((x) => x.active).length === 1 && verdictOf(R6.quit), 'the TAB ROW: one chip per tab of the agent\'s browser, each "The agent’s" (the bridge\'s `tab-owners`); while the agent drives NOTHING is drawn on them; "Close all…" at the row\'s end', S(R6));
     const takeTip = await ev('const b = L().el().querySelector(".browser-live-mode-btn"); return b ? b.title : null;');
-    ok(/Take over to switch or close the agent’s tabs/.test(takeTip || ''), 'the Take over toggle (a WORKING control) names what taking over adds: "Take over to switch or close the agent’s tabs"', takeTip);
+    ok(verdictOf(/Take over to switch or close the agent’s tabs/.test(takeTip || '')), 'the Take over toggle (a WORKING control) names what taking over adds: "Take over to switch or close the agent’s tabs"', takeTip);
     const tk6 = await ev('const b = L().el().querySelector(".browser-live-mode-btn"); return b && b.offsetParent ? rect(b) : null;');
     if (tk6) await click(centre(tk6));
     const drawn6 = await until(async () => { const r6 = await row6(); return !!(r6 && r6.rows.length === 3 && r6.rows.every((x) => x.canClose) && r6.rows.filter((x) => x.canSwitch).length === 2); }, 8000, 120);
     R6 = await row6();
-    ok(drawn6, 'a REAL Take over: every chip gets its ✕, every chip but the one on show is a switch', S(R6));
+    ok(verdictOf(drawn6), 'a REAL Take over: every chip gets its ✕, every chip but the one on show is a switch', S(R6));
     const tabs6 = tabsOf();
     const cur6 = tabs6.find((x) => x.active), other6 = tabs6.find((x) => !x.active && x.url === 'https://c.test/') || tabs6.find((x) => !x.active);
     const chipRect = (id) => ev(`const el = L().el().querySelector('.browser-live-tabchip[data-target="' + ${S(id)}.toUpperCase() + '"]'); return el && el.offsetParent ? rect(el) : null;`);
@@ -405,7 +405,7 @@ else await (async () => {
     const cr6 = await chipRect(other6.targetId);
     if (cr6) await click({ x: cr6.left + 14, y: cr6.top + cr6.height / 2 });
     const sw6 = await until(() => tabsOf().find((x) => x.active)?.targetId === other6.targetId, 8000, 100);
-    ok(sw6 && cmds().slice(n6).includes(`tab ${other6.targetId.toUpperCase()}`), `a REAL click on a chip SWITCHES the agent's tab (under its own session, by target id): ${other6.url} is on show`, S({ after: cmds().slice(n6), active: tabsOf().find((x) => x.active) }));
+    ok(gateOf(sw6) && verdictOf(cmds().slice(n6).includes(`tab ${other6.targetId.toUpperCase()}`)), `a REAL click on a chip SWITCHES the agent's tab (under its own session, by target id): ${other6.url} is on show`, S({ after: cmds().slice(n6), active: tabsOf().find((x) => x.active) }));
     await until(async () => (await row6()).rows.find((x) => x.active)?.targetId === other6.targetId.toUpperCase(), 5000, 100);
     await sleep(3400); // past the takeover anchor's grace: an AGENT's switch would now refuse his input tab_switched
     const inp6 = up.inputs.length;
@@ -413,7 +413,7 @@ else await (async () => {
     await click({ x: cv6.left + 40, y: cv6.top + 40 });
     const fwd6 = await until(() => up.inputs.length > inp6, 4000, 80);
     const rcpt6 = await ev('const s = L().state(); return s.receipts || s.lastReceipt || null;');
-    ok(fwd6, 'HIS switch moved the takeover\'s anchor: his next click on the picture reaches the page (never `tab_switched`)', S({ inputs: up.inputs.slice(inp6).map((m) => m.type), rcpt6 }));
+    ok(verdictOf(fwd6), 'HIS switch moved the takeover\'s anchor: his next click on the picture reaches the page (never `tab_switched`)', S({ inputs: up.inputs.slice(inp6).map((m) => m.type), rcpt6 }));
     // ✕ on a tab that is NOT on show
     const rest6 = tabsOf().filter((x) => x.targetId !== other6.targetId);
     const victim = rest6.find((x) => !x.active);
@@ -421,7 +421,7 @@ else await (async () => {
     const xr = await closeRect(victim.targetId);
     if (xr) await click(centre(xr));
     const gone6 = await until(() => !tabsOf().some((x) => x.targetId === victim.targetId), 8000, 100);
-    ok(gone6 && cmds().slice(n7).includes(`tab close ${victim.targetId.toUpperCase()}`) && tabsOf().find((x) => x.active)?.targetId === other6.targetId, `a REAL ✕ closes the agent's tab ${victim.url} under its own session — the tab on show stays`, S({ after: cmds().slice(n7), tabs: tabsOf() }));
+    ok(gateOf(gone6) && gateOf(cmds().slice(n7).includes(`tab close ${victim.targetId.toUpperCase()}`)) && tabsOf().find((x) => x.active)?.targetId === other6.targetId, `a REAL ✕ closes the agent's tab ${victim.url} under its own session — the tab on show stays`, S({ after: cmds().slice(n7), tabs: tabsOf() }));
     await until(async () => (await row6()).rows.length === 2, 5000, 100);
     // a refused close names why (the browser refuses it: the keeper's `tab_failed`)
     fs.writeFileSync(path.join(AB, 'fail-close'), '1');
@@ -430,25 +430,25 @@ else await (async () => {
     if (xr2) await click(centre(xr2));
     const err6 = await until(async () => { const r6 = await row6(); return !!(r6.error && r6.error.act === 'close'); }, 6000, 100);
     fs.unlinkSync(path.join(AB, 'fail-close'));
-    ok(err6 && tabsOf().some((x) => x.targetId === keepOne.targetId), 'a close the browser refuses is SAID (the toast\'s words: "Could not close the tab: …") — never silence; the tab stays', S({ error: (await row6()).error, xr2, row: await row6(), cmds: cmds().slice(-6), tail: journal.split('\n').filter((l) => /tab /.test(l)).slice(-4) }));
+    ok(gateOf(err6) && verdictOf(tabsOf().some((x) => x.targetId === keepOne.targetId)), 'a close the browser refuses is SAID (the toast\'s words: "Could not close the tab: …") — never silence; the tab stays', S({ error: (await row6()).error, xr2, row: await row6(), cmds: cmds().slice(-6), tail: journal.split('\n').filter((l) => /tab /.test(l)).slice(-4) }));
     // ✕ on the tab ON SHOW: the agent moves to its neighbour first, then the tab closes; the last tab has no ✕
     const n8 = cmds().length;
     const xr3 = await closeRect(other6.targetId);
     if (xr3) await click(centre(xr3));
     const gone7 = await until(() => !tabsOf().some((x) => x.targetId === other6.targetId), 8000, 100);
     const a8 = cmds().slice(n8);
-    ok(gone7 && a8.indexOf(`tab ${keepOne.targetId.toUpperCase()}`) >= 0 && a8.indexOf(`tab ${keepOne.targetId.toUpperCase()}`) < a8.indexOf(`tab close ${other6.targetId.toUpperCase()}`) && tabsOf().length === 1 && tabsOf()[0].active, '✕ on the tab ON SHOW: the agent\'s session moves to its neighbour FIRST, then the tab closes (the view keeps a picture)', S({ a8, tabs: tabsOf() }));
+    ok(gateOf(gone7) && a8.indexOf(`tab ${keepOne.targetId.toUpperCase()}`) >= 0 && a8.indexOf(`tab ${keepOne.targetId.toUpperCase()}`) < a8.indexOf(`tab close ${other6.targetId.toUpperCase()}`) && tabsOf().length === 1 && verdictOf(tabsOf()[0].active), '✕ on the tab ON SHOW: the agent\'s session moves to its neighbour FIRST, then the tab closes (the view keeps a picture)', S({ a8, tabs: tabsOf() }));
     const last6 = await until(async () => { const r6 = await row6(); return r6.rows.length === 1 && !r6.rows[0].canClose; }, 5000, 100);
-    ok(last6, 'the agent\'s LAST tab carries no ✕ (Close all… is the way to end it)', S(await row6()));
+    ok(verdictOf(last6), 'the agent\'s LAST tab carries no ✕ (Close all… is the way to end it)', S(await row6()));
     // the handback carries his acts (said to the agent in the handback's own words — test-browser-tabs ② pins the sentence)
     const hb6 = await ev('const b = L().el().querySelector(".browser-live-handback"); return b && b.offsetParent ? rect(b) : null;');
     if (hb6) await click(centre(hb6));
     // verify F3: each act is recorded at its own exec's check, so the list is in the order they RAN — the ✕ on the tab on
     // show is its neighbour move (tab-switch) THEN its close
     const said6 = await until(() => /the user's tab acts while driving \(said to the agent\): tab-switch, tab-close, tab-switch, tab-close/.test(journal), 8000, 100);
-    ok(said6, 'the handback carries what he did to the agent\'s tabs, in the order it ran (the keeper: "the user\'s tab acts while driving (said to the agent): tab-switch, tab-close, tab-switch, tab-close")', journal.split('\n').filter((l) => /handed back to the agent/.test(l)).slice(-2).join('\n'));
+    ok(verdictOf(said6), 'the handback carries what he did to the agent\'s tabs, in the order it ran (the keeper: "the user\'s tab acts while driving (said to the agent): tab-switch, tab-close, tab-switch, tab-close")', journal.split('\n').filter((l) => /handed back to the agent/.test(l)).slice(-2).join('\n'));
     const watch6 = await until(async () => { const r6 = await row6(); return r6.rows.every((x) => !x.canClose && !x.canSwitch); }, 5000, 100);
-    ok(watch6, 'handed back: the row draws no control again');
+    ok(verdictOf(watch6), 'handed back: the row draws no control again');
     // "Close all…" asks BY THE BROWSER'S NAME; cancelled ⇒ nothing stopped
     const n9 = cmds().length;
     await until(async () => (await row6()).quit, 8000, 120); // the row's end follows the conversation's browser rows (a handback re-reads them)
@@ -458,19 +458,19 @@ else await (async () => {
     const qa = (await row6()).quitAsked || {};
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await sleep(600);
-    ok(asked && /^Close all tabs of “.+”\?$/.test(qa.title) && /every tab of it closes/.test(qa.message) && !cmds().slice(n9).some((c) => /^close/.test(c)) && (await ev('return L().state().connected && !L().state().stopped;')), '"Close all…" asks ONCE, naming the browser ("Close all tabs of “…”?"); cancelled ⇒ nothing stopped', S({ qa, q6, after: cmds().slice(n9), row: await row6() }));
+    ok(gateOf(asked) && gateOf(/^Close all tabs of “.+”\?$/.test(qa.title)) && gateOf(/every tab of it closes/.test(qa.message)) && !cmds().slice(n9).some((c) => /^close/.test(c)) && (verdictOf(await ev('return L().state().connected && !L().state().stopped;'))), '"Close all…" asks ONCE, naming the browser ("Close all tabs of “…”?"); cancelled ⇒ nothing stopped', S({ qa, q6, after: cmds().slice(n9), row: await row6() }));
     // zh + ja: the row at 360 px — whole, the tab on show never folded
     await cli(['tab', 'new', 'https://d.test/a-long-page-title-that-goes-on']); await cli(['tab', 'new', 'https://e.test/']);
     for (const [lang, mark, quitWord] of [['zh', 'agent 的', '全部关闭…'], ['ja', 'エージェントの', 'すべて閉じる…']]) {
       await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
-      if (!ok(await boot(), `${lang}: the app booted again in ${lang}`)) continue;
+      if (!ok(verdictOf(await boot()), `${lang}: the app booted again in ${lang}`)) continue;
       await sleep(600);
       await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); if (!live()) app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
       await until(async () => { const l = await ev('const l = L(); return !!(l && l.state().tabRow.shown && l.state().tabRow.rows.length === 3);'); return l; }, 12000, 150);
       await ev('const w = live(); const el = w.element; wm.setMinSize && wm.setMinSize(w.id, null); el.style.width = "360px"; el.style.height = "560px"; window.dispatchEvent(new Event("resize")); return true;');
       await sleep(700);
       const z6 = await ev('const l = L(); const s = l.state(); const r = l.el().querySelector(".browser-live-tabrow"); const q = l.el().querySelector(".browser-live-tabrow-quit"); const act = s.tabRow.rows.find((x) => x.active); const actEl = act ? l.el().querySelector(\'.browser-live-tabchip[data-target="\' + act.targetId + \'"]\') : null; return { rows: s.tabRow.rows.map((x) => x.mark), folded: s.tabRow.folded, activeFolded: act ? s.tabRow.folded.includes(act.targetId) : null, row: rect(r), sw: r.scrollWidth, cw: r.clientWidth, quit: q && q.offsetParent ? { text: s.tabRow.quitText, sw: q.scrollWidth, cw: q.clientWidth, right: rect(q).left + rect(q).width } : null, actRect: actEl && actEl.offsetParent ? rect(actEl) : null };');
-      ok(z6.rows.every((x) => x === mark) && z6.quit && z6.quit.text === quitWord && z6.quit.sw <= z6.quit.cw + 1 && z6.quit.right <= z6.row.left + z6.row.width + 1 && z6.activeFolded === false && z6.actRect && z6.actRect.left + z6.actRect.width <= z6.row.left + z6.row.width + 1 && z6.sw <= z6.cw + 1,
+      ok(gateOf(z6.rows.every((x) => x === mark)) && gateOf(z6.quit) && z6.quit.text === quitWord && z6.quit.sw <= z6.quit.cw + 1 && z6.quit.right <= z6.row.left + z6.row.width + 1 && z6.activeFolded === false && gateOf(z6.actRect) && z6.actRect.left + z6.actRect.width <= z6.row.left + z6.row.width + 1 && z6.sw <= z6.cw + 1,
         `${lang}: the row in the device's words ("${mark}", "${quitWord}"), whole in a 360 px window — nothing overflows, the tab on show never folds (${z6.folded.length} folded into ▾+N)`, S(z6));
     }
     // ⑦ lane live-watch-polish (B-93d7, design 006 G1–G4): WATCH A FOLDED TAB in zh at 360 px — the "▾+N" menu's entry says
@@ -492,7 +492,7 @@ else await (async () => {
         fs.writeFileSync(path.join(AB, 'cdp.json'), JSON.stringify({ [ns]: CDPF }));
         await cli(['tab', 'new', 'https://f.test/']); await cli(['tab', 'new', 'https://g.test/']);
         await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', 'zh'); true` });
-        if (ok(await boot(), 'zh: the app booted again for the watch leg')) {
+        if (ok(verdictOf(await boot()), 'zh: the app booted again for the watch leg')) {
           await sleep(600);
           await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); if (!live()) app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
           await until(async () => !!(await ev('const l = L(); return !!(l && l.state().connected && l.state().tabRow.shown && l.state().tabRow.rows.length === 5);')), 12000, 150);
@@ -511,13 +511,13 @@ else await (async () => {
           const watched = !!pick && await until(async () => { const t = await ev('return L().state().tabRow;'); return !!(t.watch && t.watch.targetId === pick.targetId && !t.watch.pending && /^正在查看“/.test(t.watchLine)); }, 8000, 150);
           const t1 = await ev('return L().state().tabRow;');
           const cur = t1.rows.find((x) => x.active) || {};
-          ok(watched && t1.watchLine.includes('“' + pick.title + '”') && t1.watchLine.includes('agent 在“' + cur.title + '”上') && !t1.folded.includes(pick.targetId) && opened(pick.targetId) > 0 && (tabsOf().find((x) => x.active) || {}).targetId === agentTab0,
+          ok(gateOf(watched) && gateOf(t1.watchLine.includes('“' + pick.title + '”')) && gateOf(t1.watchLine.includes('agent 在“' + cur.title + '”上')) && !t1.folded.includes(pick.targetId) && opened(pick.targetId) > 0 && (tabsOf().find((x) => x.active) || {}).targetId === agentTab0,
             'G2/G3 zh: the view watches the folded tab — the line names BOTH tabs ("正在查看“…” — …agent 在“…”上"), the watched chip is kept on the row, the capture opened on it, the agent\'s tab untouched', S({ t1, pages: pages.map((p) => p.id), agentTab0 }));
           // G4: the view's socket drops — the reconnected view re-sends its watch; the line and the picture tell ONE truth
           const p0 = pick ? opened(pick.targetId) : 0;
           await ev('const ws = L().ws(); if (ws) ws.close(); return true;');
           const again = !!pick && await until(async () => { const t = await ev('const s = L().state(); return { c: s.connected, w: s.tabRow.watch, line: s.tabRow.watchLine };'); return !!(t.c && opened(pick.targetId) > p0 && t.w && t.w.targetId === pick.targetId && !t.w.pending && t.line.includes('“' + pick.title + '”')); }, 15000, 200);
-          ok(again, 'G4 zh: the socket dropped and reopened — the view re-sent its watch (a new capture on the watched tab) and its line still names it: one truth', S(await ev('const s = L().state(); return { c: s.connected, tr: s.tabRow };')));
+          ok(verdictOf(again), 'G4 zh: the socket dropped and reopened — the view re-sent its watch (a new capture on the watched tab) and its line still names it: one truth', S(await ev('const s = L().state(); return { c: s.connected, tr: s.tabRow };')));
         }
       } finally {
         try { fs.unlinkSync(path.join(AB, 'cdp.json')); } catch { }
@@ -667,7 +667,7 @@ else await (async () => {
           const frB = endMin != null ? await noRoom(endMin) : { fed: false, error: 'the row, its end button or the front\'s chip was not drawn to measure', frames: 0, visibility: null };
           const sdB = await ev(settledJs(3000));
           const premise = !!(frB.fed && r0.frontW && frB.room != null && frB.room < r0.frontW && Math.abs(frB.rowW - r0.rowW) <= 1);
-          ok(premise, `r943 CONTROL's PREMISE — no room, by a fact it set and read back: the end button planted at ${endMin} px (it was ${r0 && r0.endW}) leaves ${frB.room} px of the row for the front's chip of ${r0 && r0.frontW} px (the row ${r0 && r0.rowW} → ${frB.rowW} px)${premise ? '' : ' — THE PREMISE DID NOT FORM: the control below is not judged, so this is no verdict on the fold'}`, S({ r0, after: frB }));
+          ok(verdictOf(premise), `r943 CONTROL's PREMISE — no room, by a fact it set and read back: the end button planted at ${endMin} px (it was ${r0 && r0.endW}) leaves ${frB.room} px of the row for the front's chip of ${r0 && r0.frontW} px (the row ${r0 && r0.rowW} → ${frB.rowW} px)${premise ? '' : ' — THE PREMISE DID NOT FORM: the control below is not judged, so this is no verdict on the fold'}`, S({ r0, after: frB }));
           const wB = await ev(untilJs(rowAt, "r.more && r.more.marked && !(r.chip && r.chip.whole)", 5000));
           const huge = wB && wB.r;
           console.log(`    ⑨ the row at 1280 px with NO ROOM (the end button planted at ${endMin} px, ${frB.room} px left for a ${r0 && r0.frontW} px chip; ${facePlace(frB, wB, sdB)}): ${S(huge)}`);
@@ -766,7 +766,7 @@ else await (async () => {
       for (const lang of ['en', 'zh']) {
         const w = WORDS[lang];
         await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
-        if (!ok(await boot(), `⑩ ${lang}: the app booted again in ${lang}`)) continue;
+        if (!ok(verdictOf(await boot()), `⑩ ${lang}: the app booted again in ${lang}`)) continue;
         await sleep(600);
         await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
         await until(() => ev('return !!chatWin();'), 10000);
@@ -780,19 +780,19 @@ else await (async () => {
         await sleep(300);
         const first = {};
         for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { await plantRun(runA); await sleep(150); first[wpx] = await bars(); await shoot(`b346d-mark-first-${lang}-${wpx}.png`, first[wpx], wpx); }); }
-        ok(Array.isArray(pids) && pids.length > 0 && [1280, 390].every((x) => markOk(first[x], w) && first[x].note.length > 20) && first[1280].mark && first[1280].note === first[1280].mark.title,
+        ok(gateOf(Array.isArray(pids)) && pids.length > 0 && gateOf([1280, 390].every((x) => markOk(first[x], w) && first[x].note.length > 20)) && gateOf(first[1280].mark) && first[1280].note === first[1280].mark.title,
           `⑩ ${lang}: a browser in a hidden window — the bar's quiet MARK «${w.mark}» (a span, its tip the full sentence; inside the bar, or folded into ⋯ at 390) and its line said, at 1280 and 390`, S(first));
         // …then the mark alone, once the run's 20 s have passed
         await sleep(20600);
         const later = {};
         for (const wpx of [390, 1280]) { await sizeTo(wpx); await readHeld(async () => { await plantRun(runA); await sleep(150); later[wpx] = await bars(); await shoot(`b346d-mark-later-${lang}-${wpx}.png`, later[wpx], wpx); }); }
-        ok([1280, 390].every((x) => markOk(later[x], w) && later[x].note === ''), `⑩ ${lang}: the line is said ONCE a browser run — after its 20 s the mark alone stays, at 1280 and 390`, S(later));
+        ok(verdictOf([1280, 390].every((x) => markOk(later[x], w) && later[x].note === '')), `⑩ ${lang}: the line is said ONCE a browser run — after its 20 s the mark alone stays, at 1280 and 390`, S(later));
         // (2) THE SIGN-IN PROMPTS LINE: what to do, a button whose word names the moment (none for another machine's browser)
         for (const [why, btnWord] of [['not-watched', w.watch], ['gave-up', w.connect], ['remote', null]]) {
           await feedPk(why); await sleep(200);
           const got = {};
           for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { await plantRun(runA); await feedPk(why); await sleep(150); got[wpx] = await bars(); await shoot(`b346d-signin-${why}-${lang}-${wpx}.png`, got[wpx], wpx); }); }
-          ok([1280, 390].every((x) => w.prompts.test(got[x].line) && (btnWord ? !!got[x].btn && got[x].btn.text === btnWord && got[x].btn.right <= got[x].btn.dbRight + 1 : !got[x].btn)),
+          ok(verdictOf([1280, 390].every((x) => w.prompts.test(got[x].line) && (btnWord ? !!got[x].btn && got[x].btn.text === btnWord && got[x].btn.right <= got[x].btn.dbRight + 1 : !got[x].btn))),
             `⑩ ${lang}: «${why}» — the line speaks of sign-in prompts and says what to do; ${btnWord ? `its button «${btnWord}», whole inside the bar` : 'no button (another machine: close the tab there)'}, at 1280 and 390`, S(got));
         }
         // (3) r1505: A PRESS ALWAYS GETS ITS REPLY — «Connect again now» pressed, the bridge's answer planted as the fact is (the
@@ -802,7 +802,7 @@ else await (async () => {
         const said = {};
         const replyOf = () => ev(`const e = L().el().querySelector('.browser-live-passkey-retry-said'); return e && e.style.display !== 'none' ? e.textContent : '';`);
         for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { await plantRun(runA); await feedPk('gave-up'); await feedAck(); await sleep(150); said[wpx] = await bars(); said[wpx].reply = await replyOf(); await shoot(`b346d-reply-gave-up-${lang}-${wpx}.png`, said[wpx], wpx); }); }
-        ok([1280, 390].every((x) => REPLY[lang].test(said[x].reply) && markOk(said[x], w) && !!said[x].btn && said[x].btn.text === w.connect),
+        ok(verdictOf([1280, 390].every((x) => REPLY[lang].test(said[x].reply) && markOk(said[x], w) && !!said[x].btn && said[x].btn.text === w.connect)),
           `⑩ ${lang}: a press that changed nothing is ANSWERED under the line («${said[1280].reply}»), the mark quiet beside it, at 1280 and 390`, S(said));
         if (lang === 'en') {
           // B-346d, THE RED MADE ON PURPOSE (once, en at 390 — where the box's red try fell): the hub's own digest pushed down the
@@ -810,8 +810,8 @@ else await (async () => {
           // reads the hub's fact drawn over the plant — the mark gone
           const placed = async (gated) => { await sizeTo(390); const run = async () => { await plantRun(runA); await feedPk('gave-up'); await feedAck(); const pushed = await placeHubPush(); await sleep(150); const b = await bars(); return { pushed, ok: markOk(b, w), mark: b.mark, folded: b.folded }; }; return gated ? readHeld(run) : run(); };
           const pg = await placed(true), pr = await placed(false);
-          ok(pg.pushed && pg.ok, '⑩ en: B-346d — a push of the hub\'s own digest placed between the plant and the read is HELD by the suite\'s gate: the read is the plant\'s (the mark quiet at 390)', S(pg));
-          ok(pr.pushed && !pr.ok, 'CONTROL (the leg as it stood, no gate): the same placed push lands before the read — the hub\'s fact drawn over the plant, the mark gone at 390 (the one red try) — RED', S(pr));
+          ok(gateOf(pg.pushed) && verdictOf(pg.ok), '⑩ en: B-346d — a push of the hub\'s own digest placed between the plant and the read is HELD by the suite\'s gate: the read is the plant\'s (the mark quiet at 390)', S(pg));
+          ok(gateOf(pr.pushed) && !pr.ok, 'CONTROL (the leg as it stood, no gate): the same placed push lands before the read — the hub\'s fact drawn over the plant, the mark gone at 390 (the one red try) — RED', S(pr));
         }
         console.log(`    ⑩ ${lang}: the gate held ${await ev('const g = app.ws.__b346dGate; return g ? g.total : -1;')} push(es) of the hub's digest during the reads`);
         await feedPk(null);
@@ -839,7 +839,7 @@ else await (async () => {
       for (const lang of ['en', 'zh']) {
         const w = WORDS[lang], PW = PAINT_WORDS[lang], said = Object.values(PW);
         await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
-        if (!ok(await boot(), `⑪ ${lang}: the app booted again in ${lang}`)) continue;
+        if (!ok(verdictOf(await boot()), `⑪ ${lang}: the app booted again in ${lang}`)) continue;
         await sleep(600);
         await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
         await until(() => ev('return !!chatWin();'), 10000);
@@ -850,7 +850,7 @@ else await (async () => {
         for (const code of Object.keys(PW)) {
           got[code] = {};
           for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { got[code].at = await plantPaint(code, 'shown'); await sleep(150); got[code][wpx] = await bars(); got[code]['door' + wpx] = got[code].at && got[code].at.shown ? await chipOf(got[code].at.shown) : null; await shoot(`bcf8-still-${code}-${lang}-${wpx}.png`, await framed(got[code][wpx]), wpx); }); }
-          ok(!!got[code].at && !!got[code].at.shown && [1280, 390].every((x) => got[code][x].note === PW[code] && markOk(got[code][x], w)),
+          ok(!!got[code].at && !!got[code].at.shown && verdictOf([1280, 390].every((x) => got[code][x].note === PW[code] && markOk(got[code][x], w))),
             `⑪ ${lang}: «${code}» on the tab the view shows — its line said on the display line («${PW[code]}»), the hidden-window mark still on the bar, at 1280 and 390`, S(got[code]));
         }
         const other = {}, gone = {};
@@ -859,26 +859,26 @@ else await (async () => {
           await readHeld(async () => { await plantPaint('show-left', 'other'); await sleep(150); other[wpx] = await bars(); });
           await readHeld(async () => { await plantPaint('show-left', 'shown'); await sleep(150); await plantPaint('show-left', null); await sleep(150); gone[wpx] = await bars(); });
         }
-        ok([1280, 390].every((x) => !said.includes(other[x].note) && markOk(other[x], w)), `⑪ ${lang}: a code on ANOTHER tab (one this view does not show) — no line of it here`, S(other));
-        ok([1280, 390].every((x) => !said.includes(gone[x].note) && markOk(gone[x], w)), `⑪ ${lang}: the code cleared — its line gone with it (said while it stands, never after)`, S(gone));
+        ok(verdictOf([1280, 390].every((x) => !said.includes(other[x].note) && markOk(other[x], w))), `⑪ ${lang}: a code on ANOTHER tab (one this view does not show) — no line of it here`, S(other));
+        ok(verdictOf([1280, 390].every((x) => !said.includes(gone[x].note) && markOk(gone[x], w))), `⑪ ${lang}: the code cleared — its line gone with it (said while it stands, never after)`, S(gone));
         // r4297: the watcher's third line names Take over first BECAUSE the shown tab's chip is no button for a watcher
         await sizeTo(1280); const shownW = got['show-left'].at && got['show-left'].at.shown; const chipW = shownW ? await chipOf(shownW) : null;
         ok(!!chipW && chipW.role !== 'button', `⑪ ${lang}: a person who only watches — the shown tab's chip is no button, and the third line says Take over first («${PW['show-left']}»)`, S(chipW));
-        ok([1280, 390].every((x) => { const dr = got['show-left']['door' + x]; return !!dr && dr.drawn && dr.above && !!dr.take; }), `⑪ ${lang}: r4334 — BOTH doors the watcher's line names are DRAWN, at 1280 and 390: Take over on the bar, and the shown tab's chip in the tab row ABOVE the bar (never folded)`, S({ 1280: got['show-left'].door1280, 390: got['show-left'].door390 }));
+        ok(verdictOf([1280, 390].every((x) => { const dr = got['show-left']['door' + x]; return !!dr && dr.drawn && dr.above && !!dr.take; })), `⑪ ${lang}: r4334 — BOTH doors the watcher's line names are DRAWN, at 1280 and 390: Take over on the bar, and the shown tab's chip in the tab row ABOVE the bar (never folded)`, S({ 1280: got['show-left'].door1280, 390: got['show-left'].door390 }));
         // …then as a person who DRIVES: Take over, the same code — «Click its tab above», the chip a button
         // r4334: the watcher follows the line — a REAL click on the bar's Take over (the first door it names)
         const tkR = await ev('const b = L().el().querySelector(".browser-live-mode-btn"); return b && b.offsetParent ? rect(b) : null;'); if (tkR) await click(centre(tkR)); else await ev('L().takeOver(); return true;');
         const drivingN = await until(() => ev('const s = L().state(); return s.mode === "takeover" && s.mine;'), 12000);
         const drv = {};
         for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { drv.at = await plantPaint('show-left', 'shown'); await sleep(150); drv[wpx] = await bars(); drv['chip' + wpx] = drv.at && drv.at.shown ? await chipOf(drv.at.shown) : null; await shoot(`bcf8-still-show-left-driving-${lang}-${wpx}.png`, await framed(drv[wpx]), wpx); }); }
-        ok(drivingN && [1280, 390].every((x) => drv[x].note === DRIVE_WORDS[lang]) && !!drv.chip1280 && drv.chip1280.role === 'button',
+        ok(gateOf(drivingN) && gateOf([1280, 390].every((x) => drv[x].note === DRIVE_WORDS[lang])) && !!drv.chip1280 && drv.chip1280.role === 'button',
           `⑪ ${lang}: a person who DRIVES — the third line «${DRIVE_WORDS[lang]}», and the shown tab's chip IS a button (it brings the tab forward), at 1280 and 390`, S(drv));
         // r4334: the driver's door is drawn where the line says (the chip in the row ABOVE the bar) and a REAL press on it reaches the tab:
         // the switch runs under the agent's own session, by the tab's id (the fake agent-browser's command log)
         await sizeTo(1280); const dChip = drv.at && drv.at.shown ? await chipOf(drv.at.shown) : null; const nCmd = cmds().length;
         if (dChip && dChip.rect) await click(centre(dChip.rect));
         const pressed = !!(drv.at && drv.at.shown) && await until(() => cmds().slice(nCmd).includes(`tab ${String(drv.at.shown).toUpperCase()}`), 8000, 100);
-        ok(!!dChip && dChip.drawn && dChip.above && dChip.role === 'button' && pressed, `⑪ ${lang}: r4334 — the driver's door is DRAWN where the line says (the chip in the tab row above the bar) and a REAL press on it reaches the tab (the switch to it, under the agent's own session)`, S({ chip: dChip, cmds: cmds().slice(nCmd) }));
+        ok(!!dChip && gateOf(dChip.drawn) && gateOf(dChip.above) && dChip.role === 'button' && verdictOf(pressed), `⑪ ${lang}: r4334 — the driver's door is DRAWN where the line says (the chip in the tab row above the bar) and a REAL press on it reaches the tab (the switch to it, under the agent's own session)`, S({ chip: dChip, cmds: cmds().slice(nCmd) }));
         await readHeld(async () => { await plantPaint('show-left', null); });
         await ev('L().send({ type: "handback" }); return true;');
         await until(() => ev('const s = L().state(); return s.mode === "watch" && !s.mine;'), 10000);
@@ -897,4 +897,4 @@ else await (async () => {
     await sleep(500);
   }
 })().catch((e) => ok(false, 'the suite threw', e && (e.stack || e.message)));
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

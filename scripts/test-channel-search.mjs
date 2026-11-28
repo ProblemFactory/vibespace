@@ -27,7 +27,7 @@ import { spawnSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const SR = require(path.join(REPO, 'src/channel-search.js'));
 const { carriesFrame, makeRecord } = require(path.join(REPO, 'src/channel-record.js'));
 const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
@@ -56,21 +56,21 @@ const snipCases = (S) => ({
 });
 const sc = snipCases(SR);
 ok(sc.markup === 'the budget review Q3', 'markup is stripped, the words kept', JSON.stringify(sc.markup));
-ok(sc.entity && !carriesFrame(sc.entity) && /\[system-reminder\]/.test(sc.entity), 'an entity-encoded frame tag decodes INTO the name door and leaves inert', JSON.stringify(sc.entity));
-ok(sc.split && !carriesFrame(sc.split) && !/​/.test(sc.split), 'a frame tag split by a hidden character is neutered (the character removed, the tag inert)', JSON.stringify(sc.split));
+ok(gateOf(sc.entity) && !carriesFrame(sc.entity) && verdictOf(/\[system-reminder\]/.test(sc.entity)), 'an entity-encoded frame tag decodes INTO the name door and leaves inert', JSON.stringify(sc.entity));
+ok(gateOf(sc.split) && !carriesFrame(sc.split) && !/​/.test(sc.split), 'a frame tag split by a hidden character is neutered (the character removed, the tag inert)', JSON.stringify(sc.split));
 ok(sc.bidi === 'invoicefdp.exe budget', 'a bidi override is removed (the words read in their order)', JSON.stringify(sc.bidi));
-ok(sc.dangling && !/<system-reminder/.test(sc.dangling), 'a dangling opener at the end loses its <', JSON.stringify(sc.dangling));
-ok(sc.obj === 'object form' && sc.none.every((x) => x === null), 'an object snippet reads its text field; an array, a number, an all-invisible string are no snippet');
+ok(gateOf(sc.dangling) && !/<system-reminder/.test(sc.dangling), 'a dangling opener at the end loses its <', JSON.stringify(sc.dangling));
+ok(sc.obj === 'object form' && verdictOf(sc.none.every((x) => x === null)), 'an object snippet reads its text field; an array, a number, an all-invisible string are no snippet');
 const big = 'x'.repeat(1024 * 1024) + '<system-reminder>';
 // in WORK (lane work-meter-judges, .209 — was < 200 ms by hrtime, a FAST_SERIAL clock judge): 1 MiB and 2 MiB cost the same
 const bs = SR.snippetOf(big), SRF = path.join(REPO, 'src/channel-search.js');
 const ms1 = judgeInChild({ module: SRF, run: '(M, x) => M.snippetOf(x)', mk: "(n) => 'x'.repeat(n) + '<system-reminder>'", n: 1024 * 1024, kind: 'bounded' });
 const big2 = '<'.repeat(1024 * 1024);
 const ms2 = judgeInChild({ module: SRF, run: '(M, x) => M.snippetOf(x)', mk: "(n) => '<'.repeat(n)", n: 1024 * 1024, kind: 'bounded' });
-ok(bs.length <= SR.SNIPPET_MAX && !carriesFrame(bs) && ms1.ok && ms2.ok && big2.length, `a 1 MB display_info is cut BEFORE any regex: ≤ ${SR.SNIPPET_MAX} characters out, the same WORK at 1 / 2 MiB (${ms1.w1} / ${ms1.w2}; a '<' run ${ms2.w1} / ${ms2.w2})`, JSON.stringify({ ms1, ms2 }));
+ok(bs.length <= SR.SNIPPET_MAX && !carriesFrame(bs) && gateOf(ms1.ok) && gateOf(ms2.ok) && verdictOf(big2.length), `a 1 MB display_info is cut BEFORE any regex: ≤ ${SR.SNIPPET_MAX} characters out, the same WORK at 1 / 2 MiB (${ms1.w1} / ${ms1.w2}; a '<' run ${ms2.w1} / ${ms2.w2})`, JSON.stringify({ ms1, ms2 }));
 const sh = SR.snippetShape({ text: 'secret words <em>x</em>', title: 'more secret' });
 ok(sh.form === 'object' && sh.keys.join() === 'text,title' && sh.length === 23 && sh.markup === true && !JSON.stringify(sh).includes('secret'), 'the shape says form, key names, length, markup — never a word', JSON.stringify(sh));
-ok(SR.holdsQuery('季度预算复盘', '预算') && !SR.holdsQuery('季度 预 算', '预算') && SR.isCjk('预算') && !SR.isCjk('budget'), 'VS3 asks one boolean per snippet: does it hold the words as written');
+ok(gateOf(SR.holdsQuery('季度预算复盘', '预算')) && !SR.holdsQuery('季度 预 算', '预算') && gateOf(SR.isCjk('预算')) && !SR.isCjk('budget'), 'VS3 asks one boolean per snippet: does it hold the words as written');
 const hits = [{ convId: 'c1', vendorId: 'm1', at: 5 }, { convId: 'c1', vendorId: 'm2', at: 4 }, { convId: 'c1', vendorId: 'm1', at: 5 }, { convId: 'c2', vendorId: 'm3', at: 3 }];
 const mg = SR.mergeVendorHits(hits, { stored: (c, v) => v === 'm2' });
 ok(mg.hits.map((h) => h.vendorId).join() === 'm1,m3' && mg.stored === 1 && mg.repeated === 1, 'the merge drops a stored hit and a repeat, order kept', JSON.stringify(mg));
@@ -81,7 +81,7 @@ const table = [
   [V({ lastAt: 99000 }), 'search-floor'], [V({ inflight: true }), 'search-floor'], [V({ shareRefused: true, shareRetrySec: 7 }), 'vendor-budget'],
   [V({ minuteLeft: 0, minuteResetAt: 120000 }), 'search-minute'], [V({ budgetLeft: 0, budgetResetAt: 140000 }), 'vendor-budget'],
 ];
-ok(table.every(([v, code]) => v.act === 'refuse' && v.code === code) && table[2][0].retryAfterMs === 30000 && table[3][0].retryAfterMs === 1000, 'the refusal table: each row refuses by its code with its wait', JSON.stringify(table.map(([v]) => v)));
+ok(gateOf(table.every(([v, code]) => v.act === 'refuse' && v.code === code)) && table[2][0].retryAfterMs === 30000 && table[3][0].retryAfterMs === 1000, 'the refusal table: each row refuses by its code with its wait', JSON.stringify(table.map(([v]) => v)));
 ok(V({}).act === 'ask' && V({}).pages === 3 && V({ minuteLeft: 2 }).pages === 2 && V({ budgetLeft: 1 }).pages === 1 && V({ lastAt: 97000 }).act === 'ask', 'past every row: ask, never more pages than the minute or the budget has left');
 const words = (match) => SR.statusText({ state: 'done', found: 12, match }, { vendor: 'Lark' });
 // verify r1 F2: the words read the row's `adds` (what a hit ADDS to the saved copy), never the adapter id
@@ -98,15 +98,15 @@ const addsTable = [
   [SR.sectionHead(['older', 'unsaved'], { vendor: 'Lark · Gmail' }), "Not saved here — from Lark · Gmail's search"],
   [SR.sectionHead([], { vendor: 'Lark' }), "Older messages — from Lark's search"],
 ];
-ok(addsTable.every(([got, want]) => got === want), "F2 the words per `adds`: 'unsaved' says \"not saved here\" (Gmail's hits: mail outside the synced scope, a reply not synced yet), 'older' keeps Lark's words; one 'unsaved' row among the asked turns the head", JSON.stringify(addsTable.filter(([g, w]) => g !== w)));
+ok(verdictOf(addsTable.every(([got, want]) => got === want)), "F2 the words per `adds`: 'unsaved' says \"not saved here\" (Gmail's hits: mail outside the synced scope, a reply not synced yet), 'older' keeps Lark's words; one 'unsaved' row among the asked turns the head", JSON.stringify(addsTable.filter(([g, w]) => g !== w)));
 const gRow = require(path.join(REPO, 'src/channels/gmail.js')).caps.search, lRow = require(path.join(REPO, 'src/channels/lark.js')).caps.search;
 // lane slack-search (owner 2026-10-12): Slack's row — a hit adds what the copy never saved (a channel never joined, a thread
 // reply, history before the first read): "not saved here", and token matching: "may be related", never "found"
 const sRow = require(path.join(REPO, 'src/channels/slack.js')).caps.search;
-ok(sRow && sRow.adds === 'unsaved' && sRow.match === 'tokens' && sRow.context === 'around' && SR.sectionHead([sRow.adds], { vendor: 'Slack' }) === "Not saved here — from Slack's search" && !/found|older/i.test(said(sRow.adds, 3, sRow.match, 'Slack')), "Slack's row: adds 'unsaved', matches tokens — its press says \"not saved here\" and never \"found\" / \"older\"", JSON.stringify([sRow && sRow.adds, said(sRow.adds, 3, sRow.match, 'Slack')]));
+ok(gateOf(sRow) && sRow.adds === 'unsaved' && sRow.match === 'tokens' && sRow.context === 'around' && SR.sectionHead([sRow.adds], { vendor: 'Slack' }) === "Not saved here — from Slack's search" && !/found|older/i.test(said(sRow.adds, 3, sRow.match, 'Slack')), "Slack's row: adds 'unsaved', matches tokens — its press says \"not saved here\" and never \"found\" / \"older\"", JSON.stringify([sRow && sRow.adds, said(sRow.adds, 3, sRow.match, 'Slack')]));
 ok(gRow.adds === 'unsaved' && lRow.adds === 'older' && !/older/i.test(said(gRow.adds, 3, gRow.match) + SR.sectionHead([gRow.adds], { vendor: 'Gmail' })) && said(lRow.adds, 12, lRow.match, 'Lark') === words('unknown'), "F2 the rows: Gmail declares adds 'unsaved' (its press never says \"older\"), Lark 'older' (its words unchanged)", JSON.stringify([gRow.adds, lRow.adds]));
 ok(words('unknown') === "Asked Lark's whole history: 12 older messages may be related" && words('tokens') === words('unknown') && words('substring') === "Asked Lark's whole history: 12 older found", 'VS3: only a measured `substring` says "found" — until then "may be related"');
-ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' })) && /40 s/.test(SR.statusText({ state: 'refused', code: 'vendor-budget', retryAfterSec: 40 }, { vendor: 'Lark' })) && SR.statusText({ state: 'refused', code: 'not-supported' }) === 'This channel offers no search of its own', 'the refusals are worded: Re-authorize, the wait, no search of its own');
+ok(gateOf(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' }))) && gateOf(/40 s/.test(SR.statusText({ state: 'refused', code: 'vendor-budget', retryAfterSec: 40 }, { vendor: 'Lark' }))) && SR.statusText({ state: 'refused', code: 'not-supported' }) === 'This channel offers no search of its own', 'the refusals are worded: Re-authorize, the wait, no search of its own');
 
 // lane vendor-search-memo (.230): THE MEMO, PURE — key, scope, TTL, page append, Search again, LRU, bytes, table, words
 {
@@ -116,34 +116,34 @@ ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' }))
   ok(SR.memoQuery('  Budget \t  PLAN ') === 'budget plan' && SR.memoScope(null) === 'all' && SR.memoScope(['b', 'a', 'b']) === SR.memoScope(['a', 'b']) && SR.memoScope(['a']) !== SR.memoScope(['a', 'b']), 'memo: the key = trimmed, case-folded, spaces collapsed; the scope = all or the conversation set (order and repeats aside)');
   let s = put(undefined, { query: 'budget  plan' }).state;
   const g1 = get(s, { query: ' BUDGET plan', now: T0 + 5000 });
-  ok(g1.answer && g1.answer.hits.length === 1 && g1.answer.next === 'p:10' && g1.answer.ageMs === 5000 && g1.answer.askedAt === T0, 'memo: the same words (another case, other spaces) read the entry with its age');
-  ok(!get(s, { query: 'budget plan', scopes: ['set:1:x'] }).answer && get(s, { query: 'budget plan', scopes: ['set:1:x', 'all'] }).answer, 'memo: a scope reads its own entries only — an agent lists the owner\'s ("all") beside its own');
+  ok(gateOf(g1.answer) && g1.answer.hits.length === 1 && g1.answer.next === 'p:10' && g1.answer.ageMs === 5000 && g1.answer.askedAt === T0, 'memo: the same words (another case, other spaces) read the entry with its age');
+  ok(!get(s, { query: 'budget plan', scopes: ['set:1:x'] }).answer && verdictOf(get(s, { query: 'budget plan', scopes: ['set:1:x', 'all'] }).answer), 'memo: a scope reads its own entries only — an agent lists the owner\'s ("all") beside its own');
   // B-5b32 (report fb-460926fdbc): THE LIFE — an ASK is answered only inside SEARCH_MEMO_LIFE_MS from the account's answer
   const L10 = get(s, { query: 'budget plan', now: T0 + SR.SEARCH_MEMO_LIFE_MS }), L11 = get(s, { query: 'budget plan', now: T0 + 11 * 60e3 });
   const late = get(s, { query: 'budget plan', now: T0 + 365 * 86400e3 }), lateLook = get(s, { query: 'budget plan', now: T0 + 365 * 86400e3, look: true });
   const back1 = get(s, { query: 'budget plan', now: T0 - 1000 });
-  ok(SR.SEARCH_MEMO_LIFE_MS === 10 * 60e3 && L10.answer && L10.answer.ageMs === SR.SEARCH_MEMO_LIFE_MS && L10.answer.lifeMs === SR.SEARCH_MEMO_LIFE_MS && !L10.answer.past && L11.answer === null && late.answer === null && back1.answer === null, 'memo (B-5b32): an ask is answered only inside the life — at 10 min yes; at 11 min, a year later, or with the clock gone back past the answer: null (the account is asked again)', JSON.stringify({ L10: L10.answer && L10.answer.ageMs, L11: !!L11.answer, late: !!late.answer, back1: !!back1.answer }));
+  ok(SR.SEARCH_MEMO_LIFE_MS === 10 * 60e3 && gateOf(L10.answer) && L10.answer.ageMs === SR.SEARCH_MEMO_LIFE_MS && L10.answer.lifeMs === SR.SEARCH_MEMO_LIFE_MS && !L10.answer.past && L11.answer === null && late.answer === null && back1.answer === null, 'memo (B-5b32): an ask is answered only inside the life — at 10 min yes; at 11 min, a year later, or with the clock gone back past the answer: null (the account is asked again)', JSON.stringify({ L10: L10.answer && L10.answer.ageMs, L11: !!L11.answer, late: !!late.answer, back1: !!back1.answer }));
   // B-5b32 follow (r1115): a LOOK prefers the YOUNGEST page among its scopes (the agent's page first in the order, a fresher
   // whole-view page under 'all'); an ASK keeps the caller's order
   const yo = SR.searchMemo(put(undefined, { scope: 'set:1:ab', query: 'youngest', now: T0, next: null }).state, { op: 'put', scope: 'all', query: 'youngest', page: null, now: T0 + 5000, hits: [], next: null }).state;
   const yLook = get(yo, { query: 'youngest', scopes: ['set:1:ab', 'all'], now: T0 + 60000, look: true }).answer, yAsk = get(yo, { query: 'youngest', scopes: ['set:1:ab', 'all'], now: T0 + 60000 }).answer;
   const yTie = get(put(put(undefined, { scope: 'set:1:ab', query: 'tie', next: null }).state, { scope: 'all', query: 'tie', next: null }).state, { query: 'tie', scopes: ['set:1:ab', 'all'], look: true }).answer;
-  ok(yLook && yLook.scope === 'all' && yLook.ageMs === 55000 && yAsk && yAsk.scope === 'set:1:ab' && yTie && yTie.scope === 'set:1:ab', 'memo (B-5b32 follow): a LOOK shows the youngest page among its scopes (the whole view\'s, 55 s, over the agent\'s, 60 s); an ASK keeps the caller\'s order; a tie keeps the first', JSON.stringify({ look: yLook && yLook.scope, ask: yAsk && yAsk.scope, tie: yTie && yTie.scope }));
-  ok(lateLook.answer && lateLook.answer.past === true && lateLook.answer.ageMs === 365 * 86400e3 && lateLook.state.entries.size === 2 && late.state.entries.size === 2, 'memo (B-5b32 + lane search-card-open): a LOOK still reads a page past its life, with its true age and `past` — no age drops an entry', JSON.stringify(lateLook.answer && { past: lateLook.answer.past, ageMs: lateLook.answer.ageMs }));
+  ok(gateOf(yLook) && yLook.scope === 'all' && yLook.ageMs === 55000 && gateOf(yAsk) && yAsk.scope === 'set:1:ab' && gateOf(yTie) && yTie.scope === 'set:1:ab', 'memo (B-5b32 follow): a LOOK shows the youngest page among its scopes (the whole view\'s, 55 s, over the agent\'s, 60 s); an ASK keeps the caller\'s order; a tie keeps the first', JSON.stringify({ look: yLook && yLook.scope, ask: yAsk && yAsk.scope, tie: yTie && yTie.scope }));
+  ok(gateOf(lateLook.answer) && lateLook.answer.past === true && lateLook.answer.ageMs === 365 * 86400e3 && lateLook.state.entries.size === 2 && late.state.entries.size === 2, 'memo (B-5b32 + lane search-card-open): a LOOK still reads a page past its life, with its true age and `past` — no age drops an entry', JSON.stringify(lateLook.answer && { past: lateLook.answer.past, ageMs: lateLook.answer.ageMs }));
   s = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:10', now: T0 + 60000, hits: [{ convId: 'c', vendorId: 'w', at: 0 }], next: null }).state;
   const pg = get(s, { query: 'budget plan', page: 'p:10', now: T0 + 61000 });
   const stray = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:99', now: T0 + 62000, hits: [], next: null });
-  ok(pg.answer && pg.answer.askedAt === T0 && pg.answer.hits[0].vendorId === 'w' && get(s, { query: 'budget plan' }).answer.next === 'p:10' && stray.answer === false, 'memo: a later page APPENDS (askedAt stays the first press\'s); a page that does not follow the last is not kept');
+  ok(gateOf(pg.answer) && pg.answer.askedAt === T0 && pg.answer.hits[0].vendorId === 'w' && get(s, { query: 'budget plan' }).answer.next === 'p:10' && stray.answer === false, 'memo: a later page APPENDS (askedAt stays the first press\'s); a page that does not follow the last is not kept');
   const cl = SR.searchMemo(s, { op: 'clear', scope: 'all', query: 'Budget Plan' });
-  ok(cl.answer === true && !get(cl.state, { query: 'budget plan' }).answer && get(s, { query: 'budget plan' }).answer, 'memo: "Search again" forgets the entry (a new state — the old one untouched)');
+  ok(cl.answer === true && !get(cl.state, { query: 'budget plan' }).answer && verdictOf(get(s, { query: 'budget plan' }).answer), 'memo: "Search again" forgets the entry (a new state — the old one untouched)');
   let L;
   for (let i = 0; i < SR.SEARCH_MEMO_MAX + 6; i++) { L = put(L, { query: `q${i}`, hits: [] }).state; if (i === SR.SEARCH_MEMO_MAX - 1) L = get(L, { query: 'q0' }).state; }
-  ok(L.entries.size === SR.SEARCH_MEMO_MAX && get(L, { query: 'q0' }).answer && !get(L, { query: 'q1' }).answer && get(L, { query: `q${SR.SEARCH_MEMO_MAX + 5}` }).answer, `memo: the LRU — ≤ ${SR.SEARCH_MEMO_MAX} entries, the least recently READ leaves first (q0 was read, q1 left)`);
+  ok(L.entries.size === SR.SEARCH_MEMO_MAX && gateOf(get(L, { query: 'q0' }).answer) && !get(L, { query: 'q1' }).answer && verdictOf(get(L, { query: `q${SR.SEARCH_MEMO_MAX + 5}` }).answer), `memo: the LRU — ≤ ${SR.SEARCH_MEMO_MAX} entries, the least recently READ leaves first (q0 was read, q1 left)`);
   const fat = (n) => [{ convId: 'c', vendorId: 'v', at: 1, snippet: 'x'.repeat(n) }];
   let B;
   for (let i = 0; i < 8; i++) B = put(B, { query: `f${i}`, hits: fat(200 * 1024) }).state;
   const huge = put(B, { query: 'huge', hits: fat(1100 * 1024) });
-  ok(B.bytes <= SR.SEARCH_MEMO_BYTES && B.entries.size < 8 && !get(B, { query: 'f0' }).answer && get(B, { query: 'f7' }).answer && huge.answer === false && huge.state.entries.size === B.entries.size, `memo: ≤ ${SR.SEARCH_MEMO_BYTES / 1048576} MiB an account (the oldest leave); one answer over it is not kept`, JSON.stringify({ bytes: B.bytes, n: B.entries.size }));
+  ok(B.bytes <= SR.SEARCH_MEMO_BYTES && B.entries.size < 8 && !get(B, { query: 'f0' }).answer && gateOf(get(B, { query: 'f7' }).answer) && huge.answer === false && huge.state.entries.size === B.entries.size, `memo: ≤ ${SR.SEARCH_MEMO_BYTES / 1048576} MiB an account (the oldest leave); one answer over it is not kept`, JSON.stringify({ bytes: B.bytes, n: B.entries.size }));
   const Vm = (o) => SR.fullSearchVerdict({ declared: true, scopeHeld: true, now: 100000, floorMs: 2000, minuteLeft: 12, budgetLeft: 60, pages: 3, ...o });
   ok(Vm({ memo: true, backoffUntil: 200000, lastAt: 99999, inflight: true, minuteLeft: 0, budgetLeft: 0 }).act === 'memo' && Vm({ peek: true }).act === 'unasked' && Vm({ memo: true, peek: true }).act === 'memo' && Vm({ memo: true, declared: false }).code === 'not-supported' && Vm({ memo: true, scopeHeld: false }).code === 'needs-scope', 'the table: a remembered answer before the back-off, the floor, the minute, the budget; a look that is no press asks nothing; not declared / no scope still first');
   // lane search-card-open (.233): THE FAN — what one searcher found for a conversation answers that conversation
@@ -151,32 +151,32 @@ ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' }))
   const ap = (st, o) => SR.searchMemo(st, { op: 'put', scope: 'set:2:ab', query: 'Kayako', page: null, now: T0, hits: AH, next: 'p:10', by: 'agent', ...o });
   let F = ap(undefined).state;
   const fc = get(F, { query: 'kayako', scopes: ['all', SR.memoConv('c1')] }).answer;
-  ok(F.entries.size === 3 && fc && fc.scope === 'conv:c1' && fc.hits.map((h) => h.vendorId).join() === 'm1,m2' && fc.next === null && fc.derived && fc.by === 'agent' && !get(F, { query: 'kayako' }).answer, 'fan: an agent\'s answer is ALSO remembered per conversation it found (that conversation\'s hits, no page token, by the agent); not under "all" when its scope did not cover the account', JSON.stringify(fc));
+  ok(F.entries.size === 3 && gateOf(fc) && fc.scope === 'conv:c1' && fc.hits.map((h) => h.vendorId).join() === 'm1,m2' && fc.next === null && gateOf(fc.derived) && fc.by === 'agent' && !get(F, { query: 'kayako' }).answer, 'fan: an agent\'s answer is ALSO remembered per conversation it found (that conversation\'s hits, no page token, by the agent); not under "all" when its scope did not cover the account', JSON.stringify(fc));
   const Fa = ap(undefined, { covers: true }).state;
   const fa = get(Fa, { query: 'kayako' }).answer;
-  ok(fa && fa.hits.length === 3 && fa.next === null && fa.derived, 'fan: a scope covering every conversation of the account is remembered under "all" too (no token — it belongs to the agent\'s scope)');
+  ok(gateOf(fa) && fa.hits.length === 3 && fa.next === null && verdictOf(fa.derived), 'fan: a scope covering every conversation of the account is remembered under "all" too (no token — it belongs to the agent\'s scope)');
   const Fo = ap(put(undefined, { query: 'kayako', next: 'p:o' }).state, { covers: true }).state;
   ok(get(Fo, { query: 'kayako' }).answer.next === 'p:o' && !get(Fo, { query: 'kayako' }).answer.derived, 'fan: a derived entry never replaces an own answer (the owner\'s "all" keeps its rows and token)');
   const Fp = SR.searchMemo(F, { op: 'put', scope: 'set:2:ab', query: 'kayako', page: 'p:10', now: T0 + 1, hits: [{ convId: 'c1', vendorId: 'm4', at: 0 }], next: null, by: 'agent' }).state;
   ok(get(Fp, { query: 'kayako', scopes: ['conv:c1'] }).answer.hits.map((h) => h.vendorId).join() === 'm1,m2,m4' && !get(Fp, { query: 'kayako', scopes: ['conv:c1'], page: 'p:10' }).answer, 'fan: the next page joins what its first page derived; a derived entry answers no page token');
   const Fc = SR.searchMemo(F, { op: 'clear', scopes: ['set:2:ab'], query: 'kayako' });
-  ok(Fc.answer && Fc.state.entries.size === 0 && Fc.state.bytes === 0, 'fan: "Search again" on the origin forgets what it derived');
+  ok(gateOf(Fc.answer) && Fc.state.entries.size === 0 && Fc.state.bytes === 0, 'fan: "Search again" on the origin forgets what it derived');
   const many = Array.from({ length: 40 }, (_, i) => ({ convId: `k${i}`, vendorId: `v${i}`, at: i }));
   const Fm = ap(undefined, { hits: many }).state;
-  ok(Fm.entries.size === 1 + SR.SEARCH_MEMO_FAN && get(Fm, { query: 'kayako', scopes: ['set:2:ab'] }).answer, `fan: bounded — ≤ ${SR.SEARCH_MEMO_FAN} conversation entries a put, the original kept; the LRU (${SR.SEARCH_MEMO_MAX}) bounds them all`);
+  ok(Fm.entries.size === 1 + SR.SEARCH_MEMO_FAN && verdictOf(get(Fm, { query: 'kayako', scopes: ['set:2:ab'] }).answer), `fan: bounded — ≤ ${SR.SEARCH_MEMO_FAN} conversation entries a put, the original kept; the LRU (${SR.SEARCH_MEMO_MAX}) bounds them all`);
   // THE FILE (lane search-card-open: persisted per account) — a round trip, garbage, the bound, a derived token
   const disk = JSON.parse(JSON.stringify(SR.memoToDisk(Fp, { email: 'a@example.com' })));
   const back = SR.memoFromDisk(disk);
   const bad = JSON.parse(JSON.stringify(disk)); bad.entries[bad.entries.length - 1][1].pages[0].next = 'p:x'; bad.entries.push(['junk', { pages: 'x' }]);
   const badBack = SR.memoFromDisk(bad);
   ok(disk.v === 1 && disk.identity.email === 'a@example.com' && back.entries.size === Fp.entries.size && back.bytes === Fp.bytes && JSON.stringify(get(back, { query: 'kayako', scopes: ['conv:c1'] }).answer) === JSON.stringify(get(Fp, { query: 'kayako', scopes: ['conv:c1'] }).answer) && SR.memoFromDisk(null).entries.size === 0 && SR.memoFromDisk({ v: 9 }).entries.size === 0, 'file: memoToDisk → JSON → memoFromDisk answers the same; garbage / another version = empty');
-  ok(badBack.entries.size === Fp.entries.size && [...badBack.entries.values()].filter((x) => x.from).every((x) => x.pages[0].next === null), 'file: a malformed row is skipped; a derived row read back has no page token whatever the file says');
+  ok(badBack.entries.size === Fp.entries.size && verdictOf([...badBack.entries.values()].filter((x) => x.from).every((x) => x.pages[0].next === null)), 'file: a malformed row is skipped; a derived row read back has no page token whatever the file says');
   let BIG; for (let i = 0; i < 100; i++) BIG = put(BIG, { query: `b${i}`, hits: [] }).state;
   const bigDisk = SR.memoToDisk(BIG); for (let i = 0; i < 50; i++) bigDisk.entries.push([`all\u0000x${i}`, { askedAt: 1, by: 'owner', pages: [{ token: null, hits: [], next: null }] }]);
   ok(SR.memoFromDisk(bigDisk).entries.size === SR.SEARCH_MEMO_MAX, `file: an over-long file is read back within the bound (${SR.SEARCH_MEMO_MAX}, the newest)`);
-  ok(SR.isMemoScope('all') && SR.isMemoScope(SR.memoScope(['a', 'b'])) && !SR.isMemoScope('conv:c1') && !SR.isMemoScope('set:1:zz') && !SR.isMemoScope({}), 'the card\'s key: "all" or a set hash — a conversation scope is never read off a request');
-  ok(/^From Lark's search \(12 min ago, asked by the agent\)$/.test(SR.memoText(12 * 60e3, { vendor: 'Lark', by: 'agent' })) && /search on 10\/05 09:00$/.test(SR.memoText(3 * 3600e3, { vendor: 'Lark', date: '10/05 09:00' })) && /^The agent searched Lark 3 min ago — its results are not remembered here$/.test(SR.forgottenText(3 * 60e3, { vendor: 'Lark' })), 'the words: the agent\'s remembered answer says who asked and when (minutes, then the day); nothing remembered is said');
-  ok(/less than a minute/.test(SR.memoText(59999, { vendor: 'Lark' })) && /Lark's search 5 min ago/.test(SR.memoText(5 * 60e3 + 1, { vendor: 'Lark' })) && /Press Search/.test(SR.statusText({ state: 'unasked' }, { vendor: 'Lark' })), 'the words: a remembered answer says its age; the opened dialog says a press asks');
+  ok(gateOf(SR.isMemoScope('all')) && gateOf(SR.isMemoScope(SR.memoScope(['a', 'b']))) && !SR.isMemoScope('conv:c1') && !SR.isMemoScope('set:1:zz') && !SR.isMemoScope({}), 'the card\'s key: "all" or a set hash — a conversation scope is never read off a request');
+  ok(gateOf(/^From Lark's search \(12 min ago, asked by the agent\)$/.test(SR.memoText(12 * 60e3, { vendor: 'Lark', by: 'agent' }))) && gateOf(/search on 10\/05 09:00$/.test(SR.memoText(3 * 3600e3, { vendor: 'Lark', date: '10/05 09:00' }))) && verdictOf(/^The agent searched Lark 3 min ago — its results are not remembered here$/.test(SR.forgottenText(3 * 60e3, { vendor: 'Lark' }))), 'the words: the agent\'s remembered answer says who asked and when (minutes, then the day); nothing remembered is said');
+  ok(gateOf(/less than a minute/.test(SR.memoText(59999, { vendor: 'Lark' }))) && gateOf(/Lark's search 5 min ago/.test(SR.memoText(5 * 60e3 + 1, { vendor: 'Lark' }))) && verdictOf(/Press Search/.test(SR.statusText({ state: 'unasked' }, { vendor: 'Lark' }))), 'the words: a remembered answer says its age; the opened dialog says a press asks');
 }
 
 // ── §B THE STORE: NEWEST CONVERSATION FIRST UNDER THE CAP ──────────────────
@@ -205,7 +205,7 @@ async function storeLeg(create, label) {
 {
   const { r, got, want } = await storeLeg(null, 'real');
   ok(JSON.stringify(got) === JSON.stringify(want), 'a capped scan searched the 10 NEWEST conversations (the cut is the oldest, never readdir chance)', JSON.stringify(got.slice(0, 4)));
-  ok(r.coverage && r.coverage.scanned === 10 && r.coverage.total === 40 && r.coverage.capped === true && r.coverage.oldestAt === 1_700_000_000_000 + 30 * 60e3, 'the answer says what it covered: 10 of 40, capped, the oldest instant reached', JSON.stringify(r.coverage));
+  ok(gateOf(r.coverage) && r.coverage.scanned === 10 && r.coverage.total === 40 && r.coverage.capped === true && r.coverage.oldestAt === 1_700_000_000_000 + 30 * 60e3, 'the answer says what it covered: 10 of 40, capped, the oldest instant reached', JSON.stringify(r.coverage));
 }
 
 // ── §C THE ENGINE OVER THE FAKE VENDOR'S SEARCH ────────────────────────────
@@ -255,20 +255,20 @@ const logHash = (eng, a, c) => { try { return crypto.createHash('sha1').update(f
 {
   const { eng, S, tick } = await mkEngine('eng-main');
   const loc = await eng.search('srch', 'Ops');
-  ok(loc.ok && loc.coverage && loc.coverage.total >= 1 && loc.vendorSearch && loc.vendorSearch.match === 'substring', 'the local answer carries its coverage and that the account offers its own search', JSON.stringify({ c: loc.coverage, v: loc.vendorSearch }));
+  ok(gateOf(loc.ok) && gateOf(loc.coverage) && loc.coverage.total >= 1 && gateOf(loc.vendorSearch) && loc.vendorSearch.match === 'substring', 'the local answer carries its coverage and that the account offers its own search', JSON.stringify({ c: loc.coverage, v: loc.vendorSearch }));
   const r1 = await eng.searchVendor('srch', 'budget');
-  ok(r1.ok && S.calls.search === fake.FAKE_SEARCH.pagesPerPress && r1.hits.length === 2 * fake.FAKE_SEARCH.pageSize && r1.next, `ONE press = ${fake.FAKE_SEARCH.pagesPerPress} pages (the row's pagesPerPress), a token for the rest`, JSON.stringify({ calls: S.calls, n: r1.hits && r1.hits.length, code: r1.code }));
-  ok(r1.ok && r1.hits.every((h) => h.snippet && !/<em>/.test(h.snippet)) && r1.hits.some((h) => h.known && h.convId === 'srch-ops') && r1.hits.filter((h) => !h.known).every((h) => h.title === null), 'each hit: the snippet through the reader, a stored conversation named, an unknown one nameless (the client words it)');
+  ok(gateOf(r1.ok) && S.calls.search === fake.FAKE_SEARCH.pagesPerPress && r1.hits.length === 2 * fake.FAKE_SEARCH.pageSize && verdictOf(r1.next), `ONE press = ${fake.FAKE_SEARCH.pagesPerPress} pages (the row's pagesPerPress), a token for the rest`, JSON.stringify({ calls: S.calls, n: r1.hits && r1.hits.length, code: r1.code }));
+  ok(gateOf(r1.ok) && gateOf(r1.hits.every((h) => h.snippet && !/<em>/.test(h.snippet))) && gateOf(r1.hits.some((h) => h.known && h.convId === 'srch-ops')) && verdictOf(r1.hits.filter((h) => !h.known).every((h) => h.title === null)), 'each hit: the snippet through the reader, a stored conversation named, an unknown one nameless (the client words it)');
   const r2 = await eng.searchVendor('srch', 'kickoff');
   ok(r2.code === 'search-floor' && r2.retryAfterSec >= 1 && S.calls.search === 2, 'a second press (other words) inside the 2 s floor = ZERO vendor calls, refused with the wait', JSON.stringify(r2));
   tick(2500);
   const r3 = await eng.searchVendor('srch', 'budget', { pageToken: r1.next });
-  ok(r3.ok && S.calls.search === 3 && r3.hits.length >= 1, 'the scroll\'s page = ONE call by its token', JSON.stringify({ calls: S.calls, code: r3.code }));
+  ok(gateOf(r3.ok) && S.calls.search === 3 && r3.hits.length >= 1, 'the scroll\'s page = ONE call by its token', JSON.stringify({ calls: S.calls, code: r3.code }));
   const stored = eng.store.readTail('srch', 'srch-ops', { limit: 1 })[0];
   S.inject.extra = { convId: 'srch-ops', vendorId: stored.vendorId, at: stored.at, fromId: null, threadKey: null, snippet: 'stored one' };
   tick(2500);
   const r4 = await eng.searchVendor('srch', 'budget', { again: true });
-  ok(r4.ok && !r4.hits.some((h) => h.vendorId === stored.vendorId) && r4.stored >= 1, 'a hit the local copy holds is dropped — it is in section one, once (V6)', JSON.stringify({ stored: r4.stored }));
+  ok(gateOf(r4.ok) && !r4.hits.some((h) => h.vendorId === stored.vendorId) && r4.stored >= 1, 'a hit the local copy holds is dropped — it is in section one, once (V6)', JSON.stringify({ stored: r4.stored }));
   S.inject.extra = null;
   S.inject.rate = 1;
   tick(2500);
@@ -285,31 +285,31 @@ const logHash = (eng, a, c) => { try { return crypto.createHash('sha1').update(f
   const a1 = await eng.aroundOwner('srch', 'srch-ops', { vendorId: hit.vendorId, at: hit.at });
   const a2 = await eng.aroundOwner('srch', 'srch-archived-chat', { vendorId: 'srch-arch-1', at: r1.hits.find((h) => h.convId === 'srch-archived-chat').at });
   const after = { h: logHash(eng, 'srch', 'srch-ops'), row: JSON.stringify(eng.store.index.peek('srch/srch-ops')), conv: Object.keys(eng.store.index.live()).length };
-  ok(a1.ok && a1.records.some((r) => r.vendorId === hit.vendorId) && a1.records.length <= SR.AROUND_MAX && S.calls.around === 2 && a1.stored === false, 'around = ONE adapter read (its two requests) per opened hit — two hits, two reads; the found message among ≤ 50 records', JSON.stringify({ n: a1.records && a1.records.length, calls: S.calls.around }));
-  ok(a2.ok && a2.known === false && after.h === before.h && after.row === before.row && after.conv === before.conv && !eng.store.findRecord('srch', 'srch-ops', hit.vendorId), 'NOTHING is stored: the log\'s bytes, its index row and the conversation count are identical; an unknown conversation is never born (V5 / F8)');
+  ok(gateOf(a1.ok) && gateOf(a1.records.some((r) => r.vendorId === hit.vendorId)) && a1.records.length <= SR.AROUND_MAX && S.calls.around === 2 && a1.stored === false, 'around = ONE adapter read (its two requests) per opened hit — two hits, two reads; the found message among ≤ 50 records', JSON.stringify({ n: a1.records && a1.records.length, calls: S.calls.around }));
+  ok(gateOf(a2.ok) && a2.known === false && after.h === before.h && after.row === before.row && after.conv === before.conv && !eng.store.findRecord('srch', 'srch-ops', hit.vendorId), 'NOTHING is stored: the log\'s bytes, its index row and the conversation count are identical; an unknown conversation is never born (V5 / F8)');
   const nos = await eng.searchVendor('nos', 'budget');
-  ok(nos.code === 'not-supported' && /no search of its own/.test(nos.error), 'an account whose adapter declares no search refuses by name, asking nothing', JSON.stringify(nos));
+  ok(nos.code === 'not-supported' && verdictOf(/no search of its own/.test(nos.error)), 'an account whose adapter declares no search refuses by name, asking nothing', JSON.stringify(nos));
   // the agent: --full and --around
   const AG = { kind: 'agent', id: 'agent-S', name: 'Searcher', groups: [] };
   const ga = await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: 'agent-S', name: 'Searcher' } }]);
   tick(31000);
   const cA = S.calls.search;
   const f1 = await eng.searchFor(AG, 'budget', { full: true, adapterId: 'srch' });
-  ok(ga.ok && f1.ok && S.calls.search === cA + 1 && f1.results.length >= 1 && f1.results.every((x) => /srch-ops/.test(x.key) && x.source === 'vendor'), 'an agent\'s --full = ONE page; every hit it is shown is in a conversation it can see', JSON.stringify({ ga: ga.code, f1: f1.code || f1.results && f1.results.length, calls: S.calls.search - cA }));
+  ok(gateOf(ga.ok) && gateOf(f1.ok) && S.calls.search === cA + 1 && f1.results.length >= 1 && verdictOf(f1.results.every((x) => /srch-ops/.test(x.key) && x.source === 'vendor')), 'an agent\'s --full = ONE page; every hit it is shown is in a conversation it can see', JSON.stringify({ ga: ga.code, f1: f1.code || f1.results && f1.results.length, calls: S.calls.search - cA }));
   tick(2500);
   const f2 = await eng.searchFor(AG, 'kickoff', { full: true, adapterId: 'srch' });
   ok(f2.code === 'refresh-floor' && S.calls.search === cA + 1, 'its second --full (other words) inside 20 s is refused by the floor, zero calls', JSON.stringify(f2));
   const f2m = await eng.searchFor(AG, 'Budget', { full: true, adapterId: 'srch' });
-  ok(f2m.ok && f2m.remembered && S.calls.search === cA + 1 && f2m.results.length === f1.results.length, 'lane vendor-search-memo: its repeat of the same words = its own remembered answer, zero calls, no floor', JSON.stringify({ code: f2m.code, rem: f2m.remembered }));
+  ok(gateOf(f2m.ok) && gateOf(f2m.remembered) && S.calls.search === cA + 1 && f2m.results.length === f1.results.length, 'lane vendor-search-memo: its repeat of the same words = its own remembered answer, zero calls, no floor', JSON.stringify({ code: f2m.code, rem: f2m.remembered }));
   tick(21000);
   const f3 = await eng.searchFor(AG, 'last year', { full: true, adapterId: 'srch' });
-  ok(f3.ok && f3.results.length === 0 && f3.truncated === false && !('stored' in f3) && !('next' in f3), 'a hit only in a conversation it cannot see is ABSENT — no count, no truncated, no token (V2)', JSON.stringify(f3));
+  ok(gateOf(f3.ok) && f3.results.length === 0 && f3.truncated === false && !('stored' in f3) && !('next' in f3), 'a hit only in a conversation it cannot see is ABSENT — no count, no truncated, no token (V2)', JSON.stringify(f3));
   const ar = await eng.readAroundFor(AG, 'srch', 'srch-ops', hit.vendorId);
   const arHidden = await eng.readAroundFor(AG, 'srch', 'srch-archived-chat', 'srch-arch-1');
   const arNever = await eng.readAroundFor(AG, 'srch', 'srch-ops', 'never-shown');
-  ok(ar.ok && ar.records.some((r) => r.vendorId === hit.vendorId) && /not saved/.test(ar.note) && arHidden.code === 'not-found' && arNever.code === 'not-found', '--around: the messages around a hit it was shown; a hidden conversation and an id never shown are the uniform not-found', JSON.stringify({ ar: ar.code, h: arHidden.code, n: arNever.code }));
+  ok(gateOf(ar.ok) && gateOf(ar.records.some((r) => r.vendorId === hit.vendorId)) && gateOf(/not saved/.test(ar.note)) && arHidden.code === 'not-found' && arNever.code === 'not-found', '--around: the messages around a hit it was shown; a hidden conversation and an id never shown are the uniform not-found', JSON.stringify({ ar: ar.code, h: arHidden.code, n: arNever.code }));
   const loc2 = await eng.searchFor(AG, 'Ops');
-  ok(loc2.ok && Number.isFinite(loc2.covered) && loc2.fullOffered === true, 'the free search says what it covered and that --full exists', JSON.stringify({ covered: loc2.covered, f: loc2.fullOffered }));
+  ok(gateOf(loc2.ok) && gateOf(Number.isFinite(loc2.covered)) && loc2.fullOffered === true, 'the free search says what it covered and that --full exists', JSON.stringify({ covered: loc2.covered, f: loc2.fullOffered }));
   // verify r1 (F1–F4): the stored check at the hit's whole second, the press floor kept off the scroll's page, the
   // --around floor, one press of the endpoint's minute kept for the owner (each red on the lane head f7b4cd48)
   const ar2 = await eng.readAroundFor(AG, 'srch', 'srch-ops', hit.vendorId);
@@ -321,16 +321,16 @@ const logHash = (eng, a, c) => { try { return crypto.createHash('sha1').update(f
   tick(61000);
   const r7 = await eng.searchVendor('srch', 'budget');
   S.inject.extra = null;
-  ok(r7.ok && !r7.hits.some((h) => h.vendorId === 'ms-1') && r7.stored >= 1, 'verify r1 F1: a whole-second hit on the oldest stored (millisecond) message counts as stored — never section two, never VS1', JSON.stringify({ code: r7.code, stored: r7.stored }));
+  ok(gateOf(r7.ok) && !r7.hits.some((h) => h.vendorId === 'ms-1') && r7.stored >= 1, 'verify r1 F1: a whole-second hit on the oldest stored (millisecond) message counts as stored — never section two, never VS1', JSON.stringify({ code: r7.code, stored: r7.stored }));
   tick(800);
   const r8 = await eng.searchVendor('srch', 'budget', { pageToken: r7.next });
-  ok(r7.next && r8.ok, 'verify r1 F4: the scroll\'s page 0.8 s after the press is asked (the 2 s floor is a press\'s)', JSON.stringify({ code: r8.code }));
+  ok(gateOf(r7.next) && verdictOf(r8.ok), 'verify r1 F4: the scroll\'s page 0.8 s after the press is asked (the 2 s floor is a press\'s)', JSON.stringify({ code: r8.code }));
   await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'everyone', id: '*' } }]);
   tick(61000);
   const fx = {};
   for (let i = 0; i < fake.FAKE_SEARCH.perMin + 2; i++) { const x = await eng.searchFor({ kind: 'agent', id: `agent-L${i}`, name: 'L', groups: [] }, `zz loop ${i}`, { full: true, adapterId: 'srch' }); fx[x.ok ? 'ok' : x.code] = (fx[x.ok ? 'ok' : x.code] || 0) + 1; tick(200); }
   const own = await eng.searchVendor('srch', 'budget', { again: true });
-  ok(own.ok && fx.ok === fake.FAKE_SEARCH.perMin - fake.FAKE_SEARCH.pagesPerPress, 'verify r1 F3: agents looping --full leave one press of the endpoint\'s minute — the owner\'s press is asked', JSON.stringify({ agents: fx, owner: own.code || 'ok' }));
+  ok(gateOf(own.ok) && fx.ok === fake.FAKE_SEARCH.perMin - fake.FAKE_SEARCH.pagesPerPress, 'verify r1 F3: agents looping --full leave one press of the endpoint\'s minute — the owner\'s press is asked', JSON.stringify({ agents: fx, owner: own.code || 'ok' }));
   eng.stop && eng.stop();
 }
 
@@ -368,35 +368,35 @@ async function agentRoad(eng, S) {
   const road = await agentRoad(eng, S);
   const sp0 = road.spent;
   const hit = road.full.ok && road.full.results.find((x) => x.vendorId === FILE_MSG);
-  ok(hit && hit.source === 'vendor' && !eng.store.findRecord('srch', 'srch-ops', FILE_MSG), '--full finds the file message — one the saved copy never held (a hit names its message id)', JSON.stringify({ code: road.full.code, hit }));
-  ok(road.typed.code === 'not-found' && /not in the saved copy/.test(road.typed.error) && /read <conv> --around/.test(road.typed.error) && road.typedCalls === 0, 'the RIGHT ids typed before any vendor read showed the message here: not-found naming both (the saved copy, no --around), ZERO vendor calls — Lark\'s resource address names no chat', JSON.stringify({ typed: road.typed, calls: road.typedCalls }));
+  ok(gateOf(hit) && hit.source === 'vendor' && !eng.store.findRecord('srch', 'srch-ops', FILE_MSG), '--full finds the file message — one the saved copy never held (a hit names its message id)', JSON.stringify({ code: road.full.code, hit }));
+  ok(road.typed.code === 'not-found' && gateOf(/not in the saved copy/.test(road.typed.error)) && gateOf(/read <conv> --around/.test(road.typed.error)) && road.typedCalls === 0, 'the RIGHT ids typed before any vendor read showed the message here: not-found naming both (the saved copy, no --around), ZERO vendor calls — Lark\'s resource address names no chat', JSON.stringify({ typed: road.typed, calls: road.typedCalls }));
   const shown = road.around.ok ? road.around.records.find((r) => r.vendorId === FILE_MSG) : null;
   const part = shown ? (shown.attachments || []).find((a) => a.id === FILE_ID) : null;
-  ok(part && part.name === 'Q3-plan.pdf' && /not saved/.test(road.around.note), '--around shows the file message with its attachment id and name (printed, not saved)', JSON.stringify({ code: road.around.code, part }));
+  ok(gateOf(part) && part.name === 'Q3-plan.pdf' && verdictOf(/not saved/.test(road.around.note)), '--around shows the file message with its attachment id and name (printed, not saved)', JSON.stringify({ code: road.around.code, part }));
   const x1 = road.fetched;
   const sp1 = { ...eng.budgetOf('srch').spentBy };
-  ok(x1.ok && x1.source === 'vendor' && x1.cached === false && S.calls.fetches.length === 1 && JSON.stringify(S.calls.fetches[0]) === JSON.stringify({ convId: 'srch-ops', messageId: FILE_MSG, attachmentId: FILE_ID, mime: null }) && fs.readFileSync(x1.file, 'utf-8') === `fixture attachment ${FILE_ID} of ${FILE_MSG}\n`, 'the fetch: ONE adapter call with the message id and file key the read showed (no type said ⇒ none passed), source \'vendor\', the vendor\'s bytes', JSON.stringify({ x1, fetches: S.calls.fetches }));
+  ok(gateOf(x1.ok) && x1.source === 'vendor' && x1.cached === false && S.calls.fetches.length === 1 && JSON.stringify(S.calls.fetches[0]) === JSON.stringify({ convId: 'srch-ops', messageId: FILE_MSG, attachmentId: FILE_ID, mime: null }) && fs.readFileSync(x1.file, 'utf-8') === `fixture attachment ${FILE_ID} of ${FILE_MSG}\n`, 'the fetch: ONE adapter call with the message id and file key the read showed (no type said ⇒ none passed), source \'vendor\', the vendor\'s bytes', JSON.stringify({ x1, fetches: S.calls.fetches }));
   ok((sp1.agent || 0) - (sp0.agent || 0) === 1 && (sp1.owner || 0) === (sp0.owner || 0), 'charged as the AGENT (spendAs \'agent\'): one unit on the agents\' share, none on the owner\'s — the archive road\'s attribution', JSON.stringify({ sp0, sp1 }));
-  ok(x1.from === 'Brook' && x1.conversation && x1.conversation.id === 'srch-ops' && x1.mime === 'text/plain', 'the answer names the sender and the conversation the read showed it in', JSON.stringify({ from: x1.from, conv: x1.conversation, mime: x1.mime }));
+  ok(x1.from === 'Brook' && gateOf(x1.conversation) && x1.conversation.id === 'srch-ops' && x1.mime === 'text/plain', 'the answer names the sender and the conversation the read showed it in', JSON.stringify({ from: x1.from, conv: x1.conversation, mime: x1.mime }));
   const x2 = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG, by: 'agent', principal: AGF });
   const sp2 = { ...eng.budgetOf('srch').spentBy };
-  ok(x2.ok && x2.cached === true && x2.source === 'vendor' && x2.file === x1.file && S.calls.fetches.length === 1 && JSON.stringify(sp2) === JSON.stringify(sp1), 'the second fetch: the CACHE — zero vendor calls, nothing charged, still source \'vendor\'', JSON.stringify({ x2, n: S.calls.fetches.length, sp2 }));
+  ok(gateOf(x2.ok) && x2.cached === true && x2.source === 'vendor' && x2.file === x1.file && S.calls.fetches.length === 1 && JSON.stringify(sp2) === JSON.stringify(sp1), 'the second fetch: the CACHE — zero vendor calls, nothing charged, still source \'vendor\'', JSON.stringify({ x2, n: S.calls.fetches.length, sp2 }));
   const x3 = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: 'srch-ops-old-nope', by: 'agent', principal: AGF });
-  ok(x3.code === 'not-found' && /not in the saved copy/.test(x3.error) && /--around/.test(x3.error) && S.calls.fetches.length === 1, 'a WRONG message id: not-found naming both (not saved, never shown here), zero vendor calls', JSON.stringify(x3));
+  ok(x3.code === 'not-found' && gateOf(/not in the saved copy/.test(x3.error)) && gateOf(/--around/.test(x3.error)) && S.calls.fetches.length === 1, 'a WRONG message id: not-found naming both (not saved, never shown here), zero vendor calls', JSON.stringify(x3));
   const AGX = { kind: 'agent', id: 'agent-X', name: 'Outsider', groups: [] };
   const xh = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG, by: 'agent', principal: AGX });
   ok(xh.code === 'not-found' && !/saved copy/.test(xh.error || '') && S.calls.fetches.length === 1, 'an agent that cannot read the conversation: the uniform not-found — reach before the road, the cache never asked', JSON.stringify(xh));
   // the owner's door (`?msg=`): the picture the same read showed — `type=image` (its `image/*`), charged to the OWNER
   const o1 = await eng.attachment('srch', 'srch-ops', 'srch-ops-old-pic-img', { msg: 'srch-ops-old-pic' });
   const sp3 = { ...eng.budgetOf('srch').spentBy };
-  ok(o1.ok && o1.source === 'vendor' && S.calls.fetches.length === 2 && S.calls.fetches[1].messageId === 'srch-ops-old-pic' && S.calls.fetches[1].mime === 'image/*' && fs.readFileSync(o1.file).subarray(1, 4).toString() === 'PNG' && (sp3.owner || 0) - (sp2.owner || 0) === 1 && (sp3.agent || 0) === (sp2.agent || 0), 'the owner\'s door on the same road: the shown picture asked as an image, charged to the owner (spendAs \'owner\')', JSON.stringify({ o1: o1.code || o1.source, f: S.calls.fetches[1], sp3 }));
+  ok(gateOf(o1.ok) && o1.source === 'vendor' && S.calls.fetches.length === 2 && S.calls.fetches[1].messageId === 'srch-ops-old-pic' && S.calls.fetches[1].mime === 'image/*' && fs.readFileSync(o1.file).subarray(1, 4).toString() === 'PNG' && (sp3.owner || 0) - (sp2.owner || 0) === 1 && (sp3.agent || 0) === (sp2.agent || 0), 'the owner\'s door on the same road: the shown picture asked as an image, charged to the owner (spendAs \'owner\')', JSON.stringify({ o1: o1.code || o1.source, f: S.calls.fetches[1], sp3 }));
   ok(logHash(eng, 'srch', 'srch-ops') === h0 && !eng.store.findRecord('srch', 'srch-ops', FILE_MSG) && !eng.store.findRecord('srch', 'srch-ops', 'srch-ops-old-pic'), 'NOTHING stored: the log\'s bytes are identical — the files are cached, the messages stay unsaved (F8)');
   // an account whose channel lists files but cannot fetch them: `not-supported` by name, nothing asked
   const ms = await eng.searchVendor('srcm', 'Q3-plan');
   const mh = ms.ok ? ms.hits.find((h) => h.vendorId === 'srcm-ops-old-file') : null;
   const ma = mh ? await eng.aroundOwner('srcm', 'srcm-ops', { vendorId: mh.vendorId, at: mh.at }) : null;
   const mu = await eng.attachment('srcm', 'srcm-ops', 'file_v3_00fake_srcm_q3plan', { msg: 'srcm-ops-old-file' });
-  ok(ma && ma.ok && mu.code === 'not-supported' && /srcm can list attachments but not fetch them/.test(mu.error) && M.calls.fetches.length === 0, 'a channel without the fetch capability (caps.attachments \'metadata\'): not-supported, naming the account — no call', JSON.stringify({ ma: ma && ma.code, mu }));
+  ok(gateOf(ma) && gateOf(ma.ok) && mu.code === 'not-supported' && gateOf(/srcm can list attachments but not fetch them/.test(mu.error)) && M.calls.fetches.length === 0, 'a channel without the fetch capability (caps.attachments \'metadata\'): not-supported, naming the account — no call', JSON.stringify({ ma: ma && ma.code, mu }));
   eng.stop && eng.stop();
 }
 {
@@ -408,7 +408,7 @@ async function agentRoad(eng, S) {
   S.inject.gone.add(FILE_MSG);
   const g1 = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG });
   const g2 = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG });
-  ok(g1.code === 'not-found' && /not in the saved copy, and the vendor has no such message/.test(g1.error) && S.calls.fetches.length === 1, 'a shown message the vendor no longer has: ONE call, not-found naming both — "not in the saved copy, and the vendor has no such message"', JSON.stringify({ g1, n: S.calls.fetches.length }));
+  ok(g1.code === 'not-found' && gateOf(/not in the saved copy, and the vendor has no such message/.test(g1.error)) && S.calls.fetches.length === 1, 'a shown message the vendor no longer has: ONE call, not-found naming both — "not in the saved copy, and the vendor has no such message"', JSON.stringify({ g1, n: S.calls.fetches.length }));
   ok(g2.code === 'not-found' && g2.remembered === true && g2.error === g1.error && S.calls.fetches.length === 1, 'asked again: the remembered refusal, the same words, no second call', JSON.stringify(g2));
   eng.stop && eng.stop();
 }
@@ -421,36 +421,36 @@ console.log('§M the memo: one ask per (account, scope, query) — a repeat, a r
   const m1 = await eng.searchVendor('srch', 'budget');
   tick(3000);
   const m2 = await eng.searchVendor('srch', '  BUDGET ');
-  ok(m1.ok && !m1.memo && m2.ok && m2.memo && m2.pages === 0 && S.calls.search === PP && JSON.stringify(m2.hits) === JSON.stringify(m1.hits) && m2.next === m1.next, 'the same words twice (case and spaces aside) = ONE vendor press; the second answered from the memo — same rows, same token', JSON.stringify({ calls: S.calls.search, m2: m2.code || m2.memo }));
+  ok(gateOf(m1.ok) && !m1.memo && gateOf(m2.ok) && gateOf(m2.memo) && m2.pages === 0 && S.calls.search === PP && JSON.stringify(m2.hits) === JSON.stringify(m1.hits) && m2.next === m1.next, 'the same words twice (case and spaces aside) = ONE vendor press; the second answered from the memo — same rows, same token', JSON.stringify({ calls: S.calls.search, m2: m2.code || m2.memo }));
   tick(60000);
   const m3 = await eng.searchVendor('srch', 'budget', { peek: true });
   const m3n = await eng.searchVendor('srch', 'never asked', { peek: true });
-  ok(m3.ok && m3.memo && m3.memo.ageMs === 63000 && m3.hits.length === m1.hits.length && m3n.ok && m3n.unasked && m3n.hits.length === 0 && S.calls.search === PP, 'reopening the dialog (peek) = 0 calls: the memo with its age, or "unasked" — never the vendor', JSON.stringify({ calls: S.calls.search, m3: m3.memo, m3n: m3n.unasked || m3n.code }));
+  ok(gateOf(m3.ok) && gateOf(m3.memo) && m3.memo.ageMs === 63000 && m3.hits.length === m1.hits.length && gateOf(m3n.ok) && gateOf(m3n.unasked) && m3n.hits.length === 0 && S.calls.search === PP, 'reopening the dialog (peek) = 0 calls: the memo with its age, or "unasked" — never the vendor', JSON.stringify({ calls: S.calls.search, m3: m3.memo, m3n: m3n.unasked || m3n.code }));
   const m4 = await eng.searchVendor('srch', 'budget', { again: true });
   const m5 = await eng.searchVendor('srch', 'budget');
-  ok(m4.ok && !m4.memo && S.calls.search === 2 * PP && m5.memo && m5.memo.ageMs === 0, '"Search again" = ONE more press (the entry forgotten, asked anew); the next press reads the new entry', JSON.stringify({ calls: S.calls.search, m4: m4.code, m5: m5.memo }));
+  ok(gateOf(m4.ok) && !m4.memo && S.calls.search === 2 * PP && gateOf(m5.memo) && m5.memo.ageMs === 0, '"Search again" = ONE more press (the entry forgotten, asked anew); the next press reads the new entry', JSON.stringify({ calls: S.calls.search, m4: m4.code, m5: m5.memo }));
   const m6 = await eng.searchVendor('srch', 'budget', { pageToken: m5.next });
   const m6b = await eng.searchVendor('srch', 'budget', { pageToken: m5.next });
-  ok(m5.next && m6.ok && !m6.memo && m6b.memo && S.calls.search === 2 * PP + 1, 'the scroll\'s next page = one call, appended to the entry; asked again it is remembered', JSON.stringify({ calls: S.calls.search }));
+  ok(gateOf(m5.next) && gateOf(m6.ok) && !m6.memo && gateOf(m6b.memo) && S.calls.search === 2 * PP + 1, 'the scroll\'s next page = one call, appended to the entry; asked again it is remembered', JSON.stringify({ calls: S.calls.search }));
   tick(3 * 86400e3);
   const m7 = await eng.searchVendor('srch', 'budget');
-  ok(m7.ok && !m7.memo && S.calls.search === 3 * PP + 1, 'B-5b32: three days later the same words ASK the account again (a page past its life is not served) — one press\'s pages', JSON.stringify({ calls: S.calls.search, m7: m7.code || !!m7.memo }));
+  ok(gateOf(m7.ok) && !m7.memo && S.calls.search === 3 * PP + 1, 'B-5b32: three days later the same words ASK the account again (a page past its life is not served) — one press\'s pages', JSON.stringify({ calls: S.calls.search, m7: m7.code || !!m7.memo }));
   await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: 'agent-M', name: 'M' } }]);
   const AGm = { kind: 'agent', id: 'agent-M', name: 'M', groups: [] };
   const c8 = S.calls.search;
   const a1 = await eng.searchFor(AGm, 'Budget', { full: true, adapterId: 'srch' });
-  ok(a1.ok && a1.remembered && S.calls.search === c8 && a1.results.length >= 1 && a1.results.every((x) => /srch-ops/.test(x.key)), 'an agent after the owner (same words) = 0 calls — only what it can see (reach after the memo)', JSON.stringify({ code: a1.code, n: a1.results && a1.results.length, calls: S.calls.search - c8 }));
+  ok(gateOf(a1.ok) && gateOf(a1.remembered) && S.calls.search === c8 && a1.results.length >= 1 && verdictOf(a1.results.every((x) => /srch-ops/.test(x.key))), 'an agent after the owner (same words) = 0 calls — only what it can see (reach after the memo)', JSON.stringify({ code: a1.code, n: a1.results && a1.results.length, calls: S.calls.search - c8 }));
   const a2 = await eng.searchFor(AGm, 'kickoff', { full: true, adapterId: 'srch' });
   tick(2000);
   const a3 = await eng.searchFor(AGm, 'last year', { full: true, adapterId: 'srch' });
   const a4 = await eng.searchFor(AGm, 'kickoff', { full: true, adapterId: 'srch' });
-  ok(a2.ok && !a2.remembered && a3.code === 'refresh-floor' && a4.ok && a4.remembered && S.calls.search === c8 + 1, 'the agent floor still gates a FRESH call (20 s; the memo read stamped nothing); its own fresh answer is remembered for it', JSON.stringify({ a2: a2.code, a3: a3.code, a4: a4.code, calls: S.calls.search - c8 }));
+  ok(gateOf(a2.ok) && !a2.remembered && a3.code === 'refresh-floor' && gateOf(a4.ok) && gateOf(a4.remembered) && S.calls.search === c8 + 1, 'the agent floor still gates a FRESH call (20 s; the memo read stamped nothing); its own fresh answer is remembered for it', JSON.stringify({ a2: a2.code, a3: a3.code, a4: a4.code, calls: S.calls.search - c8 }));
   const c9 = S.calls.search;
   const b1 = await eng.searchVendor('srch2', 'budget');
   tick(2500);
   const b2 = await eng.searchVendor('srch2', 'budget');
   const b3 = await eng.searchVendor('srch', 'budget');
-  ok(b1.ok && !b1.memo && b2.memo && b3.memo && S.calls.search === c9 + PP, 'two accounts searched: each its OWN memo — the second account asks once, then both answer from their own', JSON.stringify({ b1: b1.code || !!b1.memo, calls: S.calls.search - c9 }));
+  ok(gateOf(b1.ok) && !b1.memo && gateOf(b2.memo) && gateOf(b3.memo) && S.calls.search === c9 + PP, 'two accounts searched: each its OWN memo — the second account asks once, then both answer from their own', JSON.stringify({ b1: b1.code || !!b1.memo, calls: S.calls.search - c9 }));
   // lane search-card-open (.233): THE OWNER OPENS WHAT THE AGENT FOUND — the agent's own vendor ask of words whose hit
   // the saved copy does not hold (the vendor's history: 'Quarterly budget review', 400 days back)
   tick(21000);
@@ -460,24 +460,24 @@ console.log('§M the memo: one ask per (account, scope, query) — a repeat, a r
   const o2 = await eng.searchVendor('srch', 'quarterly', { peek: true, convId: 'srch-ops' });
   const o3 = await eng.searchVendor('srch', 'quarterly', { peek: true });
   const aIds = a5.results.map((x) => x.vendorId).sort().join();
-  ok(aIds === 'srch-ops-old-1' && S.calls.search === c10 + 1 && a5.memoScope && /^set:/.test(a2.memoScope) && o1.ok && o1.memo && o1.memo.by === 'agent' && o1.next === null && o1.hits.filter((h) => h.convId === 'srch-ops').map((h) => h.vendorId).sort().join() === aIds && S.calls.search === c10 + 1, 'the owner\'s dialog opened from the agent\'s row (its memo scope + conversation) = 0 vendor calls: the agent\'s hits, said "asked by the agent", no page token', JSON.stringify({ k: a5.memoScope, o1: o1.code || o1.memo, n: o1.hits && o1.hits.length, aIds, calls: S.calls.search - c10 }));
-  ok(o2.ok && o2.memo && o2.hits.length && o2.hits.every((h) => h.convId === 'srch-ops') && o2.next === null && o3.unasked && S.calls.search === c10 + 1, 'a dialog scoped to that conversation finds it without the key (the per-conversation entry); the account-wide open does not (the agent saw one conversation)', JSON.stringify({ o2: o2.code || o2.memo, o3: !!o3.unasked }));
+  ok(aIds === 'srch-ops-old-1' && S.calls.search === c10 + 1 && gateOf(a5.memoScope) && gateOf(/^set:/.test(a2.memoScope)) && gateOf(o1.ok) && gateOf(o1.memo) && o1.memo.by === 'agent' && o1.next === null && o1.hits.filter((h) => h.convId === 'srch-ops').map((h) => h.vendorId).sort().join() === aIds && S.calls.search === c10 + 1, 'the owner\'s dialog opened from the agent\'s row (its memo scope + conversation) = 0 vendor calls: the agent\'s hits, said "asked by the agent", no page token', JSON.stringify({ k: a5.memoScope, o1: o1.code || o1.memo, n: o1.hits && o1.hits.length, aIds, calls: S.calls.search - c10 }));
+  ok(gateOf(o2.ok) && gateOf(o2.memo) && gateOf(o2.hits.length) && gateOf(o2.hits.every((h) => h.convId === 'srch-ops')) && o2.next === null && gateOf(o3.unasked) && S.calls.search === c10 + 1, 'a dialog scoped to that conversation finds it without the key (the per-conversation entry); the account-wide open does not (the agent saw one conversation)', JSON.stringify({ o2: o2.code || o2.memo, o3: !!o3.unasked }));
   // a SECOND agent: it never reads another agent's entry nor a conversation entry — its own vendor ask, its own reach
   const other = Object.values(eng.store.index.live()).find((en) => en && en.adapterId === 'srch' && en.id !== 'srch-ops');
   await eng.setAccess('srch', { kind: 'conversation', convId: other.id }, [{ principal: { kind: 'agent', id: 'agent-N', name: 'N' } }]);
   const n1 = await eng.searchFor({ kind: 'agent', id: 'agent-N', name: 'N', groups: [] }, 'quarterly', { full: true, adapterId: 'srch' });
-  ok(n1.ok && !n1.remembered && S.calls.search === c10 + 2 && n1.results.every((x) => !/srch-ops/.test(x.key)), 'agent N (another conversation) is not answered from agent M\'s entries — one ask of its own, nothing of srch-ops (agents open no dialog; the owner reads every entry)', JSON.stringify({ n1: n1.code, calls: S.calls.search - c10, keys: n1.results && n1.results.map((x) => x.key) }));
+  ok(gateOf(n1.ok) && !n1.remembered && S.calls.search === c10 + 2 && verdictOf(n1.results.every((x) => !/srch-ops/.test(x.key))), 'agent N (another conversation) is not answered from agent M\'s entries — one ask of its own, nothing of srch-ops (agents open no dialog; the owner reads every entry)', JSON.stringify({ n1: n1.code, calls: S.calls.search - c10, keys: n1.results && n1.results.map((x) => x.key) }));
   // PERSISTED: a restart reads the account's file — the reopen asks nothing
   eng.stop && eng.stop();
   const file = path.join(ROOT, 'eng-memo', 'channels', 'srch', 'search-memo.json');
   const R = await mkEngine('eng-memo', ENG, ['srch2']);
   const p1 = await R.eng.searchVendor('srch', 'budget', { peek: true });
   const p2 = await R.eng.searchVendor('srch', 'quarterly', { peek: true, memo: a5.memoScope, convId: 'srch-ops' });
-  ok(fs.existsSync(file) && (fs.statSync(file).mode & 0o777) === 0o600 && p1.ok && p1.memo && p1.hits.length && p2.memo && p2.memo.by === 'agent' && p2.hits.some((h) => h.vendorId === 'srch-ops-old-1') && R.S.calls.search === 0, 'a restart: the memo is read from <account>/search-memo.json (0600) — the reopen and the agent row answer with 0 vendor calls', JSON.stringify({ file: fs.existsSync(file), p1: p1.code || p1.memo, p2: p2.code || p2.memo, calls: R.S.calls.search }));
+  ok(gateOf(fs.existsSync(file)) && (fs.statSync(file).mode & 0o777) === 0o600 && gateOf(p1.ok) && gateOf(p1.memo) && gateOf(p1.hits.length) && gateOf(p2.memo) && p2.memo.by === 'agent' && gateOf(p2.hits.some((h) => h.vendorId === 'srch-ops-old-1')) && R.S.calls.search === 0, 'a restart: the memo is read from <account>/search-memo.json (0600) — the reopen and the agent row answer with 0 vendor calls', JSON.stringify({ file: fs.existsSync(file), p1: p1.code || p1.memo, p2: p2.code || p2.memo, calls: R.S.calls.search }));
   // DROPPED with the account: a disconnect forgets it (file and all)
   await R.eng.disconnect('srch');
   const d1 = await R.eng.searchVendor('srch', 'budget', { peek: true });
-  ok(!fs.existsSync(file) && (d1.unasked || d1.ok === false) && !d1.memo && R.S.calls.search === 0, 'a disconnect drops the account\'s memo — its file gone, nothing answered from it', JSON.stringify({ file: fs.existsSync(file), d1: d1.code || d1.unasked }));
+  ok(!fs.existsSync(file) && (gateOf(d1.unasked) || d1.ok === false) && !d1.memo && R.S.calls.search === 0, 'a disconnect drops the account\'s memo — its file gone, nothing answered from it', JSON.stringify({ file: fs.existsSync(file), d1: d1.code || d1.unasked }));
   R.eng.stop && R.eng.stop();
   // ANOTHER IDENTITY: a file written for one account holder is never read for another
   const I1 = await mkEngine('eng-ident', ENG, [], { identity: { email: 'ada@example.com' } });
@@ -487,7 +487,7 @@ console.log('§M the memo: one ask per (account, scope, query) — a repeat, a r
   const held = JSON.parse(fs.readFileSync(ifile, 'utf-8')).identity;
   const I2 = await mkEngine('eng-ident', ENG, [], { identity: { email: 'bob@example.com' } });
   const i2 = await I2.eng.searchVendor('srch', 'budget', { peek: true });
-  ok(held && held.email === 'ada@example.com' && i2.unasked && !fs.existsSync(ifile), 'the file names whose account answered; read under another identity it is dropped, never shown', JSON.stringify({ held, i2: i2.code || i2.unasked }));
+  ok(gateOf(held) && held.email === 'ada@example.com' && gateOf(i2.unasked) && !fs.existsSync(ifile), 'the file names whose account answered; read under another identity it is dropped, never shown', JSON.stringify({ held, i2: i2.code || i2.unasked }));
   I2.eng.stop && I2.eng.stop();
 }
 
@@ -536,14 +536,14 @@ const lifeLegs = async (name, ENGmod) => {
 {
   const PP = fake.FAKE_SEARCH.pagesPerPress;
   const r = await lifeLegs('eng-life', ENG);
-  ok(r.at10.memo && r.at10.ageMs === SR.SEARCH_MEMO_LIFE_MS && r.at10.lifeMs === SR.SEARCH_MEMO_LIFE_MS && r.at10.calls === PP, 'B-5b32: at 10 min (the life) the same press is answered from memory, its age and its life said — 0 calls', JSON.stringify(r.at10));
-  ok(r.look11.memo && r.look11.past && r.look11.ageMs === 11 * 60e3 && r.look11.calls === PP, 'B-5b32: at 11 min the dialog\'s LOOK (it never asks) still shows the page, its true age and `past` — 0 calls (what an agent found still opens, .233)', JSON.stringify(r.look11));
-  ok(r.press11.ok && !r.press11.memo && r.press11.calls === 2 * PP && r.after.memo && r.after.ageMs === 3000 && r.after.calls === 2 * PP, 'B-5b32: at 11 min the PRESS is not answered from memory — the account is asked again (one press), and that answer is remembered from its own instant', JSON.stringify({ press11: r.press11, after: r.after }));
-  ok(r.agent.a1 === false && r.agent.a2 && r.agent.a2.ageSec === 120 && r.agent.a2.lifeSec === 600 && r.agent.a3 === false && r.agent.a3ok && r.agent.calls === 2, 'B-5b32: an agent\'s --full — inside the life the remembered answer with its age and its life (120 s of 600 s); at 11 min the account is asked again (2 calls in all)', JSON.stringify(r.agent));
-  ok(r.slow.memo && r.slow.ageMs === 6 * 60e3 && r.slow.first >= 1 && r.slow.calls === r.slow.first, 'B-5b32: the life counts from the ACCOUNT\'S ANSWER — an account that answered 5 min after the press: 6 min later its page is 6 min old and served (11 min from the press)', JSON.stringify(r.slow));
+  ok(gateOf(r.at10.memo) && r.at10.ageMs === SR.SEARCH_MEMO_LIFE_MS && r.at10.lifeMs === SR.SEARCH_MEMO_LIFE_MS && r.at10.calls === PP, 'B-5b32: at 10 min (the life) the same press is answered from memory, its age and its life said — 0 calls', JSON.stringify(r.at10));
+  ok(gateOf(r.look11.memo) && gateOf(r.look11.past) && r.look11.ageMs === 11 * 60e3 && r.look11.calls === PP, 'B-5b32: at 11 min the dialog\'s LOOK (it never asks) still shows the page, its true age and `past` — 0 calls (what an agent found still opens, .233)', JSON.stringify(r.look11));
+  ok(gateOf(r.press11.ok) && !r.press11.memo && r.press11.calls === 2 * PP && gateOf(r.after.memo) && r.after.ageMs === 3000 && r.after.calls === 2 * PP, 'B-5b32: at 11 min the PRESS is not answered from memory — the account is asked again (one press), and that answer is remembered from its own instant', JSON.stringify({ press11: r.press11, after: r.after }));
+  ok(r.agent.a1 === false && gateOf(r.agent.a2) && r.agent.a2.ageSec === 120 && r.agent.a2.lifeSec === 600 && r.agent.a3 === false && gateOf(r.agent.a3ok) && r.agent.calls === 2, 'B-5b32: an agent\'s --full — inside the life the remembered answer with its age and its life (120 s of 600 s); at 11 min the account is asked again (2 calls in all)', JSON.stringify(r.agent));
+  ok(gateOf(r.slow.memo) && r.slow.ageMs === 6 * 60e3 && r.slow.first >= 1 && r.slow.calls === r.slow.first, 'B-5b32: the life counts from the ACCOUNT\'S ANSWER — an account that answered 5 min after the press: 6 min later its page is 6 min old and served (11 min from the press)', JSON.stringify(r.slow));
   // RED CONTROLS, in copies
   const rel = await lifeLegs('eng-life-release', patched('src/server/channels-engine.js', 'now: t, look: !!peek && !pageToken })', 'now: t, look: true })', 'release-no-life'));
-  ok(rel.press11.memo && rel.press11.calls === PP && rel.agent.a3 === true && rel.agent.calls === 1, 'CONTROL (the release\'s road: every read answered whatever its age): the 11-minute press and the agent\'s 11-minute --full are answered from memory — the legs above would be RED', JSON.stringify({ press11: rel.press11, agent: rel.agent }));
+  ok(gateOf(rel.press11.memo) && rel.press11.calls === PP && rel.agent.a3 === true && rel.agent.calls === 1, 'CONTROL (the release\'s road: every read answered whatever its age): the 11-minute press and the agent\'s 11-minute --full are answered from memory — the legs above would be RED', JSON.stringify({ press11: rel.press11, agent: rel.agent }));
   const prs = await lifeLegs('eng-life-press', patched('src/server/channels-engine.js', 'now: answeredAt || t,', 'now: t,', 'life-from-press'));
   ok(!prs.slow.memo && prs.slow.first >= 1 && prs.slow.calls === 2 * prs.slow.first, 'CONTROL: an engine that counts the life from the PRESS asks the slow account again 6 min after its answer — the answer-instant leg would be RED', JSON.stringify(prs.slow));
   const PL = patched('src/channel-search.js', 'if (past && !ev.look) continue;', 'if (false) continue;', 'pure-no-life');
@@ -552,19 +552,19 @@ const lifeLegs = async (name, ENGmod) => {
   const PY = patched('src/channel-search.js', '(ev.look && Number(x.askedAt) > Number(best.x.askedAt))', 'false', 'look-first-scope');
   const pyS = PY.searchMemo(PY.searchMemo(undefined, { op: 'put', scope: 'set:1:ab', query: 'y', page: null, now: 1e6, hits: [], next: null }).state, { op: 'put', scope: 'all', query: 'y', page: null, now: 1e6 + 5000, hits: [], next: null }).state;
   ok(PY.searchMemo(pyS, { op: 'get', scopes: ['set:1:ab', 'all'], query: 'y', page: null, now: 1e6 + 60000, look: true }).answer.scope === 'set:1:ab', 'CONTROL: a look that takes the first scope shows the agent\'s older page over the fresher whole-view one — the youngest leg would be RED');
-  ok(plGet(PL, pl) && plGet(SR, SR.searchMemo(undefined, { op: 'put', scope: 'all', query: 'q', page: null, now: 1e6, hits: [], next: null }).state) === null, 'CONTROL: the memo without its life row answers an 11-minute ask — the PURE leg would be RED');
+  ok(gateOf(plGet(PL, pl)) && plGet(SR, SR.searchMemo(undefined, { op: 'put', scope: 'all', query: 'q', page: null, now: 1e6, hits: [], next: null }).state) === null, 'CONTROL: the memo without its life row answers an 11-minute ask — the PURE leg would be RED');
 }
 
 // ── §K PATCHED-COPY CONTROLS ───────────────────────────────────────────────
 console.log('§K controls: each rule removed ⇒ its leg red');
 {
   const noAdds = patched('src/channel-search.js', "    if (v.adds === 'unsaved') {\n", "    if (false) {\n", 'no-adds');
-  ok(/older/.test(noAdds.statusText({ state: 'done', found: 3, match: 'tokens', adds: 'unsaved' }, { vendor: 'Gmail' })), 'CONTROL (F2): the words with the row ignored say "older" for Gmail\'s hits');
+  ok(verdictOf(/older/.test(noAdds.statusText({ state: 'done', found: 3, match: 'tokens', adds: 'unsaved' }, { vendor: 'Gmail' }))), 'CONTROL (F2): the words with the row ignored say "older" for Gmail\'s hits');
   const noDoor = patched('src/channel-search.js', "return peerName(cut.replace(TAG_RE, '').replace(ENTITY_RE, (m, k) => ENTITIES[k]), SNIPPET_MAX);", "return cut.replace(TAG_RE, '').replace(ENTITY_RE, (m, k) => ENTITIES[k]).slice(0, SNIPPET_MAX);", 'no-door');
   const k1 = snipCases(noDoor);
-  ok(carriesFrame(k1.entity) && /‮/.test(k1.bidi), 'CONTROL: the reader without the name door leaves an entity-built frame LIVE and the bidi override in');
+  ok(gateOf(carriesFrame(k1.entity)) && verdictOf(/‮/.test(k1.bidi)), 'CONTROL: the reader without the name door leaves an entity-built frame LIVE and the bidi override in');
   const noStored = patched('src/channel-search.js', 'if (stored(h.convId, h.vendorId, h.at)) { st++; continue; }', '', 'no-stored');
-  ok(noStored.mergeVendorHits(hits, { stored: (c, v) => v === 'm2' }).hits.some((h) => h.vendorId === 'm2'), 'CONTROL: the merge without the stored check keeps a stored hit (it would show twice)');
+  ok(verdictOf(noStored.mergeVendorHits(hits, { stored: (c, v) => v === 'm2' }).hits.some((h) => h.vendorId === 'm2')), 'CONTROL: the merge without the stored check keeps a stored hit (it would show twice)');
   const noFloor = patched('src/channel-search.js', "if (Number(f.lastAt) > 0 && t - Number(f.lastAt) < floor) return { act: 'refuse', code: 'search-floor', retryAfterMs: wait(Number(f.lastAt) + floor) };", '', 'no-floor');
   ok(noFloor.fullSearchVerdict({ declared: true, scopeHeld: true, now: 100000, floorMs: 2000, lastAt: 99000, minuteLeft: 12, budgetLeft: 60, pages: 3 }).act === 'ask', 'CONTROL: the table without its floor row asks inside the floor');
   const noSort = patched('src/channel-store.js', "    names.sort((a, b) => (lastAtOf.has(b) - lastAtOf.has(a)) || ((lastAtOf.get(b) || 0) - (lastAtOf.get(a) || 0)) || (a < b ? -1 : a > b ? 1 : 0));\n", "    names.sort();\n", 'no-sort');
@@ -581,12 +581,12 @@ console.log('§K controls: each rule removed ⇒ its leg red');
   const one = fs.statSync(st2.logPath('acct', 'c-000')).size;
   const rk = await st2.search('acct', 'needle', { limit: 200, maxBytes: one * 10 + 5 });
   st2.close();
-  ok(rk.results.map((x) => x.convId).includes('c-000') && !rk.results.map((x) => x.convId).includes('c-039'), 'CONTROL: the scan in name order searches the OLDEST ten and misses the newest');
+  ok(gateOf(rk.results.map((x) => x.convId).includes('c-000')) && !rk.results.map((x) => x.convId).includes('c-039'), 'CONTROL: the scan in name order searches the OLDEST ten and misses the newest');
   const engNoStamp = patched('src/server/channels-engine.js', '    else e.searchOwnerAt = t;\n', '\n', 'no-stamp');
   const k5 = await mkEngine('eng-nostamp', engNoStamp);
   await k5.eng.searchVendor('srch', 'budget');
   const k5b = await k5.eng.searchVendor('srch', 'budge');
-  ok(k5b.ok && k5.S.calls.search === 4, 'CONTROL: an engine that never stamps the press lets the second press inside the floor reach the vendor (4 calls, not 2)', JSON.stringify(k5.S.calls));
+  ok(gateOf(k5b.ok) && k5.S.calls.search === 4, 'CONTROL: an engine that never stamps the press lets the second press inside the floor reach the vendor (4 calls, not 2)', JSON.stringify(k5.S.calls));
   k5.eng.stop && k5.eng.stop();
   const engStores = patched('src/server/channels-engine.js', '    if (r.facts) measureFullSearch(rec, { around: r.facts });\n', '    if (r.facts) measureFullSearch(rec, { around: r.facts });\n    store.appendRecords(rec.id, cid, r.records);\n', 'stores');
   const k6 = await mkEngine('eng-stores', engStores);
@@ -603,30 +603,30 @@ console.log('§K controls: each rule removed ⇒ its leg red');
   const k7 = await mkEngine('eng-nomemo', patched('src/server/channels-engine.js', '      memo: !!kept, peek: !!peek && !pageToken,\n', '      memo: false, peek: !!peek && !pageToken,\n', 'no-memo'));
   await k7.eng.searchVendor('srch', 'budget'); k7.tick(3000);
   const k7b = await k7.eng.searchVendor('srch', 'budget');
-  ok(k7b.ok && !k7b.memo && k7.S.calls.search === 2 * PP, 'CONTROL: an engine with no memo asks the vendor again for the same words (2 presses, not 1)', JSON.stringify(k7.S.calls));
+  ok(gateOf(k7b.ok) && !k7b.memo && k7.S.calls.search === 2 * PP, 'CONTROL: an engine with no memo asks the vendor again for the same words (2 presses, not 1)', JSON.stringify(k7.S.calls));
   k7.eng.stop && k7.eng.stop();
   const k8 = await mkEngine('eng-refmemo', patched('src/server/channels-engine.js', '    if (failure && !pages) return failure;\n', "    if (failure && !pages) { memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'put', scope, query, page: pageToken, now: t, hits: [], next: null }).state); return failure; }\n", 'refusal-memo'));
   k8.S.inject.rate = 1;
   const k8a = await k8.eng.searchVendor('srch', 'budget'); k8.tick(2500);
   const k8b = await k8.eng.searchVendor('srch', 'budget');
-  ok(k8a.code === 'backoff' && k8b.ok && k8b.memo && k8b.hits.length === 0, 'CONTROL: an engine that remembers a refusal answers the next press with an empty "remembered" result', JSON.stringify({ a: k8a.code, b: k8b.code || k8b.memo }));
+  ok(k8a.code === 'backoff' && gateOf(k8b.ok) && gateOf(k8b.memo) && k8b.hits.length === 0, 'CONTROL: an engine that remembers a refusal answers the next press with an empty "remembered" result', JSON.stringify({ a: k8a.code, b: k8b.code || k8b.memo }));
   k8.eng.stop && k8.eng.stop();
   const k9 = await mkEngine('eng-noagain', patched('src/server/channels-engine.js', 'again: !!again && !tok,', 'again: false,', 'no-again'));
   await k9.eng.searchVendor('srch', 'budget'); k9.tick(3000);
   const k9b = await k9.eng.searchVendor('srch', 'budget', { again: true });
-  ok(k9b.memo && k9.S.calls.search === PP, 'CONTROL: a "Search again" that forgets nothing answers from the memo (0 calls)', JSON.stringify(k9.S.calls));
+  ok(gateOf(k9b.memo) && k9.S.calls.search === PP, 'CONTROL: a "Search again" that forgets nothing answers from the memo (0 calls)', JSON.stringify(k9.S.calls));
   k9.eng.stop && k9.eng.stop();
   // lane search-card-open: the fan removed ⇒ the owner's dialog scoped to the agent's conversation misses (asks a press)
   const NF = patched('src/channel-search.js', '.slice(0, SEARCH_MEMO_FAN).map(', '.slice(0, 0).map(', 'no-fan');
   const nf = NF.searchMemo(undefined, { op: 'put', scope: 'set:2:ab', query: 'quarterly', page: null, now: 1, hits: [{ convId: 'srch-ops', vendorId: 'srch-ops-old-1', at: 1 }], next: 'p:10', by: 'agent' });
   const k10b = NF.searchMemo(nf.state, { op: 'get', scopes: ['all', NF.memoConv('srch-ops')], query: 'quarterly', page: null, now: 2 }).answer;
-  ok(nf.answer && k10b === null, 'CONTROL: a memo that does not fan by conversation leaves the owner\'s dialog on the agent\'s conversation unanswered ("press Search")', JSON.stringify(k10b));
+  ok(gateOf(nf.answer) && k10b === null, 'CONTROL: a memo that does not fan by conversation leaves the owner\'s dialog on the agent\'s conversation unanswered ("press Search")', JSON.stringify(k10b));
   // the derived entry's token rule removed ⇒ the owner's answer from the agent's scope carries the agent's page token
   const k11 = await mkEngine('eng-tok', patched('src/server/channels-engine.js', 'next: own ? kept.next : null,', 'next: kept.next,', 'derived-token'));
   await k11.eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: 'agent-K', name: 'K' } }]);
   const k11a = await k11.eng.searchFor({ kind: 'agent', id: 'agent-K', name: 'K', groups: [] }, 'budget', { full: true, adapterId: 'srch' });
   const k11b = await k11.eng.searchVendor('srch', 'budget', { peek: true, memo: k11a.memoScope, convId: 'srch-ops' });
-  ok(k11b.memo && k11b.next, 'CONTROL: an engine handing the agent\'s page token to the owner answers with a token that belongs to another searcher', JSON.stringify({ memo: k11b.memo, next: k11b.next }));
+  ok(gateOf(k11b.memo) && verdictOf(k11b.next), 'CONTROL: an engine handing the agent\'s page token to the owner answers with a token that belongs to another searcher', JSON.stringify({ memo: k11b.memo, next: k11b.next }));
   k11.eng.stop && k11.eng.stop();
 }
 {
@@ -635,12 +635,12 @@ console.log('§K controls: each rule removed ⇒ its leg red');
   const preFix = patched('src/server/channels-engine.js', "    return r && r.attachments.some((a) => String(a.id) === String(attId)) ? r : null;\n", '    return null;\n', 'att-archive-only');
   const kp = await mkAttEngine('eng-att-prefix', preFix);
   const kpr = await agentRoad(kp.eng, kp.S);
-  ok(kpr.around.ok && kpr.fetched.code === 'not-found' && kp.S.calls.fetches.length === 0, 'CONTROL: the pre-fix engine (the archive the only carrier) answers not-found on the line --around printed — the owner\'s 2026-10-20 case', JSON.stringify({ a: kpr.around.code, f: kpr.fetched }));
+  ok(gateOf(kpr.around.ok) && kpr.fetched.code === 'not-found' && kp.S.calls.fetches.length === 0, 'CONTROL: the pre-fix engine (the archive the only carrier) answers not-found on the line --around printed — the owner\'s 2026-10-20 case', JSON.stringify({ a: kpr.around.code, f: kpr.fetched }));
   kp.eng.stop && kp.eng.stop();
   const byTyped = patched('src/server/channels-engine.js', "    return r && r.attachments.some((a) => String(a.id) === String(attId)) ? r : null;\n", "    return msg ? { vendorId: String(msg), at: null, author: null, attachments: [{ id: String(attId), name: null, mime: null }], shown: true } : null;\n", 'att-typed-ids');
   const kt = await mkAttEngine('eng-att-typed', byTyped);
   const ktr = await agentRoad(kt.eng, kt.S);
-  ok(ktr.typed.ok && ktr.typedCalls === 1 && kt.S.calls.fetches[0].messageId === FILE_MSG, 'CONTROL: an engine asking the vendor by the ids it was GIVEN fetches before any read showed the message here — the zero-call leg is not vacuous', JSON.stringify({ typed: ktr.typed.code || ktr.typed.source, n: kt.S.calls.fetches.length }));
+  ok(gateOf(ktr.typed.ok) && ktr.typedCalls === 1 && kt.S.calls.fetches[0].messageId === FILE_MSG, 'CONTROL: an engine asking the vendor by the ids it was GIVEN fetches before any read showed the message here — the zero-call leg is not vacuous', JSON.stringify({ typed: ktr.typed.code || ktr.typed.source, n: kt.S.calls.fetches.length }));
   kt.eng.stop && kt.eng.stop();
 }
 // ── §S THE AGENT'S ANSWER (lane channels-search-says-hidden, a field miss 2026-10-21) ─────────────────────────────────
@@ -669,7 +669,7 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
     ['a hidden flag that is not `true` is no hidden match', { hiddenMatch: 'yes', q: 'acmenet' }, ['nothing matches "acmenet".']],
   ];
   for (const [name, f, want] of TABLE) { const got = SR.searchAnswer(f); ok(JSON.stringify(got) === JSON.stringify(want), `PURE searchAnswer — ${name}`, JSON.stringify(got)); }
-  ok(!/\d/.test(H) && H.includes(SR.SHARE_DOOR) && /ask the user to share them with you/.test(H) && /Grant access…/.test(SR.SHARE_DOOR), 'HIDDEN_TEXT: ONE sentence, no digit, the recipe (ask the user) and the user\'s door (Grant access…)', H);
+  ok(!/\d/.test(H) && gateOf(H.includes(SR.SHARE_DOOR)) && gateOf(/ask the user to share them with you/.test(H)) && verdictOf(/Grant access…/.test(SR.SHARE_DOOR)), 'HIDDEN_TEXT: ONE sentence, no digit, the recipe (ask the user) and the user\'s door (Grant access…)', H);
   // the memo keeps a page's UNSHOWN tally (the threads an adapter dropped unread) — a remembered answer says what the asked one said
   const m1 = SR.searchMemo(undefined, { op: 'put', scope: 'set:2:abcd', query: 'acmenet', page: null, now: 1000, hits: [], next: null, by: 'agent', unshown: [['t-1', 2], ['bad'], ['t-2', 0]] });
   const m2 = SR.searchMemo(m1.state, { op: 'get', scopes: ['set:2:abcd'], query: 'acmenet', page: null, now: 2000 });
@@ -696,16 +696,16 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   ok(st.results.map((x) => x.vendorId).join() === 'sh-ops-1', 'EVERY WORD: «Wren NID» finds the message whose SENDER holds one word and whose TEXT the other (the field miss: one substring found nothing)', JSON.stringify(st.results.map((x) => x.vendorId)));
   ok(st2.results.map((x) => x.vendorId).join() === 'sh-ann-1' && st3.results.length === 0, '…a word only in the conversation\'s TITLE counts (a mail thread\'s subject); words spread over two messages of two conversations match neither', JSON.stringify([st2.results.map((x) => x.vendorId), st3.results.length]));
   const a1 = await k.eng.searchFor(AH, 'Wren NID');
-  ok(a1.ok && a1.results.length === 1 && a1.match === 'every-word' && a1.hiddenMatch === false && a1.saidKind === 'hits' && !('said' in a1), 'the agent: its two-word hit shown, the answer names the match (every-word), nothing hidden, a KEY not words (saidKind hits; no query in the body)', JSON.stringify({ n: a1.results.length, saidKind: a1.saidKind, m: a1.match }));
+  ok(gateOf(a1.ok) && a1.results.length === 1 && a1.match === 'every-word' && a1.hiddenMatch === false && a1.saidKind === 'hits' && !('said' in a1), 'the agent: its two-word hit shown, the answer names the match (every-word), nothing hidden, a KEY not words (saidKind hits; no query in the body)', JSON.stringify({ n: a1.results.length, saidKind: a1.saidKind, m: a1.match }));
   const a2 = await k.eng.searchFor(AH, 'Acmenet install');
-  ok(a2.ok && a2.results.length === 0 && a2.hiddenMatch === true && a2.saidKind === 'none-readable' && !JSON.stringify(a2).includes('Acmenet install'), 'ALL HIDDEN: no row; the answer keys «matches exist where you cannot read» (none-readable + hiddenMatch), NEVER the query text — not «nothing»', JSON.stringify({ saidKind: a2.saidKind, hiddenMatch: a2.hiddenMatch }));
-  ok(noLeak(a2, 'Acmenet install'), 'NO LEAK: no digit and no account in the words; the whole answer holds no title, sender, word, conversation or message id of the hidden match (existence only)', JSON.stringify(a2));
+  ok(gateOf(a2.ok) && a2.results.length === 0 && a2.hiddenMatch === true && a2.saidKind === 'none-readable' && !JSON.stringify(a2).includes('Acmenet install'), 'ALL HIDDEN: no row; the answer keys «matches exist where you cannot read» (none-readable + hiddenMatch), NEVER the query text — not «nothing»', JSON.stringify({ saidKind: a2.saidKind, hiddenMatch: a2.hiddenMatch }));
+  ok(verdictOf(noLeak(a2, 'Acmenet install')), 'NO LEAK: no digit and no account in the words; the whole answer holds no title, sender, word, conversation or message id of the hidden match (existence only)', JSON.stringify(a2));
   // the brief's rule 2, measured (no change): `list --all` already lists the hidden conversation among the titles it may
   // REQUEST (the account's directory) — the door an agent can use itself; the search's words never name it
   const la = k.eng.listFor(AH, { all: true });
-  ok(la.ok && la.conversations.some((c) => c.key === 'srch/srch-announce' && c.level === 'requestable' && c.directory === true), '`list --all` lists the conversation it cannot read among the titles it may REQUEST (unchanged — lane channel-agent-watch W2)', JSON.stringify(la.conversations.map((c) => [c.key, c.level])));
+  ok(gateOf(la.ok) && verdictOf(la.conversations.some((c) => c.key === 'srch/srch-announce' && c.level === 'requestable' && c.directory === true)), '`list --all` lists the conversation it cannot read among the titles it may REQUEST (unchanged — lane channel-agent-watch W2)', JSON.stringify(la.conversations.map((c) => [c.key, c.level])));
   const a3 = await k.eng.searchFor(AH, 'zzqq nothing');
-  ok(a3.ok && a3.hiddenMatch === false && a3.saidKind === 'none', 'TRULY NOTHING: the «nothing matches» key (none) — only when nothing matched where it looked', JSON.stringify(a3.saidKind));
+  ok(gateOf(a3.ok) && a3.hiddenMatch === false && a3.saidKind === 'none', 'TRULY NOTHING: the «nothing matches» key (none) — only when nothing matched where it looked', JSON.stringify(a3.saidKind));
   // an agent that reads nothing here but may REQUEST titles (the account's directory lists group conversations — the
   // default) is told the same existence; with the directory off it has NO reach in the account: total (§8), never searched
   const AZ = { kind: 'agent', id: 'agent-Z', name: 'Z', groups: [] };
@@ -713,7 +713,7 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   await k.eng.setAgentDirectory('srch', { groups: false, singles: false });
   const a5 = await k.eng.searchFor(AZ, 'Acmenet install');
   await k.eng.setAgentDirectory('srch', { groups: true, singles: false });
-  ok(a4.ok && a4.hiddenMatch === true && a4.saidKind === 'none-readable' && noLeak(a4, 'Acmenet install') && a5.ok && a5.hiddenMatch === false && a5.saidKind === 'none-not-shared', 'an agent that may only REQUEST titles here (the directory) learns the existence (none-readable + hiddenMatch); with NO reach in the account it stays total (§8: none-not-shared) — never searched for it', JSON.stringify([a4.saidKind, a5.saidKind]));
+  ok(gateOf(a4.ok) && a4.hiddenMatch === true && a4.saidKind === 'none-readable' && gateOf(noLeak(a4, 'Acmenet install')) && gateOf(a5.ok) && a5.hiddenMatch === false && a5.saidKind === 'none-not-shared', 'an agent that may only REQUEST titles here (the directory) learns the existence (none-readable + hiddenMatch); with NO reach in the account it stays total (§8: none-not-shared) — never searched for it', JSON.stringify([a4.saidKind, a5.saidKind]));
   // --full: a vendor hit in the hidden conversation (one it answered, one already stored) ⇒ existence, never its words
   k.tick(31000);
   k.S.inject.extra = { convId: 'srch-announce', vendorId: 'sh-ann-new', at: Date.now() - 60e3, fromId: null, threadKey: null, snippet: 'Acmenet install moved to October 25' };
@@ -722,8 +722,8 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   k.S.inject.extra = { convId: 'srch-announce', vendorId: 'sh-ann-1', at: Date.now() - 3600e3, fromId: null, threadKey: null, snippet: 'Acmenet install date is October 24' };
   const f2 = await k.eng.searchFor(AH, 'Acmenet order', { full: true, adapterId: 'srch', saved: 0 });
   k.S.inject.extra = null;
-  ok(f1.ok && f1.results.length === 0 && f1.hiddenMatch === true && f1.saidKind === 'full-none-either' && noLeak(f1, 'Acmenet install'), '--full: the vendor\'s hit in a conversation it may not read ⇒ existence only (full-none-either + hiddenMatch), nothing of it (snippet, id, title), no query in the body', JSON.stringify(f1));
-  ok(f2.ok && f2.hiddenMatch === true && noLeak(f2, 'Acmenet order'), '--full: a vendor hit the merge drops as ALREADY STORED, in a conversation it may not read ⇒ existence too (the field\'s shape: every vendor hit was saved)', JSON.stringify({ h: f2.hiddenMatch, saidKind: f2.saidKind }));
+  ok(gateOf(f1.ok) && f1.results.length === 0 && f1.hiddenMatch === true && f1.saidKind === 'full-none-either' && verdictOf(noLeak(f1, 'Acmenet install')), '--full: the vendor\'s hit in a conversation it may not read ⇒ existence only (full-none-either + hiddenMatch), nothing of it (snippet, id, title), no query in the body', JSON.stringify(f1));
+  ok(gateOf(f2.ok) && f2.hiddenMatch === true && verdictOf(noLeak(f2, 'Acmenet order')), '--full: a vendor hit the merge drops as ALREADY STORED, in a conversation it may not read ⇒ existence too (the field\'s shape: every vendor hit was saved)', JSON.stringify({ h: f2.hiddenMatch, saidKind: f2.saidKind }));
   k.eng.stop && k.eng.stop();
   // CONTROLS — each rule removed from a copy ⇒ its leg RED
   const kc1 = patched('src/channel-store.js', "      const rest = pred ? [] : words.filter((w) => !title.includes(w));\n", "      const rest = pred ? [] : [needle];\n", 'one-substring');
@@ -749,7 +749,7 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   // with q) echoes the caller's query back into the body; the no-query leg (test-record-clear-walk's fence) goes RED
   const kmq = await rig('eng-said-q', engCopy([[RET, RET.replace('saidKind, ', 'saidKind, said: SR.searchAnswer({ hitsSeen: results.length, hiddenMatch: hidden.match, q: query, accounts }), ')]], 'q-echo'));
   const mq = await kmq.eng.searchFor(AH, 'Acmenet install');
-  ok(mq.hiddenMatch === true && JSON.stringify(mq).includes('Acmenet install') && !noLeak(mq, 'Acmenet install'), 'MUTANT (the base before this lane): a copy that words the answer server-side echoes the caller\'s query in the body — the no-query leg goes RED', JSON.stringify(mq.saidKind));
+  ok(mq.hiddenMatch === true && gateOf(JSON.stringify(mq).includes('Acmenet install')) && !noLeak(mq, 'Acmenet install'), 'MUTANT (the base before this lane): a copy that words the answer server-side echoes the caller\'s query in the body — the no-query leg goes RED', JSON.stringify(mq.saidKind));
   kmq.eng.stop && kmq.eng.stop();
 }
 // ── §H B-360d FOUND HOLDER 3 (lane bl-loop-b, 主开发 r4581 / r4582): THE ORDER AND THE WANTED TEST FROM THE LOG FILES ──────────
@@ -817,7 +817,7 @@ console.log('§H B-360d found holder 3: the search reads its logs\' own rows, ne
   }
   ok(diffs.length === 0, `WHO MAY SEE IS UNCHANGED: in each of ${SCENES.length} scenes the answer is the release's byte for byte, and the files it opens are the release's, in its order`, JSON.stringify(diffs).slice(0, 600));
   const agent = await reads(st, SCENES[1][1])();
-  ok(!agent.seen.some((x) => /^(stat:)?k5\.ndjson$/.test(x)) && agent.seen.includes('k1.ndjson'), 'a log outside the caller\'s set is NEVER opened (no stat, no read of k5)', agent.seen.join());
+  ok(!agent.seen.some((x) => /^(stat:)?k5\.ndjson$/.test(x)) && verdictOf(agent.seen.includes('k1.ndjson')), 'a log outside the caller\'s set is NEVER opened (no stat, no read of k5)', agent.seen.join());
   ok(syncCalls.length === 0, 'nothing NEW on the loop: in every scene the store\'s synchronous fs calls are the release\'s, file for file (its scan reads each hit\'s side log as it did; the directory read stays the one it was)', JSON.stringify(syncCalls).slice(0, 600));
   const person = await reads(st, SCENES[0][1])(), opened = person.seen.filter((x) => !x.startsWith('stat:'));
   const WANT_ORDER = ['k2', 'k3', 'odd1', 'k5', 'k4', 'chat%201', 'k1', 'norow'].map((c) => `${c}.ndjson`);
@@ -832,7 +832,7 @@ console.log('§H B-360d found holder 3: the search reads its logs\' own rows, ne
     const ps = require(MUTE.write(STORE, anchored(SRC(STORE), AT, AT + '    fs.existsSync(path.join(msgsDir, safeSeg(adapterId)));   // PLANTED: one synchronous call on the loop\n', 'b360d-h3-planted-sync'), 'planted-sync')).createChannelStore({ dir, log: quiet });
     const a = await reads(ps, SCENES[0][1])(), b = await reads(rs, SCENES[0][1])();
     ps.close();
-    ok(a.syncs.join() !== b.syncs.join() && a.syncs.some((x) => /^existsSync /.test(x)), `RED (the leg «nothing new on the loop»): ONE synchronous call planted in logFilesOf is seen — ${a.syncs.length} store-framed call(s) where the release's copy makes ${b.syncs.length}`, JSON.stringify({ planted: a.syncs, release: b.syncs }));
+    ok(a.syncs.join() !== b.syncs.join() && verdictOf(a.syncs.some((x) => /^existsSync /.test(x))), `RED (the leg «nothing new on the loop»): ONE synchronous call planted in logFilesOf is seen — ${a.syncs.length} store-framed call(s) where the release's copy makes ${b.syncs.length}`, JSON.stringify({ planted: a.syncs, release: b.syncs }));
   }
   // (2) THE UNSAFE IDS (the round's shoulds at :2342 and :2357): an id in the CALLER's list that safeSeg refuses rejects the whole search
   //     in the release's own words; a damaged ROW whose id safeSeg refuses is passed over on every road, where the release refused
@@ -841,7 +841,7 @@ console.log('§H B-360d found holder 3: the search reads its logs\' own rows, ne
     const said = async (x, list) => { try { await x.search('pa', 'note', { limit: 5, convIds: ['k1', ...list] }); return 'answered'; } catch (e) { return 'refused: ' + e.message; } };
     const rows = [];
     for (const b of BAD) rows.push([JSON.stringify(b), await said(st, [b]), await said(rs, [b])]);
-    ok(rows.every(([, c, r]) => c === r && /^refused: channel-store: unsafe id segment /.test(c)), `an unsafe id in the CALLER's list (${BAD.length}: '', '.', '..', a slash, a backslash, a NUL, null) refuses the whole search in the release's own words, byte for byte`, JSON.stringify(rows));
+    ok(verdictOf(rows.every(([, c, r]) => c === r && /^refused: channel-store: unsafe id segment /.test(c))), `an unsafe id in the CALLER's list (${BAD.length}: '', '.', '..', a slash, a backslash, a NUL, null) refuses the whole search in the release's own words, byte for byte`, JSON.stringify(rows));
     const us = require(MUTE.write(STORE, anchored(SRC(STORE), 'for (const c of convIds) { safeSeg(c); want.add(String(c));', 'for (const c of convIds) { want.add(String(c));', 'b360d-h3-no-list-refusal'), 'no-list-refusal')).createChannelStore({ dir, log: quiet });
     const ur = await said(us, ['..']);
     us.close();
@@ -867,11 +867,11 @@ console.log('§H B-360d found holder 3: the search reads its logs\' own rows, ne
     got.passedFallback = sd.searchStats().passedOver - po0 - got.passedMain;
     got.fallbacks = sd.searchStats().fallback - fb0d;
     got.relMain = await ans(rd, 'pd'); got.relFallback = await ans(rd, 'pf');
-    ok(got.main.split(',').sort().join() === 'd1,d2' && got.fallback.split(',').sort().join() === [CJK8, 'f1'].sort().join() && got.fallbacks === 1 && /^refused: channel-store: unsafe id segment /.test(got.relMain) && /^refused: channel-store: unsafe id segment /.test(got.relFallback), 'a damaged ROW whose id safeSeg refuses is passed over on EVERY road — the main road with its odd rows (pd: d1, d2) and the fallback (pf, counted once) answer; the release\'s pass refused the account\'s whole search (a named difference, damaged rows only)', JSON.stringify(got));
+    ok(got.main.split(',').sort().join() === 'd1,d2' && got.fallback.split(',').sort().join() === [CJK8, 'f1'].sort().join() && got.fallbacks === 1 && gateOf(/^refused: channel-store: unsafe id segment /.test(got.relMain)) && verdictOf(/^refused: channel-store: unsafe id segment /.test(got.relFallback)), 'a damaged ROW whose id safeSeg refuses is passed over on EVERY road — the main road with its odd rows (pd: d1, d2) and the fallback (pf, counted once) answer; the release\'s pass refused the account\'s whole search (a named difference, damaged rows only)', JSON.stringify(got));
     const ts = require(MUTE.write(STORE, anchored(SRC(STORE), 'const segName = (id) => { try { return `${safeSeg(id)}.ndjson`; } catch { return null; } };', 'const segName = (id) => `${safeSeg(id)}.ndjson`;', 'b360d-h3-rows-throw'), 'rows-throw')).createChannelStore({ dir: dirD, log: quiet });
     const tg = { main: await ans(ts, 'pd'), fallback: await ans(ts, 'pf') };
     ts.close(); sd.close(); rd.close();
-    ok(/^refused/.test(tg.main) && /^refused/.test(tg.fallback), 'RED: a copy whose row roads throw on such an id (the fallback and the odd rows before this follow) refuses both searches — the leg above would go red', JSON.stringify(tg));
+    ok(gateOf(/^refused/.test(tg.main)) && verdictOf(/^refused/.test(tg.fallback)), 'RED: a copy whose row roads throw on such an id (the fallback and the odd rows before this follow) refuses both searches — the leg above would go red', JSON.stringify(tg));
     // 主开发 r4966 (holder 3's follow's should): each row a road passes over is COUNTED (searchStats.passedOver) — why the release's error went away
     ok(got.passedMain === 1 && got.passedFallback === 1, `each row passed over is COUNTED in the search's own stats: the main road's damaged ODD row (${got.passedMain}) and the fallback's damaged row (${got.passedFallback}); the main road never meets a row with no log (it reads the account's files), so such a row costs it nothing and is not counted there`, JSON.stringify(got));
     const cs = require(MUTE.write(STORE, anchored(SRC(STORE), 'searchStats.passedOver++', 'void 0', 'b360d-h3-uncounted', { count: 2 }), 'uncounted')).createChannelStore({ dir: dirD, log: quiet });
@@ -994,15 +994,15 @@ console.log('§H B-360d found holder 3: the search reads its logs\' own rows, ne
     const heldIn = ['slack', 'webhook'].every((k) => ID_ROWS[k].lines[0].includes(`[${ID_ROWS[k].held}]`));
     const bad = census(kinds, ID_ROWS);
     const held = Object.keys(ID_ROWS).filter((k) => ID_ROWS[k].held), asSent = Object.keys(ID_ROWS).filter((k) => !ID_ROWS[k].held);
-    ok(!bad.length && seededOnce && fakeIds && heldIn, `THE ADAPTER-ID CENSUS: ${kinds.length} kinds, each with its id line standing once in its file — held to a class inside the safe set by their own code: ${held.join(', ')}; taken as the vendor sends them: ${asSent.map((k) => `${k} (${ID_ROWS[k].as})`).join(', ')} — the read-back is exact for any id (account «ge» above)`, JSON.stringify({ bad, seededOnce, fakeIds, heldIn }));
+    ok(!bad.length && gateOf(seededOnce) && gateOf(fakeIds) && verdictOf(heldIn), `THE ADAPTER-ID CENSUS: ${kinds.length} kinds, each with its id line standing once in its file — held to a class inside the safe set by their own code: ${held.join(', ')}; taken as the vendor sends them: ${asSent.map((k) => `${k} (${ID_ROWS[k].as})`).join(', ')} — the read-back is exact for any id (account «ge» above)`, JSON.stringify({ bad, seededOnce, fakeIds, heldIn }));
     const redA = census([...kinds, 'teams'], ID_ROWS);
     const redB = census(kinds, { ...ID_ROWS, slack: { ...ID_ROWS.slack, lines: ['const ID_RE = /^[A-Z0-9][A-Z0-9_ ]{1,40}$/;'], held: 'A-Z0-9_ ' } });
-    ok(redA.some((x) => /^teams: no row/.test(x)) && redB.some((x) => /stands 0×/.test(x)) && redB.some((x) => /outside the safe set/.test(x)), 'RED: a kind with no row, a line that no longer stands, and a class reaching outside the safe set are each named — the census above would go red', JSON.stringify({ redA, redB }));
+    ok(gateOf(redA.some((x) => /^teams: no row/.test(x))) && gateOf(redB.some((x) => /stands 0×/.test(x))) && verdictOf(redB.some((x) => /outside the safe set/.test(x))), 'RED: a kind with no row, a line that no longer stands, and a class reaching outside the safe set are each named — the census above would go red', JSON.stringify({ redA, redB }));
   }
   st.close(); rs.close();
 }
 
-for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 6 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 6 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

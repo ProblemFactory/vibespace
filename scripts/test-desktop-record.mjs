@@ -89,7 +89,7 @@ const J = JSON.stringify;
 const MODEL = 'src/lib/desktop-record.js';
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -131,7 +131,7 @@ const ids = (rec) => ((rec && rec.windows) || rec || []).map((w) => w.winId || w
 /** The PURE legs over one copy of the model — the controls re-run them on a patched copy. */
 function pureLegs(P, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const { mergeDesktopRecord: merge, shrinkVerdict, desktopChanges } = P;
   const HR = { windows: [R('hr-1'), R('hr-2', { gridBounds: GB(0.5, 0) }), R('hr-3', { gridBounds: GB(0, 0.5) })], grid: { rows: 2, cols: 2 }, theme: 'dark' };
   const before = J(HR);
@@ -253,13 +253,13 @@ function captureKeys(text) {
 /** The layer law's legs over one copy of desktop-record.js — the §7 controls re-run them on patched copies. */
 function layerLegs(P, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const { LAYERS, layerOf, applyForViewport, arrangementFor, ARRANGEMENT, PHONE_KEEPS, PHONE_SHOWS } = P;
   if (!LAYERS || !layerOf || !applyForViewport || !arrangementFor) { leg(false, '§8 desktop-record.js exports LAYERS, layerOf, applyForViewport and arrangementFor'); return failed; }
   const NAMES = ['workspace', 'arrangement', 'chrome', 'preference', 'meta'];
   const all = LAYERS.flatMap((r) => r.fields.map((f) => [f, r.layer]));
   const twice = [...new Set(all.map(([f]) => f).filter((f, i, a) => a.indexOf(f) !== i))];
-  leg(J(LAYERS.map((r) => r.layer)) === J(NAMES) && Object.isFrozen(LAYERS) && LAYERS.every((r) => Object.isFrozen(r.fields)), '§8 LAYERS is the design\'s five rows in order — workspace · arrangement (the desktop shard) · chrome · preference · meta (the phone shard is local, never in the document) — frozen', J(LAYERS.map((r) => r.layer)));
+  leg(J(LAYERS.map((r) => r.layer)) === J(NAMES) && gateOf(Object.isFrozen(LAYERS)) && verdictOf(LAYERS.every((r) => Object.isFrozen(r.fields))), '§8 LAYERS is the design\'s five rows in order — workspace · arrangement (the desktop shard) · chrome · preference · meta (the phone shard is local, never in the document) — frozen', J(LAYERS.map((r) => r.layer)));
   leg(!twice.length, `§8 no field is listed twice (${all.length} fields, each in exactly ONE layer)`, J(twice));
   // THE CENSUS of the real shape
   const fields = documentFields(realShapeDoc());
@@ -280,11 +280,11 @@ function layerLegs(P, { quiet = false } = {}) {
   const capBad = cap.filter((k) => layerOf(k) == null);
   leg(cap.length >= 35 && !capBad.length, `§8 THE CAPTURE CENSUS (acorn over layout.js captureWin / captureChrome / captureState): every key a page writes into a record (${cap.length}) has a layer`, J({ capBad, cap }));
   const SNAP = '      if (win._isSnapped) { winState.isSnapped = true;';
-  leg(LT.includes(SNAP) && J(captureKeys(LT.replace(SNAP, '      winState.dockSide = win._dock;\n' + SNAP)).filter((k) => layerOf(k) == null)) === J(['dockSide']), '§8 RED control: a capture writing a field no layer names (winState.dockSide) is RED, by name');
+  leg(gateOf(LT.includes(SNAP)) && J(captureKeys(LT.replace(SNAP, '      winState.dockSide = win._dock;\n' + SNAP)).filter((k) => layerOf(k) == null)) === J(['dockSide']), '§8 RED control: a capture writing a field no layer names (winState.dockSide) is RED, by name');
   leg(!captureKeys(LT.replace('  captureWin(win, id = win?.id) {', "  // winState.dockSide = win._dock; 'winState.sidebarWidth = 1'\n  captureWin(win, id = win?.id) {")).filter((k) => layerOf(k) == null).length, '§8 control: the same assignment in a comment and a string captures nothing (acorn reads code only)');
-  leg(ARRANGEMENT.every((k) => layerOf(k) === 'arrangement') && PHONE_KEEPS.every((k) => ['arrangement', 'chrome', 'preference'].includes(layerOf(k))) && PHONE_SHOWS.every((k) => layerOf(k) === 'arrangement'), '§8 the write half\'s lists are layered: ARRANGEMENT (captureForViewport\'s carry) ⊂ arrangement, PHONE_KEEPS (recordFor\'s record carry) ⊂ arrangement ∪ chrome ∪ preference, the phone\'s minimize ⊂ arrangement');
+  leg(gateOf(ARRANGEMENT.every((k) => layerOf(k) === 'arrangement')) && gateOf(PHONE_KEEPS.every((k) => ['arrangement', 'chrome', 'preference'].includes(layerOf(k)))) && verdictOf(PHONE_SHOWS.every((k) => layerOf(k) === 'arrangement')), '§8 the write half\'s lists are layered: ARRANGEMENT (captureForViewport\'s carry) ⊂ arrangement, PHONE_KEEPS (recordFor\'s record carry) ⊂ arrangement ∪ chrome ∪ preference, the phone\'s minimize ⊂ arrangement');
   const LEGACY = [['z', 'zIndex'], ['min', 'isMinimized'], ['snap', 'isSnapped'], ['snapBounds', 'preSnapBounds'], ['id', 'winId']];
-  leg(LEGACY.every(([o, n]) => layerOf(o) && layerOf(o) === layerOf(n)), '§8 a legacy spelling sits in its canonical\'s layer: z / zIndex, min / isMinimized, snap / isSnapped, snapBounds / preSnapBounds, id / winId', J(LEGACY.map(([o, n]) => [o, layerOf(o), n, layerOf(n)])));
+  leg(verdictOf(LEGACY.every(([o, n]) => layerOf(o) && layerOf(o) === layerOf(n))), '§8 a legacy spelling sits in its canonical\'s layer: z / zIndex, min / isMinimized, snap / isSnapped, snapBounds / preSnapBounds, id / winId', J(LEGACY.map(([o, n]) => [o, layerOf(o), n, layerOf(n)])));
   // THE TRUTH TABLE: reader class × source × writer
   const doc = realShapeDoc(), rec = doc.desktops['d-1'].autoSave, before = J(doc);
   const WRITERS = [['desktop-written', 'desktop'], ['phone-written (live)', 'phone'], ['unstamped', 'desktop'], ['a re-read', 'desktop']]; // the writer = layout-model.js writerClass(msg)
@@ -301,19 +301,19 @@ function layerLegs(P, { quiet = false } = {}) {
   if (!quiet) console.log('    §8 ' + cells.join('\n    §8 '));
   leg(!bad.length && cells.length === 24, `§8 THE TRUTH TABLE (reader class × source × writer, ${cells.length} cells) is the law`, J(bad));
   const row = (pred) => bad.filter(pred).length === 0;
-  leg(row((b) => b.cls === 'phone') && cells.filter((c) => c.startsWith('phone')).every((c) => /arrangement minimize · chrome — · preference —/.test(c)), '§8 a PHONE applies membership + a desktop\'s minimize only — no grid, box, z, maximize or snap, no sidebar or bars, no theme — from any record by any road (inc-mv8l2frb-xkqm; §6b guard 5)', J(bad));
-  leg(row((b) => b.cls === 'desktop' && b.src === 'remote' && b.label.startsWith('phone')) && /arrangement — · chrome — · preference —/.test(cells.find((c) => c.startsWith('desktop remote phone'))), '§8 a DESKTOP takes a live phone record\'s membership only (§6b guard 10 — the retired membershipOnly)', J(bad));
-  leg(row((b) => b.cls === 'desktop' && b.src === 'remote' && !b.label.startsWith('phone')), '§8 a DESKTOP takes a desktop-written, an unstamped and a re-read record\'s arrangement + chrome live — never its preference', J(bad));
-  leg(row((b) => b.cls === 'desktop' && b.src === 'boot') && applyForViewport('desktop', rec, { source: 'boot' }).arrangement?.grid?.cols === 3, '§8 the boot takes the record on disk WHOLE on a desktop — a phone-written one too (the owner\'s record holds the desk\'s 1×3) — with its preference', J(bad));
-  leg(row((b) => b.cls === 'desktop' && b.src === 'preset'), '§8 a PRESET is membership + arrangement on a desktop — never a sidebar, the bars, a theme or fonts', J(bad));
+  leg(gateOf(row((b) => b.cls === 'phone')) && verdictOf(cells.filter((c) => c.startsWith('phone')).every((c) => /arrangement minimize · chrome — · preference —/.test(c))), '§8 a PHONE applies membership + a desktop\'s minimize only — no grid, box, z, maximize or snap, no sidebar or bars, no theme — from any record by any road (inc-mv8l2frb-xkqm; §6b guard 5)', J(bad));
+  leg(gateOf(row((b) => b.cls === 'desktop' && b.src === 'remote' && b.label.startsWith('phone'))) && verdictOf(/arrangement — · chrome — · preference —/.test(cells.find((c) => c.startsWith('desktop remote phone')))), '§8 a DESKTOP takes a live phone record\'s membership only (§6b guard 10 — the retired membershipOnly)', J(bad));
+  leg(verdictOf(row((b) => b.cls === 'desktop' && b.src === 'remote' && !b.label.startsWith('phone'))), '§8 a DESKTOP takes a desktop-written, an unstamped and a re-read record\'s arrangement + chrome live — never its preference', J(bad));
+  leg(gateOf(row((b) => b.cls === 'desktop' && b.src === 'boot')) && applyForViewport('desktop', rec, { source: 'boot' }).arrangement?.grid?.cols === 3, '§8 the boot takes the record on disk WHOLE on a desktop — a phone-written one too (the owner\'s record holds the desk\'s 1×3) — with its preference', J(bad));
+  leg(verdictOf(row((b) => b.cls === 'desktop' && b.src === 'preset')), '§8 a PRESET is membership + arrangement on a desktop — never a sidebar, the bars, a theme or fonts', J(bad));
   // the subsets' shapes
   const boot = applyForViewport('desktop', rec, { source: 'boot' });
   const memKeys = [...new Set(boot.membership.windows.flatMap((w) => Object.keys(w)))];
-  leg(memKeys.every((k) => layerOf(k) === 'workspace') && memKeys.includes('openSpec') && !memKeys.includes('gridBounds') && J(Object.keys(boot.arrangement?.windows['w-term'] || {})) === J(ARRANGEMENT), '§8 the membership carries the entries\' WORKSPACE fields only (an arrangement field is not in it); a desktop\'s arrangement carries every arrangement key of each entry', J({ memKeys, a: boot.arrangement && Object.keys(boot.arrangement.windows['w-term'] || {}) }));
+  leg(gateOf(memKeys.every((k) => layerOf(k) === 'workspace')) && gateOf(memKeys.includes('openSpec')) && !memKeys.includes('gridBounds') && J(Object.keys(boot.arrangement?.windows['w-term'] || {})) === J(ARRANGEMENT), '§8 the membership carries the entries\' WORKSPACE fields only (an arrangement field is not in it); a desktop\'s arrangement carries every arrangement key of each entry', J({ memKeys, a: boot.arrangement && Object.keys(boot.arrangement.windows['w-term'] || {}) }));
   const d2 = applyForViewport('desktop', doc.desktops['d-2'].autoSave, { source: 'boot' }), old = applyForViewport('desktop', doc.autoSave, { source: 'boot' });
   leg(!!d2.chrome && !!old.chrome && 'toolbarScale' in d2.chrome && d2.chrome.toolbarScale === null && !('toolbarScale' in old.chrome) && old.chrome.toolbarHeight === 40 && J(Object.keys(d2.preference || {})) === J(['theme', 'globalFontSize', 'globalFontFamily']), '§8 a present key stays present (an explicit toolbarScale: null is the sender\'s reset), an absent one stays absent (a legacy record\'s toolbarHeight decodes alone)', J({ d2: d2.chrome, old: old.chrome }));
   const la = arrangementFor(old, { id: 'w-old' }), lp = arrangementFor(applyForViewport('phone', doc.autoSave, { source: 'boot' }), { id: 'w-old' });
-  leg(la && la.z === 3 && la.min === true && la.snap === true && !!la.snapBounds && old.membership.windows[0].id === 'w-old' && lp && lp.min === true && J(Object.keys(lp)) === J(PHONE_SHOWS), '§8 the legacy spellings ride the subsets verbatim (read both, write the canonical — the apply\'s precedence decides): a desktop\'s z / min / snap / snapBounds, a phone\'s min, the membership\'s id', J({ la, lp }));
+  leg(gateOf(la) && la.z === 3 && la.min === true && la.snap === true && !!la.snapBounds && old.membership.windows[0].id === 'w-old' && gateOf(lp) && lp.min === true && J(Object.keys(lp)) === J(PHONE_SHOWS), '§8 the legacy spellings ride the subsets verbatim (read both, write the canonical — the apply\'s precedence decides): a desktop\'s z / min / snap / snapBounds, a phone\'s min, the membership\'s id', J({ la, lp }));
   leg(arrangementFor(boot, { winId: 'w-nope' }) === null && arrangementFor(applyForViewport('desktop', rec, { source: 'remote', writer: 'phone' }), { winId: 'w-chat' }) === null && arrangementFor(boot, null) === null, '§8 arrangementFor: an entry the record does not hold, a live phone record on a desktop, no entry ⇒ null');
   leg(applyForViewport('desktop', rec, { source: 'remote' }).arrangement === null && applyForViewport('desktop', { ...rec, viewport: 'desktop' }, { source: 'remote' }).chrome.sidebarOpen === true, '§8 no writer named ⇒ the record\'s own stamp (a phone-stamped record live on a desktop: membership only)');
   const odd = applyForViewport('desktop', rec, { source: 'switch' });
@@ -330,7 +330,7 @@ const layerFailed = layerLegs(P);
  *  re-run them on patched copies. */
 function gateLegs(P, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const { layerGate, PHONE_KEEPS, ARRANGEMENT, LAYERS } = P;
   if (!layerGate || !PHONE_KEEPS) { leg(false, '§9 desktop-record.js exports layerGate and PHONE_KEEPS'); return failed; }
   const doc = realShapeDoc(), held = doc.desktops['d-1'].autoSave, before = J(doc);
@@ -364,8 +364,8 @@ function gateLegs(P, { quiet = false } = {}) {
   const unk = gate('a field no layer names (a window\'s dockSide, a record\'s wallpaper)', 'phone', held, sent((r, w) => { w('w-chat').dockSide = 'left'; r.wallpaper = 'sea'; }));
   const many = gate('the theme, w-files\' z, the sidebar and w-chat\'s box at once', 'phone', held, sent((r, w) => { r.theme = 'light'; w('w-files').zIndex = 1; r.sidebarOpen = false; w('w-chat').gridBounds.top += 0.2; }));
   if (!quiet) console.log('    §9 ' + rows.join('\n    §9 '));
-  leg(eq.ok, '§9 a phone record EQUAL to the held one outside the workspace passes (the record a current phone writes)', J(eq));
-  leg(refused(z, ['zIndex'], ['w-chat']) && refused(gb, ['gridBounds'], ['w-term']) && refused(sb, ['sidebarOpen']) && refused(gr, ['grid']) && refused(th, ['theme']), '§9 a phone record that changes z, a box, the sidebar, the grid or the theme is REFUSED cross-layer — each by name (and the window)', J({ z, gb, sb, gr, th }));
+  leg(verdictOf(eq.ok), '§9 a phone record EQUAL to the held one outside the workspace passes (the record a current phone writes)', J(eq));
+  leg(gateOf(refused(z, ['zIndex'], ['w-chat'])) && gateOf(refused(gb, ['gridBounds'], ['w-term'])) && gateOf(refused(sb, ['sidebarOpen'])) && gateOf(refused(gr, ['grid'])) && verdictOf(refused(th, ['theme'])), '§9 a phone record that changes z, a box, the sidebar, the grid or the theme is REFUSED cross-layer — each by name (and the window)', J({ z, gb, sb, gr, th }));
   // THE CENSUS: every field of the arrangement / chrome / preference rows is gated — each one moved alone is refused by its name
   const LEG = { z: 'zIndex', min: 'isMinimized', snap: 'isSnapped', snapBounds: 'preSnapBounds' };
   const winF = ARRANGEMENT.filter((f) => !(f in LEG)), rowF = LAYERS.filter((r) => ['arrangement', 'chrome', 'preference'].includes(r.layer)).flatMap((r) => r.fields);
@@ -374,17 +374,17 @@ function gateLegs(P, { quiet = false } = {}) {
   for (const f of winF) { const v = layerGate('phone', held, sent((r, w) => { w('w-files')[f] = bump(w('w-files')[f]); })); if (!refused(v, [f], ['w-files'])) missed.push([f, v]); }
   for (const f of PHONE_KEEPS) { const v = layerGate('phone', held, sent((r) => { r[f] = bump(r[f]); })); if (!refused(v, [f])) missed.push([f, v]); }
   leg(!missed.length && J([...winF, ...PHONE_KEEPS, ...Object.keys(LEG)].sort()) === J([...rowF].sort()), `§9 THE GATE CENSUS: every field of the arrangement / chrome / preference rows (${rowF.length}, the legacy spellings read as their canonical) is gated — each one moved alone is refused by its own name`, J(missed));
-  leg(J(PHONE_KEEPS) === J(rowF.filter((f) => !ARRANGEMENT.includes(f))) && PHONE_KEEPS.includes('theme') && PHONE_KEEPS.includes('taskbarHeight') && !PHONE_KEEPS.includes('zIndex'), '§9 PHONE_KEEPS (what a phone\'s record carries from the held one) = every RECORD field outside the workspace, derived from LAYERS', J(PHONE_KEEPS));
-  leg(lg1.ok && lg2.ok, '§9 a legacy spelling equals its canonical (z / zIndex, min / isMinimized, snap / isSnapped, snapBounds / preSnapBounds) — both ways', J({ lg1, lg2 }));
-  leg(wob.ok && refused(wob2, ['gridBounds'], ['w-chat']), '§9 a sub-pixel wobble (≤ 0.002, guard 4\'s apply epsilon) passes; 0.003 is a move', J({ wob, wob2 }));
-  leg(abs.ok && refused(sc, ['toolbarScale']), '§9 an absent false flag is false; a toolbar scale within 0.02 of 1 is the null the capture writes; 1.1 is a change', J({ abs, sc }));
-  leg(dk.ok && un.ok && odd.ok, '§9 a DESKTOP stamp is unrestricted; an UNSTAMPED record (a pre-.264 sender) and an unknown stamp are a desktop\'s (today\'s behaviour)', J({ dk, un, odd }));
-  leg(first.ok, '§9 a FIRST write (the server holds no record of that desktop) passes', J(first));
-  leg(mem.ok && ws.ok && meta.ok, '§9 the WORKSPACE flows: a close, a phone-born window (its box is the workspace\'s news), titles / openSpec / paths / the chain\'s active-layout-split; meta stamps are never judged', J({ mem, ws, meta }));
-  leg(unk.ok, '§9 a field no layer names is not judged here (the §8 census reds it first — the gate never refuses a new workspace field)', J(unk));
-  leg(refused(many, ['zIndex', 'gridBounds', 'sidebarOpen', 'theme'], ['w-chat', 'w-files']), '§9 a refusal names EVERY field moved, in table order (window fields, then the record\'s), and the windows in the record\'s order', J(many));
+  leg(J(PHONE_KEEPS) === J(rowF.filter((f) => !ARRANGEMENT.includes(f))) && gateOf(PHONE_KEEPS.includes('theme')) && gateOf(PHONE_KEEPS.includes('taskbarHeight')) && !PHONE_KEEPS.includes('zIndex'), '§9 PHONE_KEEPS (what a phone\'s record carries from the held one) = every RECORD field outside the workspace, derived from LAYERS', J(PHONE_KEEPS));
+  leg(gateOf(lg1.ok) && verdictOf(lg2.ok), '§9 a legacy spelling equals its canonical (z / zIndex, min / isMinimized, snap / isSnapped, snapBounds / preSnapBounds) — both ways', J({ lg1, lg2 }));
+  leg(gateOf(wob.ok) && verdictOf(refused(wob2, ['gridBounds'], ['w-chat'])), '§9 a sub-pixel wobble (≤ 0.002, guard 4\'s apply epsilon) passes; 0.003 is a move', J({ wob, wob2 }));
+  leg(gateOf(abs.ok) && verdictOf(refused(sc, ['toolbarScale'])), '§9 an absent false flag is false; a toolbar scale within 0.02 of 1 is the null the capture writes; 1.1 is a change', J({ abs, sc }));
+  leg(gateOf(dk.ok) && gateOf(un.ok) && verdictOf(odd.ok), '§9 a DESKTOP stamp is unrestricted; an UNSTAMPED record (a pre-.264 sender) and an unknown stamp are a desktop\'s (today\'s behaviour)', J({ dk, un, odd }));
+  leg(verdictOf(first.ok), '§9 a FIRST write (the server holds no record of that desktop) passes', J(first));
+  leg(gateOf(mem.ok) && gateOf(ws.ok) && verdictOf(meta.ok), '§9 the WORKSPACE flows: a close, a phone-born window (its box is the workspace\'s news), titles / openSpec / paths / the chain\'s active-layout-split; meta stamps are never judged', J({ mem, ws, meta }));
+  leg(verdictOf(unk.ok), '§9 a field no layer names is not judged here (the §8 census reds it first — the gate never refuses a new workspace field)', J(unk));
+  leg(verdictOf(refused(many, ['zIndex', 'gridBounds', 'sidebarOpen', 'theme'], ['w-chat', 'w-files'])), '§9 a refusal names EVERY field moved, in table order (window fields, then the record\'s), and the windows in the record\'s order', J(many));
   let threw = null; try { layerGate('phone', held, null); layerGate('phone', { windows: 'x' }, { windows: [null, 3, { winId: 'w-chat' }] }); layerGate('phone', held, { windows: [{ zIndex: 1 }] }); } catch (e) { threw = e.message; }
-  leg(!threw && layerGate('phone', held, null).ok && J(doc) === before, '§9 garbage never throws (no record / a non-list / entries with no id); the inputs are never mutated', threw);
+  leg(!threw && gateOf(layerGate('phone', held, null).ok) && J(doc) === before, '§9 garbage never throws (no record / a non-list / entries with no id); the inputs are never mutated', threw);
   return failed;
 }
 console.log('— §9 THE LAYER GATE (PURE layerGate — the server half, src/lib/desktop-record.js)');
@@ -445,7 +445,7 @@ const INCIDENT = () => ({ 'desk-fin': [R('fin-1', { gridBounds: GB(0.1, 0.1) })]
 
 async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k); // a control re-runs the legs its patch can redden (the timer legs cost seconds each)
   // a) THE INCIDENT: the drop onto HR's preview (window.js calls exactly this), HR never opened
   if (want('a')) {
@@ -453,16 +453,16 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     leg(W.rects('desk-hr') === 3, '§4 before the drop HR\'s preview draws its 3 windows (from the held record — the page built none of them)', W.rects('desk-hr'));
     const r = W.dm.moveWindowToDesktop('fin-1', 'desk-hr');
     const hr = W.dm._savedStates.get('desk-hr'), fin = W.dm._savedStates.get('desk-fin');
-    leg(r.ok && r.moved && J(ids(hr)) === J(['hr-1', 'hr-2', 'hr-3', 'fin-1']), '§4 THE DROP onto an UNVISITED desktop: its held record keeps its 3 windows and ADDS the moved one (2.369.198: [fin-1] alone)', J(ids(hr)));
+    leg(gateOf(r.ok) && gateOf(r.moved) && J(ids(hr)) === J(['hr-1', 'hr-2', 'hr-3', 'fin-1']), '§4 THE DROP onto an UNVISITED desktop: its held record keeps its 3 windows and ADDS the moved one (2.369.198: [fin-1] alone)', J(ids(hr)));
     const moved = hr.windows[3];
-    leg(moved && moved.type === 'files' && moved.openSpec?.action === 'openFileExplorer' && moved.title === 'fin-1' && moved.explorerPath === '/x/fin-1', '§4 …the moved window is added as the ONE capture makes it (type, title, openSpec, path — not the old four-field stub)', J(moved));
+    leg(gateOf(moved) && moved.type === 'files' && moved.openSpec?.action === 'openFileExplorer' && moved.title === 'fin-1' && moved.explorerPath === '/x/fin-1', '§4 …the moved window is added as the ONE capture makes it (type, title, openSpec, path — not the old four-field stub)', J(moved));
     leg(J(ids(fin)) === '[]', '§4 …and the source\'s held record drops it (nothing else touched)', J(ids(fin)));
     leg(W.rects('desk-hr') === 4, '§4 HR\'s preview draws 4 after the drop (2.369.198: 3 → 1 — the cache fallback ran only when no live window was there)', W.rects('desk-hr'));
     await W.lm._doAutoSave();
     const hrSync = W.syncs('desk-hr'), finSync = W.syncs('desk-fin');
     leg(hrSync.length === 1 && J(ids(hrSync[0].state)) === J(['hr-1', 'hr-2', 'hr-3', 'fin-1']), '§4 THE AUTOSAVE after the drop SENDS HR\'s HELD record — 4 windows, never a list derived from the page', J(hrSync.map((m) => ids(m.state))));
     leg(finSync.length === 1 && J(ids(finSync[0].state)) === '[]', '§4 …and Fin\'s (the window left it) — the server holds the move whatever the page does next (2.369.198 sent Fin alone: a reload before visiting HR lost the moved window too)', J(finSync.map((m) => ids(m.state))));
-    leg([...hrSync, ...finSync].every((m) => (m.evidence || []).some((e) => e.id === 'fin-1' && e.why === 'moved')), '§4 …both carry the move as evidence for the server\'s belt', J(finSync[0]?.evidence));
+    leg(verdictOf([...hrSync, ...finSync].every((m) => (m.evidence || []).some((e) => e.id === 'fin-1' && e.why === 'moved'))), '§4 …both carry the move as evidence for the server\'s belt', J(finSync[0]?.evidence));
     W.sent.length = 0; await W.lm._doAutoSave();
     leg(W.syncs('desk-hr').length === 1, '§4 …a save before the server READ the first one re-sends HR (owed until the ack — verify r5 ⑤; an idempotent duplicate)');
     await tick(40); W.sent.length = 0; await W.lm._doAutoSave(); // the ack landed
@@ -496,14 +496,14 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const W = world(DM, LM, { records: recs });
     W.mkWin('new-1', 'desk-fin', { type: 'chat', _openSpec: undefined });
     const r = W.dm.moveWindowToDesktop('new-1', 'desk-hr', { replaces: 'hr-old' });
-    leg(r.ok && J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3', 'new-1']), '§4 RESUME PLACEMENT (no gesture): the unvisited desktop keeps its windows, the resumed one REPLACES its old entry (never two windows of one conversation on the next visit)', J(ids(W.dm._savedStates.get('desk-hr'))));
-    leg(W.dm.evidence().some((e) => e.id === 'hr-old' && e.why === 'replaced'), '§4 …the replaced entry is evidence (\'replaced\')');
+    leg(gateOf(r.ok) && J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3', 'new-1']), '§4 RESUME PLACEMENT (no gesture): the unvisited desktop keeps its windows, the resumed one REPLACES its old entry (never two windows of one conversation on the next visit)', J(ids(W.dm._savedStates.get('desk-hr'))));
+    leg(verdictOf(W.dm.evidence().some((e) => e.id === 'hr-old' && e.why === 'replaced')), '§4 …the replaced entry is evidence (\'replaced\')');
   }
   // e) a close leaves every held record, with evidence
   if (want('e')) {
     const W = world(DM, LM, { records: INCIDENT() });
     W.dm.purgeClosedWindow('hr-2');
-    leg(J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-3']) && W.dm.evidence().some((e) => e.id === 'hr-2' && e.why === 'closed'), '§4 a CLOSE leaves every held record (purgeClosedWindow through the door) and is evidence (\'closed\')');
+    leg(J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-3']) && verdictOf(W.dm.evidence().some((e) => e.id === 'hr-2' && e.why === 'closed')), '§4 a CLOSE leaves every held record (purgeClosedWindow through the door) and is evidence (\'closed\')');
     leg(J(W.dm.takeDirty()) === J(['desk-hr']), '§4 …a desktop not on show that listed it is sent with the next save (the close reaches the server while its evidence is fresh)');
     leg(J(W.dm.takeDirty()) === J(['desk-hr']), '§4 …and stays owed until the server READ it (verify r5 ⑤: a save on a dead socket took it out of the set and the re-send carried the desktop on show alone)');
     W.dm.noteCarried('desk-hr'); // the ack
@@ -514,7 +514,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
   if (want('e2')) {
     const recs = INCIDENT(); recs['desk-hr'].push(R('fin-1'));
     const W = world(DM, LM, { records: recs });
-    leg(J(ids(W.dm.recordFor('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3']) && W.dm.evidence().some((e) => e.id === 'fin-1' && e.why === 'moved'), '§4 a record entry for a window the page has BUILT on another desktop leaves the record it is not in (evidence \'moved\'); the unbuilt ones stay', J(ids(W.dm.recordFor('desk-hr'))));
+    leg(J(ids(W.dm.recordFor('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3']) && verdictOf(W.dm.evidence().some((e) => e.id === 'fin-1' && e.why === 'moved')), '§4 a record entry for a window the page has BUILT on another desktop leaves the record it is not in (evidence \'moved\'); the unbuilt ones stay', J(ids(W.dm.recordFor('desk-hr'))));
     leg(!('updatedAt' in W.dm.recordFor('desk-fin')), '§4 the record the page writes never carries the server\'s updatedAt stamp (the server stamps every write)');
   }
   // f) build attempts: in flight ⇒ kept; past the grace ⇒ dropped with evidence; no openSpec ⇒ at once
@@ -523,7 +523,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const W = world(DM, LM, { records: recs, failReplay: ['hr-dead'] });
     await W.dm.switchTo('desk-hr'); W.dm._restoring = false;
     const r1 = ids(W.dm.recordFor('desk-hr'));
-    leg(r1.includes('hr-dead') && !r1.includes('hr-nospec'), '§4 a window still being built stays in the record (the fast-switch protection); one with no openSpec cannot be built and leaves at once', J(r1));
+    leg(gateOf(r1.includes('hr-dead')) && !r1.includes('hr-nospec'), '§4 a window still being built stays in the record (the fast-switch protection); one with no openSpec cannot be built and leaves at once', J(r1));
     W.dm._buildAttempts.get('hr-dead').at -= 21000;
     const r2 = ids(W.dm.recordFor('desk-hr'));
     leg(!r2.includes('hr-dead') && J(W.dm.evidence().filter((e) => e.why === 'unbuilt').map((e) => e.id).sort()) === J(['hr-dead', 'hr-nospec']), '§4 …past the grace it is one the page CANNOT build: it leaves, named to the server (\'unbuilt\')', J({ r2, ev: W.dm.evidence() }));
@@ -543,8 +543,8 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const replayed = []; const rs = W3.app.replayOpenSpec; W3.app.replayOpenSpec = (spec, id) => { replayed.push(id); return rs(spec, id); };
     await W3.dm.switchTo('desk-hr'); W3.dm._restoring = false;
     const r3 = ids(W3.dm.recordFor('desk-hr'));
-    leg(!replayed.includes('hr-dup') && !r3.includes('hr-dup') && W3.dm.evidence().some((e) => e.id === 'hr-dup' && e.why === 'dup' && e.by === 'fin-live') && r3.includes('hr-1'), '§4 a record entry for a session already open here under another window id is never replayed and leaves at once (evidence {why:\'dup\', by: the window that shows it} — userW inc-mw1ogdno-5jny; the lane\'s ①: a 20 s build attempt the server held against every other client)', J({ replayed, r3, ev: W3.dm.evidence() }));
-    leg(replayed.includes('hr-parent') && r3.includes('hr-parent') && !W3.dm.evidence().some((e) => e.id === 'hr-parent'), '§4 …but the PARENT of a fork open here is another session and IS replayed and kept — the conversation id its fork borrows never settles it (verify r2: keyed on the conversation id, the parent\'s never-opened window left its desktop\'s record for good)', J({ replayed, r3, ev: W3.dm.evidence() }));
+    leg(!replayed.includes('hr-dup') && !r3.includes('hr-dup') && gateOf(W3.dm.evidence().some((e) => e.id === 'hr-dup' && e.why === 'dup' && e.by === 'fin-live')) && verdictOf(r3.includes('hr-1')), '§4 a record entry for a session already open here under another window id is never replayed and leaves at once (evidence {why:\'dup\', by: the window that shows it} — userW inc-mw1ogdno-5jny; the lane\'s ①: a 20 s build attempt the server held against every other client)', J({ replayed, r3, ev: W3.dm.evidence() }));
+    leg(gateOf(replayed.includes('hr-parent')) && gateOf(r3.includes('hr-parent')) && !W3.dm.evidence().some((e) => e.id === 'hr-parent'), '§4 …but the PARENT of a fork open here is another session and IS replayed and kept — the conversation id its fork borrows never settles it (verify r2: keyed on the conversation id, the parent\'s never-opened window left its desktop\'s record for good)', J({ replayed, r3, ev: W3.dm.evidence() }));
   }
   // g) THE REFUSAL (the server's belt answered): the view = the server's record + what the page built, re-sent
   if (want('g')) {
@@ -555,7 +555,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     clearToasts();
     for (const h of W.handlers) h({ type: 'layout-sync-refused', desktopId: 'desk-hr', reason: 'shrink-without-close', unexplained: ['hr-1', 'hr-2', 'hr-3'], state: { windows: INCIDENT()['desk-hr'] } });
     leg(J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3', 'fin-1']), '§4 a REFUSED record (ws `layout-sync-refused`, routed by the socket) reconciles: the view = the server\'s record + the window the page built there', J(ids(W.dm._savedStates.get('desk-hr'))));
-    leg(/“hr-1”, “hr-2”, “hr-3” on “HR” were kept/.test(toasts()[0] || ''), '§4 …said in a toast, never silent — naming the windows kept (userW inc-mw1ogdno-5jny: their names, never a count)', J(toasts()));
+    leg(verdictOf(/“hr-1”, “hr-2”, “hr-3” on “HR” were kept/.test(toasts()[0] || '')), '§4 …said in a toast, never silent — naming the windows kept (userW inc-mw1ogdno-5jny: their names, never a count)', J(toasts()));
     W.sent.length = 0; await W.lm._doAutoSave();
     leg(J(ids(W.syncs('desk-hr')[0]?.state)) === J(['hr-1', 'hr-2', 'hr-3', 'fin-1']), '§4 …and the corrected record goes out with the next save', J(W.syncs('desk-hr').map((m) => ids(m.state))));
   }
@@ -598,10 +598,10 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     W.lm._restoring = false;
     for (const h of W.handlers) h({ type: 'layout-sync', seq: 4, desktopId: 'desk-hr', state: { windows: INCIDENT()['desk-hr'] } });
     await tick(400);
-    leg(w?._desktopId === 'desk-fin' && w?._hiddenByDesktop === false && W.wins.has('fin-1') && !W.closed.includes('fin-1'), '§4 a REMOTE MOVE IN: the record of the desktop on show lists a window this page holds hidden elsewhere — moved here and shown; the source\'s record that follows does not close it', J([w?._desktopId, w?._hiddenByDesktop, W.closed]));
+    leg(w?._desktopId === 'desk-fin' && w?._hiddenByDesktop === false && gateOf(W.wins.has('fin-1')) && !W.closed.includes('fin-1'), '§4 a REMOTE MOVE IN: the record of the desktop on show lists a window this page holds hidden elsewhere — moved here and shown; the source\'s record that follows does not close it', J([w?._desktopId, w?._hiddenByDesktop, W.closed]));
     W.lm._restoring = false;
     for (const h of W.handlers) h({ type: 'layout-sync', seq: 5, desktopId: 'desk-fin', state: { windows: [] } });
-    leg(W.closed.includes('fin-1'), '§4 …and a drop no other record explains is still a close');
+    leg(verdictOf(W.closed.includes('fin-1')), '§4 …and a drop no other record explains is still a close');
   }
   // k) verify r1 D2 — a RECONNECT re-reads the layout (§6b guard 9)
   if (want('k')) {
@@ -617,8 +617,8 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       W.lm._restoring = false;
       for (const h of W.stateHandlers) h(false); for (const h of W.stateHandlers) h(true); // an outage, a reconnect
       await tick(450); W.lm._restoring = false; await tick(300); // 250 ms to the read + the apply; the cooldown lifted by hand; the deferred HR record's drain
-      leg(fetches.some((u) => /\/api\/layouts$/.test(u)), '§4 a RECONNECT re-reads /api/layouts (the lane\'s ①: the held records stayed at the last broadcast before the outage, and the next save wrote that base over what arrived meanwhile — one window another client had opened was wiped)', J(fetches));
-      leg(W.wins.has('fin-2') && !W.wins.has('fin-1') && W.wins.has('fin-own'), '§4 …the desktop on show follows the server: fin-2 opened; fin-1 closed (the wire listed it, the server dropped it); this page\'s OWN unsent window kept (the wire never listed it)', J([...W.wins.keys()]));
+      leg(verdictOf(fetches.some((u) => /\/api\/layouts$/.test(u))), '§4 a RECONNECT re-reads /api/layouts (the lane\'s ①: the held records stayed at the last broadcast before the outage, and the next save wrote that base over what arrived meanwhile — one window another client had opened was wiped)', J(fetches));
+      leg(gateOf(W.wins.has('fin-2')) && !W.wins.has('fin-1') && verdictOf(W.wins.has('fin-own')), '§4 …the desktop on show follows the server: fin-2 opened; fin-1 closed (the wire listed it, the server dropped it); this page\'s OWN unsent window kept (the wire never listed it)', J([...W.wins.keys()]));
       leg(J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3', 'hr-4']), '§4 …a desktop not on show is cached from the server (hr-4 arrived during the outage)', J(ids(W.dm._savedStates.get('desk-hr'))));
       // a second outage, during which fin-2 was MOVED to HR: the desktop on show is read last, so the move is a move
       server.desktops['desk-fin'].autoSave.windows = []; server.desktops['desk-hr'].autoSave.windows.push(R('fin-2'));
@@ -637,7 +637,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const delAt = W.sent.findIndex((m) => m.type === 'desktop-delete');
     const finAt = W.sent.map((m, i) => (m.type === 'layout-sync' && m.desktopId === 'desk-fin' ? i : -1)).filter((i) => i >= 0);
     leg(finSyncs.length >= 1 && J(ids(finSyncs[finSyncs.length - 1].state).sort()) === J(['fin-1', 'hr-1', 'hr-2', 'hr-3']), '§4 deleting the desktop ON SHOW: the target\'s record with all 4 goes out AT ONCE — not left to an autosave the switch\'s gate drops (the lane\'s ①: the server forgot the desktop and held its 3 windows in no record until the next input; a reload in between lost them)', J(finSyncs.map((m) => ids(m.state))));
-    leg(finAt.length && delAt > finAt[finAt.length - 1], '§4 …and BEFORE the desktop-delete (never a moment with the windows in no record)', J([finAt, delAt]));
+    leg(gateOf(finAt.length) && delAt > finAt[finAt.length - 1], '§4 …and BEFORE the desktop-delete (never a moment with the windows in no record)', J([finAt, delAt]));
     leg(J(ids(W.dm._savedStates.get('desk-fin')).sort()) === J(['fin-1', 'hr-1', 'hr-2', 'hr-3']) && !W.dm._savedStates.has('desk-hr'), '§4 …the held records agree: Fin holds 4, HR is gone');
   }
   // m) verify r1 D6 — a refused record of the desktop ON SHOW is re-sent by rearmSave alone (no dirty desk marks it)
@@ -661,14 +661,14 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const n0 = W.sent.length;
     W.lm._flushPending(); // the pointerup (the capture listener) …
     const r = W.dm.moveWindowToDesktop('fin-2', 'desk-hr'); // … then the drop on HR's preview (window.js's mouseup)
-    leg(r.ok && r.moved && W.wins.get('fin-2')?._desktopId === 'desk-hr', '§4 the drop moved fin-2 to HR');
+    leg(gateOf(r.ok) && gateOf(r.moved) && W.wins.get('fin-2')?._desktopId === 'desk-hr', '§4 the drop moved fin-2 to HR');
     await tick(650); // the deferred record lands
     const w = W.wins.get('fin-2');
     leg(!!w && w._desktopId === 'desk-hr' && w._hiddenByDesktop === true, '§4 THE HELD MOVE: a record received BEFORE the user\'s move cannot know it — the window stays where the user dropped it (verify r2: r1\'s move-in put it back on Fin)', J([w?._desktopId, w?._hiddenByDesktop]));
     await tick(2000); // the apply's 1 s cooldown, the held move's re-send at its end, the autosave it arms (500 ms)
     const since = W.sent.slice(n0).filter((m) => m.type === 'layout-sync');
     const hrS = since.filter((m) => m.desktopId === 'desk-hr'), finS = since.filter((m) => m.desktopId === 'desk-fin');
-    leg(hrS.length >= 1 && ids(hrS[hrS.length - 1].state).includes('fin-2') && finS.length >= 1 && !ids(finS[finS.length - 1].state).includes('fin-2'), '§4 …and the move goes out once more, as the user\'s own act (HR with fin-2, Fin without) — the apply\'s dirty clear does not swallow it', J({ hr: hrS.map((m) => ids(m.state)), fin: finS.map((m) => ids(m.state)), dirty: W.lm._userDirty }));
+    leg(hrS.length >= 1 && gateOf(ids(hrS[hrS.length - 1].state).includes('fin-2')) && finS.length >= 1 && !ids(finS[finS.length - 1].state).includes('fin-2'), '§4 …and the move goes out once more, as the user\'s own act (HR with fin-2, Fin without) — the apply\'s dirty clear does not swallow it', J({ hr: hrS.map((m) => ids(m.state)), fin: finS.map((m) => ids(m.state)), dirty: W.lm._userDirty }));
     // …while a record received AFTER the move is a genuine remote move and still applies
     W.lm._restoring = false;
     for (const h of W.handlers) h({ type: 'layout-sync', seq: 2, desktopId: 'desk-fin', state: { windows: [R('fin-1'), R('fin-2')] } });
@@ -687,7 +687,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const finChain = { tabs: ['fin-1', 'fin-x'], active: 0, layout: 'tabs', order: ['fin-1', 'fin-x'] };
     W.wins.get('fin-1')._tabChain = finChain; W.mkWin('fin-x', 'desk-fin', { _tabChain: finChain, _isTabGuest: true });
     for (const h of W.handlers) h({ type: 'layout-sync', seq: 2, desktopId: 'desk-fin', state: { windows: [R('fin-1'), R('fin-x')] } });
-    leg(W.detached.includes('fin-x') && W.detached.length === 1 && !W.detached.includes('hr-2') && chain.tabs.length === 2, '§4 …a chain on the desktop on show that the record does not carry is broken, as before; HR\'s still stands', J({ detached: W.detached, tabs: chain.tabs }));
+    leg(gateOf(W.detached.includes('fin-x')) && W.detached.length === 1 && !W.detached.includes('hr-2') && chain.tabs.length === 2, '§4 …a chain on the desktop on show that the record does not carry is broken, as before; HR\'s still stands', J({ detached: W.detached, tabs: chain.tabs }));
   }
   // q) verify r2 ④ — another page's `desktop-updated` after a delete: the deleted desktop's windows go where the
   // deleter's record put them (its target — b21c2d40 sends that record first), not to desktop #1
@@ -751,8 +751,8 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     try {
       for (const h of W.stateHandlers) h(true); for (const h of W.stateHandlers) h(false); for (const h of W.stateHandlers) h(true);
       const poll = async (pred, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await tick(50); } return pred(); }; // bounded polls, never a fixed tick (the box's load lags timers)
-      leg(await poll(() => calls === 1, 3000) && J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3']), '§4 the re-read was asked once and failed (a cut) — the page still holds its stale HR', J([calls, ids(W.dm._savedStates.get('desk-hr'))]));
-      leg(await poll(() => calls >= 3 && J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3', 'hr-4']), 9000), '§4 a failed re-read is retried (a cut, then a 503, then the answer) and the page catches up — never left on the stale base after one failure (verify r2: one try, and the next save wrote that base over what arrived during the outage)', J([calls, ids(W.dm._savedStates.get('desk-hr'))]));
+      leg(gateOf(await poll(() => calls === 1, 3000)) && J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3']), '§4 the re-read was asked once and failed (a cut) — the page still holds its stale HR', J([calls, ids(W.dm._savedStates.get('desk-hr'))]));
+      leg(verdictOf(await poll(() => calls >= 3 && J(ids(W.dm._savedStates.get('desk-hr'))) === J(['hr-1', 'hr-2', 'hr-3', 'hr-4']), 9000)), '§4 a failed re-read is retried (a cut, then a 503, then the answer) and the page catches up — never left on the stale base after one failure (verify r2: one try, and the next save wrote that base over what arrived during the outage)', J([calls, ids(W.dm._savedStates.get('desk-hr'))]));
     } finally { globalThis.fetch = realFetch; }
   }
   // t) verify r2 R7 — the drain's ORDER is by seq, not by the map's insertion order (r1's part no gate caught)
@@ -798,7 +798,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     W.sent.length = 0;
     await W.dm.switchTo('desk-fin');
     const hrSync = W.syncs('desk-hr')[0];
-    leg(!!hrSync && J(ids(hrSync.state)) === J(['hr-3']) && ['hr-1', 'hr-2'].every((id) => (hrSync.evidence || []).some((e) => e.id === id && e.why === 'closed')), '§4 the switch\'s broadcast of the desktop being left (two closes, no autosave yet) carries their evidence — else the belt refuses the user\'s own closes and a false "were kept" toast follows (D6: caught by no gate)', J(hrSync));
+    leg(!!hrSync && J(ids(hrSync.state)) === J(['hr-3']) && verdictOf(['hr-1', 'hr-2'].every((id) => (hrSync.evidence || []).some((e) => e.id === id && e.why === 'closed'))), '§4 the switch\'s broadcast of the desktop being left (two closes, no autosave yet) carries their evidence — else the belt refuses the user\'s own closes and a false "were kept" toast follows (D6: caught by no gate)', J(hrSync));
   }
   // w) verify r3 ② — a move made while the reconnect's re-read is IN FLIGHT: the answer predates it and must not reverse it
   if (want('w')) {
@@ -811,13 +811,13 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       await tick(30);
       W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now();
       const r = W.dm.moveWindowToDesktop('fin-2', 'desk-hr'); // the drop while the read is in flight
-      leg(r.ok && r.moved, '§4 the drop moved fin-2 to HR while the re-read was in flight');
+      leg(gateOf(r.ok) && verdictOf(r.moved), '§4 the drop moved fin-2 to HR while the re-read was in flight');
       await tick(700); release(); await p; await tick(30); // the answer: the server's records from BEFORE the move, landing after the move's save LEFT (verify r4 ①: an answer before the save is held by the unsaved-act rule; this one is held by the horizon alone)
       const w = W.wins.get('fin-2');
       leg(!!w && w._desktopId === 'desk-hr' && w._hiddenByDesktop === true, '§4 verify r3 ②: the re-read (asked before the move) does not put fin-2 back on Fin — its horizon is the ask, never the answer', w?._desktopId);
       await tick(2600); // the apply's cooldown, the held move's re-send, its autosave
       const hrS = W.syncs('desk-hr'), finS = W.syncs('desk-fin');
-      leg(hrS.length >= 1 && ids(hrS[hrS.length - 1].state).includes('fin-2') && finS.length >= 1 && !ids(finS[finS.length - 1].state).includes('fin-2'), '§4 …and the move goes out after the re-read (HR with fin-2, Fin without)', J([hrS.map((m) => ids(m.state)), finS.map((m) => ids(m.state))]));
+      leg(hrS.length >= 1 && gateOf(ids(hrS[hrS.length - 1].state).includes('fin-2')) && finS.length >= 1 && !ids(finS[finS.length - 1].state).includes('fin-2'), '§4 …and the move goes out after the re-read (HR with fin-2, Fin without)', J([hrS.map((m) => ids(m.state)), finS.map((m) => ids(m.state))]));
     } finally { globalThis.fetch = realFetch; }
   }
   // x) verify r3 ② — a move made while DISCONNECTED (its save queued in ws.js) vs a re-read whose answer raced the queued save on the server
@@ -835,7 +835,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       W.dm.moveWindowToDesktop('fin-2', 'desk-hr');
       await tick(700); // the autosave "sent" — queued in ws.js while disconnected
       const queued = W.pending.filter((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr');
-      leg(queued.length >= 1 && ids(queued[queued.length - 1].state).includes('fin-2') && W.syncs('desk-hr').length === 0 && W.lm._unacked.some((x) => x.at == null), '§4 the move\'s save was queued while disconnected (nothing left; its no-ack clock not started)');
+      leg(queued.length >= 1 && gateOf(ids(queued[queued.length - 1].state).includes('fin-2')) && W.syncs('desk-hr').length === 0 && verdictOf(W.lm._unacked.some((x) => x.at == null)), '§4 the move\'s save was queued while disconnected (nothing left; its no-ack clock not started)');
       W.app.ws.connected = true; for (const h of W.stateHandlers) h(true); // the reconnect: the queue flushes, the re-read 250 ms later
       await tick(700);
       const w = W.wins.get('fin-2');
@@ -890,7 +890,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       leg(c._tabChain === null && a._tabChain === ch3 && ch3.tabs.length === 2 && queued === 0, '§4 verify r5 ②: a TEAR-OFF made in the cooldown is not undone by the record deferred under it — the group of two stands and the older record\'s 3-group is not rebuilt around the window that left', J([c._tabChain?.tabs, ch3.tabs, queued]));
       await tick(3000);
       const fin = W.syncs('desk-fin').pop(), rec = fin && (fin.state.windows || []).find((w) => w.winId === 'fin-1'), rec3 = fin && (fin.state.windows || []).find((w) => w.winId === 'fin-3');
-      leg(!!rec?.tabChain?.tabs && rec.tabChain.tabs.length === 2 && rec3 && !rec3.isTabGuest, '§4 …and the deferred save carries the two-group and the free window', J(fin && (fin.state.windows || []).map((w) => [w.winId, w.tabChain?.tabs, !!w.isTabGuest])));
+      leg(!!rec?.tabChain?.tabs && rec.tabChain.tabs.length === 2 && gateOf(rec3) && !rec3.isTabGuest, '§4 …and the deferred save carries the two-group and the free window', J(fin && (fin.state.windows || []).map((w) => [w.winId, w.tabChain?.tabs, !!w.isTabGuest])));
     }
   }
   // a5) verify r5 ⑥ — a move whose window the record never names (a peer closed it, captured before the move): the apply's dirty clear vs the move's pending save
@@ -902,7 +902,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     for (const h of W.handlers) h({ type: 'layout-sync', seq: 1, desktopId: 'desk-fin', receivedAt: Date.now(), state: { windows: [R('fin-1', { gridBounds: GB(0.2, 0.2) })] } }); // a peer's Fin record WITHOUT fin-2 (the peer closed it; captured before the move)
     await tick(3500);
     const hr = W.syncs('desk-hr');
-    leg(W.wins.get('fin-2')?._desktopId === 'desk-hr' && hr.length >= 1 && ids(hr[hr.length - 1].state).includes('fin-2') && !W.dm._dirtyDesks.has('desk-hr'), '§4 verify r5 ⑥: the move wins over the peer\'s concurrent close AND reaches the server — the owed desk re-arms the re-send (the apply\'s dirty clear swallowed the move\'s save and no loop re-armed it: the window sat on HR on the page only, until the next act)', J([W.wins.get('fin-2')?._desktopId, hr.map((m) => ids(m.state)), [...W.dm._dirtyDesks]]));
+    leg(W.wins.get('fin-2')?._desktopId === 'desk-hr' && hr.length >= 1 && gateOf(ids(hr[hr.length - 1].state).includes('fin-2')) && !W.dm._dirtyDesks.has('desk-hr'), '§4 verify r5 ⑥: the move wins over the peer\'s concurrent close AND reaches the server — the owed desk re-arms the re-send (the apply\'s dirty clear swallowed the move\'s save and no loop re-armed it: the window sat on HR on the page only, until the next act)', J([W.wins.get('fin-2')?._desktopId, hr.map((m) => ids(m.state)), [...W.dm._dirtyDesks]]));
   }
   // ak) verify r5 ⑤ — THE ACK: a save SENT on a socket that looks open but the server never reads; the socket dies; the reconnect re-reads
   if (want('ak')) {
@@ -918,7 +918,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       W.dm.moveWindowToDesktop('fin-2', 'desk-hr');
       await tick(700); // the autosave "sent" on the open socket — read by nobody
       const n0 = W.syncs('desk-hr').length;
-      leg(n0 >= 1 && ids(W.syncs('desk-hr')[n0 - 1].state).includes('fin-2') && W.dm._dirtyDesks.has('desk-hr'), '§4 the move\'s save left on the (dead) socket; HR stays owed (no ack read it)');
+      leg(n0 >= 1 && gateOf(ids(W.syncs('desk-hr')[n0 - 1].state).includes('fin-2')) && verdictOf(W.dm._dirtyDesks.has('desk-hr')), '§4 the move\'s save left on the (dead) socket; HR stays owed (no ack read it)');
       W.app._swallow = false;
       W.app.ws.connected = false; for (const h of W.stateHandlers) h(false); // the browser learns of the death
       await tick(100);
@@ -928,7 +928,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       leg(!!w && w._desktopId === 'desk-hr', '§4 verify r5 ⑤: a move whose save the server never READ is not reversed by the re-read (released at the server\'s ack, never at the send — r4\'s held (a))', w?._desktopId);
       await tick(2600); // the held move's re-send + its ack
       const hrS = W.syncs('desk-hr');
-      leg(hrS.length > n0 && ids(hrS[hrS.length - 1].state).includes('fin-2') && !W.dm._dirtyDesks.has('desk-hr') && W.lm._carriedAt('desk-hr') > 0, '§4 …and the held act is RE-SENT after the reconnect, HR from its still-owed dirty record (a dead save had taken it out of the set), and released at the ack', J([hrS.length, n0, [...W.dm._dirtyDesks], W.lm._carriedAt('desk-hr')]));
+      leg(hrS.length > n0 && gateOf(ids(hrS[hrS.length - 1].state).includes('fin-2')) && !W.dm._dirtyDesks.has('desk-hr') && W.lm._carriedAt('desk-hr') > 0, '§4 …and the held act is RE-SENT after the reconnect, HR from its still-owed dirty record (a dead save had taken it out of the set), and released at the ack', J([hrS.length, n0, [...W.dm._dirtyDesks], W.lm._carriedAt('desk-hr')]));
     } finally { globalThis.fetch = realFetch; }
   }
   // ak2) verify r5 ⑤ — the same on the desktop ON SHOW (the real page's shape): the re-send is the very text the swallowed save carried
@@ -964,7 +964,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now();
     W.dm.moveWindowToDesktop('fin-2', 'desk-hr');
     await tick(650); // the save left; HR refused, Fin acked
-    leg(refusedOnce && W.lm._carriedAt('desk-fin') > 0 && W.lm._carriedAt('desk-hr') === 0, '§4 the HR record was refused and Fin\'s acked: Fin is carried, HR is not');
+    leg(gateOf(refusedOnce) && W.lm._carriedAt('desk-fin') > 0 && W.lm._carriedAt('desk-hr') === 0, '§4 the HR record was refused and Fin\'s acked: Fin is carried, HR is not');
     for (const h of W.handlers) h({ type: 'layout-sync', seq: 7, desktopId: 'desk-fin', receivedAt: Date.now(), state: { windows: [R('fin-1', { gridBounds: GB(0.2, 0.2) }), R('fin-2', { gridBounds: GB(0.5, 0.1) })] } }); // a stale Fin record (fin-2 on Fin) right after the refusal
     await tick(100);
     leg(W.wins.get('fin-2')?._desktopId === 'desk-hr', '§4 verify r5 ⑤: the act on the REFUSED desktop stays held — a stale record cannot put fin-2 back on Fin (the send-stamp released it here)', W.wins.get('fin-2')?._desktopId);
@@ -990,7 +990,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       W.app.ws.connected = true; for (const h of W.stateHandlers) h(true); // the reconnect; the re-read
       await tick(1500);
       const sentBox = W.syncs('desk-fin').map((m) => (m.state.windows || []).find((x) => x.winId === 'fin-2')?.gridBounds?.left);
-      leg(w.gridBounds.left === 0.7 && sentBox.includes(0.7), '§4 verify r5 ①: a drag made in the second before a SLEEP survives the wake — the clock watch re-armed its witness and the pending save\'s input time by the gap; the save left and the re-read kept it (every hold expired at once before: guard 2 dropped the save, the re-read reversed the box, nothing said)', J([w.gridBounds.left, sentBox]));
+      leg(w.gridBounds.left === 0.7 && verdictOf(sentBox.includes(0.7)), '§4 verify r5 ①: a drag made in the second before a SLEEP survives the wake — the clock watch re-armed its witness and the pending save\'s input time by the gap; the save left and the re-read kept it (every hold expired at once before: guard 2 dropped the save, the re-read reversed the box, nothing said)', J([w.gridBounds.left, sentBox]));
       leg(!toasts().some((m) => /not kept/.test(m)), '§4 …and nothing was "not kept"', J(toasts()));
     } finally { globalThis.fetch = realFetch; Date.now = realNow; }
   }
@@ -1002,10 +1002,10 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now(); // the pointerdown
     const n0 = W.sent.length;
     const r = W.dm.moveWindowToDesktop('fin-2', 'desk-hr'); // the drop, 200 ms into the cooldown (it calls scheduleAutoSave)
-    leg(r.ok && r.moved, '§4 the drop (200 ms into the cooldown) moved fin-2 to HR');
+    leg(gateOf(r.ok) && verdictOf(r.moved), '§4 the drop (200 ms into the cooldown) moved fin-2 to HR');
     await tick(2600);
     const hrS = W.sent.slice(n0).filter((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr');
-    leg(hrS.length >= 1 && ids(hrS[hrS.length - 1].state).includes('fin-2'), '§4 verify r3 ③: the move is saved on its own — a user act under the apply\'s cooldown is deferred past the gate, never dropped (it waited for the next act; a reload undid it)', J(W.sent.slice(n0).map((m) => [m.desktopId, ids(m.state)])));
+    leg(hrS.length >= 1 && verdictOf(ids(hrS[hrS.length - 1].state).includes('fin-2')), '§4 verify r3 ③: the move is saved on its own — a user act under the apply\'s cooldown is deferred past the gate, never dropped (it waited for the next act; a reload undid it)', J(W.sent.slice(n0).map((m) => [m.desktopId, ids(m.state)])));
   }
   // z) verify r3 ③ — a close made in the cooldown is the user's: held against an older record, the hidden desktop dirty, carried by the next save
   if (want('z')) {
@@ -1016,14 +1016,14 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now();
     const n0 = W.sent.length;
     W.app.wm.closeWindow('fin-2'); W.app.wm.closeWindow('hr-1'); W.lm.scheduleAutoSave(); // the user closes a shown and a hidden window from the taskbar, 200 ms into the cooldown (wm._notify schedules the save)
-    leg(W.lm._closeHeld('fin-2') && W.lm._closeHeld('hr-1'), '§4 verify r3 ③: a close made in the cooldown is HELD (noteClosed refused every close under _restoring — the apply\'s and the user\'s alike)');
-    leg(W.dm._dirtyDesks.has('desk-hr'), '§4 …and HR (not on show) is dirty for it (purgeClosedWindow read the same gate)');
+    leg(gateOf(W.lm._closeHeld('fin-2')) && verdictOf(W.lm._closeHeld('hr-1')), '§4 verify r3 ③: a close made in the cooldown is HELD (noteClosed refused every close under _restoring — the apply\'s and the user\'s alike)');
+    leg(verdictOf(W.dm._dirtyDesks.has('desk-hr')), '§4 …and HR (not on show) is dirty for it (purgeClosedWindow read the same gate)');
     for (const h of W.handlers) h({ type: 'layout-sync', seq: 2, desktopId: 'desk-fin', state: { windows: [R('fin-1', { gridBounds: GB(0.2, 0.2) }), R('fin-2', { gridBounds: GB(0.5, 0.1) })] } }); // an older record of Fin (captured before the close) deferred under the cooldown
     await tick(3600);
     leg(!W.wins.has('fin-2'), '§4 …the stale record does not re-create the closed window');
     const since = W.sent.slice(n0).filter((m) => m.type === 'layout-sync');
     const finS = since.filter((m) => m.desktopId === 'desk-fin'), hrS = since.filter((m) => m.desktopId === 'desk-hr');
-    leg(finS.length >= 1 && !ids(finS[finS.length - 1].state).includes('fin-2') && hrS.length >= 1 && !ids(hrS[hrS.length - 1].state).includes('hr-1') && (finS[finS.length - 1].evidence || []).some((e) => e.id === 'fin-2' && e.why === 'closed'), '§4 …and the closes are carried by the next save (Fin without fin-2, HR without hr-1, evidence closed)', J(since.map((m) => [m.desktopId, ids(m.state), (m.evidence || []).map((e) => e.id + ':' + e.why)])));
+    leg(finS.length >= 1 && !ids(finS[finS.length - 1].state).includes('fin-2') && hrS.length >= 1 && !ids(hrS[hrS.length - 1].state).includes('hr-1') && verdictOf((finS[finS.length - 1].evidence || []).some((e) => e.id === 'fin-2' && e.why === 'closed')), '§4 …and the closes are carried by the next save (Fin without fin-2, HR without hr-1, evidence closed)', J(since.map((m) => [m.desktopId, ids(m.state), (m.evidence || []).map((e) => e.id + ':' + e.why)])));
   }
   // st) verify r3 ④ — the re-read fails for good: the user is told once, a stale base is never saved, the next success releases the held save
   if (want('st')) {
@@ -1035,7 +1035,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const realFetch = globalThis.fetch; globalThis.fetch = async () => { calls++; if (!good) return { ok: false, status: 503 }; return { ok: true, json: async () => server }; };
     try {
       for (const h of W.stateHandlers) h(true); for (const h of W.stateHandlers) h(false); for (const h of W.stateHandlers) h(true);
-      leg(await poll(() => calls === 4 && W.lm._resyncStale === true, 12000), '§4 verify r3 ④: four attempts failed — the page knows its base is STALE', J([calls, W.lm._resyncStale]));
+      leg(verdictOf(await poll(() => calls === 4 && W.lm._resyncStale === true, 12000)), '§4 verify r3 ④: four attempts failed — the page knows its base is STALE', J([calls, W.lm._resyncStale]));
       leg(told().length === 1, '§4 verify r3 ④: the user is told ONCE (a toast) that the layout could not be re-read', J(told()));
       W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now();
       const n0 = W.sent.length;
@@ -1043,10 +1043,10 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       await tick(900);
       leg(!W.sent.slice(n0).some((m) => m.type === 'layout-sync'), '§4 verify r3 ④: a stale base is never saved — the save is HELD (it would have dropped hr-4, unknown to this page: the D2 class, below the belt after a restart)', J(W.sent.slice(n0).map((m) => [m.desktopId, ids(m.state)])));
       const c1 = calls;
-      leg(await poll(() => calls > c1, 3000), '§4 …and the held save asked the read again');
+      leg(verdictOf(await poll(() => calls > c1, 3000)), '§4 …and the held save asked the read again');
       good = true; // the server is back
-      leg(await poll(() => W.lm._resyncStale === false, 12000), '§4 …the next successful read ends the stale state');
-      leg(await poll(() => W.sent.slice(n0).some((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr' && ids(m.state).includes('hr-4') && ids(m.state).includes('fin-1')), 3000), '§4 …and the held save goes out on the FRESH base (HR with hr-4 AND the moved fin-1)', J(W.sent.slice(n0).map((m) => [m.desktopId, ids(m.state)])));
+      leg(verdictOf(await poll(() => W.lm._resyncStale === false, 12000)), '§4 …the next successful read ends the stale state');
+      leg(verdictOf(await poll(() => W.sent.slice(n0).some((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr' && ids(m.state).includes('hr-4') && ids(m.state).includes('fin-1')), 3000)), '§4 …and the held save goes out on the FRESH base (HR with hr-4 AND the moved fin-1)', J(W.sent.slice(n0).map((m) => [m.desktopId, ids(m.state)])));
       leg(told().length === 1, '§4 …told once, not on every held save');
     } finally { globalThis.fetch = realFetch; }
   }
@@ -1055,7 +1055,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const W = world(DM, LM, { records: { 'desk-fin': [R('fin-1', { gridBounds: GB(0.1, 0.1) }), R('fin-2', { gridBounds: GB(0.5, 0.1) })], 'desk-hr': INCIDENT()['desk-hr'] } });
     W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now();
     const r = W.dm.moveWindowToDesktop('fin-2', 'desk-hr');
-    leg(r.ok && r.moved, '§4 the drop moved fin-2 to HR');
+    leg(gateOf(r.ok) && verdictOf(r.moved), '§4 the drop moved fin-2 to HR');
     await tick(100);
     for (const h of W.handlers) h({ type: 'layout-sync', seq: 1, desktopId: 'desk-fin', state: { windows: [R('fin-1', { gridBounds: GB(0.2, 0.2) }), R('fin-2', { gridBounds: GB(0.5, 0.1) })] } }); // a peer's Fin record, captured before the drop, lands after it
     await tick(30);
@@ -1063,7 +1063,7 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     leg(!!w && w._desktopId === 'desk-hr' && w._hiddenByDesktop === true, '§4 verify r4 ①: a record received AFTER the drop but captured before it does not put fin-2 back on Fin — THE UNSAVED ACT: no save has carried the move, so no peer could know it (it used to re-adopt the window and the apply\'s dirty clear swallowed the move\'s save)', w?._desktopId);
     await tick(3000);
     const hrS = W.syncs('desk-hr'), finS = W.syncs('desk-fin');
-    leg(hrS.length >= 1 && ids(hrS[hrS.length - 1].state).includes('fin-2') && finS.length >= 1 && !ids(finS[finS.length - 1].state).includes('fin-2'), '§4 …and the move reaches the server (HR with fin-2, Fin without)', J([hrS.map((m) => ids(m.state)), finS.map((m) => ids(m.state))]));
+    leg(hrS.length >= 1 && gateOf(ids(hrS[hrS.length - 1].state).includes('fin-2')) && finS.length >= 1 && !ids(finS[finS.length - 1].state).includes('fin-2'), '§4 …and the move reaches the server (HR with fin-2, Fin without)', J([hrS.map((m) => ids(m.state)), finS.map((m) => ids(m.state))]));
   }
   // ub) verify r4 ① — the same for GEOMETRY: a drag released, a peer's record 100 ms later; then a drag under the cooldown vs a record deferred under it (the r3 ③ deferred save must carry the USER's box)
   if (want('ub')) {
@@ -1101,10 +1101,10 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
     const seen = new Set();
     for (let i = 0; i < 10; i++) { await tick(200); const w = W.wins.get('fin-2'); seen.add(w ? w._desktopId : 'gone'); }
     clearInterval(peer);
-    leg(seen.size === 1 && seen.has('desk-hr'), '§4 verify r4 ①: under a peer saving every 400 ms the drop is never re-adopted onto Fin (it used to bounce Fin ⇄ HR on every record)', J([...seen]));
+    leg(seen.size === 1 && verdictOf(seen.has('desk-hr')), '§4 verify r4 ①: under a peer saving every 400 ms the drop is never re-adopted onto Fin (it used to bounce Fin ⇄ HR on every record)', J([...seen]));
     await tick(3200);
     const hrS = W.syncs('desk-hr');
-    leg(hrS.length >= 1 && ids(hrS[hrS.length - 1].state).includes('fin-2'), '§4 …and HR with fin-2 goes out once the peer quiets (the deferred save is bounded by the peer\'s silence, not starved for good)', J(hrS.map((m) => ids(m.state))));
+    leg(hrS.length >= 1 && verdictOf(ids(hrS[hrS.length - 1].state).includes('fin-2')), '§4 …and HR with fin-2 goes out once the peer quiets (the deferred save is bounded by the peer\'s silence, not starved for good)', J(hrS.map((m) => ids(m.state))));
   }
   // ue) verify r4 ② — a window ON the desktop on show, listed by its record AND by another desktop's stale held record (a double): the record of the desktop on show wins
   if (want('ue')) {
@@ -1128,21 +1128,21 @@ async function doorLegs(DM, LM, { quiet = false, legs = null } = {}) {
       W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now();
       W.dm.moveWindowToDesktop('fin-2', 'desk-hr'); W.app.wm.closeWindow('fin-1'); W.lm.scheduleAutoSave(); // two acts on the stale page: held
       await tick(900);
-      leg(!W.sent.some((m) => m.type === 'layout-sync') && W.lm._closeHeld('fin-1') && W.wins.get('fin-2')?._desktopId === 'desk-hr', '§4 verify r4 ④: the move and the close are held on the stale page (nothing sent)');
+      leg(!W.sent.some((m) => m.type === 'layout-sync') && gateOf(W.lm._closeHeld('fin-1')) && W.wins.get('fin-2')?._desktopId === 'desk-hr', '§4 verify r4 ④: the move and the close are held on the stale page (nothing sent)');
       skew = 61000; W.lm._clockLast = Date.now(); W.lm._resyncing = false; // a minute passes WITH THE PAGE RUNNING (the clock watch saw it tick — verify r5 ①: a sleep is re-armed, a run minute expires) — past ACT_HOLD_MS / CLOSE_HOLD_MS; the ladder gave up meanwhile (the state after its last retry)
       for (const h of W.stateHandlers) h(false); for (const h of W.stateHandlers) h(true); // the socket back: the reconnect re-reads, the server answers
       const poll = async (pred, ms) => { const t0 = realNow(); while (realNow() - t0 < ms) { if (pred()) return true; await tick(50); } return pred(); };
-      leg(await poll(() => W.lm._resyncStale === false, 5000), '§4 verify r4 ④: the re-read succeeded — the stale episode ended');
+      leg(verdictOf(await poll(() => W.lm._resyncStale === false, 5000)), '§4 verify r4 ④: the re-read succeeded — the stale episode ended');
       await tick(2600);
       const w2 = W.wins.get('fin-2');
-      leg(!!w2 && w2._desktopId === 'desk-fin' && !w2._hiddenByDesktop && W.wins.has('fin-1'), '§4 verify r4 ④: the page FOLLOWS the server — the expired move is not held (fin-2 back on Fin, shown) and the expired close is not held (fin-1 built again); before ①\'s bound the move stayed displayed on HR while nothing sent it (a fork a reload resolved by losing it)', J([w2?._desktopId, W.wins.has('fin-1')]));
+      leg(!!w2 && w2._desktopId === 'desk-fin' && !w2._hiddenByDesktop && verdictOf(W.wins.has('fin-1')), '§4 verify r4 ④: the page FOLLOWS the server — the expired move is not held (fin-2 back on Fin, shown) and the expired close is not held (fin-1 built again); before ①\'s bound the move stayed displayed on HR while nothing sent it (a fork a reload resolved by losing it)', J([w2?._desktopId, W.wins.has('fin-1')]));
       leg(!W.sent.some((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr' && ids(m.state).includes('fin-2')), '§4 …no save carries the expired move (guard 2\'s expiry keeps its meaning)');
-      leg(told().length === 1 && /were not kept \(2\)/.test(told()[0]), '§4 verify r4 ④: the user is told ONCE how many changes were not kept (the stale toast had promised "held until it can be")', J(told()));
+      leg(told().length === 1 && verdictOf(/were not kept \(2\)/.test(told()[0])), '§4 verify r4 ④: the user is told ONCE how many changes were not kept (the stale toast had promised "held until it can be")', J(told()));
       // verify r5 ④: a SECOND stale episode with nothing new held — the acts already counted are not counted (and toasted) again
       W.lm._resyncStale = true; W.lm._staleTold = true; W.lm._resyncing = true;
       skew += 61000; W.lm._clockLast = Date.now(); W.lm._resyncing = false; // another run minute
       for (const h of W.stateHandlers) h(false); for (const h of W.stateHandlers) h(true);
-      leg(await poll(() => W.lm._resyncStale === false, 5000), '§4 verify r5 ④: a second stale episode ended');
+      leg(verdictOf(await poll(() => W.lm._resyncStale === false, 5000)), '§4 verify r5 ④: a second stale episode ended');
       await tick(600);
       leg(told().length === 1, '§4 verify r5 ④: the acts counted at the first release are RETIRED — a second release with nothing new says nothing (the same expired move was counted and toasted again before)', J(told()));
     } finally { globalThis.fetch = realFetch; Date.now = realNow; }
@@ -1202,7 +1202,7 @@ const FULL = () => ({ left: 0, top: 0, width: 1, height: 1 });
 
 async function hubLegs(WSH, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const send = (S, state, o = {}) => S.send({ type: 'layout-sync', desktopId: o.desktopId || 'desk-a', state, evidence: o.evidence || [], sentAt: o.sentAt || 77, ...(o.viewport !== undefined ? { viewport: o.viewport } : {}) });
   const syncs = (S) => S.frames.filter((f) => f.type === 'layout-sync');
   const answer = (S) => S.frames.find((f) => f.type === 'layout-sync-ack' || f.type === 'layout-sync-refused') || {};
@@ -1213,7 +1213,7 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     const r = answer(phone);
     leg(r.type === 'layout-sync-refused' && J(Object.keys(r)) === J(['type', 'desktopId', 'reason', 'fields', 'state', 'sentAt']) && r.desktopId === 'desk-a' && r.reason === 'cross-layer' && J(r.fields) === J(['gridBounds']) && J(r.state) === J(GSEED().desktops['desk-a'].autoSave) && r.sentAt === 4242, '§9b a PHONE record that moves a box is REFUSED by the real handler: layout-sync-refused {desktopId, reason:\'cross-layer\', fields:[\'gridBounds\'], state: the record kept, sentAt} — the shrink belt\'s door', J(r));
     leg(H.writes() === 0 && J(H.layouts()) === J(GSEED()) && !syncs(desk).length, '§9b …nothing written, nothing broadcast (the desk\'s socket hears nothing)', J({ writes: H.writes(), desk: desk.frames.map((f) => f.type) }));
-    leg(H.warns.some((w) => /\[layout-sync\] REFUSED a phone record of desktop "Alpha" \(desk-a\): it changes gridBounds \(window a-1\)/.test(w)) && H.tele.some((e) => e.kind === 'event' && e.name === 'layout-sync-refused' && e.detail === 'cross-layer gridBounds'), '§9b …the journal names the desktop, the fields and the window; telemetry counts it (layout-sync-refused · cross-layer gridBounds)', J({ warns: H.warns.filter((w) => /layout-sync/.test(w)), tele: H.tele }));
+    leg(gateOf(H.warns.some((w) => /\[layout-sync\] REFUSED a phone record of desktop "Alpha" \(desk-a\): it changes gridBounds \(window a-1\)/.test(w))) && verdictOf(H.tele.some((e) => e.kind === 'event' && e.name === 'layout-sync-refused' && e.detail === 'cross-layer gridBounds')), '§9b …the journal names the desktop, the fields and the window; telemetry counts it (layout-sync-refused · cross-layer gridBounds)', J({ warns: H.warns.filter((w) => /layout-sync/.test(w)), tele: H.tele }));
   }
   for (const [label, viewport] of [['desktop-stamped', 'desktop'], ['UNSTAMPED (a pre-.264 sender)', undefined]]) {
     const H = hub(WSH, GSEED()), w = H.connect(), desk = H.connect();
@@ -1252,7 +1252,7 @@ async function hubLegs(WSH, { quiet = false } = {}) {
  *  screen, z 40) — a phone's. */
 async function gateDoorLegs(DM, WSH, { quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   const { ARRANGEMENT, PHONE_KEEPS, applyForViewport } = P;
   const seedRec = () => GSEED().desktops['desk-a'].autoSave;
@@ -1274,7 +1274,7 @@ async function gateDoorLegs(DM, WSH, { quiet = false, legs = null } = {}) {
     const { H, sock, W } = phoneWorld();
     closeOnPhone(W, 'a-3'); await W.lm._doAutoSave(); await tick(40);
     const st = H.layouts().desktops['desk-a'].autoSave, refusals = sock.frames.filter((f) => f.type === 'layout-sync-refused');
-    leg(!refusals.length && sock.frames.some((f) => f.type === 'layout-sync-ack') && J(ids(st)) === J(['a-1', 'a-2']) && st.viewport === 'phone', '§9c a CURRENT phone page (this tree\'s recordFor) closes a window: its save passes the gate at once — the close lands', J({ refusals, ids: ids(st) }));
+    leg(!refusals.length && gateOf(sock.frames.some((f) => f.type === 'layout-sync-ack')) && J(ids(st)) === J(['a-1', 'a-2']) && st.viewport === 'phone', '§9c a CURRENT phone page (this tree\'s recordFor) closes a window: its save passes the gate at once — the close lands', J({ refusals, ids: ids(st) }));
     leg(arr(st) === arr(kept()) && keeps(st) === keeps(seedRec()), '§9c …and the record keeps the desk\'s every box and z, grid, sidebar, bars, theme and fonts — the page\'s own (full-screen boxes, dark, sidebar open) never leave it (PHONE_KEEPS from the held record)', J({ arr: arr(st), keeps: keeps(st) }));
   }
   if (want('old')) {
@@ -1285,7 +1285,7 @@ async function gateDoorLegs(DM, WSH, { quiet = false, legs = null } = {}) {
     W.dm.recordFor = function (d) { this.recordFor = realFor; const rec = { ...this._savedStates.get(d), windows: W.lm.captureWindows(d), ...W.lm.captureChrome() }; delete rec.updatedAt; delete rec.viewport; return rec; };
     await W.lm._doAutoSave(); await tick(40);
     const r = sock.frames.find((f) => f.type === 'layout-sync-refused') || {}, w0 = H.writes(), heard0 = desk.frames.filter((f) => f.type === 'layout-sync').length;
-    leg(r.reason === 'cross-layer' && ['zIndex', 'gridBounds', 'sidebarOpen', 'theme'].every((f) => (r.fields || []).includes(f)) && J(r.state) === J(seedRec()) && w0 === 0 && heard0 === 0, `§9c an OLD phone bundle's save (its own full-screen boxes, z, sidebar, theme…) carrying a closed window is REFUSED cross-layer (${(r.fields || []).join(', ')}) — nothing written, the desk hears nothing`, J({ r, w0, heard0 }));
+    leg(r.reason === 'cross-layer' && gateOf(['zIndex', 'gridBounds', 'sidebarOpen', 'theme'].every((f) => (r.fields || []).includes(f))) && J(r.state) === J(seedRec()) && w0 === 0 && heard0 === 0, `§9c an OLD phone bundle's save (its own full-screen boxes, z, sidebar, theme…) carrying a closed window is REFUSED cross-layer (${(r.fields || []).join(', ')}) — nothing written, the desk hears nothing`, J({ r, w0, heard0 }));
     await tick(900); // onSyncRefused reconciles (the view = the record kept + what the page built), rearmSave re-arms, the autosave sends
     const st = H.layouts().desktops['desk-a'].autoSave, heard = desk.frames.filter((f) => f.type === 'layout-sync');
     leg(W.syncs('desk-a').length === 2 && J(ids(st)) === J(['a-1', 'a-2']) && heard.length === 1 && heard[0].viewport === 'phone' && !W.wins.has('a-3'), '§9c RECONCILIATION NEVER LOSES MEMBERSHIP: the page re-sends on its own through this tree\'s capture (membership only) and the close LANDS — the desk hears that one record, the closed window is not reopened', J({ sends: W.syncs('desk-a').length, ids: ids(st), heard: heard.length }));
@@ -1317,23 +1317,23 @@ const unbuiltEv = (list) => list.map((w) => ({ id: w.winId, why: 'unbuilt' }));
 
 function ringPureLegs(P, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const { keepIdentity, keepIdentities, mergeDesktopRecord: merge, shrinkVerdict, staleVerdict, foreignStamp, sessionOf } = P;
   // §10a IDENTITY IS NEVER FORGOTTEN
   const rec = WORK(), before = J(rec);
   const cap = rec.map((w) => ({ ...nameless(w), gridBounds: GB(0.3, 0.3), zIndex: 99 }));
   const kept = cap.map((c, i) => keepIdentity(rec[i], c));
-  leg(kept.every(named) && kept.every((w, i) => w.serverSessionId === rec[i].serverSessionId && w.backendSessionId === rec[i].backendSessionId && w.claudeSessionId === rec[i].claudeSessionId && w.cwd === rec[i].cwd && w.backend === 'claude' && w.openSpec.backendSessionId === rec[i].openSpec.backendSessionId && w.openSpec.sessionKey === rec[i].openSpec.sessionKey), '§10a a capture that names no session (its attach not answered — the phone\'s 23:37:09 save) keeps every IDENTITY field and its openSpec\'s conversation id from the record\'s entry', J(kept[0]));
-  leg(kept.every((w) => w.zIndex === 99 && w.gridBounds.left === 0.3), '§10a …and everything else is the capture\'s (its box, its z — the merge\'s rule is unchanged)', J(kept[0]));
+  leg(gateOf(kept.every(named)) && verdictOf(kept.every((w, i) => w.serverSessionId === rec[i].serverSessionId && w.backendSessionId === rec[i].backendSessionId && w.claudeSessionId === rec[i].claudeSessionId && w.cwd === rec[i].cwd && w.backend === 'claude' && w.openSpec.backendSessionId === rec[i].openSpec.backendSessionId && w.openSpec.sessionKey === rec[i].openSpec.sessionKey)), '§10a a capture that names no session (its attach not answered — the phone\'s 23:37:09 save) keeps every IDENTITY field and its openSpec\'s conversation id from the record\'s entry', J(kept[0]));
+  leg(verdictOf(kept.every((w) => w.zIndex === 99 && w.gridBounds.left === 0.3)), '§10a …and everything else is the capture\'s (its box, its z — the merge\'s rule is unchanged)', J(kept[0]));
   const other = { ...cap[0], serverSessionId: 'sess-9', openSpec: { ...cap[0].openSpec, serverId: 'sess-9' } };
   leg(keepIdentity(rec[0], other) === other, '§10a a capture naming ANOTHER session (a resume, a re-attach) keeps its own — nothing is carried', J(keepIdentity(rec[0], other)));
   const full = CH('w-1', 1, { zIndex: 50 }), files = R('f-1');
   leg(keepIdentity(rec[0], full) === full && keepIdentity(R('f-1', { title: 'x' }), files) === files && keepIdentity(null, full) === full && keepIdentity(rec[0], null) === null, '§10a a capture that knows who it is, a window that is no session, a missing side — returned as they are (the same object)');
-  leg(J(rec) === before && cap.every((c) => !named(c)), '§10a the inputs are never mutated');
+  leg(J(rec) === before && verdictOf(cap.every((c) => !named(c))), '§10a the inputs are never mutated');
   const m = merge({ record: { windows: rec }, built: cap });
-  leg(J(ids(m)) === J(ids(rec)) && m.windows.every(named), '§10a mergeDesktopRecord (every record a page sends): the built windows\' nameless captures keep the record\'s identity — 2.369.340 wrote them nameless', J(m.windows.map(named)));
+  leg(J(ids(m)) === J(ids(rec)) && verdictOf(m.windows.every(named)), '§10a mergeDesktopRecord (every record a page sends): the built windows\' nameless captures keep the record\'s identity — 2.369.340 wrote them nameless', J(m.windows.map(named)));
   const kl = keepIdentities(rec, [...cap, CH('w-9', 9)]);
-  leg(kl.length === 6 && kl.slice(0, 5).every(named) && J(kl[5]) === J(CH('w-9', 9)) && J(keepIdentities(null, cap)) === J(cap), '§10a keepIdentities (the server\'s write) per id; a new entry as it is; no stored record ⇒ nothing carried');
+  leg(kl.length === 6 && gateOf(kl.slice(0, 5).every(named)) && J(kl[5]) === J(CH('w-9', 9)) && J(keepIdentities(null, cap)) === J(cap), '§10a keepIdentities (the server\'s write) per id; a new entry as it is; no stored record ⇒ nothing carried');
   leg(sessionOf(nameless(rec[0])) === 'sess-1' && sessionOf(rec[0]) === 'sess-1' && sessionOf(files) === null && sessionOf({ type: 'chat', openSpec: { action: 'viewSession', serverId: 'x' } }) === null, '§10a sessionOf: the live attach, else the session the openSpec attaches to; null for any other window');
   // §10b A PAGE'S FAILURE IS NOT THE WORKSPACE'S TRUTH
   const alive = (s) => ALIVE.includes(s);
@@ -1343,10 +1343,10 @@ function ringPureLegs(P, { quiet = false } = {}) {
   // UNBUILT IS NOT DROPPED (lane layout-stopped-window, 2.369.365): a SESSION window whose session is gone (stopped, unknown) is
   // no longer explained by 'unbuilt' either — the page shows it as a placeholder; the belt refuses it, named in `unbuilt`
   const gone = shrinkVerdict({ prev: WORK(), next: [], evidence: unbuiltEv(WORK()), alive: () => false });
-  leg(!gone.ok && J(gone.unbuilt) === J(ids(WORK())) && shrinkVerdict({ prev: WORK(), next: [], evidence: WORK().map((w) => ({ id: w.winId, why: 'closed' })), alive }).ok, '§10b …their sessions GONE ⇒ still REFUSED (UNBUILT IS NOT DROPPED — lane layout-stopped-window: named in `unbuilt`); the person\'s CLOSE of five live windows passes', J(gone));
+  leg(!gone.ok && J(gone.unbuilt) === J(ids(WORK())) && verdictOf(shrinkVerdict({ prev: WORK(), next: [], evidence: WORK().map((w) => ({ id: w.winId, why: 'closed' })), alive }).ok), '§10b …their sessions GONE ⇒ still REFUSED (UNBUILT IS NOT DROPPED — lane layout-stopped-window: named in `unbuilt`); the person\'s CLOSE of five live windows passes', J(gone));
   const dup = shrinkVerdict({ prev: WORK(), next: [CH('w-1b', 1)], evidence: unbuiltEv(WORK().slice(0, 1)), alive: (s) => s === 'sess-1' });
-  leg(dup.ok, '§10b …a live window dropped as \'unbuilt\' while ANOTHER entry of the record shows its session (a duplicate the page settled at once) passes', J(dup));
-  leg(shrinkVerdict({ prev: [R('hr-1'), R('hr-2'), R('hr-3')], next: [], evidence: [{ id: 'hr-1', why: 'moved' }, { id: 'hr-2', why: 'replaced' }, { id: 'hr-3', why: 'unbuilt' }] }).ok, '§10b …a window that is no session stays explained by \'unbuilt\' (§2 unchanged)');
+  leg(verdictOf(dup.ok), '§10b …a live window dropped as \'unbuilt\' while ANOTHER entry of the record shows its session (a duplicate the page settled at once) passes', J(dup));
+  leg(verdictOf(shrinkVerdict({ prev: [R('hr-1'), R('hr-2'), R('hr-3')], next: [], evidence: [{ id: 'hr-1', why: 'moved' }, { id: 'hr-2', why: 'replaced' }, { id: 'hr-3', why: 'unbuilt' }] }).ok), '§10b …a window that is no session stays explained by \'unbuilt\' (§2 unchanged)');
   // §10c A RECORD NEVER GOES BACKWARDS
   const W1 = [{ who: 1, at: 200, replaced: 100 }], W2 = [{ who: 1, at: 200, replaced: 100 }, { who: 1, at: 300, replaced: 200 }];
   const rows = [
@@ -1363,7 +1363,7 @@ function ringPureLegs(P, { quiet = false } = {}) {
   ];
   const table = rows.map(([label, a, want]) => { const r = staleVerdict(a); return { label, want, got: r.ok, r }; });
   if (!quiet) console.log(table.map((t) => `      ${t.got ? 'ok     ' : 'REFUSED'} ${t.label}`).join('\n'));
-  leg(table.every((t) => t.got === t.want), '§10c THE STALENESS VERDICT TABLE (PURE staleVerdict — printed above): refused only when the base is older than the newest record ANOTHER writer stored', J(table.filter((t) => t.got !== t.want)));
+  leg(verdictOf(table.every((t) => t.got === t.want)), '§10c THE STALENESS VERDICT TABLE (PURE staleVerdict — printed above): refused only when the base is older than the newest record ANOTHER writer stored', J(table.filter((t) => t.got !== t.want)));
   leg(staleVerdict(rows[3][1]).reason === 'stale' && staleVerdict(rows[3][1]).held === 200 && staleVerdict(rows[3][1]).base === 100 && staleVerdict(rows[0][1]).judged === false, '§10c …a refusal names reason \'stale\', the stamp kept and the base; no base is not judged');
   leg(foreignStamp(W2, 1, 300) === 100 && foreignStamp(W2, 2, 300) === 300 && foreignStamp([], 1, 50) === 50, '§10c foreignStamp: the writer\'s own chain looks past itself to the record it replaced');
   return failed;
@@ -1374,7 +1374,7 @@ const ringPureFailed = ringPureLegs(P);
 /** §10d on the REAL handler: the staleness gate, the identity kept, the live-unbuilt refusal */
 async function ringHubLegs(WSH, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const seed = () => ({ desktopMeta: [{ id: 'desk-work', name: '工作' }, { id: 'desk-res', name: '研究' }], desktops: { 'desk-work': { autoSave: { windows: WORK(), grid: null, viewport: 'desktop', updatedAt: 1000 } }, 'desk-res': { autoSave: { windows: [CH('r-6', 6)], grid: null, viewport: 'desktop', updatedAt: 1000 } } } });
   const send = (S, windows, o = {}) => S.send({ type: 'layout-sync', desktopId: 'desk-work', state: { windows, grid: null }, evidence: o.evidence || [], sentAt: o.sentAt || 5, ...(o.base !== undefined ? { base: o.base } : {}), viewport: o.viewport || 'desktop' });
   const last = (S, t) => S.frames.filter((f) => f.type === t).pop() || null;
@@ -1383,12 +1383,12 @@ async function ringHubLegs(WSH, { quiet = false } = {}) {
     const moved = WORK(); moved[0].gridBounds = GB(0.6, 0.6);
     await send(A, moved, { base: 1000, sentAt: 11 });
     const ack = last(A, 'layout-sync-ack'), st = H.layouts().desktops['desk-work'].autoSave, relay = last(B, 'layout-sync');
-    leg(ack && ack.updatedAt === st.updatedAt && st.updatedAt >= 1000 && relay && relay.updatedAt === st.updatedAt && !('updatedAt' in relay.state), '§10d the server\'s stamp rides the ACK and the RELAY (each page\'s next base) — the relayed state stays the writer\'s', J({ ack, relay: relay && { updatedAt: relay.updatedAt } }));
+    leg(gateOf(ack) && ack.updatedAt === st.updatedAt && st.updatedAt >= 1000 && gateOf(relay) && relay.updatedAt === st.updatedAt && !('updatedAt' in relay.state), '§10d the server\'s stamp rides the ACK and the RELAY (each page\'s next base) — the relayed state stays the writer\'s', J({ ack, relay: relay && { updatedAt: relay.updatedAt } }));
     const w0 = H.writes();
     await send(B, WORK(), { base: 1000, sentAt: 12 });
     const r = last(B, 'layout-sync-refused');
-    leg(r && r.reason === 'stale' && J(Object.keys(r)) === J(['type', 'desktopId', 'reason', 'state', 'sentAt']) && r.state.updatedAt === st.updatedAt && r.state.windows[0].gridBounds.left === 0.6 && r.sentAt === 12 && H.writes() === w0 && !A.frames.some((f) => f.type === 'layout-sync'), '§10d THE STALENESS GATE on the real handler: a write from a base OLDER than another writer\'s record is REFUSED {reason:\'stale\', state: the record kept} — nothing written, nothing relayed', J(r));
-    leg(H.warns.some((w) => /\[layout-sync\] REFUSED a desktop record of desktop "工作" \(desk-work\): written from an older base/.test(w)) && H.tele.some((e) => e.name === 'layout-sync-refused' && /^stale /.test(e.detail)), '§10d …the journal names the desktop and both stamps; telemetry counts it (layout-sync-refused · stale)', J(H.warns.filter((w) => /stale|older base/.test(w))));
+    leg(gateOf(r) && r.reason === 'stale' && J(Object.keys(r)) === J(['type', 'desktopId', 'reason', 'state', 'sentAt']) && r.state.updatedAt === st.updatedAt && r.state.windows[0].gridBounds.left === 0.6 && r.sentAt === 12 && H.writes() === w0 && !A.frames.some((f) => f.type === 'layout-sync'), '§10d THE STALENESS GATE on the real handler: a write from a base OLDER than another writer\'s record is REFUSED {reason:\'stale\', state: the record kept} — nothing written, nothing relayed', J(r));
+    leg(gateOf(H.warns.some((w) => /\[layout-sync\] REFUSED a desktop record of desktop "工作" \(desk-work\): written from an older base/.test(w))) && verdictOf(H.tele.some((e) => e.name === 'layout-sync-refused' && /^stale /.test(e.detail))), '§10d …the journal names the desktop and both stamps; telemetry counts it (layout-sync-refused · stale)', J(H.warns.filter((w) => /stale|older base/.test(w))));
     await send(B, WORK(), { base: r?.state?.updatedAt ?? H.layouts().desktops['desk-work'].autoSave.updatedAt, sentAt: 13 }); // (a control without the gate refuses nothing)
     leg(last(B, 'layout-sync-ack')?.sentAt === 13 && H.layouts().desktops['desk-work'].autoSave.windows[0].gridBounds.left === 0.1, '§10d …the re-send from the record kept (its base) is written', J(last(B, 'layout-sync-ack')));
     const t1 = H.layouts().desktops['desk-work'].autoSave.updatedAt;
@@ -1401,14 +1401,14 @@ async function ringHubLegs(WSH, { quiet = false } = {}) {
     const H = hub(WSH, seed(), { alive: ALIVE }), A = H.connect(), B = H.connect();
     await send(A, WORK().map(nameless), { viewport: 'phone', sentAt: 21 });
     const st = H.layouts().desktops['desk-work'].autoSave, relay = last(B, 'layout-sync');
-    leg(last(A, 'layout-sync-ack') && st.windows.length === 5 && st.windows.every(named) && relay && relay.state.windows.every(named) && st.viewport === 'phone', '§10d IDENTITY on the real handler: a phone save of the five entries NAMELESS (its attaches still in flight) is written with every entry\'s identity kept — on disk and in the relay', J(st.windows.map((w) => [w.winId, w.serverSessionId || null, w.openSpec.backendSessionId])));
+    leg(gateOf(last(A, 'layout-sync-ack')) && st.windows.length === 5 && gateOf(st.windows.every(named)) && gateOf(relay) && gateOf(relay.state.windows.every(named)) && st.viewport === 'phone', '§10d IDENTITY on the real handler: a phone save of the five entries NAMELESS (its attaches still in flight) is written with every entry\'s identity kept — on disk and in the relay', J(st.windows.map((w) => [w.winId, w.serverSessionId || null, w.openSpec.backendSessionId])));
   }
   {
     const H = hub(WSH, { ...seed(), desktops: { ...seed().desktops, 'desk-work': { autoSave: { windows: WORK().map(nameless), grid: null, viewport: 'phone', updatedAt: 1000 } } } }, { alive: ALIVE }), D = H.connect(), B = H.connect();
     await send(D, [], { evidence: unbuiltEv(WORK()), base: 1000, sentAt: 31 });
     const r = last(D, 'layout-sync-refused');
-    leg(r && r.reason === 'shrink-without-close' && J(r.unexplained) === J(ids(WORK())) && H.layouts().desktops['desk-work'].autoSave.windows.length === 5 && !B.frames.some((f) => f.type === 'layout-sync'), '§10d THE RING 00:17:31 on the real handler: the woken desktop\'s 工作 = [] with five \'unbuilt\' (the record nameless, the sessions LIVE) is REFUSED — the server keeps 5, nobody hears a 0', J(r));
-    leg(H.warns.some((w) => /drops 5 window\(s\) with no close\/move\/kill[\s\S]*5 LIVE \(the sender could not build them\)/.test(w)), '§10d …the journal says the five were LIVE', J(H.warns.filter((w) => /drops/.test(w))));
+    leg(gateOf(r) && r.reason === 'shrink-without-close' && J(r.unexplained) === J(ids(WORK())) && H.layouts().desktops['desk-work'].autoSave.windows.length === 5 && !B.frames.some((f) => f.type === 'layout-sync'), '§10d THE RING 00:17:31 on the real handler: the woken desktop\'s 工作 = [] with five \'unbuilt\' (the record nameless, the sessions LIVE) is REFUSED — the server keeps 5, nobody hears a 0', J(r));
+    leg(verdictOf(H.warns.some((w) => /drops 5 window\(s\) with no close\/move\/kill[\s\S]*5 LIVE \(the sender could not build them\)/.test(w))), '§10d …the journal says the five were LIVE', J(H.warns.filter((w) => /drops/.test(w))));
     await send(D, [], { evidence: WORK().map((w) => ({ id: w.winId, why: 'closed' })), base: 1000, sentAt: 32 });
     leg(last(D, 'layout-sync-ack')?.sentAt === 32 && H.layouts().desktops['desk-work'].autoSave.windows.length === 0, '§10d …the person\'s CLOSE of the five passes');
   }
@@ -1420,7 +1420,7 @@ const ringHubFailed = await ringHubLegs(loadHandler());
 /** §10e the ring through REAL pages (DesktopManager + LayoutManager) whose sockets are the REAL handler */
 async function ringDoorLegs(DM, LM, WSH, { quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   const desks = [{ id: 'desk-work', name: '工作' }, { id: 'desk-res', name: '研究' }];
   const seedOf = (work, at = 1000, viewport = 'desktop') => ({ desktopMeta: desks.map((d) => ({ ...d })), desktops: { 'desk-work': { autoSave: { windows: work, grid: null, viewport, updatedAt: at } }, 'desk-res': { autoSave: { windows: [CH('r-6', 6)], grid: null, viewport: 'desktop', updatedAt: at } } } });
@@ -1444,7 +1444,7 @@ async function ringDoorLegs(DM, LM, WSH, { quiet = false, legs = null } = {}) {
     const H = hub(WSH, seedOf(WORK()), { alive: ALIVE });
     const { W } = page(H, WORK(), { phone: true });
     dirty(W); await W.lm._doAutoSave(); await tick(40);
-    leg(work(H).viewport === 'phone' && work(H).windows.length === 5 && work(H).windows.every(named), '§10e THE RING 23:37:09: the woken PHONE saves 工作 before its five attaches answered — the record keeps every window\'s identity (2.369.340 wrote all five nameless)', J(work(H).windows.map((w) => [w.winId, w.serverSessionId || null, w.openSpec.backendSessionId])));
+    leg(work(H).viewport === 'phone' && work(H).windows.length === 5 && verdictOf(work(H).windows.every(named)), '§10e THE RING 23:37:09: the woken PHONE saves 工作 before its five attaches answered — the record keeps every window\'s identity (2.369.340 wrote all five nameless)', J(work(H).windows.map((w) => [w.winId, w.serverSessionId || null, w.openSpec.backendSessionId])));
   }
   if (want('desk')) {
     // 00:17:31 — the desktop reloads on the NAMELESS record (as the base left it), builds none of the five, and switches to 研究
@@ -1470,7 +1470,7 @@ async function ringDoorLegs(DM, LM, WSH, { quiet = false, legs = null } = {}) {
     H.replace(restored);
     dirty(P0); P0.lm._lastSentJson = null; await P0.lm._doAutoSave(); await tick(60);
     const r = sock.frames.find((f) => f.type === 'layout-sync-refused');
-    leg(r && r.reason === 'stale' && work(H).windows.length === 6, '§10e 恢复布局 HOLDS: the phone that slept through the restore saves 工作 from its OLD copy (five, no j) — REFUSED stale; the six stay (2.369.340: the one-window drop passed the belt, 6 → 5)', J({ refused: r && r.reason, n: work(H).windows.length }));
+    leg(gateOf(r) && r.reason === 'stale' && work(H).windows.length === 6, '§10e 恢复布局 HOLDS: the phone that slept through the restore saves 工作 from its OLD copy (five, no j) — REFUSED stale; the six stay (2.369.340: the one-window drop passed the belt, 6 → 5)', J({ refused: r && r.reason, n: work(H).windows.length }));
     await tick(900);
     const acked = sock.frames.filter((f) => f.type === 'layout-sync-ack').length;
     leg(acked >= 1 && J(ids(work(H)).sort()) === J([...ids(WORK()), 'w-j'].sort()) && P0.dm.stampOf('desk-work') >= restored.desktops['desk-work'].autoSave.updatedAt, '§10e …the phone ADOPTS the restored record (its base becomes the restore\'s stamp) and its re-send keeps the six', J({ acked, ids: ids(work(H)), base: P0.dm.stampOf('desk-work') }));
@@ -1493,7 +1493,7 @@ const ringDoorFailed = await ringDoorLegs(RealDM, RealLM, loadHandler());
  *  conversation id */
 async function ringRestoreLegs(DM, LM, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const W = world(DM, LM, { records: { 'desk-work': [] }, active: 'desk-work', desks: [{ id: 'desk-work', name: '工作' }] });
   const calls = [];
   Object.assign(W.app.wm, { _notify() {}, _scheduleOverlapUpdate() {}, setGrid() {} });
@@ -1504,8 +1504,8 @@ async function ringRestoreLegs(DM, LM, { quiet = false } = {}) {
   globalThis.fetch = async (u) => ({ ok: true, json: async () => (String(u).includes('/api/active') ? { sessions: WORK().map((w, i) => ({ id: 'sess-' + (i + 1), backend: 'claude', backendSessionId: 'conv-' + (i + 1), cwd: '/w/' + (i + 1), name: 'n', mode: 'chat' })) } : { sessions: [] }) });
   try { await W.lm.restoreState({ windows: WORK().map(nameless), grid: null }); } catch (e) { calls.push({ threw: String(e && e.message) }); }
   finally { globalThis.fetch = realFetch; }
-  leg(calls.length === 5 && calls.every((c, i) => c.sid === 'sess-' + (i + 1)), '§10f THE BOOT RESTORE of 工作\'s NAMELESS five (the woken desktop, 00:16:52): each is found by the session its openSpec attaches to — 5 attaches (2.369.340: none, every one dropped as \'unbuilt\' 20 s later)', J(calls));
-  leg(calls.every((c, i) => c.opts && c.opts.backendSessionId === 'conv-' + (i + 1)), '§10f …and each attach CARRIES the conversation id — the window\'s openSpec names it before the attach answers (a save in between never writes it nameless)', J(calls.map((c) => c.opts && c.opts.backendSessionId)));
+  leg(calls.length === 5 && verdictOf(calls.every((c, i) => c.sid === 'sess-' + (i + 1))), '§10f THE BOOT RESTORE of 工作\'s NAMELESS five (the woken desktop, 00:16:52): each is found by the session its openSpec attaches to — 5 attaches (2.369.340: none, every one dropped as \'unbuilt\' 20 s later)', J(calls));
+  leg(verdictOf(calls.every((c, i) => c.opts && c.opts.backendSessionId === 'conv-' + (i + 1))), '§10f …and each attach CARRIES the conversation id — the window\'s openSpec names it before the attach answers (a save in between never writes it nameless)', J(calls.map((c) => c.opts && c.opts.backendSessionId)));
   return failed;
 }
 console.log('— §10f THE BOOT RESTORE of a nameless entry (layout.js restoreState)');
@@ -1519,274 +1519,274 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   // (a) a merge that REPLACES the record with the page's windows — the incident's rule
   {
     const find = '  for (const w of listOf(base.windows)) {';
-    ok(PSRC.includes(find), 'control merge-replaces: the patched line exists in desktop-record.js');
+    ok(verdictOf(PSRC.includes(find)), 'control merge-replaces: the patched line exists in desktop-record.js');
     const f = pureLegs(M.load(MODEL, PSRC.replace(find, '  for (const w of []) {'), 'merge-replaces'), { quiet: true });
-    ok(f.some((n) => /userW's drop/.test(n)) && f.some((n) => /not built/.test(n)), `control merge-replaces: a merge that REPLACES the record turns the §1 legs RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+    ok(gateOf(f.some((n) => /userW's drop/.test(n))) && verdictOf(f.some((n) => /not built/.test(n))), `control merge-replaces: a merge that REPLACES the record turns the §1 legs RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   // (e) a belt blind to evidence
   {
     const find = "    if (ev.has(id) && !(why.get(id) === 'unbuilt' && sid && !nextSessions.has(sid) && alive(sid))) continue;";
-    ok(PSRC.includes(find), 'control belt-blind: the patched line exists in desktop-record.js');
+    ok(verdictOf(PSRC.includes(find)), 'control belt-blind: the patched line exists in desktop-record.js');
     const f = pureLegs(M.load(MODEL, PSRC.replace(find, ''), 'belt-blind'), { quiet: true });
-    ok(f.some((n) => /bulk close/.test(n)) && !f.some((n) => /userW's write/.test(n)), `control belt-blind: a belt that reads no evidence refuses the user's own bulk close (RED) — the incident's refusal still holds (${f.length})`);
+    ok(gateOf(f.some((n) => /bulk close/.test(n))) && !f.some((n) => /userW's write/.test(n)), `control belt-blind: a belt that reads no evidence refuses the user's own bulk close (RED) — the incident's refusal still holds (${f.length})`);
   }
   // (f) verify r1: a belt blind to ARRIVALS (the lane's ①)
   {
     const find = '  const arrived = unexplained.filter((id) => rec.has(id));';
-    ok(PSRC.includes(find), 'control belt-blind-arrivals: the patched line exists in desktop-record.js');
+    ok(verdictOf(PSRC.includes(find)), 'control belt-blind-arrivals: the patched line exists in desktop-record.js');
     const f = pureLegs(M.load(MODEL, PSRC.replace(find, '  const arrived = [];'), 'belt-blind-arrivals'), { quiet: true });
-    ok(f.some((n) => /ANOTHER client added lately/.test(n)) && !f.some((n) => /bulk close/.test(n)), `control belt-blind-arrivals: a belt that forgets arrivals admits the 1-window drop of a window another client just added (RED) — the bulk close still passes (${f.length})`);
+    ok(gateOf(f.some((n) => /ANOTHER client added lately/.test(n))) && !f.some((n) => /bulk close/.test(n)), `control belt-blind-arrivals: a belt that forgets arrivals admits the 1-window drop of a window another client just added (RED) — the bulk close still passes (${f.length})`);
   }
   const DSRC = read('src/lib/desktop-manager.js');
   const LSRC0 = read('src/lib/layout.js');
   // (g) verify r1: ONE slot for every desktop (the lane's ① / 2.369.198 guard 3)
   {
     const find = '    this._pendingRemote.set(deferKey(msg), msg);'; // B-4767: the slot keys per desktop AND writer class (layout-model.js)
-    ok(LSRC0.includes(find), 'control one-slot: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control one-slot: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, "    this._pendingRemote.clear(); this._pendingRemote.set('', msg);", "src/lib/layout.js"), 'one-slot', { esm: true }))).LayoutManager, { quiet: true, legs: ['a', 'i'] });
-    ok(f.some((n) => /pointerup applies BOTH/.test(n)) && !f.some((n) => /THE DROP onto an UNVISITED/.test(n)), `control one-slot: one slot for every desktop loses the target's record of a move (RED) (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
+    ok(gateOf(f.some((n) => /pointerup applies BOTH/.test(n))) && !f.some((n) => /THE DROP onto an UNVISITED/.test(n)), `control one-slot: one slot for every desktop loses the target's record of a move (RED) (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   // (h) verify r1: a remote move applied as a CLOSE (the lane's ①)
   {
     const find = '  adoptRemoteMove(win, from, { to = null, rec = null } = {}) {\n';
-    ok(DSRC.includes(find), 'control move-as-close: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'control move-as-close: the patched line exists in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, find + '    return null;\n', "src/lib/desktop-manager.js"), 'move-as-close', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['a', 'i', 'j'] });
-    ok(f.some((n) => /REMOTE MOVE OUT/.test(n)) && f.some((n) => /REMOTE MOVE IN/.test(n)) && !f.some((n) => /THE DROP onto an UNVISITED/.test(n)), `control move-as-close: a page that closes a window another client moved turns the remote-move legs RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
+    ok(gateOf(f.some((n) => /REMOTE MOVE OUT/.test(n))) && gateOf(f.some((n) => /REMOTE MOVE IN/.test(n))) && !f.some((n) => /THE DROP onto an UNVISITED/.test(n)), `control move-as-close: a page that closes a window another client moved turns the remote-move legs RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   // (i) verify r1: a reconnect that re-reads nothing (the lane's ①)
   {
     const find = '    app.ws.onStateChange((connected) => { if (!connected) { this._lastSentJson = null; this._unacked = this._unacked.filter((s) => s.at == null); } if (connected) { this._clockTick(); this._lastRemoteSeq = 0; for (const s of this._unacked) if (s.at == null) s.at = Date.now(); if (this._connects++ > 0) setTimeout(() => this._resyncFromServer(), 250); } });';
-    ok(LSRC0.includes(find), 'control no-resync: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control no-resync: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    app.ws.onStateChange((connected) => { if (connected) this._lastRemoteSeq = 0; });', "src/lib/layout.js"), 'no-resync', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
-    ok(f.some((n) => /RECONNECT re-reads/.test(n)) && f.some((n) => /hr-4 arrived during the outage/.test(n)), `control no-resync: a reconnect that re-reads nothing leaves the stale base (RED) (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
+    ok(gateOf(f.some((n) => /RECONNECT re-reads/.test(n))) && verdictOf(f.some((n) => /hr-4 arrived during the outage/.test(n))), `control no-resync: a reconnect that re-reads nothing leaves the stale base (RED) (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   // (j) verify r1 D1: a delete that leaves the target's record to the next autosave
   {
     const find = '    this._broadcastDesktopState(targetId, this.recordFor(targetId)); // the target holds them BEFORE the server forgets the desktop\n';
-    ok(DSRC.includes(find), 'control delete-no-send: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'control delete-no-send: the patched line exists in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '', "src/lib/desktop-manager.js"), 'delete-no-send', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['l'] });
-    ok(f.some((n) => /deleting the desktop ON SHOW/.test(n)), `control delete-no-send: the target's record is not sent — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /deleting the desktop ON SHOW/.test(n))), `control delete-no-send: the target's record is not sent — RED (${f.length})`);
   }
   // (k) verify r1 D6: a rearmSave that does nothing
   {
     const find = '  rearmSave() {\n';
-    ok(LSRC0.includes(find), 'control no-rearm: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control no-rearm: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, find + '    return;\n', "src/lib/layout.js"), 'no-rearm', { esm: true }))).LayoutManager, { quiet: true, legs: ['m'] });
-    ok(f.some((n) => /re-arms the save/.test(n)) && f.some((n) => /goes out on its own/.test(n)), `control no-rearm: the refused record of the desktop on show never goes out — RED (${f.length})`);
+    ok(gateOf(f.some((n) => /re-arms the save/.test(n))) && verdictOf(f.some((n) => /goes out on its own/.test(n))), `control no-rearm: the refused record of the desktop on show never goes out — RED (${f.length})`);
   }
   // (l) verify r1 D6: the switch's broadcast without the evidence
   {
     const find = "    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop', base: this.stampOf(desktopId) });";
-    ok(DSRC.includes(find), 'control switch-no-evidence: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'control switch-no-evidence: the patched line exists in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, "    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: [], sentAt });", "src/lib/desktop-manager.js"), 'switch-no-evidence', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['n'] });
-    ok(f.some((n) => /switch's broadcast of the desktop being left/.test(n)), `control switch-no-evidence: the closes leave unexplained — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /switch's broadcast of the desktop being left/.test(n))), `control switch-no-evidence: the closes leave unexplained — RED (${f.length})`);
   }
   // (m) verify r1 ⑥: the same-conversation rule patched out ⇒ the entry lingers as a build attempt
   {
     const find = "      if (ws.openSpec.action === 'attachSession' && ws.openSpec.serverId && liveServerIds.has(ws.openSpec.serverId)) { noSpec.push(winId); continue; }\n";
-    ok(DSRC.includes(find), 'control dup-lingers: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'control dup-lingers: the patched line exists in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '', "src/lib/desktop-manager.js"), 'dup-lingers', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['f'] });
-    ok(f.some((n) => /already open here under another window id/.test(n)) && !f.some((n) => /PARENT of a fork/.test(n)), `control dup-lingers: the entry is replayed and lingers — RED; the parent leg stays green (${f.length})`);
+    ok(gateOf(f.some((n) => /already open here under another window id/.test(n))) && !f.some((n) => /PARENT of a fork/.test(n)), `control dup-lingers: the entry is replayed and lingers — RED; the parent leg stays green (${f.length})`);
   }
   // (o) verify r2: the settle rule keyed on the CONVERSATION id (r1's key) settles a fork's parent
   {
     const find = "      if (ws.openSpec.action === 'attachSession' && ws.openSpec.serverId && liveServerIds.has(ws.openSpec.serverId)) { noSpec.push(winId); continue; }\n";
     const conv = "      if (ws.openSpec.action === 'attachSession' && ws.openSpec.backendSessionId && [...this.app.wm.windows.values()].some((w) => w._openSpec?.action === 'attachSession' && w._openSpec.backendSessionId === ws.openSpec.backendSessionId)) { noSpec.push(winId); continue; }\n";
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, conv, "src/lib/desktop-manager.js"), 'settle-by-conversation', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['f'] });
-    ok(f.some((n) => /PARENT of a fork/.test(n)) && !f.some((n) => /already open here under another window id/.test(n)), `control settle-by-conversation: r1's key drops the fork's parent — RED; the true duplicate still settles (${f.length})`);
+    ok(gateOf(f.some((n) => /PARENT of a fork/.test(n))) && !f.some((n) => /already open here under another window id/.test(n)), `control settle-by-conversation: r1's key drops the fork's parent — RED; the true duplicate still settles (${f.length})`);
   }
   // (n) verify r2: a move with no witness — the stale record re-adopts the window the user just dragged off
   {
     const find = '    for (const m of members) { m._desktopId = desktopId; m._movedAt = movedAt; }';
-    ok(DSRC.includes(find), 'control no-held-move: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'control no-held-move: the patched line exists in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '    for (const m of members) m._desktopId = desktopId;', "src/lib/desktop-manager.js"), 'no-held-move', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['o'] });
-    ok(f.some((n) => /THE HELD MOVE/.test(n)) && f.some((n) => /goes out once more/.test(n)), `control no-held-move: the user's drop is put back by the record deferred under the drag and never sent — RED (${f.length}: ${f.map((n) => n.slice(0, 70)).join(' | ')})`);
+    ok(gateOf(f.some((n) => /THE HELD MOVE/.test(n))) && verdictOf(f.some((n) => /goes out once more/.test(n))), `control no-held-move: the user's drop is put back by the record deferred under the drag and never sent — RED (${f.length}: ${f.map((n) => n.slice(0, 70)).join(' | ')})`);
   }
   // (p) verify r2: the chain loop without its desktop guard breaks hidden desktops' groups
   {
     const find = "            if (activeDesk && w._desktopId && w._desktopId !== activeDesk) continue;\n";
-    ok(LSRC0.includes(find), 'control chain-any-desktop: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control chain-any-desktop: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'chain-any-desktop', { esm: true }))).LayoutManager, { quiet: true, legs: ['p'] });
-    ok(f.some((n) => /leaves the tab group on hidden HR intact/.test(n)), `control chain-any-desktop: a record of Fin breaks HR's hidden group — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /leaves the tab group on hidden HR intact/.test(n))), `control chain-any-desktop: a record of Fin breaks HR's hidden group — RED (${f.length})`);
   }
   // (q) verify r2 ④: the old fallback — a deleted desktop's windows to desktop #1 on every other page
   {
     const find = '            const dest = homeOf(win.id) || fallbackId;';
-    ok(DSRC.includes(find), 'control delete-to-first: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'control delete-to-first: the patched line exists in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '            const dest = fallbackId;', "src/lib/desktop-manager.js"), 'delete-to-first', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['q'] });
-    ok(f.some((n) => /not on desktop #1/.test(n)) && f.some((n) => /never writes it under D1 too/.test(n)), `control delete-to-first: the windows land on #1 and the next save doubles them — RED (${f.length})`);
+    ok(gateOf(f.some((n) => /not on desktop #1/.test(n))) && verdictOf(f.some((n) => /never writes it under D1 too/.test(n))), `control delete-to-first: the windows land on #1 and the next save doubles them — RED (${f.length})`);
   }
   // (r) verify r2 ⑤: a re-read that leaves an older deferred record to drain after it
   {
     const find = '      else { this._pendingRemote.delete(key); this._handleRemoteSync(msg); }\n';
-    ok(LSRC0.includes(find), 'control resync-keeps-stale: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control resync-keeps-stale: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '      else this._handleRemoteSync(msg);\n', "src/lib/layout.js"), 'resync-keeps-stale', { esm: true }))).LayoutManager, { quiet: true, legs: ['r'] });
-    ok(f.some((n) => /never lands AFTER the re-read/.test(n)), `control resync-keeps-stale: the stale record drains over the fresh one — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /never lands AFTER the re-read/.test(n))), `control resync-keeps-stale: the stale record drains over the fresh one — RED (${f.length})`);
   }
   // (s) verify r2 ⑥: a re-read that gives up on the first failure
   {
     const find = '      if (attempt < RESYNC_RETRIES) { setTimeout(() => this._resyncFromServer(attempt + 1), RESYNC_RETRY_MS * (attempt + 1)); return; }\n';
-    ok(LSRC0.includes(find), 'control resync-no-retry: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control resync-no-retry: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'resync-no-retry', { esm: true }))).LayoutManager, { quiet: true, legs: ['s'] });
-    ok(f.some((n) => /a failed re-read is retried/.test(n)), `control resync-no-retry: the page stays on its stale base — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /a failed re-read is retried/.test(n))), `control resync-no-retry: the page stays on its stale base — RED (${f.length})`);
   }
   // (t) verify r2 R7: a drain in insertion order (no seq sort)
   {
     const find = '      const { next, drop } = releaseNext(this._pendingRemote, this._appliedSeq);'; // B-4767: the order (and the drop) live in layout-model.js
-    ok(LSRC0.includes(find), 'control drain-no-sort: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control drain-no-sort: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '      const { next, drop } = { next: [...this._pendingRemote.entries()][0], drop: [] };', "src/lib/layout.js"), 'drain-no-sort', { esm: true }))).LayoutManager, { quiet: true, legs: ['t'] });
-    ok(f.some((n) => /BEFORE the source/.test(n)), `control drain-no-sort: the source drains first and closes the moved window — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /BEFORE the source/.test(n))), `control drain-no-sort: the source drains first and closes the moved window — RED (${f.length})`);
   }
   // (u) verify r2 R7: the cached sweep without its adopt
   {
     const find = '.filter((w) => !this.adoptRemoteMove(w, desktopId))';
     ok(DSRC.split(find).length === 2, 'control cache-sweep-closes: the patched text exists once in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '', "src/lib/desktop-manager.js"), 'cache-sweep-closes', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['u'] });
-    ok(f.some((n) => /cached sweep moves the hidden window/.test(n)), `control cache-sweep-closes: the hidden window is closed — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /cached sweep moves the hidden window/.test(n))), `control cache-sweep-closes: the hidden window is closed — RED (${f.length})`);
   }
   // (v) verify r2 R7: the re-read closing whatever the record lacks (no `closeOnlyWired`)
   {
     const find = '            if (closeOnlyWired && !this.app.desktopManager?.wireListed?.(activeDesk, id)) continue;\n';
-    ok(LSRC0.includes(find), 'control close-any-wired: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control close-any-wired: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'close-any-wired', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
-    ok(f.some((n) => /OWN unsent window kept/.test(n)), `control close-any-wired: the page's own unsent window is closed by the re-read — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /OWN unsent window kept/.test(n))), `control close-any-wired: the page's own unsent window is closed by the re-read — RED (${f.length})`);
   }
   // (w) verify r2 R7: the re-read in the server's order (the desktop on show not last)
   {
     const find = '    const order = Object.entries(desktops).sort(([a], [b]) => (a === active) - (b === active));';
-    ok(LSRC0.includes(find), 'control resync-any-order: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control resync-any-order: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    const order = Object.entries(desktops);', "src/lib/layout.js"), 'resync-any-order', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
-    ok(f.some((n) => /moved off the desktop on show during the outage is MOVED/.test(n)), `control resync-any-order: a window moved off the desktop on show during the outage is closed — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /moved off the desktop on show during the outage is MOVED/.test(n))), `control resync-any-order: a window moved off the desktop on show during the outage is closed — RED (${f.length})`);
   }
   // (v) verify r2 ⑩: an apply that never holds the user's own geometry
   {
     const find = '          const heldGeom = this.actHeld(win._boundsAt, receivedAt, win);\n';
-    ok(LSRC0.includes(find), 'control no-held-geometry: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control no-held-geometry: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '          const heldGeom = false;\n', "src/lib/layout.js"), 'no-held-geometry', { esm: true }))).LayoutManager, { quiet: true, legs: ['v'] });
-    ok(f.some((n) => /THE HELD GEOMETRY/.test(n)) && f.some((n) => /drag goes out once more/.test(n)) && !f.some((n) => /other windows still apply/.test(n)), `control no-held-geometry: the drag is snapped back and never sent — RED (${f.length})`);
+    ok(gateOf(f.some((n) => /THE HELD GEOMETRY/.test(n))) && gateOf(f.some((n) => /drag goes out once more/.test(n))) && !f.some((n) => /other windows still apply/.test(n)), `control no-held-geometry: the drag is snapped back and never sent — RED (${f.length})`);
   }
   // ((x) verify r3 ①: the click-witness controls of §6's geomWitnessPin over patched window.js text: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // (y) verify r3 ②: the re-read's horizon at its ANSWER (r2's stamp) — a move made while it was in flight is reversed
   {
     const find = '    const receivedAt = Math.min(startedAt, this._movesSentAt ?? 0);';
-    ok(LSRC0.includes(find), 'control resync-horizon: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control resync-horizon: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    const receivedAt = Date.now();', "src/lib/layout.js"), 'resync-horizon', { esm: true }))).LayoutManager, { quiet: true, legs: ['w', 'x'] });
-    ok(f.some((n) => /horizon is the ask/.test(n)), `control resync-horizon: a horizon at the answer reverses the in-flight move whose save left before the answer — RED (${f.length}; the queued one is held by the unsaved-act rule since verify r4 ①)`);
+    ok(verdictOf(f.some((n) => /horizon is the ask/.test(n))), `control resync-horizon: a horizon at the answer reverses the in-flight move whose save left before the answer — RED (${f.length}; the queued one is held by the unsaved-act rule since verify r4 ①)`);
   }
   // (z) verify r3 ②: a save queued while disconnected stamped as sent
   {
     const find = '    this._unacked.push({ sentAt, desks: [...desks], pending: desks.length, refused: new Set(), at: this.app.ws?.connected !== false ? Date.now() : null });\n    this._armAckWatch();';
-    ok(LSRC0.includes(find), 'control queued-as-sent: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control queued-as-sent: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    for (const d of desks) this._markCarried(d, sentAt);', "src/lib/layout.js"), 'queued-as-sent', { esm: true }))).LayoutManager, { quiet: true, legs: ['w', 'x', 'ak', 'ak2'] });
-    ok(f.some((n) => /never READ is not reversed/.test(n)) && !f.some((n) => /horizon is the ask/.test(n)), `control queued-as-sent (today's rule: a save carried at its SEND): a save on a dead socket is reversed by the re-read — RED; the in-flight leg still holds (${f.length})`);
+    ok(gateOf(f.some((n) => /never READ is not reversed/.test(n))) && !f.some((n) => /horizon is the ask/.test(n)), `control queued-as-sent (today's rule: a save carried at its SEND): a save on a dead socket is reversed by the re-read — RED; the in-flight leg still holds (${f.length})`);
   }
   // (aa) verify r3 ③: noteClosed refusing every close under `_restoring` (the user's in the cooldown included)
   {
     const find = '    if (!id || this._applying || this._booting) return;';
-    ok(LSRC0.includes(find), 'control close-under-cooldown: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control close-under-cooldown: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    if (!id || this._restoring) return;', "src/lib/layout.js"), 'close-under-cooldown', { esm: true }))).LayoutManager, { quiet: true, legs: ['z'] });
-    ok(f.some((n) => /a close made in the cooldown is HELD/.test(n)), `control close-under-cooldown: a close in the cooldown is not held (RED) (${f.length})`);
+    ok(verdictOf(f.some((n) => /a close made in the cooldown is HELD/.test(n))), `control close-under-cooldown: a close in the cooldown is not held (RED) (${f.length})`);
   }
   // (ab) verify r3 ③: a save under a gate DROPPED (no deferral)
   {
     const find = '    if (!this._userDirty || this._applying || this._deferT) return;\n    const at = this._lastUserInputAt || Date.now();';
-    ok(LSRC0.includes(find), 'control save-dropped-under-gate: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control save-dropped-under-gate: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    return;\n    const at = this._lastUserInputAt || Date.now();', "src/lib/layout.js"), 'save-dropped-under-gate', { esm: true }))).LayoutManager, { quiet: true, legs: ['y'] });
-    ok(f.some((n) => /the move is saved on its own/.test(n)), `control save-dropped-under-gate: a drop in the cooldown waits for the next act (RED) (${f.length})`);
+    ok(verdictOf(f.some((n) => /the move is saved on its own/.test(n))), `control save-dropped-under-gate: a drop in the cooldown waits for the next act (RED) (${f.length})`);
   }
   // (ac) verify r3 ④: a save from the stale base (no hold) — the copies also shorten the retry ladder (150 ms): a control's wall is the mechanism's, not the product's constants
   {
     const find = '    if (this._resyncStale) { if (!this._resyncing) this._resyncFromServer(); return; }';
-    ok(LSRC0.includes(find), 'control stale-base-saved: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control stale-base-saved: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(editAnchor(LSRC0, find, '', "src/lib/layout.js", 'first'), 'const RESYNC_RETRY_MS = 1500;', 'const RESYNC_RETRY_MS = 150;', "src/lib/layout.js"), 'stale-base-saved', { esm: true }))).LayoutManager, { quiet: true, legs: ['st'] });
-    ok(f.some((n) => /a stale base is never saved/.test(n)), `control stale-base-saved: the page writes its stale base after a failed re-read (RED) (${f.length})`);
+    ok(verdictOf(f.some((n) => /a stale base is never saved/.test(n))), `control stale-base-saved: the page writes its stale base after a failed re-read (RED) (${f.length})`);
   }
   // (ad) verify r3 ④: the failed re-read told to the console only
   {
     const find = "      if (!this._staleTold) { this._staleTold = true; showToast(t(";
-    ok(LSRC0.includes(find), 'control stale-untold: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control stale-untold: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(editAnchor(LSRC0, find, "      if (false) { this._staleTold = true; showToast(t(", "src/lib/layout.js"), 'const RESYNC_RETRY_MS = 1500;', 'const RESYNC_RETRY_MS = 150;', "src/lib/layout.js"), 'stale-untold', { esm: true }))).LayoutManager, { quiet: true, legs: ['st'] });
-    ok(f.some((n) => /the user is told ONCE/.test(n)) && !f.some((n) => /a stale base is never saved/.test(n)), `control stale-untold: a console line only (RED) — the hold still holds (${f.length})`);
+    ok(gateOf(f.some((n) => /the user is told ONCE/.test(n))) && !f.some((n) => /a stale base is never saved/.test(n)), `control stale-untold: a console line only (RED) — the hold still holds (${f.length})`);
   }
   // (ag) verify r4 ①: THE UNSAVED ACT reverted — actHeld reduced to the receipt clause (r2's rule): a record received after an unsaved act undoes it
   {
     const find = '    return t >= receivedAt || t > (win ? this._carriedAt(win._desktopId) : (this._movesSentAt || 0));';
-    ok(LSRC0.includes(find), 'control unsaved-act-reverted: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control unsaved-act-reverted: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    return t >= receivedAt;', "src/lib/layout.js"), 'unsaved-act-reverted', { esm: true }))).LayoutManager, { quiet: true, legs: ['ua', 'ub', 'uc'] });
-    ok(f.some((n) => /does not put fin-2 back on Fin/.test(n)) && f.some((n) => /does not snap fin-2 back \(the drag/.test(n)) && f.some((n) => /never re-adopted onto Fin/.test(n)), `control unsaved-act-reverted: the receipt clause alone lets a record 100 ms after a drop / a drag / under a chatty peer undo it — RED (${f.length}: ${f.map((n) => n.slice(0, 60)).join(' | ')})`);
+    ok(gateOf(f.some((n) => /does not put fin-2 back on Fin/.test(n))) && gateOf(f.some((n) => /does not snap fin-2 back \(the drag/.test(n))) && verdictOf(f.some((n) => /never re-adopted onto Fin/.test(n))), `control unsaved-act-reverted: the receipt clause alone lets a record 100 ms after a drop / a drag / under a chatty peer undo it — RED (${f.length}: ${f.map((n) => n.slice(0, 60)).join(' | ')})`);
   }
   // (ah) verify r4 ②: adoptRemoteMove told a destination equal to the source falls through to the held-record search (the r1 form)
   {
     const find = "      if (to === from || to === '__stage__') return null;\n      dest = to;\n    } else {\n";
-    ok(DSRC.includes(find), 'control adopt-falls-through: the patched lines exist in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'control adopt-falls-through: the patched lines exist in desktop-manager.js');
     const mut = editAnchor(DSRC, find, "      dest = to !== from && to !== '__stage__' ? to : null;\n    }\n    if (!dest) {\n", "src/lib/desktop-manager.js");
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', mut, 'adopt-falls-through', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['ue'] });
-    ok(f.some((n) => /record of the desktop on show LISTS stays on it/.test(n)), `control adopt-falls-through: the search moves the listed window out — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /record of the desktop on show LISTS stays on it/.test(n))), `control adopt-falls-through: the search moves the listed window out — RED (${f.length})`);
   }
   // (cj) verify r5 ①: a clock watch that re-arms nothing — the sleep expires every hold and guard 2 drops the save: RED by leg cj
   {
     const find = '    const fresh = (t, hold = ACT_HOLD_MS) => t > 0 && before - t <= hold;\n';
-    ok(LSRC0.includes(find), 'control clock-unwatched: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control clock-unwatched: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    return;\n', "src/lib/layout.js"), 'clock-unwatched', { esm: true }))).LayoutManager, { quiet: true, legs: ['cj', 'st2'] });
-    ok(f.some((n) => /survives the wake/.test(n)) && !f.some((n) => /FOLLOWS the server/.test(n)), `control clock-unwatched: with no re-arm the drag before the sleep is lost at the wake — RED; the run minute (st2) still expires either way (${f.length})`);
+    ok(gateOf(f.some((n) => /survives the wake/.test(n))) && !f.some((n) => /FOLLOWS the server/.test(n)), `control clock-unwatched: with no re-arm the drag before the sleep is lost at the wake — RED; the run minute (st2) still expires either way (${f.length})`);
   }
   // (a5) verify r5 ⑥: an owed desk that re-arms nothing — the move waits for the next act: RED by a5
   {
     const find = "    if (owed && [...owed].some((d) => !this._unacked.some((s) => s.desks.includes(d)))) heldMoved = true;\n";
-    ok(LSRC0.includes(find), 'control owed-desk-unarmed: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control owed-desk-unarmed: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'owed-desk-unarmed', { esm: true }))).LayoutManager, { quiet: true, legs: ['a5'] });
-    ok(f.some((n) => /the owed desk re-arms the re-send/.test(n)), `control owed-desk-unarmed: the move stays on the page and never reaches the server — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /the owed desk re-arms the re-send/.test(n))), `control owed-desk-unarmed: the move stays on the page and never reaches the server — RED (${f.length})`);
   }
   // (st2b) verify r5 ④: a count that retires nothing — the same expired act is toasted at every stale release: RED by st2's second episode
   {
     const find = '      n++; w._movedAt = 0; w._boundsAt = 0; w._chainAt = 0; // counted once: said, then gone\n';
-    ok(LSRC0.includes(find), 'control expired-not-retired: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control expired-not-retired: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '      n++;\n', "src/lib/layout.js"), 'expired-not-retired', { esm: true }))).LayoutManager, { quiet: true, legs: ['st2'] });
-    ok(f.some((n) => /a second release with nothing new says nothing/.test(n)) && !f.some((n) => /told ONCE how many changes were not kept/.test(n)), `control expired-not-retired: the expired move is toasted again at the second release — RED; the first release still counts right (${f.length})`);
+    ok(gateOf(f.some((n) => /a second release with nothing new says nothing/.test(n))) && !f.some((n) => /told ONCE how many changes were not kept/.test(n)), `control expired-not-retired: the expired move is toasted again at the second release — RED; the first release still counts right (${f.length})`);
   }
   // (ch) verify r5 ②: the hold lines gone — the merge dissolves, the split falls back, the tear-off is re-grouped: RED by ch; a verb's stamp gone: RED by the pin
   {
     const f1 = '            if (this.actHeld(w._chainAt, receivedAt, w)) { heldKept = true; continue; }\n';
     const f2 = "          if ((tc.tabs || []).some((id) => { const m = this.app.wm.windows.get(String(id)); return m && this.actHeld(m._chainAt, receivedAt, m); })) { heldKept = true; continue; }\n";
-    ok(LSRC0.includes(f1) && LSRC0.includes(f2), 'control chain-unheld: the patched lines exist in layout.js');
+    ok(gateOf(LSRC0.includes(f1)) && verdictOf(LSRC0.includes(f2)), 'control chain-unheld: the patched lines exist in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(editAnchor(LSRC0, f1, '', "src/lib/layout.js"), f2, '', "src/lib/layout.js"), 'chain-unheld', { esm: true }))).LayoutManager, { quiet: true, legs: ['ch'] });
-    ok(f.some((n) => /a MERGE made in the cooldown/.test(n)) && f.some((n) => /a SIDE-BY-SIDE made in the cooldown/.test(n)) && f.some((n) => /a TEAR-OFF made in the cooldown/.test(n)), `control chain-unheld: without the hold the merge dissolves, the split falls back to tabs and the tear-off is re-grouped — RED (${f.length})`);
+    ok(gateOf(f.some((n) => /a MERGE made in the cooldown/.test(n))) && gateOf(f.some((n) => /a SIDE-BY-SIDE made in the cooldown/.test(n))) && verdictOf(f.some((n) => /a TEAR-OFF made in the cooldown/.test(n))), `control chain-unheld: without the hold the merge dissolves, the split falls back to tabs and the tear-off is re-grouped — RED (${f.length})`);
     // ((ch)'s text half — bindSplit without its stamp is RED by §6's chain-witness pin, a patched src/lib/tab-group.js string: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   // (ak2) verify r5 ⑤: a no-op guard that silences a re-send of a text the server never READ — RED by leg ak2
   {
     const find = "    if (json === this._lastSentJson && !this._unacked.some((s) => s.desks.includes(desktopId || ''))) {\n";
     const find2 = '{ this._lastSentJson = null; this._unacked = this._unacked.filter((s) => s.at == null); }';
-    ok(LSRC0.includes(find) && LSRC0.includes(find2), 'control noop-unread: the patched lines exist in layout.js');
+    ok(gateOf(LSRC0.includes(find)) && verdictOf(LSRC0.includes(find2)), 'control noop-unread: the patched lines exist in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(editAnchor(LSRC0, find, '    if (json === this._lastSentJson) {\n', "src/lib/layout.js"), find2, '{ this._unacked = this._unacked.filter((s) => s.at == null); }', "src/lib/layout.js"), 'noop-unread', { esm: true }))).LayoutManager, { quiet: true, legs: ['ak2'] });
-    ok(f.some((n) => /RE-SENT after the reconnect although its text equals/.test(n)), `control noop-unread: the held drag on the desktop on show is kept on the page but never reaches the server — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /RE-SENT after the reconnect although its text equals/.test(n))), `control noop-unread: the held drag on the desktop on show is kept on the page but never reaches the server — RED (${f.length})`);
   }
   // (ak) verify r5 ⑤: a refusal that CARRIES (the refused desktop released with the save) — RED by leg ar
   {
     const find = '    if (refused) s.refused.add(key);\n';
-    ok(LSRC0.includes(find), 'control refusal-carries: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control refusal-carries: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'refusal-carries', { esm: true }))).LayoutManager, { quiet: true, legs: ['ar'] });
-    ok(f.some((n) => /stays held — a stale record cannot put fin-2 back/.test(n)), `control refusal-carries: a refused record that counts as carried lets a stale record undo the act — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /stays held — a stale record cannot put fin-2 back/.test(n))), `control refusal-carries: a refused record that counts as carried lets a stale record undo the act — RED (${f.length})`);
   }
   // ((r5③) a door planted without a witness RED by §6's census, each new stamp removed RED by the doors pin: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // ((ai) verify r4 ③: a door that stamps nothing, each RED by §6's doors pin: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // (aj) verify r4 ④: the stale release silent — the expired acts dropped without a word
   {
     const find = "    if (expired) showToast(t('The layout was re-read";
-    ok(LSRC0.includes(find), 'control stale-release-untold: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control stale-release-untold: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, "    if (false) showToast(t('The layout was re-read", "src/lib/layout.js"), 'stale-release-untold', { esm: true }))).LayoutManager, { quiet: true, legs: ['st2'] });
-    ok(f.some((n) => /told ONCE how many changes were not kept/.test(n)) && !f.some((n) => /FOLLOWS the server/.test(n)), `control stale-release-untold: the acts are dropped without a word — RED; the page still follows the server (${f.length})`);
+    ok(gateOf(f.some((n) => /told ONCE how many changes were not kept/.test(n))) && !f.some((n) => /FOLLOWS the server/.test(n)), `control stale-release-untold: the acts are dropped without a word — RED; the page still follows the server (${f.length})`);
   }
   // (ae)/(af) verify r3 revert table: r2 ④'s unknown-desktop guards in _setRecord and noteWire
   {
     const f1 = '    if (!this._desktops.some((d) => d.id === desktopId)) return;\n    this._savedStates.set(desktopId, record);';
-    ok(DSRC.includes(f1), 'control orphan-held: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(f1)), 'control orphan-held: the patched line exists in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, f1, '    this._savedStates.set(desktopId, record);', "src/lib/desktop-manager.js"), 'orphan-held', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['orph'] });
-    ok(f.some((n) => /an orphan record/.test(n)), `control orphan-held: _setRecord without its guard holds the orphan (RED) (${f.length})`);
+    ok(verdictOf(f.some((n) => /an orphan record/.test(n))), `control orphan-held: _setRecord without its guard holds the orphan (RED) (${f.length})`);
     const f2 = "    if (!this._desktops.some((d) => d.id === desktopId)) return; // a desktop this page does not know (verify r2 ④)\n";
-    ok(DSRC.includes(f2), 'control orphan-wire: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(f2)), 'control orphan-wire: the patched line exists in desktop-manager.js');
     const g = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, f2, '', "src/lib/desktop-manager.js"), 'orphan-wire', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['orph'] });
-    ok(g.some((n) => /an orphan record/.test(n)), `control orphan-wire: noteWire without its guard keeps a wire base for the orphan (RED) (${g.length})`);
+    ok(verdictOf(g.some((n) => /an orphan record/.test(n))), `control orphan-wire: noteWire without its guard keeps a wire base for the orphan (RED) (${g.length})`);
   }
   // (b) the pre-fix _updateCachedDesktop (2.369.198, byte for byte in its body)
   {
@@ -1808,16 +1808,16 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     this._savedStates.set(desktopId, cached);`;
     const mut = DSRC.slice(0, start) + PRE + DSRC.slice(end);
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', mut, 'pre-fix-cache', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['a', 'b', 'c', 'd', 'e', 'e2', 'f', 'g', 'h'] });
-    ok(f.some((n) => /THE DROP onto an UNVISITED/.test(n)) && f.some((n) => /preview draws 4 after the drop/.test(n)) && f.some((n) => /THE SWITCH to HR builds/.test(n)) && !f.some((n) => /CONTROL visited first/.test(n)), `control pre-fix-cache: the 2.369.198 cache rebuild turns the drop / preview / switch legs RED — and the visited-first control stays green, as it did in the incident (${f.length}: ${f.slice(0, 3).join(' | ').slice(0, 200)})`);
+    ok(gateOf(f.some((n) => /THE DROP onto an UNVISITED/.test(n))) && gateOf(f.some((n) => /preview draws 4 after the drop/.test(n))) && gateOf(f.some((n) => /THE SWITCH to HR builds/.test(n))) && !f.some((n) => /CONTROL visited first/.test(n)), `control pre-fix-cache: the 2.369.198 cache rebuild turns the drop / preview / switch legs RED — and the visited-first control stays green, as it did in the incident (${f.length}: ${f.slice(0, 3).join(' | ').slice(0, 200)})`);
     // ((b)'s census half — the pre-fix body's two raw writes named by §5's census: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   // (c) an autosave that never sends a changed desktop it does not show
   {
     const LSRC = read('src/lib/layout.js');
     const find = '    for (const d of dm?.takeDirty?.() || []) {';
-    ok(LSRC.includes(find), 'control no-dirty-send: the patched line exists in layout.js');
+    ok(verdictOf(LSRC.includes(find)), 'control no-dirty-send: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC, find, '    for (const d of []) {', "src/lib/layout.js"), 'no-dirty-send', { esm: true }))).LayoutManager, { quiet: true, legs: ['a', 'g'] });
-    ok(f.some((n) => /THE AUTOSAVE after the drop SENDS HR/.test(n)) && f.some((n) => /corrected record goes out/.test(n)), `control no-dirty-send: the autosave leg turns RED — the server never hears of HR (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+    ok(gateOf(f.some((n) => /THE AUTOSAVE after the drop SENDS HR/.test(n))) && verdictOf(f.some((n) => /corrected record goes out/.test(n))), `control no-dirty-send: the autosave leg turns RED — the server never hears of HR (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   // ((d) a NEW raw writer of a held record — §5's census over a patched desktop-manager.js: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // THE LAYER LAW (lane layout-layers-p0): each rule of applyForViewport / LAYERS turns its own §8 leg RED
@@ -1831,10 +1831,10 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     { tag: 'layer-twice', find: "Object.freeze({ layer: 'chrome', fields: Object.freeze(['sidebarOpen',", repl: "Object.freeze({ layer: 'chrome', fields: Object.freeze(['grid', 'sidebarOpen',", expect: /no field is listed twice/ },
     { tag: 'unlisted-field', find: "'explorerPath', 'explorerHost', ", repl: "'explorerPath', ", expect: /THE CENSUS: every field|THE CAPTURE CENSUS/ },
   ]) {
-    ok(PSRC.includes(m.find), `control ${m.tag}: the patched line exists in desktop-record.js`);
+    ok(verdictOf(PSRC.includes(m.find)), `control ${m.tag}: the patched line exists in desktop-record.js`);
     if (!PSRC.includes(m.find)) continue;
     const f = layerLegs(M.load(MODEL, PSRC.replace(m.find, m.repl), m.tag), { quiet: true });
-    ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its §8 leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+    ok(verdictOf(f.some((n) => m.expect.test(n))), `control ${m.tag}: the patched copy turns its §8 leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   // THE LAYER GATE (lane layout-layers-p1): each rule of layerGate turns its own §9 leg RED; the gate removed and the P0
   // write half turn the real handler's / the reconciliation's legs RED
@@ -1845,72 +1845,72 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     { tag: 'gate-blind-to-chrome', find: '  for (const f of PHONE_KEEPS) if (!sameValue(gateValue(held, f), gateValue(next, f))) moved.add(f);', repl: '', expect: /THE GATE CENSUS/ },
     { tag: 'gate-judges-new-windows', find: '    if (!h || seen.has(id)) continue;', repl: "    if (seen.has(id)) continue; if (!h) { windows.push(id); moved.add('gridBounds'); continue; }", expect: /the WORKSPACE flows/ },
   ]) {
-    ok(PSRC.includes(m.find), `control ${m.tag}: the patched line exists in desktop-record.js`);
+    ok(verdictOf(PSRC.includes(m.find)), `control ${m.tag}: the patched line exists in desktop-record.js`);
     if (!PSRC.includes(m.find)) continue;
     const f = gateLegs(M.load(MODEL, PSRC.replace(m.find, m.repl), m.tag), { quiet: true });
-    ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its §9 leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+    ok(verdictOf(f.some((n) => m.expect.test(n))), `control ${m.tag}: the patched copy turns its §9 leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   {
     const WSH0 = loadHandler(() => ({ ok: true }));
     const h = await hubLegs(WSH0, { quiet: true }), d = await gateDoorLegs(RealDM, WSH0, { quiet: true, legs: ['old'] });
-    ok(h.some((n) => /a PHONE record that moves a box is REFUSED/.test(n)) && !h.some((n) => /SHRINK BELT is unchanged/.test(n)) && d.some((n) => /THE DESK IS UNCHANGED/.test(n)), `control gate-removed (layerGate answering ok on the real handler): a phone write MOVES A DESK WINDOW — the record on disk takes the phone's full-screen box and a desk's boot shows it; the shrink belt still holds (${h.length + d.length}: ${[...h, ...d].slice(0, 2).join(' | ').slice(0, 200)})`);
+    ok(gateOf(h.some((n) => /a PHONE record that moves a box is REFUSED/.test(n))) && !h.some((n) => /SHRINK BELT is unchanged/.test(n)) && verdictOf(d.some((n) => /THE DESK IS UNCHANGED/.test(n))), `control gate-removed (layerGate answering ok on the real handler): a phone write MOVES A DESK WINDOW — the record on disk takes the phone's full-screen box and a desk's boot shows it; the shrink belt still holds (${h.length + d.length}: ${[...h, ...d].slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   {
     const find = "    if (viewport === 'phone') for (const k of PHONE_KEEPS) delete chrome[k];";
-    ok(DSRC.includes(find), 'control pre-p1-write-half: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'control pre-p1-write-half: the patched line exists in desktop-manager.js');
     const DM0 = (await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, "    if (viewport === 'phone') for (const k of ['sidebarOpen', 'grid']) delete chrome[k];", "src/lib/desktop-manager.js"), 'pre-p1-write-half', { esm: true }))).DesktopManager;
     const f = await gateDoorLegs(DM0, loadHandler(), { quiet: true, legs: ['cur'] });
-    ok(f.some((n) => /a CURRENT phone page/.test(n)), `control pre-p1-write-half: the P0 write half (a phone carries the sidebar and the grid only) — the gate REFUSES a phone save whose own theme / fonts / bars differ from the desk's (RED) (${f.length})`);
+    ok(verdictOf(f.some((n) => /a CURRENT phone page/.test(n))), `control pre-p1-write-half: the P0 write half (a phone carries the sidebar and the grid only) — the gate REFUSES a phone save whose own theme / fonts / bars differ from the desk's (RED) (${f.length})`);
   }
   // THE OWNER'S RING (lane layout-stale-record-sync): each new rule removed turns its own §10 legs RED
   {
     const find = "    if (ev.has(id) && !(why.get(id) === 'unbuilt' && sid && !nextSessions.has(sid) && alive(sid))) continue;";
-    ok(PSRC.includes(find), 'control ring-unbuilt-explains-live: the patched line exists in desktop-record.js');
+    ok(verdictOf(PSRC.includes(find)), 'control ring-unbuilt-explains-live: the patched line exists in desktop-record.js');
     const Mx = M.load(MODEL, PSRC.replace(find, '    if (ev.has(id)) continue;'), 'ring-unbuilt-explains-live');
     const f = ringPureLegs(Mx, { quiet: true });
     const WSHx = loadHandler(null, { shrinkVerdict: Mx.shrinkVerdict });
     const h = await ringHubLegs(WSHx, { quiet: true }); // (the door's page no longer SENDS the drop — lane layout-stopped-window: the PURE and the hub legs carry this control)
-    ok(f.some((n) => /THE RING 00:17:31/.test(n)) && h.some((n) => /THE RING 00:17:31 on the real handler/.test(n)), `control ring-unbuilt-explains-live (2.369.340's belt: 'unbuilt' explains a live window): the woken desktop's 工作 = [] is WRITTEN — 5 → 0 (RED ${f.length}/${h.length})`);
+    ok(gateOf(f.some((n) => /THE RING 00:17:31/.test(n))) && verdictOf(h.some((n) => /THE RING 00:17:31 on the real handler/.test(n))), `control ring-unbuilt-explains-live (2.369.340's belt: 'unbuilt' explains a live window): the woken desktop's 工作 = [] is WRITTEN — 5 → 0 (RED ${f.length}/${h.length})`);
   }
   {
     const find = "    windows.push(page.has(id) ? keepIdentity(w, page.get(id)) : w);";
-    ok(PSRC.includes(find), 'control ring-merge-forgets: the patched line exists in desktop-record.js');
+    ok(verdictOf(PSRC.includes(find)), 'control ring-merge-forgets: the patched line exists in desktop-record.js');
     const f = ringPureLegs(M.load(MODEL, PSRC.replace(find, '    windows.push(page.has(id) ? page.get(id) : w);'), 'ring-merge-forgets'), { quiet: true });
     const h = await ringHubLegs(loadHandler(null, { keepIdentities: (p, n) => n }), { quiet: true });
-    ok(f.some((n) => /mergeDesktopRecord \(every record a page sends\)/.test(n)) && h.some((n) => /IDENTITY on the real handler/.test(n)), `control ring-merge-forgets + ring-server-forgets (2.369.340's merge / write): the nameless capture takes the record's place — RED (${f.length}/${h.length})`);
+    ok(gateOf(f.some((n) => /mergeDesktopRecord \(every record a page sends\)/.test(n))) && verdictOf(h.some((n) => /IDENTITY on the real handler/.test(n))), `control ring-merge-forgets + ring-server-forgets (2.369.340's merge / write): the nameless capture takes the record's place — RED (${f.length}/${h.length})`);
   }
   {
     const WSHx = loadHandler(null, { staleVerdict: () => ({ ok: true, judged: false }) });
     const h = await ringHubLegs(WSHx, { quiet: true }), d = await ringDoorLegs(RealDM, RealLM, WSHx, { quiet: true, legs: ['restore'] });
-    ok(h.some((n) => /THE STALENESS GATE on the real handler/.test(n)) && d.some((n) => /恢复布局 HOLDS/.test(n)), `control ring-no-stale-gate (2.369.340: no base judged): the phone's old copy lands over the restore — RED (${h.length}/${d.length})`);
+    ok(gateOf(h.some((n) => /THE STALENESS GATE on the real handler/.test(n))) && verdictOf(d.some((n) => /恢复布局 HOLDS/.test(n))), `control ring-no-stale-gate (2.369.340: no base judged): the phone's old copy lands over the restore — RED (${h.length}/${d.length})`);
   }
   {
     // the restore's ladder is desktop-record liveSessionOf (r9 — ONE resolution, the copy verdict reads it too): its recipe rung
     // patched out, and restoreState reading that copy
     const find = "    || (spec.action === 'attachSession' && spec.serverId && find((s) => s.id === spec.serverId))\n", imp = "import { conversationOf, hostOf, sessionOf, liveSessionOf } from './desktop-record.js';";
-    ok(PSRC.includes(find) && LSRC0.includes(imp), 'control ring-restore-ignores-spec: the patched lines exist in desktop-record.js (liveSessionOf) and layout.js (its import)');
+    ok(gateOf(PSRC.includes(find)) && verdictOf(LSRC0.includes(imp)), 'control ring-restore-ignores-spec: the patched lines exist in desktop-record.js (liveSessionOf) and layout.js (its import)');
     const rec = M.write('src/lib/desktop-record.js', PSRC.replace(find, ''), 'ring-restore-ignores-spec');
     const LMx = (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, imp, imp.replace("'./desktop-record.js'", JSON.stringify(rec)), "src/lib/layout.js"), 'ring-restore-ignores-spec', { esm: true }))).LayoutManager;
     const f = await ringRestoreLegs(RealDM, LMx, { quiet: true });
-    ok(f.some((n) => /THE BOOT RESTORE of 工作's NAMELESS five/.test(n)), `control ring-restore-ignores-spec (2.369.340's restoreState): a nameless chat matches nothing and builds nothing — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /THE BOOT RESTORE of 工作's NAMELESS five/.test(n))), `control ring-restore-ignores-spec (2.369.340's restoreState): a nameless chat matches nothing and builds nothing — RED (${f.length})`);
   }
   {
     const find = "{ mode: 'chat', backend: alive.backend || backend, machine: true, backendSessionId: alive.backendSessionId || alive.claudeSessionId || backendSessionId || undefined });";
-    ok(LSRC0.includes(find), 'control ring-attach-nameless: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control ring-attach-nameless: the patched line exists in layout.js');
     const LMx = (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, "{ mode: 'chat', backend: alive.backend || backend, machine: true });", "src/lib/layout.js"), 'ring-attach-nameless', { esm: true }))).LayoutManager;
     const f = await ringRestoreLegs(RealDM, LMx, { quiet: true });
-    ok(f.length === 1 && f.some((n) => /each attach CARRIES the conversation id/.test(n)), `control ring-attach-nameless (2.369.340's attach): the window's openSpec names no conversation until 'attached' — RED (${f.length})`);
+    ok(f.length === 1 && verdictOf(f.some((n) => /each attach CARRIES the conversation id/.test(n))), `control ring-attach-nameless (2.369.340's attach): the window's openSpec names no conversation until 'attached' — RED (${f.length})`);
   }
   {
     const find = "    if (behindStamp(this._appliedStamps, msg)) {";
-    ok(LSRC0.includes(find), 'control ring-applies-older: the patched line exists in layout.js');
+    ok(verdictOf(LSRC0.includes(find)), 'control ring-applies-older: the patched line exists in layout.js');
     const LMx = (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    if (false) {', "src/lib/layout.js"), 'ring-applies-older', { esm: true }))).LayoutManager;
     const f = await ringDoorLegs(RealDM, LMx, loadHandler(), { quiet: true, legs: ['behind'] });
-    ok(f.some((n) => /A RECORD NEVER GOES BACKWARDS on the page/.test(n)), `control ring-applies-older: the older record lands over the newer — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /A RECORD NEVER GOES BACKWARDS on the page/.test(n))), `control ring-applies-older: the older record lands over the newer — RED (${f.length})`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 34 })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 34 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 const anyFailed = fail || pureFailed.length || layerFailed.length || doorFailed.length || gateFailed.length || hubFailed.length || gateDoorFailed.length || ringPureFailed.length || ringHubFailed.length || ringDoorFailed.length || ringRestoreFailed.length;
 console.log(`\n${anyFailed ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(anyFailed ? 1 : 0);
+process.exit(anyFailed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

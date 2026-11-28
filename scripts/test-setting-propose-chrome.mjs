@@ -30,7 +30,7 @@ const chromeHome = path.join(root, 'chrome-home');
 for (const d of [fakeHome, stubDir, chromeHome]) fs.mkdirSync(d, { recursive: true });
 const CWD = path.join(fakeHome, 'project'); fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); if (typeof PAGE_ERRORS !== 'undefined' && PAGE_ERRORS.length) console.error('    the page said:', PAGE_ERRORS.splice(0).slice(-4).join(' | ')); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); if (typeof PAGE_ERRORS !== 'undefined' && PAGE_ERRORS.length) console.error('    the page said:', PAGE_ERRORS.splice(0).slice(-4).join(' | ')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SID = crypto.randomUUID();
 const DAY = 'spend.unattendedPerInstanceDay', IDDAY = 'spend.unattendedPerIdentityDay', HOUR = 'spend.unattendedPerIdentityHour';
@@ -153,23 +153,23 @@ try {
 
   console.log('② the agent proposes; the refusals file nothing');
   const r0 = await ask(['Raise the day ceiling so the release can finish?', '--propose', `${DAY}=1600`], TOKEN);
-  check('a RAISE with no --until is refused by name, with the row\'s link — nothing filed', r0.code !== 0 && /time-boxed/.test(r0.out) && r0.out.includes(`vibespace://settings/${DAY}`) && (await items()).length === 0, r0.out);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
+  check('a RAISE with no --until is refused by name, with the row\'s link — nothing filed', r0.code !== 0 && gateOf(/time-boxed/.test(r0.out)) && gateOf(r0.out.includes(`vibespace://settings/${DAY}`)) && (await items()).length === 0, r0.out);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const r1 = await ask(['The judge\'s cap?', '--propose', 'plugin.llm.dailyBudgetUsd=9', '--until', '2h'], TOKEN);
   check('the judge\'s daily cap is not on the list — refused, nothing filed', r1.code !== 0 && (await items()).length === 0, r1.out);
   const a = await ask(['The lanes hit today\'s ceiling — raise it so the release can finish?', '--propose', `${DAY}=1600`, '--until', '6h'], TOKEN);
   const filedA = await items();
-  check('a raise with --until 6h is filed (the ONE proposal in the store — the refusals above filed none); the agent reads the hub\'s line', a.code === 0 && filedA.length === 1 && filedA[0].action.key === DAY && /proposed: spend\.unattendedPerInstanceDay → 1600 for 6 h from the owner's press/.test(a.out), { out: a.out, n: filedA.length });
+  check('a raise with --until 6h is filed (the ONE proposal in the store — the refusals above filed none); the agent reads the hub\'s line', a.code === 0 && filedA.length === 1 && filedA[0].action.key === DAY && verdictOf(/proposed: spend\.unattendedPerInstanceDay → 1600 for 6 h from the owner's press/.test(a.out)), { out: a.out, n: filedA.length });
 
   console.log('③ the tray draws ONE box: the row, its value now, the proposal, ONE button naming the amount and the moment — at every width');
   await openTray();
   check('the box is drawn in the tray', !!(await until(`!!document.querySelector(${JSON.stringify(box(DAY))})`, { timeout: 10000 })));
   const b1 = await boxOf(box(DAY));
-  check('…with the value now (800, the default) and the proposed 1600, and ONE button naming 1600 and the stretch', !!b1 && b1.press === 'yes' && /800/.test(b1.now) && /1600/.test(b1.text) && !!b1.go && /1600/.test(b1.go.words) && b1.go.shown === '800', b1);
+  check('…with the value now (800, the default) and the proposed 1600, and ONE button naming 1600 and the stretch', !!b1 && b1.press === 'yes' && gateOf(/800/.test(b1.now)) && gateOf(/1600/.test(b1.text)) && !!b1.go && gateOf(/1600/.test(b1.go.words)) && b1.go.shown === '800', b1);
   for (const w of [280, 360, 480, 600, 768, 1024, 1280, 1440]) {
     await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
     await sleep(400); await openTray();
     const bw = await boxOf(box(DAY));
-    check(`width ${w}: the box fits its row (it never widens the tray) and its button's words are whole and on screen`, !!bw && bw.fits && !!bw.go && bw.go.whole && bw.go.inside, bw && { fits: bw.fits, go: bw.go });
+    check(`width ${w}: the box fits its row (it never widens the tray) and its button's words are whole and on screen`, !!bw && gateOf(bw.fits) && !!bw.go && gateOf(bw.go.whole) && verdictOf(bw.go.inside), bw && { fits: bw.fits, go: bw.go });
     await shot(`zh-tray-${w}`);
   }
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -178,12 +178,12 @@ try {
   console.log('④ a value that MOVED since the ask is said, and the button follows it; the row\'s link opens Settings and writes nothing');
   check('the owner changes the row by hand (the owner\'s page): 1200', (await ownerPatch({ [DAY]: 1200 })).status === 200 && stored()[DAY] === 1200);
   const b2 = await boxWhen(box(DAY), (b) => b.moved, 'the box never said the value moved');
-  check('the box says it is 1200 now and was 800 when asked; the button now carries 1200 as what it saw' + never(b2), !!b2 && b2.moved && /1200/.test(b2.now) && /800/.test(b2.now) && !!b2.go && b2.go.shown === '1200', b2);
+  check('the box says it is 1200 now and was 800 when asked; the button now carries 1200 as what it saw' + never(b2), !!b2 && gateOf(b2.moved) && gateOf(/1200/.test(b2.now)) && gateOf(/800/.test(b2.now)) && !!b2.go && b2.go.shown === '1200', b2);
   await shot('zh-tray-moved');
   const bytes0 = settingsBytes();
   check('a real press on «Open this setting»', (await press(`${box(DAY)} .ut-sc-link`)) === true);
   check('Settings opens on that row', !!(await until(`!!document.querySelector('.settings-row[data-path="${DAY}"].settings-row-focus')`, { timeout: 10000 })));
-  check('A PRESS THAT CHANGES NOTHING WRITES NOTHING: the settings file byte for byte the same', sameBytes(bytes0, settingsBytes()));
+  check('A PRESS THAT CHANGES NOTHING WRITES NOTHING: the settings file byte for byte the same', verdictOf(sameBytes(bytes0, settingsBytes())));
 
   console.log('⑤ ONE PRESS: the value written, the hold on disk, the item answered — and the Settings row says the hold with «End now»');
   await openTray();
@@ -196,7 +196,7 @@ try {
   check('the item is answered (resolved by the press; the agent told on the reply road)', !!it1 && it1.status !== 'open', it1 && { status: it1.status, reply: it1.reply });
   await evalJs(`app.openSettingAt(${JSON.stringify(DAY)}); true`);
   const held = await until(`(() => { const l = document.querySelector('.settings-row[data-path="${DAY}"] .settings-row-held'); return l ? l.textContent : null; })()`, { timeout: 10000 });
-  check('the Settings row SAYS the hold: 1600 until the moment, then 1200 — with «End now»', !!held && /1600/.test(held) && /1200/.test(held) && !!(await evalJs(`!!document.querySelector('.settings-row[data-path="${DAY}"] .settings-held-end')`)), held);
+  check('the Settings row SAYS the hold: 1600 until the moment, then 1200 — with «End now»', !!held && gateOf(/1600/.test(held)) && gateOf(/1200/.test(held)) && !!(await evalJs(`!!document.querySelector('.settings-row[data-path="${DAY}"] .settings-held-end')`)), held);
   await shot('zh-settings-held-row');
 
   console.log('⑥ «End now»: the row goes back at once — quietly: a toast with the row\'s link, no For-you item');
@@ -216,7 +216,7 @@ try {
   const cardSel = `.cn-card .ut-setting-change[data-key="${IDDAY}"]`;
   check('the chat\'s card draws the same box', !!(await until(`!!document.querySelector(${JSON.stringify(cardSel)})`, { timeout: 15000 })));
   const b3 = await boxOf(cardSel);
-  check('…a lower with no moment: «it stays»; the button names 100', !!b3 && !!b3.go && /100/.test(b3.go.words) && b3.go.shown === '200', b3);
+  check('…a lower with no moment: «it stays»; the button names 100', !!b3 && !!b3.go && gateOf(/100/.test(b3.go.words)) && b3.go.shown === '200', b3);
   await shot('zh-chat-card');
   await sleep(900);   // press-arm
   check('a real press in the chat', (await press(`${cardSel} .ut-setting-go`)) === true);
@@ -238,24 +238,24 @@ try {
   check('a hold stands: 1600, back to 1200', !!hB && hB.value === 1600 && hB.before === 1200 && stored()[DAY] === 1600, hB);
   const qc = await ask(['Settle the day ceiling at 1000?', '--propose', `${DAY}=1000`], TOKEN), qd = await ask(['Raise the day ceiling a little more for an hour?', '--propose', `${DAY}=2000`, '--until', '1h'], TOKEN);
   const q1400 = await ask(['Make it 1400 for good?', '--propose', `${DAY}=1400`], TOKEN);
-  check('LAW A at the ASK: on the held row a lasting 1400 (over the «before» 1200) is refused by name, with the row\'s link — nothing filed', q1400.code !== 0 && /raise-over-hold|goes back to 1200/.test(q1400.out) && q1400.out.includes(`vibespace://settings/${DAY}`), q1400.out);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
+  check('LAW A at the ASK: on the held row a lasting 1400 (over the «before» 1200) is refused by name, with the row\'s link — nothing filed', q1400.code !== 0 && gateOf(/raise-over-hold|goes back to 1200/.test(q1400.out)) && verdictOf(q1400.out.includes(`vibespace://settings/${DAY}`)), q1400.out);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const C = await idOf('Settle the day ceiling at 1000'), D = await idOf('Raise the day ceiling a little more');
   check('a lasting 1000 (under the «before») and a timed 2000 are filed on the held row', qc.code === 0 && qd.code === 0 && !!C && !!D, { qc: qc.out, qd: qd.out });
   await openTray();
   await until(`!!document.querySelector(${JSON.stringify(byId(D))})`, { timeout: 10000 });
   const bA = await boxOf(byId(A)), bC = await boxOf(byId(C)), bD = await boxOf(byId(D));
-  check('LAW A ON THE CARD: the lasting 1400 filed before the hold draws NO button now — the reason names 1400 and the 1200 it would stay above, with the row\'s link', !!bA && !bA.go && bA.press === 'raise-over-hold' && /1400/.test(bA.why) && /1200/.test(bA.why), bA);
+  check('LAW A ON THE CARD: the lasting 1400 filed before the hold draws NO button now — the reason names 1400 and the 1200 it would stay above, with the row\'s link', !!bA && !bA.go && bA.press === 'raise-over-hold' && gateOf(/1400/.test(bA.why)) && verdictOf(/1200/.test(bA.why)), bA);
   await shotOf('zh-held-case-lasting-over-before', byId(A));
-  check('a lasting 1000 on the held row: ONE button «改为 1000 …» and the held line says the hold ends', !!bC && !!bC.go && /改为/.test(bC.go.words) && /1000/.test(bC.go.words) && /1200/.test(bC.held), bC);
+  check('a lasting 1000 on the held row: ONE button «改为 1000 …» and the held line says the hold ends', !!bC && !!bC.go && gateOf(/改为/.test(bC.go.words)) && gateOf(/1000/.test(bC.go.words)) && verdictOf(/1200/.test(bC.held)), bC);
   await shotOf('zh-held-case-lasting-under-before', byId(C));
-  check('a timed 2000 on the held row: the raise button, and the held line says it still goes back to 1200', !!bD && !!bD.go && /2000/.test(bD.go.words) && /1200/.test(bD.held), bD);
+  check('a timed 2000 on the held row: the raise button, and the held line says it still goes back to 1200', !!bD && !!bD.go && gateOf(/2000/.test(bD.go.words)) && verdictOf(/1200/.test(bD.held)), bD);
   await shotOf('zh-held-case-timed', byId(D));
   const bytesH = settingsBytes();
   check('LAW B: the owner types 1300 into the held row (the owner\'s page writes it)', (await ownerPatch({ [DAY]: 1300 })).status === 200 && stored()[DAY] === 1300);
   check('…the hold ENDS where the write lands — the hub keeps none, every page is told', !!(await until(`fetch('/api/setting-holds').then((r) => r.json()).then((j) => j.holds.length === 0)`, { timeout: 8000 })));
   check('…no return can write over it: the settings file holds the hand\'s 1300', stored()[DAY] === 1300 && !sameBytes(bytesH, settingsBytes()));
   const bD2 = await boxWhen(byId(D), (b) => !b.held, 'the held line never went');
-  check('LAW C ON THE CARD: no held line any more; the timed 2000 now goes back to the hand\'s 1300 — never «then 1200»' + never(bD2), !!bD2 && !bD2.held && /1300/.test(bD2.text) && !/之后回到 1200/.test(bD2.text), bD2 && bD2.text);
+  check('LAW C ON THE CARD: no held line any more; the timed 2000 now goes back to the hand\'s 1300 — never «then 1200»' + never(bD2), !!bD2 && !bD2.held && gateOf(/1300/.test(bD2.text)) && !/之后回到 1200/.test(bD2.text), bD2 && bD2.text);
   await shotOf('zh-held-case-after-hand-change', byId(D));
   await evalJs(`app.openSettingAt(${JSON.stringify(DAY)}); true`);
   await until(`!!document.querySelector('.settings-row[data-path="${DAY}"]')`, { timeout: 10000 }); await sleep(400);
@@ -275,7 +275,7 @@ try {
   check('the phone\'s sheet draws the box', !!(await until(`!!document.querySelector(${JSON.stringify(box(HOUR))})`, { timeout: 10000 })));
   check('a tap opens THAT row (the phone draws a row on one line until tapped)', (await press(`#user-todos-popup .ut-item:has(.ut-setting-change[data-key="${HOUR}"]) .ut-body`, { touch: true })) === true);
   const b4 = await boxOf(box(HOUR));
-  check('…its button whole and on the phone\'s screen', !!b4 && !!b4.go && b4.go.whole && b4.go.inside, b4);
+  check('…its button whole and on the phone\'s screen', !!b4 && !!b4.go && gateOf(b4.go.whole) && verdictOf(b4.go.inside), b4);
   await shot('zh-phone-sheet');
   await sleep(900);   // press-arm
   check('a tap on the button', (await press(`${box(HOUR)} .ut-setting-go`, { touch: true })) === true);
@@ -291,4 +291,4 @@ try {
 } catch (e) { failed++; console.error('  ✗ threw:', e && e.stack || e); }
 console.log(failed ? `✗ test-setting-propose-chrome: ${passed} passed, ${failed} failed` : `ALL PASS (${passed})`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

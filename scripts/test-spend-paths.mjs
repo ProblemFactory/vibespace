@@ -64,7 +64,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const GIT_ENV = gitEnvFrom(process.env); // §2 asks git for the tracked source INSIDE `npm run build`
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -186,7 +186,7 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
   ok('§1 FAIL CLOSED: a reason outside the declared set is refused',
     A.authorizeUnattendedSpend({ reason: 'something-new', identity: ID, state: A.emptyBudget(), now }).why === 'unknown-reason');
   ok('§1 every declared reason says what it spends, and one of them is not a turn (the codex reset credit)',
-    Object.values(A.SPEND_REASONS).every((r) => typeof r.what === 'string' && typeof r.turn === 'boolean')
+    gateOf(Object.values(A.SPEND_REASONS).every((r) => typeof r.what === 'string' && typeof r.turn === 'boolean'))
     && A.SPEND_REASONS['codex-reset-credit'].turn === false && A.SPEND_REASONS['auto-resume'].turn === true);
 
   const cred = (serves) => A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: ID, state: A.emptyBudget(), credential: { serves, state: 'wiped' }, now });
@@ -201,7 +201,7 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
   let n = A.emptyBudget(); let warns = [];
   for (let i = 0; i < 12; i++) { const r = A.noteUnattendedSpend(n, { identity: ID, at: now + i, limits: OLD }); n = r.state; if (r.warn) warns.push(r.warn); }
   ok('§1 the 80% notice fires ONCE, at the crossing (10th of 12), naming the axis', warns.length === 1 && warns[0].scope === 'hour' && warns[0].used === 10, JSON.stringify(warns));
-  ok('§1 …and its sentence names the account and both numbers', /A has used 10 of its 12 unattended turns this hour \(83%\)/.test(A.noticeText(warns[0])), A.noticeText(warns[0]));
+  ok('§1 …and its sentence names the account and both numbers', verdictOf(/A has used 10 of its 12 unattended turns this hour \(83%\)/.test(A.noticeText(warns[0]))), A.noticeText(warns[0]));
 
   // ── RESERVATIONS (r5): an authorization binds until somebody says what
   // happened. The PURE half only has to answer "how much is in flight" — the
@@ -233,7 +233,7 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
       withHolds.ok === false && withHolds.why === 'hour-cap' && withHolds.counts.hour === 0 && withHolds.inFlight.identity === 2,
       JSON.stringify({ why: withHolds.why, counts: withHolds.counts.hour, inFlight: withHolds.inFlight }));
     ok('§1 …and it SAYS so, so the refusal is not mistaken for spend that happened',
-      /\(\+2 in flight\)/.test(withHolds.detail) && /has spent 0/.test(withHolds.detail), withHolds.detail);
+      gateOf(/\(\+2 in flight\)/.test(withHolds.detail)) && verdictOf(/has spent 0/.test(withHolds.detail)), withHolds.detail);
     ok('§1 …an EXPIRED hold binds nothing (the bound is a TTL, not a leak)',
       A.authorizeUnattendedSpend({
         reason: 'auto-resume', identity: ID, state: A.emptyBudget(),
@@ -293,7 +293,7 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
     ok('§1 a FRESH overage record still refuses (D3b is intact — this is the positive control)',
       ovAuth(fresh).ok === false && ovAuth(fresh).why === 'overage-in-use');
     ok('§1 …and it SAYS how old the evidence is (a refusal that never dates itself cannot be told from a stale file)',
-      / \(last reported 1 min ago\)/.test(ovAuth(fresh).detail), ovAuth(fresh).detail);
+      verdictOf(/ \(last reported 1 min ago\)/.test(ovAuth(fresh).detail)), ovAuth(fresh).detail);
     ok('§1 a STALE record neither blocks nor claims (P6) and says which rung expired it',
       ovAuth(aged).ok === true && A.overageState(aged, { now }).inUse === 'unknown'
       && A.overageState(aged, { now }).evidence === 'stale' && A.overageState(aged, { now }).stated === 'yes');
@@ -327,9 +327,9 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
     const rows = { perIdentityHour: 'spend.unattendedPerIdentityHour', perIdentityDay: 'spend.unattendedPerIdentityDay', perInstanceDay: 'spend.unattendedPerInstanceDay' };
     const schemaMax = Object.fromEntries(Object.entries(rows).map(([k, key]) => [k, maxOf(key)]));
     ok('§1 the census can read all three schema rows (an unreadable schema would make the next assert vacuous)',
-      Object.values(schemaMax).every((v) => Number.isFinite(v)), JSON.stringify(schemaMax));
+      verdictOf(Object.values(schemaMax).every((v) => Number.isFinite(v))), JSON.stringify(schemaMax));
     ok('§1 the authorizer\'s clamp IS the schema\'s own max, row for row — widening one without the other goes red here',
-      Object.entries(schemaMax).every(([k, v]) => A.CAP_MAX[k] === v), JSON.stringify({ schemaMax, CAP_MAX: A.CAP_MAX }));
+      verdictOf(Object.entries(schemaMax).every(([k, v]) => A.CAP_MAX[k] === v)), JSON.stringify({ schemaMax, CAP_MAX: A.CAP_MAX }));
     // and the ledger can COUNT to the biggest cap the schema offers
     const bigLimits = { perIdentityHour: 200, perIdentityDay: 2000, perInstanceDay: 10000, noticePct: 0 };
     ok('§1 retention is a FUNCTION of the limits, so the biggest offered cap is reachable',
@@ -728,7 +728,7 @@ function trackedServerSource() {
   try { files = trackedServerSource(); } catch (e) { gitOk = false; console.log('  · SKIP: git could not list the tracked source (' + e.message.split('\n')[0] + ')'); }
   if (gitOk) {
     ok('§2 census scope is non-vacuous and covers the known producers', files.length > 50
-      && ['server.js', 'src/server/auto-resume.js', 'src/server/conversation-deliver.js', 'src/agent-routes.js', 'src/server/usage-pool-engine.js'].every((f) => files.includes(f)),
+      && verdictOf(['server.js', 'src/server/auto-resume.js', 'src/server/conversation-deliver.js', 'src/agent-routes.js', 'src/server/usage-pool-engine.js'].every((f) => files.includes(f))),
       `${files.length} tracked server-side files`);
     const hits = censusOver(REPO, files);
     const allowKey = (h) => h.file + '#' + h.prim;
@@ -751,7 +751,7 @@ function trackedServerSource() {
     ok('§2 every SITE that can open an unattended turn is under the authorizer (or allowlisted WITH a reason)', unwired.length === 0, unwired.join(', '));
     const deadAllow = ALLOW.filter((a) => !hits.some((h) => h.file === a.file && h.prim === a.prim));
     ok('§2 no dead allowlist entry (a row that matches nothing hides the next real producer)', deadAllow.length === 0, deadAllow.map((a) => a.file + '#' + a.prim).join(', '));
-    ok('§2 every allowlist row states WHY, and names the ONE primitive it excuses', ALLOW.every((a) => typeof a.why === 'string' && a.why.length > 20 && PRIMITIVES.some((p) => p.id === a.prim)));
+    ok('§2 every allowlist row states WHY, and names the ONE primitive it excuses', verdictOf(ALLOW.every((a) => typeof a.why === 'string' && a.why.length > 20 && PRIMITIVES.some((p) => p.id === a.prim))));
     // THE PAIR KEY IS LOAD-BEARING ON THE REAL TREE, not only on a fixture:
     // src/agent-routes.js holds a GATED site (the Stop nudge) and an allowed
     // one (the forward to the ladder), and src/server/conversation-deliver.js
@@ -760,7 +760,7 @@ function trackedServerSource() {
     const mixedFiles = [...new Set(hits.map((h) => h.file))]
       .filter((f) => hits.some((h) => h.file === f && h.gated) && hits.some((h) => h.file === f && !h.gated));
     ok('§2 …and files holding BOTH a gated and a non-gated site are reported per site (' + mixedFiles.join(', ') + ')',
-      mixedFiles.length >= 2 && mixedFiles.every((f) => fileGranularGated(REPO, f)), mixedFiles.join(', '));
+      mixedFiles.length >= 2 && verdictOf(mixedFiles.every((f) => fileGranularGated(REPO, f))), mixedFiles.join(', '));
     const gatedFiles = [...new Set(hits.filter((h) => h.gated).map((h) => h.file))];
     // THE REASON TABLE, BOTH WAYS: every reason a producer passes must be
     // declared (an undeclared one is refused at runtime — §1 — so it would be a
@@ -778,45 +778,45 @@ function trackedServerSource() {
     const stash334 = hits.find((h) => h.file === 'src/server/stash-handover.js' && /spendReason: 'stash-retry'/.test(read(h.file).split('\n')[h.line - 1] || ''));
     const stash335 = hits.find((h) => h.file === 'src/server/stash-handover.js' && /spendReason: 'stash-handover'/.test(read(h.file).split('\n')[h.line - 1] || ''));
     ok('§2 the attended column is PER SITE: the hand-over file\'s gated stash-retry site prints no attended reason, its press site prints stash-handover; the groups site reads its `const paid` line', !!stash334 && !!stash335 && attendedAt(stash334).length === 0 && attendedAt(stash335).join() === 'stash-handover'
-      && hits.some((h) => h.file === 'src/server/groups-engine.js' && attendedAt(h).join() === 'owner-group-wake'), JSON.stringify({ s334: stash334 && attendedAt(stash334), s335: stash335 && attendedAt(stash335) }));
+      && verdictOf(hits.some((h) => h.file === 'src/server/groups-engine.js' && attendedAt(h).join() === 'owner-group-wake')), JSON.stringify({ s334: stash334 && attendedAt(stash334), s335: stash335 && attendedAt(stash335) }));
 
     { // §2c the guard is wired where the hub builds it — and its RED control is the B-02a3 door as 869399b5c built it
       const texts = Object.fromEntries(files.map((f) => [f, read(f)]));
       const W = guardWiring(texts);
       const names = [...new Set(W.takers.map((x) => x.f.split('/').pop()))].sort();
       ok(`§2c every function that TAKES the spend guard is handed it at every site that builds it (${W.sites.length} sites: ${names.join(', ')})`,
-        W.unwired.length === 0 && ['stash-handover.js', 'conversation-deliver.js', 'worker-dispatch.js', 'agent-routes.js'].every((x) => names.includes(x)) && W.sites.length >= 6, W.unwired);
+        W.unwired.length === 0 && gateOf(['stash-handover.js', 'conversation-deliver.js', 'worker-dispatch.js', 'agent-routes.js'].every((x) => names.includes(x))) && W.sites.length >= 6, W.unwired);
       const sj = texts['server.js'], key = "getSpendGuard: () => spendGuard";
       const kept = stripJsComments(sj || '');
       ok('§2c the census reads server.js WHOLE: its stripper keeps every line, and the constructions a `/*` inside a line comment once hid from it (the usage engine, the boot restore) are read',
-        !!sj && kept.split('\n').length === sj.split('\n').length && kept.includes("require('./src/server/usage-pool-engine.js').create(") && kept.includes("require('./src/server/boot-restore.js').create("), { lines: sj && sj.split('\n').length, kept: kept.split('\n').length });
+        !!sj && kept.split('\n').length === sj.split('\n').length && gateOf(kept.includes("require('./src/server/usage-pool-engine.js').create(")) && verdictOf(kept.includes("require('./src/server/boot-restore.js').create(")), { lines: sj && sj.split('\n').length, kept: kept.split('\n').length });
       const probe = "// a route like /api/file/serve/* etc.\nconst d = require('./stash-handover.js').create({ activeSessions });\n// the end */\n";
       const Wp = guardWiring({ ...texts, 'src/server/zz-census-probe.js': probe });
-      ok('§2c RED CONTROL (the blind span): an unwired build after a line comment that holds «/*» is named', Wp.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wp.unwired);
+      ok('§2c RED CONTROL (the blind span): an unwired build after a line comment that holds «/*» is named', verdictOf(Wp.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u))), Wp.unwired);
       const W3 = guardWiring({ ...texts, 'server.js': sj.replace(key, 'getSpendGuard: () => null') });
-      ok('§2c RED CONTROL: a key that hands NOTHING (`getSpendGuard: () => null`) is named', W3.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js handed nothing/.test(u)), W3.unwired);
+      ok('§2c RED CONTROL: a key that hands NOTHING (`getSpendGuard: () => null`) is named', verdictOf(W3.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js handed nothing/.test(u))), W3.unwired);
       const W5 = guardWiring({ ...texts, 'server.js': sj.replace(key, "getSpendGuard: () => require('./src/server/usage-pool-engine.js').spendGuard") });
-      ok('§2c RED CONTROL: the 869399b5c getter moved to the site (`() => require(…usage-pool-engine.js).spendGuard` — a module export, never the instance) hands nothing', W5.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js handed nothing/.test(u)), W5.unwired);
+      ok('§2c RED CONTROL: the 869399b5c getter moved to the site (`() => require(…usage-pool-engine.js).spendGuard` — a module export, never the instance) hands nothing', verdictOf(W5.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js handed nothing/.test(u))), W5.unwired);
       const probeVar = "const SH = require('./stash-handover.js');\nconst d = SH.create({ activeSessions });\n";
       const Wv = guardWiring({ ...texts, 'src/server/zz-census-probe.js': probeVar });
-      ok('§2c RED CONTROL: a module bound to a name (`const SH = require(…); SH.create(…)`) is read — built there without the guard, it is named', Wv.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wv.unwired);
+      ok('§2c RED CONTROL: a module bound to a name (`const SH = require(…); SH.create(…)`) is read — built there without the guard, it is named', verdictOf(Wv.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u))), Wv.unwired);
       const Wn = guardWiring({ ...texts, 'src/server/zz-census-taker.js': 'function create({ activeSessions, spendGuard = null }) { return { activeSessions, spendGuard }; }\nmodule.exports = { create };\n' });
-      ok('§2c RED CONTROL: a function that takes the guard and is built nowhere the census can read is named', Wn.unwired.some((u) => /zz-census-taker\.js create\(\{spendGuard\}\) is built nowhere a census can read/.test(u)), Wn.unwired);
+      ok('§2c RED CONTROL: a function that takes the guard and is built nowhere the census can read is named', verdictOf(Wn.unwired.some((u) => /zz-census-taker\.js create\(\{spendGuard\}\) is built nowhere a census can read/.test(u))), Wn.unwired);
       const Wa = guardWiring({ ...texts, 'src/server/zz-census-arrow.js': 'const create = ({ activeSessions, spendGuard = null }) => ({ activeSessions, spendGuard });\nmodule.exports = { create };\n',
         'src/server/zz-census-probe.js': "const d = require('./zz-census-arrow.js').create({ activeSessions });\n" });
-      ok('§2c RED CONTROL (the verdict\'s should): an ARROW constructor that takes the guard (`const create = ({ spendGuard }) => …`), built without it, is named', Wa.unwired.some((u) => /zz-census-arrow\.js create\(\{spendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wa.unwired);
+      ok('§2c RED CONTROL (the verdict\'s should): an ARROW constructor that takes the guard (`const create = ({ spendGuard }) => …`), built without it, is named', verdictOf(Wa.unwired.some((u) => /zz-census-arrow\.js create\(\{spendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u))), Wa.unwired);
       const Wk = guardWiring({ ...texts, 'src/server/zz-census-class.js': 'class Door {\n  constructor({ activeSessions, getSpendGuard = () => null }) { this.g = getSpendGuard; }\n}\nmodule.exports = { Door };\n',
         'src/server/zz-census-probe.js': "const { Door } = require('./zz-census-class.js');\nconst d = new Door({ activeSessions });\n" });
-      ok('§2c RED CONTROL (the verdict\'s should): a CLASS whose constructor takes the guard, built by `new` without it, is named', Wk.unwired.some((u) => /zz-census-class\.js Door\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wk.unwired);
+      ok('§2c RED CONTROL (the verdict\'s should): a CLASS whose constructor takes the guard, built by `new` without it, is named', verdictOf(Wk.unwired.some((u) => /zz-census-class\.js Door\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u))), Wk.unwired);
       const keyAR = 'serverSetting, spendGuard, scheduleCtxSync';
       if (sj.split(keyAR).length !== 2) throw new Error('the anchor of the control «the agent routes unwired» is not in server.js once');
       const W4 = guardWiring({ ...texts, 'server.js': sj.replace(keyAR, 'serverSetting, scheduleCtxSync') });
-      ok('§2c RED CONTROL: a DESTRUCTURED constructor is read too — server.js calling setupAgentRoutes (bound by `const { setupAgentRoutes } = require(…)`) without the guard is named', W4.unwired.some((u) => /agent-routes\.js setupAgentRoutes\(\{spendGuard\}\) built at server\.js without it/.test(u)), W4.unwired);
+      ok('§2c RED CONTROL: a DESTRUCTURED constructor is read too — server.js calling setupAgentRoutes (bound by `const { setupAgentRoutes } = require(…)`) without the guard is named', verdictOf(W4.unwired.some((u) => /agent-routes\.js setupAgentRoutes\(\{spendGuard\}\) built at server\.js without it/.test(u))), W4.unwired);
       if (!sj || !sj.includes(key)) throw new Error('the anchor of the control «the B-02a3 door unwired» is not in server.js');
       const W2 = guardWiring({ ...texts, 'server.js': sj.replace(key, 'getSpendGuardX: () => spendGuard') });
-      ok('§2c RED CONTROL: server.js building the stash door without its guard (869399b5c) is named unwired', W2.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js without it/.test(u)), W2.unwired);
+      ok('§2c RED CONTROL: server.js building the stash door without its guard (869399b5c) is named unwired', verdictOf(W2.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js without it/.test(u))), W2.unwired);
     }
-    ok('§2 the four wired consumers are all in the GATED set', ['src/server/auto-resume.js', 'src/server/conversation-deliver.js', 'src/agent-routes.js', 'src/server/usage-pool-engine.js'].every((f) => gatedFiles.includes(f)), gatedFiles.join(', '));
+    ok('§2 the four wired consumers are all in the GATED set', verdictOf(['src/server/auto-resume.js', 'src/server/conversation-deliver.js', 'src/agent-routes.js', 'src/server/usage-pool-engine.js'].every((f) => gatedFiles.includes(f))), gatedFiles.join(', '));
     // THE OWNER'S RULING (2026-09-27 — "告知agent发生了打断，交还时提醒它重新运行"): the takeover now TELLS the agent and the
     // handback reminds it to re-run — and neither grows a producer: browser-handback.js keeps its ONE ladder site (the
     // explicit handback, the re-run sentence rides its text), and the takeover moment is the ladder's DISPLAY-only card
@@ -826,8 +826,8 @@ function trackedServerSource() {
       const bsrc = read('src/server/browser-handback.js');
       const tbody = bsrc.slice(bsrc.indexOf('  function announceTakeover('), bsrc.indexOf('  /** Which browser the user took'));
       ok('§2 the takeover tells for FREE: browser-handback.js still holds exactly ONE ladder site (the explicit handback — the census did not grow a producer) and the takeover moment calls no rung, no stash and no authorizer — only the display-only card path and a zero-spend notice',
-        bh.length === 1 && bh[0].prim === 'deliver-ladder' && tbody.length > 400 && !/deliverToConversation|stashFor|authorizeSpend|spendReason/.test(tbody) && /const card = \{ fromName: FROM_NAME, text, kind: 'notification' \};/.test(tbody) && /emitCard\(sess\.s, card\)/.test(tbody) && /deliver\.emitPeerCard\(cid, card\)/.test(tbody) && /queueNotice\(sess, T\.takeoverNotice\(/.test(tbody)
-          && /emitCard: \(session, card\) => require\('\.\.\/normalizers'\)\.feedPeerCard\(session, card\)/.test(read('src/server/mounts-plugins-wiring.js')),
+        bh.length === 1 && bh[0].prim === 'deliver-ladder' && tbody.length > 400 && !/deliverToConversation|stashFor|authorizeSpend|spendReason/.test(tbody) && gateOf(/const card = \{ fromName: FROM_NAME, text, kind: 'notification' \};/.test(tbody)) && gateOf(/emitCard\(sess\.s, card\)/.test(tbody)) && gateOf(/deliver\.emitPeerCard\(cid, card\)/.test(tbody)) && gateOf(/queueNotice\(sess, T\.takeoverNotice\(/.test(tbody))
+          && verdictOf(/emitCard: \(session, card\) => require\('\.\.\/normalizers'\)\.feedPeerCard\(session, card\)/.test(read('src/server/mounts-plugins-wiring.js'))),
         JSON.stringify(bh.map((h) => h.file + ':' + h.line + ' ' + h.prim)));
       // lane browser-resume B (§3.9, the owner's ruling 2): "Hand back and continue" — the between-turns hand-back files ONE
       // stash entry + ONE display-only card and NEVER opens a turn: no rung, no authorizer, no spend reason in its body; the
@@ -835,8 +835,8 @@ function trackedServerSource() {
       // still counts ONE ladder site in this file (the explicit handback)
       const cbody = bsrc.slice(bsrc.indexOf('  async function continueFor('), bsrc.indexOf('  let unsubInput = null'));
       ok('§2 LANE BROWSER-RESUME: "Hand back with a note" is FREE — continueFor holds no rung, no authorizer, no spend reason (only the stash + the display-only card), the announcer returns before announce() for `continue`, and browser-handback.js still has exactly ONE ladder site',
-        bh.length === 1 && cbody.length > 400 && !/deliverToConversation|authorizeSpend|spendReason/.test(cbody) && /deliver\.stashFor\(cid, \{ source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: id, text \}\)/.test(cbody) && /emitCard\(sess\.s, card\)/.test(cbody)
-          && /if \(ev\.cause === 'continue'\) return;\n      announce\(ev\)/.test(bsrc) && require(path.join(REPO, 'src/browser-takeover.js')).announceVerdict({ cause: 'continue', announceIdle: true }).deliver === false,
+        bh.length === 1 && cbody.length > 400 && !/deliverToConversation|authorizeSpend|spendReason/.test(cbody) && gateOf(/deliver\.stashFor\(cid, \{ source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: id, text \}\)/.test(cbody)) && gateOf(/emitCard\(sess\.s, card\)/.test(cbody))
+          && gateOf(/if \(ev\.cause === 'continue'\) return;\n      announce\(ev\)/.test(bsrc)) && require(path.join(REPO, 'src/browser-takeover.js')).announceVerdict({ cause: 'continue', announceIdle: true }).deliver === false,
         JSON.stringify({ sites: bh.length, body: cbody.length }));
     }
 
@@ -848,9 +848,9 @@ function trackedServerSource() {
       const dsrc = read('src/server/design-engine.js');
       ok('§2 LANE DESIGN-CHROME: the design comment opens no turn nobody typed — design-engine.js holds no ladder call, no authorizer, no spend reason and no frame formatter; its comment goes to the typing sender (sendUserInput, origin design-comment) or the stash (stashFor, source design-comment), and the census finds no producer site in it but that typing sender (its typed-send row is an ALLOW: the owner\'s own click — lane worker-dispatch\'s census, composed at the 2.369.202 integration)',
         !/deliverToConversation|authorizeSpend|spendReason|formatChatInput|peerPost|postToInbox/.test(dsrc)
-          && /sendUserInput\(sessionId, line, \{ msgId: now\(\) \+ '-design', origin: 'design-comment', door: 'enter' \}\)/.test(dsrc)   // + the conversation's own Enter door (lane reply-door-follows-enter) — still the typing sender, the owner's words
-          && /deliver\.stashFor\(cid, \{ source: 'design-comment', kind: 'peer', fromName: DESIGN_COMMENT_FROM, text: line \}\)/.test(dsrc)
-          && hits.filter((h) => h.file === 'src/server/design-engine.js' || h.file === 'src/routes/design.js').every((h) => h.file === 'src/server/design-engine.js' && h.prim === 'typed-send' && ALLOW.some((a) => a.file === h.file && a.prim === h.prim)),
+          && gateOf(/sendUserInput\(sessionId, line, \{ msgId: now\(\) \+ '-design', origin: 'design-comment', door: 'enter' \}\)/.test(dsrc))   // + the conversation's own Enter door (lane reply-door-follows-enter) — still the typing sender, the owner's words
+          && gateOf(/deliver\.stashFor\(cid, \{ source: 'design-comment', kind: 'peer', fromName: DESIGN_COMMENT_FROM, text: line \}\)/.test(dsrc))
+          && verdictOf(hits.filter((h) => h.file === 'src/server/design-engine.js' || h.file === 'src/routes/design.js').every((h) => h.file === 'src/server/design-engine.js' && h.prim === 'typed-send' && ALLOW.some((a) => a.file === h.file && a.prim === h.prim))),
         JSON.stringify(hits.filter((h) => /design/.test(h.file))));
     }
 
@@ -861,13 +861,13 @@ function trackedServerSource() {
       const csrc = read('src/server/conversation-ops.js');
       const co = hits.filter((h) => h.file === 'src/server/conversation-ops.js');
       ok('§2 LANE AUTOMATION-VERBS: conversation-ops.js holds exactly ONE headless-open site and it is GATED (spendGuard.authorize, reason automation-open, before the spawn)',
-        co.length === 1 && co[0].prim === 'headless-open' && co[0].gated === true && /spendGuard\.authorize\(\{ reason: 'automation-open', identity/.test(csrc), JSON.stringify(co));
+        co.length === 1 && co[0].prim === 'headless-open' && co[0].gated === true && verdictOf(/spendGuard\.authorize\(\{ reason: 'automation-open', identity/.test(csrc)), JSON.stringify(co));
       const from = "const g = spendGuard.authorize({ reason: 'automation-open', identity, sessionName: v.spec.name || null });";
       const mutDir = tmpdir('vs-spend-convops-');
       fs.mkdirSync(path.join(mutDir, 'src', 'server'), { recursive: true });
       fs.writeFileSync(path.join(mutDir, 'src/server/conversation-ops.js'), editAnchor(csrc, from, 'const g = { ok: true, hold: null };', "src/server/conversation-ops.js"));
       const mh = censusOver(mutDir, ['src/server/conversation-ops.js']);
-      ok('§2 …MUTANT: the same file without the authorizer call reads its headless open UNWIRED', csrc.includes(from) && mh.length === 1 && mh[0].gated === false, JSON.stringify(mh));
+      ok('§2 …MUTANT: the same file without the authorizer call reads its headless open UNWIRED', gateOf(csrc.includes(from)) && mh.length === 1 && mh[0].gated === false, JSON.stringify(mh));
     }
 
     // NEGATIVE CONTROL: a synthetic producer in a scratch tree.
@@ -895,7 +895,7 @@ function trackedServerSource() {
     ok('§2 NEGATIVE CONTROL: a file that CONSTRUCTS the guard but never ASKS it is NOT gated (r2: this is how the reset credit hid)',
       cHits3.length === 1 && cHits3[0].gated === false, JSON.stringify(cHits3));
     ok('§2 …and the retired regex would have called that same file gated (the blind spot, kept as a control)',
-      /authorizeSpend|spendGuard|spend-authorizer/.test(fs.readFileSync(path.join(scratch, 'src/server/new-producer.js'), 'utf8')));
+      verdictOf(/authorizeSpend|spendGuard|spend-authorizer/.test(fs.readFileSync(path.join(scratch, 'src/server/new-producer.js'), 'utf8'))));
 
     // ── r3's OWN BLIND SPOT: ONE gated producer + ONE new ungated producer in
     // the SAME file. Under the file-granular verdict this file answered GATED
@@ -964,26 +964,26 @@ function trackedServerSource() {
       gUnwired.length === 1 && gUnwired[0].prim === 'cli-inbox', JSON.stringify(gHits));
     const realHits = censusOver(REPO, ['src/server/groups-engine.js']);
     ok('§2 …while the real engine holds exactly ONE site, the allowlisted forward to the ladder',
-      realHits.length === 1 && realHits[0].prim === 'deliver-ladder' && allowSet2.has('src/server/groups-engine.js#deliver-ladder'), JSON.stringify(realHits));
+      realHits.length === 1 && realHits[0].prim === 'deliver-ladder' && verdictOf(allowSet2.has('src/server/groups-engine.js#deliver-ladder')), JSON.stringify(realHits));
   }
   // WIRING PIN — the census proves a file ASKS; these prove server.js HANDS it
   // the real guard (an unwired dep degrades to "allow", which is the shape a
   // test harness needs and production must never have).
   const srv = read('server.js');
   ok('§2 WIRING: the engine constructs the ONE guard and server.js re-exports it',
-    /spendGuard,/.test(srv) && /const spendGuard = require\('\.\/spend-guard\.js'\)\.create\(\{/.test(read('src/server/usage-pool-engine.js')));
+    gateOf(/spendGuard,/.test(srv)) && verdictOf(/const spendGuard = require\('\.\/spend-guard\.js'\)\.create\(\{/.test(read('src/server/usage-pool-engine.js'))));
   ok('§2 WIRING: auto-resume is created WITH authorizeSpend + noteSpend',
-    /authorizeSpend: \(id, s, identity, o\) => spendGuard\.authorize\(\{ reason: 'auto-resume'/.test(srv) && /noteSpend: \(id, s, identity, hold\) => spendGuard\.note\(/.test(srv));
+    gateOf(/authorizeSpend: \(id, s, identity, o\) => spendGuard\.authorize\(\{ reason: 'auto-resume'/.test(srv)) && verdictOf(/noteSpend: \(id, s, identity, hold\) => spendGuard\.note\(/.test(srv)));
   // …and it FORWARDS the two halves r5 added, because dropping either is a
   // silent behaviour change: without `hold` on the wire the pre-gate PROBE
   // reserves a slot and the charging call refuses its own request (measured at
   // cap 1/hour: zero continues ever fire), and without `releaseSpend` a send
   // that fails keeps that slot booked for the hold's whole TTL.
   ok('§2 WIRING: …and it forwards the PROBE flag and the release half (r5)',
-    /hold: !!\(o && o\.hold\)/.test(srv) && /releaseSpend: \(id, s, hold\) => spendGuard\.release\(\{ hold \}\)/.test(srv));
+    gateOf(/hold: !!\(o && o\.hold\)/.test(srv)) && verdictOf(/releaseSpend: \(id, s, hold\) => spendGuard\.release\(\{ hold \}\)/.test(srv)));
   ok('§2 WIRING: the delivery ladder is created WITH authorizeSpend + noteSpend + releaseSpend',
-    /authorizeSpend: \(req\) => spendGuard\.authorize\(req\), noteSpend: \(rec\) => spendGuard\.note\(rec\), releaseSpend: \(rec\) => spendGuard\.release\(rec\)/.test(srv));
-  ok('§2 WIRING: the agent routes (the Stop nudge lives there) receive the guard', /setupAgentRoutes\(\{[^)]*spendGuard,/.test(srv));
+    verdictOf(/authorizeSpend: \(req\) => spendGuard\.authorize\(req\), noteSpend: \(rec\) => spendGuard\.note\(rec\), releaseSpend: \(rec\) => spendGuard\.release\(rec\)/.test(srv)));
+  ok('§2 WIRING: the agent routes (the Stop nudge lives there) receive the guard', verdictOf(/setupAgentRoutes\(\{[^)]*spendGuard,/.test(srv)));
   // THE ENGINE'S OWN PRODUCER (r2). The other three consumers get the guard
   // handed to them by server.js and have a pin each; the codex reset credit
   // lives INSIDE the file that constructs it, so its pin is that it asks the
@@ -994,7 +994,7 @@ function trackedServerSource() {
   {
     const eng = read('src/server/usage-pool-engine.js');
     ok('§2 WIRING: the codex reset credit asks the module-local guard, not an injected dep',
-      /spendGuard\.authorize\(\{ reason: 'codex-reset-credit'/.test(eng) && /spendGuard\.note\(\{ reason: 'codex-reset-credit'/.test(eng));
+      gateOf(/spendGuard\.authorize\(\{ reason: 'codex-reset-credit'/.test(eng)) && verdictOf(/spendGuard\.note\(\{ reason: 'codex-reset-credit'/.test(eng)));
     ok('§2 …and the engine takes NO authorizeSpend/noteSpend deps any more (a gate depending on a dep nobody passes is nobody\'s gate)',
       !/authorizeSpend\s*=\s*null/.test(eng) && !/noteSpend\s*=\s*null/.test(eng));
     ok('§2 …and the guard the reset credit asks is the one this file constructs',
@@ -1002,11 +1002,11 @@ function trackedServerSource() {
       && eng.indexOf("require('./spend-guard.js').create({") < eng.indexOf("spendGuard.authorize({ reason: 'codex-reset-credit'"));
   }
   ok('§2 WIRING: the two callers of the ladder TYPE themselves (jobs ⇒ job-notification, agent messaging ⇒ peer-message)',
-    /spendReason: 'job-notification'/.test(read('src/jobs.js')) && /spendReason: 'peer-message'/.test(read('src/agent-routes.js')));
+    gateOf(/spendReason: 'job-notification'/.test(read('src/jobs.js'))) && verdictOf(/spendReason: 'peer-message'/.test(read('src/agent-routes.js'))));
   ok('§2 WIRING: the ledger is FLUSHED on the routine restart path (a debounced-only write hands the next boot a fresh hour)',
     // lane hub-loop-stalls commit 2 round 3 (law 2): the store writer's exit begins first — the signal noted, beginExit, the
     // rank-0 flush — so the spend guard's flush sits further from `function shutdown()`; still on the routine restart path
-    /spendGuard\.flush\(\)/.test(srv) && /function shutdown\(\)[\s\S]{0,1400}spendGuard\.flush\(\)/.test(srv));
+    gateOf(/spendGuard\.flush\(\)/.test(srv)) && verdictOf(/function shutdown\(\)[\s\S]{0,1400}spendGuard\.flush\(\)/.test(srv)));
   ok('§2 §ban-safety: the vendor whitelist is untouched by this change (design §7 — if it needed a change, the design is wrong)',
     !/spend-authorizer|spend-guard|spend-budget/.test(read('scripts/test-vendor-whitelist.mjs')));
 }
@@ -1397,51 +1397,51 @@ function pressCensus(override = {}) {
   for (const d of PC.doors) console.log(`      ${d.ok ? 'refused first' : 'NOT REFUSED  '}  ${doorWord(d)} (${d.f})${d.ok ? '' : ' — ' + d.why}`);
   ok('§2b the census reads its files (none unparsed) and finds the attended sites', PC.bad.length === 0 && PC.sites.length >= 6, JSON.stringify(PC.bad));
   ok('§2b every attended reason is spelled at exactly ONE site — or has NONE and a DEFERRED census row naming the lane that wires it (' + attended.map((r) => `${r}${(bySite[r] || []).length ? '@' + bySite[r].map((s) => s.f.split('/').pop() + ':' + s.line).join('+') : deferred.has(r) ? ' deferred→' + deferred.get(r).wiredIn : ' NONE'}`).join(' · ') + ')',
-    attended.every((r) => ((bySite[r] || []).length === 1 && !deferred.has(r)) || (!(bySite[r] || []).length && deferred.has(r))) && DEFERRED_ATTENDED.every((d) => attended.includes(d.reason)), JSON.stringify(Object.fromEntries(attended.map((r) => [r, (bySite[r] || []).length]))));
-  ok('§2b every attended site is SELECTED on the press — its attended branch unreachable without isPress(pressed)', PC.fenced.length > 0 && PC.fenced.every((s) => s.how), JSON.stringify(PC.fenced.filter((s) => !s.how).map((s) => `${s.reason}@${s.f}:${s.line}`)));
+    gateOf(attended.every((r) => ((bySite[r] || []).length === 1 && !deferred.has(r)) || (!(bySite[r] || []).length && deferred.has(r)))) && verdictOf(DEFERRED_ATTENDED.every((d) => attended.includes(d.reason))), JSON.stringify(Object.fromEntries(attended.map((r) => [r, (bySite[r] || []).length]))));
+  ok('§2b every attended site is SELECTED on the press — its attended branch unreachable without isPress(pressed)', PC.fenced.length > 0 && verdictOf(PC.fenced.every((s) => s.how)), JSON.stringify(PC.fenced.filter((s) => !s.how).map((s) => `${s.reason}@${s.f}:${s.line}`)));
   ok('§2b TAINT: every `pressed` anywhere is minted by a door (pressOf) or handed on — never built from a body, a record or a literal', PC.taint.length === 0, PC.taint.join(' | '));
   ok('§2b r3 THE PRESS IS NEVER KEPT: every press rides a call\'s argument down ONE request\'s chain — no record, viewer or table holds one, no `.pressed =`', PC.kept.length === 0, PC.kept.join(' | '));
   ok('§2b r4 A PRESS IS NEVER REPLAYED: no press is handed on inside a timer (setTimeout / setInterval / setImmediate / schedule) — a replay later is never the person\'s act', PC.replayed.length === 0, PC.replayed.join(' | '));
-  ok('§2b THE WALK: every attended site reaches its doors along the press hops, with no unreadable hop', PC.holes.length === 0 && Object.values(PC.walks).every((x) => x.size > 0), PC.holes.join(' | '));
-  ok('§2b THE FENCE: every DERIVED door refuses EVERY bearer before it mints the press (' + PC.doors.length + ' doors)', PC.doors.length >= 14 && PC.doors.every((d) => d.ok), JSON.stringify(PC.doors.filter((d) => !d.ok)));
+  ok('§2b THE WALK: every attended site reaches its doors along the press hops, with no unreadable hop', PC.holes.length === 0 && verdictOf(Object.values(PC.walks).every((x) => x.size > 0)), PC.holes.join(' | '));
+  ok('§2b THE FENCE: every DERIVED door refuses EVERY bearer before it mints the press (' + PC.doors.length + ' doors)', PC.doors.length >= 14 && verdictOf(PC.doors.every((d) => d.ok)), JSON.stringify(PC.doors.filter((d) => !d.ok)));
   ok('§2b every press a door mints reaches an attended site (no decorative press)', PC.strayMints.length === 0, PC.strayMints.join(' | '));
   const derivedKeys = new Set(PC.doors.map((d) => d.f + ' ' + d.name));
-  ok('§2b CONTROL (the hand-kept table — a control, never the census): the derived doors cover every row (' + CONTROL_DOORS.length + ', the 15th door and the live view included)', CONTROL_DOORS.every(([f, h]) => derivedKeys.has(f + ' ' + h)), JSON.stringify(CONTROL_DOORS.filter(([f, h]) => !derivedKeys.has(f + ' ' + h))));
+  ok('§2b CONTROL (the hand-kept table — a control, never the census): the derived doors cover every row (' + CONTROL_DOORS.length + ', the 15th door and the live view included)', verdictOf(CONTROL_DOORS.every(([f, h]) => derivedKeys.has(f + ' ' + h))), JSON.stringify(CONTROL_DOORS.filter(([f, h]) => !derivedKeys.has(f + ' ' + h))));
   // MUTANT CONTROLS — the census over a patched copy of ONE file each (the rest from the cache)
   const t1 = Date.now();
   const srv = read('server.js');
   const noRefuse = srv.replace("  if (require('./src/write-origin.js').pressBearer(req.headers)) return res.status(403).json(", "  if (false) return res.status(403).json(");
   const m1 = pressCensus({ 'server.js': noRefuse });
-  ok('§2b CONTROL: the For-you ✓ door without its bearer refusal reads NOT REFUSED (the 15th door, as b8d2d98e shipped it)', noRefuse !== srv && m1.doors.some((d) => d.f === 'server.js' && /user-todos/.test(d.name) && !d.ok));
+  ok('§2b CONTROL: the For-you ✓ door without its bearer refusal reads NOT REFUSED (the 15th door, as b8d2d98e shipped it)', noRefuse !== srv && verdictOf(m1.doors.some((d) => d.f === 'server.js' && /user-todos/.test(d.name) && !d.ok)));
   const ge = read('src/server/groups-engine.js');
   const unsel = ge.replace("const paid = self && isPress(pressed) ? { spendReason: 'owner-group-wake' }", "const paid = self ? { spendReason: 'owner-group-wake' }");
   const m2 = pressCensus({ 'src/server/groups-engine.js': unsel });
-  ok('§2b CONTROL: an attended site selected on the author alone (the r1 shape) reads NOT selected on the press', unsel !== ge && m2.fenced.some((s) => s.reason === 'owner-group-wake' && !s.how));
+  ok('§2b CONTROL: an attended site selected on the author alone (the r1 shape) reads NOT selected on the press', unsel !== ge && verdictOf(m2.fenced.some((s) => s.reason === 'owner-group-wake' && !s.how)));
   // (an agent route, planted as a small file beside the tree — the census reads it like any other)
   const m3 = pressCensus({ 'src/server/zz-forge.js': "const __forge = (ge, b) => ge.post({ group: b.group, from: b.from, text: b.text, pressed: true });\nmodule.exports = { __forge };\n" });
-  ok('§2b CONTROL: a press that is not minted nor handed on (`ge.post({ …, pressed: true })`) is a TAINT', m3.taint.some((t) => /zz-forge\.js/.test(t)), m3.taint.join(' | '));
+  ok('§2b CONTROL: a press that is not minted nor handed on (`ge.post({ …, pressed: true })`) is a TAINT', verdictOf(m3.taint.some((t) => /zz-forge\.js/.test(t))), m3.taint.join(' | '));
   const m3b = pressCensus({ 'src/server/zz-forge.js': "const router = require('express').Router();\nrouter.post('/api/agent/zz-forge', async (req, res) => { const { pressOf } = require('../write-origin.js'); res.json(await req.app.locals.groups.post({ group: req.body.group, from: 'user', text: 'x', pressed: pressOf({ headers: { 'sec-fetch-site': 'same-origin' } }) })); });\nmodule.exports = { router };\n" });
-  ok('§2b CONTROL: an AGENT route that mints a press from a forged request (`pressOf({headers: …})`) is a door that is NOT REFUSED', m3b.doors.some((d) => /zz-forge/.test(d.name) && !d.ok), JSON.stringify(m3b.doors.filter((d) => /zz-forge/.test(d.name))));
+  ok('§2b CONTROL: an AGENT route that mints a press from a forged request (`pressOf({headers: …})`) is a door that is NOT REFUSED', verdictOf(m3b.doors.some((d) => /zz-forge/.test(d.name) && !d.ok)), JSON.stringify(m3b.doors.filter((d) => /zz-forge/.test(d.name))));
   const m4 = pressCensus({ 'src/server/zz-held-deliver.js': "function deliverHeld(cid, { pressed = null } = {}) { return deliver.deliverToConversation(cid, 't', isPress(pressed) ? { spendReason: 'held-deliver' } : { spendReason: 'channel-message' }); }\nmodule.exports = { deliverHeld };\n" });
   const m4n = m4.sites.filter((s) => s.reason === 'held-deliver').length;
-  ok('§2b CONTROL: the day a `held-deliver` site exists, its DEFERRED row is RED until retired (one site AND a deferred row)', m4n === 1 && deferred.has('held-deliver') && !(m4n === 0 && deferred.has('held-deliver')));
+  ok('§2b CONTROL: the day a `held-deliver` site exists, its DEFERRED row is RED until retired (one site AND a deferred row)', m4n === 1 && gateOf(deferred.has('held-deliver')) && !(m4n === 0 && deferred.has('held-deliver')));
   const ch = read('src/routes/channels.js');
   const cut = ch.replace("router.post('/api/channel-groups/:id/:verb', async (req, res) => {\n  try {\n    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;\n", "router.post('/api/channel-groups/:id/:verb', async (req, res) => {\n  try {\n");
   const m5 = pressCensus({ 'src/routes/channels.js': cut });
-  ok('§2b CONTROL: the group verb route without its refusal reads NOT refused — in the derived census and in the r1 line reader', cut !== ch && m5.doors.some((d) => /channel-groups\/:id\/:verb/.test(d.name) && !d.ok) && !doorRefusesFirst(cut, "router.post('/api/channel-groups/:id/:verb'").ok && doorRefusesFirst(ch, "router.post('/api/channel-groups/:id/:verb'").ok);
+  ok('§2b CONTROL: the group verb route without its refusal reads NOT refused — in the derived census and in the r1 line reader', cut !== ch && gateOf(m5.doors.some((d) => /channel-groups\/:id\/:verb/.test(d.name) && !d.ok)) && !doorRefusesFirst(cut, "router.post('/api/channel-groups/:id/:verb'").ok && verdictOf(doorRefusesFirst(ch, "router.post('/api/channel-groups/:id/:verb'").ok));
   const br = read('src/routes/browser.js');
   const brOld = br.replace('if (!isAgentBearer(req) && !pressBearer(req.headers)) return false;', 'if (!isAgentBearer(req)) return false;');
   const m6 = pressCensus({ 'src/routes/browser.js': brOld });
   ok('§2b CONTROL: browser.js\'s refuseAgentBearer back at vsst_ / jbt_ only (6428c67e) — its hand-back door reads NOT refused (an automation key\'s vsak_ would press it)',
-    brOld !== br && m6.doors.some((d) => /api\/browser\/handback/.test(d.name) && !d.ok));
+    brOld !== br && verdictOf(m6.doors.some((d) => /api\/browser\/handback/.test(d.name) && !d.ok)));
   const bs = read('src/server/browser-stream.js');
   const bsOld = bs.replace("      if (viewer.bearer) { send(viewer.ws, { type: 'refused', code: 'agent_forbidden',", "      if (false) { send(viewer.ws, { type: 'refused', code: 'agent_forbidden',");
   const m7 = pressCensus({ 'src/server/browser-stream.js': bsOld });
-  ok('§2b CONTROL: the live view\'s Hand back without its bearer refusal reads NOT refused (the socket door)', bsOld !== bs && m7.doors.some((d) => d.kind !== 'route' && /browser-stream/.test(d.f) && !d.ok));
+  ok('§2b CONTROL: the live view\'s Hand back without its bearer refusal reads NOT refused (the socket door)', bsOld !== bs && verdictOf(m7.doors.some((d) => d.kind !== 'route' && /browser-stream/.test(d.f) && !d.ok)));
   ok('§2b the bearer predicate refuses vsst_, jbt_ and vsak_ alike and no cookie request — and pressOf mints ONLY for a person on this page (never for a bearer, a header-less script, a cross-site page; never through JSON)',
-    ['Bearer vsst_' + 'a'.repeat(32), 'Bearer jbt_' + 'b'.repeat(32), 'Bearer vsak_' + 'c'.repeat(43), 'bearer x'].every((h) => WO.pressBearer({ authorization: h }))
+    gateOf(['Bearer vsst_' + 'a'.repeat(32), 'Bearer jbt_' + 'b'.repeat(32), 'Bearer vsak_' + 'c'.repeat(43), 'bearer x'].every((h) => WO.pressBearer({ authorization: h })))
       && !WO.pressBearer({ cookie: 'vs_token=' + 'd'.repeat(48) }) && !WO.pressBearer({})
-      && WO.isPress(WO.pressOf({ headers: { 'sec-fetch-site': 'same-origin' } })) && WO.isPress(WO.pressOf({ headers: { origin: 'http://h:1', host: 'h:1' } }))
+      && gateOf(WO.isPress(WO.pressOf({ headers: { 'sec-fetch-site': 'same-origin' } }))) && gateOf(WO.isPress(WO.pressOf({ headers: { origin: 'http://h:1', host: 'h:1' } })))
       && !WO.pressOf({ headers: {} }) && !WO.pressOf({ headers: { 'sec-fetch-site': 'same-origin', authorization: 'Bearer vsak_x' } }) && !WO.pressOf({ headers: { 'sec-fetch-site': 'cross-site' } })
       && !WO.isPress(JSON.parse(JSON.stringify({ p: WO.pressOf({ headers: { 'sec-fetch-site': 'same-origin' } }) })).p) && !WO.isPress(true) && !WO.isPress({}));
   // r3 THE CAPABILITY LAW (accept-r2 claim 1 (b): r2's press was ONE module-level singleton — pressOf(reqA) === pressOf(reqB),
@@ -1457,7 +1457,7 @@ function pressCensus(override = {}) {
     return { a, b, atB, timer, outside: WO.isPress(a.p), copy: WO.isPress(Object.freeze({ ...a.p })) };
   })();
   ok('§2b r3 A PRESS IS MINTED PER REQUEST: two requests\' presses are two frozen {at, route, reqId} — each a press in its OWN chain across its awaits and timers; door A\'s press presented in door B\'s chain, outside any chain, or as a copy is NOT a press',
-    bound.a.p !== bound.b.p && Object.isFrozen(bound.a.p) && JSON.stringify(Object.keys(bound.a.p).sort()) === '["at","reqId","route","toJSON"]' && bound.a.p.route === 'POST /api/door-a' && bound.b.p.route === 'POST /api/door-b' && bound.a.p.reqId !== bound.b.p.reqId
+    bound.a.p !== bound.b.p && gateOf(Object.isFrozen(bound.a.p)) && JSON.stringify(Object.keys(bound.a.p).sort()) === '["at","reqId","route","toJSON"]' && bound.a.p.route === 'POST /api/door-a' && bound.b.p.route === 'POST /api/door-b' && bound.a.p.reqId !== bound.b.p.reqId
       && bound.a.mine === true && bound.b.mine === true && bound.timer === true && bound.atB.a === false && bound.atB.b === true && bound.outside === false && bound.copy === false && JSON.stringify({ p: bound.a.p }) === '{}',
     JSON.stringify({ a: bound.a.mine, b: bound.b.mine, atB: bound.atB, timer: bound.timer, outside: bound.outside, copy: bound.copy, routes: [bound.a.p.route, bound.b.p.route] }));
   // the r2 live view, re-planted: the HANDSHAKE's press kept on the viewer for every later Hand back on the socket
@@ -1467,13 +1467,13 @@ function pressCensus(override = {}) {
     .replace("v.expectWakes, pressOf(viewer.page, 'WS /api/browser/stream hand-back'));", 'v.expectWakes, viewer.pressed);');
   const m8 = pressCensus({ 'src/server/browser-stream.js': bsR2 });
   ok('§2b r3 CONTROL: e03ad393\'s live view (the HANDSHAKE\'s press kept on `viewer.pressed`, handed to every later Hand back) reads KEPT — and its door is no longer a per-message mint',
-    bsR2 !== bs && (bsR2.match(/viewer\.pressed\)/g) || []).length === 1 && m8.kept.some((k) => /browser-stream\.js/.test(k)) && m8.doors.some((d) => /browser-stream/.test(d.f) && !d.ok), JSON.stringify({ kept: m8.kept, doors: m8.doors.filter((d) => /browser-stream/.test(d.f)) }));
+    bsR2 !== bs && (bsR2.match(/viewer\.pressed\)/g) || []).length === 1 && gateOf(m8.kept.some((k) => /browser-stream\.js/.test(k))) && verdictOf(m8.doors.some((d) => /browser-stream/.test(d.f) && !d.ok)), JSON.stringify({ kept: m8.kept, doors: m8.doors.filter((d) => /browser-stream/.test(d.f)) }));
   // r4 CONTROL (accept-r3 claim 0, gap 2 — the acceptor's plant P7): the group door's press re-posted an hour later from a
   // timer armed IN the request's chain, and the same press bound into a setImmediate — each red BY NAME
   const p7 = ch.replace("    switch (req.params.verb) {\n      case 'post':", "    if (req.params.verb === 'post' && press) setTimeout(() => ge.post({ group, from: OWNER, pressed: press, text: String(b.text || ''), consent: ownerConsent(b) }), 3600e3);\n    if (req.params.verb === 'post' && press) setImmediate(ge.post.bind(ge, { group, from: OWNER, pressed: press, text: 'again', consent: ownerConsent(b) }));\n    switch (req.params.verb) {\n      case 'post':");
   const m9 = pressCensus({ 'src/routes/channels.js': p7 });
   ok('§2b r4 CONTROL: a press re-posted from a timer armed in the door\'s own chain (the acceptor\'s P7, an hour later) and one bound into a setImmediate each read REPLAYED, by name',
-    p7 !== ch && m9.replayed.length - PC.replayed.length === 2 && m9.replayed.some((x) => /channels\.js:\d+ .*setTimeout/.test(x)) && m9.replayed.some((x) => /channels\.js:\d+ .*setImmediate/.test(x)), JSON.stringify(m9.replayed));
+    p7 !== ch && m9.replayed.length - PC.replayed.length === 2 && gateOf(m9.replayed.some((x) => /channels\.js:\d+ .*setTimeout/.test(x))) && verdictOf(m9.replayed.some((x) => /channels\.js:\d+ .*setImmediate/.test(x))), JSON.stringify(m9.replayed));
   // THE ACCEPTED BLIND SPOT, NAMED (accept-r2 claim 1 (c)): a COMPUTED name — `WO['press' + 'Of']`, `o['press' + 'ed']` —
   // is no identifier the AST walk can follow; the grep beside it reads every server file for that spelling. (The brief's
   // `press\s*\+|\[['"]press` also matches four innocent lines — «Impress + the», `['press-allow'`, «press+release»,
@@ -1505,7 +1505,7 @@ function pressCensus(override = {}) {
     press.ok === true && press.attended === true && retry.ok === false && retry.why === 'hour-cap' && retry.retryAfter === at('2026-10-28T08:21:33Z'), JSON.stringify({ press: [press.ok, press.attended], retry: [retry.ok, retry.why] }));
   const others = Object.keys(A.SPEND_REASONS).filter((r) => A.SPEND_REASONS[r].turn && !A.SPEND_REASONS[r].attended);
   ok('§2b …every attended reason passes a full hour, every other turn reason is refused by it (' + others.length + ' gated)',
-    attended.every((r) => ask(A, r).ok === true) && others.every((r) => ask(A, r).why === 'hour-cap'));
+    gateOf(attended.every((r) => ask(A, r).ok === true)) && verdictOf(others.every((r) => ask(A, r).why === 'hour-cap')));
   const n = A.noteUnattendedSpend(full, { identity: who, at: now + 36000, reason: 'stash-handover' });
   ok('§2b …and the press is NEVER CHARGED: no stamp (30 stay 30), no 80 % notice — only the attended tally (1)',
     n.state.identities.k.length === 30 && n.state.instance.length === 30 && n.warn === null && n.state.attended.length === 1 && n.state.attended[0].reason === 'stash-handover');
@@ -1531,7 +1531,7 @@ function pressCensus(override = {}) {
   g.authorize({ reason: 'stash-retry', identity: who, cid: 'conv-1', now: now + 5 * 60e3 + 3000 });
   const spoke = lines.filter((l) => /^\[spend\] refused stash-retry/.test(l));
   ok('§2b R4: the refusal journal NAMES the conversation and SAYS what its 5-min dedupe swallowed (2 lines for 4 refusals, the second "(+2 more …)")',
-    r1.ok === false && spoke.length === 2 && spoke.every((l) => l.includes('for conversation conv-1')) && /\(\+2 more in the 5 min after the previous line\)$/.test(spoke[1]) && !/\(\+/.test(spoke[0]), JSON.stringify(spoke));
+    r1.ok === false && spoke.length === 2 && gateOf(spoke.every((l) => l.includes('for conversation conv-1'))) && gateOf(/\(\+2 more in the 5 min after the previous line\)$/.test(spoke[1])) && !/\(\+/.test(spoke[0]), JSON.stringify(spoke));
   // r2 (accept-r1: «(+N more)» was said only on the NEXT line — five refusals then silence journaled ONE line, the other
   // four never): a window that SWALLOWED refusals is FLUSHED when it ends, by ONE bounded timer (injected here)
   {
@@ -1545,20 +1545,20 @@ function pressCensus(override = {}) {
     for (const t of armed) t.fn();
     const flushed = lines2.filter((l) => /^\[spend\] refused stash-retry/.test(l));
     ok('§2b r2 R4: five refusals in a minute then SILENCE ⇒ the swallowed four are journaled when the 5-min window ends — «(+4 more in the last 5 min)», no sixth refusal needed (ONE bounded timer, armed for the window\'s end)',
-      before === 1 && timers.length === 1 && armed.length === 1 && armed[0].ms === 5 * 60e3 - 12000 && flushed.length === 2 && /\(\+4 more in the last 5 min\)$/.test(flushed[1]) && flushed[1].includes('for conversation conv-2'), JSON.stringify({ before, timers: timers.map((t) => t.ms), flushed }));
+      before === 1 && timers.length === 1 && armed.length === 1 && armed[0].ms === 5 * 60e3 - 12000 && flushed.length === 2 && gateOf(/\(\+4 more in the last 5 min\)$/.test(flushed[1])) && verdictOf(flushed[1].includes('for conversation conv-2')), JSON.stringify({ before, timers: timers.map((t) => t.ms), flushed }));
     g2.authorize({ reason: 'stash-retry', identity: who, cid: 'conv-2', now: now + 5 * 60e3 + 1000 });
     const after = lines2.filter((l) => /^\[spend\] refused stash-retry/.test(l));
     ok('§2b r2 R4 …and the next window\'s first refusal says no stale count (the flushed four are not said twice)', after.length === 3 && !/\(\+/.test(after[2]), JSON.stringify(after.slice(-1)));
   }
   const it = items[0];
   ok('§2b R2: the For-you refusal carries its words as STRUCTURE — the account, the cap and the next free slot as an INSTANT CLAUSE ({next:{at, key, gone}}, r2) — and its English line names the instant in UTC (Z), never a hub-zone clock',
-    !!it && it.i18n && it.i18n.text.params.account === 'acct-1' && it.i18n.text.params.cap === 30 && it.i18n.text.params.next && it.i18n.text.params.next.at === at('2026-10-28T08:21:33Z') && /\{next\}/.test(it.i18n.text.key)
-      && new RegExp('Next allowed after ' + isoZ(at('2026-10-28T08:21:33Z')) + '\\.').test(it.text) && !/\b(AM|PM)\b/.test(it.text), JSON.stringify(it && { text: it.text, i18n: it.i18n }));
+    !!it && gateOf(it.i18n) && it.i18n.text.params.account === 'acct-1' && it.i18n.text.params.cap === 30 && gateOf(it.i18n.text.params.next) && it.i18n.text.params.next.at === at('2026-10-28T08:21:33Z') && gateOf(/\{next\}/.test(it.i18n.text.key))
+      && gateOf(new RegExp('Next allowed after ' + isoZ(at('2026-10-28T08:21:33Z')) + '\\.').test(it.text)) && !/\b(AM|PM)\b/.test(it.text), JSON.stringify(it && { text: it.text, i18n: it.i18n }));
 
   // THE OWNER'S CHANNELS SEND: the adapter's reason follows a PERSON's decision (P.userDecidedSend), never the drafter alone
   const P = require(path.join(REPO, 'src/channel-policy.js'));
   ok('§2b userDecidedSend: the user composed it, or pressed Approve on it ⇒ attended; an agent\'s draft sent by POLICY ⇒ not',
-    P.userDecidedSend({ draftedBy: { kind: 'user' }, approvedBy: 'policy' }) && P.userDecidedSend({ draftedBy: { kind: 'agent', id: 'c' }, approvedBy: 'user' })
+    gateOf(P.userDecidedSend({ draftedBy: { kind: 'user' }, approvedBy: 'policy' })) && gateOf(P.userDecidedSend({ draftedBy: { kind: 'agent', id: 'c' }, approvedBy: 'user' }))
       && !P.userDecidedSend({ draftedBy: { kind: 'agent', id: 'c' }, approvedBy: 'policy' }) && !P.userDecidedSend(null) && !P.userDecidedSend({}));
   const sent = [];
   const ag = require(path.join(REPO, 'src/channels/agents.js')).create({ id: 'agents' }, { deliver: { deliverToConversation: async (cid, text, o) => { sent.push(o.spendReason); return { ok: true, lane: 'message' }; } } });
@@ -1567,7 +1567,7 @@ function pressCensus(override = {}) {
   await ag.send('conv-x', { text: 'hi', idemKey: 'p-2' });
   await ag.send('conv-x', { text: 'hi', idemKey: 'p-3', byUser: true });
   ok('§2b the Agents adapter sends a person\'s decision WITH its door\'s press as owner-channel-send (attended); a decision with no press (r2: a retry, a request with no page) and anything else as peer-message', JSON.stringify(sent) === JSON.stringify(['owner-channel-send', 'peer-message', 'peer-message']), JSON.stringify(sent));
-  ok('§2b …and the outbound engine hands the adapter that decision and the press on its ONE send line', /e\.adapter\.send\(p\.convId, \{[^\n]*\.\.\.files, byUser: P\.userDecidedSend\(p\), pressed, /.test(read('src/server/channels-outbound.js')));
+  ok('§2b …and the outbound engine hands the adapter that decision and the press on its ONE send line', verdictOf(/e\.adapter\.send\(p\.convId, \{[^\n]*\.\.\.files, byUser: P\.userDecidedSend\(p\), pressed, /.test(read('src/server/channels-outbound.js'))));
 
   // THE DOOR, LIVE: the REAL hand-over route over express — every bearer 403 by name, a cookie-less browser request reaches it
   const express = require(path.join(REPO, 'node_modules/express'));
@@ -1587,7 +1587,7 @@ function pressCensus(override = {}) {
   };
   const live = await drive(require(path.join(REPO, 'src/server/stash-handover.js')));
   ok('§2b the REAL hand-over door: vsst_, jbt_ and vsak_ bearers are each 403 agent_forbidden (a page header beside one changes nothing); the person\'s page (Sec-Fetch-Site same-origin) reaches the route (404 no_session)',
-    ['vsst', 'jbt', 'vsak', 'vsakPage'].every((k) => live[k].status === 403 && live[k].code === 'agent_forbidden') && live.none.status === 404 && live.none.code === 'no_session', JSON.stringify(live));
+    gateOf(['vsst', 'jbt', 'vsak', 'vsakPage'].every((k) => live[k].status === 403 && live[k].code === 'agent_forbidden')) && live.none.status === 404 && live.none.code === 'no_session', JSON.stringify(live));
   ok('§2b r2 AN ATTENDED DOOR IS A PERSON\'S DOOR: a header-less request (no bearer, no Origin, no Sec-Fetch-Site — a script on a sign-in-off instance) is 403 not_a_person, by name',
     live.bare.status === 403 && live.bare.code === 'not_a_person', JSON.stringify(live.bare));
   ok('§2b R4: a press refused for a reason that is NOT the ceiling is journaled ONCE per (conversation, code) per 5 min and counted in telemetry EVERY time (2 presses ⇒ 1 line, 2 events)',
@@ -1618,16 +1618,16 @@ console.log('\n§3 the guard: persisted counters, one journal line, one inbox it
   const r3 = g.authorize({ reason: 'auto-resume', session: S, sessionName: 'my conversation' });
   ok('§3 the third is refused by the hour cap', r3.ok === false && r3.why === 'hour-cap');
   ok('§3 the refusal reaches the JOURNAL once, naming the reason, the identity and the session',
-    logs.filter((l) => /refused auto-resume/.test(l)).length === 1 && /SUB-A/.test(logs.join('\n')) && /hour-cap/.test(logs.join('\n')), logs.join(' | '));
+    logs.filter((l) => /refused auto-resume/.test(l)).length === 1 && gateOf(/SUB-A/.test(logs.join('\n'))) && verdictOf(/hour-cap/.test(logs.join('\n'))), logs.join(' | '));
   g.authorize({ reason: 'auto-resume', session: S }); g.authorize({ reason: 'auto-resume', session: S });
   ok('§3 …and repeats inside the 5min floor stay out of the journal (the incident wrote ~150 identical cards)',
     logs.filter((l) => /refused auto-resume/.test(l)).length === 1);
   const refusals = inbox.filter((i) => /VibeSpace refused/.test(i.text));
   ok('§3 the refusal reaches the USER: exactly one "For you" item, in the accounts row, naming the ceiling',
-    refusals.length === 1 && refusals[0].key === 'accounts' && /cap 2/.test(refusals[0].text) && /2\/2 this hour/.test(refusals[0].detail), JSON.stringify(refusals[0] || inbox[0] || {}).slice(0, 220));
+    refusals.length === 1 && refusals[0].key === 'accounts' && gateOf(/cap 2/.test(refusals[0].text)) && verdictOf(/2\/2 this hour/.test(refusals[0].detail)), JSON.stringify(refusals[0] || inbox[0] || {}).slice(0, 220));
 
   g.flush();
-  ok('§3 the ledger is on disk', fs.existsSync(path.join(dataDir, 'spend-budget.json')));
+  ok('§3 the ledger is on disk', verdictOf(fs.existsSync(path.join(dataDir, 'spend-budget.json'))));
   const g2 = mk();  // ← A RESTART
   ok('§3 THE COUNTERS SURVIVE A RESTART (a release restart that hands the spenders a fresh hour is not a ceiling)',
     g2.authorize({ reason: 'auto-resume', session: S }).why === 'hour-cap');
@@ -1639,7 +1639,7 @@ console.log('\n§3 the guard: persisted counters, one journal line, one inbox it
   settings['spend.unattendedPerIdentityHour'] = 10;
   const g3 = mk();
   for (let i = 0; i < 8; i++) g3.note({ reason: 'stop-nudge', session: { id: 'sub-c' } });
-  ok('§3 the 80% notice is filed once, in the inbox, naming the budget', inbox.length === inbox0 + 1 && /8 of its 10 unattended turns/.test(inbox[inbox.length - 1].text), inbox[inbox.length - 1]?.text);
+  ok('§3 the 80% notice is filed once, in the inbox, naming the budget', inbox.length === inbox0 + 1 && verdictOf(/8 of its 10 unattended turns/.test(inbox[inbox.length - 1].text)), inbox[inbox.length - 1]?.text);
   const before = inbox.length;
   g3.note({ reason: 'stop-nudge', session: { id: 'sub-c' } });
   ok('§3 …and NOT again inside the same window', inbox.length === before);
@@ -1672,7 +1672,7 @@ console.log('\n§3b an oat-only subscription serves turns, so the ceiling must n
     // the shape the product actually spawns — the whole reason this matters
     let spawn = null; try { spawn = am.resolveForSpawn(OAT, 'claude'); } catch (e) { spawn = { err: e.message }; }
     ok('§3b the account is SPAWNABLE with no credential file (oatOnly ⇒ the token rides spawn env)',
-      spawn && spawn.oatOnly === true && !!spawn.localEnv?.CLAUDE_CODE_OAUTH_TOKEN, JSON.stringify(spawn).slice(0, 140));
+      gateOf(spawn) && spawn.oatOnly === true && !!spawn.localEnv?.CLAUDE_CODE_OAUTH_TOKEN, JSON.stringify(spawn).slice(0, 140));
 
     // THE ENGINE'S OWN READERS, both of them, on the same account
     const eng2 = engMod.create({
@@ -1707,9 +1707,9 @@ console.log('\n§3b an oat-only subscription serves turns, so the ceiling must n
     // WIRING PIN: the guard must be built with the ACCOUNT reader
     const engSrc = read('src/server/usage-pool-engine.js');
     ok('§3b WIRING: the guard is constructed with accountCredentialState, not memberLoginState',
-      /credentialStateOf: \(key\) => accountCredentialState\(key\)/.test(engSrc));
+      verdictOf(/credentialStateOf: \(key\) => accountCredentialState\(key\)/.test(engSrc)));
     ok('§3b …and memberLoginState is still what SLOT validation asks (the two questions stay two)',
-      /const st = memberLoginState\(linkedId\)/.test(engSrc));
+      verdictOf(/const st = memberLoginState\(linkedId\)/.test(engSrc)));
   }
 }
 
@@ -1731,7 +1731,7 @@ console.log('\n§3d the boot load prunes with the widest retention, not with lim
   const iSetup = srv.indexOf('setupPersistence({');
   const iReader = srv.indexOf('persistenceRouter.readSettings ? persistenceRouter.readSettings()');
   ok('§3d server.js builds the guard BEFORE the settings reader exists (the shape that makes this a defect)',
-    iEngine > 0 && iSetup > iEngine && iReader > 0 && /router\.readSettings\s*=/.test(read('src/routes/persistence.js')),
+    iEngine > 0 && iSetup > iEngine && iReader > 0 && verdictOf(/router\.readSettings\s*=/.test(read('src/routes/persistence.js'))),
     JSON.stringify({ engineAt: iEngine, setupAt: iSetup }));
 
   // The production boot shape: a reader that answers NOTHING until setup runs.
@@ -1817,13 +1817,13 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     const v2 = g.authorize({ reason: 'peer-message', identity: ID2, now: now + 1000 });
     const v3 = g.authorize({ reason: 'job-notification', identity: ID, now: now + 2000 });
     ok('§3f a TORN ledger refuses every unattended reason BY NAME, on every account (never «allowed on an empty count»)',
-      [v1, v2, v3].every((v) => v.ok === false && v.why === 'ledger-unreadable') && /could not be read \(not JSON\)/.test(v1.detail), JSON.stringify([v1.why, v2.why, v3.why, v1.detail]));
+      gateOf([v1, v2, v3].every((v) => v.ok === false && v.why === 'ledger-unreadable')) && verdictOf(/could not be read \(not JSON\)/.test(v1.detail)), JSON.stringify([v1.why, v2.why, v3.why, v1.detail]));
     const notes = inbox.filter((i) => i.origin === 'spend');
     ok('§3f …and the tray gets exactly ONE notice for the instance (not one per account), urgent, naming the file and its door',
-      notes.length === 1 && notes[0].key === 'accounts' && notes[0].urgency === 'high' && /spend-budget\.json could not be read \(not JSON\)/.test(notes[0].detail)
-        && notes[0].i18n && notes[0].i18n.door === 'ledger' && !/Unattended turns used/.test(notes[0].detail), JSON.stringify(notes.map((n) => [n.key, n.urgency, n.detail.slice(0, 120)])));
-    ok('§3f …and the journal says it at load, before any refusal', /^\[spend\] data\/spend-budget\.json could not be read \(not JSON\)/.test(logs[0] || ''), logs[0]);
-    ok('§3f …the snapshot says it (Diagnostics can read it)', g.snapshot().ledgerUnreadable && g.snapshot().ledgerUnreadable.error === 'not JSON');
+      notes.length === 1 && notes[0].key === 'accounts' && notes[0].urgency === 'high' && gateOf(/spend-budget\.json could not be read \(not JSON\)/.test(notes[0].detail))
+        && gateOf(notes[0].i18n) && notes[0].i18n.door === 'ledger' && !/Unattended turns used/.test(notes[0].detail), JSON.stringify(notes.map((n) => [n.key, n.urgency, n.detail.slice(0, 120)])));
+    ok('§3f …and the journal says it at load, before any refusal', verdictOf(/^\[spend\] data\/spend-budget\.json could not be read \(not JSON\)/.test(logs[0] || '')), logs[0]);
+    ok('§3f …the snapshot says it (Diagnostics can read it)', gateOf(g.snapshot().ledgerUnreadable) && g.snapshot().ledgerUnreadable.error === 'not JSON');
     const att = g.authorize({ reason: 'owner-channel-send', identity: ID, now: now + 3000 });
     ok('§3f a person\'s press is not refused — the ceiling never counts it, so an unreadable count cannot decide it', att.ok === true && att.attended === true, JSON.stringify(att.why));
     g.note({ reason: 'owner-channel-send', identity: ID, now: now + 3000 });
@@ -1843,29 +1843,29 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     const back = g.authorize({ reason: 'auto-resume', identity: ID, now: now + 70e3 });
     ok('§3f REPAIRED: the async re-read finds it — its two stamps count (2 this hour), the turn is allowed, the refusal ends',
       reread === true &&
-      back.ok === true && back.counts.hour === 2 && g.snapshot().ledgerUnreadable === null && /reads again/.test(logs.join('\n')), JSON.stringify({ ok: back.ok, why: back.why, hour: back.counts && back.counts.hour }));
+      back.ok === true && back.counts.hour === 2 && g.snapshot().ledgerUnreadable === null && verdictOf(/reads again/.test(logs.join('\n'))), JSON.stringify({ ok: back.ok, why: back.why, hour: back.counts && back.counts.hour }));
     ok('§3f …and the press made while it was unreadable is KEPT beside the file\'s stamps (a stamp is never dropped)',
       Object.values(g.snapshot().attended || {}).reduce((a, b) => a + (Number(b) || 0), 0) === 1, JSON.stringify(g.snapshot().attended));
     g.release({ hold: back.hold, now: now + 70e3 });
     g.flush();
-    ok('§3f …and from then on it is written as before', /"sub-a"/.test(fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8')) && fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8') !== TORN);
+    ok('§3f …and from then on it is written as before', gateOf(/"sub-a"/.test(fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8'))) && fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8') !== TORN);
     // (3) A DIRECTORY in its place (the panel's second scene): refused; removed by the owner ⇒ the count starts over
     const d3 = g3.authorize({ reason: 'stop-nudge', identity: ID, now });
     ok('§3f a DIRECTORY in the file\'s place refuses by name (EISDIR), and nothing is left beside it (no .tmp)',
-      d3.ok === false && d3.why === 'ledger-unreadable' && /EISDIR/.test(d3.detail), d3.detail);
+      d3.ok === false && d3.why === 'ledger-unreadable' && verdictOf(/EISDIR/.test(d3.detail)), d3.detail);
     g3.flush();
-    ok('§3f …the flush writes nothing (no rename onto the directory, no stranded .tmp)', fs.statSync(g3._file).isDirectory() && !fs.existsSync(g3._file + '.tmp'));
+    ok('§3f …the flush writes nothing (no rename onto the directory, no stranded .tmp)', gateOf(fs.statSync(g3._file).isDirectory()) && !fs.existsSync(g3._file + '.tmp'));
     fs.rmSync(g3._file, { recursive: true, force: true });
     await g3.recheckLedger();
     const d3b = g3.authorize({ reason: 'stop-nudge', identity: ID, now: Date.now() + 61e3 });
     ok('§3f REMOVED by the owner: past the bound the count starts over — allowed, said in the journal, and the file is written again',
-      d3b.ok === true && /was removed — the count starts over/.test(g3logs.join('\n')) && (g3.release({ hold: d3b.hold }), g3.flush(), fs.statSync(g3._file).isFile()), JSON.stringify({ why: d3b.why, logs: g3logs.slice(-2) }));
+      d3b.ok === true && gateOf(/was removed — the count starts over/.test(g3logs.join('\n'))) && verdictOf((g3.release({ hold: d3b.hold }), g3.flush(), fs.statSync(g3._file).isFile())), JSON.stringify({ why: d3b.why, logs: g3logs.slice(-2) }));
   }
   // (4) NOT A LEDGER: JSON that is no object — null, an array, a number — is unreadable too; NOTHING ON DISK is a fresh start
   for (const [label, text] of [['null', 'null'], ['an array', '[1,2]'], ['a number', '7'], ['an empty object', '{}'], ['a budget that is a string', '{"budget":"x"}'], ['a budget that is an array', '{"v":1,"budget":[]}']]) {
     const dir = world((f) => fs.writeFileSync(f, text));
     const v = mk(guardMod, dir, [], []).authorize({ reason: 'auto-resume', identity: ID, now });
-    ok(`§3f a file holding ${label} is no ledger — refused by name`, v.ok === false && v.why === 'ledger-unreadable' && /not a ledger object/.test(v.detail), v.why);
+    ok(`§3f a file holding ${label} is no ledger — refused by name`, v.ok === false && v.why === 'ledger-unreadable' && verdictOf(/not a ledger object/.test(v.detail)), v.why);
   }
   {   // ONE For-you item across restarts (its itemKey), and it is RESOLVED the moment the file reads again
     const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
@@ -1890,7 +1890,7 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     ok('§3f the notice is ONE For-you item across a restart (its own itemKey), and the file reading again RESOLVES it — never a stale «refused» standing for 6 h',
       open1.length === 1 && open2.length === 0, JSON.stringify({ open1: open1.length, open2: open2.length }));
     ok('§3f IT UN-STICKS BY ITSELF: while unreadable the guard arms its own re-read (one timer, LEDGER_RECHECK_MS, re-armed while still torn) — an idle hub recovers within a minute of the repair; a timer, so a clock that steps back changes nothing',
-      armed && rearmed && g.snapshot().ledgerUnreadable === null && timers.length === 0, JSON.stringify({ armed, rearmed, left: timers.length }));
+      gateOf(armed) && gateOf(rearmed) && g.snapshot().ledgerUnreadable === null && timers.length === 0, JSON.stringify({ armed, rearmed, left: timers.length }));
   }
   {   // (r2, the follow-up's read S4) A READ THAT NEVER SETTLES (a hung mount) never ends the self-recheck, and is never joined
     const runHung = async (mod) => {
@@ -1905,7 +1905,7 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     };
     const r = await runHung(guardMod);
     ok('§3f (r2) A READ THAT NEVER SETTLES: the self-recheck stays armed at every tick, and the read in flight is never joined by a second (a hung mount\'s threads are not piled up)',
-      r.every((x) => x.reads === 1 && x.armed === 1), JSON.stringify(r));
+      verdictOf(r.every((x) => x.reads === 1 && x.armed === 1)), JSON.stringify(r));
     const m = mutantModule('src/server/spend-guard.js', [['recheckTimer = schedule(() => { recheckTimer = null; recheckLedger().catch(() => false); if (unreadable) armRecheck(); }, LEDGER_RECHECK_MS);', 'recheckTimer = schedule(() => { recheckTimer = null; recheckLedger().catch(() => false).then(() => { if (unreadable) armRecheck(); }); }, LEDGER_RECHECK_MS);']]);
     ok('§3f (r2) CONTROL: the re-arm only after the read settled (the follow-up\'s first form) in a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
     if (!m.err) { const rm = await runHung(m.mod); ok('§3f (r2) CONTROL: with it, one read that never settles ENDS the self-recheck — no timer is left armed — RED', rm[0].armed === 0, JSON.stringify(rm)); }
@@ -1914,7 +1914,7 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     fs.mkdirSync(LF(dir, 'spend-budget.json'), { recursive: true });
     const gd = guardMod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => null, log: () => { }, schedule: () => null });
     await gd.recheckLedger();
-    ok('§3f (r2) the default re-read never opens what is not a regular file: it stays unreadable, named «not a regular file»', gd.snapshot().ledgerUnreadable && gd.snapshot().ledgerUnreadable.error === 'not a regular file', JSON.stringify(gd.snapshot().ledgerUnreadable));
+    ok('§3f (r2) the default re-read never opens what is not a regular file: it stays unreadable, named «not a regular file»', gateOf(gd.snapshot().ledgerUnreadable) && gd.snapshot().ledgerUnreadable.error === 'not a regular file', JSON.stringify(gd.snapshot().ledgerUnreadable));
   }
   {
     const dir = tmpdir('vs-spend-3f-none-');
@@ -1927,7 +1927,7 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     const dir = world((f) => fs.writeFileSync(f, '{"v":1,"budget":{"v":1,"identities":{},"instance":[],"notices":{}}}'));
     const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => null, log: () => { }, schedule: () => null, readLedgerSync: () => { throw Object.assign(new Error(code), { code }); } });
     const v = g.authorize({ reason: 'auto-resume', identity: ID, now });
-    ok(`§3f a file the hub may not read (${code}, through the read seam) refuses by name`, v.why === 'ledger-unreadable' && new RegExp(code).test(v.detail), v.detail);
+    ok(`§3f a file the hub may not read (${code}, through the read seam) refuses by name`, v.why === 'ledger-unreadable' && verdictOf(new RegExp(code).test(v.detail)), v.detail);
   }
   // (6) THE WORDS: rendered through the client's own renderer, en / zh / ja — no count line (there is none), the ledger door;
   // and the hand-over toast says it in words, never the bare `why`
@@ -1944,12 +1944,12 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     console.log('    en: ' + out.en.text + ' / ' + out.en.lines.join(' / '));
     const all = (o) => o.text + '\n' + o.lines.join('\n');
     ok('§3f the notice, en: the producer, the conversation, «could not be read», the ledger door (repair or remove) — and NO count line',
-      /the continue after a usage limit in «build-bot»: its record of turns nobody typed could not be read/.test(out.en.text) && /repair it, or remove it to start the count over/.test(all(out.en)) && !/Turns nobody typed:|0 of 30/.test(all(out.en)), all(out.en));
-    ok('§3f …in zh and ja, every line in the language (no MISSING)', ['zh', 'ja'].every((l) => !/MISSING/.test(all(out[l])) && /spend-budget\.json/.test(all(out[l]))) && /账本读不出来/.test(out.zh.text) && /記録を読めない/.test(out.ja.text), all(out.zh) + ' || ' + all(out.ja));
+      gateOf(/the continue after a usage limit in «build-bot»: its record of turns nobody typed could not be read/.test(out.en.text)) && gateOf(/repair it, or remove it to start the count over/.test(all(out.en))) && !/Turns nobody typed:|0 of 30/.test(all(out.en)), all(out.en));
+    ok('§3f …in zh and ja, every line in the language (no MISSING)', gateOf(['zh', 'ja'].every((l) => !/MISSING/.test(all(out[l])) && /spend-budget\.json/.test(all(out[l])))) && gateOf(/账本读不出来/.test(out.zh.text)) && verdictOf(/記録を読めない/.test(out.ja.text)), all(out.zh) + ' || ' + all(out.ja));
     const SSm = require(path.join(REPO, 'src/stash-summary.js'));
     const toast = (l) => SSm.handOverRefusalWords({ code: 'spend_refused', why: 'ledger-unreadable', identity: ID }, T[l], { now }).text;
     ok('§3f the hand-over toast says it in words (en / zh / ja), never «the spend ceiling refused this turn (ledger-unreadable)»',
-      /could not read its record of turns nobody typed/.test(toast('en')) && !/ledger-unreadable/.test(toast('en')) && ['zh', 'ja'].every((l) => !/MISSING/.test(toast(l))), toast('en'));
+      gateOf(/could not read its record of turns nobody typed/.test(toast('en'))) && !/ledger-unreadable/.test(toast('en')) && verdictOf(['zh', 'ja'].every((l) => !/MISSING/.test(toast(l)))), toast('en'));
   }
   // RED CONTROLS — patched copies of the real modules
   {   // the release's load: an unreadable file is an empty budget
@@ -2017,11 +2017,11 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     const inbox = [], logs = []; const g = mk(guardMod, dir, inbox, logs);
     const r = resets(inbox);
     ok('§3g a REMOVED ledger (its marker stands): ONE notice in the tray, urgent, its words and the count of resets; the journal says it',
-      r.length === 1 && r[0].key === 'accounts' && r[0].urgency === 'high' && /removed — the count started over/.test(r[0].text) && r[0].i18n && r[0].i18n.detail[0].params.n === 1
-        && logs.some((l) => /was removed — the count starts over \(this data folder has kept one since .*\); reset #1 of this record/.test(l)), JSON.stringify([r.map((x) => x.text), logs]));
+      r.length === 1 && r[0].key === 'accounts' && r[0].urgency === 'high' && gateOf(/removed — the count started over/.test(r[0].text)) && gateOf(r[0].i18n) && r[0].i18n.detail[0].params.n === 1
+        && verdictOf(logs.some((l) => /was removed — the count starts over \(this data folder has kept one since .*\); reset #1 of this record/.test(l))), JSON.stringify([r.map((x) => x.text), logs]));
     ok('§3g …the count starts over (the door kept: an unattended turn is allowed on a zero count)', g.authorize({ reason: 'auto-resume', identity: ID, now: t3g + 1000 }).ok === true);
     ok('§3g …COUNTED (the snapshot and the marker: reset #1, removed) and the record written at once — a restart reads it whole',
-      g.snapshot().ledgerResets === 1 && g.snapshot().ledgerLastReset && g.snapshot().ledgerLastReset.kind === 'removed' && fs.existsSync(LF(dir, 'spend-budget.json'))
+      g.snapshot().ledgerResets === 1 && gateOf(g.snapshot().ledgerLastReset) && g.snapshot().ledgerLastReset.kind === 'removed' && gateOf(fs.existsSync(LF(dir, 'spend-budget.json')))
         && JSON.parse(fs.readFileSync(LF(dir, 'spend-budget.born.json'), 'utf8')).resets === 1, JSON.stringify(g.snapshot().ledgerLastReset));
     const inbox2 = [], logs2 = []; mk(guardMod, dir, inbox2, logs2);
     ok('§3g …and the NEXT start is silent (a reset is said once, never at every boot)', resets(inbox2).length === 0 && !said(logs2), JSON.stringify(logs2));
@@ -2035,7 +2035,7 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     const inbox = [], logs = []; const g = mk(guardMod, dir, inbox, logs);
     const r = resets(inbox);
     ok('§3g an OLDER COPY put back (its seq below the marker\'s): ONE notice and the journal name it — reset #2',
-      r.length === 1 && /older copy/i.test(r[0].text) && r[0].i18n.detail[0].params.n === 2 && logs.some((l) => /OLDER copy \(write \d+ of \d+\).*reset #2/.test(l)), JSON.stringify([r.map((x) => x.text), logs]));
+      r.length === 1 && gateOf(/older copy/i.test(r[0].text)) && r[0].i18n.detail[0].params.n === 2 && verdictOf(logs.some((l) => /OLDER copy \(write \d+ of \d+\).*reset #2/.test(l))), JSON.stringify([r.map((x) => x.text), logs]));
     ok('§3g …COUNTED (reset #2, older), and the next write numbers above the marker', g.snapshot().ledgerResets === 2 && g.snapshot().ledgerLastReset.kind === 'older' && g.snapshot().ledgerSeq > 0, JSON.stringify(g.snapshot().ledgerLastReset));
   }
   // (4) RED: the load as before (ENOENT = nothing spent yet; the marker never read) — a removed ledger resets in silence
@@ -2077,7 +2077,7 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     fs.writeFileSync(LF(d4, 'spend-budget.json'), older);   // repaired from an older backup
     const back = await g.recheckLedger();
     ok('§3g a torn ledger REPAIRED FROM AN OLDER COPY: it reads again, and the older copy is SAID and COUNTED (the release\'s road was silent)',
-      back === true && resets(inbox).length === 1 && /older copy/i.test(resets(inbox)[0].text) && g.snapshot().ledgerLastReset.kind === 'older' && logs.some((l) => /OLDER copy \(write 1 of 2\)/.test(l)), JSON.stringify([back, resets(inbox).map((x) => x.text), logs.slice(-3)]));
+      back === true && resets(inbox).length === 1 && gateOf(/older copy/i.test(resets(inbox)[0].text)) && g.snapshot().ledgerLastReset.kind === 'older' && verdictOf(logs.some((l) => /OLDER copy \(write 1 of 2\)/.test(l))), JSON.stringify([back, resets(inbox).map((x) => x.text), logs.slice(-3)]));
   }
   // (7) A LEDGER WITH NO WRITE NUMBER that LACKS a turn the marker counted (a copy from before the marker, put back): its own words.
   //     B-ef83 (主开发 19:20Z: a reset notice only for a REAL loss): no number alone is no loss — §3h (2) holds the CURRENT one silent
@@ -2089,7 +2089,7 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     fs.writeFileSync(LF(d5, 'spend-budget.json'), JSON.stringify(L));
     const inbox = [], logs = []; const g = mk(guardMod, d5, inbox, logs);
     ok('§3g a ledger with NO WRITE NUMBER that lacks a turn its marker counted: said in its own words, counted, the notice filed',
-      resets(inbox).length === 1 && g.snapshot().ledgerLastReset.kind === 'unnumbered' && logs.some((l) => /carries no write number/.test(l)), JSON.stringify(logs));
+      resets(inbox).length === 1 && g.snapshot().ledgerLastReset.kind === 'unnumbered' && verdictOf(logs.some((l) => /carries no write number/.test(l))), JSON.stringify(logs));
   }
   // (8) AN UNREADABLE MARKER beside a readable ledger: said at load and HELD (the store-read law) — never set aside, never read as empty and written over
   {
@@ -2099,12 +2099,12 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     const inbox = [], logs = []; const g = mk(guardMod, d6, inbox, logs);
     g.note({ reason: 'auto-resume', identity: ID, now: t3g + 1000 }); g.flush();
     ok('§3g an UNREADABLE MARKER: said at load and HELD — after a write its bytes are its own (never set aside, never written over), the ledger still written',
-      logs.some((l) => /born\.json could not be read \(not JSON\) — it is held/.test(l)) && fs.readFileSync(LF(d6, 'spend-budget.born.json'), 'utf8') === '{"born":'
+      gateOf(logs.some((l) => /born\.json could not be read \(not JSON\) — it is held/.test(l))) && fs.readFileSync(LF(d6, 'spend-budget.born.json'), 'utf8') === '{"born":'
         && !fs.readdirSync(d6).some((f) => /born\.json\.(unreadable|corrupt)-/.test(f)) && JSON.parse(fs.readFileSync(LF(d6, 'spend-budget.json'), 'utf8')).seq > 1 && resets(inbox).length === 0, JSON.stringify(logs));
     fs.writeFileSync(LF(d6, 'spend-budget.born.json'), JSON.stringify({ born: t3g - 9e6, seq: 1, resets: 4 }));   // repaired
     g.note({ reason: 'auto-resume', identity: ID, now: t3g + 2000 }); g.flush();
     const M6 = JSON.parse(fs.readFileSync(LF(d6, 'spend-budget.born.json'), 'utf8'));
-    ok('§3g …once it reads again its history is adopted (resets 4, its birth) and it is written with this write\'s number', M6.resets === 4 && M6.born === t3g - 9e6 && M6.seq > 1 && logs.some((l) => /born\.json reads again/.test(l)), JSON.stringify(M6));
+    ok('§3g …once it reads again its history is adopted (resets 4, its birth) and it is written with this write\'s number', M6.resets === 4 && M6.born === t3g - 9e6 && M6.seq > 1 && verdictOf(logs.some((l) => /born\.json reads again/.test(l))), JSON.stringify(M6));
   }
   // (9) THE NOTICE OUTLIVES A RESTART: the store not there at boot (as on a hub: it is built later) — owed in the marker, filed at the next boot
   {
@@ -2115,7 +2115,7 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     const owed = JSON.parse(fs.readFileSync(LF(d7, 'spend-budget.born.json'), 'utf8')).noticeOwed;
     const inbox = []; mk(guardMod, d7, inbox, []);   // ← the restart, before any unattended turn
     ok('§3g a reset whose notice the store could not take (no store at boot): OWED in the marker, and the next boot files it',
-      gNo.snapshot().ledgerResets === 1 && owed && owed.kind === 'removed' && owed.n === 1 && resets(inbox).length === 1 && resets(inbox)[0].i18n.detail[0].params.n === 1
+      gNo.snapshot().ledgerResets === 1 && gateOf(owed) && owed.kind === 'removed' && owed.n === 1 && resets(inbox).length === 1 && resets(inbox)[0].i18n.detail[0].params.n === 1
         && !JSON.parse(fs.readFileSync(LF(d7, 'spend-budget.born.json'), 'utf8')).noticeOwed, JSON.stringify([owed, resets(inbox).length]));
   }
 }
@@ -2160,11 +2160,11 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     gA.note({ reason: 'notify', identity: ID, now: t3h + 1100 }); gA.flush();
     ok('§3h a LIVE HOLDER of data/spend-budget.lock (another process, its identity answering): every unattended turn is refused BY NAME (ledger-held-elsewhere), said once in For you (urgent, its own item) and the journal',
       vA.ok === false && vA.why === 'ledger-held-elsewhere' && inboxA.filter((i) => i.itemKey === guardMod.HELD_ITEM).length === 1 && inboxA.find((i) => i.itemKey === guardMod.HELD_ITEM).urgency === 'high'
-        && gA.snapshot().ledgerHeldBy && gA.snapshot().ledgerHeldBy.pid === kid.pid && logsA.some((l) => /kept by another VibeSpace process on this data folder \(pid \d+/.test(l)), JSON.stringify([vA.why, gA.snapshot().ledgerHeldBy, logsA.slice(0, 3)]));
+        && gateOf(gA.snapshot().ledgerHeldBy) && gA.snapshot().ledgerHeldBy.pid === kid.pid && verdictOf(logsA.some((l) => /kept by another VibeSpace process on this data folder \(pid \d+/.test(l))), JSON.stringify([vA.why, gA.snapshot().ledgerHeldBy, logsA.slice(0, 3)]));
     ok('§3h …this process NEVER writes the ledger nor its marker while held (their bytes after a note and a flush are the keeper\'s), and it judges no waiting frame (the keeper counted them — none pulled)',
       fs.readFileSync(LF(dA, 'spend-budget.json'), 'utf8') === before && fs.readFileSync(LF(dA, 'spend-budget.born.json'), 'utf8') === markerBefore && gA.waitingOverCap().length === 0
-        && logsA.some((l) => /not written by this process while another keeps it/.test(l)));
-    ok('§3h …and it asks again on its own (a timer of LOCK_RETRY_MS)', timers.some((t) => t.ms === guardMod.LOCK_RETRY_MS), JSON.stringify(timers.map((t) => t.ms)));
+        && verdictOf(logsA.some((l) => /not written by this process while another keeps it/.test(l))));
+    ok('§3h …and it asks again on its own (a timer of LOCK_RETRY_MS)', verdictOf(timers.some((t) => t.ms === guardMod.LOCK_RETRY_MS)), JSON.stringify(timers.map((t) => t.ms)));
     // (b) THE TAKEOVER: the keeper wrote its last record and ended — the lock is this process's, and the record the other kept IS the record
     // the keeper's LAST record: one more turn it counted (a stamp as it writes them, half a second after the first)
     const theirs = JSON.parse(before);
@@ -2177,7 +2177,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     const lockNow = JSON.parse(fs.readFileSync(LF(dA, 'spend-budget.lock'), 'utf8'));
     ok('§3h THE KEEPER ENDED: the lock is taken over (it names this process), the held item resolved, unattended turns allowed again — counted from the keeper\'s record PLUS the one noted meanwhile, never the file twice (3)',
       tookA === true && lockNow.pid === process.pid && gA.snapshot().ledgerHeldBy === null && vA2.ok === true && (vA2.counts ? vA2.counts.day === 3 : false)
-        && inboxA.find((i) => i.itemKey === guardMod.HELD_ITEM).status === 'done' && logsA.some((l) => /keeps data\/spend-budget\.json now \(the process that kept it, pid \d+, ended\)/.test(l)),
+        && inboxA.find((i) => i.itemKey === guardMod.HELD_ITEM).status === 'done' && verdictOf(logsA.some((l) => /keeps data\/spend-budget\.json now \(the process that kept it, pid \d+, ended\)/.test(l))),
       JSON.stringify([tookA, lockNow.pid, vA2.ok, vA2.counts, logsA.slice(-2)]));
     // (c) A RECYCLED NUMBER: a live pid whose identity is NOT the one the lock wrote — the lock is a dead one's: taken over at once, said
     const dC = tmpdir('vs-spend-3h-recycled-');
@@ -2187,7 +2187,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     const logsC = []; const gC = mk(guardMod, dC, [], logsC);
     ok('§3h a lock naming a LIVE pid with ANOTHER identity (the number given to another process): taken over at once, said — never a block for good',
       gC.snapshot().ledgerHeldBy === null && JSON.parse(fs.readFileSync(LF(dC, 'spend-budget.lock'), 'utf8')).pid === process.pid && gC.authorize({ reason: 'auto-resume', identity: ID, now: t3h }).ok === true
-        && logsC.some((l) => /named a process that is gone \(pid \d+/.test(l)), JSON.stringify(logsC.slice(0, 2)));
+        && verdictOf(logsC.some((l) => /named a process that is gone \(pid \d+/.test(l))), JSON.stringify(logsC.slice(0, 2)));
     // (d) A DEAD HOLDER (its process ended without its exit): taken over at once
     const dD = tmpdir('vs-spend-3h-dead-');
     const kidD = liveKid();
@@ -2206,7 +2206,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     const beatE = gE.lockAgain(t0E + guardMod.LOCK_STALE_MS + 5000);
     const tookE = gE.lockAgain(t0E + 2 * guardMod.LOCK_STALE_MS + 10000);   // silent past LOCK_STALE_MS of THIS clock since its last beat
     ok('§3h a lock of ANOTHER MACHINE is judged by its heartbeat on THIS clock: held while its mtime changes (an old timestamp from a slow clock still beats), taken over once it has not changed for LOCK_STALE_MS',
-      heldE && soonE === false && beatE === false && tookE === true && gE.snapshot().ledgerHeldBy === null, JSON.stringify([heldE, soonE, beatE, tookE]));
+      gateOf(heldE) && soonE === false && beatE === false && tookE === true && gE.snapshot().ledgerHeldBy === null, JSON.stringify([heldE, soonE, beatE, tookE]));
     // (f) THE KEEPER'S OWN HEARTBEAT finds a lock that no longer names it — it stops writing at once
     const dF = tmpdir('vs-spend-3h-lost-');
     const tF = [];
@@ -2243,7 +2243,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       const gI = mk(guardMod, dI, [], []);
       const heldI = gI.snapshot().ledgerHeldBy, vI = gI.authorize({ reason: 'auto-resume', identity: ID, now: t3h });
       fs.chmodSync(LF(dI, 'spend-budget.lock'), 0o644);
-      ok('§3h a lock that is there and CANNOT BE READ (another user\'s): held — refused by name, never set aside', !!heldI && vI.why === 'ledger-held-elsewhere' && fs.existsSync(LF(dI, 'spend-budget.lock')), JSON.stringify([heldI, vI.why]));
+      ok('§3h a lock that is there and CANNOT BE READ (another user\'s): held — refused by name, never set aside', !!heldI && vI.why === 'ledger-held-elsewhere' && verdictOf(fs.existsSync(LF(dI, 'spend-budget.lock'))), JSON.stringify([heldI, vI.why]));
     }
     // (l) THE LOCK REMOVED BY HAND while this process keeps the ledger: made again at the next heartbeat — its record is still the
     // record, never read again (no stamp counted twice)
@@ -2257,7 +2257,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     for (let i = 0; i < 200 && !fs.existsSync(LF(dL, 'spend-budget.lock')); i++) await new Promise((r) => setTimeout(r, 25));
     const vL = gL.authorize({ reason: 'auto-resume', identity: ID, now: t3h + 1000 });
     ok('§3h the lock REMOVED BY HAND while this process keeps the ledger: made again at the heartbeat, the count unchanged (1, never the file merged twice)',
-      !!beatL && fs.existsSync(LF(dL, 'spend-budget.lock')) && JSON.parse(fs.readFileSync(LF(dL, 'spend-budget.lock'), 'utf8')).pid === process.pid && vL.ok === true && vL.counts && vL.counts.day === 1, JSON.stringify([!!beatL, vL.ok, vL.counts]));
+      !!beatL && gateOf(fs.existsSync(LF(dL, 'spend-budget.lock'))) && JSON.parse(fs.readFileSync(LF(dL, 'spend-budget.lock'), 'utf8')).pid === process.pid && vL.ok === true && gateOf(vL.counts) && vL.counts.day === 1, JSON.stringify([!!beatL, vL.ok, vL.counts]));
 
     // ── B-ef83 SMALLS (round wfm9rn69h; the save itself is not moved, 主开发 r1293) ──
     // (b1) THE BOUND OF ONE RETRY against a live holder: ONE round of 5 synchronous calls on data/, counted on the fs module itself
@@ -2295,10 +2295,10 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     };
     const bm = await bootUnmade(guardMod);
     ok('§3h a lock the folder REFUSES at boot (EACCES) and nobody holds: the ledger is kept WITHOUT it (the release\'s road) — turns allowed, said by its code, asked again every LOCK_UNMADE_RETRY_MS',
-      bm.vM.ok === true && !!bm.un0 && bm.un0.error === 'EACCES' && bm.said && bm.retry, JSON.stringify({ ok: bm.vM.ok, why: bm.vM.why, un0: bm.un0, said: bm.said, retry: bm.retry }));
+      bm.vM.ok === true && !!bm.un0 && bm.un0.error === 'EACCES' && gateOf(bm.said) && verdictOf(bm.retry), JSON.stringify({ ok: bm.vM.ok, why: bm.vM.why, un0: bm.un0, said: bm.said, retry: bm.retry }));
     ok('§3h …the OWNER SEES it (r1648 (d)): ONE For-you item for the episode (its words translated by key) and the usage meter\'s state «unlocked»',
-      bm.items0 === 1 && bm.open0 === 1 && /counts turns nobody typed without the lock of their record/.test(String(bm.itemKey0)) && !!bm.note0 && bm.note0.state === 'unlocked' && bm.note0.error === 'EACCES', JSON.stringify({ items: bm.items0, open: bm.open0, key: bm.itemKey0, note: bm.note0 }));
-    ok('§3h …the folder lets it again: the retry MAKES the lock (this process\'s), said, its heartbeat follows, the episode\'s item CLOSES and the meter has nothing to say', bm.made && bm.un1 === null && bm.madeSaid && bm.beat && bm.closed && bm.note1 === null, JSON.stringify({ made: bm.made, un1: bm.un1, madeSaid: bm.madeSaid, beat: bm.beat, closed: bm.closed, note1: bm.note1 }));
+      bm.items0 === 1 && bm.open0 === 1 && gateOf(/counts turns nobody typed without the lock of their record/.test(String(bm.itemKey0))) && !!bm.note0 && bm.note0.state === 'unlocked' && bm.note0.error === 'EACCES', JSON.stringify({ items: bm.items0, open: bm.open0, key: bm.itemKey0, note: bm.note0 }));
+    ok('§3h …the folder lets it again: the retry MAKES the lock (this process\'s), said, its heartbeat follows, the episode\'s item CLOSES and the meter has nothing to say', gateOf(bm.made) && bm.un1 === null && gateOf(bm.madeSaid) && gateOf(bm.beat) && gateOf(bm.closed) && bm.note1 === null, JSON.stringify({ made: bm.made, un1: bm.un1, madeSaid: bm.madeSaid, beat: bm.beat, closed: bm.closed, note1: bm.note1 }));
     const redBoot = copyOf('    } else keepUnmade(lk.error, now0);\n', "    } else log(`[spend] data/spend-budget.lock could not be made (${lk.error}) — this process keeps the ledger without it`);\n", 'B-ef83 smalls: the release\'s boot road (never asked again)'); // stale-pins: kept — the RED plants the release's boot line
     ok('§3h CONTROL: the anchored copy (the release\'s boot road) is built', !redBoot.err, redBoot.err || '');
     if (!redBoot.err) { const br = await bootUnmade(redBoot); ok('§3h CONTROL: in that copy the refused lock is never asked again — never made, and the owner is told nothing (RED: a second process could take the lock and keep its own count)', !br.retry && !br.made && br.items0 === 0, JSON.stringify({ retry: br.retry, made: br.made, items: br.items0 })); }
@@ -2330,9 +2330,9 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     };
     const rn = await removedRefused(guardMod);
     ok('§3h the lock REMOVED while this process keeps the ledger and the folder REFUSES a new one: every unattended turn REFUSED by the TRUE reason (ledger-lock-unwritable, its code) — never «another process keeps it»; the meter says «refused»',
-      !!rn.vN && rn.vN.ok === false && rn.vN.why === 'ledger-lock-unwritable' && !!rn.unwritable && rn.unwritable.error === 'EACCES' && rn.unmade === null && rn.said && !rn.named && !!rn.noteN && rn.noteN.state === 'refused', JSON.stringify({ ok: rn.vN && rn.vN.ok, why: rn.vN && rn.vN.why, unwritable: rn.unwritable, unmade: rn.unmade, said: rn.said, named: rn.named, note: rn.noteN }));
-    ok('§3h …the snapshot names the hold\'s cause («lock-unwritable»), and a write while held says why it is not written — never «while another keeps it» (r1801 (2) (5))', rn.cause === 'lock-unwritable' && rn.writeSaid && !rn.writeWrong, JSON.stringify({ cause: rn.cause, writeSaid: rn.writeSaid, writeWrong: rn.writeWrong }));
-    ok('§3h …and it HEALS by itself: the folder writes again ⇒ the held retry takes the lock, the record read again (count 1), turns allowed — never held for ever', rn.healed && rn.vN2.ok === true && !!rn.vN2.counts && rn.vN2.counts.day === 1, JSON.stringify({ healed: rn.healed, ok: rn.vN2.ok, why: rn.vN2.why, counts: rn.vN2.counts }));
+      !!rn.vN && rn.vN.ok === false && rn.vN.why === 'ledger-lock-unwritable' && !!rn.unwritable && rn.unwritable.error === 'EACCES' && rn.unmade === null && gateOf(rn.said) && !rn.named && !!rn.noteN && rn.noteN.state === 'refused', JSON.stringify({ ok: rn.vN && rn.vN.ok, why: rn.vN && rn.vN.why, unwritable: rn.unwritable, unmade: rn.unmade, said: rn.said, named: rn.named, note: rn.noteN }));
+    ok('§3h …the snapshot names the hold\'s cause («lock-unwritable»), and a write while held says why it is not written — never «while another keeps it» (r1801 (2) (5))', rn.cause === 'lock-unwritable' && gateOf(rn.writeSaid) && !rn.writeWrong, JSON.stringify({ cause: rn.cause, writeSaid: rn.writeSaid, writeWrong: rn.writeWrong }));
+    ok('§3h …and it HEALS by itself: the folder writes again ⇒ the held retry takes the lock, the record read again (count 1), turns allowed — never held for ever', gateOf(rn.healed) && rn.vN2.ok === true && !!rn.vN2.counts && rn.vN2.counts.day === 1, JSON.stringify({ healed: rn.healed, ok: rn.vN2.ok, why: rn.vN2.why, counts: rn.vN2.counts }));
     const redLost = copyOf('      h = lk.holder || { lockUnwritable: lk.error };\n', '      h = lk.holder || { contended: true };\n', 'B-ef83 smalls: the release\'s lost-lock road'); // stale-pins: kept — the RED plants the release's lost-lock line
     ok('§3h CONTROL: the anchored copy (the release\'s lost-lock road) is built', !redLost.err, redLost.err || '');
     if (!redLost.err) { const lr = await removedRefused(redLost); ok('§3h CONTROL: in that copy the same scene refuses in the name of ANOTHER PROCESS nobody is (RED: ledger-held-elsewhere — the false name)', !!lr.vN && lr.vN.ok === false && lr.vN.why === 'ledger-held-elsewhere', JSON.stringify({ ok: lr.vN && lr.vN.ok, why: lr.vN && lr.vN.why })); }
@@ -2356,7 +2356,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     };
     const ho = heldGoneRefused(guardMod);
     ok('§3h HELD, then the holder is GONE and the folder refuses a new lock: STILL held, by the TRUE reason (ledger-lock-unwritable), said — never in the gone process\'s name',
-      ho.held0 && ho.kept === false && ho.vO.ok === false && ho.vO.why === 'ledger-lock-unwritable' && !!ho.unwritable && ho.unwritable.error === 'EACCES' && ho.causeO === 'lock-unwritable' && ho.said, JSON.stringify({ held0: ho.held0, kept: ho.kept, ok: ho.vO.ok, why: ho.vO.why, unwritable: ho.unwritable, said: ho.said }));
+      gateOf(ho.held0) && ho.kept === false && ho.vO.ok === false && ho.vO.why === 'ledger-lock-unwritable' && !!ho.unwritable && ho.unwritable.error === 'EACCES' && ho.causeO === 'lock-unwritable' && verdictOf(ho.said), JSON.stringify({ held0: ho.held0, kept: ho.kept, ok: ho.vO.ok, why: ho.vO.why, unwritable: ho.unwritable, said: ho.said }));
     ok('§3h …and it HEALS: the folder writes again ⇒ the next retry takes the lock and the keeper\'s record (count 1) — turns allowed', ho.healed === true && ho.vO2.ok === true && !!ho.vO2.counts && ho.vO2.counts.day === 1, JSON.stringify({ healed: ho.healed, ok: ho.vO2.ok, why: ho.vO2.why, counts: ho.vO2.counts }));
     const redHeld = copyOf('    if (!lk.took && lk.holder) { heldBy = { ...heldOf(lk.holder, now), since: heldBy ? heldBy.since : now, saidWrite: heldBy ? heldBy.saidWrite : false }; return false; }\n', '    if (!lk.took) { if (lk.holder) heldBy = { ...heldOf(lk.holder, now), since: heldBy ? heldBy.since : now, saidWrite: heldBy ? heldBy.saidWrite : false }; return false; }\n', 'B-ef83 smalls: the release\'s held retry'); // stale-pins: kept — the RED plants the release's held retry
     ok('§3h CONTROL: the anchored copy (the release\'s held retry) is built', !redHeld.err, redHeld.err || '');
@@ -2394,7 +2394,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       } finally { undo(); }
     };
     const bs = bootNoStore(guardMod);
-    ok('§3h THE MUST (r1801): the guard built BEFORE the For-you store — nothing filed then; the 60 s ask, the folder still refusing, files EXACTLY ONE item (a second ask none)', bs.before === 0 && bs.open === 1 && bs.still, JSON.stringify(bs));
+    ok('§3h THE MUST (r1801): the guard built BEFORE the For-you store — nothing filed then; the 60 s ask, the folder still refusing, files EXACTLY ONE item (a second ask none)', bs.before === 0 && bs.open === 1 && verdictOf(bs.still), JSON.stringify(bs));
     const redOrder = copyOf("    let ut = null; try { ut = getUserTodos(); } catch { ut = null; }\n    if (!ut || typeof ut.add !== 'function') return false;   // the store comes later in boot: the 60 s ask files it then\n", '    const ut = null;\n    unlockedFiled = true;\n', "B-ef83 r1801: the tip's order (the flag first)"); // stale-pins: kept — the RED plants the tip's order
     ok('§3h CONTROL: the anchored copy (the flag set before the filing) is built', !redOrder.err, redOrder.err || '');
     if (!redOrder.err) { const ro = bootNoStore(redOrder); ok('§3h CONTROL: in that copy the owner gets NO item at a real boot (RED: the flag set, nothing filed)', ro.open === 0, JSON.stringify(ro)); }
@@ -2408,7 +2408,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       const beatP = tP.find((x) => x.ms === guardMod.LOCK_BEAT_MS);
       if (beatP) beatP.fn();
       for (let i = 0; i < 200 && inP[0].status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
-      ok('§3h an EARLIER RUN\'s «kept without the lock» item CLOSES when a later boot makes the lock at once — at the first beat after the store answers (r1801 (4))', openAtBoot && inP[0].status !== 'open' && !!gP.snapshot() && gP.snapshot().ledgerHeldBy === null, JSON.stringify({ openAtBoot, status: inP[0].status }));
+      ok('§3h an EARLIER RUN\'s «kept without the lock» item CLOSES when a later boot makes the lock at once — at the first beat after the store answers (r1801 (4))', gateOf(openAtBoot) && inP[0].status !== 'open' && !!gP.snapshot() && gP.snapshot().ledgerHeldBy === null, JSON.stringify({ openAtBoot, status: inP[0].status }));
     }
     // ── r2047's FOLLOW (round wt5inp00k) ──
     // (m3) THREE OUTCOMES: an add that THROWS (a full list) sets no filed mark — the next 60 s ask files it (exactly one item)
@@ -2425,7 +2425,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       } finally { undo(); }
     };
     const bt = bootAddThrows(guardMod);
-    ok('§3h r2047 (1): the episode item\'s add THREW at the boot — no filed mark; the next 60 s ask files it: exactly ONE item', bt.after === 0 && bt.open === 1 && bt.unmade, JSON.stringify(bt));
+    ok('§3h r2047 (1): the episode item\'s add THREW at the boot — no filed mark; the next 60 s ask files it: exactly ONE item', bt.after === 0 && bt.open === 1 && verdictOf(bt.unmade), JSON.stringify(bt));
     const redThrow = copyOf("    if (!filed && !owedToRead) return false;   // the add threw: NOT filed — asked again at the next 60 s ask\n", '', "B-ef83 r2047 (1): a thrown add counted as filed"); // stale-pins: kept — the RED takes the third outcome out
     ok('§3h CONTROL: the anchored copy (a thrown add counted as filed) is built', !redThrow.err, redThrow.err || '');
     if (!redThrow.err) { const rt = bootAddThrows(redThrow); ok('§3h CONTROL: in that copy the owner gets NO item (RED: the thrown add marked filed)', rt.open === 0, JSON.stringify(rt)); }
@@ -2451,7 +2451,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       return { heldAtBoot, tookH2, statuses, status: inH2[0].status, closeSaid: logsH2.filter((l) => l.includes('could not close the inbox item')).length };
     };
     const h2 = await heldThenTake(guardMod);
-    ok('§3h r2047 (2): a boot that started HELD takes the lock later — an earlier run\'s «kept without the lock» item CLOSES at the next beat', h2.heldAtBoot && h2.tookH2 === true && h2.status !== 'open', JSON.stringify(h2));
+    ok('§3h r2047 (2): a boot that started HELD takes the lock later — an earlier run\'s «kept without the lock» item CLOSES at the next beat', gateOf(h2.heldAtBoot) && h2.tookH2 === true && h2.status !== 'open', JSON.stringify(h2));
     const redTake = copyOf("    unlockedCloseOwed = true;   // r2047 (2): a boot that started HELD takes the lock — an earlier run's «kept without the lock» item is no longer true\n", '', "B-ef83 r2047 (2): the takeover owes no close"); // stale-pins: kept — the RED takes the takeover's owed close out
     ok('§3h CONTROL: the anchored copy (the takeover owes no close) is built', !redTake.err, redTake.err || '');
     if (!redTake.err) { const r2 = await heldThenTake(redTake); ok('§3h CONTROL: in that copy the earlier run\'s item stays OPEN after the beat (RED: the takeover\'s owed close taken out)', r2.tookH2 === true && r2.status === 'open', JSON.stringify(r2)); }
@@ -2475,10 +2475,10 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       return { heldNow, stillOpen, retry: !!retryL3, status: inL3[0].status };
     };
     const l3 = await lostBeforeStore(guardMod);
-    ok('§3h r2047 (2): the lock LOST before the store answered (another process took it) — the HELD retry closes the earlier run\'s item once the store answers', l3.heldNow && l3.stillOpen && l3.retry && l3.status !== 'open', JSON.stringify(l3));
+    ok('§3h r2047 (2): the lock LOST before the store answered (another process took it) — the HELD retry closes the earlier run\'s item once the store answers', gateOf(l3.heldNow) && gateOf(l3.stillOpen) && gateOf(l3.retry) && l3.status !== 'open', JSON.stringify(l3));
     const redRetry = copyOf('lockAgain(); if (unlockedCloseOwed && closeItemsNow(UNLOCKED_ITEM)) unlockedCloseOwed = false; if (heldBy) armLockRetry(); }', 'lockAgain(); if (heldBy) armLockRetry(); }', "B-ef83 r2047 (2): the held retry closes nothing"); // stale-pins: kept — the RED takes the held retry's close out
     ok('§3h CONTROL: the anchored copy (the held retry closes nothing) is built', !redRetry.err, redRetry.err || '');
-    if (!redRetry.err) { const r3 = await lostBeforeStore(redRetry); ok('§3h CONTROL: in that copy the earlier run\'s item stays OPEN after the held retry (RED: the retry\'s close taken out)', r3.heldNow && r3.retry && r3.status === 'open', JSON.stringify(r3)); }
+    if (!redRetry.err) { const r3 = await lostBeforeStore(redRetry); ok('§3h CONTROL: in that copy the earlier run\'s item stays OPEN after the held retry (RED: the retry\'s close taken out)', gateOf(r3.heldNow) && gateOf(r3.retry) && r3.status === 'open', JSON.stringify(r3)); }
     // round w7yapjt1r: a list that stays FULL (the add keeps throwing) — the episode's failure said ONCE, however many 60 s asks
     const addAlwaysThrows = (mod) => {
       const dF = tmpdir('vs-spend-3h-unmade-full-');
@@ -2493,7 +2493,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       } finally { undo(); }
     };
     const af = addAlwaysThrows(guardMod);
-    ok('§3h w7yapjt1r: a list that stays FULL — three 60 s asks, the failure said ONCE in the journal (the first of the episode), no item', af.asks === 3 && af.said === 1 && af.items === 0 && af.unmade, JSON.stringify(af));
+    ok('§3h w7yapjt1r: a list that stays FULL — three 60 s asks, the failure said ONCE in the journal (the first of the episode), no item', af.asks === 3 && af.said === 1 && af.items === 0 && verdictOf(af.unmade), JSON.stringify(af));
     const redSaid = copyOf("      if (itemKey !== UNLOCKED_ITEM || !unlockedFailSaid) log('[spend] could not file the inbox item: ' + e.message);\n", "      log('[spend] could not file the inbox item: ' + e.message);\n", "B-ef83 w7yapjt1r: every failed ask said"); // stale-pins: kept — the RED says every failure, as the release did
     ok('§3h CONTROL: the anchored copy (every failed ask said) is built', !redSaid.err, redSaid.err || '');
     if (!redSaid.err) { const rf = addAlwaysThrows(redSaid); ok('§3h CONTROL: in that copy the journal says it at the boot\'s try AND at every ask (RED: one line a minute for the whole episode)', rf.asks === 3 && rf.said >= rf.asks && rf.said > af.said, JSON.stringify({ red: rf, guard: af })); }
@@ -2551,11 +2551,11 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     };
     const ur = await unreadableBehindRefused(guardMod);
     ok('§3h a lock THERE and UNREADABLE behind a folder that refuses the temp write: HELD (it may be a live keeper\'s) by THAT reason — ledger-lock-unreadable, the snapshot\'s cause, the meter «unreadable», the journal\'s words — never «another process (pid ?)» (r1801 (1))',
-      ur.v.ok === false && ur.v.why === 'ledger-lock-unreadable' && ur.cause === 'lock-unreadable' && !!ur.note && ur.note.state === 'unreadable' && ur.said && !ur.named, JSON.stringify({ ok: ur.v.ok, why: ur.v.why, cause: ur.cause, note: ur.note, said: ur.said, named: ur.named }));
+      ur.v.ok === false && ur.v.why === 'ledger-lock-unreadable' && ur.cause === 'lock-unreadable' && !!ur.note && ur.note.state === 'unreadable' && gateOf(ur.said) && !ur.named, JSON.stringify({ ok: ur.v.ok, why: ur.v.why, cause: ur.cause, note: ur.note, said: ur.said, named: ur.named }));
     ok('§3h …and it HEALS: the lock reads again (a process that ended) ⇒ the retry takes it over, turns allowed', ur.healed === true && ur.v2.ok === true, JSON.stringify({ healed: ur.healed, ok: ur.v2.ok, why: ur.v2.why }));
     const redUnread = copyOf(", ...(cannot ? { lockUnreadable: String(e2.code || 'unreadable') } : {}) } }; }", ' } }; }', "B-ef83 r1801 (1): the unreadable lock with no cause of its own"); // stale-pins: kept — the RED plants the tip's unnamed hold
     ok('§3h CONTROL: the anchored copy (no cause for the unreadable lock) is built', !redUnread.err, redUnread.err || '');
-    if (!redUnread.err) { const uu = await unreadableBehindRefused(redUnread); ok('§3h CONTROL: in that copy the hold is said in the name of ANOTHER PROCESS (pid ?) (RED: the false name)', uu.v.ok === false && uu.v.why === 'ledger-held-elsewhere' && uu.named, JSON.stringify({ why: uu.v.why, named: uu.named })); }
+    if (!redUnread.err) { const uu = await unreadableBehindRefused(redUnread); ok('§3h CONTROL: in that copy the hold is said in the name of ANOTHER PROCESS (pid ?) (RED: the false name)', uu.v.ok === false && uu.v.why === 'ledger-held-elsewhere' && verdictOf(uu.named), JSON.stringify({ why: uu.v.why, named: uu.named })); }
 
     // ── THE LAW: A RESET NOTICE ONLY FOR A REAL LOSS ──
     // (1) A CRASH BETWEEN THE BOOT'S TWO WRITES, both orders. A: the marker (the reset said, the count restarted) landed, the
@@ -2570,7 +2570,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     fs.rmSync(LF(d1, 'spend-budget.json'));   // ← the crash: the reset's marker is on disk, the ledger's write never landed
     const in1b = [], lg1b = []; const g1b = mk(guardMod, d1, in1b, lg1b);
     ok('§3h (1) CRASH, order A (the marker landed, the ledger did not): the next boot says NOTHING — no second notice, still reset #1',
-      resets(in1b).length === 0 && !said(lg1b) && g1b.snapshot().ledgerResets === 1 && lg1b.some((l) => /was removed — the count starts over; its marker records no turn nobody typed that still counts/.test(l)), JSON.stringify(lg1b));
+      resets(in1b).length === 0 && !said(lg1b) && g1b.snapshot().ledgerResets === 1 && verdictOf(lg1b.some((l) => /was removed — the count starts over; its marker records no turn nobody typed that still counts/.test(l))), JSON.stringify(lg1b));
     const redGone = copyOf("    if (marker && A.countLost(marker.counted, null, now)) { ledgerReset('removed', facts, now); return true; }", "    if (marker) { ledgerReset('removed', facts, now); return true; }", 'B-ef83: the release\'s rule (a marker beside no ledger = removed)');
     if (!redGone.err) {
       const d1r = tmpdir('vs-spend-3h-crashA-red-');
@@ -2597,7 +2597,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     const in2 = [], lg2 = []; const g2 = mk(guardMod, d2, in2, lg2);
     g2.note({ reason: 'auto-resume', identity: ID, now: t3h + 2000 }); g2.flush();
     ok('§3h (2) a DOWNGRADE and back (no write number, but every counted turn in it): SILENT — no notice, no reset; the journal says it, and it is numbered on',
-      resets(in2).length === 0 && !said(lg2) && g2.snapshot().ledgerResets === 0 && lg2.some((l) => /carries no write number .* every turn nobody typed that still counts is in it: nothing is lost/.test(l))
+      resets(in2).length === 0 && !said(lg2) && g2.snapshot().ledgerResets === 0 && gateOf(lg2.some((l) => /carries no write number .* every turn nobody typed that still counts is in it: nothing is lost/.test(l)))
         && JSON.parse(fs.readFileSync(LF(d2, 'spend-budget.json'), 'utf8')).seq > JSON.parse(M2).seq, JSON.stringify(lg2));
     const redNum = copyOf("    if (A.countLost(marker.counted, raw.budget || raw, now)) {", "    if (fileSeq === null || fileSeq < marker.seq || A.countLost(marker.counted, raw.budget || raw, now)) {", 'B-ef83: the release\'s rule (the write number decides)');
     if (!redNum.err) {
@@ -2614,7 +2614,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     fs.writeFileSync(LF(d3, 'spend-budget.born.json'), JSON.stringify({ born: t3h - 9e6, seq: 99, resets: 0 }));   // repaired by hand: a guess
     const in3 = [], lg3 = []; const g3 = mk(guardMod, d3, in3, lg3);
     ok('§3h (3) a MARKER REPAIRED BY HAND (write 2 of a guessed 99, no count recorded): SILENT — the journal says it proves no loss',
-      resets(in3).length === 0 && !said(lg3) && lg3.some((l) => /is write \d+ of 99 — its marker records no count to compare: nothing is lost/.test(l)), JSON.stringify(lg3));
+      resets(in3).length === 0 && !said(lg3) && verdictOf(lg3.some((l) => /is write \d+ of 99 — its marker records no count to compare: nothing is lost/.test(l))), JSON.stringify(lg3));
     if (!redNum.err) {
       const d3r = tmpdir('vs-spend-3h-repaired-red-');
       fs.writeFileSync(LF(d3r, 'spend-budget.json'), fs.readFileSync(LF(d3, 'spend-budget.json'), 'utf8'));
@@ -2630,13 +2630,13 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     fs.rmSync(LF(dN, 'spend-budget.json'));
     const inN = []; mk(guardMod, dN, inN, []);
     ok('§3h (END) the reset\'s notice carries its END: the instant its last lost turn stops counting (a day past it)',
-      resets(inN).length === 1 && MN.counted && resets(inN)[0].expiresAt === MN.counted.until && MN.counted.until === lastStampT3h + 24 * 3600e3, JSON.stringify([MN.counted, resets(inN)[0] && resets(inN)[0].expiresAt]));
+      resets(inN).length === 1 && gateOf(MN.counted) && resets(inN)[0].expiresAt === MN.counted.until && MN.counted.until === lastStampT3h + 24 * 3600e3, JSON.stringify([MN.counted, resets(inN)[0] && resets(inN)[0].expiresAt]));
     const dN2 = tmpdir('vs-spend-3h-end2-');
     fs.writeFileSync(LF(dN2, 'spend-budget.born.json'), JSON.stringify({ born: t3h - 9e7, seq: 3, resets: 1, noticeOwed: { kind: 'removed', n: 1, at: t3h - 9e7, until: t3h - 1000 } }));
     fs.writeFileSync(LF(dN2, 'spend-budget.json'), JSON.stringify({ v: 1, seq: 3, budget: { v: 1, identities: {}, instance: [], notices: {}, attended: [] } }));
     const inN2 = [], lgN2 = []; mk(guardMod, dN2, inN2, lgN2);
     ok('§3h (END) a notice OWED past its end (the store never took it in time) is not filed — untrue by then — and is cleared from the marker',
-      resets(inN2).length === 0 && !JSON.parse(fs.readFileSync(LF(dN2, 'spend-budget.born.json'), 'utf8')).noticeOwed && lgN2.some((l) => /no longer said — the turns it lost no longer count/.test(l)), JSON.stringify(lgN2));
+      resets(inN2).length === 0 && !JSON.parse(fs.readFileSync(LF(dN2, 'spend-budget.born.json'), 'utf8')).noticeOwed && verdictOf(lgN2.some((l) => /no longer said — the turns it lost no longer count/.test(l))), JSON.stringify(lgN2));
   } finally {
     for (const c of kids) { try { c.stdin.end(); } catch { } try { if (c.exitCode === null && !c.signalCode) c.kill('SIGKILL'); } catch { } }
   }
@@ -2736,7 +2736,7 @@ if (!probe) {
     const atSleep = wh.fired.length, firing = !!sh._arFiring;
     open(); await wh.settled();
     ok('§4 r2988 THE WAIT IS THE FIRE\'S OWN STATE: a pre-fire gate held past the old fixed 80 ms — that sleep reads NO continue while the gate is in flight (the whole gate\'s sighting, made by a held promise); the wait on the fire\'s state reads it delivered ONCE',
-      atSleep === 0 && firing && wh.fired.length === 1 && !sh._arFiring, { atSleep, firing, fired: wh.fired.map((f) => f.id) });
+      atSleep === 0 && gateOf(firing) && wh.fired.length === 1 && !sh._arFiring, { atSleep, firing, fired: wh.fired.map((f) => f.id) });
   }
   // the loop breaker itself would allow a TIMED fire for a different arm, so
   // this next one is refused by the CEILING and by nothing else
@@ -2747,7 +2747,7 @@ if (!probe) {
   ok('§4 THE CEILING refuses it: the identity has spent its hour', w.fired.length === 1, JSON.stringify(w.fired.map((f) => f.id)));
   ok('§4 …and the PROMISE is kept: the session is still armed, so a later hour continues it', !!w.ar._armed.get('sess-2-2'));
   ok('§4 …and the refusal reached the user through the guard, not through a second card class',
-    w.inbox.some((i) => /refused/.test(i.text) && /hour/.test(i.detail || '')) && !w.notes.some((n) => /预算/.test(n.text)), JSON.stringify(w.inbox.map((i) => i.text)));
+    gateOf(w.inbox.some((i) => /refused/.test(i.text) && /hour/.test(i.detail || ''))) && !w.notes.some((n) => /预算/.test(n.text)), JSON.stringify(w.inbox.map((i) => i.text)));
 
   // the budget on disk counts exactly the delivered turn
   w.eng.spendGuard.flush();
@@ -2820,17 +2820,17 @@ console.log('\n§4b a continue that is not delivered gives its hold back (failed
     return r;
   }
   const fs1 = await failedSendLeg(arMod);
-  ok('§4b FAILED SEND: nothing was delivered (the channel refused the continue)', fs1.notDelivered, JSON.stringify(fs1));
+  ok('§4b FAILED SEND: nothing was delivered (the channel refused the continue)', verdictOf(fs1.notDelivered), JSON.stringify(fs1));
   ok('§4b …the hold was GIVEN BACK (the guard holds nothing open)', fs1.holdsOpen === 0, JSON.stringify(fs1));
-  ok('§4b …the session is STILL ARMED ("will retry" is a promise that stands)', fs1.stillArmed, JSON.stringify(fs1));
+  ok('§4b …the session is STILL ARMED ("will retry" is a promise that stands)', verdictOf(fs1.stillArmed), JSON.stringify(fs1));
   ok('§4b …and the SAME slot, at an hour cap of ONE, authorizes the retry — which lands and is charged once',
-    fs1.refired && fs1.charged === 1, JSON.stringify(fs1));
+    gateOf(fs1.refired) && fs1.charged === 1, JSON.stringify(fs1));
   const nv = await noVerbLeg(arMod);
-  ok('§4b NO VERB: the session armed while its harness had a verb', nv.armedOk, JSON.stringify(nv));
-  ok('§4b …nothing was delivered when the verb was gone at fire time', nv.notDelivered, JSON.stringify(nv));
+  ok('§4b NO VERB: the session armed while its harness had a verb', verdictOf(nv.armedOk), JSON.stringify(nv));
+  ok('§4b …nothing was delivered when the verb was gone at fire time', verdictOf(nv.notDelivered), JSON.stringify(nv));
   ok('§4b …the hold was GIVEN BACK (the guard holds nothing open)', nv.holdsOpen === 0, JSON.stringify(nv));
-  ok('§4b …the arm is dropped (no verb = a promise nobody can keep; the shipped exit disarms)', nv.disarmed, JSON.stringify(nv));
-  ok('§4b …and a second arm + fire on the SAME slot, at an hour cap of ONE, still authorizes and lands', nv.refired, JSON.stringify(nv));
+  ok('§4b …the arm is dropped (no verb = a promise nobody can keep; the shipped exit disarms)', verdictOf(nv.disarmed), JSON.stringify(nv));
+  ok('§4b …and a second arm + fire on the SAME slot, at an hour cap of ONE, still authorizes and lands', verdictOf(nv.refired), JSON.stringify(nv));
 
   // NEGATIVE CONTROLS: each exit's own `giveBack();` removed in a patched copy
   const legFails = (r) => !(r.holdsOpen === 0 && r.refired);
@@ -2838,7 +2838,7 @@ console.log('\n§4b a continue that is not delivered gives its hold back (failed
   ok('§4b CONTROL: the failed-send patch applies to the real file (a needle that misses would pass by doing nothing)', !mSend.err, mSend.err);
   if (mSend.mod) {
     const r = await failedSendLeg(mSend.mod);
-    ok('§4b CONTROL: with the failed-send giveBack() removed the leg FAILS (the hold stays booked, the retry is refused)', legFails(r) && r.holdsOpen === 1 && !r.refired, JSON.stringify(r));
+    ok('§4b CONTROL: with the failed-send giveBack() removed the leg FAILS (the hold stays booked, the retry is refused)', gateOf(legFails(r)) && r.holdsOpen === 1 && !r.refired, JSON.stringify(r));
     const other = await noVerbLeg(mSend.mod);
     ok('§4b CONTROL: …and that patch leaves the no-verb leg green (each leg pins its OWN exit)', !legFails(other), JSON.stringify(other));
   }
@@ -2846,7 +2846,7 @@ console.log('\n§4b a continue that is not delivered gives its hold back (failed
   ok('§4b CONTROL: the no-verb patch applies to the real file', !mVerb.err, mVerb.err);
   if (mVerb.mod) {
     const r = await noVerbLeg(mVerb.mod);
-    ok('§4b CONTROL: with the no-verb giveBack() removed the leg FAILS (the hold stays booked, the second arm is refused)', legFails(r) && r.holdsOpen === 1 && !r.refired, JSON.stringify(r));
+    ok('§4b CONTROL: with the no-verb giveBack() removed the leg FAILS (the hold stays booked, the second arm is refused)', gateOf(legFails(r)) && r.holdsOpen === 1 && !r.refired, JSON.stringify(r));
     const other = await failedSendLeg(mVerb.mod);
     ok('§4b CONTROL: …and that patch leaves the failed-send leg green', !legFails(other), JSON.stringify(other));
   }
@@ -2874,7 +2874,7 @@ console.log('\n§5 the delivery ladder: a refusal stashes, an allowed delivery i
   const r1 = await deliver.deliverToConversation('cid-1', 'hello', { spendReason: 'job-notification' });
   ok('§5 the first Background Work notification is delivered live', r1.ok === true && posted.length === 1, JSON.stringify(r1));
   const r2 = await deliver.deliverToConversation('cid-1', 'hello again', { spendReason: 'job-notification' });
-  ok('§5 the second is REFUSED by the ceiling, with a reason the caller can read', r2.ok === false && r2.refused === 'spend' && /spend budget/.test(r2.reason), JSON.stringify(r2));
+  ok('§5 the second is REFUSED by the ceiling, with a reason the caller can read', r2.ok === false && r2.refused === 'spend' && verdictOf(/spend budget/.test(r2.reason)), JSON.stringify(r2));
   ok('§5 …and nothing was posted for it (the CLI never saw a frame)', posted.length === 1);
   // NOTHING IS LOST: the caller stashes, and the stash is what the next
   // injection drains — the same words, riding a turn that was going to happen.
@@ -2884,7 +2884,7 @@ console.log('\n§5 the delivery ladder: a refusal stashes, an allowed delivery i
   // lane notify-retry (2026-10-01): between the ok branch and the stash there is now the PARKED branch — a transient
   // miss on a live pid the ladder keeps (and retries under the SAME authorization); every other not-ok answer stashes
   ok('§5 the jobs engine stashes exactly this shape on a not-ok answer (source pin at the caller: ok → parked → stashed)',
-    /if \(r && r\.ok\) \{[\s\S]{0,400}\} else if \(r && r\.parked === true\) \{[\s\S]{0,2000}\} else \{\s*\n\s*this\._stashNotif\(cid, job, ev,/.test(read('src/jobs.js')));
+    verdictOf(/if \(r && r\.ok\) \{[\s\S]{0,400}\} else if \(r && r\.parked === true\) \{[\s\S]{0,2000}\} else \{\s*\n\s*this\._stashNotif\(cid, job, ev,/.test(read('src/jobs.js'))));
   const led = guard.snapshot();
   ok('§5 the ledger charged the delivered one ONLY', (led.budget.identities['sub-a'] || []).length === 1, JSON.stringify(led.budget.identities));
 }
@@ -3024,7 +3024,7 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
       const rs = [];
       for (let i = 0; i < 8; i++) { const r = await L.deliver.deliverToConversation('cid-r', 'wake ' + i, { kind: 'peer', spendReason: 'peer-message' }); rs.push(r); if (r.ok) { L.deliver.noteQueueItems('cid-r', L.frames.map((_, k) => ({ id: 'q' + k }))); L.deliver.settleRpcDelivery('cid-r', { ok: true, mode: 'queued' }); } }
       ok('§5c THE CEILING: cap 3, a conversation in a turn — sends 1 to 3 queued, sends 4 and on REFUSED at the send by name (the hour cap), 3 frames written',
-        rs.slice(0, 3).every((r) => r.ok && r.queued) && rs.slice(3).every((r) => !r.ok && r.refused === 'spend' && r.why === 'hour-cap') && L.frames.length === 3, JSON.stringify(rs.map((r) => r.ok ? 'Q' : r.why)));
+        gateOf(rs.slice(0, 3).every((r) => r.ok && r.queued)) && gateOf(rs.slice(3).every((r) => !r.ok && r.refused === 'spend' && r.why === 'hour-cap')) && L.frames.length === 3, JSON.stringify(rs.map((r) => r.ok ? 'Q' : r.why)));
       ok('§5c …the hour reads 3 while they wait', L.hour() === 3);
       for (const left of [['q1', 'q2'], ['q2'], []]) { L.deliver.noteTurnEnded('cid-r'); L.deliver.noteQueueItems('cid-r', left.map((id) => ({ id }))); L.deliver.noteTurnStarted('cid-r'); }
       ok('§5c …the turn ends: exactly 3 turns billed, the hour reads 3 (each carried turn is its reserved unit)', L.hour() === 3 && L.deliver.queuedEntries('cid-r').length === 0, String(L.hour()));
@@ -3105,14 +3105,14 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
           if (args.length !== 3 || !KEEP.has(args[2])) bad.push({ rel, why: args.length < 3 ? 'no retention' : 'not LOAD_RETENTION', text: 'pruneBudget(' + args.join(', ') + ')' });
         }
       }
-      ok(`§5d CENSUS (round 4): src/, data/bin/, tools/, scripts/ (tests aside) and server.js read by ${readBy} — ${scanned.length} name the prune; every pruneBudget call (${calls.length}) keeps LOAD_RETENTION — none, null, the live limits and an alias are red`, scanned.includes('src/spend-authorizer.js') && scanned.includes('src/server/spend-guard.js') && calls.length >= 5 && bad.length === 0, JSON.stringify({ bad, scanned }));
+      ok(`§5d CENSUS (round 4): src/, data/bin/, tools/, scripts/ (tests aside) and server.js read by ${readBy} — ${scanned.length} name the prune; every pruneBudget call (${calls.length}) keeps LOAD_RETENTION — none, null, the live limits and an alias are red`, gateOf(scanned.includes('src/spend-authorizer.js')) && gateOf(scanned.includes('src/server/spend-guard.js')) && calls.length >= 5 && bad.length === 0, JSON.stringify({ bad, scanned }));
       // the census reads what it claims: the panel's M8b / M8c / M8d, each in a copy of the text, is found
       const probe = (rel, src) => { const out = []; const re = /\bpruneBudget\b/g; let m; while ((m = re.exec(src))) { const after = src.slice(m.index + 11); if (!/^\s*\(/.test(after)) { out.push('alias'); continue; } const a = after.slice(after.indexOf('(') + 1); let d = 0, cur = '', args = []; for (const c of a) { if (c === '(' || c === '{' || c === '[') d++; else if (c === ')' || c === '}' || c === ']') { if (d === 0) break; d--; } if (c === ',' && d === 0) { args.push(cur.trim()); cur = ''; } else cur += c; } args.push(cur.trim()); if (args.length !== 3 || !KEEP.has(args[2])) out.push(args.join(',')); } return out; };
       ok('§5d CENSUS reads what it claims: a null third argument (M8b), a bare call in queued-wakes.js (M8c) and a destructured alias (M8d) are each found',
-        probe('x', 'const s = pruneBudget(state, now, null);').length === 1 && probe('x', "void require('../spend-authorizer.js').pruneBudget({}, 0);").length === 1 && probe('x', 'const { pruneBudget: pb_ } = A; state = pb_(state, now);').includes('alias')
+        probe('x', 'const s = pruneBudget(state, now, null);').length === 1 && probe('x', "void require('../spend-authorizer.js').pruneBudget({}, 0);").length === 1 && gateOf(probe('x', 'const { pruneBudget: pb_ } = A; state = pb_(state, now);').includes('alias'))
         && probe('x', 'const s = pruneBudget(state, now, limits());').length === 1 && probe('x', 'A.pruneBudget(state, Date.now(), A.LOAD_RETENTION)').length === 0);
       const sa = read('src/spend-authorizer.js').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).map((l) => l.replace(/\s\/\/ .*$/, '')).join('\n');
-      ok('§5d …and a stamp list is cut only to the retention: every stampCap call outside the prune\'s own body passes LOAD_RETENTION (the default constant aside)', (sa.match(/stampCap\(([^)]*)\)/g) || []).every((c) => /stampCap\((LOAD_RETENTION|limits|null)\)/.test(c)) && (sa.match(/stampCap\(LOAD_RETENTION\)/g) || []).length === 1 && (sa.match(/stampCap\(limits\)/g) || []).length === 2, JSON.stringify(sa.match(/stampCap\(([^)]*)\)/g)));
+      ok('§5d …and a stamp list is cut only to the retention: every stampCap call outside the prune\'s own body passes LOAD_RETENTION (the default constant aside)', gateOf((sa.match(/stampCap\(([^)]*)\)/g) || []).every((c) => /stampCap\((LOAD_RETENTION|limits|null)\)/.test(c))) && (sa.match(/stampCap\(LOAD_RETENTION\)/g) || []).length === 1 && (sa.match(/stampCap\(limits\)/g) || []).length === 2, JSON.stringify(sa.match(/stampCap\(([^)]*)\)/g)));
     }
     // MUST 2 (1): a CARRIED reservation is converted — a return after it returns nothing, across a guard reload too
     {
@@ -3140,14 +3140,14 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
       const perConv = q.full('cid-one');
       for (let c = 0; c < QW.MAX_ENTRIES / QW.PER_CONVERSATION_MAX - 1; c++) for (let i = 0; i < QW.PER_CONVERSATION_MAX; i++) q.noteWritten('cid-' + c, { text: 'm' + i });
       const hub = q.full('cid-new');
-      ok(`§5d the bounds REFUSE by name — ${QW.PER_CONVERSATION_MAX} frames behind one turn, ${QW.MAX_ENTRIES} live on the hub — and nothing is dropped (${q.count()} held)`, /bound is 50/.test(perConv || '') && /bound is 500/.test(hub || '') && q.count() === QW.MAX_ENTRIES, JSON.stringify({ perConv, hub, n: q.count() }));
+      ok(`§5d the bounds REFUSE by name — ${QW.PER_CONVERSATION_MAX} frames behind one turn, ${QW.MAX_ENTRIES} live on the hub — and nothing is dropped (${q.count()} held)`, gateOf(/bound is 50/.test(perConv || '')) && gateOf(/bound is 500/.test(hub || '')) && q.count() === QW.MAX_ENTRIES, JSON.stringify({ perConv, hub, n: q.count() }));
     }
     // the refusal names promised turns as promised
     {
       const { guard } = big({ 'spend.unattendedPerIdentityHour': 3 });
       for (let i = 0; i < 3; i++) guard.note({ reason: 'peer-message', identity: id, reservation: 'qw-p' + i });
       const v = guard.authorize({ reason: 'job-notification', identity: id });
-      ok('§5d a refusal over reserved turns says them as PROMISED: «spent or promised 3 … 3 of them waiting behind running turns»', !v.ok && /has spent or promised 3 unattended turns this hour, 3 of them waiting behind running turns \(cap 3\)/.test(v.detail || ''), v.detail);
+      ok('§5d a refusal over reserved turns says them as PROMISED: «spent or promised 3 … 3 of them waiting behind running turns»', !v.ok && verdictOf(/has spent or promised 3 unattended turns this hour, 3 of them waiting behind running turns \(cap 3\)/.test(v.detail || '')), v.detail);
     }
   }
   // ── §5e THE RESERVATION, ROUND 4 (主开发's panel on 6ca9575ee): a prune never forgives (the owner lowers the caps, then raises
@@ -3202,7 +3202,7 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
       } finally { fsm.renameSync = origRename; global.setTimeout = origST; }
       const gsrc = read('src/server/spend-guard.js');
       const noteBody = gsrc.slice(gsrc.indexOf('  function note({'), gsrc.indexOf('  function release({'));
-      ok('§5e …the guard\'s note() never writes in the call: no flush() in its body (round 3\'s two synchronous writes per wake are gone)', noteBody.length > 200 && !/\bflush\(\)/.test(noteBody) && /persist\(\);/.test(noteBody));
+      ok('§5e …the guard\'s note() never writes in the call: no flush() in its body (round 3\'s two synchronous writes per wake are gone)', noteBody.length > 200 && !/\bflush\(\)/.test(noteBody) && verdictOf(/persist\(\);/.test(noteBody)));
     }
     // MODERATE 4 — the panel's M7f both ways, and M7g
     {
@@ -3238,9 +3238,9 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
       const ip = vp && A4.refusalI18n(vp), is = vs && A4.refusalI18n(vs);
       const promisedLine = (r) => (r ? r.detail.filter((d) => d && d.key === 'Of these, {n} are messages waiting behind running turns — counted while they wait, given back only if they are known not to have run.') : []);
       ok('§5e SMALL: «Spent or promised by» over promised stamps (2 of 3 waiting), «Spent by» over spent ones; the For-you notice adds «Of these, 2 are messages waiting behind running turns …» beside its «Spent by» rows',
-        !!vp && !vp.ok && /Spent or promised by: /.test(tp) && !!vs && !vs.ok && /Spent by: /.test(ts) && !/promised/.test(ts) && promisedLine(ip).length === 1 && promisedLine(ip)[0].params.n === 2 && promisedLine(is).length === 0, JSON.stringify({ tp, ts, ip: promisedLine(ip) }));
+        !!vp && !vp.ok && gateOf(/Spent or promised by: /.test(tp)) && !!vs && !vs.ok && gateOf(/Spent by: /.test(ts)) && !/promised/.test(ts) && promisedLine(ip).length === 1 && promisedLine(ip)[0].params.n === 2 && promisedLine(is).length === 0, JSON.stringify({ tp, ts, ip: promisedLine(ip) }));
       const dz = read('src/lib/i18n-zh.js'), dj = read('src/lib/i18n-ja.js');
-      ok('§5e …and the new line is in both dictionaries', dz.includes('"Of these, {n} are messages waiting behind running turns — counted while they wait, given back only if they are known not to have run.":') && dj.includes('"Of these, {n} are messages waiting behind running turns — counted while they wait, given back only if they are known not to have run.":'));
+      ok('§5e …and the new line is in both dictionaries', gateOf(dz.includes('"Of these, {n} are messages waiting behind running turns — counted while they wait, given back only if they are known not to have run.":')) && verdictOf(dj.includes('"Of these, {n} are messages waiting behind running turns — counted while they wait, given back only if they are known not to have run.":')));
     }
     // SMALL — the 80 % notice on the carried path: a live carry whose stamp was gone crosses 80 % ⇒ the notice is filed
     {
@@ -3263,10 +3263,10 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
     ok('§5b the wrapper has all six peer_message_result emitters (an unreadable census makes the next two vacuous)',
       emitters.length === 6, String(emitters.length));
     ok('§5b every ok:TRUE answer carries a `mode` — that is what makes it an answer about the frame we just wrote',
-      emitters.filter((e) => /ok: true/.test(e)).length === 3 && emitters.filter((e) => /ok: true/.test(e)).every((e) => /mode: '/.test(e)));
+      emitters.filter((e) => /ok: true/.test(e)).length === 3 && verdictOf(emitters.filter((e) => /ok: true/.test(e)).every((e) => /mode: '/.test(e))));
     ok('§5b …and every ok:FALSE answer carries `text` and NO mode — two of the three are about a DIFFERENT, earlier message',
       emitters.filter((e) => /ok: false/.test(e)).length === 3
-      && emitters.filter((e) => /ok: false/.test(e)).every((e) => /(?:^|[\s,])text\b/.test(e) && !/mode: '/.test(e)),
+      && verdictOf(emitters.filter((e) => /ok: false/.test(e)).every((e) => /(?:^|[\s,])text\b/.test(e) && !/mode: '/.test(e))),
       JSON.stringify(emitters.filter((e) => /ok: false/.test(e))));
     const L = mkLadder();
     await L.deliver.deliverToConversation('cid-1', 'job', { kind: 'notification', spendReason: 'job-notification' });
@@ -3303,14 +3303,14 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
   {
     const ce = read('src/server/stdout/codex-events.js');
     ok('§5b WIRING: the codex stdout consumer settles on peer_message_result, by PROPERTY ACCESS on the lazy ref',
-      /peer_message_result[\s\S]{0,900}deliverRef\?\.settleRpcDelivery\?\.\(/.test(ce));
+      verdictOf(/peer_message_result[\s\S]{0,900}deliverRef\?\.settleRpcDelivery\?\.\(/.test(ce)));
     ok('§5b …and the ladder gates on the CAPS ROW, never on a backend id',
-      /notificationDelivery\(capsOf\(rpc\.s\.backend\)\) === 'steer'/.test(read('src/server/conversation-deliver.js')));
+      verdictOf(/notificationDelivery\(capsOf\(rpc\.s\.backend\)\) === 'steer'/.test(read('src/server/conversation-deliver.js'))));
     // lane agy-peer-wake: antigravity rides the SAME rung, answered on the acp journal's `peer_result` — its consumer
     // settles EVERY answer the same way (an unwired twin would leave a predicted-free frame of that road free for ever)
     const ae = read('src/server/stdout/acp-events.js');
     ok('§5b WIRING (lane agy-peer-wake): the acp stdout consumer settles on EVERY peer_result, by PROPERTY ACCESS on the lazy ref',
-      /msg\.kind === 'peer_result'\) \{[\s\S]{0,4000}?deliverRef\?\.settleRpcDelivery\?\.\(cid, \{ ok: msg\.ok !== false, mode: msg\.mode \|\| null \}\)/.test(ae));
+      verdictOf(/msg\.kind === 'peer_result'\) \{[\s\S]{0,4000}?deliverRef\?\.settleRpcDelivery\?\.\(cid, \{ ok: msg\.ok !== false, mode: msg\.mode \|\| null \}\)/.test(ae)));
     ok("§5b …and a harness whose 'steer' is a stop + a new turn (antigravity: steerJoinsTurn:false) is never on the predicted-free lane",
       notificationDelivery(capsOf('antigravity')) === 'queue' && capsOf('antigravity').peerDelivery === 'rpc-queue');
   }
@@ -3371,7 +3371,7 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
     for (let i = 0; i < 5; i++) { W.adv(2 * MIN); W.q.noteTurnEnded('c-f2'); W.q.noteTurnStarted('c-f2'); W.q.noteQueue('c-f2', ids.slice(i + 1).map((_, j) => ({ id: 'it-' + (i + 1 + j) })), 4242, { fresh: true }); runs.push(W.g.reservationState(ids[i])); }
     const c = W.counts();
     ok('§5f F2 (the reader\'s scene, real guard + queued-wakes): cap 5/h, 5 frames queued behind a hung turn; 3 h later NO unattended turn is spent — the 5 still waiting hold this hour («spent or promised 5 …, 5 of them waiting behind running turns»); the turn ends and its 5 run ⇒ the hour holds 5, never 10 (the release: 5 spent, then 10)',
-      spent === 0 && !!refused && refused.why === 'hour-cap' && /spent or promised 5 unattended turns this hour, 5 of them waiting behind running turns/.test(refused.detail) && J(runs) === J(['converted', 'converted', 'converted', 'converted', 'converted']) && c.hour === 5 && c.day === 5,
+      spent === 0 && !!refused && refused.why === 'hour-cap' && gateOf(/spent or promised 5 unattended turns this hour, 5 of them waiting behind running turns/.test(refused.detail)) && J(runs) === J(['converted', 'converted', 'converted', 'converted', 'converted']) && c.hour === 5 && c.day === 5,
       J({ spent, detail: refused && refused.detail, runs, hour: c.hour, day: c.day }));
   }
   // (2) THE LAW as a property: seeded timelines on the PURE authorizer — frames queued behind running turns, unattended turns now,
@@ -3402,7 +3402,7 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
   const SEEDS = Array.from({ length: 40 }, (_, i) => 7919 * (i + 1));
   const tip = SEEDS.map((sd) => law(A, sd));
   ok('§5f THE LAW over 40 seeded timelines (4 days each, cap 4/h and 14/24 h, hangs of 20–30 h): no hour window and no rolling 24 h holds more billed unattended turns than its cap, wherever each queued frame ran',
-    tip.every((x) => x.hour <= 4 && x.day <= 14) && tip.reduce((a, x) => a + x.runs, 0) > 1000 && tip.some((x) => x.hour === 4) && tip.some((x) => x.day === 14),
+    gateOf(tip.every((x) => x.hour <= 4 && x.day <= 14)) && tip.reduce((a, x) => a + x.runs, 0) > 1000 && gateOf(tip.some((x) => x.hour === 4)) && verdictOf(tip.some((x) => x.day === 14)),
     J({ hour: Math.max(...tip.map((x) => x.hour)), day: Math.max(...tip.map((x) => x.day)), runs: tip.reduce((a, x) => a + x.runs, 0) }));
   // (3) the unit legs, on the pure authorizer
   const L5 = { perIdentityHour: 5, perIdentityDay: 200, perInstanceDay: 10000, noticePct: 0 };
@@ -3465,7 +3465,7 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
   ok('§5f a STASH DRAIN of a waiting stamp is counted where the turn it rode ran — the hour and the day of the drain (1, 1)', J(u.eDrain) === J([1, 1]), J(u));
   ok('§5f a carry 23 h 30 after its send stays in its hour though another account\'s note prunes the ledger at 24 h 05: a second turn at 24 h 10 is refused at cap 1 (the prune keeps a stamp a day past its LAST instant)', u.fM11 === false, J(u));
   ok('§5f the waiting bound IS queued-wakes\' own: RESERVATION_WAIT_MAX_MS = LIVE_MAX_AGE_MS = 7 days',
-    A.RESERVATION_WAIT_MAX_MS === 7 * DAY && /const LIVE_MAX_AGE_MS = 7 \* 24 \* 3600 \* 1000;/.test(read('src/server/queued-wakes.js')));
+    A.RESERVATION_WAIT_MAX_MS === 7 * DAY && verdictOf(/const LIVE_MAX_AGE_MS = 7 \* 24 \* 3600 \* 1000;/.test(read('src/server/queued-wakes.js'))));
   // (4) queued-wakes settles where the hub stops waiting — through the REAL guard
   {
     const W = world(30); const e1 = W.send('c-ar', 'x'); W.q.answer(e1.id, { mode: 'queued' }); W.adv(2 * HOUR);
@@ -3486,7 +3486,7 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
     W.q = W.mkQ();   // the ladder loads: nothing on disk holds them
     const atLoad = W.counts(); W.adv(HOUR + MIN); const later = W.counts(); const v = W.spend();
     ok('§5f at LOAD: five waiting stamps no queued entry holds end as «given up» at once — counted in that hour only (5, then 0), no longer said to wait (promised 5 → 0), and the next unattended turn is allowed (the reader\'s d8 ⑥: refused for a week, «5 of them waiting» when nothing waits)',
-      before.promisedHour === 5 && atLoad.hour === 5 && atLoad.promisedHour === 0 && later.hour === 0 && v.ok === true && ['orphan-0', 'orphan-4'].every((r) => W.g.reservationState(r) === 'reserved'), J({ before, atLoad, later, ok: v.ok }));
+      before.promisedHour === 5 && atLoad.hour === 5 && atLoad.promisedHour === 0 && later.hour === 0 && v.ok === true && verdictOf(['orphan-0', 'orphan-4'].every((r) => W.g.reservationState(r) === 'reserved')), J({ before, atLoad, later, ok: v.ok }));
     // a live entry keeps its stamp waiting; a crash lost the entry after a carry (the store's write landed, the guard's did not) ⇒ the next sweep lets it go
     const W2 = world(30); const k = W2.send('c-held', 'z'); W2.q.answer(k.id, { mode: 'queued' });
     W2.q = W2.mkQ();   // a restart with its entry on disk: still held
@@ -3542,8 +3542,8 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
     const words = n && n.i18n ? n.i18n.detail.map((d) => d.key) : [];
     const behindLine = n && n.i18n ? n.i18n.detail.find((d) => d.key === 'They wait behind {names} and {n} more conversations.') : null;
     ok('§5f the refusal held by waiting frames NAMES where they wait — «alpha-chat», «beta-chat», «gamma-chat» and 1 more — in the English line and the For-you notice, and its door opens that conversation (filed under its key), never only Settings → Spending',
-      !v.ok && v.why === 'hour-cap' && first === 1 && adds[0].key === 'antigravity:cid-1' && n.sessionName === 'Spending' && /They wait behind «alpha-chat», «beta-chat», «gamma-chat» and 1 more conversations\./.test(n.text)
-        && !!behindLine && behindLine.params.names === '«alpha-chat», «beta-chat», «gamma-chat»' && behindLine.params.n === 1 && words.includes('Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.') && n.i18n.door === 'waiting',
+      !v.ok && v.why === 'hour-cap' && first === 1 && adds[0].key === 'antigravity:cid-1' && n.sessionName === 'Spending' && gateOf(/They wait behind «alpha-chat», «beta-chat», «gamma-chat» and 1 more conversations\./.test(n.text))
+        && !!behindLine && behindLine.params.names === '«alpha-chat», «beta-chat», «gamma-chat»' && behindLine.params.n === 1 && gateOf(words.includes('Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.')) && n.i18n.door === 'waiting',
       J({ first, key: adds[0] && adds[0].key, text: n && n.text, words }));
     // THE SEAM WITH LAWS 2 + 3 (shape C, 主开发 15:30Z item 8): while a «messages waiting» item stands for the conversation the
     // frames wait behind, IT speaks — the spending notice is not filed; once that item is gone, the notice is filed as before
@@ -3575,7 +3575,7 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
       standing.length = 0;
       W3.adv(MIN); const v3 = W3.g.authorize({ reason: 'job-notification', identity: ID, now: W3.clock() });
       ok('§5f THE SEAM\'S JOURNAL LINE KEEPS THE NOTICE\'S CADENCE: 36 refusals in six hours while the item stands ⇒ ONE line, 0 notices; 72 in twelve hours ⇒ two lines (at 10 min and 6 h 20), never one per refusal; the item gone ⇒ the notice is filed at once under its key',
-        refused === 72 && inWindow === 1 && noticesHeld === 0 && J(at) === J([10, 380]) && lines.every((x) => /the spending notice at antigravity:cid-1 is not filed/.test(x.l)) && !v3.ok && adds3.length === 1 && adds3[0].key === 'antigravity:cid-1' && lines.length === 2,
+        refused === 72 && inWindow === 1 && noticesHeld === 0 && J(at) === J([10, 380]) && gateOf(lines.every((x) => /the spending notice at antigravity:cid-1 is not filed/.test(x.l))) && !v3.ok && adds3.length === 1 && adds3[0].key === 'antigravity:cid-1' && lines.length === 2,
         J({ refused, inWindow, noticesHeld, at, after: adds3.map((x) => x.key) }));
     }
     // B-44f3 (its remainder, round wf_98627db5-966): THE SEAM AT FOR YOU'S READ — a refusal while For you is HELD owes its notice; at
@@ -3617,11 +3617,11 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
       const at = notes.map((x) => Math.round((x.filed - base0) / MIN));
       const overlap = notes.some((x, k) => k > 0 && x.filed < notes[k - 1].exp);
       ok('§5f ONE OPEN NOTICE PER WAIT, NEVER SILENT: a 13-hour wait refused every 61 minutes files its notice at 0 h, 6 h 06 and 12 h 12 — each filed only after the previous one expired, never two open at once, all under the conversation\'s key',
-        J(at) === J([0, 366, 732]) && !overlap && notes.every((x) => x.key === 'antigravity:cid-9' && x.exp - x.filed === 6 * HOUR), J({ at, overlap }));
+        J(at) === J([0, 366, 732]) && !overlap && verdictOf(notes.every((x) => x.key === 'antigravity:cid-9' && x.exp - x.filed === 6 * HOUR)), J({ at, overlap }));
     }
     const dz = read('src/lib/i18n-zh.js'), dj = read('src/lib/i18n-ja.js');
     const keys = ['They wait behind {names}.', 'They wait behind {names} and {n} more conversations.', 'Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.', 'Of these, {n} are messages waiting behind running turns — counted while they wait, given back only if they are known not to have run.'];
-    ok('§5f …every new line is in both dictionaries', keys.every((k) => dz.includes(J(k) + ':') && dj.includes(J(k) + ':')), J(keys.filter((k) => !dz.includes(J(k) + ':') || !dj.includes(J(k) + ':'))));
+    ok('§5f …every new line is in both dictionaries', verdictOf(keys.every((k) => dz.includes(J(k) + ':') && dj.includes(J(k) + ':'))), J(keys.filter((k) => !dz.includes(J(k) + ':') || !dj.includes(J(k) + ':'))));
   }
   // (7) RED CONTROLS — patched copies of the real files, each round's rule taken out
   const MA = (edits) => mutantModule('src/spend-authorizer.js', edits);
@@ -3634,7 +3634,7 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
   const mNoAge = MA([['  const live = (t) => !(waitingStamp(t) && stampAt(t) <= now - RESERVATION_WAIT_MAX_MS);', '  const live = () => true;']]);
   const mNoNames = MA([['  const waits = promisedHere > 0 && Array.isArray(behind) && behind.length ? behind : null;', '  const waits = null;']]);
   const all = [mAtSend, mDaySend, mNoRan, mDrain, mPruneSend, mNoEnd, mNoAge, mNoNames];
-  ok('§5f CONTROL: every patched copy was really built (an unapplied patch is a green control)', all.every((m) => m.mod && m.hits === 1), J(all.map((m) => m.err || m.hits)));
+  ok('§5f CONTROL: every patched copy was really built (an unapplied patch is a green control)', verdictOf(all.every((m) => m.mod && m.hits === 1)), J(all.map((m) => m.err || m.hits)));
   const broke = (m, key) => SEEDS.find((sd) => { const x = law(m.mod, sd); return key === 'day' ? x.day > 14 : x.hour > 4; });
   ok('§5f CONTROL: every window counted at the SEND (the release) ⇒ THE LAW is RED (an hour holds more than its cap)', !!mAtSend.mod && broke(mAtSend, 'hour') !== undefined, mAtSend.err);
   ok('§5f CONTROL: the day counted at the send (round 0) ⇒ the reader\'s day scene is RED (free at 24 h 01) — MUST 1', !!mDaySend.mod && leg(mDaySend.mod).dayAt2401 === true, mDaySend.err || J(leg(mDaySend.mod)));
@@ -3781,7 +3781,7 @@ console.log('\n§5c the charge is debited to the identity the authorization reso
       const W = mkWorld(m.mod);
       const r = await run(W);
       ok('§5c NEGATIVE CONTROL: r3 authorizes THREE unattended turns against a cap of 1 — the authorized account is debited 0',
-        r.verdicts.every((v) => v.ok) && r.led['sub-AAA'] === undefined, JSON.stringify({ v: r.verdicts.map((x) => x.ok), led: r.led }));
+        gateOf(r.verdicts.every((v) => v.ok)) && r.led['sub-AAA'] === undefined, JSON.stringify({ v: r.verdicts.map((x) => x.ok), led: r.led }));
       ok('§5c NEGATIVE CONTROL: …and the account that was NEVER ASKED is debited all three (it now refuses its own turns)',
         r.led['sub-BBB'] === 3, JSON.stringify(r.led));
       ok('§5c NEGATIVE CONTROL: …and the guard SAYS it had to resolve the identity itself, three times',
@@ -3793,8 +3793,8 @@ console.log('\n§5c the charge is debited to the identity the authorization reso
       try { shipped = execFileSync('git', ['-C', REPO, 'show', '4ceba626:' + delPath], { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 }).toString(); } catch { }
       if (!shipped) console.log('  · SKIP: git could not read 4ceba626:' + delPath + ' (the pre-fix bytes)');
       else ok('§5c NEGATIVE CONTROL: the restored expression is byte-identical to the SHIPPED one (the control reproduces r3, not an invention)',
-        shipped.includes(R3_LINE) && !shipped.includes(FIX)
-        && PRE.startsWith(R3_LINE.slice(0, -3)) && !PRE.includes('v.identity'),
+        gateOf(shipped.includes(R3_LINE)) && !shipped.includes(FIX)
+        && gateOf(PRE.startsWith(R3_LINE.slice(0, -3))) && !PRE.includes('v.identity'),
         JSON.stringify({ inShipped: shipped.includes(R3_LINE), pre: PRE }));
     }
   }
@@ -3929,23 +3929,23 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       JSON.stringify(rows) === JSON.stringify([[null, 0, true], ['', 0, true], ['  ', 0, true], [undefined, 30, false], [0, 0, false], [-1, 0, true], ['abc', 0, true], [true, 0, true], [false, 0, true], ['off', 0, true], ['30', 30, false], [12, 12, false]]), JSON.stringify(rows));
     const L = A.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? null : undefined));
     const v = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: A.emptyBudget(), limits: L });
-    ok('§5g (3) a null hour cap REFUSES (never the default 30) and the refusal says «no cap is set», not «set to 0»', v.ok === false && v.why === 'hour-cap' && v.capUnset === true && /no cap is set for unattended turns per identity per hour/.test(v.detail) && !/set to 0/.test(v.detail), v.detail);
+    ok('§5g (3) a null hour cap REFUSES (never the default 30) and the refusal says «no cap is set», not «set to 0»', v.ok === false && v.why === 'hour-cap' && v.capUnset === true && gateOf(/no cap is set for unattended turns per identity per hour/.test(v.detail)) && !/set to 0/.test(v.detail), v.detail);
     const i = A.refusalI18n(v, { sessionName: 'ops' });
     const doorKeys = i.detail.map((d) => d.key);
     ok('§5g (3) …the notice reads its own row («no limit is set … — set a number») and the door that sets it, never «switched off — its limit is 0»',
-      /no limit is set for turns nobody typed on \{account\} — set a number/.test(i.text.key) && doorKeys.includes(A.DOOR_LINK_WORDS.unset) && !/switched off/.test(i.text.key), JSON.stringify(i.text));
+      gateOf(/no limit is set for turns nobody typed on \{account\} — set a number/.test(i.text.key)) && gateOf(doorKeys.includes(A.DOOR_LINK_WORDS.unset)) && !/switched off/.test(i.text.key), JSON.stringify(i.text));
     const Li = A.budgetLimits((k) => (k === 'spend.unattendedPerInstanceDay' ? '' : undefined));
     const vi = A.authorizeUnattendedSpend({ reason: 'peer-message', identity: IDg, state: A.emptyBudget(), limits: Li });
-    ok('§5g (3) a blank INSTANCE cap: refused, «on this instance»', vi.why === 'instance-cap' && /on this instance — set a number/.test(A.refusalI18n(vi, {}).text.key));
+    ok('§5g (3) a blank INSTANCE cap: refused, «on this instance»', vi.why === 'instance-cap' && verdictOf(/on this instance — set a number/.test(A.refusalI18n(vi, {}).text.key)));
     const { dictEntries } = await import('./i18n-extract.mjs');
     const ZH = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
     const SSm = require(path.join(REPO, 'src/stash-summary.js'));
     const toast = SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, capUnset: true, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {});
     ok('§5g (3) the hand-over toast says it (no limit is set — set a number) with the Spending door; a 0 cap still says «switched off»',
-      /no limit is set for turns nobody typed on G: set a number in its row: vibespace:\/\/settings\/spend\.unattendedPerIdentityHour\./.test(toast.text) && toast.door === 'spending'
-        && /switched off/.test(SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {}).text), toast.text);
+      gateOf(/no limit is set for turns nobody typed on G: set a number in its row: vibespace:\/\/settings\/spend\.unattendedPerIdentityHour\./.test(toast.text)) && toast.door === 'spending'
+        && verdictOf(/switched off/.test(SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {}).text)), toast.text);
     const keys = [...A.REFUSAL_WORDS['cap-unset'], ...A.REFUSAL_WORDS['cap-unset-instance'], A.DOOR_WORDS.unset, A.DOOR_LINK_WORDS.unset, 'Not handed over — no limit is set for turns nobody typed on {account}: set a number in its row: {link}. The notices keep waiting.', 'Not handed over — no limit is set for turns nobody typed on this instance: set a number in its row: {link}. The notices keep waiting.', 'none — every turn nobody typed is held until a number is set'];
-    ok('§5g (3) every new sentence is in zh and ja', keys.every((k) => ZH.has(k) && JA.has(k)), keys.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
+    ok('§5g (3) every new sentence is in zh and ja', verdictOf(keys.every((k) => ZH.has(k) && JA.has(k))), keys.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
     // A REQUEST THAT SETS A CAP TO NOTHING STORES NOTHING (the follow-up ruling): the REAL settings router — a PATCH {cap: null}
     // from the owner's page stores it BLANK (refused, said), never removes the key so the default comes back. THE PORT'S MEETING
     // (2.369.412's setting-holds): the server's own patchSettings keeps its door's contract — a null is the row's DEFAULT, what a
@@ -3992,10 +3992,10 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       // THE MEETING: a timed raise of a cap at its default returns to the default — never «no limit is set»
       const hr = await holdRun(require(path.join(REPO, 'src/routes/persistence.js')));
       ok('§5g (3) THE PORT\'S MEETING (setting-holds): a timed raise of the hour cap from its default (30 → 50) RETURNS to the default — the key removed through patchSettings, the cap 30 again, never «no limit is set» (every turn nobody typed refused)',
-        hr.took && hr.during === 50 && !Object.prototype.hasOwnProperty.call(hr.after, HOURK) && hr.L.perIdentityHour === 30 && !hr.L.unset, JSON.stringify(hr));
+        gateOf(hr.took) && hr.during === 50 && !Object.prototype.hasOwnProperty.call(hr.after, HOURK) && hr.L.perIdentityHour === 30 && !hr.L.unset, JSON.stringify(hr));
       const mh = mutantModule('src/routes/persistence.js', [["{ if (v === null && (!SPEND_CAP_KEYS.has(k) || Object.prototype.hasOwnProperty.call(patch, k))) delete merged[k]; }   // the internal door", "{ if (v === null && !SPEND_CAP_KEYS.has(k)) delete merged[k]; }   // the internal door"]]);
       ok('§5g (3) CONTROL: the follow-up\'s first rule (patchSettings keeps a cap\'s null) in a copy (the patch hit)', !mh.err && mh.hits === 1, mh.err || '');
-      if (!mh.err) { const hm = await holdRun(mh.mod); ok('§5g (3) CONTROL: with it, the raise\'s return STORES null — the hour cap reads «no limit is set», every turn nobody typed refused — RED', hm.took && hm.after[HOURK] === null && hm.L.perIdentityHour === 0 && JSON.stringify(hm.L.unset) === '["perIdentityHour"]', JSON.stringify(hm)); }
+      if (!mh.err) { const hm = await holdRun(mh.mod); ok('§5g (3) CONTROL: with it, the raise\'s return STORES null — the hour cap reads «no limit is set», every turn nobody typed refused — RED', gateOf(hm.took) && hm.after[HOURK] === null && hm.L.perIdentityHour === 0 && JSON.stringify(hm.L.unset) === '["perIdentityHour"]', JSON.stringify(hm)); }
       // THE CURE (主开发 04:23Z, round wrhah7kp5's MUST): the Settings page saves the WHOLE file by POST — a person's cleared cap is
       // stored BLANK there too, and no later internal patch (another row's write, a timed raise and its return) drops it
       const refusedSaid = (st) => { const L = A.budgetLimits((k) => st[k]); const v = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: A.emptyBudget(), limits: L }); return !v.ok && v.why === 'hour-cap' && v.capUnset === true && /no cap is set for unattended turns per identity per hour/.test(v.detail); };
@@ -4029,10 +4029,10 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         await pg.H.returnHold(HOURK, 'moment');
         const afterHold = pg.disk(), back = pg.notices.find((m) => m && m.type === 'server-notice');
         await pg.close();
-        ok('§5g (3) THE CURE: the Settings page\'s POST of a cleared hour cap stores it BLANK — «no limit is set», every unattended turn refused and said', posted === 200 && afterPost[HOURK] === '' && refusedSaid(afterPost), JSON.stringify(afterPost));
-        ok('§5g (3) …(1) a later patch of ANOTHER row keeps the blank — still refused and said', afterPatch[HOURK] === '' && afterPatch['ui.anotherRow'] === 2 && refusedSaid(afterPatch), JSON.stringify(afterPatch));
+        ok('§5g (3) THE CURE: the Settings page\'s POST of a cleared hour cap stores it BLANK — «no limit is set», every unattended turn refused and said', posted === 200 && afterPost[HOURK] === '' && verdictOf(refusedSaid(afterPost)), JSON.stringify(afterPost));
+        ok('§5g (3) …(1) a later patch of ANOTHER row keeps the blank — still refused and said', afterPatch[HOURK] === '' && afterPatch['ui.anotherRow'] === 2 && verdictOf(refusedSaid(afterPatch)), JSON.stringify(afterPatch));
         ok('§5g (3) …(2) a timed raise over the blank (its «now» read as none = 0: a raise) and its return — the blank comes back, still refused and said; the notice says «none» with the row\'s link, never an empty value',
-          !!took && took.ok && took.before === '' && during === 50 && afterHold[HOURK] === '' && refusedSaid(afterHold) && !!back && back.i18n && back.i18n.key === '{label} is back to none — the hold ended: every turn nobody typed is held until a number is set: {link}' && /vibespace:\/\/settings\/spend\.unattendedPerIdentityHour/.test(back.i18n.params.link), JSON.stringify({ took, during, afterHold, back }));
+          !!took && gateOf(took.ok) && took.before === '' && during === 50 && afterHold[HOURK] === '' && gateOf(refusedSaid(afterHold)) && !!back && gateOf(back.i18n) && back.i18n.key === '{label} is back to none — the hold ended: every turn nobody typed is held until a number is set: {link}' && verdictOf(/vibespace:\/\/settings\/spend\.unattendedPerIdentityHour/.test(back.i18n.params.link)), JSON.stringify({ took, during, afterHold, back }));
       }
       {
         // a cap's NULL already on disk (an older build, a hand edit): a patch of another row never drops it, and (b) a tool's PATCH of an
@@ -4043,7 +4043,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         const tool = await pg.send('PATCH', { 'ui.someRow': 3 }, { authorization: 'Bearer agent-key' });
         const afterTool = pg.disk();
         await pg.close();
-        ok('§5g (3) THE CURE: a cap\'s stored NULL survives a patch of another row (the internal door drops only a null it carries) — refused and said', afterPatch[HOURK] === null && refusedSaid(afterPatch), JSON.stringify(afterPatch));
+        ok('§5g (3) THE CURE: a cap\'s stored NULL survives a patch of another row (the internal door drops only a null it carries) — refused and said', afterPatch[HOURK] === null && verdictOf(refusedSaid(afterPatch)), JSON.stringify(afterPatch));
         ok('§5g (3) (b) a tool\'s PATCH of an UNRELATED row is not refused by a spend row nobody touched — the stored null stays as it was', tool === 200 && afterTool['ui.someRow'] === 3 && afterTool[HOURK] === null, JSON.stringify({ tool, afterTool }));
       }
       // RED COPIES (setup-checked anchors; a copy whose line is gone fails by name)
@@ -4075,9 +4075,9 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         };
         const a = await lawRun({ wireNote: true }), b = await lawRun({ wireNote: false });
         ok('§5g (3) CURE 2 (the law): a hold at 0, then the page\'s POST of the cleared field — the write\'s note ends the hold «changed by hand (none)»; its moment writes nothing: the disk holds the blank, refused and said',
-          a.took && a.held === 0 && a.posted === 200 && a.d[HOURK] === '' && refusedSaid(a.d) && a.list.length === 0 && a.logs.some((l) => /changed by hand \(none\)/.test(l)) && (a.r.none || a.r.changedByHand), JSON.stringify({ ...a, logs: a.logs.slice(-3) }));
+          gateOf(a.took) && a.held === 0 && a.posted === 200 && a.d[HOURK] === '' && gateOf(refusedSaid(a.d)) && a.list.length === 0 && gateOf(a.logs.some((l) => /changed by hand \(none\)/.test(l))) && (verdictOf(a.r.none) || verdictOf(a.r.changedByHand)), JSON.stringify({ ...a, logs: a.logs.slice(-3) }));
         ok('§5g (3) …and with no write note at all, the return itself reads the RAW value: the blank is not the 0 it wrote — no write over it, the blank stays, refused and said',
-          b.took && b.r.changedByHand === true && b.d[HOURK] === '' && refusedSaid(b.d), JSON.stringify({ r: b.r, d: b.d }));
+          gateOf(b.took) && b.r.changedByHand === true && b.d[HOURK] === '' && verdictOf(refusedSaid(b.d)), JSON.stringify({ r: b.r, d: b.d }));
         const SHSRC = read('src/server/setting-holds.js'), LIVE = "    if (!AS.holdIsLive(h, raw)) { endChangedByHand(key, said(raw)";
         ok('§5g (3) setup: the return\'s raw liveness is in setting-holds once', SHSRC.split(LIVE).length === 2);
         const mr2 = mutantModule('src/server/setting-holds.js', [[LIVE, "    if (!AS.holdIsLive(h, cur)) { endChangedByHand(key, said(raw)"]]);
@@ -4093,7 +4093,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
           const listed = pg.H.list().length; await pg.close(); return { listed, logs: pg.logs };
         };
         const nr = await noteRun();
-        ok('§5g (3) OWED: the settings-write note reads the RAW value — the cleared field ends the hold at 0 at once, «changed by hand (none)»', nr.listed === 0 && nr.logs.some((l) => /changed by hand \(none\)/.test(l)), JSON.stringify(nr));
+        ok('§5g (3) OWED: the settings-write note reads the RAW value — the cleared field ends the hold at 0 at once, «changed by hand (none)»', nr.listed === 0 && verdictOf(nr.logs.some((l) => /changed by hand \(none\)/.test(l))), JSON.stringify(nr));
         const SH3 = read('src/server/setting-holds.js'), NOTE = 'const raw = rawOf(next || {}, key); if (!AS.holdIsLive(holds[key], raw))';
         ok('§5g (3) setup: the write note\'s raw liveness is in setting-holds once', SH3.split(NOTE).length === 2);
         const mn = mutantModule('src/server/setting-holds.js', [[NOTE, 'const raw = valueIn(next || {}, key); if (!AS.holdIsLive(holds[key], raw))']]);
@@ -4104,7 +4104,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
           const listed = pg.H.list().length, d = pg.disk(); await pg.close(); return { listed, d };
         };
         const br = await bootRun();
-        ok('§5g (3) OWED: the BOOT reads the RAW value — a blank row under a hold at 0 (cleared while the hub was down) ends the hold; nothing is written over the blank', br.listed === 0 && br.d[HOURK] === '' && refusedSaid(br.d), JSON.stringify(br));
+        ok('§5g (3) OWED: the BOOT reads the RAW value — a blank row under a hold at 0 (cleared while the hub was down) ends the hold; nothing is written over the blank', br.listed === 0 && br.d[HOURK] === '' && verdictOf(refusedSaid(br.d)), JSON.stringify(br));
         const START = '      const cur = rawOf(readSettings() || {}, k);';
         ok('§5g (3) setup: the boot\'s raw liveness is in setting-holds once', SH3.split(START).length === 2);
         const mb = mutantModule('src/server/setting-holds.js', [[START, '      const cur = presentOf(k);']]);
@@ -4118,7 +4118,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       {
         const importOf = (settings) => ({ file: { app: 'vibespace-config', sections: { settings } }, sections: ['settings'] });
         const imp = await pageRun(freshPR('page-import')); const st = await imp.send('POST', importOf({ [HOURK]: null, 'ui.someRow': 1 }), undefined, '/api/config/import'); const di = imp.disk(); await imp.close();
-        ok('§5g (3) CURE 2: a config import whose settings part clears the hour cap stores it BLANK — refused and said', st === 200 && di[HOURK] === '' && refusedSaid(di), JSON.stringify({ st, di }));
+        ok('§5g (3) CURE 2: a config import whose settings part clears the hour cap stores it BLANK — refused and said', st === 200 && di[HOURK] === '' && verdictOf(refusedSaid(di)), JSON.stringify({ st, di }));
         const PSRC2 = read('src/routes/persistence.js'), IMPB = "typeof file.sections.settings === 'object') blankCaps(file.sections.settings);";
         ok('§5g (3) setup: the import\'s blank rule is in persistence.js once', PSRC2.split(IMPB).length === 2);
         const mi = mutantModule('src/routes/persistence.js', [[IMPB, "typeof file.sections.settings === 'object') void 0;"]]);
@@ -4138,7 +4138,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       const Lm = m.mod.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? null : undefined));
       const vm = m.mod.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: m.mod.emptyBudget(), limits: Lm });
       const Lg = m.mod.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? 'abc' : undefined));
-      ok('§5g (3) CONTROL: with it, a null cap is a SILENT 0 — «switched off … its limit is 0», no «no cap is set» — and a text cap reads the DEFAULT 30 (the release) — RED', Lm.perIdentityHour === 0 && !Lm.unset && /switched off/.test(m.mod.refusalI18n(vm, {}).text.key) && !/no cap is set/.test(vm.detail) && Lg.perIdentityHour === 30);
+      ok('§5g (3) CONTROL: with it, a null cap is a SILENT 0 — «switched off … its limit is 0», no «no cap is set» — and a text cap reads the DEFAULT 30 (the release) — RED', Lm.perIdentityHour === 0 && !Lm.unset && gateOf(/switched off/.test(m.mod.refusalI18n(vm, {}).text.key)) && !/no cap is set/.test(vm.detail) && Lg.perIdentityHour === 30);
     }
   }
   // ── (2) A CAP LOWERED BELOW WHAT ALREADY WAITS ──
@@ -4162,12 +4162,12 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     for (let i = 0; i < 5; i++) W.q.rejudge();
     const unheld = W.inbox.filter((x) => x.i18n && /could not be held/.test(x.i18n.text.key));
     ok('§5g (2) an agent that serves no «remove»: nothing is lost or returned; said ONCE per frame in the journal, and ONCE per frame WHERE THE PERSON LOOKS (a For-you line: it may run past the limit) — five sweeps, two lines',
-      W.stash.length === 0 && W.counts().promisedHour === 3 && W.logs.filter((l) => /could not be asked back out now/.test(l)).length === 2 && unheld.length === 2 && unheld.every((x) => /past the limit/.test(x.i18n.text.key)), JSON.stringify({ logs: W.logs, inbox: W.inbox.map((x) => x.text) }));
+      W.stash.length === 0 && W.counts().promisedHour === 3 && W.logs.filter((l) => /could not be asked back out now/.test(l)).length === 2 && unheld.length === 2 && verdictOf(unheld.every((x) => /past the limit/.test(x.i18n.text.key))), JSON.stringify({ logs: W.logs, inbox: W.inbox.map((x) => x.text) }));
     ok('§5g (2) PACED: five sweeps ask each frame ONCE (2 asks — never one sidecar read per frame per sweep)', W.pulls.length === 2, JSON.stringify(W.pulls));
     const { dictEntries } = await import('./i18n-extract.mjs');
     const ZH = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
     const UK = [...A.UNHELD_WORDS.cap, ...A.UNHELD_WORDS.ledger, A.UNHELD_WORDS.door];
-    ok('§5g (2) …the For-you line\'s words are in zh and ja', UK.every((k) => ZH.has(k) && JA.has(k)), UK.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
+    ok('§5g (2) …the For-you line\'s words are in zh and ja', verdictOf(UK.every((k) => ZH.has(k) && JA.has(k))), UK.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
   }
   // THE WIRING: a settings write reaches the REAL ladder (server.js's own wiring: the verdict rides waitingReservations),
   // which writes the wrapper's own remove verb for the bound item; the wrapper's answer is HELD in the stash — said as the
@@ -4206,9 +4206,9 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const held = w.q.filter((e) => e && e.text === 'a waiting note');
     const SSh = require(path.join(REPO, 'src/stash-summary.js'));
     ok('§5g (2) …its words are HELD in the stash and SAID as the spending ceiling\'s («the spending ceiling held them»), and a FULL stash (30) drops nothing for them — 31 entries, the oldest still there',
-      held.length === 1 && held[0].held && held[0].held.kind === 'spend-cap' && held[0].held.capHeld === true && SSh.HELD_WHY[SSh.heldKeyOf(held[0].held)] === 'the spending ceiling held them' && w.q.length === 31 && w.q.some((e) => e && e.text === 'older 0'), JSON.stringify({ n: w.q.length, held: held.map((e) => e.held) }));
-    ok('§5g (2) WIRING: src/routes/persistence.js writeSettings sends the signal (budgetLimits before and after) on every write', /function writeSettings\(data, out = null\) \{[\s\S]{0,2200}noteLimitsWritten\(spendOf\(prev\), spend\)/.test(read('src/routes/persistence.js')));
-    ok('§5g (2) WIRING: server.js wires the guard\'s waitingReservations into the ladder (its answer carries the verdict — server.js unchanged)', /waitingReservations: \(\) => spendGuard\.waitingReservations\(\)/.test(read('server.js')) && Array.isArray(w.guard.waitingReservations().overCap));
+      held.length === 1 && gateOf(held[0].held) && held[0].held.kind === 'spend-cap' && held[0].held.capHeld === true && SSh.HELD_WHY[SSh.heldKeyOf(held[0].held)] === 'the spending ceiling held them' && w.q.length === 31 && verdictOf(w.q.some((e) => e && e.text === 'older 0')), JSON.stringify({ n: w.q.length, held: held.map((e) => e.held) }));
+    ok('§5g (2) WIRING: src/routes/persistence.js writeSettings sends the signal (budgetLimits before and after) on every write', verdictOf(/function writeSettings\(data, out = null\) \{[\s\S]{0,2200}noteLimitsWritten\(spendOf\(prev\), spend\)/.test(read('src/routes/persistence.js'))));
+    ok('§5g (2) WIRING: server.js wires the guard\'s waitingReservations into the ladder (its answer carries the verdict — server.js unchanged)', gateOf(/waitingReservations: \(\) => spendGuard\.waitingReservations\(\)/.test(read('server.js'))) && verdictOf(Array.isArray(w.guard.waitingReservations().overCap)));
     const mg = mutantModule('src/server/spend-guard.js', [["Object.defineProperty(rids, 'overCap', { get: () => overCapNow(Date.now()) }); ", '']]);
     ok('§5g (2) CONTROL: the verdict taken off the guard\'s waitingReservations answer in a copy (the patch hit)', !mg.err && mg.hits === 1, mg.err || '');
     if (!mg.err) { const wm = await wiring({ gMod: mg.mod }); ok('§5g (2) CONTROL: with it, the settings signal writes NO remove frame — the waiting frame would run past the cap — RED', wm.asked.length === 0, JSON.stringify(wm.frames)); }
@@ -4281,7 +4281,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     for (let i = 0; i < 3; i++) W.q.rejudge();
     const lines = W.inbox.filter((x) => x.i18n && /could not be held/.test(x.i18n.text.key));
     ok('§5g (2) r2 THE LEDGER UNREADABLE: the old-agent line still names the conversation the frame waits behind («release-notes», filed under its key), ONE item per frame (its own itemKey — never merged by its words)',
-      lines.length === 2 && lines.every((x) => x.key === 'claude:c1' && x.i18n.text.params && x.i18n.text.params.conversation === 'release-notes' && /record of turns nobody typed cannot be read/.test(x.i18n.text.key)) && new Set(lines.map((x) => x.itemKey)).size === 2 && lines.every((x) => /^spend-unheld:/.test(x.itemKey || '')),
+      lines.length === 2 && gateOf(lines.every((x) => x.key === 'claude:c1' && x.i18n.text.params && x.i18n.text.params.conversation === 'release-notes' && /record of turns nobody typed cannot be read/.test(x.i18n.text.key))) && new Set(lines.map((x) => x.itemKey)).size === 2 && verdictOf(lines.every((x) => /^spend-unheld:/.test(x.itemKey || ''))),
       JSON.stringify(lines.map((x) => ({ key: x.key, itemKey: x.itemKey, p: x.i18n && x.i18n.text.params }))));
   }
   {   // (1) THE RIGHT REASON, WHOLE — the hand-over card says the ledger's reason for what the ledger held, never the cap's
@@ -4290,41 +4290,41 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const { dictEntries } = await import('./i18n-extract.mjs');
     const ZH = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
     ok('§5g (2) r2 THE RIGHT REASON ON THE CARD: what the ledger held says «the record of turns nobody typed could not be read» (zh/ja); a lowered cap keeps «the spending ceiling held them»',
-      k === 'spend-ledger' && /record of turns nobody typed could not be read/.test(SSh.HELD_WHY[k]) && SSh.HELD_WHY[kc] === 'the spending ceiling held them' && ZH.has(SSh.HELD_WHY[k]) && JA.has(SSh.HELD_WHY[k]), JSON.stringify({ k, kc }));
+      k === 'spend-ledger' && gateOf(/record of turns nobody typed could not be read/.test(SSh.HELD_WHY[k])) && SSh.HELD_WHY[kc] === 'the spending ceiling held them' && gateOf(ZH.has(SSh.HELD_WHY[k])) && verdictOf(JA.has(SSh.HELD_WHY[k])), JSON.stringify({ k, kc }));
     // B-ef83 smalls: what a restart's overlap held (another process kept the ledger) says THAT, never the cap's words
     const kh = SSh.heldKeyOf({ kind: 'spend-cap', why: 'ledger-held-elsewhere' });
     ok('§5g B-ef83 THE RIGHT REASON ON THE CARD: what another process\'s ledger held says «another VibeSpace process on this data folder kept the record…» (zh/ja), never «the spending ceiling held them»',
-      kh === 'spend-held' && /another VibeSpace process on this data folder kept the record of turns nobody typed/.test(SSh.HELD_WHY[kh]) && ZH.has(SSh.HELD_WHY[kh]) && JA.has(SSh.HELD_WHY[kh]), JSON.stringify({ kh }));
+      kh === 'spend-held' && gateOf(/another VibeSpace process on this data folder kept the record of turns nobody typed/.test(SSh.HELD_WHY[kh])) && gateOf(ZH.has(SSh.HELD_WHY[kh])) && verdictOf(JA.has(SSh.HELD_WHY[kh])), JSON.stringify({ kh }));
     // B-ef83 r1648: a hold for a lock that cannot be written says THAT — on the card, in the agent's tail; the refusal's words and its door
     const kl = SSh.heldKeyOf({ kind: 'spend-cap', why: 'ledger-lock-unwritable' });
-    ok('§5g B-ef83 r1648 the card for a frame held because the lock cannot be written: «VibeSpace could not write the lock of its record…» (zh/ja)', kl === 'spend-lock' && /could not write the lock of its record of turns nobody typed/.test(SSh.HELD_WHY[kl]) && ZH.has(SSh.HELD_WHY[kl]) && JA.has(SSh.HELD_WHY[kl]), JSON.stringify({ kl }));
+    ok('§5g B-ef83 r1648 the card for a frame held because the lock cannot be written: «VibeSpace could not write the lock of its record…» (zh/ja)', kl === 'spend-lock' && gateOf(/could not write the lock of its record of turns nobody typed/.test(SSh.HELD_WHY[kl])) && gateOf(ZH.has(SSh.HELD_WHY[kl])) && verdictOf(JA.has(SSh.HELD_WHY[kl])), JSON.stringify({ kl }));
     const JMt = require(path.join(REPO, 'src/job-model.js'));
     const tail = (why) => JMt.notifTailSentence([{ jobId: 'jb-1', text: 'x', ts: 1, held: { kind: 'spend-cap', why } }]);
     ok('§5g B-ef83 r1648 the AGENT\'s tail says the true cause of a spend hold (another process\'s ledger / the lock / the unreadable record), the ceiling only for the ceiling',
-      /another VibeSpace process on this data folder kept the record/.test(tail('ledger-held-elsewhere')) && /could not write the lock of its record/.test(tail('ledger-lock-unwritable')) && /record of turns nobody typed could not be read/.test(tail('ledger-unreadable')) && /held by the spending ceiling/.test(tail('cap-lowered')) && !/spending ceiling/.test(tail('ledger-held-elsewhere')),
+      gateOf(/another VibeSpace process on this data folder kept the record/.test(tail('ledger-held-elsewhere'))) && gateOf(/could not write the lock of its record/.test(tail('ledger-lock-unwritable'))) && gateOf(/record of turns nobody typed could not be read/.test(tail('ledger-unreadable'))) && gateOf(/held by the spending ceiling/.test(tail('cap-lowered'))) && !/spending ceiling/.test(tail('ledger-held-elsewhere')),
       JSON.stringify([tail('ledger-held-elsewhere'), tail('ledger-lock-unwritable'), tail('cap-lowered')]));
     const SAw = require(path.join(REPO, 'src/spend-authorizer.js'));
     const vLk = SAw.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: 'k', name: 'K' }, state: SAw.emptyBudget(), ledger: { lockUnwritable: true, error: 'EACCES' } });
     const iLk = SAw.refusalI18n ? SAw.refusalI18n({ ...vLk, reason: 'auto-resume' }, { sessionName: 'c1' }) : null;
     ok('§5g B-ef83 r1648 THE TRUE REASON: a lock nobody holds and this process cannot write refuses by ledger-lock-unwritable (its code), its words and its door «lock» translated (zh/ja)',
-      vLk.ok === false && vLk.why === 'ledger-lock-unwritable' && /EACCES/.test(String(vLk.detail)) && !!iLk && ZH.has(iLk.text.key) && JA.has(iLk.text.key) && /cannot write the lock of its record/.test(iLk.text.key) && read('src/spend-authorizer.js').includes("'ledger-lock-unwritable': 'lock'") && !!SAw.DOOR_WORDS && ZH.has(SAw.DOOR_WORDS.lock) && JA.has(SAw.DOOR_WORDS.lock),
+      vLk.ok === false && vLk.why === 'ledger-lock-unwritable' && gateOf(/EACCES/.test(String(vLk.detail))) && !!iLk && gateOf(ZH.has(iLk.text.key)) && gateOf(JA.has(iLk.text.key)) && gateOf(/cannot write the lock of its record/.test(iLk.text.key)) && gateOf(read('src/spend-authorizer.js').includes("'ledger-lock-unwritable': 'lock'")) && !!SAw.DOOR_WORDS && gateOf(ZH.has(SAw.DOOR_WORDS.lock)) && verdictOf(JA.has(SAw.DOOR_WORDS.lock)),
       JSON.stringify({ why: vLk.why, detail: vLk.detail, key: iLk && iLk.text && iLk.text.key }));
     // r1801 (3): a HAND-OVER refused for the lock says THAT — never the ceiling, never a raw code (zh/ja); and the lockread card + tail
     const howW = (why) => SSh.handOverRefusalWords({ code: 'spend_refused', why }, (s) => s);
     const hU = howW('ledger-lock-unwritable'), hR = howW('ledger-lock-unreadable');
     ok('§5g B-ef83 r1801 (3) the hand-over refused for the lock has its OWN sentence (cannot write it / is there and cannot be read), never the ceiling\'s or a raw code; zh/ja',
-      !!hU && /cannot write the lock of its record/.test(hU.text) && !!hR && /is there and cannot be read/.test(hR.text) && !/spend ceiling|ledger-lock/.test(hU.text + hR.text) && ZH.has(hU.text) && JA.has(hU.text) && ZH.has(hR.text) && JA.has(hR.text), JSON.stringify([hU && hU.text, hR && hR.text]));
+      !!hU && gateOf(/cannot write the lock of its record/.test(hU.text)) && !!hR && gateOf(/is there and cannot be read/.test(hR.text)) && !/spend ceiling|ledger-lock/.test(hU.text + hR.text) && gateOf(ZH.has(hU.text)) && gateOf(JA.has(hU.text)) && gateOf(ZH.has(hR.text)) && verdictOf(JA.has(hR.text)), JSON.stringify([hU && hU.text, hR && hR.text]));
     const kr = SSh.heldKeyOf({ kind: 'spend-cap', why: 'ledger-lock-unreadable' });
-    ok('§5g B-ef83 r1801 (1) the card and the agent\'s tail for a hold by an unreadable lock say THAT (zh/ja)', kr === 'spend-lockread' && ZH.has(SSh.HELD_WHY[kr]) && JA.has(SSh.HELD_WHY[kr]) && /was there and could not be read/.test(tail('ledger-lock-unreadable')), JSON.stringify({ kr, tail: tail('ledger-lock-unreadable') }));
+    ok('§5g B-ef83 r1801 (1) the card and the agent\'s tail for a hold by an unreadable lock say THAT (zh/ja)', kr === 'spend-lockread' && gateOf(ZH.has(SSh.HELD_WHY[kr])) && gateOf(JA.has(SSh.HELD_WHY[kr])) && verdictOf(/was there and could not be read/.test(tail('ledger-lock-unreadable'))), JSON.stringify({ kr, tail: tail('ledger-lock-unreadable') }));
     // r1648 (d): the usage meter's note — its sentence for both states (zh/ja), nothing when there is nothing; and the payload carries it
     const USl = await import(path.join(REPO, 'src/lib/usage-source.js'));
     const nRef = USl.spendLedgerNote({ state: 'refused', error: 'EACCES' }), nUnl = USl.spendLedgerNote({ state: 'unlocked', error: 'EROFS' });
     ok('§5g B-ef83 r1648 (d) THE METER\'S NOTE: «Turns nobody typed are held — … (EACCES) …» / «… counted without the lock … (EROFS) …», none without a state; both sentences translated',
-      /^Turns nobody typed are held — VibeSpace cannot write the lock of their record \(EACCES\)/.test(String(nRef)) && /^Turns nobody typed are counted without the lock of their record — the data folder refuses it \(EROFS\)/.test(String(nUnl)) && USl.spendLedgerNote(null) === null
-        && ZH.has('Turns nobody typed are held — VibeSpace cannot write the lock of their record ({code}); they start again by themselves once it can') && JA.has('Turns nobody typed are counted without the lock of their record — the data folder refuses it ({code}); VibeSpace asks again every minute'),
+      gateOf(/^Turns nobody typed are held — VibeSpace cannot write the lock of their record \(EACCES\)/.test(String(nRef))) && gateOf(/^Turns nobody typed are counted without the lock of their record — the data folder refuses it \(EROFS\)/.test(String(nUnl))) && USl.spendLedgerNote(null) === null
+        && gateOf(ZH.has('Turns nobody typed are held — VibeSpace cannot write the lock of their record ({code}); they start again by themselves once it can')) && verdictOf(JA.has('Turns nobody typed are counted without the lock of their record — the data folder refuses it ({code}); VibeSpace asks again every minute')),
       JSON.stringify([nRef, nUnl]));
     { const nUr = USl.spendLedgerNote({ state: 'unreadable', error: 'EACCES' });
-      ok('§5g B-ef83 r1801 (1) the meter\'s note for a lock that is there and cannot be read (zh/ja)', /^Turns nobody typed are held — the lock of their record is there and cannot be read \(EACCES\)/.test(String(nUr)) && ZH.has('Turns nobody typed are held — the lock of their record is there and cannot be read ({code}); they start again by themselves once it reads') && JA.has('Turns nobody typed are held — the lock of their record is there and cannot be read ({code}); they start again by themselves once it reads'), String(nUr)); }
+      ok('§5g B-ef83 r1801 (1) the meter\'s note for a lock that is there and cannot be read (zh/ja)', gateOf(/^Turns nobody typed are held — the lock of their record is there and cannot be read \(EACCES\)/.test(String(nUr))) && gateOf(ZH.has('Turns nobody typed are held — the lock of their record is there and cannot be read ({code}); they start again by themselves once it reads')) && verdictOf(JA.has('Turns nobody typed are held — the lock of their record is there and cannot be read ({code}); they start again by themselves once it reads')), String(nUr)); }
     {
       const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
       const tmpU = tmpdir('vs-spend-5g-usage-'), cacheU = path.join(tmpU, 'usage-cache'); fs.mkdirSync(cacheU, { recursive: true });
@@ -4334,7 +4334,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         CODEX_SESSIONS_DIR: path.join(tmpU, 'cx'), META_DIR: path.join(tmpU, 'meta'), AVAILABLE_MODELS: { claude: [] }, BUFFERS_DIR: path.join(tmpU, 'buf'), spendGuard: { ledgerNotice: () => ({ state: 'refused', error: 'EACCES', since: 1 }) } });
       const payU = await new Promise((resolve) => routesU['/api/usage']({}, { json: resolve }));
       ok('§5g B-ef83 r1648 (d) /api/usage carries the guard\'s ledger state (spendLedger) — the meter\'s note reads it; server.js hands the guard on its EXISTING setupUsage line',
-        !!payU && !!payU.spendLedger && payU.spendLedger.state === 'refused' && /setupUsage\(\{ app, accounts, hosts, spendGuard, usageHistory,/.test(read('server.js')) && /spendLedgerNote\(this\._spendLedger, \{ t \}\)/.test(read('src/lib/usage-meter.js')),
+        !!payU && !!payU.spendLedger && payU.spendLedger.state === 'refused' && gateOf(/setupUsage\(\{ app, accounts, hosts, spendGuard, usageHistory,/.test(read('server.js'))) && verdictOf(/spendLedgerNote\(this\._spendLedger, \{ t \}\)/.test(read('src/lib/usage-meter.js'))),
         JSON.stringify(payU && payU.spendLedger));
     }
   }
@@ -4386,7 +4386,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
   {
     const { W, s1, s2, s3 } = scene3b({ serves: false });
     ok('§5g (1) AGED OUT, no take-back (the reader\'s ③b): it runs two hours after the give-up and is COUNTED WHERE IT RAN — the next spend is refused, worst hour 2 at cap 2 (the release: 3)',
-      s1 === true && s2 === 'hour-cap' && s3 === 'hour-cap' && W.maxIn(HOUR) === 2 && W.counts().hour === 2 && /ran in its agent after all — counted where it ran/.test(W.logs.join('\n')), JSON.stringify({ s1, s2, s3, worst: W.maxIn(HOUR), hour: W.counts().hour }));
+      s1 === true && s2 === 'hour-cap' && s3 === 'hour-cap' && W.maxIn(HOUR) === 2 && W.counts().hour === 2 && verdictOf(/ran in its agent after all — counted where it ran/.test(W.logs.join('\n'))), JSON.stringify({ s1, s2, s3, worst: W.maxIn(HOUR), hour: W.counts().hour }));
   }
   {   // an UNBOUND frame (no queue item the hub could name) aged out: nothing can watch it — its unit is counted where the hub stopped
     const W = mkWorld({ 'spend.unattendedPerIdentityHour': 2 });
@@ -4413,7 +4413,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const zero = JL.heldText({ total: 2, byConversation: { c: { count: 2, reason: { kind: 'spend-cap', why: 'hour-cap', cap: 0, identity: 'G' }, kinds: { 'spend-cap': 2 } } } }, { t: fill, cid: 'c' });
     const jobs = read('src/jobs.js');
     ok('§5g (3) Background Work\'s held line says an EMPTY cap as itself («no limit is set … — set a number»), never «hourly ceiling (0)»; a real 0 still says (0); the held record carries the flag; zh / ja',
-      /no limit is set for turns nobody typed — set a number/.test(words) && !/ceiling \(0\)/.test(words) && /ceiling \(0\)/.test(zero) && /if \(r\.capUnset === true\) out\.capUnset = true;/.test(jobs) && ZH.has('no limit is set for turns nobody typed — set a number') && JA.has('no limit is set for turns nobody typed — set a number'), words);
+      gateOf(/no limit is set for turns nobody typed — set a number/.test(words)) && !/ceiling \(0\)/.test(words) && gateOf(/ceiling \(0\)/.test(zero)) && gateOf(/if \(r\.capUnset === true\) out\.capUnset = true;/.test(jobs)) && gateOf(ZH.has('no limit is set for turns nobody typed — set a number')) && verdictOf(JA.has('no limit is set for turns nobody typed — set a number')), words);
   }
   const scene4 = (opts) => {   // the reader's d8 ④: the hub restarts, reads the holder dead (it is alive), then the agent re-states its queue
     const W = mkWorld({ 'spend.unattendedPerIdentityHour': 3 }, opts);
@@ -4429,7 +4429,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
   {
     const { W, settled, spent } = scene4({});
     ok('§5g (1) JUDGED GONE AT BOOT, alive after all (the reader\'s ④): its re-stated queue lists the three ⇒ each taken back out — none runs; the words wait ONCE (the three marked copies, never six)',
-      JSON.stringify(settled) === JSON.stringify(['unknown', 'unknown', 'unknown']) && W.queue.c1.length === 0 && W.ran.length === spent && spent === 3 && W.maxIn(HOUR) === 3 && W.stash.length === 3 && W.stash.every((x) => x.startsWith(QWm.REPEAT_HEAD)) && W.q.goneFor('c1').length === 0,
+      JSON.stringify(settled) === JSON.stringify(['unknown', 'unknown', 'unknown']) && W.queue.c1.length === 0 && W.ran.length === spent && spent === 3 && W.maxIn(HOUR) === 3 && W.stash.length === 3 && gateOf(W.stash.every((x) => x.startsWith(QWm.REPEAT_HEAD))) && W.q.goneFor('c1').length === 0,
       JSON.stringify({ settled, ran: W.ran.length, spent, worst: W.maxIn(HOUR), stash: W.stash.length, gone: W.q.goneFor('c1').length }));
   }
   {
@@ -4538,7 +4538,7 @@ console.log('\n§5d five deliveries dispatched in one pass cannot outrun the cei
       const W = mkWorld(m.mod);
       const rs = await Promise.all(CIDS.map((c) => send(W, c)));
       ok('§5d NEGATIVE CONTROL: without the hold all FIVE are authorized and charged against a cap of 2',
-        rs.every((r) => r.ok) && W.charged() === 5, JSON.stringify({ ok: rs.filter((r) => r.ok).length, charged: W.charged() }));
+        gateOf(rs.every((r) => r.ok)) && W.charged() === 5, JSON.stringify({ ok: rs.filter((r) => r.ok).length, charged: W.charged() }));
     }
   }
   {   // A DELIVERY THAT REACHES NO RUNG OPENS NO TURN — the hold comes back, or
@@ -4723,11 +4723,11 @@ console.log('\n§5e the two calls that must NOT consume the budget: the probe an
     // question and the charge, which is exactly what refuted the dispatch's probe above
     const JUDGED_PROBES = ['src/server/auto-resume.js:', 'src/server/delivery-wake.js:'];
     ok('§5e every probe in the tracked server source is a JUDGED pre-gate question — auto-resume\'s, and a delivery\'s wake before its resume (piece 7); a dispatch\'s compaction is HELD + noted under peer-compact, never probed',
-      probes.length === JUDGED_PROBES.length && JUDGED_PROBES.every((j) => probes.filter((x) => x.startsWith(j)).length === 1), probes.join(', ') || 'none found');
+      probes.length === JUDGED_PROBES.length && verdictOf(JUDGED_PROBES.every((j) => probes.filter((x) => x.startsWith(j)).length === 1)), probes.join(', ') || 'none found');
     const sh = read('src/server/stash-handover.js');
     const wakeBody = sh.slice(sh.indexOf('async function handOverWake('), sh.indexOf('function releaseWake('));
     ok('§5e …and the turn a delivery\'s probe precedes is CHARGED: handOverWake posts through the ladder (its own authorize + hold) under the delivery\'s reason, both spelled as literals',
-      /d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'peer-message'/.test(wakeBody) && /d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'job-notification'/.test(wakeBody) && !/hold:\s*false/.test(wakeBody));
+      gateOf(/d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'peer-message'/.test(wakeBody)) && gateOf(/d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'job-notification'/.test(wakeBody)) && !/hold:\s*false/.test(wakeBody));
   }
 
   // EVERY CHARGE THAT BUILDS ITS OWN PAYLOAD MUST CARRY THE HOLD — a census,
@@ -4767,7 +4767,7 @@ console.log('\n§5e the two calls that must NOT consume the budget: the probe an
     const scratch = "  spendGuard?.note?.({ reason: 'stop-nudge', session: s, identity: auth && auth.identity });";
     NOTE_CALL.lastIndex = 0;
     ok('§5e CONTROL: a payload WITHOUT the hold is caught by that same rule (r4\'s shipped line, verbatim)',
-      NOTE_CALL.test(scratch) && !/\bhold\b/.test(scratch));
+      gateOf(NOTE_CALL.test(scratch)) && !/\bhold\b/.test(scratch));
     NOTE_CALL.lastIndex = 0;
   }
 
@@ -4828,7 +4828,7 @@ console.log('\n§6 the Stop nudge: a persisted cooldown, an exit condition, and 
   guard = mkGuard();
   ok('§6 THE COOLDOWN SURVIVES A RESTART (this was an in-memory field only; the instance restarts several times a day)',
     stopCheck().block === false);
-  ok('§6 …and the record is on disk under the session-status key', /"claude:s1"/.test(fs.readFileSync(path.join(dataDir, 'spend-budget.json'), 'utf8')));
+  ok('§6 …and the record is on disk under the session-status key', verdictOf(/"claude:s1"/.test(fs.readFileSync(path.join(dataDir, 'spend-budget.json'), 'utf8'))));
 
   // THE EXIT CONDITION, on its OWN session so the count starts at zero (the
   // nudges above already left three unanswered ones on s1 — that IS the
@@ -4839,7 +4839,7 @@ console.log('\n§6 the Stop nudge: a persisted cooldown, an exit condition, and 
   const s2 = { agentToken: 'vsst_t', backend: 'claude', cwd: dataDir, name: 'conv2' };
   sessions.set('s2', s2);
   const n0 = [stopCheck(), stopCheck(), stopCheck()];
-  ok('§6 with cooldown 0 it nudges every stop — until the exit condition', n0.every((r) => r.block === true), JSON.stringify(n0.map((r) => r.block)));
+  ok('§6 with cooldown 0 it nudges every stop — until the exit condition', verdictOf(n0.every((r) => r.block === true)), JSON.stringify(n0.map((r) => r.block)));
   ok('§6 the 4th nudge to a session that has NEVER reported a status is refused (D8 exit condition)', stopCheck().block === false);
   statuses.set('claude:s2', { at: Date.now(), state: 'working' });
   ok('§6 …and a single status report re-opens it (the counter measures "answered", not age)', stopCheck().block === true);
@@ -4881,7 +4881,7 @@ console.log('\n§7 paid overage: refused for unattended spend, visible where the
   w.arm(s); await w.fireDue();
   ok('§7 D3b: the auto-continue is REFUSED while the account bills paid overage', w.fired.length === 0);
   ok('§7 …and the refusal names it (the panel word and the inbox word are the same)',
-    w.inbox.some((i) => /paid overage/.test(i.text)), JSON.stringify(w.inbox.map((i) => i.text)));
+    verdictOf(w.inbox.some((i) => /paid overage/.test(i.text))), JSON.stringify(w.inbox.map((i) => i.text)));
   ok('§7 …the session stays armed (this is money, not a broken promise)', !!w.ar._armed.get('sess-ov-1'));
 
   // the opt-in
@@ -4899,9 +4899,9 @@ console.log('\n§7 paid overage: refused for unattended spend, visible where the
     // the NAMES, not the exact import line: r4 widened this import to bring in
     // `spendControlState` beside it, and a pin on the whole line makes adding
     // the next PURE verdict look like a regression
-    /import \{[^}]*\boverageState\b[^}]*\} from '\.\.\/spend-authorizer\.js'/.test(um) && /overageChip\(overageState\(snap\)/.test(um));
+    gateOf(/import \{[^}]*\boverageState\b[^}]*\} from '\.\.\/spend-authorizer\.js'/.test(um)) && verdictOf(/overageChip\(overageState\(snap\)/.test(um)));
   ok('§7 PANEL: Manage Agents — where the owner picks a switch target — renders it too (design §1.4: provenance reached one panel of four; since 2.369.189 as the credits chip on the row\'s identity line)',
-    /overageChip\(overageState\(u\)/.test(ma) && /creditsSlotHtml\(/.test(ma));
+    gateOf(/overageChip\(overageState\(u\)/.test(ma)) && verdictOf(/creditsSlotHtml\(/.test(ma)));
   const chip = require(path.join(REPO, 'src/lib/usage-source.js'));
   // 2.369.189 (owner: "这啥玩意啊 不如显示个钱的图标"): the chip's face is the money icon + ONE
   // word; the sentence and the money moved into its tip (title + aria-label)
@@ -4910,7 +4910,7 @@ console.log('\n§7 paid overage: refused for unattended spend, visible where the
     chip.overageChip(A.overageState({ overage: { inUse: false, status: 'rejected', disabledReason: 'org_level_disabled_until' } })) === null
     && chip.overageChip(A.overageState({})) === null
     && inUseChip.label === 'Credits' && inUseChip.money === '$4.25 / $20.00'
-    && /^Using paid overage credits — .*billed pay-per-use\. Spent this period: \$4\.25 \/ \$20\.00\. Automatic turns are refused/.test(inUseChip.tip), JSON.stringify(inUseChip));
+    && verdictOf(/^Using paid overage credits — .*billed pay-per-use\. Spent this period: \$4\.25 \/ \$20\.00\. Automatic turns are refused/.test(inUseChip.tip)), JSON.stringify(inUseChip));
   ok('§7 …and it never claims "in use" about a record that stopped being refreshed (that chip tip promises a refusal that no longer happens) — only the dim credits chip, whose tip promises none',
     chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() - A.OVERAGE_STALE_MS - 1 } }))?.kind === 'credits'
     && !/refused/.test(chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() - A.OVERAGE_STALE_MS - 1 } })).tip));
@@ -4944,7 +4944,7 @@ console.log('\n§7c usage credits: a dim chip before the bill, a last-resort ran
   const chip = require(path.join(REPO, 'src/lib/usage-source.js'));
   const cr = chip.overageChip(A.overageState(allowed));
   ok('§7c the chip: a DIM "credits" chip for an allowed org (kind credits), today\'s chip for inUse, nothing for disabled / unknown',
-    cr?.kind === 'credits' && cr.dim === true && cr.label === 'Credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(cr.tip)
+    cr?.kind === 'credits' && cr.dim === true && cr.label === 'Credits' && gateOf(/Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(cr.tip))
     && chip.overageChip(A.overageState({ overage: { inUse: true, asOf: now } }, { now }))?.kind === 'inUse'
     && chip.overageChip(A.overageState(disabled)) === null && chip.overageChip(A.overageState({})) === null, JSON.stringify(cr));
   // SPEND-GUARD UNCHANGED (pinned): a credits-allowed member changes no verdict
@@ -4973,7 +4973,7 @@ console.log('\n§7c usage credits: a dim chip before the bill, a last-resort ran
   ok('§7c ENGINE: a pool parked on a spent credits member posts the parking notice — one KEY per (pool, member, 6 h bucket), so the server\'s per-key dedup makes it once per 6 h',
     creditKeys.length === 2 && creditKeys[0] === creditKeys[1] && creditKeys[0] === `pool-credits-${w2.P}-${w2.M1}-${Math.floor(Date.now() / (6 * 3600e3))}`, JSON.stringify(w2.noticeKeys));
   ok('§7c …the sentence names the member and the bill, and the pool is NOT reported as stuck',
-    w2.notices.some((t) => /^Pool "pool" is running on Alpha's usage credits — requests past its quota are billed pay-per-use \(Alpha: spent: 5h 0%, 7d 0%\); every other member is out of quota\./.test(t))
+    gateOf(w2.notices.some((t) => /^Pool "pool" is running on Alpha's usage credits — requests past its quota are billed pay-per-use \(Alpha: spent: 5h 0%, 7d 0%\); every other member is out of quota\./.test(t)))
     && !w2.noticeKeys.some((k) => /^pool-blocked-/.test(k)) && w2.am.poolCurrent(w2.P) === w2.M1, JSON.stringify(w2.notices));
   // …and the LAST-RESORT switch: current spent (no credits), the other member has credits
   const w3 = mkWorld({ settings: {} });
@@ -4981,13 +4981,13 @@ console.log('\n§7c usage credits: a dim chip before the bill, a last-resort ran
   w3.writeCache(w3.M2, w3.healthy({ overage: { inUse: false, status: 'allowed', asOf: now } }));
   w3.eng.maybePoolAutoSwitchForPool(w3.P, { force: true });
   ok('§7c ENGINE: the last-resort switch lands on the credits member, says so in the switch notice and posts the parking notice',
-    w3.am.poolCurrent(w3.P) === w3.M2 && w3.notices.some((t) => /auto-switched to Beta .*the last resort: Beta bills pay-per-use past its quota \(usage credits\)/.test(t))
-    && w3.noticeKeys.some((k) => k === `pool-credits-${w3.P}-${w3.M2}-${Math.floor(Date.now() / (6 * 3600e3))}`), JSON.stringify(w3.notices));
+    w3.am.poolCurrent(w3.P) === w3.M2 && gateOf(w3.notices.some((t) => /auto-switched to Beta .*the last resort: Beta bills pay-per-use past its quota \(usage credits\)/.test(t)))
+    && verdictOf(w3.noticeKeys.some((k) => k === `pool-credits-${w3.P}-${w3.M2}-${Math.floor(Date.now() / (6 * 3600e3))}`)), JSON.stringify(w3.notices));
   // the panels render the chip from the same PURE rule
   const ma2 = read('src/lib/manage-agents.js'), um2 = read('src/lib/usage-meter.js');
   ok('§7c PANEL: the roster renders the credits chip on the identity line (creditsSlotHtml → creditsChipHtml) and the popup beside the provenance line (the same creditsChipHtml, the money icon)',
-    /const creditsSlotHtml = \(u\) => `<span class="acct-credits-slot">\$\{creditsChipHtml\(creditsChipFor\(u\), \{ esc: escHtml, icon: UI_ICONS\.money \}\)\}<\/span>`/.test(ma2)
-    && /if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)(?: \+ \(ovc\.kind === 'inUse' && !turnsAllowed \? ` <button [^`]*data-door=\"settings:spend\.allowOverageTurns\"[^`]*` : ''\))?\);/.test(um2));
+    gateOf(/const creditsSlotHtml = \(u\) => `<span class="acct-credits-slot">\$\{creditsChipHtml\(creditsChipFor\(u\), \{ esc: escHtml, icon: UI_ICONS\.money \}\)\}<\/span>`/.test(ma2))
+    && verdictOf(/if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)(?: \+ \(ovc\.kind === 'inUse' && !turnsAllowed \? ` <button [^`]*data-door=\"settings:spend\.allowOverageTurns\"[^`]*` : ''\))?\);/.test(um2)));
   // THE ORG FACTS SURVIVE THE IDENTITY REPAIR (final verifier, the fail-closed
   // census): repairSidecarsByApiPhase rebuilds a cache whose 7d contradicts the
   // account's API phase — and used to rebuild it WITHOUT `overage`/`spend`, so
@@ -5012,7 +5012,7 @@ console.log('\n§7c usage credits: a dim chip before the bill, a last-resort ran
     const st1 = A.overageState(c1, { now });
     const gate = (c) => A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: K, name: 'Member K' }, state: A.emptyBudget(), now, overage: A.overageState(c, { now }) });
     ok('§7c REPAIR (replaced): the rebuilt cache carries overage (inUse, status, resetsAt, asOf) and spend verbatim, overageState still reads in-use, and the authorizer still REFUSES overage-in-use',
-      r1.counts.replaced === 1 && c1.sevenDay && rl.weeklyNear(c1.sevenDay.resetsAt, WA) === true && c1.overage && c1.overage.inUse === true && c1.overage.status === 'allowed' && c1.overage.resetsAt === OV.resetsAt && c1.overage.asOf === OV.asOf && c1.spend && c1.spend.used === 12.5 && c1.spend.limit === 50
+      r1.counts.replaced === 1 && gateOf(c1.sevenDay) && rl.weeklyNear(c1.sevenDay.resetsAt, WA) === true && gateOf(c1.overage) && c1.overage.inUse === true && c1.overage.status === 'allowed' && c1.overage.resetsAt === OV.resetsAt && c1.overage.asOf === OV.asOf && gateOf(c1.spend) && c1.spend.used === 12.5 && c1.spend.limit === 50
       && st1.inUse === 'yes' && st1.mode === 'inUse' && gate(c1).ok === false && gate(c1).why === 'overage-in-use', JSON.stringify({ counts: r1.counts, ov: c1.overage, sp: c1.spend, st: st1.inUse, gate: gate(c1) }));
     // …and the EMPTIED branch (no anchor agrees wholly): a scoped foreign bucket on every anchor
     const dd2 = path.join(tmpdir('vs-spend-orgfacts2-'), 'data');
@@ -5022,7 +5022,7 @@ console.log('\n§7c usage credits: a dim chip before the bill, a last-resort ran
     const r2 = repair.repairSidecarsByApiPhase({ dataDir: dd2, accounts: accts, id: 'T-orgfacts2' });
     const c2 = JSON.parse(fs.readFileSync(path.join(dd2, 'usage-cache', K + '.json'), 'utf8'));
     ok('§7c REPAIR (emptied): the identity-only remnant STILL carries overage + spend, and the authorizer still refuses — an emptied reading is not an emptied bill',
-      r2.counts.emptied === 1 && !c2.sevenDay && c2.overage && c2.overage.inUse === true && c2.overage.status === 'allowed' && c2.spend && c2.spend.used === 12.5 && gate(c2).why === 'overage-in-use', JSON.stringify({ counts: r2.counts, ov: c2.overage, gate: gate(c2) }));
+      r2.counts.emptied === 1 && !c2.sevenDay && gateOf(c2.overage) && c2.overage.inUse === true && c2.overage.status === 'allowed' && gateOf(c2.spend) && c2.spend.used === 12.5 && gate(c2).why === 'overage-in-use', JSON.stringify({ counts: r2.counts, ov: c2.overage, gate: gate(c2) }));
   }
 }
 
@@ -5073,7 +5073,7 @@ console.log('\n§7b the three fields the §1.4 CLOSED row names each have ONE re
     const row = doc.split('\n').find((l) => /Overage is captured and discarded/.test(l)) || '';
     ok('§7b the §1.4 row exists and is a single table row (the census has something to check)', row.length > 200);
     ok('§7b …and its verdict names the reader of EVERY field it claims',
-      CLAIMED.every((c) => row.includes(c.reader)),
+      verdictOf(CLAIMED.every((c) => row.includes(c.reader))),
       CLAIMED.filter((c) => !row.includes(c.reader)).map((c) => c.reader).join(', '));
     ok('§7b NEGATIVE CONTROL: r3\'s verdict text (one reader named) fails that check',
       !CLAIMED.every((c) => '**CLOSED 2026-09-08**: one reader (`overageState`, PURE) asked by the authorizer'.includes(c.reader)));
@@ -5089,7 +5089,7 @@ console.log('\n§7b the three fields the §1.4 CLOSED row names each have ONE re
   ok('§7b a codex account that has REACHED its spend control refuses unattended spend, by NAME',
     scAuth({ spendControlReached: true, fetchedAt: now }).why === 'spend-control-reached');
   ok('§7b …and the refusal says WHY a turn there is worthless (rejected, not billed)',
-    /requests are rejected/.test(scAuth({ spendControlReached: true, fetchedAt: now }).detail));
+    verdictOf(/requests are rejected/.test(scAuth({ spendControlReached: true, fetchedAt: now }).detail)));
   ok('§7b P6: `false` and a missing field are not claims and never block',
     scAuth({ spendControlReached: false, fetchedAt: now }).ok === true
     && scAuth({ fetchedAt: now }).ok === true && scAuth(null).ok === true);
@@ -5109,7 +5109,7 @@ console.log('\n§7b the three fields the §1.4 CLOSED row names each have ONE re
     ok('§7b …and an UNDATED one cannot claim the present either',
       scAuth(undated, now).ok === true && A.spendControlState(undated, { now }).evidence === 'undated');
     ok('§7b it uses the SAME staleness constant as its sibling (one physical fact, one window)',
-      /staleMs = OVERAGE_STALE_MS/.test(auth.slice(auth.indexOf('function spendControlState'), auth.indexOf('function spendControlState') + 400)));
+      verdictOf(/staleMs = OVERAGE_STALE_MS/.test(auth.slice(auth.indexOf('function spendControlState'), auth.indexOf('function spendControlState') + 400))));
     ok('§7b `reached:no` is deliberately NOT date-bounded (it blocks nothing, so no decision changes)',
       A.spendControlState({ spendControlReached: false, fetchedAt: now - A.OVERAGE_STALE_MS * 4 }, { now }).reached === 'no');
   }
@@ -5142,13 +5142,13 @@ console.log('\n§7b the three fields the §1.4 CLOSED row names each have ONE re
     const um = read('src/lib/usage-meter.js'), ma = read('src/lib/manage-agents.js');
     const chip = require(path.join(REPO, 'src/lib/usage-source.js'));
     ok('§7b PANEL: the usage popup renders the spend-control chip from that same PURE rule',
-      /spendControlChip\(spendControlState\(snap\)/.test(um) && /\bspendControlState\b/.test(um));
+      gateOf(/spendControlChip\(spendControlState\(snap\)/.test(um)) && verdictOf(/\bspendControlState\b/.test(um)));
     ok('§7b PANEL: Manage Agents — where the owner picks a switch target — renders it too',
-      /spendControlChip\(spendControlState\(u\)/.test(ma));
+      verdictOf(/spendControlChip\(spendControlState\(u\)/.test(ma)));
     ok('§7b the chip says nothing when the control is off or unknown, and names it when it is on',
       chip.spendControlChip({ reached: 'no' }) === null && chip.spendControlChip({ reached: 'unknown' }) === null
       && chip.spendControlChip(null) === null
-      && /spend control reached/.test(chip.spendControlChip({ reached: 'yes' }).label));
+      && verdictOf(/spend control reached/.test(chip.spendControlChip({ reached: 'yes' }).label)));
   }
 }
 
@@ -5191,11 +5191,11 @@ console.log('\n§8 the EDF reserve floor (D2): a voluntary move stops at the flo
   const { poolBlockedNotice } = require(path.join(REPO, 'src/account-pool-auto.js'));
   const sentence = poolBlockedNotice(held, { poolName: 'All', currentName: 'B' });
   ok('§8 the blocked notice says the SPENDING limit, not "out of quota" (which prescribes waiting for a reset)',
-    /held back by your spending limits/i.test(sentence) && /15% reserve floor/.test(sentence) && !/out of quota/.test(sentence), sentence);
+    gateOf(/held back by your spending limits/i.test(sentence)) && gateOf(/15% reserve floor/.test(sentence)) && !/out of quota/.test(sentence), sentence);
   const quotaWall = poolBlockedNotice(run({ b: acct(0.99, 6 * D), a: acct(0.995, 12 * H) }, { reserveFloorPct: 15 }), { poolName: 'All', currentName: 'B' });
-  ok('§8 CONTROL: a quota-emptied list still says the quota sentence, verbatim as before', /no member can serve it — B is spent:/.test(quotaWall), quotaWall);
+  ok('§8 CONTROL: a quota-emptied list still says the quota sentence, verbatim as before', verdictOf(/no member can serve it — B is spent:/.test(quotaWall)), quotaWall);
   ok('§8 the engine reads both bars from SETTINGS and hands them to the pure decision',
-    /reserveFloorPct: reserveFloorPct\(\), overageIds: overageMemberIds\(/.test(read('src/server/usage-pool-engine.js')));
+    verdictOf(/reserveFloorPct: reserveFloorPct\(\), overageIds: overageMemberIds\(/.test(read('src/server/usage-pool-engine.js'))));
   const w = mkWorld({ settings: {} });
   ok('§8 the shipped default floor is 15% (D2), read per decision', w.eng.reserveFloorPct() === 15);
   const w0 = mkWorld({ settings: { 'pool.reserveFloorPct': 0 } });
@@ -5287,7 +5287,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
     // loading at all proves the re-binding reached those requires.
     const arSrc = read('src/server/auto-resume.js');
     ok('§9 NEGATIVE CONTROL scope: the module HAS relative requires, so the copy must resolve them as the real module does (mutantModule re-binds its require)',
-      /require\('\.\.?\//.test(arSrc));
+      verdictOf(/require\('\.\.?\//.test(arSrc)));
     // the pre-fix bytes, byte-exact (git show 40ad936d:src/server/auto-resume.js
     // — the commit BOTH chains branched from, so it is the one shape that
     // predates the spend ceiling AND the generic resume verb)
@@ -5304,7 +5304,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
     const preM = mutantModule('src/server/auto-resume.js', subs);
     const preSrc = preM.file ? fs.readFileSync(preM.file, 'utf8') : '';
     ok('§9 NEGATIVE CONTROL: both pre-fix shapes were re-applied to the copy (an unapplied patch is a green control)',
-      !preM.err && preM.hits === 2 && /catch \{ gate = true; \}/.test(preSrc) && preSrc.includes(MASTER_PROMISE),
+      !preM.err && preM.hits === 2 && gateOf(/catch \{ gate = true; \}/.test(preSrc)) && verdictOf(preSrc.includes(MASTER_PROMISE)),
       preM.err || `${preM.hits}/2 substitutions`);
     // …and they are the PRE-FIX bytes, byte for byte — not a shape this suite invented.
     {
@@ -5312,7 +5312,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
       try { masterSrc = execFileSync('git', ['-C', REPO, 'show', '40ad936d:src/server/auto-resume.js'], { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 }).toString(); } catch { }
       if (!masterSrc) console.log('  · SKIP: git could not read 40ad936d:src/server/auto-resume.js (the pre-fix bytes)');
       else ok('§9 …and both restored shapes are byte-identical to 40ad936d\'s (the control reproduces the SHIPPED defect, not an invented one)',
-        masterSrc.includes('catch { gate = true; }') && masterSrc.includes(MASTER_PROMISE));
+        gateOf(masterSrc.includes('catch { gate = true; }')) && verdictOf(masterSrc.includes(MASTER_PROMISE)));
     }
     if (preM.mod) {
       const preThrew = await gateRun(preM.mod, () => { throw new Error('boom'); });
@@ -5327,9 +5327,9 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   // literal inside the boot wiring. Both are named here so a reader knows
   // which claim is a measurement and which is a read.
   ok('§9 the pre-fire gate fails CLOSED in the engine (was `catch { return true; }`)',
-    /refusing the continue \(fail closed\)[\s\S]{0,200}return false;/.test(read('src/server/usage-pool-engine.js')));
+    verdictOf(/refusing the continue \(fail closed\)[\s\S]{0,200}return false;/.test(read('src/server/usage-pool-engine.js'))));
   ok('§9 …and at the wiring site in server.js (one alone stayed green: a throw was answered with a billed turn at BOTH layers)',
-    /beforeFire: \(id, s\) => \{ try \{ return beforeAutoResumeFire\(id, s\); \} catch \(e\) \{[^}]*return false; \} \}/.test(read('server.js')));
+    verdictOf(/beforeFire: \(id, s\) => \{ try \{ return beforeAutoResumeFire\(id, s\); \} catch \(e\) \{[^}]*return false; \} \}/.test(read('server.js'))));
   const engSrc = read('src/server/usage-pool-engine.js');
   const gateAt = engSrc.indexOf('async function beforeAutoResumeFire');
   const gateEnd = engSrc.indexOf('\nfunction ', gateAt);   // the next top-level declaration
@@ -5384,7 +5384,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   const coldW = creditWorld(100, { cold: true });
   coldW.w.eng.spendGuard.flush();
   ok('§9 a COLD conversation with a healthy pool member never reaches the ceiling: no credit, nothing charged (the switch rung comes first)',
-    coldW.spent === false && (() => { try { return (JSON.parse(fs.readFileSync(path.join(coldW.w.dataDir, 'spend-budget.json'), 'utf8')).budget.instance || []).length === 0; } catch { return true; } })());
+    coldW.spent === false && verdictOf((() => { try { return (JSON.parse(fs.readFileSync(path.join(coldW.w.dataDir, 'spend-budget.json'), 'utf8')).budget.instance || []).length === 0; } catch { return true; } })()));
   // and the LEDGER agrees with the pty in both directions (an assertion about
   // the frame alone cannot tell "refused" from "charged but never written")
   allowed.w.eng.spendGuard.flush(); denied.w.eng.spendGuard.flush();
@@ -5418,7 +5418,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   // (b) a charge stamps {at, reason}; a mixed ledger counts both shapes together
   let st = A.noteUnattendedSpend(legacy, { identity: { key: 'sub-L', name: 'L' }, at: now, reason: 'job-notification' }).state;
   const last = st.identities['sub-L'][st.identities['sub-L'].length - 1];
-  ok('§10 a charge writes {at, reason} beside the timestamp', last && last.at === now && last.reason === 'job-notification', JSON.stringify(last));
+  ok('§10 a charge writes {at, reason} beside the timestamp', gateOf(last) && last.at === now && last.reason === 'job-notification', JSON.stringify(last));
   ok('§10 a mixed (bare + typed) ledger counts every stamp once', A.spendCounts(st, 'sub-L', now).hour === 3 && A.spendCounts(st, 'sub-L', now).producers.hour['job-notification'] === 1, JSON.stringify(A.spendCounts(st, 'sub-L', now)));
   ok('§10 an undeclared reason is stored as null, never invented', A.noteUnattendedSpend(A.emptyBudget(), { identity: { key: 'x' }, at: now, reason: 'not-a-reason' }).state.identities.x[0].reason === null);
   // (c) the refusal names the producers that spent the window
@@ -5427,21 +5427,21 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   const v = A.authorizeUnattendedSpend({ reason: 'stop-nudge', identity: { key: 'sub-L', name: 'L' }, state: st, limits: { perIdentityHour: 12 }, now });
   ok('§10 the hour-cap refusal carries the window\'s producers (job-notification ×10, auto-resume ×1, unknown ×2)', v.ok === false && v.why === 'hour-cap' && v.producers['job-notification'] === 10 && v.producers['auto-resume'] === 1 && v.producers.unknown === 2, JSON.stringify(v.producers));
   const txt = A.refusalText(v);
-  ok('§10 …and the sentence says who spent it, most first', /Spent by: job-notification ×10, unknown/.test(txt) === false && /Spent by: job-notification ×10, older builds \(no reason recorded\) ×2, auto-resume ×1\./.test(txt), txt);
+  ok('§10 …and the sentence says who spent it, most first', /Spent by: job-notification ×10, unknown/.test(txt) === false && verdictOf(/Spent by: job-notification ×10, older builds \(no reason recorded\) ×2, auto-resume ×1\./.test(txt)), txt);
   // (d) the 80 % notice names them too
   let w = null, s2 = A.emptyBudget();
   for (let i = 0; i < 8; i++) { const r = A.noteUnattendedSpend(s2, { identity: { key: 'sub-N', name: 'N' }, at: now - i, reason: i < 6 ? 'job-notification' : 'peer-message', limits: { perIdentityHour: 10, noticePct: 80 } }); s2 = r.state; if (r.warn) w = r.warn; }
-  ok('§10 the 80 % notice carries and prints the top producers of its window', w && w.producers && w.producers['job-notification'] === 6 && /Top producers this hour: job-notification ×6, peer-message ×2\./.test(A.noticeText(w)), w && A.noticeText(w));
+  ok('§10 the 80 % notice carries and prints the top producers of its window', gateOf(w) && gateOf(w.producers) && w.producers['job-notification'] === 6 && verdictOf(/Top producers this hour: job-notification ×6, peer-message ×2\./.test(A.noticeText(w))), w && A.noticeText(w));
   // (e) the guard passes the reason through to the stamp (wiring pin + a real charge)
   const gsrc = read('src/server/spend-guard.js');
-  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind, press \}\)/.test(gsrc));   // + the reservation's id (lane queued-is-not-woke round 2) + the press id (the attended bulk press's record)
+  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', verdictOf(/A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind, press \}\)/.test(gsrc)));   // + the reservation's id (lane queued-is-not-woke round 2) + the press id (the attended bulk press's record)
   {
     const dir = tmpdir('vs-spend-reason-');
     const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, identityOf: () => ({ key: 'sub-G', name: 'G' }), getUserTodos: () => null, log: () => { } });
     const auth = g.authorize({ reason: 'job-notification', identity: { key: 'sub-G', name: 'G' } });
     g.note({ reason: 'job-notification', identity: auth.identity, hold: auth.hold });
     const stamps = g.snapshot().budget.identities['sub-G'] || [];
-    ok('§10 a real guard charge lands as {at, reason:"job-notification"}', stamps.length === 1 && stamps[0].reason === 'job-notification' && Number.isFinite(stamps[0].at), JSON.stringify(stamps));
+    ok('§10 a real guard charge lands as {at, reason:"job-notification"}', stamps.length === 1 && stamps[0].reason === 'job-notification' && verdictOf(Number.isFinite(stamps[0].at)), JSON.stringify(stamps));
     g.flush();
     const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'spend-budget.json'), 'utf-8'));
     ok('§10 …and persists in that shape', onDisk.budget.identities['sub-G'][0].reason === 'job-notification');
@@ -5484,26 +5484,26 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
   console.log('    zh: ' + out.zh.text + ' / ' + out.zh.lines.join(' / '));
   console.log('    ja: ' + out.ja.text + ' / ' + out.ja.lines.join(' / '));
   const has = (o, re) => re.test(o.text + '\n' + o.lines.join('\n'));
-  ok('§10r hour-cap, en: the PRODUCER (the continue after a usage limit), the CONVERSATION («build-bot»), the account, the cap, the next free slot in the viewer\'s zone', has(out.en, /the continue after a usage limit/) && has(out.en, /«build-bot»/) && has(out.en, /acct-1 has used its 30 turns/) && has(out.en, /The next frees at 1:21 AM\./), out.en.text);
-  ok('§10r …the COUNTS per window and ONE «Spent by» row per producer, most first (job-notification ×20, peer-message ×10) — and the Spending door', has(out.en, /30 of 30 this hour, 30 of 200 in 24 hours; this instance 30 of 800/) && out.en.lines.filter((l) => /^Spent by /.test(l)).join('|') === 'Spent by a Background Work notification: 20|Spent by a message from another session: 10' && has(out.en, /Held: the continue after a usage limit \(auto-resume\)/) && has(out.en, /Settings → Spending/), out.en.lines.join(' | '));
-  ok('§10r …in zh: the producer, the conversation, the counts and each «Spent by» row, in Chinese', has(out.zh, /用量限制后的自动继续/) && has(out.zh, /「build-bot」/) && has(out.zh, /本小时 30\/30/) && has(out.zh, /由一条后台任务通知花掉：20/) && has(out.zh, /由一条来自其他会话的消息花掉：10/) && !has(out.zh, /MISSING/), out.zh.text + ' / ' + out.zh.lines.join(' / '));
-  ok('§10r …in ja: the same facts in Japanese', has(out.ja, /使用制限後の自動続行/) && has(out.ja, /「build-bot」/) && has(out.ja, /この 1 時間 30\/30/) && has(out.ja, /バックグラウンド作業の通知による消費：20/) && !has(out.ja, /MISSING/), out.ja.text);
+  ok('§10r hour-cap, en: the PRODUCER (the continue after a usage limit), the CONVERSATION («build-bot»), the account, the cap, the next free slot in the viewer\'s zone', gateOf(has(out.en, /the continue after a usage limit/)) && gateOf(has(out.en, /«build-bot»/)) && gateOf(has(out.en, /acct-1 has used its 30 turns/)) && verdictOf(has(out.en, /The next frees at 1:21 AM\./)), out.en.text);
+  ok('§10r …the COUNTS per window and ONE «Spent by» row per producer, most first (job-notification ×20, peer-message ×10) — and the Spending door', gateOf(has(out.en, /30 of 30 this hour, 30 of 200 in 24 hours; this instance 30 of 800/)) && out.en.lines.filter((l) => /^Spent by /.test(l)).join('|') === 'Spent by a Background Work notification: 20|Spent by a message from another session: 10' && gateOf(has(out.en, /Held: the continue after a usage limit \(auto-resume\)/)) && verdictOf(has(out.en, /Settings → Spending/)), out.en.lines.join(' | '));
+  ok('§10r …in zh: the producer, the conversation, the counts and each «Spent by» row, in Chinese', gateOf(has(out.zh, /用量限制后的自动继续/)) && gateOf(has(out.zh, /「build-bot」/)) && gateOf(has(out.zh, /本小时 30\/30/)) && gateOf(has(out.zh, /由一条后台任务通知花掉：20/)) && gateOf(has(out.zh, /由一条来自其他会话的消息花掉：10/)) && !has(out.zh, /MISSING/), out.zh.text + ' / ' + out.zh.lines.join(' / '));
+  ok('§10r …in ja: the same facts in Japanese', gateOf(has(out.ja, /使用制限後の自動続行/)) && gateOf(has(out.ja, /「build-bot」/)) && gateOf(has(out.ja, /この 1 時間 30\/30/)) && gateOf(has(out.ja, /バックグラウンド作業の通知による消費：20/)) && !has(out.ja, /MISSING/), out.ja.text);
   const later = render('en', hour, Date.parse('2026-10-28T08:21:33Z') + 330 * 60e3);
-  ok('§10r a next-free instant already PAST is said «The next is free now.» at render (the 6-hour notice at +330 min) — never the stale clock', /The next is free now\.$/.test(later.text) && !/01:21/.test(later.text), later.text);
+  ok('§10r a next-free instant already PAST is said «The next is free now.» at render (the 6-hour notice at +330 min) — never the stale clock', gateOf(/The next is free now\.$/.test(later.text)) && !/01:21/.test(later.text), later.text);
   const out2 = fileWith(null, { reason: 'job-notification', identity: id, sessionName: 'nightly' }, {}, { usable: false, state: 'login expired' });
   const o2 = Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, render(l, out2)]));
-  ok('§10r identity-cannot-serve names the LOGIN and its door — the Usage window — and says the limits cannot help (never «used its N turns», never «change the limits»)', has(o2.en, /acct-1 cannot answer a request right now \(login expired\) — sign it in again from the Usage window/) && has(o2.en, /Sign acct-1 in again from the Usage window/) && !has(o2.en, /Change the limits/) && has(o2.zh, /「用量」窗口/) && has(o2.ja, /「使用状況」ウィンドウ/), o2.en.text + ' | ' + o2.en.lines.join(' | '));
+  ok('§10r identity-cannot-serve names the LOGIN and its door — the Usage window — and says the limits cannot help (never «used its N turns», never «change the limits»)', gateOf(has(o2.en, /acct-1 cannot answer a request right now \(login expired\) — sign it in again from the Usage window/)) && gateOf(has(o2.en, /Sign acct-1 in again from the Usage window/)) && !has(o2.en, /Change the limits/) && gateOf(has(o2.zh, /「用量」窗口/)) && verdictOf(has(o2.ja, /「使用状況」ウィンドウ/)), o2.en.text + ' | ' + o2.en.lines.join(' | '));
   const out3 = fileWith(null, { reason: 'job-notification', identity: id, sessionName: 'nightly' }, { 'spend.unattendedPerIdentityHour': 0 });
   const o3 = Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, render(l, out3)]));
-  ok('§10r a cap of 0 says the turns are SWITCHED OFF for the account (never «used its 0 turns»), with the Spending door', has(o3.en, /turns nobody typed are switched off for acct-1/) && !has(o3.en, /used its 0/) && has(o3.en, /Settings → Spending/) && has(o3.zh, /acct-1 的无人输入轮次已关闭/) && has(o3.ja, /acct-1 では誰も入力していないターンがオフです/), o3.en.text);
+  ok('§10r a cap of 0 says the turns are SWITCHED OFF for the account (never «used its 0 turns»), with the Spending door', gateOf(has(o3.en, /turns nobody typed are switched off for acct-1/)) && !has(o3.en, /used its 0/) && gateOf(has(o3.en, /Settings → Spending/)) && gateOf(has(o3.zh, /acct-1 的无人输入轮次已关闭/)) && verdictOf(has(o3.ja, /acct-1 では誰も入力していないターンがオフです/)), o3.en.text);
   const out4 = fileWith(null, { reason: 'job-notification', identity: null, sessionName: 'nightly' });
   const o4 = render('en', out4);
-  ok('§10r identity-unknown says the account could not be told and WHERE TO LOOK (the Usage window, the [spend] lines) — no empty account, no «limit»', has(o4, /could not tell which account the turn would bill/) && has(o4, /Account: not known/) && has(o4, /\[spend\] lines/) && !/ on \.| on $/.test(o4.text), o4.text + ' | ' + o4.lines.join(' | '));
+  ok('§10r identity-unknown says the account could not be told and WHERE TO LOOK (the Usage window, the [spend] lines) — no empty account, no «limit»', gateOf(has(o4, /could not tell which account the turn would bill/)) && gateOf(has(o4, /Account: not known/)) && gateOf(has(o4, /\[spend\] lines/)) && !/ on \.| on $/.test(o4.text), o4.text + ' | ' + o4.lines.join(' | '));
   const sc = A.refusalI18n({ ok: false, why: 'spend-control-reached', reason: 'peer-message', identity: id, limits: A.BUDGET_DEFAULTS, counts: { hour: 1, day: 1, instanceDay: 1 } }, { sessionName: 'ops' });
   const o5 = render('en', { i18n: sc });
-  ok('§10r spend-control-reached names the CONTROL and says it is the vendor\'s (never a VibeSpace limit)', has(o5, /acct-1 has reached its spend control/) && has(o5, /set with the account’s vendor/) && !has(o5, /Change the limits/), o5.text);
+  ok('§10r spend-control-reached names the CONTROL and says it is the vendor\'s (never a VibeSpace limit)', gateOf(has(o5, /acct-1 has reached its spend control/)) && gateOf(has(o5, /set with the account’s vendor/)) && !has(o5, /Change the limits/), o5.text);
   ok('§10r THE TABLE IS WHOLE: every why has its row; the toast and the notice share it (a refusal with no account never says «the limit is reached» unless it WAS a cap)',
-    ['hour-cap', 'day-cap', 'instance-cap', 'identity-cannot-serve', 'spend-control-reached', 'identity-unknown', 'overage-in-use', 'unknown-reason'].every((w) => A.REFUSAL_WORDS[w] && A.REFUSAL_WORDS[w].length === 2) && A.REFUSAL_WORDS['switched-off'] && A.REFUSAL_WORDS.other);
+    gateOf(['hour-cap', 'day-cap', 'instance-cap', 'identity-cannot-serve', 'spend-control-reached', 'identity-unknown', 'overage-in-use', 'unknown-reason'].every((w) => A.REFUSAL_WORDS[w] && A.REFUSAL_WORDS[w].length === 2)) && gateOf(A.REFUSAL_WORDS['switched-off']) && verdictOf(A.REFUSAL_WORDS.other));
   // CONTROL — the r1 renderer's input (b8d2d98e's refusalI18n, recreated): one generic sentence, no producer, no counts
   const r1 = { text: { key: '{account} has used its {cap} turns nobody typed this hour — VibeSpace held the next one. The next frees at {time}.', params: { account: 'acct-1', cap: 30, time: { at: Date.parse('2026-10-28T08:21:33Z') } } }, detail: [{ key: 'Turns you type, and the buttons you press that say «starts a turn», are never counted. Change the limits in Settings → Spending.' }] };
   const r1o = render('en', { i18n: r1 });
@@ -5515,7 +5515,7 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
     const fl = fileWith((g) => { for (let i = 0; i < 3; i++) g.authorize({ reason: 'job-notification', identity: id, sessionName: 'nightly', hold: true, now: now - 1000 + i }); }, { reason: 'job-notification', identity: id, sessionName: 'nightly' }, { 'spend.unattendedPerIdentityHour': 3 });
     const of = render('en', fl), ofz = render('zh', fl);
     ok('§10r r3 IN FLIGHT: a cap reached by holds says them — «(+3 in flight)» in the English, «Also in flight: 3 …» rendered (en / zh), beside «0 of 3 this hour»',
-      !!fl && /\(\+3 in flight\)/.test(fl.text) && has(of, /Also in flight: 3 started and not yet answered/) && has(of, /Turns nobody typed: 0 of 3 this hour/) && has(ofz, /另有 3 个已开始/), fl && [fl.text, of.lines.join(' | ')].join(' ⇒ '));
+      !!fl && gateOf(/\(\+3 in flight\)/.test(fl.text)) && gateOf(has(of, /Also in flight: 3 started and not yet answered/)) && gateOf(has(of, /Turns nobody typed: 0 of 3 this hour/)) && verdictOf(has(ofz, /另有 3 个已开始/)), fl && [fl.text, of.lines.join(' | ')].join(' ⇒ '));
     // (b) THE OVERAGE EVIDENCE: «(last reported 7 min ago)» — rendered as the INSTANT it was reported, in the viewer's zone
     const ovDir = tmpdir('vs-spend-notice-ovg-');
     const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
@@ -5528,12 +5528,12 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
     // the tray prints an instant through page-time (lane ui-language, the reader's round: the date beyond today, the page's zone)
     const seenClock = (await import(pathToFileURL(path.join(REPO, 'src/lib/page-time.js')).href)).stampAt(nowR - 7 * 60e3, { now: nowR });
     ok('§10r r3 THE OVERAGE EVIDENCE: «last reported 7 min ago» is rendered as the instant — «Paid overage was last reported at ' + seenClock + '.» (the viewer\'s zone; ja too)',
-      !!ov && /last reported 7 min ago/.test(ov.text) && oo.lines.includes(`Paid overage was last reported at ${seenClock}.`) && has(ooj, /有料の超過利用が最後に報告されたのは/), ov && oo.lines.join(' | '));
+      !!ov && gateOf(/last reported 7 min ago/.test(ov.text)) && gateOf(oo.lines.includes(`Paid overage was last reported at ${seenClock}.`)) && verdictOf(has(ooj, /有料の超過利用が最後に報告されたのは/)), ov && oo.lines.join(' | '));
     // (c) identity-unknown: the English said «(instance 7/800)» — the instance's count is rendered with no account
     const iu = fileWith((g) => { for (let i = 0; i < 7; i++) g.note({ reason: 'peer-message', identity: id, now: now - 60e3 + i }); }, { reason: 'job-notification', identity: null, sessionName: 'nightly' });
     const ou = render('en', iu);
     ok('§10r r3 identity-unknown says the INSTANCE\'s count (no account): «Turns nobody typed on this instance: 7 of 800 in 24 hours.»',
-      !!iu && /\(instance 7\/800\)/.test(iu.detail) && has(ou, /Turns nobody typed on this instance: 7 of 800 in 24 hours\./) && has(ou, /Account: not known/), iu && ou.lines.join(' | '));
+      !!iu && gateOf(/\(instance 7\/800\)/.test(iu.detail)) && gateOf(has(ou, /Turns nobody typed on this instance: 7 of 800 in 24 hours\./)) && verdictOf(has(ou, /Account: not known/)), iu && ou.lines.join(' | '));
     // (d) TWELVE PRODUCERS: the eye folds after six («And 6 more producers.»); the RECORD a Copy says carries all twelve
     const twelve = [...Object.keys(A.SPEND_REASONS).filter((r) => !A.SPEND_REASONS[r].attended), 'unknown'].slice(0, 12);   // every gated reason (11) + the legacy stamp
     const v12 = { ok: false, why: 'hour-cap', reason: 'auto-resume', identity: id, limits: A.BUDGET_DEFAULTS, counts: { hour: 78, day: 78, instanceDay: 78 }, retryAfter: now + 600e3, producers: Object.fromEntries(twelve.map((r, i) => [r, 12 - i])) };
@@ -5545,13 +5545,13 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
     const eye = LY.itemDetailLinesOf(i12, said12), rec = LY.itemRecordLinesOf(i12, said12);
     console.log(`    12 producers: the eye ${eye.filter((l) => /^Spent by /.test(l)).length} rows + «${eye.find((l) => /^And /.test(l))}», the record (Copy) ${rec.filter((l) => /^Spent by /.test(l)).length} rows`);
     ok('§10r r3 THE FOLD IS FOR THE EYE: twelve producers show six «Spent by» rows and «And 6 more producers.»; the RECORD (what Copy says — user-todos-actions recordOf) carries all twelve rows, through the real store',
-      twelve.length === 12 && !!i12 && eye.filter((l) => /^Spent by /.test(l)).length === 6 && eye.includes('And 6 more producers.') && rec.filter((l) => /^Spent by /.test(l)).length === 12 && !rec.some((l) => /^And \d+ more/.test(l)) && i12.i18n.detail.length <= 12,
+      twelve.length === 12 && !!i12 && eye.filter((l) => /^Spent by /.test(l)).length === 6 && gateOf(eye.includes('And 6 more producers.')) && rec.filter((l) => /^Spent by /.test(l)).length === 12 && !rec.some((l) => /^And \d+ more/.test(l)) && i12.i18n.detail.length <= 12,
       JSON.stringify({ eye, rec }));
     // (e) THE TOAST WITH NO WHY (the authorizer threw — conversation-deliver fails closed with refused:'spend', no why)
     const SSm = require(path.join(REPO, 'src/stash-summary.js'));
     const nw = SSm.handOverRefusalWords({ code: 'spend_refused' }, T.en, { now });
     ok('§10r r3 a hand-over refused with NO why is not a cap — the toast says the check refused without saying why, never «the limit … is reached», and names no Spending door',
-      !/limit/.test(nw.text) && /without saying why/.test(nw.text) && nw.door === null, JSON.stringify(nw));
+      !/limit/.test(nw.text) && gateOf(/without saying why/.test(nw.text)) && nw.door === null, JSON.stringify(nw));
     // (f) r4 (accept-r3 confirmed 0): THE AUTHORIZER THROWS — the REAL hand-over door over the REAL ladder whose authorizer
     // throws: the 429 body's `error` is SAID in the toast (quoted, en / zh / ja), and the log lines the toast names are the
     // ones WRITTEN («[deliver] spend authorizer threw …», «[stash] hand-over refused … spend_refused …»); no «[spend]» line
@@ -5570,10 +5570,10 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
       const said = { en: SSm.handOverRefusalWords(body, T.en, { now }).text, zh: SSm.handOverRefusalWords(body, T.zh, { now }).text, ja: SSm.handOverRefusalWords(body, T.ja, { now }).text };
       ok('§10r r4 THE AUTHORIZER THROWS at the real door: 429 spend_refused with no why — the toast SAYS the reply\'s error, quoted (en / zh / ja), names [stash] and [deliver], never [spend]',
         body.status === 429 && body.code === 'spend_refused' && body.why === null && body.error === 'spend authorizer failed: settings store unreadable'
-          && said.en.includes('“' + body.error + '”') && ['zh', 'ja'].every((l) => said[l].includes(body.error) && !/MISSING/.test(said[l])) && Object.values(said).every((x) => /\[stash\]/.test(x) && /\[deliver\]/.test(x) && !/\[spend\]/.test(x)),
+          && gateOf(said.en.includes('“' + body.error + '”')) && gateOf(['zh', 'ja'].every((l) => said[l].includes(body.error) && !/MISSING/.test(said[l]))) && verdictOf(Object.values(said).every((x) => /\[stash\]/.test(x) && /\[deliver\]/.test(x) && !/\[spend\]/.test(x))),
         JSON.stringify({ body, said }));
       ok('§10r r4 …and every log line the toast names IS written: «[deliver] spend authorizer threw …» and «[stash] hand-over refused for conversation cid-r4 — spend_refused: spend authorizer failed: …»; no «[spend]» line exists for a throw',
-        logs.some((l) => /^\[deliver\] spend authorizer threw .*settings store unreadable/.test(l)) && logs.some((l) => /^\[stash\] hand-over refused for conversation cid-r4 — spend_refused: spend authorizer failed: settings store unreadable/.test(l)) && !logs.some((l) => /^\[spend\]/.test(l)),
+        gateOf(logs.some((l) => /^\[deliver\] spend authorizer threw .*settings store unreadable/.test(l))) && gateOf(logs.some((l) => /^\[stash\] hand-over refused for conversation cid-r4 — spend_refused: spend authorizer failed: settings store unreadable/.test(l))) && !logs.some((l) => /^\[spend\]/.test(l)),
         JSON.stringify(logs));
     }
   }
@@ -5596,7 +5596,7 @@ console.log('\n§10b the pool\'s placement acts start no turn');
     ok(`§10b ${name} exists and reaches no turn producer (fireNow / sendToSession / the delivery ladder / a pty write)`, !!body && body.length > 200 && !TURN.test(body), body ? (body.match(TURN) || [''])[0] : 'missing');
   }
   const ctl = 'function setConversationPin(x) {\n  getAutoResume()?.fireNow?.(x);\n' + 'x'.repeat(220) + '\n}\n';
-  ok('§10b CONTROL: a pin writer that nudged auto-resume is caught', TURN.test(bodyOf(ctl, 'function setConversationPin(')));
+  ok('§10b CONTROL: a pin writer that nudged auto-resume is caught', verdictOf(TURN.test(bodyOf(ctl, 'function setConversationPin('))));
 }
 
 // ── §10c A NEXT-TURN WATCH IS NEVER BILLED: STORED HITS KEEP THEIR ROAD (lane boot-flush-next-turn) ──
@@ -5642,9 +5642,9 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
   const c = roadCensus(esrc);
   const starts = c.rows.filter((r) => r.kind === 'starts');
   console.log('    road census rows: ' + c.rows.map((r) => `${r.kind}:${r.fn || ''}@${r.line}${r.road ? '→road@' + r.road : ''}`).join(' · '));
-  ok('§10c the census finds the four readers that start a delivery from stored hits (the boot flush, the scope digest, the boot scheduler, the carry), each asking the road after its read', JSON.stringify(starts.map((r) => r.fn).sort()) === JSON.stringify([...STARTS].sort()) && starts.every((r) => r.road), JSON.stringify(starts));
+  ok('§10c the census finds the four readers that start a delivery from stored hits (the boot flush, the scope digest, the boot scheduler, the carry), each asking the road after its read', JSON.stringify(starts.map((r) => r.fn).sort()) === JSON.stringify([...STARTS].sort()) && verdictOf(starts.every((r) => r.road)), JSON.stringify(starts));
   ok('§10c the one reader that only CARRIES stored hits is the named row (wakeNow)', c.rows.filter((r) => r.kind === 'carries').map((r) => r.fn).join() === Object.keys(CARRIES).join());
-  ok('§10c every pending-row writer names its road (keepPending, wakeNow\'s re-hold, releaseAside — lane wake-approve-card r8: a held decision\'s Deliver puts its hits back, each on the road it was parked on), and the next-turn door parks on the next-turn road (4 sites)', c.rows.filter((r) => r.kind === 'writer').length === 3 && c.rows.filter((r) => r.kind === 'writer').some((r) => r.fn === 'releaseAside') && c.rows.filter((r) => r.kind === 'next-turn-park').length === 4);   // B-1ca5 r432: + the stop's hold and the in-flight park (each still on the next-turn road)
+  ok('§10c every pending-row writer names its road (keepPending, wakeNow\'s re-hold, releaseAside — lane wake-approve-card r8: a held decision\'s Deliver puts its hits back, each on the road it was parked on), and the next-turn door parks on the next-turn road (4 sites)', c.rows.filter((r) => r.kind === 'writer').length === 3 && gateOf(c.rows.filter((r) => r.kind === 'writer').some((r) => r.fn === 'releaseAside')) && c.rows.filter((r) => r.kind === 'next-turn-park').length === 4);   // B-1ca5 r432: + the stop's hold and the in-flight park (each still on the next-turn road)
   ok('§10c THE CENSUS: no stored hit starts a delivery without its road', c.violations.length === 0, JSON.stringify(c.violations));
   const ROAD_LINE = "        if (pendingRoadOf(item.watcher, pend) === 'next-turn') { results.push(await stashPending(rec, convId, item, p, pend)); continue; }\n";
   const SCOPE_ROAD = "        if (pendingRoadOf(item.watcher, pend) !== 'wake') continue;";
@@ -5652,8 +5652,8 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
   const BOOT_ROAD2 = "if (pendingRoadOf(item.watcher, pend) !== 'wake') { armBoot(";   // lane wake-approve-card r6: the scheduler's conversation branch reads the road too (a next-turn road is never asked about its age)
   const WAKE_PUSH = "e2.pending.push({ record: h.record, why: h.why || [], at: t, road: 'wake', for: pk });";
   const STASH_PARK = "if (!fromPending) await keepPending(rec, convId, hits, 0, pk, 'next-turn');";
-  ok('§10c the controls\' anchors are present once each', [ROAD_LINE, SCOPE_ROAD, BOOT_ROAD, BOOT_ROAD2, WAKE_PUSH, STASH_PARK].every((a) => esrc.split(a).length === 2));
-  const red = (mut, re, what) => { const v = roadCensus(mut).violations; ok(`§10c CONTROL: ${what} is RED (${v.join('; ')})`, v.some((x) => re.test(x))); };
+  ok('§10c the controls\' anchors are present once each', verdictOf([ROAD_LINE, SCOPE_ROAD, BOOT_ROAD, BOOT_ROAD2, WAKE_PUSH, STASH_PARK].every((a) => esrc.split(a).length === 2)));
+  const red = (mut, re, what) => { const v = roadCensus(mut).violations; ok(`§10c CONTROL: ${what} is RED (${v.join('; ')})`, verdictOf(v.some((x) => re.test(x)))); };
   red(esrc.replace(ROAD_LINE, ''), /in flushPending\(\) .* no road check/, 'the boot flush without its road check');
   red(esrc.replace(SCOPE_ROAD, ''), /in flushScopeNow\(\) .* no road check/, 'the scope digest without its road check');
   red(esrc.replace(BOOT_ROAD, ') {').replace(BOOT_ROAD2, 'if (false) { armBoot('), /in scheduleBootPending\(\) .* no road check/, 'the boot scheduler without its road checks');
@@ -5721,10 +5721,10 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
   // RED CONTROLS: patched copies of the engine without the road (the f57d1cbe9 behaviour)
   const noRoad = mutantModule('src/server/channels-engine.js', [[ROAD_LINE, '']]);
   const m1 = noRoad.mod ? await bootLeg(noRoad.mod) : null;
-  ok('§10c CONTROL: the engine without the flush\'s road check BILLS the probe\'s hit at boot (billed 1 — the bug)', m1 && m1.billed === 1 && J(m1.reasons) === '["channel-message"]' && m1.stashed === 0, noRoad.err || J(m1));
+  ok('§10c CONTROL: the engine without the flush\'s road check BILLS the probe\'s hit at boot (billed 1 — the bug)', gateOf(m1) && m1.billed === 1 && J(m1.reasons) === '["channel-message"]' && m1.stashed === 0, noRoad.err || J(m1));
   const noScope = mutantModule('src/server/channels-engine.js', [[SCOPE_ROAD + '   // THE ROAD (lane boot-flush-next-turn): next-turn hits wait for the boot flush\'s free stash, never a billed digest', ''], [BOOT_ROAD, ') {']]);
   const m7 = noScope.mod ? await bootLeg(noScope.mod, { grain: 'account', notify: 'digest' }) : null;
-  ok('§10c CONTROL: without the scheduler\'s and the scope digest\'s road checks the whole-account leg arms a scope digest and BILLS it', m7 && J(m7.windows) === '["scope"]' && m7.billed === 1, noScope.err || J(m7));
+  ok('§10c CONTROL: without the scheduler\'s and the scope digest\'s road checks the whole-account leg arms a scope digest and BILLS it', gateOf(m7) && J(m7.windows) === '["scope"]' && m7.billed === 1, noScope.err || J(m7));
 
   // (3) lane stash-pending-live: THE CARRY. Lane boot-flush-next-turn's probe/live-later.mjs (copied): a member comes live
   // WITHOUT a restart and a second hit arrives ⇒ on d035f7cfa `stashed 1, pending still 1` — the second hit alone, the
@@ -5773,7 +5773,7 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
     return out;
   }
   const c1 = await liveLeg(ENG);
-  ok('§10c THE PROBE (live-later): parked while nobody was live, a member comes live and a second hit arrives ⇒ ONE block carries both, the parked first; pending 0, billed 0', c1.distinct && c1.parked.n === 1 && c1.parked.stashed === 0 && c1.stashed === 1 && c1.to[0] === MEMBER.cid && J(c1.blocks) === '["PF"]' && c1.pending === 0 && c1.billed === 0, J(c1));
+  ok('§10c THE PROBE (live-later): parked while nobody was live, a member comes live and a second hit arrives ⇒ ONE block carries both, the parked first; pending 0, billed 0', gateOf(c1.distinct) && c1.parked.n === 1 && c1.parked.stashed === 0 && c1.stashed === 1 && c1.to[0] === MEMBER.cid && J(c1.blocks) === '["PF"]' && c1.pending === 0 && c1.billed === 0, J(c1));
   const c2 = await liveLeg(ENG, { then: 'turn' });
   ok('§10c no new hit: the member\'s OWN TURN carries it (carryParked queues 1) ⇒ stashed for that member, pending 0, billed 0; a second turn finds nothing', c2.queued === 1 && c2.stashed === 1 && c2.to[0] === MEMBER.cid && J(c2.blocks) === '["P"]' && c2.pending === 0 && c2.billed === 0 && c2.again === 0, J(c2));
   const c3 = await liveLeg(ENG, { then: 'turn-twice' });
@@ -5794,14 +5794,14 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
   const CARRY_DEFER = "    if (!fromPending && !carry && !stopped && parkedNextTurn(en, w, pk)) return billedWake({ conv: `${rec.id}/${convId}` }, () => stashHits(rec, convId, hits, { item, pk, batch, carry: true, prefer }));\n";
   const noCarry = mutantModule('src/server/channels-engine.js', [[CARRY_DEFER, '']]);
   const k1 = noCarry.mod ? await liveLeg(noCarry.mod) : null;
-  ok('§10c CONTROL: without the hit\'s carry the probe answers as on d035f7cfa — the second hit alone, the parked one still pending', k1 && k1.stashed === 1 && J(k1.blocks) === '["F"]' && k1.pending === 1, noCarry.err || J(k1));
+  ok('§10c CONTROL: without the hit\'s carry the probe answers as on d035f7cfa — the second hit alone, the parked one still pending', gateOf(k1) && k1.stashed === 1 && J(k1.blocks) === '["F"]' && k1.pending === 1, noCarry.err || J(k1));
   const CARRY_QUEUE = "        track(billedWake({ conv: key }, () => stashHits(rec, en.id, [], { item, pk, carry: true, prefer: cid })));";
   // (B-43bc: the wake site's hand-over mark — the watcher's name and the receiver's — is a SECOND lock on this double; the
   // control lifts it too, so it still shows what the chain alone holds)
   const STASH_MARK = '    const vS = judgeHits(rec.id, convId, pk, target.cid, all, { ranOut: true });\n';   // B-1ca5 part B: the stash reads the marks through the ONE verdict
   const offChain = mutantModule('src/server/channels-engine.js', [[CARRY_QUEUE, "        track(stashHits(rec, en.id, [], { item, pk, carry: true, prefer: cid }));"], [STASH_MARK, '    const vS = { deliver: all, wait: [], kept: [], spent: [], ticket: null };\n']]);   // the control lifts the marks at the stash's read (every record deliverable)
   const k3 = offChain.mod ? await liveLeg(offChain.mod, { then: 'turn-twice' }) : null;
-  ok('§10c CONTROL: the turn\'s carry read OFF the conversation\'s chain hands the parked message over TWICE on two asks in one tick', k3 && k3.stashed === 2 && k3.parkedOut === 2, offChain.err || J(k3));
+  ok('§10c CONTROL: the turn\'s carry read OFF the conversation\'s chain hands the parked message over TWICE on two asks in one tick', gateOf(k3) && k3.stashed === 2 && k3.parkedOut === 2, offChain.err || J(k3));
 
   // THROUGH THE REAL HOOK ROUTES: the member's SessionStart (task-context) asks; its first prompt (prompt-context) drains it
   const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
@@ -5850,7 +5850,7 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
   ok('§10c …a harness without SessionStart (codex): its first prompt asks, the carry lands in the stash and rides the NEXT prompt (never lost, never billed)', t2.parked === 1 && J(t2.inCtx) === '[0,0,1]' && t2.pending === 0 && t2.billed === 0, J(t2));
   const noAsk = mutantModule('src/agent-routes.js', [['        carryParkedFor(caller2.conversationId);\n', '']]);
   const k4 = noAsk.mod ? await turnLeg(noAsk.mod) : null;
-  ok('§10c CONTROL: the hook routes without the ask ⇒ the member\'s turns carry nothing and the hit stays parked (the d035f7cfa behaviour: it waits for a boot)', k4 && J(k4.inCtx) === '[0,0,0]' && k4.pending === 1, noAsk.err || J(k4));
+  ok('§10c CONTROL: the hook routes without the ask ⇒ the member\'s turns carry nothing and the hit stays parked (the d035f7cfa behaviour: it waits for a boot)', gateOf(k4) && J(k4.inCtx) === '[0,0,0]' && k4.pending === 1, noAsk.err || J(k4));
 }
 
 // ── §11 THE TREE IS NEVER WRITTEN (B-59b8 r1 / B-0220) ──────────────────────
@@ -5860,7 +5860,7 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
 // so a plain `git status` never saw them) and any suite scanning src/ beside
 // this one counted them as product code.
 console.log('\n§11 the patched copies never touch the tree');
-for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok('§11 ' + r.name, r.pass, r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok('§11 ' + r.name, verdictOf(r.pass), r.detail);
 
 // §12 lane webhook-l1-server: THE PER-PATH WAKE BUDGET (docs/design-webhook.zh.md §6) is wired on the ONE wake door —
 // judged before the watcher's own pace and before the wake's ledger row (the bill); a refusal is a hold, never a turn
@@ -5872,7 +5872,7 @@ console.log('\n§12 the per-path wake budget on the wake door');
   const p = eng.indexOf('const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));', i);
   const r = eng.indexOf('const resId = await reserveWake(', i);
   ok('§12 wakeNow judges the per-path budget, THEN the watcher\'s pace, THEN reserves the wake row (the bill)', i > 0 && b > i && p > b && r > p, { i, b, p, r });
-  ok('§12 a budget refusal is a HOLD (keepPending + the named refusal) — never a dropped hit, never a billed turn', /if \(!budget\.ok\) \{\n\s+if \(!fromPending\) await keepPending\(rec, convId, freshHits, newElided, pk\);\n\s+await noteRefusal\(rec, convId, budget\.why, t, item\);/.test(eng));
+  ok('§12 a budget refusal is a HOLD (keepPending + the named refusal) — never a dropped hit, never a billed turn', verdictOf(/if \(!budget\.ok\) \{\n\s+if \(!fromPending\) await keepPending\(rec, convId, freshHits, newElided, pk\);\n\s+await noteRefusal\(rec, convId, budget\.why, t, item\);/.test(eng)));
   const mut = eng.replace('const budget = pathBudgetVerdict(rec, convId, en, t);', '').replace('const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));', 'const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));\n    const budget = pathBudgetVerdict(rec, convId, en, t);');
   const mb = mut.indexOf('const budget = pathBudgetVerdict(', i), mp = mut.indexOf('const pace = F.paceVerdict(', i);
   ok('§12 CONTROL: the budget moved AFTER the pace is RED by the same order check', !(mb > i && mp > mb));
@@ -5894,12 +5894,12 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const TWIN = 'auto-resume';   // the press-less twin: the batch door's arithmetic, on a gated reason
   const B = (groups, extra = {}) => A.authorizeUnattendedBatch({ reason: TWIN, groups, state, limits: L, now, ...extra });
   // THE ATTENDED PRESS (the owner's ruling 2026-11-18): far over every cap, it is still allowed — and the brakes that bind a press bind it
-  ok('§13 PURE: `bulk-resume` is a row of the spend reasons marked ATTENDED', A.SPEND_REASONS['bulk-resume'] && A.SPEND_REASONS['bulk-resume'].attended === true);
+  ok('§13 PURE: `bulk-resume` is a row of the spend reasons marked ATTENDED', gateOf(A.SPEND_REASONS['bulk-resume']) && A.SPEND_REASONS['bulk-resume'].attended === true);
   const att = (groups, extra = {}) => A.authorizeUnattendedBatch({ reason: 'bulk-resume', groups, state, limits: L, now, ...extra });
-  ok('§13 PURE ATTENDED: 40 on A + 40 on B (A\'s hour 2 of 5, the instance\'s day 2 of 8) is ALLOWED — none counted against the caps', (() => { const v = att([{ identity: IA, n: 40 }, { identity: IB, n: 40 }]); return v.ok === true && v.attended === true; })());
+  ok('§13 PURE ATTENDED: 40 on A + 40 on B (A\'s hour 2 of 5, the instance\'s day 2 of 8) is ALLOWED — none counted against the caps', verdictOf((() => { const v = att([{ identity: IA, n: 40 }, { identity: IB, n: 40 }]); return v.ok === true && v.attended === true; })()));
   // FORM TWO (主开发 2026-11-18 16:20Z — «an ACCOUNT already in paid overage is still refused: the account, not the press»)
-  ok('§13 PURE ATTENDED: paid overage in use on B refuses B BY NAME — and A\'s share goes on (the account, not the press)', (() => { const v = att([{ identity: IA, n: 3 }, { identity: IB, n: 2 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === true && v.attended === true && v.groups.length === 1 && v.refusedSlots.length === 1 && v.refusedSlots[0].identity.key === 'sub-b' && v.refusedSlots[0].why === 'overage-in-use' && v.refusedSlots[0].n === 2 && /B/.test(v.refusedSlots[0].detail); })());
-  ok('§13 PURE ATTENDED: …EVERY account in overage ⇒ the press starts nothing, refused, each account named', (() => { const v = att([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: () => ({ overage: { inUse: 'yes' } }) }); return v.ok === false && v.why === 'overage-in-use' && v.refusedSlots.map((r) => r.identity.key).join() === 'sub-a,sub-b'; })());
+  ok('§13 PURE ATTENDED: paid overage in use on B refuses B BY NAME — and A\'s share goes on (the account, not the press)', verdictOf((() => { const v = att([{ identity: IA, n: 3 }, { identity: IB, n: 2 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === true && v.attended === true && v.groups.length === 1 && v.refusedSlots.length === 1 && v.refusedSlots[0].identity.key === 'sub-b' && v.refusedSlots[0].why === 'overage-in-use' && v.refusedSlots[0].n === 2 && /B/.test(v.refusedSlots[0].detail); })()));
+  ok('§13 PURE ATTENDED: …EVERY account in overage ⇒ the press starts nothing, refused, each account named', verdictOf((() => { const v = att([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: () => ({ overage: { inUse: 'yes' } }) }); return v.ok === false && v.why === 'overage-in-use' && v.refusedSlots.map((r) => r.identity.key).join() === 'sub-a,sub-b'; })()));
   // (4) THE BATCH LAYER FAILS CLOSED (主开发 20:16Z): handed the ledger, an unreadable budget refuses a gated batch BY NAME, as the
   // single authorizer does; an attended press passes, as the single one does. The control proves its plant first
   {
@@ -5907,7 +5907,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     const tw = (ledger) => B([{ identity: IA, n: 1 }], ledger ? { ledger } : {});
     const plant = tw(null), red = tw(LEDGER);
     ok('§13 (4) CONTROL FIRST: the same twin batch with a READABLE ledger is allowed (the plant is the ledger fact alone)', plant.ok === true, JSON.stringify(plant));
-    ok('§13 (4) the batch authorizer handed an UNREADABLE ledger refuses the gated batch BY NAME (ledger-unreadable), as the single one does', red.ok === false && red.why === 'ledger-unreadable' && /could not be read/.test(red.detail), JSON.stringify(red));
+    ok('§13 (4) the batch authorizer handed an UNREADABLE ledger refuses the gated batch BY NAME (ledger-unreadable), as the single one does', red.ok === false && red.why === 'ledger-unreadable' && verdictOf(/could not be read/.test(red.detail)), JSON.stringify(red));
     ok('§13 (4) …an attended press passes it, exactly as the single authorizer does for an attended reason', att([{ identity: IA, n: 1 }], { ledger: LEDGER }).ok === true && A.authorizeUnattendedSpend({ reason: 'bulk-resume', identity: IA, state, limits: L, now, ledger: LEDGER }).ok === true);
   }
   // (3) THE RECORD OF A PRESS: one press row (when, how many, the batch id) beside its per-continue rows, FOLDED by account — a press
@@ -5924,11 +5924,11 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     ok('§13 (3) CONTROL FIRST: 600 UNFOLDED continues push the day\'s earlier rows out (the tally keeps ' + A.pruneBudget(un, now + 1000).attended.length + ' rows — the cap is the plant)', !A.pruneBudget(un, now + 1000).attended.some((t) => t.reason === 'held-deliver'));
     ok('§13 (3) a press of 600: ONE press row (600, its batch id) + one folded row per account; the day\'s 3 earlier rows kept; the counts say 600 continues and 3 presses of the other reason', rows.length === 6 && !!pressRow && counts['bulk-resume'] === 600 && counts['held-deliver'] === 3, JSON.stringify({ n: rows.length, counts }));
   }
-  ok('§13 PURE CONTROL: the gated twin stays ALL OR NOTHING — overage on B refuses its whole batch', (() => { const v = B([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === false && v.why === 'overage-in-use' && !v.refusedSlots; })());
+  ok('§13 PURE CONTROL: the gated twin stays ALL OR NOTHING — overage on B refuses its whole batch', verdictOf((() => { const v = B([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === false && v.why === 'overage-in-use' && !v.refusedSlots; })()));
   ok('§13 PURE CONTROL: the same 40 + 40 on the gated twin is refused by the hour cap', B([{ identity: IA, n: 40 }, { identity: IB, n: 40 }]).why === 'hour-cap');
   ok('§13 PURE: A holds 2 of 5 this hour ⇒ a share of 3 on A + 2 on B fits (instance 2 + 5 = 7 ≤ 8)', B([{ identity: IA, n: 3 }, { identity: IB, n: 2 }]).ok === true);
   const r1 = B([{ identity: IA, n: 4 }, { identity: IB, n: 1 }]);
-  ok('§13 PURE: a share of 4 on A (2 + 4 > 5) refuses the WHOLE batch, naming the bucket and the slot', r1.ok === false && r1.why === 'hour-cap' && r1.identity && r1.identity.key === 'sub-a' && /this batch needs 4 more/.test(r1.detail) && r1.n === 5, JSON.stringify(r1));
+  ok('§13 PURE: a share of 4 on A (2 + 4 > 5) refuses the WHOLE batch, naming the bucket and the slot', r1.ok === false && r1.why === 'hour-cap' && gateOf(r1.identity) && r1.identity.key === 'sub-a' && gateOf(/this batch needs 4 more/.test(r1.detail)) && r1.n === 5, JSON.stringify(r1));
   const r2 = B([{ identity: IA, n: 3 }, { identity: IB, n: 4 }]);
   ok('§13 PURE: each slot fits but the INSTANCE does not (2 + 7 > 8) ⇒ refused by the instance cap', r2.ok === false && r2.why === 'instance-cap', JSON.stringify(r2));
   ok('§13 PURE: the live HOLDS count like charges (3 holds on A ⇒ a share of 1 refuses)', B([{ identity: IA, n: 1 }], { pending: [{ id: 'h1', key: 'sub-a', at: now }, { id: 'h2', key: 'sub-a', at: now }, { id: 'h3', key: 'sub-a', at: now }] }).why === 'hour-cap');
@@ -5948,18 +5948,18 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     const gA = guardMod.create({ dataDir: tmpdir('vs-spend-bulkatt-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
     const many = Array.from({ length: 10 }, (_, i) => sess('A', 'p' + i));
     const vA = gA.authorizeBatch({ reason: 'bulk-resume', items: many });
-    ok('§13 GUARD ATTENDED: a press of 10 on A (cap 3 an hour) is allowed with one row per item and NO hold — nothing booked', vA.ok === true && vA.attended === true && vA.holds.length === 10 && vA.holds.every((h) => h.hold === null && h.identity.key === 'A') && gA.snapshot().holdsOpen === 0, JSON.stringify({ ok: vA.ok, why: vA.why, holds: (vA.holds || []).length, open: gA.snapshot().holdsOpen }));
+    ok('§13 GUARD ATTENDED: a press of 10 on A (cap 3 an hour) is allowed with one row per item and NO hold — nothing booked', vA.ok === true && vA.attended === true && vA.holds.length === 10 && gateOf(vA.holds.every((h) => h.hold === null && h.identity.key === 'A')) && gA.snapshot().holdsOpen === 0, JSON.stringify({ ok: vA.ok, why: vA.why, holds: (vA.holds || []).length, open: gA.snapshot().holdsOpen }));
     for (const h of vA.holds) gA.note({ reason: 'bulk-resume', identity: h.identity, hold: h.hold });
     const b0 = gA.snapshot().budget;
     ok('§13 GUARD ATTENDED: the 10 delivered continues write NO stamp to the unattended ledger — 10 in the attended tally', (b0.identities.A || []).length === 0 && (b0.instance || []).length === 0 && (b0.attended || []).filter((x) => x.reason === 'bulk-resume').length === 10, JSON.stringify({ a: (b0.identities.A || []).length, att: (b0.attended || []).length }));
     const x3 = [0, 1, 2].map(() => gA.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }));
-    ok('§13 GUARD ATTENDED: …and A\'s hourly room is whole for its OWN automatic continues (3 of 3 still authorized)', x3.every((x) => x.ok === true), JSON.stringify(x3.map((x) => x.why)));
+    ok('§13 GUARD ATTENDED: …and A\'s hourly room is whole for its OWN automatic continues (3 of 3 still authorized)', verdictOf(x3.every((x) => x.ok === true)), JSON.stringify(x3.map((x) => x.why)));
   }
   { // the cure's should: a conversation with NO billing slot never refuses the whole PRESS — skipped by name, the rest held; the twin still fails closed whole
     const gU = guardMod.create({ dataDir: tmpdir('vs-spend-bulkun-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
     const ghost = { session: { name: 'ghost' }, sessionId: 'g', sessionName: 'ghost' };
     const vU = gU.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'a1'), ghost] }), tU = gU.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), ghost] });
-    ok('§13 GUARD ATTENDED: an item whose slot cannot be named is skipped (identity-unknown) and the press goes on with the named; the gated twin refuses whole', vU.ok === true && vU.holds.map((h) => h.sessionId).join() === 'a1' && vU.skipped.some((x) => x.sessionId === 'g' && x.why === 'identity-unknown') && tU.ok === false && tU.why === 'identity-unknown', JSON.stringify({ vU, tU }));
+    ok('§13 GUARD ATTENDED: an item whose slot cannot be named is skipped (identity-unknown) and the press goes on with the named; the gated twin refuses whole', vU.ok === true && vU.holds.map((h) => h.sessionId).join() === 'a1' && gateOf(vU.skipped.some((x) => x.sessionId === 'g' && x.why === 'identity-unknown')) && tU.ok === false && tU.why === 'identity-unknown', JSON.stringify({ vU, tU }));
     // (3) on the guard: the press row and the folded continues, through note({press}) and notePress
     gU.notePress({ reason: 'bulk-resume', press: 'rb-g', n: 2 });
     gU.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-g' }); gU.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-g' });
@@ -5998,21 +5998,21 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     const items = [sess('A', 'a1'), sess('B', 'b1'), sess('A', 'a2'), sess('B', 'b2')];
     const pv = gB.previewBatch({ reason: 'bulk-resume', items });
     const quiet = logsB.length === 0 && todosB.length === 0 && gB.snapshot().holdsOpen === 0;
-    ok('§13 GUARD previewBatch: B named (overage-in-use, 2 conversations) — and QUIET: nothing held, nothing journalled, nothing filed', pv.refusedSlots.length === 1 && pv.refusedSlots[0].identity.key === 'B' && pv.refusedSlots[0].why === 'overage-in-use' && pv.refusedSlots[0].n === 2 && quiet, JSON.stringify({ pv, logsB, todosB }));
+    ok('§13 GUARD previewBatch: B named (overage-in-use, 2 conversations) — and QUIET: nothing held, nothing journalled, nothing filed', pv.refusedSlots.length === 1 && pv.refusedSlots[0].identity.key === 'B' && pv.refusedSlots[0].why === 'overage-in-use' && pv.refusedSlots[0].n === 2 && verdictOf(quiet), JSON.stringify({ pv, logsB, todosB }));
     const vB = gB.authorizeBatch({ reason: 'bulk-resume', items });
     // (2) where the instance ALLOWS turns in paid overage, the preview says so and names the account the press would bill as overage
     const gO = guardMod.create({ dataDir: tmpdir('vs-spend-bulkovok-'), serverSetting: (k) => (k === 'spend.allowOverageTurns' ? true : settings[k]), identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, readCacheFor: (k) => (k === 'B' ? { overage: { inUse: true, asOf: Date.now() - 60e3 } } : null), getUserTodos: () => ({ add: () => { } }), log: () => { } });
     const pvO = gO.previewBatch({ reason: 'bulk-resume', items });
     ok('§13 (2) GUARD previewBatch where paid overage is ALLOWED: nothing refused, overageAllowed, and B named as billed (2 continues) — the dialog\'s sentence and cost line read it', pvO.refusedSlots.length === 0 && pvO.overageAllowed === true && pvO.overageBilled.length === 1 && pvO.overageBilled[0].identity.key === 'B' && pvO.overageBilled[0].n === 2 && pv.overageAllowed === false && pv.overageBilled.length === 0, JSON.stringify({ pvO, pv }));
-    ok('§13 GUARD ATTENDED FORM TWO: the press holds rows for A\'s two only; B\'s two come back skipped, by name and rule; the journal names B; no For-you item', vB.ok === true && vB.holds.map((h) => h.sessionId).join() === 'a1,a2' && vB.skipped.map((x) => `${x.sessionId}:${x.identity.key}:${x.why}`).join() === 'b1:B:overage-in-use,b2:B:overage-in-use' && logsB.some((l) => /bulk-resume: 2 on B left stopped — overage-in-use/.test(l)) && todosB.length === 0, JSON.stringify({ vB, logsB }));
+    ok('§13 GUARD ATTENDED FORM TWO: the press holds rows for A\'s two only; B\'s two come back skipped, by name and rule; the journal names B; no For-you item', vB.ok === true && vB.holds.map((h) => h.sessionId).join() === 'a1,a2' && vB.skipped.map((x) => `${x.sessionId}:${x.identity.key}:${x.why}`).join() === 'b1:B:overage-in-use,b2:B:overage-in-use' && gateOf(logsB.some((l) => /bulk-resume: 2 on B left stopped — overage-in-use/.test(l))) && todosB.length === 0, JSON.stringify({ vB, logsB }));
   }
   const ok1 = g.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('B', 'b1')] });
-  ok('§13 GUARD: an allowed batch opens ONE hold per item, each on the slot it will bill', ok1.ok && ok1.holds.length === 3 && ok1.holds.filter((h) => h.identity.key === 'A').length === 2 && g.snapshot().holdsOpen === 3, JSON.stringify(ok1.holds));
-  ok('§13 GUARD: …and those holds BIND a concurrent single producer (A has 2 held of 3 ⇒ one more fits, two do not)', (() => { const x = g.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }); const y = g.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }); g.release({ hold: x.hold }); return x.ok && !y.ok && y.why === 'hour-cap'; })());
+  ok('§13 GUARD: an allowed batch opens ONE hold per item, each on the slot it will bill', gateOf(ok1.ok) && ok1.holds.length === 3 && ok1.holds.filter((h) => h.identity.key === 'A').length === 2 && g.snapshot().holdsOpen === 3, JSON.stringify(ok1.holds));
+  ok('§13 GUARD: …and those holds BIND a concurrent single producer (A has 2 held of 3 ⇒ one more fits, two do not)', verdictOf((() => { const x = g.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }); const y = g.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }); g.release({ hold: x.hold }); return x.ok && !y.ok && y.why === 'hour-cap'; })()));
   for (const h of ok1.holds) g.note({ reason: TWIN, identity: h.identity, hold: h.hold });
   ok('§13 GUARD (the twin): each delivered turn converts its hold into ONE stamp under its reason (no double count)', g.snapshot().holdsOpen === 0 && (g.snapshot().budget.identities.A || []).filter((s) => s.reason === TWIN).length === 2);
   const no = g.authorizeBatch({ reason: TWIN, items: [sess('A', 'a3'), sess('A', 'a4')] });
-  ok('§13 GUARD: a batch that does not fit is refused WHOLE — no hold opened, its bucket + slot named', no.ok === false && no.why === 'hour-cap' && !no.holds && g.snapshot().holdsOpen === 0 && /A has spent 2/.test(no.detail), JSON.stringify(no));
+  ok('§13 GUARD: a batch that does not fit is refused WHOLE — no hold opened, its bucket + slot named', no.ok === false && no.why === 'hour-cap' && !no.holds && g.snapshot().holdsOpen === 0 && verdictOf(/A has spent 2/.test(no.detail)), JSON.stringify(no));
   ok('§13 a refusal made by HOLDS alone promises no instant (retryAfter 0 — never «Next allowed after 12/31/1969»)', /Next allowed after 12\/31\/1969|1970/.test(todos.map((x) => x.text).join()) === false && A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IA, state: A.emptyBudget(), limits: L, now, pending: Array.from({ length: 5 }, (_, i) => ({ id: 'p' + i, key: 'sub-a', at: now })) }).retryAfter === 0, JSON.stringify(todos.map((x) => x.text)));
   ok('§13 the refusal carries the bucket\'s numbers for the person\'s words: A has LEFT 1 of 3 this hour, the batch NEEDS 2', no.left === 1 && no.need === 2, JSON.stringify({ left: no.left, need: no.need }));
   // A RE-ASK OF ONE CONTINUE NAMES ITS CONVERSATION in the journal (the U2 cure's should): the batch's loop asks again before each
@@ -6023,18 +6023,18 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     const full = g9.authorizeBatch({ reason: TWIN, items: [sess('A', 'x1'), sess('A', 'x2'), sess('A', 'x3')] });
     for (const h of full.holds || []) g9.note({ reason: TWIN, identity: h.identity, hold: h.hold });
     const solo = g9.authorizeBatch({ reason: TWIN, items: [sess('A', 'solo')] });
-    ok('§13 GUARD: a refused batch of ONE names its conversation in the journal («for solo»), never «a batch of 1»', solo.ok === false && solo.why === 'hour-cap' && logs9.some((l) => /refused auto-resume for solo on A/.test(l)) && !logs9.some((l) => /a batch of 1\b/.test(l)), JSON.stringify(logs9));
+    ok('§13 GUARD: a refused batch of ONE names its conversation in the journal («for solo»), never «a batch of 1»', solo.ok === false && solo.why === 'hour-cap' && gateOf(logs9.some((l) => /refused auto-resume for solo on A/.test(l))) && !logs9.some((l) => /a batch of 1\b/.test(l)), JSON.stringify(logs9));
   }
   // RENEWAL (U2 cure, the adversarial read's MUST 1): a batch opens its holds at once and delivers them paced behind bounded
   // gates — a batch longer than RESERVE_TTL_MS must not lose the holds it has not reached yet
-  ok('§13 PURE renewPending: the named holds are re-stamped, the others and an unknown id untouched', (() => { const p0 = [{ id: 'h1', key: 'A', at: 1 }, { id: 'h2', key: 'A', at: 2 }]; const p1 = A.renewPending(p0, ['h2', 'nope'], 99); return p1[0].at === 1 && p1[1].at === 99 && p0[1].at === 2 && p1.length === 2; })());
+  ok('§13 PURE renewPending: the named holds are re-stamped, the others and an unknown id untouched', verdictOf((() => { const p0 = [{ id: 'h1', key: 'A', at: 1 }, { id: 'h2', key: 'A', at: 2 }]; const p1 = A.renewPending(p0, ['h2', 'nope'], 99); return p1[0].at === 1 && p1[1].at === 99 && p0[1].at === 2 && p1.length === 2; })()));
   {
     const t0 = Date.now(), TTL = A.RESERVE_TTL_MS;
     const mk3 = () => guardMod.create({ dataDir: tmpdir('vs-spend-bulk3-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
     const g3 = mk3(), b3 = g3.authorizeBatch({ reason: TWIN, items: [sess('A', 'r1'), sess('A', 'r2')], now: t0 });
     g3.renewHolds(b3.holds.map((h) => h.hold), t0 + TTL - 10000);
     const x1 = g3.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20000 }), x2 = g3.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20001 });
-    ok('§13 GUARD: RENEWED batch holds outlive their first lifetime and still BIND (2 held of 3 ⇒ one more fits, a second does not)', b3.ok && x1.ok === true && x2.ok === false && x2.why === 'hour-cap', JSON.stringify({ x1: x1.ok, x2: x2.why }));
+    ok('§13 GUARD: RENEWED batch holds outlive their first lifetime and still BIND (2 held of 3 ⇒ one more fits, a second does not)', gateOf(b3.ok) && x1.ok === true && x2.ok === false && x2.why === 'hour-cap', JSON.stringify({ x1: x1.ok, x2: x2.why }));
     const g4 = mk3(); g4.authorizeBatch({ reason: TWIN, items: [sess('A', 'r1'), sess('A', 'r2')], now: t0 });
     const y1 = g4.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20000 }), y2 = g4.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20001 });
     ok('§13 CONTROL: the same batch NOT renewed loses its holds past the lifetime — two more fit (the leg above would go red)', y1.ok === true && y2.ok === true);
@@ -6044,7 +6044,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const logs2 = [];
   const g2 = guardMod.create({ dataDir: tmpdir('vs-spend-bulk2-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: (k, it) => { todos2.push(it); } }), log: (l) => logs2.push(String(l)) });
   g2.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('A', 'a3'), sess('A', 'a4')] });
-  ok('§13 GUARD: a BATCH refusal is answered in the person\'s own dialog — NO For-you item (its words would say what the bucket used, not what the batch needs); the journal says it once', todos2.length === 0 && logs2.filter((l) => /refused auto-resume/.test(l)).length === 1 && logs2.some((l) => /this batch needs 4 more/.test(l)), JSON.stringify({ todos2, logs2 }));
+  ok('§13 GUARD: a BATCH refusal is answered in the person\'s own dialog — NO For-you item (its words would say what the bucket used, not what the batch needs); the journal says it once', todos2.length === 0 && logs2.filter((l) => /refused auto-resume/.test(l)).length === 1 && verdictOf(logs2.some((l) => /this batch needs 4 more/.test(l))), JSON.stringify({ todos2, logs2 }));
   g2.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('A', 'a3'), sess('A', 'a4')] });
   ok('§13 GUARD: …and a second press of the same refusal files nothing either', todos2.length === 0);
   const un = g.authorizeBatch({ reason: TWIN, items: [sess('B', 'b2'), { session: { name: 'ghost' }, sessionId: 'g', sessionName: 'ghost' }] });
@@ -6056,27 +6056,27 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const rows = censusOver(REPO, files).filter((h) => h.file === 'src/server/auto-resume.js' && h.prim === 'continue-send');
   const bulkLine = arSrc.split('\n').findIndex((l) => /deliverContinue\(session, verb, prompt, \(s2, text\) => sentNoted\(s2, text, sendToSession\(e\.id/.test(l)) + 1;
   const bulkRow = rows.find((h) => h.line === bulkLine);
-  ok('§13 CENSUS: auto-resume.js holds exactly TWO continue sites — the single continue and the bulk resume — both GATED', rows.length === 2 && rows.every((h) => h.gated), JSON.stringify(rows));
-  ok('§13 CENSUS: …the bulk site is gated by its OWN batch authorization (authorizeSpendBatch), not by a neighbour', bulkRow && bulkRow.gated && /^gate@/.test(bulkRow.via) && /authorizeSpendBatch\(/.test(arSrc.split('\n')[Number(bulkRow.via.split('@')[1]) - 1]), JSON.stringify(bulkRow));
+  ok('§13 CENSUS: auto-resume.js holds exactly TWO continue sites — the single continue and the bulk resume — both GATED', rows.length === 2 && verdictOf(rows.every((h) => h.gated)), JSON.stringify(rows));
+  ok('§13 CENSUS: …the bulk site is gated by its OWN batch authorization (authorizeSpendBatch), not by a neighbour', gateOf(bulkRow) && gateOf(bulkRow.gated) && gateOf(/^gate@/.test(bulkRow.via)) && verdictOf(/authorizeSpendBatch\(/.test(arSrc.split('\n')[Number(bulkRow.via.split('@')[1]) - 1])), JSON.stringify(bulkRow));
   const mDir = tmpdir('vs-spend-bulkmut-');
   fs.mkdirSync(path.join(mDir, 'src', 'server'), { recursive: true });
   const from = '      v = authorizeSpendBatch\n        ? authorizeSpendBatch(chosen.map(';
   const fromMoved = 'v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null;';   // the per-continue re-ask on the slot that bills (lg-recovery U2 cure: every item, moved or not)
   fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), editAnchor(editAnchor(arSrc, from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(', "src/server/auto-resume.js"), fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: bill, hold: null }], paid.spendReason);', "src/server/auto-resume.js"));
   const mRows = censusOver(mDir, ['src/server/auto-resume.js']).filter((h) => h.prim === 'continue-send');
-  ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the per-continue re-ask\'s) reads the bulk site UNWIRED (and the single one still GATED)', arSrc.includes(from) && arSrc.includes(fromMoved) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
-  ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the reason the core chose', /authorizeSpendBatch: \(items, reason\) => spendGuard\.authorizeBatch\(\{ reason, items: items\.map\(/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));
-  ok('§13 WIRING (主开发 21:04Z): the press\'s end and the presses of the day to the bulk routes', /notePressEnd: \(batchId, delivered\) => spendGuard\.notePressEnd\(\{ press: batchId, delivered \}\)/.test(read('server.js')) && /bulk-resume-routes\.js'\)\.create\(\{ activeSessions, pressesToday: \(\) => spendGuard\.pressesToday\(\), /.test(read('server.js')) && /presses: \(\(\) => \{ try \{ return pressesToday \? pressesToday\(\) : \[\]; \}/.test(read('src/server/bulk-resume-routes.js')));
-  ok('§13 WIRING (the cure): server.js hands the core the guard\'s QUIET preview (as the press would ask), the press record, and the press id on every charge', /previewSpendBatch: \(items\) => spendGuard\.previewBatch\(\{ reason: 'bulk-resume', items: items\.map\(/.test(read('server.js')) && /notePress: \(batchId, n, reason\) => spendGuard\.notePress\(\{ reason, press: batchId, n \}\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));
-  ok('§13 THE PRESS (the owner\'s ruling 2026-11-18): the core selects the attended reason ONLY on the press its door minted (else the gated twin), and that reason rides the batch\'s authorization, every re-ask, every charge and the press record', /const paid = isPress\(pressed\) \? \{ spendReason: 'bulk-resume' \} : \{ spendReason: 'auto-resume' \};/.test(arSrc) && (arSrc.match(/paid\.spendReason/g) || []).length === 4);
+  ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the per-continue re-ask\'s) reads the bulk site UNWIRED (and the single one still GATED)', gateOf(arSrc.includes(from)) && gateOf(arSrc.includes(fromMoved)) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
+  ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the reason the core chose', gateOf(/authorizeSpendBatch: \(items, reason\) => spendGuard\.authorizeBatch\(\{ reason, items: items\.map\(/.test(read('server.js'))) && gateOf(/renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js'))) && verdictOf(/noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js'))));
+  ok('§13 WIRING (主开发 21:04Z): the press\'s end and the presses of the day to the bulk routes', gateOf(/notePressEnd: \(batchId, delivered\) => spendGuard\.notePressEnd\(\{ press: batchId, delivered \}\)/.test(read('server.js'))) && gateOf(/bulk-resume-routes\.js'\)\.create\(\{ activeSessions, pressesToday: \(\) => spendGuard\.pressesToday\(\), /.test(read('server.js'))) && verdictOf(/presses: \(\(\) => \{ try \{ return pressesToday \? pressesToday\(\) : \[\]; \}/.test(read('src/server/bulk-resume-routes.js'))));
+  ok('§13 WIRING (the cure): server.js hands the core the guard\'s QUIET preview (as the press would ask), the press record, and the press id on every charge', gateOf(/previewSpendBatch: \(items\) => spendGuard\.previewBatch\(\{ reason: 'bulk-resume', items: items\.map\(/.test(read('server.js'))) && gateOf(/notePress: \(batchId, n, reason\) => spendGuard\.notePress\(\{ reason, press: batchId, n \}\)/.test(read('server.js'))) && verdictOf(/noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js'))));
+  ok('§13 THE PRESS (the owner\'s ruling 2026-11-18): the core selects the attended reason ONLY on the press its door minted (else the gated twin), and that reason rides the batch\'s authorization, every re-ask, every charge and the press record', gateOf(/const paid = isPress\(pressed\) \? \{ spendReason: 'bulk-resume' \} : \{ spendReason: 'auto-resume' \};/.test(arSrc)) && (arSrc.match(/paid\.spendReason/g) || []).length === 4);
   { const rt = read('src/server/bulk-resume-routes.js'), h = rt.indexOf("app.post('/api/sessions/resume-stopped'"), body = rt.slice(h, rt.indexOf('app.post(', h + 10));
-    ok('§13 THE DOOR: POST /api/sessions/resume-stopped refuses EVERY bearer first, then the page, and mints the press it hands the batch (pressOf(req))', h > 0 && /try \{\s*(?:\/\/[^\n]*\n\s*)*if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(body) && /ar\.resumeBatch\(\{ limit, ids, pressed: pressOf\(req\) \}\)/.test(body)); }
+    ok('§13 THE DOOR: POST /api/sessions/resume-stopped refuses EVERY bearer first, then the page, and mints the press it hands the batch (pressOf(req))', h > 0 && gateOf(/try \{\s*(?:\/\/[^\n]*\n\s*)*if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(body)) && verdictOf(/ar\.resumeBatch\(\{ limit, ids, pressed: pressOf\(req\) \}\)/.test(body))); }
   { // (21:55Z (1)) THE ROUTE: the presses of the day that THROW are said as null and journalled — never «no presses»; read ⇒ the list
     const R2 = require(path.join(REPO, 'src/server/bulk-resume-routes.js'));
     const logs2 = [], arP = { stoppedPlan: () => ({ eligible: [], skipped: [], total: 0, running: null }), bulkCounts: () => ({ total: 0, on: 0 }) };
     const thrown = R2.create({ activeSessions: new Map(), getAutoResume: () => arP, pressesToday: () => { throw new Error('the record could not be read'); }, log: (l) => logs2.push(String(l)) }).stopped();
     const fine = R2.create({ activeSessions: new Map(), getAutoResume: () => arP, pressesToday: () => [{ at: 1, press: 'rb-1', planned: 2, delivered: 2, byAccount: [] }] }).stopped();
-    ok('§13 (21:55Z (1)) THE ROUTE: pressesToday throwing ⇒ `presses: null` and one journal line naming it; read ⇒ the list as it is', thrown.presses === null && logs2.some((l) => /the presses of the day could not be read: the record could not be read/.test(l)) && Array.isArray(fine.presses) && fine.presses.length === 1, JSON.stringify({ thrown: thrown.presses, logs2, fine: fine.presses }));
+    ok('§13 (21:55Z (1)) THE ROUTE: pressesToday throwing ⇒ `presses: null` and one journal line naming it; read ⇒ the list as it is', thrown.presses === null && gateOf(logs2.some((l) => /the presses of the day could not be read: the record could not be read/.test(l))) && gateOf(Array.isArray(fine.presses)) && fine.presses.length === 1, JSON.stringify({ thrown: thrown.presses, logs2, fine: fine.presses }));
   }
   { // THE REAL DOOR, driven (the read's should): a person's page reaches the batch WITH a press; every bearer is refused first; a header-less local request is not a press
     const R = require(path.join(REPO, 'src/server/bulk-resume-routes.js'));
@@ -6087,7 +6087,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     const page = hit({ 'sec-fetch-site': 'same-origin' });
     const bearers = ['vsst_t', 'jbt_t', 'vsak_t'].map((k) => hit({ authorization: 'Bearer ' + k, 'sec-fetch-site': 'same-origin' }));
     const bare = hit({});
-    ok('§13 THE REAL DOOR: a person\'s page (same-origin) reaches the batch WITH a press (attended); vsst_ / jbt_ / vsak_ bearers are 403 agent_forbidden even beside a page header; a header-less request is 403 not_a_page — the batch never hears either', page.st === 200 && seen.join() === 'true' && bearers.every((b) => b.st === 403 && b.code === 'agent_forbidden') && bare.st === 403 && bare.code === 'not_a_page', JSON.stringify({ page, bearers, bare, seen }));
+    ok('§13 THE REAL DOOR: a person\'s page (same-origin) reaches the batch WITH a press (attended); vsst_ / jbt_ / vsak_ bearers are 403 agent_forbidden even beside a page header; a header-less request is 403 not_a_page — the batch never hears either', page.st === 200 && seen.join() === 'true' && gateOf(bearers.every((b) => b.st === 403 && b.code === 'agent_forbidden')) && bare.st === 403 && bare.code === 'not_a_page', JSON.stringify({ page, bearers, bare, seen }));
   }
 }
 
@@ -6096,7 +6096,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
 // touched: this is a read of snapshot().attended through the route the report already asks.
 console.log('§B-64c1 the attended tally, worded for the Diagnostics report (a read only)');
 {
-  const okP = (n, c, facts) => { ok(n, c, JSON.stringify(facts)); if (c) console.log('      ' + JSON.stringify(facts)); };
+  const okP = (n, c, facts) => { ok(n, verdictOf(c), JSON.stringify(facts)); if (c) console.log('      ' + JSON.stringify(facts)); };
   const W64 = await import(pathToFileURL(path.join(REPO, 'src/lib/attended-tally-words.js')).href);
   const fill = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
   const tEn = (k, p) => fill(k, p), esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -6178,7 +6178,7 @@ console.log('\n§14 r3136: a usage reading that cannot be told holds the unatten
   const pressed = g.authorize({ reason: 'outbox-wake-now', session: { id: RK } });
   const told = ut.items.filter((i) => i.itemKey === 'spend-reading-unread:' + RK);
   ok('§14 (b) AFTER TORN BYTES, overage not stated again: three unattended turns refused by name, ONE notice for the account across the three, a person\'s press passes, and no counter moved for a refused turn',
-    rs.every((r) => r.ok === false && r.why === 'reading-unread') && told.length === 1 && told[0].status === 'open' && pressed.ok === true && !!rs[2].counts && rs[2].counts.hour === 0 && rs[2].counts.day === 0,
+    gateOf(rs.every((r) => r.ok === false && r.why === 'reading-unread')) && told.length === 1 && told[0].status === 'open' && pressed.ok === true && !!rs[2].counts && rs[2].counts.hour === 0 && rs[2].counts.day === 0,
     JSON.stringify({ whys: rs.map((r) => r.why), told: told.length, hour: rs[2].counts && rs[2].counts.hour }));
   caches[RK] = reading({ fetchedAt: now + 1, source: 'rate-limit-event', overage: { inUse: false, status: 'rejected', asOf: now + 1 } });
   if (typeof UW.noteWritten === 'function') UW.noteWritten(path.join(os.tmpdir(), RK + '.json'), '{}');
@@ -6192,7 +6192,7 @@ console.log('\n§14 r3136: a usage reading that cannot be told holds the unatten
   { const undo = refuse(f); try { door = UW.readReading ? UW.readReading(f, MK) : null; caches[MK] = door; rm = [1, 2, 3].map(() => g.authorize({ reason: 'auto-resume', session: { id: MK } })); } finally { undo(); } }
   const guardTold = ut.items.filter((i) => i.itemKey === 'spend-reading-unread:' + MK);
   ok('§14 (c) A READ THAT FAILS: the door answers the UNREAD mark (never null), the turns are refused by name — and with NO producer\'s item open the guard files its OWN notice, once across the three (r3285: a hold is never without its word)',
-    door === UNREAD && rm.every((r) => r.ok === false && r.why === 'reading-unread') && guardTold.length === 1, JSON.stringify({ door, whys: rm.map((r) => r.why), guardTold: guardTold.length }));
+    door === UNREAD && gateOf(rm.every((r) => r.ok === false && r.why === 'reading-unread')) && guardTold.length === 1, JSON.stringify({ door, whys: rm.map((r) => r.why), guardTold: guardTold.length }));
   const NK = 'sub-r3136n', door0 = UW.readReading ? UW.readReading(path.join(dir, NK + '.json'), NK) : undefined;
   caches[NK] = door0;
   const rn = g.authorize({ reason: 'auto-resume', session: { id: NK } });
@@ -6222,14 +6222,14 @@ console.log('\n§14 r3136: a usage reading that cannot be told holds the unatten
     door3 === UNREAD && !!w1 && w1.ok === false && items.length === 1 && items[0].origin === 'server' && items[0].sessionName === 'Usage' && items[0].action.account === K && wordsAtMark.length === 1 && wordsAtMark[0].key === (FY && FY.TEXT) && wordsAtMark[0].account === 'Gamma',
     JSON.stringify({ door3, w1: w1 && w1.ok, items: items.map((i) => ({ a: i.action, s: i.status })) }));
   ok('§14 (d) …the door is a PERSON\'s: a request carrying a bearer token is refused (403) and nothing is moved',
-    !!bearer && bearer.code === 403 && bearer.body && bearer.body.ok === false, JSON.stringify(bearer && { code: bearer.code, body: bearer.body }));
+    !!bearer && bearer.code === 403 && gateOf(bearer.body) && bearer.body.ok === false, JSON.stringify(bearer && { code: bearer.code, body: bearer.body }));
   const aside = fs.readdirSync(dir2).filter((n) => n.startsWith(K + '.json.unreadable-'));
   let o = null; try { o = JSON.parse(fs.readFileSync(f2, 'utf8')); } catch { o = null; }
   const unk = o ? UW.restartUnknowns(o) : null;
   const five = o ? require(path.join(REPO, 'src/quota-model.js')).lanesOfReading(o).find((l) => l.lane === 'plan:5h') : null;
   ok('§14 (d) «Set it aside»: the file RENAMED beside itself (its bytes kept byte for byte, nothing deleted), a file that STARTED AGAIN in its place — the waiting wall written over it at once and stated, every other gating fact UNKNOWN (never «no reading») — the mark lifted, and the SAME item now says the way out of that state (r3285: refresh this account\'s usage)',
-    !!r && r.ok === true && r.state === 'pass' && aside.length === 1 && fs.readFileSync(path.join(dir2, aside[0])).equals(bytes0) && !!o && !!o.startedAgain && o.startedAgain.setAside === aside[0]
-      && Array.isArray(unk) && unk.includes('plan:7d') && unk.includes('overage') && !unk.includes('plan:5h') && !!five && five.usedPct >= 100 && UW.readingUnread(K) === null && items.length === 1 && items[0].status === 'open' && items[0].i18n.text.key === FY.TEXT_RESTART,
+    !!r && r.ok === true && r.state === 'pass' && aside.length === 1 && gateOf(fs.readFileSync(path.join(dir2, aside[0])).equals(bytes0)) && !!o && !!o.startedAgain && o.startedAgain.setAside === aside[0]
+      && gateOf(Array.isArray(unk)) && gateOf(unk.includes('plan:7d')) && gateOf(unk.includes('overage')) && !unk.includes('plan:5h') && !!five && five.usedPct >= 100 && UW.readingUnread(K) === null && items.length === 1 && items[0].status === 'open' && items[0].i18n.text.key === FY.TEXT_RESTART,
     JSON.stringify({ r, aside, unk, five: five && five.usedPct, status: items[0] && items[0].status }));
   const r2 = fy ? fy.setAside(K) : null;
   ok('§14 (d) …a press on a file that reads: «nothing to set aside», no file moved', !!r2 && r2.ok === true && r2.state === 'none' && fs.readdirSync(dir2).filter((n) => n.includes('.unreadable-')).length === 1, JSON.stringify(r2));
@@ -6252,7 +6252,7 @@ console.log('\n§14 r3136: a usage reading that cannot be told holds the unatten
   await tick(5);
   const qNever = w.eng.quotaVerdictFor(w.M2, { session: sD });
   ok('§14 (e) THE DIRECT GATE: an account bound directly whose reading file cannot be read is NOT USABLE and nothing is known (the fire waits) — it was usable a moment before; after torn bytes the weekly lane not stated again holds it; a file NOT THERE is «no usage data» as before (not held)',
-    qOpen.usable === true && qHeld && qHeld.usable === false && qHeld.readingUnread === true && qHeld.known === false && qTorn.usable === false && Array.isArray(qTorn.restarted) && qTorn.restarted.includes('plan:7d') && !qTorn.restarted.includes('plan:5h') && qNever.usable !== false && !qNever.readingUnread,
+    qOpen.usable === true && gateOf(qHeld) && qHeld.usable === false && qHeld.readingUnread === true && qHeld.known === false && qTorn.usable === false && gateOf(Array.isArray(qTorn.restarted)) && gateOf(qTorn.restarted.includes('plan:7d')) && !qTorn.restarted.includes('plan:5h') && qNever.usable !== false && !qNever.readingUnread,
     JSON.stringify({ qOpen: qOpen.usable, qHeld, qTorn: qTorn && { u: qTorn.usable, r: qTorn.restarted }, qNever: qNever && { u: qNever.usable, why: qNever.reason } }));
   // (f) THE POOL's PICK: a member whose reading cannot be told is never a target (the escape goes to a measured member or none) —
   // B has LESS left than an unknown member is counted at, so a pick that reads the mark as «no reading» takes C
@@ -6264,7 +6264,7 @@ console.log('\n§14 r3136: a usage reading that cannot be told holds the unatten
     !!dBoth && dBoth.to === 'B' && (!dOnlyHeld || dOnlyHeld.to !== 'C'), JSON.stringify({ both: dBoth && dBoth.to, onlyHeld: dOnlyHeld && (dOnlyHeld.to || dOnlyHeld.reason) }));
   const ranked = POOL.rankPoolMembers({ members: [{ id: 'B', name: 'B' }, { id: 'C', name: 'C' }], readCache: (id) => (id in pc ? pc[id] : null), nowSec: nowS }) || [];
   ok('§14 (f) …and the RANKED list the live evict path and the device\'s offline order walk never holds the member whose reading cannot be told (a measured member with less left stays)',
-    Array.isArray(ranked) && ranked.some((r) => r.id === 'B') && !ranked.some((r) => r.id === 'C'), JSON.stringify(ranked.map((r) => r.id)));
+    gateOf(Array.isArray(ranked)) && gateOf(ranked.some((r) => r.id === 'B')) && !ranked.some((r) => r.id === 'C'), JSON.stringify(ranked.map((r) => r.id)));
   // (g) THE THREE HOLDS NO LEG HERE DRIVES, pinned by their lines (each absent at the base): the wall probe asks no vendor for an
   // account whose file cannot be read — AFTER the accounts list's hold (no list: no identity, no reading to ask); the automatic
   // reset-credit rung keeps the credit once the identity is known; the delivery wake waits on the reading's hold by name
@@ -6275,7 +6275,7 @@ console.log('\n§14 r3136: a usage reading that cannot be told holds the unatten
   const held3 = { wallProbeAfterTheList: listAt > 0 && readingAt > listAt && readingAt - listAt < 600, rungAfterTheIdentity: rungAt > 0 && ENG.lastIndexOf('if (!ci.unknown) {', rungAt) > rungAt - 200,
     wakeWaitsByName: /limit = q \? \(q\.readingUnread \? \{ unread: true, why: `its account's usage reading cannot be told \(\$\{q\.reason\}\)` \}/.test(WAKE) };
   ok('§14 (g) THE THREE HOLDS BY THEIR LINES: the wall probe skips an account whose file cannot be read, asked after the accounts list; the reset-credit rung keeps the credit once the identity is known; the wake waits on the reading\'s hold by name',
-    Object.values(held3).every(Boolean), JSON.stringify(held3));
+    verdictOf(Object.values(held3).every(Boolean)), JSON.stringify(held3));
 }
 
 // ── §15 r3285 (the round w19k650vo, ruled by 主开发): A HOLD IS NEVER WITHOUT ITS WORD, A DOOR ONLY FOR A KNOWN ACCOUNT, THE HOLDS DRIVEN ──
@@ -6307,7 +6307,7 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
   nameThrows = false; quiet(() => fy.tick());              // …and the next tick files it again with the engine's label
   const named = openOf(K).map((i) => ({ id: i.id, text: i.text }));
   ok('§15 (a) A HOLD IS NEVER WITHOUT ITS WORD: marked while the For-you store was not built — no item then; the next tick FILES it on the real store (the opaque word while the label helper is not there, never the id), and the tick after names the account by its label — ONE item',
-    before === 0 && atTick.length === 1 && /an account/.test(atTick[0].text) && !atTick[0].text.includes(K) && named.length === 1 && named[0].id === atTick[0].id && /Delta/.test(named[0].text), JSON.stringify({ before, atTick: atTick.map((i) => i.text), named: named.map((i) => i.text) }));
+    before === 0 && atTick.length === 1 && gateOf(/an account/.test(atTick[0].text)) && !atTick[0].text.includes(K) && named.length === 1 && named[0].id === atTick[0].id && verdictOf(/Delta/.test(named[0].text)), JSON.stringify({ before, atTick: atTick.map((i) => i.text), named: named.map((i) => i.text) }));
   const notices = [];
   const g = guardMod.create({ dataDir: tmpdir('vs-r3285-guard-'), serverSetting: () => undefined, identityOf: (s) => (s && s.id ? { key: s.id, name: s.id } : null), readCacheFor: (k) => UW.readReading(UW.cacheFileFor(dir, k), k), readingItemOpen: (k, kind) => fy.noteHeld(k, kind), getUserTodos: () => ({ add: (key, it) => { notices.push(it); return { id: 'n' + notices.length }; }, idsWhere: () => [], setStatus: () => { } }), log: () => { } });
   const r1 = quiet(() => g.authorize({ reason: 'auto-resume', session: { id: K } }));
@@ -6328,7 +6328,7 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
   const press = (account, headers = { 'sec-fetch-site': 'same-origin' }) => { const res = { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } }; quiet(() => routes[FY.ROUTE]({ params: { account }, headers }, res)); return res; };
   const unknown = ['made-up-account', '__models__', 'a.b.c'].map((n) => press(n));
   ok('§15 (b) THE PRESS\'s PATH: a made-up name, the folder\'s models file and a name with dots each answer NOT FOUND by name (404, its words in `error`) — nothing set aside',
-    unknown.every((r) => r.code === 404 && r.body && r.body.code === 'not_found' && /no account/.test(r.body.error || '')) && fs.readdirSync(dir2).length === 0, JSON.stringify(unknown.map((r) => [r.code, r.body && r.body.code])));
+    gateOf(unknown.every((r) => r.code === 404 && r.body && r.body.code === 'not_found' && /no account/.test(r.body.error || ''))) && fs.readdirSync(dir2).length === 0, JSON.stringify(unknown.map((r) => [r.code, r.body && r.body.code])));
   const seed = () => { fs.writeFileSync(f2, JSON.stringify(reading())); for (const n of fs.readdirSync(dir2)) if (n !== P + '.json') fs.rmSync(path.join(dir2, n), { force: true }); return fs.readFileSync(f2); };
   const failAt = (step, fn) => {   // step 'tmp' | 'aside' | 'place': the one call that fails
     const realW = fs.writeFileSync, realR = fs.renameSync, realO = fs.openSync;
@@ -6346,9 +6346,9 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
     quiet(() => UW.readReading(f2, P));
   }
   ok('§15 (b) EACH FAILURE POINT of the press answers its own words in `error` (500) and loses nothing: the new file not made — nothing moved; the old file not set aside — nothing moved; the new one not put in place — the old one put back',
-    outcomes.tmp.code === 500 && /nothing was moved/.test(outcomes.tmp.error || '') && outcomes.tmp.kept && outcomes.tmp.aside === 0
-      && outcomes.aside.code === 500 && /nothing was moved/.test(outcomes.aside.error || '') && outcomes.aside.kept && outcomes.aside.aside === 0
-      && outcomes.place.code === 500 && /the old one was put back/.test(outcomes.place.error || '') && outcomes.place.kept && outcomes.place.aside === 0, JSON.stringify(outcomes));
+    outcomes.tmp.code === 500 && gateOf(/nothing was moved/.test(outcomes.tmp.error || '')) && gateOf(outcomes.tmp.kept) && outcomes.tmp.aside === 0
+      && outcomes.aside.code === 500 && gateOf(/nothing was moved/.test(outcomes.aside.error || '')) && gateOf(outcomes.aside.kept) && outcomes.aside.aside === 0
+      && outcomes.place.code === 500 && gateOf(/the old one was put back/.test(outcomes.place.error || '')) && gateOf(outcomes.place.kept) && outcomes.place.aside === 0, JSON.stringify(outcomes));
   const bytesOk = seed(); const u2 = refuse(f2);
   let ok200 = null; try { quiet(() => UW.readReading(f2, P)); ok200 = press(P); } finally { u2(); }
   const asideOk = fs.readdirSync(dir2).filter((n) => n.startsWith(P + '.json.unreadable-'));
@@ -6356,9 +6356,9 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
   FY.create({ app: { post: (p, h) => { fy3routes[p] = h; } }, todos: () => store, cacheDir: dir2, nameOf: () => 'Hotel', isKnown: () => 'unconfirmed', backendOf: () => null, readNow: () => null, every: 0 });
   const r503 = (() => { const res = { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } }; quiet(() => fy3routes[FY.ROUTE]({ params: { account: 'host-host-dial-x-1' }, headers: { 'sec-fetch-site': 'same-origin' } }, res)); return res; })();
   ok('§15 (b) …a file named for a machine the machines\' list cannot confirm (held) is NOT set aside — 503, refused by that name (machines_unread), never «no account»',
-    r503.code === 503 && r503.body && r503.body.code === 'machines_unread' && /machines' list cannot be read/.test(r503.body.error || ''), JSON.stringify(r503.body));
+    r503.code === 503 && gateOf(r503.body) && r503.body.code === 'machines_unread' && verdictOf(/machines' list cannot be read/.test(r503.body.error || '')), JSON.stringify(r503.body));
   ok('§15 (b) FROM THE OWNER\'s PAGE the press SUCCEEDS through the route: 200 «pass», the old bytes kept beside it, a file that started again in its place',
-    ok200.code === 200 && ok200.body && ok200.body.state === 'pass' && asideOk.length === 1 && fs.readFileSync(path.join(dir2, asideOk[0])).equals(bytesOk) && !!JSON.parse(fs.readFileSync(f2, 'utf8')).startedAgain, JSON.stringify({ code: ok200.code, body: ok200.body, asideOk }));
+    ok200.code === 200 && gateOf(ok200.body) && ok200.body.state === 'pass' && asideOk.length === 1 && gateOf(fs.readFileSync(path.join(dir2, asideOk[0])).equals(bytesOk)) && !!JSON.parse(fs.readFileSync(f2, 'utf8')).startedAgain, JSON.stringify({ code: ok200.code, body: ok200.body, asideOk }));
   // (c) THE POOL BRANCH of the pre-fire verdict: a pool whose only usable member is held — the continue waits
   const w = mkWorld();
   const sP = w.mkSession('sess-r3285p');
@@ -6368,7 +6368,7 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
   await tick(5);
   let vHeld = null; { const u = refuse(path.join(w.cacheDir, w.M1 + '.json')); try { vHeld = w.eng.quotaVerdictFor(w.P, { session: sP }); } finally { u(); } }
   ok('§15 (c) THE POOL BRANCH: a pool whose ONLY usable member\'s reading cannot be told is NOT usable — the continue waits (it was usable through that member a moment before)',
-    vOpen.usable === true && vHeld && vHeld.usable === false, JSON.stringify({ vOpen: vOpen.usable, vHeld: vHeld && { u: vHeld.usable, r: vHeld.reason } }));
+    vOpen.usable === true && gateOf(vHeld) && vHeld.usable === false, JSON.stringify({ vOpen: vOpen.usable, vHeld: vHeld && { u: vHeld.usable, r: vHeld.reason } }));
   // (d) THE POOL's DECISION, held members: a start leaves a held default; a walled held member leaves; every member held — no target
   const pc = { A: UNREAD, B: reading({ fiveHour: { utilization: 0.3, resetsAt: nowS() + 3600 } }), C: UNREAD };
   const members = [{ id: 'A', name: 'A' }, { id: 'B', name: 'B' }];
@@ -6392,7 +6392,7 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
     try { clearTimeout(sD._wallProbeTimer); } catch { } sD._wallProbeTimer = null;
   } finally { console.log = l0; }
   ok('§15 (e) THE WALL PROBE, driven: a readable wall with no reset arms the probe ladder; the same account whose file cannot be read arms NONE (a probe\'s answer could not be written) and says so',
-    armedReadable === true && armedHeld === false && said.some((l) => /no wall probe — this account's usage reading file could not be read/.test(l)), JSON.stringify({ armedReadable, armedHeld, said: said.filter((l) => /wall/.test(l)).slice(0, 3) }));
+    armedReadable === true && armedHeld === false && verdictOf(said.some((l) => /no wall probe — this account's usage reading file could not be read/.test(l))), JSON.stringify({ armedReadable, armedHeld, said: said.filter((l) => /wall/.test(l)).slice(0, 3) }));
   // (f) THE RESET-CREDIT RUNG, driven on a codex account: its file cannot be read — the credit is KEPT, no consume verb written
   const amC = new AccountManager({ dataDir: path.join(tmpdir('vs-r3285-cx-'), 'data') });
   const CX = amC.createCodexSubscription({ name: 'Foxtrot' }).id;
@@ -6405,7 +6405,7 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
   let rungHeld = null;
   try { const u = refuse(path.join(cxDir, CX + '.json')); try { rungHeld = engC.resetCreditRung(sC, { resetsAtSec: nowS() + 3600, lane: 'plan:7d', key: CX }); } finally { u(); } } finally { console.log = l1; }
   ok('§15 (f) THE RESET-CREDIT RUNG, driven: a codex account whose file cannot be read KEEPS its credit — the rung answers «skipped» by the reading\'s hold, and no consume verb is written to the conversation',
-    rungHeld === 'skipped' && writes.length === 0 && saidC.some((l) => /kept \(reading-unread/.test(l)), JSON.stringify({ rungHeld, writes: writes.length, said: saidC.filter((l) => /reset-credit/.test(l)).slice(0, 2) }));
+    rungHeld === 'skipped' && writes.length === 0 && verdictOf(saidC.some((l) => /kept \(reading-unread/.test(l))), JSON.stringify({ rungHeld, writes: writes.length, said: saidC.filter((l) => /reset-credit/.test(l)).slice(0, 2) }));
   // (g) THE GUARD's LISTENER reads a held account's file only at writes of THAT account (r3285 (7))
   let reads = 0;
   const HK = 'sub-r3285lis';
@@ -6437,10 +6437,10 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
     quiet(() => hm.remove(HID));
     const removed = K(MK);
     ok('§15 (h) PRODUCTION\'s OWN TEST: an account, the hub\'s own login and the per-machine form of a machine the REAL machines\' list knows (its id holds dashes) are known — that machine REMOVED is not, nor the folder\'s models file, nor a made-up name; with the machines\' list held the machine\'s form is «unconfirmed» (said, never set aside); the item names the machine by its label, never its file key',
-      HID.includes('-') && seen.account === true && seen.global === true && seen.machine === true && seen.models === false && seen.madeUp === false && seen.label === 'Lab box'
+      gateOf(HID.includes('-')) && seen.account === true && seen.global === true && seen.machine === true && seen.models === false && seen.madeUp === false && seen.label === 'Lab box'
         && unconfirmed === 'unconfirmed' && heldLabel === 'a paired machine' && removed === false, JSON.stringify({ HID, seen, unconfirmed, heldLabel, removed }));
   }
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

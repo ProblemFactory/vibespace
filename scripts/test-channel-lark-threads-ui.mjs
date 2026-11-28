@@ -32,7 +32,7 @@ const wt = path.join(ROOT, 'wt'), chromeDir = path.join(ROOT, 'chrome'), fakeHom
 for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 fs.writeFileSync(TOPICS, JSON.stringify({ topics: {} }));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 
@@ -57,12 +57,12 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 const waitServer = async () => { for (let i = 0; i < 240; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-ok(await waitServer(), 'the worktree server booted (the fake accounts; fake-poll lists thread replies separately)');
+ok(verdictOf(await waitServer()), 'the worktree server booted (the fake accounts; fake-poll lists thread replies separately)');
 const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch {} return { status: r.status, json: j }; };
 const C = 'fake-poll-ops';
 let recs = [];
 for (let i = 0; i < 160; i++) { const r = await api('GET', `/api/channels/fake-poll/${C}/messages?limit=50`); recs = (r.json.records || r.json || []); if (r.status === 200 && Array.isArray(recs) && recs.length >= 5) break; await sleep(250); }
-ok(Array.isArray(recs) && recs.length >= 5, `the ops room was ingested (${recs.length} records)`);
+ok(gateOf(Array.isArray(recs)) && recs.length >= 5, `the ops room was ingested (${recs.length} records)`);
 const plain = recs.filter((r) => !r.replyTo && !r.threadKey && r.author && r.author.id && !r.author.isSelf);
 const root = plain[plain.length - 2] || plain[0];
 const person = plain.find((r) => r.author.id !== root.author.id) || plain[0];
@@ -104,15 +104,15 @@ const OPEN = (tag) => `(async () => {
 const ROW = (tag) => `(() => { const w = window.__w[${J(tag)}]; const row = w.content.querySelector('.chanmsg[data-vid=${J(String(root.vendorId))}]'); const chip = row && row.querySelector('.chanmsg-thread-chip'); return { noReload: window.__noReload === 1, probe: row ? row.__probe : null, chip: chip ? chip.textContent : null }; })()`;
 
 const p1 = await newPage({ lang: 'zh' }), p2 = await newPage({ lang: 'ja' });
-ok(p1.ready && p2.ready, 'two tabs loaded the app (zh, ja)');
+ok(gateOf(p1.ready) && verdictOf(p2.ready), 'two tabs loaded the app (zh, ja)');
 console.log('(r) a thread born on a root the window already drew — the recheck');
 const o1 = await p1.evaljs(OPEN('a')), o2 = await p2.evaljs(OPEN('b'));
-ok(o1.found && o2.found && !o1.chip && !o2.chip, `the root (${root.vendorId}) is drawn in both tabs with NO thread chip (nobody had answered it in a thread)`, J([o1, o2]));
+ok(gateOf(o1.found) && gateOf(o2.found) && !o1.chip && !o2.chip, `the root (${root.vendorId}) is drawn in both tabs with NO thread chip (nobody had answered it in a thread)`, J([o1, o2]));
 fs.writeFileSync(TOPICS, JSON.stringify({ topics: { [root.vendorId]: { key: 'fthr_lkt1', replies: [{ vendorId: 'lkt-r1', at: Date.now() - 5000, author: { id: 'u-brook', name: 'Brook' }, text: 'a reply made in the new topic' }] } } }));
 const press = await api('POST', `/api/channels/fake-poll/${encodeURIComponent(C)}/refresh`, {});
 let r1 = null, r2 = null;
 for (let i = 0; i < 80; i++) { r1 = await p1.evaljs(ROW('a')); r2 = await p2.evaljs(ROW('b')); if (r1.chip && r2.chip) break; await sleep(250); }
-ok(press.status === 200 && r1.chip && r2.chip && r1.noReload && r2.noReload && r1.probe === o1.probe && r2.probe === o2.probe, `the OWNER's Refresh re-lists the chat (rule 22b), the stored root WIDENS and its row grows the chip IN PLACE in both tabs — no reload, the same row node ("${r1.chip}" / "${r2.chip}")`, J({ press: press.status, r1, r2 }));
+ok(press.status === 200 && gateOf(r1.chip) && gateOf(r2.chip) && gateOf(r1.noReload) && gateOf(r2.noReload) && r1.probe === o1.probe && r2.probe === o2.probe, `the OWNER's Refresh re-lists the chat (rule 22b), the stored root WIDENS and its row grows the chip IN PLACE in both tabs — no reload, the same row node ("${r1.chip}" / "${r2.chip}")`, J({ press: press.status, r1, r2 }));
 // the chip says "open to load": a click opens the pane, the walk loads the topic's reply (the fake account ticks once a
 // minute here — its timer walk is test-channels-engine ㉓ (A)'s), and the chip counts it
 const opened = await p1.evaljs(`(async () => {
@@ -127,13 +127,13 @@ const opened = await p1.evaljs(`(async () => {
 let r3 = null;
 for (let i = 0; i < 80; i++) { r3 = await p1.evaljs(ROW('a')); if (r3.chip && /1/.test(r3.chip)) break; await sleep(250); }
 const th = await api('GET', `/api/channels/fake-poll/${encodeURIComponent(C)}/thread/${encodeURIComponent(root.vendorId)}`);
-ok(opened.clicked && opened.reply && r3 && /1/.test(r3.chip || '') && (th.json.records || []).some((x) => x.vendorId === 'lkt-r1'), `the chip opens the pane and the walk loads the topic's reply; the chip then counts it ("${r3 && r3.chip}") — no reload (${r3 && r3.noReload})`, J({ opened, r3, th: (th.json.records || []).map((x) => x.vendorId) }));
+ok(gateOf(opened.clicked) && gateOf(opened.reply) && gateOf(r3) && gateOf(/1/.test(r3.chip || '')) && verdictOf((th.json.records || []).some((x) => x.vendorId === 'lkt-r1')), `the chip opens the pane and the walk loads the topic's reply; the chip then counts it ("${r3 && r3.chip}") — no reload (${r3 && r3.noReload})`, J({ opened, r3, th: (th.json.records || []).map((x) => x.vendorId) }));
 
 console.log('(n) "Set a name…" — the owner\'s own name for an author, every head, both tabs');
 const vid = String(person.vendorId), aid = String(person.author.id), vname = String(person.author.name);
 const HEADS = (tag) => `(() => { const w = window.__w[${J(tag)}]; return [...w.content.querySelectorAll('.chanmsg-who[data-author-id=${J(aid)}]')].map((b) => ({ text: b.textContent, title: b.title || '' })); })()`;
 const before1 = await p1.evaljs(HEADS('a')), before2 = await p2.evaljs(HEADS('b'));
-ok(before1.length >= 1 && before1.every((h) => h.text === vname) && before2.every((h) => h.text === vname), `${aid}'s heads read the channel's name "${vname}" (${before1.length} in the zh tab, ${before2.length} in the ja tab)`, J([before1, before2]));
+ok(before1.length >= 1 && gateOf(before1.every((h) => h.text === vname)) && verdictOf(before2.every((h) => h.text === vname)), `${aid}'s heads read the channel's name "${vname}" (${before1.length} in the zh tab, ${before2.length} in the ja tab)`, J([before1, before2]));
 const menu = await p1.evaljs(`(async () => {
   const w = window.__w.a;
   const who = w.content.querySelector('.chanmsg-who[data-author-id=${J(aid)}]');
@@ -154,21 +154,21 @@ const menu = await p1.evaljs(`(async () => {
   input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   return { items, title, input: true, waitedMenu, waitedDlg };
 })()`);
-ok(menu.input && menu.items.some((x) => /设置名字…/.test(x)) && /起的名字/.test(menu.title), `(z) the head's menu says "设置名字…" and the dialog "${menu.title}" (zh — the dictionary's words); waited ${menu.waitedMenu * 100} ms for the menu, ${menu.waitedDlg * 100} ms for the dialog (evidence, ≤ 5 s each)`, J(menu));
+ok(gateOf(menu.input) && gateOf(menu.items.some((x) => /设置名字…/.test(x))) && verdictOf(/起的名字/.test(menu.title)), `(z) the head's menu says "设置名字…" and the dialog "${menu.title}" (zh — the dictionary's words); waited ${menu.waitedMenu * 100} ms for the menu, ${menu.waitedDlg * 100} ms for the dialog (evidence, ≤ 5 s each)`, J(menu));
 let after1 = null, after2 = null;
 for (let i = 0; i < 40; i++) { after1 = await p1.evaljs(HEADS('a')); after2 = await p2.evaljs(HEADS('b')); if (after1.every((h) => h.text === 'Ada 林') && after2.length && after2.every((h) => h.text === 'Ada 林')) break; await sleep(150); }
-ok(after1.every((h) => h.text === 'Ada 林' && h.title.includes(vname)) && after2.every((h) => h.text === 'Ada 林' && h.title.includes(vname)) && (await p2.evaljs('window.__noReload === 1')), `the owner's name is EVERY head of ${aid} in BOTH tabs, in place (no reload); the title keeps the channel's name and says it is the owner's`, J({ after1, after2 }));
+ok(gateOf(after1.every((h) => h.text === 'Ada 林' && h.title.includes(vname))) && gateOf(after2.every((h) => h.text === 'Ada 林' && h.title.includes(vname))) && (verdictOf(await p2.evaljs('window.__noReload === 1'))), `the owner's name is EVERY head of ${aid} in BOTH tabs, in place (no reload); the title keeps the channel's name and says it is the owner's`, J({ after1, after2 }));
 const agent = await api('GET', `/api/channels/fake-poll/${encodeURIComponent(C)}/messages?limit=50`);
 const arec = (agent.json.records || agent.json || []).find((r) => r.vendorId === vid);
-ok(arec && arec.author.display === 'Ada 林' && arec.author.name === vname && arec.author.alias === 'Ada 林', 'a fresh read of the page (the window\'s route) carries it: display = the owner\'s name, name = the channel\'s', J(arec && arec.author));
+ok(gateOf(arec) && arec.author.display === 'Ada 林' && arec.author.name === vname && arec.author.alias === 'Ada 林', 'a fresh read of the page (the window\'s route) carries it: display = the owner\'s name, name = the channel\'s', J(arec && arec.author));
 const ja = await p2.evaljs(`(async () => { const w = window.__w.b; const who = w.content.querySelector('.chanmsg-who[data-author-id=${J(aid)}]'); who.click(); for (let i = 0; i < 50 && !document.querySelector('.context-menu .context-menu-item'); i++) await new Promise((r) => setTimeout(r, 100)); const items = [...document.querySelectorAll('.context-menu .context-menu-item')].map((x) => x.textContent); document.querySelectorAll('.context-menu').forEach((x) => x.remove()); return items; })()`);   // verify r2 ⑦: an evidence wait
-ok(ja.some((x) => /名前を設定…/.test(x)), `(z) the ja tab's menu says "名前を設定…"`, J(ja));
+ok(verdictOf(ja.some((x) => /名前を設定…/.test(x))), `(z) the ja tab's menu says "名前を設定…"`, J(ja));
 const clr = await api('PATCH', `/api/channels/fake-poll/authors/${encodeURIComponent(aid)}`, { alias: '' });
 let back1 = null, back2 = null;
 for (let i = 0; i < 40; i++) { back1 = await p1.evaljs(HEADS('a')); back2 = await p2.evaljs(HEADS('b')); if (back1.every((h) => h.text === vname) && back2.every((h) => h.text === vname)) break; await sleep(150); }
-ok(clr.status === 200 && back1.every((h) => h.text === vname) && back2.every((h) => h.text === vname), 'an EMPTY name clears it: the channel\'s name returns in both tabs, in place', J({ clr: clr.json, back1, back2 }));
+ok(clr.status === 200 && gateOf(back1.every((h) => h.text === vname)) && verdictOf(back2.every((h) => h.text === vname)), 'an EMPTY name clears it: the channel\'s name returns in both tabs, in place', J({ clr: clr.json, back1, back2 }));
 const ag = await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/authors/${encodeURIComponent(aid)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_not-the-owner' }, body: JSON.stringify({ alias: 'x' }) });
 ok(ag.status === 403 || ag.status === 401, `an agent bearer is refused (${ag.status})`);
 p1.close(); p2.close();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -57,7 +57,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const acorn = require('acorn');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -156,7 +156,7 @@ function judge(files) {
 
 console.log('① ② ③ THE CENSUS over the shipped tree');
 const red0 = judge(tree);
-ok(tree.size > 400 && [...tree.keys()].some((k) => k.startsWith('data/bin/')), `the census reads ${tree.size} files (src/, server.js, data/bin)`);
+ok(tree.size > 400 && verdictOf([...tree.keys()].some((k) => k.startsWith('data/bin/'))), `the census reads ${tree.size} files (src/, server.js, data/bin)`);
 ok(red0.length === 0, 'no auto-unlock shape; the vault doors are called only from src/routes/vault.js with the request body; the key-file law only behind the vault', red0.join(' | '));
 {
   const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
@@ -189,15 +189,15 @@ ok(red0.length === 0, 'no auto-unlock shape; the vault doors are called only fro
   const engSrc = tree.get('src/server/vault-engine.js') || '';
   const kinds = kindsOf(engSrc);
   const noRow = kinds.filter((k) => !SECRET_KINDS[k]), noKind = Object.keys(SECRET_KINDS).filter((k) => !kinds.includes(k));
-  ok(kinds.length >= 6 && !noRow.length && !noKind.length && VE.isSecretName('secret:0a1b2c3d4e') && !VE.isSecretName('secret:') && !VE.isSecretName('secrets:x'), `every secret kind of the engine is a row here — ${kinds.join(', ')} (+ agent:<scope>/<name>, lane vault-mint-put) — none unclassified, none dead`, { noRow, noKind });
+  ok(kinds.length >= 6 && !noRow.length && !noKind.length && gateOf(VE.isSecretName('secret:0a1b2c3d4e')) && !VE.isSecretName('secret:') && !VE.isSecretName('secrets:x'), `every secret kind of the engine is a row here — ${kinds.join(', ')} (+ agent:<scope>/<name>, lane vault-mint-put) — none unclassified, none dead`, { noRow, noKind });
   const planted = kindsOf(engSrc.replace('|totp|secret|provider|keyfile):', '|totp|secret|provider|keyfile|note):'));   // lane lg-vault-file: the literal gained `keyfile`
-  ok(planted.includes('note') && planted.filter((k) => !SECRET_KINDS[k]).join() === 'note', 'CONTROL: a planted kind (`note:`) in SECRET_RE is a kind with no row — RED');
+  ok(gateOf(planted.includes('note')) && planted.filter((k) => !SECRET_KINDS[k]).join() === 'note', 'CONTROL: a planted kind (`note:`) in SECRET_RE is a kind with no row — RED');
 }
 
 console.log('④ the agent side has no unlock');
 {
   const cli = tree.get('data/bin/vibespace-vault') || '';
-  ok(cli.length > 0 && /\/api\/agent\/vault\/state/.test(cli) && /\/api\/agent\/vault\/lock/.test(cli) && !/\/api\/(agent\/)?vault\/(unlock|setup|change)/.test(cli), 'data/bin/vibespace-vault calls state and lock — never unlock / setup / change');
+  ok(cli.length > 0 && gateOf(/\/api\/agent\/vault\/state/.test(cli)) && gateOf(/\/api\/agent\/vault\/lock/.test(cli)) && !/\/api\/(agent\/)?vault\/(unlock|setup|change)/.test(cli), 'data/bin/vibespace-vault calls state and lock — never unlock / setup / change');
   const routes = tree.get('src/routes/vault.js') || '';
   const agentDoors = [...routes.matchAll(/app\.(get|post)\('(\/api\/agent\/vault\/[^']+)'/g)].map((m) => m[2]);
   // lane vault-e2e-password-fix-r2: + the LINK TOKEN door — a remote session's attach child asks for ITS machine's device
@@ -210,12 +210,12 @@ console.log('④ the agent side has no unlock');
   // design q-047 L1 (lane vault-totp): + the TWO-STEP CODE door — a GET answering a granted entry's CURRENT code (never the
   // seed: its answer is built from named fields only — test-vault-routes ⑨ plants a seed and ⑩'s mutant leaks it ⇒ RED)
   const codeDoor = (() => { const i = routes.indexOf("app.get('/api/agent/vault/totp/:name'"); const j = routes.indexOf('\n    });', i); return i > 0 && j > i ? routes.slice(i, j) : ''; })();
-  ok(/res\.json\(\{ ok: true, name: r\.name, code: r\.code, secondsLeft: r\.secondsLeft, period: r\.period \}\)/.test(codeDoor) && !/seed|secretGet|reveal|unlock/.test(codeDoor) && /callerOf\(token\)/.test(codeDoor),
+  ok(gateOf(/res\.json\(\{ ok: true, name: r\.name, code: r\.code, secondsLeft: r\.secondsLeft, period: r\.period \}\)/.test(codeDoor)) && !/seed|secretGet|reveal|unlock/.test(codeDoor) && verdictOf(/callerOf\(token\)/.test(codeDoor)),
     'the two-step code door answers NAMED fields only (name, code, secondsLeft, period) — no seed, no secretGet, no reveal, no unlock; its caller is the session token\'s conversation');
   // lane vault-run-door: + RUN (the hub spawns the command with the value injected; the answer is the SCRUBBED output) and
   // RUNNABLE (the entries a run may reference — names, never a value)
   const cliRuns = /\/api\/agent\/vault\/run'/.test(cli) && /\/api\/agent\/vault\/runnable'/.test(cli);
-  ok(cliRuns, 'data/bin/vibespace-vault calls run and runnable (lane vault-run-door) — and still no unlock / setup / change (above)');
+  ok(verdictOf(cliRuns), 'data/bin/vibespace-vault calls run and runnable (lane vault-run-door) — and still no unlock / setup / change (above)');
   // THE RUN DOOR'S ANSWER (lane vault-run-door): every chunk of the child's stdout / stderr reaches `parts` only through the
   // run's scrubber, the tail at the end too; the answer's two streams are those VALUE-masked parts ONLY (round 21: not secret-shapes — a tool's own named field is not a secret) — nothing else.
   // Lane vault-scrub-forms: ONE scrubber per run (createRunMasker, both pipes in arrival order — one window): `parts` is
@@ -234,7 +234,7 @@ console.log('④ the agent side has no unlock');
       && /const outT = \{ text: parts\.out\.join\(''\), redacted: 0 \}, errT = \{ text: parts\.err\.join\(''\), redacted: 0 \};/.test(t)
       && /stdout: outT\.text, stderr: errT\.text/.test(t) && !/stdout: (?!outT\.text|utf8Head\(outT\.text\))/.test(t) && !/stderr: (?!errT\.text|utf8Head\(errT\.text\))/.test(t);
   };
-  ok(scrubbedOnly(door), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through the run\'s ONE scrubber (createRunMasker\'s push, the end\'s tail too — one place, handOn), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');
+  ok(verdictOf(scrubbedOnly(door)), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through the run\'s ONE scrubber (createRunMasker\'s push, the end\'s tail too — one place, handOn), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');
   ok(!scrubbedOnly(door.replace('if (text) scrub.push(k, text);', 'if (text) parts[k].push(text);')) && !scrubbedOnly(door.replace('if (text) scrub.push(k, text);', "if (text) handOn({ out: k === 'out' ? text : '', err: k === 'err' ? text : '' });")) && !scrubbedOnly(door, scrubWorker.replace("m = VR.createRunMasker(valuesOf(msg.secrets), ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']")),
     'MUTANTS: a stream chunk handed on without the scrubber (straight into parts, or into handOn), or a worker whose masker holds none of the run\'s values ⇒ RED');
   // 主开发 r1919 (4): THE ONE FEED of the hand-on is inside the worker's start (startScrub): a piece's reply, in order, is the only
@@ -254,27 +254,27 @@ console.log('④ the agent side has no unlock');
       && /if \(msg\.type === 'push'\) \{ const o = m\.push\(msg\.stream, msg\.text\); parentPort\.postMessage\(\{ type: 'out', seq: msg\.seq, out: o\.out, err: o\.err, counts: counts\(\) \}\); return; \}/.test(wk)
       && /if \(msg\.type === 'end'\) \{ const o = m\.end\(!!msg\.cut\); parentPort\.postMessage\(\{ type: 'end', seq: msg\.seq, out: o\.out, err: o\.err, counts: counts\(\) \}\); \}/.test(wk);
   };
-  ok(feedOnly(door) && replyOnly(scrubWorker), 'r1919 (4): THE ONE FEED of the run\'s hand-on is inside its worker\'s start — a piece\'s reply in order is the only onOut call, an end resolves with the worker\'s end reply or the loss\'s withheld words; and THE WORKER\'S REPLY is its masker\'s answer (the piece\'s text goes only into m.push; each reply posts o.out / o.err)');
+  ok(gateOf(feedOnly(door)) && verdictOf(replyOnly(scrubWorker)), 'r1919 (4): THE ONE FEED of the run\'s hand-on is inside its worker\'s start — a piece\'s reply in order is the only onOut call, an end resolves with the worker\'s end reply or the loss\'s withheld words; and THE WORKER\'S REPLY is its masker\'s answer (the piece\'s text goes only into m.push; each reply posts o.out / o.err)');
   const feedTwice = anchored(door, "if (post({ type: 'push', seq, stream, text }) && !timer) arm();", "if (post({ type: 'push', seq, stream, text }) && !timer) arm(); sc.onOut({ out: stream === 'out' ? text : '', err: stream === 'err' ? text : '' });", 'test-vault-law r1919 (4): a second feed of the raw piece');
   const replyRaw = anchored(scrubWorker, "parentPort.postMessage({ type: 'out', seq: msg.seq, out: o.out, err: o.err, counts: counts() });", "parentPort.postMessage({ type: 'out', seq: msg.seq, out: msg.stream === 'out' ? msg.text : '', err: msg.stream === 'err' ? msg.text : '', counts: counts() });", 'test-vault-law r1919 (4): the reply posts the raw piece');
   ok(!feedOnly(feedTwice) && !replyOnly(replyRaw), 'r1919 (4) MUTANTS: a second feed handing the raw piece on at its post, and a worker whose reply posts the raw piece ⇒ RED');
   // 主开发 r2161 (c)(d): the run route's refusal carries `ran` (a child that finished before a lock) and `receipt` (a child that ran:
   // an unanswered run, a lock after its end) — the words promise them, the CLI says them
   const refusalKeys = (t) => { const m = /const refusal = \(res, r\) => res\.status\(DOOR\.statusOf\(r\.code\)\)[^\n]*?\[([^\]]*)\]\.filter\(\(k\) => r\[k\] != null\)/.exec(t); return m ? m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')) : []; };   // the RUN door's helper (the paste door has its own refusal helper in the same file)
-  ok(['killed', 'ran', 'receipt'].every((k) => refusalKeys(routes).includes(k)), `r2161 (c)(d): the run route's refusal hands the caller \`ran\` and \`receipt\` (with \`killed\`) — ${refusalKeys(routes).join(', ')}`);
+  ok(verdictOf(['killed', 'ran', 'receipt'].every((k) => refusalKeys(routes).includes(k))), `r2161 (c)(d): the run route's refusal hands the caller \`ran\` and \`receipt\` (with \`killed\`) — ${refusalKeys(routes).join(', ')}`);
   ok(!refusalKeys(anchored(routes, "'killed', 'ran', 'receipt'].filter", "'killed'].filter", 'test-vault-law r2161 (d): the route drops the receipt')).includes('receipt'), 'r2161 (d) MUTANT: a refusal list without `ran` / `receipt` ⇒ RED');   // stale-pins: kept (the mutant's replacement IS the release's list)
   ok(!/vaultReveal|valueOf\(/.test(routes.slice(routes.indexOf("'/api/agent/vault/runnable'"), routes.indexOf("'/api/agent/vault/runnable'") + 700)), 'runnable answers names — it never asks a store for a value');
   // lane vault-mint-put (q-043 §9): + MINT / PUT — CREATE-only doors in the session's OWN namespace; neither reads a value
   // back (there is no agent reveal door; the owner reveals in the Vault window), and both refuse a locked vault by name.
   ok(!/app\.get\('\/api\/agent\/vault\/(mint|put)'/.test(routes) && !/res\.json\(\{[^}]*\bvalue\s*:/.test(routes.slice(routes.indexOf("'/api/agent/vault/mint'"), routes.indexOf("'/api/agent/vault/link-token'"))), 'mint / put are POST-only and their answer carries no `value:` field (create, never read — the q-043 ① law)');
   const lt = routes.slice(routes.indexOf("'/api/agent/vault/link-token'"));
-  ok(lt.length > 0 && !/vault\.(unlock|setup|change)\(/.test(lt.slice(0, lt.indexOf('\n  });'))) && /vsst_/.test(lt.slice(0, 900)) && /_agentdSession/.test(lt.slice(0, 900)),
+  ok(lt.length > 0 && !/vault\.(unlock|setup|change)\(/.test(lt.slice(0, lt.indexOf('\n  });'))) && gateOf(/vsst_/.test(lt.slice(0, 900))) && verdictOf(/_agentdSession/.test(lt.slice(0, 900))),
     'the link-token door answers a session token (vsst_) of a session on a paired machine only, and never unlocks / sets up / changes');
   const personDoors = [...routes.matchAll(/app\.post\('(\/api\/vault\/[^']+)', person\(/g)].map((m) => m[1]);
-  ok(['setup', 'unlock', 'change', 'lock', 'idle', 'active'].every((d) => personDoors.includes('/api/vault/' + d)), `every person door is wrapped in person() (human_only + same-origin): ${personDoors.join(', ')}`);
+  ok(verdictOf(['setup', 'unlock', 'change', 'lock', 'idle', 'active'].every((d) => personDoors.includes('/api/vault/' + d))), `every person door is wrapped in person() (human_only + same-origin): ${personDoors.join(', ')}`);
   // B-ab6c's round (主开发 r5200 should 4): a website login's PERSON doors (each noStoreL(person(…))) — its change's write and its swap among them
   const loginPersonDoors = [...routes.matchAll(/app\.(?:post|delete)\('(\/api\/vault\/web-logins[^']*)', noStoreL\(person\(/g)].map((m) => m[1]);
-  ok(['/api/vault/web-logins', '/api/vault/web-logins/use-previous'].every((d) => loginPersonDoors.includes(d)), `a website login's write (Add, Change password…) and its swap («Use the previous password») are person doors: ${loginPersonDoors.join(', ')}`);
+  ok(verdictOf(['/api/vault/web-logins', '/api/vault/web-logins/use-previous'].every((d) => loginPersonDoors.includes(d))), `a website login's write (Add, Change password…) and its swap («Use the previous password») are person doors: ${loginPersonDoors.join(', ')}`);
 }
 
 console.log('⑤ MUTANTS — each RED');
@@ -325,7 +325,7 @@ console.log('⑥ THE REAL STORES across the states');
   const is = IS.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet });
   is.setIntegration('cloud:browserless', { apiKey: 'law-api-key', apiUrl: 'https://chrome.example.net' });
   const master0 = AS.appSecretsMaster({ dataDir: d }).master;
-  ok(['.accounts-key', '.mounts-key', '.integrations-key', '.app-secrets-key'].every((k) => fs.existsSync(path.join(d, k))), 'not set up: the four stores minted their key FILES (the migration window)');
+  ok(verdictOf(['.accounts-key', '.mounts-key', '.integrations-key', '.app-secrets-key'].every((k) => fs.existsSync(path.join(d, k)))), 'not set up: the four stores minted their key FILES (the migration window)');
   const reads = () => ({
     acc: (() => { try { acc._key(); return acc.getKey(a.id); } catch (e) { return e.code; } })(),   // getKey answers null on any refusal; the spawn path names it (`account key unavailable — the vault is locked …`)
     mnt: (() => { try { return mm._dec(mm._state.mounts.find((m) => m.id === mid).secretKeyEnc); } catch (e) { return e.reason || e.code; } })(),
@@ -333,14 +333,14 @@ console.log('⑥ THE REAL STORES across the states');
     int: JSON.stringify(is.resolveIntegration('cloud:browserless')).includes('law-api-key') ? 'law-api-key' : (is.publicView('cloud:browserless').storeError || {}).reason || 'refused',
     app: (() => { const r = AS.appSecretsMaster({ dataDir: d }); return r.master ? (r.master.equals(master0) ? 'master' : 'OTHER') : r.refused.code; })(),
   });
-  ok((await eng.setup(PW)).ok, 'setup seals them');
+  ok(verdictOf((await eng.setup(PW)).ok), 'setup seals them');
   const r1 = reads();
-  ok(r1.acc === a.key || (typeof r1.acc === 'string' && r1.acc.startsWith('sk-ant-law-')), 'unlocked: accounts reads its key', r1);
+  ok(r1.acc === a.key || (typeof r1.acc === 'string' && verdictOf(r1.acc.startsWith('sk-ant-law-'))), 'unlocked: accounts reads its key', r1);
   ok(r1.mnt === 'mount-secret' && r1.mntRow === null && r1.int === 'law-api-key' && r1.app === 'master', 'unlocked: mounts, integrations and app-secrets read theirs (the same master)', r1);
   eng.lock();
   const r2 = reads();
-  ok(r2.acc === KF.VAULT_LOCKED && r2.mnt === KF.VAULT_LOCKED && r2.mntRow && r2.mntRow.code === KF.VAULT_LOCKED && /vault_locked/.test(r2.int) && r2.app === KF.VAULT_LOCKED, 'LOCKED: every store refuses key-unreadable:vault_locked — and the mounts row says it', r2);
-  ok(['.accounts-key', '.mounts-key', '.integrations-key', '.app-secrets-key'].every((k) => !fs.existsSync(path.join(d, k))), 'locked: no store minted a key file beside the vault');
+  ok(r2.acc === KF.VAULT_LOCKED && r2.mnt === KF.VAULT_LOCKED && gateOf(r2.mntRow) && r2.mntRow.code === KF.VAULT_LOCKED && gateOf(/vault_locked/.test(r2.int)) && r2.app === KF.VAULT_LOCKED, 'LOCKED: every store refuses key-unreadable:vault_locked — and the mounts row says it', r2);
+  ok(verdictOf(['.accounts-key', '.mounts-key', '.integrations-key', '.app-secrets-key'].every((k) => !fs.existsSync(path.join(d, k)))), 'locked: no store minted a key file beside the vault');
   await eng.unlock(PW);
   const r3 = reads();
   ok(r3.mnt === 'mount-secret' && r3.int === 'law-api-key' && r3.app === 'master', 'unlock ⇒ every store reads again', r3);
@@ -367,11 +367,11 @@ console.log('⑦ THE AUTOMATION KEYS (design q-046) — a key\'s value never rea
     if (/value:\s*plan\.value|\{\s*ok:\s*true,\s*value/.test(en)) bad.push('an engine answer carries a value');
     return bad;
   };
-  ok(routes && engine && cli && census(routes, engine, cli).length === 0, 'THE CENSUS: the agent doors and vibespace-api never reach a value; the engine reads `apikey:<id>` ONLY in vaultReveal (the Vault window\'s people-only reveal)', census(routes, engine, cli));
+  ok(gateOf(routes) && gateOf(engine) && gateOf(cli) && census(routes, engine, cli).length === 0, 'THE CENSUS: the agent doors and vibespace-api never reach a value; the engine reads `apikey:<id>` ONLY in vaultReveal (the Vault window\'s people-only reveal)', census(routes, engine, cli));
   const plant = routes.replace("else res.json({ ok: true, keys, verbs:", "else res.json({ ok: true, value: engine.vaultReveal(caller.want), keys, verbs:");   // the route's answer line since r3104 (lane login-request-card): the hold answered first
-  ok(plant !== routes && census(plant, engine, cli).includes('an agent door reads a value'), 'MUTANT RED: an agent door that answers a key\'s value (vaultReveal in /api/agent/automation/keys) is caught by the census');
+  ok(plant !== routes && verdictOf(census(plant, engine, cli).includes('an agent door reads a value')), 'MUTANT RED: an agent door that answers a key\'s value (vaultReveal in /api/agent/automation/keys) is caught by the census');
   const plant2 = engine.replace("return { ok: true, key: A.publicKey(plan.record) };", "return { ok: true, key: A.publicKey(plan.record), value: plan.value };");
-  ok(plant2 !== engine && census(routes, plant2, cli).includes('an engine answer carries a value'), 'MUTANT RED: a mint that answers its value is caught by the census');
+  ok(plant2 !== engine && verdictOf(census(routes, plant2, cli).includes('an engine answer carries a value')), 'MUTANT RED: a mint that answers its value is caught by the census');
   // THE REAL ENGINE across the states: nothing cached across a lock, a restart is locked, the unlock resumes
   const ROOT = scratch('vault-law-ak');
   fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -394,7 +394,7 @@ console.log('⑦ THE AUTOMATION KEYS (design q-046) — a key\'s value never rea
   const restarted = await e.use({ caller, verb: 'conversations.rename', args: { name: 'x' } });
   await v.unlock(PW, {});
   const again = await e.use({ caller, verb: 'conversations.rename', args: { name: 'x' } });
-  ok(ok1.ok && locked.code === 'vault_locked' && restarted.code === 'vault_locked' && v.state() === 'unlocked' && again.ok, 'granted ⇒ runs · LOCKED ⇒ vault_locked · a RESTART (a new engine) ⇒ locked, vault_locked · the person\'s unlock ⇒ it runs again (no key value was ever needed)', { ok1: ok1.ok, locked: locked.code, restarted: restarted.code, again: again.ok || again.code });
+  ok(gateOf(ok1.ok) && locked.code === 'vault_locked' && restarted.code === 'vault_locked' && v.state() === 'unlocked' && verdictOf(again.ok), 'granted ⇒ runs · LOCKED ⇒ vault_locked · a RESTART (a new engine) ⇒ locked, vault_locked · the person\'s unlock ⇒ it runs again (no key value was ever needed)', { ok1: ok1.ok, locked: locked.code, restarted: restarted.code, again: again.ok || again.code });
   v.close();
   fs.rmSync(ROOT, { recursive: true, force: true });
 }
@@ -405,14 +405,14 @@ console.log('⑧ THE NAMED EXCEPTION — the per-instance relay token (design q-
   const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
   const RT = require(path.join(REPO, 'src/relay-token.js'));
   const row = V.SECRETS_AT_REST.find((r) => r.where === 'data/' + RT.FILE);
-  ok(!!row && !row.entry && typeof row.exception === 'string' && /q-051/.test(row.exception) && /owner/.test(row.exception) && /2026-10-20/.test(row.exception) && /without the second password/.test(row.exception) && /public names only/.test(row.exception) && /never the hub/.test(row.exception) && /revocable/.test(row.exception),
+  ok(!!row && !row.entry && typeof row.exception === 'string' && gateOf(/q-051/.test(row.exception)) && gateOf(/owner/.test(row.exception)) && gateOf(/2026-10-20/.test(row.exception)) && gateOf(/without the second password/.test(row.exception)) && gateOf(/public names only/.test(row.exception)) && gateOf(/never the hub/.test(row.exception)) && verdictOf(/revocable/.test(row.exception)),
     'SECRETS_AT_REST names data/relay-token.json as an EXCEPTION: the owner\'s decision (q-051, 2026-10-20), why (a restart re-publishes without the second password), its blast radius (that instance\'s public names, never the hub), revocable', row);
   const frpRow = V.SECRETS_AT_REST.find((r) => r.entry === 'frp:token');
-  ok(!!frpRow && /grace/.test(frpRow.what) && /2026-10-relay-token-per-instance/.test(frpRow.retires || ''), 'the shared relay token stays the vault\'s frp:token — the knock during the relay\'s grace — and its row says when it retires', frpRow);
+  ok(!!frpRow && gateOf(/grace/.test(frpRow.what)) && verdictOf(/2026-10-relay-token-per-instance/.test(frpRow.retires || '')), 'the shared relay token stays the vault\'s frp:token — the knock during the relay\'s grace — and its row says when it retires', frpRow);
   const STORE_KEYS = Object.keys(VE.STORE_KEYS || {}).concat(Array.isArray(VE.STORE_KEYS) ? VE.STORE_KEYS.map((k) => k.name || k) : []);
   ok(!STORE_KEYS.some((k) => String(k).includes('relay')) && !/\.key$|-key$/.test(RT.FILE) && !VE.isSecretName('relay:token'), 'the relay token is no store key (no STORE_KEYS row, no key-file name) and no vault secret name (relay: is not a secret prefix)', STORE_KEYS);
   const frpSrc = read('src/plugins/frp.js');
-  ok(!/secretPut\([^)]*relay|secretGet\([^)]*relay/i.test(frpSrc) && /replaceShredding\(relayFile\(\), RT\.serialize\(rec\)\)/.test(frpSrc), 'the frp plugin writes it to its file (0600, atomic, the old bytes overwritten) — never into the vault', null);
+  ok(!/secretPut\([^)]*relay|secretGet\([^)]*relay/i.test(frpSrc) && verdictOf(/replaceShredding\(relayFile\(\), RT\.serialize\(rec\)\)/.test(frpSrc)), 'the frp plugin writes it to its file (0600, atomic, the old bytes overwritten) — never into the vault', null);
 }
 
 console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途，不给值」): no route, no CLI verb, no broadcast answers an entry\'s bytes to a BEARER');
@@ -588,7 +588,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   const c0 = useCensus(tree);
   ok(c0.red.length === 0, `(a) every verb of data/bin/vibespace-vault (${c0.verbs.join(', ')}) and every agent vault route (${[...c0.routes.keys()].join(', ')}) is classified; the link-token door is THE one exception`, c0.red);
   const reachRows = [...c0.routes].map(([k, r]) => `${k} → ${r.reach.join('+') || '∅'}`);
-  ok(c0.routes.size >= 3 && [...c0.routes.values()].some((r) => r.reach.includes('facts')) && [...c0.routes.values()].some((r) => r.reach.includes('lock')), `(b) REACH: the agent routes name only receipt / purpose-door / refusal keys (${reachRows.join(' · ')})`, reachRows);
+  ok(c0.routes.size >= 3 && gateOf([...c0.routes.values()].some((r) => r.reach.includes('facts'))) && verdictOf([...c0.routes.values()].some((r) => r.reach.includes('lock'))), `(b) REACH: the agent routes name only receipt / purpose-door / refusal keys (${reachRows.join(' · ')})`, reachRows);
 
   // (c) THE SENTINEL SWEEP — the real routes over a real engine with a sentinel in every entry
   const express8 = require(path.join(REPO, 'node_modules/express'));
@@ -605,13 +605,13 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   sentinels.push(['link token (own machine)', Buffer.from(OWN)], ['link token (another machine)', Buffer.from(OTHER)]);
   for (const [entry, label] of [['frp:token', 'relay token'], ['file:law-pair', 'sealed file key'], ['apikey:ak-law', 'automation key'], ['secret:0a1b2c3d4e', 'free entry']]) {   // lane vault-paste-request: + a free entry (the owner's paste)
     const v = `law-${label.replace(/\W/g, '')}-${crypto.randomBytes(12).toString('hex')}`;
-    ok(eng8.secretPut(entry, v).ok, `the sweep's sentinel sealed: ${label}`);
+    ok(verdictOf(eng8.secretPut(entry, v).ok), `the sweep's sentinel sealed: ${label}`);
     sentinels.push([label, Buffer.from(v)]);
   }
   // lane lg-vault-file (B-0830): + a FILE the owner put in and an agent's own file — their BYTES are sentinels (no door answers them)
   for (const [entry, label, put] of [['keyfile:0b1c2d3e4f', 'the owner\'s file', (n, b) => eng8.filePut(n, b, { filename: 'law-licence.lic', prov: 'uploaded' })], ['agent:c-local/law-file', 'an agent\'s file', (n, b) => eng8.agentFilePut(n, b, { filename: 'law.key', actor: 'Law local' })]]) {
     const b = Buffer.from(`law-file-${label.replace(/\W/g, '')}-${crypto.randomBytes(16).toString('hex')}`);
-    ok((await put(entry, b)).ok, `the sweep's sentinel sealed: ${label} (its bytes)`);   // the cure: a file's put answers a promise
+    ok(verdictOf((await put(entry, b)).ok), `the sweep's sentinel sealed: ${label} (its bytes)`);   // the cure: a file's put answers a promise
     sentinels.push([label, b]);
   }
   ok(sentinels.length === VE8.STORE_KEYS.length + 8, `${sentinels.length} sentinels: every store key, two machines' link tokens, the relay token, a sealed file key, an automation key, a free entry, the owner's file and an agent's file`);
@@ -692,9 +692,9 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   const { registerVaultRoutes: reg8 } = require(path.join(REPO, 'src/routes/vault.js'));
   const s0 = await sweep(reg8);
   ok(s0.leaks.length === 0 && s0.calls >= 20, `(c) THE SWEEP: ${s0.routes.length} agent routes × ${BEARERS.length} bearers + the CLI's verbs + every broadcast frame (${s0.calls} answers) ⇒ no stored value in any form`, s0.leaks);
-  ok(s0.own, '(c) …the POSITIVE CONTROL: the exception\'s own answer (a session on a machine asking its link-token door) carries its own machine\'s token — the sweep sees a value when one is there');
+  ok(verdictOf(s0.own), '(c) …the POSITIVE CONTROL: the exception\'s own answer (a session on a machine asking its link-token door) carries its own machine\'s token — the sweep sees a value when one is there');
   const auditUse = fs.readFileSync(path.join(d8, VE8.AUDIT_FILE), 'utf8');
-  ok(/"event":"vault-use"[^\n]*"door":"link-token"[^\n]*"outcome":"ok"/.test(auditUse) && hitsOf(auditUse).length === 0, 'the link-token answers are USES in the audit (door link-token, outcome ok) — and the audit holds no stored value in any form', hitsOf(auditUse));
+  ok(gateOf(/"event":"vault-use"[^\n]*"door":"link-token"[^\n]*"outcome":"ok"/.test(auditUse)) && hitsOf(auditUse).length === 0, 'the link-token answers are USES in the audit (door link-token, outcome ok) — and the audit holds no stored value in any form', hitsOf(auditUse));
 
   // (c2) lane vault-agent-own: THE OWNER CONVERSATION'S OWN RUN NEVER REVEALS THE VALUE EITHER — no card asked anyone, and the
   // scrubber still stands between the child and the agent: the REAL put route seals a value under the session's own entry
@@ -721,7 +721,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     ok(ref === 'vault://agent:law-conv-own/law-tok' && ran.status === 200 && ansO.ok === true && ansO.by === 'own' && !cardO.length && hitO.length === 0 && (ansO.stdout || '').split('[vault:agent:law-conv-own/law-tok]').length >= 3 && !!lineO && lineO.allowedBy === 'own',
       '(c2) lane vault-agent-own: the OWNER conversation\'s run of the value it PUT (named by its durable id) asks nobody — and its answer holds the value in NO form (raw / hex / base64 / base64url: the scrubber still stands); its run line says allowedBy own', { ref, status: ran.status, by: ansO.by, cards: cardO.length, hits: hitO.length, stdout: String(ansO.stdout || '').slice(0, 200), allowedBy: lineO && lineO.allowedBy });
     const otherRun = await call(portO, 'POST', '/api/agent/vault/run', { authorization: 'Bearer ' + TO.other }, { args: ['--env', `T=${ref}`, '--', process.execPath, '-e', PRINT], cwd: ROOT8 });
-    ok(otherRun.status === 403 && /use_not_granted/.test(otherRun.body) && formsO.every((f) => !otherRun.body.includes(f)), '(c2) …another session\'s run of it ⇒ 403 use_not_granted, nothing read', otherRun.status);
+    ok(otherRun.status === 403 && gateOf(/use_not_granted/.test(otherRun.body)) && verdictOf(formsO.every((f) => !otherRun.body.includes(f))), '(c2) …another session\'s run of it ⇒ 403 use_not_granted, nothing read', otherRun.status);
     await new Promise((res) => srvO.close(res));
     // THE CONTROL: the same run through the door with a scrubber worker that masks nothing (its masker built over no value) ⇒ the
     // value IS in the answer (the 0 above is not vacuous). The worker is planted beside the run root, its requires absolute
@@ -750,20 +750,20 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   ok(planted !== routesSrc, 'the mutant\'s anchor is in src/routes/vault.js');
   const mt = new Map(tree); mt.set(RV, planted);
   const m1 = useCensus(mt);
-  ok(m1.red.some((l) => /GET \/api\/agent\/vault\/peek is not classified/.test(l)), `MUTANT RED (a): a planted agent route that answers a stored value, unclassified ⇒ ${m1.red[0] || 'GREEN'}`);
+  ok(verdictOf(m1.red.some((l) => /GET \/api\/agent\/vault\/peek is not classified/.test(l))), `MUTANT RED (a): a planted agent route that answers a stored value, unclassified ⇒ ${m1.red[0] || 'GREEN'}`);
   const m2 = useCensus(mt, { extraRoutes: { 'GET /api/agent/vault/peek': ['receipt', 'a lie'] } });
-  ok(m2.red.some((l) => /reaches vault\.secretGet \(hub-only\)/.test(l)), `MUTANT RED (b): the same route classified as a receipt — its handler reaches a hub-only key ⇒ ${m2.red[0] || 'GREEN'}`);
+  ok(verdictOf(m2.red.some((l) => /reaches vault\.secretGet \(hub-only\)/.test(l))), `MUTANT RED (b): the same route classified as a receipt — its handler reaches a hub-only key ⇒ ${m2.red[0] || 'GREEN'}`);
   const s1 = await sweep(loadAs(RV, planted).registerVaultRoutes);
-  ok(s1.leaks.some((l) => /peek[^\n]*relay token/.test(l)), `MUTANT RED (c): the sweep over the planted route finds the relay token in its answer ⇒ ${s1.leaks[0] || 'GREEN'}`);
+  ok(verdictOf(s1.leaks.some((l) => /peek[^\n]*relay token/.test(l))), `MUTANT RED (c): the sweep over the planted route finds the relay token in its answer ⇒ ${s1.leaks[0] || 'GREEN'}`);
   const cliSrc = tree.get('data/bin/vibespace-vault');
   const plantedCli = cliSrc.replace("  if (cmd === 'lock')", "  if (cmd === 'peek') { const d = await call('GET', '/api/agent/vault/link-token'); console.log(d.token); return; }\n  if (cmd === 'lock')");
   ok(plantedCli !== cliSrc, 'the CLI mutant\'s anchor is in data/bin/vibespace-vault');
   const mc = new Map(tree); mc.set('data/bin/vibespace-vault', plantedCli);
   const m3 = useCensus(mc);
-  ok(m3.red.some((l) => /the verb "peek" is not classified/.test(l)), `MUTANT RED (a): a planted CLI verb, unclassified ⇒ ${m3.red[0] || 'GREEN'}`);
+  ok(verdictOf(m3.red.some((l) => /the verb "peek" is not classified/.test(l))), `MUTANT RED (a): a planted CLI verb, unclassified ⇒ ${m3.red[0] || 'GREEN'}`);
   const cliCopy = path.join(ROOT8, 'vibespace-vault-peek'); fs.writeFileSync(cliCopy, plantedCli, { mode: 0o700 }); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ROOT8, 'cli-call.js'));   // lane cli-call-timeouts: a copy outside the checkout reads THE ONE CALL beside it
   const s2 = await sweep(reg8, { cli: cliCopy });
-  ok(s2.leaks.some((l) => /vibespace-vault peek ⇒ link token \(own machine\)/.test(l)), `MUTANT RED (c): the planted verb run against the real doors prints the machine's link token ⇒ ${s2.leaks[0] || 'GREEN'}`);
+  ok(verdictOf(s2.leaks.some((l) => /vibespace-vault peek ⇒ link token \(own machine\)/.test(l))), `MUTANT RED (c): the planted verb run against the real doors prints the machine's link token ⇒ ${s2.leaks[0] || 'GREEN'}`);
   // (e) THE JOB ROAD (lane vault-job-road, design-vault-service-secret L1a): a Background Work job is GIVEN a value at each start —
   // the create route's `vault` is a PURPOSE-DOOR field (references in; the answer is the job's snapshot: names and references);
   // src/jobs.js names no engine key (its ONE road is src/server/vault-job-door.js); the door reaches only what a spawn needs; and
@@ -772,8 +772,8 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   {
     const ar = tree.get('src/agent-routes.js'), js = tree.get('src/jobs.js'), jd = tree.get('src/server/vault-job-door.js');
     const h = ar.slice(ar.indexOf("app.post('/api/agent/jobs',"), ar.indexOf("app.get('/api/agent/jobs',"));
-    ok(/\n {4}vault: b\.vault,/.test(h) && !/secretGet|getVault|\bvault\.[a-z]/i.test(h.replace(/\n {4}vault: b\.vault,[^\n]*/, '')), '(e) the create route carries `vault` — REFERENCES, a purpose-door field (the hub hands the values at each start; the answer is the snapshot) — and reaches no vault key itself');
-    ok(!/\b(secretGet|secretNames|keyFor|noteUse|secretPut)\b/.test(js) && /door\.payload\(v\)/.test(js), '(e) src/jobs.js names no engine key — the job door is its one road');
+    ok(gateOf(/\n {4}vault: b\.vault,/.test(h)) && !/secretGet|getVault|\bvault\.[a-z]/i.test(h.replace(/\n {4}vault: b\.vault,[^\n]*/, '')), '(e) the create route carries `vault` — REFERENCES, a purpose-door field (the hub hands the values at each start; the answer is the snapshot) — and reaches no vault key itself');
+    ok(!/\b(secretGet|secretNames|keyFor|noteUse|secretPut)\b/.test(js) && verdictOf(/door\.payload\(v\)/.test(js)), '(e) src/jobs.js names no engine key — the job door is its one road');
     const reach = [...new Set([...jd.matchAll(/\bvault\.([A-Za-z]+)\(/g)].map((m) => m[1]))].sort();
     ok(reach.join() === 'audit,blocked,noteUse,onLock,onUnlock,secretGet,secretNames,state,useCounts', `(e) the job door reaches only secretGet (the spawn's frame), noteUse, blocked, secretNames, state, onUnlock and (lane vault-job-approval) audit — its approval card's ask / allow / deny / over lines, ids and references — useCounts (the Vault row's «started N×», counts) and (B-a08e, 主开发 r1665) onLock — its one lock road withdraws the open cards — never a store key, a reveal, a write or the unlock (${reach.join(', ')})`);
     const J8 = path.join(ROOT8, 'jobroot'), jd8 = path.join(J8, 'data');
@@ -815,7 +815,7 @@ console.log('⑩ THE AGY LOGIN FILE (lane agy-subagent-cards): the subagent read
   const P = '9c0f0000-0000-4000-8000-0000000000a1', S = '49120000-0000-4000-8000-0000000000b1', M1 = 'c0000000-0000-4000-8000-0000000000c1', SG = '.system_generated';
   ok(AS.TOKEN_FILE === path.basename(H8.TOKEN_REL) && !AS.storeReadable(AS.TOKEN_FILE) && !AS.storeReadable(`brain/${S}/${SG}/messages/${AS.TOKEN_FILE}.json`) && !AS.storeReadable(`brain/${S}/${SG}/logs/../../../${AS.TOKEN_FILE}`),
     'the reader\'s verdict refuses the login file by its name (the name the descriptor\'s TOKEN_REL only ever stats)');
-  ok(['data/bin/agy-wrapper.js', 'src/agy-store-fs.js', 'src/agy-backfill.js'].every((f) => !read(f).includes(AS.TOKEN_FILE)) && !/require\(['"](?:node:)?fs['"]\)/.test(read('src/agy-store.js')), 'no reader spells the file: the wrapper, the ONE gate (agy-store-fs) and the hub\'s reader (agy-backfill) name it nowhere; agy-store holds no fs');
+  ok(gateOf(['data/bin/agy-wrapper.js', 'src/agy-store-fs.js', 'src/agy-backfill.js'].every((f) => !read(f).includes(AS.TOKEN_FILE))) && !/require\(['"](?:node:)?fs['"]\)/.test(read('src/agy-store.js')), 'no reader spells the file: the wrapper, the ONE gate (agy-store-fs) and the hub\'s reader (agy-backfill) name it nowhere; agy-store holds no fs');
   const ROOT10 = scratch('vault-law-agy');
   fs.mkdirSync(path.join(ROOT10, 'data', 'bin'), { recursive: true });
   // the scratch root's src = the repo's, entry by entry, so ONE module can be a mutant copy (the gate, below)
@@ -858,18 +858,18 @@ console.log('⑩ THE AGY LOGIN FILE (lane agy-subagent-cards): the subagent read
   const mutated = path.join(ROOT10, 'data', 'bin', 'agy-wrapper.js');
   fs.copyFileSync(path.join(REPO, 'data/bin/agy-wrapper.js'), mutated);
   const [real, red] = await Promise.all([run('real', path.join(REPO, 'data/bin/agy-wrapper.js')), run('red', mutated, (all) => all.includes(CANARY))]);
-  ok(real.turned && !real.all.includes(CANARY) && /refused \(a link in the store\)/.test(real.log) && /subagent tail off/.test(real.log),
+  ok(gateOf(real.turned) && !real.all.includes(CANARY) && gateOf(/refused \(a link in the store\)/.test(real.log)) && verdictOf(/subagent tail off/.test(real.log)),
     'END TO END: every file the tail opens is a link to the login file — the real wrapper says it refused the link, journals and logs NO byte of the canary, and its look ends', real.log.split('\n').filter((l) => /store|subagent/.test(l)).slice(0, 6));
   // the hub's reader of a sub that ALREADY RAN (src/agy-backfill.js, the cards' addendum) over the SAME store: no canary
   const { storeReader } = require(path.join(REPO, 'src/agy-store-fs.js'));
   const hubLog = [];
   const snapOf = (sr) => JSON.stringify(AS.snapshotOf(sr, { parentId: P, toolCallId: `${P}:6`, step: 6 }));
   const hub = snapOf(storeReader(path.join(ROOT10, 'real'), { log: (l) => hubLog.push(l) }));
-  ok(!hub.includes(CANARY) && hubLog.some((l) => /refused \(a link in the store\)/.test(l)), 'THE HUB\'S READER (a sub that already ran) over the same store: the SAME gate refuses the links — no byte of the canary in what it would draw', hubLog.slice(0, 3));
+  ok(!hub.includes(CANARY) && verdictOf(hubLog.some((l) => /refused \(a link in the store\)/.test(l))), 'THE HUB\'S READER (a sub that already ran) over the same store: the SAME gate refuses the links — no byte of the canary in what it would draw', hubLog.slice(0, 3));
   // the RED run's verdicts (its run went beside the real one, above)
-  ok(gate.includes(cut1) && gate.includes(cut2) && red.all.includes(CANARY), 'RED CONTROL: with the gate as a copy that follows links (no realpath check, no O_NOFOLLOW) the wrapper journals the canary — the leg above can go red', red.all.includes(CANARY) ? 'canary seen' : red.log.slice(-400));
+  ok(gateOf(gate.includes(cut1)) && gateOf(gate.includes(cut2)) && verdictOf(red.all.includes(CANARY)), 'RED CONTROL: with the gate as a copy that follows links (no realpath check, no O_NOFOLLOW) the wrapper journals the canary — the leg above can go red', red.all.includes(CANARY) ? 'canary seen' : red.log.slice(-400));
   const redHub = snapOf(require(path.join(ROOT10, 'src', 'agy-store-fs.js')).storeReader(path.join(ROOT10, 'red')));
-  ok(redHub.includes(CANARY), 'RED CONTROL: …and the hub\'s reader through that copy draws the canary — its leg can go red too', redHub.slice(0, 200));
+  ok(verdictOf(redHub.includes(CANARY)), 'RED CONTROL: …and the hub\'s reader through that copy draws the canary — its leg can go red too', redHub.slice(0, 200));
   fs.rmSync(ROOT10, { recursive: true, force: true });
 }
 
@@ -878,7 +878,7 @@ console.log('⑪ lane passkey-sink: A KERNEL PASSKEY SIGNATURE IS A USE — the 
   // the census: the watch notes a use through ONE seam (pkUse → the injected vaultUse), and the wiring hands it the engine's noteUse
   const dsrc = read('src/server/browser-dialogs.js'), wsrc = read('src/server/mounts-plugins-wiring.js');
   const calls = dsrc.match(/\bvaultUse\(/g) || [];
-  ok(calls.length === 1 && /function pkUse\([\s\S]{0,600}vaultUse\('passkeys', \{ by: rec\.by === 'human' \? 'human' : 'agent', door: 'passkey'/.test(dsrc) && /vaultUse: \(entry, use, o\) => vault\.noteUse\(entry, use, o\)/.test(wsrc),
+  ok(calls.length === 1 && gateOf(/function pkUse\([\s\S]{0,600}vaultUse\('passkeys', \{ by: rec\.by === 'human' \? 'human' : 'agent', door: 'passkey'/.test(dsrc)) && verdictOf(/vaultUse: \(entry, use, o\) => vault\.noteUse\(entry, use, o\)/.test(wsrc)),
     'ONE use seam in the watch (pkUse → vaultUse(\'passkeys\', {by, door: passkey, conv}, {purpose})) and the wiring hands it the engine\'s noteUse — no second use writer', calls.length);
   const ROOT11 = scratch('vault-law-pk');
   fs.rmSync(ROOT11, { recursive: true, force: true }); fs.mkdirSync(ROOT11, { recursive: true });
@@ -888,7 +888,7 @@ console.log('⑪ lane passkey-sink: A KERNEL PASSKEY SIGNATURE IS A USE — the 
   const quiet = { log() {}, warn() {}, error() {} };
   const d = path.join(ROOT11, 'data'); fs.mkdirSync(d);
   const eng = VE.create({ dataDir: d, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
-  ok((await eng.setup('the passkey law\'s second password')).ok, 'a vault set up over this data dir (the passkeys\' key lives in it)');
+  ok(verdictOf((await eng.setup('the passkey law\'s second password')).ok), 'a vault set up over this data dir (the passkeys\' key lives in it)');
   // the wiring's own passkeys handle (mounts-plugins-wiring: data/browser-passkeys.json 0600 + browser-passkeys.key through lawfulKey)
   const file = path.join(d, 'browser-passkeys.json'), keyFile = path.join(d, 'browser-passkeys.key');
   const withCipher = (op) => { const k = SB.lawfulKey(keyFile, { raw: true, hasCiphertext: () => SB.holdsCiphertext({ files: [file], re: /v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\./ }) }); if (!k.ok) return { ok: false, code: k.code, file: path.basename(keyFile), words: KF.refusalWords(k.code, path.basename(keyFile)) }; const c = PS.cipherOf(crypto, k.key); try { return op(c); } finally { if (SB.vaultHeld(keyFile)) k.key.fill(0); } };
@@ -910,21 +910,21 @@ console.log('⑪ lane passkey-sink: A KERNEL PASSKEY SIGNATURE IS A USE — the 
     const a2 = await c2.answerPromise;
     const pkcs8 = passkeys.cipher.open(row.keySealed);
     const good = a2.outcome === 'completed' && crypto.verify('sha256', Buffer.concat([Buffer.from(a2.get.authenticatorData, 'base64url'), Buffer.from(c2.request.clientDataHash, 'base64url')]), WA.publicKeyOf({ crypto, privateKeyPkcs8: pkcs8 }).publicKey, Buffer.from(a2.get.signature, 'base64url'));
-    ok(a1.outcome === 'completed' && good && !fs.existsSync(keyFile) && (fs.statSync(file).mode & 0o777) === 0o600, 'register + sign-in on the kernel with the passkeys\' key HELD BY THE VAULT (no key file beside the data); the signature verifies', { a1: a1.outcome, a2: a2.outcome, keyFile: fs.existsSync(keyFile) });
+    ok(a1.outcome === 'completed' && gateOf(good) && !fs.existsSync(keyFile) && (fs.statSync(file).mode & 0o777) === 0o600, 'register + sign-in on the kernel with the passkeys\' key HELD BY THE VAULT (no key file beside the data); the signature verifies', { a1: a1.outcome, a2: a2.outcome, keyFile: fs.existsSync(keyFile) });
     await new Promise((r) => setTimeout(r, 50));
     const audit = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8');
     const lines = audit.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use' && l.door === 'passkey');
-    ok(lines.length === 2 && lines.every((l) => l.entry === 'browser-passkeys.key' && l.by === 'agent' && l.conv === 'conv-pk-1' && l.outcome === 'ok' && /^vr-[0-9a-f]{12}$/.test(l.receipt) && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip,grant')
-      && /register a passkey on example\.test/.test(lines[0].purpose) && /sign in to example\.test with a passkey/.test(lines[1].purpose),
+    ok(lines.length === 2 && gateOf(lines.every((l) => l.entry === 'browser-passkeys.key' && l.by === 'agent' && l.conv === 'conv-pk-1' && l.outcome === 'ok' && /^vr-[0-9a-f]{12}$/.test(l.receipt) && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip,grant'))
+      && gateOf(/register a passkey on example\.test/.test(lines[0].purpose)) && verdictOf(/sign in to example\.test with a passkey/.test(lines[1].purpose)),
       'THE USE LAW: the new key and the signature are ONE vault-use line each (entry browser-passkeys.key, door passkey, the conversation, the purpose, a receipt — the closed key set)', lines);
     const sentinels = [pkcs8, Buffer.from(pkcs8, 'base64').toString('hex'), Buffer.from(pkcs8, 'base64').toString('base64url'), row.keySealed, a2.get.signature];
-    ok(sentinels.every((s) => s && !audit.includes(s)) && !JSON.stringify(eng.usesOf('conv-pk-1')).includes(pkcs8) && eng.usesOf('conv-pk-1').filter((x) => x.door === 'passkey').length === 2, 'no line carries the key (PKCS#8 raw / hex / base64url), its sealed blob, nor the signature — purposes and receipts only; the agent\'s own `uses` reads them back', eng.usesOf('conv-pk-1').length);
+    ok(gateOf(sentinels.every((s) => s && !audit.includes(s))) && !JSON.stringify(eng.usesOf('conv-pk-1')).includes(pkcs8) && eng.usesOf('conv-pk-1').filter((x) => x.door === 'passkey').length === 2, 'no line carries the key (PKCS#8 raw / hex / base64url), its sealed blob, nor the signature — purposes and receipts only; the agent\'s own `uses` reads them back', eng.usesOf('conv-pk-1').length);
     eng.lock();
     const c3 = k.triggerWebAuthn({ op: 'get', origin: 'https://example.test' });
     const a3 = await c3.answerPromise;
     await new Promise((r) => setTimeout(r, 50));
     const after = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use' && l.door === 'passkey');
-    ok(a3.outcome === 'cancelled' && a3.error === 'NotAllowedError' && after.length === 2 && /on this instance's page/.test(w.passkeyIn('bp-1', null).text || '') && items.some((i) => /browser-passkeys\.key/.test(i.text || '') && /vault_locked/.test(i.text || '')),
+    ok(a3.outcome === 'cancelled' && a3.error === 'NotAllowedError' && after.length === 2 && gateOf(/on this instance's page/.test(w.passkeyIn('bp-1', null).text || '')) && verdictOf(items.some((i) => /browser-passkeys\.key/.test(i.text || '') && /vault_locked/.test(i.text || ''))),
       'the vault LOCKED ⇒ the next sign-in is refused webauthn_key_locked (the page told NotAllowedError, nothing signed, no use line), the key For-you line names the file', { a3, items: items.map((i) => i.text) });
   } finally { w.shutdown(); await k.close(); eng.close(); fs.rmSync(ROOT11, { recursive: true, force: true }); }
 }
@@ -937,23 +937,23 @@ console.log('⑫ lane browser-login (r22 pivot): A WEB LOGIN IS A VAULT ENTRY, I
   const { startFakeKernel } = await import('./fixtures/fake-kernel.mjs');
   const quiet = { log() {}, warn() {}, error() {} };
   const NAME = BL.entryName('https://shop.example.test', 'alice');
-  ok(VE.isSecretName(NAME) && !VE.STORE_KEYS.some((k) => k.name === NAME || NAME.startsWith(k.name)) && /web-login:/.test(read('src/server/vault-engine.js').match(/const SECRET_RE = [^\n]*/)[0]),
+  ok(gateOf(VE.isSecretName(NAME)) && !VE.STORE_KEYS.some((k) => k.name === NAME || NAME.startsWith(k.name)) && verdictOf(/web-login:/.test(read('src/server/vault-engine.js').match(/const SECRET_RE = [^\n]*/)[0])),
     'a web login is a vault ENTRY (`web-login:<origin>#<user>` — SECRET_RE), never a STORE_KEYS row (no key file, no lawfulKey road)');
   // the ONE writer: only browser-logins.js seals a web-login entry (its writeEntry → secretPut), nothing else in src/ names the prefix in a put
   const putters = [...tree.entries()].filter(([rel, t]) => rel !== 'src/server/browser-logins.js' && /secretPut\([^)\n]*web-login/.test(t)).map(([rel]) => rel);
   const wsrc = read('src/server/browser-logins.js');
-  ok(!putters.length && (wsrc.match(/\bvault\.secretPut\(/g) || []).length === 1 && /function writeEntry\([\s\S]{0,700}vault\.secretPut\(name, text, \{\s*kind: norm\.source/.test(wsrc) && (wsrc.match(/\bvault\.noteUse\(/g) || []).length === 1,
+  ok(!putters.length && (wsrc.match(/\bvault\.secretPut\(/g) || []).length === 1 && gateOf(/function writeEntry\([\s\S]{0,700}vault\.secretPut\(name, text, \{\s*kind: norm\.source/.test(wsrc)) && (wsrc.match(/\bvault\.noteUse\(/g) || []).length === 1,
     'THE ONE WRITER: browser-logins.js seals a web login through ONE secretPut (writeEntry) and notes every use through ONE noteUse — nothing else in src/ writes the prefix', putters);
   const ROOT12 = scratch('vault-law-wl');
   fs.rmSync(ROOT12, { recursive: true, force: true }); fs.mkdirSync(ROOT12, { recursive: true });
   const d = path.join(ROOT12, 'data'); fs.mkdirSync(d);
   const eng = VE.create({ dataDir: d, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
-  ok((await eng.setup('the web login law\'s second password')).ok, 'a vault set up over this data dir');
+  ok(verdictOf((await eng.setup('the web login law\'s second password')).ok), 'a vault set up over this data dir');
   const grants = GS.create({ memory: true });
   const logins = Lm.create({ vault: eng, grants: () => grants, forYou: { add: () => 'fy', resolve() {} } });
   const PW = ['wl', crypto.randomBytes(8).toString('hex'), 'Zz'].join('-');   // built at run time
   const forms = (pw) => [pw, Buffer.from(pw).toString('hex'), Buffer.from(pw).toString('base64'), Buffer.from(pw).toString('base64url')];
-  ok(logins.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: PW }).ok && eng.secretNames().some((x) => x.name === NAME) && !fs.readFileSync(path.join(d, fs.readdirSync(d).find((f) => /vault/.test(f) && f.endsWith('.json')) || 'vault.json'), 'utf8').includes(PW), 'the owner\'s login is sealed under its entry (the record on disk holds no password in the clear)');
+  ok(gateOf(logins.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: PW }).ok) && gateOf(eng.secretNames().some((x) => x.name === NAME)) && !fs.readFileSync(path.join(d, fs.readdirSync(d).find((f) => /vault/.test(f) && f.endsWith('.json')) || 'vault.json'), 'utf8').includes(PW), 'the owner\'s login is sealed under its entry (the record on disk holds no password in the clear)');
   logins.addOwn({ origin: 'https://other.example.test', username: 'alice', password: PW });
   grants.set('browser-login', 'https://shop.example.test#*', { to: [{ kind: 'conversation', key: 'conv-wl-1' }] });
   grants.set('browser-login', 'https://other.example.test#*', { to: [{ kind: 'conversation', key: 'conv-wl-1' }] });
@@ -996,11 +996,11 @@ console.log('⑫ lane browser-login (r22 pivot): A WEB LOGIN IS A VAULT ENTRY, I
     const bobPw = bobRec && bobRec.pending ? bobRec.pending.password : null;
     const sentinels = [...forms(PW), ...(bobPw ? forms(bobPw) : [])];
     const domVals = k.readDomValues(tid);
-    ok(answers[0].status === 200 && answers[1].status === 200 && answers[4].status === 200 && answers[2].status === 404 && answers[3].status === 403 && bobPw && domVals.u === 'alice' && domVals.pw === PW && domVals.npw === bobPw,
+    ok(answers[0].status === 200 && answers[1].status === 200 && answers[4].status === 200 && answers[2].status === 404 && answers[3].status === 403 && gateOf(bobPw) && domVals.u === 'alice' && domVals.pw === PW && domVals.npw === bobPw,
       'the route answers user + password fills, a generated registration and two refusals (login_no_entry 404 · login_phishing 403)', answers.map((a) => [a.status, a.text.slice(0, 160)]));
-    ok(answers.every((a) => sentinels.every((x) => !a.text.includes(x))), 'THE SENTINEL SWEEP: no answer of the route holds a password (the owner\'s or the one the vault minted) — raw, hex, base64 or base64url');
+    ok(verdictOf(answers.every((a) => sentinels.every((x) => !a.text.includes(x)))), 'THE SENTINEL SWEEP: no answer of the route holds a password (the owner\'s or the one the vault minted) — raw, hex, base64 or base64url');
     const lines = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use' && l.door === 'browser-login');
-    ok(lines.length >= 3 && lines.every((l) => /^web-login:https:\/\/shop\.example\.test#/.test(l.entry) && l.by === 'agent' && l.conv === 'conv-wl-1' && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip,grant') && lines.some((l) => l.outcome === 'filled') && lines.some((l) => l.outcome === 'generated-and-filled') && sentinels.every((x) => !fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').includes(x)),
+    ok(lines.length >= 3 && gateOf(lines.every((l) => /^web-login:https:\/\/shop\.example\.test#/.test(l.entry) && l.by === 'agent' && l.conv === 'conv-wl-1' && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip,grant')) && gateOf(lines.some((l) => l.outcome === 'filled')) && gateOf(lines.some((l) => l.outcome === 'generated-and-filled')) && verdictOf(sentinels.every((x) => !fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').includes(x))),
       'THE USE LAW: every fill is ONE vault-use line through the engine\'s noteUse (the entry, door browser-login, the conversation, the purpose, outcome filled/generated-and-filled, a receipt — the closed key set), never a password', lines.map((l) => [l.entry, l.purpose, l.outcome]));
     // MUTANT: a watch copy that answers the value, a route copy that passes the answer on
     const dsrc = read('src/server/browser-dialogs.js'), rsrc = read('src/routes/browser.js');
@@ -1013,11 +1013,11 @@ console.log('⑫ lane browser-login (r22 pivot): A WEB LOGIN IS A VAULT ENTRY, I
     await wl.noteSnapshot({ profileId: PID, browserKey: KEY }, '- textbox "Password" [ref=e2]');
     const half = await serve(Rm, wl); servers.push(half.srv);
     const a1 = await ask(half.url, { target: '@e2', spec: 'shop.example.test#alice/password' });
-    ok(a1.status === 200 && forms(PW).every((x) => !a1.text.includes(x)), 'the REAL route over a leaking watch still answers no value — its named fields are a second belt');
+    ok(a1.status === 200 && verdictOf(forms(PW).every((x) => !a1.text.includes(x))), 'the REAL route over a leaking watch still answers no value — its named fields are a second belt');
     const RL = MUT.load('src/routes/browser.js', leakR, 'leakroute');
     const both = await serve(RL, wl); servers.push(both.srv);
     const a2 = await ask(both.url, { target: '@e2', spec: 'shop.example.test#alice/password' });
-    ok(a2.status === 200 && forms(PW).some((x) => a2.text.includes(x)), 'MUTANT RED: a watch copy that answers the value + a route copy that passes the answer on ⇒ the sweep sees the password (the sweep bites)');
+    ok(a2.status === 200 && verdictOf(forms(PW).some((x) => a2.text.includes(x))), 'MUTANT RED: a watch copy that answers the value + a route copy that passes the answer on ⇒ the sweep sees the password (the sweep bites)');
   } finally {
     for (const x of servers) { try { x.close(); } catch {} }
     for (const x of watches) { try { x.shutdown(); } catch {} }
@@ -1039,7 +1039,7 @@ console.log('⑬ lane engine-distribution: the plugin-git credential through the
   const d = path.join(ROOT13, 'data'); fs.mkdirSync(path.join(d, 'plugins'), { recursive: true });
   const eng = VE.create({ dataDir: d, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
   const VPW = ['law', crypto.randomBytes(4).toString('hex'), 'git'].join(' ');
-  ok((await eng.setup(VPW)).ok, 'a REAL vault, set up (the integration store\'s key is the vault\'s from here — lawfulKey)');
+  ok(verdictOf((await eng.setup(VPW)).ok), 'a REAL vault, set up (the integration store\'s key is the vault\'s from here — lawfulKey)');
   const is = IS.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet });
   const TOK = ['law', 'pat', crypto.randomBytes(5).toString('hex')].join('-'); // built at runtime
   is.setIntegration('plugin-git', { host: 'repo.test', token: TOK });
@@ -1050,13 +1050,13 @@ console.log('⑬ lane engine-distribution: the plugin-git credential through the
   FX.resetCalls();
   const r1 = await ins.install({ source: 'git', value: URL_HTTPS, ref: 'v1', credential: 'plugin-git' });
   const f1 = FX.calls().find((c) => c.argv.includes('fetch'));
-  ok(r1.id === 'acme.lawgit' && f1 && f1.ask && f1.ask.pass === TOK && !f1.argv.some((a) => a.includes(TOK)) && !Object.values(f1.env).some((v) => String(v).includes(TOK)), 'unlocked: the installer resolves the sealed token through the store at the clone — git reads it from the askpass file only');
+  ok(r1.id === 'acme.lawgit' && gateOf(f1) && gateOf(f1.ask) && f1.ask.pass === TOK && !f1.argv.some((a) => a.includes(TOK)) && !Object.values(f1.env).some((v) => String(v).includes(TOK)), 'unlocked: the installer resolves the sealed token through the store at the clone — git reads it from the askpass file only');
   eng.lock();
   FX.resetCalls();
   let e2 = null; try { await ins.install({ source: 'git', value: URL_HTTPS, ref: 'v1', credential: 'plugin-git' }); } catch (e) { e2 = e; }
-  ok(e2 && e2.code === 'plugin_git_credential' && /vault is locked/i.test(e2.message) && FX.calls().length === 0 && !fs.existsSync(path.join(d, '.integrations-key')), 'LOCKED: the install is refused plugin_git_credential, «the vault is locked» — git never ran, no key file was minted to read around it', e2 && e2.message);
+  ok(gateOf(e2) && e2.code === 'plugin_git_credential' && gateOf(/vault is locked/i.test(e2.message)) && FX.calls().length === 0 && !fs.existsSync(path.join(d, '.integrations-key')), 'LOCKED: the install is refused plugin_git_credential, «the vault is locked» — git never ran, no key file was minted to read around it', e2 && e2.message);
   let e2a = null; try { await ins.install({ source: 'git', value: URL_HTTPS, ref: 'v1', credential: 'auto' }); } catch (e) { e2a = e; }
-  ok(e2a && e2a.code === 'plugin_git_credential' && FX.calls().length === 0, 'LOCKED + the fleet\'s \'auto\': refused by name too — never an anonymous clone that would only fail as «auth» and hide the locked vault', e2a && e2a.message);
+  ok(gateOf(e2a) && e2a.code === 'plugin_git_credential' && FX.calls().length === 0, 'LOCKED + the fleet\'s \'auto\': refused by name too — never an anonymous clone that would only fail as «auth» and hide the locked vault', e2a && e2a.message);
   await eng.unlock(VPW);
   const r3 = await ins.install({ source: 'git', value: URL_HTTPS, ref: 'v1', credential: 'plugin-git' });
   ok(r3.id === 'acme.lawgit', 'unlock ⇒ the credential serves the clone again');
@@ -1064,4 +1064,4 @@ console.log('⑬ lane engine-distribution: the plugin-git credential through the
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -18,7 +18,7 @@ const acorn = require('acorn');
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
 const GLOBALS = new Set([
   // JS + node ambient
@@ -180,7 +180,7 @@ ok(totalBad === 0, `every identifier in ${files.length} server-tier files resolv
 
 // NEGATIVE CONTROL: the exact incident shape must go red
 const probe = freeIdentifiers('function f(){ return classifyCliDeath(x, 1); }\nconst x = 1;', 'probe.js');
-ok(probe.some(([n]) => n === 'classifyCliDeath'), 'NEGATIVE CONTROL: an undeclared call is detected');
+ok(verdictOf(probe.some(([n]) => n === 'classifyCliDeath')), 'NEGATIVE CONTROL: an undeclared call is detected');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

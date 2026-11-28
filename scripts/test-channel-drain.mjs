@@ -61,7 +61,7 @@ const SRC = fs.readFileSync(path.join(REPO, MODEL), 'utf8');
 const D0 = require(path.join(REPO, MODEL));
 
 let passN = 0, failN = 0;
-const ok = (c, n, extra) => { if (c) { passN++; console.log('  ✓ ' + n); } else { failN++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passN++; console.log('  ✓ ' + n); } else { failN++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 const J = (x) => JSON.stringify(x);
 // ⑦ (lane channel-drain-scale): the work meter's verdicts come from CHILD processes (the meter must start before the model
 // loads) — launched here, read at ⑦, so they run beside the walk instead of after it
@@ -769,7 +769,7 @@ let totalSteps = 0, totalPasses = 0, totalFetches = 0;
       totalSteps += sim.steps; totalPasses += sim.passNo; totalFetches += sim.fetches.length;
       for (const [k, v] of Object.entries(sim.cover)) { totals[k] = (totals[k] || 0) + v; byProfile[prof][k] = (byProfile[prof][k] || 0) + v; }
       ok(sim.violations.length === 0 && sim.steps >= WALK_STEPS, `${prof} seed ${seed}: ${sim.steps} steps, ${sim.passNo} passes, ${sim.fetches.length} fetches, ${sim.waiters.size} requests — every rule held at every step`, sim.violations.slice(0, 5).join(' | '));
-      ok(settled && unanswered === 0, `${prof} seed ${seed}: LIVENESS — once the arrivals stop every one of ${sim.waiters.size} requests is answered exactly once (ok, a refusal by name, a settlement or its own bound)`, `settled ${settled}, ${unanswered} unanswered`);
+      ok(gateOf(settled) && unanswered === 0, `${prof} seed ${seed}: LIVENESS — once the arrivals stop every one of ${sim.waiters.size} requests is answered exactly once (ok, a refusal by name, a settlement or its own bound)`, `settled ${settled}, ${unanswered} unanswered`);
     }
   }
   for (const [key, label] of RULE_COVER) ok((totals[key] || 0) > 0 && !totals['violation:' + key.split('-')[0]], `${label} — exercised ${totals[key] || 0}× across the walk, never violated`);
@@ -864,7 +864,7 @@ console.log('② THE TABLES: the 70-cell concurrency table and the r2–r8 repro
 {
   const res = table(D0);
   for (const { c, problems } of res) ok(problems.length === 0, `table · ${c.state} · ${c.origin} · ${c.N} caller(s) on ${c.distinct ? c.N + ' keys' : '1 key'}: ${J(expectCell({ ...c, key: keyOf(c.state === 'timer-fetching-key' ? 0 : 1) }))}`, problems.slice(0, 3).join('; '));
-  ok(res.length === 70 && res.every((x) => !x.problems.length), `the table holds: ${res.length} cells, ${res.filter((x) => x.problems.length).length} red`);
+  ok(res.length === 70 && verdictOf(res.every((x) => !x.problems.length)), `the table holds: ${res.length} cells, ${res.filter((x) => x.problems.length).length} red`);
 }
 
 // The repro shapes, each a function of the model so a mutant can be run through the SAME shape.
@@ -1090,37 +1090,37 @@ ok(R.oneKey.agents === 1 && R.oneKey.windows === 1 && R.oneKey.queued === 1, `r4
 ok(R.ownerOnce.first === 1 && R.ownerOnce.second === 0, `r4 ruling · five owner presses on five keys inside a back-off: ${R.ownerOnce.first} call (one key per window), a second round ${R.ownerOnce.second}`, J(R.ownerOnce));
 ok(R.everyStep.posDue >= 1 && R.everyStep.posDue <= 2 && R.everyStep.posNotDue >= 1 && R.everyStep.posNotDue <= 2 && R.everyStep.calls === 41 && R.everyStep.dueTwice === 1, `r5 · requests filed behind a 40-row timer pass are fetched at the NEXT step — the ridden due row at ${R.everyStep.posDue}, the not-due row at ${R.everyStep.posNotDue}, ${R.everyStep.calls} calls`, J(R.everyStep));
 ok(R.budgetCut.calls === 10 && R.budgetCut.ok === 10 && R.budgetCut.cut === 5 && J(R.budgetCut.late) === '["budget","budget","budget"]', `r5/r6 · fifteen requests on a 10/min budget: exactly ${R.budgetCut.calls} calls, ${R.budgetCut.ok} ok, ${R.budgetCut.cut} refused by the cut by name, three late ones by the judgement (${J(R.budgetCut.late)})`, J(R.budgetCut));
-ok(R.storm.refusedAgents === 20 && R.storm.owner && R.storm.owner.ok && R.storm.open && R.storm.open.ok, `r6 · one agent's storm of 200 behind a held fetch: ${R.storm.refusedAgents} agents refused at CAP − RESERVE, the owner's press and a window's open accepted and answered ok`, J(R.storm));
+ok(R.storm.refusedAgents === 20 && gateOf(R.storm.owner) && gateOf(R.storm.owner.ok) && gateOf(R.storm.open) && verdictOf(R.storm.open.ok), `r6 · one agent's storm of 200 behind a held fetch: ${R.storm.refusedAgents} agents refused at CAP − RESERVE, the owner's press and a window's open accepted and answered ok`, J(R.storm));
 ok(R.refusalAtSight.code === 'refresh-floor' && R.refusalAtSight.fetchesBefore === 0 && R.refusalAtSight.passFetches >= 45, `r6 · an agent's floor-refused request behind a ${R.refusalAtSight.passFetches}-fetch pass is answered at the NEXT step — ${R.refusalAtSight.fetchesBefore} vendor calls begun between its filing and its answer (only the one in flight)`, J(R.refusalAtSight));
 ok(R.okAtFetch.pos === 1 && R.okAtFetch.answeredAt === 1, `r7 · the owner's not-due request behind a ${R.okAtFetch.passFetches}-fetch pass is fetched at position ${R.okAtFetch.pos} and answered ok AT that fetch, never at the pass's end`, J(R.okAtFetch));
 ok(R.forcedThrice.queuedViolations === 0 && R.forcedThrice.forcedFetches === 20, `r7 · three forced asks and a timer ask behind a running pass: ONE queued pass, forced (${R.forcedThrice.forcedFetches} fetches = every row once)`, J(R.forcedThrice));
 ok(R.interleave.duringStream === 35 && R.interleave.maxRequestRun <= 1, `r7 · a saturating owner stream beside 35 due rows: ${R.interleave.duringStream}/35 due rows served DURING the stream, never two request fetches in a row while one waits (max ${R.interleave.maxRequestRun})`, J(R.interleave));
-ok(R.oneKeyStream.allOk && R.oneKeyStream.maxWait <= 3 && R.oneKeyStream.calls <= R.oneKeyStream.requests * 0.6, `r8 (a) · ${R.oneKeyStream.requests} requests on ONE key, one filed during every fetch: every one heard within ${R.oneKeyStream.maxWait} fetches, ${R.oneKeyStream.calls} calls (coalesced)`, J(R.oneKeyStream));
-ok(R.pressUnderLanes.ok && R.pressUnderLanes.wait !== null && R.pressUnderLanes.wait <= 5, `r8 (b) · the owner's one press under four lanes re-filing the instant each answers is heard after ${R.pressUnderLanes.wait} fetches — within a round`, J(R.pressUnderLanes));
+ok(gateOf(R.oneKeyStream.allOk) && R.oneKeyStream.maxWait <= 3 && R.oneKeyStream.calls <= R.oneKeyStream.requests * 0.6, `r8 (a) · ${R.oneKeyStream.requests} requests on ONE key, one filed during every fetch: every one heard within ${R.oneKeyStream.maxWait} fetches, ${R.oneKeyStream.calls} calls (coalesced)`, J(R.oneKeyStream));
+ok(gateOf(R.pressUnderLanes.ok) && R.pressUnderLanes.wait !== null && R.pressUnderLanes.wait <= 5, `r8 (b) · the owner's one press under four lanes re-filing the instant each answers is heard after ${R.pressUnderLanes.wait} fetches — within a round`, J(R.pressUnderLanes));
 ok(R.ownerFirst.pos === 1 && R.ownerFirst.calls === 60, `r8 (c) · the owner's press on a due row behind 40 agent riders is fetched at position ${R.ownerFirst.pos} (humans first; ${R.ownerFirst.calls} calls = every row once)`, J(R.ownerFirst));
 ok(R.stopMidPass.callsAfterStop === 0 && R.stopMidPass.unanswered === 0 && R.stopMidPass.codes.filter((c) => c === 'stopped').length === 2, `r8 low · a stop between fetches: both waiters hear stopped in one step, ${R.stopMidPass.callsAfterStop} vendor calls after it (r8 measured 43)`, J(R.stopMidPass));
 ok(R.humanBeforeDiscovery.humanAt >= 0 && R.humanBeforeDiscovery.discoverAt > R.humanBeforeDiscovery.humanAt && R.humanBeforeDiscovery.discoveries === 1, `r8 low · a human's request filed while a turn brings discovery: the human's fetch at call ${R.humanBeforeDiscovery.humanAt}, discovery after it at ${R.humanBeforeDiscovery.discoverAt}, once`, J(R.humanBeforeDiscovery));
 ok(R.sharePerFetch.agentFetches === 5 && R.sharePerFetch.refused === 15, `r9 · twenty agent requests judged together under a share of 5: exactly ${R.sharePerFetch.agentFetches} agent fetches, ${R.sharePerFetch.refused} refused by name (r8 judged the share at the boundary only)`, J(R.sharePerFetch));
-ok(R.bound.carry && R.bound.firstFetches === K && R.bound.all, `r9 · a request stream with no due row: the first pass ends after exactly ${R.bound.firstFetches} (K = ${K}) request fetches, carrying the rest — every request answered ok`, J(R.bound));
+ok(gateOf(R.bound.carry) && R.bound.firstFetches === K && verdictOf(R.bound.all), `r9 · a request stream with no due row: the first pass ends after exactly ${R.bound.firstFetches} (K = ${K}) request fetches, carrying the rest — every request answered ok`, J(R.bound));
 ok(R.dueAgain.twice === 1 && R.dueAgain.total === 10, `rule 13 · a forced pass whose human request was fetched before discovery never fetches it twice (${R.dueAgain.twice} call, ${R.dueAgain.total} in all)`, J(R.dueAgain));
 
 // ═══ ②b THE PACE (rule 18, lane R5) ═══════════════════════════════════════════════════════════
 console.log('②b THE PACE (rule 18): the owner\'s 873-conversation first ingest under the Gmail defaults, and what a wait may never do');
 {
   const I = R.firstIngest;
-  ok(I.calls === 873 && I.distinct === 873 && I.inOrder && I.ok && !I.cut && I.violations.length === 0, `the first ingest of 873 conversations at 40 units each is ONE timer pass: every row fetched once, most overdue first, never cut by the minute (${I.calls} calls, cut ${I.cut})`, J(I));
+  ok(I.calls === 873 && I.distinct === 873 && gateOf(I.inOrder) && gateOf(I.ok) && !I.cut && I.violations.length === 0, `the first ingest of 873 conversations at 40 units each is ONE timer pass: every row fetched once, most overdue first, never cut by the minute (${I.calls} calls, cut ${I.cut})`, J(I));
   ok(I.max1s <= 80, `no second holds more than 80 units — one second's worth + one thread read (the rule's exact tolerance: burst 40 + 40·1 s + 0) — measured ${I.max1s}`, J(I));
   ok(I.max10s <= 440 && I.max60s <= 2440 && I.max60s <= 3000, `no 10 s holds more than 440, no 60 s more than 2440 — inside the 3000/min budget and far inside Google's 6000/min per user (measured ${I.max10s} / ${I.max60s})`, J(I));
   ok(I.wallSec >= 871 && I.wallSec <= 874, `…so the first read takes ≈ 873 × 40 / 40 = 873 s of wall clock (${I.wallSec.toFixed(1)} s from the first call to the last) — one thread a second, as the setting says`, J(I));
   ok(I.maxWait <= 1000 && I.waits >= 872, `every wait is one step of ≤ 1 s (${I.waits} waits, longest ${I.maxWait} ms) — the drain is asked again at least once a second`, J(I));
   const C = REPROS.firstIngest(D0, { pace: null });
-  ok(C.calls < 873 && C.cut && C.max1s >= 2000, `CONTROL · the SAME pass with the pace off is the shape the vendor refused: ${C.max1s} units inside one second before the minute's cut (${C.calls} calls, then nothing for the rest of the minute) — the legs above would go red`, J({ calls: C.calls, max1s: C.max1s, cut: C.cut }));
-  ok(R.humanDuringWait.ok && R.humanDuringWait.pos === R.humanDuringWait.filedAfter, `the owner's press filed during a pace wait (after ${R.humanDuringWait.filedAfter} fetches) is the NEXT call (position ${R.humanDuringWait.pos}) — a wait re-picks, humans first`, J(R.humanDuringWait));
+  ok(C.calls < 873 && gateOf(C.cut) && C.max1s >= 2000, `CONTROL · the SAME pass with the pace off is the shape the vendor refused: ${C.max1s} units inside one second before the minute's cut (${C.calls} calls, then nothing for the rest of the minute) — the legs above would go red`, J({ calls: C.calls, max1s: C.max1s, cut: C.cut }));
+  ok(gateOf(R.humanDuringWait.ok) && R.humanDuringWait.pos === R.humanDuringWait.filedAfter, `the owner's press filed during a pace wait (after ${R.humanDuringWait.filedAfter} fetches) is the NEXT call (position ${R.humanDuringWait.pos}) — a wait re-picks, humans first`, J(R.humanDuringWait));
   ok(R.refusalDuringWait.code === 'refresh-floor' && R.refusalDuringWait.fetchesBetween === 0 && R.refusalDuringWait.heldMs <= 20, `an agent's floor-refused request filed while the bucket is empty is refused at the next step: ${R.refusalDuringWait.fetchesBetween} calls, ${R.refusalDuringWait.heldMs} ms (the fetch in flight) — never held behind a wait`, J(R.refusalDuringWait));
-  ok(R.pacedBound.carry && R.pacedBound.firstFetches === K && R.pacedBound.waits > 0, `a paced request stream still ends after exactly K = ${K} request FETCHES (${R.pacedBound.firstFetches}, with ${R.pacedBound.waits} waits between them) — a wait never counts toward the bound`, J(R.pacedBound));
+  ok(gateOf(R.pacedBound.carry) && R.pacedBound.firstFetches === K && R.pacedBound.waits > 0, `a paced request stream still ends after exactly K = ${K} request FETCHES (${R.pacedBound.firstFetches}, with ${R.pacedBound.waits} waits between them) — a wait never counts toward the bound`, J(R.pacedBound));
   ok(R.overBurst.first === 410 && R.overBurst.gapMs >= 10250 && R.overBurst.gapMs <= 10300 && R.overBurst.maxWait <= 1000, `a 410-unit discovery on a 40-unit bucket goes on a FULL bucket; the next fetch waits out the debt (${R.overBurst.gapMs} ms ≈ (410 − 40 + 40) / 40 s) in ${R.overBurst.waits} steps of ≤ 1 s`, J(R.overBurst));
-  ok(R.minuteOuterCap.cut && R.minuteOuterCap.calls === 15, `the minute stays the OUTER cap: a 100/s pace against a 600/min budget is still cut at the minute (${R.minuteOuterCap.calls} × 40 units, cut ${R.minuteOuterCap.cut})`, J(R.minuteOuterCap));
-  ok(R.pacedFairness.all && R.pacedFairness.worst <= 0 && R.pacedFairness.waits > 0, `under the pace a saturating owner stream still serves the i-th of 35 due rows after at most i request fetches (worst slack ${R.pacedFairness.worst}, ${R.pacedFairness.waits} waits)`, J(R.pacedFairness));
+  ok(gateOf(R.minuteOuterCap.cut) && R.minuteOuterCap.calls === 15, `the minute stays the OUTER cap: a 100/s pace against a 600/min budget is still cut at the minute (${R.minuteOuterCap.calls} × 40 units, cut ${R.minuteOuterCap.cut})`, J(R.minuteOuterCap));
+  ok(gateOf(R.pacedFairness.all) && R.pacedFairness.worst <= 0 && R.pacedFairness.waits > 0, `under the pace a saturating owner stream still serves the i-th of 35 due rows after at most i request fetches (worst slack ${R.pacedFairness.worst}, ${R.pacedFairness.waits} waits)`, J(R.pacedFairness));
   const D = D0;
   const P = D.paceFresh(40, 40, 0);
   ok(D.paceWaitMs(P, 0, 40) === 0 && D.paceWaitMs(D.paceCharge(P, 0, 40), 0, 40) === 1000 && D.paceWaitMs(D.paceCharge(P, 0, 40), 500, 40) === 500 && D.paceWaitMs(D.paceCharge(P, 0, 410), 0, 410) === 1000 && D.paceLevel(D.paceCharge(P, 0, 410), 10250) === 40 && D.paceWaitMs(null, 0, 1e9) === 0, 'the bucket arithmetic: a full bucket sends at once, an empty one waits the shortfall (≤ 1 s per ask), a debt is waited out, a full bucket is capped, no pace never waits');
@@ -1158,13 +1158,13 @@ console.log('③ FAIRNESS: the due list under a saturating stream, a lone reques
   sim.runPass({ origin: 'timer' });
   const dueOrder = Array.from({ length: 35 }, (_, i) => keyOf(10 + i));
   const worst = Math.max(...dueOrder.map((key, i) => (firstDueAt.get(key) ?? Infinity) - (i + 1)));
-  ok(dueOrder.every((key) => firstDueAt.has(key)) && worst <= 0, `under a saturating request stream the i-th of 35 due rows is fetched after at most i request fetches (worst slack ${worst}; the stream never paused) — K_fair = the row's position ≤ 35`, J([...firstDueAt].slice(0, 6)));
+  ok(gateOf(dueOrder.every((key) => firstDueAt.has(key))) && worst <= 0, `under a saturating request stream the i-th of 35 due rows is fetched after at most i request fetches (worst slack ${worst}; the stream never paused) — K_fair = the row's position ≤ 35`, J([...firstDueAt].slice(0, 6)));
   const big = createSim(D0, { keys: 874, now: T0 + 31e3, lastOf: () => T0, cadenceOf: (i) => (i < 873 ? 30e3 : 900e3) });
   let w = null;
   big.hooks.during = (act) => { if (!w && act.type === 'fetch') w = big.file('agent', keyOf(873)); };
   big.runPass({ origin: 'timer' });
   const dueBetween = big.fetches.slice(w.filedFetch - 1, w.answer.fetch).filter((f) => f.due).length;   // from the fetch in flight when it was filed to its own
-  ok(w.answer && w.answer.ok && dueBetween === 1 && big.fetches.length === 874, `a lone agent request filed behind 873 due rows waits for ONE due fetch (the one in flight: ${dueBetween}), then is fetched — ${big.fetches.length} calls in all`, J({ dueBetween, pos: w.answer.fetch }));
+  ok(gateOf(w.answer) && gateOf(w.answer.ok) && dueBetween === 1 && big.fetches.length === 874, `a lone agent request filed behind 873 due rows waits for ONE due fetch (the one in flight: ${dueBetween}), then is fetched — ${big.fetches.length} calls in all`, J({ dueBetween, pos: w.answer.fetch }));
   ok(D0.STREAK_MAX === K && D0.REFRESH_QUEUE_CAP === CAP && D0.REFRESH_OWNER_RESERVE === RESERVE, `the model's numbers are the spec's: STREAK_MAX ${D0.STREAK_MAX} (K), CAP ${D0.REFRESH_QUEUE_CAP}, RESERVE ${D0.REFRESH_OWNER_RESERVE}`);
 }
 
@@ -1224,26 +1224,26 @@ let DM = null;
 // and judges each mutant exactly as before
 const builtMutants = MUTANTS.map((m) => { const mm = mutant(m.tag, m.edits); return { m, mm, walkRun: mm.setup ? pool.run({ kind: 'mutant', file: mm.file, want: m.walk }) : null }; });
 for (const { m, mm, walkRun } of builtMutants) {
-  if (!ok(mm.setup, `MUTANT setup · ${m.tag} (rule ${m.rule}, ${m.why}) is reconstructed from the shipped bytes`, mm.why)) continue;
+  if (!ok(verdictOf(mm.setup), `MUTANT setup · ${m.tag} (rule ${m.rule}, ${m.why}) is reconstructed from the shipped bytes`, mm.why)) continue;
   DM = mm.D;
   let rep;
   try { rep = m.repro(); } catch (e) { rep = { red: true, said: 'threw: ' + e.message }; }
   const w = await walkRun;
   const hit = w.error ? { ['worker:' + w.error.slice(0, 60)]: 1 } : w.hit;
   const named = m.walk.filter((k) => hit[k]);
-  ok(rep.red && named.length > 0, `MUTANT ${m.tag}: its repro goes red (${rep.said.slice(0, 160)}) AND the walk names rule ${m.rule}'s invariant (${named.map((k) => `${k} ×${hit[k]}`).join(', ')})`, `repro red ${rep.red}; walk hit ${J(hit)}`);
+  ok(gateOf(rep.red) && named.length > 0, `MUTANT ${m.tag}: its repro goes red (${rep.said.slice(0, 160)}) AND the walk names rule ${m.rule}'s invariant (${named.map((k) => `${k} ×${hit[k]}`).join(', ')})`, `repro red ${rep.red}; walk hit ${J(hit)}`);
 }
 pool.close();
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(verdictOf(r.pass), r.name, r.detail);
 // the 70-cell table under the three mutants whose rule it pins most directly
 {
   const redCells = (tag, edits) => { const mm = mutant(tag + '-table', edits); return mm.setup ? table(mm.D).filter((x) => x.problems.length).map((x) => `${x.c.state}/${x.c.origin}/${x.c.N}${x.c.distinct ? 'd' : ''}`) : ['setup']; };
   const a = redCells('every-press', MUTANTS.find((m) => m.tag === 'every-press').edits);
-  ok(a.length >= 2 && a.every((x) => x.startsWith('backoff/owner')), `MUTANT every-press turns the table's back-off owner cells red (${a.join(', ')})`);
+  ok(a.length >= 2 && verdictOf(a.every((x) => x.startsWith('backoff/owner'))), `MUTANT every-press turns the table's back-off owner cells red (${a.join(', ')})`);
   const b = redCells('no-ride', MUTANTS.find((m) => m.tag === 'no-ride').edits);
-  ok(b.some((x) => /\/5$|\/20$/.test(x)), `MUTANT no-ride turns the table's many-callers-one-key cells red (${b.slice(0, 8).join(', ')})`);
+  ok(verdictOf(b.some((x) => /\/5$|\/20$/.test(x))), `MUTANT no-ride turns the table's many-callers-one-key cells red (${b.slice(0, 8).join(', ')})`);
   const c = redCells('backoff-door', MUTANTS.find((m) => m.tag === 'backoff-door').edits);
-  ok(c.some((x) => x.startsWith('backoff/agent')), `MUTANT backoff-door turns the table's back-off agent cells red (${c.slice(0, 8).join(', ')})`);
+  ok(verdictOf(c.some((x) => x.startsWith('backoff/agent'))), `MUTANT backoff-door turns the table's back-off agent cells red (${c.slice(0, 8).join(', ')})`);
 }
 
 // ═══ ④b RULE 20 (lane channel-threads) — the reaction trickle + the thread walk, as a seeded walk ════════
@@ -1474,11 +1474,11 @@ const R21 = {
   const o = R21.order(D0);
   ok(J(o.log) === J(['c0003', 'feed', 'feed', 'discover', 'c0010', 'c0009', 'c0000', 'c0001', 'c0002', 'c0004', 'c0005', 'c0006', 'c0007', 'c0008', 'c0011']) && o.v.length === 0, 'rule 21 ORDER: the owner\'s request first, then the feed\'s two pages, then discovery, then the feed\'s rows (the NEWEST page\'s order first — page 2 named c0010 then c0009, moving the pending c0009 up again), then the plain due rows', J(o.log));
   const m = R21.minute(D0);
-  ok(m.feeds === 0 && m.fetches === 4 && m.end.ok, 'rule 21: the feed\'s own minute spent ⇒ no page (silently — nobody waits on it); the pass is a plain one', J(m));
+  ok(m.feeds === 0 && m.fetches === 4 && verdictOf(m.end.ok), 'rule 21: the feed\'s own minute spent ⇒ no page (silently — nobody waits on it); the pass is a plain one', J(m));
   const b = R21.budget(D0);
   ok(b.feeds === 0, 'rule 21: the minute\'s budget spent ⇒ no page (rule 9 stays the outer cap)', J(b));
   const k = R21.skip(D0);
-  ok(k.feeds === 1 && k.fetches === 4 && k.ok && !k.failed, 'rule 21: a FEED-LOCAL refusal (its own rate tier / scope) ends the feed and never the pass — every due row still fetched, the pass ok', J(k));
+  ok(k.feeds === 1 && k.fetches === 4 && gateOf(k.ok) && !k.failed, 'rule 21: a FEED-LOCAL refusal (its own rate tier / scope) ends the feed and never the pass — every due row still fetched, the pass ok', J(k));
   const e = R21.error(D0);
   ok(e.feeds === 1 && e.fetches === 0 && !e.ok && e.why === 'auth-expired', 'rule 21: an ACCOUNT failure on a page is rule 3 — the pass fails by the account\'s code, nothing more is sent', J(e));
   const n = R21.noTimer(D0);
@@ -1498,7 +1498,7 @@ const R21 = {
   ];
   for (const m of MUT21) {
     const mm = mutant(m.tag, m.edits);
-    if (!ok(mm.setup, `MUTANT setup · ${m.tag} (rule 21: ${m.clause}) is reconstructed from the shipped bytes`, mm.why)) continue;
+    if (!ok(verdictOf(mm.setup), `MUTANT setup · ${m.tag} (rule 21: ${m.clause}) is reconstructed from the shipped bytes`, mm.why)) continue;
     let rep;
     try { rep = m.repro(mm.D); } catch (e) { rep = { red: true, said: 'threw: ' + e.message }; }
     const hit = {};
@@ -1508,7 +1508,7 @@ const R21 = {
       for (const v of r.sim.violations) { const kk = v.split(':')[0]; hit[kk] = (hit[kk] || 0) + 1; }
     }
     const named = m.walk.filter((k) => hit[k]);
-    ok(rep.red && named.length > 0, `MUTANT ${m.tag}: its table row goes red (${String(rep.said).slice(0, 140)}) AND the walk names rule 21's invariant (${named.map((k) => `${k} ×${hit[k]}`).join(', ')})`, `repro red ${rep.red}; walk hit ${J(hit)}`);
+    ok(gateOf(rep.red) && named.length > 0, `MUTANT ${m.tag}: its table row goes red (${String(rep.said).slice(0, 140)}) AND the walk names rule 21's invariant (${named.map((k) => `${k} ×${hit[k]}`).join(', ')})`, `repro red ${rep.red}; walk hit ${J(hit)}`);
   }
 }
 
@@ -1574,7 +1574,7 @@ const R22 = {
   ], { now: NOW, everyMs: 3600e3 });
   ok(J(due.map((d) => d.key)) === J(['acct/a', 'acct/b']), 'rule 22a recheckDue: due = live + separately listed + not a topic group + walked once + active within 14 d + not rechecked within the hour — never rechecked first, then the oldest; a paused / inline / topic / never-walked / quiet / silent row, a clock gone backwards and junk are not due', J(due));
   ok(D0.recheckDue(Array.from({ length: 500 }, (_, i) => row('acct/k' + i)), { now: NOW, max: 7 }).length === 7 && D0.recheckDue([row('acct/a', { lastRecheckAt: NOW - 61e3 })], { now: NOW, everyMs: 1 }).length === 1 && D0.recheckDue([row('acct/a', { lastRecheckAt: NOW - 59e3 })], { now: NOW, everyMs: 1 }).length === 0, 'rule 22a recheckDue: at most `max`; the cadence is never under a minute (a setting of 1 ms reads as 60 s)');
-  ok(D0.recheckOnPress(0, NOW) && D0.recheckOnPress(NOW - 61e3, NOW) && !D0.recheckOnPress(NOW - 30e3, NOW) && D0.recheckOnPress(NOW + 5e3, NOW) && D0.RECHECK_FLOOR_MS === 60e3, 'rule 22b recheckOnPress: the owner\'s press re-lists unless the conversation was rechecked within 60 s (a clock gone backwards never blocks it)');
+  ok(gateOf(D0.recheckOnPress(0, NOW)) && gateOf(D0.recheckOnPress(NOW - 61e3, NOW)) && !D0.recheckOnPress(NOW - 30e3, NOW) && gateOf(D0.recheckOnPress(NOW + 5e3, NOW)) && D0.RECHECK_FLOOR_MS === 60e3, 'rule 22b recheckOnPress: the owner\'s press re-lists unless the conversation was rechecked within 60 s (a clock gone backwards never blocks it)');
   // B-dfa4 U3: THE DUE LIST'S NEXT INSTANT — before it the clock alone never changes the answer (the engine keeps the
   // answer to it and reads no row); recheckMay is false only for a row no later hour makes due (the kept candidates drop it)
   {
@@ -1600,16 +1600,16 @@ const R22 = {
     const GONE = '  return { due: true, dueAt: last, next: gone };';
     ok(SRC.split(GONE).length === 2, 'control setup: the due row\'s leaving instant is present once');
     const lawM = nextLaw(M.load(MODEL, SRC.replace(GONE, '  return { due: true, dueAt: last, next: Infinity };'), 'next-no-leaving'));
-    ok(lawM.bad.some((b) => b.c === 0), `CONTROL: a next instant that forgets a due row's leaving keeps an answer the clock changed — red (${lawM.bad.length} states wrong)`, J(lawM.bad.slice(0, 2)));
+    ok(verdictOf(lawM.bad.some((b) => b.c === 0)), `CONTROL: a next instant that forgets a due row's leaving keeps an answer the clock changed — red (${lawM.bad.length} states wrong)`, J(lawM.bad.slice(0, 2)));
   }
   const o = R22.order(D0);
-  ok(J(o.log) === J(['f:c0003', 'f:c0000', 'f:c0001', 'recheck:c0002', 'recheck:c0003', 'recheck:c0000']) && o.end.ok && o.v.length === 0, 'rule 22 ORDER: the owner\'s request, then the due rows, then — nothing else pending — the armed rechecks in their order (the lowest priority: a recheck never delays a human or a due row)', J(o.log));
+  ok(J(o.log) === J(['f:c0003', 'f:c0000', 'f:c0001', 'recheck:c0002', 'recheck:c0003', 'recheck:c0000']) && gateOf(o.end.ok) && o.v.length === 0, 'rule 22 ORDER: the owner\'s request, then the due rows, then — nothing else pending — the armed rechecks in their order (the lowest priority: a recheck never delays a human or a due row)', J(o.log));
   const bd = R22.bound(D0);
   ok(J(bd.rechecks) === J(['c0000', 'c0001']) && bd.v.length === 0, 'rule 22: perPass (2) rechecks a pass, the rest wait for the next pass; a second turn in the pass re-arms nothing', J(bd));
   const nv = R22.never(D0);
   ok(nv.backoff === 0 && nv.request === 0 && nv.budget === 0, 'rule 22: no recheck inside a back-off (the owner\'s one press only), on a request-only pass, or with the minute spent', J(nv));
   const rf = R22.refusals(D0);
-  ok(rf.skipOk && rf.skipN === 2 && !rf.errOk && rf.errWhy === 'auth-expired' && rf.errN === 1, 'rule 22: a conversation-level refusal ends that recheck and the pass goes on; an account failure is rule 3 (nothing more sent)', J(rf));
+  ok(gateOf(rf.skipOk) && rf.skipN === 2 && !rf.errOk && rf.errWhy === 'auth-expired' && rf.errN === 1, 'rule 22: a conversation-level refusal ends that recheck and the pass goes on; an account failure is rule 3 (nothing more sent)', J(rf));
   const pr = R22.press(D0);
   ok(pr.owner === true && pr.open === false && pr.agent === false, 'rule 22b: the OWNER\'s press carries `recheck`; a window\'s open and an agent\'s refresh never do (a metered call the owner pays for)', J(pr));
 }
@@ -1624,7 +1624,7 @@ const R22 = {
   ];
   for (const m of MUT22) {
     const mm = mutant(m.tag, m.edits);
-    if (!ok(mm.setup, `MUTANT setup · ${m.tag} (rule 22: ${m.clause}) is reconstructed from the shipped bytes`, mm.why)) continue;
+    if (!ok(verdictOf(mm.setup), `MUTANT setup · ${m.tag} (rule 22: ${m.clause}) is reconstructed from the shipped bytes`, mm.why)) continue;
     let rep;
     try { rep = m.repro(mm.D); } catch (e) { rep = { red: true, said: 'threw: ' + e.message }; }
     const hit = {};
@@ -1634,7 +1634,7 @@ const R22 = {
       for (const v of r.sim.violations) { const kk = v.split(':')[0]; hit[kk] = (hit[kk] || 0) + 1; }
     }
     const named = m.walk.filter((k) => hit[k]);
-    ok(rep.red && named.length > 0, `MUTANT ${m.tag}: its table row goes red (${String(rep.said).slice(0, 140)}) AND the walk names rule 22's invariant (${named.map((k) => `${k} ×${hit[k]}`).join(', ')})`, `repro red ${rep.red}; walk hit ${J(hit)}`);
+    ok(gateOf(rep.red) && named.length > 0, `MUTANT ${m.tag}: its table row goes red (${String(rep.said).slice(0, 140)}) AND the walk names rule 22's invariant (${named.map((k) => `${k} ×${hit[k]}`).join(', ')})`, `repro red ${rep.red}; walk hit ${J(hit)}`);
   }
 }
 
@@ -1644,7 +1644,7 @@ console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an
   const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\/\/[^\n'`]*$/gm, '');
   ok(!/\brequire\s*\(/.test(code) && !/\bimport\b/.test(code), 'the model imports NOTHING (PURE — test-architecture lists it)');
   ok(!/Date\.now|new Date|setTimeout|setImmediate|setInterval|Math\.random|process\./.test(code), 'the model reads no clock, sets no timer, draws no randomness and touches no process — `now` is a fact the driver hands in');
-  ok(/^'use strict';/.test(SRC) && /module\.exports = \{/.test(SRC), 'the model is CJS (the engine requires it, this suite and a patched copy load it the same way)');
+  ok(gateOf(/^'use strict';/.test(SRC)) && verdictOf(/module\.exports = \{/.test(SRC)), 'the model is CJS (the engine requires it, this suite and a patched copy load it the same way)');
   const rules = [...SRC.matchAll(/^ \* {1,2}(\d{1,2})\. [A-Z]/gm)].map((m) => Number(m[1]));
   ok(J(rules) === J(Array.from({ length: 22 }, (_, i) => i + 1)), `the doc comment states the rules as ONE numbered list 1–22 (${rules.join(',')}) — rule 20 (lane channel-threads) is the reaction trickle + the thread walk, rule 21 (lane lark-search-poll) the change feed, rule 22 (lane lark-threads) the recent-roots recheck`);
   ok(J(D0.REFUSAL_CODES) === J(['backoff', 'vendor-budget', 'refresh-floor', 'refresh-queue-full']) && !D0.ANSWER_OUTCOMES.includes('wait') && D0.PACE_WAIT_MAX_MS === 1000, 'rule 18 adds NO refusal code and no settlement — a wait is neither (REFUSAL_CODES unchanged; PACE_WAIT_MAX_MS 1000)');
@@ -1654,25 +1654,25 @@ console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an
   const statusOf = (c) => { for (const seg of segs) { const q = seg.indexOf(' ? '); if (q > 0 && seg.slice(0, q).includes(`'${c}'`)) return Number(seg.slice(q + 3).trim()); } return null; };
   const retry = [...D0.REFUSAL_CODES, 'stopped', 'account-changed'];
   const st = Object.fromEntries(retry.map((c) => [c, statusOf(c)]));
-  ok(retry.every((c) => [429, 409, 503].includes(st[c])), `every code the drain can name that means "try again" is in the agent route's retry-able table: ${J(st)}`);
+  ok(verdictOf(retry.every((c) => [429, 409, 503].includes(st[c]))), `every code the drain can name that means "try again" is in the agent route's retry-able table: ${J(st)}`);
   ok(!line.includes("'not-connected'"), 'not-connected is TERMINAL by name (the agent route answers it 500 — nothing to retry until the owner connects)');
   const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8');
   const cliSet = (/const REFRESH_REFUSED = \[([^\]]*)\]/.exec(cli) || [])[1] || '';
-  ok(retry.every((c) => cliSet.includes(`'${c}'`)), `the CLI's REFRESH_REFUSED names every one of them (exit 4, "not refreshed: …")`, cliSet);
+  ok(verdictOf(retry.every((c) => cliSet.includes(`'${c}'`))), `the CLI's REFRESH_REFUSED names every one of them (exit 4, "not refreshed: …")`, cliSet);
   const esrc = engineSource(REPO);
   const ecode = esrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const region = ecode.slice(ecode.indexOf('async function pass(adapterId'), ecode.indexOf('function lastPollOf(key)'))
     + ecode.slice(ecode.indexOf('const DRAIN_ORIGIN'), ecode.indexOf('async function agentRefresh('));
-  ok(/const Drain = require\('\.\.\/channel-drain\.js'\);/.test(esrc), 'the engine requires the PURE drain');
+  ok(verdictOf(/const Drain = require\('\.\.\/channel-drain\.js'\);/.test(esrc)), 'the engine requires the PURE drain');
   ok((region.match(/Drain\.next\(/g) || []).length === 1 && (ecode.match(/Drain\.admit\(/g) || []).length === 1 && (ecode.match(/Drain\.apply\(/g) || []).length === 2, 'the engine asks the drain for EVERY step through ONE `Drain.next` and admits through ONE `Drain.admit`; it applies each step (begin + completion) through `Drain.apply`');
   const forbidden = ['takeTimerTurn', 'interleave(', 'lastBy', 'queue.splice', 'queue.find(', 'front run', 'pressGranted', 'riders.push', 'done.has('];
   const found = forbidden.filter((f) => region.includes(f));
   ok(found.length === 0, `the engine's pass / request-set region spells NONE of the imperative scheduler (r5–r8's takeTimerTurn, interleave, the front run, the rider lookups, the boundary splices)`, found.join(', '));
   ok(!/\.sort\(/.test(region), 'the engine\'s pass region orders nothing itself (no `.sort(`)');
   const ci = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
-  ok(/\{ name: 'test-channel-drain', tier: 'fast'(?:,| \})/.test(ci), 'the gate is registered in the FAST tier (scripts/ci.mjs)');
+  ok(verdictOf(/\{ name: 'test-channel-drain', tier: 'fast'(?:,| \})/.test(ci)), 'the gate is registered in the FAST tier (scripts/ci.mjs)');
   const arch = fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8');
-  ok(arch.includes("'src/channel-drain.js'"), 'test-architecture classifies it PURE');
+  ok(verdictOf(arch.includes("'src/channel-drain.js'")), 'test-architecture classifies it PURE');
 }
 
 // ═══ ⑥ RULE 19 — HISTORY ON DEMAND (lane channel-render verify r6, 2026-09-27): the server belt under /older ═══
@@ -1718,7 +1718,7 @@ console.log('⑥ RULE 19: one conversation\'s older history — join, the rememb
   ok(J(asked) === J({ askedAt: 10_000, inflight: true, exhaustedAt: 0 }) && J(landedEnd) === J({ askedAt: 10_000, inflight: false, exhaustedAt: 10_100 }) && J(landedMore) === J({ askedAt: 10_000, inflight: false, exhaustedAt: 0 }) && J(failed) === J({ askedAt: 10_000, inflight: false, exhaustedAt: 0 }) && J(changed) === J({ askedAt: 10_000, inflight: false, exhaustedAt: 0 }), 'olderApply: ask stamps the clock + the flight; landed ends the flight and remembers only an `exhausted` end; failed ends it remembering nothing; changed forgets the end and keeps the clock');
   ok(J(e0) === J(D0.olderEmpty()) && J(asked) === J({ askedAt: 10_000, inflight: true, exhaustedAt: 0 }), 'olderApply never mutates the memory it was given');
   let threw = null; try { D0.olderApply(e0, 'bogus', 1); } catch (e) { threw = e.message; }
-  ok(/no such older event bogus/.test(threw || ''), 'an unknown event throws by name');
+  ok(verdictOf(/no such older event bogus/.test(threw || '')), 'an unknown event throws by name');
   // A MUTANT PER CLAUSE — each a patched copy whose own rows go red (and whose repro on the engine is test-channels-engine ⑭'s control)
   const OLD_MUTANTS = [
     { tag: 'older-no-join', why: '20 concurrent /older = 20 vendor calls for one page', edits: [["  if (m.inflight) return { act: 'join' };\n", '']], red: (D) => D.olderVerdict(asked, 10_050).act !== 'join' },
@@ -1728,10 +1728,10 @@ console.log('⑥ RULE 19: one conversation\'s older history — join, the rememb
   ];
   for (const m of OLD_MUTANTS) {
     const mm = mutant(m.tag, m.edits);
-    if (!ok(mm.setup, `MUTANT setup · ${m.tag} (rule 19, ${m.why}) is reconstructed from the shipped bytes`, mm.why)) continue;
-    ok(m.red(mm.D) && !m.red(D0), `MUTANT ${m.tag}: its own row goes red on the copy and stays green on the shipped model`);
+    if (!ok(verdictOf(mm.setup), `MUTANT setup · ${m.tag} (rule 19, ${m.why}) is reconstructed from the shipped bytes`, mm.why)) continue;
+    ok(gateOf(m.red(mm.D)) && !m.red(D0), `MUTANT ${m.tag}: its own row goes red on the copy and stays green on the shipped model`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length + OLD_MUTANTS.length })) ok(r.pass, 'rule 19 ' + r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length + OLD_MUTANTS.length })) ok(verdictOf(r.pass), 'rule 19 ' + r.name, r.detail);
 }
 
 // ── lane lark-threads verify r3 (T2 ②): THE SLIDING MINUTE — the minute's meter is a fixed window (60), the per-second bucket
@@ -1750,13 +1750,13 @@ console.log('\n⑦ scale: a pass is O(due + steps · requests) — the work mete
   const rows = await Promise.all(SCALE_ROWS);
   const said = rows.map((v) => v.err ? `n=${v.n}: ${v.err}` : `${v.n}→${2 * v.n}: ×${Number(v.r).toFixed(3)} (${Math.round((v.w2 - v.w1) / v.n)} per row)`).join(' · ');
   console.log(`    the meter: ${said}`);
-  ok(rows.every((v) => v.ok), `⑦ a pass over D due rows is LINEAR in D by the work meter, D up to 90 000 (${said})`, J(rows));
+  ok(verdictOf(rows.every((v) => v.ok)), `⑦ a pass over D due rows is LINEAR in D by the work meter, D up to 90 000 (${said})`, J(rows));
   const ctl = mutant('rebuild-per-step', [['  const queue = queueOf(waiting, p.due);', '  const queue = queueOf(waiting, dqOf(dqRows(p.due)));']]);
   const cv = ctl.setup ? await judgeLater({ module: M.write(MODEL, SRC.replace('  const queue = queueOf(waiting, p.due);', '  const queue = queueOf(waiting, dqOf(dqRows(p.due)));'), 'rebuild-meter'), ...SCALE_PASS, n: 500, kind: 'linear' }) : { ok: true, err: ctl.why };
   const mut = mutant('apply-in-place', [['  const p = snap.pass ? { ...snap.pass } : null;', '  const p = snap.pass;']]);
   const mh = mut.setup ? walkMutant(mut.D, ['0-pure'], 2, 600) : {};
-  ok(mut.setup && mh['0-pure'] > 0, `⑦ CONTROL: an apply that writes the pass it was handed is named by the walk (0-pure ×${mh['0-pure'] || 0})`, J(mh));
-  ok(ctl.setup && cv.ok === false && cv.r > 2.5, `⑦ CONTROL: the queue rebuilt from every due row per step reads non-linear (×${Number(cv.r).toFixed(3)} at 500 → 1 000)`, J(cv));
+  ok(gateOf(mut.setup) && mh['0-pure'] > 0, `⑦ CONTROL: an apply that writes the pass it was handed is named by the walk (0-pure ×${mh['0-pure'] || 0})`, J(mh));
+  ok(gateOf(ctl.setup) && cv.ok === false && cv.r > 2.5, `⑦ CONTROL: the queue rebuilt from every due row per step reads non-linear (×${Number(cv.r).toFixed(3)} at 500 → 1 000)`, J(cv));
 }
 
 console.log('\nverify r3 (T2 ②): the sliding minute = 60·r + burst − 1, said on the card');
@@ -1769,10 +1769,10 @@ console.log('\nverify r3 (T2 ②): the sliding minute = 60·r + burst − 1, sai
   ok(maxWindow(s11, 60e3) === 60 && maxWindow(s2040, 60e3) === 40 * 60 + 40 - 1, `the formula 60·r + burst − 1: burst 1 ⇒ 60; Gmail's 40/s burst 40 ⇒ ${40 * 60 + 40 - 1}`);
   const C = require(path.join(REPO, 'src/channel-caps.js'));
   const words = (b) => C.budgetText({ unit: 'request', limit: 60, exhausted: true, waiting: 2, resetInSeconds: 12, perSec: 1, spentBy: { agent: 0 }, ...b });
-  ok(/60 requests\/min \(at most 1\/s, 5 at once\)/.test(words({ burst: 5 })) && /60 requests\/min \(at most 1\/s\)/.test(words({ burst: 1 })) && !/at once/.test(words({ burst: null })), 'the card\'s budget sentence names the burst beside the minute and the per-second figure ("5 at once"); a bucket of one says nothing more');
-  ok(/\(at most 1\/s, 5 at once\) for this account, 3 of them by agent refreshes/.test(words({ burst: 5, spentBy: { agent: 3 } })), '…and the agent-share variant carries the same burst');
+  ok(gateOf(/60 requests\/min \(at most 1\/s, 5 at once\)/.test(words({ burst: 5 }))) && gateOf(/60 requests\/min \(at most 1\/s\)/.test(words({ burst: 1 }))) && !/at once/.test(words({ burst: null })), 'the card\'s budget sentence names the burst beside the minute and the per-second figure ("5 at once"); a bucket of one says nothing more');
+  ok(verdictOf(/\(at most 1\/s, 5 at once\) for this account, 3 of them by agent refreshes/.test(words({ burst: 5, spentBy: { agent: 3 } }))), '…and the agent-share variant carries the same burst');
   const eng = engineSource(REPO);
-  ok(/burst: pd \? Math\.round\(pd\.burst \* 100\) \/ 100 : null \};/.test(eng), 'WIRING: budgetView serves `burst` from the pace declaration (the card reads it; nothing else computes a ceiling)');
+  ok(verdictOf(/burst: pd \? Math\.round\(pd\.burst \* 100\) \/ 100 : null \};/.test(eng)), 'WIRING: budgetView serves `burst` from the pace declaration (the card reads it; nothing else computes a ceiling)');
 }
 
 console.log('— lane discovery-cursor-persist (B-6638): the listing verdict — a restart resumes, it never re-asks what it knows');
@@ -1793,12 +1793,12 @@ console.log('— lane discovery-cursor-persist (B-6638): the listing verdict —
   ok(rt.cursor === 'p3' && rt.startedAt === 10 && rt.at === 20 && rt.complete === false && rt.completeAt === null, 'a walk state round-trips through the record (cursor, start, at; never complete)', JSON.stringify(rt));
   const done = D.discoveryRecord({ cursor: null, startedAt: 10, lastAt: 30, lastCompleteAt: 30 });
   ok(done.cursor === null && done.startedAt === null && done.complete === true && done.completeAt === 30, 'a complete walk is recorded complete with no cursor', JSON.stringify(done));
-  ok([null, 7, 'x', { cursor: 5 }, { complete: true }].every((r) => { const h = D.discoveryOf(r); return !h || (h.cursor === null && h.complete === false); }), 'a missing / malformed record heals to never listed (complete needs its instant)');
+  ok(verdictOf([null, 7, 'x', { cursor: 5 }, { complete: true }].every((r) => { const h = D.discoveryOf(r); return !h || (h.cursor === null && h.complete === false); })), 'a missing / malformed record heals to never listed (complete needs its instant)');
   ok(D.discoveryOf({ cursor: 'x'.repeat(5000) }).cursor === null, 'a cursor past 4 KB is not kept');
   const CE = (code, detail) => Object.assign(new Error(code), { code, detail });
-  ok(D.cursorRefused(CE('not-found')) && D.cursorRefused(CE('vendor-error', { cursorRefused: true })), 'cursorRefused: a 404 or the adapter\'s typed word');
+  ok(gateOf(D.cursorRefused(CE('not-found'))) && verdictOf(D.cursorRefused(CE('vendor-error', { cursorRefused: true }))), 'cursorRefused: a 404 or the adapter\'s typed word');
   ok(!['transport', 'rate-limited', 'auth-expired', 'forbidden', 'vendor-error'].some((c) => D.cursorRefused(CE(c, { status: 400 }))) && !D.cursorRefused(null), 'cursorRefused: auth / rate / transport / an untyped vendor error are the call\'s, never the cursor\'s');
 }
 
 console.log(`\n${failN ? 'FAILED' : 'ALL PASS'} (${passN} passed${failN ? `, ${failN} failed` : ''})`);
-process.exit(failN ? 1 : 0);
+process.exit(failN ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

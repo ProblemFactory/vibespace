@@ -38,8 +38,8 @@ const UHM = require(path.join(ROOT, 'src/usage-history.js'));
 const FAM = require(path.join(ROOT, 'src/model-family.js'));
 const MP = require(path.join(ROOT, 'src/model-providers.js'));
 let pass = 0, fail = 0, skip = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + e : '')); } };
-const red = (c, m, e) => ok(c, 'RED CONTROL (the shipped tables alone — today\'s tree): ' + m, e);
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + e : '')); } };
+const red = (c, m, e) => ok(verdictOf(c), 'RED CONTROL (the shipped tables alone — today\'s tree): ' + m, e);
 const dir = scratch('cunn');
 const BASE = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/claude-model-catalog-2.1.321.json'), 'utf8'));
 
@@ -67,14 +67,14 @@ try {
   {
     const text = 'var SOo=' + lit(BASE) + ';';
     const r = CMC.catalogIn(text, text.indexOf(CMC.ANCHOR));
-    ok(r.ok && r.raw.models.length === 24 && r.raw.models.map((m) => m.id).join() === BASE.models.map((m) => m.id).join(), "2.1.321's catalog (the fixture, in the CLI's minified shape) parses to its 24 models", JSON.stringify({ ok: r.ok, code: r.code }));
+    ok(gateOf(r.ok) && r.raw.models.length === 24 && r.raw.models.map((m) => m.id).join() === BASE.models.map((m) => m.id).join(), "2.1.321's catalog (the fixture, in the CLI's minified shape) parses to its 24 models", JSON.stringify({ ok: r.ok, code: r.code }));
     const v = CMC.validateCatalog(r.raw);
     const f52 = v.models.find((m) => m.id === 'claude-fable-5-2');
-    ok(f52 && f52.family === 'fable' && f52.label === 'Fable 5.2' && f52.window === 1000000 && f52.oneM === 'native' && f52.maxOutput === 128000 && f52.tier === 'tier_8_40_cache_read_0_20' && f52.price.input === 8 && f52.price.output === 40 && f52.price.cacheWrite5m === 10 && f52.price.cacheWrite1h === 16 && f52.price.cacheRead === 0.2 && v.aliases.fable === 'claude-fable-5-2', 'Fable 5.2 reads as the binary states it: family, «Fable 5.2», 1M native, 128k out, $8/$40, cw $10 / $16, hit $0.20, `fable` → it', JSON.stringify(f52));
+    ok(gateOf(f52) && f52.family === 'fable' && f52.label === 'Fable 5.2' && f52.window === 1000000 && f52.oneM === 'native' && f52.maxOutput === 128000 && f52.tier === 'tier_8_40_cache_read_0_20' && f52.price.input === 8 && f52.price.output === 40 && f52.price.cacheWrite5m === 10 && f52.price.cacheWrite1h === 16 && f52.price.cacheRead === 0.2 && v.aliases.fable === 'claude-fable-5-2', 'Fable 5.2 reads as the binary states it: family, «Fable 5.2», 1M native, 128k out, $8/$40, cw $10 / $16, hit $0.20, `fable` → it', JSON.stringify(f52));
     const h55 = v.models.find((m) => m.id === 'claude-haiku-5-5');
-    ok(h55 && h55.price.long && h55.price.long.above === 100000 && h55.price.long.input === 0.5 && h55.price.input === 0.1, "Haiku 5.5's long-prompt tier is its own block (never flattened over the top-level rates)", JSON.stringify(h55 && h55.price));
+    ok(gateOf(h55) && gateOf(h55.price.long) && h55.price.long.above === 100000 && h55.price.long.input === 0.5 && h55.price.input === 0.1, "Haiku 5.5's long-prompt tier is its own block (never flattened over the top-level rates)", JSON.stringify(h55 && h55.price));
     const h45 = v.models.find((m) => m.id === 'claude-haiku-4-5');
-    ok(h45 && h45.oneM === null && h45.firstParty === 'claude-haiku-4-5-20251001', 'a 200k model with only `supports_1m_suffix` has no 1M form; its dated first-party id is kept', JSON.stringify(h45));
+    ok(gateOf(h45) && h45.oneM === null && h45.firstParty === 'claude-haiku-4-5-20251001', 'a 200k model with only `supports_1m_suffix` has no 1M form; its dated first-party id is kept', JSON.stringify(h45));
     globalThis.__cunnPwn = 0;
     for (const [bad, code] of [['{schema_version:1,pricing_tiers:{},models:[Ye()]}', 'not-a-literal'], ['{schema_version:1,pricing_tiers:{},models:[(()=>{globalThis.__cunnPwn=1})()]}', 'not-a-literal'], ['{__proto__:{x:1},schema_version:1,pricing_tiers:{},models:[]}', 'forbidden-key'], ['{schema_version:1,pricing_tiers:{},models:[`x`]}', 'not-a-literal'], ['{schema_version:1,pricing_tiers:{},models:[...a]}', 'not-a-literal']]) {
       const p = CMC.parseLiteral(bad, 0);
@@ -86,14 +86,14 @@ try {
   console.log('§1 an unseen binary: an unknown version, a new file, a catalog no table of ours names');
   const cli900 = fakeCli({ version: '2.1.900', builtAt: '2026-12-01T00:00:00Z', catalog: NEW });
   const e900 = await note(cli900, '2.1.900');
-  ok(e900 && e900.state === 'read' && e900.cli === '2.1.900' && e900.builtAt === '2026-12-01T00:00:00Z' && e900.models.length === 26 && e900.refused.length === 0, 'read once, never run: 2.1.900, built 2026-12-01, 26 models, nothing refused', JSON.stringify(e900 && { state: e900.state, cli: e900.cli, n: e900.models.length, refused: e900.refused, reason: e900.reason }));
+  ok(gateOf(e900) && e900.state === 'read' && e900.cli === '2.1.900' && e900.builtAt === '2026-12-01T00:00:00Z' && e900.models.length === 26 && e900.refused.length === 0, 'read once, never run: 2.1.900, built 2026-12-01, 26 models, nothing refused', JSON.stringify(e900 && { state: e900.state, cli: e900.cli, n: e900.models.length, refused: e900.refused, reason: e900.reason }));
   await CAT._landed(); const ledger = JSON.parse(fs.readFileSync(path.join(dir, 'data', CAT.LEDGER), 'utf8'));
   ok(ledger.schema === 1 && Object.keys(ledger.binaries).length === 1 && ledger.binaries[ledger.current].evidence.anchor === CMC.ANCHOR && ledger.binaries[ledger.current].evidence.versionAgrees === true, 'the ledger keeps it (keyed by version + the file identity) with the evidence: the anchor, its offset, the version string agreeing with --version', JSON.stringify(ledger.binaries[ledger.current].evidence));
 
   console.log('§B the new model is pickable — in its 1M form; any catalog id resolves when typed');
   {
     const want = ['fable', 'fable[1m]', 'quill', 'quill[1m]', 'claude-fable-6', 'claude-fable-6[1m]', 'claude-quill-1', 'claude-quill-1[1m]'];
-    ok(want.every((id) => ids().includes(id)), 'the picker lists the new model, its 1M form, the new family and its aliases', JSON.stringify(ids()));
+    ok(verdictOf(want.every((id) => ids().includes(id))), 'the picker lists the new model, its 1M form, the new family and its aliases', JSON.stringify(ids()));
     red(!want.some((id) => SEED.some((r) => r.id === id && /6|quill/.test(id))), 'the shipped rows name neither claude-fable-6 nor quill');
     const row = (id) => env.AVAILABLE_MODELS.claude.find((r) => r.id === id);
     ok(row('fable').label === 'fable · Fable 6 · 1M' && row('fable').resolves === 'claude-fable-6' && row('quill[1m]').label === 'quill[1m] · Quill 1 · 1M' && row('quill').context === 200000, 'an alias says what it means on THIS CLI («fable · Fable 6 · 1M»; quill 200k, quill[1m] 1M)', JSON.stringify([row('fable'), row('quill'), row('quill[1m]')]));
@@ -105,7 +105,7 @@ try {
     red(!MP.ID_PATTERNS.anthropic.test('claude-quill-1[1m]') && MP.resolveModel(sub(SEED), 'quill') === null, "the .387 open branch tested the whole typed id against `^claude-[a-z0-9.-]*$`: a typed …[1m] and the alias `quill` were refused");
     ok(env.AVAILABLE_MODELS.claude.length <= 40, 'the dropdown stays short: per family the latest + the ids we ship, each with its 1M form (' + env.AVAILABLE_MODELS.claude.length + ' rows)');
     const lr = MP.listedRows(env.AVAILABLE_MODELS.claude).find((r) => r.id === 'claude-quill-1');
-    ok(lr && lr.context === 200000, "listedRows keeps the harness row's own size (the badge says 200k for Quill 1)", JSON.stringify(lr));
+    ok(gateOf(lr) && lr.context === 200000, "listedRows keeps the harness row's own size (the badge says 200k for Quill 1)", JSON.stringify(lr));
   }
 
   console.log('§C priced from the CLI\'s own catalog; the source said where prices are shown');
@@ -115,7 +115,7 @@ try {
     const q1 = uh._cost(ev1('claude-quill-1', { i: M, o: M }));
     ok(Math.abs(q1 - 6) < 1e-9, 'claude-quill-1 — a family no table of ours names — costs $1 + $5', String(q1));
     const s = uh.pricingView().sources;
-    ok(s['fable-6'] && s['fable-6'].from === 'catalog' && s['fable-6'].cli === '2.1.900' && s.fable.from === 'shipped', "the price table says each row's source (the editor's Source column): fable-6 = Claude Code 2.1.900, fable = VibeSpace's", JSON.stringify([s['fable-6'], s.fable]));
+    ok(gateOf(s['fable-6']) && s['fable-6'].from === 'catalog' && s['fable-6'].cli === '2.1.900' && s.fable.from === 'shipped', "the price table says each row's source (the editor's Source column): fable-6 = Claude Code 2.1.900, fable = VibeSpace's", JSON.stringify([s['fable-6'], s.fable]));
     const disk = JSON.parse(fs.readFileSync(uh.pricingFile, 'utf8'));
     ok(!('fable-6' in disk.tiers) && !('quill-1' in disk.tiers), 'nothing catalog-derived is written to pricing.json');
     uh.setPricing({ tiers: { 'fable-6': { ...uh.pricingView().tiers['fable-6'] } } });
@@ -125,7 +125,7 @@ try {
     const k = (id) => { const m = id.toLowerCase(); for (const key of Object.keys(t0.pricing.tiers).filter((x) => x !== '_default').sort((a, b) => b.length - a.length)) if (m.includes(key)) return key; return '_default'; };
     red(k('claude-fable-6') === 'fable' && k('claude-quill-1') === '_default', 'claude-fable-6 fell on Fable 5\'s `fable` row ($10/$50) and claude-quill-1 on `_default` ($3/$15)', `${k('claude-fable-6')} / ${k('claude-quill-1')}`);
     const page = fs.readFileSync(path.join(ROOT, 'src/lib/usage-window.js'), 'utf8');
-    ok(/<th>\$\{t\('Source'\)\}<\/th><\/tr>`/.test(page) && /t\('From Claude Code \{v\}', \{ v: src\.cli/.test(page) && /t\('Entered by you'\)/.test(page) && /std\.textContent = /.test(page), "the price editor draws a Source cell per row, by textContent (VibeSpace's table · From Claude Code {v} · Entered by you)");
+    ok(gateOf(/<th>\$\{t\('Source'\)\}<\/th><\/tr>`/.test(page)) && gateOf(/t\('From Claude Code \{v\}', \{ v: src\.cli/.test(page)) && gateOf(/t\('Entered by you'\)/.test(page)) && verdictOf(/std\.textContent = /.test(page)), "the price editor draws a Source cell per row, by textContent (VibeSpace's table · From Claude Code {v} · Entered by you)");
   }
 
   console.log('§D the quota lane is a fact about ONE account\'s reading (acceptance r1 law C, r2 law C final)');
@@ -163,14 +163,14 @@ try {
     const val = (src, key) => { const m = new RegExp('^  ' + JSON.stringify(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': "([^"]*)"', 'm').exec(src); return m ? m[1] : null; };
     const words = [...env.AVAILABLE_MODELS.claude.map((r) => r.label), ...events.map((e) => e.d), 'From Claude Code {v}', "VibeSpace's table", 'Entered by you', 'Source'];
     for (const k of ['From Claude Code {v}', "VibeSpace's table"]) words.push(val(zh, k), val(ja, k));
-    ok(words.every((w) => typeof w === 'string' && w.length) && !words.some((w) => WAIT.test(w)), `none of the ${words.length} picker labels, price-source words (en / zh / ja) and Diagnostics lines says to wait for a release`, JSON.stringify(words.filter((w) => !w || WAIT.test(w))));
+    ok(gateOf(words.every((w) => typeof w === 'string' && w.length)) && !words.some((w) => WAIT.test(w)), `none of the ${words.length} picker labels, price-source words (en / zh / ja) and Diagnostics lines says to wait for a release`, JSON.stringify(words.filter((w) => !w || WAIT.test(w))));
     red(WAIT.test('records may show as new fields until the next release') && WAIT.test('Until a release registers one'), 'the matcher is not vacuous: the .387 «until the next release» sentences are what it catches (cli-registration\'s — cli-self-measure rewords those)');
   }
 
   console.log('§H the maintainers hear first — once');
   {
     const read = events.filter((e) => e.n === 'cli-model-catalog-read'), unk = events.filter((e) => e.n === 'cli-unknown-model');
-    ok(read.length === 1 && /claude 2\.1\.900 · built 2026-12-01 · 26 models · new: claude-fable-6, claude-quill-1/.test(read[0].d), 'ONE `cli-model-catalog-read`: the version, the build date, the count, the new ids', JSON.stringify(read));
+    ok(read.length === 1 && verdictOf(/claude 2\.1\.900 · built 2026-12-01 · 26 models · new: claude-fable-6, claude-quill-1/.test(read[0].d)), 'ONE `cli-model-catalog-read`: the version, the build date, the count, the new ids', JSON.stringify(read));
     ok(unk.map((e) => e.d).join(' | ') === 'claude-fable-6 · fable · Claude Code 2.1.900 | claude-quill-1 · quill · Claude Code 2.1.900', 'ONE `cli-unknown-model` per new id (Diagnostics\' Harness drift rows)', JSON.stringify(unk));
     ok(!events.some((e) => /\/|home|@|account/i.test(e.d.replace(/\$[\d.]+\/\$[\d.]+/g, ''))), 'no path, no account, no identifier in any detail');
     const n = events.length;
@@ -188,10 +188,10 @@ try {
     ok(e.state === 'unreadable' && e.reason.code === 'not-a-literal', 'refused by name: not-a-literal', JSON.stringify(e.reason));
     ok(ids().join() === SEED.map((r) => r.id).join(), 'the picker is exactly the shipped rows — never empty, never broken');
     const said = events.slice(n);
-    ok(said.length === 1 && said[0].n === 'cli-unknown-model-catalog' && /Claude Code 2\.1\.901: its own model list could not be read here \(not-a-literal at \+\d+\) — VibeSpace uses its built-in list/.test(said[0].d), 'ONE quiet Diagnostics line, no For-you item', JSON.stringify(said));
+    ok(said.length === 1 && said[0].n === 'cli-unknown-model-catalog' && verdictOf(/Claude Code 2\.1\.901: its own model list could not be read here \(not-a-literal at \+\d+\) — VibeSpace uses its built-in list/.test(said[0].d)), 'ONE quiet Diagnostics line, no For-you item', JSON.stringify(said));
     ok(uh._tier('claude-fable-6') === 'fable-6', "an unreadable binary takes no price away: a conversation 2.1.900 served stays priced (the union of every catalog read)");
     await note(cli900, '2.1.900');
-    ok(ids().includes('claude-fable-6'), 'back on the readable binary, its rows return at once (no re-read: the ledger)');
+    ok(verdictOf(ids().includes('claude-fable-6')), 'back on the readable binary, its rows return at once (no re-read: the ledger)');
   }
 
   console.log('§J a value out of bounds is refused BY NAME — never clamped');
@@ -203,7 +203,7 @@ try {
     const v = CMC.validateCatalog(bad);
     const f6 = v.models.find((m) => m.id === 'claude-fable-6'), q1 = v.models.find((m) => m.id === 'claude-quill-1');
     const names = v.refused.map((r) => `${r.id} ${r.field} ${r.code}`);
-    ok(f6.price === null && names.includes('claude-fable-6 price.input price-range') && names.includes('claude-quill-1 context.window context-range') && names.includes('claude-quill-1 display_name label-long'), 'refused by name: price.input 5000, window 99 M, an 80-char label', JSON.stringify(names));
+    ok(f6.price === null && gateOf(names.includes('claude-fable-6 price.input price-range')) && gateOf(names.includes('claude-quill-1 context.window context-range')) && verdictOf(names.includes('claude-quill-1 display_name label-long')), 'refused by name: price.input 5000, window 99 M, an 80-char label', JSON.stringify(names));
     ok(q1.window === null && q1.label === 'claude-quill-1' && !CMC.priceLayerOf([{ state: 'read', cli: 'x', builtAt: 'x', models: v.models }]).rows['fable-6'], 'nothing is clamped: the refused price is no row at all (the id keeps the shipped answer), the window unknown, the label the id');
   }
 
@@ -215,7 +215,7 @@ try {
     const row = (i, o) => ({ input: i, output: o, cacheWrite5m: i, cacheWrite1h: i, cacheRead: i / 10 });
     // (1) the person edits the `opus` FAMILY row: Opus 4.8 (which falls on it) stays on theirs — no longer key slides under it
     const a = CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING, opus: row(4, 20) }, accounts: {} }, L321, opt);
-    ok(tierOf(a.pricing, 'claude-opus-4-8') === 'opus' && !('opus-4-8' in a.pricing.tiers) && a.disagreements.some((d) => d.id === 'claude-opus-4-8' && d.used === 'you' && d.fellOn === 'opus'), "a person's `opus` row (4 / 20): claude-opus-4-8 stays on it — the catalog's 5 / 25 adds no key under it, and the disagreement names the person's row as the one in force", JSON.stringify(a.disagreements.filter((d) => /opus-4-8/.test(d.id))));
+    ok(tierOf(a.pricing, 'claude-opus-4-8') === 'opus' && !('opus-4-8' in a.pricing.tiers) && verdictOf(a.disagreements.some((d) => d.id === 'claude-opus-4-8' && d.used === 'you' && d.fellOn === 'opus')), "a person's `opus` row (4 / 20): claude-opus-4-8 stays on it — the catalog's 5 / 25 adds no key under it, and the disagreement names the person's row as the one in force", JSON.stringify(a.disagreements.filter((d) => /opus-4-8/.test(d.id))));
     // (2) the person edits `haiku`: Haiku 4.5 and Haiku 5.5 stay on their 0.5
     const b = CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING, haiku: row(0.5, 2.5) }, accounts: {} }, L321, opt);
     ok(tierOf(b.pricing, 'claude-haiku-4-5-20251001') === 'haiku' && tierOf(b.pricing, 'claude-haiku-5-5') === 'haiku' && !('haiku-4-5' in b.pricing.tiers) && !('haiku-5-5' in b.pricing.tiers), "a person's `haiku` row (0.5): Haiku 4.5 is not put back at the shipped $1, Haiku 5.5 not moved — their row stands for both");
@@ -291,11 +291,11 @@ try {
     fs.chmodSync(cli900, 0o000); // the binary cannot even be opened: boot must not need it
     const v = CAT.boot({ dataDir: path.join(dir, 'data'), event: ev, log: () => { } });
     fs.chmodSync(cli900, 0o755);
-    ok(v && v.cli === '2.1.900' && ids().includes('claude-fable-6') && ids().includes('claude-quill-1[1m]'), 'boot (the server\'s cli-env create): the ledger\'s list is in force at once — no tick, no binary', JSON.stringify(v && v.cli));
+    ok(gateOf(v) && v.cli === '2.1.900' && gateOf(ids().includes('claude-fable-6')) && verdictOf(ids().includes('claude-quill-1[1m]')), 'boot (the server\'s cli-env create): the ledger\'s list is in force at once — no tick, no binary', JSON.stringify(v && v.cli));
     const uh4 = new UHM.UsageHistory({ dataDir: path.join(dir, 'uh3'), homeDir: path.join(dir, 'uh3') });
     ok(uh4._tier('claude-fable-6') === 'fable-6' && uh4.pricingView().sources['fable-6'].from === 'catalog' && uh3._tier('claude-fable-6') === 'fable-6', '…its prices too, for an instance made after boot AND one made before it (the Source column says «From Claude Code»)');
     ok(FAM.familyOfModel('claude-quill-1') === 'quill', '…and its families');
-    ok(/\nconst CMCS = require\('\.\/cli-model-catalog\.js'\);[\s\S]*?try \{ CMCS\.boot\(\{ dataDir: path\.join\(rootDir, 'data'\) \}\); \} catch \{ \}\n/.test(fs.readFileSync(path.join(ROOT, 'src/server/cli-env.js'), 'utf8')), 'the SERVER\'s boot call: cli-env create() boots the ledger from <root>/data (the drill\'s restart is that call; the hub leg proves it on a real second process)');
+    ok(verdictOf(/\nconst CMCS = require\('\.\/cli-model-catalog\.js'\);[\s\S]*?try \{ CMCS\.boot\(\{ dataDir: path\.join\(rootDir, 'data'\) \}\); \} catch \{ \}\n/.test(fs.readFileSync(path.join(ROOT, 'src/server/cli-env.js'), 'utf8'))), 'the SERVER\'s boot call: cli-env create() boots the ledger from <root>/data (the drill\'s restart is that call; the hub leg proves it on a real second process)');
     await CAT._landed(); ok(events.length === nEv && fs.readFileSync(ledgerFile, 'utf8') === ledgerBytes, 'nothing re-read, nothing said again, the ledger untouched');
   }
 
@@ -318,12 +318,12 @@ try {
     ok(en.state === 'unreadable' && en.reason.code === 'timeout' && en.retry === true, 'a read whose open never returns (a FIFO swapped in): bounded by the read\'s own timeout (20 ms here, READ_TIMEOUT_MS in the hub) — `timeout`, marked to try again', JSON.stringify(en.reason));
     const nd = path.join(dir, 'fifo-standin'); fs.mkdirSync(nd, { recursive: true });
     const ed = await CAT.readBinary(nd, {});
-    ok(ed.reason && ed.reason.code === 'not-a-file' && ed.retry === true, 'a path that is not a regular file when opened: refused by name (not-a-file), never read');
+    ok(gateOf(ed.reason) && ed.reason.code === 'not-a-file' && ed.retry === true, 'a path that is not a regular file when opened: refused by name (not-a-file), never read');
     const cli903 = fakeCli({ version: '2.1.903', builtAt: '2026-12-04T00:00:00Z', catalog: NEW });
     const p1 = CAT.noteBinary({ cmd: cli903, version: '2.1.903', dataDir: path.join(dir, 'data'), which: (c) => c, open: never, timeoutMs: 20 });
     const r1 = await p1; // bounded by the read's own timeout: a stuck open never holds the chain
     const r2 = await CAT.noteBinary({ cmd: cli903, version: '2.1.903', dataDir: path.join(dir, 'data'), which: (c) => c });
-    ok(r1 && r1.retry === true && r2 && r2.state === 'read', 'the stuck read blocks nothing after it: the next tick reads the same binary', JSON.stringify([r1 && r1.reason, r2 && r2.state]));
+    ok(gateOf(r1) && r1.retry === true && gateOf(r2) && r2.state === 'read', 'the stuck read blocks nothing after it: the next tick reads the same binary', JSON.stringify([r1 && r1.reason, r2 && r2.state]));
     await note(cli900, '2.1.900');
   }
 
@@ -336,7 +336,7 @@ try {
     CAT._reset();
     const e1 = await CAT.noteBinary({ cmd: cli900, version: '2.1.900', dataDir: d2, which: (c) => c, event: ev, log: () => { } });
     await CAT._landed(); const saved = JSON.parse(fs.readFileSync(path.join(d2, CAT.LEDGER), 'utf8'));
-    ok(e1 && e1.state === 'read' && !('x' in saved.binaries) && !('y' in saved.binaries) && !('z' in saved.binaries) && Object.keys(saved.binaries).length === 1, 'a ledger holding non-entries ({"x":null}, 5, a half entry): what the load accepts the save writes — dropped, read once, saved');
+    ok(gateOf(e1) && e1.state === 'read' && !('x' in saved.binaries) && !('y' in saved.binaries) && !('z' in saved.binaries) && Object.keys(saved.binaries).length === 1, 'a ledger holding non-entries ({"x":null}, 5, a half entry): what the load accepts the save writes — dropped, read once, saved');
     ok(!fs.existsSync(path.join(d2, CAT.LEDGER + '.tmp-99999')), 'the tmp file a kill left between write and rename is removed at the next save');
     const ne2 = events.length;
     CAT._reset();
@@ -348,7 +348,7 @@ try {
     const l1 = await CAT.noteBinary({ cmd: locked, version: '2.1.904', dataDir: d2, which: (c) => c });
     fs.chmodSync(locked, 0o755);
     const l2 = await CAT.noteBinary({ cmd: locked, version: '2.1.904', dataDir: d2, which: (c) => c });
-    ok(l1 && l1.reason && l1.reason.code === 'EACCES' && l1.retry === true && l2 && l2.state === 'read' && events.filter((x, i) => i >= n3 && x.n === 'cli-unknown-model-catalog').length === 1, 'an I/O failure (EACCES at first sight, chmod later — the same key) is tried again at a later tick and then read; said once', JSON.stringify([l1 && l1.reason, l2 && l2.state]));
+    ok(gateOf(l1) && gateOf(l1.reason) && l1.reason.code === 'EACCES' && l1.retry === true && gateOf(l2) && l2.state === 'read' && events.filter((x, i) => i >= n3 && x.n === 'cli-unknown-model-catalog').length === 1, 'an I/O failure (EACCES at first sight, chmod later — the same key) is tried again at a later tick and then read; said once', JSON.stringify([l1 && l1.reason, l2 && l2.state]));
     const bad = fakeCli({ version: '2.1.905', builtAt: '2026-12-06T00:00:00Z', body: lit(NEW).replace('models:[', 'models:[Ye(),') });
     const b1 = await CAT.noteBinary({ cmd: bad, version: '2.1.905', dataDir: d2, which: (c) => c });
     const b2 = await CAT.noteBinary({ cmd: bad, version: '2.1.905', dataDir: d2, which: (c) => c });
@@ -362,7 +362,7 @@ try {
     const hang = () => new Promise(() => { });
     const rp = await CAT.noteBinary({ cmd: cli900, version: '2.1.900', dataDir: d2, which: (c) => c, fsx: { realpath: hang }, timeoutMs: 20 });
     const after = await CAT.noteBinary({ cmd: locked, version: '2.1.904', dataDir: d2, which: (c) => c });
-    ok(rp === null && after && after.state === 'read', 'a realpath that never answers is bounded (null, nothing stored) and the next tick for another binary proceeds');
+    ok(rp === null && gateOf(after) && after.state === 'read', 'a realpath that never answers is bounded (null, nothing stored) and the next tick for another binary proceeds');
     // small r2 (3): an entry the reader could not have produced is dropped at load — never a menu that throws for ever
     const d3 = path.join(dir, 'data-shape'); fs.mkdirSync(d3, { recursive: true });
     await CAT._landed(); const good = JSON.parse(fs.readFileSync(path.join(d2, CAT.LEDGER), 'utf8'));
@@ -383,7 +383,7 @@ try {
     ok(events.length === nS, `10 000 padding lines after the current ones, two restarts: ${events.length - nS} line(s) said again (r3's load kept only the newest 2 000 and said 7 price lines again)`, JSON.stringify(events.slice(nS).map((x) => x.n)));
     CAT.apply(); // a save
     await CAT._landed(); const saidNow = JSON.parse(fs.readFileSync(lf, 'utf8')).said;
-    ok(saidNow.length < 100 && !saidNow.some((k) => k.startsWith('pad-') || k.includes('claude-pad-')) && ledger0.said.every((k) => saidNow.includes(k) || !k.startsWith('cli-model-catalog-read|')), `a save keeps only what is still true (${saidNow.length} lines: the kept builds, their models, the current disagreements) — the file is bounded by that`, String(saidNow.length));
+    ok(saidNow.length < 100 && !saidNow.some((k) => k.startsWith('pad-') || k.includes('claude-pad-')) && verdictOf(ledger0.said.every((k) => saidNow.includes(k) || !k.startsWith('cli-model-catalog-read|'))), `a save keeps only what is still true (${saidNow.length} lines: the kept builds, their models, the current disagreements) — the file is bounded by that`, String(saidNow.length));
     // …and a save BEFORE any price table has recomputed keeps every price line (unknown is not «ended»): the ledger loaded with
     // no reader fed, a save, THEN a usage-history built ⇒ 0 lines said again (主开发's mutant 2: the clause removed ⇒ all said again)
     await CAT._landed(); const priced = JSON.parse(fs.readFileSync(lf, 'utf8')).said.filter((k) => k.startsWith('cli-unknown-model-price|'));
@@ -399,7 +399,7 @@ try {
     uh7.setPricing({ tiers: { opus: rowT(4, 20), 'haiku-5-5': rowT(0.1, 0.5), sonnet: rowT(3, 15) }, sources: { opus: { from: 'catalog' }, 'haiku-5-5': { from: 'catalog' }, sonnet: { from: 'you' } } });
     const disk7 = JSON.parse(fs.readFileSync(uh7.pricingFile, 'utf8'));
     const persist = fs.readFileSync(path.join(ROOT, 'src/routes/persistence.js'), 'utf8');
-    ok(uh7.lastCatalogSkips().join() === 'haiku-5-5,opus' && disk7.tiers.sonnet.input === 3 && /pricingSkipped = uh\?\.lastCatalogSkips\?\.\(\) \|\| \[\];/.test(persist) && /not imported as yours — the export marked these as Claude Code's own prices: \$\{pricingSkipped\.slice\(0, 20\)\.join\(', '\)\}/.test(persist), "an import skips the rows the export marked as the catalog's (opus, haiku-5-5) and SAYS them by key in the import's own summary; the person's own row (sonnet) is written");
+    ok(uh7.lastCatalogSkips().join() === 'haiku-5-5,opus' && disk7.tiers.sonnet.input === 3 && gateOf(/pricingSkipped = uh\?\.lastCatalogSkips\?\.\(\) \|\| \[\];/.test(persist)) && verdictOf(/not imported as yours — the export marked these as Claude Code's own prices: \$\{pricingSkipped\.slice\(0, 20\)\.join\(', '\)\}/.test(persist)), "an import skips the rows the export marked as the catalog's (opus, haiku-5-5) and SAYS them by key in the import's own summary; the person's own row (sonnet) is written");
     await note(cli900, '2.1.900');
   }
 
@@ -408,21 +408,21 @@ try {
     env.AVAILABLE_MODELS.claude.push({ id: 'claude-served-once', label: 'Served once' }); // the passive ingest of a served model
     const nb = bcasts.length;
     await note(fakeCli({ version: '2.1.906', builtAt: '2026-12-07T00:00:00Z', catalog: NEW }), '2.1.906');
-    ok(ids().includes('claude-served-once'), '(1) a catalog read keeps the rows that came from elsewhere (the passive ingest, the /v1/models fetch)');
+    ok(verdictOf(ids().includes('claude-served-once')), '(1) a catalog read keeps the rows that came from elsewhere (the passive ingest, the /v1/models fetch)');
     ok(bcasts.length - nb === 1 && bcasts[bcasts.length - 1].type === 'available-models-dirty', '(2) THE NOTIFY LAW: one recomputation = one `available-models-dirty` signal', JSON.stringify(bcasts.slice(nb)));
     const appSrc = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');
-    ok(/const refreshAvailableModels = \(\) => fetchJson\('\/api\/available-models'\)\.then\(applyAvailableModels\);/.test(appSrc) && /msg\.type === 'available-models-dirty'\) refreshAvailableModels\(\)/.test(appSrc), '(2) …and the client applies the boot fetch and every signal through ONE function (Settings › default model, the session options)');
+    ok(gateOf(/const refreshAvailableModels = \(\) => fetchJson\('\/api\/available-models'\)\.then\(applyAvailableModels\);/.test(appSrc)) && verdictOf(/msg\.type === 'available-models-dirty'\) refreshAvailableModels\(\)/.test(appSrc)), '(2) …and the client applies the boot fetch and every signal through ONE function (Settings › default model, the session options)');
     const remote = CMC.remoteRows(env.AVAILABLE_MODELS.claude);
     const rIds = remote.map((r) => r.id);
-    ok(!rIds.includes('claude-fable-6') && !rIds.includes('quill') && remote.find((r) => r.id === 'fable').label === 'fable' && rIds.includes('claude-fable-5-2') && remote.every((r) => r.context === undefined && r.resolves === undefined), '(3) ANOTHER MACHINE: the shipped rows only, aliases plain, no size or mapping claimed — nothing this hub\'s catalog alone knows', JSON.stringify(rIds));
+    ok(!rIds.includes('claude-fable-6') && !rIds.includes('quill') && remote.find((r) => r.id === 'fable').label === 'fable' && gateOf(rIds.includes('claude-fable-5-2')) && verdictOf(remote.every((r) => r.context === undefined && r.resolves === undefined)), '(3) ANOTHER MACHINE: the shipped rows only, aliases plain, no size or mapping claimed — nothing this hub\'s catalog alone knows', JSON.stringify(rIds));
     const pm = fs.readFileSync(path.join(ROOT, 'src/routes/provider-models.js'), 'utf8'), ap = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');
-    ok(/models: host \? CMC\.remoteRows\(m\.models\) : m\.models/.test(pm) && /menu\(backend, accountOfSession\(s\) \|\| \{ backend \}, s\.host \|\| null\)/.test(pm) && /menu\(backend, null, host\)/.test(pm) && /menu\(backend, a, host\)/.test(pm) && !/if \(s\.host/.test(pm) && /\$\{hostId \? `&host=\$\{encodeURIComponent\(hostId\)\}` : ''\}/.test(ap), '(3) …through ONE `host` parameter on every door: a running conversation\'s machine and the New Session dialog\'s machine (no branch)');
+    ok(gateOf(/models: host \? CMC\.remoteRows\(m\.models\) : m\.models/.test(pm)) && gateOf(/menu\(backend, accountOfSession\(s\) \|\| \{ backend \}, s\.host \|\| null\)/.test(pm)) && gateOf(/menu\(backend, null, host\)/.test(pm)) && gateOf(/menu\(backend, a, host\)/.test(pm)) && !/if \(s\.host/.test(pm) && verdictOf(/\$\{hostId \? `&host=\$\{encodeURIComponent\(hostId\)\}` : ''\}/.test(ap)), '(3) …through ONE `host` parameter on every door: a running conversation\'s machine and the New Session dialog\'s machine (no branch)');
     const css = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8'), uw = fs.readFileSync(path.join(ROOT, 'src/lib/usage-window.js'), 'utf8');
-    ok(/\.usage-price-scroll \{ max-width: 100%; overflow-x: auto;/.test(css) && /\.usage-price-src \{ color: var\(--text-dim\)/.test(css) && /scroll\.className = 'usage-price-scroll'; scroll\.appendChild\(tbl\)/.test(uw), '(4) the price table scrolls sideways on a phone (every column, Source included, reachable); the Source cell has its own rule');
+    ok(gateOf(/\.usage-price-scroll \{ max-width: 100%; overflow-x: auto;/.test(css)) && gateOf(/\.usage-price-src \{ color: var\(--text-dim\)/.test(css)) && verdictOf(/scroll\.className = 'usage-price-scroll'; scroll\.appendChild\(tbl\)/.test(uw)), '(4) the price table scrolls sideways on a phone (every column, Source included, reachable); the Source cell has its own rule');
     const rv = CMC.validateCatalog({ models: [{ id: 'claude-x-1', family: 'constructor', display_name: 'X' }, { id: 'claude-y-1', family: 'yy1', display_name: '<img src=x>' }, { id: 'claude-z-1', family: 'zz1', display_name: 'Z'.repeat(80) }], pricing_tiers: {}, aliases: { tostring: { default: 'claude-y-1' }, toString: { default: 'claude-y-1' } }, latest_per_family: { hasOwnProperty: 'claude-y-1' } });
     const codes = rv.refused.map((r) => `${r.id}:${r.field}:${r.code}`);
-    ok(codes.includes('claude-x-1:family:reserved-name') && codes.includes('hasOwnProperty:latest_per_family:reserved-name') && codes.some((c) => /^toString:aliases:/.test(c)), '(5) a family / alias / key that is a built-in property name is refused by name', JSON.stringify(codes));
-    ok(codes.includes('claude-y-1:display_name:label-chars') && codes.includes('claude-z-1:display_name:label-long'), '(6) a refused display_name is named for what it is: label-chars (markup / control) vs label-long');
+    ok(gateOf(codes.includes('claude-x-1:family:reserved-name')) && gateOf(codes.includes('hasOwnProperty:latest_per_family:reserved-name')) && verdictOf(codes.some((c) => /^toString:aliases:/.test(c))), '(5) a family / alias / key that is a built-in property name is refused by name', JSON.stringify(codes));
+    ok(gateOf(codes.includes('claude-y-1:display_name:label-chars')) && verdictOf(codes.includes('claude-z-1:display_name:label-long')), '(6) a refused display_name is named for what it is: label-chars (markup / control) vs label-long');
   }
 
   console.log('§M the census — every model-keyed site has a row; every row: no release on an ordinary update, and by which road');
@@ -454,9 +454,9 @@ try {
     ok(!unrowed.length, 'every model-keyed site in src/ has a census row', unrowed.join(', '));
     ok(!dead.length, 'no census row is dead (its site still exists)', dead.join(', '));
     const shape = C.rows.every((r) => typeof r.id === 'string' && r.id && fs.existsSync(path.join(ROOT, r.file)) && r.keyedOn === 'model' && r.needsReleaseOnOrdinaryUpdate === false && typeof r.road === 'string' && r.road.length > 10 && typeof r.suite === 'string' && fs.existsSync(path.join(ROOT, 'scripts', r.suite + '.mjs')));
-    ok(shape && new Set(C.rows.map((r) => r.id)).size === C.rows.length, `every one of the ${C.rows.length} rows: {id, file, keyedOn, needsReleaseOnOrdinaryUpdate: false, road, suite} — no release of ours on an ordinary update`);
+    ok(gateOf(shape) && new Set(C.rows.map((r) => r.id)).size === C.rows.length, `every one of the ${C.rows.length} rows: {id, file, keyedOn, needsReleaseOnOrdinaryUpdate: false, road, suite} — no release of ours on an ordinary update`);
     const counted = C.rows.filter((r) => r.match), moved = counted.filter((r) => hits.get(r.file + '|' + r.match) !== r.sites);
-    ok(!moved.length && counted.every((r) => Number.isInteger(r.sites) && r.sites > 0), `every row's site count is the tree's (${counted.reduce((n, r) => n + r.sites, 0)} sites): a new site in an already-rowed file is judged again`, moved.map((r) => `${r.id} ${r.sites} → ${hits.get(r.file + '|' + r.match)}`).join(', '));
+    ok(!moved.length && verdictOf(counted.every((r) => Number.isInteger(r.sites) && r.sites > 0)), `every row's site count is the tree's (${counted.reduce((n, r) => n + r.sites, 0)} sites): a new site in an already-rowed file is judged again`, moved.map((r) => `${r.id} ${r.sites} → ${hits.get(r.file + '|' + r.match)}`).join(', '));
     const planted = scan([['src/planted.js', "const T = { 'claude-fable-6': { input: 6 } };\nif (m.includes('sonnet')) x();\nconst M = new Map([['fable-6', { input: 6 }], ['quill', {}]]);\nswitch (fam) { case 'fable': a(); }\n"], ['src/planted-rate.js', "const RATE = { opus: { input: 1 }, sonnet: { input: 2 } };\n"]]);
     red(['model-id-literal', 'family-word', 'family-key'].every((k) => planted.has('src/planted.js|' + k) && !rowKeys.has('src/planted.js|' + k)) && planted.has('src/planted-rate.js|family-key'), 'a new model-keyed table planted in src/ (an id-keyed row, a family-word branch, a Map on short ids, a switch on a family, an unquoted `{ opus: …, sonnet: … }` on ONE line) is a site with no row');
     const escaped = 'const core = (m) => String(m).replace(/\\s*\\[1m\\]$/, \'\');\n';
@@ -479,7 +479,7 @@ try {
       delete process.env.VS_NO_REAL_CLI; env.refreshAvailableModels(); const off = asked.length - under;
       console.log(`  (B-9dd0: model-list requests — under VS_NO_REAL_CLI=1: ${under}; the switch off: ${off} — ${asked.join(', ') || 'none'})`);
       ok(under === 0, 'B-9dd0: under VS_NO_REAL_CLI=1 the model list asks no vendor, an API key set (the refusal stands in front of the request)', asked.join(', '));
-      ok(off === 1 && /^https:\/\/api\.anthropic\.com\/v1\/models\?/.test(asked[under] || ''), 'B-9dd0 RED CONTROL: the same call with the switch off makes its one request (the stand-in sees it — the zero above is the refusal\'s)', asked.join(', '));
+      ok(off === 1 && verdictOf(/^https:\/\/api\.anthropic\.com\/v1\/models\?/.test(asked[under] || '')), 'B-9dd0 RED CONTROL: the same call with the switch off makes its one request (the stand-in sees it — the zero above is the refusal\'s)', asked.join(', '));
     } finally {
       https.request = real;
       if (saved.sw === undefined) delete process.env.VS_NO_REAL_CLI; else process.env.VS_NO_REAL_CLI = saved.sw;
@@ -508,7 +508,7 @@ try {
       return out;
     };
     const g = await writerLeg(CAT, 'real');
-    ok(g.mine >= 2 && g.names === 'cli-model-catalog.write' && g.latest && g.a1 === false && g.a2 === false && g.said === 1 && g.whole,
+    ok(g.mine >= 2 && g.names === 'cli-model-catalog.write' && gateOf(g.latest) && g.a1 === false && g.a2 === false && g.said === 1 && verdictOf(g.whole),
       `the ledger's saves go to the writer by name (${g.names}, ${g.mine} hand-overs), each hands the LATEST state (the bytes equal the ledger in memory; that a burst becomes ONE write is the real writer's own property, src/store-writer.js, not shown at this seam), a failed landing answers false and is SAID ONCE (${g.said}), the old file stands whole`, JSON.stringify(g));
     const RED = mutantCopies('cunn-writer', ROOT).load('src/server/cli-model-catalog.js', anchored(fs.readFileSync(CAT_FILE, 'utf8'),
       "      onWritten: (ok, e) => { if (ok) { st.saveSaid = false; return; } if (!st.saveSaid) {", "      onWritten: (ok, e) => { if (ok) { st.saveSaid = false; return; } if (false) {", 'catalog-fail-cut'), 'catalog-fail-cut');
@@ -522,4 +522,4 @@ try {
   }
 } catch (e) { fail++; console.log('  ✗ the drill threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skip} skipped)` : `\nALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

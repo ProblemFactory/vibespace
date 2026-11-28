@@ -33,7 +33,7 @@ const CH_HOME = path.join(root, 'chrome-home'), CH_RUN = scratch('vdl-run'); // 
 fs.mkdirSync(CH_HOME, { recursive: true });   // created as its siblings create their browser's HOME
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── fixtures: a real PNG and a real (xref-complete) PDF, each under an ASCII and a CJK name ──
@@ -142,7 +142,7 @@ try {
   await evalJs(`(async () => { __vd.closeAll(); await new Promise((r) => setTimeout(r, 150)); app.openFile(${JSON.stringify(DOCX.path)}, ${JSON.stringify(DOCX.name)}); return true; })()`);
   const seat = await evalJs(`(async () => { const b = await ${docxReady}; if (!b) return null; const prev = b.previousElementSibling, next = b.nextElementSibling;
     return { title: b.title, aria: b.getAttribute('aria-label'), svg: !!b.querySelector('svg'), prev: prev && prev.className, next: next && next.className, office: !!b.parentElement.querySelector('.docx-tool-office') }; })()`);
-  ok(seat && seat.title === '下载' && seat.aria === '下载' && seat.svg && (seat.office ? /docx-tool-office/.test(seat.prev || '') : /docx-pages/.test(seat.next || '')),
+  ok(gateOf(seat) && seat.title === '下载' && seat.aria === '下载' && gateOf(seat.svg) && (seat.office ? verdictOf(/docx-tool-office/.test(seat.prev || '')) : verdictOf(/docx-pages/.test(seat.next || ''))),
     `① the Word toolbar carries 下载 (an SVG icon, named) ${seat && seat.office ? 'right after "Open in LibreOffice"' : 'before the page count (no LibreOffice door on this scratch server)'}`, seat);
   if (process.env.VD_SHOT_DIR) {
     const box = await evalJs(`(async () => { const w = __vd.win(); app.wm.toggleMaximize(w.id); await new Promise((r) => setTimeout(r, 900)); const r = w.element.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: Math.min(r.height, 520) }; })()`);
@@ -153,7 +153,7 @@ try {
   let n0 = downloads.length;
   await evalJs(`(__vd.btn('.docx-toolbar').click(), true)`);
   let r = await saved(n0);
-  ok(same(r, DOCX.name, DOCX.bytes), `① clicking it: Chrome saves ${JSON.stringify(DOCX.name)} — the file's own name, identical bytes (${DOCX.bytes.length} B)`, show(r));
+  ok(verdictOf(same(r, DOCX.name, DOCX.bytes)), `① clicking it: Chrome saves ${JSON.stringify(DOCX.name)} — the file's own name, identical bytes (${DOCX.bytes.length} B)`, show(r));
 
   console.log('— ② the title-bar menu');
   n0 = downloads.length;
@@ -162,7 +162,7 @@ try {
     const it = await __vd.until(() => [...document.querySelectorAll('.taskbar-context-menu *')].find((e) => e.children.length === 0 && e.textContent.trim() === '下载'), 3000);
     if (!it) return null; it.click(); return true; })()`);
   r = await saved(n0);
-  ok(row && same(r, DOCX.name, DOCX.bytes), '② its title-bar right-click menu has 下载 — one click, one save, same name and bytes', { row, ...show(r) });
+  ok(gateOf(row) && verdictOf(same(r, DOCX.name, DOCX.bytes)), '② its title-bar right-click menu has 下载 — one click, one save, same name and bytes', { row, ...show(r) });
 
   console.log('— ③ an image: the media toolbar Download');
   await evalJs(`(async () => { __vd.closeAll(); await new Promise((r) => setTimeout(r, 150)); app.openFile(${JSON.stringify(PNG.path)}, ${JSON.stringify(PNG.name)}); return true; })()`);
@@ -170,7 +170,7 @@ try {
   n0 = downloads.length;
   if (ib) await evalJs(`(__vd.btn('.media-toolbar').click(), true)`);
   r = await saved(n0);
-  ok(ib && same(r, PNG.name, PNG.bytes), `③ the image toolbar's Download saves ${JSON.stringify(PNG.name)} with identical bytes`, { ib, ...show(r) });
+  ok(gateOf(ib) && verdictOf(same(r, PNG.name, PNG.bytes)), `③ the image toolbar's Download saves ${JSON.stringify(PNG.name)} with identical bytes`, { ib, ...show(r) });
 
   console.log('— ④ the code editor: clean, then with unsaved edits');
   await evalJs(`(async () => { __vd.closeAll(); await new Promise((r) => setTimeout(r, 150)); app.openEditor(${JSON.stringify(MD.path)}, ${JSON.stringify(MD.name)}); return true; })()`);
@@ -180,7 +180,7 @@ try {
   r = await saved(n0);
   await sleep(300);
   const t1 = await evalJs('__vd.toasts()');
-  ok(eb && same(r, MD.name, MD.bytes) && !t1.includes('未保存的修改'), `④ a clean editor's Download saves ${JSON.stringify(MD.name)} with the file's bytes, no toast`, { eb, ...show(r), t1 });
+  ok(gateOf(eb) && gateOf(same(r, MD.name, MD.bytes)) && !t1.includes('未保存的修改'), `④ a clean editor's Download saves ${JSON.stringify(MD.name)} with the file's bytes, no toast`, { eb, ...show(r), t1 });
   await evalJs(`(() => { const c = __vd.win().element.querySelector('.cm-content'); c.focus(); return true; })()`);
   await page.cmd('Input.insertText', { text: 'UNSAVED ' });
   const dirty = await evalJs(`(async () => !!(await __vd.until(() => __vd.win()._editorDirty?.(), 3000)))()`);
@@ -189,7 +189,7 @@ try {
   r = await saved(n0);
   const t2 = await evalJs(`__vd.until(() => __vd.toasts().includes('已下载保存过的版本') && __vd.toasts(), 3000)`);
   const nToast = (String(t2 || '').match(/已下载保存过的版本/g) || []).length;
-  ok(dirty && same(r, MD.name, MD.bytes) && nToast === 1, '④ with unsaved edits: the SAVED bytes download, and ONE toast says the unsaved changes are not included', { dirty, ...show(r), t2 });
+  ok(gateOf(dirty) && gateOf(same(r, MD.name, MD.bytes)) && nToast === 1, '④ with unsaved edits: the SAVED bytes download, and ONE toast says the unsaved changes are not included', { dirty, ...show(r), t2 });
 
   console.log('— ⑤ a phone (390 px)');
   await evalJs('(__vd.closeAll(), true)');
@@ -201,10 +201,10 @@ try {
   const pd = await evalJs(onScreen('.docx-toolbar'));
   await evalJs(`(async () => { __vd.closeAll(); await new Promise((r) => setTimeout(r, 200)); app.openEditor(${JSON.stringify(MD.path)}, ${JSON.stringify(MD.name)}); return !!(await ${edReady}); })()`); await sleep(400);
   const pe = await evalJs(onScreen('.editor-toolbar'));
-  ok(reachable(pd) && reachable(pe), '⑤ on a 390 px phone the Word and the editor Download buttons are on screen and take the tap', { pd, pe });
+  ok(gateOf(reachable(pd)) && verdictOf(reachable(pe)), '⑤ on a 390 px phone the Word and the editor Download buttons are on screen and take the tap', { pd, pe });
 } catch (e) {
   fail++; console.error('  ✗ the suite threw: ' + (e && e.stack || e));
 }
 
 console.log(`\n${pass} passed, ${fail} failed (${((Date.now() - T0) / 1000).toFixed(1)} s)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

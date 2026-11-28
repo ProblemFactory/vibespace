@@ -51,13 +51,13 @@ const errs=[]; ws.on('message',d=>{const m=JSON.parse(d); if(m.method==='Runtime
 await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/`});
 await new Promise(r=>setTimeout(r,7000));
 const e=async x=>(await send('Runtime.evaluate',{expression:x,returnByValue:true,awaitPromise:true})).result?.value;
-let pass=0,fail=0; const ck=(n,c,x='')=>{if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n+(x?' — '+x:''))}};
-ck('app booted', await e(`!!window.app && !!app.desktopManager`));
+let pass=0,fail=0; const ck=(n,c,x='')=>{ if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n+(x?' — '+x:''))}};
+ck('app booted', verdictOf(await e(`!!window.app && !!app.desktopManager`)));
 // add a 2nd desktop so previews exist, then re-render
 await e(`app.desktopManager.createDesktop(); app.desktopManager._renderSwitcher(); true`);
 await new Promise(r=>setTimeout(r,300));
-ck('desktop previews are draggable', await e(`[...document.querySelectorAll('.desktop-preview-wrapper:not(.stage-preview-wrapper)')].every(w=>w.draggable===true)`));
-ck('reorderDesktop exists', await e(`typeof app.desktopManager.reorderDesktop==='function'`));
+ck('desktop previews are draggable', verdictOf(await e(`[...document.querySelectorAll('.desktop-preview-wrapper:not(.stage-preview-wrapper)')].every(w=>w.draggable===true)`)));
+ck('reorderDesktop exists', verdictOf(await e(`typeof app.desktopManager.reorderDesktop==='function'`)));
 // reorder and confirm order changed + message shape
 const okReorder = await e(`(()=>{
   const dm=app.desktopManager; const ids=dm._desktops.map(d=>d.id);
@@ -85,7 +85,7 @@ const menuOk = await e(`(()=>{
 })()`);
 ck('preview moved into TOOLBAR still shows Rename/Delete (not Customize UI)', menuOk==='ok', menuOk);
 // toolbar height resize wiring
-ck('toolbar resize handle exists', await e(`!!document.getElementById('toolbar-resize-handle')`));
+ck('toolbar resize handle exists', verdictOf(await e(`!!document.getElementById('toolbar-resize-handle')`)));
 const thOk = await e(`(()=>{
   // 2.254.0: the resize is a content SCALE (zoom), not a fixed height — the
   // RENDERED height must follow --toolbar-scale and reset cleanly
@@ -103,4 +103,4 @@ ck('no JS exceptions during boot+interactions', errs.length===0);
 if(errs.length) console.log('   errs:', errs.slice(0,3));
 console.log(fail?`${fail} FAILED (${pass} passed)`:`ALL PASS (${pass})`);
 ws.close(); cleanup();
-process.exit(fail?1:0);
+process.exit(fail?1:0); import { verdictOf } from './lib/check.mjs';

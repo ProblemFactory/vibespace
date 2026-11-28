@@ -56,7 +56,7 @@ const K = require('../src/server/browser-keeper.js');
 const F = require('../src/browser-facts.js');
 const B = require('../src/browser-profiles.js');
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -183,7 +183,7 @@ console.log('— ② L2: a record whose daemon is GONE starts no browser-CLI chi
   const c = await sweep(K, registry(3, { live: true, extra }), { stallMs: 0 });
   closeHook = null;
   const procGone = await new Promise((r) => { if (proc.exitCode !== null || proc.signalCode) return r(true); proc.once('exit', () => r(true)); setTimeout(() => r(false), 2000); });
-  ok(st != null && c.removed === 4 && c.closes === 1 && procGone, `CONTROL: beside 3 gone daemons, ONE whose daemon runs (pid ${proc.pid}, its start time recorded) is still closed by the browser CLI — 1 start in all — and ended; all 4 records removed`, { st, removed: c.removed, closes: c.closes, procGone });
+  ok(st != null && c.removed === 4 && c.closes === 1 && verdictOf(procGone), `CONTROL: beside 3 gone daemons, ONE whose daemon runs (pid ${proc.pid}, its start time recorded) is still closed by the browser CLI — 1 start in all — and ended; all 4 records removed`, { st, removed: c.removed, closes: c.closes, procGone });
   try { proc.kill('SIGKILL'); } catch { /* gone */ }
   // MUTANT: the gone-daemon judgment removed (every live-looking record goes to the CLI's close)
   const noJudge = editAnchor(ksrc, "        if (B.isLiveBrowser(rec0) && isLocalRec(rec0) && !starting.has(profileId) && !stopping.has(profileId) && daemonSeenGone(rec0)) {", '        if (false) {', "src/server/browser-keeper.js");
@@ -203,7 +203,7 @@ console.log('— ③ L4: progress persists — the registry hands on a PIECE per
   // the copy taken at a write = the bytes that write hands on (lane lg-store-writes U5b: the registry as it stands once that write lands)
   const s = await sweep(K, dataDir, { stallMs: 5, onWrite: (n, w) => { if (copied === null && w.left > 0) { copied = w.left; fs.writeFileSync(path.join(mid, 'browser-profiles.json'), w.bytes); } } });
   const lefts = s.writeLog.map((w) => w.left);
-  ok(s.removed === 120 && s.left === 0 && s.writes >= 2 && s.writes < 120 && lefts.every((x, i) => i === 0 || x < lefts[i - 1]) && lefts[lefts.length - 1] === 0, `the registry hands on a PIECE per write (the keeper's hand-offs to the store writer — that each lands is the writer's own suites') — ${s.writes} writes for 120 removals, the records left after each: ${lefts.join(' → ')}`, { writes: s.writes, lefts });
+  ok(s.removed === 120 && s.left === 0 && s.writes >= 2 && s.writes < 120 && gateOf(lefts.every((x, i) => i === 0 || x < lefts[i - 1])) && lefts[lefts.length - 1] === 0, `the registry hands on a PIECE per write (the keeper's hand-offs to the store writer — that each lands is the writer's own suites') — ${s.writes} writes for 120 removals, the records left after each: ${lefts.join(' → ')}`, { writes: s.writes, lefts });
   const left = copied == null ? -1 : onDisk(mid);
   const r = copied == null ? { removed: -1, left: -1 } : await sweep(K, mid, { how: 'boot', stallMs: 0 });
   ok(copied > 0 && left === copied && r.removed === left && r.left === 0, `a keeper booted over the registry as it stood at a write mid-walk (a restart there): ${left} records left, and its boot sweep retires exactly those ${r.removed}`, { copied, left, removed: r.removed });
@@ -216,7 +216,7 @@ console.log('— ⑤ F1: a record whose conversation is carried again before its
   let backAt = 0;
   const s = await sweep(K, dataDir, { stallMs: 0, onRemoved: (n, k) => { if (n === 1) { backAt = n; k._reg().leases.push({ profileId: KEEP, browserKey: KEEP_KEY, sessionId: 'sess-back', targetId: null, since: Date.now(), input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' }); } } });
   const reg = s.k._reg(); const rec = reg.browsers[KEEP];
-  ok(backAt === 1 && s.removed === 19 && s.left === 1 && !!s.k.profile(KEEP) && rec && rec.state === 'ready' && rec.pid === 4100005 && s.closes === 0, 'among 20 orphans, the one whose lease came back after the first removal (before its own step) is KEPT — its browser record untouched (still `ready`, its pid), no CLI start — and the other 19 go', { removed: s.removed, left: s.left, state: rec && rec.state, closes: s.closes });
+  ok(backAt === 1 && s.removed === 19 && s.left === 1 && !!s.k.profile(KEEP) && gateOf(rec) && rec.state === 'ready' && rec.pid === 4100005 && s.closes === 0, 'among 20 orphans, the one whose lease came back after the first removal (before its own step) is KEPT — its browser record untouched (still `ready`, its pid), no CLI start — and the other 19 go', { removed: s.removed, left: s.left, state: rec && rec.state, closes: s.closes });
 }
 
 console.log('— ⑥ F2: nothing of a carried conversation is ended by the sweep — a stall placed in the reap\'s window');
@@ -248,7 +248,7 @@ const f2 = async (Km) => {
 };
 {
   const g = await f2(K);
-  ok(g.kept && g.state === 'ready' && g.alive && g.closes === 0 && g.out && g.out.kept === true, 'the conversation resumed inside the reap\'s window: after the reap the retire reads the lease again — the record KEPT, the browser it just started left RUNNING, no CLI start', g);
+  ok(gateOf(g.kept) && g.state === 'ready' && gateOf(g.alive) && g.closes === 0 && gateOf(g.out) && g.out.kept === true, 'the conversation resumed inside the reap\'s window: after the reap the retire reads the lease again — the record KEPT, the browser it just started left RUNNING, no CLI start', g);
   const noReread = editAnchor(ksrc, "      if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };\n      { const ph = passkeyHeldNow();", "      { const ph = passkeyHeldNow();", "src/server/browser-keeper.js")   /* r3702: the re-read now sits before the passkey hold's ask (still before the stop) */;
   ok(noReread !== ksrc, 'MUTANT (the re-read after the reap removed): the patch applies');
   if (noReread !== ksrc) {
@@ -308,7 +308,7 @@ console.log('— ⑧ F5: one registry write and one broadcast per PIECE of the w
     const dataDir = registry(60);
     let at = null;
     await sweep(K, dataDir, { stallMs: 0, onRemoved: (n, k) => { if (n === 10 && at === null) { k.shutdown(); at = { disk: onDisk(dataDir), memory: k._reg().profiles.filter((p) => p.ephemeral).length }; } } });
-    ok(at && at.memory === 50 && at.disk === at.memory, `K1: a stop (the keeper's shutdown) after 10 of 60 removals, inside one piece — the file holds what memory holds: ${at && at.disk} on disk, ${at && at.memory} in memory`, at);
+    ok(gateOf(at) && at.memory === 50 && at.disk === at.memory, `K1: a stop (the keeper's shutdown) after 10 of 60 removals, inside one piece — the file holds what memory holds: ${at && at.disk} on disk, ${at && at.memory} in memory`, at);
   }
   const noBatch = editAnchor(ksrc, '    if (sweepIds.has(id)) sweepDirty = true; else commit();', '    commit();', "src/server/browser-keeper.js");
   ok(noBatch !== ksrc, 'MUTANT (the batching dropped): the patch applies');
@@ -335,7 +335,7 @@ const unseen = async (Km, shape, waitMs = 1500) => {   // waitMs: how long a clo
 {
   for (const shape of ['no pid', 'no start time']) {
     const u = await unseen(K, shape);
-    ok(u.closes === 1 && u.ended && u.removed === 1, `a LIVE daemon whose record has ${shape === 'no pid' ? 'no pid' : 'its pid but no start time'}: the retire cannot see it gone, so it closes it by the CLI as before — ${u.closes} start, the daemon ${u.ended ? 'ended' : 'LEFT RUNNING'}, the record removed`, u);
+    ok(u.closes === 1 && gateOf(u.ended) && u.removed === 1, `a LIVE daemon whose record has ${shape === 'no pid' ? 'no pid' : 'its pid but no start time'}: the retire cannot see it gone, so it closes it by the CLI as before — ${u.closes} start, the daemon ${u.ended ? 'ended' : 'LEFT RUNNING'}, the record removed`, u);
   }
   const oldJudge = editAnchor(ksrc, '!stopping.has(profileId) && daemonSeenGone(rec0)) {', '!stopping.has(profileId) && daemonGone(rec0)) {', "src/server/browser-keeper.js");
   ok(oldJudge !== ksrc, 'MUTANT (an absent fact read as «gone», the old judgment): the patch applies');
@@ -368,9 +368,9 @@ const carriedRetire = async (Km, detachFirst) => {
 };
 {
   const d = await carriedRetire(K, false);
-  ok(d.answer && d.answer.kept === true && d.closes === 0 && d.running && d.kept && d.state === 'ready', `a DIRECT retire of a record its conversation still holds KEEPS it — the record and its browser (answer kept, ${d.closes} CLI close, the daemon ${d.running ? 'running' : 'ENDED'}, state ${d.state})`, d);
+  ok(gateOf(d.answer) && d.answer.kept === true && d.closes === 0 && gateOf(d.running) && gateOf(d.kept) && d.state === 'ready', `a DIRECT retire of a record its conversation still holds KEEPS it — the record and its browser (answer kept, ${d.closes} CLI close, the daemon ${d.running ? 'running' : 'ENDED'}, state ${d.state})`, d);
   const r = await carriedRetire(K, true);
-  ok(r.answer && r.answer.removed === true && r.closes === 1 && !r.running && !r.kept, `the product's road — a detach, then the retire (it joins the detach's own) — ENDS it: removed, ${r.closes} CLI close, the daemon ${r.running ? 'LEFT RUNNING' : 'ended'}`, r);
+  ok(gateOf(r.answer) && r.answer.removed === true && r.closes === 1 && !r.running && !r.kept, `the product's road — a detach, then the retire (it joins the detach's own) — ENDS it: removed, ${r.closes} CLI close, the daemon ${r.running ? 'LEFT RUNNING' : 'ended'}`, r);
 }
 
 console.log('— ④ L3: the lifecycle of a child record, as the code has it');
@@ -380,10 +380,10 @@ console.log('— ④ L3: the lifecycle of a child record, as the code has it');
   const k = K.create({ dataDir, homeDir: ROOT, env: () => kenv, liveKeys: () => live, install: false, log: { log() { }, warn() { }, error() { }, info() { } }, tickMs: 3600e3 });
   const kids = [k.newChild({ browserKey: PARENT }), k.newChild({ browserKey: PARENT })].map((c) => c.handle);
   let r = k.reconcile({ graceMs: 0 }); await r.retired;
-  ok(kids.every((h) => k._reg().children[h]), 'a sub-agent\'s child handle stays while its parent conversation is carried (newChild: «reaped with the parent»), however long ago it was minted', Object.keys(k._reg().children));
+  ok(verdictOf(kids.every((h) => k._reg().children[h])), 'a sub-agent\'s child handle stays while its parent conversation is carried (newChild: «reaped with the parent»), however long ago it was minted', Object.keys(k._reg().children));
   live = new Set();
   r = k.reconcile({ graceMs: 0 }); await r.retired;
-  ok(kids.every((h) => !k._reg().children[h]), '…and goes with the parent (reconcile §3.7: the same rule and grace as a lease)', Object.keys(k._reg().children));
+  ok(verdictOf(kids.every((h) => !k._reg().children[h])), '…and goes with the parent (reconcile §3.7: the same rule and grace as a lease)', Object.keys(k._reg().children));
 }
 
 console.log('— ⑪ B-346d law 2: a daemon gone BEFORE its idle timeout is never «idled out» — the words say what is known');
@@ -424,16 +424,16 @@ console.log('— ⑪ B-346d law 2: a daemon gone BEFORE its idle timeout is neve
   const Krel = ksrc.includes(EARLY) ? M.load('src/server/browser-keeper.js', editAnchor(ksrc, EARLY, '    const early = false; // the release: every gone daemon «idled out»', "src/server/browser-keeper.js"), 'law2-release') : null;
   const Knaive = ksrc.includes(BEFORE) ? M.load('src/server/browser-keeper.js', editAnchor(ksrc, BEFORE, '    const served = Math.max(Number(pe && pe.lastVerbAt) || 0, Number(rec.startedAt) || 0); // the newest verb (the asking one)', "src/server/browser-keeper.js"), 'law2-newest-verb') : null;
   const [r, rel, naive] = await Promise.all([law2(K), Krel ? law2(Krel) : null, Knaive ? law2(Knaive) : null]);
-  ok(r.every((x) => x.state === 'stopped' && x.by === 'idle'), 'every gone daemon is recorded stopped with stoppedBy «idle» — every behaviour keyed on it unchanged (the next verb starts it again, its kept tabs reopen)', r);
-  ok(r[0].early && r[0].early.withinMs === 65000 && r[0].early.idleMs === IDLE && /^the browser was found gone within 65 s of a command it served, before its idle timeout of 15 min — why is not known here; the next command starts it again$/.test(r[0].note) && r[0].rowEarly && r[0].rowEarly.withinMs === 65000,
+  ok(verdictOf(r.every((x) => x.state === 'stopped' && x.by === 'idle')), 'every gone daemon is recorded stopped with stoppedBy «idle» — every behaviour keyed on it unchanged (the next verb starts it again, its kept tabs reopen)', r);
+  ok(gateOf(r[0].early) && r[0].early.withinMs === 65000 && r[0].early.idleMs === IDLE && gateOf(/^the browser was found gone within 65 s of a command it served, before its idle timeout of 15 min — why is not known here; the next command starts it again$/.test(r[0].note)) && gateOf(r[0].rowEarly) && r[0].rowEarly.withinMs === 65000,
     'B-346d law 2: a daemon gone 69 s after its start against a 15-minute idle is «found gone within 65 s of a command it served, before its idle timeout» — a BOUND, never when it ended — never «idled out», the cause said as unknown; the Housekeeping row carries the fact', r[0]);
-  ok(!r[1].early && /^the browser idled out \(15 min without a command\)/.test(r[1].note) && !r[1].rowEarly, 'a daemon quiet past its idle timeout still idled out (the words as before)', r[1]);
-  ok(!r[2].early && /^the browser idled out/.test(r[2].note), 'takeover C3: the verb ASKING now (stamped 1 s ago, before the judge) never makes an idle-out read «found gone within 1 s» — the daemon is judged by the verb before it', r[2]);
-  if (rel) ok(/idled out/.test(rel[0].note) && !rel[0].early, 'CONTROL (the release: every gone daemon «idled out»): the row\'s own 69 s daemon reads «idled out» — RED', rel[0]);
-  if (naive) ok(naive[2].early && /found gone within 1 s of a command it served/.test(naive[2].note), 'CONTROL (judged by the newest verb, the asking one): a real idle-out reads «found gone within 1 s of a command it served» — RED', naive[2]);
+  ok(!r[1].early && gateOf(/^the browser idled out \(15 min without a command\)/.test(r[1].note)) && !r[1].rowEarly, 'a daemon quiet past its idle timeout still idled out (the words as before)', r[1]);
+  ok(!r[2].early && verdictOf(/^the browser idled out/.test(r[2].note)), 'takeover C3: the verb ASKING now (stamped 1 s ago, before the judge) never makes an idle-out read «found gone within 1 s» — the daemon is judged by the verb before it', r[2]);
+  if (rel) ok(gateOf(/idled out/.test(rel[0].note)) && !rel[0].early, 'CONTROL (the release: every gone daemon «idled out»): the row\'s own 69 s daemon reads «idled out» — RED', rel[0]);
+  if (naive) ok(gateOf(naive[2].early) && verdictOf(/found gone within 1 s of a command it served/.test(naive[2].note)), 'CONTROL (judged by the newest verb, the asking one): a real idle-out reads «found gone within 1 s of a command it served» — RED', naive[2]);
   // the kept store: 'ended' is its own word, reopened as an idle-out is (D2: an automatic stop)
-  ok(KB.STOP_WHYS.includes('ended') && KB.stopWhyOf('ended') === 'ended' && KB.restoreKindFor('ended') === 'auto' && KB.restoreKindFor('ended') === KB.restoreKindFor('idle')
-    && /found gone before its idle timeout \(why is not known here\)/.test(KB.stopWhyWords('ended')) && KB.stopWhyWords('idle') === 'it idled out',
+  ok(gateOf(KB.STOP_WHYS.includes('ended')) && KB.stopWhyOf('ended') === 'ended' && KB.restoreKindFor('ended') === 'auto' && KB.restoreKindFor('ended') === KB.restoreKindFor('idle')
+    && gateOf(/found gone before its idle timeout \(why is not known here\)/.test(KB.stopWhyWords('ended'))) && KB.stopWhyWords('idle') === 'it idled out',
     'the kept browser\'s reason: «ended» (found gone before its idle timeout, why unknown) — its tabs reopen by themselves as an idle-out\'s do; the agent\'s words say it', { why: KB.stopWhyOf('ended'), kind: KB.restoreKindFor('ended'), words: KB.stopWhyWords('ended') });
 }
 
@@ -498,22 +498,22 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «
   };
   const iso = (ms) => new Date(ms).toISOString();
   const all = await recordOf(K);
-  ok(/gone record bp-/.test(all.line) && all.line.includes(`last seen alive ${iso(CLK0 + 10e3)} (12 s before it was found gone)`) && all.line.includes(`found gone ${iso(CLK0 + 22e3)} by the tick`),
+  ok(gateOf(/gone record bp-/.test(all.line)) && gateOf(all.line.includes(`last seen alive ${iso(CLK0 + 10e3)} (12 s before it was found gone)`)) && verdictOf(all.line.includes(`found gone ${iso(CLK0 + 22e3)} by the tick`)),
     'B-346d recorder (a): the record says the last time a tick saw its daemon ALIVE beside the time it was found gone — a bound on both sides (12 s)', all.line);
-  ok(all.line.includes(`its Chrome: alive (pid ${all.chrome}) when its daemon was found gone (the reap decides)`), 'B-346d recorder (b): its Chrome OUTLIVED the daemon — said, read before the reap (which decides by its own, stricter rule)', all.line);
-  ok(all.line.includes(`the hub's own signals: SIGTERM to its daemon (pid ${all.daemon}) by the keeper: its stop at ${iso(CLK0 - 5e3)}`), 'B-346d recorder (c): the hub\'s own signal to that daemon during its run — what was sent, by which site, when', all.line);
-  ok(all.line.includes(`the hub unit's OOM kills: 3 (read ${iso(CLK0)}) → 4 (read ${iso(CLK0 + 10e3)}): ROSE by 1 during its run`), 'B-346d recorder (d): the first counter value read during the run and the last one read, each with its time — a rise said', all.line);
+  ok(verdictOf(all.line.includes(`its Chrome: alive (pid ${all.chrome}) when its daemon was found gone (the reap decides)`)), 'B-346d recorder (b): its Chrome OUTLIVED the daemon — said, read before the reap (which decides by its own, stricter rule)', all.line);
+  ok(verdictOf(all.line.includes(`the hub's own signals: SIGTERM to its daemon (pid ${all.daemon}) by the keeper: its stop at ${iso(CLK0 - 5e3)}`)), 'B-346d recorder (c): the hub\'s own signal to that daemon during its run — what was sent, by which site, when', all.line);
+  ok(verdictOf(all.line.includes(`the hub unit's OOM kills: 3 (read ${iso(CLK0)}) → 4 (read ${iso(CLK0 + 10e3)}): ROSE by 1 during its run`)), 'B-346d recorder (d): the first counter value read during the run and the last one read, each with its time — a rise said', all.line);
   ok(!/https?:|:\/\/|\bwww\./.test(all.line) && !/title/i.test(all.line), 'B-346d recorder: names and numbers only — no page address, no site name, no title', all.line);
   // r1311 (2): THE LINE IS WRITTEN WHEN ITS FACTS ARE READ — before the reap's own line; the reap's own signal to its Chrome is not one of the run's
   const iGone = all.lines.findIndex((l) => l.includes('gone record')), iReap = all.lines.findIndex((l) => l.includes('ended its own orphaned browser pid'));
-  ok(iGone >= 0 && iReap > iGone && all.chromeEnded && !all.line.includes('its orphaned Chrome'), 'B-346d recorder (r1311 (2)): the record is written BEFORE the reap\'s own line, and the reap\'s own signal to its Chrome is never among the run\'s signals; the Chrome is still ended', { iGone, iReap, chromeEnded: all.chromeEnded });
+  ok(iGone >= 0 && iReap > iGone && gateOf(all.chromeEnded) && !all.line.includes('its orphaned Chrome'), 'B-346d recorder (r1311 (2)): the record is written BEFORE the reap\'s own line, and the reap\'s own signal to its Chrome is never among the run\'s signals; the Chrome is still ended', { iGone, iReap, chromeEnded: all.chromeEnded });
   const [gone, none, other, early] = await Promise.all([recordOf(K, { chromeCase: 'gone', signal: 'none', oomEnd: 3 }), recordOf(K, { chromeCase: 'none', signal: 'before' }), recordOf(K, { signal: 'other' }), recordOf(K, { tickAlive: false, signal: 'none' })]);
-  ok(gone.line.includes(`its Chrome: already gone (pid ${gone.chrome})`) && none.line.includes('its Chrome: none recorded for this run'), 'B-346d recorder (b): every case said — a Chrome already gone, none recorded for the run', { gone: gone.line, none: none.line });
-  ok(gone.line.includes('the hub\'s own signals: none (the ledger holds this hub process\'s notes since ') && none.line.includes('the hub\'s own signals: none (') && none.line.includes(`the newest ${SLm.LEDGER_MAX} pids)`),
+  ok(gateOf(gone.line.includes(`its Chrome: already gone (pid ${gone.chrome})`)) && verdictOf(none.line.includes('its Chrome: none recorded for this run')), 'B-346d recorder (b): every case said — a Chrome already gone, none recorded for the run', { gone: gone.line, none: none.line });
+  ok(gateOf(gone.line.includes('the hub\'s own signals: none (the ledger holds this hub process\'s notes since ')) && gateOf(none.line.includes('the hub\'s own signals: none (')) && verdictOf(none.line.includes(`the newest ${SLm.LEDGER_MAX} pids)`)),
     'B-346d recorder (c): no signal ⇒ «none», saying since when the ledger holds notes; a row noted BEFORE the run (a reused pid) is never read as this run\'s', { gone: gone.line, none: none.line });
-  ok(other.line.includes(`SIGTERM to pid ${other.daemon} (another process by then, not its daemon)`), 'B-346d recorder (r1311 (4)): a row whose process start is not this run\'s daemon is said as ANOTHER PROCESS — never as a signal to it', other.line);
-  ok(gone.line.includes('3 (read ') && gone.line.includes(': no change') && early.line.includes('last seen alive never by a tick') && /OOM kills: not read/.test(early.line), 'B-346d recorder (a)+(d): an unchanged counter says «no change»; a daemon gone before any tick saw it says «never by a tick», and a counter value that never came back «not read»', { gone: gone.line, early: early.line });
-  ok(!all.runs.includes(all.line.match(/gone record (bp-[0-9a-f]+)/)?.[1]) && Array.isArray(all.runs), 'B-346d recorder (r1311 (3)): a run found gone is forgotten (the runs no longer live are forgotten at every tick: one entry a conversation never lives for the hub\'s life)', all.runs);
+  ok(verdictOf(other.line.includes(`SIGTERM to pid ${other.daemon} (another process by then, not its daemon)`)), 'B-346d recorder (r1311 (4)): a row whose process start is not this run\'s daemon is said as ANOTHER PROCESS — never as a signal to it', other.line);
+  ok(gateOf(gone.line.includes('3 (read ')) && gateOf(gone.line.includes(': no change')) && gateOf(early.line.includes('last seen alive never by a tick')) && verdictOf(/OOM kills: not read/.test(early.line)), 'B-346d recorder (a)+(d): an unchanged counter says «no change»; a daemon gone before any tick saw it says «never by a tick», and a counter value that never came back «not read»', { gone: gone.line, early: early.line });
+  ok(!all.runs.includes(all.line.match(/gone record (bp-[0-9a-f]+)/)?.[1]) && verdictOf(Array.isArray(all.runs)), 'B-346d recorder (r1311 (3)): a run found gone is forgotten (the runs no longer live are forgotten at every tick: one entry a conversation never lives for the hub\'s life)', all.runs);
   ok(GRm.memoryEventsPathFrom('0::/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service\n') === '/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service/memory.events' && GRm.memoryEventsPathFrom('12:cpu:/x\n') === null && GRm.oomKillsFrom('oom 1\noom_kill 7\n') === 7 && GRm.oomKillsFrom('oom 1\n') === null,
     'B-346d recorder (d): the hub unit\'s memory.events path read off /proc/self/cgroup (cgroup v2 only; none ⇒ unreadable), oom_kill parsed');
   // THE LEDGER'S SITES — each notes only where the kill SUCCEEDED, with the process's start (r1311 (4))
@@ -527,7 +527,7 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «
   const W_NOTE = "    try { require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig); } catch { /* the ledger is a record, never the kill's answer */ }\n";
   const wBetween = n(wsrc, W_KILL) === 1 && n(wsrc, W_NOTE) === 1 ? wsrc.slice(wsrc.indexOf(W_KILL) + W_KILL.length, wsrc.indexOf(W_NOTE)) : null;
   SITES.push([wsrc, W_KILL], [wsrc, W_NOTE]);
-  ok(SITES.every(([t, x]) => n(t, x) === 1) && wBetween != null && /^(?:[ \t]*\/\/[^\n]*\n)*$/.test(wBetween), `B-346d recorder (c): the hub's 5 signal sites each note the ONE ledger after their kill succeeded (the keeper's inside its try; the panel's after the kill's try, whose catch throws, in its OWN fence — r1455): a failed kill notes nothing`, { sites: SITES.map(([t, x]) => [x.slice(0, 50), n(t, x)]), between: wBetween });
+  ok(gateOf(SITES.every(([t, x]) => n(t, x) === 1)) && wBetween != null && verdictOf(/^(?:[ \t]*\/\/[^\n]*\n)*$/.test(wBetween)), `B-346d recorder (c): the hub's 5 signal sites each note the ONE ledger after their kill succeeded (the keeper's inside its try; the panel's after the kill's try, whose catch throws, in its OWN fence — r1455): a failed kill notes nothing`, { sites: SITES.map(([t, x]) => [x.slice(0, 50), n(t, x)]), between: wBetween });
   // r1455: A NOTE THAT FAILS NEVER SAYS A KILL THAT LANDED FAILED — a real child (sleep) killed through the panel's signalProc
   // with the ledger's noteSignal throwing ⇒ the answer is ok and the child ended by SIGTERM. CONTROL: 32554283d's line (the
   // note inside the kill's try, whose catch throws again), rebuilt by anchored() ⇒ the person is told the kill failed while
@@ -542,11 +542,11 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «
   };
   const WIRING = 'src/server/sysinfo-wiring.js';
   const ownFence = await panelKill(require(path.join(REPO, WIRING)));
-  ok(ownFence.r && ownFence.r.ok === true && !ownFence.err && ownFence.sig === 'SIGTERM', 'B-346d recorder (r1455): the panel\'s kill that LANDED answers ok while the ledger\'s note throws (the note in its own fence)', ownFence);
+  ok(gateOf(ownFence.r) && ownFence.r.ok === true && !ownFence.err && ownFence.sig === 'SIGTERM', 'B-346d recorder (r1455): the panel\'s kill that LANDED answers ok while the ledger\'s note throws (the note in its own fence)', ownFence);
   const inTry = await panelKill(M.load(WIRING, anchored(wsrc, W_KILL + wsrc.slice(wsrc.indexOf(W_KILL) + W_KILL.length, wsrc.indexOf(W_NOTE)) + W_NOTE,
     "    try { process.kill(pid, 'SIG' + sig); require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig); } catch (e) {\n      if (e.code === 'ESRCH') throw new Error('no such process (already gone)');\n      if (e.code === 'EPERM') throw new Error(\"permission denied (another user's process)\");\n      throw e;\n    }\n", // stale-pins: kept (r1455: 32554283d's line, the control's rebuilt text — gone from the product on purpose)
     'r1455 control: the note inside the kill\'s try'), 'note-in-kill-try'));
-  ok(!!inTry.err && /ledger is down/.test(inTry.err) && inTry.sig === 'SIGTERM', 'CONTROL (r1455): 32554283d\'s line — the note inside the kill\'s try, whose catch throws again — tells the person a kill that LANDED failed — RED', inTry);
+  ok(!!inTry.err && gateOf(/ledger is down/.test(inTry.err)) && inTry.sig === 'SIGTERM', 'CONTROL (r1455): 32554283d\'s line — the note inside the kill\'s try, whose catch throws again — tells the person a kill that LANDED failed — RED', inTry);
   ok(n(ksrc, 'function forgetEndedRuns() { for (const pid of [...aliveRuns.keys()]) { const r0 = reg.browsers[pid]; if (!r0 || !B.isLiveBrowser(r0)) aliveRuns.delete(pid); } }') === 1 && n(ksrc, '    refreshOom(); forgetEndedRuns();') === 1,
     'B-346d recorder (r1311 (3)): every tick forgets the runs whose record is no longer live — a stop, an idle end, a removal (the gone path forgets its own at once: judged above)');
   // r1311 THE MUST — THE RECORDER NEVER GATES THE TICK: a counter whose read never answers (a FIFO nobody writes: a held file
@@ -588,14 +588,14 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «
     recordOf(M.load('src/server/browser-keeper.js', afterReap, 'recorder-after-reap')),
   ]);
   for (const [n, x] of [['recorder (a) all', all], ['gone', gone], ['none', none], ['other', other], ['early', early], ['CONTROL (a)', ca], ['CONTROL (b)', cb], ['CONTROL (c)', cc], ['fenced', fenced], ['CONTROL (2) late', late]]) if (x && x.expired && x.expired.length) ok(false, `HARNESS (⑫ ${n}): ${x.expired.join(', ')} did not come within its bound — its leg is not judged on it`, x.expired);
-  ok(ca.line.includes('last seen alive never by a tick'), 'CONTROL (a): a keeper whose tick does not stamp «seen alive» says «never by a tick» of a daemon a tick saw — RED', ca.line);
-  ok(cb.line.includes('its Chrome: none recorded for this run') && !cb.line.includes('alive (pid'), 'CONTROL (b): a record that never reads the Chrome says «none recorded» of a Chrome that outlived its daemon — RED', cb.line);
-  ok(cc.line.includes('the hub\'s own signals: none ('), 'CONTROL (c): a record that never reads the ledger says «none» of a daemon the hub signalled — RED', cc.line);
-  ok(fenced.state === 'stopped' && fenced.chromeEnded === true && !fenced.threw && fenced.lines.some((l) => l.includes('its gone record could not be written (planted: the recorder throws)')),
+  ok(verdictOf(ca.line.includes('last seen alive never by a tick')), 'CONTROL (a): a keeper whose tick does not stamp «seen alive» says «never by a tick» of a daemon a tick saw — RED', ca.line);
+  ok(gateOf(cb.line.includes('its Chrome: none recorded for this run')) && !cb.line.includes('alive (pid'), 'CONTROL (b): a record that never reads the Chrome says «none recorded» of a Chrome that outlived its daemon — RED', cb.line);
+  ok(verdictOf(cc.line.includes('the hub\'s own signals: none (')), 'CONTROL (c): a record that never reads the ledger says «none» of a daemon the hub signalled — RED', cc.line);
+  ok(fenced.state === 'stopped' && fenced.chromeEnded === true && !fenced.threw && verdictOf(fenced.lines.some((l) => l.includes('its gone record could not be written (planted: the recorder throws)'))),
     'B-346d recorder (r1311 (1)): a recorder that THROWS is fenced — the daemon is still marked gone (stopped), its Chrome still ended, the tick goes on, the journal says why no record was written', { state: fenced.state, chromeEnded: fenced.chromeEnded, threw: fenced.threw });
   ok(!!bare.threw || bare.chromeEnded === false, 'CONTROL (1): the same throw with the fence taken away stops the tick before the reap — the Chrome is NOT ended — RED', { threw: bare.threw, chromeEnded: bare.chromeEnded });
-  ok(late.line.includes('by the keeper: its orphaned Chrome') || late.lines.findIndex((l) => l.includes('gone record')) > late.lines.findIndex((l) => l.includes('ended its own orphaned browser pid')), 'CONTROL (2): facts read AFTER the reap carry the reap\'s own signal to its Chrome as the run\'s, written after the reap\'s line — RED', late.line);
+  ok(verdictOf(late.line.includes('by the keeper: its orphaned Chrome')) || late.lines.findIndex((l) => l.includes('gone record')) > late.lines.findIndex((l) => l.includes('ended its own orphaned browser pid')), 'CONTROL (2): facts read AFTER the reap carry the reap\'s own signal to its Chrome as the run\'s, written after the reap\'s line — RED', late.line);
   for (const c of kids) await ended(c);
 }
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

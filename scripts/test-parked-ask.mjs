@@ -24,7 +24,7 @@ import { scratchDir } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 
 // ── the measured shape (buffer-only: the assistant tool_use rides the ring as it did on the pod) ──
 const TU = 'toolu_01PARKEDxDocusignBash', RID = 'b3f1e2a4-6c5d-4e7f-8a9b-0c1d2e3f4a5b', HID = '7d3c1a52-91b4-4f0e-a2c8-5b0e6d4f9a13';
@@ -140,7 +140,7 @@ console.log('— ① PURE: the stall verdict');
 const P = pureFacts(REPO);
 for (const [n, got, want] of P.table) ok(`${n} ⇒ ${want}`, got === want, got);
 ok('the bound is 3 forced re-attaches, at most one per 5 min, after 120 s of true silence', P.TS.STALL_MAX_REATTACH === 3 && P.TS.STALL_COOLDOWN_MS === 300000 && P.TS.STALL_SILENCE_MS === 120000);
-ok('waitingOnUser: requires_action, or any open ask; running/idle/null with none is not', P.TS.waitingOnUser({ turnState: 'requires_action' }) && P.TS.waitingOnUser({ pendingAsks: [{}] }) && !P.TS.waitingOnUser({ turnState: 'running' }) && !P.TS.waitingOnUser({}));
+ok('waitingOnUser: requires_action, or any open ask; running/idle/null with none is not', gateOf(P.TS.waitingOnUser({ turnState: 'requires_action' })) && gateOf(P.TS.waitingOnUser({ pendingAsks: [{}] })) && !P.TS.waitingOnUser({ turnState: 'running' }) && !P.TS.waitingOnUser({}));
 
 console.log('— ② the ring: a restored session\'s turn state');
 {
@@ -153,7 +153,7 @@ console.log('— ② the ring: a restored session\'s turn state');
   const brSrc = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
   // B-ba09: the flag rides the same spread (the ring's word means it; the sidecar only without a word) — no `_isStreaming:` key of its own beside it
   const brObj = brSrc.slice(brSrc.lastIndexOf('sockName: sockFile,', brSrc.indexOf('...restoredStreaming(')), brSrc.indexOf('_goalTokensUsed: wrapperGoalTokens,'));
-  ok('boot-restore spreads the ring\'s turn state AND its streaming flag onto the restored session (the sidecar flag only without a word)', /\.\.\.restoredStreaming\(savedBuffer, wrapperStreaming\),/.test(brObj) && !/_isStreaming:/.test(brObj), brObj.length);
+  ok('boot-restore spreads the ring\'s turn state AND its streaming flag onto the restored session (the sidecar flag only without a word)', gateOf(/\.\.\.restoredStreaming\(savedBuffer, wrapperStreaming\),/.test(brObj)) && !/_isStreaming:/.test(brObj), brObj.length);
 }
 
 console.log('— ③ the attach rebuild of a parked ask (the measured .buf shape)');
@@ -173,7 +173,7 @@ const C = await clientFacts(REPO);
 ok('a turn parked on an ask (requires_action) is never re-attached and nothing is said', C.parked.reattaches === 0 && C.parked.notes.length === 0, C.parked);
 ok('…nor when only the rebuilt ask says so (a restored session that never heard a turn state)', C.parkedRestoredBase.reattaches === 0, C.parkedRestoredBase);
 ok('a truly silent running turn: exactly 3 forced re-attaches in 8 hours (was 96)', C.silent.reattaches === 3, C.silent.reattaches);
-ok('…then ONE dim note, said once', C.silent.notes.length === 1 && /^no output for \d+ min — the agent may be waiting on something not shown; Stop or check the session$/.test(C.silent.notes[0]), C.silent.notes);
+ok('…then ONE dim note, said once', C.silent.notes.length === 1 && verdictOf(/^no output for \d+ min — the agent may be waiting on something not shown; Stop or check the session$/.test(C.silent.notes[0])), C.silent.notes);
 ok('the typing line of a parked turn reads the chip\'s words, and gives its label back when the state moves on',
   JSON.stringify(C.shown) === JSON.stringify(['thinking...', 'waiting for you', 'thinking...', 'waiting for you', 'thinking...']), C.shown);
 
@@ -208,4 +208,4 @@ console.log('— ⑤ patched copies: each defect turns its leg RED');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

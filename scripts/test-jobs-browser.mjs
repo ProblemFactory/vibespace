@@ -22,7 +22,7 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
 const W = require(path.join(REPO, 'src/browser-windows.js'));   // B-7a99: the rung-2 stand-in's RUNG2_CREATE (its line came from test-browser-windows with 066b90274, its import did not); no leg here asks rung 2 today (measured: 0 calls)
 
 let pass = 0, fail = 0;
-function ok(cond, name, detail) {
+function ok(cond, name, detail) { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 }
@@ -63,7 +63,7 @@ function principalTable(M) {
   });
 }
 console.log('— ① the principal table');
-for (const r of principalTable(J)) ok(r.good, `${r.name} → ${r.want}`, r.v);
+for (const r of principalTable(J)) ok(verdictOf(r.good), `${r.name} → ${r.want}`, r.v);
 { const L = (j) => String(j.name || j.id);   // the engine's ONE name accessor's contract (lane job-notify-user r5: src/jobs.js labelOf)
   ok(J.jobLabelOf(job(), L) === 'job daily reconcile' && J.jobLabelOf(job({ name: '' }), L) === 'job jb-11112222' && J.jobLabelOf(job({ name: 'x'.repeat(80) }), L).length === 44, 'jobLabelOf: "job <name>" (≤ 40 chars of it) through the accessor the caller hands, the id when unnamed');
   ok(J.jobLabelOf(job()) === 'job jb-11112222', 'jobLabelOf: no accessor ⇒ the job\'s ID — never the record\'s name (fail closed, r5)'); }
@@ -83,7 +83,7 @@ function routeTable(M) {
   for (const r of ['', 'teleport', 'profiles-all']) { const v = M.jobRouteVerdict(r); rows.push({ name: `FAIL CLOSED: an unknown route "${r}" is refused`, good: v.ok === false && v.code === 'job_token' }); }
   return rows;
 }
-for (const r of routeTable(J)) ok(r.good, r.name);
+for (const r of routeTable(J)) ok(verdictOf(r.good), r.name);
 
 console.log('— ① the profile a job browses in = the owner\'s pin / attachment');
 const set0 = (o = {}) => ({ attachments: [], pin: null, children: [], handles: [], defaultId: null, ...o });
@@ -100,7 +100,7 @@ function resolveTable(M) {
   ];
   return rows.map(([name, v, want]) => { const r = M.jobResolveVerdict(v); return { name, good: want.startsWith('p-') ? r.ok === true && r.profileId === want : r.ok === false && r.code === want, r }; });
 }
-for (const r of resolveTable(J)) ok(r.good, r.name, r.r);
+for (const r of resolveTable(J)) ok(verdictOf(r.good), r.name, r.r);
 
 console.log('— ① the handle and the release rule');
 const children = {
@@ -123,7 +123,7 @@ function handleTable(M) {
     { name: '…a throwing engine carries every handle (r3571: «could not be told» is never «not running»)', good: M.jobChildrenToRelease(children, () => { throw new Error('down'); }).length === 0 && M.carriedJobHandles(children, () => { throw new Error('down'); }).size === 4 },
   ];
 }
-for (const r of handleTable(J)) ok(r.good, r.name);
+for (const r of handleTable(J)) ok(verdictOf(r.good), r.name);
 
 // ── ② admission = the owner's ──
 console.log('— ② admission through the REAL mayAttach: a job\'s handle is judged as its owner conversation');
@@ -139,12 +139,12 @@ const ADMIT = [
 for (const [name, p, taskIds, want] of ADMIT) {
   const owner = B.mayAttach(p, { browserKey: OWNER, taskIds });
   const viaJob = B.mayAttach(p, { browserKey: H, taskIds });
-  ok(owner.ok === want && viaJob.ok === want && (want || (viaJob.code === 'not_owner' && owner.code === 'not_owner')), `${name}: owner ${owner.ok ? 'admitted' : owner.code}, job ${viaJob.ok ? 'admitted' : viaJob.code}`, { owner, viaJob });
+  ok(owner.ok === want && viaJob.ok === want && (verdictOf(want) || (viaJob.code === 'not_owner' && owner.code === 'not_owner')), `${name}: owner ${owner.ok ? 'admitted' : owner.code}, job ${viaJob.ok ? 'admitted' : viaJob.code}`, { owner, viaJob });
 }
 {
   const p = prof({ kind: 'only', who: [{ kind: 'session', id: OWNER }] });
   const d = B.decideAttach({ profile: p, leases: [{ profileId: p.id, browserKey: OWNER, sessionId: 's1' }], browserKey: H, sessionId: null, now: 10, taskIds: [] });
-  ok(d.ok && d.created && d.lease.browserKey === H, 'decideAttach: the job\'s handle gets its OWN lease beside the owner\'s (one window per holder)', d);
+  ok(gateOf(d.ok) && gateOf(d.created) && d.lease.browserKey === H, 'decideAttach: the job\'s handle gets its OWN lease beside the owner\'s (one window per holder)', d);
 }
 
 
@@ -284,55 +284,55 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 25)); } return !!(await fn()); };
   // accept-fixes-jobs F5 (the acceptance of 2.369.202): BEFORE its first page verb, a job's status names the profile that verb lands on
   { const rs = await fetch(base + '/api/agent/browser/status', { headers: { Authorization: 'Bearer jbt_aaaa' } }); const j = await rs.json();
-    ok(rs.status === 200 && j.job && j.job.lands && j.job.lands.profileId === pBank.id && j.job.pin && j.job.pin.profileId === pBank.id && j.job.lease === null && j.job.label === 'job daily reconcile', 'F5: a job\'s status BEFORE any page verb names the profile its next verb lands on (Bank — the owner\'s pin), the owner\'s pin and "no window yet" — it answered its bare handle\'s empty set ("no profile attached / pin: none")', j.job || j); }
+    ok(rs.status === 200 && gateOf(j.job) && gateOf(j.job.lands) && j.job.lands.profileId === pBank.id && gateOf(j.job.pin) && j.job.pin.profileId === pBank.id && j.job.lease === null && j.job.label === 'job daily reconcile', 'F5: a job\'s status BEFORE any page verb names the profile its next verb lands on (Bank — the owner\'s pin), the owner\'s pin and "no window yet" — it answered its bare handle\'s empty set ("no profile attached / pin: none")', j.job || j); }
   const r1 = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['open', 'https://bank.test'] });
   const H = handleOf('jb-0000aaaa');
-  ok(r1.status === 200 && r1.j && r1.j.ok && r1.j.job === true && r1.j.kind === 'attachment', 'a jbt_ resolve is ADMITTED (200, kind attachment, job:true) — it was 401 "missing session token" before', r1);
-  ok(B.isChildKey(H) && B.parentKeyOf(H) === KA && k._reg().children[H].job === 'jb-0000aaaa', `the job got its OWN handle under the owner's key (${H}, tagged job)`, k._reg().children);
+  ok(r1.status === 200 && gateOf(r1.j) && gateOf(r1.j.ok) && r1.j.job === true && r1.j.kind === 'attachment', 'a jbt_ resolve is ADMITTED (200, kind attachment, job:true) — it was 401 "missing session token" before', r1);
+  ok(gateOf(B.isChildKey(H)) && B.parentKeyOf(H) === KA && k._reg().children[H].job === 'jb-0000aaaa', `the job got its OWN handle under the owner's key (${H}, tagged job)`, k._reg().children);
   ok(JSON.stringify(leasesOf(H)) === JSON.stringify([pBank.id]), 'its own lease is in the OWNER\'s pinned profile (Bank) — the same logins', leasesOf(H));
-  ok(k._reg().pins[KA] && k._reg().pins[KA].profileId === pBank.id && !k._reg().pins[H], 'the owner\'s pin is untouched and the job pinned nothing');
+  ok(gateOf(k._reg().pins[KA]) && k._reg().pins[KA].profileId === pBank.id && !k._reg().pins[H], 'the owner\'s pin is untouched and the job pinned nothing');
   const lw = (bk) => { const l = B.findLease(k._reg().leases, pBank.id, bk); return l ? l.windowId : undefined; };
-  { const rOwner = await call('/api/agent/browser/resolve', 'vsst_owner', { argv: ['open', 'https://bank.test/home'] }); ok(rOwner.status === 200 && leasesOf(KA).includes(pBank.id), 'the owner conversation still resolves to Bank, its own lease beside the job\'s', rOwner); }
+  { const rOwner = await call('/api/agent/browser/resolve', 'vsst_owner', { argv: ['open', 'https://bank.test/home'] }); ok(rOwner.status === 200 && verdictOf(leasesOf(KA).includes(pBank.id)), 'the owner conversation still resolves to Bank, its own lease beside the job\'s', rOwner); }
   ok(lw(H) !== undefined && lw(KA) !== undefined && String(lw(H)) !== String(lw(KA)), `ITS OWN WINDOW: the job's lease and the owner's hold different windows (${lw(H)} vs ${lw(KA)})`);
   const winKA = lw(KA);
   { const out = await cliRun(['status'], { VIBESPACE_JOB_TOKEN: 'jbt_aaaa' });
-    ok(/this is Background Work job daily reconcile \(jb-0000aaaa\)/.test(out) && /its page verbs land on Bank \(/.test(out) && /its window: ready/.test(out) && /the conversation's pin: Bank/.test(out) && !/no profile attached|pin: none/.test(out), 'F5: the REAL CLI\'s `status` inside the job prints the job\'s binding — lands on Bank, its window live, the conversation\'s pin — never "no profile attached / pin: none"', out); }
+    ok(gateOf(/this is Background Work job daily reconcile \(jb-0000aaaa\)/.test(out)) && gateOf(/its page verbs land on Bank \(/.test(out)) && gateOf(/its window: ready/.test(out)) && gateOf(/the conversation's pin: Bank/.test(out)) && !/no profile attached|pin: none/.test(out), 'F5: the REAL CLI\'s `status` inside the job prints the job\'s binding — lands on Bank, its window live, the conversation\'s pin — never "no profile attached / pin: none"', out); }
   // accept-fixes-jobs F10: the live view's browsers row names the job's window by the JOB's name (the route's own answer → the strip's list)
   { const S = require('../src/browser-stream.js');
     const rs = await fetch(base + '/api/browser/session/w-owner'); const j = await rs.json();
     const row = rs.status === 200 ? S.browserListFor(j).find((x) => x.ref === H) : null;
-    ok(j.jobNames && j.jobNames[H] === 'daily reconcile' && row && row.helper && row.helper.job === true && row.helper.name === 'daily reconcile', 'F10: the browsers row of the job\'s window is the JOB by its name ("daily reconcile", job) — it read a bare "Helper 1" (the attachment set dropped the job tag, so the route named nothing)', { status: rs.status, jobNames: j.jobNames, helper: row && row.helper }); }
+    ok(gateOf(j.jobNames) && j.jobNames[H] === 'daily reconcile' && gateOf(row) && gateOf(row.helper) && row.helper.job === true && row.helper.name === 'daily reconcile', 'F10: the browsers row of the job\'s window is the JOB by its name ("daily reconcile", job) — it read a bare "Helper 1" (the attachment set dropped the job tag, so the route named nothing)', { status: rs.status, jobNames: j.jobNames, helper: row && row.helper }); }
   // verify r1 (MED): a PENDING FORK carrying the owner's conversation id, first in the live set, with its own browser key and
   // no pin — before the fix the job was judged as the FORK (its handle minted under bk-f0f0f0f0, refused job_no_profile)
   { const fork = { claudeSessionId: 'conv-userW-1', _browserKey: 'bk-f0f0f0f0', _forkRequested: true, _forkSourceId: 'conv-userW-1', agentToken: 'vsst_fork', name: 'fork-pending' };
     const keep = [...sessions]; sessions.clear(); sessions.set('w-fork', fork); for (const [kk, v] of keep) sessions.set(kk, v); live.add('bk-f0f0f0f0');
     const rp = await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['open', 'https://bank.test/p'] });
     const hp = Object.entries(k._reg().children).find(([, c]) => c && c.job === 'jb-0000bbbb');
-    ok(rp.status === 200 && hp && hp[1].parent === KA && !Object.values(k._reg().children).some((c) => c && c.parent === 'bk-f0f0f0f0'), 'verify r1: a PENDING FORK carrying the owner\'s id is NOT the owner — the job is judged as the owner (its handle under the owner\'s key, the owner\'s pin), nothing minted under the fork\'s key', { status: rp.status, code: rp.j && rp.j.code, parent: hp && hp[1].parent });
+    ok(rp.status === 200 && gateOf(hp) && hp[1].parent === KA && !Object.values(k._reg().children).some((c) => c && c.parent === 'bk-f0f0f0f0'), 'verify r1: a PENDING FORK carrying the owner\'s id is NOT the owner — the job is judged as the owner (its handle under the owner\'s key, the owner\'s pin), nothing minted under the fork\'s key', { status: rp.status, code: rp.j && rp.j.code, parent: hp && hp[1].parent });
     k.releaseJob('jb-0000bbbb', 'leg cleanup'); sessions.delete('w-fork'); live.delete('bk-f0f0f0f0'); }
   const again = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] });
   ok(again.status === 200 && handleOf('jb-0000aaaa') === H && Object.values(k._reg().children).filter((c) => c.job === 'jb-0000aaaa').length === 1, 'a second verb reuses the job\'s handle (one handle per job)');
-  for (const route of ['pin', 'use', 'new-child', 'detach', 'resume']) { const r = await call('/api/agent/browser/' + route, 'jbt_aaaa', { profile: pOther.id }); ok(r.status === 403 && r.j && r.j.code === 'job_token', `a job is refused /${route} by name (403 job_token)`, r); }
+  for (const route of ['pin', 'use', 'new-child', 'detach', 'resume']) { const r = await call('/api/agent/browser/' + route, 'jbt_aaaa', { profile: pOther.id }); ok(r.status === 403 && gateOf(r.j) && r.j.code === 'job_token', `a job is refused /${route} by name (403 job_token)`, r); }
   { const st = await fetch(base + '/api/agent/browser/status', { headers: { Authorization: 'Bearer jbt_aaaa' } }); const j = await st.json(); ok(st.status === 200 && j.shared === false, 'a job may read its status', j); }
   // not_owner: the user narrows Bank to ANOTHER conversation — the owner is refused, and so is its job
   k._reg().profiles.find((x) => x.id === pBank.id).grantUse = { to: [{ kind: 'conversation', key: KB, browserKey: KB }], except: [] };   // lane grants-unify: the keeper's mirror of the store's row, narrowed
   const r2 = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] });
-  ok(r2.status === 403 && r2.j && r2.j.code === 'not_owner' && /Your tab in its browser was closed/.test(r2.j.error) && !leasesOf(H).length, 'the owner conversation may no longer use Bank ⇒ its JOB is refused not_owner (the same name, the same 403) and its tab closed with the refusal', r2);
+  ok(r2.status === 403 && gateOf(r2.j) && r2.j.code === 'not_owner' && gateOf(/Your tab in its browser was closed/.test(r2.j.error)) && !leasesOf(H).length, 'the owner conversation may no longer use Bank ⇒ its JOB is refused not_owner (the same name, the same 403) and its tab closed with the refusal', r2);
   k._reg().profiles.find((x) => x.id === pBank.id).grantUse = { to: [{ kind: 'everyone' }], except: [] };
   // a job not running is refused; a job with no profile pinned is refused by name
   jobs.get('jb-0000bbbb').state = 'done';
-  { const r = await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] }); ok(r.status === 409 && r.j && r.j.code === 'job_not_running', 'a finished job\'s token is refused job_not_running', r); }
+  { const r = await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] }); ok(r.status === 409 && gateOf(r.j) && r.j.code === 'job_not_running', 'a finished job\'s token is refused job_not_running', r); }
   jobs.get('jb-0000bbbb').state = 'up';
   k.setPin(KA, null, { origin: 'chosen', by: 'user' });
-  { const r = await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] }); ok(r.status === 409 && r.j && r.j.code === 'job_no_profile', 'no pin and no attachment of Bank in the owner\'s set (the owner\'s own lease aside) ⇒ the job is refused job_no_profile — or resolves the owner\'s default attachment', r); }
+  { const r = await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] }); ok(r.status === 409 && gateOf(r.j) && r.j.code === 'job_no_profile', 'no pin and no attachment of Bank in the owner\'s set (the owner\'s own lease aside) ⇒ the job is refused job_no_profile — or resolves the owner\'s default attachment', r); }
   k.setPin(KA, pBank.id, { origin: 'chosen', by: 'user' });
-  { const r = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] }); ok(r.status === 200 && leasesOf(H).includes(pBank.id), 'Bank for all again: the job resolves again (a new lease under the same handle)', r); }
+  { const r = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] }); ok(r.status === 200 && verdictOf(leasesOf(H).includes(pBank.id)), 'Bank for all again: the job resolves again (a new lease under the same handle)', r); }
   // the OWNER conversation goes away: the running job keeps browsing
   sessions.clear(); live.delete(KA);
   k.reconcile({ graceMs: 0 });
-  ok(leasesOf(H).includes(pBank.id) && !leasesOf(KA).length, 'the owner conversation is gone (its lease dropped) — the RUNNING job\'s lease is kept (a running job carries its handle)', { job: leasesOf(H), owner: leasesOf(KA) });
+  ok(gateOf(leasesOf(H).includes(pBank.id)) && !leasesOf(KA).length, 'the owner conversation is gone (its lease dropped) — the RUNNING job\'s lease is kept (a running job carries its handle)', { job: leasesOf(H), owner: leasesOf(KA) });
   const r3 = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] });
-  ok(r3.status === 200 && r3.j && r3.j.ok, '…and it still resolves (the owner\'s recorded key + its pin) — it keeps browsing until the job ends', r3);
+  ok(r3.status === 200 && gateOf(r3.j) && verdictOf(r3.j.ok), '…and it still resolves (the owner\'s recorded key + its pin) — it keeps browsing until the job ends', r3);
   // B-f276 family unit 2 (主开发 r3084 — the law of r3019): THE JOBS STORE HELD (its read failed: the engine keeps an EMPTY memory
   // while held) — the keeper's reconcile asks the hold («unknown») and releases NOTHING: the real reconcile, as at boot and every tick
   { const keep = new Map(jobs); jobs.clear(); jm._unread = { store: { code: 'EIO' } };
@@ -340,11 +340,11 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     k.reconcile({ graceMs: 0 });
     await new Promise((r) => setTimeout(r, 50));
     const kept = !!k._reg().children[H] && leasesOf(H).includes(pBank.id) && model.windows.has(winHeld) && tabsHeld.length > 0 && tabsHeld.every((t) => model.targets.get(t).state !== 'closed') && !jl.slice(jl0).some((x) => /job handle released/.test(x));
-    ok(kept, 'THE JOBS STORE HELD (r3084): the real reconcile over the held, EMPTY job list releases NOTHING — the job\'s handle, its lease, its window and its tabs all kept', { children: Object.keys(k._reg().children), tabs: tabsHeld.length, said: jl.slice(jl0) });
+    ok(verdictOf(kept), 'THE JOBS STORE HELD (r3084): the real reconcile over the held, EMPTY job list releases NOTHING — the job\'s handle, its lease, its window and its tabs all kept', { children: Object.keys(k._reg().children), tabs: tabsHeld.length, said: jl.slice(jl0) });
     const MH = mutantCopies('jobs-browser-held', REPO), JSRC = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
     const JX = MH.load('src/browser-job-principal.js', anchored(JSRC, "  if (jm && jm._unread && jm._unread.store) return 'unknown';\n", '', 'B-f276 r3084: the hold not asked'));
-    ok(JX.jobChildrenToRelease(k._reg().children, (id) => JX.jobRunningIn(jm, id)).some((x) => x.handle === H) && !J.jobChildrenToRelease(k._reg().children, (id) => J.jobRunningIn(jm, id)).some((x) => x.handle === H), 'RED CONTROL — the hold not asked (the release\'s road, in a copy): the rule releases that job\'s handle over the held list');
-    for (const row of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+    ok(gateOf(JX.jobChildrenToRelease(k._reg().children, (id) => JX.jobRunningIn(jm, id)).some((x) => x.handle === H)) && !J.jobChildrenToRelease(k._reg().children, (id) => J.jobRunningIn(jm, id)).some((x) => x.handle === H), 'RED CONTROL — the hold not asked (the release\'s road, in a copy): the rule releases that job\'s handle over the held list');
+    for (const row of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 1 })) ok(verdictOf(row.pass), row.name, row.detail);
     jobs.clear(); for (const [a, b] of keep) jobs.set(a, b); delete jm._unread;
   }
   // 主开发 r3115 (1), the census's J1: a job the engine CANNOT VERIFY (`unverified` — a skeleton recovered from torn bytes, a job whose
@@ -352,11 +352,11 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   { const jA = jobs.get('jb-0000aaaa'), st0 = jA.state; jA.state = 'unverified';
     const winU = lw(H), tabsU = windowTabs(winU), jl1 = jl.length;
     k.reconcile({ graceMs: 0 }); await new Promise((r) => setTimeout(r, 50));
-    ok(!!k._reg().children[H] && leasesOf(H).includes(pBank.id) && tabsU.length > 0 && tabsU.every((t) => model.targets.get(t).state !== 'closed') && !jl.slice(jl1).some((x) => /job handle released/.test(x)), 'AN UNVERIFIED JOB (r3115 (1)): the real reconcile keeps its handle, lease and tabs — unknown is never «not running»', { children: Object.keys(k._reg().children) });
+    ok(!!k._reg().children[H] && gateOf(leasesOf(H).includes(pBank.id)) && tabsU.length > 0 && gateOf(tabsU.every((t) => model.targets.get(t).state !== 'closed')) && !jl.slice(jl1).some((x) => /job handle released/.test(x)), 'AN UNVERIFIED JOB (r3115 (1)): the real reconcile keeps its handle, lease and tabs — unknown is never «not running»', { children: Object.keys(k._reg().children) });
     const MU = mutantCopies('jobs-browser-unverified', REPO), JSRC1 = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
     const JU = MU.load('src/browser-job-principal.js', anchored(JSRC1, "  if (j && j.state === 'unverified') return 'unknown';\n", '', 'B-f276 r3115 (1): unverified read as not running'));
-    ok(JU.jobChildrenToRelease(k._reg().children, (id) => JU.jobRunningIn(jm, id)).some((x) => x.handle === H), 'RED CONTROL — unverified read as not running (the release\'s road, in a copy): the rule releases that handle');
-    for (const row of copiesCensus(MU.files, MU.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+    ok(verdictOf(JU.jobChildrenToRelease(k._reg().children, (id) => JU.jobRunningIn(jm, id)).some((x) => x.handle === H)), 'RED CONTROL — unverified read as not running (the release\'s road, in a copy): the rule releases that handle');
+    for (const row of copiesCensus(MU.files, MU.dir, REPO, { minCopies: 1 })) ok(verdictOf(row.pass), row.name, row.detail);
     jA.state = st0;
   }
   // r3571 (the job handles' keep): while the jobs engine CANNOT SAY — not loaded yet (it loads its jobs on a timer after the listen
@@ -367,27 +367,27 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     jobs.clear(); jm.ready = false;   // the engine made, its jobs not loaded yet: the list is EMPTY
     const winN = lw(H), tabsN = windowTabs(winN), jlN = jl.length, codeN = J.jobsUnknownCode(jm);
     k.reconcile({ graceMs: 0 }); await new Promise((r) => setTimeout(r, 50));
-    ok(codeN === 'jobs_engine_not_ready' && keptNow(winN, tabsN, jlN), 'THE ENGINE NOT LOADED YET (r3571): the real reconcile over its EMPTY list releases NOTHING — the job\'s handle, its lease, its window and its tabs all kept', { codeN, children: Object.keys(k._reg().children), said: jl.slice(jlN) });
+    ok(codeN === 'jobs_engine_not_ready' && verdictOf(keptNow(winN, tabsN, jlN)), 'THE ENGINE NOT LOADED YET (r3571): the real reconcile over its EMPTY list releases NOTHING — the job\'s handle, its lease, its window and its tabs all kept', { codeN, children: Object.keys(k._reg().children), said: jl.slice(jlN) });
     jm.initError = 'EACCES: permission denied, mkdir (placed)';   // its start failed: the list stays empty for the run
     const winF = lw(H), tabsF = windowTabs(winF), jlF = jl.length, codeF = J.jobsUnknownCode(jm);
     k.reconcile({ graceMs: 0 }); await new Promise((r) => setTimeout(r, 50));
-    ok(codeF === 'jobs_engine_failed' && keptNow(winF, tabsF, jlF), 'THE ENGINE WHOSE START FAILED (r3571): the real reconcile releases NOTHING — every job handle stays carried for the run', { codeF, said: jl.slice(jlF) });
+    ok(codeF === 'jobs_engine_failed' && verdictOf(keptNow(winF, tabsF, jlF)), 'THE ENGINE WHOSE START FAILED (r3571): the real reconcile releases NOTHING — every job handle stays carried for the run', { codeF, said: jl.slice(jlF) });
     const MN = mutantCopies('jobs-browser-not-ready', REPO), JSRC2 = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
     const JN = MN.load('src/browser-job-principal.js', anchored(JSRC2, "  if (jobsUnknownCode(jm)) return 'unknown';   // r3571: its handle is carried until the engine can say (judged by facts then)\n", '', 'r3571: the engine not asked whether it can say'));
     const relN = (ready, err) => { jm.ready = ready; if (err) jm.initError = err; else delete jm.initError; return JN.jobChildrenToRelease(k._reg().children, (id) => JN.jobRunningIn(jm, id)).some((x) => x.handle === H); };
-    ok(relN(false, null) && relN(false, 'EACCES (placed)'), 'RED CONTROL — the engine not asked whether it can say (the release\'s road, in a copy): over the engine not loaded yet, and over the engine whose start failed, the rule releases that handle');
-    for (const row of copiesCensus(MN.files, MN.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+    ok(gateOf(relN(false, null)) && verdictOf(relN(false, 'EACCES (placed)')), 'RED CONTROL — the engine not asked whether it can say (the release\'s road, in a copy): over the engine not loaded yet, and over the engine whose start failed, the rule releases that handle');
+    for (const row of copiesCensus(MN.files, MN.dir, REPO, { minCopies: 1 })) ok(verdictOf(row.pass), row.name, row.detail);
     jobs.clear(); for (const [a, b] of keep) jobs.set(a, b); delete jm.initError; jm.ready = true;
     // an ask that THROWS could not tell: carried (the wiring's own catch answers unknown too, pinned below)
     const boom = () => { throw new Error('a made-up failure of the ask'); };
     const MT = mutantCopies('jobs-browser-ask-throws', REPO), JSRC3 = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
     const JT = MT.load('src/browser-job-principal.js', anchored(JSRC3, "catch { on = true; /* r3571: an ask that throws could not tell — carried, never released */ }", 'catch { on = false; }', 'r3571: a throw read as not running'));
-    ok(!J.jobChildrenToRelease(k._reg().children, boom).some((x) => x.handle === H) && J.carriedJobHandles(k._reg().children, boom).has(H), 'AN ASK THAT THROWS (r3571): the job\'s handle is CARRIED — never released on a failure of the ask');
-    ok(JT.jobChildrenToRelease(k._reg().children, boom).some((x) => x.handle === H), 'RED CONTROL — a throw read as not running (the release\'s road, in a copy): the rule releases that handle');
-    for (const row of copiesCensus(MT.files, MT.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+    ok(!J.jobChildrenToRelease(k._reg().children, boom).some((x) => x.handle === H) && verdictOf(J.carriedJobHandles(k._reg().children, boom).has(H)), 'AN ASK THAT THROWS (r3571): the job\'s handle is CARRIED — never released on a failure of the ask');
+    ok(verdictOf(JT.jobChildrenToRelease(k._reg().children, boom).some((x) => x.handle === H)), 'RED CONTROL — a throw read as not running (the release\'s road, in a copy): the rule releases that handle');
+    for (const row of copiesCensus(MT.files, MT.dir, REPO, { minCopies: 1 })) ok(verdictOf(row.pass), row.name, row.detail);
     // a READY engine still judges by facts: a job it lists as finished releases its handle (the rule's own road, unchanged)
     const jR = jobs.get('jb-0000aaaa'), stR = jR.state; jR.state = 'done';
-    ok(J.jobsUnknownCode(jm) === null && J.jobChildrenToRelease(k._reg().children, (id) => J.jobRunningIn(jm, id)).some((x) => x.handle === H), 'a READY engine still judges by facts: a job it lists as finished releases its handle');
+    ok(J.jobsUnknownCode(jm) === null && verdictOf(J.jobChildrenToRelease(k._reg().children, (id) => J.jobRunningIn(jm, id)).some((x) => x.handle === H)), 'a READY engine still judges by facts: a job it lists as finished releases its handle');
     jR.state = stR;
   }
   // 主开发 r3115 (the census's one unverified item, verified): the SETTINGS HELD — `browser.cli` unread: the CLI pin file the agent's
@@ -396,7 +396,7 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     const pfH = pinAt(path.join(O, 'data-pin-held')), pfR = pinAt(path.join(O, 'data-pin-release'));
     const kH = mk(K, { dataDir: path.join(O, 'data-pin-held'), settingsHeld: () => ({ code: 'EIO' }) }), kR = mk(K, { dataDir: path.join(O, 'data-pin-release') });
     const pinH = kH.cliPin(); kR.cliPin();
-    ok(fs.existsSync(pfH) && pinH && pinH.held === true, 'THE SETTINGS HELD: the CLI pin is not computed from an unread setting — its file is LEFT AS IT IS (the last pin stands)', pinH);
+    ok(gateOf(fs.existsSync(pfH)) && gateOf(pinH) && pinH.held === true, 'THE SETTINGS HELD: the CLI pin is not computed from an unread setting — its file is LEFT AS IT IS (the last pin stands)', pinH);
     ok(!fs.existsSync(pfR), 'RED CONTROL — the same keeper with no hold to ask (the release): the default «path» pin REMOVES the file');
   }
   // THE .229 MIRROR (F11 red on the Actions runner: window 104 left open, its tab never closed): a tab read in flight while the
@@ -408,7 +408,7 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     lH.tabRoots = [...(Array.isArray(lH.tabRoots) ? lH.tabRoots : []), late]; // the keeper's own stamp (TBS.addRoot at the tab's create)
     go(); await pend;
     const roots = (B.findLease(k._reg().leases, pBank.id, H) || {}).tabRoots || [];
-    ok(roots.includes(late) && windowTabs(lw(H)).includes(late), `THE .229 MIRROR: a root stamped while a tab read was in flight (${late.slice(0, 4)}…, the job's window's new tab) survives that read — it was pruned as gone and the finalize closed nothing`, { late, roots }); }
+    ok(gateOf(roots.includes(late)) && verdictOf(windowTabs(lw(H)).includes(late)), `THE .229 MIRROR: a root stamped while a tab read was in flight (${late.slice(0, 4)}…, the job's window's new tab) survives that read — it was pruned as gone and the finalize closed nothing`, { late, roots }); }
   // the job's end: finalize releases (what onRunEnded calls), the evidence rule releases what a missed finalize left
   const winH = lw(H), tabsH = windowTabs(winH), tabsKA = windowTabs(winKA);
   const leaseRoots = (bk) => { const l = B.findLease(k._reg().leases, pBank.id, bk); return l ? [...(l.targetId ? [l.targetId] : []), ...(l.tabRoots || [])].map((x) => String(x).slice(0, 4)) : null; };
@@ -417,16 +417,16 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   jobs.get('jb-0000aaaa').state = 'done';
   const released = k.releaseJob('jb-0000aaaa', 'the job run ended');
   // accept-fixes-jobs F11 (the acceptance of 2.369.202: after `vibespace-job stop` the job's window stayed open in the shared profile)
-  ok(tabsH.length > 0 && await until(() => !model.windows.has(winH) && tabsH.every((t) => model.targets.get(t).state === 'closed'), 15000) && tabsKA.length > 0 && tabsKA.every((t) => model.targets.get(t).state !== 'closed'), `F11: AT FINALIZE the job's WINDOW closes (window ${winH}: ${tabsH.length} tab(s) closed over CDP) — the owner's page in its own window is untouched; the window stayed open before`, { winH, ...f11State(winH, tabsH, rootsAtRelease, jlAtRelease), rebinds, owner: tabsKA.map((t) => t.slice(0, 4) + ':' + model.targets.get(t).state) }); // THE .229 MIRROR: one deadline for both facts; the keeper's own lines name the closer's branch
+  ok(tabsH.length > 0 && gateOf(await until(() => !model.windows.has(winH) && tabsH.every((t) => model.targets.get(t).state === 'closed'), 15000)) && tabsKA.length > 0 && verdictOf(tabsKA.every((t) => model.targets.get(t).state !== 'closed')), `F11: AT FINALIZE the job's WINDOW closes (window ${winH}: ${tabsH.length} tab(s) closed over CDP) — the owner's page in its own window is untouched; the window stayed open before`, { winH, ...f11State(winH, tabsH, rootsAtRelease, jlAtRelease), rebinds, owner: tabsKA.map((t) => t.slice(0, 4) + ':' + model.targets.get(t).state) }); // THE .229 MIRROR: one deadline for both facts; the keeper's own lines name the closer's branch
   ok(!Object.values(k._reg().leftTabs || {}).some((m) => m && m[H]), 'F11: no "left tab" is kept for the released job handle (a job never comes back for its page)', k._reg().leftTabs);
-  ok(released.includes(H) && !leasesOf(H).length && !k._reg().children[H], 'AT FINALIZE the job\'s lease and handle are gone (its window closes with the lease)', { released, leases: leasesOf(H) });
+  ok(gateOf(released.includes(H)) && !leasesOf(H).length && !k._reg().children[H], 'AT FINALIZE the job\'s lease and handle are gone (its window closes with the lease)', { released, leases: leasesOf(H) });
   await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] });
   const H2 = handleOf('jb-0000bbbb');
   const winH2 = lw(H2), tabsH2 = windowTabs(winH2);
   jobs.get('jb-0000bbbb').state = 'failed';
   k.reconcile({ graceMs: 120000 });
-  ok(tabsH2.length > 0 && await until(() => !model.windows.has(winH2) && tabsH2.every((t) => model.targets.get(t).state === 'closed'), 15000), `F11: THE SWEEP closes the window too (a job that ended without its finalize: window ${winH2}, ${tabsH2.length} tab(s))`, { winH2, ...f11State(winH2, tabsH2, leaseRoots(H2), 0) });
-  ok(H2 && !k._reg().children[H2] && !leasesOf(H2).length, 'THE SWEEP: a job that ended without its finalize hook is released at the next reconcile (evidence: not running)', { H2, children: Object.keys(k._reg().children) });
+  ok(tabsH2.length > 0 && verdictOf(await until(() => !model.windows.has(winH2) && tabsH2.every((t) => model.targets.get(t).state === 'closed'), 15000)), `F11: THE SWEEP closes the window too (a job that ended without its finalize: window ${winH2}, ${tabsH2.length} tab(s))`, { winH2, ...f11State(winH2, tabsH2, leaseRoots(H2), 0) });
+  ok(gateOf(H2) && !k._reg().children[H2] && !leasesOf(H2).length, 'THE SWEEP: a job that ended without its finalize hook is released at the next reconcile (evidence: not running)', { H2, children: Object.keys(k._reg().children) });
   // round wgbjnr750 (J1's end): an UNVERIFIED job keeps its handle until the PERSON removes it (the panel's Remove — Stop leaves it
   // unverified) or it is archived: then the next reconcile releases its handle (the real reconcile)
   { jobs.set('jb-0000cccc', { id: 'jb-0000cccc', name: 'third', state: 'up', owner: { conversation: { id: 'conv-userW-1' } } }); tokens.set('jbt_cccc', 'jb-0000cccc');
@@ -434,12 +434,12 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     const H3 = handleOf('jb-0000cccc'); jobs.get('jb-0000cccc').state = 'unverified';
     k.reconcile({ graceMs: 0 }); const keptU = !!(H3 && k._reg().children[H3]);
     jobs.delete('jb-0000cccc'); k.reconcile({ graceMs: 0 });
-    ok(!!H3 && keptU && !k._reg().children[H3], 'AN UNVERIFIED JOB\'s end (r3115 (1), round wgbjnr750): its handle is kept while unverified, and released by the next reconcile once the person REMOVES it', { H3, keptU });
+    ok(!!H3 && gateOf(keptU) && !k._reg().children[H3], 'AN UNVERIFIED JOB\'s end (r3115 (1), round wgbjnr750): its handle is kept while unverified, and released by the next reconcile once the person REMOVES it', { H3, keptU });
   }
   // round wgbjnr750 (pin): the wiring hands the keeper the settings hold — a dropped line would leave every keeper leg green
   { const MW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-    ok(/settingsHeld: \(\) => \(typeof persistenceRouter\.settingsHeld === 'function' \? persistenceRouter\.settingsHeld\(\) : null\),\s+\/\/ B-f276 family unit 2: the CLI pin/.test(MW), 'THE WIRING (pin): the browser keeper is handed the settings hold (persistenceRouter.settingsHeld)'); }
-  ok(jl.some((x) => /job jb-0000aaaa uses the conversation's browser as bk-00000a01\.\d+/.test(x)) && jl.some((x) => /job handle released \(the job run ended\)/.test(x)), 'the journal names the job by its ID at the mint and the release (never its name)', jl.filter((x) => /job/.test(x)));
+    ok(verdictOf(/settingsHeld: \(\) => \(typeof persistenceRouter\.settingsHeld === 'function' \? persistenceRouter\.settingsHeld\(\) : null\),\s+\/\/ B-f276 family unit 2: the CLI pin/.test(MW)), 'THE WIRING (pin): the browser keeper is handed the settings hold (persistenceRouter.settingsHeld)'); }
+  ok(gateOf(jl.some((x) => /job jb-0000aaaa uses the conversation's browser as bk-00000a01\.\d+/.test(x))) && verdictOf(jl.some((x) => /job handle released \(the job run ended\)/.test(x))), 'the journal names the job by its ID at the mint and the release (never its name)', jl.filter((x) => /job/.test(x)));
   // THE .229 RULE'S SECOND ORDERING (lane jobs-browser-f11-race — F11 red on the rel251/rel253 runners: roots at the release
   // [0009…, 0005…], tab 0004 left open): the narrowing's close of a holder's session (closeLeaseSession: `tab close`, `close`,
   // the lost-tab mark — never awaited by the refusal) landed AFTER the holder's re-attach had bound its session to its NEW
@@ -475,13 +475,13 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     return { refused: refused && refused.code, parkedClose, attachFirst, w1, t1: t1 && t1.slice(0, 4), t1State: st(t1), w2, t2: t2 && t2.slice(0, 4), t2State: st(t2), rooted: !!t2 && roots.includes(t2), roots: roots.map((x) => x.slice(0, 4)), rebinds: jl2.filter((x) => x.includes(X + ':') && /a new tab bound|bound to the browser's only tab/.test(x)).length };
   };
   const ord = await closeThenAttach(K, 'shipped');
-  ok(ord.refused === 'not_owner' && ord.parkedClose && !ord.attachFirst && ord.t1State === 'closed' && ord.t2State === 'ok' && ord.rooted && ord.rebinds === 0, 'THE SECOND ORDERING: a narrowing\'s session close still in flight when the holder re-attaches FINISHES FIRST — it closes the tab the narrowing took (not the re-attach\'s), the new window\'s tab stays open and rooted, no rebind replaces its root (the F11 runner red: the close landed on the new tab, the finalize left the window open)', ord);
+  ok(ord.refused === 'not_owner' && gateOf(ord.parkedClose) && !ord.attachFirst && ord.t1State === 'closed' && ord.t2State === 'ok' && gateOf(ord.rooted) && ord.rebinds === 0, 'THE SECOND ORDERING: a narrowing\'s session close still in flight when the holder re-attaches FINISHES FIRST — it closes the tab the narrowing took (not the re-attach\'s), the new window\'s tab stays open and rooted, no rebind replaces its root (the F11 runner red: the close landed on the new tab, the finalize left the window open)', ord);
   const KSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const WAIT_LINE = "    if (cw.wait) { log.log?.(`[browser] ${browserKey}: its attach on ${p.id} waits for its session's close in flight (bounded by the browser CLI's own timeouts, ~30 s at most)`); await sessionCloses.get(cw.key); }\n";
   const MK = mutantCopies('jobs-browser-close', REPO);
-  ok(KSRC.includes(WAIT_LINE), 'control "the attach does not wait for its close": its needle is in the shipped keeper');
+  ok(verdictOf(KSRC.includes(WAIT_LINE)), 'control "the attach does not wait for its close": its needle is in the shipped keeper');
   const pre = await closeThenAttach(MK.load('src/server/browser-keeper.js', editAnchor(KSRC, WAIT_LINE, '', "src/server/browser-keeper.js"), 'no-close-wait'), 'prefix');
-  ok(pre.attachFirst && pre.t2State === 'closed' && !pre.rooted && pre.rebinds > 0, 'control "the attach does not wait for its close" (the pre-fix keeper): the SAME hand interleave goes RED — the re-attach binds first, the late close shuts the NEW window\'s tab and marks it lost, the next verb rebinds a fresh root', pre);
+  ok(gateOf(pre.attachFirst) && pre.t2State === 'closed' && !pre.rooted && pre.rebinds > 0, 'control "the attach does not wait for its close" (the pre-fix keeper): the SAME hand interleave goes RED — the re-attach binds first, the late close shuts the NEW window\'s tab and marks it lost, the next verb rebinds a fresh root', pre);
   // B-0cee (an agent's report, fb-61e4794124; test-browser-windows c32 is its heavy cell): the holder's window closed between the
   // create and the bind (every tab of it gone, the binary knows no such tab) ⇒ the keeper asks ONCE more itself: a window of its
   // own, said — never the shared fallback, never the agent's hand. The release refused window_busy (bind_failed); the agent repeated it
@@ -541,7 +541,7 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     const got = await bindBounds(MK.load('src/server/browser-keeper.js', src, 'b0cee-' + red), 'ctl-' + red, SC[red][0]);
     ok(JSON.stringify(got) !== JSON.stringify(SC[red][1]) && JSON.stringify(got) !== JSON.stringify(bt[red]) && got.ok === true && (red !== 'unstamped' || (got.note === null && got.windows === 2)), `CONTROL (B-0cee, ${what}): the «${red}» bound goes RED — ${red === 'unstamped' ? 'the tab opens and nothing says why' : 'the act asks again where it must not'}`, got);
   }
-  for (const row of copiesCensus(MK.files, MK.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MK.files, MK.dir, REPO, { minCopies: 1 })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 
@@ -572,33 +572,33 @@ console.log('— ⑥ a job\'s own working directory is a write root of its brows
   const until = async (fn, ms = 30000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 200)); await jm._sweep(); } return false; };
   const runJob = async (name, argv, cwd) => { const r = jm.create({ kind: 'task', name, cmd: { argv, env: { TMPDIR: TMP }, ...(cwd ? { cwd } : {}) }, owner }, caller); const j = jm.jobs.get(r.job.id); await until(() => ['done', 'failed', 'interrupted'].includes(j.state)); let log = ''; try { log = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { } return { j, log }; };
   const inWd = await runJob('shot-in-wd', [process.execPath, CLI, 'screenshot', path.join(WD, 'shot.png')], WD);
-  ok(!/write_path_refused/.test(inWd.log) && /127\.0\.0\.1:9|ECONNREFUSED|fetch failed|unreachable|not answer/i.test(inWd.log), 'F6: inside a job, `screenshot <the job\'s cwd>/shot.png` PASSES the write fence (it reaches the server call — refused write_path_refused before: a job had no VIBESPACE_SESSION_CWD)', inWd.log.slice(0, 600));
+  ok(!/write_path_refused/.test(inWd.log) && verdictOf(/127\.0\.0\.1:9|ECONNREFUSED|fetch failed|unreachable|not answer/i.test(inWd.log)), 'F6: inside a job, `screenshot <the job\'s cwd>/shot.png` PASSES the write fence (it reaches the server call — refused write_path_refused before: a job had no VIBESPACE_SESSION_CWD)', inWd.log.slice(0, 600));
   const outside = await runJob('shot-outside', [process.execPath, CLI, 'screenshot', path.join(D, 'elsewhere.png')], WD);
-  ok(/write_path_refused/.test(outside.log) && /the job's working directory \(/.test(outside.log) && !/session started before|session directory/.test(outside.log), 'F6: a path OUTSIDE the job\'s cwd is still refused — the words name "the job\'s working directory", never a session restart', outside.log.slice(0, 600));
+  ok(gateOf(/write_path_refused/.test(outside.log)) && gateOf(/the job's working directory \(/.test(outside.log)) && !/session started before|session directory/.test(outside.log), 'F6: a path OUTSIDE the job\'s cwd is still refused — the words name "the job\'s working directory", never a session restart', outside.log.slice(0, 600));
   const noCwd = await runJob('shot-no-cwd', ['sh', '-c', `cd ${JSON.stringify(WD)} && exec ${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)} screenshot ./x.png`]);
-  ok(/write_path_refused/.test(noCwd.log) && /Background Work job's working directory is not known here/.test(noCwd.log) && !/session started before this VibeSpace version|once it is restarted/.test(noCwd.log), 'F6: a job with NO directory of its own (never the server\'s cwd, never the shell\'s `cd`) is refused in the JOB\'s words — never "your session is too old, restart it"', noCwd.log.slice(0, 600));
+  ok(gateOf(/write_path_refused/.test(noCwd.log)) && gateOf(/Background Work job's working directory is not known here/.test(noCwd.log)) && !/session started before this VibeSpace version|once it is restarted/.test(noCwd.log), 'F6: a job with NO directory of its own (never the server\'s cwd, never the shell\'s `cd`) is refused in the JOB\'s words — never "your session is too old, restart it"', noCwd.log.slice(0, 600));
   // r2886: THE WORDS NAME THE TEMP FOLDER THE FENCE ALLOWS — the OS temp folder AS THE JOB's CLI SEES IT (its TMPDIR: TMP here, by its
   // real path), never «/tmp» (a Mac's /var/folders/…, any shell that sets TMPDIR); a save there passes. RED: the release's words,
   // through a copy of the CLI beside a verb table whose sentences say «/tmp» again (today's). TMP's own path ends in /tmp: the
   // release's words are judged by «, /tmp or» / «only /tmp or», never by a bare «/tmp or»
   const TMP_REAL = fs.realpathSync(TMP), RELEASE_WORDS = /(?:, |only |under )\/tmp or ~\/Downloads/;   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
-  ok(outside.log.includes(`${TMP_REAL} or ~/Downloads; nothing ran`) && outside.log.includes(`save under the job's working directory, ${TMP_REAL} or ~/Downloads`)
-    && noCwd.log.includes(`so only ${TMP_REAL} or ~/Downloads`) && !RELEASE_WORDS.test(outside.log + noCwd.log),
+  ok(gateOf(outside.log.includes(`${TMP_REAL} or ~/Downloads; nothing ran`)) && gateOf(outside.log.includes(`save under the job's working directory, ${TMP_REAL} or ~/Downloads`))
+    && gateOf(noCwd.log.includes(`so only ${TMP_REAL} or ~/Downloads`)) && !RELEASE_WORDS.test(outside.log + noCwd.log),
     'r2886: the refusal and its remedy name the temp folder the job\'s CLI sees (its TMPDIR, by its real path) — never «/tmp»', (outside.log + noCwd.log).slice(-500));
   const inTmp = await runJob('shot-in-tmp', [process.execPath, CLI, 'screenshot', path.join(TMP, 'shot.png')], WD);
-  ok(!/write_path_refused/.test(inTmp.log) && /127\.0\.0\.1:9|ECONNREFUSED|fetch failed|unreachable|not answer/i.test(inTmp.log), 'r2886: …and a screenshot in THAT folder passes the fence (it reaches the server call)', inTmp.log.slice(-300));
+  ok(!/write_path_refused/.test(inTmp.log) && verdictOf(/127\.0\.0\.1:9|ECONNREFUSED|fetch failed|unreachable|not answer/i.test(inTmp.log)), 'r2886: …and a screenshot in THAT folder passes the fence (it reaches the server call)', inTmp.log.slice(-300));
   const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8'), today = anchored(vsrc, '${TMP} or ~/Downloads', '/tmp or ~/Downloads', 'the release words (r2886)', { count: 7 });   // stale-pins: kept — the release's words restored for the RED control (r2886)
   const DT = path.join(D, 'ctl-words', 'bin'); fs.mkdirSync(DT, { recursive: true });
   fs.copyFileSync(CLI, path.join(DT, 'vibespace-browser')); fs.writeFileSync(path.join(DT, 'vibespace-browser-verbs.js'), today); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(DT, 'cli-call.js'));
   const outToday = await runJob('shot-outside-today', [process.execPath, path.join(DT, 'vibespace-browser'), 'screenshot', path.join(D, 'elsewhere.png')], WD);
-  ok(today !== vsrc && /write_path_refused/.test(outToday.log) && RELEASE_WORDS.test(outToday.log) && !outToday.log.includes(`${TMP_REAL} or ~/Downloads`),
+  ok(today !== vsrc && gateOf(/write_path_refused/.test(outToday.log)) && gateOf(RELEASE_WORDS.test(outToday.log)) && !outToday.log.includes(`${TMP_REAL} or ~/Downloads`),
     'RED CONTROL: the release\'s words (a verb table whose sentences say «/tmp», beside a copy of the CLI) tell a job whose temp folder is elsewhere to save under «/tmp» — a folder its fence then refuses', outToday.log.slice(-300));
   // F11's engine seam: an exit 0, a crash (exit 3) and a stop each call onRunEnded once (server.js wires it to the keeper's releaseJob)
   const crash = await runJob('crash', ['sh', '-c', 'exit 3']);
   const st = jm.create({ kind: 'task', name: 'stopped', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller); const sj = jm.jobs.get(st.job.id);
   await until(() => sj.state === 'up' && sj.proc && sj.proc.pid); jm.stop(sj); await until(() => ['interrupted', 'failed'].includes(sj.state));
   const once = (id) => ended.filter((x) => x === id).length === 1;
-  ok(once(inWd.j.id) && once(crash.j.id) && crash.j.state === 'failed' && once(sj.id) && sj.state === 'interrupted', 'F11: every run end — exit, crash (exit 3), stop (interrupted) — calls the release seam exactly once', { ended, crash: crash.j.state, stopped: sj.state });
+  ok(gateOf(once(inWd.j.id)) && gateOf(once(crash.j.id)) && crash.j.state === 'failed' && gateOf(once(sj.id)) && sj.state === 'interrupted', 'F11: every run end — exit, crash (exit 3), stop (interrupted) — calls the release seam exactly once', { ended, crash: crash.j.state, stopped: sj.state });
   // round wxzvih2as's MUST (1), a PERSON's REMOVAL BEATS THE COPIES: removing a job releases its browser handle BY ID (the same release a
   // run's end makes) — the keeper never keeps it because a kept copy of torn jobs.json still names the job
   { const n0 = ended.filter((x) => x === inWd.j.id).length; const rr = jm.rm(jm.jobs.get(inWd.j.id) || inWd.j);
@@ -620,34 +620,34 @@ console.log('— ⑥ a job\'s own working directory is a write root of its brows
 console.log('— ⑤ the wiring: the CLI reads the job token, a run\'s end releases, the keeper knows which jobs run, the trace stores the job id');
 {
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-  ok(/const TOKEN = process\.env\.VIBESPACE_SESSION_TOKEN \|\| process\.env\.VIBESPACE_JOB_TOKEN;/.test(read('data/bin/vibespace-browser')), 'data/bin/vibespace-browser reads VIBESPACE_JOB_TOKEN when no session token (a job\'s process carries only that)');
-  ok(/VIBESPACE_JOB_TOKEN: this\._jobToken\(job\)/.test(read('src/jobs.js')) && !/VIBESPACE_SESSION_TOKEN/.test(read('src/jobs.js')), '…which is what src/jobs.js puts in a job\'s env (and no session token)');
+  ok(verdictOf(/const TOKEN = process\.env\.VIBESPACE_SESSION_TOKEN \|\| process\.env\.VIBESPACE_JOB_TOKEN;/.test(read('data/bin/vibespace-browser'))), 'data/bin/vibespace-browser reads VIBESPACE_JOB_TOKEN when no session token (a job\'s process carries only that)');
+  ok(gateOf(/VIBESPACE_JOB_TOKEN: this\._jobToken\(job\)/.test(read('src/jobs.js'))) && !/VIBESPACE_SESSION_TOKEN/.test(read('src/jobs.js')), '…which is what src/jobs.js puts in a job\'s env (and no session token)');
   // lane jobs-memory-bound round 5: ONE JUDGE PER RUN END — a run already judged returns before it (it released at its own judgment)
-  ok(/_finalizeRun\(job, run, exit, why\) \{\n(\s*if \(run\.endedAt\) return; \/\/ ONE JUDGE PER RUN END[^\n]*\n)?\s*run\.endedAt = exit\.endedAt \|\| now\(\);\n[^\n]*\n\s*try \{ this\.d\.onRunEnded\?\.\(job, run\); \} catch \{ \}/.test(read('src/jobs.js')), 'the run\'s finalize calls onRunEnded FIRST (before any state branch — every run end releases)');
-  ok(/onRunEnded: \(job, run\) => onRunEnded\(job, run\)/.test(read('src/server/jobs-wiring.js')) && /onRunEnded: \(job\) => \{ try \{ browserKeeper\?\.releaseJob\?\.\(job\.id, 'the job run ended'\); \} catch \{ \} \}/.test(read('server.js')), 'jobs-wiring forwards it and server.js releases the job\'s browser handle (keeper.releaseJob)');
+  ok(verdictOf(/_finalizeRun\(job, run, exit, why\) \{\n(\s*if \(run\.endedAt\) return; \/\/ ONE JUDGE PER RUN END[^\n]*\n)?\s*run\.endedAt = exit\.endedAt \|\| now\(\);\n[^\n]*\n\s*try \{ this\.d\.onRunEnded\?\.\(job, run\); \} catch \{ \}/.test(read('src/jobs.js'))), 'the run\'s finalize calls onRunEnded FIRST (before any state branch — every run end releases)');
+  ok(gateOf(/onRunEnded: \(job, run\) => onRunEnded\(job, run\)/.test(read('src/server/jobs-wiring.js'))) && verdictOf(/onRunEnded: \(job\) => \{ try \{ browserKeeper\?\.releaseJob\?\.\(job\.id, 'the job run ended'\); \} catch \{ \} \}/.test(read('server.js'))), 'jobs-wiring forwards it and server.js releases the job\'s browser handle (keeper.releaseJob)');
   const mw = read('src/server/mounts-plugins-wiring.js');
-  ok(mw.includes("        return (jobId) => { try { const jm = getJobs ? getJobs() : null; const why = P.jobsUnknownCode(jm); if (why) { say(why); return 'unknown'; } return P.jobRunningIn(jm, jobId); } catch { say('jobs_ask_threw'); return 'unknown'; } }; })(),\n") && /getJobs: \(\) => \(getJobs \? getJobs\(\) : null\),\n\s*bindingsLookup: \(cid\) =>/.test(mw) && /getJobs: \(\) => jobsWiring\.getJobs\(\)/.test(read('server.js')), 'the keeper asks the engine which jobs run (r3571: while it cannot say, or the ask throws, UNKNOWN — said once by its code); the routes get the engine + the owner\'s recorded key');
+  ok(gateOf(mw.includes("        return (jobId) => { try { const jm = getJobs ? getJobs() : null; const why = P.jobsUnknownCode(jm); if (why) { say(why); return 'unknown'; } return P.jobRunningIn(jm, jobId); } catch { say('jobs_ask_threw'); return 'unknown'; } }; })(),\n")) && gateOf(/getJobs: \(\) => \(getJobs \? getJobs\(\) : null\),\n\s*bindingsLookup: \(cid\) =>/.test(mw)) && verdictOf(/getJobs: \(\) => jobsWiring\.getJobs\(\)/.test(read('server.js'))), 'the keeper asks the engine which jobs run (r3571: while it cannot say, or the ask throws, UNKNOWN — said once by its code); the routes get the engine + the owner\'s recorded key');
   const kp = read('src/server/browser-keeper.js');
-  ok(/for \(const \{ handle \} of J\.jobChildrenToRelease\(reg\.children, jobRunning\)\) releaseJobHandle\(handle, 'its job is not running'\);\n\s*const live = liveKeys\(\);/.test(kp), 'the reconcile (boot + every tick) releases a job handle whose job is not running BEFORE the carrier rule');
-  ok(/function liveKeys\(\) \{[\s\S]{0,200}sessionLiveKeys\(\)[\s\S]{0,200}J\.carriedJobHandles\(reg\.children, jobRunning\)/.test(kp), 'the keeper\'s live set = the live sessions\' keys + the handles RUNNING jobs carry');
+  ok(verdictOf(/for \(const \{ handle \} of J\.jobChildrenToRelease\(reg\.children, jobRunning\)\) releaseJobHandle\(handle, 'its job is not running'\);\n\s*const live = liveKeys\(\);/.test(kp)), 'the reconcile (boot + every tick) releases a job handle whose job is not running BEFORE the carrier rule');
+  ok(verdictOf(/function liveKeys\(\) \{[\s\S]{0,200}sessionLiveKeys\(\)[\s\S]{0,200}J\.carriedJobHandles\(reg\.children, jobRunning\)/.test(kp)), 'the keeper\'s live set = the live sessions\' keys + the handles RUNNING jobs carry');
   const rb = read('src/routes/browser.js');
-  ok(/if \(token && token\.startsWith\('jbt_'\)\) return jobAgentFacts\(req, res, token\);/.test(rb) && /if \(f\.job\) return resolveForJob\(req, res, k, f\);/.test(rb), 'the routes admit jbt_ through ONE door (agentFacts → jobAgentFacts) and resolve a job through resolveForJob');
-  ok(/if \(token && token\.startsWith\('jbt_'\)\) \{ const jf = jobFactsOf\(token, \{ mint: false \}\);/.test(rb), 'the BELT judges a job\'s answer with the job\'s own key and never mints one');
+  ok(gateOf(/if \(token && token\.startsWith\('jbt_'\)\) return jobAgentFacts\(req, res, token\);/.test(rb)) && verdictOf(/if \(f\.job\) return resolveForJob\(req, res, k, f\);/.test(rb)), 'the routes admit jbt_ through ONE door (agentFacts → jobAgentFacts) and resolve a job through resolveForJob');
+  ok(verdictOf(/if \(token && token\.startsWith\('jbt_'\)\) \{ const jf = jobFactsOf\(token, \{ mint: false \}\);/.test(rb)), 'the BELT judges a job\'s answer with the job\'s own key and never mints one');
   const T = require(path.join(REPO, 'src/browser-trace.js'));
   const base = { id: 'e1', at: 1, sessionId: 's', browserKey: 'bk-0000aaaa.2', profileId: 'p', command: { action: 'click', params: {} }, position: null };
   ok(T.entryFor({ ...base, job: 'jb-0000aaaa' }).job === 'jb-0000aaaa' && !('job' in T.entryFor({ ...base, job: 'daily reconcile' })) && !('job' in T.entryFor({ ...base, job: 'jb-0000aaaa', holder: 'user' })) && !('job' in T.entryFor(base)), 'a trace entry stores the job by ID only (a name-shaped value is never stored; the user\'s own act never carries one)');
-  ok(/job: typeof keeper\?\.jobOf === 'function' \? keeper\.jobOf\(tp\.browserKey\) : null \}\);/.test(read('src/server/browser-trace.js')), 'the recorder asks the keeper which job a handle is');
+  ok(verdictOf(/job: typeof keeper\?\.jobOf === 'function' \? keeper\.jobOf\(tp\.browserKey\) : null \}\);/.test(read('src/server/browser-trace.js'))), 'the recorder asks the keeper which job a handle is');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  ok(/t\('Job: \{name\}'/.test(read('src/lib/browser-live-window.js')) && zh.includes('"Job: {name}":') && ja.includes('"Job: {name}":'), 'the strip names a job\'s window "Job: <name>" (zh + ja)');
+  ok(gateOf(/t\('Job: \{name\}'/.test(read('src/lib/browser-live-window.js'))) && gateOf(zh.includes('"Job: {name}":')) && verdictOf(ja.includes('"Job: {name}":')), 'the strip names a job\'s window "Job: <name>" (zh + ja)');
   const bs = require(path.join(REPO, 'src/browser-stream.js'));
   if (typeof bs.browserListFor === 'function') {
     const rows = bs.browserListFor({ browserKey: 'bk-0000aaaa', leases: [], attachments: [], children: [{ handle: 'bk-0000aaaa.2', job: 'jb-0000aaaa', browser: { profileId: 'p-bank', state: 'ready', live: true, job: true } }, { handle: 'bk-0000aaaa.1', browser: null }], helperNames: { 'bk-0000aaaa.1': 'research' }, jobNames: { 'bk-0000aaaa.2': 'daily reconcile' } });
     const jr = (rows || []).find((r) => r.ref === 'bk-0000aaaa.2'), hr = (rows || []).find((r) => r.ref === 'bk-0000aaaa.1');
-    ok(jr && jr.helper && jr.helper.job === true && jr.helper.name === 'daily reconcile' && jr.profileId === 'p-bank' && hr && hr.helper && !hr.helper.job && hr.helper.name === 'research', 'the strip model: the job\'s row is a helper row marked job with its live name and its profile; a helper stays a helper', rows);
+    ok(gateOf(jr) && gateOf(jr.helper) && jr.helper.job === true && jr.helper.name === 'daily reconcile' && jr.profileId === 'p-bank' && gateOf(hr) && gateOf(hr.helper) && !hr.helper.job && hr.helper.name === 'research', 'the strip model: the job\'s row is a helper row marked job with its live name and its profile; a helper stays a helper', rows);
   } else ok(false, 'browser-stream exports browserListFor');
 }
 
-ok(/const \{ addressableId \} = require\('\.\.\/claude-lock-capture\.js'\);\s*\n\s*if \(cid\) for \(const \[tid, t\] of \(ctx\.activeSessions \|\| new Map\(\)\)\) if \(t && addressableId\(t\) === cid\)/.test(fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8')), 'PIN (verify r1): jobFactsOf finds the owner\'s live session by addressableId — a pending fork\'s borrowed id is nobody\'s');
+ok(verdictOf(/const \{ addressableId \} = require\('\.\.\/claude-lock-capture\.js'\);\s*\n\s*if \(cid\) for \(const \[tid, t\] of \(ctx\.activeSessions \|\| new Map\(\)\)\) if \(t && addressableId\(t\) === cid\)/.test(fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'))), 'PIN (verify r1): jobFactsOf finds the owner\'s live session by addressableId — a pending fork\'s borrowed id is nobody\'s');
 { const jobsSrc = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8'), wrap = fs.readFileSync(path.join(REPO, 'data/bin/job-wrapper.js'), 'utf8');
   // B-ba47's follow-up (9fa653133): the run's env is jobRunEnv — jobEnv over the owner's own words plus the hub's additions, those
   // marked (VIBESPACE_HANDED) — written over several lines: the pin reads the spawn's whole env property, up to the next one
@@ -656,8 +656,8 @@ ok(/const \{ addressableId \} = require\('\.\.\/claude-lock-capture\.js'\);\s*\n
   const envAt = jobsSrc.indexOf('env: jobRunEnv(');
   const closeOf = (t, open) => { let d = 0; for (let i = open; i < t.length && i < open + 4000; i++) { if (t[i] === '(') d++; else if (t[i] === ')' && --d === 0) return i + 1; } return -1; };
   const envEnd = envAt < 0 ? -1 : closeOf(jobsSrc, envAt + 'env: jobRunEnv'.length), spawnEnv = envEnd < 0 ? '' : jobsSrc.slice(envAt, envEnd);
-  ok(envAt >= 0 && envEnd > envAt && spawnEnv.endsWith(')'), `the job spawn's env call is found and closed within 4000 characters (${envAt}..${envEnd}) — the pin below reads exactly that call`);
-  ok(/if \(\/\^\(VIBESPACE_\|npm_\|CLAUDE_CODE_\)\/\.test\(k\)\) delete env\[k\];/.test(jobsSrc) && /return withHandedMark\(jobEnv\(\{ \.\.\.own, \.\.\.handed \}, base\), jobEnv\(own, base\)/.test(jobsSrc) && spawnEnv.length > 0 && /VIBESPACE_JOB_TOKEN: this\._jobToken\(job\)/.test(spawnEnv) && !/VIBESPACE_SESSION_TOKEN/.test(spawnEnv) && /env: spec\.env,/.test(wrap) && !/process\.env/.test(wrap), 'PIN (verify r1 ④): a job\'s child env is jobEnv (through jobRunEnv since B-ba47\'s follow-up: the hub\'s additions marked) — every VIBESPACE_* of the server stripped, VIBESPACE_JOB_TOKEN set, NEVER a session token; the wrapper hands spec.env to the child unchanged and never falls back to its own env (lane job-spec-off-argv)'); }
+  ok(envAt >= 0 && envEnd > envAt && verdictOf(spawnEnv.endsWith(')')), `the job spawn's env call is found and closed within 4000 characters (${envAt}..${envEnd}) — the pin below reads exactly that call`);
+  ok(gateOf(/if \(\/\^\(VIBESPACE_\|npm_\|CLAUDE_CODE_\)\/\.test\(k\)\) delete env\[k\];/.test(jobsSrc)) && gateOf(/return withHandedMark\(jobEnv\(\{ \.\.\.own, \.\.\.handed \}, base\), jobEnv\(own, base\)/.test(jobsSrc)) && spawnEnv.length > 0 && gateOf(/VIBESPACE_JOB_TOKEN: this\._jobToken\(job\)/.test(spawnEnv)) && !/VIBESPACE_SESSION_TOKEN/.test(spawnEnv) && gateOf(/env: spec\.env,/.test(wrap)) && !/process\.env/.test(wrap), 'PIN (verify r1 ④): a job\'s child env is jobEnv (through jobRunEnv since B-ba47\'s follow-up: the hub\'s additions marked) — every VIBESPACE_* of the server stripped, VIBESPACE_JOB_TOKEN set, NEVER a session token; the wrapper hands spec.env to the child unchanged and never falls back to its own env (lane job-spec-off-argv)'); }
 // ── ③ mutant-copy controls ──
 console.log('— ③ mutant-copy controls (a weakened rule must turn named rows red)');
 const src = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
@@ -669,12 +669,12 @@ const CONTROLS = [
   { what: 'the owner\'s temporary browser handed to a job', needle: "  return { ok: false, code: 'job_no_profile', error: 'this job\\'s conversation has no profile pinned", repl: "  if (v.kind === 'none') return { ok: true, profileId: null };\n  return { ok: false, code: 'job_no_profile', error: 'this job\\'s conversation has no profile pinned", reds: ['no pin, no attachment (the owner\'s temporary browser) ⇒ job_no_profile'] },
 ];
 for (const c of CONTROLS) {
-  ok(src.includes(c.needle), `control "${c.what}": its needle is in the shipped source`);
+  ok(verdictOf(src.includes(c.needle)), `control "${c.what}": its needle is in the shipped source`);
   const mod = M.load('src/browser-job-principal.js', editAnchor(src, c.needle, c.repl, "src/browser-job-principal.js"), c.what.replace(/\W+/g, '-').slice(0, 24));
   const r = red(mod);
-  ok(c.reds.every((n) => r.includes(n)), `control "${c.what}": the named rows go RED on the weakened copy (${r.length} red)`, r);
+  ok(verdictOf(c.reds.every((n) => r.includes(n))), `control "${c.what}": the named rows go RED on the weakened copy (${r.length} red)`, r);
 }
-for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(row.pass, row.name, row.detail);
+for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(verdictOf(row.pass), row.name, row.detail);
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

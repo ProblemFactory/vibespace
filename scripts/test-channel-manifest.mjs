@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, m, d) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}${d !== undefined ? `\n      ${JSON.stringify(d).slice(0, 400)}` : ''}`); } };
+const ok = (c, m, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}${d !== undefined ? `\n      ${JSON.stringify(d).slice(0, 400)}` : ''}`); } };
 
 console.log('① one list line: the fake vendor joins through a copy of the vendor list');
 const LIST = path.join(REPO, 'src/channels/registry-list.js');
@@ -23,7 +23,7 @@ const ANCHOR = "  require('./slack/manifest.js'),\n";
 ok(src.split(ANCHOR).length === 2, 'the list line anchor is present once');
 const copy = src.replace(ANCHOR, ANCHOR + `  require(${JSON.stringify(path.join(REPO, 'scripts/fixtures/channels/acme/manifest.js'))}),\n`);
 const added = copy.split('\n').filter((l) => !src.split('\n').includes(l));
-ok(added.length === 1 && /fixtures\/channels\/acme\/manifest\.js/.test(added[0]), 'the copy differs from the list by ONE line', added);
+ok(added.length === 1 && verdictOf(/fixtures\/channels\/acme\/manifest\.js/.test(added[0])), 'the copy differs from the list by ONE line', added);
 const Module = require('module');
 const m = new Module(LIST, null); m.filename = LIST; m.paths = Module._nodeModulePaths(path.dirname(LIST));
 m._compile(copy, LIST); m.loaded = true; require.cache[LIST] = m;
@@ -35,7 +35,7 @@ const row = R.rowById('acme');
 ok(!!row && R.rowIds().indexOf('acme') === R.rowIds().indexOf('slack') + 1 && !R.checkRow(row).length && R.validateValues(row, { clientId: 'nope' }).ok === false && R.validateValues(row, { clientId: 'acme_abc123' }).ok !== false, 'the registry derives its integration row in list order, with its OWN validator', R.checkRow(row || {}));
 const S = await import(path.join(REPO, 'src/lib/settings-schema.js'));
 const sb = S.SETTINGS_SCHEMA['channels.budgetAcmePerMin'], so = S.SETTINGS_SCHEMA['channels.acmeNameField'];
-ok(sb && sb.channel === 'acme' && sb.tier === 'advanced' && sb.default === 30 && so && so.type === 'enum' && so.when.channel === 'acme' && so.options.length === 2 && !('channel' in so), 'the schema derives its "Per vendor" rows and its option row (when: { channel }) — no schema edit');
+ok(gateOf(sb) && sb.channel === 'acme' && sb.tier === 'advanced' && sb.default === 30 && gateOf(so) && so.type === 'enum' && so.when.channel === 'acme' && so.options.length === 2 && !('channel' in so), 'the schema derives its "Per vendor" rows and its option row (when: { channel }) — no schema edit');
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 ok(ENG.REAL_ADAPTERS.map((x) => x.kind).join(',') === 'lark,gmail,slack,acme', 'REAL_ADAPTERS derives its adapter module from the manifest');
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-manifest-'));
@@ -49,7 +49,7 @@ try {
   ok(typeof inst.apiBearer === 'function' && acme.api.hosts[0] === 'api.acme.test', 'the raw-API fence takes its declared row beside its bearer');
   // lane channel-vendor-one-file: the account menu's "API access…" row reads the view's declared fact (never a kind list)
   const view = eng.adapterView({ id: 'a1', kind: 'acme', label: 'Acme', enabled: true, options: {} });
-  ok(view && view.rawApi === true && view.push === null, 'its account view carries the declared raw-API fact (rawApi; a poll vendor has no push view) — the panel reads it, never its kind');
+  ok(gateOf(view) && view.rawApi === true && view.push === null, 'its account view carries the declared raw-API fact (rawApi; a poll vendor has no push view) — the panel reads it, never its kind');
   ok(eng.consentLandingOf ? eng.consentLandingOf('acme') === null || typeof eng.consentLandingOf('acme') === 'object' : true, 'its consent row was validated at load (ephemeral, no landing)');
 } finally { if (eng.stop) eng.stop(); }
 
@@ -64,6 +64,6 @@ for (const [patch, re, what] of [
   [{ OPTIONS: [{ key: 'tone', label: 'Tone', default: 'x', choices: ['plain'] }] }, /choices must be/, 'an option default outside its choices'], [{ OPTIONS: {} }, /OPTIONS must be an array/, 'OPTIONS not a table'],
   [{ vendorNameOf: 'Acme' }, /vendorNameOf must be a function/, 'a non-function vendorNameOf'], [{ builtin: 'yes' }, /builtin must be a boolean/, 'a non-boolean builtin'],
   [{ policyDefault: 7 }, /policyDefault must be/, 'a non-word policyDefault'], [{ manifest: { kind: 'other' } }, /manifest must be its own/, 'another vendor\'s manifest'],
-]) ok(re.test(refuse(patch) || ''), `REFUSED at register: ${what}`, refuse(patch));
+]) ok(verdictOf(re.test(refuse(patch) || '')), `REFUSED at register: ${what}`, refuse(patch));
 console.log(`\n${fail ? 'FAILED' : 'OK'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

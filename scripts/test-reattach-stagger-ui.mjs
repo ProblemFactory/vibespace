@@ -48,7 +48,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the stub CLI: init, then every user line `ping-N` is answered `pong-N` ──
@@ -107,7 +107,7 @@ const cleanup = () => {
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-check('the worktree server answered', await waitServer(PORT));
+check('the worktree server answered', verdictOf(await waitServer(PORT)));
 
 // ── raw CDP ─────────────────────────────────────────────────────────────────
 const WebSocket = require('ws');
@@ -221,10 +221,10 @@ try {
   await waitApp(); await sleep(500);
   await openWs(PORT);
   const sid = await create('stagger');
-  check('a chat session on the fix', !!sid && await attach(sid, 'stagger'));
+  check('a chat session on the fix', !!sid && verdictOf(await attach(sid, 'stagger')));
   await armPage(sid);
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'ping-0' }));
-  check('the stub answers (ping-0 → pong-0 on screen)', await waitFor(`[...((${LIST(sid)})?.querySelectorAll('.chat-msg') || [])].some((m) => /pong-0/.test(m.textContent))`, 10000));
+  check('the stub answers (ping-0 → pong-0 on screen)', verdictOf(await waitFor(`[...((${LIST(sid)})?.querySelectorAll('.chat-msg') || [])].some((m) => /pong-0/.test(m.textContent))`, 10000)));
 
   // ═══ ① the fix: RUNS restarts, half of them with a lagged frame inside the window ═══
   console.log(`① ${RUNS} restarts on the fix (jitter pinned to 500 ms; the probe typed at the attached frame; every other run injects a lagged frame at +200 ms)`);
@@ -234,12 +234,12 @@ try {
     runs.push(r);
     console.log(`  run ${k}${r.lagged ? ' (lagged)' : ''}: kept=${r.kept} inWindow=${r.inWindow} (ping +${r.pingMs} ms, pong +${r.pongMs} ms) whole=${r.whole} watermark=${r.watermark} attacheds=${r.attacheds.join(' ')}${r.lagged ? ' injected=' + r.laggedInjected : ''} n=${r.inv.n}/${r.inv.total} dom=${r.inv.dom} lastSeq=${r.inv.lastSeq}/${r.maxSeq}`);
   }
-  check(`① every run re-attached on a new epoch and the probe's create op landed INSIDE the stagger window (< 500 ms after the attached frame) — ${runs.filter((r) => r.inWindow).length}/${RUNS}`, runs.every((r) => r.up && r.reattached && r.inWindow), runs.map((r) => [r.tag, r.reattached, r.pingMs]));
-  check(`① THE FIX: the probe's records (the typed line + the pong) are on screen 8 s later in EVERY run — 0 losses in ${RUNS}`, runs.every((r) => r.kept), runs.filter((r) => !r.kept).map((r) => [r.tag, r.inv]));
-  check('① …and the view is WHOLE after each rebuild: ids unique, list = total = DOM, nothing pending or queued', runs.every((r) => r.whole), runs.filter((r) => !r.whole).map((r) => [r.tag, r.inv]));
-  check('① …and the seq watermark is consistent: _seqEpoch = the new epoch, _lastSeq = the last frame applied, never poisoned', runs.every((r) => r.watermark), runs.filter((r) => !r.watermark).map((r) => [r.tag, r.inv, r.maxSeq]));
+  check(`① every run re-attached on a new epoch and the probe's create op landed INSIDE the stagger window (< 500 ms after the attached frame) — ${runs.filter((r) => r.inWindow).length}/${RUNS}`, verdictOf(runs.every((r) => r.up && r.reattached && r.inWindow)), runs.map((r) => [r.tag, r.reattached, r.pingMs]));
+  check(`① THE FIX: the probe's records (the typed line + the pong) are on screen 8 s later in EVERY run — 0 losses in ${RUNS}`, verdictOf(runs.every((r) => r.kept)), runs.filter((r) => !r.kept).map((r) => [r.tag, r.inv]));
+  check('① …and the view is WHOLE after each rebuild: ids unique, list = total = DOM, nothing pending or queued', verdictOf(runs.every((r) => r.whole)), runs.filter((r) => !r.whole).map((r) => [r.tag, r.inv]));
+  check('① …and the seq watermark is consistent: _seqEpoch = the new epoch, _lastSeq = the last frame applied, never poisoned', verdictOf(runs.every((r) => r.watermark)), runs.filter((r) => !r.watermark).map((r) => [r.tag, r.inv, r.maxSeq]));
   const lag = runs.filter((r) => r.lagged);
-  check(`① the lagged runs (${lag.length}) really injected the frame inside the window and saw a SECOND attached of the same epoch (the newer snapshot) — still whole, still kept`, lag.length >= 1 && lag.every((r) => r.laggedInjected && r.attacheds.length >= 2 && r.kept && r.whole), lag.map((r) => [r.tag, r.laggedInjected, r.attacheds]));
+  check(`① the lagged runs (${lag.length}) really injected the frame inside the window and saw a SECOND attached of the same epoch (the newer snapshot) — still whole, still kept`, lag.length >= 1 && verdictOf(lag.every((r) => r.laggedInjected && r.attacheds.length >= 2 && r.kept && r.whole)), lag.map((r) => [r.tag, r.laggedInjected, r.attacheds]));
   check('① no page error', pageErrors.length === 0, pageErrors);
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); } catch {}
   await sleep(500);
@@ -254,16 +254,16 @@ try {
   fs.writeFileSync(cvPath, src.replace(needle, ''));
   execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: cwt, stdio: 'ignore' });
   startServer(cwt, CPORT);
-  check('control: the patched copy\'s server answered', await waitServer(CPORT));
+  check('control: the patched copy\'s server answered', verdictOf(await waitServer(CPORT)));
   await cdp('Page.navigate', { url: `http://127.0.0.1:${CPORT}/` });
   await waitApp(); await sleep(500);
   try { liveWs.close(); } catch {}
   await openWs(CPORT);
   const csid = await create('stagger-ctl');
-  check('control: a chat session on the pre-fix build', !!csid && await attach(csid, 'stagger-ctl'));
+  check('control: a chat session on the pre-fix build', !!csid && verdictOf(await attach(csid, 'stagger-ctl')));
   await armPage(csid);
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: csid, text: 'ping-c0' }));
-  check('control: the stub answers', await waitFor(`[...((${LIST(csid)})?.querySelectorAll('.chat-msg') || [])].some((m) => /pong-c0/.test(m.textContent))`, 10000));
+  check('control: the stub answers', verdictOf(await waitFor(`[...((${LIST(csid)})?.querySelectorAll('.chat-msg') || [])].some((m) => /pong-c0/.test(m.textContent))`, 10000)));
   const ctl = [];
   for (let k = 1; k <= CONTROL_RUNS; k++) {
     const r = await restartRun(cwt, CPORT, csid, `c${k}`, { lagged: false });
@@ -272,7 +272,7 @@ try {
   }
   const lost = ctl.filter((r) => r.inWindow && !r.kept);
   check(`② CONTROL: the pre-fix copy LOSES the probe's records in ${lost.length}/${CONTROL_RUNS} runs (the measured class: the ops ran into the list the slab replaced; the watermark says applied) — the ① rule can go red`, lost.length >= 1, ctl.map((r) => [r.tag, r.inWindow, r.kept, r.inv]));
-  check('② CONTROL: …and in every lost run the watermark still claims the lost frames (lastSeq = the last frame seen) — the resume by seq could never bring them back', lost.every((r) => r.inv.lastSeq === r.maxSeq), lost.map((r) => [r.tag, r.inv.lastSeq, r.maxSeq]));
+  check('② CONTROL: …and in every lost run the watermark still claims the lost frames (lastSeq = the last frame seen) — the resume by seq could never bring them back', verdictOf(lost.every((r) => r.inv.lastSeq === r.maxSeq)), lost.map((r) => [r.tag, r.inv.lastSeq, r.maxSeq]));
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: csid })); } catch {}
 } catch (e) {
   failed++;
@@ -281,4 +281,4 @@ try {
 if (failed && process.env.STAGGER_KEEP_LOG) { try { for (const d of [wt, cwt]) if (fs.existsSync(logOf(d))) fs.copyFileSync(logOf(d), process.env.STAGGER_KEEP_LOG + '.' + path.basename(d)); } catch {} }
 console.log(`\n${failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`}`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

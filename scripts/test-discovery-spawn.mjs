@@ -87,7 +87,7 @@ if (process.env.VS_DISC_ARM) {
 }
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => {
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (c) { pass++; console.log('  ✓ ' + n); }
   else { fail++; console.error('  ✗ ' + n + (extra ? ' — ' + JSON.stringify(extra) : '')); }
 };
@@ -142,7 +142,7 @@ const inGroupG = (pid, pg) => { try { const st = fs.readFileSync(`/proc/${pid}/s
   ok(ident.readPpid(child.pid) === process.pid,
     `readPpid names the real parent (${ident.readPpid(child.pid)} === ${process.pid})`);
   const mine = ident.readChildPids(process.pid);
-  ok(mine.includes(child.pid), `readChildPids lists a live child (${JSON.stringify(mine)})`);
+  ok(verdictOf(mine.includes(child.pid)), `readChildPids lists a live child (${JSON.stringify(mine)})`);
   ok(ident.readChildPids(child.pid).length === 0, 'a childless pid answers with an EMPTY list, not a guess');
   ok(ident.readPpid(0) === null && ident.readPpid(-1) === null && ident.readChildPids(0).length === 0,
     'a nonsense pid is refused without touching anything');
@@ -280,7 +280,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   ok(withPath.sessions === TOTAL, `the sweep really discovered all ${TOTAL} locks — ${N} with procStart + ${NO_PS} without (${withPath.sessions})`);
   ok(withPath.running === TOTAL, `and it verified EVERY one as RUNNING (${withPath.running}) — both identity rungs really ran`);
   ok(withPath.spawns <= 1, `≤ 1 child process for ${TOTAL} locks + ${N} live sessions (${withPath.spawns}: ${JSON.stringify(withPath.byCmd)})`);
-  if (hasTmux) ok(Object.keys(withPath.byCmd).every((k) => k.endsWith(':tmux')), 'the only survivor is `tmux list-panes` (ONE per sweep)');
+  if (hasTmux) ok(verdictOf(Object.keys(withPath.byCmd).every((k) => k.endsWith(':tmux'))), 'the only survivor is `tmux list-panes` (ONE per sweep)');
 
   const noTmux = runArm('src/session-store.js', { noTmux: true });
   console.log(`  · sweep with a PATH that has NO tmux: ${JSON.stringify(noTmux)}`);
@@ -301,7 +301,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     controlsRan++;
     const pre = git.stdout;
     // the control must really BE the retired shape, or it controls nothing
-    ok(/pgrep/.test(pre) && /'ps', \['-p', String\(pid\), '-o', 'ppid='\]/.test(pre),
+    ok(gateOf(/pgrep/.test(pre)) && verdictOf(/'ps', \['-p', String\(pid\), '-o', 'ppid='\]/.test(pre)),
       'the control copy really carries the retired per-item shapes (`pgrep -P`, `ps -p -o ppid=`)');
     const preFile = MUTS.write('src/session-store.js', pre, 'prefix', { esm: false });
     // …with this box's NORMAL PATH, on purpose: master's identity rung for a
@@ -337,7 +337,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   ok(!/pgrep/.test(code), 'no `pgrep` survives in session-store code');
   ok(!/_childPidCache/.test(code), 'the 15s per-childPid cache is gone with the fork it existed to blunt');
   ok(!/'ppid='/.test(code), 'no per-pid `ps -o ppid=` survives in session-store code');
-  ok(/readChildPids\(/.test(code) && /readPpid\(/.test(code), 'session-store asks THE process reader (src/cli-identity.js) for both facts');
+  ok(gateOf(/readChildPids\(/.test(code)) && verdictOf(/readPpid\(/.test(code)), 'session-store asks THE process reader (src/cli-identity.js) for both facts');
 }
 
 // ── §6 the PATH lookup itself must not spawn (a `which` would be one more fork
@@ -374,7 +374,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   // late this would read 0 and so would everything above it.
   await store.isProcessClaudeAsync(process.pid);
   const t2 = censusStop();
-  ok(t2.spawns === 1 && Object.keys(t2.byCmd)[0].endsWith(':ps'),
+  ok(t2.spawns === 1 && verdictOf(Object.keys(t2.byCmd)[0].endsWith(':ps')),
     `POSITIVE CONTROL: the census sees session-store's OWN destructured exec (${JSON.stringify(t2)})`);
 }
 
@@ -418,9 +418,9 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     return null;
   };
   const headSrc = sliceFn(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), 'refreshWebuiPids');
-  ok(!!headSrc && /activeSessions/.test(headSrc) && headSrc.endsWith('}'),
+  ok(!!headSrc && gateOf(/activeSessions/.test(headSrc)) && verdictOf(headSrc.endsWith('}')),
     `the shipped refreshWebuiPids() sliced out of server.js (${headSrc ? headSrc.length + ' chars' : 'NOT FOUND'})`);
-  ok(!!headSrc && !/pgrep/.test(headSrc) && /readChildPids\(meta\.childPid\)/.test(headSrc),
+  ok(!!headSrc && !/pgrep/.test(headSrc) && verdictOf(/readChildPids\(meta\.childPid\)/.test(headSrc)),
     'the shipped copy asks THE process reader and carries no `pgrep`');
 
   // THE FIXTURE: N pty-wrapper stand-ins, each with TWO real children — the
@@ -499,7 +499,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     } else {
     controlsRan++;
       const preSrc = sliceFn(git.stdout, 'refreshWebuiPids');
-      ok(!!preSrc && /execFileSync\('pgrep', \['-P'/.test(preSrc),
+      ok(!!preSrc && verdictOf(/execFileSync\('pgrep', \['-P'/.test(preSrc)),
         'the control copy really carries the retired per-session `pgrep -P` (or it controls nothing)');
       const pre = runRefresher(preSrc);
       console.log(`  · refreshWebuiPids, PRE-FIX, same fixture: ${JSON.stringify(pre.error ? pre : { ms: pre.ms, spawns: pre.spawns, pids: pre.set.size })}`);
@@ -507,7 +507,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
       ok(pre.spawns >= WEBUI_N,
         `PRE-FIX: ${pre.spawns} SYNCHRONOUS child processes for ${WEBUI_N} live sessions — the defect reproduces`);
       const same = !!pre.set && !!head.set && pre.set.size === head.set.size && [...pre.set].every((p) => head.set.has(p));
-      ok(same,
+      ok(verdictOf(same),
         `and the two answers are IDENTICAL (${pre.set?.size} === ${head.set?.size} pids) — the fork bought nothing`);
       ok(pre.ms > head.ms,
         `PRE-FIX blocked the loop ${pre.ms} ms where the shipped copy takes ${head.ms} ms (same box, same fixture; ~9.16 s vs 1.6 ms at 61 sessions / 1.5 GB RSS — VS_WEBUI_N=61 VS_WEBUI_RSS_MB=1500)`);
@@ -522,7 +522,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     const callers = ['src/ws-handler.js', 'src/ws-create.js', 'src/server/boot-restore.js']
       .filter((f) => /refreshWebuiPids\(\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
     ok(callers.length >= 3, `refreshWebuiPids is still called from the kill / create / restore paths (${callers.join(', ')})`);
-    ok(/activeSessions\.delete\(data\.sessionId\);\s*\n\s*refreshWebuiPids\(\);/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')),
+    ok(verdictOf(/activeSessions\.delete\(data\.sessionId\);\s*\n\s*refreshWebuiPids\(\);/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'))),
       'and the kill case still calls it IN-BAND, before the broadcast — the shape that made a Terminate blank the window for 30 s');
   }
 }
@@ -619,7 +619,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   // word-match would fail the fix on the comment that explains it. This is the
   // same rule test-architecture §45 applies — a census reads CODE.
   const codeOnly = (s) => String(s || '').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-  ok(!!shippedSrc && /pidsMatchingCmdline\(session\.socketPath\)/.test(codeOnly(shippedSrc))
+  ok(!!shippedSrc && gateOf(/pidsMatchingCmdline\(session\.socketPath\)/.test(codeOnly(shippedSrc)))
     && !/pgrep/.test(codeOnly(shippedSrc)),
     `the shipped kill-path body asks THE process reader and spawns no \`pgrep\` (${shippedSrc ? shippedSrc.length + ' chars' : 'NOT FOUND'})`);
   const kHead = await runKill(shippedSrc, 'shipped');
@@ -639,16 +639,16 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     } else {
     controlsRan++;
       const preSrc = sliceKillBody(git.stdout);
-      ok(!!preSrc && /execFileAsync\('pgrep', \['-f', session\.socketPath\]/.test(preSrc),
+      ok(!!preSrc && verdictOf(/execFileAsync\('pgrep', \['-f', session\.socketPath\]/.test(preSrc)),
         'the control copy really carries the retired `pgrep -f <socketPath>` (or it controls nothing)');
       const kPre = await runKill(preSrc, 'pre-fix');
       console.log(`  · kill-path socket lookup, PRE-FIX: ${JSON.stringify(kPre.error ? kPre : { ms: kPre.ms, spawns: kPre.spawns, killed: kPre.killed })}`);
       ok(!kPre.error, `the control copy runs (${kPre.error || 'ok'})`);
-      ok(kPre.spawns === 1 && Object.keys(kPre.byCmd).some((k) => k.endsWith(':pgrep')),
+      ok(kPre.spawns === 1 && verdictOf(Object.keys(kPre.byCmd).some((k) => k.endsWith(':pgrep'))),
         `PRE-FIX: ONE child process per kill (${kPre.spawns}: ${JSON.stringify(kPre.byCmd)}) — the fork whose cost grows with the server's RSS`);
       // `undefined === undefined` is not an agreement: name the pids BOTH arms
       // had to find, or this assert passes hardest when neither arm ran.
-      ok(Array.isArray(kPre.killed) && kPre.killed.length === expectKilled.length
+      ok(gateOf(Array.isArray(kPre.killed)) && kPre.killed.length === expectKilled.length
         && JSON.stringify(kPre.killed) === JSON.stringify(kHead.killed),
         `and the two answers are IDENTICAL (${JSON.stringify(kPre.killed)}) — the fork bought nothing`);
     }
@@ -660,7 +660,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     censusStart();
     const viaPs = await ident.pidsMatchingCmdline(NEEDLE, { procRoot: path.join(scratch('disc-kill-noproc'), 'nope') });
     const t = censusStop();
-    ok(t.spawns === 1 && Object.keys(t.byCmd).some((k) => k.endsWith(':pgrep')),
+    ok(t.spawns === 1 && verdictOf(Object.keys(t.byCmd).some((k) => k.endsWith(':pgrep'))),
       `no-/proc rung: ONE \`pgrep -f\` for the whole question (${t.spawns}: ${JSON.stringify(t.byCmd)})`);
     ok(JSON.stringify(viaPs.sort((a, b) => a - b)) === JSON.stringify(wantPids),
       `and it names the SAME pids as the /proc rung (${JSON.stringify(viaPs)})`);
@@ -695,7 +695,7 @@ console.log('\n§9c a live lock with no cwd never fails the sweep');
   ok(src.split(SKIP).length === 2, 'the skip is ONE line in the sweep (the control removes exactly it)');
   controlsRan++;
   const ctl = arm2(MUTS.write('src/session-store.js', editAnchor(src, SKIP, '', "src/session-store.js"), 'cwdless', { esm: false }));
-  ok(/cwd|replace/.test(ctl.error || ''), `CONTROL: without the skip the same fixture throws out of the sweep (${ctl.error || JSON.stringify(ctl)})`);
+  ok(verdictOf(/cwd|replace/.test(ctl.error || '')), `CONTROL: without the skip the same fixture throws out of the sweep (${ctl.error || JSON.stringify(ctl)})`);
   try { fs.rmSync(H2, { recursive: true, force: true }); } catch { }
 }
 
@@ -711,7 +711,7 @@ console.log('\n§10 the pre-fix copy never touches the tree');
 // ANY control ran — a checkout that can show the ref writes ≥ 1 copy, a
 // shallow one writes none and says so.
 ok((controlsRan > 0) === (MUTS.files.length > 0), `§10 copies exist exactly when a negative control ran (${controlsRan} ran, ${MUTS.files.length} written)`);
-for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: controlsRan ? 1 : 0, label: controlsRan ? '' : '(every negative control was SKIPPED — no git history for the pre-fix ref on this checkout, so nothing was written) ' })) ok(r.pass, '§10 ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: controlsRan ? 1 : 0, label: controlsRan ? '' : '(every negative control was SKIPPED — no git history for the pre-fix ref on this checkout, so nothing was written) ' })) ok(verdictOf(r.pass), '§10 ' + r.name, r.pass ? undefined : r.detail);
 
 // ── §11 A FIXTURE ENDS WITH ITS CHILDREN (B-b403, lane bl-scratch, 2026-11-17) ──────
 // §5's webui stand-ins and §6's kill fixtures are shells that FORK (`sleep 300 & sleep 300 & read x`, `sh -c 'sleep 300'`).
@@ -728,7 +728,7 @@ console.log('\n§11 a fixture ends with its children');
   const ctlKids = ident.readChildPids(ctl.pid);
   ctl.kill('SIGKILL');
   await until(() => !alive(ctl.pid));
-  ok(ctlKids.length === 2 && !alive(ctl.pid) && ctlKids.every(alive), `§11 CONTROL: a forking shell ended by its own pid (the old teardown) leaves its children alive (red: ${ctlKids.filter(alive).length} of ${ctlKids.length})`);
+  ok(ctlKids.length === 2 && !alive(ctl.pid) && verdictOf(ctlKids.every(alive)), `§11 CONTROL: a forking shell ended by its own pid (the old teardown) leaves its children alive (red: ${ctlKids.filter(alive).length} of ${ctlKids.length})`);
   try { if (ctlKids.some(alive) && Number.isInteger(ctl.pid) && ctl.pid > 1) process.kill(-ctl.pid, 'SIGKILL'); } catch { }   // its members, read alive, hold the group id
   // B-b403 cure 2 (主开发 06:13Z): a fixture whose leader was REAPED while a member lives — the member, read alive, holds the
   // group id, so the teardown still ends that group (the leg after cleanup() is red under the leader-only teardown)
@@ -740,13 +740,13 @@ console.log('\n§11 a fixture ends with its children');
   lone.kill('SIGKILL');
   await until(() => lone.exitCode !== null || lone.signalCode !== null);
   const leaderOnly = (k) => k.exitCode === null && k.signalCode === null;
-  ok(loneKids.length === 1 && !leaderOnly(lone) && loneKids.every(alive), `§11 SETUP (cure 2): its leader is reaped while its member lives — the leader-only condition is false for this group (${loneKids.filter(alive).length} of ${loneKids.length} alive)`);
+  ok(loneKids.length === 1 && !leaderOnly(lone) && verdictOf(loneKids.every(alive)), `§11 SETUP (cure 2): its leader is reaped while its member lives — the leader-only condition is false for this group (${loneKids.filter(alive).length} of ${loneKids.length} alive)`);
   cleanup();
   const gone = await until(() => !grand.some(alive) && !ctlKids.some(alive) && !loneKids.some(alive));
   ok(!loneKids.some(alive), `§11 cure 2: a group whose leader was reaped is still ended through the member read alive in it (${loneKids.filter(alive).length} alive)`);
-  ok(grand.length >= Number(process.env.VS_WEBUI_N || 20) * 2 && gone, `§11 the teardown ends every forking fixture's group: ${grand.length} children of ${shells} shells gone (${grand.filter(alive).length} alive), the control's 2 by its group`);
+  ok(grand.length >= Number(process.env.VS_WEBUI_N || 20) * 2 && verdictOf(gone), `§11 the teardown ends every forking fixture's group: ${grand.length} children of ${shells} shells gone (${grand.filter(alive).length} alive), the control's 2 by its group`);
 }
 
 cleanup();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

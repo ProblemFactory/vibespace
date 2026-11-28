@@ -29,7 +29,7 @@ const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome for the client'); process.exit(0); }
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 250) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const PNG_DIR = process.env.VIBESPACE_RLS_PNG_DIR || null;
@@ -165,11 +165,11 @@ try {
   await D.ev('(app.sidebar.toggle(true), true)');
   await until(() => D.ev("document.getElementById('session-list-menu')?.offsetParent ? true : null"), 5000, 100);
   const btn = await D.ev(`(() => { const b = document.getElementById('session-list-menu'); if (!b) return null; const q = b.getBoundingClientRect(); return { shown: b.offsetParent !== null, svg: !!b.querySelector('svg'), title: b.title, w: Math.round(q.width), row: b.parentElement.id }; })()`);
-  check(`desk: the ⋯ sits in the session list's own header row, an SVG icon, titled 「${btn?.title}」`, !!btn && btn.shown && btn.svg && btn.row === 'session-filter-row' && btn.title === '会话列表操作', btn);
+  check(`desk: the ⋯ sits in the session list's own header row, an SVG icon, titled 「${btn?.title}」`, !!btn && gateOf(btn.shown) && gateOf(btn.svg) && btn.row === 'session-filter-row' && btn.title === '会话列表操作', btn);
   await press(D.S, D.ev, '#session-list-menu');
   const menu = await until(() => D.ev(`(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); if (!m) return null; return [...m.querySelectorAll('.context-menu-item')].map((n) => ({ text: n.textContent.trim(), svg: !!n.querySelector('svg') })); })()`), 5000, 100);
   // lane auto-resume-bulk (.349): the ⋯ also holds the two bulk auto-resume acts now — the refresh entry stays FIRST
-  check(`desk: the menu's FIRST entry is 「${menu?.[0]?.text}」 with its SVG icon (the list-wide actions: refresh + the bulk auto-resume acts)`, !!menu && menu.length === 4 && menu[0].text === '刷新所有活着的会话…' && menu.every((x) => x.svg) && /^对所有会话开启自动继续$/.test(menu[1].text), menu);
+  check(`desk: the menu's FIRST entry is 「${menu?.[0]?.text}」 with its SVG icon (the list-wide actions: refresh + the bulk auto-resume acts)`, !!menu && menu.length === 4 && menu[0].text === '刷新所有活着的会话…' && gateOf(menu.every((x) => x.svg)) && verdictOf(/^对所有会话开启自动继续$/.test(menu[1].text)), menu);
   const sideRect = await D.ev(`(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); const s = document.getElementById('sidebar').getBoundingClientRect(); const q = m.getBoundingClientRect(); return { x: 0, y: 0, width: Math.min(innerWidth, Math.max(s.right, q.right) + 12), height: Math.min(innerHeight, Math.max(q.bottom + 40, 260)) }; })()`);
   const pMenu = await shot(D.S, 'desk-menu.png', sideRect);
   await press(D.S, D.ev, MENU_ITEM);
@@ -183,7 +183,7 @@ try {
   check(`desk: an emptied note — 确定 disabled, said inline 「${emptied?.err}」`, !!emptied && emptied.ok === true && emptied.err === '请先写提醒内容', emptied);
   await D.ev(`(() => { const t = document.querySelector('#refresh-live-dialog textarea'); t.value = ${JSON.stringify(NOTE_ZH)}; t.dispatchEvent(new Event('input')); return true; })()`);
   const deskOk = await pressUncovered(D.S, D.ev, '#refresh-live-dialog .btn-create');
-  check(`desk: 确定 is pressed STILL and lands on 确定 (waited ${deskOk.waitedMs} ms, ${deskOk.looks} looks)${deskOk.ok ? '' : ` — NOT pressed: ${deskOk.found === false ? 'no button' : deskOk.disabled ? 'disabled' : deskOk.landed ? `MISSED — ${deskOk.landed.why}` : `${deskOk.verdict} (under its point: ${deskOk.cover?.tag}${deskOk.movers?.length ? `; moving: ${deskOk.movers.join(', ')}` : ''})`}`}`, deskOk.ok, deskOk);
+  check(`desk: 确定 is pressed STILL and lands on 确定 (waited ${deskOk.waitedMs} ms, ${deskOk.looks} looks)${deskOk.ok ? '' : ` — NOT pressed: ${deskOk.found === false ? 'no button' : deskOk.disabled ? 'disabled' : deskOk.landed ? `MISSED — ${deskOk.landed.why}` : `${deskOk.verdict} (under its point: ${deskOk.cover?.tag}${deskOk.movers?.length ? `; moving: ${deskOk.movers.join(', ')}` : ''})`}`}`, verdictOf(deskOk.ok), deskOk);
   const toast = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /已排给/.test(x)); return t && !document.getElementById('refresh-live-dialog') ? t : null; })()`), 10000, 150);
   check(`desk: 确定 ⇒ the dialog closes, the toast 「${toast}」`, toast === '已排给 2 个，跳过 1 个已停止的', { toast, all: await D.ev('window.__toastTexts()'), pageErrors, // .371: on a red, WHERE it stopped — the last clicks, the refresh-note request (status, ms) or none, the dialog's state
     after: await D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); const b = o && o.querySelector('.btn-create'); return { clicks: window.__clicks.slice(-6), fetches: window.__fetches, dialog: !!o, okDisabled: b ? b.disabled : null, err: o ? (o.querySelector('.refresh-live-error') || {}).textContent : null }; })()`) });
@@ -191,10 +191,10 @@ try {
   const notes1 = refreshNotes();
   check('desk: the stash holds ONE note each under the 2 live conversations, none under the stopped one', notes1[SIDS[0]].length === 1 && notes1[SIDS[1]].length === 1 && notes1[SIDS[0]][0] === NOTE_ZH && notes1[SIDS[2]].length === 0, notes1);
   check('desk: no create / input / kill frame left the page (never a wake — the note waits for the next turn)', (await D.ev('window.__frames.length')) === 0, await D.ev('window.__frames'));
-  check('desk: the server says it: 2 queued, 1 skipped, no spend path', srvLog.join('').includes('[stash] refresh note queued for 2 live conversation(s) (0 replaced, 1 skipped, 0 failed)') && !/\[spend\][^\n]*refresh/i.test(srvLog.join('')), srvLog.join('').split('\n').filter((l) => /refresh|spend/.test(l)).slice(-6));
+  check('desk: the server says it: 2 queued, 1 skipped, no spend path', gateOf(srvLog.join('').includes('[stash] refresh note queued for 2 live conversation(s) (0 replaced, 1 skipped, 0 failed)')) && !/\[spend\][^\n]*refresh/i.test(srvLog.join('')), srvLog.join('').split('\n').filter((l) => /refresh|spend/.test(l)).slice(-6));
   const strips = await until(() => D.ev(`(() => { const a = ${stripOf(SIDS[0])}, b = ${stripOf(SIDS[1])}, c = ${stripOf(SIDS[2])}; return a.shown && b.shown ? { a, b, c } : null; })()`), 10000, 150);
-  check(`desk: the strip above the composer on BOTH live windows — 「${strips?.a?.head}${strips?.a?.parts}」`, !!strips && strips.a.head === '有 1 条通知在等这个 agent 的下一轮' && /VibeSpace 通知/.test(strips.a.parts) && strips.b.shown, strips);
-  check('desk: …and none on the stopped window', !!strips && strips.c.win && !strips.c.shown, strips?.c);
+  check(`desk: the strip above the composer on BOTH live windows — 「${strips?.a?.head}${strips?.a?.parts}」`, !!strips && strips.a.head === '有 1 条通知在等这个 agent 的下一轮' && gateOf(/VibeSpace 通知/.test(strips.a.parts)) && verdictOf(strips.b.shown), strips);
+  check('desk: …and none on the stopped window', !!strips && gateOf(strips.c.win) && !strips.c.shown, strips?.c);
   const winRect = (sid) => D.ev(`(() => { const q = ${winOf(sid)}.element.getBoundingClientRect(); const x = Math.max(0, q.left), y = Math.max(0, q.top); return { x, y, width: Math.min(innerWidth - x, q.width), height: Math.min(innerHeight - y, q.height) }; })()`);
   await D.ev(`(() => { const w = ${winOf(SIDS[0])}; app.wm.focusWindow ? app.wm.focusWindow(w.id) : null; const b = w.element.querySelector('.chat-stash-more'); b && b.click(); return true; })()`);
   const det = await until(() => D.ev(`(() => { const f = ${stripOf(SIDS[0])}; return f.detailsOpen && f.rows.length ? f : null; })()`), 5000, 100);
@@ -237,7 +237,7 @@ try {
     // ① the form opened mid-slide: 确定 rides the workspace
     const o1 = await slideOpen();
     const look0 = await D.ev(stillLookSource(OK_SEL));
-    check(`still: the form stands in a SLIDING workspace — 确定 under its point, moving: ${(look0?.movers || []).join(', ')}`, !!o1 && !!look0 && look0.found && look0.hits && (look0.movers || []).some((m) => /^margin-left@div#main-wrapper/.test(m)), { o1, look0 });
+    check(`still: the form stands in a SLIDING workspace — 确定 under its point, moving: ${(look0?.movers || []).join(', ')}`, !!o1 && !!look0 && gateOf(look0.found) && gateOf(look0.hits) && verdictOf((look0.movers || []).some((m) => /^margin-left@div#main-wrapper/.test(m))), { o1, look0 });
     // ② RED CONTROL — a press aimed where 确定 WAS (it presses once the button's LEFT edge has slid 20 px past that point — whatever its
     //   label's width; lane ui-plain-words pick 5 gave it a doing word, «提醒 N 个会话（下一轮）», wider than 2 × 60 px): a named miss
     const red1 = await DOOR(OK_SEL, { gate: false, aim: async (look) => { await until(() => D.ev(`(() => { const e = document.querySelector(${JSON.stringify(OK_SEL)}); if (!e) return null; const q = e.getBoundingClientRect(); return q.left - ${look.x} >= 20 ? true : null; })()`), 4000, 20); return { x: look.x, y: look.y }; } });
@@ -256,7 +256,7 @@ try {
     await D.ev('(window.__toasts.length = 0, true)');
     const good = await DOOR(OK_SEL);
     const g = DOOR.last || {};
-    check(`still: THE STILL DOOR waits the slide out (${g.waitedMs} ms, ${g.looks} looks) and presses 确定 when nothing moves it — it lands on 确定${g.landed && !g.landed.ok ? ` — MISSED: ${g.landed.why}` : ''}`, good === true && !!g.look && (g.look.movers || []).length === 0 && g.landed && g.landed.ok && g.waitedMs >= 500, g);
+    check(`still: THE STILL DOOR waits the slide out (${g.waitedMs} ms, ${g.looks} looks) and presses 确定 when nothing moves it — it lands on 确定${g.landed && !g.landed.ok ? ` — MISSED: ${g.landed.why}` : ''}`, good === true && !!g.look && (g.look.movers || []).length === 0 && gateOf(g.landed) && gateOf(g.landed.ok) && g.waitedMs >= 500, g);
     const toast3 = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /已排给/.test(x)); return t && !document.getElementById('refresh-live-dialog') ? t : null; })()`), 10000, 150);
     check(`still: …the dialog closes with the toast 「${toast3}」`, toast3 === '已排给 2 个，跳过 1 个已停止的', { toast3, all: await D.ev('window.__toastTexts()') });
   } finally {
@@ -288,7 +288,7 @@ try {
   await tap(Ph.S, Ph.ev, MENU_ITEM);
   const pdlg = await until(() => Ph.ev(dialogFacts), 5000, 100);
   check(`phone: the confirm — 「${pdlg?.count}」, no stopped window open here so nothing named as skipped`, !!pdlg && pdlg.count === '将提醒 2 个活着的会话（下一轮生效，不唤醒、不计费）' && pdlg.skip === '' && pdlg.note === NOTE_ZH, pdlg);
-  check('phone: 取消 / 确定 ≥ 44 px tall and inside the viewport', !!pdlg && pdlg.btns.length === 2 && pdlg.btns.every((b) => b.h >= 44 && b.l >= 0 && b.r <= pdlg.vw), pdlg?.btns);
+  check('phone: 取消 / 确定 ≥ 44 px tall and inside the viewport', !!pdlg && pdlg.btns.length === 2 && verdictOf(pdlg.btns.every((b) => b.h >= 44 && b.l >= 0 && b.r <= pdlg.vw)), pdlg?.btns);
   const NOTE2 = NOTE_ZH + '（第二次：release-notes skill 改了模板）';
   await Ph.ev(`(() => { const t = document.querySelector('#refresh-live-dialog textarea'); t.value = ${JSON.stringify(NOTE2)}; t.dispatchEvent(new Event('input')); return true; })()`);
   const pPhoneDialog = await shot(Ph.S, 'phone-dialog.png');
@@ -296,7 +296,7 @@ try {
   const ptoast = await until(() => Ph.ev(`window.__toastTexts().find((x) => /已排给/.test(x)) || null`), 10000, 150);
   check(`phone: the toast 「${ptoast}」`, ptoast === '已排给 2 个活着的会话——下一轮生效', ptoast);
   const notes2 = refreshNotes();
-  check('a second press REPLACES the waiting note — still ONE per live conversation, the edited words', notes2[SIDS[0]].length === 1 && notes2[SIDS[1]].length === 1 && notes2[SIDS[0]][0] === NOTE2 && notes2[SIDS[2]].length === 0 && srvLog.join('').includes('(2 replaced, 0 skipped, 0 failed)'), notes2);
+  check('a second press REPLACES the waiting note — still ONE per live conversation, the edited words', notes2[SIDS[0]].length === 1 && notes2[SIDS[1]].length === 1 && notes2[SIDS[0]][0] === NOTE2 && notes2[SIDS[2]].length === 0 && verdictOf(srvLog.join('').includes('(2 replaced, 0 skipped, 0 failed)')), notes2);
   const deskAfter = await until(() => D.ev(`(() => { const f = ${stripOf(SIDS[0])}; return f.rows.some((r) => r.includes('第二次')) ? f : null; })()`), 10000, 150);
   check('desk (the first client): its strip still counts ONE, now the edited note', !!deskAfter && deskAfter.head === '有 1 条通知在等这个 agent 的下一轮' && deskAfter.rows.length === 1, deskAfter || await D.ev(stripOf(SIDS[0])));
   if (PNG_DIR) console.log('  PNGs:', [pMenu, pDialog, pToast, pStrip, pPhoneStrip, pPhoneMenu, pPhoneDialog].filter(Boolean).join(' '));
@@ -313,4 +313,4 @@ try {
   check(`the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`, lit.offenders.length === 0, JSON.stringify(lit.offenders.slice(0, 3)));
 }
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

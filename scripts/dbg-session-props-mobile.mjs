@@ -30,7 +30,7 @@ const SHOTS = '/tmp/vs-b6b6d-shots';
 fs.mkdirSync(SHOTS, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 try { execSync('git worktree prune', { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -112,12 +112,12 @@ try {
   })()`);
   console.log(JSON.stringify(res, null, 2));
   check('a props window opened', !res.error);
-  check('Model row states value + origin', res.rows?.some((r) => /Model/.test(r.label) && /gpt-6-astra/.test(r.text) && /own value/.test(r.text)), JSON.stringify(res.rows));
-  check('Effort row states value + origin', res.rows?.some((r) => /Effort/.test(r.label) && /ultra/.test(r.text) && /own value/.test(r.text)));
+  check('Model row states value + origin', verdictOf(res.rows?.some((r) => /Model/.test(r.label) && /gpt-6-astra/.test(r.text) && /own value/.test(r.text))), JSON.stringify(res.rows));
+  check('Effort row states value + origin', verdictOf(res.rows?.some((r) => /Effort/.test(r.label) && /ultra/.test(r.text) && /own value/.test(r.text))));
   check('no horizontal overflow inside the panel at 375px', res.contentOverflowX <= 0, 'overflowX=' + res.contentOverflowX);
   check('no horizontal overflow of the document at 375px', res.docOverflowX <= 0, 'docOverflowX=' + res.docOverflowX);
-  check('every measured row fits in the 375px viewport width', (res.rows || []).every((r) => r.scrollW <= r.clientW + 1), JSON.stringify((res.rows || []).map((r) => [r.label, r.scrollW, r.clientW])));
-  check('the ORIGIN is readable — no row clips its value at 375px', (res.rows || []).every((r) => !r.valClipped), JSON.stringify((res.rows || []).map((r) => [r.label, r.valClipped, r.valScrollW, r.valW])));
+  check('every measured row fits in the 375px viewport width', verdictOf((res.rows || []).every((r) => r.scrollW <= r.clientW + 1)), JSON.stringify((res.rows || []).map((r) => [r.label, r.scrollW, r.clientW])));
+  check('the ORIGIN is readable — no row clips its value at 375px', verdictOf((res.rows || []).every((r) => !r.valClipped)), JSON.stringify((res.rows || []).map((r) => [r.label, r.valClipped, r.valScrollW, r.valW])));
   const png = await cdp('Page.captureScreenshot', {});
   fs.writeFileSync(path.join(SHOTS, 'session-props-375x667.png'), Buffer.from(png.data, 'base64'));
   console.log('screenshot: ' + path.join(SHOTS, 'session-props-375x667.png'));
@@ -161,7 +161,7 @@ try {
   console.log(JSON.stringify(res2, null, 2));
   const mRow = (res2.rows || []).find((r) => /Model/.test(r.label));
   const eRow = (res2.rows || []).find((r) => /Effort/.test(r.label));
-  check('r2: a session predating the stated origin still shows the VALUE', !!mRow && /gpt-6-astra/.test(mRow.text) && !!eRow && /ultra/.test(eRow.text), JSON.stringify(res2.rows));
+  check('r2: a session predating the stated origin still shows the VALUE', !!mRow && gateOf(/gpt-6-astra/.test(mRow.text)) && !!eRow && verdictOf(/ultra/.test(eRow.text)), JSON.stringify(res2.rows));
   check('r2: …and NO origin parenthetical — the panel does not invent "(instance default)"',
     !!mRow && mRow.dimSpans.length === 0 && !!eRow && eRow.dimSpans.length === 0,
     JSON.stringify((res2.rows || []).map((r) => [r.label, r.text, r.dimSpans])));
@@ -204,7 +204,7 @@ try {
   const byName = (n) => (wire.creates || []).find((c) => c.name === n);
   check('r2 wire: createSession did not throw', !wire.err, wire.err);
   check('r2 wire: a NEW create carries the STATED empty verbatim (an explicit "Auto" is a choice)',
-    !!byName('wire-auto') && byName('wire-auto').hasModel && byName('wire-auto').model === '' && byName('wire-auto').hasEffort && byName('wire-auto').effort === '',
+    !!byName('wire-auto') && gateOf(byName('wire-auto').hasModel) && byName('wire-auto').model === '' && gateOf(byName('wire-auto').hasEffort) && byName('wire-auto').effort === '',
     JSON.stringify(byName('wire-auto')));
   check('r2 wire: a NEW create that supplied nothing still carries the instance defaults',
     !!byName('wire-none') && byName('wire-none').model === 'gpt-5.6-sol' && byName('wire-none').effort === 'xhigh',
@@ -272,10 +272,10 @@ try {
   const iM = (res3.rows || []).find((r) => /Model/.test(r.label));
   const iE = (res3.rows || []).find((r) => /Effort/.test(r.label));
   check('r3 375x667: the newly-reachable "(instance default)" row renders on both twins',
-    !!iM && /instance default/.test(iM.text) && !!iE && /instance default/.test(iE.text),
+    !!iM && gateOf(/instance default/.test(iM.text)) && !!iE && verdictOf(/instance default/.test(iE.text)),
     JSON.stringify((res3.rows || []).map((r) => [r.label, r.text])));
   check('r3 375x667: …unclipped, and no horizontal overflow',
-    (res3.rows || []).every((r) => !r.valClipped && r.scrollW <= r.clientW + 1)
+    gateOf((res3.rows || []).every((r) => !r.valClipped && r.scrollW <= r.clientW + 1))
     && res3.contentOverflowX <= 0 && res3.docOverflowX <= 0,
     JSON.stringify({ rows: (res3.rows || []).map((r) => [r.label, r.valClipped, r.h]), c: res3.contentOverflowX, d: res3.docOverflowX }));
   const png3 = await cdp('Page.captureScreenshot', {});
@@ -284,4 +284,4 @@ try {
 } catch (e) {
   failed++; console.error('measurement failed: ' + e.message);
 }
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -39,7 +39,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUT = mutantCopies('phone-titlebar', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } return !!c; };
 const J = JSON.stringify;
 const TC = await import('../src/lib/title-chips.js');
 // an older tree (the base, r1, r2) lacks exports this suite judges: a call that throws is a NAMED failure, never a crash
@@ -320,7 +320,7 @@ console.log('§4 NEGATIVE CONTROLS on patched copies (outside the tree)');
     const M = await mutant(tag, edits);
     if (!M) continue;
     const j = judgeIt(M);
-    ok(j.red, `CONTROL — ${what}: ${j.say}`, j.ex);
+    ok(verdictOf(j.red), `CONTROL — ${what}: ${j.say}`, j.ex);
   }
 }
 
@@ -329,33 +329,33 @@ console.log('§5 the wiring');
   const tc = read('src/lib/title-chips.js');
   ok(!/^\s*import\b/m.test(tc), 'title-chips.js still imports nothing (test-title-chips pins it): the count is spelled here');
   const rf = path.join(repo, 'src/lib/row-fold-model.js');
-  if (fs.existsSync(rf)) { const m = /export const ROW_INLINE_MAX = (\d+);/.exec(fs.readFileSync(rf, 'utf8')); ok(m && Number(m[1]) === TC.NAV_INLINE_MAX, `the bar's count IS the phone row's: NAV_INLINE_MAX ${TC.NAV_INLINE_MAX} = row-fold-model.js ROW_INLINE_MAX ${m && m[1]} (one rule for phone rows)`); }
+  if (fs.existsSync(rf)) { const m = /export const ROW_INLINE_MAX = (\d+);/.exec(fs.readFileSync(rf, 'utf8')); ok(gateOf(m) && Number(m[1]) === TC.NAV_INLINE_MAX, `the bar's count IS the phone row's: NAV_INLINE_MAX ${TC.NAV_INLINE_MAX} = row-fold-model.js ROW_INLINE_MAX ${m && m[1]} (one rule for phone rows)`); }
   else console.log('    (src/lib/row-fold-model.js is not on this tree — lane phone-roster-fold\'s twin: the literal 3 above holds the rule; the train runs this suite on the merged tree, where ROW_INLINE_MAX is pinned equal)');
   const mn = read('src/lib/mobile-nav.js');
-  ok(/import \{ navBarFold, navTitleMinText, navMoreRows, navMoreLoud \} from '\.\/title-chips\.js';/.test(mn) && /import \{ FOLDED \} from '\.\/bar-fold\.js';/.test(mn), 'mobile-nav.js reads the PURE fold + the shared FOLDED class');
-  ok(/const ctl = this\._barCtl = new AbortController\(\);/.test(mn) && /window\.addEventListener\('vs-viewport-class', fit, \{ signal: ctl\.signal \}\);/.test(mn) && /ctl\.signal\.addEventListener\('abort', \(\) => \{ this\._barMo\.disconnect\(\); wrapMo\.disconnect\(\); ro\?\.disconnect\(\);/.test(mn)
-    && /more\.addEventListener\('click', [^\n]*\{ signal: ctl\.signal \}\);/.test(mn), 'the bar\'s watchers (the tier signal, the ⋯\'s press, the subtree + width observers, r4: what stands above it) live on the controller the bar owns');
-  ok(/this\._barMo\.observe\(nav, \{ subtree: true, childList: true, characterData: true \}\);/.test(mn) && /this\._barMo\?\.takeRecords\(\); \/\/ the pass's own writes/.test(mn) && /\n    this\._scheduleFit\?\.\(\);\n  \}\n/.test(mn),
+  ok(gateOf(/import \{ navBarFold, navTitleMinText, navMoreRows, navMoreLoud \} from '\.\/title-chips\.js';/.test(mn)) && verdictOf(/import \{ FOLDED \} from '\.\/bar-fold\.js';/.test(mn)), 'mobile-nav.js reads the PURE fold + the shared FOLDED class');
+  ok(gateOf(/const ctl = this\._barCtl = new AbortController\(\);/.test(mn)) && gateOf(/window\.addEventListener\('vs-viewport-class', fit, \{ signal: ctl\.signal \}\);/.test(mn)) && gateOf(/ctl\.signal\.addEventListener\('abort', \(\) => \{ this\._barMo\.disconnect\(\); wrapMo\.disconnect\(\); ro\?\.disconnect\(\);/.test(mn))
+    && verdictOf(/more\.addEventListener\('click', [^\n]*\{ signal: ctl\.signal \}\);/.test(mn)), 'the bar\'s watchers (the tier signal, the ⋯\'s press, the subtree + width observers, r4: what stands above it) live on the controller the bar owns');
+  ok(gateOf(/this\._barMo\.observe\(nav, \{ subtree: true, childList: true, characterData: true \}\);/.test(mn)) && gateOf(/this\._barMo\?\.takeRecords\(\); \/\/ the pass's own writes/.test(mn)) && verdictOf(/\n    this\._scheduleFit\?\.\(\);\n  \}\n/.test(mn)),
     're-decided on a chip\'s change (the subtree — never the pass\'s own writes) and on the title\'s (updateTitle)');
-  ok(/if \(this\.app\.isMobile && this\.app\.viewportClass\?\.\(\) === 'compact' && !columnShape\(\) && nav\.getClientRects\(\)\.length\) \{/.test(mn) && /for \(const el of kids\) el\.classList\.remove\(FOLDED\);\n    if \(todos\?\.dataset\.badges\) delete todos\.dataset\.badges;\n    more\.classList\.remove\('on'\);/.test(mn),
+  ok(gateOf(/if \(this\.app\.isMobile && this\.app\.viewportClass\?\.\(\) === 'compact' && !columnShape\(\) && nav\.getClientRects\(\)\.length\) \{/.test(mn)) && verdictOf(/for \(const el of kids\) el\.classList\.remove\(FOLDED\);\n    if \(todos\?\.dataset\.badges\) delete todos\.dataset\.badges;\n    more\.classList\.remove\('on'\);/.test(mn)),
     'the fold is the compact class\'s alone: every pass starts unfolded — the regular class and the desktop keep the base\'s bar');
-  ok(/more\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); if \(this\._moreMenu\?\.isConnected\) \{ this\._moreMenu\.remove\(\); return; \} this\._openMore\(\); \}/.test(mn) && /menu\._closeExclude\?\.push\(this\.moreBtn\);/.test(mn) && !/more\.addEventListener\('pointerdown'/.test(mn),
+  ok(gateOf(/more\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); if \(this\._moreMenu\?\.isConnected\) \{ this\._moreMenu\.remove\(\); return; \} this\._openMore\(\); \}/.test(mn)) && gateOf(/menu\._closeExclude\?\.push\(this\.moreBtn\);/.test(mn)) && !/more\.addEventListener\('pointerdown'/.test(mn),
     'the ⋯ is its menu\'s anchor: exempt from the menu\'s outside-press closer, so its second press — a finger\'s or a mouse\'s — closes the menu (r2)');
-  ok(/run: \(\) => app\._pressGlobalSettings\(el\) \}/.test(mn) && /run: \(\) => openDesktopSheet\(app, el, \{/.test(mn) && !/_pressGlobalSettings\(more\)|openDesktopSheet\(app, more,/.test(mn),
+  ok(gateOf(/run: \(\) => app\._pressGlobalSettings\(el\) \}/.test(mn)) && gateOf(/run: \(\) => openDesktopSheet\(app, el, \{/.test(mn)) && !/_pressGlobalSettings\(more\)|openDesktopSheet\(app, more,/.test(mn),
     'a ⋯ row\'s door is anchored at its OWN chip — Settings keyed to ⚙, never to the ⋯ (a later ⋯ press closes it; 设置 again opens it) (r2)');
-  ok(/const icon = row\?\.querySelector\('\.mnav-more-icon'\), label = row\?\.querySelector\('\.mnav-more-label'\), val = row\?\.querySelector\('\.mnav-more-value'\), g = r\.glyph\(\);\n      if \(!icon \|\| !label \|\| !val\) continue;\n      if \(icon\._glyph !== g\) \{ icon\.innerHTML = g; icon\._glyph = g; \}/.test(mn) && /if \(val\.textContent !== r\.value\) val\.textContent = r\.value;/.test(mn)
-    && /menu\._paintMo = new MutationObserver\(\(\) => this\._paintMore\(\)\);/.test(mn) && /for \(const r of rows\) menu\._paintMo\.observe\(r\.el, \{ subtree: true, childList: true, characterData: true, attributes: true \}\);/.test(mn)
-    && /if \(key === 'usage'\) return \{ el, glyph: \(\) => el\.innerHTML,/.test(mn), 'a ⋯ row repaints its glyph AND its value from the chip at every change (the ring\'s arc with its %) (r2)');
-  ok(/row\(FILE_ICONS\.folder, t\('Files'\), \(\) => this\._pressFiles\(\)/.test(mn) && /this\._pressFiles = installNavFilesDoor\(app\);/.test(mn) && !/app\.openFileExplorer\(\)\),/.test(mn), 'LAW 3: the «+» sheet\'s 文件 row is the nav door\'s press (moved, not copied — the explorer this phone showed last)');
+  ok(gateOf(/const icon = row\?\.querySelector\('\.mnav-more-icon'\), label = row\?\.querySelector\('\.mnav-more-label'\), val = row\?\.querySelector\('\.mnav-more-value'\), g = r\.glyph\(\);\n      if \(!icon \|\| !label \|\| !val\) continue;\n      if \(icon\._glyph !== g\) \{ icon\.innerHTML = g; icon\._glyph = g; \}/.test(mn)) && gateOf(/if \(val\.textContent !== r\.value\) val\.textContent = r\.value;/.test(mn))
+    && gateOf(/menu\._paintMo = new MutationObserver\(\(\) => this\._paintMore\(\)\);/.test(mn)) && gateOf(/for \(const r of rows\) menu\._paintMo\.observe\(r\.el, \{ subtree: true, childList: true, characterData: true, attributes: true \}\);/.test(mn))
+    && verdictOf(/if \(key === 'usage'\) return \{ el, glyph: \(\) => el\.innerHTML,/.test(mn)), 'a ⋯ row repaints its glyph AND its value from the chip at every change (the ring\'s arc with its %) (r2)');
+  ok(gateOf(/row\(FILE_ICONS\.folder, t\('Files'\), \(\) => this\._pressFiles\(\)/.test(mn)) && gateOf(/this\._pressFiles = installNavFilesDoor\(app\);/.test(mn)) && !/app\.openFileExplorer\(\)\),/.test(mn), 'LAW 3: the «+» sheet\'s 文件 row is the nav door\'s press (moved, not copied — the explorer this phone showed last)');
   const pf = read('src/lib/phone-files.js');
-  ok(/const press = \(\) => \{ dayOneUsed\(DOOR\); paint\(\); return openFilesDoor\(app, \{ pressed: true \}\); \};\n  if \(btn\) btn\.onclick = press;\n  paint\(\);\n  return press;/.test(pf), 'phone-files.js: ONE press — the regular bar\'s button and the «+» row run it');
+  ok(verdictOf(/const press = \(\) => \{ dayOneUsed\(DOOR\); paint\(\); return openFilesDoor\(app, \{ pressed: true \}\); \};\n  if \(btn\) btn\.onclick = press;\n  paint\(\);\n  return press;/.test(pf)), 'phone-files.js: ONE press — the regular bar\'s button and the «+» row run it');
   const ut = read('src/lib/user-todos-panel.js');
-  ok(/const one = navOneBadge\(\{ urgent: cu, high: ch, loud: n, total, notices \}\);\n      mBtn\.innerHTML = UI_ICONS\.inbox \+ segs \+ \(one \? `<span class="mnav-one" data-seg="\$\{one\.seg\}">\$\{one\.count\}<\/span>` : ''\);/.test(ut),
+  ok(verdictOf(/const one = navOneBadge\(\{ urgent: cu, high: ch, loud: n, total, notices \}\);\n      mBtn\.innerHTML = UI_ICONS\.inbox \+ segs \+ \(one \? `<span class="mnav-one" data-seg="\$\{one\.seg\}">\$\{one\.count\}<\/span>` : ''\);/.test(ut)),
     'the For-you chip carries its ONE-badge form beside the five — a .mnav-one, never a .ut-count (the badge\'s readers count those)');
   const css = read('public/style.css');
-  ok(css.includes('html[data-vc="compact"] #mobile-nav-files { display: none; }') && css.includes('html[data-vc="compact"] #mobile-nav > .bar-folded { display: none !important; }')
-    && /html\[data-vc="compact"\] #mobile-nav > :is\(#mobile-nav-menu, [^)]*#mobile-nav-overflow\) \{ min-width: 44px; min-height: 44px; \}/.test(css) && css.includes('html[data-vc="compact"] #mobile-nav-todos .ut-count { display: none; }') /* the compact class: ONE number ALWAYS (主开发's ruling 2026-11-13 — the recovery of phone-six); was gated on [data-badges="one"] */
-    && css.includes('.mobile-sheet.mnav-more-menu .context-menu-item { min-height: 44px; font-size: 16px;'), 'style.css: the compact bar — no folder icon, 44 px targets, a folded chip leaves the row, the one-badge form, the ⋯ rows 44 px / 16 px');
+  ok(gateOf(css.includes('html[data-vc="compact"] #mobile-nav-files { display: none; }')) && gateOf(css.includes('html[data-vc="compact"] #mobile-nav > .bar-folded { display: none !important; }'))
+    && gateOf(/html\[data-vc="compact"\] #mobile-nav > :is\(#mobile-nav-menu, [^)]*#mobile-nav-overflow\) \{ min-width: 44px; min-height: 44px; \}/.test(css)) && gateOf(css.includes('html[data-vc="compact"] #mobile-nav-todos .ut-count { display: none; }')) /* the compact class: ONE number ALWAYS (主开发's ruling 2026-11-13 — the recovery of phone-six); was gated on [data-badges="one"] */
+    && verdictOf(css.includes('.mobile-sheet.mnav-more-menu .context-menu-item { min-height: 44px; font-size: 16px;')), 'style.css: the compact bar — no folder icon, 44 px targets, a folded chip leaves the row, the one-badge form, the ⋯ rows 44 px / 16 px');
   // NO RULE RE-SHOWS THE COMPACT BAR'S FOLDER ICON (the r1 acceptance's gap M6b): a rule that names #mobile-nav-files itself and sets a
   // display other than none is the regular class's, or plain (lower than the compact rule), never !important
   const CHUNKS = css.split('}'); // ONE split of the 850 KB sheet (each costs ~2 ms): the rules below read its chunks
@@ -371,11 +371,11 @@ console.log('§5 the wiring');
   const laneLines = cssLines.filter((l) => /mnav-|vault-gear-mark|#mobile-nav-overflow|phone-sheet-top/.test(l)); // ONE pass over the sheet's lines
   const lane = laneLines.filter((l) => /mnav-one|mnav-more|mnav-sheet|#mobile-nav-overflow/.test(l));
   const laneCss = laneLines.join('\n'); // the r4 CSS pins judge these lines
-  ok(/--red-fg: #ffffff; --yellow-fg: #000000;/.test(css) && css.includes('.mnav-one[data-seg="urgent"] { background: var(--red); color: var(--red-fg); }') && css.includes('.mnav-one[data-seg="high"] { background: var(--yellow); color: var(--yellow-fg); }')
-    && lane.every((l) => !/:\s*#[0-9a-fA-F]{3,8}\b|,\s*#[0-9a-fA-F]{3,8}\s*\)/.test(l)), `the one badge and the ⋯ in THEME colours only — words on --red / --yellow are --red-fg / --yellow-fg (defined with the palette); no colour literal in the bar's rules (${lane.length} lines) (r2)`);
+  ok(gateOf(/--red-fg: #ffffff; --yellow-fg: #000000;/.test(css)) && gateOf(css.includes('.mnav-one[data-seg="urgent"] { background: var(--red); color: var(--red-fg); }')) && gateOf(css.includes('.mnav-one[data-seg="high"] { background: var(--yellow); color: var(--yellow-fg); }'))
+    && verdictOf(lane.every((l) => !/:\s*#[0-9a-fA-F]{3,8}\b|,\s*#[0-9a-fA-F]{3,8}\s*\)/.test(l))), `the one badge and the ⋯ in THEME colours only — words on --red / --yellow are --red-fg / --yellow-fg (defined with the palette); no colour literal in the bar's rules (${lane.length} lines) (r2)`);
   // r3 — each pin a predicate over the source, judged on the tree AND on the tree with r2's line put back (its CONTROL, RED)
   const put = (src, from, to) => { const i = src.indexOf(from); return i < 0 || src.indexOf(from, i + 1) >= 0 ? null : src.slice(0, i) + to + src.slice(i + from.length); };
-  const pinOn = (subject, name, holds, back, who) => ok(holds(subject) && back !== null && !holds(back), `${name} — CONTROL: ${who}'s line put back is RED${back === null ? ` (the CONTROL could not put ${who}'s line back)` : ''}`);
+  const pinOn = (subject, name, holds, back, who) => ok(gateOf(holds(subject)) && back !== null && !holds(back), `${name} — CONTROL: ${who}'s line put back is RED${back === null ? ` (the CONTROL could not put ${who}'s line back)` : ''}`);
   const pin = (name, holds, r2) => pinOn(mn, name, holds, r2, 'r2');
   const fitOf = (src) => { const a = src.indexOf('  _fitBar() {'); return a < 0 ? '' : src.slice(a, src.indexOf('\n  }\n', a)); };
   const gearWhole = (src) => /if \(key === 'gear'\) return \{ el, glyph: \(\) => el\.innerHTML, label: t\('Settings'\), run: \(\) => app\._pressGlobalSettings\(el\) \};/.test(src)
@@ -444,8 +444,8 @@ console.log('§5 the wiring');
   const whichFailures = (src) => { const f = runFdw(src); return typeof f !== 'function' ? [`no runnable filesDoorWindow (${f})`] : WHICH.filter(([, app, want]) => (tryv(() => f(app))?.id ?? null) !== want).map(([what, app, want]) => `${what}: want ${want}, got ${tryv(() => f(app))?.id ?? null}`); };
   const pf3 = put(pf, pf.slice(pf.indexOf('export function filesDoorWindow(app) {'), pf.indexOf('\n}\n', pf.indexOf('export function filesDoorWindow(app) {')) + 2), 'export function filesDoorWindow(app) { return explorersHere(app).sort((a, b) => z(b) - z(a))[0] || null; }');
   ok(whichFailures(pf).length === 0 && pf3 !== null && whichFailures(pf3).length >= 2, `G1: WHICH explorer the row names and the press brings — phone-files.js filesDoorWindow RUN over ${WHICH.length} rooms (the last shown; this desktop's first; another desktop / minimized / another machine still named) — CONTROL: r3's (this desktop's local explorers only) RED on ${pf3 === null ? '?' : whichFailures(pf3).length}`, [...whichFailures(pf), ...(pf3 ? whichFailures(pf3) : [])].slice(0, 4));
-  ok(/export function filesDoorName\(app, win\) \{/.test(pf) && /const path = ex\.currentPath \|\| win\._explorerPath \|\| '', at = \{ home: app\._localHome \|\| '', host \};\n  return \{ name: doorName\(path, at\), dir: doorNameDir\(path, at\) \};/.test(pf) && /const host = ex\._host \? \(ex\._hostSelect\?\.selectedOptions\?\.\[0\]\?\.textContent \|\| ex\._host\) : '';/.test(pf)
-    && /const there = path \? explorersHere\(app\)\.find\(\(w\) => w\._explorer\.currentPath === path\) : filesDoorWindow\(app\);/.test(pf), 'G1: phone-files.js — the door and the row ask ONE function which explorer comes back, and ONE what it is called (the explorer\'s host words, as its title says them) and (r5) which way its folder\'s name reads');
+  ok(gateOf(/export function filesDoorName\(app, win\) \{/.test(pf)) && gateOf(/const path = ex\.currentPath \|\| win\._explorerPath \|\| '', at = \{ home: app\._localHome \|\| '', host \};\n  return \{ name: doorName\(path, at\), dir: doorNameDir\(path, at\) \};/.test(pf)) && gateOf(/const host = ex\._host \? \(ex\._hostSelect\?\.selectedOptions\?\.\[0\]\?\.textContent \|\| ex\._host\) : '';/.test(pf))
+    && verdictOf(/const there = path \? explorersHere\(app\)\.find\(\(w\) => w\._explorer\.currentPath === path\) : filesDoorWindow\(app\);/.test(pf)), 'G1: phone-files.js — the door and the row ask ONE function which explorer comes back, and ONE what it is called (the explorer\'s host words, as its title says them) and (r5) which way its folder\'s name reads');
   // G2 — ⚙'s lock mark drawn ONE way: its svg in the mark's OWN em (never the row's 16 px), on its glyph's corner (never a 44 px box's)
   pinOn(laneCss, 'G2: the lock mark\'s svg is sized in the mark\'s OWN em (13.333 px — the bar\'s 11 × 13.3 in the ⋯ menu\'s 16 px row too) and keeps the mark\'s shrink there', (c) => c.includes('.vault-gear-mark { font-size: 13.3333px; }') && c.includes('.mobile-sheet .context-menu-item .vault-gear-mark svg { flex-shrink: 1; }'),
     put(laneCss, '.vault-gear-mark { font-size: 13.3333px; }', ''), 'r3');
@@ -510,16 +510,16 @@ console.log('§5 the wiring');
   const NAMES5 = [...new Set([...surfaces, ...floats(mn)])];
   const RULES = placeRules(css, NAMES5), mini = RULES.map((r) => `${r.sel} {${r.body}}`).join('\n'); // the controls re-judge THESE rules' text
   const judge = (sheet, names = NAMES5) => placeFailures(sheet === mini ? RULES : placeRules(sheet, names), names);
-  ok(RULES.length >= 5 && judge(mini).length === 0 && surfaces.length >= 5 && strays(mn).length === 0 && /(^|\n):root \{ --phone-sheet-top: 48px; \}(\n|$)/.test(laneCss),
+  ok(RULES.length >= 5 && judge(mini).length === 0 && surfaces.length >= 5 && strays(mn).length === 0 && verdictOf(/(^|\n):root \{ --phone-sheet-top: 48px; \}(\n|$)/.test(laneCss)),
     `G4 + K1/K2: EVERY phone surface is placed AND given its room by ONE variable — the ${RULES.length} rules naming one as their subject (${RULES.filter((r) => imp(decl(r.body, 'top'))).map((r) => r.sel).join(' · ')}): top var(--phone-sheet-top), max-height the screen − it − 12 px, !important over any inline value; the bar's floating elements are all named (${floats(mn).join(' ') || 'none'}); the bar's press hold covers exactly these (${surfaces.join(' ')})`, { fails: judge(mini), strays: strays(mn) });
   const r4Css = mini.split(`max-height: ${ROOM} !important;`).join(`max-height: ${R4_ROOM};`).split(`max-height: min(420px, ${ROOM}) !important;`).join(`max-height: ${R4_ROOM};`);
   const k1 = judge(r4Css);
-  ok(['.usage-popup', '.global-settings-popover', '.ut-mini-popover', '.context-menu.mobile-sheet'].every((x) => k1.some((f) => f.startsWith(`${x}: a top without the room`))), `K1 CONTROL — r4's max-heights (the screen − 60 px: a 48 px top's room) put back are RED by name: ${k1.map((f) => f.split(':')[0]).join(' · ')}`, k1);
+  ok(verdictOf(['.usage-popup', '.global-settings-popover', '.ut-mini-popover', '.context-menu.mobile-sheet'].every((x) => k1.some((f) => f.startsWith(`${x}: a top without the room`)))), `K1 CONTROL — r4's max-heights (the screen − 60 px: a 48 px top's room) put back are RED by name: ${k1.map((f) => f.split(':')[0]).join(' · ')}`, k1);
   const r3Css = mini.split('top: var(--phone-sheet-top) !important;').join('top: 48px !important;');
-  ok(['.context-menu.mobile-sheet', '.usage-popup'].every((x) => judge(r3Css).some((f) => f.startsWith(`${x}: top «48px !important»`))), `G4 CONTROL — r3's rules (the Desktops sheet's .mobile-sheet and the Usage popup at 48 !important) are RED by name: ${[...new Set(judge(r3Css).map((f) => f.split(':')[0]))].join(' · ')}`);
+  ok(verdictOf(['.context-menu.mobile-sheet', '.usage-popup'].every((x) => judge(r3Css).some((f) => f.startsWith(`${x}: top «48px !important»`)))), `G4 CONTROL — r3's rules (the Desktops sheet's .mobile-sheet and the Usage popup at 48 !important) are RED by name: ${[...new Set(judge(r3Css).map((f) => f.split(':')[0]))].join(' · ')}`);
   const mn4 = put(mn, ", .ut-mini-popover, .mobile-win-switcher';", ", .ut-mini-popover';");
   const k2 = mn4 === null ? ['?'] : [...strays(mn4), ...judge(mini.replace(/html\[data-vc="compact"\] \.mobile-win-switcher \{[^}]*\}/, ''), [...new Set([...surfaceList(mn4), ...floats(mn4)])])];
-  ok(k2.includes('.mobile-win-switcher') && k2.includes('.mobile-win-switcher: no rule places it (top + room from the variable)'), `K2 CONTROL — r4's bar (the title switcher outside PHONE_SURFACES, no rule of its own: placed once, at open) is RED by name: ${k2.join(' · ')}`);
+  ok(gateOf(k2.includes('.mobile-win-switcher')) && verdictOf(k2.includes('.mobile-win-switcher: no rule places it (top + room from the variable)')), `K2 CONTROL — r4's bar (the title switcher outside PHONE_SURFACES, no rule of its own: placed once, at open) is RED by name: ${k2.join(' · ')}`);
   // the acceptance's planted CSS mutants (M5–M7: a literal top on a sheet by another selector shape) — RED by name now
   const MUTS = [['M5 a new rule with the sheets\' left/right at a literal top', '.foo-sheet.mobile-sheet { left: 8px !important; right: 8px !important; top: 48px !important; }'],
     ['M6 the same with right before left', '.context-menu.mobile-sheet { right: 8px !important; left: 8px !important; top: 48px !important; }'], ['M7 the Desktops sheet by its own class', '.mdesk-menu.mobile-sheet { top: 48px !important }'],
@@ -539,13 +539,13 @@ console.log('§5 the wiring');
   const roads = (files) => files.filter(([, t]) => /setProperty\('--phone-sheet-top'/.test(t)).map(([f]) => f);
   const underOf = (src) => { const a = src.indexOf('  _publishUnder() {'); return a < 0 ? '' : src.slice(a, src.indexOf('\n  }\n', a)); };
   const pub = underOf(mn);
-  ok(openerFailures(writers).length === 0 && roads(writers).join() === 'src/lib/mobile-nav.js' && /if \(this\._held\) \{ this\._heldMissed = true; return; \}/.test(pub) && /const v = nb > 0 && !columnShape\(\) \? `\$\{Math\.round\(nb \/ \(uiScale\(\) \|\| 1\)\) \+ 4\}px` : '';/.test(pub) && /if \(v\) root\.style\.setProperty\('--phone-sheet-top', v\); else root\.style\.removeProperty\('--phone-sheet-top'\);/.test(pub)
-    && /this\._publishUnder\(\); \/\/ r4: every phone surface under the bar as it stands now/.test(fitOf(mn)),
+  ok(openerFailures(writers).length === 0 && roads(writers).join() === 'src/lib/mobile-nav.js' && gateOf(/if \(this\._held\) \{ this\._heldMissed = true; return; \}/.test(pub)) && gateOf(/const v = nb > 0 && !columnShape\(\) \? `\$\{Math\.round\(nb \/ \(uiScale\(\) \|\| 1\)\) \+ 4\}px` : '';/.test(pub)) && gateOf(/if \(v\) root\.style\.setProperty\('--phone-sheet-top', v\); else root\.style\.removeProperty\('--phone-sheet-top'\);/.test(pub))
+    && verdictOf(/this\._publishUnder\(\); \/\/ r4: every phone surface under the bar as it stands now/.test(fitOf(mn))),
     `G4: every OPENER of a phone surface (${OPENERS.map(([f, , c]) => `${f.replace('src/lib/', '')} ${c}`).join(' · ')}) opens a surface whose rule takes its top AND its room from the variable, and writes no inline !important top / max-height; ONE function writes it (mobile-nav.js _publishUnder, each fit pass — the bar's measured bottom + 4, never under a held press)`, { openers: openerFailures(writers), roads: roads(writers) });
   const r3Under = put(mn, "    menu.classList.add('mobile-sheet'); // under the bar as it stands: style.css --phone-sheet-top (_publishUnder, r4)\n", "    menu.classList.add('mobile-sheet');\n    menu.style.setProperty('top', `${Math.round(nb / (uiScale() || 1)) + 4}px`, 'important');\n");
-  ok(r3Under !== null && openerFailures(writers.map(([f, t]) => [f, f === 'src/lib/mobile-nav.js' ? r3Under : t])).includes('src/lib/mobile-nav.js (.mobile-sheet)'), 'G4 CONTROL — r3\'s road of its own in _sheet (sheetUnderNav\'s inline !important top) is RED by name');
+  ok(r3Under !== null && verdictOf(openerFailures(writers.map(([f, t]) => [f, f === 'src/lib/mobile-nav.js' ? r3Under : t])).includes('src/lib/mobile-nav.js (.mobile-sheet)')), 'G4 CONTROL — r3\'s road of its own in _sheet (sheetUnderNav\'s inline !important top) is RED by name');
   const m3 = put(ut, "createPopover(anchor, 'ut-mini-popover')", "createPopover(anchor, 'ut-mini-popover'); pop.style.cssText += 'max-height:718px !important'; (0)");
-  ok(m3 !== null && openerFailures(writers.map(([f, t]) => [f, f === 'src/lib/user-todos-panel.js' ? m3 : t])).includes('src/lib/user-todos-panel.js (.ut-mini-popover)'), 'K1 CONTROL — an opener\'s inline !important room of its own (the planted M3 shape: cssText «max-height:…!important») is RED by name');
+  ok(m3 !== null && verdictOf(openerFailures(writers.map(([f, t]) => [f, f === 'src/lib/user-todos-panel.js' ? m3 : t])).includes('src/lib/user-todos-panel.js (.ut-mini-popover)')), 'K1 CONTROL — an opener\'s inline !important room of its own (the planted M3 shape: cssText «max-height:…!important») is RED by name');
   // K1 — a popup's INLINE room is computed from what is DRAWN (r5: the Usage popup through the ⋯ row hung from its folded chip, a zero
   // rect — inline max-height = the whole screen − 22): utils.js anchorFixedPopup RUN from its text over a folded chip in a bar at 114–158
   const fnOf = (src, head) => { const a = src.indexOf(head); if (a < 0) return ''; let d = 0, i = a + head.length - 1; const b0 = i; for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) break; } return src.slice(a, i + 1).replace(/^export /, ''); };
@@ -561,9 +561,9 @@ console.log('§5 the wiring');
   });
   const afp = runAfp(uts), afp4 = runAfp(put(uts, '  const r = drawnAnchorRect(anchor); // a folded chip\'s popup: from the bar that holds it, never a zero rect (r5)', '  const r = anchor.getBoundingClientRect();') || '');
   ok(afp?.folded === '560px' && afp.shown === '560px' && afp.foldedTop === '164px' && afp4?.folded === '718px', `K1: a popup's inline room is computed from what is DRAWN — utils.js anchorFixedPopup RUN over a folded chip in a bar at 114–158 (740 px screen): max-height ${afp?.folded} from the bar, as from a shown chip (${afp?.shown}) — CONTROL: r4's zero rect ${afp4?.folded} (RED)`, { afp, afp4 });
-  ok(/const rect = drawnAnchorRect\(anchor\); \/\/ ⚙ folded into the phone's ⋯/.test(writers.find(([f]) => f === 'src/lib/app.js')[1]) && /while \(el\?\.parentElement && !el\.getClientRects\(\)\.length\) el = el\.parentElement;/.test(uts), 'K1: the Settings popover takes its place from what is drawn too (app.js _showGlobalSettings → drawnAnchorRect — the bar when ⚙ is folded)');
-  ok(css.includes('html[data-vc="compact"] #mobile-nav-overflow.vault-locked { position: relative; color: var(--red); }') && css.includes('.mnav-more-menu .context-menu-item.vault-locked .mnav-more-icon { position: relative; color: var(--red); }')
-    && css.includes('.mnav-more-menu .mnav-more-value { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;') && css.includes('.mobile-sheet .mnav-sheet-hint {'),
+  ok(gateOf(/const rect = drawnAnchorRect\(anchor\); \/\/ ⚙ folded into the phone's ⋯/.test(writers.find(([f]) => f === 'src/lib/app.js')[1])) && verdictOf(/while \(el\?\.parentElement && !el\.getClientRects\(\)\.length\) el = el\.parentElement;/.test(uts)), 'K1: the Settings popover takes its place from what is drawn too (app.js _showGlobalSettings → drawnAnchorRect — the bar when ⚙ is folded)');
+  ok(gateOf(css.includes('html[data-vc="compact"] #mobile-nav-overflow.vault-locked { position: relative; color: var(--red); }')) && gateOf(css.includes('.mnav-more-menu .context-menu-item.vault-locked .mnav-more-icon { position: relative; color: var(--red); }'))
+    && gateOf(css.includes('.mnav-more-menu .mnav-more-value { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;')) && verdictOf(css.includes('.mobile-sheet .mnav-sheet-hint {')),
     'style.css (r3): the ⋯ and ⚙\'s row in the lock\'s red, a long desktop name ellipsized in its value (the label never cut), the 文件 row\'s hint line');
   // r6 L1 — «+» IS THE CREATE MENU (the r5 acceptance: the owner put Files INTO «+», but its sheet opened only on a 500 ms press and
   // the tap opened New Session; with nothing waiting no For-you page, so no 文件 card — NO door on the screen said Files): a TAP opens
@@ -618,9 +618,9 @@ console.log('§5 the wiring');
     `L2: the regular class writes no variable — mobile-nav.js _publishUnder RUN from its text over ${PUB.length} bars (the compact one at the top 48px, under the strip 162px; the regular class's column, its row, a rotation's stale value, the desktop: none) — CONTROL: the compact term dropped is RED by name: ${l2.map((x) => x.replace(/, the bar[^:]*/, '').replace(/: want «[^»]*», got /, ' → ')).join(' · ')}`,
     { now: pubFailures(mn), control: l2 });
   const pd = read('src/phone-doors.js');
-  ok(pd.includes(`T('the «+» sheet «Files» (the nav door\\'s press; r6: a tap on «+», then the row)', 'src/lib/mobile-nav.js', "t('Files'), () => this._pressFiles")`) && pd.includes(`T('the nav «+» (a tap opens its sheet — r6)', 'src/lib/mobile-nav.js', "newBtn.onclick = (e) => { e.stopPropagation(); if (this._createMenu?.isConnected)")`),
+  ok(gateOf(pd.includes(`T('the «+» sheet «Files» (the nav door\\'s press; r6: a tap on «+», then the row)', 'src/lib/mobile-nav.js', "t('Files'), () => this._pressFiles")`)) && verdictOf(pd.includes(`T('the nav «+» (a tap opens its sheet — r6)', 'src/lib/mobile-nav.js', "newBtn.onclick = (e) => { e.stopPropagation(); if (this._createMenu?.isConnected)")`)),
     'phone-doors.js: the Files twin is the «+» row\'s press, a tap on «+» away; New session\'s, «+»\'s tap and the sheet\'s first row (test-phone-doors censuses them)');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

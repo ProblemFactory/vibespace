@@ -20,7 +20,7 @@ const S = require(path.join(REPO, 'src/server/desktop-stream.js'));
 const fs = require('fs');
 
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 400) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 400) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -66,17 +66,17 @@ async function run(A) {
 
 console.log('§1 both ends of the hub hop are noDelay');
 const r = await run(ACC);
-ok(r.back && r.fp > 0, `a viewer's bytes went through the bridge and the hub forward 127.0.0.1:${r.fp} to the device and back`);
-ok(r.relay, 'the bridge\'s RFB relay set noDelay on its connect to the forward (stream-relay-rfb.js)');
-ok(r.accept, 'the hub forward set noDelay on the socket it accepted (desktop-access.js forwardPort)');
+ok(gateOf(r.back) && r.fp > 0, `a viewer's bytes went through the bridge and the hub forward 127.0.0.1:${r.fp} to the device and back`);
+ok(verdictOf(r.relay), 'the bridge\'s RFB relay set noDelay on its connect to the forward (stream-relay-rfb.js)');
+ok(verdictOf(r.accept), 'the hub forward set noDelay on the socket it accepted (desktop-access.js forwardPort)');
 
 console.log('§2 CONTROL: the forward without its call');
 const LINE = /\n[ \t]*sock\.setNoDelay\(true\);[^\n]*/;
 const src = fs.readFileSync(path.join(REPO, 'src/server/desktop-access.js'), 'utf8');
-ok(LINE.test(src), 'desktop-access.js carries the accept\'s call (the control removes exactly it)');
+ok(verdictOf(LINE.test(src)), 'desktop-access.js carries the accept\'s call (the control removes exactly it)');
 const M = mutantCopies('picnodelay', REPO).load('src/server/desktop-access.js', editAnchor(src, LINE, '', "src/server/desktop-access.js"), 'bare');
 const c = await run(M);
-ok(c.back && c.relay && !c.accept, 'the copy still forwards, the relay\'s call still shows — and the accept\'s is gone: the spy tells them apart', c);
+ok(gateOf(c.back) && gateOf(c.relay) && !c.accept, 'the copy still forwards, the relay\'s call still shows — and the accept\'s is gone: the spy tells them apart', c);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

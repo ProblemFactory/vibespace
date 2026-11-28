@@ -28,7 +28,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const root = mintRoot('ghost-host-smoke'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -107,7 +107,7 @@ const st = await evaljs(`(() => {
     bodyHasGhostError: document.body.textContent.includes('host not found'),
   };
 })()`);
-check('roster loaded (precondition)', st.rosterLoaded, JSON.stringify(st));
+check('roster loaded (precondition)', verdictOf(st.rosterLoaded), JSON.stringify(st));
 check('ghost Recent selection healed to Local (memory)', st.recentMem === '', JSON.stringify(st));
 check('ghost History selection healed to Local (memory)', st.histMem === '', JSON.stringify(st));
 check('localStorage keys cleared', st.recentLs === '' && st.histLs === '', JSON.stringify(st));
@@ -125,4 +125,4 @@ const neg = await evaljs(`(() => {
 check('NEGATIVE CONTROL: unloaded roster keeps the selection', neg.v === 'still-mine' && neg.mem === 'still-mine', JSON.stringify(neg));
 
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS (7)');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

@@ -66,13 +66,13 @@ const K = require(path.join(repo, 'src/server/desktop-app-keeper.js'));
 // (the write is the law's own). Each scan now waits for that FACT first — the record file DURABLE, the writer's own answer
 // (bounded by its own timeout) — and only then lists; a write that never lands is red by name, never a throw
 const SW = require(path.join(repo, 'src/store-writer.js'));
-const landed = async (dir, where, names = ['desktop-apps.json']) => { const d = {}; for (const n of names) d[n] = await SW.storeWriter().durable(path.join(dir, n)); const all = Object.values(d).every((x) => x === true); ok(all, `${where}: the store files' writes LANDED before the data dir is listed (the store writer's own answer: ${names.join(', ')})`, d); return all; };   // a file the writer never wrote answers true at once
+const landed = async (dir, where, names = ['desktop-apps.json']) => { const d = {}; for (const n of names) d[n] = await SW.storeWriter().durable(path.join(dir, n)); const all = Object.values(d).every((x) => x === true); ok(verdictOf(all), `${where}: the store files' writes LANDED before the data dir is listed (the store writer's own answer: ${names.join(', ')})`, d); return all; };   // a file the writer never wrote answers true at once
 const A = require(path.join(repo, 'src/server/desktop-access.js'));
 const R = require(path.join(repo, 'src/routes/desktop-apps.js'));
 const express = require('express');
 const MUT = mutantCopies('rats', repo);
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -195,24 +195,24 @@ let rec1 = null, fakePid = null;
 await section('§1 the launch — through the route, the access layer and the keeper to the real spawn', async () => {
   const r = await post('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM, name: 'Notepad' });
   const v = JSON.parse(r.text);
-  ok(r.status === 200 && v.id && v.backend === 'remoteapp' && v.via === 'xpra+xfreerdp' && v.recipe === 'xpra-seamless' && v.label === 'Notepad', 'POST remoteapp ⇒ a record on the remoteapp rung via xpra+xfreerdp (xpra-seamless)', v);
+  ok(r.status === 200 && gateOf(v.id) && v.backend === 'remoteapp' && v.via === 'xpra+xfreerdp' && v.recipe === 'xpra-seamless' && v.label === 'Notepad', 'POST remoteapp ⇒ a record on the remoteapp rung via xpra+xfreerdp (xpra-seamless)', v);
   const LATER = ['§1 ready', '§1 the ONE stdin line', '§1 its argv', '§1 its own XDG_CONFIG_HOME', '§1 ONE forward reference', '§1 the record\'s FACTS', '§1 launched by a person'];
   if (!v.id) return notRun(`the POST made no record (${r.status} ${v.code || ''}: ${String(v.error || r.text).slice(0, 240)})`, LATER);
   rec1 = await settle(v.id);
   if (!rec1) return notRun(`record ${v.id} never left launching in 10 s`, LATER);
   fakePid = rec1 && rec1.pids.app;
-  ok(rec1 && rec1.state === 'ready' && fakePid > 0, `ready; the app part is the fake xfreerdp (pid ${fakePid}) — lastError ${rec1 && rec1.lastError}`, rec1);
+  ok(gateOf(rec1) && rec1.state === 'ready' && fakePid > 0, `ready; the app part is the fake xfreerdp (pid ${fakePid}) — lastError ${rec1 && rec1.lastError}`, rec1);
   const saw = fakePid ? await until(() => { const s = fakeSaw(fakePid); return s.some((x) => x.phase === 'connected') ? s : null; }, 8000) : null;
   const st = saw && saw.find((x) => x.phase === 'stdin');
   const start = saw && saw.find((x) => x.phase === 'start');
-  ok(st && st.lines === 1 && st.domainFromStdin === false && st.password && st.password.sha256 === sha(PW) && st.password.length === PW_BYTES.length, 'the fake read exactly ONE stdin line, not as a domain (/d: present), and it IS the password (sha256 + length)', st);
-  ok(start && rec1.rdp && start.argv.includes('/from-stdin') && start.argv.includes('/d:') && start.argv.includes(`/cert:deny,fingerprint:sha256:${FP}`) && start.argv.includes('/gfx') && start.argv[0] === `/v:127.0.0.1:${rec1.rdp.port}`, 'its argv: /v: = the hub\'s loopback forward, /d:, /from-stdin, the pinned cert with deny, /gfx (the fake reports no H.264)', start && start.argv);
+  ok(gateOf(st) && st.lines === 1 && st.domainFromStdin === false && gateOf(st.password) && st.password.sha256 === sha(PW) && st.password.length === PW_BYTES.length, 'the fake read exactly ONE stdin line, not as a domain (/d: present), and it IS the password (sha256 + length)', st);
+  ok(gateOf(start) && gateOf(rec1.rdp) && gateOf(start.argv.includes('/from-stdin')) && gateOf(start.argv.includes('/d:')) && gateOf(start.argv.includes(`/cert:deny,fingerprint:sha256:${FP}`)) && gateOf(start.argv.includes('/gfx')) && start.argv[0] === `/v:127.0.0.1:${rec1.rdp.port}`, 'its argv: /v: = the hub\'s loopback forward, /d:, /from-stdin, the pinned cert with deny, /gfx (the fake reports no H.264)', start && start.argv);
   const cfg = path.join(keeper.logRoot, v.id, 'rdp-config');
-  ok(start && start.env.XDG_CONFIG_HOME === cfg && fs.existsSync(cfg) && (fs.statSync(cfg).mode & 0o777) === 0o700 && fs.readdirSync(cfg).length === 0, 'the client\'s own XDG_CONFIG_HOME: <appDir>/rdp-config, 0700, empty (a stored TOFU certificate cannot beat the pin)', start && start.env);
+  ok(gateOf(start) && start.env.XDG_CONFIG_HOME === cfg && gateOf(fs.existsSync(cfg)) && (fs.statSync(cfg).mode & 0o777) === 0o700 && fs.readdirSync(cfg).length === 0, 'the client\'s own XDG_CONFIG_HOME: <appDir>/rdp-config, 0700, empty (a stored TOFU certificate cannot beat the pin)', start && start.env);
   const fw = acc.forwards();
-  ok(fw.length === 1 && fw[0].hostId === HOST && fw[0].remotePort === 3389 && fw[0].refs === 1 && rec1.rdp && fw[0].localPort === rec1.rdp.port && tcpOpened.filter((p) => p === 3389).length >= 1 && machineHellos === 1 && saw && saw.find((x) => x.phase === 'connected').reply === 'VS-FAKE-MACHINE 3389', 'ONE forward reference to the machine\'s 3389 through its agent\'s tcpForward; the fake reached the "machine" through it and heard its answer', { fw, tcpOpened, machineHellos });
-  ok(rec1.rdp && rec1.rdp.forwardId === `${HOST}:3389` && rec1.rdp.certFp === FP && rec1.rdp.client === '3.32.1' && rec1.remoteapp.hostId === HOST && rec1.remoteapp.program === PROGRAM && rec1.starts.app > 0 && rec1.display === ':4242' && rec1.hostId === 'local', 'the record\'s FACTS: rdp {forwardId, certFp, port, client}, remoteapp {machine, program}, pid + starttime, display — the record is THIS machine\'s (hostId local)', { rdp: rec1.rdp, remoteapp: rec1.remoteapp });
-  ok(rec1.launchedBy && rec1.launchedBy.kind === 'person' && rec1.caps && rec1.caps.perWindow === true && rec1.stream === 'xpra', 'launched by a person; its caps are the row\'s (per-window, xpra stream)', { launchedBy: rec1.launchedBy, caps: rec1.caps });
+  ok(fw.length === 1 && fw[0].hostId === HOST && fw[0].remotePort === 3389 && fw[0].refs === 1 && gateOf(rec1.rdp) && fw[0].localPort === rec1.rdp.port && tcpOpened.filter((p) => p === 3389).length >= 1 && machineHellos === 1 && gateOf(saw) && saw.find((x) => x.phase === 'connected').reply === 'VS-FAKE-MACHINE 3389', 'ONE forward reference to the machine\'s 3389 through its agent\'s tcpForward; the fake reached the "machine" through it and heard its answer', { fw, tcpOpened, machineHellos });
+  ok(gateOf(rec1.rdp) && rec1.rdp.forwardId === `${HOST}:3389` && rec1.rdp.certFp === FP && rec1.rdp.client === '3.32.1' && rec1.remoteapp.hostId === HOST && rec1.remoteapp.program === PROGRAM && rec1.starts.app > 0 && rec1.display === ':4242' && rec1.hostId === 'local', 'the record\'s FACTS: rdp {forwardId, certFp, port, client}, remoteapp {machine, program}, pid + starttime, display — the record is THIS machine\'s (hostId local)', { rdp: rec1.rdp, remoteapp: rec1.remoteapp });
+  ok(gateOf(rec1.launchedBy) && rec1.launchedBy.kind === 'person' && gateOf(rec1.caps) && rec1.caps.perWindow === true && rec1.stream === 'xpra', 'launched by a person; its caps are the row\'s (per-window, xpra stream)', { launchedBy: rec1.launchedBy, caps: rec1.caps });
 });
 
 await section('§2 THE SINKS — the password\'s bytes nowhere but the child\'s stdin', async () => {
@@ -239,7 +239,7 @@ await section('§2 THE SINKS — the password\'s bytes nowhere but the child\'s 
   look('the access layer\'s forwards()', JSON.stringify(acc.forwards()));
   const leaked = sinks.filter(([, h]) => h).map(([n]) => n);
   ok(leaked.length === 0 && sinks.length === 14, `the password in 0 of ${sinks.length} sinks (${sinks.map(([n]) => n).join(' · ')})`, leaked);
-  ok(frames.some((f) => f.includes(rec1.id)) && gl.status === 200 && gl.text.includes(rec1.id) && gi.status === 200, 'the sinks were live: the broadcasts and both GETs carry the record');
+  ok(gateOf(frames.some((f) => f.includes(rec1.id))) && gl.status === 200 && gateOf(gl.text.includes(rec1.id)) && gi.status === 200, 'the sinks were live: the broadcasts and both GETs carry the record');
   // the checkout's own path is not the record's content (lane vault-e2e-password: its worktree is …/wt-vault-e2e-password, and the fixture exec path rides the record)
   ok(!/"password"/i.test(fs.readFileSync(path.join(dataDir, 'desktop-apps.json'), 'utf8')) && !/password/i.test(JSON.stringify(rec1).split(repo).join('<repo>')), 'no `password` field anywhere in the record');
 });
@@ -248,21 +248,21 @@ await section('§3 stop — the forward goes with the session', async () => {
   if (!rec1) return notRun('§1 left no record to stop', ['§3 stopped', '§3 the forward\'s reference dropped', '§3 the fake xfreerdp was signalled']);
   const r = await post(`/api/desktop/apps/${rec1.id}/stop`, {});
   const end = await ended(rec1.id);
-  ok(r.status === 200 && end && !['launching', 'ready'].includes(end.state), `stopped (${end && end.state})`, r.text.slice(0, 200));
-  ok(await until(() => acc.forwards().length === 0 && machineConns.size === 0), 'the forward\'s reference dropped: no listener left, the machine-side connection closed', { fw: acc.forwards(), conns: machineConns.size });
-  ok(await until(() => fakeSaw(fakePid).some((x) => x.phase === 'signal')), 'the fake xfreerdp was signalled (SIGTERM) by the keeper\'s teardown');
+  ok(r.status === 200 && gateOf(end) && !['launching', 'ready'].includes(end.state), `stopped (${end && end.state})`, r.text.slice(0, 200));
+  ok(verdictOf(await until(() => acc.forwards().length === 0 && machineConns.size === 0)), 'the forward\'s reference dropped: no listener left, the machine-side connection closed', { fw: acc.forwards(), conns: machineConns.size });
+  ok(verdictOf(await until(() => fakeSaw(fakePid).some((x) => x.phase === 'signal'))), 'the fake xfreerdp was signalled (SIGTERM) by the keeper\'s teardown');
 });
 
 const launchAndEnd = async (body, ms = 10000) => { const r = await post('/api/desktop/machine-desktop/remoteapp', body); const v = JSON.parse(r.text); if (!v.id) return { r, v }; return { r, v, end: await endedWhy(() => live(v.id), ms) }; };
 await section('§4 why it ended — the client\'s own words through the real chain', async () => {
   setup = { ...setup, certFp: randFp() };
   const c = await launchAndEnd({ host: HOST, program: PROGRAM });
-  ok(c.end && c.end.exitCode === 143 && c.end.rdp.ended === 'rdp_cert_changed' && /Lab PC|dev-w1n/.test(c.end.lastError) && /certificate is not the one pinned/.test(c.end.lastError), 'a wrong pin ⇒ exit 143, rdp.ended rdp_cert_changed, the record\'s lastError says so', c.end ? { exitCode: c.end.exitCode, rdp: c.end.rdp, lastError: c.end.lastError } : c.v);
-  ok(await until(() => acc.forwards().length === 0), 'its forward closed');
+  ok(gateOf(c.end) && c.end.exitCode === 143 && c.end.rdp.ended === 'rdp_cert_changed' && gateOf(/Lab PC|dev-w1n/.test(c.end.lastError)) && verdictOf(/certificate is not the one pinned/.test(c.end.lastError)), 'a wrong pin ⇒ exit 143, rdp.ended rdp_cert_changed, the record\'s lastError says so', c.end ? { exitCode: c.end.exitCode, rdp: c.end.rdp, lastError: c.end.lastError } : c.v);
+  ok(verdictOf(await until(() => acc.forwards().length === 0)), 'its forward closed');
   setup = { ...setup, certFp: FP, pw: () => PW + 'x' };
   const a = await launchAndEnd({ host: HOST, program: PROGRAM });
-  ok(a.end && a.end.exitCode === 134 && a.end.rdp.ended === 'rdp_auth_failed' && /refused the Windows sign-in/.test(a.end.lastError), 'a wrong password ⇒ exit 134, rdp_auth_failed', a.end ? { exitCode: a.end.exitCode, rdp: a.end.rdp, lastError: a.end.lastError } : a.v);
-  ok(await until(() => acc.forwards().length === 0), 'its forward closed');
+  ok(gateOf(a.end) && a.end.exitCode === 134 && a.end.rdp.ended === 'rdp_auth_failed' && verdictOf(/refused the Windows sign-in/.test(a.end.lastError)), 'a wrong password ⇒ exit 134, rdp_auth_failed', a.end ? { exitCode: a.end.exitCode, rdp: a.end.rdp, lastError: a.end.lastError } : a.v);
+  ok(verdictOf(await until(() => acc.forwards().length === 0)), 'its forward closed');
   // the measured hole: a TOFU certificate stored for 127.0.0.1:<port> in the hub user's config — hold a forward reference
   // first so the launch's port is known, plant the certificate there, then launch with a WRONG pin
   setup = { ...setup, pw: () => PW, certFp: randFp() };
@@ -270,17 +270,17 @@ await section('§4 why it ended — the client\'s own words through the real cha
   const storeDir = path.join(home, '.config', 'freerdp', 'server'); fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, `127.0.0.1_${hold.localPort}.pem`), '-----BEGIN CERTIFICATE-----\nstored-by-an-earlier-tofu\n-----END CERTIFICATE-----\n');
   const s = await launchAndEnd({ host: HOST, program: PROGRAM });
-  ok(s.end && s.end.rdp.ended === 'rdp_cert_changed' && s.end.rdp.port === hold.localPort, 'a TOFU certificate stored in ~/.config/freerdp for that very port + a wrong pin ⇒ STILL refused (the client reads only its own empty XDG_CONFIG_HOME)', s.end ? { rdp: s.end.rdp, lastError: s.end.lastError } : s.v);
+  ok(gateOf(s.end) && s.end.rdp.ended === 'rdp_cert_changed' && s.end.rdp.port === hold.localPort, 'a TOFU certificate stored in ~/.config/freerdp for that very port + a wrong pin ⇒ STILL refused (the client reads only its own empty XDG_CONFIG_HOME)', s.end ? { rdp: s.end.rdp, lastError: s.end.lastError } : s.v);
   hold.close();
   setup = { ...setup, certFp: FP };
 });
 
 await section('§5 the door\'s refusals — by name, nothing opened', async () => {
-  ok(await until(() => acc.forwards().length === 0), '§4 left no forward behind once its sessions\' teardowns ran (the state turns before the teardown drops the reference)', acc.forwards());
+  ok(verdictOf(await until(() => acc.forwards().length === 0)), '§4 left no forward behind once its sessions\' teardowns ran (the state turns before the teardown drops the reference)', acc.forwards());
   setup = null;
   const ns = await post('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
   const nv = JSON.parse(ns.text);
-  ok(ns.status === 409 && nv.code === 'remoteapp_needs_setup' && JSON.stringify(nv.missing) === JSON.stringify(['user', 'password', 'certificate']) && /needs its Windows user name, its Windows password and its Remote Desktop certificate fingerprint — give them once on its RemoteApp settings card/.test(nv.error) && /Lab PC/.test(nv.error), 'no setup ⇒ 409 remoteapp_needs_setup naming every missing part, the machine by its name, and its door (the RemoteApp settings card, r1b)', nv);
+  ok(ns.status === 409 && nv.code === 'remoteapp_needs_setup' && JSON.stringify(nv.missing) === JSON.stringify(['user', 'password', 'certificate']) && gateOf(/needs its Windows user name, its Windows password and its Remote Desktop certificate fingerprint — give them once on its RemoteApp settings card/.test(nv.error)) && verdictOf(/Lab PC/.test(nv.error)), 'no setup ⇒ 409 remoteapp_needs_setup naming every missing part, the machine by its name, and its door (the RemoteApp settings card, r1b)', nv);
   setup = { user: 'someone', domain: '', certFp: FP, pw: () => PW };
   platform = 'darwin';
   const mac = await post('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
@@ -294,22 +294,22 @@ await section('§5 the door\'s refusals — by name, nothing opened', async () =
   const fv = JSON.parse(first.text);
   await settle(fv.id);
   const second = await post('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: 'calc.exe' });
-  ok(second.status === 409 && JSON.parse(second.text).code === 'rdp_session_busy' && JSON.parse(second.text).error.includes(fv.id), 'a second session on the same machine ⇒ 409 rdp_session_busy naming the first', second.text);
+  ok(second.status === 409 && JSON.parse(second.text).code === 'rdp_session_busy' && verdictOf(JSON.parse(second.text).error.includes(fv.id)), 'a second session on the same machine ⇒ 409 rdp_session_busy naming the first', second.text);
   await post(`/api/desktop/apps/${fv.id}/stop`, {}); await ended(fv.id); await until(() => acc.forwards().length === 0);
   // a hub whose client is FreeRDP 2 / a hub without the client: their own keepers (the build facts are read per binary)
   const old = path.join(root, 'old-bin'); fs.mkdirSync(old, { recursive: true }); fs.copyFileSync(FAKE, path.join(old, 'xfreerdp')); fs.chmodSync(path.join(old, 'xfreerdp'), 0o755);
   const k2 = K.create({ dataDir: path.join(root, 'data-old'), env: baseEnv({ VS_FAKE_RDP_VERSION: '2.11.7' }), broadcast: () => { }, display: stubDisplay({ xfreerdp: path.join(old, 'xfreerdp') }), access: () => acc, log: spyLog });
   const e2 = await k2.machine.launch({ remoteapp: { hostId: HOST, program: PROGRAM } }, { remoteappDoor: true }).then(() => null, (e) => e);
-  ok(e2 && e2.code === 'rdp_client_too_old' && /FreeRDP 2\.11\.7/.test(e2.message) && k2.machine.listApps().length === 0, 'FreeRDP 2 on the hub ⇒ rdp_client_too_old, no record', e2 && e2.message);
+  ok(gateOf(e2) && e2.code === 'rdp_client_too_old' && gateOf(/FreeRDP 2\.11\.7/.test(e2.message)) && k2.machine.listApps().length === 0, 'FreeRDP 2 on the hub ⇒ rdp_client_too_old, no record', e2 && e2.message);
   const k3 = K.create({ dataDir: path.join(root, 'data-none'), env: baseEnv(), broadcast: () => { }, display: stubDisplay({ xfreerdp: null }), access: () => acc, log: spyLog });
   const e3 = await k3.machine.launch({ remoteapp: { hostId: HOST, program: PROGRAM } }, { remoteappDoor: true }).then(() => null, (e) => e);
-  ok(e3 && e3.code === 'no-backend' && /xpra\+xfreerdp not on PATH; xpra\+xfreerdp3 not on PATH\) — apt install freerdp3-x11$/.test(e3.message), 'no client on the hub ⇒ no-backend naming both spellings and the package', e3 && e3.message);
+  ok(gateOf(e3) && e3.code === 'no-backend' && verdictOf(/xpra\+xfreerdp not on PATH; xpra\+xfreerdp3 not on PATH\) — apt install freerdp3-x11$/.test(e3.message)), 'no client on the hub ⇒ no-backend naming both spellings and the package', e3 && e3.message);
   // design §1.6 fence 4: the GENERIC launch never starts a RemoteApp — the route an agent token reaches, and the `launch` op
   const S = require(path.join(repo, 'src/desktop-serve.js'));
   const gen = await post('/api/desktop/apps', { remoteapp: { hostId: HOST, program: PROGRAM } });
   const genTok = await post('/api/desktop/apps', { remoteapp: { hostId: HOST, program: PROGRAM } }, { authorization: 'Bearer ' + 'y'.repeat(8) });
   const op = await S.runDesktopServeOp(keeper.machine, 'launch', { body: { remoteapp: { hostId: HOST, program: PROGRAM } } });
-  ok(gen.status === 403 && JSON.parse(gen.text).code === 'remoteapp_door' && genTok.status >= 400 && op.ok === false && op.code === 'remoteapp_door' && keeper.machine.listApps().every((r) => !r.remoteapp || !['launching', 'ready'].includes(r.state)), 'the generic POST /api/desktop/apps (with or without an agent token) and the `launch` op refuse a RemoteApp body BY NAME (remoteapp_door) — only its own door starts one', { gen: gen.text.slice(0, 160), genTok: genTok.status, op });
+  ok(gen.status === 403 && JSON.parse(gen.text).code === 'remoteapp_door' && genTok.status >= 400 && op.ok === false && op.code === 'remoteapp_door' && verdictOf(keeper.machine.listApps().every((r) => !r.remoteapp || !['launching', 'ready'].includes(r.state))), 'the generic POST /api/desktop/apps (with or without an agent token) and the `launch` op refuse a RemoteApp body BY NAME (remoteapp_door) — only its own door starts one', { gen: gen.text.slice(0, 160), genTok: genTok.status, op });
   ok(acc.forwards().length === 0, 'no refusal left a forward behind', acc.forwards());
 });
 
@@ -321,10 +321,10 @@ await section('§6 the relaunch reconnects (the Scale ▸ seat)', async () => {
   const calls0 = setupCalls, port0 = a.rdp.port;
   const rl = await keeper.relaunch(v.id, { scale: 1 });
   const b = await settle(rl.app.id);
-  ok(b && b.state === 'ready' && b.id !== v.id && b.remoteapp.program === PROGRAM && setupCalls === calls0 + 1, 'the successor is ready, the same app of the same machine, its setup READ AGAIN (never carried)', { state: b && b.state, calls: setupCalls - calls0 });
-  ok(await until(() => { const f = acc.forwards(); return f.length === 1 && f[0].refs === 1 && f[0].localPort === port0 && b.rdp.port === port0 ? f : null; }), 'the successor shared the forward; the old session let go of its reference (refs back to 1, same port)', acc.forwards());
+  ok(gateOf(b) && b.state === 'ready' && b.id !== v.id && b.remoteapp.program === PROGRAM && setupCalls === calls0 + 1, 'the successor is ready, the same app of the same machine, its setup READ AGAIN (never carried)', { state: b && b.state, calls: setupCalls - calls0 });
+  ok(verdictOf(await until(() => { const f = acc.forwards(); return f.length === 1 && f[0].refs === 1 && f[0].localPort === port0 && b.rdp.port === port0 ? f : null; })), 'the successor shared the forward; the old session let go of its reference (refs back to 1, same port)', acc.forwards());
   const old = live(v.id);
-  ok(old && !['launching', 'ready'].includes(old.state) && old.replacedBy === b.id, `the old record ended (${old && old.state}) naming its successor`);
+  ok(gateOf(old) && !['launching', 'ready'].includes(old.state) && old.replacedBy === b.id, `the old record ended (${old && old.state}) naming its successor`);
   await post(`/api/desktop/apps/${b.id}/stop`, {}); await ended(b.id); await until(() => acc.forwards().length === 0);
 });
 
@@ -335,7 +335,7 @@ await section('§7 a spawn PATH without node (the hosted runner\'s — master .2
   for (const d of ['/usr/bin', '/bin']) { let list = []; try { list = fs.readdirSync(d); } catch { /* not on this box */ } for (const n of list) if (!/^node(js)?$/.test(n) && !names.has(n)) { names.add(n); fs.symlinkSync(path.join(d, n), path.join(farm, n)); } }
   const onPath = (p, bin) => p.split(':').some((d) => { try { fs.accessSync(path.join(d, bin), fs.constants.X_OK); return true; } catch { return false; } });
   const NO_NODE = `${path.dirname(FAKE)}:${farm}`;
-  ok(names.size > 100 && !onPath(NO_NODE, 'node') && onPath(NO_NODE, 'sh'), `the control PATH: ${names.size} programs of /usr/bin + /bin, no node (this suite's own is ${process.execPath})`);
+  ok(names.size > 100 && !onPath(NO_NODE, 'node') && verdictOf(onPath(NO_NODE, 'sh')), `the control PATH: ${names.size} programs of /usr/bin + /bin, no node (this suite's own is ${process.execPath})`);
   // a copy per leg: the build facts are memoised per binary (path + size + mtime), never per PATH
   const copy = (dir, text) => { const f = path.join(root, dir, 'xfreerdp'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text, { mode: 0o755 }); return f; };
   const shFake = copy('sh-fake', fs.readFileSync(FAKE));
@@ -345,16 +345,16 @@ await section('§7 a spawn PATH without node (the hosted runner\'s — master .2
   const pid4 = r4 && r4.pids.app;
   const saw4 = pid4 ? await until(() => { const x = fakeSaw(pid4); return x.some((y) => y.phase === 'connected') ? x : null; }, 8000) : null;
   const env4 = pid4 ? String(fs.readFileSync(`/proc/${pid4}/environ`)).split('\0') : [];
-  ok(r4 && r4.state === 'ready' && r4.rdp.client === '3.32.1' && saw4 && saw4.find((x) => x.phase === 'connected').reply === 'VS-FAKE-MACHINE 3389' && env4.includes(`PATH=${NO_NODE}`), 'the sh fake under it: its version read (3.32.1), the launch READY, the "machine" reached through the forward — its environ\'s PATH is the node-less one', r4 ? { state: r4.state, lastError: r4.lastError, client: r4.rdp && r4.rdp.client } : g.error);
+  ok(gateOf(r4) && r4.state === 'ready' && r4.rdp.client === '3.32.1' && gateOf(saw4) && saw4.find((x) => x.phase === 'connected').reply === 'VS-FAKE-MACHINE 3389' && verdictOf(env4.includes(`PATH=${NO_NODE}`)), 'the sh fake under it: its version read (3.32.1), the launch READY, the "machine" reached through the forward — its environ\'s PATH is the node-less one', r4 ? { state: r4.state, lastError: r4.lastError, client: r4.rdp && r4.rdp.client } : g.error);
   if (g.id) { await k4.stop(g.id).catch(() => { }); await until(() => { const x = k4.get(g.id); return x && !['launching', 'ready'].includes(x.state); }); }
-  ok(await until(() => acc.forwards().length === 0), 'its stop closed the forward', acc.forwards());
+  ok(verdictOf(await until(() => acc.forwards().length === 0)), 'its stop closed the forward', acc.forwards());
   // the .288 fake's first line + its /version + /buildconfig answers (the whole file ran under node)
   const ENV_NODE = "#!/usr/bin/env node\nconst a = process.argv[2];\nif (a === '/version') console.log('This is FreeRDP version 3.32.1 (fake)');\nelse if (a === '/buildconfig') console.log('Build configuration: WITH_GFX_H264=OFF');\n";
   const k5 = K.create({ dataDir: path.join(root, 'data-env-node'), env: baseEnv({ PATH: NO_NODE }), broadcast: () => { }, display: stubDisplay({ xfreerdp: copy('env-node-fake', ENV_NODE) }), access: () => acc, log: spyLog });
   const e5 = await k5.machine.launch({ remoteapp: { hostId: HOST, program: PROGRAM } }, { remoteappDoor: true }).then(() => null, (e) => e);
-  ok(e5 && e5.code === 'rdp_client_unknown' && /env: .node.: No such file or directory/.test(e5.message) && k5.machine.listApps().length === 0 && acc.forwards().length === 0, 'RED CONTROL: an `#!/usr/bin/env node` fake under the same PATH ⇒ rdp_client_unknown in the runner\'s words ("/usr/bin/env: \'node\': No such file or directory"), no record, no forward', e5 && e5.message);
+  ok(gateOf(e5) && e5.code === 'rdp_client_unknown' && gateOf(/env: .node.: No such file or directory/.test(e5.message)) && k5.machine.listApps().length === 0 && acc.forwards().length === 0, 'RED CONTROL: an `#!/usr/bin/env node` fake under the same PATH ⇒ rdp_client_unknown in the runner\'s words ("/usr/bin/env: \'node\': No such file or directory"), no record, no forward', e5 && e5.message);
   const f6 = await D.rdpBuildFacts(copy('env-node-fake-2', ENV_NODE), { env: { PATH: `${path.dirname(process.execPath)}:${NO_NODE}` } });
-  ok(/^This is FreeRDP version 3\.32\.1 \(fake\)/.test(f6.version), '…and with node put back on that PATH the same fake answers its version — the red is a fake that needs node, not the runner', f6);
+  ok(verdictOf(/^This is FreeRDP version 3\.32\.1 \(fake\)/.test(f6.version)), '…and with node put back on that PATH the same fake answers its version — the red is a fake that needs node, not the runner', f6);
 });
 
 await section('CONTROLS — each sink / rule proven able to fail', async () => {
@@ -373,11 +373,11 @@ await section('CONTROLS — each sink / rule proven able to fail', async () => {
   };
   const n0 = said.length;
   const c1 = await runMutant('log', cut(S, '        seat.password = null;', "        seat.password = null; console.log('[desktop] RemoteApp sign-in', stdinLine);"));
-  ok(said.slice(n0).join('\n').includes(PW), 'CONTROL: a planted console.log of the password ⇒ the console sink sees it (§2 would be red)');
+  ok(verdictOf(said.slice(n0).join('\n').includes(PW)), 'CONTROL: a planted console.log of the password ⇒ the console sink sees it (§2 would be red)');
   await c1.stop();
   const c2 = await runMutant('argv', cut(S, "rec = M.newRecord({ id, label: rq.name, exec, args: av.argv,", "rec = M.newRecord({ id, label: rq.name, exec, args: [...av.argv, '/p:' + String(setup.password())],"));
   const cmd2 = c2.rec && c2.rec.pids.app ? fs.readFileSync(`/proc/${c2.rec.pids.app}/cmdline`) : Buffer.alloc(0);
-  ok(JSON.stringify(c2.rec && c2.rec.args).includes(PW) && cmd2.includes(PW_BYTES), 'CONTROL: an argv `/p:` mutant ⇒ the record\'s argv and /proc cmdline sinks see the password (§2 would be red)');
+  ok(gateOf(JSON.stringify(c2.rec && c2.rec.args).includes(PW)) && verdictOf(cmd2.includes(PW_BYTES)), 'CONTROL: an argv `/p:` mutant ⇒ the record\'s argv and /proc cmdline sinks see the password (§2 would be red)');
   await c2.stop();
   // the stored-certificate hole, with the client's own XDG_CONFIG_HOME removed
   const S3 = cut(S, 'env: seat ? { ...appEnv, XDG_CONFIG_HOME: seat.configDir } : appEnv,', 'env: appEnv,');
@@ -391,14 +391,14 @@ await section('CONTROLS — each sink / rule proven able to fail', async () => {
   const v3 = await acc3.launchRemoteApp(HOST, { program: PROGRAM });
   const r3 = await until(() => { const x = ds3.get(v3.id); return x && x.state !== 'launching' ? x : null; });
   const saw3 = await until(() => { const s = fakeSaw(r3 && r3.pids.app); return s.some((x) => ['connected', 'end'].includes(x.phase)) ? s : null; }, 6000);
-  ok(saw3 && saw3.some((x) => x.phase === 'connected'), 'CONTROL: without the client\'s own XDG_CONFIG_HOME a stored TOFU certificate beats a wrong pin — it CONNECTS (§4\'s stored-certificate leg would be red)', saw3 && saw3.map((x) => x.phase));
+  ok(gateOf(saw3) && verdictOf(saw3.some((x) => x.phase === 'connected')), 'CONTROL: without the client\'s own XDG_CONFIG_HOME a stored TOFU certificate beats a wrong pin — it CONNECTS (§4\'s stored-certificate leg would be red)', saw3 && saw3.map((x) => x.phase));
   await ds3.stop(v3.id).catch(() => { }); h3.close(); await until(() => acc3.forwards().length === 0, 5000);
   // `/d:` dropped (the design's optional [/d:]) — the copy of desktop-serve requires a patched remoteapp
   const raNoD = MUT.write('src/remoteapp.js', cut(RAsrc, "`/d:${d.value || ''}`, '/from-stdin'", "...(d.value ? [`/d:${d.value}`] : []), '/from-stdin'"), 'nod');
   const c4 = await runMutant('nod', cut(S, "const RA = require('./remoteapp');", `const RA = require(${JSON.stringify(raNoD)});`));
   const st4 = c4.saw.find((x) => x.phase === 'stdin');
   const end4 = await endedWhy(() => c4.dsm.get(c4.rec.id), 6000);
-  ok(st4 && st4.domainFromStdin === true && st4.password === null && end4 && end4.rdp.ended === 'rdp_cancelled', 'CONTROL: without `/d:` the fake reads the password line as the DOMAIN, has no password, and the session ends cancelled (§1 would be red)', { st4, ended: end4 && end4.rdp });
+  ok(gateOf(st4) && st4.domainFromStdin === true && st4.password === null && gateOf(end4) && end4.rdp.ended === 'rdp_cancelled', 'CONTROL: without `/d:` the fake reads the password line as the DOMAIN, has no password, and the session ends cancelled (§1 would be red)', { st4, ended: end4 && end4.rdp });
   await c4.stop();
 });
 
@@ -411,7 +411,7 @@ await section('CONTROLS — the door check', async () => {
   const accd = A.create({ hosts, local: () => dsd, install: false, rdpSetup: async () => ({ user: 'someone', domain: '', certFp: FP, password: () => PW }), log: spyLog });
   dsd = DSd.install({ dataDir: path.join(root, 'mut-nodoor'), env: baseEnv(), display: stubDisplay({ xfreerdp: FAKE }), log: spyLog, remoteapp: { setup: (h) => accd.remoteappSetup(h), forward: (h) => accd.remoteappForward(h) } });
   const vd = await dsd.launch({ remoteapp: { hostId: HOST, program: PROGRAM } }).then((v) => v, (e) => e);
-  ok(vd && vd.id && vd.backend === 'remoteapp', 'CONTROL: without the door check the GENERIC launch starts a RemoteApp (the fence-4 leg would be red)', vd && (vd.id || vd.message));
+  ok(gateOf(vd) && gateOf(vd.id) && vd.backend === 'remoteapp', 'CONTROL: without the door check the GENERIC launch starts a RemoteApp (the fence-4 leg would be red)', vd && (vd.id || vd.message));
   if (vd && vd.id) { await until(() => { const x = dsd.get(vd.id); return x && x.state !== 'launching' ? x : null; }); await dsd.stop(vd.id).catch(() => { }); await until(() => accd.forwards().length === 0, 5000); }
 });
 
@@ -445,33 +445,33 @@ const endedS = (id, ms = 10000) => until(() => { const r = keeperS.get(id); retu
 await section('§8 the sealed row — the card\'s doors, the first connection, the launch reads the store', async () => {
   const AG = { authorization: 'Bearer ' + 'v'.repeat(8) };
   const ag = [await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`, AG), await getS(`/api/desktop/machine-desktop/remoteapp/facts?host=${HOST}`, AG), await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, user: 'x', password: PW2 }, AG), await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST }, AG)];
-  ok(ag.every((r) => r.status === 403 && r.json.code === 'human_only') && storeS.machineView('remoteapp', HOST).hasValues === false, 'an agent token on every door of the card (setup GET / POST, facts, trust) ⇒ 403 human_only, nothing stored — no agent turn can carry a sign-in (the transcript sink)', ag.map((r) => r.status));
+  ok(gateOf(ag.every((r) => r.status === 403 && r.json.code === 'human_only')) && storeS.machineView('remoteapp', HOST).hasValues === false, 'an agent token on every door of the card (setup GET / POST, facts, trust) ⇒ 403 human_only, nothing stored — no agent turn can carry a sign-in (the transcript sink)', ag.map((r) => r.status));
   const sv = await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, user: 'someone', password: PW2, certFp: 'aa:' + 'bb:'.repeat(30) + 'cc' });
   ok(sv.status === 200 && sv.json.setup.set.password === true && sv.json.setup.values.user === 'someone' && sv.json.setup.values.certFp === '' && !sv.text.includes(PW2), 'save: the password SEALED (the answer says "set", never its bytes); a certFp in the body is NOT taken (only the first connection pins one)', sv.json);
   const file = fs.readFileSync(path.join(sealedDir, 'integrations.json'), 'utf8');
-  ok(file.includes(`remoteapp/${HOST}`) && !file.includes(PW2) && storeS.resolveMachine('remoteapp', HOST).values.password === PW2, 'integrations.json holds remoteapp/<hostId> with the password as ciphertext; the store opens it for its consumer');
+  ok(gateOf(file.includes(`remoteapp/${HOST}`)) && !file.includes(PW2) && storeS.resolveMachine('remoteapp', HOST).values.password === PW2, 'integrations.json holds remoteapp/<hostId> with the password as ciphertext; the store opens it for its consumer');
   const bad = await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: 'two\nlines' });
-  ok(bad.status === 400 && bad.json.code === 'invalid-values' && /password: one line/.test(bad.json.error), 'a password with a line break (it is ONE stdin line) ⇒ 400 invalid-values by name, nothing changed', bad.json);
+  ok(bad.status === 400 && bad.json.code === 'invalid-values' && verdictOf(/password: one line/.test(bad.json.error)), 'a password with a line break (it is ONE stdin line) ⇒ 400 invalid-values by name, nothing changed', bad.json);
   const nopin = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
-  ok(nopin.status === 409 && nopin.json.code === 'remoteapp_needs_setup' && JSON.stringify(nopin.json.missing) === '["certificate"]' && /press First connection on its RemoteApp settings card/.test(nopin.json.error) && accS.forwards().length === 0, 'saved but not pinned ⇒ the launch is refused naming First connection; nothing opened', nopin.json);
+  ok(nopin.status === 409 && nopin.json.code === 'remoteapp_needs_setup' && JSON.stringify(nopin.json.missing) === '["certificate"]' && gateOf(/press First connection on its RemoteApp settings card/.test(nopin.json.error)) && accS.forwards().length === 0, 'saved but not pinned ⇒ the launch is refused naming First connection; nothing opened', nopin.json);
   // the first connection
   const tr = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
   const run = lastTrustRun();
   const st = run.find((x) => x.phase === 'start'), stdin = run.find((x) => x.phase === 'stdin');
   ok(tr.status === 200 && tr.json?.setup?.values?.certFp === fpOf(PEM_A) && tr.json.setup.missing.length === 0 && tr.json.setup.changed === false, 'the first connection PINS the machine certificate\'s sha256 (the fixture server-a\'s) on the sealed row', tr.json);
-  ok(st && JSON.stringify(st.argv.slice(1)) === JSON.stringify(['/u:someone', '/d:', '/from-stdin:force', '/cert:tofu', '/auth-only', '/log-level:WARN']) && /^\/v:127\.0\.0\.1:\d+$/.test(st.argv[0]) && !st.argv.some((x) => /\/app:/.test(x)) && st.env.DISPLAY === null, 'its argv: the forward, /u:, /d:, /from-stdin:force, /cert:tofu, /auth-only — NO app, no display', st && st.argv);
-  ok(stdin && stdin.lines === 1 && stdin.password.sha256 === sha(PW2) && run.some((x) => x.why === 'auth-only-ok'), 'it read ONE stdin line = the sealed password (sha256), and signed in', stdin);
-  ok(st && /\/rdp-trust-da-[\w-]+$/.test(st.env.XDG_CONFIG_HOME) && st.env.XDG_CONFIG_HOME.startsWith(keeperS.logRoot) && !fs.existsSync(st.env.XDG_CONFIG_HOME) && accS.forwards().length === 0, 'its OWN fresh config dir (under the keeper\'s dir) is gone after; the forward closed', st && st.env.XDG_CONFIG_HOME);
-  ok(audits.some((a) => /"verb":"remoteapp-trust"/.test(a) && a.includes(fpOf(PEM_A)) && /"ok":true/.test(a)) && audits.some((a) => /"verb":"remoteapp-setup"/.test(a) && /"fields":\["user","password"\]/.test(a)), 'one audit line per change: the setup (the field NAMES) and the first connection (the pin) — never a value', audits);
+  ok(gateOf(st) && JSON.stringify(st.argv.slice(1)) === JSON.stringify(['/u:someone', '/d:', '/from-stdin:force', '/cert:tofu', '/auth-only', '/log-level:WARN']) && gateOf(/^\/v:127\.0\.0\.1:\d+$/.test(st.argv[0])) && !st.argv.some((x) => /\/app:/.test(x)) && st.env.DISPLAY === null, 'its argv: the forward, /u:, /d:, /from-stdin:force, /cert:tofu, /auth-only — NO app, no display', st && st.argv);
+  ok(gateOf(stdin) && stdin.lines === 1 && stdin.password.sha256 === sha(PW2) && verdictOf(run.some((x) => x.why === 'auth-only-ok')), 'it read ONE stdin line = the sealed password (sha256), and signed in', stdin);
+  ok(gateOf(st) && gateOf(/\/rdp-trust-da-[\w-]+$/.test(st.env.XDG_CONFIG_HOME)) && gateOf(st.env.XDG_CONFIG_HOME.startsWith(keeperS.logRoot)) && !fs.existsSync(st.env.XDG_CONFIG_HOME) && accS.forwards().length === 0, 'its OWN fresh config dir (under the keeper\'s dir) is gone after; the forward closed', st && st.env.XDG_CONFIG_HOME);
+  ok(gateOf(audits.some((a) => /"verb":"remoteapp-trust"/.test(a) && a.includes(fpOf(PEM_A)) && /"ok":true/.test(a))) && verdictOf(audits.some((a) => /"verb":"remoteapp-setup"/.test(a) && /"fields":\["user","password"\]/.test(a))), 'one audit line per change: the setup (the field NAMES) and the first connection (the pin) — never a value', audits);
   // the launch reads the sealed row
   const l = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
   sealedRec = l.json && l.json.id ? await settleS(l.json.id) : null;
   const pid = sealedRec && sealedRec.pids.app;
   const saw = await until(() => { const sw = fakeSaw(pid); return sw.some((x) => x.phase === 'connected') ? sw : null; }, 8000);
   const ls = saw && saw.find((x) => x.phase === 'stdin');
-  ok(sealedRec && sealedRec.state === 'ready' && sealedRec.rdp.certFp === fpOf(PEM_A) && startOf(pid).argv.includes(`/cert:deny,fingerprint:sha256:${fpOf(PEM_A)}`) && ls && ls.password.sha256 === sha(PW2), 'the launch reads the SEALED row: the pinned certificate in its argv, the sealed password on its stdin', { state: sealedRec && sealedRec.state, ls });
+  ok(gateOf(sealedRec) && sealedRec.state === 'ready' && sealedRec.rdp.certFp === fpOf(PEM_A) && gateOf(startOf(pid).argv.includes(`/cert:deny,fingerprint:sha256:${fpOf(PEM_A)}`)) && gateOf(ls) && ls.password.sha256 === sha(PW2), 'the launch reads the SEALED row: the pinned certificate in its argv, the sealed password on its stdin', { state: sealedRec && sealedRec.state, ls });
   const busy = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
-  ok(busy.status === 409 && busy.json?.code === 'rdp_session_busy' && !!sealedRec && busy.json.error.includes(sealedRec.id), 'a first connection while a session runs ⇒ 409 rdp_session_busy naming it', busy.json);
+  ok(busy.status === 409 && busy.json?.code === 'rdp_session_busy' && !!sealedRec && verdictOf(busy.json.error.includes(sealedRec.id)), 'a first connection while a session runs ⇒ 409 rdp_session_busy naming it', busy.json);
   const fw = accS.forwards();
   ok(fw.length === 1 && fw[0].localPort === sealedRec?.rdp?.port && fw[0].remotePort === 3389, 'one loopback forward to the machine\'s 3389 (the hub side 127.0.0.1 only)');
   // a relaunch reads the row AGAIN: a password changed meanwhile is the one handed over
@@ -481,7 +481,7 @@ await section('§8 the sealed row — the card\'s doors, the first connection, t
   const b = rl && rl.app ? await until(() => { const x = keeperS.get(rl.app.id); return x && x.state !== 'launching' ? x : null; }) : null;
   const sawB = await until(() => { const sw = fakeSaw(b && b.pids.app); return sw.some((x) => ['connected', 'end'].includes(x.phase)) ? sw : null; }, 8000);
   const stB = sawB && sawB.find((x) => x.phase === 'stdin');
-  ok(stB && stB.password.sha256 === sha(PW3), 'the relaunch read the sealed row AGAIN — the password saved meanwhile is the one on its stdin (never carried from the first launch)', stB);
+  ok(gateOf(stB) && stB.password.sha256 === sha(PW3), 'the relaunch read the sealed row AGAIN — the password saved meanwhile is the one on its stdin (never carried from the first launch)', stB);
   if (b) await keeperS.machine.stop(b.id).catch(() => { }); await until(() => accS.forwards().length === 0);
   await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: PW2 });
   // a changed certificate
@@ -494,7 +494,7 @@ await section('§8 the sealed row — the card\'s doors, the first connection, t
   const ce = c.json && c.json.id ? await endedWhy(() => keeperS.get(c.json.id)) : null;
   const ceSeen = ce ? { id: ce.id, state: ce.state, rdp: { ...ce.rdp } } : null;
   const gv = await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`);
-  ok(ceSeen && ceSeen.rdp.ended === 'rdp_cert_changed' && gv.json?.setup?.refused?.code === 'rdp_cert_changed' && gv.json.setup.refused.id === ceSeen.id, 'the machine shows ANOTHER certificate ⇒ the launch ends rdp_cert_changed, and the card\'s view says refused (under the pin still in force)', ceSeen ? { ended: ceSeen.rdp, refused: gv.json?.setup?.refused } : `waited 10 s for launch ${c.json && c.json.id}'s reason (rdp.ended) — none came; the record: ${JSON.stringify(c.json && c.json.id ? keeperS.get(c.json.id) : c.json)}`);
+  ok(gateOf(ceSeen) && ceSeen.rdp.ended === 'rdp_cert_changed' && gv.json?.setup?.refused?.code === 'rdp_cert_changed' && gv.json.setup.refused.id === ceSeen.id, 'the machine shows ANOTHER certificate ⇒ the launch ends rdp_cert_changed, and the card\'s view says refused (under the pin still in force)', ceSeen ? { ended: ceSeen.rdp, refused: gv.json?.setup?.refused } : `waited 10 s for launch ${c.json && c.json.id}'s reason (rdp.ended) — none came; the record: ${JSON.stringify(c.json && c.json.id ? keeperS.get(c.json.id) : c.json)}`);
   await until(() => accS.forwards().length === 0);
   // RED CONTROL (item 8): the same launch with rdpEndOf's read of app.log HELD 600 ms — the runner's order, made to last.
   // endedS (the pre-.358 wait: the state alone) returns inside the hold with NO reason, and the view read then says
@@ -510,26 +510,26 @@ await section('§8 the sealed row — the card\'s doors, the first connection, t
     late = c0.json && c0.json.id ? await endedWhy(() => keeperS.get(c0.json.id)) : null;
     gvLate = await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`);
   } finally { fs.promises.open = open0; }
-  ok(early && early.ended === null && !['launching', 'ready'].includes(early.state) && gvEarly.json?.setup && gvEarly.json.setup.refused === null, 'RED CONTROL: rdpEndOf\'s read of app.log held 600 ms — the pre-.358 wait (endedS, the state alone) returns with NO reason yet, and the view read then says refused null: the runner\'s ✗', { early, refused: gvEarly && gvEarly.json?.setup?.refused });
-  ok(late && late.rdp.ended === 'rdp_cert_changed' && gvLate.json?.setup?.refused?.id === late.id && late.id === early?.id, '…endedWhy waits through the same hold for the reason (rdp_cert_changed), and the view says refused', { ended: late && late.rdp && late.rdp.ended, refused: gvLate && gvLate.json?.setup?.refused });
+  ok(gateOf(early) && early.ended === null && !['launching', 'ready'].includes(early.state) && gateOf(gvEarly.json?.setup) && gvEarly.json.setup.refused === null, 'RED CONTROL: rdpEndOf\'s read of app.log held 600 ms — the pre-.358 wait (endedS, the state alone) returns with NO reason yet, and the view read then says refused null: the runner\'s ✗', { early, refused: gvEarly && gvEarly.json?.setup?.refused });
+  ok(gateOf(late) && late.rdp.ended === 'rdp_cert_changed' && gvLate.json?.setup?.refused?.id === late.id && late.id === early?.id, '…endedWhy waits through the same hold for the reason (rdp_cert_changed), and the view says refused', { ended: late && late.rdp && late.rdp.ended, refused: gvLate && gvLate.json?.setup?.refused });
   await until(() => accS.forwards().length === 0);
   const re = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
-  ok(re.status === 200 && re.json?.setup?.values?.certFp === fpOf(PEM_B) && re.json.setup.changed === true && re.json.setup.refused === null && audits.some((a) => a.includes(`"replaced":"${fpOf(PEM_A)}"`)), '「重新信任」 pins the new certificate (changed, the old one named in the audit line), and the refusal no longer stands', re.json && re.json.setup && { fp: re.json.setup.values.certFp, changed: re.json.setup.changed, refused: re.json.setup.refused, audit: audits.slice(-1) });
+  ok(re.status === 200 && re.json?.setup?.values?.certFp === fpOf(PEM_B) && re.json.setup.changed === true && re.json.setup.refused === null && verdictOf(audits.some((a) => a.includes(`"replaced":"${fpOf(PEM_A)}"`))), '「重新信任」 pins the new certificate (changed, the old one named in the audit line), and the refusal no longer stands', re.json && re.json.setup && { fp: re.json.setup.values.certFp, changed: re.json.setup.changed, refused: re.json.setup.refused, audit: audits.slice(-1) });
   const l2 = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
   const r2 = l2.json && l2.json.id ? await settleS(l2.json.id) : null;
-  ok(r2 && r2.state === 'ready' && r2.rdp.certFp === fpOf(PEM_B), 'the next launch connects under the new pin');
+  ok(gateOf(r2) && r2.state === 'ready' && r2.rdp.certFp === fpOf(PEM_B), 'the next launch connects under the new pin');
   if (r2) await keeperS.machine.stop(r2.id).catch(() => { }); await until(() => accS.forwards().length === 0);
   // a wrong password at the first connection pins nothing
   await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: PW2 + 'x' });
   serverPem = PEM_A;
   const wp = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
-  ok(wp.status === 409 && wp.json.code === 'rdp_auth_failed' && /nothing was pinned/.test(wp.json.error) && storeS.machineView('remoteapp', HOST).values.certFp === fpOf(PEM_B) && accS.forwards().length === 0, 'a wrong password ⇒ 409 rdp_auth_failed, the pin unchanged (the certificate it was shown is NOT taken), the forward closed', wp.json);
+  ok(wp.status === 409 && wp.json.code === 'rdp_auth_failed' && gateOf(/nothing was pinned/.test(wp.json.error)) && storeS.machineView('remoteapp', HOST).values.certFp === fpOf(PEM_B) && accS.forwards().length === 0, 'a wrong password ⇒ 409 rdp_auth_failed, the pin unchanged (the certificate it was shown is NOT taken), the forward closed', wp.json);
   await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: PW2 });
   serverPem = PEM_B;
   // the facts door
   factsAnswer = RAm.parseRemoteappFacts(JSON.stringify({ t: 'remoteapp-facts', edition: 'Core', product: 'Windows 11 Home', deny: '1', listening: 0, allowList: null, gpu: null }));
   const fh = await getS(`/api/desktop/machine-desktop/remoteapp/facts?host=${HOST}`);
-  ok(fh.status === 200 && fh.json.ok && fh.json.ready === false && JSON.stringify(fh.json.rows.map((r) => r.code)) === '["edition_home","rdp_off","allowlist_off","gpu_off"]', 'the facts door: a Home machine with Remote Desktop off ⇒ its rows, each unmet with its sentence code, not ready', fh.json);
+  ok(fh.status === 200 && gateOf(fh.json.ok) && fh.json.ready === false && JSON.stringify(fh.json.rows.map((r) => r.code)) === '["edition_home","rdp_off","allowlist_off","gpu_off"]', 'the facts door: a Home machine with Remote Desktop off ⇒ its rows, each unmet with its sentence code, not ready', fh.json);
   factsAnswer = 'old';
   const fo = await getS(`/api/desktop/machine-desktop/remoteapp/facts?host=${HOST}`);
   ok(fo.status === 200 && fo.json.code === 'agent_too_old' && fo.json.have === '2.369.250' && fo.json.need === require(path.join(repo, 'package.json')).version, 'an agent that predates the op ⇒ agent_too_old naming the version it has and the one it needs (this hub\'s), never asked', fo.json);
@@ -549,7 +549,7 @@ await section('§8 the sealed row — the card\'s doors, the first connection, t
   };
   const DSreal = require(path.join(repo, 'src/desktop-serve.js'));
   const fixed = await racePair(DSreal, 'fixed');
-  ok(fixed.runs === 1 && fixed.codes.includes('rdp_trust_busy') && fixed.codes.includes('ok'), 'two first connections at once with a COLD build read ⇒ one runs, the other is refused rdp_trust_busy — ONE /auth-only sign-in to the machine', fixed);
+  ok(fixed.runs === 1 && gateOf(fixed.codes.includes('rdp_trust_busy')) && verdictOf(fixed.codes.includes('ok')), 'two first connections at once with a COLD build read ⇒ one runs, the other is refused rdp_trust_busy — ONE /auth-only sign-in to the machine', fixed);
   const Ssrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
   const cutR = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return editAnchor(src, from, to, "the text handed to cutR()"); };
   const markLine = "    rdpTrusting.add(hostId); // taken with the check, BEFORE any await (verify r1: two clicks during a cold build read both ran /auth-only)\n";
@@ -596,15 +596,15 @@ await section('§9 THE SINKS of the sealed chain — the password only in the se
   look('GET /api/desktop/apps', gl.text); look('GET /api/desktop/apps/:id', gi.text);
   look('the access layer\'s forwards()', JSON.stringify(accS.forwards()));
   const leaked = sinks.filter(([, h]) => h).map(([n]) => n);
-  ok(printed && leaked.length === 0 && sinks.length === 17, `the client PRINTED it (app.log held it while it ran) — and the password is in 0 of ${sinks.length} sinks after (${sinks.map(([n]) => n).join(' · ')})`, { printed, leaked });
-  ok(files.some((f) => f.endsWith('integrations.json')) && sFrames.length >= 4 && audits.length >= 4 && answers.length >= 10, 'the sinks were live: the sealed file, the store broadcasts, the audit rows and the route answers exist');
+  ok(gateOf(printed) && leaked.length === 0 && sinks.length === 17, `the client PRINTED it (app.log held it while it ran) — and the password is in 0 of ${sinks.length} sinks after (${sinks.map(([n]) => n).join(' · ')})`, { printed, leaked });
+  ok(gateOf(files.some((f) => f.endsWith('integrations.json'))) && sFrames.length >= 4 && audits.length >= 4 && answers.length >= 10, 'the sinks were live: the sealed file, the store broadcasts, the audit rows and the route answers exist');
   ok(storeS.resolveMachine('remoteapp', HOST).values.password === PW2, 'the ONE readable place: the sealed record, opened by its consumer\'s resolveMachine');
   // CONTROLS
   const cut = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return editAnchor(src, from, to, "the text handed to cut()"); };
   const ISsrc = fs.readFileSync(path.join(repo, 'src/server/integration-store.js'), 'utf8');
   const leakView = MUT.load('src/server/integration-store.js', cut(ISsrc, '      if (!f.secret) values[f.key] = set[f.key] ? String(v) : \'\';', '      values[f.key] = set[f.key] ? String(v) : \'\';'), 'viewleak');
   const ctlStore = leakView.create({ dataDir: sealedDir, env: {}, broadcast: () => { }, log: spyLog });
-  ok(holds(JSON.stringify(ctlStore.machineView('remoteapp', HOST))), 'CONTROL: a machine view that draws the secret field like a plain one ⇒ the view sink sees the password (§8 would be red)');
+  ok(verdictOf(holds(JSON.stringify(ctlStore.machineView('remoteapp', HOST)))), 'CONTROL: a machine view that draws the secret field like a plain one ⇒ the view sink sees the password (§8 would be red)');
   const Ssrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
   const DSn = MUT.load('src/desktop-serve.js', cut(Ssrc, '    if (rec.rdp) await scrubRdpLogFile(rec.id); // lane remoteapp-r1b: its log at rest holds no password shape', '    // (no scrub)'), 'noscrub');
   let dsn = null;
@@ -616,7 +616,7 @@ await section('§9 THE SINKS of the sealed chain — the password only in the se
   await until(() => fakeSaw(rn && rn.pids.app).some((x) => x.phase === 'connected'), 8000);
   await until(() => fs.existsSync(logN) && fs.readFileSync(logN, 'utf8').includes('password='), 4000);
   await dsn.stop(vn.id).catch(() => { }); await until(() => { const x = dsn.get(vn.id); return x && !['launching', 'ready'].includes(x.state); }); await until(() => accN.forwards().length === 0, 5000);
-  ok(fs.existsSync(logN) && holds(fs.readFileSync(logN)), 'CONTROL: without the teardown scrub the printed password stays in app.log (§8\'s app.log sink would be red)', fs.existsSync(logN) ? fs.readFileSync(logN, 'utf8').slice(-300) : 'no log at ' + logN);
+  ok(gateOf(fs.existsSync(logN)) && verdictOf(holds(fs.readFileSync(logN))), 'CONTROL: without the teardown scrub the printed password stays in app.log (§8\'s app.log sink would be red)', fs.existsSync(logN) ? fs.readFileSync(logN, 'utf8').slice(-300) : 'no log at ' + logN);
 });
 
 await section('§R the fake\'s record — every line ONE JSON object, even when a stop kills its clock mid-line (lane race-sweep)', async () => {
@@ -630,15 +630,15 @@ await section('§R the fake\'s record — every line ONE JSON object, even when 
   const fixedFile = path.join(root, 'clock-dies-fixed.jsonl');
   runFake(FAKE, fixedFile);
   const fx = readRecord(fixedFile);
-  ok(fx.rows.length >= 2 && fx.torn.length === 0 && fx.rows.every((r) => r.at === 0 && r.clock_unknown === 'date exit 143'), `the fake with a clock killed by SIGTERM: ${fx.rows.length} lines, every one JSON — at 0 + clock_unknown "date exit 143" (phases ${fx.rows.map((r) => r.phase).join(' · ')})`, fx);
+  ok(fx.rows.length >= 2 && fx.torn.length === 0 && verdictOf(fx.rows.every((r) => r.at === 0 && r.clock_unknown === 'date exit 143')), `the fake with a clock killed by SIGTERM: ${fx.rows.length} lines, every one JSON — at 0 + clock_unknown "date exit 143" (phases ${fx.rows.map((r) => r.phase).join(' · ')})`, fx);
   const fakeSrc = fs.readFileSync(FAKE, 'utf8');
   const pre = fakeSrc.replace(/^record\(\) \{\n[\s\S]*?\n\}\n/m, () => 'record() { [ -z "$REC" ] || printf \'{"pid":%s,"at":%s000,%s}\\n\' "$$" "$(date +%s)" "$1" >>"$REC"; }\n');   // a function: `$$` in a replacement STRING is one `$`
-  ok(pre !== fakeSrc && pre.includes('"at":%s000,%s}\\n\' "$$" "$(date +%s)"') && !/^record\(\) \{$/m.test(pre), 'PATCH LANDED: the control fake writes the record line the pre-fix way (`"at":$(date +%s)000`)');
+  ok(pre !== fakeSrc && gateOf(pre.includes('"at":%s000,%s}\\n\' "$$" "$(date +%s)"')) && !/^record\(\) \{$/m.test(pre), 'PATCH LANDED: the control fake writes the record line the pre-fix way (`"at":$(date +%s)000`)');
   const preExe = path.join(root, 'xfreerdp-pre-race-sweep'); fs.writeFileSync(preExe, pre, { mode: 0o755 });
   const preFile = path.join(root, 'clock-dies-pre.jsonl');
   runFake(preExe, preFile);
   const px = readRecord(preFile);
-  ok(px.torn.length >= 2 && px.torn.every((l) => /"at":000,/.test(l)) && px.rows.length === 0, `CONTROL: the pre-fix fake under the same dying clock writes ${px.torn.length} TORN lines (\`"at":000\` — invalid JSON) and the reader names them, never throws (the pre-fix suite threw "Unexpected number in JSON" in every later section)`, px);
+  ok(px.torn.length >= 2 && gateOf(px.torn.every((l) => /"at":000,/.test(l))) && px.rows.length === 0, `CONTROL: the pre-fix fake under the same dying clock writes ${px.torn.length} TORN lines (\`"at":000\` — invalid JSON) and the reader names them, never throws (the pre-fix suite threw "Unexpected number in JSON" in every later section)`, px);
   // THE MEASURED MOMENT, made deterministic: the keeper's stop SIGTERMs the fake's whole group (sid == pid) while record()
   // waits on its clock — a `date` that blocks until that signal (the first call only; a later one is the real date)
   const slow = path.join(root, 'clock-blocks'); fs.mkdirSync(slow, { recursive: true });
@@ -654,12 +654,12 @@ await section('§R the fake\'s record — every line ONE JSON object, even when 
     return { inClock: !!inClock, ...how, ...readRecord(file) };
   };
   const mf = await stopMidClock(FAKE, 'fixed');
-  ok(mf.inClock && mf.code === 145 && mf.torn.length === 0 && mf.rows.length >= 1 && mf.rows[mf.rows.length - 1].phase === 'signal',
+  ok(gateOf(mf.inClock) && mf.code === 145 && mf.torn.length === 0 && mf.rows.length >= 1 && mf.rows[mf.rows.length - 1].phase === 'signal',
     `THE MOMENT (the stop's group SIGTERM while record() waits on its clock): the fixed fake writes NO torn line — its TERM trap runs before the line, it ends on its "signal" line (exit ${mf.code}; phases ${mf.rows.map((r) => r.phase).join(' · ') || 'none'})`, mf);
   const mp = await stopMidClock(preExe, 'pre');
-  ok(mp.inClock && mp.torn.length === 1 && /^\{"pid":\d+,"at":000,"phase":"start"/.test(mp.torn[0] || ''), `CONTROL: the pre-fix fake at the same moment writes the TORN line the runner saw (${(mp.torn[0] || 'none').slice(0, 40)}…) — the date died inside the printf that wrote it`, { inClock: mp.inClock, code: mp.code, torn: mp.torn.map((l) => l.slice(0, 80)), phases: mp.rows.map((r) => r.phase) });
+  ok(gateOf(mp.inClock) && mp.torn.length === 1 && verdictOf(/^\{"pid":\d+,"at":000,"phase":"start"/.test(mp.torn[0] || '')), `CONTROL: the pre-fix fake at the same moment writes the TORN line the runner saw (${(mp.torn[0] || 'none').slice(0, 40)}…) — the date died inside the printf that wrote it`, { inClock: mp.inClock, code: mp.code, torn: mp.torn.map((l) => l.slice(0, 80)), phases: mp.rows.map((r) => r.phase) });
 });
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 7 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 7 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

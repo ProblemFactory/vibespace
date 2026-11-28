@@ -23,7 +23,7 @@ const R = (rel) => require(path.join(REPO, rel));
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const L = R('src/vault-loud.js');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -55,21 +55,21 @@ const runTable = (fn) => CASES.map((c) => { const want = L.LOUD_TABLE[c.row]; co
 
 console.log('① THE TABLE — every row of LOUD_TABLE, driven by real-shaped facts');
 {
-  ok(L.LOUD_TABLE.length === 6 && Object.isFrozen(L.LOUD_TABLE) && L.LOUD_TABLE.every((r) => Object.isFrozen(r)), 'six frozen rows');
+  ok(L.LOUD_TABLE.length === 6 && gateOf(Object.isFrozen(L.LOUD_TABLE)) && verdictOf(L.LOUD_TABLE.every((r) => Object.isFrozen(r))), 'six frozen rows');
   const res = runTable(L.vaultLoudState);
   for (let i = 0; i < L.LOUD_TABLE.length; i++) {
     const r = L.LOUD_TABLE[i]; const mine = res.filter((x) => x.row === i);
-    ok(mine.length >= 2 && mine.every((x) => x.ok), `row ${i + 1}: ${r.facts} · dismissed ${r.dismissed} · on ${r.on} ⇒ dialog ${r.dialog ? 'OPENS' : 'no'} · ⚙ mark ${r.mark ? 'RED' : 'no'} · item ${r.item ? 'FILED' : 'none'} (${mine.length} cases)`, mine.filter((x) => !x.ok));
+    ok(mine.length >= 2 && verdictOf(mine.every((x) => x.ok)), `row ${i + 1}: ${r.facts} · dismissed ${r.dismissed} · on ${r.on} ⇒ dialog ${r.dialog ? 'OPENS' : 'no'} · ⚙ mark ${r.mark ? 'RED' : 'no'} · item ${r.item ? 'FILED' : 'none'} (${mine.length} cases)`, mine.filter((x) => !x.ok));
   }
   console.log('   the table:');
   for (const r of L.LOUD_TABLE) console.log(`     | ${r.facts.padEnd(22)} | ${r.dismissed.padEnd(13)} | ${r.on.padEnd(26)} | ${(r.dialog ? 'opens' : '—').padEnd(5)} | ${(r.mark ? 'red' : '—').padEnd(3)} | ${r.item ? 'filed' : '—'} |`);
   const restart = { ...F.locked, startedAt: BOOT + 3600e3, lockedSince: BOOT + 3600e3 };
   const lockAct = { ...F.locked, lockedSince: BOOT + 600e3 };
   ok(L.lockKey(restart) !== KEY && L.lockKey(lockAct) !== KEY && L.lockKey({ ...F.locked }) === KEY, 'the lock key moves with a RESTART (a new startedAt) and with a LOCK ACT (a new lockedSince); the same lock keeps it');
-  ok(L.vaultLoudState({ facts: restart, dismissed: KEY, on: 'load' }).dialog && L.vaultLoudState({ facts: lockAct, dismissed: KEY, on: 'reconnect' }).dialog, 'a lock set aside asks again once it is a NEW lock (a restart, a lock act) — at the next load / reconnect');
+  ok(gateOf(L.vaultLoudState({ facts: restart, dismissed: KEY, on: 'load' }).dialog) && verdictOf(L.vaultLoudState({ facts: lockAct, dismissed: KEY, on: 'reconnect' }).dialog), 'a lock set aside asks again once it is a NEW lock (a restart, a lock act) — at the next load / reconnect');
   ok(L.lockKey(F.open) === null && L.lockKey(F.unset) === null && L.lockKey(null) === null, 'no lock key unless locked');
   const old = { state: 'locked' };   // a hub before startedAt / lockedSince
-  ok(L.vaultLoudState({ facts: old, on: 'load' }).dialog && L.vaultLoudState({ facts: old, on: 'load' }).lock === ':', 'facts without the boot or the lock moment still ask at a load (the key is never null while locked)');
+  ok(gateOf(L.vaultLoudState({ facts: old, on: 'load' }).dialog) && L.vaultLoudState({ facts: old, on: 'load' }).lock === ':', 'facts without the boot or the lock moment still ask at a load (the key is never null while locked)');
   ok(L.vaultLoudState({ facts: F.locked, on: 'nonsense' }).dialog === true && !L.vaultLoudState({ facts: null, on: 'broadcast' }).dialog && !L.vaultLoudState().mark, 'an unknown event reads as a load; null facts at a broadcast throw nothing and say nothing');
   ok(L.LATER_KEY === 'vs-vault-unlock-later', 'the set-aside lock lives under one sessionStorage key (vs-vault-unlock-later)');
 }
@@ -80,16 +80,16 @@ console.log('② THE ONE READER — the page asks the table in one file; the ⚙
   const libs = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js'));
   const readers = libs.filter((f) => /from '\.\.\/vault-loud\.js'/.test(read('src/lib/' + f)));
   ok(readers.length === 1 && readers[0] === 'vault-unlock.js', 'ONE client reader: only src/lib/vault-unlock.js imports src/vault-loud.js', readers);
-  ok(/^import \{ vaultLoudState, LATER_KEY \} from '\.\.\/vault-loud\.js';/m.test(VU), 'vault-unlock.js imports vaultLoudState + LATER_KEY');
-  ok(/if \(vaultLoudState\(\{ facts: f, dismissed: dismissedLock\(\), on, seen \}\)\.dialog\) showUnlock\(\{ opener: 'system' \}\);/.test(VU), 'the DIALOG: onVaultState opens it iff the table says so (the set-aside lock, the event, the boot it saw) — the system\'s open (lane dialog-yield r3: a form that waits behind, the strip and the chip say it)');
-  ok(/onVaultState\(msg, 'broadcast'\)/.test(VU) && /onVaultState\(f, 'reconnect'\)/.test(VU) && /onVaultState\(f, 'load'\);\n\}/.test(VU), 'the three doors name their event: the broadcast, the reconnect re-read, the boot read (load)');
-  ok(/drawGearMark\(vaultLoudState\(\{ facts: f \}\)\.mark\);/.test(VU) && /const GEAR_IDS = \['btn-global-settings', 'mobile-nav-gear'\];/.test(VU), 'the ⚙ MARK: applyVaultFacts draws it from the table on both buttons (the toolbar\'s, the phone nav\'s)');
-  ok(/escapeToClose: true, onClose, kind: 'form' \}\);/.test(VU) && /if \(facts && facts\.state === 'locked'\) dismissLock\(facts\);/.test(VU), 'the dialog: Esc closes it, and a close while still locked sets THIS lock aside (「稍后」 / Esc / ✕ — an unlock does not)');
-  ok(/export function unlockFirst\(open\) \{\n  if \(vaultLoudState\(\{ facts \}\)\.mark\) \{ unlockThen\(open, \{ here: true \}\); return; \}[^\n]*\n  open\(\);\n\}/.test(VU), 'the ⚙ PRESS: unlockFirst — locked ⇒ the dialog first, then the menu (B-864f cure: at THIS page\'s unlock or the dialog\'s close — unlockThen, here; a removed dialog runs no closer); otherwise the menu at once');
-  ok(/btn\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\._pressGlobalSettings\(btn\); \};/.test(read('src/lib/app.js')) && /gear\.onclick = \(e\) => \{ e\.stopPropagation\(\); app\._pressGlobalSettings\(gear\); \};/.test(read('src/lib/mobile-nav.js')), 'both ⚙ buttons press through App._pressGlobalSettings (app.js, mobile-nav.js)');
+  ok(verdictOf(/^import \{ vaultLoudState, LATER_KEY \} from '\.\.\/vault-loud\.js';/m.test(VU)), 'vault-unlock.js imports vaultLoudState + LATER_KEY');
+  ok(verdictOf(/if \(vaultLoudState\(\{ facts: f, dismissed: dismissedLock\(\), on, seen \}\)\.dialog\) showUnlock\(\{ opener: 'system' \}\);/.test(VU)), 'the DIALOG: onVaultState opens it iff the table says so (the set-aside lock, the event, the boot it saw) — the system\'s open (lane dialog-yield r3: a form that waits behind, the strip and the chip say it)');
+  ok(gateOf(/onVaultState\(msg, 'broadcast'\)/.test(VU)) && gateOf(/onVaultState\(f, 'reconnect'\)/.test(VU)) && verdictOf(/onVaultState\(f, 'load'\);\n\}/.test(VU)), 'the three doors name their event: the broadcast, the reconnect re-read, the boot read (load)');
+  ok(gateOf(/drawGearMark\(vaultLoudState\(\{ facts: f \}\)\.mark\);/.test(VU)) && verdictOf(/const GEAR_IDS = \['btn-global-settings', 'mobile-nav-gear'\];/.test(VU)), 'the ⚙ MARK: applyVaultFacts draws it from the table on both buttons (the toolbar\'s, the phone nav\'s)');
+  ok(gateOf(/escapeToClose: true, onClose, kind: 'form' \}\);/.test(VU)) && verdictOf(/if \(facts && facts\.state === 'locked'\) dismissLock\(facts\);/.test(VU)), 'the dialog: Esc closes it, and a close while still locked sets THIS lock aside (「稍后」 / Esc / ✕ — an unlock does not)');
+  ok(verdictOf(/export function unlockFirst\(open\) \{\n  if \(vaultLoudState\(\{ facts \}\)\.mark\) \{ unlockThen\(open, \{ here: true \}\); return; \}[^\n]*\n  open\(\);\n\}/.test(VU)), 'the ⚙ PRESS: unlockFirst — locked ⇒ the dialog first, then the menu (B-864f cure: at THIS page\'s unlock or the dialog\'s close — unlockThen, here; a removed dialog runs no closer); otherwise the menu at once');
+  ok(gateOf(/btn\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\._pressGlobalSettings\(btn\); \};/.test(read('src/lib/app.js'))) && verdictOf(/gear\.onclick = \(e\) => \{ e\.stopPropagation\(\); app\._pressGlobalSettings\(gear\); \};/.test(read('src/lib/mobile-nav.js'))), 'both ⚙ buttons press through App._pressGlobalSettings (app.js, mobile-nav.js)');
   const H = read('src/server/vault-hooks.js');
-  ok(/const loud = \(\) => VL\.vaultLoudState\(\{ facts: vault\.facts\(\) \}\)\.item;/.test(H) && /if \(loud\(\)\) fileItem\(/.test(H) && /vault\.onLock\(\(\) => \{ if \(loud\(\)\) fileItem\(null\); \}\);/.test(H), 'the hub\'s ITEM asks the same table — at boot and at every lock act');
-  ok(/kind: 'action', urgency: 'urgent', by: 'agent', sessionName: 'Vault', text: VAULT_ITEM_TEXT/.test(H), 'the item is an URGENT action row (one add() site, its dedupe text unchanged)');
+  ok(gateOf(/const loud = \(\) => VL\.vaultLoudState\(\{ facts: vault\.facts\(\) \}\)\.item;/.test(H)) && gateOf(/if \(loud\(\)\) fileItem\(/.test(H)) && verdictOf(/vault\.onLock\(\(\) => \{ if \(loud\(\)\) fileItem\(null\); \}\);/.test(H)), 'the hub\'s ITEM asks the same table — at boot and at every lock act');
+  ok(verdictOf(/kind: 'action', urgency: 'urgent', by: 'agent', sessionName: 'Vault', text: VAULT_ITEM_TEXT/.test(H)), 'the item is an URGENT action row (one add() site, its dedupe text unchanged)');
 }
 
 console.log('③ THE ITEM over the real engine + the real For-you store');
@@ -160,18 +160,18 @@ console.log('④ RED CONTROLS — the base, one each');
   // the dialog: the base asked at every load while locked (no set-aside lock — a reload after 「稍后」 asked again)
   const preDialog = (i) => { const s = L.vaultLoudState(i); return { ...s, dialog: s.locked && (i.on !== 'broadcast' || i.facts.startedAt !== i.seen) }; };
   const r1 = runTable(preDialog).filter((x) => !x.ok);
-  ok(r1.length > 0 && r1.every((x) => x.row === 3), `RED: a table that ignores the set-aside lock fails row 4 (a reload after 「稍后」 asks again — the base) — ${r1.length} case(s) red`, r1.map((x) => x.input));
+  ok(r1.length > 0 && verdictOf(r1.every((x) => x.row === 3)), `RED: a table that ignores the set-aside lock fails row 4 (a reload after 「稍后」 asks again — the base) — ${r1.length} case(s) red`, r1.map((x) => x.input));
   const everyBroadcast = (i) => { const s = L.vaultLoudState(i); return { ...s, dialog: s.locked && i.dismissed !== s.lock }; };
   const r2 = runTable(everyBroadcast).filter((x) => !x.ok);
-  ok(r2.length > 0 && r2.every((x) => x.row === 5), `RED: a table that asks at every broadcast fails row 6 (a lock act would pop the dialog over the page) — ${r2.length} case(s) red`);
+  ok(r2.length > 0 && verdictOf(r2.every((x) => x.row === 5)), `RED: a table that asks at every broadcast fails row 6 (a lock act would pop the dialog over the page) — ${r2.length} case(s) red`);
   const noMark = (i) => ({ ...L.vaultLoudState(i), mark: false });
-  ok(runTable(noMark).some((x) => !x.ok && x.row >= 2), 'RED: no ⚙ mark (the base) fails every locked row');
+  ok(verdictOf(runTable(noMark).some((x) => !x.ok && x.row >= 2)), 'RED: no ⚙ mark (the base) fails every locked row');
   // the item: the base filed a NOTICE at boot only (no lock-act filing)
   const M = mutantCopies('vault-loud', REPO);
   const src = read('src/server/vault-hooks.js');
   const a1 = "    vault.onLock(() => { if (loud()) fileItem(null); });";
   const a2 = "kind: 'action', urgency: 'urgent', by: 'agent'";
-  ok(src.includes(a1) && src.includes(a2), 'the mutants\' anchors are the lock-act filing and the item\'s kind');
+  ok(gateOf(src.includes(a1)) && verdictOf(src.includes(a2)), 'the mutants\' anchors are the lock-act filing and the item\'s kind');
   const base = require(M.write('src/server/vault-hooks.js', editAnchor(editAnchor(src, a1, '', "src/server/vault-hooks.js"), a2, "kind: 'notice', urgency: 'high', by: 'agent'", "src/server/vault-hooks.js"), 'base'));
   const b = await itemLegs(base);
   ok(b.boot.length === 1 && b.boot[0].band === 0 && b.badge === 0, 'RED: the base\'s boot item is a NOTICE — band 0, the badge counts nothing', b.boot);
@@ -183,4 +183,4 @@ for (const t of stores) { try { t.stop(); } catch { } }
 for (const e of engines) { try { e.close?.(); } catch { } }
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

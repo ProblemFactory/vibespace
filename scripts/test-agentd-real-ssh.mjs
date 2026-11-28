@@ -21,7 +21,7 @@ const hostId = process.argv[2];
 if (!hostId) { console.error('usage: test-agentd-real-ssh.mjs <hostId>'); process.exit(2); }
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const { HostManager } = require('../src/hosts.js');
@@ -70,7 +70,7 @@ check('pipe session spawned on the host', r1.pid > 0, JSON.stringify(r1));
 await sleep(600);
 hs.write('one\n');
 await sleep(900);
-check('stdout relays back over real ssh', out.toString().includes('echo:one'), JSON.stringify(out.toString()));
+check('stdout relays back over real ssh', verdictOf(out.toString().includes('echo:one')), JSON.stringify(out.toString()));
 
 const consumed = out.length;
 console.log('— DROP the ssh bridge — daemon + session survive on the host —');
@@ -92,10 +92,10 @@ await sleep(500);
 check('no replay at the offset', out2.length === 0, JSON.stringify(out2.toString().slice(0, 80)));
 hs2.write('two\n');
 await sleep(900);
-check('post-reconnect input flows to the surviving session', out2.toString().includes('echo:two'), JSON.stringify(out2.toString()));
+check('post-reconnect input flows to the surviving session', verdictOf(out2.toString().includes('echo:two')), JSON.stringify(out2.toString()));
 hs2.write('quit\n');
 await sleep(1000);
-check('exit sentinel arrives', out2.toString().includes('"_remote_exit"') && out2.toString().includes('"code":7'), JSON.stringify(out2.toString().slice(-100)));
+check('exit sentinel arrives', gateOf(out2.toString().includes('"_remote_exit"')) && verdictOf(out2.toString().includes('"code":7')), JSON.stringify(out2.toString().slice(-100)));
 
 dm2.stop();
 // cleanup: kill the daemon + remove the throwaway root on the host
@@ -108,4 +108,4 @@ try {
 
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M2 REAL-SSH tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

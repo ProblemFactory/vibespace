@@ -31,7 +31,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -70,15 +70,15 @@ const J = {}; // the judges §6 runs again on each patched copy
       r({ channel: 'lark' }, {}, { channels: new Set(['lark']) }) === true, r({ channel: 'lark' }, {}, { channels: new Set() }) === false, r({ channel: 'lark' }, {}, {}) === true,
     ].every(Boolean);
   };
-  ok(J.truth(V), 'setting is / isNot / truthy, fact, harness, channel — each true, false, and NOT KNOWN (⇒ shown)');
+  ok(verdictOf(J.truth(V)), 'setting is / isNot / truthy, fact, harness, channel — each true, false, and NOT KNOWN (⇒ shown)');
   J.unknown = (M) => M.rowRelevant({ when: { weather: 'rain' } }, ctxOf()) === true && M.rowRelevant({ when: { setting: 'a', fact: 'vnc' } }, ctxOf({ a: false }, { vnc: false })) === true && M.clauseKind({ fact: 'vnc', harness: 'x' }) === null;
-  ok(J.unknown(V), 'an unknown tag, or a clause with two tags, hides nothing at runtime (44e refuses both at build time)');
+  ok(verdictOf(J.unknown(V)), 'an unknown tag, or a clause with two tags, hides nothing at runtime (44e refuses both at build time)');
   J.allOf = (M) => {
     const w = [{ setting: 'a', is: true }, { setting: 'b', is: true }];
     return M.rowRelevant({ when: w }, ctxOf({ a: true, b: true })) && !M.rowRelevant({ when: w }, ctxOf({ a: true, b: false })) && !M.rowRelevant({ when: w }, ctxOf({ a: false, b: true }));
   };
-  ok(J.allOf(V), 'an array `when` holds only while EVERY clause holds (the second clause is read, not just the first)');
-  ok(JSON.stringify(V.WHEN_KINDS) === '["setting","fact","harness","channel"]' && Object.isFrozen(V.WHEN_KINDS) && S.WHEN_KINDS === V.WHEN_KINDS, 'WHEN_KINDS is the closed, frozen set — and settings-schema.js re-exports the same object (lane channel-declared-settings builds on it)');
+  ok(verdictOf(J.allOf(V)), 'an array `when` holds only while EVERY clause holds (the second clause is read, not just the first)');
+  ok(JSON.stringify(V.WHEN_KINDS) === '["setting","fact","harness","channel"]' && gateOf(Object.isFrozen(V.WHEN_KINDS)) && S.WHEN_KINDS === V.WHEN_KINDS, 'WHEN_KINDS is the closed, frozen set — and settings-schema.js re-exports the same object (lane channel-declared-settings builds on it)');
   ok(JSON.stringify(V.WHEN_FACTS) === '["vnc","desktopApps"]' && JSON.stringify(V.TIERS) === '["advanced"]', 'WHEN_FACTS = vnc, desktopApps; TIERS = advanced');
 }
 
@@ -120,23 +120,23 @@ console.log('§3 the four rules on a fixture schema');
   const vm = (M, o = {}) => M.settingsViewModel(F, { categories: cats, ctx, t: tEn, ...o });
   const paths = (sec) => sec.rows.map((r) => r.path).join(',');
   J.rule4 = (M) => { const m = vm(M); return paths(m.byCategory.A) === 'a.plain' && m.byCategory.A.hiddenAdvanced === 2 && m.byCategory.C.show && m.byCategory.C.rows.length === 0 && m.byCategory.C.hiddenAdvanced === 1; };
-  ok(J.rule4(V), 'rule 4: switch OFF ⇒ A draws its everyday row and counts 2 advanced hidden; a category of only advanced rows (C) still draws — its "1 advanced setting hidden · Show" line');
+  ok(verdictOf(J.rule4(V)), 'rule 4: switch OFF ⇒ A draws its everyday row and counts 2 advanced hidden; a category of only advanced rows (C) still draws — its "1 advanced setting hidden · Show" line');
   J.rule4on = (M) => { const m = vm(M, { showAdvanced: true }); const r = m.byCategory.A.rows.find((x) => x.path === 'a.adv2'); return paths(m.byCategory.A) === 'a.plain,a.adv1,a.adv2' && m.byCategory.A.hiddenAdvanced === 0 && r && r.chips.map((c) => c.kind).join(',') === 'advanced,reload'; };
-  ok(J.rule4on(V), '…switch ON ⇒ the advanced rows draw, each with the `advanced` chip (+ `reload` where it applies), nothing counted');
+  ok(verdictOf(J.rule4on(V)), '…switch ON ⇒ the advanced rows draw, each with the `advanced` chip (+ `reload` where it applies), nothing counted');
   // lane setting-doors l3 (主开发 2026-11-15): THE REVEAL — the ONE row a `vibespace://settings/<key>` link opened on draws past the advanced
   // tier for that open, the switch still OFF; nothing else is drawn by it (a mutant with the reveal branch off was green in every fast leg)
   J.reveal = (M) => { const off = vm(M), rv = vm(M, { reveal: 'a.adv1' }); return !off.byCategory.A.rows.some((r) => r.path === 'a.adv1') && rv.byCategory.A.rows.some((r) => r.path === 'a.adv1') && !rv.byCategory.A.rows.some((r) => r.path === 'a.adv2'); };
-  ok(J.reveal(V), 'lane setting-doors l3: reveal — the link\'s row (a.adv1, advanced) draws with the switch OFF, and only that row (a.adv2 stays hidden)');
+  ok(verdictOf(J.reveal(V)), 'lane setting-doors l3: reveal — the link\'s row (a.adv1, advanced) draws with the switch OFF, and only that row (a.adv2 stays hidden)');
   J.rule3 = (M) => { const m = vm(M, { showAdvanced: true }); return !m.byCategory.B.show && m.byCategory.B.hiddenAdvanced === 0 && !m.byCategory.A.rows.some((r) => r.path === 'a.dep') && m.sections.filter((s) => s.show).map((s) => s.category).join(',') === 'A,C'; };
-  ok(J.rule3(V), 'rule 3: a false `when` hides the row; B (every row about an unlinked vendor) is not drawn at all — the nav lists A, C — and its advanced row is NOT counted as "advanced hidden"');
+  ok(verdictOf(J.rule3(V)), 'rule 3: a false `when` hides the row; B (every row about an unlinked vendor) is not drawn at all — the nav lists A, C — and its advanced row is NOT counted as "advanced hidden"');
   J.rule1 = (M) => { const m = vm(M, { query: 'lark' }); const g = m.byCategory.B.rows.find((r) => r.path === 'b.gone'), a = m.byCategory.B.rows.find((r) => r.path === 'b.advgone'); return m.byCategory.B.show && g && a && g.chips.some((c) => c.kind === 'unused' && c.text === 'not in use here: no Lark account is linked') && a.chips.map((c) => c.kind).join(',') === 'advanced,unused' && m.hiddenAdvanced === 0; };
-  ok(J.rule1(V), 'rule 1: a search shows every match — hidden and advanced alike — with the chip saying WHY in words; no hidden-count line while searching');
+  ok(verdictOf(J.rule1(V)), 'rule 1: a search shows every match — hidden and advanced alike — with the chip saying WHY in words; no hidden-count line while searching');
   J.rule2 = (M) => { const m = M.settingsViewModel(F, { categories: cats, ctx, t: tEn, isModified: (p) => p === 'b.advgone' || p === 'a.adv1' }); const r = m.byCategory.B.rows.find((x) => x.path === 'b.advgone'); return m.byCategory.B.show && r && r.chips.map((c) => c.kind).join(',') === 'advanced,unused' && m.byCategory.A.rows.some((x) => x.path === 'a.adv1') && m.byCategory.A.hiddenAdvanced === 1; };
-  ok(J.rule2(V), 'rule 2 (V2): a MODIFIED advanced row whose `when` is false draws, with BOTH chips — and a modified advanced row is never counted as hidden');
+  ok(verdictOf(J.rule2(V)), 'rule 2 (V2): a MODIFIED advanced row whose `when` is false draws, with BOTH chips — and a modified advanced row is never counted as hidden');
   J.census = (M) => { const m = vm(M, { query: 'orphan' }); return m.drawn === 0 && !m.sections.some((s) => s.rows.some((r) => r.path === 'z.unlisted')); };
-  ok(J.census(V), 'a row in a category the census list does not name is not drawn, even when searched (§44 semantics unchanged)');
+  ok(verdictOf(J.census(V)), 'a row in a category the census list does not name is not drawn, even when searched (§44 semantics unchanged)');
   J.depLive = (M) => { vals['a.plain'] = false; const m = vm(M); vals['a.plain'] = true; return m.byCategory.A.rows.some((r) => r.path === 'a.dep'); };
-  ok(J.depLive(V), 'the dependent row appears once its governing row has the value it waits for');
+  ok(verdictOf(J.depLive(V)), 'the dependent row appears once its governing row has the value it waits for');
 }
 
 console.log('§4 the shipped schema');
@@ -149,18 +149,18 @@ console.log('§4 the shipped schema');
   { // B-544d r2: a harness folded because its CLI is not found here carries the Re-check door on its chip; another fold does not
     const found = real(none, { query: 'codex' }), cx = Object.values(found.byCategory).flatMap((s) => s.rows).filter((r) => r.why);
     const dk = Object.values(real(none, { query: 'desktop' }).byCategory).flatMap((s) => s.rows).filter((r) => r.why && /display backend/.test(r.why));
-    ok(cx.length > 0 && cx.every((r) => r.chips.some((c) => c.kind === 'unused' && c.recheck === 'codex')) && dk.length > 0 && dk.every((r) => r.chips.every((c) => !c.recheck)), 'B-544d r2: a row folded because the codex CLI is not found here, found by a search, carries the Re-check door on its «not in use here» chip; a fold for another reason (no display backend) does not', { cx: cx.length, dk: dk.length });
+    ok(cx.length > 0 && gateOf(cx.every((r) => r.chips.some((c) => c.kind === 'unused' && c.recheck === 'codex'))) && dk.length > 0 && verdictOf(dk.every((r) => r.chips.every((c) => !c.recheck))), 'B-544d r2: a row folded because the codex CLI is not found here, found by a search, carries the Re-check door on its «not in use here» chip; a fold for another reason (no display backend) does not', { cx: cx.length, dk: dk.length });
   }
-  ok(!m0.byCategory.Codex.show && !m0.byCategory.OpenCode.show && m0.byCategory.Claude.show, 'a machine without the codex / opencode CLIs: the WHOLE Codex and OpenCode sections vanish (the table-level `when`), Claude stays');
-  ok(m1.byCategory.Codex.show && m1.byCategory.Codex.rows.length === S.harnessSettingPaths('codex').length, '…with them installed, every derived Codex row draws');
-  ok(!m0.byCategory['Desktop apps'].show && m1.byCategory['Desktop apps'].rows.length === 9 && mu.byCategory['Desktop apps'].show, 'Desktop apps: hidden without a display backend, its 9 rows with one (lane agent-window-no-steal: + Agent-opened windows come to the front; lane app-display-portal: + file dialogs in their own window; lane app-display-notify-sink: + notifications in their own window; lane app-display-secrets: + apps keep their logins), SHOWN while the fact is unknown');
-  ok(!m0.byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField') && m1.byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField') && real({ channels: null }).byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField'), 'the Lark-only row: hidden with no Lark account, shown with one, shown when the accounts read failed (V3: a 401 / a timeout hides nothing)');
+  ok(!m0.byCategory.Codex.show && !m0.byCategory.OpenCode.show && verdictOf(m0.byCategory.Claude.show), 'a machine without the codex / opencode CLIs: the WHOLE Codex and OpenCode sections vanish (the table-level `when`), Claude stays');
+  ok(gateOf(m1.byCategory.Codex.show) && m1.byCategory.Codex.rows.length === S.harnessSettingPaths('codex').length, '…with them installed, every derived Codex row draws');
+  ok(!m0.byCategory['Desktop apps'].show && m1.byCategory['Desktop apps'].rows.length === 9 && verdictOf(mu.byCategory['Desktop apps'].show), 'Desktop apps: hidden without a display backend, its 9 rows with one (lane agent-window-no-steal: + Agent-opened windows come to the front; lane app-display-portal: + file dialogs in their own window; lane app-display-notify-sink: + notifications in their own window; lane app-display-secrets: + apps keep their logins), SHOWN while the fact is unknown');
+  ok(!m0.byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField') && gateOf(m1.byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField')) && verdictOf(real({ channels: null }).byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField')), 'the Lark-only row: hidden with no Lark account, shown with one, shown when the accounts read failed (V3: a 401 / a timeout hides nothing)');
   // a HELD row (src/lib/settings-view.js `held`, lane cache-warmth-tiles r1a′) exists but is never drawn — the one named
   // exception to V1, each listed by test-architecture §44 with its why
   const heldKeys = Object.keys(SCHEMA).filter((p) => SCHEMA[p].held !== undefined);
   const misses = Object.keys(SCHEMA).filter((p) => !heldKeys.includes(p) && !real(none, { query: p }).sections.some((s) => s.rows.some((r) => r.path === p)));
   ok(misses.length === 0, `V1: EVERY one of the ${Object.keys(SCHEMA).length - heldKeys.length} drawable rows is reachable by searching its key with the switch OFF and every fact false (a loop, not a sample; ${heldKeys.length} held)`, misses.slice(0, 5));
-  ok(heldKeys.every((p) => !real(all, { query: p, showAdvanced: true }).sections.some((s) => s.rows.some((r) => r.path === p))),
+  ok(verdictOf(heldKeys.every((p) => !real(all, { query: p, showAdvanced: true }).sections.some((s) => s.rows.some((r) => r.path === p)))),
     `V1: …and a HELD row is reachable by NO search, every fact true (${heldKeys.join(', ') || 'none held'})`);
   // lane engine-spi-egress L3: the anti-bot backend's two rows are RETIRED (src/retired-settings.js) — no search reaches them
   { const gone = real(all, { query: 'browser.cloak', showAdvanced: true }).sections.flatMap((s) => s.rows).filter((r) => /^browser\.cloak\./.test(r.path));
@@ -181,14 +181,14 @@ console.log('§4 the shipped schema');
 console.log('§5 wiring pins');
 {
   const ui = read('src/lib/settings-ui.js');
-  ok(/settingsViewModel\(SETTINGS_SCHEMA, \{ categories: SETTINGS_CATEGORIES, query, showAdvanced: this\._showAdvanced, ctx: this\._viewCtx\(\)/.test(ui) && /for \(const cat of SETTINGS_CATEGORIES\) grouped\[cat\] = this\._onlyCategory && cat !== this\._onlyCategory \? \{ \.\.\.vm\.byCategory\[cat\], show: false \} : vm\.byCategory\[cat\];/.test(ui), '_renderContent draws the view model\'s answer, still walking SETTINGS_CATEGORIES (§44\'s coupling)');
-  ok(/localStorage\.getItem\(SHOW_ADVANCED_KEY\) === '1'/.test(ui) && /localStorage\.setItem\(SHOW_ADVANCED_KEY/.test(ui) && V.SHOW_ADVANCED_KEY === 'vibespace.settingsAdvanced', 'the ONE header switch is persisted per device under vibespace.settingsAdvanced');
-  ok(/if \(sec\.hiddenAdvanced\) section\.appendChild\(this\._hiddenAdvancedLine\(/.test(ui) && /this\._setShowAdvanced\(true\); this\._rerenderKeepingPlace\(/.test(ui), 'each category ends with the hidden-count line; its Show turns the switch on and keeps the category in place');
-  ok(/if \(asksChannel\) \{\s*Promise\.resolve\(fetchJson\('\/api\/channels\/adapters'\)\)/.test(ui) && !/setInterval|setTimeout\(\(\) => this\._buildFacts/.test(ui), 'the accounts fact = ONE GET /api/channels/adapters per open, only when some row asks about a vendor; never on a timer');
-  ok(/app\._desktopAppsAvailable === true \? true : app\._desktopAppsKnown \? false : undefined/.test(ui) && /app\._desktopAppsKnown = true;/.test(read('src/lib/desktop-app-launcher.js')), 'desktopApps is false only once the probe ANSWERED (an unanswered probe hides nothing)');
-  ok(/this\._harnessesHere = new Set\(d\.harnesses\.filter\(\(h\) => h && h\.cli !== false\)/.test(read('src/lib/app.js')) && /row\.cli = cliCmds\.resolvedHere\(h\.id, \{ unaskedBare: !!\(h\.acp \|\| h\.exe\) \}\);/.test(read('src/server/cli-env.js')), 'the harness fact: /api/home rows carry `cli` (did the CLI resolve here — B-544d: the login shell\'s verdict once asked, the boot fact before; `installed` keeps claude / codex / shell in the picker)');
-  ok(/router\.get\('\/api\/channels\/adapters', \(req, res\) => \{[\s\S]{0,200}engine\(\)\.adapterRecords\(\)\.adapters\.map\(\(r\) => \(\{ id: r\.id, kind: r\.kind, builtin: !!r\.builtin, enabled: r\.enabled !== false \}\)\)/.test(read('src/routes/channels.js')), 'GET /api/channels/adapters answers the accounts only — never the digest\'s conversations');
-  ok(/if \(r\.tier !== undefined\) entry\.tier = r\.tier;/.test(read('src/lib/settings-schema.js')) && /when: \{ harness: 'codex' \}/.test(read('src/harness-settings.js')) && /when: \{ harness: 'opencode' \}/.test(read('src/harness-settings.js')), 'derived harness rows carry their tier and their TABLE\'s `when`');
+  ok(gateOf(/settingsViewModel\(SETTINGS_SCHEMA, \{ categories: SETTINGS_CATEGORIES, query, showAdvanced: this\._showAdvanced, ctx: this\._viewCtx\(\)/.test(ui)) && verdictOf(/for \(const cat of SETTINGS_CATEGORIES\) grouped\[cat\] = this\._onlyCategory && cat !== this\._onlyCategory \? \{ \.\.\.vm\.byCategory\[cat\], show: false \} : vm\.byCategory\[cat\];/.test(ui)), '_renderContent draws the view model\'s answer, still walking SETTINGS_CATEGORIES (§44\'s coupling)');
+  ok(gateOf(/localStorage\.getItem\(SHOW_ADVANCED_KEY\) === '1'/.test(ui)) && gateOf(/localStorage\.setItem\(SHOW_ADVANCED_KEY/.test(ui)) && V.SHOW_ADVANCED_KEY === 'vibespace.settingsAdvanced', 'the ONE header switch is persisted per device under vibespace.settingsAdvanced');
+  ok(gateOf(/if \(sec\.hiddenAdvanced\) section\.appendChild\(this\._hiddenAdvancedLine\(/.test(ui)) && verdictOf(/this\._setShowAdvanced\(true\); this\._rerenderKeepingPlace\(/.test(ui)), 'each category ends with the hidden-count line; its Show turns the switch on and keeps the category in place');
+  ok(gateOf(/if \(asksChannel\) \{\s*Promise\.resolve\(fetchJson\('\/api\/channels\/adapters'\)\)/.test(ui)) && !/setInterval|setTimeout\(\(\) => this\._buildFacts/.test(ui), 'the accounts fact = ONE GET /api/channels/adapters per open, only when some row asks about a vendor; never on a timer');
+  ok(gateOf(/app\._desktopAppsAvailable === true \? true : app\._desktopAppsKnown \? false : undefined/.test(ui)) && verdictOf(/app\._desktopAppsKnown = true;/.test(read('src/lib/desktop-app-launcher.js'))), 'desktopApps is false only once the probe ANSWERED (an unanswered probe hides nothing)');
+  ok(gateOf(/this\._harnessesHere = new Set\(d\.harnesses\.filter\(\(h\) => h && h\.cli !== false\)/.test(read('src/lib/app.js'))) && verdictOf(/row\.cli = cliCmds\.resolvedHere\(h\.id, \{ unaskedBare: !!\(h\.acp \|\| h\.exe\) \}\);/.test(read('src/server/cli-env.js'))), 'the harness fact: /api/home rows carry `cli` (did the CLI resolve here — B-544d: the login shell\'s verdict once asked, the boot fact before; `installed` keeps claude / codex / shell in the picker)');
+  ok(verdictOf(/router\.get\('\/api\/channels\/adapters', \(req, res\) => \{[\s\S]{0,200}engine\(\)\.adapterRecords\(\)\.adapters\.map\(\(r\) => \(\{ id: r\.id, kind: r\.kind, builtin: !!r\.builtin, enabled: r\.enabled !== false \}\)\)/.test(read('src/routes/channels.js'))), 'GET /api/channels/adapters answers the accounts only — never the digest\'s conversations');
+  ok(gateOf(/if \(r\.tier !== undefined\) entry\.tier = r\.tier;/.test(read('src/lib/settings-schema.js'))) && gateOf(/when: \{ harness: 'codex' \}/.test(read('src/harness-settings.js'))) && verdictOf(/when: \{ harness: 'opencode' \}/.test(read('src/harness-settings.js'))), 'derived harness rows carry their tier and their TABLE\'s `when`');
 }
 
 console.log('§6 patched copies — each rule\'s judge goes red without it');
@@ -205,13 +205,13 @@ console.log('§6 patched copies — each rule\'s judge goes red without it');
   ];
   let i = 0;
   for (const [name, from, to, judges] of PATCHES) {
-    ok(src.includes(from), `the patch site of "${name}" is in the module (a moved line would make this control vacuous)`);
+    ok(verdictOf(src.includes(from)), `the patch site of "${name}" is in the module (a moved line would make this control vacuous)`);
     const f = M.write('src/lib/settings-view.js', editAnchor(src, from, to, "src/lib/settings-view.js"), `m${i++}`, { esm: true });
     const Mut = await import(pathToFileURL(f).href);
     const red = judges.filter((j) => { try { return !J[j](Mut); } catch { return true; } });
-    ok(red.length === judges.length && judges.every((j) => J[j](V)), `NEGATIVE CONTROL — ${name}: ${judges.join(', ')} RED on the copy, green on the real module`);
+    ok(red.length === judges.length && verdictOf(judges.every((j) => J[j](V))), `NEGATIVE CONTROL — ${name}: ${judges.join(', ')} RED on the copy, green on the real module`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: PATCHES.length })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: PATCHES.length })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log('§7 the per-vendor channel rows (B-df40 part 3), derived from src/channel-settings.js');
@@ -224,38 +224,38 @@ console.log('§7 the per-vendor channel rows (B-df40 part 3), derived from src/c
     return e && e.tier === 'advanced' && e.when && e.when.channel === tbl.vendor && e.channel === tbl.vendor && e.category === 'Channels' && e.liveApply === true
       && e.default === r.default && e.min === r.min && e.max === r.max && e.step === r.step && e.label === r.label && e.type === 'number';
   }));
-  ok(J7.derived(S) && S.channelSettingPaths('lark').join(',') === 'channels.budgetLarkPerMin,channels.larkRequestsPerSec' && S.channelSettingPaths('gmail').join(',') === 'channels.budgetGmailPerMin,channels.gmailUnitsPerSec',
+  ok(gateOf(J7.derived(S)) && S.channelSettingPaths('lark').join(',') === 'channels.budgetLarkPerMin,channels.larkRequestsPerSec' && S.channelSettingPaths('gmail').join(',') === 'channels.budgetGmailPerMin,channels.gmailUnitsPerSec',
     'every table row is a Channels row under today\'s key: advanced, `when: { channel: <vendor> }`, `channel` on the entry, the table\'s own default / min / max / step / label');
   const nameOf = (kind, id) => (kind === 'channel' ? S.channelVendorName(id) : null);
   const view = (channels, o = {}) => V.settingsViewModel(SCHEMA, { categories: CATS, ctx: { get: (k) => (SCHEMA[k] ? SCHEMA[k].default : undefined), facts: { channels }, nameOf }, t: tEn, showAdvanced: true, ...o }).byCategory.Channels;
   const vendorPaths = (sec) => sec.rows.filter((r) => r.schema.channel).map((r) => r.path).join(',');
   ok(vendorPaths(view(new Set())) === '' && vendorPaths(view(new Set(['lark']))) === 'channels.budgetLarkPerMin,channels.larkRequestsPerSec' && vendorPaths(view(new Set(['lark', 'gmail']))).split(',').length === 4,
     'a vendor without a linked account hides its rows (switch ON — relevance, not tier); with a Lark account the Lark pair draws, the Gmail pair stays hidden; both accounts ⇒ all four');
-  ok(vendorPaths(view(null)).split(',').length === Object.values(CS.CHANNEL_SETTINGS).reduce((n, tbl) => n + tbl.rows.length, 0) && vendorPaths(view(null)).includes('channels.budgetSlackPerMin'), '…and an unanswered accounts read (a 401, a timeout) hides none of them — every vendor\'s rows, Slack\'s included (ignorance hides nothing)');
+  ok(vendorPaths(view(null)).split(',').length === Object.values(CS.CHANNEL_SETTINGS).reduce((n, tbl) => n + tbl.rows.length, 0) && verdictOf(vendorPaths(view(null)).includes('channels.budgetSlackPerMin')), '…and an unanswered accounts read (a 401, a timeout) hides none of them — every vendor\'s rows, Slack\'s included (ignorance hides nothing)');
   const off = view(new Set(['lark', 'gmail']), { showAdvanced: false });
   ok(vendorPaths(off) === '' && off.hiddenAdvanced >= 4, `switch OFF ⇒ the vendor rows fold into the category's hidden-count line with the engine's advanced rows (${off.hiddenAdvanced})`);
   const mod = view(new Set(['lark']), { showAdvanced: false, isModified: (p) => p === 'channels.budgetGmailPerMin' });
   const g = mod.rows.find((r) => r.path === 'channels.budgetGmailPerMin');
-  ok(g && g.chips.map((c) => c.kind).join(',') === 'advanced,unused' && g.why === 'no Gmail account is linked', 'a Gmail budget set earlier stays drawn after the account is gone, with both chips — "no Gmail account is linked" (the vendor named by its table)', g && g.chips);
+  ok(gateOf(g) && g.chips.map((c) => c.kind).join(',') === 'advanced,unused' && g.why === 'no Gmail account is linked', 'a Gmail budget set earlier stays drawn after the account is gone, with both chips — "no Gmail account is linked" (the vendor named by its table)', g && g.chips);
   ok(V.whyHidden(SCHEMA['channels.larkRequestsPerSec'], { facts: { channels: new Set() }, nameOf }, tZh) === '没有关联的 Lark 账号' && V.whyHidden(SCHEMA['channels.gmailUnitsPerSec'], { facts: { channels: new Set() }, nameOf }, tJa) === 'Gmail アカウントが連携されていません', 'the reason in zh / ja, the vendor named from the table');
   const searched = V.settingsViewModel(SCHEMA, { categories: CATS, query: 'quota units per second', ctx: { get: () => undefined, facts: { channels: new Set() }, nameOf }, t: tEn }).byCategory.Channels;
-  ok(searched.rows.some((r) => r.path === 'channels.gmailUnitsPerSec' && r.chips.some((c) => c.kind === 'unused')), 'a search still finds a hidden vendor row, with its chip (rule 1)');
+  ok(verdictOf(searched.rows.some((r) => r.path === 'channels.gmailUnitsPerSec' && r.chips.some((c) => c.kind === 'unused'))), 'a search still finds a hidden vendor row, with its chip (rule 1)');
   const words = ['Per vendor', 'Read by the Channels engine · {vendor}', 'Each service\'s own request budget and pace, per linked account. A service\'s rows show while one of its accounts is linked.', 'Gmail',
     'Reactions are read only for the messages an open window shows, one call per message, at most this many a minute per account (0 = never list — reactions arrive only as live events). Checked before the account\'s per-minute vendor budget, so reading reactions never takes the budget new messages need.'];
   const missing = words.filter((k) => !zh[k] || !ja[k]);
   ok(!missing.length && tZh('Read by the Channels engine · {vendor}', { vendor: 'Lark' }) === '由频道引擎读取 · Lark' && SCHEMA['channels.reactionsPerMin'].description === words[4], 'the block title, its note, the chip and the vendor name are in BOTH dictionaries; the reactions row no longer points at a budget "above" (the vendor rows moved below)', missing);
   const ui = read('src/lib/settings-ui.js');
-  ok(/const vendorRows = items\.filter\(\(it\) => it\.schema\.channel\);/.test(ui) && /if \(schema\.channel\) continue;/.test(ui) && /section\.appendChild\(this\._renderSetting\(path, schema, chips\)\);/.test(ui) && /st\.dataset\.channelBlock = 'vendor'; st\.textContent = t\('Per vendor'\);/.test(ui),
+  ok(gateOf(/const vendorRows = items\.filter\(\(it\) => it\.schema\.channel\);/.test(ui)) && gateOf(/if \(schema\.channel\) continue;/.test(ui)) && gateOf(/section\.appendChild\(this\._renderSetting\(path, schema, chips\)\);/.test(ui)) && verdictOf(/st\.dataset\.channelBlock = 'vendor'; st\.textContent = t\('Per vendor'\);/.test(ui)),
     'the window draws the category\'s own rows first, then ONE "Per vendor" sub-block with the derived rows');
-  ok(/else if \(schema\.channel\) this\._renderChannelChip\(info, schema\);/.test(ui) && /t\('Read by the Channels engine · \{vendor\}', \{ vendor: channelVendorName\(schema\.channel\) \}\)/.test(ui) && /kind === 'channel' \? channelVendorName\(id\) : null/.test(ui),
+  ok(gateOf(/else if \(schema\.channel\) this\._renderChannelChip\(info, schema\);/.test(ui)) && gateOf(/t\('Read by the Channels engine · \{vendor\}', \{ vendor: channelVendorName\(schema\.channel\) \}\)/.test(ui)) && verdictOf(/kind === 'channel' \? channelVendorName\(id\) : null/.test(ui)),
     'a derived vendor row\'s apply-chip slot says "Read by the Channels engine · Lark"; the hidden-reason names the vendor through channelVendorName');
   const ssrc = read('src/lib/settings-schema.js');
   const FROM = "    tier: 'advanced', when: { channel: tbl.vendor },\n";
-  ok(ssrc.includes(FROM) && !/'channels\.(budgetLarkPerMin|budgetGmailPerMin|gmailUnitsPerSec|larkRequestsPerSec)': \{/.test(ssrc), 'the patch site of the derivation control is in settings-schema.js, and none of the four rows is hand-written there any more');
+  ok(gateOf(ssrc.includes(FROM)) && !/'channels\.(budgetLarkPerMin|budgetGmailPerMin|gmailUnitsPerSec|larkRequestsPerSec)': \{/.test(ssrc), 'the patch site of the derivation control is in settings-schema.js, and none of the four rows is hand-written there any more');
   const M = mutantCopies('settings-view-channel', REPO);
   const Smut = await import(pathToFileURL(M.write('src/lib/settings-schema.js', editAnchor(ssrc, FROM, '', "src/lib/settings-schema.js"), 'nowhen', { esm: true })).href);
-  ok(!J7.derived(Smut) && Smut.SETTINGS_SCHEMA['channels.budgetLarkPerMin'] && !Smut.SETTINGS_SCHEMA['channels.budgetLarkPerMin'].when, 'NEGATIVE CONTROL — a schema copy whose derived vendor rows lose `tier` + `when` is RED on the derivation judge (green on the real module)');
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+  ok(!J7.derived(Smut) && gateOf(Smut.SETTINGS_SCHEMA['channels.budgetLarkPerMin']) && !Smut.SETTINGS_SCHEMA['channels.budgetLarkPerMin'].when, 'NEGATIVE CONTROL — a schema copy whose derived vendor rows lose `tier` + `when` is RED on the derivation judge (green on the real module)');
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log('§8 the store\'s notifier walks a snapshot of its listeners');
@@ -280,12 +280,12 @@ console.log('§8 the store\'s notifier walks a snapshot of its listeners');
   const namedOf = (v, who) => (v.expired ? `the ${who} child never answered within its bound — a harness line, never the store's verdict` : null);
   const said = (v, who) => { const l = namedOf(v, who); if (l) ok(false, l, JSON.stringify(v)); };
   const real = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href)); said(real, 'real store\'s');
-  ok(real.green, 'a listener that re-subscribes while it runs is called ONCE (the other listener once too), the store returns, 2 listeners stay', JSON.stringify(real));
+  ok(verdictOf(real.green), 'a listener that re-subscribes while it runs is called ONCE (the other listener once too), the store returns, 2 listeners stay', JSON.stringify(real));
   // THE PLACEMENT (the family's law 1): the old leg's verdict leaned on the child beating its deadline — a start HELD past a deadline
   // shorter than the hold (a stall the leg owns, never load) reads a GREEN store RED by that deadline; the bound of this leg reads it green
   const HOLD = 400, held = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href, { holdMs: HOLD, timeout: HOLD / 2 }));
   const heldNow = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href, { holdMs: HOLD }));
-  ok(held.expired && !held.green && /never answered within its bound — a harness line/.test(namedOf(held, 'held') || '') && heldNow.green, `PLACED: a child whose start is held ${HOLD} ms past a ${HOLD / 2} ms deadline is killed (the old leg's red, made at will) and this leg says that expiry as its NAMED harness line, never the store's verdict — under this leg's bound the same held child answers green`, JSON.stringify({ held, heldNow }));
+  ok(gateOf(held.expired) && !held.green && gateOf(/never answered within its bound — a harness line/.test(namedOf(held, 'held') || '')) && verdictOf(heldNow.green), `PLACED: a child whose start is held ${HOLD} ms past a ${HOLD / 2} ms deadline is killed (the old leg's red, made at will) and this leg says that expiry as its NAMED harness line, never the store's verdict — under this leg's bound the same held child answers green`, JSON.stringify({ held, heldNow }));
   const SNAP = 'for (const cb of [...listeners]) {';
   const ssrc = read('src/lib/settings.js');
   ok(ssrc.split(SNAP).length === 2, 'the notifier walks a snapshot, spelled once where the control reverts it');
@@ -293,18 +293,18 @@ console.log('§8 the store\'s notifier walks a snapshot of its listeners');
   const mut = M.write('src/lib/settings.js', editAnchor(ssrc, SNAP, 'for (const cb of listeners) {', "src/lib/settings.js"), 'liveset', { esm: true });
   const red = verdict(drive(pathToFileURL(mut).href)); said(red, 'live-Set copy\'s');
   ok(!red.green && !!red.o && red.o.calls === CAP + 100 && red.o.listeners === 1, `CONTROL: a copy walking the LIVE Set re-enters the re-subscribing listener in the same notify — ${red.o ? red.o.calls - 100 : '?'} times, to the cap the leg placed (the snapshot: once) ⇒ RED`, JSON.stringify(red));
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log('§9 the LLM plugin rows (lane decision-attention, D2): the person\'s block + the threshold');
 {
   const SCHEMA = S.SETTINGS_SCHEMA;
   const b = SCHEMA['decision.attentionBlock'], th = SCHEMA['decision.threshold'];
-  ok(b && b.type === 'text' && b.multiline === true && b.maxLength === 1500 && b.draft === 'decision' && b.default === '' && !b.tier && !b.when && b.liveApply === true, '"What matters to me": a multiline text of at most 1 500 characters, everyday (no tier, no when), with the draft button', b && { type: b.type, multiline: b.multiline, maxLength: b.maxLength, draft: b.draft, tier: b.tier });
-  ok(th && th.type === 'number' && th.default === 0.7 && th.min === 0.5 && th.max === 0.9 && th.step === 0.05 && th.tier === 'advanced' && !th.block && th.alsoBlock === 'attention', 'the threshold: a number 0.50–0.90, default 0.70, step 0.05 — ONE row in 插件 › LLM (tier advanced, plugin-settings-p0) that the 「需关注 · 怎么判断」 block draws too (int263 seam b); was: a slider in the 「需关注 · 怎么判断」 block, out of Advanced (lane attention-policy)', th && { d: th.default, min: th.min, max: th.max, tier: th.tier });
-  ok(b.category === th.category && zh[b.label] && zh[th.label] && zh[b.description] && zh[th.description], 'both rows sit in the Channels category, their label and description worded in zh');
+  ok(gateOf(b) && b.type === 'text' && b.multiline === true && b.maxLength === 1500 && b.draft === 'decision' && b.default === '' && !b.tier && !b.when && b.liveApply === true, '"What matters to me": a multiline text of at most 1 500 characters, everyday (no tier, no when), with the draft button', b && { type: b.type, multiline: b.multiline, maxLength: b.maxLength, draft: b.draft, tier: b.tier });
+  ok(gateOf(th) && th.type === 'number' && th.default === 0.7 && th.min === 0.5 && th.max === 0.9 && th.step === 0.05 && th.tier === 'advanced' && !th.block && th.alsoBlock === 'attention', 'the threshold: a number 0.50–0.90, default 0.70, step 0.05 — ONE row in 插件 › LLM (tier advanced, plugin-settings-p0) that the 「需关注 · 怎么判断」 block draws too (int263 seam b); was: a slider in the 「需关注 · 怎么判断」 block, out of Advanced (lane attention-policy)', th && { d: th.default, min: th.min, max: th.max, tier: th.tier });
+  ok(b.category === th.category && gateOf(zh[b.label]) && gateOf(zh[th.label]) && gateOf(zh[b.description]) && verdictOf(zh[th.description]), 'both rows sit in the Channels category, their label and description worded in zh');
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
-  ok(/schema\.type === 'text' && schema\.multiline/.test(UI) && /'\/api\/channels\/decision\/draft'/.test(UI) && !/draft[\s\S]{0,400}this\.settings\.set\(path, r\.text/.test(UI), 'the UI draws the multiline row as a textarea, its draft button asks /api/channels/decision/draft, and the proposal is NEVER saved by itself (only Save / an edit saves)');
+  ok(gateOf(/schema\.type === 'text' && schema\.multiline/.test(UI)) && gateOf(/'\/api\/channels\/decision\/draft'/.test(UI)) && !/draft[\s\S]{0,400}this\.settings\.set\(path, r\.text/.test(UI), 'the UI draws the multiline row as a textarea, its draft button asks /api/channels/decision/draft, and the proposal is NEVER saved by itself (only Save / an edit saves)');
 }
 
 console.log('§9b 插件 › LLM (lane llm-plugin-rename, owner 2026-10-14): ordered by FEATURE — each switch, then its own rows; the drafter\'s own switch; no row says the old name or "judge"');
@@ -314,22 +314,22 @@ console.log('§9b 插件 › LLM (lane llm-plugin-rename, owner 2026-10-14): ord
   const tbl = PS.PLUGIN_SETTINGS.llm;
   const paths = Object.entries(SCHEMA).filter(([, r]) => r.category === 'Plugin: LLM').map(([p]) => p);
   const ORDER = ['plugin.llm.attention', 'decision.threshold', 'decision.attentionBlock', 'decision.implicitLabels', 'plugin.llm.rules', 'plugin.llm.routing', 'plugin.llm.inbox', 'plugin.llm.judgeModel', 'plugin.llm.learn', 'plugin.llm.learnModel', 'plugin.llm.dailyBudgetUsd'];
-  ok(tbl && tbl.label === 'LLM' && tbl.integration === 'llm' && paths.join() === ORDER.join(), `the section 「插件 › LLM」, in feature order: the judge (its four switches, attention's own rows after it, the judging model they share), the drafter (switch, model), the budget last (${paths.map((p) => p.split('.').pop()).join(' · ')})`);
-  ok(['attention', 'rules', 'routing', 'inbox'].every((k) => SCHEMA['plugin.llm.' + k].type === 'boolean' && SCHEMA['plugin.llm.' + k].default === false) && SCHEMA['plugin.llm.learn'].type === 'boolean' && SCHEMA['plugin.llm.learn'].default === true,
+  ok(gateOf(tbl) && tbl.label === 'LLM' && tbl.integration === 'llm' && paths.join() === ORDER.join(), `the section 「插件 › LLM」, in feature order: the judge (its four switches, attention's own rows after it, the judging model they share), the drafter (switch, model), the budget last (${paths.map((p) => p.split('.').pop()).join(' · ')})`);
+  ok(gateOf(['attention', 'rules', 'routing', 'inbox'].every((k) => SCHEMA['plugin.llm.' + k].type === 'boolean' && SCHEMA['plugin.llm.' + k].default === false)) && SCHEMA['plugin.llm.learn'].type === 'boolean' && SCHEMA['plugin.llm.learn'].default === true,
     'the judge\'s four switches stay OFF by default (each bills by itself); the drafter\'s switch is ON (a draft is the owner\'s own click)');
   const jm = SCHEMA['plugin.llm.judgeModel'];
-  ok(jm && jm.type === 'string' && jm.default === '' && !S.SETTINGS_SCHEMA['plugin.llm.model'], 'judgeModel: a text row, empty by default (the preset\'s / the provider\'s model) — the card\'s model field moved here');
+  ok(gateOf(jm) && jm.type === 'string' && jm.default === '' && !S.SETTINGS_SCHEMA['plugin.llm.model'], 'judgeModel: a text row, empty by default (the preset\'s / the provider\'s model) — the card\'s model field moved here');
   const rows = paths.map((p) => SCHEMA[p]);
   const words = rows.flatMap((r) => [r.label, r.description, ...((r.options || []).map((o) => o.label))]).filter(Boolean);
   const OLD = /Decision API|决策 ?API|判定 ?API|decision-api|\bjudge\b/i;
   const all = [...words, ...words.map((w) => zh[w] || ''), ...words.map((w) => ja[w] || '')];
   ok(words.length >= 22 && !all.some((w) => OLD.test(w)), `no row says the old name or "judge" in en / zh / ja (${words.length} strings ×3) — 「判断模型」 is the word for the model that judges`, all.filter((w) => OLD.test(w)).join(' | '));
   const keys = tbl.rows.flatMap((r) => [r.label, r.description, ...((r.options || []).map((o) => o.label))]).filter(Boolean).map((x) => (Array.isArray(x) ? x[0] : x));   // the dictionary keys (a templated description's own key)
-  ok(keys.length === words.length && keys.every((w) => zh[w] && ja[w]) && !keys.some((w) => OLD.test(w) || OLD.test(zh[w]) || OLD.test(ja[w])), `every word of the section in zh and ja (${keys.length} keys)`, keys.filter((w) => !zh[w] || !ja[w]).join(' | '));
+  ok(keys.length === words.length && gateOf(keys.every((w) => zh[w] && ja[w])) && !keys.some((w) => OLD.test(w) || OLD.test(zh[w]) || OLD.test(ja[w])), `every word of the section in zh and ja (${keys.length} keys)`, keys.filter((w) => !zh[w] || !ja[w]).join(' | '));
   const descs = rows.map((r) => r.description);
-  ok(descs.every((d) => /\b(Example|E\.g\.)/.test(d)), 'every row carries ONE example (the card-grammar law: what you get + an example + where it shows)', descs.filter((d) => !/\b(Example|E\.g\.)/.test(d)).join(' | '));
+  ok(verdictOf(descs.every((d) => /\b(Example|E\.g\.)/.test(d))), 'every row carries ONE example (the card-grammar law: what you get + an example + where it shows)', descs.filter((d) => !/\b(Example|E\.g\.)/.test(d)).join(' | '));
   ok(zh[SCHEMA['plugin.llm.judgeModel'].label] === '判断模型' && zh[SCHEMA['decision.attentionBlock'].label] === '我在乎什么' && zh[SCHEMA['decision.threshold'].label] === '需关注阈值', 'the zh words: 「判断模型」, 「我在乎什么」, 「需关注阈值」 (no 「（决策 API）」 suffix)');
-  ok(OLD.test('Needs-attention threshold (Decision API)') && OLD.test('How sure the judge must be') && OLD.test('我在乎什么（决策 API）'), 'CONTROL: the base\'s words are caught by the same needle');
+  ok(gateOf(OLD.test('Needs-attention threshold (Decision API)')) && gateOf(OLD.test('How sure the judge must be')) && verdictOf(OLD.test('我在乎什么（决策 API）')), 'CONTROL: the base\'s words are caught by the same needle');
 }
 
 console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one block of rows — the rule switches, the preset, the judge\'s switch, its dials');
@@ -340,11 +340,11 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
   const rules = FO.ATTENTION_RULES.map((c) => `channels.attention.rule.${c}`);
   ok(block.join() === ['channels.attention.preset', ...rules, 'channels.attention.judge', 'decision.threshold', 'decision.attentionBlock'].join(), 'the block, in order: the preset, the eight rule switches, the judge\'s switch, its threshold, "what matters to me"', block.join());
   const rows = block.map((p) => SCHEMA[p]);
-  ok(rows.filter((r) => r.block).every((r) => r.category === SCHEMA['channels.offHoursTz'].category && r.liveApply === true && !r.tier && !r.when && r.blockTitle === rows[0].blockTitle), 'every row: category Channels, liveApply, everyday (no tier / when), the block\'s one head');
-  ok(rules.every((p) => SCHEMA[p].type === 'boolean' && SCHEMA[p].default === true && !SCHEMA[p].store), 'each fixed rule: a boolean, default ON (today\'s first screen), stored in settings');
+  ok(verdictOf(rows.filter((r) => r.block).every((r) => r.category === SCHEMA['channels.offHoursTz'].category && r.liveApply === true && !r.tier && !r.when && r.blockTitle === rows[0].blockTitle)), 'every row: category Channels, liveApply, everyday (no tier / when), the block\'s one head');
+  ok(verdictOf(rules.every((p) => SCHEMA[p].type === 'boolean' && SCHEMA[p].default === true && !SCHEMA[p].store)), 'each fixed rule: a boolean, default ON (today\'s first screen), stored in settings');
   const pre = SCHEMA['channels.attention.preset'], jr = SCHEMA['channels.attention.judge'];
   ok(pre.type === 'enum' && pre.radio === true && pre.store === 'derived' && pre.default === 'both' && pre.options.map((o) => o.value).join() === Object.keys(FO.ATTENTION_PRESETS).join(), 'the preset: a radio over the PURE presets, derived (it stores nothing — it sets the switches)', pre.options.map((o) => o.value).join());
-  ok(jr.type === 'boolean' && jr.store && jr.store.plugin === 'llm' && jr.store.feature === 'attention' && jr.fact === 'attention-today', 'the judge\'s switch IS the LLM plugin\'s `attention` feature (one store) with the today readout beside it');
+  ok(jr.type === 'boolean' && gateOf(jr.store) && jr.store.plugin === 'llm' && jr.store.feature === 'attention' && jr.fact === 'attention-today', 'the judge\'s switch IS the LLM plugin\'s `attention` feature (one store) with the today readout beside it');
   const words = [rows[0].blockTitle, ...rows.flatMap((r) => [r.label, r.description]), ...pre.options.map((o) => o.label), 'Today: judged {n} · {m} needed you', 'Open in Settings', 'How "needs attention" is decided'];
   const miss = words.filter((w) => !zh[w] || !ja[w]);
   ok(!miss.length, `every word of the block in zh and ja (${words.length} strings)`, miss.join(' | '));
@@ -354,16 +354,16 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
   const find = (schema, q) => V.settingsViewModel(schema, { categories: CATS, query: q, ctx: { get: (k) => (SCHEMA[k] ? SCHEMA[k].default : undefined), facts: {}, nameOf: () => null }, t: tEn }).sections.flatMap((s) => s.rows.map((r) => r.path));
   const hitZh = find(zhSchema, '需关注'), hitEn = find(SCHEMA, 'attention');
   const own = block.filter((p) => SCHEMA[p].block);   // int263 seam b: the plugin's two rows are found in 插件 › LLM
-  ok(own.every((p) => hitZh.includes(p)) && own.every((p) => hitEn.includes(p)), `the Settings search finds every row of the block: 需关注 (${hitZh.filter((p) => own.includes(p)).length}/${own.length}) · attention (${hitEn.filter((p) => own.includes(p)).length}/${own.length})`);
+  ok(gateOf(own.every((p) => hitZh.includes(p))) && verdictOf(own.every((p) => hitEn.includes(p))), `the Settings search finds every row of the block: 需关注 (${hitZh.filter((p) => own.includes(p)).length}/${own.length}) · attention (${hitEn.filter((p) => own.includes(p)).length}/${own.length})`);
   const noHead = Object.fromEntries(Object.entries(zhSchema).map(([p, r]) => [p, { ...r, blockTitle: undefined }]));
   ok(!find(noHead, '需关注').includes('channels.attention.rule.replied'), 'CONTROL: without the head in the search words, 需关注 misses 「我 24 小时内回过的」 ⇒ the leg above is the head\'s doing');
   // lane attention-rule-at-you: the 8th switch, its owner words, found by 「@」 in zh and en
   const AY = SCHEMA['channels.attention.rule.at-you'];
-  ok(AY && FO.ATTENTION_RULES.includes('at-you') && zh[AY.label] === '有人 @ 了我、我还没读的' && zh[AY.description] === '群里或单聊里点名 @ 你、24 小时内还没读的消息。', 'the 8th rule: 「有人 @ 了我、我还没读的」 with its hint, a switch of the block', AY && zh[AY.label]);
-  ok(find(zhSchema, '@').includes('channels.attention.rule.at-you') && find(SCHEMA, '@').includes('channels.attention.rule.at-you'), 'the Settings search 「@」 finds the at-you row (zh and en)');
+  ok(gateOf(AY) && gateOf(FO.ATTENTION_RULES.includes('at-you')) && zh[AY.label] === '有人 @ 了我、我还没读的' && zh[AY.description] === '群里或单聊里点名 @ 你、24 小时内还没读的消息。', 'the 8th rule: 「有人 @ 了我、我还没读的」 with its hint, a switch of the block', AY && zh[AY.label]);
+  ok(gateOf(find(zhSchema, '@').includes('channels.attention.rule.at-you')) && verdictOf(find(SCHEMA, '@').includes('channels.attention.rule.at-you')), 'the Settings search 「@」 finds the at-you row (zh and en)');
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
-  ok(/if \(schema\.store\) return this\._createStoredElsewhere\(path, schema, row\);/.test(UI) && /\/api\/plugins\/\$\{encodeURIComponent\(id\)\}\/config/.test(UI) && !UI.slice(UI.indexOf('  _createStoredElsewhere(path, schema, row) {'), UI.indexOf('  _createSlider(path, schema, row, value) {')).includes('this.settings.set(path'), 'a stored-elsewhere row never writes settings: the judge\'s switch writes through the plugin\'s own config door');
-  ok(/if \(schema\.slider\) return this\._createSlider/.test(UI) && /input\.type = 'range'/.test(UI) && /renderBlock\(block, \{ items = null \} = \{\}\)/.test(UI), 'the threshold draws as a range; ONE renderBlock serves the Settings window and the Channels door');
+  ok(gateOf(/if \(schema\.store\) return this\._createStoredElsewhere\(path, schema, row\);/.test(UI)) && gateOf(/\/api\/plugins\/\$\{encodeURIComponent\(id\)\}\/config/.test(UI)) && !UI.slice(UI.indexOf('  _createStoredElsewhere(path, schema, row) {'), UI.indexOf('  _createSlider(path, schema, row, value) {')).includes('this.settings.set(path'), 'a stored-elsewhere row never writes settings: the judge\'s switch writes through the plugin\'s own config door');
+  ok(gateOf(/if \(schema\.slider\) return this\._createSlider/.test(UI)) && gateOf(/input\.type = 'range'/.test(UI)) && verdictOf(/renderBlock\(block, \{ items = null \} = \{\}\)/.test(UI)), 'the threshold draws as a range; ONE renderBlock serves the Settings window and the Channels door');
 }
 
 // ── lane decision-spend-readout: the judge's MONEY where Settings names the judge (owner 2026-10-13) ──
@@ -375,11 +375,11 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
   const SCHEMA = S.SETTINGS_SCHEMA;
   const wired = (ui) => ui.includes(`const DECISION_BUDGET_PATH = '${BUDGET}';`) && /if \(path === DECISION_BUDGET_PATH\) this\._renderDecisionToday\(info\);/.test(ui)
     && /_renderDecisionToday\(info\) \{[\s\S]{0,400}liveDecisionLine\(line, \(L\) => paintDecisionLine\(line, L, 'text'\)\);/.test(ui);
-  ok(SCHEMA[BUDGET] && SCHEMA[BUDGET].type === 'number' && wired(UI), 'the budget row (plugin.llm.dailyBudgetUsd) draws today\'s money against its cap under it — the PURE line, live');
+  ok(gateOf(SCHEMA[BUDGET]) && SCHEMA[BUDGET].type === 'number' && verdictOf(wired(UI)), 'the budget row (plugin.llm.dailyBudgetUsd) draws today\'s money against its cap under it — the PURE line, live');
   ok(!wired(UI.replace('    if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);', '')), 'RED CONTROL: without the row\'s dispatch line the leg above is red');
   const att = UI.slice(UI.indexOf('  _renderAttentionToday(info) {'), UI.indexOf('  _renderDecisionToday(info) {'));
-  ok(/money && money\.on \? ' · ' \+ money\.spend : ''/.test(att) && /liveDecisionLine\(line, \(L\) => \{ money = L; draw\(\); \}\)/.test(att), 'the 需关注 block\'s judge line adds the money (the PURE line\'s spend half), patched in place');
-  ok(/if \(cat === t\('Spending'\)\) this\._renderDecisionSpend\(section, content, nav\);/.test(UI) && /paintDecisionLine\(line, L, 'month'\)/.test(UI) && /pluginCategoryOf\('llm'\)/.test(UI), 'Settings › Spending lists the LLM plugin (today / cap / month) with a door to its section');
+  ok(gateOf(/money && money\.on \? ' · ' \+ money\.spend : ''/.test(att)) && verdictOf(/liveDecisionLine\(line, \(L\) => \{ money = L; draw\(\); \}\)/.test(att)), 'the 需关注 block\'s judge line adds the money (the PURE line\'s spend half), patched in place');
+  ok(gateOf(/if \(cat === t\('Spending'\)\) this\._renderDecisionSpend\(section, content, nav\);/.test(UI)) && gateOf(/paintDecisionLine\(line, L, 'month'\)/.test(UI)) && verdictOf(/pluginCategoryOf\('llm'\)/.test(UI)), 'Settings › Spending lists the LLM plugin (today / cap / month) with a door to its section');
   const tz = (w, v = {}) => String(zh[w] || w).replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m));
   const L = DM.decisionTodayLine({ byUse: { attention: { calls: 60, usd: 0.009, hits: 1 }, inbox: { calls: 3, usd: 0.001 } } }, 1, { t: tz, monthUsd: 0.4 });
   ok(L.text === '今天：判断了 63 条 · 命中 1 条 · 已花 < $0.01（上限 $1.00）' && L.short === '今天 < $0.01（上限 $1.00）· 判断 63 次 · 1 条需要你' && L.title === '需关注 $0.009 · 托盘 $0.001 · 规则 $0' && L.month === 'LLM · 今天 < $0.01 / $1.00 · 本月 $0.40', 'zh: the owner\'s words — 「今天：判断了 63 条 · 命中 1 条 · 已花 < $0.01（上限 $1.00）」', L);
@@ -395,19 +395,19 @@ console.log('§11 a textarea row stacks; the rail keeps the words ≥ 40 % (the 
   const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
   const STACK = "if (control.tagName === 'TEXTAREA' || control.querySelector('textarea')) row.classList.add('settings-row-stack');";
   const render = UI.slice(UI.indexOf('  _renderSetting(path, schema, chips = null) {'), UI.indexOf('  renderBlock(block'));
-  ok(render.includes('const control = this._createControl(path, schema, row);\n    controlWrap.appendChild(control);\n') && render.includes(STACK), 'the row renderer stamps settings-row-stack off the control it drew — every textarea row, whichever branch made it');
+  ok(gateOf(render.includes('const control = this._createControl(path, schema, row);\n    controlWrap.appendChild(control);\n')) && verdictOf(render.includes(STACK)), 'the row renderer stamps settings-row-stack off the control it drew — every textarea row, whichever branch made it');
   const factory = UI.slice(UI.indexOf('  _createControl('), UI.indexOf('  _refreshControl('));
-  ok((factory.match(/createElement\('textarea'\)/g) || []).length === 2 && /schema\.type === 'json'/.test(factory) && /schema\.type === 'text' && schema\.multiline/.test(factory), 'the control factory makes a textarea in two branches (json, the multi-line text) — both reach the line above');
+  ok((factory.match(/createElement\('textarea'\)/g) || []).length === 2 && gateOf(/schema\.type === 'json'/.test(factory)) && verdictOf(/schema\.type === 'text' && schema\.multiline/.test(factory)), 'the control factory makes a textarea in two branches (json, the multi-line text) — both reach the line above');
   const block = (CSS.match(/\/\* SETTINGS ROWS NEVER SQUEEZE THEIR WORDS[\s\S]*?\/\* end: settings rows never squeeze their words \*\//) || [''])[0];
   const rule = (sel) => { const m = block.match(new RegExp('\\n' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}')); return m ? m[1] : ''; };
-  ok(/flex-direction: column/.test(rule('.settings-row.settings-row-stack')) && /align-items: stretch/.test(rule('.settings-row.settings-row-stack')), 'THE STACK: a stacked row is a column, the words and the control each across it');
+  ok(gateOf(/flex-direction: column/.test(rule('.settings-row.settings-row-stack'))) && verdictOf(/align-items: stretch/.test(rule('.settings-row.settings-row-stack'))), 'THE STACK: a stacked row is a column, the words and the control each across it');
   const box = rule('.settings-row-stack .settings-json');
-  ok(/width: 100%/.test(box) && /min-width: 0/.test(box) && /min-height: 4\.5em/.test(box) && /resize: vertical/.test(box), 'its box spans the row (no 200 px floor), at least 4.5em tall, resized vertically');
-  ok(/justify-content: flex-end/.test(rule('.settings-multiline')) && /flex: 1 1 100%/.test(rule('.settings-multiline > .settings-multiline-text')), 'the box on a line of its own, its buttons on the next one at the right');
-  ok(/flex-wrap: wrap/.test(rule('.settings-row')) && /min-width: 40%/.test(rule('.settings-row-info')) && /margin-left: auto/.test(rule('.settings-row-control')), 'THE RAIL: a row wraps, its words keep ≥ 40 %, a wrapped control sits at the right');
+  ok(gateOf(/width: 100%/.test(box)) && gateOf(/min-width: 0/.test(box)) && gateOf(/min-height: 4\.5em/.test(box)) && verdictOf(/resize: vertical/.test(box)), 'its box spans the row (no 200 px floor), at least 4.5em tall, resized vertically');
+  ok(gateOf(/justify-content: flex-end/.test(rule('.settings-multiline'))) && verdictOf(/flex: 1 1 100%/.test(rule('.settings-multiline > .settings-multiline-text'))), 'the box on a line of its own, its buttons on the next one at the right');
+  ok(gateOf(/flex-wrap: wrap/.test(rule('.settings-row'))) && gateOf(/min-width: 40%/.test(rule('.settings-row-info'))) && verdictOf(/margin-left: auto/.test(rule('.settings-row-control'))), 'THE RAIL: a row wraps, its words keep ≥ 40 %, a wrapped control sits at the right');
   const at = (s) => CSS.indexOf(s), start = at('/* SETTINGS ROWS NEVER SQUEEZE THEIR WORDS');
-  ok(start > 0 && ['.settings-row {\n', '.settings-row-info {', '.settings-row-control {', '.settings-json {\n', '.settings-link-btn {'].every((s) => at(s) >= 0 && at(s) < start), 'the block comes after the rules it overrides (a specificity tie goes to the later rule)');
-  ok(block && !/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(block), 'theme vars only — no literal colour in the block');
+  ok(start > 0 && verdictOf(['.settings-row {\n', '.settings-row-info {', '.settings-row-control {', '.settings-json {\n', '.settings-link-btn {'].every((s) => at(s) >= 0 && at(s) < start)), 'the block comes after the rules it overrides (a specificity tie goes to the later rule)');
+  ok(gateOf(block) && !/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(block), 'theme vars only — no literal colour in the block');
 }
 
 // ── lane idle-paint-default-on (the owner 2026-10-20 「可以」): browser.idlePaintFreeze is ON by default — ONE default ──
@@ -417,21 +417,21 @@ console.log('§12 browser.idlePaintFreeze: the row\'s default is src/browser-idl
   const BI = createRequire(import.meta.url)('../src/browser-idle.js');
   const KEY = 'browser.idlePaintFreeze';
   const rowDefault = (SS) => SS.SETTINGS_SCHEMA[KEY] && SS.SETTINGS_SCHEMA[KEY].default === BI.IDLE_PAINT_DEFAULT && BI.IDLE_PAINT_DEFAULT === true;
-  ok(rowDefault(S) && S.SETTINGS_SCHEMA[KEY].type === 'boolean' && S.SETTINGS_SCHEMA[KEY].tier === 'advanced', 'the row\'s default is IDLE_PAINT_DEFAULT = true (the keeper\'s read takes the same value — test-browser-display)', S.SETTINGS_SCHEMA[KEY]);
+  ok(gateOf(rowDefault(S)) && S.SETTINGS_SCHEMA[KEY].type === 'boolean' && S.SETTINGS_SCHEMA[KEY].tier === 'advanced', 'the row\'s default is IDLE_PAINT_DEFAULT = true (the keeper\'s read takes the same value — test-browser-display)', S.SETTINGS_SCHEMA[KEY]);
   const { SettingsManager } = await import('../src/lib/settings.js');
   const mgr = (vals) => { const m = new SettingsManager(); m._values = { ...vals }; return m; };
   const unset = mgr({}), off = mgr({ [KEY]: false }), on = mgr({ [KEY]: true });
   const turnedOff = mgr({}); turnedOff.set(KEY, false); clearTimeout(turnedOff._saveTimer); turnedOff._saveTimer = null;
   const backOn = mgr({ [KEY]: false }); backOn.set(KEY, true); clearTimeout(backOn._saveTimer); backOn._saveTimer = null;
-  ok(unset.get(KEY) === true && !unset.isModified(KEY) && off.get(KEY) === false && on.get(KEY) === true && on.isModified(KEY),
+  ok(unset.get(KEY) === true && !unset.isModified(KEY) && off.get(KEY) === false && on.get(KEY) === true && verdictOf(on.isModified(KEY)),
     'the Settings model: never set ⇒ on (the default); a stored false stays off and a stored true stays stored — a default never rewrites a stored value');
   ok(turnedOff._values[KEY] === false && turnedOff.get(KEY) === false && !(KEY in backOn._values) && backOn.get(KEY) === true,
     'the door: turning it off STORES false (the server\'s read sees it); turning it back on drops the override (sparse storage — the default is on)');
   const ssrc12 = read('src/lib/settings-schema.js'), LIT = "    type: 'boolean', default: IDLE_PAINT_DEFAULT,\n    label: t('Stop drawing in a browser nobody watches'),";
   const M12 = mutantCopies('settings-view-idle', REPO);
   const Slit = await import(pathToFileURL(M12.write('src/lib/settings-schema.js', editAnchor(ssrc12, LIT, LIT.replace('default: IDLE_PAINT_DEFAULT,', 'default: false,'), "src/lib/settings-schema.js"), 'literal-default', { esm: true })).href);
-  ok(ssrc12.includes(LIT) && !rowDefault(Slit), 'CONTROL: a row that keeps a literal default of its own (the .331 `false`) is RED on the default row');
-  for (const r of copiesCensus(M12.files, M12.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+  ok(gateOf(ssrc12.includes(LIT)) && !rowDefault(Slit), 'CONTROL: a row that keeps a literal default of its own (the .331 `false`) is RED on the default row');
+  for (const r of copiesCensus(M12.files, M12.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 // §13 lane owner-press-attended (R3, r2) — A HALF-TYPED NUMBER NEVER REACHES THE SERVER, AND THE ROW SAYS WHAT IS SAVED.
@@ -496,11 +496,11 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
     const k0 = await type(r1, ['7', '73', '730'], KEEP, { pauseAfterFirst: 700 });
     ok(k1.beforeChange.length === 0 && k1.sm.get(KEEP) === S.SETTINGS_SCHEMA[KEEP].default && k1.typed[k1.typed.length - 1] === true,
       'r2 «730» typed into claude.transcriptRetentionDays with a 700 ms pause after the «7» and NO Enter / blur ⇒ 0 POSTs (the store unchanged; the row says «not saved yet»)', JSON.stringify(k1.beforeChange.map((x) => x.body[KEEP])));
-    ok(k0.beforeChange.some((x) => x.body[KEEP] === 7), 'r2 CONTROL (the r1 field, every keystroke committed): the same typing POSTs cleanupPeriodDays 7 — the acceptance\'s transcript-deletion road', JSON.stringify(k0.beforeChange.map((x) => x.body[KEEP])));
+    ok(verdictOf(k0.beforeChange.some((x) => x.body[KEEP] === 7)), 'r2 CONTROL (the r1 field, every keystroke committed): the same typing POSTs cleanupPeriodDays 7 — the acceptance\'s transcript-deletion road', JSON.stringify(k0.beforeChange.map((x) => x.body[KEEP])));
     const g = await type(real, ['2', '20', '200'], PATH, { blur: true });
     const hit = g.posts.find((x) => x.body[PATH] === 200);
     ok(g.beforeChange.length === 0 && !!hit && g.posts.length === 1, 'r2 typed 200 then Enter / blur ⇒ ONE POST (200), after the change and only then', JSON.stringify(g.posts.map((x) => x.body[PATH])));
-    ok(g.typed[0] === true && g.typed[g.typed.length - 1] === false && g.states.includes('pending') && g.states.includes('saving') && g.states[g.states.length - 1] === 'saved' && g.sm.saveStateOf(PATH) === 'saved',
+    ok(g.typed[0] === true && g.typed[g.typed.length - 1] === false && gateOf(g.states.includes('pending')) && gateOf(g.states.includes('saving')) && g.states[g.states.length - 1] === 'saved' && g.sm.saveStateOf(PATH) === 'saved',
       'r2 …the row ran typed (the field differs, nothing stored) → pending → saving → saved', JSON.stringify({ typed: g.typed, states: g.states }));
     await advance(10000);
     const still = g.sm.saveStateOf(PATH);
@@ -517,12 +517,12 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
     const h = await type(real, ['1', '12', '120'], HOT, { pauseAfterFirst: 700, blur: true });
     const h0 = await type(r1, ['1', '12', '120'], HOT, { pauseAfterFirst: 700 });
     ok(h.beforeChange.length === 0 && h.posts.length === 1 && h.posts[0].body[HOT] === 120 && h.bound.length === 0, 'r2 «120» into channels.pollHotSec (min 10) with a pause after the «1» ⇒ nothing until the change, then 120 — never 10', JSON.stringify(h.posts.map((x) => x.body[HOT])));
-    ok(h0.beforeChange.some((x) => x.body[HOT] === 10), 'r2 CONTROL (the r1 field): the «1» was stored AT the min (10) during the pause', JSON.stringify(h0.beforeChange.map((x) => x.body[HOT])));
+    ok(verdictOf(h0.beforeChange.some((x) => x.body[HOT] === 10)), 'r2 CONTROL (the r1 field): the «1» was stored AT the min (10) during the pause', JSON.stringify(h0.beforeChange.map((x) => x.body[HOT])));
     const c = await type(real, ['3', '30', '3000'], DAY, { blur: true });
     ok(c.beforeChange.length === 0 && c.posts.length === 1 && c.posts[0].body[DAY] === 2000 && c.input.value === 2000 && c.bound.length === 1 && c.bound[0].bound === 'max',
       'r2 a value over the maximum is clamped AT THE CHANGE: stored 2000, written back into the field and SAID (the R2-verify toast: «kept at the maximum»)', JSON.stringify({ posts: c.posts.map((x) => x.body), field: c.input.value }));
     const f = await type(real, ['4', '40'], PATH, { blur: true });
-    ok(f.sm.saveStateOf(PATH) === 'failed' && /^Not saved — the server did not answer/.test(V.saveMarkWords('failed', tEn)), 'R3 a save that does not land reads «Not saved — the server did not answer…» (never «Saved»)', f.sm.saveStateOf(PATH));
+    ok(f.sm.saveStateOf(PATH) === 'failed' && verdictOf(/^Not saved — the server did not answer/.test(V.saveMarkWords('failed', tEn))), 'R3 a save that does not land reads «Not saved — the server did not answer…» (never «Saved»)', f.sm.saveStateOf(PATH));
     // the slow hub (accept-r1 settings-marks leg 2): 41's POST is still out when 42 is saved; 42 lands, THEN 41 fails
     {
       const sm = new SettingsManager();
@@ -573,25 +573,25 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
       const zero = V.inForceOf(PATH, { live: { spend: SA.budgetLimits((k) => (k === PATH ? 0 : undefined)) }, budgetLimits: SA.budgetLimits });
       const said = { en: V.saveMarkWords('saved', tEn, { inForce: fromStore }), zh: V.saveMarkWords('saved', tZh, { inForce: fromEcho }), ja: V.saveMarkWords(null, tJa, { inForce: fromEcho }) };
       ok(fromStore === V.IN_FORCE_UNSET && fromEcho === V.IN_FORCE_UNSET && zero === 0 && said.en === 'Saved · in force now: none — every turn nobody typed is held until a number is set'
-        && !/\{value\}|none — every/.test(said.zh) && /无/.test(said.zh) && /なし/.test(said.ja),
+        && !/\{value\}|none — every/.test(said.zh) && gateOf(/无/.test(said.zh)) && verdictOf(/なし/.test(said.ja)),
       'B-0a33 (3) an EMPTY cap (null stored, blank echoed) is in force as «none — every turn nobody typed is held until a number is set» (en / zh / ja) — never «0», never the default; an explicit 0 still says 0', JSON.stringify({ fromStore, fromEcho, zero, said }));
       const orig = read('src/lib/settings-view.js');
       const NEEDLES = [["  if (unset(L)) return IN_FORCE_UNSET;\n", ''], ['return unset(live.spend) ? IN_FORCE_UNSET : Number(live.spend[f]);', 'return Number(live.spend[f]);']];
       const M7 = mutantCopies('settings-view-unset', REPO);
       const Mu = await import(pathToFileURL(M7.write('src/lib/settings-view.js', NEEDLES.reduce((x, [f, t]) => editAnchor(x, f, t, "src/lib/settings-view.js"), orig), 'unset', { esm: true })).href);
       const muStore = Mu.inForceOf(PATH, { live: null, server: (k) => sm6.serverValue(k), budgetLimits: SA.budgetLimits });
-      ok(NEEDLES.every(([f]) => orig.includes(f)) && muStore === 0 && Mu.saveMarkWords('saved', tEn, { inForce: muStore }) === 'Saved · in force now: 0',
+      ok(gateOf(NEEDLES.every(([f]) => orig.includes(f))) && muStore === 0 && Mu.saveMarkWords('saved', tEn, { inForce: muStore }) === 'Saved · in force now: 0',
         'B-0a33 (3) CONTROL: the two «none» answers removed from a copy — the empty cap reads «Saved · in force now: 0» (the release) — RED', JSON.stringify({ muStore }));
       // THE FIELD: a Spending cap left BLANK is stored EMPTY (null → «none», every turn nobody typed held) — never the default;
       // any other number row left blank reverts to its default as before
       const blank = (p0) => { const stored = []; const inp = { value: '', oninput: null, onchange: null }; V.bindNumberField(inp, { schema: S.SETTINGS_SCHEMA[p0], path: p0, settings: { get: () => S.SETTINGS_SCHEMA[p0].default, set: (k, v) => stored.push([k, v]) }, clamp: (n) => S.clampToSchema(S.SETTINGS_SCHEMA[p0], n) }); inp.onchange(); return { stored, shown: inp.value }; };
       const capRows = V.SPEND_CAP_PATHS.map(blank);
       const other = blank('spend.budgetNoticePct');
-      ok(capRows.every((r, i) => r.stored.length === 1 && r.stored[0][0] === V.SPEND_CAP_PATHS[i] && r.stored[0][1] === null && r.shown === '') && other.stored[0][1] === S.SETTINGS_SCHEMA['spend.budgetNoticePct'].default,
+      ok(gateOf(capRows.every((r, i) => r.stored.length === 1 && r.stored[0][0] === V.SPEND_CAP_PATHS[i] && r.stored[0][1] === null && r.shown === '')) && other.stored[0][1] === S.SETTINGS_SCHEMA['spend.budgetNoticePct'].default,
         'B-0a33 (3) the three Spending caps left BLANK are stored EMPTY (null) — never the default; the notice threshold (not a cap) still reverts to its default', JSON.stringify({ capRows, other }));
       const Mb = await import(pathToFileURL(M7.write('src/lib/settings-view.js', editAnchor(orig, "    if (!Number.isFinite(num) && SPEND_CAP_PATHS.includes(path)) { settings.set(path, null); input.value = ''; onCommit(); return; }\n", '', "src/lib/settings-view.js"), 'blank', { esm: true })).href);
       const mb = (() => { const stored = []; const inp = { value: '', oninput: null, onchange: null }; Mb.bindNumberField(inp, { schema: S.SETTINGS_SCHEMA[PATH], path: PATH, settings: { get: () => 30, set: (k, v) => stored.push(v) }, clamp: (n) => S.clampToSchema(S.SETTINGS_SCHEMA[PATH], n) }); inp.onchange(); return stored; })();
-      ok(orig.includes("SPEND_CAP_PATHS.includes(path)) { settings.set(path, null);") && mb.length === 1 && mb[0] === S.SETTINGS_SCHEMA[PATH].default, 'B-0a33 (3) CONTROL: the blank rule removed from a copy — a blank cap is stored as the DEFAULT (the release: read as the default) — RED', JSON.stringify(mb));
+      ok(gateOf(orig.includes("SPEND_CAP_PATHS.includes(path)) { settings.set(path, null);")) && mb.length === 1 && mb[0] === S.SETTINGS_SCHEMA[PATH].default, 'B-0a33 (3) CONTROL: the blank rule removed from a copy — a blank cap is stored as the DEFAULT (the release: read as the default) — RED', JSON.stringify(mb));
     }
     // NO ROW COMMITS ON INPUT: every plain number row of the schema, typed into with the real binding — the store is never written
     const rows = Object.keys(S.SETTINGS_SCHEMA).filter((k) => S.SETTINGS_SCHEMA[k].type === 'number' && !S.SETTINGS_SCHEMA[k].slider && !S.SETTINGS_SCHEMA[k].store);
@@ -602,11 +602,11 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
     Object.assign(globalThis, saved);
   }
   const ui = read('src/lib/settings-ui.js');
-  ok(/bindNumberField\(input, \{/.test(ui) && /onTyping: \(typed\) => this\._markTyped\(path, typed\)/.test(ui) && /if \(\(schema\.type === 'number' && !schema\.slider && !schema\.store\) \|\| schema\.serverVerdict\) controlWrap\.appendChild\(this\._saveMark\(path\)\);/.test(ui) && /saveMarkWords\(st, t, \{ inForce, refused: /.test(ui),
+  ok(gateOf(/bindNumberField\(input, \{/.test(ui)) && gateOf(/onTyping: \(typed\) => this\._markTyped\(path, typed\)/.test(ui)) && gateOf(/if \(\(schema\.type === 'number' && !schema\.slider && !schema\.store\) \|\| schema\.serverVerdict\) controlWrap\.appendChild\(this\._saveMark\(path\)\);/.test(ui)) && verdictOf(/saveMarkWords\(st, t, \{ inForce, refused: /.test(ui)),
     'R3 wiring: the Settings number field is bound by bindNumberField (its typing marks the row), and every number row carries the save mark (+ a row the server may refuse — the exit check, 主开发 17:04Z: its refusal is said there)');
   const per = read('src/routes/persistence.js');
-  ok(/const out = \{\}, spend = writeSettings\(data, out\);\n\s+answerAtLanding\(res, \{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\)(?:, \.\.\.\(refused \? \{ refused \} : \{\}\))? \}, out\.landing\);/.test(per) && /broadcast\(\{ type: 'settings-updated', settings: data, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per)
-    && /this\.settings\.applyRemote\(msg\.settings, \{ spend: msg\.spend \|\| null \}\);/.test(read('src/lib/app.js')),
+  ok(gateOf(/const out = \{\}, spend = writeSettings\(data, out\);\n\s+answerAtLanding\(res, \{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\)(?:, \.\.\.\(refused \? \{ refused \} : \{\}\))? \}, out\.landing\);/.test(per)) && gateOf(/broadcast\(\{ type: 'settings-updated', settings: data, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per))
+    && verdictOf(/this\.settings\.applyRemote\(msg\.settings, \{ spend: msg\.spend \|\| null \}\);/.test(read('src/lib/app.js'))),
     'r2 wiring: the ONE settings writer computes the in-force `spend` once — the POST echoes it AND the settings-updated broadcast carries it to every tab');
 }
 
@@ -615,8 +615,8 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
 // /api/browser/engines → browser-build-model engineOptions); the advanced tier keeps the same row count
 {
   const de = S.SETTINGS_SCHEMA['browser.defaultEngine'], ui = read('src/lib/settings-ui.js');
-  ok(de && de.type === 'enum' && de.options.length === 1 && de.options[0].value === 'default' && !/plugin:|custom-browser/.test(JSON.stringify(de)) && de.fact === 'browser-engine' && de.tier === 'advanced'
-    && /this\._renderEngineFact\(info, row, path\)/.test(ui) && /import \{ engineFactText, engineFactDoor, fillEngineSelect \} from '\.\/browser-build-model\.js'/.test(ui),
+  ok(gateOf(de) && de.type === 'enum' && de.options.length === 1 && de.options[0].value === 'default' && !/plugin:|custom-browser/.test(JSON.stringify(de)) && de.fact === 'browser-engine' && de.tier === 'advanced'
+    && gateOf(/this\._renderEngineFact\(info, row, path\)/.test(ui)) && verdictOf(/import \{ engineFactText, engineFactDoor, fillEngineSelect \} from '\.\/browser-build-model\.js'/.test(ui)),
     'lane engine-spi-egress: the default-engine row names no engine id (Chrome alone in the schema); its options are DRAWN from the engine table the fact line reads (engineOptions), the same answer', de && de.options);
 }
 
@@ -632,11 +632,11 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
   const shown = (sel) => (sel.children.find((o) => o.selected) || {}).value || null;
   const ENGS = { engines: [{ id: 'acme.engine', label: 'Acme', installed: true }], defaultEngine: { value: 'plugin:gone.engine', source: 'user' } };
   const sErr = draw({ error: 'boom' }, 'plugin:gone.engine'), sNone = draw(null, 'plugin:gone.engine'), sOk = draw(ENGS, 'plugin:gone.engine'), sReset = draw(ENGS, undefined);
-  ok(shown(sErr) === 'plugin:gone.engine' && /gone\.engine — its plugin is not running/.test(sErr.children[1].textContent) && sErr.children.length === 2 && shown(sNone) === 'plugin:gone.engine'
-    && sOk.children.map((o) => o.value).join() === 'default,plugin:acme.engine,plugin:gone.engine' && shown(sOk) === 'plugin:gone.engine' && shown(sReset) === 'default' && sReset.children.some((o) => o.value === 'plugin:acme.engine'),
+  ok(shown(sErr) === 'plugin:gone.engine' && gateOf(/gone\.engine — its plugin is not running/.test(sErr.children[1].textContent)) && sErr.children.length === 2 && shown(sNone) === 'plugin:gone.engine'
+    && sOk.children.map((o) => o.value).join() === 'default,plugin:acme.engine,plugin:gone.engine' && shown(sOk) === 'plugin:gone.engine' && shown(sReset) === 'default' && verdictOf(sReset.children.some((o) => o.value === 'plugin:acme.engine')),
     'r2 minor 3: the default-engine <select> — the engines route FAILS or has not answered ⇒ the stored plugin:<id> still shows AS ITSELF («its plugin is not running»), never as Chrome; answered ⇒ one option per engine; after a Reset the engines last read are still offered', { err: sErr.children.map((o) => o.value), ok: sOk.children.map((o) => o.value) });
   const ui2 = read('src/lib/settings-ui.js');
-  ok(/if \(schema\.fact === 'browser-engine'\) fillEngineSelect\(select, this\._engines \|\| null, value, t, document\)/.test(ui2) && /if \(schema\.fact === 'browser-engine'\) this\._loadEngines\(row, path, row\.querySelector\('\.settings-engine-fact'\)\)/.test(ui2) && /\.then\(paint, \(\) => paint\(\{ error: 'unreachable' \}\)\)/.test(ui2),
+  ok(gateOf(/if \(schema\.fact === 'browser-engine'\) fillEngineSelect\(select, this\._engines \|\| null, value, t, document\)/.test(ui2)) && gateOf(/if \(schema\.fact === 'browser-engine'\) this\._loadEngines\(row, path, row\.querySelector\('\.settings-engine-fact'\)\)/.test(ui2)) && verdictOf(/\.then\(paint, \(\) => paint\(\{ error: 'unreachable' \}\)\)/.test(ui2)),
     'r2 minor 3 WIRING: every draw of the control draws the engines last read; a Reset\'s redraw re-reads GET /api/browser/engines; a failed read still draws (the stored value as itself)');
 }
 
@@ -654,7 +654,7 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
   const en = cases.map(([e, re]) => [BMu.engineNote(e, tr(null)), re]);
   const z = cases.map(([e]) => BMu.engineNote(e, tr(zhU))), j = cases.map(([e]) => BMu.engineNote(e, tr(jaU)));
   const downloadingUser = BMu.engineNote({ ...base, installed: false, executable: false, binary: { code: 'browser_engine_kernel_missing', why: 'unset' }, kernel: { state: 'downloading', bytes: 1, total: 2 } }, tr(null));
-  ok(en.every(([s, re]) => re.test(s)) && !/download/i.test(downloadingUser) && z.every((s) => /[\u4e00-\u9fff]/.test(s) && !/the program/.test(s)) && j.every((s) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(s) && !/the program/.test(s)) && /没有设置程序/.test(z[1]) && /プログラムが設定されていません/.test(j[1]),
+  ok(gateOf(en.every(([s, re]) => re.test(s))) && !/download/i.test(downloadingUser) && gateOf(z.every((s) => /[\u4e00-\u9fff]/.test(s) && !/the program/.test(s))) && gateOf(j.every((s) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(s) && !/the program/.test(s))) && gateOf(/没有设置程序/.test(z[1])) && verdictOf(/プログラムが設定されていません/.test(j[1])),
     'L1b: the engine card for the OWNER\'s program — «measured x» / «no program set (its Program file setting)» + its door on the line (lane ui-needs-a-button pick 5) / «the program you named can\'t be run (why)» / «did not say its version» / r2: «not measured yet» (never an older file\'s version) and an execute-only file «can\'t read the file to check it»; never a download word (a stale kernel state ignored), in zh / ja too', { en: en.map(([s]) => s), z, j });
 }
 
@@ -759,12 +759,12 @@ console.log('§14 the settings\' faces: the server reads schema keys only, the d
   const P5J = judge(P5);
   ok(PJ.l5.join() === 'sidebar.plantedNobodyReads' && P5J.l5.join() === 'sidebar.plantedNobodyReads' && J.l5.length === 0,
     'CONTROL (RED, L5): a planted schema row that no docs line names is red by name; a planted row the docs name holds, even one with no category (no table renders it)', JSON.stringify({ planted: PJ.l5, named: P5J.l5 }));
-  ok(PJ.l1.length === 2 && PJ.l1.some((x) => x.startsWith('channels.plantedNoRow ← src/server/planted-faces.js:')) && PJ.l1.some((x) => x.startsWith('browser.fenceScriptsWhileDriven ←'))
+  ok(PJ.l1.length === 2 && gateOf(PJ.l1.some((x) => x.startsWith('channels.plantedNoRow ← src/server/planted-faces.js:'))) && gateOf(PJ.l1.some((x) => x.startsWith('browser.fenceScriptsWhileDriven ←')))
     && PJ.l2.join() === 'browser.plantedNoRow' && PJ.l3.join() === 'src/server/planted-faces.js: serverSetting(computeKey()) ×1' && PJ.hand.join() === 'src/server/planted-faces.js: plantedReader'
-    && P.unreadByCall.includes('sidebar.plantedNobodyReads') && !F.unreadByCall.includes('sidebar.plantedNobodyReads'),
+    && gateOf(P.unreadByCall.includes('sidebar.plantedNobodyReads')) && !F.unreadByCall.includes('sidebar.plantedNobodyReads'),
     'CONTROL (RED, each law): a planted server read of a key with no row and the warned key read outside its function (L1), a docs name that is no row — a retired one holds (L2), an unnameable read and a new hand-off of the reader (L3) — each named; the printed L4 counts a planted row nobody reads', JSON.stringify(PJ));
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
-console.log('ALL PASS (' + pass + ')');
+console.log('ALL PASS (' + pass + ')'); import { verdictOf, gateOf } from './lib/check.mjs';

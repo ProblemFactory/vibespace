@@ -23,7 +23,7 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time
 const require = createRequire(import.meta.url);
 const JN = require('../src/job-notice.js');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -68,17 +68,17 @@ for (const [name, outs, want] of TABLE) ok(!bad.includes(name), name, JSON.strin
 // RED CONTROL — the pre-fix verdict as src/jobs.js had it: every failed attempt with a URL said DOWN, a recovery never
 const PREFIX = ({ next, url }) => ({ record: next.ok ? null : { cause: 'x' }, notice: !next.ok && url ? { kind: 'down' } : null });
 const badPre = judge(PREFIX);
-ok(badPre.length >= 4 && badPre.includes(TABLE[0][0]) && badPre.includes(TABLE[3][0]), `RED CONTROL: the pre-fix verdict (a notice at every failed attempt) fails ${badPre.length}/${TABLE.length} rows — the repeat and the vault class among them`, JSON.stringify(badPre));
+ok(badPre.length >= 4 && gateOf(badPre.includes(TABLE[0][0])) && verdictOf(badPre.includes(TABLE[3][0])), `RED CONTROL: the pre-fix verdict (a notice at every failed attempt) fails ${badPre.length}/${TABLE.length} rows — the repeat and the vault class among them`, JSON.stringify(badPre));
 {
   const r = play(JN.noticeVerdict, fails(UNREACH, 5));
   ok(r.rec.attempts === 5 && r.rec.cause === 'relay_unreachable' && r.rec.sinceAt === 1_792_480_000_000 && r.rec.said === true, 'the counter: attempts 5, sinceAt = the first failure, said', JSON.stringify(r.rec));
-  ok(r.said.length === 1 && r.said[0].what.includes(URL0) && /is DOWN — publish failed: frpc reload failed/.test(r.said[0].what) && /said once/.test(r.said[0].what), 'the DOWN notice names the URL and the relay\'s sentence, and says it is said once', r.said[0] && r.said[0].what);
+  ok(r.said.length === 1 && gateOf(r.said[0].what.includes(URL0)) && gateOf(/is DOWN — publish failed: frpc reload failed/.test(r.said[0].what)) && verdictOf(/said once/.test(r.said[0].what)), 'the DOWN notice names the URL and the relay\'s sentence, and says it is said once', r.said[0] && r.said[0].what);
   const y = play(JN.noticeVerdict, [...fails(UNREACH, 2), ...fails(NOPORT, 1)]);
   ok(y.rec.cause === 'port_in_use' && y.rec.attempts === 1 && y.rec.sinceAt === 1_792_480_000_000 + 2 * 3_600_000 && y.rec.downAt === 1_792_480_000_000, 'a new cause restarts the count and its since; the episode keeps when it went down (downAt)', JSON.stringify(y.rec));
   const v = play(JN.noticeVerdict, fails(LOCKED, 5));
-  ok(v.rec.cause === 'vault_locked' && v.rec.said === false && v.rec.attempts === 5 && JN.whyOf(v.rec) === JN.VAULT_WAIT && /waiting for the vault/.test(JN.whyOf(v.rec)), 'the vault class: counted (5), never said, its status words = waiting for the vault', JSON.stringify(v.rec));
+  ok(v.rec.cause === 'vault_locked' && v.rec.said === false && v.rec.attempts === 5 && JN.whyOf(v.rec) === JN.VAULT_WAIT && verdictOf(/waiting for the vault/.test(JN.whyOf(v.rec))), 'the vault class: counted (5), never said, its status words = waiting for the vault', JSON.stringify(v.rec));
   const nu = play(JN.noticeVerdict, [...fails(UNREACH, 1), { ok: true, url: URL1 }]);
-  ok(nu.said.length === 2 && nu.said[1].kind === 'recovered' && nu.said[1].what.includes(URL0) && nu.said[1].what.includes(URL1) && !/no longer works|NEW address/.test(nu.said[1].what), 'a recovery to another address names both in ONE notice — never «the old link no longer works» (B-74f5: the proven check says a change)', nu.said[1] && nu.said[1].what);
+  ok(nu.said.length === 2 && nu.said[1].kind === 'recovered' && gateOf(nu.said[1].what.includes(URL0)) && gateOf(nu.said[1].what.includes(URL1)) && !/no longer works|NEW address/.test(nu.said[1].what), 'a recovery to another address names both in ONE notice — never «the old link no longer works» (B-74f5: the proven check says a change)', nu.said[1] && nu.said[1].what);
   // B-74f5: THE CHANGE CHECK'S VERDICT — said only when the new address answered AND the old one failed; a web address read as tcp:// is
   // kept unless proven; neither answering ⇒ look again
   const TCP0 = 'tcp://relay.test:22999', UV = JN.urlChangeVerdict;
@@ -90,7 +90,7 @@ ok(badPre.length >= 4 && badPre.includes(TABLE[0][0]) && badPre.includes(TABLE[3
     ['no change', { from: URL0, to: URL0, toAnswers: false, fromAnswers: false }, { say: false, adopt: true, again: false }],
   ];
   const badU = rowsU.filter(([, i, w]) => { const v = UV(i); return v.say !== w.say || v.adopt !== w.adopt || v.again !== w.again; }).map(([n]) => n);
-  ok(typeof UV === 'function' && !badU.length && JN.keepsWebUrl(URL0, TCP0) && !JN.keepsWebUrl(TCP0, URL0) && !JN.keepsWebUrl(URL0, URL1), 'B-74f5: urlChangeVerdict — said only when proven; a web address read as tcp:// kept until then; neither answering ⇒ again', JSON.stringify(badU));
+  ok(typeof UV === 'function' && !badU.length && gateOf(JN.keepsWebUrl(URL0, TCP0)) && !JN.keepsWebUrl(TCP0, URL0) && !JN.keepsWebUrl(URL0, URL1), 'B-74f5: urlChangeVerdict — said only when proven; a web address read as tcp:// kept until then; neither answering ⇒ again', JSON.stringify(badU));
   const first = play(JN.noticeVerdict, [...fails(UNREACH, 3), { ok: true, url: URL0 }], null);
   ok(first.said.length === 0, 'a first publish that never had a URL: no DOWN (the creator polls), no recovery either', JSON.stringify(first.said));
   ok(JN.noticeVerdict({ prev: null, next: { ok: true, url: URL0 }, url: URL0 }).notice === null, 'published → published: nothing');
@@ -103,12 +103,12 @@ ok(badPre.length >= 4 && badPre.includes(TABLE[0][0]) && badPre.includes(TABLE[3
   ok(C(new Error('could not publish the subdomain on the relay (is the domain / DNS set up?)')) === 'subdomain_refused' && C(new Error('the forward is not active (is the machine online?)')) === 'forward_inactive', 'causeOf: the subdomain refused, the forward inactive');
   ok(C(UNREACH(1)) === C(UNREACH(9)) && C(UNREACH(1)) === 'relay_unreachable', 'causeOf: the relay unreachable (its port number is not a new cause)');
   ok(C(new Error('odd failure 12 at 07:13')) === C(new Error('odd failure 99 at 08:41')) && C(new Error('odd failure 1')) !== C(new Error('another failure 1')), 'causeOf: any other sentence is its own cause, numbers folded');
-  ok(JN.CLASSES.includes('vault_locked') && !JN.SAID_PER_JOB('vault_locked') && JN.SAID_PER_JOB('relay_unreachable'), 'the vault class is never said per job');
+  ok(gateOf(JN.CLASSES.includes('vault_locked')) && !JN.SAID_PER_JOB('vault_locked') && verdictOf(JN.SAID_PER_JOB('relay_unreachable')), 'the vault class is never said per job');
   // lane frp-token-proof: THE DROPPED LOGIN — its own class (by code, and by its words), before the generic texts
   ok(C(DROPPED(3)) === 'relay_login_dropped' && C(DROPPED(2459)) === 'relay_login_dropped' && C(new Error(DROPPED_MSG(7))) === 'relay_login_dropped', 'causeOf: the dropped login is its own class (by code, by its words; its count is not a new cause) — never subdomain_refused / port_in_use', C(DROPPED(3)));
-  ok(JN.CLASSES.includes('relay_login_dropped') && JN.SAID_PER_JOB('relay_login_dropped') === false, 'the dropped login is never said per job (the owner has ONE item)');
+  ok(gateOf(JN.CLASSES.includes('relay_login_dropped')) && JN.SAID_PER_JOB('relay_login_dropped') === false, 'the dropped login is never said per job (the owner has ONE item)');
   const dr = play(JN.noticeVerdict, fails((i) => DROPPED(3 + i), 4));
-  ok(dr.said.length === 0 && dr.rec.cause === 'relay_login_dropped' && dr.rec.attempts === 4 && /^waiting for the relay — it drops this instance's login/.test(JN.whyOf(dr.rec) || '') && /closes the connection right after/.test(JN.whyOf(dr.rec) || ''), 'the dropped login: counted, never said; the status waits for the relay with the relay\'s words', JN.whyOf(dr.rec));
+  ok(dr.said.length === 0 && dr.rec.cause === 'relay_login_dropped' && dr.rec.attempts === 4 && gateOf(/^waiting for the relay — it drops this instance's login/.test(JN.whyOf(dr.rec) || '')) && verdictOf(/closes the connection right after/.test(JN.whyOf(dr.rec) || '')), 'the dropped login: counted, never said; the status waits for the relay with the relay\'s words', JN.whyOf(dr.rec));
   {
     const RT = require('../src/relay-token.js');
     const a = typeof RT.droppedAlertOf === 'function' ? RT.droppedAlertOf({ logins: 3, since: Date.parse('2026-10-30T12:00:05Z'), why: 'locked' }) : null;
@@ -171,12 +171,12 @@ try {
   for (let i = 0; i < 5; i++) await F._ensurePublish(job);
   let s = F.snapshot(job);
   ok(relay.calls === 5 && said.length === 0, 'the vault locked: five publish attempts ⇒ NOTHING said to the owner conversation (the vault\'s own item carries it)', JSON.stringify({ calls: relay.calls, said }));
-  ok(s.publishState === 'failed' && s.publishCause === 'vault_locked' && s.publishAttempts === 5 && /waiting for the vault/.test(s.publishWhy) && !s.publishedUrl && s.publishSince > 0, 'the snapshot: failed · vault_locked · 5 attempts · since · waiting for the vault', JSON.stringify({ st: s.publishState, c: s.publishCause, n: s.publishAttempts, w: s.publishWhy }));
+  ok(s.publishState === 'failed' && s.publishCause === 'vault_locked' && s.publishAttempts === 5 && gateOf(/waiting for the vault/.test(s.publishWhy)) && !s.publishedUrl && s.publishSince > 0, 'the snapshot: failed · vault_locked · 5 attempts · since · waiting for the vault', JSON.stringify({ st: s.publishState, c: s.publishCause, n: s.publishAttempts, w: s.publishWhy }));
 
   // (b) a restart: the record is on disk; the next attempt under the same cause says nothing (the repeat of record)
   stopEngine(F);
   const onDisk = JSON.parse(fs.readFileSync(path.join(edir, 'jobs.json'), 'utf-8')).find((j) => j.id === job.id);
-  ok(onDisk && onDisk.publishDown && onDisk.publishDown.cause === 'vault_locked' && onDisk.publishDown.attempts === 5, 'the down record is persisted (the repeat came at every restart — a runtime-only state forgot it)', JSON.stringify(onDisk && onDisk.publishDown));
+  ok(gateOf(onDisk) && gateOf(onDisk.publishDown) && onDisk.publishDown.cause === 'vault_locked' && onDisk.publishDown.attempts === 5, 'the down record is persisted (the repeat came at every restart — a runtime-only state forgot it)', JSON.stringify(onDisk && onDisk.publishDown));
   const G = mk(JobManager, edir); cur = G;
   const gj = G.jobs.get(job.id); gj.state = 'up'; // adopted (its process lives on — the stamp check is test-jobs-engine's)
   await G._ensurePublish(gj);
@@ -195,7 +195,7 @@ try {
     let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', () => res(out));
   });
   const showLocked = await cli('show', job.id);
-  ok(/public URL: NOT published — waiting for the vault — it is locked; the owner has the unlock item[^\n]* — since \d{4}-\d\d-\d\d \d\d:\d\d UTC \(6 attempts\) \(was https:\/\/vs1785a95b84\.relay\.test\/\)/.test(showLocked), 'vibespace-job show: NOT published — waiting for the vault … — since <when> (6 attempts) (was <url>)', showLocked);
+  ok(verdictOf(/public URL: NOT published — waiting for the vault — it is locked; the owner has the unlock item[^\n]* — since \d{4}-\d\d-\d\d \d\d:\d\d UTC \(6 attempts\) \(was https:\/\/vs1785a95b84\.relay\.test\/\)/.test(showLocked)), 'vibespace-job show: NOT published — waiting for the vault … — since <when> (6 attempts) (was <url>)', showLocked);
 
   // (d) the vault unlocks: the re-publish STARTS in the unlock's own tick (never the hourly restart, never the 5-min heal)
   relay.mode = 'ok';
@@ -206,19 +206,19 @@ try {
   s = G.snapshot(gj);
   ok(!gj.publishDown && s.publishState === null && s.publishedUrl === URL0 && said.length === 0, 'published again: the URL, no down state — and no «back UP» either (the vault class was never said, so neither is its end)', JSON.stringify({ st: s.publishState, u: s.publishedUrl, said }));
   const showUp = await cli('show', job.id);
-  ok(showUp.includes(`public URL: ${URL0}`) && !/NOT published/.test(showUp), 'vibespace-job show: the URL (fb-666f37fd38: never «NOT published» after the relay\'s 200)', showUp);
+  ok(gateOf(showUp.includes(`public URL: ${URL0}`)) && !/NOT published/.test(showUp), 'vibespace-job show: the URL (fb-666f37fd38: never «NOT published» after the relay\'s 200)', showUp);
 
   // (e) a cause the agent can act on: five failures ⇒ ONE notice; the relay's success through the Ports manager's heal-sweep
   // republish is the job's state IN THE SAME TICK (the job never asked); then ONE «back UP»
   relay.mode = 'unreachable';
   for (let i = 0; i < 5; i++) await G._ensurePublish(gj);
-  ok(said.length === 1 && /is DOWN — publish failed: frpc reload failed/.test(said[0]) && gj.publishDown.attempts === 5 && gj.publishDown.cause === 'relay_unreachable', 'the relay unreachable ×5 (a new port number each time) ⇒ ONE DOWN notice, attempts 5', JSON.stringify({ said, rec: gj.publishDown }));
+  ok(said.length === 1 && gateOf(/is DOWN — publish failed: frpc reload failed/.test(said[0])) && gj.publishDown.attempts === 5 && gj.publishDown.cause === 'relay_unreachable', 'the relay unreachable ×5 (a new port number each time) ⇒ ONE DOWN notice, attempts 5', JSON.stringify({ said, rec: gj.publishDown }));
   relay.mode = 'ok';
   const rec = pf._state.forwards.find((r) => r.id === gj._pfId);
   const seen = []; const adopt = pf._adoptPublish.bind(pf); pf._adoptPublish = (r, a) => { adopt(r, a); seen.push(G.snapshot(gj)); };
   const healed = await pf._republish(rec);
   ok(healed === true && seen.length === 1 && seen[0].publishState === null && seen[0].publishedUrl === URL0, 'the heal sweep\'s republish (pf._republish): the job\'s snapshot shows the URL in the very tick the Ports manager adopts it', JSON.stringify({ healed, seen: seen.map((x) => [x.publishState, x.publishedUrl]) }));
-  ok(said.length === 2 && /is back UP — published again \(down since/.test(said[1]) && said[1].includes(URL0), 'ONE «back UP» notice (the DOWN was said)', JSON.stringify(said));
+  ok(said.length === 2 && gateOf(/is back UP — published again \(down since/.test(said[1])) && verdictOf(said[1].includes(URL0)), 'ONE «back UP» notice (the DOWN was said)', JSON.stringify(said));
   await pf._republish(rec);
   ok(said.length === 2, 'the next adopt of the same URL says nothing', JSON.stringify(said));
   pf._adoptPublish = adopt;
@@ -226,22 +226,22 @@ try {
   // (f) the cause changes: one notice per cause; the Ports panel's publish (the relay's success, not the job's) ends it once
   relay.mode = 'unreachable'; await G._ensurePublish(gj); await G._ensurePublish(gj);
   relay.mode = 'noport'; await G._ensurePublish(gj); await G._ensurePublish(gj);
-  ok(said.length === 4 && /frpc reload failed/.test(said[2]) && /could not allocate a public port/.test(said[3]), 'unreachable ×2 then no-port ×2 ⇒ two notices, one per cause', JSON.stringify(said.slice(2)));
+  ok(said.length === 4 && gateOf(/frpc reload failed/.test(said[2])) && verdictOf(/could not allocate a public port/.test(said[3])), 'unreachable ×2 then no-port ×2 ⇒ two notices, one per cause', JSON.stringify(said.slice(2)));
   relay.mode = 'ok'; await pf.publish(gj._pfId);
-  ok(said.length === 5 && /back UP/.test(said[4]) && !gj.publishDown, 'the Ports panel\'s publish: ONE «back UP»', JSON.stringify(said.slice(4)));
+  ok(said.length === 5 && gateOf(/back UP/.test(said[4])) && !gj.publishDown, 'the Ports panel\'s publish: ONE «back UP»', JSON.stringify(said.slice(4)));
 
   // (g) the owner's OWN subscription filter shapes its auto-notify (fb-a001be4917 — the loop skipped it, the lane ignored it)
   const sub = G.subscribe(gj, ownerCaller, { filter: '^(?!.*is DOWN)' });
-  ok(sub.ok && sub.ownerLane === true, 'the owner subscribing to its own job: the answer says it shapes its own lane (ownerLane)', JSON.stringify(sub));
+  ok(gateOf(sub.ok) && sub.ownerLane === true, 'the owner subscribing to its own job: the answer says it shapes its own lane (ownerLane)', JSON.stringify(sub));
   G._notifyRate.clear(); delivered.length = 0;
   relay.mode = 'unreachable'; await G._ensurePublish(gj);
   const filt = (gj.notifyLog || []).slice(-1)[0];
-  ok(said.length === 6 && delivered.length === 0 && filt && filt.lane === 'filtered' && filt.ok === false && /your own subscription filter/.test(filt.reason), 'a DOWN the filter names never reaches the owner conversation — journalled as filtered, never stashed', JSON.stringify({ delivered, filt }));
+  ok(said.length === 6 && delivered.length === 0 && gateOf(filt) && filt.lane === 'filtered' && filt.ok === false && verdictOf(/your own subscription filter/.test(filt.reason)), 'a DOWN the filter names never reaches the owner conversation — journalled as filtered, never stashed', JSON.stringify({ delivered, filt }));
   G._notifyRate.clear();
   relay.mode = 'ok'; await G._ensurePublish(gj);
-  ok(delivered.length === 1 && delivered[0].cid === 'conv-O' && /back UP/.test(delivered[0].text), 'what the filter does not name (the «back UP») is delivered', JSON.stringify(delivered));
+  ok(delivered.length === 1 && delivered[0].cid === 'conv-O' && verdictOf(/back UP/.test(delivered[0].text)), 'what the filter does not name (the «back UP») is delivered', JSON.stringify(delivered));
   const subOut = await cli('subscribe', job.id, '--filter', '^(?!.*is DOWN)');
-  ok(/your own auto-notify included/.test(subOut), 'the CLI\'s subscribe echo says the owner\'s auto-notify is included', subOut);
+  ok(verdictOf(/your own auto-notify included/.test(subOut)), 'the CLI\'s subscribe echo says the owner\'s auto-notify is included', subOut);
 
   // (h) a deliberate stop ends the episode (the next start is a fresh one); a restart never does (b)
   relay.mode = 'unreachable'; await G._ensurePublish(gj);
@@ -262,7 +262,7 @@ try {
   H.jobs.set(hj.id, hj);
   said.length = 0; relay.mode = 'unreachable';
   for (let i = 0; i < 5; i++) await H._ensurePublish(hj);
-  ok(said.length === 5 && said.every((w) => /is DOWN/.test(w)), `RED CONTROL: the pre-fix rule (a notice at every failed attempt) says ${said.length} for five failures — the fix says 1`, JSON.stringify(said.length));
+  ok(said.length === 5 && verdictOf(said.every((w) => /is DOWN/.test(w))), `RED CONTROL: the pre-fix rule (a notice at every failed attempt) says ${said.length} for five failures — the fix says 1`, JSON.stringify(said.length));
   stopEngine(H); cur = null;
   // RED CONTROL ② — the owner's filter line taken out: the DOWN the owner's own filter names reaches it (fb-a001be4917)
   const OWN = "      if (own && !M.filterMatches(own.filter, notifText)) { this._notifyLogPush(job, { lane: 'filtered', ok: false, reason: 'your own subscription filter' }); return; }";
@@ -272,7 +272,7 @@ try {
   const kj = { ...job, id: 'jb-topo0003', publishDown: undefined, _pfId: undefined, notifyLog: [], subscribers: [] };
   K.jobs.set(kj.id, kj); K.subscribe(kj, ownerCaller, { filter: '^(?!.*is DOWN)' });
   delivered.length = 0; relay.mode = 'unreachable'; await K._ensurePublish(kj);
-  ok(delivered.length === 1 && /is DOWN/.test(delivered[0].text), 'RED CONTROL ②: without the owner-filter line the DOWN the filter names is delivered anyway (the feedback of record)', JSON.stringify(delivered.length));
+  ok(delivered.length === 1 && verdictOf(/is DOWN/.test(delivered[0].text)), 'RED CONTROL ②: without the owner-filter line the DOWN the filter names is delivered anyway (the feedback of record)', JSON.stringify(delivered.length));
   stopEngine(K); cur = null;
   // RED CONTROL ③ — the Ports manager without its relayPublished line: the heal sweep republishes and the job still says
   // «NOT published» (fb-666f37fd38 — the URL answered 200, poll said the vault was locked)
@@ -290,7 +290,7 @@ try {
   relay.mode = 'ok';
   const staleRec = pfm._state.forwards.find((r) => r.id === lj._pfId);
   await pfm._republish(staleRec);
-  ok(staleRec.publicUrl === URL0 && L.snapshot(lj).publishState === 'failed' && /waiting for the vault/.test(L.snapshot(lj).publishWhy), 'RED CONTROL ③: without the tell, the relay republished and the job still says NOT published — waiting for the vault (the stale snapshot of record)', JSON.stringify(L.snapshot(lj).publishState));
+  ok(staleRec.publicUrl === URL0 && L.snapshot(lj).publishState === 'failed' && verdictOf(/waiting for the vault/.test(L.snapshot(lj).publishWhy)), 'RED CONTROL ③: without the tell, the relay republished and the job still says NOT published — waiting for the vault (the stale snapshot of record)', JSON.stringify(L.snapshot(lj).publishState));
   stopEngine(L); curM = null;
 
   // (k) B-74f5 (fb-71b12fb3cd, fb-197c3042ca, fb-9efc35787c): A RESTART'S tcp:// READ OF A WEB SERVICE IS NO URL CHANGE. A published
@@ -313,14 +313,14 @@ try {
     answering.clear(); answering.add(URL0); // the incident: the https address keeps answering, the tcp one answers nothing
     const a = await scene(JobManager, 'kept');
     ok(a.atOnce.said.length === 0 && a.atOnce.url === URL0 && a.atOnce.last === URL0, 'B-74f5: the restart\'s tcp:// read of an https service says NOTHING at once and the job keeps its https address (show / poll list it)', JSON.stringify(a.atOnce));
-    ok(a.said.length === 0 && a.url === URL0 && a.last === URL0 && /the old address still answers/.test(a.line || ''), 'B-74f5: after the grace the look finds the https address answering ⇒ no «CHANGED», the https address stays, the journal says why', JSON.stringify({ said: a.said, url: a.url, line: a.line }));
+    ok(a.said.length === 0 && a.url === URL0 && a.last === URL0 && verdictOf(/the old address still answers/.test(a.line || '')), 'B-74f5: after the grace the look finds the https address answering ⇒ no «CHANGED», the https address stays, the journal says why', JSON.stringify({ said: a.said, url: a.url, line: a.line }));
     answering.clear(); answering.add(TCP0); // a real move: the https address gone, the tcp one answering
     const b = await scene(JobManager, 'moved');
     ok(b.atOnce.said.length === 0 && b.atOnce.url === URL0, 'B-74f5: inside the restart\'s grace nothing is said even for a real move', JSON.stringify(b.atOnce));
-    ok(b.said.length === 1 && /public URL CHANGED/.test(b.said[0]) && b.said[0].includes(URL0) && b.said[0].includes(TCP0) && b.url === TCP0 && b.last === TCP0, 'B-74f5: after the grace, the new address answering and the old one failing ⇒ ONE «CHANGED» notice, and only then the job takes the tcp address', JSON.stringify({ said: b.said, url: b.url }));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    ok(b.said.length === 1 && gateOf(/public URL CHANGED/.test(b.said[0])) && gateOf(b.said[0].includes(URL0)) && gateOf(b.said[0].includes(TCP0)) && b.url === TCP0 && b.last === TCP0, 'B-74f5: after the grace, the new address answering and the old one failing ⇒ ONE «CHANGED» notice, and only then the job takes the tcp address', JSON.stringify({ said: b.said, url: b.url }));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     answering.clear(); // nothing answers (the relay still coming back): the look is made three times, nothing is said
     const c = await scene(JobManager, 'quiet');
-    ok(c.said.length === 0 && c.url === URL0 && /neither address answers yet/.test(c.line || ''), 'B-74f5: neither address answering ⇒ looked at again (bounded), nothing said, the https address kept', JSON.stringify({ said: c.said, line: c.line }));
+    ok(c.said.length === 0 && c.url === URL0 && verdictOf(/neither address answers yet/.test(c.line || '')), 'B-74f5: neither address answering ⇒ looked at again (bounded), nothing said, the https address kept', JSON.stringify({ said: c.said, line: c.line }));
     // RED CONTROL — the base's adopt (a URL different from the last one is said at once and taken): the incident's false notice
     const JSb = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
     const { mutantCopies: mcB } = await import('./mutant-copy.mjs');
@@ -330,7 +330,7 @@ try {
     const JMb = mcB('job-notice-b74f5', ROOT).load('src/jobs.js', anchored(JSb, NOW_HEAD, BASE_HEAD, 'B-74f5 control: the base\'s adopt'), 'base-adopt').JobManager;
     answering.clear(); answering.add(URL0);
     const r = await scene(JMb, 'base');
-    ok(r.atOnce.said.length === 1 && /public URL CHANGED/.test(r.atOnce.said[0]) && r.atOnce.said[0].includes(TCP0) && r.atOnce.url === TCP0, 'RED CONTROL (B-74f5): the base\'s adopt says «public URL CHANGED … → tcp://…, the old link no longer works» at once while the https address answers (the three reports)', JSON.stringify(r.atOnce));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    ok(r.atOnce.said.length === 1 && gateOf(/public URL CHANGED/.test(r.atOnce.said[0])) && gateOf(r.atOnce.said[0].includes(TCP0)) && r.atOnce.url === TCP0, 'RED CONTROL (B-74f5): the base\'s adopt says «public URL CHANGED … → tcp://…, the old link no longer works» at once while the https address answers (the three reports)', JSON.stringify(r.atOnce));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
 
     // B-74f5 r2 (主开发 03:47Z, three musts + shoulds) — each over the real engine and Ports manager, each with its red control
     const JSr = JSb;
@@ -347,12 +347,12 @@ try {
       const out = { atOnce, said: said.slice(), url: wj.publishedUrl, pending: wj.urlPending || null }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const w1 = await wake(JobManager, 'wak');
-    ok(w1.atOnce.length === 2 && /is DOWN/.test(w1.atOnce[0]) && /back UP at/.test(w1.atOnce[1]) && w1.atOnce[1].includes(URL0) && w1.atOnce[1].includes(URL1) && /not checked yet/.test(w1.atOnce[1]) && w1.said.length === 2 && !w1.pending && lines.some((l) => /confirmed: the recovery already named both addresses/.test(l)),
+    ok(w1.atOnce.length === 2 && gateOf(/is DOWN/.test(w1.atOnce[0])) && gateOf(/back UP at/.test(w1.atOnce[1])) && gateOf(w1.atOnce[1].includes(URL0)) && gateOf(w1.atOnce[1].includes(URL1)) && gateOf(/not checked yet/.test(w1.atOnce[1])) && w1.said.length === 2 && !w1.pending && verdictOf(lines.some((l) => /confirmed: the recovery already named both addresses/.test(l))),
       'B-74f5 r3 (L1 / L2): a service said DOWN that comes back at ANOTHER address is told UP AT ONCE, both addresses named («not checked yet»); the later check only confirms it — a journal line, never a second wake', JSON.stringify(w1));
     const NAMED = '      const words = JN.urlChangeWords({ from, to, verdict: v, named: tok.named });';
     const JMw = mcB('job-notice-b74f5-wake', ROOT).load('src/jobs.js', anchored(JSr, NAMED, '      const words = JN.urlChangeWords({ from, to, verdict: v, named: false });', 'B-74f5 r3 control: the confirmation said again'), 'named-said').JobManager;
     const w0 = await wake(JMw, 'wa0');
-    ok(w0.said.length === 3 && /back UP at/.test(w0.said[1]) && /public URL CHANGED/.test(w0.said[2]), 'RED CONTROL (B-74f5 r3 (L2)): a check that ignores what the recovery named says the move again — two wakes for one event', JSON.stringify(w0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    ok(w0.said.length === 3 && gateOf(/back UP at/.test(w0.said[1])) && verdictOf(/public URL CHANGED/.test(w0.said[2])), 'RED CONTROL (B-74f5 r3 (L2)): a check that ignores what the recovery named says the move again — two wakes for one event', JSON.stringify(w0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     // (L1 / L3) THE MUST'S OWN SCENE (主开发 04:23Z): DOWN said; the relay comes back and the probe misreads the web address as tcp; one more
     // publish read inside the grace reads it right — the person was told UP at once, at the web address, and nothing is lost after
     const misread = async (JM, tag) => {
@@ -366,12 +366,12 @@ try {
       stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const m1 = await misread(JobManager, 'mis');
-    ok(m1.atOnce.length === 2 && /is DOWN/.test(m1.atOnce[0]) && /back UP/.test(m1.atOnce[1]) && m1.atOnce[1].includes(URL0) && !m1.atOnce[1].includes('tcp://') && m1.said.length === 2 && m1.url === URL0 && !m1.pending && !m1.check && m1.timers === 0,
+    ok(m1.atOnce.length === 2 && gateOf(/is DOWN/.test(m1.atOnce[0])) && gateOf(/back UP/.test(m1.atOnce[1])) && gateOf(m1.atOnce[1].includes(URL0)) && !m1.atOnce[1].includes('tcp://') && m1.said.length === 2 && m1.url === URL0 && !m1.pending && !m1.check && m1.timers === 0,
       'B-74f5 r3 (L1 / L3): DOWN said, then a tcp MISREAD of the web address — «back UP» at the web address AT ONCE (the misread changes nothing it says), and the later right read ends the check and its timer: nothing is left to speak (the round-2 hole: the held «back UP» was dropped in silence)', JSON.stringify(m1));
     const NOTIFY = '    if (v.notice) this._notifyOwner(job, { what: v.notice.what });';
     const JMm = mcB('job-notice-b74f5-mis', ROOT).load('src/jobs.js', anchored(JSr, NOTIFY, "    if (v.notice && !(v.notice.kind === 'recovered' && next.url !== job.lastPublicUrl)) this._notifyOwner(job, { what: v.notice.what });", 'B-74f5 r3 control: the round-2 hold'), 'held').JobManager;
     const m0 = await misread(JMm, 'mi0');
-    ok(m0.said.length === 1 && /is DOWN/.test(m0.said[0]), 'RED CONTROL (B-74f5 r3 (L1)): a recovery held behind the raw address\'s check is dropped when the right read clears it — told DOWN, never told UP', JSON.stringify(m0.said));
+    ok(m0.said.length === 1 && verdictOf(/is DOWN/.test(m0.said[0])), 'RED CONTROL (B-74f5 r3 (L1)): a recovery held behind the raw address\'s check is dropped when the right read clears it — told DOWN, never told UP', JSON.stringify(m0.said));
     // (smalls) a check whose job ENDED says nothing; a keep-up service's CRASH keeps the change for its respawn; the engine's STOP ends
     // its checks; an EXHAUSTED pending pair leaves the record. Each waits for a FACT (the check's journal line, the timers, the check)
     const waitLine = async (id, re, ms = 3000) => { const t0 = Date.now(); while (!lines.some((l) => l.includes(id) && re.test(l)) && Date.now() - t0 < ms) await new Promise((res) => setTimeout(res, 10)); return lines.find((l) => l.includes(id) && re.test(l)) || null; };
@@ -383,10 +383,10 @@ try {
       const out = { said: said.slice(), pending: ej.urlPending || null, line }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const e1 = await ended(JobManager, 'end');
-    ok(e1.said.length === 0 && !e1.pending && /ended with the job/.test(e1.line || ''), 'B-74f5 (small): a change check whose job is no longer wanted up says nothing about a service no longer there, and its pending pair leaves the record (its journal line)', JSON.stringify(e1));
+    ok(e1.said.length === 0 && !e1.pending && verdictOf(/ended with the job/.test(e1.line || '')), 'B-74f5 (small): a change check whose job is no longer wanted up says nothing about a service no longer there, and its pending pair leaves the record (its journal line)', JSON.stringify(e1));
     const ENDIF = "      if (!['up', 'starting'].includes(job.state)) { // follow-up: a keep-up service between a crash and its respawn keeps its pending change (the respawn's publish read looks again); a job no longer wanted up says nothing";
     const e0 = await ended(mcB('job-notice-b74f5-end', ROOT).load('src/jobs.js', anchored(JSr, ENDIF, '      if (false) {', 'B-74f5 control: no job-ended block'), 'no-ended').JobManager, 'en0');
-    ok(e0.said.length === 1 && /public URL CHANGED/.test(e0.said[0]), 'RED CONTROL (B-74f5 (small)): without the job-ended block the check speaks about a service that is gone', JSON.stringify(e0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    ok(e0.said.length === 1 && verdictOf(/public URL CHANGED/.test(e0.said[0])), 'RED CONTROL (B-74f5 (small)): without the job-ended block the check speaks about a service that is gone', JSON.stringify(e0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     // (follow-up (1)) a keep-up service CRASHES inside the grace (state down, still wanted up): the pending change waits for its respawn,
     // whose publish read looks again — a real move is said once (r3 dropped the pair in silence at the crash)
     const crash = async (JM, tag) => {
@@ -400,7 +400,7 @@ try {
       const out = { atCrash, kept, started, said: said.slice() }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const k1 = await crash(JobManager, 'crs');
-    ok(/waits for the service to run again/.test(k1.atCrash || '') && k1.kept && k1.kept.from === URL0 && k1.started && k1.said.length === 1 && /public URL CHANGED/.test(k1.said[0]) && k1.said[0].includes(URL1),
+    ok(gateOf(/waits for the service to run again/.test(k1.atCrash || '')) && gateOf(k1.kept) && k1.kept.from === URL0 && gateOf(k1.started) && k1.said.length === 1 && gateOf(/public URL CHANGED/.test(k1.said[0])) && verdictOf(k1.said[0].includes(URL1)),
       'B-74f5 follow-up (1): a keep-up service that crashes inside the grace keeps its pending change (the journal says it waits); the respawn\'s publish read checks it and the real move is said ONCE', JSON.stringify(k1));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     const WAITLINE = "        if (job.desiredUp) { this.d.log(`[jobs] ${job.id}: a public URL check waits for the service to run again (its pending change is kept)`); return; }";
     const k0 = await crash(mcB('job-notice-b74f5-crs', ROOT).load('src/jobs.js', anchored(JSr, WAITLINE, '', 'B-74f5 control: the crash drops the pair'), 'crash-drops').JobManager, 'cr0');
@@ -432,13 +432,13 @@ try {
       const out = { rounds, fourth, afterMove, said: said.slice() }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const x1 = await exhaust(JobManager, 'exh');
-    ok(x1.said.length === 0 && x1.rounds[0].pending === 1 && x1.rounds[1].pending === 2 && x1.rounds[2].pending === null && /after 3 rounds \(dropped\)/.test(x1.rounds[2].newLine || '') && x1.fourth === false,
+    ok(x1.said.length === 0 && x1.rounds[0].pending === 1 && x1.rounds[1].pending === 2 && x1.rounds[2].pending === null && gateOf(/after 3 rounds \(dropped\)/.test(x1.rounds[2].newLine || '')) && x1.fourth === false,
       'B-74f5 (small): a change not said is looked at again at the next publish reads, three rounds — then its pending pair LEAVES the record and a fourth read starts no check', JSON.stringify(x1.rounds));
     const ROUNDLINE = '        if (rounds + 1 < URL_ROUNDS) {';
     const x0 = await exhaust(mcB('job-notice-b74f5-exh', ROOT).load('src/jobs.js', anchored(JSr, ROUNDLINE, '        if (true) {', 'B-74f5 r3 control: never dropped'), 'never-dropped').JobManager, 'ex0');
     ok(x0.rounds[2].pending !== null && x0.fourth === true, 'RED CONTROL (B-74f5 (small)): a pair never dropped stays in the record and a fourth read starts its looks again', JSON.stringify({ rounds: x0.rounds.map((r) => r.pending), fourth: x0.fourth }));
     const g1 = await exhaust(JobManager, 'gtd', { teardown: true }), g2 = await exhaust(JobManager, 'gnr', { newRun: true });
-    ok(g1.afterMove && g1.afterMove.started && g1.afterMove.said.length === 1 && /public URL CHANGED/.test(g1.afterMove.said[0]) && g2.afterMove && g2.afterMove.started && g2.afterMove.said.length === 1,
+    ok(gateOf(g1.afterMove) && gateOf(g1.afterMove.started) && g1.afterMove.said.length === 1 && gateOf(/public URL CHANGED/.test(g1.afterMove.said[0])) && gateOf(g2.afterMove) && gateOf(g2.afterMove.started) && g2.afterMove.said.length === 1,
       'B-74f5 follow-up (2): the give-up mark ends with the teardown and with a new run — a later REAL move to the given-up address is checked and said once', JSON.stringify({ teardown: g1.afterMove, newRun: g2.afterMove }));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     const GIVEUP = '  _urlGaveUp(job, from, to) { const g = job._urlGaveUp; return !!(g && g.key === `${from} ${to}` && g.run === this._runStartOf(job)); }';
     const TEARCLR = 'this._endUrlCheck(job); delete job.urlPending; delete job._urlGaveUp; // B-74f5';
@@ -489,11 +489,11 @@ try {
       const out = { said: said.slice(), url: tj.publishedUrl, line: lines.find((l) => l.includes(tj.id) && /not said|changed/.test(l)) || null }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const t1 = await twice(JobManager, 'two');
-    ok(t1.said.length === 0 && t1.url === URL0 && /both addresses answer/.test(t1.line || ''), 'B-74f5 r2 (b): one missed look at the old address is not «failed» — the second look 15 s later (40 ms here) finds it answering (the tcp one answers too: «both addresses answer»): nothing said, the https address kept', JSON.stringify(t1));
+    ok(t1.said.length === 0 && t1.url === URL0 && verdictOf(/both addresses answer/.test(t1.line || '')), 'B-74f5 r2 (b): one missed look at the old address is not «failed» — the second look 15 s later (40 ms here) finds it answering (the tcp one answers too: «both addresses answer»): nothing said, the https address kept', JSON.stringify(t1));
     const CONFIRM = '      if (v.say && !confirm) { this._checkUrlChange(job, from, to, { ...next, confirm: true }); return; } // «the old one failed» is seen twice';
     const JMt = mcB('job-notice-b74f5-two', ROOT).load('src/jobs.js', anchored(JSr, CONFIRM, '', 'B-74f5 r2 control: one look'), 'one-look').JobManager;
     const t0 = await twice(JMt, 'tw0');
-    ok(t0.said.length === 1 && /public URL CHANGED/.test(t0.said[0]), 'RED CONTROL (B-74f5 r2 (b)): one look decides «failed» — the address that answered a moment later is said to be gone', JSON.stringify(t0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    ok(t0.said.length === 1 && verdictOf(/public URL CHANGED/.test(t0.said[0])), 'RED CONTROL (B-74f5 r2 (b)): one look decides «failed» — the address that answered a moment later is said to be gone', JSON.stringify(t0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     // (should) A HUB RESTART INSIDE THE GRACE: the pending pair is on disk — the next engine checks the change and says it once
     const restart = async (JM, tag, { down = false } = {}) => { // (down: a «DOWN» said before the move — the recovery names both, and the restart must keep that it did)
       said.length = 0; lines.length = 0; answering.clear(); answering.add(URL1);
@@ -508,7 +508,7 @@ try {
       const out = { onDisk, said: said.slice(), confirmed: lines.some((l) => l.includes(rj.id) && /confirmed: the recovery already named both addresses/.test(l)) }; stopEngine(E2); cur = null; relay.mode = 'ok'; return out;
     };
     const s1 = await restart(JobManager, 'rst');
-    ok(s1.onDisk && s1.onDisk.last === URL1 && s1.onDisk.pending && s1.onDisk.pending.from === URL0 && s1.said.length === 1 && /public URL CHANGED/.test(s1.said[0]) && s1.said[0].includes(URL0) && s1.said[0].includes(URL1),   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    ok(gateOf(s1.onDisk) && s1.onDisk.last === URL1 && gateOf(s1.onDisk.pending) && s1.onDisk.pending.from === URL0 && s1.said.length === 1 && gateOf(/public URL CHANGED/.test(s1.said[0])) && gateOf(s1.said[0].includes(URL0)) && verdictOf(s1.said[0].includes(URL1)),   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
       'B-74f5 r2 (should): a hub restart inside the grace keeps the pending change on disk (urlPending) — the next engine checks it and says it once', JSON.stringify(s1));
     const PEND = '      if (pend && pend.to === url && pend.from !== url) {';
     const JMs = mcB('job-notice-b74f5-rst', ROOT).load('src/jobs.js', anchored(JSr, PEND, '      if (false) {', 'B-74f5 r2 control: the pending pair never read again'), 'no-pending').JobManager;
@@ -517,11 +517,11 @@ try {
     // (follow-up (4)) «named» RIDES THE PENDING PAIR across a hub restart: DOWN said, the recovery at B named both; the hub restarts
     // inside the grace — the next engine's check only confirms it (a journal line), never a second wake
     const n1 = await restart(JobManager, 'rnm', { down: true });
-    ok(n1.onDisk && n1.onDisk.pending && n1.onDisk.pending.named === true && n1.said.length === 2 && /is DOWN/.test(n1.said[0]) && /back UP at/.test(n1.said[1]) && n1.confirmed,
+    ok(gateOf(n1.onDisk) && gateOf(n1.onDisk.pending) && n1.onDisk.pending.named === true && n1.said.length === 2 && gateOf(/is DOWN/.test(n1.said[0])) && gateOf(/back UP at/.test(n1.said[1])) && verdictOf(n1.confirmed),
       'B-74f5 follow-up (4): «named» rides the pending pair across a hub restart — the recovery named both addresses, so the next engine\'s check only confirms (a journal line): ONE wake for the event', JSON.stringify(n1));
     const PENDSET = '    job.urlPending = { from, to, rounds, ...(named ? { named: true } : {}) };';
     const n0 = await restart(mcB('job-notice-b74f5-rnm', ROOT).load('src/jobs.js', anchored(JSr, PENDSET, '    job.urlPending = { from, to, rounds };', 'B-74f5 control: named not kept on disk'), 'named-not-kept').JobManager, 'rn0', { down: true });
-    ok(n0.said.length === 3 && /public URL CHANGED/.test(n0.said[2]), 'RED CONTROL (B-74f5 follow-up (4)): a pending pair that forgets «named» across the restart says the move a second time', JSON.stringify(n0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    ok(n0.said.length === 3 && verdictOf(/public URL CHANGED/.test(n0.said[2])), 'RED CONTROL (B-74f5 follow-up (4)): a pending pair that forgets «named» across the restart says the move a second time', JSON.stringify(n0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     // (follow-up (4)) a move B → C after a NAMED A → B is a new event — said once
     const waitNew = async (id, re, n0l, ms = 3000) => { const t0 = Date.now(); while (!lines.slice(n0l).some((l) => l.includes(id) && re.test(l)) && Date.now() - t0 < ms) await new Promise((res) => setTimeout(res, 10)); };
     const bc = async (JM, tag) => {
@@ -533,7 +533,7 @@ try {
       const out = { said: said.slice() }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const c1 = await bc(JobManager, 'b2c');
-    ok(c1.said.length === 3 && /is DOWN/.test(c1.said[0]) && /back UP at/.test(c1.said[1]) && /public URL CHANGED/.test(c1.said[2]) && c1.said[2].includes(URL1) && c1.said[2].includes(URL2),
+    ok(c1.said.length === 3 && gateOf(/is DOWN/.test(c1.said[0])) && gateOf(/back UP at/.test(c1.said[1])) && gateOf(/public URL CHANGED/.test(c1.said[2])) && gateOf(c1.said[2].includes(URL1)) && verdictOf(c1.said[2].includes(URL2)),
       'B-74f5 follow-up (4): after a NAMED recovery A → B, a later real move B → C is a new event — said once («CHANGED B → C»)', JSON.stringify(c1.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     const ADOPTCALL = '    this._checkUrlChange(job, before, url, { named: named || !!(same && pend.named), rounds: same ? Number(pend.rounds) || 0 : 0 });';
     const c0 = await bc(mcB('job-notice-b74f5-b2c', ROOT).load('src/jobs.js', anchored(JSr, ADOPTCALL, '    this._checkUrlChange(job, before, url, { named: true, rounds: same ? Number(pend.rounds) || 0 : 0 });', 'B-74f5 control: named sticks to the next pair'), 'named-sticky').JobManager, 'b20');
@@ -598,10 +598,10 @@ try {
 
   // (j) the wiring: the vault's unlock calls relayChanged; the Ports manager's adopt calls relayPublished
   const wiring = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
-  ok(/vault\.onUnlock\(\(\) => \{ try \{ const jm = getJobs && getJobs\(\); if \(jm && typeof jm\.relayChanged === 'function'\) jm\.relayChanged\('the vault unlocked'\);/.test(wiring), 'mounts-plugins-wiring: the vault\'s onUnlock → jobs.relayChanged');
+  ok(verdictOf(/vault\.onUnlock\(\(\) => \{ try \{ const jm = getJobs && getJobs\(\); if \(jm && typeof jm\.relayChanged === 'function'\) jm\.relayChanged\('the vault unlocked'\);/.test(wiring)), 'mounts-plugins-wiring: the vault\'s onUnlock → jobs.relayChanged');
   const pfSrc = fs.readFileSync(path.join(ROOT, 'src/port-forward.js'), 'utf-8');
   const adoptBody = pfSrc.slice(pfSrc.indexOf('  _adoptPublish(rec, r) {'), pfSrc.indexOf('  _localSocket('));
-  ok(/jm\.relayPublished\(rec, r\.url \|\| null\)/.test(adoptBody), 'port-forward _adoptPublish (every relay success: heal sweep, restore, machine link, the Ports panel) → jobs.relayPublished');
+  ok(verdictOf(/jm\.relayPublished\(rec, r\.url \|\| null\)/.test(adoptBody)), 'port-forward _adoptPublish (every relay success: heal sweep, restore, machine link, the Ports panel) → jobs.relayPublished');
 } finally {
   for (const sv of servers) try { sv.close(); } catch { }
   fs.rmSync(dir, { recursive: true, force: true });
@@ -628,7 +628,7 @@ console.log('§3 the dropped login — the Ports manager says it ONCE per episod
     for (let sweep = 0; sweep < 3; sweep++) for (const r of recs) await pf._republish(r);
     const dropLines = lines.filter((l) => /closes the connection right after/.test(l));
     ok(relay.n === 9 && dropLines.length === 1, `three forwards × three sweeps against the dropped relay ⇒ ONE journal line (was one per forward per sweep: ${relay.n} attempts, ${dropLines.length} line(s))`, JSON.stringify(dropLines.map((l) => l.slice(0, 80))));
-    ok(recs.every((r) => /^public URL down — the relay accepts this instance's login but closes the connection right after/.test(r.error || '')), 'each forward\'s error carries the relay\'s words (never «retrying republish» alone, never «DNS»)', JSON.stringify(recs.map((r) => r.error)));
+    ok(verdictOf(recs.every((r) => /^public URL down — the relay accepts this instance's login but closes the connection right after/.test(r.error || ''))), 'each forward\'s error carries the relay\'s words (never «retrying republish» alone, never «DNS»)', JSON.stringify(recs.map((r) => r.error)));
     ok(!lines.some((l) => /DNS|could not allocate a public port/.test(l)), 'no line says «DNS» or «a public port» — nothing was refused');
     relay.mode = 'ok'; await pf._republish(recs[0]);
     relay.mode = 'dropped'; await pf._republish(recs[1]);
@@ -641,4 +641,4 @@ console.log('§3 the dropped login — the Ports manager says it ONCE per episod
 }
 // r3228 (round whu7689zw): the held-list legs of the jobs engine's forwards moved to scripts/test-job-forwards.mjs (the reconcile)
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

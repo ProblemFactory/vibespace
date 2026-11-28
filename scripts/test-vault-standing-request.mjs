@@ -74,7 +74,7 @@ const DOOR = require(path.join(REPO, 'src/server/vault-run-door.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** A leg: an exception is a FAILED leg by name (a base tree without the feature), never a crash of the suite. */
 async function leg(name, fn) { try { await fn(); } catch (e) { fail++; console.error(`  ✗ ${name} — threw: ${String(e && e.stack || e).split('\n').slice(0, 3).join(' | ')}`); } }
@@ -192,15 +192,15 @@ await leg('① standing request', async () => {
   ok(!!(rec && rec.resolvedBy === 'granted' && rec.resolvedFact && rec.resolvedFact.grantedFor === 'standing'), '①g the card\'s record says granted · standing («allowed by you until you revoke it»)', rec && { by: rec.resolvedBy, fact: rec.resolvedFact });
   const runs = [];
   for (const part of ['part01.mp3', 'part02.mp3', 'part03.mp3']) runs.push(await runAnswered(w, RUN(w.e.ref, 'python3', 'transcribe.py', part)));
-  ok(runs.every((x) => x.r.ok && x.r.allowedBy !== undefined ? true : x.r.ok) && runs.every((x) => !x.card), '①h every later segment runs with NO card (the owner\'s loop of 40 is one Allow)', runs.map((x) => ({ ok: x.r.ok, code: x.r.code, card: !!x.card })));
+  ok(gateOf(runs.every((x) => x.r.ok && x.r.allowedBy !== undefined ? true : x.r.ok)) && verdictOf(runs.every((x) => !x.card)), '①h every later segment runs with NO card (the owner\'s loop of 40 is one Allow)', runs.map((x) => ({ ok: x.r.ok, code: x.r.code, card: !!x.card })));
   const lines = useLines(w).filter((l) => l.door === 'run' && l.outcome === 'ok');
-  ok(lines.length >= 3 && lines.slice(-3).every((l) => /^vg-[0-9a-f]{8}$/.test(String(l.grant))) && !JSON.stringify(lines).includes(VALUE), '⑤a each of those uses is a vault-use line naming the STANDING grant it rode (by grant · standing) — never the value', lines.slice(-3).map((l) => ({ grant: l.grant, outcome: l.outcome })));
+  ok(lines.length >= 3 && gateOf(lines.slice(-3).every((l) => /^vg-[0-9a-f]{8}$/.test(String(l.grant)))) && !JSON.stringify(lines).includes(VALUE), '⑤a each of those uses is a vault-use line naming the STANDING grant it rode (by grant · standing) — never the value', lines.slice(-3).map((l) => ({ grant: l.grant, outcome: l.outcome })));
   w.vault.lock();
   const locked = await runAnswered(w, RUN(w.e.ref, 'python3', 'transcribe.py', 'part04.mp3'));
   ok(!locked.r.ok && locked.r.code === 'vault_locked' && w.grants.rowsFor('vault-use', w.e.id).length === 1, '①i/⑤b a LOCK refuses the run (vault_locked) and does NOT end the grant — the row stays (it is the owner\'s row, not an 8-hour grant)', { code: locked.r.code, rows: w.grants.rowsFor('vault-use', w.e.id).length });
   await w.vault.unlock(PW);
   const after = await runAnswered(w, RUN(w.e.ref, 'python3', 'transcribe.py', 'part05.mp3'));
-  ok(after.r.ok && !after.card, '①j unlocked again: the next segment runs with no card — the standing grant held through the lock', { ok: after.r.ok, code: after.r.code });
+  ok(gateOf(after.r.ok) && !after.card, '①j unlocked again: the next segment runs with no card — the standing grant held through the lock', { ok: after.r.ok, code: after.r.code });
   const uses = w.door.usesFor(w.caller());
   const st = uses && uses.standing && uses.standing[0];
   ok(!!(st && st.entry === w.e.ref && st.commands.join() === 'python3 transcribe.py' && st.source === 'request' && st.since), '④a `vibespace-vault uses` lists it: standing · the command python3 transcribe.py · since <when>', uses && uses.standing);
@@ -222,7 +222,7 @@ await leg('① edges', async () => {
   const m = memberOf(w);
   ok(!!(yes && yes.ok && m && (m.hosts || []).join() === 'api.tts.example' && m.source === 'request' && !m.until), '①m a hosts-scoped Allow writes the member with those hosts (the row\'s «主机»), source request, no end', m);
   const curl = await runAnswered(w, RUN(w.e.ref, 'curl', 'https://api.tts.example/v1/tts'));
-  ok(curl.r.ok && !curl.card, '①n a command to a granted host runs with no card (the entry\'s switch flipped in the same act, only this member resumed)', { ok: curl.r.ok, code: curl.r.code });
+  ok(gateOf(curl.r.ok) && !curl.card, '①n a command to a granted host runs with no card (the entry\'s switch flipped in the same act, only this member resumed)', { ok: curl.r.ok, code: curl.r.code });
   const none = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'x', standing: true, cwd: w.work });
   const known = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'x', standing: true, command: 'curl https://api.tts.example/', cwd: w.work });
   const inline = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'x', standing: true, command: 'python3 -c', cwd: w.work });
@@ -247,7 +247,7 @@ await leg('② card always (this command)', async () => {
   const m = memberOf(w);
   ok(!!(a.a && a.a.ok && a.r.ok && m && m.source === 'card' && !m.until && m.commands && m.commands[0].arg === fs.realpathSync(path.join(w.work, 'other.py'))), '②c its «Always» writes a standing member on the COMMAND SHAPE (source card, no end)', { a: a.a, m });
   const b = await runAnswered(w, RUN(w.e.ref, 'python3', 'other.py', 'seg2.mp3'));
-  ok(b.r.ok && !b.card, '②d the next run of that command (another argument) runs with no card', { ok: b.r.ok, code: b.r.code });
+  ok(gateOf(b.r.ok) && !b.card, '②d the next run of that command (another argument) runs with no card', { ok: b.r.ok, code: b.r.code });
   fs.writeFileSync(path.join(w.work, 'other.py'), 'print("other, changed")\n');
   const c = await runAnswered(w, RUN(w.e.ref, 'python3', 'other.py', 'seg3.mp3'));
   ok(!!c.card, '②e the script\'s bytes changed ⇒ a new shape ⇒ the card again', { card: !!c.card, code: c.r.code });
@@ -265,7 +265,7 @@ await leg('② deadline', async () => {
   const x = await runAnswered(w, RUN(w.e.ref, 'python3', 'transcribe.py', 'late.mp3'), { leave: true });
   await sleep(120);
   const r = x.r;
-  ok(!r.ok && r.code === 'ask_expired' && /--standing --command/.test(String(r.words || '')) && /python3 transcribe\.py/.test(String(r.words || '')), '④c a card nobody answered in time (ask_expired) names the RECIPE: vibespace-vault request <ref> --standing --command "python3 transcribe.py"', { code: r.code, words: r.words });
+  ok(!r.ok && r.code === 'ask_expired' && gateOf(/--standing --command/.test(String(r.words || ''))) && verdictOf(/python3 transcribe\.py/.test(String(r.words || ''))), '④c a card nobody answered in time (ask_expired) names the RECIPE: vibespace-vault request <ref> --standing --command "python3 transcribe.py"', { code: r.code, words: r.words });
   const late = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-run-ask' && i.action.late);
   const al = late && w.door.answer(late.action.askId, { answer: 'always', reauthed: true });
   ok(!!(late && al && !al.ok && al.code === 'always_not_offered'), '②h a LATE card offers no «Always» (its door refuses it — the deadline rule unchanged)', { late: !!late, al });
@@ -300,9 +300,9 @@ await leg('④ recipe', async () => {
   const w = await world();
   w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
   const once = await runAnswered(w, RUN(w.e.ref, 'python3', 'transcribe.py', 'p1.mp3'), { answer: 'once' });
-  ok(once.r.ok && /request .* --standing --command "python3 transcribe\.py"/.test(String(once.r.next || '')), '④d a run the owner let through ONCE carries `next`: ask once for a standing grant (the CLI prints it)', { ok: once.r.ok, next: once.r.next });
+  ok(gateOf(once.r.ok) && verdictOf(/request .* --standing --command "python3 transcribe\.py"/.test(String(once.r.next || ''))), '④d a run the owner let through ONCE carries `next`: ask once for a standing grant (the CLI prints it)', { ok: once.r.ok, next: once.r.next });
   const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-vault'), 'utf8');
-  ok(/request <vault:\/\/…> --standing --for/.test(cli) && /d\.next/.test(cli) && /standing · \$\{standingScope/.test(cli), '④e the CLI: the usage names --standing, `run` prints `next`, `uses` / `list` say «standing · <scope> · since»');
+  ok(gateOf(/request <vault:\/\/…> --standing --for/.test(cli)) && gateOf(/d\.next/.test(cli)) && verdictOf(/standing · \$\{standingScope/.test(cli)), '④e the CLI: the usage names --standing, `run` prints `next`, `uses` / `list` say «standing · <scope> · since»');
 });
 
 console.log('⑥ (r2 MAJOR 1, probe P1) THE OWNER\'S ROW RULES judge the request before its card — a wildcard host needs its tool');
@@ -321,14 +321,14 @@ await leg('⑥ row rules', async () => {
   ok(!!(y && y.ok && m && m.toolFor && m.toolFor['*.github.io'] === 'curl'), '⑥d the Allow writes the wildcard WITH its tool (toolFor) — the row the owner\'s Save would keep', { y, m });
   const c1 = await runAnswered(w, RUN(w.e.ref, 'curl', 'https://pages.github.io/collect'));
   const c2 = await runAnswered(w, RUN(w.e.ref, 'wget', 'https://pages.github.io/collect'));
-  ok(c1.r.ok && !c1.card && !!c2.card, '⑥e a wildcard with its tool admits ONLY that tool — curl runs with no card; wget to the same host draws its card', { c1: { ok: c1.r.ok, code: c1.r.code, card: !!c1.card }, c2: { card: !!c2.card, code: c2.r.code } });
+  ok(gateOf(c1.r.ok) && !c1.card && !!c2.card, '⑥e a wildcard with its tool admits ONLY that tool — curl runs with no card; wget to the same host draws its card', { c1: { ok: c1.r.ok, code: c1.r.code, card: !!c1.card }, c2: { card: !!c2.card, code: c2.r.code } });
   const pub = w.useGrants.publicFor(w.e.id);
   const save = w.useGrants.setRow(w.e.id, { to: (pub.to || []).map((x) => ({ kind: x.kind, key: x.key, name: x.name, hosts: x.hosts, ...(x.toolFor ? { toolFor: x.toolFor } : {}), source: x.source, at: x.at })), except: [] }, { reauthed: true });
   ok(!!(save && save.ok && (pub.to || []).length === 1 && (pub.to[0].toolFor || {})['*.github.io'] === 'curl'), '⑥f the row the Allow wrote is one the owner can Save again unchanged (the same rules judged both)', { save, to: pub.to });
   const ug = fs.readFileSync(path.join(REPO, 'src/server/vault-use-grants.js'), 'utf8'), dr = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
   const fnBody = (s, name) => { const i = s.indexOf(`function ${name}(`); return i < 0 ? '' : s.slice(i, s.indexOf('\n  }\n', i)); };
   const rs = dr.slice(Math.max(0, dr.indexOf('async function requestStanding(')));
-  ok(['setRow', 'addMember', 'judgeMember'].every((f) => /rowRules\(/.test(fnBody(ug, f))) && !/GM\.validateWrite\(/.test(fnBody(ug, 'setRow') + fnBody(ug, 'addMember')) && rs.indexOf('useGrants.judgeMember(') > 0 && rs.indexOf('useGrants.judgeMember(') < rs.indexOf('userTodos.add('), '⑥g ONE validator: setRow, addMember and judgeMember read the same rowRules; the standing request asks judgeMember BEFORE it files its card');
+  ok(gateOf(['setRow', 'addMember', 'judgeMember'].every((f) => /rowRules\(/.test(fnBody(ug, f)))) && !/GM\.validateWrite\(/.test(fnBody(ug, 'setRow') + fnBody(ug, 'addMember')) && rs.indexOf('useGrants.judgeMember(') > 0 && rs.indexOf('useGrants.judgeMember(') < rs.indexOf('userTodos.add('), '⑥g ONE validator: setRow, addMember and judgeMember read the same rowRules; the standing request asks judgeMember BEFORE it files its card');
 });
 
 console.log('⑦ (r2 MAJOR 2, probe P7) THE PIN GRAMMAR — a shape only where the hub pins what runs; a census over every row');
@@ -399,11 +399,11 @@ await leg('⑧ seen and revoked', async () => {
     const ff = w.door.rowFacts(row || { id: rid, store: rid.split(':')[0], kind: 'password', label: cls, hosts: [] });
     drawn.push({ cls, add: !!(add && add.ok), drawn: !!(ff && ff.use && (ff.use.to || []).some((m) => m.principal === `conversation:${CID}` && (m.grant || m.id))) });   // r11: the grant id rides `grant` (a member keeps its principal's own fields)
   }
-  ok(drawn.every((d) => d.add && d.drawn), '⑧c CENSUS: a member the ONE writer writes on EVERY runnable entry class (storage, app-login, secret, agent-entry) is drawn by the window\'s reader (rowFacts → its chip + ✕)', drawn);
+  ok(verdictOf(drawn.every((d) => d.add && d.drawn)), '⑧c CENSUS: a member the ONE writer writes on EVERY runnable entry class (storage, app-login, secret, agent-entry) is drawn by the window\'s reader (rowFacts → its chip + ✕)', drawn);
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const direct = walk(path.join(REPO, 'src')).filter((p) => !p.endsWith('vault-use-grants.js') && /\.(?:set|remove)\(\s*(?:'vault-use'|U\.DOOR|VUG\.DOOR)\b/.test(fs.readFileSync(p, 'utf8'))).map((p) => path.relative(REPO, p));
   const win = fs.readFileSync(path.join(REPO, 'src/lib/vault-window.js'), 'utf8'), ux = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8'), dr = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  ok(!direct.length && /if \(row\.run && row\.run\.use\) \{ const ux = useExtras\(/.test(win) && /'vw-ak-x vw-use-x'/.test(ux) && /useB\.hidden = false;   \/\/ lane vault-standing-request r2 \(MAJOR 3\)/.test(ux) && /if \(VR\.agentScopeOf\(ref\)\) \{ const use = ownUseOf\(row, ref\);/.test(dr), '⑧d grep: no file but the ONE writer (vault-use-grants.js) writes a vault-use row; the window draws every row whose facts carry `use` — no class left out — each member with its ✕; B-bc3b: an own entry draws «Who may use it…» too (the owner shares it)', direct);
+  ok(!direct.length && gateOf(/if \(row\.run && row\.run\.use\) \{ const ux = useExtras\(/.test(win)) && gateOf(/'vw-ak-x vw-use-x'/.test(ux)) && gateOf(/useB\.hidden = false;   \/\/ lane vault-standing-request r2 \(MAJOR 3\)/.test(ux)) && verdictOf(/if \(VR\.agentScopeOf\(ref\)\) \{ const use = ownUseOf\(row, ref\);/.test(dr)), '⑧d grep: no file but the ONE writer (vault-use-grants.js) writes a vault-use row; the window draws every row whose facts carry `use` — no class left out — each member with its ✕; B-bc3b: an own entry draws «Who may use it…» too (the owner shares it)', direct);
 });
 
 console.log('⑨ (r2 JUDGE 4, probe P2 — r4: re-derived on per-scope ends) A STANDING WRITE BESIDE A TIMED SCOPE NEVER TOUCHES IT — its own scope is added, the other keeps ITS OWN end');
@@ -592,7 +592,7 @@ await leg('⑯ specifiers', async () => {
   for (const p of planted) { const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'x', standing: true, command: `deno run '${p}'`, cwd: w.work }); res.push({ p, code: q && q.code, why: q && q.why, words: q && q.words }); }
   fs.writeFileSync(path.join(w.work, 'main.ts'), 'console.log(1)\n');
   const plain = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'the deno job', standing: true, command: 'deno run main.ts', cwd: w.work });
-  ok(res.every((r) => r.code === 'command_not_pinnable' && r.why === 'specifier' && /URI scheme/.test(String(r.words || ''))) && !!(plain && plain.ok && plain.command === 'deno run main.ts'), '⑯a pin-doors: npm:, jsr:, file:, data: — each planted as a local file of that name — are refused command_not_pinnable (a module SPECIFIER deno resolves itself, never the planted file); a plain relative file is pinned', { res, plain });
+  ok(gateOf(res.every((r) => r.code === 'command_not_pinnable' && r.why === 'specifier' && /URI scheme/.test(String(r.words || '')))) && !!(plain && plain.ok && plain.command === 'deno run main.ts'), '⑯a pin-doors: npm:, jsr:, file:, data: — each planted as a local file of that name — are refused command_not_pinnable (a module SPECIFIER deno resolves itself, never the planted file); a plain relative file is pinned', { res, plain });
   const r = await runAnswered(w, RUN(w.e.ref, 'deno', 'run', 'npm:evil-pkg/main.ts'));
   ok(!!(r.card && !r.card.action.command && !r.r.ok), '⑯b its run draws a card that offers no «Always (this command)» (the run\'s own candidate reads the same grammar)', r.card && r.card.action);
   const bad = [];
@@ -602,7 +602,7 @@ await leg('⑯ specifiers', async () => {
     for (const s of ['npm:x/m', 'jsr:@x/m', 'file:m', 'data:t,c//m', 'https://x.example/m', 'C:m']) { const argv = [n, ...(g.sub ? [g.sub[0]] : []), s + ((g.ext || ['.x'])[0])]; const p = VR.pinOf(n, argv); if (!p || p.ok) bad.push({ n, argv }); }
   }
   const sh = VR.pinOf('bash', ['bash', 'job.sh']), sh2 = VR.pinOf('bash', ['bash', './job.sh']);
-  ok(!bad.length && sh && sh.why === 'path-search' && sh2 && sh2.ok, '⑯c CENSUS: every row says which word shapes are files (`files`: path | slash), and NO row pins a word with a URI scheme; a POSIX shell pins `./job.sh`, never a bare `job.sh` (it may be looked up on PATH)', { bad: bad.slice(0, 6), sh, sh2 });
+  ok(!bad.length && gateOf(sh) && sh.why === 'path-search' && gateOf(sh2) && verdictOf(sh2.ok), '⑯c CENSUS: every row says which word shapes are files (`files`: path | slash), and NO row pins a word with a URI scheme; a POSIX shell pins `./job.sh`, never a bare `job.sh` (it may be looked up on PATH)', { bad: bad.slice(0, 6), sh, sh2 });
   fs.writeFileSync(path.join(w.work, 'job.sh'), 'echo job\n');
   const s1 = await w.door.request({ caller: w.caller('cid-sh', 'S'), entry: w.e.ref, purpose: 'the job', standing: true, command: 'bash job.sh', cwd: w.work });
   const s2 = await w.door.request({ caller: w.caller('cid-sh', 'S'), entry: w.e.ref, purpose: 'the job', standing: true, command: 'bash ./job.sh', cwd: w.work });
@@ -621,7 +621,7 @@ await leg('⑰ env doors', async () => {
   }
   const seven = ['LUA_INIT', 'LUA_INIT_5_4', 'PHPRC', 'PHP_INI_SCAN_DIR', 'DOTNET_STARTUP_HOOKS', 'R_PROFILE_USER', 'JULIA_DEPOT_PATH'];
   const per = Object.fromEntries(['lua', 'php', 'dotnet', 'rscript', 'julia'].map((n) => [n, ((VR.PIN_GRAMMAR || {})[n] || {}).env || null]));
-  ok(rows.length >= 26 && !noRow.length && !leaks.length && names > 60 && seven.every((n) => VR.envRefusedOf(n)) && Object.values(per).every((l) => Array.isArray(l) && l.length), `⑰a CENSUS: every one of the ${rows.length} pinned rows names its startup-code env doors (\`env\`), and every one (${names} names) is refused for every run — the reviewer's seven among them`, { noRow, leaks: leaks.slice(0, 8), per });
+  ok(rows.length >= 26 && !noRow.length && !leaks.length && names > 60 && gateOf(seven.every((n) => VR.envRefusedOf(n))) && verdictOf(Object.values(per).every((l) => Array.isArray(l) && l.length)), `⑰a CENSUS: every one of the ${rows.length} pinned rows names its startup-code env doors (\`env\`), and every one (${names} names) is refused for every run — the reviewer's seven among them`, { noRow, leaks: leaks.slice(0, 8), per });
   const w = await world();
   w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
   fs.writeFileSync(path.join(w.work, 'job.lua'), 'print("job")\n');
@@ -863,7 +863,7 @@ await leg('㉗ the line on the face', async () => {
   const card0 = await cardAfter(w, b0), c = card0 && JSON.parse(JSON.stringify(card0)), tray = drawnHtml(c), pane = drawnHtml(c, undefined, { buttons: false }), zhTray = drawnHtml(c, tFor(ZH));
   const v = c && FA.runCardOf(c, {});
   ok(!!(c && c.action.always === true && !c.action.command && v && v.changes && v.changes.lines.length === 1 && v.changes.lines[0].map((x) => x.text).join('') === LINE && !v.always.hint), '㉗a the model: a hosts «Always» over a.example (held, no end) + c.example has ONE change line on the card\'s own row (`changes`) — «holds a.example with no end — this replaces that grant: a.example is then held for 30 days.» — never only in the hint (which a hosts «Always» does not show)', { changes: v && v.changes, hint: v && v.always.hint });
-  ok(changeRowIn(tray) === LINE && /data-answer="always"/.test(tray) && tray.indexOf('ut-run-changes') > 0 && tray.indexOf('ut-run-changes') < tray.indexOf('ut-run-answer') && !/ut-run-hint/.test(tray), '㉗b the tray / chat row (and the phone — the same row): the line on its OWN row ABOVE the three answers, the hosts «Always» among them (no hint beside it)', { row: changeRowIn(tray), tray: textOf(tray).slice(0, 400) });
+  ok(changeRowIn(tray) === LINE && gateOf(/data-answer="always"/.test(tray)) && tray.indexOf('ut-run-changes') > 0 && tray.indexOf('ut-run-changes') < tray.indexOf('ut-run-answer') && !/ut-run-hint/.test(tray), '㉗b the tray / chat row (and the phone — the same row): the line on its OWN row ABOVE the three answers, the hosts «Always» among them (no hint beside it)', { row: changeRowIn(tray), tray: textOf(tray).slice(0, 400) });
   ok(changeRowIn(pane) === LINE && !/data-answer=/.test(pane), '㉗c the For-you window\'s pane (its answers are the window\'s action row) draws the same line', { row: changeRowIn(pane) });
   ok(changeRowIn(zhTray) === '这个对话持有 a.example，不设期限 — 这会替换那个授权：之后 a.example 为期 30 天。', '㉗d in 中文: «这个对话持有 a.example，不设期限 — 这会替换那个授权：之后 a.example 为期 30 天。»', { row: changeRowIn(zhTray) });
   if (c) w.door.answer(c.action.askId, { answer: 'deny' }); await p0;
@@ -873,7 +873,7 @@ await leg('㉗ the line on the face', async () => {
   const r2 = await runAnswered(w2, RUN(w2.e.ref, 'curl', 'https://a.example/x', 'https://c.example/y'), { answer: 'always', reauthed: true });
   const row2 = changeRowOf(r2.drawn);
   const m2 = memberOf(w2);
-  ok(/^This conversation holds a\.example until .+ — this replaces that grant: a\.example is then held for 30 days\.$/.test(String(row2)) && r2.a && r2.a.ok && endOfScope(m2, 'a.example') > Date.now() + 29 * DAY, '㉗e an 8-hour scope the press STRETCHES to 30 days says so on the face the same way («holds a.example until … — this replaces that grant: … for 30 days») — and the press does exactly that', { row2, m2 });
+  ok(gateOf(/^This conversation holds a\.example until .+ — this replaces that grant: a\.example is then held for 30 days\.$/.test(String(row2))) && gateOf(r2.a) && gateOf(r2.a.ok) && endOfScope(m2, 'a.example') > Date.now() + 29 * DAY, '㉗e an 8-hour scope the press STRETCHES to 30 days says so on the face the same way («holds a.example until … — this replaces that grant: … for 30 days») — and the press does exactly that', { row2, m2 });
   const w3 = await world();
   w3.door.setRunnable({ id: w3.e.id, on: true, reauthed: true });
   const b3 = new Set(cardsOf(w3).map((x) => x.id));
@@ -899,7 +899,7 @@ await leg('㉘ the redrawn card differs', async () => {
   const it = cB && openOf(w, 'vault-run-ask').find((i) => i.id === cB.id);
   const face1 = it && drawnHtml(it), row1 = changeRowIn(face1), zh1 = it && changeRowOf(it, tFor(ZH));
   ok(!!(aA && aA.ok && aB1 && aB1.code === 'ask_redrawn' && changeRowIn(face0) === null && face1 !== face0 && /^Drawn again at \S+: what this answer writes changed since the card was first shown — read it again\.\nThis conversation holds a\.example until .+ — this replaces that grant: a\.example is then held for 30 days\.$/.test(String(row1))), '㉘a the card drawn again is NOT the old face: its own row now says «Drawn again at HH:MM: what this answer writes changed since the card was first shown — read it again.» and the line of now (the first face had no row at all)', { row1, aB1 });
-  ok(/^已于 \S+ 重新绘制：这个回答要写入的内容与卡片最初显示时不同 — 请重新阅读。/.test(String(zh1)) && !!it && /^Drawn again at \S+: what this answer writes changed/.test(String(it.detail)) && !!(it.facts && it.facts.redrawn && it.facts.redrawn.at > 0), '㉘b … in 中文 «已于 HH:MM 重新绘制：…请重新阅读。», and the prose (an older client; THE BELT\'s text) says it first; the facts carry the mark (`redrawn.at`)', { zh1, detail: it && String(it.detail).slice(0, 160) });
+  ok(gateOf(/^已于 \S+ 重新绘制：这个回答要写入的内容与卡片最初显示时不同 — 请重新阅读。/.test(String(zh1))) && !!it && gateOf(/^Drawn again at \S+: what this answer writes changed/.test(String(it.detail))) && !!(it.facts && it.facts.redrawn && it.facts.redrawn.at > 0), '㉘b … in 中文 «已于 HH:MM 重新绘制：…请重新阅读。», and the prose (an older client; THE BELT\'s text) says it first; the facts carry the mark (`redrawn.at`)', { zh1, detail: it && String(it.detail).slice(0, 160) });
   const aB2 = cB && w.door.answer(cB.action.askId, { answer: 'always', reauthed: true });
   await pA; await pB;
   ok(!!(aB2 && aB2.ok), '㉘c … and the marked card\'s next press writes (the belt reads the marked text)', aB2);
@@ -943,7 +943,7 @@ await leg('㉙ late card words', async () => {
   const late = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-run-ask' && i.action.late);
   const live0 = drawnHtml(x.drawn), face = late && drawnHtml(late), v = late && FA.runCardOf(late, {});
   const WHY = 'No «Always»: where it sends what it reads is unknown';
-  ok(/data-answer="always"/.test(live0) && textOf(live0).includes('means you trust this command itself'), '㉙a (control) the card while it could be answered offers «Always (this command)» and says what it means', textOf(live0).slice(0, 300));
+  ok(gateOf(/data-answer="always"/.test(live0)) && verdictOf(textOf(live0).includes('means you trust this command itself')), '㉙a (control) the card while it could be answered offers «Always (this command)» and says what it means', textOf(live0).slice(0, 300));
   ok(!!(late && face && !/data-answer="always"/.test(face) && /data-answer="once"/.test(face) && /data-answer="deny"/.test(face) && !textOf(face).includes('Always (this command)') && !textOf(face).includes('means you trust this command itself') && textOf(face).includes(WHY) && v && v.always.offered === false && JSON.stringify(v.always.hint).includes('No «Always»')), '㉙b the LATE card (Allow once / Deny) says nothing of an «Always (this command)» it no longer has — and keeps the base\'s «No «Always»: where it sends what it reads is unknown»', { hint: v && v.always.hint, face: textOf(face).slice(0, 400) });
   const X = { kind: 'conversation', key: CID, name: 'Transcriber' };
   const w2 = await world({ timers: fast });
@@ -970,7 +970,7 @@ await leg('㉚ the Save\'s new-host end', async () => {
   const r4 = S && S({ was: null, hosts: ['c.example'], endId: 'keep', now }), r5 = S && S({ was: { scopes: [host('a.example', null)] }, hosts: ['a.example', 'c.example'], endId: '8h', now });
   ok(!!(r4 && endIn(r4, 'c.example') === now + 30 * DAY && r5 && endIn(r5, 'a.example') === now + 8 * 3600e3 && endIn(r5, 'c.example') === now + 8 * 3600e3), '㉚d a member new to the row the same (30 days); an explicit choice («8 hours») gives every scope that end', { r4, r5 });
   const src = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
-  ok(/const plan = saveScopesOf\(\{ was, hosts: h, cmds, endId: endSel\.value, endFrom: endsFrom\(\) \}\)/.test(src) && /const plan = planNow\(\);/.test(src) && /t\('What Save writes:'\)/.test(src) && /hostsIn\.addEventListener\('input', drawPreview\)/.test(src), '㉚e the dialog\'s Save AND its «What Save writes:» line (redrawn as the hosts, the end or who change) both go through saveScopesOf — the end a new host gets is on the screen before Save');
+  ok(gateOf(/const plan = saveScopesOf\(\{ was, hosts: h, cmds, endId: endSel\.value, endFrom: endsFrom\(\) \}\)/.test(src)) && gateOf(/const plan = planNow\(\);/.test(src)) && gateOf(/t\('What Save writes:'\)/.test(src)) && verdictOf(/hostsIn\.addEventListener\('input', drawPreview\)/.test(src)), '㉚e the dialog\'s Save AND its «What Save writes:» line (redrawn as the hosts, the end or who change) both go through saveScopesOf — the end a new host gets is on the screen before Save');
   // r6 (the r5 review F2 — «Math.min → Math.max» survived 119/119: no leg had two FINITE live ends)
   const H8 = now + 8 * 3600e3;
   const r6 = S && S({ was: { scopes: [host('a.example', D5), host('b.example', H8), host('d.example', null)] }, hosts: ['a.example', 'b.example', 'd.example', 'c.example'], endId: 'keep', now });
@@ -1039,7 +1039,7 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
   };
   await leg('㉝a the toggle order after a backward clock step', async () => {
     const c = await clockLeg(DOOR);
-    ok(c.open && c.kept && c.F0gone && c.n === 3, '㉝a a backward clock step: the entry switched on AFTER it stays ON (its toggle is the newest), the OLDEST toggle (F0) is the one the bound turns off', c);
+    ok(gateOf(c.open) && gateOf(c.kept) && gateOf(c.F0gone) && c.n === 3, '㉝a a backward clock step: the entry switched on AFTER it stays ON (its toggle is the newest), the OLDEST toggle (F0) is the one the bound turns off', c);
     const m = mutant('[key]: Math.max(now(), tNewest + 1) };', '[key]: now() };', 'rawclock');
     const r = m ? await clockLeg(m) : null;
     ok(!!(m && r && !r.kept && r.evicted.length === 1), '㉝a RED control: the raw wall clock as the stamp (the r12 shape) ⇒ the entry JUST switched on is the one evicted', r);
@@ -1081,7 +1081,7 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
   // and since B-be21 the owner hears of it ONLY from the press's own notice (the switch itself is quiet then)
   await leg('㉝c a press that holds tells the owner what the cap turned off', async () => {
     const p = await pressLeg(DOOR, { hold: true });
-    ok(p.asked && !p.refused && !p.F0on && p.Eon && p.noticeN === 1 && !!p.noticeAll && p.noticeAll.includes(p.F0), '㉝c the «Always» press HOLDS at the cap ⇒ F0 (the oldest) is switched OFF and ONE For-you notice names it', p);
+    ok(gateOf(p.asked) && !p.refused && !p.F0on && gateOf(p.Eon) && p.noticeN === 1 && !!p.noticeAll && verdictOf(p.noticeAll.includes(p.F0)), '㉝c the «Always» press HOLDS at the cap ⇒ F0 (the oldest) is switched OFF and ONE For-you notice names it', p);
     const plant = 'if (off.length) noteEvicted(off); }   // B-be21: the press HELD';
     ok(DSRC.split(plant).length === 2, '㉝c the RED control\'s plant is where it claims: the held press\'s notice, once', DSRC.split(plant).length - 1);
     const mh = mutant(plant, '}   // B-be21: the press HELD', 'heldquiet');
@@ -1090,8 +1090,8 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
   });
   await leg('㉝b a refused press leaves no false notice and keeps the order', async () => {
     const p = await pressLeg(DOOR);
-    ok(p.asked && p.refused && p.F0on && !p.Eon && !p.notice, '㉝b the press is REFUSED (its member at the host bound) and put back: F0 is ON again and NO «switched off» notice says otherwise', p);
-    ok(p.stamp0 && p.stamp1 === p.stamp0, '㉝b …and F0 keeps its place in the toggle order (its stamp put back — the next bound judges it as before the press)', { stamp0: p.stamp0, stamp1: p.stamp1 });
+    ok(gateOf(p.asked) && gateOf(p.refused) && gateOf(p.F0on) && !p.Eon && !p.notice, '㉝b the press is REFUSED (its member at the host bound) and put back: F0 is ON again and NO «switched off» notice says otherwise', p);
+    ok(gateOf(p.stamp0) && p.stamp1 === p.stamp0, '㉝b …and F0 keeps its place in the toggle order (its stamp put back — the next bound judges it as before the press)', { stamp0: p.stamp0, stamp1: p.stamp1 });
     const mn = mutant('if (r.evicted && r.evicted.length && !quietEvict) noteEvicted(r.evicted);', 'if (r.evicted && r.evicted.length) noteEvicted(r.evicted);', 'loudpress');   // stale-pins: kept — a RED control: the pre-B-be21 press (a notice at the switch) restored on purpose
     const rn = mn ? await pressLeg(mn) : null;
     ok(!!(mn && rn && rn.refused && rn.F0on && rn.notice), '㉝b RED control: the notice filed at the switch (the r12 shape) ⇒ For you says F0 was switched off while F0 is ON', rn);
@@ -1103,7 +1103,7 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
   // stays OFF on disk, and the owner is told — ONE For-you notice names what the cap turned off. RED: that branch without its notice
   await leg('㉝d a refused press whose switches cannot be put back still tells the owner what the cap turned off', async () => {
     const p = await pressLeg(DOOR, { failRestore: true });
-    ok(p.faultArmed && p.asked && p.refused && p.code === 'restore_failed' && !p.F0on && p.noticeN === 1 && !!p.noticeAll && p.noticeAll.includes(p.F0), `㉝d the «Always» press is REFUSED and the switches' restore FAILS (their save made to fail) ⇒ the press answers restore_failed, F0 stays OFF, and ONE For-you notice names it — ${JSON.stringify({ faultArmed: p.faultArmed, asked: p.asked, refused: p.refused, code: p.code, F0on: p.F0on, noticeN: p.noticeN, namesF0: !!(p.noticeAll && p.noticeAll.includes(p.F0)) })}`, p);
+    ok(gateOf(p.faultArmed) && gateOf(p.asked) && gateOf(p.refused) && p.code === 'restore_failed' && !p.F0on && p.noticeN === 1 && !!p.noticeAll && verdictOf(p.noticeAll.includes(p.F0)), `㉝d the «Always» press is REFUSED and the switches' restore FAILS (their save made to fail) ⇒ the press answers restore_failed, F0 stays OFF, and ONE For-you notice names it — ${JSON.stringify({ faultArmed: p.faultArmed, asked: p.asked, refused: p.refused, code: p.code, F0on: p.F0on, noticeN: p.noticeN, namesF0: !!(p.noticeAll && p.noticeAll.includes(p.F0)) })}`, p);
     const plant = "      if (!sw || !sw.ok) { const dd = load(); const off = evicted.filter((k) => !(dd && dd.runnable.has(k))); if (off.length) noteEvicted(off); }";
     ok(DSRC.split(plant).length === 2, '㉝d the RED control\'s plant is where it claims: the failed restore\'s notice, once', DSRC.split(plant).length - 1);
     const mq = mutant(plant, '      if (!sw || !sw.ok) { }', 'restorequiet');
@@ -1137,7 +1137,7 @@ console.log('㉞ r13 should (the readers of batch 52 — B-a14b × the standing 
   };
   await leg('㉞ the standing answer drops the end by its key', async () => {
     const r = await standingLeg(DOOR);
-    ok(r.g8 && r.ended && r.standing && !r.endAfter, '㉞ a caller whose scope is not its conversation\'s id: its 8 hours ran out (the end kept under the scope), then the owner allows it standing ⇒ the old end is gone', r);
+    ok(gateOf(r.g8) && gateOf(r.ended) && gateOf(r.standing) && !r.endAfter, '㉞ a caller whose scope is not its conversation\'s id: its 8 hours ran out (the end kept under the scope), then the owner allows it standing ⇒ the old end is gone', r);
     const plant = '      if (endedGrants.delete(q.quietPair)) endsSave();';   // B-a14b: the delete also writes the ends (when one went)
     const n = DSRC.split(plant).length - 1;
     ok(n === 1, '㉞ the RED control\'s plant is where it claims: the standing answer\'s delete by q.quietPair, once', n);
@@ -1174,14 +1174,14 @@ console.log('㉟ B-a14b (主开发 r542): AN END STAYS SAID WHILE THIS CONVERSAT
     return { setup: { a: !!(ya && ya.ok), eight: !!(g8 && g8.ok), b: !!(yb && yb.ok), ...(resumeA ? { resumed: !!(ra && ra.ok) } : {}) }, pausedForA: !!(la && la.paused), usableForB: !!(lb && !lb.paused), endedA: (u.ended || []).map((e) => e.endedBy) };
   };
   const pe = await pausedEnd(DOOR);
-  ok(pe.setup.a && pe.setup.eight && pe.setup.b && pe.pausedForA && pe.usableForB && pe.endedA.join() === 'time',
+  ok(gateOf(pe.setup.a) && gateOf(pe.setup.eight) && gateOf(pe.setup.b) && gateOf(pe.pausedForA) && gateOf(pe.usableForB) && pe.endedA.join() === 'time',
     `㉟ B's press opened the entry and did not resume A's member (A's row paused, B's usable) ⇒ A's ended 8 hours are STILL said in \`uses\` — ${JSON.stringify(pe)}`, pe);
   const pr = await pausedEnd(DOOR, { resumeA: true });
-  ok(pr.setup.resumed && !pr.pausedForA && pr.endedA.length === 0, `㉟ …and once A's member is RESUMED (A can use the entry again) the end is no longer said — ${JSON.stringify(pr)}`, pr);
+  ok(gateOf(pr.setup.resumed) && !pr.pausedForA && pr.endedA.length === 0, `㉟ …and once A's member is RESUMED (A can use the entry again) the end is no longer said — ${JSON.stringify(pr)}`, pr);
   const mo = MC.load('src/server/vault-run-door.js', anchored(DSRC, '!usableHere(e.id)', '!onNowOf(e.id)', 'test-vault-standing-request ㉟ the switch alone'), 'a14b-on');
   const per = await pausedEnd(mo);
-  ok(per.pausedForA && per.endedA.length === 0, `㉟ RED control: the end hidden by the entry's switch alone (the release) ⇒ A reads no end while it cannot use the entry — ${JSON.stringify(per)}`, per);
+  ok(gateOf(per.pausedForA) && per.endedA.length === 0, `㉟ RED control: the end hidden by the entry's switch alone (the release) ⇒ A reads no end while it cannot use the entry — ${JSON.stringify(per)}`, per);
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

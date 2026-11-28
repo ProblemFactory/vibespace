@@ -32,7 +32,7 @@ import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -52,8 +52,8 @@ fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(ROOT, { recursive: true });
 
 console.log('§1 the CLI against a stub server');
-ok(fs.existsSync(CLI) && (fs.statSync(CLI).mode & 0o111) !== 0, 'data/bin/vibespace-msg exists and is executable');
-ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vibespace-msg'), 'it is in HostManager.AGENT_TOOLS (ships to remote hosts)');
+ok(gateOf(fs.existsSync(CLI)) && (fs.statSync(CLI).mode & 0o111) !== 0, 'data/bin/vibespace-msg exists and is executable');
+ok(verdictOf(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vibespace-msg')), 'it is in HostManager.AGENT_TOOLS (ships to remote hosts)');
 {
   const src = fs.readFileSync(CLI, 'utf-8').replace(/^\s*\/\/.*$/gm, '');
   const reqs = [...src.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
@@ -63,8 +63,8 @@ ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vi
   // lane cli-call-timeouts: …and THE ONE CALL every agent CLI makes to its hub (src/cli-call.js / its boot-time copy ./cli-call.js; node builtins only)
   const RULE = new Set(['../../src/agent-cli-text.js', './agent-cli-text.js', '../../src/cli-call.js', './cli-call.js']);
   const deps = reqs.filter((r) => !require('node:module').isBuiltin(r) && !RULE.has(r));
-  ok(deps.length === 0 && reqs.every((r) => r.startsWith('node:') || RULE.has(r)), 'it is dependency-free — node builtins only, spelled node:* (a host has no checkout) — but for the ONE-text rule it ships with', reqs.join(','));
-  ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('agent-cli-text.js') && !/require\(/.test(fs.readFileSync(path.join(REPO, 'src/agent-cli-text.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), 'the ONE-text rule it requires ships beside it (AGENT_TOOLS) and requires nothing itself');
+  ok(deps.length === 0 && verdictOf(reqs.every((r) => r.startsWith('node:') || RULE.has(r))), 'it is dependency-free — node builtins only, spelled node:* (a host has no checkout) — but for the ONE-text rule it ships with', reqs.join(','));
+  ok(gateOf(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('agent-cli-text.js')) && !/require\(/.test(fs.readFileSync(path.join(REPO, 'src/agent-cli-text.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), 'the ONE-text rule it requires ships beside it (AGENT_TOOLS) and requires nothing itself');
 }
 
 const seen = [];
@@ -119,65 +119,65 @@ const last = () => seen[seen.length - 1];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 {
   const noEnv = spawnSync(process.execPath, [CLI, 'group', 'list'], { encoding: 'utf-8', env: { PATH: process.env.PATH }, timeout: 15000 });
-  ok(noEnv.status === 2 && /not inside a VibeSpace session/.test(noEnv.stderr), 'outside a session: exit 2, said');
+  ok(noEnv.status === 2 && verdictOf(/not inside a VibeSpace session/.test(noEnv.stderr)), 'outside a session: exit 2, said');
 
   let r = await run(['group', 'create', 'api', 'beta', 'gamma', '--context', 'we split the API work here']);
-  ok(r.code === 0 && last().method === 'POST' && last().path === '/api/agent/msg/group' && same(last().body, { op: 'create', name: 'api', members: ['beta', 'gamma'], context: 'we split the API work here' }) && last().auth === 'Bearer vsst_cli',
+  ok(r.code === 0 && last().method === 'POST' && last().path === '/api/agent/msg/group' && gateOf(same(last().body, { op: 'create', name: 'api', members: ['beta', 'gamma'], context: 'we split the API work here' })) && last().auth === 'Bearer vsst_cli',
     'group create <name> <member…> --context ⇒ POST /group {op, name, members, context} with the session bearer (never argv)', JSON.stringify(last()));
-  ok(/woke 2 invitees = 2 billed turns: beta, gamma/.test(r.out), 'THE WAKE ECHO: create says "woke 2 invitees = 2 billed turns" and names them', r.out);
+  ok(verdictOf(/woke 2 invitees = 2 billed turns: beta, gamma/.test(r.out)), 'THE WAKE ECHO: create says "woke 2 invitees = 2 billed turns" and names them', r.out);
 
   r = await run(['group', 'invite', 'g-0000abcd', 'delta', 'beta', '--context', 'you own the schema', '--quiet']);
-  ok(same(last().body, { op: 'invite', group: 'g-0000abcd', members: ['delta', 'beta'], context: 'you own the schema', quiet: true }), 'group invite <group> <member…> --context --quiet ⇒ {op, group, members, context, quiet:true}', JSON.stringify(last().body));
-  ok(/woke 0 invitees = 0 billed turns/.test(r.out) && /added to "api": delta/.test(r.out) && /already members \(nothing done\): beta/.test(r.out), '--quiet says the ZERO count; a duplicate invitee is named as a no-op', r.out);
+  ok(verdictOf(same(last().body, { op: 'invite', group: 'g-0000abcd', members: ['delta', 'beta'], context: 'you own the schema', quiet: true })), 'group invite <group> <member…> --context --quiet ⇒ {op, group, members, context, quiet:true}', JSON.stringify(last().body));
+  ok(gateOf(/woke 0 invitees = 0 billed turns/.test(r.out)) && gateOf(/added to "api": delta/.test(r.out)) && verdictOf(/already members \(nothing done\): beta/.test(r.out)), '--quiet says the ZERO count; a duplicate invitee is named as a no-op', r.out);
   r = await run(['group', 'invite', 'g-0000abcd', 'delta']);
-  ok(!('quiet' in last().body) && /woke 1 invitee = 1 billed turn: delta/.test(r.out), 'an invite without --quiet wakes: "woke 1 invitee = 1 billed turn" (singular spelled right)', r.out);
+  ok(!('quiet' in last().body) && verdictOf(/woke 1 invitee = 1 billed turn: delta/.test(r.out)), 'an invite without --quiet wakes: "woke 1 invitee = 1 billed turn" (singular spelled right)', r.out);
 
   r = await run(['group', 'leave', 'g-0000abcd']);
-  ok(r.code === 0 && same(last().body, { op: 'leave', group: 'g-0000abcd' }), 'group leave <group> ⇒ {op, group}', JSON.stringify(last().body));
+  ok(r.code === 0 && verdictOf(same(last().body, { op: 'leave', group: 'g-0000abcd' })), 'group leave <group> ⇒ {op, group}', JSON.stringify(last().body));
   r = await run(['group', 'kick', 'api', 'delta']);
-  ok(same(last().body, { op: 'kick', group: 'api', member: 'delta' }), 'group kick <group> <member> ⇒ {op, group, member}', JSON.stringify(last().body));
+  ok(verdictOf(same(last().body, { op: 'kick', group: 'api', member: 'delta' })), 'group kick <group> <member> ⇒ {op, group, member}', JSON.stringify(last().body));
   r = await run(['group', 'rename', 'g-0000abcd', 'api', 'v2', 'lane']);
-  ok(same(last().body, { op: 'rename', group: 'g-0000abcd', name: 'api v2 lane' }) && /renamed to "api v2 lane"/.test(r.out), 'group rename <group> <name…> ⇒ the words joined into ONE name', JSON.stringify(last().body));
+  ok(gateOf(same(last().body, { op: 'rename', group: 'g-0000abcd', name: 'api v2 lane' })) && verdictOf(/renamed to "api v2 lane"/.test(r.out)), 'group rename <group> <name…> ⇒ the words joined into ONE name', JSON.stringify(last().body));
   r = await run(['group', 'notify', 'g-0000abcd', 'always']);
-  ok(same(last().body, { op: 'notify', group: 'g-0000abcd', notify: 'always' }) && /now always/.test(r.out), 'group notify <group> <mode> ⇒ ONLY the caller\'s own mode (no member field)', JSON.stringify(last().body));
+  ok(gateOf(same(last().body, { op: 'notify', group: 'g-0000abcd', notify: 'always' })) && verdictOf(/now always/.test(r.out)), 'group notify <group> <mode> ⇒ ONLY the caller\'s own mode (no member field)', JSON.stringify(last().body));
   r = await run(['group', 'archive', 'g-0000abcd']);
-  ok(same(last().body, { op: 'archive', group: 'g-0000abcd' }), 'group archive <group> ⇒ {op, group}');
+  ok(verdictOf(same(last().body, { op: 'archive', group: 'g-0000abcd' })), 'group archive <group> ⇒ {op, group}');
 
   const before = seen.length;
   r = await run(['group', 'list']);
   const r2 = await run(['groups']);
-  ok(seen.length === before + 2 && seen.slice(-2).every((x) => x.method === 'GET' && x.path === '/api/agent/msg/groups') && r.out === r2.out, '`group list` and `groups` are the same GET /groups', JSON.stringify(seen.slice(-2)));
-  ok(/g-0000abcd  "api" — 3 unread · your notify: mention/.test(r.out), 'group list prints id · name · unread · the caller\'s mode', r.out);
+  ok(seen.length === before + 2 && gateOf(seen.slice(-2).every((x) => x.method === 'GET' && x.path === '/api/agent/msg/groups')) && r.out === r2.out, '`group list` and `groups` are the same GET /groups', JSON.stringify(seen.slice(-2)));
+  ok(verdictOf(/g-0000abcd  "api" — 3 unread · your notify: mention/.test(r.out)), 'group list prints id · name · unread · the caller\'s mode', r.out);
   // B-b17f's remainder cure (主开发 21:43Z, should 2): a count the hub's start has not made yet (null) is SAID — never «null unread»
   override = (key) => (key === 'GET /api/agent/msg/groups' ? { status: 200, body: { groups: [{ id: 'g-0000abcd', name: 'api', pair: false, archived: false, unread: null, notify: 'mention', members: [{ name: 'alpha', notify: 'next-turn', live: true }] }] } } : null);
   const rn = await run(['group', 'list']);
   override = null;
-  ok(/g-0000abcd  "api" — unread not counted yet \(the hub just started\) · your notify: mention/.test(rn.out) && !/null/.test(rn.out), 'a count the hub has not made yet (null at its start) is said — never «null unread»', rn.out);
+  ok(gateOf(/g-0000abcd  "api" — unread not counted yet \(the hub just started\) · your notify: mention/.test(rn.out)) && !/null/.test(rn.out), 'a count the hub has not made yet (null at its start) is said — never «null unread»', rn.out);
 
   r = await run(['read', 'api', '--before', '1700000000000', '--limit', '20']);
-  ok(last().path === '/api/agent/msg/read' && same(last().query, { group: 'api', before: '1700000000000', limit: '20' }), 'read <group> --before <ts> --limit n ⇒ the query', JSON.stringify(last().query));
-  ok(/older: vibespace-msg read g-0000abcd --before 7/.test(r.out), 'read prints the next --before pointer');
+  ok(last().path === '/api/agent/msg/read' && verdictOf(same(last().query, { group: 'api', before: '1700000000000', limit: '20' })), 'read <group> --before <ts> --limit n ⇒ the query', JSON.stringify(last().query));
+  ok(verdictOf(/older: vibespace-msg read g-0000abcd --before 7/.test(r.out)), 'read prints the next --before pointer');
   // lane group-pending: the trailing clause = the server's `delivery` rows (the ONE rule, worded here — never a second one)
   {
     const lines = r.out.split('\n');
-    ok(lines.some((l) => l === "- [7] alpha: hello — waiting for beta's next turn"), 'read: a message waiting for its one recipient ends " — waiting for beta\'s next turn"', JSON.stringify(lines));
-    ok(lines.some((l) => l === '- [8] beta: hi — waiting: gamma · read: alpha 12:41Z · muted: delta · left: eps'), 'read: a group message lists its recipients by state (waiting · read · muted · left), a read one with its hand-over clock', JSON.stringify(lines));
-    ok(lines.some((l) => l === '- [12] alpha: legacy read — read by beta') && lines.some((l) => l === '- [13] alpha: clocked read — read by beta 12:41Z'), 'read: a handed row says WHEN (UTC HH:MMZ, like the CLI\'s other instants); a legacy row without the clock says no time', JSON.stringify(lines));
-    ok(lines.some((l) => l === '- [9] (leave) eps left') && lines.some((l) => l === '- [10] alpha: old server') && lines.some((l) => l === '- [11] alpha: nobody'), 'read: a system record, an older server\'s record (no rows) and a message with no recipient carry NO clause', JSON.stringify(lines));
+    ok(verdictOf(lines.some((l) => l === "- [7] alpha: hello — waiting for beta's next turn")), 'read: a message waiting for its one recipient ends " — waiting for beta\'s next turn"', JSON.stringify(lines));
+    ok(verdictOf(lines.some((l) => l === '- [8] beta: hi — waiting: gamma · read: alpha 12:41Z · muted: delta · left: eps')), 'read: a group message lists its recipients by state (waiting · read · muted · left), a read one with its hand-over clock', JSON.stringify(lines));
+    ok(gateOf(lines.some((l) => l === '- [12] alpha: legacy read — read by beta')) && verdictOf(lines.some((l) => l === '- [13] alpha: clocked read — read by beta 12:41Z')), 'read: a handed row says WHEN (UTC HH:MMZ, like the CLI\'s other instants); a legacy row without the clock says no time', JSON.stringify(lines));
+    ok(gateOf(lines.some((l) => l === '- [9] (leave) eps left')) && gateOf(lines.some((l) => l === '- [10] alpha: old server')) && verdictOf(lines.some((l) => l === '- [11] alpha: nobody')), 'read: a system record, an older server\'s record (no rows) and a message with no recipient carry NO clause', JSON.stringify(lines));
     const usage = await run([]);
-    ok(/each message ends with where it\n\s+stands: "waiting for <name>'s next turn"/.test(usage.out), 'the usage says a read line ends with where the message stands');
+    ok(verdictOf(/each message ends with where it\n\s+stands: "waiting for <name>'s next turn"/.test(usage.out)), 'the usage says a read line ends with where the message stands');
   }
 
   r = await run(['send', 'beta', 'the schema is in /tmp/s.sql']);
-  ok(same(last().body, { to: 'beta', text: 'the schema is in /tmp/s.sql', wake: false }), 'send <agent> "…" ⇒ {to, text, wake:false}', JSON.stringify(last().body));
-  ok(/your direct group "alpha & beta"/.test(r.out) && /created just now/.test(r.out) && /woke 0 agents = 0 billed turns/.test(r.out) && /on their next turn \(free\): beta/.test(r.out), 'a plain send SAYS the zero count and who gets it on their next turn, free', r.out);
+  ok(verdictOf(same(last().body, { to: 'beta', text: 'the schema is in /tmp/s.sql', wake: false })), 'send <agent> "…" ⇒ {to, text, wake:false}', JSON.stringify(last().body));
+  ok(gateOf(/your direct group "alpha & beta"/.test(r.out)) && gateOf(/created just now/.test(r.out)) && gateOf(/woke 0 agents = 0 billed turns/.test(r.out)) && verdictOf(/on their next turn \(free\): beta/.test(r.out)), 'a plain send SAYS the zero count and who gets it on their next turn, free', r.out);
   r = await run(['send', 'api', 'ship it', '--wake']);
-  ok(last().body.wake === true && /woke 2 agents = 2 billed turns: beta, gamma/.test(r.out), 'send <group> --wake ⇒ wake:true, echoed "woke 2 agents = 2 billed turns"', r.out);
+  ok(last().body.wake === true && verdictOf(/woke 2 agents = 2 billed turns: beta, gamma/.test(r.out)), 'send <group> --wake ⇒ wake:true, echoed "woke 2 agents = 2 billed turns"', r.out);
 
   // ── r2 finding 1: a wide wake is confirmed BEFORE the act ──
   override = (key) => (key === 'POST /api/agent/msg/send' ? { status: 409, body: { error: 'this would wake 25 agents now = 25 billed turns — confirm with --yes', code: 'confirm-wakes', wakes: 25 } } : null);
   r = await run(['send', 'api', 'everyone up', '--wake']);
-  ok(r.code === 1 && /refused \[confirm-wakes\]/.test(r.err) && /25 billed turns/.test(r.err) && /→ .*--yes/.test(r.err) && !r.out.includes('posted'), 'a send that would wake many is refused [confirm-wakes] with the COUNT and the --yes remedy — nothing claimed posted', r.err);
+  ok(r.code === 1 && gateOf(/refused \[confirm-wakes\]/.test(r.err)) && gateOf(/25 billed turns/.test(r.err)) && gateOf(/→ .*--yes/.test(r.err)) && !r.out.includes('posted'), 'a send that would wake many is refused [confirm-wakes] with the COUNT and the --yes remedy — nothing claimed posted', r.err);
   override = null;
   r = await run(['send', 'api', 'everyone up', '--wake', '--yes']);
   ok(last().body.yes === true && last().body.wake === true, 'send … --wake --yes ⇒ {wake:true, yes:true}', JSON.stringify(last().body));
@@ -188,15 +188,15 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   // ── typed refusals ──
   override = (key) => (key === 'POST /api/agent/msg/send' ? { status: 400, body: { error: 'ambiguous name "beta" — 2 sessions you can message are called that: cid-b1, cid-b2; name one by its conversation id', code: 'ambiguous', candidates: [{ name: 'beta', conversationId: 'cid-b1' }, { name: 'beta', conversationId: 'cid-b2' }] } } : null);
   r = await run(['send', 'beta', 'hi']);
-  ok(r.code === 1 && /refused \[ambiguous\]/.test(r.err) && /\n\s+cid-b1\s+"beta"/.test(r.err) && /\n\s+cid-b2\s+"beta"/.test(r.err) && /→ repeat the command with one of the ids above/.test(r.err) && !r.out.includes('posted'),
+  ok(r.code === 1 && gateOf(/refused \[ambiguous\]/.test(r.err)) && gateOf(/\n\s+cid-b1\s+"beta"/.test(r.err)) && gateOf(/\n\s+cid-b2\s+"beta"/.test(r.err)) && gateOf(/→ repeat the command with one of the ids above/.test(r.err)) && !r.out.includes('posted'),
     'AMBIGUITY: exit 1, the code, EVERY candidate id on its own line, and the remedy — nothing claimed posted', r.err);
   override = (key) => (key === 'POST /api/agent/msg/group' ? { status: 404, body: { error: 'no agent session "zed" you can message (not found, not live, or outside your reach — vibespace-msg list shows it)', code: 'unreachable' } } : null);
   r = await run(['group', 'invite', 'api', 'zed']);
-  ok(r.code === 1 && /refused \[unreachable\]/.test(r.err) && /→ vibespace-msg list shows every session you can message/.test(r.err), 'unreachable: exit 1 + the remedy line', r.err);
+  ok(r.code === 1 && gateOf(/refused \[unreachable\]/.test(r.err)) && verdictOf(/→ vibespace-msg list shows every session you can message/.test(r.err)), 'unreachable: exit 1 + the remedy line', r.err);
   // lane paced-wake-retry (D8): after a paced wake falls, `read` names the cause — no wake cap was reached
   override = (key) => (key === 'GET /api/agent/msg/read' ? { status: 200, body: { ok: true, group: { id: 'g-0000abcd', name: 'api' }, records: [{ at: 1700000000000, from: 'alpha', kind: 'message', text: 'q1', await: { state: 'held', at: 1700000000001, fell: 'paced-out' } }, { at: 1700000000002, from: 'alpha', kind: 'message', text: 'q2', await: { state: 'held', at: 1700000000003, paced: true } }, { at: 1700000000004, from: 'alpha', kind: 'message', text: 'q3', await: { state: 'held', at: 1700000000005 } }] } } : null);
   r = await run(['read', 'api']);
-  ok(r.code === 0 && /q1[^\n]*\(reply waiting — the wake could not land within its hour\)/.test(r.out) && /q2[^\n]*\(reply paced — sent when the window ends\)/.test(r.out) && /q3[^\n]*\(reply waiting — your wake cap reached\)/.test(r.out), 'read: a fall names its own cause; a paced reply and a real cap keep their words', r.out);
+  ok(r.code === 0 && gateOf(/q1[^\n]*\(reply waiting — the wake could not land within its hour\)/.test(r.out)) && gateOf(/q2[^\n]*\(reply paced — sent when the window ends\)/.test(r.out)) && verdictOf(/q3[^\n]*\(reply waiting — your wake cap reached\)/.test(r.out)), 'read: a fall names its own cause; a paced reply and a real cap keep their words', r.out);
   // P9: EVERY cause the engine can write has its own words here, from the ONE list; a new cause without a row is red by name
   {
     const causes = [...new Set([...require(path.join(REPO, 'src/channel-groups.js')).AWAIT_FELL, 'mode-changed', 'left', 'may-have-landed'])];   // the amendment's own causes named too, so a list that lost them is red here as well
@@ -210,30 +210,30 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const PACED = { name: 'beta', reason: 'paced — sent in 25 s (rate floor: one wake per target per 30s (a wake is a billed turn))', parked: true, retryInMs: 25000, retryAt: 1790000030000 };
   override = (key) => (key === 'POST /api/agent/msg/send' ? { status: 200, body: { posted: true, group: { id: 'g-00000001', name: 'api', pair: false }, pairCreated: false, woke: [], refused: [PACED, { name: 'gamma', reason: 'spend budget: hour cap' }], nextTurn: [], chars: 5 } } : null);
   r = await run(['send', 'api', 'hello', '--wake']);
-  ok(r.code === 0 && /1 wake held \(not billed yet\) — beta: paced — sent in 25 s/.test(r.out) && /1 wake refused \(not billed\) — gamma: spend budget/.test(r.out) && !/beta: [^\n]*next turn instead/.test(r.out), 'a paced wake prints «paced — sent in N s»; a refused one keeps its own line', r.out);
+  ok(r.code === 0 && gateOf(/1 wake held \(not billed yet\) — beta: paced — sent in 25 s/.test(r.out)) && gateOf(/1 wake refused \(not billed\) — gamma: spend budget/.test(r.out)) && !/beta: [^\n]*next turn instead/.test(r.out), 'a paced wake prints «paced — sent in N s»; a refused one keeps its own line', r.out);
   override = (key) => (key === 'POST /api/agent/msg/group' ? { status: 200, body: { ok: true, op: 'invite', group: { id: 'g-00000001', name: 'api', archived: false, members: [] }, added: ['beta'], already: [], woke: [], refused: [PACED], quiet: false } } : null);
   r = await run(['group', 'invite', 'api', 'beta']);
-  ok(r.code === 0 && /1 wake held \(not billed yet\) — beta: paced — sent in 25 s/.test(r.out) && !/they see it on their next turn/.test(r.out), 'an invite prints it too', r.out);
+  ok(r.code === 0 && gateOf(/1 wake held \(not billed yet\) — beta: paced — sent in 25 s/.test(r.out)) && !/they see it on their next turn/.test(r.out), 'an invite prints it too', r.out);
   override = (key) => (key === 'POST /api/agent/msg/dispatch' ? { status: 200, body: { posted: true, group: { id: 'g-00000002', name: 'pair', pair: true }, pairCreated: false, woke: [], refused: [PACED], nextTurn: [], dispatched: true, replay: false, attempt: null, record: { target: { cid: 'c', name: 'beta' }, compacted: 'skipped', compactionCounted: false, why: 'the wake pace said no: paced — sent in 25 s — not compacted', wake: { billed: false, identity: null, delivered: 'paced', retryInMs: 25000, reason: PACED.reason } } } } : null);
   r = await run(['dispatch', 'beta', 'the brief']);
-  ok(r.code === 0 && /held, not billed yet — paced — sent in 25 s/.test(r.out) && !/the brief reaches it on its next turn/.test(r.out), 'dispatch prints «paced — sent in N s»', r.out);
+  ok(r.code === 0 && gateOf(/held, not billed yet — paced — sent in 25 s/.test(r.out)) && !/the brief reaches it on its next turn/.test(r.out), 'dispatch prints «paced — sent in N s»', r.out);
   override = (key) => (key === 'POST /api/agent/msg/send' ? { status: 429, body: { error: 'rate floor: one --wake per target per 30s' } } : null);
   r = await run(['send', 'api', 'again', '--wake']);
-  ok(r.code === 1 && /refused \[rate-floor\] — rate floor/.test(r.err), 'a code-less 429 is still a typed refusal ([rate-floor]), exit 1', r.err);
+  ok(r.code === 1 && verdictOf(/refused \[rate-floor\] — rate floor/.test(r.err)), 'a code-less 429 is still a typed refusal ([rate-floor]), exit 1', r.err);
   override = (key) => (key === 'GET /api/agent/msg/groups' ? { status: 500, body: {} } : null);
   r = await run(['group', 'list']);
-  ok(r.code === 1 && /refused \[error\]/.test(r.err) && /HTTP 500/.test(r.err), 'a non-2xx with no body is a refusal (exit 1), never silently "no groups"', r.err);
+  ok(r.code === 1 && gateOf(/refused \[error\]/.test(r.err)) && verdictOf(/HTTP 500/.test(r.err)), 'a non-2xx with no body is a refusal (exit 1), never silently "no groups"', r.err);
   override = null;
   r = await run(['group', 'list'], { VIBESPACE_SESSION_TOKEN: 'vsst_cli' }, 'http://127.0.0.1:1');
-  ok(r.code === 3 && /server unreachable/.test(r.err), 'server gone: exit 3, said');
+  ok(r.code === 3 && verdictOf(/server unreachable/.test(r.err)), 'server gone: exit 3, said');
 
   // ── the job fence ──
   const n0 = seen.length;
   r = await run(['group', 'create', 'x', 'beta'], { VIBESPACE_JOB_TOKEN: 'jbt_job1' });
-  ok(r.code === 1 && /refused \[job-token\]/.test(r.err) && /never creates a group or changes membership/.test(r.err) && seen.length === n0, 'JOB FENCE: under VIBESPACE_JOB_TOKEN `group create` is refused LOCALLY (exit 1, job-token) and NO request leaves', r.err);
+  ok(r.code === 1 && gateOf(/refused \[job-token\]/.test(r.err)) && gateOf(/never creates a group or changes membership/.test(r.err)) && seen.length === n0, 'JOB FENCE: under VIBESPACE_JOB_TOKEN `group create` is refused LOCALLY (exit 1, job-token) and NO request leaves', r.err);
   for (const op of [['invite', 'api', 'beta'], ['leave', 'api'], ['kick', 'api', 'beta'], ['rename', 'api', 'y'], ['archive', 'api'], ['notify', 'api', 'mute']]) {
     const rr = await run(['group', ...op], { VIBESPACE_JOB_TOKEN: 'jbt_job1' });
-    ok(rr.code === 1 && /job-token/.test(rr.err) && seen.length === n0, `…and so is \`group ${op[0]}\``, rr.err);
+    ok(rr.code === 1 && gateOf(/job-token/.test(rr.err)) && seen.length === n0, `…and so is \`group ${op[0]}\``, rr.err);
   }
   r = await run(['group', 'create', 'x', 'beta'], { VIBESPACE_SESSION_TOKEN: 'vsst_cli', VIBESPACE_JOB_TOKEN: 'jbt_job1' });
   ok(r.code === 0 && seen.length === n0 + 1 && last().auth === 'Bearer vsst_cli', 'CONTROL: a session token (even beside a job token) DOES reach the stub — the fence is the token, not the verb');
@@ -245,7 +245,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   ok(r.code === 0 && last().path === '/api/agent/msg/groups', '…and LIST its owner\'s groups');
 
   r = await run(['help-me']);
-  ok(/group list/.test(r.out) && /ambiguous name is refused with the candidates/.test(r.out) && /Inside a Background Work job: list \/ group list \/ read \/ send only/.test(r.out), 'the usage names group list, the ambiguity rule and the job fence', r.out);
+  ok(gateOf(/group list/.test(r.out)) && gateOf(/ambiguous name is refused with the candidates/.test(r.out)) && verdictOf(/Inside a Background Work job: list \/ group list \/ read \/ send only/.test(r.out)), 'the usage names group list, the ambiguity rule and the job fence', r.out);
 }
 srv.close();
 
@@ -304,11 +304,11 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   const TA = 'vsst_' + A.slice(-4);
 
   let r = await call('POST', '/api/agent/msg/group', { token: TA, body: { op: 'create', name: 'lane', members: ['beta'] } });
-  ok(r.status === 400 && r.body.code === 'ambiguous' && Array.isArray(r.body.candidates) && r.body.candidates.map((c) => c.conversationId).sort().join(',') === [B1, B2].sort().join(',') && r.body.error.includes(B1) && r.body.error.includes(B2),
+  ok(r.status === 400 && r.body.code === 'ambiguous' && gateOf(Array.isArray(r.body.candidates)) && r.body.candidates.map((c) => c.conversationId).sort().join(',') === [B1, B2].sort().join(',') && gateOf(r.body.error.includes(B1)) && verdictOf(r.body.error.includes(B2)),
     'AMBIGUITY: a member name two reachable sessions share ⇒ 400 `ambiguous` WITH both conversation ids (in `candidates` and in the words)', JSON.stringify(r));
   ok(groupCount() === 0 && auths.length === 0, '…and nothing is created, nobody is woken');
   r = await call('POST', '/api/agent/msg/group', { token: TA, body: { op: 'create', name: 'lane', members: ['gamma', B1], context: 'we split it' } });
-  ok(r.status === 200 && r.body.ok && r.body.woke.length === 2 && auths.length === 2 && auths.every((x) => x.reason === 'peer-message'),
+  ok(r.status === 200 && gateOf(r.body.ok) && r.body.woke.length === 2 && auths.length === 2 && verdictOf(auths.every((x) => x.reason === 'peer-message')),
     'CONTROL: a unique name + a conversation id resolve — the create wakes 2, the ladder\'s authorizer asked twice with reason peer-message', JSON.stringify(r.body));
   const laneId = r.body.group ? r.body.group.id : null;
 
@@ -317,13 +317,13 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   await call('POST', '/api/agent/msg/group', { token: TA, body: { op: 'create', name: 'dup', members: [B1], quiet: true } });
   const n1 = groupCount();
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: 'dup', text: 'which one?' } });
-  ok(r.status === 400 && r.body.code === 'ambiguous' && r.body.candidates.length === 2 && r.body.candidates.every((c) => /^g-[0-9a-f]{8}$/.test(c.groupId)) && groupCount() === n1,
+  ok(r.status === 400 && r.body.code === 'ambiguous' && r.body.candidates.length === 2 && gateOf(r.body.candidates.every((c) => /^g-[0-9a-f]{8}$/.test(c.groupId))) && groupCount() === n1,
     'an ambiguous GROUP name ⇒ `ambiguous` with the group ids — no post, no session lookup, no pair created', JSON.stringify(r.body));
 
   // ── the job fence at the route ──
   const n2 = groupCount();
   r = await call('POST', '/api/agent/msg/group', { token: 'jbt_owned', body: { op: 'create', name: 'jobgroup', members: ['gamma'] } });
-  ok(r.status === 403 && r.body.code === 'job-token' && /never creates a group or changes membership/.test(r.body.error) && groupCount() === n2, 'jbt_ `group create` ⇒ 403 job-token, the refusal SAYS what a job may do, nothing created', JSON.stringify(r.body));
+  ok(r.status === 403 && r.body.code === 'job-token' && gateOf(/never creates a group or changes membership/.test(r.body.error)) && groupCount() === n2, 'jbt_ `group create` ⇒ 403 job-token, the refusal SAYS what a job may do, nothing created', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/group', { token: 'jbt_owned', body: { op: 'notify', group: laneId, notify: 'mute' } });
   ok(r.status === 403 && r.body.code === 'job-token', 'jbt_ `group notify` ⇒ job-token too (membership is the conversation\'s own act)');
   const aBefore = auths.length;
@@ -331,25 +331,25 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   ok(r.status === 403 && r.body.code === 'job-token' && groupCount() === n2 && r.body.why === 'no-pair' && !!r.body.target && r.body.target.name === 'gamma' && typeof r.body.target.conversationId === 'string' && r.body.pairs === 0,
     'jbt_ `send <agent>` with NO existing pair ⇒ job-token, no pair created — and the ROUTE\'s answer names the target, the reason and the owner\'s direct groups (0) (fb-f48717393b)', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: 'gamma', text: 'hello gamma' } });
-  ok(r.status === 200 && r.body.posted && r.body.pairCreated === true && groupCount() === n2 + 1, 'CONTROL: the owner conversation\'s OWN session token makes the pair', JSON.stringify(r.body));
+  ok(r.status === 200 && gateOf(r.body.posted) && r.body.pairCreated === true && groupCount() === n2 + 1, 'CONTROL: the owner conversation\'s OWN session token makes the pair', JSON.stringify(r.body));
   const pairId = r.body.group.id;
   r = await call('POST', '/api/agent/msg/send', { token: 'jbt_owned', body: { to: 'gamma', text: 'batch finished' } });
-  ok(r.status === 200 && r.body.posted && r.body.group.id === pairId && r.body.pairCreated === false && auths.length === aBefore, 'jbt_ `send <agent>` into the EXISTING pair posts as the owner (next-turn default: zero authorizations)', JSON.stringify(r.body));
+  ok(r.status === 200 && gateOf(r.body.posted) && r.body.group.id === pairId && r.body.pairCreated === false && auths.length === aBefore, 'jbt_ `send <agent>` into the EXISTING pair posts as the owner (next-turn default: zero authorizations)', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/send', { token: 'jbt_owned', body: { to: laneId, text: 'into the lane' } });
-  ok(r.status === 200 && r.body.posted && r.body.group.id === laneId, 'jbt_ `send <group>` into a group the owner belongs to posts');
+  ok(r.status === 200 && gateOf(r.body.posted) && r.body.group.id === laneId, 'jbt_ `send <group>` into a group the owner belongs to posts');
   r = await call('GET', '/api/agent/msg/groups', { token: 'jbt_owned' });
-  ok(r.status === 200 && r.body.groups.some((g) => g.id === pairId) && r.body.groups.some((g) => g.id === laneId), 'jbt_ `group list` = the owner conversation\'s groups');
+  ok(r.status === 200 && gateOf(r.body.groups.some((g) => g.id === pairId)) && verdictOf(r.body.groups.some((g) => g.id === laneId)), 'jbt_ `group list` = the owner conversation\'s groups');
   r = await call('GET', '/api/agent/msg/read', { token: 'jbt_owned', query: { group: pairId } });
-  ok(r.status === 200 && r.body.records.some((x) => x.text === 'batch finished' && x.from === 'alpha'), 'jbt_ `read` returns the log; the job\'s post is signed by its OWNER', JSON.stringify(r.body.records));
+  ok(r.status === 200 && verdictOf(r.body.records.some((x) => x.text === 'batch finished' && x.from === 'alpha')), 'jbt_ `read` returns the log; the job\'s post is signed by its OWNER', JSON.stringify(r.body.records));
   // lane group-pending: the read answer carries where each message stands, from the REAL engine's markers
   const batch = r.body.records.find((x) => x.text === 'batch finished');
-  ok(batch && JSON.stringify(batch.delivery) === JSON.stringify([{ member: C, name: 'gamma', state: 'waiting', at: null }]) && r.body.records.filter((x) => x.kind !== 'message').every((x) => x.delivery === null), 'read: a message to a next-turn member carries `delivery` [gamma: waiting]; a system record carries none', JSON.stringify(batch && batch.delivery));
+  ok(gateOf(batch) && JSON.stringify(batch.delivery) === JSON.stringify([{ member: C, name: 'gamma', state: 'waiting', at: null }]) && verdictOf(r.body.records.filter((x) => x.kind !== 'message').every((x) => x.delivery === null)), 'read: a message to a next-turn member carries `delivery` [gamma: waiting]; a system record carries none', JSON.stringify(batch && batch.delivery));
   await eng.commitReports(C, eng.reportsForTurn(C).marks);   // gamma's next turn handed the report out
   r = await call('GET', '/api/agent/msg/read', { token: 'jbt_owned', query: { group: pairId } });
   const handedRow = r.body.records.find((x) => x.text === 'batch finished').delivery[0];
-  ok(handedRow.state === 'handed' && Number.isFinite(handedRow.at) && handedRow.at > batch.at, '…and after gamma\'s turn start the same message reads `handed` WITH the hand-over clock (the engine stamped `reportedAt` beside the marker)', JSON.stringify(handedRow));
+  ok(handedRow.state === 'handed' && gateOf(Number.isFinite(handedRow.at)) && handedRow.at > batch.at, '…and after gamma\'s turn start the same message reads `handed` WITH the hand-over clock (the engine stamped `reportedAt` beside the marker)', JSON.stringify(handedRow));
   r = await call('GET', '/api/agent/msg/peers', { token: 'jbt_owned' });
-  ok(r.status === 200 && Array.isArray(r.body.peers) && !r.body.peers.some((p) => p.conversationId === A), 'jbt_ `list` answers (the owner itself not listed as a peer)', JSON.stringify(r.body));
+  ok(r.status === 200 && gateOf(Array.isArray(r.body.peers)) && !r.body.peers.some((p) => p.conversationId === A), 'jbt_ `list` answers (the owner itself not listed as a peer)', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/send', { token: 'jbt_nobody', body: { to: 'gamma', text: 'x' } });
   ok(r.status === 401 && r.body.code === 'auth', 'an unknown job token ⇒ 401 `auth`');
   jm.ready = false;
@@ -374,13 +374,13 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   const paced = await Promise.all(pace);
   const wokeN = paced.reduce((n, x) => n + ((x.body.woke || []).length), 0);
   const flooredN = paced.reduce((n, x) => n + ((x.body.refused || []).filter((w) => /rate floor/.test(w.reason)).length), 0);
-  ok(paced.every((x) => x.status === 200 && x.body.posted) && wokeN === 1 && flooredN === 4 && auths.length === aPace + 1,
+  ok(gateOf(paced.every((x) => x.status === 200 && x.body.posted)) && wokeN === 1 && flooredN === 4 && auths.length === aPace + 1,
     'five `@eps` messages in a second ⇒ ONE wake + four floored (every message posted; the authorizer asked once)', JSON.stringify({ wokeN, flooredN, auths: auths.length - aPace, answers: paced.map((x) => x.status + ':' + JSON.stringify(x.body.refused)) }));
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: 'delta', text: 'urgent one', wake: true } });
   ok(r.status === 200 && r.body.woke.length === 1, 'CONTROL: the first --wake to delta (by NAME) wakes', JSON.stringify(r.body));
   const aId = auths.length;
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: D, text: 'urgent two', wake: true } });
-  ok(r.status === 200 && r.body.posted && r.body.woke.length === 0 && r.body.refused.length === 1 && /rate floor/.test(r.body.refused[0].reason) && auths.length === aId,
+  ok(r.status === 200 && gateOf(r.body.posted) && r.body.woke.length === 0 && r.body.refused.length === 1 && gateOf(/rate floor/.test(r.body.refused[0].reason)) && auths.length === aId,
     'the same target by its conversation ID right after ⇒ FLOORED (the key is the resolved target, never the `to` spelling); the message still posts', JSON.stringify(r.body));
 
   // ── a group NAMED like a session is never a silent shadow ──
@@ -388,7 +388,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   const shadowId = r.body.group.id;
   const beforeShadow = store.readTail('groups', shadowId, { limit: 50 }).length;
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: 'delta', text: 'who gets this?' } });
-  ok(r.status === 400 && r.body.code === 'ambiguous' && r.body.candidates.some((c) => c.groupId === shadowId) && r.body.candidates.some((c) => c.conversationId === D) && store.readTail('groups', shadowId, { limit: 50 }).length === beforeShadow,
+  ok(r.status === 400 && r.body.code === 'ambiguous' && gateOf(r.body.candidates.some((c) => c.groupId === shadowId)) && gateOf(r.body.candidates.some((c) => c.conversationId === D)) && store.readTail('groups', shadowId, { limit: 50 }).length === beforeShadow,
     'a bare name that is BOTH one of my groups and a messageable session ⇒ `ambiguous` with both candidates (group id + conversation id), nothing posted', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: shadowId, text: 'to the group by id' } });
   ok(r.status === 200 && r.body.group.id === shadowId, 'CONTROL: `send g-<id>` routes to the group');
@@ -404,7 +404,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   ok(r.status === 409 && r.body.code === 'bad-member' && posts.length === nPosts && auths.length === nAuth && groupCount() === nGroups,
     'with the groups engine present, a session WITHOUT a conversation id ⇒ 409 bad-member — no delivery, no authorization, no group (D2 is never bypassed)', JSON.stringify(r));
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: 'gamma', text: 'before my first turn' } });
-  ok(r.status === 200 && r.body.posted && r.body.group.pair === true && posts.length === nPosts, 'CONTROL: the same body from a session WITH a conversation id is posted into the pair (next-turn: nobody woken)', JSON.stringify(r.body));
+  ok(r.status === 200 && gateOf(r.body.posted) && r.body.group.pair === true && posts.length === nPosts, 'CONTROL: the same body from a session WITH a conversation id is posted into the pair (next-turn: nobody woken)', JSON.stringify(r.body));
 
   // ── r2 finding 8: a wake the authorizer REFUSES (not billed) does not spend the floor ──
   const F = 'ffffffff-6666-4000-8000-000000000007';
@@ -431,7 +431,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   }
   const nWide = groupCount(), aWide = auths.length;
   r = await call('POST', '/api/agent/msg/group', { token: 'vsst_boss', body: { op: 'create', name: 'wide', members: many } });
-  ok(r.status === 409 && r.body.code === 'confirm-wakes' && r.body.wakes === 25 && /25 billed turns/.test(r.body.error) && /--yes/.test(r.body.error) && groupCount() === nWide && auths.length === aWide,
+  ok(r.status === 409 && r.body.code === 'confirm-wakes' && r.body.wakes === 25 && gateOf(/25 billed turns/.test(r.body.error)) && gateOf(/--yes/.test(r.body.error)) && groupCount() === nWide && auths.length === aWide,
     'a create that would wake 25 is refused BEFORE the act — `confirm-wakes`, the count (25 billed turns) and the --yes remedy; nothing created, nobody asked', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/group', { token: 'vsst_boss', body: { op: 'create', name: 'wide', members: many, yes: true } });
   const wideId = r.body.group ? r.body.group.id : null;
@@ -439,15 +439,15 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   ok(r.status === 200 && r.body.woke.length === 8 && floorRefused.length === 17 && auths.length === aWide + 8,
     'with --yes: ONE sender wakes at most 8 per minute — 8 woken, 17 floored (posted, not billed; they read it next turn); the authorizer asked 8 times, not 25', JSON.stringify({ woke: (r.body.woke || []).length, floored: floorRefused.length, asked: auths.length - aWide }));
   const auditFloor = store.auditTail({ limit: 5000 }).filter((a) => a.kind === 'group-wake' && a.groupId === wideId && a.refused === 'rate-floor');
-  ok(auditFloor.length === 17 && auditFloor.every((a) => /per sender|a minute|per minute/.test(a.reason)), 'every floored wake is AUDITED with the sender-budget reason', JSON.stringify(auditFloor.slice(0, 2)));
+  ok(auditFloor.length === 17 && verdictOf(auditFloor.every((a) => /per sender|a minute|per minute/.test(a.reason))), 'every floored wake is AUDITED with the sender-budget reason', JSON.stringify(auditFloor.slice(0, 2)));
   for (const cid of many) await eng.setNotify({ by: 'user', group: wideId, member: cid, notify: 'always' });
   const aAlways = auths.length;
   r = await call('POST', '/api/agent/msg/send', { token: 'vsst_boss', body: { to: wideId, text: 'plain post into 25 always-members' } });
   ok(r.status === 409 && r.body.code === 'confirm-wakes' && r.body.wakes === 25 && auths.length === aAlways, 'a PLAIN post that would wake 25 `always` members is refused before the act too (the count said first)', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/send', { token: 'vsst_boss', body: { to: wideId, text: 'plain post into 25 always-members', yes: true } });
-  ok(r.status === 200 && r.body.posted && r.body.woke.length === 0 && r.body.refused.length === 25 && auths.length === aAlways, '…confirmed, inside the same minute: 0 woken, 25 floored (the sender\'s minute is spent) — posted, never billed', JSON.stringify({ woke: r.body.woke, refused: (r.body.refused || []).length }));
+  ok(r.status === 200 && gateOf(r.body.posted) && r.body.woke.length === 0 && r.body.refused.length === 25 && auths.length === aAlways, '…confirmed, inside the same minute: 0 woken, 25 floored (the sender\'s minute is spent) — posted, never billed', JSON.stringify({ woke: r.body.woke, refused: (r.body.refused || []).length }));
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: 'gamma', text: 'a small one', wake: true } });
-  ok(r.status === 200 && r.body.posted, 'CONTROL: a ≤ 5-wake send needs no --yes', JSON.stringify(r.body));
+  ok(r.status === 200 && verdictOf(r.body.posted), 'CONTROL: a ≤ 5-wake send needs no --yes', JSON.stringify(r.body));
 
   // ── r2 finding 6: the floor survives a restart (a fresh routes module + engine over the SAME store dir) ──
   try { deliver.flush(); } catch {}
@@ -469,7 +469,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   });
   const aRestart = auths.length;
   r = await new Promise((resolve) => { let status = 200; routes2['POST /api/agent/msg/send']({ headers: { authorization: 'Bearer ' + TA }, body: { to: 'phi', text: 'after the restart', wake: true }, query: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } }); });
-  ok(r.status === 200 && r.body.posted && r.body.woke.length === 0 && r.body.refused.length === 1 && /rate floor/.test(r.body.refused[0].reason) && auths.length === aRestart,
+  ok(r.status === 200 && gateOf(r.body.posted) && r.body.woke.length === 0 && r.body.refused.length === 1 && gateOf(/rate floor/.test(r.body.refused[0].reason)) && auths.length === aRestart,
     'after a RESTART (fresh routes module + engine over the same store) the same sender → phi --wake is STILL floored — the floor is persisted, not an in-memory Map', JSON.stringify(r.body));
   try { deliver.flush(); } catch {}
   store2.close();
@@ -513,16 +513,16 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       return { send: `${s1.status}:${s1.body.code || 'ok'}`, sentence: s1.body.error || '', pairHoldsParent: groups.some((g) => g.pair && (g.members || []).some((m) => (m.member || m.cid) === P)), groups: groups.length, wokeBySend, askedBySend, reply: `${s2.status}:${s2.body.code || 'ok'}`, woke: posted.slice(), list: `${lst.status}:${lst.body.code || 'ok'}` };
     }
     const fk = await forkLeg(AR, 'fork');
-    ok(fk.send === '409:bad-member' && /a fork that has not announced its own conversation id yet/.test(fk.sentence) && fk.groups === 0 && fk.wokeBySend === 0 && fk.askedBySend === 0 && fk.list === '409:bad-member',
+    ok(fk.send === '409:bad-member' && gateOf(/a fork that has not announced its own conversation id yet/.test(fk.sentence)) && fk.groups === 0 && fk.wokeBySend === 0 && fk.askedBySend === 0 && fk.list === '409:bad-member',
       `a PENDING fork's \`send --wake\` ⇒ 409 bad-member by name; no pair, nobody woken, the authorizer never asked; its \`groups\` list is refused the same way (${fk.send}; the target's own later message to the parent by id is its own act: ${fk.reply})`, JSON.stringify(fk));
     const arsrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     const LINE = "  const own = ownConversationIdOf(s);\n  return { job: null, cid: own.cid, cidWhy: own.why, s, id, myGroups: _myGroupIds(s, id) };";
     ok(arsrc.split(LINE).length === 2, 'the own-id line of msgCaller is present once (the control answers the raw, possibly borrowed, id)');
     const ARc = M.load('src/agent-routes.js', editAnchor(arsrc, LINE, "  return { job: null, cid: s.claudeSessionId || s.backendSessionId || null, s, id, myGroups: _myGroupIds(s, id) };", "src/agent-routes.js"), 'msgcaller-raw-id');
     const fkc = await forkLeg(ARc, 'fork-ctl');
-    ok(fkc.send === '200:ok' && fkc.pairHoldsParent && fkc.reply === '200:ok' && fkc.woke.includes(P),
+    ok(fkc.send === '200:ok' && gateOf(fkc.pairHoldsParent) && fkc.reply === '200:ok' && verdictOf(fkc.woke.includes(P)),
       `CONTROL: the routes whose msgCaller answers the raw id let the pending fork make the pair under the PARENT's id and the target's reply WAKES THE PARENT (${JSON.stringify(fkc.woke)}) — the leg would go red`, JSON.stringify(fkc));
-    for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'r4 fork control: ' })) ok(c.pass, c.name, c.detail);
+    for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'r4 fork control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
   }
 
   // ── channel-withdraw verify r5 (2026-09-27): THE OTHER SIDE OF THE FORK RULE — a pending fork as a TARGET, as a
@@ -576,7 +576,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     // UNKNOWN then, never «no groups»: the held line by name (503 TASK_GROUPS_UNREAD), reach still closed (no pair, nobody asked).
     // RED (anchored): a copy without the held line answers «outside your reach» (404 unreachable), the release's words
     const heldL = await targetLeg(AR, LC, 'r5-target-held', { parentLive: false, held: true });
-    ok(heldL.toFork === '503:TASK_GROUPS_UNREAD' && /Task Groups: this message \(who it can reach is judged by Task Group\) was refused — task-groups\.json/.test(heldL.toForkWords) && !heldL.pairHoldsParent && heldL.askedOnParent === 0,
+    ok(heldL.toFork === '503:TASK_GROUPS_UNREAD' && gateOf(/Task Groups: this message \(who it can reach is judged by Task Group\) was refused — task-groups\.json/.test(heldL.toForkWords)) && !heldL.pairHoldsParent && heldL.askedOnParent === 0,
       `a reach miss while the Task Groups store is held says the held line by name (503 TASK_GROUPS_UNREAD), never «outside your reach»; reach stays closed (${JSON.stringify(heldL)})`);
     const arSrcH = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     const { anchored } = await import('./scratch.mjs');   // already loaded by mutant-copy above: no new effect
@@ -612,13 +612,13 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     ok(arsrc5.split(EP).length === 2, '_msgEndpoints reads the endpoint id through addressableId, once');
     const ARc5 = M5.load('src/agent-routes.js', editAnchor(arsrc5, EP, "    const cid = t.claudeSessionId || t.backendSessionId;\n    if (!cid) continue;", "src/agent-routes.js"), 'endpoints-raw');
     const deadC = await targetLeg(ARc5, LCc, 'r5-target-dead-ctl', { parentLive: false });
-    ok(deadC.forkListed && deadC.toFork === '200:ok' && deadC.pairHoldsParent && deadC.askedOnParent === 1,
+    ok(gateOf(deadC.forkListed) && deadC.toFork === '200:ok' && gateOf(deadC.pairHoldsParent) && deadC.askedOnParent === 1,
       `CONTROL: the raw-id roster + endpoints list the fork under the parent's id, mint the pair under the PARENT and authorize a billed turn on it (${JSON.stringify(deadC)}) — the leg would go red`);
     const liveC = await targetLeg(ARc5, LCc, 'r5-target-live-ctl', { parentLive: true });
     ok(liveC.toParent === '400:ambiguous', `CONTROL: with the raw roster the parent itself is \`ambiguous\` beside its pending fork (${liveC.toParent})`);
     // server.js's roster reads the SAME predicate (the suite cannot boot server.js: the line is pinned by name)
     const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
-    ok(/for \(const \[id, s\] of sessions\(\)\) \{\n(?:\s*\/\/[^\n]*\n)*\s*const cid = addressableId\(s\);\n\s*if \(!cid\) continue;/.test(fs.readFileSync(path.join(REPO, 'src/server/roster-pass.js'), 'utf-8')) && /sessionRoster\(\{ sessions: \(\) => activeSessions, tasks: \(\) => tasks, addressableId, /.test(srv) && /const \{ addressableId \} = require\('\.\/src\/claude-lock-capture'\)/.test(srv), 'PIN: server.js\'s liveSessions roster (the groups engine\'s + the channels engine\'s) reads each row\'s id through addressableId (lane roster-per-pass: the builder is src/server/roster-pass.js sessionRoster, handed server.js\'s addressableId)');
+    ok(gateOf(/for \(const \[id, s\] of sessions\(\)\) \{\n(?:\s*\/\/[^\n]*\n)*\s*const cid = addressableId\(s\);\n\s*if \(!cid\) continue;/.test(fs.readFileSync(path.join(REPO, 'src/server/roster-pass.js'), 'utf-8'))) && gateOf(/sessionRoster\(\{ sessions: \(\) => activeSessions, tasks: \(\) => tasks, addressableId, /.test(srv)) && verdictOf(/const \{ addressableId \} = require\('\.\/src\/claude-lock-capture'\)/.test(srv)), 'PIN: server.js\'s liveSessions roster (the groups engine\'s + the channels engine\'s) reads each row\'s id through addressableId (lane roster-per-pass: the builder is src/server/roster-pass.js sessionRoster, handed server.js\'s addressableId)');
 
     // THE JOB OWNER: a pending fork's `vibespace-job run` — refused by name; the control records the parent as the owner
     async function jobLeg(ARmod, name) {
@@ -647,7 +647,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       return { create: `${r.status}:${r.body.code || (r.body.success ? 'ok' : r.body.error)}`, sentence: r.body.error || '', ownerIsParent: !!(job && job.owner && job.owner.conversation && job.owner.conversation.id === P), postedOnParent: posted.filter((x) => x === P).length, parentCreates: `${rP.status}:${rP.body.success ? 'ok' : rP.body.error}`, parentOwner: rP.body && rP.body.job && rP.body.job.owner ? rP.body.job.owner.conversation : null };
     }
     const jb = await jobLeg(AR, 'r5-job');
-    ok(jb.create === '409:bad-member' && /a fork that has not announced its own conversation id yet/.test(jb.sentence) && !jb.ownerIsParent && jb.postedOnParent === 0 && jb.parentCreates === '200:ok',
+    ok(jb.create === '409:bad-member' && gateOf(/a fork that has not announced its own conversation id yet/.test(jb.sentence)) && !jb.ownerIsParent && jb.postedOnParent === 0 && jb.parentCreates === '200:ok',
       `a PENDING fork's job creation ⇒ 409 bad-member by name — no job owned by the parent, no billed notification on the parent; the parent's own creation stands (${JSON.stringify(jb)})`);
     // B-55dc ⋈ B-70f9 (lg-text-legs-3, the -moved2 meeting; 主开发 23:42Z: one leg that throws on the SECOND entry and reads the
     // named reply): the create route is entered AGAIN once the creator's membership was READ — readMembership defers the first
@@ -684,20 +684,20 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       } finally { process.off('unhandledRejection', onRej); console.warn = warn; jm.shutdown(); for (const t of jm._timers) clearInterval(t); try { dl.flush(); } catch {} }
     }
     const re = await reentryLeg(AR, 'b55-reentry');
-    ok(re.reply && re.reply.status === 500 && re.reply.body.code === 'create-failed' && /^the job create failed on the hub: the store refused on the second entry/.test(re.reply.body.error) && re.reads === 1 && re.creates === 1 && re.stray.length === 0,
+    ok(gateOf(re.reply) && re.reply.status === 500 && re.reply.body.code === 'create-failed' && gateOf(/^the job create failed on the hub: the store refused on the second entry/.test(re.reply.body.error)) && re.reads === 1 && re.creates === 1 && re.stray.length === 0,
       `B-55dc ⋈ B-70f9: a throw on the create route's SECOND entry (after the membership read) is answered by name — ${re.reply ? re.reply.status + ' ' + re.reply.body.code : 'no reply'} (${JSON.stringify(re)})`);
     const RE = 'readMembership(req, res, answersEveryThrow(jobsCreateRoute), a.session, a.sessionId)';
     const MR = mutantCopies('msg-cli-reentry', REPO);   // the plant proves itself: a copy that changes nothing fails by name
     const ARbare = MR.load('src/agent-routes.js', editAnchor(arsrc5, RE, 'readMembership(req, res, jobsCreateRoute, a.session, a.sessionId)', "src/agent-routes.js"), 'reentry-bare');
     const reRed = await reentryLeg(ARbare, 'b55-reentry-red');
-    ok(reRed.reply === null && reRed.creates === 1 && reRed.stray.some((m) => /the store refused on the second entry/.test(m)),
+    ok(reRed.reply === null && reRed.creates === 1 && verdictOf(reRed.stray.some((m) => /the store refused on the second entry/.test(m))),
       `RED CONTROL: the re-entry through the bare handler — the throw is an unhandled rejection, no reply ever comes (${JSON.stringify(reRed)})`);
-    for (const c of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'B-55dc re-entry control: ' })) ok(c.pass, c.name, c.detail);
+    for (const c of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'B-55dc re-entry control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
     const JC = "  const own = ownConversationIdOf(s);\n  return {\n    conversationId: own.cid, borrowed: own.cid ? null : (own.why === FORK_PENDING ? own.why : null),";
     ok(arsrc5.split(JC).length === 2, 'jobsCaller reads the caller\'s conversation through ownConversationIdOf, once (the control reads the raw status key)');
     const ARj = M5.load('src/agent-routes.js', editAnchor(arsrc5, JC, "  return {\n    conversationId: key.startsWith('webui:') ? null : key.slice(key.indexOf(':') + 1), borrowed: null,", "src/agent-routes.js"), 'jobscaller-raw');
     const jbc = await jobLeg(ARj, 'r5-job-ctl');
-    ok(jbc.create === '200:ok' && jbc.ownerIsParent && jbc.postedOnParent === 1, `CONTROL: the raw-key jobsCaller records the PARENT as the fork's job owner and its first notification is a billed post on the parent (${JSON.stringify(jbc)}) — the leg would go red`);
+    ok(jbc.create === '200:ok' && gateOf(jbc.ownerIsParent) && jbc.postedOnParent === 1, `CONTROL: the raw-key jobsCaller records the PARENT as the fork's job owner and its first notification is a billed post on the parent (${JSON.stringify(jbc)}) — the leg would go red`);
 
     // THE WINDOW-SHARE REQUEST (the owner's "ask <agent> to take control"): a pending fork is refused by name — the wake and the stash landed on the parent
     {
@@ -709,7 +709,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       const wr = WR.create({ engine, deliver: dlv, activeSessions: ss, log: { log() {}, warn() {} } });
       let err = null; try { await wr.request({ handle: 'h1', sessionId: 'w-F', wake: true }); } catch (e) { err = e; }
       const rp = await wr.request({ handle: 'h1', sessionId: 'w-P', wake: false });
-      ok(err && err.code === 'fork_pending' && /fork that has not announced/.test(err.message) && stashed.length === 1 && rp.ok && rp.delivered === 'next-turn', `a window-share request to a pending fork is refused by its OWN code (verify r6: the client worded no_conversation as "say something to it first"); the parent's own is served (${err && err.code}: ${err && err.message.slice(0, 60)})`);
+      ok(gateOf(err) && err.code === 'fork_pending' && gateOf(/fork that has not announced/.test(err.message)) && stashed.length === 1 && gateOf(rp.ok) && rp.delivered === 'next-turn', `a window-share request to a pending fork is refused by its OWN code (verify r6: the client worded no_conversation as "say something to it first"); the parent's own is served (${err && err.code}: ${err && err.message.slice(0, 60)})`);
       const wsrc = fs.readFileSync(path.join(REPO, 'src/server/window-request.js'), 'utf-8');
       const WL = "    if (liveForkPending(s)) throw namedError('fork_pending',";
       ok(wsrc.split(WL).length === 2, 'the window-request guard is present once');
@@ -717,7 +717,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       const stashed2 = [];
       const wr2 = WRc.create({ engine, deliver: { stashFor: (cid) => { stashed2.push(cid); return { stored: true }; }, deliverToConversation: async () => ({ ok: true }) }, activeSessions: ss, log: { log() {}, warn() {} } });
       const r2 = await wr2.request({ handle: 'h1', sessionId: 'w-F', wake: false });
-      ok(r2.ok && stashed2[0] === P, 'CONTROL: without the guard the fork\'s request is stashed for the PARENT\'s conversation — the leg would go red');
+      ok(gateOf(r2.ok) && stashed2[0] === P, 'CONTROL: without the guard the fork\'s request is stashed for the PARENT\'s conversation — the leg would go red');
     }
     // THE FOR-YOU ITEM (`vibespace-ask`): a pending fork's item was keyed under the PARENT's status key for good — the
     // owner's reply (typed by the item's key) went into the parent. Keyed under the fork's own placeholder now.
@@ -756,7 +756,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       const ac = await askLeg(ARa, 'r5-ask-ctl');
       ok(ac.key === 'claude:' + P && ac.repliesTo === 'w-P', `CONTROL: keyed by the raw status key the item is the PARENT's and the reply is typed into the parent (${JSON.stringify(ac)}) — the leg would go red`);
     }
-    for (const c of copiesCensus(M5.files, M5.dir, REPO, { minCopies: 1, label: 'r5 fork control: ' })) ok(c.pass, c.name, c.detail);
+    for (const c of copiesCensus(M5.files, M5.dir, REPO, { minCopies: 1, label: 'r5 fork control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
   }
 
   // ── channel-withdraw verify r6 (2026-09-27): THE LADDER'S OWN LOOKUPS and THE GROUP-REPORT DRAIN. r5 put the one
@@ -795,19 +795,19 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const lc = await ladderLeg(DELIVER, 'r6-ladder-codex', { shape: 'codex' });
     ok(!lc.ok && lc.forkFrames === 0 && !lc.charged.includes('slot-FORK'), `codex, the parent stopped: a frame for the PARENT is never written into the pending FORK's wrapper and never charged to the fork's slot — it falls to the stash (${JSON.stringify(lc)})`);
     const lk = await ladderLeg(DELIVER, 'r6-ladder-claude', { shape: 'claude' });
-    ok(lk.ok && lk.posts.join() === P.slice(0, 8) && lk.charged.every((x) => x === 'slot-PARENT') && lk.parentStamped && !lk.forkStamped, `claude, both live, the fork first: the frame reaches the PARENT's inbox, is charged to the PARENT's slot and stamps the parent's machine turn (${JSON.stringify(lk)})`);
+    ok(gateOf(lk.ok) && lk.posts.join() === P.slice(0, 8) && gateOf(lk.charged.every((x) => x === 'slot-PARENT')) && gateOf(lk.parentStamped) && !lk.forkStamped, `claude, both live, the fork first: the frame reaches the PARENT's inbox, is charged to the PARENT's slot and stamps the parent's machine turn (${JSON.stringify(lk)})`);
     const dlsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
     const RPC = "        if (addressableId(s) !== cid) continue;   // verify r6: a pending fork (its parent's id) is never the wrapper this frame is written into";
     const LOC = "      for (const [, s] of activeSessions) if (addressableId(s) === cid) return s;";
     ok(dlsrc.split(RPC).length === 2 && dlsrc.split(LOC).length === 2 && !/\(s\.backendSessionId \|\| s\.claudeSessionId\) (!==|===) cid/.test(dlsrc), 'the ladder reads every "which session carries this conversation" through addressableId (rung 1.5, the charged identity — rung 0, the channel socket, was removed in B-df40) — no raw read remains');
     const DLc = M6.load('src/server/conversation-deliver.js', editAnchor(editAnchor(dlsrc, RPC, "        if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;", "src/server/conversation-deliver.js"), LOC, "      for (const [, s] of activeSessions) if ((s.backendSessionId || s.claudeSessionId) === cid) return s;", "src/server/conversation-deliver.js"), 'ladder-raw');
     const lcC = await ladderLeg(DLc, 'r6-ladder-codex-ctl', { shape: 'codex' });
-    ok(lcC.ok && lcC.lane === 'rpc-queue' && lcC.forkFrames === 1 && lcC.charged.includes('slot-FORK'), `CONTROL: with the raw lookups the parent's frame is written into the FORK's wrapper and charged to the fork's slot (${JSON.stringify(lcC)}) — the leg would go red`);
+    ok(gateOf(lcC.ok) && lcC.lane === 'rpc-queue' && lcC.forkFrames === 1 && verdictOf(lcC.charged.includes('slot-FORK')), `CONTROL: with the raw lookups the parent's frame is written into the FORK's wrapper and charged to the fork's slot (${JSON.stringify(lcC)}) — the leg would go red`);
     const lkC = await ladderLeg(DLc, 'r6-ladder-claude-ctl', { shape: 'claude' });
-    ok(lkC.charged.includes('slot-FORK') && lkC.forkStamped, `CONTROL: with the raw lookups the parent's turn is charged to the FORK's slot and the fork is stamped (${JSON.stringify(lkC)})`);
+    ok(gateOf(lkC.charged.includes('slot-FORK')) && verdictOf(lkC.forkStamped), `CONTROL: with the raw lookups the parent's turn is charged to the FORK's slot and the fork is stamped (${JSON.stringify(lkC)})`);
     // server.js's peer-card site reads the same predicate (pinned by name — the suite cannot boot server.js)
     const srv6 = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
-    ok(/if \(addressableId\(s\) !== cid \|\| !s\._normalizer\) continue;/.test(srv6), 'PIN: server.js\'s emitPeerCard draws the card in the window that OWNS the conversation (addressableId), never a pending fork\'s');
+    ok(verdictOf(/if \(addressableId\(s\) !== cid \|\| !s\._normalizer\) continue;/.test(srv6)), 'PIN: server.js\'s emitPeerCard draws the card in the window that OWNS the conversation (addressableId), never a pending fork\'s');
 
     // THE GROUP REPORTS on a pending fork's prompt: the parent's pending report stays the parent's
     async function reportLeg(ARmod, name) {
@@ -842,15 +842,15 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       return { posted: s1.status, forkGot: /Group messages since your last turn/.test(fc.body.context || ''), parentGot: /Group messages since your last turn/.test(pc.body.context || ''), markerMovedBeforeParent: !!(mP && mP.reportedUpTo), afterAdoption: s2.status === 200 && /second message/.test(fc2.body.context || '') };
     }
     const rp = await reportLeg(AR, 'r6-report');
-    ok(rp.posted === 200 && !rp.forkGot && rp.parentGot && !rp.afterAdoption, `a pending fork's prompt never carries the PARENT's group report; the parent's own next prompt does; an adopted fork hears nothing of the parent's (${JSON.stringify(rp)})`);
+    ok(rp.posted === 200 && !rp.forkGot && gateOf(rp.parentGot) && !rp.afterAdoption, `a pending fork's prompt never carries the PARENT's group report; the parent's own next prompt does; an adopted fork hears nothing of the parent's (${JSON.stringify(rp)})`);
     const arsrc6 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     // B-c198 (lane for-you-jobs) moved the block up — the report is DECIDED FIRST — and assigns the hoisted `myCid`
     const GR = "      myCid = ownConversationIdOf(s).cid;\n";   // lane stash-any-turn: the any-turn comment now sits between it and the `if`
     ok(arsrc6.split(GR).length === 2, 'the next-turn group-report block reads the caller through ownConversationIdOf, once (the control reads the raw id)');
     const ARr = M6.load('src/agent-routes.js', editAnchor(arsrc6, GR, "      myCid = s.claudeSessionId || s.backendSessionId || null;\n", "src/agent-routes.js"), 'reports-raw');
     const rpC = await reportLeg(ARr, 'r6-report-ctl');
-    ok(rpC.forkGot && !rpC.parentGot, `CONTROL: with the raw id the FORK's prompt carries the parent's report and the parent's own prompt is empty (${JSON.stringify(rpC)}) — the leg would go red`);
-    for (const c of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r6 fork control: ' })) ok(c.pass, c.name, c.detail);
+    ok(gateOf(rpC.forkGot) && !rpC.parentGot, `CONTROL: with the raw id the FORK's prompt carries the parent's report and the parent's own prompt is empty (${JSON.stringify(rpC)}) — the leg would go red`);
+    for (const c of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r6 fork control: ' })) ok(verdictOf(c.pass), c.name, c.detail);
   }
 }
 
@@ -908,7 +908,7 @@ console.log('§2c the addressing-read census (r7): every raw "which session carr
     if (row) classified++; else unlisted.push(`${h.file}:${h.line}: ${h.text.slice(0, 90)}`);
   }
   ok(unlisted.length === 0, `every addressing-idiom site is classified (unlisted: ${unlisted.join(' | ') || 'none'})`);
-  ok(classified === hits.length && TABLE.every((r) => hits.some((h) => h.file === r.file && h.text.includes(r.needle))), 'the classification table has no dead rows (every needle matches a live site)');
+  ok(classified === hits.length && verdictOf(TABLE.every((r) => hits.some((h) => h.file === r.file && h.text.includes(r.needle)))), 'the classification table has no dead rows (every needle matches a live site)');
   // the ONE guarded (addressing) site really carries the predicate; the rest are non-addressing
   const guarded = TABLE.filter((r) => r.verdict === 'predicate');
   ok(guarded.length === 1 && guarded[0].file === 'src/agent-routes.js', 'exactly one raw idiom is an ADDRESSING decision, and it is fenced by liveForkPending; every other is harmless with a stated reason');
@@ -916,7 +916,7 @@ console.log('§2c the addressing-read census (r7): every raw "which session carr
   const dl = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   ok(!IDIOM.test(dl) && (dl.match(/addressableId\(s\) (?:===|!==) cid/g) || []).length === 2, 'the delivery ladder\'s two cid→session lookups (rung 1.5, the charged identity — rung 0\'s went with the channel socket, B-df40) read addressableId(s), never the raw idiom (a revert re-reddens §2c)');
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
-  ok(/if \(addressableId\(s\) !== cid \|\| !s\._normalizer\) continue;/.test(srv), 'emitPeerCard reads addressableId(s), never the raw idiom');
+  ok(verdictOf(/if \(addressableId\(s\) !== cid \|\| !s\._normalizer\) continue;/.test(srv)), 'emitPeerCard reads addressableId(s), never the raw idiom');
   // NEGATIVE CONTROL: a fresh raw addressing read on a NEW site is caught (a synthetic src file under a scratch root)
   const ctlRoot = scratch('msg-cli-census-ctl');
   fs.mkdirSync(path.join(ctlRoot, 'src', 'server'), { recursive: true });
@@ -943,11 +943,11 @@ console.log('§3 the words');
     [/read <group> --before <ts>/, 'read --before for history'],
     [/woke 2 agents = 2 billed turns/, 'the wake echo'],
   ];
-  for (const [re, what] of musts) ok(re.test(sec), `…Groups section says: ${what}`);
-  ok(/job-token/.test(man) && /candidates/.test(man), 'the manual names the job fence and the ambiguity candidates');
+  for (const [re, what] of musts) ok(verdictOf(re.test(sec)), `…Groups section says: ${what}`);
+  ok(gateOf(/job-token/.test(man)) && verdictOf(/candidates/.test(man)), 'the manual names the job fence and the ambiguity candidates');
   const idx = fs.readFileSync(path.join(REPO, 'docs/agent/index-manual.md'), 'utf-8');
   // lane cli-registry: the index table is the registry's render — the msg row names groups and points at its manual
-  ok(/\| `vibespace-msg` \|[^\n]*\bgroups\b[^\n]*`vibespace-docs msg`/.test(idx), 'the vibespace-docs index line names groups and points at `vibespace-docs msg`');
+  ok(verdictOf(/\| `vibespace-msg` \|[^\n]*\bgroups\b[^\n]*`vibespace-docs msg`/.test(idx)), 'the vibespace-docs index line names groups and points at `vibespace-docs msg`');
   ok(require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.msg === 'msg-manual.md', 'the docs route serves the msg topic');
 
   // the ONE pointer line in the budgeted Reporting-back teaching
@@ -959,7 +959,7 @@ console.log('§3 the words');
   const hits = judge(one);
   ok(hits.length === 1 && judge(multi).length === 1, 'the Reporting-back block carries exactly ONE groups pointer line (single- and multi-group)', hits.join(' | '));
   ok(hits.length === 1 && Buffer.byteLength(hits[0], 'utf-8') <= 300, `…within its budget (≤ 300 B; measured ${hits.length ? Buffer.byteLength(hits[0], 'utf-8') : '—'} B)`);
-  ok(hits.length === 1 && /no cost/.test(hits[0]) && /billed/.test(hits[0]), '…and it says the default is free and a wake is billed');
+  ok(hits.length === 1 && gateOf(/no cost/.test(hits[0])) && verdictOf(/billed/.test(hits[0])), '…and it says the default is free and a wake is billed');
   const allOff = proto._toolsSectionParts.call({}, '', false, { status: false, ask: false, task: false, jobs: false });
   ok(allOff.length === 0, 'every tool toggled off ⇒ no block at all (the pointer rides the block, never alone)');
   // NEGATIVE CONTROL: a patched copy of the teaching without the line (lane cli-registry: the line is the msg row's, in
@@ -976,7 +976,7 @@ console.log('§3 the words');
   ok(judge((P.TaskGroupManager || P).prototype._toolsSectionParts.call({}, '', false)).length === 0, 'NEGATIVE CONTROL: the same judge finds NO pointer in the patched copy');
   // the whole baseline intro (no-task sessions) still under the inline cap
   const intro = AR_intro();
-  ok(intro && Buffer.byteLength(intro, 'utf-8') < 9600, `the no-task tools intro stays under the 9600 B inline cap (${Buffer.byteLength(intro || '', 'utf-8')} B)`);
+  ok(gateOf(intro) && Buffer.byteLength(intro, 'utf-8') < 9600, `the no-task tools intro stays under the 9600 B inline cap (${Buffer.byteLength(intro || '', 'utf-8')} B)`);
 }
 function AR_intro() {
   try { return require(path.join(REPO, 'src/agent-routes.js')).sessionToolsIntro({ status: true, ask: true, task: true, jobs: true }, {}); } catch (e) { return ''; }
@@ -985,17 +985,17 @@ function AR_intro() {
 // ── lane pair-group-fate + B-eba8: the CLI says an ended addressee, lists a closed group, takes --await (pinned) ──
 {
   const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-msg'), 'utf-8');
-  ok(cliSrc.includes("a === '--await'") && cliSrc.includes('if (flags.await) body.await = true;') && cliSrc.includes("'  --await: will wake you once on the first reply (one billed turn, within 2 h)'"), 'CLI: send --await sends `await: true` and echoes the one billed turn it may cost');
-  ok(cliSrc.includes("${g.closed ? ' (closed)' : g.archived ? ' [archived]' : ''}") && cliSrc.includes("ended: 'nothing was sent — that conversation ended"), 'CLI: group list shows (closed); the `ended` refusal has its hint');
+  ok(gateOf(cliSrc.includes("a === '--await'")) && gateOf(cliSrc.includes('if (flags.await) body.await = true;')) && verdictOf(cliSrc.includes("'  --await: will wake you once on the first reply (one billed turn, within 2 h)'")), 'CLI: send --await sends `await: true` and echoes the one billed turn it may cost');
+  ok(gateOf(cliSrc.includes("${g.closed ? ' (closed)' : g.archived ? ' [archived]' : ''}")) && verdictOf(cliSrc.includes("ended: 'nothing was sent — that conversation ended")), 'CLI: group list shows (closed); the `ended` refusal has its hint');
   { // K9 (lane queued-is-not-woke follow-up 2026-11-13): in a GROUP clause a copy dropped before a turn read it is not an ended
     // conversation — said apart, with its door; the CLI's own clause function, evaluated from its source
     const cli = fs.readFileSync(CLI, 'utf8'); const i0 = cli.indexOf('const deliveryClause = '), j0 = cli.indexOf('\n};\n', i0);
     const clause = (0, eval)('(' + cli.slice(i0 + 'const deliveryClause = '.length, j0 + 2) + ')');
     const words = clause([{ name: 'beta', state: 'handed', at: Date.parse('2026-11-13T01:00:00Z') }, { name: 'gamma', state: 'undeliverable', why: 'dropped' }, { name: 'delta', state: 'undeliverable', why: 'archived', at: Date.parse('2026-11-12T10:00:00Z') }]);
-    ok(/not delivered \(dropped before a turn read it — send it again\): gamma/.test(words) && /not delivered \(ended\): delta/.test(words) && !/\(ended\): [^·]*gamma/.test(words), 'K9: a group\'s clause says a live member\'s DROPPED copy apart («dropped before a turn read it — send it again»), never «not delivered (ended)»; an archived member stays «ended»', words);
+    ok(gateOf(/not delivered \(dropped before a turn read it — send it again\): gamma/.test(words)) && gateOf(/not delivered \(ended\): delta/.test(words)) && !/\(ended\): [^·]*gamma/.test(words), 'K9: a group\'s clause says a live member\'s DROPPED copy apart («dropped before a turn read it — send it again»), never «not delivered (ended)»; an archived member stays «ended»', words);
   }
-  ok(["`not delivered — ${x.name}'s conversation ${x.why === 'gone' ? 'is gone' : 'was archived' + day(x.at)}`", "`${x.name} is stopped — delivered when it resumes`", "' (awaiting reply)'", "` (woke you ${hm(a.at)})`", "' (await expired)'"].every((n) => cliSrc.includes(n)), 'CLI: read\'s trailing clauses — not delivered (ended) / stopped / awaiting reply / woke you / await expired');
+  ok(verdictOf(["`not delivered — ${x.name}'s conversation ${x.why === 'gone' ? 'is gone' : 'was archived' + day(x.at)}`", "`${x.name} is stopped — delivered when it resumes`", "' (awaiting reply)'", "` (woke you ${hm(a.at)})`", "' (await expired)'"].every((n) => cliSrc.includes(n))), 'CLI: read\'s trailing clauses — not delivered (ended) / stopped / awaiting reply / woke you / await expired');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -27,7 +27,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -48,15 +48,15 @@ const usageRoutes = require(path.join(REPO, 'src/usage-routes.js'));
 
 // ── 1. registry contract ──
 {
-  ok('built-in harnesses registered: claude, codex, shell, opencode, antigravity', ['claude', 'codex', 'shell', 'opencode', 'antigravity'].every((id) => harnesses.has(id)) && harnesses.ids().length === 5, harnesses.ids());
+  ok('built-in harnesses registered: claude, codex, shell, opencode, antigravity', gateOf(['claude', 'codex', 'shell', 'opencode', 'antigravity'].every((id) => harnesses.has(id))) && harnesses.ids().length === 5, harnesses.ids());
   let e1 = null; try { harnesses.get('gemini'); } catch (e) { e1 = e.message; }
-  ok('an UNKNOWN harness id fails LOUDLY (never a silent claude fall-through)', /unknown harness 'gemini'/.test(e1 || ''), e1);
+  ok('an UNKNOWN harness id fails LOUDLY (never a silent claude fall-through)', verdictOf(/unknown harness 'gemini'/.test(e1 || '')), e1);
   let e2 = null; try { harnesses.get(''); } catch (e) { e2 = e.message; }
-  ok('an EMPTY id fails loudly too', /harness id required/.test(e2 || ''), e2);
+  ok('an EMPTY id fails loudly too', verdictOf(/harness id required/.test(e2 || '')), e2);
   for (const h of harnesses.list()) {
     const q = h.quota;
     ok(`${h.id}: quota contract = normalize/signalFromStream/classifyAuthFailure functions + a probe rung`,
-      typeof q.normalize === 'function' && typeof q.signalFromStream === 'function' && typeof q.classifyAuthFailure === 'function' && harnesses.QUOTA_PROBE_RUNGS.includes(q.probe));
+      typeof q.normalize === 'function' && typeof q.signalFromStream === 'function' && typeof q.classifyAuthFailure === 'function' && verdictOf(harnesses.QUOTA_PROBE_RUNGS.includes(q.probe)));
     ok(`${h.id}: quota.probe mirrors capsOf().quotaProbe (${String(q.probe)})`, q.probe === capsOf(h.id).quotaProbe);
   }
   // a CONTRIBUTED harness (plugin tier-5 / tests): register → dispatch → unregister
@@ -64,18 +64,18 @@ const usageRoutes = require(path.join(REPO, 'src/usage-routes.js'));
   harnesses.register(fake);
   ok('a contributed harness registers and dispatches through the same get()', harnesses.get('fake-acp').quota.normalize({}).fiveHour.utilization === 0.5 && harnesses.get('fake-acp').quota.signalFromStream({ type: 'acp_limit' }).kind === 'exhausted');
   let e3 = null; try { harnesses.register(fake); } catch (e) { e3 = e.message; }
-  ok('a duplicate contributed id refuses without {replace:true} (silent shadowing = a twin)', /already registered/.test(e3 || ''), e3);
+  ok('a duplicate contributed id refuses without {replace:true} (silent shadowing = a twin)', verdictOf(/already registered/.test(e3 || '')), e3);
   ok('…and replaces with the flag', harnesses.register({ ...fake, label: 'v2' }, { replace: true }).label === 'v2');
   let e4 = null; try { harnesses.register({ id: 'claude', quota: fake.quota }); } catch (e) { e4 = e.message; }
-  ok('a built-in id can never be replaced', /built-in/.test(e4 || ''), e4);
+  ok('a built-in id can never be replaced', verdictOf(/built-in/.test(e4 || '')), e4);
   let e5 = null; try { harnesses.register({ id: 'bad-probe', quota: { ...fake.quota, probe: 'telepathy' } }); } catch (e) { e5 = e.message; }
-  ok('an unknown probe rung is rejected at registration', /quota\.probe must be one of/.test(e5 || ''), e5);
+  ok('an unknown probe rung is rejected at registration', verdictOf(/quota\.probe must be one of/.test(e5 || '')), e5);
   let e6 = null; try { harnesses.register({ id: 'no-quota' }); } catch (e) { e6 = e.message; }
-  ok('a descriptor without the quota contract is rejected (NULL_QUOTA exists for that)', /quota contract missing/.test(e6 || ''), e6);
+  ok('a descriptor without the quota contract is rejected (NULL_QUOTA exists for that)', verdictOf(/quota contract missing/.test(e6 || '')), e6);
   ok('unregister removes a contributed harness', harnesses.unregister('fake-acp') === true && !harnesses.has('fake-acp'));
   let e7 = null; try { harnesses.unregister('codex'); } catch (e) { e7 = e.message; }
-  ok('…but never a built-in', /built-in/.test(e7 || ''), e7);
-  ok('NULL_QUOTA is frozen and honest (null/null/false)', Object.isFrozen(harnesses.NULL_QUOTA) && harnesses.NULL_QUOTA.normalize({}) === null && harnesses.NULL_QUOTA.signalFromStream({ type: 'rate_limit_event' }) === null && harnesses.NULL_QUOTA.probe === null && harnesses.NULL_QUOTA.classifyAuthFailure({ status: 403 }) === false);
+  ok('…but never a built-in', verdictOf(/built-in/.test(e7 || '')), e7);
+  ok('NULL_QUOTA is frozen and honest (null/null/false)', gateOf(Object.isFrozen(harnesses.NULL_QUOTA)) && harnesses.NULL_QUOTA.normalize({}) === null && harnesses.NULL_QUOTA.signalFromStream({ type: 'rate_limit_event' }) === null && harnesses.NULL_QUOTA.probe === null && harnesses.NULL_QUOTA.classifyAuthFailure({ status: 403 }) === false);
 }
 
 // ── 2. codex normalize (real shapes; the usage-routes export IS the harness fn) ──
@@ -109,7 +109,7 @@ Current week (Fable): 9% used · resets Aug 13, 2am (America/Los_Angeles)
 What's contributing to your limits usage?`;
   const NOW = Date.UTC(2026, 7, 12, 1, 0, 0);
   const p = cl.normalize(PANEL, NOW);
-  ok('CLI panel text → 5h .30 / 7d .05 / scoped Fable .09 (+ parsed resets)', p && near(p.fiveHour.utilization, 0.30) && near(p.sevenDay.utilization, 0.05) && p.scopedWeekly[0]?.name === 'Fable' && near(p.scopedWeekly[0].utilization, 0.09) && p.fiveHour.resetsAt > NOW / 1000 && p.fetchedAt === NOW, p);
+  ok('CLI panel text → 5h .30 / 7d .05 / scoped Fable .09 (+ parsed resets)', gateOf(p) && gateOf(near(p.fiveHour.utilization, 0.30)) && gateOf(near(p.sevenDay.utilization, 0.05)) && p.scopedWeekly[0]?.name === 'Fable' && gateOf(near(p.scopedWeekly[0].utilization, 0.09)) && p.fiveHour.resetsAt > NOW / 1000 && p.fetchedAt === NOW, p);
   ok('API-key-mode panel text → null', cl.normalize('API key detected — usage tracking is unavailable') === null);
   // (b) get_usage control payload — the LIVE envelope captured 2026-08-09 (test-get-usage-parse fixture)
   const live = { session: { total_cost_usd: 0 }, subscription_type: 'max', rate_limits_available: true, rate_limits: {
@@ -123,17 +123,17 @@ What's contributing to your limits usage?`;
   // r6: the codename bucket is KEPT (a stated spend is a claim even with no
   // reset — see test-get-usage-parse for the essay); the null buckets are still
   // absent, because `null` is the vendor saying there is no such limit.
-  ok('get_usage payload → the adapter parse (0-100 ints normalized, named scoped field, reset-less codename kept, null buckets absent)', g && near(g.fiveHour.utilization, 0.34) && near(g.sevenDay.utilization, 0.39) && g.scopedWeekly.some((w) => /Sonnet/i.test(w.name) && near(w.utilization, 0.12)) && g.scopedWeekly.some((w) => /nimbus/i.test(w.name) && w.utilization === 0) && !g.scopedWeekly.some((w) => /opus|oauth/i.test(w.name)) && g.source === gRef.source, g);
+  ok('get_usage payload → the adapter parse (0-100 ints normalized, named scoped field, reset-less codename kept, null buckets absent)', gateOf(g) && gateOf(near(g.fiveHour.utilization, 0.34)) && gateOf(near(g.sevenDay.utilization, 0.39)) && gateOf(g.scopedWeekly.some((w) => /Sonnet/i.test(w.name) && near(w.utilization, 0.12))) && gateOf(g.scopedWeekly.some((w) => /nimbus/i.test(w.name) && w.utilization === 0)) && !g.scopedWeekly.some((w) => /opus|oauth/i.test(w.name)) && g.source === gRef.source, g);
   // (c) GET /api/oauth/usage REST JSON (limits[] + a named seven_day_* field + extra_usage)
   const rest = { five_hour: { utilization: 42, resets_at: '2026-08-08T05:00:00.000Z' }, seven_day: { utilization: 71, resets_at: '2026-08-12T00:00:00.000Z' },
     seven_day_opus: { utilization: 100, resets_at: '2026-08-12T00:00:00.000Z' },
     limits: [{ kind: 'weekly_scoped', scope: { model: { display_name: 'Claude Fable' } }, percent: 33, resets_at: '2026-08-13T00:00:00.000Z', severity: 'normal' }],
     extra_usage: { is_enabled: true, used_credits: 1234, monthly_limit: null, utilization: 0, currency: 'USD' } };
   const o = cl.normalize(rest);
-  ok('OAuth REST JSON → 5h .42 / 7d .71 / limits[] Fable .33 / named Opus 1.0 exceeded / spend line', o && near(o.fiveHour.utilization, 0.42) && o.fiveHour.status === 'allowed' && near(o.sevenDay.utilization, 0.71)
-    && o.scopedWeekly.some((w) => w.name === 'Claude Fable' && near(w.utilization, 0.33)) && o.scopedWeekly.some((w) => w.name === 'Opus' && w.utilization === 1 && w.severity === 'exceeded')
+  ok('OAuth REST JSON → 5h .42 / 7d .71 / limits[] Fable .33 / named Opus 1.0 exceeded / spend line', gateOf(o) && gateOf(near(o.fiveHour.utilization, 0.42)) && o.fiveHour.status === 'allowed' && gateOf(near(o.sevenDay.utilization, 0.71))
+    && gateOf(o.scopedWeekly.some((w) => w.name === 'Claude Fable' && near(w.utilization, 0.33))) && gateOf(o.scopedWeekly.some((w) => w.name === 'Opus' && w.utilization === 1 && w.severity === 'exceeded'))
     && o.spend?.used === 12.34 && o.spend.limit === null && o.overallStatus === 'allowed', o);
-  ok('the REST parse is the SAME function usage-routes binds as _parseUsage (moved, not copied)', /const _parseUsage = claudeQuota\.parseOAuthUsage;/.test(read('src/usage-routes.js')) && !/function _parseUsage\(/.test(read('src/usage-routes.js')));
+  ok('the REST parse is the SAME function usage-routes binds as _parseUsage (moved, not copied)', gateOf(/const _parseUsage = claudeQuota\.parseOAuthUsage;/.test(read('src/usage-routes.js'))) && !/function _parseUsage\(/.test(read('src/usage-routes.js')));
   // (d) THE UNIT IS NOT GUESSED FROM THE VALUE (2.369.99, inc-mu3giy8t-7k36):
   // a brand-new member's first turn left its Fable cap at exactly ONE percent,
   // the control-channel read carried `seven_day_fable: { utilization: 1 }`, and
@@ -145,7 +145,7 @@ What's contributing to your limits usage?`;
       seven_day_fable: { utilization: n, resets_at: '2026-08-12T00:00:00.000Z' } }).scopedWeekly.find((w) => w.name === 'Fable');
     const bad = [];
     for (let n = 0; n <= 100; n++) { const w = named(n); if (!w || !near(w.utilization, n / 100)) bad.push([n, w && w.utilization]); }
-    ok('a named seven_day_<model> field is PERCENT for every integer 0..100 (the incident shape, 1, is 0.01 and normal)', bad.length === 0 && near(named(1).utilization, 0.01) && named(1).severity === 'normal' && named(100).severity === 'exceeded', JSON.stringify(bad.slice(0, 5)));
+    ok('a named seven_day_<model> field is PERCENT for every integer 0..100 (the incident shape, 1, is 0.01 and normal)', bad.length === 0 && gateOf(near(named(1).utilization, 0.01)) && named(1).severity === 'normal' && named(100).severity === 'exceeded', JSON.stringify(bad.slice(0, 5)));
     const retired = (pctRaw) => (pctRaw > 1 ? pctRaw / 100 : pctRaw);   // the shipped rule, verbatim, as the control
     ok('NEGATIVE CONTROL: the retired guess reads ONE percent as a spent cap and every other integer correctly — exactly the boundary this incident sat on',
       retired(1) === 1 && retired(0) === 0 && retired(2) === 0.02 && retired(100) === 1, JSON.stringify([retired(1), retired(2)]));
@@ -181,7 +181,7 @@ What's contributing to your limits usage?`;
   const c2 = cx.signalFromStream({ type: 'rate_limits_updated', rateLimits: { primary: { usedPercent: 12, windowDurationMins: 10080, resetsAt: nowSec + 3600 }, secondary: null }, resetCredits: { availableCount: 2 }, onDemand: true });
   ok('codex: a bare payload is accepted; healthy live push → reading; on-demand resetCredits ride the snapshot', c2?.kind === 'reading' && c2.tripped === null && c2.snapshot.sevenDay.usedPercent === 12 && c2.snapshot.resetCredits.availableCount === 2 && c2.onDemand === true, c2);
   const c3 = cx.signalFromStream({ type: 'event_msg', payload: { type: 'rate_limits_updated', error: 'request timed out', onDemand: true } });
-  ok('codex: a FAILED on-demand rateLimits/read → probe-failed with the error (never silent)', c3?.kind === 'probe-failed' && /timed out/.test(c3.error), c3);
+  ok('codex: a FAILED on-demand rateLimits/read → probe-failed with the error (never silent)', c3?.kind === 'probe-failed' && verdictOf(/timed out/.test(c3.error)), c3);
   const c4 = cx.signalFromStream({ type: 'event_msg', payload: { type: 'task_failed', error: 'You have hit your usage limit', codexErrorInfo: 'usage_limit_reached', resetsAt: 1788175818, rateLimits: null } });
   ok('codex: task_failed usage_limit_reached → exhausted with resetsAtSec/Ms (snapshot null when none rode along)', c4?.source === 'task_failed' && c4.kind === 'exhausted' && c4.errorInfo === 'usage_limit_reached' && c4.resetsAtSec === 1788175818 && c4.resetsAtMs === 1788175818000 && c4.snapshot === null, c4);
   for (const info of ['quota_exceeded', 'usage_not_included', 'workspace_owner_usage_limit_reached', 'workspace_member_usage_limit_reached', 'workspace_member_credits_depleted']) {
@@ -219,7 +219,7 @@ What's contributing to your limits usage?`;
       + ' ' + (AT.getHours() % 12 || 12) + ':' + String(AT.getMinutes()).padStart(2, '0') + ' ' + (AT.getHours() < 12 ? 'AM' : 'PM');
     const WIRE = "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at " + WHEN + '.';
     ok('codex: the fixture reproduces the incident\'s prose SHAPE, ordinal suffix and all (a control that no longer looks like the wire proves nothing)',
-      /try again at [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th), \d{4} \d{1,2}:\d{2} (AM|PM)\.$/.test(WIRE), WIRE.slice(-46));
+      verdictOf(/try again at [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th), \d{4} \d{1,2}:\d{2} (AM|PM)\.$/.test(WIRE)), WIRE.slice(-46));
     for (const info of ['usageLimitExceeded', 'usage_limit_exceeded']) {
       const v = cx.signalFromStream({ type: 'event_msg', payload: { type: 'task_failed', error: WIRE, codexErrorInfo: info, resetsAt: null, rateLimits: null } });
       ok(`codex: ${info} — the spelling the wire really sends — is exhaustion`, v?.kind === 'exhausted', JSON.stringify(v).slice(0, 120));
@@ -288,7 +288,7 @@ What's contributing to your limits usage?`;
   const cl = harnesses.get('claude').quota, cx = harnesses.get('codex').quota;
   ok('claude: the harness classifier IS account-pool-auto.classifyAuthFailure (verbatim, no twin)', cl.classifyAuthFailure === claudeClassify && cl.classifyAuthFailure({ status: 403 }) === true && cl.classifyAuthFailure({ status: 401, attempt: 1 }) === false);
   ok('codex: typed unauthorized qualifies', cx.classifyAuthFailure({ codexErrorInfo: 'unauthorized' }) === true);
-  ok('codex: OpenAI wording — 401 Unauthorized / invalid_grant / token expired / not logged in / org deactivated', ['401 Unauthorized', 'invalid_grant: refresh token has expired', 'The access token has expired', 'Not logged in. Run codex login', 'This organization has been deactivated'].every((m) => cx.classifyAuthFailure({ message: m }) === true));
+  ok('codex: OpenAI wording — 401 Unauthorized / invalid_grant / token expired / not logged in / org deactivated', verdictOf(['401 Unauthorized', 'invalid_grant: refresh token has expired', 'The access token has expired', 'Not logged in. Run codex login', 'This organization has been deactivated'].every((m) => cx.classifyAuthFailure({ message: m }) === true)));
   ok('codex: 403 immediate; a lone first 401 is the refresh race; attempt ≥2 qualifies', cx.classifyAuthFailure({ status: 403 }) === true && cx.classifyAuthFailure({ status: 401, attempt: 1 }) === false && cx.classifyAuthFailure({ status: 401, attempt: 2 }) === true);
   ok('codex: 5xx / 429 / transport errors / empty never qualify', cx.classifyAuthFailure({ status: 500, message: 'Internal server error', attempt: 9 }) === false && cx.classifyAuthFailure({ status: 429 }) === false && cx.classifyAuthFailure({ message: 'stream disconnected before completion' }) === false && cx.classifyAuthFailure({}) === false && cx.classifyAuthFailure() === false);
 }
@@ -324,7 +324,7 @@ const engOpts = {
   getAutoResume: () => null,   getQuotaProbe: () => (key) => { cliSpy.push(key); return true; }, // the cli-usage rung's refresher (server.js: usage.refreshViaCliPanel)
 };
 const eng = engMod.create(engOpts);
-ok('engine exports the dispatcher + the registry lookups (functional seam, never a source grep)', ['probeQuotaForKey', 'quotaSourceFor', 'quotaBackendFor'].every((k) => typeof eng[k] === 'function'));
+ok('engine exports the dispatcher + the registry lookups (functional seam, never a source grep)', verdictOf(['probeQuotaForKey', 'quotaSourceFor', 'quotaBackendFor'].every((k) => typeof eng[k] === 'function')));
 ok('quotaSourceFor: claude/codex/shell resolve; falsy = legacy claude record; unknown = NULL source (loud, once)', eng.quotaSourceFor('codex').probe === 'rpc-rate-limits' && eng.quotaSourceFor(undefined).probe === 'cli-usage' && eng.quotaSourceFor('shell').probe === null && eng.quotaSourceFor('gemini') === harnesses.NULL_QUOTA);
 ok('quotaBackendFor: named account → its backend (legacy = claude); __global_codex__ → codex; identity-less key → the asking session; else claude',
   eng.quotaBackendFor('cxs-1') === 'codex' && eng.quotaBackendFor('sub-1') === 'claude' && eng.quotaBackendFor('__global_codex__') === 'codex' && eng.quotaBackendFor('__global__', { backend: 'codex' }) === 'codex' && eng.quotaBackendFor('host-h1', { backend: 'shell' }) === 'shell' && eng.quotaBackendFor('__global__') === 'claude');
@@ -346,7 +346,7 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   const r = await eng.probeQuotaForKey('cxs-1', { session: cxSess });
   ok("codex identity → the 'rpc-rate-limits' rung, ok", r.rung === 'rpc-rate-limits' && r.backend === 'codex' && r.ok === true && r.reason === null, r);
   ok('…NO claude spawn for a codex identity (the §1 P2 fix)', cliSpy.length === 0, cliSpy);
-  ok('…the wrapper verb went down the live session stdin', cxSess.writes.some((l) => l.trim() === JSON.stringify({ type: 'codex-read-limits' })), cxSess.writes);
+  ok('…the wrapper verb went down the live session stdin', verdictOf(cxSess.writes.some((l) => l.trim() === JSON.stringify({ type: 'codex-read-limits' }))), cxSess.writes);
   let cache = null; try { cache = JSON.parse(fs.readFileSync(path.join(cacheDir, 'cxs-1.json'), 'utf8')); } catch { }
   ok('…the reading was in the account cache BEFORE the probe settled (verdict-next sees it)', cache?.sevenDay?.usedPercent === 12 && cache.resetCredits?.availableCount === 1, cache);
   ok('…and the waiter list drained', (cxSess._codexLimitsWaiters || []).length === 0);
@@ -363,9 +363,9 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
 }
 {
   const r = await eng.probeQuotaForKey('__global_codex__');
-  ok('codex CLI login with NO live codex session on that identity → honest miss, still no claude spawn', r.ok === false && r.rung === 'rpc-rate-limits' && /no live local codex chat session/.test(r.reason) && cliSpy.length === 2, r);
+  ok('codex CLI login with NO live codex session on that identity → honest miss, still no claude spawn', r.ok === false && r.rung === 'rpc-rate-limits' && gateOf(/no live local codex chat session/.test(r.reason)) && cliSpy.length === 2, r);
   const r2 = await eng.probeQuotaForKey('__global__', { session: { backend: 'shell', mode: 'terminal' } });
-  ok('shell → no rung, nothing runs', r2.ok === false && r2.rung === null && /declares no quota probe/.test(r2.reason) && cliSpy.length === 2, r2);
+  ok('shell → no rung, nothing runs', r2.ok === false && r2.rung === null && gateOf(/declares no quota probe/.test(r2.reason)) && cliSpy.length === 2, r2);
   const r3 = await eng.probeQuotaForKey('__global__', { session: { backend: 'gemini', mode: 'chat', pty: {} } });
   ok('unknown backend → NULL source: no rung, no claude spawn (never gemini-as-claude)', r3.ok === false && r3.rung === null && r3.backend === 'gemini' && cliSpy.length === 2, r3);
 }
@@ -375,13 +375,13 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   const r = await eng.probeQuotaForKey('cxs-2', { session: silent, timeoutMs: 60 });
   // the bound's own word (lane wall-clock-ratchet-down: `< 2000 ms` judged the machine): the 60 ms timer answered and
   // dropped its waiter; the ms are information
-  ok(`an unanswered rateLimits/read times out honestly (bounded wait, waiter dropped — ${Date.now() - t0} ms)`, r.ok === false && /no rate_limits_updated within 60ms/.test(r.reason) && (silent._codexLimitsWaiters || []).length === 0, r);
+  ok(`an unanswered rateLimits/read times out honestly (bounded wait, waiter dropped — ${Date.now() - t0} ms)`, r.ok === false && gateOf(/no rate_limits_updated within 60ms/.test(r.reason)) && (silent._codexLimitsWaiters || []).length === 0, r);
   const failing = mkCodex('w-cx3', 'cxs-3', (m, s) => { if (m.type === 'codex-read-limits') setTimeout(() => eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', error: 'app-server: request timed out', onDemand: true }), 5); });
   const r2 = await eng.probeQuotaForKey('cxs-3', { session: failing });
-  ok('a FAILED on-demand read settles the probe with the wrapper\'s error (never hangs to the timeout)', r2.ok === false && /request timed out/.test(r2.reason), r2);
+  ok('a FAILED on-demand read settles the probe with the wrapper\'s error (never hangs to the timeout)', r2.ok === false && verdictOf(/request timed out/.test(r2.reason)), r2);
   const late = mkCodex('w-cx4', 'cxs-3', (m, s) => { if (m.type === 'codex-read-limits') setTimeout(() => eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', rateLimits: { primary: null, secondary: null } }), 5); });
   const r3 = await eng.probeQuotaForKey('cxs-3', { session: late });
-  ok('an unparseable reply settles ok:false (a null snapshot is not a reading)', r3.ok === false && /unparseable/.test(r3.reason), r3);
+  ok('an unparseable reply settles ok:false (a null snapshot is not a reading)', r3.ok === false && verdictOf(/unparseable/.test(r3.reason)), r3);
   ok('a pooled codex scope probes its CURRENT MEMBER through the same rung', (await eng.probeQuotaForKey('pool-cx', { session: cxSess })).rung === 'rpc-rate-limits');
 }
 // the two engine consumers route through the dispatcher (functional)
@@ -401,21 +401,21 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
 {
   const eng = read('src/server/usage-pool-engine.js');
   ok('WIRING: scheduleWallProbe and beforeAutoResumeFire both call probeQuotaForKey(target, { session })', (eng.match(/probeQuotaForKey\(target, \{ session \}\)/g) || []).length === 2);
-  ok('WIRING: getQuotaProbe is consumed ONLY inside the dispatcher\'s cli-usage rung', (eng.match(/getQuotaProbe\?\.\(\)/g) || []).length === 1 && /if \(rung === 'cli-usage'\) \{\s*\n\s*const probe = getQuotaProbe\?\.\(\);/.test(eng));
-  ok('WIRING: recordRateLimitEvent classifies through the session harness (no direct parseRateLimitEvent in the engine)', /quotaSourceFor\(session\.backend\)\.signalFromStream\(msg\)/.test(eng) && !/parseRateLimitEvent\(/.test(eng));
-  ok('WIRING: recordCodexQuotaSignal consumes the harness signal (snapshot / tripped / resetsAtSec), NAMES the reading channel at the write (2026-09-07 r3: writeSnap takes `source` as a parameter — the task_failed branch is a refusal, not this push) and settles probe waiters AFTER the cache write', /const snap0 = sig\?\.snapshot \|\| null;[\s\S]{0,200}const w = writeSnap\(snap0, 'codex-rate-limits'\);\s*\n[\s\S]{0,2000}settleLive\(session, w && w\.key \?/.test(eng) && /const tripped = sig\.tripped;/.test(eng) && /const resets = sig\.resetsAtSec;/.test(eng) && !/require\('\.\.\/usage-routes\.js'\)/.test(eng));
-  ok('WIRING: notePoolAuthFailure asks the session harness for the auth verdict', /quotaSourceFor\(session\.backend\)\.classifyAuthFailure\(info\)/.test(eng));
-  ok('WIRING: the wall-machine pins test-auto-resume relies on are intact (verify probe, ladder, veto)', /_wallVerifyAt\.set\(scope, Date\.now\(\)\);\s*\n\s*scheduleWallProbe\(session, scope, model, 0\)/.test(eng) && /async function beforeAutoResumeFire/.test(eng) && /WALL_PROBE_BACKOFF = \[0, 1800000, 3600000, 7200000\]/.test(eng));
-  ok('server.js still hands the cli-usage refresher to the engine (usage.refreshViaCliPanel — the ONE `claude -p /usage` spawn site)', /getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(read('server.js')));
-  ok('session-schema registers the waiter field with an owner', /_codexLimitsWaiters:\s*\{ owner: 'engine'/.test(read('src/session-schema.js')));
+  ok('WIRING: getQuotaProbe is consumed ONLY inside the dispatcher\'s cli-usage rung', (eng.match(/getQuotaProbe\?\.\(\)/g) || []).length === 1 && verdictOf(/if \(rung === 'cli-usage'\) \{\s*\n\s*const probe = getQuotaProbe\?\.\(\);/.test(eng)));
+  ok('WIRING: recordRateLimitEvent classifies through the session harness (no direct parseRateLimitEvent in the engine)', gateOf(/quotaSourceFor\(session\.backend\)\.signalFromStream\(msg\)/.test(eng)) && !/parseRateLimitEvent\(/.test(eng));
+  ok('WIRING: recordCodexQuotaSignal consumes the harness signal (snapshot / tripped / resetsAtSec), NAMES the reading channel at the write (2026-09-07 r3: writeSnap takes `source` as a parameter — the task_failed branch is a refusal, not this push) and settles probe waiters AFTER the cache write', gateOf(/const snap0 = sig\?\.snapshot \|\| null;[\s\S]{0,200}const w = writeSnap\(snap0, 'codex-rate-limits'\);\s*\n[\s\S]{0,2000}settleLive\(session, w && w\.key \?/.test(eng)) && gateOf(/const tripped = sig\.tripped;/.test(eng)) && gateOf(/const resets = sig\.resetsAtSec;/.test(eng)) && !/require\('\.\.\/usage-routes\.js'\)/.test(eng));
+  ok('WIRING: notePoolAuthFailure asks the session harness for the auth verdict', verdictOf(/quotaSourceFor\(session\.backend\)\.classifyAuthFailure\(info\)/.test(eng)));
+  ok('WIRING: the wall-machine pins test-auto-resume relies on are intact (verify probe, ladder, veto)', gateOf(/_wallVerifyAt\.set\(scope, Date\.now\(\)\);\s*\n\s*scheduleWallProbe\(session, scope, model, 0\)/.test(eng)) && gateOf(/async function beforeAutoResumeFire/.test(eng)) && verdictOf(/WALL_PROBE_BACKOFF = \[0, 1800000, 3600000, 7200000\]/.test(eng)));
+  ok('server.js still hands the cli-usage refresher to the engine (usage.refreshViaCliPanel — the ONE `claude -p /usage` spawn site)', verdictOf(/getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(read('server.js'))));
+  ok('session-schema registers the waiter field with an owner', verdictOf(/_codexLimitsWaiters:\s*\{ owner: 'engine'/.test(read('src/session-schema.js'))));
   const ur = read('src/usage-routes.js');
-  ok('usage-routes defines NO quota normalizer of its own any more — it binds the registry and re-exports the old names', !/function normalizeCodexRateLimit\(/.test(ur) && !/function parseCliUsageText\(/.test(ur) && /harnesses\.get\('codex'\)\.quota;?\s*\n?[\s\S]{0,120}?codexQuota\.normalize|harnesses\.get\('codex'\)\.quota\.normalize/.test(ur) && /module\.exports = \{ setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe, getOAuthToken \}/.test(ur));   // r2575: getOAuthToken exported (the kept read's legs)
+  ok('usage-routes defines NO quota normalizer of its own any more — it binds the registry and re-exports the old names', !/function normalizeCodexRateLimit\(/.test(ur) && !/function parseCliUsageText\(/.test(ur) && gateOf(/harnesses\.get\('codex'\)\.quota;?\s*\n?[\s\S]{0,120}?codexQuota\.normalize|harnesses\.get\('codex'\)\.quota\.normalize/.test(ur)) && verdictOf(/module\.exports = \{ setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe, getOAuthToken \}/.test(ur)));   // r2575: getOAuthToken exported (the kept read's legs)
   const arch = read('scripts/test-architecture.mjs');
   // both sides' pins kept: backend-caps is in the PURE SET (membership) AND inside the `const PURE = new Set([` literal (placement)
-  ok('test-architecture tiers the harness modules as SHARED (never reaching up into ORCH) and backend-caps as PURE', /'src\/harnesses\/claude-quota\.js', 'src\/harnesses\/codex-quota\.js'/.test(arch) && /'src\/backend-caps\.js'[,\]]/.test(arch) && /const PURE = new Set\(\[[^\]]*'src\/backend-caps\.js'/.test(arch));
+  ok('test-architecture tiers the harness modules as SHARED (never reaching up into ORCH) and backend-caps as PURE', gateOf(/'src\/harnesses\/claude-quota\.js', 'src\/harnesses\/codex-quota\.js'/.test(arch)) && gateOf(/'src\/backend-caps\.js'[,\]]/.test(arch)) && verdictOf(/const PURE = new Set\(\[[^\]]*'src\/backend-caps\.js'/.test(arch)));
   const ss = read('src/server/stdout/claude-stream-json.js') + '\n' + read('src/server/stdout/codex-events.js'); // S5: per-protocol consumer modules
-  ok('the stdout consumers still feed both engine entry points (claude rate_limit_event / codex quota events) — S5 moved the parse behind the registry, S4 owns the signals', /recordRateLimitEvent\(session, msg\)/.test(ss) && /recordCodexQuotaSignal\?\.\(session, msg\.payload(?:, msg)?\)/.test(ss));
-  ok('the codex wrapper still serves the verb the rpc rung writes (codex-read-limits → account/rateLimits/read → rate_limits_updated)', /msg\.type === 'codex-read-limits'/.test(read('data/bin/codex-chat-wrapper.js')) && /account\/rateLimits\/read/.test(read('data/bin/codex-chat-wrapper.js')));
+  ok('the stdout consumers still feed both engine entry points (claude rate_limit_event / codex quota events) — S5 moved the parse behind the registry, S4 owns the signals', gateOf(/recordRateLimitEvent\(session, msg\)/.test(ss)) && verdictOf(/recordCodexQuotaSignal\?\.\(session, msg\.payload(?:, msg)?\)/.test(ss)));
+  ok('the codex wrapper still serves the verb the rpc rung writes (codex-read-limits → account/rateLimits/read → rate_limits_updated)', gateOf(/msg\.type === 'codex-read-limits'/.test(read('data/bin/codex-chat-wrapper.js'))) && verdictOf(/account\/rateLimits\/read/.test(read('data/bin/codex-chat-wrapper.js'))));
 }
 
 // ── 9. A DESCRIPTOR-ONLY harness is served (lane dc-pool-quota, rv-harnesses H2/H3) ──
@@ -454,16 +454,16 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   const am = new AccountManager({ dataDir: adir, platform: 'linux' });
   am._state.accounts.push({ ...fqRec });
   let sp = null, e1 = null; try { sp = am.resolveForSpawn('fq-1', 'fakeq'); } catch (e) { e1 = e.message; }
-  ok('§9 accounts.js spawns it from its creds row (spawnEnvVar = its own dir; no accounts edit)', !!sp && sp.localEnv && sp.localEnv.FAKEQ_HOME === path.join(adir, 'fakeq-subs', 'fq-1') && sp.kind === 'fakeq-subscription', sp || e1);
+  ok('§9 accounts.js spawns it from its creds row (spawnEnvVar = its own dir; no accounts edit)', !!sp && gateOf(sp.localEnv) && sp.localEnv.FAKEQ_HOME === path.join(adir, 'fakeq-subs', 'fq-1') && sp.kind === 'fakeq-subscription', sp || e1);
   let e2 = null; try { am.resolveForSpawn('fq-1', 'claude'); } catch (e) { e2 = e.message; }
-  ok('§9 …and the securestorage form still refuses its record', /not a Claude account/.test(String(e2)), e2);
+  ok('§9 …and the securestorage form still refuses its record', verdictOf(/not a Claude account/.test(String(e2))), e2);
   const accSrc = read('src/accounts.js');
   const an = "    if (this._credsOf(backend)?.spawnForm === 'isolated-home') return";
   ok('§9 control anchor: the spawn-form dispatch is spelled exactly once', accSrc.split(an).length === 2);
   const am2 = new (M.load('src/accounts.js', editAnchor(accSrc, an, "    if (backend === 'codex') return", "src/accounts.js"), 'codex-branch').AccountManager)({ dataDir: adir, platform: 'linux' });
   am2._state.accounts.push({ ...fqRec });
   let e3 = null; try { am2.resolveForSpawn('fq-1', 'fakeq'); } catch (e) { e3 = e.message; }
-  ok('§9 CONTROL: one codex branch restored in a patched accounts.js ⇒ the fake creds row is not served', /not a Claude account/.test(String(e3)), e3);
+  ok('§9 CONTROL: one codex branch restored in a patched accounts.js ⇒ the fake creds row is not served', verdictOf(/not a Claude account/.test(String(e3))), e3);
   sessions.delete('w-fq'); delete ROSTER['fq-1'];
   harnesses.unregister('fakeq'); delete BACKEND_CAPS.fakeq;
 }
@@ -474,9 +474,9 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
 // whitelist is a FAST row of ci.mjs (pre-push, fail-fast), and its census reads this slice's files like every other.
 {
   const ci = read('scripts/ci.mjs');
-  ok('scripts/test-vendor-whitelist.mjs is a FAST row of ci.mjs — the §ban-safety census runs over this slice on every push (no new vendor call site)', /\{ name: 'test-vendor-whitelist', tier: 'fast'/.test(ci) && fs.existsSync(path.join(REPO, 'scripts/test-vendor-whitelist.mjs')));
+  ok('scripts/test-vendor-whitelist.mjs is a FAST row of ci.mjs — the §ban-safety census runs over this slice on every push (no new vendor call site)', gateOf(/\{ name: 'test-vendor-whitelist', tier: 'fast'/.test(ci)) && verdictOf(fs.existsSync(path.join(REPO, 'scripts/test-vendor-whitelist.mjs'))));
 }
 
 try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

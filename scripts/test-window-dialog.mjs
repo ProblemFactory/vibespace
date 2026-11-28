@@ -25,7 +25,7 @@ const require = createRequire(import.meta.url);
 const D = require('../src/desktop-display.js'), WT = require('../src/window-targets.js'), R = require('../src/window-reach.js'), M = require('../src/desktop-apps.js');
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 const skip = (why) => { skipped++; console.log(`  - SKIP ${why}`); };
 const done = () => { console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`); process.exit(fail ? 1 : 0); };
 const bin = (n) => D.binOnPath(n, { env: process.env });
@@ -98,9 +98,9 @@ else {
   for (let i = 0; i < 40 && !rows.some((w) => w.title === 'Open' && w.mapped); i++) { await sleep(250); rows = await windowsNow(); }
   const plan = R.pixelPlan(rows);
   const sh = plan.ok ? await shot(plan, 'zenity') : { ok: false };
-  ok(plan.ok && plan.members.length === 1 && sh.ok && sh.lit > 0, `① the plan holds zenity's dialog (${plan.w}x${plan.h}), its image lit (${sh.lit}/${sh.sampled})`, { plan, sh });
+  ok(gateOf(plan.ok) && plan.members.length === 1 && gateOf(sh.ok) && sh.lit > 0, `① the plan holds zenity's dialog (${plan.w}x${plan.h}), its image lit (${sh.lit}/${sh.sampled})`, { plan, sh });
   const s = (await onBus(z.pid)) ? await snap(z.pid) : { ok: false, why: 'never on the bus' };
-  ok(s.ok && s.d.dialog && s.d.dialog.name === 'Open' && /^a dialog is up: "Open"/.test(WT.dialogHead(s.d.dialog)), '① the snapshot\'s head names it: ' + (s.ok ? WT.dialogHead(s.d.dialog) : s.why));
+  ok(gateOf(s.ok) && gateOf(s.d.dialog) && s.d.dialog.name === 'Open' && verdictOf(/^a dialog is up: "Open"/.test(WT.dialogHead(s.d.dialog))), '① the snapshot\'s head names it: ' + (s.ok ? WT.dialogHead(s.d.dialog) : s.why));
   try { process.kill(-z.pid, 'SIGTERM'); } catch { }
   await sleep(800);
 }
@@ -114,20 +114,20 @@ if (!ready) { ok(false, '② the GTK fixture never mapped'); done(); }
 const pid = Number(ready[1]);
 await sleep(1000);
 await detachViewer();
-ok(await onBus(pid), `② the fixture (pid ${pid}) is on the private bus`);
+ok(verdictOf(await onBus(pid)), `② the fixture (pid ${pid}) is on the private bus`);
 const s0 = await snap(pid);
 const btn = s0.ok && [...s0.refs.values()].find((e) => /button/.test(e.role) && e.name === 'Save as…');
 if (!btn) { ok(false, '② no "Save as…" button in the tree', s0.why); done(); }
 const pick = WT.pickAction(btn.actions || []);
 const clicked = await WT.actOnNode({ entry: btn, verb: 'do_action', action: pick && pick.index, env: process.env });
 const dl = await lineOf(app, /DIALOG save (\d+)/);
-ok(clicked.ok && dl, '② "Save as…" clicked THROUGH THE TREE ⇒ the dialog mapped app-side (GTK says so)', clicked);
+ok(gateOf(clicked.ok) && verdictOf(dl), '② "Save as…" clicked THROUGH THE TREE ⇒ the dialog mapped app-side (GTK says so)', clicked);
 const dxid = dl ? Number(dl[1]) : 0;
 await sleep(1200);
 const before = await windowsNow();
 const p0 = R.pixelPlan(before);
 const dRow = before.find((w) => w.id === dxid);
-ok(p0.ok && p0.visible === true && p0.members.length === 1 && dRow && dRow.mapped === false && Number.isInteger(dRow.frame), `② MEASURED (the pre-fix read): the main stays mapped, the dialog 0x${dxid.toString(16)} sits in an UNMAPPED corral — the plan has ${p0.members.length} member (the owner's windows: 1)`, { members: p0.members, dRow });
+ok(gateOf(p0.ok) && p0.visible === true && p0.members.length === 1 && gateOf(dRow) && dRow.mapped === false && verdictOf(Number.isInteger(dRow.frame)), `② MEASURED (the pre-fix read): the main stays mapped, the dialog 0x${dxid.toString(16)} sits in an UNMAPPED corral — the plan has ${p0.members.length} member (the owner's windows: 1)`, { members: p0.members, dRow });
 const sh0 = await shot(p0, 'gtk-before');
 const frames = R.unshownFrames(before);
 ok(frames.length === 1 && frames[0] === (dRow && dRow.frame), '② unshownFrames names exactly that corral', frames);
@@ -138,11 +138,11 @@ const p1 = R.pixelPlan(after);
 const sh1 = await shot(p1, 'gtk-after');
 const oldOrder = { ...p1, members: [...p1.members].reverse() };
 const sh1old = await shot(oldOrder, 'gtk-old-order');
-ok(m.ok && p1.members.length === 2 && p1.members[p1.members.length - 1].id === dxid && sh1.ok && sh1.bytes !== sh0.bytes && (sh1.windows || []).every((w) => w.ok), `② showWindows maps it ⇒ 2 members, the dialog LAST (on top); the image changed (${sh0.bytes} → ${sh1.bytes} B), every member grabbed`, { m, members: p1.members, sh1 });
-ok(sh1old.ok && sh1old.bytes !== sh1.bytes, `② the old top-first order draws the main window over its dialog — a different image (${sh1old.bytes} B vs ${sh1.bytes} B)`);
+ok(gateOf(m.ok) && p1.members.length === 2 && p1.members[p1.members.length - 1].id === dxid && gateOf(sh1.ok) && sh1.bytes !== sh0.bytes && verdictOf((sh1.windows || []).every((w) => w.ok)), `② showWindows maps it ⇒ 2 members, the dialog LAST (on top); the image changed (${sh0.bytes} → ${sh1.bytes} B), every member grabbed`, { m, members: p1.members, sh1 });
+ok(gateOf(sh1old.ok) && sh1old.bytes !== sh1.bytes, `② the old top-first order draws the main window over its dialog — a different image (${sh1old.bytes} B vs ${sh1.bytes} B)`);
 const s1 = await snap(pid);
 const field = s1.ok && s1.d.dialog && s1.d.dialog.field;
-ok(s1.ok && s1.d.dialog && s1.d.dialog.name === 'Save as' && field && s1.d.nodes[0].ref === s1.d.dialog.ref, '② the snapshot\'s head: ' + (s1.ok ? WT.dialogHead(s1.d.dialog) : s1.why));
+ok(gateOf(s1.ok) && gateOf(s1.d.dialog) && s1.d.dialog.name === 'Save as' && gateOf(field) && s1.d.nodes[0].ref === s1.d.dialog.ref, '② the snapshot\'s head: ' + (s1.ok ? WT.dialogHead(s1.d.dialog) : s1.why));
 // type WITHOUT a ref: the engine's rule (focused editable, else the dialog's field) through the real helper
 const foc = await WT.focusedNode({ pids: [pid], env: process.env });
 const tt = WT.typeTarget({ focused: foc.ok ? foc.node : null, dialog: s1.ok ? s1.d.dialog : null });
@@ -151,7 +151,7 @@ const typed = entry ? await WT.actOnNode({ entry, verb: 'set_text', text: 'vs-di
 await sleep(400);
 const s2 = await snap(pid);
 const back = s2.ok ? s2.snapshot.nodes.find((n) => n.ref === tt.ref) : null;
-ok(typed.ok && back && back.text === 'vs-dialog-typed.txt', `② type without a ref → ${tt.use} ${tt.ref} → the dialog's Name entry reads back "${back && back.text}"`, { tt, typed });
+ok(gateOf(typed.ok) && gateOf(back) && back.text === 'vs-dialog-typed.txt', `② type without a ref → ${tt.use} ${tt.ref} → the dialog's Name entry reads back "${back && back.text}"`, { tt, typed });
 // key Escape into the dialog's OWN X window (windowOfNode → windowfocus), the pointer inside it
 const dw = R.windowOfNode(s2.ok && s2.d.dialog, p1.members);
 const answered = lineOf(app, /ANSWER save (-?\d+) (\S*)/, 5000); // listening BEFORE the key (GTK answers within the await)
@@ -159,7 +159,7 @@ const k = await WT.injectKey({ bins, xenv, chord: WT.parseChord('Escape'), focus
 const ans = await answered;
 await sleep(600);
 const s3 = await snap(pid);
-ok(dw && dw.id === dxid && k.ok && ans && s3.ok && s3.d.dialog === null, `② key Escape into the dialog's window 0x${dw ? dw.id.toString(16) : '?'} closed it (GTK answered ${ans && ans[1]}, its Name field held "${ans && ans[2]}"); the tree no longer holds it`, { k, s3d: s3.ok && s3.d.dialog });
+ok(gateOf(dw) && dw.id === dxid && gateOf(k.ok) && gateOf(ans) && gateOf(s3.ok) && s3.d.dialog === null, `② key Escape into the dialog's window 0x${dw ? dw.id.toString(16) : '?'} closed it (GTK answered ${ans && ans[1]}, its Name field held "${ans && ans[2]}"); the tree no longer holds it`, { k, s3d: s3.ok && s3.d.dialog });
 try { process.kill(-app.pid, 'SIGTERM'); } catch { }
 
 // ③ lane app-display-portal: a dialog drawn by the desktop PORTAL (another process) — the owner's JASP on xpra :4 drew its
@@ -254,7 +254,7 @@ const pressOpen = async (f) => { const asked = lineOf(f.c, /NATIVE open/, 5000);
 const f0 = await fixture(xenv);
 await pressOpen(f0);
 const c0App = await onDisp(x.display, authFile), c0Decoy = await onDisp(decoy, dauth);
-ok(f0.pid && c0Decoy && !c0App, `③ CONTROL (today): the session bus's portal draws the chooser on the DECOY main desktop ${decoy} (${c0Decoy}), not on the app's ${x.display} (${c0App})`);
+ok(gateOf(f0.pid) && gateOf(c0Decoy) && !c0App, `③ CONTROL (today): the session bus's portal draws the chooser on the DECOY main desktop ${decoy} (${c0Decoy}), not on the app's ${x.display} (${c0App})`);
 try { process.kill(-f0.c.pid, 'SIGTERM'); } catch { }
 await run(bin('xdotool'), ['key', 'Escape'], { ...process.env, DISPLAY: decoy, XAUTHORITY: dauth });
 await sleep(800);
@@ -267,7 +267,7 @@ if (CHROME) { // a warm-up launch takes Chrome's ONE-TIME first-run windows in t
 const ch0 = CHROME ? await chromeLeg(xenv, 'control') : null;
 if (!ch0) skip('③ no google-chrome on this machine (the browser legs)');
 else {
-  ok(ch0.pressed.ok && ch0.onDecoy && !ch0.onApp, `③ CONTROL (the owner's Chrome): the file input pressed (${ch0.pressed.by}) ⇒ the session's portal maps "${ch0.onDecoy}" on the DECOY main desktop, nothing on the app display`, ch0.pressed);
+  ok(gateOf(ch0.pressed.ok) && gateOf(ch0.onDecoy) && !ch0.onApp, `③ CONTROL (the owner's Chrome): the file input pressed (${ch0.pressed.by}) ⇒ the session's portal maps "${ch0.onDecoy}" on the DECOY main desktop, nothing on the app display`, ch0.pressed);
   await endChrome(ch0);
   await run(bin('xdotool'), ['key', 'Escape'], { ...process.env, DISPLAY: decoy, XAUTHORITY: dauth });
   await sleep(600);
@@ -276,19 +276,19 @@ else {
 const a11y = await D.a11yBusAddress({ env: process.env });
 const plan = M.portalPlan({ dir: path.join(S, 'app1'), display: x.display, authFile, bins: pb, a11y, why: 'row' });
 const pc = plan.ok ? await D.startPortalBus({ plan, env: xenv, logFd: fs.openSync(path.join(S, 'portal.log'), 'a') }).catch((e) => ({ error: e.message })) : { error: plan.why };
-ok(pc && pc.pid && !pc.error, `③ the companion bus listens at ${plan.address} (a11y ${a11y ? 'the suite\'s' : 'unknown'})`, pc && pc.error);
+ok(gateOf(pc) && gateOf(pc.pid) && !pc.error, `③ the companion bus listens at ${plan.address} (a11y ${a11y ? 'the suite\'s' : 'unknown'})`, pc && pc.error);
 if (!pc || pc.error) done();
 kids.add(pc);
 const f1 = await fixture({ ...xenv, ...plan.appEnv });
 await pressOpen(f1);
 const c1App = await onDisp(x.display, authFile), c1Decoy = await onDisp(decoy, dauth);
-ok(c1App && !c1Decoy, `③ FIX: the app's own portal draws the chooser ON THE APP'S DISPLAY ${x.display} (${c1App}), the decoy has none (${c1Decoy})`);
+ok(gateOf(c1App) && !c1Decoy, `③ FIX: the app's own portal draws the chooser ON THE APP'S DISPLAY ${x.display} (${c1App}), the decoy has none (${c1Decoy})`);
 const rows = await windowsNow();
 const p3 = R.pixelPlan(rows);
 const chooser = rows.find((w) => w.title === 'Open' && w.mapped);
-ok(p3.ok && chooser && p3.members.some((m) => m.id === chooser.id) && p3.members[p3.members.length - 1].id === chooser.id, `③ the screenshot plan composes the portal's chooser, on top (${p3.members.length} members)`, rows.map((w) => `${w.title}:${w.mapped}`));
+ok(gateOf(p3.ok) && gateOf(chooser) && gateOf(p3.members.some((m) => m.id === chooser.id)) && p3.members[p3.members.length - 1].id === chooser.id, `③ the screenshot plan composes the portal's chooser, on top (${p3.members.length} members)`, rows.map((w) => `${w.title}:${w.mapped}`));
 const sh3 = p3.ok ? await shot(p3, 'portal-plan') : { ok: false };
-ok(sh3.ok && sh3.lit > 0, `③ its image is lit (${sh3.lit}/${sh3.sampled})`);
+ok(gateOf(sh3.ok) && sh3.lit > 0, `③ its image is lit (${sh3.lit}/${sh3.sampled})`);
 if (process.env.VS_PORTAL_PNG_DIR && viewerDisplay) {
   const out = path.join(process.env.VS_PORTAL_PNG_DIR, 'pane-dialog.png');
   const g = await run('python3', ['-c', "import sys,gi; gi.require_version('Gdk','3.0'); from gi.repository import Gdk; w=Gdk.get_default_root_window(); p=Gdk.pixbuf_get_from_window(w,0,0,w.get_width(),w.get_height()); p.savev(sys.argv[1],'png',[],[])", out], { ...process.env, DISPLAY: viewerDisplay, XAUTHORITY: viewerAuth });
@@ -301,7 +301,7 @@ const portalPids = members.filter((p) => /^xdg-desktop-por/.test(comm(p)));
 ok(portalPids.length >= 2, `③ the bus ACTIVATED the portal + its gtk backend IN ITS OWN SESSION: ${members.map((p) => comm(p)).join(', ')}`);
 const s4 = await WT.snapshotTarget({ pids: [f1.pid, ...members], env: process.env, wallMs: 20000 });
 const d3 = s4.ok ? WT.dialogFirst(s4.snapshot.nodes) : null;
-ok(s4.ok && d3 && d3.dialog && d3.dialog.name === 'Open', '③ the tree (app + companion pids, the user\'s a11y bus) names it: ' + (s4.ok ? WT.dialogHead(d3.dialog) : s4.why));
+ok(gateOf(s4.ok) && gateOf(d3) && gateOf(d3.dialog) && d3.dialog.name === 'Open', '③ the tree (app + companion pids, the user\'s a11y bus) names it: ' + (s4.ok ? WT.dialogHead(d3.dialog) : s4.why));
 const picked = path.join(S, 'home', 'picked-by-portal.txt'); fs.writeFileSync(picked, 'x\n');
 const answered3 = lineOf(f1.c, /ANSWER open (-?\d+) (\S*)/, 8000);
 const kenv = { ...xenv, LC_ALL: 'C.UTF-8' };
@@ -310,16 +310,16 @@ await run(bin('xdotool'), ['key', 'ctrl+l'], kenv); await sleep(300);
 await run(bin('xdotool'), ['type', '--delay', '5', picked], kenv); await sleep(300);
 await run(bin('xdotool'), ['key', 'Return'], kenv);
 const ans3 = await answered3;
-ok(ans3 && Number(ans3[1]) === -3 && ans3[2] === picked, `③ the path typed into the app-display chooser reached the app (GTK answered ${ans3 && ans3[1]} "${ans3 && ans3[2]}")`);
+ok(gateOf(ans3) && Number(ans3[1]) === -3 && ans3[2] === picked, `③ the path typed into the app-display chooser reached the app (GTK answered ${ans3 && ans3[1]} "${ans3 && ans3[2]}")`);
 if (CHROME) {
   const ch1 = await chromeLeg({ ...xenv, ...plan.appEnv }, 'fix');
   const crow = await windowsNow();
   const cplan = R.pixelPlan(crow);
-  ok(ch1.pressed.ok && ch1.onApp && !ch1.onDecoy && cplan.ok && cplan.members.length >= 2, `③ FIX (Chrome on its own portal, pressed by ${ch1.pressed.by}): the chooser "${ch1.onApp}" maps ON THE APP'S DISPLAY, the decoy has none; the plan holds ${cplan.members.length} windows`, { pressed: ch1.pressed, rows: crow.map((w) => `${w.title}:${w.mapped}`) });
+  ok(gateOf(ch1.pressed.ok) && gateOf(ch1.onApp) && !ch1.onDecoy && gateOf(cplan.ok) && cplan.members.length >= 2, `③ FIX (Chrome on its own portal, pressed by ${ch1.pressed.by}): the chooser "${ch1.onApp}" maps ON THE APP'S DISPLAY, the decoy has none; the plan holds ${cplan.members.length} windows`, { pressed: ch1.pressed, rows: crow.map((w) => `${w.title}:${w.mapped}`) });
   const cm = census();
   const cs = await WT.snapshotTarget({ pids: [ch1.pid, ...cm], env: process.env, wallMs: 20000 });
   const cd = cs.ok ? WT.dialogFirst(cs.snapshot.nodes) : null;
-  ok(cs.ok && cd && cd.dialog && cd.dialog.name === ch1.onApp && cd.nodes[0].ref === cd.dialog.ref, '③ the tree names Chrome\'s chooser FIRST: ' + (cs.ok && cd && cd.dialog ? WT.dialogHead(cd.dialog) : cs.why || 'no dialog'));
+  ok(gateOf(cs.ok) && gateOf(cd) && gateOf(cd.dialog) && cd.dialog.name === ch1.onApp && cd.nodes[0].ref === cd.dialog.ref, '③ the tree names Chrome\'s chooser FIRST: ' + (cs.ok && cd && cd.dialog ? WT.dialogHead(cd.dialog) : cs.why || 'no dialog'));
   if (process.env.VS_PORTAL_PNG_DIR && viewerDisplay) {
     const out = path.join(process.env.VS_PORTAL_PNG_DIR, 'pane-chrome.png');
     const g = await run('python3', ['-c', "import sys,gi; gi.require_version('Gdk','3.0'); from gi.repository import Gdk; w=Gdk.get_default_root_window(); p=Gdk.pixbuf_get_from_window(w,0,0,w.get_width(),w.get_height()); p.savev(sys.argv[1],'png',[],[])", out], { ...process.env, DISPLAY: viewerDisplay, XAUTHORITY: viewerAuth });
@@ -336,4 +336,4 @@ const alive = members.filter((p) => D.pidAlive(p) && comm(p) !== 'zombie');
 const um = await D.unmountUnder(path.join(S, 'app1', 'portal'));
 ok(alive.length === 0, `③ the companion dies with its session (${members.length} pids, ${alive.length} alive; FUSE mounts unmounted: ${um.length})`, alive.map((p) => `${p}:${comm(p)}`));
 try { process.kill(-f1.c.pid, 'SIGTERM'); } catch { }
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

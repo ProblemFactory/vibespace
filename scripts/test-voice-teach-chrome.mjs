@@ -50,7 +50,7 @@ const require = createRequire(import.meta.url);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700) : ''}`); }
 };
@@ -377,29 +377,29 @@ const isCardDoor = (d) => !!d && d.btn === '用 Fish Audio 连接' && d.above;
 try {
   console.log('⓪ the doors (no key, no sign-in): the Plugins row\'s chip, the sheet\'s line to the key card, the card\'s own Connect');
   const p = await page(1280, 860);
-  ok('the page is a secure, non-loopback origin (https://hub.test); the plugin is OFF and nothing is connected', await p.ev('window.isSecureContext && location.hostname === "hub.test"') && rec.enabled === false && !client.connected());
+  ok('the page is a secure, non-loopback origin (https://hub.test); the plugin is OFF and nothing is connected', gateOf(await p.ev('window.isSecureContext && location.hostname === "hub.test"')) && rec.enabled === false && !client.connected());
   const chip0 = await rowDoor(p);
-  ok('the Plugins row: the chip is THE DOOR — a button reading 用 Fish Audio 连接 (primary tone), its title names the key\'s place; no switch until it is connected (lane ui-controls-and-bugs: never a greyed one)', isRowDoor(chip0) && chip0.title.includes('或在「集成」里粘贴 Dropline 密钥') && chip0.noSwitch, chip0);
+  ok('the Plugins row: the chip is THE DOOR — a button reading 用 Fish Audio 连接 (primary tone), its title names the key\'s place; no switch until it is connected (lane ui-controls-and-bugs: never a greyed one)', gateOf(isRowDoor(chip0)) && gateOf(chip0.title.includes('或在「集成」里粘贴 Dropline 密钥')) && verdictOf(chip0.noSwitch), chip0);
   await p.shot('door-row.png', '#plugins');
   await p.clickSel(`${ROW} .plugin-chip`);
   const sheet = await p.until('!!document.querySelector("#voice-sheet .oauth-connect-btn") && !!document.querySelector("#voice-sheet .oauth-connect-key")', 6000);
   const sf = sheet ? await p.ev('(() => { const s = document.getElementById("voice-sheet"); const b = s.querySelector(".oauth-connect-btn"), k = s.querySelector(".oauth-connect-key"); return { btn: b.textContent, key: k.textContent, after: !!(b.compareDocumentPosition(k) & Node.DOCUMENT_POSITION_FOLLOWING) }; })()') : null;
-  ok('a press on the chip opens the Voice sheet: Connect first, then ONE line to the key — 已有 Dropline 密钥？到「集成」里粘贴', !!sf && sf.btn === '用 Fish Audio 连接' && sf.key === '已有 Dropline 密钥？到「集成」里粘贴' && sf.after, sf || await p.ev('document.body.innerText.slice(0, 400)'));
+  ok('a press on the chip opens the Voice sheet: Connect first, then ONE line to the key — 已有 Dropline 密钥？到「集成」里粘贴', !!sf && sf.btn === '用 Fish Audio 连接' && sf.key === '已有 Dropline 密钥？到「集成」里粘贴' && verdictOf(sf.after), sf || await p.ev('document.body.innerText.slice(0, 400)'));
   await p.shot('door-sheet.png', '#voice-sheet .dialog');
   await p.clickSel('#voice-sheet .oauth-connect-key');
   const onCard = await p.until(`!document.getElementById('voice-sheet') && !!document.querySelector('${CARD}.integ-focus')`, 6000);
-  ok('the sheet\'s line closes the sheet and opens the Integrations window ON the dropline card (focused)', onCard, await p.ev(`({ sheet: !!document.getElementById('voice-sheet'), cards: [...document.querySelectorAll('.integ-card')].map((c) => c.dataset.integ + (c.classList.contains('integ-focus') ? '*' : '')) })`));
+  ok('the sheet\'s line closes the sheet and opens the Integrations window ON the dropline card (focused)', verdictOf(onCard), await p.ev(`({ sheet: !!document.getElementById('voice-sheet'), cards: [...document.querySelectorAll('.integ-card')].map((c) => c.dataset.integ + (c.classList.contains('integ-focus') ? '*' : '')) })`));
   const card0 = await cardDoor(p);
   const key0 = await p.ev(`(() => { const r = document.querySelector('${CARD} .integ-field[data-field="apiKey"]'); return r ? { missing: !!r.querySelector('.integ-missing'), help: (r.querySelector('.integ-help') || {}).textContent || '' } : null; })()`);
-  ok('the Integrations card signs in too: 用 Fish Audio 连接 ABOVE the key field; the key optional (never marked required), its help says either one', isCardDoor(card0) && !!key0 && !key0.missing && key0.help.startsWith('可以在上面登录，或者粘贴一个 key'), { card0, key0 });
-  ok('… https here (hub.test): no refusal sentence under the button', card0 && card0.why === '', card0);
+  ok('the Integrations card signs in too: 用 Fish Audio 连接 ABOVE the key field; the key optional (never marked required), its help says either one', gateOf(isCardDoor(card0)) && !!key0 && !key0.missing && verdictOf(key0.help.startsWith('可以在上面登录，或者粘贴一个 key')), { card0, key0 });
+  ok('… https here (hub.test): no refusal sentence under the button', gateOf(card0) && card0.why === '', card0);
   await sleep(900); await p.ev(`(document.querySelector('${CARD}').scrollIntoView({ block: 'start' }), true)`);   // the focus scroll is smooth: settle it
   await p.shot('door-card.png', CARD);
   // RED CONTROLS: the same probes on the mutant bundles (fresh tabs, nothing connected yet) — each hides ONE door
   for (const [k, which] of [['m1', 'row'], ['m2', 'card']]) {
     const pm = await page(1280, 860, k);
     const row = isRowDoor(await rowDoor(pm)), crd = isCardDoor(await cardDoor(pm));
-    ok(`CONTROL ${k}: ${which === 'row' ? 'the base\'s status chip (no Dropline key yet)' : 'the card without its Connect block'} ⇒ that door probe is RED (the other stays green)`, mutantOnce[MUTANTS[k][0]] === true && (which === 'row' ? !row && crd : row && !crd), { k, row, crd, once: mutantOnce });
+    ok(`CONTROL ${k}: ${which === 'row' ? 'the base\'s status chip (no Dropline key yet)' : 'the card without its Connect block'} ⇒ that door probe is RED (the other stays green)`, mutantOnce[MUTANTS[k][0]] === true && (which === 'row' ? !row && verdictOf(crd) : gateOf(row) && !crd), { k, row, crd, once: mutantOnce });
     pm.close();
     await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${pm.targetId}`).catch(() => null);
   }
@@ -408,32 +408,32 @@ try {
   console.log('⓪b the card\'s Connect end to end (the plugin OFF), its Test on the sign-in, 断开');
   await p.clickSel(`${CARD} .oauth-connect-btn`);
   const cs0 = await consent(p);
-  ok('the card\'s Connect opened the consent tab; consent + the code ⇒ the hub\'s own https callback: connected — the plugin still OFF (Connect never waits for the switch)', !!cs0.tab && cs0.landed && rec.enabled === false, cs0);
+  ok('the card\'s Connect opened the consent tab; consent + the code ⇒ the hub\'s own https callback: connected — the plugin still OFF (Connect never waits for the switch)', !!cs0.tab && gateOf(cs0.landed) && rec.enabled === false, cs0);
   const cardOn = await p.until(`(document.querySelector('${CARD} .oauth-connect-words') || {}).textContent === '已连接：Ana · Fish Lab'`, 12000);
-  ok('the card re-renders itself: 已连接：Ana · Fish Lab with 断开', cardOn && await p.ev(`!!document.querySelector('${CARD} .oauth-disconnect')`), await p.ev(`document.querySelector('${CARD}').innerText.slice(0, 300)`));
-  ok('the first Connect registered ONE client and wrote its id to the real row; no key was ever needed', fake.clients.size === 1 && /^cid_chrome_/.test(rowValues().clientId || '') && !rowValues().apiKey, rowValues());
+  ok('the card re-renders itself: 已连接：Ana · Fish Lab with 断开', gateOf(cardOn) && verdictOf(await p.ev(`!!document.querySelector('${CARD} .oauth-disconnect')`)), await p.ev(`document.querySelector('${CARD}').innerText.slice(0, 300)`));
+  ok('the first Connect registered ONE client and wrote its id to the real row; no key was ever needed', fake.clients.size === 1 && gateOf(/^cid_chrome_/.test(rowValues().clientId || '')) && !rowValues().apiKey, rowValues());
   const nMe = calls.filter((c) => c.p === '/v1/me').length;
   await p.clickSel(`${CARD} .integ-test`);
   const passed = await p.until(`!!document.querySelector('${CARD} .integ-test-result .integ-ok')`, 8000);
   const lastMe = calls.filter((c) => c.p === '/v1/me').slice(nMe);
-  ok('the card\'s Test with NO key tests the sign-in: ONE GET /v1/me with the OAuth token ⇒ 通过', passed && lastMe.length === 1 && /^at_chrome_/.test(lastMe[0].auth) && store.publicView('dropline').lastOk === true, { passed, lastMe, text: await p.ev(`(document.querySelector('${CARD} .integ-test-result') || {}).textContent`) });
+  ok('the card\'s Test with NO key tests the sign-in: ONE GET /v1/me with the OAuth token ⇒ 通过', gateOf(passed) && lastMe.length === 1 && gateOf(/^at_chrome_/.test(lastMe[0].auth)) && store.publicView('dropline').lastOk === true, { passed, lastMe, text: await p.ev(`(document.querySelector('${CARD} .integ-test-result') || {}).textContent`) });
   await p.ev(`(document.querySelector('${CARD}').scrollIntoView({ block: 'start' }), true)`);
   await p.shot('door-card-connected.png', CARD);
   await p.clickSel(`${CARD} .oauth-disconnect`);
   const offAgain = await p.until(`!!document.querySelector('${CARD} .oauth-connect-btn')`, 6000);
-  ok('断开 on the card forgets the sign-in here; the card offers Connect again', offAgain && !client.connected() && !(tokens.read() && tokens.read().access));
+  ok('断开 on the card forgets the sign-in here; the card offers Connect again', gateOf(offAgain) && !client.connected() && !(tokens.read() && tokens.read().access));
 
   console.log('① Connect with Fish Audio — a new tab, Allow + the mailed code, the hub\'s own https callback');
   await p.ev('(document.querySelector("#card").innerHTML = "", window.__render())');
-  ok('the Voice sheet offers Connect (nothing connected)', await p.until('!!document.querySelector("#card .oauth-connect-btn")'));
+  ok('the Voice sheet offers Connect (nothing connected)', verdictOf(await p.until('!!document.querySelector("#card .oauth-connect-btn")')));
   await p.clickSel('#card .oauth-connect-btn');
   const cs1 = await consent(p);
-  ok('Connect opened the consent page in a NEW TAB (S256 + scope + resource accepted by the fake)', !!cs1.tab && /code_challenge_method=S256/.test(cs1.tab) && /scope=dropline%3Aapi/.test(cs1.tab), cs1.tab || { errs: await p.ev('window.__errs'), words: await p.ev('(document.querySelector("#card .oauth-connect-words")||{}).textContent'), targets: (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).map((x) => x.type + ' ' + x.url.slice(0, 120)) });
+  ok('Connect opened the consent page in a NEW TAB (S256 + scope + resource accepted by the fake)', !!cs1.tab && gateOf(/code_challenge_method=S256/.test(cs1.tab)) && verdictOf(/scope=dropline%3Aapi/.test(cs1.tab)), cs1.tab || { errs: await p.ev('window.__errs'), words: await p.ev('(document.querySelector("#card .oauth-connect-words")||{}).textContent'), targets: (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).map((x) => x.type + ' ' + x.url.slice(0, 120)) });
   if (!cs1.tab) throw new Error('no consent tab');
-  ok('the person finished consent + the 6-digit code in that tab ⇒ landed on https://hub.test/api/channels/oauth/cb/dropline: connected', cs1.landed, cs1.href);
+  ok('the person finished consent + the 6-digit code in that tab ⇒ landed on https://hub.test/api/channels/oauth/cb/dropline: connected', verdictOf(cs1.landed), cs1.href);
   const connected = await p.until('(document.querySelector("#card .oauth-connect-words")||{}).textContent === "已连接：Ana · Fish Lab"', 12000);
-  ok('the card says 已连接：Ana · Fish Lab with 断开 (GET /v1/me with the OAuth token)', connected && await p.ev('!!document.querySelector("#card .oauth-disconnect")') && calls.some((c) => c.p === '/v1/me' && /^at_chrome_/.test(c.auth)), await p.ev('document.querySelector("#card").innerText.slice(0, 300)'));
-  ok('the client_id was registered once (the card\'s Connect and this one share it) and sits on the row; the pair is on the hub only', fake.clients.size === 1 && /^cid_chrome_/.test(rowValues().clientId || '') && !!tokens.read().access && !(await p.ev('document.documentElement.outerHTML')).includes(tokens.read().access));
+  ok('the card says 已连接：Ana · Fish Lab with 断开 (GET /v1/me with the OAuth token)', gateOf(connected) && gateOf(await p.ev('!!document.querySelector("#card .oauth-disconnect")')) && verdictOf(calls.some((c) => c.p === '/v1/me' && /^at_chrome_/.test(c.auth))), await p.ev('document.querySelector("#card").innerText.slice(0, 300)'));
+  ok('the client_id was registered once (the card\'s Connect and this one share it) and sits on the row; the pair is on the hub only', fake.clients.size === 1 && gateOf(/^cid_chrome_/.test(rowValues().clientId || '')) && !!tokens.read().access && !(await p.ev('document.documentElement.outerHTML')).includes(tokens.read().access));
   await p.until('!!document.querySelector(".voice-teach")');
   await p.shot('connect.png');
 
@@ -442,24 +442,24 @@ try {
   ok('connected ⇒ the row\'s chip is a status again (已关闭), the switch is free', !!chip1 && !isRowDoor(chip1) && chip1.text === '已关闭' && !(await p.ev(`document.querySelector('${ROW} .plugin-sw input').disabled`)), chip1);
   await p.clickSel(`${ROW} .plugin-sw input`);
   const onNow = await p.until(`(document.querySelector('${ROW} .plugin-chip') || {}).textContent === '开'`, 6000);
-  ok('the switch turns the plugin on ⇒ the row says 开', onNow && rec.enabled === true, { chip: await p.ev(`(document.querySelector('${ROW} .plugin-chip') || {}).textContent`), rec: rec.enabled });
+  ok('the switch turns the plugin on ⇒ the row says 开', gateOf(onNow) && rec.enabled === true, { chip: await p.ev(`(document.querySelector('${ROW} .plugin-chip') || {}).textContent`), rec: rec.enabled });
   await p.ev('window.__render()');   // the sheet's status read tells the microphone (noteVoiceStatus): on now
   await p.until('!!document.querySelector(".voice-teach-off")');
 
   console.log('② teach OFF (default) ⇒ a full dictation writes nothing');
   const before = calls.length;
-  ok('teach and context are OFF by default (settings rows; the sheet says where to turn teaching on)', await p.ev('!!document.querySelector(".voice-teach-off")') && !(rec.config && (rec.config.teach || rec.config.context)));
+  ok('teach and context are OFF by default (settings rows; the sheet says where to turn teaching on)', gateOf(await p.ev('!!document.querySelector(".voice-teach-off")')) && !(rec.config && (rec.config.teach || rec.config.context)));
   const d0 = await dictate(p, 'conv-0');
-  ok('a full dictation with teach OFF ⇒ ONLY /v1/dictate reached Dropline (no vocabulary, no terms, no context)', d0 && calls.slice(before).every((c) => c.p === '/v1/dictate') && calls.slice(before).length === 1, calls.slice(before).map((c) => c.p));
+  ok('a full dictation with teach OFF ⇒ ONLY /v1/dictate reached Dropline (no vocabulary, no terms, no context)', gateOf(d0) && gateOf(calls.slice(before).every((c) => c.p === '/v1/dictate')) && calls.slice(before).length === 1, calls.slice(before).map((c) => c.p));
 
   console.log('③ teach ON ⇒ a proposal of chips; select two, 加入所选 ⇒ ONE POST /v1/terms with exactly those two');
   await p.ev('window.__set({ teach: true })');
   await p.ev('window.__render()'); await p.until('!document.querySelector(".voice-teach-off") && !!document.querySelector(".voice-teach-why")');
-  ok('the teach section carries the privacy sentence', (await p.ev('document.querySelector(".voice-teach-why").textContent')).startsWith('会把当前对话里的名字、术语与文件名发给 Dropline（Fish Audio）'));
+  ok('the teach section carries the privacy sentence', verdictOf((await p.ev('document.querySelector(".voice-teach-why").textContent')).startsWith('会把当前对话里的名字、术语与文件名发给 Dropline（Fish Audio）')));
   await dictate(p, 'conv-1');
   const hasCard = await rerender(p, '.voice-proposal');
   const terms = await p.ev('[...document.querySelectorAll(".voice-proposal .voice-term")].map((x) => x.dataset.term)');
-  ok('the dictation made a PROPOSAL card (no write) + a For-you item 加入词库 / 忽略', hasCard && terms.includes('commentsBatches') && terms.includes('doc-window-ui.js') && !terms.includes('VibeSpace') && writes().length === 0 && userTodos.openItems().length === 1 && userTodos.openItems()[0].options.join() === '加入词库,忽略', { terms, items: userTodos.openItems(), w: writes() });
+  ok('the dictation made a PROPOSAL card (no write) + a For-you item 加入词库 / 忽略', gateOf(hasCard) && gateOf(terms.includes('commentsBatches')) && gateOf(terms.includes('doc-window-ui.js')) && !terms.includes('VibeSpace') && writes().length === 0 && userTodos.openItems().length === 1 && userTodos.openItems()[0].options.join() === '加入词库,忽略', { terms, items: userTodos.openItems(), w: writes() });
   await p.shot('proposal.png');
   // the chips (lane voice-teach-candidates): words the person wrote start selected, a press toggles one, the count is live
   const chips = () => p.ev('({ on: [...document.querySelectorAll(".voice-proposal .voice-term")].filter((x) => x.getAttribute("aria-pressed") === "true").map((x) => x.dataset.term), add: document.querySelector(".voice-proposal-add").textContent, off: document.querySelector(".voice-proposal-add").disabled, tag: document.querySelector(".voice-proposal .voice-term").tagName })');
@@ -470,7 +470,7 @@ try {
   ok('a press on a chip unselects it and the count follows: 加入所选 (2)', c1.on.slice().sort().join() === 'commentsBatches,doc-window-ui.js' && c1.add === '加入所选 (2)', c1);
   await p.ev('(() => { for (const x of document.querySelectorAll(".voice-proposal .voice-term[aria-pressed=true]")) x.click(); return true; })()');
   const c2 = await chips();
-  ok('nothing selected ⇒ 加入所选 (0) is disabled', !c2.on.length && c2.add === '加入所选 (0)' && c2.off, c2);
+  ok('nothing selected ⇒ 加入所选 (0) is disabled', !c2.on.length && c2.add === '加入所选 (0)' && verdictOf(c2.off), c2);
   await p.ev('(() => { for (const t of ["commentsBatches", "doc-window-ui.js"]) document.querySelector(`.voice-proposal .voice-term[data-term="${t}"]`).click(); return true; })()');
   await p.clickSel('.voice-proposal-add');
   await p.until('!document.querySelector(".voice-proposal")');
@@ -490,7 +490,7 @@ try {
   await dictate(p, 'conv-3');
   const dlg = await p.until('!!document.querySelector(".voice-preview")', 8000);
   const shown = dlg ? await p.ev('document.querySelector(".voice-preview-text").textContent') : '';
-  ok('the first dictation of a conversation opens the PREVIEW (the exact text; nothing sent yet)', dlg && shown.includes('commentsBatches') && shown.includes('Working directory: vibespace') && !writes().some((c) => c.p === '/v1/context'), shown);
+  ok('the first dictation of a conversation opens the PREVIEW (the exact text; nothing sent yet)', gateOf(dlg) && gateOf(shown.includes('commentsBatches')) && gateOf(shown.includes('Working directory: vibespace')) && !writes().some((c) => c.p === '/v1/context'), shown);
   await p.shot('preview.png', '.voice-preview');
   await p.clickSel('.voice-preview-send');
   await p.until('!document.querySelector(".voice-preview")');
@@ -506,7 +506,7 @@ try {
   ok('the card\'s toggle names the folder it will cover — it and its subfolders, never asked — (its path on hover) and offers the parent folder', label.t === '这个文件夹及其子文件夹里建议的词都自动加入，不再询问（vibespace）' && label.title === '/home/u/projects/vibespace' && label.up === '或改为上一级文件夹（projects）' && label.upTitle === '/home/u/projects', label);
   await p.clickSel('.voice-project-auto input');
   await p.until('!!document.querySelector(".voice-project-row")');
-  ok('the folders list says what «automatic» means: the folder and its subfolders, without asking', (await p.ev('document.querySelector(".voice-projects").textContent')).includes('这些文件夹（含子文件夹）里建议的词不经询问直接加入'));
+  ok('the folders list says what «automatic» means: the folder and its subfolders, without asking', verdictOf((await p.ev('document.querySelector(".voice-projects").textContent')).includes('这些文件夹（含子文件夹）里建议的词不经询问直接加入')));
   const nTerms = writes().filter((c) => c.p === '/v1/terms').length;
   // the base's rule sent only an agent code span here and carded the person's own word — the owner read «automatic» as «no
   // more asking there» (2026-10-22); and a conversation in a SUBFOLDER was not «on» at all (exact match)
@@ -516,8 +516,8 @@ try {
   const tw = writes().filter((c) => c.p === '/v1/terms');
   const journal = await p.ev('[...document.querySelectorAll(".voice-journal-row")].map((x) => x.textContent)');
   const sent6 = tw.length === nTerms + 1 ? tw[tw.length - 1].body.terms.map((x) => x.term).sort().join() : '';
-  ok('in a SUBFOLDER of the automatic folder: brandNewIdent AND the person\'s own myOwnPlanWord went in ONE write, no card asked for either; the journal says 词（本项目自动）', sent6 === 'brandNewIdent,myOwnPlanWord' && !(await p.ev('[...document.querySelectorAll(".voice-proposal")].some((c) => /myOwnPlanWord|brandNewIdent/.test(c.textContent))')) && journal[0].includes('词（本项目自动）'), { sent6, tw: tw.map((x) => x.body), journal });
-  ok('the journal lists memory + words rows and the dropline.fish.audio/app link', journal.some((j) => j.includes('记忆')) && await p.ev('document.querySelector(".voice-memory-link").href === "https://dropline.fish.audio/app"'));
+  ok('in a SUBFOLDER of the automatic folder: brandNewIdent AND the person\'s own myOwnPlanWord went in ONE write, no card asked for either; the journal says 词（本项目自动）', sent6 === 'brandNewIdent,myOwnPlanWord' && !(await p.ev('[...document.querySelectorAll(".voice-proposal")].some((c) => /myOwnPlanWord|brandNewIdent/.test(c.textContent))')) && verdictOf(journal[0].includes('词（本项目自动）')), { sent6, tw: tw.map((x) => x.body), journal });
+  ok('the journal lists memory + words rows and the dropline.fish.audio/app link', gateOf(journal.some((j) => j.includes('记忆'))) && verdictOf(await p.ev('document.querySelector(".voice-memory-link").href === "https://dropline.fish.audio/app"')));
   await p.shot('journal.png');
   await p.clickSel('.voice-project-off');   // ✕ = ask again for this folder (the later legs dictate in it)
   await p.until('!document.querySelector(".voice-project-row")');
@@ -538,7 +538,7 @@ try {
   ok('加入所选 on words Dropline skips: the toast names each reason — «已加入 0 · 跳过 2（Dropline：已能写对 1 · 词典不收 1）» (the base said «已加入 0 · 跳过 2», no why)', shown6 === 'Quillonia,verbaMint' && toast6 === '已加入 0 · 跳过 2（Dropline：已能写对 1 · 词典不收 1）', { shown6, toast6 });
   await rerender(p, '.voice-journal-row');
   const jr6 = await p.ev('({ t: document.querySelector(".voice-journal-row").textContent, title: document.querySelector(".voice-journal-row").title })');
-  ok('the journal row says the same, and each skipped word with its reason on hover', jr6.t.includes('跳过 2（Dropline：已能写对 1 · 词典不收 1）') && jr6.title.includes('Quillonia — 已能写对') && jr6.title.includes('verbaMint — 词典不收'), jr6);
+  ok('the journal row says the same, and each skipped word with its reason on hover', gateOf(jr6.t.includes('跳过 2（Dropline：已能写对 1 · 词典不收 1）')) && gateOf(jr6.title.includes('Quillonia — 已能写对')) && verdictOf(jr6.title.includes('verbaMint — 词典不收')), jr6);
   const again6 = await p.ev("window.__seen('conv-6b', 'ask Quillonia about verbaMint, then Quillonia and verbaMint again')");
   ok('the skipped words are not asked again (another conversation, the same words: no card, no item)', !again6.proposal && !userTodos.openItems().some((i) => /Quillonia|verbaMint/.test(i.text)), again6);
   fake.skip = false;
@@ -552,7 +552,7 @@ try {
   const geo = await ph.ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const a = r('.voice-proposal-add'), card = r('#card'); return { h: a.height, right: a.right, cw: card.right, overflow: document.documentElement.scrollWidth > innerWidth }; })()`);
   ok('phone 390: the proposal buttons are ≥ 36 px tall and nothing overflows sideways', geo.h >= 36 && geo.right <= geo.cw + 1 && !geo.overflow, geo);
   const chipH = await ph.ev('[...document.querySelectorAll(".voice-proposal .voice-term")].map((x) => Math.round(x.getBoundingClientRect().height))');
-  ok('phone 390: every word chip is a ≥ 36 px tap target', chipH.length > 0 && chipH.every((h) => h >= 36), chipH);
+  ok('phone 390: every word chip is a ≥ 36 px tap target', chipH.length > 0 && verdictOf(chipH.every((h) => h >= 36)), chipH);
   await ph.shot('phone.png');
   ph.close();
 
@@ -572,29 +572,29 @@ try {
   const voiceOpen = () => userTodos.openItems().filter((i) => i.sessionKey === VPD.id).sort((a, b) => b.createdAt - a.createdAt);
   const wordsOf = (it) => it.text.slice(it.text.indexOf('：') + 1).split(',').map((x) => x.trim()).filter(Boolean);
   const vId = voiceOpen()[0] && voiceOpen()[0].id;
-  ok('ONE suggestion is open as the voice PLUGIN\'s reminder (origin plugin, under its id, with its door) — filed LOW (lane voice-dictionary-nag)', voiceOpen().length === 1 && voiceOpen().every((i) => i.origin === 'plugin' && i.plugin === VPD.id && i.urgency === 'low' && i.open && i.open.kind === 'plugin-settings' && i.open.prefill.terms.length > 0), voiceOpen());
+  ok('ONE suggestion is open as the voice PLUGIN\'s reminder (origin plugin, under its id, with its door) — filed LOW (lane voice-dictionary-nag)', voiceOpen().length === 1 && verdictOf(voiceOpen().every((i) => i.origin === 'plugin' && i.plugin === VPD.id && i.urgency === 'low' && i.open && i.open.kind === 'plugin-settings' && i.open.prefill.terms.length > 0)), voiceOpen());
   const trayOpen = async (pg) => {
     if (!(await pg.ev('!!document.getElementById("taskbar-user-todos")'))) await pg.ev('window.__tray()');
     await pg.ev('window.__pushTodos()');
     if (await pg.ev('document.getElementById("user-todos-popup").classList.contains("hidden")')) await pg.clickSel('#taskbar-user-todos');
     return pg.until('!!document.querySelector("#user-todos-popup:not(.hidden) .ut-item")', 6000);
   };
-  ok('the tray opens on the REAL store\'s snapshot', await trayOpen(t9));
+  ok('the tray opens on the REAL store\'s snapshot', verdictOf(await trayOpen(t9)));
   const row0 = `#user-todos-popup .ut-item[data-id="${vId}"]`;
   await t9.ev(`(() => { window.__row9 = document.querySelector('${row0}'); return !!window.__row9; })()`);
   // a SECOND conversation's batch while the item is open (the route the microphone calls) ⇒ the SAME item, re-worded in place
   await t9.ev(`window.__seen('conv-10', 'rename zorbleMint in delta_sheet.md, zorbleMint twice')`);
   const merged = voiceOpen();
-  ok('a second conversation\'s batch MERGES into the open item — still ONE, the same id, both batches\' words', merged.length === 1 && merged[0].id === vId && ['quuxFrobnicate', 'zorbleMint'].every((w) => wordsOf(merged[0]).includes(w)), merged);
+  ok('a second conversation\'s batch MERGES into the open item — still ONE, the same id, both batches\' words', merged.length === 1 && merged[0].id === vId && verdictOf(['quuxFrobnicate', 'zorbleMint'].every((w) => wordsOf(merged[0]).includes(w))), merged);
   await t9.ev('window.__pushTodos()');
   const patched = await t9.until(`(() => { const r = document.querySelector('${row0}'); return !!r && r === window.__row9 && r.textContent.includes('zorbleMint') && r.textContent.includes('quuxFrobnicate'); })()`, 5000);
-  ok('the tray PATCHES its keyed row in place: the same DOM node (data-id), now carrying both batches\' words — no second row', patched && (await t9.ev(`document.querySelectorAll('#user-todos-popup .ut-item[data-id="${vId}"]').length`)) === 1, await t9.ev(`(document.querySelector('${row0}') || {}).textContent`));
+  ok('the tray PATCHES its keyed row in place: the same DOM node (data-id), now carrying both batches\' words — no second row', gateOf(patched) && (await t9.ev(`document.querySelectorAll('#user-todos-popup .ut-item[data-id="${vId}"]').length`)) === 1, await t9.ev(`(document.querySelector('${row0}') || {}).textContent`));
   // lane foryou-folds' bands: the urgent ask heads band 1; the LOW suggestion waits in band 5 (never the plugin pin of band 2)
   const order = await t9.ev('[...document.querySelectorAll("#user-todos-popup .ut-bands .ut-item")].map((r) => [r.dataset.id, r.closest(".ut-band").dataset.band])');
   const keyOf = new Map(userTodos.openItems().map((i) => [i.id, i.sessionKey]));
   const keys = order.map(([id, b]) => `${b}:${keyOf.get(id)}`).filter((k, i, a) => k !== a[i - 1]);
   const fold5 = await t9.ev('(() => { const f = document.querySelector("#user-todos-popup .ut-band[data-band=\\"5\\"] .ut-fold"); return f ? f.textContent : ""; })()');
-  ok('NOT PINNED: the urgent ask heads band 1; the suggestion waits in band 5 with the other asks (newest first) — no band-2 pin under urgent', keys[0] === '1:claude:u9' && keys.includes(`5:${VPD.id}`) && !keys.some((k) => k.startsWith('2:')), { keys, fold5 });
+  ok('NOT PINNED: the urgent ask heads band 1; the suggestion waits in band 5 with the other asks (newest first) — no band-2 pin under urgent', keys[0] === '1:claude:u9' && gateOf(keys.includes(`5:${VPD.id}`)) && !keys.some((k) => k.startsWith('2:')), { keys, fold5 });
   const tickTitle = await t9.ev(`(document.querySelector('${row0} .ut-done') || {}).title`);
   ok('the reminder\'s ✓ says what it does (the door\'s `done` through t()): 把这些词加入 Dropline 词库', tickTitle === '把这些词加入 Dropline 词库', tickTitle);
   await t9.shot('tray-merged.png', '#user-todos-popup');
@@ -608,7 +608,7 @@ try {
   };
   const dr = await doorProbe(t9, vId);
   const want0 = it0.open.prefill.terms.slice().sort().join();
-  ok('a click on the reminder\'s BODY opens the voice plugin\'s sheet on the newest card of the batch (marked), its words already chosen; the tray closed', dr.opened && dr.sheet && dr.sheet.on.slice().sort().join() === want0 && dr.sheet.add === `加入所选 (${it0.open.prefill.terms.length})` && dr.sheet.trayHidden, dr);
+  ok('a click on the reminder\'s BODY opens the voice plugin\'s sheet on the newest card of the batch (marked), its words already chosen; the tray closed', gateOf(dr.opened) && gateOf(dr.sheet) && dr.sheet.on.slice().sort().join() === want0 && dr.sheet.add === `加入所选 (${it0.open.prefill.terms.length})` && verdictOf(dr.sheet.trayHidden), dr);
   await t9.shot('door.png', '#voice-sheet .dialog');
   await t9.clickSel('#voice-sheet .dialog-close');
   await t9.until('!document.getElementById("voice-sheet")');
@@ -634,7 +634,7 @@ try {
   const PLINTH = 'and plinthMarker goes into epsilon_page.md, plinthMarker twice';
   await t9.ev(`window.__seen('conv-11', ${JSON.stringify(PLINTH)})`);
   const it1 = voiceOpen()[0];
-  ok('after the ✓ a new batch files a new item (no dismissal ⇒ no wait)', !!it1 && it1.id !== vId && wordsOf(it1).includes('plinthMarker'), voiceOpen());
+  ok('after the ✓ a new batch files a new item (no dismissal ⇒ no wait)', !!it1 && it1.id !== vId && verdictOf(wordsOf(it1).includes('plinthMarker')), voiceOpen());
   await trayOpen(t9);
   const w1 = writes().length;
   await t9.clickSel(`#user-todos-popup .ut-item[data-id="${it1.id}"] .ut-dismiss`);
@@ -646,7 +646,7 @@ try {
   ok('THE SAME conversation read again a day later (no new dictation) ⇒ no For-you item and no card for its words — the evidence was consumed', !q.proposal && voiceOpen().length === 0 && !teach.view().proposals.some((x) => x.terms.includes('plinthMarker')), q);
   const back = await t9.ev(`window.__seen('conv-12', ${JSON.stringify(PLINTH)}, 'please put plinthMarker in again, with quasarTrellis and quasarTrellis')`);
   const it2 = voiceOpen()[0];
-  ok('a NEW dictation that SAYS plinthMarker brings it back (with the new quasarTrellis); epsilon_page.md, not said again, stays out', !!back.proposal && !!it2 && ['plinthMarker', 'quasarTrellis'].every((w) => wordsOf(it2).includes(w)) && !wordsOf(it2).includes('epsilon_page.md'), it2);
+  ok('a NEW dictation that SAYS plinthMarker brings it back (with the new quasarTrellis); epsilon_page.md, not said again, stays out', !!back.proposal && !!it2 && gateOf(['plinthMarker', 'quasarTrellis'].every((w) => wordsOf(it2).includes(w))) && !wordsOf(it2).includes('epsilon_page.md'), it2);
   // THE SETTINGS DOOR: the REAL All Settings window — 「插件：Voice input · Dropline」 › 「词典建议」 ON by default, its words listed
   const ts = await page(1280, 900);
   await ts.ev('window.__settingsOpen()');
@@ -655,7 +655,7 @@ try {
   const sRow = await ts.until(`(() => { const r = ${SUG}; return !!r && !!r.querySelector('.voice-cand[data-term="plinthMarker"]'); })()`, 8000);
   const sv = await ts.ev(`(() => { const r = ${SUG}, m = ${MODE}; return r ? { label: r.querySelector('.settings-row-label').textContent, on: r.querySelector('.settings-toggle input').checked, head: (r.querySelector('.voice-cands-head') || {}).textContent, words: [...r.querySelectorAll('.voice-cand')].map((c) => c.dataset.term), btns: [...r.querySelectorAll('.voice-cand[data-term="plinthMarker"] button')].map((x) => x.textContent), mode: m ? m.querySelector('select').value : null, modeLabel: m ? m.querySelector('.settings-row-label').textContent : null } : null; })()`);
   ok('All Settings › Voice input: 「词典建议」 is ON by default, its row lists every word suggested now (the open item\'s plinthMarker, quasarTrellis), each with 「加入词库」/「忽略」; 「词典建议放在哪里」 = 「待你处理」里的一条 (voice.suggestions.mode = item)',
-    sRow && sv && sv.label.startsWith('词典建议') && sv.on === true && sv.head === `建议的词（${sv.words.length}）` && ['plinthMarker', 'quasarTrellis'].every((w) => sv.words.includes(w)) && sv.btns.join() === '加入词库,忽略' && sv.mode === 'item' && sv.modeLabel.startsWith('词典建议放在哪里'), sv);
+    gateOf(sRow) && gateOf(sv) && gateOf(sv.label.startsWith('词典建议')) && sv.on === true && sv.head === `建议的词（${sv.words.length}）` && gateOf(['plinthMarker', 'quasarTrellis'].every((w) => sv.words.includes(w))) && sv.btns.join() === '加入词库,忽略' && sv.mode === 'item' && verdictOf(sv.modeLabel.startsWith('词典建议放在哪里')), sv);
   await ts.ev(`${SUG}.scrollIntoView({ block: 'center' })`);
   await ts.shot('settings-words.png', '#win');
   // 忽略 on one word ⇒ off the list, its evidence consumed, the open For-you item re-worded IN PLACE without it
@@ -663,18 +663,18 @@ try {
   await ts.clickSel(`.voice-cand[data-term="plinthMarker"] .voice-cand-ignore`);
   const goneI = await ts.until(`!document.querySelector('.voice-cand[data-term="plinthMarker"]')`, 5000);
   await sleep(200);
-  ok('忽略 on a word (the REAL route POST /api/voice/teach/word) ⇒ nothing sent; off the list; the open item re-worded IN PLACE (the same id) without it', goneI && writes().length === w2 && voiceOpen().length === 1 && voiceOpen()[0].id === it2.id && !wordsOf(voiceOpen()[0]).includes('plinthMarker') && wordsOf(voiceOpen()[0]).includes('quasarTrellis'), voiceOpen());
+  ok('忽略 on a word (the REAL route POST /api/voice/teach/word) ⇒ nothing sent; off the list; the open item re-worded IN PLACE (the same id) without it', gateOf(goneI) && writes().length === w2 && voiceOpen().length === 1 && voiceOpen()[0].id === it2.id && !wordsOf(voiceOpen()[0]).includes('plinthMarker') && verdictOf(wordsOf(voiceOpen()[0]).includes('quasarTrellis')), voiceOpen());
   await ts.clickSel(`.voice-cand[data-term="quasarTrellis"] .voice-cand-add`);
   for (let i = 0; i < 50 && writes().length === w2; i++) await sleep(100);
   await sleep(200);
   const tw2 = writes().slice(w2);
-  ok('加入词库 on a word ⇒ ONE POST /v1/terms with exactly that word; the item it emptied is closed', tw2.length === 1 && tw2[0].body.terms.map((x) => x.term).join() === 'quasarTrellis' && userTodos.get(it2.id).status === 'done' && (await ts.until(`!document.querySelector('.voice-cand[data-term="quasarTrellis"]')`, 3000)), tw2);
+  ok('加入词库 on a word ⇒ ONE POST /v1/terms with exactly that word; the item it emptied is closed', tw2.length === 1 && tw2[0].body.terms.map((x) => x.term).join() === 'quasarTrellis' && userTodos.get(it2.id).status === 'done' && (verdictOf(await ts.until(`!document.querySelector('.voice-cand[data-term="quasarTrellis"]')`, 3000))), tw2);
   // voice.suggestions.mode = 只在设置里 ⇒ a batch is a card + the list, NEVER a For-you item
   await ts.ev(`(() => { const sel = ${MODE}.querySelector('select'); sel.value = 'settings-only'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   for (let i = 0; i < 40 && rec.config.suggestionsMode !== 'settings-only'; i++) await sleep(100);   // the write reaches the engine
   CLOCK_SKEW += 2 * D;
   const so = await ts.ev(`window.__seen('conv-13', 'and ravelPoint lands in sigma_list.md, ravelPoint twice')`);
-  ok('「只在设置里」 (voice.suggestions.mode = settings-only) ⇒ the batch is a card and in the settings list — NO For-you item', rec.config.suggestionsMode === 'settings-only' && !!so.proposal && !so.proposal.itemId && voiceOpen().length === 0 && teach.view().candidates.some((x) => x.term === 'ravelPoint'), { cfg: rec.config, so: so.proposal });
+  ok('「只在设置里」 (voice.suggestions.mode = settings-only) ⇒ the batch is a card and in the settings list — NO For-you item', rec.config.suggestionsMode === 'settings-only' && !!so.proposal && !so.proposal.itemId && voiceOpen().length === 0 && verdictOf(teach.view().candidates.some((x) => x.term === 'ravelPoint')), { cfg: rec.config, so: so.proposal });
   // 「词典建议」 off ⇒ nothing is proposed at all
   await ts.ev(`${SUG}.querySelector('.settings-toggle input').click()`);
   for (let i = 0; i < 40 && rec.config.suggest !== false; i++) await sleep(100);   // the write reaches the engine
@@ -686,4 +686,4 @@ try {
   }
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e && e.stack || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-end(fail ? 1 : 0);
+end(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

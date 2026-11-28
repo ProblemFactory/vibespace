@@ -46,7 +46,7 @@ const PROJ = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-
 const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── 1. synthetic transcript: text turns + LONG texts + foldable Bash runs ──
@@ -156,7 +156,7 @@ const serverUp = async (port, ms = 90000) => {
   while (Date.now() < end) { try { await fetch(`http://127.0.0.1:${port}/api/home`); return true; } catch { await sleep(250); } }
   return false;
 };
-check('the scratch server answered', await serverUp(PORT));
+check('the scratch server answered', verdictOf(await serverUp(PORT)));
 
 const WebSocket = require('ws');
 let target = null;
@@ -234,7 +234,7 @@ const opened = await evaljs(`(async () => {
   window.__list = list;
   return { ok: true, n: list.querySelectorAll('.chat-msg').length, sh: list.scrollHeight, st: list.scrollTop };
 })()`);
-check('view-only chat opened with messages', opened?.ok && opened.n > 10, JSON.stringify(opened));
+check('view-only chat opened with messages', gateOf(opened?.ok) && opened.n > 10, JSON.stringify(opened));
 
 // one paging step: mark, set scrollTop, wait for loads/folds to settle
 const step = async (dir, px, waitMs) => await evaljs(`(async () => {
@@ -394,13 +394,13 @@ check('the fold-dominated view-only chat opened and paged at least twice', !!fol
 // TypeError mid-run): with no notch the check above is the red, by name, and the legs that need one are not read
 if (fold?.ok && Array.isArray(fold.notches) && fold.notches.length) {
   const N = fold.notches, ch = fold.ch;
-  check(`the PIN BAND was constructed: the list is ${fold.band} px shorter than the rendered attach slab (${FOLD_BAND} ± 3 — inside the 50 px band where every scrollTop is "at the live tail"), the view pinned at the tail with history above (ws ${fold.ws0}); ${fold.open.rendered} cards opened ${fold.open.sh} px tall in a ${fold.open.ch} px list (${(fold.open.sh / Math.max(1, fold.open.rendered)).toFixed(2)} px per card — the fonts' share of the geometry, printed)`, Math.abs(fold.band - FOLD_BAND) <= 3 && fold.pin0 && fold.ws0 > 0, JSON.stringify(fold));
-  check(`every notch that still has history above leaves the window ≥ 2 viewports tall (grow by HEIGHT) — (${N.map((n) => n.sh + '/' + n.ws).join(' ')})`, N.every((n) => n.ws === 0 || n.sh >= 2 * ch), JSON.stringify(N));
+  check(`the PIN BAND was constructed: the list is ${fold.band} px shorter than the rendered attach slab (${FOLD_BAND} ± 3 — inside the 50 px band where every scrollTop is "at the live tail"), the view pinned at the tail with history above (ws ${fold.ws0}); ${fold.open.rendered} cards opened ${fold.open.sh} px tall in a ${fold.open.ch} px list (${(fold.open.sh / Math.max(1, fold.open.rendered)).toFixed(2)} px per card — the fonts' share of the geometry, printed)`, Math.abs(fold.band - FOLD_BAND) <= 3 && gateOf(fold.pin0) && fold.ws0 > 0, JSON.stringify(fold));
+  check(`every notch that still has history above leaves the window ≥ 2 viewports tall (grow by HEIGHT) — (${N.map((n) => n.sh + '/' + n.ws).join(' ')})`, verdictOf(N.every((n) => n.ws === 0 || n.sh >= 2 * ch)), JSON.stringify(N));
   check('the first notch needed more than one slab (the fold makes 50 records a few hundred px) and fired ONE grown landing', N[0].extends > 1 && N[0].grown === true && N[0].extends <= 8, JSON.stringify(N[0]));
-  check(`the wheel-up is never overruled by the pin: the band's scroll reached the handler during the first notch's fetch and was SKIPPED (repinSkipPageUp ×${N[0].repinSkips}); no re-pin, no pinned re-tail during any notch`, N[0].repinSkips >= 1 && N.every((n) => n.repins === 0 && n.pinnedRetail === 0 && !n.pin), JSON.stringify(N));
-  check('the bottom is never trimmed while the window is short (a trim there removes the content on screen)', N.every((n) => n.trimBottom === 0 || n.sh >= 2 * ch), JSON.stringify(N));
-  check(`the reader never lands on the very top with history still above (the incident\'s "跳到最顶部") — st per notch: ${N.map((n) => n.st).join(' ')}`, N.every((n) => n.ws === 0 || n.st > 0), JSON.stringify(N));
-  check('no fold ceiling was hit in six notches (the ceiling is the bound, not the routine)', N.every((n) => n.foldCeiling === 0), JSON.stringify(N));
+  check(`the wheel-up is never overruled by the pin: the band's scroll reached the handler during the first notch's fetch and was SKIPPED (repinSkipPageUp ×${N[0].repinSkips}); no re-pin, no pinned re-tail during any notch`, N[0].repinSkips >= 1 && verdictOf(N.every((n) => n.repins === 0 && n.pinnedRetail === 0 && !n.pin)), JSON.stringify(N));
+  check('the bottom is never trimmed while the window is short (a trim there removes the content on screen)', verdictOf(N.every((n) => n.trimBottom === 0 || n.sh >= 2 * ch)), JSON.stringify(N));
+  check(`the reader never lands on the very top with history still above (the incident\'s "跳到最顶部") — st per notch: ${N.map((n) => n.st).join(' ')}`, verdictOf(N.every((n) => n.ws === 0 || n.st > 0)), JSON.stringify(N));
+  check('no fold ceiling was hit in six notches (the ceiling is the bound, not the routine)', verdictOf(N.every((n) => n.foldCeiling === 0)), JSON.stringify(N));
 }
 // NEGATIVE CONTROL §4b: the same band, the new rule neutered on the view instance — the notch re-pins
 {
@@ -426,18 +426,18 @@ const FOLD_TALL = 120, NOTCH_PX = 120;
   for (const n of b0?.notches || []) console.log('    notch:', JSON.stringify(n));
   const built = (r, n) => !!r?.ok && !!n && Math.abs(r.tall - FOLD_TALL) <= 3 && r.sh0 === r.ch && r.pin0 && r.ws0 > 0 && n.pass1.st === 0 && n.pass1.sh === n.pass1.ch;
   check(`BAND 0 was constructed: the list is ${b0?.tall} px TALLER than the rendered slab (${b0?.content} px; ${FOLD_TALL} ± 3 — no scroll range, sh ${b0?.sh0} = ch ${b0?.ch}), pinned with history above (ws ${b0?.ws0}), and the notch's first pass landed with NO room above the reader (st ${n1?.pass1?.st}, sh ${n1?.pass1?.sh} = ch ${n1?.pass1?.ch})`,
-    built(b0, n1), JSON.stringify(b0));
+    verdictOf(built(b0, n1)), JSON.stringify(b0));
   if (built(b0, n1)) {
     check(`BAND 0: the whole notch reached the reader across the passes — the room-less first pass kept it (Σ wheelCarry ${n1.carryPx} px = the ${NOTCH_PX} px notch)`, Math.abs(n1.carryPx - NOTCH_PX) <= 1, JSON.stringify(n1));
     check(`BAND 0: the first notch lands ONE NOTCH into history, never at the bottom: st ${n1.st} ≤ (sh ${n1.sh} − ch ${b0.ch}) − ${NOTCH_PX} (+2), no re-pin, not pinned at the notch's end`,
       n1.st <= n1.sh - b0.ch - NOTCH_PX + 2 && n1.repins === 0 && !n1.pin, JSON.stringify(n1));
-    check('BAND 0: every notch after it keeps the whole notch too, or ran out of history — no re-pin, never pinned', b0.notches.every((n) => (n.ws === 0 || Math.abs(n.carryPx - NOTCH_PX) <= 1) && n.repins === 0 && !n.pin), JSON.stringify(b0.notches));
+    check('BAND 0: every notch after it keeps the whole notch too, or ran out of history — no re-pin, never pinned', verdictOf(b0.notches.every((n) => (n.ws === 0 || Math.abs(n.carryPx - NOTCH_PX) <= 1) && n.repins === 0 && !n.pin)), JSON.stringify(b0.notches));
   }
   const c0 = await evaljs(FOLD_RUN('fold band0 control', { tall: FOLD_TALL, maxNotches: 1, stripKeep: true }));
   const cn = c0?.notches?.[0];
   console.log('  fold band0 control:', JSON.stringify({ ...c0, notches: undefined }), cn ? 'notch: ' + JSON.stringify(cn) : '');
   check(`NEGATIVE CONTROL §4b band 0: the same shape (tall ${c0?.tall}, first pass st ${cn?.pass1?.st} / sh ${cn?.pass1?.sh} = ch ${cn?.pass1?.ch}) with keepRest stripped on the instance loses the notch at the room-less pass (Σ wheelCarry ${cn?.carryPx}), lands at the bottom (st ${cn?.st} vs sh − ch ${cn ? cn.sh - c0.ch : '?'}) and RE-PINS (repins ${cn?.repins}, pinned ${cn?.pin}) — the verifier's shape, and the legs can go red`,
-    built(c0, cn) && cn.carryPx === 0 && cn.st >= cn.sh - c0.ch - 2 && cn.repins >= 1 && cn.pin, JSON.stringify(c0));
+    gateOf(built(c0, cn)) && cn.carryPx === 0 && cn.st >= cn.sh - c0.ch - 2 && cn.repins >= 1 && verdictOf(cn.pin), JSON.stringify(c0));
 }
 
 // ── 4c. THE HUGE COMPACT-MODE SESSION (inc-mubvu3a4-x8sb, 2026-09-21, owner on
@@ -642,7 +642,7 @@ const pinProbe = async (port, label) => {
   return { opened, pre, row, midRepins };
 };
 const huge = await runGestures(PLAN, 'fix');
-check('the huge fixture opened view-only with the whole-file turn map armed (the seek sentinel installed = the owner\'s tail-mode paging), content-visibility on, compact mode', huge.opened?.ok && huge.opened.armed && huge.opened.cv && huge.opened.compact, JSON.stringify(huge.opened));
+check('the huge fixture opened view-only with the whole-file turn map armed (the seek sentinel installed = the owner\'s tail-mode paging), content-visibility on, compact mode', gateOf(huge.opened?.ok) && gateOf(huge.opened.armed) && gateOf(huge.opened.cv) && verdictOf(huge.opened.compact), JSON.stringify(huge.opened));
 if (huge.opened?.ok) {
   const R = huge.rows, ch = huge.opened.ch;
   const paged = R.filter((r) => r.verdict.paged).length;
@@ -667,13 +667,13 @@ if (huge.opened?.ok) {
   const gapRows = R.filter((r) => r.name.startsWith('gap-'));
   const slabLoaded = gapRows.some((r) => r.ring.some((e) => e.tag === 'gapUp:done'));
   const inSlab = gapRows.filter((r) => r.before.gapCards > 0 && r.after.gapCards > 0 && !r.verdict.paged && (r.dir === 'up' || r.dir === 'down'));
-  check(`the gap legs reached the seek slab (gapUp:done in the ring) and ${inSlab.length} gestures ran INSIDE it without paging (≥ 3: ${inSlab.map((r) => r.name).join(' ')})`, slabLoaded && inSlab.length >= 3, JSON.stringify(gapRows.map((r) => [r.name, r.before.gapCards, r.after.gapCards, r.verdict.paged])));
+  check(`the gap legs reached the seek slab (gapUp:done in the ring) and ${inSlab.length} gestures ran INSIDE it without paging (≥ 3: ${inSlab.map((r) => r.name).join(' ')})`, gateOf(slabLoaded) && inSlab.length >= 3, JSON.stringify(gapRows.map((r) => [r.name, r.before.gapCards, r.after.gapCards, r.verdict.paged])));
   // a gap slab lives only directly above message 0: never beside a window that left it, never below a tail card
   const stale = R.filter((r) => !r.after.tp && r.after.ws > 0 && r.after.gapCards > 0);
   check('a gap slab never survives the window leaving message 0 (dropped by the top trim; the walk back to the tail leaves no ancient cards above the fresh slab)', stale.length === 0, stale.map((r) => `${r.name}: ws ${r.after.ws} gapCards ${r.after.gapCards}`).join('; '));
   const misordered = R.filter((r) => r.after.gapBelowTail === 1);
   check('a gap card is never BELOW the first tail card (the fresh tail slab lands below the gap history, never above it)', misordered.length === 0, misordered.map((r) => r.name).join(' '));
-  check('the top trim dropped the slab when the window left message 0 (gapDrop traced on the way back to the tail)', R.some((r) => r.ring.some((e) => e.tag === 'gapDrop')), JSON.stringify(R.filter((r) => r.name.startsWith('gap-down-hold')).map((r) => [r.name, r.after.ws, r.after.gapCards])));
+  check('the top trim dropped the slab when the window left message 0 (gapDrop traced on the way back to the tail)', verdictOf(R.some((r) => r.ring.some((e) => e.tag === 'gapDrop'))), JSON.stringify(R.filter((r) => r.name.startsWith('gap-down-hold')).map((r) => [r.name, r.after.ws, r.after.gapCards])));
   // heights keep settling after a landing (images, fonts, late layout): the anchor hides it from the reader — print the drift so a regression in the ANCHOR is visible
   const drift = R.filter((r) => !r.verdict.paged && (r.dir === 'up' || r.dir === 'down')).map((r) => ({ name: r.name, dsh: r.after.sh - r.before.sh }));
   const maxDrift = drift.reduce((m, d) => Math.max(m, Math.abs(d.dsh)), 0);
@@ -683,7 +683,7 @@ if (huge.opened?.ok) {
   const allTags = R.flatMap((r) => r.ring);
   check('the count trim never ran: no anchorLost {why:removed}, no extendTop landing anchored:false at scrollTop 0', !allTags.some((e) => e.tag === 'anchorLost' && e.why === 'removed') && !allTags.some((e) => e.tag === 'extendTop:done' && !e.anchored && e.st === 0), JSON.stringify(allTags.filter((e) => e.tag === 'anchorLost').slice(0, 3)));
   check('the pinned auto-follow never ran mid-history: no repin with we < total, no pageDown with pin:1 while the window was partial', !allTags.some((e) => e.tag === 'repin' && e.we < e.total) && !allTags.some((e) => e.tag === 'pageDown' && e.pin === 1 && e.we < e.total), JSON.stringify(allTags.filter((e) => e.tag === 'repin').slice(0, 3)));
-  check('the scroll-to-bottom button returns to the live tail and pins there', (() => { const b = R.find((r) => r.dir === 'btn'); return b && b.after.we >= b.after.total && b.after.pin === 1; })(), JSON.stringify(R.find((r) => r.dir === 'btn')?.after));
+  check('the scroll-to-bottom button returns to the live tail and pins there', verdictOf((() => { const b = R.find((r) => r.dir === 'btn'); return b && b.after.we >= b.after.total && b.after.pin === 1; })()), JSON.stringify(R.find((r) => r.dir === 'btn')?.after));
   const grown = allTags.filter((e) => e.tag === 'extendTop:grown').map((e) => e.passes);
   console.log(`  grow passes per landing: ${grown.join(' ') || '(single-pass landings only)'}; trims: ${allTags.filter((e) => e.tag === 'trimBottom').length} bottom / ${allTags.filter((e) => e.tag === 'trimTop').length} top / ${allTags.filter((e) => e.tag === 'trimSkipZone').length} zone-skips; carried notches: ${allTags.filter((e) => e.tag === 'wheelCarry').length}`);
 }
@@ -800,10 +800,10 @@ console.log('§4e the release frame (B-1192): a paging landing under a 3-frame s
   const line = (tag, l) => `    [${tag}] ${l.dir.padEnd(4)} landing ws ${l.ws[0]}→${l.ws[1]} we ${l.we[0]}→${l.we[1]}: ${l.fresh} fresh cards, ${l.frames} rAF reads, ${l.nScreen} read(s) with a fresh card ON SCREEN off its settled height, ${l.nBad} in the keep zone (informational — off screen, absorbed by scroll anchoring), reader ${l.readerLost ? 'LOST' : 'kept'}${l.first ? ` — first: st ${l.first.st} (settles at ${l.first.settledSt}), sh ${l.first.sh} (settles at ${l.first.settledSh}), ${JSON.stringify(l.first.cards.slice(0, 2))}` : ''}`;
   for (const l of L) console.log(line('fix', l));
   const up = L.filter((l) => l.dir === 'up'), down = L.filter((l) => l.dir === 'down');
-  check(`§4e the leg ran: ≥ 3 page-up and ≥ 2 page-down landings with fresh cards under the stall (${up.length} up, ${down.length} down, ${fix.stalled} stalled frames)`, up.length >= 3 && down.length >= 2 && L.every((l) => l.fresh > 0) && fix.stalled >= 3 * L.length, JSON.stringify(fix.opened || fix).slice(0, 400));
+  check(`§4e the leg ran: ≥ 3 page-up and ≥ 2 page-down landings with fresh cards under the stall (${up.length} up, ${down.length} down, ${fix.stalled} stalled frames)`, up.length >= 3 && down.length >= 2 && gateOf(L.every((l) => l.fresh > 0)) && fix.stalled >= 3 * L.length, JSON.stringify(fix.opened || fix).slice(0, 400));
   const bad = L.filter((l) => l.nScreen);
-  check('§4e no fresh slab card ON SCREEN is ever laid out at a height other than its settled one — in its release frame or any other (the override comes off only once the card has left the viewport)', L.length && !bad.length, 'first offending frame (evidence): ' + JSON.stringify(bad[0]?.first));
-  check('§4e the reader\'s card survives every landing', L.length && !L.some((l) => l.readerLost), JSON.stringify(L.map((l) => l.readerAt)));
+  check('§4e no fresh slab card ON SCREEN is ever laid out at a height other than its settled one — in its release frame or any other (the override comes off only once the card has left the viewport)', gateOf(L.length) && !bad.length, 'first offending frame (evidence): ' + JSON.stringify(bad[0]?.first));
+  check('§4e the reader\'s card survives every landing', gateOf(L.length) && !L.some((l) => l.readerLost), JSON.stringify(L.map((l) => l.readerAt)));
   // THE RULE UNDER IT (ci358-reds): no card of the list may shrink — every .chat-msg computes flex-shrink 0
   const shrinkable = await evaljs(`(() => { const all = [...document.querySelectorAll('.chat-message-list > .chat-msg')]; return { n: all.length, shrink: all.filter((e) => getComputedStyle(e).flexShrink !== '0').length }; })()`);
   check(`§4e every card of the list computes flex-shrink 0 — a flex column never shrinks a size-contained card to nothing (${shrinkable?.shrink} of ${shrinkable?.n} could)`, shrinkable?.n > 0 && shrinkable.shrink === 0, shrinkable);
@@ -812,7 +812,7 @@ console.log('§4e the release frame (B-1192): a paging landing under a 3-frame s
   const ctl = await releaseLeg(true);
   const C = ctl.landings || [];
   for (const l of C) console.log(line('control: pre-fix release + shrinkable cards', l));
-  check(`§4e NEGATIVE CONTROL: the pre-fix world (the two-frame release + cards a flex column may shrink) on the same view lays a fresh card out ON SCREEN off its height (${C.filter((l) => l.nScreen).length} of ${C.length} landings) — the leg sees the defect`, C.length >= 5 && C.some((l) => l.nScreen), JSON.stringify(ctl.opened || C).slice(0, 400));
+  check(`§4e NEGATIVE CONTROL: the pre-fix world (the two-frame release + cards a flex column may shrink) on the same view lays a fresh card out ON SCREEN off its height (${C.filter((l) => l.nScreen).length} of ${C.length} landings) — the leg sees the defect`, C.length >= 5 && verdictOf(C.some((l) => l.nScreen)), JSON.stringify(ctl.opened || C).slice(0, 400));
 }
 
 // ── 4g. THE NOTCH INSIDE THE LOAD LOCK (B-8c25 — this suite's red on the 2.369.195 mirror, passed on retry:
@@ -869,10 +869,10 @@ console.log('§4g the notch inside the load lock (B-8c25): a real notch that scr
   const F = await lockProbe(false);
   const fr = (F.rows || []).filter((r) => r.pre);
   check(`§4g the leg ran on the fix: the notch was delivered inside the lock in ≥ 1 of 2 attempts (${fr.length})`, fr.length >= 1, JSON.stringify(F.opened?.ok ? F.rows.map((r) => r.landed) : F.opened));
-  check('§4g on the fix the lift re-takes the skipped decision: the view never parks inside the pageUp band with history above (the extend runs from the lift — `lockBand` in the ring)', fr.length >= 1 && fr.every((r) => !r.parked && r.lockBand >= 1), JSON.stringify(fr.map((r) => ({ st: r.after.st, ws: r.after.ws, lockBand: r.lockBand }))));
+  check('§4g on the fix the lift re-takes the skipped decision: the view never parks inside the pageUp band with history above (the extend runs from the lift — `lockBand` in the ring)', fr.length >= 1 && verdictOf(fr.every((r) => !r.parked && r.lockBand >= 1)), JSON.stringify(fr.map((r) => ({ st: r.after.st, ws: r.after.ws, lockBand: r.lockBand }))));
   const C = await lockProbe(true);
   const cr = (C.rows || []).filter((r) => r.pre);
-  check(`§4g NEGATIVE CONTROL: with the lift's re-taken decision neutered (the pre-fix lift) the same notch PARKS the reader inside the band with history above (${cr.filter((r) => r.parked).length} of ${cr.length} attempts) — the leg sees the defect`, cr.length >= 1 && cr.some((r) => r.parked), JSON.stringify(cr.map((r) => ({ st: r.after.st, ws: r.after.ws }))));
+  check(`§4g NEGATIVE CONTROL: with the lift's re-taken decision neutered (the pre-fix lift) the same notch PARKS the reader inside the band with history above (${cr.filter((r) => r.parked).length} of ${cr.length} attempts) — the leg sees the defect`, cr.length >= 1 && verdictOf(cr.some((r) => r.parked)), JSON.stringify(cr.map((r) => ({ st: r.after.st, ws: r.after.ws }))));
 }
 
 // ── 4d. THE PRE-FIX CONTROL: the same fixture and gestures on a scratch copy of
@@ -921,13 +921,13 @@ console.log('§4d pre-fix control: the same legs on a copy with the keep zone an
   const prevCleanup = cleanup;
   const cleanupControl = () => { try { csrv.kill('SIGKILL'); } catch {} try { execSync(`git worktree remove --force ${cwt}`, { cwd: repo, stdio: 'ignore' }); } catch {} };
   process.on('exit', cleanupControl);
-  check('control: the patched copy\'s server answered', await serverUp(CPORT));
+  check('control: the patched copy\'s server answered', verdictOf(await serverUp(CPORT)));
   await pageReady(CPORT, 'control');
   await sleep(1500);
   const CONTROL_PLAN = [['up-slow-1', 'up', 'slow'], ['up-slow-2', 'up', 'slow'], ['up-mid-1', 'up', 'mid'], ['up-mid-2', 'up', 'mid'], ['up-fast-1', 'up', 'fast'], ['up-fast-2', 'up', 'fast'],
     ['down-mid-1', 'down', 'mid'], ['down-mid-2', 'down', 'mid'], ['down-fast-1', 'down', 'fast'], ['down-fast-2', 'down', 'fast'], ['down-fast-3', 'down', 'fast'], ['down-fast-4', 'down', 'fast']];
   const ctl = await runGestures(CONTROL_PLAN, 'control');
-  check('control: the fixture opened on the patched copy', ctl.opened?.ok && ctl.opened.armed, JSON.stringify(ctl.opened));
+  check('control: the fixture opened on the patched copy', gateOf(ctl.opened?.ok) && verdictOf(ctl.opened.armed), JSON.stringify(ctl.opened));
   if (ctl.opened?.ok) {
     const R = ctl.rows, allTags = R.flatMap((r) => r.ring);
     const jumps = R.filter((r) => r.dir === 'up' && r.verdict.reasons.some((x) => /further|gone from the DOM|pageUp band/.test(x)));
@@ -941,7 +941,7 @@ console.log('§4d pre-fix control: the same legs on a copy with the keep zone an
   // NEGATIVE CONTROL ② — the constructed probe on the patched copy (see pinProbe)
   const p = await pinProbe(CPORT, 'control');
   check(`NEGATIVE CONTROL ② precondition held: a partial window with the viewport parked ${PROBE_D} px above the DOM's bottom, unpinned, idle (${JSON.stringify(p.pre || p.opened)})`, !!p.pre?.ok, JSON.stringify(p.pre || p.opened));
-  if (p.row) check(`NEGATIVE CONTROL ②: without the windowEnd ≥ total term ONE notch across the pin band PINS the view in the middle of history by the rules themselves (${p.row.verdict.reasons.filter(TELEPORT).join('; ') || 'no ② reason'}; repins with we < total in the probe's ring: ${p.midRepins}) — the rule can go red`, p.row.verdict.reasons.some(TELEPORT) && p.midRepins >= 1, formatGesture(p.row, p.row.verdict));
+  if (p.row) check(`NEGATIVE CONTROL ②: without the windowEnd ≥ total term ONE notch across the pin band PINS the view in the middle of history by the rules themselves (${p.row.verdict.reasons.filter(TELEPORT).join('; ') || 'no ② reason'}; repins with we < total in the probe's ring: ${p.midRepins}) — the rule can go red`, gateOf(p.row.verdict.reasons.some(TELEPORT)) && p.midRepins >= 1, formatGesture(p.row, p.row.verdict));
   cleanupControl();
   process.off('exit', cleanupControl);
   void prevCleanup;
@@ -994,7 +994,7 @@ console.log('§4f first paint by text count: the §1c attach slab holds ≥ minT
   check('§4f the fix opened the §1c fixture and saw its attached frame', !!fix.m && !!fix.m.frame, JSON.stringify(fix.opened));
   if (fix.m) {
     const m = fix.m;
-    check(`§4f …and obeys the rescue law (sh/ch ${m.sh}/${m.ch} = ${(m.sh / m.ch).toFixed(2)}; autoFill ${m.autoFill}${m.fill.length ? ' at ' + m.fill.map((f) => f.sh + '/' + f.ch).join(' ') : ''}; extends ${m.extends}) — a first paint that fills its viewport pages nothing before the first gesture, one that does not gets exactly one rescue`, rescueLaw(m), JSON.stringify(m));
+    check(`§4f …and obeys the rescue law (sh/ch ${m.sh}/${m.ch} = ${(m.sh / m.ch).toFixed(2)}; autoFill ${m.autoFill}${m.fill.length ? ' at ' + m.fill.map((f) => f.sh + '/' + f.ch).join(' ') : ''}; extends ${m.extends}) — a first paint that fills its viewport pages nothing before the first gesture, one that does not gets exactly one rescue`, verdictOf(rescueLaw(m)), JSON.stringify(m));
     check(`§4f the attached frame is bounded: ${(m.frame.len / 1048576).toFixed(2)} MB ≤ 1.9 MB and the slab ≤ maxRecords (${m.frame.n}) (the tight bound — ≤ 128 KiB over tail(50) — is asserted against the control below)`, m.frame.len <= 1.9 * 1048576 && m.frame.n <= TEXT_WINDOW.maxRecords, JSON.stringify(m.frame));
     // the reconnect no-op (2.369.2) with the bigger slab: a SECOND attach of the same conversation (the reconnect
     // re-attach's round trip, sent by hand — the reconnect ladder skips read-only windows, and this view-only
@@ -1015,7 +1015,7 @@ console.log('§4f first paint by text count: the §1c attach slab holds ≥ minT
       return { ok: true, n: d.messages.length, same, skip: ring.some((e) => e.tag === 'loadHistory:identical-skip') };
     })()`);
     console.log(`  [fix] second attach: ${re.n} records, same slab ${re.same}; identical-skip ${re.skip}`);
-    check('§4f a second attach of the same conversation ships the SAME slab (the window is a pure function of the list) and loadHistory skips the rebuild (2.369.2 stays reachable)', re.ok && re.same && re.n === m.frame.n && re.skip, JSON.stringify(re));
+    check('§4f a second attach of the same conversation ships the SAME slab (the window is a pure function of the list) and loadHistory skips the rebuild (2.369.2 stays reachable)', gateOf(re.ok) && gateOf(re.same) && re.n === m.frame.n && verdictOf(re.skip), JSON.stringify(re));
   }
   // THE CONTROL: the fix's client, a server whose attach paths keep tail(50)
   const [TPORT] = await freePorts(1);
@@ -1038,7 +1038,7 @@ console.log('§4f first paint by text count: the §1c attach slab holds ≥ minT
   if (ctl.m) {
     const m = ctl.m;
     check(`NEGATIVE CONTROL §4f: tail(50) ships 50 records holding fewer than minText text cards (${m.textCards}) — the text leg can go red`, m.frame.n === 50 && m.textCards < TEXT_WINDOW.minText, JSON.stringify(m));
-    check(`§4f control: tail(50) obeys the same rescue law (sh/ch ${(m.sh / m.ch).toFixed(2)}; autoFill ${m.autoFill}) — the law is the client's, whatever the slab`, rescueLaw(m), JSON.stringify(m));
+    check(`§4f control: tail(50) obeys the same rescue law (sh/ch ${(m.sh / m.ch).toFixed(2)}; autoFill ${m.autoFill}) — the law is the client's, whatever the slab`, verdictOf(rescueLaw(m)), JSON.stringify(m));
     if (fix.m) check(`§4f the text window renders at least as tall as tail(50) — it is a superset of it (${fix.m.sh} px vs ${m.sh} px in the same ${m.ch} px list)`, fix.m.sh >= m.sh - 2 && Math.abs(fix.m.ch - m.ch) <= 2, JSON.stringify({ fix: [fix.m.sh, fix.m.ch], ctl: [m.sh, m.ch] }));
     // perf r1: the window is bounded by GROWTH (≤ maxGrowthBytes past the floor), so on a cut whose next
     // records past the budget are heavy it may stop short of minText — it must then still hold MORE text than
@@ -1069,10 +1069,10 @@ console.log('§4f first paint by text count: the §1c attach slab holds ≥ minT
   check('…and this suite\'s OWN project dir is not among them (it lives under the isolated home)',
     !after.some((d) => d.name === path.basename(PROJ)), path.basename(PROJ));
   check('the fixture really was written (the isolation did not just skip the work)',
-    fs.existsSync(path.join(PROJ, `${SID}.jsonl`)) && fs.statSync(path.join(PROJ, `${SID}.jsonl`)).size > 30e6,
+    gateOf(fs.existsSync(path.join(PROJ, `${SID}.jsonl`))) && fs.statSync(path.join(PROJ, `${SID}.jsonl`)).size > 30e6,
     path.join(PROJ, `${SID}.jsonl`));
 }
 
 ws.close();
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

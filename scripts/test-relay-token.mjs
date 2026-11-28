@@ -34,7 +34,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const RT = require(path.join(REPO, 'src/relay-token.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const sha256 = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const NOW = Date.UTC(2026, 9, 20, 8, 0, 0);
 const forms = (v) => { const b = Buffer.from(String(v)); return [String(v), b.toString('hex'), b.toString('base64'), b.toString('base64url'), String(v).slice(5, 25)]; };
@@ -43,9 +43,9 @@ const leaks = (text, tok) => forms(tok).some((f) => f && String(text).includes(f
 console.log('① mint / rotate / revoke');
 const a = RT.mint({ randomBytes: crypto.randomBytes, now: NOW, label: 'my-hub' });
 const b = RT.mint({ randomBytes: crypto.randomBytes, now: NOW, label: 'my-hub' });
-ok(RT.ID_RE.test(a.instanceId) && RT.TOKEN_RE.test(a.token) && a.token.startsWith('vsrt_') && a.token.length === 48, 'a minted record: vi-<12 hex> + vsrt_<43 base64url> (32 random bytes)', a);
+ok(gateOf(RT.ID_RE.test(a.instanceId)) && gateOf(RT.TOKEN_RE.test(a.token)) && gateOf(a.token.startsWith('vsrt_')) && a.token.length === 48, 'a minted record: vi-<12 hex> + vsrt_<43 base64url> (32 random bytes)', a);
 ok(a.instanceId !== b.instanceId && a.token !== b.token, 'two mints share nothing (the id is random — a hostname is neither unique nor stable)');
-ok(a.mintedAt === NOW && a.rotatedAt === null && a.revokedAt === null && JSON.stringify(a.prefixes) === JSON.stringify(['pf-', 'vibespace-instance']) && Array.isArray(a.subdomains) && !a.subdomains.length, 'its fields: mintedAt, no rotation, not revoked, the hub\'s proxy-name prefixes, no subdomain yet');
+ok(a.mintedAt === NOW && a.rotatedAt === null && a.revokedAt === null && JSON.stringify(a.prefixes) === JSON.stringify(['pf-', 'vibespace-instance']) && gateOf(Array.isArray(a.subdomains)) && !a.subdomains.length, 'its fields: mintedAt, no rotation, not revoked, the hub\'s proxy-name prefixes, no subdomain yet');
 let seen = 0;
 const counted = (n) => { seen = n; return crypto.randomBytes(n); };
 RT.mint({ randomBytes: counted, now: NOW, label: 'x' });
@@ -55,7 +55,7 @@ ok(r.instanceId === a.instanceId && r.token !== a.token && r.rotatedAt === NOW +
 const v = RT.revoke(r, { now: NOW + 2 });
 ok(v.instanceId === a.instanceId && v.token === null && v.revokedAt === NOW + 2, 'revoke: the token forgotten, the id and its names kept');
 const back = RT.rotate(v, { randomBytes: crypto.randomBytes, now: NOW + 3 });
-ok(back.instanceId === a.instanceId && RT.TOKEN_RE.test(back.token) && back.revokedAt === null, 'a revoked record comes back by a rotation (same id, new token)');
+ok(back.instanceId === a.instanceId && gateOf(RT.TOKEN_RE.test(back.token)) && back.revokedAt === null, 'a revoked record comes back by a rotation (same id, new token)');
 ok(RT.withSub(a, 'vs12345abcde').subdomains[0] === 'vs12345abcde' && RT.withSub(RT.withSub(a, 'vs12345abcde'), 'vs12345abcde').subdomains.length === 1 && RT.withSub(a, 'Bad Name!').subdomains.length === 0, 'withSub keeps a relay-shaped subdomain once (a bad shape is ignored)');
 let many = a; for (let i = 0; i < 80; i++) many = RT.withSub(many, 'vs' + String(i).padStart(4, '0'));
 ok(many.subdomains.length === RT.SUBS_MAX && many.subdomains[RT.SUBS_MAX - 1] === 'vs0079', 'the kept subdomains are bounded (the newest SUBS_MAX)');
@@ -80,12 +80,12 @@ ok(RT.registrationLine(v, sha256, 'add') === '' && RT.registrationLine(a, () => 
 // RED control: the same judge over a builder that leaks (the mutant a careless edit would write) — caught
 const mutantLine = (rec) => `relay-admin add ${rec.instanceId} ${rec.token} ${rec.label}`;
 const mutantPrefix = (rec) => `relay-admin add ${rec.instanceId} ${sha256(rec.token)} ${rec.label} # ${rec.token.slice(5, 25)}`;
-ok(leaks(mutantLine(a), a.token) && leaks(mutantPrefix(a), a.token), 'RED control: a line carrying the token (whole, or a 20-char piece) is caught by the same judge');
+ok(gateOf(leaks(mutantLine(a), a.token)) && verdictOf(leaks(mutantPrefix(a), a.token)), 'RED control: a line carrying the token (whole, or a 20-char piece) is caught by the same judge');
 
 console.log('④ the label is shell-safe');
 for (const [raw, want] of [['my hub; rm -rf /', 'my-hub-rm-rf'], ['$(curl evil)', 'curl-evil'], ['`id`', 'id'], ['"quoted"', 'quoted'], ['', 'vibespace'], ['  ', 'vibespace'], ['ünïcødé', 'n-c-d'], ['a'.repeat(90), 'a'.repeat(60)]]) {
   const l = RT.labelOf(raw);
-  ok(RT.LABEL_RE.test(l) && !/[\s;$`"'()|&<>\\]/.test(l), `labelOf(${JSON.stringify(raw).slice(0, 30)}) = ${l} (no space, no shell metacharacter)`, l);
+  ok(gateOf(RT.LABEL_RE.test(l)) && !/[\s;$`"'()|&<>\\]/.test(l), `labelOf(${JSON.stringify(raw).slice(0, 30)}) = ${l} (no space, no shell metacharacter)`, l);
 }
 ok(RT.mint({ randomBytes: crypto.randomBytes, now: NOW, label: 'x; reboot' }).label === 'x-reboot', 'mint sanitizes the label it is given');
 
@@ -139,11 +139,11 @@ console.log('⑥b relayEnv — frpc\'s env is BUILT, never the hub\'s inherited'
   };
   const real = judge(RT.relayEnv);
   ok(real.length === 0, 'relayEnv passes the table: the kept names (PATH LANG TMPDIR http_proxy) + the instance token + the knock — none of the hub\'s session tokens, cloud keys, the cluster\'s shared token, other proxies, HOME, a loader hook', real);
-  ok(JSON.stringify(RT.RELAY_ENV_KEEP) === JSON.stringify(['PATH', 'LANG', 'TMPDIR', 'http_proxy']) && Object.isFrozen(RT.RELAY_ENV_KEEP), 'the kept list is pinned (measured on frpc 0.70.0: it runs on an empty env, never reads HOME, dials through `http_proxy` — the one proxy name it reads)', RT.RELAY_ENV_KEEP);
+  ok(JSON.stringify(RT.RELAY_ENV_KEEP) === JSON.stringify(['PATH', 'LANG', 'TMPDIR', 'http_proxy']) && verdictOf(Object.isFrozen(RT.RELAY_ENV_KEEP)), 'the kept list is pinned (measured on frpc 0.70.0: it runs on an empty env, never reads HOME, dials through `http_proxy` — the one proxy name it reads)', RT.RELAY_ENV_KEEP);
   const spread = judge((b, o) => ({ ...b, ...RT.relayEnv(b, o) }));
-  ok(spread.includes('no dropped name, no dropped value'), 'MUTANT spreads process.env under the built names ⇒ RED', spread);
+  ok(verdictOf(spread.includes('no dropped name, no dropped value')), 'MUTANT spreads process.env under the built names ⇒ RED', spread);
   const preFix = judge((b, { token = '', knock = '' } = {}) => { const e = { ...b, [RT.KNOCK_ENV]: knock, [RT.TOKEN_ENV]: token }; delete e.VIBESPACE_FRPS_TOKEN; delete e[RT.CLUSTER_TOKEN_ENV]; return e; });
-  ok(preFix.includes('no dropped name, no dropped value'), 'MUTANT the pre-fix spawn env (a copy of process.env minus two names) ⇒ RED', preFix);
+  ok(verdictOf(preFix.includes('no dropped name, no dropped value')), 'MUTANT the pre-fix spawn env (a copy of process.env minus two names) ⇒ RED', preFix);
 }
 
 console.log('⑦ THE NAME RULE');
@@ -154,7 +154,7 @@ const NAME_TABLE = [
 ];
 for (const [proxyName, subdomain, want] of NAME_TABLE) {
   const got = RT.nameVerdict(pre, { proxyName, subdomain });
-  ok(got.ok === want && (want || got.reason === 'name_not_yours'), `nameVerdict(${proxyName || '∅'}${subdomain ? ' · ' + subdomain : ''}) ⇒ ${want ? 'ok' : 'name_not_yours'}`, got);
+  ok(got.ok === want && (verdictOf(want) || got.reason === 'name_not_yours'), `nameVerdict(${proxyName || '∅'}${subdomain ? ' · ' + subdomain : ''}) ⇒ ${want ? 'ok' : 'name_not_yours'}`, got);
 }
 ok(RT.strippedName(`${a.instanceId}.pf-x`, a.instanceId) === 'pf-x' && RT.strippedName('pf-x', a.instanceId) === 'pf-x' && RT.strippedName('a.b', null) === 'a.b', 'strippedName: frps\'s `<user>.` prefix off (both forms judged alike)');
 
@@ -178,8 +178,8 @@ ok(JSON.stringify(RT.loginOf(LOG + '\n2026-10-20 08:00:10.000 [I] [client/servic
 ok(RT.loginOf('[I] start proxy success') === null && RT.loginOf('') === null, 'loginOf: no login event ⇒ null');
 ok(JSON.stringify(RT.loginOf("[W] connect to server error: token in login doesn't match token from configuration")) === JSON.stringify({ ok: false, code: 'knock_refused' }), 'loginOf: frps refusing the SHARED token is `knock_refused` (the relay emptied its auth.token)');
 const al = RT.alertOf({ code: 'name_in_use', owner: 'other-hub' }, { name: 'vs1234567890' });
-ok(al && al.text === 'The public name vs1234567890 is held by “other-hub” on the relay' && al.i18n.text.params.owner === 'other-hub' && Array.isArray(al.i18n.detail) && !leaks(JSON.stringify(al), a.token), 'alertOf name_in_use: the name + the owner, i18n lines, never a token', al && al.text);
-ok(RT.alertOf({ code: 'name_not_yours' }, { name: 'pf-x' }).text.includes('pf-x') && RT.alertOf({ code: 'bad_token' }) === null && RT.alertOf(null) === null, 'alertOf: the two name refusals only (a login refusal is the card\'s, not the tray\'s)');
+ok(gateOf(al) && al.text === 'The public name vs1234567890 is held by “other-hub” on the relay' && al.i18n.text.params.owner === 'other-hub' && gateOf(Array.isArray(al.i18n.detail)) && !leaks(JSON.stringify(al), a.token), 'alertOf name_in_use: the name + the owner, i18n lines, never a token', al && al.text);
+ok(gateOf(RT.alertOf({ code: 'name_not_yours' }, { name: 'pf-x' }).text.includes('pf-x')) && RT.alertOf({ code: 'bad_token' }) === null && RT.alertOf(null) === null, 'alertOf: the two name refusals only (a login refusal is the card\'s, not the tray\'s)');
 
 console.log('⑧b the run\'s log — a login is no proof; a drop is a RATE and an OUTCOME (lane frp-token-proof, r2)');
 {
@@ -198,7 +198,7 @@ console.log('⑧b the run\'s log — a login is no proof; a drop is a RATE and a
   const AT = T0 + 93800 + 9;   // the file's mtime: its newest line written
   const runOf = typeof RT.runOf === 'function' ? RT.runOf : () => null, droppedOf = typeof RT.droppedOf === 'function' ? RT.droppedOf : () => null;
   const r = runOf(INCIDENT, null, { at: AT }) || {};
-  ok(r.logins === 12 && r.proxies === 0 && r.unanswered === 12 && Array.isArray(r.recent) && r.recent.length === Math.min(12, RT.RECENT_KEEP || 0), 'runOf over the incident\'s transcript: 12 logins, 0 proxies started, 12 since the relay last answered a NewProxy (their times kept, ≤ RECENT_KEEP)', r);
+  ok(r.logins === 12 && r.proxies === 0 && r.unanswered === 12 && gateOf(Array.isArray(r.recent)) && r.recent.length === Math.min(12, RT.RECENT_KEEP || 0), 'runOf over the incident\'s transcript: 12 logins, 0 proxies started, 12 since the relay last answered a NewProxy (their times kept, ≤ RECENT_KEEP)', r);
   ok(r.since === T0 + 1019 && r.recent[r.recent.length - 1] === AT, 'the log\'s own clock (PDT) maps onto the hub\'s by the file\'s mtime — whatever frpc\'s time zone', { since: r.since, want: T0 + 1019 });
   const tried = T0 + 2500;   // the boot replay's publish tried ONE NewProxy 2.5 s after the start — never answered
   ok(droppedOf(r, { knock: false, triedAt: tried, now: AT + 5e3 }) === true, 'THE DROPPED LOGIN: no shared token, a publish WANTED and never answered, 3 logins within 60 s since the relay last answered, frpc still redialling ⇒ dropped');
@@ -231,12 +231,12 @@ console.log('⑧b the run\'s log — a login is no proof; a drop is a RATE and a
   ok(!!h2 && JSON.stringify(h2) === JSON.stringify(r), 'runOf reads FORWARD: two halves (each dated by its own mtime) = the whole (the hub reads new bytes only)', h2);
   const a = typeof RT.droppedAlertOf === 'function' ? RT.droppedAlertOf({ logins: 2459, since: Date.parse('2026-10-30T12:00:05Z'), why: 'locked' }) : null;
   ok(!!a && a.text === 'The relay accepts this instance\'s login but closes the connection right after (2459 logins since 2026-10-30 12:00Z, no proxy started)', 'the owner\'s words: «the relay accepts this instance\'s login but closes the connection right after (N logins since <time>, no proxy started)»', a && a.text);
-  ok(!!a && /still requires the shared relay token, and this frpc runs without it because the vault was locked when it started\. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs\./.test(a.detail) && !/DNS|domain|public port/.test(a.text + a.detail + a.message), '…why and what to do (unlock the vault with the second password, or set the relay token again) — never «DNS» nor «a public port»', a && a.detail);
-  ok(!!a && a.i18n.text.key === RT.DROPPED_TEXT && a.i18n.text.params.n === 2459 && a.i18n.detail[0].key === RT.DROPPED_DETAIL.locked && /^the relay accepts/.test(a.message), 'the item\'s i18n carries the key + its params; the publish error is the same words in one sentence', a && a.i18n);
+  ok(!!a && gateOf(/still requires the shared relay token, and this frpc runs without it because the vault was locked when it started\. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs\./.test(a.detail)) && !/DNS|domain|public port/.test(a.text + a.detail + a.message), '…why and what to do (unlock the vault with the second password, or set the relay token again) — never «DNS» nor «a public port»', a && a.detail);
+  ok(!!a && a.i18n.text.key === RT.DROPPED_TEXT && a.i18n.text.params.n === 2459 && a.i18n.detail[0].key === RT.DROPPED_DETAIL.locked && verdictOf(/^the relay accepts/.test(a.message)), 'the item\'s i18n carries the key + its params; the publish error is the same words in one sentence', a && a.i18n);
   const none = RT.droppedAlertOf ? RT.droppedAlertOf({ logins: 3, since: 0, why: 'none' }) : null, off = RT.droppedAlertOf ? RT.droppedAlertOf({ logins: 3, since: 0, why: 'off' }) : null;
-  ok(!!none && /holds none/.test(none.detail) && !!off && /taken to no longer ask/.test(off.detail) && /since \?/.test(none.text), 'the other two causes say their own why (no token held · one held but not sent); an unknown start reads «?»', [none && none.detail, off && off.detail]);
+  ok(!!none && gateOf(/holds none/.test(none.detail)) && !!off && gateOf(/taken to no longer ask/.test(off.detail)) && verdictOf(/since \?/.test(none.text)), 'the other two causes say their own why (no token held · one held but not sent); an unknown start reads «?»', [none && none.detail, off && off.detail]);
   const ra = typeof RT.retiredAlertOf === 'function' ? RT.retiredAlertOf({ entry: 'frp:token', at: Date.parse('2026-10-30T12:00:11Z') }) : null;
-  ok(!!ra && ra.text === 'The shared relay token (frp:token) left this instance' && /ran on a frpc started without it \(2026-10-30 12:00Z\)/.test(ra.detail) && /set the relay token again/.test(ra.detail), 'A DROP IS SAID: the retirement\'s words name the entry and why', ra);
+  ok(!!ra && ra.text === 'The shared relay token (frp:token) left this instance' && gateOf(/ran on a frpc started without it \(2026-10-30 12:00Z\)/.test(ra.detail)) && verdictOf(/set the relay token again/.test(ra.detail)), 'A DROP IS SAID: the retirement\'s words name the entry and why', ra);
 }
 
 console.log('⑨ CENSUS');
@@ -250,12 +250,12 @@ ok(JSON.stringify(spelledK) === JSON.stringify(['src/relay-token.js']), 'so is t
 const users = src.filter(([, t]) => /\bRT\.TOKEN_ENV\b|\.TOKEN_ENV\]/.test(t)).map(([f]) => f);
 const frpSrc = fs.readFileSync(path.join(REPO, 'src/plugins/frp.js'), 'utf8');
 const builders = src.filter(([, t]) => /\bRT\.relayEnv\(/.test(t)).map(([f]) => f);
-ok(users.length === 0 && JSON.stringify(builders) === JSON.stringify(['src/plugins/frp.js']) && (frpSrc.match(/\bRT\.relayEnv\(/g) || []).length === 1 && /const env = RT\.relayEnv\(process\.env, \{ token: cfg\.ident\.token \|\| '', knock \}\);/.test(frpSrc), 'nobody outside src/relay-token.js puts the token under its name: the ONE frpc spawn env is RT.relayEnv(process.env, …) in src/plugins/frp.js (the toml names it through RT.frpcLines\' template)', { users, builders });
-ok(!/\.\.\.process\.env\b/.test(frpSrc) && !/Object\.assign\(\s*\{\s*\}\s*,\s*process\.env/.test(frpSrc) && (frpSrc.match(/\bspawn\(/g) || []).length === 1 && /spawn\(bin, \['-c', frpConf\(\)\], \{[^}]*\benv \}\)/.test(frpSrc), 'src/plugins/frp.js copies process.env nowhere — its one long-lived child (frpc) is spawned with the built env', (frpSrc.match(/.*\bspawn\(.*/g) || []).join(' | '));
+ok(users.length === 0 && JSON.stringify(builders) === JSON.stringify(['src/plugins/frp.js']) && (frpSrc.match(/\bRT\.relayEnv\(/g) || []).length === 1 && verdictOf(/const env = RT\.relayEnv\(process\.env, \{ token: cfg\.ident\.token \|\| '', knock \}\);/.test(frpSrc)), 'nobody outside src/relay-token.js puts the token under its name: the ONE frpc spawn env is RT.relayEnv(process.env, …) in src/plugins/frp.js (the toml names it through RT.frpcLines\' template)', { users, builders });
+ok(!/\.\.\.process\.env\b/.test(frpSrc) && !/Object\.assign\(\s*\{\s*\}\s*,\s*process\.env/.test(frpSrc) && (frpSrc.match(/\bspawn\(/g) || []).length === 1 && verdictOf(/spawn\(bin, \['-c', frpConf\(\)\], \{[^}]*\benv \}\)/.test(frpSrc)), 'src/plugins/frp.js copies process.env nowhere — its one long-lived child (frpc) is spawned with the built env', (frpSrc.match(/.*\bspawn\(.*/g) || []).join(' | '));
 const rtSrc = fs.readFileSync(path.join(REPO, 'src/relay-token.js'), 'utf8');
 ok(!/\brequire\s*\(/.test(rtSrc.replace(/\/\/.*$/gm, '')) && !/\bimport\b/.test(rtSrc.replace(/\/\/.*$/gm, '')), 'src/relay-token.js requires nothing (PURE — crypto handed in)');
-ok(/'src\/relay-token\.js'/.test(fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8')), 'it is in test-architecture\'s PURE set');
-ok(/name: 'test-relay-token', tier: 'fast'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')), 'this suite has its tier row');
+ok(verdictOf(/'src\/relay-token\.js'/.test(fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8'))), 'it is in test-architecture\'s PURE set');
+ok(verdictOf(/name: 'test-relay-token', tier: 'fast'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8'))), 'this suite has its tier row');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

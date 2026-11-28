@@ -27,7 +27,7 @@ const [CDP_PORT] = await freePorts(1);
 const dir = scratch('term-zoom');
 fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + JSON.stringify(e) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + JSON.stringify(e) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const X = path.join(repo, 'node_modules/@xterm/xterm');
 const utils = fs.readFileSync(path.join(repo, 'src/lib/utils.js'), 'utf8');
@@ -93,7 +93,7 @@ try {
     const raw = await drag(z, 'raw');
     check(`zoom ${z}, PRE-FIX page: the selection lands on row ${Math.round(20.5 * z)} — the incident, not row 20`, raw.row !== 20 && Math.abs(raw.row - 20.5 * z) <= 1, raw);
     const fixed = await drag(z, 'fixed');
-    check(`zoom ${z}, FIXED page (counter-zoom + font × scale): the selection lands on row 20`, fixed.row === 20 && /^ ?x{9,11}$/.test(fixed.text), fixed);
+    check(`zoom ${z}, FIXED page (counter-zoom + font × scale): the selection lands on row 20`, fixed.row === 20 && verdictOf(/^ ?x{9,11}$/.test(fixed.text)), fixed);
     check(`zoom ${z}: the fixed screen is the same visual size as the raw one (±3 %)`, Math.abs(fixed.screen[0] - raw.screen[0]) / raw.screen[0] < 0.03 && Math.abs(fixed.screen[1] - raw.screen[1]) / raw.screen[1] < 0.03, { raw: raw.screen, fixed: fixed.screen });
   }
 
@@ -111,11 +111,11 @@ try {
       for (const m of src.matchAll(/new Terminal\(\{[\s\S]*?\}\);/g)) sites.term.push({ f, ok: /linkHandler: TERMINAL_LINK_HANDLER\b/.test(m[0]) });
       for (const m of src.matchAll(/new WebLinksAddon\(([^\n]*)/g)) sites.addon.push({ f, ok: /^\(event, uri\) => openTerminalLink\(uri\)\)/.test(m[1]) });
     }
-    check(`census: every \`new Terminal(\` in src/lib passes linkHandler: TERMINAL_LINK_HANDLER (${sites.term.map((x) => x.f).join(', ')})`, sites.term.length >= 2 && sites.term.every((x) => x.ok) && sites.term.some((x) => x.f === 'terminal.js') && sites.term.some((x) => x.f === 'raw-screen.js'), sites.term);
-    check(`census: every \`new WebLinksAddon(\` in src/lib passes openTerminalLink (${sites.addon.map((x) => x.f).join(', ')})`, sites.addon.length >= 2 && sites.addon.every((x) => x.ok), sites.addon);
+    check(`census: every \`new Terminal(\` in src/lib passes linkHandler: TERMINAL_LINK_HANDLER (${sites.term.map((x) => x.f).join(', ')})`, sites.term.length >= 2 && gateOf(sites.term.every((x) => x.ok)) && gateOf(sites.term.some((x) => x.f === 'terminal.js')) && verdictOf(sites.term.some((x) => x.f === 'raw-screen.js')), sites.term);
+    check(`census: every \`new WebLinksAddon(\` in src/lib passes openTerminalLink (${sites.addon.map((x) => x.f).join(', ')})`, sites.addon.length >= 2 && verdictOf(sites.addon.every((x) => x.ok)), sites.addon);
     const linksSrc = fs.readFileSync(path.join(libDir, 'terminal-links.js'), 'utf8');
     const openerSrc = (linksSrc.match(/export function openTerminalLink\(uri\) \{[\s\S]*?\n\}/) || [])[0];
-    check('terminal-links.js: openTerminalLink window.open()s http(s) in a new tab, noopener', !!openerSrc && /window\.open\(u, '_blank', 'noopener,noreferrer'\)/.test(openerSrc) && /https\?/.test(openerSrc), openerSrc);
+    check('terminal-links.js: openTerminalLink window.open()s http(s) in a new tab, noopener', !!openerSrc && gateOf(/window\.open\(u, '_blank', 'noopener,noreferrer'\)/.test(openerSrc)) && verdictOf(/https\?/.test(openerSrc)), openerSrc);
     const opener = openerSrc.replace('export function', 'function');
     const WL = path.join(repo, 'node_modules/@xterm/addon-web-links/lib/addon-web-links.js');
     await evalJs(`new Promise((res,rej)=>{const s=document.createElement('script');s.src=${JSON.stringify('file://' + WL)};s.onload=()=>res(true);s.onerror=()=>rej(new Error('addon load failed'));document.head.appendChild(s);})`);
@@ -136,8 +136,8 @@ try {
       term2.dispose(); host.remove(); window.__opens = [];
       return out;
     })()`));
-    check('the real WebLinksAddon accepts the product opener', R.ctorOk, R);
-    check('a plain-text http(s) link opens in a NEW TAB via window.open, with no native confirm', R.opens.length === 1 && R.opens[0][0] === 'https://claude.com/oauth/authorize?code=true' && R.opens[0][1] === '_blank' && /noopener/.test(R.opens[0][2] || '') && R.confirms === 0, R);
+    check('the real WebLinksAddon accepts the product opener', verdictOf(R.ctorOk), R);
+    check('a plain-text http(s) link opens in a NEW TAB via window.open, with no native confirm', R.opens.length === 1 && R.opens[0][0] === 'https://claude.com/oauth/authorize?code=true' && R.opens[0][1] === '_blank' && gateOf(/noopener/.test(R.opens[0][2] || '')) && R.confirms === 0, R);
     check('a non-http(s) link is ignored (never auto-opened)', R.opens.length === 1, R);
     // THE OSC-8 ROAD, clicked for real (CDP mouse): the CLI's own hyperlink — with the product's linkHandler, and the
     // CONTROL without it (xterm's default = the native confirm the testers met)
@@ -160,9 +160,9 @@ try {
     const ctl = await clickOsc(false);
     check('CONTROL (the 2.369.344 terminal): an OSC-8 link clicked with no linkHandler → xterm\'s native «dangerous link» confirm', ctl.confirms === 1 && ctl.opens.length === 0, ctl);
     const fixed = await clickOsc(true);
-    check('an OSC-8 link (the CLI\'s sign-in URL) clicked with the product\'s linkHandler → a NEW TAB, no native confirm', fixed.confirms === 0 && fixed.opens.length === 1 && fixed.opens[0][0] === OSC_URL && fixed.opens[0][1] === '_blank' && /noopener/.test(fixed.opens[0][2] || ''), fixed);
+    check('an OSC-8 link (the CLI\'s sign-in URL) clicked with the product\'s linkHandler → a NEW TAB, no native confirm', fixed.confirms === 0 && fixed.opens.length === 1 && fixed.opens[0][0] === OSC_URL && fixed.opens[0][1] === '_blank' && verdictOf(/noopener/.test(fixed.opens[0][2] || '')), fixed);
   }
 } catch (e) { failed++; console.error('  ✗ harness error: ' + e.message); }
 ws.close();
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

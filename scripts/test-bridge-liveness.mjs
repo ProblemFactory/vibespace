@@ -24,7 +24,7 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const BL = require(path.join(REPO, 'src/bridge-liveness.js'));
 const RL = require(path.join(REPO, 'src/record-lateness.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -87,7 +87,7 @@ ok(V({ lastByteAt: 0, lastApiAt: t0 + 590e3 }).since === t0, 'no byte since the 
 ok(V({ lastByteAt: t0 + 100e3, lastApiAt: t0 + 590e3, heals: [t0 + 100e3, t0 + 200e3, t0 + 300e3] }).verdict === 'budget', 'three heals in the hour ⇒ budget (no heal loop)');
 ok(V({ lastByteAt: t0 + 100e3, lastApiAt: t0 + 590e3, heals: [t0 - 3700e3, t0 - 3650e3, t0 - 3610e3] }).verdict === 'dead', 'heals older than an hour do not count');
 ok(BL.bridgeVerdict({ now: t0, silenceMs: null }).verdict === 'off', 'the setting off ⇒ off');
-ok(/no output for 8m20s while the CLI made an API request 8m10s after the last byte/.test(BL.verdictWords(va)), `the journal words: ${JSON.stringify(BL.verdictWords(va))}`);
+ok(verdictOf(/no output for 8m20s while the CLI made an API request 8m10s after the last byte/.test(BL.verdictWords(va))), `the journal words: ${JSON.stringify(BL.verdictWords(va))}`);
 
 // ── §C ──
 console.log('\n§C the setting and the cadence');
@@ -110,7 +110,7 @@ console.log('\n§D the catch-up and its card (through lane-hot-switch\'s late ru
   feed(stamp('2026-09-30T22:04:00Z'), restoredAt + 60);           // 74 s old: backlog, not late
   ok(st.n === 3 && st.late === 2 && !BL.catchUpSettled(st, restoredAt + 100), `3 records, 2 late (the unstamped one inherits its neighbour); a 74 s old one is backlog, not "now" — not settled (${JSON.stringify({ n: st.n, late: st.late })})`);
   feed(stamp(new Date(restoredAt + 1000).toISOString()), restoredAt + 1500);
-  ok(BL.catchUpSettled(st, restoredAt + 1500), 'a record stamped NOW arrived behind the backlog ⇒ settled');
+  ok(verdictOf(BL.catchUpSettled(st, restoredAt + 1500)), 'a record stamped NOW arrived behind the backlog ⇒ settled');
   ok(BL.catchUpLostAt(st) === Date.parse('2026-09-30T19:03:20Z'), 'lost at = the oldest record we missed (before our last byte at 19:03:33)');
   const card = BL.catchUpCard(st, { fmt: (ms) => new Date(ms).toISOString().slice(11, 16) });
   ok(card === "The connection to this conversation's output was lost at 19:03 and restored at 22:05 — 4 records caught up (they are shown, not re-run).", `the card: ${JSON.stringify(card)}`);
@@ -119,7 +119,7 @@ console.log('\n§D the catch-up and its card (through lane-hot-switch\'s late ru
   ok(BL.catchUpCard(quick) === null, 'a 5 s gap (a quick restart) ⇒ no card');
   ok(BL.catchUpCard(BL.catchUpStart({ restoredAt, silentSince: restoredAt - 600e3 })) === null, 'a heal that brought nothing ⇒ no card');
   const q = BL.catchUpStart({ restoredAt });
-  ok(!BL.catchUpSettled(q, restoredAt + 14e3) && BL.catchUpSettled(q, restoredAt + 15e3), 'no record for 15 s ⇒ settled');
+  ok(!BL.catchUpSettled(q, restoredAt + 14e3) && verdictOf(BL.catchUpSettled(q, restoredAt + 15e3)), 'no record for 15 s ⇒ settled');
 }
 
 // ── §E the watch over a fake /proc ──
@@ -168,8 +168,8 @@ console.log('\n§E the watch (ORCH) over a fake /proc and fake sessions');
   ok(killed.length === 0, 'the boot sweep does NOT end an orphan while its session\'s own attach has not connected yet (no first byte)');
   sBoot._lastPtyDataAt = t;
   await sweeping;
-  ok(JSON.stringify(killed) === '[[11,"SIGKILL"],[14,"SIGKILL"]]' && /\[bridge\] boot: ended 2 orphaned dtach attach client/.test(lines[0] || ''), `…then ends them with SIGKILL and says so: ${JSON.stringify((lines[0] || '').slice(0, 100))}…`);
-  ok(sBoot._bridgeCatchUp && sBoot._bridgeCatchUp.why === 'boot', '…and counts what the freed session catches up');
+  ok(JSON.stringify(killed) === '[[11,"SIGKILL"],[14,"SIGKILL"]]' && verdictOf(/\[bridge\] boot: ended 2 orphaned dtach attach client/.test(lines[0] || '')), `…then ends them with SIGKILL and says so: ${JSON.stringify((lines[0] || '').slice(0, 100))}…`);
+  ok(gateOf(sBoot._bridgeCatchUp) && sBoot._bridgeCatchUp.why === 'boot', '…and counts what the freed session catches up');
   sBoot._bridgeCatchUp = null; sessions.delete('sess-boot');
   // a fresh orphan of A for the HEAL's own sweep (verify r1: the post-heal sweep was pinned by no gate)
   mk(15, { comm: 'dtach', argv: ['dtach', '-a', sockA, '-E', '-r', 'winch'], ppid: 3604, tty: 34907 });
@@ -182,10 +182,10 @@ console.log('\n§E the watch (ORCH) over a fake /proc and fake sessions');
   ok(acted.length === 0 && reattached.length === 0, 'silent 4 min with no witness ⇒ no heal (quiet)');
   apiAt = t - 30e3;
   acted = await W.tick();
-  ok(acted.length === 1 && reattached.length === 1 && reattached[0].o.kind === 'heal' && /^dead bridge: no output for 4m00s while the CLI made an API request/.test(reattached[0].why), `the OTel witness ⇒ ONE heal through the one healer: ${JSON.stringify(reattached[0] && reattached[0].why)}`);
-  ok(sA._bridgeCatchUp && sA._bridgeCatchUp.why === 'heal' && Array.isArray(sA._bridgeHeals) && sA._bridgeHeals.length === 1, 'the heal armed its catch-up and spent one of the hour\'s budget');
+  ok(acted.length === 1 && reattached.length === 1 && reattached[0].o.kind === 'heal' && verdictOf(/^dead bridge: no output for 4m00s while the CLI made an API request/.test(reattached[0].why)), `the OTel witness ⇒ ONE heal through the one healer: ${JSON.stringify(reattached[0] && reattached[0].why)}`);
+  ok(gateOf(sA._bridgeCatchUp) && sA._bridgeCatchUp.why === 'heal' && gateOf(Array.isArray(sA._bridgeHeals)) && sA._bridgeHeals.length === 1, 'the heal armed its catch-up and spent one of the hour\'s budget');
   await new Promise((r) => setTimeout(r, 300));   // afterReattach: the new attach's first byte (the stub stamped it) ⇒ this socket's orphans are ended
-  ok(killed.some(([p, sig]) => p === 15 && sig === 'SIGKILL') && lines.some((l) => /\[bridge\] sess-a heal: ended \d+ orphaned dtach attach client\(s\)[^\n]*pid 15 cw-1-1/.test(l)), `the heal ends the orphan holding THIS socket once the new attach has spoken (attach first, then kill) — and says so`, `killed=${JSON.stringify(killed)} lines=${JSON.stringify(lines.filter((l) => /heal/.test(l)).slice(-3))}`);
+  ok(gateOf(killed.some(([p, sig]) => p === 15 && sig === 'SIGKILL')) && verdictOf(lines.some((l) => /\[bridge\] sess-a heal: ended \d+ orphaned dtach attach client\(s\)[^\n]*pid 15 cw-1-1/.test(l))), `the heal ends the orphan holding THIS socket once the new attach has spoken (attach first, then kill) — and says so`, `killed=${JSON.stringify(killed)} lines=${JSON.stringify(lines.filter((l) => /heal/.test(l)).slice(-3))}`);
   t += 20e3;                                        // 15 s with no record and no byte past the preamble: the catch-up settles EMPTY
   await new Promise((r) => setTimeout(r, 1300));   // the settle poll runs on real time
   ok(sA._bridgeCatchUp === null && sA._bridgeEmptyHeals === 1, `an EMPTY heal (no record, nothing past the preamble) is counted by the settle poll itself: _bridgeEmptyHeals = ${sA._bridgeEmptyHeals}`);
@@ -199,7 +199,7 @@ console.log('\n§E the watch (ORCH) over a fake /proc and fake sessions');
   t += 200e3; apiAt = t - 10e3; await W.tick(); sA._bridgeCatchUp = null;
   t += 200e3; apiAt = t - 10e3;
   acted = await W.tick();
-  ok(acted.length === 0 && sA._bridgeHeals.length === 3 && lines.some((l) => /after 3 re-attaches this hour — not re-attaching again/.test(l)), 'the fourth in the hour is refused by the budget, and said once');
+  ok(acted.length === 0 && sA._bridgeHeals.length === 3 && verdictOf(lines.some((l) => /after 3 re-attaches this hour — not re-attaching again/.test(l))), 'the fourth in the hour is refused by the budget, and said once');
   const quietLines = lines.length;
   await W.tick();
   ok(lines.length === quietLines, '…said once, not every tick');
@@ -228,7 +228,7 @@ console.log('\n§E the watch (ORCH) over a fake /proc and fake sessions');
     await fire();
     const after = live().map((h) => h.ms), r2 = reads;
     W2.stop();
-    ok(armed.length === 1 && armed[0] === BL.tickMsOf(BL.silenceMsOf(0.034)) && armed[0] <= 2000 && r1 >= 3 && kept && old.cleared && after.length === 1 && after[0] === BL.tickMsOf(BL.silenceMsOf(3)) && after[0] >= 30000 && r2 > r1 && live().length === 0,
+    ok(armed.length === 1 && armed[0] === BL.tickMsOf(BL.silenceMsOf(0.034)) && armed[0] <= 2000 && r1 >= 3 && gateOf(kept) && gateOf(old.cleared) && after.length === 1 && after[0] === BL.tickMsOf(BL.silenceMsOf(3)) && after[0] >= 30000 && r2 > r1 && live().length === 0,
       `the setting changed at runtime re-arms the watch: armed at ${armed.join()} ms, ${r1} reads over start + two ticks with no re-arm, then the next tick cleared the ${old.ms} ms interval and armed ${after.join()} ms (the old cadence is gone); stop clears it`);
   } finally { globalThis.setInterval = realSI; globalThis.clearInterval = realCI; }
 }
@@ -238,36 +238,36 @@ console.log('\n§F the wiring');
 {
   const SS = read('src/server/session-stdout.js');
   const fn = (/function reattachLocalPty\([\s\S]*?\n\}/.exec(SS) || [''])[0];
-  ok(/onLocalReattach\?\.\(id, session, \{ why, kind, silentSince \}\)/.test(fn) && fn.indexOf('onLocalReattach') > fn.indexOf('setupSessionPty(session, id, newPty)'), 'THE ONE HEALER tells the watch after EVERY local re-attach (after the new pty is wired)');
+  ok(gateOf(/onLocalReattach\?\.\(id, session, \{ why, kind, silentSince \}\)/.test(fn)) && fn.indexOf('onLocalReattach') > fn.indexOf('setupSessionPty(session, id, newPty)'), 'THE ONE HEALER tells the watch after EVERY local re-attach (after the new pty is wired)');
   const UI = read('src/server/user-input.js');
-  ok(/const neverSpoke = ptyQuietSince\(session, Number\(session\._ptyOpenedAt\) \|\| 0\);\n\s*reattachLocalPty\(sessionId, session, `Broken pty stdin detected \([^`]*`\);/.test(UI), 'the broken-stdin detector still heals through it (its orphans are ended too); WHAT is re-sent is the healer\'s — the inputs a bridge that never spoke was handed (verify r1: a connected client\'s queued input is read after it dies — a re-send doubled the message)');
+  ok(verdictOf(/const neverSpoke = ptyQuietSince\(session, Number\(session\._ptyOpenedAt\) \|\| 0\);\n\s*reattachLocalPty\(sessionId, session, `Broken pty stdin detected \([^`]*`\);/.test(UI)), 'the broken-stdin detector still heals through it (its orphans are ended too); WHAT is re-sent is the healer\'s — the inputs a bridge that never spoke was handed (verify r1: a connected client\'s queued input is read after it dies — a re-send doubled the message)');
   // B-c20d: the ONE typed-input write holds what a never-spoke bridge was handed; the ONE healer replays ALL of it, in order, and repaints a terminal
-  ok(/^\s*try \{ writeSessionInput\(session, payloadLine\); \}/m.test(UI) && !/^\s*try \{ session\.pty\.write\(payloadLine/m.test(UI), 'B-c20d: the typing path writes through writeSessionInput (a never-spoke bridge HOLDS every input it is handed) — no direct pty write left');
+  ok(gateOf(/^\s*try \{ writeSessionInput\(session, payloadLine\); \}/m.test(UI)) && !/^\s*try \{ session\.pty\.write\(payloadLine/m.test(UI), 'B-c20d: the typing path writes through writeSessionInput (a never-spoke bridge HOLDS every input it is handed) — no direct pty write left');
   const iTake = fn.search(/^\s*const replay = takeHeldInputs\(session\);/m), iSetup = fn.indexOf('setupSessionPty(session, id, newPty)'), iPaint = fn.search(/^\s*repaintFromBuf\(id, session\);/m), iReplay = fn.search(/^\s*if \(replay\.length\) replayHeldInputs\(session, newPty, replay\);/m);
   ok(iTake > 0 && iSetup > iTake && iPaint > iSetup && iReplay > iPaint, 'B-c20d: the healer takes the held inputs BEFORE the new pty re-stamps the birth, repaints a terminal\'s .buf tail after wiring it, then replays every held input (the detector, the attach probe and the watch alike)', JSON.stringify({ iTake, iSetup, iPaint, iReplay }));
-  ok(/function attachToDtach\([^)]*\) \{\n\s*const repaintClients = \(\) => \{ if \(repaint\) repaintFromBuf\(id, session\); \};/.test(SS), 'B-c20d: ONE repaint — the onExit ladder\'s re-attach and the healer share repaintFromBuf');
-  ok(/createUserInputSender\(\{[^}]*reattachLocalPty, ptyQuietSince, writeSessionInput,/.test(read('server.js')), 'B-c20d: server.js hands the sender session-stdout\'s writeSessionInput (the default is a bare write)');
+  ok(verdictOf(/function attachToDtach\([^)]*\) \{\n\s*const repaintClients = \(\) => \{ if \(repaint\) repaintFromBuf\(id, session\); \};/.test(SS)), 'B-c20d: ONE repaint — the onExit ladder\'s re-attach and the healer share repaintFromBuf');
+  ok(verdictOf(/createUserInputSender\(\{[^}]*reattachLocalPty, ptyQuietSince, writeSessionInput,/.test(read('server.js'))), 'B-c20d: server.js hands the sender session-stdout\'s writeSessionInput (the default is a bare write)');
   // verify r2: anchored at the START of its line — a stamp commented out (`// session._ptyOpenedAt = …`) satisfied the unanchored pin (the 2.369.134 class)
   // B-1217: the birth is strictly after the predecessor's last byte, and the stamp is the CURRENT bridge's alone (test-pty-duck §5 drives both)
-  ok(/^\s*session\._ptyOpenedAt = Math\.max\(Date\.now\(\), \(Number\(session\._lastPtyDataAt\) \|\| 0\) \+ 1\);[^\n]*\n\s*ptyProcess\.onData\(\(\) => \{ if \(session\.pty === ptyProcess\) session\._lastPtyDataAt = Math\.max\(Date\.now\(\), Number\(session\._ptyOpenedAt\) \|\| 0\); \}\);/m.test(SS), 'every pty is stamped with its birth right beside the liveness stamp (the one place every pty is wired) — the statement, not a comment of it; the birth after the predecessor\'s last byte, the stamp only from the current bridge and never before its birth (B-1217, r1676)');
+  ok(verdictOf(/^\s*session\._ptyOpenedAt = Math\.max\(Date\.now\(\), \(Number\(session\._lastPtyDataAt\) \|\| 0\) \+ 1\);[^\n]*\n\s*ptyProcess\.onData\(\(\) => \{ if \(session\.pty === ptyProcess\) session\._lastPtyDataAt = Math\.max\(Date\.now\(\), Number\(session\._ptyOpenedAt\) \|\| 0\); \}\);/m.test(SS)), 'every pty is stamped with its birth right beside the liveness stamp (the one place every pty is wired) — the statement, not a comment of it; the birth after the predecessor\'s last byte, the stamp only from the current bridge and never before its birth (B-1217, r1676)');
   const S = read('server.js');
-  ok(/onLocalReattach: \(\.\.\.a\) => bridgeWatch\.afterReattach\(\.\.\.a\)/.test(S), 'server.js hands session-stdout the watch\'s afterReattach');
-  ok(/const bridgeWatch = require\('\.\/src\/server\/bridge-watch\.js'\)\.create\(\{ activeSessions, BUFFERS_DIR, SOCKETS_DIR, reattachLocalPty, serverSetting, getOtelIngest: \(\) => otelIngest, feedPeerCard/.test(S), 'the watch is built from the one healer, the setting, the OTel witness and the card door');
+  ok(verdictOf(/onLocalReattach: \(\.\.\.a\) => bridgeWatch\.afterReattach\(\.\.\.a\)/.test(S)), 'server.js hands session-stdout the watch\'s afterReattach');
+  ok(verdictOf(/const bridgeWatch = require\('\.\/src\/server\/bridge-watch\.js'\)\.create\(\{ activeSessions, BUFFERS_DIR, SOCKETS_DIR, reattachLocalPty, serverSetting, getOtelIngest: \(\) => otelIngest, feedPeerCard/.test(S)), 'the watch is built from the one healer, the setting, the OTel witness and the card door');
   const iRestore = S.indexOf('restoreSessions(); hub.turn(() => { bootBrowserKeeper()'), iSweep = S.indexOf('bridgeWatch.bootSweep(); bridgeWatch.start();');
-  ok(iSweep > iRestore && /setTimeout\(\(\) => \{ try \{ bridgeWatch\.bootSweep\(\); bridgeWatch\.start\(\); \}/.test(S), 'the boot sweep runs AFTER the restore\'s attaches (attach first, then end the orphans)');
+  ok(iSweep > iRestore && verdictOf(/setTimeout\(\(\) => \{ try \{ bridgeWatch\.bootSweep\(\); bridgeWatch\.start\(\); \}/.test(S)), 'the boot sweep runs AFTER the restore\'s attaches (attach first, then end the orphans)');
   const crash = (/process\.on\('uncaughtException', \(e\) => \{([\s\S]*?)\n\}\);/.exec(S) || [])[1] || '';
-  ok(/bridgeWatch\.endAttachPtys\(\)/.test(crash) && crash.indexOf('endAttachPtys') < crash.indexOf('process.exit(1)'), 'THE CRASH PATH ends the attach clients like the clean shutdown (no orphan survives a crash)');
+  ok(gateOf(/bridgeWatch\.endAttachPtys\(\)/.test(crash)) && crash.indexOf('endAttachPtys') < crash.indexOf('process.exit(1)'), 'THE CRASH PATH ends the attach clients like the clean shutdown (no orphan survives a crash)');
   const shut = (/function shutdownNow\(\) \{([\s\S]*?)\n\}/.exec(S) || [])[1] || '';
-  ok(/bridgeWatch\.endAttachPtys\(\)/.test(shut) && !/s\.pty\.kill\(\)/.test(shut), 'the clean shutdown uses the SAME teardown (one implementation)');
+  ok(gateOf(/bridgeWatch\.endAttachPtys\(\)/.test(shut)) && !/s\.pty\.kill\(\)/.test(shut), 'the clean shutdown uses the SAME teardown (one implementation)');
   const CS = read('src/server/stdout/claude-stream-json.js');
   const iNote = CS.indexOf('noteStreamRecord?.(session, msg)'), iCu = CS.indexOf('session._bridgeCatchUp?.note?.(msg)');
   ok(iNote > 0 && iCu > iNote && iCu - iNote < 400, 'the claude parse counts every record into a running catch-up, right after the late rule saw it');
   const SCH = read('src/lib/settings-schema.js');
-  ok(/'session\.deadBridgeMinutes': \{\s*type: 'number', default: 3, min: 0/.test(SCH), 'the setting is declared (default 3 minutes, 0 = off)');
+  ok(verdictOf(/'session\.deadBridgeMinutes': \{\s*type: 'number', default: 3, min: 0/.test(SCH)), 'the setting is declared (default 3 minutes, 0 = off)');
   const OI = require(path.join(REPO, 'src/server/otel-ingest.js')).create({ dataDir: path.join(ROOT, 'otel'), PORT: 1, getUsageHistory: () => null, identityGroups: () => null, listAccounts: () => [], serverSetting: () => undefined });
   OI._ingest({ resourceLogs: [{ resource: { attributes: [] }, scopeLogs: [{ logRecords: [{ timeUnixNano: String(t0 * 1e6), attributes: [{ key: 'event.name', value: { stringValue: 'api_request' } }, { key: 'session.id', value: { stringValue: 'conv-x' } }] }] }] }] });
   ok(OI.lastApiRequestAt('conv-x') === t0 && OI.lastApiRequestAt('conv-y') === null, 'the OTel witness is kept for a row with no request id and no org (it still proves the CLI worked)');
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

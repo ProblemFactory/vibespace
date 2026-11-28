@@ -49,7 +49,7 @@ const SHOTS = arg('--shots') ? path.resolve(arg('--shots')) : scratch('foryou-fi
 for (const d of [stubDir, CWD, SHOTS]) fs.mkdirSync(d, { recursive: true });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 console.log(`tree: ${TREE === repo ? 'this tree' : TREE}`);
@@ -173,7 +173,7 @@ try {
       for (const n of [1, 3, 6]) {
         const id = await fileAsk(lang, n);
         const shown = !!id && await waitFor(`!!document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item[data-id="${id}"]')`, 10000);
-        check(`① ${lang} · ${n} option(s) · the ask is filed (${id}) and it is the strip's item`, !!id && shown, { id, shown });
+        check(`① ${lang} · ${n} option(s) · the ask is filed (${id}) and it is the strip's item`, !!id && verdictOf(shown), { id, shown });
         if (!id || !shown) continue;
         // the chat strip: the chat window at each width
         const DOCK = `(document.querySelector('.chat-attn-dock:not([hidden])'))`, ROW = `(document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item'))`;
@@ -207,7 +207,7 @@ try {
         check(`① ${lang} · ${n} option(s) · the For-you window at the ladder: every option whole inside its pane`, !!IWIN && ladderFaults(iw).length === 0, ladderFaults(iw));
         // the .400 merged-tip read's minor (i): the reply's tip is an option BUTTON's — the row's «Reply:» label carries none
         const tips = await evalJs(`(() => { const l = document.querySelector('.iw .iw-opts-label'), o = [...document.querySelectorAll('.iw .iw-opt')]; return { label: !!l, labelTip: l ? l.getAttribute('title') : 'none', optTips: o.filter((b) => !!b.title).length, opts: o.length }; })()`);
-        check(`① ${lang} · ${n} option(s) · the For-you window: every option has its reply's tip (${tips && tips.optTips} / ${tips && tips.opts}), the «Reply:» label none`, !!tips && tips.label && tips.labelTip === null && tips.opts > 0 && tips.optTips === tips.opts, tips);
+        check(`① ${lang} · ${n} option(s) · the For-you window: every option has its reply's tip (${tips && tips.optTips} / ${tips && tips.opts}), the «Reply:» label none`, !!tips && gateOf(tips.label) && tips.labelTip === null && tips.opts > 0 && tips.optTips === tips.opts, tips);
         await evalJs(`(() => { const w = app.wm.windows.get(${J(IWIN)}); if (w) app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
       }
       // the PARSED road: a 120-character URL option with no space breaks INSIDE its pill — the strip at the ladder
@@ -215,7 +215,7 @@ try {
       const ushown = !!uid && await waitFor(`!!document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item[data-id="${uid}"]')`, 10000);
       const DOCKU = `(document.querySelector('.chat-attn-dock:not([hidden])'))`, ROWU = `(document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item'))`;
       const ul = ushown ? await runLadder({ setWidth: async (w) => { await winW(SID, w); await sleep(250); }, read: async () => evalJs(fitVerdictSource(DOCKU, { row: ROWU, controls: 'button', words: '.ut-opt', clampOk: '.ut-text', scrollers: '.chat-attn-dock .cad-rows, .chat-attn-dock .ut-opts' })) }) : [];
-      check(`① ${lang} · a parsed 120-character URL option (no space) · the strip at the ladder: it breaks inside its pill, nothing outside the row, no sideways scroll`, ushown && ladderFaults(ul).length === 0, ushown ? ladderFaults(ul) : { uid });
+      check(`① ${lang} · a parsed 120-character URL option (no space) · the strip at the ladder: it breaks inside its pill, nothing outside the row, no sideways scroll`, gateOf(ushown) && ladderFaults(ul).length === 0, ushown ? ladderFaults(ul) : { uid });
     }
   }
 
@@ -264,17 +264,17 @@ try {
       return { open: d.classList.contains('cad-open'), id: (d.querySelector('.cad-rows > .ut-item') || {}).dataset?.id, h: Math.round(dr.height), viewH: Math.round(wr.height), detail: !!det && (det.textContent || '').length, lastIn: inside(last), opts: opts.length, optsIn: optsTop, order, q: (d.querySelector('.ut-text') || {}).scrollHeight <= (d.querySelector('.ut-text') || {}).clientHeight + 1, scroll: v && v._messageList ? Math.round(v._messageList.scrollTop) : null, jump: !!d.querySelector('.cad-jump:not([hidden])') }; })()`;
     const o1 = await evalJs(OPEN);
     await shot('open-500-opened.png');
-    check(`② a press on the question opens it in place — ONE ORDER: the whole question, all ${o1 && o1.opts} options in view at its top, then the detail (${o1 && o1.detail} chars) whose last line is in view at its end; the strip ${o1 && o1.h} px ≤ half the view`, !!o1 && o1.open && o1.id === id && o1.detail >= 500 && o1.lastIn && o1.opts === 3 && o1.optsIn && o1.order && o1.q && o1.h <= o1.viewH / 2 + 40, o1);
-    check(`② …the chat's scroll never moved (${list0} → ${o1 && o1.scroll}) and «Show it in the conversation» is a door of its own`, !!o1 && o1.scroll === list0 && o1.jump, { list0, o1 });
+    check(`② a press on the question opens it in place — ONE ORDER: the whole question, all ${o1 && o1.opts} options in view at its top, then the detail (${o1 && o1.detail} chars) whose last line is in view at its end; the strip ${o1 && o1.h} px ≤ half the view`, !!o1 && gateOf(o1.open) && o1.id === id && o1.detail >= 500 && gateOf(o1.lastIn) && o1.opts === 3 && gateOf(o1.optsIn) && gateOf(o1.order) && gateOf(o1.q) && o1.h <= o1.viewH / 2 + 40, o1);
+    check(`② …the chat's scroll never moved (${list0} → ${o1 && o1.scroll}) and «Show it in the conversation» is a door of its own`, !!o1 && o1.scroll === list0 && verdictOf(o1.jump), { list0, o1 });
     // the message box grows and the window shrinks while it is open (主开发's question a): the strip stays on the box, within half the view
     await evalJs(`(() => { const t = app.wm.windows.get(${J(SID)}).element.querySelector('.chat-input-area textarea'); if (!t) return false; t.focus(); t.value = 'one\\ntwo\\nthree\\nfour\\nfive\\nsix'; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`); await sleep(500);
     await winW(SID, 500, 640); await sleep(600);
     const og = await evalJs(`(() => { const w = app.wm.windows.get(${J(SID)}).element, d = w.querySelector('.chat-attn-dock'), c = w.querySelector('.chat-input-area'), R = (e) => e.getBoundingClientRect(); return d && c && { open: d.classList.contains('cad-open'), bottom: Math.round(R(d).bottom), comp: Math.round(R(c).top), h: Math.round(R(d).height), view: Math.round(R(w.querySelector('.chat-view')).height) }; })()`);
-    check(`② …the message box grown to six lines and the window cut to 640 px while it is open: the strip still stands on the box (${og && og.bottom} / ${og && og.comp}), ${og && og.h} px ≤ half the view (${og && og.view})`, !!og && og.open && Math.abs(og.bottom - og.comp) <= 2 && og.h <= og.view / 2 + 2, og);
+    check(`② …the message box grown to six lines and the window cut to 640 px while it is open: the strip still stands on the box (${og && og.bottom} / ${og && og.comp}), ${og && og.h} px ≤ half the view (${og && og.view})`, !!og && gateOf(og.open) && Math.abs(og.bottom - og.comp) <= 2 && og.h <= og.view / 2 + 2, og);
     await evalJs(`(() => { const t = app.wm.windows.get(${J(SID)}).element.querySelector('.chat-input-area textarea'); if (t) { t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })); t.blur(); } return true; })()`); await winW(SID, 500, 820); await sleep(500);
     await fileAsk('zh', 1); await sleep(800);
     const o2 = await evalJs(OPEN);
-    check('② a newer ask filed while it is open: it STAYS open on the same item (the strip redrew around it)', !!o2 && o2.open && o2.id === id, o2);
+    check('② a newer ask filed while it is open: it STAYS open on the same item (the strip redrew around it)', !!o2 && gateOf(o2.open) && o2.id === id, o2);
     await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(500);
     const o3 = await evalJs(`(() => { const d = document.querySelector('.chat-attn-dock:not([hidden])'); return d && { open: d.classList.contains('cad-open'), over: d.classList.contains('cad-over'), spacer: !!document.querySelector('.cad-spacer') }; })()`);
     check('② the same press closes it (no overlay, no spacer left)', !!o3 && !o3.open && !o3.over && !o3.spacer, o3);
@@ -285,7 +285,7 @@ try {
       await winW(SID, w, 820); await sleep(500); await shot(`open-${w}-closed.png`);
       await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(700); await shot(`open-${w}-opened.png`);
       const o4 = await evalJs(OPEN);
-      check(`② …at ${w} px too: the owner's item open, its detail's last line and its options inside the window (${o4 && o4.opts})`, !!o4 && o4.open && o4.id === id && o4.optsIn && o4.lastIn, o4);
+      check(`② …at ${w} px too: the owner's item open, its detail's last line and its options inside the window (${o4 && o4.opts})`, !!o4 && gateOf(o4.open) && o4.id === id && gateOf(o4.optsIn) && verdictOf(o4.lastIn), o4);
       await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(400);
     }
     // the reader's list: the CLOSED strip at a short tile (360 × 500, six long options) never takes more than half the view and
@@ -296,7 +296,7 @@ try {
     await winW(SID, 360, 500); await waitFor(`!!document.querySelector('.chat-attn-dock .cad-rows > .ut-item[data-id="${sixCId}"]')`, 8000); await sleep(500);
     const sh = await evalJs(`(() => { const w = app.wm.windows.get(${J(SID)}).element, d = w.querySelector('.chat-attn-dock'), c = w.querySelector('.chat-input-area'), v = w.querySelector('.chat-view'), R = (e) => e.getBoundingClientRect(); return d && c && v && { h: Math.round(R(d).height), view: Math.round(R(v).height), compIn: R(c).bottom <= R(w).bottom + 1 && R(c).top >= R(w).top, scrolls: d.scrollHeight > d.clientHeight + 1 }; })()`);
     await shot('short-360x500-closed.png');
-    check(`② a short tile (360 × 500), six long options, CLOSED: the strip ${sh && sh.h} px ≤ half the view (${sh && sh.view}), it scrolls inside (${sh && sh.scrolls}), the message box stays in the window`, !!sixCId && !!sh && sh.h <= sh.view / 2 + 1 && sh.compIn, sh);
+    check(`② a short tile (360 × 500), six long options, CLOSED: the strip ${sh && sh.h} px ≤ half the view (${sh && sh.view}), it scrolls inside (${sh && sh.scrolls}), the message box stays in the window`, !!sixCId && !!sh && sh.h <= sh.view / 2 + 1 && verdictOf(sh.compIn), sh);
     await winW(SID, 500, 820); await sleep(400);
     await evalJs(`(() => { const v = app.sessions.get(${J(SID)}); if (v && v._messageList) { v._messageList.scrollTop = 0; v._messageList.dispatchEvent(new Event('scroll')); } return true; })()`); await sleep(900);
     await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(700);
@@ -304,7 +304,7 @@ try {
       const hits = pills.filter((p) => { const r = R(p); return r.bottom <= dr.bottom && r.top >= dr.top; }).map((p) => { const r = R(p), x = r.right - 6, y = r.top + r.height / 2, h = document.elementFromPoint(x, y); return h === p || p.contains(h); });
       return { downShown: !!down && down.getClientRects().length > 0, pills: hits.length, onPill: hits.every(Boolean) }; })()`);
     await shot('open-500-history.png');
-    check(`② opened while the reader is up in history (the ↓ shown: ${cover && cover.downShown}): every option's right end is the option itself — nothing (↓, the minimap) covers it (${cover && cover.pills} pills)`, !!cover && cover.pills > 0 && cover.onPill, cover);
+    check(`② opened while the reader is up in history (the ↓ shown: ${cover && cover.downShown}): every option's right end is the option itself — nothing (↓, the minimap) covers it (${cover && cover.pills} pills)`, !!cover && cover.pills > 0 && verdictOf(cover.onPill), cover);
     await evalJs(`(() => { const q = document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'); q && q.focus(); return true; })()`);
     await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(400);
     const esc = await evalJs(`(() => { const d = document.querySelector('.chat-attn-dock:not([hidden])'); return d && { open: d.classList.contains('cad-open'), spacer: !!document.querySelector('.cad-spacer') }; })()`);
@@ -336,13 +336,13 @@ try {
       const longChip = chips.find((c) => c.textContent.trim().length > 150), lr = longChip ? R(longChip) : null;
       return { chips: chips.length, names: chips.map((c) => c.textContent.trim().slice(0, 40)).slice(0, 3), longIn: !!lr && lr.right <= dr.right + 1 && lr.left >= dr.left - 1, sideways: d.scrollWidth > d.clientWidth + 1, after: !!box && !!last && R(box).top >= R(last).bottom - 1, firstIn: !!first && R(first).top >= dr.top - 1 && R(first).bottom <= dr.bottom + 1, scroll: Math.round(d.scrollTop) }; })()`);
     await shot('open-500-arts.png');
-    check(`② an ask with three attached files (one a 200-character name), OPENED: every chip drawn (${ar && ar.chips}: ${ar && ar.names.join(' · ')}) AFTER its last option, the long one's chip inside the strip (${ar && ar.longIn}) with no sideways scroll (${ar && !ar.sideways}), the first option in view at the strip's top`, !!artId && !!ar && ar.chips === 3 && ar.after && ar.longIn && !ar.sideways && ar.firstIn && ar.scroll === 0, { artId, err: artR && artR.error, ar });
+    check(`② an ask with three attached files (one a 200-character name), OPENED: every chip drawn (${ar && ar.chips}: ${ar && ar.names.join(' · ')}) AFTER its last option, the long one's chip inside the strip (${ar && ar.longIn}) with no sideways scroll (${ar && !ar.sideways}), the first option in view at the strip's top`, !!artId && !!ar && ar.chips === 3 && gateOf(ar.after) && gateOf(ar.longIn) && !ar.sideways && gateOf(ar.firstIn) && ar.scroll === 0, { artId, err: artR && artR.error, ar });
     await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(400);
     const five = await fileAsk('zh', 5, detail.slice(0, 200));
     await winW(SID, 500, 820); await waitFor(`!!document.querySelector('.chat-attn-dock .cad-rows > .ut-item[data-id="${five}"]')`, 8000); await sleep(500); await shot('five-500-closed.png');
     await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(700); await shot('five-500-opened.png');
     const o5 = await evalJs(OPEN);
-    check(`② five options (one 40+ characters) at 500 px, opened: all five whole inside the window (${o5 && o5.opts})`, !!o5 && o5.open && o5.opts === 5 && o5.optsIn, o5);
+    check(`② five options (one 40+ characters) at 500 px, opened: all five whole inside the window (${o5 && o5.opts})`, !!o5 && gateOf(o5.open) && o5.opts === 5 && verdictOf(o5.optsIn), o5);
     await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(400);
     // six LONG options at 360 (主开发 13:34Z): taller than the strip — it scrolls as one, the question and the FIRST option at
     // its top, never the detail first
@@ -353,11 +353,11 @@ try {
     const o6 = await evalJs(`(() => { const d = document.querySelector('.chat-attn-dock:not([hidden])'); if (!d) return null; d.scrollTop = 0; const R = (e) => e.getBoundingClientRect(), dr = R(d), first = d.querySelector('.ut-opt'), det = d.querySelector('.ut-detail-exp'), opts = [...d.querySelectorAll('.ut-opt')];
       return { open: d.classList.contains('cad-open'), scrolls: d.scrollHeight > d.clientHeight + 1, firstIn: !!first && R(first).top >= dr.top - 1 && R(first).bottom <= dr.bottom + 1, detailBelow: !!det && R(det).top >= R(opts[opts.length - 1]).bottom - 1, n: opts.length }; })()`);
     await shot('six-360-opened.png');
-    check(`② six long options at 360 px, opened: taller than the strip (it scrolls as one: ${o6 && o6.scrolls}), the FIRST option in view at its top, the detail below the last option (${o6 && o6.n})`, !!sixId && !!o6 && o6.open && o6.n === 6 && o6.firstIn && o6.detailBelow, o6);
+    check(`② six long options at 360 px, opened: taller than the strip (it scrolls as one: ${o6 && o6.scrolls}), the FIRST option in view at its top, the detail below the last option (${o6 && o6.n})`, !!sixId && !!o6 && gateOf(o6.open) && o6.n === 6 && gateOf(o6.firstIn) && verdictOf(o6.detailBelow), o6);
   }
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) {
   check('the suite ran to its end', false, String(e && e.stack || e));
 }
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${fail ? ' passed, ' + fail + ' failed' : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

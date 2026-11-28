@@ -38,7 +38,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const V = require('../src/browser-verbs.js');      // which commands are read back, a key's code
 const RB = require('../src/browser-read-back.js'); // the read-back itself (its own file: the device bundle never carries it)
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -85,7 +85,7 @@ console.log('③ FIELD_FORMS — each kind holds its value in ONE form');
 {
   const F = RB.FIELD_FORMS;
   const kinds = ['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range'];
-  ok(kinds.every((k) => F[k] && F[k].re.test(F[k].example) && F[k].words.length > 3) && Object.keys(F).length === kinds.length, `the seven kinds that take no typed text (${kinds.join(', ')}): each one's example is in its own form, each says its form in words`);
+  ok(gateOf(kinds.every((k) => F[k] && F[k].re.test(F[k].example) && F[k].words.length > 3)) && Object.keys(F).length === kinds.length, `the seven kinds that take no typed text (${kinds.join(', ')}): each one's example is in its own form, each says its form in words`);
   const notForms = [['date', '01072027'], ['date', '01/07/2027'], ['date', '2027-1-7'], ['date', '7 January 2027'], ['time', '0905'], ['time', '9:05'], ['time', '09:05 AM'], ['datetime-local', '2027-01-07 09:05'], ['month', '01/2027'], ['week', '2027-01'], ['color', 'red'], ['color', '#36c'], ['range', 'half']];
   const bad = notForms.filter(([k, v]) => F[k].re.test(v)).map(([k, v]) => `${k} ${v}`);
   ok(bad.length === 0, `the forms an agent writes that a field cannot take are not its form — «01072027», «01/07/2027», «0905», «09:05 AM», «red» … (${notForms.length} rows)`, bad);
@@ -340,7 +340,7 @@ async function readBackCensus(readBack) {
 }
 ok(JSON.stringify(GRAMMAR.get.attr) === '["selector","name"]' && JSON.stringify(GRAMMAR.get.value) === '["selector"]' && JSON.stringify(GRAMMAR.focus) === '["selector"]' && JSON.stringify(GRAMMAR.eval) === '["script"]',
   `the stand-in's grammar is the driver's own help, read from the pinned fixture: get attr <selector> <name>, get value <selector>, focus <selector>, eval <script> (${Object.keys(GRAMMAR.get).length} get subcommands)`, GRAMMAR);
-ok(!byGrammar(['get', 'attr', '@e5', 'type', '--json']).refused && byGrammar(['get', 'attr', 'type', '@e5', '--json']).refused && byGrammar(['get', 'valu', '@e5']).refused && byGrammar(['focus']).refused,
+ok(!byGrammar(['get', 'attr', '@e5', 'type', '--json']).refused && gateOf(byGrammar(['get', 'attr', 'type', '@e5', '--json']).refused) && gateOf(byGrammar(['get', 'valu', '@e5']).refused) && verdictOf(byGrammar(['focus']).refused),
   'the grammar takes get attr <selector> <name> and REFUSES the reversed order (get attr type @e5), an unknown subcommand and a missing selector');
 REFUSED_CALLS.length = 0;
 {
@@ -350,7 +350,7 @@ REFUSED_CALLS.length = 0;
   ok(Object.keys(cost).length >= 7, `(e) THE COST, measured on the fake — driver runs per read-back: ${Object.entries(cost).map(([k, n]) => `${k} ${n}`).join(' · ')}`, cost);
 }
 
-ok(['#due', '#a\\.b', '#\\31 23', 'input[name="dueDate"]', 'input[type="date"]'].every((x) => RB.recipeSelector(x) === x) && ["#x';touch pwned;'", '#a b', '#a\nb', 'input[name="x";y"]', '#$(id)', '#`id`', 'x'.repeat(201)].every((x) => RB.recipeSelector(x) === null),
+ok(gateOf(['#due', '#a\\.b', '#\\31 23', 'input[name="dueDate"]', 'input[type="date"]'].every((x) => RB.recipeSelector(x) === x)) && verdictOf(["#x';touch pwned;'", '#a b', '#a\nb', 'input[name="x";y"]', '#$(id)', '#`id`', 'x'.repeat(201)].every((x) => RB.recipeSelector(x) === null)),
   'B-7108 cure: the recipe takes a page\'s selector only from the bounded alphabet (CSS.escape\'s own output for letters, digits, _ . : -) — a quote, a space, a newline, $( ) or a backquote is refused');
 ok(RB.shellArg('@e7') === '@e7' && RB.shellArg('#d') === "'#d'" && RB.shellArg("a'b") === "'a'\\''b'" && RB.shellArg('input[name="x"]') === `'input[name="x"]'`,
   'one shell word: plain words as they are, `#d` quoted (unquoted it is a comment), a quote inside closed, escaped and reopened');
@@ -374,7 +374,7 @@ function wiringFindings(src) {
 {
   const hosts = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8'), gen = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8'), gi = fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8');
   const tools = (/static AGENT_TOOLS = \[([^\]]+)\]/.exec(hosts) || [, ''])[1];
-  ok(/'vibespace-browser-read-back\.js'/.test(tools) && /function createBrowserReadBackCopy\(\)[\s\S]{0,400}'src', 'browser-read-back\.js'[\s\S]{0,200}fs\.promises\.rename\(tmp, dst\)/.test(gen) && /^createBrowserReadBackCopy\(\);$/m.test(gen) && /^data\/bin\/vibespace-browser-read-back\.js$/m.test(gi),
+  ok(gateOf(/'vibespace-browser-read-back\.js'/.test(tools)) && gateOf(/function createBrowserReadBackCopy\(\)[\s\S]{0,400}'src', 'browser-read-back\.js'[\s\S]{0,200}fs\.promises\.rename\(tmp, dst\)/.test(gen)) && gateOf(/^createBrowserReadBackCopy\(\);$/m.test(gen)) && verdictOf(/^data\/bin\/vibespace-browser-read-back\.js$/m.test(gi)),
     'the read-back SHIPS beside the CLI: copied at every boot (off the loop) as vibespace-browser-read-back.js, in AGENT_TOOLS (a host gets it), gitignored');
   const devBundled = ['src/browser-verbs.js', 'src/browser-facts.js', 'src/browser-serve.js', 'src/exit-proxy.js'].filter((f) => /require\([^)]*browser-read-back/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
   ok(devBundled.length === 0, 'no module the device bundle carries requires the read-back (test-architecture §107: it is the CLI\'s alone)', devBundled);
@@ -390,7 +390,7 @@ const MUT = mutantCopies('read-back', REPO);
   const f = MUT.write('src/browser-read-back.js', editAnchor(SRC, from, '  const form = null; // CONTROL: the driver is trusted\n', "src/browser-read-back.js"), 'trust');
   const VM = require(f);
   const { bad } = await readBackCensus(VM.readBack);
-  ok(SRC.includes(from) && bad.some((b) => b.startsWith('a date fill ISO ⇒ the setter')) && bad.some((b) => b.startsWith('the owner\'s act')), 'CONTROL: a readBack that trusts the driver (the release\'s «Done» over an empty date field) FAILS ⑤', bad.slice(0, 3));
+  ok(gateOf(SRC.includes(from)) && gateOf(bad.some((b) => b.startsWith('a date fill ISO ⇒ the setter'))) && verdictOf(bad.some((b) => b.startsWith('the owner\'s act'))), 'CONTROL: a readBack that trusts the driver (the release\'s «Done» over an empty date field) FAILS ⑤', bad.slice(0, 3));
 }
 {
   // 080d37c23's read-back (the second verdict's must): the attribute asked in the REVERSED order — get attr type <selector>
@@ -399,7 +399,7 @@ const MUT = mutantCopies('read-back', REPO);
   const f = MUT.write('src/browser-read-back.js', editAnchor(SRC, from, "call(['get', 'attr', 'type', plan.sel, '--json'])", "src/browser-read-back.js"), 'reversed'); // stale-pins: kept — the reversed order IS the control's planted mutation
   REFUSED_CALLS.length = 0;
   const { bad } = await readBackCensus(require(f).readBack);
-  ok(SRC.includes(from) && bad.some((b) => b.startsWith('a date fill by @ref')) && REFUSED_CALLS.some((r) => /is no attribute name/.test(r)), 'CONTROL: the read-back that asks get attr type <selector> (080d37c23) FAILS — its @ref date fill is not set, and the stand-in refuses the call by the help\'s grammar', { bad: bad.filter((b) => b.startsWith('a date fill by @ref')).map((b) => b.slice(0, 160)), refused: REFUSED_CALLS.slice(0, 2) });
+  ok(gateOf(SRC.includes(from)) && gateOf(bad.some((b) => b.startsWith('a date fill by @ref'))) && verdictOf(REFUSED_CALLS.some((r) => /is no attribute name/.test(r))), 'CONTROL: the read-back that asks get attr type <selector> (080d37c23) FAILS — its @ref date fill is not set, and the stand-in refuses the call by the help\'s grammar', { bad: bad.filter((b) => b.startsWith('a date fill by @ref')).map((b) => b.slice(0, 160)), refused: REFUSED_CALLS.slice(0, 2) });
   REFUSED_CALLS.length = 0;
 }
 {
@@ -409,38 +409,38 @@ const MUT = mutantCopies('read-back', REPO);
   const f = MUT.write('src/browser-read-back.js', editAnchor(SRC, from, '  if (true) { // CONTROL: the focused field, whatever the verb named\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));', "src/browser-read-back.js"), 'focused');
   const VM = require(f);
   const { bad } = await readBackCensus(VM.readBack);
-  ok(SRC.includes(from) && bad.some((b) => b.startsWith('scene 1:')) && bad.some((b) => b.startsWith('scene 2:')) && bad.some((b) => b.startsWith('scene 3:')), 'CONTROL: the read-back that judges the FOCUSED field (68da75fa2) FAILS the three scenes — a one-time-code box, a card number, an earlier date field', bad.filter((b) => b.startsWith('scene')).map((b) => b.slice(0, 120)));
+  ok(gateOf(SRC.includes(from)) && gateOf(bad.some((b) => b.startsWith('scene 1:'))) && gateOf(bad.some((b) => b.startsWith('scene 2:'))) && verdictOf(bad.some((b) => b.startsWith('scene 3:'))), 'CONTROL: the read-back that judges the FOCUSED field (68da75fa2) FAILS the three scenes — a one-time-code box, a card number, an earlier date field', bad.filter((b) => b.startsWith('scene')).map((b) => b.slice(0, 120)));
 }
 {
   // B-7108, the release's road: a fill by a date part's @ref is never shown to be a part — exit 0 [read_back_unavailable]
   const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
   const f = MUT.write('src/browser-read-back.js', anchored(SRC, ' const pt = await partOf(); if (pt) return pt.landed ? null : pt;', '', 'B-7108 the release: no part check', { count: 2 }), 'no-part');
   const { bad } = await readBackCensus(require(f).readBack);
-  ok(bad.some((b) => b.startsWith('B-7108 a fill by the Month part')) && bad.some((b) => b.startsWith('B-7108 …and when the driver reads the part EMPTY')), 'CONTROL (the release\'s read-back): a fill by the Month part\'s @ref answers exit 0 [read_back_unavailable] over the EMPTY date field — the box\'s finding — FAILS ⑤', bad.filter((b) => b.startsWith('B-7108')).slice(0, 2));
+  ok(gateOf(bad.some((b) => b.startsWith('B-7108 a fill by the Month part'))) && verdictOf(bad.some((b) => b.startsWith('B-7108 …and when the driver reads the part EMPTY'))), 'CONTROL (the release\'s read-back): a fill by the Month part\'s @ref answers exit 0 [read_back_unavailable] over the EMPTY date field — the box\'s finding — FAILS ⑤', bad.filter((b) => b.startsWith('B-7108')).slice(0, 2));
 }
 {
   // B-7108 without its box check: whatever date field holds the focus is taken for the part's — the r2 must broken
   const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
   const f = MUT.write('src/browser-read-back.js', anchored(SRC, "    if (!boxInside(driverBox(await call(['get', 'box', plan.sel, '--json'])), o.box, o.scroll)) return null;\n", '', 'B-7108 no box check'), 'no-box');
   const { bad } = await readBackCensus(require(f).readBack);
-  ok(bad.some((b) => b.startsWith('B-7108 the focus on ANOTHER date field')), 'CONTROL (a part judged by the FOCUS alone): the focus on another date field is refused as «a part of it» — FAILS ⑤', bad.filter((b) => b.startsWith('B-7108')).slice(0, 2));
+  ok(verdictOf(bad.some((b) => b.startsWith('B-7108 the focus on ANOTHER date field'))), 'CONTROL (a part judged by the FOCUS alone): the focus on another date field is refused as «a part of it» — FAILS ⑤', bad.filter((b) => b.startsWith('B-7108')).slice(0, 2));
 }
 {
   // B-7108 cure's CONTROL: 449554175's id road — the page's id through CSS.escape alone, the recipe trusting the page's answer
   const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
   const rel = anchored(anchored(SRC, "if(el.id&&/^[A-Za-z0-9_.:-]+$/.test(el.id)&&", 'if(el.id&&', 'B-7108 the release: an id of any characters'), '    const sel = recipeSelector(o.sel);\n', '    const sel = o.sel || null;\n', 'B-7108 the release: the page trusted');
   const { bad } = await readBackCensus(require(MUT.write('src/browser-read-back.js', rel, 'id-unbounded')).readBack);
-  ok(bad.some((b) => b.startsWith('B-7108 cure: a HOSTILE id')) && bad.some((b) => b.startsWith('B-7108 cure: a page that LIES')), 'CONTROL (449554175\'s id road, both bounds gone): the hostile id and a lying page\'s selector travel into the agent\'s command: FAILS ⑤', bad.filter((b) => b.startsWith('B-7108 cure')).slice(0, 2));
+  ok(gateOf(bad.some((b) => b.startsWith('B-7108 cure: a HOSTILE id'))) && verdictOf(bad.some((b) => b.startsWith('B-7108 cure: a page that LIES'))), 'CONTROL (449554175\'s id road, both bounds gone): the hostile id and a lying page\'s selector travel into the agent\'s command: FAILS ⑤', bad.filter((b) => b.startsWith('B-7108 cure')).slice(0, 2));
   const half = anchored(SRC, '    const sel = recipeSelector(o.sel);\n', '    const sel = o.sel || null;\n', 'B-7108 the page trusted');
   const { bad: bad2 } = await readBackCensus(require(MUT.write('src/browser-read-back.js', half, 'page-trusted')).readBack);
-  ok(bad2.some((b) => b.startsWith('B-7108 cure: a page that LIES')) && !bad2.some((b) => b.startsWith('B-7108 cure: a HOSTILE id')), 'CONTROL (the bound in the page alone): a page that replaces its own CSS.escape and querySelectorAll puts its words in the command — the second bound is load-bearing: FAILS ⑤', bad2.filter((b) => b.startsWith('B-7108')).slice(0, 2));
+  ok(gateOf(bad2.some((b) => b.startsWith('B-7108 cure: a page that LIES'))) && !bad2.some((b) => b.startsWith('B-7108 cure: a HOSTILE id')), 'CONTROL (the bound in the page alone): a page that replaces its own CSS.escape and querySelectorAll puts its words in the command — the second bound is load-bearing: FAILS ⑤', bad2.filter((b) => b.startsWith('B-7108')).slice(0, 2));
 }
 {
   const from = "    if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {";
   const bad = wiringFindings(CLI_SRC.replace(from, '    if (false) {'));
-  ok(CLI_SRC.includes(from) && bad.length > 0, 'CONTROL: the CLI without its read-back hook FAILS ⑥', bad);
+  ok(gateOf(CLI_SRC.includes(from)) && bad.length > 0, 'CONTROL: the CLI without its read-back hook FAILS ⑥', bad);
 }
 { const lit = treeLitter(REPO); ok(!lit.err && lit.entries.length === 0, 'the tree holds no copy this run wrote (git status under src/)', lit); }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

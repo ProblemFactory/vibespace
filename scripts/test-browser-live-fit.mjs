@@ -61,7 +61,7 @@ let pass = 0, fail = 0, skipped = 0;
 // through to is never read as the product's verdict (the 2.369.414 mirror's red in test-browser-resume-ui §9 was one)
 const waits = { missed: [], judged: false };
 const missNote = () => waits.missed.length ? ` — THE STATE NEVER CAME: the wait before this judge timed out (${waits.missed.map((ms) => `${ms / 1000} s`).join(', ')}), so this red is that, not a verdict on the product` : '';
-const ok = (c, n, extra) => { const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { if (waits.judged) { waits.missed = []; waits.judged = false; } const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await pred()) return true; } catch { } await sleep(every); } let r = false; try { r = !!(await pred()); } catch { } if (!r) waits.missed.push(ms); return r; };
@@ -79,7 +79,7 @@ if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`agent-browser $
 if (!fs.existsSync(realBrowsers)) { skip(`the real agent-browser has no installed browser under ${realBrowsers} (the leg never downloads one)`); done(); }
 { // r1100 CONTROL: the mark can be read — a wait that times out is named by the next red judge
   await until(() => false, 30, 10); const note = missNote(); waits.missed = []; waits.judged = false;
-  ok(/THE STATE NEVER CAME/.test(note) && note.includes('0.03 s'), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
+  ok(gateOf(/THE STATE NEVER CAME/.test(note)) && verdictOf(note.includes('0.03 s')), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
 }
 
 const ROOT = scratch('browser-live-fit');
@@ -170,7 +170,7 @@ await (async () => {
   const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000), 'the worktree server booted (the real agent-browser on its PATH, headless config)', journal.slice(-600))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000)), 'the worktree server booted (the real agent-browser on its PATH, headless config)', journal.slice(-600))) return;
   const wsMain = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });
@@ -228,18 +228,18 @@ await (async () => {
   // ═══ ① DESKTOP: the split pane's picture IS the pane ═══
   console.log('— ① desktop: the first browse opens the live view beside the chat; the split pane\'s picture IS the pane');
   const Dk = await attachCdp(first);
-  if (!ok(await bootApp(Dk, { width: 1920, height: 1080, dsf: 1 }), 'the desktop client booted (1920×1080)')) return;
+  if (!ok(verdictOf(await bootApp(Dk, { width: 1920, height: 1080, dsf: 1 })), 'the desktop client booted (1920×1080)')) return;
   const s1 = await newSession('d', 'fit-desktop');
   await Dk.evaluate(`(() => { window.app.attachSession(${JSON.stringify(s1.sessionId)}, 'fit-desktop', ${JSON.stringify(D)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
-  ok(await until(() => Dk.evaluate(`[...window.app.wm.windows.values()].some((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s1.sessionId)})`), 15000), 'the conversation\'s chat window is open on the desktop');
+  ok(verdictOf(await until(() => Dk.evaluate(`[...window.app.wm.windows.values()].some((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s1.sessionId)})`), 15000)), 'the conversation\'s chat window is open on the desktop');
   // the chat window 1406×962 inside the workspace (so the split's live pane — its canvas — is ~700×900)
   const sizeHost = async (w, h) => Dk.evaluate(`(() => { const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s1.sessionId)}); const host = cw._tabChain ? window.app.wm.windows.get(cw._tabChain.tabs[0]) : cw; const el = host.element; host.gridBounds = null; el.style.left = '20px'; el.style.top = '10px'; el.style.width = '${w}px'; el.style.height = '${h}px'; for (const id of (cw._tabChain ? cw._tabChain.tabs : [cw.id])) { const x = window.app.wm.windows.get(id); x && x.onResize && x.onResize(); } return true; })()`);
   await sizeHost(1406, 962);
   const o1 = await s1.vb(['open', PAGE('d1')]);
   if (!o1.ok && /exited early|DevToolsActivePort|crash|exit code|Missing X server/i.test(o1.stderr + o1.stdout)) { skip(`the real chromium did not launch here: ${(o1.stderr || o1.stdout).replace(/\s+/g, ' ').slice(0, 200)}`); return; }
-  if (!ok(o1.ok && await until(() => vps.has('d1'), 20000), '`vibespace-browser open` started the conversation\'s own (headless) browser on the grid page', (o1.stderr || o1.stdout).slice(0, 300))) return;
+  if (!ok(gateOf(o1.ok) && verdictOf(await until(() => vps.has('d1'), 20000)), '`vibespace-browser open` started the conversation\'s own (headless) browser on the grid page', (o1.stderr || o1.stdout).slice(0, 300))) return;
   const L1 = liveQ(Dk, s1.sessionId);
-  ok(await until(() => L1('return !!L && L.isBound()'), 8000), 'the live view was BORN beside the chat (a split) — the desktop auto-bind');
+  ok(verdictOf(await until(() => L1('return !!L && L.isBound()'), 8000)), 'the live view was BORN beside the chat (a split) — the desktop auto-bind');
   await sizeHost(1406, 962);
   /** Wait until the view's picture equals its canvas (the page is the pane) and return the facts. */
   const fitted = async (L, n, ms = 15000) => {
@@ -255,8 +255,8 @@ await (async () => {
   // lane browser-resume C: the TAB ROW (between the strip and the bar) shows whenever the browser has tabs — its height comes off
   // the pane's (2.369.199 integration: 856 px measured beside the ~29 px row); the bound is on the pane plus that row
   const tabRowH = await L1(`const r = L.el().querySelector('.browser-live-tabrow'); return r && getComputedStyle(r).display !== 'none' ? Math.round(r.getBoundingClientRect().height) : 0;`);
-  ok(f1.good && f1.last.cw >= 690 && f1.last.cw <= 710 && f1.last.ch + tabRowH >= 880 && f1.last.ch + tabRowH <= 920, `the split pane is ${f1.last && f1.last.cw}×${f1.last && f1.last.ch} (+ the tab row's ${tabRowH} px): the frame is ${f1.last && f1.last.picW}×${f1.last && f1.last.picH} and the page's own viewport ${f1.page && f1.page.w}×${f1.page && f1.page.h} (±2 px) — the picture IS the pane`, JSON.stringify(f1));
-  ok(f1.last && f1.last.fit && f1.last.fit.state === 'fitted' && !f1.last.chip, 'the bridge says "fitted" for THIS pane — and a fitted page needs no chip', JSON.stringify(f1.last && f1.last.fit));
+  ok(gateOf(f1.good) && f1.last.cw >= 690 && f1.last.cw <= 710 && f1.last.ch + tabRowH >= 880 && f1.last.ch + tabRowH <= 920, `the split pane is ${f1.last && f1.last.cw}×${f1.last && f1.last.ch} (+ the tab row's ${tabRowH} px): the frame is ${f1.last && f1.last.picW}×${f1.last && f1.last.picH} and the page's own viewport ${f1.page && f1.page.w}×${f1.page && f1.page.h} (±2 px) — the picture IS the pane`, JSON.stringify(f1));
+  ok(gateOf(f1.last) && gateOf(f1.last.fit) && f1.last.fit.state === 'fitted' && !f1.last.chip, 'the bridge says "fitted" for THIS pane — and a fitted page needs no chip', JSON.stringify(f1.last && f1.last.fit));
   const c1 = await census(Dk, canvasSel(s1.sessionId), 'desktop-fitted');
   ok(c1.dark < 0.01, `PIXEL CENSUS of the ${c1.W}×${c1.H} pane: ${(c1.dark * 100).toFixed(2)} % dark — no band under the page`, JSON.stringify(c1));
   // CONTROL: the view stops voting (a hidden report, its own reports held) ⇒ nobody visible ⇒ after the grace the page is back at its own size — the pre-fix picture
@@ -265,14 +265,14 @@ await (async () => {
   await until(() => L1('const g = L.geometry(); return g && g.picW === 1280'), 5000, 150);
   await sleep(500);
   const c0 = await census(Dk, canvasSel(s1.sessionId), 'desktop-control');
-  ok(restored && c0.dark > 0.25, `CONTROL: nobody votes ⇒ after the ${FIT.RESTORE_AFTER_MS} ms grace the page is back at its own ${vps.get('d1') && vps.get('d1').w}×${vps.get('d1') && vps.get('d1').h} and the same census measures ${(c0.dark * 100).toFixed(1)} % dark — the band the study saw ("只占窗格上面一截")`, JSON.stringify({ restored, c0, page: vps.get('d1') }));
+  ok(gateOf(restored) && c0.dark > 0.25, `CONTROL: nobody votes ⇒ after the ${FIT.RESTORE_AFTER_MS} ms grace the page is back at its own ${vps.get('d1') && vps.get('d1').w}×${vps.get('d1') && vps.get('d1').h} and the same census measures ${(c0.dark * 100).toFixed(1)} % dark — the band the study saw ("只占窗格上面一截")`, JSON.stringify({ restored, c0, page: vps.get('d1') }));
   await L1('window.__s4NoFit = false; const p = L.state().pane; L.send({ type: "fit", width: p.width, height: p.height, dpr: 1, visible: true }); return true;'); // the view's own report is deduped (it last said "visible" itself) — say it again through its socket
   const f1b = await fitted(L1, 'd1');
-  ok(f1b.good, `…the view votes again ⇒ fitted back to ${f1b.last && f1b.last.cw}×${f1b.last && f1b.last.ch}`, JSON.stringify(f1b));
+  ok(verdictOf(f1b.good), `…the view votes again ⇒ fitted back to ${f1b.last && f1b.last.cw}×${f1b.last && f1b.last.ch}`, JSON.stringify(f1b));
   // a resize re-fits
   await sizeHost(1206, 760);
   const f1c = await fitted(L1, 'd1');
-  ok(f1c.good && Math.abs(f1c.last.cw - f1b.last.cw) > 50, `a RESIZE re-fits: the pane is now ${f1c.last && f1c.last.cw}×${f1c.last && f1c.last.ch} and so are the frame and the page (${f1c.page && f1c.page.w}×${f1c.page && f1c.page.h})`, JSON.stringify(f1c));
+  ok(gateOf(f1c.good) && Math.abs(f1c.last.cw - f1b.last.cw) > 50, `a RESIZE re-fits: the pane is now ${f1c.last && f1c.last.cw}×${f1c.last && f1c.last.ch} and so are the frame and the page (${f1c.page && f1c.page.w}×${f1c.page && f1c.page.h})`, JSON.stringify(f1c));
 
   // ═══ verify r1: a DESKTOP SWITCH hides the view (visibility:hidden on the window element — no resize, no visibilitychange) ⇒ it stops voting (it kept voting before: the page stayed the hidden pane's size, no restore) ═══
   console.log('— verify r1 (A): a desktop switch hides the view');
@@ -281,12 +281,12 @@ await (async () => {
   await Dk.evaluate(`window.app.desktopManager.switchTo(${JSON.stringify(deskB)})`);
   const hid = await until(() => L1('const s = L.state(); return !!(s.fitSent && s.fitSent.visible === false);'), 3000, 100);
   const visA = await L1('return { fitSent: L.state().fitSent, onScreen: L.el().querySelector(".browser-live-canvas").checkVisibility({ visibilityProperty: true }), hiddenByDesktop: !![...window.app.wm.windows.values()].find((x) => x._browserLive === L)._hiddenByDesktop };');
-  ok(hid, `after a desktop switch the view reports visible:false (${JSON.stringify(visA)})`, JSON.stringify(visA));
+  ok(verdictOf(hid), `after a desktop switch the view reports visible:false (${JSON.stringify(visA)})`, JSON.stringify(visA));
   const restoredB = await until(() => vps.get('d1') && vps.get('d1').w === 1280, FIT.RESTORE_AFTER_MS + 8000, 200);
-  ok(restoredB, `…and with nobody voting the page is back at its own size after the grace (page ${JSON.stringify(vps.get('d1') && [vps.get('d1').w, vps.get('d1').h])})`);
+  ok(verdictOf(restoredB), `…and with nobody voting the page is back at its own size after the grace (page ${JSON.stringify(vps.get('d1') && [vps.get('d1').w, vps.get('d1').h])})`);
   await Dk.evaluate(`window.app.desktopManager.switchTo(${JSON.stringify(deskA)})`);
   const f1d = await fitted(L1, 'd1');
-  ok(f1d.good, `switching back ⇒ fitted again (${f1d.last && f1d.last.cw}×${f1d.last && f1d.last.ch}, page ${f1d.page && f1d.page.w})`, JSON.stringify(f1d));
+  ok(verdictOf(f1d.good), `switching back ⇒ fitted again (${f1d.last && f1d.last.cw}×${f1d.last && f1d.last.ch}, page ${f1d.page && f1d.page.w})`, JSON.stringify(f1d));
   // CONTROL (the pre-fix client): the same view rebuilt WITHOUT the hider observer — MutationObserver absent while it is created,
   // so the guard's false branch IS the pre-fix code — keeps voting from the other desktop: visible stays true, no restore
   const reopenView = (noMO) => Dk.evaluate(`(() => { const sid = ${JSON.stringify(s1.sessionId)}; const L0 = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === sid); const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === sid); const syncId = L0 ? L0.id : 'win-blive-' + sid; if (L0) window.app.wm.closeWindow(L0.id); const hostId = cw._tabChain ? cw._tabChain.tabs[0] : cw.id; const MO = window.MutationObserver; if (${noMO}) window.MutationObserver = undefined; try { window.app.openBrowserLive({ sessionId: sid, syncId, intoChain: { hostId, split: true, side: 'right' } }); } finally { window.MutationObserver = MO; } return true; })()`);
@@ -297,11 +297,11 @@ await (async () => {
   const visC = await L1('return { fitSent: L.state().fitSent, onScreen: L.el().querySelector(".browser-live-canvas").checkVisibility({ visibilityProperty: true }) };');
   await sleep(FIT.RESTORE_AFTER_MS + 2500);
   const pageC = vps.get('d1') && [vps.get('d1').w, vps.get('d1').h];
-  ok(fc.good && visC && visC.fitSent && visC.fitSent.visible === true && visC.onScreen === false && pageC && pageC[0] !== 1280, `CONTROL: the view built without the hider observer (the pre-fix client) keeps reporting visible:true from the other desktop (${JSON.stringify(visC)}) and the page is never restored (still ${JSON.stringify(pageC)} after ${FIT.RESTORE_AFTER_MS + 2500} ms)`, JSON.stringify({ fc: fc.good, visC, pageC }));
+  ok(gateOf(fc.good) && gateOf(visC) && gateOf(visC.fitSent) && visC.fitSent.visible === true && visC.onScreen === false && gateOf(pageC) && pageC[0] !== 1280, `CONTROL: the view built without the hider observer (the pre-fix client) keeps reporting visible:true from the other desktop (${JSON.stringify(visC)}) and the page is never restored (still ${JSON.stringify(pageC)} after ${FIT.RESTORE_AFTER_MS + 2500} ms)`, JSON.stringify({ fc: fc.good, visC, pageC }));
   await Dk.evaluate(`window.app.desktopManager.switchTo(${JSON.stringify(deskA)})`);
   await reopenView(false);
   const f1e = await fitted(L1, 'd1');
-  ok(f1e.good && await L1('return !!L && L.isBound()'), `…the real view back in its split, fitted (${f1e.last && f1e.last.cw}×${f1e.last && f1e.last.ch})`, JSON.stringify(f1e));
+  ok(gateOf(f1e.good) && verdictOf(await L1('return !!L && L.isBound()')), `…the real view back in its split, fitted (${f1e.last && f1e.last.cw}×${f1e.last && f1e.last.ch})`, JSON.stringify(f1e));
 
   // ═══ ② THE BLANK PICTURE ═══
   console.log('— ② the blank picture: frames withheld after a navigation are said, never shown as the new page');
@@ -312,20 +312,20 @@ await (async () => {
   await until(() => vps.has('d2'), 15000);
   const w1 = await until(() => L1('const s = L.state(); return s.picture === "waiting" && s.pictureStale'), 6000, 100);
   const s2a = await L1('const s = L.state(); return { picture: s.picture, stale: s.pictureStale, text: s.statusText, dim: L.el().classList.contains("picture-stale"), url: s.url };');
-  ok(w1 && /Waiting for a picture of the new page/.test(s2a.text) && s2a.dim && /d2/.test(s2a.url), `frames withheld after the agent's navigation: at ~2 s the view says "${s2a.text}" and dims the old picture (the URL says ${s2a.url})`, JSON.stringify(s2a));
+  ok(gateOf(w1) && gateOf(/Waiting for a picture of the new page/.test(s2a.text)) && gateOf(s2a.dim) && verdictOf(/d2/.test(s2a.url)), `frames withheld after the agent's navigation: at ~2 s the view says "${s2a.text}" and dims the old picture (the URL says ${s2a.url})`, JSON.stringify(s2a));
   const n1 = await until(() => L1('return L.state().picture === "none"'), FIT.NO_PICTURE_MS + 4000, 200);
   const s2b = await L1('const s = L.state(); const re = L.el().querySelector(".browser-live-reconnect"); return { picture: s.picture, text: s.statusText, reconnect: re && re.style.display !== "none", folded: s.folded };');
-  ok(n1 && Date.now() - tNav >= FIT.NO_PICTURE_MS && /No picture of the new page came in 10 s/.test(s2b.text) && s2b.reconnect, `at 10 s: "${s2b.text}" with a Reconnect`, JSON.stringify(s2b));
+  ok(gateOf(n1) && Date.now() - tNav >= FIT.NO_PICTURE_MS && gateOf(/No picture of the new page came in 10 s/.test(s2b.text)) && verdictOf(s2b.reconnect), `at 10 s: "${s2b.text}" with a Reconnect`, JSON.stringify(s2b));
   await L1('window.__s4Drop = false; L.el().querySelector(".browser-live-reconnect").click(); return true;');
   const back = await until(() => L1('const s = L.state(); return s.connected && s.frames >= 1 && s.picture === "ok" && !L.el().classList.contains("picture-stale")'), 10000, 150);
-  ok(back, 'Reconnect ⇒ the picture of the new page, the words gone');
+  ok(verdictOf(back), 'Reconnect ⇒ the picture of the new page, the words gone');
   // a hash navigation (no repaint — measured 0 frames on 0.38.1): the bridge asks for a fresh picture, the view never waits
   const fr0 = await L1('return L.state().frames');
   const tH = Date.now();
   let waited = false;
   await s1.vb(['eval', 'location.hash = "s4-' + Date.now() + '"; 1']);
   const gotFresh = await until(async () => { const s = await L1('const s = L.state(); return { f: s.frames, p: s.picture };'); if (s.p !== 'ok') waited = true; return s.f > fr0; }, 4000, 100);
-  ok(gotFresh && !waited, `a hash navigation (no repaint): a fresh frame reached the view within ${Date.now() - tH} ms (the bridge asked the page) — it never said it was waiting`);
+  ok(gateOf(gotFresh) && !waited, `a hash navigation (no repaint): a fresh frame reached the view within ${Date.now() - tH} ms (the bridge asked the page) — it never said it was waiting`);
 
   // ═══ ③ TWO VIEWERS, THE HOLDER, THE AGENT'S OWN SIZE ═══
   console.log('— ③ two viewers at different sizes (the largest rules), the holder rules while driving, the agent\'s own size');
@@ -339,29 +339,29 @@ await (async () => {
   const big = await until(() => vps.get('d2') && vps.get('d2').w === BIG.width && vps.get('d2').h === BIG.height, 12000, 150);
   await until(() => L1('const s = L.state(); return s.fitChip && s.fitChip.kind === "other" && L.geometry() && L.geometry().picW === 1300'), 6000, 150);
   const sB = await L1(`const s = L.state(); const d = L.drawn(); return { chip: s.fitChip, drawn: { w: d.width, h: d.height }, fit: s.fit, you: s.you };`);
-  ok(big && sB.chip && sB.chip.kind === 'other' && /Sized for another window/.test(sB.chip.text), `a second viewer's LARGER pane (${BIG.width}×${BIG.height}) rules: the page is ${vps.get('d2') && vps.get('d2').w}×${vps.get('d2') && vps.get('d2').h}; this view's chip says "${sB.chip && sB.chip.text}"`, JSON.stringify(sB));
+  ok(gateOf(big) && gateOf(sB.chip) && sB.chip.kind === 'other' && verdictOf(/Sized for another window/.test(sB.chip.text)), `a second viewer's LARGER pane (${BIG.width}×${BIG.height}) rules: the page is ${vps.get('d2') && vps.get('d2').w}×${vps.get('d2') && vps.get('d2').h}; this view's chip says "${sB.chip && sB.chip.text}"`, JSON.stringify(sB));
   ok(sB.drawn.w > 0 && Math.abs(sB.drawn.w / sB.drawn.h - BIG.width / BIG.height) < 0.01, `…and this view LETTERBOXES it by the page's own aspect (drawn ${Math.round(sB.drawn.w)}×${Math.round(sB.drawn.h)}) — never stretched`, JSON.stringify(sB.drawn));
   await L1('L.send({ type: "takeover" }); return true;');
   await until(() => L1('return L.state().mode === "takeover" && L.state().mine'), 5000);
   const hold = await until(() => vps.get('d2') && Math.abs(vps.get('d2').w - pane1.cw) <= 2, 12000, 150);
   await until(() => L1('return !L.state().fitChip'), 4000, 150);
-  ok(hold && !(await L1('return L.state().fitChip')), `this view TAKES OVER ⇒ the page follows the HOLDER's pane (${vps.get('d2') && vps.get('d2').w}×${vps.get('d2') && vps.get('d2').h}) though the other pane is larger; its chip is gone`, JSON.stringify(vps.get('d2')));
+  ok(gateOf(hold) && !(await L1('return L.state().fitChip')), `this view TAKES OVER ⇒ the page follows the HOLDER's pane (${vps.get('d2') && vps.get('d2').w}×${vps.get('d2') && vps.get('d2').h}) though the other pane is larger; its chip is gone`, JSON.stringify(vps.get('d2')));
   await L1('L.send({ type: "handback" }); return true;');
   await until(() => vps.get('d2') && vps.get('d2').w === BIG.width, 12000, 150);
   nv.close();
   const alone = await until(() => vps.get('d2') && Math.abs(vps.get('d2').w - pane1.cw) <= 2, 12000, 150);
-  ok(alone, 'handed back, the larger viewer leaves ⇒ the page is this pane\'s size again');
+  ok(verdictOf(alone), 'handed back, the larger viewer leaves ⇒ the page is this pane\'s size again');
   // the agent's own viewport
   await s1.vb(['set', 'viewport', '800', '600']);
   await until(() => vps.get('d2') && vps.get('d2').w === 800, 10000, 150);
   const ag = await until(() => L1('const s = L.state(); return s.fitChip && s.fitChip.kind === "agent"'), 6000, 150);
   const sA = await L1('return L.state().fitChip');
-  ok(ag && /800×600/.test(sA.text), `the agent's own \`set viewport 800 600\` is respected: the chip says "${sA && sA.text}"`, JSON.stringify(sA));
+  ok(gateOf(ag) && verdictOf(/800×600/.test(sA.text)), `the agent's own \`set viewport 800 600\` is respected: the chip says "${sA && sA.text}"`, JSON.stringify(sA));
   await sizeHost(1306, 820); await sleep(2000);
   ok(vps.get('d2').w === 800 && vps.get('d2').h === 600, `a resize while the agent owns the size changes nothing (the page stays ${vps.get('d2').w}×${vps.get('d2').h}; the view letterboxes)`);
   await L1('L.el().querySelector(".browser-live-fit").click(); return true;');
   const f3 = await fitted(L1, 'd2');
-  ok(f3.good && !f3.last.chip, `"Fit the page to the window" (the chip) takes it back: the page is the pane again (${f3.page && f3.page.w}×${f3.page && f3.page.h})`, JSON.stringify(f3));
+  ok(gateOf(f3.good) && !f3.last.chip, `"Fit the page to the window" (the chip) takes it back: the page is the pane again (${f3.page && f3.page.w}×${f3.page && f3.page.h})`, JSON.stringify(f3));
   // the desktop leaves (its viewers go) before the phone — a visible desktop view would out-vote the phone (the rule, by design)
   await Dk.send('Page.navigate', { url: 'about:blank' });
   await sleep(500);
@@ -370,15 +370,15 @@ await (async () => {
   console.log('— ④ the phone (390×844, DPR 3, touch): auto-open full screen, the page at the phone\'s width, the link, the pinch, the chip');
   const newT = await (await fetch(`http://127.0.0.1:${CDP}/json/new?about:blank`, { method: 'PUT' })).json();
   const Ph = await attachCdp(newT);
-  if (!ok(await bootApp(Ph, { width: 390, height: 844, dsf: 3, mobile: true }), 'the phone client booted (390×844, DPR 3, touch)')) return;
-  ok(await Ph.evaluate('window.app.isMobile === true'), 'the phone client is the ≤768 px layout (app.isMobile)');
+  if (!ok(verdictOf(await bootApp(Ph, { width: 390, height: 844, dsf: 3, mobile: true })), 'the phone client booted (390×844, DPR 3, touch)')) return;
+  ok(verdictOf(await Ph.evaluate('window.app.isMobile === true')), 'the phone client is the ≤768 px layout (app.isMobile)');
   const s2 = await newSession('p', 'fit-phone a conversation with a long enough name to crowd the bar');
   await Ph.evaluate(`(() => { window.app.attachSession(${JSON.stringify(s2.sessionId)}, ${JSON.stringify(s2.name)}, ${JSON.stringify(D)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
   const chatUp = await until(() => Ph.evaluate(`(() => { const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s2.sessionId)}); return !!cw && window.app.wm.activeWindowId === cw.id; })()`), 15000);
-  ok(chatUp, 'the conversation\'s chat is the window on the phone\'s screen');
+  ok(verdictOf(chatUp), 'the conversation\'s chat is the window on the phone\'s screen');
   const L2 = liveQ(Ph, s2.sessionId);
   const o2 = await s2.vb(['open', PAGE('p1')]);
-  ok(o2.ok && await until(() => vps.has('p1'), 20000), 'the agent\'s first browse (the real binary)', (o2.stderr || o2.stdout).slice(0, 300));
+  ok(gateOf(o2.ok) && verdictOf(await until(() => vps.has('p1'), 20000)), 'the agent\'s first browse (the real binary)', (o2.stderr || o2.stdout).slice(0, 300));
   let toast = '', shown = null, tb = null;
   // the live view's own canvas is ON SCREEN and fills the phone's width (in a split chain the pane lives in the host's element)
   const auto = await until(async () => {
@@ -395,12 +395,12 @@ await (async () => {
   // the active one pushed below the workspace top
   const stackCtl = await Ph.evaluate(`(() => { const st = document.createElement('style'); st.id = 's4-presplit'; st.textContent = '@media (max-width: 768px) { .window.tab-split { display: flex !important; } }'; document.head.appendChild(st); const ws = document.getElementById('workspace').getBoundingClientRect(); const wins = [...document.querySelectorAll('#workspace .window')].map((el) => ({ active: el.classList.contains('window-active'), disp: getComputedStyle(el).display, top: Math.round(el.getBoundingClientRect().top) })); st.remove(); return { wsTop: Math.round(ws.top), shown: wins.filter((w) => w.disp !== 'none').length, activeTop: (wins.find((w) => w.active) || {}).top }; })()`);
   ok(stackCtl.shown >= 2 && stackCtl.activeTop > stackCtl.wsTop, `CONTROL: the pre-fix rule displays ${stackCtl.shown} windows and pushes the active one to y = ${stackCtl.activeTop} (the workspace top is ${stackCtl.wsTop}) — the second conversation's live view off the screen`, JSON.stringify(stackCtl));
-  ok(auto && /Back to the chat/.test(toast), `the live view OPENED BY ITSELF on the first browse, full screen (${shown && shown.w}×${shown && shown.h}, the chat behind it) — the toast: "${toast.slice(0, 110)}"`, JSON.stringify({ auto, toast, shown }));
+  ok(gateOf(auto) && verdictOf(/Back to the chat/.test(toast)), `the live view OPENED BY ITSELF on the first browse, full screen (${shown && shown.w}×${shown && shown.h}, the chat behind it) — the toast: "${toast.slice(0, 110)}"`, JSON.stringify({ auto, toast, shown }));
   const f4 = await fitted(L2, 'p1', 20000);
   // 2.369.198: on a failure the bridge's own fit lines ride the evidence (the .197 heavy red said `why: headed-floor` on a headless browser and nothing else)
   const fitLines = () => journal.split('\n').filter((l) => /\[browser-live\].*(fit|floor|picture|viewport)/i.test(l)).slice(-12).join('\n');
-  ok(f4.good && f4.last.cw >= 380 && f4.last.cw <= 390, `the page renders at the PHONE's width: the pane ${f4.last && f4.last.cw}×${f4.last && f4.last.ch}, the page ${f4.page && f4.page.w}×${f4.page && f4.page.h} (the study: 1280 wide in a 260 px strip)`, JSON.stringify(f4) + '\n    bridge: ' + fitLines().replace(/\n/g, '\n    bridge: '));
-  ok(tb && tb.w >= 150, `the auto-open toast is legible on the phone (its words ${tb ? tb.w + '×' + tb.h : 'never measured'} px in a ${tb && tb.toast} px toast — a left:50% stack squeezed them into one word per line)`, JSON.stringify(tb));
+  ok(gateOf(f4.good) && f4.last.cw >= 380 && f4.last.cw <= 390, `the page renders at the PHONE's width: the pane ${f4.last && f4.last.cw}×${f4.last && f4.last.ch}, the page ${f4.page && f4.page.w}×${f4.page && f4.page.h} (the study: 1280 wide in a 260 px strip)`, JSON.stringify(f4) + '\n    bridge: ' + fitLines().replace(/\n/g, '\n    bridge: '));
+  ok(gateOf(tb) && tb.w >= 150, `the auto-open toast is legible on the phone (its words ${tb ? tb.w + '×' + tb.h : 'never measured'} px in a ${tb && tb.toast} px toast — a left:50% stack squeezed them into one word per line)`, JSON.stringify(tb));
   // the toast is transient chrome over the picture, not the picture: cleared before the census
   await Ph.evaluate(`(() => { for (const t of document.querySelectorAll('.global-toast')) t.remove(); return true; })()`);
   const c4 = await census(Ph, canvasSel(s2.sessionId), 'phone');
@@ -418,7 +418,7 @@ await (async () => {
   await clickAt(Ph, dr.left + (link.x + link.w / 2) * k, dr.top + (link.y + link.h / 2) * k);
   await until(() => clicks.length > before, 4000, 50);
   const cl = clicks.slice(before).find((c) => c.n === 'p1');
-  ok(cl && cl.t === 'pr', `a click on the drawn link reaches the LINK on the page (${cl ? `(${cl.x},${cl.y}) on "${cl.t}"` : 'nothing'})`, JSON.stringify(clicks.slice(before)));
+  ok(gateOf(cl) && cl.t === 'pr', `a click on the drawn link reaches the LINK on the page (${cl ? `(${cl.x},${cl.y}) on "${cl.t}"` : 'nothing'})`, JSON.stringify(clicks.slice(before)));
   // a second finger while driving is refused with a hint
   const pt = (x, y, id) => ({ x, y, id, radiusX: 2, radiusY: 2, force: 1 });
   await Ph.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [pt(150, 400, 1)] });
@@ -426,7 +426,7 @@ await (async () => {
   await Ph.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await sleep(300);
   const hint = await Ph.evaluate(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent).join(' | ')`);
-  ok(/Pinch-zoom works while you watch/.test(hint) && (await L2('return L.state().zoom.s')) === 1, 'in takeover a second finger is refused with a hint (no zoom)', hint.slice(0, 200));
+  ok(gateOf(/Pinch-zoom works while you watch/.test(hint)) && (await L2('return L.state().zoom.s')) === 1, 'in takeover a second finger is refused with a hint (no zoom)', hint.slice(0, 200));
   await L2('L.send({ type: "handback" }); return true;');
   await until(() => L2('return L.state().mode === "watch"'), 5000);
   // the pinch in watch mode
@@ -451,7 +451,7 @@ await (async () => {
   if (inView) await clickAt(Ph, lx, ly);
   await until(() => clicks.length > b2, 4000, 50);
   const cl2 = clicks.slice(b2).find((c) => c.n === 'p1');
-  ok(inView && cl2 && cl2.t === 'pr' && Math.abs(cl2.x - (link.x + link.w / 2)) <= 3, `under the ×${kz.toFixed(2)} zoom a click where the link is DRAWN lands on the link (${cl2 ? `(${cl2.x},${cl2.y})` : 'nothing'} vs its centre ${(link.x + link.w / 2).toFixed(0)},${(link.y + link.h / 2).toFixed(0)}) — taps map through the transform`, JSON.stringify({ inView, lx, ly, cr, cl2 }));
+  ok(gateOf(inView) && gateOf(cl2) && cl2.t === 'pr' && Math.abs(cl2.x - (link.x + link.w / 2)) <= 3, `under the ×${kz.toFixed(2)} zoom a click where the link is DRAWN lands on the link (${cl2 ? `(${cl2.x},${cl2.y})` : 'nothing'} vs its centre ${(link.x + link.w / 2).toFixed(0)},${(link.y + link.h / 2).toFixed(0)}) — taps map through the transform`, JSON.stringify({ inView, lx, ly, cr, cl2 }));
   await L2('L.send({ type: "handback" }); L.setZoom({ s: 1, tx: 0, ty: 0 }); return true;');
   // the chip, inside the visible bar
   await Ph.evaluate(`(() => { const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s2.sessionId)}); window.app.goToWinId(cw.id); return true; })()`);
@@ -469,7 +469,7 @@ await (async () => {
     const ready = await until(async () => findable(await chipFacts()), 20000, 200);
     const rest = await chipFacts();
     console.log(`    ${lang} — the chip at rest: ${JSON.stringify(rest)}`);
-    ok(ready && findable(rest), `${lang}: the phone's chat status bar carries the "Agent browser" chip in its row, INSIDE the bar ${JSON.stringify(rest.chipBox)} (the bar ${JSON.stringify(rest.barBox)}, the screen ${rest.vw}) — nothing behind ⋯ (${rest.more ? 'a ⋯ is drawn' : 'no ⋯'}), no sideways overflow (${rest.overflow} px) — "${rest.text}" (${rest.font})`, rest);
+    ok(gateOf(ready) && verdictOf(findable(rest)), `${lang}: the phone's chat status bar carries the "Agent browser" chip in its row, INSIDE the bar ${JSON.stringify(rest.chipBox)} (the bar ${JSON.stringify(rest.barBox)}, the screen ${rest.vw}) — nothing behind ⋯ (${rest.more ? 'a ⋯ is drawn' : 'no ⋯'}), no sideways overflow (${rest.overflow} px) — "${rest.text}" (${rest.font})`, rest);
     return findable(rest) ? rest : null;
   };
   {
@@ -480,7 +480,7 @@ await (async () => {
       const ctl = await chipFacts();
       await Ph.evaluate(`(() => { document.getElementById('b737b-off').remove(); return true; })()`);
       console.log(`    CONTROL — the chip pushed past the bar: ${JSON.stringify(ctl)}`);
-      ok(ctl.shown && !ctl.inside, `CONTROL: the chip drawn 420 px past its place is OUTSIDE the visible bar ${JSON.stringify(ctl.chipBox)} (the bar ${JSON.stringify(ctl.barBox)}) — the inside check goes RED`, ctl);
+      ok(gateOf(ctl.shown) && !ctl.inside, `CONTROL: the chip drawn 420 px past its place is OUTSIDE the visible bar ${JSON.stringify(ctl.chipBox)} (the bar ${JSON.stringify(ctl.barBox)}) — the inside check goes RED`, ctl);
     }
   }
   // ═══ verify r1: the chip census under zh / ja with DejaVu Sans forced (the .185 pattern — the runner's fallback font) ═══
@@ -488,7 +488,7 @@ await (async () => {
   await Ph.send('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = 'body, .chat-status-bar, .chat-status-bar * { font-family: "DejaVu Sans" !important; }'; document.head.appendChild(st); });` });
   for (const lang of ['zh', 'ja']) {
     await Ph.evaluate(`(() => { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); return 1; })()`);
-    if (!ok(await bootApp(Ph, { width: 390, height: 844, dsf: 3, mobile: true }), `${lang}: the phone client rebooted`)) continue;
+    if (!ok(verdictOf(await bootApp(Ph, { width: 390, height: 844, dsf: 3, mobile: true })), `${lang}: the phone client rebooted`)) continue;
     await Ph.evaluate(`(() => { window.app.attachSession(${JSON.stringify(s2.sessionId)}, ${JSON.stringify(s2.name)}, ${JSON.stringify(D)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
     await until(() => Ph.evaluate(`(() => !![...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s2.sessionId)}))()`), 10000, 100);
     await Ph.evaluate(`(() => { const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s2.sessionId)}); if (cw) window.app.goToWinId(cw.id); return true; })()`);
@@ -511,4 +511,4 @@ await (async () => {
 })().catch((e) => ok(false, 'the real-rung leg threw', e && (e.stack || e.message)));
 await endLeg();
 
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

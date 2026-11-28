@@ -594,7 +594,7 @@ const isMain = isMainThread && process.argv[1] && path.resolve(process.argv[1]) 
 if (isMain) {
   const t0 = performance.now();
   let pass = 0, fail = 0;
-  const ok = (cond, msg, detail) => { if (cond) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail ? '\n      ' + [].concat(detail).slice(0, 40).join('\n      ') : ''}`); } };
+  const ok = (cond, msg, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail ? '\n      ' + [].concat(detail).slice(0, 40).join('\n      ') : ''}`); } };
 
   console.log('§0 the negative controls (planted sources and rows — each leg must go red)');
   {
@@ -608,13 +608,13 @@ if (isMain) {
     const sd = scanFile('sd.js', "import { stampAt as when, dateOf } from './page-time.js';\na.textContent = t('signed out on {date}', { date: dateOf(x, { full: true }) });\nb.textContent = t('signed out on {date}', { date: dateOf(x, { full: true, words: true }) });\nconst at = when(y);\nc.textContent = t('resumed {time}', { time: at });\nd.title = when(z);\ne.textContent = t('Exported {date}', { date: q ? when(q, { full: true }) : t('(unknown date)') });\nconst w = (ms) => when(ms, { now });\nf.textContent = t('expired {at}', { at: w(k) });\n");
     ok(sd.sentenceDates.length === 4 && sd.sentenceDates.map((x) => x.line).join() === '2,5,7,9', '⑦ a page-time date filling a t() sentence without `words` is named (directly, one hop through a local, inside a ternary, through a local wrapper); with `words`, and a stamp in a title, are not', JSON.stringify(sd.sentenceDates));
     const frag = scanFile('frag.js', 'x.innerHTML = `<img src="${a}"${b ? ` data-record-src="${b}"` : \'\'}${c ? ` data-kind="codex" data-key="${c}"` : \'\'} alt="">`; y.innerHTML = `<p>${b ? `Plain words for a person` : \'\'}</p>`; z.innerHTML = `<b${b ? ` title="Open the whole file"` : \'\'}>x</b>`;');
-    ok(frag.visible.length === 2 && /Plain words/.test(frag.visible[0].text) && /Open the whole file/.test(frag.visible[1].text), '① a piece of an enclosing tag (` data-record-src="${…}"`) is markup; words in the same place, and a title in such a piece, are named', JSON.stringify(frag.visible));
+    ok(frag.visible.length === 2 && gateOf(/Plain words/.test(frag.visible[0].text)) && verdictOf(/Open the whole file/.test(frag.visible[1].text)), '① a piece of an enclosing tag (` data-record-src="${…}"`) is markup; words in the same place, and a title in such a piece, are named', JSON.stringify(frag.visible));
     const nd = scanFile('src/stream-model.js', "function legVerdictOf(h) {\n  return { words: 'the daemon says its leg is up' };\n}\nfunction other() {\n  return { label: 'Words a person reads' };\n}\n");
     ok(nd.visible.length === 1 && nd.visible[0].line === 5, '① a NOT_DRAWN row exempts its own function only — the next function\'s words are named', JSON.stringify(nd.visible));
     const p = scanFile('p.js', `x.textContent = t('Shows {n} waiting'); y.textContent = t('{n} more', { n }); z.textContent = t('{a} of {b}', { a: 1 }); const d = { description: [t('Marked “{label}”'), { label: t('needs you') }] };\nconst m = t('fire after {n} min'); // ui-words: {n} marks where the number input is embedded`);
     ok(p.params.length === 2 && p.params[1].missing.join() === 'b', '③ a {param} its call never fills is named (no params object; a params object without it); a filled one is not', JSON.stringify(p.params));
     const m = scanFile('m.js', `p.textContent = t('<b>{n}</b> sessions', { n }); q.innerHTML = t('<b>{n}</b> sessions', { n }); showToast(t('run \`{line}\` now', { line }));`);
-    ok(m.markup.length === 2 && m.markup.every((x) => x.sink !== 'prop:innerHTML'), '④ a markup key in a TEXT sink is named (textContent, a toast); the same key into innerHTML is not', JSON.stringify(m.markup));
+    ok(m.markup.length === 2 && verdictOf(m.markup.every((x) => x.sink !== 'prop:innerHTML')), '④ a markup key in a TEXT sink is named (textContent, a toast); the same key into innerHTML is not', JSON.stringify(m.markup));
     const d = dictFindings(['Find', 'Fine words'], { zh: [{ key: 'Find', value: 'Find', line: 1 }, { key: 'the agent', value: 'agent', line: 2 }, { key: 'The most turns on ONE account', value: '在**同一个账号**上的上限', line: 3 }, { key: 'Claude', value: 'Claude', line: 4 }] });
     ok(d.missing.join() === 'zh: Fine words', '② a key with no zh row is named', JSON.stringify(d.missing));
     ok(d.english.join() === 'zh: Find' && d.glossary.join() === 'zh: the agent', '⑤ a zh row left in English is named; a glossary-pending word and a brand are not', JSON.stringify(d));
@@ -622,26 +622,26 @@ if (isMain) {
     const rf = scanFile('rf.js', `a.textContent = j.state; b.textContent = valueWord('job-state', j.state, t); c.title = \`\${st.urgency} ok\`; if (j.state === 'up') d.textContent = 'x'; e.textContent = st.state ? w(st.state) : ''; f.textContent = st.role && w(st.role);`);
     ok(rf.raw.length === 2 && rf.raw.map((x) => x.text).join() === '.state,.urgency', '⑥(c) a code-named field drawn raw is named (a textContent, a template title); the same field through a words function, or compared, is not', JSON.stringify(rf.raw));
     const sf = setFindings({ urgency: ['low', 'brand-new'] }, { urgency: { low: 'low' } }, { 'job-state': { up: 'running', zz: 'never translated' } }, { zh: new Set(['running']) });
-    ok(sf.length === 2 && /brand-new/.test(sf[0]) && /never translated/.test(sf[1]), '⑥(b) a listed value with no words, and a delegated word with no row, are named', JSON.stringify(sf));
+    ok(sf.length === 2 && gateOf(/brand-new/.test(sf[0])) && verdictOf(/never translated/.test(sf[1])), '⑥(b) a listed value with no words, and a delegated word with no row, are named', JSON.stringify(sf));
     const tp = scanFile('src/lib/tp.js', `a.textContent = new Date(x).toLocaleString(); b = n.toLocaleString('en-US'); c = \`\${m}m ago\`; d = (d.getMonth() + 1) + '/' + d.getDate(); e = new Intl.DateTimeFormat(undefined, {}).format(x); f = Intl.DateTimeFormat().resolvedOptions().timeZone;\n// page-time: a machine day key in the planted control\ng = d.getMonth() + 1;`);
     ok(tp.time.length === 4 && tp.time.map((x) => x.text.split(' ')[0]).join() === 'toLocaleString(),${…}m,getMonth(),new' && tp.time[1].kind === 'unit', '⑦ a bare toLocaleString, an English unit template, a hand-built month and an Intl formatter are named; an en-US machine format, a zone read and a `// page-time:` line are not', JSON.stringify(tp.time));
     ok(scanFile('src/lib/page-time.js', 'x = new Date(1).toLocaleString();').time.length === 0, '⑦ …and page-time.js itself is the one place a time is formatted');
     const sh = scanFile('src/lib/sh.js', "import { stampAt as when } from './page-time.js';\nfunction f(d) { let when; when = d ? when(d) : ''; return when; }\nfunction g(d) { return when(d); }");
-    ok(sh.time.length === 1 && /shadows/.test(sh.time[0].text), '⑦ a page-time import shadowed by a local where it is called is named (the usage meter\'s and the job detail\'s bug); a plain call is not', JSON.stringify(sh.time));
+    ok(sh.time.length === 1 && verdictOf(/shadows/.test(sh.time[0].text)), '⑦ a page-time import shadowed by a local where it is called is named (the usage meter\'s and the job detail\'s bug); a plain call is not', JSON.stringify(sh.time));
     // ⑥(d) control: an id capitalised by hand is named (both spellings); the same value through the door, and a declared first letter, are not
     const cp = scanFile('c.js', "a.textContent = name.charAt(0).toUpperCase() + name.slice(1);\nb.textContent = themeWord(name, t);\nc.title = v[0].toUpperCase() + v.slice(1);\n// ui-words: the first letter of a sentence t() already worded\nd.textContent = s.charAt(0).toUpperCase() + s.slice(1);");
     ok(cp.caps.length === 2 && cp.caps.map((x) => x.line).join() === '1,3', '⑥(d) a value capitalised by hand is named (charAt(0) and [0]); the same value through themeWord, and a `// ui-words:` first letter, are not', JSON.stringify(cp.caps));
     const pf = pluginFindings([{ id: 'a', label: 'OpenCode background service', description: 'Runs it' }, { id: 'b', label: 'Tailscale' }, { id: 'c', label: 'Public URLs (frp)' }], { zh: new Set(['Runs it', 'Public URLs (frp)']), ja: new Set(['Runs it', 'Public URLs (frp)']) });
-    ok(pf.length === 2 && pf.every((x) => /^a\.label: no (zh|ja) row/.test(x)), '⑥(e) a built-in plugin label with no zh / ja row is named (the reader\'s «OpenCode background service»); a name and a held row are not', JSON.stringify(pf));
+    ok(pf.length === 2 && verdictOf(pf.every((x) => /^a\.label: no (zh|ja) row/.test(x))), '⑥(e) a built-in plugin label with no zh / ja row is named (the reader\'s «OpenCode background service»); a name and a held row are not', JSON.stringify(pf));
     // the closure round (主开发 20:39Z): a stored value handed to t() as its key, and the slice / substring spellings of a capitalisation
     const nk = scanFile('src/lib/nk.js', "a.textContent = t(st.state);\nb.textContent = valueWord('job-state', st.state, t);\nc.textContent = t(p.label);");
-    ok(nk.raw.length === 1 && nk.raw[0].line === 1 && /key:t/.test(nk.raw[0].sink), '⑥(c) a code-named field handed to t() as its KEY (t(st.state)) is named; the door, and a non-stored dynamic key, are not', JSON.stringify(nk.raw));
+    ok(nk.raw.length === 1 && nk.raw[0].line === 1 && verdictOf(/key:t/.test(nk.raw[0].sink)), '⑥(c) a code-named field handed to t() as its KEY (t(st.state)) is named; the door, and a non-stored dynamic key, are not', JSON.stringify(nk.raw));
     const sc2 = scanFile('src/lib/sc2.js', "a.textContent = n.slice(0, 1).toUpperCase() + n.slice(1);\nb.title = n.substring(0, 1).toLocaleUpperCase() + n.substring(1);\nc.textContent = n.at(0).toUpperCase() + n.substr(1);\nd.textContent = n.toUpperCase() + m.slice(2);");
     ok(sc2.caps.length === 3 && sc2.caps.map((x) => x.line).join() === '1,2,3', '⑥(d) a capitalisation spelled with slice / substring / at(0) is named (the AST form: an upper-cased first piece + the rest); a whole upper-case is not', JSON.stringify(sc2.caps));
     // ⑦ marks (主开发 2026-11-14): a declared mark sink that calls a sentence's ago(), and an undeclared line printing a mark
     const mk = markFindings([{ file: 'src/lib/x.js', line: 3, text: "p.textContent = t('Updated {ago}', { ago: markAgo(at) });" }, { file: 'src/lib/x.js', line: 1, text: 'a.textContent = durationMark(ms);' }],
       (f) => (f === 'src/lib/x.js' ? ['a.textContent = durationMark(ms);', 'b.textContent = ago(at);', "p.textContent = t('Updated {ago}', { ago: markAgo(at) });"] : []), [['src/lib/x.js', 'a.textContent = durationMark('], ['src/lib/x.js', 'b.textContent = ago(', 'a row age']]);
-    ok(mk.length === 2 && mk.some((x) => /calls a SENTENCE/.test(x)) && mk.some((x) => /x\.js:3 calls durationMark/.test(x)), '⑦ a mark sink calling a sentence\'s ago() is named, and a sentence printing a mark is named; a declared mark is not', JSON.stringify(mk));
+    ok(mk.length === 2 && gateOf(mk.some((x) => /calls a SENTENCE/.test(x))) && verdictOf(mk.some((x) => /x\.js:3 calls durationMark/.test(x))), '⑦ a mark sink calling a sentence\'s ago() is named, and a sentence printing a mark is named; a declared mark is not', JSON.stringify(mk));
     // the reader's round (13:41Z): its four green mutants, planted — each shape is RED here
     const m1c = scanFile('src/lib/m1c.js', "function sysLine(by) { return '{by} created the group'.replace('{by}', by); }\nfunction ok2(by) { return t('{by} created the group', { by }); }\nconst path = '/api/{id}/x'.replace('{id}', id);");
     ok(m1c.visible.length === 1 && m1c.visible[0].line === 1 && m1c.visible[0].sink === 'hand-filled', '① M1c: a {param} sentence filled by hand (`.replace(\'{by}\', by)`) is named wherever it stands; the same key through t(), and a path template, are not', JSON.stringify(m1c.visible));
@@ -650,11 +650,11 @@ if (isMain) {
     const m3b = scanFile('src/lib/m3b.js', "a.textContent = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;\nb.textContent = d.getHours() + ':' + d.getMinutes();\nc.textContent = `${d.getHours()} h`;");
     ok(m3b.time.filter((x) => /by hand/.test(x.text) && x.kind === 'clock').length === 2, '⑦ M3b: an hh:mm built by hand from getHours / getMinutes (a template or a + \':\' +) is named; an hour count is not', JSON.stringify(m3b.time));
     const m3c = scanFile('src/lib/m3c.js', "import { stampAt as when, clockOf } from './page-time.js';\nfunction render(a) { const when = a ? 'x' : ''; const clock = (ms) => when(ms); return clock(1); }\nconst zz = function () { let clockOf = 1; return () => clockOf(5); };\nfunction fine(d) { const resetAt = when(d); return () => when(d) + resetAt; }");
-    ok(m3c.time.length === 2 && m3c.time.every((x) => /shadows/.test(x.text)), '⑦ M3c: a shadowed page-time import called from INSIDE a closure is named (chat-status-bar\'s pool lines); a closure over a renamed local is not', JSON.stringify(m3c.time));
+    ok(m3c.time.length === 2 && verdictOf(m3c.time.every((x) => /shadows/.test(x.text))), '⑦ M3c: a shadowed page-time import called from INSIDE a closure is named (chat-status-bar\'s pool lines); a closure over a renamed local is not', JSON.stringify(m3c.time));
     const lf = loginFindings({ a: { en: 'Sign in', zh: '登录', ja: 'サインイン' }, b: { en: 'Password', zh: 'Password', ja: '' } });
-    ok(lf.length === 2 && /b: no ja/.test(lf.join()) && /b: the zh row is not Chinese/.test(lf.join()), '⑧ a sign-in row with no ja and an English zh row are named; a whole row is not', JSON.stringify(lf));
+    ok(lf.length === 2 && gateOf(/b: no ja/.test(lf.join())) && verdictOf(/b: the zh row is not Chinese/.test(lf.join())), '⑧ a sign-in row with no ja and an English zh row are named; a whole row is not', JSON.stringify(lf));
     const h = headFindings(["src/x.js:3:  by: 'agent', sessionName: 'Storage',", "src/y.js:9:  sessionName: 'Brand new head',", "src/z.js:1:  sessionName: 'a flag reason', // ui-words: not a head"], { Storage: 'Storage' });
-    ok(h.length === 1 && /Brand new head/.test(h[0]), '⑥ a literal For-you head the table does not hold is named; a held one and a `// ui-words:` line are not', JSON.stringify(h));
+    ok(h.length === 1 && verdictOf(/Brand new head/.test(h[0])), '⑥ a literal For-you head the table does not hold is named; a held one and a `// ui-words:` line are not', JSON.stringify(h));
   }
 
   const now = await census();
@@ -717,7 +717,7 @@ if (isMain) {
     PT.setPageZone('Asia/Shanghai');
     const BSW = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-session-words.js')).href);
     const w = BSW.whenText(Date.parse('2026-11-13T16:10:00Z'), Date.parse('2026-11-13T15:30:00Z'));   // Shanghai: 11/14 00:10 against 11/13 23:30
-    ok(/14/.test(w), 'a session instant past midnight in the PAGE\'s zone carries its date (whenText reads «today» in the zone it prints in)', w);
+    ok(verdictOf(/14/.test(w)), 'a session instant past midnight in the PAGE\'s zone carries its date (whenText reads «today» in the zone it prints in)', w);
     PT.setPageZone(null);
     // THE SPEED CURE (the .403 prep mirror: the 1 758-row Channels panel redrew in 600 ms — page-time built an Intl.DateTimeFormat a
     // call to read the device's zone). (a) The zone is KEPT FOR A MINUTE — the limit — and a zone change is seen once it is over
@@ -744,7 +744,7 @@ if (isMain) {
         sizes = PT.stampAt.cacheSizes(); for (const k of Object.keys(worst)) worst[k] = Math.max(worst[k], sizes[k]);
       }
       PT.setPageZone(null);
-      ok(sizes && worst.formats <= sizes.formatsMax && worst.memo <= sizes.memoMax && worst.names <= sizes.namesMax && worst.memo > 1000, `page-time's caches stay under their bounds over a walk of ${zones.length} zones × 150 days (formats ${worst.formats} ≤ ${sizes && sizes.formatsMax}, quarter-hours ${worst.memo} ≤ ${sizes && sizes.memoMax}, zone names ${worst.names} ≤ ${sizes && sizes.namesMax})`, worst);
+      ok(gateOf(sizes) && worst.formats <= sizes.formatsMax && worst.memo <= sizes.memoMax && worst.names <= sizes.namesMax && worst.memo > 1000, `page-time's caches stay under their bounds over a walk of ${zones.length} zones × 150 days (formats ${worst.formats} ≤ ${sizes && sizes.formatsMax}, quarter-hours ${worst.memo} ≤ ${sizes && sizes.memoMax}, zone names ${worst.names} ≤ ${sizes && sizes.namesMax})`, worst);
     }
     // THE SPAN FORM (主开发 2026-11-15, the machine card's head «· 10/4 11:39–10/4 11:41»): the date ONCE — today none, one day the
     // date at the start, two days both, one reading one stamp, the zone's words once at the end. ITS ORACLE STATES THE LAW, whatever
@@ -767,13 +767,13 @@ if (isMain) {
         okNe = !!tail && tailOf(s0) === tail && z === `${s0.slice(0, -tail.length)}–${c1.slice(0, -tail.length)}${tail}` && (z.match(/JST|GMT\+9/g) || []).length === 1;
         Object.assign(facts, { z, tail });
       } finally { if (TZ0 === undefined) delete process.env.TZ; else process.env.TZ = TZ0; PT.setPageZone(null); }
-      ok(okEq && okNe, 'page-time stampSpan says the date ONCE: today none, one day at its start, two days both, one reading one stamp — the zone\'s words once, at the end (both cases driven: the device\'s zone = the page\'s, ≠)', facts);
+      ok(gateOf(okEq) && verdictOf(okNe), 'page-time stampSpan says the date ONCE: today none, one day at its start, two days both, one reading one stamp — the zone\'s words once, at the end (both cases driven: the device\'s zone = the page\'s, ≠)', facts);
     }
     // ONE countdown spelling (2.369.403): page-time durationMark({ full }) — the usage popup's «· in 1d10h50m» — and the roster's /
     // the cap ring's fullEta (usage-eta, PURE) are the same function, over every minute of 40 d; the owner's 09-15 form stands
     const UE = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-eta.js')).href);
     const T0 = Date.UTC(2026, 10, 14, 12), cd = (ms) => PT.durationMark(ms, { full: true });
-    ok(Array.from({ length: 40 * 1440 }, (_, i) => (i + 1) * 60e3).every((ms) => UE.fullEta(T0 + ms, T0) === cd(ms)) && cd(2 * 1440 * 60e3 + 5 * 60e3) === '2d0h5m' && cd(3 * 3600e3) === '3h0m', 'the popup\'s countdown (durationMark({ full })) and the roster\'s fullEta are ONE spelling — usage-eta countdownMark, the owner\'s 09-15 form', [cd(2 * 1440 * 60e3 + 5 * 60e3), UE.fullEta(T0 + 3 * 3600e3, T0)]);
+    ok(gateOf(Array.from({ length: 40 * 1440 }, (_, i) => (i + 1) * 60e3).every((ms) => UE.fullEta(T0 + ms, T0) === cd(ms))) && cd(2 * 1440 * 60e3 + 5 * 60e3) === '2d0h5m' && cd(3 * 3600e3) === '3h0m', 'the popup\'s countdown (durationMark({ full })) and the roster\'s fullEta are ONE spelling — usage-eta countdownMark, the owner\'s 09-15 form', [cd(2 * 1440 * 60e3 + 5 * 60e3), UE.fullEta(T0 + 3 * 3600e3, T0)]);
     // every export of the one formatter has a reader in the browser bundle (the closure: until() had none)
     const ptSrc = fs.readFileSync(path.join(REPO, 'src/lib/page-time.js'), 'utf8');
     const exportsOf = [...ptSrc.matchAll(/^export function (\w+)/gm)].map((m) => m[1]);
@@ -841,4 +841,4 @@ if (isMain) {
   ok(e.stale.length === 0, `⑤ no baseline row the dictionaries no longer hold (lower it)`, e.stale.map((h) => h.text));
   console.log(`\n${fail ? `${fail} FAILED, ${pass} passed` : `ALL PASS (${pass})`} — ${Math.round(performance.now() - t0)} ms`);
   process.exit(fail ? 1 : 0);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

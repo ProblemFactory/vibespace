@@ -50,7 +50,7 @@ const FX = scratch('rawname-fx');
 const DL = scratch('rawname-dl');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── fixtures: a real PNG and a real (xref-complete) PDF, each under an ASCII and a CJK name ──
@@ -198,14 +198,14 @@ try {
     await sleep(f.kind === 'pdf' ? 1500 : 300); // a PDF that became a download would show up here
     const url = new URL(v.src);
     ok(url.pathname === '/api/file/raw' && url.searchParams.get('path') === p, `① the preview element streams from /api/file/raw?path=<the file> (${f.kind === 'image' ? 'img' : 'iframe'}.src)`, v.src);
-    ok(v.drawn && downloads.length === n0, `① it is a PREVIEW: ${f.kind === 'image' ? `the image draws (${v.w} px wide)` : 'the PDF frame loads'} and opening it started no download (inline, never attachment)`, { v, downloads: downloads.slice(n0) });
+    ok(gateOf(v.drawn) && downloads.length === n0, `① it is a PREVIEW: ${f.kind === 'image' ? `the image draws (${v.w} px wide)` : 'the PDF frame loads'} and opening it started no download (inline, never attachment)`, { v, downloads: downloads.slice(n0) });
     const h = await evalJs(`__rn.header(${JSON.stringify(v.src)})`);
     const star = /filename\*=UTF-8''([^;]+)$/.exec(h.cd || '');
-    ok(h.status === 200 && /^inline; /.test(h.cd || '') && star && decodeURIComponent(star[1]) === f.name, `② Chrome's fetch of that URL reads Content-Disposition inline with filename*= the name`, h);
+    ok(h.status === 200 && gateOf(/^inline; /.test(h.cd || '')) && gateOf(star) && decodeURIComponent(star[1]) === f.name, `② Chrome's fetch of that URL reads Content-Disposition inline with filename*= the name`, h);
     const d = await saveVia(v.src);
     const onDisk = path.join(DL, f.name);
-    ok(d && d.suggestedFilename === f.name, `③ Chrome saves the preview's URL as ${JSON.stringify(f.name)} (Browser.downloadWillBegin.suggestedFilename)`, d);
-    ok(d && d.state === 'completed' && fs.existsSync(onDisk) && fs.readFileSync(onDisk).equals(f.bytes), '③ …and the file lands on disk under that name with the same bytes', { d, exists: fs.existsSync(onDisk), files: fs.readdirSync(DL) });
+    ok(gateOf(d) && d.suggestedFilename === f.name, `③ Chrome saves the preview's URL as ${JSON.stringify(f.name)} (Browser.downloadWillBegin.suggestedFilename)`, d);
+    ok(gateOf(d) && d.state === 'completed' && gateOf(fs.existsSync(onDisk)) && verdictOf(fs.readFileSync(onDisk).equals(f.bytes)), '③ …and the file lands on disk under that name with the same bytes', { d, exists: fs.existsSync(onDisk), files: fs.readdirSync(DL) });
     saved.push(f.name);
   }
 
@@ -243,7 +243,7 @@ try {
   for (const f of [FIXTURES[1], FIXTURES[3]]) {
     const url = `http://127.0.0.1:${PORT}/api/file/raw?path=${encodeURIComponent(path.join(FX, f.name))}`;
     const d = await saveVia(url);
-    ok(stripped.some((u) => u.startsWith(url)) && d && /^raw(\.\w+)?$/.test(d.suggestedFilename || ''), `④ control: ${JSON.stringify(f.name)} without the header is saved as ${JSON.stringify(d && d.suggestedFilename)} — the name the header gives is the only thing between the file and "raw"`, { d, stripped });
+    ok(gateOf(stripped.some((u) => u.startsWith(url))) && gateOf(d) && verdictOf(/^raw(\.\w+)?$/.test(d.suggestedFilename || '')), `④ control: ${JSON.stringify(f.name)} without the header is saved as ${JSON.stringify(d && d.suggestedFilename)} — the name the header gives is the only thing between the file and "raw"`, { d, stripped });
   }
   // ④b the other way to get it wrong: `attachment` on the preview URL turns the PDF PREVIEW into a download — ① catches it
   mode = 'attach';
@@ -254,7 +254,7 @@ try {
     const t0 = Date.now();
     while (Date.now() - t0 < 8000 && downloads.length === n0) await sleep(50);
     const d = downloads[n0];
-    ok(attached.length > 0 && d && d.suggestedFilename === f.name, `④b control: the same header as \`attachment\` makes opening the PDF preview START A DOWNLOAD (${JSON.stringify(d && d.suggestedFilename)}) — so ①'s "no download" is a real check, and \`inline\` is what keeps a preview a preview`, { d, attached });
+    ok(attached.length > 0 && gateOf(d) && d.suggestedFilename === f.name, `④b control: the same header as \`attachment\` makes opening the PDF preview START A DOWNLOAD (${JSON.stringify(d && d.suggestedFilename)}) — so ①'s "no download" is a real check, and \`inline\` is what keeps a preview a preview`, { d, attached });
   }
   mode = null;
   await page.cmd('Fetch.disable');
@@ -263,4 +263,4 @@ try {
 }
 
 console.log(`\n${pass} passed, ${fail} failed (${((Date.now() - T0) / 1000).toFixed(1)} s)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

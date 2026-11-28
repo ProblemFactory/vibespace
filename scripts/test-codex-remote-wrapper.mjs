@@ -46,7 +46,7 @@ setInterval(() => {}, 1e3);
 `;
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -75,10 +75,10 @@ w.stderr.on('data', () => {});
 let m1 = null; // poll: fixed sleeps flake under sweep load
 for (let i = 0; i < 40 && !(m1?.threadId); i++) { await sleep(300); m1 = readMeta(); }
 check('spawn survived the remote-only cwd (ENOENT trap)', w.exitCode === null, String(w.exitCode));
-check('handshake completed (threadId adopted from thread/start)', m1 && m1.threadId === 'th-stub-1', JSON.stringify(m1 && m1.threadId));
+check('handshake completed (threadId adopted from thread/start)', gateOf(m1) && m1.threadId === 'th-stub-1', JSON.stringify(m1 && m1.threadId));
 check('initialize sent exactly once', (fs.readFileSync(path.join(tmp, 'initcount'), 'utf8') || '').length === 1, '');
 await sleep(1500); // the buffer persists on a 1s debounce — let it flush
-check('_remote_state connected recorded', readBuf().includes('"_remote_state"'), '');
+check('_remote_state connected recorded', verdictOf(readBuf().includes('"_remote_state"')), '');
 
 console.log('— transport death: reconnect, NO re-initialize —');
 const km = JSON.parse(fs.readFileSync(path.join(tmp, SID + '.json'), 'utf8'));
@@ -88,7 +88,7 @@ process.kill(wrapperChild, 'SIGKILL');
 await sleep(3500); // backoff #1 = 1s, respawn, reattach
 const m2 = readMeta();
 check('reconnected (fresh attach child)', m2.childPid !== wrapperChild && m2.childPid > 0, JSON.stringify({ was: wrapperChild, now: m2.childPid }));
-check('stub app-server untouched by the pipe death', (() => { try { process.kill(km.childPid, 0); return true; } catch { return false; } })(), '');
+check('stub app-server untouched by the pipe death', verdictOf((() => { try { process.kill(km.childPid, 0); return true; } catch { return false; } })()), '');
 check('STILL exactly one initialize (handshake-once)', (fs.readFileSync(path.join(tmp, 'initcount'), 'utf8') || '').length === 1, '');
 
 console.log('— remote end: sentinel finalizes the wrapper —');
@@ -101,10 +101,10 @@ sock.write(JSON.stringify({ method: '__quit__' }) + '\n');
 await sleep(2500);
 check('wrapper exited with the remote exit code', w.exitCode === 9, String(w.exitCode));
 const m3 = readMeta();
-check('meta not streaming after finalize', m3 && m3.streaming === false, JSON.stringify(m3 && m3.streaming));
+check('meta not streaming after finalize', gateOf(m3) && m3.streaming === false, JSON.stringify(m3 && m3.streaming));
 
 try { sock.destroy(); } catch {}
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall codex-remote-wrapper tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

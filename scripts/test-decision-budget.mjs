@@ -38,7 +38,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DE = require(path.join(REPO, 'src/server/decision-engine.js'));
 const M = require(path.join(REPO, 'src/decision-model.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -95,7 +95,7 @@ console.log(`① the race — 6 in flight, room for one (estimate ${EST} tokens 
   const rs = await Promise.all(all);
   ok(rs.filter((r) => r.ok).length === 1 && rs.filter((r) => !r.ok && r.why === 'daily-budget').length === 5 && w.fetches === 1, '6 judgments ⇒ 1 call + 5 refused by the budget words (daily-budget)', rs.map((r) => r.why || 'ok'));
   const row = w.journal().find((x) => x.outcome === 'ok');
-  ok(row && row.reserved > 0 && row.usd === row.reserved && w.eng.status().today.inFlight === 0, 'the journal row says reserved → settled (no usage.cost: the larger of the reservation and tokens × price)', row);
+  ok(gateOf(row) && row.reserved > 0 && row.usd === row.reserved && w.eng.status().today.inFlight === 0, 'the journal row says reserved → settled (no usage.cost: the larger of the reservation and tokens × price)', row);
 }
 
 console.log('② the recorded cost gates (OpenRouter usage.cost = 3 USD under a 1 USD cap)');
@@ -103,7 +103,7 @@ console.log('② the recorded cost gates (OpenRouter usage.cost = 3 USD under a 
   const w = world('cost', { provider: 'openrouter', answer: (n, b) => ({ status: 200, body: { model: b.model, answers: { q1: { type: 'noul', noul: 0.2 } }, usage: { input_tokens: 40, cost: 3 } } }) });
   const r1 = await w.judge();
   const r2 = await w.judge();
-  ok(r1.ok && r1.usd === 3 && !r2.ok && r2.why === 'daily-budget' && w.fetches === 1 && w.eng.status().today.total.usd === 3, 'call 1 settles at 3 USD; call 2 is refused (0 fetches)', { r1: r1.usd, r2, fetches: w.fetches });
+  ok(gateOf(r1.ok) && r1.usd === 3 && !r2.ok && r2.why === 'daily-budget' && w.fetches === 1 && w.eng.status().today.total.usd === 3, 'call 1 settles at 3 USD; call 2 is refused (0 fetches)', { r1: r1.usd, r2, fetches: w.fetches });
 }
 
 console.log('③ a 200 without usage keeps the reservation; an answered 5xx costs 0');
@@ -111,7 +111,7 @@ console.log('③ a 200 without usage keeps the reservation; an answered 5xx cost
   const w = world('nousage', { answer: (n) => n === 1 ? { status: 200, body: okBody(null) } : { status: 503 } });
   const r1 = await w.judge();
   const t1 = w.eng.status().today.total;
-  ok(r1.ok && t1.usd > 0 && Math.abs(t1.usd - EST_USD) < 1e-8 && t1.calls === 1 && t1.inputTokens === EST, 'no usage ⇒ the estimate is the cost (never 0)', t1);
+  ok(gateOf(r1.ok) && t1.usd > 0 && Math.abs(t1.usd - EST_USD) < 1e-8 && t1.calls === 1 && t1.inputTokens === EST, 'no usage ⇒ the estimate is the cost (never 0)', t1);
   const r2 = await w.judge();
   const t2 = w.eng.status().today.total;
   ok(!r2.ok && r2.status === 503 && t2.usd === t1.usd && t2.calls === 1 && w.eng.status().today.reserved === 0, 'a 503 ⇒ the reservation released, nothing billed', { r2, t2 });
@@ -126,10 +126,10 @@ console.log('④ a 401 ⇒ reconnect; no fetch across 3 ticks; a new key resumes
   const later = [];
   for (let i = 0; i < 3; i++) { w.T += 15 * 60e3; later.push(await w.judge()); }
   const st = w.eng.status();
-  ok(w.fetches === 1 && later.every((r) => r.why === 'reconnect') && st.reconnect && st.reconnect.status === 401 && st.today.total.usd === 0, '3 ticks later: still 1 fetch, every refusal named reconnect, the card row says it, nothing billed', { later, reconnect: st.reconnect });
+  ok(w.fetches === 1 && gateOf(later.every((r) => r.why === 'reconnect')) && gateOf(st.reconnect) && st.reconnect.status === 401 && st.today.total.usd === 0, '3 ticks later: still 1 fetch, every refusal named reconnect, the card row says it, nothing billed', { later, reconnect: st.reconnect });
   w.key = 'sk-dummy-KEY-two';
   const r5 = await w.judge();
-  ok(r5.ok && w.fetches === 2 && w.eng.status().reconnect === null, 'a new key saved ⇒ the next call goes and the row is clear', r5);
+  ok(gateOf(r5.ok) && w.fetches === 2 && w.eng.status().reconnect === null, 'a new key saved ⇒ the next call goes and the row is clear', r5);
 }
 
 console.log('⑤ a 429 Retry-After is honoured; the 5xx ladder');
@@ -147,7 +147,7 @@ console.log('⑤ a 429 Retry-After is honoured; the 5xx ladder');
   const r4 = await w.judge();
   ok(!r4.ok && r4.retryAt === w.T + 900000, 'a third wall waits 15 min', r4);
   w.T += 900000;
-  ok((await w.judge()).ok && w.fetches === 4, 'after it: the call goes through');
+  ok(gateOf((await w.judge()).ok) && w.fetches === 4, 'after it: the call goes through');
 }
 
 console.log('⑥ the per-hour guard rides the same reservation');
@@ -162,7 +162,7 @@ console.log('⑥ the per-hour guard rides the same reservation');
   const pj = src.slice(src.indexOf('async function preJudge('), src.indexOf('async function onFresh('));
   const reserveAt = pj.indexOf('hrs.push(t);'), awaitAt = pj.indexOf('await decisionEngine.judge(');
   const checkAt = pj.indexOf('const road = roadOf(facts[F.isRouteRule(rule) ? \'routing\' : \'rule\'], hrs.length >= F.decisionPerHour(rule), F.decisionPerHour(rule));');   // lane judged-watch-state: the hour rides THE road verdict
-  ok(reserveAt > 0 && awaitAt > reserveAt && checkAt > 0 && checkAt < reserveAt && /a\.lastIndexOf\(t\)/.test(pj) && !/decisionHours\.get\(k\)\.push\(t\)/.test(pj), 'preJudge: the rule\'s hour slot is reserved right after its check, BEFORE the await, and handed back on a refusal / memo (F5)');
+  ok(reserveAt > 0 && awaitAt > reserveAt && checkAt > 0 && checkAt < reserveAt && gateOf(/a\.lastIndexOf\(t\)/.test(pj)) && !/decisionHours\.get\(k\)\.push\(t\)/.test(pj), 'preJudge: the rule\'s hour slot is reserved right after its check, BEFORE the await, and handed back on a refusal / memo (F5)');
 }
 
 console.log('⑦ RED CONTROLS — the old shapes in scratch copies');
@@ -182,7 +182,7 @@ console.log('⑦ RED CONTROLS — the old shapes in scratch copies');
   const Est = MUT.load('src/server/decision-engine.js', editAnchor(engSrc, a2, 'const usd = estUsd;', "src/server/decision-engine.js"), 'settle-estimate');
   const w2 = world('ctl-cost', { Engine: Est, provider: 'openrouter', answer: (n, b) => ({ status: 200, body: { model: b.model, answers: { q1: { type: 'noul', noul: 0.2 } }, usage: { input_tokens: 40, cost: 3 } } }) });
   await w2.judge(); const r2 = await w2.judge();
-  ok(r2.ok && w2.fetches === 2, 'CONTROL: settled at the estimate (the recorded cost ignored) ⇒ the 2nd call flies — leg ② would be red');
+  ok(gateOf(r2.ok) && w2.fetches === 2, 'CONTROL: settled at the estimate (the recorded cost ignored) ⇒ the 2nd call flies — leg ② would be red');
 }
 
 console.log('⑧ nothing sent ⇒ released, never settled — the judge AND the text client (lane rule-learning-fix L3)');
@@ -215,16 +215,16 @@ console.log('⑧ nothing sent ⇒ released, never settled — the judge AND the 
   };
   const run = async (table) => { const out = {}; for (const [k, f] of Object.entries(table)) out[k] = await both(f); return out; };
   const u = await run(UNSENT);
-  ok(Object.values(u).every((x) => x.judge === 0 && x.learn === 0 && x.reserved === 0 && x.inFlight === 0), `${Object.keys(UNSENT).length} ways nothing was sent (${Object.keys(UNSENT).join(' · ')}) ⇒ the judge's use and the drafter's use are charged $0, no hold left`, u);
+  ok(verdictOf(Object.values(u).every((x) => x.judge === 0 && x.learn === 0 && x.reserved === 0 && x.inFlight === 0)), `${Object.keys(UNSENT).length} ways nothing was sent (${Object.keys(UNSENT).join(' · ')}) ⇒ the judge's use and the drafter's use are charged $0, no hold left`, u);
   const real = await both(null, `http://127.0.0.1:${closed}`);
   ok(real.judge === 0 && real.learn === 0 && real.reserved === 0, `the REAL primitive on a closed loopback port (${closed}) ⇒ $0 for both callers (the connect-phase code read off the cause)`, real);
   const m = await run(MAYBE);
-  ok(Object.values(m).every((x) => x.judge > 0 && x.learn > 0 && x.reserved === 0), 'a timeout and a reset mid-answer may have reached the vendor ⇒ both keep their reservation as the cost (the money law of ③ unchanged)', m);
+  ok(verdictOf(Object.values(m).every((x) => x.judge > 0 && x.learn > 0 && x.reserved === 0)), 'a timeout and a reset mid-answer may have reached the vendor ⇒ both keep their reservation as the cost (the money law of ③ unchanged)', m);
   const orig = M.settleUsd;
   M.settleUsd = (o) => orig({ ...o, failed: null });   // RED CONTROL on the shared model object (both callers call it at call time)
   let red;
   try { red = await run(UNSENT); } finally { M.settleUsd = orig; }
-  ok(Object.values(red).every((x) => x.judge > 0 && x.learn > 0), 'RED CONTROL: settleUsd without `failed` (the old rule) charges the reservation for every one of them — to both uses', red);
+  ok(verdictOf(Object.values(red).every((x) => x.judge > 0 && x.learn > 0)), 'RED CONTROL: settleUsd without `failed` (the old rule) charges the reservation for every one of them — to both uses', red);
 }
 
 console.log('⑨ THE JUDGING MODEL ON THE WIRE (lane llm-plugin-rename): the LLM plugin\'s judgeModel row > the cluster preset\'s model (only while the cluster\'s key is in use) > the provider\'s default');
@@ -285,7 +285,7 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
   const onDisk = [a.F.usage, a.F.memo].filter((f) => fs.existsSync(f)).map((f) => path.basename(f));
   ok(!c1.done() && onDisk.length === 0, 'a call that changed the counter has NOT answered while its counter waits for the disk — and neither decision-usage.json nor decision-memo.json was written on the main thread', { done: c1.done(), onDisk });
   const u = a.rec.dirties.filter((d) => d.file === a.F.usage), m = a.rec.dirties.filter((d) => d.file === a.F.memo);
-  ok(u.length === 2 && u.every((d) => d.name === 'decision-usage.write' && d.rank === 0 && d.mode === 0o600) && a.rec.durables.filter((f) => f === a.F.usage).length === 2,
+  ok(u.length === 2 && gateOf(u.every((d) => d.name === 'decision-usage.write' && d.rank === 0 && d.mode === 0o600)) && a.rec.durables.filter((f) => f === a.F.usage).length === 2,
     'the day\'s counter is an ACT: handed as decision-usage.write, rank 0, 0600, its durable() asked — at the settle and at the recorded rate', u);
   ok(m.length === 1 && m[0].name === 'decision-memo.write' && m[0].rank === undefined && m[0].mode === 0o600 && !a.rec.durables.includes(a.F.memo), 'the memo is PACED: handed as decision-memo.write — no rank, no durable()', m);
   const ub = JSON.parse(a.rec.owed.get(a.F.usage)()), mb = JSON.parse(a.rec.owed.get(a.F.memo)());
@@ -296,7 +296,7 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
   const owedSaid = a.warns.filter((l) => /the day's counter is not on disk \(its write failed: EIO\)/.test(l)).length;
   const c3 = start(a, 'sw-3'); await c3.asked(); a.rec.land(); await c3.p;
   const againSaid = a.warns.filter((l) => /the day's counter is on disk again/.test(l)).length;
-  ok(r1.ok && owedSaid === 1 && againSaid === 1 && a.warns.length === 2, `a counter write that FAILED is said ONCE over two failed writes (${owedSaid}), the next write that lands says so once (${againSaid}) — the call still answers (the change is kept in memory)`, a.warns);
+  ok(gateOf(r1.ok) && owedSaid === 1 && againSaid === 1 && a.warns.length === 2, `a counter write that FAILED is said ONCE over two failed writes (${owedSaid}), the next write that lands says so once (${againSaid}) — the call still answers (the change is kept in memory)`, a.warns);
   const e2 = a.w.mk();
   ok(e2.status().today.total.calls === 3 && e2.memoSize() === 3 && a.rec.flushes.length === 0, 'a new engine reads the landed counter (3 calls) and memo (3 entries) back — and waits on nothing (nothing owed)', { calls: e2.status().today.total.calls, memo: e2.memoSize(), flushes: a.rec.flushes });
   e2.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: a.w.cents }) });
@@ -310,7 +310,7 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
   a.w.eng = e3;
   const asks = a.rec.durables.length, fetches = a.w.fetches;
   const hit = await Promise.race([a.w.judge({ memo: { id: 'sw-1', rule: 'r' } }), new Promise((res) => setTimeout(() => res('waited'), 500))]);
-  ok(hit && hit.ok && hit.memo === true && a.w.fetches === fetches && a.rec.durables.length === asks, 'a memo hit changes no counter and waits on nothing (no durable() asked, no fetch)', hit);
+  ok(gateOf(hit) && gateOf(hit.ok) && hit.memo === true && a.w.fetches === fetches && a.rec.durables.length === asks, 'a memo hit changes no counter and waits on nothing (no durable() asked, no fetch)', hit);
   // the TEXT-MODEL CLIENT (the drafter) keeps the same law (reader round 1): its answer waits for the counter its call changed
   const tmLeg = async (TMmod, tag) => {
     const rec = standIn(), dataDir = path.join(ROOT, 'sw-tm-' + tag); fs.mkdirSync(dataDir, { recursive: true });
@@ -328,13 +328,13 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
     return { waited, ok: r.ok, why: r.why, asked: rec.durables.length, usd: e.status().today.byUse.learn ? e.status().today.byUse.learn.usd : 0 };
   };
   const t1 = await tmLeg(require(path.join(REPO, 'src/server/text-model-client.js')), 'moved');
-  ok(t1.waited && t1.ok && t1.asked >= 1 && t1.usd > 0, 'the text-model client (the drafter) has NOT answered while the counter its call changed waits for the disk — it answers once the counter lands', t1);
+  ok(gateOf(t1.waited) && gateOf(t1.ok) && t1.asked >= 1 && t1.usd > 0, 'the text-model client (the drafter) has NOT answered while the counter its call changed waits for the disk — it answers once the counter lands', t1);
   const tmSrc = fs.readFileSync(path.join(REPO, 'src/server/text-model-client.js'), 'utf8');
   const aT = '    await ledger.settle(hold, use, u, usd, est);';
   ok(tmSrc.split(aT).length === 2, 'ANCHOR: the text-model client awaits its settle, once');
   const TMno = mutantCopies('decision-budget-tm', REPO).load('src/server/text-model-client.js', editAnchor(tmSrc, aT, '    ledger.settle(hold, use, u, usd, est);', "src/server/text-model-client.js"), 'no-await');
   const t2 = await tmLeg(TMno, 'red');
-  ok(!t2.waited && t2.ok, 'CONTROL: the settle not awaited ⇒ the drafter answers while its counter is still owed — the check above would be red', t2);
+  ok(!t2.waited && verdictOf(t2.ok), 'CONTROL: the settle not awaited ⇒ the drafter answers while its counter is still owed — the check above would be red', t2);
   // RED CONTROL: the change removed — the writes made on the main thread at the change (the old writeJsonAtomic shape)
   const engSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
   const a3 = "  const W = () => writer || require('../store-writer.js').storeWriter();\n";
@@ -344,7 +344,7 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
   const b = mkW(Sync, 'red');
   const rb = await b.w.judge({ memo: { id: 'sw-red', rule: 'r' } });
   const bDisk = [b.F.usage, b.F.memo].filter((f) => fs.existsSync(f)).map((f) => path.basename(f));
-  ok(rb.ok && bDisk.length === 2 && b.rec.dirties.length === 0, `CONTROL: the writes made on the main thread at the change ⇒ both files are on disk when the call returns (${bDisk.join(', ')}), the writer never asked — the leg's first checks would be red`);
+  ok(gateOf(rb.ok) && bDisk.length === 2 && b.rec.dirties.length === 0, `CONTROL: the writes made on the main thread at the change ⇒ both files are on disk when the call returns (${bDisk.join(', ')}), the writer never asked — the leg's first checks would be red`);
 }
 
 // ── B-a85f: THE DAY'S COUNTER IS REBUILT FROM THE JOURNAL AT BOOT (the money crash window of B-0248 U1) ────────────────────
@@ -369,7 +369,7 @@ console.log('B-a85f — a stop before the counter landed: the next boot raises t
     return { ok1: !!(r1 && r1.ok), ok2: !!(r2 && r2.ok), billed: Math.round(billed * 1e8) / 1e8, onDisk, usd: Math.round(t.usd * 1e8) / 1e8, calls: t.calls };
   };
   const a = await scene(DE, 'a85f-rebuild');
-  ok(a.ok1 && a.billed > 0 && !a.onDisk && a.usd === a.billed && a.calls >= 1,
+  ok(gateOf(a.ok1) && a.billed > 0 && !a.onDisk && a.usd === a.billed && a.calls >= 1,
     'B-a85f: two billed calls whose counter NEVER reached the disk (a stop first) — the next boot\'s counter holds the journal\'s sum for today (never 0)', a);
   const deSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
   const A = '    const j = M.daySpendByUse(rows, day0, tzOffset);';   // B-f276 family: the boot's raise is its own step now (rebuildFromJournal), the same line
@@ -379,4 +379,4 @@ console.log('B-a85f — a stop before the counter landed: the next boot raises t
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

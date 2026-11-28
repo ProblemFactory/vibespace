@@ -60,7 +60,7 @@ fs.writeFileSync(path.join(stubDir, 'asks.json'), JSON.stringify(FIX.conversatio
 fs.writeFileSync(path.join(stubDir, 'plan.json'), JSON.stringify(FIX.plan)); // ⑥: an agent's numbered PLAN, filed on «file your plan»
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the stub CLI: one assistant turn per user line; its FIRST line files its folder's questions (the agent route, in order) ──
@@ -270,7 +270,7 @@ const sum = (b) => (b ? b.segs.filter((s) => s.c !== 'ut-seg-notice').reduce((n,
 
 try {
   console.log(`setup: ${Object.keys(sids).length} stub conversations filed ${open0.length} questions (payments ${byConv(open0, 'payments').length}) through the agent route`);
-  check(`setup: the stress fixture is open on the hub — ${TOTAL} questions, six on payments, options=null on all`, open0.length === TOTAL && byConv(open0, 'payments').length === 6 && open0.every((i) => i.options == null) && !!qTests && !!qEight && !!payKey, { n: open0.length });
+  check(`setup: the stress fixture is open on the hub — ${TOTAL} questions, six on payments, options=null on all`, open0.length === TOTAL && byConv(open0, 'payments').length === 6 && gateOf(open0.every((i) => i.options == null)) && !!qTests && !!qEight && !!payKey, { n: open0.length });
 
   if (!MUT_BUNDLE) check('⓪ the RED CONTROL bundle builds from this source (its anchors are this lane\'s lines)', false, MUT_ERR);
   else try {
@@ -289,7 +289,7 @@ try {
     await waitFor(`String(app.layoutManager._lastSentJson || '').includes(app.wm.activeWindowId) && !app.layoutManager._unacked.length`, 12000); // saved — the same reload as ④'s
     await load(); await waitFor('!!app.phoneHome', 8000); await sleep(1800);
     const r0 = await evalJs(`({ home: !!app.phoneHome?.shown?.(), type: app.wm.windows.get(app.wm.activeWindowId)?.type || null })`);
-    check('RED CONTROL: the base\'s boot — a RELOAD with a conversation on show lands on the first-screen page again (the owner: «每次刷新都是这个»)', go0 && w0 && r0.home === true, { go0, w0, r0 });
+    check('RED CONTROL: the base\'s boot — a RELOAD with a conversation on show lands on the first-screen page again (the owner: «每次刷新都是这个»)', gateOf(go0) && gateOf(w0) && r0.home === true, { go0, w0, r0 });
     await evalJs(`app.openInbox({ itemId: ${JSON.stringify(qTests.id)} })`);
     await waitFor(`!!document.querySelector('.iw-item .iw-title') && document.querySelector('.iw-item .iw-title').textContent.includes('第四个问题')`, 6000); await sleep(300);
     const pane = await evalJs(`({ strong: document.querySelectorAll('.iw-item .iw-title strong, .iw-item .iw-detail strong').length, title: document.querySelector('.iw-item .iw-title')?.textContent })`);
@@ -320,10 +320,10 @@ try {
     const b = await evalJs(BTN('mobile-nav-todos'));
     const bar = await evalJs(`(() => { const ids = ['mobile-nav-todos', 'mobile-nav-dest-tasks', 'mobile-nav-gear']; const y = Object.fromEntries(ids.map((k) => [k, Math.round(document.getElementById(k)?.getBoundingClientRect().top ?? -1)])); const gap = document.querySelector('#mobile-nav .mnav-gap')?.getBoundingClientRect(); return { y, gapBottom: gap ? Math.round(gap.bottom) : null }; })()`);
     await shot('duo-951-first-screen.png');
-    check(`① the bar's For you: shown, 44 × 44 inside the bar, after the gap and before Task Groups`, !!b && b.shown && b.w === 44 && b.h === 44 && b.l >= 895 && bar.y['mobile-nav-todos'] < bar.y['mobile-nav-dest-tasks'] && bar.gapBottom !== null && bar.y['mobile-nav-todos'] >= bar.gapBottom - 1, { b, bar });
-    check(`① …its badge SAYS the ${TOTAL} (one quiet segment — nothing loud) and its words never «Nothing waiting on you»`, sum(b) === TOTAL && /\bquiet\b/.test(JSON.stringify(b.segs)) && says(b.title, TOTAL), b);
+    check(`① the bar's For you: shown, 44 × 44 inside the bar, after the gap and before Task Groups`, !!b && gateOf(b.shown) && b.w === 44 && b.h === 44 && b.l >= 895 && bar.y['mobile-nav-todos'] < bar.y['mobile-nav-dest-tasks'] && bar.gapBottom !== null && bar.y['mobile-nav-todos'] >= bar.gapBottom - 1, { b, bar });
+    check(`① …its badge SAYS the ${TOTAL} (one quiet segment — nothing loud) and its words never «Nothing waiting on you»`, sum(b) === TOTAL && gateOf(/\bquiet\b/.test(JSON.stringify(b.segs))) && verdictOf(says(b.title, TOTAL)), b);
     const m = await evalJs(MARK(sids.payments));
-    check('① the payments row: ONE marker line «needs you · 6 · <its newest question>», the row\'s last line', m.mark && /^needs you · 6 · /.test(m.text) && m.text.includes(newestPay.text) && m.last, m);
+    check('① the payments row: ONE marker line «needs you · 6 · <its newest question>», the row\'s last line', gateOf(m.mark) && gateOf(/^needs you · 6 · /.test(m.text)) && gateOf(m.text.includes(newestPay.text)) && verdictOf(m.last), m);
     check('① …and NO chips: no inline question, no fold, no reply chips, no Reply button in any list row', (await evalJs(`document.querySelectorAll('#sidebar .ut-opt, #sidebar .ut-item, #sidebar .col-asks, #sidebar .ut-reply-btn').length`)) === 0 && m.chips === 0, m);
     check('① …the marker is a finger\'s target (≥ 44 px tall on touch)', m.h >= 44, m);
     const whole = await evalJs(`(() => { const L = document.querySelector('.sidebar-section').getBoundingClientRect(); return [...document.querySelectorAll('#sidebar .col-card')].filter((c) => { const r = c.getBoundingClientRect(); return r.top >= L.top - 0.5 && r.bottom <= L.bottom + 0.5; }).length; })()`);
@@ -333,11 +333,11 @@ try {
     const ok1 = await waitFor(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); return !!w && w._inbox.state.selected === ${JSON.stringify(newestPay.id)}; })()`, 8000);
     const iw = await evalJs(INBOX);
     await shot('duo-951-marker-tap.png');
-    check('① the marker\'s tap opens the For-you window IN the conversation column, scoped to payments, on its newest question', ok1 && iw && iw.scopeKey === payKey && iw.selected === newestPay.id && iw.rows === 6 && iw.l >= 321, iw);
+    check('① the marker\'s tap opens the For-you window IN the conversation column, scoped to payments, on its newest question', gateOf(ok1) && gateOf(iw) && iw.scopeKey === payKey && iw.selected === newestPay.id && iw.rows === 6 && iw.l >= 321, iw);
     await press('#mobile-nav-todos');
     const tray = await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); const r = p.getBoundingClientRect(); return { open: !p.classList.contains('hidden'), l: Math.round(r.left), r: Math.round(r.right), head: p.querySelector('.ut-head-sub')?.textContent || '' }; })()`);
     await shot('duo-951-tray.png');
-    check(`① the bar's For you opens the tray in the conversation column (never over the list or the bar), its head «${TOTAL} open»`, tray.open && tray.l >= 321 && tray.r <= 895 && tray.head === `${TOTAL} open`, tray);
+    check(`① the bar's For you opens the tray in the conversation column (never over the list or the bar), its head «${TOTAL} open»`, gateOf(tray.open) && tray.l >= 321 && tray.r <= 895 && tray.head === `${TOTAL} open`, tray);
     const z1 = await evalJs(SIZES);
     check('① THE TOUCH SCALE at 951: in the tray, the For-you window and every marker row — every target ≥ 44 × 44, every text ≥ 14 px', z1.roots >= 3 && z1.nSmall === 0 && z1.nTiny === 0, z1);
     await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden') || document.getElementById('mobile-nav-todos').click()`); await sleep(300);
@@ -349,15 +349,15 @@ try {
     await device(382, 580); await load();
     await waitFor(`document.documentElement.dataset.vc === 'compact'`, 8000); await sleep(500);
     const b = await evalJs(BTN('mobile-nav-todos'));
-    check(`② the top bar's For you says the ${TOTAL} (its title + one quiet segment)`, !!b && b.shown && sum(b) === TOTAL && /ut-has-items/.test(b.cls) && says(b.title, TOTAL), b);
+    check(`② the top bar's For you says the ${TOTAL} (its title + one quiet segment)`, !!b && gateOf(b.shown) && sum(b) === TOTAL && gateOf(/ut-has-items/.test(b.cls)) && verdictOf(says(b.title, TOTAL)), b);
     await evalJs(`(() => { if (!app.sidebar?.isOpen) document.getElementById('mobile-nav-menu').click(); return 1; })()`);
     await waitFor(`!!(app.sidebar?.isOpen) && !!([...document.querySelectorAll('.session-item-card')].find((x) => x._webuiId === ${JSON.stringify(sids.payments)} && x.offsetParent))`, 8000); await sleep(400);
     const m = await evalJs(MARK(sids.payments));
     await shot('phone-382-drawer.png');
-    check('② the drawer\'s payments row carries «needs you · 6 · …» (the base: 0 markers on 8 cards)', m.mark && /^needs you · 6 · /.test(m.text) && m.chips === 0, m);
+    check('② the drawer\'s payments row carries «needs you · 6 · …» (the base: 0 markers on 8 cards)', gateOf(m.mark) && gateOf(/^needs you · 6 · /.test(m.text)) && m.chips === 0, m);
     await press(`(() => [...document.querySelectorAll('.session-item-card')].find((x) => x._webuiId === ${JSON.stringify(sids.payments)} && x.offsetParent)?.querySelector(':scope > .ut-sess-mark'))()`);
     const ok2 = await waitFor(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); return !!w && w._inbox.state.scopeKey === ${JSON.stringify(payKey)}; })()`, 8000);
-    check('② …its tap opens the For-you window scoped to payments (the drawer steps aside)', ok2 && !(await evalJs('!!app.sidebar?.isOpen')), await evalJs(INBOX));
+    check('② …its tap opens the For-you window scoped to payments (the drawer steps aside)', gateOf(ok2) && !(await evalJs('!!app.sidebar?.isOpen')), await evalJs(INBOX));
     // the `__tests__/` question in the pane: verbatim
     await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); w._inbox.show({ itemId: ${JSON.stringify(qTests.id)} }); return 1; })()`);
     await waitFor(`!!document.querySelector('.iw-item .iw-title') && document.querySelector('.iw-item .iw-title').textContent.includes('第四个问题')`, 6000); await sleep(300);
@@ -372,7 +372,7 @@ try {
     await shot('phone-382-pane-eight.png');
     const z2 = await evalJs(SIZES);
     check('② THE TOUCH SCALE at 382: the For-you pane — every target ≥ 44 × 44 (the four verbs labelled, the chips, the reply box), every text ≥ 14 px', z2.roots >= 1 && z2.nSmall === 0 && z2.nTiny === 0, z2);
-    check('② the 8-option question shows 8 chips («Reply: A 三处都改» … «Reply: H 先开会讨论»), inside the phone\'s width', eight.length === 8 && eight[0].t === 'Reply: A 三处都改' && eight[7].t === 'Reply: H 先开会讨论' && eight.every((c) => c.right <= 382 && c.h >= 30), eight);
+    check('② the 8-option question shows 8 chips («Reply: A 三处都改» … «Reply: H 先开会讨论»), inside the phone\'s width', eight.length === 8 && eight[0].t === 'Reply: A 三处都改' && eight[7].t === 'Reply: H 先开会讨论' && verdictOf(eight.every((c) => c.right <= 382 && c.h >= 30)), eight);
     await press(`(() => [...document.querySelectorAll('.iw-item .iw-opt')][7])()`);
     let got = null;
     for (let i = 0; i < 40 && !got; i++) { const all = await api(); const it = [...all.open, ...all.resolved].find((x) => x.id === qEight.id); if (it && it.status !== 'open') got = it; else await sleep(150); }
@@ -385,7 +385,7 @@ try {
     await shot('phone-382-tray.png');
     check('② THE TOUCH SCALE at 382: the sheet — its folded rows, the open one (the question 16 px, the «detail ▾» row, the chips, the labelled verbs) and its chrome: every target ≥ 44 × 44, every text ≥ 14 px', z3.roots >= 1 && z3.nSmall === 0 && z3.nTiny === 0 && (await evalJs(`document.querySelectorAll('#user-todos-popup .ut-item.ut-open').length`)) === 1, z3);
     await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden') || document.getElementById('taskbar-user-todos').click()`); await sleep(300);
-    check('② …a chip ANSWERS: the API item resolves by the reply with that label («H 先开会讨论»)', !!got && got.status === 'done' && got.resolvedBy === 'reply' && got.reply && got.reply.text === 'H 先开会讨论', got && { status: got.status, by: got.resolvedBy, reply: got.reply });
+    check('② …a chip ANSWERS: the API item resolves by the reply with that label («H 先开会讨论»)', !!got && got.status === 'done' && got.resolvedBy === 'reply' && gateOf(got.reply) && got.reply.text === 'H 先开会讨论', got && { status: got.status, by: got.resolvedBy, reply: got.reply });
   } catch (e) { fail++; console.log('  ✗ ② threw: ' + (e?.message || e)); }
 
   lap('the leg starts');
@@ -396,12 +396,12 @@ try {
     await P.waitFor(`document.documentElement.dataset.vc === 'desktop'`, 8000); await sleep(500);
     const n1 = (await openOf()).length;
     const b = await evalJs(BTN('taskbar-user-todos'));
-    check(`③ the taskbar's For you says the ${n1} still open (its title + segments)`, !!b && b.shown && sum(b) === n1 && says(b.title, n1), b);
+    check(`③ the taskbar's For you says the ${n1} still open (its title + segments)`, !!b && gateOf(b.shown) && sum(b) === n1 && verdictOf(says(b.title, n1)), b);
     await evalJs(`(() => { app.sidebar?.toggle?.(true); return 1; })()`);
     await P.waitFor(`!!([...document.querySelectorAll('.session-item-card')].find((x) => x._webuiId === ${JSON.stringify(sids.payments)} && x.offsetParent))`, 8000); await sleep(300);
     const m = await evalJs(MARK(sids.payments));
     await P.shot('desk-1280-sidebar.png');
-    check('③ the sidebar\'s payments row carries «needs you · 5 · …» (one answered on the phone)', m.mark && /^needs you · 5 · /.test(m.text), m);
+    check('③ the sidebar\'s payments row carries «needs you · 5 · …» (one answered on the phone)', gateOf(m.mark) && verdictOf(/^needs you · 5 · /.test(m.text)), m);
     // a second page
     const t2 = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
     const P2 = await connect(t2);
@@ -419,13 +419,13 @@ try {
     const dt = Date.now() - t0;
     const st1 = [...(await api()).resolved, ...(await api()).open].find((x) => x.id === target);
     await P.shot('desk-1280-done-toast.png');
-    check('③ ✓ on a tray row: the item is done and ONE toast says «Marked done» with Undo (the base: no toast — P3-2)', toast && st1 && st1.status === 'done', { toast, status: st1 && st1.status });
-    check(`③ TWO PAGES: the other page's badge follows the resolve within 3 s (${before2} → ${before2 - 1}, ${dt} ms)`, p2ok && dt <= 3500, { p2ok, dt });
+    check('③ ✓ on a tray row: the item is done and ONE toast says «Marked done» with Undo (the base: no toast — P3-2)', gateOf(toast) && gateOf(st1) && st1.status === 'done', { toast, status: st1 && st1.status });
+    check(`③ TWO PAGES: the other page's badge follows the resolve within 3 s (${before2} → ${before2 - 1}, ${dt} ms)`, gateOf(p2ok) && dt <= 3500, { p2ok, dt });
     await P.press(`(() => [...document.querySelectorAll('.global-toast .global-toast-action')].find((a) => a.textContent === 'Undo'))()`, { touch: false });
     let back = null;
     for (let i = 0; i < 30 && !back; i++) { const it = (await api()).open.find((x) => x.id === target); if (it) back = it; else await sleep(150); }
     check('③ …Undo restores it: the item is open again (the ↺ road)', !!back && back.status === 'open', back && back.status);
-    check('③ …and the other page counts it back', await P2.waitFor(`((${BTN('taskbar-user-todos')}).segs.filter((s) => s.c !== 'ut-seg-notice').reduce((n, s) => n + Number(s.n || 0), 0)) === ${before2}`, 3000));
+    check('③ …and the other page counts it back', verdictOf(await P2.waitFor(`((${BTN('taskbar-user-todos')}).segs.filter((s) => s.c !== 'ut-seg-notice').reduce((n, s) => n + Number(s.n || 0), 0)) === ${before2}`, 3000)));
     // a tray row's body tap opens it in place (P3-8)
     if (await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)) await P.press('#taskbar-user-todos', { touch: false });
     await P.waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden')`, 4000);
@@ -434,7 +434,7 @@ try {
     await P.press(`#user-todos-popup .ut-item[data-id="${rowId}"] .ut-text`, { touch: false });
     const exp = await evalJs(`(() => { const r = document.querySelector('#user-todos-popup .ut-item[data-id="${rowId}"]'); const tx = r?.querySelector('.ut-text'); return { open: !document.getElementById('user-todos-popup').classList.contains('hidden'), row: !!r && r.classList.contains('ut-open'), clamp: tx ? getComputedStyle(tx).webkitLineClamp : null, detail: !!r?.querySelector('.ut-detail-exp[open]'), active: app.wm.activeWindowId }; })()`);
     await P.shot('desk-1280-row-open.png');
-    check('③ a tray row\'s body tap opens it IN PLACE — the whole question, its detail open; the tray stays, nothing navigates (P3-8)', exp.open && exp.row && exp.clamp !== '2' && exp.detail && exp.active === act0, exp);
+    check('③ a tray row\'s body tap opens it IN PLACE — the whole question, its detail open; the tray stays, nothing navigates (P3-8)', gateOf(exp.open) && gateOf(exp.row) && exp.clamp !== '2' && gateOf(exp.detail) && exp.active === act0, exp);
     // the tray head's ⤢ widens a scoped window to All sessions (P3-7)
     await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); if (w) w._inbox.show({ sessionKey: ${JSON.stringify(payKey)} }); else app.openInbox({ sessionKey: ${JSON.stringify(payKey)} }); return 1; })()`);
     await P.waitFor(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); return !!w && w._inbox.state.scopeKey === ${JSON.stringify(payKey)}; })()`, 4000);
@@ -443,7 +443,7 @@ try {
     await P.press('#user-todos-popup .ut-tabs > .ut-open-win', { touch: false });
     await sleep(500);
     const sc = await evalJs(INBOX);
-    check('③ the tray head\'s ⤢ opens the window on ALL sessions — a window scoped to payments is widened, never inherited (P3-7)', !!sc && sc.scopeKey === null && sc.active, sc);
+    check('③ the tray head\'s ⤢ opens the window on ALL sessions — a window scoped to payments is widened, never inherited (P3-7)', !!sc && sc.scopeKey === null && verdictOf(sc.active), sc);
     P2.close(); try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t2.id}`); } catch { }
   } catch (e) { fail++; console.log('  ✗ ③ threw: ' + (e?.message || e)); }
   lap('the leg starts');
@@ -456,18 +456,18 @@ try {
     await load();
     await waitFor(`document.documentElement.dataset.vc === 'compact' && !!app.phoneHome?.shown?.() && document.querySelectorAll('#phone-home .ut-bands .ut-item').length >= 6`, 10000); await sleep(400);
     const h0 = await evalJs(HOME);
-    check('④ a COLD open with rows ⇒ the first-screen page (the bar says «For you»)', h0.home && h0.title === 'For you', h0);
+    check('④ a COLD open with rows ⇒ the first-screen page (the bar says «For you»)', gateOf(h0.home) && h0.title === 'For you', h0);
     const FOLD = `[...document.querySelectorAll('#phone-home .ut-bands .ut-item')].slice(0, 6).map((r) => { const vis = (e) => { const cs = getComputedStyle(e), b = e.getBoundingClientRect(); return cs.display !== 'none' && cs.visibility !== 'hidden' && b.width > 0 && b.height > 0; }; const lh = (e) => parseFloat(getComputedStyle(e).lineHeight) || parseFloat(getComputedStyle(e).fontSize) * 1.4; const tx = r.querySelector(':scope > .ut-body > .ut-text'), me = r.querySelector(':scope > .ut-body > .ut-meta'), go = r.querySelector(':scope > .ut-body > .ut-go'); const g = go ? go.getBoundingClientRect() : null, rr = r.getBoundingClientRect(); return { id: r.dataset.id, open: r.classList.contains('ut-open'), h: Math.round(rr.height), fs: parseFloat(getComputedStyle(tx).fontSize), lines: Math.round(tx.getBoundingClientRect().height / lh(tx)), metaLines: Math.round(me.getBoundingClientRect().height / lh(me)), metaFs: parseFloat(getComputedStyle(me).fontSize), acts: [...r.querySelectorAll('button, [role=button], summary, a, .fy-link, .ut-sess, .ut-opt, .ut-art')].filter((e) => vis(e) && getComputedStyle(e).pointerEvents !== 'none').map((e) => e.className.split(' ')[0]), door: g ? { w: Math.round(g.width), h: Math.round(g.height), inside: g.right <= rr.right + 0.5 && g.top >= rr.top - 0.5 && g.bottom <= rr.bottom + 0.5, label: go.dataset.label, aria: go.getAttribute('aria-label'), svg: !!go.querySelector('svg') } : null }; })`;
     const f0 = await evalJs(FOLD);
     await shot('phone-382-home-folded.png');
-    check('④ ONE ROW SHAPE: every row FOLDED — its question at 16 px in ONE line, ONE 14 px meta line, nothing tappable inside it but its trailing door', f0.length === 6 && f0.every((r) => !r.open && r.fs >= 16 && r.lines === 1 && r.metaLines === 1 && r.metaFs >= 14 && r.acts.length === 1 && r.acts[0] === 'ut-go'), f0);
-    check('④ …the trailing door: an SVG icon with its word («Chat») and its name («Go to this session»), ≥ 44 × 44, inside the row\'s right edge', f0.every((r) => r.door && r.door.svg && r.door.label === 'Chat' && r.door.aria === 'Go to this session' && r.door.w >= 44 && r.door.h >= 44 && r.door.inside), f0.map((r) => r.door));
+    check('④ ONE ROW SHAPE: every row FOLDED — its question at 16 px in ONE line, ONE 14 px meta line, nothing tappable inside it but its trailing door', f0.length === 6 && verdictOf(f0.every((r) => !r.open && r.fs >= 16 && r.lines === 1 && r.metaLines === 1 && r.metaFs >= 14 && r.acts.length === 1 && r.acts[0] === 'ut-go')), f0);
+    check('④ …the trailing door: an SVG icon with its word («Chat») and its name («Go to this session»), ≥ 44 × 44, inside the row\'s right edge', verdictOf(f0.every((r) => r.door && r.door.svg && r.door.label === 'Chat' && r.door.aria === 'Go to this session' && r.door.w >= 44 && r.door.h >= 44 && r.door.inside)), f0.map((r) => r.door));
     const [r1, r2] = f0;
     const OPEN = (id) => `(() => { const r = document.querySelector('#phone-home .ut-item[data-id="${id}"]'); return { open: !!r && r.classList.contains('ut-open'), verbs: r ? [...r.querySelectorAll(':scope > .ut-body > .ut-actions > .ut-act')].filter((b) => b.getBoundingClientRect().height >= 44).map((b) => b.dataset.label) : [], home: !!app.phoneHome.shown(), active: app.wm.activeWindowId }; })()`;
     const act0 = await evalJs('app.wm.activeWindowId');
     await press(`#phone-home .ut-item[data-id="${r1.id}"] .ut-text`);
     const o1 = await evalJs(OPEN(r1.id));
-    check('④ a tap on the question opens the row IN PLACE — its verbs shown at 44 px with their words (Reply · Open · Mark done · Dismiss), the page stays', o1.open && o1.home && o1.active === act0 && ['Reply', 'Open', 'Mark done', 'Dismiss'].every((l) => o1.verbs.includes(l)), o1);
+    check('④ a tap on the question opens the row IN PLACE — its verbs shown at 44 px with their words (Reply · Open · Mark done · Dismiss), the page stays', gateOf(o1.open) && gateOf(o1.home) && o1.active === act0 && verdictOf(['Reply', 'Open', 'Mark done', 'Dismiss'].every((l) => o1.verbs.includes(l))), o1);
     await press(`#phone-home .ut-item[data-id="${r2.id}"] .ut-text`);
     const o2 = await evalJs(`[...document.querySelectorAll('#phone-home .ut-item.ut-open')].map((r) => r.dataset.id)`);
     await shot('phone-382-home-open.png');
@@ -482,9 +482,9 @@ try {
     for (let i = 0; i < 40; i++) { if ((await openOf()).length === nOpen) break; await sleep(150); }
     await press(`#phone-home .ut-item[data-id="${r1.id}"] .ut-go`);
     const w1 = await waitFor(`!app.phoneHome.shown() && app.wm.windows.get(app.wm.activeWindowId)?.type === 'chat'`, 8000);
-    check('④ the trailing door opens the row\'s conversation in ONE tap — the page steps aside (decision 5\'s jump)', w1, await evalJs(HOME));
+    check('④ the trailing door opens the row\'s conversation in ONE tap — the page steps aside (decision 5\'s jump)', verdictOf(w1), await evalJs(HOME));
     await evalJs('history.back(); true');
-    check('④ …and back returns to the page (mobile-back.js: HOME = the page)', await waitFor(`!!app.phoneHome.shown()`, 5000), await evalJs(HOME));
+    check('④ …and back returns to the page (mobile-back.js: HOME = the page)', verdictOf(await waitFor(`!!app.phoneHome.shown()`, 5000)), await evalJs(HOME));
     await press(`#phone-home .ut-item[data-id="${r1.id}"] .ut-go`);
     await waitFor(`!app.phoneHome.shown() && app.wm.windows.get(app.wm.activeWindowId)?.type === 'chat'`, 8000);
     const win1 = await evalJs('app.wm.activeWindowId');
@@ -493,24 +493,24 @@ try {
     await load(); await waitFor('!!app.phoneHome', 8000); await sleep(1800);
     const h2 = await evalJs(HOME);
     await shot('phone-382-reload.png');
-    check('④ a RELOAD with a conversation on show keeps it — the page does not take the screen (the owner: «每次刷新都是这个»; ⓪: the base\'s boot does)', saved1 && !h2.home && h2.type === 'chat' && h2.active === win1, { saved1, h2, win1 });
+    check('④ a RELOAD with a conversation on show keeps it — the page does not take the screen (the owner: «每次刷新都是这个»; ⓪: the base\'s boot does)', gateOf(saved1) && !h2.home && h2.type === 'chat' && h2.active === win1, { saved1, h2, win1 });
     await press('#mobile-nav-todos');
     const b1 = await waitFor(`!!app.phoneHome.shown()`, 4000);
     const sheet1 = await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`);
     await press('#mobile-nav-todos');
     const b2 = await waitFor(`!app.phoneHome.shown()`, 4000);
     const h3 = await evalJs(HOME);
-    check('④ the top bar\'s For you OPENS THE PAGE (never the sheet too — one surface) and toggles it: badge ⇒ the page, badge again ⇒ the conversation it covered', b1 && !sheet1 && b2 && h3.type === 'chat' && h3.active === h2.active, { b1, sheet1, b2, h3 });
+    check('④ the top bar\'s For you OPENS THE PAGE (never the sheet too — one surface) and toggles it: badge ⇒ the page, badge again ⇒ the conversation it covered', gateOf(b1) && !sheet1 && gateOf(b2) && h3.type === 'chat' && h3.active === h2.active, { b1, sheet1, b2, h3 });
     await press('#mobile-nav-menu');
     await waitFor('!!app.sidebar?.isOpen', 4000); await sleep(400);
     const nOpen2 = (await openOf()).length;
     const dr = await evalJs(`(() => { const b = document.getElementById('drawer-foryou'); if (!b) return null; const r = b.getBoundingClientRect(); return { text: b.textContent.trim(), first: b.parentElement?.firstElementChild === b, h: Math.round(r.height), shown: getComputedStyle(b).display !== 'none' && r.width > 0, svg: !!b.querySelector('svg') }; })()`);
     await shot('phone-382-drawer-row.png');
-    check(`④ the ☰ drawer's FIRST row says «For you · ${nOpen2}» (the honest count) — a 44 px row with the For-you glyph`, !!dr && dr.shown && dr.first && dr.svg && dr.text === `For you · ${nOpen2}` && dr.h >= 44, dr);
+    check(`④ the ☰ drawer's FIRST row says «For you · ${nOpen2}» (the honest count) — a 44 px row with the For-you glyph`, !!dr && gateOf(dr.shown) && gateOf(dr.first) && gateOf(dr.svg) && dr.text === `For you · ${nOpen2}` && dr.h >= 44, dr);
     await press('#drawer-foryou');
-    check('④ …its tap opens the page (the drawer steps aside)', await waitFor(`!!app.phoneHome.shown() && !app.sidebar.isOpen`, 4000), await evalJs(HOME));
+    check('④ …its tap opens the page (the drawer steps aside)', verdictOf(await waitFor(`!!app.phoneHome.shown() && !app.sidebar.isOpen`, 4000)), await evalJs(HOME));
     await press('#mobile-nav-title');
-    check('④ the page\'s title tap still lists the windows (its switcher)', await waitFor(`!!document.querySelector('.mobile-win-switcher')`, 3000));
+    check('④ the page\'s title tap still lists the windows (its switcher)', verdictOf(await waitFor(`!!document.querySelector('.mobile-win-switcher')`, 3000)));
     await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); 1`); await sleep(200);
     const z4 = await evalJs(SIZES);
     check('④ THE TOUCH SCALE on the page at 382: every target ≥ 44 × 44 (the folded rows, their doors, the bands\' heads, the 文件 card), every text ≥ 14 px', z4.roots >= 1 && z4.nSmall === 0 && z4.nTiny === 0, z4);
@@ -561,7 +561,7 @@ try {
     const named = await evalJs(`(() => { const sb = app.sidebar; const k = ${JSON.stringify(tKey)}; const s = (sb?._allSessions || []).find((x) => (x.webuiId && 'webui:' + x.webuiId === k) || (() => { try { return sb._getSessionStateKey(x) === k; } catch { return false; } })()); if (!s) return false; sb.setCustomName(s, ${JSON.stringify(LONG)}); return true; })()`);
     await sleep(1500); // the user state's push
     const shown = await cold(375, 812, LONG);
-    check('⑤ setup: a shown one-line question and a shown long one, each with a detail; the short one\'s conversation renamed to a long name the page shows', !!tgt && !!tgt2 && named && shown, { tgt, tgt2, tKey, named, shown });
+    check('⑤ setup: a shown one-line question and a shown long one, each with a detail; the short one\'s conversation renamed to a long name the page shows', !!tgt && !!tgt2 && gateOf(named) && verdictOf(shown), { tgt, tgt2, tKey, named, shown });
     const openRow = async (root, id = tgt) => { await press(`${root} .ut-item[data-id="${id}"] .ut-text`); return waitFor(`!!document.querySelector('${root} .ut-item.ut-open[data-id="${id}"]')`, 3000); };
     if (!R2_BUNDLE || !R2_CSS) check('⑤ the round-2 RED CONTROL builds from this source (its anchors are this commit\'s lines)', false, R2_ERR);
     else {
@@ -574,9 +574,9 @@ try {
         await shot('red-r2-375-home-open.png');
         // ONE ORDER (主开发 2026-11-13: the question, then the OPTIONS, then the detail): the part under the question is the
         // options row when the item has options — the old shapes' door covers THAT part, else the «detail ▾» box
-        check('⑤ RED CONTROL (the first commit\'s shapes, 375 page): the open row\'s «Chat» door covers the part under its question (the options, else the «detail ▾» box)', or && !!gr && ((gr.hitDetail && !gr.below) || gr.others.length > 0), gr);
-        check('⑤ RED CONTROL: …its meta wraps the age ALONE — a line starts with «·»', mr.some((m) => m.open && m.starts.includes('·')), mr.filter((m) => m.open));
-        check('⑤ RED CONTROL: «N more — expand» sits ABOVE the rows it reveals', fr.length > 0 && fr.some((f) => !f.after && f.firstTop !== null && f.top < f.firstTop), fr);
+        check('⑤ RED CONTROL (the first commit\'s shapes, 375 page): the open row\'s «Chat» door covers the part under its question (the options, else the «detail ▾» box)', gateOf(or) && !!gr && ((gateOf(gr.hitDetail) && !gr.below) || gr.others.length > 0), gr);
+        check('⑤ RED CONTROL: …its meta wraps the age ALONE — a line starts with «·»', verdictOf(mr.some((m) => m.open && m.starts.includes('·'))), mr.filter((m) => m.open));
+        check('⑤ RED CONTROL: «N more — expand» sits ABOVE the rows it reveals', fr.length > 0 && verdictOf(fr.some((f) => !f.after && f.firstTop !== null && f.top < f.firstTop)), fr);
       } finally { mutant = null; }
     }
     for (const [w, h] of [[375, 812], [382, 580]]) {
@@ -585,14 +585,14 @@ try {
       const oh = await openRow('#phone-home');
       const gh = await evalJs(GEO('#phone-home', tgt)), mh = await evalJs(META('#phone-home')), zh = await evalJs(SIZES);
       await shot(`r2-${w}-home-open.png`);
-      check(`⑤ ${w}×${h} the page: the open row's door keeps the QUESTION LINE — centred on its first line, the question clear of it; the «detail ▾» box and every other part start BELOW its bottom edge (never intersecting)`, up && oh && !!gh && gh.open && !gh.hitDetail && gh.below && gh.centred && gh.clear && gh.others.length === 0, gh);
-      check(`⑤ ${w}×${h} the page: no meta line starts with «·» — the open row's long name wraps INSIDE itself, the age glued to it`, mh.length >= 6 && mh.every((m) => !m.starts.includes('·')) && mh.some((m) => m.open && m.starts.length >= 2), mh.filter((m) => m.open || m.starts.length > 1));
-      check(`⑤ ${w}×${h} the page: «N more — expand» is a full-width 44 px row AFTER its band's shown rows`, fh.length > 0 && fh.every((f) => f.after && f.h >= 44 && f.full), fh);
+      check(`⑤ ${w}×${h} the page: the open row's door keeps the QUESTION LINE — centred on its first line, the question clear of it; the «detail ▾» box and every other part start BELOW its bottom edge (never intersecting)`, gateOf(up) && gateOf(oh) && !!gh && gateOf(gh.open) && !gh.hitDetail && gateOf(gh.below) && gateOf(gh.centred) && gateOf(gh.clear) && gh.others.length === 0, gh);
+      check(`⑤ ${w}×${h} the page: no meta line starts with «·» — the open row's long name wraps INSIDE itself, the age glued to it`, mh.length >= 6 && gateOf(mh.every((m) => !m.starts.includes('·'))) && verdictOf(mh.some((m) => m.open && m.starts.length >= 2)), mh.filter((m) => m.open || m.starts.length > 1));
+      check(`⑤ ${w}×${h} the page: «N more — expand» is a full-width 44 px row AFTER its band's shown rows`, fh.length > 0 && verdictOf(fh.every((f) => f.after && f.h >= 44 && f.full)), fh);
       check(`⑤ ${w}×${h} the page: the touch scale holds with the row open (every target ≥ 44 × 44 — the name's door too — every text ≥ 14 px)`, zh.roots >= 1 && zh.nSmall === 0 && zh.nTiny === 0, zh);
       const o2 = await openRow('#phone-home', tgt2);
       const g2 = await evalJs(GEO('#phone-home', tgt2));
       await shot(`r2-${w}-home-open-long.png`);
-      check(`⑤ ${w}×${h} the page: a LONG question open — the door centred on its first line, the rest of the question beside it, the «detail ▾» box below the door`, o2 && !!g2 && g2.open && !g2.hitDetail && g2.below && g2.centred && g2.clear && g2.others.length === 0, g2);
+      check(`⑤ ${w}×${h} the page: a LONG question open — the door centred on its first line, the rest of the question beside it, the «detail ▾» box below the door`, gateOf(o2) && !!g2 && gateOf(g2.open) && !g2.hitDetail && gateOf(g2.below) && gateOf(g2.centred) && gateOf(g2.clear) && g2.others.length === 0, g2);
       // THE SHEET — the same row shape
       await evalJs(`document.getElementById('taskbar-user-todos').click(); 1`);
       const ss = await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden') && !!document.querySelector('#user-todos-popup .ut-bands .ut-item[data-id="${tgt}"]')`, 6000); await sleep(400);
@@ -600,7 +600,7 @@ try {
       const os = await openRow('#user-todos-popup');
       const gs = await evalJs(GEO('#user-todos-popup', tgt)), ms = await evalJs(META('#user-todos-popup')), zs = await evalJs(SIZES);
       await shot(`r2-${w}-sheet-open.png`);
-      check(`⑤ ${w}×${h} the sheet: the same — the door on the question line, the «detail ▾» box below it, no meta line starting with «·», the fold after the rows`, ss && os && !!gs && gs.open && !gs.hitDetail && gs.below && gs.centred && gs.clear && gs.others.length === 0 && ms.every((m) => !m.starts.includes('·')) && fs2.length > 0 && fs2.every((f) => f.after && f.h >= 44 && f.full), { gs, ms: ms.filter((m) => m.open), fs2 });
+      check(`⑤ ${w}×${h} the sheet: the same — the door on the question line, the «detail ▾» box below it, no meta line starting with «·», the fold after the rows`, gateOf(ss) && gateOf(os) && !!gs && gateOf(gs.open) && !gs.hitDetail && gateOf(gs.below) && gateOf(gs.centred) && gateOf(gs.clear) && gs.others.length === 0 && gateOf(ms.every((m) => !m.starts.includes('·'))) && fs2.length > 0 && verdictOf(fs2.every((f) => f.after && f.h >= 44 && f.full)), { gs, ms: ms.filter((m) => m.open), fs2 });
       check(`⑤ ${w}×${h} the sheet: the touch scale holds with the row open`, zs.roots >= 1 && zs.nSmall === 0 && zs.nTiny === 0, zs);
       await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden') || document.getElementById('taskbar-user-todos').click(); 1`); await sleep(300);
     }
@@ -622,7 +622,7 @@ try {
     const kept = !!e1 && e0.rows.every((r, k) => e1.rows[k] && e1.rows[k].id === r.id && Math.abs(e1.rows[k].t - r.t) <= 0.5);
     const lastB = e0 ? e0.rows[e0.rows.length - 1].b : 0;
     const below = !!e1 && e1.rows.slice(e0.rows.length).every((r) => r.t >= lastB - 0.5) && e1.fold.t >= e1.rows[e1.rows.length - 1].b - 0.5;
-    check(`⑤ the fold's tap at 375: the revealed rows appear BELOW the six (${e1 ? e1.rows.length - e0.rows.length : 0} more), the six keep their places, the fold moves after the last`, grew && kept && below, { e0: e0 && { n: e0.rows.length, fold: e0.fold }, e1: e1 && { n: e1.rows.length, fold: e1.fold, first: e1.rows.slice(0, 7).map((r) => [r.id, Math.round(r.t)]) } });
+    check(`⑤ the fold's tap at 375: the revealed rows appear BELOW the six (${e1 ? e1.rows.length - e0.rows.length : 0} more), the six keep their places, the fold moves after the last`, gateOf(grew) && gateOf(kept) && verdictOf(below), { e0: e0 && { n: e0.rows.length, fold: e0.fold }, e1: e1 && { n: e1.rows.length, fold: e1.fold, first: e1.rows.slice(0, 7).map((r) => [r.id, Math.round(r.t)]) } });
   } catch (e) { fail++; console.log('  ✗ ⑤ threw: ' + (e?.message || e)); }
   lap('the leg starts');
   console.log('⑥ THE ROUND-2 ADDENDUM: an agent\'s numbered PLAN draws no chips (the Reply box stays); a RESOLVED row goes to its conversation');
@@ -630,7 +630,7 @@ try {
     const [planQ] = FIX.plan;
     { const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); await new Promise((r) => ws.on('open', r)); ws.send(JSON.stringify({ type: 'chat-input', sessionId: sids.logs, text: 'logs: file your plan' })); await sleep(300); ws.close(); }
     let plan = null; for (let i = 0; i < 60 && !plan; i++) { plan = (await openOf()).find((x) => x.text === planQ) || null; if (!plan) await sleep(250); }
-    check('⑥ setup: the logs conversation filed its PLAN through the agent route (a plain ask: options=null, a three-step detail)', !!plan && plan.options == null && /^1\. .+\n2\. .+\n3\. /.test(plan.detail || ''), plan && { options: plan.options, detail: plan.detail });
+    check('⑥ setup: the logs conversation filed its PLAN through the agent route (a plain ask: options=null, a three-step detail)', !!plan && plan.options == null && verdictOf(/^1\. .+\n2\. .+\n3\. /.test(plan.detail || '')), plan && { options: plan.options, detail: plan.detail });
     const PLANROW = (root) => `(() => { const r = document.querySelector('${root} .ut-item[data-id="${plan.id}"]'); if (!r) return null; return { open: r.classList.contains('ut-open'), chips: r.querySelectorAll('.ut-opt').length, reply: !!r.querySelector('.ut-reply-btn'), box: !!r.querySelector('.ut-reply textarea') }; })()`;
     const planHome = async () => { await device(375, 812); await evalJs('sessionStorage.clear(); 1'); await load(); await waitFor(`!!app.phoneHome?.shown?.() && !!document.querySelector('#phone-home .ut-item[data-id="${plan.id}"]')`, 12000); await sleep(400); await press(`#phone-home .ut-item[data-id="${plan.id}"] .ut-text`); await waitFor(`!!document.querySelector('#phone-home .ut-item.ut-open[data-id="${plan.id}"]')`, 3000); };
     // the jump landed: the tray stepped aside and the conversation's chat window is the active one (its id, else its folder in the title)
@@ -656,7 +656,7 @@ try {
         await shot('red-r2-375-plan.png');
         check('⑥ RED CONTROL (the first commit\'s rule): the plan\'s three steps are drawn as reply CHIPS — a tap would post a fragment of the plan as the person\'s reply', !!pr && pr.chips === 3, pr);
         const rc = await resolvedClick();
-        check('⑥ RED CONTROL: a resolved tray row\'s body click on a mouse goes nowhere (it toggles a row with nothing to open)', rc.kept && !rc.went, rc);
+        check('⑥ RED CONTROL: a resolved tray row\'s body click on a mouse goes nowhere (it toggles a row with nothing to open)', gateOf(rc.kept) && !rc.went, rc);
       } finally { mutant = null; }
     }
     await planHome();
@@ -665,14 +665,14 @@ try {
     await waitFor(`!!document.querySelector('#phone-home .ut-item[data-id="${plan.id}"] .ut-reply textarea')`, 3000);
     const p2 = await evalJs(PLANROW('#phone-home'));
     await shot('r2-375-plan.png');
-    check('⑥ the page at 375: the plan row open draws NO chips and keeps its Reply — the box opens, the person types', !!p1 && p1.open && p1.chips === 0 && p1.reply && !!p2 && p2.box, { p1, p2 });
+    check('⑥ the page at 375: the plan row open draws NO chips and keeps its Reply — the box opens, the person types', !!p1 && gateOf(p1.open) && p1.chips === 0 && gateOf(p1.reply) && !!p2 && verdictOf(p2.box), { p1, p2 });
     await evalJs(`app.openInbox({ itemId: ${JSON.stringify(plan.id)} })`);
     await waitFor(`!!document.querySelector('.iw-item .iw-title') && document.querySelector('.iw-item .iw-title').textContent === ${JSON.stringify(planQ)}`, 6000); await sleep(300);
     const pw = await evalJs(`({ chips: document.querySelectorAll('.iw-item .iw-opt').length, box: !!document.querySelector('.iw-item .iw-reply-input') })`);
     await shot('r2-375-plan-window.png');
-    check('⑥ …and the For-you window\'s pane: no chips, its reply box', pw.chips === 0 && pw.box, pw);
+    check('⑥ …and the For-you window\'s pane: no chips, its reply box', pw.chips === 0 && verdictOf(pw.box), pw);
     const rf = await resolvedClick();
-    check('⑥ a RESOLVED tray row (kept in its band slot): a click on its body on a mouse goes to its conversation, as the base did', rf.kept && rf.went, rf);
+    check('⑥ a RESOLVED tray row (kept in its band slot): a click on its body on a mouse goes to its conversation, as the base did', gateOf(rf.kept) && verdictOf(rf.went), rf);
     // touch: the same resolved row keeps its «Chat» door
     await device(382, 580); await evalJs('sessionStorage.clear(); 1'); await load();
     await evalJs(`document.getElementById('taskbar-user-todos').click(); 1`);
@@ -685,7 +685,7 @@ try {
     await shot('r2-382-resolved-door.png');
     if (door) await press(`#user-todos-popup .ut-item[data-id="${plan.id}"] .ut-go`);
     const went2 = !!door && await waitFor(onConv(sids.logs, path.join(WORK, 'logs')), 4000);
-    check('⑥ touch at 382: the resolved row keeps its «Chat» door (≥ 44 × 44) and the door goes to its conversation', kept2 && !!door && door.shown && door.w >= 44 && door.h >= 44 && door.label === 'Chat' && went2, { kept2, door, went2 });
+    check('⑥ touch at 382: the resolved row keeps its «Chat» door (≥ 44 × 44) and the door goes to its conversation', gateOf(kept2) && !!door && gateOf(door.shown) && door.w >= 44 && door.h >= 44 && door.label === 'Chat' && verdictOf(went2), { kept2, door, went2 });
   } catch (e) { fail++; console.log('  ✗ ⑥ threw: ' + (e?.message || e)); }
   check('no page error over the legs', pageErrors.length === 0, pageErrors.slice(0, 3));
 
@@ -694,4 +694,4 @@ try {
 }
 console.log(`  (shots: ${SHOTS})`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

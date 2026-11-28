@@ -41,7 +41,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUT = mutantCopies('toolbar-fold', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : ''}`); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -146,7 +146,7 @@ const judgeReal = (M) => {
   const { bad, states } = judgeReal(L);
   const folded = states.filter((s) => s.v.overflow.length).length, compacted = states.filter((s) => s.v.compact.length).length;
   ok(bad.length === 0, `every one of ${states.length} measured states fits (${compacted} with glyphs, ${folded} with a fold) and the hand-checked rows hold (${bad.length} wrong)`, bad.slice(0, 3));
-  ok(folded >= 2 && compacted >= 20 && states.some((s) => !s.v.compact.length), `the table exercises all three rungs (full ${states.filter((s) => !s.v.compact.length && !s.v.overflow.length).length} / glyphs ${compacted} / folded ${folded})`);
+  ok(folded >= 2 && compacted >= 20 && verdictOf(states.some((s) => !s.v.compact.length)), `the table exercises all three rungs (full ${states.filter((s) => !s.v.compact.length && !s.v.overflow.length).length} / glyphs ${compacted} / folded ${folded})`);
 }
 
 // ── §3 the seeded walk ──
@@ -257,13 +257,13 @@ const libTexts = Object.fromEntries(fs.readdirSync(path.join(repo, 'src/lib')).f
   const rows = Object.entries(TM.TOOLBAR_ITEMS).filter(([, r]) => r.priority > 0);
   const dead = rows.filter(([, r]) => !r.submenu && !(r.command && registered.has(r.command)));
   ok(rows.length >= 8 && dead.length === 0, `every row that can FOLD names a registered command (or is a submenu) — its ⋯ row runs it (${rows.length} rows; ${dead.map(([k, r]) => `${k}→${r.command}`).join(', ') || 'none dead'})`);
-  ok(rows.every(([, r]) => r.submenu || (r.compact && r.label)) && Object.entries(TM.TOOLBAR_ITEMS).filter(([, r]) => r.live).every(([, r]) => r.priority === 0 && !r.compact), 'every folding button has a compact form and words; a live-measured row never folds and never compacts');
+  ok(gateOf(rows.every(([, r]) => r.submenu || (r.compact && r.label))) && verdictOf(Object.entries(TM.TOOLBAR_ITEMS).filter(([, r]) => r.live).every(([, r]) => r.priority === 0 && !r.compact)), 'every folding button has a compact form and words; a live-measured row never folds and never compacts');
   const P = (k) => TM.TOOLBAR_ITEMS[k].priority;
   ok(P('btn-new-session') < P('btn-terminal') && P('btn-terminal') === P('btn-file-explorer') && P('btn-file-explorer') < P('btn-browser') && P('btn-browser') === P('btn-desktop-apps') && P('btn-desktop-apps') < P('btn-desktop') && P('btn-desktop') < P('btn-presets') && P('layout-presets') === P('btn-desktop'), 'the priorities: New Session folds last, then Terminal = Files, Web view = Apps, Desktop = the layout presets, Presets first');
-  ok(same(TM.overflowRows(['layout-presets', 'btn-presets', 'btn-desktop', 'nope']), [{ key: 'layout-presets', submenu: 'Layout presets' }, { key: 'btn-presets', command: 'layout.savedPresets', label: 'Presets' }, { key: 'btn-desktop', command: 'desktop.open', label: 'Desktop' }]), 'overflowRows keeps the bar\'s order, a submenu head for the layout presets, an unknown key dropped');
+  ok(verdictOf(same(TM.overflowRows(['layout-presets', 'btn-presets', 'btn-desktop', 'nope']), [{ key: 'layout-presets', submenu: 'Layout presets' }, { key: 'btn-presets', command: 'layout.savedPresets', label: 'Presets' }, { key: 'btn-desktop', command: 'desktop.open', label: 'Desktop' }])), 'overflowRows keeps the bar\'s order, a submenu head for the layout presets, an unknown key dropped');
   ok(TM.compactTitle('Presets', 'Saved presets') === 'Saved presets' && TM.compactTitle('预设', '已存预设') === '已存预设' && TM.compactTitle('Apps', 'Open a desktop application in a window') === 'Apps — Open a desktop application in a window' && TM.compactTitle('Files', '') === 'Files' && TM.compactTitle('Files', 'Files') === 'Files', 'compactTitle: the words; a longer tooltip that names them kept as is, one that does not after them');
   const sf = TM.toolbarSpec('spring-3', { spring: 'flex' }), sx = TM.toolbarSpec('spring-4', { spring: 'fixed' }), un = TM.toolbarSpec('plugin-thing');
-  ok(sf.flexMin === TM.FLEX_MIN_PX && sf.priority === 0 && sx.live && sx.priority === 0 && un.live && un.priority === 0 && un.known === false && TM.FLEX_MIN_PX > 0, 'a flexible spring is a flexible item (charged 1 px, its gap paid), a fixed one rigid, an unknown element rigid and never folded');
+  ok(sf.flexMin === TM.FLEX_MIN_PX && sf.priority === 0 && gateOf(sx.live) && sx.priority === 0 && gateOf(un.live) && un.priority === 0 && un.known === false && TM.FLEX_MIN_PX > 0, 'a flexible spring is a flexible item (charged 1 px, its gap paid), a fixed one rigid, an unknown element rigid and never folded');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const words = [...rows.map(([, r]) => r.label || r.submenu)];
   const tf = libTexts['toolbar-fold.js'];
@@ -296,25 +296,25 @@ const cssPins = (css) => {
   ok(bad.length === 0, 'CSS: no zone minimum, no-shrink children, the title flexes, the fold + compact classes scoped to #toolbar, Customize wraps', bad);
   const pre = cssText.replace('.toolbar-right { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; justify-content: flex-end; }', '.toolbar-right { display: flex; align-items: center; gap: 4px; min-width: 160px; justify-content: flex-end; }');
   const pb = cssPins(pre);
-  ok(pre !== cssText && pb.length === 1 && /leftward/.test(pb[0]), 'NEGATIVE CONTROL: the pre-fix `.toolbar-right { … min-width: 160px … }` planted into a patched listing fails the pin', pb);
+  ok(pre !== cssText && pb.length === 1 && verdictOf(/leftward/.test(pb[0])), 'NEGATIVE CONTROL: the pre-fix `.toolbar-right { … min-width: 160px … }` planted into a patched listing fails the pin', pb);
   const app = libTexts['app.js'];
   const btnCmd = Object.entries(TM.TOOLBAR_ITEMS).filter(([id, r]) => r.command && id.startsWith('btn-') && id !== 'btn-desktop-apps');
   const unwired = btnCmd.filter(([id, r]) => !new RegExp(`getElementById\\('${id}'\\)\\.addEventListener\\('click', \\([^)]*\\) => runCommand\\('${r.command.replace(/\./g, '\\.')}', \\{ app: this`).test(app));
   ok(btnCmd.length === 6 && unwired.length === 0, `every toolbar button's click runs its row's command — the one its ⋯ row runs (${btnCmd.length}; ${unwired.map(([id]) => id).join(', ') || 'all wired'})`);
-  ok(/btn\.addEventListener\('click', \(\) => runCommand\(COMMAND_ID, \{ app \}\)\)/.test(libTexts['desktop-app-launcher.js']) && TM.TOOLBAR_ITEMS['btn-desktop-apps'].command === /export const COMMAND_ID = '([\w.]+)'/.exec(libTexts['desktop-app-launcher.js'])[1], 'Apps: the button and its row run desktop-app-launcher\'s COMMAND_ID');
-  ok(!/getElementById\('btn-terminal'\)\.addEventListener\('click', async/.test(app) && /async function openTerminalFrom\(app, anchor\)/.test(libTexts['toolbar-fold.js']) && /registerCommand\(\{ id: 'toolbar\.terminal', title: 'Terminal', run: \(c\) => openTerminalFrom\(c\.app, c\.anchor\) \}\)/.test(libTexts['toolbar-fold.js']), 'Terminal\'s host picker is ONE implementation (toolbar-fold.js), anchored at whichever control was pressed');
+  ok(gateOf(/btn\.addEventListener\('click', \(\) => runCommand\(COMMAND_ID, \{ app \}\)\)/.test(libTexts['desktop-app-launcher.js'])) && TM.TOOLBAR_ITEMS['btn-desktop-apps'].command === /export const COMMAND_ID = '([\w.]+)'/.exec(libTexts['desktop-app-launcher.js'])[1], 'Apps: the button and its row run desktop-app-launcher\'s COMMAND_ID');
+  ok(!/getElementById\('btn-terminal'\)\.addEventListener\('click', async/.test(app) && gateOf(/async function openTerminalFrom\(app, anchor\)/.test(libTexts['toolbar-fold.js'])) && verdictOf(/registerCommand\(\{ id: 'toolbar\.terminal', title: 'Terminal', run: \(c\) => openTerminalFrom\(c\.app, c\.anchor\) \}\)/.test(libTexts['toolbar-fold.js'])), 'Terminal\'s host picker is ONE implementation (toolbar-fold.js), anchored at whichever control was pressed');
   const setup = app.slice(app.indexOf('  _setupToolbar() {'), app.indexOf('\n  }\n', app.indexOf("this.settings.on('chrome.springs', applyArr);")));
-  ok(/applyArr\(\);[\s\S]*this\._toolbarFold = installToolbarFold\(this\);/.test(setup), 'the fold is installed in _setupToolbar AFTER the arrangement is applied');
+  ok(verdictOf(/applyArr\(\);[\s\S]*this\._toolbarFold = installToolbarFold\(this\);/.test(setup)), 'the fold is installed in _setupToolbar AFTER the arrangement is applied');
   const cz = libTexts['customize-mode.js'];
   ok((cz.match(/this\.app\._toolbarFold\?\.schedule\(\)/g) || []).length === 2, 'Customize mode reschedules the fold on enter AND on exit');
-  ok(/const bottom = bar \? Math\.max\(r\.bottom, bar\.getBoundingClientRect\(\)\.bottom\) : r\.bottom;/.test(cz), 'Customize mode\'s toolbar alignment chip sits below the WHOLE (possibly wrapped) toolbar, never over a wrapped button');
-  ok(/const squeezed = title\.scrollWidth > title\.clientWidth \+ 1;/.test(libTexts['toolbar-fold.js']) && !/title\.clientWidth < TITLE_MIN_PX/.test(libTexts['toolbar-fold.js']) && /title\.dataset\.squeezed = '1'/.test(libTexts['toolbar-fold.js']), 'the squeezed title is judged after every layout and hidden when squeezed AT ALL — whole or not drawn, never «Vibe…» (lane desktop-small P3-2; it used to hide only under TITLE_MIN_PX) — by a data attribute (the fold\'s observer never woken by it)');
+  ok(verdictOf(/const bottom = bar \? Math\.max\(r\.bottom, bar\.getBoundingClientRect\(\)\.bottom\) : r\.bottom;/.test(cz)), 'Customize mode\'s toolbar alignment chip sits below the WHOLE (possibly wrapped) toolbar, never over a wrapped button');
+  ok(gateOf(/const squeezed = title\.scrollWidth > title\.clientWidth \+ 1;/.test(libTexts['toolbar-fold.js'])) && !/title\.clientWidth < TITLE_MIN_PX/.test(libTexts['toolbar-fold.js']) && verdictOf(/title\.dataset\.squeezed = '1'/.test(libTexts['toolbar-fold.js'])), 'the squeezed title is judged after every layout and hidden when squeezed AT ALL — whole or not drawn, never «Vibe…» (lane desktop-small P3-2; it used to hide only under TITLE_MIN_PX) — by a data attribute (the fold\'s observer never woken by it)');
   const tf = libTexts['toolbar-fold.js'];
-  ok(/createBarFold\(bar, \{\s*more,\s*rulerIn: bar,/.test(tf) && /groups: \(\) => zones\(\)\.map\(\(z\) => \(\{ key: zoneKey\(z\), gapPx: parseFloat\(getComputedStyle\(z\)\.columnGap\) \|\| 0 \}\)\)/.test(tf) && /suspended: \(\) => !!app\._customize\?\.active/.test(tf), 'toolbar-fold.js drives createBarFold: the ruler inside #toolbar, the zones as groups with their own gaps, suspended while Customize edits');
-  ok(/const key = el\.id \|\| \(el\.classList\.contains\('toolbar-title'\) \? 'toolbar-title' : `\$\{zoneKey\(z\)\}#\$\{anon\+\+\}`\);/.test(tf) && /const s = toolbarSpec\(key, \{ spring \}\);/.test(tf), 'the items are read from the zones in their ARRANGED order at every layout (an id-less element counted, never skipped)');
-  ok(/bar\.appendChild\(more\);/.test(tf) && /registerMenuItem\(\{ menu: TOOLBAR_MENU, id: `\$\{TOOLBAR_MENU\}\/folded`, group: '1_folded', expand: \(c\) => foldedMenuRows\(c\) \}\)/.test(tf) && /menuItems\(TOOLBAR_MENU, \{ app, folded: fold\.folded\(\), anchor: more \}\)/.test(tf), 'the ⋯ is a direct child of #toolbar after the zones; its menu is the registry menu \'toolbar-overflow\' built from the folded keys');
+  ok(gateOf(/createBarFold\(bar, \{\s*more,\s*rulerIn: bar,/.test(tf)) && gateOf(/groups: \(\) => zones\(\)\.map\(\(z\) => \(\{ key: zoneKey\(z\), gapPx: parseFloat\(getComputedStyle\(z\)\.columnGap\) \|\| 0 \}\)\)/.test(tf)) && verdictOf(/suspended: \(\) => !!app\._customize\?\.active/.test(tf)), 'toolbar-fold.js drives createBarFold: the ruler inside #toolbar, the zones as groups with their own gaps, suspended while Customize edits');
+  ok(gateOf(/const key = el\.id \|\| \(el\.classList\.contains\('toolbar-title'\) \? 'toolbar-title' : `\$\{zoneKey\(z\)\}#\$\{anon\+\+\}`\);/.test(tf)) && verdictOf(/const s = toolbarSpec\(key, \{ spring \}\);/.test(tf)), 'the items are read from the zones in their ARRANGED order at every layout (an id-less element counted, never skipped)');
+  ok(gateOf(/bar\.appendChild\(more\);/.test(tf)) && gateOf(/registerMenuItem\(\{ menu: TOOLBAR_MENU, id: `\$\{TOOLBAR_MENU\}\/folded`, group: '1_folded', expand: \(c\) => foldedMenuRows\(c\) \}\)/.test(tf)) && verdictOf(/menuItems\(TOOLBAR_MENU, \{ app, folded: fold\.folded\(\), anchor: more \}\)/.test(tf)), 'the ⋯ is a direct child of #toolbar after the zones; its menu is the registry menu \'toolbar-overflow\' built from the folded keys');
   const bf = libTexts['bar-fold.js'];
-  ok(/import \{ barLadder \} from '\.\/live-bar-layout\.js';/.test(bf) && /const v = barLadder\(\{ widthPx, gapPx, overflowPx, groups: zones, items: rows \}\);/.test(bf) && /if \(r\.compactClass\) setCls\(r\.el, r\.compactClass, small\.has\(r\.key\)\);/.test(bf) && /!host\.contains\(r\.target\)/.test(bf), 'bar-fold.js: barLadder (the icon step), the compact class applied, mutations inside the ruler ignored');
+  ok(gateOf(/import \{ barLadder \} from '\.\/live-bar-layout\.js';/.test(bf)) && gateOf(/const v = barLadder\(\{ widthPx, gapPx, overflowPx, groups: zones, items: rows \}\);/.test(bf)) && gateOf(/if \(r\.compactClass\) setCls\(r\.el, r\.compactClass, small\.has\(r\.key\)\);/.test(bf)) && verdictOf(/!host\.contains\(r\.target\)/.test(bf)), 'bar-fold.js: barLadder (the icon step), the compact class applied, mutations inside the ruler ignored');
   ok(!/^import /m.test(read('src/lib/toolbar-fold-model.js')) && !/\bdocument\b|\bwindow\./.test(read('src/lib/toolbar-fold-model.js').replace(/\/\/.*$/gm, '')), 'toolbar-fold-model.js is PURE (imports nothing, no DOM)');
 }
 
@@ -326,7 +326,7 @@ console.log('§6 the Doc window\'s bar — groups, priorities, glyphs, theme col
   const items = [...ui.matchAll(/\btool\('(\w+)', (?:I\.(\w+)|''), t\('[^']+'\), (\d)|\bsep\((\d)\)/g)].map((m) => (m[4] ? { key: 'sep', p: +m[4] } : { key: m[1], glyph: m[2] || null, p: +m[3] }));
   const got = items.map((x) => x.key + ':' + x.p).join(' ');
   ok(got === 'style:0 sep:1 bold:1 italic:1 code:2 sep:3 ul:3 ol:3 task:3 sep:4 table:4 link:4 image:4 sep:5 raw:5', 'the groups + priorities are design 020 §2\'s: [style ▾] | B I </> | • 1. ☑ | table link image | raw', got);
-  ok(items.every((x, i) => i === 0 || x.p >= items[i - 1].p) && /btnStrip\.dataset\.prio = '0'/.test(ui) && /BAR\.push\(\{ el: btnStrip, key: 'comments', priority: 0 \}\)/.test(ui), 'priorities never fall left to right (the fold takes a suffix); the comments button at the end never folds');
+  ok(gateOf(items.every((x, i) => i === 0 || x.p >= items[i - 1].p)) && gateOf(/btnStrip\.dataset\.prio = '0'/.test(ui)) && verdictOf(/BAR\.push\(\{ el: btnStrip, key: 'comments', priority: 0 \}\)/.test(ui)), 'priorities never fall left to right (the fold takes a suffix); the comments button at the end never folds');
   // barLadder over the bar's shape (28 px glyphs, the style ≈ 80, a separator 11, gap 2): every width folds by priority
   const row = items.map((x, i) => ({ key: x.key + i, px: x.key === 'style' ? 80 : x.key === 'sep' ? 11 : 28, priority: x.p })).concat([{ key: 'comments', px: 44, priority: 0 }]);
   const bad = [], seen = new Set();
@@ -337,10 +337,10 @@ console.log('§6 the Doc window\'s bar — groups, priorities, glyphs, theme col
     if (op.some((p) => sp.some((q) => q > p))) bad.push({ w, shown: v.shown, overflow: v.overflow });
     seen.add(v.overflow.filter((k) => !/^sep/.test(k)).join(' '));
   }
-  ok(!bad.length && seen.has('') && [...seen].some((f) => /raw/.test(f) && !/table/.test(f)) && [...seen].some((f) => /table/.test(f) && !/bold/.test(f)), 'barLadder 520 → 150 px: no shown item outranks a folded one — raw folds first, then the inserts, B / I last', { bad: bad.slice(0, 3), seen: [...seen] });
+  ok(!bad.length && gateOf(seen.has('')) && gateOf([...seen].some((f) => /raw/.test(f) && !/table/.test(f))) && verdictOf([...seen].some((f) => /table/.test(f) && !/bold/.test(f))), 'barLadder 520 → 150 px: no shown item outranks a folded one — raw folds first, then the inserts, B / I last', { bad: bad.slice(0, 3), seen: [...seen] });
   const icons = await import('../src/lib/icons.js');
   const glyphs = [...new Set([...ui.matchAll(/\bI\.(\w+)/g)].map((m) => m[1]))];
-  ok(['bold', 'italic', 'code', 'listUl', 'listOl', 'task', 'table', 'link', 'image', 'raw'].every((g) => glyphs.includes(g)) && glyphs.every((g) => /^<svg aria-hidden="true"/.test(icons.UI_ICONS[g] || '')), 'every glyph the window draws is an icons.js SVG (aria-hidden) — the ten editor glyphs among them', glyphs.filter((g) => !icons.UI_ICONS[g]));
+  ok(gateOf(['bold', 'italic', 'code', 'listUl', 'listOl', 'task', 'table', 'link', 'image', 'raw'].every((g) => glyphs.includes(g))) && verdictOf(glyphs.every((g) => /^<svg aria-hidden="true"/.test(icons.UI_ICONS[g] || ''))), 'every glyph the window draws is an icons.js SVG (aria-hidden) — the ten editor glyphs among them', glyphs.filter((g) => !icons.UI_ICONS[g]));
   ok(!/(?:textContent = |mk\('button', [^,]+, )'[⋯…☑•✓]/.test(ui), 'no text glyph stands in for an icon on a button');
   const cssOf = (src) => (/const CSS = `([\s\S]*?)`;/.exec(src) || [])[1] || '';
   const literals = (css) => css.match(/#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(|(?<![-\w])(?:white|black)(?![-\w])/gi) || [];
@@ -351,6 +351,6 @@ console.log('§6 the Doc window\'s bar — groups, priorities, glyphs, theme col
   ok(literals(css + '.x{color:#fff;box-shadow:0 1px rgba(0,0,0,.2)}').length === 2 && radii(css + '.x{border-radius:6px}').length === 1, 'CONTROL: a planted literal colour and a literal radius are caught');
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3 })) ok(verdictOf(r.pass), 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

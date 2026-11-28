@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } return !!c; };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const S = JSON.stringify;
 const { SyncStore } = require('../src/sync-store.js');
@@ -47,8 +47,8 @@ const PER_STORE = CLASS.replace(PER_KEY, 'own: { ackedVersion: Math.max(0, ...s.
 const PRE_DELTA = CLASS.replace(CALL, "const verdict = arrivalVerdict({ remote: { ...op, prepended: undefined }, own: { ackedVersion: s.acked.get(op.key), pending: s.pending.has(op.key) } });");
 
 console.log('§0 the cuts');
-ok(/case 'state-set'/.test(CASES) && /case 'state-resync'/.test(CASES) && /store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES) && /store\.delete\(data\.key, ws, data\.basedOn\)/.test(CASES) && /const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASES), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim (a set hands the store its socket + basedOn; the value is data.value unless a drafts chat key carries a Stop put-back — test-queue-putback drives that belt)');
-ok(CLASS.includes(CALL) && /_applyAck\(storeName, ack\)/.test(CLASS) && /msg\.type === 'state-ack'/.test(CLASS), 'src/lib/utils.js: the client StateSync class cut verbatim (the arrival rule\'s call, the ack)');
+ok(gateOf(/case 'state-set'/.test(CASES)) && gateOf(/case 'state-resync'/.test(CASES)) && gateOf(/store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES)) && gateOf(/store\.delete\(data\.key, ws, data\.basedOn\)/.test(CASES)) && verdictOf(/const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASES)), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim (a set hands the store its socket + basedOn; the value is data.value unless a drafts chat key carries a Stop put-back — test-queue-putback drives that belt)');
+ok(gateOf(CLASS.includes(CALL)) && gateOf(/_applyAck\(storeName, ack\)/.test(CLASS)) && verdictOf(/msg\.type === 'state-ack'/.test(CLASS)), 'src/lib/utils.js: the client StateSync class cut verbatim (the arrival rule\'s call, the ack)');
 ok(PRE_FIX !== CLASS && PER_STORE !== CLASS && PRE_DELTA !== CLASS, 'control targets present: the rule\'s call, its per-key facts');
 
 // ── a discrete-event clock: the next event by (time, order) ──
@@ -169,7 +169,7 @@ console.log('§1 the PURE verdict');
     [{ remote: { version: 7, prepended: '12' }, own: { ackedVersion: 9 } }, 'drop', 'a non-integer prepended is no delta ⇒ the ordinary rule (drop)'],
   ];
   for (const [input, want, name] of cases) ok(arrivalVerdict(input) === want, name, { input, got: arrivalVerdict(input) });
-  ok(ARRIVAL_TABLE.length === 6 && ARRIVAL_TABLE.every((x) => ['apply', 'drop', 'queue'].includes(x.verdict) && x.when && x.why) && /prepended/.test(ARRIVAL_TABLE[1].when), 'the table: six rows (the delta row second, lane stop-refills-composer), each a case + a verdict + why');
+  ok(ARRIVAL_TABLE.length === 6 && gateOf(ARRIVAL_TABLE.every((x) => ['apply', 'drop', 'queue'].includes(x.verdict) && x.when && x.why)) && verdictOf(/prepended/.test(ARRIVAL_TABLE[1].when)), 'the table: six rows (the delta row second, lane stop-refills-composer), each a case + a verdict + why');
   for (const x of ARRIVAL_TABLE) console.log(`    · ${x.verdict.padEnd(5)} ${x.when} — ${x.why}`);
   const calls = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).reduce((n, f) => n + (read('src/lib/' + f).match(/arrivalVerdict\(/g) || []).length, 0);
   ok(calls === 1 && (CLASS.match(/arrivalVerdict\(/g) || []).length === 1, 'the client asks the verdict at ONE place (StateSync._applyOp)', { calls });
@@ -184,7 +184,7 @@ for (let i = 0; i < ROWS.length; i++) {
   const f = fixed[i], p = before[i], l = ROWS[i].lat;
   console.log(`    ${String(i).padStart(3)} ${String(f.d).padStart(2)}  ${f.first}      ${String(l.A.up).padStart(2)}/${String(l.A.down).padEnd(2)} ${String(l.B.up).padStart(2)}/${String(l.B.down).padEnd(2)}   ${f.srv}      | ${p.A} ${p.B} ${p.crossed ? 'CROSSED' : p.converged ? 'ok     ' : 'OFF    '}${p.older ? ' older×' + p.older : '        '} | ${f.A} ${f.B} ${f.crossed ? 'CROSSED' : f.converged ? 'ok' : 'OFF'}${f.older ? ' older×' + f.older : ''}${f.raced ? '   (raced)' : ''}`);
 }
-for (const f of fixed) ok(f.onWire === 2 && f.converged && !f.older, `§2 d=${f.d} first=${f.first} lat=${S(ROWS[f.row].lat)}: both hold the server's ${f.srv}; neither held older than its acked set (heard A ${f.heardA || '–'}, B ${f.heardB || '–'})`, f);
+for (const f of fixed) ok(f.onWire === 2 && gateOf(f.converged) && !f.older, `§2 d=${f.d} first=${f.first} lat=${S(ROWS[f.row].lat)}: both hold the server's ${f.srv}; neither held older than its acked set (heard A ${f.heardA || '–'}, B ${f.heardB || '–'})`, f);
 const raced = fixed.filter((f) => f.raced).length;
 ok(raced >= ROWS.length / 2, `§2 the table races: in ${raced}/${ROWS.length} rows neither set had seen the other (each basedOn < the other's version)`);
 const crossedBefore = before.filter((p) => p.crossed).length, olderBefore = before.filter((p) => p.older).length;
@@ -229,9 +229,9 @@ async function offlineSet(cls, { maxOps } = {}) {
   const p = await offlineSet(PRE_FIX);
   ok(p.A === 'B' && p.B === 'A', `§6 CONTROL: the pre-fix client takes B's missed hero over its own offline set — A ${p.A}, B ${p.B}, server ${p.srv}`, p);
   const s = await offlineSet(CLASS, { maxOps: 1 });
-  ok(s.snap && s.srv === 'A' && s.A === 'A' && s.B === 'A' && s.gridA === '{"rows":1,"cols":2}', `④b the full snapshot (a ring gap): A's key keeps its offline set, the snapshot's hero is held and dropped at the ack; the grid lands; all on ${s.srv} (A heard ${s.heardA || '–'})`, s);
+  ok(gateOf(s.snap) && s.srv === 'A' && s.A === 'A' && s.B === 'A' && s.gridA === '{"rows":1,"cols":2}', `④b the full snapshot (a ring gap): A's key keeps its offline set, the snapshot's hero is held and dropped at the ack; the grid lands; all on ${s.srv} (A heard ${s.heardA || '–'})`, s);
   const ps = await offlineSet(PRE_FIX, { maxOps: 1 });
-  ok(ps.snap && ps.A === 'B' && ps.B === 'A' && ps.srv === 'A', `§6 CONTROL: the pre-fix client takes the snapshot's hero over its own offline set — A ${ps.A}, B ${ps.B}, server ${ps.srv} (④b would be red; the base did the same: its snapshot replaced the key)`, ps);
+  ok(gateOf(ps.snap) && ps.A === 'B' && ps.B === 'A' && ps.srv === 'A', `§6 CONTROL: the pre-fix client takes the snapshot's hero over its own offline set — A ${ps.A}, B ${ps.B}, server ${ps.srv} (④b would be red; the base did the same: its snapshot replaced the key)`, ps);
 }
 async function inFlight(cls, { loseInFlight }) {
   const w = world({ cls });
@@ -263,7 +263,7 @@ console.log('§4e the delta row (lane stop-refills-composer): a put-back op land
   w.clock.run();
   const heard = A.heard('note');
   const putback = w.log.find((o) => o.prepended === 3), own = w.log.find((o) => o.from);
-  ok(putback && own && putback.version < own.version && heard.includes('P\n\nbase') && A.sync.stores.stage.acked.get('note') === own.version, `④e the put-back (v${putback && putback.version}) is HEARD at once although A's own set is pending (v${own && own.version} acked after it) — never held, never dropped at the ack (heard ${S(heard)})`, { heard, putback, own });
+  ok(gateOf(putback) && gateOf(own) && putback.version < own.version && gateOf(heard.includes('P\n\nbase')) && A.sync.stores.stage.acked.get('note') === own.version, `④e the put-back (v${putback && putback.version}) is HEARD at once although A's own set is pending (v${own && own.version} acked after it) — never held, never dropped at the ack (heard ${S(heard)})`, { heard, putback, own });
   const pre = world({ cls: PRE_DELTA });
   const P = pre.client('A', { up: 30, down: 5 });
   await P.sync.init('stage'); P.listen();
@@ -284,12 +284,12 @@ console.log('§5 the frames');
   const op = w.log.at(-1), sent = A.events.find((e) => e.kind === 'sent' && e.d.type === 'state-set');
   const ack = A.acks('hero'), toB = B.events.filter((e) => e.kind === 'frame' && e.d.type === 'state-sync' && e.d.key === 'hero');
   ok(ack.length === 1 && S(Object.keys(ack[0].d)) === S(['type', 'store', 'key', 'version']) && ack[0].d.version === op.version && A.heard('hero').length === 0, `⑤ the sender gets ONE state-ack {type, store, key, version} — the version its set produced (${op.version}); its own listener hears nothing`, { ack: ack.map((e) => e.d), heard: A.heard('hero') });
-  ok(sent && sent.d.basedOn === 1, '⑤ the client\'s state-set carries basedOn = the store version it had seen (1: the hub\'s slot)', sent && sent.d);
-  ok(toB.length === 1 && /^c[0-9a-z]+$/.test(toB[0].d.from) && toB[0].d.basedOn === 1 && toB[0].d.version === op.version && B.acks('hero').length === 0, `⑤ the broadcast names the sender (from ${toB[0] && toB[0].d.from}) and its basedOn; the other client gets no ack`, toB.map((e) => e.d));
+  ok(gateOf(sent) && sent.d.basedOn === 1, '⑤ the client\'s state-set carries basedOn = the store version it had seen (1: the hub\'s slot)', sent && sent.d);
+  ok(toB.length === 1 && gateOf(/^c[0-9a-z]+$/.test(toB[0].d.from)) && toB[0].d.basedOn === 1 && toB[0].d.version === op.version && B.acks('hero').length === 0, `⑤ the broadcast names the sender (from ${toB[0] && toB[0].d.from}) and its basedOn; the other client gets no ack`, toB.map((e) => e.d));
   const before = A.events.length + B.events.length;
   w.store.set('grid', '{"rows":1}'); w.clock.run();
   const hub = B.events.find((e) => e.kind === 'frame' && e.d.key === 'grid');
-  ok(hub && !('from' in hub.d) && !('basedOn' in hub.d) && A.acks('grid').length === 0 && B.acks('grid').length === 0, '⑤ a hub write names no sender and is acked to nobody', hub && hub.d);
+  ok(gateOf(hub) && !('from' in hub.d) && !('basedOn' in hub.d) && A.acks('grid').length === 0 && B.acks('grid').length === 0, '⑤ a hub write names no sender and is acked to nobody', hub && hub.d);
   A.sync.set('stage', 'nothing-here', ''); w.clock.run();
   const nack = A.acks('nothing-here');
   ok(nack.length === 1 && nack[0].d.version === w.store.version && !B.events.some((e) => e.kind === 'frame' && e.d.key === 'nothing-here') && !A.sync.stores.stage.pending.size, '⑤ deleting a key the server never held is still answered (the store\'s version) and broadcast to nobody — no set is left waiting', nack.map((e) => e.d));
@@ -301,4 +301,4 @@ console.log('§5 the frames');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

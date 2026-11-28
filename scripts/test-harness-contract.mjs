@@ -20,7 +20,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const MUTH = mutantCopies('harness-contract', REPO);
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -41,10 +41,10 @@ const { hasConsumer, PROTOCOLS } = require(path.join(REPO, 'src/server/stdout/in
 const { BACKEND_META, backendFeatureCaps, worktreeCapsFor, worktreePick: clientWorktreePick, worktreeLatchWrite: clientWorktreeLatchWrite } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
 const { HARNESS_SETTINGS, rowOf, rowsOfKind, checkTable } = require(path.join(REPO, 'src/harness-settings.js')); // PURE: the declared tables (design-harness-settings §8)
 
-ok(harnessIds().length >= 3 && ['claude', 'codex', 'shell'].every((id) => HARNESSES[id]), `registry carries the three built-in harnesses (${harnessIds().join(', ')})`);
+ok(harnessIds().length >= 3 && verdictOf(['claude', 'codex', 'shell'].every((id) => HARNESSES[id])), `registry carries the three built-in harnesses (${harnessIds().join(', ')})`);
 let threw = false; try { harnessOf('gemini'); } catch { threw = true; }
-ok(threw, 'an unknown harness id THROWS (never a claude fallback)');
-ok(createMessageManager('claude', 'x') && (() => { try { createMessageManager('gemini', 'x'); return false; } catch { return true; } })(), 'normalizer registry: known id works, unknown id throws');
+ok(verdictOf(threw), 'an unknown harness id THROWS (never a claude fallback)');
+ok(gateOf(createMessageManager('claude', 'x')) && verdictOf((() => { try { createMessageManager('gemini', 'x'); return false; } catch { return true; } })()), 'normalizer registry: known id works, unknown id throws');
 
 const BASE_METHODS = ['formatChatInput', 'formatInterrupt', 'formatPermissionResponse', 'formatSetPermissionMode', 'formatSetModel', 'formatSetEffort', 'postInterrupt'];
 const NORM_METHODS = ['onOp', 'processLive', 'convertHistory', 'convertHistoryAsync', 'tail', 'tailWindow', 'slice', 'turnMap']; // tailWindow = the attach slab (src/text-window.js, perf lane A)
@@ -53,14 +53,14 @@ const registry = createAdapterRegistry({ claudeCmd: 'claude', codexCmd: 'codex',
 for (const id of harnessIds()) {
   const h = HARNESSES[id];
   console.log(`— ${id}`);
-  ok(REQUIRED_DESCRIPTOR_KEYS.every((k) => k in h), `${id}: descriptor declares ${REQUIRED_DESCRIPTOR_KEYS.join('/')}`);
+  ok(verdictOf(REQUIRED_DESCRIPTOR_KEYS.every((k) => k in h)), `${id}: descriptor declares ${REQUIRED_DESCRIPTOR_KEYS.join('/')}`);
   ok(h.caps === capsOf(id) && h.caps === BACKEND_CAPS[id], `${id}: caps ARE the backend-caps row (one source)`);
   // lane artifacts-model: THE DELIVERABLE HOOK — a reader (record → [{path, op, bytes, id}]) or null (= never produces);
   // a reader answers every record shape with an array (a foreign / empty record → []), never a throw
   {
     const of = h.artifactsOf;
     const FOREIGN = [null, {}, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Write', input: {} }] } }, { type: 'response_item', payload: { name: 'apply_patch', type: 'function_call', arguments: '{' } }, { kind: 'update', update: { sessionUpdate: 'tool_call', content: [{ type: 'diff' }] } }];
-    ok('artifactsOf' in h && (of === null || (typeof of === 'function' && FOREIGN.every((r) => { try { const o = of(r); return Array.isArray(o) && o.length === 0; } catch { return false; } }))), `${id}: declares artifactsOf (${of === null ? 'null — never produces' : 'a reader: [] on a foreign record, never a throw'})`);
+    ok('artifactsOf' in h && (of === null || (typeof of === 'function' && verdictOf(FOREIGN.every((r) => { try { const o = of(r); return Array.isArray(o) && o.length === 0; } catch { return false; } })))), `${id}: declares artifactsOf (${of === null ? 'null — never produces' : 'a reader: [] on a foreign record, never a throw'})`);
     if (of === null) { const reg = require(path.join(REPO, "src/server/artifact-registry.js")); const N2 = require(path.join(REPO, "src/normalizers.js")); const s = { backend: id, _historyLoaded: true }; ok(reg.observe(s, { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'Write', input: { file_path: '/x.md' } }] } }) === 0 && !s._artifacts && N2.artifactDeriveOpts({ backend: id }) === null, `${id}: a null hook is PROVEN never to produce (the live consumer and the rebuild both skip it)`); }
   }
   const ad = registry.get(id);
@@ -69,16 +69,16 @@ for (const id of harnessIds()) {
     for (const m of BASE_METHODS) ok(typeof ad[m] === 'function', `${id}: adapter implements ${m}`);
     ok(typeof ad.buildSessionArgs === 'function', `${id}: adapter implements buildSessionArgs (required by ws-create, undeclared in base.js)`);
     const spec = ad.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: 'default' });
-    ok(spec && typeof spec.cmd === 'string' && Array.isArray(spec.args) && typeof spec.wrapper === 'string' && spec.mode === 'chat' && spec.env && typeof spec.env === 'object', `${id}: buildSessionArgs({mode:'chat'}) → {cmd,args,wrapper,cwd,mode,env}`);
+    ok(gateOf(spec) && typeof spec.cmd === 'string' && gateOf(Array.isArray(spec.args)) && typeof spec.wrapper === 'string' && spec.mode === 'chat' && gateOf(spec.env) && typeof spec.env === 'object', `${id}: buildSessionArgs({mode:'chat'}) → {cmd,args,wrapper,cwd,mode,env}`);
     const mm = new h.Normalizer('contract');
     for (const m of NORM_METHODS) ok(typeof mm[m] === 'function', `${id}: normalizer implements ${m}`);
-    ok(Array.isArray(mm.listeners) && typeof mm.total === 'number' && Array.isArray(mm.messages), `${id}: normalizer exposes listeners/total/messages`);
+    ok(gateOf(Array.isArray(mm.listeners)) && typeof mm.total === 'number' && verdictOf(Array.isArray(mm.messages)), `${id}: normalizer exposes listeners/total/messages`);
     ok(typeof mm.injectPeerCard === 'function', `${id}: normalizer renders peer/notification cards (injectPeerCard)`);
     ok(NORMALIZERS[id] === h.Normalizer, `${id}: normalizer registry row is the descriptor's Normalizer`);
-    ok(fs.existsSync(path.join(REPO, h.wrapper)), `${id}: wrapper file exists (${h.wrapper})`);
+    ok(verdictOf(fs.existsSync(path.join(REPO, h.wrapper))), `${id}: wrapper file exists (${h.wrapper})`);
     const w = fs.readFileSync(path.join(REPO, h.wrapper), 'utf8');
-    ok(/caps\s*[:=]\s*\{/.test(w), `${id}: wrapper adverts a caps object in its sidecar meta`);
-    ok(h.store && typeof h.store.locate === 'function', `${id}: store declares locate (where the conversation lives; transcript-service / incident read it)`);
+    ok(verdictOf(/caps\s*[:=]\s*\{/.test(w)), `${id}: wrapper adverts a caps object in its sidecar meta`);
+    ok(gateOf(h.store) && typeof h.store.locate === 'function', `${id}: store declares locate (where the conversation lives; transcript-service / incident read it)`);
     // SETTINGS TABLE (design-harness-settings §8): the descriptor's `settings` IS
     // the PURE table by identity (like caps), and the two knobs every chat
     // harness needs are ROWS of it — the schema DERIVES its section from this
@@ -86,17 +86,17 @@ for (const id of harnessIds()) {
     // harness through with no rows at all.
     ok(typeof h.settingsPrefix === 'string' && h.settings === HARNESS_SETTINGS[h.settingsPrefix], `${id}: settings ARE the PURE table HARNESS_SETTINGS.${h.settingsPrefix} (identity)`);
     ok(!!rowOf(h.settings, 'defaultModel') && !!rowOf(h.settings, 'defaultPermissionMode'), `${id}: table declares defaultModel + defaultPermissionMode rows`);
-    ok(h.inject && ['hooks', 'wrapper', 'acp'].includes(h.inject.kind) && typeof h.inject.sessionStartHonoured === 'boolean' && Array.isArray(h.inject.hookEvents), `${id}: declares its context-injection strategy (${h.inject?.kind}, sessionStartHonoured=${h.inject?.sessionStartHonoured})`);
-    if (h.inject?.hookFile) ok(typeof h.inject.hookFile.file === 'function' && typeof h.inject.hookFile.file() === 'string' && CREATE_RULES.includes(h.inject.hookFile.createIfMissing), `${id}: hook file declaration is well-formed (${h.inject.hookFile.file()}, create rule ${JSON.stringify(h.inject.hookFile.createIfMissing)})`);
+    ok(gateOf(h.inject) && gateOf(['hooks', 'wrapper', 'acp'].includes(h.inject.kind)) && typeof h.inject.sessionStartHonoured === 'boolean' && verdictOf(Array.isArray(h.inject.hookEvents)), `${id}: declares its context-injection strategy (${h.inject?.kind}, sessionStartHonoured=${h.inject?.sessionStartHonoured})`);
+    if (h.inject?.hookFile) ok(typeof h.inject.hookFile.file === 'function' && typeof h.inject.hookFile.file() === 'string' && verdictOf(CREATE_RULES.includes(h.inject.hookFile.createIfMissing)), `${id}: hook file declaration is well-formed (${h.inject.hookFile.file()}, create rule ${JSON.stringify(h.inject.hookFile.createIfMissing)})`);
     ok(typeof h.caps.streamProtocol === 'string', `${id}: caps name a stream protocol (${h.caps.streamProtocol})`);
-    ok(hasConsumer(h.caps.streamProtocol), `${id}: its stream protocol has a registered stdout consumer (src/server/stdout/index.js: ${h.caps.streamProtocol}) — the descriptor NAMES it, the registry RESOLVES it (S5)`);
+    ok(verdictOf(hasConsumer(h.caps.streamProtocol)), `${id}: its stream protocol has a registered stdout consumer (src/server/stdout/index.js: ${h.caps.streamProtocol}) — the descriptor NAMES it, the registry RESOLVES it (S5)`);
     ok(!('stdout' in h) && !('stream' in h), `${id}: no stdout/stream twin on the descriptor — caps.streamProtocol is the ONE source of truth`);
   }
   const meta = BACKEND_META[id];
-  ok(meta && meta.id === id && meta.label && meta.badgeClass, `${id}: client BACKEND_META row exists`);
-  if (h.kind === 'chat') ok(Array.isArray(meta.fallbackModels) && (meta.fallbackModels.length > 0 || meta.modelsFromAgent === true) && meta.caps, `${id}: client META carries fallbackModels (or modelsFromAgent) + feature caps`);
+  ok(gateOf(meta) && meta.id === id && gateOf(meta.label) && verdictOf(meta.badgeClass), `${id}: client BACKEND_META row exists`);
+  if (h.kind === 'chat') ok(gateOf(Array.isArray(meta.fallbackModels)) && (meta.fallbackModels.length > 0 || meta.modelsFromAgent === true) && verdictOf(meta.caps), `${id}: client META carries fallbackModels (or modelsFromAgent) + feature caps`);
 }
-ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META row has a server harness (no client-only backend)');
+ok(verdictOf(Object.keys(BACKEND_META).every((id) => HARNESSES[id])), 'every client META row has a server harness (no client-only backend)');
 // lane antigravity-harness (its RED row): a descriptor that drops ONE required row is refused — by the registry's own
 // validate() (what loading a built-in runs) AND by this suite's per-harness check above.
 {
@@ -105,7 +105,7 @@ ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META ro
   for (const k of REQUIRED_DESCRIPTOR_KEYS) {
     const copy = { ...g }; delete copy[k];
     let msg = ''; try { validate(copy); } catch (e) { msg = e.message; }
-    ok(!REQUIRED_DESCRIPTOR_KEYS.every((r) => r in copy) && /is missing|lowercase slug/.test(msg), `RED control: antigravity without its "${k}" row is refused (${msg.slice(0, 90)})`);
+    ok(!REQUIRED_DESCRIPTOR_KEYS.every((r) => r in copy) && verdictOf(/is missing|lowercase slug/.test(msg)), `RED control: antigravity without its "${k}" row is refused (${msg.slice(0, 90)})`);
   }
   let whole = ''; try { validate({ ...g }); } catch (e) { whole = e.message; }
   ok(!whole, 'POSITIVE control: the whole antigravity descriptor validates', whole);
@@ -121,20 +121,20 @@ ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META ro
   const ids = harnessIds();
   const H = require(path.join(REPO, 'src/harnesses/index.js'));
   const rows = ids.map((id) => { const p = HARNESSES[id]?.quota?.predict; return { id, p, errs: [...H.predictShapeErrs(p), ...PA.checkRegistry([HARNESSES[id]])] }; });
-  ok(rows.every((r) => !r.errs.length), `predict: every harness declares it — an adapter's name, resolved and checked on the hub, or { none } (${rows.map((r) => r.id + '=' + (typeof r.p === 'string' ? r.p : 'none')).join(' · ')})`, JSON.stringify(rows.filter((r) => r.errs.length)));
+  ok(verdictOf(rows.every((r) => !r.errs.length)), `predict: every harness declares it — an adapter's name, resolved and checked on the hub, or { none } (${rows.map((r) => r.id + '=' + (typeof r.p === 'string' ? r.p : 'none')).join(' · ')})`, JSON.stringify(rows.filter((r) => r.errs.length)));
   const pr = (id) => { const p = HARNESSES[id]?.quota?.predict; return typeof p === 'string' ? PA.adapterOf(p)?.prior : undefined; };
-  ok(pr('claude') && pr('claude').sevenDay > 0 && pr('claude').fiveHour > 0 && pr('claude').classes5h, 'predict: Claude states its measured prior (5h, 7d, its caps) and its 5h class priors');
-  ok(['codex', 'antigravity'].every((id) => pr(id) && typeof pr(id).none === 'string' && pr(id).none.length > 10), 'predict: codex and Antigravity declare NO prior, and say why (learn first)');
-  ok(rows.filter((r) => r.p && r.p.none).every((r) => !(r.id in PA.ADAPTERS)) && rows.filter((r) => typeof r.p === 'string').every((r) => r.p === r.id && PA.adapterOf(r.p) !== null),
+  ok(gateOf(pr('claude')) && pr('claude').sevenDay > 0 && pr('claude').fiveHour > 0 && verdictOf(pr('claude').classes5h), 'predict: Claude states its measured prior (5h, 7d, its caps) and its 5h class priors');
+  ok(verdictOf(['codex', 'antigravity'].every((id) => pr(id) && typeof pr(id).none === 'string' && pr(id).none.length > 10)), 'predict: codex and Antigravity declare NO prior, and say why (learn first)');
+  ok(gateOf(rows.filter((r) => r.p && r.p.none).every((r) => !(r.id in PA.ADAPTERS))) && verdictOf(rows.filter((r) => typeof r.p === 'string').every((r) => r.p === r.id && PA.adapterOf(r.p) !== null)),
     'predict: every source that predicts NAMES its own adapter (the core\'s binding, predict-adapters, by the same name); a source that states no quota has no row', JSON.stringify(rows.map((r) => [r.id, r.p])));
   const g = HARNESSES.claude;
   const bad = [[{ ...g, quota: { ...g.quota, predict: undefined } }, 'no predict'], [{ ...g, quota: { ...g.quota, predict: 'Claude adapter!' } }, 'a name that is no name'],
     [{ ...g, quota: { ...g.quota, predict: { unit: 'usd-api', prior: { sevenDay: 5 } } } }, 'the adapter object itself (the shape before: it would carry its code into the device bundle)'], [{ ...g, quota: { ...g.quota, predict: { none: '' } } }, 'a none that says no why']];
-  for (const [copy, what] of bad) { let msg = ''; try { validate(copy); } catch (e) { msg = e.message; } ok(/quota\.predict/.test(msg), `RED control: a descriptor with ${what} is refused at registration (${msg.slice(0, 90)})`); }
+  for (const [copy, what] of bad) { let msg = ''; try { validate(copy); } catch (e) { msg = e.message; } ok(verdictOf(/quota\.predict/.test(msg)), `RED control: a descriptor with ${what} is refused at registration (${msg.slice(0, 90)})`); }
   // the HUB's check: a well-shaped name no hub adapter answers passes the registry (the device cannot know) and is said by checkRegistry
   let unk = ''; try { validate({ ...g, quota: { ...g.quota, predict: 'nosuch' } }); } catch (e) { unk = e.message; }
   const unkHub = PA.checkRegistry([{ id: 'claude', quota: { ...g.quota, predict: 'nosuch' } }]);
-  ok(!unk && unkHub.length === 1 && /names 'nosuch', which no hub adapter answers/.test(unkHub[0]) && PA.checkRegistry(ids.map((id) => HARNESSES[id])).length === 0,
+  ok(!unk && unkHub.length === 1 && gateOf(/names 'nosuch', which no hub adapter answers/.test(unkHub[0])) && PA.checkRegistry(ids.map((id) => HARNESSES[id])).length === 0,
     'predict: a name no hub adapter answers passes the registry (the device checks the shape) and the hub\'s check says it by name; the built-ins all resolve', JSON.stringify([unk.slice(0, 80), unkHub]));
   // the hub's boot: harness-config-sync is created once by server.js with the registry — a built-in naming no adapter stops it by name
   const HCS = require(path.join(REPO, 'src/server/harness-config-sync.js'));
@@ -142,19 +142,19 @@ ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META ro
   const realH = require(path.join(REPO, 'src/harnesses/index.js'));
   const wrongH = { ...realH, list: () => realH.list().map((h) => (h.id === 'claude' ? { ...h, quota: { ...h.quota, predict: 'nosuch' } } : h)) };
   const okBoot = mkHcs(realH), badBoot = mkHcs(wrongH);
-  ok(!okBoot && /^prediction adapters: claude: quota\.predict names 'nosuch', which no hub adapter answers/.test(badBoot),
+  ok(!okBoot && verdictOf(/^prediction adapters: claude: quota\.predict names 'nosuch', which no hub adapter answers/.test(badBoot)),
     'predict: the hub checks every built-in name at its boot (harness-config-sync, created by server.js) — the built-ins pass; a built-in naming no adapter stops it by name', JSON.stringify([okBoot.slice(0, 80), badBoot.slice(0, 120)]));
   // a CONTRIBUTED harness (a plugin written before the member) may omit it — read as none; one it declares is checked
   let cOmit = ''; try { validate({ id: 'made-plugin', quota: { ...g.quota, predict: undefined } }, { full: false }); } catch (e) { cOmit = e.message; }
   let cBad = ''; try { validate({ id: 'made-plugin', quota: { ...g.quota, predict: { unit: 'credits', prior: { none: 'x y' } } } }, { full: false }); } catch (e) { cBad = e.message; }
-  ok(!cOmit && /quota\.predict — missing — name the adapter/.test(cBad), 'predict: a contributed harness that omits it registers (read as none); a malformed one is refused all the same', JSON.stringify([cOmit.slice(0, 80), cBad.slice(0, 80)]));
+  ok(!cOmit && verdictOf(/quota\.predict — missing — name the adapter/.test(cBad)), 'predict: a contributed harness that omits it registers (read as none); a malformed one is refused all the same', JSON.stringify([cOmit.slice(0, 80), cBad.slice(0, 80)]));
   // CONFORMANCE per source: the same made pair, learned under each source's own prior — Claude's rate leans on its prior;
   // a source with none learns only from its own pairs (no rate under $1 of cost)
   const E = require(path.join(REPO, 'src/usage-estimator.js'));
   const T = 4102444800000, a0 = { fetchedAt: T, source: 'statusline', sevenDay: { u: 0.10, resetsAt: T / 1000 + 5 * 86400 } };
   const a1 = { fetchedAt: T + 3600e3, prevFetchedAt: T, source: 'statusline', sevenDay: { u: 0.101, resetsAt: T / 1000 + 5 * 86400 }, costSince: { total: 0.5, byFamily: {} } };
   const conf = Object.keys(PA.ADAPTERS).map((src) => { const key = src === 'claude' ? 'org:made' : src + ':acct:made'; const pri = UP.priorsForIdentity(key); const r = E.learnRates([a0, a1], { priors: pri }); return { src, prior: pri ? pri.sevenDay : null, rate: r.sevenDay ? r.sevenDay.priorFullUsd : 'none' }; });
-  ok(conf.every((c) => (c.src === 'claude' ? c.prior === pr('claude').sevenDay && c.rate === pr('claude').sevenDay : c.prior === null && c.rate === 'none')),
+  ok(verdictOf(conf.every((c) => (c.src === 'claude' ? c.prior === pr('claude').sevenDay && c.rate === pr('claude').sevenDay : c.prior === null && c.rate === 'none'))),
     `predict CONFORMANCE: one made pair per source — Claude learns beside its own prior, codex and Antigravity learn from nothing but their pairs (${JSON.stringify(conf)})`);
 }
 // ── the caps MIRROR (design-harness-features §6 landing discipline): a caps row
@@ -176,7 +176,7 @@ ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META ro
         `server=${JSON.stringify(server)} client=${JSON.stringify(client)}`);
     }
     // …and the row cannot be a client-only invention (the §2.13 drift shape)
-    ok(Object.keys(BACKEND_CAPS).every((id) => BACKEND_CAPS[id][row] !== undefined),
+    ok(verdictOf(Object.keys(BACKEND_CAPS).every((id) => BACKEND_CAPS[id][row] !== undefined)),
       `every SERVER harness row declares ${row} (a client-only caps row is how \`review\` drifted)`);
   }
   const { backendFeatureCaps } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
@@ -213,11 +213,11 @@ for (const id of chatHarnessIds()) {
   }
   let frame = null, err = '';
   try { frame = JSON.parse(ad.formatQueueResync()); } catch (e) { err = e.message; }
-  ok(frame && frame.type === 'queue-resync' && Object.keys(frame).length === 1,
+  ok(gateOf(frame) && frame.type === 'queue-resync' && Object.keys(frame).length === 1,
     `${id}: adapter formats the resync ASK as a bare {type:'queue-resync'} frame (no id, no text ⇒ no size gate to get wrong)`, err || JSON.stringify(frame));
-  ok(/(?:msg|parsed)\.type === 'queue-resync'|case 'queue-resync'/.test(w),
+  ok(verdictOf(/(?:msg|parsed)\.type === 'queue-resync'|case 'queue-resync'/.test(w)),
     `${id}: its wrapper SERVES the verb (${path.basename(HARNESSES[id].wrapper)})`);
-  ok(/queueResync:\s*true/.test(w),
+  ok(verdictOf(/queueResync:\s*true/.test(w)),
     `${id}: …and ADVERTS it in the sidecar it writes — the per-PROCESS gate, because a wrapper spawned before the verb either drops the frame silently (codex) or answers it with a VISIBLE error card (ACP)`);
   // STOP PUTS THE DROPPED QUEUE BACK (owner 2026-10-24, lane stop-refills-composer): a harness that owns a queue drops it
   // on Stop — so its wrapper owes the ONE `queue_dropped` record (the person's rows, through the byte-identical twin)
@@ -226,7 +226,7 @@ for (const id of chatHarnessIds()) {
   // (claude since 2.369.361: `{ ...droppedRecordFor(…), kept }` — the twin's payload plus the count of frames handed to
   // the stopped turn, lane claude-steer-inject; acceptance r2: `kept, keptIds, landed, landedIds` — EACH handed frame's
   // fate, the literal spread over its own lines)
-  ok(/function droppedRecordFor\(rows, \{ dropId, turnId \} = \{\}\) \{/.test(w) && /(record|emitTaskEvent)\('queue_dropped', (?:\{\s*\.\.\.)?droppedRecordFor\(/.test(w),
+  ok(gateOf(/function droppedRecordFor\(rows, \{ dropId, turnId \} = \{\}\) \{/.test(w)) && verdictOf(/(record|emitTaskEvent)\('queue_dropped', (?:\{\s*\.\.\.)?droppedRecordFor\(/.test(w)),
     `${id}: a queue harness's wrapper emits ONE queue_dropped record on Stop (the put-back) through its droppedRecordFor twin (${path.basename(HARNESSES[id].wrapper)})`);
 }
 // …and the server READS that advert (wrapperCaps is the ONE reader of a
@@ -293,24 +293,24 @@ console.log('— settings tables');
   };
   for (const id of harnessIds()) {
     const h = HARNESSES[id];
-    if (!h.settingsPrefix) { ok(h.settings === null && h.configFiles && Object.keys(h.configFiles).length === 0, `${id}: no settings prefix ⇒ settings null, no config files`); continue; }
+    if (!h.settingsPrefix) { ok(h.settings === null && gateOf(h.configFiles) && Object.keys(h.configFiles).length === 0, `${id}: no settings prefix ⇒ settings null, no config files`); continue; }
     const adapterHas = (verb) => typeof h.Adapter.prototype[verb] === 'function';
     const errs = checkTable(h.settings, { settingsPrefix: h.settingsPrefix, configFiles: h.configFiles, adapterHas, wordsApart: true });   // B-82b8: a built-in table's words live apart (judged by the census below)
     ok(errs.length === 0, `${id}: checkTable passes with the descriptor's context`, errs.join('; '));
-    for (const [fid, spec] of Object.entries(h.configFiles || {})) ok(spec.rel === h.settings.files[fid].rel && typeof spec.file === 'function' && CREATE_RULES.includes(spec.createIfMissing), `${id}: configFiles.${fid}.rel IS the table's rel array (one spelling) + file()/createIfMissing ∈ ${JSON.stringify(CREATE_RULES)}`);
-    if (h.inject && h.inject.hookFile) ok(Object.values(h.configFiles).includes(h.inject.hookFile), `${id}: inject.hookFile IS one of configFiles (identity — the hook entries and the managed keys share the file object)`);
+    for (const [fid, spec] of Object.entries(h.configFiles || {})) ok(spec.rel === h.settings.files[fid].rel && typeof spec.file === 'function' && verdictOf(CREATE_RULES.includes(spec.createIfMissing)), `${id}: configFiles.${fid}.rel IS the table's rel array (one spelling) + file()/createIfMissing ∈ ${JSON.stringify(CREATE_RULES)}`);
+    if (h.inject && h.inject.hookFile) ok(verdictOf(Object.values(h.configFiles).includes(h.inject.hookFile)), `${id}: inject.hookFile IS one of configFiles (identity — the hook entries and the managed keys share the file object)`);
     for (const row of rowsOfKind(h.settings, 'cli-config')) ok(!!h.configFiles[row.apply.file] && h.configFiles[row.apply.file].writable !== false, `${id}: cli-config row ${row.key} targets a declared writable file (${row.apply.file})`);
     const ad = registry.get(id);
-    for (const row of rowsOfKind(h.settings, 'spawn')) ok(spawnRowConsumed(ad, row), `${id}: spawn row ${row.key} CHANGES the spawn when set (${row.apply.via || 'opts.settings.' + row.key})`);
+    for (const row of rowsOfKind(h.settings, 'spawn')) ok(verdictOf(spawnRowConsumed(ad, row)), `${id}: spawn row ${row.key} CHANGES the spawn when set (${row.apply.via || 'opts.settings.' + row.key})`);
     for (const row of rowsOfKind(h.settings, 'spawn').filter((r) => r.apply.live)) ok(typeof ad[row.apply.live] === 'function', `${id}: live verb ${row.apply.live} (row ${row.key}) is an adapter method`);
   }
   ok(!spawnRowConsumed(registry.get('claude'), { key: 'nobodyReadsMe', type: 'boolean', default: false, apply: { kind: 'spawn', how: 'nothing' } }), 'NEGATIVE CONTROL: a synthetic spawn row nobody consumes is caught (the checker can say no)');
-  ok(spawnRowConsumed(registry.get('claude'), rowOf(HARNESS_SETTINGS.claude, 'brief')), 'POSITIVE CONTROL: claude.brief flips --brief');
-  ok(HARNESS_SETTINGS.codex.rows.some((r) => r.key === 'historyPersistence' && r.apply.kind === 'cli-config' && r.apply.path.join('.') === 'history.persistence' && r.default === 'save-all'), 'codex declares ONE managed config.toml row: historyPersistence → [history] persistence (default save-all, 0.154.0 evidence in the row comment)');
+  ok(verdictOf(spawnRowConsumed(registry.get('claude'), rowOf(HARNESS_SETTINGS.claude, 'brief'))), 'POSITIVE CONTROL: claude.brief flips --brief');
+  ok(verdictOf(HARNESS_SETTINGS.codex.rows.some((r) => r.key === 'historyPersistence' && r.apply.kind === 'cli-config' && r.apply.path.join('.') === 'history.persistence' && r.default === 'save-all')), 'codex declares ONE managed config.toml row: historyPersistence → [history] persistence (default save-all, 0.154.0 evidence in the row comment)');
   ok(!rowOf(HARNESS_SETTINGS.claude, 'autoResumeOnLimit'), 'autoResumeOnLimit is NOT a claude row (generic feature; legacy key spelling lives in GENERIC_LEGACY_KEYS)');
 }
 // S5 pins: the stdout registry covers exactly the declared protocols; an unknown one has no consumer (never a stream-json fallback)
-ok(PROTOCOLS.every((p) => chatHarnessIds().some((id) => HARNESSES[id].caps.streamProtocol === p)), `no dead stdout consumer row: every registered protocol is declared by a chat harness (${PROTOCOLS.join(',')})`);
+ok(verdictOf(PROTOCOLS.every((p) => chatHarnessIds().some((id) => HARNESSES[id].caps.streamProtocol === p))), `no dead stdout consumer row: every registered protocol is declared by a chat harness (${PROTOCOLS.join(',')})`);
 ok(!hasConsumer('gemini-events') && !hasConsumer(null) && !hasConsumer(capsOf('shell').streamProtocol), 'an unregistered / null protocol has NO stdout consumer (session-stdout reports it loudly; nothing defaults to stream-json)');
 ok(BACKEND_META.codex.fallbackModels[0] === 'gpt-6-astra', 'codex fallback model list leads with gpt-6-astra (0.153.4 catalog default)');
 // S7 pins: client settings-prefix / account-surface collapses are gone
@@ -327,10 +327,10 @@ for (const id of chatHarnessIds()) {
   if (!c) { ok(BACKEND_META[id].caps?.accounts === false && HARNESSES[id].caps.pool === false, `${id}: no credential mechanics ⇒ client META caps.accounts false + no pool (the agent holds its own login)`); continue; }
   // the spawn form: ONE env var pointed at the account dir (codex CODEX_HOME), or a spawnEnv(dir) answer (antigravity:
   // HOME = the account's root + the bus disabled — a name no *EnvVar field may carry, see THE EVERY-PROCESS CENSUS)
-  ok(c && typeof c.subsDirName === 'string' && typeof c.authFile === 'string' && (typeof c.spawnEnvVar === 'string' || typeof c.spawnEnv === 'function') && typeof c.loginLabel === 'string' && typeof c.defaultIdField === 'string' && typeof c.keychainSensitive === 'boolean' && typeof c.parseAuth === 'function', `${id}: creds descriptor complete (${c?.subsDirName}, ${c?.spawnEnvVar || (typeof c?.spawnEnv === 'function' ? 'spawnEnv()' : undefined)})`);
+  ok(gateOf(c) && typeof c.subsDirName === 'string' && typeof c.authFile === 'string' && (typeof c.spawnEnvVar === 'string' || typeof c.spawnEnv === 'function') && typeof c.loginLabel === 'string' && typeof c.defaultIdField === 'string' && typeof c.keychainSensitive === 'boolean' && typeof c.parseAuth === 'function', `${id}: creds descriptor complete (${c?.subsDirName}, ${c?.spawnEnvVar || (typeof c?.spawnEnv === 'function' ? 'spawnEnv()' : undefined)})`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-creds-'));
   ok(c.parseAuth(tmp).loggedIn === false, `${id}: parseAuth on an empty dir = not logged in (never throws)`);
-  if (id === 'claude') { fs.writeFileSync(path.join(tmp, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', subscriptionType: 'max', expiresAt: Date.now() + 3600000 } })); fs.writeFileSync(path.join(tmp, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'a@b.c', organizationName: 'Org' } })); const r = c.parseAuth(tmp); ok(r.loggedIn && r.subscriptionType === 'max' && r.email === 'a@b.c' && r.org === 'Org' && r.accessToken === 'tok', 'claude parseAuth reads creds + identity from the dir'); }
+  if (id === 'claude') { fs.writeFileSync(path.join(tmp, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', subscriptionType: 'max', expiresAt: Date.now() + 3600000 } })); fs.writeFileSync(path.join(tmp, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'a@b.c', organizationName: 'Org' } })); const r = c.parseAuth(tmp); ok(gateOf(r.loggedIn) && r.subscriptionType === 'max' && r.email === 'a@b.c' && r.org === 'Org' && r.accessToken === 'tok', 'claude parseAuth reads creds + identity from the dir'); }
   if (id === 'antigravity') {
     // the login is a SECRET AT REST we never read: "signed in" is a STAT — an unreadable file still answers
     const H8 = require(path.join(REPO, 'src/harnesses/antigravity.js'));
@@ -340,7 +340,7 @@ for (const id of chatHarnessIds()) {
     ok(env.HOME === tmp && env.DBUS_SESSION_BUS_ADDRESS === 'disabled:' && Object.keys(env).length === 2, `${id}: spawnEnv = HOME the account root + the bus disabled (agy dials any findable bus — measured)`, env);
     fs.chmodSync(f, 0o600);
   }
-  if (id === 'codex') { const claims = Buffer.from(JSON.stringify({ email: 'x@y.z', 'https://api.openai.com/auth': { chatgpt_plan_type: 'pro' } })).toString('base64url'); fs.writeFileSync(path.join(tmp, 'auth.json'), JSON.stringify({ tokens: { access_token: 'a', id_token: `h.${claims}.s` } })); const r = c.parseAuth(tmp); ok(r.loggedIn && r.email === 'x@y.z' && r.plan === 'pro' && r.subscriptionType === 'pro' && r.authMode === 'chatgpt', 'codex parseAuth reads identity from the id_token (subscriptionType mirrors plan)'); }
+  if (id === 'codex') { const claims = Buffer.from(JSON.stringify({ email: 'x@y.z', 'https://api.openai.com/auth': { chatgpt_plan_type: 'pro' } })).toString('base64url'); fs.writeFileSync(path.join(tmp, 'auth.json'), JSON.stringify({ tokens: { access_token: 'a', id_token: `h.${claims}.s` } })); const r = c.parseAuth(tmp); ok(gateOf(r.loggedIn) && r.email === 'x@y.z' && r.plan === 'pro' && r.subscriptionType === 'pro' && r.authMode === 'chatgpt', 'codex parseAuth reads identity from the id_token (subscriptionType mirrors plan)'); }
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 const acc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
@@ -350,7 +350,7 @@ for (const id of chatHarnessIds()) {
   if (!c) continue;
   // a shipped login lists its file + the remote probe; a localOnly row (antigravity) ships NOTHING and probes nothing
   const ships = c.localOnly === true ? (c.files.length === 0 && c.probe == null) : (c.files.includes(c.authFile) && c.probe && typeof c.probe.file === 'string' && typeof c.probe.marker === 'string');
-  ok(Array.isArray(c.files) && ships && typeof c.hostFactsKey === 'string' && typeof c.longLivedToken === 'boolean' && typeof c.supportsApiKeys === 'boolean' && typeof c.seedDir === 'function' && ('bumpFile' in c) && typeof c.remoteSymlinks === 'object' && Array.isArray(c.ensureTargets), `${id}: creds remainder complete (files ${c.files?.join('+')}, hostFactsKey ${c.hostFactsKey}, bumpFile ${c.bumpFile})`);
+  ok(gateOf(Array.isArray(c.files)) && gateOf(ships) && typeof c.hostFactsKey === 'string' && typeof c.longLivedToken === 'boolean' && typeof c.supportsApiKeys === 'boolean' && typeof c.seedDir === 'function' && ('bumpFile' in c) && typeof c.remoteSymlinks === 'object' && verdictOf(Array.isArray(c.ensureTargets)), `${id}: creds remainder complete (files ${c.files?.join('+')}, hostFactsKey ${c.hostFactsKey}, bumpFile ${c.bumpFile})`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-seed-'));
   const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(tmp, 'shared'); // keep the codex seeder off the real ~/.codex
   const prevH = process.env.HOME; process.env.HOME = path.join(tmp, 'machine-home'); fs.mkdirSync(process.env.HOME); // …and the antigravity farm off the real HOME
@@ -362,12 +362,12 @@ ok((acc.match(/this\._remoteCreds\(/g) || []).length >= 2 && !/CODEX_SUB_FILES|C
 ok((acc.match(/this\._readAuthFor\(/g) || []).length >= 4 && (acc.match(/this\._acctDir\(/g) || []).length >= 3 && !/codexSubDir\(a\.id\) : this\.subDir\(a\.id\)/.test(acc) && !/\? this\.readCodexSubAuth\(/.test(acc), 'accounts.js reads dirs/auth/labels/default-field through the descriptor (mechanical codex-or-claude ternaries gone)');
 // S6 wiring pins: injection topology decided by the strategy, never a backend id
 const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
-ok(!/s\.backend !== 'codex'/.test(ar) && (ar.match(/honoursSessionStart\(s\)/g) || []).length === 5 && /if \(!honoursSessionStart\(s\)\) return res\.json\(\{ success: true, context: '' \}\);/.test(ar) && /getHarness\(b\)\.inject\?\.kind === 'wrapper'/.test(ar), 'agent-routes: the four SessionStart seen-gates + the r7 door (a harness that ignores SessionStart output gets an empty task-context — nothing drained) consult inject.sessionStartHonoured, and the hook-call door reads inject.kind (no backend-id gate left)');
+ok(!/s\.backend !== 'codex'/.test(ar) && (ar.match(/honoursSessionStart\(s\)/g) || []).length === 5 && gateOf(/if \(!honoursSessionStart\(s\)\) return res\.json\(\{ success: true, context: '' \}\);/.test(ar)) && verdictOf(/getHarness\(b\)\.inject\?\.kind === 'wrapper'/.test(ar)), 'agent-routes: the four SessionStart seen-gates + the r7 door (a harness that ignores SessionStart output gets an empty task-context — nothing drained) consult inject.sessionStartHonoured, and the hook-call door reads inject.kind (no backend-id gate left)');
 const atg = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8');
 // B-ddf3 unit 2 line 1: the removal runs the SHIPPED helper's --uninstall (harness-config-sync applyThisMachine, strip), whose SHARED applier strips our entries under EVERY event of the file
-ok(/applyThisMachine\(\{ reason: ifOptedOut \? 'hooks removed \(a start: still opted out\)' : 'hooks removed', strip: true,/.test(atg) && /if \(uninstall\) \{ if \(stripHookEntries\(root\)\)/.test(fs.readFileSync(path.join(REPO, 'src/harness-config.js'), 'utf8')) && !/\[\.\.\.HOOK_EVENTS, 'Stop'\]/.test(atg), 'the hook REMOVAL path strips every event (the shipped helper\'s --uninstall, through the SHARED mutator with no event list; the old literal was a lost binding after S6)');
-ok(/HOOK_FILES = Object\.fromEntries\(listHarnesses\(\)/.test(atg) && /HOOK_EVENTS_FOR = \(harness\) => \{ const h = listHarnesses\(\)/.test(atg) && !/harness === 'claude' \? \[/.test(atg), 'agent-tool-generators: hook files + events come from the registry (no per-harness literals)');
-ok(HARNESSES.claude.inject.hookEvents.includes('Stop') && !HARNESSES.codex.inject.hookEvents.includes('Stop') && HARNESSES.codex.inject.sessionStartHonoured === false, 'claude registers Stop, codex does not and ignores SessionStart (zero behaviour change)');
+ok(gateOf(/applyThisMachine\(\{ reason: ifOptedOut \? 'hooks removed \(a start: still opted out\)' : 'hooks removed', strip: true,/.test(atg)) && gateOf(/if \(uninstall\) \{ if \(stripHookEntries\(root\)\)/.test(fs.readFileSync(path.join(REPO, 'src/harness-config.js'), 'utf8'))) && !/\[\.\.\.HOOK_EVENTS, 'Stop'\]/.test(atg), 'the hook REMOVAL path strips every event (the shipped helper\'s --uninstall, through the SHARED mutator with no event list; the old literal was a lost binding after S6)');
+ok(gateOf(/HOOK_FILES = Object\.fromEntries\(listHarnesses\(\)/.test(atg)) && gateOf(/HOOK_EVENTS_FOR = \(harness\) => \{ const h = listHarnesses\(\)/.test(atg)) && !/harness === 'claude' \? \[/.test(atg), 'agent-tool-generators: hook files + events come from the registry (no per-harness literals)');
+ok(gateOf(HARNESSES.claude.inject.hookEvents.includes('Stop')) && !HARNESSES.codex.inject.hookEvents.includes('Stop') && HARNESSES.codex.inject.sessionStartHonoured === false, 'claude registers Stop, codex does not and ignores SessionStart (zero behaviour change)');
 
 // ── turnState / inProgressTools (design-harness-features §2.5 + §3.5) ──
 // Where "is a turn running" comes from, declared per harness and MIRRORED on
@@ -377,7 +377,7 @@ console.log('— turnState');
 {
   for (const id of Object.keys(BACKEND_CAPS)) {
     const row = BACKEND_CAPS[id];
-    ok([null, 'authoritative', 'derived'].includes(row.turnState) && typeof row.inProgressTools === 'boolean',
+    ok(gateOf([null, 'authoritative', 'derived'].includes(row.turnState)) && typeof row.inProgressTools === 'boolean',
       `${id}: declares turnState + inProgressTools (${row.turnState} / ${row.inProgressTools})`);
   }
   ok(capsOf('claude').turnState === 'authoritative' && capsOf('claude').inProgressTools === false,
@@ -386,7 +386,7 @@ console.log('— turnState');
   // FAILS if someone flips a row back on the strength of a record existing in a
   // schema — the wire leg in test-stdout-registry is the only thing that may
   // justify flipping it, and it says so in its own failure message.
-  ok(Object.values(BACKEND_CAPS).every((r) => r.inProgressTools === false),
+  ok(verdictOf(Object.values(BACKEND_CAPS).every((r) => r.inProgressTools === false)),
     'no harness claims inProgressTools — a cap is a promise to a surface, and no surface can currently draw an "executing" dot from any harness',
     JSON.stringify(Object.fromEntries(Object.entries(BACKEND_CAPS).map(([k, v]) => [k, v.inProgressTools]))));
   ok(capsOf('codex').turnState === 'authoritative' && capsOf('codex').inProgressTools === false,
@@ -400,7 +400,7 @@ console.log('— turnState');
   const consumers = { claude: 'claude-stream-json', codex: 'codex-events', opencode: 'acp-events', antigravity: 'acp-events' };
   for (const [id, mod] of Object.entries(consumers)) {
     const src = fs.readFileSync(path.join(REPO, `src/server/stdout/${mod}.js`), 'utf8');
-    ok(capsOf(id).turnState !== 'authoritative' || /session\._isStreaming = /.test(src),
+    ok(capsOf(id).turnState !== 'authoritative' || verdictOf(/session\._isStreaming = /.test(src)),
       `${id}: the 'authoritative' claim is backed by its consumer actually driving _isStreaming (${mod}.js)`);
   }
   // …and the CLIENT mirror deep-equals it, key by key, in both directions.
@@ -441,7 +441,7 @@ for (const id of chatHarnessIds()) {
   const srv = capsOf(id), cli = BACKEND_META[id].caps || {};
   const drift = Object.keys(cli).filter((k) => (k in srv ? !deepEq(srv[k], cli[k]) : !CLIENT_ONLY_OK.has(k)));
   ok(drift.length === 0, `${id}: client caps mirror the server row (or are named chrome-only flags)`, drift.map((k) => `${k}: server=${JSON.stringify(srv[k])} client=${JSON.stringify(cli[k])}`).join(' | '));
-  ok(['review', 'renameWriteback', 'forkAtMessage'].every((k) => typeof srv[k] === 'boolean' && typeof cli[k] === 'boolean'),
+  ok(verdictOf(['review', 'renameWriteback', 'forkAtMessage'].every((k) => typeof srv[k] === 'boolean' && typeof cli[k] === 'boolean')),
     `${id}: review / renameWriteback / forkAtMessage exist on BOTH sides (review=${srv.review} renameWriteback=${srv.renameWriteback} forkAtMessage=${srv.forkAtMessage})`);
 }
 ok(capsOf('claude').forkAtMessage === true && capsOf('claude').fork === true && capsOf('codex').forkAtMessage === false && capsOf('codex').fork === true,
@@ -487,13 +487,13 @@ const SITES = [
   // now picks through the client mirror row `quotaRefresh === 'session-rpc'`.
   ['src/lib/usage-meter.js', '_refreshCodexQuota(btn) {', 6, 'client codex ⟳ trigger'],
 ];
-ok(hasBackendIdGate("const live = all.find((s) => (s.backend || 'claude') === 'codex' && s.status === 'live');"), 'NEGATIVE CONTROL: the checker catches the DEFAULTED spelling `(s.backend || \'claude\') === \'codex\'` (the pre-fix codex ⟳ trigger)');
+ok(verdictOf(hasBackendIdGate("const live = all.find((s) => (s.backend || 'claude') === 'codex' && s.status === 'live');")), 'NEGATIVE CONTROL: the checker catches the DEFAULTED spelling `(s.backend || \'claude\') === \'codex\'` (the pre-fix codex ⟳ trigger)');
 ok(!hasBackendIdGate("const live = all.find((s) => backendFeatureCaps(s.backend || 'claude').quotaRefresh === 'session-rpc');"), '…and reads a caps read with a defaulted id as clean');
 for (const [file, marker, lines, label] of SITES) {
   const block = blockOf(fs.readFileSync(path.join(REPO, file), 'utf8'), marker, lines);
   ok(block !== null, `${label}: the call site is still where the pin looks (${file} :: ${marker})`);
   ok(block !== null && !hasBackendIdGate(block), `${label}: gated on caps, no backend-id branch left`, block ? block.split('\n').filter((l) => hasBackendIdGate(l)).join(' / ') : 'marker gone');
-  ok(hasBackendIdGate(`${block}\n  if (backend !== 'claude') return;`), `${label}: NEGATIVE CONTROL — the checker DOES catch a planted backend-id gate`);
+  ok(verdictOf(hasBackendIdGate(`${block}\n  if (backend !== 'claude') return;`)), `${label}: NEGATIVE CONTROL — the checker DOES catch a planted backend-id gate`);
 }
 
 // The quota verbs are pinned POSITIVELY too (deleting the gate would write a
@@ -501,7 +501,7 @@ for (const [file, marker, lines, label] of SITES) {
 {
   const qBlock = blockOf(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), "case 'codex-read-limits':", 10) || '';
   const READS_QUOTA_CAPS = /capsOf\(session\?\.backend\)[\s\S]*quotaProbe === 'rpc-rate-limits'[\s\S]*&& served\)/;
-  ok(READS_QUOTA_CAPS.test(qBlock), 'ws codex quota verb: read limits reads caps.quotaProbe === rpc-rate-limits, and the write is gated on that verdict');
+  ok(verdictOf(READS_QUOTA_CAPS.test(qBlock)), 'ws codex quota verb: read limits reads caps.quotaProbe === rpc-rate-limits, and the write is gated on that verdict');
   ok(!READS_QUOTA_CAPS.test("if (session?.pty && session.mode === 'chat' && session.backend === 'codex') {"), '…NEGATIVE CONTROL: that checker reads FALSE on the pre-fix backend-id line');
   ok(capsOf('codex').resetCredit === true && capsOf('codex').quotaProbe === 'rpc-rate-limits' && capsOf('claude').resetCredit === false && capsOf('claude').quotaProbe !== 'rpc-rate-limits' && capsOf('shell').resetCredit === false && capsOf('shell').quotaProbe === null && capsOf('gemini-unknown').resetCredit === false && capsOf('gemini-unknown').quotaProbe === null,
     '…and the verdict is unchanged: codex is served both verbs, claude / shell / an unknown id refuse both');
@@ -512,7 +512,7 @@ for (const [file, marker, lines, label] of SITES) {
 {
   const READS_QUOTA_MIRROR = /backendFeatureCaps\(s\.backend \|\| 'claude'\)\.quotaRefresh === 'session-rpc'/;
   const cBlock = blockOf(fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8'), '_refreshCodexQuota(btn) {', 6) || '';
-  ok(READS_QUOTA_MIRROR.test(cBlock), 'client codex ⟳ trigger: picks its session by the mirror row quotaRefresh === session-rpc');
+  ok(verdictOf(READS_QUOTA_MIRROR.test(cBlock)), 'client codex ⟳ trigger: picks its session by the mirror row quotaRefresh === session-rpc');
   ok(!READS_QUOTA_MIRROR.test("const live = (this.sidebar?._allSessions || []).find((s) => (s.backend || 'claude') === 'codex' && s.status === 'live' && s.webuiId && !s.host);"), '…NEGATIVE CONTROL: that checker reads FALSE on the pre-fix id line');
   ok(backendFeatureCaps('codex').quotaRefresh === 'session-rpc' && backendFeatureCaps('claude').quotaRefresh === undefined && backendFeatureCaps('shell').quotaRefresh === undefined && backendFeatureCaps('nope').quotaRefresh === undefined,
     '…and the pick is unchanged: codex sessions qualify, claude / shell / an unknown id never do');
@@ -525,10 +525,10 @@ for (const [file, marker, lines, label] of SITES) {
 // positively: it must read the capability row.
 const READS_RENAME_CAP = /backendFeatureCaps\(sessionOrKey\?\.backend\)\.renameWriteback/;
 const renameTrigger = blockOf(fs.readFileSync(path.join(REPO, 'src/lib/sidebar-state.js'), 'utf8'), 'proto.renameSession = async function', 28);
-ok(READS_RENAME_CAP.test(renameTrigger || ''), 'client rename-writeback trigger: reads caps.renameWriteback (the mirror row test-harness-contract deep-compares), so it cannot be silently DELETED either');
+ok(verdictOf(READS_RENAME_CAP.test(renameTrigger || '')), 'client rename-writeback trigger: reads caps.renameWriteback (the mirror row test-harness-contract deep-compares), so it cannot be silently DELETED either');
 ok(!READS_RENAME_CAP.test("if (sessionOrKey?.backend === 'codex' && name.trim()) this.app.renameBackendSession?.(sessionOrKey, name.trim());"),
   '…NEGATIVE CONTROL: that checker reads FALSE on the pre-fix backend-id line');
-ok(/import \{ getSessionKey, backendFeatureCaps \} from '\.\/agent-meta\.js';/.test(fs.readFileSync(path.join(REPO, 'src/lib/sidebar-state.js'), 'utf8')),
+ok(verdictOf(/import \{ getSessionKey, backendFeatureCaps \} from '\.\/agent-meta\.js';/.test(fs.readFileSync(path.join(REPO, 'src/lib/sidebar-state.js'), 'utf8'))),
   '…and the predicate is the SHARED one (agent-meta), not a local caps twin');
 // ZERO BEHAVIOUR CHANGE TODAY (the reason this is a drift fix, not a feature):
 // the predicate the trigger now reads answers exactly what the deleted id test
@@ -561,15 +561,15 @@ console.log('— worktree caps (owner ruling 9)');
   // The FACTS, dumped from `claude --help` on 2.1.257 and measured on a real
   // repo (see the caps-row comment): only claude has the flag, it is spelled
   // --worktree, and it needs a git repository.
-  ok(capsOf('claude').worktree.supported && capsOf('claude').worktree.flag === '--worktree' && capsOf('claude').worktree.requiresGitRepo === true
-    && ['codex', 'shell', 'opencode', 'antigravity'].every((id) => capsOf(id).worktree.supported === false),
+  ok(gateOf(capsOf('claude').worktree.supported) && capsOf('claude').worktree.flag === '--worktree' && capsOf('claude').worktree.requiresGitRepo === true
+    && verdictOf(['codex', 'shell', 'opencode', 'antigravity'].every((id) => capsOf(id).worktree.supported === false)),
     'claude is the only harness with the flag, spelled exactly --worktree, needing a git repo');
   ok(worktreeCaps('gemini') === NO_WORKTREE, "an unknown backend gets the all-false NO_WORKTREE row (never claude's by accident)");
   // NEVER --tmux (its own help: "Create a tmux session for the worktree
   // (requires --worktree)") — dtach is the persistence layer.
   const capsSrc = fs.readFileSync(path.join(REPO, 'src/backend-caps.js'), 'utf8');
   const adapterSrc = fs.readFileSync(path.join(REPO, 'src/adapters/claude-code.js'), 'utf8');
-  ok(!/flag:\s*'--tmux'/.test(capsSrc) && !/args\.push\('--tmux'/.test(adapterSrc) && /--tmux must never be spawned/.test(adapterSrc),
+  ok(!/flag:\s*'--tmux'/.test(capsSrc) && !/args\.push\('--tmux'/.test(adapterSrc) && verdictOf(/--tmux must never be spawned/.test(adapterSrc)),
     'no harness declares --tmux and the claude adapter never pushes it');
   // REFUSAL is a tri-state read: only a DEFINITIVE "not a repo" refuses.
   ok(!worktreeRefusal({ backend: 'claude', want: false, isGitRepo: false }), 'worktreeRefusal: not asked ⇒ no refusal, whatever the probe said');
@@ -597,10 +597,10 @@ console.log('— worktree caps (owner ruling 9)');
   // that ships dead) — ws-create must actually probe the hook and hand it to
   // the rule, on BOTH transports.
   const wsCreateSrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
-  ok(/claudeWorktreeHookConfigured/.test(wsCreateSrc) && /hooks\.WorktreeCreate/.test(wsCreateSrc)
-    && /worktreeRefusal\(\{[^}]*hasWorktreeHook\b/.test(wsCreateSrc) && /__VS_WTHOOK_YES__/.test(wsCreateSrc),
+  ok(gateOf(/claudeWorktreeHookConfigured/.test(wsCreateSrc)) && gateOf(/hooks\.WorktreeCreate/.test(wsCreateSrc))
+    && gateOf(/worktreeRefusal\(\{[^}]*hasWorktreeHook\b/.test(wsCreateSrc)) && verdictOf(/__VS_WTHOOK_YES__/.test(wsCreateSrc)),
     'WIRING: ws-create probes the hook locally AND over the host shell, and passes it to worktreeRefusal');
-  ok(/refusal\.hookEscape/.test(wsCreateSrc), 'WIRING: the refusal message names the hook escape hatch from the caps row');
+  ok(verdictOf(/refusal\.hookEscape/.test(wsCreateSrc)), 'WIRING: the refusal message names the hook escape hatch from the caps row');
   // WHICH SPAWNS PASS THE FLAG (2.1.257 decompiled): a resume RE-ENTERS the
   // recorded worktree by itself (y6(host, se.worktreeSession)), a fork STRIPS
   // the binding (Une(se,{stripWorktreeSession:true})).
@@ -612,7 +612,7 @@ console.log('— worktree caps (owner ruling 9)');
   // The client surfaces gate on the CAPS ROW, never on a backend id.
   const appSrc = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
   const propsSrc = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
-  ok(/worktreeCapsFor\(backend\)\.supported/.test(appSrc) && /worktreeCapsFor\(s\.backend \|\| 'claude'\)/.test(propsSrc)
+  ok(gateOf(/worktreeCapsFor\(backend\)\.supported/.test(appSrc)) && gateOf(/worktreeCapsFor\(s\.backend \|\| 'claude'\)/.test(propsSrc))
     && !/backend === 'claude'[^\n]*worktree/.test(appSrc) && !/worktree[^\n]*backend === 'claude'/.test(propsSrc),
     'the New Session row + the Session Properties row gate on worktreeCapsFor(backend).supported (no backend-id branch)');
   // BOTH surfaces are a real CHECKBOX writing the same per-session key, so the
@@ -620,13 +620,13 @@ console.log('— worktree caps (owner ruling 9)');
   // fact (`cfg.worktree`), which resumeSession/fork read back.
   const lifeSrc = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
   const sideSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-state.js'), 'utf8');
-  ok(/id="input-worktree"/.test(fs.readFileSync(path.join(REPO, 'public/index.html'), 'utf8'))
-    && /getElementById\('input-worktree'\)\?\.checked/.test(appSrc)
-    && /setSessionConfig\?\.\(s, \{ \.\.\.\(sidebar\.getSessionConfig\?\.\(s\) \|\| \{\}\), worktree: cb\.checked \}\)/.test(propsSrc),
+  ok(gateOf(/id="input-worktree"/.test(fs.readFileSync(path.join(REPO, 'public/index.html'), 'utf8')))
+    && gateOf(/getElementById\('input-worktree'\)\?\.checked/.test(appSrc))
+    && verdictOf(/setSessionConfig\?\.\(s, \{ \.\.\.\(sidebar\.getSessionConfig\?\.\(s\) \|\| \{\}\), worktree: cb\.checked \}\)/.test(propsSrc)),
     'the tick is a CHECKBOX in both places, writing the one per-session key (dialog → create, properties → cfg.worktree)');
-  ok(/if \(config\?\.worktree === true \|\| config\?\.worktree === false\) clean\.worktree = config\.worktree;/.test(sideSrc)
+  ok(gateOf(/if \(config\?\.worktree === true \|\| config\?\.worktree === false\) clean\.worktree = config\.worktree;/.test(sideSrc))
     && !/'outputStyle', 'worktree'\]/.test(sideSrc)
-    && /worktree: worktree !== undefined \? worktree : savedCfg\.worktree/.test(lifeSrc),
+    && verdictOf(/worktree: worktree !== undefined \? worktree : savedCfg\.worktree/.test(lifeSrc)),
     "…and the saved pick SURVIVES as a TRI-STATE (sidebar-state persists an explicit false like autoResume — the truthy list would erase an untick; resumeSession reads it back)");
 }
 
@@ -646,10 +646,10 @@ console.log('— toolAllowlist caps (the New Session form\'s 可用工具 row)')
   const pickFor = (r) => (!r ? { allow: ['Read'] } : r.kind === 'tools' ? { allow: [r.tools[0]], deny: [r.tools.find((x) => !r.keep.includes(x) && x !== r.tools[0])] } : { sandbox: r.sandbox[0], approval: r.approval[0] });
   for (const id of harnessIds()) {
     const h = harnessOf(id); const row = capsOf(id).toolAllowlist;
-    ok(Object.prototype.hasOwnProperty.call(capsOf(id), 'toolAllowlist') && shapeOk(row), `${id}: caps declares a toolAllowlist row of a known shape (${row ? row.kind : 'none'})`, JSON.stringify(row));
-    ok(same(h.caps?.toolAllowlist ?? null, row ?? null), `${id}: the descriptor's caps row IS the row capsOf answers`);
-    if (BACKEND_META[id]?.caps) ok(same(BACKEND_META[id].caps.toolAllowlist ?? null, row ?? null), `${id}: the client META mirror deep-equals the server row (no drift)`, JSON.stringify({ client: BACKEND_META[id].caps.toolAllowlist, server: row }));
-    ok(same(toolAllowlistFor(id), toolAllowlistCaps(id)), `${id}: the two readers agree (client toolAllowlistFor / server toolAllowlistCaps)`);
+    ok(gateOf(Object.prototype.hasOwnProperty.call(capsOf(id), 'toolAllowlist')) && verdictOf(shapeOk(row)), `${id}: caps declares a toolAllowlist row of a known shape (${row ? row.kind : 'none'})`, JSON.stringify(row));
+    ok(verdictOf(same(h.caps?.toolAllowlist ?? null, row ?? null)), `${id}: the descriptor's caps row IS the row capsOf answers`);
+    if (BACKEND_META[id]?.caps) ok(verdictOf(same(BACKEND_META[id].caps.toolAllowlist ?? null, row ?? null)), `${id}: the client META mirror deep-equals the server row (no drift)`, JSON.stringify({ client: BACKEND_META[id].caps.toolAllowlist, server: row }));
+    ok(verdictOf(same(toolAllowlistFor(id), toolAllowlistCaps(id))), `${id}: the two readers agree (client toolAllowlistFor / server toolAllowlistCaps)`);
     if (h.kind !== 'chat') continue;
     const ad = registry.get(id);
     const spawnOf = (o) => { const s = ad.buildSessionArgs(o); return JSON.stringify({ args: s.args, env: s.env || {} }); };
@@ -657,20 +657,20 @@ console.log('— toolAllowlist caps (the New Session form\'s 可用工具 row)')
     ok(consumed === !!row, `${id}: the adapter ${row ? 'CONSUMES a pick of its row' : 'never forwards a pick (it declares no row)'} — driven through buildSessionArgs`);
   }
   const TOOL_ROW_KIND = { claude: 'tools', codex: 'sandbox', shell: null, opencode: null, antigravity: null };   // every harness: its row's kind (null = no row)
-  ok(harnessIds().every((id) => id in TOOL_ROW_KIND && (capsOf(id).toolAllowlist?.kind ?? null) === TOOL_ROW_KIND[id]),
+  ok(verdictOf(harnessIds().every((id) => id in TOOL_ROW_KIND && (capsOf(id).toolAllowlist?.kind ?? null) === TOOL_ROW_KIND[id])),
     'claude: --allowedTools / --disallowedTools · codex: sandbox + approval · a plain shell, opencode, antigravity: no row', JSON.stringify(Object.fromEntries(harnessIds().map((id) => [id, capsOf(id).toolAllowlist?.kind ?? null]))));
   ok(toolAllowlistCaps('gemini') === null && toolAllowlistFor('gemini') === null, 'an unknown backend has no row (never claude\'s by accident)');
-  ok(capsOf('claude').toolAllowlist.keep.includes('Bash'), 'the claude row KEEPS Bash: its ✗ is refused');
+  ok(verdictOf(capsOf('claude').toolAllowlist.keep.includes('Bash')), 'the claude row KEEPS Bash: its ✗ is refused');
   const A = (pick) => toolAllowlistArgs({ backend: 'claude', pick });
-  ok(same(A({ allow: ['Edit', 'Read'], deny: ['WebFetch'] }).args, ['--allowedTools', 'Read,Edit', '--disallowedTools', 'WebFetch']), 'claude: one comma list per flag, in the row\'s order');
+  ok(verdictOf(same(A({ allow: ['Edit', 'Read'], deny: ['WebFetch'] }).args, ['--allowedTools', 'Read,Edit', '--disallowedTools', 'WebFetch'])), 'claude: one comma list per flag, in the row\'s order');
   const bash = A({ deny: ['Bash'] });
-  ok(bash.args.length === 0 && bash.dropped.includes('Bash') && bash.dirty === false && bash.pick === null, 'a ✗ Bash NEVER reaches argv — deny beats allow, it would block the Bash(vibespace-…:*) allow rules the reporting CLIs ride (named in `dropped`)');
-  ok(same(A({ allow: ['Bash'] }).args, ['--allowedTools', 'Bash']), 'a ✓ Bash is passed (it narrows nothing)');
+  ok(bash.args.length === 0 && gateOf(bash.dropped.includes('Bash')) && bash.dirty === false && bash.pick === null, 'a ✗ Bash NEVER reaches argv — deny beats allow, it would block the Bash(vibespace-…:*) allow rules the reporting CLIs ride (named in `dropped`)');
+  ok(verdictOf(same(A({ allow: ['Bash'] }).args, ['--allowedTools', 'Bash'])), 'a ✓ Bash is passed (it narrows nothing)');
   const forged = A({ allow: ['Read', 'Bash(rm:*)', '--dangerously-skip-permissions'], deny: ['Read', 'Write'] });
-  ok(same(forged.allow, ['Read']) && same(forged.deny, ['Write']) && forged.dropped.includes('Bash(rm:*)') && forged.dropped.includes('--dangerously-skip-permissions') && forged.dropped.includes('Read'),
+  ok(gateOf(same(forged.allow, ['Read'])) && gateOf(same(forged.deny, ['Write'])) && gateOf(forged.dropped.includes('Bash(rm:*)')) && gateOf(forged.dropped.includes('--dangerously-skip-permissions')) && verdictOf(forged.dropped.includes('Read')),
     'outside the closed list ⇒ DROPPED (never a flag, never a rule pattern on argv); a tool both ✓ and ✗ stays ✓');
   const C = (pick) => toolAllowlistArgs({ backend: 'codex', pick });
-  ok(same(C({ sandbox: 'read-only', approval: 'never' }).args, ['--ask-for-approval', 'never', '--sandbox', 'read-only']) && same(C({ sandbox: 'nope', approval: '' }).dropped, ['nope']) && C({}).dirty === false,
+  ok(gateOf(same(C({ sandbox: 'read-only', approval: 'never' }).args, ['--ask-for-approval', 'never', '--sandbox', 'read-only'])) && gateOf(same(C({ sandbox: 'nope', approval: '' }).dropped, ['nope'])) && C({}).dirty === false,
     'codex: the closed words only (an empty half is no pick)');
   ok(toolAllowlistArgs({ backend: 'shell', pick: { allow: ['Read'] } }).args.length === 0 && toolAllowlistArgs({ backend: 'shell', pick: { allow: ['Read'] } }).dropped[0] === 'unsupported', 'a harness without the row: nothing, said `unsupported`');
   ok(clientToolArgs === toolAllowlistArgs, 'the form\'s command-line preview IS the function the spawn runs (re-exported through agent-meta)');
@@ -683,29 +683,29 @@ console.log('— toolAllowlist caps (the New Session form\'s 可用工具 row)')
   }
   ok(!claude.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: 'default', settings: {} }).args.some((x) => /Tools$/.test(x)), 'claude: no pick ⇒ neither flag (the harness\'s own settings stand)');
   const allowRules = (() => { const s = claude.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: 'default', settings: {}, tools: { deny: ['Bash', 'WebFetch'] } }).args; const k = s.indexOf('--settings'); try { return JSON.parse(s[k + 1]).permissions.allow; } catch { return []; } })();
-  ok(allowRules.some((r) => /^Bash\(vibespace-/.test(r)), 'with a ✗ attempted on Bash the spawn still carries the Bash(vibespace-…) allow rules');
+  ok(verdictOf(allowRules.some((r) => /^Bash\(vibespace-/.test(r))), 'with a ✗ attempted on Bash the spawn still carries the Bash(vibespace-…) allow rules');
   // the codex adapter: terminal argv, chat env (the wrapper's withToolsPick), the degraded machine keeps its forced sandbox
   const codex = registry.get('codex');
   const ct = codex.buildSessionArgs({ cwd: '/tmp', mode: 'terminal', permissionMode: 'safe-yolo', settings: {}, tools: { sandbox: 'read-only' } });
   ok(ct.args[ct.args.indexOf('--sandbox') + 1] === 'read-only' && ct.args[ct.args.indexOf('--ask-for-approval') + 1] === 'on-failure', 'codex terminal: the sandbox pick replaces the mode\'s, the approval half stays the mode\'s', ct.args.join(' '));
   const cc = codex.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: '', settings: {}, tools: { approval: 'never' } });
-  ok(cc.env.CODEX_WEBUI_APPROVAL_POLICY === 'never' && cc.env.CODEX_WEBUI_SANDBOX === 'workspace-write' && same(JSON.parse(cc.env.CODEX_WEBUI_TOOLS_PICK || 'null'), { approval: 'never' }), 'codex chat: the pick rides CODEX_WEBUI_TOOLS_PICK (one JSON row) beside the resolved policy');
+  ok(cc.env.CODEX_WEBUI_APPROVAL_POLICY === 'never' && cc.env.CODEX_WEBUI_SANDBOX === 'workspace-write' && verdictOf(same(JSON.parse(cc.env.CODEX_WEBUI_TOOLS_PICK || 'null'), { approval: 'never' })), 'codex chat: the pick rides CODEX_WEBUI_TOOLS_PICK (one JSON row) beside the resolved policy');
   ok(codex.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: '', settings: {} }).env.CODEX_WEBUI_TOOLS_PICK === '', 'codex chat: no pick ⇒ the env is empty (the wrapper keeps the mode\'s own answer)');
   const { CodexAdapter } = require(path.join(REPO, 'src/adapters/codex.js'));
   const degraded = new CodexAdapter({ codexCmd: 'codex', codexSandboxSupported: false, ptyWrapper: '/w/pty', chatWrapper: '/w/codex' }).buildSessionArgs({ cwd: '/tmp', mode: 'terminal', permissionMode: '', settings: {}, tools: { sandbox: 'read-only', approval: 'never' } });
   ok(degraded.args[degraded.args.indexOf('--sandbox') + 1] === 'danger-full-access' && degraded.args[degraded.args.indexOf('--ask-for-approval') + 1] === 'never', 'a machine without codex-linux-sandbox keeps its forced danger-full-access (a sandbox pick there would promise what it cannot enforce); the approval half still applies');
   const wrap = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
-  ok(/let currentPermission = withToolsPick\(resolvePermissionMode\(permissionMode\), process\.env\.CODEX_WEBUI_TOOLS_PICK \|\| ''\);/.test(wrap)
-    && /const PICK_APPROVALS = \['untrusted', 'on-request', 'on-failure', 'never'\];/.test(wrap) && same(capsOf('codex').toolAllowlist.approval, ['untrusted', 'on-request', 'on-failure', 'never']),
+  ok(gateOf(/let currentPermission = withToolsPick\(resolvePermissionMode\(permissionMode\), process\.env\.CODEX_WEBUI_TOOLS_PICK \|\| ''\);/.test(wrap))
+    && gateOf(/const PICK_APPROVALS = \['untrusted', 'on-request', 'on-failure', 'never'\];/.test(wrap)) && verdictOf(same(capsOf('codex').toolAllowlist.approval, ['untrusted', 'on-request', 'on-failure', 'never'])),
     'the codex chat wrapper applies the pick at start, re-checked against the row\'s own approval words');
   // the form's preset mirror = what the adapter really resolves for every mode the dialog offers
   for (const mode of ['', 'read-only', 'safe-yolo', 'yolo']) {
     const p = codex.buildSessionArgs({ cwd: '/tmp', mode: 'terminal', permissionMode: mode, settings: {} }).permission;
-    ok(same(NSM.codexPreset(mode), { sandbox: p.sandbox, approval: p.approvalPolicy }), `the form's codex default for mode «${mode || 'default'}» is resolveCodexPermissionMode's (${p.sandbox} · ${p.approvalPolicy})`);
+    ok(verdictOf(same(NSM.codexPreset(mode), { sandbox: p.sandbox, approval: p.approvalPolicy })), `the form's codex default for mode «${mode || 'default'}» is resolveCodexPermissionMode's (${p.sandbox} · ${p.approvalPolicy})`);
   }
   // the client row gates on the CAPS ROW, never an id
   const formSrc = fs.readFileSync(path.join(REPO, 'src/lib/new-session-form.js'), 'utf8');
-  ok(/const row = terminalOnly\(be\) \? null : toolAllowlistFor\(be\);/.test(formSrc) && !/backend === 'claude'|be === 'claude'|be === 'codex'/.test(formSrc), 'the 可用工具 row exists exactly when toolAllowlistFor(backend) answers a row (no backend-id branch)');
+  ok(gateOf(/const row = terminalOnly\(be\) \? null : toolAllowlistFor\(be\);/.test(formSrc)) && !/backend === 'claude'|be === 'claude'|be === 'codex'/.test(formSrc), 'the 可用工具 row exists exactly when toolAllowlistFor(backend) answers a row (no backend-id branch)');
 }
 
 const wsCreateSrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
@@ -740,34 +740,34 @@ const wsCreateSrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8')
   const propsSrc2 = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
   const lifeSrc2 = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
   const viewSrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
-  ok(/cb\.checked = worktreePick\(\{ saved: cfg\.worktree, live \}\);/.test(propsSrc2)
-    && /worktree: cb\.checked \}\)/.test(propsSrc2) && !/worktree: cb\.checked \|\| undefined/.test(propsSrc2),
+  ok(gateOf(/cb\.checked = worktreePick\(\{ saved: cfg\.worktree, live \}\);/.test(propsSrc2))
+    && gateOf(/worktree: cb\.checked \}\)/.test(propsSrc2)) && !/worktree: cb\.checked \|\| undefined/.test(propsSrc2),
     'WIRING: the Session Properties checkbox READS worktreePick and WRITES a boolean (so unticking sticks)');
   // The fork call site — the round-2 MAJOR. `fork ⇒ pass` had no producer at
   // all: `_doForkSession`'s createSession carried no `worktree` key, so the
   // branch was pinned by a call no site could make.
   const forkBlock = lifeSrc2.slice(lifeSrc2.indexOf('async _doForkSession('), lifeSrc2.indexOf('// Open a stopped session as view-only'));
-  ok(forkBlock.length > 200 && /worktreePick\(\{ saved: forkCfg\.worktree, live: sessionInfo\.worktree \}\)/.test(forkBlock)
-    && /worktree: forkWorktree \|\| undefined,/.test(forkBlock),
+  ok(forkBlock.length > 200 && gateOf(/worktreePick\(\{ saved: forkCfg\.worktree, live: sessionInfo\.worktree \}\)/.test(forkBlock))
+    && verdictOf(/worktree: forkWorktree \|\| undefined,/.test(forkBlock)),
     'WIRING: _doForkSession RESOLVES the pick and passes it on the create (a fork is the other spawn that emits --worktree)');
-  ok(/const wtWillPass = worktreeSpawnArgs\(\{/.test(wsCreateSrc) && /if \(wtWillPass\) \{/.test(wsCreateSrc)
-    && /resume: !!\(data\.resume && data\.resumeId\)/.test(wsCreateSrc) && /fork: !!data\.fork/.test(wsCreateSrc),
+  ok(gateOf(/const wtWillPass = worktreeSpawnArgs\(\{/.test(wsCreateSrc)) && gateOf(/if \(wtWillPass\) \{/.test(wsCreateSrc))
+    && gateOf(/resume: !!\(data\.resume && data\.resumeId\)/.test(wsCreateSrc)) && verdictOf(/fork: !!data\.fork/.test(wsCreateSrc)),
     'WIRING: the ws-create repo preflight gates on the EMITTED decision, not on the tick (a resume never sends the flag)');
   // BOTH entry points reach the one latch, and BOTH bodies are prototype
   // methods — scripts/test-worktree-userchan-ui.mjs drives them for real. The
   // ws branch is now a one-line delegation precisely because a body that lives
   // only inside the live-view constructor closure can be pinned by grep and by
   // nothing else (which is how the pre-fix dead write stayed green).
-  ok(/msg\.type === 'worktree-path'[\s\S]{0,2000}this\._onWorktreePath\(msg\);/.test(viewSrc)
-    && /_onWorktreePath\(msg\) \{[\s\S]{0,240}this\._latchWorktreePick\(\);/.test(viewSrc)
-    && /if \('worktree' in meta\) \{[\s\S]{0,80}this\._latchWorktreePick\(\);/.test(viewSrc)
-    && /worktreeLatchWrite\(\{ saved: cfg\.worktree, live: this\._worktree \}\) === true/.test(viewSrc),
+  ok(gateOf(/msg\.type === 'worktree-path'[\s\S]{0,2000}this\._onWorktreePath\(msg\);/.test(viewSrc))
+    && gateOf(/_onWorktreePath\(msg\) \{[\s\S]{0,240}this\._latchWorktreePick\(\);/.test(viewSrc))
+    && gateOf(/if \('worktree' in meta\) \{[\s\S]{0,80}this\._latchWorktreePick\(\);/.test(viewSrc))
+    && verdictOf(/worktreeLatchWrite\(\{ saved: cfg\.worktree, live: this\._worktree \}\) === true/.test(viewSrc)),
     'WIRING: BOTH chat-view entry points run the one latch, and both bodies are drivable prototype methods (the worktree-path branch used to write a field nobody read)');
   // The swap bookkeeping (round-2 verifier, MAJOR): five sites, one helper (the
   // 4th since 2.369.118: a live Workflow card re-rendered on its taskInfo edit; the 5th
   // since 2.369.209: a pending Bash call re-drawn as its machine card on the live exitCard edit).
   ok((viewSrc.match(/this\._swapMessageEl\(/g) || []).length === 5
-    && /_swapMessageEl\(oldEl, newEl, id\) \{/.test(viewSrc)
+    && gateOf(/_swapMessageEl\(oldEl, newEl, id\) \{/.test(viewSrc))
     && !/if \(next\) el\.replaceWith\(next\);/.test(viewSrc),
     'WIRING: every in-place message re-render goes through _swapMessageEl (the tool-card swap was a bare replaceWith)');
 }
@@ -859,7 +859,7 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     });
     ok(JSON.stringify(capsOf(id).autoResume) === JSON.stringify(want),
       `${id}: caps.autoResume is DERIVED from the descriptor (${JSON.stringify(want)})`, JSON.stringify(capsOf(id).autoResume));
-    ok(want.resume === null || AUTO_RESUME_FORMS.includes(want.resume), `${id}: its resume form is in the closed set`);
+    ok(want.resume === null || verdictOf(AUTO_RESUME_FORMS.includes(want.resume)), `${id}: its resume form is in the closed set`);
     ok(want.supported === (want.signal && want.resume !== null), `${id}: 'supported' is exactly signal AND a verb — never hand-set`);
   }
   ok(JSON.stringify(capsOf('gemini').autoResume) === JSON.stringify(NO_AUTO_RESUME), 'an UNREGISTERED backend answers the honest nothing (no fallthrough to claude)');
@@ -934,7 +934,7 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
       // lane resume-words: the words that reach the channel ARE continuePromptFor's — the wall lifted on this account,
       // the facts about the CLI's reset time, the CLI's own sentence — unchanged by the harness's deliver road
       const want = typeof arMod.continuePromptFor === 'function' ? arMod.continuePromptFor({ cls: 'reset' }, null) : null;
-      ok(!!want && !!w.sent[0] && w.sent[0].text === want && /THIS message is the continue/.test(w.sent[0].text) && /un-park it now/.test(w.sent[0].text),
+      ok(!!want && !!w.sent[0] && w.sent[0].text === want && gateOf(/THIS message is the continue/.test(w.sent[0].text)) && verdictOf(/un-park it now/.test(w.sent[0].text)),
         `${id}: …the CONTINUE WORDS reach that channel unchanged (what the reset time was and was not, un-park, the CLI's continue)`, w.sent[0] && w.sent[0].text);
       ok(w.ar.statusFor('s1').armed === false, `${id}: …exactly once (the wait is spent)`);
       ok(w.ar.statusFor('s1').resume === verb.form, `${id}: …and the status names the form the surfaces gate on`);
@@ -995,26 +995,26 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     console.log(`  · census scope: ${SITES.length} files mention auto-resume (${SITES.slice(0, 6).join(', ')}${SITES.length > 6 ? ', …' : ''})`);
     ok(offenders.length === 0, 'CENSUS: no auto-resume site gates on a backend id (every one reads the caps row / the descriptor)', [...new Set(offenders)].join(' ; '));
     for (const f of ['src/server/auto-resume.js', 'src/server/usage-pool-engine.js', 'src/lib/chat-status-bar.js', 'src/auto-resume-signal.js'])
-      ok(SITES.includes(f), `CENSUS scope covers ${f} (a sweep that can miss the deciding file is not a sweep)`);
+      ok(verdictOf(SITES.includes(f)), `CENSUS scope covers ${f} (a sweep that can miss the deciding file is not a sweep)`);
     ok(SITES.length >= 10, `CENSUS scope is non-vacuous (${SITES.length} files)`);
-    for (const a of ALLOW) ok(allowHit.has(a.why), `CENSUS allowlist entry still matches something (dead reason = red): ${a.file} — ${a.why}`);
-    ok(ID_GATE.test("if (session.backend === 'codex') return null;"), '…and the census can go red (proven on a planted gate, never a check that only ever passes)');
+    for (const a of ALLOW) ok(verdictOf(allowHit.has(a.why)), `CENSUS allowlist entry still matches something (dead reason = red): ${a.file} — ${a.why}`);
+    ok(verdictOf(ID_GATE.test("if (session.backend === 'codex') return null;")), '…and the census can go red (proven on a planted gate, never a check that only ever passes)');
     // WIRING PINS (2.355.0 law: a fix nobody calls is not a fix). Each names the
     // ONE reader, so a surface that grows a private copy of the question — or
     // reads the row back as a boolean, which it was until this release — is red.
     const sb = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
-    ok(/autoResumeCapsFor\(this\._backend\)\.supported/.test(sb), 'WIRING: the status-bar chip is drawn from the DERIVED caps row, through the shared reader');
+    ok(verdictOf(/autoResumeCapsFor\(this\._backend\)\.supported/.test(sb)), 'WIRING: the status-bar chip is drawn from the DERIVED caps row, through the shared reader');
     const arSrc = fs.readFileSync(path.join(REPO, 'src/server/auto-resume.js'), 'utf8');
-    ok(/if \(!verbFor\(session\)\) \{ log\(/.test(arSrc), 'WIRING: armIfEnabled refuses a harness with no resume verb (never a promise nobody can keep)');
+    ok(verdictOf(/if \(!verbFor\(session\)\) \{ log\(/.test(arSrc)), 'WIRING: armIfEnabled refuses a harness with no resume verb (never a promise nobody can keep)');
     // lane auto-resume-bulk: the ONE `verb.deliver(` now lives in `deliverContinue`, which the single continue AND the
     // bulk resume both call — each under its own gate (test-spend-paths' census reads every `sendToSession(` site)
-    ok(/const verb = verbFor\(session\);[\s\S]{0,1200}deliverContinue\(session, verb, continuePromptFor\(note, label2, freshRun\(id, a2\)\), \(s2, text\) => sentNoted\(s2, text, sendToSession\(id, s2, text, carried\)\)\)/.test(arSrc), 'WIRING: the ONE fire choke point runs the DESCRIPTOR\'s verb, handing it the ORCH channel');
-    ok((arSrc.match(/verb\.deliver\(/g) || []).length === 1 && /function deliverContinue\(session, verb, prompt, sendChatInput\) \{ return !!verb\.deliver\(session, prompt, \{ sendChatInput \}\); \}/.test(arSrc), 'WIRING: …and there is exactly ONE of them (a second fire path is how the loop breaker — and the spend authorizer — get bypassed)');
+    ok(verdictOf(/const verb = verbFor\(session\);[\s\S]{0,1200}deliverContinue\(session, verb, continuePromptFor\(note, label2, freshRun\(id, a2\)\), \(s2, text\) => sentNoted\(s2, text, sendToSession\(id, s2, text, carried\)\)\)/.test(arSrc)), 'WIRING: the ONE fire choke point runs the DESCRIPTOR\'s verb, handing it the ORCH channel');
+    ok((arSrc.match(/verb\.deliver\(/g) || []).length === 1 && verdictOf(/function deliverContinue\(session, verb, prompt, sendChatInput\) \{ return !!verb\.deliver\(session, prompt, \{ sendChatInput \}\); \}/.test(arSrc)), 'WIRING: …and there is exactly ONE of them (a second fire path is how the loop breaker — and the spend authorizer — get bypassed)');
     ok((arSrc.match(/\bdeliverContinue\(/g) || []).length === 3, 'WIRING: …called from exactly TWO gated places — attemptFire (one continue, spendOk) and resumeBatch (the bulk resume, ONE batch authorization) — never a third');
     // lg-recovery U1 cure: THE OVERLOAD LIST IS A CONFORMANCE ROW — every registered harness either DECLARES quota.overloadErrors
     // (and each declared value marks a stop through the PURE verdict) or declares none (and no error marks it)
     { const SBc = require(path.join(REPO, 'src/stopped-by.js')); const Hc = require(path.join(REPO, 'src/harnesses')); const rows = Hc.ids().map((id) => { const d = Hc.overloadErrorsOf(id); return { id, d, marks: d.every((e) => !!SBc.stopVerdict({ lastError: e, overloadErrors: d })), none: d.length || ['overloaded', 'serverOverloaded', 'server_error', 'rate_limit'].every((e) => !SBc.stopVerdict({ lastError: e, overloadErrors: d })) }; });
-      ok(rows.length >= 3 && rows.every((r) => r.marks && r.none) && rows.some((r) => r.d.length), 'CONFORMANCE: every harness\'s declared overload list marks a stop, a harness that declares none is never marked', rows.map((r) => `${r.id}:${r.d.join('|') || '-'}`).join(' ')); }
+      ok(rows.length >= 3 && gateOf(rows.every((r) => r.marks && r.none)) && verdictOf(rows.some((r) => r.d.length)), 'CONFORMANCE: every harness\'s declared overload list marks a stop, a harness that declares none is never marked', rows.map((r) => `${r.id}:${r.d.join('|') || '-'}`).join(' ')); }
     const engSrc2 = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
     ok((engSrc2.match(/noteQuotaReadingForResume\(/g) || []).length === 3, 'WIRING: ONE shared reading edge with exactly its two producers (claude + codex), never a per-harness answer', String((engSrc2.match(/noteQuotaReadingForResume\(/g) || []).length));
   }
@@ -1057,7 +1057,7 @@ console.log('\nstore: every declared field is read outside src/harnesses; a fake
   try {
     const live = new Map([['s-acme', { backend: 'acme-store', host: null }], ['s-acme-remote', { backend: 'acme-store', host: 'h1' }], ['s-claude', { backend: 'claude', host: null }]]);
     const so = writerSweepOpts('acme-store', live, null);
-    ok(hasWriterSweep('acme-store') && so.sweep === acmeSweep && JSON.stringify(so.protectSids) === '["s-acme"]',
+    ok(gateOf(hasWriterSweep('acme-store')) && so.sweep === acmeSweep && JSON.stringify(so.protectSids) === '["s-acme"]',
       'fake harness: writerSweepOpts hands ITS store.writerSweep + the protect list of ITS live sessions on the TARGET machine', JSON.stringify(so.protectSids));
     const ran = [];
     const hosts = { deviceBounded: async () => ({ runCmd: async (cmd, args) => { ran.push(args[1]); return { stdout: 'SWEPT:4242\n' }; } }) };
@@ -1081,10 +1081,10 @@ console.log('\nstore: every declared field is read outside src/harnesses; a fake
     'claude: store.homeRename (staleUsers / moveUser / relinkLegacy) is the ONE ~/.claude/projects re-encoding (server.js + boot-restore call it)');
   const reg = createAdapterRegistry({ claudeCmd: 'claude', chatWrapper: '/x', ptyWrapper: '/y', codexCmd: 'codex', acpCommands: {} });
   const ca = reg.get('claude');
-  ok(ca && JSON.stringify(ca.chatTransportArgs()) === JSON.stringify([['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]),
+  ok(gateOf(ca) && JSON.stringify(ca.chatTransportArgs()) === JSON.stringify([['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]),
     'claude adapter: chatTransportArgs() = the ONE stream-json spelling (data/bin/chat-wrapper.js requires the same module)');
   const wsc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), wrap = fs.readFileSync(path.join(REPO, 'data/bin/chat-wrapper.js'), 'utf8');
-  ok(!/'--output-format'/.test(wsc) && !/'--output-format'/.test(wrap) && /claude-transport\.js/.test(wrap), 'the stream-json flags are spelled in neither ws-create nor chat-wrapper');
+  ok(!/'--output-format'/.test(wsc) && !/'--output-format'/.test(wrap) && verdictOf(/claude-transport\.js/.test(wrap)), 'the stream-json flags are spelled in neither ws-create nor chat-wrapper');
 }
 
 // ── THE RESUMABLE ID (lane dead-socket-keeps-chat-meta, the owner's 2026-10-30 incident) ──
@@ -1124,7 +1124,7 @@ console.log('\n— the resumable id: every harness answers it or has none; locat
 console.log('\n— the long tail\'s declared rows (terminalOnly / oauthUsage / globalUsageKey)');
 {
   const ROWS = ['terminalOnly', 'oauthUsage', 'globalUsageKey'];
-  for (const id of Object.keys(BACKEND_CAPS)) ok(ROWS.every((r) => r in BACKEND_CAPS[id]), `${id}: the shipped caps row declares ${ROWS.join(' / ')}`);
+  for (const id of Object.keys(BACKEND_CAPS)) ok(verdictOf(ROWS.every((r) => r in BACKEND_CAPS[id])), `${id}: the shipped caps row declares ${ROWS.join(' / ')}`);
   for (const id of harnessIds()) {
     const h = harnessOf(id), c = capsOf(id), b = h.ui?.billing || null;
     ok(c.terminalOnly === (h.kind === 'terminal'), `${id}: caps.terminalOnly === (kind === 'terminal') (${c.terminalOnly})`);
@@ -1133,11 +1133,11 @@ console.log('\n— the long tail\'s declared rows (terminalOnly / oauthUsage / g
   }
   const { globalUsageKeyOf, oauthUsageAccount } = require(path.join(REPO, 'src/backend-caps.js'));
   const { terminalOnly } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
-  ok(Object.keys(BACKEND_META).every((id) => terminalOnly(id) === capsOf(id).terminalOnly) && terminalOnly(undefined) === false && terminalOnly('nope') === false,
+  ok(gateOf(Object.keys(BACKEND_META).every((id) => terminalOnly(id) === capsOf(id).terminalOnly)) && terminalOnly(undefined) === false && terminalOnly('nope') === false,
     'client terminalOnly() reads the SAME caps row (every META id; absent = claude = false; unknown = false)');
   ok(globalUsageKeyOf(undefined) === '__global__' && globalUsageKeyOf('codex') === '__global_codex__' && globalUsageKeyOf('opencode') === '__global__' && globalUsageKeyOf('nope') === '__global__',
     'globalUsageKeyOf: legacy / claude / codex / opencode / unknown answer what the old ternary did');
-  ok(oauthUsageAccount({ type: 'subscription' }) && oauthUsageAccount({ type: 'subscription', backend: 'claude' }) && !oauthUsageAccount({ type: 'subscription', backend: 'codex' }) && !oauthUsageAccount({ type: 'api', backend: 'claude' }) && !oauthUsageAccount(null),
+  ok(gateOf(oauthUsageAccount({ type: 'subscription' })) && gateOf(oauthUsageAccount({ type: 'subscription', backend: 'claude' })) && !oauthUsageAccount({ type: 'subscription', backend: 'codex' }) && !oauthUsageAccount({ type: 'api', backend: 'claude' }) && !oauthUsageAccount(null),
     'oauthUsageAccount: a legacy / claude subscription yes; codex, an API key, nothing — no');
 
   // THE PROOF: two fakes through register() alone (zero consumer edits)
@@ -1149,15 +1149,15 @@ console.log('\n— the long tail\'s declared rows (terminalOnly / oauthUsage / g
     const sessions = [{ id: 'sess-acme-term-1', backend: 'acme-term', name: 'acme' }, { id: 'sess-claude-1', backend: 'claude', name: 'cl' }];
     const seen = (M) => JSON.stringify(M.pickerModel({ sessions }));
     const real = seen(WR);
-    ok(!real.includes('sess-acme-term-1') && real.includes('sess-claude-1'), 'PROOF: window reach drops a register()ed TERMINAL harness\'s session (its kind alone) and keeps a chat one', real.slice(0, 300));
+    ok(!real.includes('sess-acme-term-1') && verdictOf(real.includes('sess-claude-1')), 'PROOF: window reach drops a register()ed TERMINAL harness\'s session (its kind alone) and keeps a chat one', real.slice(0, 300));
     const UIM = require(path.join(REPO, 'src/usage-index-model.js'));
     ok(UIM.keysOf({ be: 'acme-chat' }).account === '__global_acme__' && UIM.keysOf({ be: 'codex' }).account === '__global_codex__' && UIM.keysOf({}).account === '__global__',
       'PROOF: the usage index books a register()ed harness\'s machine login under ITS declared key (claude / codex unchanged)');
-    ok(oauthUsageAccount({ type: 'subscription', backend: 'acme-chat' }), 'PROOF: a register()ed harness that declares oauthUsage joins the OAuth usage-poll accounts');
+    ok(verdictOf(oauthUsageAccount({ type: 'subscription', backend: 'acme-chat' })), 'PROOF: a register()ed harness that declares oauthUsage joins the OAuth usage-poll accounts');
     // CONTROLS: the old branch restored in a patched copy cannot see the fakes
     const wrSrc = fs.readFileSync(path.join(REPO, 'src/window-reach.js'), 'utf8');
     const wrMut = editAnchor(wrSrc, 'capsOf(s.backend).terminalOnly', "s.backend === 'shell'", "src/window-reach.js", 'join');
-    ok(wrMut !== wrSrc && seen(MUTH.load('src/window-reach.js', wrMut, 'tail-shell')).includes('sess-acme-term-1'),
+    ok(wrMut !== wrSrc && verdictOf(seen(MUTH.load('src/window-reach.js', wrMut, 'tail-shell')).includes('sess-acme-term-1')),
       'CONTROL: window-reach with `s.backend === \'shell\'` restored offers the fake terminal session (the declared row is what drops it)');
     const uimSrc = fs.readFileSync(path.join(REPO, 'src/usage-index-model.js'), 'utf8');
     const uimMut = editAnchor(uimSrc, 'r.acct || globalUsageKeyOf(r.be)', "r.acct || (r.be === 'codex' ? '__global_codex__' : '__global__')", "src/usage-index-model.js");
@@ -1177,11 +1177,11 @@ console.log('\n— the subagent row (ui.subagents ⇄ caps.subagents)');
 {
   const { SUBAGENT_VIEWS, subagentView } = require(path.join(REPO, 'src/backend-caps.js'));
   const conforms = (h, row) => !!row && SUBAGENT_VIEWS.includes(row.subagents) && row.subagents === (h.ui?.subagents || 'none') && (h.kind !== 'chat' || !!(h.ui && SUBAGENT_VIEWS.includes(h.ui.subagents)));
-  for (const id of Object.keys(BACKEND_CAPS)) ok(SUBAGENT_VIEWS.includes(BACKEND_CAPS[id].subagents), `${id}: the shipped caps row declares subagents (${BACKEND_CAPS[id].subagents})`);
-  for (const id of harnessIds()) ok(conforms(harnessOf(id), capsOf(id)), `${id}: caps.subagents is the descriptor's ui.subagents (${capsOf(id).subagents}); a chat harness declares it`, { ui: harnessOf(id).ui?.subagents, caps: capsOf(id).subagents });
+  for (const id of Object.keys(BACKEND_CAPS)) ok(verdictOf(SUBAGENT_VIEWS.includes(BACKEND_CAPS[id].subagents)), `${id}: the shipped caps row declares subagents (${BACKEND_CAPS[id].subagents})`);
+  for (const id of harnessIds()) ok(verdictOf(conforms(harnessOf(id), capsOf(id))), `${id}: caps.subagents is the descriptor's ui.subagents (${capsOf(id).subagents}); a chat harness declares it`, { ui: harnessOf(id).ui?.subagents, caps: capsOf(id).subagents });
   ok(capsOf('antigravity').subagents === 'cards' && capsOf('claude').subagents === 'virtual' && capsOf('codex').subagents === 'threads' && capsOf('opencode').subagents === 'none' && capsOf('shell').subagents === 'none',
     'the shipped values: claude virtual (its sidechain), codex threads (the child thread), antigravity cards (agy\'s store, this lane), opencode / shell none');
-  ok(subagentView(undefined) === 'virtual' && subagentView('nope') === 'none' && Object.keys(BACKEND_CAPS).every((id) => subagentView(id) === BACKEND_CAPS[id].subagents), 'subagentView: the row (absent = claude; an unknown harness = none)');
+  ok(subagentView(undefined) === 'virtual' && subagentView('nope') === 'none' && verdictOf(Object.keys(BACKEND_CAPS).every((id) => subagentView(id) === BACKEND_CAPS[id].subagents)), 'subagentView: the row (absent = claude; an unknown harness = none)');
   const agy = harnessOf('antigravity');
   const noUi = { ...agy, ui: { ...agy.ui } }; delete noUi.ui.subagents;
   const noCaps = { ...BACKEND_CAPS.antigravity }; delete noCaps.subagents;
@@ -1195,9 +1195,9 @@ console.log('\n— the subagent row (ui.subagents ⇄ caps.subagents)');
       'PROOF: a register()ed harness gets its row from its descriptor alone (declared ⇒ that view; none declared ⇒ none, never another harness\'s)');
   } finally { H.unregister('acme-subs'); H.unregister('acme-nosubs'); }
   const { subagentView: clientView } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
-  ok(Object.keys(BACKEND_META).every((id) => clientView(id) === subagentView(id)), 'the client reads the SAME row (agent-meta subagentView over the bundled backend-caps)');
+  ok(verdictOf(Object.keys(BACKEND_META).every((id) => clientView(id) === subagentView(id))), 'the client reads the SAME row (agent-meta subagentView over the bundled backend-caps)');
   const rend = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
-  ok(/subagentView\(this\.backend\) === 'none' && isSubagentToolRow\(block, msg\)/.test(rend) && /This harness shows no subagent details/.test(rend), 'a \'none\' harness\'s subagent row SAYS it shows no details (the renderer gates on the row, never the name)');
+  ok(gateOf(/subagentView\(this\.backend\) === 'none' && isSubagentToolRow\(block, msg\)/.test(rend)) && verdictOf(/This harness shows no subagent details/.test(rend)), 'a \'none\' harness\'s subagent row SAYS it shows no details (the renderer gates on the row, never the name)');
 }
 
 // ── lane artifacts-prompt-hint: THE ARTIFACTS SENTENCE names the descriptor's own file tools ──
@@ -1216,28 +1216,28 @@ console.log('\n— the Artifacts sentence (lane artifacts-prompt-hint)');
     const ft = AR.fileToolsOf({ backend: id });
     const line = AO.artifactsIntroLine(ft);
     if (typeof h.artifactsOf === 'function') {
-      ok(Array.isArray(h.artifactTools) && h.artifactTools.every((n) => typeof n === 'string' && n) && line.includes(MARK) && Buffer.byteLength(line) <= 300,
+      ok(gateOf(Array.isArray(h.artifactTools)) && gateOf(h.artifactTools.every((n) => typeof n === 'string' && n)) && gateOf(line.includes(MARK)) && Buffer.byteLength(line) <= 300,
         `${id}: declares artifactTools [${(h.artifactTools || []).join(', ')}] → one sentence of ${Buffer.byteLength(line)} B (≤ 300)`);
-      ok(h.artifactTools.every((n) => line.includes(n)) && !line.includes(`'${id}'`), `${id}: the sentence names exactly the declared tools, no harness id`);
+      ok(gateOf(h.artifactTools.every((n) => line.includes(n))) && !line.includes(`'${id}'`), `${id}: the sentence names exactly the declared tools, no harness id`);
     } else ok(ft === null && line === '', `${id}: no artifactsOf reader ⇒ no Artifacts sentence (never promise a collection)`);
   }
   // the claude row IS the reader's own table: a record per declared name yields a row (the names cannot drift from what is witnessed)
   const rec = (name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't-' + name, name, input: { file_path: '/w/a.md', notebook_path: '/w/a.ipynb', content: 'x' } }] } });
   const cl = harnessIds().map(harnessOf).find((h) => h.artifactsOf === AO.claude);
-  ok(cl && cl.artifactTools.length === 4 && cl.artifactTools.every((n) => AO.claude(rec(n)).length === 1) && AO.claude(rec('Bash')).length === 0,
+  ok(gateOf(cl) && cl.artifactTools.length === 4 && gateOf(cl.artifactTools.every((n) => AO.claude(rec(n)).length === 1)) && AO.claude(rec('Bash')).length === 0,
     'the declared names are exactly the tools the reader witnesses (each yields a row; Bash yields none)');
   // THE PROOF: a register()ed fake declaring X / Y renders "X / Y" with zero core edits; a fake without a reader renders nothing
   H.register({ id: 'acme-files', label: 'Acme Files', kind: 'chat', quota: H.NULL_QUOTA, artifactsOf: () => [], artifactTools: ['X', 'Y'] });
   H.register({ id: 'acme-noart', label: 'Acme NoArt', kind: 'chat', quota: H.NULL_QUOTA, artifactsOf: null, artifactTools: ['Z'] });
   try {
     const intro = AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({ backend: 'acme-files' }) });
-    ok(intro.includes('Use your file tools (X / Y) for files') && intro.split(MARK).length === 2, 'PROOF: a register()ed harness declaring X / Y is taught "(X / Y)" — once in the intro');
+    ok(gateOf(intro.includes('Use your file tools (X / Y) for files')) && intro.split(MARK).length === 2, 'PROOF: a register()ed harness declaring X / Y is taught "(X / Y)" — once in the intro');
     const none = AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({ backend: 'acme-noart' }) });
     ok(!none.includes(MARK) && !none.includes('(Z)'), 'CONTROL: a register()ed harness with no reader gets no sentence (its declared names are ignored)');
-    ok(AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({}) }).includes('Use your file tools for files'), 'a session with no backend gets the unnamed sentence (never a guessed harness)');
+    ok(verdictOf(AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({}) }).includes('Use your file tools for files')), 'a session with no backend gets the unnamed sentence (never a guessed harness)');
   } finally { H.unregister('acme-files'); H.unregister('acme-noart'); }
   const fn = AR.fileToolsOf.toString();
-  ok(!/['"](?:claude|codex|opencode|antigravity|shell)['"]/.test(fn) && /artifactTools/.test(fn), 'fileToolsOf reads the descriptor and spells no harness id (§46 spirit)');
+  ok(!/['"](?:claude|codex|opencode|antigravity|shell)['"]/.test(fn) && verdictOf(/artifactTools/.test(fn)), 'fileToolsOf reads the descriptor and spells no harness id (§46 spirit)');
   // the task context's tools section carries it too, after the absolute-paths line, once (single + multi)
   const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
   const proto = TaskGroupManager.prototype;
@@ -1263,9 +1263,9 @@ console.log('\n— the Artifacts sentence (lane artifacts-prompt-hint)');
   const start = call('task-context');
   const turns = [call('prompt-context'), call('prompt-context'), call('prompt-context')];
   const all = [start, ...turns].join('\n');
-  ok(start.includes('Use your file tools (' + cl.artifactTools.join(' / ') + ') for files') && all.split(MARK).length === 2,
+  ok(gateOf(start.includes('Use your file tools (' + cl.artifactTools.join(' / ') + ') for files')) && all.split(MARK).length === 2,
     `the REAL routes: SessionStart's tools intro carries the sentence and a whole session sees it exactly once (${all.split(MARK).length - 1})`);
-  ok(turns.filter(Boolean).length >= 1 && turns.every((t) => !t.includes(MARK)), `…and the per-turn reminder never carries it (${turns.filter(Boolean).length} non-empty turn contexts read)`);
+  ok(turns.filter(Boolean).length >= 1 && verdictOf(turns.every((t) => !t.includes(MARK))), `…and the per-turn reminder never carries it (${turns.filter(Boolean).length} non-empty turn contexts read)`);
 }
 
 // ── credential env: ONE derived list, TWO doors (B-6be2, lane jobenv-strip-census, 2.369.270) ──
@@ -1290,7 +1290,7 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
     const c = HARNESSES[id].creds;
     if (!c) continue;
     // a spawnEnv row's home is HOME itself — everyone's — so it declares no homeEnvVar (THE EVERY-PROCESS CENSUS below)
-    ok((typeof c.homeEnvVar === 'string' || (typeof c.spawnEnv === 'function' && c.homeEnvVar === undefined)) && Array.isArray(c.keyEnvVars) && c.keyEnvVars.every((k) => typeof k === 'string'), `${id}: creds declares homeEnvVar + keyEnvVars (${c.homeEnvVar ?? (typeof c.spawnEnv === 'function' ? 'HOME via spawnEnv' : undefined)}; [${(c.keyEnvVars || []).join(', ')}])`);
+    ok((typeof c.homeEnvVar === 'string' || (typeof c.spawnEnv === 'function' && c.homeEnvVar === undefined)) && gateOf(Array.isArray(c.keyEnvVars)) && verdictOf(c.keyEnvVars.every((k) => typeof k === 'string')), `${id}: creds declares homeEnvVar + keyEnvVars (${c.homeEnvVar ?? (typeof c.spawnEnv === 'function' ? 'HOME via spawnEnv' : undefined)}; [${(c.keyEnvVars || []).join(', ')}])`);
     const declared = [...new Set(HE.declaredEnvOf(HARNESSES[id]).map((x) => x.name))];
     const missing = declared.filter((n) => !all().includes(n));
     ok(declared.length >= 1 && !missing.length, `${id}: every creds.*EnvVar(s) is in the one list (${declared.join(', ')})`, missing.join(','));
@@ -1301,8 +1301,8 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
   const EVERY_PROCESS = ['HOME', 'PATH', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'TERM', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'];
   ok(!all().some((n) => EVERY_PROCESS.includes(n)), `no creds.*EnvVar(s) names an env every process needs (${EVERY_PROCESS.length} names) — the strip lists never take one`, all().filter((n) => EVERY_PROCESS.includes(n)));
   { const planted = live().map((d) => (d.id === 'antigravity' ? { ...d, creds: { ...d.creds, spawnEnvVar: 'HOME' } } : d));
-    ok(HE.credentialEnvNames(planted).includes('HOME') && HE.agentCredentialEnvNames(planted).includes('HOME'), 'RED control: a planted creds.spawnEnvVar HOME lands in BOTH strip lists (every agent and job would lose HOME) — the census above can go red'); }
-  ok(HE.VENDOR_CREDENTIAL_ENV.every((n) => all().includes(n)) && ['CODEX_HOME', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CLAUDE_CONFIG_DIR'].every((n) => all().includes(n)), `the one list = vendor names ∪ descriptor names (${all().length}: ${all().join(' ')})`);
+    ok(gateOf(HE.credentialEnvNames(planted).includes('HOME')) && verdictOf(HE.agentCredentialEnvNames(planted).includes('HOME')), 'RED control: a planted creds.spawnEnvVar HOME lands in BOTH strip lists (every agent and job would lose HOME) — the census above can go red'); }
+  ok(gateOf(HE.VENDOR_CREDENTIAL_ENV.every((n) => all().includes(n))) && verdictOf(['CODEX_HOME', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CLAUDE_CONFIG_DIR'].every((n) => all().includes(n))), `the one list = vendor names ∪ descriptor names (${all().length}: ${all().join(' ')})`);
   // 2. the judges — a door over a base env holding every name of the list + bystanders
   const baseOf = (names) => ({ PATH: '/usr/bin', HOME: '/home/u', SOME_FUTURE_TOOL_TOKEN: 'ft', ...Object.fromEntries(names.map((n) => [n, 'ambient-' + n])) });
   const judgeJob = (door, names = all()) => {
@@ -1318,34 +1318,34 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
   };
   const trio = ['CODEX_HOME', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'ANTHROPIC_API_KEY'];
   const j3 = jobEnv({}, baseOf(trio));
-  ok(trio.every((n) => !(n in j3)) && j3.PATH === '/usr/bin', 'job door: CODEX_HOME / CLAUDE_SECURESTORAGE_CONFIG_DIR / ANTHROPIC_API_KEY — none survive (B-6be2)', JSON.stringify(j3));
+  ok(gateOf(trio.every((n) => !(n in j3))) && j3.PATH === '/usr/bin', 'job door: CODEX_HOME / CLAUDE_SECURESTORAGE_CONFIG_DIR / ANTHROPIC_API_KEY — none survive (B-6be2)', JSON.stringify(j3));
   const jl = judgeJob(jobEnv);
-  ok(jl.pass, `job door: every name of the one list stripped (${all().length}), bystanders pass`, jl.leaked.join(','));
+  ok(verdictOf(jl.pass), `job door: every name of the one list stripped (${all().length}), bystanders pass`, jl.leaked.join(','));
   ok(jobEnv({ OPENAI_API_KEY: 'the-jobs-own' }, baseOf(all())).OPENAI_API_KEY === 'the-jobs-own', "job door: a job's OWN env / secret is laid on after the strip and wins");
   const al = judgeAgent(agentEnv);
-  ok(al.pass, `agent door (ws-handler agentEnv): strips ${agentNames().join(' ')}; keeps every homeEnvVar (${[...homes()].join(' ')})`, JSON.stringify(al));
+  ok(verdictOf(al.pass), `agent door (ws-handler agentEnv): strips ${agentNames().join(' ')}; keeps every homeEnvVar (${[...homes()].join(' ')})`, JSON.stringify(al));
   ok(agentEnv(baseOf(all())).OPENAI_API_KEY === 'ambient-OPENAI_API_KEY', 'agent door: a vendor name no descriptor writes (OPENAI_API_KEY) stays — an OpenCode/ACP agent may hold its own login that way');
   const dl = judgeAgent((b) => AE.daemonEnv(b, { drop: agentNames() }));
-  ok(dl.pass, 'daemon door (daemonEnv + the derived drop): the same agent rule', JSON.stringify(dl));
+  ok(verdictOf(dl.pass), 'daemon door (daemonEnv + the derived drop): the same agent rule', JSON.stringify(dl));
   // 3. RED controls — the base's shapes
   const jobsSrc = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
   const derivedLine = "['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS'].includes(k) || credentials.has(k)";
   const handLine = "['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS', 'ANTHROPIC_API_KEY', 'CLAUDE_SECURESTORAGE_CONFIG_DIR'].includes(k)";
   const handJobs = jobsSrc.includes(derivedLine) ? MUTH.load('src/jobs.js', editAnchor(jobsSrc, derivedLine, handLine, "src/jobs.js"), 'hand-list').jobEnv : null;
   const jh = handJobs ? judgeJob(handJobs) : { pass: true, leaked: [] };
-  ok(handJobs && !jh.pass && jh.leaked.includes('CODEX_HOME'), `RED control: the base's hand list fails the job judge (leaks ${jh.leaked.join(' ')})`);
+  ok(gateOf(handJobs) && !jh.pass && verdictOf(jh.leaked.includes('CODEX_HOME')), `RED control: the base's hand list fails the job judge (leaks ${jh.leaked.join(' ')})`);
   const ab = judgeAgent((b) => AE.agentEnv(b));
-  ok(!ab.pass && ab.leaked.includes('CLAUDE_SECURESTORAGE_CONFIG_DIR'), `RED control: the base's drop-less agentEnv fails the agent judge (leaks ${ab.leaked.join(' ')})`);
+  ok(!ab.pass && verdictOf(ab.leaked.includes('CLAUDE_SECURESTORAGE_CONFIG_DIR')), `RED control: the base's drop-less agentEnv fails the agent judge (leaks ${ab.leaked.join(' ')})`);
   // 4. the plant: a descriptor GAINING a creds.*EnvVar joins both doors with no edit anywhere else
   const pc = HARNESSES.codex.creds;
   pc.plantEnvVar = 'VS_PLANT_CRED'; pc.plantEnvVars = ['VS_PLANT_LIST'];
   try {
     const plants = ['VS_PLANT_CRED', 'VS_PLANT_LIST'];
-    ok(plants.every((n) => all().includes(n) && agentNames().includes(n)), 'plant: creds.plantEnvVar + creds.plantEnvVars auto-join the one list and the agent share');
+    ok(verdictOf(plants.every((n) => all().includes(n) && agentNames().includes(n))), 'plant: creds.plantEnvVar + creds.plantEnvVars auto-join the one list and the agent share');
     const jp = judgeJob(jobEnv, plants), ap = judgeAgent(agentEnv, plants);
-    ok(jp.pass && ap.pass, 'plant: the live job door and agent door both drop the planted names', JSON.stringify({ jp, ap }));
+    ok(gateOf(jp.pass) && verdictOf(ap.pass), 'plant: the live job door and agent door both drop the planted names', JSON.stringify({ jp, ap }));
     const hp = handJobs ? judgeJob(handJobs, plants) : { pass: true };
-    ok(handJobs && !hp.pass, 'plant RED control: the hand list lets the planted names through');
+    ok(gateOf(handJobs) && !hp.pass, 'plant RED control: the hand list lets the planted names through');
   } finally { delete pc.plantEnvVar; delete pc.plantEnvVars; }
   ok(!all().includes('VS_PLANT_CRED'), 'plant removed: the registry answers without it again');
   // 5. the account resolver writes nothing the agent door does not know (localEnv / secret.var literals)
@@ -1356,7 +1356,7 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
   // 6. no hand list regrows in jobEnv
   const jobBody = (/function jobEnv\([\s\S]*?\n\}/.exec(jobsSrc) || [''])[0];
   const typed = all().filter((n) => jobBody.includes(n));
-  ok(jobBody && /credentialEnvNames\(harnessList\(\)\)/.test(jobBody) && !typed.length, 'jobEnv derives its credential strip (credentialEnvNames over the registry) and types no credential name', typed.join(','));
+  ok(gateOf(jobBody) && gateOf(/credentialEnvNames\(harnessList\(\)\)/.test(jobBody)) && !typed.length, 'jobEnv derives its credential strip (credentialEnvNames over the registry) and types no credential name', typed.join(','));
   // 7. wiring census: every src/ module that requires agent-env.js hands the derived drop to every call
   //    (a new importer is RED until it does or is classified here with its reason)
   const EXEMPT = {
@@ -1401,7 +1401,7 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
   const baseShape = "const { agentEnv: sanitizedSpawnEnv } = require('../agent-env.js');\n  const env = { ...sanitizedSpawnEnv(process.env), [h.envVar]: h.home };";
   ok(bareOf(callsOf(baseShape)).length === 1, "wiring RED control: the base's usage-pool helper call (no drop) is caught");
   const { MINT_ENV_ALLOW } = require(path.join(REPO, 'src/oat-mint-model.js'));
-  ok(Array.isArray(MINT_ENV_ALLOW) && !MINT_ENV_ALLOW.some((n) => all().includes(n)), 'wiring: oat-mint allowlist holds no credential name');
+  ok(gateOf(Array.isArray(MINT_ENV_ALLOW)) && !MINT_ENV_ALLOW.some((n) => all().includes(n)), 'wiring: oat-mint allowlist holds no credential name');
 }
 
 // ── statusBar: THE STATUS-BAR FACTS ROW (lane agy-status-bar-facts, 2026-10-21) ──
@@ -1426,10 +1426,10 @@ console.log('\nstatusBar: every harness declares what its status bar shows');
   for (const id of chatHarnessIds()) {
     const row = HARNESSES[id].ui && HARNESSES[id].ui.statusBar;
     ok(!!row && SB.statusBarErrors(row).length === 0, `${id}: declares ui.statusBar with every key (${SB.STATUS_BAR_ROWS.join(' / ')} / windows)`, JSON.stringify(SB.statusBarErrors(row)));
-    ok(!!EXPECT[id] && SB.STATUS_BAR_ROWS.every((k) => row && row[k] === EXPECT[id][k]), `${id}: the row is what its stream feeds the bar (${JSON.stringify(EXPECT[id])})`, JSON.stringify(row));
+    ok(!!EXPECT[id] && verdictOf(SB.STATUS_BAR_ROWS.every((k) => row && row[k] === EXPECT[id][k])), `${id}: the row is what its stream feeds the bar (${JSON.stringify(EXPECT[id])})`, JSON.stringify(row));
     ok(JSON.stringify(statusBarRow(id)) === JSON.stringify(row), `${id}: the client's statusBarRow() is the descriptor's row`);
   }
-  ok(JSON.stringify(SB.statusBarOf(harnessOf('shell').ui)) === JSON.stringify(SB.NO_STATUS_BAR) && SB.STATUS_BAR_ROWS.every((k) => statusBarRow('shell')[k] === EXPECT.shell[k]) && SB.unreportedRows(statusBarRow('shell')).length === 5,
+  ok(JSON.stringify(SB.statusBarOf(harnessOf('shell').ui)) === JSON.stringify(SB.NO_STATUS_BAR) && gateOf(SB.STATUS_BAR_ROWS.every((k) => statusBarRow('shell')[k] === EXPECT.shell[k])) && SB.unreportedRows(statusBarRow('shell')).length === 5,
     'shell (terminal-only, no chat): no row ⇒ nothing reported — every fact says «not reported», server and client alike');
   ok(JSON.stringify(SB.unreportedRows(statusBarRow('claude'))) === '["odometer","duration"]' && JSON.stringify(SB.unreportedRows(statusBarRow('opencode'))) === '["cache","odometer","duration"]' && SB.unreportedRows(statusBarRow('antigravity')).length === 0,
     'what each lacks is what its bar says «not reported» for: claude the token total + the turn time, opencode also the cache rate, antigravity nothing');
@@ -1448,17 +1448,17 @@ console.log('\nstatusBar: every harness declares what its status bar shows');
   } finally { H.unregister('acme-facts'); H.unregister('acme-facts2'); }
   // the antigravity window table: every model the descriptor offers resolves (the docs' windows), an unknown slug does not
   const ag = HARNESSES.antigravity, agRow = ag.ui.statusBar;
-  ok(ag.models().filter((m) => m.id).every((m) => SB.windowOf(agRow, m.id) === 1048576) && SB.windowOf(agRow, 'claude-opus-5-5-max') === 0 && SB.windowOf(agRow, 'gemini-4-argonaut') === 0 && agRow.windows === ag.AGY_CONTEXT_WINDOWS,
+  ok(gateOf(ag.models().filter((m) => m.id).every((m) => SB.windowOf(agRow, m.id) === 1048576)) && SB.windowOf(agRow, 'claude-opus-5-5-max') === 0 && SB.windowOf(agRow, 'gemini-4-argonaut') === 0 && agRow.windows === ag.AGY_CONTEXT_WINDOWS,
     "antigravity: every slug it offers has a documented window (1,048,576 — Google's model pages, named in the descriptor); an unknown slug ⇒ 0 = «window unknown», never a guess");
   // Gemini 4 Carbon (agy 1.5.5, 2026-11-10, generally available that day): offered first in agy's own order, its window from
   // Google's model page; Argon and 3.8 Flash gain «low». RED CONTROL: the Carbon window row removed ⇒ «window unknown»
-  ok(ag.models().map((m) => m.id).slice(1, 4).join() === 'gemini-4-carbon-medium,gemini-4-carbon-high,gemini-4-carbon-low' && SB.windowOf(agRow, 'gemini-4-carbon-low') === 1048576 && ['gemini-4-argon-low', 'gemini-3.8-flash-low'].every((id) => ag.models().some((m) => m.id === id)),
+  ok(ag.models().map((m) => m.id).slice(1, 4).join() === 'gemini-4-carbon-medium,gemini-4-carbon-high,gemini-4-carbon-low' && SB.windowOf(agRow, 'gemini-4-carbon-low') === 1048576 && verdictOf(['gemini-4-argon-low', 'gemini-3.8-flash-low'].every((id) => ag.models().some((m) => m.id === id))),
     "antigravity: Gemini 4 Carbon (medium, high, low — agy 1.5.5's own order) leads the picker with its 1,048,576 window; Argon and 3.8 Flash gain «low»");
   ok(SB.windowOf({ ...agRow, windows: agRow.windows.filter((w) => w.prefix !== 'gemini-4-carbon') }, 'gemini-4-carbon-medium') === 0,
     'RED CONTROL: the Carbon window row removed ⇒ a Carbon chat\'s bar says «window unknown» (0) — the leg above names the row it needs');
   // gated on the row, never the name: the bar reads the facts row for every fact chip
   const bar = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
-  ok(/const facts = statusBarRow\(this\._backend\);/.test(bar) && ['facts.context && !ctxWindow', 'facts.context && ctxWindow', 'facts.cache &&', 'facts.odometer &&', 'facts.duration &&'].every((n) => bar.includes(n)) && /unreportedRows\(facts\)/.test(bar),
+  ok(gateOf(/const facts = statusBarRow\(this\._backend\);/.test(bar)) && gateOf(['facts.context && !ctxWindow', 'facts.context && ctxWindow', 'facts.cache &&', 'facts.odometer &&', 'facts.duration &&'].every((n) => bar.includes(n))) && verdictOf(/unreportedRows\(facts\)/.test(bar)),
     'the bar draws context / cache / odometer / turn time from the facts row and says what it lacks (unreportedRows) — no harness id');
 }
 
@@ -1498,12 +1498,12 @@ console.log('\n— a frame queued behind a turn: every row\'s peer lane says wha
     const r = await D.deliverToConversation(CID, 'a frame behind a running turn', { kind: 'peer', spendReason: 'peer-message' });
     const got = r.ok && r.queued ? 'queued' : r.ok && r.intoTurn ? 'into-turn' : !r.ok ? 'refused' : 'woke';
     const moneyOk = want === 'queued' ? money.auth === 1 && money.note === 1 : want === 'into-turn' ? money.note === 1 : money.note === 0;   // queued: the unit RESERVED at the send (round 2)
-    ok(got === want && moneyOk, `${id} (${lane}): a frame into a running turn is «${want}» — ${want === 'queued' ? 'waiting — its unit reserved at the send, the carrying turn that same unit' : want === 'into-turn' ? 'a wake into the running turn, charged once (master, ruled)' : 'the wake refused, not billed'}`, JSON.stringify({ r, money }));
+    ok(got === want && verdictOf(moneyOk), `${id} (${lane}): a frame into a running turn is «${want}» — ${want === 'queued' ? 'waiting — its unit reserved at the send, the carrying turn that same unit' : want === 'into-turn' ? 'a wake into the running turn, charged once (master, ruled)' : 'the wake refused, not billed'}`, JSON.stringify({ r, money }));
   }
 }
 
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTH.files, MUTH.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTH.files, MUTH.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 // B-82b8 (主开发 r654): THE SETTINGS WORDS LEAVE THE DEVICE BUNDLE — every word a person reads about a built-in row lives in
 // src/harness-settings-words.js, keyed by the row's own name; the device's table keeps its machine facts. ONE TABLE OWNS EACH FACT:
@@ -1511,7 +1511,7 @@ for (const r of copiesCensus(MUTH.files, MUTH.dir, REPO, { minCopies: 1 })) ok(r
 // on the Settings screen. And the eight apply notes that were engineers' English are a person's words, in zh and ja.
 console.log('B-82b8 the settings words live apart from the device\'s table');
 {
-  const okP = (c, n, facts) => { ok(c, n, JSON.stringify(facts)); if (c) console.log('      ' + JSON.stringify(facts)); };
+  const okP = (c, n, facts) => { ok(verdictOf(c), n, JSON.stringify(facts)); if (c) console.log('      ' + JSON.stringify(facts)); };
   const HSW = require(path.join(REPO, 'src/harness-settings-words.js'));
   const census = HSW.wordsCensus(HARNESS_SETTINGS);
   const rows = Object.values(HARNESS_SETTINGS).reduce((n, t) => n + t.rows.length, 0), opts = Object.values(HARNESS_SETTINGS).reduce((n, t) => n + t.rows.reduce((m, r) => m + (r.options || []).length, 0), 0);
@@ -1557,4 +1557,4 @@ console.log('B-82b8 the settings words live apart from the device\'s table');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

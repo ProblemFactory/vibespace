@@ -51,7 +51,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
 let bad = 0, n = 0;
-const ok = (name, cond, got) => { n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + String(JSON.stringify(got)).slice(0, 700)}`); };
+const ok = (name, cond, got) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + String(JSON.stringify(got)).slice(0, 700)}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-path-field-'));
@@ -192,7 +192,7 @@ fs.writeFileSync(path.join(D, 't.html'), '<!doctype html><html data-theme="dark"
 // and the recents' count — the plant made through THE one door for a control's edit (a moved line throws by name)
 const PF_FILE = path.join(REPO, 'src/lib/path-field.js'), PF_SRC = fs.readFileSync(PF_FILE, 'utf8');
 const PF_TIP = anchored(PF_SRC, 'W.rev || 0, inp.listing.home, inp.recent.map((r) => [r.path, r.count, r.when])', 'Object.keys(inp.listing.dirs).length, inp.recent.length', 'the rows memo keyed on the folders\' count');   // stale-pins: kept — the plant restores the tip's own memo key (the page's red)
-ok('CONTROL setup: the plant is where it claims — the rows memo of the copy keys on the folders\' count, its revision gone', PF_TIP !== PF_SRC && PF_TIP.includes('inp.bases.map((b) => b.path), Object.keys(inp.listing.dirs).length, inp.recent.length, !!inp.self, dead]') && !PF_TIP.includes('W.rev || 0, inp.listing.home'));   // stale-pins: kept — the copy holds the tip's key
+ok('CONTROL setup: the plant is where it claims — the rows memo of the copy keys on the folders\' count, its revision gone', PF_TIP !== PF_SRC && gateOf(PF_TIP.includes('inp.bases.map((b) => b.path), Object.keys(inp.listing.dirs).length, inp.recent.length, !!inp.self, dead]')) && !PF_TIP.includes('W.rev || 0, inp.listing.home'));   // stale-pins: kept — the copy holds the tip's key
 await require(path.join(REPO, 'node_modules/esbuild')).build({ entryPoints: [path.join(TMP, 'entry.js')], bundle: true, outfile: path.join(D, 'b-tip.js'), format: 'iife', platform: 'browser', target: 'es2020', logLevel: 'error',
   plugins: [{ name: 'memo-at-tip', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]path-field\.js$/ }, () => ({ contents: PF_TIP, loader: 'js', resolveDir: path.dirname(PF_FILE) })); } }] });
 fs.writeFileSync(path.join(D, 't-tip.html'), '<!doctype html><html data-theme="dark" lang="zh"><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body><script src="/static/b-tip.js"></script></body></html>');
@@ -247,24 +247,24 @@ console.log('── ① the list never pops by itself ──');
   await sleep(400);
   ok('a programmatic focus (a dialog opening) does NOT open the list', !(await listOpen()), null);
   await press('#cwd');
-  ok('a press on the field opens it', await until(listOpen, 3000), null);
+  ok('a press on the field opens it', verdictOf(await until(listOpen, 3000)), null);
   await key('Escape'); await reset();
   await ev(`document.getElementById('name').focus(); true`);
   await key('Tab');
-  ok('a Tab INTO the field opens it', (await until(`document.activeElement.id === 'cwd'`, 2000)) && (await until(listOpen, 3000)), await ev('document.activeElement.id'));
+  ok('a Tab INTO the field opens it', (gateOf(await until(`document.activeElement.id === 'cwd'`, 2000))) && (verdictOf(await until(listOpen, 3000))), await ev('document.activeElement.id'));
   await key('Escape'); await reset();
   await ev(`document.getElementById('cwd').focus(); true`); await sleep(150);
   await key('ArrowDown');
-  ok('↓ opens it', await until(listOpen, 3000), null);
+  ok('↓ opens it', verdictOf(await until(listOpen, 3000)), null);
   const s = await until(async () => { const x = await secs(); return x.length ? x : null; }, 4000);
-  ok('…empty: ① the groups\' folders, ③ recent (with counts), in zh', Array.isArray(s) && s[0] === '① 任务组文件夹' && s.some((t) => t.startsWith('③ 最近')), s);
+  ok('…empty: ① the groups\' folders, ③ recent (with counts), in zh', gateOf(Array.isArray(s)) && s[0] === '① 任务组文件夹' && verdictOf(s.some((t) => t.startsWith('③ 最近'))), s);
   const r = await rows();
-  ok('…the recent ~/work/investor-relations says «6 个会话 · 2 小时前»… ① first as a Task Group folder', r.some((x) => x.path === '~/work/investor-relations' && x.chips.some((c) => /任务组 · 投资者关系/.test(c))), r.slice(0, 6));
+  ok('…the recent ~/work/investor-relations says «6 个会话 · 2 小时前»… ① first as a Task Group folder', verdictOf(r.some((x) => x.path === '~/work/investor-relations' && x.chips.some((c) => /任务组 · 投资者关系/.test(c)))), r.slice(0, 6));
   await shot('01-empty-open');
   await key('Escape'); await reset();
   await ev(`document.getElementById('cwd').focus(); true`);
   await type('w');
-  ok('typing opens it', await until(listOpen, 3000), null);
+  ok('typing opens it', verdictOf(await until(listOpen, 3000)), null);
   await key('Escape'); await reset();
 }
 
@@ -273,11 +273,11 @@ console.log('\n── ② fuzzy over the whole path + ↓ Enter picks ──');
   await ev(`document.getElementById('cwd').focus(); true`);
   await type('ir q3');
   const top = await until(async () => { const r = await rows(); return r.length && r[0].path === '~/work/investor-relations/Q3-董事会材料' ? r : null; }, 5000);
-  ok('`ir q3` → ~/work/investor-relations/Q3-董事会材料 first, with its rule chip 片段前缀', !!top && top[0].chips.includes('片段前缀'), top || (await rows()));
+  ok('`ir q3` → ~/work/investor-relations/Q3-董事会材料 first, with its rule chip 片段前缀', !!top && verdictOf(top[0].chips.includes('片段前缀')), top || (await rows()));
   await shot('02-fuzzy');
   await key('ArrowDown'); await key('Enter');
   const c = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
-  ok('↓ Enter picks it: the field shows the ~/ form, the commit carries the absolute path (how pick)', (await cwd()) === '~/work/investor-relations/Q3-董事会材料' && c && c.path === HOME + '/work/investor-relations/Q3-董事会材料' && c.how === 'pick', [await cwd(), c]);
+  ok('↓ Enter picks it: the field shows the ~/ form, the commit carries the absolute path (how pick)', (await cwd()) === '~/work/investor-relations/Q3-董事会材料' && gateOf(c) && c.path === HOME + '/work/investor-relations/Q3-董事会材料' && c.how === 'pick', [await cwd(), c]);
   ok('…and the list closed', !(await listOpen()), null);
   await reset();
 }
@@ -288,7 +288,7 @@ console.log('\n── ③ Tab completes INTO a folder ──');
   await type('~/work/pa');
   await until(async () => (await rows()).some((r) => r.path === '~/work/payments'), 4000);
   await key('Tab');
-  ok('Tab: ~/work/pa → ~/work/payments/ (the focus stays)', (await until(async () => (await cwd()) === '~/work/payments/', 3000)) && (await ev(`document.activeElement.id`)) === 'cwd', await cwd());
+  ok('Tab: ~/work/pa → ~/work/payments/ (the focus stays)', (gateOf(await until(async () => (await cwd()) === '~/work/payments/', 3000))) && (await ev(`document.activeElement.id`)) === 'cwd', await cwd());
   const inside = await until(async () => { const r = await rows(); return r.some((x) => x.path === '~/work/payments/发票') ? r : null; }, 4000);
   ok('…and the list shows what is inside it', !!inside, inside || (await rows()));
   await key('Escape'); await reset();
@@ -299,10 +299,10 @@ console.log('\n── ④ Esc ──');
   await press('#cwd'); await until(listOpen, 3000);
   await key('Escape');
   const l = await log();
-  ok('Esc with the list open closes it and is defaultPrevented (the dialog\'s own Esc stays)', !(await listOpen()) && l.some((x) => x.ev === 'esc' && x.prevented === true), l);
+  ok('Esc with the list open closes it and is defaultPrevented (the dialog\'s own Esc stays)', !(await listOpen()) && verdictOf(l.some((x) => x.ev === 'esc' && x.prevented === true)), l);
   await ev('window.__log.length = 0');
   await key('Escape');
-  ok('the list closed, Esc is not touched', (await log()).some((x) => x.ev === 'esc' && x.prevented === false), await log());
+  ok('the list closed, Esc is not touched', verdictOf((await log()).some((x) => x.ev === 'esc' && x.prevented === false)), await log());
   await reset();
 }
 
@@ -313,10 +313,10 @@ console.log('\n── ⑤ BLUR COMMITS (a relative path, the selected group\'s f
   await type('Q3-董事会材料');
   await until(async () => /投资者关系/.test(await under()), 4000);
   const line = await under();
-  ok('the line: = ~/work/investor-relations/Q3-董事会材料 · 相对任务组「投资者关系」', /= ~\/work\/investor-relations\/Q3-董事会材料/.test(line) && /相对任务组「投资者关系」/.test(line), line);
+  ok('the line: = ~/work/investor-relations/Q3-董事会材料 · 相对任务组「投资者关系」', gateOf(/= ~\/work\/investor-relations\/Q3-董事会材料/.test(line)) && verdictOf(/相对任务组「投资者关系」/.test(line)), line);
   await press('#other');
   const c = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
-  ok('leaving the field commits it (how blur), the text kept as typed', c && c.how === 'blur' && c.path === HOME + '/work/investor-relations/Q3-董事会材料' && (await cwd()) === 'Q3-董事会材料', [c, await cwd()]);
+  ok('leaving the field commits it (how blur), the text kept as typed', gateOf(c) && c.how === 'blur' && c.path === HOME + '/work/investor-relations/Q3-董事会材料' && (await cwd()) === 'Q3-董事会材料', [c, await cwd()]);
   await reset();
 }
 
@@ -327,15 +327,15 @@ console.log('\n── ⑥ 「未生效：…」 ──');
   await sleep(400);
   await press('#other');
   const u = await until(async () => { const t = await under(); return /未生效/.test(t) ? t : null; }, 4000);
-  ok('a few letters with no path, left: 「未生效：…」 said, the text stays, nothing committed', !!u && /不是一个路径/.test(u) && (await cwd()) === 'zzq qqz' && !(await log()).some((x) => x.ev === 'commit') && (await ev('window.pf.verdict().status')) === 'unresolved', [u, await cwd(), await log()]);
+  ok('a few letters with no path, left: 「未生效：…」 said, the text stays, nothing committed', !!u && gateOf(/不是一个路径/.test(u)) && (await cwd()) === 'zzq qqz' && !(await log()).some((x) => x.ev === 'commit') && (await ev('window.pf.verdict().status')) === 'unresolved', [u, await cwd(), await log()]);
   await shot('06-unresolved');
   await clear(); await type('ir q3'); await sleep(500);
   await press('#other');
   await until(async () => /未生效/.test(await under()), 4000);
-  ok('`ir q3` left: 未生效 + 「用第一名 …」', await ev(`!!document.querySelector('.pf-under .pf-best')`), await under());
+  ok('`ir q3` left: 未生效 + 「用第一名 …」', verdictOf(await ev(`!!document.querySelector('.pf-under .pf-best')`)), await under());
   await press('.pf-under .pf-best');
   const c = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
-  ok('「用第一名」 commits the best one', c && c.path === HOME + '/work/investor-relations/Q3-董事会材料', c);
+  ok('「用第一名」 commits the best one', gateOf(c) && c.path === HOME + '/work/investor-relations/Q3-董事会材料', c);
   await reset();
 }
 
@@ -358,11 +358,11 @@ console.log('\n── ⑧ «不存在 — 创建？» ──');
   await until(async () => /不存在 — 创建？/.test(await under()), 4000);
   await press('#other');
   const u = await until(async () => { const t = await under(); return /未生效/.test(t) ? t : null; }, 4000);
-  ok('a missing folder, left without the tick: not taken, 未生效 says tick 「创建会话时新建这个文件夹」', !!u && /勾上「创建会话时新建这个文件夹」/.test(u) && !(await log()).some((x) => x.ev === 'commit'), u);
+  ok('a missing folder, left without the tick: not taken, 未生效 says tick 「创建会话时新建这个文件夹」', !!u && gateOf(/勾上「创建会话时新建这个文件夹」/.test(u)) && !(await log()).some((x) => x.ev === 'commit'), u);
   await press('.pf-under input[data-act="tick"]');
   const c = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
-  ok('ticked ⇒ committed with create (exists false)', c && c.create === true && c.exists === false && c.path === HOME + '/work/新项目', c);
-  ok('ensure() makes it on disk', (await ev('window.pf.ensure()')) === true && fs.existsSync(path.join(HOME, 'work/新项目')), fs.existsSync(path.join(HOME, 'work/新项目')));
+  ok('ticked ⇒ committed with create (exists false)', gateOf(c) && c.create === true && c.exists === false && c.path === HOME + '/work/新项目', c);
+  ok('ensure() makes it on disk', (await ev('window.pf.ensure()')) === true && verdictOf(fs.existsSync(path.join(HOME, 'work/新项目'))), fs.existsSync(path.join(HOME, 'work/新项目')));
   await reset();
   // B-ckpt61 (leg 8 as ruled — the ui-needs-a-button chain gave a missing PARENT its create tick, b2f2399c7): the missing parent is
   // SAID and the tick is OFFERED, and the create then makes BOTH levels (read back from the disk); the line waited for, never a sleep.
@@ -370,7 +370,7 @@ console.log('\n── ⑧ «不存在 — 创建？» ──');
   // set(''): this letter ended it — ⑧c below now proves the tick never carries)
   await press('#cwd'); await type('x'); await clear(); await type('~/nope/x');
   const u2 = await until(async () => { const t = await under(); return /上一级 ~\/nope 也不存在/.test(t) ? t : null; }, 4000);
-  ok('its parent missing ⇒ said, AND the create tick offered (not ticked)', !!u2 && (await ev(`!!document.querySelector('.pf-under input[data-act="tick"]') && !document.querySelector('.pf-under input[data-act="tick"]').checked`)), u2 || (await under()));
+  ok('its parent missing ⇒ said, AND the create tick offered (not ticked)', !!u2 && (verdictOf(await ev(`!!document.querySelector('.pf-under input[data-act="tick"]') && !document.querySelector('.pf-under input[data-act="tick"]').checked`))), u2 || (await under()));
   ok('before the tick neither level is on the disk (the read-back below is the create\'s own)', !fs.existsSync(path.join(HOME, 'nope')), fs.existsSync(path.join(HOME, 'nope')));
   await press('#other');
   const un = await until(async () => { const t = await under(); return /未生效/.test(t) ? t : null; }, 4000);
@@ -378,7 +378,7 @@ console.log('\n── ⑧ «不存在 — 创建？» ──');
   await press('.pf-under input[data-act="tick"]');
   const cn = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
   const madeBoth = !!cn && cn.create === true && cn.path === HOME + '/nope/x' && (await ev('window.pf.ensure()')) === true && fs.existsSync(path.join(HOME, 'nope', 'x')) && fs.statSync(path.join(HOME, 'nope')).isDirectory();
-  ok('ticked ⇒ committed with create, and ensure() makes BOTH levels on the disk (read back)', madeBoth, { cn, nope: fs.existsSync(path.join(HOME, 'nope')), x: fs.existsSync(path.join(HOME, 'nope', 'x')) });
+  ok('ticked ⇒ committed with create, and ensure() makes BOTH levels on the disk (read back)', verdictOf(madeBoth), { cn, nope: fs.existsSync(path.join(HOME, 'nope')), x: fs.existsSync(path.join(HOME, 'nope', 'x')) });
   await reset();
 }
 
@@ -404,7 +404,7 @@ console.log('\n── ⑧c THE TICK BELONGS TO THE PATH IT WAS GIVEN FOR (B-f3a1
   const g1 = await tickOn('~/work/勾选甲');
   await ev(`window.pf.set('~/work/另一个乙', { commit: false }); true`);
   const r1 = await boxOnce(/另一个乙/), c1 = await takes();
-  ok('⑧c a set from outside to another missing path: the tick given for «勾选甲» is GONE — the box unchecked, a commit takes nothing', g1 && r1.box === 'unchecked' && c1 === null, { g1, r1, c1 });
+  ok('⑧c a set from outside to another missing path: the tick given for «勾选甲» is GONE — the box unchecked, a commit takes nothing', gateOf(g1) && r1.box === 'unchecked' && c1 === null, { g1, r1, c1 });
   // road 2 — typing more, then back to the SAME text: gone for good (asked again), never brought back
   const g2 = await tickOn('~/work/勾选丙');
   await ev(`(() => { const i = document.getElementById('cwd'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); return true; })()`);
@@ -413,23 +413,23 @@ console.log('\n── ⑧c THE TICK BELONGS TO THE PATH IT WAS GIVEN FOR (B-f3a1
   await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 });
   await until(async () => (await ev(`document.getElementById('cwd').value`)) === '~/work/勾选丙', 3000);
   const r2b = await boxOnce(/勾选丙(?!丁)/);
-  ok('⑧c typing another text drops the tick, and typing back to the ticked text does NOT bring it back — the person is asked again', g2 && r2a.box === 'unchecked' && r2b.box === 'unchecked', { g2, r2a, r2b });
+  ok('⑧c typing another text drops the tick, and typing back to the ticked text does NOT bring it back — the person is asked again', gateOf(g2) && r2a.box === 'unchecked' && r2b.box === 'unchecked', { g2, r2a, r2b });
   // road 3 — a RELATIVE text, then a Task Group change and the door's refresh: the same words, another folder — the tick is gone
   const g3 = await tickOn('./勾选新文件夹', ['g-ir']);
   await ev(`window.sel = ['g-wk']; window.pf.refresh(); true`);
   const r3 = await boxOnce(/weekly-admin|周报与行政/);
-  ok('⑧c a relative text ticked under «投资者关系», then the Task Group changed (a refresh): another folder under the same words — the tick is GONE', g3 && r3.box === 'unchecked', { g3, r3 });
+  ok('⑧c a relative text ticked under «投资者关系», then the Task Group changed (a refresh): another folder under the same words — the tick is GONE', gateOf(g3) && r3.box === 'unchecked', { g3, r3 });
   // road 3b — an ABSOLUTE text ticked, then a Task Group picked: the SAME folder — the tick STAYS (New Session J5's shape)
   const g3b = await tickOn('~/work/勾选己');
   await ev(`window.sel = ['g-ir']; window.pf.refresh(); true`);
   const r3b = await boxOnce(/勾选己/), c3b = await takes();
-  ok('⑧c an absolute («~») text ticked, then a Task Group picked: the same folder — the tick STAYS and a commit takes it with create', g3b && r3b.box === 'checked' && !!c3b && c3b.create === true, { g3b, r3b, c3b });
+  ok('⑧c an absolute («~») text ticked, then a Task Group picked: the same folder — the tick STAYS and a commit takes it with create', gateOf(g3b) && r3b.box === 'checked' && !!c3b && c3b.create === true, { g3b, r3b, c3b });
   // road 4 — a chip that is not «new» (an existing folder): committed as itself, never with the create the other path was given
   const g4 = await tickOn('~/work/勾选戊', ['g-ir']);
   const chip = await ev(`(() => { const c = [...document.querySelectorAll('#cwd-recent button.cwd-recent-chip')].find((b) => !b.dataset.new && !b.classList.contains('cwd-name-chip')); if (!c) return null; c.id = 'f3a1-chip'; return c.dataset.path || c.textContent; })()`);
   if (chip) await press('#f3a1-chip');
   const c4 = chip ? await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000) : null;
-  ok('⑧c a chip that is not «new» picked after the tick: committed as that folder with NO create (the tick was another path\'s)', g4 && !!chip && !!c4 && c4.create !== true && (await ev(BOX)) !== 'checked', { g4, chip, c4 });
+  ok('⑧c a chip that is not «new» picked after the tick: committed as that folder with NO create (the tick was another path\'s)', gateOf(g4) && !!chip && !!c4 && c4.create !== true && (await ev(BOX)) !== 'checked', { g4, chip, c4 });
   await reset();
 }
 
@@ -461,9 +461,9 @@ console.log('\n── ⑧b the door refreshes a closed field (the name typed, th
     return { said: !!said, taken: !!taken, stands: !!stands, after, machine: !!machine, onMac };
   };
   const now = await scene('t.html');
-  ok('⑧b the scene\'s own start: the tick TAKEN — the box reads checked and the commit with create is in the log — before the name is typed (else the legs below prove nothing)', now.said && now.taken, now);
-  ok('⑧b a missing folder ticked, then the name typed (refresh() per keystroke, the field closed): the line still says «不存在 — 创建？» with its tick checked, never «正在问这台机器…» (the coordinator\'s MUST)', now.said && now.stands && now.after.status === 'missing' && !/正在问这台机器/.test(now.after.line), now);
-  ok('⑧b …the machine changed (refresh() with the field closed): the field ASKS that machine and its answer lands — the pending words never stay with no ask out', now.machine && !/正在问这台机器/.test(now.onMac), now);
+  ok('⑧b the scene\'s own start: the tick TAKEN — the box reads checked and the commit with create is in the log — before the name is typed (else the legs below prove nothing)', gateOf(now.said) && verdictOf(now.taken), now);
+  ok('⑧b a missing folder ticked, then the name typed (refresh() per keystroke, the field closed): the line still says «不存在 — 创建？» with its tick checked, never «正在问这台机器…» (the coordinator\'s MUST)', gateOf(now.said) && gateOf(now.stands) && now.after.status === 'missing' && !/正在问这台机器/.test(now.after.line), now);
+  ok('⑧b …the machine changed (refresh() with the field closed): the field ASKS that machine and its answer lands — the pending words never stay with no ask out', gateOf(now.machine) && !/正在问这台机器/.test(now.onMac), now);
   // THE WIRING (主开发's MUST 1 on 9daebd507 — the page never sent the model «closed», so after one touch it held the list open for good
   // and every refresh asked at once): typed, then LEFT (the blur closes the list: the model hears «closed»), then the door's refresh
   // with the list closed asks NOTHING — the answer stands. Its control is the model suite's event census (the wiring without «closed»)
@@ -499,9 +499,9 @@ console.log('\n── ⑨ two Task Groups + a name ⇒ one 新建 per group ─�
   const seq2 = (r2 || []).map((x) => x.path);
   const a = seq2.indexOf('~/work/payments'), b = seq2.indexOf('~/work/investor-relations/payments'), c = seq2.indexOf('~/work/compute-deal/payments'), d = seq2.indexOf('~/payments');
   ok('② = the same-name folder, <IR>/payments, <算力>/payments, ~/payments — selection order', a >= 0 && a < b && b < c && c < d, seq2);
-  ok('…the 新建 rows say 新建 + 任务组「X」', (r2 || []).find((x) => x.path === '~/work/compute-deal/payments')?.chips.join('|').includes('新建') && (r2 || []).find((x) => x.path === '~/work/compute-deal/payments')?.chips.some((t) => t.includes('任务组「算力合同谈判」')), r2);
+  ok('…the 新建 rows say 新建 + 任务组「X」', gateOf((r2 || []).find((x) => x.path === '~/work/compute-deal/payments')?.chips.join('|').includes('新建')) && verdictOf((r2 || []).find((x) => x.path === '~/work/compute-deal/payments')?.chips.some((t) => t.includes('任务组「算力合同谈判」'))), r2);
   const chips = await ev(`[...document.querySelectorAll('#cwd-recent .cwd-name-chip')].map((c) => c.textContent)`);
-  ok('the chips row under the field: one name chip per selected group + home', chips.length === 3 && /investor-relations\/payments/.test(chips[0]) && /compute-deal\/payments/.test(chips[1]) && /~\/payments/.test(chips[2]), chips);
+  ok('the chips row under the field: one name chip per selected group + home', chips.length === 3 && gateOf(/investor-relations\/payments/.test(chips[0])) && gateOf(/compute-deal\/payments/.test(chips[1])) && verdictOf(/~\/payments/.test(chips[2])), chips);
   await shot('09-two-groups');
   await key('Escape'); await reset();
 }
@@ -512,7 +512,7 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   const homeFolders = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/home-folders')).length`);
   ok('a field built while the page boots asks nothing for its chips row (it paints on refresh())', (await homeFolders()) === 0, await homeFolders());
   await ev('window.pf.refresh(); true');
-  ok('CONTROL: refresh() paints it (the home\'s folders asked once)', await until(async () => (await homeFolders()) >= 1, 3000), await homeFolders());
+  ok('CONTROL: refresh() paints it (the home\'s folders asked once)', verdictOf(await until(async () => (await homeFolders()) >= 1, 3000)), await homeFolders());
   const IR = HOME + '/work/investor-relations';
   // B-ckpt61 (the block's hosted red, both tries): THE STALL PLACED in the listing's reply (the suite's own server holds
   // /api/dir-complete) — while the machine has not answered for the text, the line says the pending words (LAW 1): no «不存在», no
@@ -524,11 +524,11 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   await ev(`window.sel = ['g-ir']; window.pf.refresh(); window.pf.setDerived(${JSON.stringify(IR)}, { note: '（来自任务组「投资者关系」）' }); true`);
   const askedOut = await until(() => ev(`!!document.querySelector('.path-field')?.dataset.pending`), 8000);   // the field's ask is out — held
   const during = await pfState(), tickDuring = await ev(`!!document.querySelector('.pf-under input[data-act="tick"]')`);
-  ok('⑨b HELD (the stall placed in the listing\'s reply): the line says «正在问这台机器…» — no «不存在», no raw absolute path, no create tick (LAW 1)', !!askedOut && /正在问这台机器/.test(during.line) && !/不存在/.test(during.line) && !during.line.includes(HOME) && !tickDuring, { askedOut, during, tickDuring });
+  ok('⑨b HELD (the stall placed in the listing\'s reply): the line says «正在问这台机器…» — no «不存在», no raw absolute path, no create tick (LAW 1)', !!askedOut && gateOf(/正在问这台机器/.test(during.line)) && !/不存在/.test(during.line) && !during.line.includes(HOME) && !tickDuring, { askedOut, during, tickDuring });
   held.open();
   const landed = await until(async () => (await dirReplies()) > before && !(await ev(`!!document.querySelector('.path-field')?.dataset.pending`)), 30000);
   const u1 = await under();
-  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）» with its facts — judged once the machine answered', (await cwd()) === IR && !!landed && u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）') && u1.includes('个文件'), { line: u1, landed: !!landed, state: await pfState() });   // (B-d833: the field's state printed whole, green or red)
+  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）» with its facts — judged once the machine answered', (await cwd()) === IR && !!landed && gateOf(u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）')) && verdictOf(u1.includes('个文件')), { line: u1, landed: !!landed, state: await pfState() });   // (B-d833: the field's state printed whole, green or red)
   ok('…the list did not pop, nothing was committed', !(await listOpen()) && !(await log()).some((x) => x.ev === 'commit'), await log());
   const c1 = await ev('window.pf.commit().then((i) => i && { path: i.path, derived: i.derived, how: i.how })');
   ok('a commit of that untouched text says derived: true', !!c1 && c1.derived === true && c1.path === IR, c1);
@@ -550,7 +550,7 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   ok('one keystroke of the name ⇒ the chips under the field: <IR>/测, ~/测 (no list opened)', !!k1 && k1[1].path === HOME + '/测' && !(await listOpen()), k1 || (await nameChips()));
   await type('试');
   const k2 = await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/测试' && c.every((x) => x.isNew) ? c : null; }, 4000);
-  ok('the next keystroke ⇒ they follow (<IR>/测试) and, once the machine said so, read 新建', !!k2 && /^新建/.test(k2[0].text), k2 || (await nameChips()));
+  ok('the next keystroke ⇒ they follow (<IR>/测试) and, once the machine said so, read 新建', !!k2 && verdictOf(/^新建/.test(k2[0].text)), k2 || (await nameChips()));
   ok('…the field\'s own line never moved while the name was typed (no «asking the machine»)', !(await under()).includes('正在问这台机器'), await under());   // (B-ckpt61: the zh words — «询问» never matched them)
   await ev(`(() => { const n = document.getElementById('name'); n.value = '草稿'; n.dispatchEvent(new Event('input')); return true; })()`);
   const k3 = await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/草稿' && c[1].isNew && !c[0].isNew ? c : null; }, 4000);
@@ -574,7 +574,7 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
     console.log(`  · ⑨b commits before the press: ${JSON.stringify(before)}`);
     const commits = (await log()).filter((x) => x.ev === 'commit').slice(before.length), tickOn = await ev(`!!document.querySelector('.pf-under input[data-act="tick"]')?.checked`);
     ok('a press on the 新建 chip fills the field and commits it as a pick with the tick (made at use — create: true)', !!got && got.how === 'pick' && got.create === true && got.path === IR + '/测试' && (await cwd()) === '~/work/investor-relations/测试', { got, cwd: await cwd(), log: await log(), verdict: await ev('window.pf.verdict()'), line: await under() });
-    ok('…the PRESS makes ONE commit, the chip\'s own pick (no blur-commit of the box\'s old text at the press), and the line\'s create tick CHECKED (made at use)', commits.length === 1 && commits[0].how === 'pick' && tickOn, { commits, tickOn, line: await under() });
+    ok('…the PRESS makes ONE commit, the chip\'s own pick (no blur-commit of the box\'s old text at the press), and the line\'s create tick CHECKED (made at use)', commits.length === 1 && commits[0].how === 'pick' && verdictOf(tickOn), { commits, tickOn, line: await under() });
     ok('…it made nothing yet', !fs.existsSync(IR + '/测试'));
   }
   await shot('09b-derived-and-name-chips');
@@ -605,7 +605,7 @@ console.log('\n── ⑨d a PARTIAL reply is asked again, BOUNDED (B-ckpt61, th
   const served = await until(async () => (await log()).find((x) => x.ev === 'commit') || null, 6000);
   await sleep(600);   // a second commit would be out by now
   const u1 = await under(), commits = (await log()).filter((x) => x.ev === 'commit').length;
-  ok('⑨d a commit whose reply was partial waits as owed (its door heard «nothing yet») and is judged AGAIN when the complete answer lands INSIDE its run: committed ONCE, the line says the folder', c1 === null && !!served && served.path === T && commits === 1 && /= ~\/work\/payments/.test(u1) && !/未生效/.test(u1), { c1, served, commits, u1 });
+  ok('⑨d a commit whose reply was partial waits as owed (its door heard «nothing yet») and is judged AGAIN when the complete answer lands INSIDE its run: committed ONCE, the line says the folder', c1 === null && !!served && served.path === T && commits === 1 && gateOf(/= ~\/work\/payments/.test(u1)) && !/未生效/.test(u1), { c1, served, commits, u1 });
   // THE RULING (主开发 21:45Z): an owed commit ENDS WITH ITS RUN — a partial reply, then a PLAIN failure: dropped, the line says it was
   // not applied, and a complete reply that lands later repaints the line only: nothing is committed
   await load();   // a fresh page: the listing does not show the folder yet (a commit on a text it shows commits at once)
@@ -648,9 +648,9 @@ console.log('\n── ⑨d a PARTIAL reply is asked again, BOUNDED (B-ckpt61, th
   const REWRITE = `document.getElementById('cwd').value = ${JSON.stringify(HOME + '/work')}; true`;   // the door's own write: no input event
   const MOVE = `(() => { const h = document.getElementById('host'); h.value = 'h-mac'; h.dispatchEvent(new Event('change')); return true; })()`;
   const rw = await owedScene('t.html', REWRITE);
-  ok('⑨d the door rewrote the box mid-run (no input event): the re-ask declines and ENDS what was owed — no «正在问这台机器…» left standing, nothing committed', rw.owed && !/正在问这台机器/.test(rw.line) && rw.commits.length === 0, rw);
+  ok('⑨d the door rewrote the box mid-run (no input event): the re-ask declines and ENDS what was owed — no «正在问这台机器…» left standing, nothing committed', gateOf(rw.owed) && !/正在问这台机器/.test(rw.line) && rw.commits.length === 0, rw);
   const mv = await owedScene('t.html', MOVE);
-  ok('⑨d the machine changed while a commit was owed: the old run ENDS — the commit is never judged on my-mac (nothing committed, no «未生效» there), no «正在问这台机器…» left once my-mac answered', mv.owed && mv.commits.length === 0 && !/未生效/.test(mv.line) && !/正在问这台机器/.test(mv.line), mv);
+  ok('⑨d the machine changed while a commit was owed: the old run ENDS — the commit is never judged on my-mac (nothing committed, no «未生效» there), no «正在问这台机器…» left once my-mac answered', gateOf(mv.owed) && mv.commits.length === 0 && !/未生效/.test(mv.line) && !/正在问这台机器/.test(mv.line), mv);
   partialFor.left = 0; partialFor.failLeft = 0;
   await load();
 }
@@ -694,7 +694,7 @@ console.log('\n── ⑨c the home\'s first read FAILS once (B-ckpt61 LAW 2) �
   const sawLines = [];
   const landed = await until(async () => { sawLines.push(await under()); return (await dirReplies()) > b2 && !(await pending()); }, 30000);
   const u3 = await under();
-  ok('⑨c the home\'s first read answered 500: the field still asked the machine, and its line names the folder with its facts — never «不存在» on the way', homeFailsLeft === 0 && !!landed && u3.includes('= ~/work/investor-relations') && u3.includes('个文件') && !sawLines.some((l) => /不存在/.test(l)), { homeFailsLeft, u3, sawLines: [...new Set(sawLines)].slice(0, 4), reads: await homeReads() });
+  ok('⑨c the home\'s first read answered 500: the field still asked the machine, and its line names the folder with its facts — never «不存在» on the way', homeFailsLeft === 0 && !!landed && gateOf(u3.includes('= ~/work/investor-relations')) && gateOf(u3.includes('个文件')) && !sawLines.some((l) => /不存在/.test(l)), { homeFailsLeft, u3, sawLines: [...new Set(sawLines)].slice(0, 4), reads: await homeReads() });
   const reads1 = await homeReads();
   await ev(`window.pf.set(${JSON.stringify(HOME + '/work')}, { commit: false }); true`);
   const reread = await until(async () => ((await homeReads()) >= 2 ? true : null), 8000);   // (a partial re-ask may have read it already)
@@ -719,8 +719,8 @@ console.log('\n── ⑩ a remote machine (my-mac): the same recommendations, c
   const homed = await until(async () => ((await ev('window.__macTap')) || []).some((x) => x.home) ? true : null, 5000);
   console.log(`  · ⑩ the rows ${homed ? 'once a listing WITH its home had landed' : '— no listing with its home ever landed'}: ${JSON.stringify((await rows()).map((x) => [x.path, x.chips.join(' | '), x.absent]))}`);
   const g1 = (r || []).filter((x) => /任务组 · /.test(x.chips.join(' ')) || x.absent);
-  ok('① on my-mac: the IR folder (my-mac 上有), 算力 declared (为 my-mac 声明), compute-deal greyed «在 my-mac 上不存在 · 新建？»', !!r && r.find((x) => x.path === '~/work/investor-relations')?.chips.some((c) => c.includes('my-mac 上') || c.includes('在 my-mac')) && r.find((x) => x.path === '~/Documents/算力合同')?.chips.some((c) => c.includes('为 my-mac 声明')) && r.find((x) => x.path === '~/work/compute-deal')?.chips.some((c) => c.includes('在 my-mac 上不存在 · 新建？')), r ? g1 : { rows: await rows(), verdict: await ev('window.pf.verdict()') });   // (when it never came: what the list showed, and the field's own verdict)
-  ok('③ that machine\'s recents with counts (3 个会话)', (r || []).some((x) => x.path === '~/Projects/website' && x.chips.some((c) => /^3 个会话/.test(c))), r || { rows: await rows(), verdict: await ev('window.pf.verdict()') });
+  ok('① on my-mac: the IR folder (my-mac 上有), 算力 declared (为 my-mac 声明), compute-deal greyed «在 my-mac 上不存在 · 新建？»', !!r && gateOf(r.find((x) => x.path === '~/work/investor-relations')?.chips.some((c) => c.includes('my-mac 上') || c.includes('在 my-mac'))) && gateOf(r.find((x) => x.path === '~/Documents/算力合同')?.chips.some((c) => c.includes('为 my-mac 声明'))) && verdictOf(r.find((x) => x.path === '~/work/compute-deal')?.chips.some((c) => c.includes('在 my-mac 上不存在 · 新建？'))), r ? g1 : { rows: await rows(), verdict: await ev('window.pf.verdict()') });   // (when it never came: what the list showed, and the field's own verdict)
+  ok('③ that machine\'s recents with counts (3 个会话)', verdictOf((r || []).some((x) => x.path === '~/Projects/website' && x.chips.some((c) => /^3 个会话/.test(c)))), r || { rows: await rows(), verdict: await ev('window.pf.verdict()') });
   // (B-d833, r169: the PLACE of the rows' state — a SECOND open of the same list, printed: if that open's reply settles the rows, the first
   // reply was received but never merged into the world the rows read; if not, the rows stay so after any reply)
   await key('Escape'); await ev(`window.pf.refresh(); true`); await ev(`document.getElementById('cwd').focus(); true`); await key('ArrowDown');
@@ -735,10 +735,10 @@ console.log('\n── ⑪ THE PICKER ──');
 {
   await ev(`window.sel = ['g-ir']; window.pf.refresh(); true`);
   await press('.path-field .pf-pick');
-  ok('the folder button opens a dialog over the dialog', await until(`!!document.querySelector('.dialog.pf-picker')`, 4000), null);
+  ok('the folder button opens a dialog over the dialog', verdictOf(await until(`!!document.querySelector('.dialog.pf-picker')`, 4000)), null);
   await until(`document.querySelectorAll('.pf-pk-tree .pf-tn').length > 5`, 5000);
   const tree = await ev(`({ pins: [...document.querySelectorAll('.pf-pk-tree .pf-tn.pin')].map((n) => n.textContent), names: [...document.querySelectorAll('.pf-pk-tree .pf-tn:not(.pin) .pf-tnm')].map((n) => n.textContent) })`);
-  ok('the groups\' folders pinned with their badge; the home\'s tree without ~/vibespace or a dot-folder', tree.pins.some((t) => t.includes('~/work/investor-relations') && t.includes('投资者关系')) && tree.names.includes('work') && !tree.names.includes('vibespace') && !tree.names.some((t) => t.startsWith('.')), tree);
+  ok('the groups\' folders pinned with their badge; the home\'s tree without ~/vibespace or a dot-folder', gateOf(tree.pins.some((t) => t.includes('~/work/investor-relations') && t.includes('投资者关系'))) && gateOf(tree.names.includes('work')) && !tree.names.includes('vibespace') && !tree.names.some((t) => t.startsWith('.')), tree);
   await ev(`(() => { const n = [...document.querySelectorAll('.pf-pk-tree [data-sel]')].find((x) => x.dataset.sel === '~/work'); n.click(); return true; })()`);
   await until(`[...document.querySelectorAll('.pf-pk-tree [data-sel]')].some((x) => x.dataset.sel === '~/work/payments')`, 4000);
   // r4927 (主开发): THE PRESS BEFORE THE MADE FOLDER's OWN LISTING LANDS — that listing is HELD at the hub's door (ASK_DOOR) until the
@@ -749,23 +749,23 @@ console.log('\n── ⑪ THE PICKER ──');
   const g11 = gateFor('~/work/payments/季度对账/');
   await ev(`[...document.querySelectorAll('.pf-pk-tree [data-sel]')].find((x) => x.dataset.sel === '~/work/payments').click(); true`);
   const pv = await until(async () => { const t = await ev(`document.querySelector('.pf-pk-right').innerText`); return /付款审批-10月\.xlsx/.test(t) ? t : null; }, 4000);
-  ok('the preview: its folders + files with sizes and dates', !!pv && /发票/.test(pv) && /26\.4 KB|27 KB|26 KB/.test(pv), pv);
+  ok('the preview: its folders + files with sizes and dates', !!pv && gateOf(/发票/.test(pv)) && verdictOf(/26\.4 KB|27 KB|26 KB/.test(pv)), pv);
   await shot('11-picker');
   await ev(`document.querySelector('.pf-pk-right [data-act="mk"]').click(); true`);
   await until(`!!document.querySelector('.pf-mk-name')`, 2000);
   await ev(`document.querySelector('.pf-mk-name').focus(); true`);
   await type('季度对账');
   await key('Enter');
-  ok('「新建文件夹」 inline makes it on disk and selects it', (await until(() => fs.existsSync(path.join(HOME, 'work/payments/季度对账')), 4000)) && (await until(`document.querySelector('.pf-pk-foot b')?.textContent === '~/work/payments/季度对账'`, 4000)), await ev(`document.querySelector('.pf-pk-foot').innerText`));
+  ok('「新建文件夹」 inline makes it on disk and selects it', (gateOf(await until(() => fs.existsSync(path.join(HOME, 'work/payments/季度对账')), 4000))) && (verdictOf(await until(`document.querySelector('.pf-pk-foot b')?.textContent === '~/work/payments/季度对账'`, 4000))), await ev(`document.querySelector('.pf-pk-foot').innerText`));
   const held11 = await until(() => (g11.arrived ? true : null), 4000);   // the made folder's own listing asked, and HELD at the door
   ok('r4927 ⑪ placed: the made folder\'s own listing is asked and HELD at the hub\'s door before the press (the collector\'s clock frozen since the parent\'s listing)', !!held11, { arrived: g11.arrived });
   await ev(`document.querySelector('.pf-pk-foot [data-act="go"]').click(); true`);
   g11.open(); DIR_CLOCK = null;
   const c = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
-  ok('「选这个文件夹」 fills the ~/ form and commits (how picker)', (await cwd()) === '~/work/payments/季度对账' && c && c.how === 'picker' && c.path === HOME + '/work/payments/季度对账' && !(await ev(`!!document.querySelector('.dialog.pf-picker')`)), [await cwd(), c]);
+  ok('「选这个文件夹」 fills the ~/ form and commits (how picker)', (await cwd()) === '~/work/payments/季度对账' && gateOf(c) && c.how === 'picker' && c.path === HOME + '/work/payments/季度对账' && !(await ev(`!!document.querySelector('.dialog.pf-picker')`)), [await cwd(), c]);
   await reset();
   await press('.path-field .pf-pick');
-  ok('reopened, it remembers its node', await until(`document.querySelector('.pf-pk-foot b')?.textContent === '~/work/payments/季度对账'`, 4000), await ev(`document.querySelector('.pf-pk-foot b')?.textContent`));
+  ok('reopened, it remembers its node', verdictOf(await until(`document.querySelector('.pf-pk-foot b')?.textContent === '~/work/payments/季度对账'`, 4000)), await ev(`document.querySelector('.pf-pk-foot b')?.textContent`));
   await ev(`document.querySelector('.pf-pk-foot [data-act="cancel"]').click(); true`);
   await reset();
   // r4927 ⑪ RED CONTROL: the same press, placed the same way, through the files route WITHOUT the drop (the release's, a patched
@@ -794,7 +794,7 @@ console.log('\n── ⑪ THE PICKER ──');
       await reset();
       await press('.path-field .pf-pick');
       const remembered2 = await until(`document.querySelector('.pf-pk-foot b')?.textContent || null`, 4000);
-      ok('r4927 ⑪ RED CONTROL (the route without the drop, the release\'s): the same placed press REMEMBERS THE PARENT, one level up', made2 && remembered2 === '~/work/payments', { made2, remembered2 });
+      ok('r4927 ⑪ RED CONTROL (the route without the drop, the release\'s): the same placed press REMEMBERS THE PARENT, one level up', gateOf(made2) && remembered2 === '~/work/payments', { made2, remembered2 });
       await ev(`document.querySelector('.pf-pk-foot [data-act="cancel"]').click(); true`);
       await reset();
     } finally { FILES = FILES_REAL; DIR_CLOCK = null; ASK_DOOR.delete('~/work/payments/季度对账-二/'); }
@@ -802,7 +802,7 @@ console.log('\n── ⑪ THE PICKER ──');
   await press('#cwd'); await type('ir q3'); await sleep(450); await key('Escape');
   await press('.path-field .pf-pick');
   const q = await until(async () => { const v = await ev(`({ q: document.querySelector('.pf-pk-q')?.value, sel: document.querySelector('.pf-pk-foot b')?.textContent })`); return v.q === 'ir q3' && v.sel ? v : null; }, 4000);
-  ok('opened on a search: the search box holds it and its best hit is chosen', q && q.sel === '~/work/investor-relations/Q3-董事会材料', q);
+  ok('opened on a search: the search box holds it and its best hit is chosen', gateOf(q) && q.sel === '~/work/investor-relations/Q3-董事会材料', q);
   await ev(`document.querySelector('.pf-pk-foot [data-act="cancel"]').click(); true`);
   await reset();
 }
@@ -817,7 +817,7 @@ console.log('\n── ⑫ IME ──');
   ok('a composing Enter (keyCode 229) never picks / commits', !(await log()).some((x) => x.ev === 'commit'), await log());
   await cdp('Input.insertText', { text: '合同' });
   const r = await until(async () => { const x = await rows(); return x.length && x[0].path === '~/work/contracts' ? x : null; }, 5000);
-  ok('the composed word (合同) finds ~/work/contracts by its link alias ~/合同', !!r && r[0].chips.some((c) => /别名「合同」/.test(c)), r || (await rows()));
+  ok('the composed word (合同) finds ~/work/contracts by its link alias ~/合同', !!r && verdictOf(r[0].chips.some((c) => /别名「合同」/.test(c))), r || (await rows()));
   await key('Escape'); await reset();
 }
 
@@ -838,7 +838,7 @@ console.log('\n── ⑭ the phone ──');
   await press('#cwd'); await type('pay');
   await until(listOpen, 4000);
   const inFlow = await ev(`(() => { const l = document.querySelector('.pf-list'); return !!l && !l.classList.contains('pf-float') && !!l.closest('.path-field'); })()`);
-  ok('on the phone the list sits in the flow under the field (not floating)', inFlow, null);
+  ok('on the phone the list sits in the flow under the field (not floating)', verdictOf(inFlow), null);
   await shot('14-phone');
 }
 
@@ -894,7 +894,7 @@ console.log('\n── ⑰ the page\'s one gate: twelve folder fields set at once
   const all = await until(() => (DIRQ.order.length >= 12 && DIRQ.now === 0 ? DIRQ.order.slice() : null), 15000);
   DIRQ.on = false;
   console.log('  · ⑰ the machine\'s view (the facts judged): ' + JSON.stringify({ firstThree: three, whileHeld, max: DIRQ.max, order: all || DIRQ.order.slice() }));
-  ok(`⑰ the doors never have more than THREE checks in flight — the fourth slot is kept for a person (held: ${three ? three.length : 0} arrived, none more)`, !!three && !!personArrived && personArrived.indexOf('~/work/payments') === 3 && personArrived.slice(0, 3).every((t) => t.startsWith('~/work/door-')), { three, personArrived });
+  ok(`⑰ the doors never have more than THREE checks in flight — the fourth slot is kept for a person (held: ${three ? three.length : 0} arrived, none more)`, !!three && !!personArrived && personArrived.indexOf('~/work/payments') === 3 && verdictOf(personArrived.slice(0, 3).every((t) => t.startsWith('~/work/door-'))), { three, personArrived });
   ok(`⑰ the PERSON's check reaches the machine AT ONCE, while the doors' three are still held (4th arrival; in flight then: ${whileHeld.now})`, !!personArrived && whileHeld.arrived === 4 && whileHeld.now === 4, whileHeld);
   ok(`⑰ the page never has more than four checks in flight (most at once: ${DIRQ.max}); field 11's door ask, superseded by the person's, never reaches the machine`, DIRQ.max === 4 && !!all && all.filter((t) => t === '~/work/door-11').length === 0, { max: DIRQ.max, all });
   await ev(`document.getElementById('many')?.remove(); true`);
@@ -1097,4 +1097,4 @@ console.log('\n── ⑱ THE LATE FACTS DRAWN (主开发 r1633 / r1636, both ro
 ok(`⑮ 0 page errors`, errors.length === 0, errors);
 ws.close(); server.close();
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);
-process.exit(bad ? 1 : 0);
+process.exit(bad ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

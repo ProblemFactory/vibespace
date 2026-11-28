@@ -19,7 +19,7 @@ import { anchored } from './scratch.mjs'; // B-9ff2 step 3: the §1b control's e
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -45,16 +45,16 @@ console.log('§1 claude: EVERY unknown record is a card in the flow — top-leve
   const c = cards(mm);
   ok('four records ⇒ four cards (no dedupe — the fall-back renders each one where it happened)', c.length === 4, c.map((m) => m.content[0].name));
   const b = c[0].content[0];
-  ok('the block names kind + name + harness and carries the WHOLE record, pretty-printed (long strings intact)', b.type === 'unknown_record' && b.kind === 'type' && b.name === 'brand_new_record' && b.harness === 'Claude Code' && b.record.includes('a'.repeat(500)) && /\n  "payload": \{/.test(b.record), { name: b.name, len: b.record.length });
-  ok('the second card is the second record (x: 2)', /"x": 2/.test(c[1].content[0].record));
-  ok('a system one says system/<subtype>', c[2].content[0].kind === 'system' && c[2].content[0].name === 'never_seen_a' && /"branch": "main"/.test(c[2].content[0].record));
+  ok('the block names kind + name + harness and carries the WHOLE record, pretty-printed (long strings intact)', b.type === 'unknown_record' && b.kind === 'type' && b.name === 'brand_new_record' && b.harness === 'Claude Code' && gateOf(b.record.includes('a'.repeat(500))) && verdictOf(/\n  "payload": \{/.test(b.record)), { name: b.name, len: b.record.length });
+  ok('the second card is the second record (x: 2)', verdictOf(/"x": 2/.test(c[1].content[0].record)));
+  ok('a system one says system/<subtype>', c[2].content[0].kind === 'system' && c[2].content[0].name === 'never_seen_a' && verdictOf(/"branch": "main"/.test(c[2].content[0].record)));
   ok('live cards are EMITTED as create ops under `message`, the key every create op carries (lane door-healthy-chat: `msg` made the chat view throw on EVERY live unknown record)', ops.filter((o) => o.op === 'create' && o.message && o.message.noticeKind === 'unknown-record').length === 4 && !ops.some((o) => 'msg' in o));
   // lane door-healthy-chat: the KINDS reach the status bar (its addedKindsWords — Session Properties' row; lane mask-value-shape: no strip chip) — one row per kind, a `record-kinds` meta op per change
   const kindOps = ops.filter((o) => o.op === 'meta' && o.subtype === 'record-kinds');
   ok('…and the kinds this harness added are kept once each (addedKinds: brand_new_record, system/never_seen_a, system/never_seen_b) and said as ONE `record-kinds` meta op per new kind (the bar\'s kinds; the attach payload carries the list)', JSON.stringify(mm.addedKinds().map((k) => k.kind + ':' + k.name)) === JSON.stringify(['record:brand_new_record', 'record:system/never_seen_a', 'record:system/never_seen_b']) && kindOps.length === 3 && kindOps[2].data.kinds.length === 3, { kinds: mm.addedKinds(), kindOps: kindOps.length });
   const big = createMessageManager('claude', 'test-unknown-big');
   big.processLive({ type: 'huge_record', blob: 'z'.repeat(200000) });
-  ok('a pathological record is truncated at 64 KB with a marker', cards(big)[0].content[0].record.length < 70000 && /truncated at 64 KB/.test(cards(big)[0].content[0].record));
+  ok('a pathological record is truncated at 64 KB with a marker', cards(big)[0].content[0].record.length < 70000 && verdictOf(/truncated at 64 KB/.test(cards(big)[0].content[0].record)));
 }
 
 console.log('§1b (B-9ff2 step 3, the coordinator\'s law r172) an unknown system record that CARRIES A CALL ID is never dropped without a trace: the card, its record-kinds count, the breadcrumb; RED on the 3ad452df5 line');
@@ -65,7 +65,7 @@ console.log('§1b (B-9ff2 step 3, the coordinator\'s law r172) an unknown system
     const mm = createMessageManager('claude', 'test-unknown-call-id');
     mm.processLive(rec('zz_call_linked_b9ff2'));
     const c = cards(mm);
-    ok('a system subtype on neither list WITH a tool_use_id ⇒ ONE fall-back card carrying the whole record, its record-kinds count (system/zz_call_linked_b9ff2) and its breadcrumb (cli-unknown-system-subtype)', c.length === 1 && c[0].content[0].kind === 'system' && c[0].content[0].name === 'zz_call_linked_b9ff2' && /"tool_use_id": "toolu_zz"/.test(c[0].content[0].record) && mm.addedKinds().filter((k) => k.name === 'system/zz_call_linked_b9ff2').length === 1 && names.filter(([n, d]) => n === 'cli-unknown-system-subtype' && d === 'zz_call_linked_b9ff2').length === 1, { cards: c.length, kinds: mm.addedKinds(), names });
+    ok('a system subtype on neither list WITH a tool_use_id ⇒ ONE fall-back card carrying the whole record, its record-kinds count (system/zz_call_linked_b9ff2) and its breadcrumb (cli-unknown-system-subtype)', c.length === 1 && c[0].content[0].kind === 'system' && c[0].content[0].name === 'zz_call_linked_b9ff2' && gateOf(/"tool_use_id": "toolu_zz"/.test(c[0].content[0].record)) && mm.addedKinds().filter((k) => k.name === 'system/zz_call_linked_b9ff2').length === 1 && names.filter(([n, d]) => n === 'cli-unknown-system-subtype' && d === 'zz_call_linked_b9ff2').length === 1, { cards: c.length, kinds: mm.addedKinds(), names });
     const mm2 = createMessageManager('claude', 'test-known-call-id');
     // (2.1.328's late_allow_not_run was this leg's example until B-9ff2's remainder made it HANDLED — the late-Allow card; 2.1.296's
     // permission_check_status is the declared card-less subtype with a call id now)
@@ -100,7 +100,7 @@ console.log('§2 history renders the same cards (the fall-back is a renderer, no
   const carded = (t) => { const m = createMessageManager('claude', 'test-unknown-consumer-' + t); m.processLive({ type: t, anything: 1 }); return cards(m).length > 0; };
   const missing = handledHere.filter(carded);
   ok(`every top-level type the SERVER consumer handles draws no Unknown-event card (${consumerTypes.length} checked: ${consumerTypes.length - handledHere.length} on the known-ignored list, ${handledHere.length} handled by the normalizer — ${handledHere.join(', ') || 'none'})`, missing.length === 0, missing);
-  ok('…RED CONTROL: a consumer type the normalizer neither handles nor declares draws the card (the judge can go red)', carded('zz_consumer_only_type'));
+  ok('…RED CONTROL: a consumer type the normalizer neither handles nor declares draws the card (the judge can go red)', verdictOf(carded('zz_consumer_only_type')));
   const transcriptTypes = ['queue-operation', 'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', 'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
     // the request-replay rows + tools-used (lane claude-steer-inject r5: MEASURED in every 2.1.308 / 2.1.312 transcript — counted as
     // an unknown kind on every restart until declared)
@@ -122,7 +122,7 @@ console.log('§3 codex: an unknown record becomes a card too');
   mm.processLive({ type: 'totally_new_codex_record', foo: 'bar' });
   mm.processLive({ type: 'totally_new_codex_record', foo: 'baz' });
   const c = cards(mm);
-  ok('one card per unknown codex record, harness named, whole record', c.length === 2 && c[0].content[0].harness === 'Codex' && /totally_new_codex_record/.test(c[0].content[0].name) && /"foo": "baz"/.test(c[1].content[0].record), c.map((m) => m.content[0].name));
+  ok('one card per unknown codex record, harness named, whole record', c.length === 2 && c[0].content[0].harness === 'Codex' && gateOf(/totally_new_codex_record/.test(c[0].content[0].name)) && verdictOf(/"foo": "baz"/.test(c[1].content[0].record)), c.map((m) => m.content[0].name));
   // lane stop-refills-composer: Stop's put-back record is HANDLED (the base's one method), never the fall-back card
   const mq = createMessageManager('codex', 'test-unknown-codex-putback');
   mq.processLive({ timestamp: 'x', type: 'event_msg', payload: { type: 'queue_dropped', dropId: '1-1', by: 'stop', turnId: 't', items: [{ id: 'q', msgId: 'm', ts: 1, text: 'back', cut: false, attachments: [] }], omitted: 0 } });
@@ -132,27 +132,27 @@ console.log('§3 codex: an unknown record becomes a card too');
 console.log('§4 the fold owns the noise: kind "unknown", its own toggle, OFF by default');
 {
   const RS = await import(path.join(REPO, 'src/lib/chat-run-summary.js'));
-  ok('RUN_KINDS + SUMMARY_ORDER carry "unknown" ("{n} unknown events / new fields" — the §3 drift card shares the toggle)', RS.RUN_KINDS.includes('unknown') && RS.SUMMARY_ORDER.some(([k, key]) => k === 'unknown' && key === '{n} unknown events / new fields'));
+  ok('RUN_KINDS + SUMMARY_ORDER carry "unknown" ("{n} unknown events / new fields" — the §3 drift card shares the toggle)', gateOf(RS.RUN_KINDS.includes('unknown')) && verdictOf(RS.SUMMARY_ORDER.some(([k, key]) => k === 'unknown' && key === '{n} unknown events / new fields')));
   ok('messageKind classifies the §3 drift card as "unknown" too', RS.messageKind({ role: 'system', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields' }] }, { toolCard: false }) === 'unknown');
   ok('messageKind classifies an unknown-event card as "unknown" (and a plain system card still as null)', RS.messageKind({ role: 'system', noticeKind: 'unknown-record', content: [{ type: 'unknown_record' }] }, { toolCard: false }) === 'unknown' && RS.messageKind({ role: 'system', content: [{ type: 'system_info', text: 'x' }] }, { toolCard: false }) === null);
   ok('foldToggleFor("unknown") is its own toggle', RS.foldToggleFor('unknown') === 'unknown');
   const schema = read('src/lib/settings-schema.js');
   const defaults = /'chat\.collapseKinds':[\s\S]{0,600}?default: \[([^\]]*)\]/.exec(schema)?.[1] || '';
-  ok('chat.collapseKinds offers "unknown" and does NOT tick it by default', /value: 'unknown'/.test(schema) && !/'unknown'/.test(defaults), defaults);
+  ok('chat.collapseKinds offers "unknown" and does NOT tick it by default', gateOf(/value: 'unknown'/.test(schema)) && !/'unknown'/.test(defaults), defaults);
 }
 
 console.log('§5 the renderer (lane door-healthy-chat, 2.369.344): a record kind is NEVER drawn in a person\'s chat — ⚙ Diagnostics and Session Properties carry it (lane mask-value-shape: no strip mark)');
 {
   const cr = read('src/lib/chat-renderers.js');
-  ok('renderSystemMsg: an unknown-record AND an unknown-fields notice render NOTHING (null — the chat view skips a null element), the card markup gone — the rule is ChatRenderers.drawsNothing (lane midturn-order r3: one rule the chat view\'s placement reads too)', /static drawsNothing\(msg\) \{\n\s+return !!msg && \(\(msg\.noticeKind === 'unknown-record' && msg\.content\?\.\[0\]\?\.type === 'unknown_record'\) \|\| \(msg\.noticeKind === 'unknown-fields' && msg\.content\?\.\[0\]\?\.type === 'unknown_fields'\)\);/.test(cr) && /renderSystemMsg\(msg[^)]*\) \{[\s\S]*?if \(ChatRenderers\.drawsNothing\(msg\)\) return null;/.test(cr) && !/chat-unknown-event/.test(cr) && !/t\('Full record'\)/.test(cr));
+  ok('renderSystemMsg: an unknown-record AND an unknown-fields notice render NOTHING (null — the chat view skips a null element), the card markup gone — the rule is ChatRenderers.drawsNothing (lane midturn-order r3: one rule the chat view\'s placement reads too)', gateOf(/static drawsNothing\(msg\) \{\n\s+return !!msg && \(\(msg\.noticeKind === 'unknown-record' && msg\.content\?\.\[0\]\?\.type === 'unknown_record'\) \|\| \(msg\.noticeKind === 'unknown-fields' && msg\.content\?\.\[0\]\?\.type === 'unknown_fields'\)\);/.test(cr)) && gateOf(/renderSystemMsg\(msg[^)]*\) \{[\s\S]*?if \(ChatRenderers\.drawsNothing\(msg\)\) return null;/.test(cr)) && !/chat-unknown-event/.test(cr) && !/t\('Full record'\)/.test(cr));
   const css = read('public/chat.css');
   ok('…its red card CSS is gone, and so is the strip\'s chip (lane mask-value-shape, page §4: the kinds live in ⚙ Diagnostics and Session Properties)', !/\.chat-unknown-event/.test(css) && !/\.chat-status-kinds/.test(css));   // stale-pins: kept — a «gone» check: the kinds chip's CSS stays out
   const BW = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-bar-words.js')).href);
   const fmtT = (k, p) => String(k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''));
   const one = BW.addedKindsChipWords([{ kind: 'record', name: 'api-request-blob', cli: '2.1.309' }], fmtT), three = BW.addedKindsChipWords([{ kind: 'record', name: 'a' }, { kind: 'record', name: 'b' }, { kind: 'fields', name: 'result', cli: '2.1.309' }], fmtT);
-  ok('the chip\'s words (PURE chat-bar-words): «1 record kind this version added — Diagnostics» / «3 record kinds …», each kind in its tooltip with its CLI build; none ⇒ no chip', one.text === '1 record kind this version added — Diagnostics' && /api-request-blob: a new record \(2\.1\.309\)/.test(one.title) && three.text === '3 record kinds this version added — Diagnostics' && /result: new fields \(2\.1\.309\)/.test(three.title) && BW.addedKindsChipWords([], fmtT) === null);
+  ok('the chip\'s words (PURE chat-bar-words): «1 record kind this version added — Diagnostics» / «3 record kinds …», each kind in its tooltip with its CLI build; none ⇒ no chip', one.text === '1 record kind this version added — Diagnostics' && gateOf(/api-request-blob: a new record \(2\.1\.309\)/.test(one.title)) && three.text === '3 record kinds this version added — Diagnostics' && gateOf(/result: new fields \(2\.1\.309\)/.test(three.title)) && BW.addedKindsChipWords([], fmtT) === null);
   const sb = read('src/lib/chat-status-bar.js'), cv = read('src/lib/chat-view.js'), ws = read('src/ws-handler.js'), rail = read('src/lib/sidebar-rail.js'), props = read('src/lib/session-props.js');
-  ok('wiring: the bar holds the kinds (no strip chip) and says them through addedKindsWords() — Session Properties\' «At its start» reads it; the view feeds the bar from the attach payload (recordKinds) and the `record-kinds` meta op; the rail\'s Diagnostics counter adds the drift kinds', !/chip\('kinds'/.test(sb) && /addedKindsWords\(\) \{ return addedKindsChipWords\(this\._addedKinds, t\); \}/.test(sb) && /bar\?\.addedKindsWords\?\.\(\)/.test(props) && /'recordKinds' in meta\) this\._statusBar\?\.setAddedKinds/.test(cv) && /op\.subtype === 'record-kinds'\) \{ this\._statusBar\?\.setAddedKinds/.test(cv) && /recordKinds: \(\(\) => \{ try \{ return session\._normalizer\?\.addedKinds\?\.\(\) \|\| \[\];/.test(ws) && /\+ \(Array\.isArray\(r\?\.drift\) \? r\.drift\.length : 0\)/.test(rail));
+  ok('wiring: the bar holds the kinds (no strip chip) and says them through addedKindsWords() — Session Properties\' «At its start» reads it; the view feeds the bar from the attach payload (recordKinds) and the `record-kinds` meta op; the rail\'s Diagnostics counter adds the drift kinds', !/chip\('kinds'/.test(sb) && gateOf(/addedKindsWords\(\) \{ return addedKindsChipWords\(this\._addedKinds, t\); \}/.test(sb)) && gateOf(/bar\?\.addedKindsWords\?\.\(\)/.test(props)) && gateOf(/'recordKinds' in meta\) this\._statusBar\?\.setAddedKinds/.test(cv)) && gateOf(/op\.subtype === 'record-kinds'\) \{ this\._statusBar\?\.setAddedKinds/.test(cv)) && gateOf(/recordKinds: \(\(\) => \{ try \{ return session\._normalizer\?\.addedKinds\?\.\(\) \|\| \[\];/.test(ws)) && verdictOf(/\+ \(Array\.isArray\(r\?\.drift\) \? r\.drift\.length : 0\)/.test(rail)));
   ok('no leftover of the 2.369.119 sample-only card', !/unknownSample/.test(read('src/message-manager.js')) && !/unknownSample/.test(read('src/codex-message-manager.js')) && !/chat-unknown-record/.test(cr));
 }
 
@@ -160,7 +160,7 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
 {
   const HAND = MM.HANDLED_SYSTEM_SUBTYPES, IGN = MM.KNOWN_IGNORED_SYSTEM_SUBTYPES;
   ok('list pins: notification/local_command/away_summary/turn_duration/background_tasks_changed/task_updated/code_change_published are HANDLED; api_error/microcompact_boundary/vcs_state_changed are KNOWN_IGNORED (card-less by decision); background_tasks_changed/task_updated LEFT the ignored list; pr-link LEFT the ignored top-level list',
-    ['notification', 'local_command', 'away_summary', 'turn_duration', 'background_tasks_changed', 'task_updated', 'code_change_published'].every((n) => HAND.has(n) && !IGN.has(n)) && ['api_error', 'microcompact_boundary', 'vcs_state_changed'].every((n) => IGN.has(n) && !HAND.has(n)) && !MM.KNOWN_IGNORED_RECORD_TYPES.has('pr-link'));
+    gateOf(['notification', 'local_command', 'away_summary', 'turn_duration', 'background_tasks_changed', 'task_updated', 'code_change_published'].every((n) => HAND.has(n) && !IGN.has(n))) && gateOf(['api_error', 'microcompact_boundary', 'vcs_state_changed'].every((n) => IGN.has(n) && !HAND.has(n))) && !MM.KNOWN_IGNORED_RECORD_TYPES.has('pr-link'));
   const mm = createMessageManager('claude', 'test-routed-1');
   const ops = []; mm.listeners.push((e) => ops.push(e));
   const prevEv = global.__vsEvent; const names = []; global.__vsEvent = (n) => names.push(n);
@@ -178,10 +178,10 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
   const h = createMessageManager('claude', 'test-routed-2');
   h.convertHistory([{ type: 'system', subtype: 'local_command', content: '<command-name>/branch</command-name>\n<command-message>branch</command-message>\n<command-args>fix/x</command-args>', level: 'info', uuid: 'lc1', parentUuid: 'p', isSidechain: false, sessionId: 's', timestamp: '2026-09-01T00:00:00Z' }]);
   const lc = h.messages[0];
-  ok('local_command ⇒ a synthetic USER message carrying the <command-name> text (renderUserMsg\'s notification path draws the /branch bubble), originKind local-command, no turn bump', h.messages.length === 1 && lc.role === 'user' && lc.synthetic === true && lc.originKind === 'local-command' && /<command-name>\/branch<\/command-name>/.test(lc.content[0].text) && h.turnIndex === 0);
+  ok('local_command ⇒ a synthetic USER message carrying the <command-name> text (renderUserMsg\'s notification path draws the /branch bubble), originKind local-command, no turn bump', h.messages.length === 1 && lc.role === 'user' && lc.synthetic === true && lc.originKind === 'local-command' && gateOf(/<command-name>\/branch<\/command-name>/.test(lc.content[0].text)) && h.turnIndex === 0);
   // away_summary → the recap card
   h.convertHistory([{ type: 'system', subtype: 'away_summary', content: 'Designed the canvas; **published**. Next: wire the toggle', uuid: 'as1', parentUuid: 'p', isSidechain: false, sessionId: 's', timestamp: '2026-09-01T00:01:00Z' }]);
-  ok('away_summary ⇒ ONE away-summary card carrying the model text (markdown on the client)', h.messages.filter((m) => m.noticeKind === 'away-summary').length === 1 && /published/.test(h.messages.find((m) => m.noticeKind === 'away-summary').content[0].text));
+  ok('away_summary ⇒ ONE away-summary card carrying the model text (markdown on the client)', h.messages.filter((m) => m.noticeKind === 'away-summary').length === 1 && verdictOf(/published/.test(h.messages.find((m) => m.noticeKind === 'away-summary').content[0].text)));
   // turn_duration → the turn's last message meta
   const td = createMessageManager('claude', 'test-routed-3');
   const tops = []; td.listeners.push((e) => tops.push(e));
@@ -190,7 +190,7 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
   td.processLive({ type: 'result', subtype: 'success', uuid: 'tr1', session_id: 's', duration_ms: 5, is_error: false, result: 'done' });
   td.processLive({ type: 'system', subtype: 'turn_duration', duration_ms: 198441, message_count: 66, budget_tokens: 12000, budget_limit: 50000, uuid: 'td1', session_id: 's' });
   const last = td.messages.filter((m) => m.role === 'assistant').pop();
-  ok('turn_duration (stream, snake_case) ⇒ merged into the turn\'s last message meta {durationMs, messageCount, budgetTokens, budgetLimit} through an EDIT op; no card', last?.meta?.turn?.durationMs === 198441 && last.meta.turn.messageCount === 66 && last.meta.turn.budgetLimit === 50000 && tops.some((o) => o.op === 'edit' && o.id === last.id && o.fields.meta?.turn?.messageCount === 66) && !td.messages.some((m) => m.noticeKind === 'unknown-record'), last?.meta);
+  ok('turn_duration (stream, snake_case) ⇒ merged into the turn\'s last message meta {durationMs, messageCount, budgetTokens, budgetLimit} through an EDIT op; no card', last?.meta?.turn?.durationMs === 198441 && last.meta.turn.messageCount === 66 && last.meta.turn.budgetLimit === 50000 && gateOf(tops.some((o) => o.op === 'edit' && o.id === last.id && o.fields.meta?.turn?.messageCount === 66)) && !td.messages.some((m) => m.noticeKind === 'unknown-record'), last?.meta);
   const td2 = createMessageManager('claude', 'test-routed-4');
   td2.convertHistory([{ type: 'user', uuid: 'hu1', parentUuid: null, isSidechain: false, sessionId: 's', message: { role: 'user', content: 'go' } }, { type: 'assistant', uuid: 'ha1', parentUuid: 'hu1', isSidechain: false, sessionId: 's', message: { id: 'msg_h1', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'ok' }] } }, { type: 'system', subtype: 'turn_duration', durationMs: 4200, messageCount: 3, parentUuid: 'ha1', isSidechain: false, sessionId: 's', uuid: 'htd' }]);
   ok('…the transcript twin (camelCase) lands the same way on a rebuild', td2.messages.filter((m) => m.role === 'assistant').pop()?.meta?.turn?.durationMs === 4200);
@@ -207,7 +207,7 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
   bg.processLive({ type: 'system', subtype: 'task_started', task_id: 't-two', tool_use_id: 'toolu_bg2', description: 'two', task_type: 'local_agent', is_backgrounded: true, uuid: 'bs2', session_id: 's' });
   bg.processLive({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't-two', task_type: 'local_agent', description: 'two' }], uuid: 'bt1', session_id: 's' });
   const one = bg.messages.find((m) => m.toolCallId === 'toolu_bg1'), two = bg.messages.find((m) => m.toolCallId === 'toolu_bg2');
-  ok('background_tasks_changed (the full live set names only t-two) ⇒ t-one\'s card is SOFT-closed (status finished, closedBy level — the set dropped it, no outcome record), t-two stays running, ONE meta op background-tasks with the set, no card', one?.taskInfo?.status === 'finished' && one.taskInfo.closedBy === 'level' && one.taskInfo.backgrounded === true && two?.taskInfo?.status === 'running' && bops.some((o) => o.op === 'edit' && o.id === one.id && o.fields.taskInfo.status === 'finished') && bops.some((o) => o.op === 'meta' && o.subtype === 'background-tasks' && o.data.tasks.length === 1 && o.data.tasks[0].id === 't-two') && !bg.messages.some((m) => m.role === 'system') && JSON.stringify(bg.backgroundTasks()) === JSON.stringify([{ id: 't-two', type: 'agent', description: 'two' }]) /* 2.369.139: the level set carries OUR type word (normalizeTaskType), the same the cards and the status bar compare */, { one: one?.taskInfo, two: two?.taskInfo });
+  ok('background_tasks_changed (the full live set names only t-two) ⇒ t-one\'s card is SOFT-closed (status finished, closedBy level — the set dropped it, no outcome record), t-two stays running, ONE meta op background-tasks with the set, no card', one?.taskInfo?.status === 'finished' && one.taskInfo.closedBy === 'level' && one.taskInfo.backgrounded === true && two?.taskInfo?.status === 'running' && gateOf(bops.some((o) => o.op === 'edit' && o.id === one.id && o.fields.taskInfo.status === 'finished')) && gateOf(bops.some((o) => o.op === 'meta' && o.subtype === 'background-tasks' && o.data.tasks.length === 1 && o.data.tasks[0].id === 't-two')) && !bg.messages.some((m) => m.role === 'system') && JSON.stringify(bg.backgroundTasks()) === JSON.stringify([{ id: 't-two', type: 'agent', description: 'two' }]) /* 2.369.139: the level set carries OUR type word (normalizeTaskType), the same the cards and the status bar compare */, { one: one?.taskInfo, two: two?.taskInfo });
   // 2.369.147 (owner: a running Workflow card read 已完成 while the same run sat in the popup as an unclickable harness row):
   // the set names t-one AGAIN ⇒ the soft close was a transient drop — the card REOPENS; dropped again ⇒ closed again; progress ⇒ alive
   bg.processLive({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't-one', task_type: 'local_agent', description: 'one' }, { task_id: 't-two', task_type: 'local_agent', description: 'two' }], uuid: 'bt2', session_id: 's' });
@@ -249,13 +249,13 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
     return { soft, ti: card?.taskInfo };
   };
   const r1 = late('a', (m) => m.processLive({ type: 'system', subtype: 'task_updated', task_id: 'tl', patch: { status: 'failed', end_time: 1 }, uuid: 'lu1', session_id: 's' }));
-  ok('set-removal (soft finished) THEN task_updated{failed} ⇒ ends as FAILED (closedBy task_updated) — the harness\'s verdict overwrites the level guess', r1.soft && r1.ti.status === 'failed' && r1.ti.closedBy === 'task_updated', r1);
+  ok('set-removal (soft finished) THEN task_updated{failed} ⇒ ends as FAILED (closedBy task_updated) — the harness\'s verdict overwrites the level guess', gateOf(r1.soft) && r1.ti.status === 'failed' && r1.ti.closedBy === 'task_updated', r1);
   const r2 = late('b', (m) => m.processLive({ type: 'system', subtype: 'task_notification', task_id: 'tl', tool_use_id: 'toolu_l', status: 'completed', summary: 'done', uuid: 'ln1', session_id: 's' }));
-  ok('set-removal THEN stdout task_notification{status:completed} ⇒ completed (closedBy notification)', r2.soft && r2.ti.status === 'completed' && r2.ti.closedBy === 'notification', r2);
+  ok('set-removal THEN stdout task_notification{status:completed} ⇒ completed (closedBy notification)', gateOf(r2.soft) && r2.ti.status === 'completed' && r2.ti.closedBy === 'notification', r2);
   const r3 = late('c', (m) => m.processLive({ type: 'system', subtype: 'task_notification', task_id: 'tl', tool_use_id: 'toolu_l', status: 'killed', uuid: 'ln2', session_id: 's' }));
-  ok('…task_notification{status:killed} (a declared terminal value) ⇒ killed, not completed', r3.soft && r3.ti.status === 'killed', r3);
+  ok('…task_notification{status:killed} (a declared terminal value) ⇒ killed, not completed', gateOf(r3.soft) && r3.ti.status === 'killed', r3);
   const r4 = late('d', (m) => m.processLive({ type: 'queue-operation', content: '<task-notification>\n<task-id>tl</task-id>\n<tool-use-id>toolu_l</tool-use-id>\n<status>failed</status>\n<summary>boom</summary>\n</task-notification>', uuid: 'lq1', session_id: 's' }));
-  ok('…the <task-notification> user-record twin after a set-removal ⇒ failed too (summary kept)', r4.soft && r4.ti.status === 'failed' && r4.ti.summary === 'boom', r4);
+  ok('…the <task-notification> user-record twin after a set-removal ⇒ failed too (summary kept)', gateOf(r4.soft) && r4.ti.status === 'failed' && r4.ti.summary === 'boom', r4);
   const r5 = late('e', (m) => { m.processLive({ type: 'system', subtype: 'task_notification', task_id: 'tl', tool_use_id: 'toolu_l', status: 'failed', uuid: 'ln3', session_id: 's' }); m.processLive({ type: 'system', subtype: 'background_tasks_changed', tasks: [], uuid: 'lt2', session_id: 's' }); });
   ok('a REAL outcome is never downgraded by a later level set (failed stays failed)', r5.ti.status === 'failed', r5);
   // the launch-ack synthesis (history + live) marks the task backgrounded: the ack text itself says "in background"
@@ -275,9 +275,9 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
   // the client half is source-pinned (chat-status-bar / chat-renderers / chat-view are DOM modules): ONE owner of the close, the tail patched by a later verdict, `finished` drawn neutral
   const sb = read('src/lib/chat-status-bar.js');
   const sbBody = sb.slice(sb.indexOf('setBackgroundTasks(list) {'), sb.indexOf('turnCost(cost'));
-  ok('chat-status-bar.setBackgroundTasks closes NOTHING (no updateTask call — the normalizer is the reconcile\'s one owner); updateTask patches a done-tail row by toolCallId when the real outcome lands after the soft close; the tail draws `finished` as ○ (tdone-soft), never ✗', !/updateTask\(/.test(sbBody) && /this\._doneTasks\?\.find\(\(r\) => r\.toolCallId === toolCallId\)/.test(sb) && /tdone-soft/.test(sb) && /dt\.status === 'finished'/.test(sb));
+  ok('chat-status-bar.setBackgroundTasks closes NOTHING (no updateTask call — the normalizer is the reconcile\'s one owner); updateTask patches a done-tail row by toolCallId when the real outcome lands after the soft close; the tail draws `finished` as ○ (tdone-soft), never ✗', !/updateTask\(/.test(sbBody) && gateOf(/this\._doneTasks\?\.find\(\(r\) => r\.toolCallId === toolCallId\)/.test(sb)) && gateOf(/tdone-soft/.test(sb)) && verdictOf(/dt\.status === 'finished'/.test(sb)));
   const cr = read('src/lib/chat-renderers.js');
-  ok('chat-renderers.taskStatusChipHtml: `finished` is the soft chip (class soft, never err); Agent AND Workflow cards use the ONE helper; chat-view\'s _freezeAgentStatus words finished like completed', /ti\.status === 'finished'\) return ` <span class="chat-task-status-chip soft"/.test(cr) && /const taskStatusChipHtml = \(ti, verdict = null\) =>/.test(cr) /* 2026-09-26: + the server's stalled verdict for a Workflow run */ && (cr.match(/taskStatusChipHtml\(/g) || []).length === 2 && /status === 'completed' \|\| status === 'finished' \? t\('finished'\)/.test(read('src/lib/chat-view.js')) && /\.chat-task-status-chip\.soft \{ color: var\(--text-dim\)/.test(read('public/chat.css')));
+  ok('chat-renderers.taskStatusChipHtml: `finished` is the soft chip (class soft, never err); Agent AND Workflow cards use the ONE helper; chat-view\'s _freezeAgentStatus words finished like completed', gateOf(/ti\.status === 'finished'\) return ` <span class="chat-task-status-chip soft"/.test(cr)) && gateOf(/const taskStatusChipHtml = \(ti, verdict = null\) =>/.test(cr)) /* 2026-09-26: + the server's stalled verdict for a Workflow run */ && (cr.match(/taskStatusChipHtml\(/g) || []).length === 2 && gateOf(/status === 'completed' \|\| status === 'finished' \? t\('finished'\)/.test(read('src/lib/chat-view.js'))) && verdictOf(/\.chat-task-status-chip\.soft \{ color: var\(--text-dim\)/.test(read('public/chat.css'))));
   // code_change_published: ONE card per url, edited in place, unified with pr-link
   const cc = createMessageManager('claude', 'test-routed-7');
   const cops = []; cc.listeners.push((e) => cops.push(e));
@@ -286,7 +286,7 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
   cc.processLive({ type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://example.invalid/o/r/pull/608', repo: 'o/r', identifier: '608', action: 'merged', uuid: 'cc2', session_id: 's' });
   cc.processLive({ type: 'system', subtype: 'code_change_published', provider: 'github', url: 'javascript:alert(1)', repo: 'o/r', identifier: '609', action: 'pushed', uuid: 'cc3', session_id: 's' });
   const pr = cc.messages.filter((m) => m.noticeKind === 'code-change-published');
-  ok('code_change_published ⇒ ONE code-change card per url (the pr-link row of the same url adds none; a later action EDITS it to merged); a non-http url yields a card with NO link', pr.length === 2 && pr[0].content[0].identifier === '608' && pr[0].content[0].action === 'merged' && cops.some((o) => o.op === 'edit' && o.id === pr[0].id) && pr[1].content[0].url === null && pr[1].content[0].identifier === '609', pr.map((m) => m.content[0]));
+  ok('code_change_published ⇒ ONE code-change card per url (the pr-link row of the same url adds none; a later action EDITS it to merged); a non-http url yields a card with NO link', pr.length === 2 && pr[0].content[0].identifier === '608' && pr[0].content[0].action === 'merged' && gateOf(cops.some((o) => o.op === 'edit' && o.id === pr[0].id)) && pr[1].content[0].url === null && pr[1].content[0].identifier === '609', pr.map((m) => m.content[0]));
   cc.processLive({ type: 'system', subtype: 'code_change_published', provider: 'github', repo: 'o/r', identifier: '609', action: 'merged', uuid: 'cc4', session_id: 's' });
   cc.processLive({ type: 'system', subtype: 'code_change_published', identifier: '42', action: 'pushed', uuid: 'cc5', session_id: 's' });
   cc.processLive({ type: 'system', subtype: 'code_change_published', identifier: '42', action: 'pushed', uuid: 'cc6', session_id: 's' });
@@ -304,9 +304,9 @@ console.log('§7 codex: item_completed McpToolCall is THE MCP tool card; the wra
   const cx = createMessageManager('codex', 'test-routed-cx');
   cx.convertHistory(lines);
   const tools = cx.messages.filter((m) => m.role === 'tool');
-  ok('the real (redacted) McpToolCall item ⇒ a tool card: toolName mcp__<server>__<tool> (the renderer\'s mcpParts draws "tool (server)"), collapseKind mcp, the arguments as input, the result content as output, complete', tools.length === 2 && tools[0].toolName === 'mcp__example-mcp__execute_code' && tools[0].collapseKind === 'mcp' && tools[0].status === 'complete' && tools[0].content[0].type === 'tool_result' && /print\(json\.dumps/.test(tools[0].content[0].input.code) && /"status": "ok"/.test(tools[0].content[0].output), tools.map((m) => [m.toolName, m.status, m.collapseKind]));
-  ok('…a failed one (status failed / result.isError) is an error card', tools[1].toolName === 'mcp__example-mcp__read_state' && tools[1].status === 'error' && /connection refused/.test(tools[1].content[0].output));
-  ok('the wrapper\'s _stdin_ack record is SKIPPED (declared): no card, no telemetry', CodexMessageManager.SKIPPED_RECORD_TYPES.has('_stdin_ack') && !names.some((x) => /_stdin_ack/.test(x)));
+  ok('the real (redacted) McpToolCall item ⇒ a tool card: toolName mcp__<server>__<tool> (the renderer\'s mcpParts draws "tool (server)"), collapseKind mcp, the arguments as input, the result content as output, complete', tools.length === 2 && tools[0].toolName === 'mcp__example-mcp__execute_code' && tools[0].collapseKind === 'mcp' && tools[0].status === 'complete' && tools[0].content[0].type === 'tool_result' && gateOf(/print\(json\.dumps/.test(tools[0].content[0].input.code)) && verdictOf(/"status": "ok"/.test(tools[0].content[0].output)), tools.map((m) => [m.toolName, m.status, m.collapseKind]));
+  ok('…a failed one (status failed / result.isError) is an error card', tools[1].toolName === 'mcp__example-mcp__read_state' && tools[1].status === 'error' && verdictOf(/connection refused/.test(tools[1].content[0].output)));
+  ok('the wrapper\'s _stdin_ack record is SKIPPED (declared): no card, no telemetry', gateOf(CodexMessageManager.SKIPPED_RECORD_TYPES.has('_stdin_ack')) && !names.some((x) => /_stdin_ack/.test(x)));
   ok('no red card and no unknown-record telemetry for the whole fixture rollout', cards(cx).length === 0 && !names.some((x) => /codex-unknown-record/.test(x)), names);
   global.__vsEvent = prevEv;
 }
@@ -315,19 +315,19 @@ console.log('§8 the renderers for the routed names escape every harness string 
 {
   const cr = read('src/lib/chat-renderers.js');
   const branch = (kind) => { const i = cr.indexOf(`noticeKind === '${kind}'`); return i >= 0 ? cr.slice(i, i + 2200) : ''; };
-  ok("harness-notification: a stop-hook-error notice is a HOOK card (chat.showHookCards covers it) AND the stop-hook notice (chat.showStopHookErrorNotice, off by default hides it via body.hide-stop-hook-notice)", /b\.key === 'stop-hook-error'\) el\.classList\.add\('chat-msg-hook', 'chat-stop-hook-notice'\)/.test(branch('harness-notification')) && /body\.hide-stop-hook-notice \.chat-stop-hook-notice \{ display: none; \}/.test(fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8')) && /hide-stop-hook-notice/.test(fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8')) && /if \(hiddenRecord\(el\)\) return 'skip';/.test(fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8')) && /\['hide-stop-hook-notice', 'chat-stop-hook-notice'\]/.test(fs.readFileSync(path.join(REPO, 'src/lib/chat-needs-card.js'), 'utf8')) /* B-2adb's follow-up: the fold reads the ONE list of hidden records */); // stale-pins: kept (the stop-hook words read from app.js, chat.css and chat-needs-card.js, never chat-view.js)
-  ok('harness-notification: the text is escaped, priority classes carry the colour, the icon is SVG (UI_ICONS)', /escHtml\(b\.text \|\| ''\)/.test(branch('harness-notification')) && /chat-harness-notice-\$\{pri\}/.test(branch('harness-notification')) && /UI_ICONS\.alert/.test(branch('harness-notification')));
-  ok('away-summary: the model text goes through renderMarkdown (marked + DOMPurify), never innerHTML raw', /this\.renderMarkdown\(msg\.content\[0\]\.text\)/.test(branch('away-summary')));
-  ok('code-change-published: the link is href-escaped, http(s)-only, rel="noopener noreferrer", and nothing calls window.open', /href="\$\{escHtml\(b\.url\)\}" target="_blank" rel="noopener noreferrer"/.test(branch('code-change-published')) && /\^https\?:\\\/\\\//.test(branch('code-change-published')) && !/window\.open/.test(branch('code-change-published')));
+  ok("harness-notification: a stop-hook-error notice is a HOOK card (chat.showHookCards covers it) AND the stop-hook notice (chat.showStopHookErrorNotice, off by default hides it via body.hide-stop-hook-notice)", gateOf(/b\.key === 'stop-hook-error'\) el\.classList\.add\('chat-msg-hook', 'chat-stop-hook-notice'\)/.test(branch('harness-notification'))) && gateOf(/body\.hide-stop-hook-notice \.chat-stop-hook-notice \{ display: none; \}/.test(fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8'))) && gateOf(/hide-stop-hook-notice/.test(fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'))) && gateOf(/if \(hiddenRecord\(el\)\) return 'skip';/.test(fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'))) && verdictOf(/\['hide-stop-hook-notice', 'chat-stop-hook-notice'\]/.test(fs.readFileSync(path.join(REPO, 'src/lib/chat-needs-card.js'), 'utf8'))) /* B-2adb's follow-up: the fold reads the ONE list of hidden records */); // stale-pins: kept (the stop-hook words read from app.js, chat.css and chat-needs-card.js, never chat-view.js)
+  ok('harness-notification: the text is escaped, priority classes carry the colour, the icon is SVG (UI_ICONS)', gateOf(/escHtml\(b\.text \|\| ''\)/.test(branch('harness-notification'))) && gateOf(/chat-harness-notice-\$\{pri\}/.test(branch('harness-notification'))) && verdictOf(/UI_ICONS\.alert/.test(branch('harness-notification'))));
+  ok('away-summary: the model text goes through renderMarkdown (marked + DOMPurify), never innerHTML raw', verdictOf(/this\.renderMarkdown\(msg\.content\[0\]\.text\)/.test(branch('away-summary'))));
+  ok('code-change-published: the link is href-escaped, http(s)-only, rel="noopener noreferrer", and nothing calls window.open', gateOf(/href="\$\{escHtml\(b\.url\)\}" target="_blank" rel="noopener noreferrer"/.test(branch('code-change-published'))) && gateOf(/\^https\?:\\\/\\\//.test(branch('code-change-published'))) && !/window\.open/.test(branch('code-change-published')));
   const css = read('public/chat.css');
-  ok('the notice colours are theme vars (immediate = --red, high = --yellow)', /\.chat-harness-notice-immediate \{[^}]*var\(--red/.test(css) && /\.chat-harness-notice-high \{[^}]*var\(--yellow\)/.test(css));
+  ok('the notice colours are theme vars (immediate = --red, high = --yellow)', gateOf(/\.chat-harness-notice-immediate \{[^}]*var\(--red/.test(css)) && verdictOf(/\.chat-harness-notice-high \{[^}]*var\(--yellow\)/.test(css)));
 }
 
 console.log('§9 the CLI 2.1.280 pass (2026-09-22): records the corpus PROVES are harness bookkeeping are card-less — declared by name, live and rebuilt; an undeclared neighbour is still the card');
 {
   const IGN = MM.KNOWN_IGNORED_SYSTEM_SUBTYPES, IGNT = MM.KNOWN_IGNORED_RECORD_TYPES;
   ok('list pins: scheduled_task_fire + bridge_status are KNOWN_IGNORED system subtypes (not HANDLED); artifact-autoreact-ledger / frame-link / artifact-comment-monitor are KNOWN_IGNORED top-level types',
-    ['scheduled_task_fire', 'bridge_status'].every((n) => IGN.has(n) && !MM.HANDLED_SYSTEM_SUBTYPES.has(n)) && ['artifact-autoreact-ledger', 'frame-link', 'artifact-comment-monitor'].every((t) => IGNT.has(t)));
+    gateOf(['scheduled_task_fire', 'bridge_status'].every((n) => IGN.has(n) && !MM.HANDLED_SYSTEM_SUBTYPES.has(n))) && verdictOf(['artifact-autoreact-ledger', 'frame-link', 'artifact-comment-monitor'].every((t) => IGNT.has(t))));
   const env = { parentUuid: 'p', isSidechain: false, sessionId: 's', timestamp: 't', version: '2.1.118' };
   const rows = [
     { ...env, uuid: 'st', type: 'system', subtype: 'scheduled_task_fire', content: 'resuming /loop wakeup' },
@@ -370,14 +370,14 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
 
   // the census (PURE)
   const n = SS.safetyStopOf(NOTICE), f = SS.safetyStopOf(NOTICE.replace('Opus 5.5', 'Fable 5.1'));
-  ok('census: the notice names its model (Opus 5.5 / Fable 5.1 — the two the corpus carries), both nudge variants are nudges (t9r = err + the Interrupted exception, the more specific row first)', n && n.kind === 'notice' && n.model === 'Opus 5.5' && f.model === 'Fable 5.1' && SS.safetyStopOf(NUDGE).row.id === 'err' && SS.safetyStopOf(NUDGE_RUN).row.id === 't9r' && SS.safetyStopOf(NUDGE_RUN).kind === 'nudge');
-  ok('census: a near-miss line, a bare suffix (no model), a multi-line or 81-char "model", null / a number ⇒ no stop', [NOTICE.replace('stopped', 'flagged'), SS.SAFETY_STOP_ROWS[0].text, 'a\nb' + SS.SAFETY_STOP_ROWS[0].text, 'm'.repeat(81) + SS.SAFETY_STOP_ROWS[0].text, null, 42, 'Your response above was stopped'].every((x) => SS.safetyStopOf(x) === null));
-  ok('census: every row is dated (since ≤2.1.280, measured on SAFETY_STOP_CLI_VERSION 2.1.288) and says where the binary writes it', SS.SAFETY_STOP_CLI_VERSION === '2.1.288' && SS.SAFETY_STOP_ROWS.length === 3 && SS.SAFETY_STOP_ROWS.every((r) => r.since === '≤2.1.280' && r.evidence.length > 30 && Object.isFrozen(r)));
+  ok('census: the notice names its model (Opus 5.5 / Fable 5.1 — the two the corpus carries), both nudge variants are nudges (t9r = err + the Interrupted exception, the more specific row first)', gateOf(n) && n.kind === 'notice' && n.model === 'Opus 5.5' && f.model === 'Fable 5.1' && SS.safetyStopOf(NUDGE).row.id === 'err' && SS.safetyStopOf(NUDGE_RUN).row.id === 't9r' && SS.safetyStopOf(NUDGE_RUN).kind === 'nudge');
+  ok('census: a near-miss line, a bare suffix (no model), a multi-line or 81-char "model", null / a number ⇒ no stop', verdictOf([NOTICE.replace('stopped', 'flagged'), SS.SAFETY_STOP_ROWS[0].text, 'a\nb' + SS.SAFETY_STOP_ROWS[0].text, 'm'.repeat(81) + SS.SAFETY_STOP_ROWS[0].text, null, 42, 'Your response above was stopped'].every((x) => SS.safetyStopOf(x) === null)));
+  ok('census: every row is dated (since ≤2.1.280, measured on SAFETY_STOP_CLI_VERSION 2.1.288) and says where the binary writes it', SS.SAFETY_STOP_CLI_VERSION === '2.1.288' && SS.SAFETY_STOP_ROWS.length === 3 && verdictOf(SS.SAFETY_STOP_ROWS.every((r) => r.since === '≤2.1.280' && r.evidence.length > 30 && Object.isFrozen(r))));
 
   // TRANSCRIPT carrier (history): the CLI's own pair, verbatim shapes
   const h = createMessageManager('claude', 'test-stop-history');
   h.convertHistory([txAsk('u0'), txNotice('u1'), txNudge('u2')]);
-  ok('history: the pair is ONE safety-stop card carrying the model, the notice, the nudge and both census rows', stops(h).length === 1 && whole(stops(h)[0].content[0]), h.messages.map((m) => m.noticeKind || m.role));
+  ok('history: the pair is ONE safety-stop card carrying the model, the notice, the nudge and both census rows', stops(h).length === 1 && verdictOf(whole(stops(h)[0].content[0])), h.messages.map((m) => m.noticeKind || m.role));
   ok('history: the nudge is NOT a user message (only the real turn is) and is not a turn; no red card, no drift card', users(h).length === 1 && h.turnIndex === 1 && cards(h).length === 0 && drift(h).length === 0, { users: users(h).length, turn: h.turnIndex });
 
   // STREAM carrier (live): the re-emitted notice + the isSynthetic nudge
@@ -385,16 +385,16 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   const ops = []; s1.listeners.push((e) => ops.push(e));
   [stAsk('a0'), stNotice('a1'), stNudge('a2')].forEach((r) => s1.processLive(r));
   const sc = stops(s1)[0];
-  ok('live: ONE card, created by the notice and EDITED by the nudge (an open window sees both halves); nothing else', stops(s1).length === 1 && whole(sc.content[0]) && ops.filter((o) => (o.op === 'create' && (o.message || o.msg)?.id === sc.id) || (o.op === 'edit' && o.id === sc.id)).map((o) => o.op).join() === 'create,edit' && users(s1).length === 1 && cards(s1).length === 0 && drift(s1).length === 0, ops.map((o) => o.op));
+  ok('live: ONE card, created by the notice and EDITED by the nudge (an open window sees both halves); nothing else', stops(s1).length === 1 && gateOf(whole(sc.content[0])) && ops.filter((o) => (o.op === 'create' && (o.message || o.msg)?.id === sc.id) || (o.op === 'edit' && o.id === sc.id)).map((o) => o.op).join() === 'create,edit' && users(s1).length === 1 && cards(s1).length === 0 && drift(s1).length === 0, ops.map((o) => o.op));
   const s2 = createMessageManager('claude', 'test-stop-live-rev');
   [stAsk('b0'), stNudge('b1'), stNotice('b2')].forEach((r) => s2.processLive(r));
-  ok('live, the nudge FIRST: still ONE card, the notice merges in (model + line)', stops(s2).length === 1 && whole(stops(s2)[0].content[0]) && users(s2).length === 1);
+  ok('live, the nudge FIRST: still ONE card, the notice merges in (model + line)', stops(s2).length === 1 && gateOf(whole(stops(s2)[0].content[0])) && users(s2).length === 1);
   const s3 = createMessageManager('claude', 'test-stop-live-run');
   [stAsk('c0'), stNotice('c1'), stNudge('c2', NUDGE_RUN)].forEach((r) => s3.processLive(r));
   ok('live: the Interrupted-exception nudge (t9r) folds the same way', stops(s3).length === 1 && stops(s3)[0].content[0].nudgeRow === 't9r' && users(s3).length === 1);
   const s4 = createMessageManager('claude', 'test-stop-two');
   s4.convertHistory([txAsk('d0'), txNotice('d1'), txNudge('d2'), txAsk('d3'), txNotice('d4'), txNudge('d5')]);
-  ok('two stops in two turns ⇒ two whole cards (a half never pairs across a turn)', stops(s4).length === 2 && stops(s4).every((m) => whole(m.content[0])) && users(s4).length === 2);
+  ok('two stops in two turns ⇒ two whole cards (a half never pairs across a turn)', stops(s4).length === 2 && gateOf(stops(s4).every((m) => whole(m.content[0]))) && users(s4).length === 2);
   const s5 = createMessageManager('claude', 'test-stop-typed');
   s5.processLive({ ...stAsk('e0'), message: { role: 'user', content: NUDGE } });
   ok('a user who TYPES the nudge sentence (promptSource, no meta stamp) keeps their own message', stops(s5).length === 0 && users(s5).length === 1 && users(s5)[0].typed === true);
@@ -412,14 +412,14 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   gd.convertHistory([env('g2', { type: 'system', subtype: 'informational', content: 'x', isMeta: false, level: 'notice', brandNewField: 1 })]);
   const grew = MM.driftLedgerRows().filter((r) => r.conversation === SID && r.shape === 'system/informational');
   ok('…the transcript shape is LIVE: a row that grew a field is a drift card naming it (the row\'s own CLI build on it) AND a drift-ledger row (negative control; lane drift-card-restore: the card is the update signal)', drift(gd).length === 1 && drift(gd)[0].content[0].fields.join() === 'brandNewField' && drift(gd)[0].content[0].cli === '2.1.288' && grew.length === 1 && grew[0].fields.join() === 'brandNewField' && grew[0].cli === '2.1.288' /* no init in the window: the row\'s own version */, { cards: drift(gd).map((m) => m.content[0]), grew });
-  ok('record-shape: informational LEFT declared-upstream-unseen (now seen + handled) and has a transcript row', !('informational' in require(path.join(REPO, 'src/record-shape.js')).DECLARED_UPSTREAM_UNSEEN.system) && !!require(path.join(REPO, 'src/record-shape.js')).SHAPES['claude:transcript:system/informational'] && MM.HANDLED_SYSTEM_SUBTYPES.has('informational'));
+  ok('record-shape: informational LEFT declared-upstream-unseen (now seen + handled) and has a transcript row', !('informational' in require(path.join(REPO, 'src/record-shape.js')).DECLARED_UPSTREAM_UNSEEN.system) && !!require(path.join(REPO, 'src/record-shape.js')).SHAPES['claude:transcript:system/informational'] && verdictOf(MM.HANDLED_SYSTEM_SUBTYPES.has('informational')));
 
   // the renderer + its words
   const cr = read('src/lib/chat-renderers.js');
   const br = (kind) => { const i = cr.indexOf(`noticeKind === '${kind}'`); return i >= 0 ? cr.slice(i, i + 1600) : ''; };
-  ok('renderer: the banner escapes the CLI text and titles the level through t(); the stop card escapes the model and the CLI lines (in a details expander) and words its head through t()', /escHtml\(b\.text \|\| ''\)/.test(br('harness-informational')) && /t\('Harness message · \{level\}'/.test(br('harness-informational')) && /escHtml\(b\.model\)/.test(br('safety-stop')) && /<details|createElement\('details'\)/.test(br('safety-stop')) && /escHtml\(cli\)/.test(br('safety-stop')) && /t\('A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it'\)/.test(br('safety-stop')));
+  ok('renderer: the banner escapes the CLI text and titles the level through t(); the stop card escapes the model and the CLI lines (in a details expander) and words its head through t()', gateOf(/escHtml\(b\.text \|\| ''\)/.test(br('harness-informational'))) && gateOf(/t\('Harness message · \{level\}'/.test(br('harness-informational'))) && gateOf(/escHtml\(b\.model\)/.test(br('safety-stop'))) && gateOf(/<details|createElement\('details'\)/.test(br('safety-stop'))) && gateOf(/escHtml\(cli\)/.test(br('safety-stop'))) && verdictOf(/t\('A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it'\)/.test(br('safety-stop'))));
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  ok('zh / ja carry both new keys (the zh head is the owner\'s wording)', zh.includes('"A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it": "安全检查拦下了上面这条回复——其余内容已被扣下，agent 已被告知不要重复"') && /"Harness message · \{level\}": "/.test(zh) && /"A safety check stopped the reply above[^"]*": "安全チェック/.test(ja) && /"Harness message · \{level\}": "/.test(ja));
+  ok('zh / ja carry both new keys (the zh head is the owner\'s wording)', gateOf(zh.includes('"A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it": "安全检查拦下了上面这条回复——其余内容已被扣下，agent 已被告知不要重复"')) && gateOf(/"Harness message · \{level\}": "/.test(zh)) && gateOf(/"A safety check stopped the reply above[^"]*": "安全チェック/.test(ja)) && verdictOf(/"Harness message · \{level\}": "/.test(ja)));
 
   // PATCHED-COPY CONTROLS: each rule removed reproduces what the owner saw
   const M = mutantCopies('stop-card', REPO);
@@ -427,7 +427,7 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   const handled = "  'informational',";
   const branch = "    if (raw.subtype === 'informational' && typeof raw.content === 'string' && raw.content.trim()) {";
   const fold = "      if (u.nudge) {"; // _processUser's fold — who is asked: userRecordOf (lane minimap-person-rows r2)
-  ok('the three patch sites exist (a control is meaningful only if its line does)', mmSrc.includes(handled) && mmSrc.includes(branch) && mmSrc.includes(fold));
+  ok('the three patch sites exist (a control is meaningful only if its line does)', gateOf(mmSrc.includes(handled)) && gateOf(mmSrc.includes(branch)) && verdictOf(mmSrc.includes(fold)));
   const live = (MMx, recs) => { const x = new MMx.MessageManager('test-stop-ctl'); recs.forEach((r) => x.processLive(r)); return x; };
   const hist = (MMx, recs) => { const x = new MMx.MessageManager('test-stop-ctl-h'); x.convertHistory(recs); return x; };
   const noHandle = require(M.write('src/message-manager.js', editAnchor(editAnchor(mmSrc, handled, '', "src/message-manager.js"), branch, '    if (false) {', "src/message-manager.js"), 'no-handler'));
@@ -440,7 +440,7 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   const rowDrift = require(M.write('src/message-manager.js', editAnchor(mmSrc, "require('./safety-stop.js')", `require(${JSON.stringify(ssCopy)})`, "src/message-manager.js"), 'on-row-drift'));
   const c = live(rowDrift, [stAsk('o0'), stNotice('o1')]);
   ok('CONTROL: with the census row mis-spelled the notice is the generic banner, not the stop card (the TABLE decides)', infos(c).length === 1 && stops(c).length === 0 && cards(c).length === 0, c.messages.map((m) => m.noticeKind));
-  ok('the copies live outside the tree', M.files.length === 4 && M.files.every((x) => !x.startsWith(REPO)));
+  ok('the copies live outside the tree', M.files.length === 4 && verdictOf(M.files.every((x) => !x.startsWith(REPO))));
 }
 
 console.log('§11 lane cli-2-1-288-records (B-e05e): claude 2.1.288\'s eight new system records are KNOWN — none wears the red card; an invented one still does');
@@ -459,14 +459,14 @@ console.log('§11 lane cli-2-1-288-records (B-e05e): claude 2.1.288\'s eight new
     ui_scroll: { client_id: 'c', component: 'Pane', instance_id: 'x', offset: 3, follow_end: true },
     ui_focus: { client_id: 'c', component: 'AbovePrompt', instance_id: 'above-prompt', plugin: 'p', key: 'k' },
   };
-  ok('the fixture records carry exactly the fields of each 2.1.288 zod object (the dump is the evidence)', Object.entries(REC).every(([st, f]) => Object.keys(f).every((k) => zod['system/' + st].includes(k + ':'))));
+  ok('the fixture records carry exactly the fields of each 2.1.288 zod object (the dump is the evidence)', verdictOf(Object.entries(REC).every(([st, f]) => Object.keys(f).every((k) => zod['system/' + st].includes(k + ':')))));
   const mm = createMessageManager('claude', 'test-288');
   let i = 0;
   for (const [st, f] of Object.entries(REC)) mm.processLive({ type: 'system', subtype: st, ...f, uuid: 'u288-' + (i++), session_id: S });
   const drift = mm.messages.filter((m) => m.noticeKind === 'unknown-fields');
   const infos = mm.messages.filter((m) => m.noticeKind === 'harness-informational');
   ok('all eight live: NO unknown-event card, NO drift card', cards(mm).length === 0 && drift.length === 0, mm.messages.map((m) => m.noticeKind));
-  ok('instruction_size_warning → ONE dim harness notice (level notice, our words + the numbers), the seven others card-less', infos.length === 1 && mm.messages.length === 1 && infos[0].content[0].level === 'notice' && infos[0].content[0].say === 'instruction-size' && infos[0].content[0].params.chars === 61234 && infos[0].content[0].params.limit === 40000 && /61234 characters \(limit 40000\)/.test(infos[0].content[0].text), infos.map((m) => m.content));
+  ok('instruction_size_warning → ONE dim harness notice (level notice, our words + the numbers), the seven others card-less', infos.length === 1 && mm.messages.length === 1 && infos[0].content[0].level === 'notice' && infos[0].content[0].say === 'instruction-size' && infos[0].content[0].params.chars === 61234 && infos[0].content[0].params.limit === 40000 && verdictOf(/61234 characters \(limit 40000\)/.test(infos[0].content[0].text)), infos.map((m) => m.content));
   ok('…the ui_toast text never reaches the chat (a plugin\'s line for the CLI\'s TUI notification bar)', !JSON.stringify(mm.messages).includes('Build failed'));
   const h = createMessageManager('claude', 'test-288-h');
   h.convertHistory([{ parentUuid: null, isSidechain: false, userType: 'external', cwd: '/w', sessionId: S, version: '2.1.288', type: 'system', subtype: 'instruction_size_warning', totalChars: 52000, totalLimitChars: 40000, fileCount: 1, uuid: 'h1', timestamp: '2026-10-07T00:00:00Z' }]);
@@ -476,8 +476,8 @@ console.log('§11 lane cli-2-1-288-records (B-e05e): claude 2.1.288\'s eight new
   ok('CONTROL: an invented ui_banner (undeclared) still renders the red Unknown-event card — the next upstream feature stays visible', cards(ctl).length === 1, ctl.messages.map((m) => m.noticeKind));
   const crx = read('src/lib/chat-renderers.js'); const ib = crx.slice(crx.indexOf("noticeKind === 'harness-informational'"), crx.indexOf("noticeKind === 'harness-informational'") + 1800);
   const KEY = 'The CLI warns the instructions are large: {chars} characters (limit {limit})';
-  ok('renderer: the instruction-size notice is OUR words through t() (escaped) on the same dim card; zh + ja carry the line', /b\.say === 'instruction-size' \? escHtml\(t\('The CLI warns the instructions are large: \{chars\} characters \(limit \{limit\}\)'/.test(ib) && ['zh', 'ja'].every((l) => read('src/lib/i18n-' + l + '.js').includes(JSON.stringify(KEY) + ':')));
-  ok('every one is a declared 2.1.288 row (SHAPE_SINCE) and on exactly one normalizer list', Object.keys(REC).every((st) => R.SHAPE_SINCE['system/' + st] === '2.1.288' && (MM.HANDLED_SYSTEM_SUBTYPES.has(st) !== MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.has(st))));
+  ok('renderer: the instruction-size notice is OUR words through t() (escaped) on the same dim card; zh + ja carry the line', gateOf(/b\.say === 'instruction-size' \? escHtml\(t\('The CLI warns the instructions are large: \{chars\} characters \(limit \{limit\}\)'/.test(ib)) && verdictOf(['zh', 'ja'].every((l) => read('src/lib/i18n-' + l + '.js').includes(JSON.stringify(KEY) + ':'))));
+  ok('every one is a declared 2.1.288 row (SHAPE_SINCE) and on exactly one normalizer list', verdictOf(Object.keys(REC).every((st) => R.SHAPE_SINCE['system/' + st] === '2.1.288' && (MM.HANDLED_SYSTEM_SUBTYPES.has(st) !== MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.has(st)))));
 }
 
 console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2.1.296\'s two new system records are KNOWN; a known record that GREW a field is the red card again (the update signal) AND a row in ⚙ Diagnostics; a stored card renders');
@@ -489,15 +489,15 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
     permission_check_status: { tool_use_id: 'toolu_296', agent_id: 'a1', status: 'checking' },
     file_attachments_missing: { message_uuid: 'm-296', sent_count: 3, missing: [{ file_uuid: 'f1', reason: 'too_large' }, { file_uuid: 'f2', reason: 'not_found' }] },
   };
-  ok('the fixture records carry exactly the fields of each 2.1.296 zod object (the dump is the evidence)', Object.entries(REC).every(([st, f]) => Object.keys(f).every((k) => zod['system/' + st].includes(k + ':'))));
+  ok('the fixture records carry exactly the fields of each 2.1.296 zod object (the dump is the evidence)', verdictOf(Object.entries(REC).every(([st, f]) => Object.keys(f).every((k) => zod['system/' + st].includes(k + ':')))));
   const mm = createMessageManager('claude', 'test-296');
   const ops = []; mm.listeners.push((e) => ops.push(e));
   let i = 0;
   for (const [st, f] of Object.entries(REC)) mm.processLive({ type: 'system', subtype: st, ...f, uuid: 'u296-' + (i++), session_id: S });
   mm.processLive({ type: 'system', subtype: 'permission_check_status', tool_use_id: 'toolu_296', status: 'done', uuid: 'u296-d', session_id: S });
   const infos = mm.messages.filter((m) => m.noticeKind === 'harness-informational');
-  ok('both live (+ the done pulse): NO unknown-event card, NO drift card', cards(mm).length === 0 && mm.messages.every((m) => m.noticeKind !== 'unknown-fields'), mm.messages.map((m) => m.noticeKind));
-  ok('file_attachments_missing → ONE plain dim line (level notice, say attachments-missing: 2 of 3, the reason codes in params); permission_check_status card-less', infos.length === 1 && mm.messages.length === 1 && infos[0].content[0].level === 'notice' && infos[0].content[0].say === 'attachments-missing' && infos[0].content[0].params.missing === 2 && infos[0].content[0].params.sent === 3 && infos[0].content[0].params.codes.join() === 'too_large,not_found' && /^2 of 3 attached files did not reach Claude/.test(infos[0].content[0].text), infos.map((m) => m.content[0]));
+  ok('both live (+ the done pulse): NO unknown-event card, NO drift card', cards(mm).length === 0 && verdictOf(mm.messages.every((m) => m.noticeKind !== 'unknown-fields')), mm.messages.map((m) => m.noticeKind));
+  ok('file_attachments_missing → ONE plain dim line (level notice, say attachments-missing: 2 of 3, the reason codes in params); permission_check_status card-less', infos.length === 1 && mm.messages.length === 1 && infos[0].content[0].level === 'notice' && infos[0].content[0].say === 'attachments-missing' && infos[0].content[0].params.missing === 2 && infos[0].content[0].params.sent === 3 && infos[0].content[0].params.codes.join() === 'too_large,not_found' && verdictOf(/^2 of 3 attached files did not reach Claude/.test(infos[0].content[0].text)), infos.map((m) => m.content[0]));
   ok('…emitted once as a create op (an open window sees the line)', ops.filter((o) => o.op === 'create').length === 1);
   const h = createMessageManager('claude', 'test-296-h');
   h.convertHistory([{ parentUuid: null, isSidechain: false, userType: 'external', cwd: '/w', sessionId: S, version: '2.1.296', type: 'system', subtype: 'file_attachments_missing', messageUuid: 'm', sentCount: 1, missing: [{ fileUuid: 'f', reason: 'download' }], uuid: 'h296', timestamp: '2026-10-15T00:00:00Z' }]);
@@ -505,7 +505,7 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
   const e = createMessageManager('claude', 'test-296-empty');
   e.processLive({ type: 'system', subtype: 'file_attachments_missing', message_uuid: 'm', sent_count: 1, missing: [], uuid: 'u296-e', session_id: S });
   ok('…an empty missing list draws nothing (the literal says "Never empty"; a malformed record is no line)', e.messages.length === 0);
-  ok('each is a declared 2.1.296 row (SHAPE_SINCE) and on exactly one normalizer list', Object.keys(REC).every((st) => R.SHAPE_SINCE['system/' + st] === '2.1.296' && (MM.HANDLED_SYSTEM_SUBTYPES.has(st) !== MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.has(st))));
+  ok('each is a declared 2.1.296 row (SHAPE_SINCE) and on exactly one normalizer list', verdictOf(Object.keys(REC).every((st) => R.SHAPE_SINCE['system/' + st] === '2.1.296' && (MM.HANDLED_SYSTEM_SUBTYPES.has(st) !== MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.has(st)))));
   const ctl = createMessageManager('claude', 'test-296-ctl');
   ctl.processLive({ type: 'system', subtype: 'file_attachments_lost', missing: [{ file_uuid: 'f', reason: 'x' }], uuid: 'c296', session_id: S });
   ok('CONTROL: an invented neighbour (file_attachments_lost) still renders the red Unknown-event card', cards(ctl).length === 1, ctl.messages.map((m) => m.noticeKind));
@@ -514,13 +514,13 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
   const cr = read('src/lib/chat-renderers.js');
   const ib = cr.slice(cr.indexOf("noticeKind === 'harness-informational'"), cr.indexOf("noticeKind === 'harness-informational'") + 1600);
   const KEY = '{missing} of {sent} attached files did not reach Claude';
-  ok('renderer: the attachments line is OUR words through t() (escaped through the same auto path), the codes only on hover; zh + ja carry the line', /b\.say === 'attachments-missing' \? attachmentsMissingWords\(p\)/.test(ib) && /function attachmentsMissingWords\(p\) \{[\s\S]{0,200}t\('\{missing\} of \{sent\} attached files did not reach Claude'/.test(cr) && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes(JSON.stringify(KEY) + ':')));
-  ok('renderer: a stored unknown-fields card (enum-only, field-naming, from .276 or later) is NOT drawn in the chat (lane door-healthy-chat) — its words left the dictionaries; the normalizer still keeps ONE notice per shape (the chip counts it, ⚙ Diagnostics lists it)', !/New fields on a known record'\) : t\('An undeclared value on a known record'\)/.test(cr) && !/isQuietDrift/.test(cr) && ['zh', 'ja'].every((l) => !read(`src/lib/i18n-${l}.js`).includes(JSON.stringify('An undeclared value on a known record') + ':')));
+  ok('renderer: the attachments line is OUR words through t() (escaped through the same auto path), the codes only on hover; zh + ja carry the line', gateOf(/b\.say === 'attachments-missing' \? attachmentsMissingWords\(p\)/.test(ib)) && gateOf(/function attachmentsMissingWords\(p\) \{[\s\S]{0,200}t\('\{missing\} of \{sent\} attached files did not reach Claude'/.test(cr)) && verdictOf(['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes(JSON.stringify(KEY) + ':'))));
+  ok('renderer: a stored unknown-fields card (enum-only, field-naming, from .276 or later) is NOT drawn in the chat (lane door-healthy-chat) — its words left the dictionaries; the normalizer still keeps ONE notice per shape (the chip counts it, ⚙ Diagnostics lists it)', !/New fields on a known record'\) : t\('An undeclared value on a known record'\)/.test(cr) && !/isQuietDrift/.test(cr) && verdictOf(['zh', 'ja'].every((l) => !read(`src/lib/i18n-${l}.js`).includes(JSON.stringify('An undeclared value on a known record') + ':'))));
   const RS = await import(path.join(REPO, 'src/lib/chat-run-summary.js'));
   const stored = { role: 'system', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: 'system/init', fields: ['foo'], enumDrift: [], sample: '{}' }] };
   const enumCard = { role: 'system', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: 'system/vcs_state_changed', fields: [], enumDrift: [{ field: 'kind', value: 'squash' }] }] };
   const both = { role: 'system', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', shape: 'system/x', fields: ['a'], enumDrift: [{ field: 'k', value: 'v' }] }] };
-  ok('chat-run-summary exports no isQuietDrift; messageKind gives a stored field-only card, an enum card and a both card each the "unknown" kind (the fold counts every drift card)', !('isQuietDrift' in RS) && [stored, enumCard, both].every((m) => RS.messageKind(m, { toolCard: false }) === 'unknown'));
+  ok('chat-run-summary exports no isQuietDrift; messageKind gives a stored field-only card, an enum card and a both card each the "unknown" kind (the fold counts every drift card)', !('isQuietDrift' in RS) && verdictOf([stored, enumCard, both].every((m) => RS.messageKind(m, { toolCard: false }) === 'unknown')));
   // THE CARD IS BACK on the normalizer: field growth ⇒ ONE card (the CLI build the init frame named) + ONE ledger row; CONTROL = .276's hiding
   const SG = 'e2e00000-0000-4000-8000-0000000000d2';
   const feedGrown = (x) => { x.processLive({ type: 'system', subtype: 'init', cwd: '/w', session_id: SG, uuid: 'u-g0', model: 'm', permissionMode: 'default', claude_code_version: '2.1.297' }); for (const k of [1, 2]) x.processLive({ type: 'system', subtype: 'informational', content: 'x' + k, level: 'info', banner_style_v2: 'compact', uuid: 'u-g' + k, session_id: SG }); return x.messages.filter((m) => m.noticeKind === 'unknown-fields'); };
@@ -530,7 +530,7 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
   const M = mutantCopies('drift-card', REPO);
   const rsSrc = read('src/lib/chat-run-summary.js');
   const guard = "m?.noticeKind === 'unknown-fields') return 'unknown';";
-  ok('the patch site exists (a control is meaningful only if its line does)', rsSrc.includes(guard));
+  ok('the patch site exists (a control is meaningful only if its line does)', verdictOf(rsSrc.includes(guard)));
   const RSx = await import(pathToFileURL(M.write('src/lib/chat-run-summary.js', editAnchor(rsSrc, guard, "(m?.noticeKind === 'unknown-fields' && !(m.content?.[0]?.fields?.length && !m.content?.[0]?.enumDrift?.length))) return 'unknown';", "src/lib/chat-run-summary.js"), 'hidden-276-fold', { esm: true })).href);
   ok('CONTROL: a copy with .276\'s fold exclusion restored gives the stored field-only card NO kind again (RED for the fold leg; the enum card stays "unknown")', RSx.messageKind(stored, { toolCard: false }) === null && RSx.messageKind(enumCard, { toolCard: false }) === 'unknown');
   const gate = '    if (entry && !newFields.length && !newEnums.length) return;\n';
@@ -542,9 +542,9 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
 
   // ⚙ DIAGNOSTICS: the ledger rows reach the report (the server route answers them on ?drift=1, the section draws one row each)
   const srv = read('server.js');
-  ok('server: GET /api/telemetry/summary answers driftLedger ONLY on ?drift=1 (the sidebar badge probe stays small; B-64c1\'s attended tally rides the same branch)', /app\.get\('\/api\/telemetry\/summary'[\s\S]{0,300}req\.query\.drift === '1' \? \{ driftLedger: driftLedgerRows\(\)(?:, attended: [^\n]*?)? \} : \{\}/.test(srv) && /const \{ MessageManager, driftLedgerRows \} = require\('\.\/src\/message-manager'\);/.test(srv));
+  ok('server: GET /api/telemetry/summary answers driftLedger ONLY on ?drift=1 (the sidebar badge probe stays small; B-64c1\'s attended tally rides the same branch)', gateOf(/app\.get\('\/api\/telemetry\/summary'[\s\S]{0,300}req\.query\.drift === '1' \? \{ driftLedger: driftLedgerRows\(\)(?:, attended: [^\n]*?)? \} : \{\}/.test(srv)) && verdictOf(/const \{ MessageManager, driftLedgerRows \} = require\('\.\/src\/message-manager'\);/.test(srv)));
   const sf = read('src/lib/setup-flows.js');
-  ok('the Diagnostics report asks for the ledger (?drift=1)', sf.includes("fetchJson('/api/telemetry/summary?days=14&drift=1')"));
+  ok('the Diagnostics report asks for the ledger (?drift=1)', verdictOf(sf.includes("fetchJson('/api/telemetry/summary?days=14&drift=1')")));
   const a = sf.indexOf('// THE DRIFT LEDGER (lane record-oracle-2-1-296'), a0 = sf.lastIndexOf('(() => {', a), a1 = sf.indexOf('})()', a) + 4;
   const section = new Function('d', 'esc', 't', 'sessionDisplayName', 'return ' + sf.slice(a0, a1) + ';');
   const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -554,9 +554,9 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
   const rows = MM.driftLedgerRows().filter((r) => r.conversation === SIDD);
   const html = section.call({ sidebar: { _allSessions: [{ sessionId: SIDD, cliTitle: 'Fix the login' }] } }, { driftLedger: rows }, esc, (k) => k, sessionDisplayName);
   const renamed = section.call({ sidebar: { _allSessions: [{ sessionId: SIDD, cliTitle: 'Fix the login' }], getCustomName: (s) => (s.sessionId === SIDD ? 'My rename' : null) } }, { driftLedger: rows }, esc, (k) => k, sessionDisplayName);
-  ok('Diagnostics section: ONE row per conversation + shape — the conversation by its NAME (THE name ladder; the user\'s rename first), harness · shape, the fields, the CLI build, the count; the sample behind "Technical details"; everything escaped', rows.length === 1 && /<h2>Records that grew a field<\/h2>/.test(html) && html.includes('<td>Fix the login</td>') && html.includes('Claude Code · system/init') && html.includes('+{grown_&lt;i&gt;}') && html.includes('<td class="dim">2.1.296</td>') && html.includes('<td class="n">1</td>') && /<summary>Technical details<\/summary><pre>[\s\S]*&lt;b&gt;x&lt;\/b&gt;/.test(html) && !html.includes('<b>x</b>') && renamed.includes('<td>My rename</td>'), html.slice(0, 600));
-  ok('…no rows ⇒ no section (a server that saw no growth says nothing); an unnamed conversation shows its id', section.call({}, { driftLedger: [] }, esc, (k) => k, sessionDisplayName) === '' && section.call({}, { driftLedger: rows }, esc, (k) => k, sessionDisplayName).includes('<td>' + SIDD + '</td>'));
-  ok('the Diagnostics words: zh + ja carry the heading, the explanation and the new column names', ['Records that grew a field', 'conversation', 'harness record', 'new fields'].every((k) => sf.includes("t('" + k + "')") && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes(JSON.stringify(k) + ':'))) && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes('"Records VibeSpace knows that arrived carrying fields it does not declare.')) && !sf.includes('so the chat shows no card') && sf.includes('the sign that the CLI may have updated'));
+  ok('Diagnostics section: ONE row per conversation + shape — the conversation by its NAME (THE name ladder; the user\'s rename first), harness · shape, the fields, the CLI build, the count; the sample behind "Technical details"; everything escaped', rows.length === 1 && gateOf(/<h2>Records that grew a field<\/h2>/.test(html)) && gateOf(html.includes('<td>Fix the login</td>')) && gateOf(html.includes('Claude Code · system/init')) && gateOf(html.includes('+{grown_&lt;i&gt;}')) && gateOf(html.includes('<td class="dim">2.1.296</td>')) && gateOf(html.includes('<td class="n">1</td>')) && gateOf(/<summary>Technical details<\/summary><pre>[\s\S]*&lt;b&gt;x&lt;\/b&gt;/.test(html)) && !html.includes('<b>x</b>') && verdictOf(renamed.includes('<td>My rename</td>')), html.slice(0, 600));
+  ok('…no rows ⇒ no section (a server that saw no growth says nothing); an unnamed conversation shows its id', section.call({}, { driftLedger: [] }, esc, (k) => k, sessionDisplayName) === '' && verdictOf(section.call({}, { driftLedger: rows }, esc, (k) => k, sessionDisplayName).includes('<td>' + SIDD + '</td>')));
+  ok('the Diagnostics words: zh + ja carry the heading, the explanation and the new column names', gateOf(['Records that grew a field', 'conversation', 'harness record', 'new fields'].every((k) => sf.includes("t('" + k + "')") && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes(JSON.stringify(k) + ':')))) && gateOf(['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes('"Records VibeSpace knows that arrived carrying fields it does not declare.'))) && !sf.includes('so the chat shows no card') && verdictOf(sf.includes('the sign that the CLI may have updated')));
 }
 
 console.log('§THE CREATE\'S FIELD (lane session-events-ends U3, 主开发 2026-11-16): the field a create carries, as the normalizer emits it (the device\'s bundle and the hub run this one normalizer) and as the hub reads it — `message`. A rename on either side is red here, in the fast tier (the parity soak read `msg` for three months and nobody saw it)');
@@ -570,11 +570,11 @@ console.log('§THE CREATE\'S FIELD (lane session-events-ends U3, 主开发 2026-
   const creates = ops.filter((o) => o && o.op === 'create');
   const shipped = creates.map((o) => JSON.parse(JSON.stringify(o)));   // as the daemon ships an op on its stream
   ok(`every create the claude normalizer emits carries «message» with an id, and none carries «msg» (${creates.length} creates: a prompt, an answer, an unknown-record card) — also after the JSON round trip the device stream makes`,
-    creates.length >= 3 && shipped.every((o) => o.message && typeof o.message.id === 'string' && o.message.id && !('msg' in o)), shipped.map((o) => Object.keys(o)));
+    creates.length >= 3 && verdictOf(shipped.every((o) => o.message && typeof o.message.id === 'string' && o.message.id && !('msg' in o))), shipped.map((o) => Object.keys(o)));
   const cv = read('src/lib/chat-view.js'), mw = read('src/message-window.js');
   ok('…and the hub reads that field: the chat view draws a create\'s `op.message` (_onCreateMessage), the message window keys its float on `op.message`',
-    /if \(op\.op === 'create'\) \{[\s\S]{0,300}this\._onCreateMessage\(op\.message, /.test(cv) && /op\.op === 'create' && op\.message && this\._afloat\.length/.test(mw));
+    gateOf(/if \(op\.op === 'create'\) \{[\s\S]{0,300}this\._onCreateMessage\(op\.message, /.test(cv)) && verdictOf(/op\.op === 'create' && op\.message && this\._afloat\.length/.test(mw)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

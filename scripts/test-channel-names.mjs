@@ -32,7 +32,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 600) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -106,30 +106,30 @@ const perConv = calls.filter((l) => !/groups, windowMinutes|conversation\(s\)/.t
 ok(calls.length === 3 && calls.filter((l) => /\bchannel\b(?: \}|,| \?)/.test(l.replace(/'channel-(?:message|receipt)'/g, ''))).length === 2, `the per-conversation wake and the receipt hand the ladder their \`channel\` ref (2 of the ${calls.length} channel deliveries; the third is a multi-conversation scope digest)`, calls.map((l) => l.trim().slice(0, 160)).join('\n'));
 const filings = [...eng.matchAll(/userTodos\.add\(INBOX_KEY/g)].map((m) => eng.slice(Math.max(0, m.index - 2000), m.index + 1400));
 const aboutOne = filings.filter((x) => /awaiting approval in|requests access to|has an UNKNOWN outcome/.test(x));
-ok(aboutOne.length === 3 && aboutOne.every((x) => /type: 'open-channel'/.test(x)), `every For-you filing about ONE conversation carries the open-channel action (${aboutOne.length})`);
+ok(aboutOne.length === 3 && verdictOf(aboutOne.every((x) => /type: 'open-channel'/.test(x))), `every For-you filing about ONE conversation carries the open-channel action (${aboutOne.length})`);
 const acts = read('src/lib/user-todos-actions.js');
-ok(/item\?\.action\?\.type === 'open-channel'[^\n]*app\.openChannel\?\.\(item\.action\.adapterId, item\.action\.convId\)/.test(acts), 'the For-you jump opens the conversation an open-channel item names (its "channels" group is no session)');
-ok(/channelRefOf\(msg\.peerChannel\) \|\| view\.ref/.test(rend) && /this\.app\?\.openChannel\?\.\(ref\.adapterId, ref\.convId\)/.test(rend), 'the notice renderer draws the ref\'s name as the link through the ONE door');
+ok(verdictOf(/item\?\.action\?\.type === 'open-channel'[^\n]*app\.openChannel\?\.\(item\.action\.adapterId, item\.action\.convId\)/.test(acts)), 'the For-you jump opens the conversation an open-channel item names (its "channels" group is no session)');
+ok(gateOf(/channelRefOf\(msg\.peerChannel\) \|\| view\.ref/.test(rend)) && verdictOf(/this\.app\?\.openChannel\?\.\(ref\.adapterId, ref\.convId\)/.test(rend)), 'the notice renderer draws the ref\'s name as the link through the ONE door');
 
 // ── §2 THE PURE LADDER ────────────────────────────────────────────────────────────────────────────────────────────
 console.log('§2 the pure ladder (src/channel-ref.js) over the real block writers');
 ok(CR.nameOf(['Ops room', 'Ada'], 'oc_1') === 'Ops room' && CR.nameOf(['', 'Ada, Bob'], 'oc_1') === 'Ada, Bob' && CR.nameOf([null, ''], 'oc_1') === 'oc_1', 'nameOf: ① the name, else ② the description, else ③ the id');
 ok(CR.describeOf({ participants: '  Ada,\nBob ' }) === 'Ada, Bob' && CR.describeOf({ authors: [{ id: 'me', name: 'Me' }, { id: 'a', name: 'Ada' }, { id: 'b', name: 'Bob' }, { id: 'c', name: 'Cy' }, { id: 'd', name: 'Di' }] }, { selfId: 'me' }) === 'Ada, Bob, Cy +1' && CR.describeOf({}) === '', 'describeOf: the participants, else the authors (self left out, three + "+N"), else nothing');
 const r0 = CR.refOf({ adapterId: 'lark-1', convId: 'oc_9', name: '  Ops\nroom ', account: 'Lark', vendor: 'lark' });
-ok(r0 && r0.name === 'Ops room' && r0.adapterId === 'lark-1' && CR.refOf({ convId: 'a\nb' }) === null && CR.refOf({ convId: 'oc_9' }).name === 'oc_9', 'refOf: sanitized, one line; no id ⇒ null; no name ⇒ the id (③)');
+ok(gateOf(r0) && r0.name === 'Ops room' && r0.adapterId === 'lark-1' && CR.refOf({ convId: 'a\nb' }) === null && CR.refOf({ convId: 'oc_9' }).name === 'oc_9', 'refOf: sanitized, one line; no id ⇒ null; no name ⇒ the id (③)');
 ok(JSON.stringify(CR.splitLead('Ops room: 1 message from Ada — matched: all messages', 'Ops room')) === JSON.stringify({ lead: 'Ops room', rest: ': 1 message from Ada — matched: all messages' }) && CR.splitLead('Ops roomy: x', 'Ops room') === null, 'splitLead: the card text\'s leading name, never a prefix of a longer word');
 const hit = { record: { author: { name: 'Ada' }, at: Date.UTC(2026, 9, 2), text: 'inc-42 is down' }, why: ['keyword "inc-"'] };
 const wb = F.renderWakeBlock({ adapterLabel: 'Lark / 飞书', title: 'Incident room', convId: 'oc_e53d', hits: [hit] });
 const wf = CR.wakeFacts(wb);
-ok(wf && wf.title.text === 'Channels · Lark / 飞书' && wf.ref && wf.ref.name === 'Incident room' && wf.ref.convId === 'oc_e53d' && wf.ref.adapterId === null && wf.ref.account === 'Lark / 飞书', 'wakeFacts reads the REAL wake block back: the account, the name, the id from the reply hint', JSON.stringify(wf && wf.ref));
+ok(gateOf(wf) && wf.title.text === 'Channels · Lark / 飞书' && gateOf(wf.ref) && wf.ref.name === 'Incident room' && wf.ref.convId === 'oc_e53d' && wf.ref.adapterId === null && wf.ref.account === 'Lark / 飞书', 'wakeFacts reads the REAL wake block back: the account, the name, the id from the reply hint', JSON.stringify(wf && wf.ref));
 const wi = CR.wakeFacts(F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'oc_1', hits: [hit], inherited: { kind: 'account' } }));
 const db = CR.wakeFacts(F.renderDigestBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'oc_1', hits: [hit, hit], windowMinutes: 15 }));
 const sd = CR.wakeFacts(F.renderScopeDigestBlock({ adapterLabel: 'Lark', scopeLabel: 'the whole account', groups: [{ title: 'A', convId: 'oc_a', hits: [hit] }, { title: 'B', convId: 'oc_b', hits: [hit] }], windowMinutes: 15 }));
 const rb = CR.wakeFacts(P.renderReceiptBlock(P.receiptFor({ id: 'p-1', convId: 'oc_1', adapterId: 'lark-1', state: 'sent', sendAs: 'user', identity: { marking: 'none' }, result: { vendorMessageId: 'v', at: 5, sentAs: 'user' } }), { adapterLabel: 'Lark', title: 'Ops' }));
-ok(wi && wi.ref && wi.ref.name === 'Ops' && db && db.ref && db.ref.name === 'Ops' && sd && !sd.ref && rb && rb.title.text === 'Channels · Lark — Ops' && !rb.ref, 'an inherited wake / a digest name their ONE conversation; a scope digest (many) and a receipt (no id) name none — their words fold under the card', JSON.stringify({ wi: wi && wi.ref, db: db && db.ref, sd: sd && sd.ref, rb: rb && rb.title }));
+ok(gateOf(wi) && gateOf(wi.ref) && wi.ref.name === 'Ops' && gateOf(db) && gateOf(db.ref) && db.ref.name === 'Ops' && gateOf(sd) && !sd.ref && gateOf(rb) && rb.title.text === 'Channels · Lark — Ops' && !rb.ref, 'an inherited wake / a digest name their ONE conversation; a scope digest (many) and a receipt (no id) name none — their words fold under the card', JSON.stringify({ wi: wi && wi.ref, db: db && db.ref, sd: sd && sd.ref, rb: rb && rb.title }));
 const body = NS.noticeBody(NS.vibespaceNoticeText(wb));
 const view = NS.noticeCardView(null, NS.vibespaceNoticeText(wb), { facts: (b) => CR.wakeFacts(b) });
-ok(view.folded && view.ref && view.ref.name === 'Incident room' && view.title.text === 'Channels · Lark / 飞书' && body.startsWith('### Channel message'), 'a REBUILT card (the transcript\'s server post, name-less): the title says the account, the block folds, the ref names the room');
+ok(gateOf(view.folded) && gateOf(view.ref) && view.ref.name === 'Incident room' && view.title.text === 'Channels · Lark / 飞书' && verdictOf(body.startsWith('### Channel message')), 'a REBUILT card (the transcript\'s server post, name-less): the title says the account, the block folds, the ref names the room');
 ok(CR.wakeFacts('Lark / 飞书 · hello') === null && CR.wakeFacts('') === null, 'a body that is no channel block has no facts');
 
 // ── §3 THE REAL ENGINE ────────────────────────────────────────────────────────────────────────────────────────────
@@ -212,18 +212,18 @@ async function engineRun(EM, tag) {
 }
 const real = await engineRun(ENG, 'real');
 const room = real.wakes.oc_room, dm = real.wakes.oc_dm, grp = real.wakes.oc_grp;
-ok(room && room.cardText.startsWith('Ops room: 1 message from Ada — ') && room.channel && room.channel.name === 'Ops room' && room.channel.adapterId === 'names-real' && room.channel.convId === 'oc_room' && room.channel.account === 'Lark / 飞书', '① a titled room\'s wake card opens with its TITLE, says who wrote, and carries the ref its name opens', JSON.stringify(room));
-ok(dm && dm.cardText.startsWith('Bob: 1 message') && dm.channel && dm.channel.name === 'Bob' && !/oc_dm/.test(dm.cardText) && /^### Channel message — Lark \/ 飞书 · Bob$/.test(dm.head), '② an untitled single chat is named by its other party — on the card AND the agent block\'s head (the reply hint keeps the id)', JSON.stringify(dm));
-ok(grp && grp.cardText.startsWith('Cy: 1 message') && grp.channel && grp.channel.name === 'Cy' && !/oc_grp/.test(grp.cardText), '② an untitled group with no listed participants is named by the authors seen in it', JSON.stringify(grp));
+ok(gateOf(room) && gateOf(room.cardText.startsWith('Ops room: 1 message from Ada — ')) && gateOf(room.channel) && room.channel.name === 'Ops room' && room.channel.adapterId === 'names-real' && room.channel.convId === 'oc_room' && room.channel.account === 'Lark / 飞书', '① a titled room\'s wake card opens with its TITLE, says who wrote, and carries the ref its name opens', JSON.stringify(room));
+ok(gateOf(dm) && gateOf(dm.cardText.startsWith('Bob: 1 message')) && gateOf(dm.channel) && dm.channel.name === 'Bob' && !/oc_dm/.test(dm.cardText) && verdictOf(/^### Channel message — Lark \/ 飞书 · Bob$/.test(dm.head)), '② an untitled single chat is named by its other party — on the card AND the agent block\'s head (the reply hint keeps the id)', JSON.stringify(dm));
+ok(gateOf(grp) && gateOf(grp.cardText.startsWith('Cy: 1 message')) && gateOf(grp.channel) && grp.channel.name === 'Cy' && !/oc_grp/.test(grp.cardText), '② an untitled group with no listed participants is named by the authors seen in it', JSON.stringify(grp));
 ok(real.bareName === null && real.rows.oc_bare === null && real.rows.oc_room === 'Ops room' && real.rows.oc_dm === 'Bob', '③ a room the server knows nothing about has no name (null — the client draws the id, the one case it may); the panel rows take the same ladder', JSON.stringify({ bare: real.bareName, rows: real.rows }));
-ok(real.proposalState === 'awaiting-approval' && real.pointer && real.pointer.text === 'Proposals awaiting approval in Bob' && real.pointer.action && real.pointer.action.type === 'open-channel' && real.pointer.action.convId === 'oc_dm' && !/oc_dm/.test(real.pointer.text + real.pointer.detail), 'the For-you approval pointer names the conversation by the ladder and OPENS it (the open-channel action)', JSON.stringify(real.pointer));
+ok(real.proposalState === 'awaiting-approval' && gateOf(real.pointer) && real.pointer.text === 'Proposals awaiting approval in Bob' && gateOf(real.pointer.action) && real.pointer.action.type === 'open-channel' && real.pointer.action.convId === 'oc_dm' && !/oc_dm/.test(real.pointer.text + real.pointer.detail), 'the For-you approval pointer names the conversation by the ladder and OPENS it (the open-channel action)', JSON.stringify(real.pointer));
 ok(real.view.length === 1 && real.view[0] === 'Bob', 'the Outbox card\'s title is the conversation\'s name NOW (the proposal froze the raw id when it was drafted)', JSON.stringify(real.view));
-ok(real.receipt && !real.receipt.stashed && /^Bob: receipt — sent/.test(real.receipt.cardText) && !/\bp-/.test(real.receipt.cardText) && real.receipt.channel && real.receipt.channel.convId === 'oc_dm', 'the receipt card names the conversation (never `proposal p-…`) and carries the ref', JSON.stringify(real.receipt));
+ok(gateOf(real.receipt) && !real.receipt.stashed && gateOf(/^Bob: receipt — sent/.test(real.receipt.cardText)) && !/\bp-/.test(real.receipt.cardText) && gateOf(real.receipt.channel) && real.receipt.channel.convId === 'oc_dm', 'the receipt card names the conversation (never `proposal p-…`) and carries the ref', JSON.stringify(real.receipt));
 {
   const sessions = new Map([['w1', { sockName: null, _channelTouches: [] }]]);
   const T = Touches.create({ sessions: () => sessions, broadcast: () => {}, metaStore: () => null, accountOf: () => ({ label: 'Lark', kind: 'lark' }), nameOf: (a, c) => (c === 'oc_dm' ? 'Bob' : null), persistDelayMs: 1e6, broadcastMs: 1e6 });
   const got = T.recordMany('w1', [{ op: 'read', adapterId: 'lark-1', convId: 'oc_dm', title: 'oc_dm', count: 3 }, { op: 'read', adapterId: 'lark-1', convId: 'oc_x', title: 'oc_x', count: 1 }], { cause: 'agent' });
-  ok(got[0] && got[0].title === 'Bob' && got[1] && got[1].title === 'oc_x', 'the touches store names a touch by the ladder over the agent answer\'s raw id (③ only when the engine knows nothing)', JSON.stringify(got.map((x) => x && x.title)));
+  ok(gateOf(got[0]) && got[0].title === 'Bob' && gateOf(got[1]) && got[1].title === 'oc_x', 'the touches store names a touch by the ladder over the agent answer\'s raw id (③ only when the engine knows nothing)', JSON.stringify(got.map((x) => x && x.title)));
   try { T.flush && T.flush(); } catch {}
 }
 
@@ -242,9 +242,9 @@ const swap = (src, from, to) => { if (!src.includes(from)) throw new Error('cont
   s = swap(s, "      ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),", "      ...p,");
   s = swap(s, "`${CR.nameOf([rTitle], p.convId || p.id)}: receipt — ${rc.status}", "`Receipt: proposal ${p.id} ${rc.status}");
   const pre = await engineRun(MUT.load('src/server/channels-engine.js', s, 'pre-fix'), 'pre');
-  ok(pre.wakes.oc_dm && /^oc_dm: 1 message/.test(pre.wakes.oc_dm.cardText) && !pre.wakes.oc_dm.channel, 'CONTROL the pre-fix wake: an untitled single chat\'s card opens with the raw id and carries no ref (the owner\'s screenshot) — §3 ② goes red', JSON.stringify(pre.wakes.oc_dm));
-  ok(pre.rows.oc_grp === null && pre.pointer && pre.pointer.text === 'Proposals awaiting approval in oc_dm' && !pre.pointer.action, 'CONTROL the pre-fix pointer: "awaiting approval in oc_dm" and no way to open it (the click ended in "Session not found")', JSON.stringify(pre.pointer));
-  ok(pre.view[0] === 'oc_dm' && pre.receipt && /^Receipt: proposal p-/.test(pre.receipt.cardText), 'CONTROL the pre-fix Outbox title and receipt card: the frozen raw id, `proposal p-…`', JSON.stringify({ view: pre.view, receipt: pre.receipt }));
+  ok(gateOf(pre.wakes.oc_dm) && gateOf(/^oc_dm: 1 message/.test(pre.wakes.oc_dm.cardText)) && !pre.wakes.oc_dm.channel, 'CONTROL the pre-fix wake: an untitled single chat\'s card opens with the raw id and carries no ref (the owner\'s screenshot) — §3 ② goes red', JSON.stringify(pre.wakes.oc_dm));
+  ok(pre.rows.oc_grp === null && gateOf(pre.pointer) && pre.pointer.text === 'Proposals awaiting approval in oc_dm' && !pre.pointer.action, 'CONTROL the pre-fix pointer: "awaiting approval in oc_dm" and no way to open it (the click ended in "Session not found")', JSON.stringify(pre.pointer));
+  ok(pre.view[0] === 'oc_dm' && gateOf(pre.receipt) && verdictOf(/^Receipt: proposal p-/.test(pre.receipt.cardText)), 'CONTROL the pre-fix Outbox title and receipt card: the frozen raw id, `proposal p-…`', JSON.stringify({ view: pre.view, receipt: pre.receipt }));
 }
 {
   const pre = read('src/server/channel-touches.js').replace('title: inert(named || x.title, T.TITLE_MAX),', 'title: inert(x.title, T.TITLE_MAX),');
@@ -255,9 +255,9 @@ const swap = (src, from, to) => { if (!src.includes(from)) throw new Error('cont
 }
 {
   const view = NS.noticeCardView(null, NS.vibespaceNoticeText(wb), { facts: () => null });
-  ok(!view.ref && /oc_e53d|Incident room/.test(view.title.text + view.body), 'CONTROL without the channel facts a rebuilt card has no ref (nothing to click) and draws the agent block as the body');
+  ok(!view.ref && verdictOf(/oc_e53d|Incident room/.test(view.title.text + view.body)), 'CONTROL without the channel facts a rebuilt card has no ref (nothing to click) and draws the agent block as the body');
   const preCensus = censusOf((rel) => (rel === 'src/server/channels-auth.js' ? read(rel).replace("title: conversationName(en.adapterId, en.id) || en.id, scope:", "title: en.title || en.id, scope:") : read(rel)));
-  ok(preCensus.unjudged.length === 1 && /en\.title \|\| en\.id/.test(preCensus.unjudged[0].text), 'CONTROL the census flags a restored `en.title || en.id` (the account dialog\'s refs) as an unjudged site', JSON.stringify(preCensus.unjudged));
+  ok(preCensus.unjudged.length === 1 && verdictOf(/en\.title \|\| en\.id/.test(preCensus.unjudged[0].text)), 'CONTROL the census flags a restored `en.title || en.id` (the account dialog\'s refs) as an unjudged site', JSON.stringify(preCensus.unjudged));
 }
 
 // ── §5 VERIFY R1 ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -348,12 +348,12 @@ async function verifyRun(EM, UT, tag) {
 {
   const v = await verifyRun(ENG, UserTodoManager, 'vr1');
   const w1 = v.wakes.oc_byid, w4 = v.wakes.oc_long, w5 = v.wakes.oc_ghost;
-  ok(v.names.oc_byid === 'Bob' && w1 && w1.channel && w1.channel.name === 'Bob' && w1.cardText.startsWith('Bob: 1 message') && !/oc_byid/.test(w1.cardText), 'F1 a listed single chat whose title IS its id (lark `name || chat_id`) is named by its other party — the card never says the id while ② is known', JSON.stringify({ name: v.names.oc_byid, w1 }));
+  ok(v.names.oc_byid === 'Bob' && gateOf(w1) && gateOf(w1.channel) && w1.channel.name === 'Bob' && gateOf(w1.cardText.startsWith('Bob: 1 message')) && !/oc_byid/.test(w1.cardText), 'F1 a listed single chat whose title IS its id (lark `name || chat_id`) is named by its other party — the card never says the id while ② is known', JSON.stringify({ name: v.names.oc_byid, w1 }));
   ok(v.states.join() === 'awaiting-approval,awaiting-approval' && JSON.stringify(v.ptrsBoth) === JSON.stringify(['oc_teamA', 'oc_teamB']), 'F2 two rooms of ONE name keep a For-you pointer EACH, each opening its own room (one merged item opened the last filer\'s)', JSON.stringify({ states: v.states, ptrs: v.ptrsBoth }));
   ok(JSON.stringify(v.ptrsAfter) === JSON.stringify(['oc_teamB']), 'F2 deciding one room\'s proposal retracts ITS pointer only — the other room still awaiting keeps its own', JSON.stringify(v.ptrsAfter));
   ok(v.outboxN === 2 && v.clones === 0, `F3 drawing the Outbox (${v.outboxN} proposals) clones the whole index 0 times (the ladder by key reads the live map)`, JSON.stringify({ n: v.outboxN, clones: v.clones }));
-  ok(w4 && w4.channel && CR.splitLead(w4.cardText, w4.channel.name) !== null && w4.channel.name.length <= CR.NAME_MAX, 'F4 a 250-char title: the card\'s words open with the SAME capped name its ref carries (the lead splits — never the markdown fallback)', JSON.stringify(w4 && { name: w4.channel && w4.channel.name.length, text: w4.cardText.slice(0, 40) }));
-  ok(v.names.oc_ghost === 'Cy' && w5 && w5.channel && w5.channel.name === 'Cy' && w5.cardText.startsWith('Cy: 1 message'), 'F5 a title of invisible characters only names nothing — the room is named by who wrote in it', JSON.stringify({ name: v.names.oc_ghost && [...v.names.oc_ghost].map((c) => c.codePointAt(0).toString(16)), w5 }));
+  ok(gateOf(w4) && gateOf(w4.channel) && CR.splitLead(w4.cardText, w4.channel.name) !== null && w4.channel.name.length <= CR.NAME_MAX, 'F4 a 250-char title: the card\'s words open with the SAME capped name its ref carries (the lead splits — never the markdown fallback)', JSON.stringify(w4 && { name: w4.channel && w4.channel.name.length, text: w4.cardText.slice(0, 40) }));
+  ok(v.names.oc_ghost === 'Cy' && gateOf(w5) && gateOf(w5.channel) && w5.channel.name === 'Cy' && verdictOf(w5.cardText.startsWith('Cy: 1 message')), 'F5 a title of invisible characters only names nothing — the room is named by who wrote in it', JSON.stringify({ name: v.names.oc_ghost && [...v.names.oc_ghost].map((c) => c.codePointAt(0).toString(16)), w5 }));
   ok(CR.nameOf(['⁢\u{E0041}'], 'oc_x') === 'oc_x' && CR.nameOf(['Ada⁣'], 'oc_x') === 'Ada' && CR.nameOf(['\u{1F469}‍\u{1F4BB} dev'], 'x') === '\u{1F469}‍\u{1F4BB} dev', 'F5 the pure ladder drops what is not drawn (src/hidden-chars.js) and keeps the joiners an emoji needs');
   // the pre-fix CONTROLS: the lane head's lines restored — each leg above goes red
   let s = eng;
@@ -363,11 +363,11 @@ async function verifyRun(EM, UT, tag) {
   // lane chat-needs-you-card (amendment 1): ACTION_IDENTITY is THE registry's — the pre-fix copy drops open-channel's identity in its own line
   const todoPre = swap(read('src/user-todos.js'), "const { ACTION_IDENTITY } = require('./foryou-actions.js');", "const ACTION_IDENTITY = { ...require('./foryou-actions.js').ACTION_IDENTITY, 'open-channel': undefined };");
   const p = await verifyRun(MUT.load('src/server/channels-engine.js', s, 'vr1-pre'), MUT.load('src/user-todos.js', todoPre, 'vr1-todos-pre').UserTodoManager, 'vr1pre');
-  ok(p.names.oc_byid === 'oc_byid' && p.wakes.oc_byid && p.wakes.oc_byid.cardText.startsWith('oc_byid: 1 message'), 'CONTROL F1: the lane head\'s ladder took the id-as-title for a name — "oc_byid: 1 message" with Bob known', JSON.stringify(p.wakes.oc_byid));
+  ok(p.names.oc_byid === 'oc_byid' && gateOf(p.wakes.oc_byid) && verdictOf(p.wakes.oc_byid.cardText.startsWith('oc_byid: 1 message')), 'CONTROL F1: the lane head\'s ladder took the id-as-title for a name — "oc_byid: 1 message" with Bob known', JSON.stringify(p.wakes.oc_byid));
   ok(JSON.stringify(p.ptrsBoth) === JSON.stringify(['oc_teamB']) && JSON.stringify(p.ptrsAfter) === '[]', 'CONTROL F2: ONE merged item (it opened oc_teamB for both); rejecting oc_teamA\'s proposal retracted it — oc_teamB still awaiting, no pointer', JSON.stringify({ both: p.ptrsBoth, after: p.ptrsAfter }));
   ok(p.clones >= 4, `CONTROL F3: the lane head cloned the whole index ${p.clones} times for a 2-proposal Outbox view`);
-  ok(p.wakes.oc_long && CR.splitLead(p.wakes.oc_long.cardText, p.wakes.oc_long.channel.name) === null, 'CONTROL F4: the lane head\'s 250-char card text does not open with its ref\'s capped name — the renderer fell back to markdown');
-  ok(p.names.oc_ghost !== 'Cy' && p.wakes.oc_ghost && p.wakes.oc_ghost.channel.name !== 'Cy', 'CONTROL F5: the lane head named the room by its invisible title (nothing drawn, Cy known)', JSON.stringify(p.wakes.oc_ghost && p.wakes.oc_ghost.channel));
+  ok(gateOf(p.wakes.oc_long) && CR.splitLead(p.wakes.oc_long.cardText, p.wakes.oc_long.channel.name) === null, 'CONTROL F4: the lane head\'s 250-char card text does not open with its ref\'s capped name — the renderer fell back to markdown');
+  ok(p.names.oc_ghost !== 'Cy' && gateOf(p.wakes.oc_ghost) && p.wakes.oc_ghost.channel.name !== 'Cy', 'CONTROL F5: the lane head named the room by its invisible title (nothing drawn, Cy known)', JSON.stringify(p.wakes.oc_ghost && p.wakes.oc_ghost.channel));
 }
 
 // ── §N lane channel-names-readable (userW inc-muyrhqtj-ys0z): THE NAMES A PERSON READS are search keys, and a sign-in
@@ -449,8 +449,8 @@ async function namesRun(EM, tag, place = {}) {
 {
   const v = await namesRun(ENG, 'n1');
   const r = v.refused;
-  ok(r.view && r.view.ok === false && r.view.why === 'scopes' && r.view.missing.join() === 'contact:base' && r.row === 'unreadable(scopes)', 'N1 a sign-in whose people warm-up is refused by permission KEEPS the fact on the account: namesReadable {ok:false, why:scopes, missing} · caps row unreadable(scopes)', JSON.stringify(r));
-  ok(r.items.length === 1 && r.items[0].status === 'open' && r.items[0].origin === 'channels' && r.items[0].kind === 'action' && r.items[0].action.adapterId === 'nr-n1' && /people's names and pictures cannot be read — re-authorize/.test(r.items[0].text), 'N1 ONE For-you item (origin channels, kind action, the account\'s Re-authorize action) says it', JSON.stringify(r.items));
+  ok(gateOf(r.view) && r.view.ok === false && r.view.why === 'scopes' && r.view.missing.join() === 'contact:base' && r.row === 'unreadable(scopes)', 'N1 a sign-in whose people warm-up is refused by permission KEEPS the fact on the account: namesReadable {ok:false, why:scopes, missing} · caps row unreadable(scopes)', JSON.stringify(r));
+  ok(r.items.length === 1 && r.items[0].status === 'open' && r.items[0].origin === 'channels' && r.items[0].kind === 'action' && r.items[0].action.adapterId === 'nr-n1' && verdictOf(/people's names and pictures cannot be read — re-authorize/.test(r.items[0].text)), 'N1 ONE For-you item (origin channels, kind action, the account\'s Re-authorize action) says it', JSON.stringify(r.items));
   ok(v.afterPasses.filed === 1 && v.afterPasses.items === 1 && v.afterPasses.open === 1 && v.afterPasses.warmCalls >= 8, `N2 filed ONCE per sign-in: ${v.afterPasses.warmCalls} refused warm-ups over 4 passes, ${v.afterPasses.filed} item`, JSON.stringify(v.afterPasses));
   ok(v.search.mira === 'oc_dorn' && v.search.lee === 'oc_dorn' && v.search.mkt === 'oc_dorn' && v.search.dorn === 'oc_dorn', 'N3 a search by the profile\'s nickname / English name / department finds the single chat whose vendor name is "Dorn"', JSON.stringify(v.search));
   ok(v.search.kenji === 'oc_kenji', 'N3 a search by a Chinese nickname (林远) finds the chat whose raw name is Latin ("Kenji")', JSON.stringify(v.search));
@@ -474,4 +474,4 @@ async function namesRun(EM, tag, place = {}) {
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

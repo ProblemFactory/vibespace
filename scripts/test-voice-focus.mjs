@@ -140,7 +140,7 @@ export const rowText = (r) => `${r.verdict.ok ? 'target  ' : r.verdict.why.padEn
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   let pass = 0, fail = 0;
-  const ok = (cond, name, detail) => {
+  const ok = (cond, name, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
     if (cond) { pass++; console.log(`  ✓ ${name}`); }
     else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : ''}`); }
   };
@@ -179,7 +179,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const bad = TABLE.filter(([f, why]) => J(f).why !== why || J(f).ok !== (why === 'target')).map(([f, why, name]) => `${name}: ${JSON.stringify(J(f))} (want ${why})`);
   ok(bad.length === 0, `${TABLE.length} rows: targets (textarea, text-like inputs, contenteditable) and every exclusion as the predicate orders them`, bad);
   const whys = new Set(TABLE.map(([f]) => J(f).why));
-  ok(F.WHY.every((w) => whys.has(w)) && [...whys].every((w) => F.WHY.includes(w)), `the table reaches every why the predicate can say (${F.WHY.join(', ')})`, [...whys]);
+  ok(gateOf(F.WHY.every((w) => whys.has(w))) && verdictOf([...whys].every((w) => F.WHY.includes(w))), `the table reaches every why the predicate can say (${F.WHY.join(', ')})`, [...whys]);
   ok(F.TEXT_TYPES.join() === ',text,search,url,email,tel' && F.SECRET_AUTOCOMPLETE.join() === 'one-time-code,current-password,new-password', 'the text types and the secret autocomplete tokens are the brief\'s');
 
   console.log('② followPlace — outside the field, inside the view, clear of the strip and the neighbours');
@@ -233,7 +233,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const by = {};
   for (const r of C) (by[r.verdict.why] = by[r.verdict.why] || []).push(r);
   ok(C.length >= 200, `the census sees the tree: ${C.length} sites in ${new Set(C.map((r) => r.file)).size} files (a vacuous grep would see none)`, C.length);
-  ok(C.every((r) => F.WHY.includes(r.verdict.why)), 'every site is a target or an exclusion BY THE PREDICATE (no third answer)', C.filter((r) => !F.WHY.includes(r.verdict.why)).map(rowText));
+  ok(verdictOf(C.every((r) => F.WHY.includes(r.verdict.why))), 'every site is a target or an exclusion BY THE PREDICATE (no third answer)', C.filter((r) => !F.WHY.includes(r.verdict.why)).map(rowText));
   console.log(`    ${Object.entries(by).map(([w, rs]) => `${w} ${rs.length}`).join(' · ')}`);
   // every exclusion but not-text by its site; the targets and the not-text by file (--all: every site, one line each)
   const ALL = process.argv.includes('--all');
@@ -266,7 +266,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   ];
   for (const [file, pred, why, name, min = 1] of anchors) {
     const rs = find(file, pred);
-    ok(rs.length >= min && rs.every((r) => r.verdict.why === why), `anchor: ${name} — ${file} ⇒ ${why} (${rs.length} site${rs.length === 1 ? '' : 's'})`, rs.map(rowText));
+    ok(rs.length >= min && verdictOf(rs.every((r) => r.verdict.why === why)), `anchor: ${name} — ${file} ⇒ ${why} (${rs.length} site${rs.length === 1 ? '' : 's'})`, rs.map(rowText));
   }
   ok((by.target || []).length >= 100, `most of what the client makes is a target (${(by.target || []).length}) — dictation follows the focus there`);
 
@@ -288,7 +288,7 @@ export function plants() {
   const R = census({ ...FILES, 'zz-plant.js': PLANT }, CSS).filter((r) => r.file === 'zz-plant.js');
   const want = { pw: 'secret', otp: 'secret', quiet: 'opted-out', ro: 'read-only', tick: 'not-text', plain: 'target', ghost: 'hidden' };
   const got = Object.fromEntries(R.filter((r) => r.name).map((r) => [r.name, r.verdict.why]));
-  ok(Object.entries(want).every(([n, w]) => got[n] === w), 'planted calls: a password, a one-time code, data-no-dictation, read-only, a checkbox, an off-screen copy helper — and a plain input made through a helper the census DERIVED (mkBox)', got);
+  ok(verdictOf(Object.entries(want).every(([n, w]) => got[n] === w)), 'planted calls: a password, a one-time code, data-no-dictation, read-only, a checkbox, an off-screen copy helper — and a plain input made through a helper the census DERIVED (mkBox)', got);
   const mk = R.filter((r) => !r.name).map((r) => `${r.tag}:${r.verdict.why}`);
   ok(mk.join() === 'input:target,textarea:read-only,input:secret', 'planted markup: a search box, a read-only textarea, a password', mk);
   ok(R.length === 10, `the comments' input / textarea are no sites (10 = 7 calls + 3 tags; got ${R.length})`, R.map(rowText));
@@ -301,4 +301,4 @@ export function plants() {
 
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
   process.exit(fail ? 1 : 0);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

@@ -5,7 +5,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-let pass=0, fail=0; const ok=(c,n,e)=>{if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
+let pass=0, fail=0; const ok=(c,n,e)=>{ if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
 const { createTranscriptService } = require(REPO + '/src/transcript-service.js');
 
 const calls = [];
@@ -76,18 +76,18 @@ const deviceHosts = (behavior) => ({
   const svc = mkSvc({ hosts: deviceHosts({ caps: ['transcript-op'] }) });
   const ref = { backend: 'claude', sessionId: 's1', cwd: '/w', host: 'host-a' };
   const gi = await svc.gapInfo(ref);
-  ok(typeof gi.fp === 'string' && gi.fp.startsWith('\u0000device:'), 'gapInfo returns an opaque DEVICE handle (route treats fp as opaque)');
+  ok(typeof gi.fp === 'string' && verdictOf(gi.fp.startsWith('\u0000device:')), 'gapInfo returns an opaque DEVICE handle (route treats fp as opaque)');
   const slab = await svc.gapSlab(ref, gi.fp, 0, 100);
-  ok(calls.includes('gapSlab'), 'a device handle routes the slab read to the device (never a local file)');
+  ok(verdictOf(calls.includes('gapSlab')), 'a device handle routes the slab read to the device (never a local file)');
   const sf = await svc.searchFull(ref, gi.fp, 'q');
-  ok(calls.includes('searchFull'), 'search on a device handle uses the device search op');
+  ok(verdictOf(calls.includes('searchFull')), 'search on a device handle uses the device search op');
   const ft = await svc.fullTurnmap(ref, gi.fp);
-  ok(calls.includes('fullTurnmap'), 'full turnmap on a device handle uses the device op');
+  ok(verdictOf(calls.includes('fullTurnmap')), 'full turnmap on a device handle uses the device op');
   // streaming contract preserved (one batch, same NDJSON callback shape)
   calls.length = 0;
   const got = [];
   const r = await svc.searchFullStream(ref, gi.fp, 'q', (m) => got.push(m), {});
-  ok(calls.includes('searchFull') && typeof r.total === 'number', 'streaming search over the device replays matches through onMatch (contract kept)');
+  ok(gateOf(calls.includes('searchFull')) && typeof r.total === 'number', 'streaming search over the device replays matches through onMatch (contract kept)');
 }
 // 7. no device → the whole family stays on the local file path
 {
@@ -98,4 +98,4 @@ const deviceHosts = (behavior) => ({
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail?1:0);
+process.exit(fail?1:0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -23,7 +23,7 @@ const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
 const { PortForwardManager } = require(path.join(REPO, 'src/port-forward.js'));
 const M = mutantCopies('artifacts-services', REPO);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -39,16 +39,16 @@ const job = (id, cid, extra = {}) => ({ id, name: 'site-' + id, kind: 'service',
 console.log('① PURE rows');
 const rows0 = AF.serviceRows([job('a', 'c-A')], { cid: 'c-A', now: 2000, base: 'https://inst.example.test' });
 const ra = rows0['job:a'];
-ok(ra && ra.kind === 'service' && ra.url === 'https://inst.example.test/proxy/http://127.0.0.1:8100/' && ra.via === 'proxy' && ra.state === 'running' && ra.since === 900 && ra.firstAt === 1000, 'a running job that listens = ONE service row: its url = this instance\'s proxy of its port (no forward), since = the job\'s start, firstAt = its first listen', ra);
+ok(gateOf(ra) && ra.kind === 'service' && ra.url === 'https://inst.example.test/proxy/http://127.0.0.1:8100/' && ra.via === 'proxy' && ra.state === 'running' && ra.since === 900 && ra.firstAt === 1000, 'a running job that listens = ONE service row: its url = this instance\'s proxy of its port (no forward), since = the job\'s start, firstAt = its first listen', ra);
 const mixed = { ...AF.fold({}, { op: 'write', path: '/p/notes.md', at: 5 }), ...AF.fold({}, AF.pageOp({ id: 'pg', srcKey: 'local:/p/site/index.html', srcPath: '/p/site/index.html', path: '/p/pg', updatedAt: 9 })), ...AF.fold({}, { op: 'write', path: '/p/run.py', at: 7 }), ...rows0 };
 const v = AF.view(mixed);
 ok(v.items.map((b) => b.kind).join(',') === 'service,page,doc' && v.items.map((b) => AF.intentOf(b)).join(',') === 'foryou,foryou,made' && v.code.length === 1 && v.count === 3, 'placement (lane artifacts-by-intent): the running service and the published page read «for you» (newest first), the doc the agent wrote «made here»; code stays folded; the chip counts it', v.items.map((b) => b.kind));
 const stopped = job('b', 'c-A', { state: 'down', runs: [{ startedAt: 900, endedAt: 5000 }] });
 const rb = AF.serviceRow(stopped, { now: 5000 + 23 * H });
-ok(rb && rb.state === 'stopped' && rb.stoppedAt === 5000 && AF.cardFacts(AF.cardBlock(rb)).stoppedAt === 5000, 'a stopped job\'s row stays (greyed) with its stop instant', rb);
+ok(gateOf(rb) && rb.state === 'stopped' && rb.stoppedAt === 5000 && AF.cardFacts(AF.cardBlock(rb)).stoppedAt === 5000, 'a stopped job\'s row stays (greyed) with its stop instant', rb);
 ok(AF.serviceRow(stopped, { now: 5000 + AF.SERVICE_KEEP_MS + 1 }) === null && AF.SERVICE_KEEP_MS === 24 * H, 'the 24 h window: a day after the stop the row goes');
 const moved = AF.serviceRows([job('a', 'c-A', { listen: { port: 8200, firstAt: 1000, at: 3000 } })], { cid: 'c-A', now: 4000 })['job:a'];
-ok(moved && moved.key === ra.key && moved.url === '/proxy/http://127.0.0.1:8200/' && AF.cardBlock(moved).port === 8200, 'a port that moves ⇒ the SAME row (key) with the new url (no instance URL ⇒ the RELATIVE proxy url)', moved);
+ok(gateOf(moved) && moved.key === ra.key && moved.url === '/proxy/http://127.0.0.1:8200/' && AF.cardBlock(moved).port === 8200, 'a port that moves ⇒ the SAME row (key) with the new url (no instance URL ⇒ the RELATIVE proxy url)', moved);
 const two = AF.serviceRows([job('a', 'c-A'), job('c', 'c-A', { listen: { port: 8300, firstAt: 1, at: 1 } })], { cid: 'c-A', now: 2000 });
 ok(Object.keys(two).length === 2, 'two jobs ⇒ two rows');
 ok(Object.keys(AF.serviceRows([job('x', 'c-B')], { cid: 'c-A', now: 2000 })).length === 0, 'THE LINEAGE RULE: another conversation\'s job ⇒ no row');
@@ -114,10 +114,10 @@ session.host = 'gpu1'; const remoteList = list(); session.host = '';
 ok(list().cwd === D && list().host === '' && remoteList.host === 'gpu1' && remoteList.cwd === D, 'listFor names the conversation\'s cwd and its machine (local = \'\') — the folder every row reads is read against them (lane artifacts-by-intent)', { cwd: list().cwd, host: remoteList.host });
 const P = portOf('mine');
 const b1 = svc()[0];
-ok(born && b1.jobId === J.id && b1.port === P && b1.url === `https://inst.example.test/proxy/http://127.0.0.1:${P}/` && b1.via === 'proxy' && b1.state === 'running' && b1.name === 'house-web', 'the job\'s row appears within one read: its ephemeral port, the link = this instance\'s proxy of it (no forward yet)', b1);
-ok(J.listen && J.listen.port === P && JX.listen && JX.listen.port === portOf('theirs') && svc().every((b) => b.jobId !== JX.id), 'the engine read BOTH jobs\' ports off their pid trees — the other conversation\'s job is no row here (lineage)');
+ok(gateOf(born) && b1.jobId === J.id && b1.port === P && b1.url === `https://inst.example.test/proxy/http://127.0.0.1:${P}/` && b1.via === 'proxy' && b1.state === 'running' && b1.name === 'house-web', 'the job\'s row appears within one read: its ephemeral port, the link = this instance\'s proxy of it (no forward yet)', b1);
+ok(gateOf(J.listen) && J.listen.port === P && gateOf(JX.listen) && JX.listen.port === portOf('theirs') && verdictOf(svc().every((b) => b.jobId !== JX.id)), 'the engine read BOTH jobs\' ports off their pid trees — the other conversation\'s job is no row here (lineage)');
 const cardId = N_cardId(J.id);
-ok(mm.messageIndex.has(cardId) && ops.filter((o) => o.op === 'create').length === 1 && mm.messageIndex.get(cardId).content[0].kind === 'service', 'the card is born ONCE at the first listen (a live create on the conversation\'s normalizer)', ops.map((o) => o.op));
+ok(gateOf(mm.messageIndex.has(cardId)) && ops.filter((o) => o.op === 'create').length === 1 && mm.messageIndex.get(cardId).content[0].kind === 'service', 'the card is born ONCE at the first listen (a live create on the conversation\'s normalizer)', ops.map((o) => o.op));
 
 console.log('②b the link follows the port\'s forward record — a REAL PortForwardManager (scratch store, a stub frp plugin)');
 const DP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-svc-pf-'));
@@ -130,7 +130,7 @@ REG.configure({ ports: () => pf });
 const card = () => mm.messageIndex.get(cardId).content[0];
 const edits = () => ops.filter((o) => o.op === 'edit' && o.id === cardId).length;
 const fwd = await pf.forward('__local__', P, { label: 'service: house-web' });
-ok(fwd && fwd.localPort > 0 && svc()[0].via === 'proxy' && svc()[0].forwardId === fwd.id && card().forwardId === fwd.id && card().url === b1.url, 'a forward (not published) ⇒ still this instance\'s proxy; the card learned its forward id from the broadcast', { row: svc()[0], card: card() });
+ok(gateOf(fwd) && fwd.localPort > 0 && svc()[0].via === 'proxy' && svc()[0].forwardId === fwd.id && card().forwardId === fwd.id && card().url === b1.url, 'a forward (not published) ⇒ still this instance\'s proxy; the card learned its forward id from the broadcast', { row: svc()[0], card: card() });
 const e0 = edits();
 const pub = await pf.publish(fwd.id);
 ok(pub.publicUrl === 'https://house-web.relay.example.test/' && svc()[0].url === pub.publicUrl && svc()[0].via === 'published', 'publish ⇒ the row links the PUBLISHED address', svc()[0]);
@@ -147,7 +147,7 @@ const MR = rsrc.includes(door) ? M.load('src/server/artifact-registry.js', editA
 if (MR) { MR.configure({ activeSessions: () => sessions, jobs: () => jm, ports: () => pf, instanceUrl: { url: () => 'https://inst.example.test' }, log: { log() { }, warn() { } } }); toRegistry = (m) => MR.noteForwards(m); }
 const e2 = edits();
 if (MR) await pf.publish(fwd.id);
-ok(MR && svc()[0].via === 'published' && !(card().via === 'published' && edits() === e2 + 1), 'CONTROL: no re-feed on the forwards broadcast ⇒ the card stays on the proxy while the row says published (the publish assert sees it)', { card: card().via, row: svc()[0].via });
+ok(gateOf(MR) && svc()[0].via === 'published' && !(card().via === 'published' && edits() === e2 + 1), 'CONTROL: no re-feed on the forwards broadcast ⇒ the card stays on the proxy while the row says published (the publish assert sees it)', { card: card().via, row: svc()[0].via });
 toRegistry = (m) => REG.noteForwards(m);
 REG.configure({ activeSessions: () => sessions, jobs: () => jm, ports: () => pf, instanceUrl: { url: () => 'https://inst.example.test' }, log: { log() { }, warn() { } } }); // the copy's configure re-pointed the normalizers' service seam
 await pf.unpublish(fwd.id);
@@ -158,8 +158,8 @@ await jm._sweep(); await jm._sweep();
 ok(Number(J._listenAt || 0) === before || Date.now() - before >= 150, 'the read is throttled per job (the engine\'s knob; production = 30 s on the 5 s tick)');
 jm.stop(J);
 const greyed = await until(() => svc()[0] && svc()[0].state === 'stopped');
-ok(greyed && svc()[0].stoppedAt > 0 && list().count === 1, 'stop ⇒ the row stays, greyed, with its stop instant', svc()[0]);
-ok(ops.some((o) => o.op === 'edit' && o.id === cardId && o.fields.content[0].state === 'stopped') && ops.filter((o) => o.op === 'create').length === 1, 'the card is PATCHED in place to stopped (no second card)');
+ok(gateOf(greyed) && svc()[0].stoppedAt > 0 && list().count === 1, 'stop ⇒ the row stays, greyed, with its stop instant', svc()[0]);
+ok(gateOf(ops.some((o) => o.op === 'edit' && o.id === cardId && o.fields.content[0].state === 'stopped')) && ops.filter((o) => o.op === 'create').length === 1, 'the card is PATCHED in place to stopped (no second card)');
 jm.rm(J, { stop: true });
 ok(svc().length === 0 && list().count === 0, 'rm ⇒ the row is gone');
 const sv = AF.serviceRows([{ ...JX }], { cid: 'conv-X', now: Date.now() });
@@ -171,7 +171,7 @@ const SPAWN = /\b(?:execFileSync|execFile|execSync|spawnSync|spawn)\s*\(|\b\w+Sy
 const listenPath = (jobsSrc, procSrc) => { const i = jobsSrc.indexOf('  _listenRead(job, stamp) {'), j = jobsSrc.indexOf('  _serviceDoor() {'); return i > 0 && j > i ? jobsSrc.slice(i, j) + '\n' + procSrc.replace(/^\s*\/\/.*$/gm, '') : null; };
 const jobsSrc = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf-8'), procSrc = fs.readFileSync(path.join(REPO, 'src/proc-listen.js'), 'utf-8');
 const census = (t) => (t == null ? 'no-scope' : (t.split('\n').filter((l) => SPAWN.test(l)).length ? 'red' : 'green'));
-ok(census(listenPath(jobsSrc, procSrc)) === 'green' && /fs\.promises\.readlink/.test(procSrc) && /require\('\.\/proc-listen\.js'\)/.test(fs.readFileSync(path.join(REPO, 'src/port-forward.js'), 'utf-8')), 'the listen path (src/jobs.js _listenRead + src/proc-listen.js) holds no exec and no sync call; port-forward\'s local watch reads the SAME reader');
+ok(census(listenPath(jobsSrc, procSrc)) === 'green' && gateOf(/fs\.promises\.readlink/.test(procSrc)) && verdictOf(/require\('\.\/proc-listen\.js'\)/.test(fs.readFileSync(path.join(REPO, 'src/port-forward.js'), 'utf-8'))), 'the listen path (src/jobs.js _listenRead + src/proc-listen.js) holds no exec and no sync call; port-forward\'s local watch reads the SAME reader');
 
 console.log('③b THE PRINTING RULE — the card\'s DOM (src/lib/artifact-card.js through esbuild, its imports stubbed) + chat.css\'s cascade');
 const esbuild = (await import(path.join(REPO, 'node_modules/esbuild/lib/main.js'))).default;
@@ -221,7 +221,7 @@ async function printed(src, css) {
   return { text, dir, first: painted(text, dir), via: el.querySelector('.chat-artifact-via')?.textContent || '', open: C.serviceOpenSpec(SB), pub: C.serviceOpenSpec({ ...SB, url: 'https://h.relay.example.test/', via: 'published' }) };
 }
 const pr = await printed(cardSrc, cssSrc);
-ok(pr.dir === 'ltr' && pr.text === 'https://inst.example.test/proxy/http://127.0.0.1:8766/' && pr.first.startsWith('https://') && !/‎/.test(pr.text), 'the card prints the row\'s url resolved through absUrl, LTR, end-truncated — the eye reads "https://…" first, never "/http"', pr);
+ok(pr.dir === 'ltr' && pr.text === 'https://inst.example.test/proxy/http://127.0.0.1:8766/' && gateOf(pr.first.startsWith('https://')) && !/‎/.test(pr.text), 'the card prints the row\'s url resolved through absUrl, LTR, end-truncated — the eye reads "https://…" first, never "/http"', pr);
 ok(pr.via === 'Through this VibeSpace' && pr.open.url === SB.target && pr.open.proxy === true && pr.pub.url === 'https://h.relay.example.test/' && pr.pub.proxy === false, 'the small via word; a proxied row opens its target in the Web view\'s PROXY mode, a published one directly', pr);
 ok(directionOf(['chat-artifact-path', 'chat-status-dim'], cssSrc) === 'rtl', 'a file PATH box stays rtl (front-truncation for paths — only the url is LTR)');
 
@@ -229,25 +229,25 @@ console.log('④ patched-copy controls');
 const asrc = fs.readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf-8');
 const lineage = '    if (jobOwnerCid(j) !== cid) continue;\n';
 const ML = asrc.includes(lineage) ? M.load('src/artifacts.js', editAnchor(asrc, lineage, '', "src/artifacts.js"), 'nolineage') : null;
-ok(ML && Object.keys(ML.serviceRows([job('x', 'c-B')], { cid: 'c-A', now: 2000 })).length === 1, 'CONTROL: without the lineage check a FOREIGN job\'s row appears (the ① lineage assert sees it)');
+ok(gateOf(ML) && Object.keys(ML.serviceRows([job('x', 'c-B')], { cid: 'c-A', now: 2000 })).length === 1, 'CONTROL: without the lineage check a FOREIGN job\'s row appears (the ① lineage assert sees it)');
 const syncExec = "    const PL = require('./proc-listen.js');\n";
-ok(jobsSrc.includes(syncExec) && census(listenPath(jobsSrc.replace(syncExec, syncExec + "    require('child_process').execSync('ss -ltnp');\n"), procSrc)) === 'red', 'CONTROL: a sync exec restored on the listen path ⇒ the never-block census is red');
+ok(gateOf(jobsSrc.includes(syncExec)) && census(listenPath(jobsSrc.replace(syncExec, syncExec + "    require('child_process').execSync('ss -ltnp');\n"), procSrc)) === 'red', 'CONTROL: a sync exec restored on the listen path ⇒ the never-block census is red');
 const expiry = '  if (!running && now - stoppedAt > SERVICE_KEEP_MS) return null;\n';
 const ME = asrc.includes(expiry) ? M.load('src/artifacts.js', editAnchor(asrc, expiry, '', "src/artifacts.js"), 'noexpiry') : null;
-ok(ME && ME.serviceRow(stopped, { now: 5000 + AF.SERVICE_KEEP_MS + 1 }) !== null, 'CONTROL: without the expiry a day-old stopped row stays (the ① 24 h assert sees it)');
+ok(gateOf(ME) && ME.serviceRow(stopped, { now: 5000 + AF.SERVICE_KEEP_MS + 1 }) !== null, 'CONTROL: without the expiry a day-old stopped row stays (the ① 24 h assert sees it)');
 // CONTROL 1: the old link restored (the instance URL's HOST with the job's RAW port) ⇒ the ①b table is red
 const proxyRet = 'return { url: `${base}/proxy/${target}`, via: \'proxy\', target, localUrl, forwardId };';
 const MH = asrc.includes(proxyRet) ? M.load('src/artifacts.js', editAnchor(asrc, proxyRet, "let h = '127.0.0.1'; try { if (instanceUrl) h = new URL(String(instanceUrl)).hostname || h; } catch { }\n  return { url: `http://${h}:${p}/`, via: 'proxy', target, localUrl, forwardId };", "src/artifacts.js"), 'rawhostport') : null;
 const mh = MH ? linkMisses(MH) : [];
-ok(MH && mh.some((x) => x.k === 'raw host:port') && mh.length > 0, 'CONTROL: the raw instance-host:port link restored ⇒ the link table is red (its never-raw-host:port invariant)', mh.slice(0, 2));
+ok(gateOf(MH) && gateOf(mh.some((x) => x.k === 'raw host:port')) && mh.length > 0, 'CONTROL: the raw instance-host:port link restored ⇒ the link table is red (its never-raw-host:port invariant)', mh.slice(0, 2));
 // CONTROL 2: the rtl path box restored for the url (the .223 card) ⇒ the eye reads "/https…" first ⇒ the printing assert is red
 const urlBox = "div(service ? 'chat-artifact-path chat-artifact-url chat-status-dim' : 'chat-artifact-path chat-status-dim')";
 const prM = cardSrc.includes(urlBox) ? await printed(cardSrc.replace(urlBox, "div('chat-artifact-path chat-status-dim')"), cssSrc) : null;
 const prC = await printed(cardSrc, cssSrc.replace('.chat-artifact-path.chat-artifact-url { direction: ltr;', '.chat-artifact-path.chat-artifact-url {'));
-ok(prM && prM.dir === 'rtl' && prM.first.startsWith('/https') && prC.dir === 'rtl' && prC.first.startsWith('/https'), 'CONTROL: the url back in the rtl path box (the card\'s class, or chat.css\'s ltr rule) ⇒ "/https://…" first ⇒ red', { card: prM && prM.first, css: prC.first });
+ok(gateOf(prM) && prM.dir === 'rtl' && gateOf(prM.first.startsWith('/https')) && prC.dir === 'rtl' && verdictOf(prC.first.startsWith('/https')), 'CONTROL: the url back in the rtl path box (the card\'s class, or chat.css\'s ltr rule) ⇒ "/https://…" first ⇒ red', { card: prM && prM.first, css: prC.first });
 try { fs.rmSync(D, { recursive: true, force: true }); } catch { }
 try { fs.rmSync(DP, { recursive: true, force: true }); } catch { }
 
 function N_cardId(jobId) { return require(path.join(REPO, 'src/normalizers.js')).artifactCardId(mm, 'job:' + jobId); }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

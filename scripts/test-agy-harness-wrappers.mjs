@@ -63,7 +63,7 @@ const WRAPPER = path.join(REPO, 'data/bin/agy-wrapper.js');
 const STUB = path.join(REPO, 'scripts/fixtures/antigravity-agy');
 const FX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/antigravity-cli-1.4.3.json'), 'utf8'));
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -587,23 +587,23 @@ let firstCid = null;
   try {
     const ses = await w.until(() => w.find('session'), 8000, 'session');
     firstCid = ses.sessionId;
-    ok('agy\'s init names the conversation → the `session` record (how new), the id the resume uses', /^[0-9a-f-]{36}$/.test(ses.sessionId) && ses.how === 'new' && ses.agentInfo?.name === 'agy', ses);
+    ok('agy\'s init names the conversation → the `session` record (how new), the id the resume uses', gateOf(/^[0-9a-f-]{36}$/.test(ses.sessionId)) && ses.how === 'new' && ses.agentInfo?.name === 'agy', ses);
     const v = await w.until(() => w.find('agent_version'), 5000, 'version');
     ok('THE VERSION LAW: every spawn records the agy version it ran (`agy --version`)', v.version === FX.version, v);
     const st0 = await w.until(() => w.stub().find((x) => x.argv && x.argv.includes('--input-format')), 5000, 'stream start');
     ok('agy was started in its stream mode with the session\'s flags, --print-timeout 0 pinned (the binary: "0 waits until the turn completes"; its docs page: 5 m)',
-      JSON.stringify(st0.argv) === JSON.stringify(['--input-format', 'stream-json', '--output-format', 'stream-json', '--print-timeout', '0', '--model', 'gemini-4-argon-high']) && /0 waits until the turn completes/.test(FX.help.flags['--print-timeout']), st0.argv);
+      JSON.stringify(st0.argv) === JSON.stringify(['--input-format', 'stream-json', '--output-format', 'stream-json', '--print-timeout', '0', '--model', 'gemini-4-argon-high']) && verdictOf(/0 waits until the turn completes/.test(FX.help.flags['--print-timeout'])), st0.argv);
     w.send({ type: 'chat-input', text: 'hello', msgId: 'u1' });
     const end = await w.until(() => w.find('prompt_end'), 8000, 'prompt_end');
-    ok('one turn: the user line on agy\'s stdin, the reply\'s deltas as text, its `result` ends the turn (end_turn)', end.stopReason === 'end_turn' && w.text() === 'Antigravity (gemini-4-argon-high, request-review): hello' && w.stub().some((x) => x.stdin && JSON.parse(x.stdin).message.content === 'hello'), w.text());
+    ok('one turn: the user line on agy\'s stdin, the reply\'s deltas as text, its `result` ends the turn (end_turn)', end.stopReason === 'end_turn' && w.text() === 'Antigravity (gemini-4-argon-high, request-review): hello' && verdictOf(w.stub().some((x) => x.stdin && JSON.parse(x.stdin).message.content === 'hello')), w.text());
     w.send({ type: 'chat-input', text: 'run the tool', msgId: 'u2' });
     await w.until(() => w.all('prompt_end').length === 2, 8000, 'second turn');
     const tc = w.find('update', (r) => r.update?.sessionUpdate === 'tool_call'), tu = w.find('update', (r) => r.update?.sessionUpdate === 'tool_call_update');
-    ok('a tool step = a tool card: tool_call (run_command, execute, its parameters) then tool_call_update completed with the output', tc && tc.update.title === 'run_command' && tc.update.kind === 'execute' && tc.update.rawInput.CommandLine === 'echo hello_headless_demo' && tu && tu.update.status === 'completed' && /hello_headless_demo/.test(tu.update.content[0].content.text), [tc, tu]);
+    ok('a tool step = a tool card: tool_call (run_command, execute, its parameters) then tool_call_update completed with the output', gateOf(tc) && tc.update.title === 'run_command' && tc.update.kind === 'execute' && tc.update.rawInput.CommandLine === 'echo hello_headless_demo' && gateOf(tu) && tu.update.status === 'completed' && verdictOf(/hello_headless_demo/.test(tu.update.content[0].content.text)), [tc, tu]);
     const mm = new AcpMessageManager('agy');
     for (const r of w.records) { try { mm.processLive(r); } catch { } }
     const msgs = mm.tail(mm.total);
-    ok('the ACP normalizer renders the journal: the user bubble, the assistant reply and the tool card', msgs.some((m) => m.role === 'user') && msgs.some((m) => m.role === 'assistant' && /Antigravity \(/.test(JSON.stringify(m))) && msgs.some((m) => /run_command|hello_headless_demo/.test(JSON.stringify(m))), msgs.map((m) => m.role + ':' + (m.type || '')).join(' '));
+    ok('the ACP normalizer renders the journal: the user bubble, the assistant reply and the tool card', gateOf(msgs.some((m) => m.role === 'user')) && gateOf(msgs.some((m) => m.role === 'assistant' && /Antigravity \(/.test(JSON.stringify(m)))) && verdictOf(msgs.some((m) => /run_command|hello_headless_demo/.test(JSON.stringify(m)))), msgs.map((m) => m.role + ':' + (m.type || '')).join(' '));
   } finally { await w.stop(); }
 }
 
@@ -614,10 +614,10 @@ console.log('— ③ THE SLASH REFUSAL (agy would end the stream, exit 2)');
     await w.until(() => w.find('session'), 8000, 'session');
     w.send({ type: 'chat-input', text: '/usage', msgId: 's1' });
     const n = await w.until(() => w.find('notice', (r) => r.noticeKind === 'slash-refused'), 5000, 'refusal');
-    ok('a chat line that IS one of agy\'s own commands (/usage) is refused by the wrapper, by name', /\/usage was not sent/.test(n.text), n.text);
+    ok('a chat line that IS one of agy\'s own commands (/usage) is refused by the wrapper, by name', verdictOf(/\/usage was not sent/.test(n.text)), n.text);
     w.send({ type: 'chat-input', text: 'still here', msgId: 's2' });
     await w.until(() => w.find('prompt_end'), 8000, 'the next turn');
-    ok('…it never reached agy, and the conversation lives on (the next turn answers)', !w.stub().some((x) => x.stdin && /"\/usage"/.test(x.stdin)) && w.exited === null && /still here/.test(w.text()));
+    ok('…it never reached agy, and the conversation lives on (the next turn answers)', !w.stub().some((x) => x.stdin && /"\/usage"/.test(x.stdin)) && w.exited === null && verdictOf(/still here/.test(w.text())));
   } finally { await w.stop(); }
   // RED control: the same wrapper with the refusal removed lets the line through — agy ends the session (exit 2)
   const src = fs.readFileSync(WRAPPER, 'utf8');
@@ -629,7 +629,7 @@ console.log('— ③ THE SLASH REFUSAL (agy would end the stream, exit 2)');
     await m.until(() => m.find('session'), 8000, 'session');
     m.send({ type: 'chat-input', text: '/usage', msgId: 's1' });
     await m.until(() => m.exited, 8000, 'exit');
-    ok('RED control: a wrapper copy WITHOUT the refusal forwards it — agy ends the conversation (exit 2), said as such', src.includes(cut) && m.find('notice', (r) => r.noticeKind === 'agent-exited' && /exit 2/.test(r.text)) && m.exited.code === 2, m.records.filter((r) => r.kind === 'notice').map((r) => r.text));
+    ok('RED control: a wrapper copy WITHOUT the refusal forwards it — agy ends the conversation (exit 2), said as such', gateOf(src.includes(cut)) && gateOf(m.find('notice', (r) => r.noticeKind === 'agent-exited' && /exit 2/.test(r.text))) && m.exited.code === 2, m.records.filter((r) => r.kind === 'notice').map((r) => r.text));
   } finally { await m.stop(); }
 }
 
@@ -643,26 +643,26 @@ const streamStarts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--
     await w.until(() => w.find('prompt_end'), 8000, 'turn');
     const card = w.find('permission_request');
     ok('agy\'s stderr soft-deny line becomes the harness-neutral permission card naming the tool, its words kept, the retry\'s reach said',
-      card && /^agy-deny-/.test(card.requestId) && card.toolCall.title === 'agy skipped run_command: it needs approval' && card.toolCall.kind === 'execute'
-      && /requires approval/.test(card.toolCall.rawInput.notice) && /EVERY tool approved for one turn/.test(card.toolCall.rawInput.allowOnce) && !card.toolCall.rawInput.allowRule
+      gateOf(card) && gateOf(/^agy-deny-/.test(card.requestId)) && card.toolCall.title === 'agy skipped run_command: it needs approval' && card.toolCall.kind === 'execute'
+      && gateOf(/requires approval/.test(card.toolCall.rawInput.notice)) && gateOf(/EVERY tool approved for one turn/.test(card.toolCall.rawInput.allowOnce)) && !card.toolCall.rawInput.allowRule
       && JSON.stringify(card.options) === JSON.stringify([{ optionId: 'retry', name: 'Allow once and retry', kind: 'allow_once' }, { optionId: 'skip', name: 'Keep skipped', kind: 'reject_once' }]), card);
     ok('…and the turn still ended normally (the run continues, as agy documents)', w.find('prompt_end').stopReason === 'end_turn');
     const mm = new AcpMessageManager('agy');
     for (const r of w.records) { try { mm.processLive(r); } catch { } }
     const pc = mm.tail(mm.total).find((m) => m.permission && m.permission.requestId === card.requestId);
-    ok('the ACP normalizer draws it as an approval card with the two buttons (no new client); on the machine login no rule door (its settings are the person\'s own file)', pc && pc.permission.kind === 'approval' && pc.permission.toolName === 'Bash' && pc.permission.options.map((o) => o.name).join('|') === 'Allow once and retry|Keep skipped' && pc.permission.input.tool === 'run_command', pc && pc.permission);
+    ok('the ACP normalizer draws it as an approval card with the two buttons (no new client); on the machine login no rule door (its settings are the person\'s own file)', gateOf(pc) && pc.permission.kind === 'approval' && pc.permission.toolName === 'Bash' && pc.permission.options.map((o) => o.name).join('|') === 'Allow once and retry|Keep skipped' && pc.permission.input.tool === 'run_command', pc && pc.permission);
     const before = streamStarts(w).length;
     w.send({ type: 'permission-response', sessionId: 's', requestId: card.requestId, approved: true, optionId: 'retry' });
     await w.until(() => w.all('prompt_end').length === 2, 8000, 'the retry turn');
     await w.until(() => streamStarts(w).length >= before + 2, 8000, 'the restore restart');
     const starts = streamStarts(w), retryStart = starts[before], restoreStart = starts[before + 1];
     ok('Allow and retry: answered on the card (allow_once), agy restarted on the SAME conversation with --dangerously-skip-permissions for the retry',
-      w.find('permission_resolved', (r) => r.requestId === card.requestId && r.optionKind === 'allow_once') && retryStart.includes('--dangerously-skip-permissions') && retryStart[retryStart.indexOf('--conversation') + 1] === ses.sessionId, retryStart);
-    ok('…the retry line names the tool and that turn ran under always-proceed (the bypass)', w.stub().some((x) => x.stdin && /allowed run_command/.test(x.stdin)) && /always-proceed\): The user allowed run_command/.test(w.text()), w.text());
+      gateOf(w.find('permission_resolved', (r) => r.requestId === card.requestId && r.optionKind === 'allow_once')) && gateOf(retryStart.includes('--dangerously-skip-permissions')) && retryStart[retryStart.indexOf('--conversation') + 1] === ses.sessionId, retryStart);
+    ok('…the retry line names the tool and that turn ran under always-proceed (the bypass)', gateOf(w.stub().some((x) => x.stdin && /allowed run_command/.test(x.stdin))) && verdictOf(/always-proceed\): The user allowed run_command/.test(w.text())), w.text());
     ok('…ONE turn only: right after it agy is back on the conversation\'s mode (restarted without the bypass)', !restoreStart.includes('--dangerously-skip-permissions') && restoreStart[restoreStart.indexOf('--conversation') + 1] === ses.sessionId, restoreStart);
     w.send({ type: 'chat-input', text: 'and now', msgId: 'd2' }); // during the restore restart it queues (a restart drains the queue)
     await w.until(() => w.all('prompt_end').length === 3, 8000, 'the next turn');
-    ok('…the next user turn runs under request-review again', /request-review\): and now/.test(w.text()), w.text());
+    ok('…the next user turn runs under request-review again', verdictOf(/request-review\): and now/.test(w.text())), w.text());
     w.send({ type: 'chat-input', text: 'deny again', msgId: 'd3' });
     await w.until(() => w.all('permission_request').length === 2, 8000, 'second card');
     const c2 = w.all('permission_request')[1], n0 = streamStarts(w).length;
@@ -672,7 +672,7 @@ const streamStarts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--
     ok('Keep skipped: answered (reject_once), nothing restarts, nothing is sent', w.find('permission_resolved', (r) => r.requestId === c2.requestId).optionKind === 'reject_once' && streamStarts(w).length === n0 && w.all('prompt_end').length === 4);
     w.send({ type: 'permission-response', sessionId: 's', requestId: c2.requestId, approved: true, optionId: 'retry' });
     const st = await w.until(() => w.find('notice', (r) => r.noticeKind === 'stale'), 5000, 'stale');
-    ok('a second answer to the same card is refused by name (stale) — no restart', /unknown\/expired/.test(st.text) && streamStarts(w).length === n0);
+    ok('a second answer to the same card is refused by name (stale) — no restart', gateOf(/unknown\/expired/.test(st.text)) && streamStarts(w).length === n0);
   } finally { await w.stop(); }
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const line = "  if (SOFT_DENY_RE.test(line)) {";   // B-bba6: the line's head (its body now also words a skip said as agy ends)
@@ -683,7 +683,7 @@ const streamStarts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--
     await m.until(() => m.find('session'), 8000, 'session');
     m.send({ type: 'chat-input', text: 'please deny this', msgId: 'd1' });
     await m.until(() => m.find('prompt_end'), 8000, 'turn');
-    ok('RED control: a copy whose stderr reader drops the line leaves the skip SILENT — no card, no notice (the legs above can go red)', src.includes(line) && !m.find('permission_request') && !m.find('notice', (r) => /approval/.test(r.text || '')));
+    ok('RED control: a copy whose stderr reader drops the line leaves the skip SILENT — no card, no notice (the legs above can go red)', gateOf(src.includes(line)) && !m.find('permission_request') && !m.find('notice', (r) => /approval/.test(r.text || '')));
   } finally { await m.stop(); }
 }
 console.log('— ④b THE ONE-TURN BYPASS never reaches a user turn (a reorder during the slow restart)');
@@ -707,13 +707,13 @@ console.log('— ④b THE ONE-TURN BYPASS never reaches a user turn (a reorder d
     } finally { await w.stop(); }
   }
   const t = await reorderLeg(WRAPPER);
-  ok('the user turn moved ahead of the retry runs under request-review; the retry alone gets the bypass', /request-review\): mine/.test(t) && /always-proceed\): The user allowed run_command/.test(t), t);
+  ok('the user turn moved ahead of the retry runs under request-review; the retry alone gets the bypass', gateOf(/request-review\): mine/.test(t)) && verdictOf(/always-proceed\): The user allowed run_command/.test(t)), t);
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const guard = '  if (wantBypass !== childRetryBypass) {';
   const mutated = path.join(MUTBIN, 'agy-wrapper-leak.js');
   fs.writeFileSync(mutated, editAnchor(src, guard, '  if (wantBypass && !retryBypass) {', "data/bin/agy-wrapper.js"));
   const tm = await reorderLeg(mutated);
-  ok('RED control: a copy that checks only "retry wants it" (not what the process was started with) runs the moved user turn with every tool approved', src.includes(guard) && /always-proceed\): mine/.test(tm), tm);
+  ok('RED control: a copy that checks only "retry wants it" (not what the process was started with) runs the moved user turn with every tool approved', gateOf(src.includes(guard)) && verdictOf(/always-proceed\): mine/.test(tm)), tm);
 }
 
 console.log('— ④c ON A NAMED ACCOUNT: "Allow <rule> and retry" writes the rule into the ACCOUNT\'s own settings.json');
@@ -738,10 +738,10 @@ console.log('— ④c ON A NAMED ACCOUNT: "Allow <rule> and retry" writes the ru
   }
   const root = mkRoot('acct-a');
   const r = await ruleLeg(root);
-  ok('the card offers the rule the notice names, scoped to THIS account, before the once-door', r.card.options.map((o) => o.optionId).join() === 'rule,retry,skip' && r.card.options[0].name === 'Allow command(rm) and retry' && r.card.options[0].kind === 'allow_always' && /this Google account's own Antigravity settings/.test(r.card.toolCall.rawInput.allowRule), r.card.options);
+  ok('the card offers the rule the notice names, scoped to THIS account, before the once-door', r.card.options.map((o) => o.optionId).join() === 'rule,retry,skip' && r.card.options[0].name === 'Allow command(rm) and retry' && r.card.options[0].kind === 'allow_always' && verdictOf(/this Google account's own Antigravity settings/.test(r.card.toolCall.rawInput.allowRule)), r.card.options);
   const js = JSON.parse(fs.readFileSync(settingsOf(root), 'utf8'));
   ok('…answered: command(rm) is in the account\'s settings.json permissions.allow (mode 0600)', JSON.stringify(js.permissions.allow) === '["command(rm)"]' && (fs.statSync(settingsOf(root)).mode & 0o777) === 0o600, js);
-  ok('…agy restarted on the same conversation WITHOUT the bypass (the rule, not every tool) and the turn was sent again', r.starts.length >= 1 && !r.starts[0].includes('--dangerously-skip-permissions') && r.starts[0].includes('--conversation') && /request-review\): The user allowed run_command \(the rule command\(rm\)/.test(r.text), { starts: r.starts, text: r.text });
+  ok('…agy restarted on the same conversation WITHOUT the bypass (the rule, not every tool) and the turn was sent again', r.starts.length >= 1 && !r.starts[0].includes('--dangerously-skip-permissions') && gateOf(r.starts[0].includes('--conversation')) && verdictOf(/request-review\): The user allowed run_command \(the rule command\(rm\)/.test(r.text)), { starts: r.starts, text: r.text });
   // a settings.json that is a LINK (to the person's global file) is never written through
   const root2 = mkRoot('acct-b');
   const globalFile = path.join(ROOT, 'global-settings.json');
@@ -763,13 +763,13 @@ console.log('— ④c ON A NAMED ACCOUNT: "Allow <rule> and retry" writes the ru
   const mutated = path.join(MUTBIN, 'agy-wrapper-statdir.js');
   fs.writeFileSync(mutated, editAnchor(src, chk, 'if (!fs.statSync(d).isDirectory())', "data/bin/agy-wrapper.js"));
   const r5 = await ruleLeg(root3, mutated);
-  ok('RED control: a copy that follows the link writes the rule into the person\'s global settings.json (the leg above can go red)', src.includes(chk) && r5.card.options.some((o) => o.optionId === 'rule') && /command\(rm\)/.test(fs.readFileSync(path.join(globalDir, 'settings.json'), 'utf8')));
+  ok('RED control: a copy that follows the link writes the rule into the person\'s global settings.json (the leg above can go red)', gateOf(src.includes(chk)) && gateOf(r5.card.options.some((o) => o.optionId === 'rule')) && verdictOf(/command\(rm\)/.test(fs.readFileSync(path.join(globalDir, 'settings.json'), 'utf8'))));
   // the machine login (no mark in HOME): the auth notice names the terminal sign-in; an account: its own sign-in door
   const w = startWrapper({ env: { HOME: root, AGY_STUB_AUTH: 'none' } });
   try {
     w.send({ type: 'chat-input', text: 'hello?', msgId: 'a0' });
     const n = await w.until(() => w.find('notice', (x) => x.noticeKind === 'auth-required'), 6000, 'auth-required (account)');
-    ok('an account session that is not signed in names ITS door (Agents → Antigravity CLI → ⋯ → Sign in again)', /This Google account \(Antigravity\) is not signed in/.test(n.text) && /Sign in again/.test(n.text), n.text);
+    ok('an account session that is not signed in names ITS door (Agents → Antigravity CLI → ⋯ → Sign in again)', gateOf(/This Google account \(Antigravity\) is not signed in/.test(n.text)) && verdictOf(/Sign in again/.test(n.text)), n.text);
   } finally { await w.stop(); }
 }
 
@@ -785,11 +785,11 @@ console.log('— ⑤ a model / mode switch restarts agy on the same conversation
     await w.until(() => w.find('prompt_end'), 8000, 'turn');
     const starts = w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).map((x) => x.argv);
     const last = starts[starts.length - 1];
-    ok('the restart carries --conversation <the same id> and the new flags', last.includes('--conversation') && last[last.indexOf('--conversation') + 1] === ses.sessionId && last.includes('--model') && last[last.indexOf('--model') + 1] === 'gemini-3.8-flash-medium' && last.includes('--dangerously-skip-permissions'), last);
-    ok('…the notice says the process restarts, and the next reply runs on the new model / mode', w.find('notice', (r) => r.noticeKind === 'command_applied' && /restarts its process on the same conversation/.test(r.text)) && /gemini-3.8-flash-medium, always-proceed/.test(w.text()), w.text());
+    ok('the restart carries --conversation <the same id> and the new flags', gateOf(last.includes('--conversation')) && last[last.indexOf('--conversation') + 1] === ses.sessionId && gateOf(last.includes('--model')) && last[last.indexOf('--model') + 1] === 'gemini-3.8-flash-medium' && verdictOf(last.includes('--dangerously-skip-permissions')), last);
+    ok('…the notice says the process restarts, and the next reply runs on the new model / mode', gateOf(w.find('notice', (r) => r.noticeKind === 'command_applied' && /restarts its process on the same conversation/.test(r.text))) && verdictOf(/gemini-3.8-flash-medium, always-proceed/.test(w.text())), w.text());
     w.send({ type: 'set-mode', mode: 'yolo' });
     const u = await w.until(() => w.find('notice', (r) => r.noticeKind === 'unsupported'), 5000, 'unsupported mode');
-    ok('a mode agy does not have is refused by name (never passed through)', /has no Mode "yolo"/.test(u.text), u.text);
+    ok('a mode agy does not have is refused by name (never passed through)', verdictOf(/has no Mode "yolo"/.test(u.text)), u.text);
   } finally { await w.stop(); }
 }
 
@@ -811,24 +811,24 @@ console.log('— ⑥ Stop and the queue');
     w.send({ type: 'queue-op', op: 'edit', id: qc.items[0].id, text: 'queued one, edited' });
     w.send({ type: 'queue-op', op: 'remove', id: qc.items[1].id });
     await w.until(() => w.all('queue_op_result').length >= 2, 5000, 'queue ops');
-    ok('a turn runs, later lines queue in the WRAPPER; edit / remove are served', w.all('queue_op_result').every((r) => r.ok) && w.all('queued_input').length === 2);
+    ok('a turn runs, later lines queue in the WRAPPER; edit / remove are served', gateOf(w.all('queue_op_result').every((r) => r.ok)) && w.all('queued_input').length === 2);
     w.send({ type: 'interrupt' });
     const end = await w.until(() => w.find('prompt_end'), 5000, 'end');
     const stopLine = w.find('notice', (r) => r.noticeKind === 'stop-restart');
-    ok('Stop ends the running turn as cancelled and drops the queue (the owner\'s law, 2026-09-07 — every harness)', end.stopReason === 'cancelled' && stopLine && w.find('queue_op_result', (r) => r.op === 'remove' && r.reason === 'stopped' && r.msg_id === 'q1'), end);
+    ok('Stop ends the running turn as cancelled and drops the queue (the owner\'s law, 2026-09-07 — every harness)', end.stopReason === 'cancelled' && gateOf(stopLine) && verdictOf(w.find('queue_op_result', (r) => r.op === 'remove' && r.reason === 'stopped' && r.msg_id === 'q1')), end);
     // lane agy-harness-fixes (bug 4) SAID the drop in the Stop line («send again what should still run»); since lane
     // stop-refills-composer the words come BACK (the queue_dropped record below → the composer + the client's toast), so
     // the line no longer tells the person to re-send what is already back in their box
-    ok('…and the Stop line no longer says «send again» — the dropped words come back into the composer instead (the record below)', !/send again|not sent/.test(stopLine.text) && /Stopped — Antigravity has no cancel in its stream/.test(stopLine.text), stopLine.text);
+    ok('…and the Stop line no longer says «send again» — the dropped words come back into the composer instead (the record below)', !/send again|not sent/.test(stopLine.text) && verdictOf(/Stopped — Antigravity has no cancel in its stream/.test(stopLine.text)), stopLine.text);
     await w.until(() => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).length >= 2, 8000, 'restart after stop');
     const starts = w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).map((x) => x.argv);
-    ok('…by restarting agy on the same conversation (its stream has no cancel)', starts[1].includes('--conversation') && starts[1][starts[1].indexOf('--conversation') + 1] === ses.sessionId);
+    ok('…by restarting agy on the same conversation (its stream has no cancel)', gateOf(starts[1].includes('--conversation')) && starts[1][starts[1].indexOf('--conversation') + 1] === ses.sessionId);
     // STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer): ONE record of the person's rows, the CURRENT text
     const drops = w.all('queue_dropped');
     const iStop = w.records.findLastIndex((r) => r.type === 'acp' && r.kind === 'queue_op_result' && r.reason === 'stopped');
     const iDrop = w.records.findIndex((r) => r.type === 'acp' && r.kind === 'queue_dropped');
     const iEmpty = w.records.findIndex((r, i) => i > iStop && r.type === 'acp' && r.kind === 'queue_changed' && r.items.length === 0);
-    ok('…and what Stop dropped comes back: ONE queue_dropped carrying [{msgId q1, the EDITED text}] (q2 was removed before Stop), a `${pid}-${n}` dropId', drops.length === 1 && drops[0].items.length === 1 && drops[0].items[0].msgId === 'q1' && drops[0].items[0].text === 'queued one, edited' && /^\d+-\d+$/.test(drops[0].dropId) && drops[0].by === 'stop' && drops[0].omitted === 0, drops);
+    ok('…and what Stop dropped comes back: ONE queue_dropped carrying [{msgId q1, the EDITED text}] (q2 was removed before Stop), a `${pid}-${n}` dropId', drops.length === 1 && drops[0].items.length === 1 && drops[0].items[0].msgId === 'q1' && drops[0].items[0].text === 'queued one, edited' && gateOf(/^\d+-\d+$/.test(drops[0].dropId)) && drops[0].by === 'stop' && drops[0].omitted === 0, drops);
     ok('…in ORDER: the per-item stopped results → queue_dropped → the emptied republish', iStop > 0 && iDrop > iStop && iEmpty > iDrop, { iStop, iDrop, iEmpty });
     // ⑥c a Stop inside the context-prefix await cancels a prompt agy never received — and puts it back
     const stdinBefore = w.stub().filter((x) => x.stdin).length, endsBefore = w.all('prompt_end').length;
@@ -863,19 +863,19 @@ console.log('— ⑥b THE STEER (lane agy-harness-fixes, bug 4): a queued messag
     w.send({ type: 'chat-input', text: 'third queued', msgId: 'v3' });
     const q3 = await w.until(() => w.all('queue_changed').find((r) => r.items.length === 3), 5000, 'a queue of 3');
     const meta = JSON.parse(fs.readFileSync(path.join(w.dir, 's.json'), 'utf8'));
-    ok('the wrapper serves steer: its queue publication and its caps advert name it (the strip shows ⚡ for agy)', q3.verbs.includes('steer') && meta.caps.queueVerbs.includes('steer'), { verbs: q3.verbs, caps: meta.caps.queueVerbs });
+    ok('the wrapper serves steer: its queue publication and its caps advert name it (the strip shows ⚡ for agy)', gateOf(q3.verbs.includes('steer')) && verdictOf(meta.caps.queueVerbs.includes('steer')), { verbs: q3.verbs, caps: meta.caps.queueVerbs });
     w.send({ type: 'queue-op', op: 'steer-all' });
     w.send({ type: 'queue-op', op: 'steer', id: 'q-nope' });
     w.send({ type: 'queue-op', op: 'steer', id: q3.items[2].id });
     const res = await w.until(() => w.find('queue_op_result', (r) => r.op === 'steer' && r.ok), 5000, 'the steer');
     const head = w.all('queue_changed').find((r) => r.items.length === 3 && r.items[0].msgId === 'v3');
-    ok('steer #3 ⇒ ok, and it is at the HEAD of the queue (#1, #2 behind it, in order)', res.msg_id === 'v3' && head && head.items.map((i) => i.msgId).join() === 'v3,v1,v2', head && head.items.map((i) => i.msgId));
-    ok('steer-all stays refused (one message at a time); a steer of an id no longer queued says so', w.find('queue_op_result', (r) => r.op === 'steer-all' && r.reason === 'not-steerable') && w.find('queue_op_result', (r) => r.op === 'steer' && r.reason === 'gone'));
+    ok('steer #3 ⇒ ok, and it is at the HEAD of the queue (#1, #2 behind it, in order)', res.msg_id === 'v3' && gateOf(head) && head.items.map((i) => i.msgId).join() === 'v3,v1,v2', head && head.items.map((i) => i.msgId));
+    ok('steer-all stays refused (one message at a time); a steer of an id no longer queued says so', gateOf(w.find('queue_op_result', (r) => r.op === 'steer-all' && r.reason === 'not-steerable')) && verdictOf(w.find('queue_op_result', (r) => r.op === 'steer' && r.reason === 'gone')));
     const end = await w.until(() => w.find('prompt_end'), 5000, 'the stopped turn');
     const said = w.find('notice', (r) => r.noticeKind === 'steer-restart');
-    ok('the running turn ENDS (cancelled) — agy takes no input mid-turn — and the line says why (what it did stays)', end.stopReason === 'cancelled' && said && /Steered/.test(said.text), { end, said: said && said.text });
+    ok('the running turn ENDS (cancelled) — agy takes no input mid-turn — and the line says why (what it did stays)', end.stopReason === 'cancelled' && gateOf(said) && verdictOf(/Steered/.test(said.text)), { end, said: said && said.text });
     await w.until(() => lines(w).length >= 4, 20000, 'the queue drained');
-    ok('…agy restarts on the SAME conversation and runs the steered message FIRST, then the rest in order', starts(w).length >= 2 && starts(w)[1].includes('--conversation') && starts(w)[1].includes(ses.sessionId) && lines(w).join(' | ') === 'a slow one | third queued | first queued | second queued', lines(w));
+    ok('…agy restarts on the SAME conversation and runs the steered message FIRST, then the rest in order', starts(w).length >= 2 && gateOf(starts(w)[1].includes('--conversation')) && gateOf(starts(w)[1].includes(ses.sessionId)) && lines(w).join(' | ') === 'a slow one | third queued | first queued | second queued', lines(w));
     await w.until(() => w.all('prompt_end').length >= 4, 8000, 'the last turn\'s end').catch(() => null); // its stdin line lands before its end (lane agy-harness-fixes-2: ⑮–⑲ beside it made that race show)
     ok('…nothing queued was lost or run twice: the queue ends empty, four turns started, three ended normally', w.all('queue_changed').pop().items.length === 0 && w.all('prompt_start').length === 4 && w.all('prompt_end', (r) => r.stopReason === 'end_turn').length === 3, w.all('prompt_end').map((r) => r.stopReason));
   } finally { await w.stop(); }
@@ -893,7 +893,7 @@ console.log('— ⑥b THE STEER (lane agy-harness-fixes, bug 4): a queued messag
     const q = await m.until(() => m.all('queue_changed').find((r) => r.items.length === 1), 5000, 'queued');
     m.send({ type: 'queue-op', op: 'steer', id: q.items[0].id });
     const refused = await m.until(() => m.find('queue_op_result', (r) => r.op === 'steer'), 5000, 'refusal');
-    ok('RED control: a wrapper copy without the steer verb (the pre-fix) refuses it «not-steerable» and the turn runs on — the ⑥b asserts see it', src.includes(verbs) && refused.ok === false && refused.reason === 'not-steerable' && !m.find('notice', (r) => r.noticeKind === 'steer-restart'));
+    ok('RED control: a wrapper copy without the steer verb (the pre-fix) refuses it «not-steerable» and the turn runs on — the ⑥b asserts see it', gateOf(src.includes(verbs)) && refused.ok === false && refused.reason === 'not-steerable' && !m.find('notice', (r) => r.noticeKind === 'steer-restart'));
   } finally { await m.stop(); }
 }
 
@@ -903,7 +903,7 @@ console.log('— ⑦ resume, an agent error, text only');
   try {
     const ses = await w.until(() => w.find('session'), 8000, 'session');
     const startArgv = await w.until(() => (w.stub().find((x) => x.argv && x.argv.includes('--input-format')) || {}).argv, 8000, 'agy start');
-    ok('a resume is --conversation <id> from the first start, the session record says load', ses.how === 'load' && ses.sessionId === firstCid && startArgv.includes('--conversation') && startArgv.includes(firstCid), { ses, startArgv });
+    ok('a resume is --conversation <id> from the first start, the session record says load', ses.how === 'load' && ses.sessionId === firstCid && gateOf(startArgv.includes('--conversation')) && verdictOf(startArgv.includes(firstCid)), { ses, startArgv });
     w.send({ type: 'chat-input', text: 'this will fail', msgId: 'f1' });
     const end = await w.until(() => w.find('prompt_end'), 8000, 'end');
     // B-518e (red in two packed runs on the test machine, 638450bff and 2f241bf12: the turn's end read before its notice): agy
@@ -911,7 +911,7 @@ console.log('— ⑦ resume, an agent error, text only');
     // after the end. The leg WAITS for the notice's own record (8 s, an end for a notice that never comes), never reads it at the
     // end's instant (⑦b places the other order)
     const said = await w.until(() => noticeSaid(w), 8000, 'the AGY_ERROR notice').catch(() => null);
-    ok('agy\'s ERROR result ends the turn as an error with its words; the AGY_ERROR line is said (its own record, waited for)', end.stopReason === 'error' && /model unavailable/.test(end.error.message) && !!said, { end, said: said || null });
+    ok('agy\'s ERROR result ends the turn as an error with its words; the AGY_ERROR line is said (its own record, waited for)', end.stopReason === 'error' && gateOf(/model unavailable/.test(end.error.message)) && !!said, { end, said: said || null });
     // lane agy-harness-fixes, bug 3: a PASTED picture reaches agy — written once under <cwd>/.vibespace-uploads/, its path
     // FIRST in the text (the composer's upload road); agy's stream still gets text only (another block ends it, exit 1)
     const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -924,7 +924,7 @@ console.log('— ⑦ resume, an agent error, text only');
     await w.until(() => w.all('prompt_end').length === 2, 8000, 'image turn');
     const l1 = agyLines().pop();
     ok('a pasted picture + words: the picture is written ONCE under <cwd>/.vibespace-uploads/ (its content hash, .png) and agy reads its absolute path FIRST, then the words — never dropped',
-      l1 === `${want} see this` && fs.readFileSync(want).equals(Buffer.from(PNG, 'base64')) && !w.find('notice', (r) => r.noticeKind === 'unsupported') && w.find('user', (r) => r.msgId === 'i1')?.content[0].text === l1 && w.exited === null, { l1, want });
+      l1 === `${want} see this` && gateOf(fs.readFileSync(want).equals(Buffer.from(PNG, 'base64'))) && !w.find('notice', (r) => r.noticeKind === 'unsupported') && w.find('user', (r) => r.msgId === 'i1')?.content[0].text === l1 && w.exited === null, { l1, want });
     ok('…the folder is the person\'s (0700, the file 0600) and a repo never sees it (a `*` .gitignore)', (fs.statSync(upDir).mode & 0o777) === 0o700 && (fs.statSync(want).mode & 0o777) === 0o600 && fs.readFileSync(path.join(upDir, '.gitignore'), 'utf8') === '*\n');
     sendBlocks([pic()], 'i2');
     await w.until(() => w.all('prompt_end').length === 3, 8000, 'picture-only turn');
@@ -932,11 +932,11 @@ console.log('— ⑦ resume, an agent error, text only');
     sendBlocks([pic('JVBERi0xLjQK', 'application/pdf'), pic(), { type: 'text', text: 'and this' }], 'i3');
     await w.until(() => w.all('prompt_end').length === 4, 8000, 'one bad picture');
     const bad = w.find('notice', (r) => r.noticeKind === 'unsupported');
-    ok('a picture that cannot be written (not an image type) is the ONLY thing said as not sent — the rest of the message goes', agyLines().pop() === `${want} and this` && bad && /1 attached picture was not sent/.test(bad.text), bad);
+    ok('a picture that cannot be written (not an image type) is the ONLY thing said as not sent — the rest of the message goes', agyLines().pop() === `${want} and this` && gateOf(bad) && verdictOf(/1 attached picture was not sent/.test(bad.text)), bad);
     const readOr = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
     const journal = readOr(path.join(w.dir, 's.buf')) + JSON.stringify(w.records) + w.stderr + readOr(path.join(w.dir, 'agy-wrapper.log'));
     ok('no picture byte in the journal, the stdout records, stderr or the wrapper log (only its path)', !journal.includes(PNG.slice(0, 40)) && !journal.includes('JVBERi0xLjQK'));
-    ok('agy\'s stream got TEXT only, every line (another block type would end it)', agyLines().every((c) => typeof c === 'string'));
+    ok('agy\'s stream got TEXT only, every line (another block type would end it)', verdictOf(agyLines().every((c) => typeof c === 'string')));
   } finally { await w.stop(); }
 }
 // lane agy-wall-signal r3: a wall record names the model the running turn's process started on (agy's own init.model)
@@ -965,7 +965,7 @@ console.log('— ⑦ resume, an agent error, text only');
     try {
       await wn.until(() => wn.find('session'), 8000, 'session');
       const stn = await wn.until(() => wn.stub().find((x) => x.argv && x.argv.includes('--input-format')), 5000, 'stream start');
-      ok('a non-Gemini slug reaches agy as typed: --model claude-opus-5-5-low (no validator refuses it; agy itself judges the slug)', stn.argv.join(' ').endsWith('--model claude-opus-5-5-low'), stn.argv);
+      ok('a non-Gemini slug reaches agy as typed: --model claude-opus-5-5-low (no validator refuses it; agy itself judges the slug)', verdictOf(stn.argv.join(' ').endsWith('--model claude-opus-5-5-low')), stn.argv);
     } finally { await wn.stop(); }
   }
   const w3 = startWrapper({ env: { AGY_WEBUI_MODEL: 'claude-sonnet-4-6' } });
@@ -995,7 +995,7 @@ console.log('— ⑦ resume, an agent error, text only');
     m.send({ type: 'chat-input', text: JSON.stringify({ type: 'user', message: { content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }] } }), msgId: 'r1' });
     await m.until(() => m.find('notice', (r) => r.noticeKind === 'unsupported'), 8000, 'the dropped picture');
     await sleep(600);
-    ok('RED control: a wrapper copy that drops pictures (the pre-fix) sends a picture-only message NOWHERE — the ⑦ asserts see it', src.includes(keep) && !m.find('prompt_start') && !m.stub().some((x) => x.stdin));
+    ok('RED control: a wrapper copy that drops pictures (the pre-fix) sends a picture-only message NOWHERE — the ⑦ asserts see it', gateOf(src.includes(keep)) && !m.find('prompt_start') && !m.stub().some((x) => x.stdin));
   } finally { await m.stop(); }
 }
 
@@ -1016,7 +1016,7 @@ console.log('— ⑦b B-518e: the AGY_ERROR line after the result (two pipes in 
     fs.writeFileSync(gate, '');      // now let the stub write it
     const said = await w.until(() => noticeSaid(w), 8000, 'the held notice').catch(() => null);
     const after = !!said && w.records.indexOf(said) > w.records.indexOf(end);
-    ok('⑦b the plant is where it claims: with the AGY_ERROR line held until the result is read, the wrapper says the notice AFTER the turn\'s end', end.stopReason === 'error' && after, { end, said: !!said, after });
+    ok('⑦b the plant is where it claims: with the AGY_ERROR line held until the result is read, the wrapper says the notice AFTER the turn\'s end', end.stopReason === 'error' && verdictOf(after), { end, said: !!said, after });
     ok('⑦b RED CONTROL: the old read (the notice looked for at the end\'s instant) misses it under the placement; the cure (its own record, waited for) has it', !atEnd && !!said, { atEnd, said: !!said });
   } finally { await w.stop(); try { fs.rmSync(gate, { force: true }); } catch { } }
 }
@@ -1033,38 +1033,38 @@ console.log('— ⑦c B-bba6: the last stderr words, and the late error of a rep
   const { ef, held, signin, skipped, cNoEnd, cNoWait, cNoBound, sw, st, quiet, cNoLate, cNoGuard, cNoQuiet, cr, cLate, df, cDf, tw, cTw, ls, cLs, lsSlow, cLsSlow, cOnce } = await bba6Lane;
   const before = (r) => r.notices.indexOf('agy-error') >= 0 && r.notices.indexOf('agy-error') < r.notices.indexOf('agent-exited');
   ok('⑦c the last stderr line with NO newline is said — the wrapper read the pipe\'s END while agy still ran (the exit held behind it): «Antigravity: quota exhausted, said last» before the exit\'s own notice, the turn ends error, the wrapper exits 1',
-    ef.endLogged && !!ef.last && before(ef) && ef.end?.stopReason === 'error' && ef.exited?.code === 1, ef);
+    gateOf(ef.endLogged) && !!ef.last && gateOf(before(ef)) && ef.end?.stopReason === 'error' && ef.exited?.code === 1, ef);
   ok('⑦c …and in the OTHER order (a grandchild holds agy\'s stderr past its exit): the wrapper waits for the end at most its bound — the line is said, and the wrapper ENDS WHILE THE PIPE IS STILL HELD (released only after)',
-    !!held.last && before(held) && held.heldAtEnd === true && !!held.holder, held);
+    !!held.last && gateOf(before(held)) && held.heldAtEnd === true && !!held.holder, held);
   ok('⑦c a SIGN-IN head said last decides the exit\'s words: the sign-in notice, no «Antigravity exited» notice, exit 1',
-    signin.endLogged && signin.notices.includes('auth-required') && !signin.notices.includes('agent-exited') && signin.exited?.code === 1, signin);
+    gateOf(signin.endLogged) && gateOf(signin.notices.includes('auth-required')) && !signin.notices.includes('agent-exited') && signin.exited?.code === 1, signin);
   ok('⑦c a soft-deny line said last (no newline) is a notice naming the step — never a permission card whose «allow and retry» needs the process that just ended',
-    skipped.endLogged && !!skipped.skipped && /requires approval and was skipped/.test(skipped.skipped.text) && skipped.cards === 0, skipped);
-  ok('⑦c RED CONTROL (no flush at the pipe\'s end): the end read first (logged), the line is NEVER said — only the exit\'s notice', cNoEnd.endLogged && !cNoEnd.last && cNoEnd.notices.includes('agent-exited'), cNoEnd);
-  ok('⑦c RED CONTROL (no wait for the pipe\'s end at the exit): with the pipe held, the last line is NEVER said', !cNoWait.last && cNoWait.notices.includes('agent-exited'), cNoWait);
+    gateOf(skipped.endLogged) && !!skipped.skipped && gateOf(/requires approval and was skipped/.test(skipped.skipped.text)) && skipped.cards === 0, skipped);
+  ok('⑦c RED CONTROL (no flush at the pipe\'s end): the end read first (logged), the line is NEVER said — only the exit\'s notice', gateOf(cNoEnd.endLogged) && !cNoEnd.last && verdictOf(cNoEnd.notices.includes('agent-exited')), cNoEnd);
+  ok('⑦c RED CONTROL (no wait for the pipe\'s end at the exit): with the pipe held, the last line is NEVER said', !cNoWait.last && verdictOf(cNoWait.notices.includes('agent-exited')), cNoWait);
   ok('⑦c a CRASH mid-turn while a model switch waits for the turn\'s end: the turn ends error, the wrapper ends, and NO second agy is started on its way out (one spawn)', cr.end?.stopReason === 'error' && !!cr.exited && cr.spawned === 1, cr);
   ok('⑦c RED CONTROL (no ending mark at the process\'s own exit — its one assignment removed): the switch waiting at the crash spawns a SECOND agy just before the exit', cLate.spawned === 2, cLate);
-  ok('⑦c a write to a process that CLOSED its stdin (EPIPE) is a journal line, never a crash — the wrapper lives on', df.epipe && !df.exited, df);
+  ok('⑦c a write to a process that CLOSED its stdin (EPIPE) is a journal line, never a crash — the wrapper lives on', gateOf(df.epipe) && !df.exited, df);
   ok('⑦c RED CONTROL (no stdin error listener): that write kills the wrapper', !!cDf.exited && !cDf.epipe, cDf);
   ok('⑦c a person\'s line typed INSIDE the exit wait starts no agy (one spawn) and comes back into the box — one `queue_dropped` by «exit» carrying its words (the toast: «The conversation ended — 1 queued message(s) put back into the input box»)',
-    tw.spawned === 1 && !!tw.dropped && tw.dropped.by === 'exit' && Array.isArray(tw.dropped.items) && tw.dropped.items.length === 1 && tw.dropped.items[0].text === 'typed while it ends', tw);
+    tw.spawned === 1 && !!tw.dropped && tw.dropped.by === 'exit' && gateOf(Array.isArray(tw.dropped.items)) && tw.dropped.items.length === 1 && tw.dropped.items[0].text === 'typed while it ends', tw);
   ok('⑦c RED CONTROL (the runPrompt guard dropped): that line starts a SECOND agy during the exit wait', cTw.spawned === 2, cTw);
-  ok('⑦c a late line read after the NEXT process started is filed under the model of the process that WROTE it (claude-sonnet-4-6), not the new one', ls.served === 'claude-sonnet-4-6' && /model unavailable/.test(ls.text || ''), ls);
+  ok('⑦c a late line read after the NEXT process started is filed under the model of the process that WROTE it (claude-sonnet-4-6), not the new one', ls.served === 'claude-sonnet-4-6' && verdictOf(/model unavailable/.test(ls.text || '')), ls);
   ok('⑦c RED CONTROL (the served model read when the notice is said): it is filed under the NEW process\'s model', cLs.served === 'gemini-3.8-flash-medium', cLs);
-  ok('⑦c (ckpt61 hosted red) the RESTARTED process held 2 s before its init (a node start on a loaded runner): the scene as written is green — its init\'s model reaches the meta (the init writes it) and the late line is filed under the old model', lsSlow.served === 'claude-sonnet-4-6' && /model unavailable/.test(lsSlow.text || ''), lsSlow);
-  ok('⑦c RED CONTROL (the init\'s write removed — only the spawn\'s write 200 ms after the start): with the same placement the scene is RED, and its timeout says the fact it waited for (the meta\'s agy.model, what the meta names instead) and the processes spawned', cLsSlow.red && /the fact waited for: the meta's agy\.model = gemini-3\.8-flash-medium \(the meta names "claude-sonnet-4-6"\); the processes spawned: pid \d+, pid \d+/.test(cLsSlow.error), cLsSlow);
+  ok('⑦c (ckpt61 hosted red) the RESTARTED process held 2 s before its init (a node start on a loaded runner): the scene as written is green — its init\'s model reaches the meta (the init writes it) and the late line is filed under the old model', lsSlow.served === 'claude-sonnet-4-6' && verdictOf(/model unavailable/.test(lsSlow.text || '')), lsSlow);
+  ok('⑦c RED CONTROL (the init\'s write removed — only the spawn\'s write 200 ms after the start): with the same placement the scene is RED, and its timeout says the fact it waited for (the meta\'s agy.model, what the meta names instead) and the processes spawned', gateOf(cLsSlow.red) && verdictOf(/the fact waited for: the meta's agy\.model = gemini-3\.8-flash-medium \(the meta names "claude-sonnet-4-6"\); the processes spawned: pid \d+, pid \d+/.test(cLsSlow.error)), cLsSlow);
   ok('⑦c RED CONTROL («said once» removed): the replaced process\'s two late lines say TWO notices', cOnce.said.length === 2, cOnce);
   ok('⑦c RED CONTROL (the wait has no bound): while the grandchild holds the pipe the wrapper never ends — it ends only once released', cNoBound.heldAtEnd === false && !!cNoBound.exited, cNoBound);
   const plant = (r) => !r.held.said && r.held.starts === 1 && r.held.restarting && r.read === 2;
   ok('⑦c the plant: the switch (or the Stop) taken in BEFORE the turn answers, then its end and the restart read with the old process still alive, nothing said yet — then the old process writes its AGY_ERROR line twice',
-    [sw, st, quiet, cNoLate, cNoGuard, cNoQuiet].every(plant) && sw.end.stopReason === 'error' && st.end.stopReason === 'cancelled', [sw, st, quiet, cNoLate, cNoGuard, cNoQuiet].map((r) => ({ ...r.held, read: r.read })));
+    gateOf([sw, st, quiet, cNoLate, cNoGuard, cNoQuiet].every(plant)) && sw.end.stopReason === 'error' && st.end.stopReason === 'cancelled', [sw, st, quiet, cNoLate, cNoGuard, cNoQuiet].map((r) => ({ ...r.held, read: r.read })));
   ok('⑦c a model switch made during a turn that then FAILS: the replaced process\'s late error is said ONCE (two lines, one notice), after the turn\'s end, under the model that process served (the next starts only after it exits); the next process runs the new model',
-    sw.said.length === 1 && sw.saidAt > sw.endAt && /Antigravity: model unavailable/.test(sw.said[0].text) && sw.said[0].servedModel === 'claude-sonnet-4-6' && /--model gemini-3\.8-flash-medium/.test(sw.next || ''), sw);
+    sw.said.length === 1 && sw.saidAt > sw.endAt && gateOf(/Antigravity: model unavailable/.test(sw.said[0].text)) && sw.said[0].servedModel === 'claude-sonnet-4-6' && verdictOf(/--model gemini-3\.8-flash-medium/.test(sw.next || '')), sw);
   ok('⑦c a Stop in the MIDDLE of the turn: the stopped process\'s error stays quiet (bug 5 — no agy-error notice)', st.said.length === 0, st);
   ok('⑦c a replaced process that reports an INTERRUPTION on its way out stays quiet too (bug 5)', quiet.said.length === 0, quiet);
   ok('⑦c RED CONTROL (the late error only logged — the base\'s road): the switch\'s failed turn says nothing', cNoLate.said.length === 0, cNoLate);
   ok('⑦c RED CONTROL (no open-turn guard): a Stop mid-turn WOULD say the stopped process\'s error', cNoGuard.said.length === 1, cNoGuard);
-  ok('⑦c RED CONTROL (no interruption filter): the replaced process\'s «interrupted» WOULD be said', cNoQuiet.said.length === 1 && /interrupted/.test(cNoQuiet.said[0].text), cNoQuiet);
+  ok('⑦c RED CONTROL (no interruption filter): the replaced process\'s «interrupted» WOULD be said', cNoQuiet.said.length === 1 && verdictOf(/interrupted/.test(cNoQuiet.said[0].text)), cNoQuiet);
 }
 
 console.log('— ⑧ THE AUTH GATE: an unauthenticated agy');
@@ -1075,7 +1075,7 @@ console.log('— ⑧ THE AUTH GATE: an unauthenticated agy');
     w0.send({ type: 'chat-input', text: 'hello?', msgId: 'a0' });
     const n0 = await w0.until(() => w0.find('notice', (r) => r.noticeKind === 'auth-required'), 6000, 'auth-required (pipe)');
     await w0.until(() => w0.exited, 6000, 'exit');
-    ok('agy\'s immediate refusal on a pipe (measured 1.4.3) is said BY NAME (shape: refusal) and ends the wrapper', /not signed in/.test(n0.text) && w0.exited.code === 1 && !w0.stub().some((x) => x.stdin) && w0.find('auth_required', (r) => r.how === 'refusal'), w0.find('auth_required'));
+    ok('agy\'s immediate refusal on a pipe (measured 1.4.3) is said BY NAME (shape: refusal) and ends the wrapper', gateOf(/not signed in/.test(n0.text)) && w0.exited.code === 1 && !w0.stub().some((x) => x.stdin) && verdictOf(w0.find('auth_required', (r) => r.how === 'refusal')), w0.find('auth_required'));
   } finally { await w0.stop(); }
   const w = startWrapper({ env: { AGY_STUB_AUTH: 'wait', AGY_STUB_AUTH_WAIT_MS: '20000' } });
   try {
@@ -1083,9 +1083,9 @@ console.log('— ⑧ THE AUTH GATE: an unauthenticated agy');
     const n = await w.until(() => w.find('notice', (r) => r.noticeKind === 'auth-required'), 6000, 'auth-required');
     await w.until(() => w.exited, 6000, 'wrapper exit');
     // ordering, not a clock: the stub's own wait (20 s) ends with "authentication failed or timed out" — the wrapper must be gone first
-    ok('refused BY NAME before agy\'s pasted-code wait ends (its timeout result never arrives) — and the wrapper ends (exit 1)', /not signed in/.test(n.text) && w.exited.code === 1 && !JSON.stringify(w.records).includes('timed out'), { code: w.exited && w.exited.code });
+    ok('refused BY NAME before agy\'s pasted-code wait ends (its timeout result never arrives) — and the wrapper ends (exit 1)', gateOf(/not signed in/.test(n.text)) && w.exited.code === 1 && !JSON.stringify(w.records).includes('timed out'), { code: w.exited && w.exited.code });
     ok('…agy never received our line as its authorization code', !w.stub().some((x) => x.authCodeLine) && !w.stub().some((x) => x.stdin), w.stub());
-    ok('…the journal names the shape (link-wait), and the OAuth link is not copied into it', !JSON.stringify(w.records).includes('client_id=') && !JSON.stringify(w.records).includes('oauth2') && w.find('auth_required', (r) => r.how === 'link-wait'), w.find('auth_required'));
+    ok('…the journal names the shape (link-wait), and the OAuth link is not copied into it', !JSON.stringify(w.records).includes('client_id=') && !JSON.stringify(w.records).includes('oauth2') && verdictOf(w.find('auth_required', (r) => r.how === 'link-wait')), w.find('auth_required'));
   } finally { await w.stop(); }
 }
 
@@ -1262,7 +1262,7 @@ console.log('— ⑫ THE SUBAGENT CARD (lane agy-subagent-cards): the invoke_sub
     const r = await lateLeg('agy-sub-late-red', f, { look: 1200 })(ok);
     ok('B-0f7b RED control: the release\'s wrapper stops at the first ended tick — the late answer is never read (the card stays «completed» with no result)', !r.withAnswer, r);
   });
-  for (const out of await Promise.all(legs)) for (const [n, c, e] of out) ok(n, c, e);
+  for (const out of await Promise.all(legs)) for (const [n, c, e] of out) ok(n, verdictOf(c), e);
 }
 
 console.log('— ⑬ THE TURN\'S USAGE (lane agy-status-bar-facts; ⑫ is lane agy-subagent-cards\'): one `usage` record per turn, agy\'s transcript read through ONE gate');
@@ -1292,7 +1292,7 @@ console.log('— ⑬ THE TURN\'S USAGE (lane agy-status-bar-facts; ⑫ is lane a
     ok('the model agy named (init) + the result\'s own time ride the record; the sidecar keeps its copy (meta.usage)', u2.model === 'gemini-4-argon-high' && u2.modelFrom === 'agy' && u2.durationSeconds === 0.3 && !!side, { model: u2.model, modelFrom: u2.modelFrom, d: u2.durationSeconds, side: side?.usage });
     const mm = new AcpMessageManager('sid-u'); const ops = []; mm.onOp((o) => ops.push(o)); for (const r of w.records) mm.processLive(r);
     const meta = ops.filter((o) => o.subtype === 'usage').pop();
-    ok('…and the shared ACP normalizer turns it into the usage meta the bar reads (last call = context + cache, totals = the odometer)', meta && meta.data.input_tokens === u2.last.input && meta.data.cache_read_input_tokens === u2.last.cacheRead && meta.data.totals.total_tokens === u2.total.total, meta?.data);
+    ok('…and the shared ACP normalizer turns it into the usage meta the bar reads (last call = context + cache, totals = the odometer)', gateOf(meta) && meta.data.input_tokens === u2.last.input && meta.data.cache_read_input_tokens === u2.last.cacheRead && meta.data.totals.total_tokens === u2.total.total, meta?.data);
     ok('…and the write_file call is an Artifacts row through the descriptor\'s reader', w.all('update', (r) => r.update.sessionUpdate === 'tool_call' && r.update.title === 'write_file').flatMap((r) => g.artifactsOf(r)).map((o) => o.path).join() === path.join(w.dir, 'reports', 'summary.md'));
   } finally { await w.stop(); }
   // THE GATE: the conversation's brain dir is a LINK out of agy's store (to a file of huge, wrong counts) ⇒ never read
@@ -1316,21 +1316,21 @@ console.log('— ⑬ THE TURN\'S USAGE (lane agy-status-bar-facts; ⑫ is lane a
   fs.writeFileSync(red, editAnchor(src, cut, '', "data/bin/agy-wrapper.js"));
   const [viaLink, leaked] = await Promise.all([linkTurn(WRAPPER, 'real'), linkTurn(red, 'red')]); // independent: run together (the suite's 10 s tier)
   ok('THE GATE: a brain dir that LINKS out of agy\'s store is never read — `last` null, the stream\'s total still recorded', viaLink.last === null && viaLink.total.total > 0 && viaLink.total.input !== 777777, viaLink);
-  ok('RED copy (the realpath check cut): the link is followed and its counts become the context (777 777 tokens)', src.split(cut).length === 2 && leaked.last && leaked.last.input === 777777, leaked);
+  ok('RED copy (the realpath check cut): the link is followed and its counts become the context (777 777 tokens)', src.split(cut).length === 2 && gateOf(leaked.last) && leaked.last.input === 777777, leaked);
 }
 
 console.log('— ⑭ THE LIVE LANE (lane agy-peer-wake): the peer-message frame idle / busy / empty / restarting / not signed in / at exit, the advert, the census');
-for (const [n, c, e] of await peerLane) ok(n, c, e);
+for (const [n, c, e] of await peerLane) ok(n, verdictOf(c), e);
 
 console.log('— ⑮–⑲ (lane agy-harness-fixes-2): the mode through the ring + a Resume, «required» is no tool, no false card on a nudge turn, a stopped process is never an error');
-for (const [n, c, e] of await fixes2) ok(n, c, e);
+for (const [n, c, e] of await fixes2) ok(n, verdictOf(c), e);
 
 
 console.log('— ⓣ THE ONE TABLE (B-7e49, 主开发 r2347): this file and its twin run disjoint halves of one table of legs, whole');
 {
   const OWN = fs.readFileSync(path.join(REPO, FILES.heavy), 'utf8'), OTHER = fs.readFileSync(path.join(REPO, FILES.fast), 'utf8');
-  for (const [n, c, e] of [...judge('heavy', LEG, OWN, OTHER), ...controls('heavy', LEG, OWN, OTHER)]) ok(n, c, e);
+  for (const [n, c, e] of [...judge('heavy', LEG, OWN, OTHER), ...controls('heavy', LEG, OWN, OTHER)]) ok(n, verdictOf(c), e);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

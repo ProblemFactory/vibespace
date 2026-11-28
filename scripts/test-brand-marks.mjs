@@ -11,7 +11,7 @@ import { GAPS } from './measure-brand-marks.mjs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, m, x = '') => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m} ${x}`); } };
+const ok = (c, m, x = '') => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m} ${x}`); } };
 
 // path data (absolute M L H V Q C A Z — our drawings' grammar) → polygons
 function polys(d) {
@@ -45,13 +45,13 @@ const inside = (ps, X, Y) => ps.reduce((c, p) => { for (let i = 0, j = p.length 
 for (const v of ['lark', 'gmail', 'slack']) {
   const svg = readFileSync(path.join(ROOT, `public/brand/${v}.svg`), 'utf8');
   ok(Buffer.byteLength(svg) <= 900, `${v}.svg ≤ 900 bytes`, Buffer.byteLength(svg));
-  ok(/<svg [^>]*viewBox="0 0 24 24"/.test(svg) && !/<(style|script|image|use|linearGradient|radialGradient|mask|filter)\b|href=|url\(|on[a-z]+=/i.test(svg), `${v}.svg: viewBox 0 0 24 24, no gradient / style / script / external ref`);
-  ok((svg.match(/fill="[^"]*"/g) || []).every((f) => f === 'fill="currentColor"'), `${v}.svg: one fill (currentColor or the default) — monochrome`);
+  ok(gateOf(/<svg [^>]*viewBox="0 0 24 24"/.test(svg)) && !/<(style|script|image|use|linearGradient|radialGradient|mask|filter)\b|href=|url\(|on[a-z]+=/i.test(svg), `${v}.svg: viewBox 0 0 24 24, no gradient / style / script / external ref`);
+  ok(verdictOf((svg.match(/fill="[^"]*"/g) || []).every((f) => f === 'fill="currentColor"')), `${v}.svg: one fill (currentColor or the default) — monochrome`);
 }
 const SEP = { lark: 1.15, gmail: 1.2 };   // half the gap + half a unit: where the ink beside a gap must be
 for (const [v, segs] of Object.entries(GAPS)) {
   const svg = readFileSync(path.join(ROOT, `public/brand/${v}.svg`), 'utf8');
-  ok(/<!--[^]*COLOUR ANALYSIS[^]*-->/.test(svg), `${v}.svg names its method (colour analysis) in its comment`);
+  ok(verdictOf(/<!--[^]*COLOUR ANALYSIS[^]*-->/.test(svg)), `${v}.svg names its method (colour analysis) in its comment`);
   const ps = polys([...svg.matchAll(/ d="([^"]+)"/g)].map((m) => m[1]).join(' '));
   segs.forEach(([x0, y0, cx, cy, x1, y1], k) => {
     const bad = [];
@@ -64,4 +64,4 @@ for (const [v, segs] of Object.entries(GAPS)) {
   });
 }
 console.log(`\n${pass}/${pass + fail} passed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -21,7 +21,7 @@ const SRC = new URL('../src/webauthn-sign.js', import.meta.url).pathname;
 const WA = require(SRC);
 const PS = require('../src/browser-passkey-store.js');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 const throws = (fn) => { try { fn(); return false; } catch { return true; } };
 const hex = (b) => Buffer.from(b).toString('hex');
 
@@ -61,7 +61,7 @@ console.log('① CBOR (RFC 8949 Appendix A)');
   ok(bad.length === 0, `${V.length} RFC 8949 vectors byte for byte (uint 0 … 10^12, negative, bytes, text incl. UTF-8, arrays, maps)`, bad);
   ok(hex(WA.cbor(new Map([[3, 4], [1, 2]]))) === 'a201020304' && hex(WA.cbor(new Map([['bb', 1], ['a', 2]]))) === 'a2616102626262' + '01' && hex(WA.cbor(new Map([[-1, 0], [1, 0]]))) === 'a2010020' + '00',
     'maps are written in the CANONICAL order whatever the insertion order (shorter key first, then bytewise — CTAP2 §6)', [hex(WA.cbor(new Map([[3, 4], [1, 2]]))), hex(WA.cbor(new Map([['bb', 1], ['a', 2]])))]);
-  ok([null, true, 1.5, undefined, NaN, Number.MAX_SAFE_INTEGER + 2, () => 1].every((x) => throws(() => WA.cbor(x))) && throws(() => WA.cbor(new Map([[Buffer.from('k'), 1], [Buffer.from('k'), 2]]))) && throws(() => WA.cbor(new Date())),
+  ok(gateOf([null, true, 1.5, undefined, NaN, Number.MAX_SAFE_INTEGER + 2, () => 1].every((x) => throws(() => WA.cbor(x)))) && gateOf(throws(() => WA.cbor(new Map([[Buffer.from('k'), 1], [Buffer.from('k'), 2]])))) && verdictOf(throws(() => WA.cbor(new Date()))),
     'anything else throws (null, booleans, floats, unsafe integers, functions, objects that are not plain, a duplicate key)');
   ok(decode(WA.cbor({ a: [1, -7, Buffer.from('xy')] })).get('a')[2].toString() === 'xy', 'this suite\'s reader reads the encoder\'s output back');
 }
@@ -76,10 +76,10 @@ console.log('② authenticatorData');
   const att = WA.authenticatorData({ crypto, rpId: 'example.com', flags: { up: true, at: true }, signCount: 0, attested: { credentialId: ID, publicKeyCose: Buffer.from(COSE, 'hex') } });
   ok(hex(att) === RPHASH + '41' + '00000000' + '00'.repeat(16) + '0020' + hex(ID) + COSE, 'the attested block: AAGUID (16 zero bytes) ‖ id length (2, big-endian) ‖ id ‖ the COSE key; AT set');
   ok(hex(WA.authenticatorData({ crypto, rpId: 'example.com', flags: { up: true, at: true }, attested: { credentialId: ID, publicKeyCose: Buffer.from(COSE, 'hex'), aaguid: Buffer.alloc(16, 0xab) } })).slice(74, 106) === 'ab'.repeat(16), 'an AAGUID handed in is written as given');
-  ok(throws(() => ad({ flags: { at: true } })) && throws(() => WA.authenticatorData({ crypto, rpId: 'example.com', flags: { up: true }, attested: { credentialId: ID, publicKeyCose: Buffer.from(COSE, 'hex') } }))
-    && throws(() => ad({ flags: { up: true, bs: true } })) && throws(() => ad({ signCount: -1 })) && throws(() => ad({ signCount: 2 ** 32 })) && throws(() => ad({ signCount: 1.5 }))
-    && throws(() => WA.authenticatorData({ crypto, rpId: '', flags: {} })) && throws(() => WA.authenticatorData({ rpId: 'example.com' }))
-    && throws(() => WA.authenticatorData({ crypto, rpId: 'example.com', flags: { at: true }, attested: { credentialId: Buffer.alloc(8), publicKeyCose: Buffer.from(COSE, 'hex') } })),
+  ok(gateOf(throws(() => ad({ flags: { at: true } }))) && gateOf(throws(() => WA.authenticatorData({ crypto, rpId: 'example.com', flags: { up: true }, attested: { credentialId: ID, publicKeyCose: Buffer.from(COSE, 'hex') } })))
+    && gateOf(throws(() => ad({ flags: { up: true, bs: true } }))) && gateOf(throws(() => ad({ signCount: -1 }))) && gateOf(throws(() => ad({ signCount: 2 ** 32 }))) && gateOf(throws(() => ad({ signCount: 1.5 })))
+    && gateOf(throws(() => WA.authenticatorData({ crypto, rpId: '', flags: {} }))) && gateOf(throws(() => WA.authenticatorData({ rpId: 'example.com' })))
+    && verdictOf(throws(() => WA.authenticatorData({ crypto, rpId: 'example.com', flags: { at: true }, attested: { credentialId: Buffer.alloc(8), publicKeyCose: Buffer.from(COSE, 'hex') } }))),
     'what throws: AT without the attested block (and the other way), BS without BE, a count outside uint32, no rpId, no crypto handed in, an id under 16 bytes');
 }
 
@@ -90,15 +90,15 @@ console.log('③ assertion (ES256)');
   const cdh = crypto.createHash('sha256').update('{"type":"webauthn.get","challenge":"AAAA","origin":"https://example.com"}').digest();
   const { signature } = WA.assertion({ crypto, privateKeyPkcs8: KEY, clientDataHash: cdh, authenticatorData: ad });
   const verify = (sig, a = ad, h = cdh, key = pub) => crypto.verify('sha256', Buffer.concat([a, h]), key, sig);
-  ok(signature[0] === 0x30 && verify(signature), 'the signature is DER and VERIFIES (node crypto.verify, the key\'s public half) over authenticatorData ‖ clientDataHash');
-  ok(verify(WA.assertion({ crypto, privateKeyPkcs8: Buffer.from(KEY, 'base64'), clientDataHash: cdh.toString('base64url'), authenticatorData: ad.toString('base64url') }).signature), 'bytes and base64(url) text are the same inputs');
+  ok(signature[0] === 0x30 && verdictOf(verify(signature)), 'the signature is DER and VERIFIES (node crypto.verify, the key\'s public half) over authenticatorData ‖ clientDataHash');
+  ok(verdictOf(verify(WA.assertion({ crypto, privateKeyPkcs8: Buffer.from(KEY, 'base64'), clientDataHash: cdh.toString('base64url'), authenticatorData: ad.toString('base64url') }).signature)), 'bytes and base64(url) text are the same inputs');
   const flipped = Buffer.from(ad); flipped[36] ^= 1;
   const other = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey;
   ok(!verify(signature, flipped) && !verify(signature, ad, crypto.randomBytes(32)) && !verify(signature, ad, cdh, other), 'one flipped byte, another clientDataHash, another key ⇒ it does not verify');
   const p384 = crypto.generateKeyPairSync('ec', { namedCurve: 'P-384' }).privateKey.export({ format: 'der', type: 'pkcs8' });
   const ed = crypto.generateKeyPairSync('ed25519').privateKey.export({ format: 'der', type: 'pkcs8' });
-  ok(throws(() => WA.assertion({ crypto, privateKeyPkcs8: p384, clientDataHash: cdh, authenticatorData: ad })) && throws(() => WA.assertion({ crypto, privateKeyPkcs8: ed, clientDataHash: cdh, authenticatorData: ad }))
-    && throws(() => WA.assertion({ crypto, privateKeyPkcs8: KEY, clientDataHash: Buffer.alloc(31), authenticatorData: ad })) && throws(() => WA.assertion({ crypto, privateKeyPkcs8: KEY, clientDataHash: cdh, authenticatorData: Buffer.alloc(36) })),
+  ok(gateOf(throws(() => WA.assertion({ crypto, privateKeyPkcs8: p384, clientDataHash: cdh, authenticatorData: ad }))) && gateOf(throws(() => WA.assertion({ crypto, privateKeyPkcs8: ed, clientDataHash: cdh, authenticatorData: ad })))
+    && gateOf(throws(() => WA.assertion({ crypto, privateKeyPkcs8: KEY, clientDataHash: Buffer.alloc(31), authenticatorData: ad }))) && verdictOf(throws(() => WA.assertion({ crypto, privateKeyPkcs8: KEY, clientDataHash: cdh, authenticatorData: Buffer.alloc(36) }))),
     'a key that is not P-256 (P-384, Ed25519), a hash that is not 32 bytes, authenticator data under 37 bytes ⇒ throws');
 }
 
@@ -109,15 +109,15 @@ console.log('④ makeCredential (attestation none)');
   const o = decode(m.attestationObject), authData = o.get('authData');
   ok([...o.keys()].join() === 'fmt,attStmt,authData' && o.get('fmt') === 'none' && o.get('attStmt') instanceof Map && o.get('attStmt').size === 0, 'read back by this suite\'s own reader: fmt none, an EMPTY attStmt');
   const cose = decode(authData.subarray(37 + 16 + 2 + 32)), jwk = WA.publicKeyOf({ crypto, privateKeyPkcs8: KEY }).publicKey.export({ format: 'jwk' });
-  ok(hex(authData.subarray(0, 32)) === RPHASH && authData[32] === 0x45 && authData.readUInt32BE(33) === 0 && authData.readUInt16BE(53) === 32 && authData.subarray(55, 87).equals(ID), 'authData: rpIdHash, flags UP|UV|AT (0x45), signCount 0, id length 32, the id');
+  ok(hex(authData.subarray(0, 32)) === RPHASH && authData[32] === 0x45 && authData.readUInt32BE(33) === 0 && authData.readUInt16BE(53) === 32 && verdictOf(authData.subarray(55, 87).equals(ID)), 'authData: rpIdHash, flags UP|UV|AT (0x45), signCount 0, id length 32, the id');
   ok(cose.get(1) === 2 && cose.get(3) === -7 && cose.get(-1) === 1 && cose.get(-2).toString('base64url') === jwk.x && cose.get(-3).toString('base64url') === jwk.y && hex(m.publicKeyCose) === COSE, 'the COSE key = the key\'s PUBLIC half (kty EC2, alg ES256, crv P-256, x, y)');
   ok(m.userHandle.toString() === 'user-1' && crypto.createPrivateKey({ key: m.privateKeyPkcs8, format: 'der', type: 'pkcs8' }).asymmetricKeyDetails.namedCurve === 'prime256v1', 'the user handle\'s bytes and the PKCS#8 private key (P-256) come back for the caller to seal');
   const a = WA.makeCredential({ crypto, rpId: 'example.com', flags: { up: true } }), b = WA.makeCredential({ crypto, rpId: 'example.com', flags: { up: true } });
   ok(a.credentialId.length === WA.ID_BYTES && WA.ID_BYTES === 32 && !a.credentialId.equals(b.credentialId) && !a.publicKeyCose.equals(b.publicKeyCose) && a.userHandle === null, 'a fresh credential: 32 random bytes, a new key every time');
   const s = WA.assertion({ crypto, privateKeyPkcs8: a.privateKeyPkcs8, clientDataHash: Buffer.alloc(32, 1), authenticatorData: WA.authenticatorData({ crypto, rpId: 'example.com', flags: { up: true }, signCount: 1 }) });
   const pa = decode(a.publicKeyCose), pubA = crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: pa.get(-2).toString('base64url'), y: pa.get(-3).toString('base64url') }, format: 'jwk' });
-  ok(crypto.verify('sha256', Buffer.concat([WA.authenticatorData({ crypto, rpId: 'example.com', flags: { up: true }, signCount: 1 }), Buffer.alloc(32, 1)]), pubA, s.signature), 'a sign-in with the new key verifies against the COSE key the relying party was handed at registration');
-  ok(throws(() => WA.makeCredential({ crypto, rpId: 'example.com', user: { id: Buffer.alloc(65) } })) && throws(() => WA.makeCredential({ rpId: 'example.com' })), 'a user handle over 64 bytes, no crypto ⇒ throws');
+  ok(verdictOf(crypto.verify('sha256', Buffer.concat([WA.authenticatorData({ crypto, rpId: 'example.com', flags: { up: true }, signCount: 1 }), Buffer.alloc(32, 1)]), pubA, s.signature)), 'a sign-in with the new key verifies against the COSE key the relying party was handed at registration');
+  ok(gateOf(throws(() => WA.makeCredential({ crypto, rpId: 'example.com', user: { id: Buffer.alloc(65) } }))) && verdictOf(throws(() => WA.makeCredential({ rpId: 'example.com' }))), 'a user handle over 64 bytes, no crypto ⇒ throws');
 }
 
 console.log('⑤ the sign count (the store\'s bump → reconcile)');
@@ -149,8 +149,8 @@ console.log('⑥ the re-check — never trusting the kernel');
   ];
   for (const [name, r, want] of T) ok(RV(r) === want, `requestVerdict: ${name} ⇒ ${want || 'null'}`, RV(r));
   ok(WA.clientDataVerdict({ crypto, clientDataJSON: Buffer.from('not json').toString('base64url'), clientDataHash: h(Buffer.from('not json').toString('base64url')), origin: 'https://example.com', op: 'get' }) === 'json' && WA.clientDataVerdict({ crypto, clientDataJSON: '', clientDataHash: 'x' }) === null, 'clientDataVerdict names the mismatch (json · hash · type · origin · challenge); nothing handed ⇒ nothing to check');
-  ok(throws(() => WA.requestVerdict({ crypto, req: req() })), 'requestVerdict without the rpMatches rule handed in throws (the rule is browser-passkey-store\'s — injected, never a copy)');
-  ok(WA.algSupported(undefined) && WA.algSupported([{ alg: -7 }]) && !WA.algSupported([{ type: 'password', alg: -7 }]) && WA.ES256 === -7, 'algSupported: absent / empty = the defaults; −7 of type public-key');
+  ok(verdictOf(throws(() => WA.requestVerdict({ crypto, req: req() }))), 'requestVerdict without the rpMatches rule handed in throws (the rule is browser-passkey-store\'s — injected, never a copy)');
+  ok(gateOf(WA.algSupported(undefined)) && gateOf(WA.algSupported([{ alg: -7 }])) && !WA.algSupported([{ type: 'password', alg: -7 }]) && WA.ES256 === -7, 'algSupported: absent / empty = the defaults; −7 of type public-key');
 }
 
 console.log('⑦ PURE');
@@ -160,4 +160,4 @@ console.log('⑦ PURE');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

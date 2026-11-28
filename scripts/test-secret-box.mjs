@@ -28,7 +28,7 @@ import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 const { secretBox, SecretBoxError } = require(path.join(REPO, 'src/secret-box.js'));
 const ROOT = scratch('secretbox');
@@ -117,7 +117,7 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
   const box = secretBox(keyFile);
   const plain = 'sk-live-' + 'a'.repeat(40) + ' 日本語 \n';
   const fromLegacy = legacy._enc(plain);
-  ok(fromLegacy.split('.').length === 3 && fromLegacy.split('.').every((s) => /^[A-Za-z0-9+/=]+$/.test(s)), 'the pre-fix ciphertext is `iv.tag.data`, three base64 segments');
+  ok(fromLegacy.split('.').length === 3 && verdictOf(fromLegacy.split('.').every((s) => /^[A-Za-z0-9+/=]+$/.test(s))), 'the pre-fix ciphertext is `iv.tag.data`, three base64 segments');
   ok(box.dec(fromLegacy) === plain, 'PARITY →: the pre-fix _enc encrypts ⇒ secret-box decrypts');
   const fromBox = box.enc(plain);
   ok(legacy._dec(fromBox) === plain, 'PARITY ←: secret-box encrypts ⇒ the pre-fix _dec decrypts');
@@ -135,11 +135,11 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
   const box = secretBox(keyFile);
   ok(!box.hasKey(), 'no key before the first use');
   const c = box.enc('hello');
-  ok(box.hasKey(), 'the first enc() minted the key (ENOENT ⇒ create)');
+  ok(verdictOf(box.hasKey()), 'the first enc() minted the key (ENOENT ⇒ create)');
   const st = fs.statSync(keyFile);
   ok((st.mode & 0o777) === 0o600, `key file is 0600 (got ${(st.mode & 0o777).toString(8)})`);
   const hex = fs.readFileSync(keyFile, 'utf-8').trim();
-  ok(/^[0-9a-f]{64}$/.test(hex), 'key file holds exactly 64 hex characters');
+  ok(verdictOf(/^[0-9a-f]{64}$/.test(hex)), 'key file holds exactly 64 hex characters');
   ok(box.dec(c) === 'hello', 'and it decrypts what it encrypted');
   ok(!fs.readdirSync(path.dirname(keyFile)).some((f) => f.includes('.tmp-')), 'no temp file left behind after minting');
   // a SECOND box on the same file reads, never re-mints
@@ -153,8 +153,8 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
   // (a) EISDIR: a directory where the key file should be
   const asDir = path.join(dir, '.key-isdir'); fs.mkdirSync(asDir);
   let e1 = null; try { secretBox(asDir).enc('x'); } catch (e) { e1 = e; }
-  ok(e1 instanceof SecretBoxError && e1.code === 'key-unreadable' && /EISDIR/.test(e1.message), `EISDIR ⇒ TYPED key-unreadable naming the errno (got ${e1 && e1.code}: ${e1 && e1.message})`);
-  ok(fs.statSync(asDir).isDirectory(), 'and the directory is still there — nothing was minted over it');
+  ok(e1 instanceof SecretBoxError && e1.code === 'key-unreadable' && verdictOf(/EISDIR/.test(e1.message)), `EISDIR ⇒ TYPED key-unreadable naming the errno (got ${e1 && e1.code}: ${e1 && e1.message})`);
+  ok(verdictOf(fs.statSync(asDir).isDirectory()), 'and the directory is still there — nothing was minted over it');
   // (b) an EMPTIED file (a crash mid-write, a bad restore): NOT a fresh key
   const emptied = path.join(dir, '.key-empty'); fs.writeFileSync(emptied, '', { mode: 0o600 });
   let e2 = null; try { secretBox(emptied).enc('x'); } catch (e) { e2 = e; }
@@ -173,7 +173,7 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
   const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
   if (isRoot) console.log('  … SKIP EACCES leg (running as root, chmod 000 does not deny)');
   else {
-    ok(e4 instanceof SecretBoxError && e4.code === 'key-unreadable' && /EACCES/.test(e4.message), `EACCES ⇒ TYPED key-unreadable (got ${e4 && e4.code}: ${e4 && e4.message})`);
+    ok(e4 instanceof SecretBoxError && e4.code === 'key-unreadable' && verdictOf(/EACCES/.test(e4.message)), `EACCES ⇒ TYPED key-unreadable (got ${e4 && e4.code}: ${e4 && e4.message})`);
     fs.chmodSync(denied, 0o600);
     ok(secretBox(denied).dec(blob) === 'secret', 'once readable again the SAME key decrypts the old ciphertext — nothing was minted meanwhile');
   }
@@ -185,7 +185,7 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
   fs.mkdirSync(path.dirname(keyFile), { recursive: true });
   const a = secretBox(keyFile), b = secretBox(keyFile);
   const ka = a.readKey(), kb = b.readKey();
-  ok(ka.equals(kb), 'two boxes minting "at once" over one path both read the key that landed (link refuses to clobber)');
+  ok(verdictOf(ka.equals(kb)), 'two boxes minting "at once" over one path both read the key that landed (link refuses to clobber)');
   ok(a.dec(b.enc('cross')) === 'cross', 'and they interoperate');
 }
 
@@ -204,7 +204,7 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
   const after = fs.readFileSync(keyFile, 'utf-8');
   ok(before !== after, 'PRE-FIX: the bare catch replaced the key file on a non-ENOENT read failure');
   let dead = false; try { legacy._dec(blob); } catch { dead = true; }
-  ok(dead, 'PRE-FIX: the old ciphertext no longer decrypts — the defect §14.7 describes, silent and permanent');
+  ok(verdictOf(dead), 'PRE-FIX: the old ciphertext no longer decrypts — the defect §14.7 describes, silent and permanent');
   // The same injection against secret-box (through a real, non-ENOENT
   // failure) was leg ③: typed error, bytes untouched. Say so beside the control.
   const keyFile2 = path.join(ROOT, 'legacy2', '.key');
@@ -224,14 +224,14 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
 // ── ⑥ mounts is switched to the box ──
 {
   const src = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf-8');
-  ok(/require\('\.\/secret-box'\)/.test(src), 'src/mounts.js requires src/secret-box.js');
+  ok(verdictOf(/require\('\.\/secret-box'\)/.test(src)), 'src/mounts.js requires src/secret-box.js');
   ok(!/createCipheriv|createDecipheriv/.test(src), 'src/mounts.js carries NO inline cipher any more (the twin is gone, not duplicated)');
   ok(!/fs\.writeFileSync\(this\._keyFile/.test(src), 'src/mounts.js no longer writes its key file itself (the bare-catch mint is gone)');
   const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
   const dataDir = path.join(ROOT, 'mounts-data'); fs.mkdirSync(dataDir, { recursive: true });
   const mm = new MountManager({ dataDir, broadcast: () => {}, getSetting: () => undefined });
   const c = mm._enc('mount-secret');
-  ok(fs.existsSync(path.join(dataDir, '.mounts-key')) && mm._dec(c) === 'mount-secret', 'MountManager._enc/_dec round-trip through the box on data/.mounts-key (its OWN key file, decision 24)');
+  ok(gateOf(fs.existsSync(path.join(dataDir, '.mounts-key'))) && mm._dec(c) === 'mount-secret', 'MountManager._enc/_dec round-trip through the box on data/.mounts-key (its OWN key file, decision 24)');
   ok(makeLegacy(fs, path.join(dataDir, '.mounts-key'))._dec(c) === 'mount-secret', 'and the pre-fix reader decrypts what the switched MountManager wrote — no stored mount secret needs re-encrypting');
 }
 
@@ -245,12 +245,12 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
   const { describeJsonError } = require(path.join(REPO, 'src/secret-box.js'));
   const SECRET = 'sk-' + 'Q7f3'.repeat(8) + 'ZZZ99';
   let e = null; try { JSON.parse(`[{"k":"${SECRET}"},]`); } catch (x) { e = x; }
-  ok(e instanceof SyntaxError && e.message.includes(SECRET.slice(-6)), 'CONTROL: the retired `e.message` carries the secret\'s tail (V8 quotes the bytes around the error)');
+  ok(e instanceof SyntaxError && verdictOf(e.message.includes(SECRET.slice(-6))), 'CONTROL: the retired `e.message` carries the secret\'s tail (V8 quotes the bytes around the error)');
   const d = describeJsonError(e);
-  ok(/^not valid JSON \(SyntaxError/.test(d) && !/"/.test(d) && !d.includes(SECRET.slice(-6)) && !d.includes(SECRET.slice(0, 6)), `the helper keeps the class and no quoted fragment (${d})`);
+  ok(gateOf(/^not valid JSON \(SyntaxError/.test(d)) && !/"/.test(d) && !d.includes(SECRET.slice(-6)) && !d.includes(SECRET.slice(0, 6)), `the helper keeps the class and no quoted fragment (${d})`);
   let pos = null; try { JSON.parse('{"a":1,"b":}'); } catch (x) { pos = x; }
   const dp = describeJsonError(pos);
-  ok(/not valid JSON \(SyntaxError/.test(dp) && (!/at position/.test(pos.message) || /at position \d+/.test(dp)), `the position is kept exactly when V8 states one (${dp})`);
+  ok(gateOf(/not valid JSON \(SyntaxError/.test(dp)) && (!/at position/.test(pos.message) || verdictOf(/at position \d+/.test(dp))), `the position is kept exactly when V8 states one (${dp})`);
   ok(describeJsonError(new Error('not an array')) === 'not an array' && describeJsonError('plain') === 'plain', 'a non-SyntaxError keeps its own message (it carries no input bytes)');
 }
 
@@ -263,7 +263,7 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTSB.files, MUTSB.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTSB.files, MUTSB.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

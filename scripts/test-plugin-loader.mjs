@@ -16,7 +16,7 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -32,16 +32,16 @@ const waitFor = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.
 // ── ① validator matrix ──
 const { validateManifest, compareVersions } = require(path.join(REPO, 'src/plugin-manifest.js'));
 const base = { id: 'acme.tool', version: '1.0.0', engines: { vibespace: '2.369.24' }, client: 'iframe', server: true, contributes: { windows: [{ id: 'main', title: 'Main', entry: 'index.html' }], agentTools: [{ name: 'do', description: 'does', args: { type: 'object' } }], routes: true } };
-ok(validateManifest(base, { hostVersion: '2.369.24' }).ok, 'a complete manifest validates');
-ok(validateManifest(base, { hostVersion: '2.369.24', folderName: 'acme.tool' }).ok && !validateManifest(base, { folderName: 'other' }).ok, 'id must equal the folder name');
+ok(verdictOf(validateManifest(base, { hostVersion: '2.369.24' }).ok), 'a complete manifest validates');
+ok(gateOf(validateManifest(base, { hostVersion: '2.369.24', folderName: 'acme.tool' }).ok) && !validateManifest(base, { folderName: 'other' }).ok, 'id must equal the folder name');
 ok(!validateManifest({ ...base, id: 'Acme.Tool' }).ok && !validateManifest({ ...base, id: 'tool' }).ok, 'id is <publisher>.<name> lowercase');
 ok(!validateManifest({ ...base, version: '1.0' }).ok && !validateManifest({ ...base, engines: {} }).ok, 'version + engines.vibespace are required semver');
-ok(!validateManifest(base, { hostVersion: '2.300.0' }).ok && /requires VibeSpace ≥/.test(validateManifest(base, { hostVersion: '2.300.0' }).errors.join()), 'an older host is refused with the minimum named');
+ok(!validateManifest(base, { hostVersion: '2.300.0' }).ok && verdictOf(/requires VibeSpace ≥/.test(validateManifest(base, { hostVersion: '2.300.0' }).errors.join())), 'an older host is refused with the minimum named');
 ok(!validateManifest({ ...base, contributes: { windows: [{ id: 'x', title: 'X', entry: '../secret.html' }] } }).ok, 'window entries must be relative paths inside ui/ (no ..)');
-ok(!validateManifest({ ...base, server: false }).ok && /needs server: true/.test(validateManifest({ ...base, server: false }).errors.join()), 'agentTools/routes need server: true');
+ok(!validateManifest({ ...base, server: false }).ok && verdictOf(/needs server: true/.test(validateManifest({ ...base, server: false }).errors.join())), 'agentTools/routes need server: true');
 ok(!validateManifest({ ...base, client: 'none' }).ok, 'iframe windows need client: iframe');
-ok(validateManifest({ ...base, icon: '<svg onload="x()"></svg>' }).manifest.icon === undefined && validateManifest({ ...base, icon: '<svg viewBox="0 0 1 1"/>' }).manifest.icon, 'icons: inline svg only, handlers/scripts rejected (kept as a warning, not a fatal)');
-ok(validateManifest({ ...base, contributes: { ...base.contributes, keybindings: [{ a: 1 }] } }).warnings.some((w) => /reserved/.test(w)) && !validateManifest({ ...base, contributes: { ...base.contributes, settings: { a: 1 } } }).ok, 'reserved contributions (keybindings/…) warn, never fail; settings is real since Ph4 (a non-array is an error)');
+ok(validateManifest({ ...base, icon: '<svg onload="x()"></svg>' }).manifest.icon === undefined && verdictOf(validateManifest({ ...base, icon: '<svg viewBox="0 0 1 1"/>' }).manifest.icon), 'icons: inline svg only, handlers/scripts rejected (kept as a warning, not a fatal)');
+ok(gateOf(validateManifest({ ...base, contributes: { ...base.contributes, keybindings: [{ a: 1 }] } }).warnings.some((w) => /reserved/.test(w))) && !validateManifest({ ...base, contributes: { ...base.contributes, settings: { a: 1 } } }).ok, 'reserved contributions (keybindings/…) warn, never fail; settings is real since Ph4 (a non-array is an error)');
 ok(compareVersions('2.369.24', '2.369.9') > 0 && compareVersions('2.369.24', '2.370.0') < 0 && compareVersions('1.0.0', '1.0.0') === 0, 'compareVersions is numeric per segment');
 
 // ── ①b THE RESERVED-CONTRIBUTION SET IS PINNED ──
@@ -58,11 +58,11 @@ ok(compareVersions('2.369.24', '2.369.9') > 0 && compareVersions('2.369.24', '2.
   ok(JSON.stringify(got) === JSON.stringify(want), 'RESERVED_CONTRIBUTIONS is exactly the declared set (adding a key without updating this list is the point)', JSON.stringify(got));
   for (const key of want) {
     const w = validateManifest({ ...base, contributes: { ...base.contributes, [key]: [{ a: 1 }] } }, { hostVersion: '2.369.24' });
-    ok(w.ok && w.warnings.some((x) => x.includes(`contributes.${key}`) && /reserved/.test(x)), `contributes.${key} warns "reserved for a later phase" and never fails`, JSON.stringify(w.warnings));
+    ok(gateOf(w.ok) && verdictOf(w.warnings.some((x) => x.includes(`contributes.${key}`) && /reserved/.test(x))), `contributes.${key} warns "reserved for a later phase" and never fails`, JSON.stringify(w.warnings));
     ok(w.manifest.contributes[key] === undefined, `contributes.${key} is still IGNORED (reserved names a later phase, not a live contribution point)`);
   }
   const unknown = validateManifest({ ...base, contributes: { ...base.contributes, notAThing: [{ a: 1 }] } }, { hostVersion: '2.369.24' });
-  ok(unknown.ok && !unknown.warnings.some((x) => /notAThing/.test(x)), 'NEGATIVE CONTROL: an UNRESERVED key is dropped with no warning — which is exactly why `channelAdapters` had to be added to the list');
+  ok(gateOf(unknown.ok) && !unknown.warnings.some((x) => /notAThing/.test(x)), 'NEGATIVE CONTROL: an UNRESERVED key is dropped with no warning — which is exactly why `channelAdapters` had to be added to the list');
 }
 
 // ── ② loader against the shipped example plugin ──
@@ -84,21 +84,21 @@ const base_ = `http://127.0.0.1:${srv.address().port}`;
 const j = async (p, opt) => { const r = await fetch(base_ + p, opt); let b = null; try { b = await r.clone().json(); } catch { b = await r.text(); } return { status: r.status, headers: r.headers, body: b }; };
 
 let m = await j('/api/plugins/manifests');
-ok(m.status === 200 && m.body.plugins.some((p) => p.id === 'example.hello' && p.valid && !p.enabled), 'manifests lists the example plugin (valid, disabled by default)');
-ok(m.body.plugins.some((p) => p.id === 'broken.one' && !p.valid && p.errors.length), 'an invalid manifest is listed LOUDLY with its errors (never silently skipped)');
+ok(m.status === 200 && verdictOf(m.body.plugins.some((p) => p.id === 'example.hello' && p.valid && !p.enabled)), 'manifests lists the example plugin (valid, disabled by default)');
+ok(verdictOf(m.body.plugins.some((p) => p.id === 'broken.one' && !p.valid && p.errors.length)), 'an invalid manifest is listed LOUDLY with its errors (never silently skipped)');
 ok((await j('/plugins/example.hello/index.html')).status === 404, 'assets are 404 while disabled');
 // contributed agent tools are a declared capability since 2.369.43 (the shim is
 // a program on every session's PATH, outside the plugin sandbox) → consent gate
 const noConsent = await j('/api/plugins/manifests/example.hello/enabled', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true }) });
-ok(noConsent.status === 409 && noConsent.body.consentRequired === true && noConsent.body.capabilities.some((c) => c.id === 'agent-tools'), 'a plugin contributing agent tools cannot be enabled without consent (409 naming the tools)', noConsent.body);
+ok(noConsent.status === 409 && noConsent.body.consentRequired === true && verdictOf(noConsent.body.capabilities.some((c) => c.id === 'agent-tools')), 'a plugin contributing agent tools cannot be enabled without consent (409 naming the tools)', noConsent.body);
 const en = await j('/api/plugins/manifests/example.hello/enabled', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true, trusted: true }) });
-ok(en.status === 200 && en.body.plugin.enabled, 'enable persists and starts the plugin');
-ok(fs.existsSync(path.join(root, 'data', 'plugin-registry.json')), 'registry is written atomically to data/plugin-registry.json');
-ok(await waitFor(async () => (await j('/api/plugins/manifests')).body.plugins.find((p) => p.id === 'example.hello').state === 'running'), 'the forked server process says hello → state running');
-ok(broadcasts.some((b) => b.type === 'plugins-manifests-updated'), 'every change broadcasts plugins-manifests-updated (multi-client law)');
+ok(en.status === 200 && verdictOf(en.body.plugin.enabled), 'enable persists and starts the plugin');
+ok(verdictOf(fs.existsSync(path.join(root, 'data', 'plugin-registry.json'))), 'registry is written atomically to data/plugin-registry.json');
+ok(verdictOf(await waitFor(async () => (await j('/api/plugins/manifests')).body.plugins.find((p) => p.id === 'example.hello').state === 'running')), 'the forked server process says hello → state running');
+ok(verdictOf(broadcasts.some((b) => b.type === 'plugins-manifests-updated')), 'every change broadcasts plugins-manifests-updated (multi-client law)');
 const asset = await j('/plugins/example.hello/index.html');
-ok(asset.status === 200 && /^sandbox allow-scripts/.test(asset.headers.get('content-security-policy') || '') && !/allow-same-origin/.test(asset.headers.get('content-security-policy') || ''), 'iframe assets ride the opaque-origin sandbox CSP (never allow-same-origin)');
-ok(/text\/html/.test(asset.headers.get('content-type') || '') && asset.headers.get('cache-control') === 'no-cache', 'assets carry a real content-type and no-cache');
+ok(asset.status === 200 && gateOf(/^sandbox allow-scripts/.test(asset.headers.get('content-security-policy') || '')) && !/allow-same-origin/.test(asset.headers.get('content-security-policy') || ''), 'iframe assets ride the opaque-origin sandbox CSP (never allow-same-origin)');
+ok(gateOf(/text\/html/.test(asset.headers.get('content-type') || '')) && asset.headers.get('cache-control') === 'no-cache', 'assets carry a real content-type and no-cache');
 ok((await j('/plugins/example.hello/../../plugin-registry.json')).status !== 200 && (await j('/plugins/example.hello/..%2F..%2Fplugin-registry.json')).status !== 200, 'path traversal out of ui/ is refused');
 ok((await j('/plugins/example.hello/nope.html')).status === 404, 'missing asset → 404');
 const ping = await j('/api/plugins/example.hello/x/ping');
@@ -107,20 +107,20 @@ const c1 = await j('/api/plugins/example.hello/x/count', { method: 'POST' }); co
 ok(c1.body.count === 1 && c2.body.count === 2, 'the plugin keeps state in its own VIBESPACE_PLUGIN_DATA dir (POST /x/count increments)');
 ok((await j('/api/plugins/example.hello/x/missing')).status === 404, 'unknown plugin route → the plugin answers 404');
 const tool = await j('/api/agent/plugin-tool/example.hello/hello', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer vsst_ok' }, body: JSON.stringify({ args: { name: 'Ada' } }) });
-ok(tool.status === 200 && tool.body.ok && /hello, Ada!/.test(tool.body.output) && /session sess-1/.test(tool.body.output), 'agent tool call reaches the plugin with the calling session identity');
+ok(tool.status === 200 && gateOf(tool.body.ok) && gateOf(/hello, Ada!/.test(tool.body.output)) && verdictOf(/session sess-1/.test(tool.body.output)), 'agent tool call reaches the plugin with the calling session identity');
 ok((await j('/api/agent/plugin-tool/example.hello/hello', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer vsst_bad' }, body: '{}' })).status === 401, 'an unknown vsst_ token is refused (the route is cookie-exempt, so it MUST validate the bearer)');
 const shim = path.join(root, 'data', 'bin', 'vibespace-tool-example.hello-hello');
-ok(fs.existsSync(shim) && (fs.statSync(shim).mode & 0o111) !== 0, 'an executable agent-tool shim is generated in data/bin');
+ok(gateOf(fs.existsSync(shim)) && (fs.statSync(shim).mode & 0o111) !== 0, 'an executable agent-tool shim is generated in data/bin');
 const help = spawnSync(process.execPath, [shim, '--help'], { encoding: 'utf8' });
-ok(help.status === 0 && /greeting/.test(help.stdout), 'the shim explains itself (--help prints the manifest description + args)');
+ok(help.status === 0 && verdictOf(/greeting/.test(help.stdout)), 'the shim explains itself (--help prints the manifest description + args)');
 // async: the shim calls THIS process's server — a sync spawn would deadlock the event loop
 const run = await new Promise((r) => execFile(process.execPath, [shim, '--name', 'Grace'], { encoding: 'utf8', env: { PATH: process.env.PATH, VIBESPACE_API: base_, VIBESPACE_SESSION_TOKEN: 'vsst_ok' } }, (err, stdout, stderr) => r({ status: err ? (err.code ?? 1) : 0, stdout: String(stdout), stderr: String(stderr) })));
-ok(run.status === 0 && /hello, Grace!/.test(run.stdout), `the shim posts to the host with the session token and prints the output (${JSON.stringify(run.stdout.trim().slice(0, 60))})`);
+ok(run.status === 0 && verdictOf(/hello, Grace!/.test(run.stdout)), `the shim posts to the host with the session token and prints the output (${JSON.stringify(run.stdout.trim().slice(0, 60))})`);
 const noEnv = spawnSync(process.execPath, [shim, '--name', 'x'], { encoding: 'utf8', env: { PATH: process.env.PATH } });
-ok(noEnv.status === 3 && /not inside a VibeSpace session/.test(noEnv.stderr), 'outside a session the shim fails loudly');
+ok(noEnv.status === 3 && verdictOf(/not inside a VibeSpace session/.test(noEnv.stderr)), 'outside a session the shim fails loudly');
 const dis = await j('/api/plugins/manifests/example.hello/enabled', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: false }) });
 ok(dis.status === 200 && !dis.body.plugin.enabled, 'disable persists');
-ok(await waitFor(async () => (await j('/api/plugins/manifests')).body.plugins.find((p) => p.id === 'example.hello').state === 'stopped'), 'the plugin process is stopped on disable');
+ok(verdictOf(await waitFor(async () => (await j('/api/plugins/manifests')).body.plugins.find((p) => p.id === 'example.hello').state === 'stopped')), 'the plugin process is stopped on disable');
 ok((await j('/plugins/example.hello/index.html')).status === 404 && (await j('/api/plugins/example.hello/x/ping')).status === 404 && !fs.existsSync(shim), 'disabled: assets 404, routes 404, shim removed');
 ok((await j('/api/plugins/manifests/broken.one/enabled', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true }) })).status === 400, 'an invalid plugin cannot be enabled (400 with the errors)');
 ok((await j('/api/plugins/manifests/nope.nope/enabled', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"enabled":true}' })).status === 404, 'unknown id → 404');
@@ -132,9 +132,9 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const M = require(path.join(REPO, 'src/plugin-manifest.js'));
   const eb = { id: 'acme.engine', version: '1.0.0', engines: { vibespace: '2.369.24' }, client: 'none', server: true, contributes: { routes: true, browserEngine: true }, capabilities: { server: {} } };
   const v = M.validateManifest(eb, { hostVersion: '2.369.24' });
-  ok(v.ok && v.manifest.contributes.browserEngine === true && M.needsConsent(v.manifest) && M.capabilitySummary(v.manifest).some((c) => c.id === 'browser-engine'), 'contributes.browserEngine with server + routes validates, ALWAYS needs consent, and the consent dialog names it (browser-engine)', JSON.stringify(v.errors));
+  ok(gateOf(v.ok) && v.manifest.contributes.browserEngine === true && gateOf(M.needsConsent(v.manifest)) && verdictOf(M.capabilitySummary(v.manifest).some((c) => c.id === 'browser-engine')), 'contributes.browserEngine with server + routes validates, ALWAYS needs consent, and the consent dialog names it (browser-engine)', JSON.stringify(v.errors));
   const ns = M.validateManifest({ ...eb, server: false }), nr = M.validateManifest({ ...eb, contributes: { browserEngine: true } }), nb = M.validateManifest({ ...eb, contributes: { routes: true, browserEngine: 'yes' } });
-  ok(!ns.ok && ns.errors.some((e) => /browserEngine needs server: true/.test(e)) && !nr.ok && nr.errors.some((e) => /browserEngine needs contributes\.routes: true/.test(e)) && !nb.ok && nb.errors.some((e) => /browserEngine must be true\|false/.test(e)), 'refused BY NAME without its process, without its routes, or as anything but a boolean', JSON.stringify([ns.errors, nr.errors, nb.errors]));
+  ok(!ns.ok && gateOf(ns.errors.some((e) => /browserEngine needs server: true/.test(e))) && !nr.ok && gateOf(nr.errors.some((e) => /browserEngine needs contributes\.routes: true/.test(e))) && !nb.ok && verdictOf(nb.errors.some((e) => /browserEngine must be true\|false/.test(e))), 'refused BY NAME without its process, without its routes, or as anything but a boolean', JSON.stringify([ns.errors, nr.errors, nb.errors]));
   const plain = M.validateManifest({ ...eb, contributes: { routes: true } }).manifest, off = M.validateManifest({ ...eb, contributes: { routes: true, browserEngine: false } }).manifest;
   // lane engine-spi-egress: the fixture's EGRESS VARIANT — a valid engine manifest whose contributes.settings carries the RESERVED
   // row the engine table reads for `egress-allowlist` (a string `egressAllowlist`); without it the table finds none
@@ -142,12 +142,12 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const gv = M.validateManifest(gm), BEg0 = require(path.join(REPO, 'src/browser-engines.js'));
   const BEg = { EGRESS_ROW_KEY: BEg0.EGRESS_ROW_KEY, egressRowOf: BEg0.egressRowOf || (() => undefined), egressRowPath: BEg0.egressRowPath || (() => '') }, ERD = M.egressRowDeclared || (() => undefined); // a tree without them: ✗ by name
   const gNone = M.validateManifest({ ...gm, contributes: { ...gm.contributes, settings: [] } }), gSel = M.validateManifest({ ...gm, contributes: { ...gm.contributes, settings: [{ key: 'egressAllowlist', type: 'select', default: 'a', label: 'Sites', options: ['a'] }] } });
-  ok(gv.ok && gv.manifest.contributes.browserEngine === true && M.needsConsent(gv.manifest) && JSON.stringify(BEg.egressRowOf(gv.manifest.contributes.settings)) === JSON.stringify({ default: '' }) && BEg.egressRowPath(gm.id) === 'plugin.vibespace.egress-engine.egressAllowlist'
-    && gNone.ok && BEg.egressRowOf(gNone.manifest.contributes.settings) === null && gSel.ok && BEg.egressRowOf(gSel.manifest.contributes.settings) === null,
+  ok(gateOf(gv.ok) && gv.manifest.contributes.browserEngine === true && gateOf(M.needsConsent(gv.manifest)) && JSON.stringify(BEg.egressRowOf(gv.manifest.contributes.settings)) === JSON.stringify({ default: '' }) && BEg.egressRowPath(gm.id) === 'plugin.vibespace.egress-engine.egressAllowlist'
+    && gateOf(gNone.ok) && BEg.egressRowOf(gNone.manifest.contributes.settings) === null && gateOf(gSel.ok) && BEg.egressRowOf(gSel.manifest.contributes.settings) === null,
     'lane engine-spi-egress: the egress variant validates (an engine, consent needed) and its settings carry the RESERVED string row egressAllowlist (plugin.<id>.egressAllowlist); none / a select ⇒ no reserved row (the probe is then refused by name)', JSON.stringify(gv.errors));
   const kHash = M.capabilitiesHash(M.validateManifest(JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin/vibespace-plugin.json'), 'utf8'))).manifest);
   ok(M.capabilitiesHash(gv.manifest) !== M.capabilitiesHash(gNone.manifest) && M.capabilitiesHash(gSel.manifest) === M.capabilitiesHash(gNone.manifest) && kHash === '5ccb5cf0d1d753eb' && ERD(gv.manifest) === true && ERD(gNone.manifest) === false
-    && M.capabilitySummary(gv.manifest).some((c) => c.id === 'egress-allowlist') && !M.capabilitySummary(gNone.manifest).some((c) => c.id === 'egress-allowlist') && BEg.EGRESS_ROW_KEY === 'egressAllowlist',
+    && gateOf(M.capabilitySummary(gv.manifest).some((c) => c.id === 'egress-allowlist')) && !M.capabilitySummary(gNone.manifest).some((c) => c.id === 'egress-allowlist') && BEg.EGRESS_ROW_KEY === 'egressAllowlist',
     'L2 acceptance (A): consent COVERS the reserved row — an engine declaring it hashes differently (a later version dropping it drifts: untrusted until re-enabled) and the consent dialog says its browser reaches only the listed sites; a manifest without it hashes as before (the fixture kernel\'s hash = 5ccb5cf0d1d753eb, measured on 63f59d572 — every existing trust kept)', { kHash });
   // lane engine-spi-egress L1b: the fixture's USER VARIANT — the reserved PROGRAM row (a string executablePath; a manifest settings row
   // carries no `path` field — that is a built-in table's legacy spelling); consent names it and its hash covers it
@@ -155,8 +155,8 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const uv = M.validateManifest(um), uNone = M.validateManifest({ ...um, contributes: { ...um.contributes, settings: um.contributes.settings.filter((s) => s.key !== 'executablePath') } });
   const uPath = M.validateManifest({ ...um, contributes: { ...um.contributes, settings: um.contributes.settings.map((s) => (s.key === 'executablePath' ? { ...s, path: 'browser.someLegacy', description: 'x'.repeat(400) } : s)) } });
   const BRD = M.binaryRowDeclared || (() => undefined), uRow = uPath.ok ? uPath.manifest.contributes.settings.find((s) => s.key === 'executablePath') : null;
-  ok(uv.ok && BRD(uv.manifest) === true && BRD(uNone.manifest) === false && M.capabilitySummary(uv.manifest).some((c) => c.id === 'user-binary' && /Runs the program you name in its settings/.test(c.text)) && M.capabilitiesHash(uv.manifest) !== M.capabilitiesHash(uNone.manifest)
-    && uRow && !('path' in uRow) && uRow.description.length <= 300 && uRow.type === 'string',
+  ok(gateOf(uv.ok) && BRD(uv.manifest) === true && BRD(uNone.manifest) === false && gateOf(M.capabilitySummary(uv.manifest).some((c) => c.id === 'user-binary' && /Runs the program you name in its settings/.test(c.text))) && M.capabilitiesHash(uv.manifest) !== M.capabilitiesHash(uNone.manifest)
+    && gateOf(uRow) && !('path' in uRow) && uRow.description.length <= 300 && uRow.type === 'string',
     'lane engine-spi-egress L1b: the user variant validates; its RESERVED program row (a string executablePath — no `path` field rides a manifest row, a description cut to 300) is declared, consent says «Runs the program you name in its settings…» and its hash covers the row (a version adding or dropping it drifts)', JSON.stringify(uv.errors));
   // L1b r2 MAJOR 1: a plugin never names the program it runs — an ENGINE's program row carrying a default is REFUSED by name ('' or none
   // is the only default); the row is reserved for engines only (another plugin's string row of that name keeps its default)
@@ -164,7 +164,7 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const uNoDef = M.validateManifest({ ...um, contributes: { ...um.contributes, settings: um.contributes.settings.map((s) => { if (s.key !== 'executablePath') return s; const { default: _d, ...o } = s; return o; }) } });
   const dTrue = uDef('/usr/bin/true'), dSpace = uDef(' '), dEmpty = uDef('');
   const notEngine = M.validateManifest({ id: 'acme.tool', version: '1.0.0', engines: { vibespace: '2.369.24' }, client: 'none', contributes: { settings: [{ key: 'executablePath', type: 'string', default: '/usr/bin/true', label: 'Tool' }] } });
-  ok(!dTrue.ok && dTrue.errors.some((e) => /a plugin never names the program it runs; the executablePath row may not carry a default/.test(e)) && !dSpace.ok && dEmpty.ok && uNoDef.ok && notEngine.ok,
+  ok(!dTrue.ok && gateOf(dTrue.errors.some((e) => /a plugin never names the program it runs; the executablePath row may not carry a default/.test(e))) && !dSpace.ok && gateOf(dEmpty.ok) && gateOf(uNoDef.ok) && verdictOf(notEngine.ok),
     'L1b r2 MAJOR 1: an engine\'s program row with a default (\'/usr/bin/true\', even \' \') ⇒ REFUSED by name «a plugin never names the program it runs; the executablePath row may not carry a default»; \'\' or no default validates; a non-engine plugin\'s row of that name is not the reserved one', { dTrue: dTrue.errors, dSpace: dSpace.errors });
   ok(off.contributes.browserEngine === undefined && M.capabilitiesHash(off) === M.capabilitiesHash(plain) && M.capabilitiesHash(v.manifest) !== M.capabilitiesHash(plain) && !M.needsConsent(plain), 'false = not an engine (named only when true): every capabilities hash before this lane stays the same — an existing trust is never voided — and growing into an engine re-asks consent');
 }
@@ -176,19 +176,19 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const le = create({ rootDir: eroot, app: expressE(), hostVersion: '2.369.356', log: { log() {}, warn() {} }, agentEnv: () => ({ PATH: process.env.PATH }) });
   const reg = require(path.join(REPO, 'src/server/browser-engines.js')).create({ loader: le, dataDir: path.join(eroot, 'data') });
   const row = () => le.list().find((p) => p.id === EID);
-  ok(row() && row().valid && row().contributes.browserEngine === true && row().needsConsent && !row().enabled && reg.rows().length === 0, 'the fixture engine plugin is listed (valid, an engine, consent needed) — and NOT in the engine table while disabled');
+  ok(gateOf(row()) && gateOf(row().valid) && row().contributes.browserEngine === true && gateOf(row().needsConsent) && !row().enabled && reg.rows().length === 0, 'the fixture engine plugin is listed (valid, an engine, consent needed) — and NOT in the engine table while disabled');
   let refused = null; try { le.setEnabled(EID, true); } catch (e) { refused = e; }
-  ok(refused && refused.status === 409 && reg.rows().length === 0, 'enabling it without consent is refused (409) — the table stays empty');
+  ok(gateOf(refused) && refused.status === 409 && reg.rows().length === 0, 'enabling it without consent is refused (409) — the table stays empty');
   le.setEnabled(EID, true, { trusted: true });
   ok(row().state !== 'running' ? reg.rows().length === 0 : true, 'enabled + trusted but its process not up yet ⇒ not in the table (state is part of the rule)');
-  ok(await waitFor(() => reg.rows().length === 1), 'enabled + trusted + RUNNING ⇒ in the engine table');
+  ok(verdictOf(await waitFor(() => reg.rows().length === 1)), 'enabled + trusted + RUNNING ⇒ in the engine table');
   const pr = await le.askRoute(EID, { method: 'GET', path: '/probe', query: { binaryPath: '/nonexistent/chrome' } });
   ok(pr.status === 200 && pr.body.installed === false && pr.body.binaryPath === '/nonexistent/chrome', 'askRoute: ONE IPC route ask (GET /probe) answers about the path it was handed', JSON.stringify(pr));
   let r404 = null; try { await le.askRoute('nope.nope', { path: '/probe' }); } catch (e) { r404 = e; }
-  ok(r404 && r404.status === 404, 'askRoute of a plugin that is not there ⇒ refused (404), never a hang');
+  ok(gateOf(r404) && r404.status === 404, 'askRoute of a plugin that is not there ⇒ refused (404), never a hang');
   le.get(EID).child.kill('SIGKILL');
-  ok(await waitFor(() => row().state === 'crashed' && reg.rows().length === 0, 3000), 'its process dies ⇒ out of the table at once (not running)');
-  ok(await waitFor(() => reg.rows().length === 1, 8000), '…restarted by the loader ⇒ back in');
+  ok(verdictOf(await waitFor(() => row().state === 'crashed' && reg.rows().length === 0, 3000)), 'its process dies ⇒ out of the table at once (not running)');
+  ok(verdictOf(await waitFor(() => reg.rows().length === 1, 8000)), '…restarted by the loader ⇒ back in');
   le.setEnabled(EID, false);
   ok(reg.rows().length === 0, 'disabled ⇒ out of the table at once');
   le.shutdown();
@@ -212,9 +212,9 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   put(um0.id, { ...um0, version: '0.0.2', contributes: { ...um0.contributes, settings: um0.contributes.settings.map((s) => (s.key === 'executablePath' ? { ...s, default: '/usr/bin/true' } : s)) } });
   ld.reload();
   const g2 = rowD(gm0.id), u2 = rowD(um0.id);
-  ok(before.every((x) => x === true) && g2.enabled === false && !ld.isTrusted(gm0.id) && /capabilities changed since you trusted this plugin/.test(String(g2.notice || '')),
+  ok(gateOf(before.every((x) => x === true)) && g2.enabled === false && !ld.isTrusted(gm0.id) && verdictOf(/capabilities changed since you trusted this plugin/.test(String(g2.notice || ''))),
     'L2 acceptance (A), through the REAL loader: a trusted engine whose next version drops its site-list row is SWITCHED OFF (enabled === false), untrusted, «capabilities changed since you trusted this plugin»', { before, enabled: g2.enabled, notice: g2.notice });
-  ok(u2.enabled === false && u2.valid === false && (u2.errors || []).some((e) => /a plugin never names the program it runs; the executablePath row may not carry a default/.test(e)),
+  ok(u2.enabled === false && u2.valid === false && verdictOf((u2.errors || []).some((e) => /a plugin never names the program it runs; the executablePath row may not carry a default/.test(e))),
     'L1b r2 MAJOR 1, through the REAL loader: a trusted engine whose next version names a program in its row\'s default is INVALID and switched off (enabled === false) with the refusal\'s own words — fail closed, never a program the plugin chose', { enabled: u2.enabled, valid: u2.valid, errors: u2.errors });
   ld.shutdown();
   try { fs.rmSync(droot, { recursive: true, force: true }); } catch {}
@@ -249,13 +249,13 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const regFile = () => JSON.parse(fs.readFileSync(path.join(R0, 'data', 'plugin-registry.json'), 'utf8'));
   // ① a fleet with no engine ⇒ nothing; ② the fleet names the plugin at a FULL sha ⇒ installed from git, trusted BY THE FLEET, enabled, running
   const r0 = await EDF.bootFleet();
-  ok(r0.skipped && !rowF() && !fetches().length, 'no fleet engine ⇒ the boot job does nothing (no git call)');
+  ok(gateOf(r0.skipped) && !rowF() && !fetches().length, 'no fleet engine ⇒ the boot job does nothing (no git call)');
   fleet = { plugin: EID, default: false, preinstall: false, source: { git: URL_HTTPS, ref: shaA }, kernel: { url: '', sha256: '' } };
   const r1 = await EDF.bootFleet();
   const t1 = regFile().trust[EID];
-  ok(r1.ok && r1.outcome === 'installed' && rowF() && rowF().version === '0.1.1' && rowF().trusted && rowF().trustedBy === 'fleet' && rowF().enabled && !rowF().consentRequired && rowF().install.by === 'fleet' && rowF().install.sha === shaA && t1.by === 'fleet' && t1.sha === shaA && t1.contentHash === regFile().installs[EID].contentHash,
+  ok(gateOf(r1.ok) && r1.outcome === 'installed' && gateOf(rowF()) && rowF().version === '0.1.1' && gateOf(rowF().trusted) && rowF().trustedBy === 'fleet' && gateOf(rowF().enabled) && !rowF().consentRequired && rowF().install.by === 'fleet' && rowF().install.sha === shaA && t1.by === 'fleet' && t1.sha === shaA && t1.contentHash === regFile().installs[EID].contentHash,
     'D2: the fleet\'s plugin at a full sha ⇒ installed from git, trust {by:\'fleet\', sha, contentHash} — enabled with no dialog (the panel says «Installed and trusted by the cluster»)', { row: rowF() && { trustedBy: rowF().trustedBy, enabled: rowF().enabled }, t1 });
-  ok(await waitFor(() => regF.rows().length === 1, 8000), '…its process runs ⇒ it is in the engine table');
+  ok(verdictOf(await waitFor(() => regF.rows().length === 1, 8000)), '…its process runs ⇒ it is in the engine table');
   // ③ every boot compares the record and never re-pulls the same; a moved pin installs the new sha
   const n1 = fetches().length;
   const r2 = await EDF.bootFleet();
@@ -266,18 +266,18 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   // ④ a TAG is never the trust anchor: installed, the owner asked once
   fleet = { ...fleet, source: { git: URL_HTTPS, ref: 'v0.1.1' } };
   const r4 = await EDF.bootFleet();
-  ok(r4.outcome === 'unpinned' && EDF.fleetView().code === 'fleet_ref_not_sha' && rowF().version === '0.1.1' && !rowF().trusted && rowF().trustedBy === null && rowF().consentRequired && !rowF().enabled, 'a fleet ref that is a TAG ⇒ installed but NOT pre-trusted (a tag can move — only a sha anchors D2): disabled, the owner enables it; the run says it by name (outcome «unpinned», fleet_ref_not_sha — lane fleet-plugin-catalog)', rowF() && { trusted: rowF().trusted, enabled: rowF().enabled });
+  ok(r4.outcome === 'unpinned' && EDF.fleetView().code === 'fleet_ref_not_sha' && rowF().version === '0.1.1' && !rowF().trusted && rowF().trustedBy === null && gateOf(rowF().consentRequired) && !rowF().enabled, 'a fleet ref that is a TAG ⇒ installed but NOT pre-trusted (a tag can move — only a sha anchors D2): disabled, the owner enables it; the run says it by name (outcome «unpinned», fleet_ref_not_sha — lane fleet-plugin-catalog)', rowF() && { trusted: rowF().trusted, enabled: rowF().enabled });
   fleet = { ...fleet, source: { git: URL_HTTPS, ref: shaA } };
   await EDF.bootFleet();
-  ok(rowF().trustedBy === 'fleet' && rowF().enabled, '…back on a sha ⇒ trusted by the fleet again');
+  ok(rowF().trustedBy === 'fleet' && verdictOf(rowF().enabled), '…back on a sha ⇒ trusted by the fleet again');
   // ⑤ the trust LAPSES: the fleet stops naming it · the fleet names another id · another package under the id
   const keep = fleet;
   fleet = null;
-  ok(!rowF().trusted && rowF().consentRequired, 'the fleet stops naming the plugin ⇒ its fleet trust no longer holds (the owner is asked)');
+  ok(!rowF().trusted && verdictOf(rowF().consentRequired), 'the fleet stops naming the plugin ⇒ its fleet trust no longer holds (the owner is asked)');
   fleet = { ...keep, plugin: 'acme.other' };
   ok(!rowF().trusted, 'the fleet names another plugin id ⇒ this one\'s fleet trust no longer holds');
   fleet = keep;
-  ok(rowF().trusted && rowF().trustedBy === 'fleet', '…named again at the same sha with the same package ⇒ it holds again');
+  ok(gateOf(rowF().trusted) && rowF().trustedBy === 'fleet', '…named again at the same sha with the same package ⇒ it holds again');
   const ins = regFile().installs[EID];
   const regRaw = regFile(); regRaw.installs[EID] = { ...ins, contentHash: 'f'.repeat(64) }; fs.writeFileSync(path.join(R0, 'data', 'plugin-registry.json'), JSON.stringify(regRaw));
   const lf2 = create({ rootDir: R0, app: null, autoStart: false, hostVersion: '2.369.356', log: quiet, fleetEngine: () => fleet });
@@ -293,26 +293,26 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const R3 = path.join(groot, 'root3'); fs.mkdirSync(path.join(R3, 'data', 'plugins'), { recursive: true });
   const lu = create({ rootDir: R3, app: null, autoStart: false, hostVersion: '2.369.356', log: quiet, gitBin: FX.WRAP, fleetEngine: () => fleet });
   const iu = await lu.install({ source: 'git', value: URL_HTTPS, ref: shaA, by: 'user' });
-  ok(!iu.plugin.trusted && iu.plugin.consentRequired && iu.plugin.install.by === 'user', 'the same package installed by a PERSON still asks once (D2 is the cluster\'s install only)');
+  ok(!iu.plugin.trusted && gateOf(iu.plugin.consentRequired) && iu.plugin.install.by === 'user', 'the same package installed by a PERSON still asks once (D2 is the cluster\'s install only)');
   // ⑧ a failed boot install: NAMED, ONE For-you notice, the Plugins panel's fleet line
   fleet = { ...keep, source: { git: URL_HTTPS, ref: 'v9.9.9' } };
   const r8 = await EDF.bootFleet();
   const mf = await (await fetch(`http://127.0.0.1:${srvF.address().port}/api/plugins/manifests`)).json();
-  ok(!r8.ok && r8.code === 'plugin_git_ref_missing' && todosF.length === 1 && todosF[0].origin === 'plugin' && /cluster's plugin could not be installed/.test(todosF[0].text) && /plugin_git_ref_missing/.test(todosF[0].detail) && mf.fleet && mf.fleet.outcome === 'failed' && mf.fleet.code === 'plugin_git_ref_missing',
+  ok(!r8.ok && r8.code === 'plugin_git_ref_missing' && todosF.length === 1 && todosF[0].origin === 'plugin' && gateOf(/cluster's plugin could not be installed/.test(todosF[0].text)) && gateOf(/plugin_git_ref_missing/.test(todosF[0].detail)) && gateOf(mf.fleet) && mf.fleet.outcome === 'failed' && mf.fleet.code === 'plugin_git_ref_missing',
     'a boot install that fails ⇒ named (plugin_git_ref_missing), ONE For-you notice (origin plugin), and GET /api/plugins/manifests carries the fleet line the Plugins panel draws', { r8, todo: todosF[0], fleet: mf.fleet });
   // ⑨ preinstall ⇒ the kernel right away (this package has no kernel.json ⇒ refused by name, said once)
   fleet = { ...keep, preinstall: true };
   const r9 = await EDF.bootFleet();
-  ok(r9.ok && r9.kernel && r9.kernel.ok === false && r9.kernel.code === 'browser_engine_protocol' && todosF.length === 2 && /browser kernel could not be downloaded/.test(todosF[1].text), 'preinstall: true ⇒ the boot asks for the kernel right away (here: the package names no kernel.json ⇒ refused by name, ONE notice)', { kernel: r9.kernel });
+  ok(gateOf(r9.ok) && gateOf(r9.kernel) && r9.kernel.ok === false && r9.kernel.code === 'browser_engine_protocol' && todosF.length === 2 && verdictOf(/browser kernel could not be downloaded/.test(todosF[1].text)), 'preinstall: true ⇒ the boot asks for the kernel right away (here: the package names no kernel.json ⇒ refused by name, ONE notice)', { kernel: r9.kernel });
   // ⑩ RED CONTROL: a loader whose D2 check forgets the id trusts the package the fleet did NOT name
   const LS = fs.readFileSync(path.join(REPO, 'src/server/plugin-loader.js'), 'utf8');
   const anchor = "const fleetTrust = !!f && f.plugin === r.id && ";
-  ok(LS.includes(anchor), 'control: D2\'s id check is in plugin-loader.js');
+  ok(verdictOf(LS.includes(anchor)), 'control: D2\'s id check is in plugin-loader.js');
   const Lx = mutantCopies('plugin-loader-d2', REPO).load('src/server/plugin-loader.js', editAnchor(editAnchor(LS, anchor, 'const fleetTrust = !!f && ', "src/server/plugin-loader.js"), 'return !!(f && f.plugin === id && ', 'return !!(f && ', "src/server/plugin-loader.js"), 'any-id');
   const R4 = path.join(groot, 'root4'); fs.mkdirSync(path.join(R4, 'data', 'plugins'), { recursive: true });
   const lx = Lx.create({ rootDir: R4, app: null, autoStart: false, hostVersion: '2.369.356', log: quiet, gitBin: FX.WRAP, fleetEngine: () => fleet2 });
   const ix = await lx.install({ source: 'git', value: URL_HTTPS, ref: shaA, credential: 'auto', by: 'fleet' });
-  ok(ix.plugin.trusted && ix.trustedBy === 'fleet', 'control: that copy pre-trusts a package under an id the fleet never named — exactly what ⑥ refuses (RED)');
+  ok(gateOf(ix.plugin.trusted) && ix.trustedBy === 'fleet', 'control: that copy pre-trusts a package under an id the fleet never named — exactly what ⑥ refuses (RED)');
   lf.shutdown(); srvF.close();
   try { fs.rmSync(groot, { recursive: true, force: true }); } catch {}
 }
@@ -336,10 +336,10 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const rU = await EDU.bootFleet();
   const said = linesU.filter((l) => /runs the program its owner names \(executablePath\) — the fleet's kernel \/ preinstall is ignored/.test(l));
   const kfU = EDU.kernelFact(UID);
-  ok(rU.ok && rU.outcome === 'installed' && rU.kernel && rU.kernel.ignored === 'user-source' && said.length === 1 && !fetched.length && !todosU.length && kfU.state === 'absent',
+  ok(gateOf(rU.ok) && rU.outcome === 'installed' && gateOf(rU.kernel) && rU.kernel.ignored === 'user-source' && said.length === 1 && !fetched.length && !todosU.length && kfU.state === 'absent',
     'L1b ②d: the fleet\'s engine plugin whose program its OWNER names ⇒ installed from git as before, its preinstall + kernel IGNORED with ONE journal line — nothing fetched, no failure kept, no For-you item', { rU, said: said.length, fetched, todos: todosU.length, kf: kfU.state });
   const eK = await (async () => { try { await EDU.installKernel(UID, { by: 'user' }); return null; } catch (e) { return e; } })();
-  ok(eK && eK.code === 'engine_source_user' && /runs the program you name in its settings/.test(eK.message) && !fetched.length, 'L1b ②d: a person\'s download asked for it ⇒ engine_source_user by name (the route\'s 409), nothing fetched', eK && eK.message);
+  ok(gateOf(eK) && eK.code === 'engine_source_user' && gateOf(/runs the program you name in its settings/.test(eK.message)) && !fetched.length, 'L1b ②d: a person\'s download asked for it ⇒ engine_source_user by name (the route\'s 409), nothing fetched', eK && eK.message);
   try { fs.rmSync(uroot, { recursive: true, force: true }); } catch {}
 }
 
@@ -347,22 +347,22 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const pc = read('src/lib/plugin-client.js');
 const sandboxConst = (pc.match(/const IFRAME_SANDBOX = '([^']*)'/) || [])[1] || '';
-ok(/registerWindowType\(\{/.test(pc) && /action: w\.action/.test(pc) && /sandbox', IFRAME_SANDBOX/.test(pc) && sandboxConst.includes('allow-scripts') && !sandboxConst.includes('allow-same-origin'), `plugin-client registers contributed windows as window types and frames them sandboxed (never allow-same-origin): "${sandboxConst}"`);
-ok(/plugins-manifests-updated/.test(pc), 'plugin-client re-applies on the manifests broadcast');
+ok(gateOf(/registerWindowType\(\{/.test(pc)) && gateOf(/action: w\.action/.test(pc)) && gateOf(/sandbox', IFRAME_SANDBOX/.test(pc)) && gateOf(sandboxConst.includes('allow-scripts')) && !sandboxConst.includes('allow-same-origin'), `plugin-client registers contributed windows as window types and frames them sandboxed (never allow-same-origin): "${sandboxConst}"`);
+ok(verdictOf(/plugins-manifests-updated/.test(pc)), 'plugin-client re-applies on the manifests broadcast');
 const appSrc = read('src/lib/app.js');
 const gearSrc = read('src/lib/gear-menu.js');
-ok(/installPluginClient\(this\)/.test(appSrc) && /pluginClient\?\.contributedWindows\?\.\(\)/.test(appSrc + gearSrc), 'app installs the plugin client and the ⚙ menu (gear-menu.js since Ph1) lists contributed windows');
+ok(gateOf(/installPluginClient\(this\)/.test(appSrc)) && verdictOf(/pluginClient\?\.contributedWindows\?\.\(\)/.test(appSrc + gearSrc)), 'app installs the plugin client and the ⚙ menu (gear-menu.js since Ph1) lists contributed windows');
 const wiring = read('src/server/mounts-plugins-wiring.js');
-ok(/require\('\.\/plugin-loader\.js'\)\.create\(/.test(wiring) && /agentAuth: \(req\) =>/.test(wiring) && /sameToken\(tok, s\.agentToken\)|s\.agentToken === tok/.test(wiring) && /pluginLoader\.shutdown\(\)/.test(wiring), 'wiring creates the loader with a vsst_-validating agentAuth and shuts plugin processes down with the server');
-ok(/, activeSessions,$/m.test(read('server.js')) && /pluginLoader,$/m.test(read('server.js')) && /const \{ agentEnv \} = require\('\.\.\/ws-handler'\);/.test(wiring), 'server.js passes activeSessions and receives the loader; the wiring takes agentEnv from ws-handler (the ONE sanitized-env builder)');
-ok(/'src\/plugin-manifest\.js'/.test(read('scripts/test-architecture.mjs')), 'the manifest validator is in the PURE tier');
+ok(gateOf(/require\('\.\/plugin-loader\.js'\)\.create\(/.test(wiring)) && gateOf(/agentAuth: \(req\) =>/.test(wiring)) && gateOf(/sameToken\(tok, s\.agentToken\)|s\.agentToken === tok/.test(wiring)) && verdictOf(/pluginLoader\.shutdown\(\)/.test(wiring)), 'wiring creates the loader with a vsst_-validating agentAuth and shuts plugin processes down with the server');
+ok(gateOf(/, activeSessions,$/m.test(read('server.js'))) && gateOf(/pluginLoader,$/m.test(read('server.js'))) && verdictOf(/const \{ agentEnv \} = require\('\.\.\/ws-handler'\);/.test(wiring)), 'server.js passes activeSessions and receives the loader; the wiring takes agentEnv from ws-handler (the ONE sanitized-env builder)');
+ok(verdictOf(/'src\/plugin-manifest\.js'/.test(read('scripts/test-architecture.mjs'))), 'the manifest validator is in the PURE tier');
 const pui = read('src/lib/plugins-ui.js');
-ok(/fetchJson\('\/api\/plugins\/manifests'\)/.test(pui) && /\/api\/plugins\/manifests\/\$\{encodeURIComponent\(p\.id\)\}\/enabled/.test(pui) && /manifests\/reload/.test(pui) && /this\.pluginClient\?\.open\?\./.test(pui), 'the Plugins panel lists manifest plugins with enable/disable, rescan and open-window actions');
+ok(gateOf(/fetchJson\('\/api\/plugins\/manifests'\)/.test(pui)) && gateOf(/\/api\/plugins\/manifests\/\$\{encodeURIComponent\(p\.id\)\}\/enabled/.test(pui)) && gateOf(/manifests\/reload/.test(pui)) && verdictOf(/this\.pluginClient\?\.open\?\./.test(pui)), 'the Plugins panel lists manifest plugins with enable/disable, rescan and open-window actions');
 // lane plugin-settings-p0: a manifest plugin is a LIST row — ids / errors reach the DOM as textContent / title (pluginRow has no innerHTML)
 const rowFnL = pui.slice(pui.indexOf('function pluginRow('), pui.indexOf('\n}\n', pui.indexOf('function pluginRow(')));
-ok(rowFnL.length > 100 && !/innerHTML/.test(rowFnL) && /\.\.\.\(p\.errors \|\| \[\]\), p\.lastError/.test(pui) && /pluginRow\(\{ id: p\.id, label: p\.label \|\| p\.id, idTip: p\.label && p\.label !== p\.id \? p\.id : ''/.test(pui), 'manifest fields reach the panel as text (ids/errors come from disk, never trusted HTML — pluginRow: textContent / title)');
-for (const dict of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(['Installed plugins', 'Rescan', 'Plugin enabled', 'parked after repeated crashes'].every((k) => read(dict).includes(JSON.stringify(k) + ':')), `${dict} carries the new panel strings`);
-ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /res\.status\(401\)/.test(read('src/server/plugin-loader.js')), 'the tool route lives under the cookie-exempt /api/agent/ prefix and enforces the bearer itself');
+ok(rowFnL.length > 100 && !/innerHTML/.test(rowFnL) && gateOf(/\.\.\.\(p\.errors \|\| \[\]\), p\.lastError/.test(pui)) && verdictOf(/pluginRow\(\{ id: p\.id, label: p\.label \|\| p\.id, idTip: p\.label && p\.label !== p\.id \? p\.id : ''/.test(pui)), 'manifest fields reach the panel as text (ids/errors come from disk, never trusted HTML — pluginRow: textContent / title)');
+for (const dict of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(verdictOf(['Installed plugins', 'Rescan', 'Plugin enabled', 'parked after repeated crashes'].every((k) => read(dict).includes(JSON.stringify(k) + ':'))), `${dict} carries the new panel strings`);
+ok(gateOf(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js'))) && verdictOf(/res\.status\(401\)/.test(read('src/server/plugin-loader.js'))), 'the tool route lives under the cookie-exempt /api/agent/ prefix and enforces the bearer itself');
 
 // ── ⑪ B-f276 (主开发 r3305; the store census's «37 more stores judged», item 3): plugin-registry.json UNDER THE STORE-READ LAW ──
 // The release read ANY failure of data/plugin-registry.json as EMPTY: every plugin OFF and UNTRUSTED, the next enable / install /
@@ -426,18 +426,18 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
   const PLr = require(path.join(REPO, 'src/server/plugin-loader.js'));
   const a = await scene(PLr, 'refused');
   console.log(`    facts (refused read): ${JSON.stringify(a)}`);
-  ok(a.refused >= 1 && a.held && a.rowEnabled === null && a.rowTrusted === null && a.rowHeld && a.trust === null,
+  ok(a.refused >= 1 && gateOf(a.held) && a.rowEnabled === null && a.rowTrusted === null && gateOf(a.rowHeld) && a.trust === null,
     'B-f276 (r3305 (a)): a REFUSED read of plugin-registry.json HOLDS the registry — the plugin the file names ON and TRUSTED reads «unknown» (enabled null, trusted null, held), never «off» or «untrusted»', a);
-  ok(['enable', 'off', 'uninstall', 'update', 'install'].every((k) => refusedBy(a.tries[k])) && a.same && a.dirKept,
+  ok(gateOf(['enable', 'off', 'uninstall', 'update', 'install'].every((k) => refusedBy(a.tries[k]))) && gateOf(a.same) && verdictOf(a.dirKept),
     'B-f276 (r3305 (b)(c)): while held EVERY writer is refused BY NAME (503 plugin_registry_unread, its words name the file) before any side effect — enable with consent, switch off, uninstall, update, install — and the file stays byte for byte, the plugin\'s folder in place', a.tries);
-  ok(a.before.shimKept && a.shimKept, 'B-f276 (r3305 (c)): the start\'s shim sync removes NO agent tool\'s shim by the registry\'s silence', a);
+  ok(gateOf(a.before.shimKept) && verdictOf(a.shimKept), 'B-f276 (r3305 (c)): the start\'s shim sync removes NO agent tool\'s shim by the registry\'s silence', a);
   ok(!!(a.lifted && a.afterLift && !a.afterLift.held && a.afterLift.enabled === true && a.afterLift.trusted === true && a.afterLift.same && a.afterLift.shimKept),
     'B-f276: THE LIFT — the file read again: the plugin is ON and TRUSTED again as the file says (what the start skipped runs), nothing was written over it', a.afterLift);
   const t = await scene(PLr, 'torn');
   console.log(`    facts (torn bytes): ${JSON.stringify(t)}`);
-  ok(t.copies.length === 1 && t.copies[0] === true && t.before.dirKept && t.rowEnabled === false && !t.held,
+  ok(t.copies.length === 1 && t.copies[0] === true && gateOf(t.before.dirKept) && t.rowEnabled === false && !t.held,
     'B-f276: TORN bytes are kept aside ONCE (a copy byte for byte beside the file), then the registry starts empty — the plugin\'s folder stays where it is', t);
-  ok(t.dirKept && !t.shimKept, 'B-f276 (r3634, the round\'s pin): a torn lift starts EMPTY as the family designed — the plugin is off, so its derived agent-tool launcher goes (written again at the next enable; kept, it would answer 404); its folder stays', { dirKept: t.dirKept, shimKept: t.shimKept });
+  ok(gateOf(t.dirKept) && !t.shimKept, 'B-f276 (r3634, the round\'s pin): a torn lift starts EMPTY as the family designed — the plugin is off, so its derived agent-tool launcher goes (written again at the next enable; kept, it would answer 404); its folder stays', { dirKept: t.dirKept, shimKept: t.shimKept });
   // RED: the release's bare catch (any failure = empty)
   const LS0 = fs.readFileSync(path.join(REPO, 'src/server/plugin-loader.js'), 'utf8');
   const relSrc = editAnchor(LS0, "  { let read; try { read = { text: fs.readFileSync(registryFile, 'utf-8') }; } catch (error) { read = { error }; } const a0 = SR.storeAnswer(read, { valid: REGISTRY_SHAPE }); if (hold.start(a0) === 'data') registry = normalize(a0.value); }",
@@ -485,7 +485,7 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
   console.log(`    facts (engines, held): ${JSON.stringify(g)}`);
   ok(g.probe === 'plugin_registry_unread' && g.table === 0 && g.heldFact === true,
     'B-f276 (r3305 (a)): while held the engine table lists no manifest engine and the probe of the engine plugin the file names answers the REGISTRY\'s own refusal (plugin_registry_unread) — never «not installed», never Chrome in its place', g);
-  ok(g.fleet.skipped && g.fleet.outcome === 'held' && g.fleet.installs === 0 && g.fleet.todos === 0,
+  ok(gateOf(g.fleet.skipped) && g.fleet.outcome === 'held' && g.fleet.installs === 0 && g.fleet.todos === 0,
     'B-f276 (r3305 (c)): the cluster\'s fleet run steps aside BY NAME (outcome held) — nothing installed over the held file, no failure notice', g.fleet);
   ok(g.install.code === 'plugin_registry_unread' && !g.install.consent && g.measure.code === 'plugin_registry_unread' && !g.measure.consent && g.todosHeld === 0,
     'B-f276 (r3305 (a)(b)): the kernel\'s download and its version measure are refused by the registry\'s name — never «waiting for your consent» (no consent asked again over the held file), nothing filed', g);
@@ -499,7 +499,7 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
     '    if (!pv) return BE.missingOf({ id });\n    const src = await sourceOf(id);', 'src/server/browser-engines.js'); // stale-pins: kept (the RED's plant: the release's text)
   const gx = await engineScene(MCe.load('src/server/engine-distribution.js', EDsRel, 'release-trust'), MCe.load('src/server/browser-engines.js', BEsRel, 'release-missing'));
   console.log(`    facts (engines, red): ${JSON.stringify(gx)}`);
-  ok(gx.probe === 'browser_engine_missing' && gx.fleet.installs >= 1 && gx.install.code === 'engine_untrusted' && gx.install.consent && gx.measure.code === 'engine_untrusted',
+  ok(gx.probe === 'browser_engine_missing' && gx.fleet.installs >= 1 && gx.install.code === 'engine_untrusted' && gateOf(gx.install.consent) && gx.measure.code === 'engine_untrusted',
     'RED CONTROL (B-f276 engines, the release\'s readers): the held registry reads as EMPTY — the engine «not installed», the fleet run INSTALLS over the held file, the download and the measure «waiting for your consent»', gx);
   // (c) THE PAGE's plugin client: a HELD list tears nothing down (a plugin theme dropped would reset the person's theme to dark and save
   // it). RED: the release's apply — the held rows read as «all off»
@@ -514,7 +514,7 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
     return { dropped, deact, kept: pc._modules.has(PID) && pc._themes.has(PID) };
   };
   const pg = await pageScene(pathToFileURL(path.join(REPO, 'src/lib/plugin-client.js')).href);
-  ok(pg.kept && !pg.dropped.length && !pg.deact.length, 'B-f276 (r3305 (c)): the page\'s plugin client keeps what it applied while the list is HELD — no plugin theme dropped (the person\'s theme never reset), no module deactivated', pg);
+  ok(gateOf(pg.kept) && !pg.dropped.length && !pg.deact.length, 'B-f276 (r3305 (c)): the page\'s plugin client keeps what it applied while the list is HELD — no plugin theme dropped (the person\'s theme never reset), no module deactivated', pg);
   const PCs0 = fs.readFileSync(path.join(REPO, 'src/lib/plugin-client.js'), 'utf8');
   const pcRel = editAnchor(PCs0, '    if ((meta && meta.held) || (Array.isArray(list) && list.some((m) => m && m.held))) return this._applying || Promise.resolve();   // r3634: the list\'s own hold too\n', '', 'src/lib/plugin-client.js');
   const pgx = await pageScene(pathToFileURL(MCe.write('src/lib/plugin-client.js', pcRel, 'held-as-off')).href);
@@ -589,9 +589,9 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
       const pa = await pageOf(pcUrl, a.raw), pb = await pageOf(pcUrl, b.raw);
       console.log(`    facts (theme, torn lift): ${JSON.stringify({ msg: a.msg, page: pa })}`);
       console.log(`    facts (theme, rescan while held): ${JSON.stringify({ msg: b.msg, page: pb })}`);
-      ok(!!a.msg.torn && !a.msg.held && a.msg.rows.every((r) => r.enabled === false) && pa.stored === pa.key && pa.pending === pa.key && pa.back,
+      ok(!!a.msg.torn && !a.msg.held && gateOf(a.msg.rows.every((r) => r.enabled === false)) && pa.stored === pa.key && pa.pending === pa.key && verdictOf(pa.back),
         'B-f276 (r3634 (a)): A TORN LIFT broadcasts its rows off WITH the torn start beside them — the page drops the plugin\'s theme from view but STORES nothing: the person\'s pick stays stored and pending, and comes back when the plugin is on again', { msg: a.msg, page: pa });
-      ok(!!b.msg.held && b.msg.rows === 0 && pb.stored === pb.key && pb.current === pb.key && pb.back,
+      ok(!!b.msg.held && b.msg.rows === 0 && pb.stored === pb.key && pb.current === pb.key && verdictOf(pb.back),
         'B-f276 (r3634 (b)): A RESCAN WHILE HELD whose plugins folder did not list broadcasts an EMPTY list WITH the hold beside it — the page keeps what it applied: the person\'s theme shown and stored', { msg: b.msg, page: pb });
       // RED: the release's client — it keys on the rows' own flag only and drops with a stored fallback
       const relPc = editAnchor(editAnchor(pcSrc, '    const keepChoice = !!(meta && meta.torn);\n', '    const keepChoice = false;   // the release: every drop stores the fallback\n', 'src/lib/plugin-client.js'),
@@ -608,4 +608,4 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

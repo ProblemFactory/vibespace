@@ -34,7 +34,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const t0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -159,15 +159,15 @@ for (const m of MODELS) {
   try { mod = m.esm ? await import(pathToFileURL(path.join(REPO, m.file)).href) : require(path.join(REPO, m.file)); } catch (e) { mod = null; }
   loaded[m.file] = mod;
   let good = false; try { good = !!mod && !!m.check(mod); } catch { good = false; }
-  ok(good, `${m.file} spells ALL AGENTS: ${m.spelled}`);
+  ok(verdictOf(good), `${m.file} spells ALL AGENTS: ${m.spelled}`);
 }
 // the raw-API lane INHERITS the row (its tier lives on the access row — design: "TIER per (credential, principal) on
 // the EXISTING access row"): when its module lands it must spell `everyone` (the default tier under All = read)
 // — the TIER modules (a raw-API file that spells the tier ladder; the card modules draw one conversation's proposal, no tier picker)
 const TIER_RE = /\b(API_TIERS|TIERS)\b|'write-ask'/;
 const rawApi = tracked.filter((f) => /^src\/(lib\/)?channel-api[\w-]*\.js$/.test(f) && TIER_RE.test(read(f)));
-ok(rawApi.includes('src/channel-api.js') && rawApi.includes('src/lib/channel-api-dialog.js'), `the raw-API tier modules are found by their tier ladder (${rawApi.join(', ')})`, rawApi);
-for (const f of rawApi) ok(/\beveryone\b/.test(read(f)), `${f} (the raw-API tiers) spells ALL AGENTS — the tier under All is read at most by default`);
+ok(gateOf(rawApi.includes('src/channel-api.js')) && verdictOf(rawApi.includes('src/lib/channel-api-dialog.js')), `the raw-API tier modules are found by their tier ladder (${rawApi.join(', ')})`, rawApi);
+for (const f of rawApi) ok(verdictOf(/\beveryone\b/.test(read(f))), `${f} (the raw-API tiers) spells ALL AGENTS — the tier under All is read at most by default`);
 /** the RULE, by behaviour: All agents ⇒ Read at most by default; a write tier for everyone only with its own tick. */
 const everyoneRule = (FA) => {
   const g = (tier, allWrite) => { try { return !!FA.apiGrant({ principal: { kind: 'everyone', id: '*' }, cred: 'acct-1', tier, by: 'user', allWrite }); } catch { return false; } };
@@ -175,9 +175,9 @@ const everyoneRule = (FA) => {
     && !!FA.apiGrant({ principal: { kind: 'agent', id: 'cid-1' }, cred: 'acct-1', tier: 'write-ask', by: 'user' });
 };
 const FAPI = require(path.join(REPO, 'src/channel-api.js'));
-ok(everyoneRule(FAPI), 'src/channel-api.js spells the `everyone` rule: All agents ⇒ Read at most by default; write-ask / write-auto for everyone only with its own tick (allWrite) — an agent row is unchanged');
+ok(verdictOf(everyoneRule(FAPI)), 'src/channel-api.js spells the `everyone` rule: All agents ⇒ Read at most by default; write-ask / write-auto for everyone only with its own tick (allWrite) — an agent row is unchanged');
 const DLG = read('src/lib/channel-api-dialog.js');
-ok(/r\.key === 'everyone:\*' && r\.tier !== 'read'/.test(DLG) && /t\('Let every agent write through this account/.test(DLG) && /allWrite: !!r\.allWrite/.test(DLG), 'the dialog SAYS it: the All row at a write tier shows its own tick, and Save sends it (allWrite)');
+ok(gateOf(/r\.key === 'everyone:\*' && r\.tier !== 'read'/.test(DLG)) && gateOf(/t\('Let every agent write through this account/.test(DLG)) && verdictOf(/allWrite: !!r\.allWrite/.test(DLG)), 'the dialog SAYS it: the All row at a write tier shows its own tick, and Save sends it (allWrite)');
 // THE PRINTED TABLE (the report's)
 console.log('\n  surface · model · had "everyone" before this lane · how it is spelled now');
 for (const r of SURFACES) console.log(`  · ${r.surface} · ${r.model} · ${r.before} · ${r.spelled}`);
@@ -191,9 +191,9 @@ console.log('  · [inherits] the raw-API tier rows (SharedContext/vibespace-chan
   const f = 'src/lib/channel-reach-editor.js';
   const planted = { ...libFiles, [f]: libFiles[f].replace(", everyone: { key: 'everyone:*' } });", ' });') };
   const c1 = census(planted);
-  ok(planted[f] !== libFiles[f] && c1.problems.some((p) => /Grant reach to/.test(p) && /no ALL AGENTS row/.test(p)), 'CONTROL (1): the reach editor\'s picker without `everyone:` is RED (a surface without the All row)', c1.problems);
+  ok(planted[f] !== libFiles[f] && verdictOf(c1.problems.some((p) => /Grant reach to/.test(p) && /no ALL AGENTS row/.test(p))), 'CONTROL (1): the reach editor\'s picker without `everyone:` is RED (a surface without the All row)', c1.problems);
   const plantedNew = { ...libFiles, 'src/lib/planted-share.js': "import { principalPicker } from './principal-picker.js';\nconst p = principalPicker({ items: [], multi: true, label: t('Planted') });\n" };
-  ok(census(plantedNew).problems.some((p) => /planted-share\.js/.test(p) && /no census row names/.test(p)), 'CONTROL (1b): a NEW picker call no row names is RED (a new permission surface must say how it offers All agents)');
+  ok(verdictOf(census(plantedNew).problems.some((p) => /planted-share\.js/.test(p) && /no census row names/.test(p))), 'CONTROL (1b): a NEW picker call no row names is RED (a new permission surface must say how it offers All agents)');
   {   // (1d) a comment inside a call: its apostrophe never opens a string — each call's text ends at its own close. RED: the
       // extractor without its comment skip (rebuilt from its own text) runs the first call into the second
     const TWO = "const a = principalPicker({ items: [], // the window's share\n  label: t('One') });\nconst b = principalPicker({ items: [], label: t('Two') });\n";
@@ -201,13 +201,13 @@ console.log('  · [inherits] the raw-API tier rows (SharedContext/vibespace-chan
     const SKIP = /\n {6}if \(c === '\/' && src\[i \+ 1\] === '\/'\)[^\n]*\n {6}if \(c === '\/' && src\[i \+ 1\] === '\*'\)[^\n]*/;
     const oldSrc = pickerCalls.toString().replace(SKIP, '');
     const oldCalls = oldSrc !== pickerCalls.toString() ? new Function('return ' + oldSrc)()(TWO) : null;
-    ok(two.length === 2 && /t\('One'\) \}$/.test(two[0].text) && !/Two/.test(two[0].text) && !!oldCalls && /Two/.test(oldCalls[0].text),
+    ok(two.length === 2 && gateOf(/t\('One'\) \}$/.test(two[0].text)) && !/Two/.test(two[0].text) && !!oldCalls && verdictOf(/Two/.test(oldCalls[0].text)),
       'CONTROL (1d): an apostrophe in a comment inside a picker call never opens a string — each call ends at its own close; the extractor without its comment skip runs the first call into the second (red)', { two: two.map((c) => c.text.length), old: oldCalls && oldCalls.map((c) => c.text.length) });
   }
   // lane key-grant-everyone: the Vault key picker WITHOUT its row (= 91bf7e18's call) is RED now that it is a surface
   const fv = 'src/lib/vault-automation.js';
   const plantedV = { ...libFiles, [fv]: libFiles[fv].replace('everyone: { key: EVERYONE_SUBJECT }, ', '') };
-  ok(plantedV[fv] !== libFiles[fv] && census(plantedV).problems.some((p) => /Automation keys/.test(p) && /no ALL AGENTS row/.test(p)), 'CONTROL (1c): the Vault key picker (授权给…) without `everyone:` — the base\'s call — is RED (lane key-grant-everyone)', census(plantedV).problems);
+  ok(plantedV[fv] !== libFiles[fv] && verdictOf(census(plantedV).problems.some((p) => /Automation keys/.test(p) && /no ALL AGENTS row/.test(p))), 'CONTROL (1c): the Vault key picker (授权给…) without `everyone:` — the base\'s call — is RED (lane key-grant-everyone)', census(plantedV).problems);
   // (2) a NEW model file declaring a principal kind list is a candidate with no row ⇒ red; a REAL model whose kinds
   // lose `everyone` (a patched copy of channel-acl, loaded) fails its own spelling check ⇒ red
   const unlistedOf = (texts) => Object.entries(texts).filter(([f, src]) => (MODEL_RE.test(src) || /(^|\/|-)(acl|reach)\.js$/.test(f)) && !MODEL_EXEMPT[f] && !MODELS.some((m) => m.file === f)).map(([f]) => f);
@@ -250,7 +250,7 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
   const bad = T.filter(([, gs, ctx, lv, via]) => { const e = ACL.effective(ctx, target, gs); return e.level !== lv || e.via !== via; }).map(([n, gs, ctx]) => [n, ACL.effective(ctx, target, gs)]);
   ok(!bad.length, `channel-acl: ${T.length}-row table — MAX over the agent's / its group's / All's rows, via named`, bad);
   const v = ACL.validateGrant({ principal: { kind: 'everyone', id: 'anything', name: 'x' }, scope: { kind: 'conversation', id: target.key }, level: 'visible', origin: 'access' });
-  ok(v.ok && v.grant.principal.id === '*' && v.grant.principal.name === null && ACL.grantId(v.grant) === 'everyone:*|conversation:lark-1/c1|access', 'channel-acl: ONE spelling on disk ({kind:everyone, id:*}, no name), one row per (All, scope, origin)');
+  ok(gateOf(v.ok) && v.grant.principal.id === '*' && v.grant.principal.name === null && ACL.grantId(v.grant) === 'everyone:*|conversation:lark-1/c1|access', 'channel-acl: ONE spelling on disk ({kind:everyone, id:*}, no name), one row per (All, scope, origin)');
   const both = ACL.applyGrant(ACL.applyGrant([gA({ kind: 'agent', id: 'cid-a' }, 'requestable')], gA(ALL, 'visible')), gA({ kind: 'group', id: 'tg-1' }, 'requestable'));
   const back = ACL.removeGrant(both, { principal: ALL, scope: { kind: 'conversation', id: target.key }, origin: 'user' });
   ok(back.length === 2 && J(back.map((g) => g.principal.id)) === J(['cid-a', 'tg-1']) && ACL.effective(ag, target, back).level === 'requestable', 'channel-acl: removing All leaves every specific row exactly as it was (requestable again)');
@@ -259,10 +259,10 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
   // channel-filter: access + watchers + the fan-out
   const ALL = { kind: 'everyone', id: '*' };
   const va = F.validateAccess([{ principal: { kind: 'everyone', id: 'x', name: 'All' }, authority: 'draft' }, { principal: { kind: 'agent', id: 'cid-a', name: 'A' }, authority: 'send' }], { policyRequiresReview: false, offersSend: true });
-  ok(va.ok && va.access[0].principal.id === '*' && va.access[0].principal.name === null && F.principalKey(va.access[0].principal) === 'everyone:*', 'channel-filter: an All access row is stored {kind:everyone, id:*}, keyed everyone:*', va);
-  ok(F.rowNames({ principal: ALL }, { kind: 'agent', id: 'zz' }) && !F.rowNames({ principal: ALL }, { kind: 'user' }) && F.rowNames({ principal: { kind: 'everyone', id: '*', target: 'c1' } }, { kind: 'agent', id: 'c1' }) && !F.rowNames({ principal: { kind: 'everyone', id: '*', target: 'c1' } }, { kind: 'agent', id: 'c2' }), 'channel-filter: an All row names EVERY agent (a fan-out target names its own conversation only)');
+  ok(gateOf(va.ok) && va.access[0].principal.id === '*' && va.access[0].principal.name === null && F.principalKey(va.access[0].principal) === 'everyone:*', 'channel-filter: an All access row is stored {kind:everyone, id:*}, keyed everyone:*', va);
+  ok(gateOf(F.rowNames({ principal: ALL }, { kind: 'agent', id: 'zz' })) && !F.rowNames({ principal: ALL }, { kind: 'user' }) && gateOf(F.rowNames({ principal: { kind: 'everyone', id: '*', target: 'c1' } }, { kind: 'agent', id: 'c1' })) && !F.rowNames({ principal: { kind: 'everyone', id: '*', target: 'c1' } }, { kind: 'agent', id: 'c2' }), 'channel-filter: an All row names EVERY agent (a fan-out target names its own conversation only)');
   const vw = F.validateWatchers([{ principal: ALL, notify: 'wake' }], [{ principal: { kind: 'agent', id: 'cid-a' } }]);
-  ok(!vw.ok && vw.code === 'watcher-needs-access' && /all agents has no access here/.test(vw.error), 'channel-filter: an All watcher NEEDS All\'s access row (watcher-needs-access, worded "all agents")', vw);
+  ok(!vw.ok && vw.code === 'watcher-needs-access' && verdictOf(/all agents has no access here/.test(vw.error)), 'channel-filter: an All watcher NEEDS All\'s access row (watcher-needs-access, worded "all agents")', vw);
   const eff = F.effectiveGrants({ conversation: { access: [{ principal: { kind: 'agent', id: 'cid-a' }, authority: 'draft' }], watchers: [] }, account: { access: [{ principal: ALL, authority: 'send' }], watchers: [{ principal: ALL, notify: 'wake', mode: 'all', dailyWakeCap: 2 }] } }, {});
   const authFor = (ctx) => (eff.access.some((x) => F.rowNames(x.row, ctx) && x.row.authority === 'send') ? 'send' : 'draft');
   ok(eff.access.length === 2 && authFor({ kind: 'agent', id: 'cid-a' }) === 'send' && authFor({ kind: 'agent', id: 'cid-z' }) === 'send', 'channel-filter: A\'s own draft row never narrows All\'s send (authority = MAX over every row naming the agent — the engine\'s rule)');
@@ -302,13 +302,13 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
   ];
   const bad = T.filter(([rec, ctx, lv, via]) => { const r = R.reachFor(rec, ctx); return r.level !== lv || r.via !== via; }).map(([rec, ctx]) => [ctx, R.reachFor(rec, ctx)]);
   ok(!bad.length, `window-reach: ${T.length}-row table — All exposes every agent session, a session's / group's own row is named first, no caller ⇒ hidden`, bad);
-  ok(g1.changed && g1.row.principal.id === '*' && !g1.row.principal.name && !R.grant(g1.record, { kind: 'everyone', id: 'other' }).changed, 'window-reach: ONE All row (any id spells *; a second grant changes nothing)');
+  ok(gateOf(g1.changed) && g1.row.principal.id === '*' && !g1.row.principal.name && !R.grant(g1.record, { kind: 'everyone', id: 'other' }).changed, 'window-reach: ONE All row (any id spells *; a second grant changes nothing)');
   const rv = R.revoke(g3.record, ALLP);
-  ok(rv.changed && J(rv.record.rows.map((r) => r.principal.kind)) === J(['session', 'group']) && R.reachFor(rv.record, { sessionKeys: ['claude:zzz'] }).level === 'hidden', 'window-reach: revoking All drops only the All row — the session and group rows stay as they were');
+  ok(gateOf(rv.changed) && J(rv.record.rows.map((r) => r.principal.kind)) === J(['session', 'group']) && R.reachFor(rv.record, { sessionKeys: ['claude:zzz'] }).level === 'hidden', 'window-reach: revoking All drops only the All row — the session and group rows stay as they were');
   const pm = R.pickerModel({ sessions: [{ id: 's1', name: 'A', backend: 'claude', backendSessionId: 'abc' }], groups: [], record: g1.record });
-  ok(pm.everyone && pm.everyone.checked === true && !pm.others.length && R.pickerModel({ sessions: [], groups: [], record: rec0 }).everyone.checked === false, 'window-reach: the picker model answers All as its own entry (checked from the record), never as an "other"');
+  ok(gateOf(pm.everyone) && pm.everyone.checked === true && !pm.others.length && R.pickerModel({ sessions: [], groups: [], record: rec0 }).everyone.checked === false, 'window-reach: the picker model answers All as its own entry (checked from the record), never as an "other"');
   const ns = R.normShare({ principals: [ALLP, { kind: 'group', id: 'tg-1' }], mode: 'auto' });
-  ok(ns.ok && ns.share.principals[0].kind === 'everyone' && R.launchSummary({ touched: true, choice: { principals: [ALLP], mode: 'auto' } }).hidden === false && R.principalsNow([ALLP], { sessions: [], groups: [] })[0].absent === undefined, 'window-reach: a launch share may carry All (never "absent", never "hidden")');
+  ok(gateOf(ns.ok) && ns.share.principals[0].kind === 'everyone' && R.launchSummary({ touched: true, choice: { principals: [ALLP], mode: 'auto' } }).hidden === false && R.principalsNow([ALLP], { sessions: [], groups: [] })[0].absent === undefined, 'window-reach: a launch share may carry All (never "absent", never "hidden")');
 }
 {
   // exit-reach: All IS the everyone mode (no second spelling) and keeps the rows picked beside it
@@ -316,20 +316,20 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
   const rows = [{ kind: 'group', id: 'tg-1' }, { kind: 'session', id: 'claude:abc' }];
   const ONE = [{ kind: 'group', id: 'tg-1' }, { kind: 'conversation', key: 'abc' }];   // lane grants-unify: the ONE spelling
   const v1 = E.patchVerdict(cur, { use: { mode: 'everyone', who: rows } });
-  ok(v1.ok && v1.access.use.mode === 'everyone' && v1.access.use.who.length === 2, 'exit-reach: everyone + the rows picked beside it — accepted, the rows KEPT', v1);
+  ok(gateOf(v1.ok) && v1.access.use.mode === 'everyone' && v1.access.use.who.length === 2, 'exit-reach: everyone + the rows picked beside it — accepted, the rows KEPT', v1);
   // lane grants-unify: the lists are rows of the grants store — `everyone` an entry in `to`, the kept rows beside it
   const [useRow] = E.exitRows(v1.access, 'h');
   const back = E.exitAccessOf({ exit: E.storedExit(v1.access) }, { use: [useRow] });
   ok(J(useRow.to) === J([{ kind: 'everyone' }, ...ONE]) && back.use.mode === 'everyone' && J(back.use.who) === J(ONE), 'exit-reach: written as a row and read back — the kept rows survive the store');
-  ok(E.exitVerdict(back, 'use', { sessionKeys: ['claude:nobody'] }).ok && E.exitVerdict(back, 'use', { sessionKeys: ['claude:nobody'] }).via === 'everyone', 'exit-reach: everyone admits every caller (the kept rows decide nothing — no change to what a grant allows)');
+  ok(gateOf(E.exitVerdict(back, 'use', { sessionKeys: ['claude:nobody'] }).ok) && E.exitVerdict(back, 'use', { sessionKeys: ['claude:nobody'] }).via === 'everyone', 'exit-reach: everyone admits every caller (the kept rows decide nothing — no change to what a grant allows)');
   const v2 = E.patchVerdict(back, { use: { mode: 'only', who: back.use.who } });
-  ok(v2.ok && v2.access.use.mode === 'only' && J(v2.access.use.who) === J(ONE) && !E.exitVerdict(v2.access, 'use', { sessionKeys: ['claude:nobody'] }).ok, 'exit-reach: taking All away restores EXACTLY the rows that were picked (the dialog sends them back)');
+  ok(gateOf(v2.ok) && v2.access.use.mode === 'only' && J(v2.access.use.who) === J(ONE) && !E.exitVerdict(v2.access, 'use', { sessionKeys: ['claude:nobody'] }).ok, 'exit-reach: taking All away restores EXACTLY the rows that were picked (the dialog sends them back)');
   const v3 = E.patchVerdict(cur, { use: { mode: 'only', who: [{ kind: 'everyone', id: '*' }] } });
-  ok(!v3.ok && v3.code === 'bad_principal' && /mode "everyone"/.test(v3.error), 'exit-reach: an `everyone` ROW is refused bad_principal — All agents is the mode (one spelling)', v3);
+  ok(!v3.ok && v3.code === 'bad_principal' && verdictOf(/mode "everyone"/.test(v3.error)), 'exit-reach: an `everyone` ROW is refused bad_principal — All agents is the mode (one spelling)', v3);
   const legacyUse = require(path.join(REPO, 'src/grant-model.js')).fromExitGrant({ mode: 'only', who: [{ kind: 'everyone', id: '*' }, { kind: 'group', id: 'tg-1' }] });   // lane grants-unify: the migration's mapper
   const fromDisk = E.exitAccessOf({}, { use: [{ door: 'exit', resource: 'h:use', to: legacyUse.to }] });
   ok(fromDisk.use.mode === 'only' && fromDisk.use.who.length === 1, 'exit-reach: an `everyone` row on disk is dropped when it is carried over (never consulted as a list row, never read as the mode)');
-  ok(E.patchVerdict(cur, { use: { mode: 'everyone' } }).ok && E.patchVerdict(cur, { use: { mode: 'nobody', who: rows } }).access.use.who.length === 0, 'exit-reach: everyone with no rows is fine; nobody keeps none');
+  ok(gateOf(E.patchVerdict(cur, { use: { mode: 'everyone' } }).ok) && E.patchVerdict(cur, { use: { mode: 'nobody', who: rows } }).access.use.who.length === 0, 'exit-reach: everyone with no rows is fine; nobody keeps none');
 }
 {
   // browser-profiles: All IS `all` (an `everyone` entry in the profile's grants row — lane grants-unify) and keeps the rows
@@ -337,16 +337,16 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
   const p0 = { id: 'p-1', label: 'work', grantUse: { to: [{ kind: 'group', id: 'tg-1' }], except: [] } };
   const convOf = (k) => (k === K ? 'cid-a1' : null);
   const v1 = B.usePatchVerdict({ profile: p0, use: { mode: 'all', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K }] }, knownTask: () => true, knownKey: () => true, conversationOf: convOf });
-  ok(v1.ok && J(v1.row.to) === J([{ kind: 'everyone' }, { kind: 'group', id: 'tg-1' }, { kind: 'conversation', key: 'cid-a1' }]) && v1.now.mode === 'all' && v1.now.kept.length === 2, 'browser-profiles: all + the rows picked beside it ⇒ the row {to:[everyone, …the kept rows]}', v1);
+  ok(gateOf(v1.ok) && J(v1.row.to) === J([{ kind: 'everyone' }, { kind: 'group', id: 'tg-1' }, { kind: 'conversation', key: 'cid-a1' }]) && v1.now.mode === 'all' && v1.now.kept.length === 2, 'browser-profiles: all + the rows picked beside it ⇒ the row {to:[everyone, …the kept rows]}', v1);
   const p1 = { ...p0, grantUse: B.useOfRows([{ door: 'browser-profile', resource: 'p-1', ...v1.row }], { browserKeyOf: (c) => (c === 'cid-a1' ? K : null) }) };
   const U = B.whoMayUse(p1);
-  ok(U.mode === 'all' && U.kept.length === 2 && B.mayAttach(p1, { browserKey: 'bk-99999999' }).ok && B.mayAttach(p1, { browserKey: 'bk-99999999' }).via === 'all', 'browser-profiles: whoMayUse answers all (+ kept) — every conversation is admitted, the kept rows decide nothing');
-  ok(J(B.useDigestOf(p1)) === J({ mode: 'all', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K, conversationId: 'cid-a1' }] }) && /"s"/.test(B.useStamp(p1)) && B.useStamp(p1) !== B.useStamp({ ...p0, grantUse: { to: [{ kind: 'everyone' }], except: [] } }), 'browser-profiles: the digest and the stamp carry the kept rows (a list written under All is still a list a stale dialog must not overwrite)', B.useDigestOf(p1));
+  ok(U.mode === 'all' && U.kept.length === 2 && gateOf(B.mayAttach(p1, { browserKey: 'bk-99999999' }).ok) && B.mayAttach(p1, { browserKey: 'bk-99999999' }).via === 'all', 'browser-profiles: whoMayUse answers all (+ kept) — every conversation is admitted, the kept rows decide nothing');
+  ok(J(B.useDigestOf(p1)) === J({ mode: 'all', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K, conversationId: 'cid-a1' }] }) && gateOf(/"s"/.test(B.useStamp(p1))) && B.useStamp(p1) !== B.useStamp({ ...p0, grantUse: { to: [{ kind: 'everyone' }], except: [] } }), 'browser-profiles: the digest and the stamp carry the kept rows (a list written under All is still a list a stale dialog must not overwrite)', B.useDigestOf(p1));
   const v2 = B.usePatchVerdict({ profile: p1, use: { mode: 'only', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K }] }, knownTask: () => false, knownKey: () => false });
-  ok(v2.ok && v2.now.mode === 'only' && v2.row.to.length === 2 && !v2.row.to.some((e) => e.kind === 'everyone'), 'browser-profiles: taking All away restores the kept rows — accepted as KNOWN even when the task / key would no longer be (they were in the list)', v2);
+  ok(gateOf(v2.ok) && v2.now.mode === 'only' && v2.row.to.length === 2 && !v2.row.to.some((e) => e.kind === 'everyone'), 'browser-profiles: taking All away restores the kept rows — accepted as KNOWN even when the task / key would no longer be (they were in the list)', v2);
   const sv = B.useShapeVerdict({ mode: 'only', who: [{ kind: 'everyone', id: '*' }] });
-  ok(!sv.ok && /All agents is mode "all"/.test(sv.error), 'browser-profiles: an `everyone` ROW is refused — All agents is mode "all" (one spelling)', sv);
-  ok(B.useShapeVerdict({ mode: 'all' }).ok && J(B.usePatchVerdict({ profile: p0, use: { mode: 'all' } }).row) === J({ to: [{ kind: 'everyone' }], except: [] }) && !('kept' in B.usePatchVerdict({ profile: p0, use: { mode: 'all' } }).now), 'browser-profiles: a bare all is the plain everyone row (no rows kept)');
+  ok(!sv.ok && verdictOf(/All agents is mode "all"/.test(sv.error)), 'browser-profiles: an `everyone` ROW is refused — All agents is mode "all" (one spelling)', sv);
+  ok(gateOf(B.useShapeVerdict({ mode: 'all' }).ok) && J(B.usePatchVerdict({ profile: p0, use: { mode: 'all' } }).row) === J({ to: [{ kind: 'everyone' }], except: [] }) && !('kept' in B.usePatchVerdict({ profile: p0, use: { mode: 'all' } }).now), 'browser-profiles: a bare all is the plain everyone row (no rows kept)');
   ok(B.rowWithConversation(p1, 'cid-b2') === null, 'browser-profiles: a pick under All writes nothing (every conversation may already)');
 }
 {
@@ -364,16 +364,16 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
     ok(W.allAgentsSentence('external') === outside && W.allAgentsSentence('shared') === own && typeof zhD[outside] === 'string' && zhD[outside].length > 0 && typeof jaD[outside] === 'string' && jaD[outside].length > 0,
       'browser-who-model: an outside endpoint («external», the road verdict\'s own reason) is said by name — a browser VibeSpace did not start, every conversation sees every tab — with its zh and ja entries; a paired machine\'s shared profile is the scope road («shared»: each conversation in its own tab)');
     const dialog = fs.readFileSync(path.join(REPO, 'src/lib/browser-who-dialog.js'), 'utf8'), fresh = fs.readFileSync(path.join(REPO, 'src/lib/browser-new-profile.js'), 'utf8'), trace = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-    ok([dialog, fresh, trace].every((x) => !x.includes(`t('${own}')`)) && /allAgentsSentence\(view\.road, t\)/.test(dialog) && /allAgentsSentence\(st\.host \? roadOfChoice\(\{ roads: st\.hostRoads, road: st\.hostRoad \}, st\.provider\) : roadOfChoice\(\{ roads: st\.roads, road: st\.road \}, st\.provider\), t\)/.test(fresh) && /allAgentsSentence\(r && r\.agentRoad, t\)/.test(trace),
+    ok(gateOf([dialog, fresh, trace].every((x) => !x.includes(`t('${own}')`))) && gateOf(/allAgentsSentence\(view\.road, t\)/.test(dialog)) && gateOf(/allAgentsSentence\(st\.host \? roadOfChoice\(\{ roads: st\.hostRoads, road: st\.hostRoad \}, st\.provider\) : roadOfChoice\(\{ roads: st\.roads, road: st\.road \}, st\.provider\), t\)/.test(fresh)) && verdictOf(/allAgentsSentence\(r && r\.agentRoad, t\)/.test(trace)),
       'browser-who-model: the three dialogs word it ONLY through allAgentsSentence, keyed by the road the server sent — never a literal «own tab» promise');
     const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-    ok(zh.includes(JSON.stringify(shared) + ':') && ja.includes(JSON.stringify(shared) + ':'), 'browser-who-model: the shared-road sentence has its zh and ja');
+    ok(gateOf(zh.includes(JSON.stringify(shared) + ':')) && verdictOf(ja.includes(JSON.stringify(shared) + ':')), 'browser-who-model: the shared-road sentence has its zh and ja');
     // the .401 read (L2b): a MEDIATED profile on a hub with no proxy — every agent lease there is refused by name — is UNAVAILABLE, never «own tab»
     const unavailable = "Agents cannot use this browser on this computer right now — it is shared with separate tabs, and VibeSpace's browser proxy is not running here.";
     const keeperSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    ok(W.allAgentsSentence('unavailable') === unavailable && zh.includes(JSON.stringify(unavailable) + ':') && ja.includes(JSON.stringify(unavailable) + ':')
-      && /const dialogRoadOf = \(p\) => \{ const v = agentRoadOf\(p\); return p && isMediated\(p\) && !\(mediator && mediationOn\(\) && typeof mediator\.grantFor === 'function'\) \? \{ mode: v\.mode, why: 'unavailable' \} : v; \};/.test(keeperSrc)
-      && /agentRoad: dialogRoadOf\(p\)\.why/.test(keeperSrc) && /agentRoadFor: \(id, \{ host = null, provider = null \} = \{\}\) => \(id \? dialogRoadOf\(/.test(keeperSrc),
+    ok(W.allAgentsSentence('unavailable') === unavailable && gateOf(zh.includes(JSON.stringify(unavailable) + ':')) && gateOf(ja.includes(JSON.stringify(unavailable) + ':'))
+      && gateOf(/const dialogRoadOf = \(p\) => \{ const v = agentRoadOf\(p\); return p && isMediated\(p\) && !\(mediator && mediationOn\(\) && typeof mediator\.grantFor === 'function'\) \? \{ mode: v\.mode, why: 'unavailable' \} : v; \};/.test(keeperSrc))
+      && gateOf(/agentRoad: dialogRoadOf\(p\)\.why/.test(keeperSrc)) && verdictOf(/agentRoadFor: \(id, \{ host = null, provider = null \} = \{\}\) => \(id \? dialogRoadOf\(/.test(keeperSrc)),
       'browser-who-model: a mediated profile on a hub with NO proxy is worded UNAVAILABLE (every agent lease there is refused mediation_unavailable) — the keeper\'s dialog road says so in the profile row and /use; en / zh / ja');
   }
   const view = { use: { mode: 'all', who: [{ kind: 'task', id: 'tg-1', title: 'Ops' }] } };
@@ -390,7 +390,7 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
   const tr = (s, p = {}) => s.replace(/\{(\w+)\}/g, (_, k) => (p[k] !== undefined ? String(p[k]) : '{' + k + '}'));
   const s1 = CW.notifySentence({ principal: { kind: 'everyone', id: '*' }, notify: 'wake', mode: 'all', dailyWakeCap: 3 }, tr, { scope: 'account' });
   const s2 = CW.notifySentence({ principal: { kind: 'everyone', id: '*' }, notify: 'digest', digestMinutes: 30, mode: 'all', dailyWakeCap: 3 }, tr, { scope: 'conversation' });
-  ok(/^Every running conversation will be woken right away/.test(s1) && /a billed turn for each/.test(s1) && /3 times a day each/.test(s1) && /billed turn for each/.test(s2) && /every 30 minutes/.test(s2), 'the Notify preview under All says it: every running conversation, a billed turn for each, the cap EACH', [s1, s2]);
+  ok(gateOf(/^Every running conversation will be woken right away/.test(s1)) && gateOf(/a billed turn for each/.test(s1)) && gateOf(/3 times a day each/.test(s1)) && gateOf(/billed turn for each/.test(s2)) && verdictOf(/every 30 minutes/.test(s2)), 'the Notify preview under All says it: every running conversation, a billed turn for each, the cap EACH', [s1, s2]);
   ok(CW.grainSummaryText({ access: [{ principal: { kind: 'agent', id: 'a', name: 'A' }, authority: 'draft' }, { principal: { kind: 'everyone', id: '*' }, authority: 'draft' }] }).indexOf('All agents') < CW.grainSummaryText({ access: [{ principal: { kind: 'agent', id: 'a', name: 'A' }, authority: 'draft' }, { principal: { kind: 'everyone', id: '*' }, authority: 'draft' }] }).indexOf('A ('), 'the account / conversation card line names All agents FIRST');
 }
 
@@ -454,12 +454,12 @@ async function moneyLeg(ENGmod, name) {
 }
 {
   const { w, live, a, s, counts } = await moneyLeg(require(path.join(REPO, 'src/server/channels-engine.js')), 'money');
-  ok(a.ok && s.ok && s.watchers.length === 1 && s.watchers[0].principal.kind === 'everyone', 'the grain holds ONE All access row and ONE All watcher (cap 2)', { a: a.code, s: s.code });
-  ok(J(counts) === J({ 'agent-1': 2, 'agent-2': 2, 'agent-3': 2 }) && w.ladder.calls.every((c) => c.opts && c.opts.spendReason === 'channel-message'), `4 batches × 3 running conversations under a cap of 2 ⇒ EXACTLY 2 billed wakes each (${J(counts)}), every one through the ladder's money door`);
+  ok(gateOf(a.ok) && gateOf(s.ok) && s.watchers.length === 1 && s.watchers[0].principal.kind === 'everyone', 'the grain holds ONE All access row and ONE All watcher (cap 2)', { a: a.code, s: s.code });
+  ok(J(counts) === J({ 'agent-1': 2, 'agent-2': 2, 'agent-3': 2 }) && verdictOf(w.ladder.calls.every((c) => c.opts && c.opts.spendReason === 'channel-message')), `4 batches × 3 running conversations under a cap of 2 ⇒ EXACTLY 2 billed wakes each (${J(counts)}), every one through the ladder's money door`);
   const row = (w.en().watchers || [])[0];
-  ok(row && Object.keys(row.stats.fan || {}).sort().join() === 'agent-1,agent-2,agent-3' && ['agent-1', 'agent-2', 'agent-3'].every((c) => row.stats.fan[c].wakes.filter((x) => x.ok !== false).length === 2) && !(row.stats.wakes || []).length, 'each conversation\'s wakes sit in ITS OWN ledger (stats.fan[cid], 2 each) — the shared ledger stays empty');
-  ok(['agent-1', 'agent-2', 'agent-3'].every((c) => (w.en().pending || []).filter((p) => p.for === `everyone:*>${c}`).length === 2), 'the hits past each cap are HELD per conversation (2 pending each) — a hold, never a drop');
-  ok(w.e.digest().conversations.some((c) => c.watchers && c.watchers.some((x) => x.principal.kind === 'everyone')), 'the view still shows ONE All watcher (the fan-out is the wake path\'s, never the card\'s)');
+  ok(gateOf(row) && Object.keys(row.stats.fan || {}).sort().join() === 'agent-1,agent-2,agent-3' && gateOf(['agent-1', 'agent-2', 'agent-3'].every((c) => row.stats.fan[c].wakes.filter((x) => x.ok !== false).length === 2)) && !(row.stats.wakes || []).length, 'each conversation\'s wakes sit in ITS OWN ledger (stats.fan[cid], 2 each) — the shared ledger stays empty');
+  ok(verdictOf(['agent-1', 'agent-2', 'agent-3'].every((c) => (w.en().pending || []).filter((p) => p.for === `everyone:*>${c}`).length === 2)), 'the hits past each cap are HELD per conversation (2 pending each) — a hold, never a drop');
+  ok(verdictOf(w.e.digest().conversations.some((c) => c.watchers && c.watchers.some((x) => x.principal.kind === 'everyone'))), 'the view still shows ONE All watcher (the fan-out is the wake path\'s, never the card\'s)');
   // a DEAD BOOT's reservation inside a per-conversation ledger is released like any other (its slot freed)
   await w.e.store.index.update((ix) => { const e2 = ix.conversations[`${w.A}/${w.OPS}`]; e2.watchers[0].stats.fan['agent-2'].wakes.push({ at: Date.now(), n: 1, cid: 'agent-2', ok: true, lane: 'reserved', reserved: true, bootId: 'a-dead-boot', id: 'ghost' }); });
   const relN = await w.e.releaseStaleReservations();
@@ -480,7 +480,7 @@ async function moneyLeg(ENGmod, name) {
   // removing All's access removes its watcher — and the named agent's rows stay
   const r2 = await w2.e.setAccess(w2.A, w2.OPSC, [{ principal: { kind: 'agent', id: 'agent-1', name: 'One' } }]);
   // lane grants-unify: the access list is the grants store's row — read back from the grain's answer
-  ok(r2.ok && (w2.en().watchers || []).length === 1 && w2.en().watchers[0].principal.id === 'agent-1' && r2.access.length === 1 && r2.access[0].principal.id === 'agent-1' && r2.watchers.length === 1, 'removing All\'s access removes the All notification; agent-1\'s own access + notification stay exactly as they were');
+  ok(gateOf(r2.ok) && (w2.en().watchers || []).length === 1 && w2.en().watchers[0].principal.id === 'agent-1' && r2.access.length === 1 && r2.access[0].principal.id === 'agent-1' && r2.watchers.length === 1, 'removing All\'s access removes the All notification; agent-1\'s own access + notification stay exactly as they were');
   // an ACCOUNT-grain All DIGEST: each running conversation holds its own window and gets its own digest (never one for all)
   const live3 = [{ cid: 'agent-1', name: 'One', groups: [] }, { cid: 'agent-2', name: 'Two', groups: [] }, { cid: 'agent-3', name: 'Three', groups: [] }];
   const w3 = await world(require(path.join(REPO, 'src/server/channels-engine.js')), 'digest', { live: live3 });
@@ -489,16 +489,16 @@ async function moneyLeg(ENGmod, name) {
   const s3 = await w3.e.setWatchers(w3.A, acct, [{ principal: ALLP, notify: 'digest', digestMinutes: 30, dailyWakeCap: 5 }]);
   await w3.ingest('GPU one', 'GPU two');
   const held3 = ['agent-1', 'agent-2', 'agent-3'].every((c) => (w3.en().pending || []).filter((p) => p.for === `everyone:*>${c}`).length === 2);
-  ok(a3.ok && s3.ok && w3.ladder.calls.length === 0 && held3, 'an ACCOUNT-grain All digest: nothing delivered yet, each running conversation holds the 2 hits under ITS OWN window', { a3: a3.code, s3: s3.code, pending: (w3.en().pending || []).map((p) => p.for) });
+  ok(gateOf(a3.ok) && gateOf(s3.ok) && w3.ladder.calls.length === 0 && verdictOf(held3), 'an ACCOUNT-grain All digest: nothing delivered yet, each running conversation holds the 2 hits under ITS OWN window', { a3: a3.code, s3: s3.code, pending: (w3.en().pending || []).map((p) => p.for) });
   const f3 = await w3.e.flushScope(w3.A, 'account', null);
   const p3 = per(w3.ladder.calls);
-  ok(f3 && J(p3) === J({ 'agent-1': 1, 'agent-2': 1, 'agent-3': 1 }) && w3.ladder.calls.every((c) => /^### Channel digest/.test(c.text) && /GPU one/.test(c.text) && /GPU two/.test(c.text)) && !(w3.en().pending || []).length, `…its flush delivers ONE digest PER running conversation (${J(p3)}), each with both hits, and clears every window`);
+  ok(gateOf(f3) && J(p3) === J({ 'agent-1': 1, 'agent-2': 1, 'agent-3': 1 }) && gateOf(w3.ladder.calls.every((c) => /^### Channel digest/.test(c.text) && /GPU one/.test(c.text) && /GPU two/.test(c.text))) && !(w3.en().pending || []).length, `…its flush delivers ONE digest PER running conversation (${J(p3)}), each with both hits, and clears every window`);
   // ④ THE REQUEST FLOW — a conversation All agents may see: "already allowed", no card
   await w.e.setAccess(w.A, w.OPSC, [{ principal: ALLP, authority: 'draft' }]);
   const rq = await w.e.request({ kind: 'agent', id: 'agent-9', name: 'Nine', groups: [] }, w.A, w.OPS, 'I need it');
-  ok(rq.ok && rq.already === true && rq.via === 'everyone' && rq.level === 'visible' && w.todos.length === 0, '④ an agent\'s request on a conversation All agents may see is answered "already allowed" (via everyone) — no For-you card', rq);
+  ok(gateOf(rq.ok) && rq.already === true && rq.via === 'everyone' && rq.level === 'visible' && w.todos.length === 0, '④ an agent\'s request on a conversation All agents may see is answered "already allowed" (via everyone) — no For-you card', rq);
   const cli = read('data/bin/vibespace-channels');
-  ok(/r\.via === 'everyone' \? `already allowed — the user gave every agent access/.test(cli), '④ the CLI says "already allowed" for it (never "a request was filed")');
+  ok(verdictOf(/r\.via === 'everyone' \? `already allowed — the user gave every agent access/.test(cli)), '④ the CLI says "already allowed" for it (never "a request was filed")');
 }
 {
   // CONTROLS — patched copies of the engine (outside the tree)
@@ -518,7 +518,7 @@ async function moneyLeg(ENGmod, name) {
   ok(ENGINE_SRC.split(PACE).length === 2, 'CONTROL setup: the wake\'s pace line');
   const uncapped = M.load('src/server/channels-engine.js', ENGINE_SRC.replace(PACE, '    const pace = F.fanTargetOf(w.principal) ? { ok: true } : F.paceVerdict(paceWakes, t, F.digestCap(w));\n    if (!pace.ok) {'), 'uncapped');
   const c2 = await moneyLeg(uncapped, 'ctl-uncapped');
-  ok(Object.values(c2.counts).every((n) => n === 4), `CONTROL (b): a fan-out without its cap bills EVERY hit to EVERY conversation (${J(c2.counts)}) — All × N uncapped, the money rule red`, c2.counts);
+  ok(verdictOf(Object.values(c2.counts).every((n) => n === 4)), `CONTROL (b): a fan-out without its cap bills EVERY hit to EVERY conversation (${J(c2.counts)}) — All × N uncapped, the money rule red`, c2.counts);
 }
 for (const e of engines) { try { e.stop(); } catch {} }
 
@@ -680,34 +680,34 @@ console.log('⑦ the reach table: four principal sets × six actors × read / re
 console.log('⑤ wiring: every dialog maps the All row onto its model\'s own spelling');
 {
   const FE = read('src/lib/channel-filter-editor.js');
-  ok(/const EVERYONE_KEY = 'everyone:\*';/.test(FE) && /out = \[\{ value: EVERYONE_KEY, label: t\('All agents'\), kind: 'everyone', id: '\*', name: null \}\]/.test(FE) && /everyone: \{ key: EVERYONE_KEY \}/.test(FE), 'Grant access…: the All row is a principal choice {kind:everyone, id:*} (the payload\'s one spelling)');
-  ok(/everyone: 'roster'/.test(FE) && /kind: 'everyone', id: '\*', name: t\('All agents'\)[^\n]*t\('every running conversation gets a billed turn on each hit'\)/.test(FE) && /expectedWakesTotal\(expected, \{ running \}\)/.test(FE), 'Notify…: All is offered when it holds access, its row says the money, the total counts a budget per running conversation');
+  ok(gateOf(/const EVERYONE_KEY = 'everyone:\*';/.test(FE)) && gateOf(/out = \[\{ value: EVERYONE_KEY, label: t\('All agents'\), kind: 'everyone', id: '\*', name: null \}\]/.test(FE)) && verdictOf(/everyone: \{ key: EVERYONE_KEY \}/.test(FE)), 'Grant access…: the All row is a principal choice {kind:everyone, id:*} (the payload\'s one spelling)');
+  ok(gateOf(/everyone: 'roster'/.test(FE)) && gateOf(/kind: 'everyone', id: '\*', name: t\('All agents'\)[^\n]*t\('every running conversation gets a billed turn on each hit'\)/.test(FE)) && verdictOf(/expectedWakesTotal\(expected, \{ running \}\)/.test(FE)), 'Notify…: All is offered when it holds access, its row says the money, the total counts a budget per running conversation');
   // verify r1 T2 ①: the MULTIPLIER is on the dialog — N running now × the cap each, a later conversation its own
-  ok(/allRow \? t\('In all: about \{n\} wakes a day — \{running\} conversation\(s\) running now, All agents is at most \{cap\} a day for EACH of them \(a conversation started later gets its own\); every notification has its own cap', \{ n: F\.expectedWakesTotal\(expected, \{ running \}\), running, cap: F\.digestCap\(allRow\) \}\)/.test(FE), 'Notify…: with an All row the total NAMES the multiplier (N running now, the cap for EACH, a later conversation its own)');
+  ok(verdictOf(/allRow \? t\('In all: about \{n\} wakes a day — \{running\} conversation\(s\) running now, All agents is at most \{cap\} a day for EACH of them \(a conversation started later gets its own\); every notification has its own cap', \{ n: F\.expectedWakesTotal\(expected, \{ running \}\), running, cap: F\.digestCap\(allRow\) \}\)/.test(FE)), 'Notify…: with an All row the total NAMES the multiplier (N running now, the cap for EACH, a later conversation its own)');
   // verify r1 T2 ⑥: a draft-only row beside an All row that may send is MOOT — said, re-said when a radio changes
-  ok(/const syncMoot = \(\) => \{/.test(FE) && /all && all\.authority === 'send' \? rows\.filter\(\(r\) => r\.key !== EVERYONE_KEY && r\.authority === 'draft'\)/.test(FE) && /t\('All agents may reply directly here, so a draft-only row beside it changes nothing: \{names\} may reply directly too \(set All agents to draft, or remove it, to narrow\)\.'/.test(FE) && /if \(inp\.checked\) \{ r\.authority = value; syncMoot\(\); \}/.test(FE) && /watchedNote\.style\.display = gone\.length \? '' : 'none';\n    syncMoot\(\);/.test(FE), 'Grant access…: a draft-only row beside All-may-send is said to be moot (on draw and on every authority radio change)');
+  ok(gateOf(/const syncMoot = \(\) => \{/.test(FE)) && gateOf(/all && all\.authority === 'send' \? rows\.filter\(\(r\) => r\.key !== EVERYONE_KEY && r\.authority === 'draft'\)/.test(FE)) && gateOf(/t\('All agents may reply directly here, so a draft-only row beside it changes nothing: \{names\} may reply directly too \(set All agents to draft, or remove it, to narrow\)\.'/.test(FE)) && gateOf(/if \(inp\.checked\) \{ r\.authority = value; syncMoot\(\); \}/.test(FE)) && verdictOf(/watchedNote\.style\.display = gone\.length \? '' : 'none';\n    syncMoot\(\);/.test(FE)), 'Grant access…: a draft-only row beside All-may-send is said to be moot (on draw and on every authority radio change)');
   const RE2 = read('src/lib/channel-reach-editor.js');
-  ok(/const allVisible = entries\.some\(\(g\) => g\.principal && g\.principal\.kind === 'everyone' && g\.level === 'visible'\);/.test(RE2) && /t\('All agents is visible here, so a requestable row beside it changes nothing: \{names\} can already see it \(remove the All agents row to narrow\)\.'/.test(RE2), 'Reach & policy: a requestable row beside a visible All row is said to be moot');
+  ok(gateOf(/const allVisible = entries\.some\(\(g\) => g\.principal && g\.principal\.kind === 'everyone' && g\.level === 'visible'\);/.test(RE2)) && verdictOf(/t\('All agents is visible here, so a requestable row beside it changes nothing: \{names\} can already see it \(remove the All agents row to narrow\)\.'/.test(RE2)), 'Reach & policy: a requestable row beside a visible All row is said to be moot');
   // verify r1 T2 ④: All on a machine's exit is said as strongly as it is, per grant, the run sentence following "Ask me each time"
   const XD2 = read('src/lib/exit-access-dialog.js');
-  ok(/const allOn = mode === 'only' && sel\.has\(EVERYONE_KEY\);/.test(XD2) && /t\('Every conversation — the ones you start later included — can borrow the network of \{machine\}\.'/.test(XD2) && /askBox && askBox\.checked \? t\('Every conversation — the ones you start later included — can run commands on \{machine\} as you, each after your Allow\.'/.test(XD2) && /t\('Every conversation — the ones you start later included — can run commands on \{machine\} as you, without asking\.'/.test(XD2) && /if \(askBox\) askBox\.onchange = \(\) => syncCount\(\);/.test(XD2), 'exit access: with All agents picked each grant says "every conversation — the ones you start later included — …" (run: after your Allow / without asking), re-said when the ask box changes');
+  ok(gateOf(/const allOn = mode === 'only' && sel\.has\(EVERYONE_KEY\);/.test(XD2)) && gateOf(/t\('Every conversation — the ones you start later included — can borrow the network of \{machine\}\.'/.test(XD2)) && gateOf(/askBox && askBox\.checked \? t\('Every conversation — the ones you start later included — can run commands on \{machine\} as you, each after your Allow\.'/.test(XD2)) && gateOf(/t\('Every conversation — the ones you start later included — can run commands on \{machine\} as you, without asking\.'/.test(XD2)) && verdictOf(/if \(askBox\) askBox\.onchange = \(\) => syncCount\(\);/.test(XD2)), 'exit access: with All agents picked each grant says "every conversation — the ones you start later included — …" (run: after your Allow / without asking), re-said when the ask box changes');
   const RE = read('src/lib/channel-reach-editor.js');
-  ok(/const out = \[\{ kind: 'everyone', id: '\*', name: t\('All agents'\) \}\];/.test(RE) && /name: p\.kind === 'everyone' \? null : p\.name/.test(RE), 'Reach & policy: Grant reach to… All agents ⇒ {kind:everyone, id:*}');
+  ok(gateOf(/const out = \[\{ kind: 'everyone', id: '\*', name: t\('All agents'\) \}\];/.test(RE)) && verdictOf(/name: p\.kind === 'everyone' \? null : p\.name/.test(RE)), 'Reach & policy: Grant reach to… All agents ⇒ {kind:everyone, id:*}');
   const WS = read('src/lib/window-share.js');
-  ok(/out\.push\(\{ key: 'everyone:\*', kind: 'everyone', id: '\*', name: t\('All agents'\), checked: !!all\.checked/.test(WS) && /ref: \{ kind: 'everyone', row: \{ id: '\*'/.test(WS), 'window share: the All row comes from the model\'s `everyone` entry and toggles {kind:everyone, id:*}');
+  ok(gateOf(/out\.push\(\{ key: 'everyone:\*', kind: 'everyone', id: '\*', name: t\('All agents'\), checked: !!all\.checked/.test(WS)) && verdictOf(/ref: \{ kind: 'everyone', row: \{ id: '\*'/.test(WS)), 'window share: the All row comes from the model\'s `everyone` entry and toggles {kind:everyone, id:*}');
   const XD = read('src/lib/exit-access-dialog.js');
   // lane grants-unify: the stored list is drawn through the picker model's rowToPick (`everyone` an entry of `to` ⇒ the All key)
-  ok(/if \(all\) g\.mode = 'everyone';/.test(XD) && /rowToPick\(\{ to: \[\.\.\.\(g\.mode === 'everyone' \? \[\{ kind: 'everyone' \}\] : \[\]\)/.test(XD) && /everyoneKey: EVERYONE_KEY/.test(XD) && !/value: 'everyone'|\['nobody', 'everyone', 'only'\]/.test(XD), 'exit access: the picker\'s All row IS mode everyone (the radio is gone — one spelling); the rows beside it ride along');
+  ok(gateOf(/if \(all\) g\.mode = 'everyone';/.test(XD)) && gateOf(/rowToPick\(\{ to: \[\.\.\.\(g\.mode === 'everyone' \? \[\{ kind: 'everyone' \}\] : \[\]\)/.test(XD)) && gateOf(/everyoneKey: EVERYONE_KEY/.test(XD)) && !/value: 'everyone'|\['nobody', 'everyone', 'only'\]/.test(XD), 'exit access: the picker\'s All row IS mode everyone (the radio is gone — one spelling); the rows beside it ride along');
   const BW = read('src/lib/browser-who-dialog.js');
-  ok(/everyone: \{ key: EVERYONE_KEY \}/.test(BW) && /const use0 = draftUse\(d\.sel, wire\);/.test(BW) && !/bwho-radio|radiogroup/.test(BW), 'browser who-can-use: one picker, All first, mapped through draftUse (the radios are gone)');
+  ok(gateOf(/everyone: \{ key: EVERYONE_KEY \}/.test(BW)) && gateOf(/const use0 = draftUse\(d\.sel, wire\);/.test(BW)) && !/bwho-radio|radiogroup/.test(BW), 'browser who-can-use: one picker, All first, mapped through draftUse (the radios are gone)');
   const RT = read('src/routes/browser-trace.js');
-  ok(/patch\.use = sv\.mode === 'all' \? \(rows\.length \? \{ mode: 'all', who: rows, \.\.\.ex \} : \{ mode: 'all', \.\.\.ex \}\)/.test(RT), 'the browser PATCH route carries the rows kept beside All (resolved like a list\'s)');
+  ok(verdictOf(/patch\.use = sv\.mode === 'all' \? \(rows\.length \? \{ mode: 'all', who: rows, \.\.\.ex \} : \{ mode: 'all', \.\.\.ex \}\)/.test(RT)), 'the browser PATCH route carries the rows kept beside All (resolved like a list\'s)');
   const WT = read('src/server/window-targets-engine.js');
   // lane grants-unify: «who it reaches» is the ONE admission over that row alone (All = an `everyone` entry ⇒ every live caller)
-  ok(/const one = \{ door: 'window', resource: '-', to: \[R\.rowOfRecord\(\{ windowId: '-', rows: \[row\] \}\)\.to\[0\]\]/.test(WT) && /const v = GM\.admits\(\[one\]/.test(WT), 'the window engine counts every live agent session as reached by an All row (the share view\'s "who it reaches")');
+  ok(gateOf(/const one = \{ door: 'window', resource: '-', to: \[R\.rowOfRecord\(\{ windowId: '-', rows: \[row\] \}\)\.to\[0\]\]/.test(WT)) && verdictOf(/const v = GM\.admits\(\[one\]/.test(WT)), 'the window engine counts every live agent session as reached by an All row (the share view\'s "who it reaches")');
   const EN = ENGINE_SRC;
   const wakePaths = ['const eff = wakeEffOf(en);   // ALL AGENTS fanned out', 'const eff = wakeEffOf(store.index.peek(`${rec.id}/${convId}`));   // a fan-out target', 'const scopeFor = (rec, convId, pk) => { const eff = wakeEffOf(', 'const eff0 = wakeEffOf(en0);', 'const eff = wakeEffOf(en);   // a fan-out target\'s hits wait'];
-  ok(wakePaths.every((p) => EN.includes(p)) && (EN.match(/wakeEffOf\(/g) || []).length >= 10, `every wake path reads the fan-out (wakeEffOf: ${(EN.match(/wakeEffOf\(/g) || []).length} sites)`);
+  ok(gateOf(wakePaths.every((p) => EN.includes(p))) && (EN.match(/wakeEffOf\(/g) || []).length >= 10, `every wake path reads the fan-out (wakeEffOf: ${(EN.match(/wakeEffOf\(/g) || []).length} sites)`);
 }
 
 // ═══ ⑥ i18n ════════════════════════════════════════════════════════════════
@@ -724,10 +724,10 @@ console.log('⑥ i18n: the new words in both dictionaries');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const miss = KEYS.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
   ok(!miss.length, `${KEYS.length} new keys in zh AND ja`, miss);
-  ok(zh.includes('"All agents": "所有 agent"') && ja.includes('"All agents": "すべてのエージェント"'), 'the owner\'s words: All agents / 所有 agent / すべてのエージェント');
+  ok(gateOf(zh.includes('"All agents": "所有 agent"')) && verdictOf(ja.includes('"All agents": "すべてのエージェント"')), 'the owner\'s words: All agents / 所有 agent / すべてのエージェント');
 }
 
-for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(x.pass, 'tree: ' + x.name, x.detail);
+for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(verdictOf(x.pass), 'tree: ' + x.name, x.detail);
 console.log(`\n(${Date.now() - t0} ms)`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

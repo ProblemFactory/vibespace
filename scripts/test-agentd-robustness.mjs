@@ -33,7 +33,7 @@ process.env.VIBESPACE_AGENTD_ROOT = AGENTD_ROOT;
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const version = require('../package.json').version;
@@ -178,7 +178,7 @@ console.log('— 3. NETWORK JITTER: 5 mid-stream drops, offset reattach, zero lo
   const nums = lines.map((l) => Number(l.slice(1)));
   let contiguous = true, firstBad = -1;
   for (let i = 0; i < nums.length; i++) if (nums[i] !== i) { contiguous = false; firstBad = i; break; }
-  check(`stream reassembled contiguous 0..${N - 1} across ≥5 drops (no loss, no dup)`, contiguous && nums.length === N && sawSentinel, `got ${nums.length}/${N} lines, contiguous=${contiguous}, firstBad=${firstBad}, sentinel=${sawSentinel}`);
+  check(`stream reassembled contiguous 0..${N - 1} across ≥5 drops (no loss, no dup)`, gateOf(contiguous) && nums.length === N && verdictOf(sawSentinel), `got ${nums.length}/${N} lines, contiguous=${contiguous}, firstBad=${firstBad}, sentinel=${sawSentinel}`);
 }
 
 console.log('— 4. IO LATENCY: 120ms/chunk transport delay, offsets exact, no deadlock —');
@@ -192,7 +192,7 @@ console.log('— 4. IO LATENCY: 120ms/chunk transport delay, offsets exact, no d
   const lines = h.buf.toString().split('\n').filter((l) => /X{500}\d+$/.test(l));
   const nums = lines.map((l) => Number(l.replace(/^X+/, '')));
   const contiguous = nums.every((v, i) => v === i);
-  check('all 50 latency-delayed chunks delivered in order (flow control alive)', nums.length === 50 && contiguous, `${nums.length} lines contiguous=${contiguous}`);
+  check('all 50 latency-delayed chunks delivered in order (flow control alive)', nums.length === 50 && verdictOf(contiguous), `${nums.length} lines contiguous=${contiguous}`);
   conn.mux.destroy();
 }
 
@@ -210,7 +210,7 @@ console.log('— 5. CONCURRENCY: fat transfer on one session must not starve ano
   await sleep(1500);
   const bPings = [...b.buf.toString().matchAll(/P(\d+)/g)].map((m) => Number(m[1]));
   const bContig = bPings.every((v, i) => v === i);
-  check('session B kept flowing while A flooded 2MB (no starvation)', bPings.length === 10 && bContig, `B got ${bPings.length} pings, A got ${a.buf.length} bytes`);
+  check('session B kept flowing while A flooded 2MB (no starvation)', bPings.length === 10 && verdictOf(bContig), `B got ${bPings.length} pings, A got ${a.buf.length} bytes`);
   check('session A also delivered its fat payload', a.buf.length > 1000000, `${a.buf.length} bytes`);
   conn.mux.destroy();
 }
@@ -219,4 +219,4 @@ endDaemonsAndWait(path.dirname(stateDir));
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M2 robustness tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

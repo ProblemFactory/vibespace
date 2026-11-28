@@ -25,7 +25,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 
 // A scratch HOME (never the developer's real ~/.claude — src/fixture-guard.js)
 // and a scratch data dir, both per-pid.
@@ -114,33 +114,33 @@ const win = fs.readFileSync(path.join(REPO, 'src/lib/usage-window.js'), 'utf-8')
 const dash = fs.readFileSync(path.join(REPO, 'src/lib/usage-dashboard.js'), 'utf-8');
 const route = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf-8');
 
-ok(/export const ORIGIN_COLS = \['main', 'subagent', 'workflow'\]/.test(dash),
+ok(verdictOf(/export const ORIGIN_COLS = \['main', 'subagent', 'workflow'\]/.test(dash)),
   'the three columns are declared ONCE (usage-dashboard), so the legend and the headers cannot disagree');
-ok(/ORIGIN_META = \(\) => \(\{[\s\S]*?main:[\s\S]*?subagent:[\s\S]*?workflow:[\s\S]*?unknown:/.test(dash),
+ok(verdictOf(/ORIGIN_META = \(\) => \(\{[\s\S]*?main:[\s\S]*?subagent:[\s\S]*?workflow:[\s\S]*?unknown:/.test(dash)),
   'the vocabulary names all four origins including the honest "unknown"');
-ok(/\{ key: 'origin', label: t\('Origin'\) \}/.test(dash), "the panel dashboard offers 'origin' as a dimension");
-ok(/dim: 'origin'/.test(dash) && /splitBy: 'origin'/.test(dash),
+ok(verdictOf(/\{ key: 'origin', label: t\('Origin'\) \}/.test(dash)), "the panel dashboard offers 'origin' as a dimension");
+ok(gateOf(/dim: 'origin'/.test(dash)) && verdictOf(/splitBy: 'origin'/.test(dash)),
   'the default preset actually USES it (a dimension only an editor can reach is a dimension nobody sees)');
-ok(/ORIGIN_COLS, ORIGIN_ORDER, ORIGIN_META \} from '\.\/usage-dashboard\.js'/.test(win),
+ok(verdictOf(/ORIGIN_COLS, ORIGIN_ORDER, ORIGIN_META \} from '\.\/usage-dashboard\.js'/.test(win)),
   'the window imports that one vocabulary instead of keeping a second copy');
-ok(/function renderSessions\(/.test(win) && /ORIGIN_COLS\.map\(k => `<th/.test(win),
+ok(gateOf(/function renderSessions\(/.test(win)) && verdictOf(/ORIGIN_COLS\.map\(k => `<th/.test(win)),
   'the "By session" table renders one column per origin');
-ok(/renderSessions\(d, state, \{ limit: 12, pivotHere \}\)/.test(win),
+ok(verdictOf(/renderSessions\(d, state, \{ limit: 12, pivotHere \}\)/.test(win)),
   'and it REPLACED the old plain session group (a renderer nobody calls is not a feature)');
-ok(/function originStack\(/.test(win) && /td\.appendChild\(originStack\(cells, metric\)\)/.test(win),
+ok(gateOf(/function originStack\(/.test(win)) && verdictOf(/td\.appendChild\(originStack\(cells, metric\)\)/.test(win)),
   'every session row carries the stacked share bar');
-ok(/renderOrigin\(d, state\),\n\s*renderBilling\(d\)/.test(win),
+ok(verdictOf(/renderOrigin\(d, state\),\n\s*renderBilling\(d\)/.test(win)),
   'the "By origin" group is FIRST in the cost section');
-ok(/originSplit: pivotMap\(d, 'project:origin'\)/.test(win),
+ok(verdictOf(/originSplit: pivotMap\(d, 'project:origin'\)/.test(win)),
   'the project rows are handed their origin split');
-ok(/const split = opts\.originSplit \? originSplitText\(opts\.originSplit\[r\.key\], metric\) : '';/.test(win)
-  && /title2 \+= '\\n' \+ split/.test(win),
+ok(gateOf(/const split = opts\.originSplit \? originSplitText\(opts\.originSplit\[r\.key\], metric\) : '';/.test(win))
+  && verdictOf(/title2 \+= '\\n' \+ split/.test(win)),
   'and the split reaches the row TITLE (the hover answer the row itself cannot give)');
 // B-f95d ② (2.369.274): the two crosses are no longer asked for with every load —
 // the session table / the project section ask once on screen (test-usage-pivots
 // pins the mechanism; this is the tripwire that the old line stays gone).
-ok(!/ORIGIN_PIVOTS/.test(win) && /renderSessions\(d, state, \{ limit: 12, pivotHere \}\)/.test(win)
-  && /withPivot\('project:origin', renderGroup\(/.test(win),
+ok(!/ORIGIN_PIVOTS/.test(win) && gateOf(/renderSessions\(d, state, \{ limit: 12, pivotHere \}\)/.test(win))
+  && verdictOf(/withPivot\('project:origin', renderGroup\(/.test(win)),
   'the window asks for its two crosses when their sections are on screen, never with every load');
 
 // The route caps the pivot list; a view asks for at most what it draws (the
@@ -161,11 +161,11 @@ ok(cap >= Math.max(2, worstPreset),
 
 // ── ⑥ the shipped scanner stamps it too (remote hosts run workflows) ──────
 const scan = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-usage-scan'), 'utf-8');
-ok(/origin: \(info && info\.origin\) \|\| 'main'/.test(scan) && /wf: \(info && info\.wf\) \|\| undefined/.test(scan),
+ok(gateOf(/origin: \(info && info\.origin\) \|\| 'main'/.test(scan)) && verdictOf(/wf: \(info && info\.wf\) \|\| undefined/.test(scan)),
   'the checkout-less scanner stamps origin/wf too (behaviour pinned by test-usage-walk-parity; this is the drift tripwire)');
 const hist = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf-8');
-ok(/origin: e\.origin \|\| undefined/.test(hist),
+ok(verdictOf(/origin: e\.origin \|\| undefined/.test(hist)),
   'a remote event with NO origin stays unnamed rather than being claimed as "main"');
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
@@ -127,15 +127,15 @@ try {
   const s1 = await h.oauth.start({ origin: 'https://hub.example.ts.net' });
   const reg = log.filter((x) => x.p === '/oauth/register');
   ok('the first Connect registers ONCE: client_name VibeSpace, redirect = the hub\'s own https + /api/channels/oauth/cb/dropline; no secret in the answer', reg.length === 1 && JSON.parse(reg[0].body).client_name === 'VibeSpace' && JSON.parse(reg[0].body).redirect_uris[0] === 'https://hub.example.ts.net/api/channels/oauth/cb/dropline' && s1.via === 'own-https', { reg, s1 });
-  ok('the client_id is written to the `dropline` row (own value)', h.writes.length === 1 && h.writes[0][0] === 'dropline' && /^cid_/.test(h.writes[0][1].clientId));
+  ok('the client_id is written to the `dropline` row (own value)', h.writes.length === 1 && h.writes[0][0] === 'dropline' && verdictOf(/^cid_/.test(h.writes[0][1].clientId)));
   const au = new URL(s1.url);
-  ok('the authorize URL: S256 challenge, scope dropline:api, resource = the API, the hub\'s state — and NO verifier', au.searchParams.get('code_challenge_method') === 'S256' && au.searchParams.get('scope') === 'dropline:api' && au.searchParams.get('resource') === 'https://api.dropline.fish.audio' && /^v1\./.test(au.searchParams.get('state')) && !/verifier/.test(s1.url), s1.url);
+  ok('the authorize URL: S256 challenge, scope dropline:api, resource = the API, the hub\'s state — and NO verifier', au.searchParams.get('code_challenge_method') === 'S256' && au.searchParams.get('scope') === 'dropline:api' && au.searchParams.get('resource') === 'https://api.dropline.fish.audio' && gateOf(/^v1\./.test(au.searchParams.get('state'))) && !/verifier/.test(s1.url), s1.url);
   const s2 = await h.oauth.start({ origin: 'https://hub.example.ts.net' });
-  ok('a second Connect reuses the client (no second registration)', log.filter((x) => x.p === '/oauth/register').length === 1 && s2.ok);
+  ok('a second Connect reuses the client (no second registration)', log.filter((x) => x.p === '/oauth/register').length === 1 && verdictOf(s2.ok));
 
   console.log('② consent → landing → exchange once');
   const c = await consent(s2.url);
-  ok('the fake consent page accepted S256 + resource + scope and redirected with code + iss + state', c.status === 302 && c.q && c.q.code && c.q.iss && c.q.state === new URL(s2.url).searchParams.get('state'), c);
+  ok('the fake consent page accepted S256 + resource + scope and redirected with code + iss + state', c.status === 302 && gateOf(c.q) && gateOf(c.q.code) && gateOf(c.q.iss) && c.q.state === new URL(s2.url).searchParams.get('state'), c);
   const forged = c.q.state.replace(/\.[^.]+$/, '.' + 'A'.repeat(43));
   const rf = await fetch(`${LAND}?code=${c.q.code}&state=${encodeURIComponent(forged)}`);
   const otherKind = DO.stateOf({ origin: 'https://hub.example.ts.net', flowId: 'abcdef0123456789', issuedAt: Date.now(), kind: 'slack' }, h.oauth.sign);
@@ -143,16 +143,16 @@ try {
   ok('a forged state (bad HMAC) and another kind\'s state are refused BEFORE any exchange', rf.status === 400 && rk.why === 'wrong-kind' && log.filter((x) => x.p === '/oauth/token').length === 0, { st: rf.status, rk });
   const land = await fetch(`${LAND}?code=${c.q.code}&state=${encodeURIComponent(c.q.state)}&iss=x`);
   const page = await land.text();
-  ok('THE LANDING ROUTE /api/channels/oauth/cb/dropline (no cookie) exchanges and says connected; never the code or state', land.status === 200 && page.includes('id="connected"') && !page.includes(c.q.code) && !page.includes(c.q.state.slice(0, 20)), page.slice(0, 200));
+  ok('THE LANDING ROUTE /api/channels/oauth/cb/dropline (no cookie) exchanges and says connected; never the code or state', land.status === 200 && gateOf(page.includes('id="connected"')) && !page.includes(c.q.code) && !page.includes(c.q.state.slice(0, 20)), page.slice(0, 200));
   const again = await fetch(`${LAND}?code=${c.q.code}&state=${encodeURIComponent(c.q.state)}`);
   ok('the same landing twice ⇒ refused (a code is exchanged once)', again.status === 400 && log.filter((x) => x.p === '/oauth/token').length === 1);
   const tokPost = log.filter((x) => x.p === '/oauth/token')[0];
   const verifier = new URLSearchParams(tokPost.body).get('code_verifier');
-  ok('the verifier never left the hub except in the ONE token POST (not in the authorize URL, the landing, any other request)', verifier && verifier.length >= 43 && log.filter((x) => (x.q + x.body).includes(verifier)).length === 1 && !s2.url.includes(verifier) && !new URLSearchParams(tokPost.body).get('client_secret'));
+  ok('the verifier never left the hub except in the ONE token POST (not in the authorize URL, the landing, any other request)', gateOf(verifier) && verifier.length >= 43 && log.filter((x) => (x.q + x.body).includes(verifier)).length === 1 && !s2.url.includes(verifier) && !new URLSearchParams(tokPost.body).get('client_secret'));
   const pair = h.tk.read();
   const mode = fs.statSync(path.join(dir, 'dropline-oauth.json')).mode & 0o777;
-  ok('the pair: access 24 h from expires_in (never 1 h), refresh, clientId; file 0600', pair.access && pair.refresh && Math.abs(pair.accessExp - pair.at - 86400e3) < 5 && pair.clientId === h.writes[0][1].clientId && mode === 0o600, { pair: { ...pair, access: '…', refresh: '…' }, mode: mode.toString(8) });
-  ok('the card\'s account: oauth · connected · Ana · Fish Lab; connected() true', JSON.stringify(h.client.account()) === JSON.stringify({ tier: 'oauth', state: 'connected', name: 'Ana', team: 'Fish Lab' }) && h.client.connected(), h.client.account());
+  ok('the pair: access 24 h from expires_in (never 1 h), refresh, clientId; file 0600', gateOf(pair.access) && gateOf(pair.refresh) && Math.abs(pair.accessExp - pair.at - 86400e3) < 5 && pair.clientId === h.writes[0][1].clientId && mode === 0o600, { pair: { ...pair, access: '…', refresh: '…' }, mode: mode.toString(8) });
+  ok('the card\'s account: oauth · connected · Ana · Fish Lab; connected() true', JSON.stringify(h.client.account()) === JSON.stringify({ tier: 'oauth', state: 'connected', name: 'Ana', team: 'Fish Lab' }) && verdictOf(h.client.connected()), h.client.account());
 
   console.log('③ refresh: rotation, single flight, write-before-use, reconnect');
   const old = h.tk.read();
@@ -174,7 +174,7 @@ try {
   const before = JSON.stringify(h.tk.read());
   const nMe = log.filter((x) => x.p === '/v1/me').length;
   let err = null; try { await hf.client.me(); } catch (e) { err = e; }
-  ok('a write failure on rotation ⇒ store-failed, the OLD pair kept on disk, and NO request was made with the new token', err && err.code === 'store-failed' && JSON.stringify(h.tk.read()) === before && log.filter((x) => x.p === '/v1/me').length === nMe, err && err.message);
+  ok('a write failure on rotation ⇒ store-failed, the OLD pair kept on disk, and NO request was made with the new token', gateOf(err) && err.code === 'store-failed' && JSON.stringify(h.tk.read()) === before && log.filter((x) => x.p === '/v1/me').length === nMe, err && err.message);
   // a 401 after one refresh ⇒ reconnect (fresh hub over the same file; the old refresh above is dead: mint a fresh pair)
   const h2 = hub({ fileName: 'b.json' });
   const s3 = await h2.oauth.start({ origin: 'https://hub.example.ts.net' });
@@ -182,7 +182,7 @@ try {
   await fetch(`${LAND}?code=${c3.q.code}&state=${encodeURIComponent(c3.q.state)}`);
   fake.force401 = 2;
   let e401 = null; try { await h2.client.me(); } catch (e) { e401 = e; }
-  ok('a 401 ⇒ ONE refresh ⇒ still 401 ⇒ `reconnect`: the card says it, connected() false', e401 && e401.code === 'reconnect' && h2.client.account().state === 'reconnect' && !h2.client.connected(), { e: e401 && e401.code, acct: h2.client.account() });
+  ok('a 401 ⇒ ONE refresh ⇒ still 401 ⇒ `reconnect`: the card says it, connected() false', gateOf(e401) && e401.code === 'reconnect' && h2.client.account().state === 'reconnect' && !h2.client.connected(), { e: e401 && e401.code, acct: h2.client.account() });
   h2.client.disconnect();
   ok('Disconnect forgets the pair here (the file is gone)', !fs.existsSync(path.join(dir, 'b.json')) && h2.client.account().tier === null);
 
@@ -211,7 +211,7 @@ try {
       return { lines: lines.length, rotated: !!(first && second && second.refresh !== first.refresh), needles: needles.length, leaked: lines.filter((l) => needles.some((n) => l.includes(n))).length };
     };
     const real = await pairLeg(path.join(REPO, 'src/server/dropline-client.js'), 'p.json');
-    ok('connect + a rotation through the real modules: no captured line holds an access or a refresh token, old or new', real.rotated && real.needles === 4 && real.leaked === 0, real);
+    ok('connect + a rotation through the real modules: no captured line holds an access or a refresh token, old or new', gateOf(real.rotated) && real.needles === 4 && real.leaked === 0, real);
     const mdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-oauth-m-'));
     try {
       fs.mkdirSync(path.join(mdir, 'src/server'), { recursive: true });
@@ -220,7 +220,7 @@ try {
       const anchor = '      try { tokens.write(next); }';
       fs.writeFileSync(path.join(mdir, 'src/server/dropline-client.js'), editAnchor(src, anchor, '      log.log?.(`[voice] refreshed ${JSON.stringify(next)}`);\n' + anchor, "src/server/dropline-client.js"));
       const m = await pairLeg(path.join(mdir, 'src/server/dropline-client.js'), 'pm.json');
-      ok('CONTROL: a copy that logs the rotated pair leaks it ⇒ the check above is RED on it', src.split(anchor).length === 2 && m.rotated && m.leaked > 0, m);
+      ok('CONTROL: a copy that logs the rotated pair leaks it ⇒ the check above is RED on it', src.split(anchor).length === 2 && gateOf(m.rotated) && m.leaked > 0, m);
     } finally { fs.rmSync(mdir, { recursive: true, force: true }); }
   }
 
@@ -232,7 +232,7 @@ try {
     const r = await hc.oauth.start({ origin: 'http://10.0.0.5:3456' });
     const st = new URL(r.url).searchParams.get('state');
     const clear = JSON.parse(Buffer.from(st.split('.')[1], 'base64url').toString());
-    ok('the preset\'s clientId + relay page: no registration; the state carries u = the hub origin and k = dropline for the relay', r.ok && r.via === 'relay' && new URL(r.url).searchParams.get('client_id') === 'cid_cluster_000001' && new URL(r.url).searchParams.get('redirect_uri') === 'https://admin.example.test/relay/' && log.filter((x) => x.p === '/oauth/register').length === nReg && clear.u === 'http://10.0.0.5:3456' && clear.k === 'dropline', { r, clear });
+    ok('the preset\'s clientId + relay page: no registration; the state carries u = the hub origin and k = dropline for the relay', gateOf(r.ok) && r.via === 'relay' && new URL(r.url).searchParams.get('client_id') === 'cid_cluster_000001' && new URL(r.url).searchParams.get('redirect_uri') === 'https://admin.example.test/relay/' && log.filter((x) => x.p === '/oauth/register').length === nReg && clear.u === 'http://10.0.0.5:3456' && clear.k === 'dropline', { r, clear });
   }
   // lane dropline-connect-door (a fleet user's report 2026-10-18): the refusal names the REAL door — WHO can give this instance
   // an https address — through the status answer (connectWhy), and Connect never waits for the plugin's switch
@@ -261,7 +261,7 @@ try {
         const r = await fetch(`${base}/api/voice/oauth/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin: o.instance || 'http://box.lan:3456' }) });
         const b = await r.json();
         if (why) ok(`${name}: status connectVia null + connectWhy ${why}; start ⇒ 409 needs-https with ITS sentence; nothing sent to Fish Audio`, st.connectVia === null && st.connectWhy === why && r.status === 409 && b.error === 'needs-https' && b.message === WHYS[why] && log.filter((x) => x.p === '/oauth/register').length === nReg, { st, b });
-        else ok(`${name}: connectVia ${via}, connectWhy null — and start with the plugin OFF answers the consent URL (a person connects first, switches on after)`, st.connectVia === via && st.connectWhy === null && st.enabled === false && r.status === 200 && b.ok === true && /\/oauth\/authorize\?/.test(b.url), { st, b });
+        else ok(`${name}: connectVia ${via}, connectWhy null — and start with the plugin OFF answers the consent URL (a person connects first, switches on after)`, st.connectVia === via && st.connectWhy === null && st.enabled === false && r.status === 200 && b.ok === true && verdictOf(/\/oauth\/authorize\?/.test(b.url)), { st, b });
       } finally { s2.close(); }
     }
     // B-1e9a cure 3 (the read): the status answer CARRIES the door's two names — the Connect block draws the heal press / the
@@ -277,12 +277,12 @@ try {
         ok('B-1e9a cure 3: GET /api/voice/status carries presetShadowed and presetChoices (the Connect block\'s heal door reads nothing else)', st.presetShadowed === 'dropline' && JSON.stringify(st.presetChoices) === JSON.stringify([{ key: 'teamA', label: 'Team A' }, { key: 'teamB', label: 'Team B' }]), st);
       } finally { s3.close(); }
     }
-    ok('CONTROL: the two refusal sentences differ, and only the operator one names VIBESPACE_PUBLIC_URL', WHYS['self-hosted'] !== WHYS.operator && /VIBESPACE_PUBLIC_URL/.test(WHYS.operator) && !/VIBESPACE_PUBLIC_URL/.test(WHYS['self-hosted']) && /Tailscale/.test(WHYS['self-hosted']));
+    ok('CONTROL: the two refusal sentences differ, and only the operator one names VIBESPACE_PUBLIC_URL', WHYS['self-hosted'] !== WHYS.operator && gateOf(/VIBESPACE_PUBLIC_URL/.test(WHYS.operator)) && !/VIBESPACE_PUBLIC_URL/.test(WHYS['self-hosted']) && verdictOf(/Tailscale/.test(WHYS['self-hosted'])));
   }
-  ok('the door registry: dropline\'s door is what the route consulted (and a bad kind is refused at registration)', (() => { try { doors.register('../x', { landing() { }, page() { } }); return false; } catch { return true; } })());
+  ok('the door registry: dropline\'s door is what the route consulted (and a bad kind is refused at registration)', verdictOf((() => { try { doors.register('../x', { landing() { }, page() { } }); return false; } catch { return true; } })()));
 } finally {
   srv.close(); appSrv.close();
   fs.rmSync(dir, { recursive: true, force: true });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

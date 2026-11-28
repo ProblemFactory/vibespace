@@ -26,7 +26,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const BUNDLE = path.join(REPO, 'data/bin/vibespace-agentd.js');
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : process.env.MDA_SHOTS || null; })(); // MDA_SHOTS: a ci.mjs claim passes no argv
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (!fs.existsSync(BUNDLE)) { ok(false, 'the agentd bundle exists (npm run build first)'); process.exit(1); }
 
@@ -69,7 +69,7 @@ const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const OPPLAT = 'listInstalled({ platform: process.platform';
 const CAP_LIST = /capabilities: \[([^\]]*)\]/;
-ok(HELLO.test(bundleText) && bundleText.includes(OPPLAT) && /"desktop-apps-list"/.test((CAP_LIST.exec(bundleText) || [])[1] || ''), 'the bundle carries the hello-ack platform, the op\'s platform and the capability (the copies patch exactly those)');
+ok(gateOf(HELLO.test(bundleText)) && gateOf(bundleText.includes(OPPLAT)) && verdictOf(/"desktop-apps-list"/.test((CAP_LIST.exec(bundleText) || [])[1] || '')), 'the bundle carries the hello-ack platform, the op\'s platform and the capability (the copies patch exactly those)');
 const as = (plat) => bundleText.replace(HELLO, (all, pre) => `${pre}platform: ${JSON.stringify(plat)},`).replace(OPPLAT, `listInstalled({ platform: ${JSON.stringify(plat)}`);
 const dropCap = (txt) => txt.replace(CAP_LIST, (all, inner) => `capabilities: [${inner.split(',').map((x) => x.trim()).filter((x) => x && x !== '"desktop-apps-list"').join(', ')}]`);
 const copies = { win: as('win32'), mac: as('darwin'), old: dropCap(as('win32')) };
@@ -86,7 +86,7 @@ async function deviceOn(name) {
 }
 const dms = { 'win-a': await deviceOn('win'), 'mac-b': await deviceOn('mac'), 'win-old': await deviceOn('old') };
 const info = (id) => dms[id].status().info || {};
-ok(info('win-a').platform === 'win32' && info('win-a').capabilities.includes('desktop-apps-list') && info('mac-b').platform === 'darwin' && info('win-old').platform === 'win32' && !info('win-old').capabilities.includes('desktop-apps-list'), 'three real agents: a Windows-shaped and a Mac-shaped one with the op, an old Windows one without it');
+ok(info('win-a').platform === 'win32' && gateOf(info('win-a').capabilities.includes('desktop-apps-list')) && info('mac-b').platform === 'darwin' && info('win-old').platform === 'win32' && !info('win-old').capabilities.includes('desktop-apps-list'), 'three real agents: a Windows-shaped and a Mac-shaped one with the op, an old Windows one without it');
 
 // ── the hub: the real access layer + keeper + routes ────────────────────────────────────────────────────────────
 const quiet = { log() { }, warn() { } };
@@ -154,18 +154,18 @@ for (const [label, w, h, file] of [['desk 900 px', 900, 760, 'desk.png'], ['phon
   console.log(`① – ③ the Windows machine's dialog (${label})`);
   const p = await page(w, h);
   await p.ev(`window.__open(${ROW('win-a', 'WIN-DESK1')})`);
-  ok(await p.until(`document.querySelectorAll('#machine-desktop-dialog .machine-apps-row').length > 0`), `${label}: the dialog lists the machine's apps (asked through the real op)`);
+  ok(verdictOf(await p.until(`document.querySelectorAll('#machine-desktop-dialog .machine-apps-row').length > 0`)), `${label}: the dialog lists the machine's apps (asked through the real op)`);
   const got = await p.ev(names);
-  ok(got.includes('JASP') && got.includes('7-Zip 24.08 (x64)') && got.includes('Chrome (Work)') && !got.some((n) => /Uninstall|JASP 0\.98/.test(n)), `${label}: JASP is listed (once), the Uninstall-key app too, no uninstaller`, got);
+  ok(gateOf(got.includes('JASP')) && gateOf(got.includes('7-Zip 24.08 (x64)')) && gateOf(got.includes('Chrome (Work)')) && !got.some((n) => /Uninstall|JASP 0\.98/.test(n)), `${label}: JASP is listed (once), the Uninstall-key app too, no uninstaller`, got);
   const title = await p.ev(`document.querySelector('.machine-apps-title').textContent`);
   ok(title === `WIN-DESK1上已安装（${got.length}）`, `${label}: the head says "{machine}上已安装（n）" (zh)`, title);
   const m1 = await p.ev(MEASURE);
-  ok(m1.length === 4 && m1[0].text === '串流一个窗口…' && m1[3].text === 'RemoteApp 设置…' && m1.every((b) => b.lines === 1 && b.fits && b.h <= 40), `${label}: ① every action-row button holds its words on ONE line, uncut (${m1.map((b) => `${b.text} ${b.w}×${b.h}`).join(' · ')})`, m1); // + lane remoteapp-r1b's «RemoteApp settings…» on a Windows machine; + lane stream-p2w-build's «Stream one window…» first (int304)
+  ok(m1.length === 4 && m1[0].text === '串流一个窗口…' && m1[3].text === 'RemoteApp 设置…' && verdictOf(m1.every((b) => b.lines === 1 && b.fits && b.h <= 40)), `${label}: ① every action-row button holds its words on ONE line, uncut (${m1.map((b) => `${b.text} ${b.w}×${b.h}`).join(' · ')})`, m1); // + lane remoteapp-r1b's «RemoteApp settings…» on a Windows machine; + lane stream-p2w-build's «Stream one window…» first (int304)
   if (w === 900) {
     await p.ev(`(() => { const s = document.createElement('style'); s.id = 'base-rule'; s.textContent = '.desktop-install-actions{flex-wrap:nowrap!important}.desktop-install-actions>button{flex:0 1 auto!important;white-space:normal!important}.desktop-install-actions>.file-tool-btn{width:24px!important;height:24px!important;min-height:0!important;padding:0!important}'; document.head.append(s); })()`);
     const m0 = await p.ev(MEASURE);
     const again = m0.find((b) => b.text === '再检查一次');
-    ok(again && again.lines >= 3 && again.w <= 30, `RED CONTROL: the base rule (no wrap, the 24 px icon-button box) draws "再检查一次" as a column (${again && `${again.w}×${again.h}, ${again.lines} lines`})`, m0);
+    ok(gateOf(again) && again.lines >= 3 && again.w <= 30, `RED CONTROL: the base rule (no wrap, the 24 px icon-button box) draws "再检查一次" as a column (${again && `${again.w}×${again.h}, ${again.lines} lines`})`, m0);
     await p.ev(`document.getElementById('base-rule').remove()`);
   }
   await p.ev(`[...document.querySelectorAll('.machine-apps-row')].find((b) => b.querySelector('.machine-apps-name').textContent === 'JASP').click()`);
@@ -173,7 +173,7 @@ for (const [label, w, h, file] of [['desk 900 px', 900, 760, 'desk.png'], ['phon
   ok(cmd === 'start "" "C:\\Program Files\\JASP\\JASP.exe"', `${label}: ② a press on JASP fills the command box with its launch line`, cmd);
   await p.ev(`(() => { const f = document.querySelector('.machine-apps-filter'); f.value = 'chrome'; f.dispatchEvent(new Event('input')); })()`);
   const filtered = await p.ev(names);
-  ok(filtered.length === 2 && filtered.every((n) => /Chrome/.test(n)), `${label}: the filter narrows the list by name`, filtered);
+  ok(filtered.length === 2 && verdictOf(filtered.every((n) => /Chrome/.test(n))), `${label}: the filter narrows the list by name`, filtered);
   await p.ev(`(() => { const f = document.querySelector('.machine-apps-filter'); f.value = ''; f.dispatchEvent(new Event('input')); })()`);
   const docW = await p.ev(`document.documentElement.scrollWidth`);
   const dlg = await p.ev(`(() => { const b = document.querySelector('#machine-desktop-dialog .dialog').getBoundingClientRect(); return [Math.round(b.left), Math.round(b.right), Math.round(b.height)]; })()`);
@@ -183,7 +183,7 @@ for (const [label, w, h, file] of [['desk 900 px', 900, 760, 'desk.png'], ['phon
     console.log('③ Check again lists the machine again');
     fs.appendFileSync(records, lnk('Fiji', 'C:\\Fiji.app\\ImageJ-win64.exe') + '\r\n');
     await p.ev(`[...document.querySelectorAll('#machine-desktop-dialog .desktop-install-actions > button')].find((b) => b.textContent === '再检查一次').click()`);
-    ok(await p.until(`[...document.querySelectorAll('.machine-apps-name')].some((n) => n.textContent === 'Fiji')`), 'Check again re-lists: the app just added on the machine appears');
+    ok(verdictOf(await p.until(`[...document.querySelectorAll('.machine-apps-name')].some((n) => n.textContent === 'Fiji')`)), 'Check again re-lists: the app just added on the machine appears');
   }
   p.close();
 }
@@ -192,9 +192,9 @@ console.log('④ the Mac machine lists its bundles');
 {
   const p = await page(900, 760);
   await p.ev(`window.__open(${ROW('mac-b', 'Mac-mini')})`);
-  ok(await p.until(`document.querySelectorAll('#machine-desktop-dialog .machine-apps-row').length > 0`), 'the Mac\'s dialog lists its apps');
+  ok(verdictOf(await p.until(`document.querySelectorAll('#machine-desktop-dialog .machine-apps-row').length > 0`)), 'the Mac\'s dialog lists its apps');
   const got = await p.ev(names);
-  ok(['Blender', 'Fiji', 'JASP', 'Terminal'].every((n) => got.includes(n)), 'its ~/Applications bundles (Utilities one level in)', got);
+  ok(verdictOf(['Blender', 'Fiji', 'JASP', 'Terminal'].every((n) => got.includes(n))), 'its ~/Applications bundles (Utilities one level in)', got);
   await p.ev(`[...document.querySelectorAll('.machine-apps-row')].find((b) => b.querySelector('.machine-apps-name').textContent === 'JASP').click()`);
   ok(await p.ev(`document.querySelector('.machine-desktop-cmd').value`) === 'open -a "JASP"', 'a press fills `open -a "JASP"`');
   p.close();
@@ -205,10 +205,10 @@ console.log('⑤ an old agent: the update words, answered at once');
   const t0 = Date.now();
   const r = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/apps?host=win-old&fresh=1`)).json();
   const ms = Date.now() - t0;
-  ok(r.code === 'host_needs_daemon' && Array.isArray(r.rows) && ms < 2000, `the old agent is never asked: host_needs_daemon in ${ms} ms (never a hang)`, r);
+  ok(r.code === 'host_needs_daemon' && gateOf(Array.isArray(r.rows)) && ms < 2000, `the old agent is never asked: host_needs_daemon in ${ms} ms (never a hang)`, r);
   const p = await page(900, 760);
   await p.ev(`window.__open(${ROW('win-old', 'OLD-PC')})`);
-  ok(await p.until(`/VibeSpace 代理/.test(document.querySelector('.machine-apps-note').textContent)`), 'the dialog says the list needs that machine\'s agent updated (zh)');
+  ok(verdictOf(await p.until(`/VibeSpace 代理/.test(document.querySelector('.machine-apps-note').textContent)`)), 'the dialog says the list needs that machine\'s agent updated (zh)');
   const note = await p.ev(`document.querySelector('.machine-apps-note').textContent`);
   ok(note === '这份列表需要更新OLD-PC上的 VibeSpace 代理（它会自动更新；一分钟后再检查一次）', 'the words, verbatim', note);
   await p.shot('old-daemon.png');
@@ -224,13 +224,13 @@ console.log('⑥ the dialog as EACH opener opens it (lane machine-needs-at-pairi
     const mm = /showMachineDesktopDialog\(\w+, \w+, \{(.*)$/.exec(line);
     if (mm && !/^\s*export function/.test(line)) openers.push({ file: f, keys: optNames.filter((k) => new RegExp(`\\b${k}:`).test(mm[1])), hands: /\binstall:/.test(mm[1]) });
   }
-  ok(openers.length >= 2 && openers.every((o) => !o.hands), `the openers (derived from src/lib): ${openers.map((o) => `${o.file} {${o.keys.join(', ')}}`).join(' · ')} — none hands an install door`, openers);
+  ok(openers.length >= 2 && verdictOf(openers.every((o) => !o.hands)), `the openers (derived from src/lib): ${openers.map((o) => `${o.file} {${o.keys.join(', ')}}`).join(' · ')} — none hands an install door`, openers);
   for (const o of openers) {
     const p = await page(900, 760);
     await p.ev(`window.__openAs(${ROW('win-a', 'WIN-DESK1')}, ${JSON.stringify(o.keys)})`);
-    ok(await p.until(`!!document.querySelector('#machine-desktop-dialog .desktop-install-actions')`), `${o.file}: the dialog opens`);
+    ok(verdictOf(await p.until(`!!document.querySelector('#machine-desktop-dialog .desktop-install-actions')`)), `${o.file}: the dialog opens`);
     const tv = await p.ev(`(() => { const b = [...document.querySelectorAll('#machine-desktop-dialog .desktop-install-actions > button')].find((x) => x.textContent === '安装 TightVNC Server…'); if (!b) return null; const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), shown: !!b.offsetParent, state: document.querySelector('.machine-desktop-state').textContent }; })()`);
-    ok(tv && tv.shown && tv.w > 40 && tv.h > 10 && /TightVNC/.test(tv.state), `${o.file}: the line «${tv && tv.state}» has «安装 TightVNC Server…» beside it, drawn on screen (${tv && `${tv.w}×${tv.h}`})`, tv);
+    ok(gateOf(tv) && gateOf(tv.shown) && tv.w > 40 && tv.h > 10 && verdictOf(/TightVNC/.test(tv.state)), `${o.file}: the line «${tv && tv.state}» has «安装 TightVNC Server…» beside it, drawn on screen (${tv && `${tv.w}×${tv.h}`})`, tv);
     await p.shot(`opener-${o.file.replace(/\.js$/, '')}.png`);
     p.close();
   }
@@ -240,4 +240,4 @@ console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? '
 for (const dm of Object.values(dms)) { try { dm.stop(); } catch { /* gone */ } }
 // Chrome writes its profile until it has exited: wait for that, then the exit handler removes the scratch whole
 if (chrome && chrome.exitCode == null) { const gone = new Promise((r) => chrome.once('exit', r)); try { chrome.kill('SIGTERM'); } catch { /* gone */ } await Promise.race([gone, sleep(5000)]); }
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

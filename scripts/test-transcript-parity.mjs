@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 // ── fixture HOME, set BEFORE any src require (CODEX_SESSIONS_DIR binds at
 // module load) — the daemon child inherits it via spawn env ──
@@ -168,7 +168,7 @@ await parity('page (default = the text window)', svc.page(ref, {}), ['page', ref
 }
 const big = await parity('page (all, multi-window payload)', svc.page(ref, { offset: 0, limit: 999 }), ['page', ref, { offset: 0, limit: 999 }]);
 ok(big.a.length > 512 * 1024, `page-all payload spans >2 mux windows (${(big.a.length / 1024).toFixed(0)}KB) — count-gating actually exercised`);
-ok(big.a.includes('大文本结尾марker'), 'multibyte content survived chunked byte-channel transfer intact');
+ok(verdictOf(big.a.includes('大文本结尾марker')), 'multibyte content survived chunked byte-channel transfer intact');
 ok(!big.a.includes('sidechain noise'), 'subagent records filtered identically on both legs');
 await parity('turnmap', svc.turnmap(ref), ['turnmap', ref, {}]);
 await parity('searchIndexed', svc.searchIndexed(ref, '世界'), ['searchIndexed', ref, { q: '世界' }]);
@@ -195,7 +195,7 @@ await parity('taskState (TodoWrite replay)', svc.taskState(ref), ['taskState', r
   fs.appendFileSync(fp, more.map((r) => JSON.stringify(r)).join('\n') + '\n');
   const p1 = await parity('page after an APPEND between two calls', svc.page(ref, {}), ['page', ref, {}]);
   const st1 = await parity('status after an APPEND between two calls', svc.status(ref), ['status', ref, {}]);
-  ok(p1.a !== p0.a && p1.a.includes('done 完成') && !p1.a.includes('sidechain noise') && st1.a !== st0.a && st1.a.includes('"completed"'), 'the appended records are visible on both legs (text, TodoWrite state), the sidechain one is not');
+  ok(p1.a !== p0.a && gateOf(p1.a.includes('done 完成')) && !p1.a.includes('sidechain noise') && st1.a !== st0.a && verdictOf(st1.a.includes('"completed"')), 'the appended records are visible on both legs (text, TodoWrite state), the sidechain one is not');
   const { jsonlCacheClear } = require(REPO + '/src/session-store.js');
   jsonlCacheClear();
   ok(J(await svc.page(ref, {})) === p1.a && J(await svc.status(ref)) === st1.a, 'the appended page/status equal a COLD read of the same file (in-process cache cleared)');
@@ -230,7 +230,7 @@ const HSID = 'cccccccc-1111-2222-3333-444444444444';
 }
 const href = { backend: 'claude', sessionId: HSID, cwd: CWD };
 const hg = await svc.gapInfo(href);
-ok(hg.gap && hg.gap.totalLines === 18000 && hg.gap.tailStartLine > 0, `huge fixture has a REAL gap (${hg.gap?.gapRecords} gap records, tail from line ${hg.gap?.tailStartLine})`);
+ok(gateOf(hg.gap) && hg.gap.totalLines === 18000 && hg.gap.tailStartLine > 0, `huge fixture has a REAL gap (${hg.gap?.gapRecords} gap records, tail from line ${hg.gap?.tailStartLine})`);
 await parity('gapInfo (huge file)', Promise.resolve({ gap: hg.gap, hasFile: !!hg.fp }), ['gapInfo', href, {}]);
 await parity('gapSlab (seek-read mid-file)', (async () => ({ messages: await svc.gapSlab(href, hg.fp, 40, 190) }))(), ['gapSlab', href, { fromLine: 40, toLine: 190 }]);
 await parity('fullTurnmap (streaming scan)', (async () => ({ turns: await svc.fullTurnmap(href, hg.fp), ...(hg.gap || {}) }))(), ['fullTurnmap', href, {}]);
@@ -249,8 +249,8 @@ const cref = { backend: 'codex', sessionId: TID, cwd: CWD };
   // index — its one shared walk, the bound an asker waits, the stuck-walk guard — bundled from the same src/adapters/codex.js
   const bundle = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-agentd.js'), 'utf8');
   const carried = { walk: /function requestRolloutWalk\d*\(/.test(bundle), bound: /CODEX_ASK_BOUND_MS\d* = /.test(bundle), stuck: /CODEX_WALKS_OUT\d*\.get\(/.test(bundle), lookup: /function codexRolloutLookup\d*\(/.test(bundle) };
-  ok(Object.values(carried).every(Boolean), `the agent bundle carries the rollout index's own walk, bound and stuck-walk guard (${JSON.stringify(carried)})`);
-  ok(!!inproc && !!inproc.chatStatus && inproc.chatStatus.model === 'gpt-5.6' && st.walks === 1 && st.last && st.last.ok,
+  ok(verdictOf(Object.values(carried).every(Boolean)), `the agent bundle carries the rollout index's own walk, bound and stuck-walk guard (${JSON.stringify(carried)})`);
+  ok(!!inproc && !!inproc.chatStatus && inproc.chatStatus.model === 'gpt-5.6' && st.walks === 1 && gateOf(st.last) && verdictOf(st.last.ok),
     `…the hub's side read the rollout (model «${inproc && inproc.chatStatus && inproc.chatStatus.model}») after ONE walk of its index (${st.walks}; ${st.last && st.last.rollouts} rollouts)`);
 }
 await parity('codex page', svc.page(cref, {}), ['page', cref, {}]);
@@ -265,13 +265,13 @@ await parity('searchFull', (async () => { const g2 = await svc.gapInfo(href); re
 // the SAME bytes; the agent names the capability the hub asks for; a gone place is gone on both
 {
   const caps = (await dm.connect())?.info?.capabilities || [];
-  ok(caps.includes('transcript-picture'), 'the agent\'s hello-ack names `transcript-picture` (the hub asks no agent without it)');
+  ok(verdictOf(caps.includes('transcript-picture')), 'the agent\'s hello-ack names `transcript-picture` (the hub asks no agent without it)');
   const pref = { backend: 'claude', sessionId: PSID, cwd: CWD };
   for (const [name, params] of [['main file, a picture past the mux window', { key: 'pu-1', n: 1 }], ['main file, the first picture', { key: 'pu-1', n: 0 }], ['a sub-agent\'s file', { key: 'pu-2', n: 0, agent: PAG }]]) {
     const hub = await svc.picture(pref, params);
     const hubBytes = hub && hub.ok ? Buffer.from(fs.readFileSync(hub.fp).toString('latin1', hub.start, hub.end), 'base64') : null;
     const dev = await dm.transcriptOp('picture', pref, params);
-    ok(!!hubBytes && dev && dev.ok && dev.mediaType === hub.mediaType && Buffer.from(dev.b64, 'base64').equals(hubBytes), `picture (${name}): the agent's answer = the hub's, byte for byte (${hubBytes ? hubBytes.length : 0} bytes)`);
+    ok(!!hubBytes && gateOf(dev) && gateOf(dev.ok) && dev.mediaType === hub.mediaType && verdictOf(Buffer.from(dev.b64, 'base64').equals(hubBytes)), `picture (${name}): the agent's answer = the hub's, byte for byte (${hubBytes ? hubBytes.length : 0} bytes)`);
   }
   const [hg2, dg2] = [await svc.picture(pref, { key: 'pu-1', n: 5 }), await dm.transcriptOp('picture', pref, { key: 'pu-1', n: 5 })];
   const [hu, du] = [await svc.picture(pref, { key: 'pu-2', n: 0, agent: 'ffffffffffffffff' }), await dm.transcriptOp('picture', pref, { key: 'pu-2', n: 0, agent: 'ffffffffffffffff' })];
@@ -281,7 +281,7 @@ await parity('searchFull', (async () => { const g2 = await svc.gapInfo(href); re
 // contract hygiene
 let unknownErr = null;
 try { await dm.transcriptOp('rm-rf', ref, {}); } catch (e) { unknownErr = e; }
-ok(unknownErr && /unknown transcript method/.test(unknownErr.message), 'unknown method surfaces as a NAMED error, never hangs');
+ok(gateOf(unknownErr) && verdictOf(/unknown transcript method/.test(unknownErr.message)), 'unknown method surfaces as a NAMED error, never hangs');
 const missing = await dm.transcriptOp('gapInfo', { backend: 'claude', sessionId: 'ffffffff-0000-0000-0000-000000000000', cwd: CWD }, {});
 ok(missing.hasFile === false && missing.gap === null, 'missing transcript answers honestly (hasFile:false), not an error');
 
@@ -297,7 +297,7 @@ ok(missing.hasFile === false && missing.gap === null, 'missing transcript answer
     const full = async () => { const g2 = await svc.gapInfo(ref); return { turns: g2.fp ? await svc.fullTurnmap(ref, g2.fp) : [], ...(g2.gap || {}) }; };   // the agent's op shape
     const hub = J(await (method === 'page' ? svc.page(ref, params) : method === 'turnmap' ? svc.turnmap(ref) : full()));
     const dev = J(await dm.transcriptOp(method, ref, { ...params, sent: SP.sentFor(ref.sessionId, from) }));
-    ok(dev === hub && hub.includes('auto-resume'), `B-9a2e ${name}: the agent handed the hub's rows answers BYTE-IDENTICAL to the hub's own read — VibeSpace's continue keeps its origin (${hub.length}b)`);
+    ok(dev === hub && verdictOf(hub.includes('auto-resume')), `B-9a2e ${name}: the agent handed the hub's rows answers BYTE-IDENTICAL to the hub's own read — VibeSpace's continue keeps its origin (${hub.length}b)`);
     if (dev !== hub) console.error('    diff ' + firstDiff(hub, dev));
     return hub;
   };
@@ -319,13 +319,13 @@ ok(missing.hasFile === false && missing.gap === null, 'missing transcript answer
     const roadSvc = createTranscriptService({ activeSessions: new Map(), createSessionMessages: (s) => (s?.backend === 'codex' ? new CodexSessionMessages(s, undefined, {}) : new SessionMessages(s, undefined, {})), hosts: { deviceBounded: async () => counted } });
     const viaRoad = J(await roadSvc.page({ ...ref(SR.Y2), host: 'h-paired' }, {}));
     const hubY2 = J(await svc.page(ref(SR.Y2), {}));
-    ok(viaRoad === hubY2 && hubY2.includes('auto-resume') && asks.join() === `${SR.Y2},${SR.Y2}+${SR.X}`, `B-9a2e: the hub's road to the paired machine — the fork's parent, named by the agent's ack, handed in one more ask: BYTE-IDENTICAL to the hub's own read (asks: ${asks.join(' | ')})`);
+    ok(viaRoad === hubY2 && gateOf(hubY2.includes('auto-resume')) && asks.join() === `${SR.Y2},${SR.Y2}+${SR.X}`, `B-9a2e: the hub's road to the paired machine — the fork's parent, named by the agent's ack, handed in one more ask: BYTE-IDENTICAL to the hub's own read (asks: ${asks.join(' | ')})`);
     if (viaRoad !== hubY2) console.error('    diff ' + firstDiff(hubY2, viaRoad));
     await sentParity('claude page', ref(SR.C, 'claude'), 'page', {});
     await sentParity('claude turnmap', ref(SR.C, 'claude'), 'turnmap', {});
     await sentParity('claude fullTurnmap', ref(SR.C, 'claude'), 'fullTurnmap', {});
     const bareC2 = await bareOf(ref(SR.C2, 'claude'), 'page');
-    ok(!bareC2.includes('auto-resume') && bareC2.includes('"typed":true'), 'B-9a2e CONTROL (claude): the op without the rows — the continue reads as typed by the person');
+    ok(!bareC2.includes('auto-resume') && verdictOf(bareC2.includes('"typed":true')), 'B-9a2e CONTROL (claude): the op without the rows — the continue reads as typed by the person');
   } finally { SP.setSource(null); }
 }
 // B-9a2e (round w5vyt4hhv's second small) — A CONVERSATION OF ANOTHER MACHINE, ON BOTH ROADS: the fork Y2 consults its parent X. A
@@ -360,17 +360,17 @@ ok(missing.hasFile === false && missing.gap === null, 'missing transcript answer
     SP.setPlaces((id) => (id === SR.X ? 'h-else' : undefined));
     const far = await both();
     const own = J(await svc.page({ backend: 'codex', sessionId: SR.Y2, cwd: CWD }, {}));
-    ok(far.viaAgent === far.viaHub && !far.viaHub.includes('auto-resume') && far.asks.join() === SR.Y2 && own.includes('auto-resume'), `B-9a2e: the parent noted on ANOTHER machine — the agent's road and the hub's fallback give ONE answer, the parent's rows handed on neither (asks: ${far.asks.join(' | ')}); this hub's own read stamps it`);
+    ok(far.viaAgent === far.viaHub && !far.viaHub.includes('auto-resume') && far.asks.join() === SR.Y2 && verdictOf(own.includes('auto-resume')), `B-9a2e: the parent noted on ANOTHER machine — the agent's road and the hub's fallback give ONE answer, the parent's rows handed on neither (asks: ${far.asks.join(' | ')}); this hub's own read stamps it`);
     if (far.viaAgent !== far.viaHub) console.error('    diff ' + firstDiff(far.viaHub, far.viaAgent));
     SP.setPlaces((id) => (id === SR.X ? 'h-paired' : undefined));
     const near = await both();
-    ok(near.viaAgent === near.viaHub && near.viaHub.includes('auto-resume') && near.asks.join() === `${SR.Y2},${SR.Y2}+${SR.X}`, `B-9a2e: the parent noted on THAT machine — handed on both roads, ONE answer (VibeSpace's continue) (asks: ${near.asks.join(' | ')})`);
+    ok(near.viaAgent === near.viaHub && gateOf(near.viaHub.includes('auto-resume')) && near.asks.join() === `${SR.Y2},${SR.Y2}+${SR.X}`, `B-9a2e: the parent noted on THAT machine — handed on both roads, ONE answer (VibeSpace's continue) (asks: ${near.asks.join(' | ')})`);
     if (near.viaAgent !== near.viaHub) console.error('    diff ' + firstDiff(near.viaHub, near.viaAgent));
     // THE LIVE CHAIN (the gate's own ids): a live session of the fork, not yet read here, names X in its chain — X is handed on both
     // roads although noted on another machine (the device road hands the chain at its first ask; the fallback's gate holds it)
     SP.setPlaces((id) => (id === SR.X ? 'h-else' : undefined));
     const chain = await both({ backend: 'codex', backendSessionId: SR.Y2, host: 'h-paired', cwd: CWD, forkedFrom: [SR.X] });
-    ok(chain.viaAgent === chain.viaHub && chain.viaHub.includes('auto-resume') && chain.asks.join() === `${SR.Y2}+${SR.X}`, `B-9a2e: a live session's own chain names the parent — handed on both roads, ONE answer (asks: ${chain.asks.join(' | ')})`);
+    ok(chain.viaAgent === chain.viaHub && gateOf(chain.viaHub.includes('auto-resume')) && chain.asks.join() === `${SR.Y2}+${SR.X}`, `B-9a2e: a live session's own chain names the parent — handed on both roads, ONE answer (asks: ${chain.asks.join(' | ')})`);
     if (chain.viaAgent !== chain.viaHub) console.error('    diff ' + firstDiff(chain.viaHub, chain.viaAgent));
     // A SLAB (gapSlab): C4's record carries C's id — C noted on another machine: handed on neither road; on that machine: on both
     SP.setSource((conv) => (conv === SR.X || conv === SR.Y2 || conv === SR.C ? [row] : null));
@@ -378,7 +378,7 @@ ok(missing.hasFile === false && missing.gap === null, 'missing transcript answer
     const slabFar = await slabs();
     SP.setPlaces((id) => (id === SR.C ? 'h-paired' : undefined));
     const slabNear = await slabs();
-    ok(slabFar.viaAgent === slabFar.viaHub && !slabFar.viaHub.includes('auto-resume') && slabNear.viaAgent === slabNear.viaHub && slabNear.viaHub.includes('auto-resume'),
+    ok(slabFar.viaAgent === slabFar.viaHub && !slabFar.viaHub.includes('auto-resume') && slabNear.viaAgent === slabNear.viaHub && verdictOf(slabNear.viaHub.includes('auto-resume')),
       'B-9a2e: a claude SLAB whose record carries another conversation\'s id — of another machine: handed on neither road; of that machine: on both — ONE answer each');
     if (slabNear.viaAgent !== slabNear.viaHub) console.error('    diff ' + firstDiff(slabNear.viaHub, slabNear.viaAgent));
   } finally { SP.setPlaces(null); SP.setSource(null); }
@@ -401,7 +401,7 @@ ok(missing.hasFile === false && missing.gap === null, 'missing transcript answer
     const hub = J(await svc.page(yref, {}));
     const sent = SP.sentFor(SR.Y3);
     const dev = J(await dm.transcriptOp('page', yref, { sent }));
-    ok(Object.keys(sent).join() === SR.X && dev === hub && hub.includes('auto-resume'), 'B-9a2e part 2: a stopped fork VibeSpace made, read on its paired machine with only its own id given — the link its adoption kept hands the parent\'s rows: BYTE-IDENTICAL to the hub\'s read, the parent\'s continue VibeSpace\'s on both');
+    ok(Object.keys(sent).join() === SR.X && dev === hub && verdictOf(hub.includes('auto-resume')), 'B-9a2e part 2: a stopped fork VibeSpace made, read on its paired machine with only its own id given — the link its adoption kept hands the parent\'s rows: BYTE-IDENTICAL to the hub\'s read, the parent\'s continue VibeSpace\'s on both');
     if (dev !== hub) console.error('    diff ' + firstDiff(hub, dev));
   } finally { SRmod.install(null); }
 }
@@ -426,4 +426,4 @@ os.homedir = origHomedir;
   for (const d of [home, dataDir]) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -84,7 +84,7 @@ const fakeHome = scratchHome('chan-agg-ui-home', fs);
 const chromeDir = scratch('chan-agg-ui-chrome');
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -180,7 +180,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 const waitServer = async () => { for (let i = 0; i < 120; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-ok(await waitServer(), 'the worktree server booted');
+ok(verdictOf(await waitServer()), 'the worktree server booted');
 const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' /* the owner's page — lane wake-approve-card r2 */ }, body: body === undefined ? undefined : JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch {} return { status: r.status, json: j, headers: r.headers }; };
 
 const WebSocket = require('ws');
@@ -231,7 +231,7 @@ for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP
 // lane attention-predicate-shared: 「相关」 open (`related: false`) — these legs read the hand-over / read / agent-group rows, which fold under it by default
 await api('PATCH', '/api/user-state', { channelsPanelFolds: { related: false } });
 const p1 = await newPage();
-ok(await p1.load(), 'page 1 loaded the app (zh)');
+ok(verdictOf(await p1.load()), 'page 1 loaded the app (zh)');
 
 // the first pass ingests EVERY conversation — wait for the synthetic rooms' anchors
 for (let i = 0; i < 80; i++) {
@@ -257,11 +257,11 @@ const PANEL = `(async () => {
   return { ok: false, why: 'rows never came', text: document.querySelector('.rail-panel-channels')?.textContent?.slice(0, 300) };
 })()`;
 const panel = await p1.evaljs(PANEL);
-ok(panel.ok, 'the Channels panel renders its rows', JSON.stringify(panel).slice(0, 400));
+ok(verdictOf(panel.ok), 'the Channels panel renders its rows', JSON.stringify(panel).slice(0, 400));
 const pollRows = (panel.rows || []).filter((r) => r.conv && r.conv.startsWith('fake-poll/'));
 ok(pollRows.length === 5, `EVERY conversation of the account is listed — the two base rooms and the three synthetic ones (${pollRows.length})`, JSON.stringify(pollRows.map((r) => r.conv)));
-ok((panel.rows || []).every((r) => r.chip && r.chip.length > 0), 'every row carries its freshness chip (every conversation is fetched)', JSON.stringify((panel.rows || []).map((r) => r.chip)));
-ok(panel.ok && !/跟踪|未跟踪|仅登录|Track|tracked/.test(panel.text), 'the panel says NOTHING about tracking — no 跟踪 / 未跟踪 / 仅登录 / Track anywhere', (panel.text || '').match(/.{0,20}(跟踪|仅登录|Track|tracked).{0,20}/g));
+ok(verdictOf((panel.rows || []).every((r) => r.chip && r.chip.length > 0)), 'every row carries its freshness chip (every conversation is fetched)', JSON.stringify((panel.rows || []).map((r) => r.chip)));
+ok(gateOf(panel.ok) && !/跟踪|未跟踪|仅登录|Track|tracked/.test(panel.text), 'the panel says NOTHING about tracking — no 跟踪 / 未跟踪 / 仅登录 / Track anywhere', (panel.text || '').match(/.{0,20}(跟踪|仅登录|Track|tracked).{0,20}/g));
 const rowMenu = await p1.evaljs(`(async () => {
   const row = document.querySelector('.rail-panel-channels .chan-row[data-conv="fake-poll/fake-poll-room-1"]');
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 200 }));
@@ -271,7 +271,7 @@ const rowMenu = await p1.evaljs(`(async () => {
   document.querySelectorAll('.context-menu').forEach((m) => m.remove());
   return items;
 })()`);
-ok(rowMenu.some((x) => /刷新周期/.test(x)) && rowMenu.some((x) => /立即刷新/.test(x)) && !rowMenu.some((x) => /跟踪/.test(x)), 'the row menu offers 立即刷新 and 刷新周期 ▸, and no 跟踪 verb', JSON.stringify(rowMenu));
+ok(gateOf(rowMenu.some((x) => /刷新周期/.test(x))) && gateOf(rowMenu.some((x) => /立即刷新/.test(x))) && !rowMenu.some((x) => /跟踪/.test(x)), 'the row menu offers 立即刷新 and 刷新周期 ▸, and no 跟踪 verb', JSON.stringify(rowMenu));
 
 // ── ② the window: messages, an image thumbnail through OUR route, a download chip ──
 const WIN = (conv) => `(async () => {
@@ -297,14 +297,14 @@ const WIN = (conv) => `(async () => {
 })()`;
 const win = await p1.evaljs(WIN('fake-poll-room-1'));
 ok(!win.fail && win.msgs > 0, `the conversation window reads its messages (${win.msgs})`, JSON.stringify(win).slice(0, 300));
-ok(win.imgs && win.imgs.length >= 1 && win.imgs.every((im) => /^\/api\/channels\/fake-poll\/fake-poll-room-1\/attachment\/[^?]+\?msg=[^&]+&inline=1$/.test(im.src) && im.w === 8 && im.h === 8), 'an IMAGE attachment is a thumbnail loaded through OUR route (?inline=1) and decoded (8×8 PNG)', JSON.stringify(win.imgs));
-ok(win.chips && win.chips.length >= 1 && win.chips.every((c) => /\/attachment\//.test(c.href) && c.dl && /notes-\d+\.txt/.test(c.text)), 'a FILE attachment is a download chip (name + download attribute)', JSON.stringify(win.chips));
+ok(gateOf(win.imgs) && win.imgs.length >= 1 && verdictOf(win.imgs.every((im) => /^\/api\/channels\/fake-poll\/fake-poll-room-1\/attachment\/[^?]+\?msg=[^&]+&inline=1$/.test(im.src) && im.w === 8 && im.h === 8)), 'an IMAGE attachment is a thumbnail loaded through OUR route (?inline=1) and decoded (8×8 PNG)', JSON.stringify(win.imgs));
+ok(gateOf(win.chips) && win.chips.length >= 1 && verdictOf(win.chips.every((c) => /\/attachment\//.test(c.href) && c.dl && /notes-\d+\.txt/.test(c.text))), 'a FILE attachment is a download chip (name + download attribute)', JSON.stringify(win.chips));
 if (win.chips && win.chips[0]) {
   const r = await fetch(`http://127.0.0.1:${PORT}${win.chips[0].href}`);
   const body = await r.text();
-  ok(r.status === 200 && /^attachment;/.test(r.headers.get('content-disposition') || '') && r.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(r.headers.get('content-security-policy') || '') && /fixture attachment/.test(body), 'the download answers `attachment` + nosniff + a sandbox CSP, and carries the file', JSON.stringify([r.status, r.headers.get('content-disposition'), r.headers.get('content-type')]));
+  ok(r.status === 200 && gateOf(/^attachment;/.test(r.headers.get('content-disposition') || '')) && r.headers.get('x-content-type-options') === 'nosniff' && gateOf(/sandbox/.test(r.headers.get('content-security-policy') || '')) && verdictOf(/fixture attachment/.test(body)), 'the download answers `attachment` + nosniff + a sandbox CSP, and carries the file', JSON.stringify([r.status, r.headers.get('content-disposition'), r.headers.get('content-type')]));
 }
-ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tracking');
+ok(gateOf(win.text) && !/跟踪|Track/.test(win.text), 'the window says nothing about tracking');
 
 // ── ②b R3 (2026-09-26, the owner: "lark图像不能预览吗？" — he saw "[image]" and a bare "image ⬇" chip) ──
 //    A LARK-SHAPED picture (text "[image]", a generic `image/*` attachment, no name) is DRAWN through our
@@ -328,11 +328,11 @@ ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tr
     out.overlayGone = !document.querySelector('.chat-img-overlay');
     return out;
   })()`);
-  ok(!lark1.fail && lark1.drawn && lark1.w === 8 && /\/attachment\/fake-poll-room-1-img0\?msg=[^&]+&inline=1$/.test(lark1.src), 'a LARK-SHAPED picture (`image/*`, no name) is DRAWN — fetched on demand through OUR route and decoded', JSON.stringify(lark1));
+  ok(!lark1.fail && gateOf(lark1.drawn) && lark1.w === 8 && verdictOf(/\/attachment\/fake-poll-room-1-img0\?msg=[^&]+&inline=1$/.test(lark1.src)), 'a LARK-SHAPED picture (`image/*`, no name) is DRAWN — fetched on demand through OUR route and decoded', JSON.stringify(lark1));
   // §25 (2026-09-27): the record's tree draws the picture IN PLACE of its placeholder — the "[image]" words never reach the body at all
-  ok(lark1.bodyText === '' && lark1.inBody, '…IN the message body, in place of its "[image]" line — the words never drawn (the record keeps them for agents and search)', JSON.stringify(lark1));
+  ok(lark1.bodyText === '' && verdictOf(lark1.inBody), '…IN the message body, in place of its "[image]" line — the words never drawn (the record keeps them for agents and search)', JSON.stringify(lark1));
   ok(lark1.alt === '图片', 'the picture is named in the device\'s language (图片), never the adapter\'s English', lark1.alt);
-  ok(!!lark1.overlay && lark1.overlay.endsWith(lark1.src) && lark1.overlayGone, 'a click opens THE shared image overlay on the same route (and a click closes it)', JSON.stringify(lark1));
+  ok(!!lark1.overlay && gateOf(lark1.overlay.endsWith(lark1.src)) && verdictOf(lark1.overlayGone), 'a click opens THE shared image overlay on the same route (and a click closes it)', JSON.stringify(lark1));
   const refused = await p1.evaljs(`(async () => {
     const w = window.app.openChannel('fake-poll', 'fake-poll-room-2');
     for (let i = 0; i < 80; i++) {
@@ -347,9 +347,9 @@ ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tr
     }
     return { fail: 'the refused / retried pictures never settled', html: [...w.content.querySelectorAll('.chanmsg-atts')].map((x) => x.textContent).join(' | ') };
   })()`);
-  ok(!refused.fail && refused.flaky.w === 8 && /&n=1$/.test(refused.flaky.src), 'a picture the vendor RATE-LIMITED once waits the vendor\'s time and draws on its own retry (`&n=1`)', JSON.stringify(refused));
-  ok(!refused.fail && refused.gone.refused === 'forbidden' && refused.gone.why === '被禁止' && refused.gone.retry && /图片加载失败/.test(refused.gone.title) && /图片/.test(refused.gone.text), 'a picture the vendor REFUSES is the chip that NAMES the reason in zh (图片 · 被禁止, the sentence in its title) with a Retry — never a bare "image ⬇"', JSON.stringify(refused.gone));
-  ok(!refused.fail && !/\[image\]/.test(refused.body) && refused.chipInBody, '…standing IN the body where the picture would be — no "[image]" words left over (§25)', JSON.stringify([refused.body, refused.chipInBody]));
+  ok(!refused.fail && refused.flaky.w === 8 && verdictOf(/&n=1$/.test(refused.flaky.src)), 'a picture the vendor RATE-LIMITED once waits the vendor\'s time and draws on its own retry (`&n=1`)', JSON.stringify(refused));
+  ok(!refused.fail && refused.gone.refused === 'forbidden' && refused.gone.why === '被禁止' && gateOf(refused.gone.retry) && gateOf(/图片加载失败/.test(refused.gone.title)) && verdictOf(/图片/.test(refused.gone.text)), 'a picture the vendor REFUSES is the chip that NAMES the reason in zh (图片 · 被禁止, the sentence in its title) with a Retry — never a bare "image ⬇"', JSON.stringify(refused.gone));
+  ok(!refused.fail && !/\[image\]/.test(refused.body) && verdictOf(refused.chipInBody), '…standing IN the body where the picture would be — no "[image]" words left over (§25)', JSON.stringify([refused.body, refused.chipInBody]));
   const retried = await p1.evaljs(`(async () => {
     const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-room-2');
     w.content.querySelector('[data-channel-retry="fake-poll-room-2-gone"]').click();
@@ -362,7 +362,7 @@ ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tr
     }
     return { ...saw, fail: 'no second verdict' };
   })()`);
-  ok(!retried.fail && retried.img && retried.why === '被禁止', 'Retry asks AGAIN (a new thumbnail, `retry=1` past the remembered refusal) and a refusal that stands is said again', JSON.stringify(retried));
+  ok(!retried.fail && gateOf(retried.img) && retried.why === '被禁止', 'Retry asks AGAIN (a new thumbnail, `retry=1` past the remembered refusal) and a refusal that stands is said again', JSON.stringify(retried));
 }
 
 // ── ③ scroll up into the vendor's older history ──
@@ -374,7 +374,7 @@ const older = await p1.evaljs(`(async () => {
   for (let k = 0; k < 6; k++) { list.scrollTop = 0; list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })); await new Promise((r) => setTimeout(r, 500)); }   // the person's wheel up at the top (round 3: a bare scroll event is displacement)
   return { before, after: w.content.querySelectorAll('.chanmsg').length, start: w.content.querySelector('.chanwin-start') ? w.content.querySelector('.chanwin-start').textContent : null };
 })()`);
-ok(older.start && /会话的开头|最早/.test(older.start), 'scrolling past the local log asks the vendor for older history and says where the conversation begins', JSON.stringify(older));
+ok(gateOf(older.start) && verdictOf(/会话的开头|最早/.test(older.start)), 'scrolling past the local log asks the vendor for older history and says where the conversation begins', JSON.stringify(older));
 
 // ── ⑪ design 010 (B-c9be): THE SEARCH DIALOG IN ZH — the saved copy at once, the vendor's whole history on the SAME
 //    press (the fake vendor's archive: messages its history never served), the chip, scroll-to-load, the around sheet;
@@ -430,18 +430,18 @@ const fsr = await p1.evaljs(`(async () => {
     return out;
   } finally { window.fetch = f0; }
 })()`);
-ok(fsr && !fsr.fail && fsr.typed === 0, '⑪ typing "budget" in the panel\'s filter box asks NO search (V4 — only the press does)', JSON.stringify(fsr));
+ok(gateOf(fsr) && !fsr.fail && fsr.typed === 0, '⑪ typing "budget" in the panel\'s filter box asks NO search (V4 — only the press does)', JSON.stringify(fsr));
 // ckpt61 hosted cure (633adcf2e, the plain-words pass): when nothing saved matched and the vendor was asked, section one's line
 // says so BESIDE what it covered («本机保存的消息里没有匹配 · 搜了本机保存的 N 个对话») — both clauses pinned, the coverage
 // clause no longer anchored at the line's start; the «nothing saved» clause required exactly when section one shows no hit
 const covLine = (f) => !!f && (f.saved === 0 ? /^本机保存的消息里没有匹配 · 搜了本机保存的 \d+ 个对话$/ : /^搜了本机保存的 \d+ 个对话$/).test(f.cov);   // the product's two shapes, exactly
-ok(!covLine({ cov: '搜了本机保存的 17 个对话', saved: 0 }) && !covLine({ cov: '本机保存的消息里没有匹配', saved: 0 }) && !covLine({ cov: '本机保存的消息里没有匹配 · 搜了本机保存的 17 个对话', saved: 3 }) && !covLine({ cov: '搜了本机保存的 17 个对话 · 本机保存的消息里没有匹配', saved: 0 }) && !covLine({ cov: '搜了本机保存的 17 个对话 · x', saved: 3 }) && covLine({ cov: '本机保存的消息里没有匹配 · 搜了本机保存的 17 个对话', saved: 0 }) && covLine({ cov: '搜了本机保存的 17 个对话', saved: 3 }),
+ok(!covLine({ cov: '搜了本机保存的 17 个对话', saved: 0 }) && !covLine({ cov: '本机保存的消息里没有匹配', saved: 0 }) && !covLine({ cov: '本机保存的消息里没有匹配 · 搜了本机保存的 17 个对话', saved: 3 }) && !covLine({ cov: '搜了本机保存的 17 个对话 · 本机保存的消息里没有匹配', saved: 0 }) && !covLine({ cov: '搜了本机保存的 17 个对话 · x', saved: 3 }) && gateOf(covLine({ cov: '本机保存的消息里没有匹配 · 搜了本机保存的 17 个对话', saved: 0 })) && verdictOf(covLine({ cov: '搜了本机保存的 17 个对话', saved: 3 })),
   '⑪ RED CONTROL of the coverage leg: the release\'s line with no saved hit (the «nothing saved» clause missing), the clause alone (no coverage), the clause beside saved hits, the clauses reversed and an extra clause are each refused; the product\'s two shapes pass');
-ok(fsr && fsr.heads && fsr.heads[0] === '已保存的消息' && /^更早的消息 — 来自.+的搜索$/.test(fsr.heads[1] || '') && covLine(fsr), '⑪ the press: section one "已保存的消息" with what it covered — and, when nothing saved matched and the vendor was asked, that nothing saved matched — section two "更早的消息 — 来自…的搜索" below it (zh)', JSON.stringify(fsr && { heads: fsr.heads, cov: fsr.cov, saved: fsr.saved }));
-ok(fsr && fsr.n1 === 20 && fsr.chips === fsr.n1 && fsr.chip === '未保存在本机' && fsr.unknown >= 1 && !fsr.snippetMarkup && fsr.vstat.some((x) => /又向.+查了全部历史：找到 20 条更早的/.test(x)), '⑪ two pages of the vendor\'s older hits, each chipped 未保存在本机, a conversation never synced named 一个尚未同步的对话, the snippet\'s markup stripped, the status line counts them', JSON.stringify(fsr && { n1: fsr.n1, chips: fsr.chips, chip: fsr.chip, unknown: fsr.unknown, vstat: fsr.vstat }));
-ok(fsr && fsr.n2 > fsr.n1 && fsr.pageAsks >= 1 && fsr.s1Moved === 0 && fsr.s1Same, '⑪ scrolling to the end loads the next page by itself (no "Show more"), section one never moves', JSON.stringify(fsr && { n1: fsr.n1, n2: fsr.n2, pageAsks: fsr.pageAsks, moved: fsr.s1Moved }));
-ok(fsr && fsr.sheet && fsr.sheetTitle && fsr.sheetNote && fsr.found && fsr.openBtn === false && fsr.storedArchive === 0, '⑪ a click opens 这条消息前后 — the found message marked among the vendor\'s records, said not saved, no "open" for a conversation never synced; nothing was stored', JSON.stringify(fsr && { sheet: fsr.sheet, title: fsr.sheetTitle, note: fsr.sheetNote, found: fsr.found, open: fsr.openBtn, stored: fsr.storedArchive }));
-ok(fsr && fsr.openAsks === 0 && fsr.openPeeks === 1 && fsr.openSaid, '⑪ lane vendor-search-memo: the pre-filled open asks the vendor NOTHING — one peek=1 look at the memo, 按“搜索”才会问…; the press asks', JSON.stringify(fsr && { asks: fsr.openAsks, peeks: fsr.openPeeks, said: fsr.openSaid }));
+ok(gateOf(fsr) && gateOf(fsr.heads) && fsr.heads[0] === '已保存的消息' && gateOf(/^更早的消息 — 来自.+的搜索$/.test(fsr.heads[1] || '')) && verdictOf(covLine(fsr)), '⑪ the press: section one "已保存的消息" with what it covered — and, when nothing saved matched and the vendor was asked, that nothing saved matched — section two "更早的消息 — 来自…的搜索" below it (zh)', JSON.stringify(fsr && { heads: fsr.heads, cov: fsr.cov, saved: fsr.saved }));
+ok(gateOf(fsr) && fsr.n1 === 20 && fsr.chips === fsr.n1 && fsr.chip === '未保存在本机' && fsr.unknown >= 1 && !fsr.snippetMarkup && verdictOf(fsr.vstat.some((x) => /又向.+查了全部历史：找到 20 条更早的/.test(x))), '⑪ two pages of the vendor\'s older hits, each chipped 未保存在本机, a conversation never synced named 一个尚未同步的对话, the snippet\'s markup stripped, the status line counts them', JSON.stringify(fsr && { n1: fsr.n1, chips: fsr.chips, chip: fsr.chip, unknown: fsr.unknown, vstat: fsr.vstat }));
+ok(gateOf(fsr) && fsr.n2 > fsr.n1 && fsr.pageAsks >= 1 && fsr.s1Moved === 0 && verdictOf(fsr.s1Same), '⑪ scrolling to the end loads the next page by itself (no "Show more"), section one never moves', JSON.stringify(fsr && { n1: fsr.n1, n2: fsr.n2, pageAsks: fsr.pageAsks, moved: fsr.s1Moved }));
+ok(gateOf(fsr) && gateOf(fsr.sheet) && gateOf(fsr.sheetTitle) && gateOf(fsr.sheetNote) && gateOf(fsr.found) && fsr.openBtn === false && fsr.storedArchive === 0, '⑪ a click opens 这条消息前后 — the found message marked among the vendor\'s records, said not saved, no "open" for a conversation never synced; nothing was stored', JSON.stringify(fsr && { sheet: fsr.sheet, title: fsr.sheetTitle, note: fsr.sheetNote, found: fsr.found, open: fsr.openBtn, stored: fsr.storedArchive }));
+ok(gateOf(fsr) && fsr.openAsks === 0 && fsr.openPeeks === 1 && verdictOf(fsr.openSaid), '⑪ lane vendor-search-memo: the pre-filled open asks the vendor NOTHING — one peek=1 look at the memo, 按“搜索”才会问…; the press asks', JSON.stringify(fsr && { asks: fsr.openAsks, peeks: fsr.openPeeks, said: fsr.openSaid }));
 // ── ⑪m lane vendor-search-memo (.230): THE MEMO IN THE DIALOG — opened from an agent's search row twice (the row's door
 //    app.openChannelSearch): the network ring sees NO vendor-asking /search/full on either open (⑪'s press is remembered:
 //    its hits come back with their age); 重新搜索 ⇒ exactly one ──
@@ -472,8 +472,8 @@ const fsm = await p1.evaljs(`(async () => {
     return out;
   } finally { window.fetch = f0; }
 })()`);
-ok(fsm && fsm.o1 && fsm.o2 && fsm.o1.asks === 0 && fsm.o2.asks === 0 && fsm.o1.peeks === 1 && fsm.o2.peeks === 1 && fsm.o1.hits >= 10 && fsm.o2.hits === fsm.o1.hits && /来自.*的搜索/.test(fsm.o2.memo) && fsm.o2.again, '⑪m opened from an agent\'s row twice: 0 vendor-asking /search/full on each open — ⑪\'s press answers from the memo with its age (来自…的搜索) and 重新搜索', JSON.stringify(fsm));
-ok(fsm && fsm.againAsks === 1 && fsm.againFlag === 1 && fsm.afterHits >= 10 && !fsm.afterMemo, '⑪m 重新搜索 = exactly ONE /search/full (again=1); the fresh answer carries no age line', JSON.stringify(fsm));
+ok(gateOf(fsm) && gateOf(fsm.o1) && gateOf(fsm.o2) && fsm.o1.asks === 0 && fsm.o2.asks === 0 && fsm.o1.peeks === 1 && fsm.o2.peeks === 1 && fsm.o1.hits >= 10 && fsm.o2.hits === fsm.o1.hits && gateOf(/来自.*的搜索/.test(fsm.o2.memo)) && verdictOf(fsm.o2.again), '⑪m opened from an agent\'s row twice: 0 vendor-asking /search/full on each open — ⑪\'s press answers from the memo with its age (来自…的搜索) and 重新搜索', JSON.stringify(fsm));
+ok(gateOf(fsm) && fsm.againAsks === 1 && fsm.againFlag === 1 && fsm.afterHits >= 10 && !fsm.afterMemo, '⑪m 重新搜索 = exactly ONE /search/full (again=1); the fresh answer carries no age line', JSON.stringify(fsm));
 // ── ⑪s lane search-card-open (.233; the owner: 「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」):
 //    the dialog opened the way an agent's search row opens it (its conversation, its hit refs, its memo key): the hit the
 //    saved copy lacks is SHOWN from the memo (0 vendor-asking /search/full), section two's head carries the agent count,
@@ -506,8 +506,8 @@ const fss = await p1.evaljs(`(async () => {
     return out;
   } finally { window.fetch = f0; }
 })()`);
-ok(fss && !fss.fail && fss.asks === 0 && fss.scoped === 1 && fss.row && /智能体的命中里有 1 条已不在保存的副本中/.test(fss.head) && !/不在保存的副本/.test(fss.top) && /来自/.test(fss.memo), '⑪s opened like an agent\'s row (its conversation, hit refs, memo key): the hit the saved copy lacks is SHOWN from the memo, 0 vendor-asking /search/full; the agent count is section two\'s head, not the top line', JSON.stringify(fss));
-ok(fss && fss.around && fss.gone && fss.gone.asks === 0 && /智能体.*搜过.*这里没有记住它的结果/.test(fss.gone.said) && fss.gone.again, '⑪s the shown hit opens 这条消息前后; nothing remembered ⇒ "智能体…搜过…——这里没有记住它的结果" beside 重新搜索, still 0 asks', JSON.stringify(fss && fss.gone));
+ok(gateOf(fss) && !fss.fail && fss.asks === 0 && fss.scoped === 1 && gateOf(fss.row) && gateOf(/智能体的命中里有 1 条已不在保存的副本中/.test(fss.head)) && !/不在保存的副本/.test(fss.top) && verdictOf(/来自/.test(fss.memo)), '⑪s opened like an agent\'s row (its conversation, hit refs, memo key): the hit the saved copy lacks is SHOWN from the memo, 0 vendor-asking /search/full; the agent count is section two\'s head, not the top line', JSON.stringify(fss));
+ok(gateOf(fss) && gateOf(fss.around) && gateOf(fss.gone) && fss.gone.asks === 0 && gateOf(/智能体.*搜过.*这里没有记住它的结果/.test(fss.gone.said)) && verdictOf(fss.gone.again), '⑪s the shown hit opens 这条消息前后; nothing remembered ⇒ "智能体…搜过…——这里没有记住它的结果" beside 重新搜索, still 0 asks', JSON.stringify(fss && fss.gone));
 // ── ⑪c lane mirror-green-channels (the Actions mirror, 2.369.203/.204: ⑪ red as "30 at the first look" AND as "the scroll
 //    to the end asked nothing"): the dialog's next page hung on an IntersectionObserver CROSSING. With the runner's fonts a
 //    vendor row is 40 px and the first answer left section two's end at 904 px of the observer's 914 px reach (one screen
@@ -552,8 +552,8 @@ const GEO_LEG = `(async () => {
   }
 })()`;
 const geo = await p1.evaljs(GEO_LEG);
-ok(geo && !geo.fail && geo.sh > geo.ch && geo.end <= 2 * geo.ch, `⑪c CONSTRUCTION: after the first answer section two's end is INSIDE one screen ahead (${geo && geo.end} px ≤ 2 × ${geo && geo.ch} px) and the list still scrolls (${geo && geo.sh} px of content)`, JSON.stringify(geo));
-ok(geo && geo.before === 0 && geo.n1 > 0 && geo.after >= 1 && geo.n2 > geo.n1, `⑪c no page is asked before the person scrolls (${geo && geo.before}), and the scroll to the end asks one (${geo && geo.after}: ${geo && geo.n1} → ${geo && geo.n2} older hits)`, JSON.stringify(geo));
+ok(gateOf(geo) && !geo.fail && geo.sh > geo.ch && geo.end <= 2 * geo.ch, `⑪c CONSTRUCTION: after the first answer section two's end is INSIDE one screen ahead (${geo && geo.end} px ≤ 2 × ${geo && geo.ch} px) and the list still scrolls (${geo && geo.sh} px of content)`, JSON.stringify(geo));
+ok(gateOf(geo) && geo.before === 0 && geo.n1 > 0 && geo.after >= 1 && geo.n2 > geo.n1, `⑪c no page is asked before the person scrolls (${geo && geo.before}), and the scroll to the end asks one (${geo && geo.after}: ${geo && geo.n1} → ${geo && geo.n2} older hits)`, JSON.stringify(geo));
 
 // ── ⑪b lane around-sheet-fix: THE AROUND SHEET'S RECT CENSUS — zh / en / ja (a fresh page each), the desktop window
 //    and a 390 px phone; the hit = the fake vendor's `ops-old-2`, whose window holds the archive's picture row (李天雨) ──
@@ -637,17 +637,17 @@ const AROUND_RECT = (vid) => `(async () => {
 const AROUND_CHIP = { zh: '未保存 — 打开对话查看', en: 'not saved — open the conversation to see it', ja: '未保存 — 会話を開いて確認できます' };
 for (const lang of ['zh', 'en', 'ja']) {
   const pc = await newPage();
-  ok(await pc.load(lang), `⑪b a fresh page loaded the app (${lang})`);
+  ok(verdictOf(await pc.load(lang)), `⑪b a fresh page loaded the app (${lang})`);
   const pp = await pc.evaljs(PANEL);
-  ok(pp.ok, `⑪b ${lang}: the Channels panel renders`, JSON.stringify(pp).slice(0, 200));
+  ok(verdictOf(pp.ok), `⑪b ${lang}: the Channels panel renders`, JSON.stringify(pp).slice(0, 200));
   for (const [tag, metrics] of [['desktop', null], ['390 px', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }]]) {
     if (metrics) { await pc.cdp('Emulation.setDeviceMetricsOverride', metrics); await sleep(600); }
     const c = await pc.evaljs(AROUND_RECT('fake-poll-ops-old-2'));
-    ok(c && !c.fail && c.rows >= 10 && c.named >= 10 && !c.bad.length && c.scroll.sw <= c.scroll.cw && c.scroll.sl === 0, `⑪b ${lang} ${tag}: every row's avatar, name, first line and chip inside the list (${c && c.rows} rows), the avatar on none of them, scrollWidth ${c && c.scroll && c.scroll.sw} <= clientWidth ${c && c.scroll && c.scroll.cw}`, JSON.stringify(c && { fail: c.fail, text: c.text, n: (c.bad || []).length, bad: (c.bad || []).slice(0, 6), scroll: c.scroll, rows: c.rows, named: c.named }));
-    ok(c && c.centred && c.page && c.page.x === 0 && c.page.y === 0 && c.dialogIn, `⑪b ${lang} ${tag}: the found row centred in the list, vertically only — the page never scrolled, the sheet inside the screen`, JSON.stringify(c && { centred: c.centred, dy: c.dy, st: c.st, page: c.page, dialog: c.dialog }));
+    ok(gateOf(c) && !c.fail && c.rows >= 10 && c.named >= 10 && !c.bad.length && c.scroll.sw <= c.scroll.cw && c.scroll.sl === 0, `⑪b ${lang} ${tag}: every row's avatar, name, first line and chip inside the list (${c && c.rows} rows), the avatar on none of them, scrollWidth ${c && c.scroll && c.scroll.sw} <= clientWidth ${c && c.scroll && c.scroll.cw}`, JSON.stringify(c && { fail: c.fail, text: c.text, n: (c.bad || []).length, bad: (c.bad || []).slice(0, 6), scroll: c.scroll, rows: c.rows, named: c.named }));
+    ok(gateOf(c) && gateOf(c.centred) && gateOf(c.page) && c.page.x === 0 && c.page.y === 0 && verdictOf(c.dialogIn), `⑪b ${lang} ${tag}: the found row centred in the list, vertically only — the page never scrolled, the sheet inside the screen`, JSON.stringify(c && { centred: c.centred, dy: c.dy, st: c.st, page: c.page, dialog: c.dialog }));
     // the fake archive is 400 days old: the picture's day is ANOTHER year's, so its separator names the year
-    ok(c && c.days && c.days.length >= 2 && c.dayBefore && c.picYear < new Date().getFullYear() && c.dayBefore.includes(String(c.picYear)), `⑪b ${lang} ${tag}: the window's day separators — the picture row's day is named above it WITH its year (${c && c.dayBefore}), ${c && c.days && c.days.length} days in the sheet`, JSON.stringify(c && { days: c.days, dayBefore: c.dayBefore, picYear: c.picYear }));
-    ok(c && c.pic && c.pic.who === '李天雨' && c.pic.chip === AROUND_CHIP[lang] && !c.pic.thumb && !c.pic.refused && !c.pic.retry && c.attAsks === 0, `⑪b ${lang} ${tag}: the vendor's picture VibeSpace never stored is the named chip "${AROUND_CHIP[lang]}" — no thumbnail, no "not found · Retry", our attachment route never asked for it`, JSON.stringify(c && { pic: c.pic, attAsks: c.attAsks }));
+    ok(gateOf(c) && gateOf(c.days) && c.days.length >= 2 && gateOf(c.dayBefore) && c.picYear < new Date().getFullYear() && verdictOf(c.dayBefore.includes(String(c.picYear))), `⑪b ${lang} ${tag}: the window's day separators — the picture row's day is named above it WITH its year (${c && c.dayBefore}), ${c && c.days && c.days.length} days in the sheet`, JSON.stringify(c && { days: c.days, dayBefore: c.dayBefore, picYear: c.picYear }));
+    ok(gateOf(c) && gateOf(c.pic) && c.pic.who === '李天雨' && c.pic.chip === AROUND_CHIP[lang] && !c.pic.thumb && !c.pic.refused && !c.pic.retry && c.attAsks === 0, `⑪b ${lang} ${tag}: the vendor's picture VibeSpace never stored is the named chip "${AROUND_CHIP[lang]}" — no thumbnail, no "not found · Retry", our attachment route never asked for it`, JSON.stringify(c && { pic: c.pic, attAsks: c.attAsks }));
   }
   pc.close();
   pageClosed(FS, pc.key); try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${pc.id}`); } catch {}
@@ -675,16 +675,16 @@ const pick = await p1.evaljs(`(async () => {
 })()`);
 ok(!pick.fail, 'the row menu 刷新周期 ▸ 每分钟 sets the override and the chip says it at once', JSON.stringify(pick));
 const fv = await api('GET', '/api/channels/fake-poll/fake-poll-room-2');
-ok(fv.json.conversation && fv.json.conversation.refresh && fv.json.conversation.refresh.every === 60 && fv.json.conversation.cadence.seconds === 60, 'the override is PERSISTED on the conversation (every 60 s, the scheduler\'s cadence)', JSON.stringify(fv.json.conversation && fv.json.conversation.refresh));
+ok(gateOf(fv.json.conversation) && gateOf(fv.json.conversation.refresh) && fv.json.conversation.refresh.every === 60 && fv.json.conversation.cadence.seconds === 60, 'the override is PERSISTED on the conversation (every 60 s, the scheduler\'s cadence)', JSON.stringify(fv.json.conversation && fv.json.conversation.refresh));
 const p2 = await newPage();
-ok(await p2.load(), 'page 2 loaded');
+ok(verdictOf(await p2.load()), 'page 2 loaded');
 const p2rows = await p2.evaljs(PANEL);
 const r2 = (p2rows.rows || []).find((r) => r.conv === 'fake-poll/fake-poll-room-2');
-ok(r2 && /1\s*分钟|1m/.test(r2.chip || ''), 'a SECOND client shows the same period on the same row', JSON.stringify(r2));
+ok(gateOf(r2) && verdictOf(/1\s*分钟|1m/.test(r2.chip || '')), 'a SECOND client shows the same period on the same row', JSON.stringify(r2));
 await p1.reload();
 const after = await p1.evaljs(PANEL);
 const r3 = (after.rows || []).find((r) => r.conv === 'fake-poll/fake-poll-room-2');
-ok(r3 && /1\s*分钟|1m/.test(r3.chip || ''), '…and a reload keeps it', JSON.stringify(r3));
+ok(gateOf(r3) && verdictOf(/1\s*分钟|1m/.test(r3.chip || '')), '…and a reload keeps it', JSON.stringify(r3));
 
 // ── ⑤ R4 (2026-09-27): ACCESS and NOTIFICATION are TWO OPERATIONS, access first ──
 // The owner: "你之前的交互的问题是把'让agent能访问对话'和'让agent会被通知'耦合在一起了" /
@@ -695,10 +695,10 @@ ok(r3 && /1\s*分钟|1m/.test(r3.chip || ''), '…and a reload keeps it', JSON.s
 // the route, and the dialog keeps a stored principal — "(此刻不在线)".)
 const tgWork = await api('POST', '/api/tasks', { title: '工作' });
 const GID = tgWork.json && tgWork.json.task && tgWork.json.task.id;
-ok(tgWork.status === 200 && GID, 'FIXTURE: the Task Group 工作', JSON.stringify(tgWork.json));
+ok(tgWork.status === 200 && verdictOf(GID), 'FIXTURE: the Task Group 工作', JSON.stringify(tgWork.json));
 let tgSeen = false;
 for (let i = 0; i < 200 && !tgSeen; i++) { tgSeen = await p1.evaljs(`(window.app.sidebar._tasks || []).some((t) => t.title === '工作')`); if (!tgSeen) await sleep(150); }
-ok(tgSeen, 'FIXTURE: page 1\'s Task Group mirror holds 工作 (the Grant access… picker offers it from there)');
+ok(verdictOf(tgSeen), 'FIXTURE: page 1\'s Task Group mirror holds 工作 (the Grant access… picker offers it from there)');
 // THE RUNNER'S ORDER, CONSTRUCTED (mirror-193, attempt 1): the seed below reached the server, and the 2-lane
 // runner's page had not yet applied its `channels-updated` when 授权访问… opened — the dialog drew the panel's copy
 // (no Xi ⇒ its default row = the first live agent, reader) and its whole-list Save wrote [reader, 工作] over Xi.
@@ -725,9 +725,9 @@ const HOLD = (on) => `(() => {
 const PANEL_LINE = `(() => { const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); return l ? l.textContent : ''; })()`;
 ok((await p1.evaljs(HOLD(true))).held === true, 'CONSTRUCTION: page 1 holds its channels-updated frames (its panel copy will not hear of the seed)');
 const seed = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: { kind: 'agent', id: 'agent-xi', name: 'Xi' }, authority: 'draft' }] });
-ok(seed.status === 200 && seed.json.ok && seed.json.watchers.length === 0, 'FIXTURE: the agent Xi holds ACCESS to the whole account (the first operation, through its route) — no notification', JSON.stringify(seed.json));
+ok(seed.status === 200 && gateOf(seed.json.ok) && seed.json.watchers.length === 0, 'FIXTURE: the agent Xi holds ACCESS to the whole account (the first operation, through its route) — no notification', JSON.stringify(seed.json));
 const W_BAD = await api('PUT', '/api/channels/adapters/fake-poll/watchers', { watchers: [{ principal: { kind: 'group', id: GID, name: '工作' }, notify: 'wake' }] });
-ok(W_BAD.status === 400 && W_BAD.json.code === 'watcher-needs-access' && W_BAD.json.principal && W_BAD.json.principal.id === GID, 'a notification for 工作 BEFORE it has access is refused BY NAME (watcher-needs-access) — notification needs access', JSON.stringify(W_BAD.json));
+ok(W_BAD.status === 400 && W_BAD.json.code === 'watcher-needs-access' && gateOf(W_BAD.json.principal) && W_BAD.json.principal.id === GID, 'a notification for 工作 BEFORE it has access is refused BY NAME (watcher-needs-access) — notification needs access', JSON.stringify(W_BAD.json));
 // THE TOASTS A SAVE PRODUCED, JUDGED BY ARRIVAL (mirror-193, attempt 2: `[]` — the old judge counted the stack before
 // the click and sliced the stack after it; a toast is capped at 4 and expires 3 s after it is shown, so an OLDER
 // toast leaving during a slow save shifted the count and the new toast fell outside the slice). A MutationObserver
@@ -780,10 +780,10 @@ const grant = await p1.evaljs(`(async () => {
 })()`);
 const released = await p1.evaljs(HOLD(false));
 ok(!grant.fail && !/Xi/.test(grant.panelLine) && released.released > 0, `CONSTRUCTION held: when the dialog opened, page 1's panel copy had not heard of Xi (its account line: "${grant.panelLine}"; ${released.released} held frame(s) released after)`, JSON.stringify({ panelLine: grant.panelLine, released }));
-ok(!grant.fail && grant.title === '谁可以在这里阅读和操作？' && /^整个账号 —— /.test(grant.sub || '') && grant.before.length === 1 && /Xi/.test(grant.before[0]) && grant.readFresh, '授权访问… asks "谁可以在这里阅读和操作？" over "整个账号 —— …" (channel-polish: plain words) with the account\'s access rows as the SERVER holds them (Xi, kept though not live) — read fresh (GET …/adapters/fake-poll/view), never from the stale panel copy (mirror-193)', JSON.stringify(grant));
-ok(grant.closed && !(grant.toasts || []).some((x) => x.error) && (grant.toasts || []).some((x) => /访问权限已保存/.test(x.text) && /通知…/.test(x.text)), 'adding 组 · 工作 and saving closes with the toast "访问权限已保存 … 除非添加通知（通知…），否则不会唤醒任何人"', JSON.stringify(grant.toasts));
+ok(!grant.fail && grant.title === '谁可以在这里阅读和操作？' && gateOf(/^整个账号 —— /.test(grant.sub || '')) && grant.before.length === 1 && gateOf(/Xi/.test(grant.before[0])) && verdictOf(grant.readFresh), '授权访问… asks "谁可以在这里阅读和操作？" over "整个账号 —— …" (channel-polish: plain words) with the account\'s access rows as the SERVER holds them (Xi, kept though not live) — read fresh (GET …/adapters/fake-poll/view), never from the stale panel copy (mirror-193)', JSON.stringify(grant));
+ok(gateOf(grant.closed) && !(grant.toasts || []).some((x) => x.error) && verdictOf((grant.toasts || []).some((x) => /访问权限已保存/.test(x.text) && /通知…/.test(x.text))), 'adding 组 · 工作 and saving closes with the toast "访问权限已保存 … 除非添加通知（通知…），否则不会唤醒任何人"', JSON.stringify(grant.toasts));
 const acc1 = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
-ok(acc1 && acc1.access.map((r) => `${r.principal.name}:${r.authority}`).sort().join() === 'Xi:draft,工作:draft' && acc1.watchers.length === 0, 'the wire: ACCESS = Xi + 工作 (both draft), WATCHERS = none', JSON.stringify(acc1 && { access: acc1.access, watchers: acc1.watchers }));
+ok(gateOf(acc1) && acc1.access.map((r) => `${r.principal.name}:${r.authority}`).sort().join() === 'Xi:draft,工作:draft' && acc1.watchers.length === 0, 'the wire: ACCESS = Xi + 工作 (both draft), WATCHERS = none', JSON.stringify(acc1 && { access: acc1.access, watchers: acc1.watchers }));
 const m2 = await p1.evaljs(MENU('通知…'));
 ok(!m2.fail, 'the account ⋯ 通知… opens', JSON.stringify(m2));
 const notify = await p1.evaljs(`(async () => {
@@ -808,10 +808,10 @@ const notify = await p1.evaljs(`(async () => {
   const out = await (${SAVE_OUTCOME('chan-notify-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存'));
   return { picker, canAdd: !!addNote && addNote.style.display !== 'none', estimate, total, ...out };
 })()`);
-ok(!notify.fail && notify.picker.length === 2 && notify.picker.some((o) => /Xi/.test(o)) && notify.picker.includes('工作'), 'the NOTIFY picker is EXACTLY the account\'s access list (Xi, 工作) — nobody without access is offered', JSON.stringify(notify.picker));
-ok(notify.closed && !(notify.toasts || []).some((x) => x.error) && /每天约/.test(notify.total || ''), 'one watcher (Xi, wake, 按过滤器 keyword deploy) saves with no error; the total line sums the ceilings', JSON.stringify(notify));
+ok(!notify.fail && notify.picker.length === 2 && gateOf(notify.picker.some((o) => /Xi/.test(o))) && verdictOf(notify.picker.includes('工作')), 'the NOTIFY picker is EXACTLY the account\'s access list (Xi, 工作) — nobody without access is offered', JSON.stringify(notify.picker));
+ok(gateOf(notify.closed) && !(notify.toasts || []).some((x) => x.error) && verdictOf(/每天约/.test(notify.total || '')), 'one watcher (Xi, wake, 按过滤器 keyword deploy) saves with no error; the total line sums the ceilings', JSON.stringify(notify));
 const acc2 = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
-ok(acc2 && acc2.watchers.length === 1 && acc2.watchers[0].principal.name === 'Xi' && acc2.watchers[0].notify === 'wake' && acc2.watchers[0].mode === 'filtered' && acc2.watchers[0].filter && acc2.watchers[0].filter.rules[0].value === 'deploy' && acc2.access.length === 2, 'the wire: Xi WATCHES (wake on its filter); 工作 has ACCESS ONLY — no watcher', JSON.stringify(acc2 && acc2.watchers));
+ok(gateOf(acc2) && acc2.watchers.length === 1 && acc2.watchers[0].principal.name === 'Xi' && acc2.watchers[0].notify === 'wake' && acc2.watchers[0].mode === 'filtered' && gateOf(acc2.watchers[0].filter) && acc2.watchers[0].filter.rules[0].value === 'deploy' && acc2.access.length === 2, 'the wire: Xi WATCHES (wake on its filter); 工作 has ACCESS ONLY — no watcher', JSON.stringify(acc2 && acc2.watchers));
 const CARD = '访问：Xi（起草）, 组 · 工作（起草） · 通知：Xi 每批唤醒 按过滤器';
 const card = await p1.evaljs(`(async () => {
   for (let i = 0; i < 60; i++) { const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); if (l && /通知：Xi/.test(l.textContent)) return l.textContent; await new Promise((r) => setTimeout(r, 200)); }
@@ -835,7 +835,7 @@ const ROWS_NOW = `(async () => {
   return { fail: 'the 5 rows of the account never drew' };
 })()`;
 const inh = await p1.evaljs(ROWS_NOW);
-ok(!inh.fail && inh.rows.length === 5 && inh.rows.every((r) => r.assign === null), 'an INHERITED row says nothing: none of the account\'s 5 rows draws the access / notification line (the account card says it once)', JSON.stringify(inh));
+ok(!inh.fail && inh.rows.length === 5 && verdictOf(inh.rows.every((r) => r.assign === null)), 'an INHERITED row says nothing: none of the account\'s 5 rows draws the access / notification line (the account card says it once)', JSON.stringify(inh));
 const OVR = ((inh.rows || []).map((r) => r.conv.slice('fake-poll/'.length)).filter((c) => !/^fake-poll-room-[123]$/.test(c))[0]) || 'fake-poll-room-1';
 // a row's assignment is its LEAD watcher's grain (effectiveView): the conversation's OWN grain = its own access + its own watcher
 const XI = { kind: 'agent', id: 'agent-xi', name: 'Xi' };
@@ -851,7 +851,7 @@ const ROW_OF = (conv, want) => `(async () => {
   return { fail: 'timed out', want: ${want} };
 })()`;
 const ov = await p1.evaljs(ROW_OF(OVR, true));
-ok(ovAcc.status === 200 && ovSet.status === 200 && !ov.fail && ov.grain === 'conversation' && /^与账号不同：/.test(ov.assign || '') && /Xi/.test(ov.assign) && ov.others === 0, `a conversation given its OWN grain (access + a watcher) draws the line, worded as the difference ("${ov.assign}") — and only that row`, JSON.stringify({ status: [ovAcc.status, ovSet.status], body: ovSet.json, ov }));
+ok(ovAcc.status === 200 && ovSet.status === 200 && !ov.fail && ov.grain === 'conversation' && gateOf(/^与账号不同：/.test(ov.assign || '')) && gateOf(/Xi/.test(ov.assign)) && ov.others === 0, `a conversation given its OWN grain (access + a watcher) draws the line, worded as the difference ("${ov.assign}") — and only that row`, JSON.stringify({ status: [ovAcc.status, ovSet.status], body: ovSet.json, ov }));
 const ovBackW = await api('PUT', `/api/channels/fake-poll/${encodeURIComponent(OVR)}/watchers`, { watchers: [] });
 const ovBack = ovBackW.status === 200 ? await api('PUT', `/api/channels/fake-poll/${encodeURIComponent(OVR)}/access`, { access: [] }) : ovBackW;
 const back = await p1.evaljs(ROW_OF(OVR, false));
@@ -861,7 +861,7 @@ const win2 = await p1.evaljs(`(async () => {
   for (let i = 0; i < 60; i++) { const c = w.content.querySelector('.chan-assign-chip'); if (c && /工作/.test(c.textContent)) return { chip: c.textContent, inherited: c.classList.contains('chan-assign-inherited') }; await new Promise((r) => setTimeout(r, 200)); }
   return { fail: 'no inherited chip on the window' };
 })()`);
-ok(!win2.fail && win2.inherited && /（账号）/.test(win2.chip) && /通知：Xi/.test(win2.chip), 'the conversation window\'s chip says both, inherited from the account', JSON.stringify(win2));
+ok(!win2.fail && gateOf(win2.inherited) && gateOf(/（账号）/.test(win2.chip)) && verdictOf(/通知：Xi/.test(win2.chip)), 'the conversation window\'s chip says both, inherited from the account', JSON.stringify(win2));
 // REMOVING ACCESS REMOVES THE NOTIFICATION — through the dialog (× on Xi's row)
 const drop = await p1.evaljs(`(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -876,9 +876,9 @@ const drop = await p1.evaljs(`(async () => {
   for (let i = 0; i < 50 && document.getElementById('chan-access-dialog'); i++) await sleep(100);
   return { note, closed: !document.getElementById('chan-access-dialog') };
 })()`);
-ok(drop.closed && drop.note && /Xi/.test(drop.note), 'removing Xi\'s access says BEFORE saving that its notification goes too', JSON.stringify(drop));
+ok(gateOf(drop.closed) && gateOf(drop.note) && verdictOf(/Xi/.test(drop.note)), 'removing Xi\'s access says BEFORE saving that its notification goes too', JSON.stringify(drop));
 const acc3 = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
-ok(acc3 && acc3.access.length === 1 && acc3.access[0].principal.name === '工作' && acc3.watchers.length === 0, 'the wire: Xi\'s access AND its notification are gone in one write; 工作 keeps its access', JSON.stringify(acc3));
+ok(gateOf(acc3) && acc3.access.length === 1 && acc3.access[0].principal.name === '工作' && acc3.watchers.length === 0, 'the wire: Xi\'s access AND its notification are gone in one write; 工作 keeps its access', JSON.stringify(acc3));
 // lane everyone-principal (2026-10-02): GRANT ACCESS… WITH ALL AGENTS PICKED (zh) — the picker's FIRST row, its chip
 // first, its access row first; the wire is ONE {kind:'everyone', id:'*'} access row beside 工作's; the account card names
 // 所有 agent FIRST; taking All away again leaves 工作's row exactly as it was (the R3 legs below read that state)
@@ -901,15 +901,15 @@ const allGrant = await p1.evaljs(`(async () => {
   const out = await (${SAVE_OUTCOME('chan-access-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存'));
   return { ...facts, chips, rows, ...out };
 })()`);
-ok(!allGrant.fail && allGrant.firstIsAll && allGrant.name === '所有 agent' && allGrant.hint === '每个会话，现在和以后' && allGrant.disabled === null, `授权访问… with ALL AGENTS (zh): the picker's FIRST row is "${allGrant.name}" · "${allGrant.hint}", never greyed`, JSON.stringify(allGrant));
-ok(!allGrant.fail && allGrant.chips.join('|') === '所有 agent|工作' && allGrant.rows[0] === '所有 agent' && allGrant.rows.length === 2 && allGrant.closed && !(allGrant.toasts || []).some((x) => x.error) && (allGrant.toasts || []).some((x) => /访问权限已保存/.test(x.text) && /所有 agent/.test(x.text)), `…its chip and its access row come FIRST (${(allGrant.chips || []).join(' · ')} / ${(allGrant.rows || []).join(' · ')}); Save closes with "访问权限已保存：所有 agent, …"`, JSON.stringify(allGrant));
+ok(!allGrant.fail && gateOf(allGrant.firstIsAll) && allGrant.name === '所有 agent' && allGrant.hint === '每个会话，现在和以后' && allGrant.disabled === null, `授权访问… with ALL AGENTS (zh): the picker's FIRST row is "${allGrant.name}" · "${allGrant.hint}", never greyed`, JSON.stringify(allGrant));
+ok(!allGrant.fail && allGrant.chips.join('|') === '所有 agent|工作' && allGrant.rows[0] === '所有 agent' && allGrant.rows.length === 2 && gateOf(allGrant.closed) && !(allGrant.toasts || []).some((x) => x.error) && verdictOf((allGrant.toasts || []).some((x) => /访问权限已保存/.test(x.text) && /所有 agent/.test(x.text))), `…its chip and its access row come FIRST (${(allGrant.chips || []).join(' · ')} / ${(allGrant.rows || []).join(' · ')}); Save closes with "访问权限已保存：所有 agent, …"`, JSON.stringify(allGrant));
 const accAll = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
-ok(accAll && accAll.access.length === 2 && accAll.access.some((r) => r.principal.kind === 'everyone' && r.principal.id === '*' && r.authority === 'draft') && accAll.access.some((r) => r.principal.name === '工作'), 'the wire: ONE {kind:everyone, id:*} access row beside 工作\'s — the payload\'s one spelling', JSON.stringify(accAll && accAll.access));
+ok(gateOf(accAll) && accAll.access.length === 2 && gateOf(accAll.access.some((r) => r.principal.kind === 'everyone' && r.principal.id === '*' && r.authority === 'draft')) && verdictOf(accAll.access.some((r) => r.principal.name === '工作')), 'the wire: ONE {kind:everyone, id:*} access row beside 工作\'s — the payload\'s one spelling', JSON.stringify(accAll && accAll.access));
 const cardAll = await p1.evaljs(`(async () => {
   for (let i = 0; i < 60; i++) { const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); if (l && /所有 agent/.test(l.textContent)) return l.textContent; await new Promise((r) => setTimeout(r, 200)); }
   const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); return l ? l.textContent : null;
 })()`);
-ok(typeof cardAll === 'string' && /^访问：所有 agent（起草）, 组 · 工作（起草）/.test(cardAll), `the account card names 所有 agent FIRST: "${cardAll}"`, cardAll);
+ok(typeof cardAll === 'string' && verdictOf(/^访问：所有 agent（起草）, 组 · 工作（起草）/.test(cardAll)), `the account card names 所有 agent FIRST: "${cardAll}"`, cardAll);
 const allDrop = await p1.evaljs(`(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-sec-more').click(); await sleep(200);
@@ -924,7 +924,7 @@ const allDrop = await p1.evaljs(`(async () => {
   return { closed: !document.getElementById('chan-access-dialog') };
 })()`);
 const accBack = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
-ok(!allDrop.fail && allDrop.closed && accBack && accBack.access.length === 1 && accBack.access[0].principal.name === '工作' && accBack.access[0].authority === 'draft', 'taking ALL AGENTS away (its chip\'s ×) leaves 工作\'s row exactly as it was', JSON.stringify({ allDrop, access: accBack && accBack.access }));
+ok(!allDrop.fail && gateOf(allDrop.closed) && gateOf(accBack) && accBack.access.length === 1 && accBack.access[0].principal.name === '工作' && accBack.access[0].authority === 'draft', 'taking ALL AGENTS away (its chip\'s ×) leaves 工作\'s row exactly as it was', JSON.stringify({ allDrop, access: accBack && accBack.access }));
 // (merge of R3 + R4, 2.369.191) R3's r2 checks run AFTER R4's ⑤: the account now holds 工作's ACCESS
 // row only (Xi's access + notification were just removed) — the same "handed over at the account
 // grain, nothing delivered" state D4 is about.
@@ -938,20 +938,20 @@ let off = null;
 for (let i = 0; i < 12; i++) { off = await p1.evaljs(FOCUS_POLL); if (off.rows.length) break; await sleep(250); }
 ok(off.view === 'focus' && off.rows.length === 0, 'D4: handed over at the ACCOUNT grain, NONE of the account\'s 5 conversations joins the attention list for that alone (no wake delivered, no agent read — watched 3 s)', JSON.stringify(off));
 const allView = await p1.evaljs(`(async () => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]').click(); await new Promise((r) => setTimeout(r, 300)); const f = ${FOCUS_POLL}; document.querySelector('.rail-panel-channels .chan-view-btn[data-view="focus"]').click(); await new Promise((r) => setTimeout(r, 300)); return f; })()`);
-ok(allView.view === 'all' && allView.rows.length === 5 && allView.rows.every((r) => r.tag === null), '…"全部" still lists all 5 — untagged: an account-grain hand-over is not a reason to be on the first screen', JSON.stringify(allView));
+ok(allView.view === 'all' && allView.rows.length === 5 && verdictOf(allView.rows.every((r) => r.tag === null)), '…"全部" still lists all 5 — untagged: an account-grain hand-over is not a reason to be on the first screen', JSON.stringify(allView));
 if (!HAVE_DTACH) console.log('  SKIP: the agent-read leg needs dtach for its stub agent session (no dtach on PATH)');
 else {
   const RCONV = 'fake-poll-room-3';
   const reach = await api('PUT', `/api/channels/fake-poll/${RCONV}/reach`, { principal: { kind: 'agent', id: READER.cid, name: READER.name }, level: 'visible' });
   ok(reach.status === 200, `FIXTURE: ${READER.name} may see fake-poll/${RCONV}`, JSON.stringify(reach.json).slice(0, 200));
   const rd = await fetch(`http://127.0.0.1:${PORT}/api/agent/channels/read?conv=${encodeURIComponent('fake-poll/' + RCONV)}`, { headers: { Authorization: 'Bearer ' + READER.token } }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
-  ok(rd.status === 200 && rd.body.ok && (rd.body.records || []).length > 0, `FIXTURE: ${READER.name} READS fake-poll/${RCONV} through its own agent route (vibespace-channels read)`, JSON.stringify(rd.body).slice(0, 200));
+  ok(rd.status === 200 && gateOf(rd.body.ok) && (rd.body.records || []).length > 0, `FIXTURE: ${READER.name} READS fake-poll/${RCONV} through its own agent route (vibespace-channels read)`, JSON.stringify(rd.body).slice(0, 200));
   let on = null;
   for (let i = 0; i < 40; i++) { on = await p1.evaljs(FOCUS_POLL); if (on.rows.length) break; await sleep(250); }
-  ok(on.rows.length === 1 && on.rows[0].key === `fake-poll/${RCONV}` && on.rows[0].tag === 'read' && on.rows[0].who === READER.name && /读过/.test(on.rows[0].text || ''), `the agent's READ lists that ONE conversation, tagged "${on && on.rows[0] ? on.rows[0].text : ''}" (the read tag, never "→ Ops desk"); the other 4 stay off`, JSON.stringify(on));
+  ok(on.rows.length === 1 && on.rows[0].key === `fake-poll/${RCONV}` && on.rows[0].tag === 'read' && on.rows[0].who === READER.name && verdictOf(/读过/.test(on.rows[0].text || '')), `the agent's READ lists that ONE conversation, tagged "${on && on.rows[0] ? on.rows[0].text : ''}" (the read tag, never "→ Ops desk"); the other 4 stay off`, JSON.stringify(on));
 }
 const acl = await api('GET', '/api/channels');
-ok((acl.json.conversations || []).filter((c) => c.adapterId === 'fake-poll').every((c) => c.assignment && c.assignment.source === 'account'), 'the wire agrees: every row\'s effective assignment comes from the account grain');
+ok(verdictOf((acl.json.conversations || []).filter((c) => c.adapterId === 'fake-poll').every((c) => c.assignment && c.assignment.source === 'account')), 'the wire agrees: every row\'s effective assignment comes from the account grain');
 
 // ── ⑦ THE OWNER'S SAVE (hotfix 2026-09-26) through NOTIFY…, clamped VISIBLY ──
 // The owner's screenshot: 组 · 工作, 匹配过滤器的消息 (two 时间窗口 rules), 每个窗口一份摘要
@@ -1019,19 +1019,19 @@ const OWNER_NOTIFY = (edit, construct = false) => `(async () => {
   return { prefill, clamps, closed, toasts, ms, preFix };
 })()`;
 const own = await p1.evaljs(OWNER_NOTIFY(false, true));
-ok(!own.fail && Array.isArray(own.clamps) && own.clamps.includes('已保持在最大值 1440') && own.clamps.includes('已保持在最大值 1000'), 'the owner\'s 9999s are CLAMPED VISIBLY before saving: "已保持在最大值 1440" under the window, "已保持在最大值 1000" under the cap', JSON.stringify(own));
-ok(own.closed && !(own.toasts || []).some((x) => x.error) && (own.toasts || []).some((x) => /通知已保存/.test(x.text) && /超出范围的数字已保持在上下限/.test(x.text)) && !(own.toasts || []).some((x) => /filterId|mode 'filtered'/.test(x.text)), `the save closes with no error toast — "通知已保存 … 超出范围的数字已保持在上下限" — and nothing says \`mode 'filtered' needs a filterId\` (judged by the toast's ARRIVAL, ${own.ms} ms after the click, while an older toast left the stack)`, JSON.stringify(own.toasts));
-ok(Array.isArray(own.preFix) && own.preFix.length === 0 && (own.toasts || []).length > 0, 'CONTROL (the runner\'s attempt 2, constructed): on the SAME save the pre-fix judge — count the stack before the click, slice it after — reads `[]`, the runner\'s exact value, because the older toast left meanwhile; the arrival log holds the save\'s toast', JSON.stringify({ preFix: own.preFix, arrived: own.toasts }));
+ok(!own.fail && gateOf(Array.isArray(own.clamps)) && gateOf(own.clamps.includes('已保持在最大值 1440')) && verdictOf(own.clamps.includes('已保持在最大值 1000')), 'the owner\'s 9999s are CLAMPED VISIBLY before saving: "已保持在最大值 1440" under the window, "已保持在最大值 1000" under the cap', JSON.stringify(own));
+ok(gateOf(own.closed) && !(own.toasts || []).some((x) => x.error) && gateOf((own.toasts || []).some((x) => /通知已保存/.test(x.text) && /超出范围的数字已保持在上下限/.test(x.text))) && !(own.toasts || []).some((x) => /filterId|mode 'filtered'/.test(x.text)), `the save closes with no error toast — "通知已保存 … 超出范围的数字已保持在上下限" — and nothing says \`mode 'filtered' needs a filterId\` (judged by the toast's ARRIVAL, ${own.ms} ms after the click, while an older toast left the stack)`, JSON.stringify(own.toasts));
+ok(gateOf(Array.isArray(own.preFix)) && own.preFix.length === 0 && (own.toasts || []).length > 0, 'CONTROL (the runner\'s attempt 2, constructed): on the SAME save the pre-fix judge — count the stack before the click, slice it after — reads `[]`, the runner\'s exact value, because the older toast left meanwhile; the arrival log holds the save\'s toast', JSON.stringify({ preFix: own.preFix, arrived: own.toasts }));
 const line = await p1.evaljs(`(async () => {
   for (let i = 0; i < 60; i++) { const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); if (l && /1440/.test(l.textContent)) return l.textContent; await new Promise((r) => setTimeout(r, 200)); }
   return null;
 })()`);
 ok(line === '访问：组 · 工作（起草） · 通知：组 · 工作 每 1440 分钟一份摘要 按过滤器', `the account card's line reads "${line}"`, line);
 const acctW = ((((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll') || {}).accountGrain || { watchers: [] }).watchers[0] || {};
-ok(acctW.mode === 'filtered' && acctW.filterId === `f-account-fake-poll|group:${GID}` && acctW.filter && acctW.filter.rules.map((r) => `${r.from}-${r.to}`).join() === '09:00-12:00,14:00-18:00' && acctW.principal.name === '工作' && acctW.notify === 'digest' && acctW.digestMinutes === 1440 && acctW.dailyWakeCap === 1000, 'the wire holds the watcher: 工作, filtered by f-account-fake-poll|group:<id> (09:00-12:00, 14:00-18:00), digest 1440, cap 1000', JSON.stringify(acctW));
+ok(acctW.mode === 'filtered' && acctW.filterId === `f-account-fake-poll|group:${GID}` && gateOf(acctW.filter) && acctW.filter.rules.map((r) => `${r.from}-${r.to}`).join() === '09:00-12:00,14:00-18:00' && acctW.principal.name === '工作' && acctW.notify === 'digest' && acctW.digestMinutes === 1440 && acctW.dailyWakeCap === 1000, 'the wire holds the watcher: 工作, filtered by f-account-fake-poll|group:<id> (09:00-12:00, 14:00-18:00), digest 1440, cap 1000', JSON.stringify(acctW));
 const again = await p1.evaljs(OWNER_NOTIFY(true));
-ok(!again.fail && again.prefill && again.prefill.who === '工作' && again.prefill.mode === 'filtered' && again.prefill.notify === 'digest' && JSON.stringify(again.prefill.rules) === JSON.stringify([['09:00', '12:00'], ['14:00', '18:00']]) && JSON.stringify(again.prefill.nums) === JSON.stringify(['1440', '1000']), 're-opening 通知… prefills 组 · 工作 with the two saved windows and the numbers AS STORED (1440, 1000)', JSON.stringify(again));
-ok(again.closed && !(again.toasts || []).some((x) => x.error), 'saving the edit (the filter re-sent inline) closes with no error toast', JSON.stringify(again.toasts));
+ok(!again.fail && gateOf(again.prefill) && again.prefill.who === '工作' && again.prefill.mode === 'filtered' && again.prefill.notify === 'digest' && JSON.stringify(again.prefill.rules) === JSON.stringify([['09:00', '12:00'], ['14:00', '18:00']]) && JSON.stringify(again.prefill.nums) === JSON.stringify(['1440', '1000']), 're-opening 通知… prefills 组 · 工作 with the two saved windows and the numbers AS STORED (1440, 1000)', JSON.stringify(again));
+ok(gateOf(again.closed) && !(again.toasts || []).some((x) => x.error), 'saving the edit (the filter re-sent inline) closes with no error toast', JSON.stringify(again.toasts));
 
 // ── ⑦b A DIGEST KEEPS ITS OWN DAILY CAP, AND A PERSON CAN CHANGE IT (verify round 2, 2026-09-27) ──
 // The watcher's `dailyWakeCap` bounds a digest as it bounds a wake (the engine reads it for both), and the owner's
@@ -1053,7 +1053,7 @@ ok(again.closed && !(again.toasts || []).some((x) => x.error), 'saving the edit 
     const R = cap.getBoundingClientRect();
     return { n: nums.length, disabled: cap.disabled, focused: document.activeElement === cap, value: cap.value, shown: R.width > 0 && R.height > 0, how: [...row.querySelectorAll('input[type=radio]')].filter((r) => r.checked && /^(now|digest|cap)$/.test(r.value)).map((r) => r.value), answers: [...row.querySelectorAll('input[type=radio]')].map((r) => r.value) };
   })()`);
-  ok(!opened.fail && opened.n === 2 && JSON.stringify(opened.how) === JSON.stringify(['digest']) && opened.value === '1000' && opened.shown && !opened.disabled && opened.focused, 'a stored DIGEST opens with its own daily cap (1000) in a field a person can use — shown, enabled, focusable', JSON.stringify(opened));
+  ok(!opened.fail && opened.n === 2 && JSON.stringify(opened.how) === JSON.stringify(['digest']) && opened.value === '1000' && gateOf(opened.shown) && !opened.disabled && verdictOf(opened.focused), 'a stored DIGEST opens with its own daily cap (1000) in a field a person can use — shown, enabled, focusable', JSON.stringify(opened));
   ok(!opened.fail && !opened.answers.includes('cap'), 'the cap is not a third exclusive answer beside "right away" and "a digest" (it bounds both)', JSON.stringify(opened.answers));
   await p1.cdp('Input.insertText', { text: '7' });
   const saved = await p1.evaljs(`(async () => {
@@ -1073,9 +1073,9 @@ ok(again.closed && !(again.toasts || []).some((x) => x.error), 'saving the edit 
     if (!out.closed) document.getElementById('chan-notify-dialog').remove();
     return out;
   })()`);
-  ok(saved.typed === '7' && /7/.test(saved.preview) && /1440/.test(saved.preview), 'typing 7 into it lands in the field, and the preview says the digest AND its new cap', JSON.stringify(saved));
+  ok(saved.typed === '7' && gateOf(/7/.test(saved.preview)) && verdictOf(/1440/.test(saved.preview)), 'typing 7 into it lands in the field, and the preview says the digest AND its new cap', JSON.stringify(saved));
   const w7 = ((((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll') || {}).accountGrain || { watchers: [] }).watchers[0] || {};
-  ok(saved.closed && !(saved.toasts || []).some((x) => x.error) && w7.notify === 'digest' && w7.digestMinutes === 1440 && w7.dailyWakeCap === 7 && w7.mode === 'filtered' && w7.filter && w7.filter.rules.length === 2, 'the wire: still the digest every 1440 minutes on its two windows — at most 7 a day', JSON.stringify([saved.toasts, w7]));
+  ok(gateOf(saved.closed) && !(saved.toasts || []).some((x) => x.error) && w7.notify === 'digest' && w7.digestMinutes === 1440 && w7.dailyWakeCap === 7 && w7.mode === 'filtered' && gateOf(w7.filter) && w7.filter.rules.length === 2, 'the wire: still the digest every 1440 minutes on its two windows — at most 7 a day', JSON.stringify([saved.toasts, w7]));
 }
 
 // ── ⑧ mirror-193: a list that changes WHILE the dialog is open is never written over ──
@@ -1107,8 +1107,8 @@ ok(!o8.fail && o8.rows.length === 1 && o8.rows[0] === '工作', 'FIXTURE: 授权
 const g8 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: WORK_P, authority: 'draft' }, { principal: YU, authority: 'draft' }] });
 ok(g8.status === 200 && (await accessNames()) === 'Yu,工作', 'WHILE IT IS OPEN, Yu is granted through the route (another window, an agent\'s approved request)', JSON.stringify(g8.json).slice(0, 200));
 const s8 = await p1.evaljs(SAVE_OPEN);
-ok(s8.toasts.some((x) => x.error && /在对话框打开期间被改动/.test(x.text)) && !s8.toasts.some((x) => /访问权限已保存/.test(x.text)), `Save (the dialog's list [工作], drawn before Yu) is REFUSED by name — the toast says the list changed while the dialog was open and nothing was saved (${s8.ms} ms)`, JSON.stringify(s8));
-ok(Array.isArray(s8.reopened) && s8.reopened.some((x) => /Yu/.test(x)) && s8.reopened.some((x) => x === '工作'), `…and the dialog RE-OPENS on the lists as they are now (${JSON.stringify(s8.reopened)})`, JSON.stringify(s8.reopened));
+ok(gateOf(s8.toasts.some((x) => x.error && /在对话框打开期间被改动/.test(x.text))) && !s8.toasts.some((x) => /访问权限已保存/.test(x.text)), `Save (the dialog's list [工作], drawn before Yu) is REFUSED by name — the toast says the list changed while the dialog was open and nothing was saved (${s8.ms} ms)`, JSON.stringify(s8));
+ok(gateOf(Array.isArray(s8.reopened)) && gateOf(s8.reopened.some((x) => /Yu/.test(x))) && verdictOf(s8.reopened.some((x) => x === '工作')), `…and the dialog RE-OPENS on the lists as they are now (${JSON.stringify(s8.reopened)})`, JSON.stringify(s8.reopened));
 ok((await accessNames()) === 'Yu,工作', 'the wire: Yu KEPT its access — the stale whole list was never written', await accessNames());
 
 // ── ⑨ mirror-193: ONE CONVERSATION WINDOW, ONE COPY OF ITS MESSAGES ──
@@ -1202,7 +1202,7 @@ const baseRooms = ((await api('GET', '/api/channels')).json.conversations || [])
 ok(baseRooms.length >= 2, `FIXTURE: two base rooms no window has opened yet (${baseRooms.join(', ')})`, JSON.stringify(baseRooms));
 const race = await p1.evaljs(RACE(baseRooms[0]));
 const rp = await p1.evaljs(REPAINT(baseRooms[0]));
-ok(rp.before > 0 && rp.cleared && rp.parsed === rp.started && rp.after === rp.before, `ONE LIST, ONE WRITER (⑨b): a rebuild (a reconnect's re-read) repainting an open window (its clear dropping scrollTop to 0 and that scroll event dispatched) draws its ${rp.before} message(s) once (${rp.after} drawn; pages read: ${rp.urls.join(' ')})`, JSON.stringify(rp));
+ok(rp.before > 0 && gateOf(rp.cleared) && rp.parsed === rp.started && rp.after === rp.before, `ONE LIST, ONE WRITER (⑨b): a rebuild (a reconnect's re-read) repainting an open window (its clear dropping scrollTop to 0 and that scroll event dispatched) draws its ${rp.before} message(s) once (${rp.after} drawn; pages read: ${rp.urls.join(' ')})`, JSON.stringify(rp));
 ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.started && race.page > 0 && race.shown === race.page, `ONE LIST, ONE WRITER: three renders in flight together (the open's page answering last; ${race.started} of them fetched a page) — the window shows the page's ${race.page} record(s) ONCE (${race.shown} drawn)`, JSON.stringify(race));
 
 // ── ⑩ lane channel-rich (2026-09-28): A MAIL IS SHOWN FORMATTED, SAFELY; A BOT HAS ITS MARK ──
@@ -1221,7 +1221,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   ok(n >= MAIL_N + 6, `FIXTURE: the mail room is ingested (${n} records: ${MAIL_N} HTML mails + pictures + hostile + plain + wide + quoted + a bot)`);
   const body = await api('GET', `/api/channels/fake-push/${MAIL}/messages?limit=60`);
   const pic = (body.json.records || []).find((r) => r.vendorId === `${MAIL}-pictures`);
-  ok(pic && pic.attachments.some((a) => a.role === 'body' && a.mime === 'text/html') && pic.attachments.some((a) => a.cid === 'logo@fake'), 'the record names its formatted BODY (role body, text/html) and its cid: picture (the record keeps `role` and `cid`)', JSON.stringify(pic && pic.attachments));
+  ok(gateOf(pic) && gateOf(pic.attachments.some((a) => a.role === 'body' && a.mime === 'text/html')) && verdictOf(pic.attachments.some((a) => a.cid === 'logo@fake')), 'the record names its formatted BODY (role body, text/html) and its cid: picture (the record keeps `role` and `cid`)', JSON.stringify(pic && pic.attachments));
   // a frame goes live on the list's IntersectionObserver + a frame callback: a BACKGROUND tab runs no frames, so
   // page 1 is brought to the front first (a person reads a mail in the tab they are looking at)
   await p1.cdp('Page.bringToFront'); becameFront(FS, p1.key, p1.bring);
@@ -1253,12 +1253,12 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   const diag = async () => JSON.stringify(await p1.evaljs('window.__mailDiag || null'));
   // ⓐ the BOT's line wears its mark
   const bot = await p1.evaljs(`(() => { const r = ${ROW(`${MAIL}-bot`)}; return r ? { name: r.querySelector('.chanmsg-head b') && r.querySelector('.chanmsg-head b').textContent, mark: !!r.querySelector('.chanmsg-head .chanmsg-bot svg'), title: r.querySelector('.chanmsg-bot') && r.querySelector('.chanmsg-bot').title, emoji: /[\\u{1F300}-\\u{1FAFF}]/u.test(r.textContent) } : null; })()`);
-  ok(bot && bot.name === 'Build Bot' && bot.mark && bot.title === '机器人' && !bot.emoji, 'D3: a bot\'s line shows its NAME with a small bot mark — the icon library\'s SVG (titled 机器人), never an emoji', JSON.stringify(bot));
+  ok(gateOf(bot) && bot.name === 'Build Bot' && gateOf(bot.mark) && bot.title === '机器人' && !bot.emoji, 'D3: a bot\'s line shows its NAME with a small bot mark — the icon library\'s SVG (titled 机器人), never an emoji', JSON.stringify(bot));
   // ⓑ a mail with NO html part renders as before (its markup-looking plain text is WORDS, no frame)
   const plain = await p1.evaljs(`(() => { const r = ${ROW(`${MAIL}-plain`)}; return r ? { frame: !!r.querySelector('.chanmail'), text: r.querySelector('.chanmsg-body').textContent } : null; })()`);
-  ok(plain && !plain.frame && plain.text.includes('<td>markup in the plain part</td>'), 'a mail with no text/html part: no frame, its plain text as WORDS (a markup-looking line stays words)', JSON.stringify(plain));
+  ok(gateOf(plain) && !plain.frame && verdictOf(plain.text.includes('<td>markup in the plain part</td>')), 'a mail with no text/html part: no frame, its plain text as WORDS (a markup-looking line stays words)', JSON.stringify(plain));
   // ⓒ the PICTURES mail: formatted, sandboxed, remote picture blocked, cid: drawn
-  ok(await waitFrame(`${MAIL}-pictures`), 'the pictures mail draws its FRAME and the frame reported its height (our resizer ran, its message was accepted)', await diag());
+  ok(verdictOf(await waitFrame(`${MAIL}-pictures`)), 'the pictures mail draws its FRAME and the frame reported its height (our resizer ran, its message was accepted)', await diag());
   const F = await p1.evaljs(`(() => {
     const r = ${ROW(`${MAIL}-pictures`)};
     const f = r.querySelector('iframe.chanmail-frame');
@@ -1274,9 +1274,9 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
       docBody: doc.slice(doc.indexOf('<body>'), doc.lastIndexOf('<script')).replace(/base64,[A-Za-z0-9+/=]+/g, 'base64,…'),
     };
   })()`);
-  ok(F.sandbox === 'allow-scripts' && F.opaque && F.formatted && F.bodyHidden, 'the frame is sandboxed "allow-scripts" ONLY (an opaque origin: contentDocument is null to the parent); the row is formatted, its text body hidden', JSON.stringify(F));
+  ok(F.sandbox === 'allow-scripts' && gateOf(F.opaque) && gateOf(F.formatted) && verdictOf(F.bodyHidden), 'the frame is sandboxed "allow-scripts" ONLY (an opaque origin: contentDocument is null to the parent); the row is formatted, its text body hidden', JSON.stringify(F));
   ok(F.csp === MF.cspFor({ nonce: (F.csp.match(/'nonce-([^']+)'/) || [])[1] }) && !/https:/.test(F.csp) && !F.remote && F.blocked === 2 && F.scripts === 1, 'the frame document: OUR CSP (no https: before the press), the remote + tracker pictures carry NO src (blocked, marked), ONE script (ours)', JSON.stringify([F.csp, F.remote, F.blocked, F.scripts, F.docBody]));
-  ok(F.cid && F.stripLogo.every((d) => d === 'none'), 'the cid: picture is drawn IN the mail (a data: picture the parent fetched through our route) — and not drawn again in the strip under it', JSON.stringify(F.stripLogo));
+  ok(gateOf(F.cid) && verdictOf(F.stripLogo.every((d) => d === 'none')), 'the cid: picture is drawn IN the mail (a data: picture the parent fetched through our route) — and not drawn again in the strip under it', JSON.stringify(F.stripLogo));
   ok(F.pics === '显示图片（2）' && F.modes[0][0] === '格式化' && F.modes[0][1] === 'true' && F.modes[1][0] === '纯文本' && F.h >= MF.HEIGHT_MIN, 'the bar says 格式化 | 纯文本 (formatted pressed) and 显示图片（2）', JSON.stringify(F));
   const z1 = await takeCspReports(() => true, { ms: 1500 });
   ok(z1.length === 0, 'lane design-frame-host: the mail frame reported NOTHING to the app page\'s sink — it navigates to the frame host (its own policy, a real header); as a srcdoc frame it ran under the app page\'s', z1);
@@ -1300,13 +1300,13 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     return { tok: !!tok, h0, h1: f.style.height, opened };
   })()`);
   const spoofRep = await takeProbeReports();
-  ok(spoofRep.length >= 1 && spoofRep.every((r) => /^script-src/.test(r.directive)), 'CONTROL: the spoofing frame — this suite\'s own srcdoc — IS reported (a srcdoc frame runs under the app page\'s policy: the zero above is the frame host, not a deaf sink)', spoofRep);
-  ok(spoof.tok && spoof.h0 === spoof.h1 && !spoof.opened.length, 'a SPOOFED resizer message (another frame, carrying the real token) moves nothing and opens nothing — the parent checks the SOURCE window', JSON.stringify(spoof));
+  ok(spoofRep.length >= 1 && verdictOf(spoofRep.every((r) => /^script-src/.test(r.directive))), 'CONTROL: the spoofing frame — this suite\'s own srcdoc — IS reported (a srcdoc frame runs under the app page\'s policy: the zero above is the frame host, not a deaf sink)', spoofRep);
+  ok(gateOf(spoof.tok) && spoof.h0 === spoof.h1 && !spoof.opened.length, 'a SPOOFED resizer message (another frame, carrying the real token) moves nothing and opens nothing — the parent checks the SOURCE window', JSON.stringify(spoof));
   // ⓔ Show pictures: this message's frame is rebuilt with https: in its CSP and the remote src; the tracker never
   await p1.evaljs(`(() => { ${ROW(`${MAIL}-pictures`)}.querySelector('.chanmail-pictures').click(); return true; })()`);
-  ok(await waitFrame(`${MAIL}-pictures`, "/img-src data: https:/.test(f.__frameDoc)"), 'after 显示图片 the frame is rebuilt');
+  ok(verdictOf(await waitFrame(`${MAIL}-pictures`, "/img-src data: https:/.test(f.__frameDoc)")), 'after 显示图片 the frame is rebuilt');
   const P = await p1.evaljs(`(() => { const r = ${ROW(`${MAIL}-pictures`)}; const d = r.querySelector('iframe.chanmail-frame').__frameDoc; return { https: /img-src data: https:/.test(d), remote: /src="https:\\/\\/img\\.example\\.invalid\\/pic\\.png"/.test(d), tracker: /tracker\\.gif/.test(d), button: r.querySelector('.chanmail-pictures').hidden }; })()`);
-  ok(P.https && P.remote && !P.tracker && P.button, 'Show pictures: https: joins img-src FOR THIS FRAME, the https picture gets its src, the http tracker never; the button is gone', JSON.stringify(P));
+  ok(gateOf(P.https) && gateOf(P.remote) && !P.tracker && verdictOf(P.button), 'Show pictures: https: joins img-src FOR THIS FRAME, the https picture gets its src, the http tracker never; the button is gone', JSON.stringify(P));
   // ⓕ Plain text ⇄ Formatted
   const T1 = await p1.evaljs(`(async () => {
     const r = ${ROW(`${MAIL}-pictures`)};
@@ -1318,11 +1318,11 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     r.querySelector('.chanmail-mode[data-mode="formatted"]').click();
     return plain;
   })()`);
-  ok(!T1.frame && !T1.formatted && T1.body, '纯文本: the frame is gone and the TEXT body is shown', JSON.stringify(T1));
+  ok(!T1.frame && !T1.formatted && verdictOf(T1.body), '纯文本: the frame is gone and the TEXT body is shown', JSON.stringify(T1));
   ok(T1.barAboveBody === true, '…and the 格式化 | 纯文本 bar stays ABOVE the text (it never jumps under the body when pressed)', JSON.stringify(T1));
-  ok(await waitFrame(`${MAIL}-pictures`), '格式化: the frame comes back');
+  ok(verdictOf(await waitFrame(`${MAIL}-pictures`)), '格式化: the frame comes back');
   // ⓖ THE HOSTILE MAIL: nothing runs, nothing is reached
-  ok(await waitFrame(`${MAIL}-hostile`), 'the hostile mail draws its frame (sanitized)');
+  ok(verdictOf(await waitFrame(`${MAIL}-hostile`)), 'the hostile mail draws its frame (sanitized)');
   await sleep(1500);
   const HM = await p1.evaljs(`(() => {
     const r = ${ROW(`${MAIL}-hostile`)};
@@ -1332,7 +1332,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
       reach: /(src|style|href)="[^"]*127\\.0\\.0\\.1:${BEACON_PORT}|<style>[^<]*127\\.0\\.0\\.1:${BEACON_PORT}/.test(d), bad: (d.match(/<(iframe|object|embed|form|input|button|meta http|base|link|svg|math|video)\\b/gi) || []).length, on: /\\son[a-z]+\\s*=/i.test(d), js: /javascript:/i.test(d),
       windowFrames: document.querySelectorAll('iframe').length, top: location.href };
   })()`);
-  ok(HM.xss === null && HM.opaque && HM.sandbox === 'allow-scripts' && HM.scripts === 1 && !HM.reach && HM.bad <= 1 && !HM.on && !HM.js, 'HOSTILE: window.__xss untouched, the frame opaque + sandboxed, ONE script (ours), no load from the beacon, no dangerous element (the one match is our own CSP <meta>), no handler, no javascript:', JSON.stringify(HM));
+  ok(HM.xss === null && gateOf(HM.opaque) && HM.sandbox === 'allow-scripts' && HM.scripts === 1 && !HM.reach && HM.bad <= 1 && !HM.on && !HM.js, 'HOSTILE: window.__xss untouched, the frame opaque + sandboxed, ONE script (ours), no load from the beacon, no dangerous element (the one match is our own CSP <meta>), no handler, no javascript:', JSON.stringify(HM));
   ok(beaconHits.length === 0, `the BEACON was never hit — script / onerror / meta refresh / base / form / iframe / CSS url() / @import / srcset / the http tracker (${beaconHits.length} hits)`, beaconHits.join(', '));
   ok(HM.top === `http://127.0.0.1:${PORT}/`, 'the page never navigated (a meta refresh / base / target=_top reached nothing)', HM.top);
   const z2 = await takeCspReports(() => true, { ms: 1000 });
@@ -1341,7 +1341,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   //    marked ONCE (the outermost), hidden in the frame behind one "显示引用内容" button, shown on a press. The frame
   //    is opaque to the parent, so the SAME document is read through a test-only same-origin probe frame (no
   //    sandbox: the probe is this suite's, never the product's — the product's frame stays allow-scripts)
-  ok(await waitFrame(`${MAIL}-quoted`), 'the quoted mail draws its frame');
+  ok(verdictOf(await waitFrame(`${MAIL}-quoted`)), 'the quoted mail draws its frame');
   const QF = await p1.evaljs(`(async () => {
     const r = ${ROW(`${MAIL}-quoted`)};
     const doc = r.querySelector('iframe.chanmail-frame').__frameDoc;
@@ -1360,9 +1360,9 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     probe.remove();
     return out;
   })()`);
-  ok(QF.marks === 1 && QF.btn === '显示引用内容' && QF.newShown && QF.oldHiddenBefore, 'the quoted history is marked ONCE (the outermost gmail_quote), the new words show, the quote is folded behind 显示引用内容', JSON.stringify(QF));
+  ok(QF.marks === 1 && QF.btn === '显示引用内容' && gateOf(QF.newShown) && verdictOf(QF.oldHiddenBefore), 'the quoted history is marked ONCE (the outermost gmail_quote), the new words show, the quote is folded behind 显示引用内容', JSON.stringify(QF));
   await takeProbeReports();
-  ok(QF.oldShownAfter && QF.btnAfter === '收起引用内容' && QF.h1 > QF.h0, 'a press shows the quoted mail, the button says 收起引用内容, the document grew (the resizer posts the new height)', JSON.stringify(QF));
+  ok(gateOf(QF.oldShownAfter) && QF.btnAfter === '收起引用内容' && QF.h1 > QF.h0, 'a press shows the quoted mail, the button says 收起引用内容, the document grew (the resizer posts the new height)', JSON.stringify(QF));
   // ⓗ LAZY: 30 HTML mails never hold 30 frames — scrolled top to bottom; at every stop EVERY formatted row on
   //    screen is live (security verify r2, continued: the cap used to blank visible mails past the sixth) and the
   //    frames never outnumber max(LIVE_FRAME_CAP, the rows on screen)
@@ -1394,12 +1394,12 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     const box = r.querySelector('.chanmail-box').getBoundingClientRect(), row = r.getBoundingClientRect();
     return { overflow: list.scrollWidth > list.clientWidth + 1, inside: box.right <= row.right + 1 && box.left >= row.left - 1, modeH: Math.round(r.querySelector('.chanmail-mode').getBoundingClientRect().height), vw: window.innerWidth };
   })()`);
-  ok(PH.vw <= 400 && !PH.overflow && PH.inside && PH.modeH >= 36, 'the phone width: the frame stays inside its row, nothing scrolls sideways, the toggle is ≥ 36 px tall', JSON.stringify(PH));
+  ok(PH.vw <= 400 && !PH.overflow && gateOf(PH.inside) && PH.modeH >= 36, 'the phone width: the frame stays inside its row, nothing scrolls sideways, the toggle is ≥ 36 px tall', JSON.stringify(PH));
   // ⓘ2 (naive-user verify, 2026-09-28) FIT TO WIDTH: a 900 px newsletter at the phone's ~300 px frame is ZOOMED to
   //    fit — its right edge is inside the frame, nothing is cut (the frame's overflow is hidden: a cut mail was
   //    unreadable AND unreachable). Read through the test-only probe at the product frame's own width; the
   //    CONTROL is the same document with our fit rule neutered (zoom pinned at 1) — it overflows.
-  ok(await waitFrame(`${MAIL}-wide`), 'the wide newsletter draws its frame at the phone width');
+  ok(verdictOf(await waitFrame(`${MAIL}-wide`)), 'the wide newsletter draws its frame at the phone width');
   const FW = await p1.evaljs(`(async () => {
     const r = ${ROW(`${MAIL}-wide`)};
     const f = r.querySelector('iframe.chanmail-frame');
@@ -1419,7 +1419,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     ctl.patched = neutered !== f.__frameDoc;
     return { w, fit, ctl, boxH: Number(r.querySelector('.chanmail-box').dataset.h) };
   })()`);
-  ok(FW.w < 400 && FW.fit.zoom && Number(FW.fit.zoom) < 0.5 && FW.fit.sw <= FW.fit.cw + 1 && FW.fit.right <= FW.w, `FIT: the 900 px mail is zoomed to the ${FW.w} px frame (zoom ${FW.fit.zoom}), its right edge inside, nothing overflows`, JSON.stringify(FW));
+  ok(FW.w < 400 && gateOf(FW.fit.zoom) && Number(FW.fit.zoom) < 0.5 && FW.fit.sw <= FW.fit.cw + 1 && FW.fit.right <= FW.w, `FIT: the 900 px mail is zoomed to the ${FW.w} px frame (zoom ${FW.fit.zoom}), its right edge inside, nothing overflows`, JSON.stringify(FW));
   ok(FW.ctl.zoom === '1' && FW.ctl.patched === true && FW.ctl.right > FW.w + 100, 'CONTROL: the same document with the fit rule neutered overflows the frame (the cut the owner would have seen)', JSON.stringify(FW.ctl));
   await takeProbeReports();
   ok(FW.boxH >= MF.HEIGHT_MIN && FW.boxH < 400, 'the product frame\'s reported height is the ZOOMED content\'s (a fitted mail is short, not a 900 px-wide mail\'s tall wrap)', JSON.stringify(FW.boxH));
@@ -1437,7 +1437,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     raw.remove();
     return true;
   })()`);
-  ok(beaconHits.length > 0 && beaconHits.some((h) => /\/script|\/onerror|\/css|\/import/.test(h)) && beaconConns > 0, `CONTROL: the same hostile mail rendered RAW reaches the beacon (${beaconHits.length} hits over ${beaconConns} TCP connections — the connection counter ⑩x reads is not blind: ${beaconHits.slice(0, 6).join(', ')})`);
+  ok(beaconHits.length > 0 && gateOf(beaconHits.some((h) => /\/script|\/onerror|\/css|\/import/.test(h))) && beaconConns > 0, `CONTROL: the same hostile mail rendered RAW reaches the beacon (${beaconHits.length} hits over ${beaconConns} TCP connections — the connection counter ⑩x reads is not blind: ${beaconHits.slice(0, 6).join(', ')})`);
   await takeProbeReports(); // the raw control's own reports (no sanitizer, no policy of its own: it runs under the app page's)
 }
 
@@ -1582,9 +1582,9 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   ok(!bad.length, `THE DOM CENSUS over ${CORPUS.length} hostile mails: opaque allow-scripts frame, ONE nonce'd script (ours), the CSP meta right after the charset, no dangerous element / handler / javascript: / srcset / action / ping / target / download / url() / keyframes, no id / name, no custom element; cid: only the message's own part; only our quote mark; 1 000 pictures capped`, bad.join('\n    '));
   ok(beaconHits.length === h0 && tlsHits.length === s0 && beaconConns === c0, `ZERO beacon hits (http ${beaconHits.length - h0}, https ${tlsHits.length - s0}) and ZERO new TCP connections to the http beacon (${beaconConns - c0} — no preconnect / dns-prefetch / prefetch opened a socket) across the whole corpus before Show pictures — no script, no meta refresh / base / form / iframe / object / embed, no link rel, no media, no srcset, no CSS url() / @import / image-set / cursor / content / font / mask, no table background, no http picture`, [...beaconHits.slice(h0), ...tlsHits.slice(s0).map((h) => h.url)].join(', '));
   const co = clickOutcomes;
-  ok(co['a-javascript'] && !co['a-javascript'].opened.length && co['a-javascript-entities'] && !co['a-javascript-entities'].opened.length && co['xlink-href'] && !co['xlink-href'].opened.length && co['base-href'] && !co['base-href'].opened.length && co['form-javascript'] && !co['form-javascript'].opened.length && co['form-post'] && !co['form-post'].opened.length, 'a real click on a javascript: / entity-spelled / xlink / base-relative link or a form button opens NOTHING', JSON.stringify(co));
-  ok(co['a-target-top'] && co['a-target-top'].opened.length === 1 && co['a-target-top'].opened[0] === `${BEACON_S || BEACON}/a-target-top/target-top` && co['a-download'] && co['a-download'].opened.length === 1 && /\/a-download\/download$/.test(co['a-download'].opened[0]), 'a real click on an https link: the PARENT opens exactly that URL (target=_top / ping / download dropped), through window.open with noopener', JSON.stringify([co['a-target-top'], co['a-download']]));
-  ok(Object.values(co).every((o) => o.top === `http://127.0.0.1:${PORT}/` && o.xss === null), 'the page never navigated and window.__xss is untouched after every click');
+  ok(gateOf(co['a-javascript']) && !co['a-javascript'].opened.length && gateOf(co['a-javascript-entities']) && !co['a-javascript-entities'].opened.length && gateOf(co['xlink-href']) && !co['xlink-href'].opened.length && gateOf(co['base-href']) && !co['base-href'].opened.length && gateOf(co['form-javascript']) && !co['form-javascript'].opened.length && gateOf(co['form-post']) && !co['form-post'].opened.length, 'a real click on a javascript: / entity-spelled / xlink / base-relative link or a form button opens NOTHING', JSON.stringify(co));
+  ok(gateOf(co['a-target-top']) && co['a-target-top'].opened.length === 1 && co['a-target-top'].opened[0] === `${BEACON_S || BEACON}/a-target-top/target-top` && gateOf(co['a-download']) && co['a-download'].opened.length === 1 && verdictOf(/\/a-download\/download$/.test(co['a-download'].opened[0])), 'a real click on an https link: the PARENT opens exactly that URL (target=_top / ping / download dropped), through window.open with noopener', JSON.stringify([co['a-target-top'], co['a-download']]));
+  ok(verdictOf(Object.values(co).every((o) => o.top === `http://127.0.0.1:${PORT}/` && o.xss === null)), 'the page never navigated and window.__xss is untouched after every click');
   // SHOW PICTURES on the https mail: ONLY https images load (no referer, no cookie), the http one and every CSS /
   // link / media vector still nothing — for THIS sender's frames (the press is per sender)
   const t1 = beaconHits.length, u1 = tlsHits.length, c1 = beaconConns;
@@ -1594,8 +1594,8 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   await sleep(2500);
   const after = tlsHits.slice(u1);
   ok(beaconHits.length === t1 && beaconConns === c1, `after Show pictures the http beacon is still untouched (${beaconHits.length - t1} hits, ${beaconConns - c1} new connections) — the http picture, every CSS url() / link / media / table background`, beaconHits.slice(t1).join(', '));
-  ok(after.length >= 2 && after.every((h) => /^\/(pictures-https|img-srcset-lazy|meta-referrer)\/(pic|pic2|lazy|referrer)\.png(\?.*)?$/.test(h.url) && h.ref === null && h.cookie === null), `after Show pictures ONLY the https <img src> pictures loaded (${after.length}: ${[...new Set(after.map((h) => h.url))].join(', ')}), each with NO referer and NO cookie — never a CSS url(), a font, a link rel, a media source, a protocol-relative or a relative path`, JSON.stringify(after));
-  if (BEACON_S) { await waitAtk(`${ATK}-x-css-reach`); const cx = await census(`${ATK}-x-css-reach`); ok(cx && !cx.timeout && cx.styleReach === 0 && cx.reach.length === 0, 'the CSS-reach mail with pictures ON: still no url() / @import / image-set in any style (the CSP would allow an https url() — the sanitizer never writes one)', JSON.stringify(cx)); }
+  ok(after.length >= 2 && verdictOf(after.every((h) => /^\/(pictures-https|img-srcset-lazy|meta-referrer)\/(pic|pic2|lazy|referrer)\.png(\?.*)?$/.test(h.url) && h.ref === null && h.cookie === null)), `after Show pictures ONLY the https <img src> pictures loaded (${after.length}: ${[...new Set(after.map((h) => h.url))].join(', ')}), each with NO referer and NO cookie — never a CSS url(), a font, a link rel, a media source, a protocol-relative or a relative path`, JSON.stringify(after));
+  if (BEACON_S) { await waitAtk(`${ATK}-x-css-reach`); const cx = await census(`${ATK}-x-css-reach`); ok(gateOf(cx) && !cx.timeout && cx.styleReach === 0 && cx.reach.length === 0, 'the CSS-reach mail with pictures ON: still no url() / @import / image-set in any style (the CSP would allow an https url() — the sanitizer never writes one)', JSON.stringify(cx)); }
   // THE ANIMATED MAIL moves nothing: no height message, one row height, one scrollTop over 3 s
   await waitAtk(`${ATK}-x-height-animation`);
   const storm = await p1.evaljs(`(async () => { const w = window.__atkW; const list = w.content.querySelector('.chanwin-list'); const row = ${AROW(`${ATK}-x-height-animation`)}; row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 2000)); const f = row.querySelector('iframe.chanmail-frame'); if (!f) return { noFrame: true };
@@ -1638,13 +1638,13 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     pf.src = f.getAttribute('src'); let pfHost = true; pf.addEventListener('load', () => { if (pfHost) { pfHost = false; pf.contentWindow.postMessage({ vsFrameDoc: 1, html: doc2 }, '*'); } }); document.body.appendChild(pf); const out = await got; pf.remove(); out.__replaced = doc2 !== doc; out.__top = location.href; out.__opened = window.__opened.length; return out; })()`);
   await sleep(1500);
   const probeHits = [...beaconHits.slice(t1), ...tlsHits.slice(u1 + after.length).map((h) => h.url)].filter((u) => /\/probe\//.test(u));
-  ok(probe && probe.__replaced && !probe.timeout && /Blocked a frame/.test(probe.parentDocument) && /does not/.test(probe.topLocation) && /does not/.test(probe.parentLocation) && probe.windowOpen === 'ok:null' && /sandbox/.test(probe.localStorage) && /sandbox/.test(probe.cookie) && /Failed to fetch/.test(probe.fetch) && /error/.test(probe.xhr) && /error/.test(probe.ws) && /blocked/.test(probe.img) && /Content Security Policy/.test(probe.eval) && /permissions policy/i.test(probe.fullscreen), 'THE SANDBOX, with OUR script under the product\'s exact frame configuration: parent.document blocked, top / parent navigation refused, window.open null, no storage, no cookie, fetch / XHR / WebSocket / Image refused, eval refused, fullscreen refused', JSON.stringify(probe));
+  ok(gateOf(probe) && gateOf(probe.__replaced) && !probe.timeout && gateOf(/Blocked a frame/.test(probe.parentDocument)) && gateOf(/does not/.test(probe.topLocation)) && gateOf(/does not/.test(probe.parentLocation)) && probe.windowOpen === 'ok:null' && gateOf(/sandbox/.test(probe.localStorage)) && gateOf(/sandbox/.test(probe.cookie)) && gateOf(/Failed to fetch/.test(probe.fetch)) && gateOf(/error/.test(probe.xhr)) && gateOf(/error/.test(probe.ws)) && gateOf(/blocked/.test(probe.img)) && gateOf(/Content Security Policy/.test(probe.eval)) && verdictOf(/permissions policy/i.test(probe.fullscreen)), 'THE SANDBOX, with OUR script under the product\'s exact frame configuration: parent.document blocked, top / parent navigation refused, window.open null, no storage, no cookie, fetch / XHR / WebSocket / Image refused, eval refused, fullscreen refused', JSON.stringify(probe));
   ok(!probeHits.length && probe.__top === `http://127.0.0.1:${PORT}/`, `…and NOTHING reached the beacon from it — form submit, sendBeacon, prefetch, @import, @font-face, a child iframe, object, video, self-navigation (${probeHits.length} hits)`, probeHits.join(', '));
   // THE ATTACHMENT ROUTE SAYS ITS SIZE (finding A's chrome half: round 1's header guard had nothing to read)
   {
     const r = await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-push/${ATK}/attachment/${encodeURIComponent(`${ATK}-x-script-plain-body`)}?msg=${ATK}-x-script-plain`);
     const body = await r.arrayBuffer();
-    ok(r.status === 200 && Number(r.headers.get('content-length')) === body.byteLength && body.byteLength > 0 && r.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(r.headers.get('content-security-policy') || ''), `the attachment route answers Content-Length (${r.headers.get('content-length')} = the body's ${body.byteLength} bytes) + nosniff + a sandbox CSP`, JSON.stringify([r.status, r.headers.get('content-length'), r.headers.get('transfer-encoding')]));
+    ok(r.status === 200 && Number(r.headers.get('content-length')) === body.byteLength && body.byteLength > 0 && r.headers.get('x-content-type-options') === 'nosniff' && verdictOf(/sandbox/.test(r.headers.get('content-security-policy') || '')), `the attachment route answers Content-Length (${r.headers.get('content-length')} = the body's ${body.byteLength} bytes) + nosniff + a sandbox CSP`, JSON.stringify([r.status, r.headers.get('content-length'), r.headers.get('transfer-encoding')]));
   }
   await p1.evaljs(`(() => { window.app.wm.closeWindow(window.__atkW.id); return true; })()`);
 }
@@ -1679,14 +1679,14 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   // ckpt61 hosted cure (2aa089967): inside the Reach & policy dialog the refusal names the Sending policy ROW above it — the refusal
 // words AND that pointer required together; the dead alternatives (不可用, 直接发送功能在这里不可用) gone, so only the shipped words pass
 const policyNote = (note) => /这里不提供直接发送/.test(note) && /要允许直接发送，请修改上方的「发送策略」/.test(note);
-ok(!policyNote('这里不提供直接发送: 这个频道要求任何东西发出前先经审批 — 可见性与策略') && !policyNote('要允许直接发送，请修改上方的「发送策略」。') && !policyNote('直接发送功能在这里不可用') && policyNote('这里不提供直接发送: 这个频道要求任何东西发出前先经审批 — 要允许直接发送，请修改上方的「发送策略」。'),
+ok(!policyNote('这里不提供直接发送: 这个频道要求任何东西发出前先经审批 — 可见性与策略') && !policyNote('要允许直接发送，请修改上方的「发送策略」。') && !policyNote('直接发送功能在这里不可用') && verdictOf(policyNote('这里不提供直接发送: 这个频道要求任何东西发出前先经审批 — 要允许直接发送，请修改上方的「发送策略」。')),
   'POLICY DOOR RED CONTROL: the release\'s pointer (the dialog\'s own name), the pointer without the refusal, and a dead alternative are each refused; the shipped note passes');
-ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send') && policyNote(pd.before.note), 'POLICY DOOR: under review section 2 offers draft only, and the refusal names where to change it — the Sending policy row above, inside this dialog', JSON.stringify(pd).slice(0, 600));
-  ok(!pd.fail && pd.after.mode === 'direct' && pd.after.source === 'account' && pd.after.same && pd.after.radios.includes('send') && pd.woken, 'POLICY DOOR: Direct picked ⇒ saved on the account and 可以直接回复 is offered IN THE SAME dialog (no reopen); section 3 is the Notify door', JSON.stringify(pd && pd.after));
+ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send') && verdictOf(policyNote(pd.before.note)), 'POLICY DOOR: under review section 2 offers draft only, and the refusal names where to change it — the Sending policy row above, inside this dialog', JSON.stringify(pd).slice(0, 600));
+  ok(!pd.fail && pd.after.mode === 'direct' && pd.after.source === 'account' && gateOf(pd.after.same) && gateOf(pd.after.radios.includes('send')) && verdictOf(pd.woken), 'POLICY DOOR: Direct picked ⇒ saved on the account and 可以直接回复 is offered IN THE SAME dialog (no reopen); section 3 is the Notify door', JSON.stringify(pd && pd.after));
   const sv = await p1.evaljs(`(async () => { const dlg = document.getElementById('chan-account-reach-dialog'); return (${SAVE_OUTCOME('chan-account-reach-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存')); })()`);
   const view = (await api('GET', '/api/channels/adapters/fake-poll/view')).json || {};
   const yu = ((view.adapter && view.adapter.accountGrain && view.adapter.accountGrain.access) || []).find((r) => r.principal && r.principal.id === 'agent-yu');
-  ok(sv.closed && yu && yu.authority === 'send' && view.adapter.policy.mode === 'direct', 'POLICY DOOR: Save writes Yu at send on the whole account (the policy reads direct)', JSON.stringify({ sv, yu, policy: view.adapter && view.adapter.policy }).slice(0, 400));
+  ok(gateOf(sv.closed) && gateOf(yu) && yu.authority === 'send' && view.adapter.policy.mode === 'direct', 'POLICY DOOR: Save writes Yu at send on the whole account (the policy reads direct)', JSON.stringify({ sv, yu, policy: view.adapter && view.adapter.policy }).slice(0, 400));
   const cv = await p1.evaljs(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const r0 = document.querySelector('.rail-panel-channels .chan-row[data-conv="fake-poll/fake-poll-room-1"]');
@@ -1702,7 +1702,7 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
     d.closest('.dialog-overlay') ? d.closest('.dialog-overlay').remove() : d.remove();
     return out;
   })()`);
-  ok(!cv.fail && cv.source === 'account' && cv.mode === 'direct' && cv.pick === '' && /^沿用账户：/.test(cv.text) && cv.opts.some((o) => /^沿用账户的设置（/.test(o)), 'POLICY DOOR: the conversation\'s 可见性与策略… says it inherits the account (direct), "沿用账户的设置" chosen', JSON.stringify(cv));
+  ok(!cv.fail && cv.source === 'account' && cv.mode === 'direct' && cv.pick === '' && gateOf(/^沿用账户：/.test(cv.text)) && verdictOf(cv.opts.some((o) => /^沿用账户的设置（/.test(o))), 'POLICY DOOR: the conversation\'s 可见性与策略… says it inherits the account (direct), "沿用账户的设置" chosen', JSON.stringify(cv));
   // ── lane guards-door (owner 2026-10-09 "带文件是不是要直接允许也要加个开关，防止用户想要完全放权"): the guards drawn where
   // the policy is read. A switch on page 1 ⇒ page 3's rows follow (the settings broadcast, no reload); "完全放权" ONLY when
   // nothing asks; under direct a link waits while its guard asks and is SENT without a card once it is switched off (a
@@ -1712,7 +1712,7 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
     const GSHOTS = process.env.GUARDS_SHOTS || wt;
     const until = async (fn, ms = 15000) => { const end = Date.now() + ms; for (;;) { let v; try { v = await fn(); } catch { v = null; } if (v || Date.now() > end) return v; await sleep(150); } };
     const p3 = await newPage();
-    ok(await p3.load(), 'GUARDS: a second page (zh) loaded the app');
+    ok(verdictOf(await p3.load()), 'GUARDS: a second page (zh) loaded the app');
     const ROWS = `(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       for (let i = 0; i < 300 && !document.querySelector('#chan-account-reach-dialog .chan-policy-guard'); i++) await sleep(100);
@@ -1725,24 +1725,24 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
     const CLICK = (g) => `(() => { const i = document.querySelector('#chan-account-reach-dialog .chan-policy-guard[data-guard=${g}] .chan-policy-guard-switch input'); if (!i) return false; i.click(); return true; })()`;
     const o1 = await p1.evaljs(MENU('可见性与策略…')), o3 = await p3.evaljs(MENU('可见性与策略…'));
     const r1 = await p1.evaljs(ROWS), r3 = await p3.evaljs(ROWS);
-    ok(!o1.fail && !o3.fail && r1.rows === 'attachments:ask links:ask offHours:allow' && r3.rows === r1.rows && r1.switches === 2 && /^使用我的时区/.test(r1.zone)
-      && /文件：问你 · 链接：问你 · 非工作时间：关/.test(r1.words) && /^不是完全放权 —— 仍会问你：带文件的消息 · 带链接的消息/.test(r1.deleg) && !r1.full,
+    ok(!o1.fail && !o3.fail && r1.rows === 'attachments:ask links:ask offHours:allow' && r3.rows === r1.rows && r1.switches === 2 && gateOf(/^使用我的时区/.test(r1.zone))
+      && gateOf(/文件：问你 · 链接：问你 · 非工作时间：关/.test(r1.words)) && gateOf(/^不是完全放权 —— 仍会问你：带文件的消息 · 带链接的消息/.test(r1.deleg)) && !r1.full,
     'GUARDS: both pages draw the guard rows under the policy (files / links ask, off-hours off with "使用我的时区"), the Direct words say the current answers, NOT full delegation', JSON.stringify({ o1, o3, r1, r3 }).slice(0, 900));
     const propose = async (text) => { const r = await api('POST', '/api/channels/fake-poll/fake-poll-room-1/propose', { text }); const pr = (r.json && r.json.proposal) || {}; return { status: r.status, id: pr.id, state: pr.state, reasons: (pr.policy && pr.policy.reasons) || [], err: r.json && (r.json.error || r.json.code) }; };
     const held = await propose('guards: see https://example.com/held');
     ok(held.state === 'awaiting-approval' && held.reasons.join() === 'links', 'GUARDS: under direct a link WAITS while its guard asks (reason: links)', JSON.stringify(held));
     if (held.id) await api('POST', `/api/channels/outbox/${encodeURIComponent(held.id)}/reject`, {});
-    ok(await p1.evaljs(CLICK('attachments')), 'GUARDS: page 1 clicks the files switch');
+    ok(verdictOf(await p1.evaljs(CLICK('attachments'))), 'GUARDS: page 1 clicks the files switch');
     const f3 = await until(async () => { const r = await p3.evaljs(ROWS); return /^attachments:allow links:ask/.test(r.rows) ? r : null; }, 15000);
-    ok(f3 && /^不是完全放权 —— 仍会问你：带链接的消息$/.test(f3.deleg) && !f3.full && /文件：允许/.test(f3.words), 'GUARDS: page 3\'s rows FOLLOW (files: allow) with no reload; links still ask ⇒ still not full delegation', JSON.stringify(f3 || await p3.evaljs(ROWS)));
-    ok(await p1.evaljs(CLICK('links')), 'GUARDS: page 1 clicks the links switch');
+    ok(gateOf(f3) && gateOf(/^不是完全放权 —— 仍会问你：带链接的消息$/.test(f3.deleg)) && !f3.full && verdictOf(/文件：允许/.test(f3.words)), 'GUARDS: page 3\'s rows FOLLOW (files: allow) with no reload; links still ask ⇒ still not full delegation', JSON.stringify(f3 || await p3.evaljs(ROWS)));
+    ok(verdictOf(await p1.evaljs(CLICK('links'))), 'GUARDS: page 1 clicks the links switch');
     const both = await until(async () => { const a = await p1.evaljs(ROWS), b = await p3.evaljs(ROWS); return a.full && b.full ? { a, b } : null; }, 15000);
-    ok(both && both.a.rows === 'attachments:allow links:allow offHours:allow' && /^完全放权：有发送权限的智能体发什么都不问你/.test(both.b.deleg) && both.b.rows === both.a.rows,
+    ok(gateOf(both) && both.a.rows === 'attachments:allow links:allow offHours:allow' && gateOf(/^完全放权：有发送权限的智能体发什么都不问你/.test(both.b.deleg)) && both.b.rows === both.a.rows,
       'GUARDS: nothing asks ⇒ "完全放权" appears on BOTH pages (only now)', JSON.stringify(both || { a: await p1.evaljs(ROWS), b: await p3.evaljs(ROWS) }));
     const sent = await until(async () => { const x = await propose('guards: see https://example.com/sent'); return x.state ? x : null; }, 10000);
     const ob = ((await api('GET', '/api/channels/outbox')).json || {});
     const card = (ob.proposals || ob.items || []).find((q) => q && q.id === (sent && sent.id) && q.state === 'awaiting-approval');
-    ok(sent && (sent.state === 'sent' || sent.state === 'sending') && !sent.reasons.length && !card, 'GUARDS: under direct + links allow the same link is SENT without a card (no reason, nothing awaiting)', JSON.stringify({ sent, card }));
+    ok(gateOf(sent) && (sent.state === 'sent' || sent.state === 'sending') && !sent.reasons.length && !card, 'GUARDS: under direct + links allow the same link is SENT without a card (no reason, nothing awaiting)', JSON.stringify({ sent, card }));
     // desktop PNG: the dialog with its guard rows
     const shot = async (pg, file, sel) => {
       const box = await pg.evaljs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return { x: Math.max(0, b.left), y: Math.max(0, b.top), width: Math.min(innerWidth, b.right) - Math.max(0, b.left), height: Math.min(innerHeight, b.bottom) - Math.max(0, b.top) }; })()`);
@@ -1751,15 +1751,15 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
       if (r.result && r.result.data) fs.writeFileSync(path.join(GSHOTS, file), Buffer.from(r.result.data, 'base64'));
       return !!(r.result && r.result.data);
     };
-    ok(await shot(p1, 'policy-row.png', '#chan-account-reach-dialog'), `GUARDS: ${path.join(GSHOTS, 'policy-row.png')}`);
+    ok(verdictOf(await shot(p1, 'policy-row.png', '#chan-account-reach-dialog')), `GUARDS: ${path.join(GSHOTS, 'policy-row.png')}`);
     // 390 px: page 3 as a phone — every guard row and its switch inside the screen
     await p3.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
     await sleep(800);
     const fit = await p3.evaljs(`(() => { const d = document.getElementById('chan-account-reach-dialog'); if (!d) return { fail: 'gone' }; const g = d.querySelector('.chan-policy-guard-rows'); g.scrollIntoView({ block: 'center' });
       const out = [...d.querySelectorAll('.chan-policy-guard, .chan-policy-guard-switch, .chan-policy-delegation')].map((e) => { const b = e.getBoundingClientRect(); return { c: e.className.split(' ')[0], l: Math.round(b.left), r: Math.round(b.right), w: Math.round(b.width) }; });
       return { vw: innerWidth, out, inside: out.every((x) => x.l >= 0 && x.r <= innerWidth && x.w > 0) }; })()`);
-    ok(fit.vw === 390 && fit.inside && fit.out.filter((x) => x.c === 'settings-toggle').length === 2, 'GUARDS: at 390 px every guard row, both switches and the delegation line sit inside the screen', JSON.stringify(fit).slice(0, 700));
-    ok(await shot(p3, 'policy-row-phone.png', '#chan-account-reach-dialog .chan-policy-row'), `GUARDS: ${path.join(GSHOTS, 'policy-row-phone.png')}`);
+    ok(fit.vw === 390 && gateOf(fit.inside) && fit.out.filter((x) => x.c === 'settings-toggle').length === 2, 'GUARDS: at 390 px every guard row, both switches and the delegation line sit inside the screen', JSON.stringify(fit).slice(0, 700));
+    ok(verdictOf(await shot(p3, 'policy-row-phone.png', '#chan-account-reach-dialog .chan-policy-row')), `GUARDS: ${path.join(GSHOTS, 'policy-row-phone.png')}`);
     // teardown: the switches back on (the defaults), both dialogs closed, page 3 gone
     await p1.evaljs(`(() => { app.settings.set('channels.guardAttachmentsReview', true); app.settings.set('channels.guardLinksReview', true); return 1; })()`);
     const restored = await until(async () => { const r = await p1.evaljs(ROWS); return r.rows === 'attachments:ask links:ask offHours:allow' ? r : null; }, 10000);
@@ -1809,13 +1809,13 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
   const ESC_ON = (sel) => `document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`;
   // A — clean: ✕ closes at once
   const c0 = await openNotify();
-  ok(!c0.fail && c0.open && c0.ticked === false, 'Notify… opens on the seeded rule with 也判断普通回复 unticked', JSON.stringify(c0));
+  ok(!c0.fail && gateOf(c0.open) && c0.ticked === false, 'Notify… opens on the seeded rule with 也判断普通回复 unticked', JSON.stringify(c0));
   const c1 = await act(X(N));
   ok(!c1.open, 'nothing changed ⇒ ✕ closes at once (no question)', JSON.stringify(c1));
   // B — the owner's tick, then ✕ ⇒ the sheet
   await openNotify();
   const b1 = await act(`document.querySelector('#${N} .chan-af-infer-tick').click(); ${X(N)}`);
-  ok(b1.open && b1.sheet && b1.words === '有未保存的更改' && JSON.stringify(b1.buttons) === JSON.stringify(['继续编辑', '放弃', '保存']) && /dialog-unsaved-save/.test(b1.focus || '') && b1.ticked === true,
+  ok(gateOf(b1.open) && gateOf(b1.sheet) && b1.words === '有未保存的更改' && JSON.stringify(b1.buttons) === JSON.stringify(['继续编辑', '放弃', '保存']) && gateOf(/dialog-unsaved-save/.test(b1.focus || '')) && b1.ticked === true,
     'ticked + ✕ ⇒ the dialog STAYS and asks in place: «有未保存的更改» · 继续编辑 / 放弃 / 保存 (保存 focused, the tick kept)', JSON.stringify(b1));
   {
     const shotR = await frontShot(FS, p1.key, p1.bring, () => p1.cdp('Page.captureScreenshot', { format: 'png' }), { name: 'the picture unsaved-sheet-notify.png' });
@@ -1824,26 +1824,26 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
   }
   // C — Esc on the sheet = 继续编辑
   const b2 = await act(ESC_ON(`#${N} .dialog-unsaved-save`));
-  ok(b2.open && !b2.sheet && b2.ticked === true, 'Esc on the sheet = 继续编辑: the sheet goes, the dialog and the tick stay', JSON.stringify(b2));
+  ok(gateOf(b2.open) && !b2.sheet && b2.ticked === true, 'Esc on the sheet = 继续编辑: the sheet goes, the dialog and the tick stay', JSON.stringify(b2));
   // D — a backdrop press asks again (lane dialog-yield: Notify… is a FORM window on the desktop — no backdrop; its window's ✕ is
   // the person's other dismissal and asks the same way)
   const b3 = await act(`const o = document.getElementById('${N}'); const w = o.closest('.window'); if (w) w.querySelector('.win-close').click(); else o.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))`);
-  ok(b3.open && b3.sheet, 'a backdrop press (a form window: its ✕) with the tick changed asks again (never a silent close)', JSON.stringify(b3));
+  ok(gateOf(b3.open) && verdictOf(b3.sheet), 'a backdrop press (a form window: its ✕) with the tick changed asks again (never a silent close)', JSON.stringify(b3));
   // E — 放弃 drops it: closed, the wire untouched, a reopen unticked
   const b4 = await act(BTN(N, '放弃'));
   ok(!b4.open && !(await inferOn()), '放弃 closes and writes nothing (the wire: the judged road still OFF)', JSON.stringify(b4));
   const b5 = await openNotify();
-  ok(b5.open && b5.ticked === false, 'a reopen after 放弃 shows the tick UNticked (the change was dropped by name)', JSON.stringify(b5));
+  ok(gateOf(b5.open) && b5.ticked === false, 'a reopen after 放弃 shows the tick UNticked (the change was dropped by name)', JSON.stringify(b5));
   // F — Esc on the dialog asks; 保存 writes it
   const f1 = await act(`document.querySelector('#${N} .chan-af-infer-tick').click(); ${ESC_ON(`#${N} .chan-af-infer-tick`)}`);
-  ok(f1.open && f1.sheet && f1.ticked === true, 'ticked + Esc on the dialog ⇒ the same question (Esc never drops a change)', JSON.stringify(f1));
+  ok(gateOf(f1.open) && gateOf(f1.sheet) && f1.ticked === true, 'ticked + Esc on the dialog ⇒ the same question (Esc never drops a change)', JSON.stringify(f1));
   await p1.evaljs(`(() => { ${TOAST_LOG}; window.__vsU0 = window.__vsToastLog.length; return 1; })()`);
   const f2 = await act(BTN(N, '保存'));
   let saved = false; for (let i = 0; i < 40 && !(saved = await inferOn()); i++) await sleep(150);
   const f2t = await p1.evaljs(`(async () => { for (let i = 0; i < 40 && document.getElementById('${N}'); i++) await new Promise((r) => setTimeout(r, 100)); return { open: !!document.getElementById('${N}'), toasts: window.__vsToastLog.slice(window.__vsU0).map((x) => x.text) }; })()`);
-  ok(saved && !f2t.open && f2t.toasts.some((x) => /通知已保存/.test(x)), '保存 on the sheet runs the dialog\'s own Save: the wire holds infer:true, the dialog closes with its toast', JSON.stringify({ f2, f2t, saved }));
+  ok(gateOf(saved) && !f2t.open && verdictOf(f2t.toasts.some((x) => /通知已保存/.test(x))), '保存 on the sheet runs the dialog\'s own Save: the wire holds infer:true, the dialog closes with its toast', JSON.stringify({ f2, f2t, saved }));
   const f3 = await openNotify();
-  ok(f3.open && f3.ticked === true, 'a reopen after 保存 shows the tick TICKED', JSON.stringify(f3));
+  ok(gateOf(f3.open) && f3.ticked === true, 'a reopen after 保存 shows the tick TICKED', JSON.stringify(f3));
   const f4 = await act(X(N));
   ok(!f4.open && !f4.sheet, '…and that saved dialog closes with ✕ at once (what is shown is what is stored)', JSON.stringify(f4));
   // G — Access… : a removed row
@@ -1855,14 +1855,14 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
   const actA = (js) => p1.evaljs(`(async () => { ${js}; await new Promise((r) => setTimeout(r, 250)); return ${STATE(A)}; })()`);
   const RM_WORK = `[...document.querySelectorAll('#${A} .chan-access-row')].find((r) => /工作/.test(r.textContent)).querySelector('.chan-af-rm').click()`;
   const g0 = await openAccess();
-  ok(!g0.fail && g0.open && g0.rows.length === 2, 'Access… opens with two rows (Yu, 工作)', JSON.stringify(g0));
+  ok(!g0.fail && gateOf(g0.open) && g0.rows.length === 2, 'Access… opens with two rows (Yu, 工作)', JSON.stringify(g0));
   const g1 = await actA(`${RM_WORK}; ${X(A)}`);
-  ok(g1.open && g1.sheet && g1.rows.length === 1 && g1.words === '有未保存的更改', 'Access…: 工作 removed + ✕ ⇒ the same sheet (the row stays removed while it asks)', JSON.stringify(g1));
+  ok(gateOf(g1.open) && gateOf(g1.sheet) && g1.rows.length === 1 && g1.words === '有未保存的更改', 'Access…: 工作 removed + ✕ ⇒ the same sheet (the row stays removed while it asks)', JSON.stringify(g1));
   const g2 = await actA(BTN(A, '放弃'));
   ok(!g2.open && (await accessNames()) === 'Yu,工作', 'Access… 放弃 closes and writes nothing (工作 keeps its access)', await accessNames());
   await openAccess();
   const g3 = await actA(`${RM_WORK}; ${X(A)}`);
-  ok(g3.sheet, 'Access…: removed again + ✕ asks again', JSON.stringify(g3));
+  ok(verdictOf(g3.sheet), 'Access…: removed again + ✕ asks again', JSON.stringify(g3));
   await actA(BTN(A, '保存'));
   let gone = false; for (let i = 0; i < 40 && !(gone = (await accessNames()) === 'Yu'); i++) await sleep(150);
   // pass 3 (store-writer follow-up): the access list is APPLIED at once (GET /api/channels says Yu), but the dialog closes on
@@ -1870,7 +1870,7 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
   // fact is waited for, bounded, never read at the instant the wire says so
   let g4 = await p1.evaljs(STATE(A));
   for (let i = 0; i < 100 && g4 && g4.open; i++) { await sleep(150); g4 = await p1.evaljs(STATE(A)); }
-  ok(gone && !g4.open, 'Access… 保存 on the sheet writes the list (Yu only) and closes (once the save\'s answer came — it follows the durable write; bound 15 s)', JSON.stringify({ g4, wire: await accessNames() }));
+  ok(gateOf(gone) && !g4.open, 'Access… 保存 on the sheet writes the list (Yu only) and closes (once the save\'s answer came — it follows the durable write; bound 15 s)', JSON.stringify({ g4, wire: await accessNames() }));
   // teardown: the account's access back to Yu + 工作, no notification
   const t1 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: WORK_P, authority: 'draft' }, { principal: YU, authority: 'draft' }] });
   const t2 = await api('PUT', '/api/channels/adapters/fake-poll/watchers', { watchers: [] });
@@ -1906,7 +1906,7 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
     "  if (cause === 'scroll' && roomAtInput !== null && roomAtInput !== undefined && Number.isFinite(Number(roomAtInput)) && Number(room) < Number(roomAtInput)) return { page: false, why: 'shrunk' };\n",
     "  if (cause === 'scroll' && Number(room) <= TOP_PX) return { page: false, why: 'no-room' };\n",
   ];
-  ok(READY.every((c) => psrc.split(c).length === 2), 'CONTROL setup: the list-ready rule and the three scroll-event clauses are each spelled once in the paging verdict');
+  ok(verdictOf(READY.every((c) => psrc.split(c).length === 2)), 'CONTROL setup: the list-ready rule and the three scroll-event clauses are each spelled once in the paging verdict');
   fs.writeFileSync(PMOD, READY.reduce((acc, c) => acc.replace(c, ''), psrc));
   // ⑪c's pre-fix dialog in the same bundle (lane mirror-green-channels): the next page asked by an IntersectionObserver alone
   const SMOD = path.join(wt, 'src/lib/channels-panel.js');
@@ -1917,9 +1917,9 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
   const IO_ONLY = "    // the end of section two, ONE screen ahead: each account's next page, one request each\n    if (typeof IntersectionObserver === 'function') {\n      observer = new IntersectionObserver((ents) => {\n        if (my !== gen || !ents.some((en) => en.isIntersecting)) return;\n        for (const st of states) if (st.next && !st.busy) ask(st, st.next);\n      }, { root: list, rootMargin: '0px 0px 100% 0px' });\n      observer.observe(sentinel);\n    }\n";
   fs.writeFileSync(SMOD, ssrc.slice(0, LOOK_AT) + IO_ONLY + ssrc.slice(ssrc.indexOf(LOOK_END) + LOOK_END.length));
   execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
-  ok(await p1.reload(), 'CONTROL: page 1 reloaded on the pre-fix bundle');
+  ok(verdictOf(await p1.reload()), 'CONTROL: page 1 reloaded on the pre-fix bundle');
   const cp = await p1.evaljs(PANEL);
-  ok(cp.ok, 'CONTROL: the panel renders on the pre-fix bundle', JSON.stringify(cp).slice(0, 200));
+  ok(verdictOf(cp.ok), 'CONTROL: the panel renders on the pre-fix bundle', JSON.stringify(cp).slice(0, 200));
   ok((await p1.evaljs(HOLD(true))).held === true, 'CONTROL: page 1 holds its channels-updated frames');
   const gz = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: WORK_P, authority: 'draft' }, { principal: YU, authority: 'draft' }, { principal: ZED, authority: 'draft' }] });
   ok(gz.status === 200 && (await accessNames()) === 'Yu,Zed,工作', 'CONTROL: Zed is granted through the route while the page\'s copy cannot hear of it');
@@ -1927,15 +1927,15 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
   const oc = mc.fail ? mc : await p1.evaljs(OPEN_ROWS);
   ok(!oc.fail && oc.readFresh === 0 && oc.rows.length === 2 && !oc.rows.some((x) => /Zed/.test(x)), `CONTROL: the pre-fix dialog DRAWS THE STALE LIST (${JSON.stringify(oc.rows)}, no fresh read) — the runner's attempt-1 mechanism, reached by the construction; the fixed leg above would go red`, JSON.stringify(oc));
   const sc = await p1.evaljs(SAVE_OPEN);
-  ok(sc.toasts.some((x) => x.error && /在对话框打开期间被改动/.test(x.text)) && (await accessNames()) === 'Yu,Zed,工作', 'CONTROL: …and its stale Save is refused by the server\'s stamp check alone — Zed kept (the second half of the fix holds without the first)', JSON.stringify({ toasts: sc.toasts, wire: await accessNames() }));
+  ok(gateOf(sc.toasts.some((x) => x.error && /在对话框打开期间被改动/.test(x.text))) && (await accessNames()) === 'Yu,Zed,工作', 'CONTROL: …and its stale Save is refused by the server\'s stamp check alone — Zed kept (the second half of the fix holds without the first)', JSON.stringify({ toasts: sc.toasts, wire: await accessNames() }));
   await p1.evaljs(HOLD(false));
   const rpc = await p1.evaljs(REPAINT(baseRooms[1]));
-  ok(rpc.before > 0 && rpc.cleared && rpc.after > rpc.before, `CONTROL (⑨b): without the queue and the ready rule the rebuild's clear asks for the page above a reset boundary — the tail again — and the window draws ${rpc.after} for ${rpc.before} (pages read: ${rpc.urls.join(' ')})`, JSON.stringify(rpc));
+  ok(rpc.before > 0 && gateOf(rpc.cleared) && rpc.after > rpc.before, `CONTROL (⑨b): without the queue and the ready rule the rebuild's clear asks for the page above a reset boundary — the tail again — and the window draws ${rpc.after} for ${rpc.before} (pages read: ${rpc.urls.join(' ')})`, JSON.stringify(rpc));
   const rc = await p1.evaljs(RACE(baseRooms[1]));
   ok(rc.bars >= 3 && rc.started >= 2 && rc.parsed === rc.started && rc.page > 0 && rc.shown >= 2 * rc.page, `CONTROL (⑨): without the serial queue the same three list writers draw the page ${Math.round(rc.shown / Math.max(1, rc.page) * 10) / 10}× (${rc.shown} for ${rc.page}) — the slow runner's duplicate list; the leg above would go red`, JSON.stringify(rc));
   const cgeo = await p1.evaljs(GEO_LEG);
-  ok(cgeo && !cgeo.fail && (cgeo.before > 0 || (cgeo.after === 0 && cgeo.end <= 2 * cgeo.ch && cgeo.sh > cgeo.ch)), `CONTROL (⑪c): the pre-fix dialog (an IntersectionObserver alone) under the same construction asks a page with nobody scrolling (${cgeo && cgeo.before}) or none at the scroll to the end (${cgeo && cgeo.after}) — the runner's two ⑪ reds; ⑪b would go red`, JSON.stringify(cgeo));
+  ok(gateOf(cgeo) && !cgeo.fail && (cgeo.before > 0 || (cgeo.after === 0 && cgeo.end <= 2 * cgeo.ch && cgeo.sh > cgeo.ch)), `CONTROL (⑪c): the pre-fix dialog (an IntersectionObserver alone) under the same construction asks a page with nobody scrolling (${cgeo && cgeo.before}) or none at the scroll to the end (${cgeo && cgeo.after}) — the runner's two ⑪ reds; ⑪b would go red`, JSON.stringify(cgeo));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

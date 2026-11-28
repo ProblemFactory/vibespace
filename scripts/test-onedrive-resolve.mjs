@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const { MountManager } = require('../src/mounts.js');
 
 let pass = 0, fail = 0;
-const ok = (cond, name) => { if (cond) { pass++; console.log('  ✓ ' + name); } else { fail++; console.error('  ✗ ' + name); } };
+const ok = (cond, name) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { pass++; console.log('  ✓ ' + name); } else { fail++; console.error('  ✗ ' + name); } };
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-od-test-'));
 const mm = new MountManager({ dataDir, broadcast: () => {} });
@@ -54,7 +54,7 @@ try {
   m.driveId = null; mode = '401';
   let err = null;
   try { await mm._resolveOneDriveDrive(m); } catch (e) { err = e; }
-  ok(/token expired/i.test(err?.message || ''), 'expired token yields an honest "token expired" error');
+  ok(verdictOf(/token expired/i.test(err?.message || '')), 'expired token yields an honest "token expired" error');
 
   // 4. applyDriveToken accepts a OneDrive record (used to throw "Not a
   //    Google Drive connection") and resolves the drive with the fresh token.
@@ -74,4 +74,4 @@ try {
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

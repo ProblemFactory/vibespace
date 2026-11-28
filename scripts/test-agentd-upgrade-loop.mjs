@@ -17,7 +17,7 @@ const require = createRequire(import.meta.url);
 const { DeviceManager } = require('../src/agentd/client.js');
 import { mutantCopies } from './mutant-copy.mjs';
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-upg-'));
 try {
@@ -110,7 +110,7 @@ console.log('— the ledger across rebuilt instances (a fake never-converging da
   const ledger = create({ rootDir: t2, AGENTD_DIR: t2, agentdHostToken: () => 'x', getHosts: () => null, getMounts: () => null, getMachineMounts: () => null, getPortForwards: () => null, getExitProxy: () => null }).upgradeLedgerFor('devL');
   const withLedger = await run(ledger, 'ledger');
   ok(withLedger.upgrades === 3 && withLedger.outcomes[3] === 'connected', `WITH the per-device ledger four rebuilt instances make 3 upgrade attempts, then the fourth link is KEPT (${JSON.stringify(withLedger)})`);
-  ok(withLedger.versions.every((v) => v === '9.9.9'), `the upgrade op names the BUNDLE's version (9.9.9 — what the re-exec'd daemon will report), never the package's 1.1.1 (${JSON.stringify(withLedger.versions)})`);
+  ok(verdictOf(withLedger.versions.every((v) => v === '9.9.9')), `the upgrade op names the BUNDLE's version (9.9.9 — what the re-exec'd daemon will report), never the package's 1.1.1 (${JSON.stringify(withLedger.versions)})`);
   const control = await run(null, 'noledger');
   ok(control.upgrades === 4, `CONTROL: the same four instances WITHOUT a ledger upgrade four times — the unbounded pre-fix shape (${control.upgrades})`);
   // the marker past 400 000 bytes is what `expected` reads (the whole file), so 9.9.9 — not the package version
@@ -129,9 +129,9 @@ console.log('— the ledger across rebuilt instances (a fake never-converging da
   // its DeviceManager WITH the per-device ledger, and the loop breaker reads through the ledger accessors
   const dpSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/server/dial-pairing.js'), 'utf8');
   const clSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/agentd/client.js'), 'utf8');
-  ok(/upgradeLedger: upgradeLedgerFor\(deviceId\)/.test(dpSrc), 'WIRING: deviceForDial constructs its DeviceManager with upgradeLedgerFor(deviceId)');
-  ok(/const led = this\._ledgerRead\(expected\);/.test(clSrc) && /led\.tries \+= 1; this\._ledgerWrite\(expected, led\);/.test(clSrc), 'WIRING: the hello-ack loop breaker counts through _ledgerRead / _ledgerWrite (never the bare instance field)');
-  ok(/op: 'upgrade', version: this\._expectedVersion\(\)/.test(clSrc), 'WIRING: the upgrade op carries _expectedVersion() (the bundle\'s), not this._version');
+  ok(verdictOf(/upgradeLedger: upgradeLedgerFor\(deviceId\)/.test(dpSrc)), 'WIRING: deviceForDial constructs its DeviceManager with upgradeLedgerFor(deviceId)');
+  ok(gateOf(/const led = this\._ledgerRead\(expected\);/.test(clSrc)) && verdictOf(/led\.tries \+= 1; this\._ledgerWrite\(expected, led\);/.test(clSrc)), 'WIRING: the hello-ack loop breaker counts through _ledgerRead / _ledgerWrite (never the bare instance field)');
+  ok(verdictOf(/op: 'upgrade', version: this\._expectedVersion\(\)/.test(clSrc)), 'WIRING: the upgrade op carries _expectedVersion() (the bundle\'s), not this._version');
   // ── lane device-upgrade-stuck: THE DOOR — the give-up reaches `onUpgradeStuck` ONCE with (from, to, {platform, capabilities});
   // a hello AT the expected version reaches `onVersionMatch`; a daemon that could not land says so (`upgrade-failed`) ──
   {
@@ -139,23 +139,23 @@ console.log('— the ledger across rebuilt instances (a fake never-converging da
     const hooks = { onUpgradeStuck: (f, t, i) => stuckCalls.push([f, t, i]), onVersionMatch: (v) => matchCalls.push(v) };
     const L = create({ rootDir: t2, AGENTD_DIR: t2, agentdHostToken: () => 'x', getHosts: () => null, getMounts: () => null, getMachineMounts: () => null, getPortForwards: () => null, getExitProxy: () => null }).upgradeLedgerFor('devHook');
     const r1 = await run(L, 'hook', { hooks });
-    ok(r1.upgrades === 3 && stuckCalls.length === 1 && stuckCalls[0][0] === '0.0.1' && stuckCalls[0][1] === '9.9.9' && stuckCalls[0][2].platform === 'win32' && Array.isArray(stuckCalls[0][2].capabilities), `DUS-H1: the loop breaker's give-up calls onUpgradeStuck exactly once with (from, to, the hello's platform + capabilities) (${JSON.stringify(stuckCalls)})`);
+    ok(r1.upgrades === 3 && stuckCalls.length === 1 && stuckCalls[0][0] === '0.0.1' && stuckCalls[0][1] === '9.9.9' && stuckCalls[0][2].platform === 'win32' && verdictOf(Array.isArray(stuckCalls[0][2].capabilities)), `DUS-H1: the loop breaker's give-up calls onUpgradeStuck exactly once with (from, to, the hello's platform + capabilities) (${JSON.stringify(stuckCalls)})`);
     helloVersion = '9.9.9';
     const r2 = await run(null, 'match', { hooks });
-    ok(r2.upgrades === 0 && matchCalls.length === 4 && matchCalls.every((v) => v === '9.9.9') && stuckCalls.length === 1, `DUS-H2: a hello AT the expected version calls onVersionMatch (the watch resolves its item) and never onUpgradeStuck (${JSON.stringify(matchCalls)})`);
+    ok(r2.upgrades === 0 && matchCalls.length === 4 && gateOf(matchCalls.every((v) => v === '9.9.9')) && stuckCalls.length === 1, `DUS-H2: a hello AT the expected version calls onVersionMatch (the watch resolves its item) and never onUpgradeStuck (${JSON.stringify(matchCalls)})`);
     helloVersion = '0.0.1';
     const fm = { onControl: () => {}, data: () => {}, control: (m) => { if (m.op === 'upgrade') setTimeout(() => fm.onControl({ op: 'upgrade-failed', version: m.version, error: 'EPERM: operation not permitted, rename' }), 5); } };
     // "NOW" is the daemon's own answer ending the attempt (lane wall-clock-ratchet-down: `< 2000 ms` judged the machine):
     // the rejection carries its reason — the 30 s timer's ends `upgrade timeout` (the CONTROL below); the ms are information
     const t0 = Date.now();
     const u = await new DeviceManager({ dataDir: t2, bundlePath: bundle, version: '1.1.1', log: () => {} })._upgrade(fm).then(() => 'done', (e) => e.message);
-    ok(/could not land the upgrade — EPERM: operation not permitted, rename/.test(u) && u !== 'upgrade timeout', `DUS-H3: a daemon's \`upgrade-failed\` ends the attempt NOW with its reason — never a silent 30 s timeout (${u}, ${Date.now() - t0} ms)`);
+    ok(gateOf(/could not land the upgrade — EPERM: operation not permitted, rename/.test(u)) && u !== 'upgrade timeout', `DUS-H3: a daemon's \`upgrade-failed\` ends the attempt NOW with its reason — never a silent 30 s timeout (${u}, ${Date.now() - t0} ms)`);
     // CONTROL: the `upgrade-failed` branch removed (the 30 s cap shortened to 300 ms so the control is quick) — the attempt
     // ends on the TIMEOUT with no reason: DUS-H3 goes red
     {
       const c0 = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/agentd/client.js'), 'utf8');
       const cm = c0.replace("        else if (msg.op === 'upgrade-failed') {", "        else if (false) {").replace("reject(new Error('upgrade timeout')); }, 30000);", "reject(new Error('upgrade timeout')); }, 300);"); // lane device-act-audit: the timeout also writes the code line
-      ok(cm !== c0 && cm.includes('else if (false) {') && cm.includes("'upgrade timeout')); }, 300);"), '(control) both patches apply');
+      ok(cm !== c0 && gateOf(cm.includes('else if (false) {')) && verdictOf(cm.includes("'upgrade timeout')); }, 300);")), '(control) both patches apply');
       const DMf = mutantCopies('upgloopf', path.join(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/agentd/client.js', cm, 'nofailop').DeviceManager;
       const fm2 = { onControl: () => {}, data: () => {}, control: (m) => { if (m.op === 'upgrade') setTimeout(() => fm2.onControl({ op: 'upgrade-failed', version: m.version, error: 'EPERM: x' }), 5); } };
       const u2 = await new DMf({ dataDir: t2, bundlePath: bundle, version: '1.1.1', log: () => {} })._upgrade(fm2).then(() => 'done', (e) => e.message);
@@ -174,11 +174,11 @@ console.log('— the ledger across rebuilt instances (a fake never-converging da
     const dpSrc2 = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/server/dial-pairing.js'), 'utf8');
     const hoSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/hosts.js'), 'utf8');
     const svSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../server.js'), 'utf8');
-    ok(/onUpgradeStuck: \(from, to, info\) => \{ const h = hosts\.findByDeviceId\(deviceId\); hosts\.onAgentUpgrade\?\.\('stuck'/.test(dpSrc2) && /onUpgradeStuck: \(from, to, info\) => this\.onAgentUpgrade\?\.\('stuck'/.test(hoSrc) && /onUpgradeStuck: \(from, to, info\) => hosts\.onAgentUpgrade\?\.\('stuck', \{ \.\.\.\(info \|\| \{\}\), hostKey: 'local'/.test(svSrc) && /hosts\.onAgentUpgrade = \(event, facts\) => deviceUpgradeWatch\.onAgentUpgrade\(event, facts\);/.test(svSrc), 'WIRING: dial, ssh and the local daemon pass the SAME door (hosts.onAgentUpgrade → the watch)');
-    ok(/console\.log\('\[device-dial\]', JSON\.stringify\(String\(deviceId\)\)/.test(dpSrc2), 'WIRING: a dial device\'s upgrade lines NAME the device (two devices read as one machine\'s "two versions")');
+    ok(gateOf(/onUpgradeStuck: \(from, to, info\) => \{ const h = hosts\.findByDeviceId\(deviceId\); hosts\.onAgentUpgrade\?\.\('stuck'/.test(dpSrc2)) && gateOf(/onUpgradeStuck: \(from, to, info\) => this\.onAgentUpgrade\?\.\('stuck'/.test(hoSrc)) && gateOf(/onUpgradeStuck: \(from, to, info\) => hosts\.onAgentUpgrade\?\.\('stuck', \{ \.\.\.\(info \|\| \{\}\), hostKey: 'local'/.test(svSrc)) && verdictOf(/hosts\.onAgentUpgrade = \(event, facts\) => deviceUpgradeWatch\.onAgentUpgrade\(event, facts\);/.test(svSrc)), 'WIRING: dial, ssh and the local daemon pass the SAME door (hosts.onAgentUpgrade → the watch)');
+    ok(verdictOf(/console\.log\('\[device-dial\]', JSON\.stringify\(String\(deviceId\)\)/.test(dpSrc2)), 'WIRING: a dial device\'s upgrade lines NAME the device (two devices read as one machine\'s "two versions")');
   }
   srv.close();
   fs.rmSync(t2, { recursive: true, force: true });
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

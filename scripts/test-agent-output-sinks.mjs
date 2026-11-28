@@ -28,7 +28,7 @@ const REPO = path.resolve(HERE, '..');
 const r = (p) => require(path.join(REPO, p));
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 const SB = r('src/secret-box.js');
 const belt = r('src/agent-output-belt.js');
@@ -87,8 +87,8 @@ todos._flush();
 {
   const f = readFile('user-todos.json');
   ok(!leaks(f, SHAPEMAT) && !leaks(f, KVMAT), 'user-todos.json carries no raw secret material (text + detail belted)');
-  ok(leaks(f, '«redacted»'), 'user-todos.json shows «redacted» where the secret was');
-  ok(leaks(f, MARKER), 'user-todos.json keeps the non-secret marker (the belt is not a blanket wipe) [control]');
+  ok(verdictOf(leaks(f, '«redacted»')), 'user-todos.json shows «redacted» where the secret was');
+  ok(verdictOf(leaks(f, MARKER)), 'user-todos.json keeps the non-secret marker (the belt is not a blanket wipe) [control]');
 }
 // --- task-groups (vibespace-task progress) ---
 const tg = new TaskGroupManager({ dataDir, onChange: () => {}, readUserState: () => ({}), getSetting: () => undefined, isPathShadowed: () => false });
@@ -98,7 +98,7 @@ try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }  
 {
   const f = readFile('task-groups.json');
   ok(!leaks(f, SHAPEMAT) && !leaks(f, KVMAT), 'task-groups.json carries no raw secret material (note + detail belted)');
-  ok(leaks(f, '«redacted»'), 'task-groups.json shows «redacted» where the secret was');
+  ok(verdictOf(leaks(f, '«redacted»')), 'task-groups.json shows «redacted» where the secret was');
 }
 // --- session-status (vibespace-status notice) ---
 const ss = new SessionStatusManager({ dataDir, onChange: () => {} });
@@ -124,7 +124,7 @@ deliver.flush();
 console.log('§2a the belt enumerates only the AGENT-REACHABLE secrets (host: / file: never shown, never masked)');
 {
   const labels = belt.maskableSecrets(SB.vaultForDir(dataDir)).map((x) => x.label);
-  ok(labels.includes('apikey:' + LIVEID), 'an apikey: entry is maskable (agent-reachable)');
+  ok(verdictOf(labels.includes('apikey:' + LIVEID)), 'an apikey: entry is maskable (agent-reachable)');
   ok(!labels.includes('host:box'), 'a host: entry is NOT maskable (the vault never shows it to an agent)');
   ok(belt.maskableSecrets({ state: () => 'locked', secretNames: () => [], secretGet: () => null }).length === 0, 'a LOCKED vault yields no maskable values (nothing to read)');
 }
@@ -143,7 +143,7 @@ if (!HAVE_VR) {
   todos2._flush();
   const f = readFile('user-todos.json');
   ok(!leaks(f, LIVEVAL) && !leaks(f, b64), 'a live vault value and its base64 form reach ZERO sink');
-  ok(leaks(f, '[vault:apikey:' + LIVEID + ']'), 'the value is replaced by its [vault:<entry>] placeholder');
+  ok(verdictOf(leaks(f, '[vault:apikey:' + LIVEID + ']')), 'the value is replaced by its [vault:<entry>] placeholder');
   ok(!leaks(f, HOSTVAL), 'a host: value is still never in a sink (it was never masked because it is never shown)');
   // lane vault-scrub-forms: the same live value in every new spelling, through the same sink — read back from the stored
   // fields (not the file's JSON text, which escapes a NUL or an ESC and would hide a leak)
@@ -186,17 +186,17 @@ console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s out
   const ran = (log) => log.includes('out ') && log.includes('split ') && !log.includes('[job-wrapper] refused');
   const real = runWrapper(wrapper, 'file');
   ok(real.log.length > 0, 'the job log was written');
-  ok(ran(real.log) && !real.specLeft, 'the run RAN: the child’s own lines are in the log, no refusal line, the spec file consumed (read once, unlinked)');
+  ok(gateOf(ran(real.log)) && !real.specLeft, 'the run RAN: the child’s own lines are in the log, no refusal line, the spec file consumed (read once, unlinked)');
   ok(!leaks(real.log, 'token=' + KVMAT), 'a whole-chunk shape in the child output is masked in the job log');
-  ok(leaks(real.log, '«redacted»'), 'the job log shows «redacted» where the secret was');
+  ok(verdictOf(leaks(real.log, '«redacted»')), 'the job log shows «redacted» where the secret was');
   // CONTROL — a refused run (a spec path outside the ctl dir): refused BY NAME, and the RAN check is red on it. The base's
   // call (the spec base64 on argv — a ≤ .330 server's) is NEVER RUN since lane job-wrapper-proto1-retire (2.369.340: the
   // protocol-1 compat lane job-wrapper-update-window kept for an update's window is gone): «not started», and the job's
   // words never reach the log — the row after.
   const old = runWrapper(wrapper, 'outside', { outside: true });
-  ok(old.log.includes('[job-wrapper] refused: the spec path names no file of the ctl dir') && !ran(old.log), 'CONTROL: a spec path outside the ctl dir is refused by name — the RAN check is red on it, so the leg can no longer pass on a refusal');
+  ok(gateOf(old.log.includes('[job-wrapper] refused: the spec path names no file of the ctl dir')) && !ran(old.log), 'CONTROL: a spec path outside the ctl dir is refused by name — the RAN check is red on it, so the leg can no longer pass on a refusal');
   const v330 = runWrapper(wrapper, 'argv', { onArgv: true });
-  ok(!ran(v330.log) && v330.log.startsWith('[job-wrapper] not started: the server spoke protocol 1 (a server older than 2.369.331)') && !leaks(v330.log, KVMAT), 'a .330 server’s call (the spec base64 on argv — an update’s window) is NOT run: the log says «not started» by name, and no word of the job (nor its secret) reaches it');
+  ok(!ran(v330.log) && gateOf(v330.log.startsWith('[job-wrapper] not started: the server spoke protocol 1 (a server older than 2.369.331)')) && !leaks(v330.log, KVMAT), 'a .330 server’s call (the spec base64 on argv — an update’s window) is NOT run: the log says «not started» by name, and no word of the job (nor its secret) reaches it');
   // MUTANT 3 — the wrapper's maskChunk returns the raw chunk (its shape census still required from this tree): the log LEAKS
   const W0 = fs.readFileSync(wrapper, 'utf8');
   const REQ = "require(path.join(__dirname, '..', '..', 'src', 'secret-shapes.js'))", RET = "return out === text ? buf : Buffer.from(out, 'utf8');";
@@ -204,7 +204,7 @@ console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s out
   const mutPath = path.join(mutDir, 'job-wrapper.js');
   fs.writeFileSync(mutPath, W0.replace(REQ, `require(${JSON.stringify(path.join(REPO, 'src', 'secret-shapes.js'))})`).replace(RET, 'return buf;'));
   const mut = W0.split(REQ).length === 2 && W0.split(RET).length === 2 ? runWrapper(mutPath, 'mut') : { log: '' };
-  ok(ran(mut.log) && leaks(mut.log, 'token=' + KVMAT), 'MUTANT 3: a wrapper whose masker returns the raw chunk LEAKS the shape into the job log (so the masker is what stops it)');
+  ok(gateOf(ran(mut.log)) && verdictOf(leaks(mut.log, 'token=' + KVMAT)), 'MUTANT 3: a wrapper whose masker returns the raw chunk LEAKS the shape into the job log (so the masker is what stops it)');
   // THE ENGINE'S OWN ROAD: a task the real JobManager starts — src/jobs.js writes the spec file and spawns
   // <dataDir>/bin/job-wrapper.js, here a SYMLINK to this tree's wrapper (production: dataDir is <repo>/data, so the
   // wrapper's own `../../src` is this tree; a COPY elsewhere loses its masker) — prints the shape; its run's log is masked
@@ -220,7 +220,7 @@ console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s out
   const runLog = job && job.runs && job.runs.length ? job.runs[job.runs.length - 1].log : null;
   let elog = '';
   for (let i = 0; i < 75 && runLog; i++) { elog = readLog(runLog); if (elog.includes('[job-wrapper] exit')) break; await new Promise((res) => setTimeout(res, 200)); }
-  ok(!made.error && ran(elog) && !leaks(elog, 'token=' + KVMAT) && leaks(elog, '«redacted»'), 'THE ENGINE’S ROAD: a job the real JobManager starts prints the shape — its run’s log ran, is masked and shows «redacted»', made.error || elog.slice(0, 300));
+  ok(!made.error && gateOf(ran(elog)) && !leaks(elog, 'token=' + KVMAT) && verdictOf(leaks(elog, '«redacted»')), 'THE ENGINE’S ROAD: a job the real JobManager starts prints the shape — its run’s log ran, is masked and shows «redacted»', made.error || elog.slice(0, 300));
   try { E.shutdown(); for (const t of E._timers || []) clearInterval(t); } catch { }
 }
 
@@ -261,17 +261,17 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: the agent\'s words as 
   tj._flush(); E._save();
   const f = readFileIn(dj, 'user-todos.json');
   const items = tj.snapshot().open.filter((i) => i.origin === 'jobs');
-  ok(items.length === 3 && !piece(f) && leaks(f, '«redacted»') && leaks(f, MARKER), 'user-todos.json: a job\'s For-you copies (a notify cron\'s --text, a task\'s NAME in the sentence and the label) carry no raw piece, the marker survives');
+  ok(items.length === 3 && !piece(f) && gateOf(leaks(f, '«redacted»')) && verdictOf(leaks(f, MARKER)), 'user-todos.json: a job\'s For-you copies (a notify cron\'s --text, a task\'s NAME in the sentence and the label) carry no raw piece, the marker survives');
   const rtItem = items.find((i) => i.jobId === rt.id);
-  ok(rtItem && rtItem.text === 'Task refresh-token: done (ok)' && /· refresh-token$|^refresh-token$/.test(rtItem.sessionName || ''), 'a job NAMED with a secret word keeps the product\'s sentence whole — «Task refresh-token: done (ok)» (r2: «Task refresh-token: «redacted»»)', rtItem && [rtItem.text, rtItem.sessionName]);
+  ok(gateOf(rtItem) && rtItem.text === 'Task refresh-token: done (ok)' && verdictOf(/· refresh-token$|^refresh-token$/.test(rtItem.sessionName || '')), 'a job NAMED with a secret word keeps the product\'s sentence whole — «Task refresh-token: done (ok)» (r2: «Task refresh-token: «redacted»»)', rtItem && [rtItem.text, rtItem.sessionName]);
   const toOwner = told.filter((x) => x.cid === 'conv-road'), toSub = told.filter((x) => x.cid === 'conv-sub');
-  ok(toOwner.some((x) => leaks(x.text, TEXT)), 'the AUTHOR gets its own reminder WHOLE — the owner conversation that wrote the --text (the belt protects a person and other agents, never the author from itself)', toOwner.map((x) => x.text.slice(0, 160)));
-  ok(toSub.length === 1 && !piece(toSub[0].text) && leaks(toSub[0].text, MARKER) && leaks(toSub[0].text, '«redacted»'), 'a SUBSCRIBER (another conversation) gets it belted, the marker kept', toSub.map((x) => x.text.slice(0, 160)));
+  ok(verdictOf(toOwner.some((x) => leaks(x.text, TEXT))), 'the AUTHOR gets its own reminder WHOLE — the owner conversation that wrote the --text (the belt protects a person and other agents, never the author from itself)', toOwner.map((x) => x.text.slice(0, 160)));
+  ok(toSub.length === 1 && !piece(toSub[0].text) && gateOf(leaks(toSub[0].text, MARKER)) && verdictOf(leaks(toSub[0].text, '«redacted»')), 'a SUBSCRIBER (another conversation) gets it belted, the marker kept', toSub.map((x) => x.text.slice(0, 160)));
   // the NAME's copies only — the owner's retry meta / stash TEXT is its own reminder (whole, above); the two task ends land
   // inside the owner's 30 s floor, so their message is the STASH entry (its jobName — the label the drain and the spill print)
   const stashNames = [...E.pendingNotifs.values()].flat().map((n) => n.jobName);
   const labels = told.map((x) => [x.fromName, x.meta && x.meta.jobName, x.text.split('):')[0]]).flat().concat(stashNames).filter(Boolean);
-  ok(told.length >= 2 && stashNames.length >= 1 && !labels.some(piece) && labels.some((l) => /road-ghp_«redacted»/.test(l)), 'the job\'s NAME is belted on every message-road copy — the chat card\'s label (fromName), the header, the retry meta, the stash (claim r2-0 (b): it reached the chat raw)', labels);
+  ok(told.length >= 2 && stashNames.length >= 1 && !labels.some(piece) && verdictOf(labels.some((l) => /road-ghp_«redacted»/.test(l))), 'the job\'s NAME is belted on every message-road copy — the chat card\'s label (fromName), the header, the retry meta, the stash (claim r2-0 (b): it reached the chat raw)', labels);
   try { E.shutdown(); } catch { }
 }
 {
@@ -310,19 +310,19 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: the agent\'s words as 
   const tree = filers(files);
   ok(tree.length === 0, `every filer of an agent-fields origin is a listed one (${Object.entries(FIELDS_FILERS).map(([k, n]) => k.replace(/^src\//, '') + ' ×' + n).join(', ')})${tree.length ? ' — ' + tree.join('; ') : ''}`);
   const ghost = filers({ ...files, 'src/server/ghost-jobs.js': "function f(userTodos) {\n  userTodos.add('jobs', { origin: 'jobs', text: 'x' });\n}\n" });
-  ok(ghost.length === 1 && /^src\/server\/ghost-jobs\.js:2 files origin 'jobs'/.test(ghost[0]), 'CONTROL: a planted second filer with origin \'jobs\' (src/server/ghost-jobs.js) is RED by name', ghost);
+  ok(ghost.length === 1 && verdictOf(/^src\/server\/ghost-jobs\.js:2 files origin 'jobs'/.test(ghost[0])), 'CONTROL: a planted second filer with origin \'jobs\' (src/server/ghost-jobs.js) is RED by name', ghost);
   // …and the store refuses what such a filer would file: a fields item with a composed sentence (never belted whole)
   const dg = scratch('aos-ghost'); fs.mkdirSync(dg, { recursive: true });
   const tg = new UserTodoManager({ dataDir: dg, onChange: () => {} });
   let gerr = ''; try { tg.add('jobs', { origin: 'jobs', text: 'Task x ' + SHAPE + ': done (ok)' }); } catch (e) { gerr = e.message; }
-  ok(/files its words as i18n \{key, params\}/.test(gerr) && tg.snapshot().open.length === 0, 'the store REFUSES a jobs filing with a composed text (fail closed: the fields are what it belts)', gerr);
+  ok(gateOf(/files its words as i18n \{key, params\}/.test(gerr)) && tg.snapshot().open.length === 0, 'the store REFUSES a jobs filing with a composed text (fail closed: the fields are what it belts)', gerr);
   // THE WRITER BY WHAT IT WRITES (lane job-notify-user r4, claim r3-1 FINDING 2): the census above reads the literal — a filer
   // spelling the origin 'jo' + 'bs', AGENT_FIELDS_ORIGINS[0] or a template literal stayed green in both censuses. The STORE
   // asserts its caller for a fields origin (src/inbox-origin.js FIELDS_FILERS): each planted shape, compiled as a module AT
   // src/server/ghost-jobs.js (in memory — nothing is written into the tree), files into a REAL store and is refused BY NAME;
   // CONTROL: the very same code compiled at the listed filer's path files
   const { FIELDS_FILERS: FF } = require(path.join(REPO, 'src/inbox-origin.js'));
-  ok(JSON.stringify(Object.keys(FF)) === JSON.stringify([...AGENT_FIELDS_ORIGINS]) && Object.entries(FF).every(([o, fs0]) => fs0.every((f) => f in FIELDS_FILERS)), 'the store\'s filer table (FIELDS_FILERS) names one listed filer per fields origin — the census above counts the same files', JSON.stringify(FF));
+  ok(JSON.stringify(Object.keys(FF)) === JSON.stringify([...AGENT_FIELDS_ORIGINS]) && verdictOf(Object.entries(FF).every(([o, fs0]) => fs0.every((f) => f in FIELDS_FILERS))), 'the store\'s filer table (FIELDS_FILERS) names one listed filer per fields origin — the census above counts the same files', JSON.stringify(FF));
   const Mod = require('module');
   const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
   const GHOSTS = {
@@ -347,17 +347,17 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: the agent\'s words as 
   const args = (name, extra = {}) => ({ origin: 'jo' + 'bs', by: 'agent', jobId: 'jb-0000a0a1', jobFact: 'ask', jobName: name, i18n: { text: { key: '{name} needs your input', params: { name } } }, ...extra });
   const viaUrl = (rel, name) => { try { vm.runInThisContext("(t, a) => t.add('claude:conv-ghost', a)", { filename: 'file://' + path.join(REPO, rel) })(wt, args(name)); return null; } catch (e) { return e.message; } };
   const esm = viaUrl('src/server/ghost-esm.mjs', 'ghost-esm');
-  ok(/^origin 'jobs' is filed only by src\/server\/jobs-wiring\.js — src\/server\/ghost-esm\.mjs is not its filer$/.test(esm || ''), 'r5: an ESM writer (its frame a file:// URL) of origin \'jobs\' is REFUSED BY NAME — the URL resolves to src/server/ghost-esm.mjs (r4: null ⇒ FILED)', esm);
+  ok(verdictOf(/^origin 'jobs' is filed only by src\/server\/jobs-wiring\.js — src\/server\/ghost-esm\.mjs is not its filer$/.test(esm || '')), 'r5: an ESM writer (its frame a file:// URL) of origin \'jobs\' is REFUSED BY NAME — the URL resolves to src/server/ghost-esm.mjs (r4: null ⇒ FILED)', esm);
   const esmListed = viaUrl('src/server/jobs-wiring.js', 'listed-esm');
   ok(esmListed === null, 'CONTROL: the same file:// frame at the listed filer\'s path files (the URL is resolved, never refused as a shape)', esmListed);
   // (no `await` on the add's own chain — an awaiting function IS a named caller: V8 keeps its async frame, and it is judged)
   const queued = (extra) => new Promise((res) => { Promise.resolve().then(wt.add.bind(wt, 'claude:conv-ghost', args('ghost-bound', extra))).then(() => res(null), (e) => res(e.message)); });
   const nokey = await queued({});
-  ok(/^origin 'jobs' needs a caller the store can name — it is filed only by src\/server\/jobs-wiring\.js/.test(nokey || ''), 'r5: a BOUND add run from the microtask queue (no frame of its own) is REFUSED — «origin \'jobs\' needs a caller the store can name» (r4: FILED)', nokey);
+  ok(verdictOf(/^origin 'jobs' needs a caller the store can name — it is filed only by src\/server\/jobs-wiring\.js/.test(nokey || '')), 'r5: a BOUND add run from the microtask queue (no frame of its own) is REFUSED — «origin \'jobs\' needs a caller the store can name» (r4: FILED)', nokey);
   const forged = await queued({ filerKey: Object.freeze({ origin: 'jobs', of: 'the For-you store' }) });
-  ok(/^origin 'jobs' carries a filer key this store never handed out — refused$/.test(forged || ''), 'r5: …with a hand-built key it is REFUSED BY NAME', forged);
+  ok(verdictOf(/^origin 'jobs' carries a filer key this store never handed out — refused$/.test(forged || '')), 'r5: …with a hand-built key it is REFUSED BY NAME', forged);
   let ghostKey; try { ghostKey = asModule('src/server/ghost-jobs.js', "module.exports = (t) => t.filerKey('jobs');")(wt); } catch (e) { ghostKey = e.message; }
-  ok(/^the filer key of origin 'jobs' is src\/server\/jobs-wiring\.js's — src\/server\/ghost-jobs\.js is not its filer$/.test(String(ghostKey)), 'r5: an unlisted file asking the store for the key is REFUSED BY NAME', String(ghostKey));
+  ok(verdictOf(/^the filer key of origin 'jobs' is src\/server\/jobs-wiring\.js's — src\/server\/ghost-jobs\.js is not its filer$/.test(String(ghostKey))), 'r5: an unlisted file asking the store for the key is REFUSED BY NAME', String(ghostKey));
   const before = wt.snapshot().open.length;
   const own = await queued({ jobId: 'jb-0000a0a2', filerKey: asModule('src/server/jobs-wiring.js', "module.exports = (t) => t.filerKey('jobs');")(wt) });
   ok(own === null && wt.snapshot().open.length === before + 1, 'CONTROL: the frameless filing with the key the store handed its listed filer files — the key stands in for the frame, nothing else does', own);
@@ -381,7 +381,7 @@ console.log('§4 MUTANT 1 — a writer with its belt stripped LEAKS the sentinel
   mut.add('sess-m', { text: 'ask ' + SHAPE, detail: 'd ' + KV, origin: 'agent' });
   mut._flush();
   const fM = (() => { try { return fs.readFileSync(path.join(dirM, 'user-todos.json'), 'utf8'); } catch { return ''; } })();
-  ok(leaks(fM, SHAPEMAT) || leaks(fM, KVMAT), 'MUTANT 1: the belt-stripped writer LEAKS the sentinel (so the real belt is what stops it)');
+  ok(verdictOf(leaks(fM, SHAPEMAT)) || verdictOf(leaks(fM, KVMAT)), 'MUTANT 1: the belt-stripped writer LEAKS the sentinel (so the real belt is what stops it)');
   // MUTANT 4 (lane job-notify-user r2 → r3): the FIELDS belt stripped — the params and the label's job name unbelted — LEAKS a
   // job's name into For you (so the per-field belt is what stops it)
   const FIELDS = 'i18n = i18n == null ? null : normalizeI18n((normalizeI18n(i18n), maskI18nParams(i18n, beltOf)));';
@@ -394,7 +394,7 @@ console.log('§4 MUTANT 1 — a writer with its belt stripped LEAKS the sentinel
   const mut4 = new (load(src4)).UserTodoManager({ dataDir: dir4, onChange: () => {} });
   mut4.add('claude:conv-m4', { origin: 'jobs', by: 'agent', ...JOBWORDS });
   mut4._flush();
-  ok(leaks(readFileIn(dir4, 'user-todos.json'), SHAPEMAT), 'MUTANT 4: a store whose fields belt is stripped LEAKS a job\'s name into For you (so the per-field belt is what stops it)');
+  ok(verdictOf(leaks(readFileIn(dir4, 'user-todos.json'), SHAPEMAT)), 'MUTANT 4: a store whose fields belt is stripped LEAKS a job\'s name into For you (so the per-field belt is what stops it)');
   // MUTANT 5 (r3): the r2 rule — the WHOLE composed sentence belted — swallows the product's words after a secret-named job's
   // name (the fields rule keeps them; the leg above proves the sentence survives on the real store)
   const WHOLE = "const rawText = typeof text === 'string' ? (agentWords ? beltOf(text.trim()) : text.trim()) : '';";
@@ -403,7 +403,7 @@ console.log('§4 MUTANT 1 — a writer with its belt stripped LEAKS the sentinel
   const dir5 = scratch('aos-mutant-whole'); fs.mkdirSync(dir5, { recursive: true });
   const mut5 = new (load(src5)).UserTodoManager({ dataDir: dir5, onChange: () => {} });
   const m5 = mut5.add('claude:conv-m5', { origin: 'jobs', by: 'agent', i18n: { text: { key: 'Task {name}: {state} ({cause})', params: { name: 'refresh-token', state: 'done', cause: 'ok' } } }, jobId: 'jb-m5', jobFact: 'end:done:ok' });
-  ok(m5.text !== 'Task refresh-token: done (ok)' && /redacted/.test(m5.text), 'MUTANT 5: the r2 whole-sentence belt eats the outcome of a job named refresh-token (so belting FIELDS is what keeps the product\'s words)', m5.text);
+  ok(m5.text !== 'Task refresh-token: done (ok)' && verdictOf(/redacted/.test(m5.text)), 'MUTANT 5: the r2 whole-sentence belt eats the outcome of a job named refresh-token (so belting FIELDS is what keeps the product\'s words)', m5.text);
 }
 
 // ---------------------------------------------------------------------------
@@ -439,8 +439,8 @@ console.log('§5 THE BIN CENSUS — every agent CLI that can carry text to a sin
   ok(census([...universe, 'vibespace-ghost']).length === 1, 'MUTANT 2: a registry with one more bin not in the census is RED');
   // the five sink writers are all present and classified as sinks
   const sinks = Object.entries(CLASS).filter(([, v]) => v.startsWith('sink:')).map(([k]) => k);
-  ok(sinks.length === 5 && sinks.every((b) => universe.includes(b)), `the five sink writers are named and present (${sinks.join(', ')})`);
+  ok(sinks.length === 5 && verdictOf(sinks.every((b) => universe.includes(b))), `the five sink writers are named and present (${sinks.join(', ')})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

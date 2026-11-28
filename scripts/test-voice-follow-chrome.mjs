@@ -52,7 +52,7 @@ const require = createRequire(import.meta.url);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : ''}`); }
 };
@@ -359,19 +359,19 @@ console.log('① desk 1280 — the boxes the owner named, and the rest of the cl
   await p.until(`document.activeElement === document.querySelector(${JSON.stringify(rj)})`);
   await p.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
   const g1 = await geo(p, rj);
-  ok('the Outbox proposal\'s REJECT reason box (focused by Reject…) has a microphone — BESIDE the field (not over it), inside the view, on top, an SVG; ONE', g1.mic && !g1.overField && g1.inView && g1.onTop && g1.svg && g1.focused && g1.n === 1, g1);
+  ok('the Outbox proposal\'s REJECT reason box (focused by Reject…) has a microphone — BESIDE the field (not over it), inside the view, on top, an SVG; ONE', gateOf(g1.mic) && !g1.overField && gateOf(g1.inView) && gateOf(g1.onTop) && gateOf(g1.svg) && gateOf(g1.focused) && g1.n === 1, g1);
   judged['channel-outbox.js inp'] = await p.ev(`window.__judge(${JSON.stringify(rj)})`);
   await p.shot('follow-reject.png', '.chan-prop');
   const d1 = await dictate(p, rj);
-  ok('dictated into the reject box: the words land AT THE CARET ("Hello DICTATEDworld"), `input` fired, the field kept the focus through both presses (no blur)', d1.recording && d1.landed && d1.focusRec && d1.focused && noBlur(d1) && inputFired(d1), d1);
-  ok('…and NOTHING is committed: no Enter, no reject request (the Outbox reject box sent on an Enter once — chat-enter-keys.js, 2026-10-14)', noEnter(d1) && routes.length === 0, { routes, ev: d1.events });
+  ok('dictated into the reject box: the words land AT THE CARET ("Hello DICTATEDworld"), `input` fired, the field kept the focus through both presses (no blur)', gateOf(d1.recording) && gateOf(d1.landed) && gateOf(d1.focusRec) && gateOf(d1.focused) && gateOf(noBlur(d1)) && verdictOf(inputFired(d1)), d1);
+  ok('…and NOTHING is committed: no Enter, no reject request (the Outbox reject box sent on an Enter once — chat-enter-keys.js, 2026-10-14)', gateOf(noEnter(d1)) && routes.length === 0, { routes, ev: d1.events });
   const ph1 = await p.ev(`document.querySelector(${JSON.stringify(rj)}).placeholder`);
-  ok('the dictation\'s context = the box\'s label (its placeholder, 「理由（agent 会读到）」) + the card\'s words (≤ 600 chars), no conversation', !!d1.call && d1.call.context.title === ph1 && /quarterly numbers are in/.test(d1.call.context.text || '') && (d1.call.context.text || '').length <= 600 && d1.call.context.before === 'Hello ' && d1.call.context.after === 'world', d1.call && d1.call.context);
+  ok('the dictation\'s context = the box\'s label (its placeholder, 「理由（agent 会读到）」) + the card\'s words (≤ 600 chars), no conversation', !!d1.call && d1.call.context.title === ph1 && gateOf(/quarterly numbers are in/.test(d1.call.context.text || '')) && (d1.call.context.text || '').length <= 600 && d1.call.context.before === 'Hello ' && d1.call.context.after === 'world', d1.call && d1.call.context);
   await p.clickSel('.chan-prop-rejectbox .mounts-btn-primary');
   for (let i = 0; i < 40 && !routes.length; i++) await sleep(50);
-  ok('the person\'s own Reject then sends the dictated reason (the box\'s value is real)', routes.length === 1 && /\/reject$/.test(routes[0].url) && routes[0].body.reason === 'Hello DICTATEDworld', routes);
+  ok('the person\'s own Reject then sends the dictated reason (the box\'s value is real)', routes.length === 1 && gateOf(/\/reject$/.test(routes[0].url)) && routes[0].body.reason === 'Hello DICTATEDworld', routes);
   await p.until(`!document.querySelector(${JSON.stringify(MIC)})`, 2000);
-  ok('the field gone with the card\'s re-render or its blur ⇒ no microphone left behind', await p.ev(`!document.querySelector(${JSON.stringify(MIC)})`));
+  ok('the field gone with the card\'s re-render or its blur ⇒ no microphone left behind', verdictOf(await p.ev(`!document.querySelector(${JSON.stringify(MIC)})`)));
   routes.length = 0;
   // — the Outbox EDIT box: its own in-field microphone (voiceField), no second one —
   await p.ev(`window.__outbox('Draft: the numbers are in.')`);
@@ -379,7 +379,7 @@ console.log('① desk 1280 — the boxes the owner named, and the rest of the cl
   await p.until(`document.activeElement === document.querySelector('.chan-prop-edit')`);
   await sleep(200);
   const g2 = await p.ev(`(() => { const f = document.querySelector('.chan-prop-edit'), b = f.parentElement.querySelector(':scope > .voice-btn'); const r = b && b.getBoundingClientRect(); return { wrapped: f.parentElement.classList.contains('voice-field'), own: !!b && r.width > 0, follow: document.querySelectorAll('.voice-follow:not([hidden])').length }; })()`);
-  ok('the Outbox EDIT box (the owner\'s 「编辑」, measured): its own microphone inside the box (voiceField) — the follower adds NO second one', g2.wrapped && g2.own && g2.follow === 0, g2);
+  ok('the Outbox EDIT box (the owner\'s 「编辑」, measured): its own microphone inside the box (voiceField) — the follower adds NO second one', gateOf(g2.wrapped) && gateOf(g2.own) && g2.follow === 0, g2);
   judged['channel-outbox.js editor'] = await p.ev(`window.__judge('.chan-prop-edit')`);
   await p.ev(`(() => { const f = document.querySelector('.chan-prop-edit'); f.value = 'Draft: the numbers are in.'; f.setSelectionRange(6, 6); return true; })()`);
   answers.length = 0; answers.push(' EDITED');
@@ -387,7 +387,7 @@ console.log('① desk 1280 — the boxes the owner named, and the rest of the cl
   await p.until(`!!document.querySelector('.chan-prop-edit + .voice-btn.recording')`);
   await sleep(250);
   await p.clickSel('.chan-prop-edit + .voice-btn .voice-time');
-  ok('…dictated through it: the words at the caret, nothing approved', await p.until(`document.querySelector('.chan-prop-edit').value === 'Draft: EDITED the numbers are in.'`) && routes.length === 0, await p.ev(`document.querySelector('.chan-prop-edit').value`));
+  ok('…dictated through it: the words at the caret, nothing approved', gateOf(await p.until(`document.querySelector('.chan-prop-edit').value === 'Draft: EDITED the numbers are in.'`)) && routes.length === 0, await p.ev(`document.querySelector('.chan-prop-edit').value`));
   // — the API proposal's reject popover —
   await p.ev('window.__api()');
   await p.clickSel('.chan-api-reject');
@@ -396,7 +396,7 @@ console.log('① desk 1280 — the boxes the owner named, and the rest of the cl
   const g3 = await geo(p, '.chan-api-why');
   judged['channel-api-card-view.js why'] = await p.ev(`window.__judge('.chan-api-why')`);
   const d3 = await dictate(p, '.chan-api-why');
-  ok('the API proposal\'s reject popover: a microphone beside its box; the words at the caret; the popover still open, nothing rejected', g3.mic && !g3.overField && d3.landed && d3.focused && noBlur(d3) && (await p.ev(`!!document.querySelector('.chan-api-reject-pop')`)) && routes.length === 0, { g3, d3 });
+  ok('the API proposal\'s reject popover: a microphone beside its box; the words at the caret; the popover still open, nothing rejected', gateOf(g3.mic) && !g3.overField && gateOf(d3.landed) && gateOf(d3.focused) && gateOf(noBlur(d3)) && (gateOf(await p.ev(`!!document.querySelector('.chan-api-reject-pop')`))) && routes.length === 0, { g3, d3 });
   // — the chat question card's own answer: a dictated line break is a SPACE (no Enter), the card's rule runs —
   await p.ev('window.__ask()');
   await p.clickSel('.chat-ask-custom');
@@ -405,8 +405,8 @@ console.log('① desk 1280 — the boxes the owner named, and the rest of the cl
   judged['chat-renderers.js customInput'] = await p.ev(`window.__judge('.chat-ask-custom')`);
   const d4 = await dictate(p, '.chat-ask-custom', { value: '', caret: 0, answer: 'the follower\nbranch', want: 'the follower branch' });
   const submit = await p.ev(`(() => { const b = [...document.querySelectorAll('.chat-permission-inline button')].find((x) => /提交|Submit/.test(x.textContent)); return b ? { disabled: b.disabled } : null; })()`);
-  ok('the chat question card\'s own answer: a microphone beside it; a dictated line break becomes a space (a one-line box never takes an Enter)', g4.mic && !g4.overField && d4.landed && noEnter(d4), { g4, d4 });
-  ok('…its own rule ran (input ⇒ the answer is selected, Submit enabled) and NOTHING was submitted (no permission-response sent)', inputFired(d4) && submit && submit.disabled === false && (await p.ev('window.__sends.length')) === 0, { submit, sends: await p.ev('window.__sends') });
+  ok('the chat question card\'s own answer: a microphone beside it; a dictated line break becomes a space (a one-line box never takes an Enter)', gateOf(g4.mic) && !g4.overField && gateOf(d4.landed) && verdictOf(noEnter(d4)), { g4, d4 });
+  ok('…its own rule ran (input ⇒ the answer is selected, Submit enabled) and NOTHING was submitted (no permission-response sent)', gateOf(inputFired(d4)) && gateOf(submit) && submit.disabled === false && (await p.ev('window.__sends.length')) === 0, { submit, sends: await p.ev('window.__sends') });
   // — a createModalShell showInputDialog box: the microphone and its chip OVER the modal's backdrop —
   await p.ev('window.__dialog()');
   await p.until(`document.activeElement && document.activeElement.matches('.dialog-overlay input')`);
@@ -416,53 +416,53 @@ console.log('① desk 1280 — the boxes the owner named, and the rest of the cl
   await p.shot('follow-dialog.png', '.dialog-overlay .dialog');
   const d5 = await dictate(p, '.dialog-overlay input', { value: '', caret: 0, answer: 'Planning board' });
   const chipTop = await p.ev(`(() => { const c = document.querySelector('.voice-chip-float:not(.hidden)'), m = document.querySelector('.voice-follow'); if (!c || !m) return null; const b = c.getBoundingClientRect(), q = m.getBoundingClientRect(); const e = document.elementFromPoint(b.left + 4, b.top + b.height / 2); return { onTop: !!e && !!e.closest('.voice-chip-float'), fixed: getComputedStyle(c).position === 'fixed', above: b.bottom <= q.top + 1, right: Math.abs(b.right - q.right) < 2 }; })()`);
-  ok('showInputDialog\'s box: the microphone stands over the modal\'s backdrop (on top at its centre), beside the box', g5.mic && g5.onTop && !g5.overField && g5.inView, g5);
-  ok('…the words land, the dialog is NOT answered (no Enter) and its "已插入 · 撤销" chip floats ABOVE its microphone (right edges aligned, fixed) over the backdrop — chat.css\'s composer chip rule no longer wins the cascade', d5.landed && noEnter(d5) && (await p.ev('window.__answer')) === 'pending' && !!chipTop && chipTop.onTop && chipTop.fixed && chipTop.above && chipTop.right, { d5, chipTop, answer: await p.ev('window.__answer') });
+  ok('showInputDialog\'s box: the microphone stands over the modal\'s backdrop (on top at its centre), beside the box', gateOf(g5.mic) && gateOf(g5.onTop) && !g5.overField && verdictOf(g5.inView), g5);
+  ok('…the words land, the dialog is NOT answered (no Enter) and its "已插入 · 撤销" chip floats ABOVE its microphone (right edges aligned, fixed) over the backdrop — chat.css\'s composer chip rule no longer wins the cascade', gateOf(d5.landed) && gateOf(noEnter(d5)) && (await p.ev('window.__answer')) === 'pending' && !!chipTop && gateOf(chipTop.onTop) && gateOf(chipTop.fixed) && gateOf(chipTop.above) && verdictOf(chipTop.right), { d5, chipTop, answer: await p.ev('window.__answer') });
   // CONTROL: the base's one-class rule (the selector switched back in place, then restored) — chat.css wins: the chip is
   // absolute at the page's LEFT edge with z-index 20, under the dialog's backdrop
   const ctl = await p.ev(`(() => { for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch { continue; } for (const r of rules) if (r.selectorText === '.voice-chip.voice-chip-float') { r.selectorText = '.voice-chip-float'; const c = document.querySelector('.voice-chip-float:not(.hidden)'); const st = getComputedStyle(c), b = c.getBoundingClientRect(); const e = document.elementFromPoint(b.left + 4, b.top + b.height / 2); const out = { position: st.position, z: st.zIndex, left: Math.round(b.left), onTop: !!e && !!e.closest('.voice-chip-float') }; r.selectorText = '.voice-chip.voice-chip-float'; return out; } } return null; })()`);
   ok('CONTROL (the base\'s one-class .voice-chip-float): the chip is absolute at the page\'s left edge, z-index 20, under the backdrop', !!ctl && ctl.position === 'absolute' && ctl.z === '20' && ctl.left < 4 && ctl.onTop === false, ctl);
   await p.clickSel('.dialog-overlay .btn-create');
-  ok('…the person\'s OK answers it with the dictated name', await p.until(`window.__answer === 'Planning board'`, 3000), await p.ev('window.__answer'));
+  ok('…the person\'s OK answers it with the dictated name', verdictOf(await p.until(`window.__answer === 'Planning board'`, 3000)), await p.ev('window.__answer'));
   // — a settings text row: the words land; its onchange saves at the blur —
   await p.ev('window.__settingsRow()');
   const SR = '.settings-content input.settings-input-text';
-  ok('a settings text row is drawn (「Upload files to」 — chat.uploadDir)', await p.until(`!!document.querySelector(${JSON.stringify(SR)})`, 4000));
+  ok('a settings text row is drawn (「Upload files to」 — chat.uploadDir)', verdictOf(await p.until(`!!document.querySelector(${JSON.stringify(SR)})`, 4000)));
   await p.clickSel(SR);
   await p.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
   const g6 = await geo(p, SR);
   judged['settings-ui.js input'] = await p.ev(`window.__judge(${JSON.stringify(SR)})`);
   const d6 = await dictate(p, SR, { value: '/home/u/uploads', caret: 15, answer: '/voice' });
   await p.clickAt(1200, 840);
-  ok('a settings text row: a microphone beside it; the words at the caret; its own onchange saves them once the box is left (as after typing)', g6.mic && !g6.overField && d6.landed && (await p.until(`window.__vals['chat.uploadDir'] === '/home/u/uploads/voice'`, 3000)), { g6, d6, vals: await p.ev('window.__vals') });
-  ok('…and the microphone goes with the blur', await p.until(`!document.querySelector(${JSON.stringify(MIC)})`, 2000));
+  ok('a settings text row: a microphone beside it; the words at the caret; its own onchange saves them once the box is left (as after typing)', gateOf(g6.mic) && !g6.overField && gateOf(d6.landed) && (verdictOf(await p.until(`window.__vals['chat.uploadDir'] === '/home/u/uploads/voice'`, 3000))), { g6, d6, vals: await p.ev('window.__vals') });
+  ok('…and the microphone goes with the blur', verdictOf(await p.until(`!document.querySelector(${JSON.stringify(MIC)})`, 2000)));
   // — the theme editor's name —
   await p.ev('window.__theme()');
-  ok('the theme editor opens', await p.until(`!!document.querySelector('.theme-editor-name')`, 4000));
+  ok('the theme editor opens', verdictOf(await p.until(`!!document.querySelector('.theme-editor-name')`, 4000)));
   await p.clickSel('.theme-editor-name');
   await p.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
   const g7 = await geo(p, '.theme-editor-name');
   judged['theme-editor.js nameInput'] = await p.ev(`window.__judge('.theme-editor-name')`);
   const d7 = await dictate(p, '.theme-editor-name', { value: '', caret: 0, answer: 'Dusk' });
-  ok('the theme editor\'s name: a microphone beside it, the words in it', g7.mic && !g7.overField && d7.landed && d7.focused, { g7, d7 });
+  ok('the theme editor\'s name: a microphone beside it, the words in it', gateOf(g7.mic) && !g7.overField && gateOf(d7.landed) && verdictOf(d7.focused), { g7, d7 });
   // — the For-you row's reply: its own microphone, no follower —
   await p.ev('window.__fy()');
   await p.clickSel('#user-todos-popup .ut-reply-input');
   await sleep(250);
   const g8 = await p.ev(`(() => { const f = document.querySelector('#user-todos-popup .ut-reply-input'); return { own: !!f.parentElement.querySelector(':scope > .voice-btn'), focused: document.activeElement === f, follow: document.querySelectorAll('.voice-follow:not([hidden])').length }; })()`);
-  ok('the For-you row\'s reply box: its own microphone (voiceField), focused — no second microphone from the follower', g8.own && g8.focused && g8.follow === 0, g8);
+  ok('the For-you row\'s reply box: its own microphone (voiceField), focused — no second microphone from the follower', gateOf(g8.own) && gateOf(g8.focused) && g8.follow === 0, g8);
   // — a contenteditable: a Range at the caret —
   await p.ev('window.__ce()');
   await p.clickSel('.zz-ce');
   await p.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
   const d9 = await dictate(p, '.zz-ce', { ce: true });
-  ok('a [contenteditable]: a microphone; the words at the caret (a Range — insertText), `input` fired, the focus kept', d9.landed && d9.focused && inputFired(d9), d9);
+  ok('a [contenteditable]: a microphone; the words at the caret (a Range — insertText), `input` fired, the focus kept', gateOf(d9.landed) && gateOf(d9.focused) && verdictOf(inputFired(d9)), d9);
   // — a type=email box: no caret API ⇒ at its end —
   await p.ev('window.__email()');
   await p.clickSel('.zz-email');
   await p.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
   const d10 = await dictate(p, '.zz-email', { want: 'Hello worldDICTATED' });
-  ok('a type=email box (no caret API in Chrome): the words at its end, never an exception', d10.landed && d10.focused, d10);
+  ok('a type=email box (no caret API in Chrome): the words at its end, never an exception', gateOf(d10.landed) && verdictOf(d10.focused), d10);
   ok('no page error on the desk legs', (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
   p.close();
 }
@@ -472,20 +472,20 @@ console.log('② the exclusions are the predicate\'s — the vault\'s password, 
   const p = await page(1280, 860);
   await p.ev('window.__vault()');
   const pw = '#vault-unlock-pw';
-  ok('the vault\'s unlock dialog: its second-password box is focused…', await p.until(`!!document.querySelector('${pw}')`, 4000) && (await p.clickSel(pw)) && (await p.until(`document.activeElement === document.querySelector('${pw}')`)));
+  ok('the vault\'s unlock dialog: its second-password box is focused…', gateOf(await p.until(`!!document.querySelector('${pw}')`, 4000)) && (gateOf(await p.clickSel(pw))) && (verdictOf(await p.until(`document.activeElement === document.querySelector('${pw}')`))));
   await sleep(400);
   judged['vault-unlock.js i'] = await p.ev(`window.__judge('${pw}')`);
-  ok('…and gets NO microphone (secret — type=password)', (await p.ev(`document.querySelectorAll('.voice-follow').length`)) === 0 && judged['vault-unlock.js i'] && judged['vault-unlock.js i'].why === 'secret', judged['vault-unlock.js i']);
+  ok('…and gets NO microphone (secret — type=password)', (await p.ev(`document.querySelectorAll('.voice-follow').length`)) === 0 && gateOf(judged['vault-unlock.js i']) && judged['vault-unlock.js i'].why === 'secret', judged['vault-unlock.js i']);
   await p.ev('window.__term()');
-  ok('a real xterm terminal holds the focus (its helper textarea)…', await p.until(`document.activeElement && document.activeElement.classList.contains('xterm-helper-textarea')`, 4000));
+  ok('a real xterm terminal holds the focus (its helper textarea)…', verdictOf(await p.until(`document.activeElement && document.activeElement.classList.contains('xterm-helper-textarea')`, 4000)));
   await sleep(400);
   const tj = await p.ev(`window.__judge('.xterm-helper-textarea')`);
-  ok('…and gets NO microphone (terminal)', (await p.ev(`document.querySelectorAll('.voice-follow').length`)) === 0 && tj && tj.why === 'terminal', tj);
+  ok('…and gets NO microphone (terminal)', (await p.ev(`document.querySelectorAll('.voice-follow').length`)) === 0 && gateOf(tj) && tj.why === 'terminal', tj);
   await p.ev('window.__composer()');
   await p.clickSel('.chat-view textarea');
   await sleep(400);
   const cg = await p.ev(`(() => ({ focused: document.activeElement === document.querySelector('.chat-view textarea'), own: !!document.querySelector('.chat-view .chat-voice-btn'), follow: document.querySelectorAll('.voice-follow').length }))()`);
-  ok('the chat composer keeps ITS microphone (placement chat, richer facts) — the follower adds none', cg.focused && cg.own && cg.follow === 0, cg);
+  ok('the chat composer keeps ITS microphone (placement chat, richer facts) — the follower adds none', gateOf(cg.focused) && gateOf(cg.own) && cg.follow === 0, cg);
   p.close();
 }
 
@@ -496,15 +496,15 @@ console.log('③ the press: a popover stays open; blur / removal ⇒ gone; a rec
   await p.clickSel('.zz-pop-input');
   await p.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
   const d = await dictate(p, '.zz-pop-input', { value: '', caret: 0, answer: 'Renamed' });
-  ok('a field inside a createPopover popover: the presses on the follower\'s microphone are no outside press — the popover stays open, the words land', d.landed && (await p.ev(`!!document.querySelector('.zz-follow-pop') && document.querySelector('.zz-follow-pop').isConnected`)), d);
+  ok('a field inside a createPopover popover: the presses on the follower\'s microphone are no outside press — the popover stays open, the words land', gateOf(d.landed) && (verdictOf(await p.ev(`!!document.querySelector('.zz-follow-pop') && document.querySelector('.zz-follow-pop').isConnected`))), d);
   // blur ⇒ gone
   await p.clickAt(1200, 840);
-  ok('a blur (a press elsewhere) ⇒ the microphone is gone', await p.until(`!document.querySelector('.voice-follow')`, 2000));
+  ok('a blur (a press elsewhere) ⇒ the microphone is gone', verdictOf(await p.until(`!document.querySelector('.voice-follow')`, 2000)));
   // removal while focused ⇒ gone
   await p.ev('window.__dialog()');
   await p.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
   await p.ev(`document.querySelector('.dialog-overlay').remove(), true`);
-  ok('the field removed while it holds the focus (a dialog closed by a script) ⇒ the microphone is gone too', await p.until(`!document.querySelector('.voice-follow')`, 2000));
+  ok('the field removed while it holds the focus (a dialog closed by a script) ⇒ the microphone is gone too', verdictOf(await p.until(`!document.querySelector('.voice-follow')`, 2000)));
   // a recording outlives a blur and lands in ITS field
   await p.ev('window.__api()');
   await p.clickSel('.chan-api-reject');
@@ -518,16 +518,16 @@ console.log('③ the press: a popover stays open; blur / removal ⇒ gone; a rec
   const mid = await p.ev(`({ host: !!document.querySelector('.voice-follow .voice-btn.recording'), n: document.querySelectorAll('.voice-follow').length })`);
   await p.clickSel('.voice-follow .voice-btn .voice-time');
   const landed = await p.until(`document.querySelector('.chan-api-why').value === 'too wide — ask first'`);
-  ok('a recording outlives a blur: its microphone stays (one), the words land in ITS field (unfocused: a range edit)', mid.host && mid.n === 1 && landed, { mid, value: await p.ev(`document.querySelector('.chan-api-why').value`) });
-  ok('…then the microphone follows the field that holds the focus now', await p.until(`(() => { const h = document.querySelector('.voice-follow:not([hidden])'); const o = document.querySelector('.zz-other'); if (!h || !o) return false; const a = h.getBoundingClientRect(), b = o.getBoundingClientRect(); return Math.abs(a.right - b.right) < 60 || Math.abs(a.left - b.right) < 60; })()`, 3000));
+  ok('a recording outlives a blur: its microphone stays (one), the words land in ITS field (unfocused: a range edit)', gateOf(mid.host) && mid.n === 1 && verdictOf(landed), { mid, value: await p.ev(`document.querySelector('.chan-api-why').value`) });
+  ok('…then the microphone follows the field that holds the focus now', verdictOf(await p.until(`(() => { const h = document.querySelector('.voice-follow:not([hidden])'); const o = document.querySelector('.zz-other'); if (!h || !o) return false; const a = h.getBoundingClientRect(), b = o.getBoundingClientRect(); return Math.abs(a.right - b.right) < 60 || Math.abs(a.left - b.right) < 60; })()`, 3000)));
   // voice input off ⇒ absent
   await p.ev(`window.__notePlugins([{ id: 'voice-input', enabled: false }]), true`);
   await p.ev('window.__email()');
   await p.clickSel('.zz-email');
   await sleep(300);
-  ok('voice input off (the plugins-updated broadcast) ⇒ the follower\'s microphone is ABSENT (not greyed)', await p.ev(`[...document.querySelectorAll('.voice-follow')].every((h) => getComputedStyle(h).display === 'none')`));
+  ok('voice input off (the plugins-updated broadcast) ⇒ the follower\'s microphone is ABSENT (not greyed)', verdictOf(await p.ev(`[...document.querySelectorAll('.voice-follow')].every((h) => getComputedStyle(h).display === 'none')`)));
   await p.ev(`window.__notePlugins([{ id: 'voice-input', enabled: true }]), true`);
-  ok('…and back with the broadcast', await p.until(`!!document.querySelector('.voice-follow') && getComputedStyle(document.querySelector('.voice-follow')).display !== 'none'`, 2000));
+  ok('…and back with the broadcast', verdictOf(await p.until(`!!document.querySelector('.voice-follow') && getComputedStyle(document.querySelector('.voice-follow')).display !== 'none'`, 2000)));
   ok('no page error on the press legs', (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
   p.close();
   // MUTANTS: the window-capture guard removed — the closer's own voice fact still keeps the popover (lane
@@ -543,7 +543,7 @@ console.log('③ the press: a popover stays open; blur / removal ⇒ gone; a rec
     m.close();
     return open;
   };
-  ok('MUTANT (the press guard removed): the popover STILL stays open — the outside-press closer\'s own voice fact keeps it too', await popAfterPress('mutant'));
+  ok('MUTANT (the press guard removed): the popover STILL stays open — the outside-press closer\'s own voice fact keeps it too', verdictOf(await popAfterPress('mutant')));
   ok('MUTANT 2 (the guard AND the closer\'s voice fact removed): the same press closes the popover — the two layers are what keep it', !(await popAfterPress('mutant2')));
 }
 
@@ -561,18 +561,18 @@ for (const [w, h] of [[390, 844], [375, 812]]) {
   await sleep(150);
   const g = await geo(p, rj);
   const strip = await p.ev(`(() => { const m = document.querySelector('.voice-follow').getBoundingClientRect(), s = document.querySelector('.chat-kbd-yield').getBoundingClientRect(); return { over: m.left < s.right && s.left < m.right && m.top < s.bottom && s.top < m.bottom }; })()`);
-  ok(`${w}×${h}: a TAP on the reject box ⇒ a microphone ≥ 40×40, outside the field, inside the view, on top`, g.mic && g.w >= 40 && g.h >= 40 && !g.overField && g.inView && g.onTop && g.focused, g);
+  ok(`${w}×${h}: a TAP on the reject box ⇒ a microphone ≥ 40×40, outside the field, inside the view, on top`, gateOf(g.mic) && g.w >= 40 && g.h >= 40 && !g.overField && gateOf(g.inView) && gateOf(g.onTop) && verdictOf(g.focused), g);
   ok(`${w}×${h}: …never over the keyboard-yield strip`, strip.over === false, { strip, side: g.side });
   const d = await dictate(p, rj);
-  ok(`${w}×${h}: a TAP on it records, a tap stops — the box keeps the focus (the keyboard stays), the words at the caret, nothing sent`, d.recording && d.focusRec && d.landed && d.focused && noBlur(d) && routes.length === 0, d);
+  ok(`${w}×${h}: a TAP on it records, a tap stops — the box keeps the focus (the keyboard stays), the words at the caret, nothing sent`, gateOf(d.recording) && gateOf(d.focusRec) && gateOf(d.landed) && gateOf(d.focused) && gateOf(noBlur(d)) && routes.length === 0, d);
   const ch = await p.ev(`(() => { const c = document.querySelector('.voice-chip-float:not(.hidden)'), f = document.querySelector(${JSON.stringify(rj)}); if (!c) return null; const b = c.getBoundingClientRect(), r = f.getBoundingClientRect(); return { over: b.left < r.right && r.left < b.right && b.top < r.bottom && r.top < b.bottom, inView: b.top >= 0 && b.bottom <= innerHeight, side: document.querySelector('.voice-follow').dataset.side }; })()`);
-  ok(`${w}×${h}: …its 已插入 · 撤销 chip never lies over the words it just wrote (the far side of the microphone)`, !!ch && ch.over === false && ch.inView, ch);
+  ok(`${w}×${h}: …its 已插入 · 撤销 chip never lies over the words it just wrote (the far side of the microphone)`, !!ch && ch.over === false && verdictOf(ch.inView), ch);
   await p.shot(`follow-phone-${w}.png`, '.chan-prop');
   // the owner's 「编辑」 on the phone: the Outbox Edit… box keeps its OWN microphone (voiceField), ≥ 40×40, inside the box
   await p.tapSel('.chan-prop [data-edit]');
   await p.until(`!!document.querySelector('.chan-prop-edit')`);
   const eg = await p.ev(`(() => { const f = document.querySelector('.chan-prop-edit'), b = f.parentElement.querySelector(':scope > .voice-btn'); if (!b) return null; const q = b.getBoundingClientRect(), r = f.getBoundingClientRect(); return { w: q.width, h: q.height, inBox: q.left >= r.left - 1 && q.right <= r.right + 1 && q.top >= r.top - 1 && q.bottom <= r.bottom + 1, follow: document.querySelectorAll('.voice-follow:not([hidden])').length }; })()`);
-  ok(`${w}×${h}: the Outbox Edit… box (the owner's 「编辑」) has its own microphone on the phone — ≥ 40×40 inside the box, no second one`, !!eg && eg.w >= 40 && eg.h >= 40 && eg.inBox && eg.follow === 0, eg);
+  ok(`${w}×${h}: the Outbox Edit… box (the owner's 「编辑」) has its own microphone on the phone — ≥ 40×40 inside the box, no second one`, !!eg && eg.w >= 40 && eg.h >= 40 && gateOf(eg.inBox) && eg.follow === 0, eg);
   ok(`${w}×${h}: no page error`, (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
   p.close();
 }
@@ -588,10 +588,10 @@ console.log('④b the owner\'s phone 448×850 (touch) — the Report a problem b
   await sleep(150);
   const g = await geo(p, rp);
   const rt = await p.ev(`window.__judge(${JSON.stringify(rp)})`);
-  ok('448×850: a TAP on the Report a problem box (a dictation target by the predicate) ⇒ the follower\'s microphone ≥ 40×40, outside the box, inside the screen, ON TOP of the modal (its centre hits the microphone, not the dialog)', !!rt && rt.ok && g.mic && g.w >= 40 && g.h >= 40 && !g.overField && g.inView && g.onTop && g.focused, { g, rt });
+  ok('448×850: a TAP on the Report a problem box (a dictation target by the predicate) ⇒ the follower\'s microphone ≥ 40×40, outside the box, inside the screen, ON TOP of the modal (its centre hits the microphone, not the dialog)', !!rt && gateOf(rt.ok) && gateOf(g.mic) && g.w >= 40 && g.h >= 40 && !g.overField && gateOf(g.inView) && gateOf(g.onTop) && verdictOf(g.focused), { g, rt });
   const posts0 = routes.length;
   const d = await dictate(p, rp, { value: '', caret: 0, answer: 'The tray closed when I stopped the dictation' });
-  ok('448×850: a TAP records, a tap stops — the words land in the Report a problem box, which keeps the focus; the dialog stays and nothing is captured', d.recording && d.focusRec && d.landed && d.focused && noBlur(d) && (await p.ev(`!!document.querySelector(${JSON.stringify(rp)})`)) && routes.length === posts0, d);
+  ok('448×850: a TAP records, a tap stops — the words land in the Report a problem box, which keeps the focus; the dialog stays and nothing is captured', gateOf(d.recording) && gateOf(d.focusRec) && gateOf(d.landed) && gateOf(d.focused) && gateOf(noBlur(d)) && (gateOf(await p.ev(`!!document.querySelector(${JSON.stringify(rp)})`))) && routes.length === posts0, d);
   await p.shot('follow-report-448.png', '.dialog-overlay .dialog');
   ok('448×850: no page error', (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
   p.close();
@@ -606,7 +606,7 @@ console.log('⑤ RED CONTROL = the base\'s shape (the follower unexported in a p
   await p.until(`document.activeElement === document.querySelector('.chan-prop-rejectbox input')`);
   await sleep(800);
   const base = await p.ev(`(() => { const f = document.querySelector('.chan-prop-rejectbox input'), r = f.getBoundingClientRect(); const near = [...document.querySelectorAll('.chat-voice-btn')].filter((b) => { const q = b.getBoundingClientRect(); return q.width > 0 && Math.abs(q.top - r.top) < 80; }).length; return { focused: document.activeElement === f, mics: near }; })()`);
-  ok('BASE SHAPE: the focused reject box has no microphone at all — the check ① proves is RED without the follower', base.focused && base.mics === 0, base);
+  ok('BASE SHAPE: the focused reject box has no microphone at all — the check ① proves is RED without the follower', gateOf(base.focused) && base.mics === 0, base);
   p.close();
 }
 
@@ -637,7 +637,7 @@ console.log('⑦ A FOLLOWER NEVER POLLS LAYOUT — the Report a problem box focu
     const p = await page(1280, 860, { b });
     await p.cdp('Page.bringToFront');
     // (the bundle this scene asked for is the one the page runs — a mutant page that fell back to page.js judged nothing)
-    ok(`⑦ the «${b}» page runs ${b}.js`, await p.ev(`[...document.scripts].some((s) => s.src.endsWith('/${b}.js'))`));
+    ok(`⑦ the «${b}» page runs ${b}.js`, verdictOf(await p.ev(`[...document.scripts].some((s) => s.src.endsWith('/${b}.js'))`)));
     await p.ev(COUNT);
     await p.ev('window.__report()');
     await p.until(`!!document.querySelector(${JSON.stringify(RP)})`);
@@ -658,13 +658,13 @@ console.log('⑦ A FOLLOWER NEVER POLLS LAYOUT — the Report a problem box focu
   console.log(`    after the focus (1 s): ${JSON.stringify(g.armed)}`);
   console.log(`    nothing moving 5 s: ${JSON.stringify(g.idle)}`);
   console.log(`    another pane scrolling 5 s: ${JSON.stringify(g.scroll)}`);
-  ok('⑦ the Report a problem box focused ⇒ the follower\'s microphone shows', g.shown);
+  ok('⑦ the Report a problem box focused ⇒ the follower\'s microphone shows', verdictOf(g.shown));
   ok('⑦ the focus arms NO timer (0 setInterval in the second after it)', g.armed.intervals === 0, g.armed);
   ok('⑦ NOTHING MOVING, 5 s after the first placement: the follower places 0 times (0 hit tests of its own) and forces 0 layouts', g.idle.hits === 0 && g.idle.forcedLayouts === 0, g.idle);
-  ok('⑦ ANOTHER PANE SCROLLING (not an ancestor of the field), 5 s: the follower places 0 times and forces 0 layouts', g.scroll.scrolled && g.scroll.hits === 0 && g.scroll.forcedLayouts === 0, g.scroll);
+  ok('⑦ ANOTHER PANE SCROLLING (not an ancestor of the field), 5 s: the follower places 0 times and forces 0 layouts', gateOf(g.scroll.scrolled) && g.scroll.hits === 0 && g.scroll.forcedLayouts === 0, g.scroll);
   const p = g.p;
   const g0 = await geo(p, RP);
-  ok('⑦ …and the microphone still stands beside the box (outside it, in the view, on top), the box focused', g0.mic && !g0.overField && g0.inView && g0.onTop && g0.focused, g0);
+  ok('⑦ …and the microphone still stands beside the box (outside it, in the view, on top), the box focused', gateOf(g0.mic) && !g0.overField && gateOf(g0.inView) && gateOf(g0.onTop) && verdictOf(g0.focused), g0);
   const rel = () => p.ev(`(() => { const m = document.querySelector('.voice-follow').getBoundingClientRect(), f = document.querySelector(${JSON.stringify(RP)}).getBoundingClientRect(); return { dx: Math.round(m.left - f.left), dy: Math.round(m.top - f.top), fx: Math.round(f.left), fy: Math.round(f.top), hidden: document.querySelector('.voice-follow').hidden }; })()`);
   const beside = async (label, act, { ms = 2000 } = {}) => {
     const before = await rel(); await p.ev(V0);
@@ -676,18 +676,18 @@ console.log('⑦ A FOLLOWER NEVER POLLS LAYOUT — the Report a problem box focu
   };
   // (1) its size: the box grows (its own ResizeObserver)
   const s1 = await beside('grow', `(() => { const f = document.querySelector(${JSON.stringify(RP)}); f.style.height = (f.getBoundingClientRect().height + 60) + 'px'; return true; })()`);
-  ok('⑦ SIGNAL — the box grows (its ResizeObserver): the microphone is placed again, outside the box', s1.ok && s1.placements >= 1 && s1.after.fy !== s1.before.fy, s1);
+  ok('⑦ SIGNAL — the box grows (its ResizeObserver): the microphone is placed again, outside the box', gateOf(s1.ok) && s1.placements >= 1 && s1.after.fy !== s1.before.fy, s1);
   // (2) 主开发's read: A LAYOUT SHIFT INSIDE THE HOLDER — a sibling ABOVE the field grows by 40 px (a validation line): the field
   // moves, nothing scrolls, its size and the holder's attributes untouched — the ResizeObserver over its ancestors; 0 timers
   const s2 = await beside('sibling', `(() => { const f = document.querySelector(${JSON.stringify(RP)}); const v = document.createElement('div'); v.className = 'zz-validation'; v.style.cssText = 'height:40px'; v.textContent = 'a validation line'; f.parentElement.insertBefore(v, f); return true; })()`);
-  ok('⑦ SIGNAL — a sibling above the box grows by 40 px (the field moves, nothing scrolls): the microphone is beside the box again, 0 timers armed', s2.ok && s2.after.fy !== s2.before.fy && Math.abs(s2.after.dy - s2.before.dy) <= 1 && (await p.ev('window.__vf.intervals')) === 0, s2);
+  ok('⑦ SIGNAL — a sibling above the box grows by 40 px (the field moves, nothing scrolls): the microphone is beside the box again, 0 timers armed', gateOf(s2.ok) && s2.after.fy !== s2.before.fy && Math.abs(s2.after.dy - s2.before.dy) <= 1 && (await p.ev('window.__vf.intervals')) === 0, s2);
   // (3) the person's own act in the field: a key typed re-places by the cheap road — nothing moved ⇒ no hit test
   await p.ev(V0); await p.key('a', 'KeyA', 65); await sleep(300);
   const typed = await p.ev(VREAD);
   ok('⑦ a key typed in the box (nothing moved): the follower looks once and makes NO hit test (the cheap road)', typed.hits === 0, typed);
   // (4) a pane that moved without a scroll: the holder's style written (the window manager's move) — same offset after
   const s4 = await beside('move', `(document.querySelector('.dialog-overlay').style.transform = 'translate(-180px, 40px)', true)`);
-  ok('⑦ SIGNAL — the pane that holds it moves without a scroll (its holder\'s style): the microphone moves with the box (the same offset)', s4.ok && s4.after.fx === s4.before.fx - 180 && Math.abs(s4.after.dx - s4.before.dx) <= 1 && Math.abs(s4.after.dy - s4.before.dy) <= 1, s4);
+  ok('⑦ SIGNAL — the pane that holds it moves without a scroll (its holder\'s style): the microphone moves with the box (the same offset)', gateOf(s4.ok) && s4.after.fx === s4.before.fx - 180 && Math.abs(s4.after.dx - s4.before.dx) <= 1 && Math.abs(s4.after.dy - s4.before.dy) <= 1, s4);
   // 主开发's numbers: (a) a 2-s DRAG of the holder — its style written every frame; (b) 5 s of STREAMING into the holder — a line
   // added above the field 1.8 / s and the holder's class flipped with each (the chat window's per-message shape)
   await p.ev(V0);
@@ -696,7 +696,7 @@ console.log('⑦ A FOLLOWER NEVER POLLS LAYOUT — the Report a problem box focu
   const dv = await p.ev(VREAD);
   const g5 = await geo(p, RP);
   console.log(`    DRAG 2 s: ${drag} frames of style writes on the holder ⇒ ${dv.hits} placements (one hit test each)`);
-  ok('⑦ a 2-s drag of the holder: at most one placement a frame, and the microphone beside the box at the end', drag > 30 && dv.hits <= drag + 1 && g5.mic && !g5.overField, { drag, dv, g5 });
+  ok('⑦ a 2-s drag of the holder: at most one placement a frame, and the microphone beside the box at the end', drag > 30 && dv.hits <= drag + 1 && gateOf(g5.mic) && !g5.overField, { drag, dv, g5 });
   await p.ev(V0);
   await p.ev(`(() => { const f = document.querySelector(${JSON.stringify(RP)}); const o = document.querySelector('.dialog-overlay'); const list = document.createElement('div'); list.className = 'zz-stream'; f.parentElement.insertBefore(list, f); let n = 0; window.__vfStream = setInterval(function vfStream() { const l = document.createElement('p'); l.textContent = '流式输出第 ' + (++n) + ' 行 — streaming line ' + n; l.style.margin = '0'; list.appendChild(l); o.classList.toggle('zz-busy'); }, 555); return true; })()`);
   await sleep(5000);
@@ -704,26 +704,26 @@ console.log('⑦ A FOLLOWER NEVER POLLS LAYOUT — the Report a problem box focu
   await sleep(150);
   const sv = await p.ev(VREAD), lines = await p.ev(`document.querySelectorAll('.zz-stream p').length`), g6 = await geo(p, RP);
   console.log(`    STREAMING 5 s: ${lines} lines added above the box (each one a class flip on the holder) ⇒ ${sv.hits} placements (one hit test each)`);
-  ok('⑦ 5 s of streaming into the holder (a line a message, the holder\'s class flipped): one placement a message at most, the microphone beside the box', lines >= 8 && sv.hits <= lines + 1 && g6.mic && !g6.overField, { lines, sv, g6 });
+  ok('⑦ 5 s of streaming into the holder (a line a message, the holder\'s class flipped): one placement a message at most, the microphone beside the box', lines >= 8 && sv.hits <= lines + 1 && gateOf(g6.mic) && !g6.overField, { lines, sv, g6 });
   // (5) something laid over it, then gone: the holder's parent's child list; the one hit test hides / shows it
   await p.ev(`(() => { const f = document.querySelector(${JSON.stringify(RP)}).getBoundingClientRect(); const c = document.createElement('div'); c.id = 'zz-cover'; c.setAttribute('data-popover', ''); c.style.cssText = 'position:fixed;z-index:100000;background:#fff;left:' + (f.left - 60) + 'px;top:' + (f.top - 60) + 'px;width:' + (f.width + 120) + 'px;height:' + (f.height + 120) + 'px'; document.body.appendChild(c); return true; })()`);
   const covered = await p.until(`document.querySelector('.voice-follow').hidden === true`, 2000);
   await p.ev(`(document.getElementById('zz-cover').remove(), true)`);
   const uncovered = await p.until(`document.querySelector('.voice-follow').hidden === false`, 2000);
-  ok('⑦ SIGNAL — a popover laid over the box hides the microphone; gone again ⇒ it is back', covered && uncovered, { covered, uncovered });
+  ok('⑦ SIGNAL — a popover laid over the box hides the microphone; gone again ⇒ it is back', gateOf(covered) && verdictOf(uncovered), { covered, uncovered });
   // (6) a field removed without a blur — the dialog's whole sheet removed (an ancestor, not the field's parent)
   await p.ev(`(document.querySelector('.dialog-overlay').remove(), true)`);
-  ok('⑦ SIGNAL — the dialog removed with the box focused (no blur): the follower is gone', await p.until(`!document.querySelector('.voice-follow')`, 2000));
+  ok('⑦ SIGNAL — the dialog removed with the box focused (no blur): the follower is gone', verdictOf(await p.until(`!document.querySelector('.voice-follow')`, 2000)));
   ok('⑦ no page error', (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
   p.close();
   // MUTANTS — each poll put back is RED here, by name
   const mt = await scene('poll-timer');
   console.log(`    MUTANT the 250-ms timer back: armed ${JSON.stringify(mt.armed)} · idle ${JSON.stringify(mt.idle)}`);
-  ok('⑦ MUTANT (the 250-ms timer back): the focus arms a timer and, nothing moving, the follower places every tick — the idle pins are RED', mt.shown && mt.armed.intervals >= 1 && mt.idle.hits >= 10, { armed: mt.armed, idle: mt.idle });
+  ok('⑦ MUTANT (the 250-ms timer back): the focus arms a timer and, nothing moving, the follower places every tick — the idle pins are RED', gateOf(mt.shown) && mt.armed.intervals >= 1 && mt.idle.hits >= 10, { armed: mt.armed, idle: mt.idle });
   mt.p.close();
   const ms2 = await scene('poll-scroll');
   console.log(`    MUTANT the page-wide scroll listener back: idle ${JSON.stringify(ms2.idle)} · scroll ${JSON.stringify(ms2.scroll)}`);
-  ok('⑦ MUTANT (the window-capture scroll listener back): another pane scrolling places the follower every frame — the scroll pin is RED', ms2.shown && ms2.idle.hits === 0 && ms2.scroll.hits >= 10, { idle: ms2.idle, scroll: ms2.scroll });
+  ok('⑦ MUTANT (the window-capture scroll listener back): another pane scrolling places the follower every frame — the scroll pin is RED', gateOf(ms2.shown) && ms2.idle.hits === 0 && ms2.scroll.hits >= 10, { idle: ms2.idle, scroll: ms2.scroll });
   ms2.p.close();
 }
 
@@ -742,7 +742,7 @@ console.log('⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived) — and
   const ofKind = (r, rt) => r.tag !== 'input' || !rt || !rt.type || r.facts.dynamic || (r.facts.type || 'text') === rt.type;
   const censusOf = (file, name, rt, kinded = true) => [...new Set(C.filter((r) => r.file === file && r.name === name && (name !== 'input' || r.tag === 'input') && (!kinded || ofKind(r, rt))).map((r) => r.verdict.why))].join('|') || 'NO SITE';
   const pairs = Object.entries(judged).map(([k, rt]) => { const [file, name] = k.split(' '); return { k, runtime: rt && rt.why, type: rt && rt.type, census: censusOf(file, name, rt) }; });
-  ok(`every box rendered here is judged at run time as the census judged its site (${pairs.map((x) => `${x.k}: ${x.runtime}`).join(' · ')})`, pairs.length >= 8 && pairs.every((x) => x.runtime === x.census), pairs);
+  ok(`every box rendered here is judged at run time as the census judged its site (${pairs.map((x) => `${x.k}: ${x.runtime}`).join(' · ')})`, pairs.length >= 8 && verdictOf(pairs.every((x) => x.runtime === x.census)), pairs);
   // CONTROLS: the union (the leg as it was — red on the hosted run once it was real) does not match the settings text row; and the
   // kind is a real filter — that same verdict judged as a CHECKBOX of settings-ui.js meets the checkbox sites' «not-text»
   const st = judged['settings-ui.js input'];
@@ -751,4 +751,4 @@ console.log('⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived) — and
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-end(fail ? 1 : 0);
+end(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

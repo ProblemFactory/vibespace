@@ -31,7 +31,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms = 10000) => { const t0 = Date.now(); for (;;) { let v = false; try { v = await fn(); } catch { v = false; } if (v) return true; if (Date.now() - t0 > ms) return false; await sleep(15); } };
 
@@ -41,7 +41,7 @@ const B = require('../src/browser-profiles.js');
 // ═══ ① PURE ══════════════════════════════════════════════════════════════════
 console.log('— ① PURE: "not yet known" fails closed and says nothing; the settled verdict names its tries');
 {
-  ok(JSON.stringify(F.PROBE_RETRY_MS) === JSON.stringify([5e3, 15e3, 45e3, 120e3, 600e3]) && Object.isFrozen(F.PROBE_RETRY_MS) && F.PROBE_TIMEOUT_MS === 8000,
+  ok(JSON.stringify(F.PROBE_RETRY_MS) === JSON.stringify([5e3, 15e3, 45e3, 120e3, 600e3]) && gateOf(Object.isFrozen(F.PROBE_RETRY_MS)) && F.PROBE_TIMEOUT_MS === 8000,
     'THE LADDER: 5 s → 15 s → 45 s → 2 min → 10 min after each miss (bounded, frozen); each try waits up to 8 s');
   const never = B.floorVerdict(undefined);
   ok(never.state === 'unknown' && never.sharedProfiles === false && never.settled === false && B.floorNotice(never) === null, 'never asked (undefined) ⇒ unknown — NOT YET KNOWN: no shared profile (fail closed), no notice (it read "absent" before, a fact nobody measured)');
@@ -55,10 +55,10 @@ console.log('— ① PURE: "not yet known" fails closed and says nothing; the se
   ok(words === 'Could not read the agent-browser version after 6 tries over 14 minutes (timed out after 8 s): shared profiles stay off until it answers. Per-session isolation is on and working; `npm ls -g agent-browser` shows what is installed.',
     'THE NOTICE names the tries, the span and the last why — and what still works', words);
   const detail = B.floorNoticeDetail(done, { retryMs: F.PROBE_RETRY_MS, timeoutMs: F.PROBE_TIMEOUT_MS });
-  ok(/again 5 s, 15 s, 45 s, 2 min and 10 min after each miss/.test(detail) && /waiting up to 8 s/.test(detail) && /Check again asks once more now/.test(detail) && /goes away by itself/.test(detail) && !/agent-browser/.test(detail),
+  ok(gateOf(/again 5 s, 15 s, 45 s, 2 min and 10 min after each miss/.test(detail)) && gateOf(/waiting up to 8 s/.test(detail)) && gateOf(/Check again asks once more now/.test(detail)) && gateOf(/goes away by itself/.test(detail)) && !/agent-browser/.test(detail),
     'its detail: the ladder, the wait per try, the door, the withdrawal — and never the hidden CLI\'s name (§52b: only floorNotice may say it)', detail);
   ok(B.floorVerdict('0.38.1', B.FLOOR_VERSION, { ok: true, attempts: 3 }).state === 'ok' && B.floorVerdict(null).state === 'absent' && B.floorNotice(B.floorVerdict(null)) === null
-    && /too old for shared profiles/.test(B.floorNotice(B.floorVerdict('0.32.0'))), 'answers are unchanged: ok / absent (silent) / too-old (its own notice)');
+    && verdictOf(/too old for shared profiles/.test(B.floorNotice(B.floorVerdict('0.32.0')))), 'answers are unchanged: ok / absent (silent) / too-old (its own notice)');
   const W = (err, version = '') => F.probeWhy({ err, version, timeoutMs: 8000 });
   ok(W(Object.assign(new Error('t'), { killed: true, signal: 'SIGTERM' })) === 'timed out after 8 s' && F.probeWhy({ err: { killed: true }, version: '', timeoutMs: 250 }) === 'timed out after 250 ms'
     && W({ signal: 'SIGKILL' }) === 'ended by SIGKILL' && W({ code: 1 }) === 'exited 1 without a version' && W({ code: 'EACCES' }) === 'could not run (EACCES)'
@@ -98,14 +98,14 @@ function ladderWorld(script, { retryMs = F.PROBE_RETRY_MS } = {}) {
   console.log('    attempt │ after   │ outcome │ next');
   for (const r of rows) console.log(`    ${String(r.attempt).padEnd(7)} │ ${r.after.padEnd(7)} │ ${r.outcome.padEnd(7)} │ ${r.next}`);
   const p = w.f.lastProbe();
-  ok(rows.length === 6 && rows.map((r) => r.after).join() === 'boot,5 s,15 s,45 s,120 s,600 s' && rows.slice(0, 5).every((r) => r.next !== 'exhausted') && rows[5].next === 'exhausted',
+  ok(rows.length === 6 && rows.map((r) => r.after).join() === 'boot,5 s,15 s,45 s,120 s,600 s' && gateOf(rows.slice(0, 5).every((r) => r.next !== 'exhausted')) && rows[5].next === 'exhausted',
     'THE TABLE: the boot miss, then 5 s / 15 s / 45 s / 2 min / 10 min — EXHAUSTED only at the 6th miss (5 retries, bounded)', rows);
-  ok(w.calls() === 6 && w.waiting.length === 0 && p.exhausted && p.attempts === 6 && p.nextAt === null && p.why === 'timed out after 8 s' && p.since === t0 && p.at - p.since === 833e3,
+  ok(w.calls() === 6 && w.waiting.length === 0 && gateOf(p.exhausted) && p.attempts === 6 && p.nextAt === null && p.why === 'timed out after 8 s' && p.since === t0 && p.at - p.since === 833e3,
     'after the last rung: 6 probes, NO timer left, the state names 6 tries over 833 s (785 s of waits + 6 × 8 s timeouts)', p);
-  ok(B.floorNotice(B.floorVerdict(w.f.lastVersion(), B.FLOOR_VERSION, p)).startsWith('Could not read the agent-browser version after 6 tries over 14 minutes (timed out after 8 s)'), 'the verdict over that state is settled ⇒ the notice\'s words');
+  ok(verdictOf(B.floorNotice(B.floorVerdict(w.f.lastVersion(), B.FLOOR_VERSION, p)).startsWith('Could not read the agent-browser version after 6 tries over 14 minutes (timed out after 8 s)')), 'the verdict over that state is settled ⇒ the notice\'s words');
   // a later probe (the Check again door, a reader past the memo) still misses: counted, no new ladder
   await w.f.probeVersion({ fresh: true });
-  ok(w.f.lastProbe().attempts === 7 && w.f.lastProbe().exhausted && w.waiting.length === 0, 'exhausted stays exhausted: a later miss counts (7 tries), no second ladder');
+  ok(w.f.lastProbe().attempts === 7 && gateOf(w.f.lastProbe().exhausted) && w.waiting.length === 0, 'exhausted stays exhausted: a later miss counts (7 tries), no second ladder');
   // and an answer resets everything
   const w2 = ladderWorld(['hang', 'hang', 'hang', 'hang', 'hang', 'hang', 'hang', '0.38.1']);
   await w2.f.probeVersion(); while (await w2.fire()) { /* to the end */ }
@@ -124,7 +124,7 @@ function ladderWorld(script, { retryMs = F.PROBE_RETRY_MS } = {}) {
   ok(w.calls() === reader0 && w.waiting.length === 1 && w.waiting[0].delay === 15e3, 'a READER inside the memo while a rung waits forks nothing and moves no rung (the per-action fork rule)');
   await w.fire();
   const p = w.f.lastProbe();
-  ok(p.ok && p.attempts === 3 && w.waiting.length === 0 && w.f.lastVersion() === '0.38.1' && B.floorVerdict(w.f.lastVersion(), B.FLOOR_VERSION, p).state === 'ok', 'the third try answers ⇒ ok (3 tries), NO rung left — the floor is known without anybody being told it was not', p);
+  ok(gateOf(p.ok) && p.attempts === 3 && w.waiting.length === 0 && w.f.lastVersion() === '0.38.1' && B.floorVerdict(w.f.lastVersion(), B.FLOOR_VERSION, p).state === 'ok', 'the third try answers ⇒ ok (3 tries), NO rung left — the floor is known without anybody being told it was not', p);
 }
 {
   // stop(): the owner's end
@@ -191,16 +191,16 @@ process.on('exit', () => { for (const k of keepers) { try { k.shutdown(); } catc
   await k.boot();
   const sawMiss = await waitFor(() => { const p = k.floorFacts().lastProbe; return p && !p.ok; }, 5000);
   const during = k.floorFacts();
-  ok(sawMiss && during.floor && during.floor.state === 'unknown' && during.floor.settled === false && during.floor.sharedProfiles === false && during.lastProbe.why === 'timed out after 1 s' && floorItems(todos).length === 0,
+  ok(gateOf(sawMiss) && gateOf(during.floor) && during.floor.state === 'unknown' && during.floor.settled === false && during.floor.sharedProfiles === false && during.lastProbe.why === 'timed out after 1 s' && floorItems(todos).length === 0,
     'the BOOT probe hung (killed at its timeout) ⇒ the floor reads unknown, unsettled — no shared profile opens on it, and nothing is filed', during);
   const twice = await waitFor(() => (k.floorFacts().lastProbe?.attempts || 0) >= 2, 6000);
   hang(0); // it hung twice; from now on it answers
   const healed = await waitFor(() => k.floorFacts().lastProbe?.ok === true, 8000);
   const f = k.floorFacts();
-  ok(twice && healed && f.version === '0.38.1' && f.floor.state === 'ok' && f.floor.sharedProfiles === true && f.lastProbe.attempts === 3,
+  ok(gateOf(twice) && gateOf(healed) && f.version === '0.38.1' && f.floor.state === 'ok' && f.floor.sharedProfiles === true && f.lastProbe.attempts === 3,
     'HUNG TWICE, THEN ANSWERED: the ladder asked again by itself — the third try ⇒ ok (3 tries), the floor known', f);
   ok(floorItems(todos).length === 0 && todos.forSession('browser').length === 0 && !journal.some((l) => /Could not read/.test(l)), 'NO notice was ever filed (the For-you store holds nothing, the journal says nothing) — a transient stays a transient');
-  ok(k.list().floor && k.list().floor.state === 'ok' && k.list().lastProbe && k.list().lastProbe.attempts === 3, 'the digest (GET /api/browser/profiles) carries the floor + the probe state');
+  ok(gateOf(k.list().floor) && k.list().floor.state === 'ok' && gateOf(k.list().lastProbe) && k.list().lastProbe.attempts === 3, 'the digest (GET /api/browser/profiles) carries the floor + the probe state');
   k.shutdown();
 }
 {
@@ -220,7 +220,7 @@ process.on('exit', () => { for (const k of keepers) { try { k.shutdown(); } catc
   release(1);
   const rs = await readers;
   hold(null); release(null);
-  ok(held && forks === 1 && rs[0].version === '0.38.1' && rs[1] === '0.38.1' && rs[2] === '0.38.1' && facts.lastProbe().attempts === 1,
+  ok(gateOf(held) && forks === 1 && rs[0].version === '0.38.1' && rs[1] === '0.38.1' && rs[2] === '0.38.1' && facts.lastProbe().attempts === 1,
     `SINGLE FLIGHT: the door, the act's read and the installs page asked while ONE probe was held ⇒ ${forks} fork, one answer for all three`, { forks, rs: [rs[0].version, rs[1], rs[2]] });
   k.shutdown();
 }
@@ -231,16 +231,16 @@ process.on('exit', () => { for (const k of keepers) { try { k.shutdown(); } catc
   failing('always');
   await kB.boot();
   const third = await waitFor(() => (kB.floorFacts().lastProbe?.attempts || 0) >= 3, 5000);
-  ok(third && floorItems(todosB).length === 0, 'three misses in: still NOTHING filed (the ladder is still asking)');
+  ok(gateOf(third) && floorItems(todosB).length === 0, 'three misses in: still NOTHING filed (the ladder is still asking)');
   const ex = await waitFor(() => kB.floorFacts().lastProbe?.exhausted === true, 8000);
   await sleep(20);
   const items = floorItems(todosB);
   const it = items[0] || {};
-  ok(ex && items.length === 1 && kB.floorFacts().lastProbe.attempts === 6, `the ladder EXHAUSTED (6 tries) ⇒ exactly ONE For-you item (${items.length})`, { items, probe: kB.floorFacts().lastProbe });
-  ok(it.kind === 'notice' && it.origin === 'browser' && it.sessionName === 'Agent browser' && it.action && it.action.type === 'browser-floor-check',
+  ok(gateOf(ex) && items.length === 1 && kB.floorFacts().lastProbe.attempts === 6, `the ladder EXHAUSTED (6 tries) ⇒ exactly ONE For-you item (${items.length})`, { items, probe: kB.floorFacts().lastProbe });
+  ok(it.kind === 'notice' && it.origin === 'browser' && it.sessionName === 'Agent browser' && gateOf(it.action) && it.action.type === 'browser-floor-check',
     'it is a browser notice carrying the Check again door (action browser-floor-check)', it);
-  ok(/^Could not read the agent-browser version after 6 tries over \d+ seconds? \(exited 1 without a version\): shared profiles stay off until it answers\./.test(it.text || '')
-    && /again 30 ms, 30 ms, 30 ms, 30 ms and 30 ms after each miss, each time waiting up to 1 s/.test(it.detail || '') && /Check again asks once more now/.test(it.detail || ''),
+  ok(gateOf(/^Could not read the agent-browser version after 6 tries over \d+ seconds? \(exited 1 without a version\): shared profiles stay off until it answers\./.test(it.text || ''))
+    && gateOf(/again 30 ms, 30 ms, 30 ms, 30 ms and 30 ms after each miss, each time waiting up to 1 s/.test(it.detail || '')) && verdictOf(/Check again asks once more now/.test(it.detail || '')),
     'its words name the tries, the span and the last why; the detail names the ladder and the door', { text: it.text, detail: it.detail });
   // the facts API + the door, through the REAL router
   const express = require('express');
@@ -252,7 +252,7 @@ process.on('exit', () => { for (const k of keepers) { try { k.shutdown(); } catc
   const API = `http://127.0.0.1:${srv.address().port}`;
   const j = async (method, p) => { const res = await fetch(API + p, { method, headers: { 'Content-Type': 'application/json' }, body: method === 'POST' ? '{}' : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   const reg = R.router.stack.filter((l) => l.route).map((l) => `${Object.keys(l.route.methods)[0].toUpperCase()} ${l.route.path}`);
-  ok(reg.includes('GET /api/browser/floor') && reg.includes('POST /api/browser/floor/check') && reg.includes('GET /api/browser/profiles') && reg.includes('GET /api/browser/cli') && reg.length >= 60,
+  ok(gateOf(reg.includes('GET /api/browser/floor')) && gateOf(reg.includes('POST /api/browser/floor/check')) && gateOf(reg.includes('GET /api/browser/profiles')) && gateOf(reg.includes('GET /api/browser/cli')) && reg.length >= 60,
     `the router registers the floor routes beside their neighbours at MOUNT (${reg.length} routes) — none nested inside another handler`);
   let r = await j('GET', '/api/browser/floor');
   ok(r.status === 200 && r.json.version === '' && r.json.floor.state === 'unknown' && r.json.floor.settled === true && r.json.lastProbe.attempts === 6 && r.json.lastProbe.ok === false && r.json.lastProbe.why === 'exited 1 without a version' && typeof r.json.lastProbe.at === 'number',
@@ -264,9 +264,9 @@ process.on('exit', () => { for (const k of keepers) { try { k.shutdown(); } catc
   failing(0);
   r = await j('POST', '/api/browser/floor/check');
   const after = todosB.get(it.id);
-  ok(r.status === 200 && r.json.floor.state === 'ok' && r.json.version === '0.38.1' && after && after.status === 'done' && floorItems(todosB).length === 0,
+  ok(r.status === 200 && r.json.floor.state === 'ok' && r.json.version === '0.38.1' && gateOf(after) && after.status === 'done' && floorItems(todosB).length === 0,
     'Check again once it answers ⇒ ok — and the notice is WITHDRAWN (resolved by the fact that negates it)', { json: r.json, status: after && after.status });
-  ok(journal.some((l) => /its "could not read" notice is withdrawn/.test(l)), 'the journal says it was withdrawn');
+  ok(verdictOf(journal.some((l) => /its "could not read" notice is withdrawn/.test(l))), 'the journal says it was withdrawn');
   await new Promise((r2) => srv.close(r2));
   kB.shutdown();
 }
@@ -341,7 +341,7 @@ console.log('— ④ RED controls: the old one-shot files the notice after the F
   if (!base) console.log(`  - SKIP the base-tree control: ${why}`);
   else {
     const before = await run(base, 'base');
-    ok(before.length === 1 && before[0].k === 'agent-browser-floor' && /Could not read the installed agent-browser version/.test(before[0].t),
+    ok(before.length === 1 && before[0].k === 'agent-browser-floor' && verdictOf(/Could not read the installed agent-browser version/.test(before[0].t)),
       'RED ON THE BASE TREE: one failed probe ⇒ the 「shared profiles stay off」 notice AT ONCE (the .268 incident, reproduced)', before);
     const now = await run(REPO, 'now');
     ok(now.length === 0, 'THIS TREE, the same probe: browser-env says nothing (an unsettled unknown is not its sentence)', now);
@@ -352,7 +352,7 @@ console.log('— ④ RED controls: the old one-shot files the notice after the F
   const k = mkKeeper(path.join(ROOT, 'data-x'), todos, { retryMs: [], timeoutMs: 1000 });
   await k.boot();
   await waitFor(() => floorItems(todos).length > 0, 5000);
-  ok(floorItems(todos).length === 1 && k.floorFacts().lastProbe.attempts === 1 && /after 1 try over/.test(floorItems(todos)[0].text), 'CONTROL: an EMPTY ladder ⇒ the notice after the FIRST failure (1 try) — the ladder is what holds it back', { items: floorItems(todos).map((i) => i.text), probe: k.floorFacts().lastProbe });
+  ok(floorItems(todos).length === 1 && k.floorFacts().lastProbe.attempts === 1 && verdictOf(/after 1 try over/.test(floorItems(todos)[0].text)), 'CONTROL: an EMPTY ladder ⇒ the notice after the FIRST failure (1 try) — the ladder is what holds it back', { items: floorItems(todos).map((i) => i.text), probe: k.floorFacts().lastProbe });
   k.shutdown();
   failing(0);
 }
@@ -363,22 +363,22 @@ console.log('— ⑤ wiring: the pane\'s Check again, the model\'s verb, the wor
   const L = await import(pathToFileURL(path.join(REPO, 'src/lib/inbox-window-layout.js')).href);
   const item = { id: 'ut-1', sessionKey: 'browser', status: 'open', kind: 'notice', text: 'x', action: { type: 'browser-floor-check' } };
   const v = L.itemView(item, {});
-  ok(Array.isArray(v.actions) && v.actions[0] === 'browser-floor-check' && !L.itemView({ ...item, status: 'done' }, {}).actions.includes('browser-floor-check'), 'the For-you window\'s pane: Check again FIRST on the open item, gone once it is resolved', v.actions);
+  ok(gateOf(Array.isArray(v.actions)) && v.actions[0] === 'browser-floor-check' && !L.itemView({ ...item, status: 'done' }, {}).actions.includes('browser-floor-check'), 'the For-you window\'s pane: Check again FIRST on the open item, gone once it is resolved', v.actions);
   const act = read('src/lib/user-todos-actions.js');
   const at = act.indexOf("rec.action.type === 'browser-floor-check'");
   const verb = at >= 0 ? act.slice(at, act.indexOf('\n    }\n', at)) : '';
-  ok(/fetchJson\('\/api\/browser\/floor\/check', \{ method: 'POST'/.test(verb) && /return true;/.test(verb) && /return false;/.test(verb), 'the model\'s verb posts the ONE door (POST /api/browser/floor/check); an answer advances, a miss stays');
+  ok(gateOf(/fetchJson\('\/api\/browser\/floor\/check', \{ method: 'POST'/.test(verb)) && gateOf(/return true;/.test(verb)) && verdictOf(/return false;/.test(verb)), 'the model\'s verb posts the ONE door (POST /api/browser/floor/check); an answer advances, a miss stays');
   const win = read('src/lib/inbox-window.js');
   // lane cli-self-measure: the «Check again» verbs are ONE family the window reads off the registry (foryou-actions CHECK_AGAIN_TYPES —
   // a row that declares `checkAgain`, its hover); the floor probe is one of them
   const FYA = require(path.join(REPO, 'src/foryou-actions.js'));
-  ok(FYA.CHECK_AGAIN_TYPES.includes('browser-floor-check') && /once more now/.test(FYA.ROW_OF['browser-floor-check'].checkAgain) && /CHECK_AGAIN_TYPES\.map\(\(ty\) => \[ty, \(\) => actBtn\(ty, UI_ICONS\.refresh, FY_ROW\[ty\]\.checkLabel \? t\(FY_ROW\[ty\]\.checkLabel\) : t\('Check again'\), t\(FY_ROW\[ty\]\.checkAgain\)/.test(win) && /if \(CHECK_AGAIN_TYPES\.includes\(a\)\) \{ if \(await model\.runAction\(it\)\) advance\(id\); return; \}/.test(win), 'the window draws the button (the registry row\'s hover) and runs the model\'s verb');
+  ok(gateOf(FYA.CHECK_AGAIN_TYPES.includes('browser-floor-check')) && gateOf(/once more now/.test(FYA.ROW_OF['browser-floor-check'].checkAgain)) && gateOf(/CHECK_AGAIN_TYPES\.map\(\(ty\) => \[ty, \(\) => actBtn\(ty, UI_ICONS\.refresh, FY_ROW\[ty\]\.checkLabel \? t\(FY_ROW\[ty\]\.checkLabel\) : t\('Check again'\), t\(FY_ROW\[ty\]\.checkAgain\)/.test(win)) && verdictOf(/if \(CHECK_AGAIN_TYPES\.includes\(a\)\) \{ if \(await model\.runAction\(it\)\) advance\(id\); return; \}/.test(win)), 'the window draws the button (the registry row\'s hover) and runs the model\'s verb');
   const Z = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
   const Jx = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
   const keys = ['Check again', 'Ask for the browser version once more now — this notice goes away by itself once it reads', 'The browser version reads again: {version}', 'Still no answer: {why}'];
-  ok(keys.every((k) => Z[k] && Jx[k]), 'the words: zh + ja for the button, its title and both toasts', keys.filter((k) => !Z[k] || !Jx[k]));
+  ok(verdictOf(keys.every((k) => Z[k] && Jx[k])), 'the words: zh + ja for the button, its title and both toasts', keys.filter((k) => !Z[k] || !Jx[k]));
 }
 
 for (const k of keepers) { try { k.shutdown(); } catch { } }
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? ` passed, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

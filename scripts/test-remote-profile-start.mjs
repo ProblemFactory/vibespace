@@ -26,7 +26,7 @@ const { DeviceManager } = require('../src/agentd/client.js');
 const M = await import('../src/lib/browser-new-profile-model.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 const ROOT = scratch('rps');
 fs.rmSync(ROOT, { recursive: true, force: true });
 const HOME = path.join(ROOT, 'home'); fs.mkdirSync(path.join(HOME, '.agent-browser'), { recursive: true });
@@ -91,16 +91,16 @@ console.log('— ① the machine\'s own facts + ops (win32 / darwin / linux)');
 {
   const winNoCli = machine('win-nocli', { platform: 'win32', env: WIN_ENV, cli: null });
   const r1 = (await op(winNoCli, 'builds')).ready;
-  ok(r1 && r1.platform === 'win32' && !r1.cli.found && r1.step && r1.step.code === 'browser_cli_missing' && r1.step.command === 'npm install -g agent-browser; agent-browser install' && r1.step.shell === 'powershell', 'win32, no agent-browser on Path × PATHEXT (+ npm\'s global bin): browser_cli_missing, the PowerShell command', r1);
+  ok(gateOf(r1) && r1.platform === 'win32' && !r1.cli.found && gateOf(r1.step) && r1.step.code === 'browser_cli_missing' && r1.step.command === 'npm install -g agent-browser; agent-browser install' && r1.step.shell === 'powershell', 'win32, no agent-browser on Path × PATHEXT (+ npm\'s global bin): browser_cli_missing, the PowerShell command', r1);
   const winCli = machine('win-cli', { platform: 'win32', env: WIN_ENV, files: ['C:\\Users\\u\\AppData\\Roaming\\npm\\agent-browser.CMD'] });
   const r2 = (await op(winCli, 'builds')).ready;
-  ok(r2.cli.found && r2.cli.path === 'C:\\Users\\u\\AppData\\Roaming\\npm\\agent-browser.CMD' && !r2.browser.found && r2.step && r2.step.code === 'browser_missing' && r2.step.command === 'agent-browser install', 'win32, the npm .CMD shim found (case-blind `Path`), no Chrome anywhere: browser_missing → agent-browser install', r2);
+  ok(gateOf(r2.cli.found) && r2.cli.path === 'C:\\Users\\u\\AppData\\Roaming\\npm\\agent-browser.CMD' && !r2.browser.found && gateOf(r2.step) && r2.step.code === 'browser_missing' && r2.step.command === 'agent-browser install', 'win32, the npm .CMD shim found (case-blind `Path`), no Chrome anywhere: browser_missing → agent-browser install', r2);
   const winReady = machine('win-ready', { platform: 'win32', env: WIN_ENV, files: ['C:\\Users\\u\\AppData\\Roaming\\npm\\agent-browser.CMD', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'] });
   const r3 = (await op(winReady, 'builds')).ready;
   ok(r3.step === null && r3.browser.kind === 'system' && r3.browser.path === 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'win32 with Chrome in Program Files: ready (no step)', r3);
   const macNoCli = machine('mac-nocli', { platform: 'darwin', cli: null, files: ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'] });
   const r4 = (await op(macNoCli, 'builds')).ready;
-  ok(r4.step && r4.step.code === 'browser_cli_missing' && r4.step.command === 'npm install -g agent-browser && agent-browser install' && r4.step.shell === 'sh' && r4.browser.found, 'darwin, Chrome.app present but no CLI: browser_cli_missing, the sh command', r4);
+  ok(gateOf(r4.step) && r4.step.code === 'browser_cli_missing' && r4.step.command === 'npm install -g agent-browser && agent-browser install' && r4.step.shell === 'sh' && verdictOf(r4.browser.found), 'darwin, Chrome.app present but no CLI: browser_cli_missing, the sh command', r4);
   const macPw = machine('mac-pw', { platform: 'darwin' });
   fs.mkdirSync(path.join(macPw.home, 'Library', 'Caches', 'ms-playwright', 'chromium-1187'), { recursive: true });
   ok((await op(macPw, 'builds')).ready.browser.kind === 'playwright', 'darwin: Playwright\'s cache counts (agent-browser reads it)');
@@ -114,14 +114,14 @@ console.log('— ① the machine\'s own facts + ops (win32 / darwin / linux)');
   // a START on a machine with no CLI: refused BY NAME with the step, NOTHING created there
   const id = 'bp-0a0b0c0d';
   const s1 = await op(winNoCli, 'start', { profileId: id });
-  ok(s1.ok === false && s1.code === 'browser_cli_missing' && s1.step && s1.step.command.includes('npm install -g agent-browser') && !/agent-browser/.test(s1.error) && /Agent browser panel/.test(s1.error) && !fs.existsSync(path.join(winNoCli.home, '.agent-browser', 'vs-' + id)) && winNoCli.st.launches.length === 0, 'start with no CLI: browser_cli_missing + the step (the sentence never names the CLI — an agent reads it), the profile folder NOT created, nothing launched', s1);
+  ok(s1.ok === false && s1.code === 'browser_cli_missing' && gateOf(s1.step) && gateOf(s1.step.command.includes('npm install -g agent-browser')) && !/agent-browser/.test(s1.error) && gateOf(/Agent browser panel/.test(s1.error)) && !fs.existsSync(path.join(winNoCli.home, '.agent-browser', 'vs-' + id)) && winNoCli.st.launches.length === 0, 'start with no CLI: browser_cli_missing + the step (the sentence never names the CLI — an agent reads it), the profile folder NOT created, nothing launched', s1);
   const Sm = mutant('src/browser-serve.js', '{ const cli = cliFact(bs); if (!cli.found)', '{ const cli = cliFact(bs); if (false)');
   const s1c = await Sm.runBrowserServeOp(winNoCli.bs, 'start', { profileId: id });
-  ok(s1c.code !== 'browser_cli_missing' && fs.existsSync(path.join(winNoCli.home, '.agent-browser', 'vs-' + id)), 'CONTROL (the check removed): the start creates the folder and is not refused by name', s1c);
+  ok(s1c.code !== 'browser_cli_missing' && verdictOf(fs.existsSync(path.join(winNoCli.home, '.agent-browser', 'vs-' + id))), 'CONTROL (the check removed): the start creates the folder and is not refused by name', s1c);
   // the CLI's OWN "no Chrome" verdict at a launch ⇒ browser_missing + the step (never a generic launch_failed)
   const noChrome = machine('lin-nochrome', { platform: 'linux', noChrome: true });
   const s2 = await op(noChrome, 'start', { profileId: id });
-  ok(s2.ok === false && s2.code === 'browser_missing' && s2.step && s2.step.command === 'agent-browser install', 'a launch the CLI answers "No Chrome binary found": browser_missing + agent-browser install', s2);
+  ok(s2.ok === false && s2.code === 'browser_missing' && gateOf(s2.step) && s2.step.command === 'agent-browser install', 'a launch the CLI answers "No Chrome binary found": browser_missing + agent-browser install', s2);
   const Sm2 = mutant('src/browser-serve.js', "if (!r.ok && /No Chrome binary found/i.test(", "if (false && /No Chrome binary found/i.test(");
   ok((await Sm2.runBrowserServeOp(noChrome.bs, 'start', { profileId: id })).code === 'launch_failed', 'CONTROL (no translation): the same launch is a generic launch_failed');
   // REMOVE: the profile's OWN folder + its two launch views; a sibling, a running browser, a link — each kept and said
@@ -134,17 +134,17 @@ console.log('— ① the machine\'s own facts + ops (win32 / darwin / linux)');
   fs.writeFileSync(S.planFileOf(m.bs, 'vs-' + id) , '{}'); fs.writeFileSync(S.buildFileOf(m.bs, 'vs-' + id), '{}');
   m.st.running.set('vs-' + id, true);
   const rr = await op(m, 'remove', { profileId: id });
-  ok(rr.ok === false && rr.code === 'running' && fs.existsSync(own), 'remove while its browser runs there: refused `running`, the folder kept', rr);
+  ok(rr.ok === false && rr.code === 'running' && verdictOf(fs.existsSync(own)), 'remove while its browser runs there: refused `running`, the folder kept', rr);
   m.st.running.delete('vs-' + id);
   const rm = await op(m, 'remove', { profileId: id });
-  ok(rm.ok && rm.removed === true && rm.views === 2 && !fs.existsSync(own) && fs.readFileSync(path.join(sib, 'Cookies'), 'utf8') === 'keep' && !fs.existsSync(S.planFileOf(m.bs, 'vs-' + id)), 'remove: the profile\'s own folder + its two launch views gone; a sibling profile untouched', rm);
+  ok(gateOf(rm.ok) && rm.removed === true && rm.views === 2 && !fs.existsSync(own) && fs.readFileSync(path.join(sib, 'Cookies'), 'utf8') === 'keep' && !fs.existsSync(S.planFileOf(m.bs, 'vs-' + id)), 'remove: the profile\'s own folder + its two launch views gone; a sibling profile untouched', rm);
   ok((await op(m, 'remove', { profileId: id })).removed === false, 'remove again: ok, nothing there (removed:false)');
   const bad = await op(m, 'remove', { profileId: '../../etc' });
   ok(bad.ok === false && bad.code === 'bad-request', 'remove of a non-id ("../../etc"): bad-request — the machine composes the path from an id only', bad);
   const outside = path.join(ROOT, 'outside'); fs.mkdirSync(outside, { recursive: true }); fs.writeFileSync(path.join(outside, 'keep.txt'), 'k');
   fs.symlinkSync(outside, own);
   const rl = await op(m, 'remove', { profileId: id });
-  ok(rl.ok === false && rl.code === 'not_a_folder' && fs.existsSync(path.join(outside, 'keep.txt')), 'a LINK where the folder should be: left as it is, its target untouched (never followed)', rl);
+  ok(rl.ok === false && rl.code === 'not_a_folder' && verdictOf(fs.existsSync(path.join(outside, 'keep.txt'))), 'a LINK where the folder should be: left as it is, its target untouched (never followed)', rl);
   fs.unlinkSync(own);
 }
 
@@ -153,10 +153,10 @@ console.log('— ② the capability gate');
 {
   const ask = async (caps, action) => { const self = { connect: async () => ({ info: { capabilities: caps } }), _request: async () => ({ result: { ok: true, asked: action } }) }; try { return await DeviceManager.prototype.browserServe.call(self, action, { profileId: 'bp-0a0b0c0d' }); } catch (e) { return { thrown: e.code, message: e.message }; } };
   const old = await ask(['browser-serve', 'browser-builds'], 'remove');
-  ok(old.thrown === 'remove_unsupported' && /upgrade the agent/.test(old.message), 'an agent without `browser-remove` is never asked to remove: remove_unsupported by name', old);
+  ok(old.thrown === 'remove_unsupported' && verdictOf(/upgrade the agent/.test(old.message)), 'an agent without `browser-remove` is never asked to remove: remove_unsupported by name', old);
   ok((await ask(['browser-serve', 'browser-builds', 'browser-remove'], 'remove')).asked === 'remove' && (await ask(['browser-serve'], 'status')).asked === 'status', 'with the capability it is asked; other ops are unchanged');
   const daemon = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  ok(/capabilities: \[[^\]]*'browser-remove'[^\]]*\]/.test(daemon) && S.BROWSER_SERVE_OPS.includes('remove'), 'the daemon announces `browser-remove`; `remove` is in the shared op table');
+  ok(gateOf(/capabilities: \[[^\]]*'browser-remove'[^\]]*\]/.test(daemon)) && verdictOf(S.BROWSER_SERVE_OPS.includes('remove')), 'the daemon announces `browser-remove`; `remove` is in the shared op table');
 }
 
 // ═══ ②b B-e799: THE STRUCTURED STOP — the machine's `stop` answers its OUTCOME in fields (capability `browser-stop-facts`) ═══
@@ -168,12 +168,12 @@ console.log('— ②b the structured stop: the outcome in fields, the gate, the 
   const askP = async (caps, action, params) => { let asked = 0; const self = { connect: async () => ({ info: { capabilities: caps, daemonVersion: '2.369.414' } }), _request: async () => { asked++; return { result: { ok: true, asked: action } }; } }; try { const r = await DeviceManager.prototype.browserServe.call(self, action, params); return { ...r, asked }; } catch (e) { return { thrown: e.code, message: e.message, asked }; } };
   const OLD = ['browser-serve', 'browser-builds', 'browser-remove'], NEW = [...OLD, 'browser-stop-facts'];
   const g0 = await askP(OLD, 'stop', { profileId: 'bp-0a0b0c0d', facts: true });
-  ok(g0.thrown === 'stop_facts_unsupported' && g0.asked === 0 && /\(2\.369\.414\) predates the structured stop answer/.test(g0.message) && /updates it by itself when the machine next connects/.test(g0.message) && /do not try to update it yourself/.test(g0.message),
+  ok(g0.thrown === 'stop_facts_unsupported' && g0.asked === 0 && gateOf(/\(2\.369\.414\) predates the structured stop answer/.test(g0.message)) && gateOf(/updates it by itself when the machine next connects/.test(g0.message)) && verdictOf(/do not try to update it yourself/.test(g0.message)),
     'B-e799: an agent without `browser-stop-facts` is NEVER asked a stop with facts — refused by name, its words true to the update road (the hub updates it at its next connection; never by the asker)', g0);
   const g1 = await askP(NEW, 'stop', { profileId: 'bp-0a0b0c0d', facts: true }), g2 = await askP(OLD, 'stop', { profileId: 'bp-0a0b0c0d' });
   ok(g1.asked === 1 && g1.ok === true && g2.asked === 1 && g2.ok === true, 'B-e799: with the capability it is asked; a stop WITHOUT facts (a person\'s own stop) is asked of an older agent as before', { g1, g2 });
   const daemon = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  ok(/capabilities: \[[^\]]*'browser-stop-facts'[^\]]*\]/.test(daemon), 'B-e799: the daemon announces `browser-stop-facts`');
+  ok(verdictOf(/capabilities: \[[^\]]*'browser-stop-facts'[^\]]*\]/.test(daemon)), 'B-e799: the daemon announces `browser-stop-facts`');
 
   // the op's five outcomes over a stand-in machine (its runtime injected per case; the grace shortened to 50 ms)
   const m = machine('stop-facts', { files: ['/usr/bin/google-chrome'] });
@@ -193,13 +193,13 @@ console.log('— ②b the structured stop: the outcome in fields, the gate, the 
   fs.unlinkSync(lockAt);
   // (4) the fields ONLY when asked: a stop without facts (a person's own stop) answers today's shape
   const sPlain = await S.runBrowserServeOp({ ...m.bs, runtime: { ...m.bs.runtime, info: async () => ({ active: true, pid: DEAD }), closeAll: async () => ({ ok: true }) }, stopGraceMs: 50 }, 'stop', { profileId: SF });
-  ok(sStopped.ok && sStopped.outcome === 'stopped' && sStopped.daemon && sStopped.daemon.pid === DEAD && sStopped.survivors.length === 0, 'B-e799: our daemon gone after the grace ⇒ outcome «stopped», its pid named', sStopped);
-  ok(sSurvived.ok && sSurvived.outcome === 'survived' && sSurvived.survivors.length === 1 && sSurvived.survivors[0].pid === process.pid && Number.isInteger(sSurvived.survivors[0].starttime) && /still alive/.test(sSurvived.left || ''),
+  ok(gateOf(sStopped.ok) && sStopped.outcome === 'stopped' && gateOf(sStopped.daemon) && sStopped.daemon.pid === DEAD && sStopped.survivors.length === 0, 'B-e799: our daemon gone after the grace ⇒ outcome «stopped», its pid named', sStopped);
+  ok(gateOf(sSurvived.ok) && sSurvived.outcome === 'survived' && sSurvived.survivors.length === 1 && sSurvived.survivors[0].pid === process.pid && gateOf(Number.isInteger(sSurvived.survivors[0].starttime)) && verdictOf(/still alive/.test(sSurvived.left || '')),
     'B-e799: a daemon alive after the grace ⇒ «survived» with its pid and start time (the words `left` kept for an older hub; the process NOT signalled)', sSurvived);
   ok(sFailed.ok === false && sFailed.code === 'stop_failed' && sFailed.outcome === 'failed', 'B-e799: a close that failed with the daemon still alive ⇒ «failed» (ok:false, its own code)', sFailed);
-  ok(sNone.ok && sNone.outcome === 'not_running' && sNone.daemon === null, 'B-e799: nothing of ours ran and nothing holds its folder ⇒ «not_running»', sNone);
-  ok(sRecycled.ok && sRecycled.outcome === 'not_running' && !sRecycled.holder, 'B-e799 (round wvdrkjdvx 1): a stale lock whose pid is alive but names no folder of ours (a recycled pid) ⇒ «not_running» — the owner rule says free, never «not ours»', sRecycled);
-  ok(sPlain.ok && sPlain.closed === 1 && !('outcome' in sPlain) && !('survivors' in sPlain), 'B-e799 (round wvdrkjdvx 4): a stop asked WITHOUT facts (a person\'s own stop) answers today\'s shape — no outcome fields: its road is kept', sPlain);
+  ok(gateOf(sNone.ok) && sNone.outcome === 'not_running' && sNone.daemon === null, 'B-e799: nothing of ours ran and nothing holds its folder ⇒ «not_running»', sNone);
+  ok(gateOf(sRecycled.ok) && sRecycled.outcome === 'not_running' && !sRecycled.holder, 'B-e799 (round wvdrkjdvx 1): a stale lock whose pid is alive but names no folder of ours (a recycled pid) ⇒ «not_running» — the owner rule says free, never «not ours»', sRecycled);
+  ok(gateOf(sPlain.ok) && sPlain.closed === 1 && !('outcome' in sPlain) && !('survivors' in sPlain), 'B-e799 (round wvdrkjdvx 4): a stop asked WITHOUT facts (a person\'s own stop) answers today\'s shape — no outcome fields: its road is kept', sPlain);
   // the PURE outcome over the LOCK VERDICT's facts (a fast suite starts no real program): who holds the folder is judged by
   // browser-profiles profileLockVerdict — the keeper's launch mark, or the browser CLI's own --remote-debugging-port=0 on a folder
   // VibeSpace minted; the real driver scrubs every AGENT_BROWSER_* from its Chrome, so the environment is no witness
@@ -212,7 +212,7 @@ console.log('— ②b the structured stop: the outcome in fields, the gate, the 
   const pIdle = pure(S, { before: { active: false }, daemon: { pid: DEAD, starttime: null }, lockFacts: { lock: null, holder: null } });   // (3) an idle daemon, no browser, ended
   ok(pOwnPre.outcome === 'survived' && pOwnPre.survivors[0].pid === 4321 && pOwnMark.outcome === 'survived' && pPerson.outcome === 'not_ours' && pPerson.holder.user === true && pPerson.holder.pid === 4321,
     'B-e799 (round wvdrkjdvx 1): OUR OWN orphan (the CLI\'s --remote-debugging-port=0, or the keeper\'s launch mark) ⇒ «survived», named; a browser with no mark of ours ⇒ «not_ours», user', { pOwnPre, pOwnMark, pPerson });
-  ok(pLinger.outcome === 'survived' && pLinger.survivors.some((x) => x.pid === 4321), 'B-e799 (round wvdrkjdvx 2): the daemon ended inside the grace while OUR Chrome still holds the folder ⇒ «survived» (never «stopped» with its memory still there)', pLinger);
+  ok(pLinger.outcome === 'survived' && verdictOf(pLinger.survivors.some((x) => x.pid === 4321)), 'B-e799 (round wvdrkjdvx 2): the daemon ended inside the grace while OUR Chrome still holds the folder ⇒ «survived» (never «stopped» with its memory still there)', pLinger);
   ok(pIdle.outcome === 'not_running' && pIdle.daemonEnded === true, 'B-e799 (round wvdrkjdvx 3): an idle daemon with no browser, then ended ⇒ «not_running» with daemonEnded (the words say what happened)', pIdle);
   // RED (two copies): (1) today's environment rule — the holder judged by its namespace — calls OUR OWN orphan «not ours» (the false
   // cause a person would read); (2) the lock read only when the daemon was not active — a lingering Chrome after the grace is «stopped»
@@ -272,10 +272,10 @@ const owner = { owner: { kind: 'instance', id: null } };
   const Rc = mutant('src/routes/browser.js', "    try { await k.stop(req.params.id, { why: 'user' }); } catch (e) { if (!(remote && e && e.code === 'not-found')) throw e; cold = true; }", "    await k.stop(req.params.id, { why: 'user' });");
   const APIc = await serve(Rc);
   const c0 = await call(APIc, 'POST', `/api/browser/profiles/${p.id}/restart`);
-  ok(c0.status === 404 && /no browser record/.test(c0.json && c0.json.error), 'CONTROL (the base\'s stop-first restart): a never-started paired machine\'s profile answers 404 "no browser record"', c0);
+  ok(c0.status === 404 && verdictOf(/no browser record/.test(c0.json && c0.json.error)), 'CONTROL (the base\'s stop-first restart): a never-started paired machine\'s profile answers 404 "no browser record"', c0);
   R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, forwards: () => access.forwards() });
   const c1 = await call(API, 'POST', `/api/browser/profiles/${p.id}/restart`);
-  ok(c1.status === 200 && c1.json.cold === true && c1.json.browser && c1.json.browser.state === 'ready' && mac.st.launches.length === 1 && access.forwards().some((f) => f.hostId === 'dev-mac'), 'the owner STARTS it from cold: 200, started on dev-mac (one launch there), the hub forward up', c1);
+  ok(c1.status === 200 && c1.json.cold === true && gateOf(c1.json.browser) && c1.json.browser.state === 'ready' && mac.st.launches.length === 1 && verdictOf(access.forwards().some((f) => f.hostId === 'dev-mac')), 'the owner STARTS it from cold: 200, started on dev-mac (one launch there), the hub forward up', c1);
   const c2 = await call(API, 'POST', `/api/browser/profiles/${p.id}/restart`);
   ok(c2.status === 200 && c2.json.cold === false && mac.st.launches.length === 2, 'a live one is RESTARTED (stop + start, cold:false) — the one door');
   // 2 · BROWSE IT YOURSELF: his own tab over the HUB FORWARD (never the machine's port), the live view's target
@@ -283,23 +283,23 @@ const owner = { owner: { kind: 'instance', id: null } };
   const b1 = await call(API, 'POST', `/api/browser/profiles/${p.id}/browse`);
   const fwd = access.forwards().find((f) => f.hostId === 'dev-mac');
   const tabCalls = hubCli().slice(before).filter((c) => c.argv[0] === 'tab' && c.argv[1] === 'new');
-  ok(b1.status === 200 && b1.json.key === HM.humanKeyFor(p.id) && tabCalls.length === 1 && fwd && tabCalls[0].cdp && tabCalls[0].cdp.includes('127.0.0.1:' + fwd.localPort) && !tabCalls[0].cdp.includes(':' + CDP_PORT + '/'), 'Browse yourself on a paired machine\'s profile: his own tab, opened over the hub forward 127.0.0.1:' + (fwd && fwd.localPort) + ' (not the machine\'s port)', { b1, tabCalls });
+  ok(b1.status === 200 && b1.json.key === HM.humanKeyFor(p.id) && tabCalls.length === 1 && gateOf(fwd) && gateOf(tabCalls[0].cdp) && gateOf(tabCalls[0].cdp.includes('127.0.0.1:' + fwd.localPort)) && !tabCalls[0].cdp.includes(':' + CDP_PORT + '/'), 'Browse yourself on a paired machine\'s profile: his own tab, opened over the hub forward 127.0.0.1:' + (fwd && fwd.localPort) + ' (not the machine\'s port)', { b1, tabCalls });
   const tg = k.humanTargetFor(b1.json.key);
-  ok(tg && tg.ok !== false && tg.profileId === p.id, 'the live view\'s target for his browsing window exists (the view opens on it)', tg);
+  ok(gateOf(tg) && tg.ok !== false && tg.profileId === p.id, 'the live view\'s target for his browsing window exists (the view opens on it)', tg);
   const HMc = mutant('src/browser-human.js', "  if (p.host && hostKnown === false) return no('remote_profile'", "  if (p.host) return no('remote_profile'");
   ok(HMc.browseYourselfVerdict({ profile: { id: p.id, label: 'x', host: 'dev-mac' }, hostKnown: true }).code === 'remote_profile' && HM.browseYourselfVerdict({ profile: { id: p.id, label: 'x', host: 'dev-mac' }, hostKnown: true }).ok === true, 'CONTROL (the v1 line): the same verdict refuses remote_profile; this tree answers ok');
   const gone = HM.browseYourselfVerdict({ profile: { id: p.id, label: 'Bank', host: 'dev-gone' }, hostKnown: false });
-  ok(gone.code === 'remote_profile' && /not paired with this VibeSpace any more/.test(gone.error), 'a machine this VibeSpace no longer knows: remote_profile, said by name', gone);
+  ok(gone.code === 'remote_profile' && verdictOf(/not paired with this VibeSpace any more/.test(gone.error)), 'a machine this VibeSpace no longer knows: remote_profile, said by name', gone);
   await k.quitHuman(b1.json.key);
   ok(!B.isLiveBrowser(k._reg().browsers[p.id]) && !mac.st.running.size, 'Quit the whole browser: stopped on the machine');
   // 3 · NO BROWSER THERE — said by name, with the one step for THAT platform (start + browse + the dialog's builds)
   const w = k.createProfile({ label: 'On the PC', host: 'dev-win' }, owner);
   const s1 = await call(API, 'POST', `/api/browser/profiles/${w.id}/restart`);
-  ok(s1.status === 409 && s1.json.code === 'browser_cli_missing' && s1.json.step && s1.json.step.command === 'npm install -g agent-browser; agent-browser install' && s1.json.step.machine === 'dev-win' && /dev-win: no browser can start on this machine/.test(s1.json.error) && !fs.existsSync(path.join(win.home, '.agent-browser', 'vs-' + w.id)), 'start on a Windows machine with no agent-browser: 409 browser_cli_missing, the PowerShell step + the machine, nothing created there', s1);
+  ok(s1.status === 409 && s1.json.code === 'browser_cli_missing' && gateOf(s1.json.step) && s1.json.step.command === 'npm install -g agent-browser; agent-browser install' && s1.json.step.machine === 'dev-win' && gateOf(/dev-win: no browser can start on this machine/.test(s1.json.error)) && !fs.existsSync(path.join(win.home, '.agent-browser', 'vs-' + w.id)), 'start on a Windows machine with no agent-browser: 409 browser_cli_missing, the PowerShell step + the machine, nothing created there', s1);
   const s2 = await call(API, 'POST', `/api/browser/profiles/${w.id}/browse`);
-  ok(s2.status === 409 && s2.json.code === 'browser_cli_missing' && s2.json.step && s2.json.step.shell === 'powershell', 'Browse yourself there: the same refusal by name + its step', s2);
+  ok(s2.status === 409 && s2.json.code === 'browser_cli_missing' && gateOf(s2.json.step) && s2.json.step.shell === 'powershell', 'Browse yourself there: the same refusal by name + its step', s2);
   const bw = await call(API, 'GET', '/api/browser/builds?host=dev-win'), bm = await call(API, 'GET', '/api/browser/builds?host=dev-mac'), bl = await call(API, 'GET', '/api/browser/builds');
-  ok(bw.json.ready && bw.json.ready.step.code === 'browser_cli_missing' && bm.json.ready && bm.json.ready.step === null && bl.json.ready === null, 'GET /api/browser/builds?host=: the machine\'s `ready` (dev-win: the step; dev-mac: none); this computer: null', { bw: bw.json.ready, bm: bm.json.ready, bl: bl.json.ready });
+  ok(gateOf(bw.json.ready) && bw.json.ready.step.code === 'browser_cli_missing' && gateOf(bm.json.ready) && bm.json.ready.step === null && bl.json.ready === null, 'GET /api/browser/builds?host=: the machine\'s `ready` (dev-win: the step; dev-mac: none); this computer: null', { bw: bw.json.ready, bm: bm.json.ready, bl: bl.json.ready });
   // 4 · DELETE WITH ITS FOLDER THERE (the DELETE route and the panel's Delete… / forget)
   fs.mkdirSync(path.join(mac.home, '.agent-browser', 'vs-' + p.id, 'Default'), { recursive: true });
   const Rd = mutant('src/routes/browser.js', "    const r = k.removeProfile(req.params.id, { unpin, machine: snap, replyMs: REPLY_LAND_MS });", "    const r = k.removeProfile(req.params.id, { unpin, replyMs: REPLY_LAND_MS });");   // the moved2 cure 2: the machine is asked by the keeper's own step (the snapshot handed to it) — the control hands none   // lane lg-store-writes (the move's hunt, C): the machine's call is the ternary's second road (the first: a removal not on disk asks nothing)
@@ -307,23 +307,23 @@ const owner = { owner: { kind: 'instance', id: null } };
   const p2 = k.createProfile({ label: 'Control twin', host: 'dev-mac' }, owner);
   fs.mkdirSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id), { recursive: true });
   const dc = await call(APId, 'DELETE', `/api/browser/profiles/${p2.id}`);
-  ok(dc.status === 200 && fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id)) && !dc.json.machine, 'CONTROL (no machine removal): the record goes, its folder on the machine STAYS and nothing says so');
+  ok(dc.status === 200 && gateOf(fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id))) && !dc.json.machine, 'CONTROL (no machine removal): the record goes, its folder on the machine STAYS and nothing says so');
   R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, forwards: () => access.forwards() });
   const d1 = await call(API, 'DELETE', `/api/browser/profiles/${p.id}`);
-  ok(d1.status === 200 && d1.json.removed === p.id && d1.json.machine && d1.json.machine.removed === true && d1.json.machine.host === 'dev-mac' && !fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p.id)) && fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id)), 'DELETE: the record AND its folder on dev-mac gone (the machine\'s own op); another profile\'s folder there untouched', d1.json);
+  ok(d1.status === 200 && d1.json.removed === p.id && gateOf(d1.json.machine) && d1.json.machine.removed === true && d1.json.machine.host === 'dev-mac' && !fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p.id)) && verdictOf(fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id))), 'DELETE: the record AND its folder on dev-mac gone (the machine\'s own op); another profile\'s folder there untouched', d1.json);
   const l = k.createProfile({ label: 'Old agent box', host: 'dev-lin' }, owner);
   const d2 = await call(API, 'DELETE', `/api/browser/profiles/${l.id}`);
-  ok(d2.status === 200 && !k.profile(l.id) && d2.json.machine && d2.json.machine.removed === false && d2.json.machine.code === 'remove_unsupported' && /vs-bp-[0-9a-f]{8} on dev-lin was left there/.test(d2.json.machine.left) && /upgrade the agent/.test(d2.json.machine.left), 'an agent that predates removal: the record goes, the answer says plainly which folder was LEFT on dev-lin and why', d2.json);
+  ok(d2.status === 200 && !k.profile(l.id) && gateOf(d2.json.machine) && d2.json.machine.removed === false && d2.json.machine.code === 'remove_unsupported' && gateOf(/vs-bp-[0-9a-f]{8} on dev-lin was left there/.test(d2.json.machine.left)) && verdictOf(/upgrade the agent/.test(d2.json.machine.left)), 'an agent that predates removal: the record goes, the answer says plainly which folder was LEFT on dev-lin and why', d2.json);
   const dn = k.createProfile({ label: 'Offline box', host: 'dev-down' }, owner);
   const d3 = await call(API, 'DELETE', `/api/browser/profiles/${dn.id}`);
-  ok(d3.status === 200 && d3.json.machine && d3.json.machine.code === 'host_unavailable' && /was left there/.test(d3.json.machine.left), 'an offline machine: removed here, its folder there named as left', d3.json);
+  ok(d3.status === 200 && gateOf(d3.json.machine) && d3.json.machine.code === 'host_unavailable' && verdictOf(/was left there/.test(d3.json.machine.left)), 'an offline machine: removed here, its folder there named as left', d3.json);
   // the panel's Delete… (the forget route's service): a paired machine's profile — its folder there, said in the ledger
   const T = require('../src/server/browser-trace.js');
   const tr = T.create({ dataDir: DATA, homeDir: HOME, keeper: k, log, sweepEveryMs: 3600e3 });
   const f = k.createProfile({ label: 'Forget me', host: 'dev-mac' }, owner);
   fs.mkdirSync(path.join(mac.home, '.agent-browser', 'vs-' + f.id), { recursive: true });
   const fr = await tr.forgetProfile(f.id, {});
-  ok(fr.ok && fr.machine && fr.machine.removed === true && !fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + f.id)) && /on dev-mac deleted there/.test(fr.ledger.why) && !/already gone/.test(fr.ledger.why), 'the panel\'s Delete… of a paired machine\'s profile: its folder on dev-mac deleted, the ledger says so (never "already gone")', fr);
+  ok(gateOf(fr.ok) && gateOf(fr.machine) && fr.machine.removed === true && !fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + f.id)) && gateOf(/on dev-mac deleted there/.test(fr.ledger.why)) && !/already gone/.test(fr.ledger.why), 'the panel\'s Delete… of a paired machine\'s profile: its folder on dev-mac deleted, the ledger says so (never "already gone")', fr);
   try { tr.stop?.(); } catch { /* none */ }
 }
 
@@ -334,18 +334,18 @@ console.log('— ④ the New profile dialog: a machine with no browser, by name,
   const rows = M.machineChoices({ machines: [{ hostId: 'local' }, { hostId: 'dev-win', label: 'WIN-DESK1', connected: true, capabilities: ['browser-serve'] }, { hostId: 'dev-mac', label: 'Mac', connected: true, capabilities: ['browser-serve'] }, { hostId: 'dev-old', label: 'Old', connected: true, capabilities: ['probe'] }],
     ready: { 'dev-win': { step: { code: 'browser_cli_missing', command: 'npm install -g agent-browser; agent-browser install', shell: 'powershell' } }, 'dev-mac': { step: null } }, t: tEn });
   const rw = rows.find((r) => r.hostId === 'dev-win'), rm = rows.find((r) => r.hostId === 'dev-mac'), ro = rows.find((r) => r.hostId === 'dev-old');
-  ok(rw.state === 'needs-browser' && rw.pickable && /agent-browser is not installed on WIN-DESK1/.test(rw.note) && /PowerShell/.test(rw.note) && rw.step.command === 'npm install -g agent-browser; agent-browser install', 'WIN-DESK1 with no CLI: needs-browser, BY NAME, its PowerShell command (copyable), still pickable', rw);
+  ok(rw.state === 'needs-browser' && gateOf(rw.pickable) && gateOf(/agent-browser is not installed on WIN-DESK1/.test(rw.note)) && gateOf(/PowerShell/.test(rw.note)) && rw.step.command === 'npm install -g agent-browser; agent-browser install', 'WIN-DESK1 with no CLI: needs-browser, BY NAME, its PowerShell command (copyable), still pickable', rw);
   ok(rm.state === 'ready' && !rm.step && ro.state === 'no-browser', 'a ready machine stays ready; an agent too old keeps its own words');
   const w2 = M.machineStepWords({ code: 'browser_missing', command: 'agent-browser install', shell: 'sh', machine: 'dev-lin' }, { t: tEn });
-  ok(w2 && /dev-lin has no Chrome for agent-browser to run/.test(w2.note) && /terminal/.test(w2.note) && w2.command === 'agent-browser install' && /No browser on dev-lin yet/.test(w2.title), 'a refused start\'s step in words: the machine, the missing Chrome, where to type, the command');
-  ok(M.machineStepWords(null) === null && M.MACHINE_STATES.includes('needs-browser'), 'no step ⇒ no words; the state is in the closed set');
+  ok(gateOf(w2) && gateOf(/dev-lin has no Chrome for agent-browser to run/.test(w2.note)) && gateOf(/terminal/.test(w2.note)) && w2.command === 'agent-browser install' && verdictOf(/No browser on dev-lin yet/.test(w2.title)), 'a refused start\'s step in words: the machine, the missing Chrome, where to type, the command');
+  ok(M.machineStepWords(null) === null && verdictOf(M.MACHINE_STATES.includes('needs-browser')), 'no step ⇒ no words; the state is in the closed set');
   // the Agent browser panel's row: a paired machine's profile is the user's to browse and delete (never this machine's sweep's)
   const TR = require('../src/browser-trace.js');
   const rp = { id: 'bp-0a0b0c0e', label: 'Remote', provider: 'chromium', host: 'dev-mac', dir: null };
   const row = TR.housekeepingVerdict({ profiles: [rp], now: Date.now() })[0];
   const TRc = mutant('src/browser-trace.js', '    if (!q.ok && !remoteOwned(p, rowOf)) return', '    if (!q.ok) return');
   const rowC = TRc.housekeepingVerdict({ profiles: [rp], now: Date.now() })[0];
-  ok(row.state === 'kept' && row.canBrowse && row.canForget && TR.forgetVerdict({ profile: rp }).ok && rowC.state === 'not-ours' && !rowC.canForget, 'the panel row of a paired machine\'s profile: kept, Browse yourself + Delete… offered (CONTROL: the base row is not-ours — no Browse, Delete greyed)', { row, rowC });
+  ok(row.state === 'kept' && gateOf(row.canBrowse) && gateOf(row.canForget) && gateOf(TR.forgetVerdict({ profile: rp }).ok) && rowC.state === 'not-ours' && !rowC.canForget, 'the panel row of a paired machine\'s profile: kept, Browse yourself + Delete… offered (CONTROL: the base row is not-ours — no Browse, Delete greyed)', { row, rowC });
   ok(TR.queueVerdict(rp).code === 'not_ours' && TR.forgetVerdict({ profile: rp, browsers: { [rp.id]: { state: 'ready' } } }).code === 'running', 'this machine\'s sweep still never judges it (queueVerdict not_ours); a running one is refused first');
 }
 
@@ -380,10 +380,10 @@ console.log('— ⑤ verify r1');
     res.json({ ...k.removeProfile(req.params.id, { unpin }), unpinned: u.cleared, ...(m ? { machine: m } : {}) });`);
   const APIr = await serve(Rr);
   const rc = await raceOnce(APIr);
-  ok(rc.st.state === 'ready' && rc.d.status === 409 && rc.d.json.code === 'running' && rc.kept && rc.running, 'CONTROL (the machine asked BEFORE the record goes): the start lands in between — the folder\'s logins are gone there, yet the Delete answers 409 running and the profile stays listed', { st: rc.st, d: rc.d.json });
+  ok(rc.st.state === 'ready' && rc.d.status === 409 && rc.d.json.code === 'running' && gateOf(rc.kept) && verdictOf(rc.running), 'CONTROL (the machine asked BEFORE the record goes): the start lands in between — the folder\'s logins are gone there, yet the Delete answers 409 running and the profile stays listed', { st: rc.st, d: rc.d.json });
   setupWith(R);
   const r1 = await raceOnce(API);
-  ok(r1.st.thrown === 'not-found' && r1.d.status === 200 && r1.d.json.machine && r1.d.json.machine.removed === true && !r1.kept && !r1.running, 'a Delete racing an agent\'s first command: the record went first (that start is not-found), the folder there deleted, nothing runs there', { st: r1.st, d: r1.d.json });
+  ok(r1.st.thrown === 'not-found' && r1.d.status === 200 && gateOf(r1.d.json.machine) && r1.d.json.machine.removed === true && !r1.kept && !r1.running, 'a Delete racing an agent\'s first command: the record went first (that start is not-found), the folder there deleted, nothing runs there', { st: r1.st, d: r1.d.json });
   // the panel's Delete… (forget) takes the same order
   const T2 = require('../src/server/browser-trace.js');
   const tr2 = T2.create({ dataDir: DATA, homeDir: HOME, keeper: k, log, sweepEveryMs: 3600e3 });
@@ -395,13 +395,13 @@ console.log('— ⑤ verify r1');
   let sf; try { sf = await k.start(pf.id, { why: 'attach' }); } catch (e) { sf = { thrown: e.code }; }
   relf(); GATE.remove = null;
   const fr = await fP;
-  ok(sf.thrown === 'not-found' && fr.ok && fr.machine && fr.machine.removed === true && !k.profile(pf.id) && !mac.st.running.has('vs-' + pf.id), 'the panel\'s Delete… racing a start: the same order (record first, then the machine)', { sf, fr: fr && fr.machine });
+  ok(sf.thrown === 'not-found' && gateOf(fr.ok) && gateOf(fr.machine) && fr.machine.removed === true && !k.profile(pf.id) && !mac.st.running.has('vs-' + pf.id), 'the panel\'s Delete… racing a start: the same order (record first, then the machine)', { sf, fr: fr && fr.machine });
   try { tr2.stop?.(); } catch { /* none */ }
   // F3 · THIS computer's never-started profile: the restart route still answers 404 "no browser record" (no launch, no `cold`)
   const here = k.createProfile({ label: 'Here' }, owner);
   const n0 = hubCli().length;
   const h1 = await call(API, 'POST', `/api/browser/profiles/${here.id}/restart`);
-  ok(h1.status === 404 && /no browser record/.test(h1.json.error) && Object.keys(h1.json).join() === 'error,code' && hubCli().length === n0, 'this computer\'s never-started profile: restart answers 404 "no browser record" byte-for-byte as before — nothing launched', h1);
+  ok(h1.status === 404 && gateOf(/no browser record/.test(h1.json.error)) && Object.keys(h1.json).join() === 'error,code' && hubCli().length === n0, 'this computer\'s never-started profile: restart answers 404 "no browser record" byte-for-byte as before — nothing launched', h1);
   // int220: this computer's restart goes through the keeper's restartProfile first (lane browser-unresponsive) — the cold-start mutant drops that door too
   const Rh = mutant('src/routes/browser.js', "    if (!remote && typeof k.restartProfile === 'function') return res.json({ browser: await k.restartProfile(req.params.id, { by: 'user' }) });\n    try { await k.stop(req.params.id, { why: 'user' }); } catch (e) { if (!(remote && e && e.code === 'not-found')) throw e; cold = true; }", "    try { await k.stop(req.params.id, { why: 'user' }); } catch (e) { if (!(e && e.code === 'not-found')) throw e; cold = true; }");
   const APIh = await serve(Rh);
@@ -416,7 +416,7 @@ console.log('— ⑤ verify r1');
   const Rm = mutant('src/routes/browser.js', " ? { step: e.step } : {}), ...(res.locals && res.locals.minted", " ? { step: e.step } : {}), // eaten ...(res.locals && res.locals.minted");
   const APIm = await serve(Rm); setupWith(Rm, late);
   const a2 = await call(APIm, 'POST', '/api/browser/attach', { sessionId: 's-1', profile: 'bp-deadbeef' });
-  ok(a1.status === 404 && a1.json.minted && a1.json.minted.key === 'bk-1a2b3c4d' && a2.status === 404 && !a2.json.minted, 'a refused answer still carries the key this call minted (CONTROL: the comment-eaten line drops it)', { a1: a1.json, a2: a2.json });
+  ok(a1.status === 404 && gateOf(a1.json.minted) && a1.json.minted.key === 'bk-1a2b3c4d' && a2.status === 404 && !a2.json.minted, 'a refused answer still carries the key this call minted (CONTROL: the comment-eaten line drops it)', { a1: a1.json, a2: a2.json });
   setupWith(R);
   // F1 · Browse yourself on this computer's profile whose backend cannot run: the verdict's own words (rule 5), before start()
   const ctl = { off: false };
@@ -427,7 +427,7 @@ console.log('— ⑤ verify r1');
   const e1 = await browseErr(kOf(K, path.join(ROOT, 'data-f1')));
   const Kc = mutant('src/server/browser-keeper.js', 'hostKnown: p && p.host ? knownHost(p.host) : true, control: p && !isEph(p)', 'hostKnown: p && p.host ? knownHost(p.host) : true, eaten: p && !isEph(p)');
   const e2 = await browseErr(kOf(Kc, path.join(ROOT, 'data-f1c')));
-  ok(e1 && e1.code === 'backend_unavailable' && /can't run on this computer right now/.test(e1.message) && e2 && !/can't run on this computer right now/.test(e2.message), 'Browse yourself, its backend unavailable: the verdict\'s own words (CONTROL: without `control` the start\'s raw sentence)', { e1: e1 && e1.message, e2: e2 && e2.message });
+  ok(gateOf(e1) && e1.code === 'backend_unavailable' && gateOf(/can't run on this computer right now/.test(e1.message)) && gateOf(e2) && !/can't run on this computer right now/.test(e2.message), 'Browse yourself, its backend unavailable: the verdict\'s own words (CONTROL: without `control` the start\'s raw sentence)', { e1: e1 && e1.message, e2: e2 && e2.message });
 }
 
 
@@ -446,11 +446,11 @@ console.log('— ④ the manager\'s stop of a paired machine\'s browser: the out
   try {
     ok(await start(k, q.id) === true, 'B-e799: the named profile runs on dev-mac (the keeper\'s own start)');
     const row = k.stopRows().find((r) => r.id === q.id);
-    ok(row && row.kind === 'profile' && row.machine === 'dev-mac' && row.tabsKept === false, 'B-e799: its stop row is a NAMED PROFILE on its machine (kind profile, machine dev-mac; its tabs are not kept — as a named profile here)', row);
+    ok(gateOf(row) && row.kind === 'profile' && row.machine === 'dev-mac' && row.tabsKept === false, 'B-e799: its stop row is a NAMED PROFILE on its machine (kind profile, machine dev-mac; its tabs are not kept — as a named profile here)', row);
     // (a) the machine's agent predates the answer (dev-mac announces no `browser-stop-facts`): refused BY NAME, nothing moves
     const launches0 = mac.st.launches.length;
     let e1 = null; try { await k.managerStop(q.id); } catch (e) { e1 = e; }
-    ok(e1 && e1.code === 'stop_facts_unsupported' && /updates it by itself when the machine next connects/.test(e1.message) && live(k, q.id) && mac.st.running.get(qns) === true && access.forwards().some((f) => f.hostId === 'dev-mac'),
+    ok(gateOf(e1) && e1.code === 'stop_facts_unsupported' && gateOf(/updates it by itself when the machine next connects/.test(e1.message)) && gateOf(live(k, q.id)) && mac.st.running.get(qns) === true && verdictOf(access.forwards().some((f) => f.hostId === 'dev-mac')),
       'B-e799: an agent that predates the structured answer — refused stop_facts_unsupported by name; the record, the browser there and its forward are untouched', { code: e1 && e1.code, live: live(k, q.id) });
     CAPS['dev-mac'].push('browser-stop-facts');
     // (b) «stopped»: freed, the record stopped by the manager, nothing left in its error field
@@ -461,7 +461,7 @@ console.log('— ④ the manager\'s stop of a paired machine\'s browser: the out
     ok(await start(k, q.id) === true && mac.st.launches.length > launches0, 'B-e799: started again');
     mac.bs.runtime.info = async (ns) => ({ active: ns === qns, pid: ns === qns ? process.pid : null });
     const r2 = await k.managerStop(q.id);
-    ok(r2.freed === false && new RegExp(`still running there after the stop \\(pid ${process.pid}\\)`).test(r2.why || ''), 'B-e799: outcome «survived» ⇒ NOT freed, the surviving pid named', r2);
+    ok(r2.freed === false && verdictOf(new RegExp(`still running there after the stop \\(pid ${process.pid}\\)`).test(r2.why || '')), 'B-e799: outcome «survived» ⇒ NOT freed, the surviving pid named', r2);
     // (d) «not_ours»: nothing of ours ran there, and a browser VibeSpace did not start holds the profile's folder (its lock facts INJECTED
     // through the stand-in machine: a holder that NAMES the folder and carries no mark of ours — the lock verdict calls it the user's) ⇒ NOT freed
     const personLock = (dir) => ({ lock: { host: os.hostname(), pid: 4321 }, holder: { pid: 4321, alive: true, starttime: 777, cmdline: ['chrome', `--user-data-dir=${dir}`].join('\0'), dirs: [dir], parentIsDaemon: false } });
@@ -471,7 +471,7 @@ console.log('— ④ the manager\'s stop of a paired machine\'s browser: the out
     mac.bs.lockFactsOf = personLock;
     const r3 = await k.managerStop(q.id);
     delete mac.bs.lockFactsOf;
-    ok(r3.freed === false && /a browser VibeSpace did not start holds this profile's folder there/.test(r3.why || '') && /pid 4321/.test(r3.why || ''), 'B-e799: outcome «not_ours» ⇒ NOT freed — a browser of another namespace holds its folder there, its pid named, left running', r3);
+    ok(r3.freed === false && gateOf(/a browser VibeSpace did not start holds this profile's folder there/.test(r3.why || '')) && verdictOf(/pid 4321/.test(r3.why || '')), 'B-e799: outcome «not_ours» ⇒ NOT freed — a browser of another namespace holds its folder there, its pid named, left running', r3);
     // RED: the release's road — a keeper copy that reads only the op's words — reads the same machine answer as FREED
     const KSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const MK = mutantCopies('rps-stop-facts', REPO);
@@ -495,10 +495,10 @@ console.log('— ④ the manager\'s stop of a paired machine\'s browser: the out
     let personAnswer = null; const call0 = access.call; access.call = async (...a) => { const r = await call0(...a); if (a[1] === 'stop') personAnswer = r; return r; };
     try { await k.stop(q.id, { why: 'user' }); } finally { access.call = call0; }
     const recP = k.browserOf(q.id);
-    ok(personAnswer && !('outcome' in personAnswer) && !live(k, q.id) && recP.stoppedBy === 'user' && /daemon pid \d+ is still alive after close --all/.test(recP.lastError || ''), 'B-e799 (round wvdrkjdvx 4): a person\'s own stop asks no facts — the machine answers today\'s shape and the keeper reads its words as before (its road kept)', { answer: personAnswer, lastError: recP && recP.lastError });
+    ok(gateOf(personAnswer) && !('outcome' in personAnswer) && !live(k, q.id) && recP.stoppedBy === 'user' && verdictOf(/daemon pid \d+ is still alive after close --all/.test(recP.lastError || '')), 'B-e799 (round wvdrkjdvx 4): a person\'s own stop asks no facts — the machine answers today\'s shape and the keeper reads its words as before (its road kept)', { answer: personAnswer, lastError: recP && recP.lastError });
   } finally { mac.bs.runtime.info = info0; delete mac.bs.stopGraceMs; }
 }
 
 console.log(`\ntest-remote-profile-start: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

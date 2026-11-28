@@ -33,7 +33,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('boot-ready-wt'), PROFILE = scratch('boot-ready-chrome'), FIXTURE = scratch('boot-ready-canonical'), SHOTS = scratch('boot-ready-shots');
 fs.mkdirSync(FIXTURE, { recursive: true }); fs.mkdirSync(SHOTS, { recursive: true }); // an empty canonical: /api/version never reaches the network
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
@@ -177,14 +177,14 @@ async function legHang() {
 
 try {
   const m = await legMidBoot('fix');
-  for (const [n, c, e] of judgeMidBoot(m, '')) check(n, c, e);
+  for (const [n, c, e] of judgeMidBoot(m, '')) check(n, verdictOf(c), e);
   const u = await legUpdate('fix');
-  for (const [n, c, e] of judgeUpdate(u, '')) check(n, c, e);
+  for (const [n, c, e] of judgeUpdate(u, '')) check(n, verdictOf(c), e);
   const h = await legHang();
-  check(`③ the splash climbed the ladder in words (${h.lines.slice(0, 2).join(' | ').slice(0, 160)})`, h.lines.some((l) => /^Waiting for the server \(\/api\/layouts: no answer within 1 s\) — trying again in 1 s$/.test(l)), h.lines);
-  check(`③ …then the reason in words + Reload after ${(h.ms / 1000).toFixed(1)} s: "${h.lines[h.lines.length - 1]}"`, h.btn === 'Reload now' && /^The server did not answer \/api\/layouts \(no answer within 1 s\) after 5 tries\.$/.test(h.lines[h.lines.length - 1] || '') && h.held >= 5, h); // five boot tries (+ the custom-grid buttons' own ask, off the splash path)
-  check('③ one boot-stuck telemetry event reached the server, naming /api/layouts', h.stuck && /\/api\/layouts: stall after 5 tries/.test(h.stuck.detail || ''), h.stuck);
-  check('③ Reload (the request answers again) recovers: the page loads', h.reloaded && h.pageReadyAt > 0, h);
+  check(`③ the splash climbed the ladder in words (${h.lines.slice(0, 2).join(' | ').slice(0, 160)})`, verdictOf(h.lines.some((l) => /^Waiting for the server \(\/api\/layouts: no answer within 1 s\) — trying again in 1 s$/.test(l))), h.lines);
+  check(`③ …then the reason in words + Reload after ${(h.ms / 1000).toFixed(1)} s: "${h.lines[h.lines.length - 1]}"`, h.btn === 'Reload now' && gateOf(/^The server did not answer \/api\/layouts \(no answer within 1 s\) after 5 tries\.$/.test(h.lines[h.lines.length - 1] || '')) && h.held >= 5, h); // five boot tries (+ the custom-grid buttons' own ask, off the splash path)
+  check('③ one boot-stuck telemetry event reached the server, naming /api/layouts', gateOf(h.stuck) && verdictOf(/\/api\/layouts: stall after 5 tries/.test(h.stuck.detail || '')), h.stuck);
+  check('③ Reload (the request answers again) recovers: the page loads', gateOf(h.reloaded) && h.pageReadyAt > 0, h);
 
   // ── ④ the patched-copy control: the pre-fix rules, rebuilt into the scratch worktree's bundle ──
   await stopServer();
@@ -199,9 +199,9 @@ try {
   const mc = await legMidBoot('control');
   const uc = await legUpdate('control');
   const redM = judgeMidBoot(mc, '').filter(([, c]) => !c).map(([n]) => n), redU = judgeUpdate(uc, '').filter(([, c]) => !c).map(([n]) => n);
-  check(`④ control (pre-fix bundle): ① goes red — ${redM.length} judge(s): ${redM.map((n) => n.slice(0, 70)).join(' | ')}`, anchored && redM.some((n) => /only once the server is ready/.test(n)), { anchored, redM, mc });
-  check(`④ control (pre-fix bundle): ② goes red — the page reloaded ${uc.navAt && uc.readyAt ? Math.round(uc.readyAt - uc.navAt) + ' ms BEFORE ready' : '?'}`, anchored && redU.some((n) => /reloads only once/.test(n)), { redU, uc });
+  check(`④ control (pre-fix bundle): ① goes red — ${redM.length} judge(s): ${redM.map((n) => n.slice(0, 70)).join(' | ')}`, gateOf(anchored) && verdictOf(redM.some((n) => /only once the server is ready/.test(n))), { anchored, redM, mc });
+  check(`④ control (pre-fix bundle): ② goes red — the page reloaded ${uc.navAt && uc.readyAt ? Math.round(uc.readyAt - uc.navAt) + ' ms BEFORE ready' : '?'}`, gateOf(anchored) && verdictOf(redU.some((n) => /reloads only once/.test(n))), { redU, uc });
 } catch (e) { failed++; console.error('  ✗ suite crashed: ' + (e.stack || e.message)); }
 console.log(`screenshots + server log: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed} of ${passed + failed})` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

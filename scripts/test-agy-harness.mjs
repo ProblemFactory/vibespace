@@ -62,7 +62,7 @@ const WRAPPER = path.join(REPO, 'data/bin/agy-wrapper.js');
 const STUB = path.join(REPO, 'scripts/fixtures/antigravity-agy');
 const FX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/antigravity-cli-1.4.3.json'), 'utf8'));
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -100,23 +100,23 @@ const LEG = trackLegs(console);   // B-7e49: each printed mark counted under its
 console.log('— ① the descriptor, re-derived from what agy 1.4.3 measured');
 {
   const helpFlags = Object.keys(FX.help.flags);
-  ok('the executable is `agy` (cli-env resolves exe.command; ANTIGRAVITY_CMD overrides), the chat wrapper is agy\'s own', g.exe.command === 'agy' && g.wrapper === 'data/bin/agy-wrapper.js' && g.Adapter === AgyAdapter && fs.existsSync(path.join(REPO, g.wrapper)));
+  ok('the executable is `agy` (cli-env resolves exe.command; ANTIGRAVITY_CMD overrides), the chat wrapper is agy\'s own', g.exe.command === 'agy' && g.wrapper === 'data/bin/agy-wrapper.js' && g.Adapter === AgyAdapter && verdictOf(fs.existsSync(path.join(REPO, g.wrapper))));
   ok('the journal is the ACP one: caps.streamProtocol acp-events + the ACP normalizer (agy itself is not ACP)', capsOf('antigravity').streamProtocol === 'acp-events' && g.Normalizer === AcpMessageManager && g.caps === capsOf('antigravity'));
   const all = agyFlags({ model: 'm', effort: 'max', permissionMode: 'plan', resumeId: 'c-1' });
-  ok('every flag the adapter passes is one agy 1.4.3 --help lists', ['--model', '--effort', '--mode', '--conversation', '--dangerously-skip-permissions', '--prompt-interactive', '--input-format', '--output-format'].every((f) => helpFlags.includes(f)) && all.filter((a) => a.startsWith('--')).every((f) => helpFlags.includes(f)), all);
-  ok('effort values = the binary\'s low|medium|high|xhigh|max (the docs said three)', AGY_EFFORTS.join('|') === 'low|medium|high|xhigh|max' && /low\|medium\|high\|xhigh\|max/.test(FX.help.flags['--effort']));
+  ok('every flag the adapter passes is one agy 1.4.3 --help lists', gateOf(['--model', '--effort', '--mode', '--conversation', '--dangerously-skip-permissions', '--prompt-interactive', '--input-format', '--output-format'].every((f) => helpFlags.includes(f))) && verdictOf(all.filter((a) => a.startsWith('--')).every((f) => helpFlags.includes(f))), all);
+  ok('effort values = the binary\'s low|medium|high|xhigh|max (the docs said three)', AGY_EFFORTS.join('|') === 'low|medium|high|xhigh|max' && verdictOf(/low\|medium\|high\|xhigh\|max/.test(FX.help.flags['--effort'])));
   // lane effort-menu-per-harness: a level agy does not have is REFUSED BY NAME (it used to ride as no --effort at all, without a word)
   { let e = null; try { agyFlags({ effort: 'ultracode' }); } catch (x) { e = x; }
-    ok('an effort agy does not have (claude\'s ultracode) THROWS effort_not_supported naming agy\'s levels — never dropped', e?.code === 'effort_not_supported' && JSON.stringify(e.levels) === JSON.stringify([...AGY_EFFORTS]) && /"ultracode"/.test(e.message), e?.message);
+    ok('an effort agy does not have (claude\'s ultracode) THROWS effort_not_supported naming agy\'s levels — never dropped', e?.code === 'effort_not_supported' && JSON.stringify(e.levels) === JSON.stringify([...AGY_EFFORTS]) && verdictOf(/"ultracode"/.test(e.message)), e?.message);
     ok('the descriptor declares the SAME array as its effort menu (ui.effortLevels), no extras', g.ui.effortLevels === AGY_EFFORTS && !g.ui.effortExtras); }
-  ok('our modes onto agy\'s: accept-edits / auto / plan = --mode (the binary\'s values), bypass = --dangerously-skip-permissions', AGY_MODES.filter((m) => m !== 'bypassPermissions').every((m) => FX.help.flags['--mode'].includes(m))
+  ok('our modes onto agy\'s: accept-edits / auto / plan = --mode (the binary\'s values), bypass = --dangerously-skip-permissions', gateOf(AGY_MODES.filter((m) => m !== 'bypassPermissions').every((m) => FX.help.flags['--mode'].includes(m)))
     && JSON.stringify(agyFlags({ permissionMode: 'bypassPermissions' })) === '["--dangerously-skip-permissions"]' && JSON.stringify(agyFlags({ permissionMode: 'default' })) === '[]');
   const ad = new AgyAdapter(g.adapterConfig({ acpCommands: { antigravity: '/opt/agy' }, acpWrapper: '/w/acp-wrapper.js', ptyWrapper: '/w/pty' }));
   const term = ad.buildSessionArgs({ mode: 'terminal', model: 'gemini-4-argon-high', effort: 'high', permissionMode: 'auto', resumeId: 'c-9' });
   ok('terminal = agy\'s TUI: --model / --effort / --mode / --conversation', term.cmd === '/opt/agy' && JSON.stringify(term.args) === JSON.stringify(['--model', 'gemini-4-argon-high', '--effort', 'high', '--mode', 'auto', '--conversation', 'c-9']) && term.wrapper === '/w/pty', term);
   // Gemini 4 Carbon (agy 1.5.5, 2026-11-10) rides both roads as typed
   const carbC = ad.buildSessionArgs({ mode: 'chat', model: 'gemini-4-carbon-medium', permissionMode: 'auto' }), carbT = ad.buildSessionArgs({ mode: 'terminal', model: 'gemini-4-carbon-high', permissionMode: 'auto' });
-  ok('Gemini 4 Carbon: the wrapper env (chat) and --model (terminal), as typed', carbC.env.AGY_WEBUI_MODEL === 'gemini-4-carbon-medium' && carbT.args.join(' ').includes('--model gemini-4-carbon-high'));
+  ok('Gemini 4 Carbon: the wrapper env (chat) and --model (terminal), as typed', carbC.env.AGY_WEBUI_MODEL === 'gemini-4-carbon-medium' && verdictOf(carbT.args.join(' ').includes('--model gemini-4-carbon-high')));
   // A SLUG AGY OFFERS THAT IS NOT GEMINI is typeable through Custom… TODAY (the question of 2026-11-10): no provider record
   // serves the antigravity harness (accountProviderId → null ⇒ the menu is OPEN: the harness judges its own spellings),
   // resolvePick passes the id as typed, the descriptor carries it; the wrapper leg that runs it to agy's argv is the heavy twin's ⑦ (B-7e49)
@@ -136,14 +136,14 @@ console.log('— ① the descriptor, re-derived from what agy 1.4.3 measured');
     const MEASURED = ['gemini-4-carbon-medium', 'gemini-4-carbon-high', 'gemini-4-carbon-low', 'gemini-4-argon-low', 'gemini-3.8-flash-low'];
     ok('the model table = the docs\' slugs (provenance «docs», their order) + the rows agy 1.5.5 listed signed in (provenance «measured») — each once, nothing else (agy models needs a sign-in — measured)',
       g.models().slice(1).map((m) => m.id).join() === AR.map((r) => r[0]).join() && prov('docs') === FX.models.slugs.join() && prov('measured') === MEASURED.join()
-      && AR.every((r) => r[1] === 'docs' || r[1] === 'measured') && new Set(AR.map((r) => r[0])).size === AR.length && /sign in/i.test(FX.unauthenticated.models));
+      && gateOf(AR.every((r) => r[1] === 'docs' || r[1] === 'measured')) && new Set(AR.map((r) => r[0])).size === AR.length && verdictOf(/sign in/i.test(FX.unauthenticated.models)));
   }
   const tbl = HARNESS_SETTINGS.antigravity;
-  ok('settings: the table IS the descriptor\'s; its effort / mode options are agy\'s own values', g.settings === tbl && tbl.rows.find((r) => r.key === 'defaultEffort').options.filter((o) => o.value).every((o) => AGY_EFFORTS.includes(o.value))
-    && tbl.rows.find((r) => r.key === 'defaultPermissionMode').options.filter((o) => o.value).every((o) => AGY_MODES.includes(o.value)));
+  ok('settings: the table IS the descriptor\'s; its effort / mode options are agy\'s own values', g.settings === tbl && gateOf(tbl.rows.find((r) => r.key === 'defaultEffort').options.filter((o) => o.value).every((o) => AGY_EFFORTS.includes(o.value)))
+    && verdictOf(tbl.rows.find((r) => r.key === 'defaultPermissionMode').options.filter((o) => o.value).every((o) => AGY_MODES.includes(o.value))));
   ok('auto-resume: a limit signal (the wall, lane agy-wall-signal) and NO resume verb ⇒ derived never offered', JSON.stringify(capsOf('antigravity').autoResume) === JSON.stringify({ signal: true, resume: null, supported: false }));
   ok('commit 2 = named Google accounts, each its own HOME root (localOnly, nothing shipped); still no pool', !!g.creds && g.creds.spawnForm === 'isolated-home' && g.creds.localOnly === true && g.creds.files.length === 0 && capsOf('antigravity').pool === false);
-  ok('the job door strips agy\'s login names (GEMINI_API_KEY / AGY_ADC_AUTH / GOOGLE_GEMINI_BASE_URL — names the binary holds)', ['GEMINI_API_KEY', 'AGY_ADC_AUTH', 'GOOGLE_GEMINI_BASE_URL'].every((n) => HE.VENDOR_CREDENTIAL_ENV.includes(n) && FX.env.names.includes(n)));
+  ok('the job door strips agy\'s login names (GEMINI_API_KEY / AGY_ADC_AUTH / GOOGLE_GEMINI_BASE_URL — names the binary holds)', verdictOf(['GEMINI_API_KEY', 'AGY_ADC_AUTH', 'GOOGLE_GEMINI_BASE_URL'].every((n) => HE.VENDOR_CREDENTIAL_ENV.includes(n) && FX.env.names.includes(n))));
 }
 
 console.log('— ①b agy\'s OWN slash commands: ONE closed list (the measured fixture), a line that starts with a path is text');
@@ -152,12 +152,12 @@ console.log('— ①b agy\'s OWN slash commands: ONE closed list (the measured f
   const modSrc = fs.readFileSync(path.join(REPO, 'src/harnesses/antigravity-slash.js'), 'utf8');
   const wSrc = fs.readFileSync(WRAPPER, 'utf8');
   ok('the list IS the one agy 1.4.3 measured (the fixture\'s slashInPrint.answeredWithoutATurn — its own changelog), frozen; the descriptor exports the SAME array',
-    JSON.stringify(SL.AGY_SLASH_COMMANDS) === JSON.stringify(FX.slashInPrint.answeredWithoutATurn) && FX.slashInPrint.provenance === 'changelog' && Object.isFrozen(SL.AGY_SLASH_COMMANDS)
+    JSON.stringify(SL.AGY_SLASH_COMMANDS) === JSON.stringify(FX.slashInPrint.answeredWithoutATurn) && FX.slashInPrint.provenance === 'changelog' && gateOf(Object.isFrozen(SL.AGY_SLASH_COMMANDS))
     && require(path.join(REPO, 'src/harnesses/antigravity.js')).AGY_SLASH_COMMANDS === SL.AGY_SLASH_COMMANDS, SL.AGY_SLASH_COMMANDS);
   ok('the module is PURE (no require, no import — the wrapper loads it beside src/) and names the fixture it was measured from',
-    !/\brequire\(|\bimport\b/.test(modSrc.replace(/^\s*\/\/.*$/gm, '')) && modSrc.includes('scripts/fixtures/antigravity-cli-1.4.3.json'));
+    !/\brequire\(|\bimport\b/.test(modSrc.replace(/^\s*\/\/.*$/gm, '')) && verdictOf(modSrc.includes('scripts/fixtures/antigravity-cli-1.4.3.json')));
   ok('ONE definition: the wrapper requires that module and its guard asks agySlashCommand — no first-character test, no list of its own',
-    wSrc.includes("require(path.join(__dirname, '..', '..', 'src', 'harnesses', 'antigravity-slash.js'))") && wSrc.includes('  const word = agySlashCommand(text);\n') && !wSrc.includes('^\\/[A-Za-z]') && !wSrc.includes("'/credits'"));
+    gateOf(wSrc.includes("require(path.join(__dirname, '..', '..', 'src', 'harnesses', 'antigravity-slash.js'))")) && gateOf(wSrc.includes('  const word = agySlashCommand(text);\n')) && !wSrc.includes('^\\/[A-Za-z]') && !wSrc.includes("'/credits'"));
   const CMD = [['/model', '/model'], ['/usage opus', '/usage'], ['/help', '/help'], ['  /MODEL', '/model'], ['/Config\nthe next line', '/config'], ['/credits　全角空格', '/credits'], ...SL.AGY_SLASH_COMMANDS.map((c) => [c, c])];
   const TEXT = ['/home/u/x.zip 这里是…', '/tmp/a.txt', '~/x', './run.sh', '../up.sh', '/ 2', '/2026', '/notacommand hello', '/models', '/model/x', '/usage.txt', 'hello /model', '', null, undefined];
   const bad = CMD.filter(([t, w]) => SL.agySlashCommand(t) !== w).concat(TEXT.filter((t) => SL.agySlashCommand(t) !== null).map((t) => [t, SL.agySlashCommand(t)]));
@@ -169,7 +169,7 @@ console.log('— ①b agy\'s OWN slash commands: ONE closed list (the measured f
   fs.writeFileSync(mp, editAnchor(modSrc, cut, BASE_RULE, "src/harnesses/antigravity-slash.js"));
   const base = require(mp).agySlashCommand;
   ok('RED CONTROL (the base\'s first-character rule): the attachment message IS the command «/home», /tmp/a.txt «/tmp», /notacommand a command',
-    modSrc.includes(cut) && base('/home/u/x.zip 这里是…') === '/home' && base('/tmp/a.txt') === '/tmp' && base('/notacommand hello') === '/notacommand' && base('/model') === '/model', [base('/home/u/x.zip 这里是…'), base('/tmp/a.txt'), base('/notacommand hello')]);
+    gateOf(modSrc.includes(cut)) && base('/home/u/x.zip 这里是…') === '/home' && base('/tmp/a.txt') === '/tmp' && base('/notacommand hello') === '/notacommand' && base('/model') === '/model', [base('/home/u/x.zip 这里是…'), base('/tmp/a.txt'), base('/notacommand hello')]);
 }
 
 console.log('— ⑨ NAMED ACCOUNTS: «Add Google account (Antigravity)» = a HOME root each (the real accounts store, a scratch data dir)');
@@ -190,18 +190,18 @@ console.log('— ⑨ NAMED ACCOUNTS: «Add Google account (Antigravity)» = a HO
   try {
     const am = new AccountManager({ dataDir: DATA });
     const c = am.createHomeSubscription('antigravity', { name: '' });
-    ok('createHomeSubscription: an agy- id whose dir data/agy-subs/<id> is a 0700 HOME root, named by the login label', /^agy-[0-9a-f]{12}$/.test(c.id) && c.dir === path.join(DATA, 'agy-subs', c.id) && (fs.statSync(c.dir).mode & 0o777) === 0o700 && am.get(c.id).name === 'Google' && am.get(c.id).backend === 'antigravity');
+    ok('createHomeSubscription: an agy- id whose dir data/agy-subs/<id> is a 0700 HOME root, named by the login label', gateOf(/^agy-[0-9a-f]{12}$/.test(c.id)) && c.dir === path.join(DATA, 'agy-subs', c.id) && (fs.statSync(c.dir).mode & 0o777) === 0o700 && am.get(c.id).name === 'Google' && am.get(c.id).backend === 'antigravity');
     ok('…the login is agy\'s OWN sign-in (its TUI: a link + a pasted code) on that root, the bus disabled, in an empty working dir', c.loginCmd === `cd '${c.dir}/.vibespace-login' && HOME='${c.dir}' DBUS_SESSION_BUS_ADDRESS=disabled: 'agy'`, c.loginCmd);
     const L = (rel) => { try { return fs.readlinkSync(path.join(c.dir, rel)); } catch { return null; } };
     ok('THE FARM: the agent\'s own commands see the person\'s dotfiles (.ssh, .gitconfig, .config/gh, ~/.gemini/config are links)',
       L('.ssh') === path.join(MACHINE, '.ssh') && L('.gitconfig') === path.join(MACHINE, '.gitconfig') && L('.config/gh') === path.join(MACHINE, '.config/gh') && L('.gemini/config') === path.join(MACHINE, '.gemini/config'));
     ok('…agy\'s own state is per account: .gemini/antigravity-cli and .config/antigravity are the root\'s (no machine login, no machine plugin secrets)',
-      fs.lstatSync(path.join(c.dir, '.gemini/antigravity-cli')).isDirectory() && !fs.existsSync(path.join(c.dir, H8.TOKEN_REL)) && !fs.existsSync(path.join(c.dir, '.config/antigravity')));
+      gateOf(fs.lstatSync(path.join(c.dir, '.gemini/antigravity-cli')).isDirectory()) && !fs.existsSync(path.join(c.dir, H8.TOKEN_REL)) && !fs.existsSync(path.join(c.dir, '.config/antigravity')));
     const acctSettings = path.join(c.dir, '.gemini/antigravity-cli/settings.json');
     ok('…the person\'s agy customizations are linked (skills), settings.json is the ACCOUNT\'S OWN file seeded from the machine\'s',
-      L('.gemini/antigravity-cli/skills') === path.join(MACHINE, '.gemini/antigravity-cli/skills') && fs.lstatSync(acctSettings).isFile() && JSON.parse(fs.readFileSync(acctSettings, 'utf8')).permissions.allow[0] === 'command(git)');
+      L('.gemini/antigravity-cli/skills') === path.join(MACHINE, '.gemini/antigravity-cli/skills') && gateOf(fs.lstatSync(acctSettings).isFile()) && JSON.parse(fs.readFileSync(acctSettings, 'utf8')).permissions.allow[0] === 'command(git)');
     let threw = ''; try { am.resolveForSpawn(c.id, 'antigravity'); } catch (e) { threw = e.message; }
-    ok('before the sign-in: listed not logged in, and a spawn on it refuses by name', am.list().accounts.find((a) => a.id === c.id).loggedIn === false && /not logged in/.test(threw), threw);
+    ok('before the sign-in: listed not logged in, and a spawn on it refuses by name', am.list().accounts.find((a) => a.id === c.id).loggedIn === false && verdictOf(/not logged in/.test(threw)), threw);
     fs.writeFileSync(path.join(c.dir, H8.TOKEN_REL), 'ACCOUNT-LOGIN', { mode: 0o600 }); // what agy's sign-in writes
     const fin = am.finalizeHomeSubscription(c.id);
     ok('finalize: logged in by a stat of agy\'s file (no identity read — the name stays until the person renames it)', fin.loggedIn === true && fin.email === null && am.get(c.id).name === 'Google', fin);
@@ -210,18 +210,18 @@ console.log('— ⑨ NAMED ACCOUNTS: «Add Google account (Antigravity)» = a HO
     ok('a spawn on it: HOME = the account root + the bus disabled (process env, never argv), no secret, nothing to ship', sp.localEnv.HOME === c.dir && sp.localEnv.DBUS_SESSION_BUS_ADDRESS === 'disabled:' && sp.secret === null && sp.remoteCreds === null && sp.kind === 'antigravity-subscription', sp);
     ok('…and the spawn REFRESHED the farm (the new ~/.npmrc is linked)', L('.npmrc') === path.join(MACHINE, '.npmrc'));
     let rt = ''; try { am.resolveForSpawn(c.id, 'antigravity', { remote: true }); } catch (e) { rt = e.message; }
-    ok('a REMOTE spawn on a named account is refused by name (localOnly: the login never leaves this machine)', /run on this machine only/.test(rt), rt);
+    ok('a REMOTE spawn on a named account is refused by name (localOnly: the login never leaves this machine)', verdictOf(/run on this machine only/.test(rt)), rt);
     am.setDefault(c.id, 'antigravity');
     ok('the default is the descriptor\'s field (defaultAntigravityAccountId), a no-pick spawn takes it, "subscription" = the machine login', am.list().defaultAntigravityAccountId === c.id && am.resolveForSpawn(undefined, 'antigravity')?.id === c.id && am.resolveForSpawn('subscription', 'antigravity') === null);
     ok('…the claude / codex defaults are untouched', am.list().defaultAccountId === null && am.list().defaultCodexAccountId === null);
     const again = am.homeLoginCommand(c.id);
     ok('"Sign in again" answers the same login command on the existing root', again.id === c.id && again.loginCmd === c.loginCmd);
     const exp = JSON.stringify(am.exportBundle());
-    ok('export carries the account record and NOT its login (files: nothing — a secret we never read)', exp.includes(c.id) && !exp.includes('ACCOUNT-LOGIN') && !exp.includes('MACHINE-LOGIN'));
+    ok('export carries the account record and NOT its login (files: nothing — a secret we never read)', gateOf(exp.includes(c.id)) && !exp.includes('ACCOUNT-LOGIN') && !exp.includes('MACHINE-LOGIN'));
     am.remove(c.id);
     ok('remove: the root goes and NOTHING it linked is touched (rm never follows: the person\'s .ssh key, gh, agy settings, machine login all intact)',
       !fs.existsSync(c.dir) && am.list().defaultAntigravityAccountId === null && fs.readFileSync(path.join(MACHINE, '.ssh/id_ed25519'), 'utf8') === 'machine-key\n'
-      && fs.existsSync(path.join(MACHINE, '.config/gh/hosts.yml')) && fs.existsSync(path.join(MACHINE, '.gemini/antigravity-cli/skills')) && fs.readFileSync(path.join(MACHINE, H8.TOKEN_REL), 'utf8') === 'MACHINE-LOGIN');
+      && gateOf(fs.existsSync(path.join(MACHINE, '.config/gh/hosts.yml'))) && gateOf(fs.existsSync(path.join(MACHINE, '.gemini/antigravity-cli/skills'))) && fs.readFileSync(path.join(MACHINE, H8.TOKEN_REL), 'utf8') === 'MACHINE-LOGIN');
     const ms = g.creds.machineStatus({ cmd: null });
     fs.rmSync(path.join(MACHINE, H8.TOKEN_REL));
     const ms2 = g.creds.machineStatus({ cmd: '/opt/agy' });
@@ -237,22 +237,22 @@ console.log('— ⑩ THE /usage READING: the judge (the brief\'s STOP rule) + th
   const clean = { conversation_id: '', status: 'SUCCESS', response: 'x', num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 } };
   ok('a SUCCESS with no turn in a shape no signed-in capture pinned is "unparsed" — the one pinned shape is the 1.4.3 capture\'s (usage-groups; its parser legs: test-antigravity-usage)', U.KNOWN_SHAPES.length === 1 && U.KNOWN_SHAPES[0].id === 'usage-groups' && U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(clean) }).verdict === 'unparsed');
   const billed = [{ ...clean, num_turns: 1 }, { ...clean, conversation_id: 'c-1' }, { ...clean, usage: { input_tokens: 0, output_tokens: 3 } }, { event: 'result', result: { ...clean, num_turns: 2 } }];
-  ok('THE STOP RULE: any sign of a turn — num_turns, a conversation, one token, the stream-json result shape — is turn-started', billed.every((e) => U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(e) }).verdict === 'turn-started'), billed.map((e) => U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(e) }).verdict));
+  ok('THE STOP RULE: any sign of a turn — num_turns, a conversation, one token, the stream-json result shape — is turn-started', verdictOf(billed.every((e) => U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(e) }).verdict === 'turn-started')), billed.map((e) => U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(e) }).verdict));
   const src = fs.readFileSync(path.join(REPO, 'src/harnesses/antigravity-usage.js'), 'utf8');
   const cut = '  if (signs.length) return { verdict: \'turn-started\'';
   const mutated = path.join(ROOT, 'antigravity-usage-noturn.js');
   fs.writeFileSync(mutated, editAnchor(editAnchor(src, cut, '  if (false && signs.length) return { verdict: \'turn-started\'', "src/harnesses/antigravity-usage.js"), "require('../quota-model.js')", `require(${JSON.stringify(path.join(REPO, 'src/quota-model.js'))})`, "src/harnesses/antigravity-usage.js")); // the copy lives in scratch: its one relative require made absolute
-  ok('RED control: a judge copy without the turn check calls a billed answer "unparsed" (the STOP rule can go red)', src.includes(cut) && require(mutated).judgeUsageAnswer({ code: 0, stdout: JSON.stringify(billed[0]) }).verdict === 'unparsed');
+  ok('RED control: a judge copy without the turn check calls a billed answer "unparsed" (the STOP rule can go red)', gateOf(src.includes(cut)) && require(mutated).judgeUsageAnswer({ code: 0, stdout: JSON.stringify(billed[0]) }).verdict === 'unparsed');
   ok('redactCapture: e-mails, project ids and opaque tokens become placeholders', JSON.stringify(U.redactCapture({ a: 'me@x.com', p: 'proj-name-123456', t: 'x'.repeat(48) })) === '{"a":"<email>","p":"<project>","t":"<opaque>"}');
   // the capture script, against the fake agy
   const CAP = path.join(REPO, 'scripts/agy-usage-capture.mjs');
   const run = (args, env = {}) => new Promise((res) => { const log = path.join(ROOT, `cap-${Math.random().toString(36).slice(2)}.log`); const c = spawn(process.execPath, [CAP, '--agy', STUB, ...args], { env: { ...CLEAN_ENV, AGY_STUB_LOG: log, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', (code) => res({ code, out, log: (() => { try { return fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })() })); });
   const outOf = (n) => path.join(ROOT, `usage-${n}.json`);
   const a = await run(['--out', outOf('auth')]);
-  ok('capture, not signed in: exit 2, nothing written', a.code === 2 && /auth-required/.test(a.out) && !fs.existsSync(outOf('auth')), a.out);
+  ok('capture, not signed in: exit 2, nothing written', a.code === 2 && gateOf(/auth-required/.test(a.out)) && !fs.existsSync(outOf('auth')), a.out);
   const o = await run(['--out', outOf('ok')], { AGY_STUB_USAGE: 'ok' });
   const capOk = fs.existsSync(outOf('ok')) ? JSON.parse(fs.readFileSync(outOf('ok'), 'utf8')) : null;
-  ok('capture, no turn: exit 0, the redacted answer written (version, argv, verdict unparsed, no e-mail left)', o.code === 0 && capOk && capOk.version === FX.version && capOk.verdict === 'unparsed' && JSON.stringify(capOk.argv) === JSON.stringify(U.USAGE_ARGV) && !/@example\.com/.test(JSON.stringify(capOk)), o.out);
+  ok('capture, no turn: exit 0, the redacted answer written (version, argv, verdict unparsed, no e-mail left)', o.code === 0 && gateOf(capOk) && capOk.version === FX.version && capOk.verdict === 'unparsed' && JSON.stringify(capOk.argv) === JSON.stringify(U.USAGE_ARGV) && !/@example\.com/.test(JSON.stringify(capOk)), o.out);
   const tr = await run(['--out', outOf('turn')], { AGY_STUB_USAGE: 'turn' });
   ok('capture, a turn started: exit 3 (STOP) and the evidence written marked turn-started', tr.code === 3 && JSON.parse(fs.readFileSync(outOf('turn'), 'utf8')).verdict === 'turn-started', tr.out);
   const H8 = require(path.join(REPO, 'src/harnesses/antigravity.js'));
@@ -260,7 +260,7 @@ console.log('— ⑩ THE /usage READING: the judge (the brief\'s STOP rule) + th
   const root = path.join(ROOT, 'cap-acct'); H8.seedHomeRoot(root, machine);
   const ac = await run(['--account', root, '--out', outOf('acct')], { AGY_STUB_USAGE: 'ok' });
   const usageCall = ac.log.find((x) => x.argv && x.argv[0] === '-p');
-  ok('--account runs it on the account\'s root: HOME = the root, the bus disabled (the spawn env), the CLI\'s own argv', ac.code === 0 && usageCall && usageCall.home === root && usageCall.bus === 'disabled:' && JSON.stringify(usageCall.argv) === JSON.stringify(U.USAGE_ARGV), { log: ac.log, out: ac.out });
+  ok('--account runs it on the account\'s root: HOME = the root, the bus disabled (the spawn env), the CLI\'s own argv', ac.code === 0 && gateOf(usageCall) && usageCall.home === root && usageCall.bus === 'disabled:' && JSON.stringify(usageCall.argv) === JSON.stringify(U.USAGE_ARGV), { log: ac.log, out: ac.out });
   const bad = await run(['--account', machine, '--out', outOf('bad')]);
   ok('--account on a directory that is not an account root is refused (exit 1), agy never runs', bad.code === 1 && !bad.log.some((x) => x.argv && x.argv[0] === '-p'), bad.out);
 }
@@ -290,15 +290,15 @@ console.log('— ⑪ THE EXECUTABLE (lane antigravity-spawn-argv): argv[4] is ag
   const mutated = path.join(MUTBIN, 'agy-wrapper-no-refusal.js');
   fs.writeFileSync(mutated, editAnchor(src, cut, '', "data/bin/agy-wrapper.js"));
   const m = await run('/usr/bin/env', mutated);
-  ok('RED copy (the refusal cut): /usr/bin/env runs and the session says only «exit code 125 — see agy-wrapper.log»', src.split(cut).length === 2 && m.code === 125 && m.errors.some((t) => /exited \(exit code 125\) — see agy-wrapper\.log/.test(t)), m);
+  ok('RED copy (the refusal cut): /usr/bin/env runs and the session says only «exit code 125 — see agy-wrapper.log»', src.split(cut).length === 2 && m.code === 125 && verdictOf(m.errors.some((t) => /exited \(exit code 125\) — see agy-wrapper\.log/.test(t))), m);
 }
 
 
 console.log('— ⓣ THE ONE TABLE (B-7e49, 主开发 r2347): this file and its twin run disjoint halves of one table of legs, whole');
 {
   const OWN = fs.readFileSync(path.join(REPO, FILES.fast), 'utf8'), OTHER = fs.readFileSync(path.join(REPO, FILES.heavy), 'utf8');
-  for (const [n, c, e] of [...judge('fast', LEG, OWN, OTHER), ...controls('fast', LEG, OWN, OTHER)]) ok(n, c, e);
+  for (const [n, c, e] of [...judge('fast', LEG, OWN, OTHER), ...controls('fast', LEG, OWN, OTHER)]) ok(n, verdictOf(c), e);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

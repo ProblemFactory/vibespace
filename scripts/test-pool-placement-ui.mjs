@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -58,10 +58,10 @@ console.log('§2 the order: seed, moves, rows');
   const stateOf = (id) => (id === 'm' ? { code: 'out', key: 'out of quota until {time}', params: { atMs: (NOW + 3600) * 1000 } } : { code: 'usable', key: 'usable', params: {} });
   const rows = M.priorityRows({ members, checked: ['m', 'u'], order: ['u', 'm'], mode: 'priority', current: 'u', stateOf });
   ok(rows.map((r) => r.id + ':' + (r.place || '-')).join(',') === 'u:1,m:2,f:-', 'rows: the order first (#1, #2), an unchecked member after without a place', rows.map((r) => r.id + ':' + r.place));
-  ok(rows.every((r) => r.actions.every((a) => !('disabled' in a))), 'no action is ever DISABLED (a greyed control is refused by the house rules)');
+  ok(verdictOf(rows.every((r) => r.actions.every((a) => !('disabled' in a)))), 'no action is ever DISABLED (a greyed control is refused by the house rules)');
   ok(JSON.stringify(rows[0].actions.map((a) => a.act)) === '["down","gather","pin-all"]' && JSON.stringify(rows[1].actions.map((a) => a.act)) === '["top","up","pin-all"]' && rows[2].actions.length === 0, 'only what applies: #1 has no Move up/top (absent), the last no Move down; a member of the pool has the one press (B-2083 unit B), one outside it none', rows.map((r) => r.actions.map((a) => a.act)));
-  ok(rows[0].isDefault && rows[0].actions.some((a) => a.act === 'gather'), 'addendum 4: "Move every conversation here now" is on #1 EVEN WHEN #1 already is the default — never unreachable');
-  ok(rows.find((r) => r.id === 'm').state.code === 'out' && rows.find((r) => r.id === 'm').checked, 'an exhausted member is a normal, checked row that SAYS it is out of quota');
+  ok(gateOf(rows[0].isDefault) && verdictOf(rows[0].actions.some((a) => a.act === 'gather')), 'addendum 4: "Move every conversation here now" is on #1 EVEN WHEN #1 already is the default — never unreachable');
+  ok(rows.find((r) => r.id === 'm').state.code === 'out' && verdictOf(rows.find((r) => r.id === 'm').checked), 'an exhausted member is a normal, checked row that SAYS it is out of quota');
   const w = M.rowWords(rows[0], tEn);
   ok(w.place === '#1' && w.name === 'UCI Max' && w.state === 'usable' && w.note === 'new conversations start here', 'row words (en)', w);
   const wz = M.rowWords(rows[1], tZh, { fmtTime: () => '周二 14:00' });
@@ -69,7 +69,7 @@ console.log('§2 the order: seed, moves, rows');
   const wj = M.rowWords(rows[0], tJa);
   ok(wj.state === '利用可' && wj.note === '新しい会話はここで始まります', 'row words (ja)', wj);
   const auto = M.priorityRows({ members, checked: null, order: ['u'], mode: 'automatic', current: 'u', stateOf });
-  ok(auto.every((r) => r.place === null && JSON.stringify(r.actions.map((a) => a.act)) === '["pin-all"]') && auto.map((r) => r.id).join() === 'm,u,f', 'Automatic: no places, no order menu — the list order (turning Manual priority OFF clears the list); the row\'s action place holds only the one press (B-2083 unit B)');
+  ok(gateOf(auto.every((r) => r.place === null && JSON.stringify(r.actions.map((a) => a.act)) === '["pin-all"]')) && auto.map((r) => r.id).join() === 'm,u,f', 'Automatic: no places, no order menu — the list order (turning Manual priority OFF clears the list); the row\'s action place holds only the one press (B-2083 unit B)');
   ok(M.placementWords('priority', tZh) === '分配方式：手动优先级' && M.placementWords('automatic', tEn) === 'Placement: Automatic', 'the placement caption');
 }
 
@@ -86,15 +86,15 @@ console.log('B-2083 unit B — THE MEMBER ROW\'s ONE PRESS «Move every conversa
     'the press and its clear in en and zh');
   const plan = { ok: true, now: 2, restart: 1, waits: { 'pin-exhausted': 1, 'pin-login-dead': 1 }, here: 1, provider: 1, remote: 0, elsewhere: 2, refused: {} };
   const c = M.pinAllConfirmWords(plan, tEn, { poolName: 'Team', memberName: 'Member U' });
-  ok(c.ask === true && c.title === 'Pin every conversation of “Team” to “Member U”?' && c.message.includes('2 move there now.') && c.message.includes('1 move at their next restart') && c.message.includes('1 wait until it can serve them: out of quota.') && c.message.includes('1 wait until it can serve them: cannot sign in.')
-    && c.message.includes('2 of them were pinned to another member') && c.message.includes('1 already pinned here.') && c.message.includes('1 stay: they run on another provider') && !/pin-|_unread|code/.test(c.message),
+  ok(c.ask === true && c.title === 'Pin every conversation of “Team” to “Member U”?' && gateOf(c.message.includes('2 move there now.')) && gateOf(c.message.includes('1 move at their next restart')) && gateOf(c.message.includes('1 wait until it can serve them: out of quota.')) && gateOf(c.message.includes('1 wait until it can serve them: cannot sign in.'))
+    && gateOf(c.message.includes('2 of them were pinned to another member')) && gateOf(c.message.includes('1 already pinned here.')) && gateOf(c.message.includes('1 stay: they run on another provider')) && !/pin-|_unread|code/.test(c.message),
     'THE CONFIRM SAYS FIRST, in plain words: now · at the next restart · waiting and why · pinned elsewhere (the clear will not bring it back) · here · stays — no verdict code name', c);
   const cz = M.pinAllConfirmWords(plan, tZh, { poolName: 'Team', memberName: 'Member U' });
-  ok(cz.title === '把「Team」的所有对话固定到「Member U」？' && cz.message.includes('2 个现在就移过去。') && cz.message.includes('个等到它能服务时再移') && cz.message.includes('「恢复自动」不会恢复那个固定'), 'the confirm in zh (every part a dictionary row)', cz);
+  ok(cz.title === '把「Team」的所有对话固定到「Member U」？' && gateOf(cz.message.includes('2 个现在就移过去。')) && gateOf(cz.message.includes('个等到它能服务时再移')) && verdictOf(cz.message.includes('「恢复自动」不会恢复那个固定')), 'the confirm in zh (every part a dictionary row)', cz);
   const none = M.pinAllConfirmWords({ ok: true, now: 0, restart: 0, waits: {}, here: 2, provider: 0, remote: 1, elsewhere: 0 }, tEn, { poolName: 'Team', memberName: 'Member U' });
-  ok(none.ask === false && /^No conversation of “Team” to move to “Member U”\. 2 already pinned here\. 1 stay: they run on another machine\.$/.test(none.text), 'nothing to pin: no confirm, the sentence says why', none);
+  ok(none.ask === false && verdictOf(/^No conversation of “Team” to move to “Member U”\. 2 already pinned here\. 1 stay: they run on another machine\.$/.test(none.text)), 'nothing to pin: no confirm, the sentence says why', none);
   const done = M.pinAllWords({ ok: true, now: 3, restart: 0, waits: { 'pin-recovering': 1 }, here: 0, provider: 0, remote: 0, elsewhere: 1, refused: { pin_not_saved: 1 } }, tEn, { poolName: 'Team', memberName: 'Member U' });
-  ok(done.type === 'error' && done.text.startsWith('4 conversation(s) of “Team” pinned to Member U.') && done.text.includes('1 wait until it can serve them: its quota is not back yet.') && done.text.includes('1 could not be pinned: its record could not be saved — try again.') && !/pin_not_saved/.test(done.text),
+  ok(done.type === 'error' && gateOf(done.text.startsWith('4 conversation(s) of “Team” pinned to Member U.')) && gateOf(done.text.includes('1 wait until it can serve them: its quota is not back yet.')) && gateOf(done.text.includes('1 could not be pinned: its record could not be saved — try again.')) && !/pin_not_saved/.test(done.text),
     'the answer in the same plain counts; one that could not be pinned is said with its plain why, never its code (r5294 should)', done);
   ok(M.pinClearWords({ ok: true, cleared: 3, refused: {} }, tEn, { poolName: 'Team', memberName: 'Member U' }).text === '3 conversation(s) of “Team” are placed automatically again.'
     && M.pinClearWords({ ok: true, cleared: 0, refused: {} }, tZh, { poolName: 'Team', memberName: 'Member U' }).text === '「Team」没有固定在 Member U 上的对话。', 'the clear\'s answer (en, zh)');
@@ -108,14 +108,14 @@ console.log('B-2083 unit B — THE MEMBER ROW\'s ONE PRESS «Move every conversa
   };
   const sayOf = (mod, pays, t) => mod.pinAllConfirmWords({ ...P0, pays }, t, { poolName: 'Team', memberName: 'Member U' }).message;
   for (const [pays, [en, zhs, jas]] of Object.entries(SAY)) {
-    ok(sayOf(M, pays, tEn).startsWith(en + ' 44 move there now.') && sayOf(M, pays, tZh).startsWith(zhs) && sayOf(M, pays, tJa).startsWith(jas),
+    ok(gateOf(sayOf(M, pays, tEn).startsWith(en + ' 44 move there now.')) && gateOf(sayOf(M, pays, tZh).startsWith(zhs)) && verdictOf(sayOf(M, pays, tJa).startsWith(jas)),
       `«${pays}»: the confirm says the money FIRST, in one plain sentence, in en / zh / ja — then the counts`, [sayOf(M, pays, tEn), sayOf(M, pays, tZh), sayOf(M, pays, tJa)]);
   }
   ok(sayOf(M, null, tEn) === '44 move there now.', 'a member that bills nothing past its quota: no money sentence', sayOf(M, null, tEn));
-  ok(M.pinAllConfirmWords({ ...P0, now: 1, unread: 2 }, tEn, { poolName: 'Team', memberName: 'Member U' }).message.includes('2 stay: their member could not be read — pin each by itself.'), 'a conversation whose member cannot be read is said apart (r5294 should)');
+  ok(verdictOf(M.pinAllConfirmWords({ ...P0, now: 1, unread: 2 }, tEn, { poolName: 'Team', memberName: 'Member U' }).message.includes('2 stay: their member could not be read — pin each by itself.')), 'a conversation whose member cannot be read is said apart (r5294 should)');
   const endedSaid = M.pinAllWords({ ok: true, now: 4, restart: 0, waits: {}, ended: 1, refused: {} }, tEn, { poolName: 'Team', memberName: 'Member U' });
-  ok(endedSaid.type === undefined && endedSaid.text.includes('1 ended or left the pool meanwhile — nothing was changed for them.') && !/try again/.test(endedSaid.text)
-    && M.pinClearWords({ ok: true, cleared: 2, ended: 1, refused: {} }, tZh, { poolName: 'Team', memberName: 'Member U' }).text.includes('1 个在此期间已结束或离开了这个池——没有对它们做任何更改。'),
+  ok(endedSaid.type === undefined && gateOf(endedSaid.text.includes('1 ended or left the pool meanwhile — nothing was changed for them.')) && !/try again/.test(endedSaid.text)
+    && verdictOf(M.pinClearWords({ ok: true, cleared: 2, ended: 1, refused: {} }, tZh, { poolName: 'Team', memberName: 'Member U' }).text.includes('1 个在此期间已结束或离开了这个池——没有对它们做任何更改。')),
     'a conversation that ended (or left the pool) while the press ran is said apart — no «try again», not an error (r5333 should)', endedSaid);
   // r5539: A NOTICE IN THIS DEVICE's WORDS, and THE PAGE's OWN PRESS said by its reply alone (src/lib/notice-words.js)
   {
@@ -132,9 +132,9 @@ console.log('B-2083 unit B — THE MEMBER ROW\'s ONE PRESS «Move every conversa
     ok(NW.markOwnNotice('pool-pin-all-pamark1') === true && NW.takeOwnNotice('pool-pin-all-pamark1') === true && NW.takeOwnNotice('pool-pin-all-pamark1') === false && NW.takeOwnNotice('pool-pin-all-other') === false,
       'THE PRESS\'s OWN MARK: marked before the press, taken ONCE when its notice arrives (that page says the press by its reply); another key is never taken');
     for (let i = 0; i < 70; i++) NW.markOwnNotice('k' + i);
-    ok(NW.takeOwnNotice('k0') === false && NW.takeOwnNotice('k69') === true && /^pa[a-z0-9]{8,}$/.test(NW.newPressMark('pa')), 'at most 64 marks are kept (the oldest goes); a fresh mark is letters and digits after its prefix');
+    ok(NW.takeOwnNotice('k0') === false && NW.takeOwnNotice('k69') === true && verdictOf(/^pa[a-z0-9]{8,}$/.test(NW.newPressMark('pa'))), 'at most 64 marks are kept (the oldest goes); a fresh mark is letters and digits after its prefix');
     const APP = fs2.readFileSync(path.resolve('src/lib/app.js'), 'utf8'), MAS = fs2.readFileSync(path.resolve('src/lib/manage-agents.js'), 'utf8');
-    ok(APP.includes("if (!takeOwnNotice(msg.key)) showToast(noticeWords(msg, t), { type: msg.level >= 2 ? 'error' : undefined });") && !APP.includes('const said = (ps) =>'),   // stale-pins: kept — an ABSENCE check: the old inline words left app.js for notice-words.js
+    ok(gateOf(APP.includes("if (!takeOwnNotice(msg.key)) showToast(noticeWords(msg, t), { type: msg.level >= 2 ? 'error' : undefined });")) && !APP.includes('const said = (ps) =>'),   // stale-pins: kept — an ABSENCE check: the old inline words left app.js for notice-words.js
       'the hub page\'s one notice door words every notice through noticeWords and skips the notice of its own press (its mark taken)');
     const pa = MAS.indexOf("const press = newPressMark('pa'); markOwnNotice('pool-pin-all-' + press);"), pf = MAS.indexOf("body: JSON.stringify({ memberId, press })");
     const ca = MAS.indexOf("const press = newPressMark('pc'); markOwnNotice('pool-pin-clear-' + press);"), cf = MAS.indexOf("body: JSON.stringify({ memberId, clear: true, press })");
@@ -182,24 +182,24 @@ console.log('§4 the billing switcher\'s pool SUBMENU (the pin) — addendum 3: 
   const stateOf = (id) => (id === 'f' ? spent : { code: 'usable', key: 'usable', params: {} });
   const m = M.poolSubmenuModel({ pool, auth, pinId: null, live: true, applies: 'now', stateOf });
   ok(m.parent.member === auth.poolTarget && m.parent.memberId === 'm', 'the pool row names THIS conversation\'s member — the same fact the chip prints (Martin Max), never the default (UCI Max)', m.parent);
-  ok(m.parent.title && m.parent.title.params.member === 'Martin Max' && m.parent.title.params.default === 'UCI Max' && tEn(m.parent.title.key, m.parent.title.params) === 'This conversation runs on Martin Max; new conversations start on UCI Max.', 'the default is named SEPARATELY, in words, in one sentence (the tooltip)', tEn(m.parent.title.key, m.parent.title.params));
+  ok(gateOf(m.parent.title) && m.parent.title.params.member === 'Martin Max' && m.parent.title.params.default === 'UCI Max' && tEn(m.parent.title.key, m.parent.title.params) === 'This conversation runs on Martin Max; new conversations start on UCI Max.', 'the default is named SEPARATELY, in words, in one sentence (the tooltip)', tEn(m.parent.title.key, m.parent.title.params));
   ok(tZh(m.parent.title.key, m.parent.title.params) === '这个对话在用 Martin Max；新对话从 UCI Max 开始。', '…in zh too');
   const same = M.poolSubmenuModel({ pool, auth: { ...auth, poolTarget: 'UCI Max', poolTargetId: 'u' }, stateOf });
   ok(tEn(same.parent.title.key, same.parent.title.params) === 'This conversation runs on UCI Max.', 'when the conversation IS on the default, one clause says it');
   ok(m.rows[0].act === 'auto' && m.rows[0].checked === true && M.submenuNoteWords(m.rows[0], tZh) === '新对话默认: UCI Max', 'first row: Automatic, ✓ when nothing is pinned, its hint names the default ("新对话默认: UCI Max")', M.submenuNoteWords(m.rows[0], tZh));
   const rowOf = (mm, id) => mm.rows.find((r) => r.id === id);
-  ok(rowOf(m, 'm').checked && !rowOf(m, 'u').checked && !rowOf(m, 'f').checked, 'the ✓ inside the submenu sits on the conversation\'s member (Martin), not the default');
-  ok(m.rows.every((r) => !('disabled' in r)), 'no row is disabled');
+  ok(gateOf(rowOf(m, 'm').checked) && !rowOf(m, 'u').checked && !rowOf(m, 'f').checked, 'the ✓ inside the submenu sits on the conversation\'s member (Martin), not the default');
+  ok(verdictOf(m.rows.every((r) => !('disabled' in r))), 'no row is disabled');
   ok(M.submenuNoteWords(rowOf(m, 'f'), tEn, { fmtTime: () => 'Tue 14:00' }) === 'out of quota until Tue 14:00 · pins now, switches when it can', 'an exhausted member is offered, in words: "out of quota … · pins now, switches when it can"', M.submenuNoteWords(rowOf(m, 'f'), tEn, { fmtTime: () => 'Tue 14:00' }));
   const p = M.poolSubmenuModel({ pool, auth: { ...auth, pinned: 'Fish Max', pinnedId: 'f' }, pinId: 'f', live: true, applies: 'now', stateOf });
-  ok(!p.rows[0].checked && rowOf(p, 'f').pinned && /^pinned · out of quota until/.test(M.submenuNoteWords(rowOf(p, 'f'), tEn)), 'pinned: Automatic loses its ✓, the pinned member says "pinned" in words (and still its state)', M.submenuNoteWords(rowOf(p, 'f'), tEn));
-  ok(rowOf(p, 'm').checked, '…while the ✓ stays on where it RUNS (the pin waits for Fish)');
+  ok(!p.rows[0].checked && gateOf(rowOf(p, 'f').pinned) && verdictOf(/^pinned · out of quota until/.test(M.submenuNoteWords(rowOf(p, 'f'), tEn))), 'pinned: Automatic loses its ✓, the pinned member says "pinned" in words (and still its state)', M.submenuNoteWords(rowOf(p, 'f'), tEn));
+  ok(verdictOf(rowOf(p, 'm').checked), '…while the ✓ stays on where it RUNS (the pin waits for Fish)');
   const cold = M.poolSubmenuModel({ pool, auth, pinId: null, live: true, applies: 'restart', stateOf });
   ok(M.submenuNoteWords(rowOf(cold, 'u'), tEn) === 'applies at the next restart' && M.submenuNoteWords(rowOf(cold, 'm'), tEn) === '', 'a pool that cannot re-point a running conversation says "applies at the next restart" on the rows that would move it', M.submenuNoteWords(rowOf(cold, 'u'), tEn));
   const stopped = M.poolSubmenuModel({ pool, auth: null, pinId: null, live: false, stateOf });
   ok(M.submenuNoteWords(rowOf(stopped, 'u'), tJa) === '会話を再開したときに適用' && stopped.parent.member === null, 'a stopped conversation: "applies when it resumes" (ja), no member claimed');
   const gone = M.poolSubmenuModel({ pool, auth, pinId: 'x-removed', live: true, stateOf: () => null });
-  ok(rowOf(gone, 'x-removed') && rowOf(gone, 'x-removed').pinned, 'a pinned member the pool no longer offers still shows (so it can be un-pinned)');
+  ok(gateOf(rowOf(gone, 'x-removed')) && verdictOf(rowOf(gone, 'x-removed').pinned), 'a pinned member the pool no longer offers still shows (so it can be un-pinned)');
 }
 
 // §r1g (verify r1, authority — words): "MOVE EVERY CONVERSATION HERE NOW" SAYS WHAT IT DID. The toast read
@@ -216,20 +216,20 @@ console.log('§r1g the gather act, in words');
   ok(n.move === 2 && n.pinned === 1, 'the count: this pool\'s LOCAL conversations, a pinned one apart (a remote one and another account\'s never)', n);
   const c = M.gatherConfirmWords(n, tEn, { memberName: 'Fish Max' });
   ok(c.title === 'Move 2 conversation(s) to “Fish Max”?' && c.message === 'This pool cannot switch a running conversation in place, so each one restarts and continues via resume. 1 pinned conversation(s) stay on their pin.' && c.confirmText === 'Move & restart', 'ONE confirm that names the count (and the pinned ones it leaves)', c);
-  ok(M.gatherConfirmWords(n, tZh, { memberName: 'Fish Max' }).title === '把 2 个对话切到“Fish Max”？' && /^2 件の会話を/.test(M.gatherConfirmWords(n, tJa, { memberName: 'Fish Max' }).title), '…zh / ja');
+  ok(M.gatherConfirmWords(n, tZh, { memberName: 'Fish Max' }).title === '把 2 个对话切到“Fish Max”？' && verdictOf(/^2 件の会話を/.test(M.gatherConfirmWords(n, tJa, { memberName: 'Fish Max' }).title)), '…zh / ja');
   ok(M.gatherConfirmWords({ move: 0, pinned: 3 }, tEn, { memberName: 'X' }) === null, 'nothing would restart ⇒ no confirm');
   const said = (r, t = tEn) => M.gatherWords(r, t, { poolName: '全部', memberName: 'Fish Max', fmtTime: () => 'Tue 14:00' });
   ok(said({ success: true, moved: 3, skipped: { pinned: 0, cannotServe: [] }, affected: [] }).text === 'Every conversation of “全部” now uses Fish Max', 'all of them moved ⇒ "Every conversation…"');
   const part = said({ success: true, moved: 2, skipped: { pinned: 1, cannotServe: [{ sid: 's-9', name: 'conv 9', why: 'pin-exhausted' }] }, affected: [{}, {}] });
   ok(part.type === undefined && part.text === '2 conversation(s) of “全部” now use Fish Max — 1 pinned conversation(s) stay on their pin — 1 stay where they are (Fish Max cannot serve them) — restarting 2 conversation(s)…', 'some stayed ⇒ the count that moved, the pinned ones, the ones it cannot serve, the restarts — never "every"', part.text);
-  ok(!/Every|所有对话/.test(said({ success: true, moved: 2, skipped: { pinned: 1, cannotServe: [] }, affected: [] }, tZh).text) && /1 个已固定的对话留在各自固定的账号上/.test(said({ success: true, moved: 2, skipped: { pinned: 1, cannotServe: [] }, affected: [] }, tZh).text), '…zh', said({ success: true, moved: 2, skipped: { pinned: 1, cannotServe: [] }, affected: [] }, tZh).text);
+  ok(!/Every|所有对话/.test(said({ success: true, moved: 2, skipped: { pinned: 1, cannotServe: [] }, affected: [] }, tZh).text) && verdictOf(/1 个已固定的对话留在各自固定的账号上/.test(said({ success: true, moved: 2, skipped: { pinned: 1, cannotServe: [] }, affected: [] }, tZh).text)), '…zh', said({ success: true, moved: 2, skipped: { pinned: 1, cannotServe: [] }, affected: [] }, tZh).text);
   const no = said({ code: 'target_cannot_serve', why: 'pin-exhausted', until: 1800000000000, member: 'Fish Max', error: 'Fish Max is out of quota — nothing was moved.' });
   ok(no.type === 'error' && no.text === 'Fish Max: out of quota until Tue 14:00 — nothing was moved. The pool brings its conversations back to it when it can serve again.', 'a refusal by its CODE, in the device\'s words, with the time', no.text);
   ok(said({ code: 'target_cannot_serve', why: 'pin-login-dead', member: 'Fish Max' }, tZh).text === 'Fish Max：无法登录 — 没有移动任何对话。等它能用时，池会把对话带回来。', '…a login that cannot serve (zh)', said({ code: 'target_cannot_serve', why: 'pin-login-dead', member: 'Fish Max' }, tZh).text);
   ok(said({ error: 'not a signed-in member of this pool', code: 'not_member' }).text === 'not a signed-in member of this pool' && said(null).type === 'error', 'any other refusal: the server\'s sentence; no answer at all: an error');
   const fs2 = require('node:fs');
   const ma = fs2.readFileSync(path.resolve('src/lib/manage-agents.js'), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
-  ok(/const words = gatherConfirmWords\(gatherCount\(this\.sidebar\?\._webuiSessions \|\| \[\], poolId\), t, \{ memberName \}\);/.test(ma) && /const said = gatherWords\(r, t, \{ poolName, memberName, fmtTime \}\);/.test(ma) && !/Every conversation of/.test(ma), 'WIRING PIN: the dialog asks the model for the confirm and for the answer\'s words (no sentence of its own)');
+  ok(gateOf(/const words = gatherConfirmWords\(gatherCount\(this\.sidebar\?\._webuiSessions \|\| \[\], poolId\), t, \{ memberName \}\);/.test(ma)) && gateOf(/const said = gatherWords\(r, t, \{ poolName, memberName, fmtTime \}\);/.test(ma)) && !/Every conversation of/.test(ma), 'WIRING PIN: the dialog asks the model for the confirm and for the answer\'s words (no sentence of its own)');
 }
 
 // §r1e (verify r1, authority — words): A MEMBER LEFT THE POOL. The act said "Excluded X from pool" and nothing
@@ -242,12 +242,12 @@ console.log('§r1e a removed member, in the act\'s own words');
   ok(M.evictedWords({ removed: ['m'], moved: 0, restarted: 0, stayed: 0, held: 2 }, tEn) === '2 conversation(s) stop after their current turn and wait — no other member can take them right now. They continue when one can.', 'conversations nobody can take: the act says they STOP AND WAIT (全B) — never "keep running"', M.evictedWords({ held: 2 }, tEn));
   ok(M.evictedWords({ removed: ['m'], stayed: 1, held: 0 }, tEn) === '1 conversation(s) could not be parked — no member of the pool is signed in.', '…and one that could not be parked at all says why', M.evictedWords({ stayed: 1 }, tEn));
   ok(M.evictedWords({ removed: ['m'], moved: 3, restarted: 0, stayed: 0 }, tEn) === '' && M.evictedWords(null, tEn) === '', 'everything moved (each conversation is told by the pool) / nothing removed ⇒ nothing to add');
-  ok(/^2 个对话会在当前回合结束后停下等待/.test(M.evictedWords({ held: 2 }, tZh)) && /^2 件の会話は現在のターンの後に停止して待機します/.test(M.evictedWords({ held: 2 }, tJa)), '…zh / ja');
+  ok(gateOf(/^2 个对话会在当前回合结束后停下等待/.test(M.evictedWords({ held: 2 }, tZh))) && verdictOf(/^2 件の会話は現在のターンの後に停止して待機します/.test(M.evictedWords({ held: 2 }, tJa))), '…zh / ja');
   const fs3 = require('node:fs');
   const ma = fs3.readFileSync(path.resolve('src/lib/manage-agents.js'), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
   ok((ma.match(/const kept = evictedWords\(r\?\.evicted, t\); if \(kept\) showToast\(kept, \{ type: 'error', duration: 10000 \}\);/g) || []).length === 2, 'WIRING PIN: BOTH ways a member leaves a pool (Members… Save, the member\'s own Exclude) say it');
   const tip = 'Removes “{name}” from the pool’s member list. The pool’s conversations running on it move to another member at once — or, when no other member can take them, stop after their current turn and wait; conversations that picked it directly keep running on it.';
-  ok(ma.includes(`title: t('${tip}', { name: a.name }),`) && !/member list; conversations that picked it directly keep running on it\./.test(ma) && zh[tip] && ja[tip], 'the Exclude row says BEFORE the click that the pool\'s conversations on it move at once (en / zh / ja)');
+  ok(gateOf(ma.includes(`title: t('${tip}', { name: a.name }),`)) && !/member list; conversations that picked it directly keep running on it\./.test(ma) && gateOf(zh[tip]) && verdictOf(ja[tip]), 'the Exclude row says BEFORE the click that the pool\'s conversations on it move at once (en / zh / ja)');
 }
 
 // §r1 (verify r1, authority): THE PIN'S RESUME CARRIER. The billing submenu saves the pin into the
@@ -305,7 +305,7 @@ console.log('§r1 the pin\'s resume carrier (the real setSessionConfig)');
   ok(old.getSessionConfig(key) == null, 'control: …and a pin-only config vanishes whole');
   // the stopped card's popover edits four keys — it must carry the rest along
   const card = fs.readFileSync(path.resolve('src/lib/session-card.js'), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
-  ok(/state\.setSessionConfig\?\.\(s, \{ \.\.\.\(state\.getSessionConfig\?\.\(s\) \|\| \{\}\), \.\.\.overrides \}\);/.test(card) && !/state\.setSessionConfig\?\.\(s, overrides\);/.test(card), 'WIRING PIN: the session card\'s popover writes its four keys OVER the saved config (a model pick on a stopped conversation keeps its pin)');
+  ok(gateOf(/state\.setSessionConfig\?\.\(s, \{ \.\.\.\(state\.getSessionConfig\?\.\(s\) \|\| \{\}\), \.\.\.overrides \}\);/.test(card)) && !/state\.setSessionConfig\?\.\(s, overrides\);/.test(card), 'WIRING PIN: the session card\'s popover writes its four keys OVER the saved config (a model pick on a stopped conversation keeps its pin)');
   // …and every other writer spreads what is saved (census: a fresh object anywhere drops the pin)
   const writers = [];
   for (const f of fs.readdirSync(path.resolve('src/lib')).filter((x) => x.endsWith('.js'))) {
@@ -313,7 +313,7 @@ console.log('§r1 the pin\'s resume carrier (the real setSessionConfig)');
     text.forEach((l, i) => { const c = l.replace(/(^|\s)\/\/.*$/, ''); if (/setSessionConfig\??\.?\(/.test(c) && !/proto\.setSessionConfig/.test(c)) writers.push({ f, n: i + 1, l: c.trim(), prev: (text[i - 1] || '') + (text[i - 2] || '') + (text[i - 3] || '') }); });
   }
   const carries = (w) => /\{ \.\.\.\(?[\w.?]*(getSessionConfig|cfg|cur)\b/.test(w.l);   // (r5500: pinTo's saveCfg spreads the config as it stands when it writes — `{ ...(this.sidebar?.getSessionConfig?.(cfgKey) || {}) }`; the old `{ ...cfg }` form is gone)
-  ok(writers.length >= 8 && writers.every(carries), `CENSUS: every setSessionConfig writer in src/lib (${writers.length}) writes OVER the saved config`, writers.filter((w) => !carries(w)).map((w) => `${w.f}:${w.n} ${w.l}`));
+  ok(writers.length >= 8 && verdictOf(writers.every(carries)), `CENSUS: every setSessionConfig writer in src/lib (${writers.length}) writes OVER the saved config`, writers.filter((w) => !carries(w)).map((w) => `${w.f}:${w.n} ${w.l}`));
 }
 
 console.log('§P THE PROVIDER: the owner\'s card for a move to ANOTHER provider (q-053 P0b, decision ①)');
@@ -322,13 +322,13 @@ console.log('§P THE PROVIDER: the owner\'s card for a move to ANOTHER provider 
   const card = { id: 'ut-x', text: 'Moving "Fix the build" to DeepSeek row (DeepSeek) needs your OK — it restarts the conversation and its model becomes deepseek-chat', detail: 'd', status: 'open', kind: 'action', urgency: 'high',
     action: { type: 'pool-cross-provider', askId: 'q1', poolId: 'pool-1', memberId: 'acct-b' } };
   const v = L.itemView(card, { t: tEn });
-  ok(JSON.stringify(v.actions.slice(0, 3)) === '["hub-once","pool-always","hub-deny"]' && v.hubAsk && v.hubAsk.type === 'pool-cross-provider' && v.hubAsk.askId === 'q1',
+  ok(JSON.stringify(v.actions.slice(0, 3)) === '["hub-once","pool-always","hub-deny"]' && gateOf(v.hubAsk) && v.hubAsk.type === 'pool-cross-provider' && v.hubAsk.askId === 'q1',
     'the card answers the three held-ask ways, FIRST: Allow once · Always for this pool · Deny (never a typed reply)', v.actions);
   ok(!L.itemView({ ...card, status: 'done' }, { t: tEn }).actions.includes('hub-once'), 'a resolved card has no answer buttons');
   const TEXT = 'Moving "{title}" to {member} ({provider}) needs your OK — it restarts the conversation and its model becomes {model}';
   const LINE = 'Switched from {from} ({fromProvider}) to {to} ({toProvider}) — model {model} → {toModel}';
   const p = { title: 'Fix the build', member: 'DeepSeek row', provider: 'DeepSeek', model: 'deepseek-chat' };
-  ok(tZh(TEXT, p) === '把「Fix the build」切到 DeepSeek row（DeepSeek）需要你同意——会重启对话，模型改为 deepseek-chat' && tJa(TEXT, p).includes('deepseek-chat') && tJa(TEXT, p) !== TEXT, 'the card\'s words in zh / ja (names, provider and the new model kept)', [tZh(TEXT, p), tJa(TEXT, p)]);
+  ok(tZh(TEXT, p) === '把「Fix the build」切到 DeepSeek row（DeepSeek）需要你同意——会重启对话，模型改为 deepseek-chat' && gateOf(tJa(TEXT, p).includes('deepseek-chat')) && tJa(TEXT, p) !== TEXT, 'the card\'s words in zh / ja (names, provider and the new model kept)', [tZh(TEXT, p), tJa(TEXT, p)]);
   const lp = { from: 'Member A', fromProvider: 'Anthropic subscription', to: 'Member B', toProvider: 'DeepSeek', model: 'sonnet', toModel: 'deepseek-chat' };
   ok(tZh(LINE, lp) === '已从 Member A（Anthropic subscription）切到 Member B（DeepSeek）——模型 sonnet → deepseek-chat' && tJa(LINE, lp) !== LINE, 'the line in the conversation, zh / ja', [tZh(LINE, lp), tJa(LINE, lp)]);
   ok(tZh('Always for this pool') === '一直（这个池）' && tJa('Always for this pool') === '常に（このプール）', 'the Always word names the POOL (the setting it writes), zh / ja');
@@ -342,17 +342,17 @@ console.log('§U A DELETED ACCOUNT\'s conversation, UNPLACED (lane pool-provider
   const NONE = '{member} ({provider}) was deleted and no other {provider} account in pool "{pool}" can take this conversation, so nothing moved it — and no other provider in the pool serves its model. Add or sign in a {provider} account and it moves there.';
   const p = { title: 'Fix the build', provider: 'DeepSeek', member: 'DS key 1', pool: 'Main', offer: 'Router', offerProvider: 'OpenRouter', model: 'deepseek-chat' };
   ok(tZh(TEXT, p) === '账号已删，「Fix the build」需要你选一个 DeepSeek 账号', 'the card\'s line in zh is the owner\'s own sentence 「账号已删，<对话> 需要你选一个 <provider> 账号」', tZh(TEXT, p));
-  ok(tJa(TEXT, p) !== TEXT && tJa(TEXT, p).includes('Fix the build') && tJa(TEXT, p).includes('DeepSeek') && tEn(TEXT, p) === 'Account deleted — "Fix the build" needs you to pick a DeepSeek account', 'the line in ja / en (the conversation and its provider kept)', [tJa(TEXT, p), tEn(TEXT, p)]);
+  ok(tJa(TEXT, p) !== TEXT && gateOf(tJa(TEXT, p).includes('Fix the build')) && gateOf(tJa(TEXT, p).includes('DeepSeek')) && tEn(TEXT, p) === 'Account deleted — "Fix the build" needs you to pick a DeepSeek account', 'the line in ja / en (the conversation and its provider kept)', [tJa(TEXT, p), tEn(TEXT, p)]);
   for (const [k, n] of [[OFFER, 'with a move to offer'], [NONE, 'with none']]) {
     const z = tZh(k, p), j = tJa(k, p);
-    ok(z !== k && j !== k && ['DS key 1', 'DeepSeek', 'Main'].every((x) => z.includes(x) && j.includes(x)) && (k !== OFFER || ['Router', 'OpenRouter', 'deepseek-chat'].every((x) => z.includes(x) && j.includes(x))), `the detail ${n}: zh / ja name the deleted account, its provider, the pool${k === OFFER ? ', the offer and the model' : ''}`, [z, j]);
+    ok(z !== k && j !== k && gateOf(['DS key 1', 'DeepSeek', 'Main'].every((x) => z.includes(x) && j.includes(x))) && (k !== OFFER || verdictOf(['Router', 'OpenRouter', 'deepseek-chat'].every((x) => z.includes(x) && j.includes(x)))), `the detail ${n}: zh / ja name the deleted account, its provider, the pool${k === OFFER ? ', the offer and the model' : ''}`, [z, j]);
   }
   const offerCard = { id: 'ut-u', text: tEn(TEXT, p), detail: tEn(OFFER, p), status: 'open', kind: 'action', urgency: 'high', action: { type: 'pool-cross-provider', askId: 'q9', poolId: 'pool-1', memberId: 'acct-r' } };
   const v = L.itemView(offerCard, { t: tEn });
-  ok(JSON.stringify(v.actions.slice(0, 3)) === '["hub-once","pool-always","hub-deny"]' && v.hubAsk && v.hubAsk.askId === 'q9', 'with a move to offer it is the EXHAUSTED CASE\'S card: Allow once · Always for this pool · Deny, first', v.actions);
+  ok(JSON.stringify(v.actions.slice(0, 3)) === '["hub-once","pool-always","hub-deny"]' && gateOf(v.hubAsk) && v.hubAsk.askId === 'q9', 'with a move to offer it is the EXHAUSTED CASE\'S card: Allow once · Always for this pool · Deny, first', v.actions);
   const v2 = L.itemView({ ...offerCard, id: 'ut-v', detail: tEn(NONE, p), action: null }, { t: tEn });
   ok(!v2.actions.includes('hub-once') && !v2.actions.includes('pool-always') && !v2.hubAsk, 'with none it carries no answer that could move it (the words alone)', v2.actions);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

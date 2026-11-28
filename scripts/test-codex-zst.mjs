@@ -36,7 +36,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -78,7 +78,7 @@ fs.writeFileSync(zstPath, zstBuf);
 console.log('— ① zstd readers');
 const DF = require(path.join(REPO, 'src/discovery-facts.js'));
 ok(DF.ZSTD_SUPPORTED === true, `this node (${process.versions.node}) has zlib zstd (the readers need ≥22.15)`);
-ok(DF.isZstBuffer(zstBuf) && !DF.isZstBuffer(Buffer.from(plainText)) && DF.isZstPath(zstPath) && !DF.isZstPath(plainPath), 'zstd detection by magic bytes and by extension');
+ok(gateOfGuard(DF.isZstBuffer(zstBuf)) && !DF.isZstBuffer(Buffer.from(plainText)) && gateOfGuard(DF.isZstPath(zstPath)) && !DF.isZstPath(plainPath), 'zstd detection by magic bytes and by extension');
 ok(DF.zstdDecompressFrames(zstBuf).toString() === zstText, 'zstdDecompressFrames concatenates EVERY frame and steps over skippable frames (zstdDecompressSync alone stops after the first)');
 ok(DF.zstdDecompressFrames(zstBuf.subarray(0, frame1.length + 20)).toString() === zstText.slice(0, 300), 'a truncated trailing frame yields the earlier frames\' text (bounded prefix reads work)');
 // ci-352-red — THE RUNTIME FACT: how many frames ONE zlib.zstdDecompressSync call decodes is the node's (24.12: the first
@@ -90,7 +90,7 @@ ok(DF.zstdDecompressFrames(zstBuf.subarray(0, frame1.length + 20)).toString() ==
   const rawTail = crypto.randomBytes(4000), rawFrame = zlib.zstdCompressSync(rawTail);     // incompressible ⇒ raw blocks: a cut answers covered bytes
   const cut = Buffer.concat([frame1, skippable, rawFrame]).subarray(0, frame1.length + skippable.length + 2000);
   const got = DF.zstdDecompressFrames(cut);
-  ok(got.subarray(0, 300).toString() === zstText.slice(0, 300) && got.length >= 300 && got.length <= 4300 && got.subarray(300).equals(rawTail.subarray(0, got.length - 300)),
+  ok(got.subarray(0, 300).toString() === zstText.slice(0, 300) && got.length >= 300 && got.length <= 4300 && verdictOf(got.subarray(300).equals(rawTail.subarray(0, got.length - 300))),
     `a last frame cut mid-way (raw blocks) answers the earlier frames' text plus the bytes it covers, never '' (${got.length - 300} B of the cut frame)`);
   ok(DF.zstdDecompressFrames(frame2.subarray(0, 20)).length === 0 && DF.readHeadText(zstPath, 100000) === zstText,
     'a lone cut frame answers 0 bytes without throwing; the whole-file head read is unchanged by the flush mode');
@@ -99,8 +99,8 @@ let big = null; try { DF.zstdDecompressFrames(zstBuf, { maxOutputLength: 100 });
 ok(big === 'EZSTBIG', 'exceeding maxOutputLength throws the coded EZSTBIG error (never a giant string)');
 const headZ = DF.readHeadText(zstPath, 100000), headP = DF.readHeadText(plainPath, 100000);
 ok(headZ === zstText && headP === plainText, 'readHeadText returns plain text for both a .zst and a plain rollout');
-ok(DF.readHeadText(zstPath, 200).length <= 200 && DF.readHeadText(zstPath, 200).endsWith('\n'), 'readHeadText caps the PLAIN bytes and drops the cut-off last line');
-ok(DF.codexThreadIdOf(zstPath) === TID2 && DF.codexThreadIdOf(plainPath) === TID && DF.CODEX_ROLLOUT_RE.test('rollout-x.jsonl.zst') && !DF.CODEX_ROLLOUT_RE.test('notes.jsonl'), 'thread-id + rollout-name rules accept .jsonl and .jsonl.zst');
+ok(DF.readHeadText(zstPath, 200).length <= 200 && verdictOf(DF.readHeadText(zstPath, 200).endsWith('\n')), 'readHeadText caps the PLAIN bytes and drops the cut-off last line');
+ok(DF.codexThreadIdOf(zstPath) === TID2 && DF.codexThreadIdOf(plainPath) === TID && gateOfGuard(DF.CODEX_ROLLOUT_RE.test('rollout-x.jsonl.zst')) && !DF.CODEX_ROLLOUT_RE.test('notes.jsonl'), 'thread-id + rollout-name rules accept .jsonl and .jsonl.zst');
 const CX = require(path.join(REPO, 'src/adapters/codex.js'));
 
 // ── ①b A REAL-SHAPED ROLLOUT THAT COMPRESSES BETTER THAN 4× (the vanished-thread bug)
@@ -134,7 +134,7 @@ const TID3 = '77777777-6666-4555-8444-333333333333';
   try { DF.zstdDecompressFrames(bigComp.subarray(0, Math.min(bigComp.length, HEAD)), { maxOutputLength: Math.max(HEAD * 4, 1024 * 1024) }); } catch (e) { oldCap = e.code; }
   ok(oldCap === 'EZSTBIG', 'REPRO: the old one-shot ratio-guess cap throws on this file (that throw became an empty head)');
   const bigHead = DF.readHeadText(bigPath, HEAD);
-  ok(bigHead.length > 0 && bigHead.length <= HEAD && bigHead.startsWith('{"timestamp"') && bigHead.endsWith('\n'), `readHeadText BISECTS the compressed prefix instead of guessing a ratio (${bigHead.length} plain bytes, never '')`);
+  ok(bigHead.length > 0 && bigHead.length <= HEAD && gateOfGuard(bigHead.startsWith('{"timestamp"')) && verdictOf(bigHead.endsWith('\n')), `readHeadText BISECTS the compressed prefix instead of guessing a ratio (${bigHead.length} plain bytes, never '')`);
   ok(DF.zstdDecompressHead(bigComp, HEAD).length >= HEAD && DF.zstdDecompressHead(bigComp, HEAD).length <= Math.max(HEAD * 4, 1024 * 1024), 'zstdDecompressHead yields AT LEAST the requested head and never inflates the whole archive');
   const bigMeta = CX.extractCodexThreadMeta(bigPath);
   ok(bigMeta.threadId === TID3 && bigMeta.cwd === '/work/big' && bigMeta.name === 'high ratio rollout that used to vanish', 'the thread stays in the session list (threadId + cwd + name), where it used to vanish', bigMeta);
@@ -199,11 +199,11 @@ console.log('— ③ discovery interpretation: NC names, CO liveness, .zst ids')
   const real = JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'please fix the parser bug in lexer.js' }] } });
   const s = run([`C 1700001000 4000 ${rp}`, `HC ${rp}\t"cwd":"/work/plain"`, `NC ${rp}\t${inj}`, `NC ${rp}\t${real}`, `C 1700000900 3000 ${rz}`, `HC ${rz}\t"cwd":"/work/zst"`, `CO ${rz}`]);
   const a = s.find((x) => x.sessionId === TID), b = s.find((x) => x.sessionId === TID2);
-  ok(a && a.name === 'please fix the parser bug in lexer.js' && a.status === 'remote-stopped', 'NC lines name the thread through the codex naming rule (the injected <recommended_plugins> record is skipped)', a);
-  ok(b && b.backend === 'codex' && b.status === 'remote-running' && b.cwd === '/work/zst' && b.name === null, 'a CO line marks the thread RUNNING on the host (Resume must not double-write); a .zst rollout gets its thread id', b);
+  ok(gateOfGuard(a) && a.name === 'please fix the parser bug in lexer.js' && a.status === 'remote-stopped', 'NC lines name the thread through the codex naming rule (the injected <recommended_plugins> record is skipped)', a);
+  ok(gateOfGuard(b) && b.backend === 'codex' && b.status === 'remote-running' && b.cwd === '/work/zst' && b.name === null, 'a CO line marks the thread RUNNING on the host (Resume must not double-write); a .zst rollout gets its thread id', b);
   const cut = `NC ${rp}\t` + JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'a long question that gets cut off by the 2000-byte cap somewhere in the middle of the' }] } }).slice(0, 120);
   const s2 = run([`C 1700001000 4000 ${rp}`, cut]);
-  ok(s2[0]?.name && /^a long questio/.test(s2[0].name), 'a TRUNCATED NC line still names from the cut "text":"…" fragment', { got: s2[0]?.name, cut });
+  ok(gateOfGuard(s2[0]?.name) && verdictOf(/^a long questio/.test(s2[0].name)), 'a TRUNCATED NC line still names from the cut "text":"…" fragment', { got: s2[0]?.name, cut });
   const twins = run([`C 1700001000 4000 ${rp}`, `C 1700000000 900 ${rp.replace(/\.jsonl$/, '.jsonl.zst')}`]);
   ok(twins.length === 1 && twins[0].sessionId === TID, 'a .jsonl and its .jsonl.zst twin list ONCE');
   // TWIN ORDER, BOTH WAYS (the "plain wins" comment used to be a lie): both
@@ -226,7 +226,7 @@ console.log('— ③ discovery interpretation: NC names, CO liveness, .zst ids')
   const twinRunning = run([`C 1700002000 900 ${rzTwin}`, `C 1700001000 4000 ${rp}`, `CO ${rp}`]);
   ok(twinRunning[0].status === 'remote-running', 'a CO line on EITHER twin marks the one thread running');
   const lines = DF.synthesizeDiscoveryLines({ locks: [], jsonls: [], codexRollouts: [{ path: rz, size: 3000, mtimeMs: 1700000900000, headCwd: '/work/zst', userLines: [real] }], codexOpen: [rz] });
-  ok(/^NC /m.test(lines) && /^CO /m.test(lines) && run(lines.split('\n'))[0].status === 'remote-running' && run(lines.split('\n'))[0].name === 'please fix the parser bug in lexer.js', 'the daemon snapshot (userLines + codexOpen) synthesizes NC/CO lines the same interpreter reads (device/ssh parity)');
+  ok(gateOfGuard(/^NC /m.test(lines)) && gateOfGuard(/^CO /m.test(lines)) && run(lines.split('\n'))[0].status === 'remote-running' && run(lines.split('\n'))[0].name === 'please fix the parser bug in lexer.js', 'the daemon snapshot (userLines + codexOpen) synthesizes NC/CO lines the same interpreter reads (device/ssh parity)');
   ok(DF.nameFromCodexUserLine(inj) === null && DF.nameFromCodexUserLine('{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"nope"}]}}') === null, 'assistant records and injected blocks never name a thread');
 }
 
@@ -291,12 +291,12 @@ console.log('— ④b the dir-listing settle guard belongs to the CAPTURE, not t
   const tick = new Date();                       // the dir's mtime tick is OPEN right now
   fs.utimesSync(d, tick, tick);
   const first = CS.collectCodexThreadMetas().metas;
-  ok(first.some((m) => m.threadId === tidA), 'the unsettled capture lists what it saw');
+  ok(verdictOf(first.some((m) => m.threadId === tidA)), 'the unsettled capture lists what it saw');
   const tidB = mk(2);                            // created in the SAME mtime tick…
   fs.utimesSync(d, tick, tick);                  // …so the mtime does not move
   await sleep(2100);                             // the lookup-time guard would now say "settled"
   const second = CS.collectCodexThreadMetas().metas;
-  ok(second.some((m) => m.threadId === tidB), 'a listing captured UNSETTLED is re-read on the next lookup (the same-second sibling appears)');
+  ok(verdictOf(second.some((m) => m.threadId === tidB)), 'a listing captured UNSETTLED is re-read on the next lookup (the same-second sibling appears)');
   const hitsBefore = CS.dirCacheStats().hits;
   CS.collectCodexThreadMetas();
   ok(CS.dirCacheStats().hits > hitsBefore, '…and the now-SETTLED capture is cached again (the readdir-per-poll win survives)');
@@ -307,37 +307,37 @@ console.log('— ⑤ descriptor store contract + wiring pins');
   const { HARNESSES, chatHarnessIds } = require(path.join(REPO, 'src/harnesses/index.js'));
   for (const id of chatHarnessIds()) {
     const st = HARNESSES[id].store;
-    ok(st && typeof st.locate === 'function' && (typeof st.SessionMessages === 'function' || typeof st.createReader === 'function'), `${id}: store declares locate + a reader`);
+    ok(gateOfGuard(st) && typeof st.locate === 'function' && (typeof st.SessionMessages === 'function' || typeof st.createReader === 'function'), `${id}: store declares locate + a reader`);
   }
   for (const id of ['claude', 'codex']) {
     const st = HARNESSES[id].store;
     ok(typeof st.discover === 'function' && (id === 'codex') === (typeof st.forkChain === 'function') && typeof st.writerSweep === 'function' && typeof st.remoteFind === 'function' && typeof st.remoteFind('abc').findExpr === 'string' && typeof st.remoteFind('abc').cacheRel === 'string' && typeof st.remoteFind('abc').root === 'string', `${id}: store declares discover/forkChain/writerSweep/remoteFind`);
   }
-  ok(/rollout-\*abc\.jsonl\.zst/.test(HARNESSES.codex.store.remoteFind('abc').findExpr) && HARNESSES.codex.store.forkChain(TID2).length === 0, 'codex remoteFind matches .jsonl and .jsonl.zst; forkChain reads the rollout meta');
+  ok(gateOfGuard(/rollout-\*abc\.jsonl\.zst/.test(HARNESSES.codex.store.remoteFind('abc').findExpr)) && HARNESSES.codex.store.forkChain(TID2).length === 0, 'codex remoteFind matches .jsonl and .jsonl.zst; forkChain reads the rollout meta');
   const rs = read('src/routes/sessions.js');
-  ok(/for \(const h of listHarnesses\(\)\) \{\s*\n\s*if \(!h\.store \|\| typeof h\.store\.discover !== 'function'\) continue;[\s\S]{0,400}?else others\[h\.id\] = await h\.store\.discover\(\{ activeSessions, webuiPids, devSnap \}\);/.test(rs) /* B-891e: claude's discover runs in the sweep's worker (store.discoverInSweep) */ && !/listCodexThreads\(\{ activeSessions \}\)/.test(rs) && !/runningByProjDir/.test(rs), 'routes/sessions discovers through every harness\'s store.discover (the claude sweep moved to session-store, the codex walk to the worker) — no backend ternary');
-  ok(/async function discoverClaudeSessions\(\{ activeSessions, webuiPids = new Set\(\), devSnap = null(?:, stepClock = null)? \} = \{\}\)/.test(read('src/session-store.js')), 'session-store owns discoverClaudeSessions (lock-first sweep, verbatim)');
+  ok(gateOfGuard(/for \(const h of listHarnesses\(\)\) \{\s*\n\s*if \(!h\.store \|\| typeof h\.store\.discover !== 'function'\) continue;[\s\S]{0,400}?else others\[h\.id\] = await h\.store\.discover\(\{ activeSessions, webuiPids, devSnap \}\);/.test(rs)) /* B-891e: claude's discover runs in the sweep's worker (store.discoverInSweep) */ && !/listCodexThreads\(\{ activeSessions \}\)/.test(rs) && !/runningByProjDir/.test(rs), 'routes/sessions discovers through every harness\'s store.discover (the claude sweep moved to session-store, the codex walk to the worker) — no backend ternary');
+  ok(verdictOf(/async function discoverClaudeSessions\(\{ activeSessions, webuiPids = new Set\(\), devSnap = null(?:, stepClock = null)? \} = \{\}\)/.test(read('src/session-store.js'))), 'session-store owns discoverClaudeSessions (lock-first sweep, verbatim)');
   const ts = read('src/transcript-service.js');
-  ok(/function localTranscriptPath\(r\)/.test(ts) && /h\.store\.locate\(r\.sessionId, r\.cwd\)/.test(ts) && /hosts\.fetchTranscript\(r\.host, r\.backend \|\| 'claude', r\.sessionId\)/.test(ts) && !/r\.backend === 'codex' \? findCodexSessionJsonlPath/.test(ts), 'transcript-service locates + fetches through the descriptor store (no codex ternaries)');
+  ok(gateOfGuard(/function localTranscriptPath\(r\)/.test(ts)) && gateOfGuard(/h\.store\.locate\(r\.sessionId, r\.cwd\)/.test(ts)) && gateOfGuard(/hosts\.fetchTranscript\(r\.host, r\.backend \|\| 'claude', r\.sessionId\)/.test(ts)) && !/r\.backend === 'codex' \? findCodexSessionJsonlPath/.test(ts), 'transcript-service locates + fetches through the descriptor store (no codex ternaries)');
   const hs = read('src/hosts.js');
-  ok(/async fetchTranscript\(id, backend, sessionId/.test(hs) && /h\.store\.remoteFind\(sessionId\)/.test(hs) && /return this\.fetchTranscript\(id, 'codex', threadId, opts\)/.test(hs) && /return this\.fetchTranscript\(id, 'claude', sessionId, opts\)/.test(hs), 'hosts.fetchTranscript is THE remote fetch; the two legacy methods are shims');
+  ok(gateOfGuard(/async fetchTranscript\(id, backend, sessionId/.test(hs)) && gateOfGuard(/h\.store\.remoteFind\(sessionId\)/.test(hs)) && gateOfGuard(/return this\.fetchTranscript\(id, 'codex', threadId, opts\)/.test(hs)) && verdictOf(/return this\.fetchTranscript\(id, 'claude', sessionId, opts\)/.test(hs)), 'hosts.fetchTranscript is THE remote fetch; the two legacy methods are shims');
   // B-3185 r2 moved the CO leg into `codexOpenRolloutsShell()` (it now runs the
   // SAME batched fd scan + executable identity as the writer sweep), so the
   // emitter's loop variable is no longer `$t`. Pin the EMISSION, not the
   // variable name — and pin it on the composed script, which is what ships.
-  ok(/-name 'rollout-\*\.jsonl' -o -name 'rollout-\*\.jsonl\.zst'/.test(hs) && /printf 'NC %s\\\\t'/.test(hs) && /echo "CO \$\w+"/.test(hs) && /zstd -dc -- "\$f"/.test(hs), 'the ssh discovery script lists .zst rollouts, emits NC name lines (zstd(1) for compressed heads) and CO open-rollout lines');
+  ok(gateOfGuard(/-name 'rollout-\*\.jsonl' -o -name 'rollout-\*\.jsonl\.zst'/.test(hs)) && gateOfGuard(/printf 'NC %s\\\\t'/.test(hs)) && gateOfGuard(/echo "CO \$\w+"/.test(hs)) && verdictOf(/zstd -dc -- "\$f"/.test(hs)), 'the ssh discovery script lists .zst rollouts, emits NC name lines (zstd(1) for compressed heads) and CO open-rollout lines');
   {
     const { codexOpenRolloutsShell } = require(path.join(REPO, 'src/hosts.js'));
     const co = codexOpenRolloutsShell();
-    ok(/echo "CO \$\w+"/.test(co) && co.includes('.jsonl.zst'), 'the CO leg itself still emits CO lines and still matches compressed rollouts (B-3185 r2 port)');
+    ok(gateOfGuard(/echo "CO \$\w+"/.test(co)) && verdictOf(co.includes('.jsonl.zst')), 'the CO leg itself still emits CO lines and still matches compressed rollouts (B-3185 r2 port)');
   }
   const ag = read('src/agentd/agentd.js');
-  ok(/rollout-\.\*\\\.jsonl\(\?:\\\.zst\)\?\$/.test(ag) && /r\.userLines = head\.split/.test(ag) && /listOpenCodexRolloutPaths\(\{ sessionsDir: croot \}\)/.test(ag) && /codexOpen: snap\.codexOpen \|\| \[\]/.test(ag), 'the daemon snapshot carries .zst rollouts, userLines and codexOpen (one implementation via discovery-facts)');
+  ok(gateOfGuard(/rollout-\.\*\\\.jsonl\(\?:\\\.zst\)\?\$/.test(ag)) && gateOfGuard(/r\.userLines = head\.split/.test(ag)) && gateOfGuard(/listOpenCodexRolloutPaths\(\{ sessionsDir: croot \}\)/.test(ag)) && verdictOf(/codexOpen: snap\.codexOpen \|\| \[\]/.test(ag)), 'the daemon snapshot carries .zst rollouts, userLines and codexOpen (one implementation via discovery-facts)');
   const tw = read('src/transcript-worker.js');
-  ok(/case 'codexThreadMetas'/.test(tw) && /case 'codexOpenThreads'/.test(tw) && /transcriptWorkerCall\('codexThreadMetas', \{\}, \(e\) => \{ refused = /.test(read('src/codex-session-store.js')) && !/transcriptWorkerCall\('codexThreadMetas', \{\}, collectCodexThreadMetas\)/.test(read('src/codex-session-store.js')), 'the rollout walk and the /proc scan run as transcript-worker ops; a refusal answers the kept listing — never the walk inline (row B-422c)');   // stale-pins: kept (the absence check: the release's walk-inline fallback must stay gone)
+  ok(gateOfGuard(/case 'codexThreadMetas'/.test(tw)) && gateOfGuard(/case 'codexOpenThreads'/.test(tw)) && gateOfGuard(/transcriptWorkerCall\('codexThreadMetas', \{\}, \(e\) => \{ refused = /.test(read('src/codex-session-store.js'))) && !/transcriptWorkerCall\('codexThreadMetas', \{\}, collectCodexThreadMetas\)/.test(read('src/codex-session-store.js')), 'the rollout walk and the /proc scan run as transcript-worker ops; a refusal answers the kept listing — never the walk inline (row B-422c)');   // stale-pins: kept (the absence check: the release's walk-inline fallback must stay gone)
   const uw = read('src/usage-walker.js'), sc = read('data/bin/vibespace-usage-scan');
-  ok(/\\\.jsonl\(\\\.zst\)\?\$\/i/.test(uw) && /\\\.jsonl\(\\\.zst\)\?\$\/i/.test(sc) && /cur\.zsize === st\.size/.test(uw) && /cur\.zsize === st\.size/.test(sc) && /function zstdPlain\(buf\)/.test(uw) && /function zstdPlain\(buf\)/.test(sc), 'walker module + shipped scanner carry the SAME zst handling (lockstep)');
-  ok(/'test-codex-zst'/.test(read('scripts/ci.mjs')), 'this suite is in the release gate');
+  ok(gateOfGuard(/\\\.jsonl\(\\\.zst\)\?\$\/i/.test(uw)) && gateOfGuard(/\\\.jsonl\(\\\.zst\)\?\$\/i/.test(sc)) && gateOfGuard(/cur\.zsize === st\.size/.test(uw)) && gateOfGuard(/cur\.zsize === st\.size/.test(sc)) && gateOfGuard(/function zstdPlain\(buf\)/.test(uw)) && verdictOf(/function zstdPlain\(buf\)/.test(sc)), 'walker module + shipped scanner carry the SAME zst handling (lockstep)');
+  ok(verdictOf(/'test-codex-zst'/.test(read('scripts/ci.mjs'))), 'this suite is in the release gate');
 }
 
 console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ .jsonl.zst)');
@@ -370,7 +370,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
   remote.path = rolloutPath; remote.data = Buffer.from(plainSmall); remote.mtime = 1000;
   const c1 = await hm.fetchTranscript('hz', 'codex', TIDR);
   ok(fs.readFileSync(c1, 'utf8') === plainSmall, 'first fetch caches the plain rollout');
-  ok(/\| sort \| head -1/.test(findCmd), 'the remote locate is DETERMINISTIC and prefers the plain twin (find | sort | head -1)');
+  ok(verdictOf(/\| sort \| head -1/.test(findCmd)), 'the remote locate is DETERMINISTIC and prefers the plain twin (find | sort | head -1)');
   ok(metaOf(c1).remotePath === rolloutPath && metaOf(c1).compressed === false, 'the meta records WHICH remote file the bytes came from');
 
   // the host compresses the finished rollout: same thread, different file
@@ -379,8 +379,8 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
   remote.path = rolloutPath + '.zst'; remote.data = compressed; remote.mtime = 2000;
   const c2 = await hm.fetchTranscript('hz', 'codex', TIDR);
   const got2 = fs.readFileSync(c2);
-  ok(got2.equals(compressed) && DF.isZstBuffer(got2), 'a SWITCHED remote file is refetched whole — never compressed bytes appended onto the plain prefix', got2.subarray(0, 8).toString('hex'));
-  ok(metaOf(c2).remotePath.endsWith('.zst') && metaOf(c2).compressed === true, 'the meta follows the switch (compressed flag recorded)');
+  ok(gateOfGuard(got2.equals(compressed)) && verdictOf(DF.isZstBuffer(got2)), 'a SWITCHED remote file is refetched whole — never compressed bytes appended onto the plain prefix', got2.subarray(0, 8).toString('hex'));
+  ok(gateOfGuard(metaOf(c2).remotePath.endsWith('.zst')) && metaOf(c2).compressed === true, 'the meta follows the switch (compressed flag recorded)');
 
   // …and back: a resumed thread writes plain again, over a COMPRESSED cache
   const plainBig = rollout(TIDR, '/work/remote', 'remote codex thread', 800);
@@ -434,14 +434,14 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     seedSlot(sl, hybrid, { size: comp.length, mtime: 2000, fetchedAt: Date.now(), slab: true });   // PRE-FIX meta shape
     remote.path = sl.remotePath + '.zst'; remote.data = comp; remote.mtime = 2000;
     ok(hybrid.length === comp.length && !hybrid.equals(comp) && !DF.isZstBuffer(hybrid), 'REPRO: the hybrid has the remote file\'s exact size and mtime, but neither file\'s bytes');
-    ok(preFixValid(JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')), remote.path, comp.length, 2000, sl.cache), 'NEGATIVE CONTROL: the pre-fix predicate calls the hybrid VALID (vacuous sameRemote) — served forever');
+    ok(verdictOf(preFixValid(JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')), remote.path, comp.length, 2000, sl.cache)), 'NEGATIVE CONTROL: the pre-fix predicate calls the hybrid VALID (vacuous sameRemote) — served forever');
     reads.length = 0;
     const healed = await hm.fetchTranscript('hz', 'codex', sl.tid);
-    ok(fs.readFileSync(healed).equals(comp), 'a meta WITHOUT provenance is not valid: the slot refetches WHOLE and now holds the remote\'s bytes', reads);
+    ok(verdictOf(fs.readFileSync(healed).equals(comp)), 'a meta WITHOUT provenance is not valid: the slot refetches WHOLE and now holds the remote\'s bytes', reads);
     ok(metaOf(healed).remotePath === remote.path && metaOf(healed).compressed === true, '…and the rewritten meta carries the provenance the old one lacked');
     reads.length = 0;
     await hm.fetchTranscript('hz', 'codex', sl.tid);
-    ok(reads.length === 0 && fs.readFileSync(sl.cache).equals(comp), 'the heal costs exactly ONE refetch — the next poll short-circuits on the HEALED bytes');
+    ok(reads.length === 0 && verdictOf(fs.readFileSync(sl.cache).equals(comp)), 'the heal costs exactly ONE refetch — the next poll short-circuits on the HEALED bytes');
   }
 
   {   // the mirror shape: plain bytes appended onto a cached COMPRESSED file
@@ -451,7 +451,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     ok(comp.length < plainBuf.length, 'fixture: the cached compressed bytes are shorter than the returning plain file');
     seedSlot(sl, Buffer.concat([comp, plainBuf.subarray(comp.length)]), { size: plainBuf.length, mtime: 5000, fetchedAt: Date.now(), slab: true });
     remote.path = sl.remotePath; remote.data = plainBuf; remote.mtime = 5000;
-    ok(preFixValid(JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')), remote.path, plainBuf.length, 5000, sl.cache), 'NEGATIVE CONTROL: the pre-fix predicate accepts the reverse hybrid too (zstd magic under a plain remote)');
+    ok(verdictOf(preFixValid(JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')), remote.path, plainBuf.length, 5000, sl.cache)), 'NEGATIVE CONTROL: the pre-fix predicate accepts the reverse hybrid too (zstd magic under a plain remote)');
     const healed = await hm.fetchTranscript('hz', 'codex', sl.tid);
     ok(fs.readFileSync(healed, 'utf8') === text, 'a cache whose MAGIC contradicts the resolved remote is refetched whole');
     ok(metaOf(healed).compressed === false && metaOf(healed).remotePath === sl.remotePath, '…with the plain remote recorded');
@@ -496,7 +496,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     const spliced = Buffer.concat([Buffer.from(text.slice(0, -50)), Buffer.alloc(50, 0)]);
     seedSlot(sl, spliced, { size: spliced.length, mtime: 9500, fetchedAt: Date.now(), slab: true, remotePath: sl.remotePath, compressed: false });
     remote.path = sl.remotePath; remote.data = Buffer.from(text); remote.mtime = 9500;
-    ok(preFixValid(JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')), remote.path, spliced.length, 9500, sl.cache), 'NEGATIVE CONTROL: size + mtime + provenance all agree — only the BYTES say the cache is spliced');
+    ok(verdictOf(preFixValid(JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')), remote.path, spliced.length, 9500, sl.cache)), 'NEGATIVE CONTROL: size + mtime + provenance all agree — only the BYTES say the cache is spliced');
     const c = await hm.fetchTranscript('hz', 'codex', sl.tid);
     ok(fs.readFileSync(c, 'utf8') === text, 'a cache whose TAIL is not text is refetched even under a provenance-carrying meta (an append always lands its foreign bytes at the tail)');
   }
@@ -533,24 +533,24 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     const later = Buffer.from(tick.repeat(80));                 // the appends that buried it
     ok(later.length > 4096, `fixture: the later appends bury the splice deeper than the 4 KB tail window (${later.length}B)`);
     const buried = Buffer.concat([head, foreign, later]);
-    ok(tailOnlyClean(buried) && buried.indexOf(DF.ZSTD_MAGIC) >= 0, 'NEGATIVE CONTROL: a tail-only scan calls the buried hybrid verified — the marker is 6 KB from the end');
+    ok(gateOfGuard(tailOnlyClean(buried)) && buried.indexOf(DF.ZSTD_MAGIC) >= 0, 'NEGATIVE CONTROL: a tail-only scan calls the buried hybrid verified — the marker is 6 KB from the end');
     seedSlot(sl, buried, { size: buried.length, mtime: 11000, fetchedAt: Date.now(), slab: true });   // PRE-FIX meta
     remote.path = sl.remotePath; remote.data = Buffer.concat([head, later, Buffer.alloc(foreign.length, 0x20)]); remote.mtime = 11000;
     reads.length = 0; sshProbeOnly();
     let err = null, got = null;
     try { got = await hm.fetchTranscript('hz', 'codex', sl.tid, { maxBytes: buried.length - 1 }); } catch (e) { err = String(e && e.message || e); }
     ok(!got, 'the over-cap adoption is refused: a splice buried under later appends is never served as verified', got && fs.readFileSync(got).equals(buried) ? 'SERVED THE HYBRID' : err);
-    ok(/could not be verified/.test(err || ''), '…and the refusal names the real fault instead of a bare "too large"', err);
+    ok(verdictOf(/could not be verified/.test(err || '')), '…and the refusal names the real fault instead of a bare "too large"', err);
     ok(!(JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')).remotePath), 'a refused slot is NOT stamped with provenance (it would freeze the corruption in)');
     // ROUND 2: the suffix must not hand out a remedy that cannot work. It is
     // reachable ONLY when the remote is past the cap — where a whole refetch is
     // impossible by construction — so "delete it to re-sync" destroyed the only
     // local copy and failed identically.
-    ok(!/delete it to re-sync/.test(err || '') && /cannot be re-fetched whole/.test(err || ''), 'the refusal states that the remote is past the cap, not a deletion that cannot repair anything', err);
+    ok(!/delete it to re-sync/.test(err || '') && verdictOf(/cannot be re-fetched whole/.test(err || '')), 'the refusal states that the remote is past the cap, not a deletion that cannot repair anything', err);
     fs.rmSync(sl.cache); fs.rmSync(sl.cache + '.meta');                 // do exactly what the old text told the user to do
     let errAfterDelete = null;
     try { await hm.fetchTranscript('hz', 'codex', sl.tid, { maxBytes: buried.length - 1 }); } catch (e) { errAfterDelete = String(e && e.message || e); }
-    ok(/too large/.test(errAfterDelete || '') && !fs.existsSync(sl.cache), 'NEGATIVE CONTROL: deleting the cache as the old text instructed fails identically — with the last local copy gone', errAfterDelete);
+    ok(gateOfGuard(/too large/.test(errAfterDelete || '')) && !fs.existsSync(sl.cache), 'NEGATIVE CONTROL: deleting the cache as the old text instructed fails identically — with the last local copy gone', errAfterDelete);
     sshDead(); hm._hostDownUntil?.clear();
   }
 
@@ -561,12 +561,12 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     const pre = filler(CH - 2);
     ok(pre.length === CH - 2, `fixture: the first chunk ends 2 bytes into the zstd magic (${pre.length})`);
     const straddle = Buffer.concat([pre, DF.ZSTD_MAGIC, filler(8192)]);
-    ok(tailOnlyClean(straddle), 'NEGATIVE CONTROL: the straddling magic is also outside the tail window');
+    ok(verdictOf(tailOnlyClean(straddle)), 'NEGATIVE CONTROL: the straddling magic is also outside the tail window');
     seedSlot(sl, straddle, { size: straddle.length, mtime: 12000, fetchedAt: Date.now(), slab: true });
     remote.path = sl.remotePath; remote.data = Buffer.alloc(straddle.length, 0x20); remote.mtime = 12000; sshProbeOnly();
     let err2 = null, got2 = null;
     try { got2 = await hm.fetchTranscript('hz', 'codex', sl.tid, { maxBytes: straddle.length - 1 }); } catch (e) { err2 = String(e && e.message || e); }
-    ok(!got2 && /could not be verified/.test(err2 || ''), 'a marker split across the 1 MiB chunk boundary is still caught (3-byte carry)', err2);
+    ok(!got2 && verdictOf(/could not be verified/.test(err2 || '')), 'a marker split across the 1 MiB chunk boundary is still caught (3-byte carry)', err2);
     sshDead(); hm._hostDownUntil?.clear();
   }
 
@@ -582,14 +582,14 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     const foreign = zlib.zstdCompressSync(Buffer.from(rollout(sl.tid, '/work/stamped', 'already-stamped hybrid', 40))).subarray(0, 64);
     const later = Buffer.from(tick.repeat(80));
     const buried = Buffer.concat([head, foreign, later]);
-    ok(tailOnlyClean(buried) && buried.indexOf(DF.ZSTD_MAGIC) >= 0, 'NEGATIVE CONTROL: the tail window sees nothing wrong with this slot either');
+    ok(gateOfGuard(tailOnlyClean(buried)) && buried.indexOf(DF.ZSTD_MAGIC) >= 0, 'NEGATIVE CONTROL: the tail window sees nothing wrong with this slot either');
     // the meta the SHIPPED adoption + delta path left behind: provenance, no schema marker
     seedSlot(sl, buried, { size: buried.length, mtime: 19000, fetchedAt: Date.now(), slab: true, remotePath: sl.remotePath, compressed: false });
     remote.path = sl.remotePath; remote.data = Buffer.concat([head, later, Buffer.alloc(foreign.length, 0x20)]); remote.mtime = 19000;
     sshProbeOnly();
     let e3 = null, g3 = null;
     try { g3 = await hm.fetchTranscript('hz', 'codex', sl.tid, { maxBytes: buried.length - 1 }); } catch (e) { e3 = String(e && e.message || e); }
-    ok(!g3 && /could not be verified/.test(e3 || ''), 'a hybrid that already CARRIES provenance is deep-checked once and refused (sameRemote is not evidence of verified bytes)', g3 ? 'SERVED THE HYBRID' : e3);
+    ok(!g3 && verdictOf(/could not be verified/.test(e3 || '')), 'a hybrid that already CARRIES provenance is deep-checked once and refused (sameRemote is not evidence of verified bytes)', g3 ? 'SERVED THE HYBRID' : e3);
     sshDead(); hm._hostDownUntil?.clear();
   }
 
@@ -604,7 +604,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     try {
       reads.length = 0;
       const p1 = await hm.fetchTranscript('hz', 'codex', sl.tid);
-      ok(fs.readFileSync(p1).equals(clean) && reads.length === 0 && deepReads.length > 0, 'a legacy-provenance slot is whole-file verified before its bytes are trusted (and then served, no refetch)', { deepReads, reads });
+      ok(gateOfGuard(fs.readFileSync(p1).equals(clean)) && reads.length === 0 && deepReads.length > 0, 'a legacy-provenance slot is whole-file verified before its bytes are trusted (and then served, no refetch)', { deepReads, reads });
       ok(metaOf(p1).v >= 2, '…and re-stamped with the schema marker every meta writer now carries', metaOf(p1));
       const n1 = deepReads.length;
       await hm.fetchTranscript('hz', 'codex', sl.tid);
@@ -620,7 +620,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     remote.path = sl.remotePath; remote.data = big; remote.mtime = 13000;
     reads.length = 0;
     const c8 = await hm.fetchTranscript('hz', 'codex', sl.tid, { maxBytes: big.length - 1 });
-    ok(fs.readFileSync(c8).equals(big) && reads.length === 0, 'a CLEAN over-cap slot still adopts after the whole-file scan (no false positive, no refetch)', reads);
+    ok(gateOfGuard(fs.readFileSync(c8).equals(big)) && reads.length === 0, 'a CLEAN over-cap slot still adopts after the whole-file scan (no false positive, no refetch)', reads);
     const m8 = metaOf(c8);
     ok(m8.remotePath === sl.remotePath && m8.compressed === false && m8.adopted === true, 'the adoption is WRITTEN BACK (provenance + an `adopted` marker) — the deep scan is paid once, not per poll', m8);
     // ROUND 3: …and the delta that GROWS that slot must not erase it. Both
@@ -633,14 +633,14 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     reads.length = 0;
     const c8b = await hm.fetchTranscript('hz', 'codex', sl.tid, { maxBytes: big.length - 1 });
     const m8b = metaOf(c8b);
-    ok(fs.readFileSync(c8b).equals(grown8) && reads.length === 1 && reads[0][1] === big.length, 'the adopted over-cap slot grows by an append-only delta', reads);
+    ok(gateOfGuard(fs.readFileSync(c8b).equals(grown8)) && reads.length === 1 && reads[0][1] === big.length, 'the adopted over-cap slot grows by an append-only delta', reads);
     ok(m8b.adopted === true && m8b.slab === true && m8b.size === grown8.length, 'a DELTA carries the prior meta forward — `adopted` (these bytes were VERIFIED, never fetched) and the lane marker survive the growth', m8b);
     // …and a WHOLE refetch legitimately drops it: every byte is now ours
     remote.data = big; remote.mtime = 13002;                               // the remote rotated smaller ⇒ no prefix ⇒ whole
     reads.length = 0;
     const c8c = await hm.fetchTranscript('hz', 'codex', sl.tid);
     const m8c = metaOf(c8c);
-    ok(fs.readFileSync(c8c).equals(big) && reads.length === 1 && reads[0][1] === 0 && m8c.adopted === undefined && m8c.slab === true,
+    ok(gateOfGuard(fs.readFileSync(c8c).equals(big)) && reads.length === 1 && reads[0][1] === 0 && m8c.adopted === undefined && m8c.slab === true,
       'NEGATIVE CONTROL: a WHOLE refetch clears `adopted` — it describes bytes that are no longer in the slot (the lane marker is re-stamped by the writer that fetched them)', m8c);
   }
 
@@ -668,7 +668,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     };
     seedSlot(sl, body, { size: body.length, mtime: 14000, fetchedAt: Date.now() });                    // PRE-FIX meta
     const c9 = await sshHm.fetchTranscript('hssh', 'codex', sl.tid, { maxBytes: CAP });
-    ok(fs.readFileSync(c9).equals(body) && cats.length === 0, 'the ssh rung adopts an over-cap verified slot without re-pulling it', cats);
+    ok(gateOfGuard(fs.readFileSync(c9).equals(body)) && cats.length === 0, 'the ssh rung adopts an over-cap verified slot without re-pulling it', cats);
     const m9 = JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8'));
     ok(m9.remotePath === sl.remotePath && m9.adopted === true, 'the ssh rung STAMPS the meta before returning (it used to hand the cache back provenance-less forever)', m9);
     // …and now the remote grows, under the cap it was adopted with
@@ -677,7 +677,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     ok(grown.length > CAP, `fixture: a whole re-pull is still impossible (${grown.length}B remote vs a ${CAP}B cap) — the growth rides a delta or not at all`);
     let growErr = null, c9b = null;
     try { c9b = await sshHm.fetchTranscript('hssh', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { growErr = String(e && e.message || e); }
-    ok(!growErr && c9b && fs.readFileSync(c9b).equals(grown), 'an over-cap ssh slot GROWS instead of hard-failing "too large" on its next byte (forever, since nothing else can move)', growErr);
+    ok(!growErr && gateOfGuard(c9b) && verdictOf(fs.readFileSync(c9b).equals(grown)), 'an over-cap ssh slot GROWS instead of hard-failing "too large" on its next byte (forever, since nothing else can move)', growErr);
     ok(cats.length === 0 && tails.length === 1 && tails[0] === body.length + 1, `…by an append-only tail delta off the cached prefix, never a whole cat (${JSON.stringify({ cats: cats.length, tails })})`);
     const m9b = JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8'));
     ok(m9b.size === grown.length && m9b.mtime === 15000 && m9b.v >= 2, '…and the meta follows the growth (schema marker carried by every writer)', m9b);
@@ -690,13 +690,13 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     rem.bytes = grown2; rem.size = grown.length + 1; rem.mtime = 16000;
     const c9c = await sshHm.fetchTranscript('hssh', 'codex', sl.tid, { maxBytes: CAP });
     const m9c = JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8'));
-    ok(fs.readFileSync(c9c).equals(grown2) && m9c.size === grown2.length, 'a read that overtakes the stat keeps the extra bytes and stamps the REAL size', m9c);
+    ok(gateOfGuard(fs.readFileSync(c9c).equals(grown2)) && m9c.size === grown2.length, 'a read that overtakes the stat keeps the extra bytes and stamps the REAL size', m9c);
     // …but FEWER bytes than the stat promised is a truncated read: never stamped
     rem.size = grown2.length + Buffer.byteLength(tick); rem.mtime = 17000;   // promises bytes the host will not serve
     const metaBefore = fs.readFileSync(sl.cache + '.meta', 'utf8');
     let shortErr = null;
     try { await sshHm.fetchTranscript('hssh', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { shortErr = String(e && e.message || e); }
-    ok(/short tail read/.test(shortErr || ''), 'a truncated tail read throws instead of stamping bytes we did not get (the 2.187.0 stump rule)', shortErr);
+    ok(verdictOf(/short tail read/.test(shortErr || '')), 'a truncated tail read throws instead of stamping bytes we did not get (the 2.187.0 stump rule)', shortErr);
     ok(fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore, '…and the meta is left exactly as it was', fs.readFileSync(sl.cache + '.meta', 'utf8'));
     // NEGATIVE CONTROL: a slot whose bytes do NOT verify has no prefix to grow
     // from — the honest cap error, not a silent delta off unverified bytes
@@ -705,7 +705,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     const tailsBefore = tails.length;
     let badErr = null;
     try { await sshHm.fetchTranscript('hssh', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { badErr = String(e && e.message || e); }
-    ok(/too large/.test(badErr || '') && /could not be verified/.test(badErr || '') && tails.length === tailsBefore && cats.length === 0, 'NEGATIVE CONTROL: an unverifiable cache is never delta-grown — the cap error names the real fault instead', { badErr, tails });
+    ok(gateOfGuard(/too large/.test(badErr || '')) && gateOfGuard(/could not be verified/.test(badErr || '')) && tails.length === tailsBefore && cats.length === 0, 'NEGATIVE CONTROL: an unverifiable cache is never delta-grown — the cap error names the real fault instead', { badErr, tails });
   }
 
   {   // (3) a transcript SHORTER than the 4-byte magic must verify, not re-pull
@@ -715,7 +715,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     remote.path = sl.remotePath; remote.data = tiny; remote.mtime = 16000;
     reads.length = 0;
     const ct = await hm.fetchTranscript('hz', 'codex', sl.tid);
-    ok(fs.readFileSync(ct).equals(tiny) && reads.length === 0, 'a 3-byte transcript short-circuits on its cache (it used to be fully re-pulled on EVERY poll — nothing to judge by the 4-byte magic)', reads);
+    ok(gateOfGuard(fs.readFileSync(ct).equals(tiny)) && reads.length === 0, 'a 3-byte transcript short-circuits on its cache (it used to be fully re-pulled on EVERY poll — nothing to judge by the 4-byte magic)', reads);
     // …but the head still has to look like a record, and a compressed remote
     // can never be shorter than its own magic
     const sl2 = slotOf('cccccccc-dddd-4eee-8fff-00000000000b');
@@ -723,14 +723,14 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     remote.path = sl2.remotePath; remote.data = Buffer.from(rollout(sl2.tid, '/work/tiny2', 'not a record head', 2)); remote.mtime = 17000;
     reads.length = 0;
     const ct2 = await hm.fetchTranscript('hz', 'codex', sl2.tid);
-    ok(reads.length === 1 && fs.readFileSync(ct2, 'utf8').startsWith('{'), 'NEGATIVE CONTROL: a short cache that does not start with a record is still refetched', reads);
+    ok(reads.length === 1 && verdictOf(fs.readFileSync(ct2, 'utf8').startsWith('{')), 'NEGATIVE CONTROL: a short cache that does not start with a record is still refetched', reads);
     const sl3 = slotOf('cccccccc-dddd-4eee-8fff-00000000000c');
     const zbody = zlib.zstdCompressSync(Buffer.from(rollout(sl3.tid, '/work/tiny3', 'compressed twin', 3)));
     seedSlot(sl3, Buffer.from([0x28, 0xb5]), { size: 2, mtime: 18000, fetchedAt: Date.now(), slab: true, remotePath: sl3.remotePath + '.zst', compressed: true });
     remote.path = sl3.remotePath + '.zst'; remote.data = zbody; remote.mtime = 18000;
     reads.length = 0;
     const ct3 = await hm.fetchTranscript('hz', 'codex', sl3.tid);
-    ok(reads.length === 1 && fs.readFileSync(ct3).equals(zbody), 'NEGATIVE CONTROL: a 2-byte cache under a COMPRESSED remote is never called verified (a zstd frame is never shorter than its magic)', reads);
+    ok(reads.length === 1 && verdictOf(fs.readFileSync(ct3).equals(zbody)), 'NEGATIVE CONTROL: a 2-byte cache under a COMPRESSED remote is never called verified (a zstd frame is never shorter than its magic)', reads);
   }
 
   // ── ⑥d BOTH SIDES COMPRESSED — the growth leg the compression clause
@@ -753,18 +753,18 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     remote.path = sl.remotePath + '.zst'; remote.data = zc1; remote.mtime = 21000;
     reads.length = 0;
     const z1 = await hm.fetchTranscript('hz', 'codex', sl.tid);
-    ok(fs.readFileSync(z1).equals(zc1) && metaOf(z1).compressed === true && reads.length === 1 && reads[0][1] === 0, 'the compressed remote is cached whole (the slot now holds .zst bytes)', reads);
+    ok(gateOfGuard(fs.readFileSync(z1).equals(zc1)) && metaOf(z1).compressed === true && reads.length === 1 && reads[0][1] === 0, 'the compressed remote is cached whole (the slot now holds .zst bytes)', reads);
     const zt2 = zt1 + tick.repeat(60);
     const zc2 = zlib.zstdCompressSync(Buffer.from(zt2));                    // the SAME path, re-compressed after more turns
     ok(zc2.length > zc1.length && !zc2.subarray(0, zc1.length).equals(zc1), `fixture: the re-compressed archive is larger and is NOT an append onto the old one (${zc1.length}→${zc2.length}B)`);
-    ok(deltaLegalMinusCompressionClause(true, zc1.length, zc2.length) && metaOf(z1).remotePath === remote.path && DF.isZstBuffer(fs.readFileSync(sl.cache)),
+    ok(gateOfGuard(deltaLegalMinusCompressionClause(true, zc1.length, zc2.length)) && metaOf(z1).remotePath === remote.path && verdictOf(DF.isZstBuffer(fs.readFileSync(sl.cache))),
       'NEGATIVE CONTROL: every OTHER delta precondition holds — same remote path, a verified (magic-checked) cache, a cached prefix shorter than the remote');
     const spliced = Buffer.concat([zc1, zc2.subarray(zc1.length)]);         // what the guard-less delta would write
     ok(!spliced.equals(zc2) && plainOf(spliced) !== zt2, 'NEGATIVE CONTROL: that delta would weld a foreign frame tail onto the old frames — the slot decompresses to the OLD transcript and the growth is silently lost', plainOf(spliced).length);
     remote.data = zc2; remote.mtime = 22000;
     reads.length = 0;
     const z2 = await hm.fetchTranscript('hz', 'codex', sl.tid);
-    ok(fs.readFileSync(z2).equals(zc2), 'a RE-COMPRESSED remote over a compressed cache is refetched WHOLE — never delta-appended (re-compression rewrites the archive, it does not append)');
+    ok(verdictOf(fs.readFileSync(z2).equals(zc2)), 'a RE-COMPRESSED remote over a compressed cache is refetched WHOLE — never delta-appended (re-compression rewrites the archive, it does not append)');
     ok(reads.length === 1 && reads[0][1] === 0 && reads[0][2] === zc2.length, `…by one whole read from offset 0, not a tail off the cached archive's length (${JSON.stringify(reads)})`);
     ok(plainOf(fs.readFileSync(z2)) === zt2 && metaOf(z2).compressed === true, '…and the cache decompresses to the whole re-compressed transcript');
   }
@@ -788,11 +788,11 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
       return Buffer.from(`${rem.bytes.length} ${rem.mtime}\n${rpath}\n`);
     };
     const p1 = await sshHm2.fetchTranscript('hz2', 'codex', tid);
-    ok(fs.readFileSync(p1).equals(zc1) && cats.length === 1 && tails.length === 0, 'ssh rung: the compressed remote is cached whole');
+    ok(gateOfGuard(fs.readFileSync(p1).equals(zc1)) && cats.length === 1 && tails.length === 0, 'ssh rung: the compressed remote is cached whole');
     rem.bytes = zc2; rem.mtime = 24000;
-    ok(deltaLegalMinusCompressionClause(true, zc1.length, zc2.length), 'NEGATIVE CONTROL: the ssh legality test minus its compression clause calls this growth a legal delta too');
+    ok(verdictOf(deltaLegalMinusCompressionClause(true, zc1.length, zc2.length)), 'NEGATIVE CONTROL: the ssh legality test minus its compression clause calls this growth a legal delta too');
     const p2 = await sshHm2.fetchTranscript('hz2', 'codex', tid);
-    ok(fs.readFileSync(p2).equals(zc2) && cats.length === 2 && tails.length === 0, `ssh rung: a re-compressed remote is whole-cat'ed, never tail-appended (${JSON.stringify({ cats: cats.length, tails })})`);
+    ok(gateOfGuard(fs.readFileSync(p2).equals(zc2)) && cats.length === 2 && tails.length === 0, `ssh rung: a re-compressed remote is whole-cat'ed, never tail-appended (${JSON.stringify({ cats: cats.length, tails })})`);
     ok(plainOf(fs.readFileSync(p2)) === zt2, '…and the cached archive decompresses to the whole transcript (a spliced one would stop at the old text)');
   }
 
@@ -837,7 +837,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     seedFallback(); tailMode = 'throw';
     let fbErr = null, f1 = null;
     try { f1 = await sshHm3.fetchTranscript('hz3', 'codex', tid); } catch (e) { fbErr = String(e && e.message || e); }
-    ok(!fbErr && f1 && fs.readFileSync(f1).equals(grown) && tails.length === 1 && cats.length === 1,
+    ok(!fbErr && gateOfGuard(f1) && gateOfGuard(fs.readFileSync(f1).equals(grown)) && tails.length === 1 && cats.length === 1,
       `a \`tail\` the host cannot run falls back to the whole cat — the fetch COMPLETES instead of hard-failing what the pre-delta code did (${fbErr || JSON.stringify({ cats: cats.length, tails })})`);
     ok(metaAt().size === grown.length && metaAt().mtime === 26000, '…and stamps the bytes the fallback actually fetched', metaAt());
     ok(metaAt().adopted === undefined, '…while the WHOLE refetch drops the `adopted` marker (it described bytes no longer in the slot)', metaAt());
@@ -845,7 +845,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     seedFallback(); tailMode = 'short';
     let shortFbErr = null, f2 = null;
     try { f2 = await sshHm3.fetchTranscript('hz3', 'codex', tid); } catch (e) { shortFbErr = String(e && e.message || e); }
-    ok(!shortFbErr && f2 && fs.readFileSync(f2).equals(grown) && cats.length === 1,
+    ok(!shortFbErr && gateOfGuard(f2) && gateOfGuard(fs.readFileSync(f2).equals(grown)) && cats.length === 1,
       `a SHORT tail (the remote rotated between the stat and the read) falls back too — truncated bytes are never appended, the whole file is (${shortFbErr || JSON.stringify({ cats: cats.length, tails })})`);
 
     // NEGATIVE CONTROL: over the cap a whole cat is impossible by construction
@@ -854,8 +854,8 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
     seedFallback(); tailMode = 'throw';
     let overErr = null;
     try { await sshHm3.fetchTranscript('hz3', 'codex', tid, { maxBytes: body.length - 1 }); } catch (e) { overErr = String(e && e.message || e); }
-    ok(/illegal option/.test(overErr || '') && cats.length === 0, 'NEGATIVE CONTROL: over the cap the delta failure is still a hard failure and never a whole cat (which could not fit anyway)', { overErr, cats: cats.length });
-    ok(fs.readFileSync(cache).equals(body) && metaAt().size === body.length && metaAt().adopted === true, '…and the refused poll leaves the cache and its meta exactly as they were', metaAt());
+    ok(gateOfGuard(/illegal option/.test(overErr || '')) && cats.length === 0, 'NEGATIVE CONTROL: over the cap the delta failure is still a hard failure and never a whole cat (which could not fit anyway)', { overErr, cats: cats.length });
+    ok(gateOfGuard(fs.readFileSync(cache).equals(body)) && metaAt().size === body.length && metaAt().adopted === true, '…and the refused poll leaves the cache and its meta exactly as they were', metaAt());
   }
 
   // ── ⑥f TWO OVERLAPPING FETCHES OF ONE SLOT (B-7638 round 4). Both rungs are
@@ -952,7 +952,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
       const got = fs.readFileSync(sl.cache);
       ok(p1 === p2 && reads2.length === 1 && reads2[0][0] === prefix.length && appends.n === 1,
         `two overlapping fetches of one slot = ONE remote read and ONE append (${JSON.stringify({ reads: reads2, appends: appends.n, same: p1 === p2 })})`);
-      ok(got.equals(grown) && JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')).size === grown.length,
+      ok(gateOfGuard(got.equals(grown)) && JSON.parse(fs.readFileSync(sl.cache + '.meta', 'utf8')).size === grown.length,
         `…and the cache is byte-exact (${got.length} vs ${grown.length}B)`);
     }
 
@@ -976,7 +976,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
       gate.open();
       await Promise.all([c1, c2]);
       const doubled = fs.readFileSync(sl.cache);
-      ok(reads2.length === 2 && doubled.length === prefix.length + 2 * delta.length && doubled.subarray(prefix.length).equals(Buffer.concat([delta, delta])),
+      ok(reads2.length === 2 && doubled.length === prefix.length + 2 * delta.length && verdictOf(doubled.subarray(prefix.length).equals(Buffer.concat([delta, delta]))),
         `REPRO: without the guards both fetches append the SAME tail — the cache carries a duplicated region (${doubled.length} vs ${grown.length}B)`);
       // …and one more poll, once the remote has passed the doubled size, seals it
       const grown2 = Buffer.concat([grown, Buffer.from(ticks(4, 4))]);
@@ -1008,7 +1008,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
       await sleep(20);
       rem.gate.open();
       const [p1, p2] = await Promise.all([c1, c2]);
-      ok(p1 === p2 && log.tails.length === 1 && log.cats.length === 0 && appends.n === 1 && fs.readFileSync(sl.cache).equals(grown),
+      ok(p1 === p2 && log.tails.length === 1 && log.cats.length === 0 && appends.n === 1 && verdictOf(fs.readFileSync(sl.cache).equals(grown)),
         `ssh rung: overlapping fetches coalesce too — one tail, one append, byte-exact cache (${JSON.stringify({ tails: log.tails, cats: log.cats.length, appends: appends.n })})`);
       // NEGATIVE CONTROL on the same rung
       const sl2 = slotFor('hf4', 'cccccccc-dddd-4eee-8fff-000000000023');
@@ -1041,7 +1041,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
       const rem = { path: sl.remotePath, bytes: grown, mtime: 34001, beforeRead: () => fs.appendFileSync(sl.cache, Buffer.from('X')) };
       const hmE = dialHm('hf5', rem, reads2, null);
       const c = await hmE.fetchTranscript('hf5', 'codex', sl.tid);
-      ok(fs.readFileSync(c).equals(grown) && reads2.length === 2 && reads2[1][0] === 0 && reads2[1][1] === grown.length,
+      ok(gateOfGuard(fs.readFileSync(c).equals(grown)) && reads2.length === 2 && reads2[1][0] === 0 && reads2[1][1] === grown.length,
         `slab rung: an append offset the slot has moved past triggers a WHOLE refetch, never a splice (${JSON.stringify(reads2)})`);
       // NEGATIVE CONTROL: the pre-fix blind append welds the tail on anyway
       const slN = slotFor('hf6', 'cccccccc-dddd-4eee-8fff-000000000025');
@@ -1061,7 +1061,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
       const remS = { path: slS.remotePath, bytes: grown, mtime: 34001, beforeRead: () => fs.appendFileSync(slS.cache, Buffer.from('X')) };
       const hmG = sshHm('hf7', remS, logS);
       const cs = await hmG.fetchTranscript('hf7', 'codex', slS.tid);
-      ok(fs.readFileSync(cs).equals(grown) && logS.tails.length === 1 && logS.cats.length === 1,
+      ok(gateOfGuard(fs.readFileSync(cs).equals(grown)) && logS.tails.length === 1 && logS.cats.length === 1,
         `ssh rung: same — the moved slot falls back to the whole cat (${JSON.stringify({ tails: logS.tails, cats: logS.cats.length })})`);
     }
 
@@ -1079,9 +1079,9 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
       let capErr = null;
       try { await hmH.fetchTranscript('hf8', 'codex', sl.tid, { maxBytes: prefix.length - 1 }); } catch (e) { capErr = String(e && e.message || e); }
       const after = fs.readFileSync(sl.cache);
-      ok(/refusing to splice/.test(capErr || '') && log.cats.length === 0,
+      ok(gateOfGuard(/refusing to splice/.test(capErr || '')) && log.cats.length === 0,
         `over the cap a moved slot fails LOUDLY and never splices (${capErr})`);
-      ok(after.length === prefix.length + 1 && after.subarray(0, prefix.length).equals(prefix),
+      ok(after.length === prefix.length + 1 && verdictOf(after.subarray(0, prefix.length).equals(prefix)),
         '…and the refused poll adds nothing of its own to the slot (only the foreign write that moved it is there)');
     }
 
@@ -1144,10 +1144,10 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const hmI = dialWithSsh('hg1', rem, reads2, log);
         let err = null, got = null;
         await withWarns(async () => { try { got = await hmI.fetchTranscript('hg1', 'codex', sl.tid, { maxBytes: prefix.length - 1 }); } catch (e) { err = String(e && e.message || e); } });
-        ok(!got && /refusing to splice/.test(err || ''), `the over-cap refusal reaches the CALLER instead of dying in the data-plane catch (${got ? 'SERVED' : err})`);
+        ok(!got && verdictOf(/refusing to splice/.test(err || '')), `the over-cap refusal reaches the CALLER instead of dying in the data-plane catch (${got ? 'SERVED' : err})`);
         ok(log.tails.length === 0 && log.cats.length === 0, `…and the ssh rung never runs a delta (nor anything else) after the slab rung watched the slot move (${JSON.stringify(log)})`);
         const after = fs.readFileSync(sl.cache);
-        ok(after.length === prefix.length + FOREIGN.length && after.subarray(0, prefix.length).equals(prefix) && metaTextOf(sl) === metaBefore,
+        ok(after.length === prefix.length + FOREIGN.length && gateOfGuard(after.subarray(0, prefix.length).equals(prefix)) && metaTextOf(sl) === metaBefore,
           '…the cache carries only the foreign write that moved it, and the meta is byte-identical to what the poll found', { len: after.length, meta: metaTextOf(sl) });
 
         // (E2) THE SAME SLOT ONE POLL LATER — the movement is over, but the
@@ -1158,9 +1158,9 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         rem.beforeRead = null;
         let err2 = null, got2 = null;
         await withWarns(async () => { try { got2 = await hmI.fetchTranscript('hg1', 'codex', sl.tid, { maxBytes: prefix.length - 1 }); } catch (e) { err2 = String(e && e.message || e); } });
-        ok(!got2 && log.tails.length === 0 && log.cats.length === 0 && fs.readFileSync(sl.cache).equals(after) && metaTextOf(sl) === metaBefore,
+        ok(!got2 && log.tails.length === 0 && log.cats.length === 0 && gateOfGuard(fs.readFileSync(sl.cache).equals(after)) && metaTextOf(sl) === metaBefore,
           'the NEXT poll refuses too — a slot that grew outside our writers is never delta-grown, on either rung', { err2, log });
-        ok(/holds \d+ bytes where the last fetch stamped \d+/.test(err2 || '') && /cannot be re-fetched whole/.test(err2 || ''),
+        ok(gateOfGuard(/holds \d+ bytes where the last fetch stamped \d+/.test(err2 || '')) && verdictOf(/cannot be re-fetched whole/.test(err2 || '')),
           '…and the refusal names THAT fault (not a bare "too large", not the spliced-bytes one)', err2);
 
         // NEGATIVE CONTROL: the pre-fix shape, both legs neutered — the
@@ -1183,16 +1183,16 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         await withWarns(async () => { try { gotN = await hmJ.fetchTranscript('hg2', 'codex', slN.tid, { maxBytes: prefix.length - 1 }); } catch (e) { errN = String(e && e.message || e); } });
         const spliced = fs.readFileSync(slN.cache);
         const metaN = JSON.parse(metaTextOf(slN));
-        ok(!errN && gotN && logN.tails.length === 1 && spliced.length === grown.length && !spliced.equals(grown) && metaN.size === grown.length,
+        ok(!errN && gateOfGuard(gotN) && logN.tails.length === 1 && spliced.length === grown.length && !spliced.equals(grown) && metaN.size === grown.length,
           `REPRO: with both legs removed the ssh rung splices off the MOVED offset — right size, wrong bytes, stamped COMPLETE (${JSON.stringify({ errN, tails: logN.tails, len: spliced.length, want: grown.length, meta: metaN.size })})`);
-        ok(spliced.subarray(prefix.length, prefix.length + FOREIGN.length).equals(FOREIGN) && !spliced.subarray(prefix.length).equals(grown.subarray(prefix.length)),
+        ok(gateOfGuard(spliced.subarray(prefix.length, prefix.length + FOREIGN.length).equals(FOREIGN)) && !spliced.subarray(prefix.length).equals(grown.subarray(prefix.length)),
           `REPRO: the remote's bytes [${prefix.length},${prefix.length + FOREIGN.length}) are gone — the foreign write sits in their place`);
         readsN.length = 0; logN.tails.length = 0;
         const servedAgain = await hmJ.fetchTranscript('hg2', 'codex', slN.tid, { maxBytes: prefix.length - 1 });
-        ok(servedAgain && readsN.length === 0 && logN.tails.length === 0 && !fs.readFileSync(slN.cache).equals(grown),
+        ok(gateOfGuard(servedAgain) && readsN.length === 0 && logN.tails.length === 0 && !fs.readFileSync(slN.cache).equals(grown),
           'REPRO: and the sealed slot short-circuits on every later poll — a stopped conversation serves the corrupt transcript forever');
         // …and the ONE thing the pre-fix code did not leave behind either: a line saying it happened
-        ok(capturedWarns.slice(warnsAt).some((w) => /refusing to splice/.test(w)),
+        ok(verdictOf(capturedWarns.slice(warnsAt).some((w) => /refusing to splice/.test(w))),
           'DEGRADE-PATH LAW: when the fallback DOES swallow that verdict, it at least logs it verbatim (pre-fix: not a single line)', capturedWarns.slice(warnsAt));
 
         // (E3) LEG ISOLATION — each of the three guards is load-bearing on its
@@ -1214,7 +1214,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         await withWarns(async () => { try { gotI = await hmI2.fetchTranscript('hg6', 'codex', slI.tid, { maxBytes: prefix.length - 1 }); } catch (e) { errI = String(e && e.message || e); } });
         ok(!gotI && logI.tails.length === 0 && fs.readFileSync(slI.cache).length === prefix.length + FOREIGN.length && fs.readFileSync(slI.cache + '.meta', 'utf8') === metaI,
           'LEG ISOLATION: with only the typed verdict removed the other two legs still refuse the splice', { errI, logI });
-        ok(/too large/.test(errI || '') && !/refusing to splice/.test(errI || ''),
+        ok(gateOfGuard(/too large/.test(errI || '')) && !/refusing to splice/.test(errI || ''),
           '…but the caller loses the diagnosis (it hears "too large" about a slot that MOVED) — which is why the verdict travels as a code', errI);
       }
 
@@ -1233,7 +1233,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const rem = { path: sl.remotePath, bytes: grown, mtime: 37001, beforeRead: () => fs.appendFileSync(sl.cache, Buffer.from('X')) };
         const hmK = dialWithSsh('hg3', rem, reads2, log);
         const c = await hmK.fetchTranscript('hg3', 'codex', sl.tid);
-        ok(fs.readFileSync(c).equals(grown) && reads2.length === 2 && reads2[1][0] === 0 && log.tails.length === 0 && log.cats.length === 0,
+        ok(gateOfGuard(fs.readFileSync(c).equals(grown)) && reads2.length === 2 && reads2[1][0] === 0 && log.tails.length === 0 && log.cats.length === 0,
           `under the cap a moved slot is refetched WHOLE on the slab rung and never reaches the ssh one (${JSON.stringify({ reads: reads2, log })})`);
 
         const sl2 = slotFor('hg4', 'cccccccc-dddd-4eee-8fff-000000000033');
@@ -1247,7 +1247,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         hmL.deviceBounded = async () => ({ ...dev, fsReadRange: async (p2, off, len) => { if (++readsSeen === 2) throw new Error('data plane died before the whole refetch landed'); return dev.fsReadRange(p2, off, len); } });
         let errF = null, cF = null;
         await withWarns(async () => { try { cF = await hmL.fetchTranscript('hg4', 'codex', sl2.tid); } catch (e) { errF = String(e && e.message || e); } });
-        ok(!errF && cF && fs.readFileSync(cF).equals(grown) && log2.cats.length === 1 && log2.tails.length === 0,
+        ok(!errF && gateOfGuard(cF) && gateOfGuard(fs.readFileSync(cF).equals(grown)) && log2.cats.length === 1 && log2.tails.length === 0,
           `…and when the slab rung's own whole refetch dies, the ssh rung whole-cats instead of deltaing off the moved offset (${errF || JSON.stringify(log2)})`);
       }
 
@@ -1266,8 +1266,8 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const orig = console.warn; console.warn = (...a) => warns.push(a.map(String).join(' '));
         let cD = null;
         try { cD = await hmM.fetchTranscript('hg5', 'codex', sl.tid); } finally { console.warn = orig; }
-        ok(cD && fs.readFileSync(cD).equals(body) && log.cats.length === 1, 'a data-plane fault still degrades to the ssh rung (the fetch completes)', log);
-        ok(warns.some((w) => w.includes('device link not responding within 6s — synthetic probe fault') && w.includes('hg5')),
+        ok(gateOfGuard(cD) && gateOfGuard(fs.readFileSync(cD).equals(body)) && log.cats.length === 1, 'a data-plane fault still degrades to the ssh rung (the fetch completes)', log);
+        ok(verdictOf(warns.some((w) => w.includes('device link not responding within 6s — synthetic probe fault') && w.includes('hg5'))),
           'DEGRADE-PATH LAW: the swallowed error is logged VERBATIM, with the host it happened on', warns);
         // NEGATIVE CONTROL: the line is not unconditional noise — a healthy
         // data-plane fetch degrades nothing and says nothing.
@@ -1276,7 +1276,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         console.warn = (...a) => warns.push(a.map(String).join(' '));
         let cE = null;
         try { cE = await hmM.fetchTranscript('hg5', 'codex', sl.tid); } finally { console.warn = orig; }
-        ok(cE && fs.readFileSync(cE).equals(rem.bytes) && log.cats.length === 0 && !warns.some((w) => /falling back to the ssh rung/.test(w)),
+        ok(gateOfGuard(cE) && gateOfGuard(fs.readFileSync(cE).equals(rem.bytes)) && log.cats.length === 0 && !warns.some((w) => /falling back to the ssh rung/.test(w)),
           'NEGATIVE CONTROL: a healthy data-plane fetch logs no fallback line at all', warns);
       }
 
@@ -1305,13 +1305,13 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         };
         const metaAt = () => JSON.parse(fs.readFileSync(cache + '.meta', 'utf8'));
         const c1 = await hmN.fetchTranscript('hg7', 'codex', tid);
-        ok(fs.readFileSync(c1).equals(rem.bytes) && log.cats.length === 1 && metaAt().size === rem.bytes.length,
+        ok(gateOfGuard(fs.readFileSync(c1).equals(rem.bytes)) && log.cats.length === 1 && metaAt().size === rem.bytes.length,
           `a whole cat that overtakes the stat stamps the bytes it FETCHED, not the ones it was promised (${metaAt().size} vs stat ${rem.statSize} vs file ${rem.bytes.length})`);
         const before = rem.bytes;
         rem.bytes = Buffer.concat([before, Buffer.from(ticks(3, 2))]); rem.statSize = rem.bytes.length; rem.mtime = 39001;
         log.cats.length = 0; log.tails.length = 0;
         const c2 = await hmN.fetchTranscript('hg7', 'codex', tid);
-        ok(fs.readFileSync(c2).equals(rem.bytes) && log.tails.length === 1 && log.tails[0] === before.length + 1 && log.cats.length === 0,
+        ok(gateOfGuard(fs.readFileSync(c2).equals(rem.bytes)) && log.tails.length === 1 && log.tails[0] === before.length + 1 && log.cats.length === 0,
           `…which is what lets the NEXT poll still ride the append-only delta (${JSON.stringify(log)})`);
         // NEGATIVE CONTROL: the pre-fix stamp (the stat value) on the same
         // slot — the invariant now reads the fetch's own extra bytes as
@@ -1320,7 +1320,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         rem.bytes = Buffer.concat([rem.bytes, Buffer.from(ticks(5, 2))]); rem.statSize = rem.bytes.length; rem.mtime = 39002;
         log.cats.length = 0; log.tails.length = 0;
         const c3 = await hmN.fetchTranscript('hg7', 'codex', tid);
-        ok(fs.readFileSync(c3).equals(rem.bytes) && log.cats.length === 1 && log.tails.length === 0 && metaAt().size === rem.bytes.length,
+        ok(gateOfGuard(fs.readFileSync(c3).equals(rem.bytes)) && log.cats.length === 1 && log.tails.length === 0 && metaAt().size === rem.bytes.length,
           `NEGATIVE CONTROL: a meta stamped with the stat value costs a WHOLE re-pull (and heals) — the delta win is what the honest stamp protects (${JSON.stringify(log)})`);
       }
     }
@@ -1389,7 +1389,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         noHeal(hmN);
         let errN = null, gotN = null;
         try { gotN = await hmN.fetchTranscript('hh0', 'codex', slN.tid, { maxBytes: CAP }); } catch (e) { errN = String(e && e.message || e); }
-        ok(!gotN && /too large/.test(errN || '') && new RegExp(`holds ${held.length} bytes where the last fetch stamped ${body.length}`).test(errN || ''),
+        ok(!gotN && gateOfGuard(/too large/.test(errN || '')) && verdictOf(new RegExp(`holds ${held.length} bytes where the last fetch stamped ${body.length}`).test(errN || '')),
           `REPRO: pre-fix, a slot the old cat over-stamped is refused over the cap (${errN})`);
         let errN2 = null;
         try { await hmN.fetchTranscript('hh0', 'codex', slN.tid, { maxBytes: CAP }); } catch (e) { errN2 = String(e && e.message || e); }
@@ -1404,7 +1404,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const hm1 = sshRung('hh1', rem, log);
         let err = null, got = null;
         try { got = await hm1.fetchTranscript('hh1', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { err = String(e && e.message || e); }
-        ok(got && !err && fs.readFileSync(sl.cache).equals(grown),
+        ok(gateOfGuard(got) && !err && verdictOf(fs.readFileSync(sl.cache).equals(grown)),
           `the over-cap slot loads again: the gap is verified against the remote and the delta lands on it (${err})`);
         ok(log.probes.length === 1 && log.probes[0][0] === body.length && log.probes[0][1] === over.length && log.cats.length === 0 && log.tails.length === 1 && log.tails[0] === held.length + 1,
           `…by ONE bounded probe of exactly [stamp, file) and then the ordinary tail delta — never a whole cat (${JSON.stringify(log)})`);
@@ -1416,7 +1416,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         rem.bytes = Buffer.concat([grown, Buffer.from(ticks(7, 2))]); rem.mtime = 40002;
         const probesAfter = log.probes.length;
         const c2 = await hm1.fetchTranscript('hh1', 'codex', sl.tid, { maxBytes: CAP });
-        ok(fs.readFileSync(c2).equals(rem.bytes) && log.probes.length === probesAfter && log.tails.length === 2 && log.cats.length === 0,
+        ok(gateOfGuard(fs.readFileSync(c2).equals(rem.bytes)) && log.probes.length === probesAfter && log.tails.length === 2 && log.cats.length === 0,
           `the heal is paid ONCE per slot: the next poll rides the delta with no probe at all (${JSON.stringify(log)})`);
       }
 
@@ -1442,7 +1442,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         hm8._ssh = async (h, cmd) => { if (deltaDies && /^tail -c \+/.test(cmd) && !/\| head -c /.test(cmd)) throw new Error('connection reset while streaming the tail'); return okSsh(h, cmd); };
         let err = null;
         try { await hm8.fetchTranscript('hha', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { err = String(e && e.message || e); }
-        ok(err && /connection reset while streaming the tail/.test(err) && fs.readFileSync(sl.cache).equals(held),
+        ok(gateOfGuard(err) && gateOfGuard(/connection reset while streaming the tail/.test(err)) && verdictOf(fs.readFileSync(sl.cache).equals(held)),
           `fixture: the heal succeeds and the delta behind it dies on the wire (${err})`);
         const mid = metaAt(sl);
         ok(mid.size === held.length && mid.sizeExact === true && typeof mid.healedStampAt === 'number',
@@ -1450,7 +1450,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         deltaDies = false;
         const probesBefore = log.probes.length;
         const c = await hm8.fetchTranscript('hha', 'codex', sl.tid, { maxBytes: CAP });
-        ok(fs.readFileSync(c).equals(grown) && log.probes.length === probesBefore && log.cats.length === 0,
+        ok(gateOfGuard(fs.readFileSync(c).equals(grown)) && log.probes.length === probesBefore && log.cats.length === 0,
           `…so the retry rides the delta with no second probe (${JSON.stringify(log)})`);
       }
       // (I2) THE SLAB RUNG TWIN — the same heal, through the data plane's own
@@ -1467,7 +1467,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const reads2 = [];
         const hm2 = dialHm('hh2', { path: sl.remotePath, bytes: grown, mtime: 41001 }, reads2, null);
         const c = await hm2.fetchTranscript('hh2', 'codex', sl.tid, { maxBytes: CAP });
-        ok(fs.readFileSync(c).equals(grown) && reads2.length === 2 && reads2[0][0] === body.length && reads2[0][1] === over.length && reads2[1][0] === held.length,
+        ok(gateOfGuard(fs.readFileSync(c).equals(grown)) && reads2.length === 2 && reads2[0][0] === body.length && reads2[0][1] === over.length && reads2[1][0] === held.length,
           `slab rung: the gap probe then the delta, both bounded, no whole re-pull (${JSON.stringify(reads2)})`);
         ok(metaAt(sl).size === grown.length && metaAt(sl).sizeExact === true, '…with the same re-stamp (one heal, two rungs, one implementation)', metaAt(sl));
       }
@@ -1492,22 +1492,22 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const hm3 = sshRung('hh3', { path: sl.remotePath, bytes: grown, mtime: 42001 }, log);
         let err = null, got = null;
         try { got = await hm3.fetchTranscript('hh3', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { err = String(e && e.message || e); }
-        ok(!got && /too large/.test(err || '') && log.tails.length === 0 && log.cats.length === 0,
+        ok(!got && gateOfGuard(/too large/.test(err || '')) && log.tails.length === 0 && log.cats.length === 0,
           `a longer cache whose extra bytes are NOT the remote's is still refused — round 5 is not weakened by the heal (${got ? 'SERVED' : err})`);
-        ok(/CHECKED against the remote: they are not its own/.test(err || '') && new RegExp(`holds ${held.length} bytes where the last fetch stamped ${body.length}`).test(err || ''),
+        ok(gateOfGuard(/CHECKED against the remote: they are not its own/.test(err || '')) && verdictOf(new RegExp(`holds ${held.length} bytes where the last fetch stamped ${body.length}`).test(err || '')),
           '…and the refusal reports what the heal LEARNED (a checked mismatch is a different diagnosis from an unchecked one)', err);
-        ok(fs.readFileSync(sl.cache).equals(held) && fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore && log.probes.length === 1,
+        ok(gateOfGuard(fs.readFileSync(sl.cache).equals(held)) && fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore && log.probes.length === 1,
           '…leaving cache AND meta byte-identical, after exactly one bounded probe', { probes: log.probes, meta: fs.readFileSync(sl.cache + '.meta', 'utf8') });
         // the refusal is REMEMBERED (in memory, never stamped): the next poll
         // costs nothing at all, and clearing the memo is what makes it re-probe
         let err2 = null;
         try { await hm3.fetchTranscript('hh3', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { err2 = String(e && e.message || e); }
-        ok(err2 && log.probes.length === 1 && fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore,
+        ok(gateOfGuard(err2) && log.probes.length === 1 && fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore,
           'a refused slot is not re-probed every poll — the verdict is memoized in MEMORY, because stamping it on disk would freeze the corruption in', { probes: log.probes });
         hm3._healRefusedAt.clear();
         let err3 = null;
         try { await hm3.fetchTranscript('hh3', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { err3 = String(e && e.message || e); }
-        ok(err3 && log.probes.length === 2, 'NEGATIVE CONTROL: with the memo cleared the same poll probes again (the memo is the reason, not a disk stamp)', { probes: log.probes });
+        ok(gateOfGuard(err3) && log.probes.length === 2, 'NEGATIVE CONTROL: with the memo cleared the same poll probes again (the memo is the reason, not a disk stamp)', { probes: log.probes });
       }
 
 
@@ -1534,13 +1534,13 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const orig = console.warn; console.warn = (...x) => warns.push(x.map(String).join(' '));
         let err = null, got = null;
         try { got = await hm7.fetchTranscript('hh9', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { err = String(e && e.message || e); } finally { console.warn = orig; }
-        ok(!got && /retryable on the next poll/.test(err || '') && fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore && log.tails.length === 0,
+        ok(!got && gateOfGuard(/retryable on the next poll/.test(err || '')) && fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore && log.tails.length === 0,
           `a probe that dies on the wire refuses as RETRYABLE and adopts nothing (${got ? 'SERVED' : err})`);
-        ok(warns.some((w) => w.includes('connection reset while reading the gap') && w.includes('hh9')), '…naming the wire fault verbatim, on the host it happened on', warns);
+        ok(verdictOf(warns.some((w) => w.includes('connection reset while reading the gap') && w.includes('hh9'))), '…naming the wire fault verbatim, on the host it happened on', warns);
         // …and it is NOT remembered: the very next poll asks again and heals
         probeDies = false;
         const c = await hm7.fetchTranscript('hh9', 'codex', sl.tid, { maxBytes: CAP });
-        ok(fs.readFileSync(c).equals(grown) && log.probes.length === 1 && metaAt(sl).sizeExact === true,
+        ok(gateOfGuard(fs.readFileSync(c).equals(grown)) && log.probes.length === 1 && metaAt(sl).sizeExact === true,
           'NEGATIVE CONTROL: an unanswered question is not a refusal — the next poll probes again and the slot heals', { probes: log.probes, tails: log.tails });
       }
       // (J2) …and the free evidence comes FIRST: a splice marker buried deeper
@@ -1563,7 +1563,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         try { got = await hm4.fetchTranscript('hh4', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { err = String(e && e.message || e); }
         ok(!got && log.probes.length === 0 && log.tails.length === 0 && fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore,
           `a cache carrying a buried splice marker is never healed, and never costs a remote read to find that out (${got ? 'SERVED' : err})`);
-        ok(/carries a splice marker/.test(err || '') && !/CHECKED against the remote/.test(err || ''),
+        ok(gateOfGuard(/carries a splice marker/.test(err || '')) && !/CHECKED against the remote/.test(err || ''),
           '…and the refusal names the evidence it ACTUALLY has — claiming the remote check it skipped would be the "an error string is not a diagnosis" law with the sign flipped', err);
       }
 
@@ -1579,7 +1579,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const log = rollLog();
         const hm5 = sshRung('hh5', { path: sl.remotePath, bytes: grown, mtime: 44001 }, log);
         const c = await hm5.fetchTranscript('hh5', 'codex', sl.tid);            // default cap ⇒ way under
-        ok(fs.readFileSync(c).equals(grown) && log.cats.length === 1 && log.probes.length === 0 && log.tails.length === 0,
+        ok(gateOfGuard(fs.readFileSync(c).equals(grown)) && log.cats.length === 1 && log.probes.length === 0 && log.tails.length === 0,
           `under the cap the same shape is a whole refetch, with no probe and no adoption (${JSON.stringify(log)})`);
         ok(metaAt(sl).size === grown.length && metaAt(sl).sizeExact === true && metaAt(sl).healedStampAt === undefined,
           '…and the fetched bytes carry the exact-size marker, so this slot can never need the heal again', metaAt(sl));
@@ -1603,7 +1603,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         try { got = await hm6.fetchTranscript('hh6', 'codex', sl.tid, { maxBytes: CAP }); } catch (e) { err = String(e && e.message || e); }
         ok(!got && log.probes.length === 0 && log.tails.length === 0 && fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore,
           `the heal is gated on the MARKER, not on the size alone: a round-5+ meta refuses without asking anyone (${got ? 'SERVED' : err})`);
-        ok(new RegExp(`holds ${held.length} bytes where the last fetch stamped ${body.length}`).test(err || '') && !/CHECKED against the remote|splice marker/.test(err || ''),
+        ok(gateOfGuard(new RegExp(`holds ${held.length} bytes where the last fetch stamped ${body.length}`).test(err || '')) && !/CHECKED against the remote|splice marker/.test(err || ''),
           '…and says so without claiming a check it did not run', err);
       }
 
@@ -1635,7 +1635,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const lines = warns.filter((w) => /falling back to the ssh rung/.test(w));
         ok(wired === 3 && lines.length === 2 && lines.filter((w) => w.includes('hh7')).length === 1,
           `three degraded fetches on one host print ONE line, and a second host in the same window still prints its own (${JSON.stringify({ wired, lines })})`);
-        ok(lines.every((w) => w.includes('device link not responding — persistent synthetic fault')),
+        ok(verdictOf(lines.every((w) => w.includes('device link not responding — persistent synthetic fault'))),
           'DEGRADE-PATH LAW: the line that IS printed still names the swallowed fault verbatim', lines);
         // …and the window is a window: the next one prints, carrying what the
         // last one swallowed (driven on the method's own clock — the wiring
@@ -1662,7 +1662,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         ok(distinct === true && later[0] === OTHER,
           'a DIFFERENT fault inside the window still speaks — "+N similar" may only ever count things that ARE similar', { distinct, later });
         ok(repeat === false, 'NEGATIVE CONTROL: two lines of the same sentence differing only in byte offsets are ONE class — the rate limit still bites where it should', { repeat, later });
-        ok(printed === 1 && later.length === 2 && /falling back to the ssh rung \(\+3 similar suppressed in the last minute\)$/.test(later[1]),
+        ok(printed === 1 && later.length === 2 && verdictOf(/falling back to the ssh rung \(\+3 similar suppressed in the last minute\)$/.test(later[1])),
           'a new window prints again and reports how many faults the closed one swallowed', later);
         // A/B ON THE KEY ITSELF: round 6's key (host alone) vs round 7's, same
         // two faults, same clock — this is the reported harm, reproduced.
@@ -1741,7 +1741,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
           const errs = [];
           for (let i = 0; i < 3; i++) errs.push(await poll(hm, 'hn1', sl));
           ok(scans.length - base === 1, `the whole-file scan is paid ONCE for the slot — not per rung, not per poll (${scans.length - base} scans in 3 polls over 2 rungs)`);
-          ok(errs.every((e) => e && /CHECKED against the remote: they are not its own/.test(e)) && errs[0] === errs[1] && errs[1] === errs[2],
+          ok(gateOfGuard(errs.every((e) => e && /CHECKED against the remote: they are not its own/.test(e))) && errs[0] === errs[1] && errs[1] === errs[2],
             '…and the refusal is unchanged: the same diagnosis every poll, from a check nobody had to re-run', errs[0]);
           ok(fs.readFileSync(sl.cache + '.meta', 'utf8') === metaBefore, '…leaving the meta byte-identical (a refused poll never stamps — the memo lives in MEMORY)');
 
@@ -1767,7 +1767,7 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
           fs.openSync = (fp, ...a) => { if (String(fp) === sl.cache) throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' }); return origOpen(fp, ...a); };
           let errU = null;
           try { errU = await poll(hm, 'hn1', sl); } finally { fs.openSync = origOpen; }
-          ok(/could not be verified/.test(errU || ''), 'an unreadable cache refuses the poll — a scan that could not run is not a pass', errU);
+          ok(verdictOf(/could not be verified/.test(errU || '')), 'an unreadable cache refuses the poll — a scan that could not run is not a pass', errU);
           const b5 = scans.length;
           await poll(hm, 'hn1', sl);
           ok(scans.length - b5 === 1, '…and remembers NOTHING: the next poll scans again (an IO failure is not a verdict, the same line the heal draws for a dead probe)', scans.length - b5);
@@ -1815,13 +1815,13 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const rN = racing(fN, 'ho0');
         rN.hmx._healGapIsStillOurs = () => true;                                 // the pre-fix code asked nothing about the file it was comparing
         const outN = await fetchErr(rN.hmx, 'ho0', fN);
-        ok(!outN.path && /CHECKED against the remote: they are not its own/.test(outN.err || '') && rN.raced(),
+        ok(!outN.path && gateOfGuard(/CHECKED against the remote: they are not its own/.test(outN.err || '')) && verdictOf(rN.raced()),
           `REPRO: a slot that SHRANK under the probe is reported as a proven foreign append (${outN.err})`);
         ok(rN.hmx._healRefusedAt.get(fN.sl.cache)?.why === 'foreign',
           'REPRO: …and that verdict is MEMOIZED — a fact about a race, frozen for ten minutes as a fact about the bytes', rN.hmx._healRefusedAt.get(fN.sl.cache));
         fs.writeFileSync(fN.sl.cache, fN.held);                                  // the writer finished: the slot is whole and healthy again
         const outN2 = await fetchErr(rN.hmx, 'ho0', fN);
-        ok(!outN2.path && /CHECKED against the remote/.test(outN2.err || '') && rN.log.probes.length === 1,
+        ok(!outN2.path && gateOfGuard(/CHECKED against the remote/.test(outN2.err || '')) && rN.log.probes.length === 1,
           'REPRO: …so the healthy slot stays condemned on the next poll, with no probe left to correct it', { probes: rN.log.probes });
 
         // …and with the guard in place
@@ -1829,13 +1829,13 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
         const metaBefore = fs.readFileSync(f.sl.cache + '.meta', 'utf8');
         const r = racing(f, 'ho1');
         const out = await fetchErr(r.hmx, 'ho1', f);
-        ok(!out.path && /changed size while those bytes were being checked/.test(out.err || '') && !/CHECKED against the remote/.test(out.err || ''),
+        ok(!out.path && gateOfGuard(/changed size while those bytes were being checked/.test(out.err || '')) && !/CHECKED against the remote/.test(out.err || ''),
           `the same race is the MOVED class: it says the file shifted, and never claims a comparison it could not make (${out.err})`);
         ok(!(r.hmx._healRefusedAt && r.hmx._healRefusedAt.has(f.sl.cache)) && fs.readFileSync(f.sl.cache + '.meta', 'utf8') === metaBefore,
           '…memoizing nothing and stamping nothing — the next poll must be free to answer differently', [...(r.hmx._healRefusedAt || new Map()).keys()]);
         fs.writeFileSync(f.sl.cache, f.held);                                    // same recovery as the repro's
         const out2 = await fetchErr(r.hmx, 'ho1', f);
-        ok(out2.path && fs.readFileSync(out2.path).equals(f.grown) && metaAt(f.sl).sizeExact === true && r.log.probes.length === 2,
+        ok(gateOfGuard(out2.path) && gateOfGuard(fs.readFileSync(out2.path).equals(f.grown)) && metaAt(f.sl).sizeExact === true && r.log.probes.length === 2,
           'NEGATIVE CONTROL: the very next poll heals the slot the race refused — the transient costs one poll, not ten minutes', { err: out2.err, probes: r.log.probes });
       }
     }
@@ -1854,7 +1854,7 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
     return { execs, words: words.every((w) => w === ''), cmds: cmds.every((c) => c === null), uids: uids.every((u) => u === null) };
   };
   const c1 = countRun(CI);
-  ok(fs.existsSync('/proc/self') && gonePids.length === 25 && c1.execs === 0 && c1.words && c1.cmds && c1.uids,
+  ok(gateOfGuard(fs.existsSync('/proc/self')) && gonePids.length === 25 && c1.execs === 0 && gateOfGuard(c1.words) && gateOfGuard(c1.cmds) && verdictOf(c1.uids),
     'B-f64b: 25 pids that exist nowhere — procArgv / procCmdline / procUid answer «gone» with ZERO ps calls where /proc exists', { pids: gonePids.length, ...c1 });
   const NOP = path.join(os.tmpdir(), `vs-noproc-${process.pid}`);   // never created: a machine with no /proc
   let psAsked = 0;
@@ -1905,7 +1905,7 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   // the worker's op run on the main thread (SafeFs's inline run when no worker is alive) answers null
   const TW = require(path.join(REPO, 'src/transcript-worker.js'));
   const op1 = procWalks(() => TW.runOp('codexOpenThreads', {}));
-  ok(op1.n === 0 && op1.out && op1.out.result === null, 'B-f64b: the codexOpenThreads op on the main thread answers null (not known) and walks nothing — locate\'s rule', { n: op1.n, out: op1.out });
+  ok(op1.n === 0 && gateOfGuard(op1.out) && op1.out.result === null, 'B-f64b: the codexOpenThreads op on the main thread answers null (not known) and walks nothing — locate\'s rule', { n: op1.n, out: op1.out });
   // RED ×2: the base's inline fallback (the walk on this thread when the worker cannot answer); the op without its guard
   const inl = "transcriptWorkerCall('codexOpenThreads', {}, () => null)";
   if (!csSrc.includes(inl)) throw new Error('the anchor of the control «B-f64b: the inline walk» is not in the source');
@@ -1941,11 +1941,11 @@ console.log('⑧ the zst cache and the ssh control folder are judged before use 
     const NEW = M.load('src/adapters/codex.js', cxSrc, 'own', { same: true }); // a fresh real module under this TMPDIR, on purpose (B-0d3e)
     let err = null; try { NEW.plainJsonlPath(zstPath); } catch (e) { err = e; }
     const awayAfterNew = fs.readdirSync(away).length;
-    ok(cxSrc.includes(CXA) && !!err && err.code === 'EZSTCACHE' && err.message.includes(path.join(T, `vibespace-zst-${uid}`)) && /SYMLINK/.test(err.message) && /the way out/.test(err.message) && awayAfterNew === 0,
+    ok(gateOfGuard(cxSrc.includes(CXA)) && !!err && err.code === 'EZSTCACHE' && gateOfGuard(err.message.includes(path.join(T, `vibespace-zst-${uid}`))) && gateOfGuard(/SYMLINK/.test(err.message)) && gateOfGuard(/the way out/.test(err.message)) && awayAfterNew === 0,
       `B-3767 unit 2: a link at the zst cache's per-user name is refused by name with the way out, and no twin is written through it (${err ? err.code + ': ' + err.message.slice(0, 160) : 'no error'}; ${awayAfterNew} file(s) behind the link)`);
     const OLD = M.load('src/adapters/codex.js', editAnchor(cxSrc, CXA, '  const v = { ok: true }; try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { }\n', "src/adapters/codex.js"), 'old');
     let oldTwin = null; try { oldTwin = OLD.plainJsonlPath(zstPath); } catch { }
-    ok(!!oldTwin && fs.realpathSync(oldTwin).startsWith(fs.realpathSync(away) + '/'), `CONTROL B-3767 unit 2: the release's mkdir-in-a-catch wrote the twin through the planted link (red): ${oldTwin}`);
+    ok(!!oldTwin && verdictOf(fs.realpathSync(oldTwin).startsWith(fs.realpathSync(away) + '/')), `CONTROL B-3767 unit 2: the release's mkdir-in-a-catch wrote the twin through the planted link (red): ${oldTwin}`);
     for (const f of fs.readdirSync(away)) fs.rmSync(path.join(away, f), { force: true });
     // the ssh control folder
     console.warn = (...a) => { warned.push(a.join(' ')); };
@@ -1964,13 +1964,13 @@ console.log('⑧ the zst cache and the ssh control folder are judged before use 
     process.env.TMPDIR = good;
     const fine = new HM1({ dataDir: path.join(T, 'data-b') });
     const argsFine = fine.sshArgs(h, { multiplex: true }).join(' ');
-    ok(hostsSrc.includes(HA) && !/ControlMaster|ControlPath/.test(argsRefused) && !/ControlPath/.test(cmdRefused) && warnOnce.length === 1 && warnOnce[0].includes(path.join(T, `vs-cm-${uid}`)) && /the way out/.test(warnOnce[0]) && /ControlPath=/.test(argsFine) && argsFine.includes(path.join(good, `vs-cm-${uid}`)) && argsBack.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`) && warnAfter === 1,
+    ok(gateOfGuard(hostsSrc.includes(HA)) && !/ControlMaster|ControlPath/.test(argsRefused) && !/ControlPath/.test(cmdRefused) && warnOnce.length === 1 && gateOfGuard(warnOnce[0].includes(path.join(T, `vs-cm-${uid}`))) && gateOfGuard(/the way out/.test(warnOnce[0])) && gateOfGuard(/ControlPath=/.test(argsFine)) && gateOfGuard(argsFine.includes(path.join(good, `vs-cm-${uid}`))) && gateOfGuard(argsBack.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`)) && warnAfter === 1,
       `B-3767 unit 2: a link at the ssh control folder's name turns connection sharing OFF (no ControlPath into it), said once with the path and the way out; once the planted name is gone sharing comes back by itself (no restart, no second warning); a private folder keeps it (${JSON.stringify({ refusedHasCM: /ControlMaster/.test(argsRefused), warned: warnOnce.length })})`);
     process.env.TMPDIR = T;
     fs.rmSync(path.join(T, `vs-cm-${uid}`), { recursive: true, force: true }); fs.symlinkSync(away, path.join(T, `vs-cm-${uid}`));   // planted again for the control
     const HM0 = M.load('src/hosts.js', editAnchor(hostsSrc, HA, '    const cm = { ok: true }; try { fs.mkdirSync(this._cmDir, { recursive: true, mode: 0o700 }); } catch { }\n', "src/hosts.js"), 'old').HostManager;
     const oldArgs = new HM0({ dataDir: path.join(T, 'data-c') }).sshArgs(h, { multiplex: true }).join(' ');
-    ok(oldArgs.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`), 'CONTROL B-3767 unit 2: the release put its ControlPath into the planted link (red)');
+    ok(verdictOf(oldArgs.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`)), 'CONTROL B-3767 unit 2: the release put its ControlPath into the planted link (red)');
   } finally {
     console.warn = warn0;
     if (prevT === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevT;
@@ -1979,4 +1979,4 @@ console.log('⑧ the zst cache and the ssh control folder are judged before use 
 }
 try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf as gateOfGuard } from './lib/check.mjs';

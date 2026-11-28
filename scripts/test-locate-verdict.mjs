@@ -40,7 +40,7 @@ const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
 const { LOCATE_WORDS, LOCATE_ORDER, locateVerdict, NON_ARCHIVED } = require(path.join(REPO, 'src/locate-verdict.js'));
 const { CARD_TO_WINDOW } = require(path.join(REPO, 'scripts/lib/session-menu-parity.js'));
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra ? '\n      ' + extra : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra ? '\n      ' + extra : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -93,10 +93,10 @@ console.log('① THE VERDICT: each reason in its place, the first filter that dr
   ok(!bad.length, `${rows.length} rows: every reason where the list puts it, the FIRST filter that drops the row named, a row in a collapsed or far folder shown`, bad.map(([o]) => J(o) + ' → ' + J(V(o))).join(' | '));
   ok(V({ term: 'Zz', matchesTerm: false }).term === 'Zz' && V({ statusFilter: ['live'], status: 'stopped' }).name === 'stopped' && V({ activeView: 'live', status: 'tmux' }).name === 'live' && V({ backendFilter: ['codex'] }).name === 'claude' && V({ hostFilter: ['h1'] }).name === 'local',
     'the reason carries what the sentence names: the words searched, the status, the view, the agent, the location');
-  ok(J(LOCATE_ORDER) === J(ORDER) && Object.isFrozen(LOCATE_ORDER), `the module's order is the list's: ${ORDER.join(' → ')}`, J(LOCATE_ORDER));
-  ok(J(Object.keys(LOCATE_WORDS).sort()) === J(['absent', ...ORDER].sort()) && !('folder' in LOCATE_WORDS) && Object.isFrozen(LOCATE_WORDS),
+  ok(J(LOCATE_ORDER) === J(ORDER) && verdictOf(Object.isFrozen(LOCATE_ORDER)), `the module's order is the list's: ${ORDER.join(' → ')}`, J(LOCATE_ORDER));
+  ok(J(Object.keys(LOCATE_WORDS).sort()) === J(['absent', ...ORDER].sort()) && !('folder' in LOCATE_WORDS) && verdictOf(Object.isFrozen(LOCATE_WORDS)),
     'one sentence per reason — and none for a folder (a collapsed folder is opened, never a reason)');
-  ok(ORDER.every((k) => typeof LOCATE_WORDS[k].door === 'string' && LOCATE_WORDS[k].door.length > 3) && LOCATE_WORDS.absent.door === null,
+  ok(gateOf(ORDER.every((k) => typeof LOCATE_WORDS[k].door === 'string' && LOCATE_WORDS[k].door.length > 3)) && LOCATE_WORDS.absent.door === null,
     'every reason the sidebar can undo names its door; only «not in the list» has none (nothing in the sidebar can show it)');
   ok(NON_ARCHIVED === FOUR.length, `the status filter narrows only below all ${FOUR.length} non-archived statuses (the list's own rule)`);
 }
@@ -106,14 +106,14 @@ console.log('② THE LIST FILTERS WITH THE VERDICT (B-b842): one predicate — s
   const RI = methodText(SIDEBAR, '  _renderInner() {'), FS = methodText(SIDEBAR, '  _filterSessions(term) {'), LF = methodText(SIDEBAR, '  _locateFacts(sessionId) {'), RF = methodText(SIDEBAR, '  _listRowFacts(s, ctx) {');
   // (a) THE WIRING — the list keeps no chain of its own
   const OWN = ['sessionMatchesFilter(', 'passesAgentKindFilter(', 'isStoppedBy(', 'this._backendFilter.has(', 'this._hostFilter.has(', 'nonArchivedFilters', '=== this._activeView', 'this.isArchived('];   // stale-pins: kept — an ABSENCE census: the release chain's matchers, which _renderInner must no longer hold
-  ok(/const filtered = this\._filterSessions\(f\);\n\s*let sessions = filtered\.sessions;/.test(RI) && OWN.every((k) => !RI.includes(k)), `_renderInner lists what _filterSessions shows and holds no matcher of its own (${OWN.length} named) — the second copy of the chain is gone`, OWN.filter((k) => RI.includes(k)).join(' · '));
-  ok(/const v = locateVerdict\(this\._listRowFacts\(s, ctx\)\);/.test(FS) && /if \(v\.show\) sessions\.push\(s\);/.test(FS) && /for \(const s of this\._allSessions \|\| \[\]\)/.test(FS), '_filterSessions judges EVERY row with the verdict over _listRowFacts and lists exactly what it shows');
-  ok(/return this\._listRowFacts\(s, this\._listFilterCtx\(/.test(LF), 'Locate\'s facts come from the SAME builder (_locateFacts → _listRowFacts over _listFilterCtx)');
-  ok(/statusOn: \[\.\.\.this\._statusFilter\]\.filter\(\(x\) => x !== 'archived'\)/.test(methodText(SIDEBAR, '  _listFilterCtx(term) {')) && /statusOn: ctx\.statusOn/.test(RF) && /Array\.isArray\(f\.statusOn\) \? f\.statusOn :/.test(read('src/locate-verdict.js')),
+  ok(gateOf(/const filtered = this\._filterSessions\(f\);\n\s*let sessions = filtered\.sessions;/.test(RI)) && verdictOf(OWN.every((k) => !RI.includes(k))), `_renderInner lists what _filterSessions shows and holds no matcher of its own (${OWN.length} named) — the second copy of the chain is gone`, OWN.filter((k) => RI.includes(k)).join(' · '));
+  ok(gateOf(/const v = locateVerdict\(this\._listRowFacts\(s, ctx\)\);/.test(FS)) && gateOf(/if \(v\.show\) sessions\.push\(s\);/.test(FS)) && verdictOf(/for \(const s of this\._allSessions \|\| \[\]\)/.test(FS)), '_filterSessions judges EVERY row with the verdict over _listRowFacts and lists exactly what it shows');
+  ok(verdictOf(/return this\._listRowFacts\(s, this\._listFilterCtx\(/.test(LF)), 'Locate\'s facts come from the SAME builder (_locateFacts → _listRowFacts over _listFilterCtx)');
+  ok(gateOf(/statusOn: \[\.\.\.this\._statusFilter\]\.filter\(\(x\) => x !== 'archived'\)/.test(methodText(SIDEBAR, '  _listFilterCtx(term) {'))) && gateOf(/statusOn: ctx\.statusOn/.test(RF)) && verdictOf(/Array\.isArray\(f\.statusOn\) \? f\.statusOn :/.test(read('src/locate-verdict.js'))),
     'the statuses on are built ONCE a draw (_listFilterCtx) and handed to every row (_listRowFacts) — never an array a row a draw (主开发 04:09Z)');
-  ok(['sessionMatchesFilter(s, ctx.term)', 'passesAgentKindFilter(s, ctx.kindFilter)', 'isStoppedBy(s)', 'this.isArchived(s)'].every((k) => RF.includes(k)), 'the row facts ask the list\'s own matchers: the search box\'s, the agent kind\'s, the stopped pill\'s, Archived');
+  ok(verdictOf(['sessionMatchesFilter(s, ctx.term)', 'passesAgentKindFilter(s, ctx.kindFilter)', 'isStoppedBy(s)', 'this.isArchived(s)'].every((k) => RF.includes(k))), 'the row facts ask the list\'s own matchers: the search box\'s, the agent kind\'s, the stopped pill\'s, Archived');
   const SU = methodText(SIDEBAR, '  _stoppedUnderFilters() {');
-  ok(/stoppedOnly: true \};/.test(SU) && /isStoppedBy\(s\) && locateVerdict\(this\._listRowFacts\(s, ctx\)\)\.show/.test(SU) && !/sessionMatchesFilter\(|_statusFilter|_activeView|_backendFilter|_hostFilter/.test(SU), 'the pill\'s count (_stoppedUnderFilters) is the same predicate with the pill on — no third copy of the chain');
+  ok(gateOf(/stoppedOnly: true \};/.test(SU)) && gateOf(/isStoppedBy\(s\) && locateVerdict\(this\._listRowFacts\(s, ctx\)\)\.show/.test(SU)) && !/sessionMatchesFilter\(|_statusFilter|_activeView|_backendFilter|_hostFilter/.test(SU), 'the pill\'s count (_stoppedUnderFilters) is the same predicate with the pill on — no third copy of the chain');
   // (b) THE BEHAVIOUR, against the list's rules STATED here: the release's chain as a person reads it (the search box, the agent,
   // the location, the kind, the stopped pill — never on the Tasks board —, then the Tasks board narrows by Archived alone;
   // elsewhere Archived / the status filter, narrowing only below all four / the quick view), with the counts the hints read
@@ -175,7 +175,7 @@ console.log('② THE LIST FILTERS WITH THE VERDICT (B-b842): one predicate — s
   };
   const R = run();
   ok(!R.bad, `over ${R.n} states (the eight filters, both tabs, four rows a list) the list draws the rows the rules say in their order, with the same counts; Locate (reading the search box) says «shown» exactly then — else the FIRST filter that drops it; the pill counts what a press shows (${R.shown} shown)`, R.bad && J(R.bad));
-  ok(R.shown > 0 && R.shown < R.n && ORDER.every((k) => R.whys.has(k)), `…and the matrix reaches every reason (${[...R.whys].join(', ')})`);
+  ok(R.shown > 0 && R.shown < R.n && verdictOf(ORDER.every((k) => R.whys.has(k))), `…and the matrix reaches every reason (${[...R.whys].join(', ')})`);
   // every door makes progress: pressed, the row shows or the next reason is a LATER one — a present row shows within the order's length
   let worst = 0, stuck = null;
   for (const st of states) {
@@ -244,7 +244,7 @@ console.log('③ ONE SHOW DOOR: a program never goes through the rail\'s re-clic
   ok(items >= 9, `the rail's own items keep their re-click (${items} items: a person's second click on the open tab collapses it)`);
   const callers = files.filter((f) => /\._railShow\??\.?\(/.test(fs.readFileSync(path.join(REPO, f), 'utf-8')));
   const want = ['src/lib/sidebar-rail.js', 'src/lib/jobs-panel.js', 'src/lib/channels-panel.js', 'src/lib/manage-agents.js', 'src/lib/plugins-ui.js', 'src/lib/session-lifecycle.js'];
-  ok(want.every((f) => callers.includes(f)), `every program caller moved to the show door (${callers.join(', ')})`);
+  ok(verdictOf(want.every((f) => callers.includes(f))), `every program caller moved to the show door (${callers.join(', ')})`);
   const jobs = fs.readFileSync(path.join(REPO, 'src/lib/jobs-panel.js'), 'utf-8');
   const planted = jobs.replace("sb._railShow('jobs');", "sb._railGo('jobs');");
   ok(planted !== jobs && census(planted, 'src/lib/jobs-panel.js').length === 1, 'RED CONTROL: the release\'s focusJobsPanel line (`sb._railGo(\'jobs\')`) put back is caught');
@@ -271,10 +271,10 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
 {
   const LOCATE = methodText(LIFE, '  async locateSessionInSidebar(backendSessionId) {');
   const WAIT = Number((LIFE.match(/const LOCATE_WAIT_MS = (\d+);/) || [])[1]);
-  ok(WAIT > 0 && /LOCATE_WAIT_MS/.test(LOCATE) && /_railShow\?\.\('folders'\)/.test(LOCATE) && !/_railGo/.test(LOCATE) && /\.session-item-card/.test(LOCATE) && !/\.session-card'/.test(LOCATE),
+  ok(WAIT > 0 && gateOf(/LOCATE_WAIT_MS/.test(LOCATE)) && gateOf(/_railShow\?\.\('folders'\)/.test(LOCATE)) && !/_railGo/.test(LOCATE) && gateOf(/\.session-item-card/.test(LOCATE)) && !/\.session-card'/.test(LOCATE),
     `Locate goes through the show door, looks for the card's real class and waits on a bound (LOCATE_WAIT_MS = ${WAIT})`);
   const railObj = (() => { const s = RAIL.indexOf('    _railShow(id) {'), e = RAIL.indexOf('    _railSync() {', s); return s > 0 && e > s ? RAIL.slice(s, e) : ''; })();
-  ok(/_railShow\(id\) \{/.test(railObj) && /_railGo\(id\) \{/.test(railObj), 'the real _railShow and _railGo are read off sidebar-rail.js');
+  ok(gateOf(/_railShow\(id\) \{/.test(railObj)) && verdictOf(/_railGo\(id\) \{/.test(railObj)), 'the real _railShow and _railGo are read off sidebar-rail.js');
   const store = { setItem() {}, getItem: () => null };
   const RAILM = new Function('localStorage', 'track', `return ({ ${railObj} });`)(store, () => {});
   // TODAY'S DOOR (主开发's must, its red control): the show door that clears a drill-down but does not draw the list again
@@ -329,42 +329,42 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
   ];
   for (const [name, w] of SCENES) {
     const r = await press(LOCATE, world(w));
-    ok(shown(r), `Locate from ${name}: open on the sessions list, the row flashed, no toast`, J(r));
+    ok(verdictOf(shown(r)), `Locate from ${name}: open on the sessions list, the row flashed, no toast`, J(r));
   }
   const rel = await press(RELEASE_LOCATE, world(SCENES[0][1]));
-  ok(!rel.open && rel.toasts.length === 1 && /Entry not visible/.test(rel.toasts[0]), `RED CONTROL (the release's Locate, verbatim) on the owner's open list: the list COLLAPSES and it says «not visible» (${J(rel)})`);
+  ok(!rel.open && rel.toasts.length === 1 && verdictOf(/Entry not visible/.test(rel.toasts[0])), `RED CONTROL (the release's Locate, verbatim) on the owner's open list: the list COLLAPSES and it says «not visible» (${J(rel)})`);
   const relOpen = await press(FIXED_CLASS, world(SCENES[0][1]));
   ok(!relOpen.open && relOpen.toasts.length === 1, `RED CONTROL (the release's Locate with the card's class corrected): an open list still collapses (${J(relOpen)})`);
   const relClosed = await press(FIXED_CLASS, world(SCENES[5][1]));
-  ok(relClosed.open && relClosed.flashes === 0 && relClosed.toasts.length === 1, `RED CONTROL (class corrected) on the owner's case: the sidebar opens, it looks once at 60 ms, and a row in a closed zone is never found — nothing opens the zone (${J(relClosed)})`);
+  ok(gateOf(relClosed.open) && relClosed.flashes === 0 && relClosed.toasts.length === 1, `RED CONTROL (class corrected) on the owner's case: the sidebar opens, it looks once at 60 ms, and a row in a closed zone is never found — nothing opens the zone (${J(relClosed)})`);
   // a hidden row: said once, with its door; the door shows it
   const Wh = world({ open: true, tab: 'folders', facts: { ...SHOWN, term: 'zz', matchesTerm: false } });
   const h = await press(LOCATE, Wh);
-  ok(h.open && h.flashes === 0 && J(h.toasts) === J(['Hidden by the search box: «zz»']) && Wh.actions.length === 1 && Wh.actions[0].label === 'Clear search',
+  ok(gateOf(h.open) && h.flashes === 0 && J(h.toasts) === J(['Hidden by the search box: «zz»']) && Wh.actions.length === 1 && Wh.actions[0].label === 'Clear search',
     `a row hidden by the search box: one toast naming the words searched, with its door «Clear search», and the list stays open (${J(h)})`);
   Wh.actions[0].run(); await Wh.drain();
   ok(J(Wh.doors) === J(['search']) && Wh.flashes === 1 && Wh.toasts.length === 1, '…the door clears the search and the row is located and flashed, no second toast');
   for (const [why, o] of [['archived', { archived: true }], ['status', { statusFilter: ['stopped'] }], ['view', { activeView: 'stopped' }], ['kind', { kindPass: false }], ['stopped', { stoppedOnly: true }]]) {
     const Wx = world({ open: true, tab: 'folders', facts: { ...SHOWN, ...o } });
     const x = await press(LOCATE, Wx);
-    ok(x.open && x.toasts.length === 1 && Wx.actions.length === 1 && Wx.actions[0].label === LOCATE_WORDS[why].door, `a row hidden by «${why}»: said once with its door «${LOCATE_WORDS[why].door}», the list open`, J(x));
+    ok(gateOf(x.open) && x.toasts.length === 1 && Wx.actions.length === 1 && Wx.actions[0].label === LOCATE_WORDS[why].door, `a row hidden by «${why}»: said once with its door «${LOCATE_WORDS[why].door}», the list open`, J(x));
   }
   const Wa = world({ open: true, tab: 'folders', facts: { present: false } });
   const ab = await press(LOCATE, Wa);
-  ok(J(ab.toasts) === J([LOCATE_WORDS.absent.words]) && !Wa.actions.length && ab.open, 'a conversation not in the list: said in those words, no door offered, the list open');
+  ok(J(ab.toasts) === J([LOCATE_WORDS.absent.words]) && !Wa.actions.length && verdictOf(ab.open), 'a conversation not in the list: said in those words, no door offered, the list open');
   // the wait is bounded: a list that never draws the row ends at the bound with its own sentence (never «not visible», never a loop)
   const Wn = world({ open: true, tab: 'folders', never: true });
   const nv = await press(LOCATE, Wn);
   const framesAtBound = Math.round(WAIT / FRAME);
-  ok(nv.toasts.length === 1 && /did not draw this conversation in time/.test(nv.toasts[0]) && Wn.q.length === 0 && Wn.frames >= framesAtBound && Wn.frames <= framesAtBound + 2,
+  ok(nv.toasts.length === 1 && gateOf(/did not draw this conversation in time/.test(nv.toasts[0])) && Wn.q.length === 0 && Wn.frames >= framesAtBound && Wn.frames <= framesAtBound + 2,
     `a list that never draws the row: the wait ends at its bound (${Wn.frames} frames of ${FRAME} model ms ≈ LOCATE_WAIT_MS) with its own sentence, nothing left running`, J({ nv, frames: Wn.frames }));
 
   // THE MUST (主开发's verdict): ON A PHONE, after a Task Group was opened, the Sessions tab still draws its detail; Locate on a LIVE row
   // outside it — the show door clears the drill-down and DRAWS the list again (the tab already being Sessions)
   const ph = await press(LOCATE, world({ open: true, tab: 'folders', phone: true, drill: true }));
-  ok(shown(ph), `THE MUST — a phone, a Task Group's detail left on the Sessions tab, Locate on a live row outside it: the list drawn again, the row flashed, no toast (${J(ph)})`, ph);
+  ok(verdictOf(shown(ph)), `THE MUST — a phone, a Task Group's detail left on the Sessions tab, Locate on a live row outside it: the list drawn again, the row flashed, no toast (${J(ph)})`, ph);
   const phRed = RAILM_NO_REDRAW && await press(LOCATE, world({ open: true, tab: 'folders', phone: true, drill: true, rail: RAILM_NO_REDRAW }));
-  ok(!!phRed && phRed.flashes === 0 && phRed.toasts.length === 1 && /did not draw this conversation in time/.test(phRed.toasts[0]), `RED CONTROL — today's door (the drill-down cleared, nothing drawn): the stale detail stays and Locate times out (${J(phRed)})`, phRed);
+  ok(!!phRed && phRed.flashes === 0 && phRed.toasts.length === 1 && verdictOf(/did not draw this conversation in time/.test(phRed.toasts[0])), `RED CONTROL — today's door (the drill-down cleared, nothing drawn): the stale detail stays and Locate times out (${J(phRed)})`, phRed);
   // THE WAIT ENDS WHEN THE PERSON WALKS AWAY: closed, another tab, their own scroll — silently
   const WALKS = [['closes the list', (w) => w.sb.toggle(false)], ['chooses another tab', (w) => { w.sb._activeTab = 'ports'; }],
     ['scrolls the list (wheel)', (w) => w.person('wheel')], ['touches the list', (w) => w.person('touchstart')], ['presses a key in the list', (w) => w.person('keydown')],
@@ -379,13 +379,13 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
   // WHAT LOCATE OPENED IS SAID: a switcher it moved off another machine names what it showed, with the way back (the REAL switch-back)
   const Ws = world({ open: true, tab: 'folders', zone: 'closed', switched: { zone: 'recent', host: 'h1', name: 'Box' } });
   const sw = await press(LOCATE, Ws);
-  ok(sw.flashes === 1 && sw.toasts.length === 1 && /^Recent now shows Local, to find this conversation \(it showed Box\)$/.test(sw.toasts[0]) && Ws.actions[0]?.label === 'Show Box again',
+  ok(sw.flashes === 1 && sw.toasts.length === 1 && gateOf(/^Recent now shows Local, to find this conversation \(it showed Box\)$/.test(sw.toasts[0])) && Ws.actions[0]?.label === 'Show Box again',
     `a Recent switcher moved off «Box» to find the row: said in the switcher's own word («Local»), with «Show Box again» (${J(sw.toasts)})`, sw);
   Ws.actions[0].run();
   ok(Ws.sb._wbRecentHost === 'h1' && Ws.sb._wbHistoryHost === '', '…and its door puts the RECENT switcher back (the workbench\'s own switch-back, drawn again)', { recent: Ws.sb._wbRecentHost, history: Ws.sb._wbHistoryHost });
   const Wh2 = world({ open: true, tab: 'folders', zone: 'closed', switched: { zone: 'history', host: 'h2', name: 'Lab' } });
   const sw2 = await press(LOCATE, Wh2);
-  ok(sw2.flashes === 1 && /^History now shows Local, to find this conversation \(it showed Lab\)$/.test(sw2.toasts[0] || ''), `a History switcher: its own sentence (${J(sw2.toasts)})`, sw2);
+  ok(sw2.flashes === 1 && verdictOf(/^History now shows Local, to find this conversation \(it showed Lab\)$/.test(sw2.toasts[0] || '')), `a History switcher: its own sentence (${J(sw2.toasts)})`, sw2);
   Wh2.actions[0].run();
   ok(Wh2.sb._wbHistoryHost === 'h2' && Wh2.sb._wbRecentHost === '', '…and its door puts the HISTORY switcher back');
   // the row NOT shown (not drawn in time): what Locate switched is PUT BACK, silently — no switch sentence
@@ -393,7 +393,7 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
   Wn2.sb._openZoneOf = function () { (this._locateSwitched || []).push({ zone: 'recent', host: 'h1', name: 'Box' }); this._wbRecentHost = ''; return 'render'; };   // opens, yet the row never draws
   Wn2.sb.zoneOpen = false;
   const nv2 = await press(LOCATE, Wn2);
-  ok(nv2.toasts.length === 1 && /did not draw this conversation in time/.test(nv2.toasts[0]) && Wn2.sb._wbRecentHost === 'h1', `the row not drawn in time: only the timeout sentence, and the switcher is put back (${J(nv2.toasts)}, recent=${Wn2.sb._wbRecentHost})`, nv2);
+  ok(nv2.toasts.length === 1 && gateOf(/did not draw this conversation in time/.test(nv2.toasts[0])) && Wn2.sb._wbRecentHost === 'h1', `the row not drawn in time: only the timeout sentence, and the switcher is put back (${J(nv2.toasts)}, recent=${Wn2.sb._wbRecentHost})`, nv2);
 }
 
 console.log('④b THE ZONE THAT HOLDS THE ROW (sidebar-workbench.js _openZoneOf — the sessions tab is zones, not folders)');
@@ -420,8 +420,8 @@ console.log('④b THE ZONE THAT HOLDS THE ROW (sidebar-workbench.js _openZoneOf 
   R.push(['the regular class\'s one column: its next page asked for (the sentinel scrolled)', OPEN.call(f, 'a') === 'scrolled' && scrolled === 1]);
   const bad = R.filter(([, c]) => !c);
   ok(!bad.length, `${R.length} rows: ${R.map(([n]) => n).join(' · ')}`, bad.map(([n]) => n).join(' | '));
-  ok(/if \(sb\._openZoneOf\?\.\(backendSessionId\) === 'render'\) sb\._render\?\.\(\);/.test(LIFE), 'Locate opens the zone each look and draws when it changed');
-  ok(/if \(id !== 'tasks'\) this\._mobileDrilldown = null;/.test(RAIL), 'the show door ends a Task Group\'s drill-down (the phone: it outlived a switch to Sessions)');
+  ok(verdictOf(/if \(sb\._openZoneOf\?\.\(backendSessionId\) === 'render'\) sb\._render\?\.\(\);/.test(LIFE)), 'Locate opens the zone each look and draws when it changed');
+  ok(verdictOf(/if \(id !== 'tasks'\) this\._mobileDrilldown = null;/.test(RAIL)), 'the show door ends a Task Group\'s drill-down (the phone: it outlived a switch to Sessions)');
 }
 
 console.log('⑤ THE TWO SESSION MENUS AGREE — Fork on the window\'s menu, one table for every card command');
@@ -446,14 +446,14 @@ console.log('⑤ THE TWO SESSION MENUS AGREE — Fork on the window\'s menu, one
     return { card, problems };
   };
   const T = tableVerdict(CARD, WIN, CARD_TO_WINDOW);
-  ok(CARD_IDS.includes('session-card/outbox') && CARD_IDS.includes('session-card/task-groups') && WIN_IDS.includes('window/task-groups'), `the card's rows with no command are read too — ${CARD_IDS.join(', ')} (one registered from channel-outbox.js)`);
+  ok(gateOf(CARD_IDS.includes('session-card/outbox')) && gateOf(CARD_IDS.includes('session-card/task-groups')) && verdictOf(WIN_IDS.includes('window/task-groups')), `the card's rows with no command are read too — ${CARD_IDS.join(', ')} (one registered from channel-outbox.js)`);
   ok(T.card.length >= 20 && !T.problems.length, `all ${T.card.length} card commands have a row — ${Object.values(CARD_TO_WINDOW).filter((r) => r.window).length} on the window's menu, the rest not applicable with the reason`, T.problems.join(' | '));
-  ok(CARD_TO_WINDOW['session.fork'] && CARD_TO_WINDOW['session.fork'].window === 'session.fork' && cmdsOf(WIN).includes('session.fork'), 'Fork is on the window\'s menu — the card\'s own command');
+  ok(gateOf(CARD_TO_WINDOW['session.fork']) && CARD_TO_WINDOW['session.fork'].window === 'session.fork' && verdictOf(cmdsOf(WIN).includes('session.fork')), 'Fork is on the window\'s menu — the card\'s own command');
   const noFork = WIN.replace(/\n\s*registerMenuItem\(\{ menu: M, group: '2_session', order: 25, command: 'session\.fork'[^\n]*/, '');
-  ok(noFork !== WIN && tableVerdict(CARD, noFork, CARD_TO_WINDOW).problems.some((p) => p.startsWith('session.fork')), 'RED CONTROL: the window\'s Fork row deleted (the release) is caught');
+  ok(noFork !== WIN && verdictOf(tableVerdict(CARD, noFork, CARD_TO_WINDOW).problems.some((p) => p.startsWith('session.fork'))), 'RED CONTROL: the window\'s Fork row deleted (the release) is caught');
   const extraCard = CARD.replace("registerMenuItem({ menu: M, group: '3_admin', order: 30, command: 'session.properties' });", "registerMenuItem({ menu: M, group: '3_admin', order: 30, command: 'session.properties' });\n  registerMenuItem({ menu: M, group: '3_admin', order: 35, command: 'session.somethingNew' });");
-  ok(extraCard !== CARD && tableVerdict(extraCard, WIN, CARD_TO_WINDOW).problems.some((p) => p.includes('session.somethingNew')), 'RED CONTROL: a new card command with no row is caught');
-  ok(tableVerdict(CARD, WIN, { ...CARD_TO_WINDOW, 'session.fork': { na: 'not on the window menu at all' } }).problems.some((p) => p.startsWith('session.fork')), 'RED CONTROL: a «not applicable» row for a command the window offers is caught');
+  ok(extraCard !== CARD && verdictOf(tableVerdict(extraCard, WIN, CARD_TO_WINDOW).problems.some((p) => p.includes('session.somethingNew'))), 'RED CONTROL: a new card command with no row is caught');
+  ok(verdictOf(tableVerdict(CARD, WIN, { ...CARD_TO_WINDOW, 'session.fork': { na: 'not on the window menu at all' } }).problems.some((p) => p.startsWith('session.fork'))), 'RED CONTROL: a «not applicable» row for a command the window offers is caught');
   // Fork shows on both menus for the same conversations: both registries, real, run over the same rows
   const backendFeatureCaps = (b) => ({ fork: b !== 'shell', accounts: b === 'claude' || b === 'codex' });   // test-contributions' stand-in
   const fresh = async (tag, winText) => {
@@ -477,7 +477,7 @@ console.log('⑤ THE TWO SESSION MENUS AGREE — Fork on the window\'s menu, one
   const Creal = await fresh('real', WIN);
   const off = agree(Creal);
   const forkRows = ['live', 'stopped'].map((status) => Creal.menuItems('window', { app: { sidebar: { _tasks: [] }, desktopManager: { getDesktopMenuItems: () => [] }, wm: { windows: new Map([['w', {}]]) } }, id: 'w', win: {}, s: { status, sessionId: 'abc' }, switchSubmenu: false, closeLabel: '✕ Close' }).find((i) => i.command === 'session.fork'));
-  ok(!off.length && forkRows.every((r) => r && r.label === 'Fork…' && r.kind === 'fork'), `over 48 conversations (4 statuses × 6 agents, every registered harness and none, × 2 locations) the window's menu offers Fork exactly when the card does — «Fork…», under the command's one condition`, off.join(' | '));
+  ok(!off.length && verdictOf(forkRows.every((r) => r && r.label === 'Fork…' && r.kind === 'fork')), `over 48 conversations (4 statuses × 6 agents, every registered harness and none, × 2 locations) the window's menu offers Fork exactly when the card does — «Fork…», under the command's one condition`, off.join(' | '));
   const narrowed = WIN.replace("command: 'session.fork', kind: 'fork', when: hasSess });", "command: 'session.fork', kind: 'fork', when: live });");
   const Cnar = await fresh('narrowed', narrowed);
   ok(narrowed !== WIN && agree(Cnar).length > 0, `RED CONTROL: a window Fork row narrowed to live conversations disagrees with the card (${agree(Cnar).length} conversations)`);
@@ -490,20 +490,20 @@ console.log('⑥ THE WORDS: three languages, the vague sentence gone, no native 
   const said = [...methodText(LIFE, '  async locateSessionInSidebar(backendSessionId) {').matchAll(/t\('([^']+)'|'((?:Recent|History) now shows [^']+)'/g)].map((m) => m[1] || m[2]);   // every sentence Locate itself says (the switch's two ride a ternary)
   const keys = [...new Set([...Object.values(LOCATE_WORDS).flatMap((w) => [w.words, w.door]).filter(Boolean), timeout, ...said].filter(Boolean))];
   const missing = keys.filter((k) => !ZH.includes(J(k) + ':') || !JA.includes(J(k) + ':'));
-  ok(timeout && keys.length >= 19 && !missing.length, `all ${keys.length} sentences and doors (the verdict's and every one Locate says) have a zh and a ja row`, missing.join(' | '));
+  ok(gateOf(timeout) && keys.length >= 19 && !missing.length, `all ${keys.length} sentences and doors (the verdict's and every one Locate says) have a zh and a ja row`, missing.join(' | '));
   const files = [];
   const walk = (dir) => { for (const e of fs.readdirSync(path.join(REPO, dir), { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (/\.(m?js|cjs|html)$/.test(e.name)) files.push(p); } };
   walk('src');
   const vague = files.filter((f) => /['"`]Entry not visible/.test(fs.readFileSync(path.join(REPO, f), 'utf-8')));   // a string the page could say (code or a dictionary row), not a comment telling the story
   const plant = /['"`]Entry not visible/.test(RELEASE_LOCATE);
-  ok(!vague.length && plant, `the release's «Entry not visible — it may be archived or filtered out» is said nowhere (${files.length} files; the release's own line is caught)`, vague.join(', '));
+  ok(!vague.length && verdictOf(plant), `the release's «Entry not visible — it may be archived or filtered out» is said nowhere (${files.length} files; the release's own line is caught)`, vague.join(', '));
   const L = methodText(LIFE, '  async locateSessionInSidebar(backendSessionId) {');
-  ok(!/\b(alert|confirm|prompt)\(/.test(L) && /showToast\(words, w\.door \? \{ action: \{ label: t\(w\.door\)/.test(L), 'Locate says a hidden row in a toast whose action is its door — no native dialog');
-  ok(/_locateName\?\.\(v\.why, v\.name\)/.test(L) && /if \(why === 'status'\) return \(\{ live: tr\('Live'\)/.test(SIDEBAR) && /if \(why === 'host'\) return id === 'local' \? tr\('Local'\)/.test(SIDEBAR),
+  ok(!/\b(alert|confirm|prompt)\(/.test(L) && verdictOf(/showToast\(words, w\.door \? \{ action: \{ label: t\(w\.door\)/.test(L)), 'Locate says a hidden row in a toast whose action is its door — no native dialog');
+  ok(gateOf(/_locateName\?\.\(v\.why, v\.name\)/.test(L)) && gateOf(/if \(why === 'status'\) return \(\{ live: tr\('Live'\)/.test(SIDEBAR)) && verdictOf(/if \(why === 'host'\) return id === 'local' \? tr\('Local'\)/.test(SIDEBAR)),
     'a status, a view, an agent and a location are named in the words the list\'s own controls show, never a raw id');
   const css = read('public/style.css');
-  ok(/\.session-item-card\.locate-flash \{/.test(css) && !/\.session-card\.locate-flash/.test(css), 'the flash is drawn on the card\'s real class (`.session-item-card.locate-flash`)');
+  ok(gateOf(/\.session-item-card\.locate-flash \{/.test(css)) && !/\.session-card\.locate-flash/.test(css), 'the flash is drawn on the card\'s real class (`.session-item-card.locate-flash`)');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -24,7 +24,7 @@ import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -49,17 +49,17 @@ const TA = PT.mintToken('webhook'), TB = PT.mintToken('webhook');
 const nonce = crypto.randomBytes(16).toString('hex');
 const code = WP.encodeCode({ hook: 'https://a.example/hook/ci', caller: 'c-0a0a0a0a', token: TA, nonce, exp: NOW + WP.CODE_TTL_MS, name: 'Hub A' });
 const dc = WP.decodeCode(code, NOW);
-ok(code.startsWith('vswp_') && !code.includes('vswh_') && dc.ok && dc.token === TA && dc.caller === 'c-0a0a0a0a' && dc.nonce === nonce && dc.name === 'Hub A' && WP.CODE_TTL_MS === 600000, 'a code is vswp_ + base64url, round-trips, lives 10 minutes');
+ok(gateOf(code.startsWith('vswp_')) && !code.includes('vswh_') && gateOf(dc.ok) && dc.token === TA && dc.caller === 'c-0a0a0a0a' && dc.nonce === nonce && dc.name === 'Hub A' && WP.CODE_TTL_MS === 600000, 'a code is vswp_ + base64url, round-trips, lives 10 minutes');
 ok(WP.decodeCode(code.slice(0, -4), NOW).why === 'bad-code' && WP.decodeCode('vswh_' + 'a'.repeat(48), NOW).why === 'caller-token' && WP.decodeCode('hello', NOW).why === 'bad-code' && WP.decodeCode(code, NOW + WP.CODE_TTL_MS + 1).why === 'expired', 'a mangled code ⇒ bad-code; a caller token pasted as a code ⇒ caller-token (the wrong secret, by name); one past its 10 minutes ⇒ expired');
 const hv = WP.hookUrlVerdict('https://x.io/vs/hook/ci');
-ok(hv.ok && hv.pairUrl === 'https://x.io/vs/api/channels/webhook/ci/pair' && WP.hookUrlVerdict('http://127.0.0.1:9/hook/ci').why === 'https-required' && WP.hookUrlVerdict('http://127.0.0.1:9/hook/ci', { allowPrivate: true }).ok
+ok(gateOf(hv.ok) && hv.pairUrl === 'https://x.io/vs/api/channels/webhook/ci/pair' && WP.hookUrlVerdict('http://127.0.0.1:9/hook/ci').why === 'https-required' && gateOf(WP.hookUrlVerdict('http://127.0.0.1:9/hook/ci', { allowPrivate: true }).ok)
   && !WP.hookUrlVerdict('https://u:p@x.io/hook/ci').ok && !WP.hookUrlVerdict('https://x.io/hook/ci?t=1').ok && !WP.hookUrlVerdict('https://x.io/api/x').ok && !WP.hookUrlVerdict('https://x.io/hook/Bad_Slug').ok, 'the hook URL: https (http only with allowPrivate), no credentials / query, ends in /hook/<slug> (a prefix kept in the pair URL)');
 const pend = { slug: 'ci', callerId: 'c-0a0a0a0a', token: TA, nonce, exp: NOW + WP.CODE_TTL_MS, spent: false };
 const frame = (o = {}) => WP.frameOf({ nonce, hookUrl: 'https://b.example/hook/side-a', caller: 'c-0b0b0b0b', token: TB, name: 'Hub B', ...o });
 const heads = (body, o = {}) => ({ ...Object.fromEntries(Object.entries(WP.frameHeaders({ slug: 'ci', callerId: 'c-0a0a0a0a', token: TA, body, now: NOW }, { hmacHex })).map(([k, v]) => [k.toLowerCase(), v])), ...o });
 const V = (o = {}) => { const body = o.body !== undefined ? o.body : frame(); return WP.completionVerdict({ slug: 'ci', headers: o.headers || heads(body), body, now: o.now || NOW, pending: o.pending === undefined ? pend : o.pending, allowPrivate: o.allowPrivate === true }, { hmacHex, safeEqual }); };
 const good = V();
-ok(good.ok && good.frame.caller === 'c-0b0b0b0b' && good.frame.token === TB && good.frame.hookUrl === 'https://b.example/hook/side-a' && good.frame.name === 'Hub B', 'a frame signed with the code\'s token, its nonce, an https hook ⇒ the verdict holds');
+ok(gateOf(good.ok) && good.frame.caller === 'c-0b0b0b0b' && good.frame.token === TB && good.frame.hookUrl === 'https://b.example/hook/side-a' && good.frame.name === 'Hub B', 'a frame signed with the code\'s token, its nonce, an https hook ⇒ the verdict holds');
 const fb = frame();
 const legs = [
   ['no pending code', V({ pending: null }), 'unknown'],
@@ -78,7 +78,7 @@ ok(!spProved.ok && spProved.why === 'spent' && spProved.answer === 'spent' && !s
 const fn = frame({ nonce: 'f'.repeat(32) });
 ok(V({ body: fn, headers: heads(fn) }).why === 'nonce', 'a signed frame with another nonce ⇒ 401 (nonce)');
 const fh = frame({ hookUrl: 'http://b.example/hook/side-a' });
-ok(V({ body: fh, headers: heads(fh) }).why === 'https-required' && V({ body: fh, headers: heads(fh), allowPrivate: true }).ok, 'a signed frame naming an http hook ⇒ 400 https-required (ok with allowPrivateReplyUrl)');
+ok(V({ body: fh, headers: heads(fh) }).why === 'https-required' && verdictOf(V({ body: fh, headers: heads(fh), allowPrivate: true }).ok), 'a signed frame naming an http hook ⇒ 400 https-required (ok with allowPrivateReplyUrl)');
 const ft = frame({ token: 'vsdt_' + 'a'.repeat(36) });
 ok(V({ body: ft, headers: heads(ft) }).why === 'bad-frame', 'a signed frame whose token is not a vswh_ token ⇒ 400 bad-frame');
 // THE ORDER: the verdict before the one write — CONTROL: a mutant that writes first
@@ -87,7 +87,7 @@ const runComplete = (mod, o) => mod.complete({ slug: 'ci', headers: heads(o), bo
 const refusedReal = runComplete(WP, fb);
 const realWrites = writes.length;
 const okReal = WP.complete({ slug: 'ci', headers: heads(fb), body: fb, now: NOW, pending: pend }, { hmacHex, safeEqual, write: (f) => writes.push(f) });
-ok(!refusedReal.ok && realWrites === 0 && okReal.ok && writes.length === 1, 'complete(): a refused frame writes NOTHING; a good one writes once');
+ok(!refusedReal.ok && realWrites === 0 && gateOf(okReal.ok) && writes.length === 1, 'complete(): a refused frame writes NOTHING; a good one writes once');
 const src = fs.readFileSync(path.join(repo, 'src/webhook-pair.js'), 'utf-8');
 const MUT_FROM = '  const v = completionVerdict(input, deps);\n  if (!v.ok) return v;\n  deps.write(v.frame);';
 const MUT_TO = '  deps.write(input.body);\n  const v = completionVerdict(input, deps);\n  if (!v.ok) return v;';
@@ -96,7 +96,7 @@ mm.filename = path.join(repo, 'src', 'webhook-pair.mutant.js'); mm.paths = Modul
 mm._compile(editAnchor(src, MUT_FROM, MUT_TO, "src/webhook-pair.js"), mm.filename);
 writes.length = 0;
 runComplete(mm.exports, fb);
-ok(src.includes(MUT_FROM) && writes.length === 1, 'CONTROL: a mutant complete() that writes before the verdict writes on a REFUSED frame — the leg above turns RED');
+ok(gateOf(src.includes(MUT_FROM)) && writes.length === 1, 'CONTROL: a mutant complete() that writes before the verdict writes on a REFUSED frame — the leg above turns RED');
 /** a copy of a src module with one line replaced, compiled beside the original (its requires resolve the same) */
 function mutant(rel, from, to) {
   const file = path.join(repo, rel), text = fs.readFileSync(file, 'utf-8');
@@ -112,10 +112,10 @@ const leak = earlyV.completionVerdict({ slug: 'ci', headers: heads(fb, forgedSig
 ok(leak.answer === 'spent' && leak.why === 'spent', 'CONTROL: a verdict that names `spent` BEFORE the signature tells an unproven frame — the leg above turns RED', leak);
 const pm = WP.createPending({ max: 2 });
 pm.put({ slug: 'ci', callerId: 'c-00000001', token: TA, nonce }, NOW); pm.put({ slug: 'ci', callerId: 'c-00000002', token: TA, nonce }, NOW); pm.put({ slug: 'ci', callerId: 'c-00000003', token: TA, nonce }, NOW);
-ok(pm.size() === 2 && !pm.get('ci', 'c-00000001', NOW) && pm.get('ci', 'c-00000003', NOW) && !pm.get('ci', 'c-00000003', NOW + WP.CODE_TTL_MS + 1), 'the pending memo is bounded (oldest out) and forgets a code past its 10 minutes');
+ok(pm.size() === 2 && !pm.get('ci', 'c-00000001', NOW) && gateOf(pm.get('ci', 'c-00000003', NOW)) && !pm.get('ci', 'c-00000003', NOW + WP.CODE_TTL_MS + 1), 'the pending memo is bounded (oldest out) and forgets a code past its 10 minutes');
 pm.put({ slug: 'ci', callerId: 'c-00000004', token: TA, nonce }, NOW); pm.spend('ci', 'c-00000004', NOW);
 const sp4 = pm.get('ci', 'c-00000004', NOW);
-ok(sp4 && sp4.spent === true && sp4.spentAt === NOW && !pm.get('ci', 'c-00000004', NOW + WP.CODE_TTL_MS + 1), 'a spent code stays a TOMBSTONE (spent, single use) until its deadline, then it is swept');
+ok(gateOf(sp4) && sp4.spent === true && sp4.spentAt === NOW && !pm.get('ci', 'c-00000004', NOW + WP.CODE_TTL_MS + 1), 'a spent code stays a TOMBSTONE (spent, single use) until its deadline, then it is swept');
 // the store door (lane webhook-pair-join): bind reloads the held rows, sweeps the expired, writes every change through it
 const doorRows = [];
 const door = (rows) => ({ read: () => rows, write: (r) => doorRows.push(r) });
@@ -170,16 +170,16 @@ try {
   ok(mkA.status === 200, 'FIXTURE: A has path ci');
   const agentMint = await A.call('POST', '/api/channels/webhook/paths/ci/pair-code', { headers: { Authorization: 'Bearer vsst_' + 'a'.repeat(30) }, body: {} });
   const agentJoin = await B.call('POST', '/api/channels/webhook/join', { headers: { Authorization: 'Bearer jbt_' + 'b'.repeat(30) }, body: { code: 'x' } });
-  ok(agentMint.status === 403 && agentJoin.status === 403 && agentMint.j.code === 'agent-forbidden' && /vibespace-ask/.test(agentMint.j.error), 'an agent bearer on pair-code / join ⇒ 403 agent-forbidden, the words point at vibespace-ask', [agentMint.status, agentJoin.status]);
+  ok(agentMint.status === 403 && agentJoin.status === 403 && agentMint.j.code === 'agent-forbidden' && verdictOf(/vibespace-ask/.test(agentMint.j.error)), 'an agent bearer on pair-code / join ⇒ 403 agent-forbidden, the words point at vibespace-ask', [agentMint.status, agentJoin.status]);
   const c1 = await A.call('POST', '/api/channels/webhook/paths/ci/pair-code', { body: { name: 'Hub A' } });
-  ok(c1.status === 200 && c1.j.shownOnce === true && c1.j.code.startsWith('vswp_') && /^c-[0-9a-f]{8}$/.test(c1.j.callerId) && c1.j.expiresAt - Date.now() <= WP.CODE_TTL_MS && A.callers('ci').length === 0, 'A mints ONE code (shown once, 10 min) — nothing is written on A yet', c1.t.slice(0, 200));
+  ok(c1.status === 200 && c1.j.shownOnce === true && gateOf(c1.j.code.startsWith('vswp_')) && gateOf(/^c-[0-9a-f]{8}$/.test(c1.j.callerId)) && c1.j.expiresAt - Date.now() <= WP.CODE_TTL_MS && A.callers('ci').length === 0, 'A mints ONE code (shown once, 10 min) — nothing is written on A yet', c1.t.slice(0, 200));
   const j1 = await B.call('POST', '/api/channels/webhook/join', { body: { code: c1.j.code, slug: 'side-a', name: 'Hub B' } });
   const aRow = A.callers('ci')[0] || {}, bRow = B.callers('side-a')[0] || {};
   ok(j1.status === 200 && aRow.id === c1.j.callerId && aRow.kind === 'peer' && aRow.name === 'Hub B' && aRow.delivery.mode === 'reply-url' && aRow.delivery.replyUrl === `http://127.0.0.1:${B.port}/hook/side-a` && aRow.outCaller === bRow.id && aRow.generation === 1, 'B joins ⇒ A stores B as a `peer` caller (delivery reply-url = B\'s hook URL, generation 1)', { j1: j1.t.slice(0, 200), aRow });
   ok(bRow.kind === 'peer' && bRow.name === 'Hub A' && bRow.delivery.replyUrl === `http://127.0.0.1:${A.port}/hook/ci` && bRow.outCaller === aRow.id && !JSON.stringify(j1.j).match(/vsw[hp]_/), 'B made path side-a + a `peer` caller for A (A\'s hook URL); the join answer carries no token');
   const TAB = A.eng.secrets.open(aRow.tokenEnc), TBA = B.eng.secrets.open(bRow.tokenEnc);
   const again = await B.call('POST', '/api/channels/webhook/join', { body: { code: c1.j.code, slug: 'side-a2' } });
-  ok(again.status === 502 && again.j.code === 'code-used' && /^Hub A says this code was already used/.test(again.j.error) && !B.callers('side-a2').length && A.callers('ci').length === 1 && A.callers('ci')[0].generation === 1, 'the SAME code a second time ⇒ A answers 409 (spent, to a frame that proves the code), B says "Hub A says this code was already used" and writes nothing, A unchanged', again.t.slice(0, 200));
+  ok(again.status === 502 && again.j.code === 'code-used' && gateOf(/^Hub A says this code was already used/.test(again.j.error)) && !B.callers('side-a2').length && A.callers('ci').length === 1 && A.callers('ci')[0].generation === 1, 'the SAME code a second time ⇒ A answers 409 (spent, to a frame that proves the code), B says "Hub A says this code was already used" and writes nothing, A unchanged', again.t.slice(0, 200));
   const fr = WP.frameOf({ nonce: WP.decodeCode(c1.j.code, Date.now()).nonce, hookUrl: `http://127.0.0.1:${B.port}/hook/x`, caller: 'c-0d0d0d0d', token: PT.mintToken('webhook'), name: 'thief' });
   const replay = await A.call('POST', '/api/channels/webhook/ci/pair', { headers: WP.frameHeaders({ slug: 'ci', callerId: c1.j.callerId, token: TAB, body: fr, now: Date.now() }, { hmacHex }), body: fr });
   const forged = await A.call('POST', '/api/channels/webhook/ci/pair', { headers: WP.frameHeaders({ slug: 'ci', callerId: c1.j.callerId, token: PT.mintToken('webhook'), body: fr, now: Date.now() }, { hmacHex }), body: fr });
@@ -192,14 +192,14 @@ try {
   const pb = WP.peerBody({ text: 'B says hi', threadKey: 'th-1', name: 'spoofed name' });
   const pc = await A.call('POST', '/hook/ci', { headers: { ...signedHook('ci', pb, TAB, aRow.id), 'X-VibeSpace-Peer-Version': '1' }, body: pb });
   const recA = A.eng.store.readTail('webhook', 'ci', { limit: 5 }).find((r) => r.text === 'B says hi');
-  ok(pc.status === 200 && recA && recA.author.id === `caller:${aRow.id}` && recA.author.name === 'Hub B' && recA.threadKey === 'th-1' && (recA.facts || []).some((f) => f.k === 'sender' && f.v.name === 'spoofed name'), 'a peer call ⇒ a record authored by the REGISTERED peer (from.name only a fact), threadKey kept', recA);
+  ok(pc.status === 200 && gateOf(recA) && recA.author.id === `caller:${aRow.id}` && recA.author.name === 'Hub B' && recA.threadKey === 'th-1' && verdictOf((recA.facts || []).some((f) => f.k === 'sender' && f.v.name === 'spoofed name')), 'a peer call ⇒ a record authored by the REGISTERED peer (from.name only a fact), threadKey kept', recA);
   const pv2 = await A.call('POST', '/hook/ci', { headers: { ...signedHook('ci', pb.replace('hi', 'hey'), TAB, aRow.id), 'X-VibeSpace-Peer-Version': '2' }, body: pb.replace('hi', 'hey') });
   ok(pv2.status !== 200, 'a peer call of another payload version ⇒ refused');
   // A → B: a send to the peer lands on B as a record by B's peer row for A
   const send = await A.eng.composeEach({ kind: 'user' }, 'webhook', 'ci', { text: 'A answers', recipients: [aRow.id] });
   let recB = null;
   for (let i = 0; i < 100 && !recB; i++) { recB = B.eng.store.readTail('webhook', 'side-a', { limit: 5 }).find((r) => r.text === 'A answers'); if (!recB) await new Promise((r) => setTimeout(r, 20)); }
-  ok(send.ok && recB && recB.author.id === `caller:${bRow.id}` && recB.author.name === 'Hub A', 'A → B: the send lands on B as a record authored by B\'s peer row for A', { send: send.ok || send.error, recB });
+  ok(gateOf(send.ok) && gateOf(recB) && recB.author.id === `caller:${bRow.id}` && recB.author.name === 'Hub A', 'A → B: the send lands on B as a record authored by B\'s peer row for A', { send: send.ok || send.error, recB });
   // expiry: on B (the code read) and on A (the completion)
   const c2 = await A.call('POST', '/api/channels/webhook/paths/ci/pair-code', { body: {} });
   B.skew(WP.CODE_TTL_MS + 1000);
@@ -209,7 +209,7 @@ try {
   A.skew(WP.CODE_TTL_MS + 1000);
   const lateA = await B.call('POST', '/api/channels/webhook/join', { body: { code: c2.j.code, slug: 'late' } });
   A.skew(0);
-  ok(lateA.status === 502 && lateA.j.code === 'code-unknown' && /does not know this code/.test(lateA.j.error) && !B.callers('late').length && A.callers('ci').length === 1, 'the same code reaching A after its 10 minutes ⇒ A answers 401, B says it does not know this code (by name), nothing is written on either side', lateA.j);
+  ok(lateA.status === 502 && lateA.j.code === 'code-unknown' && gateOf(/does not know this code/.test(lateA.j.error)) && !B.callers('late').length && A.callers('ci').length === 1, 'the same code reaching A after its 10 minutes ⇒ A answers 401, B says it does not know this code (by name), nothing is written on either side', lateA.j);
   // http refused without allowPrivateReplyUrl (both doors)
   A.settings['webhook.allowPrivateReplyUrl'] = false;
   const mintHttp = await A.call('POST', '/api/channels/webhook/paths/ci/pair-code', { body: {} });
@@ -285,7 +285,7 @@ try {
   const d1 = WP.decodeCode(k1.j && k1.j.code, Date.now());
   SECRETS.push(k1.j.code, d1.token);
   const f1 = readPF(A1), ftext = fs.readFileSync(PF(A1), 'utf-8');
-  ok(k1.status === 200 && f1 && f1.rows.length === 1 && f1.rows[0].callerId === k1.j.callerId && f1.rows[0].exp === k1.j.expiresAt && f1.rows[0].mintedAt === k1.j.expiresAt - WP.CODE_TTL_MS && f1.rows[0].name === 'Hub A' && f1.rows[0].spent === false
+  ok(k1.status === 200 && gateOf(f1) && f1.rows.length === 1 && f1.rows[0].callerId === k1.j.callerId && f1.rows[0].exp === k1.j.expiresAt && f1.rows[0].mintedAt === k1.j.expiresAt - WP.CODE_TTL_MS && f1.rows[0].name === 'Hub A' && f1.rows[0].spent === false
     && (fs.statSync(PF(A1)).mode & 0o777) === 0o600 && !ftext.includes(d1.token) && !ftext.includes(k1.j.code) && A1.eng.secrets.open(f1.rows[0].tokenEnc) === d1.token,
   'the mint writes the pending half (0600): mint time, deadline, caller id, name — the token SEALED; neither the token nor the code in the clear', f1);
   await getPaths(A1);
@@ -302,34 +302,34 @@ try {
     'A RESTARTED inside the 10 minutes: the code still pairs — B joins, the new A process stores B as its peer (and B stores A)', j1.t.slice(0, 300));
   SECRETS.push(A2.eng.secrets.open(a2Row.tokenEnc), B3.eng.secrets.open(b3Row.tokenEnc));
   const f2 = readPF(A2);
-  ok(f2 && f2.rows.length === 1 && f2.rows[0].spent === true && Number.isFinite(f2.rows[0].spentAt) && typeof f2.rows[0].tokenEnc === 'string', 'the used code stays a sealed TOMBSTONE (spent) until its deadline', f2);
+  ok(gateOf(f2) && f2.rows.length === 1 && f2.rows[0].spent === true && gateOf(Number.isFinite(f2.rows[0].spentAt)) && typeof f2.rows[0].tokenEnc === 'string', 'the used code stays a sealed TOMBSTONE (spent) until its deadline', f2);
   const j2 = await B3.call('POST', '/api/channels/webhook/join', { body: { code: k1.j.code, slug: 'hub-a' } });
-  ok(j2.status === 502 && j2.j.code === 'code-used' && /^Hub A says this code was already used/.test(j2.j.error) && B3.callers('hub-a').length === 1 && B3.callers('hub-a')[0].generation === 1 && A2.callers('ci')[0].generation === 1,
+  ok(j2.status === 502 && j2.j.code === 'code-used' && gateOf(/^Hub A says this code was already used/.test(j2.j.error)) && B3.callers('hub-a').length === 1 && B3.callers('hub-a')[0].generation === 1 && A2.callers('ci')[0].generation === 1,
     'the same code again (after the restart too) ⇒ "Hub A says this code was already used" — by name, nothing written on either side', j2.j);
   // the join's other names: not a code / a caller token (the wrong secret) / an ALTERED code (A cannot verify it)
   const bc = await B3.call('POST', '/api/channels/webhook/join', { body: { code: 'hello', check: true } });
   const ct = await B3.call('POST', '/api/channels/webhook/join', { body: { code: PT.mintToken('webhook') } });
-  ok(bc.status === 400 && bc.j.code === 'bad-code' && /not a VibeSpace pairing code/.test(bc.j.error) && ct.status === 400 && ct.j.code === 'caller-token' && /caller token \(vswh_…\), not a pairing code/.test(ct.j.error),
+  ok(bc.status === 400 && bc.j.code === 'bad-code' && gateOf(/not a VibeSpace pairing code/.test(bc.j.error)) && ct.status === 400 && ct.j.code === 'caller-token' && verdictOf(/caller token \(vswh_…\), not a pairing code/.test(ct.j.error)),
     'a pasted non-code ⇒ "not a VibeSpace pairing code"; a caller TOKEN pasted ⇒ "that is a caller token, not a pairing code" (by name, nothing posted)', [bc.j, ct.j]);
   const k2 = await A2.call('POST', '/api/channels/webhook/paths/ci/pair-code', { body: { name: 'Hub A' } });
   const d2 = WP.decodeCode(k2.j.code, Date.now());
   SECRETS.push(k2.j.code, d2.token);
   const altered = WP.encodeCode({ hook: d2.hook, caller: d2.caller, token: PT.mintToken('webhook'), nonce: d2.nonce, exp: d2.exp, name: d2.name });
   const ja = await B3.call('POST', '/api/channels/webhook/join', { body: { code: altered, slug: 'altered' } });
-  ok(ja.status === 502 && ja.j.code === 'code-unknown' && /^Hub A does not know this code/.test(ja.j.error) && !B3.callers('altered').length && readPF(A2).rows.find((r) => r.callerId === d2.caller).spent === false,
+  ok(ja.status === 502 && ja.j.code === 'code-unknown' && gateOf(/^Hub A does not know this code/.test(ja.j.error)) && !B3.callers('altered').length && readPF(A2).rows.find((r) => r.callerId === d2.caller).spent === false,
     'an ALTERED code (another secret inside) ⇒ A refuses the unproven frame with its same-shape 401; B says "Hub A does not know this code"; A\'s real code stays unspent', ja.j);
   await getPaths(A2); await getPaths(B3);
   // past the deadline: a restart sweeps every row (the tombstone and the pending code) — nothing sealed is left
   await A2.halt();
   A3 = await instance('a3', S3(), { dataDir: A1.dataDir, port: A1.port, skew: WP.CODE_TTL_MS + 1000 });
   const f3 = readPF(A3);
-  ok(f3 && Array.isArray(f3.rows) && f3.rows.length === 0, 'a restart PAST the deadline sweeps both rows (spent + pending) — the file keeps no row, no ciphertext', f3);
+  ok(gateOf(f3) && gateOf(Array.isArray(f3.rows)) && f3.rows.length === 0, 'a restart PAST the deadline sweeps both rows (spent + pending) — the file keeps no row, no ciphertext', f3);
   const j3 = await B3.call('POST', '/api/channels/webhook/join', { body: { code: k2.j.code, slug: 'late' } });
   ok(j3.status === 502 && j3.j.code === 'code-unknown' && !B3.callers('late').length, '…a code B still believes in (its clock) ⇒ "Hub A does not know this code" by name, nothing written', j3.j);
   B3.skew(WP.CODE_TTL_MS + 1000);
   const j4 = await B3.call('POST', '/api/channels/webhook/join', { body: { code: k2.j.code, slug: 'late', check: true } });
   B3.skew(0);
-  ok(j4.status === 400 && j4.j.code === 'expired' && /has expired \(a code lives 10 minutes\)/.test(j4.j.error), 'B\'s own clock past the deadline ⇒ "that pairing code has expired" by name (the paste box says it before any post)', j4.j);
+  ok(j4.status === 400 && j4.j.code === 'expired' && verdictOf(/has expired \(a code lives 10 minutes\)/.test(j4.j.error)), 'B\'s own clock past the deadline ⇒ "that pairing code has expired" by name (the paste box says it before any post)', j4.j);
   // CONTROL: the same restart over routes that keep the memo in MEMORY ⇒ the code dies with the process (the restart leg RED)
   const k5 = await A3.call('POST', '/api/channels/webhook/paths/ci/pair-code', { body: { name: 'Hub A' } });
   SECRETS.push(k5.j.code);
@@ -346,7 +346,7 @@ try {
   walk(A1.dataDir); walk(B3.dataDir);
   const fileHits = files.filter((f) => leaks(fs.readFileSync(f, 'latin1')));
   const bcs = JSON.stringify([A1.bc, A2.bc, A3.bc, AM.bc, B3.bc]);
-  ok(SECRETS.length >= 7 && gets.length >= 5 && !gets.some(leaks) && !leaks(bcs) && bcs.length > 50 && !leaks(warns.join('\n')) && !fileHits.length && files.some((f) => f.endsWith('pair-pending.json')),
+  ok(SECRETS.length >= 7 && gets.length >= 5 && !gets.some(leaks) && !leaks(bcs) && bcs.length > 50 && !leaks(warns.join('\n')) && !fileHits.length && verdictOf(files.some((f) => f.endsWith('pair-pending.json'))),
     `the census: no code and no token in a GET answer (${gets.length}), a broadcast (${bcs.length} B), a warning, or any of the ${files.length} files under both data dirs (pair-pending.json included)`, { fileHits, gets: gets.filter(leaks).length });
   const DOOR_FROM = 'rows.map(({ token, ...r }) => ({ ...r, tokenEnc: secrets.seal(token) }))';
   const clear = mutant('src/channels/webhook.js', DOOR_FROM, 'rows.map(({ token, ...r }) => ({ ...r, tokenEnc: token }))');
@@ -363,4 +363,4 @@ finally {
 }
 function signedHook(slug, b, tok, id) { const t = String(Math.floor(Date.now() / 1000)); return { 'Content-Type': 'application/json', 'X-Webhook-Caller': id, 'X-Webhook-Timestamp': t, 'X-Webhook-Signature': 'v1=' + hmacHex(tok, WA.signatureBase(t, '/hook/' + slug, b)) }; }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

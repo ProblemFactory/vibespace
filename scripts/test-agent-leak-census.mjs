@@ -77,7 +77,7 @@ const TABLE = JSON.parse(fs.readFileSync(path.join(REPO, TABLE_REL), 'utf-8'));
 let pass = 0, fail = 0;
 // each part's own time, said (the hosted fast job warned of 12.3 s over the tier's 10 s, 2.369.410's close): said, never judged
 const lap = (() => { let t = performance.now(); return (what) => { const n = performance.now(); console.log(`    (${what}: ${Math.round(n - t)} ms)`); t = n; }; })();
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1600) : '')); } };
 const READ = new Map();
 const readRepo = (f) => { if (!READ.has(f)) READ.set(f, fs.readFileSync(path.join(REPO, f), 'utf-8')); return READ.get(f); };
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
@@ -291,7 +291,7 @@ ok(!C.unplaced.length, 'every next() the middleware calls sits in a door the cen
 ok(!C.doorUnclassified.length, 'every door is classified in the table (`bearer` or `other: <why>`)', C.doorUnclassified.length ? 'NEW — add each to ' + TABLE_REL + ' doors: ' + C.doorUnclassified.join(' | ') : '');
 ok(!C.doorDead.length && !C.doorReasonless.length, 'no dead door row, no `other` without its why', [...C.doorDead.map((c) => 'DEAD ' + c), ...C.doorReasonless.map((c) => 'NO WHY ' + c)].join(' | '));
 ok(!C.bearerUnreadable.length && C.bearerDoors.length >= 2, `every bearer door is a path test the census reads (${C.bearerDoors.map((d) => (d.test.kind === 'prefix' ? d.test.path + '*' : d.test.path)).join(', ')})`, C.bearerUnreadable.join(' | '));
-ok(C.bearerDoors.some((d) => d.test.kind === 'prefix' && d.test.path === '/api/agent/'), 'the agent prefix /api/agent/ is a bearer door');
+ok(verdictOf(C.bearerDoors.some((d) => d.test.kind === 'prefix' && d.test.path === '/api/agent/')), 'the agent prefix /api/agent/ is a bearer door');
 if (C.doors.some((d) => d.cond === '!enabled')) console.log('    said, not swept: on a hub nobody signs in to (`!enabled`, the door class), every route is open to any caller — this census reads the signed-in hub');
 {
   // THE CLASSES THE GATE LETS THROUGH ARE PINNED (主开发 r1341 4): src/auth.js PASSES is exactly door / open / login — the three this
@@ -305,7 +305,7 @@ if (C.doors.some((d) => d.cond === '!enabled')) console.log('    said, not swept
     return { ok: JSON.stringify(passes) === JSON.stringify(['door', 'login', 'open']) && !!body && [...returned].every((r) => ['OPEN', 'LOGIN', 'PAGE'].includes(r)), passes, returned: [...returned].sort() };
   };
   const A = readRepo('src/auth.js'), D = readRepo('src/door.js'), real = passPin(A, D);
-  ok(real.ok, `the gate lets through exactly ${real.passes.join(' / ')} (src/auth.js PASSES), and the door class returns no pass class but through next() / OPEN / LOGIN (it returns ${real.returned.join(', ')})`, real);
+  ok(verdictOf(real.ok), `the gate lets through exactly ${real.passes.join(' / ')} (src/auth.js PASSES), and the door class returns no pass class but through next() / OPEN / LOGIN (it returns ${real.returned.join(', ')})`, real);
   const fourth = passPin(A.replace("new Set(['door', 'open', 'login'])", "new Set(['door', 'open', 'login', 'page'])"), D);
   const asDoor = passPin(A, D.replace("if (p.startsWith('/api/agent/')) return next();", "if (p.startsWith('/api/agent/')) return DOOR;"));
   ok(!fourth.ok && !asDoor.ok, `CONTROLS: a fourth class in PASSES (${fourth.passes.join(', ')}) and a door returned as DOOR (${asDoor.returned.join(', ')}) are each RED`, { fourth, asDoor });
@@ -337,14 +337,14 @@ const overlay = (over) => (f) => (has(over, f) ? over[f] : readRepo(f));
   ok(at > 0, 'the agent door is found in src/door.js (the controls\' anchor)');
   const planted = auth.slice(0, at) + "if (p.startsWith('/api/planted/')) return next();\n      " + auth.slice(at);
   const c1 = census({ files: FILES, read: overlay({ 'src/door.js': planted }), table: TABLE });
-  ok(c1.doorUnclassified.length === 1 && /\/api\/planted\//.test(c1.doorUnclassified[0]), 'CONTROL: a planted door the table does not name ⇒ RED (unclassified)', c1.doorUnclassified);
+  ok(c1.doorUnclassified.length === 1 && verdictOf(/\/api\/planted\//.test(c1.doorUnclassified[0])), 'CONTROL: a planted door the table does not name ⇒ RED (unclassified)', c1.doorUnclassified);
   const c1b = census({ files: FILES, read: overlay({ 'src/door.js': planted }), table: { ...TABLE, doors: { ...TABLE.doors, "p.startsWith('/api/planted/')": 'bearer' } } });
-  ok(c1b.bearerDoors.some((d) => d.test.path === '/api/planted/') && !c1b.doorUnclassified.length, 'CONTROL: classified `bearer`, the planted door joins the sweep\'s doors');
+  ok(gateOf(c1b.bearerDoors.some((d) => d.test.path === '/api/planted/')) && !c1b.doorUnclassified.length, 'CONTROL: classified `bearer`, the planted door joins the sweep\'s doors');
   const c1c = census({ files: FILES, read: overlay({ 'src/door.js': planted.replace("if (p.startsWith('/api/planted/'))", "if (/^\\/api\\/planted\\//.test(p))") }), table: { ...TABLE, doors: { ...TABLE.doors, '/^\\/api\\/planted\\//.test(p)': 'bearer' } } });
   ok(c1c.bearerUnreadable.length === 1, 'CONTROL: a `bearer` door written as a regex the census cannot read ⇒ RED', c1c.bearerUnreadable);
   const blockDoor = auth.slice(0, at) + "if (p.startsWith('/api/planted-block/')) { req.planted = 1; return next(); }\n      if (p === '/api/planted-tail') { next(); return; }\n      " + auth.slice(at);
   const c1d = census({ files: FILES, read: overlay({ 'src/door.js': blockDoor }), table: TABLE });
-  ok(c1d.doorUnclassified.length === 2 && c1d.doorUnclassified.every((x) => /planted-(block|tail)/.test(x)), 'CONTROL: a door written as a block with more statements, and one as `next(); return;` ⇒ each read and RED (unclassified)', c1d.doorUnclassified);
+  ok(c1d.doorUnclassified.length === 2 && verdictOf(c1d.doorUnclassified.every((x) => /planted-(block|tail)/.test(x))), 'CONTROL: a door written as a block with more statements, and one as `next(); return;` ⇒ each read and RED (unclassified)', c1d.doorUnclassified);
   const loose = auth.slice(0, at) + "p === '/api/planted-loose' && next();\n      " + auth.slice(at);
   const c1e = census({ files: FILES, read: overlay({ 'src/door.js': loose }), table: TABLE });
   ok(c1e.unplaced.length === 1, 'CONTROL: a next() no door holds (`cond && next()`) ⇒ RED (unplaced)', c1e.unplaced);
@@ -354,33 +354,33 @@ const overlay = (over) => (f) => (has(over, f) ? over[f] : readRepo(f));
   const vault = readRepo('src/routes/vault.js');
   const anchor = vault.indexOf('function registerVaultRoutes(');
   const body = vault.indexOf('}) {', anchor) + 4;   // the function body's first byte (after the destructured parameter list)
-  ok(anchor > 0 && body > anchor && /^\n  app\.use\(\['\/api\/vault'/.test(vault.slice(body)), 'registerVaultRoutes\'s body is found (the controls\' anchor: its first statement)');
+  ok(anchor > 0 && body > anchor && verdictOf(/^\n  app\.use\(\['\/api\/vault'/.test(vault.slice(body))), 'registerVaultRoutes\'s body is found (the controls\' anchor: its first statement)');
   const dyn = vault.slice(0, body) + "\n  app.get(PLANTED_PATH, (req, res) => res.json({}));" + vault.slice(body);
   const c2 = census({ files: FILES, read: overlay({ 'src/routes/vault.js': dyn }), table: TABLE });
-  ok(c2.dynamicUnrowed.length === 1 && /PLANTED_PATH/.test(c2.dynamicUnrowed[0]), 'CONTROL: a route whose path is no literal and no row ⇒ RED', c2.dynamicUnrowed);
+  ok(c2.dynamicUnrowed.length === 1 && verdictOf(/PLANTED_PATH/.test(c2.dynamicUnrowed[0])), 'CONTROL: a route whose path is no literal and no row ⇒ RED', c2.dynamicUnrowed);
   const lit = vault.slice(0, body) + "\n  const PLANTED = '/api/agent/planted-const';\n  app.get(PLANTED, (req, res) => res.json({}));" + vault.slice(body);
   const c3 = census({ files: FILES, read: overlay({ 'src/routes/vault.js': lit }), table: TABLE });
-  ok(c3.routes.some((r) => r.path === '/api/agent/planted-const' && r.file === 'src/routes/vault.js'), 'CONTROL: a route whose path is a same-file const is read as a bearer route');
+  ok(verdictOf(c3.routes.some((r) => r.path === '/api/agent/planted-const' && r.file === 'src/routes/vault.js')), 'CONTROL: a route whose path is a same-file const is read as a bearer route');
   const lone = "'use strict';\nmodule.exports = (app) => { app.post('/api/agent/planted-lone', (req, res) => res.json({})); };\n";
   const c4 = census({ files: [...FILES, 'src/server/planted-lone.js'], read: overlay({ 'src/server/planted-lone.js': lone }), table: TABLE });
-  ok(c4.unreached.includes('src/server/planted-lone.js'), 'CONTROL: a bearer route in a module the hub never loads ⇒ RED (unreached)', c4.unreached);
+  ok(verdictOf(c4.unreached.includes('src/server/planted-lone.js')), 'CONTROL: a bearer route in a module the hub never loads ⇒ RED (unreached)', c4.unreached);
   const c5 = census({ files: FILES, read: readRepo, table: { ...TABLE, routes: { ...(TABLE.routes || {}), 'GET /api/agent/planted-dead': { skip: 'x' }, [`${C.routes[0].method} ${C.routes[0].path}`]: { skip: ' ' } } } });
-  ok(c5.routeDead.includes('GET /api/agent/planted-dead') && c5.routeReasonless.length === 1, 'CONTROL: a routes row no route answers ⇒ DEAD, a skip with a blank why ⇒ RED', [c5.routeDead, c5.routeReasonless]);
+  ok(gateOf(c5.routeDead.includes('GET /api/agent/planted-dead')) && c5.routeReasonless.length === 1, 'CONTROL: a routes row no route answers ⇒ DEAD, a skip with a blank why ⇒ RED', [c5.routeDead, c5.routeReasonless]);
   // a computed bearer path rowed `bearer:` joins the sweep; rowed with anything else it is RED
   const dyn2 = vault.slice(0, body) + "\n  app.get(PLANTED_PATH, (req, res) => res.json({}));" + vault.slice(body);
   const k2 = 'src/routes/vault.js app.get(PLANTED_PATH)';
   const c6 = census({ files: FILES, read: overlay({ 'src/routes/vault.js': dyn2 }), table: { ...TABLE, dynamic: { ...TABLE.dynamic, [k2]: 'bearer: GET /api/agent/planted-computed' } } });
-  ok(!c6.dynamicUnrowed.length && !c6.dynamicReasonless.length && c6.routes.some((r) => r.path === '/api/agent/planted-computed' && r.file === 'src/routes/vault.js'), 'CONTROL: a computed path rowed `bearer: GET /api/agent/…` joins the bearer routes', c6.dynamicReasonless);
+  ok(!c6.dynamicUnrowed.length && !c6.dynamicReasonless.length && verdictOf(c6.routes.some((r) => r.path === '/api/agent/planted-computed' && r.file === 'src/routes/vault.js')), 'CONTROL: a computed path rowed `bearer: GET /api/agent/…` joins the bearer routes', c6.dynamicReasonless);
   const c7 = census({ files: FILES, read: overlay({ 'src/routes/vault.js': dyn2 }), table: { ...TABLE, dynamic: { ...TABLE.dynamic, [k2]: 'a computed path, fine' } } });
-  ok(c7.dynamicReasonless.includes(k2), 'CONTROL: a dynamic row that is neither `other: <why>` nor `bearer: <METHOD path>` ⇒ RED', c7.dynamicReasonless);
+  ok(verdictOf(c7.dynamicReasonless.includes(k2)), 'CONTROL: a dynamic row that is neither `other: <why>` nor `bearer: <METHOD path>` ⇒ RED', c7.dynamicReasonless);
   const belt = vault.slice(0, body) + "\n  app.use('/api/agent/planted-belt', (req, res, next) => next());" + vault.slice(body);
   const c8 = census({ files: FILES, read: overlay({ 'src/routes/vault.js': belt }), table: TABLE });
-  ok(c8.beltUnrowed.length === 1 && /planted-belt/.test(c8.beltUnrowed[0]), 'CONTROL: a new belt under a bearer door with no `belts` row ⇒ RED', c8.beltUnrowed);
+  ok(c8.beltUnrowed.length === 1 && verdictOf(/planted-belt/.test(c8.beltUnrowed[0])), 'CONTROL: a new belt under a bearer door with no `belts` row ⇒ RED', c8.beltUnrowed);
   const other = "'use strict';\nmodule.exports = (a) => { a.post('/api/agent/planted-recv', (req, res) => res.json({})); };\n";
   const c9 = census({ files: [...FILES, 'src/server/planted-recv.js'], read: overlay({ 'src/server/planted-recv.js': other }), table: TABLE });
-  ok(c9.routes.some((r) => r.path === '/api/agent/planted-recv'), 'CONTROL: a route on another receiver (`a.post(\'/api/agent/…\', h)`) is read');
+  ok(verdictOf(c9.routes.some((r) => r.path === '/api/agent/planted-recv')), 'CONTROL: a route on another receiver (`a.post(\'/api/agent/…\', h)`) is read');
   const c10 = census({ files: FILES, read: overlay({ 'src/routes/vault.js': vault + '\n)(' }), table: TABLE });
-  ok(c10.unparsed.includes('src/routes/vault.js'), 'CONTROL: a hub file that does not parse ⇒ RED (unparsed)', c10.unparsed);
+  ok(verdictOf(c10.unparsed.includes('src/routes/vault.js')), 'CONTROL: a hub file that does not parse ⇒ RED (unparsed)', c10.unparsed);
 }
 {
   // a dead or blank row of each table kind (the table planted, the tree as it is)
@@ -392,9 +392,9 @@ const overlay = (over) => (f) => (has(over, f) ? over[f] : readRepo(f));
   const k = Object.keys(t.belts).find((x) => x.startsWith('/api/agent/vault '));
   t.belts[k] = '';
   const c = census({ files: FILES, read: readRepo, table: t });
-  ok(c.doorDead.includes("p === '/api/planted-dead-door'") && c.doorReasonless.includes("p.startsWith('/otel/')"), 'CONTROL: a door row no door has ⇒ DEAD, an `other:` with no why ⇒ RED', [c.doorDead, c.doorReasonless]);
-  ok(c.dynamicDead.includes('src/planted.js app.get(NOPE)'), 'CONTROL: a dynamic row no registration has ⇒ DEAD', c.dynamicDead);
-  ok(c.beltDead.includes('/api/agent/planted-dead-belt src/routes/vault.js') && c.beltReasonless.includes(k), 'CONTROL: a belt row no belt has ⇒ DEAD, a belt row with no why ⇒ RED', [c.beltDead, c.beltReasonless]);
+  ok(gateOf(c.doorDead.includes("p === '/api/planted-dead-door'")) && verdictOf(c.doorReasonless.includes("p.startsWith('/otel/')")), 'CONTROL: a door row no door has ⇒ DEAD, an `other:` with no why ⇒ RED', [c.doorDead, c.doorReasonless]);
+  ok(verdictOf(c.dynamicDead.includes('src/planted.js app.get(NOPE)')), 'CONTROL: a dynamic row no registration has ⇒ DEAD', c.dynamicDead);
+  ok(gateOf(c.beltDead.includes('/api/agent/planted-dead-belt src/routes/vault.js')) && verdictOf(c.beltReasonless.includes(k)), 'CONTROL: a belt row no belt has ⇒ DEAD, a belt row with no why ⇒ RED', [c.beltDead, c.beltReasonless]);
 }
 
 // ── ⑤–⑦ THE WORLD (U2): the hub's REAL wiring, mounted in-process ─────────────────────────────────────────────────
@@ -957,8 +957,8 @@ const vaultUp = await VAULT.setup(VAULT_PW);
 const putB = VAULT.secretPut('apikey:census-b', SENT.secret, { actor: 'owner' });
 const LOGIN_ORIGIN = 'https://census-login.example';
 const loginB = W0.made.get('src/server/mounts-plugins-wiring.js:browserLogins').addOwn({ origin: LOGIN_ORIGIN, username: SENT.loginUser, password: SENT.loginPass });
-ok(plant.every(([, r]) => r.status >= 200 && r.status < 300) && jobA && jobB && TJA && TJB, 'the planting runs through the real routes (B\'s progress, B\'s and A\'s jobs — the real jobs engine, its spawn stubbed)', plant.map(([n, r]) => `${n} → ${r.status} ${r.text.slice(0, 160)}`).join(' | '));
-ok(vaultUp && vaultUp.ok && putB && putB.ok !== false && loginB && loginB.ok !== false, 'the vault is set up and holds B\'s secret and an ungranted website login (the real engine and the real web-login door)', JSON.stringify({ vaultUp, putB, loginB }).slice(0, 400));
+ok(gateOf(plant.every(([, r]) => r.status >= 200 && r.status < 300)) && gateOf(jobA) && gateOf(jobB) && gateOf(TJA) && verdictOf(TJB), 'the planting runs through the real routes (B\'s progress, B\'s and A\'s jobs — the real jobs engine, its spawn stubbed)', plant.map(([n, r]) => `${n} → ${r.status} ${r.text.slice(0, 160)}`).join(' | '));
+ok(gateOf(vaultUp) && gateOf(vaultUp.ok) && gateOf(putB) && putB.ok !== false && gateOf(loginB) && loginB.ok !== false, 'the vault is set up and holds B\'s secret and an ungranted website login (the real engine and the real web-login door)', JSON.stringify({ vaultUp, putB, loginB }).slice(0, 400));
 const TOKENS = { bToken: TB, bJobToken: TJB };
 const B_REF = {};   // `$B.<key>` in a row's body: B's planted things, by the ids the real writers gave them
 const pageB = (() => { try { return JSON.parse(plant.find(([n]) => /B's page/.test(n))[1].text); } catch { return null; } })();
@@ -969,7 +969,7 @@ const UT = W0.made.get('server.js:userTodos');
 const chanIdOf = (needle) => (UT.idsWhere((i) => i && i.sessionKey === 'channels' && JSON.stringify([i.text, i.detail, i.i18n]).includes(needle)) || [])[0] || null;
 const chanSwapId = chanIdOf(SENT.chanLabel), chanLandId = chanIdOf(SENT.chanUser);
 ok(!!(chanSwapId && chanLandId && JSON.stringify(UT.get(chanSwapId).i18n).includes(SENT.chanLabel) && JSON.stringify(UT.get(chanLandId).i18n).includes(SENT.chanUser)), 'the owner\'s two channels items are planted through the real For-you writer (the account names in their words and i18n params)', JSON.stringify({ swap: chanSwapId, landed: chanLandId }));
-ok(Object.values(B_REF).every((v) => typeof v === 'string' && v.length > 3), 'B\'s planted things have the ids their real writers gave them (group, conversation, job, page, For-you item, feedback report)', JSON.stringify(B_REF));
+ok(verdictOf(Object.values(B_REF).every((v) => typeof v === 'string' && v.length > 3)), 'B\'s planted things have the ids their real writers gave them (group, conversation, job, page, For-you item, feedback report)', JSON.stringify(B_REF));
 const NEEDLES = [];
 for (const [k, v] of Object.entries({ ...SENT, ...TOKENS })) {
   if (!v) continue;
@@ -1042,7 +1042,7 @@ const AKEYS = require(path.join(REPO, 'src/automation-keys.js'));
 const reopened = await VAULT.unlock(VAULT_PW);   // the sweep's last write locked it (an agent may)
 const minted = AE.mint({ name: 'census-key', scopes: [...AKEYS.VERBS], limits: { cwdRoots: [CWD_A], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] }, by: 'census' });   // its opens may land in A's folder only
 const granted = minted && minted.ok ? AE.grant(minted.key.id, ['session:' + SID_A], { by: 'census' }) : null;
-ok(reopened && reopened.ok !== false && minted && minted.ok && granted && granted.ok, `a key is minted through the real engine with every verb (${AKEYS.VERBS.length}) and granted to A (the default reach)`, JSON.stringify({ minted, granted }).slice(0, 300));
+ok(gateOf(reopened) && reopened.ok !== false && gateOf(minted) && gateOf(minted.ok) && gateOf(granted) && verdictOf(granted.ok), `a key is minted through the real engine with every verb (${AKEYS.VERBS.length}) and granted to A (the default reach)`, JSON.stringify({ minted, granted }).slice(0, 300));
 const KEY_RESULTS = [];
 const layerOf = (v) => ((AKEYS.scopeOf ? AKEYS.scopeOf(v) : (AKEYS.SCOPES || []).find((x) => x.verb === v)) || {}).layer;
 if (minted && minted.ok) for (const verb of [...AKEYS.VERBS].sort((a, b) => (layerOf(a) === 'read' ? 0 : 1) - (layerOf(b) === 'read' ? 0 : 1))) {   // the reads first (an act may change what a read finds)
@@ -1126,7 +1126,7 @@ ok(RESULTS.length === expected && !by((x) => x.timedOut || x.status <= 0).length
 {
   const RF = TABLE.refused || {};
   const progs = [...new Set(SPAWNED.map((x) => x.split(' ')[1]))];
-  ok(progs.every((p) => has(RF, p)) && Object.keys(RF).every((p) => progs.includes(p)) && Object.values(RF).every((w) => String(w || '').trim().length >= 20), `every program a handler would start is refused and is a \`refused\` row with its why (${progs.join(', ') || 'none'})`, [...progs.filter((p) => !has(RF, p)).map((p) => 'NEW ' + p), ...Object.keys(RF).filter((p) => !progs.includes(p)).map((p) => 'DEAD ' + p)].join(' | '));
+  ok(gateOf(progs.every((p) => has(RF, p))) && gateOf(Object.keys(RF).every((p) => progs.includes(p))) && verdictOf(Object.values(RF).every((w) => String(w || '').trim().length >= 20)), `every program a handler would start is refused and is a \`refused\` row with its why (${progs.join(', ') || 'none'})`, [...progs.filter((p) => !has(RF, p)).map((p) => 'NEW ' + p), ...Object.keys(RF).filter((p) => !progs.includes(p)).map((p) => 'DEAD ' + p)].join(' | '));
 }
 ok(!WORLD.demanded.size && !WORLD.gaps.size && !REJECTED.length, 'after the sweep: no construction without a row, no stand-in member missing, no unhandled rejection (a handler\'s own names are rows too)', (WORLD.demanded.size ? 'ADD A CATALOG ROW (eval / make / inert, with its why) in scripts/test-agent-leak-census.mjs for each — `git log -L <line>,<line>:<file>` names the commit that made the construction: ' : '') + [...[...WORLD.demanded].map(([k, v]) => `${k} — ${v}`), ...[...WORLD.gaps].map((g) => `${g} (give the stand-in that member)`), ...REJECTED].slice(0, 12).join(' | '));
 SPAWNED.length = 0;   // the controls below count their own
@@ -1181,11 +1181,11 @@ ok(!SVF.critical.length, 'no CRITICAL sentinel reaches any caller outside a list
   t.findings['GET /api/agent/planted-finding · A · bName'] = 'a planted findings row no answer carries';
   t.findings[firstFinding] = '';
   const v = sweepVerdicts(ALL_RESULTS, t);
-  ok(v.shallow.dead.includes('/api/agent/planted-dead/') && v.shallow.count.length === 1, 'CONTROL: a `shallow` row no route has ⇒ DEAD, one whose count moved ⇒ RED', [v.shallow.dead, v.shallow.count]);
-  ok(v.shape.blank.includes(firstShape), 'CONTROL: a `shape` row with no why ⇒ RED', v.shape.blank);
-  ok(v.deep.lost.includes('GET /api/agent/planted-deep') && v.deep.gained.length === 1, 'CONTROL: the `deep` set pinned both ways — a route the table names that A no longer reaches, and one it reaches that the table does not name ⇒ each RED', v.deep);
-  ok(v.open.dead.includes('GET /api/agent/planted-open') && v.anon.unrowed.includes(firstAnon), 'CONTROL: an `open` row no route answers ⇒ DEAD; an `anonymous` row with no why is no row ⇒ RED', [v.open.dead, v.anon.unrowed]);
-  ok(v.findings.dead.includes('GET /api/agent/planted-finding · A · bName') && v.findings.unrowed.includes(firstFinding), 'CONTROL: a `findings` row no answer carries ⇒ DEAD; one with no why is no row (its hit ⇒ NEW) — a blank why never silences a hit', [v.findings.dead, v.findings.unrowed]);
+  ok(gateOf(v.shallow.dead.includes('/api/agent/planted-dead/')) && v.shallow.count.length === 1, 'CONTROL: a `shallow` row no route has ⇒ DEAD, one whose count moved ⇒ RED', [v.shallow.dead, v.shallow.count]);
+  ok(verdictOf(v.shape.blank.includes(firstShape)), 'CONTROL: a `shape` row with no why ⇒ RED', v.shape.blank);
+  ok(gateOf(v.deep.lost.includes('GET /api/agent/planted-deep')) && v.deep.gained.length === 1, 'CONTROL: the `deep` set pinned both ways — a route the table names that A no longer reaches, and one it reaches that the table does not name ⇒ each RED', v.deep);
+  ok(gateOf(v.open.dead.includes('GET /api/agent/planted-open')) && verdictOf(v.anon.unrowed.includes(firstAnon)), 'CONTROL: an `open` row no route answers ⇒ DEAD; an `anonymous` row with no why is no row ⇒ RED', [v.open.dead, v.anon.unrowed]);
+  ok(gateOf(v.findings.dead.includes('GET /api/agent/planted-finding · A · bName')) && verdictOf(v.findings.unrowed.includes(firstFinding)), 'CONTROL: a `findings` row no answer carries ⇒ DEAD; one with no why is no row (its hit ⇒ NEW) — a blank why never silences a hit', [v.findings.dead, v.findings.unrowed]);
 }
 // the two late asserts' RED controls (主开发 08:54Z: an assert never seen red is a comment)
 {
@@ -1201,7 +1201,7 @@ ok(!SVF.critical.length, 'no CRITICAL sentinel reaches any caller outside a list
   tasksStore.unbind(gB.id, KEY_A);
   const after = await call('GET', `/api/agent/task?group=${encodeURIComponent(gB.id)}`, { bearer: TA });
   const hIn = hitsIn(inside);
-  ok(before.status === 403 && inside.status === 200 && hIn.includes('bProgress') && after.status === 403, 'POSITIVE CONTROL: A put in B\'s Task Group reads it (200) and the scanner sees B\'s progress in that answer; out again ⇒ 403 (the sweep\'s refusals are real refusals)', [before.status, inside.status, hIn, after.status, inside.text.slice(0, 200)]);
+  ok(before.status === 403 && inside.status === 200 && gateOf(hIn.includes('bProgress')) && after.status === 403, 'POSITIVE CONTROL: A put in B\'s Task Group reads it (200) and the scanner sees B\'s progress in that answer; out again ⇒ 403 (the sweep\'s refusals are real refusals)', [before.status, inside.status, hIn, after.status, inside.text.slice(0, 200)]);
 }
 
 
@@ -1226,7 +1226,7 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
   const planted = mpw.slice(0, at) + "app.get('/api/agent/planted-wiring', (req, res) => res.json({ live: activeSessions.size, groups: typeof sessionCallerOf, names: [...activeSessions.values()].map((s) => s.name), k: Buffer.from(JSON.stringify({ nm: String(globalThis.__lgPlantedSecret) })).toString('base64') }));\n" + mpw.slice(at);
   const a = again({ [MPW]: planted });
   const va = mountVerdict(a.B.app, a.c.routes, TABLE);
-  ok(a.c.routes.some((r) => r.path === '/api/agent/planted-wiring' && r.file === MPW) && va.mounted.has('GET /api/agent/planted-wiring') && !va.unmounted.length && !va.extra.length && !a.B.threw.length, 'CONTROL: a bearer route planted IN the wiring file is read by ③ and mounted by the world — ⑥\'s verdict green on it (its handler closes over the wiring\'s own names)', [a.B.threw, va.unmounted, va.extra]);
+  ok(gateOf(a.c.routes.some((r) => r.path === '/api/agent/planted-wiring' && r.file === MPW)) && gateOf(va.mounted.has('GET /api/agent/planted-wiring')) && !va.unmounted.length && !va.extra.length && !a.B.threw.length, 'CONTROL: a bearer route planted IN the wiring file is read by ③ and mounted by the world — ⑥\'s verdict green on it (its handler closes over the wiring\'s own names)', [a.B.threw, va.unmounted, va.extra]);
   {
     const ss = a.B.world.value('server.js', 'activeSessions');
     ss.set('wA', { ...sessions.get('wA') }); ss.set('wB', { ...sessions.get('wB') });
@@ -1235,7 +1235,7 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
     sv.close();
     const h = hitsIn(ans);
     const fv = sweepVerdicts([{ route: 'GET /api/agent/planted-wiring', who: 'A', status: ans.status, text: ans.text, hits: h }], TABLE).findings;
-    ok(ans.status === 200 && h.includes('bName') && h.includes('secret') && fv.unrowed.includes('GET /api/agent/planted-wiring · A · secret') && fv.critical.length === 1, 'CONTROL: the planted wiring route answers B\'s name and a secret\'s bytes base64-encoded INSIDE a JSON object (no 3-byte alignment) — the scanner sees both, and the findings verdict says NEW and CRITICAL ⇒ RED', [ans.status, h, fv.unrowed, ans.text.slice(0, 120)]);
+    ok(ans.status === 200 && gateOf(h.includes('bName')) && gateOf(h.includes('secret')) && gateOf(fv.unrowed.includes('GET /api/agent/planted-wiring · A · secret')) && fv.critical.length === 1, 'CONTROL: the planted wiring route answers B\'s name and a secret\'s bytes base64-encoded INSIDE a JSON object (no 3-byte alignment) — the scanner sees both, and the findings verdict says NEW and CRITICAL ⇒ RED', [ans.status, h, fv.unrowed, ans.text.slice(0, 120)]);
   }
   // (b) a route its module registers only when a dep is given: the wiring's dep made null ⇒ unmounted ⇒ RED
   const vault = readRepo('src/routes/vault.js');
@@ -1243,17 +1243,17 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
   const gated = vault.slice(0, vb) + "\n  if (paste) app.get('/api/agent/planted-gated', (req, res) => res.json({}));" + vault.slice(vb);
   const b = again({ 'src/routes/vault.js': gated }, { modules: { 'src/routes/vault.js': gated }, catalog: { ...CATALOG, [MPW + ':vaultPaste']: { kind: 'make', why: 'the control: the paste door absent', make: () => null } } });
   const vb2 = mountVerdict(b.B.app, b.c.routes, TABLE);
-  ok(b.c.routes.some((r) => r.path === '/api/agent/planted-gated') && vb2.unmounted.includes('GET /api/agent/planted-gated'), 'CONTROL: a route gated on a dep the wiring passes null is read by ③ and NOT mounted — ⑥\'s verdict names it (gated off)', vb2.unmounted);
+  ok(gateOf(b.c.routes.some((r) => r.path === '/api/agent/planted-gated')) && verdictOf(vb2.unmounted.includes('GET /api/agent/planted-gated')), 'CONTROL: a route gated on a dep the wiring passes null is read by ③ and NOT mounted — ⑥\'s verdict names it (gated off)', vb2.unmounted);
   const vb3 = mountVerdict(b.B.app, b.c.routes, { ...TABLE, routes: { ...(TABLE.routes || {}), 'GET /api/agent/planted-gated': { unmounted: '  ' }, 'GET /api/agent/vault/state': { unmounted: 'a planted stale row' } } });
-  ok(vb3.unmountedReasonless.includes('GET /api/agent/planted-gated') && vb3.unmountedStale.includes('GET /api/agent/vault/state'), 'CONTROL: an `unmounted` row with a blank why, and one on a route that IS mounted ⇒ RED', [vb3.unmountedReasonless, vb3.unmountedStale]);
+  ok(gateOf(vb3.unmountedReasonless.includes('GET /api/agent/planted-gated')) && verdictOf(vb3.unmountedStale.includes('GET /api/agent/vault/state')), 'CONTROL: an `unmounted` row with a blank why, and one on a route that IS mounted ⇒ RED', [vb3.unmountedReasonless, vb3.unmountedStale]);
   const b2 = again({ 'src/routes/vault.js': gated }, { modules: { 'src/routes/vault.js': gated } });
-  ok(b2.mounted.has('GET /api/agent/planted-gated'), 'CONTROL: the same route with the dep the real wiring passes IS mounted (the planted module copy is the one the wiring loads)');
+  ok(verdictOf(b2.mounted.has('GET /api/agent/planted-gated')), 'CONTROL: the same route with the dep the real wiring passes IS mounted (the planted module copy is the one the wiring loads)');
   // a router mounted under a prefix: the world joins the prefix (a route ③'s literal read cannot see)
   {
     const r = express.Router(); r.get('/planted-sub', (req, res) => res.json({}));
     const x = express(); x.use('/api/agent', r); x.get(/^\/api\/agent\/planted-re$/, (req, res) => res.json({}));
     const vx = mountVerdict(x, [], TABLE);
-    ok(vx.extra.includes('GET /api/agent/planted-sub') && vx.regex.length === 1, 'CONTROL: a router mounted under /api/agent serves GET /api/agent/planted-sub (⑥: a mounted route ③ did not read ⇒ RED), a regex route is said as such ⇒ RED', [vx.extra, vx.regex]);
+    ok(gateOf(vx.extra.includes('GET /api/agent/planted-sub')) && vx.regex.length === 1, 'CONTROL: a router mounted under /api/agent serves GET /api/agent/planted-sub (⑥: a mounted route ③ did not read ⇒ RED), a regex route is said as such ⇒ RED', [vx.extra, vx.regex]);
   }
   // a wiring file whose evaluated code reads its own __dirname (the real tree's folder) ⇒ RED
   {
@@ -1261,16 +1261,16 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
     ok(fb > 0, 'the feedback routes\' mount is found in the wiring (the control\'s anchor)');
     const dirny = mpw.slice(0, fb) + mpw.slice(fb).replace("registerFeedbackRoutes(app, {", "registerFeedbackRoutes(app, { plantedDir: __dirname,");
     const dd = again({ [MPW]: dirny });
-    ok(dd.B.dirnameReads.has(MPW) && !dd.B.threw.length, 'CONTROL: a wiring site that reads its own __dirname (mounts-plugins-wiring.js) ⇒ RED (dirnameReads names the file)', [...dd.B.dirnameReads]);
+    ok(gateOf(dd.B.dirnameReads.has(MPW)) && !dd.B.threw.length, 'CONTROL: a wiring site that reads its own __dirname (mounts-plugins-wiring.js) ⇒ RED (dirnameReads names the file)', [...dd.B.dirnameReads]);
   }
   // (c) a construction with no catalog row ⇒ RED
   const { ['server.js:hosts']: _drop, ...lessCat } = CATALOG;
   const c3 = again({}, { catalog: lessCat });
-  ok(c3.B.demanded.has('server.js:hosts'), 'CONTROL: a construction the catalog does not name (server.js:hosts dropped) ⇒ RED', [...c3.B.demanded.keys()]);
+  ok(verdictOf(c3.B.demanded.has('server.js:hosts')), 'CONTROL: a construction the catalog does not name (server.js:hosts dropped) ⇒ RED', [...c3.B.demanded.keys()]);
   // (d) a registering export used where the boot does not run ⇒ RED
   const late = mpw.slice(0, at) + "const plantedLate = () => require('../routes/vault.js').registerVaultRoutes(app, { vault });\n" + mpw.slice(at);
   const d = again({ [MPW]: late });
-  ok(d.B.broken.some((x) => x.what === 'registerVaultRoutes' && /no top-level declaration/.test(x.why)), 'CONTROL: a registering export called inside a function the boot never runs ⇒ RED (the site\'s chain is broken)', d.B.broken.map((x) => x.tag));
+  ok(verdictOf(d.B.broken.some((x) => x.what === 'registerVaultRoutes' && /no top-level declaration/.test(x.why))), 'CONTROL: a registering export called inside a function the boot never runs ⇒ RED (the site\'s chain is broken)', d.B.broken.map((x) => x.tag));
   // (e) a site that starts a program ⇒ refused and RED
   const sp0 = SPAWNED.length;
   const srv = readRepo('server.js');
@@ -1278,7 +1278,7 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
   ok(ed > 0, 'the editor routes\' mount is found in server.js (the controls\' anchor)');
   const spawny = srv.slice(0, ed) + srv.slice(ed).replace('registerEditorRoutes(app, { activeSessions,', "registerEditorRoutes(app, { planted: require('child_process').execFileSync('true'), activeSessions,");
   const e = again({ 'server.js': spawny });
-  ok(SPAWNED.length > sp0 && e.B.threw.some((t) => /no program runs/.test(t)), 'CONTROL: a site that starts a program is refused and RED (the world starts none)', e.B.threw);
+  ok(SPAWNED.length > sp0 && verdictOf(e.B.threw.some((t) => /no program runs/.test(t))), 'CONTROL: a site that starts a program is refused and RED (the world starts none)', e.B.threw);
   SPAWNED.length = sp0;
 }
 lap('⑦ the controls');
@@ -1293,4 +1293,4 @@ lap('⑦ the controls');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

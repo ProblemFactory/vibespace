@@ -20,7 +20,7 @@ import path from 'node:path';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (name, cond, detail) => {
+const ok = (name, cond, detail) => { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1500) : ''}`); }
 };
@@ -86,7 +86,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   const now = C.census(REPO);
   const j = judge(now);
   ok(`every one of the ${now.sites.length} sites (${new Set(now.sites.map((x) => key(x.file, x.scope, x.kind))).size} rows) is a row with its exact count; no dead row; nothing the scanner cannot follow`, !j.unrowed.length && !j.moved.length && !j.dead.length && !j.unclassified.length, j);
-  ok('every off-loop / fallback row says WHY it never holds the loop; every debt row says HOW OFTEN it runs (timer / boot / per …) — the conversion order is checkable', ROWS.every((x) => [OFF, FALLBACK, DEBT].includes(x[4]) && (x[4] === DEBT ? /^(?:timer|boot|per )/.test(x[5]) : x[5].length >= 20)), ROWS.filter((x) => !(x[4] === DEBT ? /^(?:timer|boot|per )/.test(x[5]) : x[5].length >= 20)));
+  ok('every off-loop / fallback row says WHY it never holds the loop; every debt row says HOW OFTEN it runs (timer / boot / per …) — the conversion order is checkable', verdictOf(ROWS.every((x) => [OFF, FALLBACK, DEBT].includes(x[4]) && (x[4] === DEBT ? /^(?:timer|boot|per )/.test(x[5]) : x[5].length >= 20))), ROWS.filter((x) => !(x[4] === DEBT ? /^(?:timer|boot|per )/.test(x[5]) : x[5].length >= 20)));
   // round 2: a class is not free text — OFF only where the code runs OUTSIDE the hub's process (the device agent, its CLI, the
   // forked measurement), a FALLBACK names the guard that keeps it off the hub's road. A DEBT row moved to OFF in a hub file is red.
   const OFF_HOMES = /^(?:src\/agentd\/|src\/claude-oat-probe\.js$|src\/job-logs-sweep-worker\.js$)/;   // lane job-logs-sweep: the remover's child (one batch a child through the starter since B-323e; throws without --once)
@@ -109,11 +109,11 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   const c9 = judge(C.census(REPO, { patch: { 'src/new-bound.js': "const { execSync: ex2 } = require('child_process');\nconst cp2 = require('child_process');\nfunction b1() { return ex2.call(null, 'true'); }\nfunction b2() { return cp2.execFileSync.apply(cp2, ['true']); }\nmodule.exports = { b1, b2 };\n" } }));
   const offRows = ROWS.map((x) => (x[0] === 'src/transcript-service.js' && x[1] === 'createTranscriptService > rescue' ? [...x.slice(0, 4), OFF, 'a WORKER thread (a 20-character why)'] : x));
   const c10 = offRows.filter((x) => x[4] === OFF && !OFF_HOMES.test(x[0])).map((x) => x[0]);
-  ok('CONTROLS (round 2, the shapes followed now): an ITERATIVE stack walk RED; a walk through fs under another name RED; through a destructured readdirSync RED; execSync.call / cp.execFileSync.apply RED (two sites); a hub file\'s DEBT row moved to OFF-LOOP with a short why RED', c6.unrowed.some((u) => /new-iter\.js\|tree\|walk/.test(u)) && c7.unrowed.some((u) => /new-renamed\.js\|walkx\|walk/.test(u)) && c8.unrowed.some((u) => /new-rd\.js\|walkr\|walk/.test(u)) && c9.unrowed.some((u) => /new-bound\.js\|b1\|child:execSync/.test(u)) && c9.unrowed.some((u) => /new-bound\.js\|b2\|child:execFileSync/.test(u)) && c10.includes('src/transcript-service.js'), { c6: c6.unrowed, c7: c7.unrowed, c8: c8.unrowed, c9: c9.unrowed, c10 });
+  ok('CONTROLS (round 2, the shapes followed now): an ITERATIVE stack walk RED; a walk through fs under another name RED; through a destructured readdirSync RED; execSync.call / cp.execFileSync.apply RED (two sites); a hub file\'s DEBT row moved to OFF-LOOP with a short why RED', gateOf(c6.unrowed.some((u) => /new-iter\.js\|tree\|walk/.test(u))) && gateOf(c7.unrowed.some((u) => /new-renamed\.js\|walkx\|walk/.test(u))) && gateOf(c8.unrowed.some((u) => /new-rd\.js\|walkr\|walk/.test(u))) && gateOf(c9.unrowed.some((u) => /new-bound\.js\|b1\|child:execSync/.test(u))) && gateOf(c9.unrowed.some((u) => /new-bound\.js\|b2\|child:execFileSync/.test(u))) && verdictOf(c10.includes('src/transcript-service.js')), { c6: c6.unrowed, c7: c7.unrowed, c8: c8.unrowed, c9: c9.unrowed, c10 });
   ok('CONTROLS: one more sync child in a rowed scope moves its count (RED); a new recursive readdirSync walk (RED); a sync child through a destructured alias (RED); a computed call of child_process the scanner cannot follow (RED, unclassified); readdirSync(…, {recursive: true}) (RED)',
-    c1.moved.some((m) => /src\/transcript-service\.js\|createTranscriptService > rescue\|child:execFileSync 1 → 2/.test(m)) && c2.unrowed.some((u) => /src\/new-walker\.js\|scan\|walk/.test(u)) && c3.unrowed.some((u) => /src\/new-alias\.js\|go\|child:execSync/.test(u)) && c4.unclassified.length >= 1 && c5.unrowed.some((u) => /src\/new-recursive\.js/.test(u)), { c1: c1.moved, c2: c2.unrowed, c3: c3.unrowed, c4: c4.unclassified, c5: c5.unrowed });
+    gateOf(c1.moved.some((m) => /src\/transcript-service\.js\|createTranscriptService > rescue\|child:execFileSync 1 → 2/.test(m))) && gateOf(c2.unrowed.some((u) => /src\/new-walker\.js\|scan\|walk/.test(u))) && gateOf(c3.unrowed.some((u) => /src\/new-alias\.js\|go\|child:execSync/.test(u))) && c4.unclassified.length >= 1 && verdictOf(c5.unrowed.some((u) => /src\/new-recursive\.js/.test(u))), { c1: c1.moved, c2: c2.unrowed, c3: c3.unrowed, c4: c4.unclassified, c5: c5.unrowed });
 }
 
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

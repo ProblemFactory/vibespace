@@ -16,7 +16,7 @@ import { scratchHome } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
 // THIS PROCESS IS RE-HOMED before any product code loads (test-fixture-isolation
 // (c)): the §1c section below mints fixture ids (fixtureSid) and runs the REAL
@@ -50,8 +50,8 @@ const tools = (n) => Array.from({ length: n }, tool);
 
 // ── isTextCard ──────────────────────────────────────────────────────────────
 console.log('— isTextCard');
-ok('a user prompt with text counts', isTextCard(user('hello')));
-ok('assistant text counts', isTextCard(asst('here is the answer')));
+ok('a user prompt with text counts', verdictOf(isTextCard(user('hello'))));
+ok('assistant text counts', verdictOf(isTextCard(asst('here is the answer'))));
 ok('a tool card does not count', !isTextCard(tool()));
 ok('an EMPTY thinking block does not count (nor a non-empty one — thinking is not text)', !isTextCard(think('')) && !isTextCard(think('pondering')));
 ok('a system/info card does not count', !isTextCard(sys('Model auto-fallback')));
@@ -64,7 +64,7 @@ ok('garbage never throws', !isTextCard(null) && !isTextCard({}) && !isTextCard({
 // ── the window ──────────────────────────────────────────────────────────────
 console.log('— textWindow');
 ok('the numbers are ONE frozen table (minText 24 / minRecords 50 / maxRecords 400 / maxGrowthBytes 128 KiB — perf r1: the bound is on what the window adds PAST the floor)',
-  Object.isFrozen(TEXT_WINDOW) && TEXT_WINDOW.minText === 24 && TEXT_WINDOW.minRecords === 50 && TEXT_WINDOW.maxRecords === 400 && TEXT_WINDOW.maxGrowthBytes === 128 * 1024 && !('maxBytes' in TEXT_WINDOW));
+  gateOf(Object.isFrozen(TEXT_WINDOW)) && TEXT_WINDOW.minText === 24 && TEXT_WINDOW.minRecords === 50 && TEXT_WINDOW.maxRecords === 400 && TEXT_WINDOW.maxGrowthBytes === 128 * 1024 && !('maxBytes' in TEXT_WINDOW));
 {
   // 60 texts spaced 10 tool cards apart: the tail(50) holds ~5 text cards
   const list = [];
@@ -74,7 +74,7 @@ ok('the numbers are ONE frozen table (minText 24 / minRecords 50 / maxRecords 40
   const w = textWindow(list);
   ok(`THE CASE: a list whose tail(50) holds ${tail50Text} < minText text cards returns start < total−50 (start ${w.start}, total ${total})`, tail50Text < 24 && w.start < total - 50);
   ok(`…the walk stops at exactly minText text cards (${w.textCount}), reason 'text'`, w.textCount === 24 && w.reason === 'text');
-  ok('…and the window begins AT the 24th text card from the end (no extra records past it)', isTextCard(list[w.start]) && list.slice(w.start).filter(isTextCard).length === 24);
+  ok('…and the window begins AT the 24th text card from the end (no extra records past it)', gateOf(isTextCard(list[w.start])) && list.slice(w.start).filter(isTextCard).length === 24);
   ok('DETERMINISM: the same list gives the same start twice (identical-skip depends on it)', textWindow(list).start === w.start && textWindow(list.slice()).start === w.start);
   ok('sliceTextWindow is slice(start)', sliceTextWindow(list).length === total - w.start && sliceTextWindow(list)[0] === list[w.start]);
 }
@@ -110,7 +110,7 @@ ok('the numbers are ONE frozen table (minText 24 / minRecords 50 / maxRecords 40
   const bytes = win.reduce((a, m) => a + jsonSize(m), 0);
   ok(`an image-heavy list stops at the growth budget (reason ${w.reason}, growth ${(w.growth / 1024).toFixed(0)} KB ≤ 128 KiB, window ${(bytes / 1024).toFixed(0)} KB = floor ${(floorBytes / 1024).toFixed(0)} KB + growth)`,
     w.reason === 'maxGrowth' && w.growth <= TEXT_WINDOW.maxGrowthBytes && bytes === floorBytes + w.growth && w.textCount < 24);
-  ok('…no record past the floor is an image (the image ends the walk, it is never pulled in)', win.slice(0, win.length - 50).every((m) => jsonSize(m) < 540 * 1024));
+  ok('…no record past the floor is an image (the image ends the walk, it is never pulled in)', verdictOf(win.slice(0, win.length - 50).every((m) => jsonSize(m) < 540 * 1024)));
   ok('…the floor never pays for its size: sizes are read only PAST it (the floor\'s two images are never measured)', !sizes.some((n) => n > 540 * 1024) || w.start < list.length - 50);
   const est = textWindow(list, { sizeOf: () => 1 });
   ok('…an injected sizeOf is what the byte walk reads (a 1-byte estimate never stops on bytes)', est.reason !== 'maxGrowth' && est.start < w.start);
@@ -120,11 +120,11 @@ ok('the numbers are ONE frozen table (minText 24 / minRecords 50 / maxRecords 40
 }
 // ── THE SLAB AN ATTACH ASKS FOR (perf r1): 'floor' = tail(minRecords) exactly; anything else = the text window ──
 console.log('— attachWindowOpts (the attach frame\'s `slab` hint)');
-ok('the hint vocabulary is ONE frozen list: floor | text', typeof attachWindowOpts === 'function' && Array.isArray(SLAB_HINTS) && Object.isFrozen(SLAB_HINTS) && SLAB_HINTS.join('|') === 'floor|text');
+ok('the hint vocabulary is ONE frozen list: floor | text', typeof attachWindowOpts === 'function' && gateOf(Array.isArray(SLAB_HINTS)) && gateOf(Object.isFrozen(SLAB_HINTS)) && SLAB_HINTS.join('|') === 'floor|text');
 if (typeof attachWindowOpts === 'function') {
   const list = []; for (let i = 0; i < 60; i++) { list.push(user('q' + i)); list.push(...tools(10)); }
   ok("'floor' ⇒ exactly tail(50) (the pre-lane slab, what a hidden view / a burst pays)", sliceTextWindow(list, attachWindowOpts('floor')).length === 50 && sliceTextWindow(list, attachWindowOpts('floor'))[0] === list[list.length - 50]);
-  ok("'text', absent (an older client) and garbage ⇒ the text window", ['text', undefined, null, 'x', 7].every((h) => sliceTextWindow(list, attachWindowOpts(h)).length === sliceTextWindow(list).length) && sliceTextWindow(list).length > 50);
+  ok("'text', absent (an older client) and garbage ⇒ the text window", gateOf(['text', undefined, null, 'x', 7].every((h) => sliceTextWindow(list, attachWindowOpts(h)).length === sliceTextWindow(list).length)) && sliceTextWindow(list).length > 50);
   ok("'floor' on a list shorter than the floor ⇒ the whole list", sliceTextWindow(list.slice(0, 20), attachWindowOpts('floor')).length === 20);
 }
 // ── THE §1c FIXTURES THE PROBES USE (perf r1 — the claims are re-derived here, not
@@ -155,7 +155,7 @@ console.log('— the §1c fixtures (6 MB, 48 MB): printed, bounded');
     }
   } finally { cleanup(); }
 }
-ok('opts override the table (minText 3 on the spaced list)', (() => { const l = []; for (let i = 0; i < 20; i++) { l.push(user('q')); l.push(...tools(30)); } return textWindow(l, { minText: 3, minRecords: 5 }).start === l.length - 3 * 31; })());
+ok('opts override the table (minText 3 on the spaced list)', verdictOf((() => { const l = []; for (let i = 0; i < 20; i++) { l.push(user('q')); l.push(...tools(30)); } return textWindow(l, { minText: 3, minRecords: 5 }).start === l.length - 3 * 31; })()));
 
 // ── PURE ─────────────────────────────────────────────────────────────────────
 console.log('— purity + twin parity');
@@ -172,7 +172,7 @@ const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.j
     mm.messages = list;
     return list.length - mm.tailWindow().length;
   });
-  ok(`every normalizer answers tailWindow() with the SAME start on the same list (claude/codex/acp: ${starts.join('/')})`, starts.every((s) => s === textWindow(list).start));
+  ok(`every normalizer answers tailWindow() with the SAME start on the same list (claude/codex/acp: ${starts.join('/')})`, verdictOf(starts.every((s) => s === textWindow(list).start)));
 }
 {
   // a REAL claude conversion: 30 turns, each a prompt + 12 tool round trips + a reply
@@ -199,13 +199,13 @@ console.log('— wiring');
 const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
 const ts = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
 // (perf lane D: the slab is built only on the full rung, inside attachedFrameText's slab callback)
-ok('ws-handler: the live attach ships the slab the attach ASKED for (perf r1: floor | text)', /messages: session\._normalizer \? session\._normalizer\.tailWindow\(attachWindowOpts\(data\.slab\)\) : \[\],/.test(wsh));
-ok('ws-handler: the view-only attach ships the slab asked for too', /messages: mm\.tailWindow\(attachWindowOpts\(data\.slab\)\), totalCount: mm\.total, chatStatus: sm\.chatStatus\(\), isStreaming: false, viewOnly: true/.test(wsh));
-ok('ws-handler: the mapping is the PURE module\'s (one spelling of "floor")', /const \{ attachWindowOpts \} = require\('\.\/text-window\.js'\);/.test(wsh) && !/data\.slab === 'floor'/.test(wsh));
+ok('ws-handler: the live attach ships the slab the attach ASKED for (perf r1: floor | text)', verdictOf(/messages: session\._normalizer \? session\._normalizer\.tailWindow\(attachWindowOpts\(data\.slab\)\) : \[\],/.test(wsh)));
+ok('ws-handler: the view-only attach ships the slab asked for too', verdictOf(/messages: mm\.tailWindow\(attachWindowOpts\(data\.slab\)\), totalCount: mm\.total, chatStatus: sm\.chatStatus\(\), isStreaming: false, viewOnly: true/.test(wsh)));
+ok('ws-handler: the mapping is the PURE module\'s (one spelling of "floor")', gateOf(/const \{ attachWindowOpts \} = require\('\.\/text-window\.js'\);/.test(wsh)) && !/data\.slab === 'floor'/.test(wsh));
 ok('ws-handler: no attach path ships tail(50) any more', !/\.tail\(50\)/.test(wsh));
-ok('transcript-service.page(): the default branch is the text window (HTTP + the daemon op; row B-422c: + its «not loaded», when said)', /return \{ messages: mm\.tailWindow\(\), total: mm\.total(?:, \.\.\.saidOf\(v\))? \};/.test(ts) && !/mm\.tail\(50\)/.test(ts));
+ok('transcript-service.page(): the default branch is the text window (HTTP + the daemon op; row B-422c: + its «not loaded», when said)', gateOf(/return \{ messages: mm\.tailWindow\(\), total: mm\.total(?:, \.\.\.saidOf\(v\))? \};/.test(ts)) && !/mm\.tail\(50\)/.test(ts));
 const hc = fs.readFileSync(path.join(REPO, 'scripts/test-harness-contract.mjs'), 'utf8');
-ok('the harness contract requires tailWindow of EVERY normalizer (a new harness cannot ship without it)', /const NORM_METHODS = \[[^\]]*'tailWindow'/.test(hc));
+ok('the harness contract requires tailWindow of EVERY normalizer (a new harness cannot ship without it)', verdictOf(/const NORM_METHODS = \[[^\]]*'tailWindow'/.test(hc)));
 
 // ── the REAL home is untouched (this process was re-homed before the code under test loaded) ──
 {
@@ -217,4 +217,4 @@ ok('the harness contract requires tailWindow of EVERY normalizer (a new harness 
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

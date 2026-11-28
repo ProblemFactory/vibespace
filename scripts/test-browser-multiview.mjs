@@ -42,7 +42,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 60) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -118,7 +118,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   let journal = '';
   const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 40000, 100)), 'the worktree server booted', journal.slice(-800))) return;
   const j = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
@@ -128,7 +128,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const ups = [];
   let chrome = null;
   try {
-    if (!ok(Object.values(SIDS).every(Boolean), 'four chat sessions (Alpha, Bravo, Charlie, Delta) were created on the fake claude', journal.slice(-600))) return;
+    if (!ok(verdictOf(Object.values(SIDS).every(Boolean)), 'four chat sessions (Alpha, Bravo, Charlie, Delta) were created on the fake claude', journal.slice(-600))) return;
     await sleep(1200);
     // four profiles, each its own fake upstream
     const P = {};
@@ -156,7 +156,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     const boot = async (url) => { await send('Page.navigate', { url }); for (let i = 0; i < 120; i++) { try { if (await ev('if (!window.app || !window.app.ready) return false; return await Promise.race([window.app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 100))]);')) return true; } catch { } await sleep(250); } return false; };
-    if (!ok(await boot(`http://127.0.0.1:${PORT}/`), 'the app booted in headless chrome (desktop, 1280×900)')) return;
+    if (!ok(verdictOf(await boot(`http://127.0.0.1:${PORT}/`)), 'the app booted in headless chrome (desktop, 1280×900)')) return;
     await sleep(1200);
     const mouse = (type, x, y, extra = {}) => send('Input.dispatchMouseEvent', { type, x, y, ...extra });
     const click = async (pt, { button = 'left' } = {}) => { await mouse('mouseMoved', pt.x, pt.y); await mouse('mousePressed', pt.x, pt.y, { button, clickCount: 1 }); await mouse('mouseReleased', pt.x, pt.y, { button, clickCount: 1 }); await sleep(300); };
@@ -173,23 +173,23 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const ids = await ev(`const A = chat(${S(SIDS.A)}), B = chat(${S(SIDS.B)}); wm.createTabChain(A, B); wm.focusWindow(A.id); return { A: A.id, B: B.id };`);
     // lane agent-window-no-pop (inc-mvhebl4n-rkvr): an agent's browser opens beside its chat only where the person LOOKS at that
     // chat — Alpha is the shown, active tab when its browser starts
-    ok(await attach(SIDS.A, 'Alpha work'), 'Alpha attaches its browser (a new lease in the digest)');
+    ok(verdictOf(await attach(SIDS.A, 'Alpha work')), 'Alpha attaches its browser (a new lease in the digest)');
     const born = await until(() => ev(`const L = live(${S(SIDS.A)}); return !!(L && L._tabChain && L._tabChain === chat(${S(SIDS.A)})._tabChain && L._browserLive.state().frames >= 1);`), 15000);
     const c1 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return { layout: ch.layout, pair: ch.split && ch.split.pair, left: ch.split && ch.split.left, right: ch.split && ch.split.right };`);
     const LA = await ev(`return live(${S(SIDS.A)}).id;`);
-    ok(born && c1.layout === 'split' && S(c1.pair) === S([ids.A, LA]) && S(c1.right) === S([LA]), 'D5 (b): the group was NOT split yet ⇒ Alpha\'s live view is born BESIDE it — chat | browser (the one pane became two)', S(c1));
+    ok(gateOf(born) && c1.layout === 'split' && S(c1.pair) === S([ids.A, LA]) && S(c1.right) === S([LA]), 'D5 (b): the group was NOT split yet ⇒ Alpha\'s live view is born BESIDE it — chat | browser (the one pane became two)', S(c1));
     // the person goes to Bravo (a REAL click on its tab — the left pane shows Bravo, the right keeps Alpha's browser: Bravo has none)
     const tabB0 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return rect(wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="${ids.B}"]'));`);
     await click(centre(tabB0));
     const onB = await until(() => ev(`const ch = chat(${S(SIDS.A)})._tabChain; return ch.split.pair[0] === ${S(ids.B)} && app.wm.activeWindowId === ${S(ids.B)};`), 4000);
     const pairB0 = await ev(`return chat(${S(SIDS.A)})._tabChain.split.pair;`);
-    ok(onB && pairB0[1] === LA, 'a REAL click on Bravo (left) ⇒ Bravo is shown and active; the right keeps Alpha\'s browser (Bravo has none yet)', S(pairB0));
+    ok(gateOf(onB) && pairB0[1] === LA, 'a REAL click on Bravo (left) ⇒ Bravo is shown and active; the right keeps Alpha\'s browser (Bravo has none yet)', S(pairB0));
     const rectBefore = await ev(`return rect(wm.windows.get(${S(ids.A)}).element);`);
-    ok(await attach(SIDS.B, 'Bravo work'), 'Bravo attaches its browser');
+    ok(verdictOf(await attach(SIDS.B, 'Bravo work')), 'Bravo attaches its browser');
     const bornB = await until(() => ev(`const L = live(${S(SIDS.B)}); return !!(L && L._tabChain && L._browserLive.state().connected);`), 15000);
     const c2 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; const LB = live(${S(SIDS.B)}); const tab = wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="' + LB.id + '"]'); return { pair: ch.split.pair, right: ch.split.right, left: ch.split.left, LB: LB.id, arrived: !!(tab && tab.classList.contains('tab-arrived')), hidden: LB.content.classList.contains('tab-hidden'), shownPanes: ch.tabs.filter((id) => !wm.windows.get(id).content.classList.contains('tab-hidden')).length, host: rect(wm.windows.get(ch.tabs[0]).element) };`);
     const LB = c2.LB;
-    ok(bornB && S(c2.pair) === S([ids.B, LA]) && S(c2.right) === S([LA, LB]) && c2.hidden && c2.arrived, 'D5 (a)/(b): the group is ALREADY split ⇒ Bravo\'s live view is a TAB on the browser side, hidden, PULSING — the two shown panes did not move', S(c2));
+    ok(gateOf(bornB) && S(c2.pair) === S([ids.B, LA]) && S(c2.right) === S([LA, LB]) && gateOf(c2.hidden) && verdictOf(c2.arrived), 'D5 (a)/(b): the group is ALREADY split ⇒ Bravo\'s live view is a TAB on the browser side, hidden, PULSING — the two shown panes did not move', S(c2));
     ok(c2.shownPanes === 2 && Math.abs(c2.host.width - rectBefore.width) <= 1 && Math.abs(c2.host.left - rectBefore.left) <= 1, 'still TWO panes (never a third), the window did not move or resize', S({ before: rectBefore, after: c2.host }));
     await ev(`window.__ws0 = { A: live(${S(SIDS.A)})._browserLive.ws(), B: live(${S(SIDS.B)})._browserLive.ws() }; return true;`);
     const conn0 = { A: U.A.connections, B: U.B.connections };
@@ -197,18 +197,18 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const tabA = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return rect(wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="${ids.A}"]'));`);
     await click(centre(tabA));
     const f0 = await until(() => ev(`const ch = chat(${S(SIDS.A)})._tabChain; return ch.split.pair[0] === ${S(ids.A)} && ch.split.pair[1] === ${S(LA)};`), 4000);
-    ok(f0, 'a REAL click on Alpha (left) ⇒ the right follows to Alpha\'s browser', S(await ev(`return chat(${S(SIDS.A)})._tabChain.split.pair;`)));
+    ok(verdictOf(f0), 'a REAL click on Alpha (left) ⇒ the right follows to Alpha\'s browser', S(await ev(`return chat(${S(SIDS.A)})._tabChain.split.pair;`)));
     const tabB = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return rect(wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="${ids.B}"]'));`);
     await click(centre(tabB));
     const f1 = await until(() => ev(`const ch = chat(${S(SIDS.A)})._tabChain; return ch.split.pair[0] === ${S(ids.B)} && ch.split.pair[1] === ${S(LB)};`), 4000);
     const s1 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return { pair: ch.split.pair, active: ch.tabs[ch.active], sameA: live(${S(SIDS.A)})._browserLive.ws() === window.__ws0.A, sameB: live(${S(SIDS.B)})._browserLive.ws() === window.__ws0.B, bFrames: live(${S(SIDS.B)})._browserLive.state().frames };`);
-    ok(f1 && s1.active === ids.B, 'D5 (c) / §3 (b): a REAL click on Bravo (left) ⇒ the right FOLLOWS to Bravo\'s browser; the focus stays on the clicked tab', S(s1));
-    ok(s1.sameA && s1.sameB && U.A.connections === conn0.A && U.B.connections === conn0.B && s1.bFrames >= 1, 'ZERO relay reconnects: both live views kept their socket, no upstream saw a second connection (the browser was already connected)', S({ s1, conn0, now: { A: U.A.connections, B: U.B.connections } }));
+    ok(gateOf(f1) && s1.active === ids.B, 'D5 (c) / §3 (b): a REAL click on Bravo (left) ⇒ the right FOLLOWS to Bravo\'s browser; the focus stays on the clicked tab', S(s1));
+    ok(gateOf(s1.sameA) && gateOf(s1.sameB) && U.A.connections === conn0.A && U.B.connections === conn0.B && s1.bFrames >= 1, 'ZERO relay reconnects: both live views kept their socket, no upstream saw a second connection (the browser was already connected)', S({ s1, conn0, now: { A: U.A.connections, B: U.B.connections } }));
     // a REAL click on Alpha's browser tab (right half) ⇒ the left follows to Alpha
     const tabLA = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return rect(wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="${LA}"]'));`);
     await click(centre(tabLA));
     const f2 = await until(() => ev(`const ch = chat(${S(SIDS.A)})._tabChain; return ch.split.pair[0] === ${S(ids.A)} && ch.split.pair[1] === ${S(LA)};`), 4000);
-    ok(f2 && U.A.connections === conn0.A && U.B.connections === conn0.B, '…and the reverse: a REAL click on Alpha\'s browser (right) ⇒ the left follows to chat Alpha — still zero reconnects', S(await ev(`return chat(${S(SIDS.A)})._tabChain.split.pair;`)));
+    ok(gateOf(f2) && U.A.connections === conn0.A && U.B.connections === conn0.B, '…and the reverse: a REAL click on Alpha\'s browser (right) ⇒ the left follows to chat Alpha — still zero reconnects', S(await ev(`return chat(${S(SIDS.A)})._tabChain.split.pair;`)));
 
     // ── 2 · two chats already side by side ──
     console.log('— 2 · two chats ALREADY side by side: the new browser is a tab, nothing moves');
@@ -218,17 +218,17 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await until(() => ev(`return !!chat(${S(SIDS.D)});`), 10000);
     const cd = await ev(`const C = chat(${S(SIDS.C)}), D = chat(${S(SIDS.D)}); wm.bindSplit(C, D, { side: 'right' }); await new Promise((r) => setTimeout(r, 300)); const ch = C._tabChain; return { C: C.id, D: D.id, pair: ch.split.pair, host: rect(wm.windows.get(ch.tabs[0]).element) };`);
     ok(S(cd.pair) === S([cd.C, cd.D]), 'Charlie | Delta, side by side');
-    ok(await attach(SIDS.C, 'Charlie work'), 'Charlie attaches its browser');
+    ok(verdictOf(await attach(SIDS.C, 'Charlie work')), 'Charlie attaches its browser');
     const bornC = await until(() => ev(`const L = live(${S(SIDS.C)}); return !!(L && L._tabChain && L._tabChain === chat(${S(SIDS.C)})._tabChain);`), 15000);
     const c3 = await ev(`const ch = chat(${S(SIDS.C)})._tabChain; const LC = live(${S(SIDS.C)}); return { pair: ch.split.pair, left: ch.split.left, right: ch.split.right, LC: LC.id, hidden: LC.content.classList.contains('tab-hidden'), shown: ch.tabs.filter((id) => !wm.windows.get(id).content.classList.contains('tab-hidden')).length, host: rect(wm.windows.get(ch.tabs[0]).element) };`);
-    ok(bornC && S(c3.pair) === S([cd.C, cd.D]) && c3.left.includes(c3.LC) && c3.hidden && c3.shown === 2, 'D5 (b): Charlie\'s browser is a TAB on Charlie\'s own side (no browser side yet) — the pair stays Charlie | Delta, two panes, never four columns', S(c3));
+    ok(gateOf(bornC) && S(c3.pair) === S([cd.C, cd.D]) && gateOf(c3.left.includes(c3.LC)) && gateOf(c3.hidden) && c3.shown === 2, 'D5 (b): Charlie\'s browser is a TAB on Charlie\'s own side (no browser side yet) — the pair stays Charlie | Delta, two panes, never four columns', S(c3));
     ok(Math.abs(c3.host.left - cd.host.left) <= 1 && Math.abs(c3.host.width - cd.host.width) <= 1, '…and the window did not move', S({ before: cd.host, after: c3.host }));
 
     // ── 3 · pop out, fold back (both paths) ──
     console.log('— 3 · pop out a strip tab into its own window; fold back through the menu and through the icon drop');
-    ok(await attach(SIDS.A, 'Alpha second'), 'Alpha attaches a SECOND browser');
+    ok(verdictOf(await attach(SIDS.A, 'Alpha second')), 'Alpha attaches a SECOND browser');
     const strip2 = await until(() => ev(`const L = live(${S(SIDS.A)})._browserLive; return L.state().stripShown && L.state().rows.length === 2;`), 8000);
-    ok(strip2 && (await ev(`return [...wm.windows.values()].filter((w) => w.type === 'browser-live' && w._browserLive.state().sessionId === ${S(SIDS.A)}).length;`)) === 1, 'ONE Agent browser window for Alpha, its strip now lists both of its browsers (no second window opened by itself)');
+    ok(gateOf(strip2) && (await ev(`return [...wm.windows.values()].filter((w) => w.type === 'browser-live' && w._browserLive.state().sessionId === ${S(SIDS.A)}).length;`)) === 1, 'ONE Agent browser window for Alpha, its strip now lists both of its browsers (no second window opened by itself)');
     const tabA2 = await ev(`const L = live(${S(SIDS.A)})._browserLive; const b = L.el().querySelector('.browser-live-strip-tab[data-ref="${P.A2.id}"]'); return b ? rect(b) : null;`);
     await click(centre(tabA2), { button: 'right' });
     const itemRect = await ev(`const m = document.querySelector('.context-menu'); const it = m && [...m.querySelectorAll('.context-menu-item')].find((x) => x.textContent.trim() === 'Open in new window'); return it ? rect(it) : null;`);
@@ -236,7 +236,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     if (itemRect) await click(centre(itemRect));
     const popped = await until(() => ev(`const ws = lives(${S(SIDS.A)}); return ws.length === 2 && ws.some((w) => w.id !== 'win-blive-' + ${S(SIDS.A)} && w._browserLive.state().currentRef === ${S(P.A2.id)} && w._browserLive.state().frames >= 1);`), 10000);
     const pop1 = await ev(`const ws = lives(${S(SIDS.A)}); const p = ws.find((w) => w.id !== 'win-blive-' + ${S(SIDS.A)}); return { id: p && p.id, chained: !!(p && p._tabChain), mainRef: live(${S(SIDS.A)})._browserLive.state().currentRef };`);
-    ok(popped && !pop1.chained && pop1.mainRef === P.A.id, 'D3: a SECOND Agent browser window of Alpha (a free window, the same strip, its OWN selection = Alpha second); the main one still shows Alpha work', S(pop1));
+    ok(gateOf(popped) && !pop1.chained && pop1.mainRef === P.A.id, 'D3: a SECOND Agent browser window of Alpha (a free window, the same strip, its OWN selection = Alpha second); the main one still shows Alpha work', S(pop1));
     // path ①: the window's own menu
     const bar1 = await ev(`return rect(wm.windows.get(${S(pop1.id)}).titleSpan);`);
     await click(centre(bar1), { button: 'right' });
@@ -244,7 +244,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     ok(!!fold1, 'its title-bar menu offers "Fold back into the Agent browser window"');
     if (fold1) await click(centre(fold1));
     const back1 = await until(() => ev(`return !wm.windows.has(${S(pop1.id)}) && lives(${S(SIDS.A)}).length === 1 && live(${S(SIDS.A)})._browserLive.state().currentRef === ${S(P.A2.id)};`), 6000);
-    ok(back1, 'path ① folded back: the popped-out window closed, the main one SELECTS the tab it showed (Alpha second)');
+    ok(verdictOf(back1), 'path ① folded back: the popped-out window closed, the main one SELECTS the tab it showed (Alpha second)');
     // path ②: pop out again, then drag its ICON onto the group — the one drag exception folds back
     const tabA1 = await ev(`const L = live(${S(SIDS.A)})._browserLive; return rect(L.el().querySelector('.browser-live-strip-tab[data-ref="${P.A.id}"]'));`);
     await click(centre(tabA1), { button: 'right' });
@@ -261,7 +261,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await mouse('mouseReleased', to.x, to.y, { button: 'left', clickCount: 1 });
     const back2 = await until(() => ev(`return !wm.windows.has(${S(pop2.id)}) && lives(${S(SIDS.A)}).length === 1 && live(${S(SIDS.A)})._browserLive.state().currentRef === ${S(P.A.id)};`), 6000);
     const chainAfter = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return { tabs: ch.tabs.length, lives: ch.tabs.filter((id) => wm.windows.get(id).type === 'browser-live').length };`);
-    ok(back2 && chainAfter.lives === 2, 'path ② the ICON dropped on the group FOLDED BACK: the window closed, the main one shows its tab — the group still holds exactly one view per session (never a chain of two views of one session)', S({ back2, chainAfter }));
+    ok(gateOf(back2) && chainAfter.lives === 2, 'path ② the ICON dropped on the group FOLDED BACK: the window closed, the main one shows its tab — the group still holds exactly one view per session (never a chain of two views of one session)', S({ back2, chainAfter }));
     // path ③ (lane P verify, finding 3): fold back the window the user is DRIVING — the takeover moves with it (a
     // `pass` to the main window's view before the close): the keeper still says user, the main window drives, no
     // viewer-left handback, no For-you item. Control (a runtime neuter of the as-shipped order — switch, then close
@@ -286,9 +286,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await sleep(400);
     const main3 = await ev(`const L = live(${S(SIDS.A)})._browserLive.state(); return { ref: L.currentRef, mode: L.mode, mine: L.mine, badge: L.badge };`);
     const todos3 = ((await j('GET', '/api/user-todos')).json || {}).todos || [];
-    ok(!!fold3 && back3 && main3.mode === 'takeover' && main3.mine && (await inputA2()) === 'user', 'path ③ folding back the window you DRIVE keeps your control: the main window shows that browser in takeover, yours — the keeper still says user', S(main3));
+    ok(!!fold3 && gateOf(back3) && main3.mode === 'takeover' && gateOf(main3.mine) && (await inputA2()) === 'user', 'path ③ folding back the window you DRIVE keeps your control: the main window shows that browser in takeover, yours — the keeper still says user', S(main3));
     ok(!/handed back to the agent/.test(journal.slice(mark3)) && todos3.length === todos0.length, 'path ③ …nothing was handed back (no viewer-left handback in the journal) and no For-you item appeared', journal.slice(mark3).split('\n').filter((l) => /handed back|passed from view/.test(l)).join(' | '));
-    ok(/control passed from view \d+ to view \d+/.test(journal.slice(mark3)), 'path ③ …the journal names the pass (view → view)');
+    ok(verdictOf(/control passed from view \d+ to view \d+/.test(journal.slice(mark3))), 'path ③ …the journal names the pass (view → view)');
     await ev(`live(${S(SIDS.A)})._browserLive.send({ type: 'handback' }); return true;`);
     await until(async () => (await inputA2()) === 'agent', 5000);
     // the control: the as-shipped fold-back ORDER (switch the main one, close the driven one, no pass)
@@ -296,7 +296,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const mark4 = journal.length;
     await ev(`const p = wm.windows.get(${S(pop4)}); live(${S(SIDS.A)})._browserLive.switchTo(p._browserLive.state().currentRef); wm.closeWindow(p.id); return true;`);
     await until(async () => (await inputA2()) === 'agent', 6000);
-    ok((await inputA2()) === 'agent' && /handed back to the agent \(viewer-left/.test(journal.slice(mark4)), 'path ③ CONTROL: the pre-fix order (switch, close, no pass) hands the browser back to the agent (viewer-left) — the leg above is red on it', journal.slice(mark4).split('\n').filter((l) => /handed back/.test(l)).join(' | '));
+    ok((await inputA2()) === 'agent' && verdictOf(/handed back to the agent \(viewer-left/.test(journal.slice(mark4))), 'path ③ CONTROL: the pre-fix order (switch, close, no pass) hands the browser back to the agent (viewer-left) — the leg above is red on it', journal.slice(mark4).split('\n').filter((l) => /handed back/.test(l)).join(' | '));
     await ev(`const L = live(${S(SIDS.A)})._browserLive; L.switchTo(${S(P.A.id)}); return true;`);
     await until(() => ev(`return live(${S(SIDS.A)})._browserLive.state().currentRef === ${S(P.A.id)} && live(${S(SIDS.A)})._browserLive.state().connected;`), 6000);
 
@@ -310,28 +310,28 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await sleep(800);
     const capOfS = async (sid) => ((await j('GET', `/api/browser/session/${sid}`)).json || {}).cap || null;
     const inG = await capOfS(SIDS.E2), outG = await capOfS(SIDS.B);
-    ok(!!gid && !!SIDS.E2 && inG && inG.cap === 2 && inG.origin === 'task-group' && inG.explicit === null, 'a conversation CREATED into the group starts with the group\'s default cap (2, origin task-group)', S({ gid, inG }));
-    ok(outG && outG.origin !== 'task-group', 'a conversation already RUNNING outside it is untouched', S(outG));
+    ok(!!gid && !!SIDS.E2 && gateOf(inG) && inG.cap === 2 && inG.origin === 'task-group' && inG.explicit === null, 'a conversation CREATED into the group starts with the group\'s default cap (2, origin task-group)', S({ gid, inG }));
+    ok(gateOf(outG) && outG.origin !== 'task-group', 'a conversation already RUNNING outside it is untouched', S(outG));
     await j('PATCH', `/api/tasks/${gid}`, { browserCap: 5 });
     await sleep(300);
     const inG2 = await capOfS(SIDS.E2);
-    ok(inG2 && inG2.cap === 2 && inG2.origin === 'task-group', 'the group\'s default edited to 5 while that conversation RUNS: it keeps the 2 it started with (a running agent is never refused mid-turn by a group edit)', S(inG2));
+    ok(gateOf(inG2) && inG2.cap === 2 && inG2.origin === 'task-group', 'the group\'s default edited to 5 while that conversation RUNS: it keeps the 2 it started with (a running agent is never refused mid-turn by a group edit)', S(inG2));
 
     // ── 4 · reconnect ──
     console.log('— 4 · a reload restores the group and every live view reconnects');
     await ev(`const ch = chat(${S(SIDS.A)})._tabChain; const i = ch.tabs.indexOf(${S(ids.B)}); wm.switchTab(ch, i); return true;`); // left Bravo ⇒ the right follows to Bravo's browser
     const before4 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return { pair: ch.split.pair, left: ch.split.left, right: ch.split.right };`);
     await sleep(3500); // past the 2 s autosave debounce
-    ok(await boot(`http://127.0.0.1:${PORT}/?r=1`), 'the page reloaded');
+    ok(verdictOf(await boot(`http://127.0.0.1:${PORT}/?r=1`)), 'the page reloaded');
     const restored = await until(() => ev(`const A = chat(${S(SIDS.A)}); const ch = A && A._tabChain; const la = live(${S(SIDS.A)}), lb = live(${S(SIDS.B)}); return !!(ch && la && lb && la._tabChain === ch && lb._tabChain === ch && la._browserLive.state().connected && lb._browserLive.state().connected && la._browserLive.state().frames >= 1 && lb._browserLive.state().frames >= 1);`), 25000);
     const after4 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; const la = live(${S(SIDS.A)}), lb = live(${S(SIDS.B)}); const st = (w) => w && w._browserLive ? (({ connected, frames, currentRef, error }) => ({ connected, frames, currentRef, error: error && (error.code || error.state) }))(w._browserLive.state()) : null; return ch ? { layout: ch.layout, pair: ch.split && ch.split.pair, left: ch.split && ch.split.left, right: ch.split && ch.split.right, la: st(la), lb: st(lb), inChain: [la && la._tabChain === ch, lb && lb._tabChain === ch] } : null;`);
-    ok(restored && after4 && after4.layout === 'split' && S(after4.pair) === S(before4.pair) && S(after4.left) === S(before4.left) && S(after4.right) === S(before4.right), 'the group comes back whole (members, sides, the shown pair) and both live views reconnect and draw', S({ before4, after4 }));
+    ok(gateOf(restored) && gateOf(after4) && after4.layout === 'split' && S(after4.pair) === S(before4.pair) && S(after4.left) === S(before4.left) && S(after4.right) === S(before4.right), 'the group comes back whole (members, sides, the shown pair) and both live views reconnect and draw', S({ before4, after4 }));
 
     // ── 5 · phone ──
     console.log('— 5 · phone (390×844): one pane; a switch there never makes the other side follow');
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
     await send('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' });
-    if (ok(await boot(`http://127.0.0.1:${PORT}/?m=1`), 'the app booted at 390×844')) {
+    if (ok(verdictOf(await boot(`http://127.0.0.1:${PORT}/?m=1`)), 'the app booted at 390×844')) {
       await until(() => ev(`const A = chat(${S(SIDS.A)}); return !!(A && A._tabChain && live(${S(SIDS.A)}));`), 20000);
       // S4 verify r1: the phone displays ONLY the active window (a split host no longer shows unless it is the one on screen —
       // before, EVERY split host was displayed and this leg passed with the last-created live view on screen too) ⇒ the group
@@ -354,4 +354,4 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   }
 })().catch((e) => ok(false, 'the suite threw', e && (e.stack || e.message)));
 
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -33,7 +33,7 @@ import os from 'node:os';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0, skipped = 0;   // skipped: r5135 law 1's named skips (⑫: a plant never read)
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -129,7 +129,7 @@ parentPort.on('message', (m) => {
     const w3 = SW.create({ log: { warn() {} } }), st3 = CS.createChannelStore({ dir, log: { warn() {}, log() {} }, writer: w3 });
     const h1 = st3.index.peek('a/h1'), h2 = st3.index.peek('a/h2'); try { st3.close(); } catch { } w3.stop();
     const t = journalOf(dir);
-    ok(h1 && h1.title === 'by hand' && h2 && h2.title === 'next' && (!t || (t.endsWith('\n') && readable(t))) && said.some((l) => /its last line had no newline/.test(l)),
+    ok(gateOf(h1) && h1.title === 'by hand' && gateOf(h2) && h2.title === 'next' && (!t || (gateOf(t.endsWith('\n')) && gateOf(readable(t)))) && verdictOf(said.some((l) => /its last line had no newline/.test(l))),
       'MUST 1: a journal edited by hand to end without its newline — the load says so, the next act never glues to it, a restart reads both', { h1, h2, said: said.slice(0, 2), tail: t.slice(-120) });
   }
   fs.rmSync(T, { recursive: true, force: true });
@@ -173,9 +173,9 @@ parentPort.on('message', (m) => {
     return { code, why, line: said.find((l) => /not on disk yet/.test(l)) || '' };
   };
   const [q, f] = await Promise.all([run(false), run(true)]);   // side by side: each its own dir, writer and thread
-  ok(q.code === 'not-durable' && q.why && q.why.why === 'queued' && q.why.ahead >= 1 && /its write is still queued behind at least \d+ other writes? — the storage is slow/.test(q.line) && !/failed/.test(q.line),
+  ok(q.code === 'not-durable' && gateOf(q.why) && q.why.why === 'queued' && q.why.ahead >= 1 && gateOf(/its write is still queued behind at least \d+ other writes? — the storage is slow/.test(q.line)) && !/failed/.test(q.line),
     `true words 4: an act still QUEUED at durable()'s bound (here 100 ms; 150 ms a write, ${q.why ? q.why.ahead : '?'} ahead) is said as waiting: «${q.line.slice(0, 220)}»`, q);
-  ok(f.code === 'not-durable' && f.why && f.why.why === 'failed' && /its write failed — kept, retried/.test(f.line), `true words 4: an act whose write FAILED is said as failed: «${f.line.slice(0, 160)}»`, f);
+  ok(f.code === 'not-durable' && gateOf(f.why) && f.why.why === 'failed' && verdictOf(/its write failed — kept, retried/.test(f.line)), `true words 4: an act whose write FAILED is said as failed: «${f.line.slice(0, 160)}»`, f);
   fs.rmSync(T, { recursive: true, force: true });
 }
 // ── ⑧ ROUND 4 — true words 5: the bound line after the index LANDED; the load says a partial row and a wrong-type table ──
@@ -213,7 +213,7 @@ parentPort.on('message', (m) => {
       const landedAt = said.length;
       for (let i = 0; i < 6; i++) { try { await st.index.update(() => { st.index.entry('a', 'b0').note = 'm' + i + 'y'.repeat(400); }, { durable: true }); } catch { } }
       const after = said.slice(landedAt).filter((l) => /past its bound/.test(l));
-      ok(before >= 1 && after.length >= 1 && after.every((l) => !/has not landed since/.test(l)), `true words 5: past the journal's bound after the index LANDED, the line is a new episode's — never «the index has not landed since» (${after.length} said after the landing)`, { before, after: after.map((l) => l.slice(0, 160)) });
+      ok(before >= 1 && after.length >= 1 && verdictOf(after.every((l) => !/has not landed since/.test(l))), `true words 5: past the journal's bound after the index LANDED, the line is a new episode's — never «the index has not landed since» (${after.length} said after the landing)`, { before, after: after.map((l) => l.slice(0, 160)) });
     } finally { try { st.close(); } catch { } w.stop(); }
   }
   { const dir = path.join(T, 'odd'); fs.mkdirSync(dir, { recursive: true });
@@ -228,7 +228,7 @@ parentPort.on('message', (m) => {
     const st2 = CS.createChannelStore({ dir, log: { warn: (l) => said.push(String(l)), log() {} }, writer: w2 });
     const row = st2.index.peek('a/w0'); try { st2.close(); } catch { } w2.stop();
     const line = said.find((l) => /index-acts\.ndjson:/.test(l)) || '';
-    ok(/1 row not a whole conversation row \(no key of its own\) applied as written/.test(line) && /1 top-level table of another type than the index's own not applied \(the index's kept\)/.test(line) && row && row.title === 'partial',
+    ok(gateOf(/1 row not a whole conversation row \(no key of its own\) applied as written/.test(line)) && gateOf(/1 top-level table of another type than the index's own not applied \(the index's kept\)/.test(line)) && gateOf(row) && row.title === 'partial',
       `true words 5: the load SAYS a partial row over a whole one and a top-level table of the wrong type: «${line.slice(0, 260)}»`, { line, row });
   }
   fs.rmSync(T, { recursive: true, force: true });
@@ -257,7 +257,7 @@ console.log('⑧ round 4 — true words 2: the exit hands every moved store to t
   try {
     if (src.split(FROM).length === 2) { fs.writeFileSync(mp, editAnchor(editAnchor(src, FROM, "const r = writeHere(s, p, since) ? 'ok' : 'failed';", "src/store-writer.js").replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`), /__dirname/g, JSON.stringify(path.join(REPO, 'src')), "src/store-writer.js")); mut = run(require(mp)); }
   } finally { }
-  ok(live.written.length === 3 && !live.calls.length && mut && mut.calls.some((c) => /^(writeSync|renameSync|openSync)/.test(c)),
+  ok(live.written.length === 3 && !live.calls.length && gateOf(mut) && verdictOf(mut.calls.some((c) => /^(writeSync|renameSync|openSync)/.test(c))),
     `true words 2: at the exit the three moved stores were written by the THREAD — the main thread's fs saw ${live.calls.length} write calls; the MUTANT that writes them on the main thread is red by name (${mut ? mut.calls.slice(0, 4).join(', ') : 'its anchor is gone'})`, { live, mut });
   fs.rmSync(T, { recursive: true, force: true });
 }
@@ -292,7 +292,7 @@ console.log('round 6\'s amend: a wait for a write ends when the write ends; the 
     // 50 ms the thread's OWN write took (a 56 ms write on a loaded machine: one) — the red (the notify on the wrong cell) still ends
     // EVERY fast write's wait by its poll
     const bad = rows.filter((r) => r.timedOut > Math.floor((Number(r.writeMs) || 0) / 50)), waits = rows.reduce((n, r) => n + r.waits, 0);
-    ok(rows.every((r) => r.onDisk) && !bad.length, `THE ONE FIX: 20 runtime flushSync of fast writes on the writer's real thread — ${waits} waits, ${bad.length} of the 20 flushes had a wait end by its 50 ms poll beyond its own write's time (a wait per 50 ms the thread's write took; d468bf5b1: 20 of 20)`, { bad: bad.slice(0, 5), rows: rows.slice(0, 3) });
+    ok(gateOf(rows.every((r) => r.onDisk)) && !bad.length, `THE ONE FIX: 20 runtime flushSync of fast writes on the writer's real thread — ${waits} waits, ${bad.length} of the 20 flushes had a wait end by its 50 ms poll beyond its own write's time (a wait per 50 ms the thread's write took; d468bf5b1: 20 of 20)`, { bad: bad.slice(0, 5), rows: rows.slice(0, 3) });
     w.stop();
   }
   // ITEM 2 — a store a write's own callback dirties DURING the exit's last pass is written; one that keeps changing is named
@@ -305,7 +305,7 @@ console.log('round 6\'s amend: a wait for a write ends when the write ends; the 
     w.beginExit(); w.exitFlush({ only: 'rank0' });
     const r = w.exitFlush({});
     const line = said.find((l) => /^\[store-write\] exit: /.test(l)) || '';
-    ok(fs.existsSync(b) && r.all.written.includes('b.write') && /NOT written: c\.write — it changed again during the exit's last pass 5 times — its last change is not written/.test(line),
+    ok(gateOf(fs.existsSync(b)) && gateOf(r.all.written.includes('b.write')) && verdictOf(/NOT written: c\.write — it changed again during the exit's last pass 5 times — its last change is not written/.test(line)),
       `ITEM 2: a store the index-like callback dirtied during the last pass is WRITTEN (b.write on disk, in the line); a store that changes at its every write is NAMED after 5 rounds («${line.slice(0, 160)}…»)`, { written: r.all.written, left: r.all.left, line });
     w.stop();
   }
@@ -318,8 +318,8 @@ console.log('round 6\'s amend: a wait for a write ends when the write ends; the 
     w.dirty(dirAt, { name: 'dir.write', produce: () => '{"d":1}', debounceMs: 600000 });
     w.beginExit(); w.exitFlush({ only: 'rank0' }); w.exitFlush({});
     const slowLine = said.find((l) => /slow\.write took/.test(l)) || '', failLine = said.find((l) => /dir\.write not written/.test(l)) || '', exitLine = said.find((l) => /^\[store-write\] exit: /.test(l)) || '';
-    ok(/the exit waited for it \(the main thread blocked\)$/.test(slowLine) && !/bound/.test(slowLine), `ITEM 3: a slow exit write — «${slowLine.slice(slowLine.indexOf(' — ') + 3)}» (no bound: there is none)`, said);
-    ok(/dir\.write not written \((EISDIR|ENOTEMPTY|EEXIST); attempt 1\) — not retried at the exit — named in its exit line$/.test(failLine) && /NOT written: dir\.write — the write failed \((EISDIR|ENOTEMPTY|EEXIST); 1 attempt\)/.test(exitLine) && !said.some((l) => /retrying in/.test(l)),
+    ok(gateOf(/the exit waited for it \(the main thread blocked\)$/.test(slowLine)) && !/bound/.test(slowLine), `ITEM 3: a slow exit write — «${slowLine.slice(slowLine.indexOf(' — ') + 3)}» (no bound: there is none)`, said);
+    ok(gateOf(/dir\.write not written \((EISDIR|ENOTEMPTY|EEXIST); attempt 1\) — not retried at the exit — named in its exit line$/.test(failLine)) && gateOf(/NOT written: dir\.write — the write failed \((EISDIR|ENOTEMPTY|EEXIST); 1 attempt\)/.test(exitLine)) && !said.some((l) => /retrying in/.test(l)),
       `ITEM 3: a failed exit write says its OWN code in both lines — «${failLine.slice(failLine.indexOf('('))}» · «${exitLine.slice(exitLine.indexOf('NOT written'), exitLine.indexOf('NOT written') + 70)}» — and nothing promises a retry`, said);
     w.stop();
   }
@@ -354,9 +354,9 @@ await (async () => {
     return { atExit, onDisk: fs.existsSync(f) };
   };
   const a = scene(require(SWF), 'cure');
-  ok(a.atExit === true && a.onDisk, '⑨ (a) an act\'s answer waiting on its write is answered (true) INSIDE the exit\'s flush — before the run that calls process.exit ends', a);
+  ok(a.atExit === true && verdictOf(a.onDisk), '⑨ (a) an act\'s answer waiting on its write is answered (true) INSIDE the exit\'s flush — before the run that calls process.exit ends', a);
   const aRed = scene(loadAs(real.replace(aSync, aLate)), 'red');
-  ok(aRed.atExit === null && aRed.onDisk, '⑨ (a) CONTROL: the answer on a microtask (the promise road, a mutant copy) ⇒ written, but NOT answered when the process leaves', aRed);
+  ok(aRed.atExit === null && verdictOf(aRed.onDisk), '⑨ (a) CONTROL: the answer on a microtask (the promise road, a mutant copy) ⇒ written, but NOT answered when the process leaves', aRed);
   // (b) a waiter whose version never lands (a store that changes again at every write of it, asked again each time): the
   // exit's last pass answers EVERY waiter before it returns — the last one false; a durable() asked after it answers at once
   {
@@ -368,7 +368,7 @@ await (async () => {
     let after = null; w.durable(c, { answer: (v) => { after = v; } });
     let clean = null; w.durable(path.join(T9, 'never-handed.json'), { answer: (v) => { clean = v; } });
     w.stop();
-    ok(atExit.length >= 2 && atExit.length === n && atExit.slice(0, -1).every((v) => v === true) && atExit[atExit.length - 1] === false,
+    ok(atExit.length >= 2 && atExit.length === n && gateOf(atExit.slice(0, -1).every((v) => v === true)) && atExit[atExit.length - 1] === false,
       `⑨ (b) every waiter is answered before exitFlush returns — ${atExit.length} asked, each landed one true, the change left by the last pass FALSE`, { atExit, writes: n });
     ok(after === false && clean === true, '⑨ (b) a durable() asked AFTER the exit\'s last pass answers at once — false for a change still owed (nothing writes it now), true for a file owing nothing', { after, clean });
   }
@@ -437,7 +437,7 @@ srv.listen(0, '127.0.0.1', () => process.stdout.write(srv.address().port + '\\n'
   // is asynchronous, so an answer made inside the exit's flush must go out unencoded (identityAtExit) — RED: without it, lost
   const full = (r) => { try { const o = JSON.parse(r.body); return r.status === 200 && o.saved === true && o.pad.length === 4096; } catch { return false; } };
   const f1 = await ask('gzip');
-  ok(full(f1) && !f1.enc, '⑨ (f) through express + compression() with gzip accepted: the answer made at the stop goes out UNENCODED and WHOLE (identityAtExit)', { status: f1.status, enc: f1.enc, len: (f1.body || '').length, error: f1.error });
+  ok(gateOf(full(f1)) && !f1.enc, '⑨ (f) through express + compression() with gzip accepted: the answer made at the stop goes out UNENCODED and WHOLE (identityAtExit)', { status: f1.status, enc: f1.enc, len: (f1.body || '').length, error: f1.error });
   const f2 = await ask('gzip-red');
   ok(!full(f2), '⑨ (f) CONTROL: the same answer without identityAtExit ⇒ compression\'s asynchronous zlib loses it when the process leaves', { status: f2.status, enc: f2.enc, len: (f2.body || '').length, error: f2.error });
   fs.rmSync(T9, { recursive: true, force: true });
@@ -542,7 +542,7 @@ setInterval(() => { }, 1000);
   ok(b.sig === 'SIGKILL' && b.disk === '{"v":"old"}' && !b.stepped && !b.owed,
     '⑩ (b) a REAL kill (SIGKILL) before the landing: the step NEVER ran and a start finds the OLD record — the act simply did not happen', b);
   const b1 = await killed(atOnce, 'at-once');
-  ok(b1.sig === 'SIGKILL' && b1.disk === '{"v":"old"}' && b1.stepped, '⑩ (b) CONTROL (a copy running the step at the act): after the same kill the step HAD run over the old record — red', b1);
+  ok(b1.sig === 'SIGKILL' && b1.disk === '{"v":"old"}' && verdictOf(b1.stepped), '⑩ (b) CONTROL (a copy running the step at the act): after the same kill the step HAD run over the old record — red', b1);
   fs.rmSync(T10, { recursive: true, force: true });
 })();
 
@@ -626,8 +626,8 @@ parentPort.on('message', (m) => {
     const todayPath = M11.write('src/store-writer-worker.js', anchored(srcW, 'try { writeAll(fs, fd, m.parts); try { fs.fsyncSync(fd); } catch (e) { noSync = unsynced(e); } } catch (e) { err = e; }', 'try { writeAll(fs, fd, m.parts); } catch (e) { err = e; }', 'today: a whole write renamed with no sync'), 'no-sync');   // stale-pins: kept (today's line, the RED copy)
     const direct = (W, name) => { const sc0 = scene(name, {}), m = { file: sc0.file, tmp: sc0.file + '.tmp-a', parts: ['{"v":2}'], mode: 0o600 }; const sc = sceneFs(m); let err = null; try { W.writeJob(m, sc.fs); } catch (e) { err = e; } sc.end(err); return orders(sc0.dir)[0]; };
     const a = direct(WK, 'a-real'), aRed = direct(require(todayPath), 'a-today');
-    ok(syncedFirst(a) && a.err === null && a.fileAfter === '{"v":2}' && !a.tempLeft, `⑪ (a) THE ORDER (a recording stand-in): a whole write syncs its temp before the close and the rename — ${said(a)}`, a);
-    ok(aRed && !aRed.order.includes('fsync temp') && aRed.fileAfter === '{"v":2}' && !syncedFirst(aRed), `⑪ (a) RED (today's writeJob): the store's name pointed at bytes never synced — ${said(aRed)}`, aRed);
+    ok(gateOf(syncedFirst(a)) && a.err === null && a.fileAfter === '{"v":2}' && !a.tempLeft, `⑪ (a) THE ORDER (a recording stand-in): a whole write syncs its temp before the close and the rename — ${said(a)}`, a);
+    ok(gateOf(aRed) && !aRed.order.includes('fsync temp') && aRed.fileAfter === '{"v":2}' && !syncedFirst(aRed), `⑪ (a) RED (today's writeJob): the store's name pointed at bytes never synced — ${said(aRed)}`, aRed);
 
     // (b) the exit's flush (through the thread) · (c) the main-only road + the loop CONTROL · (d) a failed sync · (e) the loop leg —
     // side by side, each its own folder, writer and thread
@@ -671,15 +671,15 @@ parentPort.on('message', (m) => {
       } finally { stop(); try { w.stop(); } catch { } }
     };
     const [b, c, d, e] = await Promise.all([exitRoad(), mainRoad(), failedSync(), loopLeg()]);
-    ok(syncedFirst(b.o) && b.o.fileAfter === '{"v":2}' && b.written.includes('exit.write'), `⑪ (b) the exit's flush (through the thread): ${said(b.o)}`, b);
-    ok(syncedFirst(c.o) && c.o.fileAfter === '{"v":2}' && c.landed === true && c.mode === 'main', `⑪ (c) the writer's main-only road (its thread gone): ${said(c.o)}`, c);
+    ok(gateOf(syncedFirst(b.o)) && b.o.fileAfter === '{"v":2}' && verdictOf(b.written.includes('exit.write')), `⑪ (b) the exit's flush (through the thread): ${said(b.o)}`, b);
+    ok(gateOf(syncedFirst(c.o)) && c.o.fileAfter === '{"v":2}' && c.landed === true && c.mode === 'main', `⑪ (c) the writer's main-only road (its thread gone): ${said(c.o)}`, c);
     const [d1, d2] = d.os;
-    ok(d.os.length === 2 && d1.err === 'EIO' && d1.order.includes('fsync temp') && !d1.order.some((x) => /^rename/.test(x)) && d1.fileAfter === '{"v":1}' && !d1.tempLeft
-      && d.first === false && d.owed === true && d.between === '{"v":1}' && d.again.includes('fail.write') && d.lines.some((l) => /fail\.write not written \(EIO; attempt 1\) — kept in memory, retrying in 1 s/.test(l))
-      && syncedFirst(d2) && d2.err === null && d.after === false && d.bytes === '{"v":2}',
+    ok(d.os.length === 2 && d1.err === 'EIO' && gateOf(d1.order.includes('fsync temp')) && !d1.order.some((x) => /^rename/.test(x)) && d1.fileAfter === '{"v":1}' && !d1.tempLeft
+      && d.first === false && d.owed === true && d.between === '{"v":1}' && gateOf(d.again.includes('fail.write')) && gateOf(d.lines.some((l) => /fail\.write not written \(EIO; attempt 1\) — kept in memory, retrying in 1 s/.test(l)))
+      && gateOf(syncedFirst(d2)) && d2.err === null && d.after === false && d.bytes === '{"v":2}',
       `⑪ (d) A SYNC THAT FAILS IS A FAILED WRITE: nothing renamed (${said(d1)}), the temp removed, the store still its previous whole version (${d1 && d1.fileAfter}); its waiter told «not landed» (${d.first}), the change still owed (${d.owed}) and said («${(d.lines.find((l) => /fail\.write/.test(l)) || '').slice(0, 110)}»); its next write landed it (${d.bytes})`, d);
-    ok(e.landed === true && e.o && e.o.order.includes('released by the main loop') && syncedFirst(e.o), `⑪ (e) THE SYNC IS OFF THE HUB'S LOOP: the thread's sync waited for a file only a turn of the main loop writes, and was released — the loop turned while it synced (${said(e.o)})`, e);
-    ok(c.o && c.o.order.includes('never released'), `⑪ (e) CONTROL: the same gate on the main-only road was never released in its 100 ms — a sync on the main thread holds the loop, the leg above can tell (${said(c.o)})`, c.o);
+    ok(e.landed === true && gateOf(e.o) && gateOf(e.o.order.includes('released by the main loop')) && verdictOf(syncedFirst(e.o)), `⑪ (e) THE SYNC IS OFF THE HUB'S LOOP: the thread's sync waited for a file only a turn of the main loop writes, and was released — the loop turned while it synced (${said(e.o)})`, e);
+    ok(gateOf(c.o) && verdictOf(c.o.order.includes('never released')), `⑪ (e) CONTROL: the same gate on the main-only road was never released in its 100 ms — a sync on the main thread holds the loop, the leg above can tell (${said(c.o)})`, c.o);
   } finally { fs.rmSync(T11, { recursive: true, force: true }); }
 })();
 
@@ -711,7 +711,7 @@ await (async () => {
   try {
     const CODES = [...FC.SYNC_UNSUPPORTED].sort(), LET_BE = ['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'];   // the folder sync's own let-be codes of the set (unchanged)
     const wsrc = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf8'), swsrc = fs.readFileSync(path.join(REPO, 'src/store-writer.js'), 'utf8');
-    ok(CODES.join() === 'EINVAL,ENOSYS,ENOTSUP,EOPNOTSUPP' && wsrc.includes("const { SYNC_UNSUPPORTED } = require('./fd-close.js');") && typeof WK.serve === 'function',
+    ok(CODES.join() === 'EINVAL,ENOSYS,ENOTSUP,EOPNOTSUPP' && gateOf(wsrc.includes("const { SYNC_UNSUPPORTED } = require('./fd-close.js');")) && typeof WK.serve === 'function',
       `⑫ ONE SET FOR BOTH DOORS: the writer's thread reads the hub door's own constant (${CODES.join(', ')}) — no list of its own; its answer is one exported function`);
     const PLACE = path.join(T12, 'placed-fs.cjs');
     fs.writeFileSync(PLACE, `'use strict';
@@ -761,7 +761,7 @@ require(${JSON.stringify(wkPath)}).serve(parentPort, new Int32Array(workerData.s
     const judged = (dirs, cond, name, detail) => {
       const unread = (dirs || []).filter((d) => !hitsOf(d));
       if (!dirs || !dirs.length || unread.length) { skipped++; console.log(`  ⊘ SKIP: ${name} — its plant was never read (${unread.length} of ${(dirs || []).length} placed folder(s)): not judged`); return; }
-      ok(cond, name, detail);
+      ok(verdictOf(cond), name, detail);
     };
     const noSyncOf = (lines) => lines.filter((l) => / its file system does not do a sync \(/.test(l));
     const wordsOf = (name, code) => `[store-write] ${FC.syncUnsupportedWords(name, code)} (said once: every later write of this writer whose sync is refused so lands the same way)`;
@@ -878,4 +878,4 @@ require(${JSON.stringify(wkPath)}).serve(parentPort, new Int32Array(workerData.s
 })();
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} named skip(s)` : ''})` : `\nALL PASS (${pass})${skipped ? ` — ${skipped} named skip(s)` : ''}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

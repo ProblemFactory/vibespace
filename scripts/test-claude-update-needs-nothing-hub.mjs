@@ -23,7 +23,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + e : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + e : '')); } };
 
 const PORT = await freePort();
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cunn-hub-'));
@@ -47,18 +47,18 @@ const get = async (p) => { try { const r = await fetch(`http://127.0.0.1:${PORT}
 try {
   let up = false;
   for (let i = 0; i < 120 && !up; i++) { if (await get('/api/home')) up = true; else await sleep(250); }
-  ok(up, 'the scratch hub is up', errText.slice(-400));
+  ok(verdictOf(up), 'the scratch hub is up', errText.slice(-400));
   const t0 = Date.now();
   let models = null;
   while (Date.now() - t0 < 90e3) { const m = await get('/api/available-models'); if (m && Array.isArray(m.claude) && m.claude.some((r) => r.id === 'claude-fable-6')) { models = m.claude; break; } await sleep(1000); }
   const ids = (models || []).map((r) => r.id);
   ok(!!models, `the hub read the never-seen binary's own catalog on its existing --version tick (${Math.round((Date.now() - t0) / 1000)} s after boot)`, errText.slice(-400));
-  ok(['claude-fable-6', 'claude-fable-6[1m]', 'quill', 'quill[1m]', 'claude-quill-1[1m]'].every((id) => ids.includes(id)), '/api/available-models: the new model in its 1M form, the new family and its aliases', JSON.stringify(ids));
+  ok(verdictOf(['claude-fable-6', 'claude-fable-6[1m]', 'quill', 'quill[1m]', 'claude-quill-1[1m]'].every((id) => ids.includes(id))), '/api/available-models: the new model in its 1M form, the new family and its aliases', JSON.stringify(ids));
   const fa = (models || []).find((r) => r.id === 'fable');
-  ok(fa && fa.label === 'fable · Fable 6 · 1M', 'the alias row says what `fable` means on this CLI', JSON.stringify(fa));
+  ok(gateOf(fa) && fa.label === 'fable · Fable 6 · 1M', 'the alias row says what `fable` means on this CLI', JSON.stringify(fa));
   const pr = await get('/api/usage-stats/pricing');
   const t = pr && pr.pricing && pr.pricing.tiers, s = pr && pr.pricing && pr.pricing.sources;
-  ok(t && t['fable-6'] && t['fable-6'].input === 6 && t['fable-6'].output === 30 && s['fable-6'].from === 'catalog' && s['fable-6'].cli === '2.1.900' && t['quill-1'] && t['quill-1'].input === 1, '/api/usage-stats/pricing: Fable 6 and Quill 1 priced from the catalog, the source said', JSON.stringify({ f6: t && t['fable-6'], src: s && s['fable-6'] }));
+  ok(gateOf(t) && gateOf(t['fable-6']) && t['fable-6'].input === 6 && t['fable-6'].output === 30 && s['fable-6'].from === 'catalog' && s['fable-6'].cli === '2.1.900' && gateOf(t['quill-1']) && t['quill-1'].input === 1, '/api/usage-stats/pricing: Fable 6 and Quill 1 priced from the catalog, the source said', JSON.stringify({ f6: t && t['fable-6'], src: s && s['fable-6'] }));
   const disk = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'usage-history', 'pricing.json'), 'utf8'));
   ok(!('fable-6' in disk.tiers) && !('quill-1' in disk.tiers), 'nothing catalog-derived is written to the hub\'s pricing.json');
   // B-574d: the hub's store writer lands the ledger OFF its loop — the read waits ON THAT FACT (the file holding the read), its bound said by name
@@ -67,10 +67,10 @@ try {
   if (!led) console.log('  · HARNESS: data/cli-model-catalog.json never held the read within 30 s — the claim below reads a file that did not land');
   led = led || { binaries: {}, current: null };
   const cur = led.binaries[led.current];
-  ok(cur && cur.state === 'read' && cur.cli === '2.1.900' && cur.models.length === 26, 'data/cli-model-catalog.json holds the read (2.1.900, 26 models)', JSON.stringify(cur && { state: cur.state, cli: cur.cli, n: cur.models.length }));
+  ok(gateOf(cur) && cur.state === 'read' && cur.cli === '2.1.900' && cur.models.length === 26, 'data/cli-model-catalog.json holds the read (2.1.900, 26 models)', JSON.stringify(cur && { state: cur.state, cli: cur.cli, n: cur.models.length }));
   const tel = await get('/api/telemetry/summary?days=14&drift=1');
   const drift = ((tel && tel.drift) || []).map((r) => `${r.name}: ${r.detail}`);
-  ok(drift.includes('cli-unknown-model: claude-fable-6 · fable · Claude Code 2.1.900') && drift.includes('cli-unknown-model: claude-quill-1 · quill · Claude Code 2.1.900'), "Diagnostics' Harness drift rows name each new id (the maintainers hear first)", JSON.stringify(drift));
+  ok(gateOf(drift.includes('cli-unknown-model: claude-fable-6 · fable · Claude Code 2.1.900')) && verdictOf(drift.includes('cli-unknown-model: claude-quill-1 · quill · Claude Code 2.1.900')), "Diagnostics' Harness drift rows name each new id (the maintainers hear first)", JSON.stringify(drift));
   // LAW A (acceptance r1): what the hub read is in force from the FIRST answer after a restart — a second process over the
   // same data dir, with NO claude at all (so no --version tick can ever read anything), answers from the ledger at once
   try { srv.kill('SIGKILL'); } catch { }
@@ -84,8 +84,8 @@ try {
   const firstAnswerS = Math.round((Date.now() - tb) / 100) / 10;
   const m2 = await get2('/api/available-models'), p2 = await get2('/api/usage-stats/pricing');
   const ids2 = ((m2 && m2.claude) || []).map((r) => r.id);
-  ok(up2 && firstAnswerS < 20 && ids2.includes('claude-fable-6') && ids2.includes('claude-quill-1[1m]'), `a RESTART with no claude at all: the first answers (${firstAnswerS} s after start, before the 20 s tick) list the ledger's models`, JSON.stringify(ids2.slice(0, 12)));
-  ok(p2 && p2.pricing && p2.pricing.tiers['fable-6'] && p2.pricing.sources['fable-6'].from === 'catalog', '…and price from it (the Source column says «From Claude Code 2.1.900»)', JSON.stringify(p2 && p2.pricing && p2.pricing.sources && p2.pricing.sources['fable-6']));
+  ok(gateOf(up2) && firstAnswerS < 20 && gateOf(ids2.includes('claude-fable-6')) && verdictOf(ids2.includes('claude-quill-1[1m]')), `a RESTART with no claude at all: the first answers (${firstAnswerS} s after start, before the 20 s tick) list the ledger's models`, JSON.stringify(ids2.slice(0, 12)));
+  ok(gateOf(p2) && gateOf(p2.pricing) && gateOf(p2.pricing.tiers['fable-6']) && p2.pricing.sources['fable-6'].from === 'catalog', '…and price from it (the Source column says «From Claude Code 2.1.900»)', JSON.stringify(p2 && p2.pricing && p2.pricing.sources && p2.pricing.sources['fable-6']));
   // §L (moved from the fast drill): the box's OWN installed claude, read for real — never run (informational on the mirror)
   {
     const { readBinary } = require(path.join(repo, 'src/server/cli-model-catalog.js'));
@@ -95,10 +95,10 @@ try {
     else {
       const e = await readBinary(real, {});
       const good = e.state === 'read' && e.models.length >= 20 && e.refused.length === 0;
-      if (good || !process.env.GITHUB_ACTIONS) ok(good, `the installed claude ${e.cli} (built ${String(e.builtAt).slice(0, 10)}): ${e.models.length} models read in ${e.evidence.ms} ms, nothing refused — never run`, JSON.stringify({ state: e.state, reason: e.reason }));
+      if (good || !process.env.GITHUB_ACTIONS) ok(verdictOf(good), `the installed claude ${e.cli} (built ${String(e.builtAt).slice(0, 10)}): ${e.models.length} models read in ${e.evidence.ms} ms, nothing refused — never run`, JSON.stringify({ state: e.state, reason: e.reason }));
       else console.log('  - SKIP (informational on the mirror) the installed claude: ' + JSON.stringify(e.reason));
     }
   }
 } catch (e) { fail++; console.log('  ✗ the hub leg threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

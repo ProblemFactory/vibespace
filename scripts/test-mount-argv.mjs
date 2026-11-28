@@ -30,7 +30,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -88,8 +88,8 @@ try {
     return bad;
   });
   ok(census(PROV.rows).length === 0, `② every rclone row declares dirCache, poll < ttl, poll only on a ChangeNotify row (${PROV.rows.length} rows)`, census(PROV.rows).join('; '));
-  ok(['onedrive', 'drive'].every((id) => JSON.stringify(PROV.byId[id].dirCache) === '{"ttl":"5m","poll":"1m"}'), '② onedrive + drive = {5m, 1m} (rclone\'s own defaults for a polling backend)');
-  ok(PROV.rows.filter((r) => r.rclone !== false && !['onedrive', 'drive'].includes(r.id)).every((r) => JSON.stringify(r.dirCache) === '{"ttl":"30s"}'), '② every other rclone row = {ttl: 30s}, no poll');
+  ok(verdictOf(['onedrive', 'drive'].every((id) => JSON.stringify(PROV.byId[id].dirCache) === '{"ttl":"5m","poll":"1m"}')), '② onedrive + drive = {5m, 1m} (rclone\'s own defaults for a polling backend)');
+  ok(verdictOf(PROV.rows.filter((r) => r.rclone !== false && !['onedrive', 'drive'].includes(r.id)).every((r) => JSON.stringify(r.dirCache) === '{"ttl":"30s"}')), '② every other rclone row = {ttl: 30s}, no poll');
   for (const [id, ttl, poll] of [['od', '5m', '1m'], ['gd', '5m', '1m'], ['s3p', '30s', null], ['rlo', '30s', null], ['ro', '30s', null]]) {
     const a = argvOf(mgr, id);
     ok(cell(a, '--dir-cache-time') === ttl && cell(a, '--poll-interval') === poll, `② ${id}: --dir-cache-time ${ttl}${poll ? ' --poll-interval ' + poll : ', no --poll-interval'}`, JSON.stringify(a));
@@ -98,13 +98,13 @@ try {
 
   console.log('③ the s3 flag only on an s3 backend; a child builds from its parent\'s row');
   for (const id of ['od', 'gd', 'rlo', 'ro']) ok(!argvOf(mgr, id).includes(S3F), `③ ${id}: no s3 flag`);
-  ok(argvOf(mgr, 's3p').includes(S3F) && argvOf(mgr, 'rs3').includes(S3F), '③ s3 row + a raw rclone s3 record: the s3 flag');
+  ok(gateOf(argvOf(mgr, 's3p').includes(S3F)) && verdictOf(argvOf(mgr, 'rs3').includes(S3F)), '③ s3 row + a raw rclone s3 record: the s3 flag');
   const nos3 = makeMgr(MountManager, 'nos3', [{ id: 's', name: 's', type: 's3' }], ['vfs-fast-fingerprint']);
   ok(!argvOf(nos3, 's').includes(S3F), '③ an rclone without the flag never gets it (hasFlag gates)');
   const gdc = argvOf(mgr, 'gdc');
   ok(!gdc.includes(S3F) && cell(gdc, '--dir-cache-time') === '5m' && cell(gdc, '--poll-interval') === '1m', '③ a drive CHILD (parentId, no type): no s3 flag, its parent\'s 5m / 1m (/mnt/gdrive_39ai_shared)', JSON.stringify(gdc));
-  ok(argvOf(mgr, 's3c').includes(S3F), '③ an s3 child keeps the s3 flag');
-  ok(argvOf(mgr, 'ro').includes('--read-only') && !argvOf(mgr, 'od').includes('--read-only'), '③ mode ro ⇒ --read-only, rw ⇒ none');
+  ok(verdictOf(argvOf(mgr, 's3c').includes(S3F)), '③ an s3 child keeps the s3 flag');
+  ok(gateOf(argvOf(mgr, 'ro').includes('--read-only')) && !argvOf(mgr, 'od').includes('--read-only'), '③ mode ro ⇒ --read-only, rw ⇒ none');
 
   console.log('④ the rc socket');
   const run = path.join(D, 'run'); fs.mkdirSync(run, { mode: 0o700 });
@@ -113,9 +113,9 @@ try {
   const under = A.rcSocketPath({ id: 'od', dataDir: '/srv/data', xdgRuntimeDir: '/srv/data/run', uid: 1000, tmpBase: '/tmp' });
   ok(under.path === '/tmp/vs-mounts-1000/od.sock' && under.via === 'tmp', '④ a runtime dir under the data dir is skipped (the tmp rung)', JSON.stringify(under));
   const netfs = A.rcSocketPath({ id: 'od', dataDir: '/d', xdgRuntimeDir: '/run/user/1', uid: 1, network: () => true });
-  ok(netfs.path === null && /network filesystem/.test(netfs.why), '④ every rung on a network filesystem ⇒ no socket, refused by name', netfs.why);
+  ok(netfs.path === null && verdictOf(/network filesystem/.test(netfs.why)), '④ every rung on a network filesystem ⇒ no socket, refused by name', netfs.why);
   const both = A.rcSocketPath({ id: 'od', dataDir: '/tmp', xdgRuntimeDir: '', uid: 1, tmpBase: '/tmp' });
-  ok(both.path === null && /under the data dir/.test(both.why), '④ nothing outside the data dir ⇒ no socket', both.why);
+  ok(both.path === null && verdictOf(/under the data dir/.test(both.why)), '④ nothing outside the data dir ⇒ no socket', both.why);
   ok(A.rcSocketPath({ id: 'od', xdgRuntimeDir: '/' + 'x'.repeat(100), uid: 1 }).via === 'tmp' && A.rcSocketPath({ id: '../od' }).path === null, '④ the 107-byte sun_path bound skips a long rung; an id that is not a file name has no socket');
   for (const [name, o, want] of [['hasFlag', { rcSocket: '/r/x.sock' }, true], ['no rc-addr flag', { rcSocket: '/r/x.sock', hasFlag: () => false }, false], ['under dataDir', { rcSocket: '/d/x.sock', dataDir: '/d' }, false]]) {
     const a = A.rcloneMountArgs({ row: PROV.byId.onedrive, remote: 'VS:', mountpoint: '/m', cacheDir: '/c', hasFlag: (f) => RCLONE_1693.includes(f), ...o });
@@ -139,7 +139,7 @@ try {
   console.log('⑤ the twin: hub and device call the ONE builder');
   ok(JSON.stringify(DM.pullMountArgs('/m')) === JSON.stringify(['mount', 'vsdev:', '/m', '--read-only', '--dir-cache-time', '5s', '--vfs-cache-mode', 'minimal', '--timeout', '30s', '--contimeout', '10s', '--attr-timeout', '1s'])
     && JSON.stringify(DM.pullMountArgs('/m', '/c').slice(-2)) === '["--cache-dir","/c"]', '⑤ the device pull argv is today\'s, token for token (+ --cache-dir when given)');
-  ok(A.dirCacheOf(DM.PULL_ROW).ok && !DM.PULL_ROW.dirCache.poll && census([{ ...DM.PULL_ROW, rcloneType: 'webdav' }]).length === 0, '⑤ the pull row passes the census (webdav: no poll; 5 s = the held-file tick)');
+  ok(gateOf(A.dirCacheOf(DM.PULL_ROW).ok) && !DM.PULL_ROW.dirCache.poll && census([{ ...DM.PULL_ROW, rcloneType: 'webdav' }]).length === 0, '⑤ the pull row passes the census (webdav: no poll; 5 s = the held-file tick)');
   const CELLS = ['--dir-cache-time', '--poll-interval', '--rc-addr'];
   const drift = [...PROV.rows.filter((r) => r.rclone !== false), DM.PULL_ROW].filter((r) => {
     const o = { remote: 'VS:', mountpoint: '/m', cacheDir: '/c', hasFlag: () => true, rcSocket: '/r/s.sock' };
@@ -151,20 +151,20 @@ try {
   const codeOf = (f) => fs.readFileSync(path.join(REPO, f), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const strays = ['src/mounts.js', 'src/device-mount.js'].flatMap((f) => FLAGS.filter((fl) => codeOf(f).includes(`'${fl}'`)).map((fl) => `${f} ${fl}`));
   ok(strays.length === 0, '⑤ no mount flag literal in src/mounts.js or src/device-mount.js — only src/mount-argv.js writes them', strays.join(', '));
-  ok(FLAGS.filter((fl) => fl !== '--attr-timeout').every((fl) => codeOf('src/mount-argv.js').includes(`'${fl}'`)), '⑤ (census scope: the builder holds every one of them)');
+  ok(verdictOf(FLAGS.filter((fl) => fl !== '--attr-timeout').every((fl) => codeOf('src/mount-argv.js').includes(`'${fl}'`))), '⑤ (census scope: the builder holds every one of them)');
 
   console.log('⑥ the log survives a remount');
   const logOf = (g, id) => fs.readFileSync(path.join(g._logDir, id + '.log'), 'utf8');
   const say = (g, id, line) => { const fd = g._openMountLog(id); fs.writeSync(fd, line + '\n'); fs.closeSync(fd); };
   say(mgr, 'od', 'CRITICAL: daemon 1 last words'); say(mgr, 'od', 'NOTICE: daemon 2 up');
-  ok(/daemon 1 last words[\s\S]*daemon 2 up/.test(logOf(mgr, 'od')), '⑥ the previous daemon\'s last line is still in the log after a remount');
+  ok(verdictOf(/daemon 1 last words[\s\S]*daemon 2 up/.test(logOf(mgr, 'od'))), '⑥ the previous daemon\'s last line is still in the log after a remount');
   ok(mgr.tailMountLog('od', 2, { current: true }).join('|') === 'NOTICE: daemon 2 up', '⑥ tail {current}: the newest daemon\'s lines only (the start verdict reads this)', mgr.tailMountLog('od', 2, { current: true }).join('|'));
-  ok(mgr.tailMountLog('od', 3).some((l) => l.includes('daemon 1 last words')) && mgr.tailMountLog('od', 3).some((l) => l.startsWith(MountManager.LOG_MARK)), '⑥ tail: the dead daemon\'s last words + the spawn marker');
+  ok(gateOf(mgr.tailMountLog('od', 3).some((l) => l.includes('daemon 1 last words'))) && verdictOf(mgr.tailMountLog('od', 3).some((l) => l.startsWith(MountManager.LOG_MARK))), '⑥ tail: the dead daemon\'s last words + the spawn marker');
   fs.appendFileSync(path.join(mgr._logDir, 'od.log'), ('x'.repeat(99) + '\n').repeat(11000));
   const t0 = mgr.tailMountLog('od', 4);
-  ok(t0.length === 4 && t0.every((l) => l === 'x'.repeat(99)), '⑥ the tail is a bounded read of a 1 MB log');
+  ok(t0.length === 4 && verdictOf(t0.every((l) => l === 'x'.repeat(99))), '⑥ the tail is a bounded read of a 1 MB log');
   say(mgr, 'od', 'NOTICE: daemon 3 up');
-  ok(fs.statSync(path.join(mgr._logDir, 'od.log.1')).size > A.LOG_ROTATE_BYTES && /daemon 1 last words/.test(fs.readFileSync(path.join(mgr._logDir, 'od.log.1'), 'utf8')) && logOf(mgr, 'od').split('\n').length === 3, '⑥ past 1 MB the log rotates to <id>.log.1 before the spawn (nothing of it lost)');
+  ok(fs.statSync(path.join(mgr._logDir, 'od.log.1')).size > A.LOG_ROTATE_BYTES && gateOf(/daemon 1 last words/.test(fs.readFileSync(path.join(mgr._logDir, 'od.log.1'), 'utf8'))) && logOf(mgr, 'od').split('\n').length === 3, '⑥ past 1 MB the log rotates to <id>.log.1 before the spawn (nothing of it lost)');
   ok(mgr.tailMountLog('nope', 5).length === 0, '⑥ no log ⇒ []');
 
   console.log('⑦ _rcStats over a fake rclone');
@@ -174,7 +174,7 @@ try {
   mgr.rcloneBin = () => FAKE;
   process.env.XDG_RUNTIME_DIR = run;
   try {
-    ok(/no rc socket/.test((await mgr._rcStats(mgr._get('od'))).error || ''), '⑦ no socket ⇒ {error}, no child');
+    ok(verdictOf(/no rc socket/.test((await mgr._rcStats(mgr._get('od'))).error || '')), '⑦ no socket ⇒ {error}, no child');
     const sp = mgr._rcSocketPick(mgr._get('od')).path;
     const srv = net.createServer(); await new Promise((r) => srv.listen(sp, r));
     try {
@@ -184,7 +184,7 @@ try {
       const t1 = Date.now(), h = await mgr._rcStats(mgr._get('od'), 300);
       // the bound's own word (lane wall-clock-ratchet-down: `< 2500 ms` judged the machine): the 300 ms kill answered —
       // the fake left to run would print its stats after 5 s, no error; the ms are information
-      ok(/no answer in 300 ms/.test(h.error || '') && !h.stats, '⑦ a daemon that does not answer ⇒ {error} from the bound\'s own kill', `${h.error} ${Date.now() - t1} ms`);
+      ok(gateOf(/no answer in 300 ms/.test(h.error || '')) && !h.stats, '⑦ a daemon that does not answer ⇒ {error} from the bound\'s own kill', `${h.error} ${Date.now() - t1} ms`);
       fs.rmSync(path.join(D, 'hang'), { force: true });
     } finally { srv.close(); }
   } finally { if (env0 === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = env0; }
@@ -203,7 +203,7 @@ try {
   const childMut = makeMgr(require(MC.write('src/mounts.js', editAnchor(mSrc, EFF, 'const conn = this._connOf(m), row = rowOf(m);', "src/mounts.js"), 'child')).MountManager, 'mutc',
     [{ id: 'gd', name: 'gd', type: 'drive' }, { id: 'gdc', name: 'gdc', parentId: 'gd' }]);
   const gm = argvOf(childMut, 'gdc');
-  ok(gm.includes(S3F) && cell(gm, '--dir-cache-time') === '30s', '⑧ NEGATIVE CONTROL: a child built from rowOf(child) gets the s3 flag and the s3 row\'s 30 s (red)', JSON.stringify(gm));
+  ok(gateOf(gm.includes(S3F)) && cell(gm, '--dir-cache-time') === '30s', '⑧ NEGATIVE CONTROL: a child built from rowOf(child) gets the s3 flag and the s3 row\'s 30 s (red)', JSON.stringify(gm));
   const logMut = makeMgr(require(MC.write('src/mounts.js', editAnchor(mSrc, OPEN, "const fd = fs.openSync(f, 'w');", "src/mounts.js"), 'w')).MountManager, 'mutw', []);
   say(logMut, 'L', 'daemon 1 last words'); say(logMut, 'L', 'daemon 2 up');
   ok(!/daemon 1 last words/.test(logOf(logMut, 'L')), '⑧ NEGATIVE CONTROL: the log opened \'w\' again ⇒ the dead daemon\'s last words are gone (red)');
@@ -224,9 +224,9 @@ try {
   ok(JSON.stringify(hostArgs({ via: 'nfs', hostOs: 'macos', folderName: "Bob's notes/ü", readOnly: true })) === JSON.stringify(['nfsmount', 'vsdav:', '/m', '--daemon', '--log-file', '/L', '--log-level', 'NOTICE',
     '--volname', 'VibeSpace Bobs notes', '--vfs-cache-mode', 'off', '--read-only', '--dir-cache-time', '10s', '--timeout', '30s', '--contimeout', '10s']), '⑩ macOS ro over the nfs rung: nfsmount, the folder-named volume (only [\\w .-] kept), cache off + --read-only', JSON.stringify(hostArgs({ via: 'nfs', hostOs: 'macos', folderName: "Bob's notes/ü", readOnly: true })));
   const throws = (f) => { try { f(); return ''; } catch (e) { return String(e.message); } };
-  ok(/no "sshfs" rung/.test(throws(() => hostArgs({ via: 'sshfs' }))) && /onedrive row has no "nfs" rung/.test(throws(() => A.rcloneMountArgs({ row: PROV.byId.onedrive, remote: 'VS:', mountpoint: '/m', cacheDir: '/c', via: 'nfs' }))),
+  ok(gateOf(/no "sshfs" rung/.test(throws(() => hostArgs({ via: 'sshfs' })))) && verdictOf(/onedrive row has no "nfs" rung/.test(throws(() => A.rcloneMountArgs({ row: PROV.byId.onedrive, remote: 'VS:', mountpoint: '/m', cacheDir: '/c', via: 'nfs' })))),
     '⑩ a rung a row does not declare is refused by name (the hub rows: FUSE mount only)');
-  ok(/needs its log file/.test(throws(() => hostArgs({ logFile: null }))), '⑩ a --daemon row without its log file is refused (--daemon detaches stderr: the reason would be lost, inc-mtl78uhs)');
+  ok(verdictOf(/needs its log file/.test(throws(() => hostArgs({ logFile: null })))), '⑩ a --daemon row without its log file is refused (--daemon detaches stderr: the reason would be lost, inc-mtl78uhs)');
   ok(census([{ ...H, rcloneType: 'webdav' }]).length === 0 && JSON.stringify(H.dirCache) === '{"ttl":"10s"}', '⑩ the row passes the dirCache census (webdav: a ttl, no poll)');
   const WORDS = ['plain', 'two words', "Bob's", "''", '$HOME', '`id`', '"dq"', 'back\\slash', '', '*', '-n', 'a\nb', 'ü 名'];
   const splitBySh = (line) => execFileSync('sh', ['-c', `printf '%s\\0' ${line}`], { env: { PATH: '/usr/bin:/bin' } }).toString().split('\0').slice(0, -1);
@@ -276,11 +276,11 @@ try {
     const p = await pushOnce(c), tag = `${c.osKind} ${c.mode} ${p.sub} "${c.folder}"`;
     const nw = p.lines[0] || '', a = runSeen(p.old), b = runSeen(nw);
     ok(p.lines.length === 1 && p.r.method === (c.nfs ? 'rclone-nfs' : 'rclone-webdav'), `⑪ ${tag}: one sh line, rung ${p.r.method}`, JSON.stringify(p.lines));
-    ok(nw.startsWith(`${ENV} ${SETSID} '${RCLONE}' '${p.sub}' 'vsdav:' `) && nw.endsWith(` </dev/null >/dev/null 2>>'${p.logf}'`) && p.old.startsWith(`${ENV} ${SETSID} `),
+    ok(gateOf(nw.startsWith(`${ENV} ${SETSID} '${RCLONE}' '${p.sub}' 'vsdav:' `)) && gateOf(nw.endsWith(` </dev/null >/dev/null 2>>'${p.logf}'`)) && verdictOf(p.old.startsWith(`${ENV} ${SETSID} `)),
       `⑪ ${tag}: the caller composes only env + the setsid prefix + shellWords + the fd redirect`, nw);
-    ok(a.code === 0 && b.code === 0 && JSON.stringify(a.argv) === JSON.stringify(b.argv) && JSON.stringify(a.env) === JSON.stringify(b.env) && a.argv.includes(p.mp),
+    ok(a.code === 0 && b.code === 0 && JSON.stringify(a.argv) === JSON.stringify(b.argv) && JSON.stringify(a.env) === JSON.stringify(b.env) && verdictOf(a.argv.includes(p.mp)),
       `⑪ ${tag}: sh hands rclone the SAME words in the SAME order + the same env (${(b.argv || []).length} words)`, `old ${JSON.stringify(a.argv)} ${a.why || ''} new ${JSON.stringify(b.argv)} ${b.why || ''}`);
-    ok(c.osKind === 'macos' ? (b.argv || []).join(' ').includes(`--volname VibeSpace ${c.folder.replace(/[^\w .-]/g, '')} `) : !(b.argv || []).includes('--volname'), `⑪ ${tag}: ${c.osKind === 'macos' ? 'the folder-named volume' : 'no --volname'}`);
+    ok(c.osKind === 'macos' ? verdictOf((b.argv || []).join(' ').includes(`--volname VibeSpace ${c.folder.replace(/[^\w .-]/g, '')} `)) : !(b.argv || []).includes('--volname'), `⑪ ${tag}: ${c.osKind === 'macos' ? 'the folder-named volume' : 'no --volname'}`);
   }
   const q = await pushOnce({ osKind: 'linux', mode: 'rw', folder: "Bob's notes" });
   const qa = runSeen(q.old), qb = runSeen(q.lines[0] || '');
@@ -333,23 +333,23 @@ try {
   const files = all.filter((f) => CAN_HIT.test(f.src));
   const real = judge(all), agentd = scope.filter((f) => f.startsWith('src/agentd/')).length;
   ok(real.red.length === 0, `⑫ twin-sets = 0: ${scope.length} src/ modules walked (${agentd} under src/agentd), ${files.length} spell rclone or a mount flag, ${real.tokens} string tokens judged — no mount argv outside the builder`, real.red.join('; '));
-  ok(agentd > 0 && files.some((f) => f.rel.startsWith('src/agentd/')) && real.excused >= 1 && files.some((f) => f.rel === 'src/machine-mounts.js'), '⑫ (the scope is derived and live: the daemon\'s modules walked + judged, xpra\'s --daemon=no seen and excused, machine-mounts.js judged)', `${agentd} agentd, ${real.excused} excused`);
+  ok(agentd > 0 && gateOf(files.some((f) => f.rel.startsWith('src/agentd/'))) && real.excused >= 1 && verdictOf(files.some((f) => f.rel === 'src/machine-mounts.js')), '⑫ (the scope is derived and live: the daemon\'s modules walked + judged, xpra\'s --daemon=no seen and excused, machine-mounts.js judged)', `${agentd} agentd, ${real.excused} excused`);
   const plant = (rel, extra) => { if (!scope.includes(rel)) throw new Error(`control target ${rel} is not in the scope`); return judge(all.map((f) => (f.rel === rel ? { rel, src: f.src + '\n' + extra + '\n' } : f))).red; };
   // the base's own line (ff33cdf1e machine-mounts.js:353), planted back VERBATIM
   const BASE_353 = "const rcloneCmd = (sub) => `${env} $(command -v setsid >/dev/null 2>&1 && echo setsid) \"${rclone}\" ${sub} vsdav: '${mp}' --daemon --log-file '${logf}' --log-level NOTICE ${volname} --vfs-cache-mode ${mode === 'rw' ? 'writes' : 'off'} ${roFlag} --dir-cache-time 10s --timeout 30s --contimeout 10s </dev/null >/dev/null 2>>'${logf}'`;";
   const c1 = plant('src/machine-mounts.js', BASE_353);
-  ok(c1.length === 3 && c1.every((x) => x.startsWith('src/machine-mounts.js:')), '⑫ CONTROL: the base\'s hand-built line planted back ⇒ red (its --daemon, --vfs-cache-mode, --dir-cache-time cells)', c1.join('; '));
+  ok(c1.length === 3 && verdictOf(c1.every((x) => x.startsWith('src/machine-mounts.js:'))), '⑫ CONTROL: the base\'s hand-built line planted back ⇒ red (its --daemon, --vfs-cache-mode, --dir-cache-time cells)', c1.join('; '));
   const c2 = plant('src/mounts.js', "execFile(this.rcloneBin(), ['mount', remote, mp, '--read-only']);");
-  ok(c2.length === 1 && /"mount" subcommand cell/.test(c2[0]), '⑫ CONTROL: a hand-built argv array (the subcommand cell beside rclone, no mount flag) ⇒ red', c2.join('; '));
+  ok(c2.length === 1 && verdictOf(/"mount" subcommand cell/.test(c2[0])), '⑫ CONTROL: a hand-built argv array (the subcommand cell beside rclone, no mount flag) ⇒ red', c2.join('; '));
   ok(!files.some((f) => f.rel === 'src/agentd/mux.js'), '⑫ (control target: src/agentd/mux.js spells neither rclone nor a mount flag today — the prefilter skips it)');
   const c3 = plant('src/agentd/mux.js', 'const line = `rclone mount vsdav: ${mp}`;');
-  ok(c3.length === 1 && /^src\/agentd\/mux\.js:\d+ shell/.test(c3[0]), '⑫ CONTROL: a literal `rclone mount` shell line planted in a daemon module the prefilter skipped ⇒ red (the filter reads the planted text)', c3.join('; '));
+  ok(c3.length === 1 && verdictOf(/^src\/agentd\/mux\.js:\d+ shell/.test(c3[0])), '⑫ CONTROL: a literal `rclone mount` shell line planted in a daemon module the prefilter skipped ⇒ red (the filter reads the planted text)', c3.join('; '));
   const c4 = plant('src/lib/sidebar-mounts.js', "tr('Then: rclone mount {name}: /mnt/x');");
-  ok(c4.length === 1 && /prose row .*6 sites, declared 5/.test(c4[0]), '⑫ CONTROL: a sixth copy of the declared prose ⇒ red (the row counts its sites)', c4.join('; '));
+  ok(c4.length === 1 && verdictOf(/prose row .*6 sites, declared 5/.test(c4[0])), '⑫ CONTROL: a sixth copy of the declared prose ⇒ red (the row counts its sites)', c4.join('; '));
   const c5 = plant('src/desktop-display.js', "spawn(rcloneBin, [mountWord, remote, mp, '--daemon']);");
-  ok(c5.length === 1 && /mount flag "--daemon"/.test(c5[0]), '⑫ CONTROL: a bare rclone --daemon beside the excused xpra --daemon=no ⇒ red', c5.join('; '));
+  ok(c5.length === 1 && verdictOf(/mount flag "--daemon"/.test(c5[0])), '⑫ CONTROL: a bare rclone --daemon beside the excused xpra --daemon=no ⇒ red', c5.join('; '));
 } finally {
   fs.rmSync(D, { recursive: true, force: true });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

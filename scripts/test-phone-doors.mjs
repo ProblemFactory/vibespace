@@ -33,7 +33,7 @@ const P = require(path.join(REPO, 'src/phone-doors.js'));
 const F = require(path.join(REPO, 'src/files-door.js'));
 const PC = require(path.join(REPO, 'src/path-candidates.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 console.log('① the twin census — every desktop door has a phone twin');
@@ -44,16 +44,16 @@ const sources = Object.fromEntries(files.map((f) => [f, read(f)]));
 const v = P.twinCensus({ doors, sources });
 console.log(`    doors (${doors.length}): ${doors.join(' ')}`);
 for (const r of P.PHONE_TWINS) console.log(`    ${r.door.padEnd(20)} → ${r.twins ? r.twins.map((t) => t.where).join(' · ') : 'none — ' + r.why}`);
-ok(doors.length >= 20 && ['btn-file-explorer', 'btn-browser', 'btn-desktop', 'btn-desktop-apps', 'rail:channels', 'rail:browser', 'rail:settings'].every((d) => doors.includes(d)),
+ok(doors.length >= 20 && verdictOf(['btn-file-explorer', 'btn-browser', 'btn-desktop', 'btn-desktop-apps', 'rail:channels', 'rail:browser', 'rail:settings'].every((d) => doors.includes(d))),
   `the census reads the doors from the source: the toolbar's buttons + the rail's items (${doors.length}) — Files / Web view / Desktop / Apps / Channels / Agent browser / Settings among them`, doors);
-ok(v.ok, `every desktop door has a phone twin whose anchor is in its file and not turned off on a phone (${P.PHONE_TWINS.length} rows, ${P.PHONE_TWINS.reduce((a, r) => a + (r.twins || []).length, 0)} twins)`, v);
+ok(verdictOf(v.ok), `every desktop door has a phone twin whose anchor is in its file and not turned off on a phone (${P.PHONE_TWINS.length} rows, ${P.PHONE_TWINS.reduce((a, r) => a + (r.twins || []).length, 0)} twins)`, v);
 const filesRow = P.PHONE_TWINS.find((r) => r.door === 'btn-file-explorer');
-ok(filesRow.twins.length === 3 && /mobile-nav-files/.test(filesRow.twins[0].anchor) && /filesCard/.test(filesRow.twins[1].anchor), 'Files has THREE phone twins: the nav 文件 (first), the For-you page\'s card, the «+» sheet row', filesRow.twins.map((t) => t.where));
+ok(filesRow.twins.length === 3 && gateOf(/mobile-nav-files/.test(filesRow.twins[0].anchor)) && verdictOf(/filesCard/.test(filesRow.twins[1].anchor)), 'Files has THREE phone twins: the nav 文件 (first), the For-you page\'s card, the «+» sheet row', filesRow.twins.map((t) => t.where));
 { // RED CONTROL — the base: the same census over the base's index.html (no nav 文件) and For-you page (no card)
   const baseIndex = indexHtml.replace(/\n\s*<button id="mobile-nav-files"[^\n]*/, '');
   const baseTodos = sources['src/lib/user-todos-panel.js'].replace(/\n[^\n]*home\.append\(filesCard\(app\)\);[^\n]*/, '');
   const b = P.twinCensus({ doors, sources: { ...sources, 'public/index.html': baseIndex, 'src/lib/user-todos-panel.js': baseTodos } });
-  ok(baseIndex !== indexHtml && baseTodos !== sources['src/lib/user-todos-panel.js'] && !b.ok && b.broken.length === 2 && b.broken.every((x) => x.door === 'btn-file-explorer'),
+  ok(baseIndex !== indexHtml && baseTodos !== sources['src/lib/user-todos-panel.js'] && !b.ok && b.broken.length === 2 && verdictOf(b.broken.every((x) => x.door === 'btn-file-explorer')),
     'RED CONTROL (the base, c1dfc1af): its nav and its For-you page had no files twin — both named broken; the long-press sheet row was the only one', b.broken.map((x) => x.where));
 }
 { // RED CONTROL — a door with no row (the files row dropped)
@@ -69,13 +69,13 @@ ok(filesRow.twins.length === 3 && /mobile-nav-files/.test(filesRow.twins[0].anch
   const gm = sources['src/lib/gear-menu.js'];
   const gate = gm.replace("icon: I.cog, label: () => t('All Settings...')", "icon: I.cog, when: (c) => !c.app.isMobile, label: () => t('All Settings...')");
   const b = P.twinCensus({ doors, sources: { ...sources, 'src/lib/gear-menu.js': gate } });
-  ok(gate !== gm && !b.ok && b.broken.length === 1 && b.broken[0].door === 'rail:settings' && /turned off on a phone/.test(b.broken[0].why), 'RED CONTROL: a twin whose row is turned off on a phone (`when: !c.app.isMobile`) is no twin', b.broken);
+  ok(gate !== gm && !b.ok && b.broken.length === 1 && b.broken[0].door === 'rail:settings' && verdictOf(/turned off on a phone/.test(b.broken[0].why)), 'RED CONTROL: a twin whose row is turned off on a phone (`when: !c.app.isMobile`) is no twin', b.broken);
 }
 { // RED CONTROL — a «none» with no reason; a stale row
   const t1 = P.PHONE_TWINS.map((r) => (r.door === 'btn-presets' ? { ...r, why: '' } : r));
   const b1 = P.twinCensus({ doors, sources, table: t1 });
   const b2 = P.twinCensus({ doors, sources, table: [...P.PHONE_TWINS, { door: 'btn-gone', twins: null, why: 'x' }] });
-  ok(!b1.ok && b1.broken.some((x) => x.door === 'btn-presets' && /no reason/.test(x.why)) && !b2.ok && b2.stale.join() === 'btn-gone', 'RED CONTROLS: a «none» row must say why; a row for a door the source no longer has is stale', { b1: b1.broken, b2: b2.stale });
+  ok(!b1.ok && gateOf(b1.broken.some((x) => x.door === 'btn-presets' && /no reason/.test(x.why))) && !b2.ok && b2.stale.join() === 'btn-gone', 'RED CONTROLS: a «none» row must say why; a row for a door the source no longer has is stale', { b1: b1.broken, b2: b2.stale });
 }
 ok(P.PHONE_TWINS.filter((r) => r.twins === null).map((r) => r.door).join() === 'btn-presets,btn-add-grid', 'the only doors without a phone twin are the layout presets / grid (a phone shows one window at a time) — each with its reason');
 
@@ -115,73 +115,73 @@ console.log('④ B-d027 — a relative name in the explorer\'s bar resolves agai
   const abs = PC.resolveRelative('~/notes', fieldBases(`${H}/work`), L);
   ok(abs.resolved[0]?.path === '~/notes', 'an absolute / ~ path is unchanged by the base');
   const fe = read('src/lib/file-explorer.js');
-  ok(/bases: \(\) => \(this\.currentPath \? \[\{ path: this\.currentPath, label: t\('this folder'\) \}\] : \[\]\),/.test(fe), 'the explorer\'s pathField passes its folder as base 1 (the field adds ~ last)');
+  ok(verdictOf(/bases: \(\) => \(this\.currentPath \? \[\{ path: this\.currentPath, label: t\('this folder'\) \}\] : \[\]\),/.test(fe)), 'the explorer\'s pathField passes its folder as base 1 (the field adds ~ last)');
 }
 
 console.log('⑤ wiring pins');
 {
   const idx = indexHtml;
   const navAt = idx.indexOf('<button id="mobile-nav-files"'), menuAt = idx.indexOf('<button id="mobile-nav-menu"'), titleAt = idx.indexOf('<span id="mobile-nav-title"');
-  ok(navAt > menuAt && navAt < titleAt && /<button id="mobile-nav-files" title="Files" aria-label="Files" data-i18n-attr="title,aria-label">/.test(idx) && /<span class="mnav-word" aria-hidden="true" data-i18n>Files<\/span><\/button>/.test(idx),
+  ok(navAt > menuAt && navAt < titleAt && gateOf(/<button id="mobile-nav-files" title="Files" aria-label="Files" data-i18n-attr="title,aria-label">/.test(idx)) && verdictOf(/<span class="mnav-word" aria-hidden="true" data-i18n>Files<\/span><\/button>/.test(idx)),
     'index.html: the nav\'s 文件 sits right after ☰ (before the title), named Files for a screen reader, its day-one word in a span');
   const mn = read('src/lib/mobile-nav.js');
-  ok(/import \{ installNavFilesDoor, filesDoorWindow, filesDoorName \} from '\.\/phone-files\.js';/.test(mn) && /\n    this\._pressFiles = installNavFilesDoor\(app\);\n/.test(mn) && /row\(FILE_ICONS\.folder, t\('Files'\), \(\) => this\._pressFiles\(\), back \? named\(filesDoorName\(app, back\)\) : ''\),/.test(mn),
+  ok(gateOf(/import \{ installNavFilesDoor, filesDoorWindow, filesDoorName \} from '\.\/phone-files\.js';/.test(mn)) && gateOf(/\n    this\._pressFiles = installNavFilesDoor\(app\);\n/.test(mn)) && verdictOf(/row\(FILE_ICONS\.folder, t\('Files'\), \(\) => this\._pressFiles\(\), back \? named\(filesDoorName\(app, back\)\) : ''\),/.test(mn)),
     'MobileNav installs the nav door (the phone\'s nav controller) and its «+» sheet\'s 文件 row runs the door\'s press, its hint naming the FOLDER it brings back (lane phone-titlebar-title: the compact bar shows no folder icon; r3: ONE act per row, said; r4: the folder\'s name, never a path)');
   const pf = read('src/lib/phone-files.js');
-  ok(/export function goPhoneHome\(app\) \{ if \(!app\.phoneHome\?\.show\?\.\(\)\) app\.sidebar\?\.toggle\?\.\(true\); \}/.test(pf) && read('src/lib/mobile-back.js').includes('window: () => { if (!home?.show?.()) sb.toggle(true); },'),
+  ok(gateOf(/export function goPhoneHome\(app\) \{ if \(!app\.phoneHome\?\.show\?\.\(\)\) app\.sidebar\?\.toggle\?\.\(true\); \}/.test(pf)) && verdictOf(read('src/lib/mobile-back.js').includes('window: () => { if (!home?.show?.()) sb.toggle(true); },')),
     'the explorer\'s ‹ is the back gesture\'s home rule (mobile-back.js close.window): the For-you page when it has rows, else the conversation list');
-  ok(/if \(there\) \{ app\.goToWinId\(there\.id\); return there; \}/.test(pf) && !/\.revealWindow\(|\.focusWindow\(/.test(pf), 'the doors reveal an explorer through app.goToWinId (the counted door, test-architecture §62) — no new revealWindow / focusWindow site');
-  ok(/const paint = \(\) => btn\?\.classList\.toggle\('labelled', dayOneWords\(\[DOOR\]\)\);/.test(pf) && /const press = \(\) => \{ dayOneUsed\(DOOR\); paint\(\); return openFilesDoor\(app, \{ pressed: true \}\); \};\n  if \(btn\) btn\.onclick = press;/.test(pf),
+  ok(gateOf(/if \(there\) \{ app\.goToWinId\(there\.id\); return there; \}/.test(pf)) && !/\.revealWindow\(|\.focusWindow\(/.test(pf), 'the doors reveal an explorer through app.goToWinId (the counted door, test-architecture §62) — no new revealWindow / focusWindow site');
+  ok(gateOf(/const paint = \(\) => btn\?\.classList\.toggle\('labelled', dayOneWords\(\[DOOR\]\)\);/.test(pf)) && verdictOf(/const press = \(\) => \{ dayOneUsed\(DOOR\); paint\(\); return openFilesDoor\(app, \{ pressed: true \}\); \};\n  if \(btn\) btn\.onclick = press;/.test(pf)),
     'the nav\'s word shows for the first week (or until used) — the rail\'s own day-one record (sidebar-rail.js dayOneWords / dayOneUsed over railLabels)');
   const sr = read('src/lib/sidebar-rail.js');
-  ok(/export function dayOneWords\(doors\) \{\n  const v = railLabels\(\{ record: readRailRecord\(\), now: Date\.now\(\), doors \}\);\n  keepRailRecord\(v\.record\);\n  return v\.show;\n\}/.test(sr) && /export function dayOneUsed\(door\) \{ keepRailRecord\(railUsed\(readRailRecord\(\), door\)\); \}/.test(sr),
+  ok(gateOf(/export function dayOneWords\(doors\) \{\n  const v = railLabels\(\{ record: readRailRecord\(\), now: Date\.now\(\), doors \}\);\n  keepRailRecord\(v\.record\);\n  return v\.show;\n\}/.test(sr)) && verdictOf(/export function dayOneUsed\(door\) \{ keepRailRecord\(railUsed\(readRailRecord\(\), door\)\); \}/.test(sr)),
     'sidebar-rail.js lends its day-one record (one key, vs-rail-labels — scratch.mjs presets it done for every chrome suite)');
   const ut = read('src/lib/user-todos-panel.js');
   const rootAt = ut.indexOf("if (!root) { root = mk('div', 'ut-inbox ut-home');"), cardAt = ut.indexOf("if (!home.querySelector(':scope > .ph-files')) home.append(filesCard(app));");
   ok(rootAt > 0 && cardAt > rootAt && cardAt - rootAt < 600, 'the For-you page appends the 文件 card AFTER its list (the first screen stays the attention list\'s — test-mobile-gaps measures it)');
   const fe = read('src/lib/file-explorer.js');
-  ok(/this\._phone = app\.isMobile \? explorerPhoneBits\(this\) : null;/.test(fe) && /if \(this\._phone\) toolbar\.prepend\(this\._phone\.back\);/.test(fe) && /this\._phone\?\.paint\(data\.path\);/.test(fe),
+  ok(gateOf(/this\._phone = app\.isMobile \? explorerPhoneBits\(this\) : null;/.test(fe)) && gateOf(/if \(this\._phone\) toolbar\.prepend\(this\._phone\.back\);/.test(fe)) && verdictOf(/this\._phone\?\.paint\(data\.path\);/.test(fe)),
     'the explorer builds its phone furniture only on a phone: ‹ first in the toolbar, the crumbs painted on every navigation');
-  ok(/newHere\.onclick = \(\) => \{ if \(ex\.currentPath\) app\.showNewSessionDialog\(\{ cwd: ex\.currentPath, hostId: ex\._host \|\| undefined \}\); \};/.test(pf),
+  ok(verdictOf(/newHere\.onclick = \(\) => \{ if \(ex\.currentPath\) app\.showNewSessionDialog\(\{ cwd: ex\.currentPath, hostId: ex\._host \|\| undefined \}\); \};/.test(pf)),
     '«New session here» opens the New Session dialog with the folder on show (and its machine) — the dialog is not this lane\'s');
   const vc = read('public/viewers.css');
-  ok(/\.file-phone-back, \.file-crumbs, \.file-new-here \{ display: none; \}/.test(vc) && /\.file-item \{ width: 100%; min-width: 0; min-height: 44px;/.test(vc) && /\.file-toolbar \.file-path-input \{[^}]*font-size: 16px;/.test(vc) && /\.file-crumbs \{[^}]*overflow-x: auto;/.test(vc),
+  ok(gateOf(/\.file-phone-back, \.file-crumbs, \.file-new-here \{ display: none; \}/.test(vc)) && gateOf(/\.file-item \{ width: 100%; min-width: 0; min-height: 44px;/.test(vc)) && gateOf(/\.file-toolbar \.file-path-input \{[^}]*font-size: 16px;/.test(vc)) && verdictOf(/\.file-crumbs \{[^}]*overflow-x: auto;/.test(vc)),
     'viewers.css: the furniture hidden on a desktop; on a phone rows ≥ 44 px, the path bar at 16 px (no iOS focus zoom), the crumbs scroll sideways');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const KEYS = ['Files', 'Home', 'Back', 'this folder', 'New session here'];
   const miss = KEYS.filter((k) => !zh.includes(`  ${JSON.stringify(k)}:`) || !ja.includes(`  ${JSON.stringify(k)}:`));
-  ok(miss.length === 0 && /"Files": "文件"/.test(zh), `i18n: every word the doors say is in zh + ja (${KEYS.length}; «文件»)`, miss);
+  ok(miss.length === 0 && verdictOf(/"Files": "文件"/.test(zh)), `i18n: every word the doors say is in zh + ja (${KEYS.length}; «文件»)`, miss);
 }
 
 console.log('⑥ THE DESKTOPS DOOR (lane desktop-switch-phone — userW on the Duo\'s inner display: «如何在这个界面下切换桌面？»; the chrome legs are test-duo-layout ⑧ at 951 and 382)');
 {
   const mn = read('src/lib/mobile-nav.js'), dm = read('src/lib/desktop-manager.js'), css = read('public/style.css');
-  ok(/\n    this\.desktopsBtn = this\._buildDesktopsDoor\(\);\n    this\.bar = installTrailingBar\(app\);/.test(mn) && /b\.id = 'mobile-nav-desktops'; b\.type = 'button'; b\.className = 'mnav-dest mnav-desktops';/.test(mn) && /b\.innerHTML = UI_ICONS\.desktops;/.test(mn),
+  ok(gateOf(/\n    this\.desktopsBtn = this\._buildDesktopsDoor\(\);\n    this\.bar = installTrailingBar\(app\);/.test(mn)) && gateOf(/b\.id = 'mobile-nav-desktops'; b\.type = 'button'; b\.className = 'mnav-dest mnav-desktops';/.test(mn)) && verdictOf(/b\.innerHTML = UI_ICONS\.desktops;/.test(mn)),
     'MobileNav builds ONE Desktops button on its nav (both phone classes), an SVG icon (UI_ICONS.desktops) — no new nav, no new sheet component');
   const sh = read('src/lib/desktop-switch-sheet.js');
-  ok(/openDesktopSheet\(this\.app, b, \{ onSwitch: \(id, o\) => this\.switchDesktop\(id, o\) \}\)/.test(mn) && /onSwitch\(r\.id, show \? \{ show \} : undefined\);/.test(sh) && /onSwitch\(dm\.createDesktop\(\)\);/.test(sh) && /const go = app\.stage\?\.isActive \? app\.stage\.leave\(id\) : id === dm\.activeDesktopId \? null : dm\.switchTo\(id\);/.test(mn),
+  ok(gateOf(/openDesktopSheet\(this\.app, b, \{ onSwitch: \(id, o\) => this\.switchDesktop\(id, o\) \}\)/.test(mn)) && gateOf(/onSwitch\(r\.id, show \? \{ show \} : undefined\);/.test(sh)) && gateOf(/onSwitch\(dm\.createDesktop\(\)\);/.test(sh)) && verdictOf(/const go = app\.stage\?\.isActive \? app\.stage\.leave\(id\) : id === dm\.activeDesktopId \? null : dm\.switchTo\(id\);/.test(mn)),
     'its sheet: one row per desktop = the manager\'s own switch road (the Stage left first, as the taskbar preview\'s click), the last row «New desktop» = createDesktop — no hand-rolled switch');
-  ok(/const menu = showContextMenu\(regular \? ar\.left : 0, regular \? ar\.top : 0, items, 'context-menu', \{ placesItself: true \}\);/.test(sh) && /if \(!regular\) menu\.classList\.add\('mobile-sheet'\);/.test(sh),
+  ok(gateOf(/const menu = showContextMenu\(regular \? ar\.left : 0, regular \? ar\.top : 0, items, 'context-menu', \{ placesItself: true \}\);/.test(sh)) && verdictOf(/if \(!regular\) menu\.classList\.add\('mobile-sheet'\);/.test(sh)),
     'the compact class lays the sheet out as the phone\'s sheet (.mobile-sheet, the «+» long-press sheet\'s), the regular class beside the button (showContextMenu — the existing infra)');
-  ok(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm) && /\n    this\.bar\?\.update\?\.\(\);\n    this\.updateDesktopsDoor\(\);\n/.test(mn),
+  ok(gateOf(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm)) && verdictOf(/\n    this\.bar\?\.update\?\.\(\);\n    this\.updateDesktopsDoor\(\);\n/.test(mn)),
     'the door follows every desktop change (the manager\'s _renderSwitcher — switch / create / rename / delete / a remote update) and every window change (updateTitle)');
-  ok(/this\._titleEl\.onclick = \(\) => this\._showWindowSwitcher\(\);/.test(mn) && !/if \(app\.viewportClass\?\.\(\) !== 'regular'\) this\._showWindowSwitcher\(\)/.test(mn),
+  ok(gateOf(/this\._titleEl\.onclick = \(\) => this\._showWindowSwitcher\(\);/.test(mn)) && !/if \(app\.viewportClass\?\.\(\) !== 'regular'\) this\._showWindowSwitcher\(\)/.test(mn),
     'the title tap opens the window switcher (its desktop tabs) in the regular class too — RED CONTROL: the base\'s `if (app.viewportClass?.() !== \'regular\')` guard is gone');
-  ok(/if \(desk && w\?\._desktopId && w\._desktopId !== desk\) return;/.test(mn),
+  ok(verdictOf(/if \(desk && w\?\._desktopId && w\._desktopId !== desk\) return;/.test(mn)),
     '§6b guard 10: a switch\'s in-between (the old desktop\'s window still active) is never noted as the new desktop\'s window on show');
   const tasksOrder = /html\[data-vc="regular"\] #mobile-nav-dest-tasks \{ order: (\d+); \}/.exec(css), deskOrder = /html\[data-vc="regular"\] #mobile-nav-desktops \{ order: (\d+); \}/.exec(css), gapOrder = /#mobile-nav \.mnav-gap \{ display: block; order: (\d+);/.exec(css);
   ok(!!(tasksOrder && deskOrder && gapOrder) && +gapOrder[1] < +deskOrder[1] && +deskOrder[1] < +tasksOrder[1], 'the regular class\'s trailing bar: the bottom section starts with Desktops (after the gap, before Task Groups)', { gap: gapOrder?.[1], desk: deskOrder?.[1], tasks: tasksOrder?.[1] });
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const KEYS = ['Desktops', 'Desktops — {name} ({k}/{n})', '1 window', '{n} windows', 'New desktop', 'Sessions'];
   const miss = KEYS.filter((k) => !zh.includes(`  ${JSON.stringify(k)}:`) || !ja.includes(`  ${JSON.stringify(k)}:`));
-  ok(miss.length === 0 && /"New desktop": "新桌面"/.test(zh), `i18n: every word the door says is in zh + ja (${KEYS.length}; «新桌面»)`, miss);
+  ok(miss.length === 0 && verdictOf(/"New desktop": "新桌面"/.test(zh)), `i18n: every word the door says is in zh + ja (${KEYS.length}; «新桌面»)`, miss);
 }
 
 console.log('⑦ THE SPLIT\'S DOOR (lane phone-six — userW\'s side by side; the PURE rule is test-phone-split, the chrome legs test-phone-six-chrome ⑥)');
 {
-  ok(doors.includes('win:split') && !P.desktopDoors({ indexHtml, railSrc }).includes('win:split'), 'the census reads a window\'s own door too: the tab strip\'s split button (tab-group.js) is the desktop\'s side by side — `win:split`');
+  ok(gateOf(doors.includes('win:split')) && !P.desktopDoors({ indexHtml, railSrc }).includes('win:split'), 'the census reads a window\'s own door too: the tab strip\'s split button (tab-group.js) is the desktop\'s side by side — `win:split`');
   const row = P.PHONE_TWINS.find((r) => r.door === 'win:split');
-  ok(!!row && row.twins.length === 1 && /«Split»/.test(row.twins[0].where) && v.ok, 'its phone twin: the window switcher\'s «Split» beside a window (src/lib/mobile-nav.js)', row);
+  ok(!!row && row.twins.length === 1 && gateOf(/«Split»/.test(row.twins[0].where)) && verdictOf(v.ok), 'its phone twin: the window switcher\'s «Split» beside a window (src/lib/mobile-nav.js)', row);
   // RED CONTROL — the base: its switcher rows had no «Split» (the anchor line removed)
   const mn = sources['src/lib/mobile-nav.js'], baseMn = mn.replace(/\n[^\n]*splitBtn\.className = 'mobile-win-split'[^\n]*/, '');
   const b = P.twinCensus({ doors, sources: { ...sources, 'src/lib/mobile-nav.js': baseMn } });
@@ -189,8 +189,8 @@ console.log('⑦ THE SPLIT\'S DOOR (lane phone-six — userW\'s side by side; th
   // RED CONTROL — the twin turned off on a phone
   const offMn = mn.replace("splitBtn.className = 'mobile-win-split' + (sv.ok ? '' : ' refused');", "if (!app.isMobile) splitBtn.className = 'mobile-win-split' + (sv.ok ? '' : ' refused');");
   const c = P.twinCensus({ doors, sources: { ...sources, 'src/lib/mobile-nav.js': offMn } });
-  ok(offMn !== mn && !c.ok && c.broken.some((x) => x.door === 'win:split' && /turned off/.test(x.why)), 'RED CONTROL: the split\'s twin turned off on a phone is red', c.broken);
+  ok(offMn !== mn && !c.ok && verdictOf(c.broken.some((x) => x.door === 'win:split' && /turned off/.test(x.why))), 'RED CONTROL: the split\'s twin turned off on a phone is red', c.broken);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

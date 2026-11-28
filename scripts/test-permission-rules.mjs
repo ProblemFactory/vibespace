@@ -29,7 +29,7 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let passed = 0, failed = 0;
-const check = (name, cond, extra) => { if (cond) { passed++; console.log('  ✓ ' + name); } else { failed++; console.error('  ✗ ' + name + (extra ? '\n    ' + extra : '')); } };
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (cond) { passed++; console.log('  ✓ ' + name); } else { failed++; console.error('  ✗ ' + name + (extra ? '\n    ' + extra : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const PR = require(path.join(REPO, 'src/permission-rules.js'));
@@ -66,7 +66,7 @@ console.log('— Part 1: the PURE model + renderer');
 // ── claude: settings blob → rules ──
 {
   const g = PR.claudeRulesFromSettings({ permissions: { allow: ['Bash(git *)', 'Read(**)'], deny: ['Bash(curl *)'], ask: ['WebFetch'], defaultMode: 'plan', additionalDirectories: ['/a', '/b'] } });
-  check('allow/deny/ask arrays become rules of their own kind', g.rules.filter((r) => r.kind === 'allow').length === 2 && g.rules.some((r) => r.kind === 'deny') && g.rules.some((r) => r.kind === 'ask'));
+  check('allow/deny/ask arrays become rules of their own kind', g.rules.filter((r) => r.kind === 'allow').length === 2 && gateOf(g.rules.some((r) => r.kind === 'deny')) && verdictOf(g.rules.some((r) => r.kind === 'ask')));
   check('non-list permission keys become kind "value" (defaultMode, additionalDirectories)',
     g.rules.find((r) => r.key === 'permissions.defaultMode')?.value === 'plan' && g.rules.find((r) => r.key === 'permissions.additionalDirectories')?.value === '/a, /b');
   const none = PR.claudeRulesFromSettings({ model: 'opus' });
@@ -82,7 +82,7 @@ console.log('— Part 1: the PURE model + renderer');
     { layer: 'policySettings', file: '/etc/claude-code/managed-settings.json', present: true, settings: {}, dropIns: [{ file: '/etc/claude-code/managed-settings.d/10-org.json', settings: { permissions: { deny: ['Bash(sudo *)'] } } }] },
   ], { cwd: '/w' });
   const by = Object.fromEntries(rec.layers.map((l) => [l.id, l]));
-  check('a MISSING file and an UNREADABLE file are different notes', by.projectSettings.note === 'not present' && /not valid JSON/.test(by.localSettings.note));
+  check('a MISSING file and an UNREADABLE file are different notes', by.projectSettings.note === 'not present' && verdictOf(/not valid JSON/.test(by.localSettings.note)));
   check('an existing file with no permissions block says "no permissions block"', by.policySettings.note === 'no permissions block');
   check('each managed drop-in is its OWN source with its OWN path (copy-path must point at the right file)',
     by['policySettings:drop-in']?.file === '/etc/claude-code/managed-settings.d/10-org.json' && by['policySettings:drop-in'].rules[0].value === 'Bash(sudo *)');
@@ -129,14 +129,14 @@ const CODEX_FIXTURE = {
 {
   const rec = PR.codexRulesRecord(CODEX_FIXTURE, { cwd: '/w/proj' });
   const by = Object.fromEntries(rec.layers.map((l) => [l.id, l]));
-  check('codex: each key is attributed to the layer `origins` says WON it', by.user.rules.some((r) => r.key === 'approval_policy' && r.value === 'never'));
+  check('codex: each key is attributed to the layer `origins` says WON it', verdictOf(by.user.rules.some((r) => r.key === 'approval_policy' && r.value === 'never')));
   check('codex: the `sessionFlags` layer exists, has NO file, and owns the key it won — the whole reason the SESSION rung exists',
-    by.sessionFlags && by.sessionFlags.file === null && by.sessionFlags.rules.some((r) => r.key === 'sandbox_mode'));
+    gateOf(by.sessionFlags) && by.sessionFlags.file === null && verdictOf(by.sessionFlags.rules.some((r) => r.key === 'sandbox_mode')));
   check('codex: a layer that contributed NOTHING still appears (an empty /etc/codex/config.toml is a real, useful fact)',
     !!by.system && by.system.file === '/etc/codex/config.toml');
   check('codex: only the SESSION\'s own directory trust level travels — never the whole projects table (a real store had 378 origin keys)',
     rec.layers.flatMap((l) => l.rules).filter((r) => /^projects\./.test(r.key)).length === 1
-    && rec.layers.flatMap((l) => l.rules).some((r) => r.key === 'projects./w/proj.trust_level' && r.value === 'trusted'));
+    && verdictOf(rec.layers.flatMap((l) => l.rules).some((r) => r.key === 'projects./w/proj.trust_level' && r.value === 'trusted')));
   check('codex: a null config value is NOT reported as a rule ("not set" is the layer\'s business)',
     !rec.layers.flatMap((l) => l.rules).some((r) => r.key === 'permissions' || r.key === 'default_permissions'));
 
@@ -150,8 +150,8 @@ const CODEX_FIXTURE = {
     check('codex TABLE key: the session\'s own `-c sandbox_workspace_write.network_access=true` is attributed to sessionFlags WITH ITS VALUE — `sandbox_workspace_write` itself is never in `origins` (measured)',
       !!net && net.layer === 'sessionFlags' && net.value === 'true' && net.note === null, JSON.stringify(net));
     check('codex TABLE key: the leaves the FILE won stay with the file — a split table is one rule per leaf, codex\'s own model',
-      all.some((r) => r.key === 'sandbox_workspace_write.exclude_tmpdir_env_var' && r.layer === 'user' && r.value === 'true')
-      && all.some((r) => r.key === 'sandbox_workspace_write.writable_roots' && r.layer === 'user' && r.value === '["/tmp/a"]'),
+      gateOf(all.some((r) => r.key === 'sandbox_workspace_write.exclude_tmpdir_env_var' && r.layer === 'user' && r.value === 'true'))
+      && verdictOf(all.some((r) => r.key === 'sandbox_workspace_write.writable_roots' && r.layer === 'user' && r.value === '["/tmp/a"]')),
       JSON.stringify(all.filter((r) => r.key.startsWith('sandbox_workspace_write'))));
     check('codex TABLE key: array-index leaves that agree on a layer collapse to their parent path (a real config had 700 writable_roots = 701 leaf origins)',
       !all.some((r) => /\.writable_roots\.\d+$/.test(r.key)));
@@ -220,7 +220,7 @@ const CODEX_FIXTURE = {
       // POSITIVE CONTROL: a genuinely SPLIT table still splits — the filter
       // must not have turned "one rule per leaf" off for the case it is for.
       check('POSITIVE CONTROL: a table whose CARRIED leaves disagree is still one rule per leaf, each under its own layer',
-        rules.some((r) => r.key === 'sandbox_workspace_write.network_access' && r.layer === 'user' && r.value === 'true'),
+        verdictOf(rules.some((r) => r.key === 'sandbox_workspace_write.network_access' && r.layer === 'user' && r.value === 'true')),
         JSON.stringify(rules.filter((r) => r.key.startsWith('sandbox_workspace_write'))));
       // …and when NOTHING maps, we say who set the key rather than inventing
       // "nobody did" (defaults) or "we were capped" (unknown).
@@ -256,7 +256,7 @@ const CODEX_FIXTURE = {
     }, {});
     const pkg = withPkg.layers.find((l) => l.id === 'packagedDefaults');
     check('when codex DOES list a packagedDefaults layer the rules go there, with the FILE codex named (never a file-less forgery)',
-      !!pkg && pkg.file === '/opt/codex/defaults.toml' && pkg.rules.some((r) => r.key === 'approval_policy'), JSON.stringify(pkg));
+      !!pkg && pkg.file === '/opt/codex/defaults.toml' && verdictOf(pkg.rules.some((r) => r.key === 'approval_policy')), JSON.stringify(pkg));
   }
 
   // ── the >32KiB degrade path: "we dropped the origin map" ≠ "no layer set it" ──
@@ -264,23 +264,23 @@ const CODEX_FIXTURE = {
     const capped = PR.codexRulesRecord({ ...CODEX_FIXTURE, origins: {}, originsDropped: true }, { cwd: '/w/proj' });
     const cr = capped.layers.flatMap((l) => l.rules.map((r) => ({ ...r, layer: l.id })));
     check('THE FINDING (degrade path): when the producer dropped `origins` to fit its cap, NO rule claims "the packaged default" — they are filed under an explicit unknown-source layer that says the origin map never travelled',
-      cr.length > 0 && cr.every((r) => r.layer === 'originUnknown' && r.note === PR.CODEX_CAPPED_NOTE)
-      && /capped/.test(capped.layers.find((l) => l.id === 'originUnknown').note), JSON.stringify(cr.map((r) => [r.layer, r.note])));
+      cr.length > 0 && gateOf(cr.every((r) => r.layer === 'originUnknown' && r.note === PR.CODEX_CAPPED_NOTE))
+      && verdictOf(/capped/.test(capped.layers.find((l) => l.id === 'originUnknown').note)), JSON.stringify(cr.map((r) => [r.layer, r.note])));
     // NEGATIVE CONTROL: the SAME empty origin map WITHOUT the flag is the
     // honest "no layer set any of this" answer and must keep saying so.
     const noFlag = PR.codexRulesRecord({ ...CODEX_FIXTURE, origins: {} }, { cwd: '/w/proj' });
     const nr = noFlag.layers.flatMap((l) => l.rules.map((r) => ({ ...r, layer: l.id })));
     check('NEGATIVE CONTROL: the same empty origin map WITHOUT `originsDropped` still reads "the packaged default" (the two facts must not collapse into one sentence)',
-      nr.length > 0 && nr.every((r) => r.note === PR.CODEX_DEFAULT_NOTE) && !noFlag.layers.some((l) => l.id === 'originUnknown'));
+      nr.length > 0 && gateOf(nr.every((r) => r.note === PR.CODEX_DEFAULT_NOTE)) && !noFlag.layers.some((l) => l.id === 'originUnknown'));
     check('the two notes are distinct strings (a degrade path may never borrow the honest answer\'s words)', PR.CODEX_CAPPED_NOTE !== PR.CODEX_DEFAULT_NOTE);
   }
   const noCwd = PR.codexRulesRecord(CODEX_FIXTURE, { cwd: null, scope: 'instance' });
   check('codex instance scope reports no per-directory trust level at all', !noCwd.layers.flatMap((l) => l.rules).some((r) => /^projects\./.test(r.key)));
   const unknown = PR.codexRulesRecord({ config: { approval_policy: 'on-request' }, origins: { approval_policy: { name: { type: 'quantumLayer' } } }, layers: [] }, {});
-  check('an UNKNOWN codex layer type is named, never dropped (upstream adds variants)', unknown.layers[0].label.includes('quantumLayer'));
+  check('an UNKNOWN codex layer type is named, never dropped (upstream adds variants)', verdictOf(unknown.layers[0].label.includes('quantumLayer')));
   check('every ConfigLayerSource variant in the 0.153.4 schema has a label',
-    ['packagedDefaults', 'mdm', 'system', 'enterpriseManaged', 'user', 'project', 'sessionFlags', 'legacyManagedConfigTomlFromFile', 'legacyManagedConfigTomlFromMdm']
-      .every((t) => !PR.codexLayerLabel({ type: t }).label.startsWith('unknown layer')));
+    verdictOf(['packagedDefaults', 'mdm', 'system', 'enterpriseManaged', 'user', 'project', 'sessionFlags', 'legacyManagedConfigTomlFromFile', 'legacyManagedConfigTomlFromMdm']
+      .every((t) => !PR.codexLayerLabel({ type: t }).label.startsWith('unknown layer'))));
   check('codex with no config at all = an HONEST unavailable record, not an empty tree',
     PR.codexRulesRecord({}, {}).ok === false && PR.codexRulesRecord({}, {}).reason === 'no-config');
 }
@@ -292,16 +292,16 @@ const CODEX_FIXTURE = {
     permission: { edit: 'allow', bash: { 'git push*': 'deny', 'rm -rf*': 'deny', '*': 'ask' }, external_directory: 'deny', webfetch: 'ask' },
   });
   const rules = rec.layers[0].rules;
-  check('opencode: a tool→action entry becomes one rule of that action', rules.some((r) => r.key === 'permission.edit' && r.kind === 'allow'));
+  check('opencode: a tool→action entry becomes one rule of that action', verdictOf(rules.some((r) => r.key === 'permission.edit' && r.kind === 'allow')));
   check('opencode: a tool→{pattern:action} map becomes one rule PER PATTERN, pattern in the key',
-    rules.filter((r) => r.key.startsWith('permission.bash[')).length === 3 && rules.some((r) => r.key === 'permission.bash[git push*]' && r.kind === 'deny'));
+    rules.filter((r) => r.key.startsWith('permission.bash[')).length === 3 && verdictOf(rules.some((r) => r.key === 'permission.bash[git push*]' && r.kind === 'deny')));
   check('opencode: ONE layer, and its note says the serve reports no per-key origin (never a fake file attribution)',
-    rec.layers.length === 1 && rec.layers[0].file === null && /does not say which file/.test(rec.layers[0].note));
+    rec.layers.length === 1 && rec.layers[0].file === null && verdictOf(/does not say which file/.test(rec.layers[0].note)));
   const whole = PR.opencodeRulesRecord({ permission: 'ask' });
   check('opencode: the whole-agent string form is a rule too', whole.layers[0].rules[0].key === 'permission' && whole.layers[0].rules[0].kind === 'ask');
   const bare = PR.opencodeRulesRecord({ $schema: 'x' });
   check('opencode with NO permission block says what that means (its own defaults decide), and is still ok:true',
-    bare.ok === true && bare.layers[0].rules.length === 0 && /no permission block/.test(bare.layers[0].note));
+    bare.ok === true && bare.layers[0].rules.length === 0 && verdictOf(/no permission block/.test(bare.layers[0].note)));
 }
 
 // ── honest empty states ──
@@ -329,16 +329,16 @@ const CODEX_FIXTURE = {
   check('renderRuleTree: EVERY harness-controlled string leaves through the injected escaper (rule text, key, path)',
     !/onerror|<img/.test(outsideMarkers)                    // nothing model-controlled outside a marker
     && html.split(MARK(evil)).length - 1 === 2              // both rule VALUES went through it
-    && html.includes(MARK('/h/' + evil + '/settings.json')), outsideMarkers.slice(0, 240));
+    && verdictOf(html.includes(MARK('/h/' + evil + '/settings.json'))), outsideMarkers.slice(0, 240));
   check('renderRuleTree: the injected icon is the ONLY raw html', (html.match(/<svg\/>/g) || []).length === 1);
   const un = PR.renderRuleTree(PR.unavailable('opencode', 'store-unavailable', evil), { esc: MARK, t: (s) => s });
   check('an unavailable record renders its DETAIL (escaped) and carries the reason code for the UI to branch on',
-    un.includes(MARK(evil)) && un.includes('data-reason="' + MARK('store-unavailable') + '"'));
+    gateOf(un.includes(MARK(evil))) && verdictOf(un.includes('data-reason="' + MARK('store-unavailable') + '"')));
   const real = PR.renderRuleTree(rec, { esc: (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), t: (s) => s });
   check('copy-path rides data-copy on a BUTTON (never a link, never an href), and is escaped there too',
-    /<button [^>]*class="perm-layer-path" data-copy="[^"]*&lt;img/.test(real), real.slice(real.indexOf('perm-layer-path') - 40, real.indexOf('perm-layer-path') + 160));
+    verdictOf(/<button [^>]*class="perm-layer-path" data-copy="[^"]*&lt;img/.test(real)), real.slice(real.indexOf('perm-layer-path') - 40, real.indexOf('perm-layer-path') + 160));
   check('allow/deny/ask badges are the HARNESS\'s own words, NOT translated (they appear verbatim in the user\'s own settings file)',
-    PR.renderRuleTree(rec, { esc: (s) => String(s), t: () => 'TRANSLATED' }).includes('>allow<'));
+    verdictOf(PR.renderRuleTree(rec, { esc: (s) => String(s), t: () => 'TRANSLATED' }).includes('>allow<')));
   check('the tree offers NO edit control of any kind (ruling 10 is read-only)',
     !/<input|<select|<textarea|contenteditable|data-edit/i.test(real));
 }
@@ -357,7 +357,7 @@ const CODEX_FIXTURE = {
 // ── the caps row is the ONE gate (never a backend id) ──
 {
   check('the source vocabulary is closed and every declared harness source is in it',
-    Object.values(BACKEND_CAPS).every((r) => r.permissionRules.source === null || PR.PERMISSION_RULE_SOURCES.includes(r.permissionRules.source)),
+    verdictOf(Object.values(BACKEND_CAPS).every((r) => r.permissionRules.source === null || PR.PERMISSION_RULE_SOURCES.includes(r.permissionRules.source))),
     JSON.stringify(Object.fromEntries(Object.entries(BACKEND_CAPS).map(([k, v]) => [k, v.permissionRules.source]))));
   check('shell declares NO rule surface (no agent ⇒ no rules, and the section is never drawn)', capsOf('shell').permissionRules.source === null);
   check('opencode declares instance-only (its serve reports ONE resolved config with no per-key origin)',
@@ -373,7 +373,7 @@ const CODEX_FIXTURE = {
   {
     const blk = ORACLES_MOD.blockedCapability('codex', 'permissionRules.instance');
     check('the switched-off capability is explained by a MEASURED rejection, not by a hand-written sentence',
-      !!blk && blk.id === 'codex-app-server-config-read' && blk.measured.inetConnects > 0 && /chatgpt\.com/.test(blk.measured.host || ''),
+      !!blk && blk.id === 'codex-app-server-config-read' && blk.measured.inetConnects > 0 && verdictOf(/chatgpt\.com/.test(blk.measured.host || '')),
       JSON.stringify(blk && blk.measured));
     check('NEGATIVE CONTROL: a capability that is ON has no blocking rejection (the mechanism cannot mark a live feature)',
       ORACLES_MOD.blockedCapability('claude', 'permissionRules.instance') === null && capsOf('claude').permissionRules.instance === true);
@@ -392,9 +392,9 @@ const CODEX_FIXTURE = {
   const Lr = (layer, file, perm) => ({ layer, file, present: true, settings: { permissions: perm } });
   const USER = '/h/.claude/settings.json', PROJ = '/w/.claude/settings.json', LOCAL = '/w/.claude/settings.local.json', MANAGED = '/etc/claude-code/managed-settings.json';
   const a = PR.claudeDefaultMode(rec([Lr('userSettings', USER, { defaultMode: 'acceptEdits' }), Lr('projectSettings', PROJ, { defaultMode: 'bypassPermissions' })]));
-  check('claudeDefaultMode: the LAST layer that sets permissions.defaultMode wins (project over user) and is named with its file', a.ok && a.mode === 'bypassPermissions' && a.layer.id === 'projectSettings' && a.layer.short === 'Project' && a.layer.file === PROJ && a.disabledBy === null && a.cwd === '/w', a);
+  check('claudeDefaultMode: the LAST layer that sets permissions.defaultMode wins (project over user) and is named with its file', gateOf(a.ok) && a.mode === 'bypassPermissions' && a.layer.id === 'projectSettings' && a.layer.short === 'Project' && a.layer.file === PROJ && a.disabledBy === null && a.cwd === '/w', a);
   const b = PR.claudeDefaultMode(rec([Lr('userSettings', USER, { defaultMode: 'acceptEdits' }), { layer: 'projectSettings', file: PROJ, present: false }, Lr('localSettings', LOCAL, { allow: ['Bash(ls)'] })]));
-  check('claudeDefaultMode: a project layer that is absent or sets no defaultMode leaves the user layer\'s word', b.ok && b.mode === 'acceptEdits' && b.layer.id === 'userSettings', b);
+  check('claudeDefaultMode: a project layer that is absent or sets no defaultMode leaves the user layer\'s word', gateOf(b.ok) && b.mode === 'acceptEdits' && b.layer.id === 'userSettings', b);
   const c = PR.claudeDefaultMode(rec([Lr('userSettings', USER, { defaultMode: 'acceptEdits' }), Lr('localSettings', LOCAL, { defaultMode: 'plan' })]));
   check('claudeDefaultMode: the local layer (settings.local.json) outranks the user layer', c.mode === 'plan' && c.layer.id === 'localSettings', c);
   const d = PR.claudeDefaultMode(rec([Lr('projectSettings', PROJ, { defaultMode: 'bypassPermissions' }), Lr('policySettings', MANAGED, { disableBypassPermissionsMode: 'disable' })]));
@@ -402,7 +402,7 @@ const CODEX_FIXTURE = {
   const d2 = PR.claudeDefaultMode(rec([Lr('projectSettings', PROJ, { defaultMode: 'acceptEdits' }), Lr('policySettings', MANAGED, { disableBypassPermissionsMode: 'disable' })]));
   check('claudeDefaultMode: …and leaves any other resolved mode alone', d2.mode === 'acceptEdits' && d2.disabledBy.id === 'policySettings', d2);
   const e = PR.claudeDefaultMode(rec([{ layer: 'userSettings', file: USER, present: false }, Lr('projectSettings', PROJ, { allow: ['Bash(ls)'] })]));
-  check('claudeDefaultMode: no layer sets one ⇒ mode default with NO layer (the built-in default)', e.ok && e.mode === 'default' && e.layer === null && e.disabledBy === null, e);
+  check('claudeDefaultMode: no layer sets one ⇒ mode default with NO layer (the built-in default)', gateOf(e.ok) && e.mode === 'default' && e.layer === null && e.disabledBy === null, e);
   const f = PR.claudeDefaultMode(rec([{ layer: 'projectSettings', file: PROJ, present: true, error: 'not valid JSON (x) — the CLI ignores a settings file it cannot parse' }, Lr('userSettings', USER, { defaultMode: 'acceptEdits' })]));
   check('claudeDefaultMode: an unreadable layer contributes nothing (the CLI ignores it too)', f.mode === 'acceptEdits' && f.layer.id === 'userSettings', f);
   const g = PR.claudeDefaultMode(PR.unavailable('codex', 'unsupported-harness', 'x', { cwd: '/w' }));
@@ -436,10 +436,10 @@ const mod = mkModule();
 {
   const rec = await mod.readClaudeRules({ cwd: PROJ, home: HOME });
   const by = Object.fromEntries(rec.layers.map((l) => [l.id, l]));
-  check('claude reader: real files on disk → the real hierarchy (user + project + local + managed)', rec.ok && rec.layers.length === 4);
-  check('claude reader: rules come from the FILES, never from prose', by.userSettings.rules.some((r) => r.value === 'Bash(git status)' && r.kind === 'allow'));
+  check('claude reader: real files on disk → the real hierarchy (user + project + local + managed)', gateOf(rec.ok) && rec.layers.length === 4);
+  check('claude reader: rules come from the FILES, never from prose', verdictOf(by.userSettings.rules.some((r) => r.value === 'Bash(git status)' && r.kind === 'allow')));
   check('claude reader: an UNPARSEABLE settings file says so verbatim (the CLI ignores it — the user must know)',
-    /not valid JSON/.test(by.localSettings.note || ''), by.localSettings.note);
+    verdictOf(/not valid JSON/.test(by.localSettings.note || '')), by.localSettings.note);
   const inst = await mod.readClaudeRules({ cwd: '', home: HOME, scope: 'instance' });
   check('claude reader: instance scope has no project/local layers at all', !inst.layers.some((l) => l.id === 'projectSettings' || l.id === 'localSettings'));
 }
@@ -448,17 +448,17 @@ const mod = mkModule();
   fs.writeFileSync(path.join(big, '.claude/settings.json'), 'x'.repeat((1 << 20) + 10));
   const rec = await mod.readClaudeRules({ cwd: big, home: HOME });
   const l = rec.layers.find((x) => x.id === 'projectSettings');
-  check('claude reader: an absurdly large "settings file" is refused with its size, not read into the server (the byte-cap law)', /too large to be a settings file/.test(l.note || ''), l.note);
+  check('claude reader: an absurdly large "settings file" is refused with its size, not read into the server (the byte-cap law)', verdictOf(/too large to be a settings file/.test(l.note || '')), l.note);
 }
 {
   const r1 = await mod.read({ backend: 'shell', scope: 'session' });
   check('routing: a harness with source:null answers unsupported-harness (shell)', r1.ok === false && r1.reason === 'unsupported-harness');
   const r2 = await mod.read({ backend: 'claude', scope: 'session', host: 'h1', cwd: '/x' });
   check('routing: a REMOTE session says the rules live on that machine (never this machine\'s files under a remote label)',
-    r2.ok === false && r2.reason === 'remote-session' && /h1/.test(r2.detail));
+    r2.ok === false && r2.reason === 'remote-session' && verdictOf(/h1/.test(r2.detail)));
   const r3 = await mod.read({ backend: 'opencode', scope: 'session' });
   check('routing: opencode refuses the SESSION scope with the honest reason (it reports one machine-wide resolved config)',
-    r3.ok === false && r3.reason === 'unsupported-harness' && /whole machine/.test(r3.detail));
+    r3.ok === false && r3.reason === 'unsupported-harness' && verdictOf(/whole machine/.test(r3.detail)));
   const r4 = await mod.read({ backend: 'codex', scope: 'session', sessionId: 'nope' });
   check('routing: codex session scope with no live session = no-live-session (a stopped session\'s rules are not recorded anywhere)',
     r4.ok === false && r4.reason === 'no-live-session');
@@ -469,10 +469,10 @@ const mod = mkModule();
   // (this harness CAN answer; we decline to ask it that way).
   const r5 = await mod.read({ backend: 'codex', scope: 'instance', cwd: '/x' });
   check('routing: codex instance scope answers would-connect and NAMES the measurement (never a silent capability, never a spawn)',
-    r5.ok === false && r5.reason === 'would-connect' && /chatgpt\.com/.test(r5.detail || '') && /strace/.test(r5.detail || '')
+    r5.ok === false && r5.reason === 'would-connect' && gateOf(/chatgpt\.com/.test(r5.detail || '')) && gateOf(/strace/.test(r5.detail || ''))
     && r5.layers.length === 0, JSON.stringify(r5).slice(0, 300));
   check('routing: would-connect is a DECLARED reason code (a UI branching on an undeclared code is a bug)',
-    PR.UNAVAILABLE_REASONS.includes('would-connect'));
+    verdictOf(PR.UNAVAILABLE_REASONS.includes('would-connect')));
   // NEGATIVE CONTROL: the sibling refusal is still the generic one, so
   // 'would-connect' cannot be what this reader says whenever a scope is off.
   const r5b = await mod.read({ backend: 'opencode', scope: 'session' });
@@ -507,9 +507,9 @@ const mod = mkModule();
   mod.onWrapperRecord(SID, { type: 'permission_rules', ok: true, requestId: rid, cwd: PROJ, config: CODEX_FIXTURE.config, origins: CODEX_FIXTURE.origins, layers: CODEX_FIXTURE.layers });
   const rec = await p;
   check('the wrapper answer is SHAPED server-side into the shared record (the wrapper ships as a single file and forwards codex\'s own fields)',
-    rec.ok === true && rec.backend === 'codex' && rec.layers.some((l) => l.id === 'sessionFlags'));
+    rec.ok === true && rec.backend === 'codex' && verdictOf(rec.layers.some((l) => l.id === 'sessionFlags')));
   check('…and the SESSION rung really shows the session\'s own -c flag as such (leaf-keyed table origins survive the whole seam)',
-    rec.layers.find((l) => l.id === 'sessionFlags')?.rules.some((r) => r.key === 'sandbox_workspace_write.network_access' && r.value === 'true'),
+    verdictOf(rec.layers.find((l) => l.id === 'sessionFlags')?.rules.some((r) => r.key === 'sandbox_workspace_write.network_access' && r.value === 'true')),
     JSON.stringify(rec.layers.map((l) => [l.id, l.rules.map((r) => r.key)])));
 
   // WIRING PIN (the 2.355.0 unstaged-wiring law): `originsDropped` is only a
@@ -524,7 +524,7 @@ const mod = mkModule();
     const recD = await pd;
     const rulesD = recD.layers.flatMap((l) => l.rules.map((r) => ({ ...r, layer: l.id })));
     check('WIRING PIN: a capped wrapper answer (`originsDropped`) reaches the reader — every rule lands under the explicit unknown-source layer, none claims "the packaged default"',
-      recD.truncated === true && rulesD.length > 0 && rulesD.every((r) => r.layer === 'originUnknown' && r.note === PR.CODEX_CAPPED_NOTE),
+      recD.truncated === true && rulesD.length > 0 && verdictOf(rulesD.every((r) => r.layer === 'originUnknown' && r.note === PR.CODEX_CAPPED_NOTE)),
       JSON.stringify(rulesD.map((r) => [r.layer, r.note])));
     written.length = 0;
     const pn = mod.readViaSession(SID, { timeoutMs: 4000 });
@@ -533,13 +533,13 @@ const mod = mkModule();
     const recN = await pn;
     check('NEGATIVE CONTROL through the same seam: without the flag an empty origin map is still the honest "the packaged default" answer',
       !recN.layers.some((l) => l.id === 'originUnknown')
-      && recN.layers.flatMap((l) => l.rules).every((r) => r.note === PR.CODEX_DEFAULT_NOTE));
+      && verdictOf(recN.layers.flatMap((l) => l.rules).every((r) => r.note === PR.CODEX_DEFAULT_NOTE)));
   }
 
   written.length = 0;
   const p2 = mod.readViaSession(SID, { timeoutMs: 300 });
   const t2 = await p2;
-  check('a wrapper that never answers TIMES OUT into a typed record (no hung UI, no silent failure)', t2.ok === false && t2.reason === 'read-failed' && /did not answer/.test(t2.detail));
+  check('a wrapper that never answers TIMES OUT into a typed record (no hung UI, no silent failure)', t2.ok === false && t2.reason === 'read-failed' && verdictOf(/did not answer/.test(t2.detail)));
 
   written.length = 0;
   const p3 = mod.readViaSession(SID, { timeoutMs: 4000 });
@@ -548,7 +548,7 @@ const mod = mkModule();
   mod.onWrapperRecord(SID, { type: 'permission_rules', ok: false, requestId: rid3, reason: 'unsupported-by-protocol', detail: 'ACP v1 has no config-read method', mode: 'build', modes: ['build', 'plan'] });
   const rec3 = await p3;
   check('an ACP-style refusal maps to a DECLARED reason code and keeps the one permission fact the protocol does carry (the live mode)',
-    rec3.ok === false && PR.UNAVAILABLE_REASONS.includes(rec3.reason) && rec3.mode === 'build');
+    rec3.ok === false && gateOf(PR.UNAVAILABLE_REASONS.includes(rec3.reason)) && rec3.mode === 'build');
   activeSessions.delete(SID);
 }
 // ── the local oracles ──
@@ -571,7 +571,7 @@ const mod = mkModule();
     && resolveOracleCmd('codex', { codex: () => '/usr/bin/codex' }).cmd === '/usr/bin/codex',
     JSON.stringify(resolveOracleCmd('claude', { codex: () => '/usr/bin/codex' })));
   check('oracle: every shipped oracle\'s backend HAS a wired command ref (a future claude oracle must add one, not inherit a lie)',
-    ORACLES_MOD.ORACLES.every((o) => resolveOracleCmd(o.backend, { codex: () => '/x' }).reason !== 'no-runner'));
+    verdictOf(ORACLES_MOD.ORACLES.every((o) => resolveOracleCmd(o.backend, { codex: () => '/x' }).reason !== 'no-runner')));
 }
 // a REAL run when codex is installed (the whole point of an oracle is that it runs)
 {
@@ -585,7 +585,7 @@ const mod = mkModule();
     fs.mkdirSync(path.join(TMP, 'oraclehome'), { recursive: true });
     const r = await live.runOracle('codex-login-status');
     check('oracle (REAL run): `codex login status` answers, and BOTH streams travel — its answer is on stderr',
-      r.ok === true && ((r.stdout || '') + (r.stderr || '')).toLowerCase().includes('logged in'), JSON.stringify({ exit: r.exitCode, out: (r.stdout || '').slice(0, 80), err: (r.stderr || '').slice(-120) }));
+      r.ok === true && verdictOf(((r.stdout || '') + (r.stderr || '')).toLowerCase().includes('logged in')), JSON.stringify({ exit: r.exitCode, out: (r.stdout || '').slice(0, 80), err: (r.stderr || '').slice(-120) }));
     const r2 = await live.runOracle('codex-mcp-list');
     check('oracle (REAL run): a --json oracle is parsed into typed JSON, and the modal gets an object rather than text',
       r2.ok === true && r2.json !== null && !r2.jsonError, JSON.stringify({ exit: r2.exitCode, jsonError: r2.jsonError, out: (r2.stdout || '').slice(0, 80) }));
@@ -643,7 +643,7 @@ const mod = mkModule();
     const ref = mk(() => ({ onWrapperRecord() { return 'ok'; } }));
     try { ref?.(); } catch (e) { threw = e.message; }
     check('THE PRIMITIVE: an mk() lazy ref is NOT callable — `ref()` throws even though `ref?.` passes (its Proxy target is `{}`)',
-      /is not a function/.test(threw || ''), String(threw));
+      verdictOf(/is not a function/.test(threw || '')), String(threw));
     check('THE PRIMITIVE: …and property access through it returns a BOUND method, which is why every consumer must use `ref?.method?.()`',
       ref?.onWrapperRecord?.() === 'ok' && mk(() => null)?.onWrapperRecord?.() === undefined);
   }
@@ -714,7 +714,7 @@ const mod = mkModule();
     const boom = driveConsumer(protocol, { pr: { onWrapperRecord() { throw new Error('sink exploded'); } }, deliver: { stashFor() { } } });
     boom.feed(answer('rq-3'));
     check(`WIRING PIN (${protocol}): a throwing sink is reported with the message VERBATIM (a catch that hides its own bug is how this one lived)`,
-      boom.warns.some((w) => /sink exploded/.test(w)), JSON.stringify(boom.warns));
+      verdictOf(boom.warns.some((w) => /sink exploded/.test(w))), JSON.stringify(boom.warns));
 
     // ④ the SAME primitive on the delivery lane — "a promised message never
     // silently dies" was false here too: deliverRef() threw into a bare catch,
@@ -727,11 +727,11 @@ const mod = mkModule();
       stashed.length === 1 && stashed[0][0] === 'cid-1' && stashed[0][1].text === wantText,
       JSON.stringify({ stashed, logs: dl.logs, warns: dl.warns }));
     check(`WIRING PIN (${protocol}): …and the "re-stashing" log is not a promise the code does not keep`,
-      dl.logs.some((l) => /re-stashing/.test(l)) && stashed.length === 1, JSON.stringify({ logs: dl.logs, stashed: stashed.length }));
+      gateOf(dl.logs.some((l) => /re-stashing/.test(l))) && stashed.length === 1, JSON.stringify({ logs: dl.logs, stashed: stashed.length }));
     const dlBoom = driveConsumer(protocol, { pr: { onWrapperRecord() { } }, deliver: { stashFor() { throw new Error('stash exploded'); } } });
     dlBoom.feed(failedPeer);
     check(`WIRING PIN (${protocol}): a stash that throws SAYS SO (the bare catch that ate this for 3 releases is gone)`,
-      dlBoom.warns.some((w) => /stash exploded/.test(w)), JSON.stringify(dlBoom.warns));
+      verdictOf(dlBoom.warns.some((w) => /stash exploded/.test(w))), JSON.stringify(dlBoom.warns));
   }
 
   // (⑤ the standing sweep — a census with its negative control — MOVED to the fast scripts/test-permission-rules-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -741,29 +741,29 @@ const mod = mkModule();
 
 // the registry's own shape (the vendor-whitelist suite enforces the proofs)
 {
-  check('every shipped oracle declares argv + a json flag + a proof', ORACLES_MOD.ORACLES.every((o) => Array.isArray(o.argv) && o.argv.length && typeof o.json === 'boolean' && o.proof));
+  check('every shipped oracle declares argv + a json flag + a proof', verdictOf(ORACLES_MOD.ORACLES.every((o) => Array.isArray(o.argv) && o.argv.length && typeof o.json === 'boolean' && o.proof)));
   check('the three candidates the design proposed are all in NOT_ORACLES (measured, rejected) and in no shipped row',
-    ['claude-auth-status', 'claude-agents-list', 'codex-doctor'].every((id) => ORACLES_MOD.rejected(id) && !ORACLES_MOD.oracle(id)));
+    verdictOf(['claude-auth-status', 'claude-agents-list', 'codex-doctor'].every((id) => ORACLES_MOD.rejected(id) && !ORACLES_MOD.oracle(id))));
   check('no shipped oracle is a claude one — every measured claude candidate reached api.anthropic.com',
-    ORACLES_MOD.ORACLES.every((o) => o.backend !== 'claude'));
+    verdictOf(ORACLES_MOD.ORACLES.every((o) => o.backend !== 'claude')));
   // A gate outside the gate rots (test-tool-toggles rode a stale CLI count for
   // 27 releases exactly this way).
-  check('ci.mjs runs this suite', /'test-permission-rules'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')));
+  check('ci.mjs runs this suite', verdictOf(/'test-permission-rules'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8'))));
 }
 
 {
   // lane automation-open-permission-resolve (q-049 M2): resolveDefaultMode — the reader + the PURE resolution over REAL files
   const SPR = require(path.join(REPO, 'src/server/permission-rules.js'));
   const r1 = await SPR.resolveDefaultMode({ backend: 'claude', cwd: PROJ, home: HOME });
-  check('resolveDefaultMode: the user layer sets acceptEdits, the project none ⇒ acceptEdits by the user file', r1.ok && r1.mode === 'acceptEdits' && r1.layer.id === 'userSettings' && r1.layer.file === path.join(HOME, '.claude/settings.json') && r1.cwd === PROJ, r1);
+  check('resolveDefaultMode: the user layer sets acceptEdits, the project none ⇒ acceptEdits by the user file', gateOf(r1.ok) && r1.mode === 'acceptEdits' && r1.layer.id === 'userSettings' && r1.layer.file === path.join(HOME, '.claude/settings.json') && r1.cwd === PROJ, r1);
   const P2 = path.join(TMP, 'proj-bypass'); fs.mkdirSync(path.join(P2, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(P2, '.claude/settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }));
   const r2 = await SPR.resolveDefaultMode({ backend: 'claude', cwd: P2, home: HOME });
-  check('resolveDefaultMode: a project file that says bypassPermissions wins over the user layer and is named', r2.ok && r2.mode === 'bypassPermissions' && r2.layer.id === 'projectSettings' && r2.layer.file === path.join(P2, '.claude/settings.json'), r2);
+  check('resolveDefaultMode: a project file that says bypassPermissions wins over the user layer and is named', gateOf(r2.ok) && r2.mode === 'bypassPermissions' && r2.layer.id === 'projectSettings' && r2.layer.file === path.join(P2, '.claude/settings.json'), r2);
   const H2 = path.join(TMP, 'home-empty'); fs.mkdirSync(H2, { recursive: true });
   const P3 = path.join(TMP, 'proj-none'); fs.mkdirSync(P3, { recursive: true });
   const r3 = await SPR.resolveDefaultMode({ backend: 'claude', cwd: P3, home: H2 });
-  check('resolveDefaultMode: no settings file anywhere ⇒ default with no layer', r3.ok && r3.mode === 'default' && r3.layer === null, r3);
+  check('resolveDefaultMode: no settings file anywhere ⇒ default with no layer', gateOf(r3.ok) && r3.mode === 'default' && r3.layer === null, r3);
   const r4 = await SPR.resolveDefaultMode({ backend: 'codex', cwd: PROJ, home: HOME });
   const r5 = await SPR.resolveDefaultMode({ backend: 'shell', cwd: PROJ, home: HOME });
   check('resolveDefaultMode: a harness whose rules are not settings files (codex, shell) ⇒ ok false unsupported-harness — nothing resolved, judged by the caps row never a backend id', r4.ok === false && r4.reason === 'unsupported-harness' && r4.backend === 'codex' && r5.ok === false && r5.reason === 'unsupported-harness', { r4, r5 });
@@ -836,7 +836,7 @@ if (!CHROME) {
   // the ROUTE itself, from the live worktree server (the 2.333.0 route-battery lesson)
   if (booted) {
     const r = await (await fetch(`http://127.0.0.1:${PORT}/api/permission-rules?backend=claude&scope=instance`)).json();
-    check('live server: GET /api/permission-rules answers a well-formed record for claude', r.ok === true && Array.isArray(r.layers) && r.layers.some((l) => l.id === 'userSettings'));
+    check('live server: GET /api/permission-rules answers a well-formed record for claude', r.ok === true && gateOf(Array.isArray(r.layers)) && verdictOf(r.layers.some((l) => l.id === 'userSettings')));
     const bad = await fetch(`http://127.0.0.1:${PORT}/api/local-oracle/not-a-thing`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     check('live server: POST /api/local-oracle/<unknown> is a 404 with a typed reason (never a 5xx)', bad.status === 404);
   }
@@ -937,11 +937,11 @@ if (!CHROME) {
     check('375×667: a codex account gets NO "Permission rules…" row (the instance rung would have spawned a connecting app-server)',
       !cRows.some((r) => /^Permission rules/.test(r.label)), JSON.stringify(cRows.map((r) => r.label)));
     check('375×667: …and it gets a DISABLED row naming the measurement instead, right where the button would have been',
-      cRows.some((r) => r.disabled && /app-server/.test(r.label) && /chatgpt\.com/.test(r.title)), JSON.stringify(cRows));
+      verdictOf(cRows.some((r) => r.disabled && /app-server/.test(r.label) && /chatgpt\.com/.test(r.title))), JSON.stringify(cRows));
     check('375×667: its three measured-clean oracles are still offered and still enabled (the fix removed one rung, not the feature)',
       cRows.filter((r) => !r.disabled && /…$/.test(r.label)).length === 3, JSON.stringify(cRows.map((r) => r.label)));
     check('NEGATIVE CONTROL: claude — which has NO oracles at all — still lists ALL its rejected candidates, and still offers its own rule view',
-      (menus.claude || []).some((r) => /^Permission rules/.test(r.label))
+      gateOf((menus.claude || []).some((r) => /^Permission rules/.test(r.label)))
       && (menus.claude || []).filter((r) => r.disabled).length === ORACLES_MOD.rejectedFor('claude').length
       && ORACLES_MOD.rejectedFor('claude').length >= 2,
       JSON.stringify((menus.claude || []).map((r) => r.label)));
@@ -999,7 +999,7 @@ if (!CHROME) {
     check('375×667: the Session-Properties tree does not overflow either',
       !props.error && props.treeScrollW <= props.treeClientW + 1 && props.docScrollW <= props.inner + 1, JSON.stringify(props));
     check('a SHELL session gets no section at all, and an OPENCODE one says machine-wide (the caps row gates the chrome, not a backend id)',
-      !props.error && props.shellHasSection === false && props.ocHasSection === true && /machine-wide/.test(props.ocHint || ''), JSON.stringify(props));
+      !props.error && props.shellHasSection === false && props.ocHasSection === true && verdictOf(/machine-wide/.test(props.ocHint || '')), JSON.stringify(props));
 
     // ── 375×667: the SHAPES round 4 introduced, in the REAL DOM ──
     // A leaf-split table produces the longest keys this view can carry
@@ -1056,7 +1056,7 @@ if (!CHROME) {
       return out;
     })()`);
     check('375×667: a LEAF-SPLIT codex table renders through the real view — the session\'s own -c flag appears as its own rule under its own layer',
-      !shapes.error && shapes.leaf && !shapes.leaf.error && shapes.leaf.keys.includes('sandbox_workspace_write.network_access'),
+      !shapes.error && gateOf(shapes.leaf) && !shapes.leaf.error && verdictOf(shapes.leaf.keys.includes('sandbox_workspace_write.network_access')),
       JSON.stringify(shapes.leaf));
     check('375×667: …and the longest key it can produce still does not overflow (no element right of the tree, no sideways page scroll)',
       !shapes.leaf.error && shapes.leaf.longest.length >= 40 && shapes.leaf.measured >= 8 && shapes.leaf.overflowing === 0
@@ -1064,9 +1064,9 @@ if (!CHROME) {
       JSON.stringify(shapes.leaf));
     check('375×667: the CAPPED answer renders its own layer saying the origin map is gone, while the layer that genuinely has no file keeps the stock line — two different sentences on one screen, never "the packaged default"',
       !shapes.capped.error
-      && shapes.capped.noteTexts.length > 0 && shapes.capped.noteTexts.every((t) => t === PR.CODEX_CAPPED_NOTE)
-      && shapes.capped.pathNone.some((t) => /origin map was dropped/.test(t))
-      && shapes.capped.pathNone.some((t) => /not stored on disk/.test(t)),
+      && shapes.capped.noteTexts.length > 0 && gateOf(shapes.capped.noteTexts.every((t) => t === PR.CODEX_CAPPED_NOTE))
+      && gateOf(shapes.capped.pathNone.some((t) => /origin map was dropped/.test(t)))
+      && verdictOf(shapes.capped.pathNone.some((t) => /not stored on disk/.test(t))),
       JSON.stringify(shapes.capped));
     check('375×667: …and that sentence-length path line wraps instead of scrolling the phone sideways',
       !shapes.capped.error && shapes.capped.measured >= 8 && shapes.capped.overflowing === 0
@@ -1117,15 +1117,15 @@ if (!CHROME) {
       return out;
     })()`);
     check('375×667 WIRING PIN: a REMOTE session\'s Properties says the rules live on that machine — never this machine\'s files under a remote label',
-      !remote.error && remote.reason === 'remote-session' && /aidev-box/.test(remote.text || '') && remote.layers === 0, JSON.stringify(remote));
+      !remote.error && remote.reason === 'remote-session' && gateOf(/aidev-box/.test(remote.text || '')) && remote.layers === 0, JSON.stringify(remote));
     check('375×667 WIRING PIN: the door really sent host= (the field is `s.host`; `hostId` is an openSpec name and does not exist on a session)',
-      !remote.error && (remote.sent || []).some((u) => /[?&]host=aidev-box/.test(u)), JSON.stringify(remote.sent));
+      !remote.error && verdictOf((remote.sent || []).some((u) => /[?&]host=aidev-box/.test(u))), JSON.stringify(remote.sent));
     {
       // the DISPLAY cwd ("aidev-box: /home/remoteuser/proj") is a grouping KEY
       // and must never travel as a path (2.225.2). It must arrive stripped.
       const cwds = (remote.sent || []).map((u) => new URL(u, 'http://x').searchParams.get('cwd'));
       check('375×667 WIRING PIN: it never sends the host-labeled DISPLAY cwd as a path (2.225.2 — that string must not reach an operation)',
-        !remote.error && cwds.length > 0 && cwds.every((c) => c === '/home/remoteuser/proj'), JSON.stringify(cwds));
+        !remote.error && cwds.length > 0 && verdictOf(cwds.every((c) => c === '/home/remoteuser/proj')), JSON.stringify(cwds));
     }
     check('375×667 WIRING PIN: no copy-path button offers a path that exists on neither machine',
       !remote.error && (remote.paths || []).length === 0, JSON.stringify(remote.paths));
@@ -1194,11 +1194,11 @@ if (!CHROME) {
       !rerender.error && rerender.layersAfterClick >= 1 && rerender.sentinelSurvived === false, JSON.stringify(rerender));
     check('375×667 RE-RENDER PIN: …and the loaded tree SURVIVES it, layer-for-layer, with the button still saying "Reload rules"',
       !rerender.error && rerender.layersAfterBroadcast === rerender.layersAfterClick && rerender.rulesAfterBroadcast >= 3
-      && /Reload rules/.test(rerender.labelAfterBroadcast || '') && rerender.editControls === 0, JSON.stringify(rerender));
+      && gateOf(/Reload rules/.test(rerender.labelAfterBroadcast || '')) && rerender.editControls === 0, JSON.stringify(rerender));
     check('375×667 RE-RENDER PIN: it survives by RE-RENDERING the held record — the broadcast asks the server (and, on codex, the agent) NOTHING',
       !rerender.error && rerender.readsAfterClick === 1 && rerender.readsAfterBroadcast === 1, JSON.stringify(rerender));
     check('NEGATIVE CONTROL: change the question (the session\'s cwd) and the held tree is DROPPED back to "Show rules…" — a tree answers ONE query, and nothing re-fetches on its own',
-      !rerender.error && rerender.layersAfterCwdChange === 0 && /Show rules/.test(rerender.labelAfterCwdChange || '')
+      !rerender.error && rerender.layersAfterCwdChange === 0 && gateOf(/Show rules/.test(rerender.labelAfterCwdChange || ''))
       && rerender.readsAfterCwdChange === 1, JSON.stringify(rerender));
 
     // A broadcast landing WHILE the read is in flight detaches the tree, and
@@ -1241,7 +1241,7 @@ if (!CHROME) {
     })()`);
     check('375×667 RE-RENDER PIN: a broadcast DURING the read does not lose the answer — it lands on the rebuilt section, from the held record, with no second fetch',
       !inflight.error && inflight.detachedMidFlight === true && inflight.layers >= 1
-      && /Reload rules/.test(inflight.label || '') && inflight.reads === 1, JSON.stringify(inflight));
+      && gateOf(/Reload rules/.test(inflight.label || '')) && inflight.reads === 1, JSON.stringify(inflight));
 
     try { ws.close(); } catch { }
   }
@@ -1250,4 +1250,4 @@ if (!CHROME) {
 
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { }
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -35,7 +35,7 @@ const IP = (() => { const all = Object.values(os.networkInterfaces()).flat().fil
 if (!IP) { console.log('SKIP: this box has no non-loopback IPv4 address (an insecure origin needs one)'); process.exit(0); }
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
 let passed = 0, failed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DOMAIN = 'hub-test.tail0000.ts.net';
 const PW = 'https-lane-pw-7';
@@ -139,7 +139,7 @@ try {
 
   console.log(`① files: https://${IP}:${PORT}`);
   await boot('files', { VIBESPACE_TLS_CERT: LEAF.c, VIBESPACE_TLS_KEY: LEAF.k }, path.join(fx, 'data-files'));
-  check('the boot banner names both addresses', await waitLog(new RegExp(`running at http://localhost:${PORT} and https://${IP.replace(/\./g, '\\.')}:${PORT}`)), log().split('\n').find((l) => /running at/.test(l)));
+  check('the boot banner names both addresses', verdictOf(await waitLog(new RegExp(`running at http://localhost:${PORT} and https://${IP.replace(/\./g, '\\.')}:${PORT}`))), log().split('\n').find((l) => /running at/.test(l)));
   const HTTPS = `https://${IP}:${PORT}`, HTTP = `http://${IP}:${PORT}`;
   // B-9dd0's remainder (2): THE BELT, probed IN THE CHROME UNDER TEST (r1521: a fresh blank tab of the suite's own Chrome — take
   // the belt off it and this leg is red): the box's own NAME, a vendor's name and a TEST-NET address are each refused; its CONTROL
@@ -150,29 +150,29 @@ try {
   if (bareR.own === 'reached') check('CONTROL: with NO belt the box\'s own name is REACHED — the belt leg above can fail', true, bareR);
   else console.log(`  ⊘ SKIP the belt's CONTROL: with no belt this box did not reach its own name (${JSON.stringify(bareR)}) — the belt leg is not shown discriminating here`);
   await go(HTTPS + '/login');
-  check('the https page loads (Chrome trusts exactly the test leaf)', await waitFor(`location.protocol === 'https:' && document.readyState === 'complete'`, 15000), await evalJs('location.href').catch(() => null));
+  check('the https page loads (Chrome trusts exactly the test leaf)', verdictOf(await waitFor(`location.protocol === 'https:' && document.readyState === 'complete'`, 15000)), await evalJs('location.href').catch(() => null));
   check('sign-in over https', (await signIn()) === 200);
   await go(HTTPS + '/');
-  check('the app on https: WebSocket connected, the sidebar drawn', await waitFor(APP_UP, 30000));
+  check('the app on https: WebSocket connected, the sidebar drawn', verdictOf(await waitFor(APP_UP, 30000)));
   check('window.isSecureContext === true on https://<ip>', await evalJs('window.isSecureContext') === true && await evalJs('!!(window.crypto && window.crypto.subtle)') === true);
   await cdp('Page.reload'); await sleep(800);
-  check('a reload keeps the session on https (no sign-in page)', await waitFor(APP_UP, 30000) && await evalJs(`!/\\/login/.test(location.pathname)`));
+  check('a reload keeps the session on https (no sign-in page)', gateOf(await waitFor(APP_UP, 30000)) && verdictOf(await evalJs(`!/\\/login/.test(location.pathname)`)));
 
   console.log(`② CONTROL: http://${IP}:${PORT} — the same port`);
   await go(HTTP + '/login');
   if (/\/login/.test(await evalJs('location.pathname'))) check('sign-in over http (same port)', (await signIn()) === 200); else check('the https cookie (no Secure flag) also signs the http origin in', true);
   await go(HTTP + '/');
   const PAGE = `({ href: location.href, app: !!window.app, ws: !!(window.app && window.app.ws && window.app.ws.connected), sidebar: !!document.getElementById('sidebar'), ready: document.readyState, title: document.title })`;
-  check('http on the SAME port still serves the app (WebSocket connected)', await waitFor(APP_UP, 30000), await evalJs(PAGE).catch((e) => e.message));
+  check('http on the SAME port still serves the app (WebSocket connected)', verdictOf(await waitFor(APP_UP, 30000)), await evalJs(PAGE).catch((e) => e.message));
   check('CONTROL: http://<ip> is NOT a secure context (no crypto.subtle) — the bug the https address fixes', await evalJs('window.isSecureContext') === false && await evalJs('!!(window.crypto && window.crypto.subtle)') === false);
   await cdp('Page.reload'); await sleep(800);
-  check('a reload keeps the session on http', await waitFor(APP_UP, 30000) && await evalJs(`!/\\/login/.test(location.pathname)`), await evalJs(PAGE).catch((e) => e.message));
+  check('a reload keeps the session on http', gateOf(await waitFor(APP_UP, 30000)) && verdictOf(await evalJs(`!/\\/login/.test(location.pathname)`)), await evalJs(PAGE).catch((e) => e.message));
 
   console.log('③ the Settings row');
   await go(HTTPS + '/'); await waitFor(APP_UP, 30000);
   await evalJs(`app._settingsUI.open({ search: 'server.https' })`);
   const ROW = `(() => { const f = document.querySelector('.settings-https-fact'); return f ? { text: f.querySelector('.settings-https-text').textContent, copy: !!f.querySelector('.settings-https-copy'), live: f.classList.contains('is-live') } : null; })()`;
-  check('the row says the secure address + a Copy button', await waitFor(`(${ROW}) && (${ROW}).copy`, 15000) && (await evalJs(ROW)).text === `Secure address: ${HTTPS} — microphone, a Mac's sign-in and other secure-only features need it`, await evalJs(ROW));
+  check('the row says the secure address + a Copy button', gateOf(await waitFor(`(${ROW}) && (${ROW}).copy`, 15000)) && (await evalJs(ROW)).text === `Secure address: ${HTTPS} — microphone, a Mac's sign-in and other secure-only features need it`, await evalJs(ROW));
   const shot = async (file) => {
     if (!SHOTS) return;
     await waitFor(SPLASH_GONE, 20000); // the boot splash covers the page until app.ready
@@ -190,7 +190,7 @@ try {
   await waitFor(`!!document.querySelector('.settings-https-copy')`, 15000);
   await sleep(400);
   const phone = await evalJs(`(() => { const f = document.querySelector('.settings-https-fact'); const t = f.querySelector('.settings-https-text'), b = f.querySelector('.settings-https-copy'); const fr = f.getBoundingClientRect(); return { over: f.scrollWidth - f.clientWidth, inView: fr.right <= innerWidth + 1, lines: Math.round(t.getBoundingClientRect().height / parseFloat(getComputedStyle(t).lineHeight)), btnIn: b.getBoundingClientRect().right <= fr.right + 1 }; })()`);
-  check('390 px: the row wraps — nothing overflows sideways, the Copy button inside', phone.over <= 0 && phone.inView && phone.btnIn && phone.lines >= 2, phone);
+  check('390 px: the row wraps — nothing overflows sideways, the Copy button inside', phone.over <= 0 && gateOf(phone.inView) && gateOf(phone.btnIn) && phone.lines >= 2, phone);
   await shot('settings-phone.png');
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -199,8 +199,8 @@ try {
   setMode('ok');
   const dTs = path.join(fx, 'data-ts');
   await boot('ts1', { VIBESPACE_TAILSCALE_BIN: STUB }, dTs);
-  check('the server acquires at boot and logs the https line', await waitLog(new RegExp(`\\[tls\\] https on :${PORT} — https://${DOMAIN.replace(/\./g, '\\.')}:${PORT} \\(tailscale certificate, until `)), log().split('\n').filter((l) => /\[tls\]/.test(l)));
-  check('status --json, then ONE cert run with --cert-file/--key-file into data/tls', calls().filter((c) => c.startsWith('cert ')).length === 1 && calls().some((c) => c === `cert --cert-file ${path.join(wt, 'data', 'tls', DOMAIN + '.crt')} --key-file ${path.join(wt, 'data', 'tls', DOMAIN + '.key')} ${DOMAIN}`), calls());
+  check('the server acquires at boot and logs the https line', verdictOf(await waitLog(new RegExp(`\\[tls\\] https on :${PORT} — https://${DOMAIN.replace(/\./g, '\\.')}:${PORT} \\(tailscale certificate, until `))), log().split('\n').filter((l) => /\[tls\]/.test(l)));
+  check('status --json, then ONE cert run with --cert-file/--key-file into data/tls', calls().filter((c) => c.startsWith('cert ')).length === 1 && verdictOf(calls().some((c) => c === `cert --cert-file ${path.join(wt, 'data', 'tls', DOMAIN + '.crt')} --key-file ${path.join(wt, 'data', 'tls', DOMAIN + '.key')} ${DOMAIN}`)), calls());
   const st = await api('/api/tls');
   check('/api/tls: tailscale, serving, the https url', st.mode === 'tailscale' && st.serving === true && st.url === `https://${DOMAIN}:${PORT}`, st);
   const inst = await api('/api/instance-url');
@@ -208,7 +208,7 @@ try {
   const peer = await new Promise((res) => { const q = https.get({ host: '127.0.0.1', port: PORT, path: '/login', servername: DOMAIN, rejectUnauthorized: false }, (r) => { res(r.socket.getPeerCertificate().fingerprint256); r.resume(); }); q.on('error', (e) => res(e.message)); });
   check('TLS on the port presents the acquired certificate', peer === new crypto.X509Certificate(fs.readFileSync(TS.c)).fingerprint256, peer);
   await boot('ts2', { VIBESPACE_TAILSCALE_BIN: STUB }, dTs);
-  check('the next boot serves it at once: "running at http://localhost:<port> and https://<domain>:<port>"', await waitLog(new RegExp(`running at http://localhost:${PORT} and https://${DOMAIN.replace(/\./g, '\\.')}:${PORT}`)), log().split('\n').find((l) => /running at/.test(l)));
+  check('the next boot serves it at once: "running at http://localhost:<port> and https://<domain>:<port>"', verdictOf(await waitLog(new RegExp(`running at http://localhost:${PORT} and https://${DOMAIN.replace(/\./g, '\\.')}:${PORT}`))), log().split('\n').find((l) => /running at/.test(l)));
 
   console.log('⑤ the owner\'s step: ONE For-you item per state, across boots');
   setMode('not-enabled');
@@ -219,7 +219,7 @@ try {
     await waitLog(/\[tls\] https off — https-not-enabled/);
     await sleep(500);
     const it = await items();
-    check(`boot ${n}: the "not enabled" For-you item — exactly ONE`, it.length === 1 && /HTTPS Certificates in the Tailscale admin console/.test(it[0].text), it.map((t) => t.text));
+    check(`boot ${n}: the "not enabled" For-you item — exactly ONE`, it.length === 1 && verdictOf(/HTTPS Certificates in the Tailscale admin console/.test(it[0].text)), it.map((t) => t.text));
   }
   setMode('denied');
   await boot('denied', { VIBESPACE_TAILSCALE_BIN: STUB }, dNo);
@@ -231,21 +231,21 @@ try {
   console.log('⑥ lane tls-pass-retry: an unreadable boot answer, then Check again');
   setMode('half');
   await boot('half', { VIBESPACE_TAILSCALE_BIN: STUB }, path.join(fx, 'data-half'));
-  check('the boot pass logs the raw answer and says status-unreadable (never "not running")', await waitLog(/\[tls\] https off — status-unreadable/) && /\[tls\] tailscale status: exit 0 but no readable JSON \(\d+ ms, 20 bytes out\)/.test(log()) && !/no-tailscale/.test(log()), log().split('\n').filter((l) => /\[tls\]/.test(l)));
+  check('the boot pass logs the raw answer and says status-unreadable (never "not running")', gateOf(await waitLog(/\[tls\] https off — status-unreadable/)) && gateOf(/\[tls\] tailscale status: exit 0 but no readable JSON \(\d+ ms, 20 bytes out\)/.test(log())) && !/no-tailscale/.test(log()), log().split('\n').filter((l) => /\[tls\]/.test(l)));
   const HTTP6 = `http://${IP}:${PORT}`;
   await go(HTTP6 + '/login'); if (/\/login/.test(await evalJs('location.pathname'))) await signIn();
   await go(HTTP6 + '/'); await waitFor(APP_UP, 30000);
   await evalJs(`app._settingsUI.open({ search: 'server.https' })`);
   const ROW6 = `(() => { const f = document.querySelector('.settings-https-fact'); if (!f) return null; const p = f.querySelector('.settings-https-probe'); return { text: f.querySelector('.settings-https-text').textContent, probe: p && !p.hidden ? p.textContent : null, again: !!f.querySelector('.settings-https-recheck'), copy: !!f.querySelector('.settings-https-copy'), live: f.classList.contains('is-live') }; })()`;
   const r6 = (await waitFor(`!!((${ROW6}) || {}).probe`, 15000)) && await evalJs(ROW6);
-  check('the row: the unreadable words + "Last check: …" in small text + Check again, no Copy', !!r6 && r6.text.startsWith('No secure address yet: Tailscale gave no readable status answer') && r6.probe === 'Last check: tailscale status answered 20 bytes that are not a status' && r6.again && !r6.copy && !r6.live, r6);
+  check('the row: the unreadable words + "Last check: …" in small text + Check again, no Copy', !!r6 && gateOf(r6.text.startsWith('No secure address yet: Tailscale gave no readable status answer')) && r6.probe === 'Last check: tailscale status answered 20 bytes that are not a status' && gateOf(r6.again) && !r6.copy && !r6.live, r6);
   await shot('row-before.png');
   setMode('ok');
   await evalJs(`document.querySelector('.settings-https-recheck').click()`);
   const r7 = (await waitFor(`!!((${ROW6}) || {}).live`, 30000)) && await evalJs(ROW6);
-  check('Check again after the stub flips to Running ⇒ the secure address + Copy, the raw reason gone', !!r7 && r7.text === `Secure address: https://${DOMAIN}:${PORT} — microphone, a Mac's sign-in and other secure-only features need it` && r7.copy && r7.probe === null, r7);
+  check('Check again after the stub flips to Running ⇒ the secure address + Copy, the raw reason gone', !!r7 && r7.text === `Secure address: https://${DOMAIN}:${PORT} — microphone, a Mac's sign-in and other secure-only features need it` && gateOf(r7.copy) && r7.probe === null, r7);
   check('… in the SAME server process (one "running at" line in this boot\'s log)', log().split('\n').filter((l) => /running at/.test(l)).length === 1 && (await api('/api/tls')).serving === true, log().split('\n').filter((l) => /running at|\[tls\]/.test(l)));
   await shot('row.png');
 } catch (e) { check('the suite ran without throwing', false, e && e.stack); }
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

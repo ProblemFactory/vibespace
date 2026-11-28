@@ -29,7 +29,7 @@ import { fileURLToPath } from 'url';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 900)); } };
+const ok = (c, name, info) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 900)); } };
 
 // ── THE GRAMMAR (over any element tree with tagName / className / dataset / childNodes / textContent) ──
 const TITLE_MAX = 90;
@@ -92,7 +92,7 @@ const derived = libFiles.filter((f) => { const s = fs.readFileSync(path.join(ROO
 const C = require(path.join(ROOT, 'src/channel-api-card.js'));
 const tellsOf = (f) => { const lines = fs.readFileSync(path.join(ROOT, f), 'utf8').split('\n'); const out = []; lines.forEach((l, i) => { for (const [k, re] of STATIC) if (re.test(l)) out.push(`${k}@${i + 1}`); }); return out; };
 console.log(`    derived (${derived.length}): ${derived.map((f) => path.basename(f)).join(', ')}`);
-ok(Object.keys(RENDERED).every((f) => derived.includes(f)) && derived.length >= 4, 'the derivation finds the rendered cards and the other decision cards', derived);
+ok(gateOf(Object.keys(RENDERED).every((f) => derived.includes(f))) && derived.length >= 4, 'the derivation finds the rendered cards and the other decision cards', derived);
 const unlisted = derived.filter((f) => !RENDERED[f] && !EXCEPTIONS[f] && tellsOf(f).length);
 ok(!unlisted.length, 'every decision-card renderer with a raw-string tell is rendered here or listed as an exception', unlisted.map((f) => `${f}: ${tellsOf(f).join(' ')}`));
 const stale = Object.keys(EXCEPTIONS).filter((f) => !derived.includes(f) || !tellsOf(f).length);
@@ -247,10 +247,10 @@ for (const lang of ['en', 'zh']) {
   for (const [k, rec] of Object.entries(FX)) {
     const c = V.renderApiCard(rec, null, { app });
     const head = c.querySelector('.chan-api-head'), tech = c.querySelectorAll('.chan-api-tech');
-    ok(head && head.textContent === WANT[lang][k], `${k}: the title = actor + verb + named object — "${head && head.textContent}"`, head && head.textContent);
+    ok(gateOf(head) && head.textContent === WANT[lang][k], `${k}: the title = actor + verb + named object — "${head && head.textContent}"`, head && head.textContent);
     ok(!violations(c).length, `${k}: no raw string outside the fold, policy as a chip, title ≤ ${TITLE_MAX}`, { v: violations(c), text: outsideText(c) });
     const fold = tech[0];
-    ok(tech.length === 1 && fold.dataset.fold === 'tech' && fold.open === false && fold.childNodes[0].tagName === 'SUMMARY' && /https:\/\/open\.feishu\.cn\/open-apis\//.test(fold.textContent) && /sha256 abab/.test(fold.textContent) && /\d+ B/.test(fold.textContent) && fold.textContent.includes('content-type: application/json') && fold.childNodes[0].textContent === WANT[lang].fold,
+    ok(tech.length === 1 && fold.dataset.fold === 'tech' && fold.open === false && fold.childNodes[0].tagName === 'SUMMARY' && gateOf(/https:\/\/open\.feishu\.cn\/open-apis\//.test(fold.textContent)) && gateOf(/sha256 abab/.test(fold.textContent)) && gateOf(/\d+ B/.test(fold.textContent)) && gateOf(fold.textContent.includes('content-type: application/json')) && fold.childNodes[0].textContent === WANT[lang].fold,
       `${k}: ONE collapsed 技术细节 fold holds the method + full URL, the header, the size + sha256, the body`, fold && fold.textContent.slice(0, 300));
   }
   const d = V.renderApiCard(FX.docxDelete, null, { app });
@@ -260,24 +260,24 @@ for (const lang of ['en', 'zh']) {
   const s = V.renderApiCard(FX.send, null, { app });
   const link = s.querySelector('.chan-api-obj');
   link.dispatch('click');
-  ok(link.tagName === 'A' && opened.length && opened[opened.length - 1][1] === 'oc_fixture', 'a named chat is a link that opens its conversation', opened);
+  ok(link.tagName === 'A' && gateOf(opened.length) && opened[opened.length - 1][1] === 'oc_fixture', 'a named chat is a link that opens its conversation', opened);
   ok(s.querySelector('.chan-api-note').textContent === '“post the weekly summary”', 'the agent\'s own --why is a quoted line under the title');
   // the always-allow button: the plain phrase; the shape it grants is the fold's line
   const u = V.renderApiCard(FX.unknown, null, { app });
   ok(s.querySelector('.chan-api-always').textContent === WANT[lang].alwaysSend && u.querySelector('.chan-api-always').textContent === WANT[lang].alwaysUnknown, `the always-allow button says the plain phrase — "${s.querySelector('.chan-api-always').textContent}" / "${u.querySelector('.chan-api-always').textContent}"`);
   ok(s.querySelector('.chan-api-allowline').textContent === WANT[lang].allowLine && s.querySelector('.chan-api-allowline').parentNode.dataset.fold === 'tech' && !d.querySelector('.chan-api-allowline'), 'the shape it will allow is a line inside the 技术细节 fold (none on a card that offers no always-allow)');
   const btns = [d, s, u].flatMap((c) => c.querySelectorAll('.mounts-btn'));
-  ok(btns.length >= 7 && btns.every((b) => !TELLS.button.test(b.textContent)), `no button label carries a URL / method + path (${btns.length} buttons)`, btns.map((b) => b.textContent));
+  ok(btns.length >= 7 && verdictOf(btns.every((b) => !TELLS.button.test(b.textContent))), `no button label carries a URL / method + path (${btns.length} buttons)`, btns.map((b) => b.textContent));
   ok(V.renderApiCard(FX.docxDelete, null, { app }).querySelector('.chan-api-objid').textContent === 'DocFixtu…', 'an unnamed document is its id in an 8-char chip');
   // B-fc37: a card the vendor redirected — the outcome by name, where it pointed INSIDE the fold, 「重新提交」 the one door
   const rd = V.renderApiCard(FX.redirected, null, { app });
   const rline = rd.querySelector('.chan-api-redirectline'), rbtn = rd.querySelectorAll('.mounts-btn');
-  ok(rd.querySelector('.chan-api-outcome').textContent === WANT[lang].redirOutcome && rline && rline.textContent === WANT[lang].redirLine && rline.parentNode.dataset.fold === 'tech', `a redirected card: the outcome "${WANT[lang].redirOutcome}", where the vendor pointed + why as a 技术细节 line`, { out: rd.querySelector('.chan-api-outcome').textContent, line: rline && rline.textContent });
-  ok(rbtn.length === 1 && rbtn[0].textContent === WANT[lang].resubmit && /chan-api-resubmit/.test(rbtn[0].className) && !TELLS.button.test(rbtn[0].textContent) && !rd.querySelector('.chan-api-approve'), `its one door is the button "${WANT[lang].resubmit}" (no Approve / Reject on a decided card)`, rbtn.map((b) => b.textContent));
+  ok(rd.querySelector('.chan-api-outcome').textContent === WANT[lang].redirOutcome && gateOf(rline) && rline.textContent === WANT[lang].redirLine && rline.parentNode.dataset.fold === 'tech', `a redirected card: the outcome "${WANT[lang].redirOutcome}", where the vendor pointed + why as a 技术细节 line`, { out: rd.querySelector('.chan-api-outcome').textContent, line: rline && rline.textContent });
+  ok(rbtn.length === 1 && rbtn[0].textContent === WANT[lang].resubmit && gateOf(/chan-api-resubmit/.test(rbtn[0].className)) && !TELLS.button.test(rbtn[0].textContent) && !rd.querySelector('.chan-api-approve'), `its one door is the button "${WANT[lang].resubmit}" (no Approve / Reject on a decided card)`, rbtn.map((b) => b.textContent));
   const n0 = calls.length;
   rbtn[0].dispatch('click');
   await new Promise((r) => setTimeout(r, 0));
-  ok(calls.slice(n0).some((c) => c.url === '/api/channels/api/proposals/api-redirected/resubmit' && c.body && c.body.shown === 'd-1'), 'pressing it posts the card\'s digest to …/resubmit (a NEW card is filed; nothing runs)', calls.slice(n0));
+  ok(verdictOf(calls.slice(n0).some((c) => c.url === '/api/channels/api/proposals/api-redirected/resubmit' && c.body && c.body.shown === 'd-1')), 'pressing it posts the card\'s digest to …/resubmit (a NEW card is filed; nothing runs)', calls.slice(n0));
   const done = V.renderApiCard({ ...FX.redirected, resubmittedAs: 'api-next' }, null, { app });
   ok(done.querySelector('.chan-api-outcome').textContent === WANT[lang].resubmitted && !done.querySelector('.chan-api-resubmit'), 'once resubmitted: the outcome says so and the door is gone', done.querySelector('.chan-api-outcome').textContent);
   // actions: Approve needs no reason; Reject asks in a popover
@@ -286,14 +286,14 @@ for (const lang of ['en', 'zh']) {
   ok(!a.querySelector('.chan-api-why') && !a.querySelector('.chan-api-reject-pop'), 'no reason box until Reject is pressed');
   a.querySelector('.chan-api-approve').click();
   await new Promise((r) => setTimeout(r, 0));
-  ok(calls.some((x) => x.url === '/api/channels/api/proposals/api-send/approve' && x.body.shown === 'd-1' && !('reason' in x.body)), 'Approve: the frozen digest, no reason', calls);
+  ok(verdictOf(calls.some((x) => x.url === '/api/channels/api/proposals/api-send/approve' && x.body.shown === 'd-1' && !('reason' in x.body))), 'Approve: the frozen digest, no reason', calls);
   a.querySelector('.chan-api-reject').click();
   const pop = a.querySelector('.chan-api-reject-pop');
   ok(!!pop && !!pop.querySelector('.chan-api-why') && globalThis.__focused === pop.querySelector('.chan-api-why') && !calls.some((x) => /reject$/.test(x.url)), 'Reject opens the reason popover (focused) and sends nothing yet');
   pop.querySelector('.chan-api-why').value = 'wrong room';
   pop.querySelector('.chan-api-reject-go').click();
   await new Promise((r) => setTimeout(r, 0));
-  ok(calls.some((x) => x.url === '/api/channels/api/proposals/api-send/reject' && x.body.reason === 'wrong room') && !a.querySelector('.chan-api-reject-pop'), 'the popover\'s Reject sends the reason and closes', calls);
+  ok(gateOf(calls.some((x) => x.url === '/api/channels/api/proposals/api-send/reject' && x.body.reason === 'wrong room')) && !a.querySelector('.chan-api-reject-pop'), 'the popover\'s Reject sends the reason and closes', calls);
   // the Outbox: row = «actor · action» + chip + outcome; the expanded card never repeats the title (lane outbox-window-scroll-filter: the
   // row never carries the object's id — the card's 技术细节 fold does)
   cards = [FX.docxDelete, FX.unknown, FX.send];
@@ -301,12 +301,12 @@ for (const lang of ['en', 'zh']) {
   await new Promise((r) => setTimeout(r, 0));
   const rows = sec.el.querySelectorAll('.chan-api-orow');
   const r0 = rows[0];
-  ok(rows.length === 3 && r0.querySelector('.chan-api-orow-head').textContent === WANT[lang].docxRow && !/DocFixtu/.test(r0.textContent) && r0.querySelector('.chan-api-orow-chip').textContent === WANT[lang].chip && !r0.querySelector('.chan-api-orow-chip').hidden && /23/.test(r0.querySelector('.chan-api-orow-out').textContent), 'the Outbox row: «actor · action» (no id) + the policy chip + 等你决定 · 23 h', rows.map((r) => r.textContent));
-  ok(rows[2].querySelector('.chan-api-orow-chip').hidden, 'a non-sensitive row draws no chip');
+  ok(rows.length === 3 && r0.querySelector('.chan-api-orow-head').textContent === WANT[lang].docxRow && !/DocFixtu/.test(r0.textContent) && r0.querySelector('.chan-api-orow-chip').textContent === WANT[lang].chip && !r0.querySelector('.chan-api-orow-chip').hidden && verdictOf(/23/.test(r0.querySelector('.chan-api-orow-out').textContent)), 'the Outbox row: «actor · action» (no id) + the policy chip + 等你决定 · 23 h', rows.map((r) => r.textContent));
+  ok(verdictOf(rows[2].querySelector('.chan-api-orow-chip').hidden), 'a non-sensitive row draws no chip');
   const objl = sec.el.querySelector('.chan-api-card .chan-api-objline');
-  ok(objl && objl.parentNode.dataset.fold === 'tech' && objl.textContent === `${WANT[lang].objLine}${DOC}`, 'the object\'s whole id is a line of the opened card\'s 技术细节 fold', objl && objl.textContent);
+  ok(gateOf(objl) && objl.parentNode.dataset.fold === 'tech' && objl.textContent === `${WANT[lang].objLine}${DOC}`, 'the object\'s whole id is a line of the opened card\'s 技术细节 fold', objl && objl.textContent);
   const open = sec.el.querySelectorAll('.chan-api-card');
-  ok(open.length === 3 && open.every((c) => !c.querySelector('.chan-api-head') && !c.querySelector('.chan-api-outcome') && !c.querySelector('.chan-api-chip-warn')) && rows.every((r) => r.classList.contains('chan-orow-open')) && open.every((c) => !violations(c).length) && rows.every((r) => !violations(r, { titleSel: 'chan-api-orow-head' }).length), 'the expanded cards repeat neither the title nor the row\'s chip / outcome, and rows + cards pass the grammar', open.map((c) => violations(c)));
+  ok(open.length === 3 && gateOf(open.every((c) => !c.querySelector('.chan-api-head') && !c.querySelector('.chan-api-outcome') && !c.querySelector('.chan-api-chip-warn'))) && gateOf(rows.every((r) => r.classList.contains('chan-orow-open'))) && gateOf(open.every((c) => !violations(c).length)) && verdictOf(rows.every((r) => !violations(r, { titleSel: 'chan-api-orow-head' }).length)), 'the expanded cards repeat neither the title nor the row\'s chip / outcome, and rows + cards pass the grammar', open.map((c) => violations(c)));
   sec.stop();
 }
 
@@ -323,13 +323,13 @@ const OLD = mk('div', 'chan-api-card', [
   mk('div', 'chan-api-actions', [mk('input', 'chan-api-why', [], { placeholder: '原因（agent 会看到）' })]),
 ]);
 const vOld = violations(OLD);
-ok(['url', 'sha', 'bytes', 'raw-id', 'sentence', 'title-long'].every((k) => vOld.includes(k)), `CONTROL: the .263 API card fails the grammar (${vOld.join(', ')})`, vOld);
+ok(verdictOf(['url', 'sha', 'bytes', 'raw-id', 'sentence', 'title-long'].every((k) => vOld.includes(k))), `CONTROL: the .263 API card fails the grammar (${vOld.join(', ')})`, vOld);
 const stripped = V.renderApiCard(FX.docxDelete, null, { app });
 delete stripped.querySelector('.chan-api-tech').dataset.fold;
 const r1 = mk('div', 'chan-api-card', [mk('div', 'chan-api-actions', [mk('button', 'mounts-btn chan-api-always', ['执行，并始终允许 POST open.feishu.cn/open-apis/im/*/messages'])])]);
-ok(violations(r1).includes('button-raw') && TELLS.button.test('Run and always allow POST slack.com/api/chat.postMessage'), 'CONTROL: the r1 always-allow label (the raw shape on the button) fails the button leg', violations(r1));
+ok(gateOf(violations(r1).includes('button-raw')) && verdictOf(TELLS.button.test('Run and always allow POST slack.com/api/chat.postMessage')), 'CONTROL: the r1 always-allow label (the raw shape on the button) fails the button leg', violations(r1));
 const vS = violations(stripped);
-ok(vS.includes('url') && vS.includes('sha') && vS.includes('bytes'), `CONTROL: the real card with its fold mark stripped fails it (${vS.join(', ')})`, vS);
+ok(gateOf(vS.includes('url')) && gateOf(vS.includes('sha')) && verdictOf(vS.includes('bytes')), `CONTROL: the real card with its fold mark stripped fails it (${vS.join(', ')})`, vS);
 
 // ── ④ THE THREE CARDS THAT WERE THE EXCEPTION LIST — the REAL modules in one bundle (the real i18n, a language per copy) ──
 console.log('④ the attachment rows, the chat image card, the For-you API row (real modules)');
@@ -392,31 +392,31 @@ if (B) for (const lang of ['en', 'zh']) {
   // (1) the Outbox proposal's attachment rows
   const box = outboxBox(M);
   const metas = box.querySelectorAll('.chan-prop-file-meta');
-  ok(metas.map((x) => x.textContent).join('|') === W8.meta.join('|') && metas.every((x) => x.dataset.chip === 'size'), `outbox: each attachment row names its kind + a human size in a size chip — ${metas.map((x) => `「${x.textContent}」`).join(' ')}`, metas.map((x) => x.textContent));
+  ok(metas.map((x) => x.textContent).join('|') === W8.meta.join('|') && verdictOf(metas.every((x) => x.dataset.chip === 'size')), `outbox: each attachment row names its kind + a human size in a size chip — ${metas.map((x) => `「${x.textContent}」`).join(' ')}`, metas.map((x) => x.textContent));
   ok(!violations(box).length, 'outbox: no sha256 / mime / raw byte count / URL outside the fold (the rows, the chips, the note)', { v: violations(box), text: outsideText(box) });
   const chips = box.querySelectorAll('.chan-prop-file-chip').map((x) => x.textContent);
   ok(chips.length === 1 && chips[0] === W8.mismatch, `outbox: the name / type mismatch chip names the FORMAT, never the mime literal — "${chips[0]}"`, chips);
   const bf = box.querySelectorAll('[data-fold="tech"]');
   const want = FILES.every((a) => bf[0] && bf[0].textContent.includes(`${a.name} · ${a.mime} · ${a.bytes} B · sha256 ${a.sha256}`));
-  ok(bf.length === 1 && bf[0].tagName === 'DETAILS' && !bf[0].open && bf[0].firstChild.tagName === 'SUMMARY' && bf[0].firstChild.textContent === TW.fold && want, 'outbox: ONE collapsed 技术细节 fold holds every file\'s type, exact bytes and whole sha256', bf[0] && bf[0].textContent.slice(0, 300));
+  ok(bf.length === 1 && bf[0].tagName === 'DETAILS' && !bf[0].open && bf[0].firstChild.tagName === 'SUMMARY' && bf[0].firstChild.textContent === TW.fold && verdictOf(want), 'outbox: ONE collapsed 技术细节 fold holds every file\'s type, exact bytes and whole sha256', bf[0] && bf[0].textContent.slice(0, 300));
   const gone = M.renderProposalCard(outboxApp, { ...PROP, id: 'p-cg2', state: 'sent', attachmentsGoneAt: 1 }).querySelector('.chan-prop-files');
   ok(!violations(gone).length && gone.querySelectorAll('[data-fold="tech"]').length === 1, 'outbox: a card whose files are gone keeps the names + kinds, the checksums in the fold', violations(gone));
   // (2) the chat's image card
   const mc = mediaCard(M, MEDIA), meta = mc.querySelector('.chat-media-meta');
-  ok(meta && meta.textContent === 'PNG · 12 KB' && meta.dataset.chip === 'size' && !violations(mc).length, `chat: the image card says its format + a human size — "${meta && meta.textContent}", no mime literal`, { meta: meta && meta.textContent, v: violations(mc) });
+  ok(gateOf(meta) && meta.textContent === 'PNG · 12 KB' && meta.dataset.chip === 'size' && !violations(mc).length, `chat: the image card says its format + a human size — "${meta && meta.textContent}", no mime literal`, { meta: meta && meta.textContent, v: violations(mc) });
   const odd = mediaCard(M, { path: '/x/p.ppm', mediaType: 'image/x-portable-pixmap', bytes: 3e6 }).querySelector('.chat-media-meta');
   const bare = mediaCard(M, { mediaType: 'image/gif', bytes: 2048 }), pasted = mediaCard(M, { dataUrl: 'data:image/png;base64,AAAA', mediaType: 'image/png', name: 'Image' });
-  ok(odd.textContent === W8.unknownImage && bare.textContent === 'GIF · 2 KB' && bare.querySelector('.chat-tool-image-chip').dataset.chip === 'size' && pasted.querySelector('.chat-media-meta').textContent === 'PNG' && [bare, pasted].every((x) => !violations(x).length),
+  ok(odd.textContent === W8.unknownImage && bare.textContent === 'GIF · 2 KB' && bare.querySelector('.chat-tool-image-chip').dataset.chip === 'size' && pasted.querySelector('.chat-media-meta').textContent === 'PNG' && verdictOf([bare, pasted].every((x) => !violations(x).length)),
     `chat: a format with no common name is "${odd.textContent}"; the chip with no picture "${bare.textContent}"; a pasted picture "PNG"`, [odd.textContent, bare.textContent]);
   // (3) the For-you row of a raw-API proposal — filed through the REAL store, worded by the REAL wordsOf
   for (const k of ['docxDelete', 'unknown', 'send']) {
     const item = fyItem(FX[k]), row = fyRow(M, item);
     const text = row.querySelector('.ut-text'), fold = row.querySelectorAll('[data-fold="tech"]'), approve = row.querySelector('.ut-proposal-approve');
-    ok(text && text.textContent === TW[k], `For you · ${k}: the row says the CARD's title — "${text && text.textContent}"`, text && text.textContent);
+    ok(gateOf(text) && text.textContent === TW[k], `For you · ${k}: the row says the CARD's title — "${text && text.textContent}"`, text && text.textContent);
     ok(!violations(row, { titleSel: 'ut-text' }).length, `For you · ${k}: no URL / sha / raw id / byte count outside the fold (title ≤ ${TITLE_MAX})`, { v: violations(row, { titleSel: 'ut-text' }), text: outsideText(row) });
-    ok(fold.length === 1 && fold[0].tagName === 'DETAILS' && !fold[0].open && fold[0].firstChild.textContent === TW.fold && fold[0].textContent.includes(`https://${FX[k].host}${FX[k].path}`) && fold[0].textContent.includes(`sha256 ${'ab'.repeat(32)}`) && /\d+ B/.test(fold[0].textContent) && approve && docOrder(row, fold[0], approve),
+    ok(fold.length === 1 && fold[0].tagName === 'DETAILS' && !fold[0].open && fold[0].firstChild.textContent === TW.fold && gateOf(fold[0].textContent.includes(`https://${FX[k].host}${FX[k].path}`)) && gateOf(fold[0].textContent.includes(`sha256 ${'ab'.repeat(32)}`)) && gateOf(/\d+ B/.test(fold[0].textContent)) && gateOf(approve) && verdictOf(docOrder(row, fold[0], approve)),
       `For you · ${k}: ONE collapsed 技术细节 fold ABOVE Approve holds the method + full URL, the body size + sha256`, fold[0] && fold[0].textContent.slice(0, 240));
-    if (k === 'docxDelete') ok(row.querySelector('.ut-api-chip') && row.querySelector('.ut-api-chip').textContent === TW.chip && row.querySelector('.ut-proposal-plan').textContent === W8.plan, `For you · the policy is a chip on the plan line — "${row.querySelector('.ut-proposal-plan').textContent}"`, row.querySelector('.ut-proposal-plan') && row.querySelector('.ut-proposal-plan').textContent);
+    if (k === 'docxDelete') ok(gateOf(row.querySelector('.ut-api-chip')) && row.querySelector('.ut-api-chip').textContent === TW.chip && row.querySelector('.ut-proposal-plan').textContent === W8.plan, `For you · the policy is a chip on the plan line — "${row.querySelector('.ut-proposal-plan').textContent}"`, row.querySelector('.ut-proposal-plan') && row.querySelector('.ut-proposal-plan').textContent);
     if (k === 'send') ok(!row.querySelector('.ut-api-chip') && !TELLS.url.test(item.text) && item.text === WANT.en.send, `For you · a non-sensitive call draws no chip; the agent's own English item text is the title too ("${item.text}")`, item.text);
   }
   const done = fyItem({ ...FX.send, id: 'api-send-done' });
@@ -434,12 +434,12 @@ if (B) {
     const caught = PLANTS.filter(([tell, raw]) => { const root = mk(); const host = all(root, (n) => n !== root && !n.hidden && !(n.dataset && n.dataset.fold) && n.tagName !== 'BUTTON' && n.tagName !== 'SUMMARY')[0] || root; host.appendChild(new Txt(` ${raw}`)); return violations(root, { titleSel: 'ut-text' }).includes(tell); }).map(([tell]) => tell);
     ok(caught.length === PLANTS.length, `CONTROL ${name}: a raw sha / mime / id / byte count PLANTED outside the fold is RED by name (${caught.join(', ')})`, caught);
     const chipRoot = mk(), chip = all(chipRoot, (n) => n.dataset && n.dataset.chip === 'size')[0];
-    if (chip) { chip.textContent = `${chip.textContent} · 14336 B`; ok(violations(chipRoot).includes('bytes'), `CONTROL ${name}: a raw byte count INSIDE a size chip is still RED`, violations(chipRoot)); }
+    if (chip) { chip.textContent = `${chip.textContent} · 14336 B`; ok(verdictOf(violations(chipRoot).includes('bytes')), `CONTROL ${name}: a raw byte count INSIDE a size chip is still RED`, violations(chipRoot)); }
   }
   for (const [name, mk, tells] of [['outbox', () => outboxBox(M), ['sha', 'mime', 'bytes']], ['For you', () => fyRow(M, fyItem(FX.docxDelete)), ['url', 'sha']]]) {
     const root = mk(); for (const fd of root.querySelectorAll('[data-fold="tech"]')) delete fd.dataset.fold;
     const v = violations(root, { titleSel: 'ut-text' });
-    ok(tells.every((x) => v.includes(x)), `CONTROL ${name}: the fold with its mark stripped is RED (${v.join(', ')})`, v);
+    ok(verdictOf(tells.every((x) => v.includes(x))), `CONTROL ${name}: the fold with its mark stripped is RED (${v.join(', ')})`, v);
   }
   // the .270 words: the old attachment meta + the old image meta (a mutant bundle of the real modules), the old For-you item
   const OLD_META = "const meta = el('span', 'chan-prop-file-meta', `${kindWord(a)} · ${P.attachmentSize(a.bytes)}`);";
@@ -447,13 +447,13 @@ if (B) {
   let MB = null, mErr = null;
   try { MB = await cardBundle('m270', { [CARD_FILES.outbox]: [OLD_META, "const meta = el('span', 'chan-prop-file-meta', `${P.attachmentSize(a.bytes)} · ${a.mime} · sha256 ${String(a.sha256).slice(0, 12)}…`);"], [CARD_FILES.chat]: [OLD_MEDIA, "const meta = [mediaType, bytes > 0 ? fmtBytes(bytes) : ''].filter(Boolean).join(' · ');"] }); } catch (e) { mErr = e; }
   const vb = MB ? violations(outboxBox(MB.en)) : [], vm = MB ? violations(mediaCard(MB.en, MEDIA)) : [];
-  ok(!!MB && vb.includes('sha') && vb.includes('mime'), `CONTROL outbox: the .270 attachment row 「2 KB · image/png · sha256 bbbbbbbbbbbb…」 is RED (${vb.join(', ')})`, mErr ? String(mErr) : vb);
-  ok(!!MB && vm.includes('mime'), `CONTROL chat: the .270 image card 「image/png · 12 KB」 is RED (${vm.join(', ')})`, mErr ? String(mErr) : vm);
+  ok(!!MB && gateOf(vb.includes('sha')) && verdictOf(vb.includes('mime')), `CONTROL outbox: the .270 attachment row 「2 KB · image/png · sha256 bbbbbbbbbbbb…」 is RED (${vb.join(', ')})`, mErr ? String(mErr) : vb);
+  ok(!!MB && verdictOf(vm.includes('mime')), `CONTROL chat: the .270 image card 「image/png · 12 KB」 is RED (${vm.join(', ')})`, mErr ? String(mErr) : vm);
   const p = FX.docxDelete, call = `${p.method} ${p.host}${p.path}`;
   const old = todos.add('channels-old', { origin: 'channels', urgency: 'normal', by: 'agent', sessionName: 'Channels', text: `Odd jobs wants to call ${p.credLabel}'s API: ${p.method} ${p.path}`, detail: `${call} — expires 24 h after it was asked`,
     i18n: { text: { key: "{name} wants to call {cred}'s API: {call}", params: { name: 'Odd jobs', cred: p.credLabel, call: `${p.method} ${p.path}` } }, detail: [{ key: '{call} — expires 24 h after it was asked', params: { call } }], source: { key: 'Channels' } }, action: { type: 'channel-api-proposal', id: 'api-old', shown: 'd-1' } });
   const vo = violations(fyRow(M, old), { titleSel: 'ut-text' });
-  ok(vo.includes('url') && vo.includes('raw-id'), `CONTROL For you: the .270 item 「Odd jobs wants to call Lark · ops's API: DELETE /open-apis/docx/…」 is RED (${vo.join(', ')})`, vo);
+  ok(gateOf(vo.includes('url')) && verdictOf(vo.includes('raw-id')), `CONTROL For you: the .270 item 「Odd jobs wants to call Lark · ops's API: DELETE /open-apis/docx/…」 is RED (${vo.join(', ')})`, vo);
 }
 // ── ⑥ lane lg-remote-hardening (B-7f0b — 主开发's ruling of 2026-11-18): THE REAL JUMP of a machine's key item. The watch files it
 // (src/server/host-key-watch.js); the bundled For-you model's jump, with a stand-in app, asks the sidebar for THAT machine's
@@ -478,4 +478,4 @@ for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globa
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 console.log(fail ? `FAILED: ${fail} of ${pass + fail}` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

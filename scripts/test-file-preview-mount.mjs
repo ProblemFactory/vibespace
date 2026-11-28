@@ -57,7 +57,7 @@ import { execFileSync, spawn } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0, failed = 0;
-const ok = (c, n, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const express = require('express');
 const XLSX = require('xlsx');
 const mammoth = require('mammoth');
@@ -123,7 +123,7 @@ const W = SW.create({ rootDir: REPO, dataDir: DATA, fresh: true, armed: true, li
 W.start();
 let threw = null;
 try { fs.readFileSync(BOOK); } catch (e) { threw = e; }
-ok(threw && threw.code === 'EVSMOUNTSYNC' && threw.message === SW.REFUSAL, `the harness: a main-thread readFileSync on the fake storage root is REFUSED by the real guard (${threw && threw.code})`);
+ok(gateOf(threw) && threw.code === 'EVSMOUNTSYNC' && threw.message === SW.REFUSAL, `the harness: a main-thread readFileSync on the fake storage root is REFUSED by the real guard (${threw && threw.code})`);
 
 const filesRouter = require(path.join(REPO, 'src/routes/files.js'));
 const pool = new SafeFs({ poolSize: 1, name: 'fpm' });
@@ -214,10 +214,10 @@ try {
     }
     delete globalThis.localStorage;
     ok(keys.length === 2, `fsErrorText words the code in two sentences (a named storage / an unnamed one) (${keys.length})`);
-    ok(said.en[0] === 'this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there' && said.en[1].startsWith('this file is on a storage, and'),
+    ok(said.en[0] === 'this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there' && verdictOf(said.en[1].startsWith('this file is on a storage, and')),
       `en: the sentence with the storage's name, no version (主开发's merged read: a version promised a fix the hub already holds) (${said.en[0]})`);
     for (const l of ['zh', 'ja']) {
-      ok(said[l][0] !== said.en[0] && said[l][0].includes('NAS') && !/\d+\.\d+\.\d+/.test(said[l][0]) && !said[l][0].includes('the server’s English') && said[l][1] !== said.en[1],
+      ok(said[l][0] !== said.en[0] && gateOf(said[l][0].includes('NAS')) && !/\d+\.\d+\.\d+/.test(said[l][0]) && !said[l][0].includes('the server’s English') && said[l][1] !== said.en[1],
         `${l}: its own sentence through t(), the name in it, no version (${said[l][0]})`);
     }
     ok(said.en[2] === 'another document is being parsed — try again in a moment' && said.zh[2] !== said.en[2] && said.ja[2] !== said.en[2] && ![said.zh[2], said.ja[2]].some((x) => x.includes('English')),
@@ -230,7 +230,7 @@ try {
     ok(r.status === 200 && r.body?.sheets?.length === 50 && r.body.truncated?.sheets === 10 && r.body.sheets[49].name === 'S49',
       `a 60-sheet workbook ⇒ 50 sheets + truncated.sheets = 10 (${r.status}: ${r.body?.sheets?.length} sheets, ${JSON.stringify(r.body?.truncated)})`);
     const cell = r.body?.sheets?.[0]?.data?.[1]?.[1];
-    ok(typeof cell === 'string' && cell.length === 2001 && cell.endsWith('…') && r.body.sheets[0].cut?.cells === 1 && r.body.truncated?.cells === 1,
+    ok(typeof cell === 'string' && cell.length === 2001 && gateOf(cell.endsWith('…')) && r.body.sheets[0].cut?.cells === 1 && r.body.truncated?.cells === 1,
       `a 2500-character cell ⇒ its first 2000 + «…», cut.cells = 1 (${cell?.length} chars, ${JSON.stringify(r.body?.sheets?.[0]?.cut)})`);
     const wide = r.body?.sheets?.[1];
     ok(wide?.data?.[0]?.length === 256 && wide.data[0][255] === 255 && wide.cut?.cols === 44 && r.body.truncated?.cols === 44,
@@ -262,7 +262,7 @@ try {
     try {
       for (const [route, body] of WRITES) {
         const r = await post(C.base, route, body);
-        ok(r.status === 400 && !r.body?.code && String(r.body?.error).startsWith(SW.REFUSAL) && !String(r.body?.error).includes('preview road'),
+        ok(r.status === 400 && !r.body?.code && gateOf(String(r.body?.error).startsWith(SW.REFUSAL)) && !String(r.body?.error).includes('preview road'),
           `${route} ⇒ its own words (err.message + roMountHint), never the preview's sentence (${r.status}: ${JSON.stringify(r.body).slice(0, 200)})`);
       }
     } finally { C.srv.close(); }
@@ -317,11 +317,11 @@ try {
     const by = Object.fromEntries((r.body?.sheets || []).map((x) => [x.name, x]));
     const none = (c) => c && c.rows === 0 && c.cols === 0 && c.cells === 0;
     const seen = (x) => JSON.stringify({ rows: x?.data?.length, cols: x?.data?.[0]?.length, cut: x?.cut, declared: x?.declared });
-    ok(r.status === 200 && none(by.tall?.cut) && JSON.stringify(by.tall.data) === '[[1,2,3],[4,5,6],[7,8,9]]' && by.tall.declared?.rows === 1048576,
+    ok(r.status === 200 && gateOf(none(by.tall?.cut)) && JSON.stringify(by.tall.data) === '[[1,2,3],[4,5,6],[7,8,9]]' && by.tall.declared?.rows === 1048576,
       `a 3 × 3 sheet declared A1:C1048576 ⇒ all 3 rows shown, no cut (the declared 1 048 576 rows ride as information) (${r.status}: ${seen(by.tall)})`);
-    ok(none(by.wide?.cut) && JSON.stringify(by.wide.data) === '[[1,2,3],[4,5,6],[7,8,9]]' && by.wide.declared?.cols === 1024,
+    ok(gateOf(none(by.wide?.cut)) && JSON.stringify(by.wide.data) === '[[1,2,3],[4,5,6],[7,8,9]]' && by.wide.declared?.cols === 1024,
       `a 3-column sheet declared A1:AMJ3 ⇒ its 3 columns whole, no «the first 256 columns» (${seen(by.wide)})`);
-    ok(by.noted?.cut?.cols === 0 && by.noted.cut.cells === 0 && by.noted.cut.rows === 1 && by.noted.data.length === 5000 && by.noted.data.every((row) => row.length <= 3),
+    ok(by.noted?.cut?.cols === 0 && by.noted.cut.cells === 0 && by.noted.cut.rows === 1 && by.noted.data.length === 5000 && verdictOf(by.noted.data.every((row) => row.length <= 3)),
       `6000 rows of A–C + one note in J5999 ⇒ the 3 columns whole — no columns cut (J sits past the rows parsed); the rows cut, which is true (rows 5001–6000 hold data) (${seen(by.noted)})`);
     ok(by.full?.cut?.rows > 0 && by.full.cut.cols === 0 && by.full.data.length === 5000 && by.full.data[4999][0] === 5000,
       `the control: 6000 rows of data ⇒ «the first 5000 rows» (cut.rows ${by.full?.cut?.rows}, ${by.full?.data?.length} rows shown)`);
@@ -410,4 +410,4 @@ try {
   fs.rmSync(DIR, { recursive: true, force: true });
 }
 console.log(failed ? `FAILED ${failed} / ${passed + failed}` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

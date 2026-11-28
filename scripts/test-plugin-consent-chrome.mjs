@@ -51,7 +51,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
 
@@ -106,7 +106,7 @@ srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: 'ignore',
 const origin = `http://127.0.0.1:${port}`;
 let up = false;
 for (let i = 0; i < 160 && !up; i++) { try { await fetch(`${origin}/api/home`); up = true; } catch { await sleep(250); } }
-check('the tree\'s server answers', up);
+check('the tree\'s server answers', verdictOf(up));
 if (!up) process.exit(1);
 
 const CDP_PORT = await freePort();
@@ -180,17 +180,17 @@ const MEASURE = `(() => {
 const judge = (tag, m) => {
   check(`${tag} the dialog is up with its intro, list and bullets`, !!(m && m.intro && m.list && m.lis.length), m);
   if (!m || !m.intro || !m.list || !m.lis.length) return;
-  check(`${tag} ③ the explanation is the dialog's body text — its font-size = the bullets' (${m.intro.fs} vs ${[...new Set(m.lis.map((l) => l.fs))].join('/')})`, m.lis.every((l) => l.fs === m.intro.fs), m.intro);
+  check(`${tag} ③ the explanation is the dialog's body text — its font-size = the bullets' (${m.intro.fs} vs ${[...new Set(m.lis.map((l) => l.fs))].join('/')})`, verdictOf(m.lis.every((l) => l.fs === m.intro.fs)), m.intro);
   check(`${tag} ③ the explanation is not in the dim hint tone (${m.intro.color} vs --text-dim ${m.dim})`, m.intro.color !== m.dim, m.intro);
   check(`${tag} ③ the explanation is no .usage-note (the Usage window's note class)`, !/\busage-note\b/.test(m.intro.cls), m.intro.cls);
   check(`${tag} ④ the list's padding-left holds its marker (12 ≤ ${m.list.pl} ≤ 20 px) — padding 0 hangs the outside markers on the dialog's border`, m.list.pl >= 12 && m.list.pl <= 20, m.list);
   check(`${tag} ④ the list box starts at the explanation's left edge, inside the body's padding (the marker in the dialog's text column)`, Math.abs(m.list.l - m.intro.l) <= 0.5 && m.list.l >= m.bodyPadL - 0.5, { list: m.list, intro: m.intro, bodyPadL: m.bodyPadL });
   check(`${tag} ④ the list has no margin of its own (the body's gap spaces it)`, m.list.mt === 0 && m.list.mb === 0, m.list);
   const rowGaps = m.lis.slice(1).map((l, i) => +(l.t - m.lis[i].b).toFixed(1));
-  check(`${tag} ④ its rows stand ≈ 6 px apart (${rowGaps.join(', ') || 'one row'})`, rowGaps.every((g) => g >= 4 && g <= 8), m.lis);
+  check(`${tag} ④ its rows stand ≈ 6 px apart (${rowGaps.join(', ') || 'one row'})`, verdictOf(rowGaps.every((g) => g >= 4 && g <= 8)), m.lis);
   const band = +(m.intro.t - m.headB).toFixed(1);
   check(`${tag} ⑤ no blank band: the explanation starts the body's own padding below the title row (${band} px vs ${m.bodyPadTop})`, band <= m.bodyPadTop + 0.5, { band, kids: m.kids });
-  check(`${tag} ⑤ no box between the title row and the explanation taller than the body's gap (${m.gap} px)`, m.between.every((b) => b.h <= m.gap), m.between);
+  check(`${tag} ⑤ no box between the title row and the explanation taller than the body's gap (${m.gap} px)`, verdictOf(m.between.every((b) => b.h <= m.gap)), m.between);
   const toList = +(m.list.t - m.intro.b).toFixed(1);
   check(`${tag} ⑤ the explanation sits one body gap above the list it introduces (${toList} px vs ${m.gap})`, Math.abs(toList - m.gap) <= 0.5, { intro: m.intro, list: m.list });
 };
@@ -198,34 +198,34 @@ const judge = (tag, m) => {
 const row = `.plugin-row[data-plugin="${PID}"]`;
 await step('①', async () => {
   const r = await evalJs(`fetch('/api/plugins/manifests').then((x) => x.json()).then((j) => (j.plugins || []).find((p) => p.id === ${J(PID)}) || null)`);
-  check('① the planted plugin is listed valid, disabled, asking for consent', !!r && r.valid && !r.enabled && r.consentRequired, r && { valid: r.valid, enabled: r.enabled, consentRequired: r.consentRequired, errors: r.errors });
+  check('① the planted plugin is listed valid, disabled, asking for consent', !!r && gateOf(r.valid) && !r.enabled && verdictOf(r.consentRequired), r && { valid: r.valid, enabled: r.enabled, consentRequired: r.consentRequired, errors: r.errors });
 });
 await step('②', async () => {
   await evalJs('app.openPluginsDialog(); true');
-  check('② the Plugins window lists the planted plugin with its switch', await waitFor(`!!document.querySelector('${row} .plugin-sw')`, 20000));
+  check('② the Plugins window lists the planted plugin with its switch', verdictOf(await waitFor(`!!document.querySelector('${row} .plugin-sw')`, 20000)));
   const pressed = await realClick(`${row} .plugin-sw`);
   const up2 = await waitFor(`!!document.querySelector('#plugin-consent-dialog .plugin-caps-list')`, 15000);
-  check('② a real press on its switch opens the consent dialog', !!pressed && up2, realClick.lastMiss);
+  check('② a real press on its switch opens the consent dialog', !!pressed && verdictOf(up2), realClick.lastMiss);
   const m = await evalJs(MEASURE);
   check(`② «${m?.title}» lists the two bullets of the owner's screenshot (server-process, browser-engine)`, J(m?.lis.map((l) => l.id)) === J(['plugin-cap-server-process', 'plugin-cap-browser-engine']), m?.lis);
   await shot('consent');
   judge('consent:', m);
   const eng = m?.lis.find((l) => l.id === 'plugin-cap-browser-engine')?.text || '';
-  check('⑥ the browser-engine bullet (zh) names the program VibeSpace starts as a profile\'s browser', eng.includes('它指定一个程序，由 VibeSpace 作为浏览器档案的浏览器来启动'), eng);
+  check('⑥ the browser-engine bullet (zh) names the program VibeSpace starts as a profile\'s browser', verdictOf(eng.includes('它指定一个程序，由 VibeSpace 作为浏览器档案的浏览器来启动')), eng);
 });
 await step('⑦', async () => {
   const cancel = await evalJs(`(() => { const b = document.querySelector('#plugin-consent-dialog .plugin-consent-actions .mounts-btn:not(.plugin-consent-accept)'); if (b) b.dataset.pc = 'cancel'; return !!b; })()`);
   if (cancel) await realClick('[data-pc="cancel"]');
   const gone = await waitFor(`!document.getElementById('plugin-consent-dialog')`, 8000);
   const off = await evalJs(`(() => { const c = document.querySelector('${row} .plugin-sw input'); return !!c && !c.checked; })()`);
-  check('⑦ Cancel closes it and the switch is off again', cancel && gone && off, { cancel, gone, off });
+  check('⑦ Cancel closes it and the switch is off again', gateOf(cancel) && gateOf(gone) && verdictOf(off), { cancel, gone, off });
 });
 await step('⑧', async () => {
   await realClick(`${row} .plugin-chip`);
   const tagged = await waitFor(`(() => { const its = [...document.querySelectorAll('.context-menu-item')]; window.__pcMenu = its.map((x) => x.textContent.trim()); const i = its.find((x) => ['查看能力…', 'Show capabilities…'].includes(x.textContent.trim())); if (i) i.dataset.pc = 'caps'; return !!i; })()`, 8000);
   if (tagged) await realClick('[data-pc="caps"]');
   const up3 = await waitFor(`!!document.querySelector('#plugin-consent-dialog .plugin-caps-list')`, 15000);
-  check('⑧ the chip\'s «查看能力…» opens the read-only variant', tagged && up3);
+  check('⑧ the chip\'s «查看能力…» opens the read-only variant', gateOf(tagged) && verdictOf(up3));
   const m = await evalJs(MEASURE);
   check(`⑧ «${m?.title}» has no Enable button`, !!m && !(await evalJs(`!!document.querySelector('#plugin-consent-dialog .plugin-consent-accept')`)));
   await shot('readonly');
@@ -236,7 +236,7 @@ await step('⑨', async () => {
   if (closeB) await realClick('[data-pc="close"]');
   await waitFor(`!document.getElementById('plugin-consent-dialog')`, 8000);
   const menu = await evalJs('window.__pcMenu || null');
-  check(`⑨ ONE door: the chip's menu lists ${J(menu)} — no 更新`, Array.isArray(menu) && menu.length > 0 && !menu.some((x) => /^(更新|Update)/.test(x)), menu);
+  check(`⑨ ONE door: the chip's menu lists ${J(menu)} — no 更新`, gateOf(Array.isArray(menu)) && menu.length > 0 && !menu.some((x) => /^(更新|Update)/.test(x)), menu);
   const inst = await evalJs(`fetch('/api/plugins/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${J(J({ source: 'path', value: hsrc }))} }).then((x) => x.json())`);
   check('⑨ a second plugin installs through the page from a folder (source path)', inst?.plugin?.id === HID, inst);
   await evalJs(`(() => { const b = [...document.querySelectorAll('.plugin-manifests-head .mounts-btn')].find((x) => ['重新扫描', 'Rescan'].includes(x.textContent.trim())); if (b) b.click(); return !!b; })()`);
@@ -263,14 +263,14 @@ await step('⑨', async () => {
     try { const { data } = await cdp('Page.captureScreenshot', { format: 'png', clip: { x, y, width: Math.min(M.vw - x, M.row.w + 2 * pad), height: Math.min(M.vh - y, M.row.h + 2 * pad), scale: 1 } }); const f = path.join(SHOTS, `${PREFIX}-row.png`); fs.writeFileSync(f, Buffer.from(data, 'base64')); console.log(`  (shot: ${f})`); } catch { }
   }
   const kidsSaid = J((M?.kids || []).map((k) => k.cls.split(' ').pop() + (k.seen ? '' : ' (unseen)')));
-  check(`⑨ B-db5d: the git-installed plugin's row draws neither «更新…» nor «卸载…» (inline: ${J(M?.inline)}); its controls end in ONE «⋯» (${kidsSaid})`, !!M && M.inline.length === 0 && !M.cluster && /\brail-row-more\b/.test((M.kids.at(-1) || {}).cls || ''), M);
-  check(`⑨ the ⚙'s place-keeper (nothing to configure) is no control — not drawn, not folded (${kidsSaid})`, !!M && M.kids.some((k) => /plugin-gear-none/.test(k.cls) && !k.seen), M && M.kids);
+  check(`⑨ B-db5d: the git-installed plugin's row draws neither «更新…» nor «卸载…» (inline: ${J(M?.inline)}); its controls end in ONE «⋯» (${kidsSaid})`, !!M && M.inline.length === 0 && !M.cluster && verdictOf(/\brail-row-more\b/.test((M.kids.at(-1) || {}).cls || '')), M);
+  check(`⑨ the ⚙'s place-keeper (nothing to configure) is no control — not drawn, not folded (${kidsSaid})`, !!M && verdictOf(M.kids.some((k) => /plugin-gear-none/.test(k.cls) && !k.seen)), M && M.kids);
   const seen = (M?.kids || []).filter((k) => k.seen && k.w > 0);
   const sameLine = (a, b) => Math.min(a.b, b.b) - Math.max(a.t, b.t) > 2;   // their boxes overlap vertically: one line (centred items have different tops)
   const tight = seen.length >= 3 && seen.every((k, i) => i === 0 || !sameLine(k, seen[i - 1]) || (k.l - seen[i - 1].r >= 2 && k.l - seen[i - 1].r <= M.gap + 0.5));
-  check(`⑨ the controls squeeze nothing — side by side on a line (gaps 2–${M && M.gap} px), the name at its 9 em basis or the controls on their own line (name ${M && M.main && M.main.w.toFixed(0)} px of ${M && M.basis.toFixed(0)})`, !!M && !!M.main && tight && (M.main.w >= M.basis - 0.5 || M.ctl.t >= M.main.b - 0.5), M && { main: M.main, ctl: M.ctl, kids: M.kids });
+  check(`⑨ the controls squeeze nothing — side by side on a line (gaps 2–${M && M.gap} px), the name at its 9 em basis or the controls on their own line (name ${M && M.main && M.main.w.toFixed(0)} px of ${M && M.basis.toFixed(0)})`, !!M && !!M.main && gateOf(tight) && (M.main.w >= M.basis - 0.5 || M.ctl.t >= M.main.b - 0.5), M && { main: M.main, ctl: M.ctl, kids: M.kids });
   const inside = (b) => !!b && b.w > 0 && b.h > 0 && b.l >= M.row.l - 0.5 && b.r <= M.row.r + 0.5 && b.t >= M.row.t - 0.5 && b.b <= M.row.b + 0.5 && b.l >= 0 && b.r <= M.vw && b.t >= 0 && b.b <= M.vh;
-  check(`⑨ every control is drawn inside the row and the 1000 × 600 viewport, on one line (${seen.map((k) => `${k.cls.split(' ').pop()} ${k.l.toFixed(0)},${k.t.toFixed(0)}`).join(' · ')})`, seen.length >= 3 && seen.every(inside) && seen.every((k) => sameLine(k, seen[0])), M);
+  check(`⑨ every control is drawn inside the row and the 1000 × 600 viewport, on one line (${seen.map((k) => `${k.cls.split(' ').pop()} ${k.l.toFixed(0)},${k.t.toFixed(0)}`).join(' · ')})`, seen.length >= 3 && gateOf(seen.every(inside)) && verdictOf(seen.every((k) => sameLine(k, seen[0]))), M);
   // the «⋯» AS A PERSON PRESSES IT (a real press: the top element at its point is the button)
   const pressedMore = await realClick(`${row} .rail-row-more`);
   const opened = await waitFor(`(() => { const its = [...document.querySelectorAll('.context-menu > .context-menu-item')]; window.__pcMore = its.map((x) => x.textContent.trim()); return its.length > 0; })()`, 8000);
@@ -278,7 +278,7 @@ await step('⑨', async () => {
   const ptrFocus = await evalJs(`!!document.activeElement && !!document.activeElement.closest('.context-menu')`);
   check(`⑨ B-6944: a POINTER's menu takes no focus (the focus stays where the press left it: in the menu ${ptrFocus})`, ptrFocus === false, ptrFocus);
   if (opened) await shot('more-menu');
-  check(`⑨ B-db5d: a real press on the row's «⋯» opens «更新…» first, then «卸载…» (${J(moreMenu)})`, !!pressedMore && opened && J(moreMenu) === J(['更新…', '卸载…']), { pressedMore, miss: realClick.lastMiss, moreMenu });
+  check(`⑨ B-db5d: a real press on the row's «⋯» opens «更新…» first, then «卸载…» (${J(moreMenu)})`, !!pressedMore && gateOf(opened) && J(moreMenu) === J(['更新…', '卸载…']), { pressedMore, miss: realClick.lastMiss, moreMenu });
   await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((p) => p.remove()); return true; })()`);
   const hrow = `.plugin-row[data-plugin="${HID}"]`;
   await evalJs(`(() => { const r = document.querySelector('${hrow}'); if (r) r.scrollIntoView({ block: 'center' }); return !!r; })()`);
@@ -287,7 +287,7 @@ await step('⑨', async () => {
   const pressed = tagU ? await realClick('[data-pc="upd"]') : false;
   const said = await waitFor(`[...document.querySelectorAll('.global-toast')].some((x) => x.textContent.includes('${HID} 已是最新（0.1.0）'))`, 20000);
   const toasts = await evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent.trim())`);
-  check(`⑨ a real press on the «⋯» then its «更新…», nothing new at the source, says «${HID} 已是最新（0.1.0）» (${J(toasts)})`, !!pm && !!pressed && said, { pm, pressed, miss: realClick.lastMiss, toasts });
+  check(`⑨ a real press on the «⋯» then its «更新…», nothing new at the source, says «${HID} 已是最新（0.1.0）» (${J(toasts)})`, !!pm && !!pressed && verdictOf(said), { pm, pressed, miss: realClick.lastMiss, toasts });
   // B-6944 — THE KEYBOARD ALONE (the readers of B-db5d: Update… / Uninstall… were native buttons a Tab reached; in the «⋯» a
   // keyboard-only person reached no row): the path plugin's «⋯» focused (a script focus stands in for the Tabs), Enter opens the menu
   // WITH THE FOCUS ON «更新…», ArrowDown reaches «卸载…», ArrowUp comes back, Escape closes it and gives the focus back to the «⋯»;
@@ -306,18 +306,18 @@ await step('⑨', async () => {
   await key('ArrowUp', ON('更新…')); const k3 = await focusNow();
   await key('Escape', BACK); const k4 = await focusNow();
   check(`⑨ B-6944: by keyboard alone — Enter on the «⋯» opens its menu with the focus on «更新…» (${J(k1)}), ArrowDown reaches «卸载…» (${k2 && k2.text}), ArrowUp comes back (${k3 && k3.text}), Escape closes it and the focus is the «⋯» again (${J(k4)})`,
-    !!k1 && k1.inMenu && k1.role === 'menuitem' && k1.text === '更新…' && !!k2 && k2.text === '卸载…' && !!k3 && k3.text === '更新…' && !!k4 && !k4.menu && k4.more, { k1, k2, k3, k4 });
+    !!k1 && gateOf(k1.inMenu) && k1.role === 'menuitem' && k1.text === '更新…' && !!k2 && k2.text === '卸载…' && !!k3 && k3.text === '更新…' && !!k4 && !k4.menu && verdictOf(k4.more), { k1, k2, k3, k4 });
   await key('Enter', ON('更新…')); const k5 = await focusNow();
   await evalJs(`(() => { const r = document.querySelector('${hrow}'); if (r) r.dataset.k10old = '1'; return !!r; })()`);   // ⑩ waits for the list this update redraws
   await key('Enter');
   const saidK = await waitFor(`[...document.querySelectorAll('.global-toast')].some((x) => x.textContent.includes('${HID} 已是最新（0.1.0）'))`, 20000);
-  check(`⑨ B-6944: …and Enter on «更新…» updates — «${HID} 已是最新（0.1.0）» said, no pointer used (${J(k5)})`, !!k5 && k5.text === '更新…' && saidK, { k5, toasts: await evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent.trim())`) });
+  check(`⑨ B-6944: …and Enter on «更新…» updates — «${HID} 已是最新（0.1.0）» said, no pointer used (${J(k5)})`, !!k5 && k5.text === '更新…' && verdictOf(saidK), { k5, toasts: await evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent.trim())`) });
 
   // ⑩ B-6944's round ① — THE FIRST FOCUS IS THE FIRST STOP: an update HELD in flight (its POST paused at the page's door: Update…
   // is off while it runs and says why), the «⋯» opened by Enter — the focus on the OFF «更新…» (never on «卸载…» behind it)
   // the update above redraws the plugin list (render(): two requests, the body cleared between them) — wait for the NEW row
   const NEWROW = `(() => { const r = document.querySelector('${hrow}'); return !!r && !r.dataset.k10old && !!r.querySelector('.rail-row-more'); })()`;
-  check('⑩ the plugin list redrawn after ⑨\'s update (a new row, not the one the update was pressed on)', await waitFor(NEWROW, 15000));
+  check('⑩ the plugin list redrawn after ⑨\'s update (a new row, not the one the update was pressed on)', verdictOf(await waitFor(NEWROW, 15000)));
   try {
   await evalJs(`(() => { document.querySelectorAll('.context-menu, #global-toasts > .global-toast').forEach((e) => e.remove()); const b = document.querySelector('${hrow} .rail-row-more'); if (b) b.focus(); return !!b && document.activeElement === b; })()`);
   heldReqs.length = 0;
@@ -331,12 +331,12 @@ await step('⑨', async () => {
     await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((e) => e.remove()); const b = document.querySelector('${hrow} .rail-row-more'); if (b) b.focus(); return document.activeElement === b; })()`);
     await key('Enter', `!!document.activeElement && !!document.activeElement.closest('.context-menu')`);
     const r1 = await evalJs(`(() => { const a = document.activeElement, m = a && a.closest('.context-menu'); if (m) m.dataset.k10 = '1'; window.__k10clicks = 0; if (a) a.addEventListener('click', () => { window.__k10clicks++; }); const w = a && a.getAttribute('aria-describedby') ? document.getElementById(a.getAttribute('aria-describedby')) : null; return a ? { text: (a.textContent || '').trim(), off: a.getAttribute('aria-disabled') === 'true', why: w ? w.textContent.trim() : null, rows: m ? [...m.querySelectorAll('[data-menu-stop]')].map((x) => (x.textContent || '').trim()) : null } : null; })()`);
-    check(`⑩ ① an update held in flight (${held ? 'its POST paused' : 'NO request held'}): Enter on the «⋯» puts the focus on its FIRST STOP — the OFF «更新…» with its why («${r1 && r1.why}»), not «卸载…» (rows ${J(r1 && r1.rows)})`, !!held && !!r1 && r1.off && /^更新…/.test(r1.text) && !!r1.why && !!r1.rows && /卸载…/.test(r1.rows[r1.rows.length - 1]), { held: !!held, r1 });
+    check(`⑩ ① an update held in flight (${held ? 'its POST paused' : 'NO request held'}): Enter on the «⋯» puts the focus on its FIRST STOP — the OFF «更新…» with its why («${r1 && r1.why}»), not «卸载…» (rows ${J(r1 && r1.rows)})`, !!held && !!r1 && gateOf(r1.off) && gateOf(/^更新…/.test(r1.text)) && !!r1.why && !!r1.rows && verdictOf(/卸载…/.test(r1.rows[r1.rows.length - 1])), { held: !!held, r1 });
     // Enter on the off row presses nothing — then ArrowDown must reach «卸载…» IN THE SAME MENU (the wait on it proves the Enter left it standing)
     await key('Enter');
     await key('ArrowDown', ON('卸载…'));
     const r2 = await evalJs(`(() => { const a = document.activeElement, m = a && a.closest('.context-menu'); return { clicks: window.__k10clicks, text: a ? (a.textContent || '').trim() : null, same: !!m && m.dataset.k10 === '1', dialog: !!document.querySelector('.modal-overlay:not(.hidden) .dialog, #dialog-overlay:not(.hidden)') }; })()`);
-    check(`⑩ ①: Enter on the off «更新…» pressed nothing — no click reached it (${r2 && r2.clicks}), the same menu, no second update asked (${heldReqs.length} held), no dialog; ArrowDown reaches «卸载…» (${r2 && r2.text})`, !!r2 && r2.clicks === 0 && r2.same && r2.text === '卸载…' && !r2.dialog && heldReqs.length === 1, { r2, held: heldReqs.length });
+    check(`⑩ ①: Enter on the off «更新…» pressed nothing — no click reached it (${r2 && r2.clicks}), the same menu, no second update asked (${heldReqs.length} held), no dialog; ArrowDown reaches «卸载…» (${r2 && r2.text})`, !!r2 && r2.clicks === 0 && gateOf(r2.same) && r2.text === '卸载…' && !r2.dialog && heldReqs.length === 1, { r2, held: heldReqs.length });
     await key('Escape', BACK);
   } finally {
     // the row the held update will redraw is MARKED BEFORE the request is let go (the hosted red of checkpoint 1: stamped after the
@@ -346,8 +346,8 @@ await step('⑨', async () => {
     await cdp('Fetch.disable').catch(() => null);
   }
   const saidH = await waitFor(`[...document.querySelectorAll('.global-toast')].some((x) => x.textContent.includes('${HID} 已是最新（0.1.0）'))`, 20000);
-  check('⑩ ①: …the held update let go, it ends as before («已是最新» said)', saidH);
-  check('⑩ the plugin list redrawn after the held update (a new row for ②: not the row marked before the request was let go)', await waitFor(NEWROW, 15000));
+  check('⑩ ①: …the held update let go, it ends as before («已是最新» said)', verdictOf(saidH));
+  check('⑩ the plugin list redrawn after the held update (a new row for ②: not the row marked before the request was let go)', verdictOf(await waitFor(NEWROW, 15000)));
   // ① THE REDRAW WHEN THE HELD UPDATE ENDS (主开发 09:53Z): Enter on the NEW row's «⋯» — the focus on its first stop, the live
   // «更新…» again, never «卸载…»
   await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((e) => e.remove()); const b = document.querySelector('${hrow} .rail-row-more'); if (b) b.focus(); return !!b && document.activeElement === b; })()`);
@@ -365,7 +365,7 @@ await step('⑨', async () => {
   const plant = await evalJs(OPEN_BY_CODE);
   await waitFor(`!!document.activeElement && !!document.activeElement.closest('.context-menu')`, 3000);
   const p0 = await evalJs(`(() => { const a = document.activeElement; return { inMenu: !!a && !!a.closest('.context-menu'), text: a ? (a.textContent || '').trim() : null }; })()`);
-  check(`⑩ ② THE PLANT: a menu opened BY CODE a moment after a key, the focus on a button — it takes the focus (${J(p0)})`, plant && p0.inMenu, p0);
+  check(`⑩ ② THE PLANT: a menu opened BY CODE a moment after a key, the focus on a button — it takes the focus (${J(p0)})`, gateOf(plant) && verdictOf(p0.inMenu), p0);
   await key('Escape', `!document.querySelector('.context-menu')`);
   for (const [what, make] of [['a text field', `(() => { const f = document.createElement('input'); f.id = 'zz-k10'; f.type = 'text'; document.body.appendChild(f); f.focus(); return document.activeElement === f; })()`],
     ['a desktop\'s picture (a canvas that takes the keys)', `(() => { const f = document.createElement('canvas'); f.id = 'zz-k10'; f.tabIndex = 0; f.width = 120; f.height = 80; f.dataset.keys = ''; f.addEventListener('keydown', (e) => { f.dataset.keys += e.key; }); document.body.appendChild(f); f.focus(); return document.activeElement === f; })()`]]) {
@@ -377,7 +377,7 @@ await step('⑨', async () => {
     await KEYT('c', 'c');
     await waitFor(`(() => { const f = document.getElementById('zz-k10'); return !!f && (f.value === 'abc' || f.dataset.keys === 'abc'); })()`, 3000);
     const r = await evalJs(`(() => { const f = document.getElementById('zz-k10'), a = document.activeElement; return { kept: a === f, typed: f.tagName === 'INPUT' ? f.value : f.dataset.keys, menu: !!document.querySelector('.context-menu'), inMenu: !!a && !!a.closest('.context-menu') }; })()`);
-    check(`⑩ ② a menu opened BY CODE a moment after a key while ${what} holds the focus — no focus moved (${r.kept}), no character lost («${r.typed}»), the menu open beside it`, focused && stamped && opened && r.kept && r.typed === 'abc' && r.menu && !r.inMenu, r);
+    check(`⑩ ② a menu opened BY CODE a moment after a key while ${what} holds the focus — no focus moved (${r.kept}), no character lost («${r.typed}»), the menu open beside it`, gateOf(focused) && gateOf(stamped) && gateOf(opened) && gateOf(r.kept) && r.typed === 'abc' && gateOf(r.menu) && !r.inMenu, r);
     await evalJs(`(() => { document.querySelectorAll('.context-menu, #zz-k10').forEach((e) => e.remove()); return true; })()`);
   }
 
@@ -399,12 +399,12 @@ await step('⑨', async () => {
     return { focused, ...(await evalJs(`(() => { const a = document.activeElement, f = document.getElementById('zz-k10'); return { road: window.__k10road, menu: !!document.querySelector('.context-menu'), inMenu: !!a && !!a.closest('.context-menu'), first: a ? (a.textContent || '').trim() : null, kept: !!f && a === f, keys: f ? (f.dataset.keys || '') : null }; })()`)) };
   };
   const mf = await viaKey(`(() => { const f = document.createElement('input'); f.id = 'zz-k10'; f.type = 'text'; document.body.appendChild(f); f.focus(); return document.activeElement === f; })()`);
-  check(`⑩ ③ the person's MENU KEY (Shift+F10) in a text field: the menu takes the focus — «${mf.first}», the first stop (${mf.road})`, mf.focused && mf.menu && mf.inMenu && mf.first === '更新…', mf);
+  check(`⑩ ③ the person's MENU KEY (Shift+F10) in a text field: the menu takes the focus — «${mf.first}», the first stop (${mf.road})`, gateOf(mf.focused) && gateOf(mf.menu) && gateOf(mf.inMenu) && mf.first === '更新…', mf);
   await key('Escape', `!document.querySelector('.context-menu')`);
   const mc = await viaKey(`(() => { const f = document.createElement('canvas'); f.id = 'zz-k10'; f.tabIndex = 0; f.width = 120; f.height = 80; f.dataset.keys = ''; f.addEventListener('keydown', (e) => { f.dataset.keys += e.key; }); document.body.appendChild(f); f.focus(); return document.activeElement === f; })()`);
-  check(`⑩ ③ …on a remote desktop's CANVAS the menu key is the remote machine's: the canvas keeps the focus and the key («${mc.keys}»), no menu takes it (${mc.road})`, mc.focused && mc.menu && mc.kept && !mc.inMenu && /F10/.test(mc.keys || ''), mc);
+  check(`⑩ ③ …on a remote desktop's CANVAS the menu key is the remote machine's: the canvas keeps the focus and the key («${mc.keys}»), no menu takes it (${mc.road})`, gateOf(mc.focused) && gateOf(mc.menu) && gateOf(mc.kept) && !mc.inMenu && verdictOf(/F10/.test(mc.keys || '')), mc);
   const mb = await viaKey(`(() => { const b = document.querySelector('${hrow} .rail-row-more'); b.focus(); return document.activeElement === b; })()`);
-  check(`⑩ ③ CONTROL: the same key on a button — the menu takes the focus («${mb.first}»: the key reaches the page and a menu opened then is walked; the FIELD scene above is the one the base fails — there Shift+F10 is no gesture key)`, mb.focused && mb.inMenu, mb);
+  check(`⑩ ③ CONTROL: the same key on a button — the menu takes the focus («${mb.first}»: the key reaches the page and a menu opened then is walked; the FIELD scene above is the one the base fails — there Shift+F10 is no gesture key)`, gateOf(mb.focused) && verdictOf(mb.inMenu), mb);
   await evalJs(`(() => { document.querySelectorAll('.context-menu, #zz-k10').forEach((e) => e.remove()); return true; })()`);
 
   // ⑩ ④ — A SUBMENU BY ITS ARROW: a window (a file explorer) and a second desktop — its title bar's menu opened a moment after a
@@ -448,12 +448,12 @@ await step('⑨', async () => {
   if (await wait4(`the file explorer this leg opened is drawn — found by the type the product gives it ('files', its id ${fx && fx.id}; new windows' types ${J(fx && fx.types)})`, `(() => { const w = ${WIN4}; return !!w && w.type === 'files' && !!w.titleBar && w.titleBar.getClientRects().length > 0; })()`, 10000)) {
     const r4 = await walk4();
     if (r4) check(`⑩ ④ a window's menu opened a moment after a key: the «➤» row («${r4.parentRow}») reached by ArrowDown, ArrowRight opens its submenu WITH the focus in it («${r4.s1.text}»), ArrowLeft back to its row (the submenu hidden: ${r4.s2.subHidden}, aria-expanded ${r4.s2.expanded}), Escape closes the menu`,
-      r4.s1.inSub && r4.s1.subShown && r4.s1.text === K4 && r4.s2.parent && r4.s2.subHidden && r4.s2.expanded === 'false' && r4.s3, r4);
+      gateOf(r4.s1.inSub) && gateOf(r4.s1.subShown) && r4.s1.text === K4 && gateOf(r4.s2.parent) && gateOf(r4.s2.subHidden) && r4.s2.expanded === 'false' && verdictOf(r4.s3), r4);
     const c4 = await walk4({ plant: true });
     // red ONLY because the opener is gone: the menu still open and the focus still ON the arrow row (its words, captured before the
     // key) — never a focus lost some other way (the reader's small, 02:08Z)
     check(`⑩ ④ RED CONTROL: the «➤» row's keyboard opener planted away — ArrowRight opens nothing: the focus never enters a submenu, the menu still open (${c4 && c4.s1 && c4.s1.menuOpen}), the focus still on the arrow row «${c4 && c4.s1 && c4.s1.text}»`,
-      !!c4 && !!c4.s1 && !c4.s1.inSub && c4.s1.menuOpen && c4.s1.onRow && c4.s1.text === c4.parentRow, c4);
+      !!c4 && !!c4.s1 && !c4.s1.inSub && gateOf(c4.s1.menuOpen) && gateOf(c4.s1.onRow) && c4.s1.text === c4.parentRow, c4);
     await evalJs(`(() => { document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); return true; })()`);
   }
   await evalJs(`(() => { if (window.__k10win && app.wm.windows.get(window.__k10win)) app.wm.requestClose(window.__k10win); const d = app.desktopManager.desktops.find((x) => x.name === ${J(K4)}); if (d) app.desktopManager.deleteDesktop(d.id); return true; })()`).catch(() => null);   // leave the page as ⑩ found it
@@ -461,4 +461,4 @@ await step('⑨', async () => {
 });
 check('no page exceptions', pageErrors.length === 0, pageErrors.slice(0, 3));
 console.log(fail ? `✗ ${fail} failed, ${pass} passed` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

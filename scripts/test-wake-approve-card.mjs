@@ -101,7 +101,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(REPO, 'src');
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 
 const FA = require(path.join(SRC, 'foryou-actions.js'));
 const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();   // this machine's clock, as the page's is
@@ -154,7 +154,7 @@ console.log('① THE CARD MODEL — item → its state, its buttons, its stamp')
   ok(FA.decidedStamp(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41), resolvedFact: { decidedBy: 'user', decidedAt: at(2026, 10, 27, 9, 41) } }), { now: NOW }) === null, '…nor one marked by anyone but the person verdict');
   const RED_FA = registryFrom(read('src/foryou-actions.js').replace("  if (!fact || fact.decidedBy !== 'person') return null;\n", '').replace('Number(fact.decidedAt) || ', ''));   // the base: no mark asked, the store's time
   const redSt = RED_FA.decidedStamp(unmarked, { now: NOW });
-  ok(read('src/foryou-actions.js').includes("  if (!fact || fact.decidedBy !== 'person') return null;\n") && !!redSt && /by you/.test(redSt.text), `RED CONTROL: the base's stamp (no mark asked) — a record decidedBy null says «${redSt && redSt.text}»`, redSt);
+  ok(gateOf(read('src/foryou-actions.js').includes("  if (!fact || fact.decidedBy !== 'person') return null;\n")) && !!redSt && verdictOf(/by you/.test(redSt.text)), `RED CONTROL: the base's stamp (no mark asked) — a record decidedBy null says «${redSt && redSt.text}»`, redSt);
   // RED CONTROL: the base's record — the quiet line said settledWords + an age: no who, no when
   const base = FA.settledWords(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41) }));
   ok(base === 'approved' && !/by you|09:41/.test(base), `RED CONTROL: the base's record words — «${base} · 2 min ago»: neither who decided nor when`, base);
@@ -213,7 +213,7 @@ function scene(registry) {
 }
 {
   const g = scene(FA);
-  ok(g.open.length === 2 && g.a.id !== g.b.id && g.cards === 2 && g.aDecidable, `two open wake requests with the same words ⇒ TWO items, two cards in the asking chat, the older (wr-a1) decidable on its own — ${g.open.length} items, ${g.cards} cards`, g.open.map((i) => [i.id, i.action.id]));
+  ok(g.open.length === 2 && g.a.id !== g.b.id && g.cards === 2 && verdictOf(g.aDecidable), `two open wake requests with the same words ⇒ TWO items, two cards in the asking chat, the older (wr-a1) decidable on its own — ${g.open.length} items, ${g.cards} cards`, g.open.map((i) => [i.id, i.action.id]));
   ok(g.c.id !== g.a.id && g.denied.status === 'done' && g.denied.resolvedBy === 'denied' && g.denied.action.id === 'wr-a1', 'a re-ask after a Deny is a NEW item; the denied record keeps «denied» (and its request id)', { c: g.c.id, denied: g.denied });
   const RED = { ...FA, ROWS: FA.ROWS.map((r) => (r.type === 'channel-watch-request' ? { ...r, identity: null } : r)), isDecisionRow: () => false };   // + the store as the base shipped it (no decision row)
   RED.ACTION_IDENTITY = Object.freeze(Object.fromEntries(RED.ROWS.filter((r) => r.identity).map((r) => [r.type, r.identity])));
@@ -259,7 +259,7 @@ const VERDICT_LINES = "    const who = personVerdict(req);\n    if (!who.ok) ret
       ['a token in the body', {}, { token: 'vsst_x' }],
     ]) {
       const r = await S.post('approve', h, body);
-      ok(r.status === 403 && r.code === 'human_only' && /only a person decides this/.test(r.error || ''), `${what} ⇒ 403 human_only, said by name`, r);
+      ok(r.status === 403 && r.code === 'human_only' && verdictOf(/only a person decides this/.test(r.error || '')), `${what} ⇒ 403 human_only, said by name`, r);
     }
     for (const [what, h] of [
       ['a bare write with no browser (curl on an instance whose sign-in is off)', {}],
@@ -276,7 +276,7 @@ const VERDICT_LINES = "    const who = personVerdict(req);\n    if (!who.ok) ret
     const page = await S.post('approve', { 'Sec-Fetch-Site': 'same-origin' });
     const own = await S.post('deny', { Origin: S.own });
     ok(page.status === 200 && own.status === 200 && S.calls.length === 2 && S.calls[0].approve === true && S.calls[0].by === 'user' && S.calls[1].approve === false, 'this instance\'s own page (Sec-Fetch-Site same-origin / its own Origin) ⇒ decided, by \'user\'', { page, own, calls: S.calls });
-    ok(S.calls.length === 2 && S.calls.every((c) => c.person === true), 'round 2: the route hands the engine the person verdict\'s mark ({person: true}) — the record says decidedBy \'person\' + the time, the only record «by you» may name', S.calls);
+    ok(S.calls.length === 2 && verdictOf(S.calls.every((c) => c.person === true)), 'round 2: the route hands the engine the person verdict\'s mark ({person: true}) — the record says decidedBy \'person\' + the time, the only record «by you» may name', S.calls);
   } finally { await S.close(); }
   // RED CONTROL: the route as the base shipped it (the person verdict cut)
   ok(REAL_SRC.split(VERDICT_LINES).length === 2, 'the RED copy\'s anchor is the route\'s verdict (exactly once)');
@@ -333,17 +333,17 @@ function doorProblems(rows, files) {
 {
   ok(doorProblems(FA.PERSON_DECIDES, SRC_FILES).length === 0, 'every `decide: \'person\'` row has a door that asks THE person verdict (routes/vault.js) BEFORE the engine decides', doorProblems(FA.PERSON_DECIDES, SRC_FILES));
   const cut = { ...SRC_FILES, 'src/routes/channels.js': SRC_FILES['src/routes/channels.js'].replace(VERDICT_LINES, '') };
-  ok(doorProblems(FA.PERSON_DECIDES, cut).some((x) => /decides before \(or without\)/.test(x)), 'RED COPY: the route without its verdict is named');
-  ok(doorProblems([...FA.PERSON_DECIDES, 'ghost-wake'], SRC_FILES).some((x) => /'ghost-wake' is decided by a person only but names no door/.test(x)), 'RED COPY: a person-decided row with no door is named');
+  ok(verdictOf(doorProblems(FA.PERSON_DECIDES, cut).some((x) => /decides before \(or without\)/.test(x))), 'RED COPY: the route without its verdict is named');
+  ok(verdictOf(doorProblems([...FA.PERSON_DECIDES, 'ghost-wake'], SRC_FILES).some((x) => /'ghost-wake' is decided by a person only but names no door/.test(x))), 'RED COPY: a person-decided row with no door is named');
   const local = { ...SRC_FILES, 'src/routes/channels.js': SRC_FILES['src/routes/channels.js'].replace("const { personVerdict } = require('./vault.js');", 'const personVerdict = () => ({ ok: true });') };
-  ok(doorProblems(FA.PERSON_DECIDES, local).some((x) => /one verdict, never a local copy/.test(x)), 'RED COPY: a local verdict in place of routes/vault.js\'s is named');
+  ok(verdictOf(doorProblems(FA.PERSON_DECIDES, local).some((x) => /one verdict, never a local copy/.test(x))), 'RED COPY: a local verdict in place of routes/vault.js\'s is named');
   // r3: the hub-act door as the base had it (a bearer check only — a bare curl answered it) and a vault door that drops the mark
   const hubBase = { ...SRC_FILES, 'src/server/exit-routes.js': SRC_FILES['src/server/exit-routes.js'].replace("  const who = personVerdict(req);\n  if (!who.ok) return res.status(403)", "  if (isAnyBearer(req)) return res.status(403)") };
-  ok(doorProblems(FA.PERSON_DECIDES, hubBase).some((x) => /'hub-act-ask': src\/server\/exit-routes\.js decides before \(or without\)/.test(x)), 'RED COPY (r3): the hub-act door as the base had it (a bearer check, no page verdict) is named', doorProblems(FA.PERSON_DECIDES, hubBase));
+  ok(verdictOf(doorProblems(FA.PERSON_DECIDES, hubBase).some((x) => /'hub-act-ask': src\/server\/exit-routes\.js decides before \(or without\)/.test(x))), 'RED COPY (r3): the hub-act door as the base had it (a bearer check, no page verdict) is named', doorProblems(FA.PERSON_DECIDES, hubBase));
   const noMark = { ...SRC_FILES, 'src/routes/vault.js': SRC_FILES['src/routes/vault.js'].replace("by: 'user', person: true }); }));   // r3: «allowed by you · 09:41»", "by: 'user' }); }));") };
-  ok(doorProblems(FA.PERSON_DECIDES, noMark).some((x) => /'vault-run-ask': .*without handing in the person verdict's mark/.test(x)), 'RED COPY (r3): the run ask\'s door without the mark is named (its record could never say «by you»)', doorProblems(FA.PERSON_DECIDES, noMark));
+  ok(verdictOf(doorProblems(FA.PERSON_DECIDES, noMark).some((x) => /'vault-run-ask': .*without handing in the person verdict's mark/.test(x))), 'RED COPY (r3): the run ask\'s door without the mark is named (its record could never say «by you»)', doorProblems(FA.PERSON_DECIDES, noMark));
   const grantNoMark = { ...SRC_FILES, 'src/routes/vault.js': SRC_FILES['src/routes/vault.js'].replace("by: 'user', person: true }); }));   // r4: `person`", "by: 'user' }); }));   // r4: `person`") };
-  ok(grantNoMark['src/routes/vault.js'] !== SRC_FILES['src/routes/vault.js'] && doorProblems(FA.PERSON_DECIDES, grantNoMark).some((x) => /'vault-grant-ask': .*without handing in the person verdict's mark/.test(x)), 'RED COPY (r4): the grant request\'s door as bec3e3f8 had it (no mark) is named', doorProblems(FA.PERSON_DECIDES, grantNoMark));
+  ok(grantNoMark['src/routes/vault.js'] !== SRC_FILES['src/routes/vault.js'] && verdictOf(doorProblems(FA.PERSON_DECIDES, grantNoMark).some((x) => /'vault-grant-ask': .*without handing in the person verdict's mark/.test(x))), 'RED COPY (r4): the grant request\'s door as bec3e3f8 had it (no mark) is named', doorProblems(FA.PERSON_DECIDES, grantNoMark));
 }
 /** who calls the engine's decide: exactly routes/channels.js; no agent route and no automation verb names the decide road */
 function decideCallers(files) {
@@ -357,7 +357,7 @@ function decideCallers(files) {
   ok(JSON.stringify(c.callers) === '["src/routes/channels.js"]' && !c.agentDoors.length && !c.verbs.length, 'the engine\'s decide is called from the person\'s route ONLY — no agent route (/api/agent/…) and no automation verb names it', c);
   const planted = { ...SRC_FILES, 'src/agent-routes/channels-decide.js': "router.post('/api/agent/channels/reach-requests/:id/approve', async (req, res) => res.json(await eng.decideRequest(req.params.id, true, 'agent')));\n" };
   const p = decideCallers(planted);
-  ok(p.agentDoors.includes('src/agent-routes/channels-decide.js') && p.callers.includes('src/agent-routes/channels-decide.js'), 'RED COPY: an agent route that decides is named', p);
+  ok(gateOf(p.agentDoors.includes('src/agent-routes/channels-decide.js')) && verdictOf(p.callers.includes('src/agent-routes/channels-decide.js')), 'RED COPY: an agent route that decides is named', p);
 }
 /** the viewer roles: every page's role is asked in ONE place and is a declared, non-deferred row */
 function roleProblems(viewers, files) {
@@ -378,12 +378,12 @@ function roleProblems(viewers, files) {
   return out;
 }
 {
-  ok(roleProblems(FA.VIEWERS, SRC_FILES).length === 0 && FA.canDecide() && FA.canDecide('owner') && !FA.canDecide('viewer') && !FA.canDecide('nobody'), 'the viewer roles: the one role every page has today is \'owner\' (decides); \'viewer\' is DEFERRED (no page names it); an unknown role may not decide', roleProblems(FA.VIEWERS, SRC_FILES));
-  ok(FA.VIEWERS.viewer && FA.VIEWERS.viewer.deferred === true && FA.VIEWERS.viewer.canDecide === false, 'the deferred surface is a REGISTRY ROW (VIEWERS.viewer — deferred), never prose');
+  ok(roleProblems(FA.VIEWERS, SRC_FILES).length === 0 && gateOf(FA.canDecide()) && gateOf(FA.canDecide('owner')) && !FA.canDecide('viewer') && !FA.canDecide('nobody'), 'the viewer roles: the one role every page has today is \'owner\' (decides); \'viewer\' is DEFERRED (no page names it); an unknown role may not decide', roleProblems(FA.VIEWERS, SRC_FILES));
+  ok(gateOf(FA.VIEWERS.viewer) && FA.VIEWERS.viewer.deferred === true && FA.VIEWERS.viewer.canDecide === false, 'the deferred surface is a REGISTRY ROW (VIEWERS.viewer — deferred), never prose');
   const named = { ...SRC_FILES, 'src/lib/chat-needs-card.js': SRC_FILES['src/lib/chat-needs-card.js'].replace('this._role = () => VIEWER_ROLE;', "this._role = () => 'viewer';") };
-  ok(roleProblems(FA.VIEWERS, named).some((x) => /role 'viewer' is DEFERRED/.test(x)), 'RED COPY: a page naming the deferred role is named');
+  ok(verdictOf(roleProblems(FA.VIEWERS, named).some((x) => /role 'viewer' is DEFERRED/.test(x))), 'RED COPY: a page naming the deferred role is named');
   const elsewhere = { ...SRC_FILES, 'src/lib/shared-view.js': "export class SharedView { constructor() { this._role = () => 'owner'; } }\n" };
-  ok(roleProblems(FA.VIEWERS, elsewhere).some((x) => /outside the one place/.test(x)), 'RED COPY: a second place answering the role is named');
+  ok(verdictOf(roleProblems(FA.VIEWERS, elsewhere).some((x) => /outside the one place/.test(x))), 'RED COPY: a second place answering the role is named');
 }
 
 // ── ⑥ ── (ONE RENDERER, NEVER STORED TWICE — the card-store census over src/lib/chat-needs-card.js with its two RED copies, and the tray row's
@@ -427,14 +427,14 @@ function lawScene(registry) {
 }
 {
   const hasLaw = typeof FA.isDecisionRow === 'function' && typeof FA.offersClosers === 'function' && Array.isArray(FA.DECISION_ENDS);
-  ok(hasLaw && FA.isDecisionRow(wr()) && !FA.offersClosers(wr()) && JSON.stringify(FA.DECISION_ENDS) === '["allowed","denied","expired"]', 'THE registry names a decision row (decide: \'person\') and its only ends — allowed / denied (its two verbs), expired (its end)', hasLaw && FA.DECISION_ENDS);
+  ok(gateOf(hasLaw) && gateOf(FA.isDecisionRow(wr())) && !FA.offersClosers(wr()) && JSON.stringify(FA.DECISION_ENDS) === '["allowed","denied","expired"]', 'THE registry names a decision row (decide: \'person\') and its only ends — allowed / denied (its two verbs), expired (its end)', hasLaw && FA.DECISION_ENDS);
   const g = lawScene(FA);
   ok(g.markDone === 'decision_row' && g.dismiss === 'decision_row' && g.afterMark === 'open:null', `✓ Mark done / ✕ Dismiss on a wake request's item are refused BY NAME (${g.markDone} / ${g.dismiss}) — it stays open (was: a silent Deny whose record read «✓ done»)`, g);
-  ok(Array.isArray(g.seenAll.decisions) && g.seenAll.decisions.length === 1 && g.seenAll.changed.length === 1 && !g.seenAll.changed.includes(g.seenAll.decisions[0]), `«Mark all seen» passes the decision row by (listed in \`decisions\` — the page says «1 decision left for you») and marks the rest (${g.seenAll.changed.length})`, g.seenAll);
+  ok(gateOf(Array.isArray(g.seenAll.decisions)) && g.seenAll.decisions.length === 1 && g.seenAll.changed.length === 1 && !g.seenAll.changed.includes(g.seenAll.decisions[0]), `«Mark all seen» passes the decision row by (listed in \`decisions\` — the page says «1 decision left for you») and marks the rest (${g.seenAll.changed.length})`, g.seenAll);
   ok(g.afterReply === 'open', 'a typed reply («approve») never answers a decision — the item stays open', g.afterReply);
   ok(g.answered === 1 && g.dec.status === 'done' && g.dec.by === 'denied' && !!g.dec.fact && g.dec.fact.decidedBy === 'person', 'its decision closes it: «denied», with the person verdict\'s mark', g.dec);
-  ok(g.reopen === 'decision_final' && g.restamp === 'decision_final' && g.kept.status === 'done' && g.kept.by === 'denied' && g.kept.fact, `a decision is FINAL: reopening it (the old ↺ / the 6 s Undo) and re-stamping it are refused by name (${g.reopen} / ${g.restamp}); the record keeps «denied by you»`, g.kept);
-  ok(g.refile.fresh && g.refile.first === 'done:denied' && g.refile.second === 'open', 'the same request filed again after its decision is a NEW item beside it — the decided record keeps its stamp (never reopened under the new filing)', g.refile);
+  ok(g.reopen === 'decision_final' && g.restamp === 'decision_final' && g.kept.status === 'done' && g.kept.by === 'denied' && verdictOf(g.kept.fact), `a decision is FINAL: reopening it (the old ↺ / the 6 s Undo) and re-stamping it are refused by name (${g.reopen} / ${g.restamp}); the record keeps «denied by you»`, g.kept);
+  ok(gateOf(g.refile.fresh) && g.refile.first === 'done:denied' && g.refile.second === 'open', 'the same request filed again after its decision is a NEW item beside it — the decided record keeps its stamp (never reopened under the new filing)', g.refile);
   ok(g.pointer === 'done:system', 'CONTROL: the Outbox\'s pointer item (open-channel — a door, no decision row) is retracted by its producer as before', g.pointer);
   ok(g.expired === '1:expired', 'its END closes it — the expiry sweep (\'expired\': the agent can ask again)', g.expired);
   ok(g.other[0] === 'dismissed' && g.other[1] === 'open:null' && g.other[2] === 'done:user', 'CONTROL: an item of any other row is closed by «Mark all seen», reopened by ↺ and closed by ✓ as before', g.other);
@@ -461,7 +461,7 @@ console.log('⑧ …AND EVERY DOOR DRAWS THEM — the tray row (the tray, the mi
   ok(JSON.stringify(vo.answer) === '["Approve","Deny"]' && vo.closers.length === 0, `the tray row (and the chat's card — one renderer) of an open wake request: its verbs are ${JSON.stringify(vo.answer)} and NO ✓ / ✕ (${JSON.stringify(vo.closers)})`, vo);
   const decided = wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: NOW - 60e3, resolvedFact: { decidedBy: 'person', decidedAt: NOW - 60e3 } });
   const dh = R.renderRow({ item: decided, resolved: true, tail: true }, rctx).innerHTML;
-  ok(verbsOf(dh).closers.length === 0 && /approved by you · /.test(dh), 'its decided record: «approved by you · HH:MM» and NO ↺ (a decision is final)', verbsOf(dh));
+  ok(verbsOf(dh).closers.length === 0 && verdictOf(/approved by you · /.test(dh)), 'its decided record: «approved by you · HH:MM» and NO ↺ (a decision is final)', verbsOf(dh));
   const plain = { id: 'ut-p', sessionKey: 'claude:c-ops', text: 'Which branch should I deploy?', status: 'open', urgency: 'normal', origin: 'agent', createdAt: NOW - 60e3 };
   const ph = R.renderRow({ item: plain, resolved: false, band: 5 }, rctx).innerHTML;
   const pr = R.renderRow({ item: { ...plain, status: 'done', resolvedBy: 'user', resolvedAt: NOW }, resolved: true, tail: true }, rctx).innerHTML;
@@ -473,7 +473,7 @@ console.log('⑧ …AND EVERY DOOR DRAWS THEM — the tray row (the tray, the mi
   // (the For-you window's registry pin of src/lib/inbox-window.js: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // RED CONTROL: the base's verbs (no closers flag asked) — Mark done / Dismiss beside Approve / Reject, Reopen on the decided record
   const b1 = L.itemView(wr(), { ...ictx(wr()), closers: undefined }).actions, b2 = L.itemView(decided, { ...ictx(decided), closers: undefined }).actions;
-  ok(b1.includes('done') && b1.includes('dismiss') && b2.includes('reopen'), `RED CONTROL: the base's window — ${JSON.stringify(b1)} on the open request, ${JSON.stringify(b2)} on the decided one`, { b1, b2 });
+  ok(gateOf(b1.includes('done')) && gateOf(b1.includes('dismiss')) && verdictOf(b2.includes('reopen')), `RED CONTROL: the base's window — ${JSON.stringify(b1)} on the open request, ${JSON.stringify(b2)} on the decided one`, { b1, b2 });
 }
 
 // ── ⑨ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -565,17 +565,17 @@ const GATE_LINE = /^    if \(wakeRefused\(req, res, [^\n]*\)\) return;[^\n]*\n/g
 {
   const g = await wakeDoors(routerFrom(REAL_SRC));
   const all = (xs, st, code) => xs.length > 0 && xs.every((r) => r.status === st && (code === undefined || r.code === code));
-  ok(all(g.vsst, 403, 'human_only') && g.vsst.every((r) => /a wake \(a billed turn\) is the owner's to set/.test(r.error || '')), `a WAKE row from an agent's vsst_ on every watchers door (${DOORS_W.length}: a conversation, the account, a rule's list, a new rule, a rule rewritten) ⇒ 403 human_only, said by name`, g.vsst);
-  ok(all(g.bare, 403, 'cross_site'), 'a bare write (curl on an instance whose sign-in is off) ⇒ 403 cross_site', g.bare);
-  ok(all(g.digest, 403, 'human_only') && all(g.legacy, 403, 'human_only'), 'a DIGEST (a paced wake) and a row that never said its delivery (it reads wake) ⇒ refused the same way', { digest: g.digest, legacy: g.legacy });
-  ok(all(g.assignVsst, 403, 'human_only') && all(g.assignBare, 403, 'cross_site'), `a pre-split ASSIGNMENT (its watcher row IS a wake) on its ${DOORS_A.length} doors ⇒ refused the same way`, { v: g.assignVsst, b: g.assignBare });
+  ok(gateOf(all(g.vsst, 403, 'human_only')) && verdictOf(g.vsst.every((r) => /a wake \(a billed turn\) is the owner's to set/.test(r.error || ''))), `a WAKE row from an agent's vsst_ on every watchers door (${DOORS_W.length}: a conversation, the account, a rule's list, a new rule, a rule rewritten) ⇒ 403 human_only, said by name`, g.vsst);
+  ok(verdictOf(all(g.bare, 403, 'cross_site')), 'a bare write (curl on an instance whose sign-in is off) ⇒ 403 cross_site', g.bare);
+  ok(gateOf(all(g.digest, 403, 'human_only')) && verdictOf(all(g.legacy, 403, 'human_only')), 'a DIGEST (a paced wake) and a row that never said its delivery (it reads wake) ⇒ refused the same way', { digest: g.digest, legacy: g.legacy });
+  ok(gateOf(all(g.assignVsst, 403, 'human_only')) && verdictOf(all(g.assignBare, 403, 'cross_site')), `a pre-split ASSIGNMENT (its watcher row IS a wake) on its ${DOORS_A.length} doors ⇒ refused the same way`, { v: g.assignVsst, b: g.assignBare });
   ok(g.writesAfterRefusals === 0, `…and the engine never asked to write (${g.writesAfterRefusals} writes)`);
-  ok(all(g.next, 200) && all(g.removal, 200), 'on a grain that holds NO wake, an agent\'s non-wake write (a next-turn row) and a removal ([]) are as they were — written', { next: g.next, removal: g.removal });
-  ok(all(g.page, 200) && all(g.assignPage, 200) && g.writes === DOORS_W.length * 3 + DOORS_A.length, `this instance's own page ⇒ written (the owner's Notify…) — ${g.writes} writes`, { page: g.page, assignPage: g.assignPage, writes: g.writes });
+  ok(gateOf(all(g.next, 200)) && verdictOf(all(g.removal, 200)), 'on a grain that holds NO wake, an agent\'s non-wake write (a next-turn row) and a removal ([]) are as they were — written', { next: g.next, removal: g.removal });
+  ok(gateOf(all(g.page, 200)) && gateOf(all(g.assignPage, 200)) && g.writes === DOORS_W.length * 3 + DOORS_A.length, `this instance's own page ⇒ written (the owner's Notify…) — ${g.writes} writes`, { page: g.page, assignPage: g.assignPage, writes: g.writes });
   // RED CONTROL: the route file with no gate at all (round 1)
   const cuts = (REAL_SRC.match(GATE_LINE) || []).length;
   const r = await wakeDoors(routerFrom(REAL_SRC.replace(GATE_LINE, '')));
-  ok(cuts === 13 && all(r.vsst, 200) && all(r.bare, 200) && all(r.assignVsst, 200), `RED CONTROL: the doors with the ${cuts} gates cut — an agent's vsst_ and a bare curl WRITE a wake on every door (${r.vsst.map((x) => x.status).join(', ')})`, { vsst: r.vsst.map((x) => x.status), bare: r.bare.map((x) => x.status) });
+  ok(cuts === 13 && gateOf(all(r.vsst, 200)) && gateOf(all(r.bare, 200)) && verdictOf(all(r.assignVsst, 200)), `RED CONTROL: the doors with the ${cuts} gates cut — an agent's vsst_ and a bare curl WRITE a wake on every door (${r.vsst.map((x) => x.status).join(', ')})`, { vsst: r.vsst.map((x) => x.status), bare: r.bare.map((x) => x.status) });
 }
 /** r3's gate, rebuilt from this file (the RED copy of round 4): the gate keyed on the BODY's rows only — a door with no rows to
  *  read has no gate; wakeRefused asks nothing of the grain. */
@@ -612,10 +612,10 @@ async function heldDoors(mod) {
 {
   const g = await heldDoors(routerFrom(REAL_SRC));
   const all = (xs, st, code) => xs.length > 0 && xs.every((r) => r.status === st && (code === undefined || r.code === code));
-  ok(g.nHeld === 10 && all(g.held, 403, 'human_only') && g.held.every((r) => r.wakeHeld && /this grain holds a wake \(a billed turn\)/.test(r.error || '')), `r4: on a grain that HOLDS a wake, EVERY write from an agent's vsst_ ⇒ 403 human_only «this grain holds a wake…» — ${g.nHeld} doors: ${g.held.map((r) => `${r.door} {${r.body}}`).join(' · ')}`, g.held.filter((r) => r.status !== 403));
-  ok(all(g.bare, 403, 'cross_site') && g.writesRefused === 0, 'r4: …a bare curl (sign-in off) ⇒ 403 cross_site; the engine never asked to write', { bare: g.bare.map((x) => x.status), writes: g.writesRefused });
-  ok(['fake-poll|pattern|p1', 'fake-poll|conversation|fake-poll-ops'].every((k) => g.asked.includes(k)) && g.asked.every((k) => /^fake-poll\|(account\||pattern\|p[12]|conversation\|fake-poll-(ops|dev))$/.test(k)), 'r4: the gate asks THE ENGINE about the grain its PATH names (account / rule / conversation) — never a body field', g.asked);
-  ok(all(g.page, 200) && all(g.free, 200), `r4: this instance's page ⇒ written; the same ${g.free.length} writes on grains with NO wake ⇒ 200 for the agent (a non-wake grain stays the agent's to edit)`, { page: g.page.map((x) => x.status), free: g.free.filter((x) => x.status !== 200) });
+  ok(g.nHeld === 10 && gateOf(all(g.held, 403, 'human_only')) && verdictOf(g.held.every((r) => r.wakeHeld && /this grain holds a wake \(a billed turn\)/.test(r.error || ''))), `r4: on a grain that HOLDS a wake, EVERY write from an agent's vsst_ ⇒ 403 human_only «this grain holds a wake…» — ${g.nHeld} doors: ${g.held.map((r) => `${r.door} {${r.body}}`).join(' · ')}`, g.held.filter((r) => r.status !== 403));
+  ok(gateOf(all(g.bare, 403, 'cross_site')) && g.writesRefused === 0, 'r4: …a bare curl (sign-in off) ⇒ 403 cross_site; the engine never asked to write', { bare: g.bare.map((x) => x.status), writes: g.writesRefused });
+  ok(gateOf(['fake-poll|pattern|p1', 'fake-poll|conversation|fake-poll-ops'].every((k) => g.asked.includes(k))) && verdictOf(g.asked.every((k) => /^fake-poll\|(account\||pattern\|p[12]|conversation\|fake-poll-(ops|dev))$/.test(k))), 'r4: the gate asks THE ENGINE about the grain its PATH names (account / rule / conversation) — never a body field', g.asked);
+  ok(gateOf(all(g.page, 200)) && verdictOf(all(g.free, 200)), `r4: this instance's page ⇒ written; the same ${g.free.length} writes on grains with NO wake ⇒ 200 for the agent (a non-wake grain stays the agent's to edit)`, { page: g.page.map((x) => x.status), free: g.free.filter((x) => x.status !== 200) });
   // RED CONTROL: round 3's routes (the gate keyed on the body) — the reviewer's three curls and every other hole WRITE
   const red = await heldDoors(routerFrom(r3Form(REAL_SRC)));
   const holes = red.held.filter((r) => r.status === 200);
@@ -887,31 +887,31 @@ const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) (?:return;|\{[^\n]*
   const c = writerCensus(SRC_FILES), c0 = c;
   const ch = c.routes.filter((r) => !/\/webhook\//.test(r)), wh = c.routes.filter((r) => /\/webhook\//.test(r));
   ok(!c.problems.length && ch.length === 13, `THE WRITER CENSUS (r4): the engine's grain writers, derived (${c.writers.join(', ')}); the ${ch.length} routes of src/routes/channels.js that call one each ask the gate FIRST for the grain their path writes: ${ch.join(' · ')}`, c.problems);
-  ok(JSON.stringify(c.fields) === JSON.stringify(['authors', 'kind', 'options', 'participants', 'stats', 'title']) && c.files.includes(WEBHOOK) && c.files.includes('src/routes/channels.js') && wh.length === 5 && !c.problems.length, `r5: THE FILE LIST IS DERIVED — the fields the engine reads for wakes off an entry (${c.fields.join(', ')}: what a rule matches, the per-path budget) and the writers of the engine name ${c.files.length} files (${c.files.join(', ')}); src/routes/webhook.js's ${wh.length} path verbs each ask the gate for the PATH: ${wh.join(' · ')} (the pairing's completion answers to the gated pair-code)`, { files: c.files, fields: c.fields, wh, problems: c.problems });
+  ok(JSON.stringify(c.fields) === JSON.stringify(['authors', 'kind', 'options', 'participants', 'stats', 'title']) && gateOf(c.files.includes(WEBHOOK)) && gateOf(c.files.includes('src/routes/channels.js')) && wh.length === 5 && !c.problems.length, `r5: THE FILE LIST IS DERIVED — the fields the engine reads for wakes off an entry (${c.fields.join(', ')}: what a rule matches, the per-path budget) and the writers of the engine name ${c.files.length} files (${c.files.join(', ')}); src/routes/webhook.js's ${wh.length} path verbs each ask the gate for the PATH: ${wh.join(' · ')} (the pairing's completion answers to the gated pair-code)`, { files: c.files, fields: c.fields, wh, problems: c.problems });
   const r3 = writerCensus({ ...SRC_FILES, 'src/routes/channels.js': r3Form(REAL_SRC) });
   const bodyKeyed = (r3Form(REAL_SRC).match(/^    if \(wakeRefused\(req, res, [^\n]*\)\) return;/gm) || []).length;
-  ok(r3.problems.length === 13 && r3.problems.every((x) => /without asking the person verdict for the grain it writes/.test(x)), `RED COPY: round 3's routes — the census names all ${r3.problems.length} doors (the ${13 - bodyKeyed} that never asked and the ${bodyKeyed} keyed on a body field): ${r3.problems.map((x) => x.replace(/: (calls|asks|its gate) .*$/, '').replace('/api/channels/', '…/')).join(' · ')}`, r3.problems);
+  ok(r3.problems.length === 13 && verdictOf(r3.problems.every((x) => /without asking the person verdict for the grain it writes/.test(x))), `RED COPY: round 3's routes — the census names all ${r3.problems.length} doors (the ${13 - bodyKeyed} that never asked and the ${bodyKeyed} keyed on a body field): ${r3.problems.map((x) => x.replace(/: (calls|asks|its gate) .*$/, '').replace('/api/channels/', '…/')).join(' · ')}`, r3.problems);
   const nested = writerCensus({ ...SRC_FILES, 'src/routes/channels.js': REAL_SRC.replace("    if (wakeRefused(req, res, convGrain(req))) return;   // r4: a filter a wake fires on is the owner's\n", "    if (b.filter && b.filter.rules) { if (wakeRefused(req, res, convGrain(req))) return; }\n") });
-  ok(nested.problems.some((x) => /^PUT \/api\/channels\/:adapterId\/:convId\/filter: calls setFilter without asking/.test(x)), 'RED COPY: a gate inside a condition on the body (the filter only when it has rules) is named', nested.problems);
+  ok(verdictOf(nested.problems.some((x) => /^PUT \/api\/channels\/:adapterId\/:convId\/filter: calls setFilter without asking/.test(x))), 'RED COPY: a gate inside a condition on the body (the filter only when it has rules) is named', nested.problems);
   const wrongGrain = writerCensus({ ...SRC_FILES, 'src/routes/channels.js': REAL_SRC.replace("    if (wakeRefused(req, res, ruleGrain(req))) return;   // r4: removing a rule that holds a wake is a wake write\n", "    if (wakeRefused(req, res, accountGrain(req))) return;\n") });
-  ok(wrongGrain.problems.some((x) => /DELETE \/api\/channels\/adapters\/:id\/patterns\/:pid: its gate names accountGrain — the path writes the ruleGrain/.test(x)), 'RED COPY: a gate asking about another grain than the one the path writes is named', wrongGrain.problems);
+  ok(verdictOf(wrongGrain.problems.some((x) => /DELETE \/api\/channels\/adapters\/:id\/patterns\/:pid: its gate names accountGrain — the path writes the ruleGrain/.test(x))), 'RED COPY: a gate asking about another grain than the one the path writes is named', wrongGrain.problems);
   const planted = writerCensus({ ...SRC_FILES, 'src/server/channels-access.js': SRC_FILES['src/server/channels-access.js'].replace('  /** Approve = EXACTLY the frozen row', '  async function wakeEveryone(a, g, rows) { return setGrain(a, g, { watchers: rows }); }\n  /** Approve = EXACTLY the frozen row') });
-  ok(planted.problems.some((x) => /wakeEveryone\(\): calls the grain writer setGrain/.test(x)), 'RED COPY: a writer planted in the engine is named', planted.problems);
+  ok(verdictOf(planted.problems.some((x) => /wakeEveryone\(\): calls the grain writer setGrain/.test(x))), 'RED COPY: a writer planted in the engine is named', planted.problems);
   const withPrim = SRC_FILES['src/server/channels-access.js'].replace('  /** Approve = EXACTLY the frozen row', "  function widenRule(id, p) { return CG.setGrainRows(CG.grainResource('pattern', id), { access: p }, 'agent'); }\n  /** Approve = EXACTLY the frozen row");
   const newRoute = REAL_SRC.replace("router.delete('/api/channels/adapters/:id/patterns/:pid',", "router.put('/api/channels/adapters/:id/patterns/:pid/widen', async (req, res) => {\n  try { forHost(req); scopeAnswer(res, await engine().widenRule(req.params.pid, req.body.access)); } catch (e) { fail(res, e); }\n});\nrouter.delete('/api/channels/adapters/:id/patterns/:pid',");
   const derived = writerCensus({ ...SRC_FILES, 'src/server/channels-access.js': withPrim, 'src/routes/channels.js': newRoute });
-  ok(derived.writers.includes('widenRule') && derived.problems.some((x) => /^PUT \/api\/channels\/adapters\/:id\/patterns\/:pid\/widen: calls widenRule without asking/.test(x)), 'RED COPY: the writers are DERIVED — a new engine function writing grain rows (the one writer) joins the census by itself, and a route calling it with no gate is named', derived.problems);
+  ok(gateOf(derived.writers.includes('widenRule')) && verdictOf(derived.problems.some((x) => /^PUT \/api\/channels\/adapters\/:id\/patterns\/:pid\/widen: calls widenRule without asking/.test(x))), 'RED COPY: the writers are DERIVED — a new engine function writing grain rows (the one writer) joins the census by itself, and a route calling it with no gate is named', derived.problems);
   const other = writerCensus({ ...SRC_FILES, 'src/server/automation-engine.js': SRC_FILES['src/server/automation-engine.js'] + '\nasync function x(eng) { return eng.setFilter("a", "c", null); }\n' });
-  ok(other.problems.some((x) => /automation-engine\.js x\(\): calls the grain writer setFilter\(\) outside a gated route/.test(x)), 'RED COPY: a second file calling a writer is named', other.problems);
+  ok(verdictOf(other.problems.some((x) => /automation-engine\.js x\(\): calls the grain writer setFilter\(\) outside a gated route/.test(x))), 'RED COPY: a second file calling a writer is named', other.problems);
   // r5 REDs: the webhook path verbs as 4b8896e7 had them (owner() alone), a gate after the write, a NEW routes file writing a wake field
   const cut = WH_SRC.replace(WH_GATE, '');
   const r4w = writerCensus({ ...SRC_FILES, [WEBHOOK]: cut });
   const named = r4w.problems.filter((x) => /webhook/.test(x));
-  ok((WH_SRC.match(WH_GATE) || []).length === 7 && named.length === 6 && named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow\b.* without asking/.test(x)) && named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x)), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
+  ok((WH_SRC.match(WH_GATE) || []).length === 7 && named.length === 6 && gateOf(named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow\b.* without asking/.test(x))) && verdictOf(named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x))), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
   const late = writerCensus({ ...SRC_FILES, [WEBHOOK]: WH_SRC.replace("  if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on\n", '').replace("    await syncRow(slug, ov.options);\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send", "    await syncRow(slug, ov.options);\n    if (pathRefused(req, res)) return;\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send") });
-  ok(late.problems.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: asks the gate AFTER it calls syncRow/.test(x)), 'RED COPY: a path verb asking the gate only AFTER its write (inside its try, past the write) is named', late.problems.filter((x) => /webhook/.test(x)));
+  ok(verdictOf(late.problems.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: asks the gate AFTER it calls syncRow/.test(x))), 'RED COPY: a path verb asking the gate only AFTER its write (inside its try, past the write) is named', late.problems.filter((x) => /webhook/.test(x)));
   const plantedFile = writerCensus({ ...SRC_FILES, 'src/routes/hooks-extra.js': "const router = require('express').Router();\nfunction touch(e, slug, o) { return e.store.index.update(() => { const en = e.store.index.entry('webhook', slug); en.options = o; }); }\nrouter.put('/api/channels/webhook/extra/:slug', async (req, res) => {\n  await touch(engine(), req.params.slug, req.body);\n  res.json({ ok: true });\n});\n" });
-  ok(plantedFile.files.includes('src/routes/hooks-extra.js') && plantedFile.problems.some((x) => /^PUT \/api\/channels\/webhook\/extra\/:slug: calls touch\b.* without asking/.test(x)), 'RED COPY: a NEW routes file writing a field the engine reads for wakes (a path\'s options) joins the file list by itself — its route with no gate is named (never a hand list)', { files: plantedFile.files, problems: plantedFile.problems.slice(-2) });
+  ok(gateOf(plantedFile.files.includes('src/routes/hooks-extra.js')) && verdictOf(plantedFile.problems.some((x) => /^PUT \/api\/channels\/webhook\/extra\/:slug: calls touch\b.* without asking/.test(x))), 'RED COPY: a NEW routes file writing a field the engine reads for wakes (a path\'s options) joins the file list by itself — its route with no gate is named (never a hand list)', { files: plantedFile.files, problems: plantedFile.problems.slice(-2) });
   // r6 (主开发, attack (d)): ONE RED COPY PER SHAPE the line-spelled census missed — each a NEW routes file, each route NAMED
   const SHAPES = [
     ['an inline `en.participants =` inside a route\'s own index.update', { 'src/routes/hooks-p1.js': "const router = require('express').Router();\nrouter.put('/api/channels/webhook/p1/:slug', async (req, res) => {\n  await engine().store.index.update((ix) => { const en = ix.entries['webhook/' + req.params.slug]; en.participants = req.body.participants; });\n  res.json({ ok: true });\n});\n" }, /^PUT \/api\/channels\/webhook\/p1\/:slug: calls participants = without asking/],
@@ -922,9 +922,9 @@ const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) (?:return;|\{[^\n]*
     ['`const ce = engine(); ce.setWatchers(`', { 'src/routes/hooks-p4.js': "const router = require('express').Router();\nrouter.put('/api/channels/:adapterId/:convId/w4', async (req, res) => {\n  const ce = engine();\n  await ce.setWatchers(req.params.adapterId, req.params.convId, req.body.rows);\n  res.json({ ok: true });\n});\n" }, /^PUT \/api\/channels\/:adapterId\/:convId\/w4: calls setWatchers without asking/],
   ];
   const shapes = SHAPES.map(([what, plant, re]) => { const c = writerCensus({ ...SRC_FILES, ...plant }); return { what, named: c.problems.some((x) => re.test(x)), joined: Object.keys(plant).every((f) => c.files.includes(f)), extra: c.problems.filter((x) => !c0.problems.includes(x)).slice(0, 3) }; });
-  ok(shapes.every((x) => x.named && x.joined), `RED COPIES — the census over the AST names the ROUTE for every shape it missed (${shapes.length}): ${shapes.map((x) => x.what + (x.named ? ' ✓' : ' ✗')).join(' · ')}`, shapes);
+  ok(verdictOf(shapes.every((x) => x.named && x.joined)), `RED COPIES — the census over the AST names the ROUTE for every shape it missed (${shapes.length}): ${shapes.map((x) => x.what + (x.named ? ' ✓' : ' ✗')).join(' · ')}`, shapes);
   const shared = writerCensus({ ...SRC_FILES, 'src/routes/hooks-p6.js': "const router = require('express').Router();\nrouter.put('/api/exits/:id/access', async (req, res) => {\n  await exitProxy.setAccess(req.params.id, req.body, { by: 'user' });\n  res.json({ ok: true });\n});\n" });
-  ok(c0.shared.includes('setAccess') && !shared.problems.some((x) => /hooks-p6|\/api\/exits\//.test(x)), `CONTROL: a writer NAME another engine also defines (derived: ${c0.shared.join(', ')}) counts only on a channels engine — an exit's setAccess is no channel write`, { shared: c0.shared, problems: shared.problems.filter((x) => /exits/.test(x)) });
+  ok(gateOf(c0.shared.includes('setAccess')) && !shared.problems.some((x) => /hooks-p6|\/api\/exits\//.test(x)), `CONTROL: a writer NAME another engine also defines (derived: ${c0.shared.join(', ')}) counts only on a channels engine — an exit's setAccess is no channel write`, { shared: c0.shared, problems: shared.problems.filter((x) => /exits/.test(x)) });
   // int382 (outbox-session-chip's local setFilter): a grain-writer's name a SECOND file comes to define is SHARED, and a shared name's
   // stray calls count only on the engine getter — the census went blind to them (the RED COPY above). The shared set is the
   // measured one; a new second definer is NAMED with its file, never shared in silence
@@ -932,7 +932,7 @@ const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) (?:return;|\{[^\n]*
   const newShared = (c, files) => c.shared.filter((n) => !SHARED_KNOWN.includes(n)).map((n) => `${n} (${Object.keys(files).filter((rel) => /^src\/.*\.js$/.test(rel) && !/^src\/server\/channels-[a-z]+\.js$/.test(rel) && scanOf(files[rel]).defs.has(n)).join(', ')})`);
   ok(!newShared(c0, SRC_FILES).length, `a grain-writer's name is its own — no new second definer (${newShared(c0, SRC_FILES).join('; ') || 'shared: ' + c0.shared.join(', ')})`, c0.shared);
   const helper = { ...SRC_FILES, 'src/lib/helper-p7.js': 'function setFilter(f) { return f; }\nmodule.exports = { setFilter };\n' };
-  ok(newShared(writerCensus(helper), helper).includes('setFilter (src/lib/helper-p7.js)'), 'RED COPY: a local helper wearing a grain-writer\'s name is named with its file', newShared(writerCensus(helper), helper));
+  ok(verdictOf(newShared(writerCensus(helper), helper).includes('setFilter (src/lib/helper-p7.js)')), 'RED COPY: a local helper wearing a grain-writer\'s name is named with its file', newShared(writerCensus(helper), helper));
 }
 
 // ── ⑩ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -944,7 +944,7 @@ const ROW3 = await import(pathToFileURL(path.join(SRC, 'lib', 'user-todos-row.js
 const rq = (o = {}) => ({ id: 'ut-rq00000001', sessionKey: 'channels', text: 'ops-agent requests access to Ops room', status: 'open', origin: 'channels', about: 'claude:c-ops', action: { type: 'open-channel', adapterId: 'lark', convId: 'oc_ops', key: 'lark/oc_ops' }, createdAt: NOW - 3600e3, resolvedAt: null, resolvedBy: null, ...o });
 const plainItem = { id: 'ut-p', sessionKey: 'claude:c-ops', text: 'Which branch should I deploy?', status: 'open', urgency: 'normal', origin: 'agent', createdAt: NOW - 60e3 };
 try {
-  ok(J(FA.POINTER_ROWS) === '["main-ask","helper-ask","open-channel"]' && FA.isPointer(rq()) && !FA.isDecisionRow(rq()) && FA.CLOSERS.includes('hide'), 'THE registry names its pointers (`closer: \'hide\'`): main-ask and helper-ask — a parked ask\'s item, its door the conversation\'s own card (lane ui-needs-a-button pick 1) — and open-channel — the access request\'s item and the Outbox\'s pointer, each a door to where its question lives', FA.POINTER_ROWS);
+  ok(J(FA.POINTER_ROWS) === '["main-ask","helper-ask","open-channel"]' && gateOf(FA.isPointer(rq())) && !FA.isDecisionRow(rq()) && verdictOf(FA.CLOSERS.includes('hide')), 'THE registry names its pointers (`closer: \'hide\'`): main-ask and helper-ask — a parked ask\'s item, its door the conversation\'s own card (lane ui-needs-a-button pick 1) — and open-channel — the access request\'s item and the Outbox\'s pointer, each a door to where its question lives', FA.POINTER_ROWS);
   const cl = { open: FA.closersOf(rq()), hidden: FA.closersOf(rq({ status: 'dismissed', resolvedBy: 'hidden' })), decision: FA.closersOf(wr()), plain: FA.closersOf(plainItem), plainDone: FA.closersOf({ ...plainItem, status: 'done' }) };
   ok(J(cl) === J({ open: ['hide'], hidden: [], decision: [], plain: ['done', 'dismiss'], plainDone: ['reopen'] }), 'closersOf (one answer, every surface): a pointer ✕ Hide only and nothing once hidden; a decision row none; any other item ✓ ✕ / ↺', cl);
   const runStore = (registry) => {
@@ -973,7 +973,7 @@ try {
   const oh = ROW3.renderRow({ item: rq(), resolved: false, band: 5 }, rctx3).innerHTML;
   const hh = ROW3.renderRow({ item: rq({ status: 'dismissed', resolvedBy: 'hidden', resolvedAt: NOW }), resolved: true, tail: true }, rctx3).innerHTML;
   const rowV = { hide: /class="ut-act ut-dismiss ut-hide"[^>]*data-label="Hide">✕</.test(oh), done: /class="ut-act ut-done"/.test(oh), reopen: /ut-reopen/.test(hh), meta: (/<div class="ut-meta">([\s\S]*?)<\/div>/.exec(hh) || [])[1] || '' };
-  ok(rowV.hide && !rowV.done && !rowV.reopen && /hidden — nothing was decided/.test(rowV.meta) && !/\bdone\b/.test(rowV.meta), 'the tray row (and the chat card — one renderer): an open access request draws ✕ «Hide» and no ✓; its hidden record «hidden — nothing was decided», no ↺', rowV);
+  ok(gateOf(rowV.hide) && !rowV.done && !rowV.reopen && gateOf(/hidden — nothing was decided/.test(rowV.meta)) && !/\bdone\b/.test(rowV.meta), 'the tray row (and the chat card — one renderer): an open access request draws ✕ «Hide» and no ✓; its hidden record «hidden — nothing was decided», no ↺', rowV);
   const ictx = (item) => ({ t: tt3, words: item.text, detail: '', name: 'Channels', origin: { origin: 'channels', label: 'Channels' }, notice: false, reply: { show: false }, ago: () => '', expires: () => '', resolvedBy: () => '', statusWords: (i) => ROW3.statusWords(i, tt3), closers: FA.closersOf(item) });
   const hiddenRq = rq({ status: 'dismissed', resolvedBy: 'hidden', resolvedAt: NOW });
   const wv = { open: L.itemView(rq(), ictx(rq())).actions, hidden: L.itemView(hiddenRq, ictx(hiddenRq)).actions, status: L.itemView(hiddenRq, ictx(hiddenRq)).meta.find((x) => x.kind === 'status').text };
@@ -992,7 +992,7 @@ try {
   ok(J(words) === J({ week: 'expires in 7 d', day6: 'expires in 1 d', h: 'expires in 23 h', min: 'expires in 30 min', closed: null, past: null, heldAsk: null }), 'expiryWords: «expires in 7 d» at filing, «1 d» on day 6, hours and minutes near its end; nothing for a closed ask, a past end, or a row that says its own (a held ask\'s 60 s)', words);
   ok(F7.WATCH_REQUEST_TTL_MS === 7 * DAY && FA.ROW_OF['channel-watch-request'].showsExpiry === true, 'the lifetime is ONE number (src/channel-filter.js WATCH_REQUEST_TTL_MS = 7 days); the row says its end (`showsExpiry`)', F7.WATCH_REQUEST_TTL_MS);
   const html = ROW3.renderRow({ item: wr({ expiresAt: Date.now() + 7 * DAY - 60e3, createdAt: Date.now() - 60e3 }), resolved: false, band: 5 }, rctx3).innerHTML;
-  ok(/expires in 7 d/.test(html) && ROW3.expiresText(Date.now() + 7 * DAY - 60e3, tt3) === 'expires in 7 d', 'the tray row (and the chat card — one renderer) says «expires in 7 d»; the For-you window\'s expiry words say days too', (/<div class="ut-meta">([\s\S]*?)<\/div>/.exec(html) || [])[1]);
+  ok(gateOf(/expires in 7 d/.test(html)) && ROW3.expiresText(Date.now() + 7 * DAY - 60e3, tt3) === 'expires in 7 d', 'the tray row (and the chat card — one renderer) says «expires in 7 d»; the For-you window\'s expiry words say days too', (/<div class="ut-meta">([\s\S]*?)<\/div>/.exec(html) || [])[1]);
   const RED = registryFrom(read('src/foryou-actions.js').replace(", ends: ['allowed', 'denied', 'expired', 'agent'], showsExpiry: true },", ", ends: ['allowed', 'denied', 'expired', 'agent'] },"));   // lane bl-msg B-ae13: the row's ends gained the asker's withdraw
   ok(RED.expiryWords(wr({ expiresAt: NOW + 7 * DAY }), { now: NOW }) === null, 'RED CONTROL: the row without `showsExpiry` (the base) — the card says nothing of its end');
 } catch (e) { ok(false, '⑪ threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
@@ -1052,15 +1052,15 @@ try {
     try { return await S.send('POST', '/api/channels/reach-requests/wr-x/approve', { 'Sec-Fetch-Site': 'same-origin' }); } finally { await S.close(); }
   };
   const e1 = await pressExpired(routerFrom(REAL_SRC));
-  ok(e1.status === 409 && e1.code === 'expired' && /^this request expired on .* — the agent can ask again$/.test(e1.error || ''), 'the decide route: an ask past its end ⇒ 409 `expired` with its words (never a 500)', e1);
+  ok(e1.status === 409 && e1.code === 'expired' && verdictOf(/^this request expired on .* — the agent can ask again$/.test(e1.error || '')), 'the decide route: an ask past its end ⇒ 409 `expired` with its words (never a 500)', e1);
   const MAP = " || code === 'expired' || code === 'placement-not-offered' ? 409";
   const e0 = REAL_SRC.split(MAP).length === 2 ? await pressExpired(routerFrom(REAL_SRC.replace(MAP, " || code === 'placement-not-offered' ? 409"))) : null;
-  ok(e0 && e0.status === 500, 'RED CONTROL: answer3 without the mapping (bec3e3f8) — the same press ⇒ HTTP 500', e0);
+  ok(gateOf(e0) && e0.status === 500, 'RED CONTROL: answer3 without the mapping (bec3e3f8) — the same press ⇒ HTTP 500', e0);
   // (⑫ (b)'s source pin of src/lib/user-todos-actions.js and the new words' zh / ja rows: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // (c) vault-grant-ask: THE third vault card in the same chat (Allow once / For 8 hours / Deny) is a DECISION ROW
   const grant = { id: 'ut-grt0000001', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', detail: 'Secret: bucket — vault://mounts/m1/secretKey', status: 'open', urgency: 'high', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'c'.repeat(32) }, createdAt: NOW - 30e3 };
   const row = FA.ROW_OF['vault-grant-ask'];
-  ok(row.decide === 'person' && row.stamp === 'grant' && J(FA.endsOf(grant)) === J(['granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over']) && FA.isDecisionRow(grant) && J(FA.closersOf(grant)) === '[]', 'THE registry: vault-grant-ask decided by a person, its own ends (Allow once / For 8 hours / Deny + a lock, a changed card, an ask that is over), no ✓ / ✕ (closersOf [])', { decide: row.decide, stamp: row.stamp, ends: FA.endsOf(grant) });
+  ok(row.decide === 'person' && row.stamp === 'grant' && J(FA.endsOf(grant)) === J(['granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over']) && gateOf(FA.isDecisionRow(grant)) && J(FA.closersOf(grant)) === '[]', 'THE registry: vault-grant-ask decided by a person, its own ends (Allow once / For 8 hours / Deny + a lock, a changed card, an ask that is over), no ✓ / ✕ (closersOf [])', { decide: row.decide, stamp: row.stamp, ends: FA.endsOf(grant) });
   const mark = { decidedBy: 'person', decidedAt: NOW - 60e3 };
   const st = (by, fact = mark) => (FA.decidedStamp({ ...grant, status: 'done', resolvedBy: by, resolvedAt: NOW, resolvedFact: fact }, { now: NOW }) || {}).text || null;
   const g8 = { ...mark, grantedFor: '8h', until: NOW + 7 * 3600e3 };   // r6: the record stays `granted` + its facts (grantedFor, until)
@@ -1145,10 +1145,10 @@ try {
     ...(f.hosts.known ? [] : CONTRACT.hosts.includes(f.hosts.why) ? [] : [`${n}: hosts.why ${f.hosts.why}`]), ...(CONTRACT.shape.includes(f.shape) ? [] : [`${n}: shape`]), ...(CONTRACT.masking.includes(f.masking) ? [] : [`${n}: masking`]),
     ...(f.always.offered || CONTRACT.always.includes(f.always.why) ? [] : [`${n}: always.why ${f.always.why}`]), ...(/^~|^\//.test(f.tool.path) && !/^\/home\//.test(f.tool.path) ? [] : [`${n}: tool.path ${f.tool.path}`])]);
   const pinOk = Object.entries(PINNED).every(([k, xs]) => J([...(CONTRACT[k] || [])].sort()) === J([...xs].sort()));
-  ok(['hosts-unknown', 'hosts-known-always', 'config-reads', 'late'].every((n) => n in V) && FX.v === 2 && pinOk && !shapeBad.length, `the fixture scripts/fixtures/vault-run-card-facts.json (the SAME bytes as lane vault-agent-own's — r23 0cc421d4, v 2; int-C diffs them): its variants (hosts-unknown / hosts-known-always / config-reads / late), each {${KEYS.join(', ')}}, every reason a code of its closed tables (\`codes\` = the contract's lists), a secret {name, entry, ref, as}, a path home-relative`, { shapeBad, codes: FX.codes });
+  ok(gateOf(['hosts-unknown', 'hosts-known-always', 'config-reads', 'late'].every((n) => n in V)) && FX.v === 2 && gateOf(pinOk) && !shapeBad.length, `the fixture scripts/fixtures/vault-run-card-facts.json (the SAME bytes as lane vault-agent-own's — r23 0cc421d4, v 2; int-C diffs them): its variants (hosts-unknown / hosts-known-always / config-reads / late), each {${KEYS.join(', ')}}, every reason a code of its closed tables (\`codes\` = the contract's lists), a secret {name, entry, ref, as}, a path home-relative`, { shapeBad, codes: FX.codes });
   const tables = { always: FA.RUN_ALWAYS_WHY, hosts: FA.RUN_HOSTS_WHY, masking: FA.RUN_MASKING, shape: FA.RUN_SHAPE };
   const cover = Object.entries(tables).map(([k, tb]) => [k, J(Object.keys(tb || {}).sort()) === J([...CONTRACT[k]].sort()), Object.values(tb || {}).filter((w) => !(w in DICT.zh) || !(w in DICT.ja))]);
-  ok(cover.every(([, same, miss]) => same && !miss.length), 'EVERY CODE HAS ITS WORDS: the client\'s tables (runCardOf) name exactly the contract\'s closed lists — always.why ×8, hosts.why ×3, masking ×1, shape ×2 — each with an en key and its zh + ja entries', cover);
+  ok(verdictOf(cover.every(([, same, miss]) => same && !miss.length)), 'EVERY CODE HAS ITS WORDS: the client\'s tables (runCardOf) name exactly the contract\'s closed lists — always.why ×8, hosts.why ×3, masking ×1, shape ×2 — each with an en key and its zh + ja entries', cover);
   // (b) THE RENDER: the row (the tray, the mini inbox, the chat card — ONE renderer) and its model, in three languages
   const run = (facts, x = {}) => ({ id: 'ut-run0000001', sessionKey: 'claude:c-ops', sessionName: 'ops', text: 'ops wants to run a command with a stored secret', detail: 'Program: … (the old clients\' prose)', status: 'open', urgency: 'urgent', kind: 'action', origin: 'vault', by: 'agent', createdAt: Date.now() - 5e3, expiresAt: Date.now() + 55e3, action: { type: 'vault-run-ask', askId: 'e'.repeat(32), always: !!(facts && facts.always && facts.always.offered), tool: 'x' }, ...(facts ? { facts } : {}), ...x });
   const rowHtml = (it, t, resolved = false) => ROW3.renderRow({ item: it, resolved, band: 1, ...(resolved ? { tail: true } : {}) }, { ...rctx3, t }).innerHTML;
@@ -1168,31 +1168,31 @@ try {
     }
   }
   const z1 = look['zh/hosts-unknown'], z2 = look['zh/hosts-known-always'], z3 = look['zh/config-reads'], W1 = V['hosts-unknown'].who, D3 = V['config-reads'].always.directive;
-  ok(!!z1 && z1.headline === `${W1} 想用「Router 账号」运行 router-api.sh` && z1.order && z1.rows === 4 && z1.first === 'hosts' && z1.warn === 'hosts' && J(z1.answers) === J(['once', 'deny']) && z1.primary && z1.hint === '不提供「总是允许」：发往何处未知' && z1.bodyClean && z1.foldHas,
+  ok(!!z1 && z1.headline === `${W1} 想用「Router 账号」运行 router-api.sh` && gateOf(z1.order) && z1.rows === 4 && z1.first === 'hosts' && z1.warn === 'hosts' && J(z1.answers) === J(['once', 'deny']) && gateOf(z1.primary) && z1.hint === '不提供「总是允许」：发往何处未知' && gateOf(z1.bodyClean) && verdictOf(z1.foldHas),
     `the owner's card, zh: the headline «${W1} 想用「Router 账号」运行 router-api.sh» → the command in its own box → 4 fact rows, «发往» FIRST in the warning accent → 允许一次 (the primary accent) · 拒绝 with «不提供「总是允许」：发往何处未知» in the same row → «技术细节» holding the references, the full path, the masking sentence; the body holds none of them`, z1);
-  ok(!!z2 && J(z2.answers) === J(['once', 'always', 'deny']) && z2.hint === '' && z2.warn === null && !!z3 && z3.hint === `不提供「总是允许」：它会读取一个本卡片无法显示的配置文件|${D3}|` && z3.warn === 'hosts' && z3.foldHas,
+  ok(!!z2 && J(z2.answers) === J(['once', 'always', 'deny']) && z2.hint === '' && z2.warn === null && !!z3 && z3.hint === `不提供「总是允许」：它会读取一个本卡片无法显示的配置文件|${D3}|` && z3.warn === 'hosts' && verdictOf(z3.foldHas),
     'the other two variants: hosts known + «Always» offered ⇒ three verbs, no hint, nothing marked; config-reads ⇒ the hint names the reason and its directive (monospace), «发往» (its config decides) marked, the template in the fold', { z2, z3 });
   const l3 = ['en', 'ja'].map((l) => look[`${l}/hosts-unknown`]);
-  ok(l3.every((x) => x && x.order && x.rows === 4 && x.warn === 'hosts' && x.bodyClean && x.foldHas) && l3[0].headline === `${W1} wants to run router-api.sh with “Router 账号”` && l3[1].headline === `${W1} が「Router 账号」を使って router-api.sh を実行しようとしています` && l3[0].hint === 'No «Always»: where it sends what it reads is unknown',
+  ok(gateOf(l3.every((x) => x && x.order && x.rows === 4 && x.warn === 'hosts' && x.bodyClean && x.foldHas)) && l3[0].headline === `${W1} wants to run router-api.sh with “Router 账号”` && l3[1].headline === `${W1} が「Router 账号」を使って router-api.sh を実行しようとしています` && l3[0].hint === 'No «Always»: where it sends what it reads is unknown',
     'en / ja: the same order, the same marks, their own words', l3.map((x) => x && { headline: x.headline, hint: x.hint }));
   ok(missed.size === 0, `every word the card said in zh / ja was in its dictionary (no English fell through)`, [...missed]);
   // (c) A RECORD WITHOUT FACTS (an older door) renders today's prose UNCHANGED — the base's bytes, pinned
   const legacy = run(null, { detail: 'Program: /usr/bin/curl\nHosts: api.example.com' });
   const lh = rowHtml(legacy, tt3);
   const BASE_BODY = `<div class="ut-proposal-plan">Program: /usr/bin/curl\nHosts: api.example.com</div><div class="ut-exit-note">The output is scrubbed of the secret&#39;s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.</div><div class="ut-exit-answer ut-hub-answer"><button type="button" class="ut-act ut-action-exit ut-exit-allow ut-hub-once" data-answer="once">Allow once</button><button type="button" class="ut-act ut-action-exit ut-exit-deny ut-hub-deny" data-answer="deny">Deny</button></div>`;
-  ok(lh.includes(`<div class="ut-text">${legacy.text}</div>`) && lh.includes(BASE_BODY) && !/ut-run/.test(lh), 'a record WITHOUT `facts` (an older door) draws today\'s words and prose byte for byte (98b6fdf7\'s), no facts card', lh.slice(0, 600));
+  ok(gateOf(lh.includes(`<div class="ut-text">${legacy.text}</div>`)) && gateOf(lh.includes(BASE_BODY)) && !/ut-run/.test(lh), 'a record WITHOUT `facts` (an older door) draws today\'s words and prose byte for byte (98b6fdf7\'s), no facts card', lh.slice(0, 600));
   const RED_PROSE = facts1 ? rowHtml(run(V['hosts-unknown'], { detail: 'Program: ~/workspace/ops/acme-net/router-api.sh — in a folder an agent can write' }), tt3) : '';
-  ok(facts1 && !RED_PROSE.includes('Program: ') && RED_PROSE.includes('ut-run-cmd'), 'RED CONTROL (98b6fdf7 has no facts renderer): a record WITH facts never shows the prose — on the base it is the prose wall', facts1 ? 'facts drawn' : 'ROW3.runFactsHtml missing — the base draws the prose');
+  ok(gateOf(facts1) && !RED_PROSE.includes('Program: ') && verdictOf(RED_PROSE.includes('ut-run-cmd')), 'RED CONTROL (98b6fdf7 has no facts renderer): a record WITH facts never shows the prose — on the base it is the prose wall', facts1 ? 'facts drawn' : 'ROW3.runFactsHtml missing — the base draws the prose');
   // (d) codes the client has no words for: monospace, never a sentence; peer words escaped
   const odd = run({ ...V['hosts-unknown'], who: '<img src=x onerror=alert(1)>', cmd: '</pre><script>alert(1)</script>', secrets: [{ name: 'a <b>bold</b> · x', ref: 'vault://secrets/secret:k1/secret', as: { kind: 'pipe', name: 'Z' } }], hosts: { known: false, list: [], why: 'quantum-route' }, always: { offered: false, why: 'moon-phase', directive: null } });
   const oh = facts1 ? rowHtml(odd, tt3) : '';
-  ok(facts1 && /<code class="ut-run-code">moon-phase<\/code>/.test(oh) && /<code class="ut-run-code">quantum-route<\/code>/.test(oh) && /<code class="ut-run-code">pipe<\/code>/.test(oh) && !/<img src=x|<script>|<b>bold/.test(oh) && oh.includes('&lt;img src=x'),
+  ok(gateOf(facts1) && gateOf(/<code class="ut-run-code">moon-phase<\/code>/.test(oh)) && gateOf(/<code class="ut-run-code">quantum-route<\/code>/.test(oh)) && gateOf(/<code class="ut-run-code">pipe<\/code>/.test(oh)) && !/<img src=x|<script>|<b>bold/.test(oh) && verdictOf(oh.includes('&lt;img src=x')),
     'a code the client has no words for is drawn monospace (always.why, hosts.why, as.kind) — never a sentence; a name, a command, `who` escaped', oh.slice(0, 300));
   // (e) the stress shapes: a 300-char command, 4 entries, 3 hosts, an entry name of 40 CJK characters — nothing dropped
   const big = '账'.repeat(40);
   const stress = run({ ...V['hosts-known-always'], cmd: './x.sh ' + 'a1b2c3d4'.repeat(37), secrets: [big, 'B', 'C', 'D'].map((n, k) => ({ name: `${n} · f`, ref: `vault://secrets/secret:k${k}/secret`, as: { kind: 'env', name: `V${k}` } })), hosts: { known: true, list: ['a.example.com:443', 'b.example.com', '10.0.0.7:8443'] } });
   const sv = FA.runCardOf ? FA.runCardOf(stress, { t: tt3 }) : null;
-  ok(!!sv && sv.cmd.length === 303 && sv.rows.length === 4 && sv.rows.find((r) => r.key === 'secrets').lines.length === 4 && sv.rows.find((r) => r.key === 'hosts').lines[0].filter((x) => x.mono).length === 3 && sv.headline.includes(big),
+  ok(!!sv && sv.cmd.length === 303 && sv.rows.length === 4 && sv.rows.find((r) => r.key === 'secrets').lines.length === 4 && sv.rows.find((r) => r.key === 'hosts').lines[0].filter((x) => x.mono).length === 3 && verdictOf(sv.headline.includes(big)),
     'the stress shapes keep every fact: the 300-char command whole, 4 entries on 4 lines, 3 hosts, the 40-character name (the chrome leg LOOKS at it at 390 px)', sv && { cmd: sv.cmd.length, rows: sv.rows.map((r) => r.key + ':' + r.lines.length) });
   // (f) A CARD WITH A DEADLINE SHOWS IT (addendum B) — a fake clock at +0 / +50 / +61 s; the late run card (addendum C)
   const T0 = Date.now(), DAY = 24 * 3600e3;
@@ -1201,7 +1201,7 @@ try {
   const clock = [0, 50, 61].map((s) => { const d = dl(ask('vault-run-ask'), s); return d && [d.state, d.warn, d.text]; });
   const hub61 = dl(ask('hub-act-ask'), 61), lateMark = dl(ask('vault-run-ask', { expiresAt: T0 + 86400e3, action: { type: 'vault-run-ask', askId: 'f'.repeat(32), late: true } }), 61), wake = dl(ask('channel-watch-request', { expiresAt: T0 + 7 * DAY }), 0), notice = dl(ask('vault-run-ask', { kind: 'notice' }), 0);
   const DUE = '按服务器时间已到期 — 等服务器确认';
-  ok(J(clock) === J([['live', false, '60 秒内有效 · 按服务器时间还剩 60 秒'], ['live', true, '60 秒内有效 · 按服务器时间还剩 10 秒'], ['due', true, DUE]]) && hub61 && hub61.state === 'due' && hub61.text === DUE && lateMark && lateMark.state === 'late' && lateMark.text === '已超时 — agent 的命令被拒绝；现在允许 = 它下次运行这条命令时直接放行（1 次）' && wake === null && notice === null,
+  ok(J(clock) === J([['live', false, '60 秒内有效 · 按服务器时间还剩 60 秒'], ['live', true, '60 秒内有效 · 按服务器时间还剩 10 秒'], ['due', true, DUE]]) && gateOf(hub61) && hub61.state === 'due' && hub61.text === DUE && gateOf(lateMark) && lateMark.state === 'late' && lateMark.text === '已超时 — agent 的命令被拒绝；现在允许 = 它下次运行这条命令时直接放行（1 次）' && wake === null && notice === null,
     'THE FAKE CLOCK (zh, the HUB\'s time — r8): +0 s «60 秒内有效 · 按服务器时间还剩 60 秒» · +50 s the warning accent «还剩 10 秒» · +61 s with no settle yet «按服务器时间已到期 — 等服务器确认» (the run card and a hub act alike — the client never infers «late» or «timed out» by its own clock); the server\'s `late` mark reads late whatever the clock; the 7-day wake ask keeps «expires in 7 d» (no ticker), a notice its own window', { clock, hub61, lateMark, wake, notice });
   // B-ba7b («还剩 61 秒» at +0, 1 run in 5; red then green on the .390 master heavy job): the item's two stamps, the hub-clock note
   // (its caller's Date.now() and its own default) and the render each READ THE CLOCK — a millisecond edge between them put the
@@ -1217,13 +1217,13 @@ try {
     `THE CLOCK FALLBACK (r9): no snapshot has said the hub's time yet ⇒ «${dev0.deadline}» / «${dev61.deadline}» — never «按服务器时间» on the device's own clock (db19b0a2: «按服务器时间还剩 60 秒»), the answers kept`, J({ dev0, dev61 }));
   if (typeof ROW3.noteHubClock === 'function') ROW3.noteHubClock(Date.now());   // a snapshot said the hub's time (this box's — offset 0)
   const d0 = drawn(at(0)), d50 = drawn(at(50)), d61 = drawn(at(61)), h61 = drawn(at(61, 'hub-act-ask')), l61 = drawn(at(61, 'vault-run-ask', { expiresAt: Date.now() + 86400e3, action: { type: 'vault-run-ask', askId: 'f'.repeat(32), always: true, late: true } }));
-  ok(d0.deadline === '60 秒内有效 · 按服务器时间还剩 60 秒' && !d0.warn && d50.warn && /还剩 10 秒/.test(d50.deadline) && d61.deadline === DUE && !d61.timedOut && J(d61.answers) === J(['once', 'deny']) && !h61.timedOut && h61.deadline === DUE && h61.answers.includes('once') && h61.answers.includes('deny') && /^已超时/.test(l61.deadline || '') && J(l61.answers) === J(['once', 'deny']),
+  ok(d0.deadline === '60 秒内有效 · 按服务器时间还剩 60 秒' && !d0.warn && gateOf(d50.warn) && gateOf(/还剩 10 秒/.test(d50.deadline)) && d61.deadline === DUE && !d61.timedOut && J(d61.answers) === J(['once', 'deny']) && !h61.timedOut && h61.deadline === DUE && gateOf(h61.answers.includes('once')) && gateOf(h61.answers.includes('deny')) && gateOf(/^已超时/.test(l61.deadline || '')) && J(l61.answers) === J(['once', 'deny']),
     'THE ROW (the tray, the chat card): the line under the question at +0 / +50 s (the accent under 15 s); at +61 s with no settle the answers STAY on the run card and a hub act alike (r8: only the producer\'s settle withdraws them — no `.ut-timed-out`); a card the server marked LATE offers 允许一次 / 拒绝 ONLY — never «Always», even when its filed card offered it (r8: its door refuses it)', { d0, d50, d61, h61, l61 });
   // the ticker: ONE page interval re-reads every line (a stub page: two lines, the run card's and a hub act's)
   const mkLine = (it) => { const ds = {}; const m = /data-deadline-at="(\d+)" data-deadline-from="(\d+)"/.exec(rowHtml(it, tt3)) || []; Object.assign(ds, { deadlineAt: m[1], deadlineFrom: m[2], state: 'live' }); const cl = new Set(); return { dataset: ds, textContent: '', classList: { toggle: (c, on) => (on ? cl.add(c) : cl.delete(c)), has: (c) => cl.has(c) }, closest: () => ({ classList: { toggle: (c, on) => (on ? cl.add('row:' + c) : cl.delete('row:' + c)) } }), cl }; };
   const lines = [mkLine(at(0)), mkLine(at(0, 'hub-act-ask'))];
   const counting = typeof ROW3.tickDeadlines === 'function' ? [ROW3.tickDeadlines({ querySelectorAll: () => lines }, Date.now() + 50e3), ROW3.tickDeadlines({ querySelectorAll: () => lines }, Date.now() + 61e3)] : null;
-  ok(!!counting && J(counting) === J([2, 0]) && lines.every((x) => x.dataset.state === 'due' && ![...x.cl].some((c) => /timed-out/.test(c)) && x.cl.has('ut-deadline-warn')),
+  ok(!!counting && J(counting) === J([2, 0]) && verdictOf(lines.every((x) => x.dataset.state === 'due' && ![...x.cl].some((c) => /timed-out/.test(c)) && x.cl.has('ut-deadline-warn'))),
     'THE TICKER: at +50 s both lines count (2), at +61 s none (0 — the interval stops itself); both lines say «… 已到期 — 等服务器确认» and NO row loses its answers (r8)', counting && { counting, states: lines.map((x) => x.dataset.state), text: lines.map((x) => x.textContent), cls: lines.map((x) => [...x.cl]) });
   // r8 A CLOCK IS THE HUB'S: a device 61 s FAST (the hub's own `now` on the For-you read sets the tab's offset) still counts the
   // live ask from 60; a device 45 s SLOW reads the hub's end, not its own (RED: 2a5e9ce8 read Date.now() — the fast device drew
@@ -1239,7 +1239,7 @@ try {
     ROW3.noteHubClock(Date.now(), Date.now());
     return { fast, slow, slowState: slowLine.dataset.state };
   })() : null;
-  ok(!!skew && /按服务器时间还剩 (60|59) 秒/.test(skew.fast.deadline || '') && skew.fast.answers.includes('once') && skew.slow === 0 && skew.slowState === 'due',
+  ok(!!skew && gateOf(/按服务器时间还剩 (60|59) 秒/.test(skew.fast.deadline || '')) && gateOf(skew.fast.answers.includes('once')) && skew.slow === 0 && skew.slowState === 'due',
     'r8 A CLOCK IS THE HUB\'S: a device 61 s ahead of the hub still shows a live 60 s ask «按服务器时间还剩 60 秒» with its answers; a device 45 s behind reads the hub\'s end (the line stops counting) — the countdown is advisory and says «按服务器时间»', skew);
   Date.now = REAL_DATE_NOW_15; // B-ba7b: the held clock ends with the row legs (and in ⑮'s finally, whatever throws)
   // (g) its END stays, in words: an ask nobody answered (the server's 'ask-expired') keeps its place «timed out — …»; a LATE
@@ -1252,7 +1252,7 @@ try {
   // time they carry is built from that instant by the page's own clockWords, in the run's zone (never a literal pattern)
   const words = (it, l, now = T0 + 91e3) => { const was = Date.now; Date.now = () => now; try { return { status: ROW3.statusWords(it, T[l]), by: ROW3.resolvedByText(it.resolvedBy, T[l], it), card: FA.decisionCard(it, { t: T[l], now }).stamp }; } finally { Date.now = was; } };
   const e3 = ['en', 'zh', 'ja'].map((l) => words(ended, l)), la = words(lateAllow, 'zh'), late24 = words({ ...lateAllow, resolvedBy: 'expired', resolvedFact: null }, 'zh');
-  ok(e3[0].status === 'timed out — the agent\'s command was refused (it may ask again)' && e3[1].status === '已超时 — agent 的命令被拒绝（它可能会再问）' && /^タイムアウト/.test(e3[2].status) && e3.every((x) => x.by === '' && x.card === x.status) && la.card === '你已放行 1 次 · 等它重跑 · ' + FA.clockWords(T0 + 90e3, T0 + 91e3) && la.by === la.card && /^已过期/.test(late24.card),
+  ok(e3[0].status === 'timed out — the agent\'s command was refused (it may ask again)' && e3[1].status === '已超时 — agent 的命令被拒绝（它可能会再问）' && gateOf(/^タイムアウト/.test(e3[2].status)) && gateOf(e3.every((x) => x.by === '' && x.card === x.status)) && la.card === '你已放行 1 次 · 等它重跑 · ' + FA.clockWords(T0 + 90e3, T0 + 91e3) && la.by === la.card && verdictOf(/^已过期/.test(late24.card)),
     'ITS END STAYS IN WORDS — an ask nobody answered (\'ask-expired\') reads «已超时 — agent 的命令被拒绝（它可能会再问）» on the row, the window and the chat card (en / ja too; RED: the base said «expired (no answer in 60 s)» — the raw outcome\'s words); a late Allow «你已放行 1 次 · 等它重跑 · HH:MM» (the person mark); the late card\'s 24 h end «已过期»', { e3, la, late24 });
   // THE MIDNIGHT EDGE, in the run's own zone: a late Allow 30 s before the local midnight after T0, read 30 s after it — the row and
   // the card both carry its DATED time («M/D HH:MM», clockWords of that instant against that now); RED control (the base's road: the
@@ -1261,7 +1261,7 @@ try {
     const MID = (() => { const m = new Date(T0); m.setHours(24, 0, 0, 0); return m.getTime(); })();
     const edge = { ...lateAllow, resolvedAt: MID - 30e3, resolvedFact: { ...lateAllow.resolvedFact, decidedAt: MID - 30e3 } };
     const le = words(edge, 'zh', MID + 30e3), want = '你已放行 1 次 · 等它重跑 · ' + FA.clockWords(MID - 30e3, MID + 30e3);
-    ok(le.by === want && le.card === want && /\d+\/\d+ \d\d:\d\d$/.test(want), `the midnight edge in the run's zone: the late Allow 30 s before midnight, read 30 s after, says its DATED time on the row and the card alike («${want}»)`, le);
+    ok(le.by === want && le.card === want && verdictOf(/\d+\/\d+ \d\d:\d\d$/.test(want)), `the midnight edge in the run's zone: the late Allow 30 s before midnight, read 30 s after, says its DATED time on the row and the card alike («${want}»)`, le);
     const dayOf = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
     const otherBy = words(edge, 'zh', MID - 60e3).by;   // the base's road: the row read on a clock that is not the card's
     ok(dayOf(MID - 60e3) !== dayOf(MID + 30e3) && dayOf(MID - 30e3) === dayOf(MID - 60e3), 'RED control, its plant first: the row\'s clock and the card\'s fall on different local days, the instant on the row\'s');
@@ -1290,14 +1290,14 @@ try {
     const kept0 = J(m.get(m.snapshot().open.find((i) => i.text === 'run 2973').id).facts);
     const again = m.add('claude:r8-2973', { text: 'run 2973', origin: 'vault', action: { type: 'vault-run-ask', askId: 'a'.repeat(31) + '3' }, facts: JSON.parse(kept0) });   // the door's own clip at the same bound
     const odd = [m.add('claude:r8-odd1', { text: 'odd 1', origin: 'vault', action: { type: 'vault-run-ask', askId: 'b'.repeat(32) }, facts: 'not an object' }), m.add('claude:r8-odd2', { text: 'odd 2', origin: 'vault', action: { type: 'vault-run-ask', askId: 'c'.repeat(32) }, facts: { ...base8, secrets: Array.from({ length: 64 }, (_, k) => ({ name: 'n'.repeat(400) + k, entry: 'e' + k, ref: 'vault://secrets/secret:k/secret', as: { kind: 'env', name: 'V' + k } })) } })];
-    ok(J(m.get(again.id).facts) === kept0 && !again.factsCut && odd.every((r) => !!r.id) && odd.map((r) => (r.factsCut || []).join(',')).join('|') === 'facts|facts' && J(odd.map((r) => m.get(r.id).facts)) === J([{ dropped: 'not-an-object', cut: ['facts'] }, { dropped: 'too-large', cut: ['facts'] }]),
+    ok(J(m.get(again.id).facts) === kept0 && !again.factsCut && gateOf(odd.every((r) => !!r.id)) && odd.map((r) => (r.factsCut || []).join(',')).join('|') === 'facts|facts' && J(odd.map((r) => m.get(r.id).facts)) === J([{ dropped: 'not-an-object', cut: ['facts'] }, { dropped: 'too-large', cut: ['facts'] }]),
       'idempotent (facts already cut re-file as they are, nothing re-cut); a facts that is no object, or past 24 KB as a whole, is DROPPED and said (`factsCut: [facts]`) — the item still filed with a STUB that says why (r9: {dropped, cut} — no `v`, so the card draws its prose)', odd.map((r) => [r.factsCut, m.get(r.id).facts]));
     // r9 (THE STORE SAYS WHEN IT DROPS — the acceptance: a 24 KB drop said nowhere, a non-text cmd dropped silently, a bad key cut as
     // «» and the re-file losing that cut): every drop NAMED — on the card, in the fold, in the journal — and filing twice gives equal cuts
     const big = m.get(odd[1].id), bigHtml = ROW3.renderRow({ item: big, resolved: false, band: 1 }, { ...rctx3, t: Z }).innerHTML;
     const shapes = { cmdObject: { ...base8, cmd: { not: 'text' } }, snake: { ...base8, snake_case: 1 }, fields40: { ...base8, ...Object.fromEntries(Array.from({ length: 40 }, (_, k) => ['f' + k, 1])) } };
     const twice = Object.entries(shapes).map(([k, f], j) => { const r1 = m.add('claude:r9-' + k, { text: 'r9 ' + k, origin: 'vault', action: { type: 'vault-run-ask', askId: String(j).repeat(32) }, facts: f }); const f1 = m.get(r1.id).facts; const r2 = m.add('claude:r9b-' + k, { text: 'r9b ' + k, origin: 'vault', action: { type: 'vault-run-ask', askId: String(j + 5).repeat(32) }, facts: JSON.parse(J(f1)) }); return [k, f1.cut || null, m.get(r2.id).facts.cut || null]; });
-    ok(!FA.runCardOf(big, { t: Z }) && /<div class="ut-run-cut ut-facts-dropped">事实太大，未保存 — 只显示文字<\/div>/.test(bigHtml)
+    ok(!FA.runCardOf(big, { t: Z }) && gateOf(/<div class="ut-run-cut ut-facts-dropped">事实太大，未保存 — 只显示文字<\/div>/.test(bigHtml))
       && J(twice.slice(0, 2)) === J([['cmdObject', ['cmd'], ['cmd']], ['snake', ['snake_case'], ['snake_case']]])
       && J(twice[2][1]) === J(Array.from({ length: 16 }, (_, k) => 'f' + (32 - Object.keys(base8).length + k))) && J(twice[2][2]) === J(twice[2][1]),   // the 33rd field on, each by name (the list's own bound: 16)
       `THE STORE SAYS WHEN IT DROPS (r9): a facts past 24 KB ⇒ the card's line «事实太大，未保存 — 只显示文字» above its text; a non-text cmd ⇒ cut «cmd»; a bad key / a 33rd field ⇒ cut by its OWN name (never «»); filing twice ⇒ equal cuts (db19b0a2: said nowhere; «cmd» silent; cut [""], the re-file losing it)`, J({ twice, line: (/ut-facts-dropped">([^<]*)</.exec(bigHtml) || [])[1] || null }));
@@ -1306,7 +1306,7 @@ try {
     const h = ROW3.runFactsHtml(it, Z);
     const body = (/<pre class="ut-run-cmd">([^<]*)<\/pre>/.exec(h) || [])[1] || '', whole = (/<pre class="ut-run-cmd ut-run-cmd-full">([^<]*)<\/pre>/.exec(h) || [])[1] || '';
     const cutLine = (/<div class="ut-run-cut">([^<]*)</.exec(h) || [])[1] || null;
-    ok(body.length === 2001 && body.endsWith('…') && whole.length === 2973 && cutLine === '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。' && h.indexOf('ut-run-cut') < h.indexOf('ut-run-facts') && h.indexOf('ut-run-cmd-full') > h.indexOf('ut-run-fold'),
+    ok(body.length === 2001 && gateOf(body.endsWith('…')) && whole.length === 2973 && cutLine === '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。' && h.indexOf('ut-run-cut') < h.indexOf('ut-run-facts') && h.indexOf('ut-run-cmd-full') > h.indexOf('ut-run-fold'),
       `the card: the body's box holds the first 2 000 drawn with «…»; under it «${cutLine}»; the «技术细节» fold holds the whole 2 973 reassembled (its own scrolling box)`, J({ body: body.length, whole: whole.length, cutLine }));
     // r8 — THE DOOR'S v 2 (vault-agent-own r23 0cc421d4): every fixture variant files BYTE-IDENTICAL; a long command in its chunked
     // fold too; its template text (`textFull`) reassembled, its `reason` and `env` in the fold; a late card after a RESTART
@@ -1320,11 +1320,11 @@ try {
     const r2 = m.add('claude:r8-v2-long', { text: 'v2 long', origin: 'vault', action: { type: 'vault-run-ask', askId: 'c'.repeat(32) }, facts: long2 });
     const it2 = m.get(r2.id), h2 = ROW3.runFactsHtml(it2, Z);
     const pres = [...h2.matchAll(/<pre class="ut-run-cmd ut-run-cmd-full">([^<]*)<\/pre>/g)].map((x) => x[1].length);
-    ok(same.every(Boolean) && J(it2.facts) === J(long2) && J(pres) === J([2973, T2.length]) && h2.includes('为什么要问') && h2.includes('它用到了另一个对话存入的密钥') && h2.includes('是为 auth.internal.example 生成的 — 这次运行把它发往 api.external.example') && h2.includes('API_BASE=https://collector.example.net/x'),
+    ok(gateOf(same.every(Boolean)) && J(it2.facts) === J(long2) && J(pres) === J([2973, T2.length]) && gateOf(h2.includes('为什么要问')) && gateOf(h2.includes('它用到了另一个对话存入的密钥')) && gateOf(h2.includes('是为 auth.internal.example 生成的 — 这次运行把它发往 api.external.example')) && verdictOf(h2.includes('API_BASE=https://collector.example.net/x')),
       `THE DOOR'S v 2 (r23): its four fixture variants and a long command in its chunked fold file BYTE-IDENTICAL; the fold reassembles the whole command (2 973) and the template's text (${T2.length}), says WHY IT ASKS and the plain env`, J({ same, pres }));
     const lost = { ...it2, facts: FX8.variants.find((v) => v.name === 'late').facts, action: { type: 'vault-run-ask', askId: 'c'.repeat(32), always: true, late: true, lateAt: Date.now(), restartLost: true }, expiresAt: Date.now() + 86400e3, createdAt: Date.now() - 61e3 };
     const hl = ROW3.renderRow({ item: lost, resolved: false, band: 1 }, { ...rctx3, t: Z }).innerHTML;
-    ok(J([...hl.matchAll(/data-answer="(\w+)"/g)].map((x) => x[1])) === J(['deny']) && hl.includes('之后服务器重启过，现在允许也不会放行任何东西') && /data-deadline-lost="1"/.test(hl),
+    ok(J([...hl.matchAll(/data-answer="(\w+)"/g)].map((x) => x[1])) === J(['deny']) && gateOf(hl.includes('之后服务器重启过，现在允许也不会放行任何东西')) && verdictOf(/data-deadline-lost="1"/.test(hl)),
       'a LATE card after a restart (r23 `action.restartLost` — the door would mint no pass) says «…之后服务器重启过，现在允许也不会放行任何东西 — 它下次运行时会再问» and offers 拒绝 alone (a card never offers what its door would not do)', hl.slice(0, 300));
   } finally { done(); }
 } catch (e) { ok(false, '⑯ (a) threw on this tree: ' + ((e && e.message) || e)); }
@@ -1344,7 +1344,7 @@ try {
       const ruled = { ...LS.item, status: 'done', resolvedBy: st.ruled.by, resolvedFact: st.ruled.fact, resolvedAt: Date.now() };
       const w = (x) => [ROW3.statusWords(x, Z), ROW3.resolvedByText(x.resolvedBy, Z, x), FA.settledWords(x, Z), typeof ROW3.endCodeOf === 'function' ? ROW3.endCodeOf(x) : '(no endCodeOf)'];
       look8.push({ name: st.name, went: went.length, kept: [kept.status, kept.resolvedBy], words: w(kept), raw: w(raw), ruledStamp: (FA.decidedStamp(ruled, { t: Z }) || {}).text || null, ruledWords: FA.settledWords(ruled, Z) });
-      ok(went.length === 1 && kept.status === 'done' && kept.resolvedBy === end && w(kept)[1] === words && w(kept)[2] === words && w(raw)[1] === words && w(raw)[2] === words && !w(raw)[3] && (stampRe ? stampRe.test((FA.decidedStamp(ruled, { t: Z }) || {}).text || '') : FA.settledWords(ruled, Z) === words),
+      ok(went.length === 1 && kept.status === 'done' && kept.resolvedBy === end && w(kept)[1] === words && w(kept)[2] === words && w(raw)[1] === words && w(raw)[2] === words && !w(raw)[3] && (stampRe ? verdictOf(stampRe.test((FA.decidedStamp(ruled, { t: Z }) || {}).text || '')) : FA.settledWords(ruled, Z) === words),
         `${st.name}: the door's settle (by «${st.by}», outcome «${st.fact.outcome}») CLOSES the card as «${end}» — «${words}» — and the same record kept unmapped reads the same; the ruled shape ${stampRe ? 'stamps «by you · HH:MM»' : 'reads the same'} (2a5e9ce8: the store skipped it — the card stayed open with its buttons after the door had answered)`, J(look8[look8.length - 1]));
     } finally { s0.done(); }
   }
@@ -1358,7 +1358,7 @@ try {
   const s1 = storeWith(FA);
   let left = null;
   try { const r = s1.m.add(LS.item.sessionKey, { text: LS.item.text, origin: 'vault', action: { ...LS.item.action } }); s1.m.resolveAnswered([r.id], 'user', { outcome: 'moon-phase' }); left = s1.m.get(r.id).status; } finally { console.warn = cw; s1.done(); }
-  ok(ROW3.statusWords(unk, Z) === '结果未知' && ROW3.endCodeOf(unk) === 'user' && ROW3.resolvedByText('user', Z, unk) === '' && FA.settledWords(unk, Z) === '结果未知' && /结果未知 · <code class="ut-end-code">user<\/code>/.test(meta) && !/完成/.test(meta) && left === 'open' && warns.some((x) => /is not one of its row's ends — the item stays open \(decision_row\)/.test(x)),
+  ok(ROW3.statusWords(unk, Z) === '结果未知' && ROW3.endCodeOf(unk) === 'user' && ROW3.resolvedByText('user', Z, unk) === '' && FA.settledWords(unk, Z) === '结果未知' && gateOf(/结果未知 · <code class="ut-end-code">user<\/code>/.test(meta)) && !/完成/.test(meta) && left === 'open' && verdictOf(warns.some((x) => /is not one of its row's ends — the item stays open \(decision_row\)/.test(x))),
     'an end this client cannot classify (resolvedBy «user», an outcome no table names) reads «结果未知 · <code>user</code>» on the row (and the chat card / the window through endCodeOf) — never «完成», never the raw word as a sentence; the store refuses that settle and SAYS so in its journal', J({ meta: (/<div class="ut-meta">(.*?)<\/div>/.exec(meta) || [])[1], left, warns }));
 } catch (e) { ok(false, '⑯ (c) threw on this tree: ' + ((e && e.message) || e)); }
 try {
@@ -1384,13 +1384,13 @@ try {
     const va = FA.runCardOf(a, { t: Z }), vb = FA.runCardOf(b, { t: Z });
     const foldA = va && va.fold ? (va.fold.find((x) => x.cmd) || {}).label : (JSON.stringify(va || {}).match(/"label":"(命令（前 \d+ 个字符）|完整命令)"/) || [])[1];
     ok(whole.length === 5037 && J((a.facts.cmdFull || []).map((c) => c.length)) === J([2000, 2000, 96]) && J(a.facts.cut) === J(['cmdFull'])
-      && va && va.cut && va.cut.text === '命令超过 4096 个字符，完整命令未保存 — 请在保险库窗口查看运行记录。这里只显示前 2000 个。' && va.cut.n === null && va.cut.whole === false
-      && vb && vb.cut && vb.cut.text === va.cut.text && vb.cut.n === null   // r12: a `cmdLen` no producer emits is no fact — read nowhere
-      && /命令（前 4096 个字符）/.test(JSON.stringify(va)) && !/完整命令在「技术细节」里/.test(JSON.stringify(va)),
+      && gateOf(va) && gateOf(va.cut) && va.cut.text === '命令超过 4096 个字符，完整命令未保存 — 请在保险库窗口查看运行记录。这里只显示前 2000 个。' && va.cut.n === null && va.cut.whole === false
+      && gateOf(vb) && gateOf(vb.cut) && vb.cut.text === va.cut.text && vb.cut.n === null   // r12: a `cmdLen` no producer emits is no fact — read nowhere
+      && gateOf(/命令（前 4096 个字符）/.test(JSON.stringify(va))) && !/完整命令在「技术细节」里/.test(JSON.stringify(va)),
       `(a) A STORE NEVER STATES A LENGTH IT CANNOT PROVE: the fold cut at 4 096 ⇒ «${va && va.cut && va.cut.text}»; a hand-built \`cmdLen\` (r12: no producer emits one) changes nothing; the fold is titled «命令（前 4096 个字符）» (db19b0a2: «命令共 4096 个字符 … 完整命令在「技术细节」里。» — 941 characters nowhere)`, J({ a: va && va.cut, b: vb && vb.cut, foldA }));
     const c = file({}, 3), whole2 = whole.slice(0, 2973), d = m.get(m.add('claude:r9-q4', { text: 'quotes 4', origin: 'vault', action: { type: 'vault-run-ask', askId: '4'.repeat(32) }, facts: { ...base9, cmd: whole2.slice(0, 2000), cmdCut: true, cmdFull: chunks(whole2) } }).id);
     const vd = FA.runCardOf(d, { t: Z });
-    ok(!!c && vd && vd.cut && vd.cut.text === '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。', '(a) CONTROL (green on both trees): a WHOLE fold (nothing cut, no cmdLen) states the chunks\' sum — the r8 line, unchanged', vd && vd.cut);
+    ok(!!c && gateOf(vd) && gateOf(vd.cut) && vd.cut.text === '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。', '(a) CONTROL (green on both trees): a WHOLE fold (nothing cut, no cmdLen) states the chunks\' sum — the r8 line, unchanged', vd && vd.cut);
   } finally { done(); }
 } catch (e) { ok(false, '⑰ (a) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
@@ -1400,7 +1400,7 @@ try {
   const rec = (type, status, by) => ({ id: 'ut-old9' + type.length + status.length + by.length, sessionKey: 'claude:c-a', text: 'an old ask', urgency: 'normal', origin: 'vault', status, resolvedBy: by, resolvedAt: NOW9 - 60e3, createdAt: NOW9 - 120e3, kind: 'action', action: { type, ...(type === 'channel-watch-request' ? { id: 'wr-1' } : { askId: 'a'.repeat(32) }) } });
   const olds = [rec('hub-act-ask', 'dismissed', 'user'), rec('vault-run-ask', 'done', 'user'), rec('channel-watch-request', 'done', 'system')];
   const seen = olds.map((it) => { const h = ROW3.renderRow({ item: it, resolved: true, band: 1, tail: true }, rctx3).innerHTML; return [FA.settledWords(it, tt3), ROW3.statusWords(it, tt3), ROW3.endCodeOf(it), /ut-end-code/.test(h), /outcome unknown/.test(h)]; });
-  ok(J(seen.map((x) => x[0])) === J(['dismissed', 'done', 'done']) && seen.every((x) => !x[2] && !x[3] && !x[4]),
+  ok(J(seen.map((x) => x[0])) === J(['dismissed', 'done', 'done']) && verdictOf(seen.every((x) => !x[2] && !x[3] && !x[4])),
     `(b) AN OLD ✓/✕ KEEPS ITS WORD: pre-law records (resolvedBy user / system, no outcome) read ${seen.map((x) => `«${x[0]}»`).join(' / ')} — never «outcome unknown · user» (db19b0a2); «unknown» stays for an end nobody worded (⑯ (c))`, J(seen));
 } catch (e) { ok(false, '⑰ (b) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
@@ -1411,11 +1411,11 @@ try {
   const it = { id: 'ut-r9-host', sessionKey: 'claude:c1', text: 'run?', status: 'open', kind: 'action', origin: 'vault', createdAt: Date.now(), action: { type: 'vault-run-ask', askId: 'e'.repeat(32) }, facts: v1.facts };
   const why = (t) => JSON.stringify(FA.runCardOf(it, { t }) || {});
   const words = { zh: why(Z), en: why(tt3), ja: why(JA) };
-  ok(!!v1 && !/为 \? 生成|minted for \?|\? 向け/.test(JSON.stringify(words)) && /不属于任何主机/.test(words.zh) && /is tied to no host/.test(words.en) && /どのホストにも紐づいていません/.test(words.ja),
+  ok(!!v1 && !/为 \? 生成|minted for \?|\? 向け/.test(JSON.stringify(words)) && gateOf(/不属于任何主机/.test(words.zh)) && gateOf(/is tied to no host/.test(words.en)) && verdictOf(/どのホストにも紐づいていません/.test(words.ja)),
     '(c) a value minted for NO host (r23 variant 1, forHost null) is worded — «不属于任何主机 …» / «is tied to no host …» / «…どのホストにも紐づいていません …» — never a raw «?»', J({ zh: (words.zh.match(/[^"]*不属于任何主机[^"]*/) || [])[0] || words.zh.slice(0, 200) }));
   const deny = { id: 'ut-r9-deny', sessionKey: 'claude:c1', text: 'wake?', status: 'done', kind: 'action', origin: 'channels', createdAt: Date.now() - 9e4, resolvedAt: Date.now() - 6e4, resolvedBy: 'denied', resolvedFact: { decidedBy: 'person', decidedAt: Date.now() - 6e4 }, action: { type: 'channel-watch-request', id: 'wr-9' } };
   const st = FA.decidedStamp(deny, { t: JA });
-  ok(st && /^あなたが拒否しました · /.test(st.text), `(c) the ja person stamp of a deny says WHO: «${st && st.text}» (was «拒否済み» — pre-existing from r1)`, st);
+  ok(gateOf(st) && verdictOf(/^あなたが拒否しました · /.test(st.text)), `(c) the ja person stamp of a deny says WHO: «${st && st.text}» (was «拒否済み» — pre-existing from r1)`, st);
   // (⑰ (c) DEFECT 2's source pin of src/lib/channel-filter-editor.js + its zh / ja words: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 } catch (e) { ok(false, '⑰ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 
@@ -1440,7 +1440,7 @@ try {
     '(a) the decide route: a held Deliver its rule cannot take now ⇒ 409 `not-in-effect` (who, how many, why); one whose rule is gone ⇒ 409 `rule-gone` — never a 500', J({ a1, a2 }));
   const MAP10 = " || code === 'not-in-effect' || code === 'rule-gone'";
   const red = REAL_SRC.split(MAP10).length === 2 ? await pressHeld(routerFrom(REAL_SRC.replace(MAP10, '')), NIE) : null;
-  ok(red && red.status === 500, 'RED CONTROL: answer3 without the two codes (8b46c196 had neither) — the same press ⇒ HTTP 500', red);
+  ok(gateOf(red) && red.status === 500, 'RED CONTROL: answer3 without the two codes (8b46c196 had neither) — the same press ⇒ HTTP 500', red);
 } catch (e) { ok(false, '⑱ (a) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
   // (b) THE WORDS OF AN END: a held decision ended because its watcher's ACCESS was revoked (the row stands, inert) says so — the
@@ -1472,7 +1472,7 @@ try {
   const cover = Object.entries(tables).map(([k, tb]) => [k, J(Object.keys(tb || {}).sort()) === J([...(CODES[k] || [])].sort()), Object.values(tb || {}).filter((w) => !(w in DICT8.zh) || !(w in JA9))]);
   const fx = JSON.parse(read('scripts/fixtures/vault-run-card-facts.json')).codes;
   const sameAsShared = J([fx.always_why, fx.hosts_why, fx.masking, fx.shape]) === J([LEGS.codes.always, LEGS.codes.hosts, LEGS.codes.masking, LEGS.codes.shape]);
-  ok(Object.keys(CODES).length === 5 && cover.every(([, same, miss]) => same && !miss.length) && sameAsShared && LEGS.variants.length >= 13,
+  ok(Object.keys(CODES).length === 5 && gateOf(cover.every(([, same, miss]) => same && !miss.length)) && gateOf(sameAsShared) && LEGS.variants.length >= 13,
     `(a) THE RENDERER PIN (owed to vault-agent-own): the client's tables name exactly CARD_FACTS_CODES (${VR.CARD_FACTS_CODES ? "this tree's export" : 'the generated copy of the producer\'s export'}) — always ×${CODES.always.length}, hosts ×${CODES.hosts.length}, masking ×1, shape ×2, whyAgain ×${(CODES.whyAgain || []).length} — each with zh + ja (704a0f4c: no whyAgain table)`, cover);
 } catch (e) { ok(false, '⑲ (a) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
@@ -1490,13 +1490,13 @@ try {
     const html = ROW3.runFactsHtml(it, Z);
     ok(J(it.facts) === J(f) && note.valueCut === true && wholeNote.length === 2100 && name.nameCut === true && wholeName.length === 2100
       && !!box && box.label === 'RUN_NOTE（完整的值）' && !!envLine && J(envLine.lines[0]) === J([{ mono: 'RUN_NOTE=' }, { aside: '（值共 2100 个字符 — 卡片上已截短，完整的值在下方）' }])
-      && !!secLine && secLine.lines[0][0].text === wholeName && secLine.lines[0].some((x) => x.aside === '（卡片上已截短 — 这里是完整的）')
-      && v.rows.find((r) => r.key === 'secrets').lines[0][0].text === 'Router 账号' && v.headline.length < 80 && html.includes(`<pre class="ut-run-cmd ut-run-cmd-full">${wholeNote}</pre>`),
+      && !!secLine && secLine.lines[0][0].text === wholeName && gateOf(secLine.lines[0].some((x) => x.aside === '（卡片上已截短 — 这里是完整的）'))
+      && v.rows.find((r) => r.key === 'secrets').lines[0][0].text === 'Router 账号' && v.headline.length < 80 && verdictOf(html.includes(`<pre class="ut-run-cmd ut-run-cmd-full">${wholeNote}</pre>`)),
       `(b) THE FOLDS DRAWN WHOLE: the producer's 2 100-character env value — the env line «RUN_NOTE= ${envLine && envLine.lines[0][1] && envLine.lines[0][1].aside}», its WHOLE in a box of its own «${box && box.label}»; the 2 100-character secret name whole in the fold, the face's headline and secrets row its entry head «Router 账号» (704a0f4c: a 2 000-character value with no marker, the 100 more characters nowhere)`, J({ store: J(it.facts) === J(f), box: !!box, envLine: envLine && envLine.lines, secHead: v && v.rows.find((r) => r.key === 'secrets') }).slice(0, 900));
     const d = m.get(m.add('claude:r11-dir', { text: 'dir', origin: 'vault', action: { type: 'vault-run-ask', askId: '2'.repeat(32) }, facts: LV['directive-long'] }).id);
     const vd = FA.runCardOf(d, { t: tt3 }), dirWhole = LV['directive-long'].always.directiveFull.join('');
     const hintDir = vd && (vd.always.hint.find((x) => x.mono != null) || {}).mono;
-    ok(dirWhole.length > 2000 && !!hintDir && hintDir.length === 2001 && hintDir.endsWith('…') && vd.fold.some((x) => x.label === 'Its config directive (whole)' && x.cmd === dirWhole),
+    ok(dirWhole.length > 2000 && !!hintDir && hintDir.length === 2001 && gateOf(hintDir.endsWith('…')) && verdictOf(vd.fold.some((x) => x.label === 'Its config directive (whole)' && x.cmd === dirWhole)),
       `(b) the «Always» hint's directive past the bound: its clip + «…» beside the buttons (${hintDir && hintDir.length} characters), its WHOLE (${dirWhole.length}) under the fold`, J({ hint: hintDir && hintDir.slice(-12) }));
   } finally { done(); }
 } catch (e) { ok(false, '⑲ (b) threw on this tree: ' + ((e && e.stack) || e)); }
@@ -1511,8 +1511,8 @@ try {
   const html = ROW3.runFactsHtml(runItem(LV['again-env']), Z);
   ok(J(Object.keys(said).sort()) === J([...LEGS.codes.whyAgain].sort()) && words(said['arg-order'].en) === W['arg-order'] && words(said.env.en) === W.env
     && words(said['arg-order'].zh) === '再次询问 — 与你放行过的命令不同：参数顺序不同' && words(said.env.zh) === '再次询问 — 与你放行过的命令不同：环境变量 RUN_TAG 变了' && words(said['arg-space'].ja) === '再確認 — 通したコマンドと違います：引数の間の空白が違います'
-    && Object.values(said).every((x) => !/\[/.test(words(x.zh)) && !/\[/.test(words(x.ja))) && /\[arg-weather\]$/.test(words(odd.again))
-    && html.includes('<div class="ut-run-again">再次询问 — 与你放行过的命令不同：环境变量 RUN_TAG 变了</div>') && FA.runCardOf(runItem(LV.ops), { t: tt3 }).again === null,
+    && gateOf(Object.values(said).every((x) => !/\[/.test(words(x.zh)) && !/\[/.test(words(x.ja)))) && gateOf(/\[arg-weather\]$/.test(words(odd.again)))
+    && gateOf(html.includes('<div class="ut-run-again">再次询问 — 与你放行过的命令不同：环境变量 RUN_TAG 变了</div>')) && FA.runCardOf(runItem(LV.ops), { t: tt3 }).again === null,
     `(c) WHY IT ASKS AGAIN — the door's ${Object.keys(said).length} dimensions named on the card's face: «${words(said['arg-order'].en)}» · «${words(said.env.zh)}» · «${words(said['arg-space'].ja)}»; an unknown code drawn as a code; a first ask says nothing (704a0f4c: no line — «mentions arg-order? false»)`, J(Object.fromEntries(Object.entries(said).map(([k, x]) => [k, words(x.zh)]))));
 } catch (e) { ok(false, '⑲ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
@@ -1522,7 +1522,7 @@ try {
   const { who, ...noWho } = LV.ops;
   const v2 = FA.runCardOf(runItem(noWho), { t: tt3 });
   const v3 = FA.runCardOf(runItem({ ...LV.ops, who: 'w'.repeat(2000), whoCut: true }), { t: tt3 });
-  ok(/^ops watch wants to run router-api\.sh with “Router 账号”$/.test(v1.headline) && /^An agent wants to run/.test(v2.headline) && !/Session 1/.test(v2.headline) && v3.headline.startsWith('w'.repeat(2000) + '…'),
+  ok(gateOf(/^ops watch wants to run router-api\.sh with “Router 账号”$/.test(v1.headline)) && gateOf(/^An agent wants to run/.test(v2.headline)) && !/Session 1/.test(v2.headline) && verdictOf(v3.headline.startsWith('w'.repeat(2000) + '…')),
     `(d) THE ACTOR IS THE FACTS' WHO: «${v1.headline}»; facts with no who ⇒ «${v2.headline.slice(0, 40)}…» (704a0f4c: the record's live name «Session 1 …»); a clipped who drawn with «…»`, J({ v1: v1.headline, v2: v2.headline }));
 } catch (e) { ok(false, '⑲ (d) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
@@ -1533,7 +1533,7 @@ try {
   const card = (n, len, cut = null) => FA.runCardOf(runItem({ ...f0, cmdFull: (() => { const x = whole.slice(0, n), o = []; for (let i = 0; i < x.length; i += 2000) o.push(x.slice(i, i + 2000)); return o; })(), ...(len ? { cmdLen: len } : {}), ...(cut ? { cut } : {}) }), { t: tt3 });
   const a = card(3000, 3500), b = card(3000, null), c = card(4096, 5037, ['cmdFull']), d = card(4096, null, ['cmdFull']);
   // (⑲ (e)'s source half — no cmdLen in src/foryou-actions.js, no «cut at» key or kb example: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
-  ok(J(a.cut) === J(b.cut) && b.cut.whole === true && b.cut.n === 3000 && J(c.cut) === J(d.cut) && /^The command is over 4096 characters/.test(d.cut.text),
+  ok(J(a.cut) === J(b.cut) && b.cut.whole === true && b.cut.n === 3000 && J(c.cut) === J(d.cut) && verdictOf(/^The command is over 4096 characters/.test(d.cut.text)),
     `(e) r12 — NO cmdLen: a hand-built cmdLen 3 500 over a 3 000 fold reads as the fold says («${a.cut.text.slice(0, 48)}…»), a store-cut fold «${d.cut.text.slice(0, 44)}…» with or without one; no code line reads cmdLen, no «cut at» key or kb example is left (1ad060a82: «3500 characters long — cut at 3000») — its source half: the fast …-pins`, J({ a: a.cut, d: d.cut }));
 } catch (e) { ok(false, '⑲ (e) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
@@ -1557,13 +1557,13 @@ try {
   const G = await import(pathToFileURL(path.join(REPO, 'scripts', 'make-vault-run-card-legs.mjs')).href);
   const named = fs.existsSync(path.join(REPO, 'scripts', 'make-vault-run-card-legs.mjs')) && /node scripts\/make-vault-run-card-legs\.mjs --write/.test(LEGS._) && G.LEGS_FILE === 'scripts/fixtures/vault-run-card-legs.json';
   const prod = G.producerOf(REPO);
-  if (!prod.ok) ok(named, `(a) SKIP by name — this tree carries no producer (${prod.why}): the legs are re-derived where it does (the train; a variant or a code that moved is RED there); the fixture names its in-tree generator`, J({ named, why: prod.why }));
+  if (!prod.ok) ok(verdictOf(named), `(a) SKIP by name — this tree carries no producer (${prod.why}): the legs are re-derived where it does (the train; a variant or a code that moved is RED there); the fixture names its in-tree generator`, J({ named, why: prod.why }));
   else {
     const { legs } = G.legsOf(REPO);
     const mine = Object.fromEntries(LEGS.variants.map((v) => [v.name, J(v)])), now = Object.fromEntries(legs.variants.map((v) => [v.name, J(v)]));
     const drift = [...new Set([...Object.keys(mine), ...Object.keys(now)])].filter((k) => mine[k] !== now[k]);
     const moved = ['src/vault-run.js', 'src/server/vault-run-door.js'].filter((f) => LEGS.producer[f] !== legs.producer[f]);
-    ok(named && G.factsPart(legs) === G.factsPart(LEGS),
+    ok(gateOf(named) && G.factsPart(legs) === G.factsPart(LEGS),
       `(a) THE LEGS RE-DERIVED from this tree's producer = the fixture (codes + ${legs.variants.length} variants)${moved.length ? ` — the producer's ${moved.join(' + ')} moved (its hash), its facts did not` : ''}${drift.length ? ` — DRIFT: ${drift.join(', ')} (regenerate: node scripts/make-vault-run-card-legs.mjs --write)` : ''}`, J({ drift, codes: J(legs.codes) === J(LEGS.codes), moved }));
   }
 } catch (e) { ok(false, '⑳ (a) threw on this tree: ' + ((e && e.stack) || e)); }
@@ -1579,10 +1579,10 @@ try {
   const LOST = '(cut — the rest is not available)';
   const envLine = ve.fold.find((x) => x.label === 'Environment').lines[0], secLine = ve.fold.find((x) => x.label === 'Secrets').lines[0];
   const folderRow = vf.rows.find((r) => r.key === 'folder').lines[0], progFold = vf.fold.find((x) => x.label === 'Program');
-  ok(envLine[0].mono === 'RUN_NOTE=' + fe.env[0].value + '…' && envLine[1] && envLine[1].aside === LOST && !ve.fold.some((x) => /its whole value/.test(x.label)) && !/2100|2000 characters/.test(J(envLine))
-    && secLine.some((x) => x.aside === LOST) && !secLine.some((x) => x.aside === '(shortened on the card — whole here)')
+  ok(envLine[0].mono === 'RUN_NOTE=' + fe.env[0].value + '…' && gateOf(envLine[1]) && envLine[1].aside === LOST && !ve.fold.some((x) => /its whole value/.test(x.label)) && !/2100|2000 characters/.test(J(envLine))
+    && gateOf(secLine.some((x) => x.aside === LOST)) && !secLine.some((x) => x.aside === '(shortened on the card — whole here)')
     && !vd.fold.some((x) => x.label === 'Its config directive (whole)')
-    && folderRow[0].mono === ff.folder + '…' && folderRow[1] && folderRow[1].aside === LOST && !vf.fold.some((x) => x.label === 'Working folder (whole)') && progFold && progFold.cmd == null && progFold.lines[0].some((x) => x.aside === LOST)
+    && folderRow[0].mono === ff.folder + '…' && gateOf(folderRow[1]) && folderRow[1].aside === LOST && !vf.fold.some((x) => x.label === 'Working folder (whole)') && gateOf(progFold) && progFold.cmd == null && gateOf(progFold.lines[0].some((x) => x.aside === LOST))
     && vz.fold.find((x) => x.label === '环境变量').lines[0][1].aside === '（已截断 — 其余部分不可用）' && JA(LOST) === '（切り詰め — 残りは取得できません）',
     `(b) A *Cut WITHOUT ITS *Full is said, never drawn whole: the env value «RUN_NOTE=<2 000>… ${envLine[1] && envLine[1].aside}» (no «its whole value» box, no length), the secret name, the «Always» directive (no «whole» box), the folder and the program path — «${Z(LOST)}» (1ad060a82: the clip in a box titled «RUN_NOTE (its whole value)», «its value is 2000 characters»)`, J({ env: envLine, folder: folderRow }));
 } catch (e) { ok(false, '⑳ (b) threw on this tree: ' + ((e && e.stack) || e)); }
@@ -1601,10 +1601,10 @@ try {
     const ar = LV['away-ref-long'], refWhole = ar.reason.away[0].refFull.join('');
     const arIt = m.get(m.add('claude:r12-ref', { text: 'ref', origin: 'vault', action: { type: 'vault-run-ask', askId: '4'.repeat(32) }, facts: ar }).id);   // r13: THROUGH the store (r12 drew it from the raw facts — the store's depth-4 walk cut it there)
     const va = FA.runCardOf(arIt, { t: tt3 }), why = va.fold.find((x) => x.label === 'Why it asks');
-    ok(J(it.facts) === J(f) && J(arIt.facts) === J(ar) && f.folderCut === true && f.tool.pathCut === true && f.tool.pathTail === 'run.sh' && !('pathFull' in f.tool) && folderWhole.endsWith('/evil-tail') && pathWhole.endsWith('/evil-tail/run.sh')
-      && fr[0].mono === f.folder + '…' && fr[1] && fr[1].aside === '（已截短 — 完整路径在「技术细节」里）' && pr[0].mono === 'run.sh'
-      && fb && fb.cmd === folderWhole && pb && pb.cmd === pathWhole && html.includes(`<pre class="ut-run-cmd ut-run-cmd-full">${pathWhole}</pre>`)
-      && ar.reason.away[0].refCut === true && refWhole.length === 2100 && why && why.lines.some((l) => l[0].mono === refWhole),
+    ok(J(it.facts) === J(f) && J(arIt.facts) === J(ar) && f.folderCut === true && f.tool.pathCut === true && f.tool.pathTail === 'run.sh' && !('pathFull' in f.tool) && gateOf(folderWhole.endsWith('/evil-tail')) && gateOf(pathWhole.endsWith('/evil-tail/run.sh'))
+      && fr[0].mono === f.folder + '…' && gateOf(fr[1]) && fr[1].aside === '（已截短 — 完整路径在「技术细节」里）' && pr[0].mono === 'run.sh'
+      && gateOf(fb) && fb.cmd === folderWhole && gateOf(pb) && pb.cmd === pathWhole && gateOf(html.includes(`<pre class="ut-run-cmd ut-run-cmd-full">${pathWhole}</pre>`))
+      && ar.reason.away[0].refCut === true && refWhole.length === 2100 && gateOf(why) && verdictOf(why.lines.some((l) => l[0].mono === refWhole)),
       `(c) THE FOLDER AND THE PATH FOLDED (both through the store): a ${folderWhole.length}-character folder — the face «${fr[0].mono.slice(0, 16)}…${fr[0].mono.slice(-12)} ${fr[1] && fr[1].aside}», the program row «${pr[0].mono}» (relative to the WHOLE folder), the fold «${fb && fb.label}» + «${pb && pb.label}» WHOLE (…/evil-tail/run.sh); a ${refWhole.length}-character reason reference whole on its line (1ad060a82 + the train's producer: a 2 000-character folder, no «…», no tail)`, J({ face: [fr[0].mono.length, pr[0].mono], boxes: [fb && fb.cmd.length, pb && pb.cmd.length] }));
   } finally { done(); }
 } catch (e) { ok(false, '⑳ (c) threw on this tree: ' + ((e && e.stack) || e)); }
@@ -1641,7 +1641,7 @@ try {
     const bad = back.filter((x) => !(x.same && J(x.cut) === J(x.name === 'clip-5037' ? ['cmdFull'] : [])) && !(x.name === 'clip-5037' && J(x.cut) === J(['cmdFull'])));
     const deep = m.get(m.add('claude:r13-deep', { text: 'deep', origin: 'vault', action: { type: 'vault-run-ask', askId: 'd'.repeat(32) }, facts: { ...LV.ops, deep: { a: { b: { c: { d: { e: 'x' } } } } } } }).id);
     const ref = m.get(m.add('claude:r13-ref', { text: 'ref', origin: 'vault', action: { type: 'vault-run-ask', askId: 'e'.repeat(32) }, facts: LV['away-ref-long'] }).id);
-    ok(!bad.length && J(deep.facts.deep) === J({ a: { b: { c: { d: null } } } }) && (deep.facts.cut || []).includes('deep.a.b.c.d') && Array.isArray(ref.facts.reason.away[0].refFull) && ref.facts.reason.away[0].refFull.join('').length === 2100,
+    ok(!bad.length && J(deep.facts.deep) === J({ a: { b: { c: { d: null } } } }) && gateOf((deep.facts.cut || []).includes('deep.a.b.c.d')) && gateOf(Array.isArray(ref.facts.reason.away[0].refFull)) && ref.facts.reason.away[0].refFull.join('').length === 2100,
       `(a) THE STORE KEEPS EVERY FOLD: all ${back.length} legs variants come back as filed (clip-5037: the store's own cmdFull cut, named); reason.away[0].refFull survives (2 100) — the walk's depth bound is 5 (b15a3cab4: 4 — refFull null, \`cut\` named it, the card «cut — the rest is not available»); a depth-6 value is still cut and named at «deep.a.b.c.d»`, J({ bad, deep: deep.facts.deep, deepCut: deep.facts.cut }));
   } finally { done(); }
 } catch (e) { ok(false, '㉑ (a) threw on this tree: ' + ((e && e.stack) || e)); }
@@ -1655,7 +1655,7 @@ try {
     const v = FA.runCardOf(it, { t: tt3 }), size = J(f).length;
     const fb = v && v.fold.find((x) => x.label === 'Working folder (whole)'), pr = v && v.rows.find((r) => r.key === 'program');
     const fw = f.folderFull.join('');   // home-relative («~/workspace/ops/…»): the 4 000-character folder is 3 991 here
-    ok(fw.length > 3900 && fw.startsWith('~/workspace/ops/') && f.tool.pathTail === 'run.sh' && size < 24000 && !(it.facts && it.facts.dropped) && J(it.facts) === J(f) && !!v && fb && fb.cmd === fw && pr && pr.lines[0][0].mono === 'run.sh' && FA.factsDroppedWords(it, { t: tt3 }) === null,
+    ok(fw.length > 3900 && gateOf(fw.startsWith('~/workspace/ops/')) && f.tool.pathTail === 'run.sh' && size < 24000 && !(it.facts && it.facts.dropped) && J(it.facts) === J(f) && !!v && gateOf(fb) && fb.cmd === fw && gateOf(pr) && pr.lines[0][0].mono === 'run.sh' && FA.factsDroppedWords(it, { t: tt3 }) === null,
       `(b) THE SIZE BOUND: a 4 000-character folder + a 4 000-character argument + two 2 100-character env values = ${size} characters of facts — kept whole by the store and drawn (the folder whole in its box, the program «${pr && pr.lines[0][0].mono}»), never the prose stub`, J({ size, dropped: it.facts && it.facts.dropped }));
   } finally { done(); }
 } catch (e) { ok(false, '㉑ (b) threw on this tree: ' + ((e && e.stack) || e)); }
@@ -1663,7 +1663,7 @@ try {
   // (c) A path whose folder fold did not arrive cannot be whole: pathTail without folderFull ⇒ «cut — the rest is not available»
   const x = JSON.parse(J(LV['folder-long'])); delete x.folderFull;
   const v = FA.runCardOf(runItem(x), { t: tt3 }), pf = v.fold.find((y) => y.label === 'Program');
-  ok(pf && pf.cmd == null && pf.lines[0].some((y) => y.aside === '(cut — the rest is not available)') && !v.fold.some((y) => y.label === 'Working folder (whole)'),
+  ok(gateOf(pf) && pf.cmd == null && gateOf(pf.lines[0].some((y) => y.aside === '(cut — the rest is not available)')) && !v.fold.some((y) => y.label === 'Working folder (whole)'),
     '(c) pathTail with no folderFull ⇒ the program path is said cut, the rest not available — never «folder clip + tail» drawn as whole', J(pf));
 } catch (e) { ok(false, '㉑ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
@@ -1684,4 +1684,4 @@ try {
 } catch (e) { ok(false, '㉒ (b) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

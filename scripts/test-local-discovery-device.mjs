@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 // synthetic HOME with two projects, three transcripts, one live "claude" lock
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ldisc-'));
@@ -85,7 +85,7 @@ const identDefines = (n) => identSrcs.some((s) => new RegExp(`function ${n}\\b`)
 const selfSrc = fs.readFileSync(new URL(import.meta.url), 'utf8');
 const noteSrc = selfSrc.slice(selfSrc.indexOf('// A live lock claiming SID1.'), selfSrc.indexOf('// \u2500\u2500 DRIFT GUARD'));
 const namesInNote = [...new Set([...noteSrc.matchAll(/\b(is[A-Z]\w+|pidLooks\w+)\b/g)].map((m) => m[1]))];
-ok(noteSrc.length > 400 && namesInNote.length >= 3 && namesInNote.every(identDefines),
+ok(noteSrc.length > 400 && namesInNote.length >= 3 && verdictOf(namesInNote.every(identDefines)),
   `every identity function the note above names is really DEFINED in one of ${IDENT_MODULES.join(' / ')} (${namesInNote.join(', ')})`,
   { named: namesInNote, undefinedOnes: namesInNote.filter((n) => !identDefines(n)) });
 const codeOnly = (t) => t.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
@@ -94,7 +94,7 @@ ok(!/isProcessClaude\b(?!Async)/.test(noteSrc) && !/isProcessClaude\b(?!Async)/.
 // NEGATIVE CONTROL: the verbatim pre-r5 sentence, so the two asserts above are
 // shown to FIRE on the drift they name rather than being vacuously true.
 const STALE_NOTE = '// LOCAL sweep reads `ps -o comm=` (session-store\n// isProcessClaude: the name of the file that was EXEC\'d)';
-ok(/isProcessClaude\b(?!Async)/.test(STALE_NOTE) && !identDefines('isProcessClaude') && identDefines('isProcessClaudeAsync'),
+ok(gateOf(/isProcessClaude\b(?!Async)/.test(STALE_NOTE)) && !identDefines('isProcessClaude') && verdictOf(identDefines('isProcessClaudeAsync')),
   'NEGATIVE CONTROL: the pre-r5 sentence names `isProcessClaude`, which no module defines any more — while the name the note now uses IS defined');
 
 const { execFileSync, spawn } = require('child_process');
@@ -168,14 +168,14 @@ const fresh = (since) => sessionsMod.sweepFails().fails === 0 && ((sessionsMod.s
 const devFresh = fresh(t0);
 await ttl();
 
-ok(Array.isArray(local.sessions) && local.sessions.length >= 3, `local scan sees the 3 transcripts (${local.sessions?.length})`);
+ok(gateOf(Array.isArray(local.sessions)) && local.sessions.length >= 3, `local scan sees the 3 transcripts (${local.sessions?.length})`);
 const L = strip(local.sessions), D = strip(dev.sessions);
 const parity = JSON.stringify(L) === JSON.stringify(D);
-ok(parity, `PARITY: device-facts sweep === local sweep (${L.length} sessions)`);
+ok(verdictOf(parity), `PARITY: device-facts sweep === local sweep (${L.length} sessions)`);
 if (!parity) console.log('LOCAL:', JSON.stringify(L), '\nDEVICE:', JSON.stringify(D));
-ok(devFresh && devUsed >= 1, `the device-facts answer is a FRESH sweep of its own (0 failed sweeps, its stats stamped after the call began) built FROM the device's snapshot (${devUsed} taken) — never the local list served again (${devMs}ms)`);
+ok(gateOf(devFresh) && devUsed >= 1, `the device-facts answer is a FRESH sweep of its own (0 failed sweeps, its stats stamped after the call began) built FROM the device's snapshot (${devUsed} taken) — never the local list served again (${devMs}ms)`);
 const s1 = D.find((x) => x.id === SID1);
-ok(s1 && s1.status !== 'stopped' && s1.pid === child.pid, `the live lock claims its transcript through device facts (${s1?.status})`);
+ok(gateOf(s1) && s1.status !== 'stopped' && s1.pid === child.pid, `the live lock claims its transcript through device facts (${s1?.status})`);
 ok(devMs < 4000, `device-facts sweep latency ${devMs}ms — under the sweep's own cache TTL`);
 
 // RED CONTROL (r3): a device whose snapshot holds a null transcript entry passes the route's shape check and throws in the sweep —
@@ -192,7 +192,7 @@ ok(devMs < 4000, `device-facts sweep latency ${devMs}ms — under the sweep's ow
   ctx.hosts.device = async () => ({ discoverySnapshot: async () => { asked2++; throw new Error('the daemon could not take its snapshot (a stand-in)'); } });
   const n0 = snapMetrics.length, t2 = Date.now(); await ttl(); const lost = await call();
   ctx.hosts.device = real;
-  ok(asked2 >= 1 && snapMetrics.length === n0 && fresh(t2) && JSON.stringify(strip(lost.sessions || [])) === JSON.stringify(L), `RED CONTROL (its stand-in asked ${asked2}×) — a device whose snapshot fails falls back to the local scan (fresh, the same list): only the USED half (${snapMetrics.length - n0} snapshots taken) turns the gate red`);
+  ok(asked2 >= 1 && snapMetrics.length === n0 && gateOf(fresh(t2)) && JSON.stringify(strip(lost.sessions || [])) === JSON.stringify(L), `RED CONTROL (its stand-in asked ${asked2}×) — a device whose snapshot fails falls back to the local scan (fresh, the same list): only the USED half (${snapMetrics.length - n0} snapshots taken) turns the gate red`);
   await ttl();
 }
 
@@ -200,8 +200,8 @@ global.__vsMetric = hadMetric;
 // fallback: kill the daemon → flag-on sweep still answers (local fallback)
 try { await dm.stop?.(); } catch { }
 const fb = await call();
-ok(Array.isArray(fb.sessions) && strip(fb.sessions).length === L.length, 'daemon down ⇒ flag-on sweep falls back to the local scan');
+ok(gateOf(Array.isArray(fb.sessions)) && strip(fb.sessions).length === L.length, 'daemon down ⇒ flag-on sweep falls back to the local scan');
 
 try { child.kill(); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

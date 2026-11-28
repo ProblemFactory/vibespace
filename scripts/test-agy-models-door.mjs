@@ -36,7 +36,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -147,17 +147,17 @@ console.log('① the parse (agy models, stdout only)');
 {
   const r = P.parseModelsAnswer({ code: 0, stdout: ANSWER_155 });
   ok('the measured 1.5.5 shape ⇒ 16 rows in agy\'s order with agy\'s labels — Gemini and non-Gemini ids (claude-*, gpt-oss-*) admitted; the «Fetching…» line dropped',
-    r.verdict === 'rows' && eq(r.rows.map((x) => [x.id, x.label]), ROWS_155), r);
+    r.verdict === 'rows' && verdictOf(eq(r.rows.map((x) => [x.id, x.label]), ROWS_155)), r);
   const so = P.parseModelsAnswer({ code: 0, stdout: 'Fetching available models...\nError: Please sign in to view available models. Run agy to sign in.\n' });
   const em = P.parseModelsAnswer({ code: 0, stdout: 'Fetching available models...\n' });
-  ok('the «Please sign in» line ⇒ signed-out (its words, bounded); an answer with no row at all ⇒ signed-out', so.verdict === 'signed-out' && /Please sign in/.test(so.why) && em.verdict === 'signed-out', [so, em]);
+  ok('the «Please sign in» line ⇒ signed-out (its words, bounded); an answer with no row at all ⇒ signed-out', so.verdict === 'signed-out' && gateOf(/Please sign in/.test(so.why)) && em.verdict === 'signed-out', [so, em]);
   const gb = P.parseModelsAnswer({ code: 0, stdout: 'Fetching available models...\n<html>' + 'x'.repeat(500) + '\nmore\n' });
   const ex = P.parseModelsAnswer({ code: 3, stdout: '' });
-  ok('garbage ⇒ unreadable with its FIRST line, bounded (≤ 160); a failing exit with nothing ⇒ unreadable «exit 3»', gb.verdict === 'unreadable' && gb.why.startsWith('<html>') && gb.why.length <= P.WORDS_MAX && ex.verdict === 'unreadable' && ex.why === 'exit 3', [gb.why.length, ex]);
+  ok('garbage ⇒ unreadable with its FIRST line, bounded (≤ 160); a failing exit with nothing ⇒ unreadable «exit 3»', gb.verdict === 'unreadable' && gateOf(gb.why.startsWith('<html>')) && gb.why.length <= P.WORDS_MAX && ex.verdict === 'unreadable' && ex.why === 'exit 3', [gb.why.length, ex]);
   const odd = P.parseModelsAnswer({ code: 0, stdout: ['Fetching available models...', 'Gemini Nice\tno id here', 'UPPER-id\tX', 'gemini-ok\t<b>bold</b>', 'gemini-ctl\tbad\u0007bell',
     'gemini-long\t' + 'L'.repeat(70), 'gemini-ok\tdup', '-leading-dash\tX', 'gemini-tab-less', 'gemini-fine\t  Fine  '].join('\n') });
   ok('the bounds: an id outside ID_RE skipped (spaces, upper case, a leading dash, no tab); markup / a control character ⇒ the row keeps its id as its label; a 70-character label cut to 60; a repeated id once',
-    odd.verdict === 'rows' && eq(odd.rows.map((x) => [x.id, x.label]), [['gemini-ok', 'gemini-ok'], ['gemini-ctl', 'gemini-ctl'], ['gemini-long', 'L'.repeat(59) + '…'], ['gemini-fine', 'Fine']]), odd.rows);
+    odd.verdict === 'rows' && verdictOf(eq(odd.rows.map((x) => [x.id, x.label]), [['gemini-ok', 'gemini-ok'], ['gemini-ctl', 'gemini-ctl'], ['gemini-long', 'L'.repeat(59) + '…'], ['gemini-fine', 'Fine']])), odd.rows);
   const many = P.parseModelsAnswer({ code: 0, stdout: Array.from({ length: 250 }, (_, i) => `gemini-m-${i}\tM ${i}`).join('\n') });
   ok('at most 200 rows (agy\'s first 200)', many.rows.length === 200 && many.rows[199].id === 'gemini-m-199');
   const bidi = P.parseModelsAnswer({ code: 0, stdout: 'gemini-x\t\u202Eevil\u202C label\ngemini-y\t\u2067\u200F\u061C\u2069\n' });
@@ -173,7 +173,7 @@ console.log('① the parse (agy models, stdout only)');
 console.log('② the door (a fake clock; the stand-in agy)');
 async function doorLegs(D, tag) {
   const res = [];
-  const leg = (name, pass, detail) => res.push({ name, pass: !!pass, detail });
+  const leg = (name, pass, detail) => { if (typeof pass !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof pass}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (res.push({ name, pass: !!pass, detail })); };
   const data = path.join(TMP, `data-${tag}`);
   fs.mkdirSync(data, { recursive: true });
   fs.rmSync(path.join(BIN, 'calls.log'), { force: true });
@@ -188,14 +188,14 @@ async function doorLegs(D, tag) {
   await door.pending('antigravity', A);
   const c1 = calls();
   leg('an opening ⇒ ONE `agy models` in the account\'s own HOME root (cwd = its empty login dir), the ambient Gemini key dropped; the completion said once (onListed)',
-    a1.ok && a1.listing && a1.code === 'started' && c1.length === n0 + 1 && c1[0].argv === 'models' && c1[0].home === home(A) && c1[0].cwd === path.join(home(A), '.vibespace-login') && c1[0].key === 'none' && eq(listed, [{ backend: 'antigravity', account: A }]), [a1, c1, listed]);
+    gateOf(a1.ok) && gateOf(a1.listing) && a1.code === 'started' && c1.length === n0 + 1 && c1[0].argv === 'models' && c1[0].home === home(A) && c1[0].cwd === path.join(home(A), '.vibespace-login') && c1[0].key === 'none' && verdictOf(eq(listed, [{ backend: 'antigravity', account: A }])), [a1, c1, listed]);
   const r1 = door.report('antigravity', A), rB = door.report('antigravity', B);
-  leg('the report = exactly agy\'s rows for THAT account (its order, its labels), listedAt the clock; another account has none', eq((r1.rows || []).map((x) => [x.id, x.label]), ROWS_155) && r1.listedAt === T && !r1.lastError && r1.by === 'Antigravity' && rB.rows === null, [r1, rB]);
+  leg('the report = exactly agy\'s rows for THAT account (its order, its labels), listedAt the clock; another account has none', gateOf(eq((r1.rows || []).map((x) => [x.id, x.label]), ROWS_155)) && r1.listedAt === T && !r1.lastError && r1.by === 'Antigravity' && rB.rows === null, [r1, rB]);
   await door._flush();
   const disk = cacheOf(data);
   const st = fs.statSync(path.join(data, 'cli-models.json'));
   leg('the cache = data/cli-models.json, 0600, schema 1 by harness and account — and NO value of the sign-in anywhere in it (stdout only)', (st.mode & 0o777) === 0o600 && JSON.parse(disk).schema === 1 && JSON.parse(disk).harnesses.antigravity[A].rows.length === 16 && !disk.includes('PLANTED') && !disk.includes('ya29'), (st.mode & 0o777).toString(8));
-  leg('the journal names the account and the row count only — never a row, never the sign-in', logs.some((l) => l === `[cli-models] antigravity ${A}: 16 rows`) && !logs.join('\n').match(/gemini-4|Carbon|PLANTED|ya29/), logs);
+  leg('the journal names the account and the row count only — never a row, never the sign-in', gateOf(logs.some((l) => l === `[cli-models] antigravity ${A}: 16 rows`)) && !logs.join('\n').match(/gemini-4|Carbon|PLANTED|ya29/), logs);
   // the floor
   T += 1 * HOUR;
   const f1 = await ASK(door, 'antigravity', A);
@@ -205,13 +205,13 @@ async function doorLegs(D, tag) {
   T += 2;
   const f3 = await ASK(door, 'antigravity', A);
   await door.pending('antigravity', A);
-  leg('…past 6 h the next opening lists again', f3.listing && calls().length === n0 + 2, f3);
+  leg('…past 6 h the next opening lists again', gateOf(f3.listing) && calls().length === n0 + 2, f3);
   // a version move
   writeStub('# another build\n');
   T += 1 * MIN;
   const v1 = await ASK(door, 'antigravity', A);
   await door.pending('antigravity', A);
-  leg('the CLI file changed since (an update: size / mtime) ⇒ the next opening reads again whatever the floor says', v1.listing && calls().length === n0 + 3, v1);
+  leg('the CLI file changed since (an update: size / mtime) ⇒ the next opening reads again whatever the floor says', gateOf(v1.listing) && calls().length === n0 + 3, v1);
   // the explicit row
   T += 1 * MIN;
   const e1 = await ASK(door, 'antigravity', A, { refresh: true });
@@ -220,7 +220,7 @@ async function doorLegs(D, tag) {
   T += 61 * 1000;
   const e3 = await ASK(door, 'antigravity', A, { refresh: true });
   await door.pending('antigravity', A);
-  leg('the explicit row sets the floor aside but keeps one a minute (429 throttled, retryInMs named), then lists again', e1.listing && e2.status === 429 && e2.code === 'throttled' && e2.retryInMs === MIN && e3.listing && calls().length === n0 + 5, [e1, e2, e3]);
+  leg('the explicit row sets the floor aside but keeps one a minute (429 throttled, retryInMs named), then lists again', gateOf(e1.listing) && e2.status === 429 && e2.code === 'throttled' && e2.retryInMs === MIN && gateOf(e3.listing) && calls().length === n0 + 5, [e1, e2, e3]);
   // in flight
   setMode('wait');
   T += 7 * HOUR;
@@ -228,14 +228,14 @@ async function doorLegs(D, tag) {
   const w = await Promise.all([ASK(door, 'antigravity', A), ASK(door, 'antigravity', A), ASK(door, 'antigravity', A, { refresh: true })]);
   fs.writeFileSync(path.join(BIN, 'release'), '');
   await door.pending('antigravity', A);
-  leg('a listing in flight is SHARED: three acts at once ⇒ one call', w.every((x) => x.listing) && w.filter((x) => x.code === 'started').length === 1 && calls().length === n0 + 6, w);
+  leg('a listing in flight is SHARED: three acts at once ⇒ one call', gateOf(w.every((x) => x.listing)) && w.filter((x) => x.code === 'started').length === 1 && calls().length === n0 + 6, w);
   // a failure keeps the last good rows; the failure floor
   setMode('signed-out');
   T += 7 * HOUR;
   const s1 = await ASK(door, 'antigravity', A);
   await door.pending('antigravity', A);
   const rs = door.report('antigravity', A);
-  leg('signed out ⇒ the last good rows KEPT, lastError signed-out with its words', s1.listing && (rs.rows || []).length === 16 && rs.lastError && rs.lastError.code === 'signed-out' && /Please sign in/.test(rs.lastError.words), rs);
+  leg('signed out ⇒ the last good rows KEPT, lastError signed-out with its words', gateOf(s1.listing) && (rs.rows || []).length === 16 && gateOf(rs.lastError) && rs.lastError.code === 'signed-out' && verdictOf(/Please sign in/.test(rs.lastError.words)), rs);
   let tens = 0;
   for (let i = 0; i < 10; i++) { T += 1 * MIN; const x = await ASK(door, 'antigravity', A); if (x.listing) { tens++; await door.pending('antigravity', A); } }
   leg('10 openings against a signed-out account inside 15 min ⇒ ONE call (the failure floor)', tens === 0 && calls().length === n0 + 7, { tens, calls: calls().length - n0 });
@@ -250,7 +250,7 @@ async function doorLegs(D, tag) {
   setMode('rows');
   const rb = await ASK(door, 'antigravity', A);
   await door.pending('antigravity', A);
-  leg('…15 min after the failure an opening lists again; an answer clears lastError', rb.listing && !door.report('antigravity', A).lastError && calls().length === n0 + 8, rb);
+  leg('…15 min after the failure an opening lists again; an answer clears lastError', gateOf(rb.listing) && !door.report('antigravity', A).lastError && calls().length === n0 + 8, rb);
   // stdout only
   setMode('stderr-only');
   T += 7 * HOUR;
@@ -258,13 +258,13 @@ async function doorLegs(D, tag) {
   await door.pending('antigravity', B);
   await door._flush();
   const so = door.report('antigravity', B);
-  leg('STDOUT ONLY: a row printed on stderr is never read (⇒ no row: signed-out) and nothing of stderr — the planted sign-in — reaches the cache', so.rows === null && so.lastError && so.lastError.code === 'signed-out' && !cacheOf(data).includes('SECRET') && !cacheOf(data).includes('PLANTED'), so);
+  leg('STDOUT ONLY: a row printed on stderr is never read (⇒ no row: signed-out) and nothing of stderr — the planted sign-in — reaches the cache', so.rows === null && gateOf(so.lastError) && so.lastError.code === 'signed-out' && !cacheOf(data).includes('SECRET') && !cacheOf(data).includes('PLANTED'), so);
   // the machine's own login
   setMode('rows');
   const m1 = await ASK(door, 'antigravity', '');
   await door.pending('antigravity', 'machine');
   const cm = calls().at(-1);
-  leg('the machine\'s own login = the key «machine»: the agents\' env and the hub\'s home as cwd', m1.listing && cm.cwd === MACHINE_HOME && cm.key === 'none' && (door.report('antigravity', 'machine').rows || []).length === 16, [m1, cm]);
+  leg('the machine\'s own login = the key «machine»: the agents\' env and the hub\'s home as cwd', gateOf(m1.listing) && cm.cwd === MACHINE_HOME && cm.key === 'none' && (door.report('antigravity', 'machine').rows || []).length === 16, [m1, cm]);
   // refusals
   const g1 = await door.ask('antigravity', A, {});
   const g2 = await ASK(door, 'claude', 'acct-claude00001');
@@ -274,7 +274,7 @@ async function doorLegs(D, tag) {
   // removal
   await door.forget(A);
   await door._flush();
-  leg('an account removed takes its entry NOW (forget) — the cache no longer names it', !cacheOf(data).includes(A) && cacheOf(data).includes('machine'));
+  leg('an account removed takes its entry NOW (forget) — the cache no longer names it', !cacheOf(data).includes(A) && verdictOf(cacheOf(data).includes('machine')));
   delete ACC[B];
   T += 7 * HOUR;
   await ASK(door, 'antigravity', '');
@@ -285,13 +285,13 @@ async function doorLegs(D, tag) {
   return res;
 }
 const real = await doorLegs(DOOR, 'real');
-for (const r of real) ok(r.name, r.pass, r.detail);
+for (const r of real) ok(r.name, verdictOf(r.pass), r.detail);
 
 console.log('② the door\'s bounds (a hang, a flood)');
 // THE HANG (a person's menu and the floor are never held by it): a good listing first, then agy never answers
 async function hangLegs(D, tag, hangMode) {
   const res = [];
-  const leg = (name, pass, detail) => res.push({ name, pass: !!pass, detail });
+  const leg = (name, pass, detail) => { if (typeof pass !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof pass}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (res.push({ name, pass: !!pass, detail })); };
   const data = path.join(TMP, `data-hang-${tag}`);
   fs.mkdirSync(data, { recursive: true });
   const A = 'agy-aaaaaaaaaaaa';
@@ -312,7 +312,7 @@ async function hangLegs(D, tag, hangMode) {
     h1.code === 'started' && (during.rows || []).length === 16 && during.listing === true && h2.code === 'shared', { h1, h2, listing: during.listing });
   await door.pending('antigravity', A);
   const h = door.report('antigravity', A);
-  leg('a CLI that never answers is KILLED at the timeout ⇒ lastError timeout, the last good rows kept, the slot freed — ONE call for both openings', h.lastError && h.lastError.code === 'timeout' && (h.rows || []).length === 16 && !h.listing && door.pending('antigravity', A) === null && calls().length === n0 + 1, { lastError: h.lastError, calls: calls().length - n0 });
+  leg('a CLI that never answers is KILLED at the timeout ⇒ lastError timeout, the last good rows kept, the slot freed — ONE call for both openings', gateOf(h.lastError) && h.lastError.code === 'timeout' && (h.rows || []).length === 16 && !h.listing && door.pending('antigravity', A) === null && calls().length === n0 + 1, { lastError: h.lastError, calls: calls().length - n0 });
   T += 1 * MIN;
   const f1 = await ASK(door, 'antigravity', A);
   leg('…the hang PACES like any failure: an opening inside 15 min asks nothing (failed-recently) — never a call per opening against a hanging agy', !f1.listing && f1.code === 'failed-recently' && calls().length === n0 + 1, f1);
@@ -322,14 +322,14 @@ async function hangLegs(D, tag, hangMode) {
   leg('…the explicit row asks again at once, and its answer clears the timeout', e1.code === 'started' && !door.report('antigravity', A).lastError && calls().length === n0 + 2, e1);
   return res;
 }
-for (const r of await hangLegs(DOOR, 'real', 'hang')) ok(r.name, r.pass, r.detail);
+for (const r of await hangLegs(DOOR, 'real', 'hang')) ok(r.name, verdictOf(r.pass), r.detail);
 {
   setMode('big');
   const { door: d2 } = makeDoor(DOOR, path.join(TMP, 'data-big'));
   await ASK(d2, 'antigravity', 'agy-aaaaaaaaaaaa');
   await d2.pending('antigravity', 'agy-aaaaaaaaaaaa');
   const b = d2.report('antigravity', 'agy-aaaaaaaaaaaa');
-  ok('a 10 MB answer from the CLI\'s own CHILD (it keeps the pipe): read to 64 KiB, the CLI killed AND the pipe let go, the cut line dropped ⇒ 200 whole rows', (b.rows || []).length === 200 && b.rows.every((x, i) => x.id === `gemini-b-${i}` && x.label === `B ${i}`), b.lastError || (b.rows || []).length);
+  ok('a 10 MB answer from the CLI\'s own CHILD (it keeps the pipe): read to 64 KiB, the CLI killed AND the pipe let go, the cut line dropped ⇒ 200 whole rows', (b.rows || []).length === 200 && verdictOf(b.rows.every((x, i) => x.id === `gemini-b-${i}` && x.label === `B ${i}`)), b.lastError || (b.rows || []).length);
 }
 
 // ── ② round 2: the seven laws' door half ───────────────────────────────────────────────────────────────────────────
@@ -351,7 +351,7 @@ console.log('② round 2 — A: a press the gate minted, never a flag a caller w
   const r4 = await door.ask('antigravity', 'machine', { press: { kind: 'open' } });          // a press object the gate never minted
   const rs = [r1, r2, r3, r4];
   ok('A: the verifier\'s planted callers — an alias on a timer, `const door = modelsDoor` at boot, a destructured ask — and a forged press object are each refused «no-press» with 0 starts, whoever holds the door',
-    rs.every((r) => r && r.ok === false && r.status === 403 && r.code === 'no-press') && calls().length === n0 && door.pending('antigravity', 'machine') === null, rs.map((r) => r && r.code));
+    gateOf(rs.every((r) => r && r.ok === false && r.status === 403 && r.code === 'no-press')) && calls().length === n0 && door.pending('antigravity', 'machine') === null, rs.map((r) => r && r.code));
   const mintA = MINTS.get(door) || ((req, sc) => (typeof door.press === 'function' ? door.press(req, sc && sc.kind) : { ok: false }));
   const once = mintA({}, { backend: 'antigravity', account: 'machine', kind: 'open' });
   const u1 = once.ok ? await door.ask('antigravity', 'machine', { press: once.press, kind: 'open' }) : null;
@@ -408,7 +408,7 @@ console.log('② round 3 — law 1: the door never signals a group it no longer 
     const plain = await scene('rows');
     ok('law 1: a plain listing that exits and closes signals NOBODY — no group signal at all (its group is empty: the number is free)', plain.length === 0, plain);
     const fork = await scene('fork-rows', { timeoutMs: 3000 });
-    ok('law 1: AFTER the exit a group is signalled only on proof — a member of ours alive (the helper holding the pipe): every signal reached a live member', fork.length >= 1 && fork.every((x) => x.members.length > 0), fork);
+    ok('law 1: AFTER the exit a group is signalled only on proof — a member of ours alive (the helper holding the pipe): every signal reached a live member', fork.length >= 1 && verdictOf(fork.every((x) => x.members.length > 0)), fork);
     const hang = await scene('hang-fork', { timeoutMs: 150 });
     const cap = await scene('big');
     ok('law 1: BEFORE the exit (the timeout, the cap) the group is ours and ended — each signal reached its live members', hang.length === 1 && hang[0].members.length > 0 && cap.length === 1 && cap[0].members.length > 0, { hang, cap });
@@ -421,7 +421,7 @@ console.log('② round 3 — law 1: the door never signals a group it no longer 
     await ASK(fd, 'antigravity', 'machine');
     await fd.pending('antigravity', 'machine');
     const fAlive = alive(foreign.pid);
-    ok('law 1: a handle whose number names a FOREIGN live group — after its «exit» the door sends NOTHING (a live process holds the number: not ours) and the foreign group lives', fAlive && !sent.some((x) => x.pgid === foreign.pid), { fAlive, sent });
+    ok('law 1: a handle whose number names a FOREIGN live group — after its «exit» the door sends NOTHING (a live process holds the number: not ours) and the foreign group lives', gateOf(fAlive) && !sent.some((x) => x.pgid === foreign.pid), { fAlive, sent });
     try { realKill.call(process, -foreign.pid, 'SIGKILL'); } catch { } // the drill's own stand-in, spawned and held here
   } finally { process.kill = realKill; }
 }
@@ -462,7 +462,7 @@ console.log('② round 2 — C: a listing leaves nothing running, and keeps an a
   await door.pending('antigravity', 'machine');
   const left1 = await settled([pidIn('pid.sh'), pidIn('pid.sleep')]);
   const h = door.report('antigravity', 'machine');
-  ok('C(i): a hang whose CLI forked a helper (`sleep 30 &; wait`) is ended as a GROUP at the timeout — nothing of the listing left alive (the helper too)', !!pidIn('pid.sleep') && left1.length === 0 && h.lastError && h.lastError.code === 'timeout', { left1, err: h.lastError });
+  ok('C(i): a hang whose CLI forked a helper (`sleep 30 &; wait`) is ended as a GROUP at the timeout — nothing of the listing left alive (the helper too)', !!pidIn('pid.sleep') && left1.length === 0 && gateOf(h.lastError) && h.lastError.code === 'timeout', { left1, err: h.lastError });
   setMode('fork-rows');
   const { door: d2 } = makeDoor(DOOR, path.join(TMP, 'data-law-c2'), { timeoutMs: 3000 });
   await ASK(d2, 'antigravity', 'machine');
@@ -476,7 +476,7 @@ console.log('② round 2 — C: a listing leaves nothing running, and keeps an a
   await ASK(d3, 'antigravity', 'machine');
   await d3.pending('antigravity', 'machine');
   const g = d3.report('antigravity', 'machine');
-  ok('round 2 (smaller 1): an oversize answer with NO newline is «unreadable» — never «signed-out» (no sign-in door for garbage)', g.lastError && g.lastError.code === 'unreadable', g.lastError);
+  ok('round 2 (smaller 1): an oversize answer with NO newline is «unreadable» — never «signed-out» (no sign-in door for garbage)', gateOf(g.lastError) && g.lastError.code === 'unreadable', g.lastError);
 }
 console.log('② round 2 — D: the cache\'s read is never a hold and never silent');
 {
@@ -500,7 +500,7 @@ console.log('③ E1 — the routes: a GET never lists; the OPENING is a person\'
 const express = require(path.join(REPO, 'node_modules/express'));
 async function routeLegs(PMR, tag) {
   const res = [];
-  const leg = (name, pass, detail) => res.push({ name, pass: !!pass, detail });
+  const leg = (name, pass, detail) => { if (typeof pass !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof pass}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (res.push({ name, pass: !!pass, detail })); };
   const data = path.join(TMP, `data-route-${tag}`);
   fs.mkdirSync(data, { recursive: true });
   T += 48 * HOUR;
@@ -523,13 +523,13 @@ async function routeLegs(PMR, tag) {
     const [, g1] = await get(`?backend=antigravity&account=${A}&list=open`);
     const [, g2] = await get('?session=s-agy');
     const [, g3] = await get('?session=s-agy&list=open');
-    leg('a GET NEVER lists: a plain GET, a stale `list=open` GET, a running conversation\'s GET (an attach, a page load or reload) ⇒ nothing asked', calls().length === n0 && [g0, g1, g2, g3].every((g) => g.report && g.report.source === 'shipped' && !g.report.listing), calls().length - n0);
+    leg('a GET NEVER lists: a plain GET, a stale `list=open` GET, a running conversation\'s GET (an attach, a page load or reload) ⇒ nothing asked', calls().length === n0 && verdictOf([g0, g1, g2, g3].every((g) => g.report && g.report.source === 'shipped' && !g.report.listing)), calls().length - n0);
     const ship = AGY.models().map((m) => m.id);
-    leg('before any report: the SHIPPED rows (Default first), Custom… open, and `report` says so (source shipped, by Antigravity, the account\'s key)', eq(g0.models.map((m) => m.id), ship) && g0.open === true && g0.report.by === 'Antigravity' && g0.report.account === A && g0.report.listedAt === null, g0.report);
+    leg('before any report: the SHIPPED rows (Default first), Custom… open, and `report` says so (source shipped, by Antigravity, the account\'s key)', gateOf(eq(g0.models.map((m) => m.id), ship)) && g0.open === true && g0.report.by === 'Antigravity' && g0.report.account === A && g0.report.listedAt === null, g0.report);
     const [o1s, o1] = await post('/api/cli-models/open', { backend: 'antigravity', account: A });
     const [, g4] = await get(`?backend=antigravity&account=${A}`);
     await door.pending('antigravity', A);
-    leg('THE OPENING (POST /api/cli-models/open, a person\'s page) ⇒ 202 listing; the menu read meanwhile says «listing» and still answers at once', o1s === 202 && o1.listing && g4.report.listing === true && calls().length === n0 + 1, [o1s, o1, g4.report]);
+    leg('THE OPENING (POST /api/cli-models/open, a person\'s page) ⇒ 202 listing; the menu read meanwhile says «listing» and still answers at once', o1s === 202 && gateOf(o1.listing) && g4.report.listing === true && calls().length === n0 + 1, [o1s, o1, g4.report]);
     // the dirty re-read loop: each completion → a re-read GET; none lists
     for (let i = 0; i < 5; i++) await get(`?backend=antigravity&account=${A}`);
     leg('the re-read after the door\'s own dirty push (five times over) never starts another listing', listed.length === 1 && calls().length === n0 + 1, { listed: listed.length, calls: calls().length - n0 });
@@ -537,15 +537,15 @@ async function routeLegs(PMR, tag) {
     const [, g6] = await get('?session=s-agy');
     const [, g7] = await get('?backend=antigravity&account=agy-bbbbbbbbbbbb');
     leg('the menu = EXACTLY the reported rows, agy\'s order and labels, under the Default row — for that account and its running conversation; Custom… stays (open)',
-      eq(g5.models.map((m) => [m.id, m.label]), [['', 'Default'], ...ROWS_155]) && g5.open === true && g5.report.source === 'reported' && g5.report.listedAt === T && eq(g6.models, g5.models), g5.report);
-    leg('…per account: the other account still answers the shipped rows', eq(g7.models.map((m) => m.id), ship) && g7.report.source === 'shipped');
+      gateOf(eq(g5.models.map((m) => [m.id, m.label]), [['', 'Default'], ...ROWS_155])) && g5.open === true && g5.report.source === 'reported' && g5.report.listedAt === T && verdictOf(eq(g6.models, g5.models)), g5.report);
+    leg('…per account: the other account still answers the shipped rows', gateOf(eq(g7.models.map((m) => m.id), ship)) && g7.report.source === 'shipped');
     // 10 openings against a signed-out account ⇒ ONE call
     setMode('signed-out');
     const nS = calls().length;
     const outs = [];
     for (let i = 0; i < 10; i++) { T += 30 * 1000; const [s, b] = await post('/api/cli-models/open', { backend: 'antigravity', account: 'agy-bbbbbbbbbbbb' }); outs.push([s, b.code]); await door.pending('antigravity', 'agy-bbbbbbbbbbbb'); }
     const [, g8] = await get('?backend=antigravity&account=agy-bbbbbbbbbbbb');
-    leg('10 openings against a signed-out account ⇒ ONE call; the menu keeps the shipped rows and names the failure (signed-out)', calls().length === nS + 1 && outs[0][1] === 'started' && outs.slice(1).every((o) => o[1] === 'failed-recently') && g8.report.lastError.code === 'signed-out' && eq(g8.models.map((m) => m.id), ship), outs);
+    leg('10 openings against a signed-out account ⇒ ONE call; the menu keeps the shipped rows and names the failure (signed-out)', calls().length === nS + 1 && outs[0][1] === 'started' && gateOf(outs.slice(1).every((o) => o[1] === 'failed-recently')) && g8.report.lastError.code === 'signed-out' && verdictOf(eq(g8.models.map((m) => m.id), ship)), outs);
     // the gates
     const nG = calls().length;
     const [b1s, b1] = await post('/api/cli-models/open', { backend: 'antigravity', account: A }, { Authorization: 'Bearer vsst_planted', Origin: base });
@@ -563,12 +563,12 @@ async function routeLegs(PMR, tag) {
     const [r1s, r1] = await post('/api/cli-models/refresh', { session: 's-agy-machine' });
     await door.pending('antigravity', 'machine');
     const [r2s, r2, ra] = await post('/api/cli-models/refresh', { backend: 'antigravity', account: 'machine' });
-    leg('the explicit row: a person\'s press lists now (the machine\'s own login for a conversation with no account), again inside the minute ⇒ 429 + Retry-After 60', r1s === 202 && r1.listing && r2s === 429 && r2.code === 'throttled' && ra === '60' && calls().length === nG + 1, [r1s, r2s, ra]);
+    leg('the explicit row: a person\'s press lists now (the machine\'s own login for a conversation with no account), again inside the minute ⇒ 429 + Retry-After 60', r1s === 202 && gateOf(r1.listing) && r2s === 429 && r2.code === 'throttled' && ra === '60' && calls().length === nG + 1, [r1s, r2s, ra]);
   } finally { srv.close(); }
   return res;
 }
 const PMREAL = require(path.join(REPO, 'src/routes/provider-models.js'));
-for (const r of await routeLegs(PMREAL, 'real')) ok(r.name, r.pass, r.detail);
+for (const r of await routeLegs(PMREAL, 'real')) ok(r.name, verdictOf(r.pass), r.detail);
 
 // ── ④ the words ───────────────────────────────────────────────────────────────────────────────────────────────
 console.log('④ the words (one line, its door — en / zh / ja)');
@@ -608,12 +608,12 @@ console.log('④ the words (one line, its door — en / zh / ja)');
     && typeof W.notInReport === 'function' && W.notInReport(t, 'Antigravity', 'gemini-9') === 'gemini-9 — not in Antigravity’s report');
   const appSrc = read('src/lib/app.js');
   ok('E (the New Session half, read; Chrome drives it in test-agy-status-bar-chrome ⑥): the field keeps the chosen model the report does not list — the pick once touched, else the saved default — with the shared words, under Default',
-    /const touched = sel\.dataset\.touched === '1';/.test(appSrc) && /o\.textContent = notInReport\(t, ans\.report\.by \|\| be, chosen\);/.test(appSrc) && /modelSel\.dataset\.touched = '1';/.test(appSrc) && /sel\.value = chosen && !touched \? chosen/.test(appSrc));
+    gateOf(/const touched = sel\.dataset\.touched === '1';/.test(appSrc)) && gateOf(/o\.textContent = notInReport\(t, ans\.report\.by \|\| be, chosen\);/.test(appSrc)) && gateOf(/modelSel\.dataset\.touched = '1';/.test(appSrc)) && verdictOf(/sel\.value = chosen && !touched \? chosen/.test(appSrc)));
   const keys = [...read('src/lib/cli-models-words.js').matchAll(/\bt\('([^']+)'/g)].map((m) => m[1]);
   const has = (file, k) => read(file).includes('\n  ' + JSON.stringify(k) + ':');
   const missing = keys.filter((k) => !has('src/lib/i18n-zh.js', k) || !has('src/lib/i18n-ja.js', k));
   ok(`every sentence in zh and ja (${keys.length} keys)`, keys.length >= 21 && !missing.length, missing);
-  ok('the client reads the moment through ITS relative-time helper (user-todos-row agoText), in both menus', /import \{ agoText as agoWords(?:, \w+)* \} from '\.\/user-todos-row\.js'/.test(read('src/lib/app.js'))   /* lane setting-doors pick 2: + registerSettingFacts on the same line */ && /import \{ agoText as agoWords \} from '\.\/user-todos-row\.js'/.test(read('src/lib/chat-status-bar.js')));   // stale-pins: kept — app.js's pin takes the line's new names; the second pin is chat-status-bar.js's own import, unchanged
+  ok('the client reads the moment through ITS relative-time helper (user-todos-row agoText), in both menus', gateOf(/import \{ agoText as agoWords(?:, \w+)* \} from '\.\/user-todos-row\.js'/.test(read('src/lib/app.js')))   /* lane setting-doors pick 2: + registerSettingFacts on the same line */ && verdictOf(/import \{ agoText as agoWords \} from '\.\/user-todos-row\.js'/.test(read('src/lib/chat-status-bar.js'))));   // stale-pins: kept — app.js's pin takes the line's new names; the second pin is chat-status-bar.js's own import, unchanged
 }
 
 // ── ⑦ the chat's model menu, the REAL bar in a fake DOM (round 2 laws G and E, the chat's half) ─────────────────────
@@ -663,20 +663,20 @@ console.log('⑦ the chat\'s model menu (the real bar, a fake DOM): no request f
   };
   const here = { source: 'reported', host: undefined, listedAt: Date.now() - 5 * MIN, lastError: null, listing: false, account: 'machine', by: 'Antigravity' };
   const g1 = await openMenu(menuOf({ ...here, source: 'shipped', host: 'devbox', listedAt: null }));
-  ok('G(i): a conversation on ANOTHER machine — the chat menu sends NO opening (only its GET), as the New Session field sends none', reqs.length === 1 && /^GET \/api\/available-models\?session=/.test(reqs[0]) && g1.items().some((x) => /On devbox: VibeSpace’s list/.test(x)), reqs);
+  ok('G(i): a conversation on ANOTHER machine — the chat menu sends NO opening (only its GET), as the New Session field sends none', reqs.length === 1 && gateOf(/^GET \/api\/available-models\?session=/.test(reqs[0])) && verdictOf(g1.items().some((x) => /On devbox: VibeSpace’s list/.test(x))), reqs);
   const g2 = await openMenu(menuOf(here));
-  ok('…and on THIS machine the GET comes first, then ONE opening POST (the person\'s act)', reqs.length === 2 && /^GET /.test(reqs[0]) && /^POST \/api\/cli-models\/open/.test(reqs[1]), reqs);
+  ok('…and on THIS machine the GET comes first, then ONE opening POST (the person\'s act)', reqs.length === 2 && gateOf(/^GET /.test(reqs[0])) && verdictOf(/^POST \/api\/cli-models\/open/.test(reqs[1])), reqs);
   const before = g2.rowNodes();
   window.dispatchEvent(new CustomEvent('vs-available-models-dirty', { detail: { backend: 'antigravity', account: 'machine' } })); await tick();
   window.dispatchEvent(new CustomEvent('vs-available-models-dirty', { detail: { backend: 'antigravity', account: 'machine' } })); await tick();
   const after = g2.rowNodes();
-  ok(`G(ii): two dirty pushes with an UNCHANGED answer rebuild nothing — every row node kept (${after.filter((n, i) => n === before[i]).length} of ${before.length}), one GET each`, before.length >= 5 && after.length === before.length && after.every((n, i) => n === before[i]) && reqs.filter((x) => /^GET /.test(x)).length === 3, { kept: after.filter((n, i) => n === before[i]).length, of: before.length, reqs });
+  ok(`G(ii): two dirty pushes with an UNCHANGED answer rebuild nothing — every row node kept (${after.filter((n, i) => n === before[i]).length} of ${before.length}), one GET each`, before.length >= 5 && after.length === before.length && gateOf(after.every((n, i) => n === before[i])) && reqs.filter((x) => /^GET /.test(x)).length === 3, { kept: after.filter((n, i) => n === before[i]).length, of: before.length, reqs });
   answer = menuOf(here, [...rows, { id: 'gemini-new-high', label: 'Gemini New (High)' }]);
   window.dispatchEvent(new CustomEvent('vs-available-models-dirty', { detail: { backend: 'antigravity', account: 'machine' } })); await tick();
-  ok('…and a CHANGED answer redraws the rows (the new row there)', g2.items().some((x) => x === 'Gemini New (High)'), g2.items());
+  ok('…and a CHANGED answer redraws the rows (the new row there)', verdictOf(g2.items().some((x) => x === 'Gemini New (High)')), g2.items());
   const e1 = await openMenu(menuOf(here), { model: 'gemini-9-held-high' });
   const held = e1.dd ? e1.dd.children.find((c) => /chat-status-models-held/.test(c.className)) : null;
-  ok('E (the chat\'s half): the conversation\'s model that the report does not list is KEPT as a marked row, said «gemini-9-held-high — not in Antigravity’s report» — the New Session field\'s words', !!held && held.textContent === 'gemini-9-held-high — not in Antigravity’s report' && /\bactive\b/.test(held.className), e1.items());
+  ok('E (the chat\'s half): the conversation\'s model that the report does not list is KEPT as a marked row, said «gemini-9-held-high — not in Antigravity’s report» — the New Session field\'s words', !!held && held.textContent === 'gemini-9-held-high — not in Antigravity’s report' && verdictOf(/\bactive\b/.test(held.className)), e1.items());
 }
 
 // ── ⑤ E2 + the callers' census ────────────────────────────────────────────────────────────────────────────────
@@ -686,7 +686,7 @@ console.log('⑤ E2 (a cache, never shared) + the door\'s callers');
   const files = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? files(path.join(dir, d.name)) : /\.(js|mjs|cjs)$/.test(d.name) ? [path.join(dir, d.name)] : []));
   const TREE = Object.fromEntries([...files('src').filter((f) => !f.startsWith('src/lib/i18n')), 'server.js'].map((f) => [f, read(f)])); // EVERY file — the census reads the whole tree
   const namers = Object.keys(TREE).filter((f) => /cli-models\.json/.test(TREE[f]));
-  ok('E2: only the door names data/cli-models.json — no export, import, sync, backup or device push reads it (a cache that stays on this hub)', eq(namers, ['src/server/cli-models-door.js']) && /const FILE = 'cli-models\.json';/.test(TREE['src/server/cli-models-door.js']), namers);
+  ok('E2: only the door names data/cli-models.json — no export, import, sync, backup or device push reads it (a cache that stays on this hub)', gateOf(eq(namers, ['src/server/cli-models-door.js'])) && verdictOf(/const FILE = 'cli-models\.json';/.test(TREE['src/server/cli-models-door.js'])), namers);
   // THE CENSUS (round 2 law A: the press is the construction, this reads its ONE site): the door made once; the press minted
   // ONCE — provider-models' cliDoor, its first statement — and handed to the one ask; `modelsReport` read by the door alone
   // (the descriptor declares it); no timer in the door but its child's two; no synchronous read in the door. Every
@@ -766,7 +766,7 @@ console.log('⑤ E2 (a cache, never shared) + the door\'s callers');
     'mint-headers (5)': ['through a mint handed a hand-built headers object in a new file (plant 5)', 'mint'], 'mint-travels': ['by handing the mint itself on (app.locals)', 'mint'] };
   for (const [name, texts] of Object.entries(planted)) {
     const v = texts ? census(texts) : [['plant-missed', name]];
-    ok(`PLANTED: a listing ${WORDS[name][0]} is RED by its name «${WORDS[name][1]}»`, v.some((x) => x[0] === WORDS[name][1]), v);
+    ok(`PLANTED: a listing ${WORDS[name][0]} is RED by its name «${WORDS[name][1]}»`, verdictOf(v.some((x) => x[0] === WORDS[name][1])), v);
   }
 }
 
@@ -791,15 +791,15 @@ console.log('⑤b B-574d (主开发 r4764): the cache through the STORE WRITER �
   };
   const g = await writerLeg(DOOR, 'real');
   ok(`the cache's save goes to the writer by name (${g.names}), 0600, its bytes the LATEST state (the listed account's rows); a failed landing: the save answers false (${g.answer}), the failure SAID (${g.said}), the old file stands whole`,
-    g.mine >= 1 && g.names === 'cli-models.write' && g.mode === 0o600 && g.latest && g.answer === false && g.said >= 1 && g.whole, JSON.stringify(g));
+    g.mine >= 1 && g.names === 'cli-models.write' && g.mode === 0o600 && gateOf(g.latest) && g.answer === false && g.said >= 1 && verdictOf(g.whole), JSON.stringify(g));
   const FAILW = "        onWritten: (ok, e) => { if (!ok) log(`[cli-models] the cache was not written:";
-  ok('the writer control\'s line exists', DSRC2.includes(FAILW));
+  ok('the writer control\'s line exists', verdictOf(DSRC2.includes(FAILW)));
   const noSay = M2.load('src/server/cli-models-door.js', editAnchor(DSRC2, FAILW, "        onWritten: (ok, e) => { if (false) log(`[cli-models] the cache was not written:", "src/server/cli-models-door.js"), 'writer-fail-cut');
   const r = await writerLeg(noSay, 'red');
   ok('RED CONTROL: the failure branch taken out — the failed landing is said by nobody', r.said === 0 && r.answer === false, JSON.stringify(r));
   // 主开发 r4992: the save's ANSWER is the writer's landing passed through — a second red cuts that pass-through to a constant true
   const ANSW = '    return (writing = Promise.resolve(writer().durable(file)));';
-  ok('the answer control\'s line exists', DSRC2.includes(ANSW));
+  ok('the answer control\'s line exists', verdictOf(DSRC2.includes(ANSW)));
   const noAnswer = mutantCopies('agy-models-door-answer', REPO).load('src/server/cli-models-door.js', editAnchor(DSRC2, ANSW, '    return (writing = Promise.resolve(true));', 'src/server/cli-models-door.js'), 'writer-answer-cut');
   const r2 = await writerLeg(noAnswer, 'answer');
   ok('RED CONTROL: the landing\'s answer not passed through (a constant true) — a refused landing answers true', r2.answer === true, JSON.stringify(r2));
@@ -812,23 +812,23 @@ console.log('⑥ negative controls (patched copies outside the tree)');
   const FLOOR = "        if (e && e.listedAt && t - e.listedAt < floorMs && !moved(e.cli)) return";
   const FAILF = "        if (le && t - le.at < failFloorMs && !moved(le.cli)) return";
   const STDIO = "stdio: ['pipe', 'pipe', 'ignore']";
-  ok('the controls\' lines exist', DSRC.includes(FLOOR) && DSRC.includes(FAILF) && DSRC.includes(STDIO));
+  ok('the controls\' lines exist', gateOf(DSRC.includes(FLOOR)) && gateOf(DSRC.includes(FAILF)) && verdictOf(DSRC.includes(STDIO)));
   const noFloor = M.load('src/server/cli-models-door.js', editAnchor(DSRC, FLOOR, '        if (false) return', "src/server/cli-models-door.js"), 'no-floor');
   const redF = (await doorLegs(noFloor, 'no-floor')).filter((r) => !r.pass).map((r) => r.name);
-  ok(`control no-floor (every opening runs agy): «the FLOOR» is RED (${redF.length} red)`, redF.some((n) => /^the FLOOR/.test(n)), redF.join(' | ').slice(0, 300));
+  ok(`control no-floor (every opening runs agy): «the FLOOR» is RED (${redF.length} red)`, verdictOf(redF.some((n) => /^the FLOOR/.test(n))), redF.join(' | ').slice(0, 300));
   const noFail = M.load('src/server/cli-models-door.js', editAnchor(DSRC, FAILF, '        if (false) return', "src/server/cli-models-door.js"), 'no-fail-floor');
   const redN = (await doorLegs(noFail, 'no-fail-floor')).filter((r) => !r.pass).map((r) => r.name);
-  ok(`control no-fail-floor: «10 openings against a signed-out account» is RED (${redN.length} red)`, redN.some((n) => /^10 openings/.test(n)), redN.join(' | ').slice(0, 300));
+  ok(`control no-fail-floor: «10 openings against a signed-out account» is RED (${redN.length} red)`, verdictOf(redN.some((n) => /^10 openings/.test(n))), redN.join(' | ').slice(0, 300));
   const errRead = M.load('src/server/cli-models-door.js', editAnchor(editAnchor(DSRC, STDIO, "stdio: ['pipe', 'pipe', 'pipe']", "src/server/cli-models-door.js"), "    try { child.stdout.setEncoding('utf8'); child.stdout.on('error', () => { }); } catch { }", "    try { child.stdout.setEncoding('utf8'); child.stdout.on('error', () => { }); child.stderr.setEncoding('utf8'); child.stderr.on('data', (d) => { stdout += d; }); } catch { }", "src/server/cli-models-door.js"), 'reads-stderr');
   const redE = (await doorLegs(errRead, 'reads-stderr')).filter((r) => !r.pass).map((r) => r.name);
-  ok(`control reads-stderr: «STDOUT ONLY» is RED (${redE.length} red)`, redE.some((n) => /^STDOUT ONLY/.test(n)), redE.join(' | ').slice(0, 300));
+  ok(`control reads-stderr: «STDOUT ONLY» is RED (${redE.length} red)`, verdictOf(redE.some((n) => /^STDOUT ONLY/.test(n))), redE.join(' | ').slice(0, 300));
   const KILL = "    const timer = setTimeout(() => { timedOut = true; finish(null, 'timeout'); }, timeoutMs);";
-  ok('the no-kill control\'s line exists', DSRC.includes(KILL));
+  ok('the no-kill control\'s line exists', verdictOf(DSRC.includes(KILL)));
   const noKill = M.load('src/server/cli-models-door.js', editAnchor(DSRC, KILL, '    const timer = null;', "src/server/cli-models-door.js"), 'no-kill');
   const redK = (await hangLegs(noKill, 'no-kill', 'hang-short')).filter((r) => !r.pass).map((r) => r.name);
-  ok(`control no-kill (a hanging agy is waited out): «a CLI that never answers is KILLED» is RED (${redK.length} red)`, redK.some((n) => /^a CLI that never answers is KILLED/.test(n)), redK.join(' | ').slice(0, 300));
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(r.name, r.pass, r.detail);
+  ok(`control no-kill (a hanging agy is waited out): «a CLI that never answers is KILLED» is RED (${redK.length} red)`, verdictOf(redK.some((n) => /^a CLI that never answers is KILLED/.test(n))), redK.join(' | ').slice(0, 300));
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(r.name, verdictOf(r.pass), r.detail);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

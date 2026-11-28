@@ -50,7 +50,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — a pid-modulo port was a 1-in-20 collision
 const wt = `/tmp/vs-rail-smoke-${process.pid}`;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree ──────────────────────────────────────────
@@ -106,7 +106,7 @@ try {
   await sleep(800); // rail builds on a constructor setTimeout + settings load
 
   // default ON: rail present, classic tab bar hidden
-  check('rail renders by default', await evalJs(`!!document.getElementById('sidebar-rail')`));
+  check('rail renders by default', verdictOf(await evalJs(`!!document.getElementById('sidebar-rail')`)));
   // 3 content tabs + every PANEL_TABS entry + 2 launchers — the panel count is
   // READ OFF THE SOURCE, not typed: a typed 10 went red in the heavy tier the
   // day the Channels panel (2.369.94) became the sixth, after 105 green runs.
@@ -118,9 +118,9 @@ try {
   const launchers = itemIds.filter((id) => !['folders', 'tasks', 'mounts'].includes(id) && !panelTabs.includes(id));
   const wantItems = 3 + panelTabs.length + launchers.length;
   const gotItems = await evalJs(`document.querySelectorAll('#sidebar-rail .rail-item').length`);
-  check(`rail has ${wantItems} items (3 content tabs + ${panelTabs.length} panels: ${panelTabs.join('/')} + ${launchers.length} launchers: ${launchers.join('/')}) — got ${gotItems}`, gotItems === wantItems && launchers.includes('browser') && launchers.includes('settings'));
-  check('classic tab bar hidden', await evalJs(`getComputedStyle(document.querySelector('.sidebar-tabs')).display === 'none'`));
-  check('sidebar content wrapped', await evalJs(`!!document.querySelector('#sidebar .sidebar-main')`));
+  check(`rail has ${wantItems} items (3 content tabs + ${panelTabs.length} panels: ${panelTabs.join('/')} + ${launchers.length} launchers: ${launchers.join('/')}) — got ${gotItems}`, gotItems === wantItems && gateOf(launchers.includes('browser')) && verdictOf(launchers.includes('settings')));
+  check('classic tab bar hidden', verdictOf(await evalJs(`getComputedStyle(document.querySelector('.sidebar-tabs')).display === 'none'`)));
+  check('sidebar content wrapped', verdictOf(await evalJs(`!!document.querySelector('#sidebar .sidebar-main')`)));
 
   // panel tabs render into the list area
   const openPanel = async (id) => {
@@ -128,7 +128,7 @@ try {
     await sleep(600);
     return evalJs(`!!document.querySelector('.rail-panel-${id}')`);
   };
-  check('ports panel renders', await openPanel('ports'));
+  check('ports panel renders', verdictOf(await openPanel('ports')));
   // 2.369.136 (owner: "搜索框和filter似乎和这个界面无关"): the session search /
   // filter row and the quick tabs belong to the session tabs — hidden on a panel
   const filterOnPanel = await evalJs(`(() => { const r = document.getElementById('session-filter-row'); const q = document.getElementById('status-quick-tabs'); return { row: r ? getComputedStyle(r).display : 'missing', tabs: q ? getComputedStyle(q).display : 'missing', cls: document.getElementById('sidebar').className }; })()`);
@@ -140,48 +140,48 @@ try {
   // The machine row lands after the async port scan fetch — poll instead of a
   // fixed sleep (gate-only red under a loaded machine while standalone green).
   const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await evalJs(expr)) return true; await sleep(250); } return evalJs(expr); };
-  check('ports panel shows local machine scan', await waitFor(`document.querySelector('.rail-panel-ports .ports-machine') !== null`));
-  check('agents panel renders', await openPanel('agents'));
+  check('ports panel shows local machine scan', verdictOf(await waitFor(`document.querySelector('.rail-panel-ports .ports-machine') !== null`)));
+  check('agents panel renders', verdictOf(await openPanel('agents')));
   // redesign: roster header has the Add-account menu button, rows carry a ⋯ menu
-  check('agents roster uses redesigned header', await evalJs(`!!document.querySelector('.rail-panel-agents .acct-roster-head .acct-add')`));
+  check('agents roster uses redesigned header', verdictOf(await evalJs(`!!document.querySelector('.rail-panel-agents .acct-roster-head .acct-add')`)));
   // a fresh instance has only each roster's CLI-login row (no ⋯ — there is no account to rename or remove); IF a named
   // account exists it must carry the ⋯ menu, and NO row may carry the old Test button. The CLI-login rows are DERIVED —
   // every `__…__` data-id (Claude's __global__, Codex's __codex_global__, an isolated-home harness's __home_global__):
   // the hand-written two-id list went RED on .330's Antigravity roster (lane mirror-331-reds-chrome)
-  check('named account rows (if any) have overflow menu, none have inline Test', await evalJs(`
+  check('named account rows (if any) have overflow menu, none have inline Test', verdictOf(await evalJs(`
     (() => { const rows = [...document.querySelectorAll('.rail-panel-agents .acct-key-row')].filter((r) => !/^__[a-z_]+__$/.test(r.dataset.id || ''));
       const noTest = !document.querySelector('.rail-panel-agents .acct-test');
       const allMenu = rows.every(r => r.querySelector('.acct-menu'));
-      return noTest && allMenu; })()`));
-  check('CONTROL: a CLI-login row copy given an account id (a named row without ⋯) fails the same rule', await evalJs(`
+      return noTest && allMenu; })()`)));
+  check('CONTROL: a CLI-login row copy given an account id (a named row without ⋯) fails the same rule', verdictOf(await evalJs(`
     (() => { const r = document.querySelector('.rail-panel-agents .acct-key-row[data-id^="__"]')?.cloneNode(true); if (!r) return false; r.dataset.id = 'acct-control';
-      return ![r].filter((x) => !/^__[a-z_]+__$/.test(x.dataset.id || '')).every((x) => x.querySelector('.acct-menu')); })()`));
+      return ![r].filter((x) => !/^__[a-z_]+__$/.test(x.dataset.id || '')).every((x) => x.querySelector('.acct-menu')); })()`)));
   // add-account menu opens a context menu
   await evalJs(`document.querySelector('.rail-panel-agents .acct-add').click()`);
   await sleep(200);
-  check('add-account opens a menu', await evalJs(`!!document.querySelector('.context-menu')`));
+  check('add-account opens a menu', verdictOf(await evalJs(`!!document.querySelector('.context-menu')`)));
   await evalJs(`document.querySelector('.context-menu')?.remove()`);
-  check('plugins panel renders', await openPanel('plugins'));
+  check('plugins panel renders', verdictOf(await openPanel('plugins')));
 
   // Background Work panel is sidebar-NATIVE (2.357.0, owner verdict): cards
   // expand INLINE — a sidebar click must never spawn a window, and the
   // interact entry points land back in the sidebar
   await evalJs(`fetch('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind:'task', name:'smoke-job', cmd:{argv:['sh','-c','sleep 5']}, context:{payload:'smoke'}, access:{view:'all', control:'session'}})}).then(r=>r.json())`);
-  check('jobs panel renders', await openPanel('jobs'));
+  check('jobs panel renders', verdictOf(await openPanel('jobs')));
   await sleep(800);
-  check('jobs toolbar renders (New button, no Open-window button)', await evalJs(`!!document.querySelector('.rail-panel-jobs .jobs-btn-ok') && ![...document.querySelectorAll('.rail-panel-jobs .jobs-btn')].some((b) => /open window/i.test(b.textContent))`));
-  check('smoke job card renders', await evalJs(`!!document.querySelector('.rail-panel-jobs [data-job]')`));
+  check('jobs toolbar renders (New button, no Open-window button)', verdictOf(await evalJs(`!!document.querySelector('.rail-panel-jobs .jobs-btn-ok') && ![...document.querySelectorAll('.rail-panel-jobs .jobs-btn')].some((b) => /open window/i.test(b.textContent))`)));
+  check('smoke job card renders', verdictOf(await evalJs(`!!document.querySelector('.rail-panel-jobs [data-job]')`)));
   const winsBefore = await evalJs('app.wm.windows.size');
   await evalJs(`document.querySelector('.rail-panel-jobs [data-job]').click()`);
   await sleep(800);
-  check('card click expands INLINE detail', await evalJs(`!!document.querySelector('.rail-panel-jobs .jobs-detail')`));
+  check('card click expands INLINE detail', verdictOf(await evalJs(`!!document.querySelector('.rail-panel-jobs .jobs-detail')`)));
   check('…and spawns NO window', await evalJs('app.wm.windows.size') === winsBefore);
-  check('openJobInteract lands in the sidebar, not a window', await evalJs(`(() => { const before = app.wm.windows.size; const id = document.querySelector('.rail-panel-jobs [data-job]').dataset.job; app.openJobInteract(id); return app.wm.windows.size === before && app.sidebar._activeTab === 'jobs'; })()`));
+  check('openJobInteract lands in the sidebar, not a window', verdictOf(await evalJs(`(() => { const before = app.wm.windows.size; const id = document.querySelector('.rail-panel-jobs [data-job]').dataset.job; app.openJobInteract(id); return app.wm.windows.size === before && app.sidebar._activeTab === 'jobs'; })()`)));
   await sleep(600);
 
   // System panel: the btop-like process manager (2.354.0) — real rows from
   // the live /api/sysinfo/procs, search narrows, expand exposes the actions
-  check('system panel renders', await openPanel('system'));
+  check('system panel renders', verdictOf(await openPanel('system')));
   // first /procs fetch: POLL, never a fixed sleep — under the gate's parallel
   // load the first fetch can take several seconds and a 1.5s sleep went red
   // (2.369.16 gate flake: 6 process-table asserts + a null .click())
@@ -192,24 +192,24 @@ try {
     if (await evalJs(`document.querySelectorAll('.rail-panel-system .prc-row').length > 5 && !!document.querySelector('.rail-panel-system .prc-pause') && !!document.querySelector('.rail-panel-system .sys-hist')`)) break;
     await sleep(250);
   }
-  check('process table has real rows', await evalJs(`document.querySelectorAll('.rail-panel-system .prc-row').length > 5`));
-  check('rows carry cpu + mem cells', await evalJs(`!!document.querySelector('.rail-panel-system .prc-row .prc-cpu') && !!document.querySelector('.rail-panel-system .prc-row .prc-mem')`));
-  check('sort chips render (CPU/MEM/PID/Name/Tree)', await evalJs(`document.querySelectorAll('.rail-panel-system .prc-sorts .sys-range-chip').length === 5`));
-  check('rows carry a PID column', await evalJs(`(() => { const el = document.querySelector('.rail-panel-system .prc-row .prc-pid'); return !!el && /^\\d+$/.test(el.textContent); })()`));
-  check('charts zone sits BEFORE the process table', await evalJs(`(() => { const p = document.querySelector('.rail-panel-system .sys-procs'); const h = document.querySelector('.rail-panel-system .sys-hist'); return !!p && !!h && (h.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0; })()`));
+  check('process table has real rows', verdictOf(await evalJs(`document.querySelectorAll('.rail-panel-system .prc-row').length > 5`)));
+  check('rows carry cpu + mem cells', verdictOf(await evalJs(`!!document.querySelector('.rail-panel-system .prc-row .prc-cpu') && !!document.querySelector('.rail-panel-system .prc-row .prc-mem')`)));
+  check('sort chips render (CPU/MEM/PID/Name/Tree)', verdictOf(await evalJs(`document.querySelectorAll('.rail-panel-system .prc-sorts .sys-range-chip').length === 5`)));
+  check('rows carry a PID column', verdictOf(await evalJs(`(() => { const el = document.querySelector('.rail-panel-system .prc-row .prc-pid'); return !!el && /^\\d+$/.test(el.textContent); })()`)));
+  check('charts zone sits BEFORE the process table', verdictOf(await evalJs(`(() => { const p = document.querySelector('.rail-panel-system .sys-procs'); const h = document.querySelector('.rail-panel-system .sys-hist'); return !!p && !!h && (h.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0; })()`)));
   // pause toggle freezes the table (no fetch-driven redraw while on)
   await evalJs(`document.querySelector('.rail-panel-system .prc-pause')?.click()`);
-  check('pause toggle arms', await evalJs(`document.querySelector('.rail-panel-system .prc-pause').classList.contains('on') && app.sidebar._prcPaused === true`));
+  check('pause toggle arms', verdictOf(await evalJs(`document.querySelector('.rail-panel-system .prc-pause').classList.contains('on') && app.sidebar._prcPaused === true`)));
   await evalJs(`document.querySelector('.rail-panel-system .prc-pause')?.click()`);
-  check('pause toggle disarms + refresh resumes', await evalJs(`app.sidebar._prcPaused === false`));
+  check('pause toggle disarms + refresh resumes', verdictOf(await evalJs(`app.sidebar._prcPaused === false`)));
   await evalJs(`(() => { const s = document.querySelector('.rail-panel-system .prc-search'); s.value = 'node'; s.dispatchEvent(new Event('input')); })()`);
   await sleep(400);
   // filter matches the FULL cmd (the title attr), not the displayed basename —
   // `sh -c "node …"` rows legitimately show 'sh' while matching 'node'
-  check('search filters the table', await evalJs(`(() => { const rows = [...document.querySelectorAll('.rail-panel-system .prc-row')]; return rows.length > 0 && rows.every((r) => (r.querySelector('.prc-name')?.title || '').toLowerCase().includes('node')); })()`));
+  check('search filters the table', verdictOf(await evalJs(`(() => { const rows = [...document.querySelectorAll('.rail-panel-system .prc-row')]; return rows.length > 0 && rows.every((r) => (r.querySelector('.prc-name')?.title || '').toLowerCase().includes('node')); })()`)));
   await evalJs(`document.querySelector('.rail-panel-system .prc-row')?.click()`);
   await sleep(200);
-  check('row expands to detail with kill actions', await evalJs(`!!document.querySelector('.rail-panel-system .prc-detail .prc-act[data-sig="TERM"]') || !!document.querySelector('.rail-panel-system .prc-detail .empty-hint')`));
+  check('row expands to detail with kill actions', verdictOf(await evalJs(`!!document.querySelector('.rail-panel-system .prc-detail .prc-act[data-sig="TERM"]') || !!document.querySelector('.rail-panel-system .prc-detail .empty-hint')`)));
   await evalJs(`(() => { const s = document.querySelector('.rail-panel-system .prc-search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
   await sleep(300);
 
@@ -218,7 +218,7 @@ try {
   await sleep(200);
   await evalJs(`app.openPluginsDialog()`);
   await sleep(500);
-  check('openPluginsDialog redirects to rail panel', await evalJs(`!!document.querySelector('.rail-panel-plugins') && !document.getElementById('plugins-dialog')`));
+  check('openPluginsDialog redirects to rail panel', verdictOf(await evalJs(`!!document.querySelector('.rail-panel-plugins') && !document.getElementById('plugins-dialog')`)));
   // lane dc-plugins: every built-in row is drawn from its DECLARED capability (src/plugins/<id>.js provides), never
   // its id. lane plugin-settings-p0 (the VS Code plugin model): a row = name · chip · ONE switch · [install] · ⚙ — the
   // relay fields live in All Settings › Plugins › Public URLs (frp), so no row carries a configuration control
@@ -231,49 +231,49 @@ try {
     state: (c.querySelector('.plugin-chip')?.textContent || '').trim() })))`));
   check('plugin rows: the ONE list in order (tailscale, frp, opencode-serve)', cards.map((c) => c.name).join('|') === 'Tailscale|Public URLs (frp)|OpenCode background service', JSON.stringify(cards));
   // lane ui-controls-and-bugs pick 3: a switch nobody can use is NOT drawn — the row's chip says why and is its door
-  check('every row: at most ONE control — its switch, drawn only when it can be used (else its chip says why) — + ⚙; the relay fields are settings rows now', cards.every((c) => c.controls === c.switches && c.switches <= 1 && c.gear && (c.switches === 1 || !!c.state)), JSON.stringify(cards));
-  check('the relay row (provides relay) says its relay state', /relay not configured|connected|stopped|not installed/.test(cards[1]?.state || ''), JSON.stringify(cards[1]));
+  check('every row: at most ONE control — its switch, drawn only when it can be used (else its chip says why) — + ⚙; the relay fields are settings rows now', verdictOf(cards.every((c) => c.controls === c.switches && c.switches <= 1 && c.gear && (c.switches === 1 || !!c.state))), JSON.stringify(cards));
+  check('the relay row (provides relay) says its relay state', verdictOf(/relay not configured|connected|stopped|not installed/.test(cards[1]?.state || '')), JSON.stringify(cards[1]));
 
   // re-click active item collapses the sidebar — but the rail STRIP persists
   // (sidebar.railPersistent, default ON) and a rail click expands back
   await evalJs(`app.sidebar._railGo('plugins')`);
   await sleep(200);
-  check('re-click collapses sidebar', await evalJs(`!app.sidebar.isOpen`));
-  check('collapsed keeps the rail strip', await evalJs(`document.getElementById('sidebar').classList.contains('rail-collapsed')`));
-  check('collapsed strip is 44px', await evalJs(`Math.round(document.getElementById('sidebar').getBoundingClientRect().width) === 44`));
-  check('panel area hidden while collapsed', await evalJs(`getComputedStyle(document.querySelector('.sidebar-main')).display === 'none'`));
+  check('re-click collapses sidebar', verdictOf(await evalJs(`!app.sidebar.isOpen`)));
+  check('collapsed keeps the rail strip', verdictOf(await evalJs(`document.getElementById('sidebar').classList.contains('rail-collapsed')`)));
+  check('collapsed strip is 44px', verdictOf(await evalJs(`Math.round(document.getElementById('sidebar').getBoundingClientRect().width) === 44`)));
+  check('panel area hidden while collapsed', verdictOf(await evalJs(`getComputedStyle(document.querySelector('.sidebar-main')).display === 'none'`)));
   await evalJs(`app.sidebar._railGo('folders')`);
   await sleep(200);
-  check('rail click expands back', await evalJs(`app.sidebar.isOpen && !document.getElementById('sidebar').classList.contains('rail-collapsed')`));
+  check('rail click expands back', verdictOf(await evalJs(`app.sidebar.isOpen && !document.getElementById('sidebar').classList.contains('rail-collapsed')`)));
   // railPersistent OFF → collapsing hides everything (classic)
   await evalJs(`app.settings.set('sidebar.railPersistent', false)`);
   await sleep(1200); // let the save echo land (applyRemote guard covers the debounce)
   await evalJs(`app.sidebar.toggle(false)`);
   await sleep(200);
-  check('persistent off: collapse hides fully', await evalJs(`!document.getElementById('sidebar').classList.contains('rail-collapsed')`));
+  check('persistent off: collapse hides fully', verdictOf(await evalJs(`!document.getElementById('sidebar').classList.contains('rail-collapsed')`)));
   await evalJs(`app.settings.set('sidebar.railPersistent', true)`);
   await sleep(200);
-  check('persistent back on applies live to a collapsed sidebar', await evalJs(`document.getElementById('sidebar').classList.contains('rail-collapsed')`));
+  check('persistent back on applies live to a collapsed sidebar', verdictOf(await evalJs(`document.getElementById('sidebar').classList.contains('rail-collapsed')`)));
   await evalJs(`app.sidebar.toggle(true)`);
   // header title tracks the active panel
   await evalJs(`app.sidebar._railGo('ports')`);
   await sleep(300);
-  check('header title tracks panel', await evalJs(`document.querySelector('#sidebar .sidebar-title').textContent.length > 0 && document.querySelector('#sidebar .sidebar-title').textContent !== 'Sessions'`));
+  check('header title tracks panel', verdictOf(await evalJs(`document.querySelector('#sidebar .sidebar-title').textContent.length > 0 && document.querySelector('#sidebar .sidebar-title').textContent !== 'Sessions'`)));
   await evalJs(`app.sidebar._railGo('folders')`);
   await sleep(200);
-  check('header title restores for sessions', await evalJs(`document.querySelector('#sidebar .sidebar-title').textContent === 'Sessions'`));
+  check('header title restores for sessions', verdictOf(await evalJs(`document.querySelector('#sidebar .sidebar-title').textContent === 'Sessions'`)));
 
   // setting OFF live-restores the classic tab bar + falls back to a session tab
   await evalJs(`app.settings.set('sidebar.activityRail', false)`);
   await sleep(500);
-  check('rail removed when setting off', await evalJs(`!document.getElementById('sidebar-rail')`));
-  check('classic tab bar restored', await evalJs(`getComputedStyle(document.querySelector('.sidebar-tabs')).display !== 'none'`));
-  check('panel tab fell back to folders', await evalJs(`app.sidebar._activeTab === 'folders'`));
+  check('rail removed when setting off', verdictOf(await evalJs(`!document.getElementById('sidebar-rail')`)));
+  check('classic tab bar restored', verdictOf(await evalJs(`getComputedStyle(document.querySelector('.sidebar-tabs')).display !== 'none'`)));
+  check('panel tab fell back to folders', verdictOf(await evalJs(`app.sidebar._activeTab === 'folders'`)));
 
   // and back ON
   await evalJs(`app.settings.set('sidebar.activityRail', true)`);
   await sleep(500);
-  check('rail rebuilt when setting on', await evalJs(`!!document.getElementById('sidebar-rail')`));
+  check('rail rebuilt when setting on', verdictOf(await evalJs(`!!document.getElementById('sidebar-rail')`)));
 
   // ── «LOCATE IN SIDEBAR» NEVER HIDES WHAT IT IS ASKED TO SHOW (lane think-tools-phone, 主开发 2026-11-17 — the owner, the row's
   // conversation open in a window, two toasts «条目不可见——可能已归档或被过滤»: «这哪里不可见了？»; and «另外右键菜单我怎么找不到fork»).
@@ -314,45 +314,45 @@ try {
   await evalJs(`app.sidebar.toggle(false)`); await sleep(300);
   const hidden1 = await evalJs(STATE);
   let L = await locate();
-  check(`the window's menu offers «Locate in sidebar» and «Fork…» for its conversation (${JSON.stringify(L.rows)})`, Array.isArray(L.rows) && L.rows.includes('Locate in sidebar') && L.rows.includes('Fork…'), L.rows);
-  check(`① THE OWNER'S CASE — the sidebar CLOSED, Locate from the window's menu, the row in a zone that drew no card (History closed): open on the sessions list, History opened, the row flashed, no toast (${JSON.stringify({ before: hidden1.card, ...L, rows: undefined, history: await evalJs('app.sidebar._wbHistoryOpen') })})`, !hidden1.card && L.pressed && shown(L) && await evalJs('app.sidebar._wbHistoryOpen === true'), L);
+  check(`the window's menu offers «Locate in sidebar» and «Fork…» for its conversation (${JSON.stringify(L.rows)})`, gateOf(Array.isArray(L.rows)) && gateOf(L.rows.includes('Locate in sidebar')) && verdictOf(L.rows.includes('Fork…')), L.rows);
+  check(`① THE OWNER'S CASE — the sidebar CLOSED, Locate from the window's menu, the row in a zone that drew no card (History closed): open on the sessions list, History opened, the row flashed, no toast (${JSON.stringify({ before: hidden1.card, ...L, rows: undefined, history: await evalJs('app.sidebar._wbHistoryOpen') })})`, !hidden1.card && gateOf(L.pressed) && gateOf(shown(L)) && verdictOf(await evalJs('app.sidebar._wbHistoryOpen === true')), L);
   // ② THE OPEN LIST with the row on screen (the release collapsed it here and said «not visible»)
   await clearToasts(); await evalJs(`app.sidebar._railShow('folders')`); await plant(); await sleep(600);
   const before = await evalJs(STATE);
   L = await locate();
-  check(`② the OPEN sessions list, the row on screen (${JSON.stringify(before)}): Locate from the window's menu keeps it open and flashes the row, no toast (${JSON.stringify({ ...L, rows: undefined })})`, before.open && before.card && L.pressed && shown(L), L);
+  check(`② the OPEN sessions list, the row on screen (${JSON.stringify(before)}): Locate from the window's menu keeps it open and flashes the row, no toast (${JSON.stringify({ ...L, rows: undefined })})`, gateOf(before.open) && gateOf(before.card) && gateOf(L.pressed) && verdictOf(shown(L)), L);
   // another panel open: back on the sessions list
   await clearToasts(); await evalJs(`app.sidebar._railShow('ports')`); await sleep(500); await plant();
   L = await locate();
-  check(`Locate from another panel (Ports): back on the sessions list, the row flashed (${JSON.stringify({ ...L, rows: undefined })})`, L.pressed && shown(L), L);
+  check(`Locate from another panel (Ports): back on the sessions list, the row flashed (${JSON.stringify({ ...L, rows: undefined })})`, gateOf(L.pressed) && verdictOf(shown(L)), L);
   // a row past its project's FIVE in Recent (the zone draws five until «N more»): Locate shows it
   await clearToasts(); await evalJs(`app.sidebar._railShow('folders')`); await plant({}, { siblings: 6 }); await sleep(300);
   const hidden5 = await evalJs(STATE);
   L = await locate();
-  check(`a row past its project's five in Recent: not drawn before (${hidden5.card}), Locate expands the project and flashes the row, no toast (${JSON.stringify({ ...L, rows: undefined })})`, !hidden5.card && L.pressed && shown(L), L);
+  check(`a row past its project's five in Recent: not drawn before (${hidden5.card}), Locate expands the project and flashes the row, no toast (${JSON.stringify({ ...L, rows: undefined })})`, !hidden5.card && gateOf(L.pressed) && verdictOf(shown(L)), L);
   // a row hidden by the SEARCH BOX: said, with the words searched and its door
   await clearToasts(); await plant();
   await evalJs(`(() => { const el = document.getElementById('session-filter'); el.value = 'zz-no-such-row'; app.sidebar._render(); return true; })()`);
   L = await locate();
-  check(`a row hidden by the SEARCH BOX: said so, with the words searched and the door «Clear search» (${L.toast})`, /Hidden by the search box: «zz-no-such-row»/.test(L.toast) && /Clear search/.test(L.toast) && !L.card && L.open, L);
+  check(`a row hidden by the SEARCH BOX: said so, with the words searched and the door «Clear search» (${L.toast})`, gateOf(/Hidden by the search box: «zz-no-such-row»/.test(L.toast)) && gateOf(/Clear search/.test(L.toast)) && !L.card && verdictOf(L.open), L);
   await evalJs(`(() => { const b = document.querySelector('#global-toasts .global-toast-action'); if (b) b.click(); return !!b; })()`);
   await sleep(900);
   L = await evalJs(`(() => { const c = [...document.querySelectorAll('#sidebar .session-item-card')].find((x) => x._sessionId === '${LOC}'); return { box: document.getElementById('session-filter').value, flash: !!c && c.classList.contains('locate-flash') }; })()`);
-  check(`…its door «Clear search» empties the box and the row is located and flashed (${JSON.stringify(L)})`, L.box === '' && L.flash, L);
+  check(`…its door «Clear search» empties the box and the row is located and flashed (${JSON.stringify(L)})`, L.box === '' && verdictOf(L.flash), L);
   // an ARCHIVED row: said, with its door «Show archived»
   await clearToasts(); await plant();
   await evalJs(`(() => { const sb = app.sidebar; sb.toggleArchive(sb._allSessions[0]); sb._render(); return true; })()`); await sleep(300);
   L = await locate();
-  check(`an ARCHIVED row: said so, with the door «Show archived» (${L.toast})`, /This conversation is archived/.test(L.toast) && /Show archived/.test(L.toast) && !L.card && L.open, L);
+  check(`an ARCHIVED row: said so, with the door «Show archived» (${L.toast})`, gateOf(/This conversation is archived/.test(L.toast)) && gateOf(/Show archived/.test(L.toast)) && !L.card && verdictOf(L.open), L);
   await evalJs(`(() => { const b = document.querySelector('#global-toasts .global-toast-action'); if (b) b.click(); return !!b; })()`);
   await sleep(900);
   L = await evalJs(`(() => { const sb = app.sidebar, c = [...document.querySelectorAll('#sidebar .session-item-card')].find((x) => x._sessionId === '${LOC}'); return { archivedOn: sb._statusFilter.has('archived'), flash: !!c && c.classList.contains('locate-flash') }; })()`);
-  check(`…its door shows the archived rows and the row is located and flashed (${JSON.stringify(L)})`, L.archivedOn && L.flash, L);
+  check(`…its door shows the archived rows and the row is located and flashed (${JSON.stringify(L)})`, gateOf(L.archivedOn) && verdictOf(L.flash), L);
   await evalJs(`(() => { const sb = app.sidebar; sb.toggleArchive(sb._allSessions[0]); sb._statusFilter.delete('archived'); localStorage.setItem('statusFilter', JSON.stringify([...sb._statusFilter])); sb._render(); return true; })()`);
   await clearToasts();
   // the re-click rule stays the rail ITEM's own: a person's second click on the open tab still collapses
   await evalJs(`app.sidebar._railShow('folders')`); await sleep(200); await evalJs(`app.sidebar._railGo('folders')`); await sleep(300);
-  check('the rail item\'s own re-click still collapses (the show door never does)', await evalJs(`!app.sidebar.isOpen`));
+  check('the rail item\'s own re-click still collapses (the show door never does)', verdictOf(await evalJs(`!app.sidebar.isOpen`)));
   await evalJs(`(() => { const w = app.wm.windows.get('${WIN}'); if (w) { w.type = w._locateType0; delete w._openSpec.backendSessionId; app.wm.closeWindow('${WIN}'); } const sb = app.sidebar; delete sb._poll; sb.toggle(true); sb._poll(); return true; })()`);
 
 } catch (e) {
@@ -361,4 +361,4 @@ try {
 }
 
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

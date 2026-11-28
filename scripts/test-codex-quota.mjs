@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js'));
 
@@ -40,35 +40,35 @@ const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js
 // ── P1: persistence + estimator wiring pins ──
 {
   const ur = read('src/usage-routes.js');
-  ok('snapshots SEED from USAGE_CACHE_DIR (idle accounts stop going amnesiac at 14 days)', /SEED FROM DISK[\s\S]{0,400}cxs-\[\\w-\]\+\|__global_codex__/.test(ur));
-  ok('…and WRITE-THROUGH freshest-wins (fetchedAt-guarded, never poison newer with older)', /WRITE-THROUGH[\s\S]{0,600}Number\(cur\.fetchedAt\) \|\| 0\) >= \(Number\(snap\.fetchedAt\)/.test(ur));
-  ok('/api/usage estimates cover codex keys', /codex identities estimate too[\s\S]{0,300}codexRl\.byAccount/.test(ur));
+  ok('snapshots SEED from USAGE_CACHE_DIR (idle accounts stop going amnesiac at 14 days)', verdictOf(/SEED FROM DISK[\s\S]{0,400}cxs-\[\\w-\]\+\|__global_codex__/.test(ur)));
+  ok('…and WRITE-THROUGH freshest-wins (fetchedAt-guarded, never poison newer with older)', verdictOf(/WRITE-THROUGH[\s\S]{0,600}Number\(cur\.fetchedAt\) \|\| 0\) >= \(Number\(snap\.fetchedAt\)/.test(ur)));
+  ok('/api/usage estimates cover codex keys', verdictOf(/codex identities estimate too[\s\S]{0,300}codexRl\.byAccount/.test(ur)));
   const eng = read('src/server/usage-pool-engine.js');
-  ok('codex identities JOIN the groups (the "economics are separate" skip is gone)', !/backend === 'codex'\)\) continue; \/\/ pools have no quota/.test(eng) && /codex identities join the groups/.test(eng));
+  ok('codex identities JOIN the groups (the "economics are separate" skip is gone)', !/backend === 'codex'\)\) continue; \/\/ pools have no quota/.test(eng) && verdictOf(/codex identities join the groups/.test(eng)));
   // dc-pool-quota (2.369.214): the prefix and the pseudo id are DERIVED from the harness's creds row (globalUsageKey /
   // globalKeyOwner) — codex keeps its 'codex:' prefix and '__global_codex__' because its creds row has no legacyGlobalKey
   const H = require(path.join(REPO, 'src/harnesses/index.js'));
   const cxCreds = H.get('codex').creds, clCreds = H.get('claude').creds;
   const codexOwnKey = cxCreds && !cxCreds.legacyGlobalKey && clCreds && clCreds.legacyGlobalKey === '__global__';
   ok('codex identity keys are backend-prefixed (email collision with a claude login must never merge quotas)',
-    /\(ownBe \? ownBe \+ ':' : ''\) \+ require\('\.\.\/usage-anchors\.js'\)\.identityKeyFor/.test(eng) && /groupKeyOf\(\{ accountId, cache, email: acctRec\?\.email, ownBe \}\)/.test(eng) && /ownBe = gOwner \|\| \(acctRec\?\.backend && globalUsageKey\(acctRec\.backend\) !== '__global__'/.test(eng) && codexOwnKey);
+    gateOf(/\(ownBe \? ownBe \+ ':' : ''\) \+ require\('\.\.\/usage-anchors\.js'\)\.identityKeyFor/.test(eng)) && gateOf(/groupKeyOf\(\{ accountId, cache, email: acctRec\?\.email, ownBe \}\)/.test(eng)) && gateOf(/ownBe = gOwner \|\| \(acctRec\?\.backend && globalUsageKey\(acctRec\.backend\) !== '__global__'/.test(eng)) && verdictOf(codexOwnKey));
   ok("'__global_codex__' is a pseudo id, not a deleted account",
-    /const gOwner = globalKeyOwner\(fn\.slice\(0, -5\)\)/.test(eng) && /accountId = \(fn === '__global__\.json' \|\| gOwner\) \? null/.test(eng) && codexOwnKey);
+    gateOf(/const gOwner = globalKeyOwner\(fn\.slice\(0, -5\)\)/.test(eng)) && gateOf(/accountId = \(fn === '__global__\.json' \|\| gOwner\) \? null/.test(eng)) && verdictOf(codexOwnKey));
   // usage-predict pick 3: the pool asks each source's own adapter (codex declares no prior), never a name test
   const UPq = require(path.join(REPO, 'src/usage-predict.js'));
-  ok('codex identities learn WITHOUT the claude Max priors', /priorsFor: \(identityKey\) => require\('\.\.\/usage-predict\.js'\)\.priorsForIdentity\(identityKey\)/.test(eng) && UPq.priorsForIdentity('codex:email:a@b') === null && UPq.priorsForIdentity('org:x') && UPq.priorsForIdentity('org:x').sevenDay > 0);
+  ok('codex identities learn WITHOUT the claude Max priors', gateOf(/priorsFor: \(identityKey\) => require\('\.\.\/usage-predict\.js'\)\.priorsForIdentity\(identityKey\)/.test(eng)) && UPq.priorsForIdentity('codex:email:a@b') === null && gateOf(UPq.priorsForIdentity('org:x')) && UPq.priorsForIdentity('org:x').sevenDay > 0);
   // (the gate grew a sibling clause in 2026-09-08 — autoCliReady — so the
   // adjacency is bounded to the same line rather than literal; what is pinned
   // is unchanged: the backend test is one of the conditions that `continue`s
   // BEFORE the spawn.)
   // (quota r2: the loop lives in src/server/auto-cli-loop.js; server.js only starts it)
   // (lane dc-harness-tail: the gate reads the declared quota rung, not the id — codex's is rpc-rate-limits)
-  ok('auto-cli refresh loop skips codex accounts (claude -p /usage is claude-only)', /capsOf\(a\.backend\)\.quotaProbe !== 'cli-usage'[^\n]*\) continue; \/\/ auto-cli/.test(read('src/server/auto-cli-loop.js')) && /createAutoCliLoop\(/.test(read('server.js'))
+  ok('auto-cli refresh loop skips codex accounts (claude -p /usage is claude-only)', gateOf(/capsOf\(a\.backend\)\.quotaProbe !== 'cli-usage'[^\n]*\) continue; \/\/ auto-cli/.test(read('src/server/auto-cli-loop.js'))) && gateOf(/createAutoCliLoop\(/.test(read('server.js')))
     && require('../src/backend-caps.js').capsOf('codex').quotaProbe !== 'cli-usage' && require('../src/backend-caps.js').capsOf('claude').quotaProbe === 'cli-usage');
   const um = read('src/lib/usage-meter.js');
   // (lane reset-unproven: each bucket goes through its display verdict first — bucketView — and the pair is drawn from it)
-  ok('the popup codex section renders est pairs like the claude one', /bucketView\(quotaModel, codex\?\.fiveHour, cEstSel\?\.fiveHour,/.test(um) && /estDisplayPair\(cv5\.reading, cv5\.est\)/.test(um) && /estBar\(cpp5\)/.test(um) && /estStat\(cpp7, cEstPop, 'sevenDay'\)/.test(um));   // law B4: the popup's own views (cpp*) read the provisional-merged cEstPop   // usage-predict pick 2: the stat names its lane (its verdict's)
-  ok('cache-efficiency bar drops the fake cache-write segment for codex-only views', /codexOnly \? \[\] : \[\{ k: t\('Cache writes'\)/.test(read('src/lib/usage-window.js')));
+  ok('the popup codex section renders est pairs like the claude one', gateOf(/bucketView\(quotaModel, codex\?\.fiveHour, cEstSel\?\.fiveHour,/.test(um)) && gateOf(/estDisplayPair\(cv5\.reading, cv5\.est\)/.test(um)) && gateOf(/estBar\(cpp5\)/.test(um)) && verdictOf(/estStat\(cpp7, cEstPop, 'sevenDay'\)/.test(um)));   // law B4: the popup's own views (cpp*) read the provisional-merged cEstPop   // usage-predict pick 2: the stat names its lane (its verdict's)
+  ok('cache-efficiency bar drops the fake cache-write segment for codex-only views', verdictOf(/codexOnly \? \[\] : \[\{ k: t\('Cache writes'\)/.test(read('src/lib/usage-window.js'))));
 }
 
 // ── P1: costBetweenMulti keys codex-global events correctly ──
@@ -87,4 +87,4 @@ const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

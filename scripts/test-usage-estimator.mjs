@@ -13,7 +13,7 @@ const CLP = require(path.resolve('src/harnesses/claude-predict.js')).prior;   //
 const { costBetween, costBetweenMulti } = require(path.resolve('src/usage-anchors.js'));
 
 let pass = 0, fail = 0;
-const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 const approx = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 
 const T0 = 1786000000000; // ms
@@ -37,7 +37,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const a1 = mkAnchor(T0, { u5: 0.30, u7: 0.40, uf: 0.60, r5: R5 });
   const a2 = mkAnchor(T0 + HR, { u5: 0.34, u7: 0.41, uf: 0.62, r5: R5, prevFetchedAt: T0, costSince: cs(20, 15) });
   const pairs = est.extractPairs([a1, a2]);
-  ck('pair: 5h Δu 0.04 over $20', approx(pairs.fiveHour[0].du, 0.04) && pairs.fiveHour[0].cost === 20);
+  ck('pair: 5h Δu 0.04 over $20', gateOf(approx(pairs.fiveHour[0].du, 0.04)) && pairs.fiveHour[0].cost === 20);
   ck('pair: scoped uses the FABLE family cost, not total', pairs['scoped:fable'][0].cost === 15);
   ck('pair: 7d uses total', pairs.sevenDay[0].cost === 20);
 
@@ -59,7 +59,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   // base matched BY fetchedAt, not adjacency
   const stranger = mkAnchor(T0 + 30 * 60000, { u7: 0.99 });
   const p4 = est.extractPairs([a1, stranger, a2]);
-  ck('pair: base matched by prevFetchedAt (interleaved stranger ignored)', approx(p4.sevenDay[0].du, 0.01));
+  ck('pair: base matched by prevFetchedAt (interleaved stranger ignored)', verdictOf(approx(p4.sevenDay[0].du, 0.01)));
 }
 
 // ── bounce-back taint (2.267.0, the Personal Max flap poison) ────────────────
@@ -74,8 +74,8 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const b3 = mkAnchor(T0 + 3 * HR, { u7: 0.53, uf: 0.53, prevFetchedAt: T0 + 2 * HR, costSince: cs(20) }); // clean again
   const tp = est.extractPairs([b0, b1, b2, b3]);
   ck('taint: decrease pair voided AND its bounce-back excluded — only the clean pair survives',
-    tp.sevenDay?.length === 1 && approx(tp.sevenDay[0].du, 0.02) && tp.sevenDay[0].cost === 20);
-  ck('taint: scoped bucket tainted independently, same outcome', tp['scoped:fable']?.length === 1 && approx(tp['scoped:fable'][0].du, 0.02));
+    tp.sevenDay?.length === 1 && gateOf(approx(tp.sevenDay[0].du, 0.02)) && tp.sevenDay[0].cost === 20);
+  ck('taint: scoped bucket tainted independently, same outcome', tp['scoped:fable']?.length === 1 && verdictOf(approx(tp['scoped:fable'][0].du, 0.02)));
   // without the taint the bounce pair would have added du 0.32 for $1.7
   const rt = est.learnRates([b0, b1, b2, b3], { priors: { sevenDay: 1730 } });
   ck('taint: learned 7d rate ignores the flap (implied full stays near prior)', rt.sevenDay.impliedFullUsd > 1000);
@@ -102,7 +102,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
 {
   const priors = { fiveHour: 500, sevenDay: 1730, 'scoped:fable': 875 };
   const r0 = est.learnRates([], { priors });
-  ck('no data: rate = pure prior (implied full = prior)', approx(r0.sevenDay.impliedFullUsd, 1730, 0.51));
+  ck('no data: rate = pure prior (implied full = prior)', verdictOf(approx(r0.sevenDay.impliedFullUsd, 1730, 0.51)));
   // heavy observation at a DIFFERENT true rate (full=$400) must dominate
   const chain = [mkAnchor(T0, { u7: 0.05 })];
   let uu = 0.05;
@@ -113,7 +113,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const r1 = est.learnRates(chain, { priors });
   ck('12 pairs at full=$400 pull implied full well below the $1730 prior', r1.sevenDay.impliedFullUsd < 700 && r1.sevenDay.impliedFullUsd > 380);
   const r2 = est.learnRates(chain, { priors: null });
-  ck('no prior: pure observation → implied full ≈ $400', approx(r2.sevenDay.impliedFullUsd, 400, 1));
+  ck('no prior: pure observation → implied full ≈ $400', verdictOf(approx(r2.sevenDay.impliedFullUsd, 400, 1)));
   ck('no prior + no signal → bucket absent', !est.learnRates([mkAnchor(T0, { u5: 0.1 })], { priors: null }).fiveHour);
 }
 
@@ -123,9 +123,9 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const anchor = mkAnchor(T0, { u5: 0.40, u7: 0.40, uf: 0.60 });
   const costFn = () => cs(173, 87.5); // $173 total, $87.5 fable since anchor
   const e = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: T0 + HR });
-  ck('est: 7d 0.40 + 173/1730 = 0.50', approx(e.sevenDay.utilization, 0.50, 0.001));
-  ck('est: fable 0.60 + 87.5/875 = 0.70', approx(e.scopedWeekly[0].utilization, 0.70, 0.001));
-  ck('est: 5h 0.40 + 173/500 clamped fine', approx(e.fiveHour.utilization, 0.40 + 173 / 500, 0.001));
+  ck('est: 7d 0.40 + 173/1730 = 0.50', verdictOf(approx(e.sevenDay.utilization, 0.50, 0.001)));
+  ck('est: fable 0.60 + 87.5/875 = 0.70', verdictOf(approx(e.scopedWeekly[0].utilization, 0.70, 0.001)));
+  ck('est: 5h 0.40 + 173/500 clamped fine', verdictOf(approx(e.fiveHour.utilization, 0.40 + 173 / 500, 0.001)));
   ck('est: marked estimated + anchor ts', e.estimated === true && e.anchorAt === T0);
 
   // WEEKLY ROLL: now past the reset → re-base at the reset boundary from 0
@@ -133,26 +133,26 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const calls = [];
   const costFn2 = (fromMs) => { calls.push(fromMs); return cs(17.3, 8.75); };
   const e2 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn: costFn2, nowMs: nowAfter });
-  ck('roll: 7d re-based from 0 at the old reset → 17.3/1730 = 0.01', approx(e2.sevenDay.utilization, 0.01, 0.001));
+  ck('roll: 7d re-based from 0 at the old reset → 17.3/1730 = 0.01', verdictOf(approx(e2.sevenDay.utilization, 0.01, 0.001)));
   ck('roll: new resetsAt advanced one week', e2.sevenDay.resetsAt === RESET + WK);
-  ck('roll: cost window starts AT the reset, not the anchor', calls.every((f) => f === RESET * 1000));
+  ck('roll: cost window starts AT the reset, not the anchor', verdictOf(calls.every((f) => f === RESET * 1000)));
   ck('roll: 5h abstains (window start unknowable)', e2.fiveHour === null);
-  ck('roll: fable re-based too', approx(e2.scopedWeekly[0].utilization, 8.75 / 875, 0.001));
+  ck('roll: fable re-based too', verdictOf(approx(e2.scopedWeekly[0].utilization, 8.75 / 875, 0.001)));
   // B-a4f1: a stated reset LANDS a minute late (quota-model RESET_GRACE_SEC) — inside that minute
   // the weekly buckets abstain, so the overlay keeps the raw reading and bucketRemaining's grace rules it
   const { RESET_GRACE_SEC } = require(path.resolve('src/quota-model.js'));
   const e3 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: (RESET + 15) * 1000 });
   ck('grace: 15 s past the stated reset the weekly buckets abstain (no re-base on a reset that has not landed)', (e3 === null || (!e3.sevenDay && !e3.scopedWeekly.length)));
   const e4 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: (RESET + RESET_GRACE_SEC + 1) * 1000 });
-  ck('grace: one second past the grace they roll as before', e4 && e4.sevenDay && e4.sevenDay.resetsAt === RESET + WK && e4.scopedWeekly[0].resetsAt === RESET + WK);
+  ck('grace: one second past the grace they roll as before', gateOf(e4) && gateOf(e4.sevenDay) && e4.sevenDay.resetsAt === RESET + WK && e4.scopedWeekly[0].resetsAt === RESET + WK);
   // verify r1: the NEXT boundary waits too. An anchor a week old crosses RESET (long landed) and
   // reaches RESET + WK inside its minute: the window is still the one that began at RESET, so a
   // week of ledger burn keeps the cap spent until bucketRemaining's grace for RESET + WK passes
   const calls5 = [];
   const e5 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn: (fromMs) => { calls5.push(fromMs); return cs(1730, 875); }, nowMs: (RESET + WK + 15) * 1000 });
-  ck('grace: 15 s past the NEXT weekly boundary the window is still the one that began at the old reset', e5 && e5.sevenDay && e5.sevenDay.resetsAt === RESET + WK && e5.scopedWeekly[0].resetsAt === RESET + WK && calls5.every((f) => f === RESET * 1000) && approx(e5.scopedWeekly[0].utilization, 1, 0.001));
+  ck('grace: 15 s past the NEXT weekly boundary the window is still the one that began at the old reset', gateOf(e5) && gateOf(e5.sevenDay) && e5.sevenDay.resetsAt === RESET + WK && e5.scopedWeekly[0].resetsAt === RESET + WK && gateOf(calls5.every((f) => f === RESET * 1000)) && verdictOf(approx(e5.scopedWeekly[0].utilization, 1, 0.001)));
   const e6 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: (RESET + WK + RESET_GRACE_SEC + 1) * 1000 });
-  ck('grace: past the next boundary grace it rolls to the week after', e6 && e6.sevenDay && e6.sevenDay.resetsAt === RESET + 2 * WK && e6.scopedWeekly[0].resetsAt === RESET + 2 * WK);
+  ck('grace: past the next boundary grace it rolls to the week after', gateOf(e6) && gateOf(e6.sevenDay) && e6.sevenDay.resetsAt === RESET + 2 * WK && e6.scopedWeekly[0].resetsAt === RESET + 2 * WK);
 
   ck('nothing estimable → null', est.estimateBuckets({ lagS: 0, anchor: mkAnchor(T0, {}), rates, costFn, nowMs: T0 + 1 }) === null);
 }
@@ -172,19 +172,19 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const rates = { sevenDay: { rate: 1 / 1730 } };
   const prev = mkAnchor(T0, { u7: 0.40 });
   const c = est.predictCalib(prev, mkAnchor(T0 + HR, { u7: 0.42 }).buckets, rates, cs(17.3));
-  ck('calib: pred 0.41 vs act 0.42 → err −0.01', approx(c.sevenDay.pred, 0.41, 0.001) && approx(c.sevenDay.err, -0.01, 0.001));
+  ck('calib: pred 0.41 vs act 0.42 → err −0.01', gateOf(approx(c.sevenDay.pred, 0.41, 0.001)) && verdictOf(approx(c.sevenDay.err, -0.01, 0.001)));
   // DELTA-RELATIVE fields (owner-corrected, 2.368.13): absolute error shrinks
   // with refresh cadence alone — the model's real claim is the MOVEMENT, so
   // calib rows must carry predΔ/actΔ and their ratio.
-  ck('calib: predDu/actDu recorded (0.01 vs 0.02) with rel = their ratio', approx(c.sevenDay.predDu, 0.01, 0.001) && approx(c.sevenDay.actDu, 0.02, 0.001) && approx(c.sevenDay.rel, 0.5, 0.01) && approx(c.sevenDay.u0, 0.40, 0.001));
+  ck('calib: predDu/actDu recorded (0.01 vs 0.02) with rel = their ratio', gateOf(approx(c.sevenDay.predDu, 0.01, 0.001)) && gateOf(approx(c.sevenDay.actDu, 0.02, 0.001)) && gateOf(approx(c.sevenDay.rel, 0.5, 0.01)) && verdictOf(approx(c.sevenDay.u0, 0.40, 0.001)));
   const tiny = est.predictCalib(prev, mkAnchor(T0 + HR, { u7: 0.41 }).buckets, rates, cs(17.3));
-  ck('calib: a barely-moved window (|actΔ|<2pt) gets rel:null — a ratio there is noise division, not accuracy', tiny.sevenDay.rel === null && approx(tiny.sevenDay.actDu, 0.01, 0.001));
+  ck('calib: a barely-moved window (|actΔ|<2pt) gets rel:null — a ratio there is noise division, not accuracy', tiny.sevenDay.rel === null && verdictOf(approx(tiny.sevenDay.actDu, 0.01, 0.001)));
   const crossed = mkAnchor(T0 + HR, { u7: 0.01, rw: RESET + WK });
   ck('calib: reset-crossed bucket skipped', est.predictCalib(prev, crossed.buckets, rates, cs(17.3)) === null);
   // the engine metric must be the RELATIVE one, gated on rel
   const engSrc = fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8');
   const estSrc = fs.readFileSync(new URL('../src/usage-estimator.js', import.meta.url), 'utf8');
-  ck('the calib metric is usage-est-rel-err-pct, gated on rel (no absolute-error headline metric anywhere)', /CALIB_METRIC = 'usage-est-rel-err-pct'/.test(estSrc) && /c\.rel == null/.test(estSrc) && !/usage-est-err-pct/.test(engSrc + estSrc));
+  ck('the calib metric is usage-est-rel-err-pct, gated on rel (no absolute-error headline metric anywhere)', gateOf(/CALIB_METRIC = 'usage-est-rel-err-pct'/.test(estSrc)) && gateOf(/c\.rel == null/.test(estSrc)) && !/usage-est-err-pct/.test(engSrc + estSrc));
 }
 
 // ── costBetweenMulti sums across an identity's account ids ───────────────────
@@ -223,19 +223,19 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
     priorsFor: () => null,
   });
   const r = ue.ratesFor(key);
-  ck('class: rates learned from the file (no prior)', approx(r.sevenDay.impliedFullUsd, 1730, 1));
+  ck('class: rates learned from the file (no prior)', verdictOf(approx(r.sevenDay.impliedFullUsd, 1730, 1)));
   ue.flushRates();   // lane hub-loop-stalls: the snapshot goes through the store writer — written now for the check
-  ck('class: rates.json snapshot written', fs.existsSync(path.join(dir, 'rates.json')));
+  ck('class: rates.json snapshot written', verdictOf(fs.existsSync(path.join(dir, 'rates.json'))));
   const e1 = ue.estimateFor('sub-x', null, T0 + 2 * HR);
-  ck('class: estimate = anchor 0.45 + 17.3/1730 = 0.46', approx(e1.sevenDay.utilization, 0.46, 0.001));
+  ck('class: estimate = anchor 0.45 + 17.3/1730 = 0.46', verdictOf(approx(e1.sevenDay.utilization, 0.46, 0.001)));
   ck('class: unknown account → null', ue.estimateFor('sub-zzz', null, T0 + 2 * HR) === null);
   ck('class: memo returns the same object within 30s', ue.estimateFor('sub-x', null, T0 + 2 * HR + 1000) === e1);
   // a NEWER raw cache than the anchor becomes the base (sweep-lag window)
   const raw = { fetchedAt: T0 + 3 * HR, sevenDay: { utilization: 0.5, resetsAt: RESET } };
   ue.invalidate(key);
   const e2 = ue.estimateFor('sub-x', raw, T0 + 3 * HR + 1000);
-  ck('class: newer raw cache wins as base', approx(e2.sevenDay.utilization, 0.5 + 17.3 / 1730, 0.001) && e2.anchorAt === T0 + 3 * HR);
-  ck('class: accountIdsFor unions file + extras', ue.accountIdsFor(key, ['sub-new']).includes('sub-x') && ue.accountIdsFor(key, ['sub-new']).includes('sub-new'));
+  ck('class: newer raw cache wins as base', gateOf(approx(e2.sevenDay.utilization, 0.5 + 17.3 / 1730, 0.001)) && e2.anchorAt === T0 + 3 * HR);
+  ck('class: accountIdsFor unions file + extras', gateOf(ue.accountIdsFor(key, ['sub-new']).includes('sub-x')) && verdictOf(ue.accountIdsFor(key, ['sub-new']).includes('sub-new')));
   // lane hub-loop-stalls commit 2 round 2 (smaller 2): THE RATES COPY READ BEFORE A MIGRATION NEVER WRITES BACK WHAT IT
   // DROPPED — the estimator keeps the file's content in memory after its first persist; a boot migration archives and
   // unlinks rates.json; the next persist (another identity) must not put the dropped identity back. server.js settles the
@@ -266,13 +266,13 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const anchor = mkAnchor(T0, { u7: 0.40 });
   const calls = [];
   const e = est.estimateBuckets({ lagS: 0, anchor, rates, costFn: (f) => { calls.push(f); return cs(17.3); }, nowMs: (RESET + WEEK_SEC_ + 3600) * 1000 });
-  ck('multi-week roll: cost window starts at the LAST passed boundary', calls.every((f) => f === (RESET + WEEK_SEC_) * 1000));
+  ck('multi-week roll: cost window starts at the LAST passed boundary', verdictOf(calls.every((f) => f === (RESET + WEEK_SEC_) * 1000)));
   ck('multi-week roll: resetsAt advanced two weeks', e.sevenDay.resetsAt === RESET + 2 * WEEK_SEC_);
 
   // normU input classes: integer-percent readings + garbage
   const ai = mkAnchor(T0, { u7: 40 });  // integer % (statusline raw shape)
   const bi = mkAnchor(T0 + HR, { u7: 45, prevFetchedAt: T0, costSince: cs(20) });
-  ck('normU: integer-% pair yields du 0.05', approx(est.extractPairs([ai, bi]).sevenDay[0].du, 0.05));
+  ck('normU: integer-% pair yields du 0.05', verdictOf(approx(est.extractPairs([ai, bi]).sevenDay[0].du, 0.05)));
   const gg = mkAnchor(T0 + HR, { u7: 'garbage', prevFetchedAt: T0, costSince: cs(20) });
   ck('normU: garbage u → bucket pair skipped', !est.extractPairs([mkAnchor(T0, { u7: 0.4 }), gg]).sevenDay);
 
@@ -281,16 +281,16 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const z1 = mkAnchor(T0 + 6 * HR, { u5: 0.10, r5: 0, prevFetchedAt: T0, costSince: cs(20) });
   ck('resetsAt=0: a 5h pair spanning 6h is skipped (window definitionally rolled)', !est.extractPairs([z0, z1]).fiveHour);
   const z2 = mkAnchor(T0 + HR, { u5: 0.35, r5: 0, prevFetchedAt: T0, costSince: cs(20) });
-  ck('resetsAt=0: an in-window 5h pair still forms', approx(est.extractPairs([z0, z2]).fiveHour[0].du, 0.05));
+  ck('resetsAt=0: an in-window 5h pair still forms', verdictOf(approx(est.extractPairs([z0, z2]).fiveHour[0].du, 0.05)));
   const ez = est.estimateBuckets({ lagS: 0, anchor: mkAnchor(T0, { u7: 0.4, rw: 0 }), rates, costFn: () => cs(17.3), nowMs: T0 + HR });
-  ck('resetsAt=0: estimate emits without a roll, resetsAt undefined', approx(ez.sevenDay.utilization, 0.41, 0.001) && ez.sevenDay.resetsAt === undefined);
+  ck('resetsAt=0: estimate emits without a roll, resetsAt undefined', gateOf(approx(ez.sevenDay.utilization, 0.41, 0.001)) && ez.sevenDay.resetsAt === undefined);
 
   // scoped asOf: stale ⟳ reading — cost window starts at the READING time
   const sa = mkAnchor(T0 + 2 * HR, { u7: 0.4 });
   sa.buckets.scopedWeekly = [{ name: 'Fable', u: 0.6, resetsAt: RESET, asOf: T0 }];
   const scCalls = [];
   const se = est.estimateBuckets({ lagS: 0, anchor: sa, rates: { 'scoped:fable': { rate: 1 / 875 } }, costFn: (f) => { scCalls.push(f); return cs(87.5, 87.5); }, nowMs: T0 + 3 * HR });
-  ck('scoped asOf: cost accrues from the reading time, not the anchor write', scCalls.includes(T0) && approx(se.scopedWeekly[0].utilization, 0.70, 0.001));
+  ck('scoped asOf: cost accrues from the reading time, not the anchor write', gateOf(scCalls.includes(T0)) && verdictOf(approx(se.scopedWeekly[0].utilization, 0.70, 0.001)));
   // two anchors carrying the SAME stale scoped reading = zero information
   const p0 = mkAnchor(T0, {}); p0.buckets.scopedWeekly = [{ name: 'Fable', u: 0.6, resetsAt: RESET, asOf: T0 - HR }];
   const p1 = mkAnchor(T0 + HR, { prevFetchedAt: T0, costSince: cs(30, 30) }); p1.buckets.scopedWeekly = [{ name: 'Fable', u: 0.6, resetsAt: RESET, asOf: T0 - HR }];
@@ -317,7 +317,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   // machine org — union it so global-login spend counts; the reassignment
   // case self-heals via the recency gate (≤14d overlap = conservative
   // over-count only). This fixture's global anchor is 1h old → unioned.
-  ck('recent __global__ IS unioned (2.340.0, recency-gated)', ids.includes('__global__') && ids.includes('sub-old') && ids.includes('sub-x'));
+  ck('recent __global__ IS unioned (2.340.0, recency-gated)', gateOf(ids.includes('__global__')) && gateOf(ids.includes('sub-old')) && verdictOf(ids.includes('sub-x')));
   // and a STALE global lineage (>14d of stream time since the last global
   // anchor) stays excluded — the original reassignable concern, still pinned
   {
@@ -335,7 +335,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   evs.push({ ts: T0 + HR + 1, acct: 'sub-x', model: 'claude-fable-5', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 });
   evs.push({ ts: T0 + HR + 2, acct: 'sub-old', model: 'claude-fable-5', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 });
   const e1 = ue.estimateFor('sub-x', null, T0 + 2 * HR);
-  ck('estimateFor sums cost across the identity id union', approx(e1.sevenDay.utilization, 0.45 + 34.6 / 1730, 0.001));
+  ck('estimateFor sums cost across the identity id union', verdictOf(approx(e1.sevenDay.utilization, 0.45 + 34.6 / 1730, 0.001)));
   // memo staleness: a fresher rawCache (e.g. a limit-banner mark) must bust it
   const banner = { fetchedAt: T0 + 2 * HR + 5000, sevenDay: { utilization: 1, resetsAt: RESET } };
   const e2 = ue.estimateFor('sub-x', banner, T0 + 2 * HR + 6000);
@@ -352,7 +352,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const eS = est.estimateBuckets({ lagS: 0, anchor: stale, rates, costFn: () => cs(600), nowMs: T0 + 72 * HR });
   ck('resetsAt=0 + anchor older than the window → 5h abstains', eS === null || eS.fiveHour === null);
   const eF = est.estimateBuckets({ lagS: 0, anchor: mkAnchor(T0, { u5: 0.4, r5: 0 }), rates, costFn: () => cs(50), nowMs: T0 + HR });
-  ck('resetsAt=0 within the window still estimates', approx(eF.fiveHour.utilization, 0.5, 0.001));
+  ck('resetsAt=0 within the window still estimates', verdictOf(approx(eF.fiveHour.utilization, 0.5, 0.001)));
 
   // legacy v1 interleaved records: mixed-id file, unmarked pair → skipped
   const mixed = [
@@ -411,18 +411,18 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('class regression: cw full between prior ($500) and data truth ($800), pulled toward data', r.fiveHour.impliedFullCwUsd > 540 && r.fiveHour.impliedFullCwUsd < 800);
   ck('class regression: recovers cr full ≈ $3200 (reads nearly free)', r.fiveHour.impliedFullCrUsd > 2600 && r.fiveHour.impliedFullCrUsd < 3800);
   ck('class regression: recovers fresh full ≈ $250', r.fiveHour.impliedFullFreshUsd > 215 && r.fiveHour.impliedFullFreshUsd < 290);
-  ck('class regression: blended rate still present (display/fallback)', Number.isFinite(r.fiveHour.rate));
+  ck('class regression: blended rate still present (display/fallback)', verdictOf(Number.isFinite(r.fiveHour.rate)));
   // usage-predict pick 3: the class priors are the SOURCE's (Claude's adapter); a prior without them (codex, Antigravity: none) fits no class regression
   const rn = est.learnRates(chain, { priors: { fiveHour: 500 } });
-  ck('class regression: a prior that states no class priors fits none (the blended rate only)', rn.fiveHour && rn.fiveHour.rateCw == null && Number.isFinite(rn.fiveHour.rate));
+  ck('class regression: a prior that states no class priors fits none (the blended rate only)', gateOf(rn.fiveHour) && rn.fiveHour.rateCw == null && verdictOf(Number.isFinite(rn.fiveHour.rate)));
   // class-aware prediction: a cr-dominated window must NOT be priced blended
   const anchor = { fetchedAt: T0, buckets: { fiveHour: { u: 0.10, resetsAt: R5 }, sevenDay: null, scopedWeekly: [] } };
   const eC = est.estimateBuckets({ lagS: 0, anchor, rates: { fiveHour: r.fiveHour }, costFn: () => csC(1, 32, 1), nowMs: T0 + HR });
   const expC = 0.10 + 1 / r.fiveHour.impliedFullCwUsd + 32 / r.fiveHour.impliedFullCrUsd + 1 / r.fiveHour.impliedFullFreshUsd;
-  ck('class-aware estimate: cr-dominated window priced per component', approx(eC.fiveHour.utilization, expC, 0.01));
+  ck('class-aware estimate: cr-dominated window priced per component', verdictOf(approx(eC.fiveHour.utilization, expC, 0.01)));
   // no byClass in the cost source → blended fallback
   const eB = est.estimateBuckets({ lagS: 0, anchor, rates: { fiveHour: r.fiveHour }, costFn: () => cs(80, 80), nowMs: T0 + HR });
-  ck('no class split in cost source → blended fallback', approx(eB.fiveHour.utilization, 0.10 + 80 * r.fiveHour.rate, 0.005));
+  ck('no class split in cost source → blended fallback', verdictOf(approx(eB.fiveHour.utilization, 0.10 + 80 * r.fiveHour.rate, 0.005)));
   // absurd data (massive cw spend against ~zero du ⇒ implied cw full beyond
   // the $20k sanity bound) must NOT emit class rates — blended only
   const bad = [
@@ -433,7 +433,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ];
   const rb = est.learnRates(bad, { priors: { fiveHour: 500, classes5h: CLP.classes5h } });
   ck('absurd implied cw full (> sanity bound) → class rates withheld, blended kept',
-    rb.fiveHour && rb.fiveHour.rateCw == null && Number.isFinite(rb.fiveHour.rate));
+    gateOf(rb.fiveHour) && rb.fiveHour.rateCw == null && verdictOf(Number.isFinite(rb.fiveHour.rate)));
 }
 
 // ── live odometer (event-driven estimation, exhaustion-#2 round) ─────────────
@@ -451,26 +451,26 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
     priorsFor: () => ({ sevenDay: 1730 }),
   });
   const e0 = ue.estimateFor('sub-x', null, T0 + HR);
-  ck('live: no ring → estimate = anchor', approx(e0.sevenDay.utilization, 0.40, 0.001));
+  ck('live: no ring → estimate = anchor', verdictOf(approx(e0.sevenDay.utilization, 0.40, 0.001)));
   // a streamed burst lands in the ring BEFORE any ledger scan sees it
   ue.noteLive({ rid: 'req_live1', accountId: 'sub-x', model: 'claude-fable-5', usd: 173, ts: T0 + 30 * 60000 });
   const e1 = ue.estimateFor('sub-x', null, T0 + HR);
-  ck('live: streamed $173 visible immediately (memo busted by noteLive)', approx(e1.sevenDay.utilization, 0.40 + 173 / 1730, 0.001));
+  ck('live: streamed $173 visible immediately (memo busted by noteLive)', verdictOf(approx(e1.sevenDay.utilization, 0.40 + 173 / 1730, 0.001)));
   // the ledger scan catches up → the rid dedups out of the live delta
   ledgerRids.add('req_live1');
   ue._estMemo.clear();
   const e2 = ue.estimateFor('sub-x', null, T0 + HR);
-  ck('live: ledger-absorbed rid no longer double-counts', approx(e2.sevenDay.utilization, 0.40, 0.001));
-  ck('live: wrong-account entries ignored', (() => {
+  ck('live: ledger-absorbed rid no longer double-counts', verdictOf(approx(e2.sevenDay.utilization, 0.40, 0.001)));
+  ck('live: wrong-account entries ignored', verdictOf((() => {
     ue.noteLive({ rid: 'req_other', accountId: 'sub-zzz', model: 'claude-fable-5', usd: 500, ts: T0 + 30 * 60000 });
     const e3 = ue.estimateFor('sub-x', null, T0 + HR);
     return approx(e3.sevenDay.utilization, 0.40, 0.001);
-  })());
+  })()));
   // THE est-2× regression (2.267.3, user saw est 27% vs ⟳ 9%): stdout records
   // have NO requestId — the ring keys on msg.id while ledger events key on
   // requestId, so rid-space exclusion never fired. The ledger's `mid` join
   // field must exclude a scanned stream entry.
-  ck('live: msg.id-keyed entry excluded once the ledger bakes its mid', (() => {
+  ck('live: msg.id-keyed entry excluded once the ledger bakes its mid', verdictOf((() => {
     ue.noteLive({ rid: 'msg_stream1', accountId: 'sub-x', model: 'claude-fable-5', usd: 100, ts: T0 + 30 * 60000 });
     ue._estMemo.clear();
     const before = ue.estimateFor('sub-x', null, T0 + HR);
@@ -478,17 +478,17 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
     ue._estMemo.clear();
     const after = ue.estimateFor('sub-x', null, T0 + HR);
     return approx(before.sevenDay.utilization, 0.40 + 100 / 1730, 0.001) && approx(after.sevenDay.utilization, 0.40, 0.001);
-  })());
+  })()));
   // Streaming partials: the same msg.id is emitted up to 3× with GROWING
   // usage — a re-note updates the entry to the max (first-wins under-counted)
-  ck('live: re-noted rid upgrades to the final (max) usage', (() => {
+  ck('live: re-noted rid upgrades to the final (max) usage', verdictOf((() => {
     ue.noteLive({ rid: 'msg_grow', accountId: 'sub-x', model: 'claude-fable-5', usd: 3, ts: T0 + 30 * 60000 });
     ue.noteLive({ rid: 'msg_grow', accountId: 'sub-x', model: 'claude-fable-5', usd: 17.3, ts: T0 + 31 * 60000 });
     ue.noteLive({ rid: 'msg_grow', accountId: 'sub-x', model: 'claude-fable-5', usd: 5, ts: T0 + 32 * 60000 }); // out-of-order smaller re-emission never downgrades
     ue._estMemo.clear();
     const e4 = ue.estimateFor('sub-x', null, T0 + HR);
     return approx(e4.sevenDay.utilization, 0.40 + 17.3 / 1730, 0.001);
-  })());
+  })()));
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -507,13 +507,13 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const j1 = { ...mkAnchor(T0 + 60e3, { u7: 0.30, prevFetchedAt: T0, costSince: cs(0.1) }), source: 'statusline' };
   // usage-predict pick 3: the jump is judged by the identity's OWN prior (Claude's here) — no longer Claude's for every source
   const rJ = est.learnRates([j0, j1], { priors: CLP });
-  ck('① uncorroborated 20pt jump (cost ≪ the source\'s prior-implied) is no pair: the rate is the prior\'s alone', rJ.sevenDay && rJ.sevenDay.nPairs === 0, JSON.stringify(rJ.sevenDay));
+  ck('① uncorroborated 20pt jump (cost ≪ the source\'s prior-implied) is no pair: the rate is the prior\'s alone', gateOf(rJ.sevenDay) && rJ.sevenDay.nPairs === 0, JSON.stringify(rJ.sevenDay));
   const rN = est.learnRates([j0, j1], { priors: null });
   ck('① a source with NO prior (codex, Antigravity) has no scale to judge a jump by: the pair stands, and the no-prior floor ($1 of cost) still withholds a rate', !rN.sevenDay && (est.extractPairs([j0, j1], {}).sevenDay || []).length === 1);
   // corroborated: same jump with plausible cost (20% of prior-implied ≈ $69) learns
   const k1 = { ...mkAnchor(T0 + 60e3, { u7: 0.30, prevFetchedAt: T0, costSince: cs(340) }), source: 'statusline' };
   const rK = est.learnRates([j0, k1], { priors: CLP });
-  ck('① corroborated jump still learns (one pair beside the prior)', rK.sevenDay && rK.sevenDay.nPairs === 1, JSON.stringify(rK.sevenDay));
+  ck('① corroborated jump still learns (one pair beside the prior)', gateOf(rK.sevenDay) && rK.sevenDay.nPairs === 1, JSON.stringify(rK.sevenDay));
 }
 {
   // ③ ledger-tail extrapolation: burn in the last 120s extends the estimate
@@ -556,10 +556,10 @@ const runTicks = (sweep, label) => {
 };
 {
   const { t, out, inv } = runTicks(est.sweepAnchorGroup);
-  ck('B-a5c0: a first reading anchors but emits nothing (no prior truth to compare)', t[0].r.recorded && t[0].n === 0);
-  ck('B-a5c0: a tick WITH a new reading emits exactly once — the moved bucket only (5h moved 1pt ⇒ none)', t[1].r.recorded && t[1].n === 1 && out[0].name === 'usage-est-rel-err-pct');
+  ck('B-a5c0: a first reading anchors but emits nothing (no prior truth to compare)', gateOf(t[0].r.recorded) && t[0].n === 0);
+  ck('B-a5c0: a tick WITH a new reading emits exactly once — the moved bucket only (5h moved 1pt ⇒ none)', gateOf(t[1].r.recorded) && t[1].n === 1 && out[0].name === 'usage-est-rel-err-pct');
   ck('B-a5c0: the row carries its attribution {account, bucket}', out[0]?.detail === 'account=sub-x bucket=sevenDay');
-  ck('B-a5c0: the value is |predΔ−actΔ|/|actΔ| (pred Δ 1pt vs act 5pt = 80%)', approx(out[0]?.value, 80, 0.01));
+  ck('B-a5c0: the value is |predΔ−actΔ|/|actΔ| (pred Δ 1pt vs act 5pt = 80%)', verdictOf(approx(out[0]?.value, 80, 0.01)));
   ck('B-a5c0: a tick WITHOUT a new reading (same snapshot) emits nothing and walks no ledger', !t[2].r.fresh && t[2].n === 1 && t[2].c === t[1].c);
   ck('B-a5c0: an older sibling cache is not new truth — nothing emitted, nothing recorded', !t[3].r.fresh && !t[3].r.recorded && t[3].n === 1);
   ck('B-a5c0: the estimator is invalidated once per accepted anchor (2), never on a re-seen tick', inv === 2);
@@ -580,27 +580,27 @@ const runTicks = (sweep, label) => {
   const estRolled = { sevenDay: { utilization: 0.0 }, fiveHour: { utilization: 0.30 } };
   const rawStale7 = { sevenDay: { utilization: 1.0, resetsAt: nowS - 60 }, fiveHour: { utilization: 0.25, resetsAt: nowS + 3600 } };
   const d1 = est.cliRefreshDrift(estRolled, rawStale7, NOW);
-  ck('B-a5c0 drift: a stale raw (resetsAt past) is skipped — drift = the controlled 5h only (5pt, not 100)', approx(d1.drift, 5, 1e-6) && d1.rolled === 1);
-  ck('B-a5c0 drift: the scheduler inputs are unchanged (triggerDrift 100, moved) — the refresh a closed window earns still fires', approx(d1.triggerDrift, 100, 1e-6) && d1.moved);
+  ck('B-a5c0 drift: a stale raw (resetsAt past) is skipped — drift = the controlled 5h only (5pt, not 100)', gateOf(approx(d1.drift, 5, 1e-6)) && d1.rolled === 1);
+  ck('B-a5c0 drift: the scheduler inputs are unchanged (triggerDrift 100, moved) — the refresh a closed window earns still fires', gateOf(approx(d1.triggerDrift, 100, 1e-6)) && verdictOf(d1.moved));
   const d2 = est.cliRefreshDrift({ sevenDay: { utilization: 0.0 } }, { sevenDay: { utilization: 1.0, resetsAt: nowS - 1 } }, NOW);
   ck('B-a5c0 drift: every bucket stale ⇒ drift null (the log says "no control", never a number)', d2.drift === null && d2.rolled === 1);
   const d3 = est.cliRefreshDrift({ sevenDay: { utilization: 0.42 } }, { sevenDay: { utilization: 0.40, resetsAt: nowS + 86400 } }, NOW);
-  ck('B-a5c0 drift: a live window still reports its drift (2pt)', approx(d3.drift, 2, 1e-6) && d3.rolled === 0);
+  ck('B-a5c0 drift: a live window still reports its drift (2pt)', gateOf(approx(d3.drift, 2, 1e-6)) && d3.rolled === 0);
   const d4 = est.cliRefreshDrift({ sevenDay: { utilization: 0.42 } }, { sevenDay: { utilization: 0.40 } }, NOW);
-  ck('B-a5c0 drift: a resetsAt-less raw keeps its control (no evidence of a roll)', approx(d4.drift, 2, 1e-6));
+  ck('B-a5c0 drift: a resetsAt-less raw keeps its control (no evidence of a roll)', verdictOf(approx(d4.drift, 2, 1e-6)));
 }
 {
   // WIRING PINS — the engine and the auto-cli loop go through the helpers (a pure fix without its call site is dead, 2.355.0)
   const eng = fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8');
   const sweepBody = eng.slice(eng.indexOf('function sweepUsageAnchors'), eng.indexOf('function sweepUsageAnchors') + 2500);
-  ck('B-a5c0 wiring: sweepUsageAnchors delegates to sweepAnchorGroup and emits no metric of its own', /sweepAnchorGroup\(/.test(sweepBody) && !/__vsMetric\?\.\('usage-est/.test(eng) && !/predictCalib\(/.test(sweepBody));
+  ck('B-a5c0 wiring: sweepUsageAnchors delegates to sweepAnchorGroup and emits no metric of its own', gateOf(/sweepAnchorGroup\(/.test(sweepBody)) && !/__vsMetric\?\.\('usage-est/.test(eng) && !/predictCalib\(/.test(sweepBody));
   const srv = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   // the loop lives in src/server/auto-cli-loop.js since 2.369.163 (quota r2); server.js only starts it
   const loop = fs.readFileSync(new URL('../src/server/auto-cli-loop.js', import.meta.url), 'utf8');
-  ck('B-a5c0 wiring: server.js starts THE auto-cli loop module (no inline twin)', /require\('\.\/src\/server\/auto-cli-loop\.js'\)\.createAutoCliLoop\(/.test(srv) && !/estDriftPct:/.test(srv));
-  ck('B-a5c0 wiring: the auto-cli loop reads cliRefreshDrift and schedules on its triggerDrift', /cliRefreshDrift\(/.test(loop) && /estDriftPct: dr\.triggerDrift/.test(loop) && !/const cmp = \(e, r\)/.test(loop));
-  ck('B-a5c0 wiring: the refresh log prints a drift only when a control existed', /drift == null/.test(loop));
-  ck('B-a5c0 wiring: __vsMetric carries a detail', /global\.__vsMetric = \(name, value, detail\) => \{[^\n]*detail/.test(srv));
+  ck('B-a5c0 wiring: server.js starts THE auto-cli loop module (no inline twin)', gateOf(/require\('\.\/src\/server\/auto-cli-loop\.js'\)\.createAutoCliLoop\(/.test(srv)) && !/estDriftPct:/.test(srv));
+  ck('B-a5c0 wiring: the auto-cli loop reads cliRefreshDrift and schedules on its triggerDrift', gateOf(/cliRefreshDrift\(/.test(loop)) && gateOf(/estDriftPct: dr\.triggerDrift/.test(loop)) && !/const cmp = \(e, r\)/.test(loop));
+  ck('B-a5c0 wiring: the refresh log prints a drift only when a control existed', verdictOf(/drift == null/.test(loop)));
+  ck('B-a5c0 wiring: __vsMetric carries a detail', verdictOf(/global\.__vsMetric = \(name, value, detail\) => \{[^\n]*detail/.test(srv)));
 }
 // ── THE BURN (B-f69c ③): the projection's input — utilization per MINUTE ─────
 {
@@ -609,11 +609,11 @@ const runTicks = (sweep, label) => {
   let asked = null;
   const costFn = (from, to) => { asked = [from, to]; return { total: 10, byFamily: { fable: 8, opus: 2, sonnet: 0, haiku: 0, other: 0 } }; };
   const b = est.burnRates({ rates, costFn, nowMs: T0 });
-  ck('burn: asks the ledger for the trailing window [now − 10 min, now]', asked && asked[0] === T0 - 600000 && asked[1] === T0);
-  ck('burn: 5h = rate × window cost / minutes ($10 over 10 min at 1/500 ⇒ 0.002/min = 0.2 %/min)', approx(b.fiveHour, 0.002));
-  ck('burn: 7d over the TOTAL, the Fable cap over the FABLE family cost only', approx(b.sevenDay, 10 / 1730 / 10) && approx(b['scoped:fable'], 8 / 875 / 10));
+  ck('burn: asks the ledger for the trailing window [now − 10 min, now]', gateOf(asked) && asked[0] === T0 - 600000 && asked[1] === T0);
+  ck('burn: 5h = rate × window cost / minutes ($10 over 10 min at 1/500 ⇒ 0.002/min = 0.2 %/min)', verdictOf(approx(b.fiveHour, 0.002)));
+  ck('burn: 7d over the TOTAL, the Fable cap over the FABLE family cost only', gateOf(approx(b.sevenDay, 10 / 1730 / 10)) && verdictOf(approx(b['scoped:fable'], 8 / 875 / 10)));
   const cls = est.burnRates({ rates: { fiveHour: { rate: 1 / 500, rateCw: 1 / 400, rateCr: 1 / 4000, rateFresh: 1 / 200 } }, costFn: () => ({ total: 10, byFamily: {}, byClass: { cw: 4, cr: 4, other: 2 } }), nowMs: T0 });
-  ck('burn: the 5h bucket uses the CLASS coefficients when the regression produced them (the predict rule)', approx(cls.fiveHour, (4 / 400 + 4 / 4000 + 2 / 200) / 10));
+  ck('burn: the 5h bucket uses the CLASS coefficients when the regression produced them (the predict rule)', verdictOf(approx(cls.fiveHour, (4 / 400 + 4 / 4000 + 2 / 200) / 10)));
   ck('burn: no spend in the window ⇒ NO claim (an empty object, never a zero burn)', Object.keys(est.burnRates({ rates, costFn: () => ({ total: 0, byFamily: {} }), nowMs: T0 })).length === 0);
   ck('burn: a bucket without a learned rate has no entry', !('scoped:opus' in b));
   ck('burn: a throwing ledger is no claim, never a throw', Object.keys(est.burnRates({ rates, costFn: () => { throw new Error('x'); }, nowMs: T0 })).length === 0);
@@ -626,10 +626,10 @@ const runTicks = (sweep, label) => {
   ck('burnFor: an idle account has no burn', Object.keys(ue.burnFor('sub-x', T0 + HR)).length === 0);
   ue.noteLive({ rid: 'req_burn1', accountId: 'sub-x', model: 'claude-fable-5', usd: 17.3, ts: T0 + HR - 5 * 60000 });
   const bf = ue.burnFor('sub-x', T0 + HR);
-  ck('burnFor: a streamed $17.30 five minutes ago on a $1730 week ⇒ 1 % of the week over the 10-min window = 0.1 %/min', approx(bf.sevenDay, 0.01 / 10, 1e-5));
+  ck('burnFor: a streamed $17.30 five minutes ago on a $1730 week ⇒ 1 % of the week over the 10-min window = 0.1 %/min', verdictOf(approx(bf.sevenDay, 0.01 / 10, 1e-5)));
   ck('burnFor: an unknown account is no claim', Object.keys(ue.burnFor('sub-nobody', T0 + HR)).length === 0);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

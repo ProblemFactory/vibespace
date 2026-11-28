@@ -40,7 +40,7 @@ process.env.HOME = fakeHome;
 os.homedir = () => fakeHome;
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -69,10 +69,10 @@ console.log('— ① the PURE row builder (labels, coalescing, escaping)');
   ok(CR.agentName('/root/water_research') === 'water_research' && CR.agentName('') === '' && CR.agentName('th-1') === 'th-1', 'agentName is the last path segment, thread ids pass through');
   const many = { rows: [IN, { ...IN, agentPath: '/root/energy_research', agentName: 'energy_research', msgType: 'MESSAGE' }, { ...IN, agentPath: '/root/interior_research', agentName: 'interior_research', msgType: 'MESSAGE' }] };
   ok(CR.collabSummaryText(many) === 'Sub-agent traffic · 3 messages · 3 agents · water_research (FINAL_ANSWER), energy_research (MESSAGE), interior_research (MESSAGE)', 'coalesced summary counts and names (the {n} param is substituted even without a client t())', CR.collabSummaryText(many));
-  ok(/^Sub-agent traffic · 4 sub-agent events · 2 agents · /.test(CR.collabSummaryText({ rows: [IN, OUT, SPAWN, ACT] })), 'a MIXED coalesced set reads as sub-agent events (never "messages") and counts DISTINCT agents', CR.collabSummaryText({ rows: [IN, OUT, SPAWN, ACT] }));
+  ok(verdictOf(/^Sub-agent traffic · 4 sub-agent events · 2 agents · /.test(CR.collabSummaryText({ rows: [IN, OUT, SPAWN, ACT] }))), 'a MIXED coalesced set reads as sub-agent events (never "messages") and counts DISTINCT agents', CR.collabSummaryText({ rows: [IN, OUT, SPAWN, ACT] }));
   ok(CR.collabReportHeadText({ rows: [IN] }) === 'water_research · FINAL_ANSWER', 'the report attribution header is "<agent> · <TYPE>"', CR.collabReportHeadText({ rows: [IN] }));
   const title = CR.collabRowTitle(OUT);
-  ok(/Sender: \/root\/interior_research/.test(title) && /Message type: message/.test(title) && /payload encrypted upstream/.test(title), 'the hover title carries the envelope + the honest encryption note', title);
+  ok(gateOf(/Sender: \/root\/interior_research/.test(title)) && gateOf(/Message type: message/.test(title)) && verdictOf(/payload encrypted upstream/.test(title)), 'the hover title carries the envelope + the honest encryption note', title);
   ok(!/payload encrypted upstream/.test(CR.collabRowTitle(IN)), '…and says nothing about encryption for a plaintext row');
 
   // XSS: EVERY model-controlled field must leave through the injected escaper.
@@ -92,13 +92,13 @@ console.log('— ① the PURE row builder (labels, coalescing, escaping)');
   const marked = CR.collabRowHtml(HOSTILE, { esc: markerEsc, icons: {} });
   const raw = marked.replace(/\u0001[^\u0002]*\u0002/g, '');
   ok(!/<img|<script|<svg|onerror|onload/.test(raw), 'every hostile field is interpolated ONLY through the injected escaper (marker proof)', raw.slice(0, 160));
-  ok(marks.includes(HOSTILE.agentName) && marks.includes(HOSTILE.threadId) && marks.some((m) => m.includes(HOSTILE.msgType)), 'the agent name, the thread id and the message type all pass through esc', JSON.stringify(marks.slice(0, 4)));
+  ok(gateOf(marks.includes(HOSTILE.agentName)) && gateOf(marks.includes(HOSTILE.threadId)) && verdictOf(marks.some((m) => m.includes(HOSTILE.msgType))), 'the agent name, the thread id and the message type all pass through esc', JSON.stringify(marks.slice(0, 4)));
   const real = CR.collabRowHtml(HOSTILE, { esc: escHtml, icons: { in: '<svg class="i"></svg>' } });
   // (an escaped `onerror=` inside text/attribute VALUES is inert — what must
   // never appear is an unescaped tag opening or a bare quote breaking out)
-  ok(!/<img|<script|<svg\/|'-alert/.test(real) && /&lt;img src=x onerror=alert\(1\)&gt;/.test(real) && /&lt;svg\/onload=alert\(3\)&gt;/.test(real), 'with the real escaper nothing executable survives (name, type, title)', real.slice(0, 200));
-  ok(/data-agent-path="\/root\/&lt;img src=x onerror=alert\(1\)&gt;"/.test(real) && /data-thread-id="&quot;&gt;&lt;script&gt;/.test(real), 'the click-through data attributes are escaped too (quotes included)', real.slice(0, 260));
-  ok(/<svg class="i"><\/svg>/.test(real) && !/[←→⊕●]/.test(real), 'the direction is an injected SVG ICON, never a glyph/emoji (§17)');
+  ok(!/<img|<script|<svg\/|'-alert/.test(real) && gateOf(/&lt;img src=x onerror=alert\(1\)&gt;/.test(real)) && verdictOf(/&lt;svg\/onload=alert\(3\)&gt;/.test(real)), 'with the real escaper nothing executable survives (name, type, title)', real.slice(0, 200));
+  ok(gateOf(/data-agent-path="\/root\/&lt;img src=x onerror=alert\(1\)&gt;"/.test(real)) && verdictOf(/data-thread-id="&quot;&gt;&lt;script&gt;/.test(real)), 'the click-through data attributes are escaped too (quotes included)', real.slice(0, 260));
+  ok(gateOf(/<svg class="i"><\/svg>/.test(real)) && !/[←→⊕●]/.test(real), 'the direction is an injected SVG ICON, never a glyph/emoji (§17)');
   const multi = CR.collabRowsHtml({ rows: [HOSTILE, { ...HOSTILE, agentPath: '/root/other', agentName: 'other', threadId: 'th-2' }] }, { esc: escHtml, icons: {} });
   ok(!/<img|<script/.test(multi) && (multi.match(/class="chat-collab-name"/g) || []).length === 2, 'the coalesced row escapes every name and keeps ONE clickable chip per agent', multi.slice(0, 120));
   ok(CR.collabRowsHtml(null, { esc: escHtml }) === '' && CR.collabRowsHtml({ rows: [] }, { esc: escHtml }) === '', 'an empty collab renders nothing (never "undefined")');
@@ -109,52 +109,52 @@ console.log('— ① the PURE row builder (labels, coalescing, escaping)');
 console.log('— ② renderer + chat-view wiring');
 {
   const cr = read('src/lib/chat-renderers.js');
-  ok(/renderToolMsg\(msg\) \{\s*\n\s*if \(msg\.collab\) return this\._renderCollabMsg\(msg\);/.test(cr), 'renderToolMsg dispatches a collab message BEFORE the tool-card path');
-  ok(/collabRowsHtml\(collab, \{ esc: escHtml, t, icons: COLLAB_ICONS, live, now: Date\.now\(\) \}\)/.test(cr), 'the renderer injects the REAL escHtml + t + the SVG icon set (+ the view\'s liveness answer)');
-  ok(/chat-agent-report-head[\s\S]{0,400}collabReportHeadText|escHtml\(collab\.agentName/.test(cr) && /chat-agent-report-body[^]{0,80}this\.renderMarkdown\(stripAnsi\(body\), \{ vsLinks: true \}\)/.test(cr), 'a sub-agent report renders an attributed head + its body as MARKDOWN (same sanitizer as assistant text; the scheme\'s links on, as the assistant text — lane setting-doors cure)');
-  ok(/renderMarkdown\(text, \{ vsLinks = false, streaming = false \} = \{\}\) \{[\s\S]{0,900}sanitizeHtml\((?:this\._fileHrefs\()?marked\.parse/.test(cr) && /import \{ sanitizeHtml \} from '\.\/safe-html\.js';/.test(cr), '…and renderMarkdown is the sanitizeHtml path (src/lib/safe-html.js — the XSS law; verify-r6: no CSS, no product classes)');
-  ok(/COLLAB_ICONS = \{[\s\S]{0,220}lock: UI_ICONS\.lock,/.test(cr) && /agentIn:/.test(read('src/lib/icons.js')), 'the direction icons come from the central SVG library');
+  ok(verdictOf(/renderToolMsg\(msg\) \{\s*\n\s*if \(msg\.collab\) return this\._renderCollabMsg\(msg\);/.test(cr)), 'renderToolMsg dispatches a collab message BEFORE the tool-card path');
+  ok(verdictOf(/collabRowsHtml\(collab, \{ esc: escHtml, t, icons: COLLAB_ICONS, live, now: Date\.now\(\) \}\)/.test(cr)), 'the renderer injects the REAL escHtml + t + the SVG icon set (+ the view\'s liveness answer)');
+  ok(gateOf(/chat-agent-report-head[\s\S]{0,400}collabReportHeadText|escHtml\(collab\.agentName/.test(cr)) && verdictOf(/chat-agent-report-body[^]{0,80}this\.renderMarkdown\(stripAnsi\(body\), \{ vsLinks: true \}\)/.test(cr)), 'a sub-agent report renders an attributed head + its body as MARKDOWN (same sanitizer as assistant text; the scheme\'s links on, as the assistant text — lane setting-doors cure)');
+  ok(gateOf(/renderMarkdown\(text, \{ vsLinks = false, streaming = false \} = \{\}\) \{[\s\S]{0,900}sanitizeHtml\((?:this\._fileHrefs\()?marked\.parse/.test(cr)) && verdictOf(/import \{ sanitizeHtml \} from '\.\/safe-html\.js';/.test(cr)), '…and renderMarkdown is the sanitizeHtml path (src/lib/safe-html.js — the XSS law; verify-r6: no CSS, no product classes)');
+  ok(gateOf(/COLLAB_ICONS = \{[\s\S]{0,220}lock: UI_ICONS\.lock,/.test(cr)) && verdictOf(/agentIn:/.test(read('src/lib/icons.js'))), 'the direction icons come from the central SVG library');
   const cv = read('src/lib/chat-view.js');
-  ok(/const collabName = e\.target\.closest\?\.\('\.chat-collab-name'\);[\s\S]{0,320}this\._openCollabAgent\(\{/.test(cv), 'chat-view delegates a click on the agent NAME to _openCollabAgent');
-  ok(/if \(threadId\) \{ this\._openSubagentViewer\(\{ threadId/.test(cv), '…which opens the EXISTING subagent viewer when the thread id is known (0.153.4 always knows it)');
-  ok(/fetchJson\(`\/api\/subagents\?\$\{q\.toString\(\)\}`\)/.test(cv) && /showToast\(t\('This sub-agent’s conversation is not on this machine\.'\)\)/.test(cv), '…falls back to the roster route and TOASTS when the child rollout is elsewhere (no silent failure)');
+  ok(verdictOf(/const collabName = e\.target\.closest\?\.\('\.chat-collab-name'\);[\s\S]{0,320}this\._openCollabAgent\(\{/.test(cv)), 'chat-view delegates a click on the agent NAME to _openCollabAgent');
+  ok(verdictOf(/if \(threadId\) \{ this\._openSubagentViewer\(\{ threadId/.test(cv)), '…which opens the EXISTING subagent viewer when the thread id is known (0.153.4 always knows it)');
+  ok(gateOf(/fetchJson\(`\/api\/subagents\?\$\{q\.toString\(\)\}`\)/.test(cv)) && verdictOf(/showToast\(t\('This sub-agent’s conversation is not on this machine\.'\)\)/.test(cv)), '…falls back to the roster route and TOASTS when the child rollout is elsewhere (no silent failure)');
   // The count is produced in chat-view (only it can see the run's rows) but the
   // LINE — its text and its position in the label — belongs to the ONE summary
   // table in the PURE module (round-5 rebase onto 2.369.37: a second per-kind
   // map in chat-view is exactly the 2.369.34 NaN class).
   const RS = await import(path.join(REPO, 'src/lib/chat-run-summary.js'));
   const tt = (k, p) => k.replace(/\{(\w+)\}/g, (m, x) => String(p?.[x] ?? m));
-  ok(/byKind\.subAgentIn = collabRows\.filter\(\(r\) => r\.dir === 'in'\)\.length;/.test(cv)
-    && RS.SUMMARY_EXTRAS.includes('subAgentIn')
+  ok(gateOf(/byKind\.subAgentIn = collabRows\.filter\(\(r\) => r\.dir === 'in'\)\.length;/.test(cv))
+    && gateOf(RS.SUMMARY_EXTRAS.includes('subAgentIn'))
     && RS.runSummaryParts({ ...RS.countKinds(['agent', 'agent']), subAgentIn: 5 }, new Set(), tt).join(' · ') === '5 sub-agent messages · 2 agent ops'
     && RS.runSummaryParts(RS.countKinds(['agent']), new Set(), tt).join(' · ') === '1 agent ops',
   "the fold summary counts codex INBOUND messages as '{n} sub-agent messages' (before 'agent ops'; absent when there are none)");
-  ok(/chat-run-agents[\s\S]{0,200}chat-collab-name/.test(cv) && /collabPart: collabRunPart\(collabStats, \{ now, live, t \}\)/.test(cv),
+  ok(gateOf(/chat-run-agents[\s\S]{0,200}chat-collab-name/.test(cv)) && verdictOf(/collabPart: collabRunPart\(collabStats, \{ now, live, t \}\)/.test(cv)),
     '…and lists the run\'s sub-agents as click-through chips, while the COUNT ("{n} sub-agents · {n} messages") rides the label so the floating bar and the footer carry it too');
-  ok(/for \(const nameEl of header\.querySelectorAll\('\.chat-collab-name'\)\) \{[\s\S]{0,220}ev\.stopPropagation\(\);/.test(cv), 'a chip click does NOT toggle the run (stopPropagation on the header\'s own handler)');
+  ok(verdictOf(/for \(const nameEl of header\.querySelectorAll\('\.chat-collab-name'\)\) \{[\s\S]{0,220}ev\.stopPropagation\(\);/.test(cv)), 'a chip click does NOT toggle the run (stopPropagation on the header\'s own handler)');
   const css = read('public/chat.css');
-  ok(/\.chat-msg\.chat-agent-report \{[^}]*border-left: 2px solid var\(--magenta/.test(css) && /\.chat-collab-name \{/.test(css) && /\.chat-collab-line \{/.test(css), 'the report card has the tinted left strip and the rows have their compact styles (theme vars only)');
+  ok(gateOf(/\.chat-msg\.chat-agent-report \{[^}]*border-left: 2px solid var\(--magenta/.test(css)) && gateOf(/\.chat-collab-name \{/.test(css)) && verdictOf(/\.chat-collab-line \{/.test(css)), 'the report card has the tinted left strip and the rows have their compact styles (theme vars only)');
   ok(!/#[0-9a-fA-F]{3,6}/.test(css.split('Codex multi-agent collab rows')[1].split('.chat-run-header .chat-collab-name')[0]), 'no literal colors in the new CSS block (§17)');
   // the default role indicator ('border') paints EVERY .chat-msg-tool-result
   // green — the report card must not read as ordinary assistant output
-  ok(/\[data-role-indicator\] \.chat-msg\.chat-agent-report \{ border-left-color: var\(--magenta/.test(css) && /\[data-role-indicator\] \.chat-msg\.chat-msg-collab \{ border-left-color: transparent/.test(css), 'the role-indicator green bar is overridden for both collab shapes (attribute + 2 classes beats the generic tool-result rule)');
+  ok(gateOf(/\[data-role-indicator\] \.chat-msg\.chat-agent-report \{ border-left-color: var\(--magenta/.test(css)) && verdictOf(/\[data-role-indicator\] \.chat-msg\.chat-msg-collab \{ border-left-color: transparent/.test(css)), 'the role-indicator green bar is overridden for both collab shapes (attribute + 2 classes beats the generic tool-result rule)');
   for (const k of ['{n} sub-agent messages', '{n} sub-agents', 'sub-agent report', 'payload encrypted upstream', 'This sub-agent’s conversation is not on this machine.']) {
-    ok(read('src/lib/i18n-zh.js').includes(`"${k}":`) && read('src/lib/i18n-ja.js').includes(`"${k}":`), `zh + ja carry "${k.slice(0, 34)}"`);
+    ok(gateOf(read('src/lib/i18n-zh.js').includes(`"${k}":`)) && verdictOf(read('src/lib/i18n-ja.js').includes(`"${k}":`)), `zh + ja carry "${k.slice(0, 34)}"`);
   }
-  ok(/const PURE = new Set\(\[[^\]]*'src\/collab-row\.js'/.test(read('scripts/test-architecture.mjs')), 'the builder is registered in the PURE tier (it must never grow a dependency)');
+  ok(verdictOf(/const PURE = new Set\(\[[^\]]*'src\/collab-row\.js'/.test(read('scripts/test-architecture.mjs'))), 'the builder is registered in the PURE tier (it must never grow a dependency)');
   // FOLD KIND (B-7473 integration 2026-09-06): a sub-agent's REPORT is the answer the owner opened
   // the window to read — it must NOT hide inside the 'agent' fold, which ships
   // ON by default. It has its own kind, offered in settings but UNCHECKED.
   const schema = read('src/lib/settings-schema.js');
   const defaults = /'chat\.collapseKinds':[\s\S]{0,600}?default: \[([^\]]*)\]/.exec(schema)?.[1] || '';
-  ok(/collapseKind: 'report'/.test(read('src/codex-message-manager.js')), "a sub-agent report is stamped collapseKind 'report' (not 'agent')");
-  ok(/\{ value: 'report', label: t\(/.test(schema) && !/'report'/.test(defaults) && /'agent'/.test(defaults), "…'report' is an OFFERED fold kind but NOT in the default set (content, not orchestration noise)", defaults);
-  ok(RS.RUN_KINDS.includes('report') && RS.countKinds(['report', 'report']).report === 2
+  ok(verdictOf(/collapseKind: 'report'/.test(read('src/codex-message-manager.js'))), "a sub-agent report is stamped collapseKind 'report' (not 'agent')");
+  ok(gateOf(/\{ value: 'report', label: t\(/.test(schema)) && !/'report'/.test(defaults) && verdictOf(/'agent'/.test(defaults)), "…'report' is an OFFERED fold kind but NOT in the default set (content, not orchestration noise)", defaults);
+  ok(gateOf(RS.RUN_KINDS.includes('report')) && RS.countKinds(['report', 'report']).report === 2
     && RS.runSummaryParts(RS.countKinds(['report', 'report', 'report']), new Set(), tt).join(' · ') === '3 sub-agent reports'
     && RS.messageKind({ collapseKind: 'report', content: [{}] }, { toolCard: true }) === 'report',
   'the run header counts the kind (an unlisted kind counts NaN and vanishes from the summary) — RUN_KINDS/SUMMARY_ORDER own it, not a chat-view map');
   for (const k of ['{n} sub-agent reports', 'Sub-agent reports (a child agent’s written answer)']) {
-    ok(read('src/lib/i18n-zh.js').includes(`"${k}":`) && read('src/lib/i18n-ja.js').includes(`"${k}":`), `zh + ja carry "${k.slice(0, 34)}"`);
+    ok(gateOf(read('src/lib/i18n-zh.js').includes(`"${k}":`)) && verdictOf(read('src/lib/i18n-ja.js').includes(`"${k}":`)), `zh + ja carry "${k.slice(0, 34)}"`);
   }
   // the dead-token fix: --bg-secondary is not defined anywhere in this project
   ok(!/\.chat-msg\.chat-agent-report \{[^}]*var\(--bg-secondary\)/.test(css) && !/\.chat-msg\.chat-peer-message \{[^}]*var\(--bg-secondary\)/.test(css), 'the report + peer cards use a DEFINED background token (--bg-secondary is undefined here ⇒ transparent)');
@@ -191,7 +191,7 @@ console.log('— ④ ONE IDENTITY PER SUB-AGENT + errors are not interchangeable
   const idents = new Set(rows.map((r) => r.agentPath || r.target).filter(Boolean));
   ok(rows.length === 4 && idents.size === 1 && [...idents][0] === '/root/water_research',
     'ONE identity per agent: the bare-name spawn/send/followup legs and the absolute inbound leg all key on /root/water_research', `${rows.length} rows, identities ${JSON.stringify([...idents])}`);
-  ok(rows.every((r) => r.threadId === 'child-water'),
+  ok(verdictOf(rows.every((r) => r.threadId === 'child-water')),
     'every row carries the child thread id once the map knows it (the outbound rows used to carry none ⇒ no click-through)', JSON.stringify(rows.map((r) => `${r.dir}:${r.threadId}`)));
   ok(Object.keys(mm.status().subagents).length === 1 && mm.status().subagents['/root/water_research'] === 'child-water',
     'status().subagents holds exactly one entry — the sub-agents summary counts DISTINCT agents, not spellings');
@@ -243,9 +243,9 @@ console.log('— ④ ONE IDENTITY PER SUB-AGENT + errors are not interchangeable
   ]);
   const errs5 = [];
   for (const m of mm5.messages) if (m.collab) for (const r of (m.collab.rows || [])) if (r.kind === 'errored') errs5.push(r);
-  ok(errs5.length === 2 && errs5[0].detail === 'same failure' && /DIFFERENT/.test(errs5[1].detail),
+  ok(errs5.length === 2 && errs5[0].detail === 'same failure' && verdictOf(/DIFFERENT/.test(errs5[1].detail)),
     'the same error record read twice collapses, but a colliding id with a different message still draws its row', JSON.stringify(errs5.map((r) => r.detail)));
-  ok(/foreign-error-\$\{tid\}-\$\{Date\.now\(\)\}-\$\{\+\+foreignErrorSeq\}/.test(read('data/bin/codex-chat-wrapper.js')),
+  ok(verdictOf(/foreign-error-\$\{tid\}-\$\{Date\.now\(\)\}-\$\{\+\+foreignErrorSeq\}/.test(read('data/bin/codex-chat-wrapper.js'))),
     'wrapper pin: the synthesized foreign-error id carries a counter (Date.now() alone is not unique)');
   // the non-error kinds keep their (thread, kind) coalescing (32 'completed'
   // records over 18 threads in the local corpus ⇒ one row per thread)
@@ -313,13 +313,13 @@ const srv = app.listen(0, '127.0.0.1', async () => {
   const list = out.codex?.body?.subagents || [];
   ok(list.length === 2, 'the roster lists exactly the conversation\'s OWN children (an unrelated thread never leaks in)', JSON.stringify(list));
   const w = list.find((s) => s.agentPath === '/root/walkthrough_v2');
-  ok(w && w.threadId === '01a07368-a01e-7503-abca-c6380f68b820' && w.nickname === 'Beauvoir' && w.depth === 1 && w.startedAt > 0, 'each row carries agentPath / nickname / threadId / depth / startedAt (from the child\'s OWN thread_spawn, not the inherited parent copy)', JSON.stringify(w));
+  ok(gateOf(w) && w.threadId === '01a07368-a01e-7503-abca-c6380f68b820' && w.nickname === 'Beauvoir' && w.depth === 1 && w.startedAt > 0, 'each row carries agentPath / nickname / threadId / depth / startedAt (from the child\'s OWN thread_spawn, not the inherited parent copy)', JSON.stringify(w));
   ok(list[0].startedAt <= list[1].startedAt, 'rows are ordered by spawn time', list.map((s) => s.startedAt).join(','));
   ok(out.cached?.body?.cached === true && JSON.stringify(out.cached.body.subagents) === JSON.stringify(list), 'a second ask inside 10s is served from cache (the walk is not free)');
   // WIRING PIN (B-7473 integration 2026-09-06): the route must not walk the tree ON the event loop —
   // it uses the transcript-worker twin. A sync require here is the regression.
   const routeSrc = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
-  ok(/collectCodexThreadMetasAsync/.test(routeSrc) && !/[^A-Za-z]collectCodexThreadMetas\(/.test(routeSrc), 'the roster walk runs OFF the event loop (collectCodexThreadMetasAsync, the worker twin) — never the sync walk', routeSrc.match(/collectCodexThreadMetas\w*/g)?.join(','));
+  ok(gateOf(/collectCodexThreadMetasAsync/.test(routeSrc)) && !/[^A-Za-z]collectCodexThreadMetas\(/.test(routeSrc), 'the roster walk runs OFF the event loop (collectCodexThreadMetasAsync, the worker twin) — never the sync walk', routeSrc.match(/collectCodexThreadMetas\w*/g)?.join(','));
   ok(out.claude?.body?.reason === 'unsupported-backend' && (out.claude.body.subagents || []).length === 0, 'a non-codex backend gets a NAMED refusal, not a bare empty list');
   ok(out.remote?.body?.reason === 'remote-machine', 'a remote session says the children live on another machine (a silent [] would read as "no sub-agents")');
   ok(out.missing?.status === 400, 'a missing threadId is a 400');
@@ -389,7 +389,7 @@ console.log('— ④ a v2 sub-agent is NEVER listed as the owner\'s own conversa
   const dfSrc = fs.readFileSync(path.join(REPO, 'src/discovery-facts.js'), 'utf8');
   const TS_LEG = "if (p.thread_source === 'subagent' || subAgent) {";
   const SPAWN_LEG = 'if (spawn) {';
-  ok(dfSrc.includes(TS_LEG) && dfSrc.includes(SPAWN_LEG), 'the mutated legs exist verbatim in the classifier (else the controls judge nothing)');
+  ok(gateOf(dfSrc.includes(TS_LEG)) && verdictOf(dfSrc.includes(SPAWN_LEG)), 'the mutated legs exist verbatim in the classifier (else the controls judge nothing)');
   const dfTs = M.write('src/discovery-facts.js', editAnchor(dfSrc, TS_LEG, 'if (subAgent) {', "src/discovery-facts.js"), 'ignore-thread-source');
   const dfNone = M.write('src/discovery-facts.js', editAnchor(editAnchor(dfSrc, SPAWN_LEG, 'if (false && spawn) {', "src/discovery-facts.js"), TS_LEG, 'if (false) {', "src/discovery-facts.js"), 'no-subagents');
   const mTs = require(dfTs);
@@ -429,26 +429,26 @@ const out = {};
   ok(a.length === 0, 'the 5 s-poll listing (listCodexThreadsAsync, the worker path) marks both children SUB-AGENT under their parent, named by nickname; the parent and the user fork stay primary', a.join('; '));
   ok(judge(o.sync || []).length === 0, 'the sync listing (user-action consumers) agrees', judge(o.sync || []).join('; '));
   const nf = (o.async || []).filter((s) => s.sessionId.startsWith('01a072d7-'));
-  ok(nf.length === 2 && nf.every((s) => s.agentKind === 'subagent') && nf.some((s) => s.parentThreadId === '01a072d7-92f1-7c20-987b-a96af83c2e76'),
+  ok(nf.length === 2 && gateOf(nf.every((s) => s.agentKind === 'subagent')) && verdictOf(nf.some((s) => s.parentThreadId === '01a072d7-92f1-7c20-987b-a96af83c2e76')),
     'the depth-2 native-fork children (a grandchild under a child) list as sub-agents too', JSON.stringify(nf));
   const mj = judge(o.mutant || []);
-  ok(mj.length > 0 && mj.some((x) => /Alice listed as primary/.test(x)), 'NEGATIVE CONTROL: a store whose classifier never marks a sub-agent FAILS the same judge (the pre-classification state the report describes)', mj.join('; '));
+  ok(mj.length > 0 && verdictOf(mj.some((x) => /Alice listed as primary/.test(x))), 'NEGATIVE CONTROL: a store whose classifier never marks a sub-agent FAILS the same judge (the pre-classification state the report describes)', mj.join('; '));
   const subs = (o.sub && o.sub.subagents) || [];
-  ok(subs.length === 2 && subs.map((s) => s.threadId).sort().join() === [C1, C2].sort().join() && subs.every((s) => s.nickname && s.agentPath),
+  ok(subs.length === 2 && subs.map((s) => s.threadId).sort().join() === [C1, C2].sort().join() && verdictOf(subs.every((s) => s.nickname && s.agentPath)),
     "the parent's GET /api/subagents lists exactly its two children (with nickname + agent path) — the parent card's View sub-agents", JSON.stringify(subs));
   ok(((o.subFork && o.subFork.subagents) || []).length === 0, 'a user fork has no sub-agents of its own (its forked_from_id never makes the parent ITS child, nor it a child)');
 
   // ── the device rung: the daemon snapshot child → synthesize → interpret ──
   const snapRun = spawnSync(process.execPath, [path.join(REPO, 'src/agentd/agentd.js'), '--discovery-snapshot-child'], { env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
   let snap = null; try { snap = JSON.parse(snapRun.stdout); } catch { }
-  ok(!!snap && Array.isArray(snap.codexRollouts), 'the daemon snapshot child ran over the scratch home', (snapRun.stderr || '').slice(-300));
+  ok(!!snap && verdictOf(Array.isArray(snap.codexRollouts)), 'the daemon snapshot child ran over the scratch home', (snapRun.stderr || '').slice(-300));
   const snapLines = DF.synthesizeDiscoveryLines(snap || {});
   ok((snapLines.match(/^SC /mg) || []).length === 4 && !snapLines.includes(`SC ${path.join(day, fs.readdirSync(day).find((n) => n.includes(P)))}`),
     'the snapshot carries an SC fact for every sub-agent rollout and none for a primary', (snapLines.match(/^SC [^\t]*/mg) || []).join(' | '));
   const dev = DF.interpretDiscoveryLines(snapLines, { hostId: 'hdev', hostName: 'Dev', claimJsonls: () => new Map() });
   ok(judge(dev).length === 0, 'the device rung lists the children as sub-agents under their parent, named by nickname (not the PARENT\'s first message the inherited copy carries)', judge(dev).join('; ') + ' ' + JSON.stringify(dev.map((s) => [s.sessionId.slice(-4), s.agentKind, s.name])));
   const devP = dev.find((s) => s.sessionId === P);
-  ok(devP && !('agentKind' in devP) && !('parentThreadId' in devP), 'a primary remote card keeps its shape byte-for-byte (no new keys)', JSON.stringify(devP));
+  ok(gateOf(devP) && !('agentKind' in devP) && !('parentThreadId' in devP), 'a primary remote card keeps its shape byte-for-byte (no new keys)', JSON.stringify(devP));
 
   // ── the ssh rung: the REAL composed script, run by sh over the scratch home ──
   const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
@@ -464,7 +464,7 @@ const out = {};
   let sshCards = [];
   try { sshCards = await hm.discoverSessions('hssh', { ttlMs: 0 }); } catch (e) { ok(false, 'ssh discovery ran', e.message); }
   const codexSsh = sshCards.filter((s) => s.backend === 'codex');
-  ok(/printf 'SC %s\\t'/.test(ranScript) && codexSsh.length === 6, 'the composed ssh script ran for real (sh, scratch HOME) and listed every rollout', `${codexSsh.length} codex cards`);
+  ok(gateOf(/printf 'SC %s\\t'/.test(ranScript)) && codexSsh.length === 6, 'the composed ssh script ran for real (sh, scratch HOME) and listed every rollout', `${codexSsh.length} codex cards`);
   ok(judge(codexSsh).length === 0, 'the ssh rung classifies exactly like the local listing (SC line → the one classifier)', judge(codexSsh).join('; ') + ' ' + JSON.stringify(codexSsh.map((s) => [s.sessionId.slice(-4), s.agentKind, s.name])));
   const sig = (l) => l.filter((s) => s.backend === 'codex' || s.agentKind !== undefined).map((s) => [s.sessionId, s.agentKind || 'primary', s.parentThreadId || null, s.name || null].join('|')).sort().join('\n');
   ok(sig(codexSsh) === sig(dev), 'device rung ≡ ssh rung (sessionId, kind, parent, name) — no twin drift', sig(codexSsh) + '\n≠\n' + sig(dev));
@@ -525,10 +525,10 @@ const out = {};
     ok(devBig.filter((s) => s.backend === 'codex').length === 45 && miss(devBig).length === 0, 'the device rung classifies ALL 45 rollouts (children past the 30 head-fact slots included)', `${devBig.filter((s) => s.backend === 'codex').length} codex cards; wrong: ${miss(devBig).join(' ')}`);
     const agSrcBig = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
     const SC_ALL = 'codexRollouts.forEach((r, i) => {';
-    ok(agSrcBig.includes(SC_ALL), 'the daemon SC leg walks every listed rollout (the mutated line exists verbatim)');
+    ok(verdictOf(agSrcBig.includes(SC_ALL)), 'the daemon SC leg walks every listed rollout (the mutated line exists verbatim)');
     const devCap = snapOf(M.write('src/agentd/agentd.js', editAnchor(agSrcBig, SC_ALL, 'codexRollouts.slice(0, 30).forEach((r, i) => {', "src/agentd/agentd.js"), 'sc-cap-30'));
     const capMiss = miss(devCap);
-    ok(devCap.length > 0 && capMiss.length >= 10 && capMiss.every((x) => /:subagent$/.test(x)), 'NEGATIVE CONTROL: a daemon whose SC leg is re-capped at 30 lists the older children as PRIMARY (the uncapped leg is load-bearing)', `${capMiss.length} wrong: ${capMiss.join(' ')}`);
+    ok(devCap.length > 0 && capMiss.length >= 10 && verdictOf(capMiss.every((x) => /:subagent$/.test(x))), 'NEGATIVE CONTROL: a daemon whose SC leg is re-capped at 30 lists the older children as PRIMARY (the uncapped leg is load-bearing)', `${capMiss.length} wrong: ${capMiss.join(' ')}`);
     // ssh rung (real composed script + a mutant that re-caps the SC leg at 30)
     const sshOf = async (HM) => {
       const d = path.join(bigHome, 'hostdata-' + Math.random().toString(36).slice(2)); fs.mkdirSync(d, { recursive: true });
@@ -545,11 +545,11 @@ const out = {};
     ok(nameless.length === 0, 'every remote child is named by its nickname, past the head-fact slots too (the NC name leg stays capped at 30 — documented)', nameless.map((s) => s.sessionId.slice(-4) + '=' + JSON.stringify(s.name)).join(' '));
     const hsSrcBig = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
     const SSH_SC = `[ -n "$TID" ] && printf '%s\\\\n' "$HD" | grep '"type":"session_meta"'`;
-    ok(hsSrcBig.includes(SSH_SC), 'the ssh SC leg exists verbatim (else the ssh control judges nothing)');
+    ok(verdictOf(hsSrcBig.includes(SSH_SC)), 'the ssh SC leg exists verbatim (else the ssh control judges nothing)');
     const hsCap = M.write('src/hosts.js', editAnchor(hsSrcBig, SSH_SC, `[ "$i" -le 30 ] && ${SSH_SC}`, "src/hosts.js"), 'sc-cap-30');
     const sshCap = await sshOf(require(hsCap).HostManager);
     const sshCapMiss = miss(sshCap);
-    ok(sshCap.length === 45 && sshCapMiss.length >= 10 && sshCapMiss.every((x) => /:subagent$/.test(x)), 'NEGATIVE CONTROL: an ssh script whose SC leg is re-capped at 30 lists the older children as PRIMARY', `${sshCap.length} cards, ${sshCapMiss.length} wrong`);
+    ok(sshCap.length === 45 && sshCapMiss.length >= 10 && verdictOf(sshCapMiss.every((x) => /:subagent$/.test(x))), 'NEGATIVE CONTROL: an ssh script whose SC leg is re-capped at 30 lists the older children as PRIMARY', `${sshCap.length} cards, ${sshCapMiss.length} wrong`);
   }
 
   // ── the sidebar: primary-only by default, the choice a page VIEW, remote zones filtered ──
@@ -559,11 +559,11 @@ const out = {};
   ok(AM.passesAgentKindFilter({ agentKind: 'subagent' }, 'primary') === false && AM.passesAgentKindFilter({}, 'primary') === true && AM.passesAgentKindFilter({ agentKind: 'subagent' }, '') === true,
     'passesAgentKindFilter: a sub-agent never passes primary-only; a kind-less (legacy) row is primary');
   const sbSrc = read('src/lib/sidebar.js'), wbSrc = read('src/lib/sidebar-workbench.js');
-  ok(!/localStorage\.setItem\(['"]agentKindFilter/.test(sbSrc) && /localStorage\.removeItem\(AGENT_KIND_FILTER_KEY\)/.test(sbSrc) && /sessionStorage\.getItem\(AGENT_KIND_FILTER_KEY\)/.test(sbSrc) && /this\._agentKindFilter = agentKindFilterAtLoad\(storedKind\)/.test(sbSrc),
+  ok(!/localStorage\.setItem\(['"]agentKindFilter/.test(sbSrc) && gateOf(/localStorage\.removeItem\(AGENT_KIND_FILTER_KEY\)/.test(sbSrc)) && gateOf(/sessionStorage\.getItem\(AGENT_KIND_FILTER_KEY\)/.test(sbSrc)) && verdictOf(/this\._agentKindFilter = agentKindFilterAtLoad\(storedKind\)/.test(sbSrc)),
     'WIRING: the sidebar never PERSISTS a kind choice (sessionStorage only) and drops the legacy localStorage key at load — a one-click ALL/↳ can no longer flood every later load');
-  ok(/kindFilter: this\._agentKindFilter \|\| null/.test(sbSrc) && /kindPass: !ctx\.kindFilter \|\| passesAgentKindFilter\(s, ctx\.kindFilter\)/.test(sbSrc) && /sidebar-kind-hint/.test(sbSrc) && /tr\('Main conversations only'\)/.test(sbSrc),
+  ok(gateOf(/kindFilter: this\._agentKindFilter \|\| null/.test(sbSrc)) && gateOf(/kindPass: !ctx\.kindFilter \|\| passesAgentKindFilter\(s, ctx\.kindFilter\)/.test(sbSrc)) && gateOf(/sidebar-kind-hint/.test(sbSrc)) && verdictOf(/tr\('Main conversations only'\)/.test(sbSrc)),
     'WIRING: the local list filters through the ONE predicate (B-b842: the list\'s row facts carry it — _listFilterCtx reads the filter, _listRowFacts asks it), and a non-primary view says so in words with the way back');
-  ok((wbSrc.match(/passesAgentKindFilter\(s, this\._agentKindFilter\)/g) || []).length >= 3 && /agentKind: s\.agentKind \|\| 'primary',\n\s*sourceKind: s\.sourceKind/.test(wbSrc),
+  ok((wbSrc.match(/passesAgentKindFilter\(s, this\._agentKindFilter\)/g) || []).length >= 3 && verdictOf(/agentKind: s\.agentKind \|\| 'primary',\n\s*sourceKind: s\.sourceKind/.test(wbSrc)),
     'WIRING: every remote zone (Recent count, Recent/History list, cross-host search) applies the same filter, and a remote card keeps its agent identity');
   // ── a sub-agent that lives ONLY on a remote host is reachable and disclosed ──
   // (verifier r1, 2026-09-24: the ↳ / ALL tabs and the kind hint read the local
@@ -614,13 +614,13 @@ const out = {};
       return out;
     };
     const real = await drive(Sidebar);
-    ok(real.subTab && real.allTab, 'a primary-only local list + a remote host holding a sub-agent ⇒ the ↳ and ALL tabs are drawn (the kind census spans the remote lists)', JSON.stringify(real));
-    ok(real.hint, 'the ALL view discloses itself (sub-agent threads are listed too) when only a REMOTE host holds them', JSON.stringify(real));
-    ok(real.searchHidden && real.hiddenCount === 1, 'a cross-host search whose only match is a filtered sub-agent says "1 more on Box hidden by the agent-kind filter" — never a silent "No sessions found"', JSON.stringify(real));
+    ok(gateOf(real.subTab) && verdictOf(real.allTab), 'a primary-only local list + a remote host holding a sub-agent ⇒ the ↳ and ALL tabs are drawn (the kind census spans the remote lists)', JSON.stringify(real));
+    ok(verdictOf(real.hint), 'the ALL view discloses itself (sub-agent threads are listed too) when only a REMOTE host holds them', JSON.stringify(real));
+    ok(gateOf(real.searchHidden) && real.hiddenCount === 1, 'a cross-host search whose only match is a filtered sub-agent says "1 more on Box hidden by the agent-kind filter" — never a silent "No sessions found"', JSON.stringify(real));
     ok(real.showAll === true, 'the hidden-row button shows ALL for this page (sessionStorage only, never localStorage)', JSON.stringify(real));
     const sbSrcUi = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
     const UNION = 'for (const st of this._wbRemoteHosts?.values() || []) if (st?.sessions) lists.push(st.sessions);';
-    ok(sbSrcUi.includes(UNION), 'the union line exists verbatim (else the control judges nothing)');
+    ok(verdictOf(sbSrcUi.includes(UNION)), 'the union line exists verbatim (else the control judges nothing)');
     const { Sidebar: SbLocal } = await import(M.write('src/lib/sidebar.js', editAnchor(sbSrcUi, UNION, '/* local only */', "src/lib/sidebar.js"), 'kinds-local-only', { esm: true }));
     const mut = await drive(SbLocal);
     ok(!mut.subTab && !mut.hint, 'NEGATIVE CONTROL: a census that reads `_allSessions` alone draws no ↳ tab and no hint — the remote-only sub-agent is unreachable (the verifier\'s repro)', JSON.stringify(mut));
@@ -630,9 +630,9 @@ const out = {};
   }
 
   const hsSrc = read('src/hosts.js'), agSrc = read('src/agentd/agentd.js');
-  ok(/printf 'SC %s\\\\t'/.test(hsSrc) && /codexScTokensFromHead\(head, tid\)/.test(agSrc) && /lines\.push\(`SC \$\{r\.path\}\\t\$\{r\.agentTokens\}`\)/.test(dfSrc),
+  ok(gateOf(/printf 'SC %s\\\\t'/.test(hsSrc)) && gateOf(/codexScTokensFromHead\(head, tid\)/.test(agSrc)) && verdictOf(/lines\.push\(`SC \$\{r\.path\}\\t\$\{r\.agentTokens\}`\)/.test(dfSrc)),
     'STANDING SWEEP: the ssh script, the daemon snapshot and the synthesizer all carry the SC fact');
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 // ── the REAL home is untouched (this process was re-homed before any fixture was written) ──
@@ -645,4 +645,4 @@ const out = {};
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

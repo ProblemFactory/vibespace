@@ -20,7 +20,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const M = require(path.join(ROOT, 'src/signin-model.js'));
 let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 400)); } };
+const ok = (c, name, info) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name); if (info !== undefined) console.log('    ', JSON.stringify(info).slice(0, 400)); } };
 
 const ESC = '\x1b';
 const URL = 'https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&state=deadbeefcafe';
@@ -48,8 +48,8 @@ function run(chunks) {
   const kinds = r.steps.map((s) => s.kind);
   ok(kinds.filter((k) => k === 'url').length === 1, '① exactly one url step', kinds);
   const urlStep = r.steps.find((s) => s.kind === 'url');
-  ok(urlStep && urlStep.url === URL, '① the url is rejoined whole across the wrap', urlStep && urlStep.url);
-  ok(kinds.includes('code-prompt'), '① code-prompt seen (ESC-spaced "Paste  code here")', kinds);
+  ok(gateOf(urlStep) && urlStep.url === URL, '① the url is rejoined whole across the wrap', urlStep && urlStep.url);
+  ok(verdictOf(kinds.includes('code-prompt')), '① code-prompt seen (ESC-spaced "Paste  code here")', kinds);
   ok(kinds.filter((k) => k === 'connected').length === 1, '① one connected step on the saved line', kinds);
   ok(kinds.indexOf('url') < kinds.indexOf('connected'), '① order: url before connected', kinds);
 }
@@ -61,21 +61,21 @@ function run(chunks) {
   const vis = S_HEAD + URL + '\r\r\n'; // plain text, no hyperlink
   ok(!run([vis]).steps.some((s) => s.kind === 'url'), '② a plain-text url is withheld until the line after it begins', run([vis]).steps.map((s) => s.kind));
   const r2 = M.signinStep(M.signinStep(M.initialSigninParse(), vis, {}).state, 'Paste code here if prompted > ', {});
-  ok(r2.steps.some((s) => s.kind === 'url' && s.url === URL), '② …and emitted once the next line (the prompt, no blank line between) begins', r2.steps);
+  ok(verdictOf(r2.steps.some((s) => s.kind === 'url' && s.url === URL)), '② …and emitted once the next line (the prompt, no blank line between) begins', r2.steps);
   const r3 = M.signinStep(M.signinStep(M.initialSigninParse(), vis, {}).state, S_BLANK, {});
-  ok(r3.steps.some((s) => s.kind === 'url' && s.url === URL), '② …or a blank line (the 2.1.296 shape) lands', r3.steps);
+  ok(verdictOf(r3.steps.some((s) => s.kind === 'url' && s.url === URL)), '② …or a blank line (the 2.1.296 shape) lands', r3.steps);
   const half = S_HEAD + ESC + ']8;;' + URL.slice(0, 50);
   ok(!run([half]).steps.some((s) => s.kind === 'url'), '② an OSC-8 target still arriving (no terminator yet) is no url');
-  ok(run([S_HEAD + S_URL]).steps.some((s) => s.kind === 'url' && s.url === URL), '② the OSC-8 target is whole once its terminator arrived — however its visible text wraps');
+  ok(verdictOf(run([S_HEAD + S_URL]).steps.some((s) => s.kind === 'url' && s.url === URL)), '② the OSC-8 target is whole once its terminator arrived — however its visible text wraps');
 }
 
 // ③ an error screen
 {
   const r = run([S_HEAD + S_ERR]);
   const e = r.steps.find((s) => s.kind === 'error');
-  ok(e && /OAuth error/.test(e.line), '③ error step carries the CLI line', e);
+  ok(gateOf(e) && verdictOf(/OAuth error/.test(e.line)), '③ error step carries the CLI line', e);
   ok(!r.steps.some((s) => s.kind === 'connected'), '③ no connected on an error screen', r.steps.map((s) => s.kind));
-  ok(e && e.line.length <= 300, '③ error line ≤ 300', e && e.line.length);
+  ok(gateOf(e) && e.line.length <= 300, '③ error line ≤ 300', e && e.line.length);
 }
 
 // ④ signinCardView — the five states
@@ -122,12 +122,12 @@ function run(chunks) {
   const typed = S_HEAD + S_URL + S_BLANK + S_PROMPT + CODE + '\r\r\n';
   const r = M.signinStep(M.initialSigninParse(), typed);
   ok(typeof M.cutAtPrompt === 'function' && r.lastLine.indexOf(CODE) < 0 && !/paste\s+code/i.test(r.lastLine), '⑥ the last line is CUT at the code prompt — an echoed code never becomes a «why»', r.lastLine);
-  ok(M.cutAtPrompt && M.cutAtPrompt('OAuth error: x') === 'OAuth error: x' && M.cutAtPrompt('Paste code here if prompted > ' + CODE) === '', '⑥ cutAtPrompt keeps a line with no prompt, drops the prompt and what follows it');
-  ok(/ended before Claude confirmed it/.test(M.ENDED_AFTER_CODE || ''), '⑥ the fixed sentence a silent death after a code says', M.ENDED_AFTER_CODE);
+  ok(gateOf(M.cutAtPrompt) && M.cutAtPrompt('OAuth error: x') === 'OAuth error: x' && M.cutAtPrompt('Paste code here if prompted > ' + CODE) === '', '⑥ cutAtPrompt keeps a line with no prompt, drops the prompt and what follows it');
+  ok(verdictOf(/ended before Claude confirmed it/.test(M.ENDED_AFTER_CODE || '')), '⑥ the fixed sentence a silent death after a code says', M.ENDED_AFTER_CODE);
   const v = M.signinCardView({ phase: 'failed', error: 'Paste code here if prompted > ' + CODE });
   ok(v.state === 'failed' && v.why.indexOf(CODE) < 0, '⑥ the card’s «why» never shows what followed the prompt (redact gained the prompt shape)', v);
-  ok(M.signinWallOf && M.signinWallOf({ oauthSubscription: true }) === 'card', '⑥ signinWallOf: a LOCAL conversation of the harness whose subscriptions the card signs in (its oauthUsage row) → the card');
-  ok(M.signinWallOf && M.signinWallOf({ oauthSubscription: false }) === 'terminal' && M.signinWallOf({ oauthSubscription: true, host: 'h1' }) === 'terminal' && M.signinWallOf({}) === 'terminal', '⑥ signinWallOf: another harness (no such row) / a remote host / no facts → the terminal road');
+  ok(gateOf(M.signinWallOf) && M.signinWallOf({ oauthSubscription: true }) === 'card', '⑥ signinWallOf: a LOCAL conversation of the harness whose subscriptions the card signs in (its oauthUsage row) → the card');
+  ok(gateOf(M.signinWallOf) && M.signinWallOf({ oauthSubscription: false }) === 'terminal' && M.signinWallOf({ oauthSubscription: true, host: 'h1' }) === 'terminal' && M.signinWallOf({}) === 'terminal', '⑥ signinWallOf: another harness (no such row) / a remote host / no facts → the terminal road');
   const CAPS = require(path.join(ROOT, 'src/backend-caps.js'));
   ok(CAPS.capsOf('claude').oauthUsage === true && CAPS.capsOf('codex').oauthUsage !== true && CAPS.capsOf('opencode').oauthUsage !== true, '⑥ the declared row today: claude’s subscriptions are the card’s, codex / opencode keep the terminal road');
 }
@@ -148,7 +148,7 @@ function run(chunks) {
     const kinds = r.steps.map((x) => x.kind).join(',');
     ok(kinds === 'url,code-prompt' && r.steps[0].url === target, `⑦ the REAL 2.1.308 auth-login screen in ${size}-byte chunks → url (the OSC-8 target, whole) then code-prompt`, kinds);
   }
-  ok(/^https:\/\/claude\.com\/cai\/oauth\/authorize\?code=true&client_id=[\w-]+&response_type=code&redirect_uri=https%3A%2F%2Fplatform\.claude\.com%2Foauth%2Fcode%2Fcallback&scope=[^&]+&code_challenge=[\w-]+&code_challenge_method=S256&state=[\w-]+$/.test(target), '⑦ the URL is the code-page sign-in (redirect platform.claude.com/oauth/code/callback)', target.slice(0, 90));
+  ok(verdictOf(/^https:\/\/claude\.com\/cai\/oauth\/authorize\?code=true&client_id=[\w-]+&response_type=code&redirect_uri=https%3A%2F%2Fplatform\.claude\.com%2Foauth%2Fcode%2Fcallback&scope=[^&]+&code_challenge=[\w-]+&code_challenge_method=S256&state=[\w-]+$/.test(target)), '⑦ the URL is the code-page sign-in (redirect platform.claude.com/oauth/code/callback)', target.slice(0, 90));
   const vis = cap.replace(/\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
   ok(run([vis]).steps.map((x) => x.kind).join(',') === 'url,code-prompt' && run([vis]).steps[0].url === target, '⑦ its VISIBLE text alone (the hyperlink stripped) reads the same URL — it ends at its line, the prompt on the next');
   const atPrompt = cap.slice(0, cap.indexOf('Session terminated'));
@@ -173,13 +173,13 @@ function run(chunks) {
   const fs = require('fs');
   const recs = fs.readFileSync(path.join(ROOT, 'scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const walls = recs.map((r) => M.liveWallOf(r));
-  ok(recs.length === 4 && walls.filter(Boolean).length === 1 && walls[0] && walls[0].reason === 'not_logged_in' && walls[0].detail === 'Not logged in · Please run /login', '⑧ exactly the refusal record is the wall (not_logged_in + the CLI\'s words); its result record and the «/login» answer are not', walls);
-  ok(recs[0].error === 'authentication_failed' && recs[0].message.model === '<synthetic>' && recs[2].local_command_outcome && recs[2].local_command_outcome.kind === 'unavailable_headless', '⑧ (the fixture is what the brief measured) authentication_failed on a <synthetic> record; «/login» = unavailable_headless');
+  ok(recs.length === 4 && walls.filter(Boolean).length === 1 && gateOf(walls[0]) && walls[0].reason === 'not_logged_in' && walls[0].detail === 'Not logged in · Please run /login', '⑧ exactly the refusal record is the wall (not_logged_in + the CLI\'s words); its result record and the «/login» answer are not', walls);
+  ok(recs[0].error === 'authentication_failed' && recs[0].message.model === '<synthetic>' && gateOf(recs[2].local_command_outcome) && recs[2].local_command_outcome.kind === 'unavailable_headless', '⑧ (the fixture is what the brief measured) authentication_failed on a <synthetic> record; «/login» = unavailable_headless');
   const quoting = { ...recs[0], error: undefined, message: { ...recs[0].message, model: 'claude-opus-5-5' } };
   const sub = { ...recs[0], parent_tool_use_id: 'toolu_1' };
   const other = { ...recs[0], error: 'rate_limit' };
   ok(!M.liveWallOf(quoting) && !M.liveWallOf(sub) && !M.liveWallOf(other) && !M.liveWallOf(null) && !M.liveWallOf({ type: 'result', result: 'Not logged in' }), '⑧ a model QUOTING the words, a sub-agent\'s record, another error\'s synthetic record, a result → no wall');
-  ok(Array.isArray(M.LIVE_WALLS) && M.LIVE_WALLS.length >= 1 && Object.isFrozen(M.LIVE_WALLS[0]), '⑧ the wall is a frozen TABLE row (the next live wall is a row, not a branch)');
+  ok(gateOf(Array.isArray(M.LIVE_WALLS)) && M.LIVE_WALLS.length >= 1 && verdictOf(Object.isFrozen(M.LIVE_WALLS[0])), '⑧ the wall is a frozen TABLE row (the next live wall is a row, not a branch)');
 }
 
 // ⑨ THE FIRST SIGN-IN BECOMES THE DEFAULT — only where nothing else could serve (主开发 2026-10-23 04:27)
@@ -187,8 +187,8 @@ function run(chunks) {
   const F = M.firstSigninDefault, base = { cardRow: true, loggedIn: true, hasDefault: false, globalLoggedIn: false, platform: 'linux', envKey: false };
   ok(F(base) === true, '⑨ a card row that logged in, no Claude default, a signed-out machine login, Linux → the default');
   const rows = [['cardRow', false], ['loggedIn', false], ['hasDefault', true], ['globalLoggedIn', true], ['platform', 'darwin'], ['envKey', true]].map(([k, v]) => [k, F({ ...base, [k]: v })]);
-  ok(rows.every(([, v]) => v === false) && F({}) === false, '⑨ any other fact keeps the default as it is (a terminal-road row, no login, a default exists — never swapped, a machine login, macOS Keychain unknowable, an API key)', rows);
+  ok(gateOf(rows.every(([, v]) => v === false)) && F({}) === false, '⑨ any other fact keeps the default as it is (a terminal-road row, no login, a default exists — never swapped, a machine login, macOS Keychain unknowable, an API key)', rows);
 }
 
 console.log(`\ntest-signin-model: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

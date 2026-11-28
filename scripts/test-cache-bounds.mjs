@@ -44,7 +44,7 @@ armWatchdog();
 const rawAA = UsageHistory.prototype.aggregateAsync;
 UsageHistory.prototype.aggregateAsync = function (...a) { return rawAA.apply(this, a).then((x) => { if (!x || !('asOf' in x)) return x; const { asOf, ...r } = x; Object.defineProperty(r, '_asOf', { value: asOf }); return r; }); };
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -90,7 +90,7 @@ console.log('§1 PURE cache-bounds');
   eq(CB.ledgerCutoff({ nowMs: NOW, tss, sizes, windowMs: 45 * DAY, maxBytes: 25 }), NOW - 10 * DAY + 1, 'the byte ceiling moves the cutoff past the row that does not fit');
   eq(CB.ledgerCutoff({ nowMs: NOW, tss, sizes, windowMs: 45 * DAY, maxBytes: 15 }), NOW - DAY + 1, 'a tie group at the edge goes whole (kept bytes never pass the ceiling)');
   eq(CB.ledgerCutoff({ nowMs: NOW, tss, sizes, windowMs: 45 * DAY, maxBytes: 1e9, prev: NOW }), NOW, 'the cutoff never slides backwards');
-  ok(CB.coldable({ ts: 1, i: 1, o: null, model: 'x' }) && !CB.coldable({ ts: 1, i: '5' }) && !CB.coldable({ i: 1 }) && !CB.coldable({ ts: 1, acct: 7 }) && !CB.coldable({ ts: 1, i: 1.5 }) && !CB.coldable({ ts: 1 }, 255) && !CB.coldable({ ts: 1 }, 0, 2 ** 32), 'coldable: whole counts / null / absent, a shard index < 255, an offset < 4 GiB');
+  ok(gateOf(CB.coldable({ ts: 1, i: 1, o: null, model: 'x' })) && !CB.coldable({ ts: 1, i: '5' }) && !CB.coldable({ i: 1 }) && !CB.coldable({ ts: 1, acct: 7 }) && !CB.coldable({ ts: 1, i: 1.5 }) && !CB.coldable({ ts: 1 }, 255) && !CB.coldable({ ts: 1 }, 0, 2 ** 32), 'coldable: whole counts / null / absent, a shard index < 255, an offset < 4 GiB');
   {
     const m = new Map([['old1', { b: 60, u: 0 }], ['old2', { b: 60, u: 0 }], ['live1', { b: 60, u: 990 }], ['live2', { b: 60, u: 995 }]]);
     const r = CB.evictIdle(m, { floorBytes: 100, idleMs: 100, now: 1000, sizeOf: (v) => v.b, usedAt: (v) => v.u });
@@ -106,12 +106,12 @@ console.log('§1 PURE cache-bounds');
   ok(s.locs('rid', 'r3').length === 1 && s.locs('mid', 'm4').length === 1 && s.locs('bare', 'r4').length === 1 && !s.locs('rid', 'nope').length && !s.locs('mid', 'r3').length, 'ColdSlab.locs(kind, id): sorted hash indexes carry the places, whatever the ts');
   eq([s.candidates('r4').length, s.candidates('m4').length, s.candidates('zz').length], [1, 1, 0], 'candidates: the host-stripped rid and the mid');
   ok(!/for \(let q = 0; q < this\.n; q\+\+\)/.test(CB.ColdSlab.prototype.candidates.toString()), '§23 (verify #18) candidates() reads the index (O(log n)), never a scan of the slab');
-  ok(/for \(let q = 0; q < this\.n; q\+\+\)/.test('candidates(id) { for (let q = 0; q < this.n; q++) {} }'), 'control: the r2 linear scan text ⇒ RED');
+  ok(verdictOf(/for \(let q = 0; q < this\.n; q\+\+\)/.test('candidates(id) { for (let q = 0; q < this.n; q++) {} }')), 'control: the r2 linear scan text ⇒ RED');
   const hi = new CB.HashIndex();
   for (let k = 0; k < 1e6; k++) hi.put(CB.idHash('k' + k), k);
   ok(hi.merges < 60 && hi.find(CB.idHash('k777'))[0] === 777 && hi.find(CB.idHash('k999999'))[0] === 999999, `§24 (verify #16) 1 M inserts = ${hi.merges} merges (geometric), places carried`);
   ok(!(1e6 / 4096 < 60), `control: a merge per 4 096 inserts would be ${Math.round(1e6 / 4096)} ⇒ RED`);
-  ok(!CB.locOk(255, 0) && !CB.locOk(0, 2 ** 32) && CB.locOk(254, 2 ** 32 - 1) && Number.isNaN(CB.locOf(300, 5)), '§22 (verify #17) the loc fence: shard index < 255, offset < 2³² — else NO place');
+  ok(!CB.locOk(255, 0) && !CB.locOk(0, 2 ** 32) && gateOf(CB.locOk(254, 2 ** 32 - 1)) && verdictOf(Number.isNaN(CB.locOf(300, 5))), '§22 (verify #17) the loc fence: shard index < 255, offset < 2³² — else NO place');
   ok(Uint8Array.of(300)[0] !== 300, 'control: an unfenced shard 300 decomposes into shard 44 ⇒ RED');
   const lone = [...s.rows(11, 25)][0];
   eq([lone.ts, lone.i, Number.isNaN(lone.o), lone.acct], [20, 4, true, undefined], 'a light row: absent tokens price as NaN, absent names stay undefined');
@@ -180,15 +180,15 @@ const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).
 const files = Object.fromEntries([...walk('src'), 'server.js'].map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]));
 const reds = census(files);
 eq(reds, [], 'every reader of the ledger cache is a census row, none on the resident array, no sync cold read on the server');
-for (const f of Object.keys(READERS)) ok(NEEDLE.test(files[f]) || f === 'src/usage-history.js', `census row ${f} still reads (a dead row would hide a move)`);
-ok(/await usageHistory\.aggregateAsync\(/.test(files['src/server/account-usage-routes.js']), 'the Usage window route streams through aggregateAsync');
+for (const f of Object.keys(READERS)) ok(verdictOf(NEEDLE.test(files[f])) || f === 'src/usage-history.js', `census row ${f} still reads (a dead row would hide a move)`);
+ok(verdictOf(/await usageHistory\.aggregateAsync\(/.test(files['src/server/account-usage-routes.js'])), 'the Usage window route streams through aggregateAsync');
 const m1 = { ...files, 'src/usage-anchors.js': files['src/usage-anchors.js'].replace('for (const ev of usageHistory._events(fromMs, toMs)) {', 'for (const ev of usageHistory._evCache.events) {') };
-ok(m1['src/usage-anchors.js'] !== files['src/usage-anchors.js'] && census(m1).some((r) => /resident array/.test(r)), 'control ①: a reader on the resident array past the window ⇒ RED');
+ok(m1['src/usage-anchors.js'] !== files['src/usage-anchors.js'] && verdictOf(census(m1).some((r) => /resident array/.test(r))), 'control ①: a reader on the resident array past the window ⇒ RED');
 
 console.log('§4 the transcript tails and the estimator lines');
 const ss = files['src/session-store.js'];
 const bytesBound = (t) => /function _jsonlCachePut[\s\S]{0,300}evictIdle\(_jsonlCache, \{ floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS/.test(t) && !/while \(_jsonlCache\.size > JSONL_CACHE_MAX\)/.test(t);
-ok(bytesBound(ss), 'the jsonl cache: the working set stays, idle tails go past a BYTE floor, the count is the second ceiling');
+ok(verdictOf(bytesBound(ss)), 'the jsonl cache: the working set stays, idle tails go past a BYTE floor, the count is the second ceiling');
 const m2 = ss.replace(/  const r = evictIdle\(_jsonlCache, \{[^\n]*\n/, '  while (_jsonlCache.size > JSONL_CACHE_MAX) _jsonlCache.delete(_jsonlCache.keys().next().value); const r = { bytes: 0, live: 0 };\n');
 ok(m2 !== ss && !bytesBound(m2), 'control ②: a count-only jsonl bound ⇒ RED');
 {
@@ -222,7 +222,7 @@ ok(m2 !== ss && !bytesBound(m2), 'control ②: a count-only jsonl bound ⇒ RED'
   const save = CB.ESTIMATOR_LINES_MAX_BYTES;
   for (const k of ['i1', 'i2', 'i3']) est.lines(k);
   eq([est._lineCache.size, est.lineCacheCensus().reduce((a, r) => a + r.bytes, 0)], [3, 3 * per], 'the estimator lines are counted by file bytes (its idle and live rows together)');
-  ok(save === 32 * CB.MB && /evictIdle\(this\._lineCache, \{ floorBytes: ESTIMATOR_LINES_MAX_BYTES, maxEntries: 256, idleMs: ESTIMATOR_LINES_IDLE_MS, liveMaxBytes: ESTIMATOR_LIVE_MAX_BYTES/.test(files['src/usage-estimator.js']), 'the estimator lines: the live identities stay, the floor applies to idle ones');
+  ok(save === 32 * CB.MB && verdictOf(/evictIdle\(this\._lineCache, \{ floorBytes: ESTIMATOR_LINES_MAX_BYTES, maxEntries: 256, idleMs: ESTIMATOR_LINES_IDLE_MS, liveMaxBytes: ESTIMATOR_LIVE_MAX_BYTES/.test(files['src/usage-estimator.js'])), 'the estimator lines: the live identities stay, the floor applies to idle ones');
   // verify #3/#11: 5 identities × 7 MB = 35 MB (> the 32 MB floor) read every sweep — counted reads per cycle
   const big = JSON.stringify({ fetchedAt: 1, accountId: 'a', utilization: { fiveHour: 0.1 }, pad: 'x'.repeat(500) }) + '\n';
   for (const k of ['j1', 'j2', 'j3', 'j4', 'j5']) fs.writeFileSync(est._file(k), big.repeat(Math.ceil(7 * CB.MB / big.length)));
@@ -249,7 +249,7 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
   const [idle1] = SS.jsonlCacheCensus(later);
   console.log(`      30 tails just read: idle ${(idle0.bytes / MB).toFixed(0)} MB · live ${(live0.bytes / MB).toFixed(0)} MB (ceiling ${live0.ceiling / MB}) · 11 min later with no put: idle ${(idle1.bytes / MB).toFixed(0)} MB (floor ${idle1.ceiling / MB})`);
   ok(idle0.name === 'transcript tails (idle)' && live0.name === 'transcript tails (live)' && live0.bytes > 250 * MB && !live0.over && live0.ceiling === CB.JSONL_LIVE_MAX_BYTES && idle0.bytes === 0, '(b) TWO ROWS: a live set of ~264 MB is NOT over — its own ceiling is 512 MB (the one row said «ceiling 128 · OVER»)');
-  ok(idle1.bytes > 250 * MB && idle1.over, 'RED (the release\'s road: the floor enforced only at the next put): eleven idle minutes and no put — the idle row holds ~264 MB over its 128 MB floor');
+  ok(idle1.bytes > 250 * MB && verdictOf(idle1.over), 'RED (the release\'s road: the floor enforced only at the next put): eleven idle minutes and no put — the idle row holds ~264 MB over its 128 MB floor');
   const tk = ME.tick({ now: later });
   const [idle2, live2] = SS.jsonlCacheCensus(later);
   console.log(`      the census tick: evicted ${tk.tails.evicted}, freed ${(tk.tails.freedBytes / MB).toFixed(0)} MB in ${tk.tails.ms.toFixed(3)} ms → idle ${(idle2.bytes / MB).toFixed(0)} MB, ${tk.tails.entries} entries`);
@@ -270,8 +270,8 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
   const order = [];
   const smp = MS.create({ readMainMemory: () => ({}), readSmapsText: () => '', ask: async () => [], caches: () => { order.push('rows'); return []; }, enforce: () => { order.push('enforce'); return { tails: { evicted: 0 } }; }, timers: { setInterval: () => 0, clearInterval: () => { } }, record: () => { } });
   const c = await smp.sample();
-  ok(JSON.stringify(order) === '["enforce","rows"]' && c.enforced && typeof c.loopMs === 'number', `the memory census's tick runs the trims first, then reads its rows (timed in its own loopMs) — ${JSON.stringify(order)}`);
-  ok(/enforce: \(\) => require\('\.\/src\/server\/memory-enforce\.js'\)\.tick\(\{ activeSessions, usageEstimator \}\)/.test(files['server.js']), 'server.js hands the sampler the tick (beside its owners)');
+  ok(JSON.stringify(order) === '["enforce","rows"]' && gateOf(c.enforced) && typeof c.loopMs === 'number', `the memory census's tick runs the trims first, then reads its rows (timed in its own loopMs) — ${JSON.stringify(order)}`);
+  ok(verdictOf(/enforce: \(\) => require\('\.\/src\/server\/memory-enforce\.js'\)\.tick\(\{ activeSessions, usageEstimator \}\)/.test(files['server.js'])), 'server.js hands the sampler the tick (beside its owners)');
   // r1374 (2): THE ESTIMATOR'S TRIM AT THE TICK — five identities read, then idle past 30 min with no read: the tick brings the
   // idle set to its 32 MB floor; RED: with no tick (the release's road) they stay over it
   {
@@ -285,7 +285,7 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
     const r = ME.tick({ usageEstimator: est, now: late });
     const [i1] = est.lineCacheCensus(late);
     console.log(`      the estimator: 5 identities × 9 MB read, 31 min idle: idle ${(i0.bytes / MB).toFixed(0)} MB (floor ${i0.ceiling / MB}) → the tick evicted ${r.lines && r.lines.evicted} → ${(i1.bytes / MB).toFixed(0)} MB`);
-    ok(i0.over && i0.bytes > 40 * MB, 'RED (the release\'s road: the floor enforced only at the next read): five idle identities hold ~45 MB over the 32 MB floor');
+    ok(gateOf(i0.over) && i0.bytes > 40 * MB, 'RED (the release\'s road: the floor enforced only at the next read): five idle identities hold ~45 MB over the 32 MB floor');
     ok(!!r.lines && r.lines.evicted > 0 && i1.bytes <= CB.ESTIMATOR_LINES_MAX_BYTES && !i1.over, 'THE TICK trims the estimator\'s idle identities to their floor too (lineCacheTrim, a cache drop)');
     fs.rmSync(edir, { recursive: true, force: true });
   }
@@ -295,7 +295,7 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
     const noteRe = /\} else if \(data\.viewOnly && \(data\.backendSessionId \|\| data\.claudeSessionId\)\) \{[\s\S]{0,400}noteJsonlView\(ws, backendSessionId, data\.sessionId \|\| backendSessionId\)/;
     const closeRe = /case 'view-close': \{ try \{ require\('\.\/session-store'\)\.dropJsonlView\(ws, data\.sessionId\); \} catch \{ \} break; \}/;
     const sockRe = /ws\.on\('close', \(\) => \{[\s\S]{0,400}dropJsonlViews\(ws\)/;
-    ok(noteRe.test(wsSrc) && closeRe.test(wsSrc) && sockRe.test(wsSrc), 'the socket handler: the view-only attach notes the hold (the cache\'s key, by window); `view-close` drops that window\'s; the socket\'s close drops the rest');
+    ok(gateOf(noteRe.test(wsSrc)) && gateOf(closeRe.test(wsSrc)) && verdictOf(sockRe.test(wsSrc)), 'the socket handler: the view-only attach notes the hold (the cache\'s key, by window); `view-close` drops that window\'s; the socket\'s close drops the rest');
     const cut = wsSrc.replace(/try \{ require\('\.\/session-store'\)\.noteJsonlView\([^\n]*\n/, '\n');
     ok(cut !== wsSrc && !noteRe.test(cut), 'RED: the handler without its noteJsonlView line — a history window\'s tail is never held');
     const cvSrc = files['src/lib/chat-view.js'];
@@ -304,7 +304,7 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
     const methodBody = (src, head) => { const headAt = src.indexOf('\n' + head); if (headAt === -1 || src.indexOf('\n' + head, headAt + 1) !== -1) return null; const ind = head.match(/^ */)[0], closeAt = src.indexOf('\n' + ind + '}\n', headAt + 1); return closeAt === -1 ? null : src.slice(headAt + 1, closeAt + ind.length + 2); };   // positions, no span: compared to -1 (the wall-clock census reads a `<` on a name as a bound)
     const SEND = /\n    try \{ const vid = this\._viewHoldId \|\| \(String\(this\.sessionId \|\| ''\)\.startsWith\('view-'\) \? this\.sessionId : null\); if \(vid\) this\.ws\?\.send\?\.\(\{ type: 'view-close', sessionId: vid \}\)/;
     const sendsAtClose = (src) => { const body = methodBody(src, '  dispose() {'); return !!body && SEND.test(body); };
-    ok(sendsAtClose(cvSrc) && /const viewId = viewIdFor\(backend, bsid\);\n    this\._viewHoldId = viewId;/.test(cvSrc), 'the page: a history window (opened as one, or rescued into one) says `view-close` when it goes (chat-view dispose)');
+    ok(gateOf(sendsAtClose(cvSrc)) && verdictOf(/const viewId = viewIdFor\(backend, bsid\);\n    this\._viewHoldId = viewId;/.test(cvSrc)), 'the page: a history window (opened as one, or rescued into one) says `view-close` when it goes (chat-view dispose)');
     const noSend = cvSrc.replace(SEND, '\n');
     ok(noSend !== cvSrc && !sendsAtClose(noSend), 'RED: a dispose without the view hold\'s send — a closed history window\'s tail stays held');
     // the window's hold ends with the WINDOW: two windows of one socket, one closed
@@ -312,7 +312,7 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
     for (let k = 0; k < 30; k++) SS.jsonlCacheTestPut('t' + k, k < 6 ? 32 * MB : 3 * MB);
     const sock2 = {}; SS.noteJsonlView(sock2, 't0', 'view-a'); SS.noteJsonlView(sock2, 't1', 'view-b'); SS.dropJsonlView(sock2, 'view-a');
     ME.tick({ activeSessions: new Map([['x', { claudeSessionId: 'zz', clients: new Map() }]]), now: Date.now() + 11 * 60e3 });
-    ok(!SS.jsonlHas('t0') && SS.jsonlHas('t1'), `a CLOSED history window's hold is gone, its socket's other window still holds (t0 ${SS.jsonlHas('t0')}, t1 ${SS.jsonlHas('t1')})`);
+    ok(!SS.jsonlHas('t0') && verdictOf(SS.jsonlHas('t1')), `a CLOSED history window's hold is gone, its socket's other window still holds (t0 ${SS.jsonlHas('t0')}, t1 ${SS.jsonlHas('t1')})`);
     SS.dropJsonlViews(sock2); SS.jsonlCacheClear(); SS.setJsonlHeld(() => null);
     // r1470 (2): two history windows of ONE conversation on one page share ONE id — the holders are COUNTED: one closed, the tail
     // is still HELD; both closed, it is not. Read from the census's live row eleven idle minutes on (only a held tail is live
@@ -337,7 +337,7 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
   }
   // r1374 (2): the rows FLATTENED in server.js — without it the four idle / live rows are nested arrays the census drops
   {
-    ok(/caches: \(\) => \[\.\.\.usageHistory\.cacheCensus\(\), require\('\.\/src\/session-store'\)\.jsonlCacheCensus\(\), usageEstimator\.lineCacheCensus\(\)\]\.flat\(\)/.test(files['server.js']), 'server.js flattens the owners\' rows (two of them hand back two rows each)');
+    ok(verdictOf(/caches: \(\) => \[\.\.\.usageHistory\.cacheCensus\(\), require\('\.\/src\/session-store'\)\.jsonlCacheCensus\(\), usageEstimator\.lineCacheCensus\(\)\]\.flat\(\)/.test(files['server.js'])), 'server.js flattens the owners\' rows (two of them hand back two rows each)');
     const owners = [[CB.cacheRow('a', { bytes: 1 })], [CB.cacheRow('t (idle)', { bytes: 1, ceiling: 2 }), CB.cacheRow('t (live)', { bytes: 1, ceiling: 2 })], [CB.cacheRow('e (idle)', { bytes: 1, ceiling: 2 }), CB.cacheRow('e (live)', { bytes: 1, ceiling: 2 })]];
     const flat = MC.memoryCensus({ main: {}, caches: [...owners[0], owners[1], owners[2]].flat() }).caches.length, nested = MC.memoryCensus({ main: {}, caches: [...owners[0], owners[1], owners[2]] }).caches.length;
     ok(flat === 5 && nested === 1, `RED (no .flat()): the four idle / live rows vanish from the census with nothing said — ${flat} rows flattened, ${nested} nested`);
@@ -358,19 +358,19 @@ const caches = [CB.cacheRow('usage ledger window', { bytes: 61 * CB.MB, count: 1
 const main = { rss: 900 * CB.MB, heapTotal: 400 * CB.MB, heapUsed: 300 * CB.MB, external: 10 * CB.MB, arrayBuffers: 1 };
 const named = (line) => ['usage ledger window', 'usage ledger cold columns', 'transcript tails', 'estimator anchor lines'].every((n) => line.includes(n));
 const line = MC.bootLine(MC.memoryCensus({ main, caches }));
-ok(named(line) && line.includes('usage ledger window 61/96 MB (120345 rows)'), 'the boot line names each cache: ' + line.slice(line.indexOf('; in')));
+ok(gateOf(named(line)) && verdictOf(line.includes('usage ledger window 61/96 MB (120345 rows)')), 'the boot line names each cache: ' + line.slice(line.indexOf('; in')));
 ok(!named(MC.bootLine(MC.memoryCensus({ main }))), 'control ③: the boot line without the owners ⇒ RED');
 eq(MC.censusRows(MC.memoryCensus({ main, caches })).caches.map((x) => x.name), caches.map((x) => x.name), 'the System window rows carry the caches (/api/sysinfo serverMemory)');
-ok(/caches: \(\) => \[\.\.\.usageHistory\.cacheCensus\(\), require\('\.\/src\/session-store'\)\.jsonlCacheCensus\(\), usageEstimator\.lineCacheCensus\(\)\]/.test(files['server.js']), 'server.js hands the sampler the three owners');
-ok(/caches = \(\) => \[\][\s\S]*memoryCensus\(\{[^}]*caches: rows/.test(files['src/server/memory-sampler.js']), 'the sampler asks the owners on every sample');
+ok(verdictOf(/caches: \(\) => \[\.\.\.usageHistory\.cacheCensus\(\), require\('\.\/src\/session-store'\)\.jsonlCacheCensus\(\), usageEstimator\.lineCacheCensus\(\)\]/.test(files['server.js'])), 'server.js hands the sampler the three owners');
+ok(verdictOf(/caches = \(\) => \[\][\s\S]*memoryCensus\(\{[^}]*caches: rows/.test(files['src/server/memory-sampler.js'])), 'the sampler asks the owners on every sample');
 
 { // §12 (verify #4): one unit per row; ArrayBuffers never summed into the main heap
   const line = MC.bootLine(MC.memoryCensus({ main, caches }));
   const heapPart = line.slice(line.indexOf('; in the main heap:'), line.indexOf('; in ArrayBuffers'));
-  ok(!heapPart.includes('cold columns') && /; in ArrayBuffers \(part of external\): usage ledger cold columns 80\/256 MB/.test(line), '§12 the cold columns print under ArrayBuffers, not the main heap');
+  ok(!heapPart.includes('cold columns') && verdictOf(/; in ArrayBuffers \(part of external\): usage ledger cold columns 80\/256 MB/.test(line)), '§12 the cold columns print under ArrayBuffers, not the main heap');
   const r1 = MC.bootLine(MC.memoryCensus({ main, caches: caches.map((x) => ({ ...x, kind: 'heap' })) }));
-  ok(r1.slice(r1.indexOf('; in the main heap:')).includes('cold columns'), 'control (the r1 row: no kind): the cold columns land in the main heap ⇒ RED');
-  ok(CB.cacheRow('x', { bytes: 300, ceiling: 256 }).over && /OVER/.test(MC.bootLine(MC.memoryCensus({ main, caches: [CB.cacheRow('x', { bytes: 300 * CB.MB, ceiling: 256 * CB.MB, kind: 'arraybuffers' })] }))), '§12 a cache past its ceiling says OVER');
+  ok(verdictOf(r1.slice(r1.indexOf('; in the main heap:')).includes('cold columns')), 'control (the r1 row: no kind): the cold columns land in the main heap ⇒ RED');
+  ok(gateOf(CB.cacheRow('x', { bytes: 300, ceiling: 256 }).over) && verdictOf(/OVER/.test(MC.bootLine(MC.memoryCensus({ main, caches: [CB.cacheRow('x', { bytes: 300 * CB.MB, ceiling: 256 * CB.MB, kind: 'arraybuffers' })] })))), '§12 a cache past its ceiling says OVER');
   const t = mkUh('u', 40 * DAY, 60 * 1024);
   fs.mkdirSync(t.dir, { recursive: true });
   writeRows(t.dir, all.slice(0, 1500));
@@ -394,13 +394,13 @@ console.log('§5b B-360d (A): THE SWEEP — every ceiling the census states is p
   for (const r of rows) console.log(`      ${r.name}: ${r.ceiling == null ? 'no ceiling' : r.enforced && r.enforced.not ? r.enforced.not : r.enforced ? `enforced by ${r.enforced.by.join(' + ')} — ${r.enforced.when}` : 'UNSTATED'}`);
   const bad = rows.map(judge).filter(Boolean);
   ok(rows.length >= 10 && !bad.length, `every census row with a ceiling states what enforces it, by functions the tree defines, or «not enforced: …» with its why (${rows.length} rows) — ${bad.join('; ')}`);
-  ok(rows.some((r) => r.name === 'usage ledger cold columns' && r.enforced && /^not enforced: .*lg-providers/.test(r.enforced.not || '')), 'the cold columns say «not enforced», and whose it is (lane lg-providers\' unit 3)');
+  ok(verdictOf(rows.some((r) => r.name === 'usage ledger cold columns' && r.enforced && /^not enforced: .*lg-providers/.test(r.enforced.not || ''))), 'the cold columns say «not enforced», and whose it is (lane lg-providers\' unit 3)');
   // CONTROLS: a ceiling with no statement, and a statement naming a function no file defines, are each red by name
   const plantA = judge(CB.cacheRow('planted', { bytes: 1, ceiling: 2 })), plantB = judge(CB.cacheRow('planted2', { bytes: 1, ceiling: 2, enforced: { by: ['src/session-store.js#noSuchTrimAnywhere'], when: 'never' } }));
   const plantC = judge(CB.cacheRow('planted3', { bytes: 1, ceiling: 2, enforced: { by: ['src/session-store.js#_take'], when: 'a name that exists in ANOTHER file' } })), plantD = judge(CB.cacheRow('planted4', { bytes: 1, ceiling: 2, enforced: { by: ['lines'], when: 'a bare name' } }));
-  ok(!!plantA && /no statement/.test(plantA) && !!plantB && /noSuchTrimAnywhere/.test(plantB) && !!plantC && /_take/.test(plantC) && !!plantD && /lines/.test(plantD), `CONTROL: an unstated ceiling, a made-up enforcer, a real function of ANOTHER file and a bare name are each red by name — «${plantA}» · «${plantB}» · «${plantC}» · «${plantD}»`);
+  ok(!!plantA && gateOf(/no statement/.test(plantA)) && !!plantB && gateOf(/noSuchTrimAnywhere/.test(plantB)) && !!plantC && gateOf(/_take/.test(plantC)) && !!plantD && verdictOf(/lines/.test(plantD)), `CONTROL: an unstated ceiling, a made-up enforcer, a real function of ANOTHER file and a bare name are each red by name — «${plantA}» · «${plantB}» · «${plantC}» · «${plantD}»`);
   const mc = MC.memoryCensus({ main: {}, caches: rows });
-  ok(mc.caches.every((x, i) => JSON.stringify(x.enforced) === JSON.stringify(rows[i].enforced || null)), 'the census (the System window, /api/sysinfo) carries each row\'s statement');
+  ok(verdictOf(mc.caches.every((x, i) => JSON.stringify(x.enforced) === JSON.stringify(rows[i].enforced || null))), 'the census (the System window, /api/sysinfo) carries each row\'s statement');
   fs.rmSync(edir, { recursive: true, force: true });
 }
 
@@ -456,7 +456,7 @@ console.log('§L11f the fields of a freshly loaded ledger cache: each counted by
   const keys = Object.keys(c), unknown = keys.filter((k) => !(k in COUNTED) && !(k in DECLARED));
   const missingRows = [...new Set(Object.values(COUNTED))].filter((n) => !rows.has(n));
   ok(keys.length > 0 && unknown.length === 0, `§L11f every field of a freshly loaded ledger cache is counted or declared (${keys.length} fields)${unknown.length ? ' — RED, no row and no reason: ' + unknown.join(', ') : ''}`);
-  ok(missingRows.length === 0 && rows.has('usage remote id sets') && rows.has('usage cells') && Object.values(COUNTED).every((n) => !rows.has(n) || Number.isFinite(rows.get(n).ceiling)), '§L11f each counted structure is a census row WITH a ceiling — the cells and the remote per-month id sets included');
+  ok(missingRows.length === 0 && gateOf(rows.has('usage remote id sets')) && gateOf(rows.has('usage cells')) && verdictOf(Object.values(COUNTED).every((n) => !rows.has(n) || Number.isFinite(rows.get(n).ceiling))), '§L11f each counted structure is a census row WITH a ceiling — the cells and the remote per-month id sets included');
   const planted = { ...c, newIndex: new Map() };
   ok(Object.keys(planted).filter((k) => !(k in COUNTED) && !(k in DECLARED)).length === 1, 'CONTROL: a field planted in the freshly loaded cache with no row and no reason is RED by name');
   const tablesOf = (text) => { const opens = text.indexOf('  const COUNTED = {'); if (opens === -1) return null; const closes = text.indexOf('\n  };\n', opens); return closes === -1 ? null : text.slice(opens, closes + 6); };   // (names no span: the wall-clock census reads spans by name)
@@ -476,11 +476,11 @@ console.log('§T the heavy twin holds the moved legs');
   const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const MOVED = ['§2 parity: a small window answers', '§6–§11 r2: the cold walk off the loop', '§13–§19 r3: no loop fold', '§25–§31 r4: the person is told', 'async function compare(tag)', 'function prep30()', '§31 THE STEPPED BOOT WARM', '§L11 every structure the ledger holds is a census row'];
   const holds = (t) => MOVED.every((h) => t.includes(h));
-  ok(holds(twin) && MOVED.every((h) => here.split(h).length === 2), '§T the heavy twin holds §2, §6–§11, §13–§19, §25–§31 and §L11 — their headings, the parity compare, the month of §30, the stepped warm — and this file runs none of them');
-  ok(/\{ name: 'test-cache-bounds-walks', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8')), '§T the twin is a HEAVY row of the tier');
+  ok(gateOf(holds(twin)) && verdictOf(MOVED.every((h) => here.split(h).length === 2)), '§T the heavy twin holds §2, §6–§11, §13–§19, §25–§31 and §L11 — their headings, the parity compare, the month of §30, the stepped warm — and this file runs none of them');
+  ok(verdictOf(/\{ name: 'test-cache-bounds-walks', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8'))), '§T the twin is a HEAVY row of the tier');
   ok(!holds(twin.replace(MOVED[2], '§13 (gone)')), 'RED CONTROL — a twin whose r3 heading is gone is no longer the moved legs: §T goes red');
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(fail ? `✗ ${fail} failed, ${pass} passed` : `ALL PASS ${pass} passed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -21,7 +21,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
@@ -38,7 +38,7 @@ console.log('— view-visibility (pure)');
   ok('wide layout + inactive → mobile does not hold (desktop shows every window)', hiddenReasons({ mobile: false, active: false }).mobile === false);
   ok('a hidden tab holds regardless of activity', hiddenReasons({ mobile: false, active: true, tabHidden: true }).tab === true);
   ok('minimized holds', hiddenReasons({ minimized: true }).minimized === true);
-  ok('isDisplayed = no reason holds', isDisplayed(hiddenReasons({})) && !isDisplayed(hiddenReasons({ minimized: true })));
+  ok('isDisplayed = no reason holds', gateOf(isDisplayed(hiddenReasons({}))) && !isDisplayed(hiddenReasons({ minimized: true })));
 }
 
 // ── 2. the ChatView reason set (real prototype, fake geometry) ──
@@ -73,7 +73,7 @@ const mkView = ({ pinned = true } = {}) => {
 {
   const v = mkView();
   v.setSuspended(true);
-  ok('legacy setSuspended(true) = the desktop reason', v._suspended === true && v._hiddenReasons.has('desktop'));
+  ok('legacy setSuspended(true) = the desktop reason', v._suspended === true && verdictOf(v._hiddenReasons.has('desktop')));
   v.setHidden('mobile', true);
   v.setSuspended(false);
   ok('desktop-manager resuming its reason does NOT resume a window a mobile tab still hides', v._suspended === true);
@@ -122,7 +122,7 @@ const drive = ({ mobile }) => {
 }
 {
   const { s } = drive({ mobile: false });
-  ok('desktop: nothing is mobile-hidden', [s.A, s.B, s.C, s.D].every((c) => c.mobile === false));
+  ok('desktop: nothing is mobile-hidden', verdictOf([s.A, s.B, s.C, s.D].every((c) => c.mobile === false)));
   ok('desktop: the hidden tab still holds', s.C.tab === true && s.B.tab === false);
   ok('desktop: minimized still holds', s.D.minimized === true && s.B.minimized === false);
 }
@@ -135,20 +135,20 @@ console.log('— wiring pins');
   // minimize's body (2.369.125 r2: the ≤768px refocus sits between the mark and the derivation — the derivation must see the NEW active class)
   const minBody = wj.slice(wj.indexOf('  minimize(id) {'), wj.indexOf('  _focusMostRecent('));
   ok('minimize re-derives AFTER the mark and after the phone refocus (restore goes through focusWindow)',
-    minBody.indexOf('win.isMinimized=true;') > 0 && minBody.indexOf('this._focusMostRecent(win.id)') > minBody.indexOf('win.isMinimized=true;') && minBody.indexOf('this.syncHiddenViews();') > minBody.indexOf('this._focusMostRecent(win.id)') && /win\.isMinimized=false; this\.focusWindow\(id\);/.test(wj),
+    minBody.indexOf('win.isMinimized=true;') > 0 && minBody.indexOf('this._focusMostRecent(win.id)') > minBody.indexOf('win.isMinimized=true;') && minBody.indexOf('this.syncHiddenViews();') > minBody.indexOf('this._focusMostRecent(win.id)') && verdictOf(/win\.isMinimized=false; this\.focusWindow\(id\);/.test(wj)),
     minBody.slice(-200));
-  ok('switchTab re-derives after flipping the guest\'s content', /this\.activeWindowId = chain\.tabs\[index\];\s*\n\s*this\.syncHiddenViews\?\.\(\);/.test(tg));
+  ok('switchTab re-derives after flipping the guest\'s content', verdictOf(/this\.activeWindowId = chain\.tabs\[index\];\s*\n\s*this\.syncHiddenViews\?\.\(\);/.test(tg)));
   ok('every ChatView registration re-derives (a view born hidden starts suspended — the page-load autoFill)', (sl.match(/sessions\.set\(winInfo\.id, (chatView|view)\); (this|app)\.wm\.syncHiddenViews\?\.\(\);/g) || []).length === 4);
-  ok('the breakpoint flip re-derives (matchMedia change → syncHiddenViews)', /matchMedia\(VC_PHONE_MEDIA\)/.test(wj) && /addEventListener\?\.\('change', \(\) => this\.syncHiddenViews\(\)\)/.test(wj));
-  ok('the rule is imported from the PURE module, not re-spelled', /import \{ HIDE_REASONS, hiddenReasons, windowMarks(?:, revealDesktop)? \} from '\.\/view-visibility\.js'/.test(wj));
-  ok('setSuspended is the desktop reason of the same set (the derivation drives every reason through setHidden)', /setSuspended\(on\) \{ this\.setHidden\('desktop', on\); \}/.test(cv) && /_applySuspend\(on\) \{/.test(cv));
-  ok('every gate still reads the derived flag (suspended / resume-settle / shortViewNeedsFill / extendTop)', /if \(this\._suspended\) return 'suspended';/.test(cv) && /if \(this\._suspended \|\| this\._disposed\) return; \/\/ hidden window: sh<=ch is an artifact/.test(cv));
+  ok('the breakpoint flip re-derives (matchMedia change → syncHiddenViews)', gateOf(/matchMedia\(VC_PHONE_MEDIA\)/.test(wj)) && verdictOf(/addEventListener\?\.\('change', \(\) => this\.syncHiddenViews\(\)\)/.test(wj)));
+  ok('the rule is imported from the PURE module, not re-spelled', verdictOf(/import \{ HIDE_REASONS, hiddenReasons, windowMarks(?:, revealDesktop)? \} from '\.\/view-visibility\.js'/.test(wj)));
+  ok('setSuspended is the desktop reason of the same set (the derivation drives every reason through setHidden)', gateOf(/setSuspended\(on\) \{ this\.setHidden\('desktop', on\); \}/.test(cv)) && verdictOf(/_applySuspend\(on\) \{/.test(cv)));
+  ok('every gate still reads the derived flag (suspended / resume-settle / shortViewNeedsFill / extendTop)', gateOf(/if \(this\._suspended\) return 'suspended';/.test(cv)) && verdictOf(/if \(this\._suspended \|\| this\._disposed\) return; \/\/ hidden window: sh<=ch is an artifact/.test(cv)));
   // WHY the sync exists: the three display:none hiders (a CSS refactor that keeps geometry would still need the sync for scrollTop)
-  ok('style.css: the phone layout displays only the active window (display:none for the rest)', /\.window \{[^}]*display: none !important;[^}]*\}\s*\n\s*\.window\.window-active \{ display: flex !important; \}/.test(css));
-  ok('style.css: a grouped guest\'s hidden tab is display:none', /\.tab-hidden \{ display: none !important; \}/.test(css));
-  ok('window.js: minimize is display:none', /win\.element\.style\.display='none'; win\.isMinimized=true;/.test(wj));
-  ok('the incident is named at the rule (future readers find the bundle)', /inc-mu6bfv1t-4drq/.test(read('src/lib/view-visibility.js')) && /inc-mu6bfv1t-4drq/.test(wj));
-  ok('ci.mjs runs this suite', /'test-hidden-view-suspend'/.test(read('scripts/ci.mjs')));
+  ok('style.css: the phone layout displays only the active window (display:none for the rest)', verdictOf(/\.window \{[^}]*display: none !important;[^}]*\}\s*\n\s*\.window\.window-active \{ display: flex !important; \}/.test(css)));
+  ok('style.css: a grouped guest\'s hidden tab is display:none', verdictOf(/\.tab-hidden \{ display: none !important; \}/.test(css)));
+  ok('window.js: minimize is display:none', verdictOf(/win\.element\.style\.display='none'; win\.isMinimized=true;/.test(wj)));
+  ok('the incident is named at the rule (future readers find the bundle)', gateOf(/inc-mu6bfv1t-4drq/.test(read('src/lib/view-visibility.js'))) && verdictOf(/inc-mu6bfv1t-4drq/.test(wj)));
+  ok('ci.mjs runs this suite', verdictOf(/'test-hidden-view-suspend'/.test(read('scripts/ci.mjs'))));
 }
 
 // ── 5. RECONNECT SLOTS (perf lane ⑤b, inc-mtndq0vb's third layer): after a
@@ -166,7 +166,7 @@ console.log('— reconnectSlot (pure)');
     ok('hidden slot 0 ⇒ base (1500)', reconnectSlot({ suspended: true, index: 0 }) === 1500);
     ok('hidden slot k ⇒ base + k·step (k=1 → 1750, k=13 → 4750)', reconnectSlot({ suspended: true, index: 1 }) === 1750 && reconnectSlot({ suspended: true, index: 13 }) === 4750);
     ok('capped at 6000 (k=18 → 6000, k=500 → 6000)', reconnectSlot({ suspended: true, index: 18 }) === 6000 && reconnectSlot({ suspended: true, index: 500 }) === 6000);
-    ok('a negative / NaN / missing index ⇒ base, never "at once"', [-3, NaN, undefined, Infinity, '2x'].every((index) => reconnectSlot({ suspended: true, index }) === 1500));
+    ok('a negative / NaN / missing index ⇒ base, never "at once"', verdictOf([-3, NaN, undefined, Infinity, '2x'].every((index) => reconnectSlot({ suspended: true, index }) === 1500)));
     ok('the knobs are parameters (base 100 / step 10 / cap 150: k=3 → 130, k=9 → 150)', reconnectSlot({ suspended: true, index: 3, baseMs: 100, stepMs: 10, capMs: 150 }) === 130 && reconnectSlot({ suspended: true, index: 9, baseMs: 100, stepMs: 10, capMs: 150 }) === 150);
   }
 }
@@ -210,10 +210,10 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     reconnect([hid.desktop, vis, hid.mobile, hid.tab, hid.minimized]); // registration order ≠ rank order
     ok('the displayed view sends its attach SYNCHRONOUSLY in the reconnect pass', attachesOf(vis).length === 1 && attachesOf(vis)[0].at === 0);
     for (const [reason, v] of Object.entries(hid)) ok(`a view hidden by '${reason}' sends NOTHING in the reconnect pass`, attachesOf(v).length === 0);
-    ok('…and a queued view\'s composer stays disabled (it is not re-registered yet)', Object.values(hid).every((v) => v._chatInput.disabled === true));
+    ok('…and a queued view\'s composer stays disabled (it is not re-registered yet)', verdictOf(Object.values(hid).every((v) => v._chatInput.disabled === true)));
     drain();
     advance(1499);
-    ok('no hidden attach before the base slot (1500 ms)', Object.values(hid).every((v) => attachesOf(v).length === 0));
+    ok('no hidden attach before the base slot (1500 ms)', verdictOf(Object.values(hid).every((v) => attachesOf(v).length === 0)));
     advance(1);
     ok('slot 0 = the best-ranked hidden view (active desktop, mobile-hidden) at 1500 ms', attachesOf(hid.mobile).length === 1 && attachesOf(hid.mobile)[0].at === 1500);
     advance(250);
@@ -223,7 +223,7 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     advance(250);
     ok('slot 3 = the window on the far desktop at 2250 ms', attachesOf(hid.desktop).length === 1 && attachesOf(hid.desktop)[0].at === 2250);
     advance(10000);
-    ok('every view attached exactly once (no double send from the queue)', [vis, ...Object.values(hid)].every((v) => attachesOf(v).length === 1) && q.size === 0);
+    ok('every view attached exactly once (no double send from the queue)', gateOf([vis, ...Object.values(hid)].every((v) => attachesOf(v).length === 1)) && q.size === 0);
   }
   {
     // B-a26e (主开发 r4686; the lane's own read of 4c2a64f15, MUST 1): A HELD WINDOW's RETRY AFTER A RECONNECT RIDES THE RECONNECT
@@ -250,9 +250,9 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     reconnectOf(held); reconnectOf(a); reconnectOf(held2); reconnectOf(b);   // ONE reconnect, in the windows' order, hidden windows in it (the tip's red: their pass cancelled the held windows' own slots)
     ok('B-a26e: a held window on a reconnect sends nothing at once and keeps the hold\'s reason on its composer', attachesOf(held).length === 0 && held._chatInput.disabled === true && held._chatInput.why === 'attaching', held._chatInput);
     drain();
-    ok('B-a26e: one reconnect = ONE pass of four slots, the held windows\' among them (none cancelled by the pass)', q.size === 4 && q.has(held) && q.has(held2), q.snapshot && q.snapshot());
+    ok('B-a26e: one reconnect = ONE pass of four slots, the held windows\' among them (none cancelled by the pass)', q.size === 4 && gateOf(q.has(held)) && verdictOf(q.has(held2)), q.snapshot && q.snapshot());
     advance(10000);
-    ok('B-a26e: every window of the pass attaches ONCE, in its slot, in the windows\' order (held 1500, a 1750, held2 2000, b 2250)', [held, a, held2, b].every((v) => attachesOf(v).length === 1) && attachesOf(held)[0].at === 1500 && attachesOf(a)[0].at === 1750 && attachesOf(held2)[0].at === 2000 && attachesOf(b)[0].at === 2250, sent);
+    ok('B-a26e: every window of the pass attaches ONCE, in its slot, in the windows\' order (held 1500, a 1750, held2 2000, b 2250)', gateOf([held, a, held2, b].every((v) => attachesOf(v).length === 1)) && attachesOf(held)[0].at === 1500 && attachesOf(a)[0].at === 1750 && attachesOf(held2)[0].at === 2000 && attachesOf(b)[0].at === 2250, sent);
     ok('B-a26e: each held window runs ONE new cycle — never a re-send of the held frame (r4686)', attachesOf(held)[0]?.cycle === true && attachesOf(held2)[0]?.cycle === true && held._reattachGen === undefined, sent);
     ok('B-a26e: the queue counts the two held retries it released until they land', q.inFlight === 2, q.inFlight);
     q.landed?.(held);   // (optional: a red-first run on a tree without it reads red here, never a throw)
@@ -468,8 +468,8 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
       R.d = holdThenDispose(ChatView);
       if (CVx) R.dx = holdThenDispose(CVx);
     } catch (e) { R.threw = String((e && e.stack) || e).slice(0, 400); } finally { globalThis.setTimeout = real.st; globalThis.clearTimeout = real.ct; Date.now = real.now; if (real.doc === undefined) delete globalThis.document; else globalThis.document = real.doc; }
-    ok(`B-a26e (r4708): the 15-minute words run from the hold's START — a new cycle 10 minutes in does not restart them (at 15 minutes: «${R.at15}»)`, /^Still attaching — waiting for the hub to answer/.test(R.first || '') && /has not answered for 15 minutes/.test(R.at15 || ''), R);
-    ok('B-a26e: a NEW hold after the last one ended says the first words again', /^Still attaching — waiting for the hub to answer/.test(R.again || ''), R.again);
+    ok(`B-a26e (r4708): the 15-minute words run from the hold's START — a new cycle 10 minutes in does not restart them (at 15 minutes: «${R.at15}»)`, gateOf(/^Still attaching — waiting for the hub to answer/.test(R.first || '')) && verdictOf(/has not answered for 15 minutes/.test(R.at15 || '')), R);
+    ok('B-a26e: a NEW hold after the last one ended says the first words again', verdictOf(/^Still attaching — waiting for the hub to answer/.test(R.again || '')), R.again);
     ok(`B-a26e (r4708): a held retry counts as in flight until ITS OWN answer lands through the real cycle handler (${R.inFlightSent} → ${R.inFlightLanded}); the hold ends`, R.frame === true && R.inFlightSent === 1 && R.handlersSent === 1 && R.inFlightLanded === 0 && R.heldAfter === false, R);
     ok(`B-a26e (r4708): a cycle whose view another road attached unhooks its handler at its check (${R.n1} → ${R.n2})`, R.n0 === 0 && R.n1 === 1 && R.n2 === 0, R);
     const WORK = /^Still attaching — the hub is still working/, WAIT = /^Still attaching — waiting for the hub to answer/, LONG = /has not answered for 15 minutes/;
@@ -480,17 +480,17 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     const a7ok = (x) => !!x && WAIT.test(x.d0 || '') && WAIT.test(x.d1 || '') && LONG.test(x.d2 || '');
     const a8ok = (x) => !!x && WORK.test(x.m0 || '');
     const a9ok = (x) => !!x && WAIT.test(x.f0 || '') && LONG.test(x.f1 || '');
-    ok('B-a26e (r5160, THE MUST): an ask 15 minutes old, acknowledged until a reconnect — after it «waiting», NEVER the Reload words; the Reload words 15 minutes after the LAST acknowledgement (the long clock counts any acknowledgement of this hold, on any socket)', a7ok(R.wl), R.wl && { d0: R.wl.d0, d1: R.wl.d1, d2: R.wl.d2 });
-    ok('B-a26e (r5160): the new attach acknowledged in the very millisecond of its ask counts as this ask\'s («still working»)', a8ok(R.wl), R.wl && R.wl.m0);
-    ok('B-a26e (r5160): a link flapping every two minutes with no answer and no acknowledgement reaches the Reload words 15 minutes after the FIRST ask, not before (a reconnect never restarts that clock)', a9ok(R.wl), R.wl && { f0: R.wl.f0, f1: R.wl.f1 });
-    ok('B-a26e (r4875): while the hub keeps ACKNOWLEDGING the bar says it is still working (at the hold, and through ten minutes of acks); its acks stopped: «waiting» after 31 s, the Reload words 15 minutes after the last ack and not before', a3ok(R.wl), R.wl);
-    ok('B-a26e (r5118): a RECONNECT while held — the dropped socket\'s last acknowledgement is not the new ask\'s: «waiting» at once, «still working» again at the new attach\'s acknowledgement', a6ok(R.wl), R.wl && { r0: R.wl.r0, r1: R.wl.r1, r2: R.wl.r2 });
-    ok(`B-a26e RED CONTROLS (r5118: each words leg's red RUN, one mutant of chat-view a leg): the clock from the ask only — a3 red (${!a3ok(R.wm.a3)}); any acknowledgement counts — a4 red (${!a4ok(R.wm.a4)}); the long timer re-reads the clock — a5 red (${!a5ok(R.wm.a5)}); the new ask decides nothing — a6 red (${!a6ok(R.wm.a6)}); the long clock fed from the filtered acknowledgement — a7 red (${!a7ok(R.wm.a7)}); each mutant leaves the other legs green`, wordsMutErr.length === 0 && Object.keys(R.wm).length === 5 && !a7ok(R.wm.a7) && a3ok(R.wm.a7) && a4ok(R.wm.a7) && a5ok(R.wm.a7) && a6ok(R.wm.a7) && !a3ok(R.wm.a3) && a4ok(R.wm.a3) && a5ok(R.wm.a3) && !a4ok(R.wm.a4) && a3ok(R.wm.a4) && a5ok(R.wm.a4) && !a5ok(R.wm.a5) && a3ok(R.wm.a5) && a4ok(R.wm.a5) && !a6ok(R.wm.a6) && a3ok(R.wm.a6) && a4ok(R.wm.a6) && a5ok(R.wm.a6), wordsMutErr.join(' | ') || R.wm);
-    ok('B-a26e (its own heavy read at 28800d6f7): under a short clock the long bound\'s timer is the fact — the Reload words when it fires, «still working» again at a later acknowledgement', a5ok(R.wl), R.wl && { s1: R.wl.s1, s2: R.wl.s2 });
-    ok('B-a26e: an acknowledgement from BEFORE the hold\'s ask (an earlier, answered attach) is no sign of life for it — «waiting» at the hold, the Reload words 15 minutes after the ask and not before', a4ok(R.wl), R.wl && { o0: R.wl.o0, o1: R.wl.o1, o2: R.wl.o2 });
-    ok('B-a26e (r4857): the 15-minute words run from the ASK that began the hold (asked 10 minutes before: Reload 5 minutes on, not 15)', /^Still attaching — waiting for the hub to answer/.test(R.asked1 || '') && /has not answered for 15 minutes/.test(R.asked2 || ''), { asked1: R.asked1, asked2: R.asked2 });
+    ok('B-a26e (r5160, THE MUST): an ask 15 minutes old, acknowledged until a reconnect — after it «waiting», NEVER the Reload words; the Reload words 15 minutes after the LAST acknowledgement (the long clock counts any acknowledgement of this hold, on any socket)', verdictOf(a7ok(R.wl)), R.wl && { d0: R.wl.d0, d1: R.wl.d1, d2: R.wl.d2 });
+    ok('B-a26e (r5160): the new attach acknowledged in the very millisecond of its ask counts as this ask\'s («still working»)', verdictOf(a8ok(R.wl)), R.wl && R.wl.m0);
+    ok('B-a26e (r5160): a link flapping every two minutes with no answer and no acknowledgement reaches the Reload words 15 minutes after the FIRST ask, not before (a reconnect never restarts that clock)', verdictOf(a9ok(R.wl)), R.wl && { f0: R.wl.f0, f1: R.wl.f1 });
+    ok('B-a26e (r4875): while the hub keeps ACKNOWLEDGING the bar says it is still working (at the hold, and through ten minutes of acks); its acks stopped: «waiting» after 31 s, the Reload words 15 minutes after the last ack and not before', verdictOf(a3ok(R.wl)), R.wl);
+    ok('B-a26e (r5118): a RECONNECT while held — the dropped socket\'s last acknowledgement is not the new ask\'s: «waiting» at once, «still working» again at the new attach\'s acknowledgement', verdictOf(a6ok(R.wl)), R.wl && { r0: R.wl.r0, r1: R.wl.r1, r2: R.wl.r2 });
+    ok(`B-a26e RED CONTROLS (r5118: each words leg's red RUN, one mutant of chat-view a leg): the clock from the ask only — a3 red (${!a3ok(R.wm.a3)}); any acknowledgement counts — a4 red (${!a4ok(R.wm.a4)}); the long timer re-reads the clock — a5 red (${!a5ok(R.wm.a5)}); the new ask decides nothing — a6 red (${!a6ok(R.wm.a6)}); the long clock fed from the filtered acknowledgement — a7 red (${!a7ok(R.wm.a7)}); each mutant leaves the other legs green`, wordsMutErr.length === 0 && Object.keys(R.wm).length === 5 && !a7ok(R.wm.a7) && gateOf(a3ok(R.wm.a7)) && gateOf(a4ok(R.wm.a7)) && gateOf(a5ok(R.wm.a7)) && gateOf(a6ok(R.wm.a7)) && !a3ok(R.wm.a3) && gateOf(a4ok(R.wm.a3)) && gateOf(a5ok(R.wm.a3)) && !a4ok(R.wm.a4) && gateOf(a3ok(R.wm.a4)) && gateOf(a5ok(R.wm.a4)) && !a5ok(R.wm.a5) && gateOf(a3ok(R.wm.a5)) && gateOf(a4ok(R.wm.a5)) && !a6ok(R.wm.a6) && gateOf(a3ok(R.wm.a6)) && gateOf(a4ok(R.wm.a6)) && verdictOf(a5ok(R.wm.a6)), wordsMutErr.join(' | ') || R.wm);
+    ok('B-a26e (its own heavy read at 28800d6f7): under a short clock the long bound\'s timer is the fact — the Reload words when it fires, «still working» again at a later acknowledgement', verdictOf(a5ok(R.wl)), R.wl && { s1: R.wl.s1, s2: R.wl.s2 });
+    ok('B-a26e: an acknowledgement from BEFORE the hold\'s ask (an earlier, answered attach) is no sign of life for it — «waiting» at the hold, the Reload words 15 minutes after the ask and not before', verdictOf(a4ok(R.wl)), R.wl && { o0: R.wl.o0, o1: R.wl.o1, o2: R.wl.o2 });
+    ok('B-a26e (r4857): the 15-minute words run from the ASK that began the hold (asked 10 minutes before: Reload 5 minutes on, not 15)', gateOf(/^Still attaching — waiting for the hub to answer/.test(R.asked1 || '')) && verdictOf(/has not answered for 15 minutes/.test(R.asked2 || '')), { asked1: R.asked1, asked2: R.asked2 });
     const dOk = (d) => !!d && d.held === true && d.before.handlers === 2 && d.before.inFlight === 1 && d.atClose.handlers === 0 && d.atClose.has === false && d.atClose.inFlight === 0 && d.atClose.hold === null && d.atClose.holdTimerLive === false && d.after.handlers === 0 && d.after.sent === 0 && d.after.liveTimers === 0;   // r4875's round: and no live timer of the closed view at all
-    ok(`B-a26e (r4857, THE MUST): THE HOLD NEVER OUTLIVES ITS WINDOW — a view held by a real cycle, its retry counted (${R.d?.before?.handlers} handlers, ${R.d?.before?.inFlight} in flight), closed: at once no handler on the link (${R.d?.atClose?.handlers}), no slot or count, no hold, no live 15-minute timer; nothing sent in the twenty minutes after`, dOk(R.d), R.d || R.threw);
+    ok(`B-a26e (r4857, THE MUST): THE HOLD NEVER OUTLIVES ITS WINDOW — a view held by a real cycle, its retry counted (${R.d?.before?.handlers} handlers, ${R.d?.before?.inFlight} in flight), closed: at once no handler on the link (${R.d?.atClose?.handlers}), no slot or count, no hold, no live 15-minute timer; nothing sent in the twenty minutes after`, verdictOf(dOk(R.d)), R.d || R.threw);
     ok(`B-a26e RED CONTROL (r4857): the tip's dispose with its hold-clear line cut leaves the hold behind (${R.dx?.atClose?.handlers} handler(s), hold ${R.dx?.atClose?.hold ? 'up' : 'gone'}, its timer ${R.dx?.atClose?.holdTimerLive ? 'live' : 'cleared'}, ${R.dx?.atClose?.inFlight} counted) — the leg can go red`, mutantErr === null && !!R.dx && R.dx.held === true && !dOk(R.dx) && R.dx.atClose.handlers === 1 && R.dx.atClose.hold !== null && R.dx.atClose.holdTimerLive === true, mutantErr || R.dx);
   }
   {
@@ -520,7 +520,7 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     const d = mkLive('d'), e = mkLive('e');
     for (const v of [d, e]) { v.setHidden('tab', true); reconnectOf(v); }
     drain();
-    ok('two queued views', q.has(d) && q.has(e));
+    ok('two queued views', gateOf(q.has(d)) && verdictOf(q.has(e)));
     try { ChatView.prototype.dispose.call(Object.assign(d, { _statusBar: null, _settingsListeners: [], ws: fakeWs, _clearPendingSteers() { }, _stopCollabTick() { } })); } catch (err) { /* the fake lacks DOM teardown bits; the dequeue is the first act */ }
     ok('dispose dequeues the view (it never takes its slot)', !q.has(d));
     advance(10000);
@@ -546,17 +546,17 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
 console.log('— reconnect wiring pins');
 {
   const cv = read('src/lib/chat-view.js'), app = read('src/lib/app.js'), rq = fs.existsSync(path.join(REPO, 'src/lib/reconnect-queue.js')) ? read('src/lib/reconnect-queue.js') : '';
-  ok('the ChatView state handler re-attaches through _reconnectAttach (not a bare _reattach(true))', /this\._connNotice\.up\(\);\s*\n\s*this\._reconnectAttach\(\);/.test(cv));
-  ok('B-a26e (r4875): an acknowledgement of the live attach while held decides the bar\'s words again at once', /this\._lastAttachAckAt = Date\.now\(\); if \(this\._attachHold\) this\._attachHoldWords\(\); \}/.test(cv));
-  ok('the queued view is decided by the DERIVED flag (_suspended), never a fourth flag', /if \(q && this\._suspended && !this\._readOnly && !this\._disposed\) \{/.test(cv));
-  ok('B-a26e (r4686): a HELD window\'s retry is enqueued in its reconnect\'s pass (never a slot of its own)', /if \(q && this\._attachHold && !this\._readOnly && !this\._disposed\) \{\n[^\n]*setDisconnected\(true, 'attaching'\);[^\n]*\n\s*q\.enqueue\(this\);\n\s*return;/.test(cv));
-  ok('_applySuspend(false) takes a queued view and attaches it now', /if \(!on && this\.app\?\._reconnectQueue\?\.take\(this\)\) this\._runQueuedReattach\('unhide'\);/.test(cv));
-  ok('dispose cancels the view\'s slot', /this\.app\?\._reconnectQueue\?\.cancel\(this\)/.test(cv));
-  ok('the App owns ONE queue, ranked by _reconnectRank, its held retries capped by the page\'s attaches in flight too (r4686: the socket\'s own count), reset on every drop', /this\._reconnectQueue = createReconnectQueue\(\{ rankOf: \(view\) => this\._reconnectRank\(view\), pageInFlight: \(\) => this\.ws\?\.attachesInFlight\?\.\(\) \?\? 0 \}\);/.test(app) && /if \(!connected\) \{ this\._reconnectQueue\.reset\(\); return; \}/.test(app));
-  ok('the queue asks the PURE verdict (reconnectSlot), never re-spells the delays', /import \{ reconnectSlot \} from '\.\/view-visibility\.js';/.test(rq) && !/1500|250\b|6000/.test(rq.replace(/^\/\/.*$/gm, '')));
-  ok('the terminal re-attach loop is untouched (still sends attach at once for TerminalSession)', /if \(session instanceof TerminalSession && session\.sessionId\) \{\s*\n\s*this\.ws\.send\(\{ type: 'attach', sessionId: session\.sessionId \}\);/.test(app));
-  ok('the ladder still stamps reattachAt at the SEND inside _reattach (queue time is never server silence)', /const attachFrame = \{ type: 'attach', sessionId: this\.sessionId, attachId \};[\s\S]{0,1800}this\.ws\.send\(attachFrame\);[\s\S]{0,1600}const reattachAt = Date\.now\(\);/.test(cv)); // (perf D: the frame may carry sinceSeq — built once, sent once: r4686, the ladder no longer re-sends it)
-  ok('ci.mjs runs the reconnect-storm harness (heavy)', /name: 'test-reconnect-storm', tier: 'heavy'/.test(read('scripts/ci.mjs')));
+  ok('the ChatView state handler re-attaches through _reconnectAttach (not a bare _reattach(true))', verdictOf(/this\._connNotice\.up\(\);\s*\n\s*this\._reconnectAttach\(\);/.test(cv)));
+  ok('B-a26e (r4875): an acknowledgement of the live attach while held decides the bar\'s words again at once', verdictOf(/this\._lastAttachAckAt = Date\.now\(\); if \(this\._attachHold\) this\._attachHoldWords\(\); \}/.test(cv)));
+  ok('the queued view is decided by the DERIVED flag (_suspended), never a fourth flag', verdictOf(/if \(q && this\._suspended && !this\._readOnly && !this\._disposed\) \{/.test(cv)));
+  ok('B-a26e (r4686): a HELD window\'s retry is enqueued in its reconnect\'s pass (never a slot of its own)', verdictOf(/if \(q && this\._attachHold && !this\._readOnly && !this\._disposed\) \{\n[^\n]*setDisconnected\(true, 'attaching'\);[^\n]*\n\s*q\.enqueue\(this\);\n\s*return;/.test(cv)));
+  ok('_applySuspend(false) takes a queued view and attaches it now', verdictOf(/if \(!on && this\.app\?\._reconnectQueue\?\.take\(this\)\) this\._runQueuedReattach\('unhide'\);/.test(cv)));
+  ok('dispose cancels the view\'s slot', verdictOf(/this\.app\?\._reconnectQueue\?\.cancel\(this\)/.test(cv)));
+  ok('the App owns ONE queue, ranked by _reconnectRank, its held retries capped by the page\'s attaches in flight too (r4686: the socket\'s own count), reset on every drop', gateOf(/this\._reconnectQueue = createReconnectQueue\(\{ rankOf: \(view\) => this\._reconnectRank\(view\), pageInFlight: \(\) => this\.ws\?\.attachesInFlight\?\.\(\) \?\? 0 \}\);/.test(app)) && verdictOf(/if \(!connected\) \{ this\._reconnectQueue\.reset\(\); return; \}/.test(app)));
+  ok('the queue asks the PURE verdict (reconnectSlot), never re-spells the delays', gateOf(/import \{ reconnectSlot \} from '\.\/view-visibility\.js';/.test(rq)) && !/1500|250\b|6000/.test(rq.replace(/^\/\/.*$/gm, '')));
+  ok('the terminal re-attach loop is untouched (still sends attach at once for TerminalSession)', verdictOf(/if \(session instanceof TerminalSession && session\.sessionId\) \{\s*\n\s*this\.ws\.send\(\{ type: 'attach', sessionId: session\.sessionId \}\);/.test(app)));
+  ok('the ladder still stamps reattachAt at the SEND inside _reattach (queue time is never server silence)', verdictOf(/const attachFrame = \{ type: 'attach', sessionId: this\.sessionId, attachId \};[\s\S]{0,1800}this\.ws\.send\(attachFrame\);[\s\S]{0,1600}const reattachAt = Date\.now\(\);/.test(cv))); // (perf D: the frame may carry sinceSeq — built once, sent once: r4686, the ladder no longer re-sends it)
+  ok('ci.mjs runs the reconnect-storm harness (heavy)', verdictOf(/name: 'test-reconnect-storm', tier: 'heavy'/.test(read('scripts/ci.mjs'))));
 }
 
 // ── 7. THE SLAB AN ATTACH ASKS FOR (perf r1 — the verifier's 19-window probe:
@@ -572,8 +572,8 @@ console.log('— attachSlab (pure) + the frames views send');
   if (typeof attachSlab === 'function') {
     ok("suspended ⇒ 'floor' whatever the burst", attachSlab({ suspended: true }) === 'floor' && attachSlab({ suspended: true, inFlight: 0 }) === 'floor');
     ok("displayed, nothing else in flight ⇒ 'text' (one window opened — the common case)", attachSlab({ inFlight: 0 }) === 'text' && attachSlab() === 'text');
-    ok("displayed, 1+ other attaches in flight ⇒ 'floor' (a burst gives the text window to its first attach only)", [1, 4, 18].every((inFlight) => attachSlab({ inFlight }) === 'floor'));
-    ok('garbage inFlight ⇒ 0 (never a floor by accident); burst is a parameter', [NaN, -2, undefined, 'x'].every((inFlight) => attachSlab({ inFlight }) === 'text') && attachSlab({ inFlight: 3, burst: 4 }) === 'text' && attachSlab({ inFlight: 4, burst: 4 }) === 'floor');
+    ok("displayed, 1+ other attaches in flight ⇒ 'floor' (a burst gives the text window to its first attach only)", verdictOf([1, 4, 18].every((inFlight) => attachSlab({ inFlight }) === 'floor')));
+    ok('garbage inFlight ⇒ 0 (never a floor by accident); burst is a parameter', gateOf([NaN, -2, undefined, 'x'].every((inFlight) => attachSlab({ inFlight }) === 'text')) && attachSlab({ inFlight: 3, burst: 4 }) === 'text' && attachSlab({ inFlight: 4, burst: 4 }) === 'floor');
   }
   // the ChatView's re-attach frame carries it (fake ws: an attachesInFlight count the test sets)
   const sent = []; let inFlight = 0;
@@ -590,13 +590,13 @@ console.log('— attachSlab (pure) + the frames views send');
   for (const v of [a, b, c]) v._reattachGen++; // retire the ladders' timers (they check the generation)
   // the ws layer counts them: sent ⇒ in flight until attached / error; a drop clears
   const wsSrc = read('src/lib/ws.js');
-  ok('WsManager counts attaches in flight (sent → attached|error; cleared on a drop; 15 s staleness)', /this\._attachInFlight\.set\(d\.sessionId, Date\.now\(\)\)/.test(wsSrc) && /\(d\.type === 'attached' \|\| d\.type === 'error'\) && d\.sessionId\) this\._attachInFlight\.delete\(d\.sessionId\)/.test(wsSrc) && /this\._connected = false;\s*\n\s*this\._attachInFlight\.clear\(\);/.test(wsSrc) && /attachesInFlight\(now = Date\.now\(\)\)/.test(wsSrc));
+  ok('WsManager counts attaches in flight (sent → attached|error; cleared on a drop; 15 s staleness)', gateOf(/this\._attachInFlight\.set\(d\.sessionId, Date\.now\(\)\)/.test(wsSrc)) && gateOf(/\(d\.type === 'attached' \|\| d\.type === 'error'\) && d\.sessionId\) this\._attachInFlight\.delete\(d\.sessionId\)/.test(wsSrc)) && gateOf(/this\._connected = false;\s*\n\s*this\._attachInFlight\.clear\(\);/.test(wsSrc)) && verdictOf(/attachesInFlight\(now = Date\.now\(\)\)/.test(wsSrc)));
   const sl = read('src/lib/session-lifecycle.js');
   ok("every chat attach site asks: the live open (burst), the view-only open (suspended + burst), the rescue + the re-attach (ChatView._attachSlabHint)",
-    /type: 'attach', sessionId: serverId, slab: attachSlab\(\{ inFlight: this\.ws\.attachesInFlight\?\.\(\) \?\? 0 \}\)/.test(sl)
-    && /slab: attachSlab\(\{ suspended: !!chatView\._suspended, inFlight: this\.ws\.attachesInFlight\?\.\(\) \?\? 0 \}\)/.test(sl)
-    && /type: 'attach', sessionId: viewId, viewOnly: true, backend, slab: this\._attachSlabHint\(\),/.test(read('src/lib/chat-view.js'))
-    && /attachFrame\.slab = this\._attachSlabHint\(\);/.test(read('src/lib/chat-view.js')));
+    gateOf(/type: 'attach', sessionId: serverId, slab: attachSlab\(\{ inFlight: this\.ws\.attachesInFlight\?\.\(\) \?\? 0 \}\)/.test(sl))
+    && gateOf(/slab: attachSlab\(\{ suspended: !!chatView\._suspended, inFlight: this\.ws\.attachesInFlight\?\.\(\) \?\? 0 \}\)/.test(sl))
+    && gateOf(/type: 'attach', sessionId: viewId, viewOnly: true, backend, slab: this\._attachSlabHint\(\),/.test(read('src/lib/chat-view.js')))
+    && verdictOf(/attachFrame\.slab = this\._attachSlabHint\(\);/.test(read('src/lib/chat-view.js'))));
 }
 
 // ── 8. THE WATERMARK MEANS APPLIED (perf r1 — the verifier's race probe: a
@@ -624,7 +624,7 @@ console.log('— a failed op poisons the resume watermark; the next attach heals
     const v = mk(); v.__throwOn = 'm61';
     let threw = false; try { v._onOp(opOf(61, 'm61')); } catch { threw = true; }
     v._onOp(opOf(62, 'm62'));
-    ok('(a) a throwing op still throws out of _onOp (the per-handler isolation reports it)', threw);
+    ok('(a) a throwing op still throws out of _onOp (the per-handler isolation reports it)', verdictOf(threw));
     v._reattach(true); v._reattachGen++;
     ok('(a) …and the next re-attach carries NO sinceSeq (a resume from 62 would skip 61 forever)', lastAttach().sinceSeq === undefined && lastAttach().sinceEpoch === undefined, JSON.stringify(lastAttach()));
   }
@@ -646,7 +646,7 @@ console.log('— a failed op poisons the resume watermark; the next attach heals
     for (const h of [...handlers]) h(slab);
     v._reattachGen++;
     ok('(b) the same-epoch full rung of a POISONED view rebuilds from the slab (_fullViewReset), not a catch-up', reset === slab && caught === 0, `reset ${!!reset} catchUps ${caught}`);
-    ok('(b) …and the heal clears the flag: the next re-attach resumes by seq again', (() => { v._lastSeq = 84; v._reattach(true); v._reattachGen++; return lastAttach().sinceSeq === 84; })(), JSON.stringify(lastAttach()));
+    ok('(b) …and the heal clears the flag: the next re-attach resumes by seq again', verdictOf((() => { v._lastSeq = 84; v._reattach(true); v._reattachGen++; return lastAttach().sinceSeq === 84; })()), JSON.stringify(lastAttach()));
   }
   // (c) control: nothing throws ⇒ the watermark follows the ops and the resume asks from it
   {
@@ -656,8 +656,8 @@ console.log('— a failed op poisons the resume watermark; the next attach heals
     ok('(c) control: a clean replay stamps the watermark and the next attach resumes from it (sinceSeq 62)', lastAttach().sinceSeq === 62 && !v._seqPoisoned, JSON.stringify(lastAttach()));
   }
   const cv = read('src/lib/chat-view.js');
-  ok('wiring: _fullViewReset clears the flag only after loadHistory ran through', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);\s*\n(\s*\/\/.*\n)*\s*this\._seqPoisoned = false;/.test(cv));
+  ok('wiring: _fullViewReset clears the flag only after loadHistory ran through', verdictOf(/this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);\s*\n(\s*\/\/.*\n)*\s*this\._seqPoisoned = false;/.test(cv)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

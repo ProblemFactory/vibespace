@@ -40,7 +40,7 @@ const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { re
 const PROFILE = scratch('popover-frame-chrome');
 const DESIGN = scratch('popover-frame-design'); // the artboards the Design window draws
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let untilJs = null;
 const until = async (expr, { timeout = 3000, step = 50 } = {}) => { const t0 = Date.now(); for (;;) { const v = await untilJs(expr); if (v) return v; if (Date.now() - t0 > timeout) return v; await sleep(step); } };
@@ -116,18 +116,18 @@ async function legs(label, fixed) {
   await evalJs(`document.querySelector('${POP}')?.remove(); true`);
   await click('#btn-global-settings');
   const s1 = await popState();
-  check(`${label} (setup) a real press on ⚙ opens its menu (${JSON.stringify(s1)})`, s1.pop && s1.menu, s1);
+  check(`${label} (setup) a real press on ⚙ opens its menu (${JSON.stringify(s1)})`, gateOf(s1.pop) && verdictOf(s1.menu), s1);
   await evalJs(`document.querySelector('${POP}').__tok = 'first'; true`);
   await shot(`${fixed ? 'fixed' : 'prefix'}-gear-open.png`);
   await click('#btn-global-settings');
   const s2 = await popState();
-  check(`${label} ⚙ pressed while its menu is open: ${want('CLOSED — no popover left', 'REBUILT (the residue) — a NEW popover under the same button')} (${JSON.stringify(s2)})`, want(!s2.pop, s2.pop && s2.tok === null), s2);
+  check(`${label} ⚙ pressed while its menu is open: ${want('CLOSED — no popover left', 'REBUILT (the residue) — a NEW popover under the same button')} (${JSON.stringify(s2)})`, verdictOf(want(!s2.pop, s2.pop && s2.tok === null)), s2);
   await evalJs(`document.querySelector('${POP}')?.remove(); true`);
   // ①b Enter on the focused ⚙ (no press at all): open, then closed — the toggle is keyed on the anchor
   await evalJs(`document.getElementById('btn-global-settings').focus(); true`);
   await key('Enter'); const k1 = await popState(); await evalJs(`if (document.querySelector('${POP}')) document.querySelector('${POP}').__tok = 'kb'; document.getElementById('btn-global-settings').focus(); true`);
   await key('Enter'); const k2 = await popState();
-  check(`${label} Enter on the focused ⚙ opens, Enter again ${want('closes', 'rebuilds')} (${JSON.stringify({ k1, k2 })})`, k1.pop && want(!k2.pop, k2.pop && k2.tok === null), { k1, k2 });
+  check(`${label} Enter on the focused ⚙ opens, Enter again ${want('closes', 'rebuilds')} (${JSON.stringify({ k1, k2 })})`, gateOf(k1.pop) && verdictOf(want(!k2.pop, k2.pop && k2.tok === null)), { k1, k2 });
   await evalJs(`document.querySelector('${POP}')?.remove(); true`);
   // ② a press into a frame — the Web view window on a SAME-ORIGIN page
   await evalJs(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); window.__wv = app.openBrowser(${JSON.stringify(URL + 'vs-frame-probe.html')}); true`);
@@ -135,15 +135,15 @@ async function legs(label, fixed) {
   check(`${label} (setup) a Web view window shows the server's own page in its frame (same-origin: contentDocument readable)`, !!loaded);
   await evalJs(`const w = window.__wv; app.wm.setBounds ? 0 : 0; true`);
   let spot = await frameSpot(`window.__wv && window.__wv.content.querySelector('iframe')`);
-  check(`${label} (setup) a point inside the Web view frame is the frame itself (${JSON.stringify(spot)})`, !!spot && spot.onFrame, spot);
+  check(`${label} (setup) a point inside the Web view frame is the frame itself (${JSON.stringify(spot)})`, !!spot && verdictOf(spot.onFrame), spot);
   await click('#btn-global-settings');
   const o1 = await popState();
-  check(`${label} (setup) ⚙ open over the Web view (${JSON.stringify(o1)})`, o1.pop && o1.menu, o1);
+  check(`${label} (setup) ⚙ open over the Web view (${JSON.stringify(o1)})`, gateOf(o1.pop) && verdictOf(o1.menu), o1);
   await shot(`${fixed ? 'fixed' : 'prefix'}-gear-over-webview.png`);
   const pd0 = (await popState()).pdown;
   await pressAt(spot.x, spot.y);
   const f1 = await popState();
-  check(`${label} a press INTO the same-origin Web view frame: the parent saw NO pointerdown (${f1.pdown - pd0}), the focus is the frame (${f1.active}), the menu is ${want('CLOSED', 'still OPEN (the residue)')} (${JSON.stringify(f1)})`, f1.pdown - pd0 === 0 && /^IFRAME/.test(f1.active || '') && want(!f1.pop, f1.pop), f1);
+  check(`${label} a press INTO the same-origin Web view frame: the parent saw NO pointerdown (${f1.pdown - pd0}), the focus is the frame (${f1.active}), the menu is ${want('CLOSED', 'still OPEN (the residue)')} (${JSON.stringify(f1)})`, f1.pdown - pd0 === 0 && gateOf(/^IFRAME/.test(f1.active || '')) && verdictOf(want(!f1.pop, f1.pop)), f1);
   await shot(`${fixed ? 'fixed' : 'prefix'}-after-press-into-webview.png`);
   await evalJs(`document.querySelector('${POP}')?.remove(); true`);
   // ② (a fact, measured here) a Web view on a CROSS-ORIGIN page (a data: URL): the window HIDES its frame and shows its
@@ -153,14 +153,14 @@ async function legs(label, fixed) {
   await evalJs(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); window.__wv = app.openBrowser('data:text/html,' + encodeURIComponent(${JSON.stringify(FRAME_PAGE)})); true`);
   await sleep(600);
   const xo = await evalJs(`(() => { const f = window.__wv && window.__wv.content.querySelector('iframe'); if (!f) return { frame: 'none' }; let doc; try { doc = f.contentDocument ? 'readable' : 'opaque'; } catch (e) { doc = 'threw ' + e.name; } return { doc, hidden: f.style.display === 'none', note: /blocked/.test(window.__wv.content.textContent) }; })()`);
-  check(`${label} (fact) a Web view on a cross-origin page hides its frame and says the site blocked embedding — a Web view frame is only ever same-origin (${JSON.stringify(xo)})`, xo.doc === 'opaque' && xo.hidden && xo.note, xo);
+  check(`${label} (fact) a Web view on a cross-origin page hides its frame and says the site blocked embedding — a Web view frame is only ever same-origin (${JSON.stringify(xo)})`, xo.doc === 'opaque' && gateOf(xo.hidden) && verdictOf(xo.note), xo);
   // int332 (lane app-page-csp's teardown, .331): the data: Web view above is this suite's OWN cross-origin plant — the app page's
   // report-only policy notes ONE frame-src line for it (deduped by key across the passes); the suite TAKES it, the teardown judges the rest
   await takeCspReports((r) => r.directive === 'frame-src' && String(r.blocked) === 'other', { want: 1, ms: 3000 });
   // ② the Design artboard (a sandboxed frame — srcdoc, or since .331 the hub's frame host (writeFrame keeps the document as __frameDoc); its own process) — the ⚙ popover AND the usage popup (a hand-built onOutsidePress site)
   await evalJs(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); window.__dw = app.openDesign({ host: '', dir: ${JSON.stringify(DESIGN)} }); true`);
   const frames = await until(`(() => { const w = window.__dw; const f = w ? [...w.element.querySelectorAll('.dc-frame iframe')] : []; return f.length === 2 && f.every((x) => (x.getAttribute('srcdoc') || '').length > 100 || (x.__frameDoc || '').length > 100) ? f.map((x) => x.getAttribute('sandbox')) : null; })()`, { timeout: 15000, step: 100 });
-  check(`${label} (setup) the Design window draws the two artboards as sandboxed frames — srcdoc, or the frame host's document kept on the element (lane design-frame-host, .331) (${JSON.stringify(frames)})`, !!frames && frames.every((s) => s === 'allow-scripts'), frames || await evalJs(`window.__dw ? window.__dw.element.querySelector('.design-status')?.textContent : 'no window'`));
+  check(`${label} (setup) the Design window draws the two artboards as sandboxed frames — srcdoc, or the frame host's document kept on the element (lane design-frame-host, .331) (${JSON.stringify(frames)})`, !!frames && verdictOf(frames.every((s) => s === 'allow-scripts')), frames || await evalJs(`window.__dw ? window.__dw.element.querySelector('.design-status')?.textContent : 'no window'`));
   // the canvas SHIELDS its artboards (the pointer is the canvas's: pan, zoom, a drag) — a real double-click on an artboard
   // opens the FOCUSED VIEW: that one artboard at fit-width, LIVE (its shield lifted, the frame takes the press)
   const shieldAt = await evalJs(`(() => { const sh = window.__dw.element.querySelector('.dc-frame-shield'); const r = sh.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
@@ -169,25 +169,25 @@ async function legs(label, fixed) {
   const live = await until(`(() => { const w = window.__dw; if (!w || !w._designCanvas || !w._designCanvas.focused()) return null; const f = [...w.element.querySelectorAll('.dc-frame iframe')].find((i) => i.getClientRects().length); if (!f) return null; const r = f.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width * 0.25, r.top + r.height * 0.75); return at === f ? { focused: w._designCanvas.focused(), w: Math.round(r.width), h: Math.round(r.height) } : null; })()`, { timeout: 5000, step: 100 });
   check(`${label} (setup) a real double-click on an artboard opens the FOCUSED view: that artboard live, its shield lifted (${JSON.stringify(live)})`, !!live, live || await evalJs(`(() => { const w = window.__dw; return { focused: w._designCanvas && w._designCanvas.focused(), shields: [...w.element.querySelectorAll('.dc-frame-shield')].map((s) => s.style.display) }; })()`));
   spot = await frameSpot(`[...window.__dw.element.querySelectorAll('.dc-frame iframe')].find((i) => i.getClientRects().length)`);
-  check(`${label} (setup) a point inside the live artboard is the frame itself (${JSON.stringify(spot)})`, !!spot && spot.onFrame, spot);
+  check(`${label} (setup) a point inside the live artboard is the frame itself (${JSON.stringify(spot)})`, !!spot && verdictOf(spot.onFrame), spot);
   if (!spot || !spot.onFrame) { check(`${label} the artboard legs (a press into the sandboxed frame closes the ⚙ menu and the usage popup) — not reached: no artboard frame to press into`, false); await evalJs(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); true`); return; }
   await click('#btn-global-settings');
   const pd2 = (await popState()).pdown;
   await pressAt(spot.x, spot.y);
   const f3 = await popState();
-  check(`${label} a press INTO the sandboxed artboard frame: no parent pointerdown (${f3.pdown - pd2}), focus = ${f3.active}, the ⚙ menu is ${want('CLOSED', 'still OPEN')}`, f3.pdown - pd2 === 0 && /^IFRAME/.test(f3.active || '') && want(!f3.pop, f3.pop), f3);
+  check(`${label} a press INTO the sandboxed artboard frame: no parent pointerdown (${f3.pdown - pd2}), focus = ${f3.active}, the ⚙ menu is ${want('CLOSED', 'still OPEN')}`, f3.pdown - pd2 === 0 && gateOf(/^IFRAME/.test(f3.active || '')) && verdictOf(want(!f3.pop, f3.pop)), f3);
   await shot(`${fixed ? 'fixed' : 'prefix'}-after-press-into-artboard.png`);
   await evalJs(`document.querySelector('${POP}')?.remove(); true`);
   // the usage popup: a hand-built onOutsidePress surface (once:false, hidden by class) — opened by its chip's own handler
   await evalJs(`document.getElementById('btn-global-settings').focus(); true`); // the focus back in the page (the frame held it), so the next press into the frame is a transfer INTO it
   await evalJs(`document.getElementById('taskbar-usage').onclick(); true`);
   const uf = await evalJs(`document.activeElement.tagName + ' ' + document.hasFocus()`);
-  check(`${label} (setup) the page holds the focus again before the usage popup opens (${uf})`, /^BUTTON true$/.test(uf), uf);
+  check(`${label} (setup) the page holds the focus again before the usage popup opens (${uf})`, verdictOf(/^BUTTON true$/.test(uf)), uf);
   const u0 = await evalJs(`!document.getElementById('usage-popup').classList.contains('hidden')`);
-  check(`${label} (setup) the usage popup is open (its chip's handler; a persistent popup hidden by class)`, u0);
+  check(`${label} (setup) the usage popup is open (its chip's handler; a persistent popup hidden by class)`, verdictOf(u0));
   await pressAt(spot.x, spot.y);
   const u1 = await evalJs(`({ hidden: document.getElementById('usage-popup').classList.contains('hidden'), active: document.activeElement.tagName })`);
-  check(`${label} a press INTO the artboard frame ${want('HIDES', 'leaves OPEN')} the usage popup too — every onOutsidePress site, nothing per site (${JSON.stringify(u1)})`, u1.active === 'IFRAME' && want(u1.hidden, !u1.hidden), u1);
+  check(`${label} a press INTO the artboard frame ${want('HIDES', 'leaves OPEN')} the usage popup too — every onOutsidePress site, nothing per site (${JSON.stringify(u1)})`, u1.active === 'IFRAME' && verdictOf(want(u1.hidden, !u1.hidden)), u1);
   await evalJs(`document.getElementById('usage-popup').classList.add('hidden'); for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); document.getElementById('btn-global-settings').focus(); document.getElementById('btn-global-settings').blur(); true`);
 }
 
@@ -204,7 +204,7 @@ try {
   await evalJs(`document.activeElement && document.activeElement.blur(); window.dispatchEvent(new Event('blur')); true`);
   await sleep(150);
   const c1 = await popState();
-  check(`the brief's simulation — window.dispatchEvent(new Event('blur')) with the body active — does NOT close the menu (${JSON.stringify(c1)})`, c1.pop && c1.menu, c1);
+  check(`the brief's simulation — window.dispatchEvent(new Event('blur')) with the body active — does NOT close the menu (${JSON.stringify(c1)})`, gateOf(c1.pop) && verdictOf(c1.menu), c1);
   // a REAL blur to another top-level window: a second target brought to the front
   await evalJs(`document.querySelector('${POP} .gs-menu-item').focus(); true`);
   const t2 = await cdp('Target.createTarget', { url: 'about:blank' });
@@ -215,7 +215,7 @@ try {
   const c2 = await popState();
   await cdp('Page.bringToFront'); await sleep(400);
   const c3 = await popState();
-  check(`a REAL blur to another top-level window (a second target to the front) does NOT close the menu — the active element stays the menu row, hasFocus() false while away (${JSON.stringify({ away: c2, back: c3 })})`, c2.pop && c3.pop && c2.hasFocus === false && c3.hasFocus === true && /gs-menu-item/.test(c2.active || ''), { c2, c3 });
+  check(`a REAL blur to another top-level window (a second target to the front) does NOT close the menu — the active element stays the menu row, hasFocus() false while away (${JSON.stringify({ away: c2, back: c3 })})`, gateOf(c2.pop) && gateOf(c3.pop) && c2.hasFocus === false && c3.hasFocus === true && verdictOf(/gs-menu-item/.test(c2.active || '')), { c2, c3 });
   try { await cdp('Target.closeTarget', { targetId: t2.targetId }); } catch {}
   await key('Escape');
   const c4 = await popState();
@@ -246,4 +246,4 @@ try {
 }
 console.log(`screenshots: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

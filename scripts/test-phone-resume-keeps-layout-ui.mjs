@@ -47,7 +47,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -123,7 +123,7 @@ else await (async () => {
     procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
     return until(() => journal.slice(at).includes('Ready.'), 60000, 100);
   };
-  if (!ok(await boot(), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await boot()), 'the worktree server booted', journal.slice(-800))) return;
   const api = async (p) => (await fetch(`http://127.0.0.1:${PORT}${p}`)).json();
   const rows = async () => { const d = (await api('/api/layouts')).desktops; return Object.fromEntries(META.map((m) => [m.id, ((d[m.id] && d[m.id].autoSave.windows) || []).map((w) => [w.winId, w.gridBounds ? J(w.gridBounds) : null])])); };
   const BEFORE = await rows();
@@ -229,10 +229,10 @@ else await (async () => {
   };
   try {
     // ① a desktop page on the first server: D previews its three rows with no position
-    ok(await P1.boot(), '① the desktop page (1440×900) booted');
+    ok(verdictOf(await P1.boot()), '① the desktop page (1440×900) booted');
     await until(async () => (await P1.ev(PREVIEW('desk-d'))) !== null, 10000, 200);
     const pv = await P1.ev(PREVIEW('desk-d'));
-    ok(pv && pv.placeholders === 3 && pv.badge === '3' && /3 windows · not placed/.test(pv.title || '') && pv.dashed === 'dashed', '① LAW 2: Desk D (three rows a phone wrote with no box, never visited here) previews THREE dashed placeholders + the count «3» — never nothing (2.369.381: an empty preview)', pv);
+    ok(gateOf(pv) && pv.placeholders === 3 && pv.badge === '3' && gateOf(/3 windows · not placed/.test(pv.title || '')) && pv.dashed === 'dashed', '① LAW 2: Desk D (three rows a phone wrote with no box, never visited here) previews THREE dashed placeholders + the count «3» — never nothing (2.369.381: an empty preview)', pv);
     if (pv) await P1.shot('preview-desk-d-desktop', { x: Math.max(0, pv.box.x - 170), y: pv.box.y, width: pv.box.width + 176, height: pv.box.height });
     // …its own «Resume interrupted sessions?» offer is declined (the phone is the page that accepts it — the incident's order)
     const offer1 = `(() => { const d = [...document.querySelectorAll('.dialog')].find((x) => /Resume interrupted sessions/.test(x.textContent)); return d ? [...d.querySelectorAll('button')].find((x) => !/Resume all/.test(x.textContent)) || null : null; })()`;
@@ -241,17 +241,17 @@ else await (async () => {
     const VIEW = (id) => `(() => { const w = app.wm.windows.get(${J(id)}), v = app.sessions.get(${J(id)}); return w ? { id: w.id, desk: w._desktopId, gb: w.gridBounds ? JSON.stringify(w.gridBounds) : null, readOnly: !!(v && v._readOnly), live: !!(v && v.sessionId && !v._readOnly), bar: !!w.element.querySelector('.chat-resume-btn') } : null; })()`;
     for (const [d, id] of [['desk-b', 'b-2'], ['desk-c', 'c-1']]) { await P1.click(`document.querySelector('.desktop-preview-wrapper .desktop-preview[data-desktop-id="${d}"]')`); await sleep(1800); await until(async () => !!(await P1.ev(VIEW(id)))?.readOnly, 15000, 200); } // a switch inside the last one's 1 s gate is not taken
     const views0 = await P1.ev(`[${['b-1', 'b-2', 'c-1'].map(VIEW).join(',')}]`), at0 = await P1.ev('app.desktopManager.activeDesktopId');
-    ok(views0.every((v) => v && v.readOnly) && views0[2].bar, '① the desktop page visited B and C: b-1, b-2, c-1 built as read-only views of their stopped conversations (c-1 with its «Resume this session» bar)', { views0, at0 });
+    ok(gateOf(views0.every((v) => v && v.readOnly)) && verdictOf(views0[2].bar), '① the desktop page visited B and C: b-1, b-2, c-1 built as read-only views of their stopped conversations (c-1 with its «Resume this session» bar)', { views0, at0 });
 
     // ② THE RESTART — the server ends; a new one boots over the same data/; the PHONE reconnects FIRST and accepts «Resume all»
     srv.kill('SIGTERM'); await until(() => srv.exitCode !== null || srv.signalCode !== null, 15000, 100); procs.delete(srv);
-    if (!ok(await boot(), '② THE RESTART: the server ended and a new one booted over the same data/', journal.slice(-600))) return;
+    if (!ok(verdictOf(await boot()), '② THE RESTART: the server ended and a new one booted over the same data/', journal.slice(-600))) return;
     const j0 = journal.length;
     // the desktop tab OPEN ACROSS THE RESTART reconnects; its person presses «Resume this session» on C's read-only window (N1)
-    ok(await until(() => P1.ev('!!(app.ws && app.ws.connected)'), 30000, 250), '② the desktop tab open across the restart reconnected');
+    ok(verdictOf(await until(() => P1.ev('!!(app.ws && app.ws.connected)'), 30000, 250)), '② the desktop tab open across the restart reconnected');
     const tR = Date.now(); await P1.ev(TAP);   // ②'s per-page facts: the tab's sends and the refusals it receives, from its new socket
     await sleep(1500);
-    ok(await P1.click(`app.wm.windows.get('c-1') && app.wm.windows.get('c-1').element.querySelector('.chat-resume-btn')`), '② its person presses «Resume this session» on c-1');
+    ok(verdictOf(await P1.click(`app.wm.windows.get('c-1') && app.wm.windows.get('c-1').element.querySelector('.chat-resume-btn')`)), '② its person presses «Resume this session» on c-1');
     await until(async () => { const v = await P1.ev(VIEW('c-1')); return !!(v && v.live); }, 20000, 250);
     const c1 = await P1.ev(VIEW('c-1'));
     const c1others = await P1.ev(`[...app.wm.windows.values()].filter((w) => w.id !== 'c-1' && w._openSpec && w._openSpec.backendSessionId === ${J(CID(3))}).map((w) => w.id)`);
@@ -259,29 +259,29 @@ else await (async () => {
     const afterBar = await rows();
     ok(!!c1 && c1.desk === 'desk-c' && c1.gb === J(GB(3)) && !c1others.length && J(afterBar['desk-c']) === J(BEFORE['desk-c']), '② N1 THE RESUME BAR: the resumed window IS row c-1 — same id, live, at its box on C; no second window; the hub\'s C row kept with its box (461b41f78: the bar closed the window it had just resumed)', { c1, c1others, c: afterBar['desk-c'] });
     PH = await newPage({ phone: true });
-    ok(!!PH && await PH.boot(), '② the PHONE page (390×844, touch) reconnected first');
+    ok(!!PH && verdictOf(await PH.boot()), '② the PHONE page (390×844, touch) reconnected first');
     const phTapped = PH ? await PH.ev(TAP).catch(() => false) : false;
     const offer = `(() => { const d = [...document.querySelectorAll('.dialog')].find((x) => /Resume interrupted sessions/.test(x.textContent)); const b = d && [...d.querySelectorAll('button')].find((x) => /Resume all/.test(x.textContent)); return b ? b.textContent : null; })()`;
-    ok(await until(async () => !!(await PH.ev(offer)), 15000, 200), '② the phone offers «Resume all» (the 2.250.0 offer: the stopped conversations of every desktop)', { offer: await PH.ev(offer).catch((e) => e.message), dialogs: await PH.ev(`[...document.querySelectorAll('.dialog, .modal, [role=dialog]')].map((d) => d.textContent.slice(0, 160))`).catch((e) => e.message), sessions: ((await api('/api/sessions')).sessions || []).map((x) => [x.sessionId, x.status, x.backend]).slice(0, 9), active: ((await api('/api/active')).sessions || []).length, wins: await PH.ev('[...app.wm.windows.keys()]').catch((e) => e.message) });
+    ok(verdictOf(await until(async () => !!(await PH.ev(offer)), 15000, 200)), '② the phone offers «Resume all» (the 2.250.0 offer: the stopped conversations of every desktop)', { offer: await PH.ev(offer).catch((e) => e.message), dialogs: await PH.ev(`[...document.querySelectorAll('.dialog, .modal, [role=dialog]')].map((d) => d.textContent.slice(0, 160))`).catch((e) => e.message), sessions: ((await api('/api/sessions')).sessions || []).map((x) => [x.sessionId, x.status, x.backend]).slice(0, 9), active: ((await api('/api/active')).sessions || []).length, wins: await PH.ev('[...app.wm.windows.keys()]').catch((e) => e.message) });
     const offered = await PH.ev(offer), N = Number((/Resume all (\d+)/.exec(offered || '') || [])[1]);
     await PH.shot('phone-offer');
-    ok(await PH.click(`[...document.querySelectorAll('.dialog button')].find((x) => /Resume all/.test(x.textContent))`), `② the person presses «${offered}»`);
+    ok(verdictOf(await PH.click(`[...document.querySelectorAll('.dialog button')].find((x) => /Resume all/.test(x.textContent))`)), `② the person presses «${offered}»`);
     await sleep(N * 400 + 2500); // the 400 ms stagger, the autosave's debounce, its sends
     const afterPhone = await rows();
     const keptPlaced = PLACED.every((id) => { const [d] = AT[id]; return J(afterPhone[d].find((r) => r[0] === id)) === J(BEFORE[d].find((r) => r[0] === id)); });
     const keptD = J(afterPhone['desk-d'].map((r) => r[0])) === J(['d-1', 'd-2', 'd-3']);
     const minted = Object.values(afterPhone).flat().map((r) => r[0]).filter((id) => !(id in AT) && id !== 'a-f');
-    ok(N === 6 && keptPlaced && keptD && !minted.length, '② after the phone\'s «Resume all»: every desktop\'s rows on the hub keep their window ids and boxes (A, B, C), D its three ids — nothing minted, nothing dropped (2.369.381: new window ids, no box)', { offered, afterPhone, minted });
+    ok(N === 6 && gateOf(keptPlaced) && gateOf(keptD) && !minted.length, '② after the phone\'s «Resume all»: every desktop\'s rows on the hub keep their window ids and boxes (A, B, C), D its three ids — nothing minted, nothing dropped (2.369.381: new window ids, no box)', { offered, afterPhone, minted });
     const said = (await PH.toasts()).map((t) => t[1]);
     ok(said.filter((t) => /Resumed 6 conversations where they were/.test(t)).length === 1 && !said.some((t) => /kept|disagree/.test(t)), '② the phone says it ONCE: «Resumed 6 conversations where they were» — no refusal toast', said);
     const lines2 = refusedSince(j0), law2 = journalLaw(lines2, 3); printRefused('②', lines2);
-    ok(law2.ok, '② the journal holds no refusal but the followers\' tie (the desktop tab follows the phone\'s resumes of a-1 — it booted on Desk A — b-1 and b-2: the older-base kind, N → N windows, at most one a resume)', { why: law2.why, lines: lines2 });
+    ok(verdictOf(law2.ok), '② the journal holds no refusal but the followers\' tie (the desktop tab follows the phone\'s resumes of a-1 — it booted on Desk A — b-1 and b-2: the older-base kind, N → N windows, at most one a resume)', { why: law2.why, lines: lines2 });
     await PH.shot('phone-after-resume');
     // N2: the desktop tab open across the restart follows the phone's re-opened rows — its B windows are the live ones, same ids, same boxes
     await P1.click(`document.querySelector('.desktop-preview-wrapper .desktop-preview[data-desktop-id="desk-b"]')`);
     await until(async () => (await P1.ev(`[${['b-1', 'b-2'].map(VIEW).join(',')}]`)).every((x) => x && x.live && x.gb), 20000, 250); // the switch's replay places at +500 ms
     const bNow = await P1.ev(`[${['b-1', 'b-2'].map(VIEW).join(',')}]`);
-    ok(bNow.every((v, k) => v && v.live && v.desk === 'desk-b' && v.gb === J(GB(k + 1))), '② N2 the desktop tab OPEN ACROSS THE RESTART: its B windows b-1, b-2 are the LIVE sessions under their own ids, at their boxes (461b41f78: dead views kept, the dead recipe written back)', bNow);
+    ok(verdictOf(bNow.every((v, k) => v && v.live && v.desk === 'desk-b' && v.gb === J(GB(k + 1)))), '② N2 the desktop tab OPEN ACROSS THE RESTART: its B windows b-1, b-2 are the LIVE sessions under their own ids, at their boxes (461b41f78: dead views kept, the dead recipe written back)', bNow);
     const s2 = await settle(P1);   // what happened, not a clock: the records quiet, the tab's gates down
     const p1warn = (await P1.toasts()).filter((t) => /warn/.test(t[0])).map((t) => t[1]), midRows = await rows();
     const lines2b = refusedSince(j0), law2b = journalLaw(lines2b, 3), j2e = journal.length; printRefused('② …', lines2b);
@@ -291,14 +291,14 @@ else await (async () => {
     const per2 = {}; for (const [k, X] of [['P1', P1], ['PH', PH]]) { const t = X ? await X.ev('!!(app.ws.ws && app.ws.ws.__vsTapped)').catch(() => false) : false; for (const d of META.map((m) => m.id)) per2[`${k} ${d}`] = t ? (await factsOf(X, d, tR)).refused : ['NOT TAPPED']; }
     const over2 = Object.entries(per2).filter(([kd, r]) => r[0] === 'NOT TAPPED' || r.length > (CAP2[kd.split(' ')[1]] || 1));
     ok(!over2.length && phTapped !== false, '② per page: no open page refused more often for a desktop than that desktop\'s followed resumes (Desk B twice: b-1 and b-2; every other desktop once) — the desktop tab and the phone, each tapped from its socket', { over2, per2, phTapped });
-    ok(s2.ok && !p1warn.length && J(midRows['desk-b']) === J(BEFORE['desk-b']) && law2b.ok, '② …the open tab warns of nothing, the hub\'s B rows keep their ids and boxes, the journal holds no refusal but the followers\' tie', { settled: s2, p1warn, b: midRows['desk-b'], why: law2b.why, lines: lines2b });
+    ok(gateOf(s2.ok) && !p1warn.length && J(midRows['desk-b']) === J(BEFORE['desk-b']) && verdictOf(law2b.ok), '② …the open tab warns of nothing, the hub\'s B rows keep their ids and boxes, the journal holds no refusal but the followers\' tie', { settled: s2, p1warn, b: midRows['desk-b'], why: law2b.why, lines: lines2b });
 
     // ③ a DESKTOP page connects and visits every desktop: windows where they were; D laid out and saved with positions
     const s3 = await settle(P1), j3 = journal.length;   // ③'s window opens once ②'s followers have gone quiet
     const gap23 = journal.slice(j2e, j3).split('\n').filter((l) => /REFUSED/.test(l)); printRefused('②→③ (the gap)', gap23);
     ok(!gap23.length, '② → ③: nothing refused between ②\'s judge and ③\'s window (the round\'s should: every refusing line falls in a judged window)', gap23);
     P2 = await newPage({});
-    ok(!!P2 && await P2.boot(), '③ a desktop page connected to the new server');
+    ok(!!P2 && verdictOf(await P2.boot()), '③ a desktop page connected to the new server');
     const pv2 = await P2.ev(PREVIEW('desk-d'));
     if (pv2) await P2.shot('preview-desk-d-after-phone', { x: Math.max(0, pv2.box.x - 170), y: pv2.box.y, width: pv2.box.width + 176, height: pv2.box.height });
     const where = `(() => Object.fromEntries([...app.wm.windows.values()].filter((w) => ${J(Object.keys(AT))}.includes(w.id)).map((w) => [w.id, [w._desktopId, w.gridBounds ? JSON.stringify(w.gridBounds) : null]])))()`;
@@ -306,15 +306,15 @@ else await (async () => {
     const seen = await P2.ev(where);
     const atBox = PLACED.every((id) => seen[id] && seen[id][0] === AT[id][0] && seen[id][1] === J(GB(AT[id][1])));
     const dOn = ['d-1', 'd-2', 'd-3'].every((id) => seen[id] && seen[id][0] === 'desk-d' && seen[id][1]);
-    ok(atBox && dOn, '③ the desktop page visited B, C, D, A: every conversation\'s window is its row, on its desktop, at its box; D\'s three laid out', seen);
+    ok(gateOf(atBox) && verdictOf(dOn), '③ the desktop page visited B, C, D, A: every conversation\'s window is its row, on its desktop, at its box; D\'s three laid out', seen);
     await sleep(1500);
     const final = await rows();
     const dPlaced = final['desk-d'].length === 3 && final['desk-d'].every((r) => r[1]);
-    ok(PLACED.every((id) => { const [d] = AT[id]; return J(final[d].find((r) => r[0] === id)) === J(BEFORE[d].find((r) => r[0] === id)); }) && dPlaced, '③ …the hub\'s records: A, B, C exactly as before the restart; D\'s rows saved WITH positions now (visiting lays them out)', final);
+    ok(gateOf(PLACED.every((id) => { const [d] = AT[id]; return J(final[d].find((r) => r[0] === id)) === J(BEFORE[d].find((r) => r[0] === id)); })) && verdictOf(dPlaced), '③ …the hub\'s records: A, B, C exactly as before the restart; D\'s rows saved WITH positions now (visiting lays them out)', final);
     const lines3 = refusedSince(j3), law3 = journalLaw(lines3, 0), warns3 = await warnsOf(), j3e = journal.length; printRefused('③', lines3);
-    ok(s3.ok && law3.ok && !warns3.P1.length && !warns3.PH.length && !warns3.P2.length, '③ no refusal on any page (nothing is resumed here: no follower, no tie owed), no warn toast on ANY open page (the desktop tab, the phone, this page) — after ②\'s followers had gone quiet', { settled: s3, why: law3.why, lines: lines3, warns3 });
+    ok(gateOf(s3.ok) && gateOf(law3.ok) && !warns3.P1.length && !warns3.PH.length && !warns3.P2.length, '③ no refusal on any page (nothing is resumed here: no follower, no tie owed), no warn toast on ANY open page (the desktop tab, the phone, this page) — after ②\'s followers had gone quiet', { settled: s3, why: law3.why, lines: lines3, warns3 });
     const pv3 = await P2.ev(PREVIEW('desk-d'));
-    ok(pv3 && pv3.placeholders === 0 && pv3.windows === 3 && !pv3.badge, '③ …and D previews its three windows where they now stand (no placeholder)', pv3);
+    ok(gateOf(pv3) && pv3.placeholders === 0 && pv3.windows === 3 && !pv3.badge, '③ …and D previews its three windows where they now stand (no placeholder)', pv3);
     if (pv3) await P2.shot('preview-desk-d-after-visit', { x: Math.max(0, pv3.box.x - 170), y: pv3.box.y, width: pv3.box.width + 176, height: pv3.box.height });
     await P2.shot('desktop-after-visits');
 
@@ -325,35 +325,35 @@ else await (async () => {
     const s4 = await settle(P2), j4 = journal.length, t4 = Date.now();
     const gap34 = journal.slice(j3e, j4).split('\n').filter((l) => /REFUSED/.test(l)); printRefused('③→④ (the gap)', gap34);
     ok(!gap34.length, '③ → ④: nothing refused between ③\'s judge and ④\'s window', gap34);
-    ok(s4.ok && tapped.every(Boolean), '④ before the stops: ③\'s writes have gone quiet (no record written, no refusal, for 2.5 s), and every open page\'s sends and received refusals are tapped', { settled: s4, tapped });
+    ok(gateOf(s4.ok) && verdictOf(tapped.every(Boolean)), '④ before the stops: ③\'s writes have gone quiet (no record written, no refusal, for 2.5 s), and every open page\'s sends and received refusals are tapped', { settled: s4, tapped });
     await P2.click(`document.querySelector('.desktop-preview-wrapper .desktop-preview[data-desktop-id="desk-c"]')`); await sleep(1800);
     const killConv = (cid) => P2.ev(`(() => { const e = [...app.sessions.entries()].find(([id, v]) => v && v.sessionId && !v._readOnly && app.wm.windows.get(id)?._openSpec?.backendSessionId === ${J(cid)}); if (e) app.killSession(e[1].sessionId, ${J(cid)}); return !!e; })()`); // the conversation's live window, whatever its id
     await killConv(CID(3));
-    ok(await until(async () => !!(await P2.ev(VIEW('c-1')))?.bar, 20000, 250), '④ c-1\'s session stopped: its window shows «Resume this session»');
+    ok(verdictOf(await until(async () => !!(await P2.ev(VIEW('c-1')))?.bar, 20000, 250)), '④ c-1\'s session stopped: its window shows «Resume this session»');
     await P2.ev(`(() => { const ws = app.ws, orig = ws.request.bind(ws); window.__creates = []; ws.request = function (m, cb, o) { if (m && m.type === 'create') window.__creates.push([m.resumeId, !!m.ignoreNoConvo]); if (m && m.type === 'create' && m.resumeId === ${J(CID(3))} && !m.ignoreNoConvo && !window.__brk) { window.__brk = 1; setTimeout(() => cb({ type: 'error', code: 'no-convo-breaker', transcriptKnown: false, message: 'No conversation found', reqId: m.reqId }), 50); return () => {}; } return orig(m, cb, o); }; return true; })()`);
-    ok(await P2.click(`app.wm.windows.get('c-1') && app.wm.windows.get('c-1').element.querySelector('.chat-resume-btn')`), '④ the person presses «Resume this session» on c-1 (the hub answers the no-transcript breaker)');
+    ok(verdictOf(await P2.click(`app.wm.windows.get('c-1') && app.wm.windows.get('c-1').element.querySelector('.chat-resume-btn')`)), '④ the person presses «Resume this session» on c-1 (the hub answers the no-transcript breaker)');
     const retryBtn = `(() => { const w = app.wm.windows.get('c-1'); return w ? [...w.element.querySelectorAll('.chat-resume-btn')].find((b) => /Try resuming anyway/.test(b.textContent)) || null : null; })()`;
-    ok(await until(async () => !!(await P2.ev(`!!${retryBtn}`)), 15000, 200), '④ …the rescued window shows «Try resuming anyway»');
+    ok(verdictOf(await until(async () => !!(await P2.ev(`!!${retryBtn}`)), 15000, 200)), '④ …the rescued window shows «Try resuming anyway»');
     await P2.shot('retry-bar');
-    ok(await P2.click(retryBtn), '④ the person presses «Try resuming anyway»');
+    ok(verdictOf(await P2.click(retryBtn)), '④ the person presses «Try resuming anyway»');
     await until(() => live('c-1'), 20000, 250);
     await sleep(1500);
     const c1r = await P2.ev(VIEW('c-1')), c1w = await winsOf(CID(3)), crs = await P2.ev('window.__creates'), cRows = await rows();
-    ok(!!c1r && c1r.live && c1r.desk === 'desk-c' && c1r.gb === J(GB(3)) && J(c1w) === J(['c-1']) && crs.length === 2 && crs[1][1] === true && J(cRows['desk-c']) === J(BEFORE['desk-c']),
+    ok(!!c1r && gateOf(c1r.live) && c1r.desk === 'desk-c' && c1r.gb === J(GB(3)) && J(c1w) === J(['c-1']) && crs.length === 2 && crs[1][1] === true && J(cRows['desk-c']) === J(BEFORE['desk-c']),
       '④ N1 «TRY RESUMING ANYWAY» re-opens row c-1: one retry create, the conversation\'s ONE window is c-1 — live, at its box on C; the hub\'s C row kept with its box (d159c081b: the bar closed the window its retry had re-opened — no window, the row gone)', { c1r, c1w, crs, c: cRows['desk-c'] });
     // ④ THE DOUBLE PRESS (r3 N2) — b-2's session stopped; its sidebar card pressed twice inside 200 ms while the hub takes 700 ms
     await P2.click(`document.querySelector('.desktop-preview-wrapper .desktop-preview[data-desktop-id="desk-b"]')`); await sleep(1800);
     await killConv(CID(2));
     // its card: a STOPPED card draws no status dot (session-card: stopped is the default state); the sidebar's list says stopped
     const card = `((app.sidebar._allSessions || []).some((s) => (s.backendSessionId || s.sessionId) === ${J(CID(2))} && s.status === 'stopped') && [...document.querySelectorAll('.session-item-card')].find((c) => c._sessionId === ${J(CID(2))} && !c.querySelector('.conn-corner-dot'))) || null`;
-    ok(await until(async () => !!(await P2.ev(`!!(${card})`)) && !!(await P2.ev(VIEW('b-2')))?.readOnly, 20000, 250), '④ b-2\'s session stopped: its sidebar card says so, its window is read-only');
+    ok(verdictOf(await until(async () => !!(await P2.ev(`!!(${card})`)) && !!(await P2.ev(VIEW('b-2')))?.readOnly, 20000, 250)), '④ b-2\'s session stopped: its sidebar card says so, its window is read-only');
     await P2.ev('(app.sidebar.isOpen || app.sidebar.toggle(true)), true'); await sleep(800); // the person opens the sidebar
     await P2.ev(`(() => { const ws = app.ws, send = ws.send.bind(ws); window.__sent = 0; ws.send = function (m) { if (m && m.type === 'create') { window.__sent++; setTimeout(() => send(m), 700); return; } return send(m); }; return true; })()`);
     // THE PHONE FOLLOWER'S TIE IS MADE (law 4 — the one case list line 155's made tie does not cover): the phone holds b-2 (its own
     // «Resume all» re-opened it in ②), so it FOLLOWS this resume and writes Desk B from the base it had; its FIRST Desk B frame is HELD
     // until the hub has kept a NEWER record of Desk B (this page's, the desktop tab's), then released — refused from an older base, always
     const sHold = await settle(P2);   // b-2's END and its records have gone quiet first: the frame held is the FOLLOW's, never the end's
-    ok(sHold.ok, '④ before the phone\'s tie: b-2\'s stop and every record it moved have gone quiet (measured), this page\'s gates down', sHold);
+    ok(verdictOf(sHold.ok), '④ before the phone\'s tie: b-2\'s stop and every record it moved have gone quiet (measured), this page\'s gates down', sHold);
     const phToasts0 = ((await PH.toasts()) || []).length;   // law 4 «nothing shown»: EVERY toast type the phone shows from here on
     await PH.ev(`(window.__holdOut = 'desk-b', true)`);
     const tTie = Date.now();
@@ -368,7 +368,7 @@ else await (async () => {
     ok(!!heldPH && !!passed && relPH === 1, '④ THE PHONE FOLLOWER\'S TIE IS MADE: the phone followed b-2\'s resume and wrote Desk B\'s record from the base it had — that frame HELD until the hub kept a newer record of Desk B, then released (refused from an older base, always)', { heldPH, heldBase, keptB, relPH });
     await sleep(1500);
     const b2 = await P2.ev(VIEW('b-2')), b2w = await winsOf(CID(2)), sent = await P2.ev('window.__sent'), bRows = await rows();
-    ok(!!pc && sent === 1 && !!b2 && b2.live && b2.desk === 'desk-b' && b2.gb === J(GB(2)) && J(b2w) === J(['b-2']) && J(bRows['desk-b']) === J(BEFORE['desk-b']),
+    ok(!!pc && sent === 1 && !!b2 && gateOf(b2.live) && b2.desk === 'desk-b' && b2.gb === J(GB(2)) && J(b2w) === J(['b-2']) && J(bRows['desk-b']) === J(BEFORE['desk-b']),
       '④ N2 b-2\'s card pressed TWICE inside 200 ms while the hub is slow: ONE create, the conversation\'s ONE window is b-2 — live, at its box on B; the hub\'s B rows kept (d159c081b: the second press closed the first one\'s window in flight)', { pressed: pc, sent, b2, b2w, b: bRows['desk-b'] });
     const sTie = await settle(P2), phF = await factsOf(PH, 'desk-b', tTie);
     const sTie2 = await settle(P2), phF2 = await factsOf(PH, 'desk-b', tTie);   // a second look after a second quiet stretch: nothing more
@@ -376,12 +376,12 @@ else await (async () => {
     const TF = { sends: phF.sends, refused: phF.refused, sendsLater: phF2.sends, refusedLater: phF2.refused.length, acks: phF2.acks, tapped: phF2.tapped, lines: phLines, rowKept: J(bAfter['desk-b']) === J(BEFORE['desk-b']), shown: phShown };
     const LT = phoneTieLaw(TF);
     console.log(`    [④ the phone follower's tie] ${J({ ...TF, lines: phLines.map((l) => l.slice(Math.max(0, l.indexOf('[layout-sync]')), 260)) })}`);
-    ok(sTie.ok && sTie2.ok && LT.ok, '④ …the hub REFUSED the phone\'s record ONCE from an older base (the stale line, N → N); the phone ADOPTED the record kept and sent ONE more frame, ACCEPTED (its ack read); then nothing; b-2\'s row keeps its id and box; the phone shows nothing; the layer gate refused nothing', { why: LT.why, settled: [sTie, sTie2] });
+    ok(gateOf(sTie.ok) && gateOf(sTie2.ok) && verdictOf(LT.ok), '④ …the hub REFUSED the phone\'s record ONCE from an older base (the stale line, N → N); the phone ADOPTED the record kept and sent ONE more frame, ACCEPTED (its ack read); then nothing; b-2\'s row keeps its id and box; the phone shows nothing; the layer gate refused nothing', { why: LT.why, settled: [sTie, sTie2] });
     // CONTROLS — the law goes red where the harm is (copies of these very facts): the phone sending on and on; the layer gate refusing it
     const cOn = phoneTieLaw({ ...TF, sendsLater: TF.sends + 2 });
     const cGate = phoneTieLaw({ ...TF, lines: [...phLines, '[layout-sync] REFUSED a phone record of desktop "B" (desk-b): it changes zIndex (window b-2) — a phone writes the workspace only; the server keeps its record'] });
-    ok(!cOn.ok && cOn.why.some((w) => /after the settle/.test(w)), '④ CONTROL: a copy in which the phone sends on and on (no settle) is RED, by name', cOn.why);
-    ok(!cGate.ok && cGate.why.some((w) => /the layer gate refused/.test(w)), '④ CONTROL: a copy in which the layer gate refuses the phone\'s record is RED, by name', cGate.why);
+    ok(!cOn.ok && verdictOf(cOn.why.some((w) => /after the settle/.test(w))), '④ CONTROL: a copy in which the phone sends on and on (no settle) is RED, by name', cOn.why);
+    ok(!cGate.ok && verdictOf(cGate.why.some((w) => /the layer gate refused/.test(w))), '④ CONTROL: a copy in which the layer gate refuses the phone\'s record is RED, by name', cGate.why);
     const lines4 = refusedSince(j4), law4 = journalLaw(lines4, 3), warns4 = await warnsOf(); printRefused('④', lines4);
     // CONTROLS of the journal law (the round's should): each of the four OTHER kinds the hub writes, and a stale line that loses a window — red by name
     const OTHER = ['[layout-sync] REFUSED a record of desktop desk-b: no such desktop (deleted meanwhile); the sender is told',
@@ -390,14 +390,14 @@ else await (async () => {
       '[layout-sync] REFUSED a phone record of desktop "Desk B" (desk-b): it changes zIndex (window b-2) — a phone writes the workspace only; the server keeps its record',
       '[layout-sync] REFUSED a phone record of desktop "Desk B" (desk-b): written from an older base (2026-11-20T00:00:00.000Z < the record kept, 2026-11-20T00:00:01.000Z) — 2 → 1 windows; the sender adopts the record kept'];
     const kindsRed = OTHER.map((l) => journalLaw([l], 9));
-    ok(kindsRed.every((r) => !r.ok && r.why.length === 1), '④ CONTROL: the journal law is RED, by name, for each of the four other kinds of refusal and for a stale line that loses a window', kindsRed.map((r) => r.why[0]));
+    ok(verdictOf(kindsRed.every((r) => !r.ok && r.why.length === 1)), '④ CONTROL: the journal law is RED, by name, for each of the four other kinds of refusal and for a stale line that loses a window', kindsRed.map((r) => r.why[0]));
     const branches = [['refused twice', { ...TF, refused: ['stale', 'stale'] }, /exactly ONE stale refusal/], ['the row moved', { ...TF, rowKept: false }, /did not keep its id and box/], ['a toast shown', { ...TF, shown: ['global-toast global-toast-info: x'] }, /showed the person a toast/], ['no ack', { ...TF, acks: 0 }, /was not accepted/]];
     const branchRed = branches.map(([n, f, re]) => [n, phoneTieLaw(f).why.some((w) => re.test(w))]);
-    ok(branchRed.every(([, r]) => r), '④ CONTROL: the phone follower\'s law is RED, by name, for a second refusal, a row that moved, a toast shown, and a frame never acked', branchRed);
+    ok(verdictOf(branchRed.every(([, r]) => r)), '④ CONTROL: the phone follower\'s law is RED, by name, for a second refusal, a row that moved, a toast shown, and a frame never acked', branchRed);
     // …and per page (the read: a sum could hide one page refused twice): each open page refused at most ONCE a desktop in ④
     const per4 = {}; for (const [k, X] of [['P1', P1], ['PH', PH], ['P2', P2]]) for (const d of ['desk-b', 'desk-c']) { const f = await factsOf(X, d, t4); per4[`${k} ${d}`] = f.tapped ? f.refused : ['NOT TAPPED']; }
     const twice = Object.entries(per4).filter(([, r]) => r.length > 1 || r[0] === 'NOT TAPPED');
-    ok(law4.ok && law4.stale >= 1 && !twice.length && !warns4.P1.length && !warns4.PH.length && !warns4.P2.length, '④ no refusal but the followers\' ties (the older-base kind, N → N windows, at most one a follower a followed resume: the desktop tab follows c-1 and b-2, the phone b-2 — it holds no c-1 — the made phone tie\'s one among them); no page refused twice for one desktop; no warn toast on ANY open page', { why: law4.why, twice, per4, lines: lines4, warns4 });
+    ok(gateOf(law4.ok) && law4.stale >= 1 && !twice.length && !warns4.P1.length && !warns4.PH.length && !warns4.P2.length, '④ no refusal but the followers\' ties (the older-base kind, N → N windows, at most one a follower a followed resume: the desktop tab follows c-1 and b-2, the phone b-2 — it holds no c-1 — the made phone tie\'s one among them); no page refused twice for one desktop; no warn toast on ANY open page', { why: law4.why, twice, per4, lines: lines4, warns4 });
     await P2.shot('desktop-after-retry-and-double-press');
     // ⑤ B-46fc'S OWN GATE (lane bl-windows — the row: «a chrome leg that opens a window and reloads at 500 ms ⇒ the same window is
     //    on show»; the 2.369.410 close's remainder). A race is proven by a STALL, never by the clock: before the press the page's
@@ -437,17 +437,17 @@ else await (async () => {
       return { press, opened, due, desk, booted, leave, mine, hub, inHub: !!opened && hub.includes(opened.id) };
     };
     const s5 = await settle(P2);
-    ok(s5.ok, '⑤ before the plant: the followers\' frames have ENDED (no record of any desktop written, no refusal, for 2.5 s) and this page\'s two restoring gates are DOWN — the plant reads a page no remote apply is gating (law 3)', s5);
+    ok(verdictOf(s5.ok), '⑤ before the plant: the followers\' frames have ENDED (no record of any desktop written, no refusal, for 2.5 s) and this page\'s two restoring gates are DOWN — the plant reads a page no remote apply is gating (law 3)', s5);
     const red = await reloadScene(true);
-    ok(!!red.press && red.press.pressed, '⑤ (control) the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', red.press);
-    ok(!!red.opened && red.due.due && red.due.dirty && !red.due.gate && red.due.held && red.due.leave === 'offAtLeave', '⑤ RED CONTROL proves its plant first: the person\'s press opened a files window, a person\'s save DUE and HELD, no gate up — and the page\'s leave is the planted one (it answers false, as the release sent nothing)', red.due);
-    ok(red.booted && !!red.opened && !red.mine && !red.inHub && Array.isArray(red.leave) && red.leave.length >= 1 && red.leave.every((l) => l.sent === false), '⑤ RED CONTROL — the release\'s behaviour (no flush at the leave): the leave RAN (logged) and sent nothing ⇒ after the reload that window is GONE and the hub\'s record holds no row of it (the leg below goes red without B-46fc)', { leave: red.leave, mine: red.mine, inHub: red.inHub, booted: red.booted });
+    ok(!!red.press && verdictOf(red.press.pressed), '⑤ (control) the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', red.press);
+    ok(!!red.opened && gateOf(red.due.due) && gateOf(red.due.dirty) && !red.due.gate && gateOf(red.due.held) && red.due.leave === 'offAtLeave', '⑤ RED CONTROL proves its plant first: the person\'s press opened a files window, a person\'s save DUE and HELD, no gate up — and the page\'s leave is the planted one (it answers false, as the release sent nothing)', red.due);
+    ok(gateOf(red.booted) && !!red.opened && !red.mine && !red.inHub && gateOf(Array.isArray(red.leave)) && red.leave.length >= 1 && verdictOf(red.leave.every((l) => l.sent === false)), '⑤ RED CONTROL — the release\'s behaviour (no flush at the leave): the leave RAN (logged) and sent nothing ⇒ after the reload that window is GONE and the hub\'s record holds no row of it (the leg below goes red without B-46fc)', { leave: red.leave, mine: red.mine, inHub: red.inHub, booted: red.booted });
     const s5b = await settle(P2);
-    ok(s5b.ok, '⑤ …and again before the second plant (the reloaded page booted, every record quiet, its gates down)', s5b);
+    ok(verdictOf(s5b.ok), '⑤ …and again before the second plant (the reloaded page booted, every record quiet, its gates down)', s5b);
     const fact = await reloadScene(false);
-    ok(!!fact.press && fact.press.pressed, '⑤ the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', fact.press);
-    ok(!!fact.opened && fact.due.due && fact.due.dirty && !fact.due.gate && fact.due.held && fact.due.leave === 'loggedLeave', '⑤ the person\'s press opened a files window; its save DUE and HELD in the page (no gate up) — the leave\'s flush its only road', fact.due);
-    ok(fact.booted && !!fact.mine && fact.mine.desk === fact.desk && fact.mine.shown && fact.inHub && Array.isArray(fact.leave) && fact.leave.some((l) => l.sent === true), '⑤ B-46fc\'S OWN GATE: the page reloaded with the open\'s save still due ⇒ the leave\'s flush SENT it (logged), the hub\'s record holds that window\'s row, and after the reload the SAME window (its id) is on show on its desktop', { opened: fact.opened, mine: fact.mine, inHub: fact.inHub, leave: fact.leave, booted: fact.booted });
+    ok(!!fact.press && verdictOf(fact.press.pressed), '⑤ the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', fact.press);
+    ok(!!fact.opened && gateOf(fact.due.due) && gateOf(fact.due.dirty) && !fact.due.gate && gateOf(fact.due.held) && fact.due.leave === 'loggedLeave', '⑤ the person\'s press opened a files window; its save DUE and HELD in the page (no gate up) — the leave\'s flush its only road', fact.due);
+    ok(gateOf(fact.booted) && !!fact.mine && fact.mine.desk === fact.desk && gateOf(fact.mine.shown) && gateOf(fact.inHub) && gateOf(Array.isArray(fact.leave)) && verdictOf(fact.leave.some((l) => l.sent === true)), '⑤ B-46fc\'S OWN GATE: the page reloaded with the open\'s save still due ⇒ the leave\'s flush SENT it (logged), the hub\'s record holds that window\'s row, and after the reload the SAME window (its id) is on show on its desktop', { opened: fact.opened, mine: fact.mine, inHub: fact.inHub, leave: fact.leave, booted: fact.booted });
     // ⑥ B-46fc PART 2 (lane lg-recovery — the row's remainder: «a socket that is not open at the reload»): the leave's flush queues the
     //    save in the CLOSED socket, and the page hands that queue to the hub by its second road (POST /api/layout-sync, fetch keepalive —
     //    the one «apply a layout save» the socket's case runs). The plant: ⑤'s held save, and the page's socket CLOSED in place, its
@@ -480,16 +480,16 @@ else await (async () => {
       return { press, opened, due, desk, booted, quiet: !!(quiet && quiet.ok), leave, mine, hub, inHub: !!opened && hub.includes(opened.id) };
     };
     const s6 = await settle(P2);
-    ok(s6.ok, '⑥ before the plant: every record quiet, this page\'s gates down (as ⑤)', s6);
+    ok(verdictOf(s6.ok), '⑥ before the plant: every record quiet, this page\'s gates down (as ⑤)', s6);
     const cutR = await closedScene(true);
-    ok(!!cutR.opened && cutR.due.due && cutR.due.dirty && !cutR.due.gate && cutR.due.held && cutR.due.open === false && cutR.due.road === 'cutRoad', '⑥ RED CONTROL proves its plant first: a files window opened, its save DUE and HELD, the page\'s socket NOT OPEN, the hand-off cut', cutR.due);
-    ok(cutR.booted && cutR.quiet && !cutR.mine && !cutR.inHub && Array.isArray(cutR.leave) && cutR.leave.some((l) => /^flush:/.test(l.why) && l.sent === true) && cutR.leave.every((l) => !/^handoff:/.test(l.why) || l.sent === 0),
+    ok(!!cutR.opened && gateOf(cutR.due.due) && gateOf(cutR.due.dirty) && !cutR.due.gate && gateOf(cutR.due.held) && cutR.due.open === false && cutR.due.road === 'cutRoad', '⑥ RED CONTROL proves its plant first: a files window opened, its save DUE and HELD, the page\'s socket NOT OPEN, the hand-off cut', cutR.due);
+    ok(gateOf(cutR.booted) && gateOf(cutR.quiet) && !cutR.mine && !cutR.inHub && gateOf(Array.isArray(cutR.leave)) && gateOf(cutR.leave.some((l) => /^flush:/.test(l.why) && l.sent === true)) && verdictOf(cutR.leave.every((l) => !/^handoff:/.test(l.why) || l.sent === 0)),
       '⑥ RED CONTROL — the release\'s road: the leave\'s flush ran and QUEUED the save in the closed socket, nothing handed it off ⇒ after the reload the window is GONE and the hub\'s record lacks it', { leave: cutR.leave, hub: cutR.hub, mine: cutR.mine });
     const s6b = await settle(P2);
-    ok(s6b.ok, '⑥ …and again before the second plant', s6b);
+    ok(verdictOf(s6b.ok), '⑥ …and again before the second plant', s6b);
     const road = await closedScene(false);
-    ok(!!road.opened && road.due.due && road.due.held && road.due.open === false && road.due.road === 'loggedHandOff', '⑥ the plant: a files window opened, its save DUE and HELD, the page\'s socket NOT OPEN', road.due);
-    ok(road.booted && road.quiet && !!road.mine && road.mine.desk === road.desk && road.mine.shown && road.inHub && Array.isArray(road.leave) && road.leave.some((l) => /^handoff:/.test(l.why) && l.sent >= 1),
+    ok(!!road.opened && gateOf(road.due.due) && gateOf(road.due.held) && road.due.open === false && road.due.road === 'loggedHandOff', '⑥ the plant: a files window opened, its save DUE and HELD, the page\'s socket NOT OPEN', road.due);
+    ok(gateOf(road.booted) && gateOf(road.quiet) && !!road.mine && road.mine.desk === road.desk && gateOf(road.mine.shown) && gateOf(road.inHub) && gateOf(Array.isArray(road.leave)) && verdictOf(road.leave.some((l) => /^handoff:/.test(l.why) && l.sent >= 1)),
       '⑥ B-46fc PART 2\'S GATE: the page reloaded with its socket closed ⇒ the leave queued the save and HANDED IT OFF (POST /api/layout-sync) — the hub\'s record holds the window and the reloaded page shows it', { leave: road.leave, hub: road.hub, mine: road.mine });
     // ⑦ ITS ROUND (wgk4tnn0w — the MUST): a page that only goes HIDDEN (no unload) while offline: the hand-off's request FAILS — the
     //    frame must stay owed, and the socket carries it when the page is shown and reconnects (the release's road). The plant: ⑥'s held
@@ -525,13 +525,13 @@ else await (async () => {
       return { press, opened, road, failed: !!failed, owed, open: !!open, quiet: !!(quiet && quiet.ok), hub, inHub: !!opened && hub.includes(opened.id) };
     };
     const s7 = await settle(P2);
-    ok(s7.ok, '⑦ before the plant: every record quiet, the gates down', s7);
+    ok(verdictOf(s7.ok), '⑦ before the plant: every record quiet, the gates down', s7);
     const swal = await hiddenScene(true);
-    ok(!!swal.opened && swal.road === 'firstCutSwallow' && swal.failed && swal.owed === 0 && swal.open && swal.quiet && !swal.inHub, '⑦ RED CONTROL — the first cut\'s swallow: the page went HIDDEN offline, the hand-off\'s request FAILED and took the frame with it (0 owed) ⇒ shown and reconnected, the hub\'s record still lacks the window', swal);
+    ok(!!swal.opened && swal.road === 'firstCutSwallow' && gateOf(swal.failed) && swal.owed === 0 && gateOf(swal.open) && gateOf(swal.quiet) && !swal.inHub, '⑦ RED CONTROL — the first cut\'s swallow: the page went HIDDEN offline, the hand-off\'s request FAILED and took the frame with it (0 owed) ⇒ shown and reconnected, the hub\'s record still lacks the window', swal);
     const s7b = await settle(P2);
-    ok(s7b.ok, '⑦ …and again before the second plant', s7b);
+    ok(verdictOf(s7b.ok), '⑦ …and again before the second plant', s7b);
     const owedR = await hiddenScene(false);
-    ok(!!owedR.opened && owedR.road === '_handOffQueued' && owedR.failed && owedR.owed >= 1 && owedR.open && owedR.quiet && owedR.inHub, '⑦ ITS ROUND\'S MUST: the page went HIDDEN offline, the hand-off FAILED and the frame stayed OWED (back in the queue) ⇒ shown and reconnected, the socket carried it: the hub\'s record holds the window', owedR);
+    ok(!!owedR.opened && owedR.road === '_handOffQueued' && gateOf(owedR.failed) && owedR.owed >= 1 && gateOf(owedR.open) && gateOf(owedR.quiet) && verdictOf(owedR.inHub), '⑦ ITS ROUND\'S MUST: the page went HIDDEN offline, the hand-off FAILED and the frame stayed OWED (back in the queue) ⇒ shown and reconnected, the socket carried it: the hub\'s record holds the window', owedR);
   } catch (e) {
     ok(false, 'the suite threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e));
   } finally {
@@ -540,4 +540,4 @@ else await (async () => {
 })();
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

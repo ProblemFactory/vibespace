@@ -29,7 +29,7 @@ const SHOTS = process.env.WSP_SHOTS || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the bundles: the REAL panel of the tree (patch = {from, to} rewrites channels-panel.js for a control)
@@ -123,14 +123,14 @@ const HEAD = `(() => {
 })()`;
 const judgeHead = (D, label, { wide }) => {
   const sameRow = D.np && D.head && D.name && D.np.t >= D.head.t - 1 && D.np.b <= D.head.b + 1 && Math.abs((D.np.t + D.np.b) / 2 - (D.name.t + D.name.b) / 2) <= 4;
-  ok(D.inHead && sameRow && D.np.l >= D.name.r && D.cnt && D.np.r <= D.cnt.l && D.more && D.np.r <= D.more.l && D.hit,
+  ok(gateOf(D.inHead) && gateOf(sameRow) && D.np.l >= D.name.r && gateOf(D.cnt) && D.np.r <= D.cnt.l && gateOf(D.more) && D.np.r <= D.more.l && verdictOf(D.hit),
     `${label} ① New path… is INSIDE the Webhook head row: the name's row, right of the name, left of the count chip and the ⋯ — and the press point hits it`, JSON.stringify({ inHead: D.inHead, head: D.head, name: D.name, np: D.np, cnt: D.cnt, more: D.more, hit: D.hit }));
-  if (wide) ok(D.label && D.label.shown && D.label.text === D.title && D.title, `${label} ① wide: the glyph AND the word ("${D.label && D.label.text}")`, JSON.stringify(D.label));
-  else ok(D.label && !D.label.shown && D.title && D.title === D.aria && D.title === D.label.text && D.np.w >= 36 && D.np.h >= 36, `${label} ⑤ narrow: the glyph alone, the word in its tooltip + aria-label ("${D.title}"), a ${D.np && D.np.w}×${D.np && D.np.h} target`, JSON.stringify({ label: D.label, title: D.title, aria: D.aria, np: D.np }));
+  if (wide) ok(gateOf(D.label) && gateOf(D.label.shown) && D.label.text === D.title && verdictOf(D.title), `${label} ① wide: the glyph AND the word ("${D.label && D.label.text}")`, JSON.stringify(D.label));
+  else ok(gateOf(D.label) && !D.label.shown && gateOf(D.title) && D.title === D.aria && D.title === D.label.text && D.np.w >= 36 && D.np.h >= 36, `${label} ⑤ narrow: the glyph alone, the word in its tooltip + aria-label ("${D.title}"), a ${D.np && D.np.w}×${D.np && D.np.h} target`, JSON.stringify({ label: D.label, title: D.title, aria: D.aria, np: D.np }));
 };
 const judgeOrder = (D, label) => {
   const ids = D.order.map((o) => o.id), last = D.order[D.order.length - 1];
-  ok(ids.join(',') === 'lark:a,gmail:a,webhook' && last && D.order.slice(0, -1).every((o) => o.b <= last.t + 1), `${label} ② the Webhook section is the LAST account section — after the person's Lark and Gmail, below them (the digest listed it first)`, JSON.stringify(D.order));
+  ok(ids.join(',') === 'lark:a,gmail:a,webhook' && gateOf(last) && verdictOf(D.order.slice(0, -1).every((o) => o.b <= last.t + 1)), `${label} ② the Webhook section is the LAST account section — after the person's Lark and Gmail, below them (the digest listed it first)`, JSON.stringify(D.order));
 };
 const WIZ = `(() => ({ wiz: !!document.querySelector('[data-wh-wizard]') }))()`;
 const CLOSE = `(() => { document.querySelectorAll('.dialog-overlay, .dialog-form, .context-menu').forEach((e) => e.remove()); return true; })()`;
@@ -146,20 +146,20 @@ console.log('§2 the press: the wizard opens, the section does not fold');
 const p0 = foldPatches();
 await d.press(D.cx, D.cy);
 const A = await d.ev(`(() => ({ ...${WIZ}, collapsed: document.querySelector('.chan-sec[data-adapter="webhook"]').classList.contains('chan-collapsed') }))()`);
-ok(A.wiz && !A.collapsed && !D.collapsed && foldPatches() === p0, '③ a mouse press on New path… opens the New path wizard; the section stays open and no fold is written', JSON.stringify({ ...A, before: D.collapsed, patches: patches.slice(p0) }));
+ok(gateOf(A.wiz) && !A.collapsed && !D.collapsed && foldPatches() === p0, '③ a mouse press on New path… opens the New path wizard; the section stays open and no fold is written', JSON.stringify({ ...A, before: D.collapsed, patches: patches.slice(p0) }));
 await d.ev(CLOSE);
 await d.press(D.name.l + 4, (D.name.t + D.name.b) / 2);
 const F = await d.ev(`(() => ({ ...${WIZ}, collapsed: document.querySelector('.chan-sec[data-adapter="webhook"]').classList.contains('chan-collapsed') }))()`);
-ok(F.collapsed && !F.wiz && foldPatches() === p0 + 1 && /"acct:webhook":true/.test(patches[patches.length - 1] || ''), '③ while a press on the head\'s name DOES fold it (and writes the fold) — the harness can see a fold', JSON.stringify({ ...F, patches: patches.slice(p0) }));
+ok(gateOf(F.collapsed) && !F.wiz && foldPatches() === p0 + 1 && verdictOf(/"acct:webhook":true/.test(patches[patches.length - 1] || '')), '③ while a press on the head\'s name DOES fold it (and writes the fold) — the harness can see a fold', JSON.stringify({ ...F, patches: patches.slice(p0) }));
 await d.press(D.name.l + 4, (D.name.t + D.name.b) / 2);
 console.log('§3 the head\'s right-click menu');
 await d.press(D.name.l + 4, (D.name.t + D.name.b) / 2, 'right');
 const M = await d.ev(`(() => { const items = [...document.querySelectorAll('.context-menu .context-menu-item')]; return { n: items.length, first: items[0] ? items[0].textContent.trim() : null, title: document.querySelector('[data-wh-new-path]').title }; })()`);
-ok(M.n > 1 && M.first === M.title && M.first, `④ the head's right-click menu (= its ⋯) opens with New path… ("${M.first}") as its first row`, JSON.stringify(M));
+ok(M.n > 1 && M.first === M.title && verdictOf(M.first), `④ the head's right-click menu (= its ⋯) opens with New path… ("${M.first}") as its first row`, JSON.stringify(M));
 await d.shot('desk-menu.png');
 await d.ev(`(() => { document.querySelector('.context-menu .context-menu-item').click(); return true; })()`);
 await sleep(200);
-ok((await d.ev(WIZ)).wiz, '④ that row opens the New path wizard');
+ok(verdictOf((await d.ev(WIZ)).wiz), '④ that row opens the New path wizard');
 d.close();
 
 console.log('§4 phone (390 px)');
@@ -167,12 +167,12 @@ const ph = await page(390, 844, 'b=after.js&w=100%25');
 const P = await ph.ev(HEAD);
 judgeHead(P, 'phone', { wide: false });
 judgeOrder(P, 'phone');
-ok(P.sw <= P.vw && P.head && P.head.r <= P.vw, 'phone: nothing wider than the screen', JSON.stringify({ vw: P.vw, sw: P.sw, head: P.head }));
+ok(P.sw <= P.vw && gateOf(P.head) && P.head.r <= P.vw, 'phone: nothing wider than the screen', JSON.stringify({ vw: P.vw, sw: P.sw, head: P.head }));
 await ph.shot('phone.png');
 const q0 = foldPatches();
 await ph.press(P.cx, P.cy);
 const PA = await ph.ev(`(() => ({ ...${WIZ}, collapsed: document.querySelector('.chan-sec[data-adapter="webhook"]').classList.contains('chan-collapsed') }))()`);
-ok(PA.wiz && !PA.collapsed && foldPatches() === q0, '⑤ a tap on the glyph opens the wizard without folding the section', JSON.stringify(PA));
+ok(gateOf(PA.wiz) && !PA.collapsed && foldPatches() === q0, '⑤ a tap on the glyph opens the wizard without folding the section', JSON.stringify(PA));
 ph.close();
 
 console.log('§5 CONTROLS');
@@ -185,8 +185,8 @@ if (fs.existsSync(path.join(dir, 'ctlorder.js'))) {
 if (fs.existsSync(path.join(dir, 'ctlhead.js'))) {
   const c = await page(1100, 900, 'b=ctlhead.js');
   const C = await c.ev(HEAD);
-  ok(C.np && !C.inHead && !(C.np.t >= C.head.t - 1 && C.np.b <= C.head.b + 1 && C.np.r <= C.cnt.l), 'CONTROL: with the button appended outside the head row it leaves the name\'s row — leg ① would be red', JSON.stringify({ inHead: C.inHead, head: C.head, np: C.np }));
+  ok(gateOf(C.np) && !C.inHead && !(C.np.t >= C.head.t - 1 && C.np.b <= C.head.b + 1 && C.np.r <= C.cnt.l), 'CONTROL: with the button appended outside the head row it leaves the name\'s row — leg ① would be red', JSON.stringify({ inHead: C.inHead, head: C.head, np: C.np }));
   c.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -40,7 +40,7 @@ const require = createRequire(import.meta.url);
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const has = (x) => typeof x === 'function';
 const tryAsync = async (f) => { try { return await f(); } catch (e) { return { threw: e }; } };
@@ -200,7 +200,7 @@ console.log('\n① a refresh (and a consent\'s code exchange) in flight across a
     ok(leftBefore >= 3 && heldFor >= 21000 && Atomics.load(sab, 2) === 3, `the two refresh POSTs and the consent's exchange had LEFT before the hold (${leftBefore}), the loop was held ${Math.round(heldFor)} ms, and the endpoint answered A + X and cut B while it was held (${Atomics.load(sab, 2)} of 3)`);
     // E (r3): the answer already in the socket is READ before any abort — the crossing tick came late (after the hold), its
     // abort waits past the poll phase (r2 aborted in the timers phase: the rotated token of the incident, lost at the edge)
-    ok(eRes && eRes.d && eRes.d.edge === 'read' && Atomics.load(sab, 3) === 11 && edgeAt >= 1050 && edgeAt <= 1950,
+    ok(gateOf(eRes) && gateOf(eRes.d) && eRes.d.edge === 'read' && Atomics.load(sab, 3) === 11 && edgeAt >= 1050 && edgeAt <= 1950,
       `E (r3): a request at the live bound's EDGE (2 s bound, the hold began ${edgeAt} ms in — one tick run), answered DURING the hold, is READ after it (${eRes && eRes.e ? `aborted: ${String((eRes.e.cause && eRes.e.cause.message) || eRes.e.message).slice(0, 100)}` : 'answered'}; sab[3] ${Atomics.load(sab, 3)})`);
     // the engine's next pass of each (the base's retry road), then C — a refusal with no lost answer before it
     await eng.pass('la', { force: true }); await eng.pass('lb', { force: true });
@@ -208,35 +208,35 @@ console.log('\n① a refresh (and a consent\'s code exchange) in flight across a
     const posts = await postsNow();
 
     // A: the answer that waited in the socket is READ — the rotated pair on the record, no re-auth, ONE POST
-    ok(TOK.la.st.token && TOK.la.st.token.refresh_token === 'ur-new-ur-A' && TOK.la.st.token.access_token === 'u-new-ur-A' && !TOK.la.st.token.invalidGrantAt && posts['ur-A'] === 1,
+    ok(gateOf(TOK.la.st.token) && TOK.la.st.token.refresh_token === 'ur-new-ur-A' && TOK.la.st.token.access_token === 'u-new-ur-A' && !TOK.la.st.token.invalidGrantAt && posts['ur-A'] === 1,
       `A (answered during the hold): the answer is read AFTER the hold — the rotated token persisted, ONE refresh POST (${posts['ur-A']}), held ${TOK.la.st.token && TOK.la.st.token.refresh_token}`);
     ok(!rec('la').signinDead && !itemOf('la') && view('la').authState === 'ok',
       `A: no dead sign-in, no re-authorize item, the row says ok (signinDead ${JSON.stringify(rec('la').signinDead || null)}, item ${!!itemOf('la')})`);
     // X (r2): the consent's code is single-use too — the exchange's answer that waited in the socket is READ, and the token's
     // lifetime counts from the SEND (before the hold), never from the late read
     const tx = TX.st.token;
-    ok(x && x.r && x.r.ok === true && tx && tx.access_token === 'u-new-code-X' && posts['code-X'] === 1,
+    ok(gateOf(x) && gateOf(x.r) && x.r.ok === true && gateOf(tx) && tx.access_token === 'u-new-code-X' && posts['code-X'] === 1,
       `X (r2): the consent's code exchanged across the hold — the answer read after it, the sign-in stored, ONE POST (${x && x.e ? `threw: ${String(x.e.message).slice(0, 120)}` : tx && tx.access_token})`);
-    ok(tx && Number(tx.expiresAt) <= wallBefore + 7200e3 + 2000, `X (r2): its lifetime counts from the send — expiresAt − the instant before the hold = ${tx ? Math.round((tx.expiresAt - wallBefore) / 1000) : '-'} s (≤ 7200 + 2; the read came ${Math.round(heldFor / 1000)} s later)`);
+    ok(gateOf(tx) && Number(tx.expiresAt) <= wallBefore + 7200e3 + 2000, `X (r2): its lifetime counts from the send — expiresAt − the instant before the hold = ${tx ? Math.round((tx.expiresAt - wallBefore) / 1000) : '-'} s (≤ 7200 + 2; the read came ${Math.round(heldFor / 1000)} s later)`);
 
     // B: the answer truly lost ⇒ recorded ⇒ ONE retry ⇒ 20064 ⇒ refresh-lost with the stall
     const dB = rec('lb').signinDead || {};
     const iB = itemOf('lb');
     ok(dB.cause === 'refresh-lost' && Number(dB.heldMs) >= 20000 && Number(dB.heldMs) <= 25000 && posts['ur-B'] === 2,
       `B (the socket cut during the hold): ONE try of the old token after the lost answer (${posts['ur-B']} POSTs), its 20064 is \`refresh-lost\` (${dB.cause}) with the stall it waited through (${dB.heldMs} ms) — never \`revoked-elsewhere\``);
-    ok(TOK.lb.st.token && TOK.lb.st.token.invalidGrantCause === 'refresh-lost' && Number(TOK.lb.st.token.invalidGrantHeldMs) >= 20000 && !!TOK.lb.st.token.refreshLostAt,
+    ok(gateOf(TOK.lb.st.token) && TOK.lb.st.token.invalidGrantCause === 'refresh-lost' && Number(TOK.lb.st.token.invalidGrantHeldMs) >= 20000 && !!TOK.lb.st.token.refreshLostAt,
       `B's token record: the lost answer (refreshLostAt) and the stamp's cause refresh-lost + its stall (${TOK.lb.st.token && TOK.lb.st.token.invalidGrantCause}, ${TOK.lb.st.token && TOK.lb.st.token.invalidGrantHeldMs})`);
     const p = iB && iB.i18n && iB.i18n.text.params;
     const zhItem = iB ? saidBy(tOf(zh))(iB.i18n.text) : '';
     const secs = p && p.cause && p.cause.params ? p.cause.params.seconds : null;
     // r2: the words say what was MEASURED — the stall's length, first; no cause word (the hub's witness saw no disk call: the
     // hold was a wait), no vendor name in the cause (the item's {kind} names it once), one level of parentheses
-    ok(iB && iB.urgency === 'urgent' && p && p.cause && p.cause.key === 'the hub stalled {seconds} s while refreshing the sign-in, and its single-use refresh token was used up' && secs >= 20 && secs <= 25
-      && zhItem.includes(`需要重新授权（hub 在刷新令牌时卡住了 ${secs} 秒，一次性刷新令牌已被用掉）`) && !/另一个 VibeSpace|NAS|磁盘/.test(zhItem) && zhItem.split('飞书').length === 2 && !nestedParens(zhItem),
+    ok(gateOf(iB) && iB.urgency === 'urgent' && gateOf(p) && gateOf(p.cause) && p.cause.key === 'the hub stalled {seconds} s while refreshing the sign-in, and its single-use refresh token was used up' && secs >= 20 && secs <= 25
+      && gateOf(zhItem.includes(`需要重新授权（hub 在刷新令牌时卡住了 ${secs} 秒，一次性刷新令牌已被用掉）`)) && !/另一个 VibeSpace|NAS|磁盘/.test(zhItem) && zhItem.split('飞书').length === 2 && !nestedParens(zhItem),
       `B's For-you item (urgent) names the MEASURED stall first, no unmeasured cause, the vendor once, one level of parentheses: «${zhItem}»`);
     const vB = view('lb');
     const rowZh = CC.signinLineText(vB, { t: tOf(zh) });
-    ok(vB.authState === 'expired' && vB.authCause === 'refresh-lost' && vB.authHeldMs >= 20000 && rowZh.includes('hub 在刷新令牌时卡住了') && !/另一个 VibeSpace|NAS|飞书/.test(rowZh),
+    ok(vB.authState === 'expired' && vB.authCause === 'refresh-lost' && vB.authHeldMs >= 20000 && gateOf(rowZh.includes('hub 在刷新令牌时卡住了')) && !/另一个 VibeSpace|NAS|飞书/.test(rowZh),
       `B's row (the account view → the red line in zh): «${rowZh}»`);
     const logB = lines.find((s) => /lb: the sign-in expired \(refresh-lost; the hub's loop was held 2\d s while the refresh's answer waited\)/.test(s));
     const lostLine = lines.find((s) => /the token refresh's answer was lost after the request left .*the hub's loop was held 2\d s while it waited/.test(s));
@@ -251,7 +251,7 @@ console.log('\n① a refresh (and a consent\'s code exchange) in flight across a
     // C: CONTROL — no lost answer precedes the 20064 ⇒ revoked-elsewhere, as before
     const dC = rec('lc').signinDead || {};
     const iC = itemOf('lc');
-    ok(dC.cause === 'revoked-elsewhere' && iC && iC.i18n.text.params.cause.key === 'your account signed in to this app from another VibeSpace' && posts['ur-C'] === 1,
+    ok(dC.cause === 'revoked-elsewhere' && gateOf(iC) && iC.i18n.text.params.cause.key === 'your account signed in to this app from another VibeSpace' && posts['ur-C'] === 1,
       `CONTROL C (a real revoke elsewhere, no lost answer): \`revoked-elsewhere\` with its words, ONE POST (${dC.cause}, ${posts['ur-C']})`);
     ok(items().length === 2, `exactly two re-authorize items (B, C) — A is alive (${items().map((i) => i.action.adapterId).join(',')})`);
   } finally {
@@ -264,7 +264,7 @@ console.log('\n① a refresh (and a consent\'s code exchange) in flight across a
 console.log('\n② R1: the refresh is bounded by LIVE loop time, never by a timer that came due across a hold');
 {
   const LD = lark.liveDeadline;
-  ok(has(LD) && lark.REFRESH_BOUND_MS === 20000, 'lark.liveDeadline exists; the refresh bound is 20 s of running time');
+  ok(gateOf(has(LD)) && lark.REFRESH_BOUND_MS === 20000, 'lark.liveDeadline exists; the refresh bound is 20 s of running time');
   if (has(LD)) {
     let skew = 0;
     const mono = () => performance.now() + skew;
@@ -274,7 +274,7 @@ console.log('\n② R1: the refresh is bounded by LIVE loop time, never by a time
     await sleep(30);
     ok(!d.signal.aborted, 'a tick after a 5 s hold (25× the bound) does NOT fire — it counts one tick and the held rest');
     await sleep(400);
-    ok(d.signal.aborted && /no answer in 0 s of running time \(the loop was held 5 s besides\)/.test(String(d.signal.reason && d.signal.reason.message)), `200 ms of RUNNING time fires it, naming the hold: «${d.signal.reason && d.signal.reason.message}»`);
+    ok(gateOf(d.signal.aborted) && verdictOf(/no answer in 0 s of running time \(the loop was held 5 s besides\)/.test(String(d.signal.reason && d.signal.reason.message))), `200 ms of RUNNING time fires it, naming the hold: «${d.signal.reason && d.signal.reason.message}»`);
     const held = d.end();
     ok(held >= 4900 && held <= 5100, `end() answers the held milliseconds (${held})`);
     const e = LD(10000, { tickMs: 20 });
@@ -323,7 +323,7 @@ console.log('\n② R1: the refresh is bounded by LIVE loop time, never by a time
     // r4 (acceptance r3, the deferral's OTHER edge): the crossing tick is ON TIME, the hold begins AFTER it — in that turn's own
     // poll phase (or an immediate queued before `fire`) — and the answer lands DURING it: the next turn's poll reads it
     const edgeRead = drive(rep(22, 1000), 20, { 19: 1500 });
-    ok(edgeRead.read === 22500 && edgeRead.at === null && edgeRead.held === 500 && edgeRead.windows && edgeRead.windows.length === 1,
+    ok(edgeRead.read === 22500 && edgeRead.at === null && edgeRead.held === 500 && gateOf(edgeRead.windows) && edgeRead.windows.length === 1,
       `r4: a 1.5 s hold that begins in the crossing turn's OWN poll phase, the answer landing during it — read by the next turn's poll, no abort (read at ${edgeRead.read}, aborted at ${edgeRead.at}, held ${edgeRead.held} ms, windows ${JSON.stringify(edgeRead.windows)}; c79d74b0 aborted at 21 500)`);
     const edgeNone = drive(rep(22, 1000), -1, { 19: 1500 });
     ok(edgeNone.at === 22500, `r4: …nothing in the socket: the abort waits ONE turn more, then fires (at ${edgeNone.at} ms) — one re-defer, never a loop`);
@@ -359,12 +359,12 @@ console.log('\n③ R2: a lost answer is an UNKNOWN outcome — recorded, tried o
   const cause = (code, syscall) => Object.assign(new Error(`${syscall || 'x'} ${code}`), { code, ...(syscall ? { syscall } : {}) });
   const failWith = (c) => () => { throw Object.assign(new TypeError('fetch failed'), { cause: c }); };
   const r1 = await run(failWith(cause('UND_ERR_SOCKET')));
-  ok(r1.e1 && r1.e1.code === 'transport' && r1.e1.detail && r1.e1.detail.lost === true && !!r1.mid.refreshLostAt, `a socket cut after the send: transport, \`lost\`, recorded on the token (${r1.e1 && r1.e1.code}, refreshLostAt ${!!r1.mid.refreshLostAt})`);
-  ok(r1.e2 && r1.e2.code === 'auth-expired' && r1.e2.detail.cause === 'refresh-lost' && r1.e2.detail.vendorCause === 'revoked-elsewhere' && r1.posts === 2 && r1.e3 && r1.e3.detail.cause === 'refresh-lost',
+  ok(gateOf(r1.e1) && r1.e1.code === 'transport' && gateOf(r1.e1.detail) && r1.e1.detail.lost === true && !!r1.mid.refreshLostAt, `a socket cut after the send: transport, \`lost\`, recorded on the token (${r1.e1 && r1.e1.code}, refreshLostAt ${!!r1.mid.refreshLostAt})`);
+  ok(gateOf(r1.e2) && r1.e2.code === 'auth-expired' && r1.e2.detail.cause === 'refresh-lost' && r1.e2.detail.vendorCause === 'revoked-elsewhere' && r1.posts === 2 && gateOf(r1.e3) && r1.e3.detail.cause === 'refresh-lost',
     `the ONE try after it: 20064 ⇒ refresh-lost (vendor said revoked-elsewhere), then nothing more is POSTed (${r1.posts} POSTs; the next call keeps the cause)`);
   ok(CC.signinCauseText('refresh-lost', { heldMs: 0, t: tOf(zh) }) === '刷新令牌的应答在途中丢失，一次性刷新令牌已被用掉', 'no stall measured: the words say the answer was lost on the way (vendor-free)');
   const r2 = await run(failWith(cause('ECONNREFUSED', 'connect')));
-  ok(r2.e1 && r2.e1.code === 'transport' && !r2.mid.refreshLostAt && r2.e2 && r2.e2.detail.cause === 'revoked-elsewhere',
+  ok(gateOf(r2.e1) && r2.e1.code === 'transport' && !r2.mid.refreshLostAt && gateOf(r2.e2) && r2.e2.detail.cause === 'revoked-elsewhere',
     `CONTROL: a request that never LEFT (ECONNREFUSED on connect) records nothing, and a later 20064 stays revoked-elsewhere (${r2.e2 && r2.e2.detail.cause})`);
   // r2 (acceptance r1): «did it leave» is the REQUEST's own fact — undici's request:create (in the caller's context) and
   // client:sendHeaders (its first byte) — published here exactly as the global fetch publishes them
@@ -375,13 +375,13 @@ console.log('\n③ R2: a lost answer is an UNKNOWN outcome — recorded, tried o
     throw c ? Object.assign(new TypeError('fetch failed'), { cause: c }) : new Error('no answer in 20 s of running time');
   };
   const s1 = await run(viaUndici(false, null));
-  ok(s1.e1 && s1.e1.detail && s1.e1.detail.lost === false && !s1.mid.refreshLostAt && s1.e2 && s1.e2.detail.cause === 'revoked-elsewhere',
+  ok(gateOf(s1.e1) && gateOf(s1.e1.detail) && s1.e1.detail.lost === false && !s1.mid.refreshLostAt && gateOf(s1.e2) && s1.e2.detail.cause === 'revoked-elsewhere',
     `r2: the live deadline's own abort while connect still waited (created, never sent — a starved threadpool's dns / connect): NEVER LEFT, nothing recorded, a later 20064 stays revoked-elsewhere (${s1.e2 && s1.e2.detail && s1.e2.detail.cause})`);
   const s2 = await run(viaUndici(true, cause('EHOSTUNREACH', 'read')));
-  ok(s2.e1 && s2.e1.detail && s2.e1.detail.lost === true && !!s2.mid.refreshLostAt && s2.e2 && s2.e2.detail.cause === 'refresh-lost',
+  ok(gateOf(s2.e1) && gateOf(s2.e1.detail) && s2.e1.detail.lost === true && !!s2.mid.refreshLostAt && gateOf(s2.e2) && s2.e2.detail.cause === 'refresh-lost',
     `r2: EHOSTUNREACH AFTER the request's headers went out (a dead TCP keepalive) is a LOST answer — recorded, the 20064 after it is refresh-lost (${s2.e2 && s2.e2.detail && s2.e2.detail.cause})`);
   const s3 = await run(failWith(cause('EHOSTUNREACH', 'read')));
-  ok(s3.e1 && s3.e1.detail && s3.e1.detail.lost === true && !!s3.mid.refreshLostAt, 'r2: …and so with no undici facts at all (a fetch undici never saw): only a connect / getaddrinfo failure never left');
+  ok(gateOf(s3.e1) && gateOf(s3.e1.detail) && s3.e1.detail.lost === true && !!s3.mid.refreshLostAt, 'r2: …and so with no undici facts at all (a fetch undici never saw): only a connect / getaddrinfo failure never left');
   // a REAL request on loopback: a TLS server that resets the ClientHello — the request was created, its headers never sent
   {
     const tls = net.createServer((s) => { s.once('data', () => s.resetAndDestroy()); });
@@ -391,7 +391,7 @@ console.log('\n③ R2: a lost answer is an UNKNOWN outcome — recorded, tried o
     const a = lark.adapter.create({ id: 'lt', brand: 'feishu' }, { fetch: (url, init) => globalThis.fetch(String(url).replace(/^https:\/\/open\.(feishu\.cn|larksuite\.com)/, `https://127.0.0.1:${tport}`), init), tokens: tok, resolveIntegration: () => CRED, log: quiet });
     const e = await a.listConversations({ limit: 5 }).then(() => null, (x) => x);
     tls.close();
-    ok(e && e.code === 'transport' && e.detail && e.detail.lost === false && !tok.st.token.refreshLostAt,
+    ok(gateOf(e) && e.code === 'transport' && gateOf(e.detail) && e.detail.lost === false && !tok.st.token.refreshLostAt,
       `r2: a REAL fetch whose TLS ClientHello was reset (the headers never left): never left — nothing recorded (${e && e.code}, lost ${e && e.detail && e.detail.lost}; r1 recorded it as lost)`);
   }
   // the refresh ran EARLY: a lost answer while the bearer still lives fails nothing — the request goes on with it, the refresh
@@ -426,9 +426,9 @@ console.log('\n③ R2: a lost answer is an UNKNOWN outcome — recorded, tried o
     const f1 = await E.call(); const f2 = await E.call(); const postsPaused = E.posts();
     E.tick(61e3);
     const f3 = await E.call();
-    ok(f1 === null && f2 === null && postsPaused === 1 && E.bearers.slice(0, 2).every((b) => b === 'Bearer u-old-ur-early') && !!E.tok.st.token.refreshLostAt,
+    ok(f1 === null && f2 === null && postsPaused === 1 && gateOf(E.bearers.slice(0, 2).every((b) => b === 'Bearer u-old-ur-early')) && !!E.tok.st.token.refreshLostAt,
       `a lost answer with 10 min of bearer left: the requests go on with the bearer held (${E.bearers.length} sent), ONE refresh POST before the pause (${postsPaused}), the loss recorded`);
-    ok(f3 && f3.code === 'auth-expired' && f3.detail.cause === 'refresh-lost' && E.posts() === 2, `after the pause the ONE try: 20064 ⇒ refresh-lost (${f3 && f3.detail && f3.detail.cause}, ${E.posts()} POSTs)`);
+    ok(gateOf(f3) && f3.code === 'auth-expired' && f3.detail.cause === 'refresh-lost' && E.posts() === 2, `after the pause the ONE try: 20064 ⇒ refresh-lost (${f3 && f3.detail && f3.detail.cause}, ${E.posts()} POSTs)`);
   }
   {
     // r2 (acceptance r1's MAJOR, pause-dropped-bearer.cjs): a Disconnect lands while the refresh POST is in flight, then a 503 /
@@ -439,13 +439,13 @@ console.log('\n③ R2: a lost answer is an UNKNOWN outcome — recorded, tried o
       const E = await early({ first, disconnect: true });
       const r = await E.wire();
       const c = await E.call();
-      ok(r.e && r.e.code === 'auth-expired' && r.e.detail && r.e.detail.tokenDropped === true && r.e.detail.why === 'disconnected' && !E.tok.st.token && E.bearers.length === 0 && c && E.posts() === 1,
+      ok(gateOf(r.e) && r.e.code === 'auth-expired' && gateOf(r.e.detail) && r.e.detail.tokenDropped === true && r.e.detail.why === 'disconnected' && !E.tok.st.token && E.bearers.length === 0 && gateOf(c) && E.posts() === 1,
         `r2: a Disconnect while the refresh was in flight + a ${how}: the raw-API door is REFUSED by name (${r.b ? `bearer=${r.b}` : `${r.e && r.e.code}: ${String(r.e && r.e.message).slice(0, 90)}`}), 0 requests on the wire (${E.bearers.length}: ${JSON.stringify(E.bearers)}), no second refresh (${E.posts()} POST)`);
     }
     const E = await early({ first: () => jsonRes({ code: 500, msg: 'internal' }, 503), reauth: true });
     const r = await E.wire();
     const c = await E.call();
-    ok(r.b === 'u-REAUTH' && c === null && E.bearers.length === 2 && E.bearers.every((b) => b === 'Bearer u-REAUTH') && E.posts() === 1,
+    ok(r.b === 'u-REAUTH' && c === null && E.bearers.length === 2 && gateOf(E.bearers.every((b) => b === 'Bearer u-REAUTH')) && E.posts() === 1,
       `r2: a re-authorize landing while the refresh was in flight + a 503: the store's NEW bearer on the wire — the raw door and the next request (${JSON.stringify(E.bearers)}), never the captured one, no second refresh (${E.posts()} POST)`);
   }
   {
@@ -459,7 +459,7 @@ console.log('\n③ R2: a lost answer is an UNKNOWN outcome — recorded, tried o
     // …but never with a bearer in its LAST minute (it would expire on the wire)
     const L = await early({ first: () => jsonRes({ code: 500, msg: 'internal' }, 503), left: 45e3 });
     const l1 = await L.call();
-    ok(l1 && l1.code === 'transport' && L.bearers.length === 0, `r2: a bearer with 45 s left is never served from a failed refresh (${l1 && l1.code}, ${L.bearers.length} sent)`);
+    ok(gateOf(l1) && l1.code === 'transport' && L.bearers.length === 0, `r2: a bearer with 45 s left is never served from a failed refresh (${l1 && l1.code}, ${L.bearers.length} sent)`);
   }
   {
     // r2 (acceptance r1's late-answer attack): an answer READ 90 min after its send — the lifetime counts from the SEND
@@ -467,7 +467,7 @@ console.log('\n③ R2: a lost answer is an UNKNOWN outcome — recorded, tried o
     const sentAt = E.now();
     await E.call();
     const t = E.tok.st.token;
-    ok(t && t.access_token === 'u-late' && t.expiresAt === sentAt + 7200e3, `r2: an answer read 90 min late keeps the vendor's clock — expiresAt = the send + 7200 s (${t ? (t.expiresAt - sentAt) / 60e3 : '-'} min after the send; r1: 210)`);
+    ok(gateOf(t) && t.access_token === 'u-late' && t.expiresAt === sentAt + 7200e3, `r2: an answer read 90 min late keeps the vendor's clock — expiresAt = the send + 7200 s (${t ? (t.expiresAt - sentAt) / 60e3 : '-'} min after the send; r1: 210)`);
   }
   const okAfter = failWith(cause('UND_ERR_SOCKET'));
   okAfter.retry = 'ok';
@@ -494,7 +494,7 @@ console.log('\n③b r3: a vault locked mid-refresh is `vault-locked` by name; a 
   const rS = await tryB(vS.a);
   tS.st.locked = false;
   const rS2 = await tryB(vS.a);
-  ok(rS.code === 'vault-locked' && rS2.bearer === 'u-rot' && vS.posts.length === 1 && tS.st.token && tS.st.token.refresh_token === 'ur-rot' && !tS.st.token.invalidGrantAt,
+  ok(rS.code === 'vault-locked' && rS2.bearer === 'u-rot' && vS.posts.length === 1 && gateOf(tS.st.token) && tS.st.token.refresh_token === 'ur-rot' && !tS.st.token.invalidGrantAt,
     `the vendor ROTATED the token as the lock landed: vault-locked now, the rotated token written at the first read after the unlock — ONE POST, no 20064 (${JSON.stringify(rS)} → ${JSON.stringify(rS2)}, POSTs ${vS.posts.length}, store ${tS.st.token && tS.st.token.refresh_token}; 9221575b discarded it and the spent token met 20064)`);
   const tP = lockStore(held());
   const vP = mkV(tP, () => jsonRes({ code: 404 }, 404), async () => { tP.st.locked = true; });
@@ -517,7 +517,7 @@ console.log('\n③b r3: a vault locked mid-refresh is `vault-locked` by name; a 
   const lostWhileLocked = !!(tL.st.token && tL.st.token.refreshLostAt);
   tL.st.locked = false; clk += 61e3;   // the owner unlocks; past the refresh's pause
   const rL2 = await tryB(aL);
-  ok(rL.code === 'vault-locked' && !lostWhileLocked && rL2.code === 'auth-expired' && rL2.detail && rL2.detail.cause === 'refresh-lost' && tL.st.token && Number(tL.st.token.refreshLostAt) > 0 && tL.st.token.invalidGrantCause === 'refresh-lost' && postsL.length === 2,
+  ok(rL.code === 'vault-locked' && !lostWhileLocked && rL2.code === 'auth-expired' && gateOf(rL2.detail) && rL2.detail.cause === 'refresh-lost' && gateOf(tL.st.token) && Number(tL.st.token.refreshLostAt) > 0 && tL.st.token.invalidGrantCause === 'refresh-lost' && postsL.length === 2,
     `r4: a refresh answer LOST as the vault locked — held in memory, written at the first read after the unlock: the retry's 20064 is \`refresh-lost\` (${JSON.stringify(rL)} → ${JSON.stringify(rL2 && { code: rL2.code, cause: rL2.detail && rL2.detail.cause })}, stamped ${tL.st.token && tL.st.token.invalidGrantCause}, POSTs ${postsL.length}; c79d74b0: revoked-elsewhere, the incident's own wrong words)`);
 }
 
@@ -565,13 +565,13 @@ console.log('\n④ R3: the refresh runs early — a 15-min margin, renewed by th
     renewDead = true;
     const pr = await eng.pass('rn', { force: true });
     const item = userTodos.snapshot().open.find((i) => i.action && i.action.type === 'channel-reauth' && i.action.adapterId === 'rn');
-    ok(pr && pr.ok === false && rec().signinDead && rec().signinDead.cause === 'revoked-elsewhere' && item && item.urgency === 'urgent' && rec().lastPass && rec().lastPass.code === 'auth-expired',
+    ok(gateOf(pr) && pr.ok === false && gateOf(rec().signinDead) && rec().signinDead.cause === 'revoked-elsewhere' && gateOf(item) && item.urgency === 'urgent' && gateOf(rec().lastPass) && rec().lastPass.code === 'auth-expired',
       `r2: a DEAD refusal met by the renew (no due request) runs the request's ladder — the record, the urgent item, the red line (${JSON.stringify(rec().signinDead && rec().signinDead.cause)}, item ${!!item}; r1 swallowed it)`);
     const n0 = renews;
     const rr = await tryAsync(() => eng.refresh('rn', 'rn-ops', { origin: 'agent' }));
     ok(renews === n0, `r2: inside the back-off a request-driven pass makes no renew POST (renews ${n0} → ${renews}; the request: ${rr && (rr.code || (rr.threw && rr.threw.message) || JSON.stringify(rr)).toString().slice(0, 60)})`);
     // the hub's witness of a stall, handed to every adapter: loop-blame's slow sync fs calls over that window
-    ok(has(wit), 'r2: the engine hands its adapters the stall witness (`loopWitness`)');
+    ok(verdictOf(has(wit)), 'r2: the engine hands its adapters the stall witness (`loopWitness`)');
     if (has(wit)) {
       const nw = Date.now(), hold = [{ from: nw - 22500, to: nw - 1000 }];
       ok(wit(21500, hold) === null, '…which names nothing when no slow sync fs call fell in the window (this suite\'s hold was a wait)');
@@ -612,16 +612,16 @@ console.log('\n④b r3: a dead refusal at the renew answers the waiting requests
     dead.add('rd'); dead.add('rp');
     const h0 = hist.rd || 0;
     const ar = await tryAsync(() => eng.refresh('rd', 'rd-ops', { origin: 'agent' }));
-    ok(ar && ar.code === 'auth-expired' && rec('rd').consecutiveFailures === 1 && (hist.rd || 0) === h0 && rec('rd').signinDead,
+    ok(gateOf(ar) && ar.code === 'auth-expired' && rec('rd').consecutiveFailures === 1 && (hist.rd || 0) === h0 && verdictOf(rec('rd').signinDead),
       `an agent's refresh whose pass met the dead refusal at the renew hears the DEAD sign-in (code ${ar && ar.code}; 9221575b: backoff, «retried in 30 s»), one failure (${rec('rd').consecutiveFailures}), no second pass (history ${h0} → ${hist.rd || 0})`);
     const p0 = hist.rp || 0;
     const pr = await tryAsync(() => eng.refresh('rp', 'rd-ops', { origin: 'refresh' }));
-    ok(pr && pr.code === 'auth-expired' && rec('rp').consecutiveFailures === 1 && (hist.rp || 0) === p0,
+    ok(gateOf(pr) && pr.code === 'auth-expired' && rec('rp').consecutiveFailures === 1 && (hist.rp || 0) === p0,
       `the owner's ONE press climbs ONE step (failures ${rec('rp').consecutiveFailures}; 9221575b: 2 — a second pass ran the request; history ${p0} → ${hist.rp || 0})`);
     locked.add('vl');
     const vr = await tryAsync(() => eng.refresh('vl', 'rd-ops', { origin: 'agent' }));
     const vr2 = await tryAsync(() => eng.refresh('vl', 'rd-ops', { origin: 'agent' }));
-    ok(vr && vr.code === 'vault-locked' && vr2 && vr2.code === 'vault-locked' && rec('vl').consecutiveFailures === 0 && !(rec('vl').lastPass && rec('vl').lastPass.code === 'vault-locked'),
+    ok(gateOf(vr) && vr.code === 'vault-locked' && gateOf(vr2) && vr2.code === 'vault-locked' && rec('vl').consecutiveFailures === 0 && !(rec('vl').lastPass && rec('vl').lastPass.code === 'vault-locked'),
       `a vault locked under the vendor call counts NO failure — the agent hears vault-locked twice, no back-off (${vr && vr.code}, ${vr2 && vr2.code}; failures ${rec('vl').consecutiveFailures}; 9221575b: 1 and «backoff»)`);
     // r4 (acceptance r3): the owner's press is filed WHILE the renew is in flight — it hears the same one failure
     dead.add('rm');
@@ -634,7 +634,7 @@ console.log('\n④b r3: a dead refusal at the renew answers the waiting requests
     if (gates.rm) gates.rm();
     const [am, pm] = await Promise.all([agentP, pressP]);
     await sleep(100);
-    ok(inFlight && am && am.code === 'auth-expired' && pm && pm.code === 'auth-expired' && rec('rm').consecutiveFailures === 1 && (hist.rm || 0) === m0,
+    ok(gateOf(inFlight) && gateOf(am) && am.code === 'auth-expired' && gateOf(pm) && pm.code === 'auth-expired' && rec('rm').consecutiveFailures === 1 && (hist.rm || 0) === m0,
       `r4: ONE press filed while the renew is in flight climbs ONE step — it hears the renew's dead refusal (${am && am.code} / ${pm && pm.code}; failures ${rec('rm').consecutiveFailures}, history ${m0} → ${hist.rm || 0}; c79d74b0: 2 and a second pass)`);
   } finally { try { eng.stop(); } catch { } try { userTodos.stop(); } catch { } }
 }
@@ -649,11 +649,11 @@ console.log('\n⑤ R4: the words name the MEASURED stall');
   const zhRow = CC.signinLineText({ authState: 'expired', authCause: 'refresh-lost', authHeldMs: 5368840 }, { t: tOf(zh) });
   ok(zhRow === '登录失效 — 需要重新授权 · hub 在刷新令牌时卡住了 89 分钟，一次性刷新令牌已被用掉', `the owner's MEASURED hold (5 368 840 ms), zh row: «${zhRow}»`);
   const zh36 = CC.signinLineText({ authState: 'expired', authCause: 'refresh-lost', authHeldMs: 129600000 }, { t: tOf(zh) });
-  ok(zh36.includes('卡住了 36 小时'), `r2: 36 h is «36 小时», never «2160 分钟»: «${zh36}»`);
+  ok(verdictOf(zh36.includes('卡住了 36 小时')), `r2: 36 h is «36 小时», never «2160 分钟»: «${zh36}»`);
   const jaRow = CC.signinLineText({ authState: 'expired', authCause: 'refresh-lost', authHeldMs: 13e3 }, { t: tOf(ja) });
-  ok(/hub が 13 秒間止まり/.test(jaRow) && !/Lark|（/.test(jaRow), `ja: «${jaRow}»`);
+  ok(gateOf(/hub が 13 秒間止まり/.test(jaRow)) && !/Lark|（/.test(jaRow), `ja: «${jaRow}»`);
   const en = CC.signinLineText({ authState: 'expired', authCause: 'refresh-lost', authHeldMs: 5 * 60e3 + 20e3 });
-  ok(/the hub stalled 5\.3 min while refreshing the sign-in, and its single-use/.test(en), `en: «${en}»`);
+  ok(verdictOf(/the hub stalled 5\.3 min while refreshing the sign-in, and its single-use/.test(en)), `en: «${en}»`);
   // a cause word ONLY from the hub's witness of that window
   const disk = CC.signinLineText({ authState: 'expired', authCause: 'refresh-lost', authHeldMs: 5368840, authHeldWhy: 'disk' }, { t: tOf(zh) });
   ok(disk === '登录失效 — 需要重新授权 · hub 在刷新令牌时被 NAS/磁盘读写卡住了 89 分钟，一次性刷新令牌已被用掉', `r2: the witness named the disk ⇒ the words say it (no parentheses): «${disk}»`);
@@ -680,7 +680,7 @@ console.log('\n⑤ R4: the words name the MEASURED stall');
   const hoursKey = CC.signinCauseText('refresh-lost', { heldMs: 5 * 3600e3, heldWhy: null, t: (k) => k });
   const planted = census({ ...zh, [hoursKey]: `${zh[hoursKey]} Feishu` }, ja);
   ok(planted.length === 1 && planted[0] === hoursKey, `r3: the census knows the Latin spelling — «Feishu» planted in the zh hours key is named (${JSON.stringify(planted)})`);
-  ok(KIND_KEYS.every((k) => !keys.includes(k) && VENDOR_RE.test(zh[k]) && VENDOR_RE.test(ja[k])), `r3: the dictionaries' own vendor words (zh «${zh.Feishu}», ja «${ja.Feishu}») are {kind} values — exempt by KEY (none is a cause key), and the census regex would name them`);
+  ok(verdictOf(KIND_KEYS.every((k) => !keys.includes(k) && VENDOR_RE.test(zh[k]) && VENDOR_RE.test(ja[k]))), `r3: the dictionaries' own vendor words (zh «${zh.Feishu}», ja «${ja.Feishu}») are {kind} values — exempt by KEY (none is a cause key), and the census regex would name them`);
   // (the For-you line's cause words — source pin — MOVED to the fast scripts/test-lark-refresh-stall-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const ut = new UserTodoManager({ dataDir: path.join(ROOT, 'todos'), expirySweepMs: 0 });
   try {
@@ -688,7 +688,7 @@ console.log('\n⑤ R4: the words name the MEASURED stall');
     ok(JSON.stringify(it.i18n.text.params.cause) === JSON.stringify({ key: 'k {seconds}', params: { seconds: 21 } }), `the For-you store keeps a words-param's scalar params (${JSON.stringify(it.i18n.text.params.cause)})`);
     let msg = '';
     try { ut.add('channels', { origin: 'channels', kind: 'action', text: 'y: sign-in expired — re-authorize', urgency: 'urgent', by: 'agent', i18n: { text: { key: '{account}: sign-in expired — re-authorize ({cause})', params: { account: 'y', cause: { key: 'k {seconds}', params: { seconds: 21, junk: { a: 1 } } } } } } }); } catch (e) { msg = e.message; }
-    ok(/params\.cause\.params\.junk must be a string or a finite number \(object refused\)/.test(msg), `r2: …and REFUSES any other shape by name (r1 dropped it silently and the row said «{…}»): «${msg}»`);
+    ok(verdictOf(/params\.cause\.params\.junk must be a string or a finite number \(object refused\)/.test(msg)), `r2: …and REFUSES any other shape by name (r1 dropped it silently and the row said «{…}»): «${msg}»`);
   } finally { try { ut.stop(); } catch { } }
   // (the producer's refused-shape sentence — source pin — MOVED to the fast scripts/test-lark-refresh-stall-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -717,7 +717,7 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
   const settle = async (id, f) => { for (let i = 0; i < 200 && !f(rec(id)); i++) await sleep(25); await sleep(200); };
   try {
     await eng.pass('ld', { force: true }); await eng.pass('lg', { force: true }); await eng.pass('lt', { force: true }); await eng.pass('lc', { force: true });
-    ok(rec('ld').signinDead && rec('lg').signinDead && itemOf('ld') && itemOf('ld').status === 'open', 'setup: both sign-ins dead (20064), their items open');
+    ok(gateOf(rec('ld').signinDead) && gateOf(rec('lg').signinDead) && gateOf(itemOf('ld')) && itemOf('ld').status === 'open', 'setup: both sign-ins dead (20064), their items open');
     const land = async (id, token) => {
       TOK[id].st.token = token;
       const nF = frames[id].length, nL = lines.length, t = ms();
@@ -732,15 +732,15 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
     const fD = frames.ld.slice(dl.nF);
     const states = fD.map((f) => (f.authState === 'ok' ? (f.authVerifying ? 'verifying' : 'ok') : f.authState)).filter((s, i, a) => i === 0 || a[i - 1] !== s);
     const dD = rec('ld').signinDead || {};
-    ok(atLanding.view && atLanding.view.authState === 'ok' && atLanding.view.authVerifying && atLanding.view.line === '已登录 — 正在用第一个请求验证…' && atLanding.item === 'done',
+    ok(gateOf(atLanding.view) && atLanding.view.authState === 'ok' && gateOf(atLanding.view.authVerifying) && atLanding.view.line === '已登录 — 正在用第一个请求验证…' && atLanding.item === 'done',
       `the landing's own broadcast: the row green with the verifying word, the item resolved (${JSON.stringify(atLanding.view && { s: atLanding.view.authState, v: atLanding.view.authVerifying, line: atLanding.view.line })}, item ${atLanding.item})`);
     ok(JSON.stringify(states) === JSON.stringify(['verifying', 'expired']),
       `a refused first request turns the row red ONCE — never a plain «ok» before it, never back (${states.join(' → ')})`, JSON.stringify(fD.map((f) => [f.t - dl.t, f.authState, f.authVerifying])));
     const lastD = fD[fD.length - 1] || {};
-    ok(dD.cause === 'refused-at-first-use' && lastD.authCause === 'refused-at-first-use' && /新的登录在第一次请求时就被拒绝了/.test(lastD.line || '') && Number(dD.since) === Number(atLanding.view && atLanding.view.authSince) && itemOf('ld') && itemOf('ld').status === 'open',
+    ok(dD.cause === 'refused-at-first-use' && lastD.authCause === 'refused-at-first-use' && gateOf(/新的登录在第一次请求时就被拒绝了/.test(lastD.line || '')) && Number(dD.since) === Number(atLanding.view && atLanding.view.authSince) && gateOf(itemOf('ld')) && itemOf('ld').status === 'open',
       `…with the refusal's OWN cause, \`since\` = the landing, the item filed again: «${lastD.line}» (since ${dD.since} vs the landing ${atLanding.view && atLanding.view.authSince})`);
     const logD = lines.slice(dl.nL).map((s) => s.replace(/^\d+ /, ''));
-    ok(logD.some((s) => /ld: a new sign-in landed — verifying it with its first request/.test(s)) && !logD.some((s) => /ld: the sign-in works again/.test(s)) && logD.some((s) => /ld: the new sign-in \(landed .*\) was refused at its first request \(refused-at-first-use\)/.test(s)),
+    ok(gateOf(logD.some((s) => /ld: a new sign-in landed — verifying it with its first request/.test(s))) && !logD.some((s) => /ld: the sign-in works again/.test(s)) && verdictOf(logD.some((s) => /ld: the new sign-in \(landed .*\) was refused at its first request \(refused-at-first-use\)/.test(s))),
       `the log is honest — «verifying» at the landing, never «works again», the refusal named: ${JSON.stringify(logD.filter((s) => /ld:/.test(s)).map((s) => s.slice(0, 110)))}`);
     // G: a NEW token that works — «works again» only after its first requests answered
     const gl = await land('lg', { access_token: 'u-good-G2', expiresAt: Date.now() + 2 * 3600e3, refresh_token: 'ur-G2', refreshExpiresAt: Date.now() + 7 * 86400e3, scopes: ['im:message'], openId: 'ou_ur-G', name: 'Owner ur-G', brand: 'feishu' });
@@ -748,7 +748,7 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
     const fG = frames.lg.slice(gl.nF).map((f) => (f.authState === 'ok' ? (f.authVerifying ? 'verifying' : 'ok') : f.authState)).filter((s, i, a) => i === 0 || a[i - 1] !== s);
     const logG = lines.slice(gl.nL).map((s) => s.replace(/^\d+ /, '')).filter((s) => /lg:/.test(s));
     const iLand = logG.findIndex((s) => /a new sign-in landed — verifying/.test(s)), iWorks = logG.findIndex((s) => /the sign-in works again \(the first requests with the new sign-in went through\)/.test(s));
-    ok(JSON.stringify(fG) === JSON.stringify(['verifying', 'ok']) && iLand >= 0 && iWorks > iLand && rec('lg').lastPass && rec('lg').lastPass.ok === true,
+    ok(JSON.stringify(fG) === JSON.stringify(['verifying', 'ok']) && iLand >= 0 && iWorks > iLand && gateOf(rec('lg').lastPass) && rec('lg').lastPass.ok === true,
       `a NEW token that works: verifying → ok after its pass answered, «works again» said then (${fG.join(' → ')}; ${JSON.stringify(logG.map((s) => s.slice(0, 90)))})`);
     // T (r3, acceptance r2 C3): a THIRD landing during the verifying window — L2's first request answered 503 (still verifying),
     // then L3 lands and the vendor refuses ITS first request: the verdict is L3's — `since` = L3's landing, the log names L3
@@ -763,8 +763,8 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
     await settle('lt', (r) => r.signinDead);
     const dT = rec('lt').signinDead || {};
     const logT = lines.slice(t3.nL).map((s) => s.replace(/^\d+ /, '')).filter((s) => /lt:/.test(s));
-    ok(midT.verifying && !midT.dead && sinceL2 && sinceL3 && sinceL3 - sinceL2 >= 1000 && Number(dT.since) === sinceL3 && dT.cause === 'refused-at-first-use'
-      && logT.some((s) => s.includes(`the new sign-in (landed ${new Date(sinceL3).toISOString()}) was refused at its first request`)) && !logT.some((s) => s.includes(new Date(sinceL2).toISOString()) && /was refused/.test(s)),
+    ok(gateOf(midT.verifying) && !midT.dead && gateOf(sinceL2) && gateOf(sinceL3) && sinceL3 - sinceL2 >= 1000 && Number(dT.since) === sinceL3 && dT.cause === 'refused-at-first-use'
+      && gateOf(logT.some((s) => s.includes(`the new sign-in (landed ${new Date(sinceL3).toISOString()}) was refused at its first request`))) && !logT.some((s) => s.includes(new Date(sinceL2).toISOString()) && /was refused/.test(s)),
       `r3 C3: a third landing while the second verifies (its first request 503: ${JSON.stringify(midT)}) — L3's refusal is L3's verdict: since = L3's landing (${dT.since}; L2 ${sinceL2}, L3 ${sinceL3}; 9221575b: L2), the log names L3: ${JSON.stringify(logT.map((s) => s.slice(0, 120)))}`);
     // C (r4, acceptance r3 C5): a pass that began while the sign-in was DEAD carries the old bearer (held 1.5 s, then 401); a
     // good consent lands while it waits — the old bearer's refusal is never the new landing's verdict
@@ -779,8 +779,8 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
     const fC = frames.lc.slice(nC).map((f) => (f.authState === 'ok' ? (f.authVerifying ? 'verifying' : 'ok') : f.authState)).filter((x, i, a) => i === 0 || a[i - 1] !== x);
     const reopened = frames.lc.slice(c1.nF).some((f) => f.open > 0);
     const logC = lines.slice(lC).map((x) => x.replace(/^\d+ /, '')).filter((x) => /lc:/.test(x));
-    ok(deadC && JSON.stringify(fC) === JSON.stringify(['verifying', 'ok']) && !reopened && !rec('lc').signinDead && logC.some((x) => /lc: a request of a pass that began under the dead sign-in \(its bearer\) was refused — a newer sign-in landed .* since/.test(x))
-      && !logC.some((x) => /the new sign-in \(landed .*\) was refused/.test(x)) && logC.some((x) => /the sign-in works again \(the first requests with the new sign-in went through\)/.test(x)),
+    ok(gateOf(deadC) && JSON.stringify(fC) === JSON.stringify(['verifying', 'ok']) && !reopened && !rec('lc').signinDead && gateOf(logC.some((x) => /lc: a request of a pass that began under the dead sign-in \(its bearer\) was refused — a newer sign-in landed .* since/.test(x)))
+      && !logC.some((x) => /the new sign-in \(landed .*\) was refused/.test(x)) && verdictOf(logC.some((x) => /the sign-in works again \(the first requests with the new sign-in went through\)/.test(x))),
       `r4 C5: the dead sign-in's bearer, refused after a landing made during its pass, is never the landing's verdict — no red flap, no item re-filed (${fC.join(' → ')}, an open item after the landing: ${reopened}; c79d74b0: verifying → expired → ok), the log: ${JSON.stringify(logC.map((x) => x.slice(0, 120)))}`);
   } finally { try { eng.stop(); } catch { } try { userTodos.stop(); } catch { } }
   // (the re-authorize dialog's seams — source pins — MOVED to the fast scripts/test-lark-refresh-stall-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -788,4 +788,4 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
 
 await worker.terminate();
 console.log(`\n${fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

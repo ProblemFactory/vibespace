@@ -30,7 +30,7 @@ const detachedHeld = (sid) => {
 const endHeldKids = () => { for (const id of HELD_KIDS.splice(0)) PI.signalIdentity(id, 'SIGKILL'); };
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -80,13 +80,13 @@ await dm.connect();   // after the exit hook: a throw here no longer leaks the d
 
 // 1. capability advertised + op works against a REAL daemon
 const conn = await dm.connect();
-ok(conn.info?.capabilities?.includes?.('sysinfo'), 'daemon advertises the sysinfo capability');
+ok(verdictOf(conn.info?.capabilities?.includes?.('sysinfo')), 'daemon advertises the sysinfo capability');
 const r = await dm.sysinfo();
-ok(r && r.mem && Number.isFinite(r.mem.used) && Number.isFinite(r.mem.limit), `op returns mem used/limit (${Math.round((r?.mem?.used || 0) / 1048576)}M / ${Math.round((r?.mem?.limit || 0) / 1073741824)}Gi)`);
-ok(Number.isFinite(r.mem.pct), 'mem.pct computed');
-ok(Array.isArray(r.load) && r.load.length === 3, 'loadavg triple');
-ok(Number.isFinite(r.cpus) && r.cpus > 0, 'cpu count');
-ok(Array.isArray(r.procs) && r.procs.length > 0 && r.procs.every((p) => p.pid && Number.isFinite(p.rss)), 'top procs with pid+rss');
+ok(gateOf(r) && gateOf(r.mem) && gateOf(Number.isFinite(r.mem.used)) && verdictOf(Number.isFinite(r.mem.limit)), `op returns mem used/limit (${Math.round((r?.mem?.used || 0) / 1048576)}M / ${Math.round((r?.mem?.limit || 0) / 1073741824)}Gi)`);
+ok(verdictOf(Number.isFinite(r.mem.pct)), 'mem.pct computed');
+ok(gateOf(Array.isArray(r.load)) && r.load.length === 3, 'loadavg triple');
+ok(gateOf(Number.isFinite(r.cpus)) && r.cpus > 0, 'cpu count');
+ok(gateOf(Array.isArray(r.procs)) && r.procs.length > 0 && verdictOf(r.procs.every((p) => p.pid && Number.isFinite(p.rss))), 'top procs with pid+rss');
 
 // 2. SAME implementation: the op's numbers come from the module the server
 // itself runs — mem.limit must agree exactly (same cgroup/host source).
@@ -98,32 +98,32 @@ ok(r.mem.source === local.mem.source, `same source tag both sides (${r.mem.sourc
 // 3. drift guard: the ssh fallback script must keep producing the SAME field
 // names the route serves, or a daemon-less host silently changes shape.
 const srv = fs.readFileSync(path.join(REPO, 'src/server/sysinfo-wiring.js'), 'utf-8'); // moved in decomposition #3
-ok(/REMOTE_SYSINFO_SCRIPT[\s\S]{0,200}FALLBACK RUNG/i.test(srv) || /fallback rung/i.test(srv.slice(srv.indexOf('REMOTE_SYSINFO_SCRIPT') - 800, srv.indexOf('REMOTE_SYSINFO_SCRIPT'))), 'script is documented as the fallback rung');
-ok(/dm\.sysinfo\(\)/.test(srv), 'remoteSysinfo tries the device op first');
+ok(verdictOf(/REMOTE_SYSINFO_SCRIPT[\s\S]{0,200}FALLBACK RUNG/i.test(srv)) || verdictOf(/fallback rung/i.test(srv.slice(srv.indexOf('REMOTE_SYSINFO_SCRIPT') - 800, srv.indexOf('REMOTE_SYSINFO_SCRIPT')))), 'script is documented as the fallback rung');
+ok(verdictOf(/dm\.sysinfo\(\)/.test(srv)), 'remoteSysinfo tries the device op first');
 const cli = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf-8');
-ok(/daemon lacks sysinfo \(capabilities gate\)/.test(cli), 'client refuses old daemons via the capability gate');
+ok(verdictOf(/daemon lacks sysinfo \(capabilities gate\)/.test(cli)), 'client refuses old daemons via the capability gate');
 
 // 4. proc-list op (2.354.0, the process manager): capability + full-table
 // shape + the same-module parity that keeps local and remote in one truth.
-ok(conn.info?.capabilities?.includes?.('proc-list'), 'daemon advertises the proc-list capability');
+ok(verdictOf(conn.info?.capabilities?.includes?.('proc-list')), 'daemon advertises the proc-list capability');
 const pl = await dm.procList();
-ok(Array.isArray(pl.procs) && pl.procs.length > 5, `proc-list returns a real table (${pl.procs?.length} rows of ${pl.total})`);
-ok(pl.procs.every((p) => Number.isFinite(p.pid) && typeof p.user === 'string' && Number.isFinite(p.rss) && typeof p.cmd === 'string' && typeof p.state === 'string'), 'rows carry pid/user/rss/cmd/state');
-ok(Number.isFinite(pl.total) && pl.total >= pl.procs.length, 'total count >= transported rows');
+ok(gateOf(Array.isArray(pl.procs)) && pl.procs.length > 5, `proc-list returns a real table (${pl.procs?.length} rows of ${pl.total})`);
+ok(verdictOf(pl.procs.every((p) => Number.isFinite(p.pid) && typeof p.user === 'string' && Number.isFinite(p.rss) && typeof p.cmd === 'string' && typeof p.state === 'string')), 'rows carry pid/user/rss/cmd/state');
+ok(gateOf(Number.isFinite(pl.total)) && pl.total >= pl.procs.length, 'total count >= transported rows');
 const localPl = await sysinfo.listProcs();
 const localKeys = Object.keys(localPl.procs[0] || {}).filter((k) => k !== 'pcpuNow').sort().join(',');
 const opKeys = Object.keys(pl.procs[0] || {}).filter((k) => k !== 'pcpuNow').sort().join(',');
 ok(localKeys === opKeys && localKeys.length > 0, `op row shape === local module row shape (${opKeys})`);
 // second call gives sampleProcCpu its delta baseline → live CPU% appears
 const pl2 = await dm.procList();
-ok(pl2.sampled === true && pl2.procs.some((p) => p.pcpuNow != null), 'second call carries live-sampled CPU% (linux delta)');
-ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client method is capability-gated');
+ok(pl2.sampled === true && verdictOf(pl2.procs.some((p) => p.pcpuNow != null)), 'second call carries live-sampled CPU% (linux delta)');
+ok(verdictOf(/daemon lacks proc-list \(capabilities gate\)/.test(cli)), 'proc-list client method is capability-gated');
 
 // 4b. B-69a7 (round wz421di05, MUST 1): the left-behind op's reply is ROUTED back to its request — the client's id-routed reply
 // list must name left-behind-result, or every read on a paired machine times out after 15 s. Driven through the hub's own
 // DeviceManager against the REAL daemon; the conversation's chain known by the keeper's record in the daemon's own HOME
 {
-  ok(conn.info?.capabilities?.includes?.('left-behind'), 'daemon advertises the left-behind capability');
+  ok(verdictOf(conn.info?.capabilities?.includes?.('left-behind')), 'daemon advertises the left-behind capability');
   const lbSid = `lb-op-${process.pid}`, lbMark = `CLAUDE_WEBUI_SESSION_ID=${lbSid}`;
   const detachedMarked = () => detachedHeld(lbSid);
   try {
@@ -134,10 +134,10 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
     fs.writeFileSync(path.join(home, '.vibespace', 'run', lbSid + '.json'), JSON.stringify({ keeperPid: keeper }));
     fs.writeFileSync(path.join(home, '.vibespace', 'run', lbSid + '.attach'), JSON.stringify({ pid: attach }));
     const t = await dm.leftBehind({ mark: lbMark, ageMs: 5000, sid: lbSid });
-    ok(Array.isArray(t.left) && t.left.some((x) => x.pid === leftover) && !t.left.some((x) => x.pid === keeper || x.pid === attach) && !t.unread, `left-behind answers through the hub's DeviceManager (its reply routed by id, never a 15 s time-out): the leftover named, the keeper's recorded processes (its meta, its attach client's record) not (${JSON.stringify(t.left.map((x) => x.pid))} · ${t.unread || 'read'})`);
-    ok(t.left.every((x) => JSON.stringify(Object.keys(x).sort()) === '["comm","pid","start","startedAt"]'), 'the op\'s rows carry pid, command name and start time only');
+    ok(gateOf(Array.isArray(t.left)) && gateOf(t.left.some((x) => x.pid === leftover)) && !t.left.some((x) => x.pid === keeper || x.pid === attach) && !t.unread, `left-behind answers through the hub's DeviceManager (its reply routed by id, never a 15 s time-out): the leftover named, the keeper's recorded processes (its meta, its attach client's record) not (${JSON.stringify(t.left.map((x) => x.pid))} · ${t.unread || 'read'})`);
+    ok(verdictOf(t.left.every((x) => JSON.stringify(Object.keys(x).sort()) === '["comm","pid","start","startedAt"]')), 'the op\'s rows carry pid, command name and start time only');
     const u = await dm.leftBehind({ mark: lbMark, ageMs: 5000 });
-    ok(u.unread === 'own-unknown' && Array.isArray(u.left) && u.left.length === 0, 'with no keeper sid the device knows no chain of the conversation: own-unknown, nothing named');
+    ok(u.unread === 'own-unknown' && gateOf(Array.isArray(u.left)) && u.left.length === 0, 'with no keeper sid the device knows no chain of the conversation: own-unknown, nothing named');
   } finally { endHeldKids(); }
 }
 
@@ -147,7 +147,7 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
 // keeper's recorded process is held even when a row names it; no keeper sid = the chain not known: nothing ended. It reads process
 // facts (Linux /proc).
 {
-  ok(conn.info?.capabilities?.includes?.('left-behind-end'), 'daemon advertises the left-behind-end capability');
+  ok(verdictOf(conn.info?.capabilities?.includes?.('left-behind-end')), 'daemon advertises the left-behind-end capability');
   const sid = `lb-end-${process.pid}`, mark = `CLAUDE_WEBUI_SESSION_ID=${sid}`;
   const spawnMarked = () => detachedHeld(sid);
   const statOf = (p) => { try { return fs.readFileSync(`/proc/${p}/stat`, 'utf8').split(') ').pop().split(' '); } catch { return null; } };
@@ -164,10 +164,10 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
     const rows = [named(leftover) || { pid: leftover, start: 0 }, { ...(named(reused) || { pid: reused, start: 0 }), start: Number((named(reused) || {}).start) + 1 }, { pid: keeper, start: Number((statOf(keeper) || [])[19]), comm: 'node' }].map(({ pid, start, comm }) => ({ pid, start, comm }));
     const e = await dm.leftBehindEnd({ mark, rows, sid, by: 'human:test' });
     console.log(`    (the press there: ${JSON.stringify(e)} · leftover ${alive(leftover) ? 'RUNS' : 'gone'} · reused ${alive(reused) ? 'runs' : 'GONE'} · keeper ${alive(keeper) ? 'runs' : 'GONE'})`);
-    ok(e.ok === true && e.ended.length === 1 && e.gone === 1 && e.held === 1 && !alive(leftover) && alive(reused) && alive(keeper), 'left-behind-end ends the listed leftover ON the machine (its reply routed by id); a reused pid (another start) is never signalled; the keeper\'s recorded process is held');
+    ok(e.ok === true && e.ended.length === 1 && e.gone === 1 && e.held === 1 && !alive(leftover) && gateOf(alive(reused)) && verdictOf(alive(keeper)), 'left-behind-end ends the listed leftover ON the machine (its reply routed by id); a reused pid (another start) is never signalled; the keeper\'s recorded process is held');
     const nm = await dm.leftBehindEnd({ mark: 'PATH=/usr/bin', rows: [rows[1]], sid, by: 'human:test' });
     const blind = await dm.leftBehindEnd({ mark, rows: [{ ...rows[1], start: Number((statOf(reused) || [])[19]) }], by: 'human:test' });
-    ok(nm.ok === false && nm.reason === 'no-mark' && blind.ok === false && blind.reason === 'own-unknown' && alive(reused) && alive(keeper), 'the op refuses any variable but a conversation\'s mark, and with no keeper sid (the chain not known) it ends nothing — even a row whose start is right');
+    ok(nm.ok === false && nm.reason === 'no-mark' && blind.ok === false && blind.reason === 'own-unknown' && gateOf(alive(reused)) && verdictOf(alive(keeper)), 'the op refuses any variable but a conversation\'s mark, and with no keeper sid (the chain not known) it ends nothing — even a row whose start is right');
   } finally { endHeldKids(); }
 }
 
@@ -184,7 +184,7 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
   const SPRI = require(REPO + '/src/server/spawn-priority.js'), NP = require(REPO + '/src/nice-program.js'), { withPriority } = require(REPO + '/src/spawn/line.js');
   const hello = (() => { try { return dm.helloInfo(); } catch { return null; } })() || conn.info || {};
   const own = NP.niceProgram();
-  ok(typeof own === 'string' && hello.nicePath === own && NP.NICE_DIRS.includes(path.dirname(own)), `the REAL agent's hello names its own nice program — the shared look's answer on this machine (${hello.nicePath})`);
+  ok(typeof own === 'string' && hello.nicePath === own && verdictOf(NP.NICE_DIRS.includes(path.dirname(own))), `the REAL agent's hello names its own nice program — the shared look's answer on this machine (${hello.nicePath})`);
   const statOf = (pid) => { try { const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
   const niceOf = (pid) => { const f = statOf(pid); return f ? Number(f[16]) : NaN; };
   const ppidOf = (pid) => { const f = statOf(pid); return f ? Number(f[1]) : NaN; };
@@ -210,12 +210,12 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
     const lowered = (x) => x.nice.length === 2 && x.nice.every((v) => v === want);
     // r598: judged at ANY niceness — min(19, the agent's + 5); at 19 itself no step can be shown: a judged PREMISE row, said by name
     const premise = agentNice >= 19;
-    ok(lowP.priority && lowP.fact.by === 5 && low.spec.cmd === own && JSON.stringify(low.spec.args.slice(0, 4)) === JSON.stringify(['-n', '5', 'sh', '-lc']) && (premise ? low.nice.length === 2 && low.nice.every((v) => v === 19) : lowered(low)),
+    ok(gateOf(lowP.priority) && lowP.fact.by === 5 && low.spec.cmd === own && JSON.stringify(low.spec.args.slice(0, 4)) === JSON.stringify(['-n', '5', 'sh', '-lc']) && (premise ? low.nice.length === 2 && verdictOf(low.nice.every((v) => v === 19)) : verdictOf(lowered(low))),
       premise ? `PREMISE (judged): the agent runs at niceness 19, the cap — the dial road's spec still starts with ITS nice (${low.spec.cmd} -n 5 sh -lc …), and no step below 19 can be shown (read ${JSON.stringify(low.nice)})`
         : `REAL agent: the dial road's spec starts with ITS nice (${low.spec.cmd} -n 5 sh -lc …); the started process and its child, each read from its own /proc entry, run at niceness ${want} — the agent's ${agentNice} + 5, at most 19 (read ${JSON.stringify(low.nice)})`);
-    ok(offP.priority === null && offP.fact.why === 'off' && JSON.stringify(off.spec) === release('off') && off.nice.every((v) => v === agentNice),
+    ok(offP.priority === null && offP.fact.why === 'off' && JSON.stringify(off.spec) === release('off') && verdictOf(off.nice.every((v) => v === agentNice)),
       `the setting off: the release's spec byte for byte, both at the agent's own niceness ${agentNice} (read ${JSON.stringify(off.nice)}), the fact «off in Settings» (r705 (1))`);
-    ok(oldP.priority === null && oldP.fact.why === 'remote' && JSON.stringify(old.spec) === release('old') && old.nice.every((v) => v === agentNice),
+    ok(oldP.priority === null && oldP.fact.why === 'remote' && JSON.stringify(old.spec) === release('old') && verdictOf(old.nice.every((v) => v === agentNice)),
       `an OLDER agent (a hello with no nicePath): the release's spec byte for byte, never asked anything new, at its own niceness (read ${JSON.stringify(old.nice)})`);
     if (!premise) ok(!lowered(off) && !lowered(old), 'RED CONTROL: the same judge on the spec with the prefix dropped (the release\'s) reads NOT lowered — this leg can go red');
   } finally {
@@ -225,14 +225,14 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
     }
     const end = Date.now() + 5000;
     while (started.some((s) => !gone(s.sh) || (s.child && !gone(s.child))) && Date.now() < end) await new Promise((res) => setTimeout(res, 20));   // gone: the condition
-    ok(started.every((s) => gone(s.sh) && (!s.child || gone(s.child))), `the leg's own processes are gone (${started.length} shells and their children)`);
+    ok(verdictOf(started.every((s) => gone(s.sh) && (!s.child || gone(s.child)))), `the leg's own processes are gone (${started.length} shells and their children)`);
   }
 }
 
 // 4d. B-e7c0 (r723): a subscription pick's merge of the person's own settings file, made ON the device by its agent — driven through
 // the hub's own DeviceManager against the REAL daemon (a scratch HOME stands in for the paired machine)
 {
-  ok(conn.info?.capabilities?.includes?.('settings-merge'), 'daemon advertises the settings-merge capability');
+  ok(verdictOf(conn.info?.capabilities?.includes?.('settings-merge')), 'daemon advertises the settings-merge capability');
   const proj = path.join(home, 'proj'); fs.mkdirSync(proj, { recursive: true });
   const KEY = ['sk', 'ant', 'api03', 'stand-in'].join('-');   // built at run time
   fs.writeFileSync(path.join(proj, 'my-settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] }, permissions: { deny: ['Bash(rm -rf:*)'] }, env: { ANTHROPIC_BASE_URL: 'https://elsewhere.example', ANTHROPIC_API_KEY: KEY, MINE: 'yes' } }));
@@ -243,8 +243,8 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
   console.log(`    (the device wrote ${r.path || r.reason} · mode ${mode.toString(8)} · keys ${Object.keys(merged).join(', ')} · env ${Object.keys(merged.env || {}).join(', ')} · dropped ${(r.dropped || []).join(', ')})`);
   ok(r.ok === true && r.path === path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'settings', `${sid}.settings`) && mode === 0o600,
     'settings-merge answers through the hub\'s DeviceManager (its reply routed by id): the device wrote <its state>/settings/<sid>.settings, 0600 — a path it made itself');
-  ok(merged.hooks && JSON.stringify(merged.permissions) === JSON.stringify({ deny: ['Bash(rm -rf:*)'] }) && merged.env.MINE === 'yes' && !('ANTHROPIC_BASE_URL' in merged.env) && !('ANTHROPIC_API_KEY' in merged.env) && merged.apiKeyHelper === '' && merged.outputStyle === 'Concise'
-    && r.dropped.includes('ANTHROPIC_BASE_URL') && r.dropped.includes('ANTHROPIC_API_KEY') && !JSON.stringify(r).includes(KEY),
+  ok(gateOf(merged.hooks) && JSON.stringify(merged.permissions) === JSON.stringify({ deny: ['Bash(rm -rf:*)'] }) && merged.env.MINE === 'yes' && !('ANTHROPIC_BASE_URL' in merged.env) && !('ANTHROPIC_API_KEY' in merged.env) && merged.apiKeyHelper === '' && merged.outputStyle === 'Concise'
+    && gateOf(r.dropped.includes('ANTHROPIC_BASE_URL')) && gateOf(r.dropped.includes('ANTHROPIC_API_KEY')) && !JSON.stringify(r).includes(KEY),
     'the device\'s merge: the person\'s hooks and deny rules KEPT, the route and the credential DROPPED (their names said, never a value), the start\'s layer LAST — the file\'s text never in the answer');
   const bad = await dm.settingsMerge({ sid: '../escape', cwd: proj, ownFile: 'my-settings.json', layer, by: 'system:test' });
   const big = await dm.settingsMerge({ sid, cwd: proj, ownFile: 'my-settings.json', layer: { k: 'x'.repeat(70000) }, by: 'system:test' });
@@ -270,11 +270,11 @@ ok(parsed.length === 2 && parsed[0].pid === 1 && parsed[0].user === 'root' && pa
 ok(parsed[1].pcpu === 99.5 && parsed[1].etime === '1-02:03:04' && parsed[1].cmd === 'node server.js --flag', 'parsePsProcs: cpu/etime/multi-word cmd');
 const many = Array.from({ length: 500 }, (_, i) => ({ pid: i + 1, rss: i, pcpu: i === 3 ? 99 : 0 }));
 const capped = sysinfo.capProcs(many, 100);
-ok(capped.length === 100 && capped.some((p) => p.pid === 4), 'capProcs keeps the CPU-hot row even when RSS-cold');
+ok(capped.length === 100 && verdictOf(capped.some((p) => p.pid === 4)), 'capProcs keeps the CPU-hot row even when RSS-cold');
 // review pins (2.354.0): a LIVE-hot process must survive the cap even when
 // its lifetime pcpu is flatlined at 0 — pcpuNow participates in the rank
 const live = Array.from({ length: 500 }, (_, i) => ({ pid: i + 1, rss: i, pcpu: 0, pcpuNow: i === 7 ? 98 : 0 }));
-ok(sysinfo.capProcs(live, 100).some((p) => p.pid === 8), 'capProcs ranks by live pcpuNow, not just the flatlined lifetime average');
+ok(verdictOf(sysinfo.capProcs(live, 100).some((p) => p.pid === 8)), 'capProcs ranks by live pcpuNow, not just the flatlined lifetime average');
 ok(sysinfo.capProcs(many, -5).length > 0 && sysinfo.capProcs(many, 3.7).length >= 20, 'capProcs clamps a hostile max');
 const siSrc = fs.readFileSync(path.join(REPO, 'src/sysinfo.js'), 'utf-8');
 ok(siSrc.indexOf('sampleProcCpu(all)') !== -1 && siSrc.indexOf('sampleProcCpu(all)') < siSrc.indexOf('capProcs(all, max)'), 'listProcs samples the WHOLE table before capping (cap-by-flatlined-pcpu bug)');
@@ -305,7 +305,7 @@ ok(siSrc.indexOf('sampleProcCpu(all)') !== -1 && siSrc.indexOf('sampleProcCpu(al
     JSON.stringify(overflow));
   // POSITIVE CONTROL, against the real machine: the shipped read answers here.
   const live = await sysinfo.read(process.cwd());
-  ok(Array.isArray(live.procs) && live.procs.length > 0 && live.procs.every((x) => x.pid && Number.isFinite(x.rss)),
+  ok(gateOf(Array.isArray(live.procs)) && live.procs.length > 0 && verdictOf(live.procs.every((x) => x.pid && Number.isFinite(x.rss))),
     `the local read really answers on THIS machine's process table (${live.procs.length} rows)`,
     JSON.stringify((live.procs || []).slice(0, 1)));
 }
@@ -327,7 +327,7 @@ ok(!/else if kill -0 \d/.test(sigText) && !/if kill -0 \d/.test(sigText),
   'signal verdict never uses a BARE kill -0 as the EPERM/ESRCH split (its failure is ambiguous)');
 ok(!/ps -p \d+/.test(sigText) && !/ps -p \$\{pid\}/.test(srv),
   'signal verdict carries no bare `ps -p <pid>` existence test (busybox `ps` has no -p)');
-ok(sigText.includes(require(REPO + '/src/cli-identity.js').pidAliveShellFn()),
+ok(verdictOf(sigText.includes(require(REPO + '/src/cli-identity.js').pidAliveShellFn())),
   'signal verdict embeds the SHARED vs_alive ladder verbatim — one probe, one author, no per-site reason to get wrong');
 
 // ── A BUSY MACHINE MUST NOT PRODUCE AN EMPTY PROCESS LIST (2026-09-07) ────
@@ -365,7 +365,7 @@ console.log(JSON.stringify({ procs: (r.procs || []).length, ok: (r.procs || []).
   };
   const withFake = { ...process.env, PATH: bin + ':' + process.env.PATH };
   const got = run(withFake);
-  ok(got.procs > 0 && got.ok, `a ps table BIGGER than the pre-fix 4 MiB buffer still yields processes (${got.procs} rows)`);
+  ok(got.procs > 0 && verdictOf(got.ok), `a ps table BIGGER than the pre-fix 4 MiB buffer still yields processes (${got.procs} rows)`);
   // NEGATIVE CONTROL: the same fake `ps` against a copy of sysinfo.js with the
   // pre-fix buffer spliced back in must produce the empty list this fixes.
   const src = fs.readFileSync(path.join(REPO, 'src/sysinfo.js'), 'utf-8');
@@ -412,8 +412,8 @@ try { await dm.stop?.(); } catch { }
   const plant = (k) => { fs.writeFileSync(path.join(rootA, 'state', 'agentd.pid'), String(k.pid)); return endOwnDaemonByPid(rootA); };
   const stranger = plant(b), notDaemon = plant(c), outside = endOwnDaemonByPid(path.resolve(os.tmpdir(), '..', `vs-outside-root-${process.pid}`));
   const aliveBefore = lives(a.pid), ended = plant(a);
-  ok(aliveBefore && ended.gone === true && !ended.why, `B-b403 cure 2: off /tmp the daemon is ended by its own pid, identity-checked — the root's daemon, alive, ends (${JSON.stringify(ended)})`);
-  ok(/refused/.test(stranger.why || '') && lives(b.pid) && /refused/.test(notDaemon.why || '') && lives(c.pid) && /not under this process's temp folder/.test(outside.why || ''),
+  ok(gateOf(aliveBefore) && ended.gone === true && !ended.why, `B-b403 cure 2: off /tmp the daemon is ended by its own pid, identity-checked — the root's daemon, alive, ends (${JSON.stringify(ended)})`);
+  ok(gateOf(/refused/.test(stranger.why || '')) && gateOf(lives(b.pid)) && gateOf(/refused/.test(notDaemon.why || '')) && gateOf(lives(c.pid)) && verdictOf(/not under this process's temp folder/.test(outside.why || '')),
     `B-b403 cure 2 CONTROLS: refused and alive — a stranger of another root (${stranger.why}), this root's process that is not a daemon (${notDaemon.why}); a root outside the temp folder (${outside.why})`);
   endSD();
 }
@@ -430,7 +430,7 @@ for (let i = 1; i <= 25000; i++) rows.push('u ' + i + ' 0.1 0.2 100000 ' + (9000
 process.stdout.write(rows.join('\\n') + '\\n');
 `, { mode: 0o755 });
   const src = fs.readFileSync(new URL('../src/sysinfo.js', import.meta.url), 'utf8');
-  ok(/PS_MAX_BUFFER = (32|64) \* 1024 \* 1024/.test(src) && !/maxBuffer: [48] \* 1024 \* 1024/.test(src), 'every ps call carries the shared ≥32 MiB bound (64 MiB since the gate-split merge; the 4/8 MiB literals are gone)');
+  ok(gateOf(/PS_MAX_BUFFER = (32|64) \* 1024 \* 1024/.test(src)) && !/maxBuffer: [48] \* 1024 \* 1024/.test(src), 'every ps call carries the shared ≥32 MiB bound (64 MiB since the gate-split merge; the 4/8 MiB literals are gone)');
   const { execFileSync } = await import('node:child_process');
   const run = (buf) => execFileSync(process.execPath, ['-e', `
     const cp = require('node:child_process'); const orig = cp.execFile;
@@ -439,7 +439,7 @@ process.stdout.write(rows.join('\\n') + '\\n');
     si.read(process.cwd()).then((r) => { console.log(JSON.stringify({ n: (r.procs || []).length, pid: r.procs?.[0]?.pid, rss: r.procs?.[0]?.rss })); });
   `], { env: { ...process.env, PATH: dir + ':' + process.env.PATH }, encoding: 'utf8', timeout: 60000 }).trim();
   const fixed = JSON.parse(run(32 * 1024 * 1024));
-  ok(fixed.n > 0 && Number.isFinite(fixed.rss) && fixed.pid === 1, `a 5.5 MB ps table still yields top procs (${fixed.n} rows, top pid ${fixed.pid})`);
+  ok(fixed.n > 0 && gateOf(Number.isFinite(fixed.rss)) && fixed.pid === 1, `a 5.5 MB ps table still yields top procs (${fixed.n} rows, top pid ${fixed.pid})`);
   const old = JSON.parse(run(4 * 1024 * 1024));
   ok(old.n === 0, 'NEGATIVE CONTROL: the old 4 MiB bound turns the same table into an EMPTY list (the gate-red shape)');
   fs.rmSync(dir, { recursive: true, force: true });
@@ -450,13 +450,13 @@ process.stdout.write(rows.join('\\n') + '\\n');
 {
   const si = require(REPO + '/src/sysinfo.js');
   const bundle = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-agentd.js'), 'utf8');
-  ok(typeof si.cmdlineHead === 'function' && /function cmdlineHeadOf\(/.test(bundle), 'F5: cmdlineHead lives in src/sysinfo.js — the daemon bundle carries the same reader (one implementation)');
+  ok(typeof si.cmdlineHead === 'function' && verdictOf(/function cmdlineHeadOf\(/.test(bundle)), 'F5: cmdlineHead lives in src/sysinfo.js — the daemon bundle carries the same reader (one implementation)');
   const table = await si.listProcs({ max: 2000 });
   const me = table.procs.find((p) => p.pid === process.pid);
   const head = await si.cmdlineHead(process.pid);
-  ok(me && head && me.cmd.startsWith(head.replace(/…$/, '').slice(0, 60)), `F5 parity: /proc/<pid>/cmdline's head = the process table's command for the same pid ("${head && head.slice(0, 50)}…")`, { head, cmd: me && me.cmd.slice(0, 120) });
-  ok(head && head.length <= si.CMDLINE_HEAD && (await si.cmdlineHead(2 ** 22 + 7)) === null, `F5: bounded (≤ ${si.CMDLINE_HEAD} chars); a pid that is gone answers null, never throws`);
+  ok(gateOf(me) && gateOf(head) && verdictOf(me.cmd.startsWith(head.replace(/…$/, '').slice(0, 60))), `F5 parity: /proc/<pid>/cmdline's head = the process table's command for the same pid ("${head && head.slice(0, 50)}…")`, { head, cmd: me && me.cmd.slice(0, 120) });
+  ok(gateOf(head) && head.length <= si.CMDLINE_HEAD && (await si.cmdlineHead(2 ** 22 + 7)) === null, `F5: bounded (≤ ${si.CMDLINE_HEAD} chars); a pid that is gone answers null, never throws`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

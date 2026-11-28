@@ -24,7 +24,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -55,11 +55,11 @@ console.log('① PURE: the paragraph, the header count, the reminder segment');
   ok(none === off && section(TG, T4, true) === section(TG, { ...T4, channels: false }, true), 'no reach (channels: false) ⇒ the tools section is byte-identical to one rendered without the flag (single and multi)');
   // lane cli-registry: the header counts every paragraph that rendered (vibespace-msg's too since the registry: 5 → 6)
   // lane agent-feedback: + vibespace-feedback's paragraph (gate always): 6 → 7
-  ok(/— 6 CLIs on your PATH/.test(none) && /— 7 CLIs on your PATH/.test(read) && /— 7 CLIs on your PATH/.test(req), 'the header\'s CLI count includes vibespace-channels only with reach (6 → 7)');
+  ok(gateOf(/— 6 CLIs on your PATH/.test(none)) && gateOf(/— 7 CLIs on your PATH/.test(read)) && verdictOf(/— 7 CLIs on your PATH/.test(req)), 'the header\'s CLI count includes vibespace-channels only with reach (6 → 7)');
   const P = TG.CHANNELS_SECTION_LINES;
-  ok(read.includes(P.read) && !read.includes(P.request) && req.includes(P.request) && !req.includes(P.read), 'read reach ⇒ the read paragraph, request-only ⇒ the request paragraph (one, never both)');
-  ok(['`vibespace-channels list`', '`vibespace-channels search "<words>"`', '`vibespace-channels read <conv>`', '`reply` only PROPOSES', 'BEFORE any other connector or file', '`vibespace-docs channels`'].every((w) => P.read.includes(w)), 'the read paragraph is copy-ready: list, search "<words>", read <conv>, reply = a proposal, look here BEFORE any other connector, the manual', P.read);
-  ok(['`vibespace-channels list --all`', '`vibespace-channels request <conv> "why"`', '`vibespace-docs channels`'].every((w) => P.request.includes(w)) && !/search|read <conv>/.test(P.request), 'the request paragraph teaches list --all + request <conv> "why" (no search / read: nothing is readable yet)', P.request);
+  ok(gateOf(read.includes(P.read)) && !read.includes(P.request) && gateOf(req.includes(P.request)) && !req.includes(P.read), 'read reach ⇒ the read paragraph, request-only ⇒ the request paragraph (one, never both)');
+  ok(verdictOf(['`vibespace-channels list`', '`vibespace-channels search "<words>"`', '`vibespace-channels read <conv>`', '`reply` only PROPOSES', 'BEFORE any other connector or file', '`vibespace-docs channels`'].every((w) => P.read.includes(w))), 'the read paragraph is copy-ready: list, search "<words>", read <conv>, reply = a proposal, look here BEFORE any other connector, the manual', P.read);
+  ok(gateOf(['`vibespace-channels list --all`', '`vibespace-channels request <conv> "why"`', '`vibespace-docs channels`'].every((w) => P.request.includes(w))) && !/search|read <conv>/.test(P.request), 'the request paragraph teaches list --all + request <conv> "why" (no search / read: nothing is readable yet)', P.request);
   ok(!/vibespace-channels|vibespace-docs channels/.test(none), 'no reach ⇒ the section never names the tool or its manual');
   // the paragraph sits with the other CLIs, before the msg line, and the multi-group section carries it once
   ok(read.indexOf(P.read) > read.indexOf('vibespace-job run') && read.indexOf(P.read) < read.indexOf('Other agents:') && section(TG, { ...T4, channels: 'read' }, true).split(P.read).length === 2, 'its place: after the jobs line, before Other agents; once in the multi-group section');
@@ -68,10 +68,10 @@ console.log('① PURE: the paragraph, the header count, the reminder segment');
   const r0 = AR.perTurnToolsLine(T4), rOff = AR.perTurnToolsLine({ ...T4, channels: false });
   const rRead = AR.perTurnToolsLine({ ...T4, channels: 'read' }), rReq = AR.perTurnToolsLine({ ...T4, channels: 'request' });
   // lane cli-registry: the docs pointer names every OPEN row's topic in the registry's order (channels after jobs)
-  ok(r0 === rOff && !/channels/.test(r0) && r0.includes('vibespace-docs [status|ask|task|jobs|msg|feedback|pages|design|exit|remote|window|browser|apps|vault|api] —'), 'no reach ⇒ the reminder line is the one without the flag, no `channels` anywhere in it');
-  ok(rRead.includes(S.read) && rRead.includes('vibespace-docs [status|ask|task|jobs|channels|msg|feedback|pages|design|exit|remote|window|browser|apps|vault|api] —') && rReq.includes(S.request) && !rReq.includes(S.read), 'read reach ⇒ the read segment + `channels` in the vibespace-docs list; request-only ⇒ the request segment');
+  ok(r0 === rOff && !/channels/.test(r0) && verdictOf(r0.includes('vibespace-docs [status|ask|task|jobs|msg|feedback|pages|design|exit|remote|window|browser|apps|vault|api] —')), 'no reach ⇒ the reminder line is the one without the flag, no `channels` anywhere in it');
+  ok(gateOf(rRead.includes(S.read)) && gateOf(rRead.includes('vibespace-docs [status|ask|task|jobs|channels|msg|feedback|pages|design|exit|remote|window|browser|apps|vault|api] —')) && gateOf(rReq.includes(S.request)) && !rReq.includes(S.read), 'read reach ⇒ the read segment + `channels` in the vibespace-docs list; request-only ⇒ the request segment');
   ok(B(rRead) - B(r0) === B(S.read) + B(' · ') + B('|channels'), `the reminder grows by the segment + its separator + "|channels" only (${B(r0)} → ${B(rRead)} B)`);
-  ok(AR.perTurnToolsLine({ ...T4, channels: 'read' }, { multi: true, manager: true }).includes('vibespace-task --group <id> progress') && AR.perTurnToolsLine(T4, { manager: true }).includes('you are a Group MANAGER'), 'the moved line keeps its multi-group and manager clauses');
+  ok(gateOf(AR.perTurnToolsLine({ ...T4, channels: 'read' }, { multi: true, manager: true }).includes('vibespace-task --group <id> progress')) && verdictOf(AR.perTurnToolsLine(T4, { manager: true }).includes('you are a Group MANAGER')), 'the moved line keeps its multi-group and manager clauses');
 }
 
 // ── the real engine ──
@@ -111,8 +111,8 @@ const cost = {};
   await eng.setAgentDirectory(A, { groups: true, singles: false });
   ok(eng.reachCountFor(AG) === 'request' && fromList(eng, AG) === 'request', 'the account directory lists group titles ⇒ \'request\' (listFor --all names them, nothing readable)');
   await eng.setAgentDirectory(A, { groups: false, singles: false });
-  ok((await eng.setReach(A, 'oc_7', { principal: { kind: 'agent', id: 'agent-1' }, level: 'requestable' })).ok && eng.reachCountFor(AG) === 'request' && fromList(eng, AG) === 'request', 'ONE conversation requestable for this agent ⇒ \'request\'');
-  ok((await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: EVERY, authority: 'draft' }] })).ok && eng.reachCountFor(AG) === 'read' && fromList(eng, AG) === 'read', 'the account granted to everyone (the incident\'s shape: everyone, draft) ⇒ \'read\'');
+  ok(gateOf((await eng.setReach(A, 'oc_7', { principal: { kind: 'agent', id: 'agent-1' }, level: 'requestable' })).ok) && eng.reachCountFor(AG) === 'request' && fromList(eng, AG) === 'request', 'ONE conversation requestable for this agent ⇒ \'request\'');
+  ok(gateOf((await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: EVERY, authority: 'draft' }] })).ok) && eng.reachCountFor(AG) === 'read' && fromList(eng, AG) === 'read', 'the account granted to everyone (the incident\'s shape: everyone, draft) ⇒ \'read\'');
   cost.every = time(() => eng.reachCountFor(AG), 200); cost.listEvery = time(() => eng.listFor(AG), 5);
   const OTHER = { kind: 'agent', id: 'agent-9', name: 'Nobody', groups: ['g-other'], msgLevelFor: () => 'none' };
   ok(eng.reachCountFor(OTHER) === 'read' && eng.reachCountFor({ kind: 'user' }) === 'read', 'everyone means every agent (another one too) — and the owner');
@@ -122,9 +122,9 @@ const cost = {};
   // channel the user connected, so a session that may message a peer is not taught vibespace-channels for it
   await eng.store.index.update(() => { const en = eng.store.index.entry('agents', 'agent-2'); en.kind = 'dm'; en.title = 'Other'; en.lastAt = clock(); });
   const PEER = { kind: 'agent', id: 'agent-8', name: 'Peer', groups: [], msgLevelFor: () => 'visible' };
-  ok(eng.listFor(PEER).conversations.some((c) => c.adapterId === 'agents' && c.level === 'visible') && eng.reachCountFor(PEER) === null, 'a peer session it may message (the Agents adapter, visible to it) is NOT reach: listFor shows it, reachCountFor says null', eng.listFor(PEER).conversations.map((c) => c.key));
+  ok(gateOf(eng.listFor(PEER).conversations.some((c) => c.adapterId === 'agents' && c.level === 'visible')) && eng.reachCountFor(PEER) === null, 'a peer session it may message (the Agents adapter, visible to it) is NOT reach: listFor shows it, reachCountFor says null', eng.listFor(PEER).conversations.map((c) => c.key));
   const parity = [AG, OTHER, PEER, { ...AG, id: 'agent-3' }].map((p) => [p.id, eng.reachCountFor(p), fromList(eng, p)]);
-  ok(parity.every(([, a, b]) => a === b), 'parity: reachCountFor answers what listFor / listFor --all would show, for every principal', parity);
+  ok(verdictOf(parity.every(([, a, b]) => a === b)), 'parity: reachCountFor answers what listFor / listFor --all would show, for every principal', parity);
 }
 console.log(`    cost over 2 000 conversations: no reach ${cost.none.toFixed(3)} ms (listFor ${cost.listNone.toFixed(3)} ms) · everyone ${cost.every.toFixed(3)} ms (listFor ${cost.listEvery.toFixed(2)} ms, 200 rows built)`);
 ok(cost.every < cost.listEvery, `the reach count builds nothing: ${cost.every.toFixed(3)} ms vs listFor's ${cost.listEvery.toFixed(2)} ms when everything is readable`);
@@ -204,13 +204,13 @@ console.log('③ the routes: SessionStart + the per-turn reminder, on reach');
 const real = await legsOf();
 {
   const { out } = real;
-  ok(out.read.start.includes('<vibespace-task-context>') && out.read.start.includes(TG.CHANNELS_SECTION_LINES.read) && /— 7 CLIs on your PATH/.test(out.read.start), 'READ REACH: the SessionStart block carries the read paragraph (and counts 7 CLIs)', out.read.start.slice(0, 300));
-  ok(out.read.p1.includes('<vibespace-reminder>') && out.read.p1.includes(AR.CHANNELS_REMINDER_SEG.read) && out.read.p1.includes('|channels|msg|'), 'READ REACH: the first quiet prompt\'s reminder carries `vibespace-channels list|search|read` and `channels` in the manual list', out.read.p1);
-  ok(!taught(out.none.start) && !taught(out.none.p1) && /— 6 CLIs on your PATH/.test(out.none.start) /* lane agent-feedback: + vibespace-feedback */, 'NO REACH (nothing granted, no directory): neither block names vibespace-channels', [out.none.start.slice(0, 200), out.none.p1]);
+  ok(gateOf(out.read.start.includes('<vibespace-task-context>')) && gateOf(out.read.start.includes(TG.CHANNELS_SECTION_LINES.read)) && verdictOf(/— 7 CLIs on your PATH/.test(out.read.start)), 'READ REACH: the SessionStart block carries the read paragraph (and counts 7 CLIs)', out.read.start.slice(0, 300));
+  ok(gateOf(out.read.p1.includes('<vibespace-reminder>')) && gateOf(out.read.p1.includes(AR.CHANNELS_REMINDER_SEG.read)) && verdictOf(out.read.p1.includes('|channels|msg|')), 'READ REACH: the first quiet prompt\'s reminder carries `vibespace-channels list|search|read` and `channels` in the manual list', out.read.p1);
+  ok(!taught(out.none.start) && !taught(out.none.p1) && verdictOf(/— 6 CLIs on your PATH/.test(out.none.start)) /* lane agent-feedback: + vibespace-feedback */, 'NO REACH (nothing granted, no directory): neither block names vibespace-channels', [out.none.start.slice(0, 200), out.none.p1]);
   ok(out.off.start === '' && out.off.p1 === '', 'INTEGRATION OFF: nothing is injected at all (neither block)');
-  ok(out.request.start.includes(TG.CHANNELS_SECTION_LINES.request) && out.request.p1.includes(AR.CHANNELS_REMINDER_SEG.request) && !out.request.p1.includes(AR.CHANNELS_REMINDER_SEG.read), 'REQUESTABLE ONLY (the directory\'s titles): the request words in both blocks', out.request.p1);
+  ok(gateOf(out.request.start.includes(TG.CHANNELS_SECTION_LINES.request)) && gateOf(out.request.p1.includes(AR.CHANNELS_REMINDER_SEG.request)) && !out.request.p1.includes(AR.CHANNELS_REMINDER_SEG.read), 'REQUESTABLE ONLY (the directory\'s titles): the request words in both blocks', out.request.p1);
   ok(!taught(out.peer.start) && !taught(out.peer.p1), 'a peer session it may message (the built-in Agents adapter) does not teach vibespace-channels');
-  ok(sameNoEngine(out), 'NO ENGINE ⇒ byte-identical to an engine with no reach: the SessionStart block (paths scrubbed) and the reminder, both rendered at ONE clock');
+  ok(verdictOf(sameNoEngine(out)), 'NO ENGINE ⇒ byte-identical to an engine with no reach: the SessionStart block (paths scrubbed) and the reminder, both rendered at ONE clock');
 }
 { // B-360d item 4 (lane bl-loop-a, 主开发 r4325): NOTHING KEPT — every prompt asks the count afresh (judged by account); the
   // release read a per-session memo of 60 s, so a grant taken away stayed in the reminder for up to a minute
@@ -223,11 +223,11 @@ const real = await legsOf();
   const given = R.call('prompt-context', s);
   await eng.setGrain(A, { kind: 'account' }, { access: [] });
   const taken = R.call('prompt-context', s);
-  ok(!taught(t0.p1) && given.includes(AR.CHANNELS_REMINDER_SEG.read) && !taught(taken), 'a grant given mid-session reaches the reminder at the very next prompt, and a grant TAKEN AWAY is gone from it at the next prompt (nothing kept across asks — B-360d item 4; the release kept it for 60 s)', [given, taken]);
+  ok(!taught(t0.p1) && gateOf(given.includes(AR.CHANNELS_REMINDER_SEG.read)) && !taught(taken), 'a grant given mid-session reaches the reminder at the very next prompt, and a grant TAKEN AWAY is gone from it at the next prompt (nothing kept across asks — B-360d item 4; the release kept it for 60 s)', [given, taken]);
   ok(!given.includes('<vibespace-task-context>') && !taken.includes('<vibespace-task-context>') && !taken.includes('<vibespace-task-update>'), 'a reach change re-sends NO block: the seen marks key on group content / folder / build, never the tools text — only the reminder moves', taken.slice(0, 200));
   await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: EVERY, authority: 'draft' }] });   // given back: the legs below read it
   const s2 = R.session();
-  ok(R.call('task-context', s2).includes(TG.CHANNELS_SECTION_LINES.read), 'a new session\'s SessionStart asks fresh');
+  ok(verdictOf(R.call('task-context', s2).includes(TG.CHANNELS_SECTION_LINES.read)), 'a new session\'s SessionStart asks fresh');
 }
 
 console.log('④ CONTROLS: each leg can go red');
@@ -247,7 +247,7 @@ console.log('④ CONTROLS: each leg can go red');
   const cut = editAnchor(src, "  if (!integrationOnMaster()) return null;\n  const eng = channelsEngine();\n  if (!eng || typeof eng.reachCountFor !== 'function') return null;\n  const t = Date.now();", "  return { at: 0, v: 'read', x: [] };\n  const eng = channelsEngine();\n  const t = Date.now();", "src/agent-routes.js");   // lane channel-reauth-visible: the memo answers {v, x}
   const ARX = MUT.load('src/agent-routes.js', cut, 'teach-anyway');
   const m = await legsOf({ AGR: ARX }, 'teach-anyway');
-  ok(cut !== src && taught(m.out.none.p1) && taught(m.out.noEngine.start), 'CONTROL: a route that teaches without reach ⇒ the NO REACH and NO ENGINE legs are RED');
+  ok(cut !== src && gateOf(taught(m.out.none.p1)) && verdictOf(taught(m.out.noEngine.start)), 'CONTROL: a route that teaches without reach ⇒ the NO REACH and NO ENGINE legs are RED');
 }
 { // lane teach-clock-scrub: the mirror's red (2.369.336, 13:10:00Z) — the NO ENGINE pair rendered across a minute edge with two
   // clocks: 1 ms apart (…:59.999 → :00.000, the mirror's shape) and a minute apart; the leg's own predicate goes RED. ONE clock at
@@ -257,7 +257,7 @@ console.log('④ CONTROLS: each leg can go red');
   const straddle = await legsOf({ at: (leg) => (leg === 'noEngine' ? edge : edge - 1) }, 'edge-1ms');
   const apart = await legsOf({ at: (leg) => (leg === 'noEngine' ? edge : edge - 60e3) }, 'edge-60s');
   const one = await legsOf({ at: () => edge - 1 }, 'edge-one');
-  ok(!sameNoEngine(straddle.out) && !sameNoEngine(apart.out) && sameNoEngine(one.out), 'CONTROL: the NO ENGINE pair rendered across a minute edge (two clocks, 1 ms and 60 s apart) ⇒ that leg is RED; ONE clock at the same instant ⇒ green', words(straddle.out));
+  ok(!sameNoEngine(straddle.out) && !sameNoEngine(apart.out) && verdictOf(sameNoEngine(one.out)), 'CONTROL: the NO ENGINE pair rendered across a minute edge (two clocks, 1 ms and 60 s apart) ⇒ that leg is RED; ONE clock at the same instant ⇒ green', words(straddle.out));
   console.log('    the edge words (1 ms apart): ' + JSON.stringify(words(straddle.out)));
 }
 { // an engine that counts the Agents adapter: a copy of the access family without the msg-acl skip, required by a copy of the engine
@@ -281,4 +281,4 @@ console.log('④ CONTROLS: each leg can go red');
 
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

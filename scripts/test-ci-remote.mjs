@@ -25,7 +25,7 @@ import path from 'node:path';
 import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const R = await import(path.join(REPO, 'scripts/ci-remote.mjs'));
 const CI = await import(path.join(REPO, 'scripts/ci.mjs'));
 const throws = (f, re) => { try { f(); return false; } catch (e) { return re.test(e.message); } };
@@ -33,11 +33,11 @@ const D = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ci-remote-'));
 try {
   // ①
   const a = R.parseArgs(['--host', 'aidev', '--snapshot=/t', '--range', 'a..b', '--shard', '2/3', '--lanes=2', '--keep']);
-  ok(a.host === 'aidev' && a.snapshot === '/t' && a.range === 'a..b' && a.shard.i === 2 && a.shard.n === 3 && a.lanes === '2' && a.keep, '① parseArgs: both spellings, the shard parsed');
-  ok(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--shard', '3/2']), /--shard wants/) && throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--shard', '0/2']), /--shard wants/), '① a shard outside 1..n refused');
-  ok(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--range', 'a..b', '--only', 'x']), /do not combine/), '① --only with --range refused (--only IS the selection)');
-  ok(throws(() => R.parseArgs(['--host', 'h']), /--snapshot/) && throws(() => R.parseArgs(['--snapshot', '/t']), /--host/) && R.parseArgs(['--snapshot', '/t', '--list']).list, '① no --snapshot refused; no --host refused unless --list');
-  ok(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--lanes', '0']), /--lanes/) && throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--frob']), /unknown argument/), '① --lanes 0 and an unknown flag refused');
+  ok(a.host === 'aidev' && a.snapshot === '/t' && a.range === 'a..b' && a.shard.i === 2 && a.shard.n === 3 && a.lanes === '2' && verdictOf(a.keep), '① parseArgs: both spellings, the shard parsed');
+  ok(gateOf(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--shard', '3/2']), /--shard wants/)) && verdictOf(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--shard', '0/2']), /--shard wants/)), '① a shard outside 1..n refused');
+  ok(verdictOf(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--range', 'a..b', '--only', 'x']), /do not combine/)), '① --only with --range refused (--only IS the selection)');
+  ok(gateOf(throws(() => R.parseArgs(['--host', 'h']), /--snapshot/)) && gateOf(throws(() => R.parseArgs(['--snapshot', '/t']), /--host/)) && verdictOf(R.parseArgs(['--snapshot', '/t', '--list']).list), '① no --snapshot refused; no --host refused unless --list');
+  ok(gateOf(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--lanes', '0']), /--lanes/)) && verdictOf(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--frob']), /unknown argument/)), '① --lanes 0 and an unknown flag refused');
   // ②
   ok([45, 40, 39, 25, 24, 0].map(R.loadRule).join() === '4,4,2,2,1,1', '② LOAD RULE: ≥ 40 GB ⇒ 4 · ≥ 25 ⇒ 2 · else 1');
   // ③ a selection over a fixed change list (a heavy suite's own file ⇒ it + its importers) and the global input
@@ -51,7 +51,7 @@ try {
     slices.forEach((s, k) => s.names.forEach((x) => { if (seen.has(x)) dup++; seen.set(x, k); }));
     ok(dup === 0 && seen.size === full.names.length, `③ ${n} slices partition the selection (${slices.map((s) => s.names.length).join(' + ')} = ${full.names.length})`, `dup ${dup}, union ${seen.size}`);
     const ser = CI.scheduleLanes(heavy, { keepOrder: true, sourceOf: (x) => { try { return fs.readFileSync(path.join(REPO, 'scripts', x + '.mjs'), 'utf-8'); } catch { return ''; } } }).serial.map((s) => s.name);
-    ok(ser.length > 0 && ser.every((x) => seen.get(x) === 0), `③ the serial group (${ser.length}) is whole in slice 1 of ${n}`);
+    ok(ser.length > 0 && verdictOf(ser.every((x) => seen.get(x) === 0)), `③ the serial group (${ser.length}) is whole in slice 1 of ${n}`);
   }
   const md = path.join(D, 'markers'); fs.mkdirSync(md);
   const two = heavy.slice(0, 2).map((s) => s.name);
@@ -66,7 +66,7 @@ try {
   ok(bareOrd.measured === 0, `③ a marker without result / failed gives NO timings (measured ${bareOrd.measured}, the unmeasured order) — this reader obeys LAW A too`);
   const un = R.selectSlice(CI, { tree: REPO, only: two, timingDirs: [] });
   ok(un.names.join() === [two[1], two[0]].join(), '③ unmeasured: late-in-table first (the table runs cheap → expensive)');
-  ok(throws(() => R.selectSlice(CI, { tree: REPO, only: ['test-not-a-suite'] }), /not a heavy suite/), '③ an unknown --only name refused before any rsync');
+  ok(verdictOf(throws(() => R.selectSlice(CI, { tree: REPO, only: ['test-not-a-suite'] }), /not a heavy suite/)), '③ an unknown --only name refused before any rsync');
   // ④ the hub half cuts the same list
   // ④ (B-7e49, 主开发 r4544): the hub half cuts the same list over the WHOLE heavy tier, with NO range — the remote's slicing and order
   // against the hub's, names AND order. The affected set over the real tree (a range and changed files handed to ci.mjs affectedSuites)
@@ -82,15 +82,15 @@ try {
   }
   const cli = spawnSync(process.execPath, [path.join(REPO, 'scripts/ci.mjs'), '--list-affected', '--shard', '2/2', `--markers=${md}`], { encoding: 'utf-8', cwd: REPO });
   const want = CI.listAffected({ shard: { i: 2, n: 2 }, dir: md }).names.join(',');
-  ok(cli.status === 0 && cli.stdout.trim() === want && /shard 2\/2/.test(cli.stderr), '④ the CLI: comma-joined on stdout (an --only value), the reasons on stderr');
+  ok(cli.status === 0 && cli.stdout.trim() === want && verdictOf(/shard 2\/2/.test(cli.stderr)), '④ the CLI: comma-joined on stdout (an --only value), the reasons on stderr');
   // ⑤
   const rs = R.runScript({ snap: '/var/tmp/vibespace-ci/snap-x', id: 'RID1', names: ['test-a', 'test-b'], head: 'f'.repeat(40), lanes: null });
-  ok(/--only=test-a,test-b --sha=f{40} --markers="\$S\/markers"/.test(rs) && /--lock="\$CI\/heavy.lock"/.test(rs), '⑤ the box runs the tree\'s ci.mjs on the slice, for the head, its own markers + lock');
-  ok(/HOME="\$S\/home"/.test(rs) && /XDG_RUNTIME_DIR="\$S\/run"/.test(rs) && /TMPDIR=\/tmp /.test(rs) && /chmod 700 "\$S\/run"/.test(rs) && /dbus-run-session --/.test(rs) && /env -i /.test(rs), '⑤ a private HOME, runtime dir (0700) and session bus under a clean env; TMPDIR=/tmp (scratch roots are /tmp/vs-*)');
-  ok(/VIBESPACE_CI_REMOTE_RUN="\$ID"/.test(rs) && /VIBESPACE_SKIP_AGENT_HOOKS=1/.test(rs) && /VIBESPACE_CI_DIR_SWEEP=off/.test(rs), '⑤ the run id in every child\'s env; agent hooks + the dir sweep off');
-  ok(/ge 40 \]; then echo 4; elif \[ \$avail -ge 25 \]; then echo 2; else echo 1/.test(rs) && /LOAD RULE/.test(rs) && /VIBESPACE_CI_LANES=3 \(--lanes\)|lanes=3/.test(R.runScript({ snap: '/s', id: 'i', names: ['t'], head: 'h', lanes: '3' })), '⑤ the LOAD RULE read on the box and printed; --lanes overrides');
+  ok(gateOf(/--only=test-a,test-b --sha=f{40} --markers="\$S\/markers"/.test(rs)) && verdictOf(/--lock="\$CI\/heavy.lock"/.test(rs)), '⑤ the box runs the tree\'s ci.mjs on the slice, for the head, its own markers + lock');
+  ok(gateOf(/HOME="\$S\/home"/.test(rs)) && gateOf(/XDG_RUNTIME_DIR="\$S\/run"/.test(rs)) && gateOf(/TMPDIR=\/tmp /.test(rs)) && gateOf(/chmod 700 "\$S\/run"/.test(rs)) && gateOf(/dbus-run-session --/.test(rs)) && verdictOf(/env -i /.test(rs)), '⑤ a private HOME, runtime dir (0700) and session bus under a clean env; TMPDIR=/tmp (scratch roots are /tmp/vs-*)');
+  ok(gateOf(/VIBESPACE_CI_REMOTE_RUN="\$ID"/.test(rs)) && gateOf(/VIBESPACE_SKIP_AGENT_HOOKS=1/.test(rs)) && verdictOf(/VIBESPACE_CI_DIR_SWEEP=off/.test(rs)), '⑤ the run id in every child\'s env; agent hooks + the dir sweep off');
+  ok(gateOf(/ge 40 \]; then echo 4; elif \[ \$avail -ge 25 \]; then echo 2; else echo 1/.test(rs)) && gateOf(/LOAD RULE/.test(rs)) && verdictOf(/VIBESPACE_CI_LANES=3 \(--lanes\)|lanes=3/.test(R.runScript({ snap: '/s', id: 'i', names: ['t'], head: 'h', lanes: '3' }))), '⑤ the LOAD RULE read on the box and printed; --lanes overrides');
   const src = fs.readFileSync(path.join(REPO, 'scripts/ci-remote.mjs'), 'utf-8');
-  ok(/'bundle', 'create', '-q', bf, 'HEAD', \.\.\.\(not\.length \? \['--not', \.\.\.not\]/.test(src) && /worktree add -q --detach \$\{sh\(snap \+ '\/tree'\)\} \$\{head\}/.test(src) && !/'--exclude=\/data/.test(src), '⑤ the box checks out a WORKTREE at the head (the commits it lacks as a bundle) — no node_modules / data/ ever shipped');
+  ok(gateOf(/'bundle', 'create', '-q', bf, 'HEAD', \.\.\.\(not\.length \? \['--not', \.\.\.not\]/.test(src)) && gateOf(/worktree add -q --detach \$\{sh\(snap \+ '\/tree'\)\} \$\{head\}/.test(src)) && !/'--exclude=\/data/.test(src), '⑤ the box checks out a WORKTREE at the head (the commits it lacks as a bundle) — no node_modules / data/ ever shipped');
   // ⑥ for real: three marked processes + one bystander
   const snap = path.join(D, 'snap'); fs.mkdirSync(path.join(snap, 'tree'), { recursive: true });
   // EVERY ID THE REAL TEARDOWN IS HANDED IS MINTED FOR THIS PROCESS (the coordinator's r626, lane bl-ci, 2026-11-20): the fixture's
@@ -100,7 +100,7 @@ try {
   const RUN_ID = mintRunId('ci-remote-run'), OTHER_ID = mintRunId('ci-remote-other');
   const SELF = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const fixedWords = [['RID', 'T'], ['RID', 'OTHER']].map((w) => `'${w.join('-')}'`);
-  ok(mintRunId('x') !== mintRunId('x') && RUN_ID !== OTHER_ID && new RegExp(`^ci-remote-run-${process.pid}-[0-9a-f]{12}$`).test(RUN_ID) && !fixedWords.some((w) => SELF.includes(w)),
+  ok(mintRunId('x') !== mintRunId('x') && RUN_ID !== OTHER_ID && gateOf(new RegExp(`^ci-remote-run-${process.pid}-[0-9a-f]{12}$`).test(RUN_ID)) && !fixedWords.some((w) => SELF.includes(w)),
     `⑥ every id handed to the REAL teardown is minted for this process (its pid + random bytes; two calls differ: ${RUN_ID}) — no fixed run id stands in the suite, so two runs at once never end each other's processes`);
   const kids = [
     spawn('sleep', ['300'], { env: { ...process.env, VIBESPACE_CI_REMOTE_RUN: RUN_ID }, detached: true, stdio: 'ignore' }),
@@ -116,12 +116,12 @@ try {
   { const end = Date.now() + 5000; while (!childrenOf(kids[2].pid).length && Date.now() < end) await new Promise((r) => setTimeout(r, 20)); }   // the condition, not a clock
   const sub = childrenOf(kids[2].pid);
   const ctl = spawnSync('bash', ['-s'], { input: R.teardownScript(path.join(D, 'other'), OTHER_ID), encoding: 'utf-8' });
-  ok(kids.every((k) => alive(k.pid)) && /no process of the run left/.test(ctl.stdout), 'CONTROL ⑥ a teardown for another run id + snap kills none of these');
+  ok(gateOf(kids.every((k) => alive(k.pid))) && verdictOf(/no process of the run left/.test(ctl.stdout)), 'CONTROL ⑥ a teardown for another run id + snap kills none of these');
   const td = spawnSync('bash', ['-s'], { input: R.teardownScript(snap, RUN_ID, { graceS: 0.3 }), encoding: 'utf-8' });
   await new Promise((r) => setTimeout(r, 300));
-  ok(kids.every((k) => !alive(k.pid)), '⑥ the run\'s processes are gone (by env, by cwd, by argv)', td.stdout.trim().slice(0, 300));
-  ok(['env', 'cwd', 'argv'].every((w) => td.stdout.includes(`(by ${w})`)) && /3 process\(es\) TERMed/.test(td.stdout), '⑥ each one named with what tied it to the run');
-  ok(alive(by.pid), '⑥ the bystander survives');
+  ok(verdictOf(kids.every((k) => !alive(k.pid))), '⑥ the run\'s processes are gone (by env, by cwd, by argv)', td.stdout.trim().slice(0, 300));
+  ok(gateOf(['env', 'cwd', 'argv'].every((w) => td.stdout.includes(`(by ${w})`))) && verdictOf(/3 process\(es\) TERMed/.test(td.stdout)), '⑥ each one named with what tied it to the run');
+  ok(verdictOf(alive(by.pid)), '⑥ the bystander survives');
   // B-b403 cure (the readers, 02:39Z): a GROUP is signalled only while something of it is known alive — its leader not yet reaped
   // (the handle: a live or zombie leader holds the group id) or a member read alive (`sub`) — so an id that died and came back is
   // never a stranger's group
@@ -131,9 +131,9 @@ try {
   // ⑦ the desktop batch
   const b = R.parseArgs(['--host', 'aidev', '--snapshot', '/t', '--batch', 'desktop', '--lanes', '8', '--range', 'a..b']);
   ok(b.batch === 'desktop' && b.lanes === '8' && b.range === 'a..b', '⑦ parseArgs: --batch desktop (with --lanes and an affected --range)');
-  ok(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'laptop']), /--batch wants desktop/)
-    && throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'desktop', '--only', 'x']), /--batch IS the selection/)
-    && throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'desktop', '--shard', '1/2']), /--batch IS the selection/),
+  ok(gateOf(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'laptop']), /--batch wants desktop/))
+    && gateOf(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'desktop', '--only', 'x']), /--batch IS the selection/))
+    && verdictOf(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'desktop', '--shard', '1/2']), /--batch IS the selection/)),
     '⑦ an unknown batch, --batch with --only and --batch with --shard are refused by name');
   ok([45, 40, 39, 25, 24].map((g) => R.loadRule(g, { batch: true })).join() === '8,8,4,4,2' && R.loadRule(45) === 4, '⑦ the batch LOAD RULE: ≥ 40 GB ⇒ 8 · ≥ 25 ⇒ 4 · else 2 (the tier\'s stays 4 / 2 / 1)');
   const srcOf = (n) => { try { return fs.readFileSync(path.join(REPO, 'scripts', n + '.mjs'), 'utf-8'); } catch { return ''; } };
@@ -141,10 +141,10 @@ try {
   // B-7e49: ONE batch selection with no box times serves the two legs that read it — it was asked twice by the same call (the
   // default timingDirs IS []), each a fresh host derivation over the tree's 468 sources; bta below keeps the default-argument road
   const bt = R.selectSlice(CI, { tree: REPO, batch: 'desktop', timingDirs: [] });
-  ok(self.length > 20 && bt.names.slice().sort().join() === self.join() && /--batch desktop: the \d+ self-hosted/.test(bt.summary),
+  ok(self.length > 20 && bt.names.slice().sort().join() === self.join() && verdictOf(/--batch desktop: the \d+ self-hosted/.test(bt.summary)),
     `⑦ the batch IS the tree's self-hosted set (${bt.names.length} of ${heavy.length}: ci.mjs hostPlan .self)`);
   // ⑦'s affected batch (a range and changed files) runs in the heavy twin test-ci-remote-impact (B-7e49, r4544)
-  ok(throws(() => R.selectSlice({ SUITES: CI.SUITES }, { tree: REPO, batch: 'desktop' }), /no HOSTS rule/), 'CONTROL ⑦ a tree whose ci.mjs predates the host rule is refused (never a guessed list)');
+  ok(verdictOf(throws(() => R.selectSlice({ SUITES: CI.SUITES }, { tree: REPO, batch: 'desktop' }), /no HOSTS rule/)), 'CONTROL ⑦ a tree whose ci.mjs predates the host rule is refused (never a guessed list)');
   // a suite the box never ran takes the tree's checked-in desktop time (lane xpra-window-split: the giant's new parts)
   const dt = CI.batchTimings(REPO) || {};
   const tabled = bt.names.filter((n) => typeof dt[n] === 'number').sort((a, b) => dt[b] - dt[a] || (a < b ? -1 : 1));
@@ -156,21 +156,21 @@ try {
     'CONTROL ⑦ without the table they fall to late-in-table order; a non-batch selection never reads it');
   const brs = R.runScript({ snap: '/s', id: 'RID', names: ['test-a'], head: 'h', lanes: null, batch: 'desktop' });
   const nrs = R.runScript({ snap: '/s', id: 'RID', names: ['test-a'], head: 'h', lanes: null });
-  ok(/VIBESPACE_CI_LANE_ROOT="\$S\/lanes"/.test(brs) && /--serial-overlap=1/.test(brs) && /then echo 8; elif \[ \$avail -ge 25 \]; then echo 4/.test(brs) && /MemAvailable lowest/.test(brs),
+  ok(gateOf(/VIBESPACE_CI_LANE_ROOT="\$S\/lanes"/.test(brs)) && gateOf(/--serial-overlap=1/.test(brs)) && gateOf(/then echo 8; elif \[ \$avail -ge 25 \]; then echo 4/.test(brs)) && verdictOf(/MemAvailable lowest/.test(brs)),
     '⑦ the batch run script: a private env per lane (VIBESPACE_CI_LANE_ROOT), the serial lane beside the floor suite, the batch LOAD RULE, the memory line');
-  ok(!/VIBESPACE_CI_LANE_ROOT|--serial-overlap/.test(nrs) && /then echo 4; elif/.test(nrs), 'CONTROL ⑦ a non-batch run script carries none of the batch\'s lane env');
+  ok(!/VIBESPACE_CI_LANE_ROOT|--serial-overlap/.test(nrs) && verdictOf(/then echo 4; elif/.test(nrs)), 'CONTROL ⑦ a non-batch run script carries none of the batch\'s lane env');
   const rows = { '4.22': { calculator: '50.0', calcSize2x: [720, 1232], calcMin2x: [720, 1232], calcButtonBound: true, pushButtonRole: 'button' }, '4.14': { calculator: '46.3', calcSize2x: [720, 1004], calcMin2x: [694, 980], calcButtonBound: false, pushButtonRole: 'push button' } };
   const box = (o) => JSON.stringify({ gtk: '4.14.5', calculator: '46.3', atspi: '2.52.0', calcSize2x: [720, 1004], calcMinFirst2x: [694, 1004], calcMin2x: [694, 980], calcButtonBound: false, pushButtonRole: 'push button', ...o });
-  ok(R.gtkRowVerdict(box({}), rows).ok, '⑦ the GTK row: a box measuring what the tree\'s "4.14" row says is accepted');
-  ok(!R.gtkRowVerdict(box({ gtk: '4.18.1' }), rows).ok && /NO row[\s\S]*under "4\.18"/.test(R.gtkRowVerdict(box({ gtk: '4.18.1' }), rows).why), '⑦ a GTK the tree has no row for is refused, naming the row to check in');
-  ok(/disagrees[\s\S]*calcMin2x/.test(R.gtkRowVerdict(box({ calcMin2x: [694, 1004] }), rows).why) && /pushButtonRole/.test(R.gtkRowVerdict(box({ pushButtonRole: 'button' }), rows).why) && R.gtkRowVerdict(box({ calcMinFirst2x: [694, 980] }), rows).ok,
+  ok(verdictOf(R.gtkRowVerdict(box({}), rows).ok), '⑦ the GTK row: a box measuring what the tree\'s "4.14" row says is accepted');
+  ok(!R.gtkRowVerdict(box({ gtk: '4.18.1' }), rows).ok && verdictOf(/NO row[\s\S]*under "4\.18"/.test(R.gtkRowVerdict(box({ gtk: '4.18.1' }), rows).why)), '⑦ a GTK the tree has no row for is refused, naming the row to check in');
+  ok(gateOf(/disagrees[\s\S]*calcMin2x/.test(R.gtkRowVerdict(box({ calcMin2x: [694, 1004] }), rows).why)) && gateOf(/pushButtonRole/.test(R.gtkRowVerdict(box({ pushButtonRole: 'button' }), rows).why)) && verdictOf(R.gtkRowVerdict(box({ calcMinFirst2x: [694, 980] }), rows).ok),
     '⑦ a box that measures differently from its row is refused (the field named)');
-  ok(!R.gtkRowVerdict('', rows).ok && /ci-provision-aidev\.sh/.test(R.gtkRowVerdict('', rows).why), '⑦ a box that never measured is refused, naming the provision step');
+  ok(!R.gtkRowVerdict('', rows).ok && verdictOf(/ci-provision-aidev\.sh/.test(R.gtkRowVerdict('', rows).why)), '⑦ a box that never measured is refused, naming the provision step');
   const fx = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'gtk-rows.json'), 'utf-8')).rows;
-  ok(fx['4.22'] && fx['4.14'] && fx['4.22'].calcMin2x.join() === '720,1232' && fx['4.22'].calcButtonBound === true && fx['4.14'].calcMin2x.join() === '694,980' && fx['4.14'].pushButtonRole === 'push button',
+  ok(gateOf(fx['4.22']) && gateOf(fx['4.14']) && fx['4.22'].calcMin2x.join() === '720,1232' && fx['4.22'].calcButtonBound === true && fx['4.14'].calcMin2x.join() === '694,980' && fx['4.14'].pushButtonRole === 'push button',
     '⑦ the checked-in rows carry the hub (4.22) and AIDev (4.14), as measured inside xpra');
 } finally {
   fs.rmSync(D, { recursive: true, force: true });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

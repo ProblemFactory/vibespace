@@ -18,7 +18,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const M = require(path.join(ROOT, 'src/desktop-apps.js')), D = require(path.join(ROOT, 'src/desktop-display.js'));
 const CHROME = ['/opt/google/chrome/chrome', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 let pass = 0, fail = 0, XVFB = null;   // XVFB: the suite's own X server — ended with SIGTERM so it removes its lock (B-e5d3)
-const check = (n, ok, x = '') => { if (ok) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${x ? ` — ${x}` : ''}`); } };
+const check = (n, ok, x = '') => { if (typeof ok !== 'boolean') throw new TypeError(`check: its condition is a ${typeof ok}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (ok) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${x ? ` — ${x}` : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-adsec-h-')), kids = [];
 const env = { PATH: process.env.PATH, HOME: path.join(tmp, 'home'), XDG_RUNTIME_DIR: path.join(tmp, 'run') };
@@ -104,13 +104,13 @@ try {
   const profOn = path.join(tmp, 'prof-on');
   let b1 = await bus(appOn, 'on');
   const c1 = await chromeRun(appOn, b1.plan, profOn, visit);
-  check('Chrome took the cookie', c1.some((c) => c.name === 'sid' && c.value === 'kept-across-restart'));
+  check('Chrome took the cookie', verdictOf(c1.some((c) => c.name === 'sid' && c.value === 'kept-across-restart')));
   check('Chrome sealed it with the KEYRING key (v11), not the basic store', prefixes(profOn) === 'v11', prefixes(profOn));
   const n1 = D.appSecretsOf({ rec: { secrets: 'on' }, dir: appOn }).count;
   check('the app\'s store keeps Chrome\'s item (the ⋯ count)', n1 >= 1, String(n1));
   b1.child.kill('SIGTERM'); await sleep(800); b1 = await bus(appOn, 'on'); // the whole session restarts: a NEW bus + service reads the sealed file
   const c2 = await chromeRun(appOn, b1.plan, profOn, async (b) => (await b.send('Storage.getCookies')).result.cookies);
-  check('after a browser + bus restart the cookie still decrypts (the key round-tripped through the sealed store)', c2.some((c) => c.name === 'sid' && c.value === 'kept-across-restart'), JSON.stringify(c2.map((c) => c.name)));
+  check('after a browser + bus restart the cookie still decrypts (the key round-tripped through the sealed store)', verdictOf(c2.some((c) => c.name === 'sid' && c.value === 'kept-across-restart')), JSON.stringify(c2.map((c) => c.name)));
   console.log('①b the environ census (lane display-secret-fd): the key is in NO process of this box but the planted control');
   await chromeRun(appOn, b1.plan, profOn, async () => {
     const keyHex = b1.facts.keyHex;
@@ -124,7 +124,7 @@ try {
     planted.kill('SIGKILL');
   });
   const log = fs.readFileSync(path.join(appOn, 'app.log'), 'utf8');
-  check('Chrome\'s libsecret opened a plain session; nothing it stored is in the log', /OpenSession plain/.test(log) && !/kept-across-restart/.test(log), log.split('\n').filter((l) => l.includes('[secrets]')).slice(0, 4).join(' / '));
+  check('Chrome\'s libsecret opened a plain session; nothing it stored is in the log', gateOf(/OpenSession plain/.test(log)) && !/kept-across-restart/.test(log), log.split('\n').filter((l) => l.includes('[secrets]')).slice(0, 4).join(' / '));
   console.log('② RED control: the setting off (no service on the bus)');
   const appOff = path.join(tmp, 'data', 'desktop-apps', 'da-chrome2'); fs.mkdirSync(appOff, { recursive: true });
   const profOff = path.join(tmp, 'prof-off'), b2 = await bus(appOff, 'off');
@@ -144,7 +144,7 @@ try {
     const { sessionId } = (await b.send('Target.attachToTarget', { targetId, flatten: true })).result;
     await sleep(800); await b.send('Runtime.evaluate', { expression: `go(${n1})` }, sessionId); await sleep(700);
     const txt = (await b.send('Runtime.evaluate', { expression: '[...document.querySelectorAll(".context-menu")].map((m) => m.innerText).join(" | ")', returnByValue: true }, sessionId)).result.result.value;
-    check('the ⋯ menu reads "Stored logins (n)" with the store\'s count + Forget all', txt.includes(`Stored logins (${n1})`) && /Forget all/.test(txt), txt.slice(0, 200));
+    check('the ⋯ menu reads "Stored logins (n)" with the store\'s count + Forget all', gateOf(txt.includes(`Stored logins (${n1})`)) && verdictOf(/Forget all/.test(txt)), txt.slice(0, 200));
     await b.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 360, deviceScaleFactor: 1, mobile: false }, sessionId);
     fs.writeFileSync(pngOut, Buffer.from((await b.send('Page.captureScreenshot', { format: 'png' }, sessionId)).result.data, 'base64'));
   });
@@ -161,4 +161,4 @@ try {
   await sleep(300); fs.rmSync(tmp, { recursive: true, force: true });
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

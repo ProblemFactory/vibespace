@@ -35,7 +35,7 @@ const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome for the client'); process.exit(0); }
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const PNG_DIR = process.env.VIBESPACE_CMM_PNG_DIR || null;
@@ -67,7 +67,7 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const tBuild = Date.now();
 try { execSync('npm run build:bundles', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(String(e.stdout || '').split('\n').filter((l) => /✗|FAIL|rror/.test(l)).slice(0, 8).join('\n')); throw e; }
 const MERMAID_JS = path.join(wt, 'public', 'mermaid.js');
-check(`the build made public/mermaid.js (${Math.round((Date.now() - tBuild) / 1000)} s build)`, fs.existsSync(MERMAID_JS));
+check(`the build made public/mermaid.js (${Math.round((Date.now() - tBuild) / 1000)} s build)`, verdictOf(fs.existsSync(MERMAID_JS)));
 const rawBytes = fs.statSync(MERMAID_JS).size, gzBytes = require('node:zlib').gzipSync(fs.readFileSync(MERMAID_JS), { level: 9 }).length;
 console.log(`  · public/mermaid.js ${rawBytes} bytes raw · ${gzBytes} bytes gzip -9 · public/bundle.js ${fs.statSync(path.join(wt, 'public', 'bundle.js')).size} bytes`);
 fs.writeFileSync(path.join(wt, 'public', 'vs-cmm-flow.md'), '# Flow\n\n' + fence(FLOW) + '\n');
@@ -175,26 +175,26 @@ try {
   const HIST = `(() => { const w = ${WIN}; return w ? [...w.element.querySelectorAll('.chat-msg .chat-text .chat-diagram')][0] || null : null; })()`;
   const f1 = await until(async () => { const f = await facts(HIST); return f && f.state === 'ok' ? f : null; }, 60000);
   check('the reply\'s fence is a .chat-diagram card INSIDE the message (.chat-msg .chat-text), drawn', !!f1, await facts(HIST));
-  check(`an <svg> of ≥ 6 node groups (${f1 && f1.nodes}) with every label as text`, !!f1 && f1.nodes >= 6 && LABELS.every((l) => f1.labels.includes(l)), f1 && { nodes: f1.nodes, labels: f1.labels });
+  check(`an <svg> of ≥ 6 node groups (${f1 && f1.nodes}) with every label as text`, !!f1 && f1.nodes >= 6 && verdictOf(LABELS.every((l) => f1.labels.includes(l))), f1 && { nodes: f1.nodes, labels: f1.labels });
   check('no foreignObject, no on* attribute, no javascript:, no <a> in the picture', !!f1 && f1.fo === 0 && !f1.onAttrs.length && !f1.jsAttrs.length && f1.anchors === 0, f1);
-  check(`every id is the picture's own scope (${f1 && f1.scope}), every class mmd-, every CSS rule (${f1 && f1.rules}) starts at #scope`, !!f1 && /^vsd/.test(f1.scope) && !f1.idsOff.length && !f1.classesOff.length && f1.rules > 10 && !f1.rulesOff.length, f1 && { idsOff: f1.idsOff, classesOff: f1.classesOff, rulesOff: f1.rulesOff, rules: f1.rules });
-  check('the toolbar says 图 · 源码 · 复制 · 放大, the picture is shown and the source hidden', !!f1 && JSON.stringify(f1.btns) === '["图","源码","复制","放大"]' && f1.view === 'diagram' && f1.figVisible && !f1.srcVisible, f1 && { btns: f1.btns, view: f1.view });
-  check('the dark page draws the dark diagram, at a readable size', !!f1 && f1.theme === 'dark' && f1.svgSize && f1.svgSize.w >= 200 && f1.svgSize.h >= 400, f1 && { theme: f1.theme, svgSize: f1.svgSize });
+  check(`every id is the picture's own scope (${f1 && f1.scope}), every class mmd-, every CSS rule (${f1 && f1.rules}) starts at #scope`, !!f1 && gateOf(/^vsd/.test(f1.scope)) && !f1.idsOff.length && !f1.classesOff.length && f1.rules > 10 && !f1.rulesOff.length, f1 && { idsOff: f1.idsOff, classesOff: f1.classesOff, rulesOff: f1.rulesOff, rules: f1.rules });
+  check('the toolbar says 图 · 源码 · 复制 · 放大, the picture is shown and the source hidden', !!f1 && JSON.stringify(f1.btns) === '["图","源码","复制","放大"]' && f1.view === 'diagram' && gateOf(f1.figVisible) && !f1.srcVisible, f1 && { btns: f1.btns, view: f1.view });
+  check('the dark page draws the dark diagram, at a readable size', !!f1 && f1.theme === 'dark' && gateOf(f1.svgSize) && f1.svgSize.w >= 200 && f1.svgSize.h >= 400, f1 && { theme: f1.theme, svgSize: f1.svgSize });
   const timing = await ev(`(() => { const d = window.__drawn[0]; const res = performance.getEntriesByType('resource').filter((e) => /\\/mermaid\\.js/.test(e.name)); return { first: d ? Math.round(d.t - window.__t0) : null, renderMs: d ? d.ms : null, res: res.map((e) => ({ name: e.name.replace(location.origin, ''), ms: Math.round(e.duration), transfer: e.transferSize, body: e.encodedBodySize, decoded: e.decodedBodySize })) }; })()`);
   console.log(`  · first render: ${timing && timing.first} ms from opening the conversation to the drawn card (mermaid.js fetch ${timing && timing.res[0] && timing.res[0].ms} ms, its first render ${timing && timing.renderMs} ms incl. initialize) · ${JSON.stringify(timing && timing.res)}`);
-  check('the library came from THIS origin, stamped ?v=<mtime> (index.html\'s link), once', !!timing && timing.res.length === 1 && /^\/mermaid\.js\?v=\d+$/.test(timing.res[0].name), timing);
+  check('the library came from THIS origin, stamped ?v=<mtime> (index.html\'s link), once', !!timing && timing.res.length === 1 && verdictOf(/^\/mermaid\.js\?v=\d+$/.test(timing.res[0].name)), timing);
   if (f1) await shot('chat-dark.png', f1.rect);
 
   // ════ ② 源码 / 图 ════
   console.log('── ② 源码 shows the source ──');
   await press(`${HIST}.querySelector('[data-v="source"]')`);
   const f2 = await until(async () => { const f = await facts(HIST); return f && f.view === 'source' ? f : null; }, 5000);
-  check('源码: the source shows, the picture hides', !!f2 && f2.srcVisible && !f2.figVisible, f2);
+  check('源码: the source shows, the picture hides', !!f2 && gateOf(f2.srcVisible) && !f2.figVisible, f2);
   check('the source shown is the diagram as written', !!f2 && f2.lines.join('\n') === FLOW, f2 && f2.lines);
   if (f2) await shot('chat-source.png', f2.rect);
   await press(`${HIST}.querySelector('[data-v="diagram"]')`);
   const f2b = await until(async () => { const f = await facts(HIST); return f && f.view === 'diagram' ? f : null; }, 5000);
-  check('图 brings the picture back', !!f2b && f2b.figVisible && !f2b.srcVisible, f2b);
+  check('图 brings the picture back', !!f2b && gateOf(f2b.figVisible) && !f2b.srcVisible, f2b);
 
   // ════ ③ 复制 ════
   console.log('── ③ 复制 copies the source ──');
@@ -210,7 +210,7 @@ try {
   const ZW = `[...app.wm.windows.values()].find((w) => w._openSpec && w._openSpec.action === 'openDiagram')`;
   const zoom = await until(() => ev(`(() => { const w = ${ZW}; const img = w && w.element.querySelector('.file-viewer-diagram img.media-image'); if (!img || !img.complete || !img.naturalWidth) return null;
     return { type: w.type, code: w._openSpec.code, src: img.src.slice(0, 5), nw: img.naturalWidth, nh: img.naturalHeight, tools: [...w.element.querySelectorAll('.media-toolbar button')].map((b) => b.textContent), rect: (() => { const r = w.element.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })() }; })()`), 20000);
-  check('a viewer window shows the picture as an image (blob:, natural size ≥ the drawn one) with zoom + pan tools', !!zoom && zoom.type === 'viewer' && zoom.src === 'blob:' && zoom.nw >= 230 && zoom.nh >= 600 && zoom.tools.includes('+') && zoom.tools.includes('1:1'), zoom);
+  check('a viewer window shows the picture as an image (blob:, natural size ≥ the drawn one) with zoom + pan tools', !!zoom && zoom.type === 'viewer' && zoom.src === 'blob:' && zoom.nw >= 230 && zoom.nh >= 600 && gateOf(zoom.tools.includes('+')) && verdictOf(zoom.tools.includes('1:1')), zoom);
   check('its openSpec carries the SOURCE (a reload / another client re-draws it through the one door)', !!zoom && zoom.code === FLOW);
   if (zoom) await shot('zoom-window.png', zoom.rect);
   await ev(`(() => { const w = ${ZW}; if (w) app.wm.closeWindow(w.id); return true; })()`);
@@ -219,8 +219,8 @@ try {
   console.log('── ⑤ a broken diagram shows its source and the line ──');
   await ev(liveMsg('cmm-bad', fence(BAD, 'This one is broken:')));
   const f5 = await until(async () => { const f = await facts(cardIn(msgSel('cmm-bad'))); return f && f.state === 'failed' ? f : null; }, 30000);
-  check('the card did not draw — it shows the SOURCE by itself (no picture, no bomb)', !!f5 && f5.view === 'source' && f5.srcVisible && !f5.figVisible && !f5.svg, f5);
-  check('it says 「渲染失败 · 第 3 行」 + mermaid\'s own words', !!f5 && /^渲染失败 · 第 3 行 — Parse error on line 3/.test(f5.err) && /Expecting/.test(f5.err), f5 && f5.err);
+  check('the card did not draw — it shows the SOURCE by itself (no picture, no bomb)', !!f5 && f5.view === 'source' && gateOf(f5.srcVisible) && !f5.figVisible && !f5.svg, f5);
+  check('it says 「渲染失败 · 第 3 行」 + mermaid\'s own words', !!f5 && gateOf(/^渲染失败 · 第 3 行 — Parse error on line 3/.test(f5.err)) && verdictOf(/Expecting/.test(f5.err)), f5 && f5.err);
   check('line 3 of the source is the marked one', !!f5 && JSON.stringify(f5.bad) === JSON.stringify(['  B --> [oops']) && f5.lines.join('\n') === BAD, f5 && f5.bad);
   if (f5) await shot('chat-failed.png', f5.rect);
 
@@ -230,11 +230,11 @@ try {
   await ev(liveMsg('cmm-stream', OPEN, 'streaming'));
   await ev(`(${VIEW}._onEditMessage('cmm-stream', { content: [{ type: 'text', text: ${JSON.stringify(OPEN + '\n  B --> C[Ship]')} }] }), true)`);
   const open6 = await until(() => ev(`(() => { const w = ${WIN}; const m = w && w.element.querySelector('${msgSel('cmm-stream')}'); if (!m) return null; const pre = m.querySelector('pre[data-fence-open]'); return pre && /Ship/.test(pre.textContent) ? { card: !!m.querySelector('.chat-diagram'), pre: true } : null; })()`), 5000, 100);
-  check('mid-stream, the OPEN fence is a code block (marked data-fence-open), no card', !!open6 && open6.pre && !open6.card, open6);
+  check('mid-stream, the OPEN fence is a code block (marked data-fence-open), no card', !!open6 && gateOf(open6.pre) && !open6.card, open6);
   const CLOSED = OPEN + '\n  B --> C[Ship]\n```\n\nStill typing';
   await ev(`(${VIEW}._onEditMessage('cmm-stream', { content: [{ type: 'text', text: ${JSON.stringify(CLOSED)} }] }), true)`);
   const f6 = await until(async () => { const f = await facts(cardIn(msgSel('cmm-stream'))); return f && f.state === 'ok' ? f : null; }, 30000);
-  check('the frame the fence closes in draws it — while the reply is still streaming', !!f6 && ['Plan', 'Build', 'Ship'].every((l) => f6.labels.includes(l)) && (await ev(`${VIEW}._messages.find((m) => m.id === 'cmm-stream').status`)) === 'streaming', f6);
+  check('the frame the fence closes in draws it — while the reply is still streaming', !!f6 && gateOf(['Plan', 'Build', 'Ship'].every((l) => f6.labels.includes(l))) && (await ev(`${VIEW}._messages.find((m) => m.id === 'cmm-stream').status`)) === 'streaming', f6);
   await ev(`(${VIEW}._onEditMessage('cmm-stream', { status: 'complete', content: [{ type: 'text', text: ${JSON.stringify(CLOSED.replace('Still typing', 'Done.'))} }] }), true)`);
   const f6b = await until(async () => { const f = await facts(cardIn(msgSel('cmm-stream'))); return f && f.state === 'ok' && f.labels.includes('Ship') ? f : null; }, 15000);
   check('the finished message keeps the diagram', !!f6b);
@@ -250,7 +250,7 @@ try {
   const f7 = await until(async () => { const f = await facts(cardIn(msgSel('cmm-xss'))); return f && f.state !== 'loading' ? f : null; }, 30000);
   await sleep(800);
   const pwned = await ev('window.__pwned === undefined ? null : window.__pwned');
-  check('the probe draws (3 nodes) and its hostile label survives as TEXT (mermaid\'s strict pass already shows `<img src="x">` without its handler; no element of it exists)', !!f7 && f7.state === 'ok' && f7.nodes === 3 && f7.labels.some((l) => /^<img src="x">$/.test(l)) && (await ev(`!${cardIn(msgSel('cmm-xss'))}.querySelector('img, foreignObject, a, script')`)) === true, f7);
+  check('the probe draws (3 nodes) and its hostile label survives as TEXT (mermaid\'s strict pass already shows `<img src="x">` without its handler; no element of it exists)', !!f7 && f7.state === 'ok' && f7.nodes === 3 && gateOf(f7.labels.some((l) => /^<img src="x">$/.test(l))) && (await ev(`!${cardIn(msgSel('cmm-xss'))}.querySelector('img, foreignObject, a, script')`)) === true, f7);
   check('no on* attribute, no javascript: value, no <a>, no foreignObject (the %%{init}%% htmlLabels door stayed shut)', !!f7 && !f7.onAttrs.length && !f7.jsAttrs.length && f7.anchors === 0 && f7.fo === 0, f7);
   check('no handler ran (window.__pwned never set) and the page is still visible (themeCSS body{display:none} refused)', pwned === null && (await ev('getComputedStyle(document.body).display')) !== 'none', pwned);
   // CONTROL (a): the same label through marked.parse + RAW insertion carries the attribute and runs (a blank tab — no app CSP)
@@ -288,10 +288,10 @@ try {
     await new Promise((r) => setTimeout(r, 300));
     return { mine, plain, ran: window.__pwned === undefined ? null : window.__pwned }; })()`);
   const mine = ctlC && ctlC.mine, plain = ctlC && ctlC.plain;
-  check('the wall keeps the picture: its labels as text, the scoped rule (classes mmd-), the gradient and marker references re-pointed', !!mine && JSON.stringify(mine.texts) === '["Start label","link label"]' && mine.ruleKept && mine.gradRef && mine.stroke === `url(#${SC}-grad)` && mine.marker === `url(#${SC}_arrow)` && mine.cls === 'mmd-node mmd-chat-agent-view-btn', mine);
+  check('the wall keeps the picture: its labels as text, the scoped rule (classes mmd-), the gradient and marker references re-pointed', !!mine && JSON.stringify(mine.texts) === '["Start label","link label"]' && gateOf(mine.ruleKept) && gateOf(mine.gradRef) && mine.stroke === `url(#${SC}-grad)` && mine.marker === `url(#${SC}_arrow)` && mine.cls === 'mmd-node mmd-chat-agent-view-btn', mine);
   check('…and drops every door: no on*, no javascript:, nothing from example.invalid, no foreignObject / a / image / use / animate / set / script, no data-id, no tabindex', !!mine && !mine.on.length && !mine.js && !mine.external && !mine.tags.some((x) => /^(foreignObject|a|image|use|animate|set|script)$/i.test(x)) && !mine.dataId && !mine.tab && !mine.html, mine);
-  check('…its CSS: no body rule, no sibling selector, no @font-face / @keyframes; ids scoped (actor0 → scope-actor0, grad → scope-grad); style= keeps fill, loses the url()', !!mine && !mine.bodyRule && !mine.sibling && !mine.fontFace && !mine.keyframes && mine.ids.includes(`${SC}-actor0`) && mine.ids.includes(`${SC}-grad`) && mine.ids.includes(SC) && /fill/.test(mine.rectStyle || '') && !/url/.test(mine.rectStyle || ''), mine);
-  check('CONTROL (c): DOMPurify\'s plain SVG profile KEEPS the body rule, the off-picture url()s, the product class and the bare ids — the hooks and the config are the wall', !!plain && plain.bodyRule && plain.external && /chat-agent-view-btn/.test(plain.cls || '') && plain.ids.includes('actor0') && plain.dataId, plain);
+  check('…its CSS: no body rule, no sibling selector, no @font-face / @keyframes; ids scoped (actor0 → scope-actor0, grad → scope-grad); style= keeps fill, loses the url()', !!mine && !mine.bodyRule && !mine.sibling && !mine.fontFace && !mine.keyframes && gateOf(mine.ids.includes(`${SC}-actor0`)) && gateOf(mine.ids.includes(`${SC}-grad`)) && gateOf(mine.ids.includes(SC)) && gateOf(/fill/.test(mine.rectStyle || '')) && !/url/.test(mine.rectStyle || ''), mine);
+  check('CONTROL (c): DOMPurify\'s plain SVG profile KEEPS the body rule, the off-picture url()s, the product class and the bare ids — the hooks and the config are the wall', !!plain && gateOf(plain.bodyRule) && gateOf(plain.external) && gateOf(/chat-agent-view-btn/.test(plain.cls || '')) && gateOf(plain.ids.includes('actor0')) && verdictOf(plain.dataId), plain);
   check('no handler ran in the control tab either (the sanitizers parse inertly)', !!ctlC && ctlC.ran === null, ctlC && ctlC.ran);
 
   // ════ ⑧ the editor's preview ════
@@ -304,7 +304,7 @@ try {
   await press(`[...(${EW}).element.querySelectorAll('button')].find((x) => x.textContent === '预览')`);
   const EC = `(() => { const w = ${EW}; return w ? w.element.querySelector('.markdown-preview .chat-diagram') : null; })()`;
   const f8 = await until(async () => { const f = await facts(EC); return f && f.state === 'ok' ? f : null; }, 30000);
-  check('the preview draws the same flowchart (≥ 6 nodes, every label) through the one door — no CDN script', !!f8 && f8.nodes >= 6 && LABELS.every((l) => f8.labels.includes(l)) && !f8.onAttrs.length && f8.fo === 0, f8 || await facts(EC));
+  check('the preview draws the same flowchart (≥ 6 nodes, every label) through the one door — no CDN script', !!f8 && f8.nodes >= 6 && gateOf(LABELS.every((l) => f8.labels.includes(l))) && !f8.onAttrs.length && f8.fo === 0, f8 || await facts(EC));
   if (f8) await shot('editor-preview.png', await ev(`(() => { const r = (${EW}).element.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })()`));
   await ev(`(() => { const w = ${EW}; if (w) app.wm.closeWindow(w.id); return true; })()`);
 
@@ -330,7 +330,7 @@ try {
   await ev(liveMsg('cmm-pic', fence(PICTURE, 'With a picture:')));
   const f11 = await until(async () => { const f = await facts(cardIn(msgSel('cmm-pic'))); return f && f.state === 'failed' ? f : null; }, 20000);
   await sleep(500);
-  check('it is NOT drawn: the source shows with the reason (VibeSpace draws nothing from outside)', !!f11 && f11.view === 'source' && /pictures\.example\.invalid/.test(f11.err) && /不从外部加载/.test(f11.err), f11);
+  check('it is NOT drawn: the source shows with the reason (VibeSpace draws nothing from outside)', !!f11 && f11.view === 'source' && gateOf(/pictures\.example\.invalid/.test(f11.err)) && verdictOf(/不从外部加载/.test(f11.err)), f11);
   check('…and nothing was requested for it', !requests.slice(before).some((u) => /example\.invalid/.test(u)), requests.slice(before));
 
   // ════ ⑫ the network ════
@@ -338,7 +338,7 @@ try {
   const off = requests.filter((u) => !(u.startsWith(ORIGIN + '/') || u.startsWith('data:') || u.startsWith('blob:') || u.startsWith('ws://127.0.0.1:' + PORT)));
   const mjs = requests.filter((u) => /\/mermaid\.js(\?|$)/.test(u));
   check(`all ${requests.length} requests the page made went to the scratch hub (data:/blob: aside)`, off.length === 0, off.slice(0, 8));
-  check('mermaid.js was requested ONCE, at its stamped address', mjs.length === 1 && /\/mermaid\.js\?v=\d+$/.test(mjs[0]), mjs);
+  check('mermaid.js was requested ONCE, at its stamped address', mjs.length === 1 && verdictOf(/\/mermaid\.js\?v=\d+$/.test(mjs[0])), mjs);
   // ⑦'S OWN PROBE IS NOT THE APP'S (lane ci-mirror-hygiene, 2.369.362 — the mirror's Chrome 156 ran this suite red on
   // 2.369.361, both tries): mermaid's sanitizer parses the probe's label in an inert document, and since Chrome 156 the
   // handler it drops is reported when its attribute is SET — nothing ran (⑦ «no handler ran»). That ONE report is
@@ -354,7 +354,7 @@ try {
   const probe = await takeProbeCspReport({ directive: 'script-src-attr', blocked: 'inline', sample: PROBE_HANDLER.slice(0, 40), source: `${ORIGIN}/mermaid.js`, document: `${ORIGIN}/` });
   const p0 = probe.taken[0];
   const fault = probeVerdictFault(probe, { major, forYou: Array.isArray(forYou) ? forYou : [{ text: `For you unread: ${JSON.stringify(forYou).slice(0, 200)}` }], count: { before: cspBefore, after: cspAfter } });
-  check(`⑦'s own probe: ${browser} ${p0 ? `reported its dropped handler — EXPECTED, taken (script-src-attr inline «${p0.sample}», set by ${p0.source} at ${p0.line}:${p0.column}); THE HUB'S VERDICT: ${probe.kind ? `kind ${probe.kind}` : 'the app page\'s'}, ${probe.noticed ? 'filed as a notice' : 'no notice'}, For you ${forYou && forYou.length ? `${forYou.length} page-security notice(s)` : 'empty'}, Diagnostics' sanitizer count +${(cspAfter?.sanitizer?.lines ?? NaN) - (cspBefore?.sanitizer?.lines ?? NaN)}` : `reported nothing for it (it reports no dropped handler; Diagnostics' sanitizer count +${(cspAfter?.sanitizer?.lines ?? NaN) - (cspBefore?.sanitizer?.lines ?? NaN)})`}`, probe.ok && !fault, fault || probe.taken);
+  check(`⑦'s own probe: ${browser} ${p0 ? `reported its dropped handler — EXPECTED, taken (script-src-attr inline «${p0.sample}», set by ${p0.source} at ${p0.line}:${p0.column}); THE HUB'S VERDICT: ${probe.kind ? `kind ${probe.kind}` : 'the app page\'s'}, ${probe.noticed ? 'filed as a notice' : 'no notice'}, For you ${forYou && forYou.length ? `${forYou.length} page-security notice(s)` : 'empty'}, Diagnostics' sanitizer count +${(cspAfter?.sanitizer?.lines ?? NaN) - (cspBefore?.sanitizer?.lines ?? NaN)}` : `reported nothing for it (it reports no dropped handler; Diagnostics' sanitizer count +${(cspAfter?.sanitizer?.lines ?? NaN) - (cspBefore?.sanitizer?.lines ?? NaN)})`}`, gateOf(probe.ok) && !fault, fault || probe.taken);
   const csp = cspReportLines(); // this suite's report lines less what it took (scratch.mjs — the take never rewrites the hub's file, B-c327)
   check('the app page reported nothing ELSE to its CSP (script-src \'self\': every script came from this origin)', csp.length === 0, csp.slice(0, 4));
   check('no uncaught page error', pageErrors.length === 0, pageErrors.slice(0, 3));
@@ -369,4 +369,4 @@ cleanup();
   check(`the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`, lit.offenders.length === 0, JSON.stringify(lit.offenders.slice(0, 3)));
 }
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -39,7 +39,7 @@ const { HostManager } = require('../src/hosts.js');
 const { UserTodoManager } = require('../src/user-todos.js');
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const tick = () => new Promise((r) => setImmediate(r));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -83,12 +83,12 @@ console.log('— ① the verdict table');
     'the instance kind: VIBESPACE_INSTANCE_NAME or the shared presets folder ⇒ cluster (mounts-plugins-wiring\'s clusterDeploy rule)');
   const actKeys = Object.entries(DA.TABLE).filter(([, l]) => l === 'act' || l === 'code').map(([k]) => k);
   const unkinded = actKeys.filter((k) => !Object.prototype.hasOwnProperty.call(P.KIND_OF, k));
-  ok(actKeys.length >= 25 && unkinded.length === 0 && Object.values(P.KIND_OF).every((k) => P.KINDS.includes(k)), `every act / code row of the layer table (${actKeys.length}) has a kind of the ${P.KINDS.length} (${P.KINDS.join(' / ')})`, unkinded);
+  ok(actKeys.length >= 25 && unkinded.length === 0 && verdictOf(Object.values(P.KIND_OF).every((k) => P.KINDS.includes(k))), `every act / code row of the layer table (${actKeys.length}) has a kind of the ${P.KINDS.length} (${P.KINDS.join(' / ')})`, unkinded);
   ok(P.kindOf('brand-new-op') === 'run' && P.kindOf('upgrade') === 'upgrade' && P.kindOf('fs-op:write-stream') === 'files' && P.kindOf('desktop-serve:app-install') === 'install' && P.kindOf('tcp-connect') === 'forward', 'an act without a kind row is `run` (the strongest words); the families as named');
   const sk = P.subjectKey;
   ok(sk('h1', 'run', 'agent:a') === sk('h1', 'run', 'agent:a') && sk('h1', 'run', 'agent:a') !== sk('h1', 'run', 'agent:b') && sk('h1', 'run', 'agent:a') !== sk('h1', 'files', 'agent:a') && sk('h1', 'run', 'agent:a') !== sk('h2', 'run', 'agent:a'), 'the card key = machine + kind + who asks (lane ledger-dedup-law r3: one card per SUBJECT)');
   ok(P.ASK_TTL_MS === E.ASK_TTL_MS && P.ASK_TTL_MS === 60000, 'the card lives 60 s — the exit ask\'s own number');
-  ok(P.answerVerdict({ askedAt: 0 }, { answer: 'once', by: 'agent', now: 1 }).code === 'human_only' && P.answerVerdict({ askedAt: 0 }, { answer: 'once', by: 'user', now: 60000 }).code === 'ask_expired' && P.answerVerdict({ askedAt: 0 }, { answer: 'maybe', by: 'user', now: 1 }).code === 'bad_answer' && P.answerVerdict({ askedAt: 0, settled: 'settled' }, { answer: 'once', by: 'user', now: 1 }).code === 'ask_settled' && P.answerVerdict({ askedAt: 0 }, { answer: 'always', by: 'user', now: 1 }).ok,
+  ok(P.answerVerdict({ askedAt: 0 }, { answer: 'once', by: 'agent', now: 1 }).code === 'human_only' && P.answerVerdict({ askedAt: 0 }, { answer: 'once', by: 'user', now: 60000 }).code === 'ask_expired' && P.answerVerdict({ askedAt: 0 }, { answer: 'maybe', by: 'user', now: 1 }).code === 'bad_answer' && P.answerVerdict({ askedAt: 0, settled: 'settled' }, { answer: 'once', by: 'user', now: 1 }).code === 'ask_settled' && verdictOf(P.answerVerdict({ askedAt: 0 }, { answer: 'always', by: 'user', now: 1 }).ok),
     'an answer: a person only, once, within 60 s, one of once / always / deny');
 }
 
@@ -100,14 +100,14 @@ console.log('— ② the third list in exit-reach');
   const a1 = E.exitAccessOf({ id: 'h', exit: { ask: true, hub: { mode: 'nobody' } } }, RUN_ALL);
   const aBad = E.exitAccessOf({ id: 'h', exit: { use: { mode: 'nobody' }, run: { mode: 'nobody' }, hub: { mode: 'sometimes' } } });
   ok(a0.hub.mode === 'default' && a1.hub.mode === 'nobody' && aBad.mode === 'unknown' && E.exitAccessOf(null).hub.mode === 'default' && E.exitAccessOf({ allowExit: true }).hub.mode === 'default', 'read: not set = default, a stored mode as is, a bad stored mode makes the WHOLE access unknown (fail closed)');
-  ok(E.exitStamp(a0) === E.exitStamp(E.exitAccessOf({ id: 'h', exit: { ask: true } }, RUN_ALL)) && !E.exitStamp(a0).includes('"h"') && E.exitStamp(a1).includes('["h","mode","nobody"]'),
+  ok(E.exitStamp(a0) === E.exitStamp(E.exitAccessOf({ id: 'h', exit: { ask: true } }, RUN_ALL)) && !E.exitStamp(a0).includes('"h"') && verdictOf(E.exitStamp(a1).includes('["h","mode","nobody"]')),
     'the stamp gains a line only when the list is set — a dialog drawn before this lane keeps its base');
   const p1 = E.patchVerdict(a0, { hub: { mode: 'ask' }, base: E.exitStamp(a0) }, { now: 5 });
-  ok(p1.ok && p1.access.hub.mode === 'ask' && p1.access.use.mode === 'nobody' && p1.access.run.mode === 'everyone' && p1.changed.hub === true, 'write: the third list alone (use / run kept)', p1);
+  ok(gateOf(p1.ok) && p1.access.hub.mode === 'ask' && p1.access.use.mode === 'nobody' && p1.access.run.mode === 'everyone' && p1.changed.hub === true, 'write: the third list alone (use / run kept)', p1);
   const st = E.storedExit(p1.access);
-  ok(st.hub && st.hub.mode === 'ask' && E.exitAccessOf({ exit: st }, RUN_ALL).hub.mode === 'ask' && !('hub' in E.storedExit(a0)), 'the stored shape carries `hub` only when set; it reads back');
+  ok(gateOf(st.hub) && st.hub.mode === 'ask' && E.exitAccessOf({ exit: st }, RUN_ALL).hub.mode === 'ask' && !('hub' in E.storedExit(a0)), 'the stored shape carries `hub` only when set; it reads back');
   const p2 = E.patchVerdict(E.exitAccessOf({ exit: st }, RUN_ALL), { run: { mode: 'nobody' } }, { now: 6 });
-  ok(p2.ok && p2.access.hub.mode === 'ask' && E.storedExit(p2.access).hub.mode === 'ask', 'a use / run save KEEPS the third list (hosts.setExitAccess replaces `exit` whole)');
+  ok(gateOf(p2.ok) && p2.access.hub.mode === 'ask' && E.storedExit(p2.access).hub.mode === 'ask', 'a use / run save KEEPS the third list (hosts.setExitAccess replaces `exit` whole)');
   const b1 = E.patchVerdict(a0, { hub: { mode: 'only' } }), b2 = E.patchVerdict(a0, { hub: 'ask' }), b3 = E.patchVerdict(a0, { hub: { mode: 'ask' }, base: E.exitStamp(a1) }), b4 = E.patchVerdict(aBad, { hub: { mode: 'ask' } });
   ok(b1.code === 'bad_mode' && b2.code === 'bad_grant' && b3.code === 'list_changed' && b4.code === 'bad_grant', 'refused: a mode off the three (+ default), a non-object, a stale base, the third list alone over an unreadable access', [b1.code, b2.code, b3.code, b4.code]);
   ok(E.patchVerdict(E.exitAccessOf({ exit: st }), { hub: { mode: 'default' } }).access.hub.mode === 'default' && !('hub' in E.storedExit(E.patchVerdict(E.exitAccessOf({ exit: st }), { hub: { mode: 'default' } }).access)), '`default` clears it (the instance\'s default applies again)');
@@ -117,14 +117,14 @@ console.log('— ② the third list in exit-reach');
 console.log('— ③ the words');
 {
   const titles = P.KINDS.map((k) => P.cardOf({ by: 'system:usage-harvest', machine: 'mac1', kind: k, summary: 'x' }).text);
-  ok(new Set(titles).size === 7 && titles.every((t) => t.startsWith('system:usage-harvest wants to') && t.includes('mac1')), 'one title per kind, naming who and the machine', titles);
+  ok(new Set(titles).size === 7 && verdictOf(titles.every((t) => t.startsWith('system:usage-harvest wants to') && t.includes('mac1'))), 'one title per kind, naming who and the machine', titles);
   const RLO = String.fromCharCode(0x202e), NL = String.fromCharCode(10);
   const w = P.cardOf({ by: 'agent:claude:c1', name: `ops${RLO}evil${NL}line`, machine: `mac${NL}1`, kind: 'run', summary: `sh -c echo hi${RLO}` });
-  ok(w.text === '"ops evil line" wants to run a command on mac 1' && !/[\u202e\n]/.test(w.i18n.text.params.who + w.i18n.text.params.machine) && w.detail.includes('It would: sh -c echo hi') && w.detail.includes('asked by agent:claude:c1') && w.i18n.detail.length === 2,
+  ok(w.text === '"ops evil line" wants to run a command on mac 1' && !/[\u202e\n]/.test(w.i18n.text.params.who + w.i18n.text.params.machine) && gateOf(w.detail.includes('It would: sh -c echo hi')) && gateOf(w.detail.includes('asked by agent:claude:c1')) && w.i18n.detail.length === 2,
     'an agent by its conversation\'s name (quoted); a name / machine / summary with hidden characters or line breaks folded', w);
-  ok(P.cardOf({ by: 'agent:claude:c1', machine: 'm', kind: 'run' }).text.startsWith('agent:claude:c1 wants') && P.whoOf('job:jb-1') === 'job:jb-1' && P.whoOf('root') === 'nobody named', 'an unknown conversation / a job / a system subject by its `by` (the Activity… spelling)');
+  ok(gateOf(P.cardOf({ by: 'agent:claude:c1', machine: 'm', kind: 'run' }).text.startsWith('agent:claude:c1 wants')) && P.whoOf('job:jb-1') === 'job:jb-1' && P.whoOf('root') === 'nobody named', 'an unknown conversation / a job / a system subject by its `by` (the Activity… spelling)');
   const r1 = P.refusalText('hub_act_denied', { machine: 'mac1', kind: 'files', reason: 'nobody' }), r2 = P.refusalText('hub_act_denied', { machine: 'mac1', kind: 'run' }), r3 = P.refusalText('ask_expired', { machine: 'mac1', kind: 'upgrade' }), r4 = P.refusalText('ask_expired', { machine: 'mac1', kind: 'run', reason: 'quiet', until: Date.UTC(2026, 9, 19, 12, 30) });
-  ok([r1, r2, r3, r4].every((r) => r.includes('"mac1"') && r.includes('Hub automation') && /nothing was done/.test(r)) && /do not retry/.test(r1 + r2 + r3) && r4.includes('12:30 UTC') && r1.includes('Never'),
+  ok(gateOf([r1, r2, r3, r4].every((r) => r.includes('"mac1"') && r.includes('Hub automation') && /nothing was done/.test(r))) && gateOf(/do not retry/.test(r1 + r2 + r3)) && gateOf(r4.includes('12:30 UTC')) && verdictOf(r1.includes('Never')),
     'every refusal names the machine, that nothing was done, the way on (Who can use it → Hub automation) — and says not to retry in a loop', [r1, r2, r3, r4]);
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = [...Object.values(P.TITLE), P.DETAIL_WHAT, P.DETAIL_HOW, 'Always on this machine', 'Hub automation', 'Allow once', 'Always allow', 'Never', 'Ask me each time',
@@ -132,7 +132,7 @@ console.log('— ③ the words');
     'Always allowed on {machine} — its Hub automation is Always allow now', 'Hub automation on paired machines (default)', 'Auto (a cluster instance asks, a local one does not)'];
   const miss = keys.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
   ok(miss.length === 0, `the card's, the dialog's and the setting's words (${keys.length} keys) are in zh and ja`, miss);
-  ok(zh.includes('"Always on this machine": "这台机器总是允许"') && zh.includes('"{who} wants to run a command on {machine}": "{who} 想在 {machine} 上运行命令"'), 'the brief\'s words: 「<who> 想在 <machine> 上 <kind> … 允许一次 / 这台机器总是允许 / 拒绝」');
+  ok(gateOf(zh.includes('"Always on this machine": "这台机器总是允许"')) && verdictOf(zh.includes('"{who} wants to run a command on {machine}": "{who} 想在 {machine} 上运行命令"')), 'the brief\'s words: 「<who> 想在 <machine> 上 <kind> … 允许一次 / 这台机器总是允许 / 拒绝」');
 }
 
 // ── the fake daemon link (test-device-acts ③'s shape) with a gate ──
@@ -195,14 +195,14 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   await settle();
   const cs = w.cards();
   const mine = w.asker.list().find((k) => k.by === 'agent:claude:c1'), theirs = w.asker.list().find((k) => k.by === 'agent:claude:c2');
-  ok(w.sent.length === 0 && cs.length === 2 && mine && mine.waiting === 2 && theirs && theirs.waiting === 1, 'an agent\'s run on a cluster instance is HELD — nothing sent; two acts of ONE subject share ONE card; another conversation\'s act of that kind is its own card', { sent: w.sent, cards: cs.length, list: w.asker.list() });
+  ok(w.sent.length === 0 && cs.length === 2 && gateOf(mine) && mine.waiting === 2 && gateOf(theirs) && theirs.waiting === 1, 'an agent\'s run on a cluster instance is HELD — nothing sent; two acts of ONE subject share ONE card; another conversation\'s act of that kind is its own card', { sent: w.sent, cards: cs.length, list: w.asker.list() });
   const c = cs.find((x) => x.action.askId === mine.askId);
-  ok(c.urgency === 'urgent' && c.origin === 'machines' && c.kind !== 'notice' && c.action.kind === 'run' && c.action.machine === 'mac1' && c.text === '"ops review" wants to run a command on mac1' && /It would: sh -c echo one/.test(c.detail) && /with the other acts of this kind by "ops review" waiting beside it — no one else's/.test(c.detail) && /every kind and every asker/.test(c.detail) && c.expiresAt === w.clock.t + 60000 && c.i18n.text.key === P.TITLE.run,
+  ok(c.urgency === 'urgent' && c.origin === 'machines' && c.kind !== 'notice' && c.action.kind === 'run' && c.action.machine === 'mac1' && c.text === '"ops review" wants to run a command on mac1' && gateOf(/It would: sh -c echo one/.test(c.detail)) && gateOf(/with the other acts of this kind by "ops review" waiting beside it — no one else's/.test(c.detail)) && gateOf(/every kind and every asker/.test(c.detail)) && c.expiresAt === w.clock.t + 60000 && c.i18n.text.key === P.TITLE.run,
     'the card: URGENT, origin machines, who (the conversation\'s name) + the machine + the kind, what it would do, whose acts its Allow once covers (no one else\'s), 60 s', c);
   const a = await w.asker.answer(c.action.askId, { answer: 'once', by: 'user', answeredBy: 'human:0123456789ab' });
   const r = await Promise.all([codeOf(p1), codeOf(p2)]);
   ok(a.state === 'allowed' && r.join() === 'sent,sent' && ops(w.sent).join() === 'run-cmd,run-cmd' && w.asker.list().length === 1 && w.asker.list()[0].by === 'agent:claude:c2', 'Allow once ⇒ BOTH of its acts run — the other conversation\'s act is still held on its own card', { a, r, sent: w.sent, list: w.asker.list() });
-  ok(w.lines.length === 2 && w.lines.every((l) => l.ask === 'allowed' && l.answeredBy === 'human:0123456789ab' && l.ok === true && l.layer === 'act'), 'each act\'s ONE audit line carries the verdict and who answered', w.lines);
+  ok(w.lines.length === 2 && verdictOf(w.lines.every((l) => l.ask === 'allowed' && l.answeredBy === 'human:0123456789ab' && l.ok === true && l.layer === 'act')), 'each act\'s ONE audit line carries the verdict and who answered', w.lines);
   ok(w.userTodos.get(c.id).status === 'done' && w.cards().length === 1, 'the card is resolved by the answer (the other subject\'s card stays up)');
   w.fire();
   ok(await codeOf(p2b) === 'ask_expired' && ops(w.sent).length === 2, 'the other conversation\'s act: refused by ITS card\'s 60 s, never by the first card\'s Allow');
@@ -222,17 +222,17 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   const p1 = w.dm.runCmd('sh', ['-c', 'rm -rf x'], { by: 'agent:claude:c1' }), p2 = w.dm.runCmd('ls', [], { by: 'system:hosts' });
   await settle();
   const agentCard = w.cards().find((c) => !c.action.standing), item = w.cards().find((c) => c.action.standing);
-  ok(agentCard && item && item.action.by === 'system:hosts' && w.asker.list().length === 2 && w.asker.list().every((k) => k.waiting === 1), 'two subjects ⇒ two asks: the agent\'s card and the background subject\'s OWN standing item, one act held on each — no join', w.asker.list());
+  ok(gateOf(agentCard) && gateOf(item) && item.action.by === 'system:hosts' && w.asker.list().length === 2 && verdictOf(w.asker.list().every((k) => k.waiting === 1)), 'two subjects ⇒ two asks: the agent\'s card and the background subject\'s OWN standing item, one act held on each — no join', w.asker.list());
   await w.asker.answer(agentCard.action.askId, { answer: 'deny', by: 'user', answeredBy: 'human:0123456789ab' });
   const e1 = await p1.catch((e) => e);
   let p2Done = false; p2.then(() => { p2Done = true; }, () => { p2Done = true; }); await settle();
-  ok(e1.code === 'hub_act_denied' && !p2Done && w.sent.length === 0 && /the user denied it/.test(e1.message) && /Hub automation/.test(e1.message), 'Deny on the agent\'s card ⇒ the agent\'s act refused hub_act_denied (the sentence names the way on); the background act is NOT settled by it — still held on its own item; nothing sent', [e1.message, p2Done, w.sent]);
+  ok(e1.code === 'hub_act_denied' && !p2Done && w.sent.length === 0 && gateOf(/the user denied it/.test(e1.message)) && verdictOf(/Hub automation/.test(e1.message)), 'Deny on the agent\'s card ⇒ the agent\'s act refused hub_act_denied (the sentence names the way on); the background act is NOT settled by it — still held on its own item; nothing sent', [e1.message, p2Done, w.sent]);
   ok(w.lines.length === 1 && w.lines[0].ok === false && w.lines[0].code === 'hub_act_denied' && w.lines[0].ask === 'denied' && w.lines[0].answeredBy === 'human:0123456789ab', 'ONE line so far: the agent\'s refused act (denied, who answered)', w.lines);
   if (item) await w.asker.answer(item.action.askId, { answer: 'deny', by: 'user', answeredBy: 'human:0123456789ab' });
   const e2 = await p2.catch((e) => e);
   const p3 = w.dm.runCmd('ls', [], { by: 'system:hosts' }).catch((e) => e); await settle(); w.fire(); // a hold (never the case here) must not hang the suite
   const e3 = await p3;
-  ok(item && e2.code === 'hub_act_denied' && e3.code === 'hub_act_denied' && w.lines.length === 3 && w.lines.slice(1).every((l) => l.ask === 'denied') && w.userTodos.get(item.id).resolvedBy === 'denied' && w.sent.length === 0, 'its OWN Deny refuses the background act (its item closes, denied); the Deny HOLDS — its next act is refused at once, no hold, no card', [e2.code, e3.code, w.lines.map((l) => l.ask)]);
+  ok(gateOf(item) && e2.code === 'hub_act_denied' && e3.code === 'hub_act_denied' && w.lines.length === 3 && gateOf(w.lines.slice(1).every((l) => l.ask === 'denied')) && w.userTodos.get(item.id).resolvedBy === 'denied' && w.sent.length === 0, 'its OWN Deny refuses the background act (its item closes, denied); the Deny HOLDS — its next act is refused at once, no hold, no card', [e2.code, e3.code, w.lines.map((l) => l.ask)]);
 }
 {
   const w = world();
@@ -242,7 +242,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   const id = w.cards()[0].id;
   w.clock.t += 60000; w.fire();
   const e = await p.catch((x) => x);
-  ok(e.code === 'ask_expired' && /nobody answered within 60 s/.test(e.message) && /do not retry in a loop/.test(e.message) && w.sent.length === 0, '60 s unanswered ⇒ ask_expired (never retried), nothing sent', e.message);
+  ok(e.code === 'ask_expired' && gateOf(/nobody answered within 60 s/.test(e.message)) && gateOf(/do not retry in a loop/.test(e.message)) && w.sent.length === 0, '60 s unanswered ⇒ ask_expired (never retried), nothing sent', e.message);
   // lane ledger-dedup-law F3: a BACKGROUND subject's card is its ONE STANDING item — the held act refused, the item stays
   const it = w.userTodos.get(id);
   ok(it.status === 'open' && it.action.standing === true && !it.expiresAt && w.lines.length === 1 && w.lines[0].ask === 'expired' && w.lines[0].op === 'run-stream', 'the held act refused (expired); its standing item stays open, no end; ONE line says so', w.lines);
@@ -275,15 +275,15 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
     return { a, b, end: { journal: notSent().slice(n0), audit: w.lines.slice(l0) } };
   };
   const r = await run(world());
-  ok(r.a.codes.every((c) => c === 'ask_standing') && r.a.journal === 1 && r.a.audit === 1,
+  ok(gateOf(r.a.codes.every((c) => c === 'ask_standing')) && r.a.journal === 1 && r.a.audit === 1,
     `60 refused acts of one subject (ask_standing): ${r.a.journal} journal line, ${r.a.audit} audit line — the first said at once, the 59 repeats counted`);
   const fold = r.b.audit.find((l) => l.repeats), foldLine = r.b.journal.find((m) => / 59 more time\(s\) since /.test(m));
-  ok(r.b.never.every((c) => c === 'hub_act_denied') && r.b.journal.length === 3 && r.b.audit.length === 3 && fold && fold.repeats === 59 && fold.ask === 'standing' && Number.isFinite(fold.since) && !!foldLine && r.b.audit[2].ask === 'never' && !r.b.audit[2].repeats,
+  ok(gateOf(r.b.never.every((c) => c === 'hub_act_denied')) && r.b.journal.length === 3 && r.b.audit.length === 3 && gateOf(fold) && fold.repeats === 59 && fold.ask === 'standing' && gateOf(Number.isFinite(fold.since)) && !!foldLine && r.b.audit[2].ask === 'never' && !r.b.audit[2].repeats,
     `the verdict changes (the list says Never): the fold said in ONE line (${fold && fold.repeats} repeats, since ${fold && fold.since}) and the new verdict's own first line — then its 5 repeats counted`, r.b.journal);
   const last = r.end.audit[r.end.audit.length - 1];
   ok(r.end.audit.length === 4 && last.repeats === 5 && last.ask === 'never' && r.end.journal.length === 4, `stop() says the open fold: ONE line for its ${last && last.repeats} repeats`);
   const row = DA.rowOf({ ...fold, id: 'x1' });
-  ok(row && row.repeats === 59 && row.since === fold.since && !('repeats' in DA.rowOf({ ...r.b.audit[2], id: 'x2' })), 'the stored line keeps its repeats on the way out (rowOf) — a single refusal has none');
+  ok(gateOf(row) && row.repeats === 59 && row.since === fold.since && !('repeats' in DA.rowOf({ ...r.b.audit[2], id: 'x2' })), 'the stored line keeps its repeats on the way out (rowOf) — a single refusal has none');
   // RED CONTROL (a runtime mutant): no fold — every refusal is a journal line and an audit line again
   const keep = DeviceManager.prototype._foldCount;
   let foldAsked = 0;   // rule (b): the plant proves it is on the refusal road (the method exists and is asked)
@@ -302,7 +302,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
     w.hosts.setExitAccess(w.hid, E.storedExit(E.patchVerdict(E.exitAccessOf(w.hosts.get(w.hid)), { hub: { mode: 'everyone' } }).access)); w.asker.onPolicyChanged(w.hid);
     const went = await codeOf(w.dm.runCmd('ls', [], by));
     const fold = w.lines.find((l) => l.repeats);
-    ok(went === 'sent' && fold && fold.repeats === 1 && fold.summary === w.lines[2].summary, `the act goes (the list says Always): its fold is said first — ONE line, ${fold && fold.repeats} repeat`);
+    ok(went === 'sent' && gateOf(fold) && fold.repeats === 1 && fold.summary === w.lines[2].summary, `the act goes (the list says Always): its fold is said first — ONE line, ${fold && fold.repeats} repeat`);
   }
   // the hourly line, the cap of open folds (the oldest said when evicted), and a stopped client folds nothing. The hour runs on
   // an INJECTED clock (dm._clock — batch 71's reader: a loaded runner's gaps between the refusals decided the old 40 ms leg)
@@ -315,7 +315,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
     const before = w.lines.length;
     now = T0 + HOUR + 5000; await codeOf(w.dm.runCmd('ls', [], by));   // a repeat past the hour: the fold is said with it
     const hourly = w.lines.find((l) => l.repeats);
-    ok(before === 1 && w.lines.length === 2 && hourly && hourly.repeats === 3 && hourly.since === T0,
+    ok(before === 1 && w.lines.length === 2 && gateOf(hourly) && hourly.repeats === 3 && hourly.since === T0,
       `while repeats keep coming the fold is said once an hour (an injected clock): ${hourly && hourly.repeats} repeats since the first line, ${w.lines.length} lines in all`);
     now += 2 * HOUR; await codeOf(w.dm.runCmd('ls', [], by));   // nothing owed, the last refusal two hours old: STALE
     const stale = w.lines[w.lines.length - 1];
@@ -328,7 +328,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
     for (let k = 0; k < 300 && wt.lines.length < 2; k++) await new Promise((r) => setTimeout(r, 10));   // its timer says it (a count, no wall-clock bound)
     t = T0 + 25; await codeOf(wt.dm.runCmd('ls', [], by)); wt.dm._foldEndAll();
     const [byTimer, next] = wt.lines.filter((l) => l.repeats);
-    ok(wt.lines.length === 3 && byTimer && byTimer.repeats === 1 && byTimer.since === T0 && next && next.repeats === 1 && next.since === T0 + 20,
+    ok(wt.lines.length === 3 && gateOf(byTimer) && byTimer.repeats === 1 && byTimer.since === T0 && gateOf(next) && next.repeats === 1 && next.since === T0 + 20,
       `a fold said by its own timer, then one more repeat: «since» = when the line before was SAID (${next && next.since - T0} ms), never the repeat it already covered (5 ms)`);
     // two long commands alike in their first SUMMARY_MAX characters are TWO acts (the fold key carries a hash of the whole argv)
     const wl = world({ hub: 'nobody' }), long = 'x'.repeat(300);
@@ -339,7 +339,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
     const w2 = world({ hub: 'nobody' });
     await codeOf(w2.dm.runCmd('ls', [], by)); await codeOf(w2.dm.runCmd('ls', [], by));   // a fold with one repeat
     for (let k = 0; k < 256; k++) await codeOf(w2.dm.runCmd('echo', [String(k)], by));       // 256 other acts: the oldest fold is evicted
-    ok(w2.lines.some((l) => l.repeats === 1 && /^ls/.test(l.summary)), 'past FOLDS_MAX open folds the oldest is said as it leaves — its repeat is never lost');
+    ok(verdictOf(w2.lines.some((l) => l.repeats === 1 && /^ls/.test(l.summary))), 'past FOLDS_MAX open folds the oldest is said as it leaves — its repeat is never lost');
     const w3 = world({ hub: 'nobody' });
     w3.conn.mux.destroy = () => { }; w3.dm.stop();
     for (let k = 0; k < 3; k++) await codeOf(w3.dm.runCmd('ls', [], by));
@@ -353,7 +353,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   const r3 = await codeOf(w.dm.fsStat('/etc'));
   const r4 = await codeOf(w.dm.serveSocks({ by: 'agent:claude:c1', consent: true }));
   ok([r1, r2, r3, r4].join() === 'sent,sent,sent,sent' && w.cards().length === 0, 'never asked: a person\'s act, an act vibespace-exit\'s own lists judged (consent: run / use), a read', [r1, r2, r3, r4]);
-  ok(w.lines.length === 3 && w.lines.every((l) => !('ask' in l)), 'their lines carry no ask (nothing was asked)', w.lines);
+  ok(w.lines.length === 3 && verdictOf(w.lines.every((l) => !('ask' in l))), 'their lines carry no ask (nothing was asked)', w.lines);
   const wl = world({ instanceKind: 'local' });
   const r5 = await codeOf(wl.dm.runCmd('ls', [], { by: 'system:usage-harvest' })), r6 = await codeOf(wl.dm.fsWrite('/t/a', Buffer.from('x'), { by: 'agent:claude:c1' }));
   ok(r5 === 'sent' && r6 === 'sent' && wl.cards().length === 0, 'a LOCAL instance does not ask (its default)');
@@ -364,7 +364,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
 {
   const w = world({ hub: 'nobody' });
   const e = await w.dm.fsWrite('/t/a', Buffer.from('x'), { by: 'agent:claude:c1' }).catch((x) => x);
-  ok(e.code === 'hub_act_denied' && /Hub automation list is Never/.test(e.message) && w.cards().length === 0 && w.sent.length === 0 && w.lines[0].ask === 'never', 'the machine\'s list Never ⇒ refused at once, no card, nothing sent (ask: never)', [e.message, w.lines]);
+  ok(e.code === 'hub_act_denied' && gateOf(/Hub automation list is Never/.test(e.message)) && w.cards().length === 0 && w.sent.length === 0 && w.lines[0].ask === 'never', 'the machine\'s list Never ⇒ refused at once, no card, nothing sent (ask: never)', [e.message, w.lines]);
   const wE = world({ hub: 'everyone' });
   ok(await codeOf(wE.dm.runCmd('ls', [], { by: 'system:x' })) === 'sent' && wE.cards().length === 0, 'Always allow ⇒ it goes, no card');
 }
@@ -379,7 +379,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   await w.asker.answer(w.cards().find((c) => c.action.kind === 'files').action.askId, { answer: 'always', by: 'user', answeredBy: 'human:0123456789ab' });
   const r = await Promise.all([codeOf(pr), codeOf(pf), codeOf(pi)]);
   ok(r.join() === 'sent,sent,sent' && w.cards().length === 0 && E.exitAccessOf(w.hosts.get(w.hid)).hub.mode === 'everyone', 'Always on this machine ⇒ the machine\'s list written to Always allow (ONE switch, every kind) — every card of the machine settles, all three go', r);
-  ok(w.lines.every((l) => l.ask === 'always' && l.answeredBy === 'human:0123456789ab'), 'their lines: always + who answered', w.lines);
+  ok(verdictOf(w.lines.every((l) => l.ask === 'always' && l.answeredBy === 'human:0123456789ab')), 'their lines: always + who answered', w.lines);
   ok(await codeOf(w.dm.runCmd('ls', [], { by: 'system:x' })) === 'sent' && w.cards().length === 0, 'afterwards nothing on that machine asks');
 }
 {
@@ -389,7 +389,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   const p = w.dm.placeSecret('/home/u/.tok', Buffer.from('s3cret'), { by: 'agent:claude:c1' });
   await settle();
   const c = w.cards()[0];
-  ok(c && !c.detail.includes('s3cret') && /\.tok · 6 B/.test(c.detail), 'a placed secret\'s card says the path and size — never the bytes', c && c.detail);
+  ok(gateOf(c) && !c.detail.includes('s3cret') && verdictOf(/\.tok · 6 B/.test(c.detail)), 'a placed secret\'s card says the path and size — never the bytes', c && c.detail);
   // lane wake-approve-card r3: A DECISION ROW HAS ITS OWN VERBS — a generic close (✓ / ✕ / Mark all seen) is refused BY NAME;
   // the ask stands until its own Deny (or its 60 s) ends it, and the item and the ask stay ONE state
   let closed = null; try { w.userTodos.setStatus(c.id, 'done', 'user'); } catch (x) { closed = x.code; }
@@ -397,7 +397,7 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   await w.asker.answer(c.action.askId, { answer: 'deny', by: 'user', person: true }).catch(() => null);   // (a tree whose ✓ settled it already: answered)
   const e = await p.catch((x) => x);
   const rec = w.userTodos.get(c.id);
-  ok(e.code === 'hub_act_denied' && w.sent.filter((m) => m.op === 'place-secret').length === 0 && rec.status === 'done' && rec.resolvedBy === 'denied' && rec.resolvedFact && rec.resolvedFact.decidedBy === 'person', 'its own Deny (the person\'s, through THE person verdict) ⇒ the act refused, the record «denied» with the person\'s mark — the item and the ask are ONE state', { code: e && e.code, rec: rec && { s: rec.status, by: rec.resolvedBy, f: rec.resolvedFact } });
+  ok(e.code === 'hub_act_denied' && w.sent.filter((m) => m.op === 'place-secret').length === 0 && rec.status === 'done' && rec.resolvedBy === 'denied' && gateOf(rec.resolvedFact) && rec.resolvedFact.decidedBy === 'person', 'its own Deny (the person\'s, through THE person verdict) ⇒ the act refused, the record «denied» with the person\'s mark — the item and the ask are ONE state', { code: e && e.code, rec: rec && { s: rec.status, by: rec.resolvedBy, f: rec.resolvedFact } });
 }
 {
   // RED CONTROL (lane wake-approve-card r3): an asker wired as the base wired it (no `aboutOf`) — the agent's card names no
@@ -405,14 +405,14 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   const w = world();
   const p = w.dm.runCmd('ls', [], { by: 'agent:claude:c1' }); await settle();
   const c = w.cards()[0];
-  ok(c && !c.about && FA.needsOf(w.userTodos.snapshot().open, ['claude:c1']).length === 0, 'RED CONTROL: an asker without aboutOf (the base) — the agent\'s card names no conversation ⇒ tray-only, its chat draws nothing', c && c.about);
+  ok(gateOf(c) && !c.about && FA.needsOf(w.userTodos.snapshot().open, ['claude:c1']).length === 0, 'RED CONTROL: an asker without aboutOf (the base) — the agent\'s card names no conversation ⇒ tray-only, its chat draws nothing', c && c.about);
   w.fire(); await codeOf(p);
 }
 {
   const store = { add: () => { throw new Error('this conversation already has 20 open items'); }, onStatus: () => { }, snapshot: () => ({ open: [] }) };
   const w = world({ store });
   const e = await w.dm.runCmd('ls', [], { by: 'agent:claude:c1' }).catch((x) => x);
-  ok(e.code === 'ask_unfiled' && /20 open items/.test(e.message) && w.asker.list().length === 0 && w.lines[0].ask === 'unfiled', 'For you refuses the card ⇒ refused NOW (never a silent 60 s wait)', e.message);
+  ok(e.code === 'ask_unfiled' && gateOf(/20 open items/.test(e.message)) && w.asker.list().length === 0 && w.lines[0].ask === 'unfiled', 'For you refuses the card ⇒ refused NOW (never a silent 60 s wait)', e.message);
 }
 {
   const w = world();
@@ -437,11 +437,11 @@ console.log('  · the agent update at hello');
   let destroyed = false;
   w.dm._askUpgrade('2.369.100', { mux: w.conn.mux, sock: { destroy: () => { destroyed = true; } } });
   await settle();
-  ok(w.cards().length === 1 && w.cards()[0].action.kind === 'upgrade' && /The device agent on mac1 waits for an update/.test(w.cards()[0].text) && w.cards()[0].action.standing === true && w.sent.length === 0, 'ONE card (kind upgrade) — the standing item names the consequence (lane ledger-dedup-law F3) — nothing pushed yet', w.cards().map((c) => c.text));
+  ok(w.cards().length === 1 && w.cards()[0].action.kind === 'upgrade' && gateOf(/The device agent on mac1 waits for an update/.test(w.cards()[0].text)) && w.cards()[0].action.standing === true && w.sent.length === 0, 'ONE card (kind upgrade) — the standing item names the consequence (lane ledger-dedup-law F3) — nothing pushed yet', w.cards().map((c) => c.text));
   await w.asker.answer(w.cards()[0].action.askId, { answer: 'once', by: 'user', answeredBy: 'human:0123456789ab' });
   for (let i = 0; i < 20 && !destroyed; i++) await tick();
   const up = w.sent.filter((m) => m.op === 'upgrade');
-  ok(up.length === 1 && up[0].by === 'system:device-upgrade' && destroyed && w.lines.some((l) => l.layer === 'code' && l.ask === 'allowed' && l.ok === true), 'Allow ⇒ the update pushed over the OPEN link (the code line: allowed), then the link dropped for the re-exec', { up, lines: w.lines });
+  ok(up.length === 1 && up[0].by === 'system:device-upgrade' && gateOf(destroyed) && verdictOf(w.lines.some((l) => l.layer === 'code' && l.ask === 'allowed' && l.ok === true)), 'Allow ⇒ the update pushed over the OPEN link (the code line: allowed), then the link dropped for the re-exec', { up, lines: w.lines });
   const wn2 = world({ hub: 'nobody' }); wn2.dm._bundlePath = bundle;
   ok(wn2.dm._upgradeHeld('2.369.100') === 'deny' && wn2.lines.length === 1 && wn2.lines[0].layer === 'code' && wn2.lines[0].ask === 'never' && wn2.sent.length === 0, 'Never ⇒ the agent stays as it is, ONE code line says so');
   const wl = world({ instanceKind: 'local' }); wl.dm._bundlePath = bundle;
@@ -449,7 +449,7 @@ console.log('  · the agent update at hello');
   const src = read('src/agentd/client.js');
   // int316: merged with device-allow-flags (`upgrade` off = its own branch, never asked) and device-bundle-signing (only a
   // build this hub WOULD push — the signed release — is asked about)
-  ok(/const held = msg\.daemonVersion !== expected && led\.tries <= 2 && DP\.allows\(pol, 'upgrade'\) && fs\.existsSync\(this\._bundlePath\) && this\._mayPush\(msg\.daemonVersion, expected\) \? this\._upgradeHeld\(msg\.daemonVersion\) : null;/.test(src) && /else if \(msg\.daemonVersion !== expected && fs\.existsSync\(this\._bundlePath\) && this\._mayPush\(msg\.daemonVersion, expected\) && !held\) \{/.test(src) && /if \(held === 'ask'\) this\._askUpgrade\(msg\.daemonVersion, \{ mux, sock, platform: msg\.platform \}\);/.test(src),
+  ok(gateOf(/const held = msg\.daemonVersion !== expected && led\.tries <= 2 && DP\.allows\(pol, 'upgrade'\) && fs\.existsSync\(this\._bundlePath\) && this\._mayPush\(msg\.daemonVersion, expected\) \? this\._upgradeHeld\(msg\.daemonVersion\) : null;/.test(src)) && gateOf(/else if \(msg\.daemonVersion !== expected && fs\.existsSync\(this\._bundlePath\) && this\._mayPush\(msg\.daemonVersion, expected\) && !held\) \{/.test(src)) && verdictOf(/if \(held === 'ask'\) this\._askUpgrade\(msg\.daemonVersion, \{ mux, sock, platform: msg\.platform \}\);/.test(src)),
     'the hello: judged before the push, never holding the link (an ask is filed AFTER the link resolves)');
   w.fire(); wn2.fire(); wl.fire();
 }
@@ -498,9 +498,9 @@ console.log('  · the agent update at hello');
   };
   const p = await runPolicy(world());
   const pf = p.end.find((l) => l.repeats);
-  ok(p.a.codes.every((c) => c === 'op-not-allowed') && p.a.sent === 0 && p.a.journal === 1 && p.a.audit === 1,
+  ok(gateOf(p.a.codes.every((c) => c === 'op-not-allowed')) && p.a.sent === 0 && p.a.journal === 1 && p.a.audit === 1,
     `B-2fa8: 30 requests the device's own list leaves off (input): ${p.a.journal} journal line, ${p.a.audit} audit line — the first said at once, the 29 repeats counted, nothing sent`, p.a);
-  ok(p.end.length === 2 && pf && pf.repeats === 29 && pf.code === 'op-not-allowed' && p.logs.some((m) => /^\[device-policy\] REFUSED input-events — op-not-allowed: 29 more time\(s\) since /.test(m)),
+  ok(p.end.length === 2 && gateOf(pf) && pf.repeats === 29 && pf.code === 'op-not-allowed' && verdictOf(p.logs.some((m) => /^\[device-policy\] REFUSED input-events — op-not-allowed: 29 more time\(s\) since /.test(m))),
     `…stop() says the fold: ONE line for its ${pf && pf.repeats} repeats, worded as the device's own refusal`, p.end);
   // THE LIST ALLOWS IT AGAIN (a road with no _gate: the send point's own check) — the fold is said and closed; a later refusal is said at once
   const allowed = async () => {
@@ -521,8 +521,8 @@ console.log('  · the agent update at hello');
     return { ok1, lines: w.lines.slice() };
   };
   const ar = await allowedRun();
-  ok(ar.ok1 && ar.lines.length === 3 && ar.lines[1].repeats === 2 && !ar.lines[2].repeats, '…a command too (its key carries the argv hash): the fold said when the list allows it, the next refusal said at once', ar.lines.map((l) => l.repeats || 0));
-  ok(al.ok1 && al.lines.length === 3 && !al.lines[0].repeats && al.lines[1].repeats === 2 && !al.lines[2].repeats,
+  ok(gateOf(ar.ok1) && ar.lines.length === 3 && ar.lines[1].repeats === 2 && !ar.lines[2].repeats, '…a command too (its key carries the argv hash): the fold said when the list allows it, the next refusal said at once', ar.lines.map((l) => l.repeats || 0));
+  ok(gateOf(al.ok1) && al.lines.length === 3 && !al.lines[0].repeats && al.lines[1].repeats === 2 && !al.lines[2].repeats,
     'the list allows the request again: its fold said (ONE line, 2 repeats); taken off once more — said AT ONCE as a first (the allowed interval is a change)', al.lines.map((l) => l.repeats || 0));
   const wl = world(), v = { ok: false, code: 'op-not-allowed', op: 'input-events', flag: 'input', remedy: 'allow it' }, req = { op: 'input-events', events: [], by: 'agent:claude:c2' };
   const said = []; for (let k = 0; k < 5; k++) said.push(wl.dm._refusedLine(req, v));
@@ -561,9 +561,9 @@ console.log('  · the agent update at hello');
     'B-0194: the hub\'s list says Never — five reconnects (five fresh clients, one hello each, each stopped): ONE code line, ONE journal line; the 4 repeats counted in the DEVICE\'s store', kn);
   const goes = freshDm(wn, 'dev:t-never', kn); goes._helloFoldEnd(reqOf(goes));
   ok(kn.lines.length === 2 && kn.lines[1].repeats === 4 && kn.lines[1].ask === 'never' && DeviceManager.helloFoldsOf('dev:t-never').size === 0, 'the update then goes: its refusals\' count said FIRST (ONE line, 4 repeats) and the record closed', kn.lines.map((l) => l.repeats || 0));
-  ok(read('src/agentd/client.js').includes("              this._helloFoldEnd({ op: 'upgrade', version: expected, from: msg.daemonVersion || undefined, by: BY_UPGRADE });")
-    && read('src/agentd/client.js').includes("      this._helloFoldEnd(req, gen0);   // B-0194: allowed")
-    && read('src/server/dial-pairing.js').includes("      helloKey: 'dev:' + deviceId,") && read('src/hosts.js').includes("      helloKey: h.deviceId ? 'dev:' + h.deviceId : 'host:' + id,"),
+  ok(gateOf(read('src/agentd/client.js').includes("              this._helloFoldEnd({ op: 'upgrade', version: expected, from: msg.daemonVersion || undefined, by: BY_UPGRADE });"))
+    && gateOf(read('src/agentd/client.js').includes("      this._helloFoldEnd(req, gen0);   // B-0194: allowed"))
+    && gateOf(read('src/server/dial-pairing.js').includes("      helloKey: 'dev:' + deviceId,")) && verdictOf(read('src/hosts.js').includes("      helloKey: h.deviceId ? 'dev:' + h.deviceId : 'host:' + id,")),
     'the push at the hello and the owner\'s Allow say the count first (the same key); BOTH construction sites key the store by the DEVICE (a graduated ssh host shares the dial road\'s)');
   // THE RECORD'S OWN TIMER: the hellos stop — the count is said all the same (no hello, no exit needed)
   const wt = world({ hub: 'nobody' }), kt = sinkOf();
@@ -597,7 +597,7 @@ console.log('  · the agent update at hello');
   const wo = world(), ko = sinkOf(), up = { op: 'upgrade', version: '2.369.200', from: '2.369.100', by: 'system:device-upgrade' }, vo = { ok: false, code: 'op-not-allowed', op: 'upgrade', flag: 'upgrade', remedy: 'allow it' };
   const saidO = []; for (let k = 0; k < 4; k++) { const dm = freshDm(wo, 'dev:t-own', ko); saidO.push(dm._refusedLine(up, vo, null, { hello: true })); dm.stop(); }
   ok(saidO.join() === 'true,false,false,false' && ko.lines.length === 1, 'the device\'s own list leaves the update off, four reconnects: said once (→ true), then counted per device (→ false)', saidO);
-  ok(read('src/agentd/client.js').includes("platform: msg.platform }), null, { hello: true })) this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — its allow list leaves \"upgrade\" off;"),
+  ok(verdictOf(read('src/agentd/client.js').includes("platform: msg.platform }), null, { hello: true })) this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — its allow list leaves \"upgrade\" off;")),
     'the hello\'s own-list branch folds per device and its journal line («its allow list leaves "upgrade" off») rides the refusal\'s answer');
   DeviceManager.dropHelloFolds('dev:t-own');
   // the store is capped: a device reporting a new version at each hello never grows it past HELLO_FOLDS_MAX
@@ -630,11 +630,11 @@ console.log('  · the agent update at hello');
     return { held: asking.held, card: !!card, lines: kg.lines.length, store: !!DeviceManager.helloFoldsOf(key) };
   };
   const lg = await lateAsk('dev:t-gen');
-  ok(lg.held === 'ask' && lg.card && lg.lines === 1 && !lg.store, 'an ask begun before an unpair, answered after it: the refusal is said, and no store is made for the gone device', lg);
+  ok(lg.held === 'ask' && gateOf(lg.card) && lg.lines === 1 && !lg.store, 'an ask begun before an unpair, answered after it: the refusal is said, and no store is made for the gone device', lg);
   const keepHF = DeviceManager.prototype._helloFold; let askedHF = 0;
   DeviceManager.prototype._helloFold = function (l, g) { askedHF++; return keepHF.call(this, l, g); };   // (a plant: the generation read at the answer, not where the ask began)
   let lc = null; try { lc = await lateAsk('dev:t-gen-ctl'); } finally { DeviceManager.prototype._helloFold = keepHF; }
-  ok(askedHF >= 1 && lc.lines === 1 && lc.store, `CONTROL (the ask without its generation; the plant asked ${askedHF}×): the late answer makes the gone device's store ⇒ RED`, lc);
+  ok(askedHF >= 1 && lc.lines === 1 && verdictOf(lc.store), `CONTROL (the ask without its generation; the plant asked ${askedHF}×): the late answer makes the gone device's store ⇒ RED`, lc);
   DeviceManager.dropHelloFolds('dev:t-gen-ctl');
   // A CLIENT KEPT ACROSS A DROP (a pairing made again IN PLACE keeps the link; a graduation rolled back): its next hellos fold on
   const wk = world({ hub: 'nobody' }), kk = sinkOf(), kept = freshDm(wk, 'dev:t-keep', kk);
@@ -642,7 +642,7 @@ console.log('  · the agent update at hello');
   DeviceManager.dropHelloFolds('dev:t-keep');
   kept._upgradeHeld('2.369.100'); kept._upgradeHeld('2.369.100'); kept._upgradeHeld('2.369.100');
   const keptRec = DeviceManager.helloFoldsOf('dev:t-keep') && [...DeviceManager.helloFoldsOf('dev:t-keep').values()][0];
-  ok(kk.lines.length === 2 && keptRec && keptRec.more === 2, 'a client kept across a drop: its first hello after it is said, the next two counted — it folds on, never one line per hello', { lines: kk.lines.length, more: keptRec && keptRec.more });
+  ok(kk.lines.length === 2 && gateOf(keptRec) && keptRec.more === 2, 'a client kept across a drop: its first hello after it is said, the next two counted — it folds on, never one line per hello', { lines: kk.lines.length, more: keptRec && keptRec.more });
   DeviceManager.dropHelloFolds('dev:t-keep');
   const kb = sinkOf(), born = freshDm(wk, 'dev:t-keep2', kb), bornGen = born._helloGenNow(); let askedB = 0;
   const keyGen = () => DeviceManager.prototype._helloGenNow.call({ _helloKey: 'dev:t-keep2' });
@@ -653,24 +653,24 @@ console.log('  · the agent update at hello');
   DeviceManager.dropHelloFolds('dev:t-keep2');
   const wj = world({ hub: 'nobody' }), kj = sinkOf(), oldDm = freshDm(wj, 'dev:t-join', kj), newDm = freshDm(wj, 'dev:t-join', kj); oldDm.stop();
   oldDm._upgradeHeld('2.369.100'); newDm._upgradeHeld('2.369.100');
-  ok(kj.lines.length === 1 && DeviceManager.helloFoldsOf('dev:t-join') && [...DeviceManager.helloFoldsOf('dev:t-join').values()][0].more === 1, 'a re-dial joined the same ask: the old client (stopped) and the new one answer — ONE line, the second counted', kj.lines.length);
+  ok(kj.lines.length === 1 && gateOf(DeviceManager.helloFoldsOf('dev:t-join')) && [...DeviceManager.helloFoldsOf('dev:t-join').values()][0].more === 1, 'a re-dial joined the same ask: the old client (stopped) and the new one answer — ONE line, the second counted', kj.lines.length);
   const live = freshDm(wj, 'dev:t-nostore', kj); live._helloFoldEnd(reqOf(live));
   ok(!DeviceManager.helloFoldsOf('dev:t-nostore'), 'the update going on a device with no store: none is made');
   DeviceManager.dropHelloFolds('dev:t-join');
   const we = world({ hub: 'nobody' }), ke = sinkOf();
   for (let k = 0; k < 17; k++) for (let r = 0; r < 2; r++) { const dm = freshDm(we, 'dev:t-evict', ke); dm._upgradeHeld(`2.369.${100 + k}`); dm.stop(); }
   const evicted = ke.lines.find((l) => l.repeats && /2\.369\.100/.test(l.summary || ''));
-  ok(DeviceManager.helloFoldsOf('dev:t-evict').size === 16 && evicted && evicted.repeats === 1, 'seventeen versions, each refused twice: the oldest record is evicted at the cap AND its count said (1 repeat)', { size: DeviceManager.helloFoldsOf('dev:t-evict').size, evicted });
+  ok(DeviceManager.helloFoldsOf('dev:t-evict').size === 16 && gateOf(evicted) && evicted.repeats === 1, 'seventeen versions, each refused twice: the oldest record is evicted at the cap AND its count said (1 repeat)', { size: DeviceManager.helloFoldsOf('dev:t-evict').size, evicted });
   DeviceManager.dropHelloFolds('dev:t-evict');
   const DPS = read('src/server/dial-pairing.js'), HS = read('src/hosts.js');
-  ok(DPS.includes("  hosts.setDialToken(deviceId, PT.tokenHash(tok));\n  try { require('../agentd/client.js').DeviceManager.dropHelloFolds('dev:' + deviceId); } catch { }   // a pairing made again")
-    && DPS.includes("  try { require('../agentd/client.js').DeviceManager.dropHelloFolds('dev:' + deviceId); } catch { }   // B-0194: what its hello folds owe said")
-    && HS.includes("if (h.deviceId) DMx.dropHelloFolds('dev:' + h.deviceId); DMx.dropHelloFolds('host:' + id);")
-    && HS.includes("require('./agentd/client.js').DeviceManager.dropHelloFolds('host:' + id); } catch {}   // B-0194: its ssh name's")
-    && HS.includes("require('./agentd/client.js').DeviceManager.dropHelloFolds('dev:' + h.deviceId); } catch {}   // B-0194: its device name's"),
+  ok(gateOf(DPS.includes("  hosts.setDialToken(deviceId, PT.tokenHash(tok));\n  try { require('../agentd/client.js').DeviceManager.dropHelloFolds('dev:' + deviceId); } catch { }   // a pairing made again"))
+    && gateOf(DPS.includes("  try { require('../agentd/client.js').DeviceManager.dropHelloFolds('dev:' + deviceId); } catch { }   // B-0194: what its hello folds owe said"))
+    && gateOf(HS.includes("if (h.deviceId) DMx.dropHelloFolds('dev:' + h.deviceId); DMx.dropHelloFolds('host:' + id);"))
+    && gateOf(HS.includes("require('./agentd/client.js').DeviceManager.dropHelloFolds('host:' + id); } catch {}   // B-0194: its ssh name's"))
+    && verdictOf(HS.includes("require('./agentd/client.js').DeviceManager.dropHelloFolds('dev:' + h.deviceId); } catch {}   // B-0194: its device name's")),
     'the drops are wired: a pairing made again and a dial unpair (dial-pairing), a host removed (both names), a graduation (the ssh name) and its undoing (the device name)');
   const MS = read('src/agentd/client.js');
-  ok(MS.includes("    if (!this._helloKey || this._helloGenNow() !== gen) return null;") && MS.includes("if (this._helloFold(l, g, gen0)) return;") && MS.includes(", gen0 = this._helloGenNow();"), 'the store is read and made only at the generation the hello began in (the ask\'s answer carries its own)');
+  ok(gateOf(MS.includes("    if (!this._helloKey || this._helloGenNow() !== gen) return null;")) && gateOf(MS.includes("if (this._helloFold(l, g, gen0)) return;")) && verdictOf(MS.includes(", gen0 = this._helloGenNow();")), 'the store is read and made only at the generation the hello began in (the ask\'s answer carries its own)');
   // RED CONTROL: no device key (the fold on the instance, as the unit's first cut) — every reconnect says it again
   const wc = world({ hub: 'nobody' }), kc = sinkOf();
   for (let k = 0; k < 5; k++) hello(wc, null, kc).dm.stop();
@@ -697,12 +697,12 @@ console.log('— ⑤ the routes');
   try {
     ok(asker.instanceKind === 'cluster' && hosts.hubActs === asker, 'wire(): a fleet pod (VIBESPACE_INSTANCE_NAME) is a cluster instance; the asker on hosts.hubActs');
     const v0 = await (await fetch(`${base}/api/hosts/${hid}/exit-access`)).json();
-    ok(v0.access.hub.mode === 'default' && v0.hub.policy === 'ask' && v0.hub.source === 'instance' && v0.hub.instanceKind === 'cluster' && v0.hub.stored === null && Array.isArray(v0.hub.asks), 'the dialog\'s GET: the list not set, what applies (ask — this cluster instance\'s default) and why', v0.hub);
+    ok(v0.access.hub.mode === 'default' && v0.hub.policy === 'ask' && v0.hub.source === 'instance' && v0.hub.instanceKind === 'cluster' && v0.hub.stored === null && verdictOf(Array.isArray(v0.hub.asks)), 'the dialog\'s GET: the list not set, what applies (ask — this cluster instance\'s default) and why', v0.hub);
     const p = link.dm.runCmd('ls', [], { by: 'agent:claude:c1' }); await settle();
     const askId = asker.list()[0].askId;
     // lane wake-approve-card r3 (the owner: «这个索要通知在聊天框里完全没有»): an AGENT's act is a card in the conversation that asked
     const filedIt = (userTodos.snapshot().open || []).find((i) => i.action && i.action.askId === askId);
-    ok(filedIt && filedIt.about === 'claude:c1' && filedIt.sessionKey === ASK.INBOX_KEY && FA.needsOf(userTodos.snapshot().open, ['claude:c1']).some((e) => e.item.id === filedIt.id), 'wire()\'s asker files an AGENT\'s act ABOUT the conversation that asked (`about` = its live session\'s key, claude:c1) — a card in its chat; the tray\'s Machines group as before', filedIt && { about: filedIt.about, key: filedIt.sessionKey });
+    ok(gateOf(filedIt) && filedIt.about === 'claude:c1' && filedIt.sessionKey === ASK.INBOX_KEY && verdictOf(FA.needsOf(userTodos.snapshot().open, ['claude:c1']).some((e) => e.item.id === filedIt.id)), 'wire()\'s asker files an AGENT\'s act ABOUT the conversation that asked (`about` = its live session\'s key, claude:c1) — a card in its chat; the tray\'s Machines group as before', filedIt && { about: filedIt.about, key: filedIt.sessionKey });
     const v1 = await (await fetch(`${base}/api/hosts/${hid}/exit-access`)).json();
     ok(v1.hub.asks.length === 1 && v1.hub.asks[0].kind === 'run' && v1.hub.asks[0].waiting === 1, 'the GET counts the cards that are up');
     const b = await post(`/api/hub-acts/asks/${askId}`, { answer: 'once' }, { Authorization: 'Bearer vsst_testtoken1' });
@@ -743,29 +743,29 @@ console.log('— ⑥ the card in the For-you row');
   const html = R.renderRow({ item: { id: 'ut-h', text: w.text, detail: w.detail, urgency: 'urgent', action: { type: 'hub-act-ask', askId: 'a1', hostId: 'h', machine: 'mac1', kind: 'files' }, createdAt: Date.now() } }, ctx).innerHTML;
   const plan = html.indexOf('ut-proposal-plan'), ans = html.indexOf('ut-hub-answer');
   const btns = [...html.matchAll(/data-answer="(\w+)">([^<]+)</g)].map((m) => `${m[1]}:${m[2]}`);
-  ok(plan >= 0 && ans > plan && btns.join('|') === 'once:Allow once|always:Always on this machine|deny:Deny' && /write \/home\/u\/\.vibespace\/cursor\.json/.test(html.slice(plan, ans)) && !/ut-detail-exp/.test(html), 'what it would do, whole, ABOVE Allow once / Always on this machine / Deny (never folded below)', btns);
-  ok(/ut-exit-allow ut-hub-once/.test(html) && /ut-exit-allow ut-hub-always/.test(html) && /ut-exit-deny ut-hub-deny/.test(html), 'Allow once and Always are armed like every Allow (press-arm: .ut-exit-allow)');
+  ok(plan >= 0 && ans > plan && btns.join('|') === 'once:Allow once|always:Always on this machine|deny:Deny' && gateOf(/write \/home\/u\/\.vibespace\/cursor\.json/.test(html.slice(plan, ans))) && !/ut-detail-exp/.test(html), 'what it would do, whole, ABOVE Allow once / Always on this machine / Deny (never folded below)', btns);
+  ok(gateOf(/ut-exit-allow ut-hub-once/.test(html)) && gateOf(/ut-exit-allow ut-hub-always/.test(html)) && verdictOf(/ut-exit-deny ut-hub-deny/.test(html)), 'Allow once and Always are armed like every Allow (press-arm: .ut-exit-allow)');
   const done = R.renderRow({ item: { id: 'ut-h', text: w.text, detail: w.detail, status: 'done', resolvedAt: Date.now(), action: { type: 'hub-act-ask', askId: 'a1' }, createdAt: Date.now() }, resolved: true }, ctx).innerHTML;
   ok(!/data-answer="once"/.test(done), 'a resolved card offers no answer');
-  ok(require('../src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('hub-act-ask') && (/'hub-act-ask': 'askId'/.test(read('src/user-todos.js')) || (() => { try { return require('../src/foryou-actions.js').ACTION_IDENTITY['hub-act-ask'] === 'askId'; } catch { return false; } })()) /* lane ledger-dedup-law r8: the merge with wake-approve-card — the registry's row */, 'a typed reply never answers it (its buttons do); one item per ask');
-  ok(/const hubAsk = !resolved && i\.action && \(i\.action\.type === 'hub-act-ask'/.test(read('src/lib/inbox-window-layout.js')) && /'hub-once', \.\.\.\(hubAsk\.type === 'vault-grant-ask' \? \['grant-8h'\] : hubAsk\.type === 'vault-run-ask' \? \[\.\.\.\(hubAsk\.window \? \['shape-window'\] : \[\]\), \.\.\.\(hubAsk\.always \? \['shape-always'\] : \[\]\)\] : \[hubAsk\.type === 'automation-ask' \? 'auto-always' : hubAsk\.type === 'pool-cross-provider' \? 'pool-always' : 'hub-always'\]\), 'hub-deny'/.test(read('src/lib/inbox-window-layout.js')) && /if \(a === 'hub-once' \|\| a === 'hub-always' \|\| a === 'hub-deny'/.test(read('src/lib/inbox-window.js')), /* design q-046: an automation ask shares the three buttons (its Always grants the key) */ 'the For-you window answers it too (its three buttons, the same arm)');
+  ok(gateOf(require('../src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('hub-act-ask')) && (verdictOf(/'hub-act-ask': 'askId'/.test(read('src/user-todos.js'))) || verdictOf((() => { try { return require('../src/foryou-actions.js').ACTION_IDENTITY['hub-act-ask'] === 'askId'; } catch { return false; } })())) /* lane ledger-dedup-law r8: the merge with wake-approve-card — the registry's row */, 'a typed reply never answers it (its buttons do); one item per ask');
+  ok(gateOf(/const hubAsk = !resolved && i\.action && \(i\.action\.type === 'hub-act-ask'/.test(read('src/lib/inbox-window-layout.js'))) && gateOf(/'hub-once', \.\.\.\(hubAsk\.type === 'vault-grant-ask' \? \['grant-8h'\] : hubAsk\.type === 'vault-run-ask' \? \[\.\.\.\(hubAsk\.window \? \['shape-window'\] : \[\]\), \.\.\.\(hubAsk\.always \? \['shape-always'\] : \[\]\)\] : \[hubAsk\.type === 'automation-ask' \? 'auto-always' : hubAsk\.type === 'pool-cross-provider' \? 'pool-always' : 'hub-always'\]\), 'hub-deny'/.test(read('src/lib/inbox-window-layout.js'))) && verdictOf(/if \(a === 'hub-once' \|\| a === 'hub-always' \|\| a === 'hub-deny'/.test(read('src/lib/inbox-window.js'))), /* design q-046: an automation ask shares the three buttons (its Always grants the key) */ 'the For-you window answers it too (its three buttons, the same arm)');
 }
 
 console.log('— ⑦ the census');
 {
   const hostsSrc = read('src/hosts.js'), dial = read('src/server/dial-pairing.js'), srv = read('server.js'), client = read('src/agentd/client.js'), exitSrc = read('src/exit-proxy.js');
   const blocks = (s) => s.split('new DeviceManager({').slice(1).map((b) => b.split('\n    });')[0].split('\n      });')[0]);
-  ok(blocks(hostsSrc).length === 1 && /actGate: this\.actGateFor\(id\)/.test(blocks(hostsSrc)[0]) && blocks(dial).length === 1 && /actGate: hosts\.actGateFor\(/.test(blocks(dial)[0]), 'both REMOTE device clients (ssh, dial) are built with the machine\'s gate');
+  ok(blocks(hostsSrc).length === 1 && gateOf(/actGate: this\.actGateFor\(id\)/.test(blocks(hostsSrc)[0])) && blocks(dial).length === 1 && verdictOf(/actGate: hosts\.actGateFor\(/.test(blocks(dial)[0])), 'both REMOTE device clients (ssh, dial) are built with the machine\'s gate');
   ok(blocks(srv).length === 1 && !/actGate/.test(blocks(srv)[0]), 'this machine\'s own daemon has none (it is the hub itself)');
-  ok(/const facts = asked !== undefined \? asked : act && DA\.auditable\(payload\) \? await this\._gate\(payload, \{ consent \}\) : null;\n    const conn = await this\.connect\(\);/.test(client) && /const asked = DA\.auditable\(req\) \? await this\._gate\(req, \{ consent \}\) : null;/.test(client) && /const asked = await this\._gate\(\{ op: 'fs-op', action: 'write-stream', step: 'open'/.test(client) && /await this\._request\(\{ \.\.\.req, chan \}, \{ audit: false, asked \}\)/.test(client),
+  ok(gateOf(/const facts = asked !== undefined \? asked : act && DA\.auditable\(payload\) \? await this\._gate\(payload, \{ consent \}\) : null;\n    const conn = await this\.connect\(\);/.test(client)) && gateOf(/const asked = DA\.auditable\(req\) \? await this\._gate\(req, \{ consent \}\) : null;/.test(client)) && gateOf(/const asked = await this\._gate\(\{ op: 'fs-op', action: 'write-stream', step: 'open'/.test(client)) && verdictOf(/await this\._request\(\{ \.\.\.req, chan \}, \{ audit: false, asked \}\)/.test(client)),
     'the gate sits at THE ONE SEND POINT (_request, before connect), before a stream\'s channel and a write-stream\'s open — and a stream\'s own request is never judged twice');
   ok((exitSrc.match(/consent: true/g) || []).length === 3, 'vibespace-exit\'s three device acts (use / run / push) carry consent — never asked twice');
-  ok(/require\('\.\/src\/server\/hub-act-ask\.js'\)\.wire\(\{ hosts, userTodos, exitProxy, settingOf: \(k\) => serverSetting\(k\), activeSessions \}\)/.test(srv), 'server.js wires the asker (one line)');
+  ok(verdictOf(/require\('\.\/src\/server\/hub-act-ask\.js'\)\.wire\(\{ hosts, userTodos, exitProxy, settingOf: \(k\) => serverSetting\(k\), activeSessions \}\)/.test(srv)), 'server.js wires the asker (one line)');
   const schema = read('src/lib/settings-schema.js');
-  ok(schema.includes(`'${P.SETTING_KEY}': {`) && P.SETTING_VALUES.every((v) => schema.includes(`{ value: '${v}'`)), `the setting ${P.SETTING_KEY} (${P.SETTING_VALUES.join(' / ')})`);
-  ok(/name: 'test-hub-act-ask', tier: 'fast'/.test(read('scripts/ci.mjs')), 'this suite has its tier row');
+  ok(gateOf(schema.includes(`'${P.SETTING_KEY}': {`)) && verdictOf(P.SETTING_VALUES.every((v) => schema.includes(`{ value: '${v}'`))), `the setting ${P.SETTING_KEY} (${P.SETTING_VALUES.join(' / ')})`);
+  ok(verdictOf(/name: 'test-hub-act-ask', tier: 'fast'/.test(read('scripts/ci.mjs'))), 'this suite has its tier row');
 }
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

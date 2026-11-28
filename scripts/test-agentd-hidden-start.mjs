@@ -33,7 +33,7 @@ const acorn = require('acorn');
 const HS = require(path.join(REPO, 'src/agentd/hidden-start.js'));
 const { daemonEnv, DAEMON_ENV_KEEP } = require(path.join(REPO, 'src/agent-env.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 1500) : '')); } };
 const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
 const rd = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const AD = rd('src/agentd/agentd.js'), PS1 = rd('scripts/vibespace-agentd-install.ps1'), HS_SRC = rd('src/agentd/hidden-start.js');
@@ -50,13 +50,13 @@ eq(['visible', 'hidden'].map((c) => V('win32', true, c)), ['stay', 'stay'], 'sel
 eq(['linux', 'darwin', 'freebsd'].map((p) => V(p, false, 'visible')), ['stay', 'stay', 'stay'], 'selfHealVerdict: not Windows ⇒ never');
 const stepWith = (o, code) => { const calls = { look: 0, reExec: 0, log: [] }; const v = HS.consoleStep({ platform: 'win32', marked: false, attached: true, ...o, look: () => { calls.look++; return code; }, reExec: () => { calls.reExec++; }, log: (l) => calls.log.push(l) }); return { v, ...calls }; };
 const s1 = stepWith({}, 20);
-ok(s1.v.act === 're-exec' && s1.look === 1 && s1.reExec === 1 && s1.log.length === 1 && /re-exec hidden, once/.test(s1.log[0]), 'consoleStep: a visible console ⇒ ONE look, ONE re-exec, one log line', s1);
+ok(s1.v.act === 're-exec' && s1.look === 1 && s1.reExec === 1 && s1.log.length === 1 && verdictOf(/re-exec hidden, once/.test(s1.log[0])), 'consoleStep: a visible console ⇒ ONE look, ONE re-exec, one log line', s1);
 const s2 = stepWith({ marked: true }, 20);
 ok(s2.v.act === 'stay' && s2.look === 0 && s2.reExec === 0, 'consoleStep: THE LOOP GUARD — the marked successor never looks (even if its console read visible)', s2);
 const s3 = stepWith({ attached: false }, 20), s4 = stepWith({ platform: 'linux' }, 20);
 ok(s3.look === 0 && s3.reExec === 0 && s4.look === 0 && s4.reExec === 0, 'consoleStep: no console handle (a re-exec\'d daemon: stdio ignore) / not Windows ⇒ never looked at', { s3, s4 });
 const s5 = stepWith({}, 21), s6 = stepWith({}, 1);
-ok(s5.v.act === 'stay' && s5.reExec === 0 && s5.log.length === 0 && s6.v.act === 'stay' && s6.v.console === 'unknown' && s6.reExec === 0 && s6.log.length === 1 && /could not tell/.test(s6.log[0]), 'consoleStep: a hidden console ⇒ stay, silent (the installer\'s first launch); a look that failed ⇒ stay and SAID once', { s5, s6 });
+ok(s5.v.act === 'stay' && s5.reExec === 0 && s5.log.length === 0 && s6.v.act === 'stay' && s6.v.console === 'unknown' && s6.reExec === 0 && s6.log.length === 1 && verdictOf(/could not tell/.test(s6.log[0])), 'consoleStep: a hidden console ⇒ stay, silent (the installer\'s first launch); a look that failed ⇒ stay and SAID once', { s5, s6 });
 eq(['C:\\Users\\ada\\.vibespace\\device@hub.example.ts.net', 'C:\\Users\\ada\\.vibespace\\device@10.0.0.7\\', '/home/u/.vibespace/agentd', 'C:\\Users\\ada\\.vibespace\\agentd', ''].map(HS.logonTaskName), ['VibeSpaceDevice-hub.example.ts.net', 'VibeSpaceDevice-10.0.0.7', null, null, null], 'logonTaskName: the installer\'s VibeSpaceDevice-<dialHost> from …\\device@<dialHost>; any other root has no task of ours');
 eq([HS.psQuote("a'b"), HS.psQuote('c\u2019d'), HS.psQuote('e\u2018\u201A\u201Bf'), HS.psQuote('C:\\x y')], ["'a''b'", "'c\u2019\u2019d'", "'e\u2018\u2018\u201A\u201A\u201B\u201Bf'", "'C:\\x y'"], 'psQuote: every single quote PowerShell reads (\' ‘ ’ ‚ ‛) is doubled inside the literal');
 
@@ -94,8 +94,8 @@ function elevationUnit(ps1) {
   return bad;
 }
 ok(elevationUnit(PS1).length === 0, 'the ps1 elevation flow: -NoElevate; Test-VsAdmin reads IsInRole(Administrator); RunLevel Highest by default; ONE Start-Process -Verb RunAs consent (encoded, secret-free); a normal-rights fallback when not elevated / declined; no token on the elevated child command line', elevationUnit(PS1));
-ok(/RUNS AS ADMINISTRATOR/.test(PS1) && /you chose a normal install/.test(PS1) && /Run as administrator\.\.\./.test(PS1), 'the three persist outcomes: admin / normal (chose -NoElevate) / declined-UAC-with-the-card-door');
-ok(PS1.includes(`function Quote-Ps([string]$s) { return "'" + ($s -replace '[''\\u2018\\u2019\\u201A\\u201B]', '$0$0') + "'" }`) && HS_SRC.includes(`const psQuote = (s) => "'" + String(s).replace(/['\\u2018\\u2019\\u201A\\u201B]/g, '$&$&') + "'";`), 'Quote-Ps (ps1) and psQuote (daemon) double the SAME four characters');
+ok(gateOf(/RUNS AS ADMINISTRATOR/.test(PS1)) && gateOf(/you chose a normal install/.test(PS1)) && verdictOf(/Run as administrator\.\.\./.test(PS1)), 'the three persist outcomes: admin / normal (chose -NoElevate) / declined-UAC-with-the-card-door');
+ok(gateOf(PS1.includes(`function Quote-Ps([string]$s) { return "'" + ($s -replace '[''\\u2018\\u2019\\u201A\\u201B]', '$0$0') + "'" }`)) && verdictOf(HS_SRC.includes(`const psQuote = (s) => "'" + String(s).replace(/['\\u2018\\u2019\\u201A\\u201B]/g, '$&$&') + "'";`)), 'Quote-Ps (ps1) and psQuote (daemon) double the SAME four characters');
 // the ps1's concatenation, evaluated: 'literal' ('' escape) · (Quote-Ps $v) · (Quote-Ps "…$v…") · $v, joined by +
 function psConcat(rhs, vars) {
   let i = 0, out = '';
@@ -127,15 +127,15 @@ const CASES = [
 ];
 for (const c of CASES) { const t = twinOf(PS1, HS, c); ok(!t.error && t.ps1 === t.daemon, `THE TWIN (${c.root}): the installer's task text == the daemon's logonTaskArgs`, t); }
 const t0 = twinOf(PS1, HS, CASES[1]).daemon;
-ok(/^-NoProfile -NonInteractive -WindowStyle Hidden -Command "[^"]*"$/.test(t0) && /Start-Process -WindowStyle Hidden -FilePath 'C:\\Program Files\\nodejs\\node\.exe' -ArgumentList \(\[char\]34\+'C:\\Users\\Jo O''Brien\\[^']*\\current\\vibespace-device\.js'\+\[char\]34\)/.test(t0) && !/cmd\.exe/i.test(t0), 'the text itself: hidden PowerShell, ONE double-quoted -Command (no " inside), node + script as literals, no cmd.exe', t0);
+ok(gateOf(/^-NoProfile -NonInteractive -WindowStyle Hidden -Command "[^"]*"$/.test(t0)) && gateOf(/Start-Process -WindowStyle Hidden -FilePath 'C:\\Program Files\\nodejs\\node\.exe' -ArgumentList \(\[char\]34\+'C:\\Users\\Jo O''Brien\\[^']*\\current\\vibespace-device\.js'\+\[char\]34\)/.test(t0)) && !/cmd\.exe/i.test(t0), 'the text itself: hidden PowerShell, ONE double-quoted -Command (no " inside), node + script as literals, no cmd.exe', t0);
 const OLD_ACTION = "  $taskArgs = \"/c set VIBESPACE_DEVICE_ROOT=$root&& set VIBESPACE_AGENTD_ROOT=$root&& `\"$nodeExe`\" `\"$current\\vibespace-device.js`\"\"\n  $a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $taskArgs\n";
 const mPs1 = PS1.replace(/  \$launch = [\s\S]*?\n  \$a = New-ScheduledTaskAction -Execute 'powershell\.exe' -Argument \$taskArgs\n/, OLD_ACTION);
 const mu = taskUnit(mPs1);
-ok(mPs1 !== PS1 && mu.some((b) => /cmd\.exe in the task block/.test(b)) && mu.some((b) => /not ONE powershell/.test(b)), 'MUTANT: the old `cmd.exe /c set …&& node` action back in the ps1 ⇒ RED', mu);
+ok(mPs1 !== PS1 && gateOf(mu.some((b) => /cmd\.exe in the task block/.test(b))) && verdictOf(mu.some((b) => /not ONE powershell/.test(b))), 'MUTANT: the old `cmd.exe /c set …&& node` action back in the ps1 ⇒ RED', mu);
 const mHs = modOf(HS_SRC.replace("return `-NoProfile -NonInteractive -WindowStyle Hidden -Command \"${launch}\"`;", "return `/c set VIBESPACE_DEVICE_ROOT=${r}&& set VIBESPACE_AGENTD_ROOT=${r}&& \"${nodeExe}\" \"${script}\"`;"));
 const mt = twinOf(PS1, mHs, CASES[0]);
-ok(mt.ps1 !== mt.daemon && /^\/c set /.test(mt.daemon), 'MUTANT: logonTaskArgs back to the cmd.exe form ⇒ the twin RED', mt);
-ok(/-ArgumentList @\("`"\$current\\vibespace-device\.js`""\) `\n\s*-RedirectStandardOutput \$out/.test(PS1) && /\$p = Start-Process -PassThru -WindowStyle Hidden \$nodeExe/.test(PS1), 'the FIRST launch: Start-Process -WindowStyle Hidden, the script path quoted for node (PS 5.1 joins -ArgumentList unquoted)');
+ok(mt.ps1 !== mt.daemon && verdictOf(/^\/c set /.test(mt.daemon)), 'MUTANT: logonTaskArgs back to the cmd.exe form ⇒ the twin RED', mt);
+ok(gateOf(/-ArgumentList @\("`"\$current\\vibespace-device\.js`""\) `\n\s*-RedirectStandardOutput \$out/.test(PS1)) && verdictOf(/\$p = Start-Process -PassThru -WindowStyle Hidden \$nodeExe/.test(PS1)), 'the FIRST launch: Start-Process -WindowStyle Hidden, the script path quoted for node (PS 5.1 joins -ArgumentList unquoted)');
 
 // ── §3 ──
 console.log('§3 the re-register is idempotent (a fake task store)');
@@ -163,14 +163,14 @@ const st = { task: { execute: 'cmd.exe', args: OLD } }, f1 = fakePs(st);
 const r1 = await HS.ensureLogonTask({ root: ROOT, nodeExe: NODE, script: SCRIPT, ps: f1.ps, log: (l) => lines.push(l) });
 const r2 = await HS.ensureLogonTask({ root: ROOT, nodeExe: NODE, script: SCRIPT, ps: f1.ps, log: (l) => lines.push(l) });
 const r3 = await HS.ensureLogonTask({ root: ROOT, nodeExe: NODE, script: SCRIPT, ps: f1.ps, log: (l) => lines.push(l) });
-ok(r1.act === 'rewritten' && r2.act === 'same' && r3.act === 'same' && f1.calls.write === 1 && f1.calls.read === 3 && lines.length === 1 && /re-registered to start hidden/.test(lines[0]) && /cmd\.exe/.test(lines[0]), 'the old cmd.exe action: rewritten ONCE (one log line naming what it was), then read and left — nothing written again', { r1, r2, r3, calls: f1.calls, lines });
+ok(r1.act === 'rewritten' && r2.act === 'same' && r3.act === 'same' && f1.calls.write === 1 && f1.calls.read === 3 && lines.length === 1 && gateOf(/re-registered to start hidden/.test(lines[0])) && verdictOf(/cmd\.exe/.test(lines[0])), 'the old cmd.exe action: rewritten ONCE (one log line naming what it was), then read and left — nothing written again', { r1, r2, r3, calls: f1.calls, lines });
 ok(st.task.execute === 'powershell.exe' && st.task.args === HS.logonTaskArgs({ root: ROOT, nodeExe: NODE, script: SCRIPT }) && r1.name === 'VibeSpaceDevice-10.0.0.7', 'what was written is the hidden action, exact (a quote in the profile path survives the write literal), under our name', st.task);
 const fa = fakePs({ task: null }), la = [];
 const ra = await HS.ensureLogonTask({ root: ROOT, nodeExe: NODE, script: SCRIPT, ps: fa.ps, log: (l) => la.push(l) });
 ok(ra.act === 'absent' && fa.calls.write === 0 && la.length === 0, 'no task ⇒ never CREATED (the person removed it, or the install made none)', { ra, calls: fa.calls });
 const ff = fakePs({ task: { execute: 'C:\\tools\\my-launcher.exe', args: '--start something' } }), lf = [];
 const rf = await HS.ensureLogonTask({ root: ROOT, nodeExe: NODE, script: SCRIPT, ps: ff.ps, log: (l) => lf.push(l) });
-ok(rf.act === 'foreign' && ff.calls.write === 0 && lf.length === 1 && /left as it is/.test(lf[0]), 'a task under our name that starts something else ⇒ left alone, said once', { rf, lf });
+ok(rf.act === 'foreign' && ff.calls.write === 0 && lf.length === 1 && verdictOf(/left as it is/.test(lf[0])), 'a task under our name that starts something else ⇒ left alone, said once', { rf, lf });
 const fm = fakePs({ task: { execute: 'powershell.exe', args: HS.logonTaskArgs({ root: ROOT, nodeExe: 'C:\\old\\node.exe', script: SCRIPT }) } });
 const rm = await HS.ensureLogonTask({ root: ROOT, nodeExe: NODE, script: SCRIPT, ps: fm.ps });
 ok(rm.act === 'rewritten' && fm.calls.write === 1, 'the hidden action with a moved node ⇒ rewritten to the node this daemon runs under', rm);
@@ -178,7 +178,7 @@ const fw = fakePs({ task: { execute: 'cmd.exe', args: OLD } }, { writeCode: 1 })
 const rw = await HS.ensureLogonTask({ root: ROOT, nodeExe: NODE, script: SCRIPT, ps: fw.ps, log: (l) => lw.push(l) });
 const fu = fakePs({}, { readOut: 'Get-ScheduledTask : Access is denied.' }), lu = [];
 const ru = await HS.ensureLogonTask({ root: ROOT, nodeExe: NODE, script: SCRIPT, ps: fu.ps, log: (l) => lu.push(l) });
-ok(rw.act === 'write-failed' && lw.length === 1 && /FAILED/.test(lw[0]) && ru.act === 'unreadable' && fu.calls.write === 0 && lu.length === 1, 'a failed write and an unreadable read are SAID (one line each); an unreadable task is never written', { rw, lw, ru, lu });
+ok(rw.act === 'write-failed' && lw.length === 1 && gateOf(/FAILED/.test(lw[0])) && ru.act === 'unreadable' && fu.calls.write === 0 && lu.length === 1, 'a failed write and an unreadable read are SAID (one line each); an unreadable task is never written', { rw, lw, ru, lu });
 const rn = await HS.ensureLogonTask({ root: 'C:\\Users\\ada\\.vibespace\\agentd', nodeExe: NODE, script: SCRIPT, ps: async () => { throw new Error('must not run'); } });
 ok(rn.act === 'no-task-name', 'a root that is not device@<host> has no task of ours ⇒ no PowerShell at all', rn);
 const mV = modOf(HS_SRC.replace("if (exe === 'powershell.exe' && args.trim() === String(want).trim()) return 'same';", ''));
@@ -235,17 +235,17 @@ function census({ ad = AD, ps1 = PS1, hubRows = HUB_ROWS } = {}) {
 const C = census();
 console.log(`    ${C.js.length} daemon starts in agentd.js, ${C.ps.length} in the ps1, ${HUB_ROWS.length} hub / POSIX rows`);
 ok(C.red.length === 0 && C.dead.length === 0, 'every daemon start is hidden (agentd: detached + stdio ignore + windowsHide: true; ps1: -WindowStyle Hidden / the hidden task); no dead hub row', { red: C.red, dead: C.dead });
-ok(C.js.length === 2 && C.js.some((s) => /cpB\.spawn\(process\.execPath, \[__filename\]/.test(s.text)) && C.js.some((s) => /spawn\(process\.execPath, argv, \{/.test(s.text)), 'agentd.js starts the daemon at exactly TWO sites: the --stdio bridge and startSuccessor (THE re-exec)', C.js);
-ok((AD.match(/startSuccessor\(/g) || []).length === 3 && /startSuccessor\(reExecArgv\(path\.join\(dir, path\.basename\(process\.argv\[1\] \|\| 'agentd\.js'\)\)\), \{ VIBESPACE_AGENTD_VERSION: version \}\)/.test(AD) && /startSuccessor\(reExecArgv\(process\.argv\[1\] \|\| __filename\), \{ \[HS\.HIDDEN_MARK\]: '1' \}\)/.test(AD), 'startSuccessor: one definition, two callers — the self-upgrade (its version) and the console self-heal (the mark)');
+ok(C.js.length === 2 && gateOf(C.js.some((s) => /cpB\.spawn\(process\.execPath, \[__filename\]/.test(s.text))) && verdictOf(C.js.some((s) => /spawn\(process\.execPath, argv, \{/.test(s.text))), 'agentd.js starts the daemon at exactly TWO sites: the --stdio bridge and startSuccessor (THE re-exec)', C.js);
+ok((AD.match(/startSuccessor\(/g) || []).length === 3 && gateOf(/startSuccessor\(reExecArgv\(path\.join\(dir, path\.basename\(process\.argv\[1\] \|\| 'agentd\.js'\)\)\), \{ VIBESPACE_AGENTD_VERSION: version \}\)/.test(AD)) && verdictOf(/startSuccessor\(reExecArgv\(process\.argv\[1\] \|\| __filename\), \{ \[HS\.HIDDEN_MARK\]: '1' \}\)/.test(AD)), 'startSuccessor: one definition, two callers — the self-upgrade (its version) and the console self-heal (the mark)');
 eq(C.ps.map((s) => s.kind), ['first launch', 'logon task'], 'the ps1 starts the daemon at TWO sites: the first launch and the logon task (the dial check, the allow-list writer and the pairing\'s setup modes are one-shots, not daemons)');
 const pj = census({ ad: AD + "\nfunction plantedStart() { require('child_process').spawn(process.execPath, [__filename], { detached: true, stdio: 'ignore' }).unref(); }\n" });
-ok(pj.red.length === 1 && /plantedStart|spawn\(process\.execPath, \[__filename\]/.test(pj.red[0]), 'CONTROL: a planted daemon start without windowsHide ⇒ RED', pj.red);
+ok(pj.red.length === 1 && verdictOf(/plantedStart|spawn\(process\.execPath, \[__filename\]/.test(pj.red[0])), 'CONTROL: a planted daemon start without windowsHide ⇒ RED', pj.red);
 const pp = census({ ps1: PS1.replace('$p = Start-Process -PassThru -WindowStyle Hidden $nodeExe', '$p = Start-Process -PassThru $nodeExe') });
-ok(pp.red.length === 1 && /first launch/.test(pp.red[0]), 'CONTROL: the first launch without -WindowStyle Hidden ⇒ RED', pp.red);
+ok(pp.red.length === 1 && verdictOf(/first launch/.test(pp.red[0])), 'CONTROL: the first launch without -WindowStyle Hidden ⇒ RED', pp.red);
 const pc = census({ ps1: mPs1 });
-ok(pc.red.length === 1 && /logon task/.test(pc.red[0]), 'CONTROL: the old cmd.exe task action ⇒ RED', pc.red);
+ok(pc.red.length === 1 && verdictOf(/logon task/.test(pc.red[0])), 'CONTROL: the old cmd.exe task action ⇒ RED', pc.red);
 const pf = census({ ps1: PS1.replace("Write-Host \"-> starting daemon with dial-out to $Dial\"", "Write-Host \"-> starting daemon with dial-out to $Dial\"\n& $nodeExe \"$current\\vibespace-device.js\"") });
-ok(pf.red.some((r) => /foreground daemon/.test(r)), 'CONTROL: a foreground `& $nodeExe …vibespace-device.js` (the daemon in the installer\'s own console) ⇒ RED', pf.red);
+ok(verdictOf(pf.red.some((r) => /foreground daemon/.test(r))), 'CONTROL: a foreground `& $nodeExe …vibespace-device.js` (the daemon in the installer\'s own console) ⇒ RED', pf.red);
 const pd = census({ hubRows: [...HUB_ROWS, { file: 'src/hosts.js', needle: 'no-such-site(', why: 'dead' }] });
 ok(pd.dead.length === 1, 'CONTROL: a hub row that names no site ⇒ RED (dead row)', pd.dead);
 
@@ -255,13 +255,13 @@ console.log('§5 the wiring in agentd.js');
 const gm = /^if \(!process\.argv\.includes\('--stdio'\) && !process\.argv\.includes\('--dial-check'\)[^\n]*\) \{\n/m.exec(AD), gate = gm ? gm.index : -1, stepAt = AD.indexOf('HS.consoleStep({'), lockAt = AD.indexOf('if (!acquireSingleton()) {');
 ok(gate > 0 && stepAt > gate && lockAt > stepAt && AD.indexOf('HS.consoleStep(') === stepAt && AD.lastIndexOf('HS.consoleStep(') === stepAt, 'the console step runs ONCE, inside the daemon body (never --stdio / --dial-check), BEFORE the singleton (the successor takes it)');
 const step = AD.slice(stepAt, lockAt);
-ok(/platform: process\.platform, marked: process\.env\.VIBESPACE_AGENTD_HIDDEN === '1',/.test(step) && /attached: \[0, 1, 2\]\.some\(\(fd\) => \{ try \{ return require\('tty'\)\.isatty\(fd\); \}/.test(step) && /look: \(\) => psOnceSync\(HS\.consoleProbeScript\(process\.pid\)\)\.code,/.test(step) && /reExec: \(\) => \{ if \(startSuccessor\(reExecArgv\(process\.argv\[1\] \|\| __filename\), \{ \[HS\.HIDDEN_MARK\]: '1' \}\)\) exitDaemon\(0\); else log\(/.test(step), 'the step: the mark read, a console handle on 0/1/2 (tty.isatty — no stream built), the look = the hidden one-shot\'s exit code, the re-exec = the marked successor then exit 0 (cmd.exe ends, its window closes)', step);
+ok(gateOf(/platform: process\.platform, marked: process\.env\.VIBESPACE_AGENTD_HIDDEN === '1',/.test(step)) && gateOf(/attached: \[0, 1, 2\]\.some\(\(fd\) => \{ try \{ return require\('tty'\)\.isatty\(fd\); \}/.test(step)) && gateOf(/look: \(\) => psOnceSync\(HS\.consoleProbeScript\(process\.pid\)\)\.code,/.test(step)) && verdictOf(/reExec: \(\) => \{ if \(startSuccessor\(reExecArgv\(process\.argv\[1\] \|\| __filename\), \{ \[HS\.HIDDEN_MARK\]: '1' \}\)\) exitDaemon\(0\); else log\(/.test(step)), 'the step: the mark read, a console handle on 0/1/2 (tty.isatty — no stream built), the look = the hidden one-shot\'s exit code, the re-exec = the marked successor then exit 0 (cmd.exe ends, its window closes)', step);
 ok(HS.HIDDEN_MARK === 'VIBESPACE_AGENTD_HIDDEN' && !DAEMON_ENV_KEEP.has(HS.HIDDEN_MARK) && !(HS.HIDDEN_MARK in daemonEnv({ [HS.HIDDEN_MARK]: '1', PATH: '/x' })), 'the mark is ONE hop: the successor is born with it, daemonEnv drops it (no session, no later re-exec inherits it)');
 const tAt = AD.indexOf('HS.ensureLogonTask(');
 const tBlk = AD.slice(AD.lastIndexOf("if (process.platform === 'win32') {", tAt), tAt + 400);
-ok(tAt > lockAt && AD.indexOf('HS.ensureLogonTask(') === AD.lastIndexOf('HS.ensureLogonTask(') && /^if \(process\.platform === 'win32'\) \{\n  setTimeout\(\(\) => HS\.ensureLogonTask\(\{ root: ROOT, nodeExe: process\.execPath, script: path\.join\(ROOT, 'current', path\.basename\(process\.argv\[1\] \|\| 'vibespace-device\.js'\)\), ps: psOnce, log \}\)/.test(tBlk) && /\.catch\(/.test(tBlk), 'the task step: win32 only, after the singleton, async (a timer — the boot never waits), the `current` script this daemon runs under, the node it runs under', tBlk.slice(0, 300));
+ok(tAt > lockAt && AD.indexOf('HS.ensureLogonTask(') === AD.lastIndexOf('HS.ensureLogonTask(') && gateOf(/^if \(process\.platform === 'win32'\) \{\n  setTimeout\(\(\) => HS\.ensureLogonTask\(\{ root: ROOT, nodeExe: process\.execPath, script: path\.join\(ROOT, 'current', path\.basename\(process\.argv\[1\] \|\| 'vibespace-device\.js'\)\), ps: psOnce, log \}\)/.test(tBlk)) && verdictOf(/\.catch\(/.test(tBlk)), 'the task step: win32 only, after the singleton, async (a timer — the boot never waits), the `current` script this daemon runs under, the node it runs under', tBlk.slice(0, 300));
 const one = (name) => { const a = AD.indexOf(`function ${name}(script) {`); return a < 0 ? '' : AD.slice(a, AD.indexOf('\n}\n', a)); };
-ok(/execFileSync\('powershell\.exe', psOnceArgs\(script\), \{ windowsHide: true, timeout: 30000,/.test(one('psOnceSync')) && /execFile\('powershell\.exe', psOnceArgs\(script\), \{ windowsHide: true, timeout: 60000,/.test(one('psOnce')) && /const psOnceArgs = \(script\) => \['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', HS\.encodePs\(script\)\];/.test(AD), 'both one-shots: powershell.exe -EncodedCommand, windowsHide: true, bounded (30 s sync look, 60 s task)');
+ok(gateOf(/execFileSync\('powershell\.exe', psOnceArgs\(script\), \{ windowsHide: true, timeout: 30000,/.test(one('psOnceSync'))) && gateOf(/execFile\('powershell\.exe', psOnceArgs\(script\), \{ windowsHide: true, timeout: 60000,/.test(one('psOnce'))) && verdictOf(/const psOnceArgs = \(script\) => \['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', HS\.encodePs\(script\)\];/.test(AD)), 'both one-shots: powershell.exe -EncodedCommand, windowsHide: true, bounded (30 s sync look, 60 s task)');
 ok(Buffer.from(HS.encodePs('exit 20'), 'base64').toString('utf16le') === 'exit 20', 'encodePs = UTF-16LE base64 (what -EncodedCommand reads)');
 
 // B-3d06: THE DEVICE'S SPAWN PATH by the platform's own separator (src/agent-env.js withSpawnPath — PURE, so its legs run here with
@@ -288,10 +288,10 @@ console.log('— B-3d06: the device agent\'s spawn PATH, by the platform\'s own 
     return bad;
   };
   const w = withSpawnPath({ Path: WIN_PATH, USERPROFILE: 'C:\\Users\\u' }, { platform: 'win32', agentDirs: WIN_DIRS, fallback: WIN_PATH });
-  ok(!winBad(w).length && Object.keys(w).includes('Path'), 'win32: the PERSON\'S PATH first and whole (Git\'s usr\\bin among it, so the hello\'s sh probe finds it), the agent\'s node dir and ~\\.local\\bin AFTER it, on the key the env spells (Path)', { got: w.Path, bad: winBad(w) });
+  ok(!winBad(w).length && verdictOf(Object.keys(w).includes('Path')), 'win32: the PERSON\'S PATH first and whole (Git\'s usr\\bin among it, so the hello\'s sh probe finds it), the agent\'s node dir and ~\\.local\\bin AFTER it, on the key the env spells (Path)', { got: w.Path, bad: winBad(w) });
   const REL_DIRS = [NODE, LBIN, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];   // the release's SIX folders, as it ran on Windows
   const rel = released({ Path: WIN_PATH }, REL_DIRS, WIN_PATH), relFirst = String(rel.PATH).split(';')[0];
-  ok(winBad(rel).length > 0 && relFirst.includes(NODE) && relFirst.includes('Git\\usr\\bin'), 'RED CONTROL (the release\'s rule, run as it ran on Windows): the PATH split on its drive colons — the node dir, the local bin AND Git\'s usr\\bin glued into ONE garbled first entry, a second PATH key beside Path', { first: relFirst, bad: winBad(rel) });
+  ok(winBad(rel).length > 0 && gateOf(relFirst.includes(NODE)) && verdictOf(relFirst.includes('Git\\usr\\bin')), 'RED CONTROL (the release\'s rule, run as it ran on Windows): the PATH split on its drive colons — the node dir, the local bin AND Git\'s usr\\bin glued into ONE garbled first entry, a second PATH key beside Path', { first: relFirst, bad: winBad(rel) });
   const w2 = withSpawnPath({ Path: 'C:\\Windows', PATH: WIN_PATH }, { platform: 'win32', agentDirs: WIN_DIRS });
   ok(Object.keys(w2).filter((k) => k.toUpperCase() === 'PATH').join() === 'PATH' && !winBad(w2).length, 'win32: two PATH keys that differ by case end as ONE — the later (an explicit extra) wins, never two in the child\'s env', w2);
   const held = `c:\\program files\\vibespace-agent\\node\;${WIN_PATH}`, w3 = withSpawnPath({ Path: held }, { platform: 'win32', agentDirs: WIN_DIRS });
@@ -303,10 +303,10 @@ console.log('— B-3d06: the device agent\'s spawn PATH, by the platform\'s own 
   ok(pathOf(w, 'win32') === w.Path && pathOf({ path: 'C:\\x' }, 'win32') === 'C:\\x' && pathOf({ Path: 'C:\\a', PATH: 'C:\\b' }, 'win32') === 'C:\\b' && pathOf({ PATH: '/u', path: '/x' }, 'linux') === '/u' && pathOf({ path: '/x' }, 'linux') === '' && pathOf({}, 'win32') === '',
     'pathOf: on win32 the PATH key as the env spells it (the later of two, as withSpawnPath keeps); elsewhere PATH only; none ⇒ empty');
   const SS = fs.readFileSync(path.join(REPO, 'src/agentd/stream-screen.js'), 'utf8'), SPT = fs.readFileSync(path.join(REPO, 'src/stream-plan.js'), 'utf8');
-  ok(SS.includes('const PATH = [pathOf(lookupEnv, platform), pathOf(env, platform)].filter(Boolean).join(path.delimiter);') && !/env\.PATH \|\| env\.Path/.test(SS) && !/env\.PATH \|\| env\.Path/.test(SPT),   // stale-pins: kept — a deliberate absence check (no reader of two fixed spellings)
+  ok(gateOf(SS.includes('const PATH = [pathOf(lookupEnv, platform), pathOf(env, platform)].filter(Boolean).join(path.delimiter);')) && !/env\.PATH \|\| env\.Path/.test(SS) && !/env\.PATH \|\| env\.Path/.test(SPT),   // stale-pins: kept — a deliberate absence check (no reader of two fixed spellings)
     'WIRING: stream-screen reads the spawn env\'s PATH through pathOf; no reader of two fixed spellings is left in the stream modules');
   const DM = fs.readFileSync(path.join(REPO, 'src/desktop-mic.js'), 'utf8');
-  ok(SS.includes('SP.ffmpegCandidates({ platform, env: { PATH, LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }') && DM.includes("SP.ffmpegCandidates({ platform: platform === 'win32' ? 'win32' : 'linux', env: { PATH: lookupEnv.PATH || lookupEnv.Path || ''")
+  ok(gateOf(SS.includes('SP.ffmpegCandidates({ platform, env: { PATH, LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }')) && gateOf(DM.includes("SP.ffmpegCandidates({ platform: platform === 'win32' ? 'win32' : 'linux', env: { PATH: lookupEnv.PATH || lookupEnv.Path || ''"))
     && (SS + DM).split('SP.ffmpegCandidates(').length === 3,
     'PIN: both callers of ffmpegCandidates hand it a PATH word (stream-plan reads that one spelling: the second was dropped)');
   ok(withSpawnPath({}, { platform: 'win32', agentDirs: WIN_DIRS, fallback: 'C:\\Windows' }).PATH === `C:\\Windows;${NODE};${LBIN}`, 'win32: an env with no PATH takes the fallback first, the agent\'s folders after, by the same separator');
@@ -315,11 +315,11 @@ console.log('— B-3d06: the device agent\'s spawn PATH, by the platform\'s own 
   const PX_DIRS = ['/opt/node/bin', path.posix.join('/home/u', '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
   const shapes = [{ PATH: '/usr/bin:/home/u/bin', path: 'lower' }, { PATH: '/opt/node/bin:/usr/local/bin' }, { PATH: '/a::/b:' }, { PATH: '' }, {}];
   const posixSame = (plat) => shapes.every((e) => JSON.stringify(withSpawnPath(e, { platform: plat, agentDirs: PX_DIRS, fallback: '/fb' })) === JSON.stringify(released(e, PX_DIRS, '/fb')));
-  ok(posixSame('linux') && posixSame('darwin'), 'a POSIX machine (linux, darwin): the env is byte for byte the release\'s, PATH and every other key, over five shapes and the fallback', shapes.map((e) => withSpawnPath(e, { platform: 'linux', agentDirs: PX_DIRS, fallback: '/fb' }).PATH));
+  ok(gateOf(posixSame('linux')) && verdictOf(posixSame('darwin')), 'a POSIX machine (linux, darwin): the env is byte for byte the release\'s, PATH and every other key, over five shapes and the fallback', shapes.map((e) => withSpawnPath(e, { platform: 'linux', agentDirs: PX_DIRS, fallback: '/fb' }).PATH));
   // the wiring: spawnEnv builds the agent's folders with its own path module (no POSIX folder on win32) and returns withSpawnPath
-  ok(/function spawnEnv\(extra\) \{\n  const merged = \{ \.\.\.daemonEnv\(process\.env\), \.\.\.\(extra \|\| \{\}\) \};\n[^]*?  const agentDirs = \[path\.dirname\(process\.execPath\), path\.join\(os\.homedir\(\), '\.local', 'bin'\), \.\.\.\(process\.platform === 'win32' \? \[\] : \['\/opt\/homebrew\/bin', '\/usr\/local\/bin', '\/usr\/bin', '\/bin'\]\)\];\n  return withSpawnPath\(merged, \{ platform: process\.platform, agentDirs, fallback: process\.env\.PATH \}\);[^\n]*\n\}/.test(AD) && !/cur\.split\(':'\)/.test(AD),
+  ok(gateOf(/function spawnEnv\(extra\) \{\n  const merged = \{ \.\.\.daemonEnv\(process\.env\), \.\.\.\(extra \|\| \{\}\) \};\n[^]*?  const agentDirs = \[path\.dirname\(process\.execPath\), path\.join\(os\.homedir\(\), '\.local', 'bin'\), \.\.\.\(process\.platform === 'win32' \? \[\] : \['\/opt\/homebrew\/bin', '\/usr\/local\/bin', '\/usr\/bin', '\/bin'\]\)\];\n  return withSpawnPath\(merged, \{ platform: process\.platform, agentDirs, fallback: process\.env\.PATH \}\);[^\n]*\n\}/.test(AD)) && !/cur\.split\(':'\)/.test(AD),
     'WIRING: spawnEnv (src/agentd/agentd.js) builds the release\'s agent folders (no POSIX folder on win32) and returns withSpawnPath over its merge with this process\'s platform; the release\'s colon split is gone');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

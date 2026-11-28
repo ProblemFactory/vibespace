@@ -47,7 +47,7 @@ import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's 
 const require = createRequire(import.meta.url);
 const member = (w, tabs) => ({ ...w, tabChain: { tabs: [...tabs], active: 0, layout: 'tabs', order: [...tabs] }, isTabGuest: tabs[0] !== w.winId });
 let pass = 0, fail = 0, CUR = null; const STRAY = [];   // r2342: CUR = the section running (a leg outside every section is STRAY)
-const ok = (c, n, extra) => { if (!CUR) STRAY.push(n); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!CUR) STRAY.push(n); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -87,14 +87,14 @@ const halvesOf = (table, part) => {
 const flip = (p) => (p === 'main' ? 'phone' : 'main');
 CUR = 'the table';
 const H = halvesOf(SECTIONS, PART);
-ok(H.whole, `r2342 THE TWO HALVES: this run is the ${PART} half (${H.mine} sections), its twin ${TWIN[PART] || '?'} the other (${H.theirs}) — disjoint, their union the whole table of ${SECTIONS.length}`, H);
+ok(verdictOf(H.whole), `r2342 THE TWO HALVES: this run is the ${PART} half (${H.mine} sections), its twin ${TWIN[PART] || '?'} the other (${H.theirs}) — disjoint, their union the whole table of ${SECTIONS.length}`, H);
 ok(!halvesOf([...SECTIONS, [SECTIONS[0][0], flip(SECTIONS[0][1])]], PART).whole && !halvesOf([...SECTIONS, ['§x', 'neither']], PART).whole && !halvesOf(SECTIONS, 'both').whole,
   'r2342 CONTROLS: a section named in both halves, one in neither, a part that is no half — each is red');
 CUR = null;
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 function pureLegs(DR, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const R = TRIPLE();
   const vNext = R['desk-v'].filter((w) => w.winId !== 'win-v-s');
   const alive = (sid) => sid === S || sid === T;
@@ -133,17 +133,17 @@ function pureLegs(DR, { quiet = false } = {}) {
   const answers = []; for (let i = 0; i < 50; i++) answers.push(RS(mem, { who: 1, desktopId: 'desk-v', key: k1, now: 1000 + i * 515 }).answer);
   leg(answers.filter(Boolean).length === 1 && answers[0] === true, '§1 refusalStorm: 50 identical refusals 515 ms apart (the measured cadence) ⇒ ONE answered, 49 repeats', answers.filter(Boolean).length);
   const fresh = RS(mem, { who: 1, desktopId: 'desk-v', key: K({ desktopId: 'desk-v', reason: 'shrink-without-close', unexplained: ['v-1'] }), now: 1000 + 50 * 515 });
-  leg(fresh.answer === true && fresh.ended && fresh.ended.count === 49 && fresh.ended.who === 1 && fresh.ended.desktopId === 'desk-v', '§1 …a CHANGED refusal is answered afresh and ends the storm ONCE: {who, desktop, count: 49}', fresh);
+  leg(fresh.answer === true && gateOf(fresh.ended) && fresh.ended.count === 49 && fresh.ended.who === 1 && fresh.ended.desktopId === 'desk-v', '§1 …a CHANGED refusal is answered afresh and ends the storm ONCE: {who, desktop, count: 49}', fresh);
   const other = RS(mem, { who: 2, desktopId: 'desk-v', key: k1, now: 1000 + 51 * 515 });
   leg(other.answer === true, '§1 …another client has its own memory (its first refusal is answered)');
   const m2 = new Map(); RS(m2, { who: 1, desktopId: 'd', key: 'k', now: 0 }); RS(m2, { who: 1, desktopId: 'd', key: 'k', now: 100 });
   const calm = RS(m2, { who: 1, desktopId: 'd', key: 'k', now: 100 + 10001 });
-  leg(calm.answer === true && calm.ended && calm.ended.count === 1, '§1 …the same refusal after 10 s of quiet is answered again (the storm before it said once)', calm);
+  leg(calm.answer === true && gateOf(calm.ended) && calm.ended.count === 1, '§1 …the same refusal after 10 s of quiet is answered again (the storm before it said once)', calm);
   const m3 = new Map(); RS(m3, { who: 1, desktopId: 'd', key: 'k', now: 0 }); RS(m3, { who: 1, desktopId: 'd', key: 'k', now: 10 });
   const ended = DR.stormEnd ? DR.stormEnd(m3, { who: 1, desktopId: 'd' }) : null;
   const m4 = new Map(); RS(m4, { who: 1, desktopId: 'd', key: 'k', now: 0 }); RS(m4, { who: 1, desktopId: 'd', key: 'k', now: 10 }); RS(m4, { who: 3, desktopId: 'd', key: 'k', now: 10 });
   const swept = DR.stormSweep ? DR.stormSweep(m4, { now: 10 + 10001 }) : [];
-  leg(ended && ended.count === 1 && !m3.size && swept.length === 1 && swept[0].count === 1 && !m4.size, '§1 stormEnd (an accepted write) and stormSweep (10 s of quiet) end a storm once; a refusal never repeated ends silently', { ended, swept });
+  leg(gateOf(ended) && ended.count === 1 && !m3.size && swept.length === 1 && swept[0].count === 1 && !m4.size, '§1 stormEnd (an accepted write) and stormSweep (10 s of quiet) end a storm once; a refusal never repeated ends silently', { ended, swept });
   const m5 = new Map(); let n5 = 0; for (let t = 0; t <= 125000; t += 500) if (RS(m5, { who: 1, desktopId: 'd', key: 'k', now: t }).answer) n5++;
   leg(n5 === 3, '§1 …a client that never stops gets one answer a MINUTE (STORM_MAX_MS), never one per send (125 s of 2 Hz ⇒ 3)', n5);
   // r3 F — THE DEDUP TRACE (noteDupsLeft): the copies a write let go, noted; an id a write lists again, forgotten; bounded
@@ -152,7 +152,7 @@ function pureLegs(DR, { quiet = false } = {}) {
   leg(J(tr1) === J([{ id: 'c', by: 'd', at: 2 }, { id: 'e', by: 'f', at: 9 }]), '§1 r3 F noteDupsLeft: a copy the write let go is traced {id, by, at}; an id the write LISTS again leaves the trace (the hub learned it is shown)', tr1);
   // r4 M — NEVER CUT BY COUNT: an entry leaves when its id is listed again, by a person's act, or when its conversation ends
   const tr2 = ND(Array.from({ length: 60 }, (_, i) => ({ id: 'w' + i, by: 'b', sid: 's' + i, at: i })), { left: [{ id: 'w60', by: 'b', sid: 's60' }], listed: [], alive: () => true, at: 99 });
-  leg(Array.isArray(tr2) && tr2.length === 61 && tr2[0].id === 'w0' && tr2[60].id === 'w60', '§1 r4 M noteDupsLeft: the trace is NEVER cut by count — 60 entries and one more ⇒ 61, the oldest kept (36bd0c866: the newest 50)', tr2 && tr2.length);
+  leg(gateOf(Array.isArray(tr2)) && tr2.length === 61 && tr2[0].id === 'w0' && tr2[60].id === 'w60', '§1 r4 M noteDupsLeft: the trace is NEVER cut by count — 60 entries and one more ⇒ 61, the oldest kept (36bd0c866: the newest 50)', tr2 && tr2.length);
   const tr3 = ND([{ id: 'a', by: 'b', sid: 'dead', at: 1 }, { id: 'c', by: 'd', sid: 'live', at: 2 }, { id: 'e', by: 'f', at: 3 }], { left: [{ id: 'g', by: 'h', sid: 'dead' }], listed: [], alive: (sid) => sid === 'live', at: 9 });
   leg(J(tr3) === J([{ id: 'c', by: 'd', sid: 'live', at: 2 }, { id: 'e', by: 'f', at: 3 }]), '§1 r4 M …an entry whose conversation ENDED leaves it (the hub\'s live-session set) — and never enters; one with no conversation named (an r3 trace) is judged by the other rules alone', tr3);
   // r4 K — A PERSON'S ACT LEAVES THE TRACE in that same write; only a 'dup' drop enters it
@@ -166,8 +166,8 @@ function pureLegs(DR, { quiet = false } = {}) {
   leg(!bad.ok && bad.reason === 'chain-disagrees' && J(bad.rows) === J(['s']), '§1 r3 G chainsAgree: the r2 re-send — host [h, g] beside the copy\'s guest row [h, s, g] — DISAGREES (reason \'chain-disagrees\', the row named)', bad);
   const lone = CA([{ winId: 'h', tabChain: ch(G) }, { winId: 'g' }], []);
   leg(!lone.ok && J(lone.rows) === J(['h']), '§1 r3 G …a row naming a member whose own row carries NO chain disagrees too', lone);
-  leg(CA(rowsOf(G, G), []).ok && CA([{ winId: 'h', tabChain: ch(G) }, { winId: 'g', tabChain: ch(G), isTabGuest: true }], []).ok, '§1 r3 G …rows that agree pass, and so does a member the record does not hold (a chain still waiting for it — never a disagreement)');
-  leg(CA(rowsOf(['h', 'g'], G), rowsOf(['h', 'g'], G)).ok, '§1 r3 G …a disagreement ALREADY STORED is the record\'s — carried (a write never fixes what its page did not build): only a disagreement the write introduces is one');
+  leg(gateOf(CA(rowsOf(G, G), []).ok) && verdictOf(CA([{ winId: 'h', tabChain: ch(G) }, { winId: 'g', tabChain: ch(G), isTabGuest: true }], []).ok), '§1 r3 G …rows that agree pass, and so does a member the record does not hold (a chain still waiting for it — never a disagreement)');
+  leg(verdictOf(CA(rowsOf(['h', 'g'], G), rowsOf(['h', 'g'], G)).ok), '§1 r3 G …a disagreement ALREADY STORED is the record\'s — carried (a write never fixes what its page did not build): only a disagreement the write introduces is one');
   return failed;
 }
 await section('§1 PURE (src/lib/desktop-record.js)', async () => { pureLegs(require(MODEL)); });
@@ -178,14 +178,14 @@ await section('§1 r4 PURE (src/lib/chain-layout.js withMembersBack)', async () 
   const was = { tabs: ['v-h', 'win-v-s', 'v-g'], active: 1, layout: 'tabs', order: ['v-h', 'win-v-s', 'v-g'] };
   ok(J(B(W(was, ['win-v-s']), was, ['win-v-s'])) === J(was), '§1 r4 J withMembersBack: a group read without a member and given it back is the group it WAS — its tabs, its strip order, its active tab (the kept window in front stays in front)', B(W(was, ['win-v-s']), was, ['win-v-s']));
   const shown = B({ tabs: ['v-h', 'v-g'], active: 1, layout: 'tabs', order: ['v-h', 'v-g'] }, { ...was, active: 0 }, ['win-v-s']);
-  ok(shown && K(shown) === K(was) && shown.tabs[shown.active] === 'v-g', '§1 r4 I …the page shows another tab of the group meanwhile: the group as it was, that tab in front', shown);
+  ok(gateOf(shown) && K(shown) === K(was) && shown.tabs[shown.active] === 'v-g', '§1 r4 I …the page shows another tab of the group meanwhile: the group as it was, that tab in front', shown);
   const merged = B({ tabs: ['v-h', 'v-g', 't'], active: 0, layout: 'tabs', order: ['v-h', 'v-g', 't'] }, was, ['win-v-s']);
-  ok(merged && J(merged.tabs) === J(['v-h', 'win-v-s', 'v-g', 't']) && J(merged.order) === J(['v-h', 'win-v-s', 'v-g', 't']) && merged.tabs[merged.active] === 'v-h', '§1 r4 I …the person changed the group (merged t in): the kept member goes back after its nearest earlier member — in the membership and the strip — and the shown tab stays', merged);
+  ok(gateOf(merged) && J(merged.tabs) === J(['v-h', 'win-v-s', 'v-g', 't']) && J(merged.order) === J(['v-h', 'win-v-s', 'v-g', 't']) && merged.tabs[merged.active] === 'v-h', '§1 r4 I …the person changed the group (merged t in): the kept member goes back after its nearest earlier member — in the membership and the strip — and the shown tab stays', merged);
   const two = { tabs: ['v-h', 'k'], active: 0, layout: 'tabs', order: ['v-h', 'k'] };
   ok(J(B(null, two, ['k'])) === J(two) && B(null, was, ['win-v-s']) === null, '§1 r4 I …a two-tab group read without one has no group left: given back, it is the group again; a bigger group someone took apart meanwhile is not re-made (null — the kept window stands alone)', [B(null, two, ['k']), B(null, was, ['win-v-s'])]);
   const sp = { tabs: ['a', 'k', 'b', 'c'], active: 0, layout: 'split', order: ['a', 'k', 'b', 'c'], split: { pair: ['a', 'b'], ratio: 0.4, dir: 'row', left: ['a', 'k'], right: ['b', 'c'] } };
   const spb = B({ ...W(sp, ['k']), split: { ...W(sp, ['k']).split, ratio: 0.6 } }, sp, ['k']);
-  ok(spb && K(spb) === K(sp) && spb.split.ratio === 0.6 && J(spb.split.left) === J(['a', 'k']), '§1 r4 J …a SPLIT given its member back: the same sides and pair (the same key), the ratio the record holds now', spb);
+  ok(gateOf(spb) && K(spb) === K(sp) && spb.split.ratio === 0.6 && J(spb.split.left) === J(['a', 'k']), '§1 r4 J …a SPLIT given its member back: the same sides and pair (the same key), the ratio the record holds now', spb);
   ok(J(B(was, was, ['win-v-s'])) === J(CL.normalizeChain(CL.cloneChain(was))) && J(B(W(was, ['win-v-s']), was, ['zz'])) === J(W(was, ['win-v-s'])), '§1 r4 …an id the chain already holds, or one `was` never named, changes nothing');
 });
 
@@ -193,7 +193,7 @@ await section('§1 r4 PURE (src/lib/chain-layout.js withMembersBack)', async () 
 /** r5 N on the real handler (its own function: the r5-N-live-set mutant runs these alone). → failed names. */
 async function hubNLegs(WSH, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const vWrite = (evidence, sentAt, o = {}) => ({ type: 'layout-sync', desktopId: 'desk-v', state: { windows: TRIPLE()['desk-v'].filter((w) => w.winId !== 'win-v-s'), grid: null, ...(o.state || {}) }, evidence, base: 1000, sentAt, viewport: 'desktop' });
   // r5 N — ALIVE FOR THE TRACE MEANS «A WINDOW CAN STILL SHOW IT» (the r4 acceptance's q4: the trace forgot every conversation
   // missing from the live-session set): a conversation that STOPPED (its CLI exited — every page keeps its window as read-only
@@ -205,11 +205,11 @@ async function hubNLegs(WSH, { quiet = false } = {}) {
   await P2.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1201));
   H2.stop(S); // its CLI exited: the live-session set lost it (session-stdout's exit path)
   await P2.send(later(H2, 1202));
-  leg(acks(P2).length === 2 && traced(H2), '§2 r5 N: a STOPPED conversation stays traced through the next write of its desktop — its window is read-only history a page still shows (4ad07d751: dropped at that write, and the page that showed it closed it)', H2.layouts().desktops['desk-v'].dupsLeft);
+  leg(acks(P2).length === 2 && verdictOf(traced(H2)), '§2 r5 N: a STOPPED conversation stays traced through the next write of its desktop — its window is read-only history a page still shows (4ad07d751: dropped at that write, and the page that showed it closed it)', H2.layouts().desktops['desk-v'].dupsLeft);
   const H3 = hub(WSH, DOC(TRIPLE())), P3 = H3.connect();
   await P3.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1301));
   const w3 = H3.writes(), k = await H3.kill(S);
-  leg(k && k.ok === true && traced(H3) === false && !('dupsLeft' in H3.layouts().desktops['desk-v']) && H3.writes() === w3 + 1, '§2 r5 N: …its END — the real kill case, the hub\'s end seam — takes it out of every desktop\'s trace at once (one write; no write of the desktop needed)', { k, writes: H3.writes() - w3, tr: H3.layouts().desktops['desk-v'].dupsLeft });
+  leg(gateOf(k) && k.ok === true && traced(H3) === false && !('dupsLeft' in H3.layouts().desktops['desk-v']) && H3.writes() === w3 + 1, '§2 r5 N: …its END — the real kill case, the hub\'s end seam — takes it out of every desktop\'s trace at once (one write; no write of the desktop needed)', { k, writes: H3.writes() - w3, tr: H3.layouts().desktops['desk-v'].dupsLeft });
   await P3.send({ ...vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1302), base: H3.layouts().desktops['desk-v'].autoSave.updatedAt, state: { windows: TRIPLE()['desk-v'].filter((w) => w.winId !== 'win-v-s'), grid: null, theme: 'dark' } });
   leg(!traced(H3), '§2 r5 N: …and a later write that lets a copy of the ENDED conversation go never traces it (nothing can show it any more)', H3.layouts().desktops['desk-v'].dupsLeft);
   const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ldup-n-')), file = path.join(dd, 'layouts.json');
@@ -219,19 +219,19 @@ async function hubNLegs(WSH, { quiet = false } = {}) {
   await P5.send(later(H5, 1402));
   const before = traced(H5);
   H5.adopt(S);
-  leg(acks(P5).length === 1 && before && traced(H5), '§2 r5 N: …and a hub that has not ADOPTED the conversation yet (after a restart) sheds nothing at a write — an absence the hub has not confirmed never shrinks the trace', H5.layouts().desktops['desk-v'].dupsLeft);
+  leg(acks(P5).length === 1 && gateOf(before) && verdictOf(traced(H5)), '§2 r5 N: …and a hub that has not ADOPTED the conversation yet (after a restart) sheds nothing at a write — an absence the hub has not confirmed never shrinks the trace', H5.layouts().desktops['desk-v'].dupsLeft);
   fs.rmSync(dd, { recursive: true, force: true });
   return failed;
 }
 async function hubLegs(WSH, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const vWrite = (evidence, sentAt, o = {}) => ({ type: 'layout-sync', desktopId: 'desk-v', state: { windows: TRIPLE()['desk-v'].filter((w) => w.winId !== 'win-v-s'), grid: null, ...(o.state || {}) }, evidence, base: 1000, sentAt, viewport: 'desktop' });
   {
     const H = hub(WSH, DOC(TRIPLE())), P = H.connect();
     await P.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1));
     leg(acks(P).length === 1 && !refusals(P).length && J(ids(H.layouts().desktops['desk-v'].autoSave.windows)) === J(['v-1', 'v-2', 'v-3', 'win-v-t']), '§2 THE REAL HANDLER: V\'s write dropping its copy of S as {why:\'dup\', by: X\'s window} is ACCEPTED — V 5 → 4, the record converges', { frames: P.frames.map((f) => f.type), v: ids(H.layouts().desktops['desk-v'].autoSave.windows) });
-    leg(H.logs.some((l) => /\[layout-sync\] desktop desk-v: 1 duplicate window\(s\) left — each conversation stays in the window that shows it \(win-v-s → win-x-s\)/.test(l)), '§2 …the journal names the copy and the window that shows its conversation', H.logs.filter((l) => /layout-sync/.test(l)));
+    leg(verdictOf(H.logs.some((l) => /\[layout-sync\] desktop desk-v: 1 duplicate window\(s\) left — each conversation stays in the window that shows it \(win-v-s → win-x-s\)/.test(l))), '§2 …the journal names the copy and the window that shows its conversation', H.logs.filter((l) => /layout-sync/.test(l)));
   }
   for (const [label, ev] of [['today\'s \'unbuilt\'', [{ id: 'win-v-s', why: 'unbuilt' }]], ['a `by` that shows nothing of S', [{ id: 'win-v-s', why: 'dup', by: 'x-1' }]]]) {
     const H = hub(WSH, DOC(TRIPLE())), P = H.connect();
@@ -243,7 +243,7 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     const H = hub(WSH, DOC(TRIPLE())), P = H.connect(), Q = H.connect();
     H.attach(P, S); H.attach(Q, S); // P shows S on X, Q shows S somewhere (its attach)
     await P.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 700));
-    leg(refusals(P).length === 1 && J(refusals(P)[0].unexplained) === J(['win-v-s']) && H.writes() === 0 && H.logs.some((l) => /1 offered as a duplicate while another page shows its conversation — kept/.test(l)), '§2 r2: V\'s valid duplicate is REFUSED while ANOTHER client has its session attached — nothing written (that page may be showing win-v-s), the journal says why', { frames: P.frames.map((f) => f.type), log: H.logs.filter((l) => /REFUSED/.test(l)) });
+    leg(refusals(P).length === 1 && J(refusals(P)[0].unexplained) === J(['win-v-s']) && H.writes() === 0 && verdictOf(H.logs.some((l) => /1 offered as a duplicate while another page shows its conversation — kept/.test(l))), '§2 r2: V\'s valid duplicate is REFUSED while ANOTHER client has its session attached — nothing written (that page may be showing win-v-s), the journal says why', { frames: P.frames.map((f) => f.type), log: H.logs.filter((l) => /REFUSED/.test(l)) });
     const H2 = hub(WSH, DOC(TRIPLE())), P2 = H2.connect(), Q2 = H2.connect();
     H2.attach(P2, S); H2.attach(Q2, S); H2.hangUp(Q2); // the other page's socket closed (its close handler ran) — the hub hears no page there
     await P2.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 701));
@@ -255,7 +255,7 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     await P.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 801));
     const tr = H.layouts().desktops['desk-v'].dupsLeft || [];
     const relay = R.frames.find((f) => f.type === 'layout-sync' && f.desktopId === 'desk-v');
-    leg(acks(P).length === 1 && tr.length === 1 && tr[0].id === 'win-v-s' && tr[0].by === 'win-x-s' && relay && J(relay.dupsLeft) === J(tr), '§2 r3 F THE DEDUP TRACE: the accepted copy is traced beside V\'s record ({id, by, at} in layouts.json — on disk) and the relay to every other page carries it', { tr, relay: relay && relay.dupsLeft });
+    leg(acks(P).length === 1 && tr.length === 1 && tr[0].id === 'win-v-s' && tr[0].by === 'win-x-s' && gateOf(relay) && J(relay.dupsLeft) === J(tr), '§2 r3 F THE DEDUP TRACE: the accepted copy is traced beside V\'s record ({id, by, at} in layouts.json — on disk) and the relay to every other page carries it', { tr, relay: relay && relay.dupsLeft });
     await P.send({ ...vWrite([], 802), state: { windows: TRIPLE()['desk-v'], grid: null } }); // a page that shows win-v-s lists it again
     leg(acks(P).length === 2 && !('dupsLeft' in H.layouts().desktops['desk-v']), '§2 r3 F …a write that lists the id again takes it out of the trace (the hub learned it is shown)', Object.keys(H.layouts().desktops['desk-v']));
   }
@@ -278,8 +278,8 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     const H = hub(WSH, DOC({ ...TRIPLE(), 'desk-v': rows(G, G) })), P = H.connect();
     await P.send(w(901, rows(['v-h', 'v-g'], G)));
     const f = refusals(P)[0];
-    leg(f && f.reason === 'chain-disagrees' && J(f.windows) === J(['win-v-s']) && H.writes() === 0 && J(Object.keys(f).sort()) === J(['desktopId', 'reason', 'sentAt', 'state', 'type', 'windows']), '§2 r3 G: the r2 re-send (host [v-h, v-g] beside the copy\'s guest row [v-h, win-v-s, v-g]) is REFUSED \'chain-disagrees\' — nothing written, the rows named, the record kept (ab1226ff2: accepted; every page ungrouped the copy)', P.frames);
-    leg(H.logs.some((l) => /REFUSED a record of desktop "Desk V" \(desk-v\): its rows disagree about a tab group \(win-v-s/.test(l)), '§2 r3 G …the journal names the rows', H.logs.filter((l) => /REFUSED/.test(l)));
+    leg(gateOf(f) && f.reason === 'chain-disagrees' && J(f.windows) === J(['win-v-s']) && H.writes() === 0 && J(Object.keys(f).sort()) === J(['desktopId', 'reason', 'sentAt', 'state', 'type', 'windows']), '§2 r3 G: the r2 re-send (host [v-h, v-g] beside the copy\'s guest row [v-h, win-v-s, v-g]) is REFUSED \'chain-disagrees\' — nothing written, the rows named, the record kept (ab1226ff2: accepted; every page ungrouped the copy)', P.frames);
+    leg(verdictOf(H.logs.some((l) => /REFUSED a record of desktop "Desk V" \(desk-v\): its rows disagree about a tab group \(win-v-s/.test(l))), '§2 r3 G …the journal names the rows', H.logs.filter((l) => /REFUSED/.test(l)));
     await P.send(w(902, rows(['v-h', 'v-g'], G)));
     leg(refusals(P).length === 1, '§2 r3 G …a repeat within 10 s is never answered (law C)', refusals(P).length);
     const H2 = hub(WSH, DOC({ ...TRIPLE(), 'desk-v': rows(['v-h', 'v-g'], G) })), P2 = H2.connect();
@@ -297,7 +297,7 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     leg(refusals(Q).length === 1, '§2 C: …another client sending the same record has its own memory (answered)');
     await P.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 300));
     const storm = H.logs.filter((l) => /\[layout-sync\] STORM: client #\d+ re-sent a record of desktop "Desk V" \(desk-v\) that was refused for the same reason 49 more time\(s\) in [\d.]+ s — not answered/.test(l));
-    leg(acks(P).length === 1 && storm.length === 1 && H.tele.some((e) => e.name === 'layout-sync-storm' && e.detail === '49'), '§2 C: a CHANGED record is judged afresh (here accepted) and the storm is said ONCE — client, desktop, count 49; telemetry layout-sync-storm', { storm, tele: H.tele.filter((e) => /storm/.test(e.name)) });
+    leg(acks(P).length === 1 && storm.length === 1 && verdictOf(H.tele.some((e) => e.name === 'layout-sync-storm' && e.detail === '49')), '§2 C: a CHANGED record is judged afresh (here accepted) and the storm is said ONCE — client, desktop, count 49; telemetry layout-sync-storm', { storm, tele: H.tele.filter((e) => /storm/.test(e.name)) });
     leg(H.logs.filter((l) => /STORM/.test(l)).length === 1, '§2 C: …exactly one storm line');
   }
   {
@@ -316,7 +316,7 @@ await section('§2 THE REAL ws-handler — A (the duplicate explained across des
  *  desktops[id], trace included) and the whole restore leave no trace naming a window the record lists. `P` = the module (a mutant's). */
 async function persistLegs(P, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ldup-k-'));
   try {
     P.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
@@ -332,10 +332,10 @@ async function persistLegs(P, { quiet = false } = {}) {
     const point = R.listLayoutHistory().find((h) => { try { return JSON.parse(fs.readFileSync(path.join(dd, 'layout-history', h.id), 'utf8')).layouts.desktops['desk-v'].autoSave.windows.some((w) => w.winId === 'win-v-s'); } catch { return false; } });
     leg(traceV().length === 1 && !listsV().includes('win-v-s') && !!point, '§2b r4 K: the trace rides a write that does not list its id (the dedup stands), and a rollback point before the dedup exists', { trace: traceV(), v: listsV(), point: point && point.id });
     await route.handle({ params: { id: point.id }, body: { desktopId: 'desk-v' } }, sink); await tick(5);
-    leg(listsV().includes('win-v-s') && !traceV().some((e) => e.id === 'win-v-s'), '§2b r4 K: THE ONE-DESKTOP RESTORE to the point before the dedup lists the copy again — and the trace no longer names it (36bd0c866: `{ ...desktops[only], autoSave }` carried the trace over; another page\'s keep then undid a person\'s close)', { v: listsV(), trace: traceV() });
+    leg(gateOf(listsV().includes('win-v-s')) && !traceV().some((e) => e.id === 'win-v-s'), '§2b r4 K: THE ONE-DESKTOP RESTORE to the point before the dedup lists the copy again — and the trace no longer names it (36bd0c866: `{ ...desktops[only], autoSave }` carried the trace over; another page\'s keep then undid a person\'s close)', { v: listsV(), trace: traceV() });
     Wl(d2); await tick(5);
     await route.handle({ params: { id: point.id } }, sink); await tick(5);
-    leg(listsV().includes('win-v-s') && !traceV().some((e) => e.id === 'win-v-s'), '§2b r4 K: …the WHOLE restore too (the point\'s own document)', { v: listsV(), trace: traceV() });
+    leg(gateOf(listsV().includes('win-v-s')) && !traceV().some((e) => e.id === 'win-v-s'), '§2b r4 K: …the WHOLE restore too (the point\'s own document)', { v: listsV(), trace: traceV() });
     const d3 = JSON.parse(J(R.readLayouts())); d3.desktops['desk-v'].dupsLeft = [{ id: 'win-v-s', by: 'win-x-s', at: 1 }, { id: 'gone-1', by: 'win-x-s', at: 2 }];
     Wl(d3); await tick(5);
     leg(J(traceV().map((e) => e.id)) === J(['gone-1']), '§2b r4 K: …and ANY write through writeLayouts (an import, a preset, a migration\'s) — the trace keeps only ids the record does not list', traceV());
@@ -350,20 +350,20 @@ await section('§2b r4 K — THE TRACE IS A FACT ABOUT THE RECORD (the real pers
   const src = (f) => read(f);
   const PS = src('src/routes/persistence.js'), WS = src('src/ws-handler.js'), HR = src('src/server/home-rename.js');   // B-8033: the home rename left server.js for its own module
   const body = (t, name) => { const i = t.indexOf('function ' + name + '('); return i < 0 ? '' : t.slice(i, t.indexOf('\n  }\n', i)); };
-  ok(/tracesTrue\(data\);/.test(body(PS, 'writeLayouts')) && /tracesTrue\(_layoutsCache\)/.test(body(PS, 'readLayouts')), '§2b census: writeLayouts (THE CHOKE POINT) and the first read of the file keep every trace true to its record (tracesTrue)');
-  ok((PS.match(/layoutsHold\.(?:write|flush|owe)\(/g) || []).length === 1 && /const gen = _layoutsGen, doc = _layoutsCache;/.test(body(PS, 'flushLayouts')) && /const seq = \+\+_vsSeq, text = doc \? stampedBytes\(doc, \{ run: RUN, seq, at: Date\.now\(\), stop: !!stop, /.test(body(PS, 'flushLayouts')) && /if \(!f\.doc\) return done\(true\);\n\s*try \{ layoutsHold\.owe\(f\.doc, \{ name: 'layouts\.write', bytes: \(\) => \{ _producedSeq = f\.seq; return f\.text; \} \}\); \}/.test(body(PS, 'landLayouts')) && !/writeJsonAtomic\(LAYOUTS_FILE/.test(PS) && (PS.match(/_layoutsCache = /g) || []).length === 4 && /_layoutsCache = data;/.test(body(PS, 'writeLayouts')), '§2b census: layouts.json is written ONLY by flushLayouts, from the cache, through its hold\'s ONE write — since B-0248 (a) its owe, the store writer\'s road, whose failure is OWED (B-225b, its second half) — and the cache is set only by its declaration, the read again\'s reset (layoutsAgain), readLayouts and writeLayouts', (PS.match(/.*_layoutsCache = .*/g) || []).map((l) => l.trim().slice(0, 80)));   // stale-pins: kept — an ABSENCE check (the desktops are never written by writeJsonAtomic again)
+  ok(gateOf(/tracesTrue\(data\);/.test(body(PS, 'writeLayouts'))) && verdictOf(/tracesTrue\(_layoutsCache\)/.test(body(PS, 'readLayouts'))), '§2b census: writeLayouts (THE CHOKE POINT) and the first read of the file keep every trace true to its record (tracesTrue)');
+  ok((PS.match(/layoutsHold\.(?:write|flush|owe)\(/g) || []).length === 1 && gateOf(/const gen = _layoutsGen, doc = _layoutsCache;/.test(body(PS, 'flushLayouts'))) && gateOf(/const seq = \+\+_vsSeq, text = doc \? stampedBytes\(doc, \{ run: RUN, seq, at: Date\.now\(\), stop: !!stop, /.test(body(PS, 'flushLayouts'))) && gateOf(/if \(!f\.doc\) return done\(true\);\n\s*try \{ layoutsHold\.owe\(f\.doc, \{ name: 'layouts\.write', bytes: \(\) => \{ _producedSeq = f\.seq; return f\.text; \} \}\); \}/.test(body(PS, 'landLayouts'))) && !/writeJsonAtomic\(LAYOUTS_FILE/.test(PS) && (PS.match(/_layoutsCache = /g) || []).length === 4 && verdictOf(/_layoutsCache = data;/.test(body(PS, 'writeLayouts'))), '§2b census: layouts.json is written ONLY by flushLayouts, from the cache, through its hold\'s ONE write — since B-0248 (a) its owe, the store writer\'s road, whose failure is OWED (B-225b, its second half) — and the cache is set only by its declaration, the read again\'s reset (layoutsAgain), readLayouts and writeLayouts', (PS.match(/.*_layoutsCache = .*/g) || []).map((l) => l.trim().slice(0, 80)));   // stale-pins: kept — an ABSENCE check (the desktops are never written by writeJsonAtomic again)
   const ROWS = { 'src/routes/persistence.js': [9, 'the presets, the active preset, the custom grids, the autosave slot, the two restores, the import — each through writeLayouts'], 'src/ws-handler.js': [7, 'layout-sync (noteDupsLeft: listed / gone / ended) + the refused newcomers a desktop\'s record remembers (r4 N4 — written at a refusal that adds one; never the record itself) + desktop-create (an empty record) / -delete (the trace goes with it) / -rename / -reorder (no record changes) + the end seam (endTraces — r5 N: a killed conversation leaves every trace) — each through writeLayouts (ctx)'] };
   const counts = Object.fromEntries(Object.keys(ROWS).map((f) => [f, (src(f).match(/\bwriteLayouts\(/g) || []).length - (f === 'src/routes/persistence.js' ? 1 : 0)]));
-  ok(Object.entries(ROWS).every(([f, [n]]) => counts[f] === n), `§2b census: every writeLayouts( call is a row (a new writer is RED until it is one) — ${J(counts)}`, ROWS);
+  ok(verdictOf(Object.entries(ROWS).every(([f, [n]]) => counts[f] === n)), `§2b census: every writeLayouts( call is a row (a new writer is RED until it is one) — ${J(counts)}`, ROWS);
   const strays = ['src/server/incident-wiring.js', 'src/server/migrations.js', 'src/server/boot-restore.js'].filter((f) => fs.existsSync(path.join(REPO, f)) && /layouts\.json/.test(src(f)) && /writeFileSync|writeJsonAtomic|renameSync/.test(src(f).split('\n').filter((l) => /layouts/.test(l)).join('\n')));
-  ok(!strays.length && /v\.split\(`\/home\/\$\{old\}\/`\)\.join\(`\/home\/\$\{user\}\/`\)/.test(HR) && /\['mounts\.json', 'layouts\.json', 'task-groups\.json', 'machine-mounts\.json'\]\.map\(\(n\) => \(\{ f: path\.join\(dataDir, n\), key: n \}\)\)/.test(HR),
+  ok(!strays.length && gateOf(/v\.split\(`\/home\/\$\{old\}\/`\)\.join\(`\/home\/\$\{user\}\/`\)/.test(HR)) && verdictOf(/\['mounts\.json', 'layouts\.json', 'task-groups\.json', 'machine-mounts\.json'\]\.map\(\(n\) => \(\{ f: path\.join\(dataDir, n\), key: n \}\)\)/.test(HR)),
     '§2b census: the one other writer of layouts.json is the HOME RENAME (src/server/home-rename.js rewriteStores — /home/<old>/ → /home/<user>/ inside string values) — it rewrites paths only, never a window id or the windows a record lists, so it cannot make a record list a traced id', strays);
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 async function toastLegs({ DM = RealDM, LM = RealLM, quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const W = world({ records: TRIPLE(), active: 'desk-x', DM, LM });
   const t0 = made.length;
   const kept = { windows: TRIPLE()['desk-v'], updatedAt: 1000 };
@@ -371,11 +371,11 @@ async function toastLegs({ DM = RealDM, LM = RealLM, quiet = false } = {}) {
   for (let k = 1; k <= 3; k++) { refuse(k); await tick(5); }
   const warn = toasts(t0);
   leg(warn.length === 1, `§4 D ONE TOAST PER CAUSE: three refusals of one desktop and reason inside 30 s ⇒ ONE toast (2.369.374: one per refusal) — here ${warn.length}`, warn.map(toastText));
-  leg(warn.length && /“Atlas notes”/.test(toastText(warn[0])) && /“Desk V”/.test(toastText(warn[0])) && !/\d+ windows/.test(toastText(warn[0])), '§4 D …it NAMES the windows the server kept (their names, not a count) and the desktop', warn.map(toastText));
+  leg(gateOf(warn.length) && gateOf(/“Atlas notes”/.test(toastText(warn[0]))) && gateOf(/“Desk V”/.test(toastText(warn[0]))) && !/\d+ windows/.test(toastText(warn[0])), '§4 D …it NAMES the windows the server kept (their names, not a count) and the desktop', warn.map(toastText));
   W.dm._refusalToasts.get('desk-v|shrink-without-close').at -= 31000; // 31 s later
   refuse(4);
   const after = toasts(t0);
-  leg(after.length === 2 && /refused 3 times/.test(toastText(after[1])), '§4 D …the next one after 30 s carries the count of the ones not shown («refused 3 times»)', after.map(toastText));
+  leg(after.length === 2 && verdictOf(/refused 3 times/.test(toastText(after[1]))), '§4 D …the next one after 30 s carries the count of the ones not shown («refused 3 times»)', after.map(toastText));
   return failed;
 }
 await section('§4 D — ONE TOAST PER CAUSE (the real DesktopManager.onSyncRefused)', async () => { await toastLegs(); });
@@ -389,7 +389,7 @@ const TB0 = await import(pathToFileURL(path.join(LIB, 'taskbar.js')).href), WC =
  *  `TB` = the taskbar module (a mutant's). → failed names. */
 async function r8Legs({ DM = RealDM, LM = RealLM, install = null, TB = TB0, quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   if (!install) return failed;
   const G = ['x-h', 'win-x-s', 'x-slow'];
@@ -415,7 +415,7 @@ async function r8Legs({ DM = RealDM, LM = RealLM, install = null, TB = TB0, quie
     P.dm.switchTo('desk-y'); // NO press: a forwarded shortcut's switch, made later
     const f = fronts(P), at = P.dm.activeDesktopId;
     await tick(5); // the hub's quiet wrapper (the switch's save) gives the console back
-    leg(marked && f === '[]' && at === 'desk-y' && toasts(t0).length === 0, `§R8 R1b: THE REVEAL'S SWITCH IS ONE SWITCH, TO ONE DESKTOP — the person opens S, whose window stands on X (on show) in a group still forming; later a switch to Y that came from no press (a forwarded shortcut's) is not the reveal's: the mark goes (8bde36a5c: \`_revealing\` held the generation alone — kept, «late-nopress») — marked ${marked}, after the switch fronts ${f}, active ${at}`);
+    leg(gateOf(marked) && f === '[]' && at === 'desk-y' && toasts(t0).length === 0, `§R8 R1b: THE REVEAL'S SWITCH IS ONE SWITCH, TO ONE DESKTOP — the person opens S, whose window stands on X (on show) in a group still forming; later a switch to Y that came from no press (a forwarded shortcut's) is not the reveal's: the mark goes (8bde36a5c: \`_revealing\` held the generation alone — kept, «late-nopress») — marked ${marked}, after the switch fronts ${f}, active ${at}`);
   }
   if (want('R1c')) {
     const P = onShow(), t0 = made.length;
@@ -424,7 +424,7 @@ async function r8Legs({ DM = RealDM, LM = RealLM, install = null, TB = TB0, quie
     P.dm._onRemoteDesktopUpdated({ desktops: DESKS.filter((d) => d.id !== 'desk-x').map((d) => ({ ...d })) }); // another page deleted X
     const f = fronts(P), at = P.dm.activeDesktopId;
     await tick(5);
-    leg(marked && f === '[]' && at === 'desk-y' && toasts(t0).length === 0, `§R8 R1c: …a REMOTE DELETION of the desktop on show after the reveal: its switch (to where X's windows went) is not the reveal's — the mark goes (8bde36a5c: kept) — marked ${marked}, after the deletion fronts ${f}, active ${at}`);
+    leg(gateOf(marked) && f === '[]' && at === 'desk-y' && toasts(t0).length === 0, `§R8 R1c: …a REMOTE DELETION of the desktop on show after the reveal: its switch (to where X's windows went) is not the reveal's — the mark goes (8bde36a5c: kept) — marked ${marked}, after the deletion fronts ${f}, active ${at}`);
   }
   if (want('R4')) {
     // the page on Y; the person switches to X (S's window built there by the visit, still attaching, in a group still forming), then
@@ -436,7 +436,7 @@ async function r8Legs({ DM = RealDM, LM = RealLM, install = null, TB = TB0, quie
     open(P);
     const pend = P.dm._pendingSwitch, at = P.dm.activeDesktopId, f = fronts(P), foc = P.app.wm.activeWindowId;
     await tick(5);
-    leg(queued && pend == null && at === 'desk-x' && f === MARK && foc === 'win-x-s' && toasts(t0).length === 0, `§R8 R4: THE LATEST ACT WINS — the person presses Y inside the 1 s gate (queued), then opens S, whose window stands on X, the desktop on show: the open consumes the queued switch — nothing left for the drain, S marked in front and focused, nothing said (8bde36a5c: Y stayed armed — the drain took the person away from what they had just opened) — queued ${queued}, after the open pending ${pend}, active ${at}, fronts ${f}, focus ${foc}`);
+    leg(gateOf(queued) && pend == null && at === 'desk-x' && f === MARK && foc === 'win-x-s' && toasts(t0).length === 0, `§R8 R4: THE LATEST ACT WINS — the person presses Y inside the 1 s gate (queued), then opens S, whose window stands on X, the desktop on show: the open consumes the queued switch — nothing left for the drain, S marked in front and focused, nothing said (8bde36a5c: Y stayed armed — the drain took the person away from what they had just opened) — queued ${queued}, after the open pending ${pend}, active ${at}, fronts ${f}, focus ${foc}`);
   }
   if (want('R2door')) {
     // S's window attaching on X (the person's open; a slow host: 60 s); the person switches to V; then a MACHINE door reaches S — a
@@ -460,7 +460,7 @@ async function r8Legs({ DM = RealDM, LM = RealLM, install = null, TB = TB0, quie
     const n = counting(P), gen = P.dm._revealGen;
     await tick(40);
     const ghost = P.dm.copiesOf('desk-v').includes('win-v-s');
-    leg(J(restores) === '[]' && n.switches === 0 && P.dm._pendingSwitch == null && P.dm.activeDesktopId === 'desk-v' && P.dm._revealGen === gen && ghost && sWins(P).length === 1 && toasts(t0).length === 0, `§R8 R2 (visit): A COPY IS NEVER RESTORED — S's window still attaching on X; V lists S with no openSpec; the person switches to V: that row is S's copy — a ghost at once, never restored, the person stays on V (8bde36a5c: restored — its attach found the window attaching on X and switched back, «bysession») — restored ${J(restores)}, switches after ${n.switches}, pending ${P.dm._pendingSwitch}, ghost ${ghost}, S windows ${J(sWins(P))}`);
+    leg(J(restores) === '[]' && n.switches === 0 && P.dm._pendingSwitch == null && P.dm.activeDesktopId === 'desk-v' && P.dm._revealGen === gen && gateOf(ghost) && sWins(P).length === 1 && toasts(t0).length === 0, `§R8 R2 (visit): A COPY IS NEVER RESTORED — S's window still attaching on X; V lists S with no openSpec; the person switches to V: that row is S's copy — a ghost at once, never restored, the person stays on V (8bde36a5c: restored — its attach found the window attaching on X and switched back, «bysession») — restored ${J(restores)}, switches after ${n.switches}, pending ${P.dm._pendingSwitch}, ghost ${ghost}, S windows ${J(sWins(P))}`);
   }
   // the real ⧉ window list (taskbar showWindowList) over the harness page; its «Other desktops» group opened
   const list = (P) => {
@@ -495,7 +495,7 @@ async function r8Legs({ DM = RealDM, LM = RealLM, install = null, TB = TB0, quie
     await tick(120);
     const said = toasts(t0).map(toastText);
     await tick(150);
-    leg(!!row && P.dm.activeDesktopId === 'desk-v' && said.length === 1 && /v-gone\.md/.test(said[0]) && /did not appear/.test(said[0]) && toasts(t0).length === 1 && P.dm._revealAsk === null, `§R8 R3 (look): A LOOK THAT GIVES UP SAYS SO — the ⧉ list's row of a window V's record holds and this page has not built; pressed, the visit builds nothing of it: said ONCE «Could not open “v-gone.md”: its window did not appear» (the deferred reveal's words, r6 R), never on a clock of its own (8bde36a5c: look() polled 20 × 250 ms and stopped in silence) — row ${!!row}, active ${P.dm.activeDesktopId}, toasts ${J(said)} then ${toasts(t0).length}`);
+    leg(!!row && P.dm.activeDesktopId === 'desk-v' && said.length === 1 && gateOf(/v-gone\.md/.test(said[0])) && gateOf(/did not appear/.test(said[0])) && toasts(t0).length === 1 && P.dm._revealAsk === null, `§R8 R3 (look): A LOOK THAT GIVES UP SAYS SO — the ⧉ list's row of a window V's record holds and this page has not built; pressed, the visit builds nothing of it: said ONCE «Could not open “v-gone.md”: its window did not appear» (the deferred reveal's words, r6 R), never on a clock of its own (8bde36a5c: look() polled 20 × 250 ms and stopped in silence) — row ${!!row}, active ${P.dm.activeDesktopId}, toasts ${J(said)} then ${toasts(t0).length}`);
   }
   return failed;
 }
@@ -524,7 +524,7 @@ const windowList = (P, TB = TB0) => {
  *  list opened on X, then the person's visit to V. → failed names. */
 async function r9Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   if (!install) return failed;
   // the server's live sessions: S and D (D shown on no desktop of this page) — the page knows them (the sidebar's active-sessions),
@@ -559,7 +559,7 @@ async function r9Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false,
     await tick(3); // the hub's quiet wrapper (the switch's save) gives the console back
     const verdict = sh.copy ? J(restores) === '[]' && copy && !offered && sW.length === 1 && /@desk-x$/.test(sW[0]) && !dW.length
       : J(restores) === J(['win-v-s']) && !copy && offered && J(dW) === J(['win-v-s@desk-v']) && sW.length === 1;
-    leg(verdict && sRows === 1 && n.switches === 0 && at === 'desk-v' && said === 0, `§R9 (${k}): ${sh.says} — ${sh.copy ? 'a COPY: the ⧉ list on X names S once (X\'s window) and never offers V\'s row; the visit to V restores nothing of it, the person stays on V, nothing said' : 'NOT a copy: the ⧉ list offers V\'s row; the visit restores it — D\'s window built on V'} — S rows ${sRows}, V's row offered ${offered}, restored ${J(restores)}, copiesOf(V) ${copy}, S windows ${J(sW)}, D windows ${J(dW)}, switches after ${n.switches}, active ${at}, toasts ${said}`);
+    leg(gateOf(verdict) && sRows === 1 && n.switches === 0 && at === 'desk-v' && said === 0, `§R9 (${k}): ${sh.says} — ${sh.copy ? 'a COPY: the ⧉ list on X names S once (X\'s window) and never offers V\'s row; the visit to V restores nothing of it, the person stays on V, nothing said' : 'NOT a copy: the ⧉ list offers V\'s row; the visit restores it — D\'s window built on V'} — S rows ${sRows}, V's row offered ${offered}, restored ${J(restores)}, copiesOf(V) ${copy}, S windows ${J(sW)}, D windows ${J(dW)}, switches after ${n.switches}, active ${at}, toasts ${said}`);
   }
   return failed;
 }
@@ -578,7 +578,7 @@ await section('§R9 ROUND 9 — the copy verdict names the conversation the rest
  *  `p`: a named preset loaded (the real loadPreset over /api/active). → failed names. */
 async function r10Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   if (!install) return failed;
   const live = () => [{ id: S, name: 'Atlas notes', cwd: '/srv/u/atlas', backend: 'claude', backendSessionId: CID, mode: 'chat' }, { id: D9, name: 'Dune log', cwd: '/srv/u/dune', backend: 'claude', backendSessionId: DID9, mode: 'chat' }];
@@ -614,14 +614,14 @@ async function r10Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false
     const verdict = !sh.copy ? n === 0 && !departed.length && kept && !copyBefore && J(restores) === J(['win-v-s']) && J(dW) === J(['win-v-s@desk-v'])
       : sh.leaves ? n === 1 && J(departed) === J([['win-v-s', 'dup', 'win-x-s']]) && J(onHub) === J(['v-1']) && J(restores) === '[]' && !dW.length
         : n === 0 && !departed.length && kept && copyBefore && J(restores) === '[]' && !dW.length;
-    leg(verdict && sW.length === 1 && /@desk-x$/.test(sW[0]) && at === 'desk-v' && said === 0, `§R10 (${k}): ${sh.says} — ${!sh.copy ? 'NOT a copy by the one verdict: never proposed — V\'s row survives the save (held and on the hub), the visit builds D\'s window' : sh.leaves ? 'a copy the hub checks by its server id: proposed as before — {why:\'dup\', by: X\'s window}, the hub\'s V record drops it' : 'a copy the hub keys by no shown server id: never proposed (the hub would refuse it) — carried, as before, never restored'} — copiesOf(V) before ${copyBefore}, normalizeDups ${n}, departed ${J(departed)}, V held ${J(held)}, on the hub ${J(onHub)}, restored ${J(restores)}, S windows ${J(sW)}, D windows ${J(dW)}, active ${at}, toasts ${said}`);
+    leg(gateOf(verdict) && sW.length === 1 && gateOf(/@desk-x$/.test(sW[0])) && at === 'desk-v' && said === 0, `§R10 (${k}): ${sh.says} — ${!sh.copy ? 'NOT a copy by the one verdict: never proposed — V\'s row survives the save (held and on the hub), the visit builds D\'s window' : sh.leaves ? 'a copy the hub checks by its server id: proposed as before — {why:\'dup\', by: X\'s window}, the hub\'s V record drops it' : 'a copy the hub keys by no shown server id: never proposed (the hub would refuse it) — carried, as before, never restored'} — copiesOf(V) before ${copyBefore}, normalizeDups ${n}, departed ${J(departed)}, V held ${J(held)}, on the hub ${J(onHub)}, restored ${J(restores)}, S windows ${J(sW)}, D windows ${J(dW)}, active ${at}, toasts ${said}`);
   }
   if (want('law')) {
     // THE WIRE'S LAW, UNCHANGED: the hub checks a 'dup' by the row's server id (shrinkVerdict's `by` shows sessionOf) — why (a)(c)(f)
     // are never proposed: the page's word would be refused, the storm this lane ended
     const x = [chat('win-x-s', S, 1)], v = (o) => require(MODEL).shrinkVerdict({ prev: [files('v-1', 0), row(o)], next: [files('v-1', 0)], evidence: [{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], alive: () => true, elsewhere: [x] });
     const r = { a: v({ backendSessionId: CID }), c: v({ backendSessionId: CID, serverSessionId: STALE9 }), f: v({ backendSessionId: CID, serverSessionId: D9 }), e: v({ serverSessionId: S }) };
-    leg(['a', 'c', 'f'].every((k) => !r[k].ok && r[k].reason === 'shrink-without-close' && J(r[k].dup) === J(['win-v-s'])) && r.e.ok === true, `§R10 (law): THE HUB'S 'dup' LAW IS UNCHANGED — V's row proposed as {why:'dup', by: X's window}: (a) no server id, (c) a stale one, (f) D's ⇒ REFUSED, named in \`dup\` (so the page never proposes them: carried, r5 O); (e) S's ⇒ accepted — ${J(Object.fromEntries(Object.entries(r).map(([k, y]) => [k, y.ok])))}`);
+    leg(gateOf(['a', 'c', 'f'].every((k) => !r[k].ok && r[k].reason === 'shrink-without-close' && J(r[k].dup) === J(['win-v-s']))) && r.e.ok === true, `§R10 (law): THE HUB'S 'dup' LAW IS UNCHANGED — V's row proposed as {why:'dup', by: X's window}: (a) no server id, (c) a stale one, (f) D's ⇒ REFUSED, named in \`dup\` (so the page never proposes them: carried, r5 O); (e) S's ⇒ accepted — ${J(Object.fromEntries(Object.entries(r).map(([k, y]) => [k, y.ok])))}`);
   }
   if (want('p')) {
     // ONE RESOLUTION FOR A PRESET TOO: loadPreset kept the old two-rung ladder (no recipe rung) — a preset row named by its recipe
@@ -653,7 +653,7 @@ await section('§R10 ROUND 10 — one verdict, everywhere a copy is decided (the
 /** The (g) shape, S's window built on X, the person's open of D (the REAL attachSession), then a real autosave. → failed names. */
 async function d285Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false, shape = 'g' } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   if (!install) return failed;
   const live = () => [{ id: S, name: 'Atlas notes', cwd: '/srv/u/atlas', backend: 'claude', backendSessionId: CID, mode: 'chat' }, { id: D9, name: 'Dune log', cwd: '/srv/u/dune', backend: 'claude', backendSessionId: DID9, mode: 'chat' }];
   // (g): V's row names D's conversation beside S's server id, S's window built on X — the person opens D. (b): V's row names S by its
@@ -672,7 +672,7 @@ async function d285Legs({ DM = RealDM, LM = RealLM, install = null, quiet = fals
   await tick(90); // the switch, the build of V's row, its attach (30 ms)
   const at = P.dm.activeDesktopId, oW = winsOf(O), sW = winsOf(S);
   const others = shape === 'g' ? J(sW) === J(['win-x-s@desk-x']) : true;
-  leg(at === 'desk-v' && J(oW) === J(['win-v-s@desk-v']) && others && toasts(t0).length === 0, `§D285 (${shape}) the person opens ${ON} — its only window is V's row, which has no recipe: the open REVEALS it (the switch to V; one window of it, that row) — b06f36e90: a second window built on X, the person kept there`, { at, oW, sW });
+  leg(at === 'desk-v' && J(oW) === J(['win-v-s@desk-v']) && gateOf(others) && toasts(t0).length === 0, `§D285 (${shape}) the person opens ${ON} — its only window is V's row, which has no recipe: the open REVEALS it (the switch to V; one window of it, that row) — b06f36e90: a second window built on X, the person kept there`, { at, oW, sW });
   P.dm._restoring = false; P.lm._restoring = false; // the switch's 1 s gate, opened (its own timer would, a second later)
   P.lm._userDirty = true; P.lm._lastUserInputAt = Date.now(); await P.lm._doAutoSave(); await tick(5);
   const onHub = ids(H.layouts().desktops['desk-v'].autoSave.windows);
@@ -683,11 +683,11 @@ await section('§D285 B-d285 (lane bl-windows) — the reveal door reads the one
   await d285Legs({ install: install10 });
   await d285Legs({ install: install10, shape: 'b' });
   const DSRC = read('src/lib/desktop-manager.js'), find = 'const e = (st?.windows || []).find((w) => w && doorSessionOf(w, live) === String(serverId)';
-  ok(DSRC.includes(find), '§D285 CONTROL setup: the reveal door\'s find exists in desktop-manager.js');
+  ok(verdictOf(DSRC.includes(find)), '§D285 CONTROL setup: the reveal door\'s find exists in desktop-manager.js');
   const M = mutantCopies('ldup-d285', REPO);
   const DMx = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, 'const e = (st?.windows || []).find((w) => w && w.openSpec && doorSessionOf(w, live) === String(serverId)', "src/lib/desktop-manager.js"), 'd285-recipe-only', { esm: true })).href)).DesktopManager;
   const f = await d285Legs({ DM: DMx, install: install10, quiet: true }), fb = await d285Legs({ DM: DMx, install: install10, quiet: true, shape: 'b' });
-  ok(f.some((n) => n.startsWith('§D285 (g) the person opens')) && fb.some((n) => n.startsWith('§D285 (b) the person opens')), `§D285 CONTROL: the release's find (a recipe first) ⇒ each open builds a second window on X — the reveal legs go RED (g: ${f.length} red, b: ${fb.length} red; the autosave legs: ${[...f, ...fb].filter((n) => /autosave/.test(n)).length} red)`, { f, fb });
+  ok(gateOf(f.some((n) => n.startsWith('§D285 (g) the person opens'))) && verdictOf(fb.some((n) => n.startsWith('§D285 (b) the person opens'))), `§D285 CONTROL: the release's find (a recipe first) ⇒ each open builds a second window on X — the reveal legs go RED (g: ${f.length} red, b: ${fb.length} red; the autosave legs: ${[...f, ...fb].filter((n) => /autosave/.test(n)).length} red)`, { f, fb });
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -877,7 +877,7 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
   const stands = '      this.noteStands(desk, was, id);\n';
   const refusalStands = '    if (this._standsNow?.get(d)?.length) this._setRecord(d, this._standsInto(d, this._savedStates.get(d)));';
   const resend = '    if (standing.size && !keptShown) setTimeout(() => this.resendKeptShown(), 1000);';
-  const set = ok([LSRC.includes(apply), DSRC.includes(refusal), DSRC.includes(rekey), DSRC.includes(stands), !DSRC.includes('mineWins'), LSRC.includes(chainTerm), DSRC.includes(refusalStands), LSRC.includes(resend)].every(Boolean),
+  const set = ok(verdictOf([LSRC.includes(apply), DSRC.includes(refusal), DSRC.includes(rekey), DSRC.includes(stands), !DSRC.includes('mineWins'), LSRC.includes(chainTerm), DSRC.includes(refusalStands), LSRC.includes(resend)].every(Boolean)),
     '§1D87 CONTROL setup: the apply\'s and the refusal road\'s calls, the re-key, the stand (and NO tie rule: r1802 (B)), the refusal road\'s stand and the stand\'s re-send exist (layout.js, desktop-manager.js)');
   const M = mutantCopies('ldup-1d87', REPO);
   const lm = async (src, name) => (await import(pathToFileURL(M.write('src/lib/layout.js', src, name, { esm: true })).href)).LayoutManager;
@@ -895,17 +895,17 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
     run(dm, DSRC.replace(rekey, 'if (wm.rekeyWindow(was, id, { inChain: true })) {'), '1d87-held-ignored', ['f'], 'DM'),
     run(lm, LSRC.replace(chainTerm, ''), '1d87-chain-term-dropped', ['c2tab'], 'LM'),
   ]);
-  for (const [c, n, e] of real.said) ok(c, n, e);
+  for (const [c, n, e] of real.said) ok(verdictOf(c), n, e);
   if (!set) return;
   const red = (r, k) => r.failed.filter((n) => n.startsWith(`§1D87 (${k})`)).length;
-  ok(red(rel, 'a') && red(rel, 'b'), `§1D87 RED CONTROL — the release's apply (nothing taken): the page's window of S is closed by the record and nothing opens it (a: ${red(rel, 'a')} red, b: ${red(rel, 'b')} red)`, rel.failed);
-  ok(red(refused, 'c'), `§1D87 RED CONTROL — the refusal road takes nothing: the refused page's window keeps its own id over the kept record, its second write lists both (${red(refused, 'c')} red)`, refused.failed);
-  ok(red(keep, 'a'), `§1D87 RED CONTROL — the keep alone (r1297's first form: the window kept, never re-keyed, never in the row's place): two rows of S — the close no longer travels (${red(keep, 'a')} red)`, keep.failed);
-  ok(red(noStand, 'c2'), `§1D87 RED CONTROL — the refusal road's stand not read into the record: the held window's second write lists the kept row beside it (${red(noStand, 'c2')} red)`, noStand.failed);
-  ok(red(noTie, 'crev'), `§1D87 RED CONTROL — the follow's tie rule put back (r1802 (B): the smaller id stands): on the refusal road (c with the ids reversed) the refused page keeps its own id and the first page re-keys onto it — the hub's order broken (${red(noTie, 'crev')} red; the crossing on a fresh desktop, (g), never reaches the rule: ${red(noTie, 'g') ? 'red' : 'green'} — the belt refuses the second write)`, noTie.failed);
-  ok(red(noResend, 'f'), `§1D87 RED CONTROL — a standing window never re-sent: the other page keeps its own id (${red(noResend, 'f')} red)`, noResend.failed);
-  ok(red(heldIgnored, 'f'), `§1D87 RED CONTROL — a held act ignored: the moved window is re-keyed under the person's hand (${red(heldIgnored, 'f')} red)`, heldIgnored.failed);
-  ok(red(chainDropped, 'c2tab'), `§1D87 RED CONTROL — the one held-act predicate without its TAB-act term (the refusal road's old copy): the merged window is re-keyed under the person's hand (${red(chainDropped, 'c2tab')} red)`, chainDropped.failed);
+  ok(gateOf(red(rel, 'a')) && verdictOf(red(rel, 'b')), `§1D87 RED CONTROL — the release's apply (nothing taken): the page's window of S is closed by the record and nothing opens it (a: ${red(rel, 'a')} red, b: ${red(rel, 'b')} red)`, rel.failed);
+  ok(verdictOf(red(refused, 'c')), `§1D87 RED CONTROL — the refusal road takes nothing: the refused page's window keeps its own id over the kept record, its second write lists both (${red(refused, 'c')} red)`, refused.failed);
+  ok(verdictOf(red(keep, 'a')), `§1D87 RED CONTROL — the keep alone (r1297's first form: the window kept, never re-keyed, never in the row's place): two rows of S — the close no longer travels (${red(keep, 'a')} red)`, keep.failed);
+  ok(verdictOf(red(noStand, 'c2')), `§1D87 RED CONTROL — the refusal road's stand not read into the record: the held window's second write lists the kept row beside it (${red(noStand, 'c2')} red)`, noStand.failed);
+  ok(verdictOf(red(noTie, 'crev')), `§1D87 RED CONTROL — the follow's tie rule put back (r1802 (B): the smaller id stands): on the refusal road (c with the ids reversed) the refused page keeps its own id and the first page re-keys onto it — the hub's order broken (${red(noTie, 'crev')} red; the crossing on a fresh desktop, (g), never reaches the rule: ${red(noTie, 'g') ? 'red' : 'green'} — the belt refuses the second write)`, noTie.failed);
+  ok(verdictOf(red(noResend, 'f')), `§1D87 RED CONTROL — a standing window never re-sent: the other page keeps its own id (${red(noResend, 'f')} red)`, noResend.failed);
+  ok(verdictOf(red(heldIgnored, 'f')), `§1D87 RED CONTROL — a held act ignored: the moved window is re-keyed under the person's hand (${red(heldIgnored, 'f')} red)`, heldIgnored.failed);
+  ok(verdictOf(red(chainDropped, 'c2tab')), `§1D87 RED CONTROL — the one held-act predicate without its TAB-act term (the refusal road's old copy): the merged window is re-keyed under the person's hand (${red(chainDropped, 'c2tab')} red)`, chainDropped.failed);
   // rekeyWindow (window.js, ITS OWN TEXT): the focus and a resume's fence mark follow the window to its new id — RED: the release's text
   const rekeyOf = (src) => { const i = src.indexOf('\n  rekeyWindow('), j = src.indexOf('\n  }\n', i); return new Function(`return ({\n${src.slice(i + 1, j + 4)}\n}).rekeyWindow;`)(); };
   const followOf = (src) => { const i = src.indexOf('\n  followIdChange('), j = src.indexOf('\n  }\n', i); return new Function(`return ({\n${src.slice(i + 1, j + 4)}\n}).followIdChange;`)(); };
@@ -921,9 +921,9 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
   };
   const w0 = console.warn; console.warn = () => {}; // the fence says each refusal (a console line)
   let fr, fc; try { fr = await follow(WSRC); fc = await follow(WSRC.replace(/\n    if \(this\.activeWindowId === oldId\)[^\n]*\n    this\._app\?\._rekeyResumeMark\?\.\(oldId, newId\);[^\n]*/, '')); } finally { console.warn = w0; }
-  ok(fr.moved && fr.focus === 'w-new' && fr.fencedNew === true && fr.fencedOld === false && fr.after === false && fr.marks === 0,
+  ok(gateOf(fr.moved) && fr.focus === 'w-new' && fr.fencedNew === true && fr.fencedOld === false && fr.after === false && fr.marks === 0,
     '§1D87 rekeyWindow carries the window\'s registrations: the focus (wm.activeWindowId) and a resume\'s fence mark follow it to its new id; the mark still ends with its turn', fr);
-  ok(fc.moved && fc.focus === 'w-old' && fc.fencedNew === false, '§1D87 RED CONTROL — the release\'s rekeyWindow: the focus names a window that no longer exists and the fence guards the dead id', fc);
+  ok(gateOf(fc.moved) && fc.focus === 'w-old' && fc.fencedNew === false, '§1D87 RED CONTROL — the release\'s rekeyWindow: the focus names a window that no longer exists and the fence guards the dead id', fc);
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -964,7 +964,7 @@ const prResumeAll = async (P, stopped, { answer = true } = {}) => {   // answer 
 const rowsOf = (doc, d) => ((doc.desktops[d] && doc.desktops[d].autoSave.windows) || []).map((w) => [w.winId, w.gridBounds ? J(w.gridBounds) : null]);
 async function prLegs({ DM = RealDM, LM = RealLM, install = null, PURE = require(MODEL), WSH = null, quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   if (want('a') && install) {
     // (a) THE INCIDENT'S DOOR: a PHONE page resumes three stopped conversations held on desktops V (on show, built read-only), X and Y
@@ -979,7 +979,7 @@ async function prLegs({ DM = RealDM, LM = RealLM, install = null, PURE = require
     const minted = [...P.wins.keys()].filter((id) => !['v-r1', 'v-f', 'x-r2', 'y-r3'].includes(id));
     const retired = ev.filter((e) => ['v-r1', 'x-r2', 'y-r3'].includes(e.id) && (e.why === 'closed' || e.why === 'replaced' || e.why === 'dup'));
     const all = toasts(t0), prog = all.filter((e) => e.dataset && e.dataset.progress === 'resume-all'), said = all.filter((e) => !prog.includes(e)).map(toastText);
-    leg(P.creates.length === 3 && same && !minted.length && !retired.length && !refusals(P.sock()).length && sent.length >= 3,
+    leg(P.creates.length === 3 && gateOf(same) && !minted.length && !retired.length && !refusals(P.sock()).length && sent.length >= 3,
       '§PR (a) a PHONE page resumes 3 stopped conversations held on desktops V (built read-only) / X / Y (never visited) ⇒ every record keeps the SAME window ids and boxes (z too), 0 rows closed or replaced, 0 windows minted for a held conversation, 0 refusals',
       { creates: P.creates.length, minted, retired, before: ['desk-v', 'desk-x', 'desk-y'].map((d) => rowsOf(before, d)), after: ['desk-v', 'desk-x', 'desk-y'].map((d) => rowsOf(after, d)), refused: refusals(P.sock()).length });
     const zs = ['desk-x', 'desk-y'].map((d) => after.desktops[d].autoSave.windows[0].zIndex);
@@ -1012,10 +1012,10 @@ async function prLegs({ DM = RealDM, LM = RealLM, install = null, PURE = require
     const n = W.dm.normalizeDups();
     await W.lm._doAutoSave();
     const sx = W.syncs('desk-x').at(-1), row = sx && sx.state.windows.find((w) => w.winId === 'win-x-s');
-    leg(n === 1 && row && J(row.gridBounds) === J(GB(4)) && row.zIndex === 104, '§PR (b) THE REAL normalizeDups on a PHONE page: the survivor\'s row takes the copy\'s box and z — the autosave writes win-x-s at the copy\'s place (never boxless)', { n, row });
+    leg(n === 1 && gateOf(row) && J(row.gridBounds) === J(GB(4)) && row.zIndex === 104, '§PR (b) THE REAL normalizeDups on a PHONE page: the survivor\'s row takes the copy\'s box and z — the autosave writes win-x-s at the copy\'s place (never boxless)', { n, row });
     const m = PURE.mergeDesktopRecord({ record: { windows: [member(prRow('o-1', 1), ['o-1', 'g-2']), member(files('g-2', 2), ['o-1', 'g-2'])] }, add: [{ winId: 'n-1', type: 'chat', title: 'Conv 1' }], remove: ['o-1'], replaced: [['n-1', 'o-1']] });
     const nr = m.windows.find((w) => w.winId === 'n-1'), gr = m.windows.find((w) => w.winId === 'g-2');
-    leg(nr && J(nr.gridBounds) === J(PRGB(1)) && nr.zIndex === 201 && J(nr.tabChain.tabs) === J(['n-1', 'g-2']) && J(gr.tabChain.tabs) === J(['n-1', 'g-2']) && nr.backendSessionId === PRC(1),
+    leg(gateOf(nr) && J(nr.gridBounds) === J(PRGB(1)) && nr.zIndex === 201 && J(nr.tabChain.tabs) === J(['n-1', 'g-2']) && J(gr.tabChain.tabs) === J(['n-1', 'g-2']) && nr.backendSessionId === PRC(1),
       '§PR (b) PURE mergeDesktopRecord `replaced`: a newcomer with no box takes the replaced row\'s box, z and SEAT in its group (every chain of the record names the newcomer)', m.windows);
   }
   if (want('c')) {
@@ -1046,11 +1046,11 @@ async function prLegs({ DM = RealDM, LM = RealLM, install = null, PURE = require
     const moved = PURE.shrinkVerdict({ prev: base, next: [base[1], base[2]], evidence: [{ id: 'v-r1', why: 'moved' }], alive: () => false });
     const closed = PURE.shrinkVerdict({ prev: base, next: [base[1], base[2]], evidence: [{ id: 'v-r1', why: 'closed' }], alive: () => false });
     const phoneBorn = PURE.shrinkVerdict({ prev: base, next: [...base, { winId: 'win-p', type: 'chat', title: 'New', backendSessionId: PRC(7) }], evidence: [], alive: () => false });
-    leg(moved.ok && closed.ok && phoneBorn.ok && !(moved.unplaced || []).length, '§PR (d) CONTROLS: a MOVE takes a row away whole, a person\'s close of one window, a window born on the phone with no box of its own — all accepted', { moved, closed, phoneBorn });
+    leg(gateOf(moved.ok) && gateOf(closed.ok) && gateOf(phoneBorn.ok) && !(moved.unplaced || []).length, '§PR (d) CONTROLS: a MOVE takes a row away whole, a person\'s close of one window, a window born on the phone with no box of its own — all accepted', { moved, closed, phoneBorn });
     const H = hub(WSH || loadHandler(), DOC({ 'desk-x': [], 'desk-y': [], 'desk-v': base }), { alive: [S, T] }), S0 = H.connect();
     await S0.send({ type: 'layout-sync', desktopId: 'desk-v', state: { windows: shapes.remint.next, grid: null }, evidence: shapes.remint.evidence, base: 1000, sentAt: 7, viewport: 'phone' });
     const rf = refusals(S0)[0], kept = H.layouts().desktops['desk-v'].autoSave.windows, line = H.logs.find((l) => /REFUSED a record of desktop/.test(l)) || '';
-    leg(rf && J(rf.unplaced) === J(['v-r1', 'v-r2']) && J(kept.map((w) => [w.winId, J(w.gridBounds)])) === J(base.map((w) => [w.winId, J(w.gridBounds)])) && /2 would lose their position with no move \(v-r1, v-r2\)/.test(line),
+    leg(gateOf(rf) && J(rf.unplaced) === J(['v-r1', 'v-r2']) && J(kept.map((w) => [w.winId, J(w.gridBounds)])) === J(base.map((w) => [w.winId, J(w.gridBounds)])) && verdictOf(/2 would lose their position with no move \(v-r1, v-r2\)/.test(line)),
       '§PR (d) THE REAL ws-handler: the 11:30:40 write is REFUSED — the frame names `unplaced`, the journal names the rows, the record keeps every box', { rf, line, kept: kept.map((w) => w.winId) });
     // the page: says it ONCE (the same refusal again inside the window is counted, not said), and its reconciled write carries the boxes
     const W = world({ records: { 'desk-x': [], 'desk-y': [], 'desk-v': base }, active: 'desk-v', DM, LM }), t0 = made.length;
@@ -1058,9 +1058,9 @@ async function prLegs({ DM = RealDM, LM = RealLM, install = null, PURE = require
     const msg = { type: 'layout-sync-refused', desktopId: 'desk-v', reason: 'shrink-without-close', unexplained: ['v-r1', 'v-r2'], unplaced: ['v-r1', 'v-r2'], arrived: [], state: { windows: base, grid: null, updatedAt: 2000 }, sentAt: 1 };
     W.dm.onSyncRefused(JSON.parse(J(msg)));
     const said = toasts(t0).map(toastText);
-    leg(said.length === 1 && /kept their places/.test(said[0]) && /Conv 1/.test(said[0]), '§PR (d) THE REAL onSyncRefused: the page says it ONCE, in its own words («… kept their places — this page had no position to give them»)', said);
+    leg(said.length === 1 && gateOf(/kept their places/.test(said[0])) && verdictOf(/Conv 1/.test(said[0])), '§PR (d) THE REAL onSyncRefused: the page says it ONCE, in its own words («… kept their places — this page had no position to give them»)', said);
     const rec = W.dm.recordFor('desk-v'), again = PURE.shrinkVerdict({ prev: base, next: rec.windows, evidence: W.dm.evidence(), alive: () => false });
-    leg(again.ok && ['v-r1', 'v-r2'].every((id) => J(rec.windows.find((w) => w.winId === id)?.gridBounds) === J(base.find((w) => w.winId === id).gridBounds)), '§PR (d) …and its next record carries the kept boxes — the belt accepts it (a refusal never loops)', { again, rows: rec.windows.map((w) => [w.winId, w.gridBounds]) });
+    leg(gateOf(again.ok) && verdictOf(['v-r1', 'v-r2'].every((id) => J(rec.windows.find((w) => w.winId === id)?.gridBounds) === J(base.find((w) => w.winId === id).gridBounds))), '§PR (d) …and its next record carries the kept boxes — the belt accepts it (a refusal never loops)', { again, rows: rec.windows.map((w) => [w.winId, w.gridBounds]) });
   }
   if (want('p')) {
     // LAW 2 — A DESKTOP WHOSE ROWS HAVE NO POSITION SAYS SO IN ITS PREVIEW: N dashed placeholders in a cascade + the count badge
@@ -1070,7 +1070,7 @@ async function prLegs({ DM = RealDM, LM = RealLM, install = null, PURE = require
     try { W.dm._switcherDigest = null; W.dm._renderSwitcher(); } finally { document.getElementById = gi; }
     const prev = box.children.flatMap((wr) => wr.children).find((c) => c.dataset && c.dataset.desktopId === 'desk-y');
     const ph = prev ? prev.children.filter((c) => /desktop-preview-win-unplaced/.test(c.className)) : [], badge = prev ? prev.children.find((c) => /desktop-preview-unplaced/.test(c.className)) : null, placed = prev ? prev.children.filter((c) => /desktop-preview-win/.test(c.className) && !/unplaced/.test(c.className)) : [];
-    leg(ph.length === 5 && badge && badge.textContent === '5' && /5 windows · not placed/.test(badge.title) && placed.length === 1 && new Set(ph.map((c) => c.style.left)).size === 5,
+    leg(ph.length === 5 && gateOf(badge) && badge.textContent === '5' && gateOf(/5 windows · not placed/.test(badge.title)) && placed.length === 1 && new Set(ph.map((c) => c.style.left)).size === 5,
       '§PR LAW 2 the preview of a desktop holding 5 rows with no position draws 5 dashed placeholders in a cascade + the count badge «5» («5 windows · not placed — …»), beside its placed row', { ph: ph.length, badge: badge && [badge.textContent, badge.title], placed: placed.length });
   }
   return failed;
@@ -1212,7 +1212,7 @@ const fenced = (cl) => cl.every((c) => c.by === '_reopenWin' || c.by === '_close
 const noFence = (P) => !(P.app._fenceRefused || []).length;
 async function pr2Legs({ DM = RealDM, LM = RealLM, install = null, PURE = require(MODEL), WSH = null, CV = read('src/lib/chat-view.js'), SRCS = null, quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   const door = resumeBarDoor(CV);
   if (want('e') && install) {
@@ -1225,7 +1225,7 @@ async function pr2Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
       const w = P.wins.get('v-r1');
       await saveNow(P);
       const after = H.layouts();
-      leg(P.creates.length === 1 && !!w && w !== ro && P.wins.get('v-r1') === w && J(rowsOf(after, 'desk-v')) === J(rowsOf(before, 'desk-v')) && !closedOf(P, 'v-r1').length && !refusals(P.sock()).length && noFence(P),
+      leg(P.creates.length === 1 && !!w && w !== ro && P.wins.get('v-r1') === w && J(rowsOf(after, 'desk-v')) === J(rowsOf(before, 'desk-v')) && !closedOf(P, 'v-r1').length && !refusals(P.sock()).length && verdictOf(noFence(P)),
         `§PR2 (e) N1 THE RESUME BAR on a ${phone ? 'PHONE' : 'DESKTOP'} page: the resumed window IS row v-r1 (same id) and stays — the record keeps the row and its box, 0 'closed', 0 refusals, the door tried no close (r4: the fence's journal empty)`,
         { creates: P.creates.length, win: w && w.id, same: w === ro, stays: P.wins.get('v-r1') === w, before: rowsOf(before, 'desk-v'), after: rowsOf(after, 'desk-v'), closed: closedOf(P, 'v-r1'), fence: P.app._fenceRefused || [] });
     }
@@ -1264,7 +1264,7 @@ async function pr2Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
     const w = P.wins.get('x-r2');
     await saveNow(P);
     const row = H.layouts().desktops['desk-x'].autoSave.windows.find((r) => r.winId === 'x-r2');
-    leg(P.creates.length === 0 && P.dm.activeDesktopId === 'desk-x' && w?._openSpec?.serverId === 'live-2' && !closedOf(P, 'x-r2').length && row && J(row.gridBounds) === J(PRGB(2)) && row.openSpec?.serverId === 'live-2',
+    leg(P.creates.length === 0 && P.dm.activeDesktopId === 'desk-x' && w?._openSpec?.serverId === 'live-2' && !closedOf(P, 'x-r2').length && gateOf(row) && J(row.gridBounds) === J(PRGB(2)) && row.openSpec?.serverId === 'live-2',
       '§PR2 (live) N2 a phone\'s card resume of a conversation LIVE in another page\'s window: no create — the page goes to X and shows row x-r2 as itself (live-2), 0 \'closed\', the hub\'s row and box intact',
       { creates: P.creates.length, at: P.dm.activeDesktopId, w: w && [w.id, w._openSpec?.serverId], closed: closedOf(P, 'x-r2'), row: row && [row.winId, row.gridBounds, row.openSpec?.serverId] });
     const H2 = hub(WSH || loadHandler(), DOC(recs()), { alive: [S, T, 'live-2'] }), P2 = prPage(H2, install, { DM, LM }), t2 = made.length;
@@ -1309,8 +1309,8 @@ async function pr2Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
     const r1 = refusals(P.sock()).length, s1 = toasts(t0).map(toastText);
     await saveNow(P); await tick(10); await saveNow(P);
     const after = H.layouts(), said = toasts(t0).map(toastText);
-    leg(!!fresh && r1 === 1 && refusals(P.sock()).length === 1 && J(refusals(P.sock())[0].unplaced) === J(['v-r1']) && s1.length === 1 && J(said) === J(s1) && /kept their places/.test(said[0])
-      && J(rowsOf(after, 'desk-v')) === J(rowsOf(before, 'desk-v')) && P.wins.has('v-r1') && !P.wins.has(fresh),
+    leg(!!fresh && r1 === 1 && refusals(P.sock()).length === 1 && J(refusals(P.sock())[0].unplaced) === J(['v-r1']) && s1.length === 1 && J(said) === J(s1) && gateOf(/kept their places/.test(said[0]))
+      && J(rowsOf(after, 'desk-v')) === J(rowsOf(before, 'desk-v')) && gateOf(P.wins.has('v-r1')) && !P.wins.has(fresh),
       '§PR2 (n3) N3 write 1 (the row dropped beside a NEW boxless row of its conversation) REFUSED and said once ⇒ the page\'s window takes the kept row\'s id, write 2 carries v-r1 with its box — accepted, 0 further refusals or toasts',
       { fresh, refusals: refusals(P.sock()).map((f) => f.unplaced), said, before: rowsOf(before, 'desk-v'), after: rowsOf(after, 'desk-v'), wins: [...P.wins.keys()] });
   }
@@ -1322,7 +1322,7 @@ async function pr2Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
     const dead = PURE.shrinkVerdict({ prev: base, next, evidence: [], alive: () => false }), live = PURE.shrinkVerdict({ prev: base, next, evidence: [], alive: () => true });
     leg(!dead.ok && !live.ok && J(dead.unplaced) === J(['v-r1']) && J(live.unplaced) === J(['v-r1']), '§PR2 (n3) PURE shrinkVerdict: a boxed row dropped beside a NEW boxless row of its conversation with NO evidence ⇒ REFUSED (`unplaced`), its session dead or alive', { dead, live });
     const grouped = PURE.shrinkVerdict({ prev: base, next: [member(nb(base[0]), ['v-r2', 'v-r1']), member(base[1], ['v-r2', 'v-r1']), base[2]], evidence: [], alive: () => false });
-    leg(grouped.ok && !(grouped.unplaced || []).length, '§PR2 (n3) PURE CONTROL: a row merged into a tab group whose frame has no box yet (it carries the frame\'s) is no strip — accepted', grouped);
+    leg(gateOf(grouped.ok) && !(grouped.unplaced || []).length, '§PR2 (n3) PURE CONTROL: a row merged into a tab group whose frame has no box yet (it carries the frame\'s) is no strip — accepted', grouped);
   }
   if (want('n4') && install) {
     // (n4) N4 THE TILE'S PRESS on a phone (a stopped conversation's placeholder): the row re-opened as itself — same id, box kept, no refusal
@@ -1344,7 +1344,7 @@ async function pr2Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
     W.app.isMobile = true;
     W.dm.onSyncRefused(JSON.parse(J({ type: 'layout-sync-refused', desktopId: 'desk-v', reason: 'shrink-without-close', unexplained: ['v-r1', 'v-r2'], unplaced: ['v-r1'], arrived: [], state: { windows: base, grid: null, updatedAt: 2000 }, sentAt: 1 })));
     const said = toasts(t0).map(toastText);
-    leg(said.length === 1 && /Conv 1/.test(said[0]) && /Conv 2/.test(said[0]) && /kept their places/.test(said[0]) && /were kept too/.test(said[0]),
+    leg(said.length === 1 && gateOf(/Conv 1/.test(said[0])) && gateOf(/Conv 2/.test(said[0])) && gateOf(/kept their places/.test(said[0])) && verdictOf(/were kept too/.test(said[0])),
       '§PR2 (n5) N5 a refusal that keeps a row for its box AND another window ⇒ ONE toast naming both («“Conv 1” … kept their places …; “Conv 2” were kept too …»)', said);
   }
   return failed;
@@ -1373,7 +1373,7 @@ const zRules = (P) => {
 };
 async function pr3Legs({ DM = RealDM, LM = RealLM, install = null, PURE = require(MODEL), WSH = null, CV = read('src/lib/chat-view.js'), quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   const door = resumeBarDoor(CV);
   if (want('rb') && install) {
@@ -1391,7 +1391,7 @@ async function pr3Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
       const w = P.wins.get('v-r1');
       await saveNow(P);
       const after = H.layouts();
-      leg(!!btn && P.creates.length === 2 && P.creates[1].ignoreNoConvo === true && !!w && w !== a && !w._readOnly && J(rowsOf(after, 'desk-v')) === J(rowsOf(before, 'desk-v')) && !closedOf(P, 'v-r1').length && cl.length === 1 && fenced(cl) && noFence(P),
+      leg(!!btn && P.creates.length === 2 && P.creates[1].ignoreNoConvo === true && !!w && w !== a && !w._readOnly && J(rowsOf(after, 'desk-v')) === J(rowsOf(before, 'desk-v')) && !closedOf(P, 'v-r1').length && cl.length === 1 && gateOf(fenced(cl)) && verdictOf(noFence(P)),
         `§PR3 (rb) N1 «TRY RESUMING ANYWAY» on a ${phone ? 'PHONE' : 'DESKTOP'} page (the no-transcript breaker's retry bar): 1 create after the retry, the conversation keeps its window — row v-r1 itself — the record keeps the row and its box, 0 'closed', the ONE close is the row's re-opening (_reopenWin)`,
         { bar: !!btn, creates: P.creates.length, retried: P.creates[1] && P.creates[1].ignoreNoConvo, win: w && w.id, fresh: w !== a, closes: cl, before: rowsOf(before, 'desk-v'), after: rowsOf(after, 'desk-v'), closed: closedOf(P, 'v-r1'), fence: P.app._fenceRefused || [] });
     }
@@ -1408,7 +1408,7 @@ async function pr3Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
       await tick(5);
       await saveNow(P);
       const row = H.layouts().desktops[desk].autoSave.windows.find((r) => r.winId === id);
-      leg(P.creates.length === 1 && mine.length === 1 && !!w && P.wins.get(id) === w && w._openSpec?.serverId === 'new-' + i && fenced(cl) && cl.length === (i === 1 ? 1 : 0) && !closedOf(P, id).length && !!row && J(row.gridBounds) === J(PRGB(i)),
+      leg(P.creates.length === 1 && mine.length === 1 && !!w && P.wins.get(id) === w && w._openSpec?.serverId === 'new-' + i && gateOf(fenced(cl)) && cl.length === (i === 1 ? 1 : 0) && !closedOf(P, id).length && !!row && J(row.gridBounds) === J(PRGB(i)),
         `§PR3 (dp) N2 TWO PRESSES within 200 ms on a ${phone ? 'PHONE' : 'DESKTOP'} page (row ${id}${desk === 'desk-v' ? '' : ', on a desktop not visited'}): 1 create, 1 window — the row itself — the second press joins the first (no close of its window, no second create), its answer lands in that window (no phantom view), the record keeps the row and its box`,
         { creates: P.creates.length, windows: mine.map((x) => x.id), w: w && [w.id, w._openSpec?.serverId], closes: cl, closed: closedOf(P, id), row: row && [row.winId, row.gridBounds] });
     }
@@ -1491,7 +1491,7 @@ async function pr3Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
     const H2 = hub(WSH || loadHandler(), DOC({ 'desk-v': [], 'desk-y': [], 'desk-x': base }), { alive: [S, T, 'new-2'] }), other = H2.connect();
     await sync(other, [...base, nc('win-f9')], [], 3);
     const rows2 = rowsOf(H2.layouts(), 'desk-x');
-    leg(rows2.length === 3 && rows2.some((r) => r[0] === 'win-f9') && !refusals(other).length,
+    leg(rows2.length === 3 && gateOf(rows2.some((r) => r[0] === 'win-f9')) && !refusals(other).length,
       '§PR3 (c1) C1 CONTROL: another page\'s new boxless row of the same conversation it was never refused for (a young fork) beside the placed row — taken', { rows: rows2, refused: refusals(other).length });
   }
   if (want('c2')) {
@@ -1505,7 +1505,7 @@ async function pr3Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
       '§PR3 (c2) C2 PURE shrinkVerdict: a PLACED group whose head strips its box while staying grouped — or the whole group — is REFUSED (`unplaced` names the frame, and every guest that lost the frame\'s box)', { head, whole });
     const guest = PURE.shrinkVerdict({ prev: base, next: [g(nb(prRow('v-r1', 1))), base[1], base[2]], evidence: [], alive: () => false });
     const fresh = PURE.shrinkVerdict({ prev: [prRow('a-1', 1), nb(prRow('b-2', 2))], next: [member(nb(prRow('a-1', 1)), ['b-2', 'a-1']), member(nb(prRow('b-2', 2)), ['b-2', 'a-1'])], evidence: [], alive: () => false });
-    leg(guest.ok && fresh.ok, '§PR3 (c2) C2 CONTROLS: a guest with no box under a head that keeps its box; a row merged as a guest into a frame never placed — both taken', { guest, fresh });
+    leg(gateOf(guest.ok) && verdictOf(fresh.ok), '§PR3 (c2) C2 CONTROLS: a guest with no box under a head that keeps its box; a row merged as a guest into a frame never placed — both taken', { guest, fresh });
   }
   if (want('c3') && install) {
     // (c3) C3 A GROUPED WINDOW TAKES ITS KEPT ROW TOO: on a phone the person closes v-r1, opens its conversation again (a NEW window, no
@@ -1557,7 +1557,7 @@ async function pr3Legs({ DM = RealDM, LM = RealLM, install = null, PURE = requir
       P.answers[0]?.({ type: 'created', sessionId: 'new-1', cwd: '/srv/p1', mode: 'chat', reqId: P.creates[0] && P.creates[0].reqId });
       await tick(60);
       const row = H.layouts().desktops['desk-v'].autoSave.windows.find((r) => r.winId === 'v-r1');
-      leg(cleared && P.wins.get('v-r1')?._openSpec?.serverId === 'new-1' && row?.openSpec?.serverId === 'new-1' && J(row.gridBounds) === J(PRGB(1)),
+      leg(gateOf(cleared) && P.wins.get('v-r1')?._openSpec?.serverId === 'new-1' && row?.openSpec?.serverId === 'new-1' && J(row.gridBounds) === J(PRGB(1)),
         '§PR3 (owe) A RESUMED ROW\'S LIVE RECIPE REACHES THE HUB: the desktop\'s record landed on the phone between its Resume press and the create\'s answer (its dirty bit cleared) ⇒ the phone still writes row v-r1 naming the live session new-1, at its box — never left naming the dead one',
         { cleared, p: P.wins.get('v-r1')?._openSpec?.serverId, row: row && [row.openSpec?.serverId, row.gridBounds], psent: P.syncs('desk-v').length });
     } finally { globalThis.setTimeout = st; }
@@ -1579,7 +1579,7 @@ const savesSince = (P, from) => [...new Set(P.syncs().slice(from).map((m) => m.s
 const hubName = (H, d, id) => { const r = (H.layouts().desktops[d]?.autoSave?.windows || []).find((w) => w.winId === id); return r ? (r.openSpec?.serverId || r.serverSessionId || null) : null; };
 async function pr4Legs({ DM = RealDM, LM = RealLM, install = null, WSH = null, CV = read('src/lib/chat-view.js'), MA = read('src/lib/manage-agents.js'), WSRC = read('src/lib/window.js'), quiet = false, legs = null, ends = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   const door = resumeBarDoor(CV);
   if (want('owe') && install) {
@@ -1677,7 +1677,7 @@ async function pr4Legs({ DM = RealDM, LM = RealLM, install = null, WSH = null, C
       const gone = end === 'closed' ? !P.wins.has('v-r1') : true;
       press(P); await tick(5);
       const mine = [...P.wins.values()].filter((x) => x._conversation?.backendSessionId === PRC(1) || x._openSpec?.backendSessionId === PRC(1));
-      leg(!!a && gone && P.creates.length === 2 && mine.length === 1 && mine[0] !== a && noFence(P),
+      leg(!!a && gateOf(gone) && P.creates.length === 2 && mine.length === 1 && mine[0] !== a && verdictOf(noFence(P)),
         `§PR4 (rel) N2 RELEASED AT ${{ timeout: 'THE WATCHDOG (15 s)', reqless: 'AN ERROR NAMING NO REQUEST (an older hub\'s «Failed to spawn session» — this hub names it)', reconnect: 'A RECONNECT THAT WILL NOT RE-SEND THE CREATE', closed: 'THE PERSON\'S CLOSE of the waiting window' }[end]}: the next press sends a create — one window of the conversation, a new one (never a join with the dead wait)`,
         { creates: P.creates.length, windows: mine.map((x) => x.id), fresh: mine[0] !== a, gone, fence: P.app._fenceRefused || [] });
     }
@@ -1753,7 +1753,7 @@ async function pr4Legs({ DM = RealDM, LM = RealLM, install = null, WSH = null, C
     await sync(page, H3, [base[1]], [{ id: 'x-r2', why: 'closed' }], 4);
     await sync(page, H3, [base[1], nc('win-n2')], [], 5);
     const rowsC = rowsOf(H3.layouts(), 'desk-x');
-    leg(!refusals(page).length && rowsC.some((r) => r[0] === 'win-n2') && !rowsC.some((r) => r[0] === 'x-r2') && !H3.layouts().desktops['desk-x'].refusedNewcomers,
+    leg(!refusals(page).length && gateOf(rowsC.some((r) => r[0] === 'win-n2')) && !rowsC.some((r) => r[0] === 'x-r2') && !H3.layouts().desktops['desk-x'].refusedNewcomers,
       '§PR4 (n4r) N4 CONTROL: the person closes the placed row (its close as evidence) — the refusal ends (the record forgets it); a boxless window of the conversation then lands', { rows: rowsC, refusals: refusals(page).length, memory: H3.layouts().desktops['desk-x'].refusedNewcomers || null });
   }
   if (want('f5') && install) {
@@ -1780,7 +1780,7 @@ async function pr4Legs({ DM = RealDM, LM = RealLM, install = null, WSH = null, C
       P.app.resumeSession(PRC(1), '/srv/p1', 'Conv 1', { backend: 'claude', backendSessionId: PRC(1) });
       P.app._closeSecondView?.('v-f', { backend: 'claude', cid: PRC(1) });
       await tick(5);
-      leg(P.wins.has('v-f') && (P.app._fenceRefused || []).some((r) => r.win === 'v-f' && r.how === '_closeSecondView'),   // stale-pins: kept — «_closeSecondView» is the name src/lib/session-lifecycle.js's _fenceSays still writes; only src/lib/user-todos-actions.js lost the token
+      leg(gateOf(P.wins.has('v-f')) && verdictOf((P.app._fenceRefused || []).some((r) => r.win === 'v-f' && r.how === '_closeSecondView')),   // stale-pins: kept — «_closeSecondView» is the name src/lib/session-lifecycle.js's _fenceSays still writes; only src/lib/user-todos-actions.js lost the token
         '§PR4 (f5) N5 A SECOND VIEW IS OF THE CONVERSATION: _closeSecondView handed an unrelated window (v-f, a file) inside a resume ⇒ refused and journaled — v-f stays', { vf: P.wins.has('v-f'), refused: P.app._fenceRefused || [] });
     }
     {
@@ -1823,7 +1823,7 @@ await section('§PR4 ROUND 4 (lane phone-resume-keeps-layout r4): an owed recipe
 const realWs = await loadWs();
 async function pr5Legs({ LM = RealLM, install = null, WS = realWs, WSH = null, quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   const rows = (globalThis.__uiRows ||= {}), had = { ...rows };
   Object.assign(rows, { opencode: { resumeResend: false }, claude: { resumeResend: true } }); // the harness rows (opencode / antigravity: no resend)
@@ -1897,7 +1897,7 @@ async function pr5Legs({ LM = RealLM, install = null, WS = realWs, WSH = null, q
       // (catch) …the hub's message loop's catch-all («Internal error handling create» — a create that throws) names the request it answers
       // too (the r4 acceptance: kb-api's «every error names its reqId» skipped it; a bare frame released EVERY pending resume on the page)
       const line = (read('src/ws-handler.js').match(/ws\.send\(JSON\.stringify\(\{ type: 'error', message: 'Internal error handling '[^\n]*/) || [''])[0];
-      leg(/reqId: data\?\.reqId/.test(line), '§PR5 (catch) THE HUB\'S CATCH-ALL NAMES THE REQUEST it answers (ws-handler\'s «Internal error handling <type>»): a create that throws ends its own wait — never every pending resume on the page', line.slice(0, 160));
+      leg(verdictOf(/reqId: data\?\.reqId/.test(line)), '§PR5 (catch) THE HUB\'S CATCH-ALL NAMES THE REQUEST it answers (ws-handler\'s «Internal error handling <type>»): a create that throws ends its own wait — never every pending resume on the page', line.slice(0, 160));
     }
     if (want('owe-b') && install) {
       // (owe-b) THE RETRY BUDGET IS PER RECIPE (the r4 acceptance's refuted-but-true shape): row x-r2's earlier recipes spent its two
@@ -1946,7 +1946,7 @@ await section('§PR5 ROUND 5 (lane phone-resume-keeps-layout r5): the watches di
 /** §PR6 (lane phone-resume-keeps-layout r6 — the r5 acceptance): the hub's refusal memory, over persistence.js's cache */
 async function pr6Legs({ WSH = null, quiet = false, legs = null } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!quiet) ok(verdictOf(c), n, extra); if (!c) failed.push(n); return !!c; };
   const want = (k) => !legs || legs.includes(k);
   if (want('n2b')) {
     // (n2b) THE MEMORY IS WRITTEN WHEN ITS MEMBERSHIP CHANGES, NEVER WHEN ONLY ITS ORDER DOES: 64 pairs stored (win-m0 … win-m63); two
@@ -1982,101 +1982,101 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   {
     lap('  · A’s by-check dropped: any ’dup’ is explained');
     const find = "    if (ev.has(id) && why.get(id) === 'dup') { const seen = !!(sid && showing(sid, id)); if (!seen && shownBy(sid, id, byOf.get(id), nextList, elsewhere)) continue; unexplained.push(id); dup.push(id); if (seen) shown.push(id); continue; }";
-    ok(PSRC.includes(find), 'mutant A-no-by-check: the patched line exists in desktop-record.js');
+    ok(verdictOf(PSRC.includes(find)), 'mutant A-no-by-check: the patched line exists in desktop-record.js');
     const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, find, "    if (ev.has(id) && why.get(id) === 'dup') continue;", "src/lib/desktop-record.js"), 'a-no-by-check');
     const f = pureLegs(Mx, { quiet: true }), h = await hubLegs(loadHandler({ shrinkVerdict: Mx.shrinkVerdict }), { quiet: true });
-    ok(f.some((n) => /CONTROL: a 'dup' whose `by` shows nothing/.test(n)) && h.some((n) => /CONTROL: the same drop with a `by` that shows nothing of S/.test(n)), `mutant A-no-by-check: a duplicate taken on the page's word drops a window nothing shows — RED (${f.length}/${h.length})`);
+    ok(gateOf(f.some((n) => /CONTROL: a 'dup' whose `by` shows nothing/.test(n))) && verdictOf(h.some((n) => /CONTROL: the same drop with a `by` that shows nothing of S/.test(n))), `mutant A-no-by-check: a duplicate taken on the page's word drops a window nothing shows — RED (${f.length}/${h.length})`);
   }
   // r2 A: the hub's `showing` dropped (the r1 verdict: a copy leaves on any page's word)
   {
     lap('  · r2 A: the hub’s `showing` dropped (the r1 verdict: a copy leaves on an');
     const h = await hubLegs(loadHandler({ shrinkVerdict: (a) => require(MODEL).shrinkVerdict({ ...a, showing: () => false }) }), { quiet: true });
-    ok(h.some((n) => /r2: V's valid duplicate is REFUSED while ANOTHER client/.test(n)), `mutant A-no-showing (b3a058eb2's verdict): the copy another page shows is written away — RED (${h.length})`);
+    ok(verdictOf(h.some((n) => /r2: V's valid duplicate is REFUSED while ANOTHER client/.test(n))), `mutant A-no-showing (b3a058eb2's verdict): the copy another page shows is written away — RED (${h.length})`);
   }
   // C's storm guard removed (every refusal answered)
   {
     lap('  · C’s storm guard removed (every refusal answered)');
     const h = await hubLegs(loadHandler({ refusalStorm: () => ({ answer: true, ended: null }) }), { quiet: true });
-    ok(h.some((n) => /50 identical refused records from one client ⇒ ONE refusal frame/.test(n)), `mutant C-no-storm-guard: 50 refusals answered, 50 journal lines — RED (${h.length})`);
+    ok(verdictOf(h.some((n) => /50 identical refused records from one client ⇒ ONE refusal frame/.test(n))), `mutant C-no-storm-guard: 50 refusals answered, 50 journal lines — RED (${h.length})`);
   }
   // D's dedup removed (a toast per refusal)
   {
     lap('  · D’s dedup removed (a toast per refusal)');
     const find = '    if (s && now - s.at < REFUSAL_TOAST_MS) { s.count++; return false; }';
-    ok(DSRC.includes(find), 'mutant D-no-dedup: the patched line exists in desktop-manager.js');
+    ok(verdictOf(DSRC.includes(find)), 'mutant D-no-dedup: the patched line exists in desktop-manager.js');
     const DMx = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '', "src/lib/desktop-manager.js"), 'd-no-dedup', { esm: true })).href)).DesktopManager;
     const f = await toastLegs({ DM: DMx, quiet: true });
-    ok(f.some((n) => /ONE TOAST PER CAUSE: three refusals/.test(n)), `mutant D-no-dedup: a warn per refusal — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /ONE TOAST PER CAUSE: three refusals/.test(n))), `mutant D-no-dedup: a warn per refusal — RED (${f.length})`);
   }
   // r3: F's trace never written, G's chain gate removed (the handler), G's verdict blind (PURE)
   {
     lap('  · r3: F’s trace never written, G’s chain gate removed (the handler), G’s');
     const tr = await hubLegs(loadHandler({ noteDupsLeft: () => [] }), { quiet: true });
-    ok(tr.some((n) => /THE DEDUP TRACE/.test(n)), `mutant r3-F-no-trace: no trace on disk, none on the relay — RED (${tr.length})`);
+    ok(verdictOf(tr.some((n) => /THE DEDUP TRACE/.test(n))), `mutant r3-F-no-trace: no trace on disk, none on the relay — RED (${tr.length})`);
     const cg = await hubLegs(loadHandler({ chainsAgree: () => ({ ok: true, rows: [] }) }), { quiet: true });
-    ok(cg.some((n) => /is REFUSED 'chain-disagrees'/.test(n)), `mutant r3-G-no-chain-gate (ab1226ff2's handler): the inconsistent re-send is written — RED (${cg.length})`);
+    ok(verdictOf(cg.some((n) => /is REFUSED 'chain-disagrees'/.test(n))), `mutant r3-G-no-chain-gate (ab1226ff2's handler): the inconsistent re-send is written — RED (${cg.length})`);
     const find = "    if (w.tabChain.tabs.some((m) => String(m) !== id && rows.has(String(m)) && members(rows.get(String(m))) !== mine)) out.push(id);";
-    ok(PSRC.includes(find), 'mutant r3-G-blind-verdict: the patched line exists in desktop-record.js');
+    ok(verdictOf(PSRC.includes(find)), 'mutant r3-G-blind-verdict: the patched line exists in desktop-record.js');
     const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, find, '', "src/lib/desktop-record.js"), 'r3-g-blind');
     const p = pureLegs(Mx, { quiet: true });
-    ok(p.some((n) => /chainsAgree: the r2 re-send/.test(n)) && p.some((n) => /NO chain disagrees too/.test(n)), `mutant r3-G-blind-verdict: chainsAgree sees no disagreement — RED (${p.length})`);
+    ok(gateOf(p.some((n) => /chainsAgree: the r2 re-send/.test(n))) && verdictOf(p.some((n) => /NO chain disagrees too/.test(n))), `mutant r3-G-blind-verdict: chainsAgree sees no disagreement — RED (${p.length})`);
   }
   // r4: K the choke point's trace rule removed (36bd0c866: the restore spread the trace), K the person's act ignored, M the newest 50
   {
     lap('  · r4: K the choke point’s trace rule removed (36bd0c866: the restore spr');
     const PSRC = read('src/routes/persistence.js'), find = '    tracesTrue(data);\n';
-    ok(PSRC.includes(find), 'mutant r4-K-restore-spreads: the patched line exists in persistence.js');
+    ok(verdictOf(PSRC.includes(find)), 'mutant r4-K-restore-spreads: the patched line exists in persistence.js');
     const Px = M.load('src/routes/persistence.js', editAnchor(PSRC, find, '', "src/routes/persistence.js"), 'r4-k-spread');
     const k = await persistLegs(Px, { quiet: true });
-    ok(k.some((n) => /THE ONE-DESKTOP RESTORE/.test(n)) && k.some((n) => /…and ANY write through writeLayouts/.test(n)), `mutant r4-K-restore-spreads (36bd0c866's writeLayouts): the restored record lists the copy the trace still names — RED (${k.length})`);
+    ok(gateOf(k.some((n) => /THE ONE-DESKTOP RESTORE/.test(n))) && verdictOf(k.some((n) => /…and ANY write through writeLayouts/.test(n))), `mutant r4-K-restore-spreads (36bd0c866's writeLayouts): the restored record lists the copy the trace still names — RED (${k.length})`);
     const ND = require(MODEL).noteDupsLeft;
     const g = await hubLegs(loadHandler({ noteDupsLeft: (t, o = {}) => ND(t, { ...o, gone: [] }) }), { quiet: true });
     const gp = pureLegs({ ...require(MODEL), noteDupsLeft: (t, o = {}) => ND(t, { ...o, gone: [] }) }, { quiet: true });
-    ok(g.some((n) => /a write whose evidence says a PERSON CLOSED/.test(n)) && gp.some((n) => /r4 K noteDupsLeft/.test(n)), `mutant r4-K-keep-on-close (the trace blind to a person's act): the closed window stays traced — RED (${g.length}/${gp.length})`);
+    ok(gateOf(g.some((n) => /a write whose evidence says a PERSON CLOSED/.test(n))) && verdictOf(gp.some((n) => /r4 K noteDupsLeft/.test(n))), `mutant r4-K-keep-on-close (the trace blind to a person's act): the closed window stays traced — RED (${g.length}/${gp.length})`);
     const f = pureLegs({ ...require(MODEL), noteDupsLeft: (t, o = {}) => ND(t, o).slice(-50) }, { quiet: true });
-    ok(f.some((n) => /NEVER cut by count/.test(n)), `mutant r4-M-fifo-50 (36bd0c866's DUP_TRACE_CAP): the oldest copies leave the trace by count — RED (${f.length})`);
+    ok(verdictOf(f.some((n) => /NEVER cut by count/.test(n))), `mutant r4-M-fifo-50 (36bd0c866's DUP_TRACE_CAP): the oldest copies leave the trace by count — RED (${f.length})`);
   }
   // r5: N the live-session set alone (4ad07d751's `alive`: a stopped conversation, or one not adopted yet, leaves the trace)
   {
     lap('  · r5: N the live-session set alone (4ad07d751’s `alive`: a stopped conve');
     const WSRC = read('src/ws-handler.js'), find = 'gone, alive: (sid) => !endedConvs.has(sid) });';
-    ok(WSRC.includes(find), 'mutant r5-N-live-set: the patched line exists in ws-handler.js');
+    ok(verdictOf(WSRC.includes(find)), 'mutant r5-N-live-set: the patched line exists in ws-handler.js');
     const Wx = M.load('src/ws-handler.js', editAnchor(WSRC, find, 'gone, alive: (sid) => activeSessions.has(sid) });', "src/ws-handler.js"), 'r5-n-live');
     const n = await hubNLegs(Wx, { quiet: true });
-    ok(n.some((x) => /a STOPPED conversation stays traced/.test(x)) && n.some((x) => /not ADOPTED the conversation yet/.test(x)), `mutant r5-N-live-set (4ad07d751's \`activeSessions.has\` alone): a stopped conversation and one not adopted yet leave the trace — RED (${n.length}: ${n.filter((x) => /r5 N/.test(x)).map((x) => x.slice(0, 60)).join(' | ')})`);
+    ok(gateOf(n.some((x) => /a STOPPED conversation stays traced/.test(x))) && verdictOf(n.some((x) => /not ADOPTED the conversation yet/.test(x))), `mutant r5-N-live-set (4ad07d751's \`activeSessions.has\` alone): a stopped conversation and one not adopted yet leave the trace — RED (${n.length}: ${n.filter((x) => /r5 N/.test(x)).map((x) => x.slice(0, 60)).join(' | ')})`);
   }
   // ROUND 8 — each road's fix removed (the shapes that need the page's own clocks — the gate's drain, «bysession» — are the loop's)
   {
     lap('  · ROUND 8 — each road’s fix removed (the shapes that need the page’s own');
     const D8 = read('src/lib/desktop-manager.js'), L8 = read('src/lib/session-lifecycle.js'), T8 = read('src/lib/taskbar.js');
-    const dm8 = async (find, repl, tag) => { ok(D8.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(D8, find, repl, "src/lib/desktop-manager.js"), tag, { esm: true })).href)).DesktopManager; };
+    const dm8 = async (find, repl, tag) => { ok(verdictOf(D8.includes(find)), `mutant ${tag}: the patched line exists in desktop-manager.js`); return (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(D8, find, repl, "src/lib/desktop-manager.js"), tag, { esm: true })).href)).DesktopManager; };
     // a second taskbar module in one process: its top-level registerWindowMenu() would register the window menu's commands again
     // (contributions' registry is the process's, and refuses a duplicate) — the copy leaves that one call out
-    const tb8 = async (find, repl, tag) => { ok(T8.includes(find) && T8.includes('\nregisterWindowMenu();\n'), `mutant ${tag}: the patched lines exist in taskbar.js`); return import(pathToFileURL(M.write('src/lib/taskbar.js', editAnchor(editAnchor(T8, find, repl, "src/lib/taskbar.js"), '\nregisterWindowMenu();\n', '\n\n', "src/lib/taskbar.js"), tag, { esm: true })).href); };
+    const tb8 = async (find, repl, tag) => { ok(gateOf(T8.includes(find)) && verdictOf(T8.includes('\nregisterWindowMenu();\n')), `mutant ${tag}: the patched lines exist in taskbar.js`); return import(pathToFileURL(M.write('src/lib/taskbar.js', editAnchor(editAnchor(T8, find, repl, "src/lib/taskbar.js"), '\nregisterWindowMenu();\n', '\n\n', "src/lib/taskbar.js"), tag, { esm: true })).href); };
     const heads = (f) => f.map((n) => n.slice(0, 16)).join(' | ');
     const blind = await dm8('    return !!(ask && ask.desk === desktopId) || !!(r && r.desk === desktopId && r.gen === (this._revealGen || 0));', '    return !!(ask && ask.desk === desktopId) || !!(r && r.gen === (this._revealGen || 0));', 'r8-R1-deskblind');
     const fb = await r8Legs({ DM: blind, install: install8, quiet: true, legs: ['R1b', 'R1c'] });
-    ok(fb.some((n) => n.startsWith('§R8 R1b:')) && fb.some((n) => n.startsWith('§R8 R1c:')), `mutant r8-R1-deskblind (a switch to ANY desktop of the reveal's generation is its own): the forwarded shortcut's switch and the remote deletion's keep the mark — RED (${fb.length}: ${heads(fb)})`);
+    ok(gateOf(fb.some((n) => n.startsWith('§R8 R1b:'))) && verdictOf(fb.some((n) => n.startsWith('§R8 R1c:'))), `mutant r8-R1-deskblind (a switch to ANY desktop of the reveal's generation is its own): the forwarded shortcut's switch and the remote deletion's keep the mark — RED (${fb.length}: ${heads(fb)})`);
     const never = await dm8('    this._revealing = null; // a switch lands: a reveal\'s own switch is spent — once (r8); queued, it stays the reveal\'s until its drain lands\n', '', 'r8-R1-neverclear');
     const fn = await r8Legs({ DM: never, install: install8, quiet: true, legs: ['R1b', 'R1c', 'R4'] });
     ok(fn.length === 0, `mutant r8-R1-neverclear ALONE (the landed switch never spends \`_revealing\`) is EQUIVALENT — the desktop check answers first: a desktop is left only by a switch that is not the reveal's, which starts a generation, so a spent \`_revealing\` never matches again; should a desktop ever be left without one, this turns RED (${fn.length}: ${heads(fn)}) — the clear's other half, never early, is the loop's r8-R1-clear-early (Q7)`);
     const armed = await dm8('    if (desk === this._activeId) this._pendingSwitch = null;\n', '', 'r8-R4-armed');
     const fa = await r8Legs({ DM: armed, install: install8, quiet: true, legs: ['R4'] });
-    ok(fa.some((n) => n.startsWith('§R8 R4:')), `mutant r8-R4-armed (8bde36a5c's keepInFront: no cancel): the switch queued before the open stays armed — RED (${fa.length})`);
+    ok(verdictOf(fa.some((n) => n.startsWith('§R8 R4:'))), `mutant r8-R4-armed (8bde36a5c's keepInFront: no cancel): the switch queued before the open stays armed — RED (${fa.length})`);
     const copyR = await dm8('        if (this._isCopy(ws, census)) { noSpec.push(winId); continue; }\n', '', 'r8-R2-restore-copy');
     const fr = await r8Legs({ DM: copyR, install: install8, quiet: true, legs: ['R2visit'] });
-    ok(fr.some((n) => n.startsWith('§R8 R2 (visit):')), `mutant r8-R2-restore-copy (8bde36a5c's no-openSpec door: no copies verdict): the copy is restored — RED (${fr.length})`);
+    ok(verdictOf(fr.some((n) => n.startsWith('§R8 R2 (visit):'))), `mutant r8-R2-restore-copy (8bde36a5c's no-openSpec door: no copies verdict): the copy is restored — RED (${fr.length})`);
     const door = "    if (!replay) this.desktopManager?.keepInFront?.(w.id); // a person's open: it stands — revealed now, in front of a group still forming around it (r5 O)\n    this.wm.revealWindow(w.id, { replay });\n";
-    ok(L8.includes(door), 'mutant r8-R2-machine-raises: the patched lines exist in session-lifecycle.js');
+    ok(verdictOf(L8.includes(door)), 'mutant r8-R2-machine-raises: the patched lines exist in session-lifecycle.js');
     const fm = await r8Legs({ install: await loadLifecycle(L8.replace(door, '    this.desktopManager?.keepInFront?.(w.id);\n    this.wm.revealWindow(w.id);\n')), quiet: true, legs: ['R2door'] });
-    ok(fm.some((n) => n.startsWith('§R8 R2 (door):')), `mutant r8-R2-machine-raises (8bde36a5c's _focusPendingAttach: keepInFront + a person's reveal on every path): the machine door asks a switch back to X and notes an act — RED by the switch count (${fm.length})`);
+    ok(verdictOf(fm.some((n) => n.startsWith('§R8 R2 (door):'))), `mutant r8-R2-machine-raises (8bde36a5c's _focusPendingAttach: keepInFront + a person's reveal on every path): the machine door asks a switch back to X and notes an act — RED by the switch count (${fm.length})`);
     const tbc = await tb8(' && !copies.has(String(id))', '', 'r8-R3-copy-row');
     const fc = await r8Legs({ install: install8, TB: tbc, quiet: true, legs: ['R3list'] });
-    ok(fc.some((n) => n.startsWith('§R8 R3 (list):')), `mutant r8-R3-copy-row (8bde36a5c's otherDeskRows: no copies filter): V's copy offered, S listed twice — RED (${fc.length})`);
+    ok(verdictOf(fc.some((n) => n.startsWith('§R8 R3 (list):'))), `mutant r8-R3-copy-row (8bde36a5c's otherDeskRows: no copies filter): V's copy offered, S listed twice — RED (${fc.length})`);
     const look = "  const dm = app.desktopManager, row = (dm._savedStates?.get(r.deskId)?.windows || []).find((w) => w && String(w.winId || w.id) === String(r.id));\n  dm.revealHeld(r.id, r.deskId, (row && ((row.openSpec && row.openSpec.name) || row.title)) || null);\n";
     const tbs = await tb8(look, "  const dm = app.desktopManager;\n  const go = app.stage?.isActive ? app.stage.leave(r.deskId) : dm.switchTo(r.deskId);\n  let tries = 0;\n  const look = () => {\n    if (dm.activeDesktopId !== r.deskId) return;\n    if (app.wm.windows.has(r.id)) { app.wm.revealWindow(r.id); return; }\n    if (++tries < 20) setTimeout(look, 250);\n  };\n  Promise.resolve(go).then(look, look);\n", 'r8-R3-silent-look');
     const fs8 = await r8Legs({ install: install8, TB: tbs, quiet: true, legs: ['R3look'] });
-    ok(fs8.some((n) => n.startsWith('§R8 R3 (look):')), `mutant r8-R3-silent-look (8bde36a5c's goOtherDesk: 20 × 250 ms, then silence): nothing said — RED by the toast count (${fs8.length})`);
+    ok(verdictOf(fs8.some((n) => n.startsWith('§R8 R3 (look):'))), `mutant r8-R3-silent-look (8bde36a5c's goOtherDesk: 20 × 250 ms, then silence): nothing said — RED by the toast count (${fs8.length})`);
   }
   // ROUND 9 — the copy verdict keyed on the server id alone (65a28cd29), and the verdict and the restore resolving a row two ways
   {
@@ -2084,23 +2084,23 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const D9s = read('src/lib/desktop-manager.js'), L9s = read('src/lib/layout.js');
     const heads = (f) => f.map((n) => n.slice(0, 9)).join(' | ');
     const key = '    const sid = doorSessionOf(w, census.live);\n', imp = "import { duplicatesOf, refusalKey, namesOf, doorSessionOf } from './desktop-record.js';";
-    ok(D9s.includes(key) && D9s.includes(imp), 'mutant r9: the patched lines exist in desktop-manager.js');
+    ok(gateOf(D9s.includes(key)) && verdictOf(D9s.includes(imp)), 'mutant r9: the patched lines exist in desktop-manager.js');
     const dm9 = async (src, tag) => (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', src, tag, { esm: true })).href)).DesktopManager;
     const sOnly = await dm9(D9s.replace(imp, "import { duplicatesOf, refusalKey, namesOf, doorSessionOf, sessionOf } from './desktop-record.js';").replace(key, '    const sid = sessionOf(w);\n'), 'r9-serverid-only');
     const fs9 = await r9Legs({ DM: sOnly, install: install9, quiet: true, legs: ['a', 'b', 'c'] });
-    ok(['a', 'b', 'c'].every((k) => fs9.some((n) => n.startsWith(`§R9 (${k}):`))), `mutant r9-serverid-only (65a28cd29's copy verdict: sessionOf — the server id alone): the row named by its conversation id, alone or beside a stale server id, is offered and restored — (a)(b)(c) RED (the server-id shape (e) is the base's own: green on 65a28cd29) (${fs9.length}: ${heads(fs9)})`);
+    ok(verdictOf(['a', 'b', 'c'].every((k) => fs9.some((n) => n.startsWith(`§R9 (${k}):`)))), `mutant r9-serverid-only (65a28cd29's copy verdict: sessionOf — the server id alone): the row named by its conversation id, alone or beside a stale server id, is offered and restored — (a)(b)(c) RED (the server-id shape (e) is the base's own: green on 65a28cd29) (${fs9.length}: ${heads(fs9)})`);
     const other = await dm9(D9s.replace(key, '    const sid = !w.openSpec && w.serverSessionId && census.live.some((s) => s.id === w.serverSessionId) ? String(w.serverSessionId) : doorSessionOf(w, census.live);\n'), 'r9-two-resolvers-verdict');
     const fv = await r9Legs({ DM: other, install: install9, quiet: true, legs: ['f', 'g'] });
-    ok(fv.some((n) => n.startsWith('§R9 (f):')) && fv.some((n) => n.startsWith('§R9 (g):')), `mutant r9-two-resolvers (the verdict reads the server id first, the restore keeps its own ladder): where the two names disagree the verdict and the restore part — S's copy restored (its attach raised X's window), D's real window never built — (f)(g) RED (${fv.length}: ${heads(fv)})`);
+    ok(gateOf(fv.some((n) => n.startsWith('§R9 (f):'))) && verdictOf(fv.some((n) => n.startsWith('§R9 (g):'))), `mutant r9-two-resolvers (the verdict reads the server id first, the restore keeps its own ladder): where the two names disagree the verdict and the restore part — S's copy restored (its attach raised X's window), D's real window never built — (f)(g) RED (${fv.length}: ${heads(fv)})`);
     const alive = "        // (desktop-record liveSessionOf — r9: a row whose session, so resolved, this page shows is a copy: never restored here)\n        const alive = liveSessionOf(ws, activeSessions);\n";
-    ok(L9s.includes(alive), 'mutant r9-two-resolvers (restore side): the patched lines exist in layout.js');
+    ok(verdictOf(L9s.includes(alive)), 'mutant r9-two-resolvers (restore side): the patched lines exist in layout.js');
     const LMr = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(L9s, alive, "        const alive = (ws.serverSessionId && activeSessions.find((s) => s.id === ws.serverSessionId)) || liveSessionOf(ws, activeSessions);\n", "src/lib/layout.js"), 'r9-two-resolvers-restore', { esm: true })).href)).LayoutManager;
     const fr9 = await r9Legs({ LM: LMr, install: install9, quiet: true, legs: ['f', 'g'] });
-    ok(fr9.length === 1 && fr9[0].startsWith('§R9 (g):'), `mutant r9-two-resolvers (restore side: restoreState keeps its own order — the server id first): D's row passes the verdict, its restore attaches S and raises X's window — (g) RED, (f) green (the verdict settles it first) (${fr9.length}: ${heads(fr9)})`);
+    ok(fr9.length === 1 && verdictOf(fr9[0].startsWith('§R9 (g):')), `mutant r9-two-resolvers (restore side: restoreState keeps its own order — the server id first): D's row passes the verdict, its restore attaches S and raises X's window — (g) RED, (f) green (the verdict settles it first) (${fr9.length}: ${heads(fr9)})`);
     const list = "    const listed = (this.app.sidebar?._webuiSessions || []).filter((s) => s && s.id != null), named = new Set(listed.map((s) => String(s.id)));\n";
-    ok(D9s.includes(list), 'mutant r9-page-only: the patched line exists in desktop-manager.js');
+    ok(verdictOf(D9s.includes(list)), 'mutant r9-page-only: the patched line exists in desktop-manager.js');
     const fp = await r9Legs({ DM: await dm9(D9s.replace(list, '    const listed = [], named = new Set();\n'), 'r9-page-only'), install: install9, quiet: true, legs: ['f', 'g'] });
-    ok(fp.length === 1 && fp[0].startsWith('§R9 (g):'), `mutant r9-page-only (the census without the server's live list — only the sessions this page shows): D's conversation id matches nothing, the row falls to S's server id — D's real window never built — (g) RED, (f) green (${fp.length}: ${heads(fp)})`);
+    ok(fp.length === 1 && verdictOf(fp[0].startsWith('§R9 (g):')), `mutant r9-page-only (the census without the server's live list — only the sessions this page shows): D's conversation id matches nothing, the row falls to S's server id — D's real window never built — (g) RED, (f) green (${fp.length}: ${heads(fp)})`);
   }
   // ROUND 10 — the autosave's dup proposal on the server id alone (9d11dd973's duplicatesOf), the census not handed in, the preset's
   // own two-rung ladder
@@ -2110,24 +2110,24 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const heads = (f) => f.map((n) => n.slice(0, 11)).join(' | ');
     const dupKey = '      const id = idOf(w), sid = sessionOf(w), door = doorSessionOf(w, live), by = sid && door && shows.has(door) ? shows.get(sid) : null;\n';
     const imp = "from './desktop-record.js';", hand = '    for (const x of duplicatesOf({ records: this._savedStates, shown, live: this._shownCensus().live })) {\n';
-    if (ok(P10.includes(dupKey) && D10.includes(imp) && D10.includes(hand), 'mutant r10: the patched lines exist in desktop-record.js / desktop-manager.js')) {
+    if (ok(gateOf(P10.includes(dupKey)) && gateOf(D10.includes(imp)) && verdictOf(D10.includes(hand)), 'mutant r10: the patched lines exist in desktop-record.js / desktop-manager.js')) {
       const drOld = M.write('src/lib/desktop-record.js', editAnchor(P10, dupKey, '      const id = idOf(w), sid = sessionOf(w), by = sid ? shows.get(sid) : null;\n', "src/lib/desktop-record.js"), 'r10-dups-on-sessionof');
       const DMo = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(D10, imp, `from ${J(drOld)};`, "src/lib/desktop-manager.js", 'join'), 'r10-dups-on-sessionof-dm', { esm: true })).href)).DesktopManager;
       const fo = await r10Legs({ DM: DMo, install: install10, quiet: true, legs: ['gn', 'gs', 'es'] });
-      ok(fo.length === 2 && fo.some((n) => n.startsWith('§R10 (gn):')) && fo.some((n) => n.startsWith('§R10 (gs):')), `mutant r10-dups-on-sessionof (9d11dd973's duplicatesOf: the server id alone): the autosave proposes D's row as S's 'dup', the hub takes it, D's window is never built — (gn)(gs) RED, the true copy (es) green (${fo.length}: ${heads(fo)})`);
+      ok(fo.length === 2 && gateOf(fo.some((n) => n.startsWith('§R10 (gn):'))) && verdictOf(fo.some((n) => n.startsWith('§R10 (gs):'))), `mutant r10-dups-on-sessionof (9d11dd973's duplicatesOf: the server id alone): the autosave proposes D's row as S's 'dup', the hub takes it, D's window is never built — (gn)(gs) RED, the true copy (es) green (${fo.length}: ${heads(fo)})`);
       const DMn = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(D10, hand, '    for (const x of duplicatesOf({ records: this._savedStates, shown })) {\n', "src/lib/desktop-manager.js"), 'r10-dups-no-census', { esm: true })).href)).DesktopManager;
       const fn = await r10Legs({ DM: DMn, install: install10, quiet: true, legs: ['gn', 'es'] });
-      ok(fn.length === 1 && fn[0].startsWith('§R10 (es):'), `mutant r10-dups-no-census (normalizeDups hands duplicatesOf no live list): a row with no recipe resolves to nothing — the true copy (es) is never proposed, carried for ever — RED; (gn) green (${fn.length}: ${heads(fn)})`);
+      ok(fn.length === 1 && verdictOf(fn[0].startsWith('§R10 (es):')), `mutant r10-dups-no-census (normalizeDups hands duplicatesOf no live list): a row with no recipe resolves to nothing — the true copy (es) is never proposed, carried for ever — RED; (gn) green (${fn.length}: ${heads(fn)})`);
     }
     const lp = 'liveSessionOf(ws, activeSessions); // the restore\'s ladder (see the terminal branch — r10)\n', lt = '          const activeMatch = liveSessionOf(ws, activeSessions);\n\n';
-    if (ok(L10.includes(lp) && L10.includes(lt), 'mutant r10-preset-two-rungs: the patched lines exist in layout.js')) {
+    if (ok(gateOf(L10.includes(lp)) && verdictOf(L10.includes(lt)), 'mutant r10-preset-two-rungs: the patched lines exist in layout.js')) {
       const two = (pad) => `let activeMatch = null;\n${pad}if (backendSessionId) activeMatch = activeSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId);\n${pad}if (!activeMatch && ws.serverSessionId) activeMatch = activeSessions.find(s => s.id === ws.serverSessionId);\n`;
       const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(editAnchor(L10, 'const activeMatch = ' + lp, two('          '), "src/lib/layout.js"), lt, '          ' + two('          ') + '\n', "src/lib/layout.js"), 'r10-preset-two-rungs', { esm: true })).href)).LayoutManager;
       const fl = await r10Legs({ LM: LMp, install: install10, quiet: true, legs: ['p'] });
-      ok(fl.length === 1 && fl[0].startsWith('§R10 (p):'), `mutant r10-preset-two-rungs (9d11dd973's loadPreset: its own ladder, no recipe rung): the rows named by their recipe attach nothing — (p) RED (${fl.length})`);
+      ok(fl.length === 1 && verdictOf(fl[0].startsWith('§R10 (p):')), `mutant r10-preset-two-rungs (9d11dd973's loadPreset: its own ladder, no recipe rung): the rows named by their recipe attach nothing — (p) RED (${fl.length})`);
     }
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: '§6 ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: '§6 ' })) ok(verdictOf(r.pass), r.name, r.detail);
 });
 
 
@@ -2137,37 +2137,37 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     lap('  · mutant pr-remint');
     const a = '      syncId: syncId || row?.id, // LAW 1: the row\'s own id — the record keeps the row, its box and its group\n', b = '    this.desktopManager?.reopenRow?.(out.id);\n';
-    if (ok(LSRC.includes(a) && LSRC.includes(b), 'mutant pr-remint: the patched lines exist in session-lifecycle.js')) {
+    if (ok(gateOf(LSRC.includes(a)) && verdictOf(LSRC.includes(b)), 'mutant pr-remint: the patched lines exist in session-lifecycle.js')) {
       const inst = await loadLifecycle(LSRC.replace(a, '      syncId,\n').replace(b, ''));
       const f = await prLegs({ install: inst, quiet: true, legs: ['a'] });
-      ok(f.some((n) => n.startsWith('§PR (a) a PHONE page resumes')), `mutant pr-remint (a5dedfed1's resume: a NEW window per conversation, the row closed for it): (a) RED (${f.length})`);
+      ok(verdictOf(f.some((n) => n.startsWith('§PR (a) a PHONE page resumes'))), `mutant pr-remint (a5dedfed1's resume: a NEW window per conversation, the row closed for it): (a) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr-dup-drops-place');
     const a = '      out.push(carry ? { desk, id, by: String(by), sid, carry } : { desk, id, by: String(by), sid });';
-    if (ok(PSRC.includes(a), 'mutant pr-dup-drops-place: the patched line exists in desktop-record.js')) {
+    if (ok(verdictOf(PSRC.includes(a)), 'mutant pr-dup-drops-place: the patched line exists in desktop-record.js')) {
       const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, a, '      out.push({ desk, id, by: String(by), sid });', "src/lib/desktop-record.js"), 'pr-dup-drops-place');
       const f = await prLegs({ PURE: Mx, quiet: true, legs: ['b'] });
-      ok(f.some((n) => n.startsWith('§PR (b) PURE duplicatesOf')), `mutant pr-dup-drops-place (a5dedfed1's duplicatesOf: the copy's box leaves with it): (b) RED (${f.length})`);
+      ok(verdictOf(f.some((n) => n.startsWith('§PR (b) PURE duplicatesOf'))), `mutant pr-dup-drops-place (a5dedfed1's duplicatesOf: the copy's box leaves with it): (b) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr-belt-blind');
     const a = '  for (const id of unplaced) if (!unexplained.includes(id)) unexplained.push(id);\n', b = ' || dup.length || unplaced.length) return';
-    if (ok(PSRC.includes(a) && PSRC.includes(b), 'mutant pr-belt-blind: the patched lines exist in desktop-record.js')) {
+    if (ok(gateOf(PSRC.includes(a)) && verdictOf(PSRC.includes(b)), 'mutant pr-belt-blind: the patched lines exist in desktop-record.js')) {
       const Mx = M.load('src/lib/desktop-record.js', editAnchor(editAnchor(PSRC, a, '', "src/lib/desktop-record.js"), b, ' || dup.length) return', "src/lib/desktop-record.js"), 'pr-belt-blind');
       const f = await prLegs({ PURE: Mx, WSH: loadHandler({ shrinkVerdict: Mx.shrinkVerdict }), quiet: true, legs: ['d'] });
-      ok(f.some((n) => n.startsWith('§PR (d) PURE shrinkVerdict: THE 11:30:40 SHAPE')) && f.some((n) => n.startsWith('§PR (d) THE REAL ws-handler')), `mutant pr-belt-blind (a5dedfed1's shrinkVerdict: a write that drops positions is accepted): (d) RED (${f.length})`);
+      ok(gateOf(f.some((n) => n.startsWith('§PR (d) PURE shrinkVerdict: THE 11:30:40 SHAPE'))) && verdictOf(f.some((n) => n.startsWith('§PR (d) THE REAL ws-handler'))), `mutant pr-belt-blind (a5dedfed1's shrinkVerdict: a write that drops positions is accepted): (d) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr-preview-blank');
     const a = '            } else if (!ws.isMinimized) unplaced.push(wid); // A DESKTOP WHOSE ROWS HAVE NO POSITION SAYS SO (LAW 2) — never nothing\n';
-    if (ok(DSRC.includes(a), 'mutant pr-preview-blank: the patched line exists in desktop-manager.js')) {
+    if (ok(verdictOf(DSRC.includes(a)), 'mutant pr-preview-blank: the patched line exists in desktop-manager.js')) {
       const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, a, '            }\n', "src/lib/desktop-manager.js"), 'pr-preview-blank', { esm: true })).href)).DesktopManager;
       const f = await prLegs({ DM: DMp, quiet: true, legs: ['p'] });
-      ok(f.some((n) => n.startsWith('§PR LAW 2')), `mutant pr-preview-blank (a5dedfed1's preview: a row with no box draws nothing): LAW 2 RED (${f.length})`);
+      ok(verdictOf(f.some((n) => n.startsWith('§PR LAW 2'))), `mutant pr-preview-blank (a5dedfed1's preview: a row with no box draws nothing): LAW 2 RED (${f.length})`);
     }
   }
   // ── r2 (the r1 acceptance's N1–N4): each fix put back as 461b41f78 shipped it turns its own §PR2 leg RED ──
@@ -2176,63 +2176,63 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     lap('  · mutant pr2-resume-bar-closes');
     const a = "    this.app.resumeSession(backendSessionId, cwd, name, {\n      mode: 'chat',\n      backend,\n      // THE WINDOW PRESSED IN IS THE ROW (lane phone-resume-keeps-layout r2, N1): resumeSession closes it as its re-opening and the\n      // resumed session takes its id — never closed here (a close after the resume closed the RESUMED window: the row went as 'closed')\n      fromWin: this.winInfo?.id,\n";
     const b = "      ...(accountId ? { accountId, onCreateResult: this.app._persistAccountOnCreate?.(`${backend}:${backendSessionId}`, accountId) } : {}),\n    });\n  }";
-    if (ok(CVSRC.includes(a) && CVSRC.includes(b), 'mutant pr2-resume-bar-closes: the patched lines exist in chat-view.js')) {
+    if (ok(gateOf(CVSRC.includes(a)) && verdictOf(CVSRC.includes(b)), 'mutant pr2-resume-bar-closes: the patched lines exist in chat-view.js')) {
       const cv = CVSRC.replace(a, "    const winId = this.winInfo?.id;\n    this.app.resumeSession(backendSessionId, cwd, name, {\n      mode: 'chat',\n      backend,\n").replace(b, "      ...(accountId ? { accountId, onCreateResult: this.app._persistAccountOnCreate?.(`${backend}:${backendSessionId}`, accountId) } : {}),\n    });\n    // Close the read-only window — the resumed session opens in a new window\n    if (winId) this.app.wm?.closeWindow?.(winId);\n  }");
       const f = await pr2Legs({ install: installPR, CV: cv, SRCS: { 'src/lib/chat-view.js': cv }, quiet: true, legs: ['e', 'census'] });
-      ok(f.filter((n) => n.startsWith('§PR2 (e) N1 THE RESUME BAR')).length === 2 && f.some((n) => n.startsWith('§PR2 (census)')), `mutant pr2-resume-bar-closes (461b41f78's Resume bar: resume, then close the window it named): (e) RED on both pages + the census RED (${f.length})`);
+      ok(f.filter((n) => n.startsWith('§PR2 (e) N1 THE RESUME BAR')).length === 2 && verdictOf(f.some((n) => n.startsWith('§PR2 (census)'))), `mutant pr2-resume-bar-closes (461b41f78's Resume bar: resume, then close the window it named): (e) RED on both pages + the census RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr2-belt-reads-evidence');
     const a = "    if (nextBy.has(id) || !hasBox(w)) continue;\n", b = " || (conversationOf(w) && freshBoxless.has(conversationOf(w)))) unplaced.push(id);";
-    if (ok(PSRC.includes(a) && PSRC.includes(b), 'mutant pr2-belt-reads-evidence: the patched lines exist in desktop-record.js')) {
+    if (ok(gateOf(PSRC.includes(a)) && verdictOf(PSRC.includes(b)), 'mutant pr2-belt-reads-evidence: the patched lines exist in desktop-record.js')) {
       const Mx = M.load('src/lib/desktop-record.js', editAnchor(editAnchor(PSRC, a, "    if (nextBy.has(id) || !hasBox(w) || !ev.has(id)) continue;\n", "src/lib/desktop-record.js"), b, " || (r === 'closed' && conversationOf(w) && freshBoxless.has(conversationOf(w)))) unplaced.push(id);", "src/lib/desktop-record.js"), 'pr2-belt-reads-evidence');
       const f = await pr2Legs({ PURE: Mx, quiet: true, legs: ['n3p'] });
-      ok(f.length === 1 && f[0].startsWith('§PR2 (n3) PURE shrinkVerdict'), `mutant pr2-belt-reads-evidence (461b41f78's belt: the shape counted only with 'closed' evidence): (n3) PURE RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR2 (n3) PURE shrinkVerdict')), `mutant pr2-belt-reads-evidence (461b41f78's belt: the shape counted only with 'closed' evidence): (n3) PURE RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr2-reconcile-resends-drop');
     const a = '    for (const id of unplaced) this._takeKeptRow(d, id, rec);\n';
-    if (ok(DSRC.includes(a), 'mutant pr2-reconcile-resends-drop: the patched line exists in desktop-manager.js')) {
+    if (ok(verdictOf(DSRC.includes(a)), 'mutant pr2-reconcile-resends-drop: the patched line exists in desktop-manager.js')) {
       const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, a, '', "src/lib/desktop-manager.js"), 'pr2-reconcile-resends-drop', { esm: true })).href)).DesktopManager;
       const f = await pr2Legs({ DM: DMp, install: installPR, quiet: true, legs: ['n3'] });
-      ok(f.length === 1 && f[0].startsWith('§PR2 (n3) N3 write 1'), `mutant pr2-reconcile-resends-drop (461b41f78's reconcile: the kept row's window never taken back — the next write is the drop again): (n3) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR2 (n3) N3 write 1')), `mutant pr2-reconcile-resends-drop (461b41f78's reconcile: the kept row's window never taken back — the next write is the drop again): (n3) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr2-dead-view-kept');
     const a = '          } else if (this._deadFor(win, rw.openSpec)) {\n';
-    if (ok(LYSRC.includes(a), 'mutant pr2-dead-view-kept: the patched line exists in layout.js')) {
+    if (ok(verdictOf(LYSRC.includes(a)), 'mutant pr2-dead-view-kept: the patched line exists in layout.js')) {
       const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LYSRC, a, '          } else if (false) {\n', "src/lib/layout.js"), 'pr2-dead-view-kept', { esm: true })).href)).LayoutManager;
       const f = await pr2Legs({ LM: LMp, install: installPR, quiet: true, legs: ['n2'] });
-      ok(f.length === 1 && f[0].startsWith('§PR2 (n2) N2 TWO PAGES'), `mutant pr2-dead-view-kept (461b41f78's apply: a changed recipe rebuilt for a placeholder only): (n2) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR2 (n2) N2 TWO PAGES')), `mutant pr2-dead-view-kept (461b41f78's apply: a changed recipe rebuilt for a placeholder only): (n2) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr2-live-page-local');
     const a = "    const liveRow = rec ? (runs(rec.openSpec?.serverId) || runs(rec.serverSessionId)) : null;\n";
     const b = "          const re = this._reopenWin(winInfo.id);\n          if (re) { re.place = winBounds ? { ...re.place, ...winBounds } : re.place; this._attachInRow(re, msg.existingId,";
-    if (ok(LSRC.includes(a) && LSRC.includes(b), 'mutant pr2-live-page-local: the patched lines exist in session-lifecycle.js')) {
+    if (ok(gateOf(LSRC.includes(a)) && verdictOf(LSRC.includes(b)), 'mutant pr2-live-page-local: the patched lines exist in session-lifecycle.js')) {
       const inst = await loadLifecycle(LSRC.replace(a, '    const liveRow = null;\n').replace(b, "          try { this.wm.closeWindow(winInfo.id); } catch { }\n          const re = { id: null };\n          if (re) { this.attachSession(msg.existingId,"));
       const f = await pr2Legs({ install: inst, quiet: true, legs: ['live', 'c4'] });
-      ok(f.some((n) => n.startsWith('§PR2 (live) N2 a phone')) && f.some((n) => n.startsWith('§PR2 (c4)')), `mutant pr2-live-page-local (461b41f78's resume: «live» read off this page alone, 'resume-already-live' closes the row): (live) + (c4) RED (${f.length})`);
+      ok(gateOf(f.some((n) => n.startsWith('§PR2 (live) N2 a phone'))) && verdictOf(f.some((n) => n.startsWith('§PR2 (c4)'))), `mutant pr2-live-page-local (461b41f78's resume: «live» read off this page alone, 'resume-already-live' closes the row): (live) + (c4) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr2-tile-closes-first');
     const a = "    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: hostOf(e) || undefined, fromWin: win.id });\n";
-    if (ok(LYSRC.includes(a), 'mutant pr2-tile-closes-first: the patched line exists in layout.js')) {
+    if (ok(verdictOf(LYSRC.includes(a)), 'mutant pr2-tile-closes-first: the patched line exists in layout.js')) {
       const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LYSRC, a, "    const bounds = this.app._snapshotWinBounds?.(win);\n    this.app.wm.closeWindow(win.id);\n    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: hostOf(e) || undefined, winBounds: bounds ? { ...bounds, winId: win.id } : undefined });\n", "src/lib/layout.js"), 'pr2-tile-closes-first', { esm: true })).href)).LayoutManager;
       const f = await pr2Legs({ LM: LMp, install: installPR, quiet: true, legs: ['n4'] });
-      ok(f.length === 1 && f[0].startsWith('§PR2 (n4)'), `mutant pr2-tile-closes-first (461b41f78's tile press: closed first, a new id minted): (n4) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR2 (n4)')), `mutant pr2-tile-closes-first (461b41f78's tile press: closed first, a new id minted): (n4) RED (${f.length})`);
     }
   }
   // ── r3 (the r2 acceptance's N1–N4 + C1–C3): each fix put back as d159c081b shipped it turns its own §PR3 leg RED ──
   {
     lap('  · mutant pr3-retry-bar-closes');
     const a = '    btn.onclick = () => { btn.disabled = true; onRetry?.(); };';
-    if (ok(CVSRC.includes(a), 'mutant pr3-retry-bar-closes: the patched line exists in chat-view.js')) {
+    if (ok(verdictOf(CVSRC.includes(a)), 'mutant pr3-retry-bar-closes: the patched line exists in chat-view.js')) {
       const cv = CVSRC.replace(a, '    btn.onclick = () => { btn.disabled = true; try { onRetry?.(); } finally { this.app.wm?.closeWindow?.(this.winInfo?.id); } };');
       const f = await pr3Legs({ install: installPR, CV: cv, quiet: true, legs: ['rb'] }), g = await pr2Legs({ CV: cv, SRCS: { 'src/lib/chat-view.js': cv }, quiet: true, legs: ['census'] });
       ok(f.filter((n) => n.startsWith('§PR3 (rb)')).length === 2 && g.length === 1, `mutant pr3-retry-bar-closes (d159c081b's retry bar: the retry, then a close of the window it named): (rb) RED on both pages + the fence RED by name (${f.length + g.length})`);
@@ -2241,27 +2241,27 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     lap('  · mutant pr3-no-join');
     const a = "    const pend = this._pendingResumeWin(backend, targetBackendId);\n";
-    if (ok(LSRC.includes(a), 'mutant pr3-no-join: the patched line exists in session-lifecycle.js')) {
+    if (ok(verdictOf(LSRC.includes(a)), 'mutant pr3-no-join: the patched line exists in session-lifecycle.js')) {
       const f = await pr3Legs({ install: await loadLifecycle(LSRC.replace(a, '    const pend = null;\n')), quiet: true, legs: ['dp'] });
-      ok(f.length === 3 && f.every((n) => n.startsWith('§PR3 (dp)')), `mutant pr3-no-join (d159c081b's resume: a second press re-opens the held row — the first resume's window in flight closed as its «tile»): (dp) RED ×3 (${f.length})`);
+      ok(f.length === 3 && verdictOf(f.every((n) => n.startsWith('§PR3 (dp)'))), `mutant pr3-no-join (d159c081b's resume: a second press re-opens the held row — the first resume's window in flight closed as its «tile»): (dp) RED ×3 (${f.length})`);
     }
   }
   {
     lap('  · mutant pr3-id-alive');
     const a = '      isAlive: () => this._winIs(winInfo) || (settled(\'closed\'), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait\'s watches (r5 N1)\n';
-    if (ok(LSRC.includes(a), 'mutant pr3-id-alive: the patched line exists in session-lifecycle.js')) {
+    if (ok(verdictOf(LSRC.includes(a)), 'mutant pr3-id-alive: the patched line exists in session-lifecycle.js')) {
       const f = await pr3Legs({ install: await loadLifecycle(LSRC.replace(a, '      isAlive: () => this.wm.windows.has(winInfo.id),\n')), quiet: true, legs: ['inst'] });
-      ok(f.length === 1 && f[0].startsWith('§PR3 (inst)'), `mutant pr3-id-alive (d159c081b's create: alive while ANY window holds its id): (inst) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR3 (inst)')), `mutant pr3-id-alive (d159c081b's create: alive while ANY window holds its id): (inst) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr3-record-z');
     const a = '    if (rec && unpressed) {\n';
-    if (ok(LSRC.includes(a), 'mutant pr3-record-z / pr3-z-never: the patched line exists in session-lifecycle.js')) {
+    if (ok(verdictOf(LSRC.includes(a)), 'mutant pr3-record-z / pr3-z-never: the patched line exists in session-lifecycle.js')) {
       const f = await pr3Legs({ install: await loadLifecycle(LSRC.replace(a, '    if (rec) {\n')), quiet: true, legs: ['z'] });
-      ok(f.length === 1 && f[0].startsWith('§PR3 (z) N3 A PRESSED RESUME'), `mutant pr3-record-z (d159c081b's resume: the record's z for every re-opened row — a press lands under the window raised since): (z) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR3 (z) N3 A PRESSED RESUME')), `mutant pr3-record-z (d159c081b's resume: the record's z for every re-opened row — a press lands under the window raised since): (z) RED (${f.length})`);
       const g = await pr3Legs({ install: await loadLifecycle(LSRC.replace(a, '    if (false) {\n')), quiet: true, legs: ['z'] });
-      ok(g.length === 1 && g[0].startsWith('§PR3 (z) N3 CONTROL'), `mutant pr3-z-never (no row keeps the record's z): the resume-all's (z) CONTROL RED (${g.length})`);
+      ok(g.length === 1 && verdictOf(g[0].startsWith('§PR3 (z) N3 CONTROL')), `mutant pr3-z-never (no row keeps the record's z): the resume-all's (z) CONTROL RED (${g.length})`);
     }
   }
   {
@@ -2269,51 +2269,51 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     const i = CVSRC.indexOf('    // A DISPOSED VIEW NEVER ACTS (r3 N4)'), j = CVSRC.indexOf('    const ids = this._getSessionIds();', i);
     if (ok(i > 0 && j > i && j - i < 900, 'mutant pr3-stale-view-acts: the patched lines exist in chat-view.js')) {
       const f = await pr3Legs({ install: installPR, CV: CVSRC.slice(0, i) + CVSRC.slice(j), quiet: true, legs: ['n4'] });
-      ok(f.length === 1 && f[0].startsWith('§PR3 (n4)'), `mutant pr3-stale-view-acts (d159c081b's Resume bar: after the account check the stale view resumes by its window's id): (n4) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR3 (n4)')), `mutant pr3-stale-view-acts (d159c081b's Resume bar: after the account check the stale view resumes by its window's id): (n4) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr3-c1-forgets');
     const a = '  for (const [nid, kid] of pairsOf(refused)) if (nextBy.has(nid) && !hasBox(nextBy.get(nid)) && hasBox(prevBy.get(kid)) && !unplaced.includes(kid)) unplaced.push(kid);\n';
-    if (ok(PSRC.includes(a), 'mutant pr3-c1-forgets: the patched line exists in desktop-record.js')) {
+    if (ok(verdictOf(PSRC.includes(a)), 'mutant pr3-c1-forgets: the patched line exists in desktop-record.js')) {
       const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, a, '', "src/lib/desktop-record.js"), 'pr3-c1-forgets');
       const f = await pr3Legs({ PURE: Mx, WSH: loadHandler({ shrinkVerdict: Mx.shrinkVerdict }), quiet: true, legs: ['c1'] });
-      ok(f.length === 1 && f[0].startsWith('§PR3 (c1) C1 A REFUSED'), `mutant pr3-c1-forgets (d159c081b's belt: the re-send of a refused newcomer beside its kept row is taken): (c1) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR3 (c1) C1 A REFUSED')), `mutant pr3-c1-forgets (d159c081b's belt: the re-send of a refused newcomer beside its kept row is taken): (c1) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr3-c2-grouped-exempt');
     const a = '  for (const [id, w] of nextBy) if (prevBy.has(id) && hasBox(prevBy.get(id)) && !hasBox(w) && !carriesFrame(id, w)) unplaced.push(id);\n';
-    if (ok(PSRC.includes(a), 'mutant pr3-c2-grouped-exempt: the patched line exists in desktop-record.js')) {
+    if (ok(verdictOf(PSRC.includes(a)), 'mutant pr3-c2-grouped-exempt: the patched line exists in desktop-record.js')) {
       const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, a, '  const grouped = (w) => !!(w && (w.isTabGuest || (w.tabChain && Array.isArray(w.tabChain.tabs) && w.tabChain.tabs.length > 1)));\n  for (const [id, w] of nextBy) if (prevBy.has(id) && hasBox(prevBy.get(id)) && !hasBox(w) && !grouped(w)) unplaced.push(id);\n', "src/lib/desktop-record.js"), 'pr3-c2-grouped-exempt');
       const f = await pr3Legs({ PURE: Mx, quiet: true, legs: ['c2'] });
-      ok(f.length === 1 && f[0].startsWith('§PR3 (c2) C2 PURE'), `mutant pr3-c2-grouped-exempt (d159c081b's belt: every grouped row exempt — a placed frame stripped is taken): (c2) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR3 (c2) C2 PURE')), `mutant pr3-c2-grouped-exempt (d159c081b's belt: every grouped row exempt — a placed frame stripped is taken): (c2) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr3-c3-chain-declined');
     const a = '    if (!w || !wm.rekeyWindow(w.id, id, { inChain: true })) return false;\n';
-    if (ok(DSRC.includes(a), 'mutant pr3-c3-chain-declined: the patched line exists in desktop-manager.js')) {
+    if (ok(verdictOf(DSRC.includes(a)), 'mutant pr3-c3-chain-declined: the patched line exists in desktop-manager.js')) {
       const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, a, '    if (!w || !wm.rekeyWindow(w.id, id)) return false;\n', "src/lib/desktop-manager.js"), 'pr3-c3-chain-declined', { esm: true })).href)).DesktopManager;
       const f = await pr3Legs({ DM: DMp, install: installPR, quiet: true, legs: ['c3'] });
-      ok(f.length === 1 && f[0].startsWith('§PR3 (c3)'), `mutant pr3-c3-chain-declined (d159c081b's re-key: a grouped window declined — the kept row rebuilt beside it): (c3) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR3 (c3)')), `mutant pr3-c3-chain-declined (d159c081b's re-key: a grouped window declined — the kept row rebuilt beside it): (c3) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr3-tile-default-box');
     const a = "              const nw = this.app.wm.windows.get(String(rw.winId || rw.id)), box = (a && a.gridBounds) || own;\n              if (nw && box && !nw._onStage) { nw.gridBounds = { ...box }; this.app.wm._applyGridBounds(nw); }\n              continue;\n";
-    if (ok(LYSRC.includes(a), 'mutant pr3-tile-default-box: the patched lines exist in layout.js')) {
+    if (ok(verdictOf(LYSRC.includes(a)), 'mutant pr3-tile-default-box: the patched lines exist in layout.js')) {
       const LMa = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LYSRC, a, '              continue;\n', "src/lib/layout.js"), 'pr3-tile-default-box', { esm: true })).href)).LayoutManager;
       const f = await pr3Legs({ LM: LMa, install: installPR, quiet: true, legs: ['ph'] });
-      ok(f.length === 1 && f[0].startsWith('§PR3 (ph)'), `mutant pr3-tile-default-box (d159c081b's apply: a tile replaced by a phone's live record placed at the desktop's default): (ph) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR3 (ph)')), `mutant pr3-tile-default-box (d159c081b's apply: a tile replaced by a phone's live record placed at the desktop's default): (ph) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr3-recipe-dropped');
     const a = "        if (this.layoutManager.noteOwnRecipe) this.layoutManager.noteOwnRecipe(winInfo.id); else this.layoutManager.scheduleAutoSave(); // re-broadcast with openSpec — owed until a save carries it (r3)\n";
-    if (ok(LSRC.includes(a), 'mutant pr3-recipe-dropped: the patched line exists in session-lifecycle.js')) {
+    if (ok(verdictOf(LSRC.includes(a)), 'mutant pr3-recipe-dropped: the patched line exists in session-lifecycle.js')) {
       const f = await pr3Legs({ install: await loadLifecycle(LSRC.replace(a, '        this.layoutManager.scheduleAutoSave(); // re-broadcast with openSpec\n')), quiet: true, legs: ['owe'] });
-      ok(f.length === 1 && f[0].startsWith('§PR3 (owe)'), `mutant pr3-recipe-dropped (d159c081b's created: the re-broadcast dropped by the anti-echo gate — the row keeps its dead recipe): (owe) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR3 (owe)')), `mutant pr3-recipe-dropped (d159c081b's created: the re-broadcast dropped by the anti-echo gate — the row keeps its dead recipe): (owe) RED (${f.length})`);
     }
   }
   // ── r4 (the r3 acceptance's N1–N5 + the residuals): each fix put back as 5033f0a06 shipped it — or removed — turns its own §PR4 leg RED ──
@@ -2329,10 +2329,10 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
       ["    for (const d of this._owedDesks()) dm?.markDirty?.(d); // an owed recipe's desktop not on show (the person switched since its answer) goes too (r4 N1)\n", ''],
       ["    if (!this._userDirty && !this._applying && !this._deferT && this._owedDesks().size) { this._deferT = setTimeout(() => { this._deferT = null; this.scheduleAutoSave(); }, 200); return; } // an owed recipe (r4 N1) waits for the gate too — asked again every 200 ms until it opens; no dirty bit, no input time\n", ''],
     ];
-    if (ok(cut.every(([a]) => LY.includes(a)), 'mutant pr4-owed-rearm: the patched lines exist in layout.js')) {
+    if (ok(verdictOf(cut.every(([a]) => LY.includes(a))), 'mutant pr4-owed-rearm: the patched lines exist in layout.js')) {
       const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', cut.reduce((s, [a, b]) => editAnchor(s, a, b, "src/lib/layout.js"), LY), 'pr4-owed-rearm', { esm: true })).href)).LayoutManager;
       const f = await pr4Legs({ LM: LMx, install: installPR, quiet: true, legs: ['owe'] });
-      ok(f.length === 3 && f.every((n) => n.startsWith('§PR4 (owe)')), `mutant pr4-owed-rearm (5033f0a06's owed recipe: cleared only by a save of its own desktop, re-armed after every remote record with a fabricated input time): (owe) RED ×3 — the recipes not carried, the idle phone echoing, the new session's page echoing (${f.length})`);
+      ok(f.length === 3 && verdictOf(f.every((n) => n.startsWith('§PR4 (owe)'))), `mutant pr4-owed-rearm (5033f0a06's owed recipe: cleared only by a save of its own desktop, re-armed after every remote record with a fabricated input time): (owe) RED ×3 — the recipes not carried, the idle phone echoing, the new session's page echoing (${f.length})`);
     }
   }
   for (const [tag, a, b, road, want, why] of [
@@ -2346,19 +2346,19 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     ['pr4-fence-unmarked', '    m.set(id, (m.get(id) || 0) + 1);\n', '', 'f5', /^§PR4 \(f5\) N5 THE FENCE'S DYNAMIC HALF/, 'no window is marked in a resume\'s turn'],
     ['pr4-second-view-any', '    if (other) { this._fenceSays(', '    if (false) { this._fenceSays(', 'f5', /^§PR4 \(f5\) N5 A SECOND VIEW IS OF THE CONVERSATION/, "5033f0a06's _closeSecondView: any id it is handed"],
   ]) {
-    if (ok(LSRC.includes(a), `mutant ${tag}: the patched line exists in session-lifecycle.js`)) {
+    if (ok(verdictOf(LSRC.includes(a)), `mutant ${tag}: the patched line exists in session-lifecycle.js`)) {
       const src = tag === 'pr4-close-holds' ? editAnchor(LSRC, "    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled('closed'); cancelReq?.(); }, { once: true });\n", '', "src/lib/session-lifecycle.js") : LSRC; // r5 N1: the close releases the wait itself too
       const f = await pr4Legs({ install: await loadLifecycle(src.replace(a, b)), quiet: true, legs: [road], ends: road === 'rel' ? [{ 'pr4-timeout-holds': 'timeout', 'pr4-reqless-holds': 'reqless', 'pr4-reconnect-holds': 'reconnect', 'pr4-close-holds': 'closed', 'pr4-join-silent': 'join' }[tag]] : null });
       const n = tag === 'pr4-loud-bulk' ? 3 : tag === 'pr4-fence-unmarked' ? 2 : 1;
-      ok(f.length === n && f.every((x) => want.test(x)), `mutant ${tag} (${why}): (${road}) RED${n > 1 ? ' ×' + n : ''} (${f.length})`, f);
+      ok(f.length === n && verdictOf(f.every((x) => want.test(x))), `mutant ${tag} (${why}): (${road}) RED${n > 1 ? ' ×' + n : ''} (${f.length})`, f);
     }
   }
   {
     lap('  · mutant pr4-pool-pressed');
     const MAS = read('src/lib/manage-agents.js'), a = 'excludeWebuiId: sess.serverId, unattended: true, ';
-    if (ok(MAS.includes(a), 'mutant pr4-pool-pressed: the patched line exists in manage-agents.js')) {
+    if (ok(verdictOf(MAS.includes(a)), 'mutant pr4-pool-pressed: the patched line exists in manage-agents.js')) {
       const f = await pr4Legs({ install: installPR, MA: MAS.replace(a, 'excludeWebuiId: sess.serverId, '), quiet: true, legs: ['z2'] });
-      ok(f.length === 1 && /THE POOL'S COLD RESTART/.test(f[0]), `mutant pr4-pool-pressed (5033f0a06's cold restart: a resume as a press — on top, focused): (z2) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(/THE POOL'S COLD RESTART/.test(f[0])), `mutant pr4-pool-pressed (5033f0a06's cold restart: a resume as a press — on top, focused): (z2) RED (${f.length})`);
     }
   }
   {
@@ -2366,28 +2366,28 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     const WS = read('src/ws-handler.js');
     const a = "            const refusedHere = Array.isArray(layoutData.desktops[desktopId].refusedNewcomers) ? layoutData.desktops[desktopId].refusedNewcomers : [];\n";
     const i = WS.indexOf('            if (!v.ok && v.newcomers?.length) { const pk = '), j = WS.indexOf('\n', i);
-    if (ok(WS.includes(a) && i > 0, 'mutant pr4-memory-on-socket: the patched lines exist in ws-handler.js')) {
+    if (ok(gateOf(WS.includes(a)) && i > 0, 'mutant pr4-memory-on-socket: the patched lines exist in ws-handler.js')) {
       const src = WS.slice(0, i) + "            if (v.ok) ws._refusedNewcomers?.delete(desktopId);\n            else if (v.newcomers?.length) { const m = ws._refusedNewcomers || (ws._refusedNewcomers = new Map()); const k = new Set(); m.set(desktopId, [...refusedHere, ...v.newcomers].filter(([a, b]) => !k.has(a + '|' + b) && k.add(a + '|' + b)).slice(-64)); }" + WS.slice(j);
       const f = await pr4Legs({ WSH: M.load('src/ws-handler.js', src.replace(a, '            const refusedHere = ws._refusedNewcomers?.get(desktopId) || [];\n'), 'pr4-memory-on-socket'), quiet: true, legs: ['n4r'] });
-      ok(f.length === 1 && f[0].startsWith('§PR4 (n4r) N4 THE REFUSAL MEMORY'), `mutant pr4-memory-on-socket (5033f0a06's hub: the refused newcomers remembered on the socket): (n4r) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR4 (n4r) N4 THE REFUSAL MEMORY')), `mutant pr4-memory-on-socket (5033f0a06's hub: the refused newcomers remembered on the socket): (n4r) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr4-refusal-forgets');
     const LY = read('src/lib/layout.js'), a = '    if (refused) this._recipesRefused(s, key); // a recipe that save carried is owed again (r4 N1)\n';
-    if (ok(LY.includes(a), 'mutant pr4-refusal-forgets: the patched line exists in layout.js')) {
+    if (ok(verdictOf(LY.includes(a)), 'mutant pr4-refusal-forgets: the patched line exists in layout.js')) {
       const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY, a, '', "src/lib/layout.js"), 'pr4-refusal-forgets', { esm: true })).href)).LayoutManager;
       const f = await pr4Legs({ LM: LMx, install: installPR, quiet: true, legs: ['owe-r'] });
-      ok(f.length === 1 && f[0].startsWith('§PR4 (owe-r)'), `mutant pr4-refusal-forgets (a recipe counted as carried at its SEND — the refused save carried nothing): (owe-r) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR4 (owe-r)')), `mutant pr4-refusal-forgets (a recipe counted as carried at its SEND — the refused save carried nothing): (owe-r) RED (${f.length})`);
     }
   }
   {
     lap('  · mutant pr4-held-box-dropped');
     const LY = read('src/lib/layout.js'), a = '          const a = arrangementFor(layers, rw) || (!win && held ? arrangementFor(held, rw) : null);';
-    if (ok(LY.includes(a), 'mutant pr4-held-box-dropped: the patched line exists in layout.js')) {
+    if (ok(verdictOf(LY.includes(a)), 'mutant pr4-held-box-dropped: the patched line exists in layout.js')) {
       const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY, a, '          const a = arrangementFor(layers, rw);', "src/lib/layout.js"), 'pr4-held-box-dropped', { esm: true })).href)).LayoutManager;
       const f = await pr4Legs({ LM: LMx, install: installPR, quiet: true, legs: ['hb'] });
-      ok(f.length === 1 && f[0].startsWith('§PR4 (hb)'), `mutant pr4-held-box-dropped (5033f0a06's apply: a phone-named row a desktop had not drawn built at its default box): (hb) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR4 (hb)')), `mutant pr4-held-box-dropped (5033f0a06's apply: a phone-named row a desktop had not drawn built at its default box): (hb) RED (${f.length})`);
     }
   }
   {
@@ -2400,16 +2400,16 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     const tipAl = '      isAlive: () => this._winIs(winInfo), // the window INSTANCE (r3 N2): one re-made under the same id is another window\n';
     const nl = '  _notifyState(connected) { const live = this._stateListeners; for (const h of [...live]) if (live.includes(h)) h(connected); }\n';
     const tipNl = '  _notifyState(connected) { for (const h of this._stateListeners) h(connected); }\n';
-    if (ok(L5.includes(ab) && L5.includes(al) && WJ.includes(nl), 'mutant pr5-*: the patched lines exist in session-lifecycle.js / ws.js')) {
+    if (ok(gateOf(L5.includes(ab)) && gateOf(L5.includes(al)) && verdictOf(WJ.includes(nl)), 'mutant pr5-*: the patched lines exist in session-lifecycle.js / ws.js')) {
       let f = await pr5Legs({ install: await loadLifecycle(L5.replace(ab, '')), quiet: true, legs: ['close'] });
-      ok(f.length === 1 && f[0].startsWith('§PR5 (close) N1 THE WATCHES DIE'), `mutant pr5-close-keeps-watch (the window's close releases nothing — the next frame does): (close) RED at the close (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR5 (close) N1 THE WATCHES DIE')), `mutant pr5-close-keeps-watch (the window's close releases nothing — the next frame does): (close) RED at the close (${f.length})`);
       f = await pr5Legs({ install: await loadLifecycle(L5.replace(al, tipAl)), quiet: true, legs: ['remake'] });
-      ok(f.length === 1 && f[0].startsWith('§PR5 (remake)'), `mutant pr5-remake-keeps-watch (the isAlive cleanup without settled()): (remake) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR5 (remake)')), `mutant pr5-remake-keeps-watch (the isAlive cleanup without settled()): (remake) RED (${f.length})`);
       const tipWs = await loadWs(WJ.replace(nl, tipNl));
       f = await pr5Legs({ install: await loadLifecycle(L5.replace(ab, '').replace(al, tipAl)), WS: tipWs, quiet: true, legs: ['close', 'remake'] });
-      ok(f.length === 3 && f[1].startsWith('§PR5 (close) N1 …THE RECONNECT AFTER IT'), `mutant pr5-r4-tip (0691bb591: the cleanup without settled + the live-array notify — the acceptance's repro): (close) ×2 incl. the skipped listener + (remake) RED (${f.length})`);
+      ok(f.length === 3 && verdictOf(f[1].startsWith('§PR5 (close) N1 …THE RECONNECT AFTER IT')), `mutant pr5-r4-tip (0691bb591: the cleanup without settled + the live-array notify — the acceptance's repro): (close) ×2 incl. the skipped listener + (remake) RED (${f.length})`);
       f = await pr5Legs({ WS: tipWs, quiet: true, legs: ['law'] });
-      ok(f.length === 1 && f[0].startsWith('§PR5 (law)'), `mutant pr5-notify-live (ws.js walks the live listener array): (law) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR5 (law)')), `mutant pr5-notify-live (ws.js walks the live listener array): (law) RED (${f.length})`);
     }
   }
   {
@@ -2418,27 +2418,27 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     if (ok(i > 0, 'mutant pr5-memory-freezes: the patched line exists in ws-handler.js')) {
       const old = "            if (!v.ok && v.newcomers?.length) { const k = new Set(), next = [...refusedHere, ...v.newcomers].filter(([a, b]) => !k.has(a + '|' + b) && k.add(a + '|' + b)).slice(-64); if (next.length !== refusedHere.length) { layoutData.desktops[desktopId].refusedNewcomers = next; writeLayouts(layoutData); } }";
       const f = await pr5Legs({ WSH: M.load('src/ws-handler.js', WS.slice(0, i) + old + WS.slice(j), 'pr5-memory-freezes'), quiet: true, legs: ['n2'] });
-      ok(f.length === 1 && f[0].startsWith('§PR5 (n2)'), `mutant pr5-memory-freezes (0691bb591's hub: a length test after the cut — a full memory never takes a new pair): (n2) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR5 (n2)')), `mutant pr5-memory-freezes (0691bb591's hub: a length test after the cut — a full memory never takes a new pair): (n2) RED (${f.length})`);
       const r5 = "            if (!v.ok && v.newcomers?.length) { const pk = ([a, b]) => a + '|' + b, now = new Map(v.newcomers.map((p) => [pk(p), p])), next = [...refusedHere.filter((p) => !now.has(pk(p))), ...now.values()].slice(-64); if (JSON.stringify(next) !== JSON.stringify(refusedHere)) { layoutData.desktops[desktopId].refusedNewcomers = next; writeLayouts(layoutData); } }";
       let g = await pr6Legs({ WSH: M.load('src/ws-handler.js', WS.slice(0, i) + r5 + WS.slice(j), 'pr6-order-writes'), quiet: true });
-      ok(g.length === 1 && g[0].startsWith('§PR6 (n2b)'), `mutant pr6-order-writes (5f3959656's hub: written whenever the JSON changed — a remembered pair's move-to-end was a write): (n2b) RED (${g.length})`);
+      ok(g.length === 1 && verdictOf(g[0].startsWith('§PR6 (n2b)')), `mutant pr6-order-writes (5f3959656's hub: written whenever the JSON changed — a remembered pair's move-to-end was a write): (n2b) RED (${g.length})`);
       const a = "layoutData.desktops[desktopId].refusedNewcomers = next; if (next.length !== refusedHere.length || next.some((p) => !had.has(pk(p)))) writeLayouts(layoutData); }";
-      if (ok(WS.slice(i, j).includes(a), 'mutant pr6-order-on-disk-only: the patched clause exists in ws-handler.js')) {
+      if (ok(verdictOf(WS.slice(i, j).includes(a)), 'mutant pr6-order-on-disk-only: the patched clause exists in ws-handler.js')) {
         g = await pr6Legs({ WSH: M.load('src/ws-handler.js', WS.slice(0, i) + WS.slice(i, j).replace(a, "if (next.length !== refusedHere.length || next.some((p) => !had.has(pk(p)))) { layoutData.desktops[desktopId].refusedNewcomers = next; writeLayouts(layoutData); } }") + WS.slice(j), 'pr6-order-on-disk-only'), quiet: true });
-        ok(g.length === 1 && g[0].startsWith('§PR6 (n2b)'), `mutant pr6-order-on-disk-only (the move-to-end kept only with a write — the order is not the LRU's: the oldest stored leaves, not the least recently refused): (n2b) RED (${g.length})`);
+        ok(g.length === 1 && verdictOf(g[0].startsWith('§PR6 (n2b)')), `mutant pr6-order-on-disk-only (the move-to-end kept only with a write — the order is not the LRU's: the oldest stored leaves, not the least recently refused): (n2b) RED (${g.length})`);
       }
     }
   }
   {
     lap('  · mutant pr5-budget-per-row');
     const LY = read('src/lib/layout.js'), a = "    this._recipeTries?.delete(id); // a NEW recipe (a resume re-opens its row under the same id) has its own two tries — per recipe, never per row for the page's life (r5)\n";
-    if (ok(LY.includes(a), 'mutant pr5-budget-per-row: the patched line exists in layout.js')) {
+    if (ok(verdictOf(LY.includes(a)), 'mutant pr5-budget-per-row: the patched line exists in layout.js')) {
       const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY, a, '', "src/lib/layout.js"), 'pr5-budget-per-row', { esm: true })).href)).LayoutManager;
       const f = await pr5Legs({ LM: LMx, install: installPR, quiet: true, legs: ['owe-b'] });
-      ok(f.length === 1 && f[0].startsWith('§PR5 (owe-b)'), `mutant pr5-budget-per-row (0691bb591: the two tries per row id for the page's life — a re-made row's new recipe dropped at its first refusal): (owe-b) RED (${f.length})`);
+      ok(f.length === 1 && verdictOf(f[0].startsWith('§PR5 (owe-b)')), `mutant pr5-budget-per-row (0691bb591: the two tries per row id for the page's life — a re-made row's new recipe dropped at its first refusal): (owe-b) RED (${f.length})`);
     }
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 14, label: '§6 PR ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 14, label: '§6 PR ' })) ok(verdictOf(r.pass), r.name, r.detail);
 });
 
 CUR = 'the table';   // r2342 (2): every row of the table met ONE section call, none off it, no leg outside a section
@@ -2448,4 +2448,4 @@ ok(unmet.length === 0 && offTable.length === 0 && STRAY.length === 0, `r2342 NO 
 console.log(`the ${PART} half (r2342) — its twin: ${TWIN[PART]}`);
 lap('— the end');
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

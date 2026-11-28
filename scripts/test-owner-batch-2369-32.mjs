@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 300) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 300) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 // ── codex model continuity: the last turn's model, read off the loop from the rollout tail ──
@@ -42,69 +42,69 @@ const wc = read('src/ws-create.js');
 // still filled the instance default into every resume).
 ok((await require(path.join(REPO, 'src/harnesses/codex.js')).store.lastTurnModel(TID)) === 'gpt-6-astra',   // async since lane resume-all-paced (read off the loop)
   'the codex descriptor exposes the thread\'s own last model to the resume ladder');
-ok(/await pickKnob\(data\.model, hstore\.lastTurnModel, 'defaultModel'\)/.test(wc) && /require\('\.\/resume-continuity'\)/.test(wc),
+ok(gateOf(/await pickKnob\(data\.model, hstore\.lastTurnModel, 'defaultModel'\)/.test(wc)) && verdictOf(/require\('\.\/resume-continuity'\)/.test(wc)),
   'ws-create: a codex resume without an explicit model carries the last-run model (client choice still wins when sent)');
 const w = read('data/bin/codex-chat-wrapper.js');
-ok(/meta\.model = meta\.modelPinned \? \(meta\.model \|\| resp\?\.model \|\| thread\.model \|\| ''\) : \(resp\?\.model \|\| thread\.model \|\| meta\.model\);/.test(w) && /meta\.modelPinned = !!msg\.model;/.test(w) && /modelPinned: !!model,/.test(w), 'wrapper: a chosen model is pinned — thread/resume or thread/name/set responses never revert it to the thread START model');
+ok(gateOf(/meta\.model = meta\.modelPinned \? \(meta\.model \|\| resp\?\.model \|\| thread\.model \|\| ''\) : \(resp\?\.model \|\| thread\.model \|\| meta\.model\);/.test(w)) && gateOf(/meta\.modelPinned = !!msg\.model;/.test(w)) && verdictOf(/modelPinned: !!model,/.test(w)), 'wrapper: a chosen model is pinned — thread/resume or thread/name/set responses never revert it to the thread START model');
 
 // ── auto-resume continue prompt labelled (claude + codex normalizers) ──
 const { MessageManager } = require(path.join(REPO, 'src/message-manager.js'));
 const mm = new MessageManager('s1'); const ops = []; mm.onOp((o) => ops.push(o));
 mm.processLive({ type: 'user', _fromWebui: true, originKind: 'auto-resume', message: { role: 'user', content: [{ type: 'text', text: 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.' }] } });
 const um = mm.messages.find((m) => m.role === 'user');
-ok(um && um.originKind === 'auto-resume' && um.typed !== true, 'claude normalizer: the server-tagged continue record carries originKind auto-resume (not "typed")');
+ok(gateOf(um) && um.originKind === 'auto-resume' && um.typed !== true, 'claude normalizer: the server-tagged continue record carries originKind auto-resume (not "typed")');
 mm.processLive({ type: 'user', _fromWebui: true, message: { role: 'user', content: [{ type: 'text', text: 'real prompt' }] } });
 ok(mm.messages.filter((m) => m.role === 'user')[1].typed === true && !mm.messages.filter((m) => m.role === 'user')[1].originKind, 'negative control: a typed prompt stays typed');
 const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
 const cm = new CodexMessageManager('c1');
 cm.processLive({ timestamp: new Date().toISOString(), type: 'response_item', _fromWebui: true, payload: { type: 'message', role: 'user', webui_msg_id: '1-auto', webui_origin: 'auto-resume', content: [{ type: 'input_text', text: 'You can continue now.' }] } });
 ok(cm.messages.find((m) => m.role === 'user')?.originKind === 'auto-resume', 'codex normalizer: webui_origin auto-resume → originKind auto-resume');
-ok(/userMsg\.originKind = 'auto-resume'; if \(userMsg\.payload\) userMsg\.payload\.webui_origin = 'auto-resume';/.test(read('server.js')), 'server.js sendToSession tags the continue record for BOTH harness shapes');
+ok(verdictOf(/userMsg\.originKind = 'auto-resume'; if \(userMsg\.payload\) userMsg\.payload\.webui_origin = 'auto-resume';/.test(read('server.js'))), 'server.js sendToSession tags the continue record for BOTH harness shapes');
 const cr = read('src/lib/chat-renderers.js');
-ok(/if \(msg\.originKind === 'auto-resume'\) \{[\s\S]{0,900}chat-msg-auto-resume[\s\S]{0,700}VibeSpace auto-resume — sent automatically after the usage limit cleared/.test(cr), 'chat-renderers renders the auto-resume prompt as a labelled VibeSpace card');
+ok(verdictOf(/if \(msg\.originKind === 'auto-resume'\) \{[\s\S]{0,900}chat-msg-auto-resume[\s\S]{0,700}VibeSpace auto-resume — sent automatically after the usage limit cleared/.test(cr)), 'chat-renderers renders the auto-resume prompt as a labelled VibeSpace card');
 // ── 2.369.97: the CAUSE rides the card, no second notice; a synthetic rejection is not a usage reading ──
 {
   const mm2 = new MessageManager('s2'); const ops2 = []; mm2.onOp((o) => ops2.push(o));
   mm2.processLive({ type: 'user', _fromWebui: true, originKind: 'auto-resume', originNote: '账号 Member W 已恢复可用，已自动继续这个任务。', message: { role: 'user', content: [{ type: 'text', text: 'You can continue now.' }] } });
   const um2 = mm2.messages.find((m) => m.role === 'user');
-  ok(um2 && um2.originNote === '账号 Member W 已恢复可用，已自动继续这个任务。', 'claude normalizer: the continue record carries its CAUSE (originNote) for the card head');
+  ok(gateOf(um2) && um2.originNote === '账号 Member W 已恢复可用，已自动继续这个任务。', 'claude normalizer: the continue record carries its CAUSE (originNote) for the card head');
   const cm2 = new CodexMessageManager('c2');
   cm2.processLive({ timestamp: new Date().toISOString(), type: 'response_item', _fromWebui: true, payload: { type: 'message', role: 'user', webui_msg_id: '2-auto', webui_origin: 'auto-resume', webui_origin_note: 'usage limit reset', content: [{ type: 'input_text', text: 'You can continue now.' }] } });
   ok(cm2.messages.find((m) => m.role === 'user')?.originNote === 'usage limit reset', 'codex normalizer: webui_origin_note → originNote');
-  ok(/msg\.originNote\s*\?[\s\S]{0,200}VibeSpace auto-resume'\)\)\} — \$\{escHtml\(msg\.originNote\)\}/.test(cr), 'chat-renderers puts the cause in the card head, escaped');
-  ok(/carried\.note/.test(read('src/server/auto-resume.js')) && /if \(carried\) \{[^}]*return; \}/.test(read('src/server/auto-resume.js')), 'auto-resume hands the cause to sendToSession and skips the second notice when it was carried');
-  ok(/originNote = note; if \(userMsg\.payload\) userMsg\.payload\.webui_origin_note = note;/.test(read('server.js')), 'server.js sendToSession stamps the note on BOTH harness shapes');
-  ok(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes('"VibeSpace auto-resume":')), 'zh/ja carry the bare card label');
+  ok(verdictOf(/msg\.originNote\s*\?[\s\S]{0,200}VibeSpace auto-resume'\)\)\} — \$\{escHtml\(msg\.originNote\)\}/.test(cr)), 'chat-renderers puts the cause in the card head, escaped');
+  ok(gateOf(/carried\.note/.test(read('src/server/auto-resume.js'))) && verdictOf(/if \(carried\) \{[^}]*return; \}/.test(read('src/server/auto-resume.js'))), 'auto-resume hands the cause to sendToSession and skips the second notice when it was carried');
+  ok(verdictOf(/originNote = note; if \(userMsg\.payload\) userMsg\.payload\.webui_origin_note = note;/.test(read('server.js'))), 'server.js sendToSession stamps the note on BOTH harness shapes');
+  ok(verdictOf(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes('"VibeSpace auto-resume":'))), 'zh/ja carry the bare card label');
   // the synthetic rejection: no usage op; a real record: one
   const mm3 = new MessageManager('s3'); const ops3 = []; mm3.onOp((o) => ops3.push(o));
   const zero = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
   mm3.processLive({ type: 'assistant', message: { role: 'assistant', model: '<synthetic>', usage: zero, content: [{ type: 'text', text: "You're out of usage credits." }] } });
   ok(!ops3.some((o) => o.op === 'meta' && o.subtype === 'usage'), 'a <synthetic> rejection record (all-zero usage) emits NO usage op — it is not a measurement');
   mm3.processLive({ type: 'assistant', message: { role: 'assistant', model: 'claude-opus-4-8', usage: { input_tokens: 12, output_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 90000 }, content: [{ type: 'text', text: 'ok' }] } });
-  ok(ops3.some((o) => o.op === 'meta' && o.subtype === 'usage' && o.data.cache_read_input_tokens === 90000), 'POSITIVE CONTROL: a real record still emits its usage');
+  ok(verdictOf(ops3.some((o) => o.op === 'meta' && o.subtype === 'usage' && o.data.cache_read_input_tokens === 90000)), 'POSITIVE CONTROL: a real record still emits its usage');
   const csb = read('src/lib/chat-status-bar.js');
-  ok(/updateUsage\(usageData\) \{[\s\S]{0,700}if \(!total && !u\.totals\) return;/.test(csb), 'status bar BELT: an all-zero reading keeps the last real one (the context% chip does not blank while a wall is waited out)');
-  ok(/m\.message\.model !== '<synthetic>'[\s\S]{0,300}lastUsage = m\.message\.usage/.test(read('src/session-store.js')), 'chatStatus (the attach payload) skips the synthetic record too');
+  ok(verdictOf(/updateUsage\(usageData\) \{[\s\S]{0,700}if \(!total && !u\.totals\) return;/.test(csb)), 'status bar BELT: an all-zero reading keeps the last real one (the context% chip does not blank while a wall is waited out)');
+  ok(verdictOf(/m\.message\.model !== '<synthetic>'[\s\S]{0,300}lastUsage = m\.message\.usage/.test(read('src/session-store.js'))), 'chatStatus (the attach payload) skips the synthetic record too');
 }
-ok(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes('"VibeSpace auto-resume — sent automatically after the usage limit cleared":') && read(f).includes('"not started":')), 'zh/ja carry the new strings');
+ok(verdictOf(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes('"VibeSpace auto-resume — sent automatically after the usage limit cleared":') && read(f).includes('"not started":'))), 'zh/ja carry the new strings');
 
 // ── sidebar: primary-only default ──
 const sb = read('src/lib/sidebar.js');
 // 2026-09-24 (the sub-agent flood): the default stays PRIMARY; an explicit
 // ALL is now a view of THIS page (sessionStorage) — persisting it let one
 // click flood every later load. The full pins live in test-codex-subagents ④.
-ok(/this\._agentKindFilter = agentKindFilterAtLoad\(storedKind\);/.test(sb) && /sessionStorage\.setItem\(AGENT_KIND_FILTER_KEY, 'all'\)/.test(sb) && /if \(sessionValue == null \|\| sessionValue === ''\) return 'primary';/.test(read('src/lib/agent-meta.js')), 'sidebar: no stored choice ⇒ PRIMARY only; ALL is chosen per page (sessionStorage)');
+ok(gateOf(/this\._agentKindFilter = agentKindFilterAtLoad\(storedKind\);/.test(sb)) && gateOf(/sessionStorage\.setItem\(AGENT_KIND_FILTER_KEY, 'all'\)/.test(sb)) && verdictOf(/if \(sessionValue == null \|\| sessionValue === ''\) return 'primary';/.test(read('src/lib/agent-meta.js'))), 'sidebar: no stored choice ⇒ PRIMARY only; ALL is chosen per page (sessionStorage)');
 
 // ── usage popup: codex ⟳ dispatch + not-started reset ──
 const um2 = read('src/lib/usage-meter.js');
 const iCodex = um2.indexOf("e.target.closest('.usage-refresh-codex-btn')"), iGeneric = um2.indexOf("e.target.closest('.usage-refresh-btn')");
 ok(iCodex > 0 && iGeneric > 0 && iCodex < iGeneric, 'usage-meter: the codex ⟳ (both classes) is dispatched BEFORE the generic claude ⟳');
-ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtReset\([^)]*utilization[^)]*\)/g) || []).length === 5 && /t\('not started'\)/.test(um2), "usage-meter: every reset cell passes utilization; 0% with no reset time renders 'not started' (tooltip explains)");
+ok(gateOf(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2)) && (um2.match(/fmtReset\([^)]*utilization[^)]*\)/g) || []).length === 5 && verdictOf(/t\('not started'\)/.test(um2)), "usage-meter: every reset cell passes utilization; 0% with no reset time renders 'not started' (tooltip explains)");
 
 // ── 2.369.33: the 'search' fold kind + weekly reset projection ──
 {
   const ss = read('src/lib/settings-schema.js');
-  ok(/default: \['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search', 'image', 'note'\]/.test(ss) && /value: 'search', label: t\('Web searches \/ fetches/.test(ss) && /value: 'image', label: t\('Image views/.test(ss), "settings: 'search' and 'image' are fold kinds, ON by default");
+  ok(gateOf(/default: \['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search', 'image', 'note'\]/.test(ss)) && gateOf(/value: 'search', label: t\('Web searches \/ fetches/.test(ss)) && verdictOf(/value: 'image', label: t\('Image views/.test(ss)), "settings: 'search' and 'image' are fold kinds, ON by default");
   const cv = read('src/lib/chat-view.js');
   // 2.369.37: the classifier + summary composer moved to the PURE module
   // src/lib/chat-run-summary.js (owner caught "1 次 MCP" over a ToolSearch —
@@ -116,23 +116,23 @@ ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtR
     && tk('Read', { file_path: '/x/y.png' }, { images: [{ mediaType: 'image/png', bytes: 9 }] }) === 'image'
     && tk('Read', { file_path: '/x/y.png' }) === 'read' && tk('Read', { file_path: '/x/logo.svg' }) === 'read' // EVIDENCE, not the extension (image-card review round 2, 2026-09-06)
     && RS.runSummaryParts(RS.countKinds(['search', 'search', 'image', 'read']), new Set(), tt).join(' · ') === '1 file reads · 2 web searches · 1 image reads'
-    && /messageKind\(el\._rawMsg, \{ toolCard: el\.classList\.contains\('chat-msg-tool-result'\), isMemoryPath \}\)/.test(cv) && /'mcp', 'agent', 'search', 'image'\]\)/.test(cv), 'chat-view: WebSearch/WebFetch→search, Grep/Glob/LS→read, ToolSearch→lookup (folds under mcp, labelled apart); summary counts searches; default set includes search');
+    && gateOf(/messageKind\(el\._rawMsg, \{ toolCard: el\.classList\.contains\('chat-msg-tool-result'\), isMemoryPath \}\)/.test(cv)) && verdictOf(/'mcp', 'agent', 'search', 'image'\]\)/.test(cv)), 'chat-view: WebSearch/WebFetch→search, Grep/Glob/LS→read, ToolSearch→lookup (folds under mcp, labelled apart); summary counts searches; default set includes search');
   // B-7473 (integration 2026-09-06, kept through the round-5 rebase): the codex
   // sub-agent 'report' kind and the inbound-message count belong to the PURE
   // module's ONE kind table — an unlisted kind counted NaN and vanished
   // (2.369.34), and a second map in chat-view would be exactly that bug again.
-  ok(RS.RUN_KINDS.includes('report') && RS.SUMMARY_ORDER.some(([k, key]) => k === 'report' && key === '{n} sub-agent reports')
-    && RS.SUMMARY_EXTRAS.includes('subAgentIn') && RS.SUMMARY_ORDER.some(([k, key]) => k === 'subAgentIn' && key === '{n} sub-agent messages')
+  ok(gateOf(RS.RUN_KINDS.includes('report')) && gateOf(RS.SUMMARY_ORDER.some(([k, key]) => k === 'report' && key === '{n} sub-agent reports'))
+    && gateOf(RS.SUMMARY_EXTRAS.includes('subAgentIn')) && gateOf(RS.SUMMARY_ORDER.some(([k, key]) => k === 'subAgentIn' && key === '{n} sub-agent messages'))
     && RS.countKinds(['report', 'report']).report === 2
-    && !/byKind = \{ thinking:/.test(cv) && /byKind\.subAgentIn = collabRows\.filter/.test(cv),
+    && !/byKind = \{ thinking:/.test(cv) && verdictOf(/byKind\.subAgentIn = collabRows\.filter/.test(cv)),
   "chat-run-summary owns the B-7473 lines: 'report' is a RUN_KIND with its own summary entry, subAgentIn is a declared SUMMARY_EXTRA — chat-view keeps NO second kind map");
   const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
   const cm2 = new CodexMessageManager('c2');
   cm2.processLive({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'function_call', call_id: 'ws1', name: 'web_search', arguments: '{"query":"rv solar"}' } });
   const card = cm2.messages.find((m) => m.role === 'tool');
-  ok(card && card.collapseKind === 'search', "codex normalizer stamps collapseKind 'search' on web_search cards", card?.collapseKind);
+  ok(gateOf(card) && card.collapseKind === 'search', "codex normalizer stamps collapseKind 'search' on web_search cards", card?.collapseKind);
   cm2.processLive({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'function_call', call_id: 'vi1', name: 'view_image', arguments: '{"path":"/tmp/x.png"}' } });
-  ok(cm2.messages.filter((m) => m.role === 'tool').some((m) => m.collapseKind === 'image'), "codex view_image cards fold as 'image'");
+  ok(verdictOf(cm2.messages.filter((m) => m.role === 'tool').some((m) => m.collapseKind === 'image')), "codex view_image cards fold as 'image'");
   const { collapseKindOf } = require(path.join(REPO, 'src/acp-message-manager.js'));
   ok(collapseKindOf('search') === 'search' && collapseKindOf('read') === 'read', "ACP tool kind 'search' folds as search");
   const { projectReset, WEEK_SEC } = require(path.join(REPO, 'src/harnesses/claude-quota.js'));
@@ -141,8 +141,8 @@ ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtR
   ok(projectReset(anchor, WEEK_SEC, anchor + 1) === anchor + WEEK_SEC && projectReset(anchor, WEEK_SEC, anchor + 3 * WEEK_SEC + 5) === anchor + 4 * WEEK_SEC, 'projectReset: the first 7-day multiple strictly in the future');
   ok(projectReset(0, WEEK_SEC, 1) === null && projectReset(anchor, 0, anchor + 1) === null, 'projectReset: no anchor / no period → null');
   const ur = read('src/usage-routes.js');
-  ok(/merged\.sevenDay = \{ \.\.\.merged\.sevenDay, resetsAt: p, resetsAtEstimated: true \}/.test(ur) && /before \? projectReset\(before\.resetsAt, WEEK_SEC, nowSec\) : null/.test(ur) && !/fiveHour[^\n]*projectReset/.test(ur), 'usage-routes projects sevenDay + scopedWeekly from the previous cache (never the 5-hour bucket)');
-  ok(/const fmtReset = \(ts, util, est\) => \{/.test(um2) && /return estMark \+ \(left > 45/.test(um2) && /rl\.sevenDay\?\.resetsAtEstimated\)/.test(um2) && /sc\.resetsAtEstimated\)/.test(um2), 'usage popup marks projected resets with ≈ (weekly + scoped weekly cells)');
+  ok(gateOf(/merged\.sevenDay = \{ \.\.\.merged\.sevenDay, resetsAt: p, resetsAtEstimated: true \}/.test(ur)) && gateOf(/before \? projectReset\(before\.resetsAt, WEEK_SEC, nowSec\) : null/.test(ur)) && !/fiveHour[^\n]*projectReset/.test(ur), 'usage-routes projects sevenDay + scopedWeekly from the previous cache (never the 5-hour bucket)');
+  ok(gateOf(/const fmtReset = \(ts, util, est\) => \{/.test(um2)) && gateOf(/return estMark \+ \(left > 45/.test(um2)) && gateOf(/rl\.sevenDay\?\.resetsAtEstimated\)/.test(um2)) && verdictOf(/sc\.resetsAtEstimated\)/.test(um2)), 'usage popup marks projected resets with ≈ (weekly + scoped weekly cells)');
 }
 
 // ── 2.369.35: binary image results never enter a card (the frozen-page incident) ──
@@ -152,7 +152,7 @@ ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtR
   m2.processLive({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: '/tmp/shot.png' } }] } });
   m2.processLive({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: big } }] }] } });
   const card = m2.messages.find((m) => m.role === 'tool'); const b = card?.content?.[0];
-  ok(b && b.type === 'tool_result' && b.output.length < 200 && /\[image image\/png · 586 KB\]/.test(b.output) && b.images?.[0]?.mediaType === 'image/png' && b.images[0].bytes === 600000 && JSON.stringify(card).length < 2000, `a Read-of-PNG tool result carries {mediaType, bytes} metadata, never the base64 (card ${JSON.stringify(card).length} bytes)`, b?.output?.slice(0, 80));
+  ok(gateOf(b) && b.type === 'tool_result' && b.output.length < 200 && gateOf(/\[image image\/png · 586 KB\]/.test(b.output)) && b.images?.[0]?.mediaType === 'image/png' && b.images[0].bytes === 600000 && JSON.stringify(card).length < 2000, `a Read-of-PNG tool result carries {mediaType, bytes} metadata, never the base64 (card ${JSON.stringify(card).length} bytes)`, b?.output?.slice(0, 80));
   ok(splitToolResultContent([{ type: 'text', text: 'hi' }]).text === '[{"type":"text","text":"hi"}]' && splitToolResultContent('plain').text === 'plain' && splitToolResultContent([{ type: 'text', text: 'a' }, { type: 'image', source: { media_type: 'image/jpeg', data: 'xx' } }]).images.length === 1, 'text/array results keep their exact previous shape; mixed results lift only the images');
   const cr2 = read('src/lib/chat-renderers.js');
   // 2.369.48 seam (the pin follows the CODE, not the other way round): the
@@ -163,9 +163,9 @@ ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtR
   // test-image-cards ① (renders a card from image blocks, greps for base64) —
   // a source-wide `!/data:/` assert is wrong here, renderUserMsg's inline
   // ACP/claude attachments legitimately build one.
-  ok(/const images = Array\.isArray\(block\.images\) \? block\.images : \[\];/.test(cr2) && /export function imageRawUrl\(fp, host\) \{\s*return `\/api\/file\/raw\?path=\$\{encodeURIComponent\(fp\)\}/.test(cr2) && /imageMediaHtml\(\{ path: isImagePath\(fp\) \? fp : '', host: mediaHost, mediaType: im\.mediaType, bytes: im\.bytes(?:, place: im\.place \|\| null)? \}\)/.test(cr2) && /chat-tool-image-chip/.test(cr2) && /<\/span>\$\{mediaHtml\}<details class="chat-diff"><summary class="chat-diff-summary">\$\{t\('Input'\)\}/.test(cr2) && !/imagesHtml/.test(cr2) && /\.chat-tool-images/.test(read('public/chat.css')), 'the tool card renders image results from the FILE (imageMediaHtml over imageRawUrl = the file viewer URL) or a size chip — never a base64 blob built by the card');
+  ok(gateOf(/const images = Array\.isArray\(block\.images\) \? block\.images : \[\];/.test(cr2)) && gateOf(/export function imageRawUrl\(fp, host\) \{\s*return `\/api\/file\/raw\?path=\$\{encodeURIComponent\(fp\)\}/.test(cr2)) && gateOf(/imageMediaHtml\(\{ path: isImagePath\(fp\) \? fp : '', host: mediaHost, mediaType: im\.mediaType, bytes: im\.bytes(?:, place: im\.place \|\| null)? \}\)/.test(cr2)) && gateOf(/chat-tool-image-chip/.test(cr2)) && gateOf(/<\/span>\$\{mediaHtml\}<details class="chat-diff"><summary class="chat-diff-summary">\$\{t\('Input'\)\}/.test(cr2)) && !/imagesHtml/.test(cr2) && verdictOf(/\.chat-tool-images/.test(read('public/chat.css'))), 'the tool card renders image results from the FILE (imageMediaHtml over imageRawUrl = the file viewer URL) or a size chip — never a base64 blob built by the card');
 }
 
 fs.rmSync(home, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -36,7 +36,7 @@ const R = (p) => require(path.join(REPO, p));
 R('src/server/owner-facts.js').configure({ setting: (k) => (k === 'instance.timezone' ? 'UTC' : undefined) });
 
 let pass = 0, fail = 0;
-const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 const LE = R('src/login-expiry.js');
 const { loginState, loginUsable, loginSwitchTarget, loginRank, loginBlockReason, loginBucketLabel, warnStageFor, reviewWarnings, EXPIRING_MS, NEAR_MS } = LE;
@@ -71,10 +71,10 @@ ck('unknown: tokens present but NO deadline is unknown, never ok', loginState(cr
 ck('unknown: a non-finite deadline is unknown, never ok', loginState(creds({ ...LIVE, refreshTokenExpiresAt: 'soon' }), NOW).state === 'unknown' && loginState(creds({ ...LIVE, refreshTokenExpiresAt: NaN }), NOW).state === 'unknown');
 ck('unknown: a blank oauth record with NO residue is unknown (nothing was wiped — nothing was ever there)', loginState(creds({ accessToken: '', refreshToken: '' }), NOW).state === 'unknown');
 ck('the INNER object is accepted too (callers holding claudeAiOauth directly)', loginState({ ...LIVE, refreshTokenExpiresAt: NOW + 5 * 24 * H }, NOW).state === 'ok');
-ck('every state carries the same four keys (no shape drift between branches)', [
+ck('every state carries the same four keys (no shape drift between branches)', verdictOf([
   loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW + 9 * 24 * H }), NOW), loginState({}, NOW),
   loginState(creds({ accessToken: '', refreshTokenExpiresAt: NOW - H, scopes: ['x'] }), NOW), loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW - H }), NOW),
-].every((s) => ['state', 'refreshExpiresAt', 'accessExpiresAt', 'msLeft'].every((k) => k in s)));
+].every((s) => ['state', 'refreshExpiresAt', 'accessExpiresAt', 'msLeft'].every((k) => k in s))));
 
 // ── THE USAGE BEARER LAW BY SHAPE (lane pool-silent-members acceptance r4, the blocker — repro/accept-r3/
 // skeptic-r3a-bearer-law-login.mjs): r3 told a long-lived token by its prefix (/^sk-ant-oat\d{2}-/), and the access token
@@ -100,14 +100,14 @@ console.log('— §1a the usage bearer law, by shape');
   const loginHolds = (g) => g.loginOk === true && g.loginTok === true && g.loginRef === null;
   const setupHolds = (g) => g.setupOk === false && g.setupTok === null && g.setupRef === 'long-lived';
   const g = shapes(LE, R('src/accounts.js').AccountManager);
-  ck(LOGIN_LEG, loginHolds(g));
-  ck(SETUP_LEG, setupHolds(g));
+  ck(LOGIN_LEG, verdictOf(loginHolds(g)));
+  ck(SETUP_LEG, verdictOf(setupHolds(g)));
   // RED CONTROL: r3's prefix rule planted back into a copy of login-expiry (the accounts store re-required on it) — the
   // LOGIN leg goes red by name, the setup leg stays green (the prefix rule refused both)
   const lePath = require.resolve(path.join(REPO, 'src/login-expiry.js')), accPath = require.resolve(path.join(REPO, 'src/accounts.js'));
   const leSrc = fs.readFileSync(lePath, 'utf8');
   const anchor = "function usageBearerOk(o) { return !!o && typeof o === 'object' && typeof o.accessToken === 'string' && o.accessToken !== '' && !!o.refreshToken; }";
-  ck('§1a RED control: the shape rule anchor is present', leSrc.includes(anchor));
+  ck('§1a RED control: the shape rule anchor is present', verdictOf(leSrc.includes(anchor)));
   if (leSrc.includes(anchor)) {
     const Module = require('node:module');
     const m = new Module(lePath, null); m.filename = lePath; m.paths = Module._nodeModulePaths(path.dirname(lePath));
@@ -124,11 +124,11 @@ console.log('— §1a the usage bearer law, by shape');
 
 console.log('— §1b predicates');
 const stFor = (msLeft) => loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW + msLeft }), NOW);
-ck('usable: ok / expiring / near / UNKNOWN all serve; expired + logged-out do not', [
+ck('usable: ok / expiring / near / UNKNOWN all serve; expired + logged-out do not', verdictOf([
   loginUsable(stFor(9 * 24 * H)), loginUsable(stFor(3 * H)), loginUsable(stFor(5 * MIN)), loginUsable(loginState({}, NOW)),
   !loginUsable(stFor(-H)), !loginUsable(loginState(creds({ accessToken: '', refreshTokenExpiresAt: NOW - H, scopes: ['x'] }), NOW)),
-].every(Boolean));
-ck('switch target: ok yes, expiring-but-far yes, inside the 30-min NEAR window NO, dead NO', loginSwitchTarget(stFor(9 * 24 * H)) && loginSwitchTarget(stFor(3 * H)) && !loginSwitchTarget(stFor(NEAR_MS - MIN)) && !loginSwitchTarget(stFor(-H)));
+].every(Boolean)));
+ck('switch target: ok yes, expiring-but-far yes, inside the 30-min NEAR window NO, dead NO', gateOf(loginSwitchTarget(stFor(9 * 24 * H))) && gateOf(loginSwitchTarget(stFor(3 * H))) && !loginSwitchTarget(stFor(NEAR_MS - MIN)) && !loginSwitchTarget(stFor(-H)));
 ck('switch target: UNKNOWN is a target (no claim never blocks)', loginSwitchTarget(loginState({}, NOW)) === true);
 ck('rank: ok/unknown 0 < expiring 1 < near 2 < dead 3', loginRank(stFor(9 * 24 * H)) === 0 && loginRank(loginState({}, NOW)) === 0 && loginRank(stFor(3 * H)) === 1 && loginRank(stFor(10 * MIN)) === 2 && loginRank(stFor(-H)) === 3);
 ck('block reason NAMES the bucket (SPEAK rule) and is null when there is nothing to say', loginBlockReason(stFor(-H)) === 'login-expired'
@@ -155,7 +155,7 @@ console.log('— §2 harness descriptor');
   fs.rmSync(dir, { recursive: true, force: true });
   const others = chatHarnessIds().filter((id) => id !== 'claude');
   ck(`other harnesses make NO claim (${others.join(',') || 'none'}) — an absent reader is honest, a fabricated 'ok' is not`,
-    others.every((id) => !HARNESSES[id].creds || typeof HARNESSES[id].creds.loginState !== 'function'));
+    verdictOf(others.every((id) => !HARNESSES[id].creds || typeof HARNESSES[id].creds.loginState !== 'function')));
 }
 
 // ── §3 pool decisions ────────────────────────────────────────────────────
@@ -230,14 +230,14 @@ console.log('— §3 pool decisions');
   ck("a CURRENT member whose login died must be left even while its quota cache reads healthy", d4.to === 'b' || d4.to === 'c');
   ck('...and the move says WHY (reason login-expired, not "exhausted")', d4.reason === 'login-expired');
   const d5 = dec({ a: null, b: healthy, c: healthy }, { a: L.out, b: L.ok, c: L.ok });
-  ck('...even with NO quota data at all for it: a dead login is a fact, not ignorance (the no-data hold does not apply)', d5.to && d5.reason === 'login-expired');
+  ck('...even with NO quota data at all for it: a dead login is a fact, not ignorance (the no-data hold does not apply)', gateOf(d5.to) && d5.reason === 'login-expired');
   ck('NEGATIVE CONTROL: no-data + a HEALTHY login still holds (unchanged)', dec({ a: null, b: healthy, c: healthy }, { a: L.ok, b: L.ok, c: L.ok }).reason === 'no-data');
   const d6 = dec({ a: healthy, b: healthy, c: healthy }, { a: L.expired, b: L.expired, c: L.out });
   // ROUND 3: the current member's dead login is its OWN named output. It used
   // to ride in `deadBuckets`, where the notice rendered it as a spent quota
   // bucket — see §3d, which asserts the sentence itself.
   ck('current dead + every other dead ⇒ named, never a silent null', d6.to === null && d6.reason === 'all-logins-expired' && d6.fromLogin === 'login session expired');
-  ck("...and the QUOTA arrays stay a quota sentence (a login is not a spent bucket)", (d6.deadBuckets || []).every((b) => !/login/i.test(b)));
+  ck("...and the QUOTA arrays stay a quota sentence (a login is not a spent bucket)", verdictOf((d6.deadBuckets || []).every((b) => !/login/i.test(b))));
 
   // ── ROUND 2 (adversarial verifier): the login gate may not claim a wall it
   // did not build, and it may not pin a conversation to a member that is
@@ -260,7 +260,7 @@ console.log('— §3 pool decisions');
   {
     const mixed = dec4({ a: spent5, q1: spent5, q2: spent5, x: healthy }, { a: L.ok, q1: L.ok, q2: L.ok, x: L.expired });
     ck("QUOTA emptied the list + ONE dead login ⇒ 'no-members', not 'all-logins-expired' (the wall is quota)", mixed.to === null && mixed.reason === 'no-members');
-    ck('...and the quota buckets are still named (round 1 suppressed them under the login branch)', (mixed.deadBuckets || []).includes('5h 0%') && (mixed.liveBuckets || []).includes('7d 90%'));
+    ck('...and the quota buckets are still named (round 1 suppressed them under the login branch)', gateOf((mixed.deadBuckets || []).includes('5h 0%')) && verdictOf((mixed.liveBuckets || []).includes('7d 90%')));
     ck('...while the login-blocked member is STILL carried, so the notice can say both halves', (mixed.loginBlocked || []).map((m) => `${m.name}:${m.state}`).join() === 'X:expired');
     const pure = dec4({ a: spent5, q1: healthy, q2: healthy, x: healthy }, { a: L.ok, q1: L.expired, q2: L.out, x: L.out });
     ck("NEGATIVE CONTROL: when the login gate is the ONLY thing that emptied the list it still says 'all-logins-expired'", pure.to === null && pure.reason === 'all-logins-expired' && (pure.loginBlocked || []).length === 3);
@@ -284,7 +284,7 @@ console.log('— §3 pool decisions');
     ck('SHIPPED BEHAVIOUR (no readLogin): a hard-dead current member escapes onto the only healthy candidate', shipped.to === 'x' && shipped.reason === 'exhausted');
     const scraps = dec4(caches, { a: L.ok, q1: L.ok, q2: L.ok, x: L.near });
     ck('hard-dead current + only a NEAR candidate ⇒ STILL MOVES (20 min of login beats zero)', scraps.to === 'x' && scraps.toRemaining === shipped.toRemaining);
-    ck('...and says what it landed on, so the notice can demand the re-login', scraps.toLoginNear && scraps.toLoginNear.id === 'x' && scraps.toLoginNear.msLeft === 10 * MIN);
+    ck('...and says what it landed on, so the notice can demand the re-login', gateOf(scraps.toLoginNear) && scraps.toLoginNear.id === 'x' && scraps.toLoginNear.msLeft === 10 * MIN);
     ck('...keeping the reason that says why we LEFT (it gates the dwell-belt exemption)', scraps.reason === 'exhausted');
     const deadCur = dec4({ a: null, q1: spent5, q2: spent5, x: healthy }, { a: L.expired, q1: L.ok, q2: L.ok, x: L.near });
     ck("...and a login-expired escape onto a scrap keeps reason 'login-expired' (a new reason string would have lost its 180s exemption)", deadCur.to === 'x' && deadCur.reason === 'login-expired' && !!deadCur.toLoginNear);
@@ -296,7 +296,7 @@ console.log('— §3 pool decisions');
     ck('NEGATIVE CONTROL: a proactive/EDF move never takes a scrap either',
       dec4({ a: healthy, q1: spent5, q2: spent5, x: { ...healthy, sevenDay: { utilization: 0.1, resetsAt: S + 1 * D } } }, { a: L.ok, q1: L.ok, q2: L.ok, x: L.near }, { proactive: true, hot: true }).to === null);
     ck('NEGATIVE CONTROL: sealed orders (the DEVICE executes them hours later) still carry no NEAR member',
-      rankPoolMembers({ members: m4, readCache: () => healthy, nowSec: S, readLogin: (id) => (id === 'x' ? L.near : L.ok) }).every((r) => r.id !== 'x'));
+      verdictOf(rankPoolMembers({ members: m4, readCache: () => healthy, nowSec: S, readLogin: (id) => (id === 'x' ? L.near : L.ok) }).every((r) => r.id !== 'x')));
     ck('NEGATIVE CONTROL: a NEAR member that is ALSO quota-dead is not a scrap (quota is a real wall of its own)',
       dec4({ a: spent5, q1: spent5, q2: spent5, x: spent5 }, { a: L.ok, q1: L.ok, q2: L.ok, x: L.near }).to === null);
     ck('NEGATIVE CONTROL: with no readLogin the scraps machinery cannot exist (no toLoginNear on any old decision)', shipped.toLoginNear === undefined);
@@ -325,26 +325,26 @@ console.log('— §3 pool decisions');
     // member quota-dead. The current member's own quota is PERFECT.
     const a1 = dec2({ a: healthy, q1: spent5 }, { a: L.expired, q1: L.ok });
     const s1 = say(a1);
-    ck('(a) current login expired + a quota-dead sibling ⇒ still a blocked notice', a1.to === null && s1.startsWith('Pool "P": '));
-    ck('...it NAMES the account the user must act on', s1.includes('Cur') && /Re-login Cur in Manage Agents\./.test(s1));
-    ck('...it says the LOGIN died, not that a quota bucket is spent', s1.includes("Cur's login session expired") && !/spent: login/.test(s1));
+    ck('(a) current login expired + a quota-dead sibling ⇒ still a blocked notice', a1.to === null && verdictOf(s1.startsWith('Pool "P": ')));
+    ck('...it NAMES the account the user must act on', gateOf(s1.includes('Cur')) && verdictOf(/Re-login Cur in Manage Agents\./.test(s1)));
+    ck('...it says the LOGIN died, not that a quota bucket is spent', gateOf(s1.includes("Cur's login session expired")) && !/spent: login/.test(s1));
     ck('...and it never prescribes the quota remedy for a wall that no window can clear', !/until a window resets/.test(s1) && !/out of quota/.test(s1));
     ck('...nor claims a quota fact about a member sitting at 90% (the buckets are simply not the wall)', !/still available/.test(s1));
     // (b) the wiped shape with no usage cache at all
     const s2 = say(dec2({ a: null, q1: spent5 }, { a: L.out, q1: L.ok }));
-    ck('(b) a SIGNED-OUT current member with no usage data says signed out + re-login', s2.includes("Cur's login is signed out") && /Re-login Cur in Manage Agents\./.test(s2) && !/window resets/.test(s2));
+    ck('(b) a SIGNED-OUT current member with no usage data says signed out + re-login', gateOf(s2.includes("Cur's login is signed out")) && gateOf(/Re-login Cur in Manage Agents\./.test(s2)) && !/window resets/.test(s2));
     // (c) the pool has no other member at all
     const s3 = say(dec2({ a: healthy }, { a: L.expired }, [{ id: 'a', name: 'Cur' }]));
-    ck('(c) a one-member pool whose login died gets the same honest sentence', s3.includes("Cur's login session expired") && /Re-login Cur in Manage Agents\./.test(s3) && !/spent: login/.test(s3));
+    ck('(c) a one-member pool whose login died gets the same honest sentence', gateOf(s3.includes("Cur's login session expired")) && gateOf(/Re-login Cur in Manage Agents\./.test(s3)) && !/spent: login/.test(s3));
     // (d) BOTH walls on the current member: the quota fact is a side note, and
     // it is only said when it is true.
     const s4 = say(dec2({ a: spent5, q1: spent5 }, { a: L.expired, q1: L.ok }));
-    ck('(d) when the current member is ALSO out of quota, the login leads and the quota rides along', /login session expired/.test(s4) && /its quota is also spent: 5h 0%/.test(s4));
+    ck('(d) when the current member is ALSO out of quota, the login leads and the quota rides along', gateOf(/login session expired/.test(s4)) && verdictOf(/its quota is also spent: 5h 0%/.test(s4)));
     // (e) MIXED: the current login died AND another member needs a re-login —
     // `why` is about the current member here, so the others must still be
     // named or the only notice that mentions them drops them.
     const s5 = say(dec2({ a: healthy, q1: healthy }, { a: L.expired, q1: L.out }));
-    ck('(e) a sibling that ALSO needs a re-login is still named when the current login is the headline', /Also needing a re-login: Quota1 \(signed out\)\./.test(s5) && /Cur's login session expired/.test(s5));
+    ck('(e) a sibling that ALSO needs a re-login is still named when the current login is the headline', gateOf(/Also needing a re-login: Quota1 \(signed out\)\./.test(s5)) && verdictOf(/Cur's login session expired/.test(s5)));
 
     // NEGATIVE CONTROLS — every sentence that was already right stays right.
     const quotaOnly = say(dec2({ a: spent5, q1: spent5 }, null));
@@ -358,7 +358,7 @@ console.log('— §3 pool decisions');
     const m3 = [...m2, { id: 'x', name: 'X' }];
     const mixedQuota = say(dec2({ a: spent5, q1: spent5, x: healthy }, { a: L.ok, q1: L.ok, x: L.expired }, m3));
     ck("NEGATIVE CONTROL: the round-2 MIXED wall (quota emptied the list, one login also dead) still says both halves",
-      /spent: 5h 0%/.test(mixedQuota) && /Also needing a re-login: X \(login expired\)\./.test(mixedQuota) && /until a window resets/.test(mixedQuota));
+      gateOf(/spent: 5h 0%/.test(mixedQuota)) && gateOf(/Also needing a re-login: X \(login expired\)\./.test(mixedQuota)) && verdictOf(/until a window resets/.test(mixedQuota)));
     ck('NEGATIVE CONTROL: a current member with a HEALTHY login never gets the fromLogin clause',
       dec2({ a: spent5, q1: spent5 }, { a: L.ok, q1: L.ok }).fromLogin === undefined);
     ck('NEGATIVE CONTROL: with no readLogin at all the field cannot exist (old behaviour is byte-identical)',
@@ -366,7 +366,7 @@ console.log('— §3 pool decisions');
     // 'stuck' keeps its "the best other member is at N%" clause — that number
     // is an argument for waiting, which is meaningless under a login wall.
     const stuck = { reason: 'stuck', to: null, fromRemaining: 0, bestRemaining: 3, deadBuckets: ['5h 0%'], liveBuckets: [] };
-    ck("NEGATIVE CONTROL: a 'stuck' quota notice still quotes the best other member", / The best other member is at 3%\./.test(say(stuck)));
+    ck("NEGATIVE CONTROL: a 'stuck' quota notice still quotes the best other member", verdictOf(/ The best other member is at 3%\./.test(say(stuck))));
     ck('...and that clause is suppressed under a login wall, where waiting is not the fix', !/best other member/.test(say({ ...stuck, fromLogin: 'login session expired' })));
   }
 }
@@ -431,7 +431,7 @@ console.log('— §3c the pool row summarises the pool');
     cleanup.push(s.dir);
     const ls = s.row().loginState;
     ck("the CURRENT target's dead login is always the pool's finding, member list or not", ls.state === 'logged-out' && ls.worstId === 'sub-out');
-    ck('...and it does not evict the healthy members from the summary', ls.members.some((m) => m.id === 'sub-ok'));
+    ck('...and it does not evict the healthy members from the summary', verdictOf(ls.members.some((m) => m.id === 'sub-ok')));
   }
   // NEGATIVE CONTROL: an EXPLICIT list is a different question — the user
   // NAMED those accounts, so a signed-out one IS the pool's finding.
@@ -481,7 +481,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
   ck('40 h out: silent (nothing to say yet)', filed.length === 0);
   clock = exp - 20 * H; w.sweep();
   ck('inside 24 h: ONE item, urgency normal', filed.length === 1 && filed[0].urgency === 'normal');
-  ck('...naming the account and the expiry time (the two facts the user needs)', /Work Max/.test(filed[0].text) && /re-login/i.test(filed[0].text) && filed[0].text.includes(new Date(exp).toISOString().slice(0, 10)));
+  ck('...naming the account and the expiry time (the two facts the user needs)', gateOf(/Work Max/.test(filed[0].text)) && gateOf(/re-login/i.test(filed[0].text)) && verdictOf(filed[0].text.includes(new Date(exp).toISOString().slice(0, 10))));
   ck('...into the accounts inbox bucket, labelled for the panel', filed[0].key === 'accounts' && filed[0].sessionName === 'Manage Agents');
   clock += 30 * MIN; w.sweep(); w.sweep();
   ck('ONCE per threshold: three more sweeps inside the same window file nothing', filed.length === 1);
@@ -492,13 +492,13 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
   ck('...and only once', filed.length === 2);
 
   clock = exp + MIN; w.sweep();
-  ck('expired: a THIRD and final item, urgency urgent', filed.length === 3 && filed[2].urgency === 'urgent' && /expired/.test(filed[2].text));
+  ck('expired: a THIRD and final item, urgency urgent', filed.length === 3 && filed[2].urgency === 'urgent' && verdictOf(/expired/.test(filed[2].text)));
   clock += 6 * H; w.sweep(); w.sweep();
   ck('...and the dead member never speaks again', filed.length === 3);
 
   // RESTART SURVIVAL: a fresh watcher over the same data dir replays nothing.
   await w.whenWritten();   // B-0248 unit 5 (lane bl-loop-b): the ledger is the store writer's, written on its thread
-  ck('the ledger is on disk (atomic store), not in memory only', fs.existsSync(path.join(dataDir, 'login-expiry.json')));
+  ck('the ledger is on disk (atomic store), not in memory only', verdictOf(fs.existsSync(path.join(dataDir, 'login-expiry.json'))));
   const w2 = mk();
   w2.sweep(); w2.sweep();
   ck('RESTART: a brand-new watcher reading the persisted ledger repeats NOTHING', filed.length === 3);
@@ -510,7 +510,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
   ck('NEGATIVE CONTROL: a re-logged-in member emits nothing', filed.length === 3);
   ck('...and its ledger row is dropped, not kept forever', !w3.ledger()['sub-1']);
   clock = exp - 3 * H; w3.sweep();
-  ck('...and the ladder RE-ARMS for the NEW deadline (silence is per-login, not per-account)', filed.length === 4 && /Work Max/.test(filed[3].text));
+  ck('...and the ladder RE-ARMS for the NEW deadline (silence is per-login, not per-account)', filed.length === 4 && verdictOf(/Work Max/.test(filed[3].text)));
 
   // SKIPPED RUNG: a server that was off across the 24 h mark must not file a
   // stale "expires in 24 h" — the most urgent rung fires, the rest are done.
@@ -557,13 +557,13 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     const filed4 = [];
     const w6 = watch.create({ accounts: acct, userTodos: { add: (k, i) => filed4.push({ k, ...i }) }, dataDir: dir4, now: () => NOW, log: () => {} });
     w6.sweep();
-    ck('FIRST SWEEP of a fresh ledger: only the RECENT death speaks (round 1 filed all three as urgent)', filed4.length === 1 && /sub-fresh/.test(filed4[0].text));
+    ck('FIRST SWEEP of a fresh ledger: only the RECENT death speaks (round 1 filed all three as urgent)', filed4.length === 1 && verdictOf(/sub-fresh/.test(filed4[0].text)));
     ck('...and it is still urgent — the gate is about age, not about caring less', filed4[0].urgency === 'urgent');
-    ck('...the pre-existing ones are RECORDED as done, so they never surface later either', ['sub-old', 'sub-ancient'].every((id) => (w6.ledger()[id]?.sent || []).includes('expired')));
+    ck('...the pre-existing ones are RECORDED as done, so they never surface later either', verdictOf(['sub-old', 'sub-ancient'].every((id) => (w6.ledger()[id]?.sent || []).includes('expired'))));
     w6.sweep(); w6.sweep();
     ck('...and further sweeps stay silent', filed4.length === 1);
     await w6.whenWritten();   // B-0248 unit 5: written on the store writer's thread
-    ck("the ledger's birth is persisted, so the grace is spent exactly ONCE per install", Number.isFinite(JSON.parse(fs.readFileSync(path.join(dir4, 'login-expiry.json'), 'utf-8')).since));
+    ck("the ledger's birth is persisted, so the grace is spent exactly ONCE per install", verdictOf(Number.isFinite(JSON.parse(fs.readFileSync(path.join(dir4, 'login-expiry.json'), 'utf-8')).since)));
 
     // NEGATIVE CONTROL 1: a login that dies AFTER we started watching is one
     // WE missed (server was off) — reporting that is the whole promise.
@@ -594,14 +594,14 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     // OPT-IN: without watchingSince the old behaviour is byte-identical.
     const ancient = loginState(wiped(NOW - 700 * H), NOW);
     ck('reviewWarnings: NO watchingSince ⇒ the ancient death still emits (the gate is an added input, never a silent default)', reviewWarnings(ancient, null, NOW).emit === 'expired');
-    ck('reviewWarnings: with watchingSince it is suppressed and marked done, with a NAMED reason', (() => {
+    ck('reviewWarnings: with watchingSince it is suppressed and marked done, with a NAMED reason', verdictOf((() => {
       const r = reviewWarnings(ancient, null, NOW, { watchingSince: NOW });
       return r.emit === null && r.suppressed === 'pre-existing' && r.entry.sent.length === LE.WARN_STAGES.length;
-    })());
-    ck('reviewWarnings: BOTH clauses are load-bearing — inside the grace, or after we started watching, it still emits', [
+    })()));
+    ck('reviewWarnings: BOTH clauses are load-bearing — inside the grace, or after we started watching, it still emits', verdictOf([
       reviewWarnings(loginState(wiped(NOW - 20 * MIN), NOW), null, NOW, { watchingSince: NOW }).emit === 'expired',
       reviewWarnings(ancient, null, NOW, { watchingSince: NOW - 900 * H }).emit === 'expired',
-    ].every(Boolean));
+    ].every(Boolean)));
     ck('reviewWarnings: a logged-out record with NO readable deadline cannot be dated ⇒ never suppressed (firing is the fail-safe direction)',
       reviewWarnings(loginState(creds({ accessToken: '', refreshToken: '', scopes: ['user:inference'] }), NOW), null, NOW, { watchingSince: NOW }).emit === 'expired');
     ck('reviewWarnings: the FUTURE rungs are untouched by the gate (a 24 h warning is always news)',
@@ -629,21 +629,21 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     ck('...and it is still the terminal RUNG (the tokens are gone: every turn fails right now)', warnStageFor(future) === 'expired');
     const txt = watch.itemTextFor('expired', 'Fish Max', future);
     ck('the inbox item never says "expired" about a timestamp in the future', !/expired/.test(txt));
-    ck('...it says what actually happened — the CLI cleared the tokens — and asks for the re-login', /is signed out/.test(txt) && /the CLI cleared its tokens/.test(txt) && /re-login it in Manage Agents/.test(txt));
+    ck('...it says what actually happened — the CLI cleared the tokens — and asks for the re-login', gateOf(/is signed out/.test(txt)) && gateOf(/the CLI cleared its tokens/.test(txt)) && verdictOf(/re-login it in Manage Agents/.test(txt)));
     ck('...and it does not quote a "session ended" date that has not happened', !/session ended/.test(txt));
-    ck('the two surfaces now agree: the chip for the SAME record also says signed out', (() => {
+    ck('the two surfaces now agree: the chip for the SAME record also says signed out', verdictOf((() => {
       const ma = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
       return /ls\.state === 'logged-out' \? t\('login signed out — re-login'\)/.test(ma) && /is signed out/.test(txt);
-    })());
+    })()));
     // NEGATIVE CONTROLS — the two shapes that were already right.
     const past = loginState(wiped(NOW - 30 * H), NOW);
     const txtPast = watch.itemTextFor('expired', 'Old Max', past);
-    ck('...and the date is NOT dropped for the common shape (deadline already passed): it moves into the clause', /is signed out/.test(txtPast) && /its login session ended 2026-/.test(txtPast));
+    ck('...and the date is NOT dropped for the common shape (deadline already passed): it moves into the clause', gateOf(/is signed out/.test(txtPast)) && verdictOf(/its login session ended 2026-/.test(txtPast)));
     const expired = loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW - H }), NOW);
     ck('NEGATIVE CONTROL: a plainly EXPIRED login (tokens still on disk) keeps the shipped "expired <when>" wording',
-      expired.state === 'expired' && /^Claude login for "X" expired 2026-.* — re-login it in Manage Agents$/.test(watch.itemTextFor('expired', 'X', expired)));
+      expired.state === 'expired' && verdictOf(/^Claude login for "X" expired 2026-.* — re-login it in Manage Agents$/.test(watch.itemTextFor('expired', 'X', expired))));
     ck('NEGATIVE CONTROL: the FUTURE rungs are untouched (they were never about the wiped shape)',
-      /^Claude login for "X" expires in 20 h \(2026-.*\) — re-login it in Manage Agents$/.test(watch.itemTextFor('24h', 'X', loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW + 20 * H }), NOW))));
+      verdictOf(/^Claude login for "X" expires in 20 h \(2026-.*\) — re-login it in Manage Agents$/.test(watch.itemTextFor('24h', 'X', loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW + 20 * H }), NOW)))));
     // The sweep files it as one urgent item, once — nothing about the wording
     // change may weaken the ledger.
     const dir7 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lew7-'));
@@ -654,8 +654,8 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     });
     w9.sweep(); w9.sweep();
     ck('the sweep files exactly one URGENT item for it and the ledger stops there', filed7.length === 1 && filed7[0].urgency === 'urgent');
-    ck('...the future deadline lives in the DETAIL, in the future tense, beside the state', /Login session ends: 2026-/.test(filed7[0].detail) && /State: logged-out/.test(filed7[0].detail));
-    ck('...and a PAST deadline reads "ended" there (the same tense rule as the text)', (() => {
+    ck('...the future deadline lives in the DETAIL, in the future tense, beside the state', gateOf(/Login session ends: 2026-/.test(filed7[0].detail)) && verdictOf(/State: logged-out/.test(filed7[0].detail)));
+    ck('...and a PAST deadline reads "ended" there (the same tense rule as the text)', verdictOf((() => {
       const dir8 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lew8-'));
       const f8 = [];
       watch.create({
@@ -664,7 +664,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       }).sweep();
       fs.rmSync(dir8, { recursive: true, force: true });
       return f8.length === 1 && /Login session ended: 2026-/.test(f8[0].detail);
-    })());
+    })()));
     fs.rmSync(dir7, { recursive: true, force: true });
   }
 
@@ -707,17 +707,17 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       const s = world(wiped(NOW - 20 * MIN));
       s.w.sweep();
       const filedId = s.open()[0]?.id;
-      ck('(a) the death files ONE open item', s.open().length === 1 && /is signed out/.test(s.open()[0].text));
+      ck('(a) the death files ONE open item', s.open().length === 1 && verdictOf(/is signed out/.test(s.open()[0].text)));
       const beforeBroadcasts = s.broadcasts;
       s.clock += 30 * MIN;
       s.creds = live(s.clock + 29 * 24 * H, s.clock); // the owner's actual shape: fresh tokens, 29 days out
       const r = s.w.sweep();
       ck('(a) the re-login RESOLVES the item the watch filed (this is the reported defect)', s.open().length === 0);
-      ck('...as done, not deleted, and not reopened', s.done().some((i) => i.id === filedId && i.status === 'done'));
+      ck('...as done, not deleted, and not reopened', verdictOf(s.done().some((i) => i.id === filedId && i.status === 'done')));
       ck('...through the store, so every open client is told (onChange fired)', s.broadcasts > beforeBroadcasts);
       ck('...attributed to neither the user nor an agent (the panel says "automatically")', s.todos.get(filedId).resolvedBy === watch.RESOLVED_BY && watch.RESOLVED_BY === 'system');
       ck('...and the journal says it ONCE, naming the account and the count', s.journal.filter((l) => /Fish Max: re-logged in — 1 warning cleared/.test(l)).length === 1);
-      ck('...the sweep reports it to its caller (the route logs the count)', (r.resolved || []).some((x) => x.id === 'sub-fish' && x.n === 1));
+      ck('...the sweep reports it to its caller (the route logs the count)', verdictOf((r.resolved || []).some((x) => x.id === 'sub-fish' && x.n === 1)));
       const j0 = s.journal.length;
       s.w.sweep(); s.w.sweep();
       ck('...and it is not re-resolved or re-announced on every later sweep', s.journal.length === j0 && s.done().filter((i) => i.id === filedId).length === 1);
@@ -726,7 +726,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       // A LATER expiry files a NEW item — recovery must not disarm the ladder.
       s.clock = s.creds.claudeAiOauth.refreshTokenExpiresAt - 20 * H;
       s.w.sweep();
-      ck('(a) a later expiry on the NEW deadline files a NEW item', s.open().length === 1 && /expires in 20 h/.test(s.open()[0].text) && s.open()[0].id !== filedId);
+      ck('(a) a later expiry on the NEW deadline files a NEW item', s.open().length === 1 && gateOf(/expires in 20 h/.test(s.open()[0].text)) && s.open()[0].id !== filedId);
       s.cleanup();
     }
 
@@ -783,7 +783,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       state.a = live(clock + 20 * 24 * H, clock);   // ONLY A is re-logged in
       w.sweep();
       const open = todos.snapshot().open;
-      ck("(d) NEGATIVE CONTROL: re-logging A clears A only — B's warning stays open", open.length === 2 && open.some((i) => /B Max/.test(i.text)) && !open.some((i) => /A Max/.test(i.text)));
+      ck("(d) NEGATIVE CONTROL: re-logging A clears A only — B's warning stays open", open.length === 2 && gateOf(open.some((i) => /B Max/.test(i.text))) && !open.some((i) => /A Max/.test(i.text)));
       ck("...and the AGENT's item (different session, not ours to touch) is untouched", todos.get(agentItem.id).status === 'open' && todos.get(agentItem.id).resolvedBy === null);
       try { todos.flush(); } catch { }
       fs.rmSync(dir, { recursive: true, force: true });
@@ -816,13 +816,13 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       const s = world(live(NOW + 20 * H, NOW));
       s.w.sweep();
       const stale = s.open()[0]?.id;
-      ck('(e2) the 24 h rung fires with 20 h left', s.open().length === 1 && /expires in 20 h/.test(s.open()[0].text));
+      ck('(e2) the 24 h rung fires with 20 h left', s.open().length === 1 && verdictOf(/expires in 20 h/.test(s.open()[0].text)));
       s.clock += 10 * MIN;
       s.creds = live(s.clock + 12 * H, s.clock);    // a 12 h session: EARLIER than the deadline we warned about
       s.w.sweep();
       ck('(e2) a re-login onto a SHORTER session still retracts the stale item', s.todos.get(stale).status === 'done');
       ck('...and re-arms immediately with the accurate one (a deserved warning is never lost by a retraction)',
-        s.open().length === 1 && s.open()[0].id !== stale && /expires in 12 h/.test(s.open()[0].text));
+        s.open().length === 1 && s.open()[0].id !== stale && verdictOf(/expires in 12 h/.test(s.open()[0].text)));
       s.cleanup();
     }
     // The pure predicate directly (each clause load-bearing).
@@ -842,7 +842,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       const id = s.open()[0].id;
       await s.w.whenWritten();   // B-0248 unit 5: written on the store writer's thread
       const onDisk = JSON.parse(fs.readFileSync(path.join(s.dir, 'login-expiry.json'), 'utf-8'));
-      ck('(f) the filed item id is PERSISTED with the member row', (onDisk.members['sub-fish'].items || []).some((r) => r.id === id));
+      ck('(f) the filed item id is PERSISTED with the member row', verdictOf((onDisk.members['sub-fish'].items || []).some((r) => r.id === id)));
       s.clock += 30 * MIN;
       s.creds = live(s.clock + 20 * 24 * H, s.clock);
       const w2 = s.mk();                              // a brand-new watcher, as after a restart
@@ -882,7 +882,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       s.creds = live(s.writtenAt + 24 * H, s.clock);  // a 24 h org session policy
       s.w.sweep();
       ck('(h) a witnessed login files the 24 h rung AND names the short session', s.open().length === 1
-        && /its last login session lasted only ~24 h — this org's session policy may be short/.test(s.open()[0].text));
+        && verdictOf(/its last login session lasted only ~24 h — this org's session policy may be short/.test(s.open()[0].text)));
       await s.w.whenWritten();   // B-0248 unit 5: written on the store writer's thread
       ck('...and the measurement is persisted in the OBSERVATION log for the next session',
         JSON.parse(fs.readFileSync(path.join(s.dir, 'login-expiry.json'), 'utf-8')).seen['sub-fish'].spanMs === 24 * H);
@@ -902,10 +902,10 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       s.writtenAt = s.clock - H;                      // last access-token refresh: an hour ago
       s.w.sweep();
       ck('(h) NEGATIVE CONTROL: an actively-refreshed 30-day login gets the warning WITHOUT the policy hint', s.open().length === 1
-        && /expires in 20 h/.test(s.open()[0].text) && !/session policy/.test(s.open()[0].text));
+        && gateOf(/expires in 20 h/.test(s.open()[0].text)) && !/session policy/.test(s.open()[0].text));
       s.cleanup();
     }
-    ck('measureLoginSpan: witnessed ⇒ the span; every missing clause ⇒ null', (() => {
+    ck('measureLoginSpan: witnessed ⇒ the span; every missing clause ⇒ null', verdictOf((() => {
       const gap = 15 * 60e3;
       const info = { refreshExpiresAt: NOW + 24 * H, writtenAt: NOW - 60e3, msLeft: 24 * H, state: 'ok' };
       const prev = { exp: NOW - 5 * H, sent: [], at: NOW - 4 * MIN };
@@ -915,15 +915,15 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
         && watch.measureLoginSpan({ ...info, writtenAt: NOW - 10 * H }, prev, NOW, gap) === null    // file predates our look
         && watch.measureLoginSpan({ ...info, writtenAt: null }, prev, NOW, gap) === null            // no mtime at all
         && watch.measureLoginSpan(info, { ...prev, at: null }, NOW, gap) === null;                  // no previous observation
-    })());
+    })()));
     ck('the hint is empty for an unmeasured / long / absurd span, and speaks only under 36 h', watch.shortSessionHint(null) === ''
       && watch.shortSessionHint(40 * H) === '' && watch.shortSessionHint(LE.SHORT_SESSION_MS) === ''
-      && /~24 h/.test(watch.shortSessionHint(24 * H)));
-    ck('a STALE measurement (shorter than what is left) is not quoted by the SENTENCE itself', (() => {
+      && verdictOf(/~24 h/.test(watch.shortSessionHint(24 * H))));
+    ck('a STALE measurement (shorter than what is left) is not quoted by the SENTENCE itself', verdictOf((() => {
       const info = loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW + 20 * H }), NOW);
       return !/session policy/.test(watch.itemTextFor('24h', 'X', info, { spanMs: 2 * H }))
         && /session policy/.test(watch.itemTextFor('24h', 'X', info, { spanMs: 24 * H }));
-    })());
+    })()));
     ck('NEGATIVE CONTROL: the terminal rungs never carry the hint (they are not about how long the session was)',
       !/session policy/.test(watch.itemTextFor('expired', 'X', loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW - H }), NOW), { spanMs: 24 * H }))
       && !/session policy/.test(watch.itemTextFor('expired', 'X', loginState(wiped(NOW - H), NOW), { spanMs: 24 * H })));
@@ -1004,7 +1004,7 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
   const REAL = { same: await realResolve('same'), moved: await realResolve('moved'), split: await realResolve('split'), pending: await realResolve('pending') };
   ck('FIXTURE SOURCE: the real reloginResolve answers {outcome} — and NEVER a top-level loggedIn (round 1 gated on exactly that)',
     REAL.same.outcome === 'same' && REAL.moved.outcome === 'moved' && REAL.split.outcome === 'split' && REAL.pending.outcome === 'pending'
-    && ['same', 'moved', 'split', 'pending'].every((k) => REAL[k].loggedIn === undefined));
+    && verdictOf(['same', 'moved', 'split', 'pending'].every((k) => REAL[k].loggedIn === undefined)));
   ck('...the captured login rides in a NESTED account on same/split, and `moved` carries no account at all',
     REAL.same.account?.loggedIn === true && REAL.split.account?.loggedIn === true
     && REAL.moved.account === undefined && REAL.moved.movedTo?.id === 'sub-2'
@@ -1207,7 +1207,7 @@ console.log('— §5c the immediate sweep RETRACTS, end to end');
     const s = world([{ id: 'sub-1', name: 'Fish Max', type: 'subscription', backend: 'claude', email: 'fish@example.com' }]);
     putCreds(s.dir, 'sub-1', { exp: Date.now() - 20 * RMIN, email: 'fish@example.com', wiped: true });
     await s.accounts.signinFactsSettled(); s.w.sweep();   // B-360d: the timer's own order
-    ck('(f) the signed-out member has an OPEN inbox item', s.open().length === 1 && /is signed out/.test(s.open()[0].text));
+    ck('(f) the signed-out member has an OPEN inbox item', s.open().length === 1 && verdictOf(/is signed out/.test(s.open()[0].text)));
     putCreds(s.dir, 'sub-1', { exp: Date.now() + 29 * 24 * RH, email: 'fish@example.com' }); // the owner re-logs in
     const h = wire(s.accounts, s.w);
     const r = call(h.post.get('/api/accounts/:id/relogin-finalize'), { params: { id: 'sub-1' } });
@@ -1325,10 +1325,10 @@ console.log('— §7 the chip at 375x667 (headless chrome)');
       const chips = await evalJs('window.chips');
       if (!chips) throw new Error('the fixture never produced window.chips (esbuild bundle failed to run?)');
       ck('BROWSER: an ok / unknown / absent login draws NO chip (only a real deadline speaks)', chips.ok === '' && chips.unknown === '' && chips.none === '');
-      ck('BROWSER: expiring / expired / logged-out each draw one', /login expires in 17 h/.test(chips.expiring) && /login expired/.test(chips.expired) && /login signed out/.test(chips.out));
+      ck('BROWSER: expiring / expired / logged-out each draw one', gateOf(/login expires in 17 h/.test(chips.expiring)) && gateOf(/login expired/.test(chips.expired)) && verdictOf(/login signed out/.test(chips.out)));
       ck('BROWSER: a host section shows only the DEAD state (an expiry warning about this machine there would be noise)', chips.host === '' && chips.hostDead !== '');
-      ck("BROWSER: a pool's chip names the member that earned it and re-logs THAT member in", /Personal Max/.test(chips.pool) && /data-relogin="s3"/.test(chips.pool));
-      ck('BROWSER: XSS - the account id and the member name are escaped in the attribute and the text', !/<img src=x/.test(chips.xss) && /data-relogin="&quot;&gt;&lt;img/.test(chips.xss) && /&lt;b&gt;evil/.test(chips.xss));
+      ck("BROWSER: a pool's chip names the member that earned it and re-logs THAT member in", gateOf(/Personal Max/.test(chips.pool)) && verdictOf(/data-relogin="s3"/.test(chips.pool)));
+      ck('BROWSER: XSS - the account id and the member name are escaped in the attribute and the text', !/<img src=x/.test(chips.xss) && gateOf(/data-relogin="&quot;&gt;&lt;img/.test(chips.xss)) && verdictOf(/&lt;b&gt;evil/.test(chips.xss)));
       const m = await evalJs(`(() => {
         const rows = [...document.querySelectorAll('.acct-key-row')];
         const chip = rows[0].querySelector('.acct-login-chip');
@@ -1349,9 +1349,9 @@ console.log('— §7 the chip at 375x667 (headless chrome)');
       ck('BROWSER: the SVG is 10x10, not viewBox-sized (' + Math.round(m.svg.w) + 'x' + Math.round(m.svg.h) + ') - the row-eating shape', Math.round(m.svg.w) === 10 && Math.round(m.svg.h) === 10);
       ck('BROWSER: the chip stays inside the viewport at 375px (right edge ' + Math.round(m.chip.right) + ')', m.chip.right <= 375);
       ck('BROWSER: it is one line, not a stack (chip ' + Math.round(m.chip.h) + 'px inside a ' + Math.round(m.extraH) + 'px extras line)', m.chip.h <= 20 && m.extraH <= 22);
-      ck('BROWSER: rows stay row-sized with the chip present (' + m.rowsH.map((h) => Math.round(h)).join('/') + 'px)', m.rowsH.every((h) => h > 20 && h < 90));
+      ck('BROWSER: rows stay row-sized with the chip present (' + m.rowsH.map((h) => Math.round(h)).join('/') + 'px)', verdictOf(m.rowsH.every((h) => h > 20 && h < 90)));
       ck('BROWSER: it reads as clickable and the centre of it actually hits the chip', m.cursor === 'pointer' && m.hit === true);
-      ck('BROWSER: theme colours only - dead is the red var, expiring the warn var, and they differ (' + m.colorDead + ' vs ' + m.colorWarn + ')', /^rgb/.test(m.colorDead) && /^rgb/.test(m.colorWarn) && m.colorDead !== m.colorWarn);
+      ck('BROWSER: theme colours only - dead is the red var, expiring the warn var, and they differ (' + m.colorDead + ' vs ' + m.colorWarn + ')', gateOf(/^rgb/.test(m.colorDead)) && gateOf(/^rgb/.test(m.colorWarn)) && m.colorDead !== m.colorWarn);
       ck('BROWSER: no JS error while rendering', jsErrors.length === 0);
       try { sock.close(); } catch { }
     } catch (e) {
@@ -1445,11 +1445,11 @@ console.log('— §8 the LAPSED chip at the owner\'s width (1000 px panel, zh, h
       };
       const a = await measure('after'), b = await measure('before');
       const r = (x) => x ? Math.round(x.w) + 'x' + Math.round(x.h) : 'none';
-      ck('BROWSER §8: the rows rendered in zh (' + JSON.stringify(a.lapText.slice(0, 40)) + ') with the Re-check verb kept on the account', /订阅/.test(a.lapText) && a.recheck === 's6');
+      ck('BROWSER §8: the rows rendered in zh (' + JSON.stringify(a.lapText.slice(0, 40)) + ') with the Re-check verb kept on the account', gateOf(/订阅/.test(a.lapText)) && a.recheck === 's6');
       ck('BROWSER §8: the lapsed chip\'s clock is a small icon (' + r(a.lapSvg) + ' ≤ 12x12), not the column', !!a.lapSvg && a.lapSvg.w <= 12 && a.lapSvg.h <= 12 && a.lapSvg.w >= 8);
       ck('BROWSER §8: its text sits on ONE line beside the clock (' + a.lapLines + ' line, chip ' + r(a.lap) + ')', a.lapLines === 1 && a.lap.h <= 20 && a.lapSvg.top >= a.lap.top - 1 && a.lapSvg.bottom <= a.lap.bottom + 1);
       ck('BROWSER §8: the login chip is unchanged (10x10: ' + r(a.loginSvg) + ') and the pool row\'s icon keeps 14 px (' + r(a.poolSvg) + ')', r(a.loginSvg) === '10x10' && r(a.poolSvg) === '14x14');
-      ck('BROWSER §8: every row stays row-sized (' + a.rowsH.map((h) => Math.round(h)).join('/') + ' px)', a.rowsH.length === 3 && a.rowsH.every((h) => h > 20 && h < 60));
+      ck('BROWSER §8: every row stays row-sized (' + a.rowsH.map((h) => Math.round(h)).join('/') + ' px)', a.rowsH.length === 3 && verdictOf(a.rowsH.every((h) => h > 20 && h < 60)));
       ck('BROWSER §8 CONTROL: the BASE shape draws the owner\'s column-wide clock (' + r(b.lapSvg) + ' > 100 px) and a tall row (' + b.rowsH.map((h) => Math.round(h)).join('/') + ' px)', !!b.lapSvg && b.lapSvg.w > 100 && Math.max(...b.rowsH) > 100);
       ck('BROWSER §8: no JS error while rendering', jsErrors.length === 0);
       try { sock.close(); } catch { }
@@ -1558,24 +1558,24 @@ console.log('— §9 the account rows at the owner\'s PHONE width (215 / 180 px,
       const sum = (m) => m.rows.map((r) => r.id + ' ' + r.nameW + 'px/' + r.vis + 'ch' + (r.chipH != null ? ' chip ' + Math.round(r.chipH) + 'px' : '')).join(', ');
       for (const w of [215, 180]) {
         const a = await render('after', w);
-        ck('BROWSER §9 @' + w + ': every name keeps ≥ 60 px and ≥ 6 of its 12 characters (' + sum(a) + ')', a.rows.length === 7 && a.rows.every((r) => r.len === 12 && r.nameW >= 60 && r.vis >= 6));
+        ck('BROWSER §9 @' + w + ': every name keeps ≥ 60 px and ≥ 6 of its 12 characters (' + sum(a) + ')', a.rows.length === 7 && verdictOf(a.rows.every((r) => r.len === 12 && r.nameW >= 60 && r.vis >= 6)));
         const chips = a.rows.filter((r) => r.chipH != null);
-        ck('BROWSER §9 @' + w + ': each login chip wraps at words — ≤ 2 lines tall (' + chips.map((r) => Math.round(r.chipH) + '/' + Math.round(r.lineH)).join(', ') + ' px chip/line)', chips.length === 3 && chips.every((r) => r.lineH > 0 && r.chipH <= 2 * r.lineH + 1));
+        ck('BROWSER §9 @' + w + ': each login chip wraps at words — ≤ 2 lines tall (' + chips.map((r) => Math.round(r.chipH) + '/' + Math.round(r.lineH)).join(', ') + ' px chip/line)', chips.length === 3 && verdictOf(chips.every((r) => r.lineH > 0 && r.chipH <= 2 * r.lineH + 1)));
         ck('BROWSER §9 @' + w + ': no horizontal overflow (.acct-list scroll ' + a.scrollW + ' ≤ client ' + a.listW + ')', a.scrollW <= a.listW && a.listW === w);
         await evalJs('window.clicks = []');
         const want = [];
         for (const r of a.rows) { await click(r.star); want.push(r.id + ':star'); await click(r.menu); want.push(r.id + ':menu'); if (r.chip) { await click(r.chip); want.push(r.id + ':relogin=' + r.relogin); } }
         const got = await evalJs('window.clicks');
-        ck('BROWSER §9 @' + w + ': the star / ⋯ / re-login chip clicks land on their own row (' + got.length + ' clicks)', JSON.stringify(got) === JSON.stringify(want) || console.error('    got ' + JSON.stringify(got) + '\n    want ' + JSON.stringify(want)));
+        ck('BROWSER §9 @' + w + ': the star / ⋯ / re-login chip clicks land on their own row (' + got.length + ' clicks)', JSON.stringify(got) === JSON.stringify(want) || verdictOf(console.error('    got ' + JSON.stringify(got) + '\n    want ' + JSON.stringify(want))));
         const b = await render('before', w);
-        ck('BROWSER §9 CONTROL @' + w + ': the BASE squeezes the name column (min ' + Math.min(...b.rows.map((r) => r.nameW)) + ' px, ' + Math.min(...b.rows.map((r) => r.vis)) + ' ch) and draws a chip per character (max ' + Math.round(Math.max(...b.rows.map((r) => r.chipH || 0))) + ' px) — ' + sum(b), b.rows.some((r) => r.nameW < 60 || r.vis < 6) && b.rows.some((r) => (r.chipH || 0) > 2 * (r.lineH || 99)));
+        ck('BROWSER §9 CONTROL @' + w + ': the BASE squeezes the name column (min ' + Math.min(...b.rows.map((r) => r.nameW)) + ' px, ' + Math.min(...b.rows.map((r) => r.vis)) + ' ch) and draws a chip per character (max ' + Math.round(Math.max(...b.rows.map((r) => r.chipH || 0))) + ' px) — ' + sum(b), gateOf(b.rows.some((r) => r.nameW < 60 || r.vis < 6)) && verdictOf(b.rows.some((r) => (r.chipH || 0) > 2 * (r.lineH || 99))));
       }
       for (const w of [420, 340]) {
         const a = await render('after', w), b = await render('before', w);
         ck('BROWSER §9 @' + w + ': at/above the pill rung the panel is PIXEL-IDENTICAL to the base (' + a.clip.width + 'x' + a.clip.height + ' png, ' + a.shot.length + ' b64 chars)', a.shot === b.shot && a.clip.height === b.clip.height);
       }
       if (process.env.ACCT_ROWS_SHOTS) for (const w of [260]) { await render('after', w); await render('before', w); }
-      ck('BROWSER §9: no JS error while rendering', jsErrors.length === 0 || console.error('    ' + jsErrors.join('\n    ')));
+      ck('BROWSER §9: no JS error while rendering', jsErrors.length === 0 || verdictOf(console.error('    ' + jsErrors.join('\n    '))));
       try { sock.close(); } catch { }
     } catch (e) {
       fail++; console.error('  x BROWSER §9: the narrow-row measurement could not run - ' + e.message);
@@ -1599,7 +1599,7 @@ console.log('— §10 login × long-lived token (oat-only)');
   const oatOf = (mintedAgo) => ({ present: true, validUntil: NOW - mintedAgo + TTL });
   const o1 = loginState(OWNER, NOW, { oat: oatOf(5 * D) });
   ck('owner shape (expired login + oat minted 5 d ago) ⇒ oat-only, msLeft = the TOKEN\'s time left', o1.state === 'oat-only' && o1.login === 'expired' && o1.oatValidUntil === NOW - 5 * D + TTL && o1.msLeft === TTL - 5 * D && o1.refreshExpiresAt === NOW - 3 * D);
-  ck('...not in DEAD_STATES: usable, a switch target, ranked below an equal ok (1), no block reason', !LE.DEAD_STATES.includes('oat-only') && loginUsable(o1) && loginSwitchTarget(o1) && loginRank(o1) === 1 && loginBlockReason(o1) === null);
+  ck('...not in DEAD_STATES: usable, a switch target, ranked below an equal ok (1), no block reason', !LE.DEAD_STATES.includes('oat-only') && gateOf(loginUsable(o1)) && gateOf(loginSwitchTarget(o1)) && loginRank(o1) === 1 && loginBlockReason(o1) === null);
   const o2 = loginState(WIPED, NOW, { oat: oatOf(5 * D) });
   ck('logged-out (wiped) + valid oat ⇒ oat-only (login: logged-out)', o2.state === 'oat-only' && o2.login === 'logged-out');
   const o3 = loginState(OWNER, NOW, { oat: oatOf(TTL + 2 * H) });
@@ -1637,7 +1637,7 @@ console.log('— §10 login × long-lived token (oat-only)');
     // refusal over the two fields they read — `_torn` (torn bytes kept aside) and `_hold` (src/store-read-hold.js): none held here
     held: AM.held, _heldRefusal: AM._heldRefusal, _tornWords: AM._tornWords, _torn: null, _hold: null };
   const sp = AM.resolveForSpawn.call(spawnFake, 'sub-o');
-  ck('resolveForSpawn: expired dir login (still parses loggedIn) + valid oat ⇒ oatOnly on the token', sp && sp.oatOnly === true && sp.localEnv.CLAUDE_CODE_OAUTH_TOKEN === 'oat-value-fixture');
+  ck('resolveForSpawn: expired dir login (still parses loggedIn) + valid oat ⇒ oatOnly on the token', gateOf(sp) && sp.oatOnly === true && sp.localEnv.CLAUDE_CODE_OAUTH_TOKEN === 'oat-value-fixture');
   // THE ACCOUNTS LIST HELD (主开发 r2947 / r3043): while the list could not be read, a start that names an account is refused BY NAME
   // (accounts_unread, the hold's words) before any road — the token is never handed for a list nobody read; the person's own «this
   // machine's login» stays theirs. The hold below is shaped as the helper's public face (held() → {file, code, since}, words())
@@ -1646,14 +1646,14 @@ console.log('— §10 login × long-lived token (oat-only)');
     _hold: { held: () => ({ file: 'accounts.json', code: 'EIO', since: Date.now() }), words: () => 'the accounts could not be read (EIO) — nothing was changed and nothing starts on another login until they read; VibeSpace reads them again by itself' } };
   const heldTry = (P) => { oatAsked = 0; try { return { r: P.resolveForSpawn.call(heldFake, 'sub-o'), oat: oatAsked }; } catch (e) { return { code: (e && e.code) || null, msg: String((e && e.message) || ''), oat: oatAsked }; } };
   const hs = heldTry(AM);
-  ck('the accounts list HELD: a start on an account is refused by name (accounts_unread, the hold\'s words) — the token is never handed', hs.code === 'accounts_unread' && /could not be read \(EIO\)/.test(hs.msg) && hs.oat === 0);
+  ck('the accounts list HELD: a start on an account is refused by name (accounts_unread, the hold\'s words) — the token is never handed', hs.code === 'accounts_unread' && gateOf(/could not be read \(EIO\)/.test(hs.msg)) && hs.oat === 0);
   ck('...and the person\'s own «this machine\'s login» stays theirs while held: no refusal, the CLI\'s global login', AM.resolveForSpawn.call(heldFake, 'subscription') === null);
   const MUT = mutantCopies('login-expiry', REPO);
   const hx = heldTry(MUT.load('src/accounts.js', anchored(src('src/accounts.js'), "    if (requested !== 'subscription' && this.held()) throw this._heldRefusal('starting a conversation on an account');\n", '', 'the spawn door does not ask the held list'), 'le-held').AccountManager.prototype);
   ck('RED CONTROL (the spawn door does not ask the held list, as the release): the held start goes ON THE TOKEN — red', !hx.code && !!(hx.r && hx.r.oatOnly === true) && hx.oat > 0);
   files['sub-o'] = creds({ ...LIVE, refreshTokenExpiresAt: Date.now() + 9 * D }); // resolveForSpawn reads the REAL clock
   const sp2 = AM.resolveForSpawn.call(spawnFake, 'sub-o');
-  ck('...a LIVE dir login keeps the dir (hot-swap + full capability), the token only as the remote secret', sp2 && !sp2.oatOnly && sp2.localEnv.CLAUDE_SECURESTORAGE_CONFIG_DIR === 'sub-o' && sp2.secret?.value === 'oat-value-fixture');
+  ck('...a LIVE dir login keeps the dir (hot-swap + full capability), the token only as the remote secret', gateOf(sp2) && !sp2.oatOnly && sp2.localEnv.CLAUDE_SECURESTORAGE_CONFIG_DIR === 'sub-o' && sp2.secret?.value === 'oat-value-fixture');
   files['sub-o'] = OWNER;
   // (the authFor pin: MOVED to the fast scripts/test-login-expiry-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 
@@ -1673,16 +1673,16 @@ console.log('— §10 login × long-lived token (oat-only)');
   w.sweep();
   ck('watch: the login died with no token ⇒ ONE urgent item', filed.length === 1 && filed[0].urgency === 'urgent');
   oat = { present: true, validUntil: NOW - 5 * D + TTL }; clock += 10 * MIN; w.sweep();
-  ck('...a token now carries the row ⇒ ONE LOW item ("keep running … only the usage refresh") and the urgent one retracted', filed.length === 2 && filed[1].urgency === 'low' && /keep running on the long-lived token/.test(filed[1].text) && /usage refresh/.test(filed[1].text) && store.get(filed[0].id).status === 'done');
+  ck('...a token now carries the row ⇒ ONE LOW item ("keep running … only the usage refresh") and the urgent one retracted', filed.length === 2 && filed[1].urgency === 'low' && gateOf(/keep running on the long-lived token/.test(filed[1].text)) && gateOf(/usage refresh/.test(filed[1].text)) && store.get(filed[0].id).status === 'done');
   clock += 2 * H; w.sweep(); w.sweep();
   ck('...ONCE: more sweeps file nothing', filed.length === 2);
   clock = oat.validUntil - 20 * H; w.sweep();
-  ck('the TOKEN\'s 24 h rung: normal, names the token and re-mint', filed.length === 3 && filed[2].urgency === 'normal' && /long-lived token for "LuMax" ends in/.test(filed[2].text) && /re-mint/.test(filed[2].text));
+  ck('the TOKEN\'s 24 h rung: normal, names the token and re-mint', filed.length === 3 && filed[2].urgency === 'normal' && gateOf(/long-lived token for "LuMax" ends in/.test(filed[2].text)) && verdictOf(/re-mint/.test(filed[2].text)));
   clock = oat.validUntil - 40 * MIN; w.sweep();
   ck('the TOKEN\'s 1 h rung: high', filed.length === 4 && filed[3].urgency === 'high');
   clock = oat.validUntil + 5 * MIN; w.sweep();
-  ck('both dead ⇒ urgent "both ended" (not suppressed as pre-existing — the token died now)', filed.length === 5 && filed[4].urgency === 'urgent' && /both ended/.test(filed[4].text));
-  ck('the oat-only item\'s detail says the two facts and that a pool cannot use the token', /Long-lived token valid until/.test(filed[1].detail) && /a POOL cannot use the token/.test(filed[1].detail));
+  ck('both dead ⇒ urgent "both ended" (not suppressed as pre-existing — the token died now)', filed.length === 5 && filed[4].urgency === 'urgent' && verdictOf(/both ended/.test(filed[4].text)));
+  ck('the oat-only item\'s detail says the two facts and that a pool cannot use the token', gateOf(/Long-lived token valid until/.test(filed[1].detail)) && verdictOf(/a POOL cannot use the token/.test(filed[1].detail)));
 
   // THE CHIP (real manage-agents.js, real style.css) — words, colour, the pool line; PNGs
   const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -1706,13 +1706,13 @@ console.log('— §10 login × long-lived token (oat-only)');
     const maBase = maSrc.replace(CUT_FOLD[0], CUT_FOLD[1]).replace(CUT_WORD[0], CUT_WORD[1]).replace(CUT_QUIET + '\n', '');
     const maWords = maSrc.replace(CUT_QUIET + '\n', '');
     ck('the icon control cut the quiet return out of manage-agents.js (its words back on the chip)', CUT_QUIET !== '@none@' && maSrc.split(CUT_QUIET).length === 2 && !maWords.includes(CUT_QUIET));
-    ck('the one-word control cut both changes out of manage-agents.js (the fold + the chip word)', maSrc.includes(CUT_FOLD[0]) && maSrc.includes(CUT_WORD[0]) && !maBase.includes(CUT_FOLD[0]) && !maBase.includes(CUT_WORD[0]));
+    ck('the one-word control cut both changes out of manage-agents.js (the fold + the chip word)', gateOf(maSrc.includes(CUT_FOLD[0])) && gateOf(maSrc.includes(CUT_WORD[0])) && !maBase.includes(CUT_FOLD[0]) && !maBase.includes(CUT_WORD[0]));
     await esbuild.build({ stdin: { contents: maBase, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' }, bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'ma-base.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBV] });
     // WIRING: the roster row composes exactly these helpers, and the word has exactly two doors (the chip; the ident of a token row with no chip)
     const keyAt = maSrc.indexOf('const keyLines = rosterAccts.map(a => {'), keyEnd = maSrc.indexOf('<div class="acct-key-row', keyAt);
     const keySrc = keyAt > 0 && keyEnd > keyAt ? maSrc.slice(keyAt, keyEnd) : '';
     ck('WIRING: the roster row\'s ident, token tag and chip come from subIdentHtml / oatTagHtml / loginExpiryChipHtml, all with { local: !selectedHost }',
-      keySrc.includes("? subIdentHtml(a, { email: aEmail || '', hostSub, hostTag: hlTag, local: !selectedHost })") && keySrc.includes('const oatTag = oatTagHtml(a, { local: !selectedHost });') && keySrc.includes('loginExpiryChipHtml(a, { local: !selectedHost })') && !keySrc.includes("t('long-lived token only") && !keySrc.includes("t('· long-lived token')"));
+      gateOf(keySrc.includes("? subIdentHtml(a, { email: aEmail || '', hostSub, hostTag: hlTag, local: !selectedHost })")) && gateOf(keySrc.includes('const oatTag = oatTagHtml(a, { local: !selectedHost });')) && gateOf(keySrc.includes('loginExpiryChipHtml(a, { local: !selectedHost })')) && !keySrc.includes("t('long-lived token only") && !keySrc.includes("t('· long-lived token')"));
     ck('CENSUS: t(\'long-lived token only\' has exactly 2 doors in manage-agents.js (the chip; a chipless token row\'s ident) + the chip\'s last-day key once', (maSrc.match(/t\('long-lived token only'\)/g) || []).length === 2 && (maSrc.match(/t\('long-lived token only · ends in \{left\}'/g) || []).length === 1);
     fs.copyFileSync(path.join(REPO, 'public/style.css'), path.join(dir, 'style.css'));
     const NOWB = Date.now();
@@ -1779,13 +1779,13 @@ console.log('— §10 login × long-lived token (oat-only)');
       console.log('    en row: ' + rowC.text + ' | ' + rowC.color + '\n    en pool: ' + poolC.text + ' | ' + poolC.color + '\n    base verdict row: ' + oldC.text + ' | ' + oldC.color);
       const quietOk = (c, name) => !!c && c.text.trim() === '' && c.aria === name && c.svgW > 0 && c.w <= c.svgW + 7 && c.role === 'button/0';
         ck('BROWSER: the owner\'s row (a QUIET token: not in its last day, no refusal) draws the chip as its CLOCK ALONE — no words, «long-lived token only» its screen-reader name, the warning colour, the tooltip keeps the two facts, the re-login door (role button, tabindex 0), its box the icon + its padding (' + (rowC.w || 0).toFixed(1) + ' px for a ' + (rowC.svgW || 0).toFixed(1) + ' px icon)',
-          quietOk(rowC, 'long-lived token only') && rowC.color === YELLOW && rowC.relogin === 'sub-o' && /sessions keep running on its long-lived token \(valid until/.test(rowC.title) && /only the quota refresh/.test(rowC.title));
-      ck('BROWSER: RED control — the BASE verdict for the same row draws the red "login expired … — re-login" chip', /login expired .* — re-login/.test(oldC.text) && oldC.color !== YELLOW && /every session on this account fails/.test(oldC.title));
-      ck('BROWSER: the token\'s last day counts the TOKEN down; a host section hides an oat-only row', />long-lived token only · ends in 20 h</.test(en.chips.near) && en.chips.host === '');
-      ck('BROWSER: the pool row keeps the slot truth (red) and says the pool cannot use the member\'s token', /LuMax: login signed out — re-login · the pool can’t use its long-lived token/.test(poolC.text) && poolC.color !== YELLOW && /a pooled session reads the login file/.test(poolC.title));
+          gateOf(quietOk(rowC, 'long-lived token only')) && rowC.color === YELLOW && rowC.relogin === 'sub-o' && gateOf(/sessions keep running on its long-lived token \(valid until/.test(rowC.title)) && verdictOf(/only the quota refresh/.test(rowC.title)));
+      ck('BROWSER: RED control — the BASE verdict for the same row draws the red "login expired … — re-login" chip', gateOf(/login expired .* — re-login/.test(oldC.text)) && oldC.color !== YELLOW && verdictOf(/every session on this account fails/.test(oldC.title)));
+      ck('BROWSER: the token\'s last day counts the TOKEN down; a host section hides an oat-only row', gateOf(/>long-lived token only · ends in 20 h</.test(en.chips.near)) && en.chips.host === '');
+      ck('BROWSER: the pool row keeps the slot truth (red) and says the pool cannot use the member\'s token', gateOf(/LuMax: login signed out — re-login · the pool can’t use its long-lived token/.test(poolC.text)) && poolC.color !== YELLOW && verdictOf(/a pooled session reads the login file/.test(poolC.title)));
       const zh = await look('zh');
       console.log('    zh row: ' + zh.rows[0].text + '\n    zh pool: ' + zh.rows[1].text);
-        ck('BROWSER zh: the quiet chip is the clock alone, «仅长期 token» its screen-reader name (warning colour) + the pool line keeps its words', quietOk(zh.rows[0], '仅长期 token') && zh.rows[0].color === YELLOW && zh.rows[1].text.includes('池用不了它的长期 token'));
+        ck('BROWSER zh: the quiet chip is the clock alone, «仅长期 token» its screen-reader name (warning colour) + the pool line keeps its words', gateOf(quietOk(zh.rows[0], '仅长期 token')) && zh.rows[0].color === YELLOW && verdictOf(zh.rows[1].text.includes('池用不了它的长期 token')));
       // THE WHOLE ROWS: the word once; row A's line 2 is the e-mail or empty (never "not logged in"); row B keeps e-mail · plan
       const once = (r, w) => (r.text.split(w).length - 1) === 1;
       const { A, B, Ae, amber, hostA, bare } = en.full;
@@ -1793,37 +1793,37 @@ console.log('— §10 login × long-lived token (oat-only)');
       // lane oat-chip-icon: a QUIET row says the token by its clock alone — the words are its name, never on the line
       const quietRow = (r, name) => r.chip.trim() === '' && r.chipAria === name && r.chipSvgW > 0 && r.chipW <= r.chipSvgW + 7 && r.chipRole === 'button/0' && !r.text.includes(name);
       ck('BROWSER row A (login gone, token valid, no e-mail): line 2 EMPTY, the chip its clock alone («long-lived token only» its name, not on the line), no green token tag, never "not logged in"',
-        A.tail === '' && quietRow(A, 'long-lived token only') && A.chipColor === YELLOW && A.green.length === 0 && A.amber.length === 0 && !A.notLoggedIn && !/not logged in/.test(A.text));
-      ck('BROWSER row A with a known e-mail: line 2 = the e-mail alone', Ae.tail === 'you@example.com' && quietRow(Ae, 'long-lived token only') && Ae.green.length === 0);
+        A.tail === '' && gateOf(quietRow(A, 'long-lived token only')) && A.chipColor === YELLOW && A.green.length === 0 && A.amber.length === 0 && !A.notLoggedIn && !/not logged in/.test(A.text));
+      ck('BROWSER row A with a known e-mail: line 2 = the e-mail alone', Ae.tail === 'you@example.com' && gateOf(quietRow(Ae, 'long-lived token only')) && Ae.green.length === 0);
       ck('BROWSER row B (expired login still parses loggedIn + valid token): line 2 = e-mail · plan, the chip its clock alone, no green token tag',
-        B.tail === 'you@example.com · max' && quietRow(B, 'long-lived token only') && B.chipColor === YELLOW && B.green.length === 0 && !/· long-lived token(?! only)/.test(B.text));
-      ck('BROWSER: a token in its last 30 days keeps the amber countdown tag beside the quiet chip (another fact, its words)', quietRow(amber, 'long-lived token only') && amber.amber.map((x) => x.trim()).join('|') === '· long-lived token · 12d left' && amber.green.length === 0);
-      ck('BROWSER: a host section is unchanged (no chip there; the ident says the word, no healthy tag)', hostA.chip === null && hostA.green.join('|') === 'long-lived token only' && once(hostA, 'long-lived token only'));
+        B.tail === 'you@example.com · max' && gateOf(quietRow(B, 'long-lived token only')) && B.chipColor === YELLOW && B.green.length === 0 && !/· long-lived token(?! only)/.test(B.text));
+      ck('BROWSER: a token in its last 30 days keeps the amber countdown tag beside the quiet chip (another fact, its words)', gateOf(quietRow(amber, 'long-lived token only')) && amber.amber.map((x) => x.trim()).join('|') === '· long-lived token · 12d left' && amber.green.length === 0);
+      ck('BROWSER: a host section is unchanged (no chip there; the ident says the word, no healthy tag)', hostA.chip === null && hostA.green.join('|') === 'long-lived token only' && verdictOf(once(hostA, 'long-lived token only')));
       ck('BROWSER: a token row with no chip (no login file at all) says the word in its ident, as before', bare.chip === null && bare.green[0] === 'long-lived token only' && !bare.notLoggedIn);
       const zA = zh.full.A, zB = zh.full.B;
       console.log('    zh row A: [' + zA.tail + '] ' + zA.text.trim() + '\n    zh row B: [' + zB.tail + '] ' + zB.text.trim());
-      ck('BROWSER zh rows A / B: the chip its clock alone («仅长期 token» its name), no 「· 长期 token」, no 未登录', zA.tail === '' && quietRow(zA, '仅长期 token') && zA.green.length === 0 && !zA.notLoggedIn
-        && zB.tail === 'you@example.com · max' && quietRow(zB, '仅长期 token') && zB.green.length === 0);
+      ck('BROWSER zh rows A / B: the chip its clock alone («仅长期 token» its name), no 「· 长期 token」, no 未登录', zA.tail === '' && gateOf(quietRow(zA, '仅长期 token')) && zA.green.length === 0 && !zA.notLoggedIn
+        && zB.tail === 'you@example.com · max' && gateOf(quietRow(zB, '仅长期 token')) && zB.green.length === 0);
       // lane oat-chip-icon r2: the note after a quiet chip starts at once; the token's last day is said ONCE (the chip's
       // «ends in»; the countdown tag steps aside, its hover sentence on the chip's hover; the chip keeps its re-login door)
       const { noted, last } = en.full;
       const tokenTags = (r) => r.amber.map((x) => x.trim()).filter((x) => /long-lived token/.test(x));   // the note is a hint too
       console.log('    en noted: [' + noted.soft + ']\n    en last: chip [' + last.chip.trim() + '] token tags [' + tokenTags(last).join('|') + ']');
-      ck('BROWSER r2: a quiet row\'s note starts at once — no orphan «·» after the clock («' + (noted.soft || '').trim() + '»)', quietRow(noted, 'long-lived token only') && (noted.soft || '').trim() === '3548 09');
+      ck('BROWSER r2: a quiet row\'s note starts at once — no orphan «·» after the clock («' + (noted.soft || '').trim() + '»)', gateOf(quietRow(noted, 'long-lived token only')) && (noted.soft || '').trim() === '3548 09');
       ck('BROWSER r2: the token\'s LAST DAY is said once — the chip «long-lived token only · ends in 20 h» (its re-login door), no countdown tag beside it, the countdown\'s sentence at the end of the chip\'s hover, the note behind it',
-        last.chip.trim() === 'long-lived token only · ends in 20 h' && tokenTags(last).length === 0 && last.chipRole === 'button/0' && /expires in 0\.8 days — re-mint it in «Long-lived token \(active\)…»\.$/.test(last.chipTitle) && (last.soft || '').trim() === '· 3548 09');
+        last.chip.trim() === 'long-lived token only · ends in 20 h' && tokenTags(last).length === 0 && last.chipRole === 'button/0' && gateOf(/expires in 0\.8 days — re-mint it in «Long-lived token \(active\)…»\.$/.test(last.chipTitle)) && (last.soft || '').trim() === '· 3548 09');
       const twice = await look('twice-en');
       ck('BROWSER r2: RED control — with the step-aside cut, the last day is said twice (the countdown tag beside the chip)', tokenTags(twice.full.last).join('|') === '· long-lived token · 0.8d left');
       // RED control (lane oat-chip-icon): the quiet return cut — the same rows draw today's words on the line
       const words = await look('words-en');
       ck('BROWSER: RED control — with the quiet return cut, the owner\'s row and row A draw the words «long-lived token only» on the line (the icon checks fail)',
-        !quietOk(words.rows[0], 'long-lived token only') && words.rows[0].text.trim() === 'long-lived token only' && !quietRow(words.full.A, 'long-lived token only') && once(words.full.A, 'long-lived token only'));
+        !quietOk(words.rows[0], 'long-lived token only') && words.rows[0].text.trim() === 'long-lived token only' && !quietRow(words.full.A, 'long-lived token only') && verdictOf(once(words.full.A, 'long-lived token only')));
       const base = await look('base-en');
       const bA = base.full.A, bB = base.full.B;
       console.log('    base row A: [' + bA.tail + '] ' + bA.text.trim() + '\n    base row B: [' + bB.tail + '] ' + bB.text.trim());
       ck('BROWSER: RED control — the base words draw THREE hints on row A (ident word + the chip sentence + the green tag) and none of the word on row B',
-        bA.green.map((x) => x.trim()).join('|') === 'long-lived token only|· long-lived token' && /login expired · sessions use the long-lived token/.test(bA.chip)
-        && !/long-lived token only/.test(bB.text) && bB.green.map((x) => x.trim()).join('|') === '· long-lived token' && /login expired · sessions use the long-lived token/.test(bB.chip));
+        bA.green.map((x) => x.trim()).join('|') === 'long-lived token only|· long-lived token' && gateOf(/login expired · sessions use the long-lived token/.test(bA.chip))
+        && !/long-lived token only/.test(bB.text) && bB.green.map((x) => x.trim()).join('|') === '· long-lived token' && verdictOf(/login expired · sessions use the long-lived token/.test(bB.chip)));
         // LOGIN_OAT_SHOTS=<dir> writes row-oat-only-<lang>.png (the owner's row) and pool-row-<lang>.png,
       // + row-a-<lang>.png / row-b-<lang>.png (the two whole rows; lang base-en = the RED control's words)
       if (process.env.LOGIN_OAT_SHOTS) {
@@ -1929,12 +1929,12 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
         const desk = await look(lang, false), phone = await look(lang, true);
         for (const [where, l] of [['desk sidebar', desk.desk], ['200 px sidebar', desk.min], ['phone', phone.phone]]) {
           console.log('    ' + lang + ' ' + where + ' (' + l.width + ' px): [' + l.rows.W.chip + '] ' + l.rows.W.lines + ' line · [' + l.rows.Hd.chip + '] ' + l.rows.Hd.lines + ' line');
-          ck('BROWSER ' + lang + ' ' + where + ' (' + l.width + ' px): a quiet token\'s chip is its clock alone («' + NOUN[lang] + '» its name, ' + l.rows.W.w.toFixed(1) + ' px for a ' + l.rows.W.svgW.toFixed(1) + ' px icon); a HELD file\'s says only 「' + NOUN[lang] + '」, ONE line, inside its row', nounOk(lang, l.rows));
+          ck('BROWSER ' + lang + ' ' + where + ' (' + l.width + ' px): a quiet token\'s chip is its clock alone («' + NOUN[lang] + '» its name, ' + l.rows.W.w.toFixed(1) + ' px for a ' + l.rows.W.svgW.toFixed(1) + ' px icon); a HELD file\'s says only 「' + NOUN[lang] + '」, ONE line, inside its row', verdictOf(nounOk(lang, l.rows)));
         }
         const W = desk.desk.rows.W, Hd = desk.desk.rows.Hd;
         ck('BROWSER ' + lang + ': the hover leads with the facts the chip used to say (「' + LEAD[lang][0] + '」) and keeps the rest; the re-login door stays',
-          W.title.startsWith(LEAD[lang][0]) && W.title.length > LEAD[lang][0].length + 20 && W.relogin === 'sub-w');
-        ck('BROWSER ' + lang + ': a HELD file\'s hover names the hub\'s CLI as not in the records yet (lane cli-self-measure: never «unmeasured», never "verified")', Hd.title.startsWith(LEAD[lang][1]) && !Hd.title.includes('2.1.296') && Hd.relogin === 'sub-h');
+          gateOf(W.title.startsWith(LEAD[lang][0])) && W.title.length > LEAD[lang][0].length + 20 && W.relogin === 'sub-w');
+        ck('BROWSER ' + lang + ': a HELD file\'s hover names the hub\'s CLI as not in the records yet (lane cli-self-measure: never «unmeasured», never "verified")', gateOf(Hd.title.startsWith(LEAD[lang][1])) && !Hd.title.includes('2.1.296') && Hd.relogin === 'sub-h');
       }
       const base = await look('base-en', false);
       console.log('    base desk: [' + base.desk.rows.W.chip + '] ' + base.desk.rows.W.lines + ' lines');
@@ -1969,8 +1969,8 @@ console.log('— §12 the row says why its reading ages: never probed / the last
   const keyAt = maSrc.indexOf('const keyLines = rosterAccts.map(a => {'), keyEnd = maSrc.indexOf('}).join(', keyAt);
   const keySrc = keyAt > 0 && keyEnd > keyAt ? maSrc.slice(keyAt, keyEnd) : '';
   ck('§12 WIRING: the claude row stamps the note on its usage cell and renders the cell with it; the poll\'s repaint hands the stamp back',
-    keySrc.includes("const probeNote = !selectedHost && usageStamp && usageStamp.src === 'accounts' && usageStamp.key === a.id ? acctProbeNote(a) : null;") && keySrc.includes('${probeNoteAttrs(probeNote)}') && keySrc.includes('usageHtml(rowSnap.u, rowSnap.est, probeNote)')
-    && maSrc.includes('const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset), snap.backend);') && maSrc.includes('const usageHtml = (u, est, probeNote = null) => this._acctUsageHtml(u, est, probeNote);'));
+    gateOf(keySrc.includes("const probeNote = !selectedHost && usageStamp && usageStamp.src === 'accounts' && usageStamp.key === a.id ? acctProbeNote(a) : null;")) && gateOf(keySrc.includes('${probeNoteAttrs(probeNote)}')) && gateOf(keySrc.includes('usageHtml(rowSnap.u, rowSnap.est, probeNote)'))
+    && gateOf(maSrc.includes('const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset), snap.backend);')) && verdictOf(maSrc.includes('const usageHtml = (u, est, probeNote = null) => this._acctUsageHtml(u, est, probeNote);')));
   if (!CHROME) console.log('  SKIP: no chrome binary on this machine (the §12 legs need headless chrome)');
   else {
     const { spawn } = await import('node:child_process');
@@ -2050,24 +2050,24 @@ console.log('— §12 the row says why its reading ages: never probed / the last
         const { rows: R, xss, repainted } = await look(lang), w = W[lang];
         console.log('    ' + lang + ' O age [' + R.O.age + '] «' + R.O.ageTitle + '» · chip «' + R.O.chipTitle.slice(0, 80) + '…»\n    ' + lang + ' F age «' + R.F.ageTitle + '»');
         ck('§12 BROWSER ' + lang + ': an oat-only row keeps its age («' + R.O.age + '» — the base\'s «' + base.rows.O.age + '»: a mark, the same letters in every language) and its age chip\'s tooltip says it is not probed and why (Claude Code 2.1.308 not cleared on this machine yet), refreshed by use',
-          base.rows.O.age === W.en.age && R.O.age === w.age && R.O.ageTitle.startsWith(w.ago) && R.O.ageTitle.endsWith(w.never));
+          base.rows.O.age === W.en.age && R.O.age === w.age && gateOf(R.O.ageTitle.startsWith(w.ago)) && verdictOf(R.O.ageTitle.endsWith(w.never)));
         ck('§12 BROWSER ' + lang + ': …its quiet chip (lane oat-chip-icon: the clock alone, 「仅长期 token」 its screen-reader name) — its tooltip ENDS with the same sentence (after the facts that lead it), the 登录 door stays (no new control)',
-          R.O.chip === '' && R.O.chipAria === w.chip && R.O.chipTitle.endsWith(' · ' + w.never) && R.O.chipTitle.length > w.never.length + 30 && R.O.relogin === 'sub-o' && !R.O.text.includes(w.never));
-        ck('§12 BROWSER ' + lang + ': a probeable row whose last probe failed says why on its age chip («' + w.failed + '<why>»)', R.F.ageTitle.endsWith(w.failed + 'exit 1: Not logged in · Please run /login') && !R.F.chip);
-        ck('§12 BROWSER ' + lang + ': a markup-shaped why is TEXT in the tooltip (escHtml) — no element, no script ran', R.X.ageTitle.endsWith(w.failed + 'exit 1: <img src=x onerror="window.__xss=1">') && R.X.imgs === 0 && !xss);
+          R.O.chip === '' && R.O.chipAria === w.chip && gateOf(R.O.chipTitle.endsWith(' · ' + w.never)) && R.O.chipTitle.length > w.never.length + 30 && R.O.relogin === 'sub-o' && !R.O.text.includes(w.never));
+        ck('§12 BROWSER ' + lang + ': a probeable row whose last probe failed says why on its age chip («' + w.failed + '<why>»)', gateOf(R.F.ageTitle.endsWith(w.failed + 'exit 1: Not logged in · Please run /login')) && !R.F.chip);
+        ck('§12 BROWSER ' + lang + ': a markup-shaped why is TEXT in the tooltip (escHtml) — no element, no script ran', gateOf(R.X.ageTitle.endsWith(w.failed + 'exit 1: <img src=x onerror="window.__xss=1">')) && R.X.imgs === 0 && !xss);
         ck('§12 BROWSER ' + lang + ': a failure OLDER than the reading is not said; a row with no failure says nothing new', !R.S.ageTitle.includes(w.failed) && !R.K.ageTitle.includes(w.failed) && !R.K.ageTitle.includes(w.never));
-        ck('§12 BROWSER ' + lang + ': the poll\'s repaint (_repaintRosterUsage) keeps the stamped note on the age chip', repainted === 1 && R.P && R.P.ageTitle.endsWith(w.never));
-        ck('§12 BROWSER ' + lang + ': a profile-less token says THAT on both tooltips (the fact that failed, named)', R.N.ageTitle.endsWith(w.noProfile) && R.N.chipTitle.endsWith(' · ' + w.noProfile) && R.N.chip === '' && R.N.chipAria === w.chip);
+        ck('§12 BROWSER ' + lang + ': the poll\'s repaint (_repaintRosterUsage) keeps the stamped note on the age chip', repainted === 1 && gateOf(R.P) && verdictOf(R.P.ageTitle.endsWith(w.never)));
+        ck('§12 BROWSER ' + lang + ': a profile-less token says THAT on both tooltips (the fact that failed, named)', gateOf(R.N.ageTitle.endsWith(w.noProfile)) && gateOf(R.N.chipTitle.endsWith(' · ' + w.noProfile)) && R.N.chip === '' && R.N.chipAria === w.chip);
         ck('§12 BROWSER ' + lang + ': THE ADDENDUM — an oat-only row the probe CAN prove (profile, measured CLI, written in its folder) says nothing new: no note on its age chip, its chip\'s hover as before',
           !R.Q.ageTitle.includes(w.noProfile) && !R.Q.ageTitle.includes(w.never) && !/can’t be probed|无法主动探测|自動では確認できません/.test(R.Q.ageTitle + ' ' + (R.Q.chipTitle || '')) && R.Q.ageTitle !== '');
       }
       console.log('    base O age «' + base.rows.O.ageTitle + '» · F «' + base.rows.F.ageTitle + '»');
       ck('§12 BROWSER: RED control — the base row says only the age: no «never probed» on the age chip or the chip, no «last probe failed»',
-        base.rows.O.ageTitle.startsWith(W.en.ago) && !base.rows.O.ageTitle.includes(W.en.never) && !base.rows.O.chipTitle.includes(W.en.never) && !base.rows.F.ageTitle.includes(W.en.failed) && base.rows.P.ageTitle.startsWith(W.en.ago) && !base.rows.P.ageTitle.includes(W.en.never));
+        gateOf(base.rows.O.ageTitle.startsWith(W.en.ago)) && !base.rows.O.ageTitle.includes(W.en.never) && !base.rows.O.chipTitle.includes(W.en.never) && !base.rows.F.ageTitle.includes(W.en.failed) && gateOf(base.rows.P.ageTitle.startsWith(W.en.ago)) && !base.rows.P.ageTitle.includes(W.en.never));
       sock.close();
     } catch (e) { ck('BROWSER §12 ran: ' + e.message, false); }
     finally { try { chrome.kill('SIGKILL'); } catch { } }
   }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

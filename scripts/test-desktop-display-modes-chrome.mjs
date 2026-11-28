@@ -59,7 +59,7 @@ const NOVNC = path.join(REPO, 'public/novnc.js');
 const FIXTURE = path.join(REPO, 'scripts/fixtures/stream/fake-desk-720p.h264');
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : process.env.VS_UI_SHOTS_DIR ? path.join(process.env.VS_UI_SHOTS_DIR, 'display-modes-chrome') : null; })();   // lane mac-locked-capture (recovery .399): VS_UI_SHOTS_DIR too, as test-desktop-webrtc-chrome — a ci.mjs claim passes no argv
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // THE LOCK'S INSTANT is the fixture's, handed to the page — never the wall clock (the rule since 2026-11-14: a suite that draws a
 // time reads no clock); the page draws «Mac 已锁屏（HH:MM 起）» from it in its own zone. The owner's Mac locked 2026-10-26 13:05Z.
@@ -105,7 +105,7 @@ const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const INJ = /(createInjector\(\{\s*)platform: process\.platform,/;
 const SCR = /(createScreen\(\{\s*)platform: process\.platform,/;
-ok(HELLO.test(bundleText) && INJ.test(bundleText) && SCR.test(bundleText), 'the bundle carries the hello-ack platform, THE injector\'s and THE screen source\'s (the copy patches exactly those)');
+ok(gateOf(HELLO.test(bundleText)) && gateOf(INJ.test(bundleText)) && verdictOf(SCR.test(bundleText)), 'the bundle carries the hello-ack platform, THE injector\'s and THE screen source\'s (the copy patches exactly those)');
 fs.mkdirSync(path.join(root, 'bundle'), { recursive: true });
 fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",').replace(SCR, '$1platform: "win32",'));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
@@ -113,7 +113,7 @@ process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home);
 const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: true });
 dm = new DeviceManager({ dataDir, bundlePath: path.join(root, 'bundle', 'vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
 try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; }
-ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includes('stream-screen'), 'a real agent, Windows-shaped, says stream-screen');
+ok(dm.status().info.platform === 'win32' && verdictOf(dm.status().info.capabilities.includes('stream-screen')), 'a real agent, Windows-shaped, says stream-screen');
 
 // ── the machine's VNC server (the fallback's): a stub RFB 3.8, VNC-password sign-in, one green frame ────────────────────
 function stubVnc() {
@@ -275,11 +275,11 @@ console.log('③ ONE window that switches');
   const up = await playingIn(p, WIN);
   await p.until(`document.querySelectorAll('${WIN} .desktop-strip-displays:not([hidden]) .desktop-strip-seg').length === 3`, 8000);
   const seg = await segOf(p), mt = await modeText(p);
-  ok(up && same(seg, [['1', D1.id, 'true', L1], ['2', D2.id, 'false', L2], ['全部显示器', '*', 'false', '全部一窗']]) && mt === '单屏 · 切换', '③ the switcher lists the machine\'s displays from the Windows offer — [1][2][全部显示器], titled with their own names, pixels and HDR, the streamed one (the primary) pressed — and the mode control reads 单屏 · 切换', { seg, mt });
-  ok(same(await sourcesOf(), [D1.id]), '③ one session, on the primary', await sourcesOf());
+  ok(gateOf(up) && gateOf(same(seg, [['1', D1.id, 'true', L1], ['2', D2.id, 'false', L2], ['全部显示器', '*', 'false', '全部一窗']])) && mt === '单屏 · 切换', '③ the switcher lists the machine\'s displays from the Windows offer — [1][2][全部显示器], titled with their own names, pixels and HDR, the streamed one (the primary) pressed — and the mode control reads 单屏 · 切换', { seg, mt });
+  ok(verdictOf(same(await sourcesOf(), [D1.id])), '③ one session, on the primary', await sourcesOf());
   await p.ev(`document.querySelector('${WIN} .desktop-strip-more').click()`);
   const rows = await menuRows(p);
-  ok(same(rows, [`✓ ${L1}`, '  在新窗口打开', ` ${L2}`, '  在新窗口打开']), '③ the ▾ menu: each display (✓ the shown one) and 「在新窗口打开」 under each', rows);
+  ok(verdictOf(same(rows, [`✓ ${L1}`, '  在新窗口打开', ` ${L2}`, '  在新窗口打开'])), '③ the ▾ menu: each display (✓ the shown one) and 「在新窗口打开」 under each', rows);
   await p.key('Escape', 'Escape', 27); await p.ev(`document.querySelectorAll('.context-menu').forEach((e) => e.remove())`);
   await p.shot('switch.png', WIN);
   await p.ev(`window.__watch('${WIN}')`);
@@ -289,7 +289,7 @@ console.log('③ ONE window that switches');
   const rec = await p.ev('({ blank: window.__blank, frames: window.__frames, stills: window.__stills })');
   await p.ev('window.__watching = false');
   const seg2 = await segOf(p);
-  ok(moved && seg2[1][2] === 'true' && seg2[0][2] === 'false', '③ a pick restarts the stream ON that display (the hub\'s one session now shows DISPLAY2); the pick is pressed', { seg2, src: await sourcesOf() });
+  ok(gateOf(moved) && seg2[1][2] === 'true' && seg2[0][2] === 'false', '③ a pick restarts the stream ON that display (the hub\'s one session now shows DISPLAY2); the pick is pressed', { seg2, src: await sourcesOf() });
   ok(rec.frames > 10 && rec.blank === 0 && rec.stills > 0, `③ NO blank frame through the switch: ${rec.frames} animation frames watched, ${rec.stills} of them showing THE STILL (the last picture), 0 with nothing`, rec);
   await p.shot('switch-2.png', WIN);
   // remembered: closed and opened again ⇒ it starts on DISPLAY2
@@ -298,7 +298,7 @@ console.log('③ ONE window that switches');
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const again = await playingIn(p, WIN);
   const w = (await p.ev('window.__wins()'))[0] || {};
-  ok(again && same(await sourcesOf(), [D2.id]) && w.spec && w.spec.action === 'openMachineDesktop' && w.spec.mode === 'switch' && w.spec.display === D2.id && w.spec.hostId === 'win-a' && typeof w.spec.by === 'string', '③ the display is REMEMBERED: closed and opened again, the window starts on DISPLAY2 — and its openSpec says so (machine, mode switch, display, who opened it)', { src: await sourcesOf(), spec: w.spec });
+  ok(gateOf(again) && gateOf(same(await sourcesOf(), [D2.id])) && gateOf(w.spec) && w.spec.action === 'openMachineDesktop' && w.spec.mode === 'switch' && w.spec.display === D2.id && w.spec.hostId === 'win-a' && typeof w.spec.by === 'string', '③ the display is REMEMBERED: closed and opened again, the window starts on DISPLAY2 — and its openSpec says so (machine, mode switch, display, who opened it)', { src: await sourcesOf(), spec: w.spec });
   await p.close();
 }
 console.log('③ RED CONTROL: the switch without THE STILL');
@@ -328,20 +328,20 @@ console.log('① a window PER display — and THE PER-MACHINE CAP');
   const two = (await p.until(`window.__wins().length === 2`, 8000)) && (await playingIn(p, WIN, 2));
   await untilN(async () => (await live()).length === 2, 8000);
   const wins = await p.ev('window.__wins()');
-  ok(pressed && two && same(wins.map((w) => [w.title, w.mode, w.display]), [['WIN-DESK1 — Desk 27', 'windows', D1.id], ['WIN-DESK1 — Side 32', 'windows', D2.id]]) && same(await sourcesOf(), [D1.id, D2.id].sort()), '① 「在新窗口打开」 (DISPLAY2) ⇒ two windows, each titled by its display (the first keeps DISPLAY1), each plays its own display — two sessions on the hub, one per display', { wins, src: await sourcesOf() });
+  ok(gateOf(pressed) && gateOf(two) && gateOf(same(wins.map((w) => [w.title, w.mode, w.display]), [['WIN-DESK1 — Desk 27', 'windows', D1.id], ['WIN-DESK1 — Side 32', 'windows', D2.id]])) && verdictOf(same(await sourcesOf(), [D1.id, D2.id].sort())), '① 「在新窗口打开」 (DISPLAY2) ⇒ two windows, each titled by its display (the first keeps DISPLAY1), each plays its own display — two sessions on the hub, one per display', { wins, src: await sourcesOf() });
   // lane stream-stats-popup: the numbers left the strip — each window's chip is its summary (串流 · ms · fps), its title the sentence
   await p.until(`[...document.querySelectorAll('${WIN} .desktop-strip-status')].filter((e) => /往返 \\d+ ms · 抖动 \\d+ ms · \\d+ fps/.test(e.title)).length === 2`, 10000);
   const rows = await p.ev(`[...document.querySelectorAll('${WIN}')].map((w) => { const s = w.querySelector('.desktop-strip-status'); return [w.querySelector('.desktop-strip-mode').textContent.trim(), /^串流 · \\d+ ms · \\d+ fps$/.test(s.textContent) && /往返 \\d+ ms · 抖动 \\d+ ms · \\d+ fps/.test(s.title), w.querySelector('.desktop-strip-seg[aria-pressed="true"]').textContent]; })`);
-  ok(same(rows, [['每显示器一窗', true, '1'], ['每显示器一窗', true, '2']]), '① each window has its own stats (its chip 串流 · ms · fps, the title 往返 · 抖动 · fps …), its mode control reads 每显示器一窗, its own display pressed', rows);
+  ok(verdictOf(same(rows, [['每显示器一窗', true, '1'], ['每显示器一窗', true, '2']])), '① each window has its own stats (its chip 串流 · ms · fps, the title 往返 · 抖动 · fps …), its mode control reads 每显示器一窗, its own display pressed', rows);
   await p.shot('windows.png');
   // closing one ① window stops only its stream
   await p.ev(`window.__close(window.__wins()[1].id)`);
   const one = await untilN(async () => same(await sourcesOf(), [D1.id]), 6000);
-  ok(one && (await p.ev('window.__wins().length')) === 1, '① closing DISPLAY2\'s window stops only its stream (DISPLAY1\'s window plays on)', await sourcesOf());
+  ok(gateOf(one) && (await p.ev('window.__wins().length')) === 1, '① closing DISPLAY2\'s window stops only its stream (DISPLAY1\'s window plays on)', await sourcesOf());
   // the door that names no display re-opens the remembered windows (both)
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const back = (await p.until(`window.__wins().length === 2`, 6000)) && (await untilN(async () => (await live()).length === 2, 8000));
-  ok(back, '① the door with no display (the Desktop picker / the Apps dialog) re-opens every remembered display\'s window', await p.ev('window.__wins().map((w) => w.title)'));
+  ok(verdictOf(back), '① the door with no display (the Desktop picker / the Apps dialog) re-opens every remembered display\'s window', await p.ev('window.__wins().map((w) => w.title)'));
   // THE PER-MACHINE CAP: two displays ⇒ 3 streams — another tab's ③ window is the third (taken), a fourth tab's is refused with its count
   const q = await page(1280, 800, DESK);
   await q.ev(`window.__open(${JSON.stringify(M)}, { mode: 'switch' })`);
@@ -351,7 +351,7 @@ console.log('① a window PER display — and THE PER-MACHINE CAP');
   const asked = await r4.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 15000); // the refused window shows the VNC picture (its sign-in first)
   if (asked) await r4.ev(`(() => { const f = document.querySelector('#machine-desktop-signin form'); f.querySelector('input[type=password]').value = 'pw'; f.requestSubmit(); })()`);
   const said = await r4.until(`/没有串流：这台机器已在串流 3 个画面——它有 2 个显示器，最多 3 个（每个显示器一个，再加一个）/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).title || '')`, 15000);
-  ok(third && asked && said && (await live()).length === 3, 'THE PER-MACHINE CAP: a third stream (another tab) is taken; a fourth is refused — its window shows the VNC picture and says the count: 没有串流：这台机器已在串流 3 个画面——它有 2 个显示器，最多 3 个（每个显示器一个，再加一个）', { third, asked, said, live: (await live()).length, title: await r4.ev(`(document.querySelector('${WIN} .desktop-strip-status') || {}).title || ''`) });
+  ok(gateOf(third) && gateOf(asked) && gateOf(said) && (await live()).length === 3, 'THE PER-MACHINE CAP: a third stream (another tab) is taken; a fourth is refused — its window shows the VNC picture and says the count: 没有串流：这台机器已在串流 3 个画面——它有 2 个显示器，最多 3 个（每个显示器一个，再加一个）', { third, asked, said, live: (await live()).length, title: await r4.ev(`(document.querySelector('${WIN} .desktop-strip-status') || {}).title || ''`) });
   await r4.close(); await q.close();
   await p.close();
 }
@@ -365,16 +365,16 @@ console.log('② every display in ONE window');
   await p.until(`!!document.querySelector('${WIN} .desktop-strip-mode:not([hidden])')`, 8000);
   await p.ev(`document.querySelector('${WIN} .desktop-strip-mode').click()`);
   const modes = await menuRows(p);
-  ok(same(modes, ['✓  单屏 · 切换', '  每显示器一窗', '  全部一窗']), 'the mode control lists the three modes (✓ the current one), each with its icon', modes);
+  ok(verdictOf(same(modes, ['✓  单屏 · 切换', '  每显示器一窗', '  全部一窗'])), 'the mode control lists the three modes (✓ the current one), each with its icon', modes);
   await pressMenu(p, /全部一窗/);
   const both = (await playingIn(p, WIN, 2)) && (await untilN(async () => same(await sourcesOf(), [D1.id, D2.id].sort()), 10000));
   const lay = await p.ev(`(() => { const r = (e) => { const b = e.getBoundingClientRect(); return { x: Math.round(b.left), y: Math.round(b.top), w: Math.round(b.width), h: Math.round(b.height) }; }; const area = document.querySelector('${WIN} .desktop-display-pane').parentElement; const ps = [...document.querySelectorAll('${WIN} .desktop-display-pane')].filter((e) => !e.hidden); return { area: r(area), panes: ps.map((e) => ({ id: e.dataset.display, ...r(e), video: !!e.querySelector('.stream-video') })) }; })()`);
   const a = lay.panes.find((x) => x.id === D1.id), b = lay.panes.find((x) => x.id === D2.id);
-  ok(both && a && b && a.video && b.video && Math.abs(a.x + a.w - b.x) <= 1 && Math.abs(a.y + a.h - (b.y + b.h)) <= 1 && Math.abs(b.w * 2 - a.w) <= 2 && Math.abs(b.h * 2 - a.h) <= 2 && lay.panes.every((x) => x.x >= lay.area.x && x.x + x.w <= lay.area.x + lay.area.w + 1), '② 全部一窗 ⇒ ONE window, two panes laid out as on the machine: DISPLAY2 right of DISPLAY1, bottom-aligned, half its size; both play (two sessions)', lay);
+  ok(gateOf(both) && gateOf(a) && gateOf(b) && gateOf(a.video) && gateOf(b.video) && Math.abs(a.x + a.w - b.x) <= 1 && Math.abs(a.y + a.h - (b.y + b.h)) <= 1 && Math.abs(b.w * 2 - a.w) <= 2 && Math.abs(b.h * 2 - a.h) <= 2 && verdictOf(lay.panes.every((x) => x.x >= lay.area.x && x.x + x.w <= lay.area.x + lay.area.w + 1)), '② 全部一窗 ⇒ ONE window, two panes laid out as on the machine: DISPLAY2 right of DISPLAY1, bottom-aligned, half its size; both play (two sessions)', lay);
   await p.until(`/(^|\\n)2 个显示器 · [1-9]\\d* fps · [1-9]\\d* kbps/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).title || '')`, 12000); // lane stream-stats-popup: the sum's sentence is the chip's title
   const st = await p.ev(`({ row: (document.querySelector('${WIN} .desktop-strip-status').title.split('\\n').find((l) => /^2 个显示器 · /.test(l)) || ''), chip: document.querySelector('${WIN} .desktop-strip-status').textContent, title: document.querySelector('${WIN} .desktop-strip-status').title, seg: [...document.querySelectorAll('${WIN} .desktop-strip-seg')].map((x) => x.getAttribute('aria-pressed')), mode: document.querySelector('${WIN} .desktop-strip-mode').textContent.trim() })`);
   const fpsSum = Number((/^2 个显示器 · (\d+) fps/.exec(st.row) || [])[1]);
-  ok(fpsSum >= 30 && /^串流 · 2 个显示器 · \d+ fps$/.test(st.chip) && (!/最慢/.test(st.row) || /最慢：[12] · (Desk 27|Side 32)，\d+ fps$/.test(st.row)) && st.title.includes(L1) && st.title.includes(L2) && same(st.seg, ['true', 'true', 'true']) && st.mode === '全部一窗', `② the chip's title sums the two (${st.row}); the chip says 串流 · 2 个显示器; its title has each display's numbers; every number and 全部显示器 pressed; the mode 全部一窗`, st);
+  ok(fpsSum >= 30 && gateOf(/^串流 · 2 个显示器 · \d+ fps$/.test(st.chip)) && (!/最慢/.test(st.row) || gateOf(/最慢：[12] · (Desk 27|Side 32)，\d+ fps$/.test(st.row))) && gateOf(st.title.includes(L1)) && gateOf(st.title.includes(L2)) && gateOf(same(st.seg, ['true', 'true', 'true'])) && st.mode === '全部一窗', `② the chip's title sums the two (${st.row}); the chip says 串流 · 2 个显示器; its title has each display's numbers; every number and 全部显示器 pressed; the mode 全部一窗`, st);
   await p.shot('all.png', WIN);
   // input: a click lands on the display under it, with that display's origin
   const c1 = [a.x + a.w / 2, a.y + a.h / 2], c2 = [b.x + b.w / 2, b.y + b.h / 2];
@@ -396,20 +396,20 @@ console.log('② every display in ONE window');
   n0 = psLines().length;
   await p.key('a', 'KeyA', 65);
   const keyed = await untilN(() => psLines().slice(n0).includes('K 30 0 1'), 4000);
-  ok(f1 === D1.id && f2 === D2.id && keyed, '② the keys follow the pointer: focused in DISPLAY1\'s view, the pointer moved over DISPLAY2 ⇒ DISPLAY2\'s view holds the focus; a key reaches the machine', { f1, f2, keyed });
+  ok(f1 === D1.id && f2 === D2.id && verdictOf(keyed), '② the keys follow the pointer: focused in DISPLAY1\'s view, the pointer moved over DISPLAY2 ⇒ DISPLAY2\'s view holds the focus; a key reaches the machine', { f1, f2, keyed });
   // fold DISPLAY2: a stub along the top, its stream stops, DISPLAY1 grows; the stub brings it back
   await p.move(c2[0], c2[1]);
   await p.ev(`${byDisplay(WIN + ' .desktop-display-pane', D2.id)}.querySelector('.desktop-display-fold').click()`);
   const folded = await untilN(async () => same(await sourcesOf(), [D1.id]), 6000);
   const fl = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-display-stub'); const ps = [...document.querySelectorAll('${WIN} .desktop-display-pane')].filter((e) => !e.hidden); return { stub: s ? [s.textContent, s.dataset.display, Math.round(s.getBoundingClientRect().top - s.parentElement.getBoundingClientRect().top)] : null, panes: ps.map((e) => [e.dataset.display, Math.round(e.getBoundingClientRect().width)]), seg: [...document.querySelectorAll('${WIN} .desktop-strip-seg')].map((x) => x.getAttribute('aria-pressed')) }; })()`);
-  ok(folded && fl.stub && fl.stub[0] === '2 · Side 32' && fl.stub[1] === D2.id && fl.stub[2] <= 8 && fl.panes.length === 1 && fl.panes[0][0] === D1.id && fl.panes[0][1] > a.w && same(fl.seg, ['true', 'false', 'true']), '② DISPLAY2 folded: a stub 「2 · Side 32」 along the top, its stream stopped (one session left), DISPLAY1\'s pane grew; its number unpressed', fl);
+  ok(gateOf(folded) && gateOf(fl.stub) && fl.stub[0] === '2 · Side 32' && fl.stub[1] === D2.id && fl.stub[2] <= 8 && fl.panes.length === 1 && fl.panes[0][0] === D1.id && fl.panes[0][1] > a.w && verdictOf(same(fl.seg, ['true', 'false', 'true'])), '② DISPLAY2 folded: a stub 「2 · Side 32」 along the top, its stream stopped (one session left), DISPLAY1\'s pane grew; its number unpressed', fl);
   await p.shot('all-folded.png', WIN);
   await p.ev(`document.querySelector('${WIN} .desktop-display-stub').click()`);
   const unfolded = (await untilN(async () => same(await sourcesOf(), [D1.id, D2.id].sort()), 8000)) && (await playingIn(p, WIN, 2));
   const spec = (await p.ev('window.__wins()'))[0].spec;
-  ok(unfolded && !(await p.ev(`!!document.querySelector('${WIN} .desktop-display-stub')`)) && spec.mode === 'all' && !spec.folded, '② the stub brings DISPLAY2 back (two sessions, both play); the openSpec says all, nothing folded', spec);
+  ok(gateOf(unfolded) && !(await p.ev(`!!document.querySelector('${WIN} .desktop-display-stub')`)) && spec.mode === 'all' && !spec.folded, '② the stub brings DISPLAY2 back (two sessions, both play); the openSpec says all, nothing folded', spec);
   await p.ev('window.__closeAll()');
-  ok(await untilN(async () => (await live()).length === 0, 5000), '② the window\'s × stops both streams');
+  ok(verdictOf(await untilN(async () => (await live()).length === 0, 5000)), '② the window\'s × stops both streams');
   await p.close();
 }
 
@@ -422,7 +422,7 @@ console.log('phone 375×667 with ② remembered');
   await p.until(`document.querySelectorAll('${WIN} .desktop-strip-displays:not([hidden]) .desktop-strip-seg').length >= 2`, 8000);
   await sleep(800);
   const s = { seg: await segOf(p), mode: await modeText(p), n: (await live()).length, panes: await p.ev(`document.querySelectorAll('${WIN} .stream-video').length`) };
-  ok(up && s.n === 1 && s.panes === 1 && s.mode === null && same(s.seg.map((x) => x[0]), ['1', '2']), '② remembered, yet a phone opens ③: one stream, the switcher [1][2] — no 全部显示器, no mode control', s);
+  ok(gateOf(up) && s.n === 1 && s.panes === 1 && s.mode === null && verdictOf(same(s.seg.map((x) => x[0]), ['1', '2'])), '② remembered, yet a phone opens ③: one stream, the switcher [1][2] — no 全部显示器, no mode control', s);
   await p.shot('phone.png');
   await p.close();
 }
@@ -439,7 +439,7 @@ console.log('② ON THE HDR ROAD (commit 2): two 2560-wide HDR displays share th
   const plays = await playingIn(p, WIN, 2);
   const chipOk = await p.until(`(() => { const e = document.querySelector('${WIN} .desktop-strip-scaled'); return !!e && !e.hidden && e.textContent === '已按 2 屏降分辨率' && /1280×360（原 2560×720）/.test(e.title); })()`, 8000);
   const ss = await live();
-  ok(scaledBoth && plays && chipOk && ss.every((x) => JSON.stringify(x.source.scaled) === JSON.stringify({ share: 2, step: 2, w: 1280, h: 360, from: { w: 2560, h: 720 } })), '② two HDR displays: each stream asks share 2 (the first view restarted under THE STILL), the agent maps every 2nd pixel (1280×360 of 2560×720) and the strip says 已按 2 屏降分辨率', { scaledBoth, plays, chipOk, scaled: ss.map((x) => x.source && x.source.scaled) });
+  ok(gateOf(scaledBoth) && gateOf(plays) && gateOf(chipOk) && verdictOf(ss.every((x) => JSON.stringify(x.source.scaled) === JSON.stringify({ share: 2, step: 2, w: 1280, h: 360, from: { w: 2560, h: 720 } }))), '② two HDR displays: each stream asks share 2 (the first view restarted under THE STILL), the agent maps every 2nd pixel (1280×360 of 2560×720) and the strip says 已按 2 屏降分辨率', { scaledBoth, plays, chipOk, scaled: ss.map((x) => x.source && x.source.scaled) });
   await p.shot('all-scaled.png', WIN);
   const b2 = await p.ev(`(() => { const e = [...document.querySelectorAll('${WIN} .desktop-display-pane')].find((x) => x.dataset.display === ${JSON.stringify(E2.id)}); const r = e.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; })()`);
   const n0 = psLines().length;
@@ -453,7 +453,7 @@ console.log('② ON THE HDR ROAD (commit 2): two 2560-wide HDR displays share th
   await p.ev(`[...document.querySelectorAll('${WIN} .desktop-display-pane')].find((x) => x.dataset.display === ${JSON.stringify(E2.id)}).querySelector('.desktop-display-fold').click()`);
   const whole = await untilN(async () => { const s1 = await live(); return s1.length === 1 && s1[0].source && s1[0].source.display === E1.id && !s1[0].source.scaled; }, 15000);
   const chipGone = await p.until(`document.querySelector('${WIN} .desktop-strip-scaled').hidden`, 8000);
-  ok(whole && chipGone && (await playingIn(p, WIN, 1)), '② one display left (the other folded): its stream restarts WHOLE (no share), the strip\'s 已按…降分辨率 goes', { whole, chipGone });
+  ok(gateOf(whole) && gateOf(chipGone) && (verdictOf(await playingIn(p, WIN, 1))), '② one display left (the other folded): its stream restarts WHOLE (no share), the strip\'s 已按…降分辨率 goes', { whole, chipGone });
   await p.close();
   await untilN(async () => (await live()).length === 0, 5000);
   FF.set({ raw: RAW }); fs.writeFileSync(FACTS, factsLine([D1, D2])); await dm.streamFacts({ force: true }).catch(() => null);
@@ -478,12 +478,12 @@ console.log('④ the Mac\'s Accessibility banner (commit 2): goes on the next ac
   const gone1 = await p.until(`document.querySelector('${WIN} .desktop-strip-tcc').hidden`, 8000);
   await p.ev(`window.__inj = { n: 9, refused: { code: 'accessibility_permission', at: 2000 } }`);
   const up2 = await p.until(`(() => { const e = document.querySelector('${WIN} .desktop-strip-tcc'); return !!e && !e.hidden; })()`, 8000);
-  ok(up1 && gone1 && up2, '④ refused (Accessibility) ⇒ the banner; the machine takes input again (its count 5 → 9, no newer refusal) ⇒ it goes; refused again ⇒ it is back', { up1, gone1, up2 });
+  ok(gateOf(up1) && gateOf(gone1) && verdictOf(up2), '④ refused (Accessibility) ⇒ the banner; the machine takes input again (its count 5 → 9, no newer refusal) ⇒ it goes; refused again ⇒ it is back', { up1, gone1, up2 });
   await p.shot('tcc-banner.png', WIN);
   await p.ev(`window.__inj = null; window.__startTcc = 'granted'`);
   await p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-seg')].find((b) => b.dataset.key === ${JSON.stringify(D2.id)}).click()`);
   const gone2 = await p.until(`document.querySelector('${WIN} .desktop-strip-tcc').hidden`, 15000);
-  ok(gone2 && !(await shown()), '④ a start whose facts say Accessibility granted (the switch to display 2) ⇒ the banner goes', { gone2 });
+  ok(gateOf(gone2) && !(await shown()), '④ a start whose facts say Accessibility granted (the switch to display 2) ⇒ the banner goes', { gone2 });
   await p.ev("localStorage.removeItem('vibespace.desktopModes')");
   await p.close();
 }
@@ -498,7 +498,7 @@ console.log('THE OPENSPEC: a reload, another device');
   await p.ev(`window.__replay(${JSON.stringify({ ...SPEC, mode: 'all', by: tag })}, 'win-restored-1')`);
   const mine = (await playingIn(p, WIN, 2)) && (await untilN(async () => (await live()).length === 2, 8000));
   const w1 = (await p.ev('window.__wins()'))[0] || {};
-  ok(mine && w1.id === 'win-restored-1' && w1.mode === 'all', 'a replay by THIS device (a reload): the window comes back under its own id, in its mode (②: both displays streaming)', w1);
+  ok(gateOf(mine) && w1.id === 'win-restored-1' && w1.mode === 'all', 'a replay by THIS device (a reload): the window comes back under its own id, in its mode (②: both displays streaming)', w1);
   await p.ev('window.__closeAll()');
   await untilN(async () => (await live()).length === 0, 5000);
   // another device's waits for a press
@@ -506,11 +506,11 @@ console.log('THE OPENSPEC: a reload, another device');
   const card = await p.until(`/WIN-DESK1 的桌面在另一台设备上打开过/.test((document.querySelector('${WIN} .desktop-display-say') || {}).textContent || '')`, 5000);
   await sleep(1500);
   const quiet0 = (await live()).length === 0 && !(await p.ev(`!!document.querySelector('${WIN} .stream-video')`));
-  ok(card && quiet0, 'another device\'s window (a layout replayed from elsewhere): 「WIN-DESK1 的桌面在另一台设备上打开过」 + 「在这里显示」 — no stream until the press', { card, quiet0 });
+  ok(gateOf(card) && verdictOf(quiet0), 'another device\'s window (a layout replayed from elsewhere): 「WIN-DESK1 的桌面在另一台设备上打开过」 + 「在这里显示」 — no stream until the press', { card, quiet0 });
   await p.shot('restore.png', WIN);
   await p.ev(`document.querySelector('${WIN} .desktop-display-say-act').click()`);
   const shown = (await playingIn(p, WIN)) && (await untilN(async () => same(await sourcesOf(), [D2.id]), 8000));
-  ok(shown, '「在这里显示」 streams it here, on the display its openSpec names (DISPLAY2)', await sourcesOf());
+  ok(verdictOf(shown), '「在这里显示」 streams it here, on the display its openSpec names (DISPLAY2)', await sourcesOf());
   await p.ev('window.__closeAll()');
   await untilN(async () => (await live()).length === 0, 5000);
   // a replayed window whose stream is refused never asks the sign-in by itself
@@ -523,7 +523,7 @@ console.log('THE OPENSPEC: a reload, another device');
   await p.ev(`document.querySelector('${WIN} .desktop-display-ask button').click()`);
   const dialog = await p.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 10000);
   fs.renameSync(FF.exe + '.away', FF.exe);
-  ok(ask && noDialog && dialog, 'a replayed window whose stream is refused (no ffmpeg) never asks the sign-in by itself: 「没有串流：…」 + 「显示 VNC 画面」, which asks it', { ask, noDialog, dialog });
+  ok(gateOf(ask) && gateOf(noDialog) && verdictOf(dialog), 'a replayed window whose stream is refused (no ffmpeg) never asks the sign-in by itself: 「没有串流：…」 + 「显示 VNC 画面」, which asks it', { ask, noDialog, dialog });
   await p.close();
 }
 console.log('⑤ NEVER SILENT (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi): a playing stream never shows the VNC picture by itself');
@@ -549,7 +549,7 @@ console.log('⑤ NEVER SILENT (lane stream-fallback-never-silent — incident in
   await p.ev(`(() => { const w = document.querySelector('${WIN}[data-id="${w2.id}"]'); ${byDisplay(WIN + '[data-id="' + w2.id + '"] .desktop-strip-seg', D1.id)}.click(); return !!w; })()`);
   await sleep(600);
   const each = await sourcesOf();
-  ok(picked && two && same(each, [D1.id, D2.id].sort()), '⑤ the incident\'s sequence: MODE → 每显示器一窗 ⇒ a window for DISPLAY2; its display segment 1 only shows the first window — ONE session per display (never two on one)', { picked, two, each });
+  ok(gateOf(picked) && gateOf(two) && verdictOf(same(each, [D1.id, D2.id].sort())), '⑤ the incident\'s sequence: MODE → 每显示器一窗 ⇒ a window for DISPLAY2; its display segment 1 only shows the first window — ONE session per display (never two on one)', { picked, two, each });
   const s1 = (await live()).find((s) => s.source && s.source.display === D1.id) || {};
   await p.ev(`window.__close(${JSON.stringify(w2.id)})`);
   await untilN(async () => same(await sourcesOf(), [D1.id]), 6000);
@@ -557,29 +557,29 @@ console.log('⑤ NEVER SILENT (lane stream-fallback-never-silent — incident in
   const again = await untilN(async () => { const s = (await live()).find((x) => x.sid === s1.sid); return !!(s && s.stats && s.stats.screen && s.stats.screen.captureRestarts === 1); }, 8000);
   const c1 = await clock(WIN); await sleep(1500); const c2 = await clock(WIN);
   const live1 = await live();
-  ok(again && live1.length === 1 && live1[0].sid === s1.sid && c2 > c1 + 0.5 && (await noVnc(m0)), `⑤ the second window closed and DISPLAY1's capture died under the first: the SAME session (${s1.sid}) captured it again in place — the first window still streams (its clock ${c1.toFixed(1)} → ${c2.toFixed(1)} s), no VNC bridge, no sign-in`, { again, live: live1.map((s) => [s.sid, s.source && s.source.display]), c1, c2, conns: vnc.seen.conns - m0.conns });
+  ok(gateOf(again) && live1.length === 1 && live1[0].sid === s1.sid && c2 > c1 + 0.5 && (verdictOf(await noVnc(m0))), `⑤ the second window closed and DISPLAY1's capture died under the first: the SAME session (${s1.sid}) captured it again in place — the first window still streams (its clock ${c1.toFixed(1)} → ${c2.toFixed(1)} s), no VNC bridge, no sign-in`, { again, live: live1.map((s) => [s.sid, s.source && s.source.display]), c1, c2, conns: vnc.seen.conns - m0.conns });
   await p.shot('never-silent-plays.png', WIN);
   // the source runs out of restarts (capture_interrupted) ⇒ the window says so and starts the same display again
   fs.writeFileSync(DIE_N, '3');
   const said = await p.until(`/串流中断：机器的屏幕采集一再中断——正在重新连接/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 12000);
   const back = (await untilN(async () => { const l = await live(); return l.length === 1 && l[0].sid !== s1.sid && l[0].source && l[0].source.display === D1.id; }, 10000)) && (await playingIn(p, WIN));
-  ok(said && back && (await noVnc(m0)), '⑤ the source ran out of restarts (capture_interrupted): 「串流中断：机器的屏幕采集一再中断——正在重新连接…」 and the SAME display again 1 s on — it plays; no VNC bridge, no sign-in', { said, back, live: (await live()).map((s) => s.source && s.source.display) });
+  ok(gateOf(said) && gateOf(back) && (verdictOf(await noVnc(m0))), '⑤ the source ran out of restarts (capture_interrupted): 「串流中断：机器的屏幕采集一再中断——正在重新连接…」 and the SAME display again 1 s on — it plays; no VNC bridge, no sign-in', { said, back, live: (await live()).map((s) => s.source && s.source.display) });
   // … and ends again within the minute ⇒ the person chooses; nothing starts by itself
   fs.writeFileSync(DIE_N, '3');
   const asked = await p.until(`(() => { const s = document.querySelector('${WIN} .desktop-display-say'); return !!s && s.querySelectorAll('button').length === 2; })()`, 15000);
   await sleep(2500);
   const ask = await say(), quiet1 = (await live()).length === 0 && (await noVnc(m0)), held = await p.ev(`!!document.querySelector('${WIN} .desktop-display-still')`);
-  ok(asked && ask && ask.text === '串流中断：机器的屏幕采集一再中断' && same(ask.buttons, ['重试', '显示 VNC 画面']) && quiet1 && held, '⑤ ended again within the minute: 「串流中断：机器的屏幕采集一再中断」 over the last picture with TWO buttons 「重试」 「显示 VNC 画面」 — 2.5 s on nothing started by itself: no stream, no VNC bridge, no sign-in', { ask, quiet1, held, note: await noteText() });
+  ok(gateOf(asked) && gateOf(ask) && ask.text === '串流中断：机器的屏幕采集一再中断' && gateOf(same(ask.buttons, ['重试', '显示 VNC 画面'])) && gateOf(quiet1) && verdictOf(held), '⑤ ended again within the minute: 「串流中断：机器的屏幕采集一再中断」 over the last picture with TWO buttons 「重试」 「显示 VNC 画面」 — 2.5 s on nothing started by itself: no stream, no VNC bridge, no sign-in', { ask, quiet1, held, note: await noteText() });
   await p.shot('never-silent-ask.png', WIN);
   await p.ev(`document.querySelectorAll('${WIN} .desktop-display-say button')[0].click()`);
   const retried = (await untilN(async () => (await live()).length === 1, 8000)) && (await playingIn(p, WIN));
-  ok(retried && !(await say()) && !(await p.ev(`!!document.querySelector('${WIN} .desktop-display-still')`)) && (await noVnc(m0)), '⑤ 「重试」 ⇒ the display streams again; the ask and the last picture go', { retried, ask: await say() });
+  ok(gateOf(retried) && !(await say()) && !(await p.ev(`!!document.querySelector('${WIN} .desktop-display-still')`)) && (verdictOf(await noVnc(m0))), '⑤ 「重试」 ⇒ the display streams again; the ask and the last picture go', { retried, ask: await say() });
   fs.writeFileSync(DIE_N, '3');
   const asked2 = await p.until(`(() => { const s = document.querySelector('${WIN} .desktop-display-say'); return !!s && s.querySelectorAll('button').length === 2; })()`, 15000);
   const quiet2 = await noVnc(m0);
   await p.ev(`document.querySelectorAll('${WIN} .desktop-display-say button')[1].click()`);
   const dialog = await p.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 10000);
-  ok(asked2 && quiet2 && dialog && vnc.seen.conns > m0.conns, '⑤ ended again ⇒ asked again (still no VNC); 「显示 VNC 画面」 ⇒ the VNC picture — its sign-in — only on that press', { asked2, quiet2, dialog, conns: vnc.seen.conns - m0.conns });
+  ok(gateOf(asked2) && gateOf(quiet2) && gateOf(dialog) && vnc.seen.conns > m0.conns, '⑤ ended again ⇒ asked again (still no VNC); 「显示 VNC 画面」 ⇒ the VNC picture — its sign-in — only on that press', { asked2, quiet2, dialog, conns: vnc.seen.conns - m0.conns });
   await p.close();
   fs.writeFileSync(DIE_N, '0');
   // a display REALLY gone (unplugged under its capture: two facts reads 1 s apart lack it) ⇒ the same display is refused ⇒ the main one
@@ -593,12 +593,12 @@ console.log('⑤ NEVER SILENT (lane stream-fallback-never-silent — incident in
   await q.ev(`${byDisplay(WIN + ' .desktop-strip-seg', D2.id)}.click()`);
   const onD2 = (await untilN(async () => same(await sourcesOf(), [D2.id]), 10000)) && (await playingIn(q, WIN));
   const switched = hubLines.slice(m1.lines).some((l) => l.includes(`session ${sw0.sid} stopped (switched)`));
-  ok(onD2 && switched && (await live()).length === 1, '⑤ a display switch leaves ONE session — the old one stopped `switched` (the hub\'s log says so)', { onD2, switched, live: (await live()).length });
+  ok(gateOf(onD2) && gateOf(switched) && (await live()).length === 1, '⑤ a display switch leaves ONE session — the old one stopped `switched` (the hub\'s log says so)', { onD2, switched, live: (await live()).length });
   fs.writeFileSync(FACTS, factsLine([D1])); // DISPLAY2 unplugged …
   fs.writeFileSync(DIE_N, '1'); // … under its capture
   const main = (await untilN(async () => same(await sourcesOf(), [D1.id]), 15000)) && (await playingIn(q, WIN));
   const qSignin = await q.ev(`!!document.querySelector('#machine-desktop-signin')`);
-  ok(main && vnc.seen.conns === m1.conns && !qSignin && hubLines.slice(m1.lines).some((l) => /stopped \(display_gone\)/.test(l)), '⑤ DISPLAY2 really gone (display_gone after two reads): the same display again is refused ⇒ the MAIN display streams — no VNC bridge, no sign-in', { main, src: await sourcesOf(), conns: vnc.seen.conns - m1.conns });
+  ok(gateOf(main) && vnc.seen.conns === m1.conns && !qSignin && verdictOf(hubLines.slice(m1.lines).some((l) => /stopped \(display_gone\)/.test(l))), '⑤ DISPLAY2 really gone (display_gone after two reads): the same display again is refused ⇒ the MAIN display streams — no VNC bridge, no sign-in', { main, src: await sourcesOf(), conns: vnc.seen.conns - m1.conns });
   fs.writeFileSync(FACTS, factsLine([D1, D2]));
   await q.ev("localStorage.removeItem('vibespace.desktopModes')");
   await q.close();
@@ -614,7 +614,7 @@ console.log('⑤ RED CONTROL: the pre-lane fallback');
   const c0 = vnc.seen.conns;
   fs.writeFileSync(DIE_N, '3');
   const dialog = await p.until(`!!document.querySelector('#machine-desktop-signin')`, 15000);
-  ok(dialog && vnc.seen.conns > c0, '⑤ RED CONTROL: the pre-lane fallback (the ladder never asked) — the same ending opens the VNC picture by itself (its sign-in on the screen, an upstream to the VNC server): the incident', { dialog, conns: vnc.seen.conns - c0 });
+  ok(gateOf(dialog) && vnc.seen.conns > c0, '⑤ RED CONTROL: the pre-lane fallback (the ladder never asked) — the same ending opens the VNC picture by itself (its sign-in on the screen, an upstream to the VNC server): the incident', { dialog, conns: vnc.seen.conns - c0 });
   fs.writeFileSync(DIE_N, '0');
   await p.close();
 }
@@ -668,11 +668,11 @@ console.log('⑥ THE STALL (lane stream-leg-flap — the owner\'s two displays s
     return r;
   }
   const S = await stallRun('/');
-  ok(S.both && S.black && S.dropped > 100, `② both displays play over the relay; the machine's pictures then fall into the black hole (${S.dropped} RTP datagrams dropped, ICE still connected) — the chip reads the owner's «${S.blackChip}»`, S);
-  ok(S.said && S.saidMs >= SM.STREAM_LIMITS.stallMs - 2000 && S.saidMs <= SM.STREAM_LIMITS.stallMs + 6000 && S.stalled === 2, `THE STALL: ${S.saidMs} ms after the pictures stopped (stallMs ${SM.STREAM_LIMITS.stallMs}) each pane says 「串流中断：画面不再传过来——正在重新连接…」 and both sessions end «stopped (stalled)» on the hub's record`, S);
-  ok(S.again && S.offered === 2 && S.vnc === 0 && /^串流 · (?:设备链路 · )?2 个显示器 · [1-9]\d* fps$/.test(S.chip), `…and the window offers both displays again BY ITSELF (2 new sessions), both play, the words go — no VNC picture, nothing to press (${S.chip})`, S);
+  ok(gateOf(S.both) && gateOf(S.black) && S.dropped > 100, `② both displays play over the relay; the machine's pictures then fall into the black hole (${S.dropped} RTP datagrams dropped, ICE still connected) — the chip reads the owner's «${S.blackChip}»`, S);
+  ok(gateOf(S.said) && S.saidMs >= SM.STREAM_LIMITS.stallMs - 2000 && S.saidMs <= SM.STREAM_LIMITS.stallMs + 6000 && S.stalled === 2, `THE STALL: ${S.saidMs} ms after the pictures stopped (stallMs ${SM.STREAM_LIMITS.stallMs}) each pane says 「串流中断：画面不再传过来——正在重新连接…」 and both sessions end «stopped (stalled)» on the hub's record`, S);
+  ok(gateOf(S.again) && S.offered === 2 && S.vnc === 0 && verdictOf(/^串流 · (?:设备链路 · )?2 个显示器 · [1-9]\d* fps$/.test(S.chip)), `…and the window offers both displays again BY ITSELF (2 new sessions), both play, the words go — no VNC picture, nothing to press (${S.chip})`, S);
   const C = await stallRun('/nostall');
-  ok(C.both && C.black && !C.said && C.stalled === 0 && C.offered === 0 && /^串流 · (?:设备链路 · )?2 个显示器 · 0 fps$/.test(C.chip), `RED CONTROL — the page without THE STALL rule in the same black hole: «${C.chip}» ${Math.round((SM.STREAM_LIMITS.stallMs + 6000) / 1000)} s on, nothing said, no session ended or offered (the owner's window)`, C);
+  ok(gateOf(C.both) && gateOf(C.black) && !C.said && C.stalled === 0 && C.offered === 0 && verdictOf(/^串流 · (?:设备链路 · )?2 个显示器 · 0 fps$/.test(C.chip)), `RED CONTROL — the page without THE STALL rule in the same black hole: «${C.chip}» ${Math.round((SM.STREAM_LIMITS.stallMs + 6000) / 1000)} s on, nothing said, no session ended or offered (the owner's window)`, C);
 }
 
 console.log('⑦ THE LOCK OVER A ROAD (lane mac-locked-capture × stream-udp-leg-fallback, recovery .399 — where the two pieces meet on the chip)');
@@ -701,15 +701,15 @@ console.log('⑦ THE LOCK OVER A ROAD (lane mac-locked-capture × stream-udp-leg
     const locked = await p.until(`/^串流 · 锁屏中/.test(${CHIPQ}.textContent || '') && ((${CHIPQ}.title || '').match(/串流 · 锁屏中/g) || []).length >= ${n === 1 ? 0 : n} && ${PANESQ} >= ${n}`, n === 1 ? 8000 : 30000);
     await sleep(400); await p.shot(file, WIN);   // the picture BEFORE the verdict: on the release tree it shows what the release says
     const r = await p.ev(`({ chip: ${CHIPQ}.textContent || '', title: ${CHIPQ}.title || '', panes: ${PANESQ} })`);
-    ok(up && road && locked && r.panes >= n && !/设备链路/.test(r.chip) && (n === 1 ? /已锁屏/.test(r.title) : (r.title.match(/串流 · 锁屏中/g) || []).length >= n), `⑦ ${n === 1 ? 'one display' : 'every display in one window'} over the device link, the Mac locked: THE LOCK wins over the road — the chip 串流 · 锁屏中 (never 设备链路 · N fps over a black pane), its title ${n === 1 ? 'the lock\'s words' : 'locked per display'}, and ${n === 1 ? 'its pane' : 'EVERY display\'s pane (the one view moved into the set too)'} says 已锁屏`, r);
+    ok(gateOf(up) && gateOf(road) && gateOf(locked) && r.panes >= n && !/设备链路/.test(r.chip) && (n === 1 ? verdictOf(/已锁屏/.test(r.title)) : (r.title.match(/串流 · 锁屏中/g) || []).length >= n), `⑦ ${n === 1 ? 'one display' : 'every display in one window'} over the device link, the Mac locked: THE LOCK wins over the road — the chip 串流 · 锁屏中 (never 设备链路 · N fps over a black pane), its title ${n === 1 ? 'the lock\'s words' : 'locked per display'}, and ${n === 1 ? 'its pane' : 'EVERY display\'s pane (the one view moved into the set too)'} says 已锁屏`, r);
     if (n > 1) { // collapsed to one display while locked: that display's view becomes the one — its pane still says the lock (recovery .401)
       await p.ev(`${byDisplay(WIN + ' .desktop-strip-seg', D1.id)}.click()`);
       const one = await p.until(`document.querySelectorAll('${WIN} .desktop-display-pane').length === 1 && ${PANESQ} === 1 && /^串流 · 锁屏中/.test(${CHIPQ}.textContent || '')`, 15000);
-      ok(one, '⑦ …collapsed to ONE display while the Mac is locked: the view that stays says the lock in its pane, the chip 串流 · 锁屏中', await p.ev(`({ panes: document.querySelectorAll('${WIN} .desktop-display-pane').length, said: ${PANESQ}, chip: ${CHIPQ}.textContent || '' })`));
+      ok(verdictOf(one), '⑦ …collapsed to ONE display while the Mac is locked: the view that stays says the lock in its pane, the chip 串流 · 锁屏中', await p.ev(`({ panes: document.querySelectorAll('${WIN} .desktop-display-pane').length, said: ${PANESQ}, chip: ${CHIPQ}.textContent || '' })`));
     }
     await p.ev('window.__locked = 0; true');
     const back = await p.until(`/^串流 · 设备链路 · /.test(${CHIPQ}.textContent || '')`, 8000);
-    ok(back, `⑦ …the unlock: the road's words come back by themselves (${n} display${n > 1 ? 's' : ''})`);
+    ok(verdictOf(back), `⑦ …the unlock: the road's words come back by themselves (${n} display${n > 1 ? 's' : ''})`);
     await p.close();
   }
   roadHub.shutdown();
@@ -717,4 +717,4 @@ console.log('⑦ THE LOCK OVER A ROAD (lane mac-locked-capture × stream-udp-leg
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

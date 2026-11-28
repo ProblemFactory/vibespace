@@ -62,7 +62,7 @@ if (skipWhy) { console.log(`SKIP: ${skipWhy}`); process.exit(0); }
 const VW = 1920, VH = 963, SIDEBAR = 470;
 
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
 
@@ -135,7 +135,7 @@ const bootServer = async (t, name) => {
 
 const T = mkTree('ours');
 const S = await bootServer(T, 'deskapp-fixed-home');
-check('the scratch tree\'s server boots (under its own dbus-run-session)', S.up, S.log.join('').slice(-1500));
+check('the scratch tree\'s server boots (under its own dbus-run-session)', verdictOf(S.up), S.log.join('').slice(-1500));
 const [CDP_PORT] = await freePorts(1);
 chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', `--window-size=${VW},${VH + 100}`, `--user-data-dir=${CHROME_DIR}`, 'about:blank'], { stdio: 'ignore', detached: true });
 const WebSocket = require('ws');
@@ -278,9 +278,9 @@ async function runConfig(origin, { dpr, lang, label, tree, control = false }) {
     out.normal = m;
     console.log(`  ${tag} NORMAL: record scale ${L.rec.scale}; window ${fmt(m.win)} pane ${fmt(m.pane)} picture ${fmt(m.pic)} (X ${m.xwin && `${m.xwin.w}×${m.xwin.h}`}) stage ${m.stage} badge ${JSON.stringify(m.badge)} lock ${JSON.stringify(m.lock)} — blank ${blankPct(m)} %; strip "${m.strip}"`);
     if (!control) {
-      check(`${tag} NORMAL: the pane IS the picture (400×300 CSS, ≤ 0.5 CSS px each side), stage 1, no badge, the window locked`, framed(m) && near(m.pic.w, 400) && near(m.pic.h, 300) && m.stage === 1 && m.badge === null && m.cls && !!m.lock, m);
+      check(`${tag} NORMAL: the pane IS the picture (400×300 CSS, ≤ 0.5 CSS px each side), stage 1, no badge, the window locked`, gateOf(framed(m)) && gateOf(near(m.pic.w, 400)) && gateOf(near(m.pic.h, 300)) && m.stage === 1 && m.badge === null && gateOf(m.cls) && !!m.lock, m);
       const e = await ev(EDGES(L.id, await shotOf()));
-      check(`${tag} NORMAL: all four red edges of the picture are on screen (left ${e.left.ok}/${e.left.n}, right ${e.right.ok}/${e.right.n}, top ${e.top.ok}/${e.top.n}, bottom ${e.bottom.ok}/${e.bottom.n})`, ['left', 'right', 'top', 'bottom'].every((k) => e[k].n >= 20 && e[k].ok >= e[k].n - 1), e);
+      check(`${tag} NORMAL: all four red edges of the picture are on screen (left ${e.left.ok}/${e.left.n}, right ${e.right.ok}/${e.right.n}, top ${e.top.ok}/${e.top.n}, bottom ${e.bottom.ok}/${e.bottom.n})`, verdictOf(['left', 'right', 'top', 'bottom'].every((k) => e[k].n >= 20 && e[k].ok >= e[k].n - 1)), e);
       check(`${tag} NORMAL: no resize handle and no maximize button is displayed`, !m.handles && !m.maxBtn, { handles: m.handles, maxBtn: m.maxBtn });
       const tbY = m.tb.y + m.tb.h / 2, tbX = m.tb.x + Math.min(m.tb.w * 0.3, 120);
       await mouse('mouseMoved', tbX, tbY);
@@ -289,25 +289,25 @@ async function runConfig(origin, { dpr, lang, label, tree, control = false }) {
       await sleep(600);
       await ev(`(() => { const w = ${FIND(L.id)}; app.wm.toggleMaximize(w.id); return true; })()`); await sleep(400);
       const m1 = await ev(MEAS(L.id));
-      check(`${tag} NORMAL: a double-click on the title bar and the maximize command leave it unmaximized at its size`, !m1.max && near(m1.win.w, m.win.w) && near(m1.win.h, m.win.h), { before: m.win, after: m1.win, max: m1.max });
+      check(`${tag} NORMAL: a double-click on the title bar and the maximize command leave it unmaximized at its size`, !m1.max && gateOf(near(m1.win.w, m.win.w)) && verdictOf(near(m1.win.h, m.win.h)), { before: m.win, after: m1.win, max: m1.max });
       await drag(m1.win.r - 3, m1.win.b - 3, m1.win.r + 200, m1.win.b + 120);
       const m2 = await settle(L.id, 5000);
-      check(`${tag} NORMAL: a trusted drag at its bottom-right corner does not resize it (${fmt(m2.win)})`, near(m2.win.w, m.win.w) && near(m2.win.h, m.win.h) && framed(m2), m2.win);
+      check(`${tag} NORMAL: a trusted drag at its bottom-right corner does not resize it (${fmt(m2.win)})`, gateOf(near(m2.win.w, m.win.w)) && gateOf(near(m2.win.h, m.win.h)) && verdictOf(framed(m2)), m2.win);
       await drag(m2.tb.x + 40, m2.tb.y + m2.tb.h / 2, m2.ws.r - 6, m2.ws.y + m2.ws.h / 2);
       const m3 = await settle(L.id, 5000);
-      check(`${tag} NORMAL: a title-bar drag onto the right snap zone moves it and never sizes it (${fmt(m3.win)})`, near(m3.win.w, m.win.w) && near(m3.win.h, m.win.h) && !near(m3.win.x, m2.win.x, 20) && framed(m3), m3.win);
+      check(`${tag} NORMAL: a title-bar drag onto the right snap zone moves it and never sizes it (${fmt(m3.win)})`, gateOf(near(m3.win.w, m.win.w)) && gateOf(near(m3.win.h, m.win.h)) && !near(m3.win.x, m2.win.x, 20) && verdictOf(framed(m3)), m3.win);
       await ev('app.wm.setGrid(1, 3); true'); await sleep(500);
       await drag(m3.tb.x + 40, m3.tb.y + m3.tb.h / 2, m3.ws.x + m3.ws.w * 0.5, m3.ws.y + m3.ws.h * 0.5);
       const m4 = await settle(L.id, 5000);
       await ev('app.wm.setGrid(null); true'); await sleep(300);
-      check(`${tag} NORMAL: a drop on the middle cell of a 1×3 grid never sizes it (${fmt(m4.win)})`, near(m4.win.w, m.win.w) && near(m4.win.h, m.win.h) && framed(m4), m4.win);
+      check(`${tag} NORMAL: a drop on the middle cell of a 1×3 grid never sizes it (${fmt(m4.win)})`, gateOf(near(m4.win.w, m.win.w)) && gateOf(near(m4.win.h, m.win.h)) && verdictOf(framed(m4)), m4.win);
       // RELEASE: the fixed window replaced by a resizable main (WeChat's login → its main window)
       const pid = (await (await fetch(`${origin}/api/desktop/apps/${L.id}`)).json()).pids?.app;
       const pre = m4.pre;
       try { process.kill(pid, 'SIGUSR1'); } catch (err) { check(`${tag} RELEASE: the fixture takes SIGUSR1`, false, String(err)); }
       const r = await until(async () => { const x = await ev(MEAS(L.id)); return x && !x.lock && x.pic && x.xwin && x.xwin.kind === 'main' && !x.fixed ? x : null; }, 20000, 300);
       const m5 = r ? await settle(L.id, 6000) : await ev(MEAS(L.id));
-      check(`${tag} RELEASE: the resizable main replaces it ⇒ unlocked, the handles and maximize back, the window at its size before the lock (${JSON.stringify(pre)} ⇒ ${fmt(m5.win)}), the new main fills the pane`, !!r && !m5.cls && m5.handles && m5.maxBtn && !!pre && near(m5.win.w, parseFloat(pre.width) + 0, 1) && near(m5.win.h, parseFloat(pre.height), 1) && framed(m5), { pre, m5 });
+      check(`${tag} RELEASE: the resizable main replaces it ⇒ unlocked, the handles and maximize back, the window at its size before the lock (${JSON.stringify(pre)} ⇒ ${fmt(m5.win)}), the new main fills the pane`, !!r && !m5.cls && gateOf(m5.handles) && gateOf(m5.maxBtn) && !!pre && gateOf(near(m5.win.w, parseFloat(pre.width) + 0, 1)) && gateOf(near(m5.win.h, parseFloat(pre.height), 1)) && verdictOf(framed(m5)), { pre, m5 });
     }
     await stop(origin, L.id);
   }
@@ -317,7 +317,7 @@ async function runConfig(origin, { dpr, lang, label, tree, control = false }) {
     const m = await settle(L.id);
     out.dialog = m;
     console.log(`  ${tag} DIALOG: window ${fmt(m.win)} pane ${fmt(m.pane)} picture ${fmt(m.pic)} X ${JSON.stringify(m.xwin)} main ${m.mainWid} — blank ${blankPct(m)} %`);
-    if (!control) check(`${tag} DIALOG: the lone fixed dialog is the picture at the pane's origin (X 0,0) and the pane IS it (480×700 CSS)`, framed(m) && m.xwin && m.xwin.kind === 'dialog' && m.xwin.x === 0 && m.xwin.y === 0 && near(m.pic.w, 480) && near(m.pic.h, 700) && m.cls, m);
+    if (!control) check(`${tag} DIALOG: the lone fixed dialog is the picture at the pane's origin (X 0,0) and the pane IS it (480×700 CSS)`, gateOf(framed(m)) && gateOf(m.xwin) && m.xwin.kind === 'dialog' && m.xwin.x === 0 && m.xwin.y === 0 && gateOf(near(m.pic.w, 480)) && gateOf(near(m.pic.h, 700)) && verdictOf(m.cls), m);
     await stop(origin, L.id);
   }
   // ── BIG 1000×900 at DPR 2: larger than the workspace ──
@@ -330,19 +330,19 @@ async function runConfig(origin, { dpr, lang, label, tree, control = false }) {
       console.log(`  ${tag} BIG: window ${fmt(m.win)} on a workspace ${fmt(m.ws)}; pane ${fmt(m.pane)} picture ${fmt(m.pic)} stage ${m.stage} badge ${JSON.stringify(m.badge)}${e ? ` — ${e.hiddenB.toFixed(1)} CSS px of the picture past the workspace's bottom edge` : ''}`);
       let last = L.id;
       if (!control) {
-        check(`${tag} BIG: a fixed window larger than the workspace keeps the app's size (pane = the 1000×900 CSS picture, stage 1, no badge), its top on the workspace`, framed(m) && near(m.pic.w, 1000) && near(m.pic.h, 900) && m.stage === 1 && m.badge === null && m.win.h > m.ws.h && near(m.win.y, m.ws.y, 1), m);
-        check(`${tag} BIG: its left, right and top red edges are on screen; the bottom is past the workspace (${e.hiddenB.toFixed(1)} CSS px — movable, the Scale ▸ menu is the lever)`, ['left', 'right', 'top'].every((k) => e[k].n >= 20 && e[k].ok >= e[k].n - 1) && e.hiddenB > 0, e);
+        check(`${tag} BIG: a fixed window larger than the workspace keeps the app's size (pane = the 1000×900 CSS picture, stage 1, no badge), its top on the workspace`, gateOf(framed(m)) && gateOf(near(m.pic.w, 1000)) && gateOf(near(m.pic.h, 900)) && m.stage === 1 && m.badge === null && m.win.h > m.ws.h && verdictOf(near(m.win.y, m.ws.y, 1)), m);
+        check(`${tag} BIG: its left, right and top red edges are on screen; the bottom is past the workspace (${e.hiddenB.toFixed(1)} CSS px — movable, the Scale ▸ menu is the lever)`, gateOf(['left', 'right', 'top'].every((k) => e[k].n >= 20 && e[k].ok >= e[k].n - 1)) && e.hiddenB > 0, e);
         // lane app-window-fit-topleft (B-1f0b): the workspace's top-left, our bar and its ✕ on screen; Scale ▸ 1× shows the rest
         const s = out.bigStrip = await ev(STRIP(L.id));
         console.log(`  ${tag} BIG: ${stripLine(s)}`);
-        check(`${tag} BIG: it stands at the WORKSPACE'S TOP-LEFT (${(s.win.x - s.ws.x).toFixed(1)},${(s.win.y - s.ws.y).toFixed(1)} from it — never the cascade's x)`, topLeft(s), s);
-        check(`${tag} BIG: our chrome strip — the title bar — is inside the workspace and its ✕ is on screen: a click at the ✕'s centre hits the ✕`, inside(s.tb, s.ws) && inside(s.close, s.ws) && s.closeHit, s);
+        check(`${tag} BIG: it stands at the WORKSPACE'S TOP-LEFT (${(s.win.x - s.ws.x).toFixed(1)},${(s.win.y - s.ws.y).toFixed(1)} from it — never the cascade's x)`, verdictOf(topLeft(s)), s);
+        check(`${tag} BIG: our chrome strip — the title bar — is inside the workspace and its ✕ is on screen: a click at the ✕'s centre hits the ✕`, gateOf(inside(s.tb, s.ws)) && gateOf(inside(s.close, s.ws)) && verdictOf(s.closeHit), s);
         const one = await scaleOne(L.id);
         if (one.nid) last = one.nid;
         const m1 = one.connected ? await settle(one.nid, 12000) : null;
         const e1 = m1 ? await ev(EDGES(one.nid, await shotOf())) : null, s1 = m1 ? await ev(STRIP(one.nid)) : null;
         if (m1) console.log(`  ${tag} BIG after Scale ▸ 1×: window ${fmt(m1.win)} pane ${fmt(m1.pane)} picture ${fmt(m1.pic)} — ${e1.hiddenB.toFixed(1)} CSS px past the workspace's bottom edge`);
-        check(`${tag} BIG: Scale ▸ 1× (its row, the confirm) relaunches the app in the SAME window, which then shows all of it — the four red edges on screen, nothing past the workspace (${e1 ? e1.hiddenB.toFixed(1) : '?'} CSS px), the window inside it`, !!m1 && framed(m1) && ['left', 'right', 'top', 'bottom'].every((k) => e1[k].n >= 20 && e1[k].ok >= e1[k].n - 1) && e1.hiddenB === 0 && inside(s1.win, s1.ws, 1), { one, m1, e1, s1 });
+        check(`${tag} BIG: Scale ▸ 1× (its row, the confirm) relaunches the app in the SAME window, which then shows all of it — the four red edges on screen, nothing past the workspace (${e1 ? e1.hiddenB.toFixed(1) : '?'} CSS px), the window inside it`, !!m1 && gateOf(framed(m1)) && gateOf(['left', 'right', 'top', 'bottom'].every((k) => e1[k].n >= 20 && e1[k].ok >= e1[k].n - 1)) && e1.hiddenB === 0 && verdictOf(inside(s1.win, s1.ws, 1)), { one, m1, e1, s1 });
       }
       await stop(origin, last);
     }
@@ -354,8 +354,8 @@ async function runConfig(origin, { dpr, lang, label, tree, control = false }) {
         const s = out.wideStrip = await ev(STRIP(L.id));
         console.log(`  ${tag} WIDE: picture ${fmt(m.pic)} stage ${m.stage}; ${stripLine(s)}`);
         {
-          check(`${tag} WIDE: a fixed window WIDER than the workspace keeps the app's size (the 1500×300 CSS picture, stage 1) and stands at the workspace's top-left`, framed(m) && near(m.pic.w, 1500) && near(m.pic.h, 300) && m.stage === 1 && s.win.w > s.ws.w && topLeft(s), { m, s });
-          check(`${tag} WIDE: its title bar is held to the workspace (${s.barMax}) — the bar inside it, the ✕ on screen and hit by a click at its centre`, inside(s.tb, s.ws) && inside(s.close, s.ws) && s.closeHit, s);
+          check(`${tag} WIDE: a fixed window WIDER than the workspace keeps the app's size (the 1500×300 CSS picture, stage 1) and stands at the workspace's top-left`, gateOf(framed(m)) && gateOf(near(m.pic.w, 1500)) && gateOf(near(m.pic.h, 300)) && m.stage === 1 && s.win.w > s.ws.w && verdictOf(topLeft(s)), { m, s });
+          check(`${tag} WIDE: its title bar is held to the workspace (${s.barMax}) — the bar inside it, the ✕ on screen and hit by a click at its centre`, gateOf(inside(s.tb, s.ws)) && gateOf(inside(s.close, s.ws)) && verdictOf(s.closeHit), s);
         }
         await stop(origin, L.id);
       }
@@ -387,9 +387,9 @@ async function runConfig(origin, { dpr, lang, label, tree, control = false }) {
     }
     out.workarea = steps;
     if (!control) {
-      check(`${tag} WORK AREA: after the 1st resize (smaller) X's root is the pane and _NET_WORKAREA is that whole root`, steps[0].follows, steps[0]);
-      check(`${tag} WORK AREA: after the 2nd resize (larger than the hello's pane) _NET_WORKAREA still equals the pane (${steps[1].x.wa.join(',')} on a ${steps[1].x.root.join('×')} root)`, steps[1].follows, steps[1]);
-      check(`${tag} WORK AREA: the app that caps itself at the work area fills the larger pane — no blank strip under it (${steps[1].strip} CSS px)`, steps[1].framed, steps[1]);
+      check(`${tag} WORK AREA: after the 1st resize (smaller) X's root is the pane and _NET_WORKAREA is that whole root`, verdictOf(steps[0].follows), steps[0]);
+      check(`${tag} WORK AREA: after the 2nd resize (larger than the hello's pane) _NET_WORKAREA still equals the pane (${steps[1].x.wa.join(',')} on a ${steps[1].x.root.join('×')} root)`, verdictOf(steps[1].follows), steps[1]);
+      check(`${tag} WORK AREA: the app that caps itself at the work area fills the larger pane — no blank strip under it (${steps[1].strip} CSS px)`, verdictOf(steps[1].framed), steps[1]);
     }
     await stop(origin, L.id);
   }
@@ -404,7 +404,7 @@ console.log('§2 CONTROL — a tree with the levers pulled back (the client\'s l
 {
   const Tc = mkTree('control', LEVERS);
   const Sc = await bootServer(Tc, 'deskapp-fixed-chome');
-  check('CONTROL: the control tree\'s server boots', Sc.up);
+  check('CONTROL: the control tree\'s server boots', verdictOf(Sc.up));
   const c = await runConfig(Sc.origin, { dpr: 2, lang: 'zh', label: 'CONTROL', tree: Tc, control: true });
   check(`CONTROL: NORMAL — the 400×300 picture in a larger pane, ${blankPct(c.normal)} % of it blank (the owner's WeChat)`, !!c.normal && !framed(c.normal) && blankPct(c.normal) >= 50, c.normal);
   check(`CONTROL: DIALOG — the lone fixed dialog is never adopted: the pane is not the picture (${blankPct(c.dialog)} % blank) and ${c.dialog && c.dialog.pic ? (c.dialog.pic.b - c.dialog.pane.b).toFixed(0) : '?'} CSS px of it are cut at the pane's bottom (the owner's Inkscape)`, !!c.dialog && !framed(c.dialog) && !!c.dialog.pic && c.dialog.pic.b > c.dialog.pane.b + 1, c.dialog);
@@ -417,7 +417,7 @@ console.log('§3 CONTROL TOP-LEFT — a tree with lane app-window-fit-topleft\'s
 {
   const Tt = mkTree('control-topleft', TOPLEFT_LEVERS);
   const St = await bootServer(Tt, 'deskapp-fixed-thome');
-  check('CONTROL TOP-LEFT: the control tree\'s server boots', St.up);
+  check('CONTROL TOP-LEFT: the control tree\'s server boots', verdictOf(St.up));
   await page(St.origin, { dpr: 2, lang: 'en' });
   const tag = 'CONTROL TOP-LEFT DPR 2 (en)', out = { big: null, wide: null };
   let L = await launch(St.origin, [1000, 900, 'normal'], `${tag} BIG`);
@@ -425,9 +425,9 @@ console.log('§3 CONTROL TOP-LEFT — a tree with lane app-window-fit-topleft\'s
   L = await launch(St.origin, [1500, 300, 'normal'], `${tag} WIDE`);
   if (L) { await settle(L.id); out.wide = await ev(STRIP(L.id)); console.log(`  ${tag} WIDE: ${stripLine(out.wide)}`); await stop(St.origin, L.id); }
   const b = out.big, w = out.wide;
-  check(`CONTROL TOP-LEFT: BIG — pre-lane the window keeps the cascade's x (${b ? (b.win.x - b.ws.x).toFixed(1) : '?'} CSS px from the workspace's left), its top slid to the workspace's, ${b ? Math.max(0, b.win.b - b.ws.b).toFixed(1) : '?'} CSS px past the bottom`, !!b && !near(b.win.x, b.ws.x, 1) && near(b.win.y, b.ws.y, 1) && b.win.b > b.ws.b, b);
+  check(`CONTROL TOP-LEFT: BIG — pre-lane the window keeps the cascade's x (${b ? (b.win.x - b.ws.x).toFixed(1) : '?'} CSS px from the workspace's left), its top slid to the workspace's, ${b ? Math.max(0, b.win.b - b.ws.b).toFixed(1) : '?'} CSS px past the bottom`, !!b && !near(b.win.x, b.ws.x, 1) && gateOf(near(b.win.y, b.ws.y, 1)) && b.win.b > b.ws.b, b);
   check(`CONTROL TOP-LEFT: WIDE — pre-lane it keeps the cascade's y (${w ? (w.win.y - w.ws.y).toFixed(1) : '?'} CSS px down) and its bar runs past the workspace: the ✕ ${w ? (w.close.x + w.close.w / 2 - w.ws.r).toFixed(1) : '?'} CSS px beyond the right edge, a click there never hits it`, !!w && !near(w.win.y, w.ws.y, 1) && !inside(w.close, w.ws) && !w.closeHit, w);
 }
 
 console.log(`${failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`}`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

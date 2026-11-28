@@ -127,7 +127,7 @@ const ROOT = scratch('consent-road');
 fs.mkdirSync(ROOT, { recursive: true });
 
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? `\n    ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`.slice(0, 900) : ''}`); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? `\n    ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`.slice(0, 900) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -180,7 +180,7 @@ console.log('① PURE src/consent-road.js');
   ];
   const bad = rows.map(([i, why]) => { const v = R(i); return v.road === 'loopback' && v.redirectUri === null && v.why === why ? null : { i, v }; }).filter(Boolean);
   ok(!bad.length, `the loopback table (${rows.length} rows): a browser on this machine, no / an http / a loopback / a query-carrying address, the person's own other road, a bad kind`, bad);
-  ok(CR.WHYS.every((w) => w === 'https-address' || w === 'relay-page' || rows.some(([, x]) => x === w)), 'every why in the closed set is a row of the table');
+  ok(verdictOf(CR.WHYS.every((w) => w === 'https-address' || w === 'relay-page' || rows.some(([, x]) => x === w))), 'every why in the closed set is a row of the table');
   // lane oauth-relay-road: THE RELAY ROWS
   const HUB = `http://127.0.0.1:${await freePort()}`;   // a local hub's own origin, the port it holds
   const rel = {
@@ -202,7 +202,7 @@ console.log('① PURE src/consent-road.js');
   ok(rel.asked.road === 'loopback' && rel.asked.why === 'asked' && rel.elsewhere.road === 'route' && rel.noOrigin.road === 'route', 'ORDER: the person\'s own road beats every relay; a browser on another host than this pod, or no origin told ⇒ not the relay (the route)', { asked: rel.asked.road, elsewhere: rel.elsewhere.road, noOrigin: rel.noOrigin.road });
   const badRelays = ['http://admin.fleet.example.test/relay/', 'https://admin.fleet.example.test/relay/?x=1', 'https://admin.fleet.example.test/relay/#a', 'https://u:p@admin.fleet.example.test/relay/', 'https://127.0.0.1/relay/', 'https://localhost/relay/', 'not a url', ''];
   const took = badRelays.filter((u) => R({ kind: 'gmail', publicUrl: '', origin: HUB, relayUrl: u }).road === 'relay');
-  ok(!took.length && badRelays.every((u) => CR.relayPageOf(u) === '') && CR.relayPageOf(` ${PUBLIC_RELAY} `) === PUBLIC_RELAY, `a relay that is not an https page address (${badRelays.length} shapes: http, a query, a fragment, credentials, a loopback host, garbage, empty) is never ridden; a good one keeps its spelling`, took);
+  ok(!took.length && gateOf(badRelays.every((u) => CR.relayPageOf(u) === '')) && CR.relayPageOf(` ${PUBLIC_RELAY} `) === PUBLIC_RELAY, `a relay that is not an https page address (${badRelays.length} shapes: http, a query, a fragment, credentials, a loopback host, garbage, empty) is never ridden; a good one keeps its spelling`, took);
   // addendum 1: a company preset rides the cluster's own page — its own › the fleet's — or none, NEVER the setting (the
   // public page's home); any other client the fleet's › the setting's
   const pk = {
@@ -235,12 +235,12 @@ console.log('① PURE src/consent-road.js');
     'a preset WITH a relay page rides it on every instance: a pod (u = its own https host), a local hub, a hub reached over Tailscale (B-be43: 100.64/10 is private)', pr);
   // lane gmail-connect-wall (law 1): a company preset's person cannot add an address to the app — the route is a preset's road
   // ONLY when the preset says its app lists it (`instanceAddress: "listed"`); else its loopback
-  ok(pr.barePod.road === 'loopback' && pr.barePod.why === 'preset-loopback' && pr.bareHub.road === 'loopback' && pr.listedPod.road === 'route' && [pr.barePod, pr.bareHub, pr.listedPod].every((x) => x.redirectUri !== PUBLIC_RELAY),
+  ok(pr.barePod.road === 'loopback' && pr.barePod.why === 'preset-loopback' && pr.bareHub.road === 'loopback' && pr.listedPod.road === 'route' && verdictOf([pr.barePod, pr.bareHub, pr.listedPod].every((x) => x.redirectUri !== PUBLIC_RELAY)),
     'a preset with NO relay page (the setting at the public page) ⇒ its LOOPBACK on a pod (preset-loopback — never the route it cannot list) and on a local hub; the route only when it says `instanceAddress: "listed"` — never the public page', { barePod: [pr.barePod.road, pr.barePod.why], bareHub: pr.bareHub.road, listedPod: pr.listedPod.road });
   // the state
   const st = CR.stateOf({ origin: POD, flowId: 'a1b2c3d4e5f60718', issuedAt: 1_800_000_000_000, kind: 'lark' }, sign);
   const v = CR.stateVerdict(st, { sign, now: 1_800_000_060_000, kind: 'lark' });
-  ok(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(st) && v.ok && v.parts.flowId === 'a1b2c3d4e5f60718' && v.parts.origin === POD, 'the state round-trips: v1.<clear>.<HMAC> → its flow and the address it comes back to', v);
+  ok(gateOf(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(st)) && gateOf(v.ok) && v.parts.flowId === 'a1b2c3d4e5f60718' && v.parts.origin === POD, 'the state round-trips: v1.<clear>.<HMAC> → its flow and the address it comes back to', v);
   const otherBoot = (c) => crypto.createHmac('sha256', 'another-boot').update(String(c)).digest('base64url');
   const clear = st.split('.').slice(0, 2).join('.');
   const forged = `v1.${Buffer.from(JSON.stringify({ u: POD, f: 'ffffffffffffffff', t: 1_800_000_000, k: 'lark' })).toString('base64url')}.${st.split('.')[2]}`;
@@ -259,9 +259,9 @@ console.log('① PURE src/consent-road.js');
   const okPage = CR.landingHtml({ ok: true, user: '<b>Ada</b>' }, { name: 'Lark' });
   const deny = CR.landingHtml({ ok: false, why: 'denied' }, { name: 'Lark' });
   const used = CR.landingHtml({ ok: false, why: 'used' }, { name: 'Google' });
-  ok(/data-landing="ok"/.test(okPage) && okPage.includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && (okPage.match(/<p[ >]/g) || []).length === 1 && /<html lang="en">/.test(okPage) && okPage.includes('&lt;b&gt;Ada&lt;/b&gt;') && !okPage.includes('<b>Ada'),
+  ok(gateOf(/data-landing="ok"/.test(okPage)) && gateOf(okPage.includes(`<script>${CR.CLOSE_SCRIPT}</script>`)) && (okPage.match(/<p[ >]/g) || []).length === 1 && gateOf(/<html lang="en">/.test(okPage)) && gateOf(okPage.includes('&lt;b&gt;Ada&lt;/b&gt;')) && !okPage.includes('<b>Ada'),
     'a connected page: one paragraph in one language (en when none is said), the person escaped, the close script (and only it)');
-  ok(/data-landing="denied"/.test(deny) && !/<script/.test(deny) && /data-landing="failed"/.test(used) && /already finished/.test(used) && /Google/.test(used) && !/<script/.test(used), 'a declined / a used sign-in says so and closes nothing');
+  ok(gateOf(/data-landing="denied"/.test(deny)) && !/<script/.test(deny) && gateOf(/data-landing="failed"/.test(used)) && gateOf(/already finished/.test(used)) && gateOf(/Google/.test(used)) && !/<script/.test(used), 'a declined / a used sign-in says so and closes nothing');
 }
 
 // ── lane oauth-landing-words (the owner 2026-10-23 14:3x PT 「这个提示里为啥把 email 打码了」 + B-24d8) ──
@@ -290,7 +290,7 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
   // the shipped file as an .mjs copy with its two 1 MB dictionaries stubbed (resolveLang never reads them) — every other byte as shipped
   const i18nSrc = fs.readFileSync(path.join(REPO, 'src/lib/i18n.js'), 'utf8');
   const DICT_IMPORTS = ["import zh from './i18n-zh.js';", "import ja from './i18n-ja.js';"];
-  ok(DICT_IMPORTS.every((x) => i18nSrc.split(x).length === 2) && /export function resolveLang\(\)/.test(i18nSrc), 'src/lib/i18n.js still imports its two dictionaries and exports resolveLang (the parity copy\'s two stubs land)');
+  ok(gateOf(DICT_IMPORTS.every((x) => i18nSrc.split(x).length === 2)) && verdictOf(/export function resolveLang\(\)/.test(i18nSrc)), 'src/lib/i18n.js still imports its two dictionaries and exports resolveLang (the parity copy\'s two stubs land)');
   try {
     const I18N = await import(new URL(`file://${MUT.write('src/lib/i18n.js', DICT_IMPORTS.reduce((t, x) => editAnchor(t, x, `const ${x.split(' ')[1]} = {};`, "src/lib/i18n.js"), i18nSrc), 'parity', { esm: true })}`).href);
     parity = PICK.filter(([h]) => typeof h === 'string').map(([h, nav]) => { navStub.language = nav || 'en'; return { h, nav, app: I18N.resolveLang(), page: CR.landingLang(h) }; });
@@ -299,7 +299,7 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
   }
   const parityBad = parity.filter((x) => x.app !== x.page);
   ok(parity.length >= 20 && !parityBad.length, `the page's language = the app's own: src/lib/i18n.js resolveLang() over the same browser's navigator.language, row for row (${parity.length} rows)`, parityBad);
-  ok(CR.LANGS.join() === 'en,zh,ja' && Object.values(CR.LANDING).every((row) => CR.LANGS.every((l) => typeof row[l] === 'string' && row[l])) && Object.values(CR.LANDING_WHY).every((row) => CR.LANGS.every((l) => typeof row[l] === 'string' && row[l])),
+  ok(CR.LANGS.join() === 'en,zh,ja' && gateOf(Object.values(CR.LANDING).every((row) => CR.LANGS.every((l) => typeof row[l] === 'string' && row[l]))) && verdictOf(Object.values(CR.LANDING_WHY).every((row) => CR.LANGS.every((l) => typeof row[l] === 'string' && row[l]))),
     'every page and every verdict has its sentence in each of the three languages');
   // (b) ONE language per page: its sentence, and NEITHER of the other two languages' sentences
   const OTHER = (l) => CR.LANGS.filter((x) => x !== l);
@@ -315,21 +315,21 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
     }
   }
   ok(!one.length, 'every page × every language: ONE paragraph, its own sentence and <html lang>, never the other two languages (the base printed en + zh + ja stacked)', one);
-  ok(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'fr' }).includes('<html lang="en">') && CR.landingHtml({ ok: true }, { name: 'Lark', lang: '<x>' }).includes('<html lang="en">'), 'a language outside the three is English (never written into the page)');
-  ok(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'zh' }).includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && /自己关闭/.test(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'zh' })) && /自動で閉じます/.test(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'ja' })),
+  ok(gateOf(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'fr' }).includes('<html lang="en">')) && verdictOf(CR.landingHtml({ ok: true }, { name: 'Lark', lang: '<x>' }).includes('<html lang="en">')), 'a language outside the three is English (never written into the page)');
+  ok(gateOf(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'zh' }).includes(`<script>${CR.CLOSE_SCRIPT}</script>`)) && gateOf(/自己关闭/.test(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'zh' }))) && verdictOf(/自動で閉じます/.test(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'ja' }))),
     'a connected page in zh / ja still closes its tab by itself and says so in that language');
   // (c) THE ADDRESS — what Cloudflare's Email Address Obfuscation rewrites (an address in the HTML) never appears bare
   const CF = /[\w.+-]+@[\w-]+\.[\w.-]+/;
   const ADDR = 'ada.road+x@example.test';
-  ok(CF.test(`signed in to Google (${ADDR})`), 'CONTROL: the obfuscation pattern catches the address as the base page printed it (escaped text, a bare @)');
+  ok(verdictOf(CF.test(`signed in to Google (${ADDR})`)), 'CONTROL: the obfuscation pattern catches the address as the base page printed it (escaped text, a bare @)');
   ok(CR.landingUser(ADDR) === '<!--email_off-->ada.road+x&#64;example.test<!--/email_off-->' && CR.landingUser('') === '' && CR.landingUser(null) === '' && CR.landingUser('<b>a@b.c</b>') === '<!--email_off-->&lt;b&gt;a&#64;b.c&lt;/b&gt;<!--/email_off-->',
     'landingUser: the address escaped as text, its @ as &#64;, inside Cloudflare\'s <!--email_off--> … <!--/email_off--> markers; nothing for no address');
   const addrBad = CR.LANGS.map((l) => ({ l, page: CR.landingHtml({ ok: true, user: ADDR }, { name: 'Google', lang: l }) })).filter(({ page }) => CF.test(page) || page.includes('@') || !page.includes('<!--email_off-->ada.road+x&#64;example.test<!--/email_off-->'));
   ok(!addrBad.length, 'a connected Google page in each language: the address between both markers with the @ as an entity — no bare @ anywhere, nothing the obfuscation pattern matches', addrBad.map((x) => x.l));
-  ok(CR.landingHtml({ ok: true, user: "a$'b$&<i>" }, { name: 'Lark' }).includes("(<!--email_off-->a$&#39;b$&amp;&lt;i&gt;<!--/email_off-->)"), 'a person whose name holds $\' / $& / markup prints it as typed (escaped; no replacement pattern is expanded)');
+  ok(verdictOf(CR.landingHtml({ ok: true, user: "a$'b$&<i>" }, { name: 'Lark' }).includes("(<!--email_off-->a$&#39;b$&amp;&lt;i&gt;<!--/email_off-->)")), 'a person whose name holds $\' / $& / markup prints it as typed (escaped; no replacement pattern is expanded)');
   // (d) THE VERDICTS — each says what happened in the one language; no sentence stands in for another's
   const WHYS_SEEN = ['bad-hmac', 'expired', 'timed-out', 'bad-shape', 'wrong-kind', 'wrong-flow', 'superseded', 'cancelled', 'over-limit', 'used', 'failed', 'paused' /* B-f276 1b: a landing while the channels are paused */];
-  ok(WHYS_SEEN.every((w) => Object.prototype.hasOwnProperty.call(CR.LANDING_WHY, w)) && Object.keys(CR.LANDING_WHY).every((w) => w === 'refused' || WHYS_SEEN.includes(w)), 'LANDING_WHY covers every refusal the state, the engine and the flow name (+ refused for anything else)', Object.keys(CR.LANDING_WHY));
+  ok(gateOf(WHYS_SEEN.every((w) => Object.prototype.hasOwnProperty.call(CR.LANDING_WHY, w))) && verdictOf(Object.keys(CR.LANDING_WHY).every((w) => w === 'refused' || WHYS_SEEN.includes(w))), 'LANDING_WHY covers every refusal the state, the engine and the flow name (+ refused for anything else)', Object.keys(CR.LANDING_WHY));
   const sentence = (w, l) => CR.LANDING_WHY[w][l].split('{name}').join('Lark');
   const matrix = [];
   for (const l of CR.LANGS) for (const w of [...WHYS_SEEN, 'nonsense', undefined]) {
@@ -339,7 +339,7 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
     if (!page.includes(sentence(own, l)) || wrong.length || !/data-landing="failed"/.test(page)) matrix.push({ l, w, own, wrong });
   }
   ok(!matrix.length, `per verdict × language (${3 * (WHYS_SEEN.length + 2)} pages): its own sentence and NONE of the others' — the «expired» words only for an expired state; an unknown why reads «refused», which claims nothing`, matrix);
-  ok(/before VibeSpace restarted/.test(sentence('bad-hmac', 'en')) && /重启之前/.test(sentence('bad-hmac', 'zh')) && /再起動する前/.test(sentence('bad-hmac', 'ja')) && /longer than 30 minutes/.test(sentence('expired', 'en')) && /30 分钟/.test(sentence('expired', 'zh')) && /30 分以上/.test(sentence('expired', 'ja')) && CR.STATE_TTL_MS === 30 * 60e3,
+  ok(gateOf(/before VibeSpace restarted/.test(sentence('bad-hmac', 'en'))) && gateOf(/重启之前/.test(sentence('bad-hmac', 'zh'))) && gateOf(/再起動する前/.test(sentence('bad-hmac', 'ja'))) && gateOf(/longer than 30 minutes/.test(sentence('expired', 'en'))) && gateOf(/30 分钟/.test(sentence('expired', 'zh'))) && gateOf(/30 分以上/.test(sentence('expired', 'ja'))) && CR.STATE_TTL_MS === 30 * 60e3,
     'a state signed before a restart (bad-hmac) says VibeSpace restarted; an expired one says it took longer than the state\'s 30 minutes (the number IS STATE_TTL_MS)');
   // the REAL verdicts, end to end through the page: another boot's HMAC after a restart, an old state, a broken one, another kind
   const rst = CR.stateOf({ origin: POD, flowId: 'abcdef0123456789', issuedAt: 1_800_000_000_000, kind: 'lark' }, sign);
@@ -357,7 +357,7 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
   const USER = "  const user = x.ok && typeof x.user === 'string' && x.user ? ` (${landingUser(x.user)})` : '';";
   const bare = MUT.load('src/consent-road.js', editAnchor(roadSrc, USER, "  const user = x.ok && typeof x.user === 'string' && x.user ? ` (${escHtml(x.user.slice(0, 200))})` : '';", "src/consent-road.js"), 'bare-user');
   const bp = bare.landingHtml({ ok: true, user: ADDR }, { name: 'Google' });
-  ok(roadSrc.split(USER).length === 2 && CF.test(bp) && !bp.includes('email_off'), 'RED CONTROL: the address printed as escaped text alone (the base) is what Cloudflare rewrites into «[email protected]» — red on (c)', bp.match(CF) && bp.match(CF)[0]);
+  ok(roadSrc.split(USER).length === 2 && gateOf(CF.test(bp)) && !bp.includes('email_off'), 'RED CONTROL: the address printed as escaped text alone (the base) is what Cloudflare rewrites into «[email protected]» — red on (c)', bp.match(CF) && bp.match(CF)[0]);
   const WHY = "  const why = (Object.prototype.hasOwnProperty.call(LANDING_WHY, x.why) ? LANDING_WHY[x.why] : LANDING_WHY.refused)[l];";
   const catchAll = MUT.load('src/consent-road.js', editAnchor(roadSrc, WHY, '  const why = LANDING_WHY.expired[l];', "src/consent-road.js"), 'catch-all');
   const caught = WHYS_SEEN.filter((w) => w !== 'expired' && catchAll.landingHtml({ ok: false, why: w }, { name: 'Lark', lang: 'en' }).includes(sentence('expired', 'en')));
@@ -480,22 +480,22 @@ console.log('② a pod\'s Connect comes back to the instance\'s route (Lark, Gma
     ok(w.e.connectTaught() === true, '⑤ nothing connected and the admin offers a company app ⇒ the hook teaches `connect` (the reach word)');
     const st = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: POD });
     const cu = new URL(st.url);
-    ok(cu.hostname === 'accounts.larksuite.com' && cu.searchParams.get('redirect_uri') === ROUTE_LARK && cu.searchParams.get('client_id') === 'cli_road0001' && /^v1\./.test(cu.searchParams.get('state') || ''),
+    ok(cu.hostname === 'accounts.larksuite.com' && cu.searchParams.get('redirect_uri') === ROUTE_LARK && cu.searchParams.get('client_id') === 'cli_road0001' && verdictOf(/^v1\./.test(cu.searchParams.get('state') || '')),
       'Connect Lark from a pod: the consent is Lark INTERNATIONAL (the preset\'s brand) and redirect_uri = the instance\'s route', { host: cu.hostname, redirect: cu.searchParams.get('redirect_uri') });
     ok(st.flow.mode === 'public' && st.flow.listening === false && st.flow.port === null && st.flow.redirectUri === ROUTE_LARK, 'nothing listens on the pod\'s loopback (mode public, no port)', st.flow);
     seen.length = 0;
     const land = await w.get(landOn(st.url, 'road-lark-code'));
-    ok(land.status === 200 && /data-landing="ok"/.test(land.body) && /Ada Road/.test(land.body) && land.body.includes(`<script>${CR.CLOSE_SCRIPT}</script>`), 'the browser lands on the route: the page says connected (who) and closes its tab', land.body.slice(0, 300));
-    ok(land.csp.includes(`script-src 'sha256-${HASH}'`) && /default-src 'none'/.test(land.csp), 'the route\'s CSP allows exactly the close script, by its hash (nothing else runs)', land.csp);
+    ok(land.status === 200 && gateOf(/data-landing="ok"/.test(land.body)) && gateOf(/Ada Road/.test(land.body)) && verdictOf(land.body.includes(`<script>${CR.CLOSE_SCRIPT}</script>`)), 'the browser lands on the route: the page says connected (who) and closes its tab', land.body.slice(0, 300));
+    ok(gateOf(land.csp.includes(`script-src 'sha256-${HASH}'`)) && verdictOf(/default-src 'none'/.test(land.csp)), 'the route\'s CSP allows exactly the close script, by its hash (nothing else runs)', land.csp);
     const tok = seen.find((x) => /authen\/v2\/oauth\/token$/.test(x.path));
-    ok(tok && hostOf(tok.path) === 'open.larksuite.com' && tok.body.redirect_uri === ROUTE_LARK && tok.body.code === 'road-lark-code' && tok.body.client_id === 'cli_road0001' && seen.some((x) => /user_info$/.test(x.path)),
+    ok(gateOf(tok) && hostOf(tok.path) === 'open.larksuite.com' && tok.body.redirect_uri === ROUTE_LARK && tok.body.code === 'road-lark-code' && tok.body.client_id === 'cli_road0001' && verdictOf(seen.some((x) => /user_info$/.test(x.path))),
       'the fake vendor saw the SAME exchange with the route as its redirect (Lark international), then one user_info', seen.map((x) => `${x.method} ${x.path}`));
     const s1 = await waitDone(w.e, st.flowId);
-    ok(s1 && s1.done && s1.ok && s1.token === st.flowId && s1.user === 'Ada Road', 'the flow is done — the dialog\'s poll reads the token', s1);
+    ok(gateOf(s1) && gateOf(s1.done) && gateOf(s1.ok) && s1.token === st.flowId && s1.user === 'Ada Road', 'the flow is done — the dialog\'s poll reads the token', s1);
     const made = await w.e.connect('lark', { flowId: st.flowId });
-    ok(made && made.adapter && made.adapter.kind === 'lark' && made.adapter.options && made.adapter.options.brand === 'lark', 'Connect makes the account under the preset, brand lark', made && made.adapter && { kind: made.adapter.kind, options: made.adapter.options });
+    ok(gateOf(made) && gateOf(made.adapter) && made.adapter.kind === 'lark' && gateOf(made.adapter.options) && made.adapter.options.brand === 'lark', 'Connect makes the account under the preset, brand lark', made && made.adapter && { kind: made.adapter.kind, options: made.adapter.options });
     const again = await w.get(landOn(st.url, 'road-lark-code'));
-    ok(again.status === 400 && /data-landing="failed"/.test(again.body) && !/<script/.test(again.body), 'a replayed landing is refused on the page (the code is used once)', again.status);
+    ok(again.status === 400 && gateOf(/data-landing="failed"/.test(again.body)) && !/<script/.test(again.body), 'a replayed landing is refused on the page (the code is used once)', again.status);
     ok(w.e.connectTaught() === false && w.e.connectOffer('lark').signedIn === 1, '⑤ an account exists ⇒ `connect` is no longer taught; the offer counts the signed-in account');
     // Gmail
     const g = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
@@ -504,18 +504,18 @@ console.log('② a pod\'s Connect comes back to the instance\'s route (Lark, Gma
     seen.length = 0;
     const gl = await w.get(landOn(g.url, 'road-google-code'));
     const gt = seen.find((x) => x.path === '/google-oauth/token');
-    ok(gl.status === 200 && /data-landing="ok"/.test(gl.body) && /Google/.test(gl.body) && gt && gt.body.redirect_uri === ROUTE_GMAIL && gt.body.code === 'road-google-code' && seen.some((x) => /profile$/.test(x.path)),
+    ok(gl.status === 200 && gateOf(/data-landing="ok"/.test(gl.body)) && gateOf(/Google/.test(gl.body)) && gateOf(gt) && gt.body.redirect_uri === ROUTE_GMAIL && gt.body.code === 'road-google-code' && verdictOf(seen.some((x) => /profile$/.test(x.path))),
       'the Google landing: connected; the token exchange carried the route as its redirect, then one profile read', { status: gl.status, token: gt && gt.body.redirect_uri });
     const gs = await waitDone(w.e, g.flowId);
-    ok(gs && gs.ok && gs.user === 'ada.road@example.test', 'the Gmail flow is done as the mailbox the profile named', gs);
+    ok(gateOf(gs) && gateOf(gs.ok) && gs.user === 'ada.road@example.test', 'the Gmail flow is done as the mailbox the profile named', gs);
     // ④ the kinds digest
     const kinds = (w.e.digest({ scope: 'accounts' }).kinds || []);
     const kl = kinds.find((k) => k.kind === 'lark'), kg = kinds.find((k) => k.kind === 'gmail'), ks = kinds.find((k) => k.kind === 'slack');
-    ok(kl && kl.consentRoute === ROUTE_LARK && kg && kg.consentRoute === ROUTE_GMAIL && (!ks || ks.consentRoute === null) && (kl.presets[0] || {}).facts && kl.presets[0].facts.brand === 'lark',
+    ok(gateOf(kl) && kl.consentRoute === ROUTE_LARK && gateOf(kg) && kg.consentRoute === ROUTE_GMAIL && (!ks || ks.consentRoute === null) && gateOf((kl.presets[0] || {}).facts) && kl.presets[0].facts.brand === 'lark',
       '④ the kinds digest: the route a custom app registers (Lark, Gmail; none for the paste type) + the preset\'s brand as a fact', { lark: kl && kl.consentRoute, presets: kl && kl.presets });
     // ⑤ the Connect row's facts
     const o = w.e.connectOffer('gmail'), none = w.e.connectOffer('nope'), offers = w.e.connectOffers().map((x) => x.kind);
-    ok(o.ok && o.kind === 'gmail' && o.label === 'Gmail' && o.preset === true && none.ok === false && none.code === 'bad-request' && /lark/.test(none.error) && !offers.includes('lark'),
+    ok(gateOf(o.ok) && o.kind === 'gmail' && o.label === 'Gmail' && o.preset === true && none.ok === false && none.code === 'bad-request' && gateOf(/lark/.test(none.error)) && !offers.includes('lark'),
       '⑤ connectOffer names a type (label, company app offered); an unknown type answers the types; connectOffers leaves out a type with a signed-in account', { o, none: none.error, offers });
   } finally { await w.close(); }
 }
@@ -535,7 +535,7 @@ console.log('③ the loopback stays the road of a local hub with no relay page (
   const n = await world('noaddr', { publicUrl: null, serverSetting: NO_RELAY });
   try {
     const g = await n.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
-    ok(g.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(new URL(g.url).searchParams.get('redirect_uri')), 'no address ⇒ Gmail\'s EPHEMERAL loopback port, as before', new URL(g.url).searchParams.get('redirect_uri'));
+    ok(g.flow.mode === 'ephemeral' && verdictOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(new URL(g.url).searchParams.get('redirect_uri'))), 'no address ⇒ Gmail\'s EPHEMERAL loopback port, as before', new URL(g.url).searchParams.get('redirect_uri'));
     ok(((n.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'lark') || {}).consentRoute === null, '④ no address ⇒ no route in the digest');
   } finally { await n.close(); }
   const h = await world('http', { publicUrl: 'http://pod-road.example.test' });
@@ -560,14 +560,14 @@ let fleetRedirect = null;
       'a fleet pod (VIBESPACE_OAUTH_RELAY_URL): Connect Lark names the ADMIN host\'s /relay/ as redirect_uri — the same address for every pod; the state\'s u = this pod, k = lark; nothing listens', { redirect: fleetRedirect, road: st.flow.road, u: clear });
     const d = throughRelay(st.url, 'code=relay-lark-code', ['fleet.example.test']);
     const to = d.act === 'redirect' ? new URL(d.to) : null;
-    ok(to && to.origin === FLEET && to.pathname === '/api/channels/oauth/cb/lark' && to.searchParams.get('code') === 'relay-lark-code', 'the admin copy of the page (data-allow = the fleet\'s domain) sends the browser to <pod>/api/channels/oauth/cb/lark with the query', d);
+    ok(gateOf(to) && to.origin === FLEET && to.pathname === '/api/channels/oauth/cb/lark' && to.searchParams.get('code') === 'relay-lark-code', 'the admin copy of the page (data-allow = the fleet\'s domain) sends the browser to <pod>/api/channels/oauth/cb/lark with the query', d);
     seen.length = 0;
     const land = await f.get(`${to.pathname}${to.search}`);
     const tok = seen.find((x) => /authen\/v2\/oauth\/token$/.test(x.path));
-    ok(land.status === 200 && /data-landing="ok"/.test(land.body) && tok && tok.body.redirect_uri === ADMIN_RELAY && tok.body.code === 'relay-lark-code', 'the pod\'s landing says connected; the fake vendor saw the exchange with the RELAY page as its redirect (the one the consent named)', { status: land.status, redirect: tok && tok.body.redirect_uri });
+    ok(land.status === 200 && gateOf(/data-landing="ok"/.test(land.body)) && gateOf(tok) && tok.body.redirect_uri === ADMIN_RELAY && tok.body.code === 'relay-lark-code', 'the pod\'s landing says connected; the fake vendor saw the exchange with the RELAY page as its redirect (the one the consent named)', { status: land.status, redirect: tok && tok.body.redirect_uri });
     const done = await waitDone(f.e, st.flowId);
     const made = done && done.ok ? await f.e.connect('lark', { flowId: st.flowId }) : null;
-    ok(made && made.adapter && made.adapter.kind === 'lark', 'the flow is done and Connect makes the account — no per-pod address was registered anywhere', done);
+    ok(gateOf(made) && gateOf(made.adapter) && made.adapter.kind === 'lark', 'the flow is done and Connect makes the account — no per-pod address was registered anywhere', done);
     const kinds = f.e.digest({ scope: 'accounts' }).kinds || [];
     const pages = (k) => JSON.stringify((kinds.find((x) => x.kind === k) || {}).relayPages);
     ok(pages('lark') === JSON.stringify([{ url: ADMIN_RELAY, who: 'fleet' }, { url: PUBLIC_RELAY, who: 'page' }]) && pages('gmail') === pages('lark') && pages('slack') === '[]',
@@ -585,7 +585,7 @@ let fleetRedirect = null;
     const lp = await h.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: h.origin });
     const gp = await h.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: h.origin });
     const lpr = new URL(lp.url).searchParams.get('redirect_uri'), gpr = new URL(gp.url).searchParams.get('redirect_uri');
-    ok(lp.flow.mode === 'fixed' && lpr === h.fixed && gp.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(gpr) && lp.flow.road !== 'relay' && gp.flow.road !== 'relay',
+    ok(lp.flow.mode === 'fixed' && lpr === h.fixed && gp.flow.mode === 'ephemeral' && gateOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(gpr)) && lp.flow.road !== 'relay' && gp.flow.road !== 'relay',
       'a local hub whose COMPANY presets name no relay page (the setting at its default, the public page): Lark\'s registered loopback, Gmail\'s ephemeral port — NEVER the public page', { lark: lpr, gmail: gpr });
     const st = await h.e.startOAuth({ kind: 'gmail', clientPreset: 'custom', clientId: '456-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-2', origin: h.origin });
     const cu = new URL(st.url);
@@ -594,16 +594,16 @@ let fleetRedirect = null;
     const q = 'code=4%2F0Ab-relay-google&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify+openid&authuser=0&prompt=consent';
     const d = throughRelay(st.url, q, []);
     const at = d.act === 'redirect' ? d.to : '';
-    ok(at.startsWith(`${h.origin}/api/channels/oauth/cb/gmail?${q}&state=`), 'the public page sends the browser to <hub>/api/channels/oauth/cb/gmail with Google\'s query VERBATIM (code, scope, authuser, prompt, state)', at.slice(0, 200));
+    ok(verdictOf(at.startsWith(`${h.origin}/api/channels/oauth/cb/gmail?${q}&state=`)), 'the public page sends the browser to <hub>/api/channels/oauth/cb/gmail with Google\'s query VERBATIM (code, scope, authuser, prompt, state)', at.slice(0, 200));
     seen.length = 0;
     const land = await h.get(at.slice(h.origin.length));
     const gt = seen.find((x) => x.path === '/google-oauth/token');
-    ok(land.status === 200 && /data-landing="ok"/.test(land.body) && gt && gt.body.redirect_uri === PUBLIC_RELAY && gt.body.code === '4/0Ab-relay-google', 'the hub\'s landing: connected; the Google exchange carried the public page as its redirect and the code decoded once', { status: land.status, redirect: gt && gt.body.redirect_uri, code: gt && gt.body.code });
+    ok(land.status === 200 && gateOf(/data-landing="ok"/.test(land.body)) && gateOf(gt) && gt.body.redirect_uri === PUBLIC_RELAY && gt.body.code === '4/0Ab-relay-google', 'the hub\'s landing: connected; the Google exchange carried the public page as its redirect and the code decoded once', { status: land.status, redirect: gt && gt.body.redirect_uri, code: gt && gt.body.code });
     const ls = await h.e.startOAuth({ kind: 'lark', clientPreset: 'custom', clientId: 'cli_road0002', clientSecret: 'dummy-road-secret-02', origin: h.origin });
     const ld = throughRelay(ls.url, 'code=relay-hub-lark', []);
     seen.length = 0;
     const ll = ld.act === 'redirect' ? await h.get(ld.to.slice(h.origin.length)) : { status: 0, body: '' };
-    ok(new URL(ls.url).searchParams.get('redirect_uri') === PUBLIC_RELAY && ll.status === 200 && /data-landing="ok"/.test(ll.body) && (seen.find((x) => /oauth\/token$/.test(x.path)) || { body: {} }).body.redirect_uri === PUBLIC_RELAY, 'a person\'s own Lark app on the local hub: the same public page, code + state ride on, connected', { act: ld.act, status: ll.status });
+    ok(new URL(ls.url).searchParams.get('redirect_uri') === PUBLIC_RELAY && ll.status === 200 && gateOf(/data-landing="ok"/.test(ll.body)) && (seen.find((x) => /oauth\/token$/.test(x.path)) || { body: {} }).body.redirect_uri === PUBLIC_RELAY, 'a person\'s own Lark app on the local hub: the same public page, code + state ride on, connected', { act: ld.act, status: ll.status });
     const kinds = h.e.digest({ scope: 'accounts' }).kinds || [];
     const pages = (kinds.find((x) => x.kind === 'lark') || {}).relayPages;
     const presetPages = ['lark', 'gmail'].map((k) => ((kinds.find((x) => x.kind === k) || {}).presets || []).map((x) => [x.key, x.relayPage]));
@@ -632,7 +632,7 @@ let fleetRedirect = null;
       const l = await q.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET });
       const g = await q.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: FLEET });
       const d = throughRelay(l.url, 'code=preset-pod-code', ['fleet.example.test']);
-      ok(new URL(l.url).searchParams.get('redirect_uri') === CO && new URL(g.url).searchParams.get('redirect_uri') === CO && l.flow.road === 'relay' && d.act === 'redirect' && d.to.startsWith(`${FLEET}/api/channels/oauth/cb/lark?code=preset-pod-code&state=`),
+      ok(new URL(l.url).searchParams.get('redirect_uri') === CO && new URL(g.url).searchParams.get('redirect_uri') === CO && l.flow.road === 'relay' && d.act === 'redirect' && verdictOf(d.to.startsWith(`${FLEET}/api/channels/oauth/cb/lark?code=preset-pod-code&state=`)),
         `a POD on the preset (${env.VIBESPACE_OAUTH_RELAY_URL ? 'the fleet\'s page set too: the preset\'s own outranks it' : 'no fleet page'}) rides the preset's relay page; the cluster's copy sends the pod back`, { lark: new URL(l.url).searchParams.get('redirect_uri'), act: d.act });
     } finally { await q.close(); }
   }
@@ -659,7 +659,7 @@ console.log('⑥ RED controls (mutant copies)');
   const baseL = await redirectOf(MUT.load('src/channels/lark.js', editAnchor(larkSrc, VIA, 'const viaRoute = false;', "src/channels/lark.js"), 'base').adapter, 'lark', CRED, consent, POD);
   const baseG = await redirectOf(MUT.load('src/channels/gmail.js', editAnchor(gmailSrc, VIA, 'const viaRoute = false;', "src/channels/gmail.js"), 'base').adapter, 'gmail', GCRED, consent, POD);
   ok(realL === ROUTE_LARK && realG === ROUTE_GMAIL, 'the real adapters, driven alone with the engine\'s consent facts: the route', { realL, realG });
-  ok(/^http:\/\/127\.0\.0\.1:\d+/.test(baseL) && /^http:\/\/127\.0\.0\.1:\d+/.test(baseG) && baseL !== ROUTE_LARK && baseG !== ROUTE_GMAIL, 'RED CONTROL = THE BASE: an adapter that never takes the route sends a pod\'s browser to 127.0.0.1 (study 2 B2) — red on the route leg', { baseL, baseG });
+  ok(gateOf(/^http:\/\/127\.0\.0\.1:\d+/.test(baseL)) && gateOf(/^http:\/\/127\.0\.0\.1:\d+/.test(baseG)) && baseL !== ROUTE_LARK && baseG !== ROUTE_GMAIL, 'RED CONTROL = THE BASE: an adapter that never takes the route sends a pod\'s browser to 127.0.0.1 (study 2 B2) — red on the route leg', { baseL, baseG });
   const roadSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
   const LOCAL = "  if (loopbackOrigin(origin)) return loop('local-browser');\n";
   const blind = MUT.load('src/consent-road.js', editAnchor(roadSrc, LOCAL, '', "src/consent-road.js"), 'blind');
@@ -702,7 +702,7 @@ console.log('⑥ RED controls (mutant copies)');
     const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     const st = await e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: POD });
     const r = await new Promise((resolve) => { http.get(`http://127.0.0.1:${srv.address().port}${landOn(st.url, 'road-lark-code-2')}`, (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => resolve({ csp: String(res.headers['content-security-policy'] || ''), body: b })); }); });
-    ok(r.body.includes('<script>') && !r.csp.includes(`sha256-${HASH}`), 'RED CONTROL: the route without the hash still sends the script, which the browser would block — red on ②\'s CSP leg (the tab would stay open)', r.csp);
+    ok(gateOf(r.body.includes('<script>')) && !r.csp.includes(`sha256-${HASH}`), 'RED CONTROL: the route without the hash still sends the script, which the browser would block — red on ②\'s CSP leg (the tab would stay open)', r.csp);
     try { await e.stop(); } catch {}
     await new Promise((res) => srv.close(res));
   }
@@ -718,7 +718,7 @@ console.log('⑧ the public relay page\'s address in src/: only where a person\'
   const host = new URL(PUBLIC_RELAY).hostname;
   const lit = hits(new RegExp(host.replace(/\./g, '\\.')));
   const litRole = (x) => (x.f !== 'src/channels/slack-manifest.js' ? null : /^const RELAY_DEFAULT = '/.test(x.line) ? 'the custom setting\'s default' : /^const EGRESS = /.test(x.line) ? 'egress: a custom app\'s browser is sent through it' : null);
-  ok(files.length > 100 && lit.length === 2 && lit.every(litRole), `the host ${host} appears in src/ only as slack-manifest.js's RELAY_DEFAULT (the custom setting's default) and EGRESS (a person's own app may send the browser through it) — ${lit.length} lines`, lit.filter((x) => !litRole(x)).map((x) => `${x.f}:${x.n} ${x.line.slice(0, 120)}`));
+  ok(files.length > 100 && lit.length === 2 && verdictOf(lit.every(litRole)), `the host ${host} appears in src/ only as slack-manifest.js's RELAY_DEFAULT (the custom setting's default) and EGRESS (a person's own app may send the browser through it) — ${lit.length} lines`, lit.filter((x) => !litRole(x)).map((x) => `${x.f}:${x.n} ${x.line.slice(0, 120)}`));
   const ROLES = [
     [/^\/\/|^\/?\*/, 'a comment'],
     [/^const RELAY_DEFAULT = ('|SM\.RELAY_DEFAULT;)/, 'the definition / its re-export'],
@@ -733,10 +733,10 @@ console.log('⑧ the public relay page\'s address in src/: only where a person\'
   const refs = hits(/\bRELAY_DEFAULT\b/);
   const roleOf = (x) => (ROLES.find(([re]) => re.test(x.line)) || [])[1] || null;
   const stray = refs.filter((x) => !roleOf(x));
-  ok(refs.length >= 12 && !stray.length && refs.some((x) => roleOf(x) === 'the custom app\'s setup words'), `every RELAY_DEFAULT reference in src/ (${refs.length}) is a custom-app role or a comment — none reaches a preset row`, stray.map((x) => `${x.f}:${x.n} ${x.line.slice(0, 140)}`));
+  ok(refs.length >= 12 && !stray.length && verdictOf(refs.some((x) => roleOf(x) === 'the custom app\'s setup words')), `every RELAY_DEFAULT reference in src/ (${refs.length}) is a custom-app role or a comment — none reaches a preset row`, stray.map((x) => `${x.f}:${x.n} ${x.line.slice(0, 140)}`));
   const REG = require(path.join(REPO, 'src/integration-registry.js'));
   const presetFields = ['lark', 'gmail', 'slack', 'dropline'].map((id) => (REG.rowById(id).fields || []).find((f) => f.key === 'relayUrl')).filter(Boolean);
-  ok(presetFields.length === 4 && presetFields.every((f) => f.default === undefined && !String(f.placeholder || '').includes(host) && !String(f.help || '').includes(host) && !/public page/.test(String(f.help || ''))), 'no registry row\'s relayUrl field (a company preset\'s value) defaults to, shows or names the public page', presetFields.map((f) => [f.key, f.default, f.placeholder]));
+  ok(presetFields.length === 4 && verdictOf(presetFields.every((f) => f.default === undefined && !String(f.placeholder || '').includes(host) && !String(f.help || '').includes(host) && !/public page/.test(String(f.help || '')))), 'no registry row\'s relayUrl field (a company preset\'s value) defaults to, shows or names the public page', presetFields.map((f) => [f.key, f.default, f.placeholder]));
 }
 
 // ── ⑨ lane oauth-setup-instructions: the Google client's kind + the setup card's addresses ──
@@ -764,7 +764,7 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
     'a WEB client\'s loopback is the FIXED one (a Web client takes only exact addresses) — a local hub with no relay, and the person\'s other road', { bare: v.webHubBare, asked: v.webAsked });
   ok(v.webHubRelay.road === 'relay' && v.webHubRelay.redirectUri === PUBLIC_RELAY && v.webPod.road === 'route' && v.webPod.redirectUri === ROUTE_GMAIL,
     'a Web client rides the relay page and the route as before (both https)', { relay: v.webHubRelay.road, route: v.webPod.road });
-  ok(v.unsaid.road === 'loopback' && !('fixed' in v.unsaid) && CR.WHYS.includes('desktop-client') && JSON.stringify(CR.CLIENT_TYPES) === JSON.stringify(['web', 'desktop']),
+  ok(v.unsaid.road === 'loopback' && !('fixed' in v.unsaid) && gateOf(CR.WHYS.includes('desktop-client')) && JSON.stringify(CR.CLIENT_TYPES) === JSON.stringify(['web', 'desktop']),
     'a client kind not said: the verdict as before (no `fixed` — the adapter\'s own loopback)', v.unsaid);
   ok(GM.clientTypeOf({ clientType: 'desktop' }, { clientType: 'web' }) === 'desktop' && GM.clientTypeOf({ clientType: '' }, { clientType: 'web' }) === 'web' && GM.clientTypeOf({}, {}) === '' && GM.clientTypeOf({ clientType: 'bogus' }, {}) === '',
     'the account\'s own clientType option wins; else what its company preset says; else not said');
@@ -772,7 +772,7 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
   ok(GM.clientTypeOf({ clientType: 'desktop' }, { clientType: 'web' }, { preset: true }) === 'web' && GM.clientTypeOf({ clientType: 'desktop' }, {}, { preset: true }) === '' && GM.clientTypeOf({ clientType: 'web' }, { clientType: 'desktop' }, { preset: true }) === 'desktop',
     'R4: a company preset account never reads its own clientType option — the preset says it, or it is not said');
   const opt = GM.OPTIONS.find((o) => o.key === 'clientType');
-  ok(opt && opt.default === '' && JSON.stringify(opt.choices) === JSON.stringify(['', 'web', 'desktop']) && opt.rebuild === false && GM.consent.callbackUrl === GMAN.GMAIL_LOOPBACK_URL && GM.consent.mode.includes('fixed') && GM.consent.mode.includes('ephemeral'),
+  ok(gateOf(opt) && opt.default === '' && JSON.stringify(opt.choices) === JSON.stringify(['', 'web', 'desktop']) && opt.rebuild === false && GM.consent.callbackUrl === GMAN.GMAIL_LOOPBACK_URL && gateOf(GM.consent.mode.includes('fixed')) && verdictOf(GM.consent.mode.includes('ephemeral')),
     'Gmail\'s option `clientType` (not said / web / desktop) and its consent row: ephemeral + FIXED (the registry row\'s loopback) + public', { opt: opt && opt.choices, mode: GM.consent.mode });
   // the adapter alone: what it hands the loopback machine (a stub records begin's arguments — no port is bound)
   const asked = async (options, values, origin, consent) => {
@@ -786,7 +786,7 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
   const hubConsent = { sign, publicUrl: () => '', relayUrl: () => '', fleetRelayUrl: () => '' };
   const gw = await asked({}, { clientType: 'web' }, HUBO, hubConsent);
   const gd = await asked({ clientType: 'desktop' }, { clientType: 'web' }, HUBO, { ...hubConsent, fleetRelayUrl: () => ADMIN_RELAY });
-  ok(gw && gw.mode === 'fixed' && gw.registeredCallbackUrl === GMAN.GMAIL_LOOPBACK_URL && gd && gd.mode === 'public' && gd.road === 'relay',
+  ok(gateOf(gw) && gw.mode === 'fixed' && gw.registeredCallbackUrl === GMAN.GMAIL_LOOPBACK_URL && gateOf(gd) && gd.mode === 'public' && gd.road === 'relay',
     'the Gmail adapter: a Web preset on a local hub binds the registry row\'s FIXED address; R4 (lane gmail-connect-wall): the account\'s own «Desktop app» is NOT read under a company preset — its Web kind rides the fleet relay', { web: gw && [gw.mode, gw.registeredCallbackUrl], desktop: gd && [gd.mode, gd.road] });
   // (b) THE REAL ENGINE: a company Google client that says it is a Web client
   const w = await world('webclient', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', clientType: 'web' } });
@@ -806,17 +806,17 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
     const atFail = landed === 200 ? null : { flow: (({ listening, running, done, cancelled, why, port, refusal }) => ({ listening, running, done, cancelled, why, port, refusal }))(w.oauth.status(st.flowId) || {}), connect: await rawConnect(Number(new URL(w.fixed).port)) };
     const done = await waitDone(w.e, st.flowId);
     const gt = seen.find((x) => x.path === '/google-oauth/token');
-    ok(landed === 200 && gt && gt.body.redirect_uri === w.fixed && gt.body.code === 'road-web-code' && done && done.ok, 'Google sends the browser to that address: the exchange carries it byte for byte, the flow is done', { landed, redirect: gt && gt.body.redirect_uri, done: done && done.ok, ...(atFail ? { atFail } : {}) });
+    ok(landed === 200 && gateOf(gt) && gt.body.redirect_uri === w.fixed && gt.body.code === 'road-web-code' && gateOf(done) && verdictOf(done.ok), 'Google sends the browser to that address: the exchange carries it byte for byte, the flow is done', { landed, redirect: gt && gt.body.redirect_uri, done: done && done.ok, ...(atFail ? { atFail } : {}) });
     const made = await w.e.connect('gmail', { flowId: st.flowId });
-    ok(made && made.adapter && made.adapter.options && made.adapter.options.clientType === 'web', 'the new account takes the preset\'s kind as its option (the dialog sent none)', made && made.adapter && made.adapter.options);
+    ok(gateOf(made) && gateOf(made.adapter) && gateOf(made.adapter.options) && made.adapter.options.clientType === 'web', 'the new account takes the preset\'s kind as its option (the dialog sent none)', made && made.adapter && made.adapter.options);
     const kg = (w.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'gmail');
-    ok(kg && kg.presets[0] && kg.presets[0].facts && kg.presets[0].facts.clientType === 'web' && kg.oauthSetup && kg.oauthSetup.base === POD && kg.oauthSetup.relayPages.length === 0 && JSON.stringify(kg.oauthSetup.presets) === JSON.stringify([{ key: 'org1', relayPage: null, clientType: 'web', listed: false, lacks: ['road'] }]) && kg.oauthSetup.presetSource && kg.oauthSetup.presetSource.from === 'env' && kg.oauthSetup.presetSource.env === 'VIBESPACE_GDRIVE_CLIENTS',
+    ok(gateOf(kg) && gateOf(kg.presets[0]) && gateOf(kg.presets[0].facts) && kg.presets[0].facts.clientType === 'web' && gateOf(kg.oauthSetup) && kg.oauthSetup.base === POD && kg.oauthSetup.relayPages.length === 0 && JSON.stringify(kg.oauthSetup.presets) === JSON.stringify([{ key: 'org1', relayPage: null, clientType: 'web', listed: false, lacks: ['road'] }]) && gateOf(kg.oauthSetup.presetSource) && kg.oauthSetup.presetSource.from === 'env' && kg.oauthSetup.presetSource.env === 'VIBESPACE_GDRIVE_CLIENTS',
       'the kinds digest: the preset\'s kind as a fact + the setup card\'s facts (this instance\'s https base, no relay page, the preset\'s page and kind)', kg && { facts: kg.presets[0] && kg.presets[0].facts, oauthSetup: kg.oauthSetup });
     // lane gmail-connect-wall (R4): the dialog's «Desktop app» on a COMPANY preset is not read (the select is not even shown);
     // on a person's own client it still decides
     const d = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: HUBO, options: { clientType: 'desktop' } });
     const dc = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'custom', clientId: '456-own.apps.googleusercontent.com', clientSecret: 'dummy-own-gsecret-1', origin: HUBO, options: { clientType: 'desktop' } });
-    ok(d.flow.mode === 'fixed' && dc.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(new URL(dc.url).searchParams.get('redirect_uri')), 'R4: «Desktop app» on a company preset changes nothing (its Web kind: the FIXED address); on a person\'s own client ⇒ the ephemeral port (any port — nothing registered)', { preset: d.flow.mode, own: dc.flow.mode });
+    ok(d.flow.mode === 'fixed' && dc.flow.mode === 'ephemeral' && verdictOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(new URL(dc.url).searchParams.get('redirect_uri'))), 'R4: «Desktop app» on a company preset changes nothing (its Web kind: the FIXED address); on a person\'s own client ⇒ the ephemeral port (any port — nothing registered)', { preset: d.flow.mode, own: dc.flow.mode });
   } finally { await w.close(); }
   // B-1217 (lane bl-loop-b, 主开发 r4407): THE ONE «fetch failed», PLACED — red at will. (i) A world whose fixed callback port is one the
   // Fetch standard blocks: the kernel binds it (the flow listening), a raw connect is accepted — yet the redirect's fetch is refused
@@ -842,7 +842,7 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
         placed = { port: bp, listening: sb.flow.listening === true, landed, connect: await rawConnect(bp), done: !!(wb.oauth.status(sb.flowId) || {}).done, refused };
       } finally { await wb.close(); }
     }
-    ok(!!placed && placed.listening && /fetch failed/.test(String(placed.landed)) && /bad port/.test(String(placed.landed)) && placed.connect === 'accepted' && !placed.done,
+    ok(!!placed && gateOf(placed.listening) && gateOf(/fetch failed/.test(String(placed.landed))) && gateOf(/bad port/.test(String(placed.landed))) && placed.connect === 'accepted' && !placed.done,
       placed ? `B-1217 PLACED: a world on the blocked port ${placed.port} (drawn at random) — listening, a raw connect accepted, and the redirect's fetch refused («fetch failed», «bad port»: node's fetch blocks it), the flow not done: the one red, at will` : `HARNESS (B-1217): no port of the Fetch standard's blocked list above 1024 could be placed on this machine${refused.length ? ` (${refused.join(', ')})` : ' (none was free to bind)'} — the placement could not be made`, placed || { refused });
     const fsp = fixedSpans(), span0 = fsp && fsp.spans.length ? fsp.spans[0] : null;   // the span fixedPort picks FIRST (its own computation)
     const lost = [];
@@ -869,7 +869,7 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
   const hubBare = OS.setupCard({ kind: 'gmail', redirect: G, base: '', relayPages: [], origin: HUBO });
   const hubBareWeb = OS.setupCard({ kind: 'gmail', redirect: G, base: '', relayPages: [], origin: HUBO, clientType: 'web' });
   const hubBareDesk = OS.setupCard({ kind: 'gmail', redirect: G, base: '', relayPages: [], origin: HUBO, clientType: 'desktop' });
-  ok(hubBare.create.key === 'desktop' && hubBare.create.why === 'local' && hubBare.create.alt === 'web' && hubBare.now && hubBare.now.road === 'loopback' && hubBare.now.uri === null && !hubBare.rows.find((x) => x.key === 'public').active
+  ok(hubBare.create.key === 'desktop' && hubBare.create.why === 'local' && hubBare.create.alt === 'web' && gateOf(hubBare.now) && hubBare.now.road === 'loopback' && hubBare.now.uri === null && !hubBare.rows.find((x) => x.key === 'public').active
     && keys(hubBareWeb) === 'public own route loopback* also' && !hubBareDesk.rows.some((x) => x.key === 'loopback'),
     'a local hub with no relay page: a Desktop client (any port, nothing to register; alt: Web + the fixed address); said Web ⇒ the fixed address is the one used; said Desktop ⇒ no address row for it', { bare: [keys(hubBare), hubBare.create], web: keys(hubBareWeb), desk: keys(hubBareDesk) });
   const https = OS.setupCard({ kind: 'gmail', redirect: G, base: POD, relayPages: [], origin: POD });
@@ -890,9 +890,9 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
   const dropNone = OS.setupCard({ kind: 'dropline', redirect: D, base: '' });
   ok(keys(slack) === 'public* own route' && slack.refusal === S.refusal && drop.who === 'self' && keys(drop) === 'route' && drop.rows[0].uri === `${POD}/api/channels/oauth/cb/dropline` && drop.console === null && drop.refusal === null && dropNone.rows.length === 0,
     'Slack: no loopback (https only), the relay page used; Dropline registers its own client — nothing to create, the one address it registers, no console', { slack: keys(slack), drop: keys(drop) });
-  ok(OS.PUBLIC_RELAY === 'https://problemfactory.github.io/vibespace/slack/' && fs.existsSync(path.join(REPO, 'docs/slack-relay/index.html')) && fs.existsSync(path.join(REPO, 'docs/slack-relay/relay.js')),
+  ok(OS.PUBLIC_RELAY === 'https://problemfactory.github.io/vibespace/slack/' && gateOf(fs.existsSync(path.join(REPO, 'docs/slack-relay/index.html'))) && verdictOf(fs.existsSync(path.join(REPO, 'docs/slack-relay/relay.js'))),
     'the public relay page is a STABLE contract: https://problemfactory.github.io/vibespace/slack/, published from docs/slack-relay (index.html + relay.js)');
-  ok(Object.values(OS.WORDS).every((s) => typeof s === 'string' && s.trim() && !/[<>]/.test(s.replace(/<host>/g, ''))) && [hubPub, hubBare, https, fleet, preset, presetBare, slack, drop].every((c) => c.rows.every((x) => OS.ROW_KEYS.includes(x.key) && OS.rowWords(x))),
+  ok(gateOf(Object.values(OS.WORDS).every((s) => typeof s === 'string' && s.trim() && !/[<>]/.test(s.replace(/<host>/g, '')))) && verdictOf([hubPub, hubBare, https, fleet, preset, presetBare, slack, drop].every((c) => c.rows.every((x) => OS.ROW_KEYS.includes(x.key) && OS.rowWords(x)))),
     'every card word is a plain string (no markup) and every row has its words');
   // (d) RED CONTROL = c8aa8820 — the client's kind never asked: a Desktop client on a local hub rides the public page, which a Desktop client can never take (redirect_uri_mismatch)
   const roadSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
@@ -914,31 +914,31 @@ console.log('⑪ the landing route: the browser\'s language, the address as type
     // Google from a ja browser: one language, the mailbox as typed (markers + &#64;), the close script, Vary
     const g = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
     const gl = await land(w, landOn(g.url, 'words-google-code'), 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7');
-    ok(gl.status === 200 && /data-landing="ok"/.test(gl.body) && /<html lang="ja">/.test(gl.body) && gl.body.includes(CR.LANDING.ok.ja.split('{name}')[0]) && !gl.body.includes('signed in to') && !gl.body.includes('已登录')
-      && gl.body.includes('<!--email_off-->ada.road&#64;example.test<!--/email_off-->') && !CF.test(gl.body) && !gl.body.includes('@') && gl.body.includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && gl.csp.includes(`sha256-${HASH}`) && /accept-language/i.test(gl.vary),
+    ok(gl.status === 200 && gateOf(/data-landing="ok"/.test(gl.body)) && gateOf(/<html lang="ja">/.test(gl.body)) && gateOf(gl.body.includes(CR.LANDING.ok.ja.split('{name}')[0])) && !gl.body.includes('signed in to') && !gl.body.includes('已登录')
+      && gateOf(gl.body.includes('<!--email_off-->ada.road&#64;example.test<!--/email_off-->')) && !CF.test(gl.body) && !gl.body.includes('@') && gateOf(gl.body.includes(`<script>${CR.CLOSE_SCRIPT}</script>`)) && gateOf(gl.csp.includes(`sha256-${HASH}`)) && verdictOf(/accept-language/i.test(gl.vary)),
       'Google lands from a ja browser: the page is Japanese only, the mailbox is printed inside <!--email_off--> with its @ as &#64; (nothing for a proxy to mask), the tab still closes itself; Vary: Accept-Language', { status: gl.status, vary: gl.vary, body: gl.body.slice(-420) });
     // Lark connected from a zh browser, then its Re-authorize CANCELLED (zh), REPLACED by a newer one (ja), and a state from before a RESTART (en)
     const st = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: POD });
     const ll = await land(w, landOn(st.url, 'words-lark-code'), 'zh-CN,zh;q=0.9,en;q=0.8');
-    ok(ll.status === 200 && /<html lang="zh">/.test(ll.body) && /已登录 Lark/.test(ll.body) && /Ada Road/.test(ll.body) && !/signed in to|サインインしました/.test(ll.body), 'Lark lands from a zh browser: the page is Chinese only', ll.body.slice(-300));
+    ok(ll.status === 200 && gateOf(/<html lang="zh">/.test(ll.body)) && gateOf(/已登录 Lark/.test(ll.body)) && gateOf(/Ada Road/.test(ll.body)) && !/signed in to|サインインしました/.test(ll.body), 'Lark lands from a zh browser: the page is Chinese only', ll.body.slice(-300));
     await waitDone(w.e, st.flowId);
     const made = await w.e.connect('lark', { flowId: st.flowId });
     const id = made && made.adapter && made.adapter.id;
     const c1 = await w.e.reauthorize(id, { origin: POD });
     await w.e.cancelAuth(id);
     const cl = await land(w, landOn(c1.flow.consentUrl, 'words-cancelled'), 'zh-CN,zh;q=0.9');
-    ok(cl.status === 400 && said(cl.body, 'cancelled', 'zh') && !cl.body.includes(CR.LANDING_WHY.expired.zh) && !/<script/.test(cl.body), 'a Re-authorize the person CANCELLED lands as «cancelled» in their language (zh) — the base said «(expired)»', cl.body.slice(-300));
+    ok(cl.status === 400 && gateOf(said(cl.body, 'cancelled', 'zh')) && !cl.body.includes(CR.LANDING_WHY.expired.zh) && !/<script/.test(cl.body), 'a Re-authorize the person CANCELLED lands as «cancelled» in their language (zh) — the base said «(expired)»', cl.body.slice(-300));
     const a1 = await w.e.reauthorize(id, { origin: POD });
     const a2 = await w.e.reauthorize(id, { origin: POD });   // the person pressed Re-authorize again
     const sl = await land(w, landOn(a1.flow.consentUrl, 'words-superseded'), 'ja');
-    ok(sl.status === 400 && said(sl.body, 'superseded', 'ja') && !sl.body.includes(CR.LANDING_WHY.expired.ja), 'the FIRST of two Re-authorize presses lands as «a newer sign-in was started — finish that one» (ja), never «expired»', sl.body.slice(-300));
+    ok(sl.status === 400 && gateOf(said(sl.body, 'superseded', 'ja')) && !sl.body.includes(CR.LANDING_WHY.expired.ja), 'the FIRST of two Re-authorize presses lands as «a newer sign-in was started — finish that one» (ja), never «expired»', sl.body.slice(-300));
     const nl = await land(w, landOn(a2.flow.consentUrl, 'words-no-language'));
-    ok(nl.status === 200 && /<html lang="en">/.test(nl.body) && /signed in to Lark/.test(nl.body), 'no language said (fetch\'s own `*`) ⇒ English; the live Re-authorize still lands connected', nl.body.slice(-200));
+    ok(nl.status === 200 && gateOf(/<html lang="en">/.test(nl.body)) && verdictOf(/signed in to Lark/.test(nl.body)), 'no language said (fetch\'s own `*`) ⇒ English; the live Re-authorize still lands connected', nl.body.slice(-200));
     // A RESTART: the same route now answers for a NEW engine (a new boot, a new state key — world() rebinds the routes);
     // the state is the first press's, signed by the boot before (the state is judged before any flow is looked up)
     w2 = await world('landing-words-reboot');
     const rl = await land(w, landOn(a1.flow.consentUrl, 'words-restarted'), 'en-US,en;q=0.9');
-    ok(rl.status === 400 && said(rl.body, 'bad-hmac', 'en') && /before VibeSpace restarted/.test(rl.body) && !rl.body.includes(CR.LANDING_WHY.expired.en), 'a sign-in started before a restart (the boot before\'s state key) lands as «started before VibeSpace restarted — start it again» (en)', rl.body.slice(-300));
+    ok(rl.status === 400 && gateOf(said(rl.body, 'bad-hmac', 'en')) && gateOf(/before VibeSpace restarted/.test(rl.body)) && !rl.body.includes(CR.LANDING_WHY.expired.en), 'a sign-in started before a restart (the boot before\'s state key) lands as «started before VibeSpace restarted — start it again» (en)', rl.body.slice(-300));
   } finally { await w.close(); if (w2) await w2.close(); }
 }
 
@@ -949,32 +949,32 @@ console.log('⑫ a chain of consent pages: the signed place, the landing that se
   const s2 = CR.stateOf({ origin: POD, flowId: F16, issuedAt: T0, kind: 'lark', chain: { page: 2, total: 3 } }, sign);
   const v2 = CR.stateVerdict(s2, { sign, kind: 'lark' });
   const s0 = CR.stateOf({ origin: POD, flowId: F16, issuedAt: T0, kind: 'lark' }, sign);
-  ok(v2.ok && v2.parts.chain && v2.parts.chain.page === 2 && v2.parts.chain.total === 3 && CR.stateVerdict(s0, { sign, kind: 'lark' }).parts.chain === null && !JSON.parse(Buffer.from(s0.split('.')[1], 'base64url').toString()).c && s0 === CR.stateOf({ origin: POD, flowId: F16, issuedAt: T0, kind: 'lark', chain: null }, sign),
+  ok(gateOf(v2.ok) && gateOf(v2.parts.chain) && v2.parts.chain.page === 2 && v2.parts.chain.total === 3 && CR.stateVerdict(s0, { sign, kind: 'lark' }).parts.chain === null && !JSON.parse(Buffer.from(s0.split('.')[1], 'base64url').toString()).c && s0 === CR.stateOf({ origin: POD, flowId: F16, issuedAt: T0, kind: 'lark', chain: null }, sign),
     'the state carries the page\'s place SIGNED (`c` = [2, 3] → parts.chain); a state without a chain is the old shape, byte for byte');
   const clearOf = (o) => `v1.${Buffer.from(JSON.stringify(o), 'utf8').toString('base64url')}`;
   const base = { u: POD, f: F16, t: Math.floor(T0 / 1000), k: 'lark' };
   const tampered = `${clearOf({ ...base, c: [1, 3] })}.${s2.split('.')[2]}`;
   ok(CR.stateVerdict(tampered, { sign, kind: 'lark' }).why === 'bad-hmac', 'a page\'s place changed on the way (page 2 → 1, the old signature) ⇒ bad-hmac');
   const bad = [[0, 3], [4, 3], [1, 9], [2], 'x', [1, 1], [2.5, 3]].map((c) => { const cl = clearOf({ ...base, c }); return CR.stateVerdict(`${cl}.${sign(cl)}`, { sign, kind: 'lark' }).why; });
-  ok(bad.every((w) => w === 'bad-shape'), `a malformed place, even signed (${bad.length} shapes: page 0, page > total, total > ${CR.CHAIN_PAGES_MAX}, one number, a word, a chain of one, a fraction) ⇒ bad-shape`, bad);
-  ok(CR.CHAIN_PAGES_MAX === 5 && CR.chainOf({ page: 5, total: 5 }) && !CR.chainOf({ page: 6, total: 6 }) && !CR.chainOf({ page: 1, total: 1 }) && CR.nextOf({ url: 'https://a.example.test/x?y=1', page: 2, total: 2 }) && !CR.nextOf({ url: 'https://a.example.test/', page: 1, total: 2 }) && !CR.nextOf({ url: 'javascript:alert(1)', page: 2, total: 3 }),
+  ok(verdictOf(bad.every((w) => w === 'bad-shape')), `a malformed place, even signed (${bad.length} shapes: page 0, page > total, total > ${CR.CHAIN_PAGES_MAX}, one number, a word, a chain of one, a fraction) ⇒ bad-shape`, bad);
+  ok(CR.CHAIN_PAGES_MAX === 5 && gateOf(CR.chainOf({ page: 5, total: 5 })) && !CR.chainOf({ page: 6, total: 6 }) && !CR.chainOf({ page: 1, total: 1 }) && gateOf(CR.nextOf({ url: 'https://a.example.test/x?y=1', page: 2, total: 2 })) && !CR.nextOf({ url: 'https://a.example.test/', page: 1, total: 2 }) && !CR.nextOf({ url: 'javascript:alert(1)', page: 2, total: 3 }),
     'a chain is ≤ 5 pages (more means the app enabled something absurd); the NEXT page is page ≥ 2 at an http(s) address — nothing else');
   const NEXT = 'https://accounts.larksuite.com/open-apis/authen/v1/authorize?client_id=cli_a&redirect_uri=x&scope=a+b&state=v1.s';
   const words = { en: 'VibeSpace: page 1/3 of the Lark permissions granted', zh: 'VibeSpace：Lark 第 1/3 页权限已授予', ja: 'VibeSpace：Lark の権限 1/3 ページ目を許可しました' };
   for (const lang of CR.LANGS) {
     const h = CR.landingHtml({ ok: true, user: 'ada.road@example.test', next: { url: NEXT, page: 2, total: 3 } }, { name: 'Lark', lang });
     const esc = NEXT.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    ok(/data-landing="chain"/.test(h) && h.includes(`<meta http-equiv="refresh" content="1;url=${esc}">`) && h.includes(`<a href="${esc}" rel="noreferrer">`) && !h.includes('<script') && h.includes(words[lang]) && h.includes('2/3') && !/[\w.+-]+@[\w-]+\.[\w.-]+/.test(h) && h.includes(`lang="${lang}"`),
+    ok(gateOf(/data-landing="chain"/.test(h)) && gateOf(h.includes(`<meta http-equiv="refresh" content="1;url=${esc}">`)) && gateOf(h.includes(`<a href="${esc}" rel="noreferrer">`)) && !h.includes('<script') && gateOf(h.includes(words[lang])) && gateOf(h.includes('2/3')) && !/[\w.+-]+@[\w-]+\.[\w.-]+/.test(h) && verdictOf(h.includes(`lang="${lang}"`)),
       `${lang}: page 1 landed ⇒ «${words[lang]}… 2/3…», then the SAME tab to the next authorize URL after 1 s (a meta refresh — no script, the route's CSP stands; a link too), the address marked, the URL escaped`, h.slice(0, 500));
   }
   const evil = CR.landingHtml({ ok: true, next: { url: 'javascript:alert(1)', page: 2, total: 3 } }, { name: 'Lark', lang: 'en' });
-  ok(/data-landing="ok"/.test(evil) && !/refresh/.test(evil) && evil.includes(`<script>${CR.CLOSE_SCRIPT}</script>`), 'a next page at a non-http address is never followed — the page is the plain «connected» one');
+  ok(gateOf(/data-landing="ok"/.test(evil)) && !/refresh/.test(evil) && verdictOf(evil.includes(`<script>${CR.CLOSE_SCRIPT}</script>`)), 'a next page at a non-http address is never followed — the page is the plain «connected» one');
   const stop = { en: 'page 2/3 of the Lark permissions was not granted. What you granted on the earlier pages stays', zh: 'Lark 第 2/3 页权限没有授予。前面各页已授予的权限都保留着', ja: 'Lark の権限 2/3 ページ目は許可されませんでした。それまでのページで許可した権限はそのまま残ります' };
   for (const lang of CR.LANGS) {
     const h = CR.landingHtml({ ok: false, why: 'denied', chain: { page: 2, total: 3 } }, { name: 'Lark', lang });
-    ok(/data-landing="chain-stopped"/.test(h) && h.includes(stop[lang]) && !/nothing was connected|什么也没连接|何も接続していません/.test(h), `${lang}: a declined page 2 says the earlier pages' grants stay — never «nothing was connected»`, h.slice(0, 300));
+    ok(gateOf(/data-landing="chain-stopped"/.test(h)) && gateOf(h.includes(stop[lang])) && !/nothing was connected|什么也没连接|何も接続していません/.test(h), `${lang}: a declined page 2 says the earlier pages' grants stay — never «nothing was connected»`, h.slice(0, 300));
   }
-  ok(/data-landing="denied"/.test(CR.landingHtml({ ok: false, why: 'denied', chain: { page: 1, total: 3 } }, { name: 'Lark', lang: 'en' })), 'a declined FIRST page is the plain «declined — nothing was connected» (nothing was granted yet)');
+  ok(verdictOf(/data-landing="denied"/.test(CR.landingHtml({ ok: false, why: 'denied', chain: { page: 1, total: 3 } }, { name: 'Lark', lang: 'en' }))), 'a declined FIRST page is the plain «declined — nothing was connected» (nothing was granted yet)');
   // THE RELAY PAGE, as shipped: a chained state rides it VERBATIM (it reads `u` and `k` only)
   const sR = CR.stateOf({ origin: FLEET, flowId: F16, issuedAt: T0, kind: 'lark', chain: { page: 2, total: 3 } }, sign);
   const q = `code=road-chain-code&state=${encodeURIComponent(sR)}`;
@@ -1017,13 +1017,13 @@ console.log('⑫ a chain of consent pages: the signed place, the landing that se
       const places = steps.slice(1).map((s) => CR.stateVerdict(new URL(s.url).searchParams.get('state'), { sign: (c) => c, kind: 'lark' }));
       const n = r.flow.chain ? r.flow.chain.total : 0;
       const redirect = viaRelay ? ADMIN_RELAY : ROUTE_LARK;
-      ok(n >= 3 && steps.length === n && steps.slice(0, -1).every((s, i) => s.status === 200 && /data-landing="chain"/.test(s.body) && s.body.includes(`data-chain="${i + 2}/${n}"`) && !s.body.includes('<script') && s.csp.includes(`script-src 'sha256-${HASH}'`) && /default-src 'none'/.test(s.csp))
-        && steps.every((s) => new URL(s.url).searchParams.get('redirect_uri') === redirect && Buffer.byteLength(s.url) <= 3000),
+      ok(n >= 3 && steps.length === n && gateOf(steps.slice(0, -1).every((s, i) => s.status === 200 && /data-landing="chain"/.test(s.body) && s.body.includes(`data-chain="${i + 2}/${n}"`) && !s.body.includes('<script') && s.csp.includes(`script-src 'sha256-${HASH}'`) && /default-src 'none'/.test(s.csp)))
+        && verdictOf(steps.every((s) => new URL(s.url).searchParams.get('redirect_uri') === redirect && Buffer.byteLength(s.url) <= 3000)),
         `${tag}: ONE Re-authorize, ${n} pages in the same tab — each landing sends it on (data-chain 2/${n} … ${n}/${n}) under the route's unchanged CSP; every page rides ${viaRelay ? 'the admin\'s relay page' : 'the instance\'s route'} and is ≤ 3 000 bytes`, steps.map((s) => [s.status, (/data-landing="([a-z-]+)"/.exec(s.body) || [])[1], Buffer.byteLength(s.url)]));
       const last = steps[steps.length - 1] || {};
-      ok(/data-landing="ok"/.test(last.body || '') && (last.body || '').includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && appList.every((x) => rec.auth.scopes.includes(x)) && rec.auth.morePending === 0 && !rec.lastAuthError && w.e.adapterView(rec).consentChain === null,
+      ok(gateOf(/data-landing="ok"/.test(last.body || '')) && gateOf((last.body || '').includes(`<script>${CR.CLOSE_SCRIPT}</script>`)) && gateOf(appList.every((x) => rec.auth.scopes.includes(x))) && rec.auth.morePending === 0 && !rec.lastAuthError && w.e.adapterView(rec).consentChain === null,
         `${tag}: the last page says connected and closes its tab; the token holds all ${appList.length}; nothing pending, no chain`, { more: rec.auth.morePending, chain: w.e.adapterView(rec).consentChain });
-      ok(places.length === n - 1 && places.every((v, i) => v.why === 'bad-hmac') && steps.slice(1).every((s, i) => { const c = JSON.parse(Buffer.from(new URL(s.url).searchParams.get('state').split('.')[1], 'base64url').toString()).c; return Array.isArray(c) && c[0] === i + 2 && c[1] === n; }),
+      ok(places.length === n - 1 && gateOf(places.every((v, i) => v.why === 'bad-hmac')) && verdictOf(steps.slice(1).every((s, i) => { const c = JSON.parse(Buffer.from(new URL(s.url).searchParams.get('state').split('.')[1], 'base64url').toString()).c; return Array.isArray(c) && c[0] === i + 2 && c[1] === n; })),
         `${tag}: each next page's state names its place (c = [k, ${n}]) under THIS boot's signature (a stranger's signer refuses it)`);
     } finally { await w.close(); }
   }
@@ -1051,14 +1051,14 @@ console.log('⑩ one source: the fleet\'s relay page from the presets\' fleet.js
     const kinds = w.e.digest({ scope: 'accounts' }).kinds || [];
     const presetPages = ['lark', 'gmail'].map((k) => ((kinds.find((x) => x.kind === k) || {}).presets || []).map((x) => x.relayPage).join());
     const fleetPage = (((kinds.find((x) => x.kind === 'lark') || {}).relayPages) || []).find((x) => x.who === 'fleet');
-    ok(rd(l) === ADMIN_RELAY && rd(g) === ADMIN_RELAY && l.flow.road === 'relay' && presetPages.join('|') === `${ADMIN_RELAY}|${ADMIN_RELAY}` && fleetPage && fleetPage.url === ADMIN_RELAY && said.some((x) => x.includes(`relay page ${ADMIN_RELAY}`)),
+    ok(rd(l) === ADMIN_RELAY && rd(g) === ADMIN_RELAY && l.flow.road === 'relay' && presetPages.join('|') === `${ADMIN_RELAY}|${ADMIN_RELAY}` && gateOf(fleetPage) && fleetPage.url === ADMIN_RELAY && verdictOf(said.some((x) => x.includes(`relay page ${ADMIN_RELAY}`))),
       'a pod with NO relay env: the presets\' fleet.json names the fleet\'s page — Lark and Gmail consents, the digest\'s relayPages and each company preset\'s relayPage all carry it; the boot line names it', { lark: rd(l), gmail: rd(g), presetPages, boot: said[0] });
     said.length = 0;
     await put(reader, 'cluster', { relayUrl: NEW_RELAY });
     const l2 = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET });
     const g2 = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: FLEET });
     const line = said.filter((x) => /\[presets\] changed/.test(x));
-    ok(rd(l2) === NEW_RELAY && rd(g2) === NEW_RELAY && line.length === 1 && line[0].includes(`relay page changed (now ${NEW_RELAY})`),
+    ok(rd(l2) === NEW_RELAY && rd(g2) === NEW_RELAY && line.length === 1 && verdictOf(line[0].includes(`relay page changed (now ${NEW_RELAY})`)),
       `a fleet.json edit reaches the NEXT Connect of the RUNNING instance — no restart; ONE journal line: ${line[0]}`, { lark: rd(l2), gmail: rd(g2), said });
     await put(reader, 'release', { relayUrl: MINE_RELAY });
     const l3 = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET });
@@ -1081,7 +1081,7 @@ console.log('⑩ one source: the fleet\'s relay page from the presets\' fleet.js
     const sOld = STORE.create({ dataDir: path.join(ROOT, 'one-source-said', 'a'), env: FLEET_ENV, presets: reader, log: cap });
     const sNew = STORE.create({ dataDir: path.join(ROOT, 'one-source-said', 'b'), env: {}, presets: reader, log: cap });
     const dep = lines.filter((x) => x.includes('VIBESPACE_OAUTH_RELAY_URL'));
-    ok(dep.length === 1 && dep[0].endsWith("VIBESPACE_OAUTH_RELAY_URL is read for the last time: move it to the presets' fleet.json (the chart does)") && sOld.fleetRelayUrl() === NEW_RELAY && sNew.fleetRelayUrl() === NEW_RELAY,
+    ok(dep.length === 1 && gateOf(dep[0].endsWith("VIBESPACE_OAUTH_RELAY_URL is read for the last time: move it to the presets' fleet.json (the chart does)")) && sOld.fleetRelayUrl() === NEW_RELAY && sNew.fleetRelayUrl() === NEW_RELAY,
       'the old env set ⇒ ONE boot line, by its words; unset ⇒ none', dep);
     await put(reader, 'release', { relayUrl: '' });
     const blank = sOld.fleetRelayUrl();
@@ -1139,12 +1139,12 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   ];
   const off = table.filter(([, got, want]) => JSON.stringify(got) !== JSON.stringify(want));
   ok(!off.length, `the road table (${table.length} rows): a company preset's route ONLY when it says its app lists the address; a silent Google preset = the documented Desktop form (any port, no path), the FIXED address its other road (and back); a Web preset its fixed address; a Desktop preset any port; Lark its registered loopback; a fleet relay unchanged; a person's own client unchanged`, off);
-  ok(CR.routeAllowed({}) && CR.routeAllowed({ preset: false }) && !CR.routeAllowed({ preset: true }) && CR.routeAllowed({ preset: true, listed: true }) && CR.listedOf({ instanceAddress: 'listed' }) && !CR.listedOf({ instanceAddress: 'yes' }) && !CR.listedOf(null) && CR.LISTED === 'listed',
+  ok(gateOf(CR.routeAllowed({})) && gateOf(CR.routeAllowed({ preset: false })) && !CR.routeAllowed({ preset: true }) && gateOf(CR.routeAllowed({ preset: true, listed: true })) && gateOf(CR.listedOf({ instanceAddress: 'listed' })) && !CR.listedOf({ instanceAddress: 'yes' }) && !CR.listedOf(null) && CR.LISTED === 'listed',
     'routeAllowed / listedOf: a person\'s own client, or a preset whose values say `instanceAddress: "listed"` — exactly that word');
   const rp = [P({}), P({ instanceAddress: 'listed' }), CR.relayOf({ relayUrl: () => '' }, { source: 'user', values: { instanceAddress: 'listed' } })];
   ok(rp[0].preset === true && rp[0].listed === false && rp[1].listed === true && rp[2].preset === false && rp[2].listed === false, 'relayOf answers preset + listed (a person\'s own client never "lists" — the fact is a preset\'s)', rp);
   // the dialog's other road is a verdict field on EVERY road (never derived in the client)
-  ok(['relay', 'route', 'loopback'].every((road) => table.some(([, got]) => got[0] === road)) && table.every(([, got]) => got[3] === null || CR.ASKED_ROADS.includes(got[3])), 'every verdict names its other road (null | loopback | fixed) — the dialog\'s visible second button');
+  ok(gateOf(['relay', 'route', 'loopback'].every((road) => table.some(([, got]) => got[0] === road))) && verdictOf(table.every(([, got]) => got[3] === null || CR.ASKED_ROADS.includes(got[3]))), 'every verdict names its other road (null | loopback | fixed) — the dialog\'s visible second button');
 
   // (b) THE REAL ENGINE — the owner's shape: a silent company Google preset, an https address, a browser elsewhere
   const SILENT = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1' };
@@ -1152,11 +1152,11 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   try {
     const a = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
     const ra = new URL(a.url).searchParams.get('redirect_uri');
-    ok(a.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(ra) && a.flow.other === 'fixed' && !a.superseded,
+    ok(a.flow.mode === 'ephemeral' && gateOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(ra)) && a.flow.other === 'fixed' && !a.superseded,
       'Connect Gmail under a silent company preset from another computer: redirect_uri = 127.0.0.1 on a free port with NO path (Google\'s documented Desktop form) — never the instance\'s own address; the flow names its other road', { mode: a.flow.mode, ra, other: a.flow.other });
     const b = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' });
     const sa = w.e.oauthStatus(a.flowId);
-    ok(b.flow.mode === 'fixed' && new URL(b.url).searchParams.get('redirect_uri') === w.fixed && b.flow.listening === true && b.superseded === 1 && b.flow.other === 'loopback' && sa.running === false && /superseded/.test(String(sa.error || (sa.flow && sa.flow.cancelled))),
+    ok(b.flow.mode === 'fixed' && new URL(b.url).searchParams.get('redirect_uri') === w.fixed && b.flow.listening === true && b.superseded === 1 && b.flow.other === 'loopback' && sa.running === false && verdictOf(/superseded/.test(String(sa.error || (sa.flow && sa.flow.cancelled)))),
       'the other road (asked `fixed`): the FIXED address, listening; the earlier sign-in is replaced (superseded — said once by the answer), never left running beside it', { b: [b.flow.mode, b.superseded, b.flow.other], a: { running: sa.running, error: sa.error } });
     const c = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' });
     ok(c.flow.mode === 'fixed' && c.flow.listening === true && c.superseded === 1 && !(c.flow.refusal), 'a third press on the fixed address: the earlier one is superseded FIRST, so the port is free — listening, no port-busy refusal', { listening: c.flow.listening, refusal: c.flow.refusal });
@@ -1170,24 +1170,24 @@ console.log('⑬ a company preset never rides an address its app does not list; 
     const pasted = await w.e.oauthCallback({ url: back.toString(), flowId: d.flowId });
     const done = await waitDone(w.e, d.flowId);
     const tk = seen.find((x) => x.path === '/google-oauth/token');
-    ok(pasted.ok && done.ok && tk && /^http:\/\/127\.0\.0\.1:\d+$/.test(tk.body.redirect_uri) && tk.body.code === 'wall-paste-code', 'the person pastes the last page\'s address: the hub finishes the exchange with the SAME path-less redirect_uri — signed in', { pasted: pasted.ok, done: done && done.ok, redirect: tk && tk.body.redirect_uri });
+    ok(gateOf(pasted.ok) && gateOf(done.ok) && gateOf(tk) && gateOf(/^http:\/\/127\.0\.0\.1:\d+$/.test(tk.body.redirect_uri)) && tk.body.code === 'wall-paste-code', 'the person pastes the last page\'s address: the hub finishes the exchange with the SAME path-less redirect_uri — signed in', { pasted: pasted.ok, done: done && done.ok, redirect: tk && tk.body.redirect_uri });
     // cancel: one press, said by its answer; a second press finds it ended
     const f = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
     const c1 = w.e.oauthCancel(f.flowId), c2 = w.e.oauthCancel(f.flowId), sf = w.e.oauthStatus(f.flowId);
     let noId = null; try { w.e.oauthCancel(null); } catch (er) { noId = er.code; }
-    ok(c1.cancelled === true && c2.cancelled === false && sf.running === false && /cancel/i.test(String(sf.error || '')) && noId === 'no-flow', 'oauthCancel: ends a running sign-in in one call (cancelled), a second finds it ended, the status says cancelled; no id ⇒ refused by name', { c1, c2, error: sf.error, noId });
+    ok(c1.cancelled === true && c2.cancelled === false && sf.running === false && gateOf(/cancel/i.test(String(sf.error || ''))) && noId === 'no-flow', 'oauthCancel: ends a running sign-in in one call (cancelled), a second finds it ended, the status says cancelled; no id ⇒ refused by name', { c1, c2, error: sf.error, noId });
     // the route: POST /api/channels/oauth/cancel (owner-only like its siblings) and GET status?kind=
     const g = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
     const post = (p, body) => new Promise((resolve) => { const rq = http.request(`${w.origin}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => { let s = ''; res.on('data', (x) => { s += x; }); res.on('end', () => { let j = null; try { j = JSON.parse(s); } catch {} resolve({ status: res.statusCode, json: j }); }); }); rq.end(JSON.stringify(body)); });
     const rs = await w.get(`/api/channels/oauth/status?kind=gmail`);
     const rc = await post('/api/channels/oauth/cancel', { flowId: g.flowId });
     const rx = await post('/api/channels/oauth/cancel', {});
-    ok(rs.status === 200 && JSON.parse(rs.body).flowId === g.flowId && rc.status === 200 && rc.json && rc.json.ok === true && rc.json.cancelled === true && rx.status === 400, 'the routes: GET /api/channels/oauth/status?kind=gmail names the running one; POST /api/channels/oauth/cancel {flowId} ends it; no flowId ⇒ 400', { status: rs.status, cancel: rc.json, none: rx.status });
+    ok(rs.status === 200 && JSON.parse(rs.body).flowId === g.flowId && rc.status === 200 && gateOf(rc.json) && rc.json.ok === true && rc.json.cancelled === true && rx.status === 400, 'the routes: GET /api/channels/oauth/status?kind=gmail names the running one; POST /api/channels/oauth/cancel {flowId} ends it; no flowId ⇒ 400', { status: rs.status, cancel: rc.json, none: rx.status });
     // the digest: each preset's road for a browser elsewhere (the dialog's words BEFORE the press) + what it does not say
     const kg = (w.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'gmail');
     const kl = (w.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'lark');
     const wg = kg && CR.wayOf({ kind: 'gmail', origin: POD, inputs: kg.presets[0].wayIn }), wl = kl && CR.wayOf({ kind: 'lark', origin: POD, inputs: kl.presets[0].wayIn });
-    ok(kg && JSON.stringify(wg) === JSON.stringify({ road: 'loopback', why: 'preset-loopback', fixed: false, other: 'fixed', uri: null }) && wl && wl.road === 'loopback' && wl.why === 'preset-loopback'
+    ok(gateOf(kg) && JSON.stringify(wg) === JSON.stringify({ road: 'loopback', why: 'preset-loopback', fixed: false, other: 'fixed', uri: null }) && gateOf(wl) && wl.road === 'loopback' && wl.why === 'preset-loopback'
       && JSON.stringify(kg.oauthSetup.presets[0].lacks) === JSON.stringify(['clientType', 'road']) && kg.oauthSetup.presets[0].listed === false,
       'the kinds digest: presets[].wayIn = the START\'s own inputs, read in the page by wayOf with the page\'s origin (Gmail: the loopback, its other road the fixed address; Lark: its loopback); oauthSetup.presets[].lacks = what the preset does not say (the client\'s kind, a way back)', { gmail: wg, lark: wl, lacks: kg && kg.oauthSetup.presets[0].lacks });
   } finally { await w.close(); }
@@ -1215,7 +1215,7 @@ console.log('⑬ a company preset never rides an address its app does not list; 
     const okl = await s1.e.startOAuth({ kind: 'slack', clientPreset: 'ws', origin: POD });
     const ks = (s0.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'slack');
     const wsl = ks && CR.wayOf({ kind: 'slack', origin: POD, inputs: ks.presets[0].wayIn });
-    ok(refused && refused.why === 'preset-unlisted' && /make your own app/.test(refused.msg) && new URL(okl.url).searchParams.get('redirect_uri') === `${POD}/api/channels/oauth/cb/slack` && wsl && wsl.road === 'none',
+    ok(gateOf(refused) && refused.why === 'preset-unlisted' && gateOf(/make your own app/.test(refused.msg)) && new URL(okl.url).searchParams.get('redirect_uri') === `${POD}/api/channels/oauth/cb/slack` && gateOf(wsl) && wsl.road === 'none',
       'SLACK (R3, the same law): a company workspace app with no relay page that does not list this address is refused BEFORE Slack is opened (preset-unlisted — the other way named), wayOf over its digest inputs says `none` for the dialog; listed ⇒ this instance\'s own address', { refused, listed: new URL(okl.url).searchParams.get('redirect_uri'), way: wsl });
     // r2 (law C): a begin that is REFUSED leaves the earlier sign-in of its kind running — nothing replaced it
     const keep = await s1.e.startOAuth({ kind: 'slack', clientPreset: 'ws', origin: POD });
@@ -1228,7 +1228,7 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   try {
     const [x, y] = await Promise.all([wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD }), wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD })]);
     const run2 = [x, y].filter((f) => wo.e.oauthStatus(f.flowId).running).length;
-    ok(run2 === 1 && wo.e.oauthStatus(y.flowId).running === true && y.superseded === 1 && /superseded/.test(String(wo.e.oauthStatus(x.flowId).error || '')), 'r2 LAW A: two OVERLAPPING Gmail starts (any port) ⇒ ONE runs — the second ends the first by name (superseded 1), never two on two ports', { running: run2, superseded: [x.superseded || 0, y.superseded || 0] });
+    ok(run2 === 1 && wo.e.oauthStatus(y.flowId).running === true && y.superseded === 1 && verdictOf(/superseded/.test(String(wo.e.oauthStatus(x.flowId).error || ''))), 'r2 LAW A: two OVERLAPPING Gmail starts (any port) ⇒ ONE runs — the second ends the first by name (superseded 1), never two on two ports', { running: run2, superseded: [x.superseded || 0, y.superseded || 0] });
     const [f1, f2] = await Promise.all([wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' }), wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' })]);
     const s2 = wo.e.oauthStatus(f2.flowId);
     ok(wo.e.oauthStatus(f1.flowId).running === false && s2.running === true && s2.flow.listening === true && !s2.flow.refusal && f2.superseded >= 1, 'r2 LAW A: two OVERLAPPING starts on the FIXED road ⇒ the second ends the first and LISTENS on the port (no «port-busy»)', { first: wo.e.oauthStatus(f1.flowId).running, listening: s2.flow.listening, refusal: s2.flow.refusal && s2.flow.refusal.code });
@@ -1236,7 +1236,7 @@ console.log('⑬ a company preset never rides an address its app does not list; 
     let bad = null; try { await wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixd' }); } catch (er) { bad = er.code; }
     const postR = (p, body) => new Promise((resolve) => { const rq = http.request(`${wo.origin}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => { let s = ''; res.on('data', (q) => { s += q; }); res.on('end', () => { let j = null; try { j = JSON.parse(s); } catch {} resolve({ status: res.statusCode, json: j }); }); }); rq.end(JSON.stringify(body)); });
     const rb = await postR('/api/channels/oauth/start', { kind: 'gmail', clientPreset: 'org1', road: 'bogus' });
-    ok(bad === 'bad-road' && rb.status === 400 && rb.json && (rb.json.code === 'bad-road' || /bad-road/.test(JSON.stringify(rb.json))), 'r2 LAW E4: an asked road that is not loopback / fixed is REFUSED by name (bad-road) — the engine and POST /api/channels/oauth/start — never silently the verdict\'s own', { engine: bad, route: rb.status });
+    ok(bad === 'bad-road' && rb.status === 400 && gateOf(rb.json) && (rb.json.code === 'bad-road' || verdictOf(/bad-road/.test(JSON.stringify(rb.json)))), 'r2 LAW E4: an asked road that is not loopback / fixed is REFUSED by name (bad-road) — the engine and POST /api/channels/oauth/start — never silently the verdict\'s own', { engine: bad, route: rb.status });
   } finally { await wo.close(); }
   // LAW D: ONE verdict, two readers — wayOf over the digest's inputs + the page's origin = the road the start takes
   const ORIGINS = [POD, 'http://pod-road.example.test:3456', 'https://other-name.example.test', 'http://192.168.7.20:3456', `http://127.0.0.1:${await freePort()}`];
@@ -1297,9 +1297,9 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   const GUARD = 'clientTypes && https && !preset ?';
   const OSm = MUT.load('src/oauth-setup.js', editAnchor(OSsrc, GUARD, 'clientTypes && https ?', "src/oauth-setup.js"), 'noclaimguard13');
   const kOwn = OS.refusalKeys({ clientTypes: true, https: true, preset: false }), kPre = OS.refusalKeys({ clientTypes: true, https: true, preset: true });
-  ok(kOwn.includes('refusal.desktop') && !kPre.includes('refusal.desktop') && kPre.includes('refusal') && /The client is a Desktop app client/.test(OS.WORDS['refusal.desktop']),
+  ok(gateOf(kOwn.includes('refusal.desktop')) && !kPre.includes('refusal.desktop') && gateOf(kPre.includes('refusal')) && verdictOf(/The client is a Desktop app client/.test(OS.WORDS['refusal.desktop'])),
     'r3 PIN (law 3): refusalKeys draws the «The client is a Desktop app client» claim for a person\'s OWN client on an https road, NEVER for a company preset (the refusal lines stay)', { own: kOwn, preset: kPre });
-  ok(OSsrc.split(GUARD).length === 2 && OSm.refusalKeys({ clientTypes: true, https: true, preset: true }).includes('refusal.desktop'), 'RED CONTROL (r3 PIN, law 3): without the preset guard the claim is drawn for a company preset — red on the leg above');
+  ok(OSsrc.split(GUARD).length === 2 && verdictOf(OSm.refusalKeys({ clientTypes: true, https: true, preset: true }).includes('refusal.desktop')), 'RED CONTROL (r3 PIN, law 3): without the preset guard the claim is drawn for a company preset — red on the leg above');
   // r3 (item 5): NO START WAITS FOR EVER on another start — a begin that hangs past the bound: the next start goes ahead (said),
   // the late one ends itself when it answers; still ONE sign-in. (A patched copy with a 300 ms bound — the real one is 20 s.)
   {
@@ -1320,7 +1320,7 @@ console.log('⑬ a company preset never rides an address its app does not list; 
       const lateR = await late;
       await sleep(50);
       const running = ww.e.oauthStatus(next.flowId).running;
-      ok(authSrcW.split(BOUND).length === 2 && answeredFirst && running === true && lateR.err && lateR.err.code === 'superseded',
+      ok(authSrcW.split(BOUND).length === 2 && gateOf(answeredFirst) && running === true && gateOf(lateR.err) && lateR.err.code === 'superseded',
         'r3 item 5: a begin that HANGS past the bound — the next start goes ahead and ANSWERS FIRST (it waited the bound, not the hang), the late one ends itself when it answers (409 superseded): one sign-in, never a kind blocked for ever', { answeredFirst, running, late: lateR.err ? lateR.err.code : 'answered' });
     } finally { await ww.close(); }
   }
@@ -1333,7 +1333,7 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   // LAW E3: only the exact string "listed" counts — an array (stringified by the reader) never puts a company app back on its own address
   const PL13 = require(path.join(REPO, 'src/preset-layers.js'));
   const ents = PL13.parseIntegrations([{ id: 'lark', key: 'a', values: { appId: 'x', appSecret: 'y', instanceAddress: ['listed'] } }, { id: 'lark', key: 'b', values: { appId: 'x', appSecret: 'y', instanceAddress: 'listed' } }, { id: 'slack', key: 'c', values: { clientId: 'x', clientSecret: 'y', instanceAddress: { v: 'listed' } } }]);
-  ok(ents[0].values.instanceAddress === '' && ents[1].values.instanceAddress === 'listed' && ents[2].values.instanceAddress === '' && !CR.listedOf(ents[0].values) && CR.listedOf(ents[1].values), 'r2 LAW E3: `instanceAddress: ["listed"]` (or an object) is NOT listed — the integrations reader keeps only the exact string', ents.map((e) => e.values.instanceAddress));
+  ok(ents[0].values.instanceAddress === '' && ents[1].values.instanceAddress === 'listed' && ents[2].values.instanceAddress === '' && !CR.listedOf(ents[0].values) && verdictOf(CR.listedOf(ents[1].values)), 'r2 LAW E3: `instanceAddress: ["listed"]` (or an object) is NOT listed — the integrations reader keeps only the exact string', ents.map((e) => e.values.instanceAddress));
   // RED CONTROL for LAW A: an engine without the per-kind place (its chain never set) lets two overlapping starts run side by side
   {
     const authSrcA = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
@@ -1396,9 +1396,9 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
   fs.writeFileSync(f, 'export function press() { return new Error().stack; }\nexport const live = { sweep: async () => { await null; return new Error().stack; } };\nexport function viaSweep() { return (function sweep() { return press(); })(); }\nfunction closeSweep() { return new Error().stack; }\nexport const aliased = { sweep: closeSweep };\nexport const viaGetter = { get sweep() { return new Error().stack; } };\n');
   const F = await import(new URL('file://' + f).href);
   const plain = F.press(), swept = await F.live.sweep(), nested = F.viaSweep(), aliased = F.aliased.sweep(), getter = F.viaGetter.sweep;
-  ok(plain.includes('wt-groups-sweep-on-change') && !stackHasFrame(plain, /\bsweep\b/) && stackHasFrame(swept, /\bsweep\b/) && stackHasFrame(nested, /\bsweep\b/) && stackHasFrame(aliased, /\bsweep\b/) && stackHasFrame(getter, /\bsweep\b/),
+  ok(gateOf(plain.includes('wt-groups-sweep-on-change')) && !stackHasFrame(plain, /\bsweep\b/) && gateOf(stackHasFrame(swept, /\bsweep\b/)) && gateOf(stackHasFrame(nested, /\bsweep\b/)) && gateOf(stackHasFrame(aliased, /\bsweep\b/)) && verdictOf(stackHasFrame(getter, /\bsweep\b/)),
     '«from a sweep» reads the frames\' FUNCTION names: a call from a checkout whose path holds the word is not a sweep; a sweep method (after its await), a call made under a sweep frame, a function stored as `sweep` («[as sweep]») and a `get sweep` accessor are', { plain: frameNames(plain), swept: frameNames(swept) });
-  ok(/\bsweep\b/.test(plain), 'CONTROL: the old whole-stack test calls that same plain call a sweep — the path alone fools it (the leg above is red with it)');
+  ok(verdictOf(/\bsweep\b/.test(plain)), 'CONTROL: the old whole-stack test calls that same plain call a sweep — the path alone fools it (the leg above is red with it)');
 }
 {
   const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
@@ -1723,7 +1723,7 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
     // the routes module holds ONE engine (RT.setup) — a world in use is the one the routes ask
     const useWorld = (wo) => { P.base = wo.w.origin; RT.setup({ getEngine: () => wo.w.e }); };
     try {
-      ok(worlds.every((x) => x.kinds.some((k) => k.kind === 'gmail')), '⑭ the digest names the Gmail type with its company preset (the dialog\'s own types)', worlds.map((x) => x.kinds.map((k) => k.kind)));
+      ok(verdictOf(worlds.every((x) => x.kinds.some((k) => k.kind === 'gmail'))), '⑭ the digest names the Gmail type with its company preset (the dialog\'s own types)', worlds.map((x) => x.kinds.map((k) => k.kind)));
       const runOne = async (wo) => { useWorld(wo); return runSeed(wo.w, wo.kinds, 1); };
       if (process.env.CR_SEED_ONLY) {   // a reader's replay: CR_SEED_ONLY=<seed> [CR_WORLD=0|1] — the whole sequence and the state at rest
         const wo = worlds[Number(process.env.CR_WORLD || 0)]; useWorld(wo);
@@ -1767,12 +1767,12 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
         const held = await runSeed(wo.w, wo.kinds, 380113);
         await shut(sq);
         console.log(`      (the fixed scene: the world's fixed port ${fx} (the kernel's bind(0) range ${(bind0Range() || ['?', '?']).join('-')}); another listener ${sq.sv ? 'bound before the seed' : 'NOT bound: ' + sq.why}; at rest ${JSON.stringify({ running: held.rest.running, ...held.rest.listen })} — ${held.ok ? 'holds' : held.why.join('; ')})`);
-        ok(!!sq.sv && held.ok && held.rest.running.length === 0 && held.rest.listen.before.includes(fx) && !held.rest.listen.live.length, `⑭ THE FIXED SCENE (seed 380113, r318 / r356): another listener of this process on the world's fixed port ${fx}, held before the seed, is no sign-in's — at rest nothing runs and the law holds`, `bound ${!!sq.sv}; ${JSON.stringify(held.rest.listen)}; ${held.why.join('; ')}`);
+        ok(!!sq.sv && gateOf(held.ok) && held.rest.running.length === 0 && gateOf(held.rest.listen.before.includes(fx)) && !held.rest.listen.live.length, `⑭ THE FIXED SCENE (seed 380113, r318 / r356): another listener of this process on the world's fixed port ${fx}, held before the seed, is no sign-in's — at rest nothing runs and the law holds`, `bound ${!!sq.sv}; ${JSON.stringify(held.rest.listen)}; ${held.why.join('; ')}`);
         let born = null;
         const ctl = await runSeed(wo.w, wo.kinds, 380113, { ...FULL, atRest: async () => { born = await bindAt(fx); } });
         await shut(born);
         console.log(`      (its red control: a listener born during the seed on ${fx} — ${born && born.sv ? 'bound at rest' : 'NOT bound: ' + (born && born.why)}; at rest ${JSON.stringify({ running: ctl.rest.running, ...ctl.rest.listen })} — ${ctl.ok ? 'holds' : ctl.why.join('; ')})`);
-        ok(!!(born && born.sv) && !ctl.ok && ctl.why.includes('a listener runs with no sign-in shown') && ctl.rest.listen.live.includes(fx), '⑭ THE FIXED SCENE\'s RED CONTROL: a listener BORN DURING the seed on that port is red by the same why («a listener runs with no sign-in shown»)', `bound ${!!(born && born.sv)}; ${JSON.stringify(ctl.rest.listen)}; ${ctl.why.join('; ')}`);
+        ok(!!(born && born.sv) && !ctl.ok && gateOf(ctl.why.includes('a listener runs with no sign-in shown')) && verdictOf(ctl.rest.listen.live.includes(fx)), '⑭ THE FIXED SCENE\'s RED CONTROL: a listener BORN DURING the seed on that port is red by the same why («a listener runs with no sign-in shown»)', `bound ${!!(born && born.sv)}; ${JSON.stringify(ctl.rest.listen)}; ${ctl.why.join('; ')}`);
         const br = bind0Range();
         ok(!br || fx < br[0] || fx > br[1], `⑭ the world's fixed port ${fx} lies outside the kernel's bind(0) range ${br ? br.join('-') : '(none to read: a bind to port 0, said above)'} (no bind to port 0 can be handed it)`);
       }
@@ -1798,7 +1798,7 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
         const t0 = Date.now();
         const src = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf8');
         const changed = edits.every(([from]) => src.split(from).length === 2);
-        if (!runsControl(i)) { ok(changed, `⑭ RED CONTROL\'s anchors: ${what} — every edit's anchor is in mounts-dialog.js once (its seeded search runs in the heavy twin)`); continue; }
+        if (!runsControl(i)) { ok(verdictOf(changed), `⑭ RED CONTROL\'s anchors: ${what} — every edit's anchor is in mounts-dialog.js once (its seeded search runs in the heavy twin)`); continue; }
         const Dm = await mutBuilt[i];
         const keep = D; D = Dm;
         const found = [];
@@ -1806,7 +1806,7 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
         let tried = 0;
         for (let s = 1; s <= SEEDS * 3 && !found.length; s++) for (const wo of worlds) { if (found.length) break; if (s % 100 === 0) await fresh(wo); useWorld(wo); tried++; const seed = SEED0 + s * 7919 + worlds.indexOf(wo); const r = await runSeed(wo.w, wo.kinds, seed, ccfg); if (!r.ok) found.push({ world: wo.name, seed, why: r.why }); }
         D = keep;
-        ok(changed && found.length > 0, `⑭ RED CONTROL: ${what} — the seeded driver finds it by itself`, found.length ? `found after ${tried} seeds: [${found[0].world}] seed ${found[0].seed}: ${found[0].why.join('; ')}` : `not found in ${tried} seeds`);
+        ok(gateOf(changed) && found.length > 0, `⑭ RED CONTROL: ${what} — the seeded driver finds it by itself`, found.length ? `found after ${tried} seeds: [${found[0].world}] seed ${found[0].seed}: ${found[0].why.join('; ')}` : `not found in ${tried} seeds`);
         if (found.length) console.log(`      (found after ${tried} seeds in ${Date.now() - t0} ms: [${found[0].world}] seed ${found[0].seed} — ${found[0].why.join('; ')})`);
       }
       // ⑭d THE CLOSE ENDS WHAT THIS PAGE STARTED (主开发's base 104729, seed 1443040): a press whose start answer never came, a
@@ -1816,17 +1816,17 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
       // and its guard — another tab's sign-in is never ended by this page's close.
       useWorld(worlds[0]);
       const s1443 = await runSeed(worlds[0].w, worlds[0].kinds, 1443040);
-      ok(s1443.ok, '⑭d the seed 1443040 (主开发\'s base 104729, the loopback world) holds: nothing that needs the dialog runs behind it', s1443.ok ? undefined : `${s1443.why.join('; ')}\n      ${s1443.log.join(' ')}`);
+      ok(verdictOf(s1443.ok), '⑭d the seed 1443040 (主开发\'s base 104729, the loopback world) holds: nothing that needs the dialog runs behind it', s1443.ok ? undefined : `${s1443.why.join('; ')}\n      ${s1443.log.join(' ')}`);
       const lost = await runSeed(worlds[0].w, worlds[0].kinds, 1, FULL, { tabs: 1, steps: [['press'], ['rel', '→get status?kind'], ['rel', '→post start'], ['rel', '←post start'], ['press'], ['rel', '→post start'], ['rel', '←get status?kind'], ['rel', '←post start', true], ['cancel'], ['rel', '→get status?kind'], ['rel', '←get status?kind'], ['close'], ['reopen'], ['close']] });
-      ok(lost.ok && lost.rest.running.length === 0, '⑭d the class as a script: a second press whose start answer is LOST (the hub ran it), a Cancel, close → reopen → close — the close ends the sign-in this page started though it never learned its id (nothing runs, no listener)', lost.ok && !lost.rest.running.length ? undefined : `${lost.why.join('; ')} running=${lost.rest.running.length}\n      ${lost.log.join(' ')}`);
+      ok(gateOf(lost.ok) && lost.rest.running.length === 0, '⑭d the class as a script: a second press whose start answer is LOST (the hub ran it), a Cancel, close → reopen → close — the close ends the sign-in this page started though it never learned its id (nothing runs, no listener)', lost.ok && !lost.rest.running.length ? undefined : `${lost.why.join('; ')} running=${lost.rest.running.length}\n      ${lost.log.join(' ')}`);
       const other = await runSeed(worlds[0].w, worlds[0].kinds, 1, FULL, { tabs: 2, steps: [['press', 1], ['rel', '→Bpost start'], ['rel', '←Bpost start'], ['press', 0], ['rel', '→Apost start', true], ['close', 0]] });
-      ok(other.ok && other.rest.running.length === 1 && other.rest.tabs[1].flow === other.rest.running[0], '⑭d its guard: tab A\'s close (its own press refused on the way) reads the kind and leaves tab B\'s sign-in alone — another page\'s `ref`', other.ok ? JSON.stringify(other.rest) : `${other.why.join('; ')}\n      ${other.log.join(' ')}`);
+      ok(gateOf(other.ok) && other.rest.running.length === 1 && other.rest.tabs[1].flow === other.rest.running[0], '⑭d its guard: tab A\'s close (its own press refused on the way) reads the kind and leaves tab B\'s sign-in alone — another page\'s `ref`', other.ok ? JSON.stringify(other.rest) : `${other.why.join('; ')}\n      ${other.log.join(' ')}`);
       // ⑭c the tidy's item 4 (the REAL routes): a cancel that names its sign-in names it by a string — a number, an object or an
       // empty string is refused by name (400 bad-flow), never read as «none named»; an absent flowId keeps the old client's meaning
       useWorld(worlds[0]);
       const cancelAs = async (b) => { const r = await fetch(`${worlds[0].w.origin}/api/channels/adapters/no-such-account/auth/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: PAGE_ORIGIN }, body: JSON.stringify(b) }); let j = {}; try { j = await r.json(); } catch { j = {}; } return { status: r.status, code: j.code || null }; };
       const c4 = { num: await cancelAs({ flowId: 12345 }), obj: await cancelAs({ flowId: { id: 'x' } }), empty: await cancelAs({ flowId: '' }), none: await cancelAs({}), nul: await cancelAs({ flowId: null }), named: await cancelAs({ flowId: 'abc' }) };
-      ok(['num', 'obj', 'empty'].every((k) => c4[k].status === 400 && c4[k].code === 'bad-flow') && ['none', 'nul', 'named'].every((k) => c4[k].status !== 400),
+      ok(gateOf(['num', 'obj', 'empty'].every((k) => c4[k].status === 400 && c4[k].code === 'bad-flow')) && verdictOf(['none', 'nul', 'named'].every((k) => c4[k].status !== 400)),
         '⑭c the account cancel route: a flowId that is not a non-empty string is refused by name (400 bad-flow); absent / null keeps the old meaning (the engine is asked — here an unknown account)', c4);
       // ⑭b THE RE-AUTHORIZE HALF of «a busy control always comes back» (the tidy's item 2): the REAL reauthDialog (live), its
       // start / cancel faked — every exit of a press, the other road or Cancel (an answer, an {error} answer, a rejected fetch)
@@ -1860,4 +1860,4 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
 
 await new Promise((r) => vendor.close(r));   // lane gmail-connect-wall: ⑬'s exchanges ride the fake too — closed last
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

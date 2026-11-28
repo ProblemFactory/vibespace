@@ -44,7 +44,7 @@ const PASTE = require(path.join(REPO, 'src/vault-paste.js'));   // lane login-re
 const acorn = require('acorn');
 
 let passed = 0, failed = 0;
-const ok = (c, name, extra) => { if (c) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : ''}`); } };
 
 // ── THE TREE, as files (an overlay = a mutated copy in memory) ──
 const READ = new Map();   // the real tree, read once
@@ -324,10 +324,10 @@ const R = census(VK.FAMILIES, real);
 printTable(VK.FAMILIES, R);
 ok(VK.FAMILIES.length >= 15 && new Set(VK.FAMILY_IDS).size === VK.FAMILIES.length, `${VK.FAMILIES.length} kind families, ids unique`);
 ok(R.problems.length === 0, 'every family\'s declared surfaces are in the tree, and nothing in the tree is outside the registry', R.problems);
-ok(real.doors.size >= 7 && [...real.doors.keys()].every((d) => VK.addOrderOf(d) != null), `the 添加… doors registered in the window (${[...real.doors.keys()].join(', ')}) are the registry's`, [...real.doors]);
-ok(VK.ADD_DOORS.map((d) => d.door).join() === 'account,integration,channel,totp,automation,web-login,secret,keyfile' && VK.ADD_DOORS.every((d, i, a) => !i || a[i - 1].order < d.order),
+ok(real.doors.size >= 7 && verdictOf([...real.doors.keys()].every((d) => VK.addOrderOf(d) != null)), `the 添加… doors registered in the window (${[...real.doors.keys()].join(', ')}) are the registry's`, [...real.doors]);
+ok(VK.ADD_DOORS.map((d) => d.door).join() === 'account,integration,channel,totp,automation,web-login,secret,keyfile' && verdictOf(VK.ADD_DOORS.every((d, i, a) => !i || a[i - 1].order < d.order)),
   '添加…\'s order is the registry\'s: Account… · Integration key… · Channel account… · Two-step code… · Automation key… · Website login… · Other key or password… · File… (lane lg-vault-file)', VK.ADD_DOORS);
-ok(R.cells.get('totp') && R.cells.get('totp').add.mark === '✓', 'TOTP\'s add surface: the 两步验证… door is registered (the gap the owner found is closed)', R.cells.get('totp'));
+ok(gateOf(R.cells.get('totp')) && R.cells.get('totp').add.mark === '✓', 'TOTP\'s add surface: the 两步验证… door is registered (the gap the owner found is closed)', R.cells.get('totp'));
 ok(R.heads.join() === 'host,frp,file,apikey,totp,secret,provider,keyfile,web-login,proxy-login', `the engine's SECRET_RE heads read: ${R.heads.join(', ')} (+ the agent namespace) — each held by a family`, R.heads);
 ok(VI.PURPOSES === VK.CATEGORIES && VI.PURPOSE_IDS.join() === VK.CATEGORY_IDS.join(), 'the inventory\'s purposes ARE the registry\'s categories (one list — the rail reads it)');
 {
@@ -336,15 +336,15 @@ ok(VI.PURPOSES === VK.CATEGORIES && VI.PURPOSE_IDS.join() === VK.CATEGORY_IDS.jo
 }
 ok(VK.categoryOf('secrets', 'weird:x') === 'other' && VK.familyOf('secrets', 'weird:x') === null && VK.categoryOf('accounts', 'agent:x') === 'agents' && VK.categoryOf('integrations', 'llm/h1') === 'machines' && VK.categoryOf('integrations', 'llm') === 'integrations',
   'matching order: an agent: entry first whatever its store; an integration\'s per-machine row → machines; a hub secret no family holds → other');
-ok(R.doorless.length >= 1 && R.doorless.every((d) => / — /.test(d)), 'every category with no 添加… door says why, in its families\' words (printed above)', R.doorless);
+ok(R.doorless.length >= 1 && verdictOf(R.doorless.every((d) => / — /.test(d))), 'every category with no 添加… door says why, in its families\' words (printed above)', R.doorless);
 {
   const a = R.cells.get('agent-secret');
   // B-3fb5: the one deferral there was (agent-secret · delete, unscheduled since 2026-10-26) is DECLARED now — its door in the tree
   const ad = VI.doorsOf({ store: 'secrets', entry: 'agent:conv-census/sample', field: 'secret' }).delete;
-  ok(a && a.delete.mark === '✓' && !R.words.some((w) => w.startsWith('agent-secret·delete ')) && ad && ad.method === 'DELETE' && ad.path === '/api/vault/agent-secrets/agent%3Aconv-census%2Fsample' && ad.confirm === 'agent-secret',
+  ok(gateOf(a) && a.delete.mark === '✓' && !R.words.some((w) => w.startsWith('agent-secret·delete ')) && gateOf(ad) && ad.method === 'DELETE' && ad.path === '/api/vault/agent-secrets/agent%3Aconv-census%2Fsample' && ad.confirm === 'agent-secret',
     'B-3fb5: agent-secret · delete is DECLARED and present (doorsOf\'s DELETE /api/vault/agent-secrets/<the whole name, encoded>, its confirm «agent-secret», the route mounted) — its deferral is gone', { mark: a && a.delete.mark, door: ad, deferred: R.words.filter((w) => w.includes('⏳')) });
   const fams = [...new Set(VK.FAMILIES.map((f) => f.confirmKey).filter(Boolean))].sort().join();
-  ok(real.confirmKeys && [...real.confirmKeys].sort().join() === fams && VK.FAMILIES.every((f) => !(f.surfaces.delete && typeof f.surfaces.delete.method === 'string') || typeof f.confirmKey === 'string'),
+  ok(gateOf(real.confirmKeys) && [...real.confirmKeys].sort().join() === fams && verdictOf(VK.FAMILIES.every((f) => !(f.surfaces.delete && typeof f.surfaces.delete.method === 'string') || typeof f.confirmKey === 'string')),
     `删除's confirm words: every { method, path } delete names its confirmKey, and the window words exactly those keys (${fams})`, { window: real.confirmKeys && [...real.confirmKeys], registry: fams });
   ok(VK.confirmKeyOf('accounts', 'a1') === 'account' && VI.doorsOf({ store: 'accounts', entry: 'a1', field: 'oat' }).delete.confirm === 'account' && VI.doorsOf({ store: 'secrets', entry: 'totp:x', field: 'seed' }).delete.confirm === 'totp' && VK.confirmKeyOf('secrets', 'host:h') === null,
     'doorsOf\'s confirm IS the registry\'s: an account and its long-lived token «account» (the window words the token by its field), a two-step code «totp», a machine\'s link none');
@@ -356,23 +356,23 @@ console.log('④ RED CONTROLS (in memory)');
   const win = realRead('src/lib/vault-window.js');
   const line = win.split('\n').find((l) => /^registerVaultAdd\(\{ id: 'totp',/.test(l));
   const gap = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${line}\n`, '') })));
-  ok(line && gap.problems.length === 1 && /^totp·add: the 添加… door «totp» is not registered/.test(gap.problems[0]) && gap.cells.get('totp').add.mark === '✗', 'TODAY\'S GAP — the window without the two-step door\'s registration ⇒ RED, naming totp·add (and only it)', gap.problems);
+  ok(gateOf(line) && gap.problems.length === 1 && gateOf(/^totp·add: the 添加… door «totp» is not registered/.test(gap.problems[0])) && gap.cells.get('totp').add.mark === '✗', 'TODAY\'S GAP — the window without the two-step door\'s registration ⇒ RED, naming totp·add (and only it)', gap.problems);
   // B-3fb5's door, each half taken away: the route unmounted, the window's confirm words for it gone ⇒ RED by name
   const routesSrc = realRead('src/routes/vault.js'), routeLine = routesSrc.split('\n').find((l) => l.includes("app.delete('/api/vault/agent-secrets/:entry'"));
   const noAgentRoute = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routesSrc.replace(`${routeLine}\n`, '') })));
-  ok(routeLine && noAgentRoute.cells.get('agent-secret').delete.mark === '✗' && noAgentRoute.problems.some((p) => /^agent-secret·delete: no route DELETE \/api\/vault\/agent-secrets\/… is mounted/.test(p)), 'B-3fb5 RED: the agent entry\'s delete route unmounted ⇒ agent-secret·delete ✗ by name', noAgentRoute.problems);
+  ok(gateOf(routeLine) && noAgentRoute.cells.get('agent-secret').delete.mark === '✗' && verdictOf(noAgentRoute.problems.some((p) => /^agent-secret·delete: no route DELETE \/api\/vault\/agent-secrets\/… is mounted/.test(p))), 'B-3fb5 RED: the agent entry\'s delete route unmounted ⇒ agent-secret·delete ✗ by name', noAgentRoute.problems);
   const wordsLine = win.split('\n').find((l) => l.startsWith("  'agent-secret': (row) => ("));
   const noAgentWords = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${wordsLine}\n`, '') })));
-  ok(wordsLine && noAgentWords.cells.get('agent-secret').delete.mark === '✗' && noAgentWords.problems.some((p) => /^agent-secret·delete: the window has no confirm words for «agent-secret»/.test(p)), 'B-3fb5 RED: the window without the agent entry\'s confirm words ⇒ agent-secret·delete ✗ by name (its 删除 would ask in no words of its own)', noAgentWords.problems);
+  ok(gateOf(wordsLine) && noAgentWords.cells.get('agent-secret').delete.mark === '✗' && verdictOf(noAgentWords.problems.some((p) => /^agent-secret·delete: the window has no confirm words for «agent-secret»/.test(p))), 'B-3fb5 RED: the window without the agent entry\'s confirm words ⇒ agent-secret·delete ✗ by name (its 删除 would ask in no words of its own)', noAgentWords.problems);
   // a door outside the closure never runs
   const lost = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${line}\n`, ''), 'src/lib/vault-lost-door.js': `${line}\n` })));
-  ok(lost.problems.some((p) => /^totp·add: .*never imports/.test(p)), 'a door registered in a module the window never imports ⇒ RED (it never runs)', lost.problems);
+  ok(verdictOf(lost.problems.some((p) => /^totp·add: .*never imports/.test(p))), 'a door registered in a module the window never imports ⇒ RED (it never runs)', lost.problems);
   // a door the registry does not name
   const stray = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': `${win}\nregisterVaultAdd({ id: 'qr-scan', label: () => 'x', run: () => {} });\n` })));
-  ok(stray.problems.length === 1 && /«qr-scan».*no registry door/.test(stray.problems[0]), 'a 添加… door the registry does not name ⇒ RED', stray.problems);
+  ok(stray.problems.length === 1 && verdictOf(/«qr-scan».*no registry door/.test(stray.problems[0])), 'a 添加… door the registry does not name ⇒ RED', stray.problems);
   // a comment never registers a door
   const commented = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${line}\n`, `// ${line}\n`) })));
-  ok(commented.problems.some((p) => /^totp·add:/.test(p)), 'the registration in a COMMENT counts as none (the census reads tokens)', commented.problems);
+  ok(verdictOf(commented.problems.some((p) => /^totp·add:/.test(p))), 'the registration in a COMMENT counts as none (the census reads tokens)', commented.problems);
   // the registry's own shape
   const totp = VK.FAMILIES.find((f) => f.id === 'totp');
   const swap = (fam) => VK.FAMILIES.map((f) => (f.id === 'totp' ? fam : f));
@@ -389,40 +389,40 @@ console.log('④ RED CONTROLS (in memory)');
     ['vault-totp-add · B-0001', /a deferral is \{ lane, backlog \}/, 'the old string form'],
   ]) {
     const r = deferAs(d);
-    ok(r.cells.get('totp').add.mark === '✗' && r.problems.some((q) => q.startsWith('totp·add: deferred ') && re.test(q)), `a deferral with ${what} ⇒ RED (never silently green)`, r.problems);
+    ok(r.cells.get('totp').add.mark === '✗' && verdictOf(r.problems.some((q) => q.startsWith('totp·add: deferred ') && re.test(q))), `a deferral with ${what} ⇒ RED (never silently green)`, r.problems);
   }
   const unsched = deferAs({ lane: 'unscheduled', backlog: 'B-0001' });
-  ok(unsched.problems.length === 0 && unsched.cells.get('totp').add.mark === '⏳' && unsched.words.includes('totp·add ⏳ unscheduled · B-0001'), '\'unscheduled\' WITH its backlog id ⇒ green, PRINTED as unscheduled', { problems: unsched.problems, words: unsched.words.filter((w) => w.startsWith('totp')) });
+  ok(unsched.problems.length === 0 && unsched.cells.get('totp').add.mark === '⏳' && verdictOf(unsched.words.includes('totp·add ⏳ unscheduled · B-0001')), '\'unscheduled\' WITH its backlog id ⇒ green, PRINTED as unscheduled', { problems: unsched.problems, words: unsched.words.filter((w) => w.startsWith('totp')) });
   const defOk = deferAs({ lane: 'vault-totp-add', backlog: 'B-0001' });
-  ok(defOk.problems.length === 0 && defOk.cells.get('totp').add.mark === '⏳' && defOk.words.includes('totp·add ⏳ lane vault-totp-add · B-0001') && defOk.doorless.some((d) => /^two-step — totp: ⏳ lane vault-totp-add · B-0001$/.test(d)),
+  ok(defOk.problems.length === 0 && defOk.cells.get('totp').add.mark === '⏳' && gateOf(defOk.words.includes('totp·add ⏳ lane vault-totp-add · B-0001')) && verdictOf(defOk.doorless.some((d) => /^two-step — totp: ⏳ lane vault-totp-add · B-0001$/.test(d))),
     'the base\'s window with the add door DEFERRED to a named lane + its backlog id ⇒ green, PRINTED as ⏳ with both — and the category says it has no door yet', { problems: defOk.problems, words: defOk.words.filter((w) => w.startsWith('totp')), doorless: defOk.doorless });
   const both = census(swap({ ...totp, deferred: { add: { lane: 'vault-totp-add', backlog: 'B-0001' } } }), real);
-  ok(both.problems.some((p) => /^totp·add: declared AND deferred/.test(p)), 'a surface declared AND deferred ⇒ RED', both.problems);
+  ok(verdictOf(both.problems.some((p) => /^totp·add: declared AND deferred/.test(p))), 'a surface declared AND deferred ⇒ RED', both.problems);
   const { doc, ...noDoc } = totp.surfaces;
   const missing = census(swap({ ...totp, surfaces: noDoc }), real);
-  ok(missing.problems.some((p) => /^totp·doc: not declared/.test(p)), 'a family that leaves a surface undeclared ⇒ RED', missing.problems);
+  ok(verdictOf(missing.problems.some((p) => /^totp·doc: not declared/.test(p))), 'a family that leaves a surface undeclared ⇒ RED', missing.problems);
   const mute = census(swap({ ...totp, surfaces: { ...totp.surfaces, cli: { none: '' } } }), real);
-  ok(mute.problems.some((p) => /^totp·cli: NONE without its words/.test(p)), 'a NONE without its words ⇒ RED', mute.problems);
+  ok(verdictOf(mute.problems.some((p) => /^totp·cli: NONE without its words/.test(p))), 'a NONE without its words ⇒ RED', mute.problems);
   const noCat = census(swap({ ...totp, category: 'nowhere' }), real);
-  ok(noCat.problems.some((p) => /totp: category «nowhere» is not the rail's/.test(p)) && noCat.problems.some((p) => /«two-step» is no family's/.test(p)), 'a family on a category the rail has not ⇒ RED (and the rail\'s category nothing lands in ⇒ RED)', noCat.problems);
+  ok(gateOf(noCat.problems.some((p) => /totp: category «nowhere» is not the rail's/.test(p))) && verdictOf(noCat.problems.some((p) => /«two-step» is no family's/.test(p))), 'a family on a category the rail has not ⇒ RED (and the rail\'s category nothing lands in ⇒ RED)', noCat.problems);
   // the tree's other surfaces
   const routes = realRead('src/routes/vault.js');
   const unmounted = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/totp',", "app.post('/api/vault/totp-gone',") })));
-  ok(unmounted.problems.length === 1 && /^totp·route: not mounted: POST \/api\/vault\/totp$/.test(unmounted.problems[0]), 'a declared person route that is not mounted ⇒ RED', unmounted.problems);
+  ok(unmounted.problems.length === 1 && verdictOf(/^totp·route: not mounted: POST \/api\/vault\/totp$/.test(unmounted.problems[0])), 'a declared person route that is not mounted ⇒ RED', unmounted.problems);
   // lane vault-entry-description: the WORDS surface — its doors mounted, its verbs in the usage, its row carrying the description
   const noWords = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/entry-words',", "app.post('/api/vault/entry-words-gone',") })));
-  ok(noWords.problems.length === 3 && noWords.problems.every((p) => /^(agent-secret|free-secret|owner-file)·words: the words door «POST \/api\/vault\/entry-words» is not mounted$/.test(p)), 'the owner\'s words door unmounted ⇒ RED on every kind that carries words (an agent\'s, a free entry, the owner\'s file — lane lg-vault-file)', noWords.problems);
+  ok(noWords.problems.length === 3 && verdictOf(noWords.problems.every((p) => /^(agent-secret|free-secret|owner-file)·words: the words door «POST \/api\/vault\/entry-words» is not mounted$/.test(p))), 'the owner\'s words door unmounted ⇒ RED on every kind that carries words (an agent\'s, a free entry, the owner\'s file — lane lg-vault-file)', noWords.problems);
   const usage = realRead('data/bin/vibespace-vault');
   // lane login-request-card: THE REQUEST surface — its doors mounted, its kind in the CLI's usage, the verdict landing the family's own target
   const noAnswer = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/secret-requests/:id/answer',", "app.post('/api/vault/secret-requests/:id/answer-gone',") })));
-  ok(noAnswer.problems.length === 4 && noAnswer.problems.every((p) => /^(free-secret|integration|web-login|totp)·request: the request door «POST \/api\/vault\/secret-requests\/:id\/answer» is not mounted$/.test(p)), 'the owner\'s answer door unmounted ⇒ RED on every kind an agent may ask for (free entry, Integrations field, website login)', noAnswer.problems);
+  ok(noAnswer.problems.length === 4 && verdictOf(noAnswer.problems.every((p) => /^(free-secret|integration|web-login|totp)·request: the request door «POST \/api\/vault\/secret-requests\/:id\/answer» is not mounted$/.test(p))), 'the owner\'s answer door unmounted ⇒ RED on every kind an agent may ask for (free entry, Integrations field, website login)', noAnswer.problems);
   const noLoginKind = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('--kind login').join('--kind site').split('|login]').join(']').split('|login|').join('|') })));
-  ok(noLoginKind.problems.length === 1 && /^web-login·request: vibespace-vault's usage names no «--kind login»$/.test(noLoginKind.problems[0]), 'the login kind gone from the CLI\'s usage ⇒ RED naming web-login·request', noLoginKind.problems);
+  ok(noLoginKind.problems.length === 1 && verdictOf(/^web-login·request: vibespace-vault's usage names no «--kind login»$/.test(noLoginKind.problems[0])), 'the login kind gone from the CLI\'s usage ⇒ RED naming web-login·request', noLoginKind.problems);
   const wlf = VK.FAMILIES.find((f) => f.id === 'web-login');
   const misLanded = census(VK.FAMILIES.map((f) => (f.id === 'web-login' ? { ...wlf, surfaces: { ...wlf.surfaces, request: { ...wlf.surfaces.request, kinds: ['password'], site: undefined } } } : f)), real);
-  ok(misLanded.problems.length === 1 && /^web-login·request: a request of .* lands «entry», not «login»$/.test(misLanded.problems[0]), 'a family whose request lands another kind\'s target (web-login asking for a password lands a free entry) ⇒ RED', misLanded.problems);
+  ok(misLanded.problems.length === 1 && verdictOf(/^web-login·request: a request of .* lands «entry», not «login»$/.test(misLanded.problems[0])), 'a family whose request lands another kind\'s target (web-login asking for a password lands a free entry) ⇒ RED', misLanded.problems);
   const noRequest = census(VK.FAMILIES.map((f) => (f.id === 'web-login' ? { ...wlf, surfaces: Object.fromEntries(Object.entries(wlf.surfaces).filter(([k]) => k !== 'request')) } : f)), real);
-  ok(noRequest.problems.some((p) => /^web-login·request: not declared/.test(p)), 'a family that leaves the request surface undeclared ⇒ RED', noRequest.problems);
+  ok(verdictOf(noRequest.problems.some((p) => /^web-login·request: not declared/.test(p))), 'a family that leaves the request surface undeclared ⇒ RED', noRequest.problems);
   // lane totp-request-card (fb-251bb41646): EVERY KIND THE PASTE ROAD TAKES IS ONE FAMILY'S REQUEST — the kinds the PURE verdict
   // accepts (a free entry's three, a website login, a two-step code) each declared by exactly ONE family's `request.kinds`: a kind
   // the road takes with no family that declares it (the totp row left at NONE) is RED by name, and so is a kind two families claim
@@ -441,45 +441,45 @@ console.log('④ RED CONTROLS (in memory)');
   ok(cross.length === 0 && roadKinds.length === 5, `every kind the paste road takes is ONE family's request (${roadKinds.join(' · ')})`, cross);
   const totpRow = VK.FAMILIES.find((f) => f.id === 'totp');
   const totpNone = kindsCross(VK.FAMILIES.map((f) => (f.id === 'totp' ? { ...totpRow, surfaces: { ...totpRow.surfaces, request: { none: 'a two-step seed is added in 添加… ▸ 两步验证…' } } } : f)));
-  ok(totpNone.length === 1 && /^the paste road takes --kind totp but no family's request declares it$/.test(totpNone[0]), 'RED CONTROL: the totp row\'s request back to NONE (as it stood before the owner\'s yes, fb-251bb41646) ⇒ RED naming --kind totp', totpNone);
+  ok(totpNone.length === 1 && verdictOf(/^the paste road takes --kind totp but no family's request declares it$/.test(totpNone[0])), 'RED CONTROL: the totp row\'s request back to NONE (as it stood before the owner\'s yes, fb-251bb41646) ⇒ RED naming --kind totp', totpNone);
   const noTotpKind = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('--kind totp').join('--kind two-step-gone').split('|totp]').join(']') })));
-  ok(noTotpKind.problems.length === 1 && /^totp·request: vibespace-vault's usage names no «--kind totp»$/.test(noTotpKind.problems[0]), 'RED CONTROL: the totp kind gone from the CLI\'s usage ⇒ RED naming totp·request', noTotpKind.problems);
+  ok(noTotpKind.problems.length === 1 && verdictOf(/^totp·request: vibespace-vault's usage names no «--kind totp»$/.test(noTotpKind.problems[0])), 'RED CONTROL: the totp kind gone from the CLI\'s usage ⇒ RED naming totp·request', noTotpKind.problems);
   const noVerb = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('vibespace-vault describe').join('vibespace-vault propose') })));
-  ok(noVerb.problems.some((p) => /^free-secret·words: vibespace-vault's usage names no «describe»$/.test(p)), 'the agent\'s verb gone from the usage ⇒ RED', noVerb.problems);
+  ok(verdictOf(noVerb.problems.some((p) => /^free-secret·words: vibespace-vault's usage names no «describe»$/.test(p))), 'the agent\'s verb gone from the usage ⇒ RED', noVerb.problems);
   const wordsLess = census(swap({ ...totp, surfaces: { ...totp.surfaces, words: { create: ['totp'], propose: 'POST /api/agent/vault/words', owner: 'POST /api/vault/entry-words' } } }), real);
-  ok(wordsLess.problems.some((p) => /^totp·words: secretRowOf carries no description/.test(p)), 'a kind that claims words its row cannot carry ⇒ RED', wordsLess.problems);
+  ok(verdictOf(wordsLess.problems.some((p) => /^totp·words: secretRowOf carries no description/.test(p))), 'a kind that claims words its row cannot carry ⇒ RED', wordsLess.problems);
   const rowLess = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace('import { loadTotp, totpExtras, showTotpAddDialog }', 'import { loadTotp, showTotpAddDialog }') })));
-  ok(rowLess.problems.some((p) => /^totp·row: the window .* does not import totpExtras/.test(p)), 'the row extras not imported by the window ⇒ RED', rowLess.problems);
+  ok(verdictOf(rowLess.problems.some((p) => /^totp·row: the window .* does not import totpExtras/.test(p))), 'the row extras not imported by the window ⇒ RED', rowLess.problems);
   const cliLess = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': realRead('data/bin/vibespace-vault').replace(/vibespace-vault totp/g, 'vibespace-vault code') })));
-  ok(cliLess.problems.length === 1 && /^totp·cli: vibespace-vault's usage names no «totp»/.test(cliLess.problems[0]), 'a CLI verb gone from the usage ⇒ RED', cliLess.problems);
+  ok(cliLess.problems.length === 1 && verdictOf(/^totp·cli: vibespace-vault's usage names no «totp»/.test(cliLess.problems[0])), 'a CLI verb gone from the usage ⇒ RED', cliLess.problems);
   const docLess = census(VK.FAMILIES, factsOf(treeOf({ 'docs/kb-features.md': realRead('docs/kb-features.md').split('**Two-step codes (TOTP)**').join('**Codes**') })));
-  ok(docLess.problems.length === 1 && /^totp·doc:/.test(docLess.problems[0]), 'no kb-features line naming the kind ⇒ RED', docLess.problems);
+  ok(docLess.problems.length === 1 && verdictOf(/^totp·doc:/.test(docLess.problems[0])), 'no kb-features line naming the kind ⇒ RED', docLess.problems);
   const eng = realRead('src/server/vault-engine.js');
   const newHead = census(VK.FAMILIES, factsOf(treeOf({ 'src/server/vault-engine.js': eng.replace('(?:host|frp|file|apikey|totp|secret|provider|keyfile):', '(?:host|frp|file|apikey|totp|secret|provider|keyfile|vapid):') })));
-  ok(newHead.problems.length === 1 && /«vapid:» is held by no family/.test(newHead.problems[0]), 'a SECRET_RE head nobody holds (a new hub secret kind with no registry row) ⇒ RED', newHead.problems);
+  ok(newHead.problems.length === 1 && verdictOf(/«vapid:» is held by no family/.test(newHead.problems[0])), 'a SECRET_RE head nobody holds (a new hub secret kind with no registry row) ⇒ RED', newHead.problems);
   const sourceLess = census(VK.FAMILIES, factsOf(treeOf({ 'src/server/mounts-plugins-wiring.js': realRead('src/server/mounts-plugins-wiring.js').replace("  passkeys: () =>", '  passkeysGone: () =>') })));
-  ok(sourceLess.problems.length === 1 && /^passkey·list: the hub's wiring lists no source for the store «passkeys»/.test(sourceLess.problems[0]), 'a store with no source in the wiring ⇒ RED on its family\'s list surface', sourceLess.problems);
+  ok(sourceLess.problems.length === 1 && verdictOf(/^passkey·list: the hub's wiring lists no source for the store «passkeys»/.test(sourceLess.problems[0])), 'a store with no source in the wiring ⇒ RED on its family\'s list surface', sourceLess.problems);
   // ③'s store leg can fire (acceptance r2 — `stores === null ||` held every store): the registry without its `secrets` holders
   const noSecrets = VK.FAMILIES.map((f) => (Array.isArray(f.stores) && f.stores.includes('secrets') ? { ...f, stores: f.stores.filter((x) => x !== 'secrets') } : f)).filter((f) => f.stores === null || f.stores.length);
   const unheld = census(noSecrets, real);
-  ok(noSecrets.some((f) => f.stores === null) && unheld.problems.includes('the inventory\'s store «secrets» is held by no family (no family lists it in its stores)'), 'the registry without its `secrets` holders ⇒ RED naming «secrets» — the stores-null family (agent-secret) holds no store', unheld.problems.filter((q) => /store/.test(q)));
+  ok(gateOf(noSecrets.some((f) => f.stores === null)) && verdictOf(unheld.problems.includes('the inventory\'s store «secrets» is held by no family (no family lists it in its stores)')), 'the registry without its `secrets` holders ⇒ RED naming «secrets» — the stores-null family (agent-secret) holds no store', unheld.problems.filter((q) => /store/.test(q)));
   const agent = VK.FAMILIES.find((f) => f.id === 'agent-secret');
   const anyRow = census(VK.FAMILIES.map((f) => (f.id === 'agent-secret' ? { ...agent, entryRe: null } : f)), real);
-  ok(anyRow.problems.some((q) => /^agent-secret: stores null .* no entry shape/.test(q)), 'stores null with no entry shape (it would hold every row of every store) ⇒ RED', anyRow.problems);
+  ok(verdictOf(anyRow.problems.some((q) => /^agent-secret: stores null .* no entry shape/.test(q))), 'stores null with no entry shape (it would hold every row of every store) ⇒ RED', anyRow.problems);
   // 删除's words come from the registry (acceptance r2)
   const { confirmKey, ...keyless } = totp;
   const noKey = census(swap(keyless), real);
-  ok(confirmKey === 'totp' && noKey.problems.some((q) => /^totp·delete: a \{ method, path \} delete names no confirmKey/.test(q)) && noKey.problems.some((q) => /confirm words «totp» are no family's confirmKey/.test(q)),
+  ok(confirmKey === 'totp' && gateOf(noKey.problems.some((q) => /^totp·delete: a \{ method, path \} delete names no confirmKey/.test(q))) && verdictOf(noKey.problems.some((q) => /confirm words «totp» are no family's confirmKey/.test(q))),
     'a { method, path } delete with no confirmKey ⇒ RED (and the window\'s words for it are then a key no family names ⇒ RED)', noKey.problems);
   const wordLine = win.split('\n').find((l) => l.startsWith("  totp: (row) => ({ title: t('Delete the two-step code"));
   const wordless = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${wordLine}\n`, '') })));
-  ok(!!wordLine && wordless.problems.length === 1 && /^totp·delete: the window has no confirm words for «totp»/.test(wordless.problems[0]), 'the window without totp\'s confirm words ⇒ RED naming totp·delete (and only it)', wordless.problems);
+  ok(!!wordLine && wordless.problems.length === 1 && verdictOf(/^totp·delete: the window has no confirm words for «totp»/.test(wordless.problems[0])), 'the window without totp\'s confirm words ⇒ RED naming totp·delete (and only it)', wordless.problems);
   const strayWords = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace('const CONFIRM_WORDS = {\n', 'const CONFIRM_WORDS = {\n  oat: () => ({ title: \'x\', message: \'x\', confirm: \'x\' }),\n') })));
-  ok(strayWords.problems.length === 1 && /confirm words «oat» are no family's confirmKey/.test(strayWords.problems[0]), 'a hand-keyed confirm-words entry no family names (the old per-field «oat») ⇒ RED', strayWords.problems);
+  ok(strayWords.problems.length === 1 && verdictOf(/confirm words «oat» are no family's confirmKey/.test(strayWords.problems[0])), 'a hand-keyed confirm-words entry no family names (the old per-field «oat») ⇒ RED', strayWords.problems);
   const chan = VK.FAMILIES.find((f) => f.id === 'channel');
   const offKey = census(VK.FAMILIES.map((f) => (f.id === 'channel' ? { ...chan, confirmKey: 'channel' } : f)), real);
-  ok(offKey.problems.some((q) => /^channel: confirmKey «channel» on a family whose 删除 is not the window's confirm door/.test(q)), 'a confirmKey on a family whose 删除 is its own dialog (a channel account) ⇒ RED', offKey.problems);
+  ok(verdictOf(offKey.problems.some((q) => /^channel: confirmKey «channel» on a family whose 删除 is not the window's confirm door/.test(q))), 'a confirmKey on a family whose 删除 is its own dialog (a channel account) ⇒ RED', offKey.problems);
 }
 
 console.log(failed ? `\n${failed} FAILED, ${passed} passed` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

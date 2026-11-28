@@ -13,7 +13,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -57,7 +57,7 @@ const ROWS = [
   const r = WS.watchSpecFromArgs(['--time-window', '09:00-09:00']);
   const ru = r.spec && r.spec.filter && Array.isArray(r.spec.filter.rules) ? r.spec.filter.rules[0] : null;
   const words = r.spec ? WS.watchWhatWords({ mode: 'filtered', filter: r.spec.filter }) : '';
-  ok(!!ru && ru.kind === 'time-window' && ru.from === '09:00' && ru.to === '09:00' && words.includes('within 09:00-09:00 (the whole day)'), `--time-window 09:00-09:00 is taken — the same time twice, the whole day — and the watch's words say it («${words}»)`, JSON.stringify(r).slice(0, 300));
+  ok(!!ru && ru.kind === 'time-window' && ru.from === '09:00' && ru.to === '09:00' && verdictOf(words.includes('within 09:00-09:00 (the whole day)')), `--time-window 09:00-09:00 is taken — the same time twice, the whole day — and the watch's words say it («${words}»)`, JSON.stringify(r).slice(0, 300));
 }
 const OKS = [];
 for (const [argv, want] of ROWS) {
@@ -70,11 +70,11 @@ for (const [argv, want] of ROWS) {
     else if (J(s[k]) !== J(v)) bad.push(`${k}=${J(s[k])}`);
   }
   if (want.rules && s.mode !== 'filtered') bad.push('mode');
-  ok(r.ok && !bad.length, `${argv.join(' ') || '(no flag)'} ⇒ ${want.rules ? want.rules.map((x) => x.kind).join(' + ') : J(want)}`, J(r) + ' ' + bad.join(', '));
+  ok(gateOf(r.ok) && !bad.length, `${argv.join(' ') || '(no flag)'} ⇒ ${want.rules ? want.rules.map((x) => x.kind).join(' + ') : J(want)}`, J(r) + ' ' + bad.join(', '));
   if (r.ok) OKS.push(r.spec);
 }
 // the row passes the DIALOG's own watcher validator as the dialog sends it (an inline filter = filterId 'inline')
-ok(OKS.length === ROWS.length && OKS.every((s) => F.validateWatchers([{ principal: { kind: 'agent', id: 'a1' }, ...s, ...(s.filter ? { filterId: 'inline' } : {}) }], [{ principal: { kind: 'agent', id: 'a1' } }]).ok && (!s.filter || F.validateFilter(s.filter).ok)),
+ok(OKS.length === ROWS.length && verdictOf(OKS.every((s) => F.validateWatchers([{ principal: { kind: 'agent', id: 'a1' }, ...s, ...(s.filter ? { filterId: 'inline' } : {}) }], [{ principal: { kind: 'agent', id: 'a1' } }]).ok && (!s.filter || F.validateFilter(s.filter).ok))),
   'every row the flags make passes validateWatchers + validateFilter exactly as the Notify dialog saves it');
 
 console.log('② every refusal by name (the validator\'s own code + words where it is the validator\'s)');
@@ -123,7 +123,7 @@ ok(same === PATS.length && PATS.filter((p) => !F.regexVerdict(p).ok).length >= 9
   const wsrc = fs.readFileSync(path.join(REPO, 'src/channel-watch-spec.js'), 'utf8');
   const W2 = MUT.load('src/channel-watch-spec.js', editAnchor(wsrc, "require('./channel-filter.js')", `require(${J(fAbs)})`, "src/channel-watch-spec.js"), 'nojudge');
   const r = W2.watchSpecFromArgs(['--regex', '(a+)+']);
-  ok(cut !== fsrc && r.ok && regexLeg(W2) < PATS.length, `CONTROL: --regex without the judge accepts "(a+)+" — ④ is red (${regexLeg(W2)}/${PATS.length})`, J(r)); }
+  ok(cut !== fsrc && gateOf(r.ok) && regexLeg(W2) < PATS.length, `CONTROL: --regex without the judge accepts "(a+)+" — ④ is red (${regexLeg(W2)}/${PATS.length})`, J(r)); }
 
 console.log('⑤ the dialog\'s verdict = the agent\'s (one schema)');
 const FILTERS = [
@@ -136,9 +136,9 @@ for (const f of FILTERS) { const d = F.validateFilter(f); const a = WS.specVerdi
 ok(agree === FILTERS.length, `validateFilter and the agent's door agree on ${agree}/${FILTERS.length} filters (every kind, every refusal)`);
 { const src = fs.readFileSync(path.join(REPO, 'src/channel-watch-spec.js'), 'utf8').replace(/\/\/.*$/gm, '');
   const own = (src.match(/'(mention|keyword|regex|sender-in-group|from-address|subject|has-attachment|not-contains|time-window|reply-to-mine|in-thread-with-me)'/g) || []).length;
-  ok(/F\.validateFilter\(/.test(src) && /F\.validateWatcher\(/.test(src) && !/RULE_KINDS\s*=/.test(src) && !/new RegExp/.test(src), `the grammar judges with channel-filter's validators and holds no kind list or regex of its own (${own} kind names = the flag table's own rows)`); }
+  ok(gateOf(/F\.validateFilter\(/.test(src)) && gateOf(/F\.validateWatcher\(/.test(src)) && !/RULE_KINDS\s*=/.test(src) && !/new RegExp/.test(src), `the grammar judges with channel-filter's validators and holds no kind list or regex of its own (${own} kind names = the flag table's own rows)`); }
 { const legacy = WS.watchSpecOfBody({ delivery: 'wake', keywords: ['outage'], dailyWakeCap: 5, why: 'w' });
-  ok(legacy.ok && legacy.spec.delivery === 'wake' && J(legacy.spec.filter.rules) === J([{ kind: 'keyword', value: 'outage' }]) && legacy.spec.dailyWakeCap === 5 && WS.watchSpecOfBody({ delivery: 'bogus' }).code === 'bad-mode' && WS.watchSpecOfBody({}).spec.delivery === 'next-turn',
+  ok(gateOf(legacy.ok) && legacy.spec.delivery === 'wake' && J(legacy.spec.filter.rules) === J([{ kind: 'keyword', value: 'outage' }]) && legacy.spec.dailyWakeCap === 5 && WS.watchSpecOfBody({ delivery: 'bogus' }).code === 'bad-mode' && WS.watchSpecOfBody({}).spec.delivery === 'next-turn',
     'the pre-parity body (an older CLI on another machine: delivery + keywords) goes through the same judge; no flag = next-turn (free)'); }
 
 console.log('⑥ THE KIND CENSUS: every rule kind the dialog offers has a CLI flag (or a named reason)');
@@ -146,12 +146,12 @@ const census = (kinds, flags, notOffered) => ({ missing: kinds.filter((k) => !fl
 const c = census(F.RULE_KINDS, WS.RULE_FLAGS, WS.NOT_OFFERED);
 ok(F.RULE_KINDS.length >= 11 && !c.missing.length && !c.stale.length, `${F.RULE_KINDS.length} kinds, each with a flag or a reason (missing: ${c.missing.join(',') || 'none'}; stale flags: ${c.stale.join(',') || 'none'})`);
 ok(J(census([...F.RULE_KINDS, 'new-kind'], WS.RULE_FLAGS, WS.NOT_OFFERED).missing) === J(['new-kind']), 'CONTROL: a new kind in the dialog without a flag is named missing');
-ok(new Set(WS.RULE_FLAGS.map((x) => x.flag)).size === WS.RULE_FLAGS.length && WS.RULE_FLAGS.every((x) => /^--[a-z-]+$/.test(x.flag)), 'one flag per kind, spelled --kebab');
+ok(new Set(WS.RULE_FLAGS.map((x) => x.flag)).size === WS.RULE_FLAGS.length && verdictOf(WS.RULE_FLAGS.every((x) => /^--[a-z-]+$/.test(x.flag))), 'one flag per kind, spelled --kebab');
 
 console.log('⑦ the manual names every flag');
 { const man = fs.readFileSync(path.join(REPO, 'docs/agent/channels-manual.md'), 'utf8');
   const missing = [...WS.RULE_FLAGS.map((x) => x.flag), ...WS.OTHER_FLAGS, '--show'].filter((f) => !man.includes(f));
-  ok(!missing.length && /vibespace-channels watches/.test(man), `docs/agent/channels-manual.md names every watch flag + watches${missing.length ? ' — missing ' + missing.join(' ') : ''}`); }
+  ok(!missing.length && verdictOf(/vibespace-channels watches/.test(man)), `docs/agent/channels-manual.md names every watch flag + watches${missing.length ? ' — missing ' + missing.join(' ') : ''}`); }
 
 console.log('⑧ B-5740: a word list keeps a number whole (4,995 is ONE keyword); a near-everything keyword is said');
 {
@@ -159,27 +159,27 @@ console.log('⑧ B-5740: a word list keeps a number whole (4,995 is ONE keyword)
   const bad = T.filter(([v, want]) => J(WS.splitWordList(v)) !== J(want)).map(([v]) => `${v} → ${J(WS.splitWordList(v))}`);
   ok(!bad.length, `splitWordList: ${T.length} shapes — a comma between two digits stays in its word, «\\,» is a comma, every other comma separates`, bad.join('; '));
   const kw = WS.watchSpecFromArgs(['--keyword', '4,995']);
-  ok(kw.ok && J(kw.spec.filter.rules) === J([{ kind: 'keyword', value: '4,995' }]) && kw.warnings && kw.warnings.length === 1 && /digits only/.test(kw.warnings[0]), 'the incident: `--keyword 4,995` is ONE keyword «4,995», and the answer says it is digits only', J(kw));
+  ok(gateOf(kw.ok) && J(kw.spec.filter.rules) === J([{ kind: 'keyword', value: '4,995' }]) && gateOf(kw.warnings) && kw.warnings.length === 1 && verdictOf(/digits only/.test(kw.warnings[0])), 'the incident: `--keyword 4,995` is ONE keyword «4,995», and the answer says it is digits only', J(kw));
   const sh = WS.watchSpecFromArgs(['--keyword', 'ok,deploy']), plain = WS.watchSpecFromArgs(['--keyword', 'deploy']), nc = WS.watchSpecFromArgs(['--not-contains', '1,000']);
-  ok(sh.ok && sh.warnings.length === 1 && /«ok» is 2 characters/.test(sh.warnings[0]) && plain.ok && plain.warnings === undefined && nc.ok && J(nc.spec.filter.rules) === J([{ kind: 'not-contains', value: '1,000' }]), 'a keyword of 2 characters is said; a plain keyword says nothing; --not-contains keeps 1,000 whole too', J({ sh: sh.warnings, plain: plain.warnings, nc: nc.spec && nc.spec.filter }));
-  ok(F.validateRule({ kind: 'keyword', value: '4,995' }).ok, 'the dialog\'s own judge takes the whole keyword (one schema)');
-  ok(/one keyword — the comma between digits keeps it whole/.test(kw.warnings[0]) && /inside longer numbers too/.test(kw.warnings[0]), 'the note says the comma kept ONE keyword and that a number matches inside longer ones', kw.warnings[0]);
+  ok(gateOf(sh.ok) && sh.warnings.length === 1 && gateOf(/«ok» is 2 characters/.test(sh.warnings[0])) && gateOf(plain.ok) && plain.warnings === undefined && gateOf(nc.ok) && J(nc.spec.filter.rules) === J([{ kind: 'not-contains', value: '1,000' }]), 'a keyword of 2 characters is said; a plain keyword says nothing; --not-contains keeps 1,000 whole too', J({ sh: sh.warnings, plain: plain.warnings, nc: nc.spec && nc.spec.filter }));
+  ok(verdictOf(F.validateRule({ kind: 'keyword', value: '4,995' }).ok), 'the dialog\'s own judge takes the whole keyword (one schema)');
+  ok(gateOf(/one keyword — the comma between digits keeps it whole/.test(kw.warnings[0])) && verdictOf(/inside longer numbers too/.test(kw.warnings[0])), 'the note says the comma kept ONE keyword and that a number matches inside longer ones', kw.warnings[0]);
   const nc2 = WS.watchSpecFromArgs(['--not-contains', 'ok']), cjk = WS.watchSpecFromArgs(['--keyword', '发票']);
-  ok(nc2.ok && /«ok» is 2 characters — it leaves out almost every message/.test((nc2.warnings || [])[0] || '') && cjk.ok && cjk.warnings === undefined, '--not-contains says it LEAVES OUT (never «matches»); a two-character CJK word (发票) is a real word — no note', J({ nc: nc2.warnings, cjk: cjk.warnings }));
+  ok(gateOf(nc2.ok) && gateOf(/«ok» is 2 characters — it leaves out almost every message/.test((nc2.warnings || [])[0] || '')) && gateOf(cjk.ok) && cjk.warnings === undefined, '--not-contains says it LEAVES OUT (never «matches»); a two-character CJK word (发票) is a real word — no note', J({ nc: nc2.warnings, cjk: cjk.warnings }));
   const viaSpec = WS.watchSpecOfBody({ spec: { mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'keyword', value: 'ok' }] } } });
   const oldCli = WS.watchSpecOfBody({ keywords: ['4', '995'], delivery: 'next-turn' });
-  ok(viaSpec.ok && (viaSpec.warnings || []).length === 1 && oldCli.ok && (oldCli.warnings || []).length === 2 && /«4» is 1 character/.test(oldCli.warnings[0]), 'EVERY road of the server door says it: a --spec row, and an OLDER CLI\'s keywords[] (which still split «4,995» itself — the incident, now said)', J({ spec: viaSpec.warnings, old: oldCli.warnings }));
+  ok(gateOf(viaSpec.ok) && (viaSpec.warnings || []).length === 1 && gateOf(oldCli.ok) && (oldCli.warnings || []).length === 2 && verdictOf(/«4» is 1 character/.test(oldCli.warnings[0])), 'EVERY road of the server door says it: a --spec row, and an OLDER CLI\'s keywords[] (which still split «4,995» itself — the incident, now said)', J({ spec: viaSpec.warnings, old: oldCli.warnings }));
   // CONTROL: the release's splitter (every comma) — 4,995 became «4» and «995»
   const SRC = fs.readFileSync(path.join(REPO, 'src/channel-watch-spec.js'), 'utf8');
   const KW = "rules: (v) => (splitWordList(v).length ? splitWordList(v) : ['']).map((value) => ({ kind: 'keyword', value })) },";
   ok(SRC.split(KW).length === 2, 'control setup: the keyword flag line is present once');
   const Pre = MUT.load('src/channel-watch-spec.js', editAnchor(SRC, KW, "rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'keyword', value })) },", "src/channel-watch-spec.js"), 'b5740-pre');   // stale-pins: kept (the release's line, restored by the red control)
   const pre = Pre.watchSpecFromArgs(['--keyword', '4,995']);
-  ok(pre.ok && J(pre.spec.filter.rules.map((r) => r.value)) === J(['4', '995']), 'RED CONTROL: the release\'s splitter makes «4» and «995» (the keyword «4» matched almost every message) — the incident leg is red on it', J(pre.spec && pre.spec.filter));
+  ok(gateOf(pre.ok) && J(pre.spec.filter.rules.map((r) => r.value)) === J(['4', '995']), 'RED CONTROL: the release\'s splitter makes «4» and «995» (the keyword «4» matched almost every message) — the incident leg is red on it', J(pre.spec && pre.spec.filter));
   // wiring: the door carries the warnings; the CLI prints them; the help says the rule
   const ACC = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8'), CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8');
-  ok(/const filed = r0 && r0\.ok !== false && !r0\.already;/.test(ACC) && /Array\.isArray\(sp\.warnings\) && sp\.warnings\.length \? \{ warnings: sp\.warnings \}/.test(ACC) && /r0\.what \? \{\} : \{ what: WS\.watchWhatWords\(row\) \}/.test(ACC) && CLI.includes("for (const kwNote of Array.isArray(r.warnings) ? r.warnings : []) console.log(`note: ${kwNote}`);") && CLI.includes("if (r.proposed && r.what && !r.already) console.log(`asked for: ${r.what}`);") && CLI.includes('a comma between two digits stays in its word'), 'the watch door carries the notes and the rule\'s words into every answer that filed it (never the already-waiting one); the CLI prints «note:» and «asked for:»; its help says the word-list rule');
+  ok(gateOf(/const filed = r0 && r0\.ok !== false && !r0\.already;/.test(ACC)) && gateOf(/Array\.isArray\(sp\.warnings\) && sp\.warnings\.length \? \{ warnings: sp\.warnings \}/.test(ACC)) && gateOf(/r0\.what \? \{\} : \{ what: WS\.watchWhatWords\(row\) \}/.test(ACC)) && gateOf(CLI.includes("for (const kwNote of Array.isArray(r.warnings) ? r.warnings : []) console.log(`note: ${kwNote}`);")) && gateOf(CLI.includes("if (r.proposed && r.what && !r.already) console.log(`asked for: ${r.what}`);")) && verdictOf(CLI.includes('a comma between two digits stays in its word')), 'the watch door carries the notes and the rule\'s words into every answer that filed it (never the already-waiting one); the CLI prints «note:» and «asked for:»; its help says the word-list rule');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

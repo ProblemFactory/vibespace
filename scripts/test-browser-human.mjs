@@ -54,7 +54,7 @@ const express = require('express');
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -87,9 +87,9 @@ const KA = 'bk-0000e0a1', KB = 'bk-0000e0a2';
 console.log('— ① PURE: the key, the verdict, the lifecycle, the attach, the end buttons, the address row, the acts, the row');
 function pureLegs(H, tag = '') {
   const legs = [];
-  const leg = (c, n, extra) => legs.push({ c: !!c, n: tag + n, extra });
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (legs.push({ c: !!c, n: tag + n, extra })); };
   // the key
-  leg(H.humanKeyFor(P1) === HU1 && H.humanKeyFor('bk-0000e001') === null && H.humanKeyFor('../x') === null && H.isHumanKey(HU1) && !H.isHumanKey('hu-0000E001') && H.profileOfHumanKey(HU1) === P1 && H.profileOfHumanKey(KA) === null && H.humanSyncId(P1) === 'win-bhuman-' + P1,
+  leg(H.humanKeyFor(P1) === HU1 && H.humanKeyFor('bk-0000e001') === null && H.humanKeyFor('../x') === null && gateOf(H.isHumanKey(HU1)) && !H.isHumanKey('hu-0000E001') && H.profileOfHumanKey(HU1) === P1 && H.profileOfHumanKey(KA) === null && H.humanSyncId(P1) === 'win-bhuman-' + P1,
     'the key is DERIVED from the profile id (hu- + its 8 hex), the sync id is deterministic (two clients, one window)');
   leg(!B.BROWSER_KEY_RE.test(HU1) && !B.CHILD_KEY_RE.test(HU1) && !B.isBrowserKey(HU1) && !B.isChildKey(HU1) && BS.chatCardsFor([{ id: 'bs-00000001', browserKey: HU1, startAt: 1, endAt: 2, holder: 'user' }], HU1).length === 0,
     'a human key NEVER matches a browser key or a child key — every path that gates on one rejects it by construction (the chat cards too)');
@@ -122,10 +122,10 @@ function pureLegs(H, tag = '') {
   const badOrder = order.filter(([, x, want]) => V(x).code !== want).map(([n, x]) => [n, V(x).code]);
   leg(!badOrder.length, `the ORDER is the decision — both orders where two apply (${order.length})`, badOrder);
   const pid = V({ closed: { code: 'profile_locked', holderPid: 4242 } });
-  leg(pid.pid === 4242 && /pid 4242/.test(pid.error) && /your own Chrome/.test(pid.error) && /Close it first/.test(pid.error), 'profile_locked names the pid and says it may be his own Chrome', pid.error);
+  leg(pid.pid === 4242 && gateOf(/pid 4242/.test(pid.error)) && gateOf(/your own Chrome/.test(pid.error)) && verdictOf(/Close it first/.test(pid.error)), 'profile_locked names the pid and says it may be his own Chrome', pid.error);
   const onlyX = V({ profile: P({ owner: { kind: 'only', who: [{ kind: 'session', id: KA }] } }) });
-  leg(onlyX.ok && onlyX.how === 'launch' && onlyX.key === HU1 && onlyX.syncId === 'win-bhuman-' + P1, '"Who can use it" is NOT an input — a profile kept to "Only chat X" is still his to browse (launch)', onlyX);
-  leg(V({ live: true, running: 6 }).ok && V({ live: true, running: 6 }).how === 'join' && V({ live: false, running: 6 }).code === 'cap' && V({ live: false, running: 5 }).how === 'launch', 'a JOIN at 6/6 is ok (a join never counts the ceiling); a LAUNCH at 6/6 is `cap`, at 5/6 it launches');
+  leg(gateOf(onlyX.ok) && onlyX.how === 'launch' && onlyX.key === HU1 && onlyX.syncId === 'win-bhuman-' + P1, '"Who can use it" is NOT an input — a profile kept to "Only chat X" is still his to browse (launch)', onlyX);
+  leg(gateOf(V({ live: true, running: 6 }).ok) && V({ live: true, running: 6 }).how === 'join' && V({ live: false, running: 6 }).code === 'cap' && V({ live: false, running: 5 }).how === 'launch', 'a JOIN at 6/6 is ok (a join never counts the ceiling); a LAUNCH at 6/6 is `cap`, at 5/6 it launches');
   leg(V({ live: true, human: { state: 'driving', alive: true } }).how === 'focus' && V({ live: true, human: { state: 'driving', alive: false } }).how === 'rejoin' && V({ live: true, human: { state: 'away', alive: false } }).how === 'rejoin', 'a live window of his drives it ⇒ focus (not an error); away / a dead window ⇒ rejoin (his tab kept)');
   leg(!('interrupts' in V()) && !('confirm' in V()), 'no `interrupts`, no confirm — browsing his own tab pauses nobody (the owner, 2)');
   // the lifecycle
@@ -141,7 +141,7 @@ function pureLegs(H, tag = '') {
   ];
   const badStep = TABLE.filter(([s, e, want]) => st(s, e) !== want).map(([s, e, want]) => `${s} + ${J(e)} ⇒ ${st(s, e)} (want ${want})`);
   leg(!badStep.length && H.endReasonOf(H.humanStep('away', 'away-timeout')) === 'left' && H.endReasonOf(H.humanStep('driving', 'idle')) === null, `every cell of the lifecycle (${TABLE.length}) — his own tab NEVER lapses by the idle clock (nobody to give it back to), the keep ends it only while away`, badStep);
-  leg(H.awayExpired({ state: 'away', awaySince: 0, now: 12 * 3600e3, keepMs: 12 * 3600e3 }) && !H.awayExpired({ state: 'away', awaySince: 0, now: 12 * 3600e3 - 1, keepMs: 12 * 3600e3 }) && !H.awayExpired({ state: 'driving', awaySince: 0, now: 99e9, keepMs: 1 }) && !H.awayExpired({ state: 'away', awaySince: 0, now: 99e9, keepMs: 0 }), 'the keep: away ≥ keep ⇒ expired; driving never; 0 = never');
+  leg(gateOf(H.awayExpired({ state: 'away', awaySince: 0, now: 12 * 3600e3, keepMs: 12 * 3600e3 })) && !H.awayExpired({ state: 'away', awaySince: 0, now: 12 * 3600e3 - 1, keepMs: 12 * 3600e3 }) && !H.awayExpired({ state: 'driving', awaySince: 0, now: 99e9, keepMs: 1 }) && !H.awayExpired({ state: 'away', awaySince: 0, now: 99e9, keepMs: 0 }), 'the keep: away ≥ keep ⇒ expired; driving never; 0 = never');
   leg(H.keepFor({ launched: true, keepMs: 43200000, joinKeepMs: 600000 }) === 43200000 && H.keepFor({ launched: false, keepMs: 43200000, joinKeepMs: 600000 }) === 600000 && H.humanKeepMs(undefined) === 12 * 3600e3 && H.humanKeepMs('x') === 12 * 3600e3 && H.humanKeepMs(0) === 0 && H.humanKeepMs(5) === 60000 && H.HUMAN_KEEP_SETTING === 'browser.humanKeepMs', 'the owner\'s 8: he LAUNCHED the browser ⇒ browser.humanKeepMs (12 h default, 0 = never, ≥ 1 min); he JOINED one an agent launched ⇒ the 10-min takeover idle');
   // the attach
   const A = (x) => { const v = H.humanAttachVerdict(x); return `${v.take}:${v.how}`; };
@@ -150,7 +150,7 @@ function pureLegs(H, tag = '') {
   // the end buttons
   const e0 = H.humanEndChoices({ conversations: 0, idleMs: 15 * 60000 }), e2 = H.humanEndChoices({ conversations: 2, names: ['Fix login', 'Report'], idleMs: 15 * 60000 });
   leg(e0.close.label === 'Close' && e0.quit.label === 'Quit the whole browser' && e0.line === 'After Close, it closes by itself in 15 min if nothing uses it.' && e0.confirm === null
-    && e2.line === 'Fix login, Report also uses this browser — Close leaves it running for them.' && e2.confirm && e2.confirm.title === 'Quit the whole browser?' && /Fix login, Report also uses this browser\. Quitting closes their pages too/.test(e2.confirm.message) && e2.confirm.danger === true,
+    && e2.line === 'Fix login, Report also uses this browser — Close leaves it running for them.' && gateOf(e2.confirm) && e2.confirm.title === 'Quit the whole browser?' && gateOf(/Fix login, Report also uses this browser\. Quitting closes their pages too/.test(e2.confirm.message)) && e2.confirm.danger === true,
     'the two ends (the owner, 5): Close (his tab; the browser stays and idles out) + Quit the whole browser — its ONE confirm names the conversations that lose their pages; none on it ⇒ no confirm', { e0, e2 });
   // the address row
   const AD = [['https://example.com/a?b=1', 'https://example.com/a?b=1'], ['example.com', 'https://example.com/'], ['localhost:3000/x', 'http://localhost:3000/x'], ['127.0.0.1:8080', 'http://127.0.0.1:8080/'], ['about:blank', 'about:blank'], ['HTTP://Example.COM', 'http://example.com/']];
@@ -180,19 +180,19 @@ function pureLegs(H, tag = '') {
   leg(J(wheel.acts) === J([{ action: 'scroll', params: { direction: 'down', amount: 240, x: 5, y: 6 } }]) && H.humanActDueIn(run([S.wheelRecord({ pt: { x: 1, y: 1 }, deltaY: 3 })]).state, 0) !== null, 'a burst of wheel ⇒ ONE `scroll` (direction + amount) once it goes quiet; an open burst says when its flush is due', wheel.acts);
   leg(J(tap.acts) === J([{ action: 'mouseclick', params: { x: 30, y: 40, button: 'left' } }]), 'a touch tap is a click at its point', tap.acts);
   const T0 = require('../src/browser-trace.js');
-  leg(all.every((a) => T0.classifyAction(a.action) !== null) && T0.redactParams('type', { text: '••••' }).text === '«4 chars»', 'every act is an action the recorder TRACES (src/browser-trace.js), a typed length is kept as «N chars»', all.map((a) => a.action));
+  leg(gateOf(all.every((a) => T0.classifyAction(a.action) !== null)) && T0.redactParams('type', { text: '••••' }).text === '«4 chars»', 'every act is an action the recorder TRACES (src/browser-trace.js), a typed length is kept as «N chars»', all.map((a) => a.action));
   // the row
   const h = { key: HU1, profileId: P1, since: 5, state: 'away', awaySince: 9, launched: true, keepMs: 43200000 };
   const row = H.humanHolderRow(h, { viewers: 2 });
-  leg(row && row.human === true && row.holder === 'user' && row.sessionId === null && row.browserKey === HU1 && row.input === 'agent' && row.state === 'away' && row.awaySince === 9 && row.launched === true && row.viewers === 2 && H.humanHolderRow({ ...h, key: 'hu-0000e002' }) === null && H.humanHolderRow({ ...h, key: KA }) === null, 'the digest row: human, holder user, NO session id, his state; a key that is not this profile\'s ⇒ no row', row);
+  leg(gateOf(row) && row.human === true && row.holder === 'user' && row.sessionId === null && row.browserKey === HU1 && row.input === 'agent' && row.state === 'away' && row.awaySince === 9 && row.launched === true && row.viewers === 2 && H.humanHolderRow({ ...h, key: 'hu-0000e002' }) === null && H.humanHolderRow({ ...h, key: KA }) === null, 'the digest row: human, holder user, NO session id, his state; a key that is not this profile\'s ⇒ no row', row);
   const hr = B.holderRows({ leases: [{ profileId: P1, browserKey: KA, sessionId: 's1' }], profiles: [{ id: P1, label: 'Work', owner: { kind: 'instance' } }, { id: 'bp-0000e0ee', label: '(ephemeral) x', ephemeral: true, owner: { kind: 'conversation', id: KB } }], browsers: {}, humans: [row, { ...row, profileId: 'bp-0000e0ee', browserKey: 'hu-0000e0ee' }, { ...row, profileId: 'bp-0000dead', browserKey: 'hu-0000dead' }] });
-  leg(hr.length === 2 && hr[1].human && hr[1].sessionId === null && hr[0].browserKey === KA, 'holderRows: the conversations\' leases + HIS row on a named profile (never on an ephemeral record, never on a profile that is gone)', hr);
+  leg(hr.length === 2 && gateOf(hr[1].human) && hr[1].sessionId === null && hr[0].browserKey === KA, 'holderRows: the conversations\' leases + HIS row on a named profile (never on an ephemeral record, never on a profile that is gone)', hr);
   leg(H.recordsMine({}) === true && H.recordsMine({ recordMine: false }) === false && H.recordsMine(null) === false, '"Also record my own actions" is an opt-OUT: absent = ON (the owner, 4)');
   return legs;
 }
 {
   const legs = pureLegs(HM);
-  for (const l of legs) ok(l.c, l.n, l.c ? undefined : l.extra);
+  for (const l of legs) ok(verdictOf(l.c), l.n, l.c ? undefined : l.extra);
   // CONTROLS — each patched copy of the PURE module turns its leg red
   const src = fs.readFileSync(path.join(REPO, 'src/browser-human.js'), 'utf8');
   const controls = [
@@ -208,12 +208,12 @@ function pureLegs(H, tag = '') {
       // the typed words must never survive the step: a copy that carries the real text reddens the typing / paste legs
       const Hk = M.load('src/browser-human.js', editAnchor(src, "  if (r.type === 'input_text') { flushWheel(st, acts); flushTyping(st, acts); const n = Array.from(str(r.text)).length; if (n) acts.push({ action: 'type', params: { text: PLACEHOLDER.repeat(Math.min(20000, n)) } }); return done(); }", "  if (r.type === 'input_text') { flushWheel(st, acts); flushTyping(st, acts); if (str(r.text)) acts.push({ action: 'type', params: { text: str(r.text) } }); return done(); }", "src/browser-human.js"), name);
       const red = pureLegs(Hk, `[${name}] `).filter((x) => !x.c);
-      ok(red.some((x) => /paste/.test(x.n)), `CONTROL ${name}: a step that keeps a paste's TEXT turns the paste leg red`, red.map((x) => x.n));
+      ok(verdictOf(red.some((x) => /paste/.test(x.n))), `CONTROL ${name}: a step that keeps a paste's TEXT turns the paste leg red`, red.map((x) => x.n));
       continue;
     }
     const Hm = M.load('src/browser-human.js', editAnchor(src, needle, repl, "src/browser-human.js"), name);
     const red = pureLegs(Hm, `[${name}] `).filter((x) => !x.c);
-    ok(red.some((x) => mustRed.test(x.n)), `CONTROL ${name}: the patched copy turns its leg RED (${red.map((x) => x.n.replace(/^\[[^\]]+\] /, '').slice(0, 60)).join(' | ')})`);
+    ok(verdictOf(red.some((x) => mustRed.test(x.n))), `CONTROL ${name}: the patched copy turns its leg RED (${red.map((x) => x.n.replace(/^\[[^\]]+\] /, '').slice(0, 60)).join(' | ')})`);
   }
 }
 
@@ -227,14 +227,14 @@ function pureLegs(H, tag = '') {
   const hsrc = fs.readFileSync(path.join(REPO, 'src/browser-human.js'), 'utf8');
   const hneedle = "    const typed = printable && (!chord || ((mods & MOD.alt) !== 0 && (mods & MOD.meta) === 0));";
   const Hc = M.load('src/browser-human.js', editAnchor(hsrc, hneedle, '    const typed = printable && !chord;', "src/browser-human.js"), 'alt-chars-as-chords');
-  ok(hsrc.includes(hneedle) && /Control\+Alt\+@/.test(shown(Hc)) && /Alt\+™/.test(shown(Hc)), 'CONTROL: the pre-fix act step names the AltGr / Option character in the chord (`press Control+Alt+@`, `press Alt+™`) — red', shown(Hc));
+  ok(gateOf(hsrc.includes(hneedle)) && gateOf(/Control\+Alt\+@/.test(shown(Hc))) && verdictOf(/Alt\+™/.test(shown(Hc))), 'CONTROL: the pre-fix act step names the AltGr / Option character in the chord (`press Control+Alt+@`, `press Alt+™`) — red', shown(Hc));
   const cred = { id: 'tr-000000000001', at: 1, browserKey: 'hu-0000e001', profileId: P1, command: { action: 'open', params: { url: 'https://alice:hunter2pw@bank.example/login?session=abc' } }, result: { success: false, error: 'net::ERR_ABORTED at https://alice:hunter2pw@bank.example/login' }, position: T0.positionOf({ kind: 'navigation', params: { url: 'https://alice:hunter2pw@bank.example/login?session=abc' } }), url: 'https://alice:hunter2pw@bank.example/home', holder: 'user' };
   const e0 = T0.entryFor(cred);
-  ok(!J(e0).includes('hunter2pw') && e0.params.url === 'https://bank.example/login?«cut»' && e0.url === 'https://bank.example/home' && /bank\.example/.test(e0.error) && T0.withoutUserinfo('mailto:a@b.example') === 'mailto:a@b.example' && T0.withoutUserinfo('http://h.example/p@q') === 'http://h.example/p@q',
+  ok(!J(e0).includes('hunter2pw') && e0.params.url === 'https://bank.example/login?«cut»' && e0.url === 'https://bank.example/home' && gateOf(/bank\.example/.test(e0.error)) && T0.withoutUserinfo('mailto:a@b.example') === 'mailto:a@b.example' && T0.withoutUserinfo('http://h.example/p@q') === 'http://h.example/p@q',
     'verify r1 (H2): a URL\'s credentials never reach a trace entry — params, text, the page url and the error say the page without `user:pass@` (a mailto, an @ in a path untouched)', e0);
   const tsrc = fs.readFileSync(path.join(REPO, 'src/browser-trace.js'), 'utf8');
   const Tc = M.load('src/browser-trace.js', editAnchor(tsrc, "function withoutUserinfo(v) { return typeof v === 'string' ?", "function withoutUserinfo(v) { return v; return typeof v === 'string' ?", "src/browser-trace.js"), 'userinfo-kept');
-  ok(J(Tc.entryFor(cred)).includes('hunter2pw'), 'CONTROL: a trace copy that keeps URLs as typed stores the password — red');
+  ok(verdictOf(J(Tc.entryFor(cred)).includes('hunter2pw')), 'CONTROL: a trace copy that keeps URLs as typed stores the password — red');
   // verify r2 (#7, r1's HELD query secrets re-judged — cut): a URL whose query / fragment NAMES a credential-shaped key keeps
   // its scheme, host and path and loses the whole query (fragment) — for EVERY navigation, an agent's too; by the key's
   // WORDS (allowlist-free), so `postcode` / `keyword` / `next` stay
@@ -268,21 +268,21 @@ function pureLegs(H, tag = '') {
   ];
   const qbad = QS.filter(([i, o]) => T0.withoutUrlSecrets(i) !== o).map(([i, o]) => ({ i, want: o, got: T0.withoutUrlSecrets(i) }));
   const agentOpen = T0.entryFor({ id: 'tr-000000000002', at: 2, browserKey: 'bk-0000e0a1', sessionId: 'sess-a', profileId: P1, command: { action: 'open', params: { url: 'https://a.example/cb?code=SECRETCODE42&state=s' } }, result: { success: true }, position: T0.positionOf({ kind: 'navigation', params: { url: 'https://a.example/cb?code=SECRETCODE42&state=s' } }), url: 'https://a.example/cb?code=SECRETCODE42&state=s' });
-  ok(!qbad.length && !J(agentOpen).includes('SECRETCODE42') && agentOpen.params.url === 'https://a.example/cb?«cut»' && /a\.example\/cb\?«cut»/.test(agentOpen.text), `verify r2 (#7): a URL whose query / fragment names a credential-shaped key loses its query in every trace entry — ${QS.length} shapes (OAuth code, the implicit flow's fragment, a magic link, a presigned URL, an API key, a session, a client secret; postcode / keyword / next kept) — an AGENT's open too (params, text, position, page url)`, { qbad, agentOpen: agentOpen.params });
+  ok(!qbad.length && !J(agentOpen).includes('SECRETCODE42') && agentOpen.params.url === 'https://a.example/cb?«cut»' && verdictOf(/a\.example\/cb\?«cut»/.test(agentOpen.text)), `verify r2 (#7): a URL whose query / fragment names a credential-shaped key loses its query in every trace entry — ${QS.length} shapes (OAuth code, the implicit flow's fragment, a magic link, a presigned URL, an API key, a session, a client secret; postcode / keyword / next kept) — an AGENT's open too (params, text, position, page url)`, { qbad, agentOpen: agentOpen.params });
   // verify r3 (the revert table): the ERROR field of an entry went through entryFor unpinned for the query cut
   const errE = T0.entryFor({ id: 'tr-0000000000e1', at: 4, browserKey: 'bk-0000e0a1', profileId: P1, command: { action: 'open', params: { url: 'https://a.example/x' } }, result: { success: false, error: 'net::ERR_ABORTED at https://a.example/cb?code=ERRCODE9&state=s' } });
-  ok(!J(errE).includes('ERRCODE9') && /a\.example\/cb\?«cut»/.test(errE.error), 'verify r3: an entry\'s ERROR naming a callback loses its query too (entryFor, not only the PURE cut)', errE.error);
+  ok(!J(errE).includes('ERRCODE9') && verdictOf(/a\.example\/cb\?«cut»/.test(errE.error)), 'verify r3: an entry\'s ERROR naming a callback loses its query too (entryFor, not only the PURE cut)', errE.error);
   const Tq = M.load('src/browser-trace.js', editAnchor(tsrc, 'function cutSecretQuery(u) {\n', 'function cutSecretQuery(u) {\n  return u;\n', "src/browser-trace.js"), 'query-kept');
-  ok(tsrc.includes('function cutSecretQuery(u) {\n') && J(Tq.entryFor({ id: 'tr-000000000003', at: 3, browserKey: 'bk-0000e0a1', profileId: P1, command: { action: 'open', params: { url: 'https://a.example/cb?code=SECRETCODE42' } }, result: { success: true } })).includes('SECRETCODE42'), 'CONTROL: a trace copy that keeps queries as typed stores the OAuth code — red');
+  ok(gateOf(tsrc.includes('function cutSecretQuery(u) {\n')) && verdictOf(J(Tq.entryFor({ id: 'tr-000000000003', at: 3, browserKey: 'bk-0000e0a1', profileId: P1, command: { action: 'open', params: { url: 'https://a.example/cb?code=SECRETCODE42' } }, result: { success: true } })).includes('SECRETCODE42')), 'CONTROL: a trace copy that keeps queries as typed stores the OAuth code — red');
   const vneedle0 = "  if (eq < 0 || depth >= 2) return false;\n";
   const Tv = M.load('src/browser-trace.js', editAnchor(tsrc, vneedle0, '  return false;\n', "src/browser-trace.js"), 'query-value-kept');
-  ok(tsrc.includes(vneedle0) && Tv.withoutUrlSecrets('https://mail.example/click?url=https%3A%2F%2Fapp.example%2Fmagic%3Ftoken%3DSECRET1').includes('SECRET1'), 'CONTROL (verify r3): a trace copy that judges only the keys keeps a redirector\'s encoded magic link — red');
+  ok(gateOf(tsrc.includes(vneedle0)) && verdictOf(Tv.withoutUrlSecrets('https://mail.example/click?url=https%3A%2F%2Fapp.example%2Fmagic%3Ftoken%3DSECRET1').includes('SECRET1')), 'CONTROL (verify r3): a trace copy that judges only the keys keeps a redirector\'s encoded magic link — red');
   // verify r2 (the revert table): the ARRAY branch of the params (a batch's lines, a list of urls) had no gate — reverted to
   // keep its strings as typed, the whole fast tier stayed green
   const arr = T0.redactParams('batch', { lines: ['open https://alice:hunter2pw@h.example/in?token=ARRTOKEN9', 'click #a'] });
   const aneedle = "v.map((x) => withoutUrlSecrets(String(x)).slice(0, 200))";
   const Ta = M.load('src/browser-trace.js', editAnchor(tsrc, aneedle, 'v.map((x) => String(x).slice(0, 200))', "src/browser-trace.js"), 'array-kept');
-  ok(!J(arr).includes('hunter2pw') && !J(arr).includes('ARRTOKEN9') && arr.lines[0] === 'open https://h.example/in?«cut»' && arr.lines[1] === 'click #a' && tsrc.includes(aneedle) && J(Ta.redactParams('batch', { lines: ['open https://alice:hunter2pw@h.example/in?token=ARRTOKEN9'] })).includes('hunter2pw'),
+  ok(!J(arr).includes('hunter2pw') && !J(arr).includes('ARRTOKEN9') && arr.lines[0] === 'open https://h.example/in?«cut»' && arr.lines[1] === 'click #a' && gateOf(tsrc.includes(aneedle)) && verdictOf(J(Ta.redactParams('batch', { lines: ['open https://alice:hunter2pw@h.example/in?token=ARRTOKEN9'] })).includes('hunter2pw')),
     'verify r2: a list param (a batch\'s lines) is cut like a string — no password, no token; CONTROL the copy that keeps list items as typed stores both — red', arr);
 }
 
@@ -303,7 +303,7 @@ function pureLegs(H, tag = '') {
   const ssrc = fs.readFileSync(path.join(REPO, 'src/browser-human.js'), 'utf8');
   const sneedle = "  if (profile.mediated === true || profile.ephemeral === true || profile.host) return null;\n";
   const Hs = M.load('src/browser-human.js', editAnchor(ssrc, sneedle, "  if (profile.ephemeral === true || profile.host) return null;\n", "src/browser-human.js"), 'share-line-ignores-mediated');
-  ok(ssrc.includes(sneedle) && J(rows(Hs)) !== J([EN, EN, null, null, null, null]), 'CONTROL: a copy that ignores `mediated` shows the line on a "separate tabs" profile — the leg above can go red', rows(Hs));
+  ok(gateOf(ssrc.includes(sneedle)) && J(rows(Hs)) !== J([EN, EN, null, null, null, null]), 'CONTROL: a copy that ignores `mediated` shows the line on a "separate tabs" profile — the leg above can go red', rows(Hs));
   // (the WIRING pin of the person's window share chip: MOVED to the fast scripts/test-browser-human-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
@@ -425,10 +425,10 @@ let work, solo, shop;
   const HW = HM.humanKeyFor(work.id);
   let r = await j('POST', `/api/browser/profiles/${work.id}/browse`, {});
   const tabNew = cmdsOf('vs-' + HW).filter((c) => /^--pin-tab tab new$/.test(c));
-  ok(r.status === 200 && r.json.ok && r.json.how === 'launch' && r.json.key === HW && r.json.syncId === 'win-bhuman-' + work.id && /^[0-9a-f]{16}$/.test(r.json.fresh || '') && logOf('launches.log').length === 1 && logOf('launches.log')[0].profile === work.dir, 'Browse yourself on a STOPPED profile: ONE launch (the keeper\'s start, on the profile directory) — the answer names his key, the window\'s sync id and a fresh token', r.json);
-  ok(logOf('connects.log').some((c) => c.sess === 'vs-' + HW && c.cdp.startsWith(`ws://127.0.0.1:${DEAD_CDP}/`)) && !logOf('refused.log').length && tabNew.length === 1, 'his session joins over the keeper browser\'s CDP url (never the directory — no SingletonLock) and opens HIS OWN pinned tab: `--pin-tab tab new` under vs-hu-…', { connects: logOf('connects.log'), tabNew });
+  ok(r.status === 200 && gateOf(r.json.ok) && r.json.how === 'launch' && r.json.key === HW && r.json.syncId === 'win-bhuman-' + work.id && gateOf(/^[0-9a-f]{16}$/.test(r.json.fresh || '')) && logOf('launches.log').length === 1 && logOf('launches.log')[0].profile === work.dir, 'Browse yourself on a STOPPED profile: ONE launch (the keeper\'s start, on the profile directory) — the answer names his key, the window\'s sync id and a fresh token', r.json);
+  ok(gateOf(logOf('connects.log').some((c) => c.sess === 'vs-' + HW && c.cdp.startsWith(`ws://127.0.0.1:${DEAD_CDP}/`))) && !logOf('refused.log').length && tabNew.length === 1, 'his session joins over the keeper browser\'s CDP url (never the directory — no SingletonLock) and opens HIS OWN pinned tab: `--pin-tab tab new` under vs-hu-…', { connects: logOf('connects.log'), tabNew });
   const h = k.humanOf(work.id);
-  ok(h && h.state === 'away' && h.launched === true && h.keepMs === 12 * 3600e3 && h.sessionId === null && h.human === true, 'he is a HOLDER (away until a window of his takes his tab), he LAUNCHED it ⇒ kept 12 h while away', h);
+  ok(gateOf(h) && h.state === 'away' && h.launched === true && h.keepMs === 12 * 3600e3 && h.sessionId === null && h.human === true, 'he is a HOLDER (away until a window of his takes his tab), he LAUNCHED it ⇒ kept 12 h while away', h);
   const dig = k.list().leases.filter((l) => l.profileId === work.id);
   ok(dig.length === 1 && dig[0].human === true && dig[0].holder === 'user' && dig[0].sessionId === null && dig[0].browserKey === HW, 'the digest\'s holder rows carry his row (sessionId null — no reader that needs a conversation takes it for one)', dig);
   const sess = leaseEvents.filter((e) => e.kind === 'human-start' && e.key === HW);
@@ -438,11 +438,11 @@ let work, solo, shop;
   r = await j('POST', '/api/agent/browser/use', { profile: 'Work' }, as(sA));
   ok(r.status === 200 && logOf('launches.log').length === 1 && r.json.others === 0, 'conversation "Fix login" `use Work` JOINS the browser he browses (still one launch; `others` counts conversations only)', r.json);
   const tk = k.humanTake({ key: HW, viewerId: 11 });
-  ok(tk.ok && k.humanOf(work.id).state === 'driving' && k.inputStateFor(KA, work.id).input === 'agent', 'a window of his takes HIS tab\'s controls — the agent\'s own input side is untouched');
+  ok(gateOf(tk.ok) && k.humanOf(work.id).state === 'driving' && k.inputStateFor(KA, work.id).input === 'agent', 'a window of his takes HIS tab\'s controls — the agent\'s own input side is untouched');
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://x.example'] }, as(sA));
   ok(r.status === 200 && r.json.kind === 'attachment' && r.json.code === undefined, 'while he browses, the agent\'s next command RESOLVES (never browser_paused, never browser_busy) — one more holder, its own tab', r.json);
   const convEvents = inputEvents.slice(ev0).filter((e) => !e.human);
-  ok(convEvents.length === 0 && inputEvents.slice(ev0).some((e) => e.human && e.kind === 'takeover' && e.browserKey === HW) && spyCount() === 0 && !sessionCards.some((c) => c.m.holder === 'user' || HM.isHumanKey(c.m.browserKey)) && markersSeen.some((m) => m.holder === 'user' && m.browserKey === HW), 'NO takeover / handback event for any conversation, no card, no notice, no delivery (his window\'s own event is `human` and the announcer ignores it); his session marker reached the hook and became NO card', { convEvents, spy: Object.fromEntries(Object.entries(spy).map(([a, b]) => [a, b.length])), cards: sessionCards.map((c) => c.key + ':' + c.m.phase) });
+  ok(convEvents.length === 0 && gateOf(inputEvents.slice(ev0).some((e) => e.human && e.kind === 'takeover' && e.browserKey === HW)) && spyCount() === 0 && !sessionCards.some((c) => c.m.holder === 'user' || HM.isHumanKey(c.m.browserKey)) && verdictOf(markersSeen.some((m) => m.holder === 'user' && m.browserKey === HW)), 'NO takeover / handback event for any conversation, no card, no notice, no delivery (his window\'s own event is `human` and the announcer ignores it); his session marker reached the hook and became NO card', { convEvents, spy: Object.fromEntries(Object.entries(spy).map(([a, b]) => [a, b.length])), cards: sessionCards.map((c) => c.key + ':' + c.m.phase) });
   // the address row + the Tabs pane
   const before = cmdsOf('vs-' + HW).length;
   fakeTargets.list = [{ targetId: OWN_TAB, type: 'page', openerId: null }, { targetId: POP_TAB, type: 'page', openerId: OWN_TAB }, { targetId: AGENT_TAB, type: 'page', openerId: null }];
@@ -459,7 +459,7 @@ let work, solo, shop;
     fakeTargets.fail = true;
     const rU = await j('POST', `/api/browser/browse/${HW}/navigate`, { tab: POP_TAB });
     fakeTargets.fail = false;
-    ok(rA.status === 403 && rA.json.code === 'not_your_tab' && /take over/.test(rA.json.error) && rT.status === 403 && rT.json.code === 'not_your_tab' && rU.status === 503 && rU.json.code === 'tabs_unreadable' && cmdsOf('vs-' + HW).length === n0 && k.inputStateFor(KA, work.id).input === 'agent',
+    ok(rA.status === 403 && rA.json.code === 'not_your_tab' && gateOf(/take over/.test(rA.json.error)) && rT.status === 403 && rT.json.code === 'not_your_tab' && rU.status === 503 && rU.json.code === 'tabs_unreadable' && cmdsOf('vs-' + HW).length === n0 && k.inputStateFor(KA, work.id).input === 'agent',
       'verify r1 (H6): his Tabs pane naming a CONVERSATION\'s tab is refused `not_your_tab` (its way out: that conversation\'s live view + take over), a `t<N>` ref too (not provably his), an unreadable tab list fails CLOSED (`tabs_unreadable`) — nothing ran under his session, the agent untouched', { rA: rA.json, rT: rT.json, rU: rU.json });
     const HT = HM.humanTabSet([{ targetId: OWN_TAB, type: 'page' }, { targetId: POP_TAB, type: 'page', openerId: OWN_TAB }, { targetId: 'F0F0000000000000000000000000000C', type: 'page', openerId: POP_TAB }, { targetId: AGENT_TAB, type: 'page' }, { targetId: 'A1A1000000000000000000000000000D', type: 'page', openerId: AGENT_TAB }, { targetId: 'B2B2000000000000000000000000000E', type: 'service_worker', openerId: OWN_TAB }], OWN_TAB);
     ok([...HT].sort().join() === [OWN_TAB, POP_TAB, 'F0F0000000000000000000000000000C'].sort().join() && HM.humanTabSet([{ targetId: AGENT_TAB, type: 'page' }], OWN_TAB).size === 0 && HM.humanTabSet([{ targetId: OWN_TAB, type: 'page' }], null).size === 0,
@@ -467,14 +467,14 @@ let work, solo, shop;
     // CONTROL: a keeper copy whose navigate admits ANY tab (the pre-fix shape) switches his session to the agent's tab — red
     const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const needle = "    let tv = null;\n    if (v.act === 'tab') {";
-    ok(src.includes(needle), 'the tab verdict needle (the control below removes it)');
+    ok(verdictOf(src.includes(needle)), 'the tab verdict needle (the control below removes it)');
     const Kt = M.load('src/server/browser-keeper.js', editAnchor(src, needle, "    let tv = null;\n    if (false) {", "src/server/browser-keeper.js"), 'any-tab');
     const kt = mkKeeper(Kt, { dataDir: path.join(ROOT, 'data-t'), readTargets });
     const tp = kt.createProfile({ label: 'T' }, { owner: { kind: 'instance', id: null } });
     await kt.browse(tp.id);
     const HTk = HM.humanKeyFor(tp.id);
     let cr = null; try { cr = await kt.navigateHuman(HTk, { tab: AGENT_TAB }); } catch (e) { cr = { code: e.code }; }
-    ok(cr && cr.ok === true && cmdsOf('vs-' + HTk).includes('tab ' + AGENT_TAB), 'CONTROL: the pre-fix keeper copy runs `tab <the agent\'s tab>` under his session — the leg above can go red', cr);
+    ok(gateOf(cr) && cr.ok === true && verdictOf(cmdsOf('vs-' + HTk).includes('tab ' + AGENT_TAB)), 'CONTROL: the pre-fix keeper copy runs `tab <the agent\'s tab>` under his session — the leg above can go red', cr);
     await kt.stop(tp.id, { why: 'user' });
   }
   // verify r2 (the revert table): the REAL read behind his tab set — browser-viewport `browserTargets`, CDP Target.getTargets
@@ -490,7 +490,7 @@ let work, solo, shop;
     const CDP = `ws://127.0.0.1:${wss.address().port}/devtools/browser/fake-cdp`;
     const VP = require('../src/server/browser-viewport.js');
     const r0 = await VP.browserTargets(CDP);
-    ok(r0.ok && r0.targets.find((x) => x.targetId === POP_TAB).openerId === OWN_TAB && r0.targets.length === 4, 'the REAL read (browserTargets over CDP Target.getTargets) carries each target\'s opener', r0);
+    ok(gateOf(r0.ok) && r0.targets.find((x) => x.targetId === POP_TAB).openerId === OWN_TAB && r0.targets.length === 4, 'the REAL read (browserTargets over CDP Target.getTargets) carries each target\'s opener', r0);
     const kv = mkKeeper(K, { dataDir: path.join(ROOT, 'data-vp') }); // no injected reader: the keeper's own default
     await kv._facts.probeVersion();
     const vp = kv.createProfile({ label: 'Vp' }, { owner: { kind: 'instance', id: null } });
@@ -500,12 +500,12 @@ let work, solo, shop;
     await kv.attach({ profileId: vp.id, browserKey: KA, sessionId: 'sess-a', by: 'user' }); // a conversation holds it (its tab is not an orphan)
     let sw = null; try { sw = await kv.navigateHuman(HV, { tab: POP_TAB }); } catch (e) { sw = { refused: e.code }; }
     let sa = null; try { sa = await kv.navigateHuman(HV, { tab: AGENT_TAB }); } catch (e) { sa = { refused: e.code }; }
-    ok(sw && sw.ok === true && sa && sa.refused === 'not_your_tab', 'through the keeper\'s OWN reader: his popup (opener = his tab) is his to switch to; the agent\'s tab is refused', { sw, sa });
+    ok(gateOf(sw) && sw.ok === true && gateOf(sa) && sa.refused === 'not_your_tab', 'through the keeper\'s OWN reader: his popup (opener = his tab) is his to switch to; the agent\'s tab is refused', { sw, sa });
     const vsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-viewport.js'), 'utf8');
     const vneedle = 'openerId: t.openerId ? String(t.openerId) : null';
     const VPx = M.load('src/server/browser-viewport.js', editAnchor(vsrc, vneedle, 'openerId: null', "src/server/browser-viewport.js"), 'no-opener');
     const rx = await VPx.browserTargets(CDP);
-    ok(vsrc.includes(vneedle) && rx.ok && !HM.humanTabSet(rx.targets, OWN_TAB).has(POP_TAB), 'CONTROL: a read that drops the opener makes his popup nobody\'s (refused, never closed by his Close) — the legs above can go red');
+    ok(gateOf(vsrc.includes(vneedle)) && gateOf(rx.ok) && !HM.humanTabSet(rx.targets, OWN_TAB).has(POP_TAB), 'CONTROL: a read that drops the opener makes his popup nobody\'s (refused, never closed by his Close) — the legs above can go red');
     try { await kv.stop(vp.id, { why: 'user' }); } catch { }
     kv.shutdown(); wss.close();
   }
@@ -551,16 +551,16 @@ let work, solo, shop;
       return out;
     };
     const ol = await orphanLeg(K, 'data-orph');
-    ok(ol.dropped && ol.left && ol.take && ol.take.ok === true && ol.take.adopted === true && ol.ran && ol.adopted.includes('C0C0000000000000000000000000000D') && ol.marked && ol.backNewTab === 1 && ol.whileLeased && ol.whileLeased.refused === 'not_your_tab' && ol.closed.includes('tab close C0C0000000000000000000000000000D') && ol.closed.includes('tab close ' + OWN_TAB),
+    ok(gateOf(ol.dropped) && gateOf(ol.left) && gateOf(ol.take) && ol.take.ok === true && ol.take.adopted === true && gateOf(ol.ran) && gateOf(ol.adopted.includes('C0C0000000000000000000000000000D')) && gateOf(ol.marked) && ol.backNewTab === 1 && gateOf(ol.whileLeased) && ol.whileLeased.refused === 'not_your_tab' && gateOf(ol.closed.includes('tab close C0C0000000000000000000000000000D')) && verdictOf(ol.closed.includes('tab close ' + OWN_TAB)),
       'verify r2 (orphan tabs): with NO conversation holding the browser, the tab a conversation that ended left behind is his to TAKE (it becomes his — persisted with his holder, closed by his Close); that conversation, if it comes back, binds a NEW tab first (never his); while a conversation holds the browser a tab outside his set stays refused (fail closed)', ol);
-    ok(J([...HM.humanTabSet([{ targetId: OWN_TAB, type: 'page' }, { targetId: 'C0C0000000000000000000000000000D', type: 'page' }, { targetId: 'C0C0000000000000000000000000000F', type: 'page', openerId: 'C0C0000000000000000000000000000D' }], OWN_TAB, ['C0C0000000000000000000000000000D'])].sort()) === J([OWN_TAB, 'C0C0000000000000000000000000000D', 'C0C0000000000000000000000000000F'].sort()) && HM.orphanTabSet([{ targetId: OWN_TAB, type: 'page' }, { targetId: AGENT_TAB, type: 'page' }], new Set([OWN_TAB]), { leased: true }).size === 0 && HM.orphanTabSet([{ targetId: OWN_TAB, type: 'page' }, { targetId: AGENT_TAB, type: 'page' }], new Set([OWN_TAB]), { leased: false }).has(AGENT_TAB) && HM.orphanTabSet([], null, { leased: false }).size === 0,
+    ok(J([...HM.humanTabSet([{ targetId: OWN_TAB, type: 'page' }, { targetId: 'C0C0000000000000000000000000000D', type: 'page' }, { targetId: 'C0C0000000000000000000000000000F', type: 'page', openerId: 'C0C0000000000000000000000000000D' }], OWN_TAB, ['C0C0000000000000000000000000000D'])].sort()) === J([OWN_TAB, 'C0C0000000000000000000000000000D', 'C0C0000000000000000000000000000F'].sort()) && HM.orphanTabSet([{ targetId: OWN_TAB, type: 'page' }, { targetId: AGENT_TAB, type: 'page' }], new Set([OWN_TAB]), { leased: true }).size === 0 && gateOf(HM.orphanTabSet([{ targetId: OWN_TAB, type: 'page' }, { targetId: AGENT_TAB, type: 'page' }], new Set([OWN_TAB]), { leased: false }).has(AGENT_TAB)) && HM.orphanTabSet([], null, { leased: false }).size === 0,
       'PURE: an adopted tab is a root of his set (with what it opens); orphans exist only when nobody holds the browser, never when his tabs are unreadable');
     const osrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const oneedle = "orphans: view ? HM.orphanTabSet(view.targets, view.own, { leased: reg.leases.some((l) => l.profileId === p.id) }) : null";
-    ok(osrc.includes(oneedle), 'the orphan needle (the control below removes it)');
+    ok(verdictOf(osrc.includes(oneedle)), 'the orphan needle (the control below removes it)');
     const Ko = M.load('src/server/browser-keeper.js', editAnchor(osrc, oneedle, 'orphans: null', "src/server/browser-keeper.js"), 'no-orphans');
     const oc = await orphanLeg(Ko, 'data-orph-c');
-    ok(oc.take && oc.take.refused === 'not_your_tab' && !oc.ran && !oc.closed.includes('tab close C0C0000000000000000000000000000D'), 'CONTROL: the keeper copy without the orphan rule refuses the tab nobody holds (`not_your_tab`, its way out a live view that does not exist) and his Close leaves it — the leg above can go red', oc);
+    ok(gateOf(oc.take) && oc.take.refused === 'not_your_tab' && !oc.ran && !oc.closed.includes('tab close C0C0000000000000000000000000000D'), 'CONTROL: the keeper copy without the orphan rule refuses the tab nobody holds (`not_your_tab`, its way out a live view that does not exist) and his Close leaves it — the leg above can go red', oc);
     // verify r3 (#3, the conversation comes BACK while he holds its old tab): r2 remembered a lease that LEFT its page only
     // where the tick drops a parent key. Reproduced on the real 0.38.1 + Chrome 154 (verify/repro-r3-detach, `--child`): a
     // DETACH (the agent's verb, the UI's Detach, a pin that moves — the conversation alive, its session bound to its tab) and
@@ -603,14 +603,14 @@ let work, solo, shop;
       return out;
     };
     const lDet = await leftLeg(K, 'data-left-d', 'detach'), lCh = await leftLeg(K, 'data-left-c', 'child');
-    ok([lDet, lCh].every((x) => x.gone && x.left && x.take && x.take.adopted === true && x.marked && x.backNewTab === 1) && lCh.again === lCh.key && /\.1$/.test(lCh.key),
+    ok(gateOf([lDet, lCh].every((x) => x.gone && x.left && x.take && x.take.adopted === true && x.marked && x.backNewTab === 1)) && lCh.again === lCh.key && verdictOf(/\.1$/.test(lCh.key)),
       'verify r3: a lease that left its page by a DETACH (the conversation alive) or a HELPER\'s handle (the next helper mints the same handle) is remembered like the tick\'s drop — he may take that tab, and the returning session binds a NEW tab first (never lands in his page)', { lDet, lCh });
     const lsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const lneedles = ["    noteLeftTab(id, browserKey); // verify r3", "    for (const l of reg.leases) if (l.browserKey === handle) noteLeftTab(l.profileId, handle);", " || !(B.isBrowserKey(browserKey) || B.isChildKey(browserKey))) return false;"];
-    ok(lneedles.every((n) => lsrc.includes(n)), 'the left-tab needles (the control below puts r2\'s shape back)');
+    ok(verdictOf(lneedles.every((n) => lsrc.includes(n))), 'the left-tab needles (the control below puts r2\'s shape back)');
     const Kl = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(editAnchor(lsrc, lneedles[0], '    // (r2: no record at a detach)', "src/server/browser-keeper.js"), lneedles[1], '', "src/server/browser-keeper.js"), lneedles[2], ' || !B.isBrowserKey(browserKey)) return false;', "src/server/browser-keeper.js"), 'left-tick-parent-only');
     const cDet = await leftLeg(Kl, 'data-left-dc', 'detach'), cCh = await leftLeg(Kl, 'data-left-cc', 'child');
-    ok([cDet, cCh].every((x) => !x.left && !x.marked && x.backNewTab === 0 && x.take && x.take.adopted === true), 'CONTROL: r2\'s shape (only the tick\'s parent-key drop recorded) — he takes the tab, nothing is marked, the returning session binds nothing (its next command lands in his page) — the leg above can go red', { cDet, cCh });
+    ok(verdictOf([cDet, cCh].every((x) => !x.left && !x.marked && x.backNewTab === 0 && x.take && x.take.adopted === true)), 'CONTROL: r2\'s shape (only the tick\'s parent-key drop recorded) — he takes the tab, nothing is marked, the returning session binds nothing (its next command lands in his page) — the leg above can go red', { cDet, cCh });
     // verify r3 (#3, "prove its next command never lands in his tab"): the returning session's bind (`tab new`) FAILS — a busy
     // daemon, a timeout. Its session is still bound to the tab he took: the attach went through with a warning and the
     // command ran IN HIS PAGE (reproduced below with the fake's refused `tab new`). Now the attach is refused `tab_unbound`
@@ -647,31 +647,31 @@ let work, solo, shop;
       return out;
     };
     const lr = await restartLeftLeg(K, 'data-left-r');
-    ok(lr.leftAfterRestart && lr.take && lr.take.adopted === true && lr.marked && lr.adoptedAfterRestart.includes('C0C0000000000000000000000000002D') && lr.closed.includes('tab close C0C0000000000000000000000000002D'),
+    ok(gateOf(lr.leftAfterRestart) && gateOf(lr.take) && lr.take.adopted === true && gateOf(lr.marked) && gateOf(lr.adoptedAfterRestart.includes('C0C0000000000000000000000000002D')) && verdictOf(lr.closed.includes('tab close C0C0000000000000000000000000002D')),
       'verify r3: the orphan state crosses a RESTART — a conversation that left before it is still marked when he takes its tab after it (its return binds a new tab), and the tab he took is still his after the next restart (his Close closes it)', lr);
     const rsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const rn1 = "    if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }"; // (lane profile-lock-roll verify r7: the raw document is kept for the token dedupe's report)
     const rn2 = 'adopted: Array.isArray(r.adopted) ? r.adopted.slice() : [], fresh: null';
-    ok(rsrc.includes(rn1) && rsrc.includes(rn2), 'the restart needles (the controls below remove each layer)');
+    ok(gateOf(rsrc.includes(rn1)) && verdictOf(rsrc.includes(rn2)), 'the restart needles (the controls below remove each layer)');
     const Kr1 = M.load('src/server/browser-keeper.js', editAnchor(rsrc, rn1, rn1.replace('; }', '; reg.leftTabs = {}; }'), "src/server/browser-keeper.js"), 'left-not-loaded');
     const Kr2 = M.load('src/server/browser-keeper.js', editAnchor(rsrc, rn2, 'adopted: [], fresh: null', "src/server/browser-keeper.js"), 'adopted-not-loaded');
     const cr1 = await restartLeftLeg(Kr1, 'data-left-rc1'), cr2 = await restartLeftLeg(Kr2, 'data-left-rc2');
-    ok(!cr1.leftAfterRestart && !cr1.marked && cr2.leftAfterRestart && cr2.marked && !cr2.closed.includes('tab close C0C0000000000000000000000000002D'), 'CONTROLS: a keeper that loads no leftTabs marks nothing after the restart; one that loads no adopted tabs leaves the tab he took open at his Close — the leg above can go red', { cr1: { left: cr1.leftAfterRestart, marked: cr1.marked }, cr2: { closed: cr2.closed } });
+    ok(!cr1.leftAfterRestart && !cr1.marked && gateOf(cr2.leftAfterRestart) && gateOf(cr2.marked) && !cr2.closed.includes('tab close C0C0000000000000000000000000002D'), 'CONTROLS: a keeper that loads no leftTabs marks nothing after the restart; one that loads no adopted tabs leaves the tab he took open at his Close — the leg above can go red', { cr1: { left: cr1.leftAfterRestart, marked: cr1.marked }, cr2: { closed: cr2.closed } });
     const RN = B.normalizeRegistry({ leftTabs: { 'bp-0000e0d5': { 'bk-0000e0d5': 5, 'bk-0000e0d6.2': 6, 'xx': 7 } }, humans: { 'bp-0000e0d5': { key: 'hu-0000e0d5', adopted: ['C0C0000000000000000000000000002D', 'nope'], state: 'away' } } });
     const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
     const bn = 'leftTabs: Object.fromEntries(Object.entries(obj(d.leftTabs))';
     const Bx = M.load('src/browser-profiles.js', editAnchor(editAnchor(bsrc, bn, 'leftTabs: Object.fromEntries(Object.entries(obj(null))', "src/browser-profiles.js"), "adopted: (Array.isArray(v.adopted) ? v.adopted : [])", 'adopted: ([])', "src/browser-profiles.js"), 'normalize-drops-orphans');
     const RX = Bx.normalizeRegistry({ leftTabs: { 'bp-0000e0d5': { 'bk-0000e0d5': 5 } }, humans: { 'bp-0000e0d5': { key: 'hu-0000e0d5', adopted: ['C0C0000000000000000000000000002D'], state: 'away' } } });
-    ok(J(RN.leftTabs) === J({ 'bp-0000e0d5': { 'bk-0000e0d5': 5, 'bk-0000e0d6.2': 6 } }) && J(RN.humans['bp-0000e0d5'].adopted) === J(['C0C0000000000000000000000000002D']) && bsrc.includes(bn) && !Object.keys(RX.leftTabs).length && !RX.humans['bp-0000e0d5'].adopted.length,
+    ok(J(RN.leftTabs) === J({ 'bp-0000e0d5': { 'bk-0000e0d5': 5, 'bk-0000e0d6.2': 6 } }) && J(RN.humans['bp-0000e0d5'].adopted) === J(['C0C0000000000000000000000000002D']) && gateOf(bsrc.includes(bn)) && !Object.keys(RX.leftTabs).length && !RX.humans['bp-0000e0d5'].adopted.length,
       'PURE normalizeRegistry keeps leftTabs (a helper\'s child key with its suffix) and his adopted tab ids, drops what is malformed; CONTROL a normalizer copy that drops both', { left: RN.leftTabs, adopted: RN.humans['bp-0000e0d5'] && RN.humans['bp-0000e0d5'].adopted });
     const lFail = await leftLeg(K, 'data-left-f', 'detach', { failBind: true });
-    ok(lFail.marked && lFail.failedBind && lFail.failedBind.refused === 'tab_unbound' && lFail.stillMarked && lFail.backNewTab === 1,
+    ok(gateOf(lFail.marked) && gateOf(lFail.failedBind) && lFail.failedBind.refused === 'tab_unbound' && gateOf(lFail.stillMarked) && lFail.backNewTab === 1,
       'verify r3: the returning session\'s bind FAILS ⇒ its attach is refused `tab_unbound` (never a command in the page he took), the mark stays and its next command binds a new tab', lFail);
     const fneedle = "      if (!bound && hu && Array.isArray(hu.adopted) && hu.adopted.length) throw namedError('tab_unbound',";
     const fsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const Kf = M.load('src/server/browser-keeper.js', editAnchor(fsrc, fneedle, "      if (false) throw namedError('tab_unbound',", "src/server/browser-keeper.js"), 'bind-fails-open');
     const cFail = await leftLeg(Kf, 'data-left-fc', 'detach', { failBind: true });
-    ok(fsrc.includes(fneedle) && cFail.failedBind && cFail.failedBind.attached === true, 'CONTROL: the keeper copy that only warns on a failed bind attaches (the command would run in his page) — the leg above can go red', cFail);
+    ok(gateOf(fsrc.includes(fneedle)) && gateOf(cFail.failedBind) && cFail.failedBind.attached === true, 'CONTROL: the keeper copy that only warns on a failed bind attaches (the command would run in his page) — the leg above can go red', cFail);
     // verify r4 (the tab-release census / THE BOUND): noteLeftTab keeps 64 keys per profile and DROPPED the oldest silently —
     // a forgotten conversation whose page he takes later runs its next command IN HIS PAGE (reproduced over this fake,
     // verify/repro-r4-cap: 65 conversations leave a page, he takes one, the oldest's return bound nothing). The bound fails
@@ -698,11 +698,11 @@ let work, solo, shop;
       return out;
     };
     const capL = await capLeg(K, 'data-left-cap');
-    ok(capL.kept === 64 && capL.take && capL.take.adopted === true && capL.oldestBackNewTab === 1, 'verify r4: the left-tab bound (64 per profile) FAILS CLOSED — 65 conversations leave a page, he takes one, the one the bound evicted binds a NEW tab on its return (never lands in his page)', capL);
+    ok(capL.kept === 64 && gateOf(capL.take) && capL.take.adopted === true && capL.oldestBackNewTab === 1, 'verify r4: the left-tab bound (64 per profile) FAILS CLOSED — 65 conversations leave a page, he takes one, the one the bound evicted binds a NEW tab on its return (never lands in his page)', capL);
     const csrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const cneedle = "{ markTabLost(pd.id, x, 'closed'); delete m[x]; }"; // lane profile-lock-roll: the ONE mark pair (verify r1 F6: the needle follows the rename)
     const capC = await capLeg(M.load('src/server/browser-keeper.js', editAnchor(csrc, cneedle, 'delete m[x];', "src/server/browser-keeper.js"), 'left-bound-forgets'), 'data-left-capc');
-    ok(csrc.includes(cneedle) && capC.kept === 64 && capC.oldestBackNewTab === 0, 'CONTROL: a keeper copy whose bound only forgets (r3) binds the evicted conversation nothing on its return — the leg above can go red', capC);
+    ok(gateOf(csrc.includes(cneedle)) && capC.kept === 64 && capC.oldestBackNewTab === 0, 'CONTROL: a keeper copy whose bound only forgets (r3) binds the evicted conversation nothing on its return — the leg above can go red', capC);
     // verify r4 (the tab-release census / THE TAKE IS MADE WHERE IT IS JUDGED): r3 adopted AFTER his `tab <id>` returned — a
     // conversation that came back inside that window cleared its own leftTabs entry ("back on its own tab") before the
     // adoption marked, and its next command ran in the page he had just taken (reproduced on the real 0.38.1 + Chrome 154,
@@ -743,12 +743,12 @@ let work, solo, shop;
       return out;
     };
     const tr1 = await takeRaceLeg(K, 'data-left-race');
-    ok(tr1.take && tr1.take.adopted === true && tr1.backNewTab === 1 && J(tr1.adopted) === J(['C0C0000000000000000000000000004D']) && tr1.failTake && tr1.failTake.refused === 'nav_failed' && !tr1.adoptedAfterFail.includes('C0C0000000000000000000000000004E') && tr1.markedAfterFail,
+    ok(gateOf(tr1.take) && tr1.take.adopted === true && tr1.backNewTab === 1 && J(tr1.adopted) === J(['C0C0000000000000000000000000004D']) && gateOf(tr1.failTake) && tr1.failTake.refused === 'nav_failed' && !tr1.adoptedAfterFail.includes('C0C0000000000000000000000000004E') && verdictOf(tr1.markedAfterFail),
       'verify r4: the take is made where it is judged — a conversation that comes back WHILE his switch to its page is in flight binds a NEW tab (never lands in the page he takes); a take whose switch fails gives the tab back (not his to close) and its marks stay', tr1);
     const rsrc4 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const rn4a = '      if (tv.adopt) adoptOrphan(h, tv.targetId);\n    }\n', rn4b = "    return { ok: true, act: v.act, url: v.url || null, ...(tv && tv.adopt ? { adopted: true } : {}) };";
     const tr0 = await takeRaceLeg(M.load('src/server/browser-keeper.js', editAnchor(editAnchor(rsrc4, rn4a, '    }\n', "src/server/browser-keeper.js"), rn4b, '    if (tv && tv.adopt) adoptOrphan(h, tv.targetId);\n' + rn4b, "src/server/browser-keeper.js"), 'take-after-switch'), 'data-left-racec');
-    ok(rsrc4.includes(rn4a) && rsrc4.includes(rn4b) && tr0.take && tr0.take.adopted === true && tr0.backNewTab === 0, 'CONTROL: r3\'s order (the adoption after his switch returned) binds the returning conversation nothing — its next command would run in the page he took — the leg above can go red', tr0);
+    ok(gateOf(rsrc4.includes(rn4a)) && gateOf(rsrc4.includes(rn4b)) && gateOf(tr0.take) && tr0.take.adopted === true && tr0.backNewTab === 0, 'CONTROL: r3\'s order (the adoption after his switch returned) binds the returning conversation nothing — its next command would run in the page he took — the leg above can go red', tr0);
     // verify r4 (the revert table): r3's `tab_unbound` reached the agent through its ROUTE unpinned — the STATUS row removed
     // answered the refusal as a 500 and the whole fast list stayed green. Through the agent's own route: 503 by name
     {
@@ -768,7 +768,7 @@ let work, solo, shop;
       const su = http.createServer(au); servers.push(su); await new Promise((r) => su.listen(0, '127.0.0.1', r));
       const rc = await fetch(`http://127.0.0.1:${su.address().port}/api/agent/browser/use`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...as(sA) }, body: JSON.stringify({ profile: 'Unbound' }) });
       fs.unlinkSync(ff);
-      ok(tk.adopted === true && ru.status === 503 && ru.json && ru.json.code === 'tab_unbound' && usrc.includes('  tab_unbound: 503,\n') && rc.status === 500,
+      ok(tk.adopted === true && ru.status === 503 && gateOf(ru.json) && ru.json.code === 'tab_unbound' && gateOf(usrc.includes('  tab_unbound: 503,\n')) && rc.status === 500,
         'verify r4: the returning conversation whose new tab cannot be bound while the tab it had is his hears `tab_unbound` through its own route as a 503 (retry), never a 500; CONTROL the routes copy without the STATUS row answers 500 — red', { ru: ru.status, code: ru.json && ru.json.code, control: rc.status });
       fakeTargets.list = [];
       try { await k.closeHuman(HU2); } catch { }
@@ -780,7 +780,7 @@ let work, solo, shop;
     // `not_browsing`) through PURE humanRefusalText in the device's language
     const wl = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     const pinW = (x) => /\['not_browsing', 'not_your_tab', 'tabs_unreadable'\]\.includes\(r\.code\) \? humanRefusalText\(r\.code, \{ label: humanLabel\(\) \}, t\)/.test(x);
-    ok(pinW(wl) && !pinW(wl.replace("['not_browsing', 'not_your_tab', 'tabs_unreadable'].includes(r.code) ? humanRefusalText(r.code,", "r.code === 'not_browsing' ? humanRefusalText('not_browsing',")), 'PIN: his window words a refused tab (`not_your_tab`, `tabs_unreadable`) in the device\'s language through humanRefusalText — never the server\'s English; CONTROL the pre-fix toast fails the pin');
+    ok(gateOf(pinW(wl)) && !pinW(wl.replace("['not_browsing', 'not_your_tab', 'tabs_unreadable'].includes(r.code) ? humanRefusalText(r.code,", "r.code === 'not_browsing' ? humanRefusalText('not_browsing',")), 'PIN: his window words a refused tab (`not_your_tab`, `tabs_unreadable`) in the device\'s language through humanRefusalText — never the server\'s English; CONTROL the pre-fix toast fails the pin');
   }
   const fileR = await j('POST', `/api/browser/browse/${HW}/navigate`, { url: 'file:///etc/passwd' });
   const chromeR = await j('POST', `/api/browser/browse/${HW}/navigate`, { url: 'chrome://settings' });
@@ -804,14 +804,14 @@ let work, solo, shop;
   // "Who can use it": a narrowing that keeps the profile from every conversation leaves HIM untouched
   const p0 = k.profile(work.id);
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'session', key: KB }] }, base: B.useStamp(p0) });
-  ok(r.status === 200 && k.humanOf(work.id) && k.humanOf(work.id).state === 'driving' && !k.leasesOn(work.id).some((l) => l.browserKey === KA), 'a "Who can use it" narrowing detaches the conversation it no longer admits — HE keeps browsing (the owner may browse every profile)', r.json);
+  ok(r.status === 200 && gateOf(k.humanOf(work.id)) && k.humanOf(work.id).state === 'driving' && !k.leasesOn(work.id).some((l) => l.browserKey === KA), 'a "Who can use it" narrowing detaches the conversation it no longer admits — HE keeps browsing (the owner may browse every profile)', r.json);
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'all' }, base: B.useStamp(k.profile(work.id)) });
   // Quit the whole browser with a conversation on it ⇒ the browser stops for everyone, he ends `stopped`
   r = await j('POST', '/api/agent/browser/use', { profile: 'Work' }, as(sA));
   const lq = leaseEvents.length;
   r = await j('POST', `/api/browser/browse/${HW}/quit`, {});
   const endEv = leaseEvents.slice(lq).find((e) => e.kind === 'human-end');
-  ok(r.status === 200 && r.json.stopped === true && r.json.conversations === 1 && k.browserOf(work.id).state === 'stopped' && !k.humanOf(work.id) && endEv && endEv.reason === 'stopped' && k.leasesOn(work.id).some((l) => l.browserKey === KA), 'Quit the whole browser: it STOPS for everyone (one conversation lost its page — the count the confirm named), he ends `stopped`, the conversation keeps its lease (its next command starts the browser again)', { r: r.json, endEv });
+  ok(r.status === 200 && r.json.stopped === true && r.json.conversations === 1 && k.browserOf(work.id).state === 'stopped' && !k.humanOf(work.id) && gateOf(endEv) && endEv.reason === 'stopped' && verdictOf(k.leasesOn(work.id).some((l) => l.browserKey === KA)), 'Quit the whole browser: it STOPS for everyone (one conversation lost its page — the count the confirm named), he ends `stopped`, the conversation keeps its lease (its next command starts the browser again)', { r: r.json, endEv });
   // …the conversation lost its tab with the browser: its NEXT command binds a new one first (never `tab_gone` — the real
   // 0.38.1's answer the heavy leg (e) caught)
   const markedQ = k._reg().tabClosed[`${work.id}|${KA}`];
@@ -819,8 +819,8 @@ let work, solo, shop;
   const rq = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://x.example'] }, as(sA));
   const boundQ = cmdsOf('vs-' + KA).slice(tq).filter((c) => NEW_TAB_RE.test(c));
   const ownQ = ownNewQ(k, work.id, KA, logOf('cmds.log').slice(tqE));
-  ok(Number.isFinite(markedQ) && rq.status === 200 && ownQ.ok && k._reg().tabClosed[`${work.id}|${KA}`] === undefined, 'the conversation\'s next command after the Quit: the browser starts again and binds it a NEW tab first (the mark the stop set), born at ITS OWN marked blank, one new-tab command, the made tab its only root (r4839), then drops the mark (the owner, 5: "they reopen with `tab new` on their next command")', { own: ownQ.facts, markedQ, rq: rq.json, boundQ });
-  ok(spyCount() === 0 && !sessionCards.some((c) => c.m.holder === 'user' || HM.isHumanKey(c.m.browserKey)) && sessionCards.length > 0 && sessionCards.every((c) => c.key === KA) && sessionCards.some((c) => c.m.phase === 'end' && c.m.reason === 'stopped'), '…and nothing of HIS reached any chat: a Quit is a Stop — the one card is the conversation\'s own session ending `stopped` (its lease session), a stop with no takeover delivers nothing', { spy: Object.fromEntries(Object.entries(spy).map(([a, b]) => [a, b.length])), cards: sessionCards.map((c) => c.key + ':' + c.m.phase + ':' + (c.m.reason || '')) });
+  ok(gateOf(Number.isFinite(markedQ)) && rq.status === 200 && gateOf(ownQ.ok) && k._reg().tabClosed[`${work.id}|${KA}`] === undefined, 'the conversation\'s next command after the Quit: the browser starts again and binds it a NEW tab first (the mark the stop set), born at ITS OWN marked blank, one new-tab command, the made tab its only root (r4839), then drops the mark (the owner, 5: "they reopen with `tab new` on their next command")', { own: ownQ.facts, markedQ, rq: rq.json, boundQ });
+  ok(spyCount() === 0 && !sessionCards.some((c) => c.m.holder === 'user' || HM.isHumanKey(c.m.browserKey)) && sessionCards.length > 0 && gateOf(sessionCards.every((c) => c.key === KA)) && verdictOf(sessionCards.some((c) => c.m.phase === 'end' && c.m.reason === 'stopped')), '…and nothing of HIS reached any chat: a Quit is a Stop — the one card is the conversation\'s own session ending `stopped` (its lease session), a stop with no takeover delivers nothing', { spy: Object.fromEntries(Object.entries(spy).map(([a, b]) => [a, b.length])), cards: sessionCards.map((c) => c.key + ':' + c.m.phase + ':' + (c.m.reason || '')) });
   // r4839's RED: a keeper copy that opens the BARE `tab new` (the release's text before line 962) — the leg's judge goes red. The
   // Quit's own road through the keeper: a conversation's lease, the browser stopped for everyone (the stop marks every lease
   // `closed`), its next attach binds its new tab. Its own registry and profile; a page list read EMPTY (nothing to switch to)
@@ -857,7 +857,7 @@ let work, solo, shop;
   // the keep: he launched it ⇒ 12 h away; the browser NEVER idles out meanwhile; then `left`, then it idles out
   await k.stop(solo.id, { why: 'user' });
   r = await j('POST', `/api/browser/profiles/${solo.id}/browse`, {});
-  ok(r.json.how === 'launch' && k.humanOf(solo.id).launched, 'Browse again on the stopped Solo: he launches it (the 12 h keep)');
+  ok(r.json.how === 'launch' && verdictOf(k.humanOf(solo.id).launched), 'Browse again on the stopped Solo: he launches it (the 12 h keep)');
   k.humanTake({ key: HS, viewerId: 21 });
   k.humanRelease({ key: HS, viewerId: 21, cause: 'viewer-left' });
   ok(k.humanOf(solo.id).state === 'away', 'his window closes ⇒ AWAY (his tab kept)');
@@ -867,7 +867,7 @@ let work, solo, shop;
   const ns11 = k.browserOf(solo.id).ns, c11 = closeAllsOf(ns11);
   clock += 11 * 3600e3; await k.tick();
   const stopShown11 = await until(() => closeAllsOf(ns11) > c11, K.STOP_GRACE_MS);
-  ok(!stopShown11 && k.humanOf(solo.id) && k.browserOf(solo.id).state === 'ready', '11 h away: the person is still kept and the browser has NOT idled out (15 min idle — the person\'s holder row counts): no stop began within the keeper\'s own stop grace', { state: k.browserOf(solo.id).state, stopShown11 });
+  ok(!stopShown11 && gateOf(k.humanOf(solo.id)) && k.browserOf(solo.id).state === 'ready', '11 h away: the person is still kept and the browser has NOT idled out (15 min idle — the person\'s holder row counts): no stop began within the keeper\'s own stop grace', { state: k.browserOf(solo.id).state, stopShown11 });
   const c1 = cmdsOf('vs-' + HS).length;
   clock += 3600e3 + 1000; await k.tick();
   // r4973 (A): the person's end may land in the keeper's OWN tick (TICK_MS, on the real clock) rather than this one, so «await k.tick()»
@@ -878,7 +878,7 @@ let work, solo, shop;
   if (!ended12) markTimedOut(false, 10000, 'the person\'s human-end (left) past 12 h');
   const t12 = clock; await k.tick();   // the second tick's chance at the same instant
   const r12 = { human: !!k.humanOf(solo.id), state: k.browserOf(solo.id).state, closes: cmdsOf('vs-' + HS).slice(c1), ended: ended12, stamp: k.browserOf(solo.id).lastLeaseDroppedAt, at: t12 };
-  ok(!r12.human && r12.state === 'ready' && r12.closes.includes('close') && r12.ended && r12.stamp === t12, 'past 12 h: the person ends `left` (their tab closes), the browser stays one more idle period', r12);
+  ok(!r12.human && r12.state === 'ready' && gateOf(r12.closes.includes('close')) && gateOf(r12.ended) && r12.stamp === t12, 'past 12 h: the person ends `left` (their tab closes), the browser stays one more idle period', r12);
   clock += 16 * 60000; await k.tick();
   // r4596 (should): the idle stop the tick STARTS lands after the CLI's close-all and the pid's end — waited for (its own fact), never 50 ms
   if (!(await until(() => k.browserOf(solo.id).state === 'stopped', 20000))) markTimedOut(k.browserOf(solo.id).state, 20000, 'the Solo browser\'s idle stop');
@@ -902,17 +902,17 @@ let work, solo, shop;
   r = await j('POST', `/api/browser/profiles/${shop.id}/browse`, {});
   const ld = leaseEvents.length;
   let de = null; try { await k.releaseAll(shop.id); } catch (e) { de = e; }
-  ok(de && de.code === 'browsing_yourself' && /browsing “Shop” yourself/.test(de.message) && /Close/.test(de.message) && k.humanOf(shop.id) && k.browserOf(shop.id).state === 'ready' && k.leasesOn(shop.id).some((l) => l.browserKey === KB) && !leaseEvents.slice(ld).some((e) => e.kind === 'human-end' || e.kind === 'detach'),
+  ok(gateOf(de) && de.code === 'browsing_yourself' && gateOf(/browsing “Shop” yourself/.test(de.message)) && gateOf(/Close/.test(de.message)) && gateOf(k.humanOf(shop.id)) && k.browserOf(shop.id).state === 'ready' && gateOf(k.leasesOn(shop.id).some((l) => l.browserKey === KB)) && !leaseEvents.slice(ld).some((e) => e.kind === 'human-end' || e.kind === 'detach'),
     'verify r1 (H4): Delete… (releaseAll) while the person browses it is REFUSED BY NAME (`browsing_yourself`: "press Close … first") before anything is released — the person\'s page, the browser and the conversation\'s lease untouched', { code: de && de.code, msg: de && de.message });
   // …his Close, then Delete… goes through (the conversation released, the browser stopped)
   await k.closeHuman(HP);
   const rel = await k.releaseAll(shop.id);
-  ok(rel && k.browserOf(shop.id).state === 'stopped' && !k.leasesOn(shop.id).length, '…after his Close, Delete… releases and stops as before', rel);
+  ok(gateOf(rel) && k.browserOf(shop.id).state === 'stopped' && !k.leasesOn(shop.id).length, '…after his Close, Delete… releases and stops as before', rel);
   // CONTROL: the keeper copy without the refusal stops the browser under his page
   {
     const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const needle = "    if (humans.has(profileId)) throw namedError('browsing_yourself', HM.humanRefusalText('browsing_yourself', { label: p.label }));";
-    ok(src.includes(needle), 'the Delete refusal needle');
+    ok(verdictOf(src.includes(needle)), 'the Delete refusal needle');
     const Kd = M.load('src/server/browser-keeper.js', editAnchor(src, needle, '', "src/server/browser-keeper.js"), 'delete-under-them');
     const kd = mkKeeper(Kd, { dataDir: path.join(ROOT, 'data-del'), readTargets });
     const dp = kd.createProfile({ label: 'Del' }, { owner: { kind: 'instance', id: null } });
@@ -926,17 +926,17 @@ let work, solo, shop;
     const dp2 = k.createProfile({ label: 'Del2' }, { owner: { kind: 'instance', id: null } });
     await k.browse(dp2.id); k.humanTake({ key: HM.humanKeyFor(dp2.id), viewerId: 'del2', holderAlive: false });
     const rd = await j('POST', `/api/browser/profiles/${dp2.id}/forget`, { release: true, unpin: true });
-    ok(rd.status === 409 && rd.json.code === 'browsing_yourself' && k.browserOf(dp2.id).state === 'ready' && k.humanOf(dp2.id), 'verify r2: Delete… through its ROUTE (POST …/forget {release}) while he browses answers 409 `browsing_yourself` — nothing released, nothing stopped', rd.json);
+    ok(rd.status === 409 && rd.json.code === 'browsing_yourself' && k.browserOf(dp2.id).state === 'ready' && verdictOf(k.humanOf(dp2.id)), 'verify r2: Delete… through its ROUTE (POST …/forget {release}) while he browses answers 409 `browsing_yourself` — nothing released, nothing stopped', rd.json);
     const trsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8');
     const TRd = M.load('src/routes/browser-trace.js', editAnchor(trsrc, 'browsing_yourself: 409, ', '', "src/routes/browser-trace.js"), 'delete-500');
     TRd.setup({ keeper: k, trace, activeSessions: active, releaseProfile: (id) => R.releaseProfile(id), unpinProfile: (id) => R.unpinProfile(id), notice: () => { }, keyForPickedSession: (id) => R.keyForPickedSession(id) });
     const ad = express(); ad.use(express.json()); ad.use(TRd.router);
     const sd = http.createServer(ad); servers.push(sd); await new Promise((r) => sd.listen(0, '127.0.0.1', r));
     const rdc = await fetch(`http://127.0.0.1:${sd.address().port}/api/browser/profiles/${dp2.id}/forget`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ release: true, unpin: true }) });
-    ok(trsrc.includes('browsing_yourself: 409, ') && rdc.status === 500, 'CONTROL: the trace routes copy without the STATUS row answers the refusal as a 500 — red', rdc.status);
+    ok(gateOf(trsrc.includes('browsing_yourself: 409, ')) && rdc.status === 500, 'CONTROL: the trace routes copy without the STATUS row answers the refusal as a 500 — red', rdc.status);
     const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
     const pinD = (x) => /delete: async \(r\) => \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(r\.human\) \{ showToast\(humanRefusalText\('browsing_yourself', \{ label: String\(r\.label \|\| r\.id\) \}, t\)/.test(x);
-    ok(pinD(tv) && !pinD(tv.replace('      if (r.human) { showToast(', '      if (false) { showToast(')), 'PIN: the panel\'s Delete… says the refusal AT ONCE in the device\'s words from the row\'s `human` fact (before any confirm or request); CONTROL the pre-fix handler fails the pin');
+    ok(gateOf(pinD(tv)) && !pinD(tv.replace('      if (r.human) { showToast(', '      if (false) { showToast(')), 'PIN: the panel\'s Delete… says the refusal AT ONCE in the device\'s words from the row\'s `human` fact (before any confirm or request); CONTROL the pre-fix handler fails the pin');
     await k.closeHuman(HM.humanKeyFor(dp2.id)); await k.stop(dp2.id, { why: 'user' });
   }
 }
@@ -948,12 +948,12 @@ let work, solo, shop;
   const rp = kr.createProfile({ label: 'Remote', host: 'dev-1' }, { owner: { kind: 'instance', id: null } });
   paired = false;
   try { await kr.browse(rp.id); } catch (x) { e = x; }
-  ok(e && e.code === 'remote_profile' && /saved on dev-1/.test(e.message), 'a machine this VibeSpace no longer knows: remote_profile by name', e && e.message);
+  ok(gateOf(e) && e.code === 'remote_profile' && verdictOf(/saved on dev-1/.test(e.message)), 'a machine this VibeSpace no longer knows: remote_profile by name', e && e.message);
   const cp = kr.createProfile({ label: 'Ext', provider: 'cdp', cdpPort: 9333 }, { owner: { kind: 'instance', id: null } });
   e = null; try { await kr.browse(cp.id); } catch (x) { e = x; }
-  ok(e && e.code === 'not_ours', 'a browser VibeSpace only connects to (cdp): not_ours', e && e.message);
+  ok(gateOf(e) && e.code === 'not_ours', 'a browser VibeSpace only connects to (cdp): not_ours', e && e.message);
   e = null; try { await kr.browse('bp-0000dead'); } catch (x) { e = x; }
-  ok(e && e.code === 'not-found', 'no such profile: not-found');
+  ok(gateOf(e) && e.code === 'not-found', 'no such profile: not-found');
   // the ceiling: a LAUNCH at the machine ceiling is refused; a JOIN is not
   const lim = { ...require('../src/keeper-limits.js'), CONCURRENT_CAP: 1 };
   const kc = mkKeeper(K, { dataDir: path.join(ROOT, 'data-c'), limits: lim });
@@ -961,7 +961,7 @@ let work, solo, shop;
   await kc.start(c1.id, { why: 'test' });
   e = null; try { await kc.browse(c2.id); } catch (x) { e = x; }
   const jn = await kc.browse(c1.id);
-  ok(e && e.code === 'cap' && /1 browsers are running/.test(e.message) && jn.how === 'join', 'the ceiling: a LAUNCH at 1/1 is refused `cap` ("Stop one"), a JOIN at 1/1 goes through', { e: e && e.message, jn });
+  ok(gateOf(e) && e.code === 'cap' && gateOf(/1 browsers are running/.test(e.message)) && jn.how === 'join', 'the ceiling: a LAUNCH at 1/1 is refused `cap` ("Stop one"), a JOIN at 1/1 goes through', { e: e && e.message, jn });
   const rr = await j('POST', `/api/browser/profiles/${work.id}/browse`, { host: 'dev-1' });
   ok(rr.status === 400 && rr.json.code === 'unsupported-host', 'the route refuses `host` (local-only, the /api/browser/* rule)');
   await kc.stop(c1.id, { why: 'user' });
@@ -1010,7 +1010,7 @@ let work, solo, shop;
   try { await rc.k2.stop(rc.p.id, { why: 'user' }); } catch { } rc.k2.shutdown();
   const quietMs = Math.max(1000, 3 * (rc.stopLanded ? rc.waitedMs : 1000));
   const r = await restartLeg(K, 'data-rs', { quietMs });
-  ok(!r.stopLanded && r.browser === 'ready' && r.human && r.human.state === 'away' && r.human.launched === true && r.human.keepMs === 12 * 3600e3 && r.boot.humans === 1 && r.target.ok === true,
+  ok(!r.stopLanded && r.browser === 'ready' && gateOf(r.human) && r.human.state === 'away' && r.human.launched === true && r.human.keepMs === 12 * 3600e3 && r.boot.humans === 1 && r.target.ok === true,
     `verify r1 (H4): a restart 40 min into the person's browsing — the browser is ADOPTED and SURVIVES the first tick (no stop landed in ${quietMs} ms, three times the control's own stop: the holder row counts for the idle clock), the holder is restored AWAY with the 12 h keep, the window's re-attach finds its target`, { stopLanded: r.stopLanded, quietMs, browser: r.browser, stoppedBy: r.stoppedBy, human: r.human, target: r.target && r.target.code });
   ok(r.browse === 'rejoin' && r.tabNews === 0 && r.reopened === 1, 'Browse yourself after the restart CONTINUES his tab (rejoin — no second `tab new`, nothing orphaned), and the first take re-opens his session marker (the old one ended `restart`)', { browse: r.browse, tabNews: r.tabNews, reopened: r.reopened });
   await r.k2.stop(r.p.id, { why: 'user' }); r.k2.shutdown();
@@ -1027,8 +1027,8 @@ let work, solo, shop;
   kd2.shutdown();
   // CONTROL: the keeper copy that restores nothing (the pre-fix memory-only holder) — the browser idles out at the first tick
   // (run FIRST, above — B-e5fe r2 — judged here)
-  ok(src.includes(needle), 'the restore needle (the control below removes it)');
-  ok(rc.stopLanded && rc.browser === 'stopped' && rc.stoppedBy === 'idle' && !rc.human, 'CONTROL: the memory-only keeper copy stops the browser at the first tick after the restart (`idle`) — the legs above can go red', { stopLanded: rc.stopLanded, waitedMs: rc.waitedMs, browser: rc.browser, stoppedBy: rc.stoppedBy, lastError: rc.lastError, human: rc.human, boot: rc.boot, events: rc.events });
+  ok(verdictOf(src.includes(needle)), 'the restore needle (the control below removes it)');
+  ok(gateOf(rc.stopLanded) && rc.browser === 'stopped' && rc.stoppedBy === 'idle' && !rc.human, 'CONTROL: the memory-only keeper copy stops the browser at the first tick after the restart (`idle`) — the legs above can go red', { stopLanded: rc.stopLanded, waitedMs: rc.waitedMs, browser: rc.browser, stoppedBy: rc.stoppedBy, lastError: rc.lastError, human: rc.human, boot: rc.boot, events: rc.events });
   // verify r2 (the revert table): two parts of the restore were unpinned — (a) a holder AWAY at the restart keeps the keep of
   // his ORIGINAL close (the brief: "the 12 h keep across a restart still 12 h from the ORIGINAL close, not from the
   // restart"); restoring `awaySince: now()` stayed green; (b) PURE normalizeRegistry drops a holder whose key does not name
@@ -1055,13 +1055,13 @@ let work, solo, shop;
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const aneedle = "awaySince: r.state === 'away' && r.awaySince ? r.awaySince : now(),";
   const awc = await awayLeg(M.load('src/server/browser-keeper.js', editAnchor(ksrc, aneedle, 'awaySince: now(),', "src/server/browser-keeper.js"), 'keep-from-restart'), 'data-awc');
-  ok(ksrc.includes(aneedle) && awc.at1201 === 'away', 'CONTROL: a keeper copy that restarts the keep at the restart still keeps him at 12 h 01 — the leg above can go red', awc);
+  ok(gateOf(ksrc.includes(aneedle)) && awc.at1201 === 'away', 'CONTROL: a keeper copy that restarts the keep at the restart still keeps him at 12 h 01 — the leg above can go red', awc);
   const doc = { humans: { 'bp-0000aaa1': { key: 'hu-0000aaa1', since: 1 }, 'bp-0000aaa2': { key: 'hu-0000bbb2', since: 1 }, 'x': { key: 'hu-0000aaa3' } } };
   const kept = Object.keys(B.normalizeRegistry(doc).humans);
   const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
   const bneedle = " && v.key === 'hu-' + k.slice(3)).map(";
   const Bn = M.load('src/browser-profiles.js', editAnchor(bsrc, bneedle, ').map(', "src/browser-profiles.js"), 'human-key-unchecked');
-  ok(J(kept) === J(['bp-0000aaa1']) && bsrc.includes(bneedle) && Object.keys(Bn.normalizeRegistry(doc).humans).includes('bp-0000aaa2'), 'verify r2: a persisted holder is kept only when its key names its profile (a hand-edited or foreign row is dropped); CONTROL the copy without the check keeps the mismatched row — red', { kept });
+  ok(J(kept) === J(['bp-0000aaa1']) && gateOf(bsrc.includes(bneedle)) && verdictOf(Object.keys(Bn.normalizeRegistry(doc).humans).includes('bp-0000aaa2')), 'verify r2: a persisted holder is kept only when its key names its profile (a hand-edited or foreign row is dropped); CONTROL the copy without the check keeps the mismatched row — red', { kept });
 }
 // verify r2 (KILL CLASS / the heal): his Chrome dies under his page and a NEW one runs on the directory (the tick's heal, or
 // 0.38.1's in-place relaunch). Measured on the real 0.38.1 + Chrome 154 (verify/repro-r2-heal): every pinned session then
@@ -1111,12 +1111,12 @@ let work, solo, shop;
   // recycled pid number with another starttime; each reverted alone stayed green on the fast tier
   {
     const h2 = await healLeg(K, 'data-heal-2', { twoStep: true }), h3 = await healLeg(K, 'data-heal-3', { samePid: true });
-    ok([h2, h3].every((x) => x.replaced && x.human === null && J(x.ended) === J(['stopped']) && x.browse === 'join' && x.hisNewTab === 1), 'verify r3 (the heal): he ends `stopped` when the tick first records the loss and the heal then relaunches (two steps), and when the new Chrome carries a recycled pid number with another starttime', { h2, h3 });
+    ok(verdictOf([h2, h3].every((x) => x.replaced && x.human === null && J(x.ended) === J(['stopped']) && x.browse === 'join' && x.hisNewTab === 1)), 'verify r3 (the heal): he ends `stopped` when the tick first records the loss and the heal then relaunches (two steps), and when the new Chrome carries a recycled pid number with another starttime', { h2, h3 });
     const hsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const Kb = M.load('src/server/browser-keeper.js', editAnchor(hsrc, ': !!rec.browserLost);', ': false);', "src/server/browser-keeper.js"), 'replaced-no-loss-arm');
     const Kc = M.load('src/server/browser-keeper.js', editAnchor(hsrc, '!(next.pid === b.pid && next.starttime === b.starttime)', '!(next.pid === b.pid)', "src/server/browser-keeper.js"), 'replaced-pid-only');
     const c2 = await healLeg(Kb, 'data-heal-2c', { twoStep: true }), c3 = await healLeg(Kc, 'data-heal-3c', { samePid: true });
-    ok(hsrc.includes(': !!rec.browserLost);') && c2.human !== null && c3.human !== null, 'CONTROLS: a copy without the recorded-loss arm keeps him on the dead tab after a two-step heal; a pid-only copy keeps him after a recycled pid — the leg above can go red', { c2: c2.human, c3: c3.human });
+    ok(gateOf(hsrc.includes(': !!rec.browserLost);')) && c2.human !== null && c3.human !== null, 'CONTROLS: a copy without the recorded-loss arm keeps him on the dead tab after a two-step heal; a pid-only copy keeps him after a recycled pid — the leg above can go red', { c2: c2.human, c3: c3.human });
   }
   ok(hl.keepMs === HM.DEFAULT_HUMAN_KEEP_MS, 'verify r3 (the heal): Browse again after the heal JOINS the browser HE launched (the same daemon run — its Chrome relaunched by the keeper) and keeps his page 12 h while away, never the 10 min of a browser an agent launched (the owner, 8)', { keepMs: hl.keepMs });
   {
@@ -1124,15 +1124,15 @@ let work, solo, shop;
     const ln = "      const launched = v.how === 'launch' || (v.how === 'join' && !!rec && rec.startedBy === BROWSE_WHY);";
     const Kl0 = M.load('src/server/browser-keeper.js', editAnchor(lsrc0, ln, "      const launched = v.how === 'launch';", "src/server/browser-keeper.js"), 'launch-by-press-only');
     const hc = await healLeg(Kl0, 'data-heal-keep');
-    ok(lsrc0.includes(ln) && hc.browse === 'join' && hc.keepMs === 10 * 60e3, 'CONTROL: the copy that counts only THIS press as his launch keeps his page 10 min after the heal — the leg above can go red', { keepMs: hc.keepMs });
+    ok(gateOf(lsrc0.includes(ln)) && hc.browse === 'join' && hc.keepMs === 10 * 60e3, 'CONTROL: the copy that counts only THIS press as his launch keeps his page 10 min after the heal — the leg above can go red', { keepMs: hc.keepMs });
   }
   // lane profile-lock-roll (L2; verify r1 F6 restated): a conversation's lease on the REPLACED browser is marked (`life`) and its
   // next command binds it a tab FIRST and is TOLD (`rebound` → `[tab_rebound]`) — never a silent blank tab, never `tab_gone`
-  ok(hl.replaced && hl.human === null && J(hl.ended) === J(['stopped']) && hl.marked && hl.convNewTab === 1 && hl.browse === 'join' && hl.hisNewTab === 1,
+  ok(gateOf(hl.replaced) && hl.human === null && J(hl.ended) === J(['stopped']) && gateOf(hl.marked) && hl.convNewTab === 1 && hl.browse === 'join' && hl.hisNewTab === 1,
     'verify r2 (the heal): a NEW Chrome replaced the one under his page — his browsing ends `stopped` (his window says so; Browse yourself JOINS with a new tab, never focuses a window on the dead tab); a conversation\'s lease is marked and its next command binds a tab first and is told (lane profile-lock-roll L2 — the agent learns its page is gone from the note, never a silent blank tab)', hl);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = '    if (replaced) tabsWentWithBrowser(rec, seenBy);\n';
-  ok(src.includes(needle), 'the replaced-browser needle (the control below removes it)');
+  ok(verdictOf(src.includes(needle)), 'the replaced-browser needle (the control below removes it)');
   const Kh = M.load('src/server/browser-keeper.js', editAnchor(src, needle, '', "src/server/browser-keeper.js"), 'relaunch-keeps-dead-tabs');
   const hc = await healLeg(Kh, 'data-heal-c');
   ok(hc.human === 'driving' && hc.browse === 'focus' && hc.hisNewTab === 0, 'CONTROL: the keeper copy that ignores the replacement keeps him "driving" a dead tab (Browse yourself = focus, no new tab) — the leg above can go red', hc);
@@ -1145,7 +1145,7 @@ let work, solo, shop;
   await ks.browse(sp.id);
   const row = ks.switcherView(sp.id).rows.find((x) => x.id === W.FIXTURE_ID);
   const r = await ks.switchBackend({ profileId: sp.id, target: W.FIXTURE_ID, by: { kind: 'user' }, confirmDowngrade: true }).catch((x) => ({ code: x.code, error: x.message }));
-  ok(row && row.state === 'in-use-by-hand' && row.facts.driver === HM.humanKeyFor(sp.id) && r.mode === 'proposal' && ks.browserOf(sp.id).state === 'ready' && ks.humanOf(sp.id), 'a switch while he browses: the dialog\'s row is in-use-by-hand (driver = his key: "Close my browsing"), the switch itself a PROPOSAL — the Chrome under his page never stops', { state: row && row.state, driver: row && row.facts.driver, r });
+  ok(gateOf(row) && row.state === 'in-use-by-hand' && row.facts.driver === HM.humanKeyFor(sp.id) && r.mode === 'proposal' && ks.browserOf(sp.id).state === 'ready' && verdictOf(ks.humanOf(sp.id)), 'a switch while he browses: the dialog\'s row is in-use-by-hand (driver = his key: "Close my browsing"), the switch itself a PROPOSAL — the Chrome under his page never stops', { state: row && row.state, driver: row && row.facts.driver, r });
   await ks.stop(sp.id, { why: 'user' });
 }
 // a MEDIATED profile: his session is raw — the mediator never grants his key
@@ -1157,7 +1157,7 @@ let work, solo, shop;
   const HMd = HM.humanKeyFor(mp.id);
   await km.browse(mp.id);
   const port = await km.streamPortFor(km.humanTargetFor(HMd));
-  ok(km.isMediated(km.profile(mp.id)) && port.ok && grants.every((g) => !HM.isHumanKey(g)) && cmdsOf('vs-' + HMd).some((c) => /tab new/.test(c)) && logOf('connects.log').some((c) => c.sess === 'vs-' + HMd && c.cdp.includes(`:${DEAD_CDP}/`)), 'a MEDIATED profile: his session goes over the RAW url (his tab outside every agent grant) — no grant is ever minted for his key, his live view\'s port too', { grants, port });
+  ok(gateOf(km.isMediated(km.profile(mp.id))) && gateOf(port.ok) && gateOf(grants.every((g) => !HM.isHumanKey(g))) && gateOf(cmdsOf('vs-' + HMd).some((c) => /tab new/.test(c))) && verdictOf(logOf('connects.log').some((c) => c.sess === 'vs-' + HMd && c.cdp.includes(`:${DEAD_CDP}/`))), 'a MEDIATED profile: his session goes over the RAW url (his tab outside every agent grant) — no grant is ever minted for his key, his live view\'s port too', { grants, port });
   await km.stop(mp.id, { why: 'user' });
 }
 // verify r1 (H3): QUIT THE WHOLE BROWSER on a MEDIATED profile — measured on the real 0.38.1 + the real mediator
@@ -1182,10 +1182,10 @@ let work, solo, shop;
     return out;
   };
   const m = await medLeg(K, 'data-mq');
-  ok(m.marked && m.bound === 1 && m.left === undefined, 'verify r1 (H3): after Quit on a MEDIATED profile the conversation\'s tab is marked gone, and its next attach binds ONE new tab under ITS session in ITS namespace over ITS grant\'s url (never the raw endpoint, never another\'s namespace), then drops the mark', m);
+  ok(gateOf(m.marked) && m.bound === 1 && m.left === undefined, 'verify r1 (H3): after Quit on a MEDIATED profile the conversation\'s tab is marked gone, and its next attach binds ONE new tab under ITS session in ITS namespace over ITS grant\'s url (never the raw endpoint, never another\'s namespace), then drops the mark', m);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = "      if (p && !isEph(p) && why !== 'switch') for (const l of reg.leases) if (l.profileId === profileId) markTabLost(profileId, l.browserKey, 'closed');"; // lane profile-lock-roll: the ONE mark pair (verify r1 F6)
-  ok(src.includes(needle), 'the stop\'s tab-mark needle');
+  ok(verdictOf(src.includes(needle)), 'the stop\'s tab-mark needle');
   const Kq = M.load('src/server/browser-keeper.js', editAnchor(src, needle, needle.replace("!isEph(p) && why", "!isEph(p) && !isMediated(p) && why"), "src/server/browser-keeper.js"), 'mediated-unmarked');
   const mc = await medLeg(Kq, 'data-mqc');
   ok(!mc.marked && mc.bound === 0, 'CONTROL: the keeper copy that leaves mediated leases unmarked binds nothing — the conversation keeps its gone tab (the real binary answered `tab_gone`) — red', mc);
@@ -1194,7 +1194,7 @@ let work, solo, shop;
 {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = '      const idle = B.browserIdle(rec, holdersOn(rec.profileId), t, idleMs());';
-  ok(src.includes(needle), 'the idle clock reads holdersOn (the census needle)');
+  ok(verdictOf(src.includes(needle)), 'the idle clock reads holdersOn (the census needle)');
   const Kc = M.load('src/server/browser-keeper.js', editAnchor(src, needle, '      const idle = B.browserIdle(rec, reg.leases, t, idleMs());', "src/server/browser-keeper.js"), 'idle-leases-only');
   const kx = mkKeeper(Kc, { dataDir: path.join(ROOT, 'data-x') });
   const xp = kx.createProfile({ label: 'X' }, { owner: { kind: 'instance', id: null } });
@@ -1222,7 +1222,7 @@ let work, solo, shop;
   const nsW = kw.browserOf(wp.id).ns, cW = closeAllsOf(nsW);
   clock += 2 * 3600e3; await kx.tick(); await kh.tick(); await kw.tick();
   const wShown = await until(() => closeAllsOf(nsW) > cW, K.STOP_GRACE_MS);
-  ok(wShown, 'ITS RED (r4665): a copy whose idle stop begins — the witness the keep leg reads (the close-all the stop makes first, counted from before the tick) FIRES within the keeper\'s own stop grace', { wShown, state: kw.browserOf(wp.id).state });
+  ok(verdictOf(wShown), 'ITS RED (r4665): a copy whose idle stop begins — the witness the keep leg reads (the close-all the stop makes first, counted from before the tick) FIRES within the keeper\'s own stop grace', { wShown, state: kw.browserOf(wp.id).state });
   const stoppedW = await until(() => kw.browserOf(wp.id).state === 'stopped', 20000);   // a cleanup no verdict reads: its expiry is said
   if (!stoppedW) markTimedOut(kw.browserOf(wp.id).state, 20000, 'cleanup: the witness twin\'s idle stop landing');
   // the wait is ON THE FACT the control judges: the idle stop landed (a generous bound; its expiry is said by THE ONE MARK)
@@ -1273,13 +1273,13 @@ let work, solo, shop;
   const skip = (name, why) => console.log(`  ⚠ SKIP (law 1): ${name} — ${why}: no judgement`);
   const w = await endWindowLeg(K, 'data-endwin');
   if (!w.held) skip('the second tick inside the person\'s end', 'the first tick never reached the held session close (the window did not form)');
-  else ok(w.held && !w.during.human && w.during.state === 'ready' && !w.during.stopShown && w.after.ended && w.after.state === 'ready' && w.after.stamped, 'past 12 h, a SECOND tick inside the person\'s end (its closes held): the row has left and the browser STAYS — no stop began within the keeper\'s own stop grace; once let go the person ends `left` and the idle clock counts from that end', w);
+  else ok(gateOf(w.held) && !w.during.human && w.during.state === 'ready' && !w.during.stopShown && gateOf(w.after.ended) && w.after.state === 'ready' && verdictOf(w.after.stamped), 'past 12 h, a SECOND tick inside the person\'s end (its closes held): the row has left and the browser STAYS — no stop began within the keeper\'s own stop grace; once let go the person ends `left` and the idle clock counts from that end', w);
   const ksrcW = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const EARLY = '    { const left = reg.browsers[h.profileId]; if (left && B.isLiveBrowser(left) && !holdersOn(h.profileId).length) left.lastLeaseDroppedAt = now(); }\n';
   const Kn = M.load('src/server/browser-keeper.js', editAnchor(ksrcW, EARLY, '', 'src/server/browser-keeper.js'), 'no-early-stamp');
   const wn = await endWindowLeg(Kn, 'data-endwin-red');
   if (!wn.held) skip('CONTROL (r4973), the copy without the early stamp', 'the first tick never reached the held session close (the window did not form)');
-  else ok(wn.held && (wn.during.stopShown || wn.during.state !== 'ready'), 'CONTROL (r4973): a keeper copy that stamps the idle clock only at the end\'s finish (2200c331f\'s endHuman) — the second tick inside the person\'s end STOPS the browser a whole idle period early: the leg above goes red', wn);
+  else ok(gateOf(wn.held) && (verdictOf(wn.during.stopShown) || wn.during.state !== 'ready'), 'CONTROL (r4973): a keeper copy that stamps the idle clock only at the end\'s finish (2200c331f\'s endHuman) — the second tick inside the person\'s end STOPS the browser a whole idle period early: the leg above goes red', wn);
 }
 
 // r5091: dropChild's lease removal — the one holder removal that stamped nothing, reached when releaseJobHandle's detach of the job's
@@ -1311,13 +1311,13 @@ let work, solo, shop;
   const skipD = (name) => console.log(`  ⚠ SKIP (law 1): ${name} — the placed fault (the mediator refusing the job's revoke) was never read, so no detach threw and dropChild never removed the lease: no judgement`);
   const dr = await dropLeg(K, 'data-dropchild');
   if (!dr.refused) skipD('the job\'s lease that dropChild removes');
-  else ok(dr.refused >= 1 && dr.before.leased && dr.before.state === 'ready' && dr.leaseGone && !dr.stopShown && dr.state === 'ready' && dr.stamped, 'a job\'s lease that dropChild removes (its detach THREW: a placed fault) starts the idle clock in that step — the tick right after does not stop the browser early (no stop within the keeper\'s stop grace)', dr);
+  else ok(dr.refused >= 1 && gateOf(dr.before.leased) && dr.before.state === 'ready' && gateOf(dr.leaseGone) && !dr.stopShown && dr.state === 'ready' && verdictOf(dr.stamped), 'a job\'s lease that dropChild removes (its detach THREW: a placed fault) starts the idle clock in that step — the tick right after does not stop the browser early (no stop within the keeper\'s stop grace)', dr);
   const ksrcD = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const DROP = '    for (const pid of leftOn) { const rec = reg.browsers[pid]; if (rec && B.isLiveBrowser(rec) && !holdersOn(pid).length) rec.lastLeaseDroppedAt = now(); }\n';
   const Kd = M.load('src/server/browser-keeper.js', editAnchor(ksrcD, DROP, '', 'src/server/browser-keeper.js'), 'no-drop-stamp');
   const drn = await dropLeg(Kd, 'data-dropchild-red');
   if (!drn.refused) skipD('CONTROL (r5091), the copy whose dropChild stamps nothing');
-  else ok(drn.refused >= 1 && drn.leaseGone && (drn.stopShown || drn.state !== 'ready'), 'CONTROL (r5091): a keeper copy whose dropChild stamps nothing (52f7d1b33\'s) — the tick right after STOPS the browser an idle period early: the leg above goes red', drn);
+  else ok(drn.refused >= 1 && gateOf(drn.leaseGone) && (verdictOf(drn.stopShown) || drn.state !== 'ready'), 'CONTROL (r5091): a keeper copy whose dropChild stamps nothing (52f7d1b33\'s) — the tick right after STOPS the browser an idle period early: the leg above goes red', drn);
 }
 
 // ═══ ②b the REAL bridge over a fake upstream + ③ the REAL recorder on his relay ═══
@@ -1376,7 +1376,7 @@ const ev2 = [];
 kb.onInput((e) => ev2.push(e));
 const b1 = await kb.browse(liveP.id);
 await until(() => [...bridge._relays.values()].some((r) => r.target.kind === 'human' && r.taps.size > 0 && r.upstream && r.upstream.readyState === 1));
-ok(bridge._relays.has('human:' + HL) && bridge._relays.get('human:' + HL).taps.size === 1, 'the recorder armed ITS tap on his relay at `human-start` (recording is on by default — the owner, 3/4)');
+ok(gateOf(bridge._relays.has('human:' + HL)) && bridge._relays.get('human:' + HL).taps.size === 1, 'the recorder armed ITS tap on his relay at `human-start` (recording is on by default — the owner, 3/4)');
 const v1 = viewer(BP, `browse=${HL}&fresh=${b1.fresh}`);
 await v1.until((v) => v.last('hello') && v.last('mode') && v.last('mode').mine === true);
 ok(v1.last('hello').human === true && v1.last('hello').target.kind === 'human' && v1.last('mode').mode === 'takeover' && kb.humanOf(liveP.id).state === 'driving', '`?browse=<key>&fresh=<token>` — the window his press opened TAKES his tab\'s controls at once (mode takeover, mine)', { hello: v1.last('hello'), mode: v1.last('mode') });
@@ -1389,7 +1389,7 @@ ok(v1.last('hello').human === true && v1.last('hello').target.kind === 'human' &
   const tryUp = (q, tokn) => new Promise((resolve) => { const w = new WebSocket(`ws://127.0.0.1:${BP}${S.STREAM_PATH}?${q}`, { headers: { Authorization: 'Bearer ' + tokn } }); w.on('unexpected-response', (_q, r) => resolve(r.statusCode)); w.on('open', () => { w.close(); resolve('open'); }); w.on('error', () => resolve('error')); });
   const upg = {};
   for (const [q, tokn] of [[`%62rowse=${HL}`, 'vsst_' + 'q'.repeat(24)], [`brows%65=${HL}`, 'vsst_' + 'q'.repeat(24)], [`browse=${HL}`, 'jbt_' + 'q'.repeat(24)], [`%62rowse=${HL}`, 'jbt_' + 'q'.repeat(24)]]) upg[q + ' ' + tokn.slice(0, 5)] = await tryUp(q, tokn);
-  ok(Object.values(upg).every((c) => c === 403) && kb.humanOf(liveP.id).state === 'driving', 'verify r2: the upgrade is judged on the PARSED query — an encoded name (`%62rowse=`, `brows%65=`) and a job token (jbt_) are refused 403 before the upgrade too', upg);
+  ok(gateOf(Object.values(upg).every((c) => c === 403)) && kb.humanOf(liveP.id).state === 'driving', 'verify r2: the upgrade is judged on the PARSED query — an encoded name (`%62rowse=`, `brows%65=`) and a job token (jbt_) are refused 403 before the upgrade too', upg);
 }
 const v2 = viewer(BP, `browse=${HL}`);
 await v2.until((v) => v.last('mode') && v.last('mode').cause === 'elsewhere');
@@ -1426,7 +1426,7 @@ up2.send({ type: 'tabs', tabs: [{ tabId: 't9', targetId: 'CCCC0000CCCC0000CCCC00
 await sleep(150);
 c1.send({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', text: 'a', rid: 91 });
 await c1.until((v) => v.by('input-receipt').some((x) => x.rid === 91));
-ok(v1.by('mode').every((m) => m.human !== false) && c1.by('input-receipt').find((x) => x.rid === 91).code === 'tab_switched', 'CONTROL: on an AGENT\'s takeover relay the same tab change still refuses the input `tab_switched` (the anchor rule stands where it belongs)', c1.by('input-receipt'));
+ok(gateOf(v1.by('mode').every((m) => m.human !== false)) && c1.by('input-receipt').find((x) => x.rid === 91).code === 'tab_switched', 'CONTROL: on an AGENT\'s takeover relay the same tab change still refuses the input `tab_switched` (the anchor rule stands where it belongs)', c1.by('input-receipt'));
 c1.send({ type: 'handback' });
 await c1.until((v) => v.last('mode') && v.last('mode').mode === 'watch');
 c1.ws.close();
@@ -1446,23 +1446,23 @@ const idx = () => { try { return fs.readFileSync(path.join(DATA2, 'browser-trace
 await until(() => idx().some((e) => e.action === 'type') && idx().filter((e) => e.action === 'open').length >= 2, 5000);
 const entries = idx();
 const clickE = entries.find((e) => e.action === 'mouseclick'), typeE = entries.find((e) => e.action === 'type');
-ok(clickE && clickE.holder === 'user' && clickE.browserKey === HL && clickE.sessionId === null && clickE.position.kind === 'point' && clickE.position.x === 120 && clickE.text === 'you: mouseclick 120 340' && clickE.before && clickE.before.file, 'RECORDED like an agent\'s (the owner, 3): his click is ONE trace entry — holder user, his key, no conversation, the page point, a before frame, "you: mouseclick 120 340"', clickE);
-ok(typeE && typeE.params.text === `«${secret.length} chars»` && typeE.holder === 'user', 'his typing is ONE entry of its LENGTH («13 chars»)', typeE && typeE.params);
+ok(gateOf(clickE) && clickE.holder === 'user' && clickE.browserKey === HL && clickE.sessionId === null && clickE.position.kind === 'point' && clickE.position.x === 120 && clickE.text === 'you: mouseclick 120 340' && gateOf(clickE.before) && verdictOf(clickE.before.file), 'RECORDED like an agent\'s (the owner, 3): his click is ONE trace entry — holder user, his key, no conversation, the page point, a before frame, "you: mouseclick 120 340"', clickE);
+ok(gateOf(typeE) && typeE.params.text === `«${secret.length} chars»` && typeE.holder === 'user', 'his typing is ONE entry of its LENGTH («13 chars»)', typeE && typeE.params);
 const leaks = [];
 const walk = (d) => { for (const n of fs.readdirSync(d)) { const f = path.join(d, n); if (fs.statSync(f).isDirectory()) walk(f); else { const b = fs.readFileSync(f); if (b.includes(secret) || b.includes('hunter2pw') || b.includes('SECRETCODE77')) { const t = b.toString('utf8'); const i = Math.max(t.indexOf(secret), t.indexOf('hunter2pw'), t.indexOf('SECRETCODE77')); leaks.push(f.split('/').slice(-1)[0] + ': …' + t.slice(Math.max(0, i - 200), i + 40)); } } } };
 walk(path.join(DATA2, 'browser-trace'));
 const openE = entries.find((e) => e.action === 'open');
 const codeE = entries.find((e) => e.action === 'open' && /x\.test\/cb/.test(String(e.params && e.params.url)));
-ok(codeE && codeE.params.url === 'https://x.test/cb?«cut»' && codeE.url === 'https://x.test/cb?«cut»' && leaks.length === 0, 'verify r2 (#7): the OAuth redirect his address row opened is recorded as `https://x.test/cb?«cut»` (params and page url) — its code in NO file (the byte census)', codeE && { params: codeE.params, url: codeE.url, leaks });
-ok(leaks.length === 0 && openE && openE.params.url === 'https://x.test/login?next=%2F' && /^you: open https:\/\/x\.test\/login/.test(openE.text), 'CENSUS: the typed words — and the PASSWORD in a URL his address row opened (verify r1, H2: `https://alice:<pw>@…` was stored whole in params, text and url) — appear in NO file under data/browser-trace (index, entries, markers); the page stays named (host, path, query)', { leaks, open: openE && { params: openE.params, text: openE.text, url: openE.url } });
+ok(gateOf(codeE) && codeE.params.url === 'https://x.test/cb?«cut»' && codeE.url === 'https://x.test/cb?«cut»' && leaks.length === 0, 'verify r2 (#7): the OAuth redirect his address row opened is recorded as `https://x.test/cb?«cut»` (params and page url) — its code in NO file (the byte census)', codeE && { params: codeE.params, url: codeE.url, leaks });
+ok(leaks.length === 0 && gateOf(openE) && openE.params.url === 'https://x.test/login?next=%2F' && verdictOf(/^you: open https:\/\/x\.test\/login/.test(openE.text)), 'CENSUS: the typed words — and the PASSWORD in a URL his address row opened (verify r1, H2: `https://alice:<pw>@…` was stored whole in params, text and url) — appear in NO file under data/browser-trace (index, entries, markers); the page stays named (host, path, query)', { leaks, open: openE && { params: openE.params, text: openE.text, url: openE.url } });
 ok(![...v1.msgs, ...v2.msgs].some((m) => (m.type === 'command' || m.type === 'result') && /^hu-act-/.test(String(m.id || ''))), 'the synthetic act records reach the TAP only — never a viewer ("Running a command" is the agent\'s)');
 const hs = trace2.sessions({ profileId: liveP.id }).find((x) => x.holder === 'user');
-ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 2 && entries.filter((e) => e.holder === 'user').every((e) => e.browserSession === hs.id) && !cards2.some((m) => m.holder === 'user' || HM.isHumanKey(m.browserKey)) && markers2.some((m) => m.holder === 'user'), 'his session: ONE open `bs-` session of the profile\'s scope (holder user, recorded), every entry of his tagged with it; its marker reached the hook and became NO card (no conversation owns his key)', hs);
+ok(gateOf(hs) && hs.browserKey === HL && gateOf(hs.open) && hs.recorded === true && hs.count >= 2 && gateOf(entries.filter((e) => e.holder === 'user').every((e) => e.browserSession === hs.id)) && !cards2.some((m) => m.holder === 'user' || HM.isHumanKey(m.browserKey)) && verdictOf(markers2.some((m) => m.holder === 'user')), 'his session: ONE open `bs-` session of the profile\'s scope (holder user, recorded), every entry of his tagged with it; its marker reached the hook and became NO card (no conversation owns his key)', hs);
 // the Sessions list and the replay window find his session BY HIS KEY (the routes take `browserKey=hu-…`)
 {
   const byKey = trace2.sessions({ browserKey: HL });
   const acts = trace2.list({ browserKey: HL, anyOf: true });
-  ok(byKey.length === 1 && byKey[0].id === hs.id && acts.length >= 2 && acts.every((e) => e.holder === 'user'), 'his key finds his session and only his acts (`/api/browser/sessions?browserKey=hu-…` + `/actions` — the replay window of his browsing)', { sessions: byKey.map((x) => x.id), acts: acts.length });
+  ok(byKey.length === 1 && byKey[0].id === hs.id && acts.length >= 2 && verdictOf(acts.every((e) => e.holder === 'user')), 'his key finds his session and only his acts (`/api/browser/sessions?browserKey=hu-…` + `/actions` — the replay window of his browsing)', { sessions: byKey.map((x) => x.id), acts: acts.length });
   // (the trace routes' PIN: MOVED to the fast scripts/test-browser-human-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   const rt = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8');   // the route walk and its trace-route copies below
   // verify r2 (#5) — THE HUMAN-ROUTE WALK: EVERY cookie route that starts, drives, ends or reads HIS browsing, derived from
@@ -1576,7 +1576,7 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
     // pinned, not driven: an ephemeral record exists only through a launch (ensureEphemeral), and a launch inside the walk's world
     // moves what the later legs read
     const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), EPH = "const p = profile(profileId);\n      if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${profileId}` };";
-    ok(/async function exitCheck\(profileId[\s\S]{0,220}if \(!p \|\| isEph\(p\)\) return \{ ok: false, code: 'not-found'/.test(ksrcE) && /function keepEgress\(profileId[\s\S]{0,220}if \(!p \|\| isEph\(p\)\) return \{ ok: false, code: 'not-found'/.test(ksrcE) && ksrcE.includes(EPH),
+    ok(gateOf(/async function exitCheck\(profileId[\s\S]{0,220}if \(!p \|\| isEph\(p\)\) return \{ ok: false, code: 'not-found'/.test(ksrcE)) && gateOf(/function keepEgress\(profileId[\s\S]{0,220}if \(!p \|\| isEph\(p\)\) return \{ ok: false, code: 'not-found'/.test(ksrcE)) && verdictOf(ksrcE.includes(EPH)),
       'PIN: a conversation\'s own browser record answers «Check the exit…» and the keep exactly like no profile (not-found, first)');
     // RED CONTROL — it proves its plant first: the edit goes through THE one door, anchored() (the guard line found exactly ONCE in the
     // exit check's route, else it throws «ANCHOR GONE» by this control's name), and the copy is exactly that line shorter
@@ -1589,14 +1589,14 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
     const tEx = await hit(Xex, 'POST', `/api/browser/profiles/${liveP.id}/exit-check`, {}, 'vsst_' + 'w'.repeat(24));
     ok(tEx.status === 409 && tEx.code === 'exit_no_proxy', 'CONTROL: the routes without the exit check\'s guard hand an agent\'s token to the keeper (409 exit_no_proxy, not 403) — the walk above is red on it', tEx);
     const mine = await hit(W, 'GET', `/api/browser/actions/${clickE.id}`), frame = await fetch(`${W}/api/browser/actions/${clickE.id}/frame/before`);
-    ok(mine.status === 200 && frame.status === 200 && /image\/jpeg/.test(frame.headers.get('content-type') || ''), '…the cookie path (no bearer) reads his entry and its frame as before', { entry: mine.status, frame: frame.status });
+    ok(mine.status === 200 && frame.status === 200 && verdictOf(/image\/jpeg/.test(frame.headers.get('content-type') || '')), '…the cookie path (no bearer) reads his entry and its frame as before', { entry: mine.status, frame: frame.status });
     // CONTROLS: a trace-routes copy whose guard is blind (the pre-r1 routes) answers his entry + frame to an agent token; a
     // copy whose guard knows only vsst_ answers them to a job token — the walk above can go red on each
     const TRx = M.load('src/routes/browser-trace.js', editAnchor(rt, "const isAgentBearer = (req) => /^Bearer\\s+(vsst_|jbt_)/i.test(", "const isAgentBearer = (req) => false && /^Bearer\\s+(vsst_|jbt_)/i.test(", "src/routes/browser-trace.js"), 'trace-guard-blind'); TRx.setup({ keeper: kb, trace: trace2, activeSessions: activeB, releaseProfile: () => null, unpinProfile: () => null, notice: () => { }, keyForPickedSession: () => null });
     const TRj = M.load('src/routes/browser-trace.js', editAnchor(rt, "/^Bearer\\s+(vsst_|jbt_)/i", "/^Bearer\\s+(vsst_)/i", "src/routes/browser-trace.js"), 'trace-guard-vsst-only'); TRj.setup({ keeper: kb, trace: trace2, activeSessions: activeB, releaseProfile: () => null, unpinProfile: () => null, notice: () => { }, keyForPickedSession: () => null });
     const X = await serveW([TRx.router]), Jb = await serveW([TRj.router]);
     const cx = [await hit(X, 'GET', `/api/browser/actions/${clickE.id}`, undefined, 'vsst_' + 'w'.repeat(24)), await hit(X, 'GET', `/api/browser/actions/${clickE.id}/frame/before`, undefined, 'vsst_' + 'w'.repeat(24)), await hit(Jb, 'GET', `/api/browser/sessions?browserKey=${HL}`, undefined, 'jbt_' + 'w'.repeat(24)), await hit(Jb, 'GET', `/api/browser/actions/${clickE.id}`, undefined, 'jbt_' + 'w'.repeat(24))];
-    ok(cx.every((x) => x.status === 200), 'CONTROLS: a blind trace guard answers his entry and its frame to vsst_; a vsst_-only guard answers his sessions and his entry to jbt_ — the walk above can go red on each', cx);
+    ok(verdictOf(cx.every((x) => x.status === 200)), 'CONTROLS: a blind trace guard answers his entry and its frame to vsst_; a vsst_-only guard answers his sessions and his entry to jbt_ — the walk above can go red on each', cx);
   }
   // (the replay window's PIN: MOVED to the fast scripts/test-browser-human-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -1606,7 +1606,7 @@ await sleep(50);
 const nE = idx().length;
 for (let i = 0; i < 10; i++) { v2.send({ type: 'input_mouse', eventType: 'mousePressed', x: 10 + i, y: 10, button: 'left', clickCount: 1 }); v2.send({ type: 'input_mouse', eventType: 'mouseReleased', x: 10 + i, y: 10, button: 'left', clickCount: 1 }); }
 await sleep(HM.TYPE_IDLE_MS + 600);
-ok(upd.changed.recordMine && upd.changed.recordMine.now === false && upd.profile.recordMine === false && bridge._relays.get('human:' + HL).taps.size === 0 && idx().length === nE, 'the OPT-OUT (the owner, 4): "Also record my own actions" off ⇒ the tap on his relay is gone, 20 forwarded inputs write ZERO entries (CONTROL: the same clicks with it on wrote entries, above)', { changed: upd.changed, taps: bridge._relays.get('human:' + HL).taps.size, n: idx().length - nE });
+ok(gateOf(upd.changed.recordMine) && upd.changed.recordMine.now === false && upd.profile.recordMine === false && bridge._relays.get('human:' + HL).taps.size === 0 && idx().length === nE, 'the OPT-OUT (the owner, 4): "Also record my own actions" off ⇒ the tap on his relay is gone, 20 forwarded inputs write ZERO entries (CONTROL: the same clicks with it on wrote entries, above)', { changed: upd.changed, taps: bridge._relays.get('human:' + HL).taps.size, n: idx().length - nE });
 kb.updateProfile(liveP.id, { recordMine: true });
 await until(() => bridge._relays.get('human:' + HL).taps.size === 1);
 ok(bridge._relays.get('human:' + HL).taps.size === 1, '…on again ⇒ the tap is back while a window of his drives');
@@ -1615,11 +1615,11 @@ const evN = ev2.length;
 v2.ws.close();
 await until(() => kb.humanOf(liveP.id) && kb.humanOf(liveP.id).state === 'away');
 await until(() => bridge._relays.get('human:' + HL) && bridge._relays.get('human:' + HL).taps.size === 0);
-ok(kb.humanOf(liveP.id).state === 'away' && ev2.slice(evN).every((e) => e.human) && bridge._relays.get('human:' + HL).taps.size === 0, 'the holder\'s window closes ⇒ he is AWAY (his tab kept), his tap disarmed; no conversation event (viewer-left is his alone)', ev2.slice(evN).map((e) => e.kind + ':' + e.browserKey));
+ok(kb.humanOf(liveP.id).state === 'away' && gateOf(ev2.slice(evN).every((e) => e.human)) && bridge._relays.get('human:' + HL).taps.size === 0, 'the holder\'s window closes ⇒ he is AWAY (his tab kept), his tap disarmed; no conversation event (viewer-left is his alone)', ev2.slice(evN).map((e) => e.kind + ':' + e.browserKey));
 // Close ⇒ every window of his is told why, typed
 const r3 = await kb.closeHuman(HL);
 await v1.until((v) => v.by('status').some((m) => m.state === 'human-ended'));
-ok(r3.ended === 'released' && v1.by('status').find((m) => m.state === 'human-ended').reason === 'released' && hs && trace2.sessions({ profileId: liveP.id }).find((x) => x.id === hs.id).reason === 'released', 'Close ⇒ every window of his gets `human-ended` (reason released) and his session ends `released`', v1.by('status').filter((m) => m.state === 'human-ended'));
+ok(r3.ended === 'released' && v1.by('status').find((m) => m.state === 'human-ended').reason === 'released' && gateOf(hs) && trace2.sessions({ profileId: liveP.id }).find((x) => x.id === hs.id).reason === 'released', 'Close ⇒ every window of his gets `human-ended` (reason released) and his session ends `released`', v1.by('status').filter((m) => m.state === 'human-ended'));
 const v3 = viewer(BP, `browse=${HL}`);
 await v3.until((v) => v.by('status').some((m) => m.state === 'error'));
 const L0 = logOf('launches.log').length;
@@ -1634,7 +1634,7 @@ bridge.shutdown(); trace2.shutdown(); await up.close(); await up2.close();
   // guard a regex over the RAW url) lets the encoded name through — the parsed-query leg above can go red
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
   const gneedle = "    if (browse && /^Bearer\\s+(vsst_|jbt_)/i.test(";
-  ok(bsrc.includes(gneedle), 'the parsed-query guard needle (the control below restores the raw-url regex)');
+  ok(verdictOf(bsrc.includes(gneedle)), 'the parsed-query guard needle (the control below restores the raw-url regex)');
   const BRx = M.load('src/server/browser-stream.js', editAnchor(bsrc, gneedle, "    if (/[?&]browse=/.test(String(req.url || '')) && /^Bearer\\s+(vsst_|jbt_)/i.test(", "src/server/browser-stream.js"), 'raw-url-guard');
   const bridgeX = BRx.create({ keeper: { ...kbView, setViewerAlive() { } }, activeSessions: activeB, requestAuthed: () => true, log: quiet }); // (its own viewer fact never replaces the real bridge's in the keeper)
   const bsrvX = http.createServer((_q, res) => { res.statusCode = 404; res.end(); });
@@ -1698,11 +1698,11 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const legs = [];
   for (const how of ['ui-detach', 'dropChild', 'narrow', 'boot', 'stop']) legs.push(await pathLeg(K, 'data-rel-' + how, how));
   const took = (x) => x.how === 'stop' || (x.take && x.take.adopted === true);
-  ok(legs.every((x) => took(x) && x.backNewTab === 1) && legs.filter((x) => x.how !== 'stop').every((x) => x.left) && legs.find((x) => x.how === 'narrow').closedMark && legs.find((x) => x.how === 'dropChild').again === legs.find((x) => x.how === 'dropChild').key,
+  ok(gateOf(legs.every((x) => took(x) && x.backNewTab === 1)) && gateOf(legs.filter((x) => x.how !== 'stop').every((x) => x.left)) && gateOf(legs.find((x) => x.how === 'narrow').closedMark) && legs.find((x) => x.how === 'dropChild').again === legs.find((x) => x.how === 'dropChild').key,
     'THE PATHS over the fake 0.38.1 (beside ②\'s tick drop, agent detach, a helper\'s tick drop, Quit, the heal, the bound and the race): the UI\'s Detach, a helper\'s handle dropped (the next helper gets the SAME handle), a narrowing (its tab closed and marked), a restart without the conversation (the boot\'s drop), the row\'s Stop — each time the returning session binds a NEW tab first, never lands in the page he took', legs);
   const dropC = await pathLeg(M.load('src/server/browser-keeper.js', editAnchor(ksrc, '    for (const l of reg.leases) if (l.browserKey === handle) noteLeftTab(l.profileId, handle);', '    // (control)', "src/server/browser-keeper.js"), 'drop-child-unrecorded'), 'data-rel-dropc', 'dropChild');
   const bootC = await pathLeg(M.load('src/server/browser-keeper.js', editAnchor(ksrc, '      noteLeftTab(d.lease.profileId, d.lease.browserKey);\n', '', "src/server/browser-keeper.js"), 'tick-unrecorded'), 'data-rel-bootc', 'boot');
-  ok(dropC.take && dropC.take.adopted === true && dropC.backNewTab === 0 && bootC.take && bootC.take.adopted === true && bootC.backNewTab === 0, 'CONTROLS: a keeper copy whose dropChild records nothing, one whose reconcile records nothing — he takes the page and the returning session binds NO new tab (its next command would run in his page) — the legs above can go red', { dropC, bootC });
+  ok(gateOf(dropC.take) && dropC.take.adopted === true && dropC.backNewTab === 0 && gateOf(bootC.take) && bootC.take.adopted === true && bootC.backNewTab === 0, 'CONTROLS: a keeper copy whose dropChild records nothing, one whose reconcile records nothing — he takes the page and the returning session binds NO new tab (its next command would run in his page) — the legs above can go red', { dropC, bootC });
 }
 // (THE AGENT CAN NEVER REACH THE PERSON'S BROWSING: MOVED to the fast scripts/test-browser-human-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 {
@@ -1715,14 +1715,14 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const asA = as(sA), asJob = { Authorization: 'Bearer jbt_' + 'z'.repeat(24) };
   const denied = [];
   for (const [m, p, body, h] of [['POST', `/api/browser/profiles/${gp.id}/browse`, {}, asA], ['POST', `/api/browser/profiles/${gp.id}/browse`, {}, asJob]]) { const x = await j(m, p, body, h); denied.push([p, x.status, x.json && x.json.code]); }
-  ok(denied.every(([, st, c]) => st === 403 && c === 'agent_forbidden') && logOf('launches.log').length === L0 && !k.humanOf(gp.id), 'an agent\'s session token (vsst_) or job token (jbt_) cannot START his browsing — 403 agent_forbidden, nothing launched', denied);
+  ok(gateOf(denied.every(([, st, c]) => st === 403 && c === 'agent_forbidden')) && logOf('launches.log').length === L0 && !k.humanOf(gp.id), 'an agent\'s session token (vsst_) or job token (jbt_) cannot START his browsing — 403 agent_forbidden, nothing launched', denied);
   const b = await j('POST', `/api/browser/profiles/${gp.id}/browse`, {});
   ok(b.status === 200 && b.json.key === HG, '…the cookie path (no bearer) browses as before');
   const n0 = cmdsOf('vs-' + HG).length;
   const rows = [];
   for (const [m, p, body] of [['POST', `/api/browser/browse/${HG}/navigate`, { url: 'https://evil.example/' }], ['POST', `/api/browser/browse/${HG}/close`, {}], ['POST', `/api/browser/browse/${HG}/quit`, {}], ['GET', `/api/browser/sessions?browserKey=${HG}`], ['GET', `/api/browser/actions?browserKey=${HG}`]]) { const x = await j(m, p, body, asA); rows.push([m + ' ' + p.split('?')[0], x.status, x.json && x.json.code]); }
   const listed = await j('GET', `/api/browser/sessions?profile=${gp.id}`, undefined, asA), mine = await j('GET', `/api/browser/sessions?profile=${gp.id}`);
-  ok(rows.every(([, st, c]) => st === 403 && c === 'agent_forbidden') && cmdsOf('vs-' + HG).length === n0 && k.humanOf(gp.id) && k.browserOf(gp.id).state === 'ready' && !listed.json.sessions.some((x) => x.holder === 'user') && mine.json.sessions.some((x) => x.holder === 'user'),
+  ok(gateOf(rows.every(([, st, c]) => st === 403 && c === 'agent_forbidden')) && cmdsOf('vs-' + HG).length === n0 && gateOf(k.humanOf(gp.id)) && k.browserOf(gp.id).state === 'ready' && !listed.json.sessions.some((x) => x.holder === 'user') && verdictOf(mine.json.sessions.some((x) => x.holder === 'user')),
     'an agent token can neither DRIVE (navigate), END (close / quit) nor READ (his sessions, his acts) his browsing — each 403 agent_forbidden, nothing ran; a profile-wide listing to it carries no session of his (the cookie\'s does)', { rows, listed: listed.json.sessions.map((x) => x.holder || 'conv'), mine: mine.json.sessions.map((x) => x.holder || 'conv') });
   // CONTROL: a routes copy without the guard starts his browsing for an agent token — red
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
@@ -1734,17 +1734,17 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const sx = http.createServer(ax); servers.push(sx); await new Promise((r) => sx.listen(0, '127.0.0.1', r));
   const gp2 = k.createProfile({ label: 'Guard2' }, { owner: { kind: 'instance', id: null } });
   const rx = await fetch(`http://127.0.0.1:${sx.address().port}/api/browser/profiles/${gp2.id}/browse`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...asA }, body: '{}' });
-  ok(rx.status === 200 && k.humanOf(gp2.id), 'CONTROL: the unguarded routes copy lets an agent token start his browsing (200) — the legs above can go red', rx.status);
+  ok(rx.status === 200 && verdictOf(k.humanOf(gp2.id)), 'CONTROL: the unguarded routes copy lets an agent token start his browsing (200) — the legs above can go red', rx.status);
   // verify r2 (KILL CLASS): the panel row's Stop route ended his page for an agent's token too (verify/kill-paths: 200 on the
   // 16065c65 tree) — while he browses, only HIS Stop (a cookie) ends it; both tokens refused, the row's cookie Stop unchanged
   const stopA = await j('POST', `/api/browser/profiles/${gp.id}/stop`, {}, asA), stopJ = await j('POST', `/api/browser/profiles/${gp.id}/stop`, {}, asJob);
-  ok(stopA.status === 403 && stopA.json.code === 'agent_forbidden' && stopJ.status === 403 && stopJ.json.code === 'agent_forbidden' && k.browserOf(gp.id).state === 'ready' && k.humanOf(gp.id), 'verify r2: an agent token (vsst_ / jbt_) on the row\'s Stop route while he browses is refused `agent_forbidden` — his page and the browser untouched', { stopA: stopA.status, stopJ: stopJ.status });
+  ok(stopA.status === 403 && stopA.json.code === 'agent_forbidden' && stopJ.status === 403 && stopJ.json.code === 'agent_forbidden' && k.browserOf(gp.id).state === 'ready' && verdictOf(k.humanOf(gp.id)), 'verify r2: an agent token (vsst_ / jbt_) on the row\'s Stop route while he browses is refused `agent_forbidden` — his page and the browser untouched', { stopA: stopA.status, stopJ: stopJ.status });
   const Rz = M.load('src/routes/browser.js', editAnchor(rsrc, "  if (typeof k.humanOf === 'function' && k.humanOf(req.params.id) && refuseAgentBearer(req, res)) return;\n", '', "src/routes/browser.js"), 'stop-for-agent-token');
   Rz.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [] });
   const az = express(); az.use(express.json()); az.use(Rz.router);
   const sz = http.createServer(az); servers.push(sz); await new Promise((r) => sz.listen(0, '127.0.0.1', r));
   const rz = await fetch(`http://127.0.0.1:${sz.address().port}/api/browser/profiles/${gp.id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...asA }, body: '{}' });
-  ok(rsrc.includes("k.humanOf(req.params.id) && refuseAgentBearer(req, res)") && rz.status === 200 && k.browserOf(gp.id).state === 'stopped' && !k.humanOf(gp.id), 'CONTROL: the routes copy without it lets an agent token stop the browser under his page (200, his browsing ended) — the leg above can go red', rz.status);
+  ok(gateOf(rsrc.includes("k.humanOf(req.params.id) && refuseAgentBearer(req, res)")) && rz.status === 200 && k.browserOf(gp.id).state === 'stopped' && !k.humanOf(gp.id), 'CONTROL: the routes copy without it lets an agent token stop the browser under his page (200, his browsing ended) — the leg above can go red', rz.status);
   await k.stop(gp.id, { why: 'user' }); await k.stop(gp2.id, { why: 'user' });
 }
 {
@@ -1757,19 +1757,19 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   await browseTake();
   await k.attach({ profileId: sp.id, browserKey: KB, sessionId: 'sess-b', by: 'user' }); // conversation B holds it too
   const r1 = await j('POST', '/api/browser/session/sess-b/stop', { ref: sp.id });
-  ok(r1.status === 409 && r1.json.code === 'browsing_yourself' && /Quit the whole browser/.test(r1.json.error) && /stop it from your browsing window/.test(r1.json.error) && !/then delete it/.test(r1.json.error) && /* verify r3 (revert table): the STOP sentence, never Delete's */ k.browserOf(sp.id).state === 'ready' && k.humanOf(sp.id) && k.humanOf(sp.id).state === 'driving',
+  ok(r1.status === 409 && r1.json.code === 'browsing_yourself' && gateOf(/Quit the whole browser/.test(r1.json.error)) && gateOf(/stop it from your browsing window/.test(r1.json.error)) && !/then delete it/.test(r1.json.error) && /* verify r3 (revert table): the STOP sentence, never Delete's */ k.browserOf(sp.id).state === 'ready' && gateOf(k.humanOf(sp.id)) && k.humanOf(sp.id).state === 'driving',
     'verify r2 (KILL CLASS): a conversation\'s strip Stop on a profile he browses is REFUSED by name (`browsing_yourself`: stop it from his window or the panel row) — his page and the browser untouched', r1.json);
   const L0 = require('../src/lib/live-strip-layout.js');
   const rowsB = S.browserListFor({ ...k.statusFor(KB), helperNames: {} });
   const his = new Set(k.list().leases.filter((l) => l.human).map((l) => l.profileId));
   const item = L0.stoppableRows(rowsB, { browsing: his }).find((x) => x.ref === sp.id);
-  ok(item && item.yours === true && !L0.stoppableRows(rowsB).find((x) => x.ref === sp.id).yours, 'PURE: the strip\'s list marks that row his ("you are browsing it yourself") from the digest\'s human rows — no Stop button there', item);
+  ok(gateOf(item) && item.yours === true && !L0.stoppableRows(rowsB).find((x) => x.ref === sp.id).yours, 'PURE: the strip\'s list marks that row his ("you are browsing it yourself") from the digest\'s human rows — no Stop button there', item);
   await k.closeHuman(HS);
   const r2 = await j('POST', '/api/browser/session/sess-b/stop', { ref: sp.id });
   ok(r2.status === 200 && k.browserOf(sp.id).state === 'stopped', '…after his Close, the strip\'s Stop stops it as before (only the conversation held it)', r2.json);
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
   const needle = "    if (row.profileId && typeof k.humanOf === 'function' && k.humanOf(row.profileId)) return res.status(409)";
-  ok(rsrc.includes(needle), 'the strip-stop needle (the control below removes it)');
+  ok(verdictOf(rsrc.includes(needle)), 'the strip-stop needle (the control below removes it)');
   const Rs = M.load('src/routes/browser.js', editAnchor(rsrc, needle, '    if (false) return res.status(409)', "src/routes/browser.js"), 'strip-stops-their-page');
   Rs.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [] });
   const as2 = express(); as2.use(express.json()); as2.use(Rs.router);
@@ -1784,6 +1784,6 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
 
 // (④ THE WORDS — MOVED to the fast scripts/test-browser-human-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 
-for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 5 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 5 })) ok(verdictOf(x.pass), x.name + (x.pass ? '' : ' — ' + x.detail));
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

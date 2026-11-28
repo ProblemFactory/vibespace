@@ -39,7 +39,7 @@ const BS = require('../src/browser-sessions.js');
 const R = require('../src/server/browser-trace.js');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -59,7 +59,7 @@ const M = mutantCopies('browser-trace', REPO);
 const KA = 'bk-0000000a', KB = 'bk-0000000b', P1 = 'bp-00000001';
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const built = typeof T.fitCoalesceVerdict === 'function' && typeof T.foldFits === 'function' && typeof T.coalesceFits === 'function';
-ok(built, 'the PURE fold exists (fitCoalesceVerdict / coalesceFits / foldFits in src/browser-trace.js)');
+ok(verdictOf(built), 'the PURE fold exists (fitCoalesceVerdict / coalesceFits / foldFits in src/browser-trace.js)');
 
 // ── the recorder world: a stub keeper + a fake bridge whose taps the suite pushes records into ──
 function world(name) {
@@ -124,7 +124,7 @@ if (built) {
   ok(V(prev, next).coalesce === true, 'the same browser + scope, 4 s after the last fit ⇒ coalesce');
   ok(V(prev, { ...next, at: 1000 + 10 * SEC }).coalesce === true && V(prev, { ...next, at: 1000 + 10 * SEC + 1 }).coalesce === false, 'exactly 10 s still coalesces; 10 s + 1 ms starts a new run');
   ok(V({ ...prev, lastAt: 1000 + 8 * SEC }, { ...next, at: 1000 + 15 * SEC }).coalesce === true, 'the window is measured from the run\'s LAST fit (`lastAt`), not its first — a long drag stays one row');
-  ok(V(prev, next, { between: { action: 'click', id: 'c1', at: 1000 + 2 * SEC } }).coalesce === false && /click/.test(V(prev, next, { between: { action: 'click', id: 'c1', at: 1000 + 2 * SEC } }).why), 'a traced action between the two fits ⇒ a new run (the reflow between two agent actions stays its own row), named');
+  ok(V(prev, next, { between: { action: 'click', id: 'c1', at: 1000 + 2 * SEC } }).coalesce === false && verdictOf(/click/.test(V(prev, next, { between: { action: 'click', id: 'c1', at: 1000 + 2 * SEC } }).why)), 'a traced action between the two fits ⇒ a new run (the reflow between two agent actions stays its own row), named');
   ok(V(prev, { ...next, browserKey: KB }).coalesce === false && V(prev, { ...next, scope: 'ephemeral', profileId: null }).coalesce === false, 'another browser (key) or another scope ⇒ never');
   ok(V(null, next).coalesce === false && V({ ...prev, action: 'click' }, next).coalesce === false && V(prev, { ...next, action: 'click' }).coalesce === false, 'no previous fit / a previous click / a next click ⇒ never');
   ok(V(prev, next, { coalesceMs: 3 * SEC }).coalesce === false, 'the window is a parameter (3 s ⇒ 4 s apart is a new run)');
@@ -132,7 +132,7 @@ if (built) {
   ok(m.id === prev.id && m.at === prev.at && m.lastAt === next.at && m.n === 2 && m.before.file === prev.before.file && m.after.file === next.after.file && m.afterSame === false && m.params.width === 1072 && m.position.width === 1072 && m.text === next.text && m.ok === true && m.browserSession === 'bs-00000001', 'the merge keeps the FIRST id / at / before frame / session, takes the LAST geometry / text / result / after frame, counts n, stamps lastAt', m);
   ok(T.coalesceFits({ ...m }, { ...next, id: 'tr-000000000003', at: 1000 + 7 * SEC }).n === 3 && T.coalesceFits(prev, { ...next, after: null }).after.file === prev.after.file, 'n accumulates over a run; a fit with no new after frame keeps the run\'s');
   ok(BS.FIT_ACTION === T.FIT_ACTION && T.FIT_ACTION === 'viewer-fit', 'browser-sessions.js (imports nothing) spells the fit action exactly as browser-trace.js does');
-  ok(T.isFitEntry(prev) && !T.isFitEntry({ action: 'click' }) && !T.isFitEntry({ action: 'viewport', kind: 'viewport' }) && T.fitCount(m) === 2 && T.fitCount({ action: 'click' }) === 0, 'isFitEntry names only the live view\'s `viewer-fit` (the agent\'s own `viewport` verb is not one); fitCount reads n');
+  ok(gateOf(T.isFitEntry(prev)) && !T.isFitEntry({ action: 'click' }) && !T.isFitEntry({ action: 'viewport', kind: 'viewport' }) && T.fitCount(m) === 2 && T.fitCount({ action: 'click' }) === 0, 'isFitEntry names only the live view\'s `viewer-fit` (the agent\'s own `viewport` verb is not one); fitCount reads n');
 }
 
 // ═══ ② PURE: the fold and the counts ═══════════════════════════════════════════
@@ -146,7 +146,7 @@ if (built) {
   const run = rows[1];
   ok(run.id === 'tr-0000000000f1' && run.n === 4 && run.at === 2000 && run.lastAt === 6000 && run.last.id === 'tr-0000000000f2' && run.entries.length === 2 && run.last.position.width === 1010, 'the fold row is keyed by its FIRST fit, counts every coalesced fit (1 + 3), spans first at → last lastAt, names the LAST geometry', run);
   const ex = T.foldFits(list, { expand: true });
-  ok(ex.length === 6 && ex.every((r) => r.kind === 'entry') && ex.filter((r) => r.fit).length === 3, 'expand: every fit is its own row, marked `fit`');
+  ok(ex.length === 6 && gateOf(ex.every((r) => r.kind === 'entry')) && ex.filter((r) => r.fit).length === 3, 'expand: every fit is its own row, marked `fit`');
   ok(T.foldFits([]).length === 0 && T.foldFits(null).length === 0 && T.foldFits([f('tr-0000000000f9', 1, 5)]).length === 1 && T.foldFits([f('tr-0000000000f9', 1, 5)])[0].kind === 'fits', 'an empty list folds to nothing; a lone fit is a fits row of one');
   ok(T.visibleEntries(rows).map((x) => x.id).join() === 'tr-0000000000c1,tr-0000000000f2,tr-0000000000c2,tr-0000000000f3,tr-0000000000c3', 'visibleEntries: the agent actions and the LAST fit of each run (what the dialog steps through)');
   const s = T.traceSummary(list);
@@ -181,8 +181,8 @@ const K1 = `s-a|${P1}`;
   ok(fitRows.length === STORMS.length, `the 37 fits land as ${STORMS.length} rows — one per storm (${fitRows.length})`);
   ok(fitRows.map((e) => e.n).join() === STORMS.join(), `each row counts its storm's fits: n = ${STORMS.join(',')} (${fitRows.map((e) => e.n).join(',')})`);
   const r0 = fitRows[0];
-  ok(r0 && r0.n === 4 && r0.lastAt > r0.at && r0.lastAt - r0.at === 3 * 2500 && r0.params.width === 1003 && r0.position.width === 1003 && /set viewport 1003 900/.test(r0.text), `a row keeps the FIRST at and the LAST geometry (at → lastAt = ${r0 && (r0.lastAt - r0.at)} ms; ${r0 && r0.text})`);
-  ok(r0 && r0.before && r0.before.file && r0.after && r0.after.file && r0.after.file !== r0.before.file && files.includes(r0.before.file) && files.includes(r0.after.file) && Buffer.from(fs.readFileSync(path.join(w1.DATA, 'browser-trace', P1, r0.after.file))).toString().startsWith('JPEG-f3a'), 'the row\'s before frame is the FIRST fit\'s, its after frame the LAST fit\'s, both on disk');
+  ok(gateOf(r0) && r0.n === 4 && r0.lastAt > r0.at && r0.lastAt - r0.at === 3 * 2500 && r0.params.width === 1003 && r0.position.width === 1003 && verdictOf(/set viewport 1003 900/.test(r0.text)), `a row keeps the FIRST at and the LAST geometry (at → lastAt = ${r0 && (r0.lastAt - r0.at)} ms; ${r0 && r0.text})`);
+  ok(gateOf(r0) && gateOf(r0.before) && gateOf(r0.before.file) && gateOf(r0.after) && gateOf(r0.after.file) && r0.after.file !== r0.before.file && gateOf(files.includes(r0.before.file)) && gateOf(files.includes(r0.after.file)) && verdictOf(Buffer.from(fs.readFileSync(path.join(w1.DATA, 'browser-trace', P1, r0.after.file))).toString().startsWith('JPEG-f3a')), 'the row\'s before frame is the FIRST fit\'s, its after frame the LAST fit\'s, both on disk');
   ok(allJpg.length === 157 * 2 + STORMS.length * 2, `every superseded fit frame is gone at once: ${allJpg.length} frame files = 157 × 2 agent frames + ${STORMS.length} × 2 fit frames (never left for the sweep)`);
   const lines = indexLines(w1);
   ok(lines.length === 157 + 37 && new Set(lines.map((l) => l.id)).size === 157 + STORMS.length, `the index stays APPEND-ONLY: ${lines.length} lines (one per fit landed), ${new Set(lines.map((l) => l.id)).size} ids — a later line under the same id supersedes the earlier`);
@@ -209,7 +209,7 @@ const K1 = `s-a|${P1}`;
   ok(later.length === 3 && later.map((e) => e.n).join() === '2,1,1' && later[0].params.width === 1101 && later[1].params.width === 1102 && later[2].params.width === 1103, `9 s after the last ⇒ the same run (n 2); 11 s after ⇒ a new run; a click between ⇒ a new run (${later.map((e) => e.n).join(',')})`);
   // an agent action right after a storm does not inherit anything (its own before frame, no n)
   const c = tr1.list({ profileId: P1, limit: 1000 }).find((e) => e.id && !isFit(e) && e.at > later[1].at);
-  ok(c && c.n === undefined && c.lastAt === undefined, 'an agent action carries no n / lastAt');
+  ok(gateOf(c) && c.n === undefined && c.lastAt === undefined, 'an agent action carries no n / lastAt');
   // the session's end marker counts agent actions only
   await w1.emit({ kind: 'detach', browserKey: KA, profileId: P1, sessionId: 's-a' });
   const ms = fs.readFileSync(path.join(w1.DATA, 'browser-trace', P1, BS.MARKERS_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -223,10 +223,10 @@ if (built) {
   // an old closed session of agent frames (300 MB), a newer one holding 200 MB of fit frames + 100 MB of agent frames; limit 400 MB
   const scopes = [{ key: P1, sessions: [sess('bs-00000001', 1000, false, [['tr-0000000000a1', 1000, 150 * MB], ['tr-0000000000a2', 2000, 150 * MB]]), sess('bs-00000002', 5000, false, [['tr-0000000000f1', 5000, 100 * MB, true], ['tr-0000000000b1', 6000, 100 * MB], ['tr-0000000000f2', 7000, 100 * MB, true]])] }];
   const plan = T.traceSizePlan({ scopes, bytesPerScope: 400 * MB + 1000 }); // (+ the five 100-byte list lines)
-  ok(plan.removeFrames.map((r) => r.id).join() === 'tr-0000000000f1,tr-0000000000f2' && plan.removeFrames.every((r) => /page-size frames go first/.test(r.why)) && plan.bytesRemoved === 200 * MB, `over by 100 MB: the two fit frames go FIRST (oldest fit first), the agent frames of the oldest session stay (${plan.removeFrames.map((r) => r.id).join(' ')})`);
+  ok(plan.removeFrames.map((r) => r.id).join() === 'tr-0000000000f1,tr-0000000000f2' && gateOf(plan.removeFrames.every((r) => /page-size frames go first/.test(r.why))) && plan.bytesRemoved === 200 * MB, `over by 100 MB: the two fit frames go FIRST (oldest fit first), the agent frames of the oldest session stay (${plan.removeFrames.map((r) => r.id).join(' ')})`);
   ok(plan.kept[0].used <= 400 * MB + 1000 && plan.kept[0].fitFrameBytes === 0 && plan.kept[0].frameBytes === 400 * MB, 'after the pass the scope fits; its kept fit frames are 0, the agent frames whole');
   const plan2 = T.traceSizePlan({ scopes, bytesPerScope: 250 * MB });
-  ok(plan2.removeFrames.map((r) => r.id).join() === 'tr-0000000000f1,tr-0000000000f2,tr-0000000000a1,tr-0000000000a2' && /oldest session's frames go first/.test(plan2.removeFrames[2].why), 'still over after every fit frame ⇒ the old rule (the oldest session\'s frames, whole)');
+  ok(plan2.removeFrames.map((r) => r.id).join() === 'tr-0000000000f1,tr-0000000000f2,tr-0000000000a1,tr-0000000000a2' && verdictOf(/oldest session's frames go first/.test(plan2.removeFrames[2].why)), 'still over after every fit frame ⇒ the old rule (the oldest session\'s frames, whole)');
   const plan3 = T.traceSizePlan({ scopes, bytesPerScope: 1024 * MB });
   ok(plan3.removeFrames.length === 0 && plan3.kept[0].fitFrameBytes === 200 * MB, 'under the limit nothing goes; the kept row names the fit frames it holds (200 MB)');
   // the recorder's usage and housekeeping over the flood
@@ -236,7 +236,7 @@ if (built) {
   ok(u.fitBytes === fitB && u.used + u.fitBytes === u.total && u.total === u.frameBytes + u.listBytes && u.limit === 1024 * MB, `usageOf: used = the agent actions' bytes, fitBytes beside (${Math.round(u.fitBytes / 1024)} KB), total = both`, u);
   const hk = await tr1.housekeeping();
   const row = hk.profiles.find((r) => r.id === P1);
-  ok(row && row.trace.n === 158 && row.trace.fits === 41 && row.trace.fitBytes === fitB && row.trace.used === u.used, `housekeeping: the row counts 158 agent actions, 41 fits beside (37 + the 4 of the run legs), and their bytes separately (${row && row.trace.fits} / ${row && Math.round(row.trace.fitBytes / 1024)} KB)`);
+  ok(gateOf(row) && row.trace.n === 158 && row.trace.fits === 41 && row.trace.fitBytes === fitB && row.trace.used === u.used, `housekeeping: the row counts 158 agent actions, 41 fits beside (37 + the 4 of the run legs), and their bytes separately (${row && row.trace.fits} / ${row && Math.round(row.trace.fitBytes / 1024)} KB)`);
   // the sweep over real files: a limit just under the total takes fit frames first
   const w3 = world('w3');
   const tr3 = mkRecorder(w3, []);
@@ -248,7 +248,7 @@ if (built) {
   const u3 = tr3.usageOf(P1);
   const limitUnderTotal = u3.total - 50; // (the limit's floor is 64 MB — a sweep over a 1 KB index is driven through the PURE plan over the real index)
   const plan4 = T.traceSizePlan({ scopes: [{ key: P1, sessions: [{ id: 'x', startAt: 1, open: true, entries: tr3.list({ profileId: P1, limit: 100 }).map((e) => ({ id: e.id, at: e.at, frameBytes: T.entryFrameBytes(e), listBytes: T.entryListBytes(e), fit: isFit(e) })) }] }], bytesPerScope: limitUnderTotal });
-  ok(plan4.removeFrames.length >= 1 && plan4.removeFrames.every((r) => isFit(tr3.list({ profileId: P1, limit: 100 }).find((e) => e.id === r.id))), `over the limit by 50 bytes on a real index: the plan names fit frames only (${plan4.removeFrames.map((r) => r.id).join(' ')})`);
+  ok(plan4.removeFrames.length >= 1 && verdictOf(plan4.removeFrames.every((r) => isFit(tr3.list({ profileId: P1, limit: 100 }).find((e) => e.id === r.id)))), `over the limit by 50 bytes on a real index: the plan names fit frames only (${plan4.removeFrames.map((r) => r.id).join(' ')})`);
   tr3.shutdown();
 }
 
@@ -272,7 +272,7 @@ if (built) {
   const Tc = M.load('src/browser-trace.js', c, 'no-fit-first');
   const sess = (id, startAt, open, list) => ({ id, startAt, open, entries: list.map(([eid, at, fb, fit]) => ({ id: eid, at, frameBytes: fb, listBytes: 100, fit: !!fit })) });
   const pc = Tc.traceSizePlan({ scopes: [{ key: P1, sessions: [sess('bs-00000001', 1000, false, [['tr-0000000000a1', 1000, 150 * MB]]), sess('bs-00000002', 5000, false, [['tr-0000000000f1', 5000, 100 * MB, true]])] }], bytesPerScope: 200 * MB });
-  ok(pc.removeFrames.length && pc.removeFrames[0].id === 'tr-0000000000a1', 'control (c): the copy takes the oldest session\'s agent frames before the fit frames (④ would be red)');
+  ok(gateOf(pc.removeFrames.length) && pc.removeFrames[0].id === 'tr-0000000000a1', 'control (c): the copy takes the oldest session\'s agent frames before the fit frames (④ would be red)');
   // (d) a recorder that leaves the superseded after frame on disk
   const rsrc = read('src/server/browser-trace.js');
   const d = editAnchor(rsrc, 'if (oldAfter && oldAfter !== keepFile) { try { fs.unlinkSync(path.join(dir, oldAfter)); } catch { /* gone already */ } }', '', "src/server/browser-trace.js");
@@ -296,35 +296,35 @@ if (built) {
   ok(trr.list({ profileId: P1 }).length === 1 && rj.length === 1 && trd.list({ profileId: P1 }).length === 1 && dj.length === 3, `control (d): the copy keeps one row but ${dj.length} frame files (the real recorder: ${rj.length}) — the superseded after frames stayed (③ would be red)`);
   trr.shutdown();
   trd.shutdown();
-  ok(M.files.length === 4 && M.files.every((f) => !f.startsWith(path.join(REPO, 'src'))), 'the four copies live in the scratch dir, never in src/');
+  ok(M.files.length === 4 && verdictOf(M.files.every((f) => !f.startsWith(path.join(REPO, 'src')))), 'the four copies live in the scratch dir, never in src/');
 }
 
 // ═══ ⑥ wiring pins ═══════════════════════════════════════════════════════════════
 console.log('— ⑥ wiring: the surfaces fold, the route sums, the bridge bounds its storm, the words exist');
 {
   const view = read('src/lib/browser-trace-view.js'), replay = read('src/lib/browser-replay-window.js'), route = read('src/routes/browser-trace.js'), bridge = read('src/server/browser-stream.js'), live = read('src/lib/browser-live-window.js');
-  ok(/foldFits/.test(view) && /foldFits\(st\.entries, \{ expand: /.test(view), 'the Actions pane (createTraceTimeline) draws foldFits rows (expand = the toggle)');
-  ok(/const s = traceSummary\(entries\)/.test(view) && /s\.fits/.test(view) && /renderTraceStrip\(strip, entries, \{ expand:/.test(view), 'the tool card\'s count reads traceSummary (fits beside, never in n) and its strip folds');
-  ok(/foldFits\(st\.entries, \{ expand: showFitsPref\(\) \}\)/.test(replay) && /brp-tick/.test(replay), 'the replay folds fits into a thin tick between steps (a step only with the toggle on)');
-  ok(/summary: T\.traceSummary\(entries\)/.test(route), 'GET /api/browser/actions answers `summary` (n / failed / fits)');
-  ok(/export function showFitsPref\(\)/.test(view) && /export function fitsToggle\(/.test(view) && /localStorage/.test(view) && /SHOW_FITS_KEY = 'vibespace\.browserTrace\.showFits'/.test(view), 'ONE per-device preference (localStorage) read by every surface; ONE toggle builder');
-  ok(/const lab = el\('label', 'browser-trace-fits-toggle'\)/.test(view) && /lab\.append\(cb, document\.createTextNode\(' ' \+ t\('Show page-size changes'\)\)\)/.test(view), 'the toggle is a <label> wrapping its checkbox with the words (test-ax-paint: a control has a name)');
-  ok(/'page-size frames: \{size\}'/.test(view) && /bprof-trace-fits/.test(view), 'the Agent browser panel prints the fit bytes beside the row\'s {used} of {size}');
-  ok(/timeline\.count\(\)/.test(live) && /count: \(\) => st\.entries\.filter\(\(e\) => !isFitEntry\(e\)\)\.length/.test(view), 'the live view\'s "Actions (N)" counts agent actions');
+  ok(gateOf(/foldFits/.test(view)) && verdictOf(/foldFits\(st\.entries, \{ expand: /.test(view)), 'the Actions pane (createTraceTimeline) draws foldFits rows (expand = the toggle)');
+  ok(gateOf(/const s = traceSummary\(entries\)/.test(view)) && gateOf(/s\.fits/.test(view)) && verdictOf(/renderTraceStrip\(strip, entries, \{ expand:/.test(view)), 'the tool card\'s count reads traceSummary (fits beside, never in n) and its strip folds');
+  ok(gateOf(/foldFits\(st\.entries, \{ expand: showFitsPref\(\) \}\)/.test(replay)) && verdictOf(/brp-tick/.test(replay)), 'the replay folds fits into a thin tick between steps (a step only with the toggle on)');
+  ok(verdictOf(/summary: T\.traceSummary\(entries\)/.test(route)), 'GET /api/browser/actions answers `summary` (n / failed / fits)');
+  ok(gateOf(/export function showFitsPref\(\)/.test(view)) && gateOf(/export function fitsToggle\(/.test(view)) && gateOf(/localStorage/.test(view)) && verdictOf(/SHOW_FITS_KEY = 'vibespace\.browserTrace\.showFits'/.test(view)), 'ONE per-device preference (localStorage) read by every surface; ONE toggle builder');
+  ok(gateOf(/const lab = el\('label', 'browser-trace-fits-toggle'\)/.test(view)) && verdictOf(/lab\.append\(cb, document\.createTextNode\(' ' \+ t\('Show page-size changes'\)\)\)/.test(view)), 'the toggle is a <label> wrapping its checkbox with the words (test-ax-paint: a control has a name)');
+  ok(gateOf(/'page-size frames: \{size\}'/.test(view)) && verdictOf(/bprof-trace-fits/.test(view)), 'the Agent browser panel prints the fit bytes beside the row\'s {used} of {size}');
+  ok(gateOf(/timeline\.count\(\)/.test(live)) && verdictOf(/count: \(\) => st\.entries\.filter\(\(e\) => !isFitEntry\(e\)\)\.length/.test(view)), 'the live view\'s "Actions (N)" counts agent actions');
   // F4: the bridge's own fit storm is bounded upstream — pinned, not rebuilt (lane S4's scheduler)
-  ok(/function scheduleFit\(relay, why, \{ force = false, delay = FIT\.FIT_DEBOUNCE_MS \} = \{\}\) \{[\s\S]*?if \(relay\.fitTimer\) clearTimeout\(relay\.fitTimer\);/.test(bridge), 'F4 (pinned): scheduleFit re-arms ONE timer per relay — a burst of pane reports is one fit');
-  ok(/if \(relay\.fitBusy\) \{ relay\.fitAgain = why; return; \}/.test(bridge) && /if \(relay\.fitAgain\) \{ const w = relay\.fitAgain; relay\.fitAgain = null; scheduleFit\(relay, w, \{ delay: 0 \}\); \}/.test(bridge), 'F4 (pinned): runFit parks a fit asked while one is in flight (`fitAgain`) and runs it ONCE after — the latest geometry wins (the verdict reads the live `fits` map)');
-  ok(/const v = FIT\.fitVerdict\(\{ fits: \[\.\.\.relay\.fits\.values\(\)\]/.test(bridge), 'F4 (pinned): the fit that runs reads the CURRENT pane sizes, never the ones it was scheduled with');
+  ok(verdictOf(/function scheduleFit\(relay, why, \{ force = false, delay = FIT\.FIT_DEBOUNCE_MS \} = \{\}\) \{[\s\S]*?if \(relay\.fitTimer\) clearTimeout\(relay\.fitTimer\);/.test(bridge)), 'F4 (pinned): scheduleFit re-arms ONE timer per relay — a burst of pane reports is one fit');
+  ok(gateOf(/if \(relay\.fitBusy\) \{ relay\.fitAgain = why; return; \}/.test(bridge)) && verdictOf(/if \(relay\.fitAgain\) \{ const w = relay\.fitAgain; relay\.fitAgain = null; scheduleFit\(relay, w, \{ delay: 0 \}\); \}/.test(bridge)), 'F4 (pinned): runFit parks a fit asked while one is in flight (`fitAgain`) and runs it ONCE after — the latest geometry wins (the verdict reads the live `fits` map)');
+  ok(verdictOf(/const v = FIT\.fitVerdict\(\{ fits: \[\.\.\.relay\.fits\.values\(\)\]/.test(bridge)), 'F4 (pinned): the fit that runs reads the CURRENT pane sizes, never the ones it was scheduled with');
   // the words, in zh and ja
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const keys = ['Show page-size changes', 'Live view fitted ×{n} · {size} (last)', 'Live view fitted · {size}', '{n} page-size change(s)', 'page-size frames: {size}', 'Every resize or move of the live view fits the page to it and is recorded. Off: consecutive page-size changes are one dim row. On: each is its own row with its frames.', '{n} page-size change(s) between {from} and {to} — the live view was resized or moved and the page fitted to it; click for the last one.'];
   const miss = keys.filter((k) => !zh[k] || !ja[k]);
   ok(miss.length === 0, `every new word has zh + ja (${miss.join(' | ') || 'all present'})`);
-  ok(/实时视图/.test(zh['Live view fitted ×{n} · {size} (last)'] || '') && /ライブビュー/.test(ja['Live view fitted ×{n} · {size} (last)'] || ''), 'the fold row names the live view in each language');
+  ok(gateOf(/实时视图/.test(zh['Live view fitted ×{n} · {size} (last)'] || '')) && verdictOf(/ライブビュー/.test(ja['Live view fitted ×{n} · {size} (last)'] || '')), 'the fold row names the live view in each language');
   const css = read('public/style.css');
-  ok(/\.browser-live-trace-row\.fits/.test(css) && /\.brp-tick/.test(css) && /\.browser-trace-row\.fits/.test(css) && /\.browser-trace-fits-toggle/.test(css), 'the dim fold rows, the replay tick and the toggle have their rules');
+  ok(gateOf(/\.browser-live-trace-row\.fits/.test(css)) && gateOf(/\.brp-tick/.test(css)) && gateOf(/\.browser-trace-row\.fits/.test(css)) && verdictOf(/\.browser-trace-fits-toggle/.test(css)), 'the dim fold rows, the replay tick and the toggle have their rules');
   const ci = read('scripts/ci.mjs');
-  ok(/\{ name: 'test-browser-trace', tier: 'fast'/.test(ci), 'ci.mjs carries this suite (fast)');
+  ok(verdictOf(/\{ name: 'test-browser-trace', tier: 'fast'/.test(ci)), 'ci.mjs carries this suite (fast)');
 }
 
 // ═══ ⑦ lane browser-viewport-answer: the agent's own set is ONE row (`agent-viewport`, kind viewport) ═══
@@ -360,13 +360,13 @@ console.log('— ⑦ the row census + the agent\'s own set viewport: one agent-v
   vp('v-a3', FIT.agentSetAnswer({ asked: FIT.agentSetAsked(['set', 'device', 'iPhone 12']), got: { error: 'the page answered no layout viewport' } }));
   const all7 = tr7.list({ profileId: P1, limit: 100 });
   const ag = all7.filter((e) => e.action === 'agent-viewport');
-  ok(ag.length === 3 && ag.every((e) => e.kind === 'viewport' && !T.isFitEntry(e) && e.n === undefined), 'the agent\'s three sets are three rows of kind viewport — never a fit, never folded', JSON.stringify(ag.map((e) => [e.action, e.kind, e.n])));
-  ok(ag[0] && ag[0].ok === false && ag[0].text === 'vibespace-browser set viewport 1280 720 → 1920×1080 (pinned by the user: not applied)' && ag[0].position.width === 1920 && ag[0].position.height === 1080 && ag[0].position.why === 'fixed' && /pinned by the user, your 1280x720 did not apply/.test(ag[0].error || '') && T.timelineLabel(ag[0]) === 'agent-viewport 1920×1080 ✗',
+  ok(ag.length === 3 && verdictOf(ag.every((e) => e.kind === 'viewport' && !T.isFitEntry(e) && e.n === undefined)), 'the agent\'s three sets are three rows of kind viewport — never a fit, never folded', JSON.stringify(ag.map((e) => [e.action, e.kind, e.n])));
+  ok(gateOf(ag[0]) && ag[0].ok === false && ag[0].text === 'vibespace-browser set viewport 1280 720 → 1920×1080 (pinned by the user: not applied)' && ag[0].position.width === 1920 && ag[0].position.height === 1080 && ag[0].position.why === 'fixed' && gateOf(/pinned by the user, your 1280x720 did not apply/.test(ag[0].error || '')) && T.timelineLabel(ag[0]) === 'agent-viewport 1920×1080 ✗',
     'a set a PIN ruled: asked 1280 720 → the page\'s 1920×1080, "pinned by the user", ok false with the answer line as its error', JSON.stringify(ag[0] && { text: ag[0].text, pos: ag[0].position, ok: ag[0].ok, error: ag[0].error }));
-  ok(ag[1] && ag[1].ok === true && ag[1].text === 'vibespace-browser set viewport 1280 720 → 1280×720' && T.positionText(ag[1].position) === '1280×720', 'a set that applied: asked → got, ok', JSON.stringify(ag[1] && ag[1].text));
-  ok(ag[2] && ag[2].text === 'vibespace-browser set device iPhone 12 → unreadable' && T.positionText(ag[2].position) === 'unreadable' && T.timelineLabel(ag[2]) === 'agent-viewport unreadable', 'a page that could not be read is "unreadable" in the row — never a guessed number', JSON.stringify(ag[2] && ag[2].text));
+  ok(gateOf(ag[1]) && ag[1].ok === true && ag[1].text === 'vibespace-browser set viewport 1280 720 → 1280×720' && T.positionText(ag[1].position) === '1280×720', 'a set that applied: asked → got, ok', JSON.stringify(ag[1] && ag[1].text));
+  ok(gateOf(ag[2]) && ag[2].text === 'vibespace-browser set device iPhone 12 → unreadable' && T.positionText(ag[2].position) === 'unreadable' && T.timelineLabel(ag[2]) === 'agent-viewport unreadable', 'a page that could not be read is "unreadable" in the row — never a guessed number', JSON.stringify(ag[2] && ag[2].text));
   const fits7 = all7.filter(isFit);
-  ok(fits7.length === 2 && fits7.every((e) => e.n === 1), 'a fit on either side of the agent\'s set stays its own run (the set is an action between, 2 s apart)', JSON.stringify(fits7.map((e) => [e.id, e.n])));
+  ok(fits7.length === 2 && verdictOf(fits7.every((e) => e.n === 1)), 'a fit on either side of the agent\'s set stays its own run (the set is an action between, 2 s apart)', JSON.stringify(fits7.map((e) => [e.id, e.n])));
   const sum = T.traceSummary(all7);
   ok(sum.n === 3 && sum.failed === 1 && sum.fits === 2, `the summary counts the sets as the agent's actions (n ${sum.n}, failed ${sum.failed}) and the fits beside (${sum.fits})`);
   ok(bc7.filter((m) => m.type === 'browser-trace-appended' && m.entry && m.entry.action === 'agent-viewport').length === 3, 'each set is broadcast once as an appended row');
@@ -381,4 +381,4 @@ console.log('— ⑦ the row census + the agent\'s own set viewport: one agent-v
 
 tr1.shutdown();
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

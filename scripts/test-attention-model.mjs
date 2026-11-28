@@ -35,7 +35,7 @@ const require = createRequire(import.meta.url);
 const A = require(path.join(ROOT, 'src/attention-model.js'));
 const DA = require(path.join(ROOT, 'src/server/device-alerts.js'));
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -62,7 +62,7 @@ console.log('① the constants and the band table');
   ok(A.CAP === 6 && A.PARK_DAYS === 7 && A.PLUGIN_FOLD_DAYS === 3 && A.DUE_WINDOW_MS === 48 * H && A.TIE_MS === MIN, 'CAP 6 (decision 1) · PARK_DAYS 7 · PLUGIN_FOLD_DAYS 3 (decision 6) · a date window of 48 h · a tie = the same minute', { CAP: A.CAP, PARK_DAYS: A.PARK_DAYS, PLUGIN_FOLD_DAYS: A.PLUGIN_FOLD_DAYS });
   eq(A.BANDS.map((b) => `${b.band}:${b.code}`), ['1:urgent', '2:waiting', '3:dated', '4:decide', '5:ask', '6:parked'], 'five bands in order, then 搁置 (PARKED = 6)');
   ok(A.PARKED === 6 && JSON.stringify(A.BADGE_BANDS) === '[1,2,3,4]' && JSON.stringify(A.TOAST_BANDS) === '[1,2]' && A.FOLD_HEAD === '{n} more — expand', 'the badge counts bands 1–4, a toast is bands 1–2, the fold head is ONE English key (zh 还有 {n} 条 — 展开)');
-  ok(Object.isFrozen(A.BANDS) && Object.isFrozen(A.POLICY) && A.POLICY.cap === A.CAP, 'the tables are frozen; POLICY = the defaults lanes ② and ③ start from');
+  ok(gateOf(Object.isFrozen(A.BANDS)) && gateOf(Object.isFrozen(A.POLICY)) && A.POLICY.cap === A.CAP, 'the tables are frozen; POLICY = the defaults lanes ② and ③ start from');
 }
 
 console.log('② THE PRODUCTION SHAPE (design §1.1, 2026-10-19: 30 open = 25 asks + 5 notices in 11 conversations; 10 younger than a day, 3 of 1–7 days, 17 of 7–30 days)');
@@ -144,7 +144,7 @@ console.log('⑤ band 1 never folds');
 {
   const urgent = Array.from({ length: 7 }, (_, k) => item({ id: 'u' + k, urgency: 'urgent', createdAt: NOW - k * MIN * 7 }));
   const r = A.needsMe(rows([...urgent, ...SHAPE]), NOW);
-  ok(r.screen.length === 7 && r.screen.every((x) => x.band === 1), `7 urgent rows ⇒ the screen is 7 (an incident pushes it open), all urgent`, r.screen.length);
+  ok(r.screen.length === 7 && verdictOf(r.screen.every((x) => x.band === 1)), `7 urgent rows ⇒ the screen is 7 (an incident pushes it open), all urgent`, r.screen.length);
   ok(!r.folds.some((f) => f.band === 1) && r.folds.find((f) => f.band === 4).n === 2 && r.folds.find((f) => f.band === 5).n === 8, 'band 1 has no fold; every other band folds whole behind its head (band 4: 2, band 5: 8)', r.folds.map((f) => [f.band, f.n]));
   const one = A.needsMe(rows([urgent[0], ...SHAPE]), NOW);
   ok(one.screen.length === 6 && one.screen[0].band === 1, 'one urgent row ⇒ still 6: it leads the screen');
@@ -178,12 +178,12 @@ console.log('⑦ THE JUDGE IS A TIE-BREAKER — a verdict never moves a row betw
   const bandOf = (r) => Object.fromEntries(r.list.map((x) => [x.id, A.placeOf(x, NOW)]));
   eq(bandOf(r1), bandOf(r0), '120 rows of every band, judged at random: every row keeps its band');
   const seq = r1.list.map((x) => A.placeOf(x, NOW));
-  ok(seq.every((b, k) => !k || seq[k - 1] <= b), 'the judged list is still ordered band by band (non-decreasing)');
+  ok(verdictOf(seq.every((b, k) => !k || seq[k - 1] <= b)), 'the judged list is still ordered band by band (non-decreasing)');
   const outside = r1.list.filter((x) => A.placeOf(x, NOW) !== 5).map((x) => x.id), outside0 = r0.list.filter((x) => A.placeOf(x, NOW) !== 5).map((x) => x.id);
   eq(outside, outside0, 'outside band 5 the order does not see the verdicts at all');
   const bucket = (x) => Math.floor(x.at / A.TIE_MS);
   const b5 = r1.list.filter((x) => A.placeOf(x, NOW) === 5);
-  ok(b5.every((x, k) => !k || bucket(b5[k - 1]) >= bucket(x)), 'inside band 5 the minutes stay newest first — a verdict only reorders the asks of ONE minute');
+  ok(verdictOf(b5.every((x, k) => !k || bucket(b5[k - 1]) >= bucket(x))), 'inside band 5 the minutes stay newest first — a verdict only reorders the asks of ONE minute');
   // the two-row proof: an older ask judged `now` at p 1.0 stays under a newer unjudged one
   const older = item({ id: 'old', createdAt: NOW - 2 * H, judged: { group: 'now', p: 1, v: 2 } }), newer = item({ id: 'new', createdAt: NOW - H });
   eq(ids(A.needsMe(rows([older, newer]), NOW).list), ['new', 'old'], 'an older ask judged now (p 1.0) stays UNDER a newer unjudged one');
@@ -237,9 +237,9 @@ console.log('⑪ the policy seam (lanes ② and ③)');
   const r8 = A.needsMe(rows(SHAPE), NOW, { cap: 8 });
   ok(r8.screen.length === 8, 'policy.cap moves the screen (lane ②\'s attention.cap row; lane ③ measures 5–8)');
   const rx = A.needsMe(rows(SHAPE), NOW, { expanded: [5] });
-  ok(rx.bands.find((b) => b.band === 5).hidden.length === 0 && rx.bands.find((b) => b.band === 5).shown.length === 8 && rx.folds.every((f) => f.band !== 5), 'policy.expanded opens a band in place (its fold gone, every row shown)');
+  ok(rx.bands.find((b) => b.band === 5).hidden.length === 0 && rx.bands.find((b) => b.band === 5).shown.length === 8 && verdictOf(rx.folds.every((f) => f.band !== 5)), 'policy.expanded opens a band in place (its fold gone, every row shown)');
   const pol = A.policyOf({ cap: 'x', parkDays: -1, expanded: new Set([2]) });
-  ok(pol.cap === 6 && pol.parkDays === 7 && pol.expanded.has(2), 'policyOf: garbage falls back to the defaults; a Set of expanded bands is read');
+  ok(pol.cap === 6 && pol.parkDays === 7 && verdictOf(pol.expanded.has(2)), 'policyOf: garbage falls back to the defaults; a Set of expanded bands is read');
   const ch = { id: 'ch1', key: 'slack:c1', source: 'channels', at: NOW - MIN, waitedBy: 'person', urgency: 'normal' };
   ok(A.needsMe([ch, ...rows(SHAPE)], NOW).screen[0].id === 'ch1', 'a lane-② Channels row with no `band` is placed by the same rule (a person waiting ⇒ band 2, ahead of the decisions)');
 }
@@ -259,13 +259,13 @@ console.log('⑫ THE OWNER\'S SWITCHES (decision 4) — a band off falls to band
   eq(ids(r2.bands.find((b) => b.band === 5).rows), ['a1', 'w2', 'w1', 'a2'], 'waiting OFF ⇒ its rows sit in band 5 in band 5\'s order (newest first: a1 1 h · w2 2 h · w1 3 h · a2 4 h — the plugin pin and longest-waiting order gone)');
   ok(r2.counts[2] === 0 && r2.counts.needsMe === 2 && A.badgeRows(all, NOW, p2).length === 2, 'waiting OFF ⇒ out of the badge (bands 1–4 now: the urgent row + the decision)', r2.counts);
   eq(r2.off, [{ band: 2, code: 'waiting', name: 'Someone is waiting', n: 2, to: 5 }], 'waiting OFF is SAID once — {band, n: 2, to: band 5} (never silently empty)');
-  ok(!A.toastWorthy(A.rowOf(W[0], NOW), p2) && A.toastWorthy(A.rowOf(W[0], NOW)) && A.toastWorthy(A.rowOf(U1[0], NOW), p2), 'waiting OFF ⇒ its arrival never toasts (on: it does); an urgent arrival still does');
+  ok(!A.toastWorthy(A.rowOf(W[0], NOW), p2) && gateOf(A.toastWorthy(A.rowOf(W[0], NOW))) && verdictOf(A.toastWorthy(A.rowOf(U1[0], NOW), p2)), 'waiting OFF ⇒ its arrival never toasts (on: it does); an urgent arrival still does');
   const p1 = A.settingsPolicy(get({ 'attention.band.urgent': false }));
   ok(!A.toastWorthy(A.rowOf(U1[0], NOW), p1) && A.placeOf(A.rowOf(U1[0], NOW), NOW, p1) === 5, 'urgent OFF ⇒ an urgent row sits in band 5 and never toasts');
   const p5 = A.settingsPolicy(get({ 'attention.band.ask': false }));
   const r5 = A.needsMe(all, NOW, p5);
   const b5 = r5.bands.find((b) => b.band === 5);
-  ok(!r5.screen.some((x) => x.band === 5) && b5.shown.length === 0 && b5.hidden.length === 2 && r5.folds.some((f) => f.band === 5 && f.n === 2), 'ask OFF ⇒ band 5 never takes a first-screen row — both wait behind its fold', { screen: ids(r5.screen), b5 });
+  ok(!r5.screen.some((x) => x.band === 5) && b5.shown.length === 0 && b5.hidden.length === 2 && verdictOf(r5.folds.some((f) => f.band === 5 && f.n === 2)), 'ask OFF ⇒ band 5 never takes a first-screen row — both wait behind its fold', { screen: ids(r5.screen), b5 });
   eq(r5.off, [{ band: 5, code: 'ask', name: 'Other questions', n: 2, to: null }], 'ask OFF is said once ({to: null}: behind the fold)');
   const old = rows([item({ id: 'o1', createdAt: NOW - 9 * D }), item({ id: 'o2', options: ['A'], createdAt: NOW - 10 * D })]);
   const pp = A.settingsPolicy(get({ 'attention.band.parked': false }));
@@ -278,7 +278,7 @@ console.log('⑫ THE OWNER\'S SWITCHES (decision 4) — a band off falls to band
   const odd = A.settingsPolicy(get({ 'attention.band.waiting': 'false', 'attention.band.dated': 0, 'attention.band.decide': null }));
   ok(odd.off.size === 0, 'only a literal false switches a band off (a "false" string, 0, null — a damaged value — leaves it on)');
   const ex = A.settingsPolicy(get({ 'attention.cap': 5 }), { expanded: new Set([5]) });
-  ok(ex.cap === 5 && ex.expanded.has(5) && A.policyOf(ex) === ex, 'settingsPolicy carries the surface\'s own state ({expanded}); a made policy is never re-made (policyOf(p) === p)');
+  ok(ex.cap === 5 && gateOf(ex.expanded.has(5)) && A.policyOf(ex) === ex, 'settingsPolicy carries the surface\'s own state ({expanded}); a made policy is never re-made (policyOf(p) === p)');
   ok(A.settingsPolicy(() => { throw new Error('x'); }).cap === 6, 'a settings reader that throws ⇒ the defaults');
   const ch = { id: 'k', key: 'slack:c', source: 'channels', at: NOW - MIN, waitedBy: 'person', urgency: 'normal' };
   ok(A.placeOf({ ...ch, band: A.bandOfRow(ch, NOW) }, NOW, p2) === 5, 'a Channels row obeys the same switch (a person waiting, waiting OFF ⇒ band 5)');
@@ -303,16 +303,16 @@ console.log('⑬ THE ONE READER — attention.band.* / attention.cap are read on
   // THE ROWS mirror the model: one boolean switch per band code (on), attention.cap = CAP in CAP_MIN–CAP_MAX, ONE block
   const { SETTINGS_SCHEMA: SS } = await import(pathToFileURL(path.join(ROOT, 'src/lib/settings-schema.js')).href);
   const rowsB = Object.entries(SS).filter(([k]) => /^attention\./.test(k));
-  ok(rowsB.length === 7 && A.BANDS.every((b) => SS[A.bandKey(b.code)] && SS[A.bandKey(b.code)].type === 'boolean' && SS[A.bandKey(b.code)].default === true && SS[A.bandKey(b.code)].label === b.name)
-    && SS[A.CAP_KEY].type === 'number' && SS[A.CAP_KEY].default === A.CAP && SS[A.CAP_KEY].min === A.CAP_MIN && SS[A.CAP_KEY].max === A.CAP_MAX && rowsB.every(([, r]) => r.block === 'bands' && r.liveApply === true),
+  ok(rowsB.length === 7 && gateOf(A.BANDS.every((b) => SS[A.bandKey(b.code)] && SS[A.bandKey(b.code)].type === 'boolean' && SS[A.bandKey(b.code)].default === true && SS[A.bandKey(b.code)].label === b.name))
+    && SS[A.CAP_KEY].type === 'number' && SS[A.CAP_KEY].default === A.CAP && SS[A.CAP_KEY].min === A.CAP_MIN && SS[A.CAP_KEY].max === A.CAP_MAX && verdictOf(rowsB.every(([, r]) => r.block === 'bands' && r.liveApply === true)),
   'THE SETTINGS ROWS mirror the model: attention.band.<code> per band (boolean, on, labelled with the band\'s own words) + attention.cap (6, 4–8) — ONE block, live');
-  ok(/const bandPolicy = \(\) => settingsPolicy\(\(k\) => app\.settings\?\.get\?\.\(k\), \{ expanded: NEEDS_OPEN \}\);/.test(src('src/lib/channels-panel.js'))
-    && /const bands = A\.settingsPolicy\(\(k\) => serverSetting\(k\)\);/.test(src('src/server/channels-engine.js'))
-    && /bands: settingsPolicy\(get\), needsMe/.test(src('src/lib/sidebar-rail.js'))
-    && /const policy = settingsPolicy\(\(k\) => this\.app\?\.settings\?\.get\?\.\(k\)\);/.test(src('src/lib/sidebar-state.js')),
+  ok(gateOf(/const bandPolicy = \(\) => settingsPolicy\(\(k\) => app\.settings\?\.get\?\.\(k\), \{ expanded: NEEDS_OPEN \}\);/.test(src('src/lib/channels-panel.js')))
+    && gateOf(/const bands = A\.settingsPolicy\(\(k\) => serverSetting\(k\)\);/.test(src('src/server/channels-engine.js')))
+    && gateOf(/bands: settingsPolicy\(get\), needsMe/.test(src('src/lib/sidebar-rail.js')))
+    && verdictOf(/const policy = settingsPolicy\(\(k\) => this\.app\?\.settings\?\.get\?\.\(k\)\);/.test(src('src/lib/sidebar-state.js'))),
   'PIN: the Channels first screen, the server\'s Channels badge, the rail\'s groups half and the sidebar\'s rank all ask settingsPolicy');
-  ok(/toastWorthy\(attentionRow\(i, now\), attnPolicy\(\)\)/.test(PANEL) && /badgeOf\(todos\.open, Date\.now\(\), attnPolicy\(\)\)/.test(PANEL) && /inboxBadgeFor\(todos\.open, keys, now, attnPolicy\(\)\)/.test(PANEL)
-    && /bandLayout\(todos, \{ now, prev: bands, policy: attnPolicy\(\) \}\)/.test(PANEL) && /for \(const b of BANDS\) app\.settings\?\.on\?\.\(bandKey\(b\.code\), onPolicy\);/.test(PANEL),
+  ok(gateOf(/toastWorthy\(attentionRow\(i, now\), attnPolicy\(\)\)/.test(PANEL)) && gateOf(/badgeOf\(todos\.open, Date\.now\(\), attnPolicy\(\)\)/.test(PANEL)) && gateOf(/inboxBadgeFor\(todos\.open, keys, now, attnPolicy\(\)\)/.test(PANEL))
+    && gateOf(/bandLayout\(todos, \{ now, prev: bands, policy: attnPolicy\(\) \}\)/.test(PANEL)) && verdictOf(/for \(const b of BANDS\) app\.settings\?\.on\?\.\(bandKey\(b\.code\), onPolicy\);/.test(PANEL)),
   'PIN: the tray\'s toasts, badge, title-bar badges and bands read the policy; a switch / the cap re-renders it live (settings broadcast)');
 }
 
@@ -330,7 +330,7 @@ console.log('⑭ A SESSION AS A ROW — the sidebar\'s rank reads the band');
   ok(A.placeOf(r, NOW) === A.PARKED && r.source === 'session', 'an ask nobody answered for 8 days parks (搁置) like any other');
   ok(A.placeOf(A.sessionRowOf({ state: 'blocked', at: NOW }, { live: true, now: NOW }), NOW, A.settingsPolicy((k) => (k === 'attention.band.waiting' ? false : undefined))) === 5, 'waiting OFF ⇒ a blocked session ranks with the asks (band 5)');
   const SS = fs.readFileSync(path.join(ROOT, 'src/lib/sidebar-state.js'), 'utf8');
-  ok(/const row = sessionRowOf\(st, \{ key, live: isLive, waiting: waiting\.has\(key\), now \}\);/.test(SS) && /if \(ab !== bb\) return ab - bb;/.test(SS) && SS.indexOf('if (ab !== bb)') < SS.indexOf('if (ar !== br) return br - ar;'), 'PIN: _sortSessions orders by the band first (sessionRowOf + placeOf), the old rank only inside a band');
+  ok(gateOf(/const row = sessionRowOf\(st, \{ key, live: isLive, waiting: waiting\.has\(key\), now \}\);/.test(SS)) && gateOf(/if \(ab !== bb\) return ab - bb;/.test(SS)) && SS.indexOf('if (ab !== bb)') < SS.indexOf('if (ar !== br) return br - ar;'), 'PIN: _sortSessions orders by the band first (sessionRowOf + placeOf), the old rank only inside a band');
 }
 
 // ⑮ «MARK ALL READ» (lane inbox-fyi-mark-all): the bulk transition as the list sees it — the same items with every notice
@@ -351,4 +351,4 @@ console.log('⑮ the bulk read of every notice: the grey count drops to 0, the l
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

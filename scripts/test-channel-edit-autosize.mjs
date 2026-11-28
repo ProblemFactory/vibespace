@@ -24,7 +24,7 @@ const SHOTS = process.env.CEA_SHOTS || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lines = (n, w = 'line') => Array.from({ length: n }, (_, i) => `${w} ${i + 1} of the agent's draft`).join('\n');
 
@@ -97,24 +97,24 @@ const fits = (b) => b && b.sh - b.ch <= 1 && b.oy !== 'scroll' && b.oy !== 'auto
   console.log('\n① – ⑦ desk (a 640×720 conversation window)');
   const P = await page(640, 720, 'after.js');
   const b25 = await P.edit(lines(25));
-  ok(fits(b25) && b25.ch <= 0.6 * b25.pane + 1 && b25.ch > 20 * b25.lh, '① a 25-line draft opens with ALL its lines shown (no inner scrollbar, ≤ 60 % of the pane)', JSON.stringify(b25));
-  ok(b25.focused, '① …and the box has the focus', JSON.stringify(b25));
+  ok(gateOf(fits(b25)) && b25.ch <= 0.6 * b25.pane + 1 && b25.ch > 20 * b25.lh, '① a 25-line draft opens with ALL its lines shown (no inner scrollbar, ≤ 60 % of the pane)', JSON.stringify(b25));
+  ok(verdictOf(b25.focused), '① …and the box has the focus', JSON.stringify(b25));
   await P.shot('desk.png');
   const b3 = await P.edit(lines(3));
-  ok(Math.abs((b3.ch - b3.pad) - 4 * b3.lh) <= 2 && fits(b3), '② a 3-line draft opens at 4 rows', JSON.stringify(b3));
+  ok(Math.abs((b3.ch - b3.pad) - 4 * b3.lh) <= 2 && verdictOf(fits(b3)), '② a 3-line draft opens at 4 rows', JSON.stringify(b3));
   await P.ev(`(() => { const t = document.querySelector('.chan-prop-edit'); t.setSelectionRange(t.value.length, t.value.length); })()`);
   const before = await P.ev(BOX);
   for (let i = 0; i < 10; i++) await P.type('\nand one more typed line ' + (i + 1));
   const after = await P.ev(BOX);
-  ok(after.ch > before.ch + 8 * before.lh && fits(after), '③ typing 10 more lines grows the box with them', JSON.stringify({ before, after }));
-  ok(after.top === before.top && after.listTop === before.listTop && after.pageY === 0 && after.taTop === 0 && after.caretAtEnd, '③ …the list and the page did not scroll, the box did not move, the caret stays at the end in view', JSON.stringify({ before, after }));
+  ok(after.ch > before.ch + 8 * before.lh && verdictOf(fits(after)), '③ typing 10 more lines grows the box with them', JSON.stringify({ before, after }));
+  ok(after.top === before.top && after.listTop === before.listTop && after.pageY === 0 && after.taTop === 0 && verdictOf(after.caretAtEnd), '③ …the list and the page did not scroll, the box did not move, the caret stays at the end in view', JSON.stringify({ before, after }));
   const bw = await P.edit('word '.repeat(300).trim());
-  ok(fits(bw) && bw.ch - bw.pad > 5 * bw.lh, '④ ONE 1500-char line (no newline) grows by its wrapped width', JSON.stringify(bw));
+  ok(gateOf(fits(bw)) && bw.ch - bw.pad > 5 * bw.lh, '④ ONE 1500-char line (no newline) grows by its wrapped width', JSON.stringify(bw));
   const b200 = await P.edit(lines(200));
   ok(Math.abs((b200.ch - b200.pad) - Math.floor(0.6 * b200.pane)) <= 1 && b200.oy === 'auto' && b200.sh > b200.ch, '⑤ a 200-line draft is clamped at 60 % of the pane and scrolls inside', JSON.stringify(b200));
   await P.ev(`window.__composer(${JSON.stringify(lines(12, 'held'))})`); await P.frames();
   const comp = await P.ev(`(() => { const t = document.querySelector('.chanwin-composer textarea'); const cs = getComputedStyle(t); return { ch: t.clientHeight, sh: t.scrollHeight, oy: cs.overflowY, lh: parseFloat(cs.lineHeight) }; })()`);
-  ok(fits(comp) && comp.ch > 10 * comp.lh, '⑥ the composer holding a 12-line draft opens at its size', JSON.stringify(comp));
+  ok(gateOf(fits(comp)) && comp.ch > 10 * comp.lh, '⑥ the composer holding a 12-line draft opens at its size', JSON.stringify(comp));
   // ⑦ the person's drag on the resize handle (bottom-right corner of the box) wins over the next keystroke
   await P.edit(lines(6));
   const g = await P.ev(`(() => { const r = document.querySelector('.chan-prop-edit').getBoundingClientRect(); return [r.right - 3, r.bottom - 3, r.height]; })()`);
@@ -141,8 +141,8 @@ const fits = (b) => b && b.sh - b.ch <= 1 && b.oy !== 'scroll' && b.oy !== 'auto
   console.log('\nCONTROL');
   const P = await page(640, 720, 'ctl.js');
   const b = await P.edit(lines(25));
-  ok(b && !fits(b) && b.ch < 6 * b.lh, `CONTROL: without the binding a 25-line draft opens in a ${b && Math.round(b.h)} px box with an inner scrollbar (red)`, JSON.stringify(b));
+  ok(gateOf(b) && !fits(b) && b.ch < 6 * b.lh, `CONTROL: without the binding a 25-line draft opens in a ${b && Math.round(b.h)} px box with an inner scrollbar (red)`, JSON.stringify(b));
   P.close();
 }
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

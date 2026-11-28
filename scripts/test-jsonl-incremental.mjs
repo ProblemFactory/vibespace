@@ -45,7 +45,7 @@ import { scratchHome, fixtureSid } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 
 // the REAL home's project list, read BEFORE this process is re-homed — the per-suite
 // census at the end proves the fixture never landed there (test-fixture-isolation (c))
@@ -145,13 +145,13 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
   writeBig(fp, sid, 6 * 1048576, 1200);
   const m0 = metrics.length;
   const t0 = performance.now(); const p1 = parse(sid); const cold = performance.now() - t0;
-  ok(same(p1, oracle(fp)), `(a) cold parse equals the oracle (${p1.length} records, ${(fs.statSync(fp).size / 1048576).toFixed(1)} MB)`, diffAt(p1, oracle(fp)));
+  ok(verdictOf(same(p1, oracle(fp))), `(a) cold parse equals the oracle (${p1.length} records, ${(fs.statSync(fp).size / 1048576).toFixed(1)} MB)`, diffAt(p1, oracle(fp)));
   const before = fs.statSync(fp).size;
   append(fp, lines(sid, 100, 800));
   const appended = fs.statSync(fp).size - before;
   const m1 = metrics.length;
   const t1 = performance.now(); const p2 = parse(sid); const warm = performance.now() - t1;
-  ok(same(p2, oracle(fp)), `(a) after +100 records the cached parse equals a fresh parse (${p2.length} records)`, diffAt(p2, oracle(fp)));
+  ok(verdictOf(same(p2, oracle(fp))), `(a) after +100 records the cached parse equals a fresh parse (${p2.length} records)`, diffAt(p2, oracle(fp)));
   const read = bytesSince(m1);
   ok(bytesStamps(m1) === 1 && read === appended, `(a) the second parse read ONLY the appended bytes (srv-jsonl-parse-bytes ${read} = appended ${appended}; file ${fs.statSync(fp).size})`, { stamps: bytesStamps(m1), read, appended });
   ok(bytesSince(m0) - read === before, `(a) the cold parse stamped the whole file (${bytesSince(m0) - read} = ${before})`);
@@ -165,14 +165,14 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
   const fp = path.join(PROJ, sid + '.jsonl');
   writeBig(fp, sid, HEAD + TAIL - 1024 * 1024);            // 33 MiB: whole-file mode
   const p1 = parse(sid);
-  ok(same(p1, oracle(fp)), `(b) whole-file mode (${(fs.statSync(fp).size / 1048576).toFixed(2)} MB) equals the oracle`, diffAt(p1, oracle(fp)));
+  ok(verdictOf(same(p1, oracle(fp))), `(b) whole-file mode (${(fs.statSync(fp).size / 1048576).toFixed(2)} MB) equals the oracle`, diffAt(p1, oracle(fp)));
   let s0 = fs.statSync(fp).size;
   append(fp, lines(sid, 400, 4000));                         // crosses 34 MiB ⇒ tail mode
   let appended = fs.statSync(fp).size - s0;
   let m = metrics.length;
   const p2 = parse(sid);
   const o2 = oracle(fp);
-  ok(fs.statSync(fp).size > HEAD + TAIL && same(p2, o2), `(b) crossing into tail mode (${(fs.statSync(fp).size / 1048576).toFixed(2)} MB): the head slid, equal to a fresh tailOnly parse (${p1.length} → ${p2.length} records)`, diffAt(p2, o2));
+  ok(fs.statSync(fp).size > HEAD + TAIL && verdictOf(same(p2, o2)), `(b) crossing into tail mode (${(fs.statSync(fp).size / 1048576).toFixed(2)} MB): the head slid, equal to a fresh tailOnly parse (${p1.length} → ${p2.length} records)`, diffAt(p2, o2));
   ok(p2[0]?.uuid !== p1[0]?.uuid, `(b) the first record moved (${p1[0]?.uuid} → ${p2[0]?.uuid})`);
   ok(bytesSince(m) === appended, `(b) the slide read only the appended bytes (${bytesSince(m)} = ${appended})`);
   for (let round = 0; round < 3; round++) {
@@ -182,7 +182,7 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
     m = metrics.length;
     const p = parse(sid);
     const o = oracle(fp);
-    ok(same(p, o) && bytesSince(m) === appended, `(b) tail mode, append round ${round + 1} (+${(appended / 1024).toFixed(0)} KB): equal to the oracle, read ${bytesSince(m)} bytes`, same(p, o) ? { read: bytesSince(m), appended } : diffAt(p, o));
+    ok(gateOf(same(p, o)) && bytesSince(m) === appended, `(b) tail mode, append round ${round + 1} (+${(appended / 1024).toFixed(0)} KB): equal to the oracle, read ${bytesSince(m)} bytes`, same(p, o) ? { read: bytesSince(m), appended } : diffAt(p, o));
   }
 }
 
@@ -198,19 +198,19 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
   fs.truncateSync(fp, cut);
   let m = metrics.length;
   let p = parse(sid);
-  ok(same(p, oracle(fp)) && bytesSince(m) === cut, `(c) truncated to ${cut} bytes: a full re-read (${bytesSince(m)} bytes), equal`, diffAt(p, oracle(fp)));
+  ok(gateOf(same(p, oracle(fp))) && bytesSince(m) === cut, `(c) truncated to ${cut} bytes: a full re-read (${bytesSince(m)} bytes), equal`, diffAt(p, oracle(fp)));
   // replace: a NEW file (new inode) that is LARGER and starts with the same bytes
   const tmp = fp + '.tmp';
   fs.writeFileSync(tmp, fs.readFileSync(fp).toString('utf-8').replace(/问题/, '问答') + lines(sid, 50, 900));
   fs.renameSync(tmp, fp);
   m = metrics.length;
   p = parse(sid);
-  ok(same(p, oracle(fp)) && bytesSince(m) === fs.statSync(fp).size, `(c) replaced by a larger file (new inode): a full re-read (${bytesSince(m)} bytes), equal`, diffAt(p, oracle(fp)));
+  ok(gateOf(same(p, oracle(fp))) && bytesSince(m) === fs.statSync(fp).size, `(c) replaced by a larger file (new inode): a full re-read (${bytesSince(m)} bytes), equal`, diffAt(p, oracle(fp)));
   // rotate: the SAME inode rewritten from byte 0 with different, longer content
   fs.writeFileSync(fp, lines(sid, 3000, 500));
   m = metrics.length;
   p = parse(sid);
-  ok(same(p, oracle(fp)) && bytesSince(m) === fs.statSync(fp).size, `(c) rewritten in place from byte 0: a full re-read, equal (${p.length} records)`, diffAt(p, oracle(fp)));
+  ok(gateOf(same(p, oracle(fp))) && bytesSince(m) === fs.statSync(fp).size, `(c) rewritten in place from byte 0: a full re-read, equal (${p.length} records)`, diffAt(p, oracle(fp)));
 }
 
 // ── (d) the unterminated trailing line ──
@@ -223,22 +223,22 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
   const half = Buffer.from(rec).subarray(0, 23);            // mid-record, mid-nothing-parseable
   append(fp, half);
   let p = parse(sid);
-  ok(same(p, oracle(fp)) && !p.some((r) => r.uuid === 'partial-1'), '(d) a half-written line is excluded (equal to the oracle)');
+  ok(gateOf(same(p, oracle(fp))) && !p.some((r) => r.uuid === 'partial-1'), '(d) a half-written line is excluded (equal to the oracle)');
   append(fp, Buffer.from(rec).subarray(23));
   append(fp, '\n' + lines(sid, 5, 300));
   p = parse(sid);
-  ok(same(p, oracle(fp)) && p.filter((r) => r.uuid === 'partial-1').length === 1, '(d) completed on the next append: included exactly ONCE, equal to the oracle', diffAt(p, oracle(fp)));
+  ok(gateOf(same(p, oracle(fp))) && p.filter((r) => r.uuid === 'partial-1').length === 1, '(d) completed on the next append: included exactly ONCE, equal to the oracle', diffAt(p, oracle(fp)));
   // a VALID record with no newline yet: the oracle parses it — so must we…
   const rec2 = JSON.stringify({ type: 'user', uuid: 'partial-2', timestamp: ts(), sessionId: sid, message: { role: 'user', content: [{ type: 'text', text: 'no newline yet 世界' }] } });
   append(fp, rec2);
   p = parse(sid);
-  ok(same(p, oracle(fp)) && p.filter((r) => r.uuid === 'partial-2').length === 1, '(d) a VALID unterminated line is included, as the oracle includes it');
+  ok(gateOf(same(p, oracle(fp))) && p.filter((r) => r.uuid === 'partial-2').length === 1, '(d) a VALID unterminated line is included, as the oracle includes it');
   // …and when its newline and more records land, it is still there ONCE
   const m = metrics.length;
   const tailText = '\n' + lines(sid, 3, 300);
   append(fp, tailText);
   p = parse(sid);
-  ok(same(p, oracle(fp)) && p.filter((r) => r.uuid === 'partial-2').length === 1, '(d) terminated + followed: still exactly ONCE, equal to the oracle', diffAt(p, oracle(fp)));
+  ok(gateOf(same(p, oracle(fp))) && p.filter((r) => r.uuid === 'partial-2').length === 1, '(d) terminated + followed: still exactly ONCE, equal to the oracle', diffAt(p, oracle(fp)));
   ok(bytesSince(m) === Buffer.byteLength(rec2) + Buffer.byteLength(tailText), `(d) the unterminated bytes are re-read, nothing else (${bytesSince(m)} bytes)`);
 }
 
@@ -274,8 +274,8 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
   append(fp, lines(sid, 20, 300));
   const m = metrics.length;
   const p = parse(sid);
-  ok(fs.statSync(fp).ino === ino && same(p, oracle(fp)) && bytesSince(m) === fs.statSync(fp).size, `(f) head byte rewritten + grown (same inode): a FULL re-read (${bytesSince(m)} bytes of ${fs.statSync(fp).size}), equal`, diffAt(p, oracle(fp)));
-  ok(p[0]?.message?.content?.[0]?.text?.startsWith('问题 9'), '(f) the rewritten byte is visible (never the stale cached record)');
+  ok(fs.statSync(fp).ino === ino && gateOf(same(p, oracle(fp))) && bytesSince(m) === fs.statSync(fp).size, `(f) head byte rewritten + grown (same inode): a FULL re-read (${bytesSince(m)} bytes of ${fs.statSync(fp).size}), equal`, diffAt(p, oracle(fp)));
+  ok(verdictOf(p[0]?.message?.content?.[0]?.text?.startsWith('问题 9')), '(f) the rewritten byte is visible (never the stale cached record)');
 }
 
 // ── (g) the async warm (the attach entry point) ──
@@ -288,7 +288,7 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
   ok(warmed === true, '(g) the cold warm filled the cache (worker or inline)');
   let m = metrics.length;
   const p0 = parse(sid);
-  ok(same(p0, oracle(fp)) && bytesStamps(m) === 0, '(g) the sync parse after the warm is a hit, equal to the oracle');
+  ok(gateOf(same(p0, oracle(fp))) && bytesStamps(m) === 0, '(g) the sync parse after the warm is a hit, equal to the oracle');
   const s0 = fs.statSync(fp).size;
   append(fp, lines(sid, 40, 500));
   m = metrics.length;
@@ -296,7 +296,7 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
   ok(bytesSince(m) === fs.statSync(fp).size - s0, `(g) …by reading only the appended bytes (${bytesSince(m)} = ${fs.statSync(fp).size - s0}) — a worker-built entry is incremental-capable`);
   m = metrics.length;
   const p1 = parse(sid);
-  ok(same(p1, oracle(fp)) && bytesStamps(m) === 0, '(g) and the sync parse after it is a hit, equal to the oracle');
+  ok(gateOf(same(p1, oracle(fp))) && bytesStamps(m) === 0, '(g) and the sync parse after it is a hit, equal to the oracle');
 }
 
 // ── (h) SessionMessages over the incremental cache = over a cold cache ──
@@ -341,4 +341,4 @@ const parse = (sid) => store.parseSessionJsonl(sid, CWD);
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

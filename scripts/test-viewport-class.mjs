@@ -35,7 +35,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const V = require(path.join(REPO, 'src/viewport-class.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 console.log('① viewportClassOf');
@@ -63,13 +63,13 @@ console.log('① viewportClassOf');
   for (const [inp, want, what] of rows) ok(V.viewportClassOf(inp) === want, `${what} ⇒ ${want}`, V.viewportClassOf(inp));
   ok(V.viewportClassOf({ width: 0, prev: 'compact' }) === 'compact' && V.viewportClassOf({ width: 0, prev: 'desktop' }) === 'desktop', 'a hidden page (width 0) keeps the class it had — never a switch on a measurement that is not one');
   ok(V.viewportClassOf({}) === 'desktop' && V.viewportClassOf({ width: NaN }) === 'desktop', 'no measurement and no class yet ⇒ the desktop (the boot default of a page that measures nothing)');
-  ok(V.isPhoneClass('compact') && V.isPhoneClass('regular') && !V.isPhoneClass('desktop') && !V.isPhoneClass(null), 'isPhoneClass: compact AND regular run the phone paths, desktop the window manager');
-  ok(V.listIsColumn('regular') && !V.listIsColumn('compact') && !V.listIsColumn('desktop'), 'listIsColumn: only the regular class keeps the list as a column (never an overlay)');
+  ok(gateOf(V.isPhoneClass('compact')) && gateOf(V.isPhoneClass('regular')) && !V.isPhoneClass('desktop') && !V.isPhoneClass(null), 'isPhoneClass: compact AND regular run the phone paths, desktop the window manager');
+  ok(gateOf(V.listIsColumn('regular')) && !V.listIsColumn('compact') && !V.listIsColumn('desktop'), 'listIsColumn: only the regular class keeps the list as a column (never an overlay)');
 }
 
 console.log('② the ONE line');
 {
-  ok(['(max-width: 768px)', '(min-width: 640px)', '(max-width: 1023px)', '(pointer: coarse)', '(orientation: portrait)'].every((q) => V.VC_WATCH_QUERIES.includes(q)), 'the watched queries: every line of the class, the pointer and the orientation', V.VC_WATCH_QUERIES);
+  ok(verdictOf(['(max-width: 768px)', '(min-width: 640px)', '(max-width: 1023px)', '(pointer: coarse)', '(orientation: portrait)'].every((q) => V.VC_WATCH_QUERIES.includes(q))), 'the watched queries: every line of the class, the pointer and the orientation', V.VC_WATCH_QUERIES);
   ok(V.VC_PHONE_MEDIA === '(max-width: 768px), (pointer: coarse) and (max-width: 1023px)', 'VC_PHONE_MEDIA = compact ∪ regular as ONE media-query list (a mouse below 769, a finger below 1024)', V.VC_PHONE_MEDIA);
   const css = ['public/style.css', 'public/chat.css', 'public/viewers.css'].map(read).join('\n');
   const phoneBlocks = css.split('@media ' + V.VC_PHONE_MEDIA + ' {').length - 1, bare = css.split('@media (max-width: 768px) {').length - 1;
@@ -89,29 +89,29 @@ console.log('③ switchVerdict');
   const f = V.switchVerdict('desktop', 'compact'), u = V.switchVerdict('compact', 'desktop');
   ok(f.act === 'tier' && f.phone === true && u.act === 'tier' && u.phone === false, 'a fold across the line: the tier switch to the phone; an unfold: back to the window manager', [f, u]);
   const c = V.switchVerdict('regular', 'compact'), r = V.switchVerdict('compact', 'regular');
-  ok(c.act === 'restyle' && r.act === 'restyle' && c.phone && r.phone, 'the Duo\'s own fold (regular ⇄ compact): a restyle — the same phone pieces, another arrangement', [c, r]);
+  ok(c.act === 'restyle' && r.act === 'restyle' && gateOf(c.phone) && verdictOf(r.phone), 'the Duo\'s own fold (regular ⇄ compact): a restyle — the same phone pieces, another arrangement', [c, r]);
 }
 
 console.log('④ wiring pins');
 {
   const app = read('src/lib/app.js'), sw = read('src/lib/viewport-switch.js'), win = read('src/lib/window.js'), sb = read('src/lib/sidebar.js'), rail = read('src/lib/sidebar-rail.js');
   const frozen = (src) => /this\.isMobile\s*=\s*window\.matchMedia\(/.test(src);
-  ok(!frozen(app) && /this\._vc = readViewportClass\(\);\s*\n\s*this\.isMobile = isPhoneClass\(this\._vc\);/.test(app), 'app.isMobile is the class\'s answer at boot — never a frozen matchMedia');
-  ok(frozen(`    this.isMobile = window.matchMedia('(max-width: 768px)').matches;`), 'RED CONTROL: the base\'s frozen boot-time line is caught by the pin');
-  ok(/this\._viewportSwitch = installViewportSwitch\(this\);/.test(app) && /viewportClass\(\) \{ return this\._vc; \}/.test(app), 'the App installs the switch and answers viewportClass()');
-  ok(/for \(const q of VC_WATCH_QUERIES\)/.test(sw) && /setTimeout\(settle, VC_SETTLE_MS\)/.test(sw) && /addEventListener\('resize', kick\)/.test(sw), 'the switch watches every query + resize and settles VC_SETTLE_MS before it acts');
-  ok(/switchVerdict\(prev, next\)/.test(sw) && /app\.isMobile = isPhoneClass\(next\)/.test(sw) && /dataset\.vc = next/.test(sw), 'a switch moves app.isMobile and <html data-vc> together, by switchVerdict');
-  ok(/app\.sidebar\?\.setPhoneMode\?\.\(true\)/.test(sw) && /app\.sidebar\?\.setPhoneMode\?\.\(false\)/.test(sw) && /app\.wm\?\.refitForViewport\?\.\(true\)/.test(sw) && /app\.wm\?\.refitForViewport\?\.\(false\)/.test(sw), 'both ways: the sidebar mode and the windows\' refit');
-  ok(/new MobileNav\(app\)/.test(sw) && /installMobileBack\(app\)/.test(sw) && /installSessionPalette\(app\)/.test(sw), 'what only a boot built is built at the first crossing (the nav, the back gesture, the palette)');
-  ok(/refitForViewport\(phone\) \{/.test(win) && /this\._focusMostRecent\(\)/.test(win.slice(win.indexOf('refitForViewport(phone) {'))) && /w\.onResize\(\)/.test(win.slice(win.indexOf('refitForViewport(phone) {'), win.indexOf('_scheduleReflowWindows() {'))), 'the window manager refits: the phone shows one window, every view re-measures');
-  ok(/setPhoneMode\(phone\) \{[\s\S]{0,400}this\._removeRail\?\.\(\); else this\._railInit\?\.\(\);/.test(sb), 'the sidebar removes the rail on the phone and builds it on the desktop');
-  ok(/classList\.remove\('rail-on', 'rail-collapsed', 'rail-labelled'\)/.test(rail) && /if \(!this\._railApplySetting\)/.test(rail), 'the rail leaves with its words (B-f5ec: the labelled strip stayed on the cover); its setting listeners are wired once');
-  ok(/app\.sidebar\?\.setRegularMode\?\.\(next === 'regular'\)/.test(sw) && /if \(app\._vc === 'regular'\) \{ try \{ app\.sidebar\?\.setRegularMode\?\.\(true\)/.test(sw), 'slice 2: the list column\'s mode follows every switch AND a page born regular');
-  ok(/if \(this\._regularMode\) \{ if \(force === true\) this\.setListHidden\(false\); return; \}/.test(sb), 'slice 2: in the regular class the phone\'s «close the drawer» never closes the list column (only an explicit show shows a hidden one)');
+  ok(!frozen(app) && verdictOf(/this\._vc = readViewportClass\(\);\s*\n\s*this\.isMobile = isPhoneClass\(this\._vc\);/.test(app)), 'app.isMobile is the class\'s answer at boot — never a frozen matchMedia');
+  ok(verdictOf(frozen(`    this.isMobile = window.matchMedia('(max-width: 768px)').matches;`)), 'RED CONTROL: the base\'s frozen boot-time line is caught by the pin');
+  ok(gateOf(/this\._viewportSwitch = installViewportSwitch\(this\);/.test(app)) && verdictOf(/viewportClass\(\) \{ return this\._vc; \}/.test(app)), 'the App installs the switch and answers viewportClass()');
+  ok(gateOf(/for \(const q of VC_WATCH_QUERIES\)/.test(sw)) && gateOf(/setTimeout\(settle, VC_SETTLE_MS\)/.test(sw)) && verdictOf(/addEventListener\('resize', kick\)/.test(sw)), 'the switch watches every query + resize and settles VC_SETTLE_MS before it acts');
+  ok(gateOf(/switchVerdict\(prev, next\)/.test(sw)) && gateOf(/app\.isMobile = isPhoneClass\(next\)/.test(sw)) && verdictOf(/dataset\.vc = next/.test(sw)), 'a switch moves app.isMobile and <html data-vc> together, by switchVerdict');
+  ok(gateOf(/app\.sidebar\?\.setPhoneMode\?\.\(true\)/.test(sw)) && gateOf(/app\.sidebar\?\.setPhoneMode\?\.\(false\)/.test(sw)) && gateOf(/app\.wm\?\.refitForViewport\?\.\(true\)/.test(sw)) && verdictOf(/app\.wm\?\.refitForViewport\?\.\(false\)/.test(sw)), 'both ways: the sidebar mode and the windows\' refit');
+  ok(gateOf(/new MobileNav\(app\)/.test(sw)) && gateOf(/installMobileBack\(app\)/.test(sw)) && verdictOf(/installSessionPalette\(app\)/.test(sw)), 'what only a boot built is built at the first crossing (the nav, the back gesture, the palette)');
+  ok(gateOf(/refitForViewport\(phone\) \{/.test(win)) && gateOf(/this\._focusMostRecent\(\)/.test(win.slice(win.indexOf('refitForViewport(phone) {')))) && verdictOf(/w\.onResize\(\)/.test(win.slice(win.indexOf('refitForViewport(phone) {'), win.indexOf('_scheduleReflowWindows() {')))), 'the window manager refits: the phone shows one window, every view re-measures');
+  ok(verdictOf(/setPhoneMode\(phone\) \{[\s\S]{0,400}this\._removeRail\?\.\(\); else this\._railInit\?\.\(\);/.test(sb)), 'the sidebar removes the rail on the phone and builds it on the desktop');
+  ok(gateOf(/classList\.remove\('rail-on', 'rail-collapsed', 'rail-labelled'\)/.test(rail)) && verdictOf(/if \(!this\._railApplySetting\)/.test(rail)), 'the rail leaves with its words (B-f5ec: the labelled strip stayed on the cover); its setting listeners are wired once');
+  ok(gateOf(/app\.sidebar\?\.setRegularMode\?\.\(next === 'regular'\)/.test(sw)) && verdictOf(/if \(app\._vc === 'regular'\) \{ try \{ app\.sidebar\?\.setRegularMode\?\.\(true\)/.test(sw)), 'slice 2: the list column\'s mode follows every switch AND a page born regular');
+  ok(verdictOf(/if \(this\._regularMode\) \{ if \(force === true\) this\.setListHidden\(false\); return; \}/.test(sb)), 'slice 2: in the regular class the phone\'s «close the drawer» never closes the list column (only an explicit show shows a hidden one)');
   const bar = read('src/lib/trailing-bar.js');
-  ok(['Task Groups', 'Files', 'Channels', 'Agent browser', 'Background Work'].every((l) => bar.includes(`label: '${l}'`)) && (bar.match(/\{ id: '[a-z]+', label:/g) || []).length === 5, 'slice 2b: the trailing bar\'s bottom section = the owner\'s five global destinations, in this order, then ⚙');
+  ok(gateOf(['Task Groups', 'Files', 'Channels', 'Agent browser', 'Background Work'].every((l) => bar.includes(`label: '${l}'`))) && (bar.match(/\{ id: '[a-z]+', label:/g) || []).length === 5, 'slice 2b: the trailing bar\'s bottom section = the owner\'s five global destinations, in this order, then ⚙');
   const ci = read('src/lib/chat-input.js'), door = ci.slice(ci.indexOf('  focus() {'), ci.indexOf('  focus() {') + 900);
-  ok(/if \(keyboardOwned\(\)\) return;[\s\S]*if \(isTouchDevice\(\)\) return;\s*\n\s*if \(this\._textarea\) this\._textarea\.focus\(\);/.test(door), 'slice 1: the composer\'s focus door stands down on a touch screen (no keyboard on load) — before it focuses the box');
+  ok(verdictOf(/if \(keyboardOwned\(\)\) return;[\s\S]*if \(isTouchDevice\(\)\) return;\s*\n\s*if \(this\._textarea\) this\._textarea\.focus\(\);/.test(door)), 'slice 1: the composer\'s focus door stands down on a touch screen (no keyboard on load) — before it focuses the box');
 }
 
 console.log('⑤ the system\'s edges (B-78db, 主开发 r3933): cover for the home-screen copy, the Duo\'s side column, every edge its inset');
@@ -126,7 +126,7 @@ console.log('⑤ the system\'s edges (B-78db, 主开发 r3933): cover for the ho
   };
   const tab = fake(false), home = fake(true), homeMq = fake(undefined, true), again = fake(true, false, 'width=device-width, viewport-fit=cover');
   const r = [SC.coverIfStandalone(tab.doc, tab.win), SC.coverIfStandalone(home.doc, home.win), SC.coverIfStandalone(homeMq.doc, homeMq.win), SC.coverIfStandalone(again.doc, again.win)];
-  ok(!r[0] && tab.meta.c === 'width=device-width, initial-scale=1.0' && r[1] && /, viewport-fit=cover$/.test(home.meta.c) && home.doc.documentElement.dataset.standalone === '1' && !r[2] && homeMq.meta.c === 'width=device-width, initial-scale=1.0' && r[3] && again.meta.c.split('viewport-fit').length === 2,
+  ok(!r[0] && tab.meta.c === 'width=device-width, initial-scale=1.0' && gateOf(r[1]) && gateOf(/, viewport-fit=cover$/.test(home.meta.c)) && home.doc.documentElement.dataset.standalone === '1' && !r[2] && homeMq.meta.c === 'width=device-width, initial-scale=1.0' && gateOf(r[3]) && again.meta.c.split('viewport-fit').length === 2,
     '⑤ viewport-fit=cover is set for an iPHONE\'s or iPAD\'s HOME-SCREEN copy only (navigator.standalone — 主开发 r4115: an Android or a desktop installed copy, display-mode standalone, stays as at the release) — a Safari tab keeps «contain»; set once', { tab: tab.meta.c, home: home.meta.c, mq: homeMq.meta.c, again: again.meta.c });
   const cols = [[{ left: 0, right: 84 }, 'right', 'the Duo, either display (the simulator: right 84, left 0)'], [{ left: 0, right: 80 }, 'right', 'the floor of the heuristic'], [{ left: 0, right: 79 }, null, 'one under the floor (r4115 (e): the edge)'],
     [{ left: 59, right: 59 }, null, 'a notched iPhone held landscape (the same inset on both sides)'], [{ left: 0, right: 59 }, null, 'a sensor housing on one side, under 80'], [{ left: 0, right: 0 }, null, 'a Safari tab / no inset'], [{ left: 84, right: 84 }, null, 'insets on both sides'],
@@ -150,11 +150,11 @@ console.log('⑤ the system\'s edges (B-78db, 主开发 r3933): cover for the ho
     };
   };
   const E = edgesOk(CSS);
-  ok(Object.values(E).every(Boolean), '⑤ every edge takes its inset: the compact content and top bar, the list overlay and the six full-width sheets clear of the side insets; the trailing bar\'s safe default (its ground into the inset, its buttons clear); on the Duo\'s column the bar INSIDE it, as wide as it, its buttons from 112 px (76 measured + 36 for a Live Activity); the list column\'s foot clear of the home indicator', E);
+  ok(verdictOf(Object.values(E).every(Boolean)), '⑤ every edge takes its inset: the compact content and top bar, the list overlay and the six full-width sheets clear of the side insets; the trailing bar\'s safe default (its ground into the inset, its buttons clear); on the Duo\'s column the bar INSIDE it, as wide as it, its buttons from 112 px (76 measured + 36 for a Live Activity); the list column\'s foot clear of the home indicator', E);
   const R = edgesOk(CSS.slice(0, CSS.indexOf('\n/* ── THE SYSTEM\'s EDGES (B-78db')));
   ok(!R.safeDefault && !R.column && !R.compact, '⑤ RED CONTROL: the release\'s stylesheet (the trailing bar at right 0, 56 px, no inset) is caught — under cover its buttons would stand inside the system\'s column', R);
   const CLIENT = read('src/client.js');
-  ok(/try \{ installSideColumn\(\); \} catch \{ \}/.test(CLIENT) && CLIENT.indexOf('installSideColumn();') < CLIENT.indexOf('const exitHop = continueExit();') && !/viewport-fit/.test(read('public/index.html')),
+  ok(gateOf(/try \{ installSideColumn\(\); \} catch \{ \}/.test(CLIENT)) && CLIENT.indexOf('installSideColumn();') < CLIENT.indexOf('const exitHop = continueExit();') && !/viewport-fit/.test(read('public/index.html')),
     '⑤ the client sets cover and reads the column BEFORE the app lays out (src/client.js, at the top); public/index.html carries no viewport-fit (a Safari tab stays «contain»)');
 }
 
@@ -168,23 +168,23 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
   const roomOf = (h, shape) => h - SC.COLUMN_TOP[shape] - 34;
   const inner = SC.columnFit({ room: roomOf(648, 'inner'), items: col('inner'), gap: 6, yields: SC.COLUMN_YIELDS.inner });
   const outer = SC.columnFit({ room: roomOf(657, 'outer'), items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer });
-  ok(inner.fits && !inner.yielded.length && inner.need === 308 && outer.fits && !outer.yielded.length && outer.need === 408,
+  ok(gateOf(inner.fits) && !inner.yielded.length && inner.need === 308 && gateOf(outer.fits) && !outer.yielded.length && outer.need === 408,
     `⑤b at the real columns every default button stands: inner ${inner.need} of ${roomOf(648, 'inner')} px (For you · Task Groups · Files · Channels · Desktops · ⚙), outer ${outer.need} of ${roomOf(657, 'outer')} px (☰ · For you · + · Task Groups · Files · Channels · Desktops · ⚙)`, { inner, outer });
   // RED CONTROL: the release's column — the owner's picture (11 buttons, ⚙ cut at the bottom) — overflows the same room; the law yields
   const release = col('inner', ['artifacts', 'more', 'browser', 'jobs', 'search']);
   const rel = SC.columnFit({ room: roomOf(648, 'inner'), items: release, gap: 6, yields: [] });
   const relLaw = SC.columnFit({ room: roomOf(648, 'inner'), items: release, gap: 6, yields: SC.COLUMN_YIELDS.inner });
-  ok(!rel.fits && rel.need === 558 && roomOf(648, 'inner') === 502 && relLaw.fits && relLaw.yielded.join() === 'desktops,channels',
+  ok(!rel.fits && rel.need === 558 && roomOf(648, 'inner') === 502 && gateOf(relLaw.fits) && relLaw.yielded.join() === 'desktops,channels',
     `⑤b RED CONTROL: the release's eleven at the inner column need ${rel.need} px of ${roomOf(648, 'inner')} — the overflow the owner saw (⚙ cut); the law alone would take ${relLaw.yielded.join(' · ')} out and keep the conversation's five — r3949 takes THOSE out instead`, { rel, relLaw });
   // a zoomed page / a short column: the stated order, the fewest yields
   const z = SC.columnFit({ room: 300, items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer });
   const z2 = SC.columnFit({ room: 210, items: col('inner'), gap: 6, yields: SC.COLUMN_YIELDS.inner });
-  ok(z.fits && z.yielded.join() === 'desktops,channels,files' && z.need === 258 && z2.fits && z2.yielded.join() === 'desktops,channels' && z2.need === 208,
+  ok(gateOf(z.fits) && z.yielded.join() === 'desktops,channels,files' && z.need === 258 && gateOf(z2.fits) && z2.yielded.join() === 'desktops,channels' && z2.need === 208,
     `⑤b a short column yields in the stated order, the fewest that fit: outer at 300 px → ${z.yielded.join(' · ')} (${z.need}); inner at 210 px → ${z2.yielded.join(' · ')} (${z2.need})`, { z, z2 });
   const floor = SC.columnFit({ room: 58, items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer }), under = SC.columnFit({ room: 57, items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer });
-  ok(floor.fits && floor.shown.join() === 'gap,gear' && !under.fits && under.shown.join() === 'gap,gear', '⑤b ⚙ never yields (every other row is reached through it): its floor is 58 px (⚙ 44 + the gap 8 + 6) — below it the verdict says «does not fit», never a lie', { floor, under });
+  ok(gateOf(floor.fits) && floor.shown.join() === 'gap,gear' && !under.fits && under.shown.join() === 'gap,gear', '⑤b ⚙ never yields (every other row is reached through it): its floor is 58 px (⚙ 44 + the gap 8 + 6) — below it the verdict says «does not fit», never a lie', { floor, under });
   const ys = [...SC.COLUMN_YIELDS.inner, ...SC.COLUMN_YIELDS.outer, ...SC.COLUMN_YIELDS.bar];   // r4185: the bar's yields need their rows too
-  ok(!ys.includes('gear') && ['inner', 'outer'].every((k) => SC.COLUMN_BUTTONS[k].at(-1) === 'gear' && SC.COLUMN_YIELDS[k].every((y) => SC.COLUMN_BUTTONS[k].includes(y)) && SC.COLUMN_BUTTONS[k].slice(0, -1).every((b) => SC.COLUMN_YIELDS[k].includes(b))),
+  ok(!ys.includes('gear') && verdictOf(['inner', 'outer'].every((k) => SC.COLUMN_BUTTONS[k].at(-1) === 'gear' && SC.COLUMN_YIELDS[k].every((y) => SC.COLUMN_BUTTONS[k].includes(y)) && SC.COLUMN_BUTTONS[k].slice(0, -1).every((b) => SC.COLUMN_YIELDS[k].includes(b)))),
     '⑤b the order is total: every column button but ⚙ is named in its display\'s yield order, ⚙ last and never yielding', SC.COLUMN_YIELDS);
   // r4185 (for «.420»): THE BAR's OWN YIELD — the regular class's trailing bar held landscape with NO column. At 844×390 (the
   // bottom inset 21) and 667×375 (none) its room is 361 / 359 px; with a chat on show its doors are Artifacts · search · ⋯ | gap |
@@ -194,7 +194,7 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
   const b390 = SC.columnFit({ room: 390 - 8 - 21, items: barItems, gap: 6, yields: SC.COLUMN_YIELDS.bar });
   const b375 = SC.columnFit({ room: 375 - 16, items: barItems, gap: 6, yields: SC.COLUMN_YIELDS.bar });
   const bRel = SC.columnFit({ room: 361, items: barItems, gap: 6, yields: [] });
-  ok(b390.fits && b390.yielded.join() === 'jobs,browser,desktops,channels' && b390.need === 358 && b375.fits && b375.yielded.join() === b390.yielded.join()
+  ok(gateOf(b390.fits) && b390.yielded.join() === 'jobs,browser,desktops,channels' && b390.need === 358 && gateOf(b375.fits) && b375.yielded.join() === b390.yielded.join()
     && !bRel.fits && bRel.need === 558 && !SC.COLUMN_YIELDS.bar.some((k) => ['artifacts', 'search', 'more', 'live', 'close', 'gear'].includes(k)),
     `⑤b the bar's own yield (r4185): at 844×390 and 667×375 it yields ${b390.yielded.join(' · ')} (${b390.need} of 361 / 359 px); never a conversation door, never ⚙ — RED CONTROL: the release's bar needs ${bRel.need}`, { b390, b375, bRel });
   const doc = (vc, sidecol) => ({ documentElement: { dataset: { vc, ...(sidecol ? { sidecol } : {}) } } });
@@ -208,14 +208,14 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
   const outIn = /html\[data-vc="regular"\]\[data-sidecol\] #mobile-nav :is\(#mobile-nav-artifacts, #mobile-nav-live, #mobile-nav-search, #mobile-nav-dest-browser, #mobile-nav-dest-jobs\) \{ display: none !important; \}/.test(B);
   const outOut = /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav :is\(#mobile-nav-title, #mobile-nav-state, #mobile-nav-search, #mobile-nav-close, #mobile-nav-overflow, #mobile-nav-usage, #mobile-nav-vault, #mobile-nav-artifacts, #mobile-nav-live, #mobile-nav-dest-browser, #mobile-nav-dest-jobs\) \{ display: none !important; \}/.test(B);
   const head = ['regular', 'compact'].every((vc) => B.includes(`html[data-vc="${vc}"][data-sidecol][data-onshow="chat"] #mobile-nav #mobile-nav-more { display: none !important; }`) && B.includes(`html[data-vc="${vc}"][data-sidecol] #mobile-nav :is(#mobile-nav-viewer-close, #mobile-nav-more).on {`));
-  ok(outIn && outOut && head, '⑤b OUT of the column on both displays: Artifacts, the live view, this conversation\'s search, Agent browser, Background Work (and on the outer the name row\'s controls, the width-fold ⋯, Usage, the lock); a chat\'s ⋯ is its strip\'s; a viewer\'s ✕ and a terminal\'s ⋯ stand at the head\'s end', { outIn, outOut, head });
+  ok(gateOf(outIn) && gateOf(outOut) && verdictOf(head), '⑤b OUT of the column on both displays: Artifacts, the live view, this conversation\'s search, Agent browser, Background Work (and on the outer the name row\'s controls, the width-fold ⋯, Usage, the lock); a chat\'s ⋯ is its strip\'s; a viewer\'s ✕ and a terminal\'s ⋯ stand at the head\'s end', { outIn, outOut, head });
   const innerOrder = ['#mobile-nav-todos', '#mobile-nav-dest-tasks', '#mobile-nav-files', '#mobile-nav-dest-channels', '#mobile-nav-desktops'].map((id, k) => new RegExp(`html\\[data-vc="regular"\\]\\[data-sidecol\\] (#mobile-nav )?${id} \\{ order: ${11 + k}; \\}`).test(B)).every(Boolean);
   const outerOrder = ['#mobile-nav-menu', '#mobile-nav-todos', '#mobile-nav-new', '#mobile-nav-dest-tasks', '#mobile-nav-files', '#mobile-nav-dest-channels', '#mobile-nav-desktops'].map((id, k) => new RegExp(`html\\[data-vc="compact"\\]\\[data-sidecol\\] (#mobile-nav )?${id} \\{ order: ${1 + k}[;]`).test(B)).every(Boolean);
-  ok(innerOrder && outerOrder && /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav-gear \{ order: 20; \}/.test(B) && /html\[data-vc="regular"\]\[data-sidecol\] #mobile-nav \.mnav-gap \{ order: 19; \}/.test(B),
+  ok(gateOf(innerOrder) && gateOf(outerOrder) && gateOf(/html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav-gear \{ order: 20; \}/.test(B)) && verdictOf(/html\[data-vc="regular"\]\[data-sidecol\] #mobile-nav \.mnav-gap \{ order: 19; \}/.test(B)),
     '⑤b IN the column, in COLUMN_BUTTONS\' order: inner For you · Task Groups · Files · Channels · Desktops · ⚙ last; outer ☰ · For you · + · Task Groups · Files · Channels · Desktops · ⚙ last', { innerOrder, outerOrder });
   const tops = new RegExp(`padding: var\\(--sidecol-top, ${SC.COLUMN_TOP.outer}px\\) 0 max\\(8px, env\\(safe-area-inset-bottom, 0px\\)\\) !important;`).test(B) && CSS.includes(`padding-top: var(--sidecol-top, ${SC.COLUMN_TOP.inner}px);`);
-  ok(tops && /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav \{\s*position: fixed !important; top: 0; right: 0; bottom: 0; left: auto; width: max\(56px, env\(safe-area-inset-right, 0px\)\);[^}]*flex-direction: column;/.test(B) && /html\[data-vc\] #mobile-nav > :is\(#mobile-nav-menu, #mobile-nav-todos, #mobile-nav-new, #mobile-nav-files, #mobile-nav-desktops, \.mnav-dest\)\.col-yield \{ display: none !important; \}/.test(B)
-    && /html\[data-vc="compact"\]\[data-sidecol\] \.window\.window-active > \.window-titlebar \{\s*display: flex !important;/.test(B),
+  ok(gateOf(tops) && gateOf(/html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav \{\s*position: fixed !important; top: 0; right: 0; bottom: 0; left: auto; width: max\(56px, env\(safe-area-inset-right, 0px\)\);[^}]*flex-direction: column;/.test(B)) && gateOf(/html\[data-vc\] #mobile-nav > :is\(#mobile-nav-menu, #mobile-nav-todos, #mobile-nav-new, #mobile-nav-files, #mobile-nav-desktops, \.mnav-dest\)\.col-yield \{ display: none !important; \}/.test(B))
+    && verdictOf(/html\[data-vc="compact"\]\[data-sidecol\] \.window\.window-active > \.window-titlebar \{\s*display: flex !important;/.test(B)),
     `⑤b the outer column: the bar fixed in the column under its top room (${SC.COLUMN_TOP.outer} — the module's number, the inner ${SC.COLUMN_TOP.inner} too), the bottom inset counted, a yielded button hidden, the window's own head the name's row`);
   // r4185: a yielded For you must HIDE — the hide rule outranks the regular class's For-you rule (two ids, !important); the old
   // class-only rule did not (line 914's latent miss). Specificity of these simple forms, :is() as its heaviest argument
@@ -225,7 +225,7 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
     return [ids, cls, typ]; };
   const beats = (a, b) => a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
   const FORYOU = 'html[data-vc="regular"] #mobile-nav #mobile-nav-todos', HIDE = 'html[data-vc] #mobile-nav > :is(#mobile-nav-menu, #mobile-nav-todos, #mobile-nav-new, #mobile-nav-files, #mobile-nav-desktops, .mnav-dest).col-yield', OLDHIDE = 'html[data-sidecol] #mobile-nav > .col-yield';  // stale-pins: kept — OLDHIDE is a red control's form: line 914's class-only rule
-  ok(CSS.includes(FORYOU + ' {') && CSS.includes(HIDE + ' { display: none !important; }') && beats(spec(HIDE), spec(FORYOU)) && !beats(spec(OLDHIDE), spec(FORYOU)),
+  ok(gateOf(CSS.includes(FORYOU + ' {')) && gateOf(CSS.includes(HIDE + ' { display: none !important; }')) && gateOf(beats(spec(HIDE), spec(FORYOU))) && !beats(spec(OLDHIDE), spec(FORYOU)),
     `⑤b a yielded For you HIDES: the hide rule ${JSON.stringify(spec(HIDE))} outranks the regular class's For-you rule ${JSON.stringify(spec(FORYOU))} — RED CONTROL: line 914's class-only rule ${JSON.stringify(spec(OLDHIDE))} lost to it`);
   const R = CSS.slice(0, i);
   ok(i > 0 && !/data-sidecol\] #mobile-nav :is\(#mobile-nav-artifacts/.test(R) && !/col-yield/.test(R), '⑤b RED CONTROL: the stylesheet before this block (slice 1) keeps the conversation\'s buttons in the column and knows no yield');
@@ -233,21 +233,21 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
   const BAR = read('src/lib/trailing-bar.js'), MN = read('src/lib/mobile-nav.js'), CSB = read('src/lib/chat-status-bar.js');
   const rows = (BAR.match(/for \(const \[i, k\] of \[([^\]]+)\]\.entries\(\)\) \{\s*\n\s*registerMenuItem\(\{ menu: 'gear', group: '0_column'/) || [])[1] || '';
   const rowKeys = rows.split(',').map((x) => x.trim().replace(/'/g, ''));
-  ok(ys.every((k) => rowKeys.includes(k)) && /when: \(\) => COLUMN_YIELDED\.has\(k\)/.test(BAR) && /run: \(\) => document\.getElementById\(COLUMN_EL\[k\]\)\?\.click\(\)/.test(BAR),
+  ok(gateOf(ys.every((k) => rowKeys.includes(k))) && gateOf(/when: \(\) => COLUMN_YIELDED\.has\(k\)/.test(BAR)) && verdictOf(/run: \(\) => document\.getElementById\(COLUMN_EL\[k\]\)\?\.click\(\)/.test(BAR)),
     `⑤b every button that may yield has its row of Global settings, shown only while it is out of the column, its press the button's own (${rowKeys.join(' · ')})`, rowKeys);
   const updateOf = (bar) => { const a = bar.indexOf('  function update() {'), b = bar.indexOf('\n  update();', a); return a > 0 && b > a ? bar.slice(a, b) : ''; };
   const fitWired = (bar) => updateOf(bar).includes('\n    fitColumn(nav);\n') && /new ResizeObserver\(\(\) => fitColumn\(nav\)\)\.observe\(nav\)/.test(bar);
-  ok(fitWired(BAR) && /this\.bar\?\.fitColumn\?\.\(\);/.test(MN) && !fitWired(BAR.replace('\n    fitColumn(nav);\n', '\n')),
+  ok(gateOf(fitWired(BAR)) && gateOf(/this\.bar\?\.fitColumn\?\.\(\);/.test(MN)) && !fitWired(BAR.replace('\n    fitColumn(nav);\n', '\n')),
     '⑤b the law runs at every update of the bar, at every size of the column and after every pass of the bar\'s buttons (RED CONTROL: a bar without the update\'s call is caught)');
-  ok(/this\.app\.viewportClass\?\.\(\) === 'compact' && !columnShape\(\) && nav\.getClientRects\(\)\.length\) \{/.test(MN) && /const v = nb > 0 && !columnShape\(\) \?/.test(MN) && /if \(columnShape\(\) !== 'outer'\) return;\s*\n\s*if \(pressedAside\) \{ pressedAside = false; return; \}[^\n]*\n\s*const head = e\.target\.closest\?\.\('\.window\.window-active > \.window-titlebar'\);/.test(MN),
+  ok(gateOf(/this\.app\.viewportClass\?\.\(\) === 'compact' && !columnShape\(\) && nav\.getClientRects\(\)\.length\) \{/.test(MN)) && gateOf(/const v = nb > 0 && !columnShape\(\) \?/.test(MN)) && verdictOf(/if \(columnShape\(\) !== 'outer'\) return;\s*\n\s*if \(pressedAside\) \{ pressedAside = false; return; \}[^\n]*\n\s*const head = e\.target\.closest\?\.\('\.window\.window-active > \.window-titlebar'\);/.test(MN)),
     '⑤b the outer column: no width fold of the compact bar there (its law is the height\'s), no sheet top from a bar that is no top row, the head\'s tap opens the switcher');
   const door = CSB.slice(CSB.indexOf("const setEl = e.target.closest('.chat-status-settings');"), CSB.indexOf('// ── the doors end ──'));
-  ok(/const mineWin = columnShape\(\) \?/.test(door) && /act\('chat-status-col-search', t\('Search this conversation'\), \(\) => view\._search\.open\(\)\)/.test(door) && /if \(held\) act\('chat-status-col-window', t\('This window'\), \(\) => this\._app\?\._mobileNav\?\.bar\?\.windowMenuAt\?\.\(held\.id, setEl\)\)/.test(door) && /held = this\._app\?\.wm\?\.windows\?\.get\?\.\(mineWin\[0\]\);/.test(door) && /windowMenuAt, fitColumn/.test(BAR),
+  ok(gateOf(/const mineWin = columnShape\(\) \?/.test(door)) && gateOf(/act\('chat-status-col-search', t\('Search this conversation'\), \(\) => view\._search\.open\(\)\)/.test(door)) && gateOf(/if \(held\) act\('chat-status-col-window', t\('This window'\), \(\) => this\._app\?\._mobileNav\?\.bar\?\.windowMenuAt\?\.\(held\.id, setEl\)\)/.test(door)) && gateOf(/held = this\._app\?\.wm\?\.windows\?\.get\?\.\(mineWin\[0\]\);/.test(door)) && verdictOf(/windowMenuAt, fitColumn/.test(BAR)),
     '⑤b AT THE BOTTOM: in the column, the strip\'s «Conversation settings» door ends with this conversation\'s search and its window\'s menu (opened above the door)');
-  ok(/const navR = nav && typeof nav\.getClientRects === 'function' && nav\.getClientRects\(\)\.length && nav\.getBoundingClientRect\(\)\.width >= nav\.getBoundingClientRect\(\)\.height \? nav\.getBoundingClientRect\(\) : null;/.test(CSB),
+  ok(verdictOf(/const navR = nav && typeof nav\.getClientRects === 'function' && nav\.getClientRects\(\)\.length && nav\.getBoundingClientRect\(\)\.width >= nav\.getBoundingClientRect\(\)\.height \? nav\.getBoundingClientRect\(\) : null;/.test(CSB)),
     '⑤b the strip\'s panels take their room under a TOP bar only — a vertical bar (the column; the trailing bar) is no ceiling (test-duo-layout ④b found the door\'s last rows under a 120 px panel\'s fold)');
-  ok(/if \(held && columnShape\(\) === 'outer' && this\._app\?\.wm\) act\('chat-status-col-close', t\('Close window'\), \(\) => this\._app\.wm\.requestClose\(held\.id\)\);/.test(CSB)
-    && /if \(columnShape\(\) !== 'outer'\) return;\n      if \(pressedAside\) \{ pressedAside = false; return; \}/.test(MN),
+  ok(gateOf(/if \(held && columnShape\(\) === 'outer' && this\._app\?\.wm\) act\('chat-status-col-close', t\('Close window'\), \(\) => this\._app\.wm\.requestClose\(held\.id\)\);/.test(CSB))
+    && verdictOf(/if \(columnShape\(\) !== 'outer'\) return;\n      if \(pressedAside\) \{ pressedAside = false; return; \}/.test(MN)),
     '⑤b the outer display: the window on show closes from its own «Close window» row (two presses, the compact ✕\'s act); its head\'s tap after a press that only chose a pane opens nothing more');
 }
 
@@ -272,7 +272,7 @@ console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the aud
     };
   };
   const E = edges4(CSS, CHAT);
-  ok(i > 0 && j > 0 && Object.values(E).every(Boolean), '⑤c every iPhone shape\'s edges: the full-screen layers (dialogs, the tour, the palette, a picture, the voice preview, the Artifacts sheet) inside the four insets; the regular class\'s list column and its ☰ clear of a top and a leading inset; the trailing bar under a top inset, the portrait top bar under a status bar, the laptop bar clear of a trailing inset', E);
+  ok(i > 0 && j > 0 && verdictOf(Object.values(E).every(Boolean)), '⑤c every iPhone shape\'s edges: the full-screen layers (dialogs, the tour, the palette, a picture, the voice preview, the Artifacts sheet) inside the four insets; the regular class\'s list column and its ☰ clear of a top and a leading inset; the trailing bar under a top inset, the portrait top bar under a status bar, the laptop bar clear of a trailing inset', E);
   const R = edges4(CSS.slice(0, i), CHAT.slice(0, j));
   ok(!R.layers && !R.list && !R.bars && !R.chat, '⑤c RED CONTROL: the stylesheets before the block (slice 1b) leave a notched iPhone\'s dialogs, list column and top bars under its status bar and sensor housing', R);
   // r4115 (the round's should: a cut at the marker is red by construction): each rule's own mutant — 17c6dd081's form put back
@@ -284,19 +284,19 @@ console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the aud
   const mC = { compact: compactOk(CSS.replace(compactNow, COMPACT_OLD)) }, mL = edges4(CSS.replace(laptopNow, LAPTOP_OLD), CHAT);
   const HID_OLD = '  html[data-vc="regular"].vs-list-hidden #main-wrapper { margin-left: env(safe-area-inset-left, 0px) !important; }';  // stale-pins: kept — a red control's mutant: f4499e926's unscoped form put back
   const hidNow = lineOf(CSS, /^  html:not\(\[data-fold="book"\]\)\[data-vc="regular"\]\[data-standalone\]\.vs-list-hidden/);   // the book guard FIRST: test-fold-posture's census reads a [data-fold="book"] only before a data-vc
-  ok(!!hidNow && /:not\(\[data-fold="book"\]\)/.test(hidNow) && /\[data-standalone\]/.test(hidNow) && !edges4(CSS.replace(hidNow, HID_OLD), CHAT).list,
+  ok(!!hidNow && gateOf(/:not\(\[data-fold="book"\]\)/.test(hidNow)) && gateOf(/\[data-standalone\]/.test(hidNow)) && !edges4(CSS.replace(hidNow, HID_OLD), CHAT).list,
     '⑤c the list-hidden margin reaches ONLY the home-screen copy (its own mark) and NEVER the book pose (主开发 r4187: unscoped, it outranked the book\'s own margin at inset 0) — RED CONTROL: f4499e926\'s unscoped rule is caught');
-  ok(!!compactNow && !!laptopNow && compactOk(CSS) && !mC.compact && !mL.bars, '⑤c RED CONTROLS, one rule each: 17c6dd081\'s compact bar (the inset as padding in a 44 px box — its buttons crushed under the clock) and its laptop bar (6 px lost at inset 0) are caught by their own pins', { mC: mC.compact, mL: mL.bars });
+  ok(!!compactNow && !!laptopNow && gateOf(compactOk(CSS)) && !mC.compact && !mL.bars, '⑤c RED CONTROLS, one rule each: 17c6dd081\'s compact bar (the inset as padding in a 44 px box — its buttons crushed under the clock) and its laptop bar (6 px lost at inset 0) are caught by their own pins', { mC: mC.compact, mL: mL.bars });
   // EVERY CURE IS A NO-OP AT INSET ZERO (the unit's own law; r4115 MUST 3): each value with every env() at 0 equals the release's
   const atZero = (v) => { const z = v.replace(/env\(safe-area-inset-[a-z]+, 0px\)/g, '0px'); let m;
     if ((m = z.match(/^calc\((\d+)px \+ 0px\)$/))) return Number(m[1]); if ((m = z.match(/^max\((\d+)px, 0px\)$/))) return Number(m[1]); if (z === '0px') return 0; return NaN; };
   const zero = [[/html\[data-vc="compact"\] #mobile-nav \{ height: ([^;]+);/, 44, 'the compact bar\'s height (the base 44)'], [/html\[data-vc="regular"\]\[data-fold="laptop"\] #mobile-nav \{ padding-right: ([^;]+);/, 6, 'the laptop bar\'s trailing padding (the base 6)'],
     [/html\[data-vc="regular"\]:not\(\[data-sidecol\]\) #mobile-nav \{ padding-top: ([^;]+);/, 8, 'the trailing bar\'s top padding (the base 8)'], [/@media \(orientation: portrait\) \{\n  \/\*[^\n]*\*\/\n  html\[data-vc="regular"\] #mobile-nav \{ height: ([^;]+);/, 44, 'the regular portrait bar\'s height (the base 44)']]
     .map(([re, want, what]) => { const v = (CSS.match(re) || [])[1] || ''; return { what, v, got: atZero(v), want }; });
-  ok(zero.every((x) => x.got === x.want), `⑤c every cure is a no-op at inset zero: ${zero.map((x) => `${x.what} ${x.got}`).join(' · ')}`, zero);
+  ok(verdictOf(zero.every((x) => x.got === x.want)), `⑤c every cure is a no-op at inset zero: ${zero.map((x) => `${x.what} ${x.got}`).join(' · ')}`, zero);
   ok(atZero('env(safe-area-inset-right, 0px)') === 0 && atZero('env(safe-area-inset-right, 0px)') !== 6, '⑤c RED CONTROL: 17c6dd081\'s laptop value at inset zero is 0, not the base\'s 6');
   const pinned = fs.existsSync(path.join(REPO, 'docs/kb-features.md')) ? read('docs/kb-features.md') : '';
-  ok(/THE SYSTEM's EDGES — the four-edge audit \(B-78db slice 2\)/.test(pinned) && (pinned.match(/^\| \d+ \| (public\/)?(style|chat|viewers)\.css:/gm) || []).length === 32,
+  ok(gateOf(/THE SYSTEM's EDGES — the four-edge audit \(B-78db slice 2\)/.test(pinned)) && (pinned.match(/^\| \d+ \| (public\/)?(style|chat|viewers)\.css:/gm) || []).length === 32,
     '⑤c the audit is written down: docs/kb-features.md holds the 32 edge-pinned rules, each with its verdict (cured, or left as it is with why)');
 }
 
@@ -304,17 +304,17 @@ console.log('⑤d the launch for every theme (B-78db line 914 cure — 主开发
 {
   const IDX = read('public/index.html'), CL = read('src/client.js');
   const noStyleMeta = (idx) => !/name="apple-mobile-web-app-status-bar-style"/.test(idx);  // stale-pins: kept — a deliberate absence check (the meta must stay gone)
-  ok(noStyleMeta(IDX) && /<html lang="en" style="background:#0c0c18">/.test(IDX) && /id="loading-screen" style="[^"]*background:#0c0c18;/.test(IDX),
+  ok(gateOf(noStyleMeta(IDX)) && gateOf(/<html lang="en" style="background:#0c0c18">/.test(IDX)) && verdictOf(/id="loading-screen" style="[^"]*background:#0c0c18;/.test(IDX)),
     '⑤d the release\'s DEFAULT status bar style stays (no status-bar-style meta: the column comes with cover alone; a translucent style would draw the clock white over a light theme) — and the first paint is the splash\'s own colour');
   ok(!noStyleMeta(IDX.replace('<title>', '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n  <title>')), '⑤d RED CONTROL: 17c6dd081\'s black-translucent meta is caught');  // stale-pins: kept — a red control's mutant: 17c6dd081's meta put back
   const ground = (cl) => { const a = cl.indexOf("const splash = document.getElementById('loading-screen');"), b = cl.indexOf('\n});', a); const blk = a > 0 && b > a ? cl.slice(a, b) : '';
     return /if \(splash\) \{ splash\.style\.pointerEvents = 'none'; splash\.style\.opacity = '0'; setTimeout\(\(\) => splash\.remove\(\), 300\); \}\n(  \/\/[^\n]*\n)*  document\.documentElement\.style\.removeProperty\('background'\);/.test(blk); };
-  ok(ground(CL), '⑤d the inline ground is the launch\'s only: it goes where the splash goes (src/client.js, after app.ready) — the theme\'s var(--bg-root) is the ground for the session');
+  ok(verdictOf(ground(CL)), '⑤d the inline ground is the launch\'s only: it goes where the splash goes (src/client.js, after app.ready) — the theme\'s var(--bg-root) is the ground for the session');
   ok(!ground(CL.replace("  document.documentElement.style.removeProperty('background');\n", '')), '⑤d RED CONTROL: 17c6dd081\'s client (the ground kept for the whole session — a light theme behind a dark page) is caught');
   // (g) THE LAUNCH's ORDER: the six sheets after the inline loading screen, the loading screen first in the body
   const at = (re) => { const m = IDX.match(re); return m ? m.index : -1; };
   const ls = at(/<div id="loading-screen"/), links = [...IDX.matchAll(/<link rel="stylesheet" href="\/([a-z-]+)\.css">/g)];
-  ok(ls > 0 && links.length === 6 && links.every((m) => m.index > ls) && at(/<head>/) < at(/<\/head>/) && !links.some((m) => m.index < at(/<\/head>/)),
+  ok(ls > 0 && links.length === 6 && gateOf(links.every((m) => m.index > ls)) && at(/<head>/) < at(/<\/head>/) && !links.some((m) => m.index < at(/<\/head>/)),
     `⑤d (g) the launch: the loading screen stands first in the body and the six sheets after it (${links.map((m) => m[1]).join(', ')})`);
   // MUST 1 (主开发 r4115): every style injected at runtime wins its ties against the sheets EXACTLY as at the release
   const { pathToFileURL } = await import('node:url');
@@ -340,11 +340,11 @@ console.log('⑤d the launch for every theme (B-78db line 914 cure — 主开发
   const headOrder = A.head.kids.map((k) => k.attrs.href || k.attrs.rel || k.tag).join(',');
   const before = sheetsIn(A.body).length;                                   // the twins stay until their clone's sheet is there
   for (const c of A.head.kids.filter((k) => k.attrs.rel === 'stylesheet')) c.fire('load');
-  ok(n === 6 && headOrder === 'title,/xterm.css,/style.css,/viewers.css,/chat.css,/theme-editor.css,/fonts.css,vs-lazy-bundle,icon' && before === 6 && sheetsIn(A.body).length === 0 && tiesWon(A),
+  ok(n === 6 && headOrder === 'title,/xterm.css,/style.css,/viewers.css,/chat.css,/theme-editor.css,/fonts.css,vs-lazy-bundle,icon' && before === 6 && sheetsIn(A.body).length === 0 && verdictOf(tiesWon(A)),
     `⑤d MUST 1: the six sheets back at their release place in the head (${headOrder}); the body twins kept until each clone loads (${before}), then gone — a style appended to the head afterwards (a custom theme, a plugin's own) comes after every sheet and wins its ties as at the release`);
   const B = page(); SO.restoreSheetOrder(B, W); const cl = B.head.kids.filter((k) => k.attrs.rel === 'stylesheet');
   cl[1].fire('error'); cl[0].sheet = { cssRules: [] }; for (const f of frames.splice(0)) f();
-  ok(!cl[1].isConnected && sheetsIn(B.body).map((l) => l.attrs.href).includes('/style.css') && !sheetsIn(B.body).map((l) => l.attrs.href).includes('/xterm.css'),
+  ok(!cl[1].isConnected && gateOf(sheetsIn(B.body).map((l) => l.attrs.href).includes('/style.css')) && !sheetsIn(B.body).map((l) => l.attrs.href).includes('/xterm.css'),
     '⑤d a clone that fails to load is dropped and its twin KEPT (the page never loses a sheet); a clone whose sheet is seen on a later frame without a load event lets its twin go');
   ok(!tiesWon(page()), '⑤d RED CONTROL: 17c6dd081\'s order (the sheets in the body, nothing restored) — a head-injected theme rule stands BEFORE the sheets and loses every tie');
   // r4187 (a): the two ways a sheet keeps the body's order are SAID (one telemetry line); a .sheet whose rules cannot be read yet is not ready
@@ -352,16 +352,16 @@ console.log('⑤d the launch for every theme (B-78db line 914 cure — 主开发
   const cc = C.head.kids.filter((k) => k.attrs.rel === 'stylesheet');
   cc[0].fire('error'); cc[1].sheet = { get cssRules() { throw new Error('InvalidAccessError'); } };
   for (let k = 0; k < 400 && frames2.length; k++) for (const f of frames2.splice(0)) f();
-  ok(said.includes('error:/xterm.css') && said.filter((x) => x.startsWith('frames:')).length === 5 && sheetsIn(C.body).length === 6,
+  ok(gateOf(said.includes('error:/xterm.css')) && said.filter((x) => x.startsWith('frames:')).length === 5 && sheetsIn(C.body).length === 6,
     `⑤d a clone that fails, and one whose sheet never shows within its frames (a Gecko-style .sheet whose rules throw counts as not loaded), each keep their twin and are SAID: ${said.length} line(s)`, said);
-  ok(/try \{ restoreSheetOrder\(document, window, \{ onMiss: \(m\) => track\('event', 'sheet-order-miss', m\) \}\); \} catch \{ \}[^\n]*\ntry \{ installSideColumn\(\); \} catch \{ \}/.test(CL) && CL.indexOf('restoreSheetOrder(') < CL.indexOf('const exitHop = continueExit();'),
+  ok(gateOf(/try \{ restoreSheetOrder\(document, window, \{ onMiss: \(m\) => track\('event', 'sheet-order-miss', m\) \}\); \} catch \{ \}[^\n]*\ntry \{ installSideColumn\(\); \} catch \{ \}/.test(CL)) && CL.indexOf('restoreSheetOrder(') < CL.indexOf('const exitHop = continueExit();'),
     '⑤d the client restores the order FIRST, before any of the app is built (src/client.js)');
   // r4115 (c) + the reach: the probe only in an iPhone's / iPad's home-screen copy, at most once a frame
   const SC = await import(pathToFileURL(path.join(REPO, 'src/lib/side-column.js')).href);
   const heard = []; const winTab = { navigator: {}, matchMedia: () => ({ matches: true }), addEventListener: (ev) => heard.push(ev) };
   const docTab = { documentElement: { dataset: {} }, querySelector: () => ({ getAttribute: () => 'width=device-width', setAttribute() {} }) };
   const SCS = read('src/lib/side-column.js');
-  ok(SC.installSideColumn(docTab, winTab) === false && heard.length === 0 && /const later = \(\) => \{ if \(queued\) return; queued = true;/.test(SCS) && /win\.addEventListener\('resize', later\)/.test(SCS),
+  ok(SC.installSideColumn(docTab, winTab) === false && heard.length === 0 && gateOf(/const later = \(\) => \{ if \(queued\) return; queued = true;/.test(SCS)) && verdictOf(/win\.addEventListener\('resize', later\)/.test(SCS)),
     '⑤d no listener and no probe where no inset can exist (a tab, an Android or a desktop installed copy — display-mode standalone no longer counts); in the home-screen copy the read is once a frame at most');
 }
 
@@ -372,49 +372,49 @@ console.log('⑤e the simulator\'s faults (主开发 r4463): the launch wears th
   // THE VALUE IS A COLOUR OR NOTHING (it is written into an attribute of the page every client is served)
   const good = ['#fafafa', '#FFF', '#0c0c18cc', 'rgb(250, 250, 250)', 'rgba(1,2,3,0.5)'], bad = ['white', '#ggg', 'url(x)', '#fff"><script>', '#fff;color:red', 'rgb(1,2,3);x', 'expression(1)', '', null, 'var(--bg-root)', '#'.padEnd(50, 'a'),
     '#fffff', '#fffffff', 'rgb(256,0,0)', 'rgb(1,2)', 'rgba(1,2,3,2)', '#fff\n', '#fff</style>', 'rgb(1,2,3))', 'hsl(0,0%,100%)', 'transparent', 'dark', 'light', 'custom-my-theme', '\u0023fff'.replace('#', '＃')];   // r4467: hostile values and a theme's NAME write nothing
-  ok(good.every((g) => LG.cleanGround(g) === g) && bad.every((b) => LG.cleanGround(b) === null), '⑤e THE ONE STRICT PATTERN: a hex of 3/4/6/8 digits or rgb()/rgba() of 0–255 channels — a word, a theme\'s name, a url(), a quote, a semicolon, a var(), a channel of 256, a newline, a full-width «＃» are refused', { good: good.map(LG.cleanGround), bad: bad.map(LG.cleanGround) });
+  ok(gateOf(good.every((g) => LG.cleanGround(g) === g)) && verdictOf(bad.every((b) => LG.cleanGround(b) === null)), '⑤e THE ONE STRICT PATTERN: a hex of 3/4/6/8 digits or rgb()/rgba() of 0–255 channels — a word, a theme\'s name, a url(), a quote, a semicolon, a var(), a channel of 256, a newline, a full-width «＃» are refused', { good: good.map(LG.cleanGround), bad: bad.map(LG.cleanGround) });
   ok(LG.groundOf('a=1; vs_ground=%23fafafa; b=2') === '#fafafa' && LG.groundOf('vs_ground=%23fff%22%3E%3Cscript%3E') === null && LG.groundOf('') === null && LG.groundOf('xvs_ground=%23fafafa') === null && LG.groundOf('vs_ground=%E0%A4%A') === null,
     '⑤e the cookie is read by its exact name, decoded, and refused unless it is a colour (a malformed escape is nothing)');
   // ON THE REAL PAGE: exactly the two launch grounds change — <html>'s inline style and the loading screen's
   const lit = IDX.split('#0c0c18').length - 1, out = LG.withGround(IDX, '#fafafa');
-  ok(out.includes('<html lang="en" style="background:#fafafa">') && /<div id="loading-screen" (?:data-ground="light" )?style="[^"]*background:#fafafa;/.test(out) && out.split('#0c0c18').length - 1 === lit - 2 && LG.withGround(IDX, null) === IDX && LG.withGround(IDX, 'white') === IDX && LG.withGround(IDX, LG.DARK) === IDX,
+  ok(gateOf(out.includes('<html lang="en" style="background:#fafafa">')) && gateOf(/<div id="loading-screen" (?:data-ground="light" )?style="[^"]*background:#fafafa;/.test(out)) && out.split('#0c0c18').length - 1 === lit - 2 && LG.withGround(IDX, null) === IDX && LG.withGround(IDX, 'white') === IDX && LG.withGround(IDX, LG.DARK) === IDX,
     `⑤e on public/index.html the remembered ground replaces exactly its two launch grounds (of ${lit} dark literals); no cookie, a word or the dark ground leave the page as it is`);
   // THE WIRING: the index route writes it before it sends; a theme that applies remembers its ground
   const routeOk = (src) => /const ground = launchGround\.groundOf\(req\.headers\.cookie\);[^\n]*\n(?:\s*html = launchImage\.withLinks\(html, ground\);[^\n]*\n)?\s*html = launchGround\.withGround\(html, ground\);[^\n]*\n\s*res\.set\('Cache-Control', 'no-cache'\)/.test(src);
-  ok(routeOk(SRV) && /app\.get\(\['\/', '\/index\.html'\], \(req, res, next\) => \{[\s\S]{0,700}const launchGround = require\('\.\/src\/launch-ground\.js'\);/.test(SRV) && /import \{ groundCookie \} from '\.\.\/launch-ground\.js';/.test(TH) && /try \{ document\.cookie = groundCookie\(getComputedStyle\(document\.documentElement\)\.getPropertyValue\('--bg-root'\)\); \}/.test(TH),
+  ok(gateOf(routeOk(SRV)) && gateOf(/app\.get\(\['\/', '\/index\.html'\], \(req, res, next\) => \{[\s\S]{0,700}const launchGround = require\('\.\/src\/launch-ground\.js'\);/.test(SRV)) && gateOf(/import \{ groundCookie \} from '\.\.\/launch-ground\.js';/.test(TH)) && verdictOf(/try \{ document\.cookie = groundCookie\(getComputedStyle\(document\.documentElement\)\.getPropertyValue\('--bg-root'\)\); \}/.test(TH)),
     '⑤e the index route writes the remembered ground into the page before it sends it; ThemeManager.apply remembers the applied theme\'s ground (a custom or plugin theme\'s as the page computes it)');
   ok(!routeOk(SRV.replace(/\n\s*html = launchGround\.withGround\([^\n]*/, '')), '⑤e RED CONTROL: 26d571cdb\'s route (no rewrite) — a light theme\'s launch stays dark');
   ok(LG.cookieFor('#fafafa') === 'vs_ground=%23fafafa; path=/; max-age=31536000; SameSite=Lax' && LG.cookieFor('red') === null, '⑤e the cookie: the whole origin, a year, never sent cross-site; nothing for a value that is no colour');
   // r4681 required 3: a theme's ground that is no plain colour CLEARS the cookie — the next launch falls back to today's dark
-  ok(LG.CLEAR === 'vs_ground=; path=/; max-age=0; SameSite=Lax' && ['hsl(0, 0%, 10%)', 'oklch(0.2 0 0)', 'color-mix(in srgb, red, blue)', 'black', ''].every((v) => LG.groundCookie(v) === LG.CLEAR) && LG.groundCookie(' #fafafa') === LG.cookieFor('#fafafa'),
+  ok(LG.CLEAR === 'vs_ground=; path=/; max-age=0; SameSite=Lax' && gateOf(['hsl(0, 0%, 10%)', 'oklch(0.2 0 0)', 'color-mix(in srgb, red, blue)', 'black', ''].every((v) => LG.groundCookie(v) === LG.CLEAR)) && LG.groundCookie(' #fafafa') === LG.cookieFor('#fafafa'),
     '⑤e a theme whose ground is no plain colour (an hsl(), oklch(), color-mix(), a name) writes the CLEARING cookie — the next launch falls back to today\'s dark, never the previous theme\'s ground');
   ok(LG.cookieFor('hsl(0, 0%, 10%)') === null, '⑤e RED CONTROL: effa5382a\'s road (write only a colour) wrote NOTHING for such a ground — the previous theme\'s ground stayed in the cookie');
   // r4681 required 1: the ground is written under the release's own guard (r3634: a fallback no person chose is shown, never stored)
   const guardOk = (t) => /apply\(name, \{ store = true \} = \{\}\) \{[\s\S]*?\n    if \(store\) try \{ document\.cookie = groundCookie\(getComputedStyle\(document\.documentElement\)\.getPropertyValue\('--bg-root'\)\); \}/.test(t);
   const guardWas = TH.replace('    if (store) try { document.cookie = groundCookie(', '    try { document.cookie = groundCookie(');   // stale-pins: kept — the CONTROL plants the unguarded write back
-  ok(guardOk(TH), '⑤e the ground is written only when the theme is STORED (apply(name, { store }) — a dark fallback for a plugin theme waiting for its plugin writes nothing)');
+  ok(verdictOf(guardOk(TH)), '⑤e the ground is written only when the theme is STORED (apply(name, { store }) — a dark fallback for a plugin theme waiting for its plugin writes nothing)');
   ok(guardWas !== TH && !guardOk(guardWas), '⑤e RED CONTROL: the write outside the guard (aad260742 formed on the train) is caught');
   // r4681 required 2: THE WORDS ON A LIGHT GROUND — the loading screen's text and track follow the ground; the splash draws its stuck-start
   // line and its Reload button in ON_LIGHT there (src/lib/boot-splash.js)
   const lightOut = LG.withGround(IDX, '#f0f0f5'), darkOut = LG.withGround(IDX, '#1e1f29');
-  ok(lightOut.includes('<div id="loading-screen" data-ground="light" style="') && lightOut.includes(`background:#f0f0f5;color:${LG.ON_LIGHT.text};`) && lightOut.includes(`<div style="width:120px;height:3px;background:${LG.ON_LIGHT.track};`)
-    && !darkOut.includes('data-ground') && darkOut.includes('background:#1e1f29;color:#e2e8f0;') && darkOut.includes('<div style="width:120px;height:3px;background:rgba(255,255,255,0.07);'),
+  ok(gateOf(lightOut.includes('<div id="loading-screen" data-ground="light" style="')) && gateOf(lightOut.includes(`background:#f0f0f5;color:${LG.ON_LIGHT.text};`)) && gateOf(lightOut.includes(`<div style="width:120px;height:3px;background:${LG.ON_LIGHT.track};`))
+    && !darkOut.includes('data-ground') && gateOf(darkOut.includes('background:#1e1f29;color:#e2e8f0;')) && verdictOf(darkOut.includes('<div style="width:120px;height:3px;background:rgba(255,255,255,0.07);')),
     '⑤e over a LIGHT ground the loading screen is marked data-ground="light", its words dark and its track dark; over a dark ground (Dracula\'s) its words stay the release\'s');
   const grounds = [...new Set([...CSS.matchAll(/--bg-root: (#[0-9a-fA-F]{3,8});/g)].map((m) => m[1]))];
   const wordsOn = (g) => (LG.lightGround(g) ? [LG.ON_LIGHT.text, LG.ON_LIGHT.line, LG.ON_LIGHT.accent] : ['#e2e8f0', '#94a3b8', '#5eead4']);
   const low = grounds.flatMap((g) => wordsOn(g).map((w) => [g, w, Math.round(LG.contrast(g, w) * 10) / 10]).filter((x) => x[2] < 4.5));
-  ok(grounds.length >= 6 && grounds.includes('#f0f0f5') && grounds.includes('#0c0c18') && low.length === 0,
+  ok(grounds.length >= 6 && gateOf(grounds.includes('#f0f0f5')) && gateOf(grounds.includes('#0c0c18')) && low.length === 0,
     `⑤e the loading screen's words (its text, the stuck-start line, the Reload button) over EVERY built-in theme's ground (${grounds.join(' ')}, read from style.css) stand at 4.5:1 or more (WCAG AA)`, low);
   ok(LG.contrast('#f0f0f5', '#94a3b8') < 4.5 && LG.contrast('#f0f0f5', '#5eead4') < 4.5, `⑤e RED CONTROL: the release's words on the light ground — the line #94a3b8 ${Math.round(LG.contrast('#f0f0f5', '#94a3b8') * 10) / 10}:1, the Reload button #5eead4 ${Math.round(LG.contrast('#f0f0f5', '#5eead4') * 10) / 10}:1 — fall under 4.5:1`);
   const BSJ = read('src/lib/boot-splash.js');
   const splashOk = (t) => /import \{ ON_LIGHT \} from '\.\.\/launch-ground\.js';/.test(t) && t.includes("const onLight = (s) => !!s && !!s.dataset && s.dataset.ground === 'light';")
     && t.includes("color:${onLight(s) ? ON_LIGHT.line : '#94a3b8'}") && t.includes("border:1px solid ${onLight(s) ? ON_LIGHT.accent : '#2dd4bf'}") && t.includes("color:${onLight(s) ? ON_LIGHT.accent : '#5eead4'}");
   const splashWas = BSJ.replace("color:${onLight(s) ? ON_LIGHT.line : '#94a3b8'}", 'color:#94a3b8');   // stale-pins: kept — the CONTROL plants effa5382a's line colour back
-  ok(splashOk(BSJ), '⑤e boot-splash.js draws the stuck-start line and the Reload button in ON_LIGHT over a light ground (the loading screen\'s mark), in the release\'s colours over a dark one');
+  ok(verdictOf(splashOk(BSJ)), '⑤e boot-splash.js draws the stuck-start line and the Reload button in ON_LIGHT over a light ground (the loading screen\'s mark), in the release\'s colours over a dark one');
   ok(splashWas !== BSJ && !splashOk(splashWas), '⑤e RED CONTROL: effa5382a\'s splash (the line drawn #94a3b8 whatever the ground) is caught');
   // FAULT 1: the page's chrome in ONE fixed container in the home-screen copy only
   const fixedOk = (css) => /html\[data-standalone\] #main-wrapper \{ position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; \}/.test(css);
-  ok(fixedOk(CSS), '⑤e the home-screen copy\'s #main-wrapper is fixed at its own rectangle (主开发\'s simulator experiment: the system\'s top band then takes the bar\'s colour, the title sharp) — UNPROVEN on the device until the pictures');
+  ok(verdictOf(fixedOk(CSS)), '⑤e the home-screen copy\'s #main-wrapper is fixed at its own rectangle (主开发\'s simulator experiment: the system\'s top band then takes the bar\'s colour, the title sharp) — UNPROVEN on the device until the pictures');
   ok(!fixedOk(CSS.slice(0, CSS.indexOf('THE SYSTEM\'s TOP BAND (B-78db'))), '⑤e RED CONTROL: 26d571cdb\'s stylesheet leaves the wrapper in the flow (the blurred title)');
 }
 
@@ -455,17 +455,17 @@ console.log('⑤f the launch image (主开发 r4481 — the owner: can the launc
   // THE SIZES: each listed screen's portrait and landscape in device pixels — nothing else answers
   const want = [...new Set(LI.SCREENS.flatMap((s) => [`${s.w * s.r}x${s.h * s.r}`, `${s.h * s.r}x${s.w * s.r}`]))];
   const offList = await Promise.all(['1399x2034.png', '1398x2034', '01398x2034.png', '../1398x2034.png', '1398x2034.png?x', '', null].map((x) => LI.imageFor(x, '#fff')));
-  ok(JSON.stringify([...LI.SIZES].sort()) === JSON.stringify(want.sort()) && LI.SCREENS[0].w === 466 && LI.SCREENS[0].h === 678 && LI.SCREENS[0].r === 3 && offList.every((x) => x === null),
+  ok(JSON.stringify([...LI.SIZES].sort()) === JSON.stringify(want.sort()) && LI.SCREENS[0].w === 466 && LI.SCREENS[0].h === 678 && LI.SCREENS[0].r === 3 && verdictOf(offList.every((x) => x === null)),
     `⑤f the sizes are the listed screens' own (${LI.SIZES.length}: the Duo's 466×678 at 3× first), portrait and landscape; any other size is refused (the route's 404)`, { sizes: LI.SIZES, offList });
   // A COLOUR OR TODAY's DARK — the same strict rule as the launch ground; a hostile value is the very image of no colour at all (one cache entry)
-  ok(['url(x)', '#fff"><x', 'white', ['#fff', '#000'], '#'.padEnd(50, 'a'), undefined].every((g) => LI.imageFor(DUO_P, g) === LI.imageFor(DUO_P, LG.DARK)) && LI.imageFor(DUO_P, '#fff') !== LI.imageFor(DUO_P, LG.DARK),
+  ok(gateOf(['url(x)', '#fff"><x', 'white', ['#fff', '#000'], '#'.padEnd(50, 'a'), undefined].every((g) => LI.imageFor(DUO_P, g) === LI.imageFor(DUO_P, LG.DARK))) && LI.imageFor(DUO_P, '#fff') !== LI.imageFor(DUO_P, LG.DARK),
     '⑤f a colour by launch-ground.js\'s one strict rule; a word, markup, a repeated query or an over-long value is today\'s dark (the same image)');
   // THE LINKS: ONE set, in the colour the page paints first
   const IDX = read('public/index.html'), links = LI.linksFor('#f0f0f5'), none = LI.linksFor(null), page = LI.withLinks(IDX, '#f0f0f5');
   const linkOk = (l) => { const m = /^<link rel="apple-touch-startup-image" media="\(device-width: (\d+)px\) and \(device-height: (\d+)px\) and \(-webkit-device-pixel-ratio: (\d)\) and \(orientation: (portrait|landscape)\)" href="\/launch-image\/(\d+)x(\d+)\.png\?g=([^"]+)">$/.exec(l);
     if (!m) return false; const [w, h, r, o, W, H] = m.slice(1, 7).map((x, i) => (i === 3 ? x : Number(x)));
     return W === (o === 'portrait' ? w : h) * r && H === (o === 'portrait' ? h : w) * r && LI.SIZES.includes(`${W}x${H}`); };
-  ok(links.length === LI.SCREENS.length * 2 && links.every(linkOk) && links.every((l) => l.endsWith('?g=%23f0f0f5">')) && none.every((l) => l.endsWith('?g=%230c0c18">')) && LI.linksFor('url(x)').join() === none.join(),
+  ok(links.length === LI.SCREENS.length * 2 && gateOf(links.every(linkOk)) && gateOf(links.every((l) => l.endsWith('?g=%23f0f0f5">'))) && gateOf(none.every((l) => l.endsWith('?g=%230c0c18">'))) && LI.linksFor('url(x)').join() === none.join(),
     `⑤f the links: ${links.length} (each screen, both orientations, its media exact), ONE set in the remembered ground — none remembered (or no colour): today's dark`, links.filter((l) => !linkOk(l)));
   ok(page.split('rel="apple-touch-startup-image"').length - 1 === links.length && page.indexOf(links.at(-1)) < page.indexOf('</head>') && page.replace(`  ${links.join('\n  ')}\n`, '') === IDX && !IDX.includes('rel="apple-touch-startup-image"'),
     '⑤f the page wears the links at the end of its head and is otherwise unchanged (index.html itself holds no such link — its comment names the mechanism: the index route writes them)');
@@ -473,7 +473,7 @@ console.log('⑤f the launch image (主开发 r4481 — the owner: can the launc
   const SRV = read('server.js');
   const linksOk = (src) => /const launchImage = require\('\.\/src\/launch-image\.js'\);[^\n]*\n\s*const ground = launchGround\.groundOf\(req\.headers\.cookie\);[^\n]*\n\s*html = launchImage\.withLinks\(html, ground\);/.test(src);
   const routeOk = (src) => /app\.get\('\/launch-image\/:size', \(req, res\) => \{\n\s*require\('\.\/src\/launch-image\.js'\)\.imageFor\(req\.params\.size, req\.query\.g\)\.then\(\(png\) => \{\n\s*if \(!png\) return res\.status\(404\)\.end\(\);/.test(src);
-  ok(linksOk(SRV) && routeOk(SRV) && SRV.indexOf("app.get('/launch-image/:size'") > SRV.indexOf("app.get(['/', '/index.html']"), '⑤f the index route writes the links in the remembered ground; /launch-image/<W>x<H>.png answers from launch-image.js, a 404 off its list (a page behind the sign-in, no door)');
+  ok(gateOf(linksOk(SRV)) && gateOf(routeOk(SRV)) && SRV.indexOf("app.get('/launch-image/:size'") > SRV.indexOf("app.get(['/', '/index.html']"), '⑤f the index route writes the links in the remembered ground; /launch-image/<W>x<H>.png answers from launch-image.js, a 404 off its list (a page behind the sign-in, no door)');
   ok(!linksOk(SRV.replace(/\n\s*html = launchImage\.withLinks\([^\n]*/, '')) && !routeOk(SRV.replace("app.get('/launch-image/:size'", "app.get('/launch-image-gone/:size'")), '⑤f RED CONTROLS: effa5382a\'s route (no links) and a server without the image\'s route are caught');
 }
 
@@ -493,16 +493,16 @@ console.log('⑤g the system\'s column on the LEFT (主开发 r4481 — the owne
     'html[data-vc="regular"][data-sidecol="left"].vs-list-hidden #user-todos-popup.usage-popup { left: calc(max(56px, env(safe-area-inset-left, 0px)) + 8px) !important; }'];
   const leftOk = (css) => { const i = css.indexOf(HEAD); if (i < 0) return false; const b = css.slice(i), m = b.indexOf('@media (orientation: landscape) {'), end = m < 0 ? -1 : b.indexOf('\n}\n', m);
     return m > 0 && end > m && LEFT_RULES.every((r) => b.slice(m, end).split('\n').some((l) => l.trim() === r)); };
-  ok(leftOk(CSS), '⑤g the bar moves INTO a column on the left (as wide as it, its buttons from the top), the list column and the conversation start after it, ☰ / the For-you tray / the head\'s ✕ and ⋯ follow, nothing of ours on the right (one landscape block)');
+  ok(verdictOf(leftOk(CSS)), '⑤g the bar moves INTO a column on the left (as wide as it, its buttons from the top), the list column and the conversation start after it, ☰ / the For-you tray / the head\'s ✕ and ⋯ follow, nothing of ours on the right (one landscape block)');
   // the conversation's start when the list is hidden ties the home-screen copy's list-hidden rule in specificity (line 914's cure): the block wins by ORDER
   const tie = CSS.indexOf('html:not([data-fold="book"])[data-vc="regular"][data-standalone].vs-list-hidden #main-wrapper'), at = CSS.indexOf(HEAD);
   ok(tie > 0 && at > tie, '⑤g the block stands AFTER the home-screen copy\'s list-hidden rule it ties in specificity (it wins by order)', { tie, at });
   ok(!leftOk(CSS.slice(0, CSS.indexOf(HEAD))), '⑤g RED CONTROL: effa5382a\'s stylesheet has no column on the left (the owner\'s picture: an empty band beside our bar on the right)');
   const tipOk = (tb) => /const atLeft = vertical && r\.left \+ r\.width \/ 2 < innerWidth \/ 2;\n    tip\.style\.left = \(vertical \? \(atLeft \? r\.right \+ 8 : r\.left - tip\.offsetWidth - 8\)/.test(tb);
-  ok(tipOk(TB), '⑤g a long press\'s tip stands on the conversation\'s side of a vertical bar: right of a bar in the column on the left, left of one on the right');
+  ok(verdictOf(tipOk(TB)), '⑤g a long press\'s tip stands on the conversation\'s side of a vertical bar: right of a bar in the column on the left, left of one on the right');
   const tipWas = TB.replace(/    const atLeft = [^\n]*\n    tip\.style\.left = \(vertical \? \(atLeft \? r\.right \+ 8 : r\.left - tip\.offsetWidth - 8\)/, '    tip.style.left = (vertical ? r.left - tip.offsetWidth - 8');   // stale-pins: kept — effa5382a's line, planted back by the CONTROL (anchored: the plant must change the text)
-  ok(tipWas !== TB && !tipOk(tipWas) && tipWas.includes("tip.style.left = (vertical ? r.left - tip.offsetWidth - 8 : Math.max(4,"), '⑤g RED CONTROL: effa5382a\'s tip (always left of a vertical bar — off the screen beside a bar at x 0) is caught');   // stale-pins: kept — the control's own text (effa5382a's line)
+  ok(tipWas !== TB && !tipOk(tipWas) && verdictOf(tipWas.includes("tip.style.left = (vertical ? r.left - tip.offsetWidth - 8 : Math.max(4,")), '⑤g RED CONTROL: effa5382a\'s tip (always left of a vertical bar — off the screen beside a bar at x 0) is caught');   // stale-pins: kept — the control's own text (effa5382a's line)
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

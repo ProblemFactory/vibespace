@@ -78,7 +78,7 @@ const [PORT] = await freePorts(1);
 const wt = scratch('deskxpra-srv');
 const home = scratchHome('deskxpra-srv-home', fs);
 let failed = 0, skipped = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const skip = (n, why) => { skipped++; console.log(`  ⚠ SKIP ${n}: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
@@ -201,17 +201,17 @@ const tcpListeners = (port) => { // /proc/net/tcp + tcp6 rows in LISTEN for this
 };
 const tcpConnect = (host, port, ms = 3000) => new Promise((res) => { const s = net.connect({ host, port }); const t = setTimeout(() => { s.destroy(); res({ ok: false, why: 'timeout' }); }, ms); s.once('connect', () => { clearTimeout(t); s.destroy(); res({ ok: true }); }); s.once('error', (e) => { clearTimeout(t); res({ ok: false, why: e.code || e.message }); }); });
 
-check('worktree server boots (password auth on)', await waitServer());
+check('worktree server boots (password auth on)', verdictOf(await waitServer()));
 check('an unauthenticated API call is refused 401 (the gate is real)', (await fetch(`${ORIGIN}/api/desktop/apps`)).status === 401);
-check('login answers the cookie', await login());
+check('login answers the cookie', verdictOf(await login()));
 
 let A = null, C = null, V = null, N = null;
 try {
   // ── §1 bring-up ──
   console.log('§1 bring-up over the routes: the default ladder picks xpra');
   const list0 = (await j('GET', '/api/desktop/apps')).body;
-  check(`GET /api/desktop/apps: availability = ${JSON.stringify({ backend: list0.availability.backend, via: list0.availability.via, recipe: list0.availability.recipe, stream: list0.availability.stream, fallbackWhy: list0.availability.fallbackWhy })}`, list0.availability.backend === 'xpra' && list0.availability.recipe === 'xpra-seamless' && list0.availability.stream === 'xpra' && list0.availability.fallbackWhy === null && Array.isArray(list0.availability.prefs) && list0.availability.prefs.length === 0, list0.availability);
-  check(`the facts name the installed xpra (${list0.availability.xpra && list0.availability.xpra.version}) and its html5 tree`, !!list0.availability.xpra && /^\d+\.\d+/.test(String(list0.availability.xpra.version)) && (!WWW || list0.availability.xpra.www === WWW), list0.availability.xpra);
+  check(`GET /api/desktop/apps: availability = ${JSON.stringify({ backend: list0.availability.backend, via: list0.availability.via, recipe: list0.availability.recipe, stream: list0.availability.stream, fallbackWhy: list0.availability.fallbackWhy })}`, list0.availability.backend === 'xpra' && list0.availability.recipe === 'xpra-seamless' && list0.availability.stream === 'xpra' && list0.availability.fallbackWhy === null && gateOf(Array.isArray(list0.availability.prefs)) && list0.availability.prefs.length === 0, list0.availability);
+  check(`the facts name the installed xpra (${list0.availability.xpra && list0.availability.xpra.version}) and its html5 tree`, !!list0.availability.xpra && gateOf(/^\d+\.\d+/.test(String(list0.availability.xpra.version))) && (!WWW || list0.availability.xpra.www === WWW), list0.availability.xpra);
   const t0 = Date.now();
   A = await launch();
   check('POST /api/desktop/apps answers a launching record on xpra (stream xpra, probe http)', !!A && A.state === 'launching' && A.backend === 'xpra' && A.via === 'xpra' && A.recipe === 'xpra-seamless' && A.stream === 'xpra' && A.fallbackWhy === null, A);
@@ -222,26 +222,26 @@ try {
   const xdir = path.join(appDir(A.id), 'xpra');
   const xdirEntries = fs.existsSync(xdir) ? fs.readdirSync(xdir) : null;
   const unixSockets = xdirEntries ? xdirEntries.filter((f) => { try { return fs.statSync(path.join(xdir, f)).isSocket(); } catch { return false; } }) : [];
-  check(`xpra's session files live under the app's OWN dir (${path.relative(wt, xdir)}: ${xdirEntries ? xdirEntries.join(', ') : 'missing'}) — the scratch socket dir, never ~/.xpra`, Array.isArray(xdirEntries) && xdirEntries.some((f) => /server\.pid|\.log$|^:?\d+/.test(f)) && !fs.existsSync(path.join(home, '.xpra')), { entries: xdirEntries, homeXpra: fs.existsSync(path.join(home, '.xpra')) });
+  check(`xpra's session files live under the app's OWN dir (${path.relative(wt, xdir)}: ${xdirEntries ? xdirEntries.join(', ') : 'missing'}) — the scratch socket dir, never ~/.xpra`, gateOf(Array.isArray(xdirEntries)) && gateOf(xdirEntries.some((f) => /server\.pid|\.log$|^:?\d+/.test(f))) && !fs.existsSync(path.join(home, '.xpra')), { entries: xdirEntries, homeXpra: fs.existsSync(path.join(home, '.xpra')) });
   check(`--bind=none: NO unix socket anywhere (${unixSockets.length} in the session dir, ~/.xpra absent)`, unixSockets.length === 0 && !fs.existsSync(path.join(home, '.xpra')), unixSockets);
-  check('the per-app Xauthority is the pinned file (non-empty) — xpra never wrote the real ~/.Xauthority', fs.existsSync(path.join(appDir(A.id), 'Xauthority')) && fs.statSync(path.join(appDir(A.id), 'Xauthority')).size > 0 && !fs.existsSync(path.join(home, '.Xauthority')));
+  check('the per-app Xauthority is the pinned file (non-empty) — xpra never wrote the real ~/.Xauthority', gateOf(fs.existsSync(path.join(appDir(A.id), 'Xauthority'))) && fs.statSync(path.join(appDir(A.id), 'Xauthority')).size > 0 && !fs.existsSync(path.join(home, '.Xauthority')));
 
   // ── §2 the binding check ──
   console.log('§2 the binding check: the xpra port is loopback-only, the product port is the control');
   const xrows = tcpListeners(A.port);
   const srows = tcpListeners(PORT);
   console.log(`  xpra :${A.port} listens on ${JSON.stringify(xrows)}; the server :${PORT} on ${JSON.stringify(srows)}`);
-  check(`the xpra listener is bound to 127.0.0.1 ONLY (${xrows.length} LISTEN row(s), every one 0100007F, none in tcp6)`, xrows.length >= 1 && xrows.every((r) => r.file === 'tcp' && r.addr === '0100007F'), xrows);
-  check('CONTROL: the product\'s own port is bound to every address (00000000 / ::) — the box CAN listen wide, xpra just does not', srows.length >= 1 && srows.some((r) => /^0{8}$|^0{32}$/.test(r.addr)), srows);
+  check(`the xpra listener is bound to 127.0.0.1 ONLY (${xrows.length} LISTEN row(s), every one 0100007F, none in tcp6)`, xrows.length >= 1 && verdictOf(xrows.every((r) => r.file === 'tcp' && r.addr === '0100007F')), xrows);
+  check('CONTROL: the product\'s own port is bound to every address (00000000 / ::) — the box CAN listen wide, xpra just does not', srows.length >= 1 && verdictOf(srows.some((r) => /^0{8}$|^0{32}$/.test(r.addr))), srows);
   const outer = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal);
   const loop = await tcpConnect('127.0.0.1', A.port);
-  check('a raw TCP connect to 127.0.0.1:<port> is answered (that is the relay\'s own upstream)', loop.ok, loop);
+  check('a raw TCP connect to 127.0.0.1:<port> is answered (that is the relay\'s own upstream)', verdictOf(loop.ok), loop);
   if (!outer) skip('a raw connect from a non-loopback address', 'this box has no non-loopback IPv4 address');
   else {
     const far = await tcpConnect(outer.address, A.port);
     check(`a raw TCP connect to ${outer.address}:${A.port} (this box's non-loopback address) is REFUSED — without the relay the picture is unreachable (${far.why || 'connected'})`, !far.ok && (far.why === 'ECONNREFUSED' || far.why === 'timeout'), far);
     const farSrv = await tcpConnect(outer.address, PORT);
-    check(`CONTROL: the same connect to the product's port ${PORT} is answered`, farSrv.ok, farSrv);
+    check(`CONTROL: the same connect to the product's port ${PORT} is answered`, verdictOf(farSrv.ok), farSrv);
   }
 
   // ── §3 relay auth + a real hello ──
@@ -266,8 +266,8 @@ try {
     const hello = await cl.waitFor('hello', () => true, 15000);
     const caps = hello.p[1];
     console.log(`  hello answered in ${Date.now() - th} ms: xpra ${P.bytesToString(caps.version || '')}, ${cl.packetTypes.length} packet-types, display-configure ${cl.packetTypes.includes('display-configure')}, keyboard-config ${cl.packetTypes.includes('keyboard-config')}`);
-    check('xpra answers the hello through the relay with its version + packet-types (the names the client picks its packet forms by)', /^\d+\.\d+/.test(P.bytesToString(caps.version || '')) && cl.packetTypes.length > 20 && cl.packetTypes.includes('configure-window') && cl.packetTypes.includes('clipboard-token'), { version: P.bytesToString(caps.version || ''), n: cl.packetTypes.length });
-    check(`the server's version equals the binary's (${P.bytesToString(caps.version || '')} vs ${xpraVersion})`, xpraVersion.includes(P.bytesToString(caps.version || '')));
+    check('xpra answers the hello through the relay with its version + packet-types (the names the client picks its packet forms by)', gateOf(/^\d+\.\d+/.test(P.bytesToString(caps.version || ''))) && cl.packetTypes.length > 20 && gateOf(cl.packetTypes.includes('configure-window')) && verdictOf(cl.packetTypes.includes('clipboard-token')), { version: P.bytesToString(caps.version || ''), n: cl.packetTypes.length });
+    check(`the server's version equals the binary's (${P.bytesToString(caps.version || '')} vs ${xpraVersion})`, verdictOf(xpraVersion.includes(P.bytesToString(caps.version || ''))));
     const nw = await cl.waitFor('new-window', () => true, 15000);
     const wid = nw.p[1]; const meta = nw.p[6] || {};
     const title = P.bytesToString(meta.title || '');
@@ -296,7 +296,7 @@ try {
       const corrections = cl.events.slice(n0).filter((e) => (e.type === 'window-move-resize' || e.type === 'window-resized') && e.p[1] === wid).map((e) => (e.type === 'window-move-resize' ? { type: e.type, w: e.p[4], h: e.p[5] } : { type: e.type, w: e.p[2], h: e.p[3] }));
       console.log(`  ${W}×${H}: X says ${xw ? `${xw.w}×${xw.h} at ${xw.x},${xw.y}` : 'no window within a cell'} after ${Date.now() - tr} ms; the server ${corrections.length ? `corrected the requester: ${corrections.map((c) => `${c.type} ${c.w}×${c.h}`).join(', ')}` : 'sent no correction (its clamp matched X — the rule)'}`);
       check(`${W}×${H}: the X server's own geometry follows within one cell (${xw ? `${xw.w}×${xw.h}` : '?'})`, !!xw, (await j('GET', `/api/desktop/apps/${A.id}/windows`)).body);
-      check(`${W}×${H}: every correction the server sent names X's actual geometry (${corrections.length} correction(s))`, !!xw && corrections.every((c) => c.w === xw.w && c.h === xw.h), { corrections, x: xw });
+      check(`${W}×${H}: every correction the server sent names X's actual geometry (${corrections.length} correction(s))`, !!xw && verdictOf(corrections.every((c) => c.w === xw.w && c.h === xw.h)), { corrections, x: xw });
     }
 
     // ── §5 the clipboard, both branches, at the X level ──
@@ -339,15 +339,15 @@ try {
     check('POST …/keep-alive ⇒ idleTimeoutMs 0 (never)', kept.status === 200 && kept.body.idleTimeoutMs === 0, kept.body);
     const Bready = await ready(B.id).catch((e) => ({ error: e.message }));
     C = await ready(C.id);
-    check('both reach ready', Bready && Bready.state === 'ready' && C.state === 'ready', Bready);
+    check('both reach ready', gateOf(Bready) && Bready.state === 'ready' && C.state === 'ready', Bready);
     const tIdle = Date.now();
     const died = await until(async () => { const r = (await j('GET', `/api/desktop/apps/${B.id}`)).body; return r && r.state === 'exited' ? r : null; }, 25000, 500);
     console.log(`  ${B.label} ${died ? `exited ${Date.now() - tIdle} ms after ready` : 'still alive after 25 s'}${died ? `: ${died.lastError}` : ''}`);
-    check('no input ⇒ stopped by the idle timeout: stoppedBy idle, lastError names it', !!died && died.stoppedBy === 'idle' && /idle timeout/.test(died.lastError || ''), died);
+    check('no input ⇒ stopped by the idle timeout: stoppedBy idle, lastError names it', !!died && died.stoppedBy === 'idle' && verdictOf(/idle timeout/.test(died.lastError || '')), died);
     await sleep(500);
-    check('…and its xpra (+ Xvfb) and app are gone', !!died && [died.pids.x, died.pids.app].every((pid) => !D.pidAlive(pid)) && !D.sessionCensus([Bready.pids.x], { fresh: true }).length, died && died.pids);
+    check('…and its xpra (+ Xvfb) and app are gone', !!died && gateOf([died.pids.x, died.pids.app].every((pid) => !D.pidAlive(pid))) && !D.sessionCensus([Bready.pids.x], { fresh: true }).length, died && died.pids);
     const cNow = (await j('GET', `/api/desktop/apps/${C.id}`)).body;
-    check(`the kept-alive session launched beside it survives the same wait (state ${cNow.state}, idle remaining ${cNow.idle && cNow.idle.remainingMs})`, cNow.state === 'ready' && cNow.idle && cNow.idle.remainingMs === null, cNow.idle);
+    check(`the kept-alive session launched beside it survives the same wait (state ${cNow.state}, idle remaining ${cNow.idle && cNow.idle.remainingMs})`, cNow.state === 'ready' && gateOf(cNow.idle) && cNow.idle.remainingMs === null, cNow.idle);
     const aNow = (await j('GET', `/api/desktop/apps/${A.id}`)).body;
     // A was launched under the shipped default — 0 = never since 2.369.171 (owner ruling 2026-09-25) — so a keeper that
     // RE-READ the setting would now hold 3000 and have stopped it beside B
@@ -376,11 +376,11 @@ try {
     const exited = new Promise((r) => srv.once('exit', r));
     srv.kill('SIGKILL'); await exited;
     console.log(`  server SIGKILLed with ${before.length} live session(s): ${before.map((b) => `${b.id} (${b.backend})`).join(', ')}`);
-    check('the sessions outlive the server (every recorded x + app pid still alive)', before.every((b) => D.pidAlive(b.x) && D.pidAlive(b.app)));
+    check('the sessions outlive the server (every recorded x + app pid still alive)', verdictOf(before.every((b) => D.pidAlive(b.x) && D.pidAlive(b.app))));
     const tb = Date.now();
     bootServer();
-    check('the server reboots', await waitServer());
-    if ((await j('GET', '/api/desktop/apps')).status === 401) check('re-login after the reboot', await login());
+    check('the server reboots', verdictOf(await waitServer()));
+    if ((await j('GET', '/api/desktop/apps')).status === 401) check('re-login after the reboot', verdictOf(await login()));
     const adopted = await until(async () => { const l = (await j('GET', '/api/desktop/apps')).body; const live = l && l.apps.filter((a) => before.some((b) => b.id === a.id)); return live && live.length === before.length && live.every((a) => a.state === 'ready' && a.adoptedAt > 0) ? live : null; }, 30000, 500);
     console.log(`  adopted ${adopted ? adopted.length : 0}/${before.length} session(s) ${Date.now() - tb} ms after the reboot`);
     check('every live session is ADOPTED at boot (ready, adoptedAt set)', !!adopted, (await j('GET', '/api/desktop/apps')).body.apps.map((a) => [a.id, a.state, a.lastError]));
@@ -390,7 +390,7 @@ try {
         check(`${b.id}: adopted as ${a.backend} — the backend it was BORN with (${b.backend}), same pids + starttime, same port`, a.backend === b.backend && a.pids.x === b.x && a.starts.x === b.sx && a.pids.app === b.app && a.port === b.port, { was: b, now: { backend: a.backend, pids: a.pids, starts: a.starts, port: a.port } });
       }
       const vAdopted = adopted.find((x) => x.backend === 'vnc-display');
-      if (vAdopted) check('DA1: the vnc-display record was NEVER migrated to xpra although the ladder now picks xpra (stream rfb, via Xvfb+x11vnc / Xvnc)', vAdopted.backend === 'vnc-display' && vAdopted.stream === 'rfb' && /Xvnc|Xvfb\+x11vnc/.test(vAdopted.via), vAdopted);
+      if (vAdopted) check('DA1: the vnc-display record was NEVER migrated to xpra although the ladder now picks xpra (stream rfb, via Xvfb+x11vnc / Xvnc)', vAdopted.backend === 'vnc-display' && vAdopted.stream === 'rfb' && verdictOf(/Xvnc|Xvfb\+x11vnc/.test(vAdopted.via)), vAdopted);
     }
     const avAfter = (await j('GET', '/api/desktop/apps')).body.availability;
     check('after the reboot the ladder still picks xpra for NEW sessions', avAfter.backend === 'xpra' && avAfter.fallbackWhy === null);
@@ -427,11 +427,11 @@ try {
     check(`every recorded pid is gone (${recordedPids().length} recorded, ${still.length} alive)`, still.length === 0, still);
     const hits = markerHits();
     check(`the marker census is EMPTY — no process carries this run's session marker or XAUTHORITY path (${hits.length})`, hits.length === 0, hits);
-    check('no session left in the store as live', (await j('GET', '/api/desktop/apps')).body.apps.every((a) => a.state === 'exited' || a.state === 'failed'));
+    check('no session left in the store as live', verdictOf((await j('GET', '/api/desktop/apps')).body.apps.every((a) => a.state === 'exited' || a.state === 'failed')));
   }
 } catch (e) {
   failed++; console.error('  ✗ threw:', e.stack || e.message);
   console.error('  server log tail:', srvLog.join('').split('\n').slice(-15).join('\n  '));
 }
 console.log(failed ? `\n${failed} FAILED${skipped ? ` (${skipped} skipped)` : ''}` : `\ndesktop-xpra (server) test passed${skipped ? ` (${skipped} skipped)` : ''}`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

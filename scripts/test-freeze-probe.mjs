@@ -11,7 +11,7 @@ import { selfGapIsFreeze, jankStormVerdict, paintGapKind } from '../src/lib/tele
 import * as tc from '../src/lib/telemetry-client.js';
 import fs from 'node:fs';
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e) : ''}`); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e) : ''}`); } };
 const T = 1_000_000;
 // a real freeze: visible since long ago, ticks 1 s apart, then one 20 s gap
 ok(selfGapIsFreeze({ tickGap: 20000, prevTick: T + 100000, now: T + 120000, hiddenNow: false, visibleSince: T, hiddenAt: 0 }) === true, 'a 20 s gap on a page visible throughout is a freeze');
@@ -178,18 +178,18 @@ console.log(JSON.stringify(out));`;
     const sim = (mod, kind, L, act = 0) => { try { return JSON.parse(cp.execFileSync(process.execPath, [path.join(dir, 'sim.mjs'), mod, kind, String(L), String(act)], { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').pop()); } catch (e) { return { error: String(e.message || e).slice(0, 200) }; } };
     const real = copy('telemetry-client', TSRC);
     const tasks = [1100, 1200, 1500, 1900, 2500].map((L) => [L, sim(real, 'task', L)]);
-    ok(tasks.every(([, r]) => r.comp === 0 && r.ring === 0), `A MAIN-THREAD TASK IS NEVER A COMPOSITOR STALL: tasks of ${tasks.map(([L]) => L).join(' / ')} ms (a click just before), each at 50 phases of the tick ⇒ 0 compositor incidents, 0 stall-ring lines (C's first form: 4 / 9 / 24 / 44 of 50; master 50 of 50 at 2 500)`, tasks);
+    ok(verdictOf(tasks.every(([, r]) => r.comp === 0 && r.ring === 0)), `A MAIN-THREAD TASK IS NEVER A COMPOSITOR STALL: tasks of ${tasks.map(([L]) => L).join(' / ')} ms (a click just before), each at 50 phases of the tick ⇒ 0 compositor incidents, 0 stall-ring lines (C's first form: 4 / 9 / 24 / 44 of 50; master 50 of 50 at 2 500)`, tasks);
     const s3 = sim(real, 'stall-person', 3000), s6 = sim(real, 'stall-person', 6000), idle = sim(real, 'stall-idle', 3000);
     const storm = sim(real, 'storm', 1200);
     ok(storm.comp === 0 && storm.ring === 0, `…nor a STORM of them: six tasks of 1 200 ms back to back (the frame never gets a free vsync, each tick ~1.2 s apart) at 10 phases ⇒ 0 incidents, 0 ring lines`, storm);
-    ok(s3.comp === 5 && s3.lens.every((x) => Math.abs(x - 3) <= 1) && s6.comp === 5 && s6.lens.every((x) => Math.abs(x - 6) <= 1), `A REAL COMPOSITOR STALL (every frame withheld 3 s / 6 s, the main thread free, a person there) is still filed ONCE each, its length within a second of the truth (${J(s3.lens)} / ${J(s6.lens)})`, { s3, s6 });
+    ok(s3.comp === 5 && gateOf(s3.lens.every((x) => Math.abs(x - 3) <= 1)) && s6.comp === 5 && verdictOf(s6.lens.every((x) => Math.abs(x - 6) <= 1)), `A REAL COMPOSITOR STALL (every frame withheld 3 s / 6 s, the main thread free, a person there) is still filed ONCE each, its length within a second of the truth (${J(s3.lens)} / ${J(s6.lens)})`, { s3, s6 });
     ok(idle.comp === 0 && idle.ring === 5, `…the same 3-s stall with NOBODY there is a paint gap (a ring line, ${idle.ring} of 5) — never an incident (${idle.comp})`, idle);
     // 主开发's second driver, as a row: ONE act at 0 / 300 / 700 / 1 200 ms into a 3-s and a 6-s stall, 50 phases each ⇒ an
     // incident in every phase — «a person was there» asked from the LAST FRAME the page knows arrived, not from the unanswered
     // request (C round 2's window lost 50 / 38 / 17 of 50 at 0 / 300 / 700 ms)
     const acts = [];
     for (const S of [3000, 6000]) for (const A of [0, 300, 700, 1200]) acts.push([S, A, sim(real, 'stall-act', S, A).comp]);
-    ok(acts.every(([, , n]) => n === 50), `A PERSON WHO MET THE FROZEN WINDOW IS THERE: one act at 0 / 300 / 700 / 1 200 ms into a 3-s and a 6-s stall ⇒ an incident in ${acts.map(([S, A, n]) => `${S / 1000}s@${A}:${n}`).join(' · ')} of 50 phases`, acts);
+    ok(verdictOf(acts.every(([, , n]) => n === 50)), `A PERSON WHO MET THE FROZEN WINDOW IS THERE: one act at 0 / 300 / 700 / 1 200 ms into a 3-s and a 6-s stall ⇒ an incident in ${acts.map(([S, A, n]) => `${S / 1000}s@${A}:${n}`).join(' · ')} of 50 phases`, acts);
     const M3 = TSRC.replace('        if (stallStart) endStall(now, presenceFrom);', '        if (stallStart) endStall(now);');
     const m3 = M3 !== TSRC ? sim(copy('m3', M3), 'stall-act', 3000, 0).comp : null;
     ok(m3 !== null && m3 < 50, `CONTROL: the presence window opened at the probe's request (round 2's) ⇒ an act at the stall's first ms is «nobody there» in ${m3 === null ? 'ANCHOR GONE' : 50 - m3} of 50 phases — RED`, m3);
@@ -203,32 +203,32 @@ console.log(JSON.stringify(out));`;
     ok(!!m1 && (m1.comp + m1.ring) > 0 && !!m2 && m2.comp > 0, `CONTROLS: a held tick that does not ask whether the page's own long frames held it ⇒ ${m1 && m1.ring} of 10 storms written as a compositor stall (ring lines, ${m1 && m1.comp} incidents); the first form's time since the last answer ⇒ ${m2 && m2.comp} of 50 of 1 500 ms — both RED`, { m1, m2 });
     if (process.env.VS_STALL_SIM_KEEP) console.log('    (sim kept in ' + dir + ')'); else try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
   }
-  ok(/const pushGap = \(end, gap\) => \{\n    if \(gap >= 300 && !document\.hidden && !frameGapIsReturn\(\{ now: end, gap, visibleSince, hiddenAt \}\)\)/.test(src), 'WIRING: a frame gap (a long frame, a late probe, the fallback loop) is pushed only when it is not a return');
+  ok(verdictOf(/const pushGap = \(end, gap\) => \{\n    if \(gap >= 300 && !document\.hidden && !frameGapIsReturn\(\{ now: end, gap, visibleSince, hiddenAt \}\)\)/.test(src)), 'WIRING: a frame gap (a long frame, a late probe, the fallback loop) is pushed only when it is not a return');
   // lane window-close-stall (the owner's recording: this watch's rAF loop forced a frame at every vsync, ≈ 190 ms of main thread
   // a second with nobody acting): THE PAGE NEVER ASKS FOR A FRAME IT DOES NOT PAINT — long frames from the observer, one probe a
   // second from the tick, the per-frame loop only without the observer and only while a person acts
   const W2 = (src.match(/export function installCompositorStallWatch\(\) \{[\s\S]*?\n\}\n/) || [''])[0];
-  ok(/\.observe\(\{ type: 'long-animation-frame' \}\)/.test(W2) && /    if \(!probeAt\) \{ probe\(\); return; \} \/\/ the one frame this second asks for/.test(W2) && /if \(now - lastInput < 2000\) requestAnimationFrame\(loop\); else \{ running = false;/.test(W2) && /if \(!observed\) \{/.test(W2) && (W2.match(/requestAnimationFrame\(/g) || []).length === 3,
+  ok(gateOf(/\.observe\(\{ type: 'long-animation-frame' \}\)/.test(W2)) && gateOf(/    if \(!probeAt\) \{ probe\(\); return; \} \/\/ the one frame this second asks for/.test(W2)) && gateOf(/if \(now - lastInput < 2000\) requestAnimationFrame\(loop\); else \{ running = false;/.test(W2)) && gateOf(/if \(!observed\) \{/.test(W2)) && (W2.match(/requestAnimationFrame\(/g) || []).length === 3,
     'NO PERMANENT rAF: frame gaps from the long-animation-frame observer, ONE rAF a second asked by the tick (the stall arm\'s heartbeat), the per-frame loop only where the observer is missing and only ≤ 2 s after an input — three requestAnimationFrame calls in the watch, none unconditional', (W2.match(/requestAnimationFrame\(/g) || []).length);
-  ok(/jankStormVerdict\(_frameGaps, \{ now: tickNow, visibleSince, longTasks: _longTasks, inputs: _inputs \}\)/.test(src), 'WIRING: the live jank-storm verdict is handed the long tasks and the input stamps');
-  ok(/if \(paintGapKind\(f, \{ longTasks, inputs \}\) !== 'jank'\) continue;/.test(src), 'WIRING: the storm verdict drops any gap that is not jank (unpainted never counts)');
-  ok(/paintGapKind\(\{ t: ended, gap: ended - Math\.min\(from \|\| stallStart, stallStart\) \}, \{ longTasks: _longTasks, inputs: _inputs \}\) === 'jank'/.test(src), 'WIRING: the compositor arm classifies its stall by the same verdict (its presence window from the last frame the page knows arrived)');
-  ok(/metric\('paint-gap-s', dur\);/.test(src) && /track\('event', 'paint-gap',/.test(src), 'WIRING: an unpainted compositor stall is a paint-gap metric + a ring line');
+  ok(verdictOf(/jankStormVerdict\(_frameGaps, \{ now: tickNow, visibleSince, longTasks: _longTasks, inputs: _inputs \}\)/.test(src)), 'WIRING: the live jank-storm verdict is handed the long tasks and the input stamps');
+  ok(verdictOf(/if \(paintGapKind\(f, \{ longTasks, inputs \}\) !== 'jank'\) continue;/.test(src)), 'WIRING: the storm verdict drops any gap that is not jank (unpainted never counts)');
+  ok(verdictOf(/paintGapKind\(\{ t: ended, gap: ended - Math\.min\(from \|\| stallStart, stallStart\) \}, \{ longTasks: _longTasks, inputs: _inputs \}\) === 'jank'/.test(src)), 'WIRING: the compositor arm classifies its stall by the same verdict (its presence window from the last frame the page knows arrived)');
+  ok(gateOf(/metric\('paint-gap-s', dur\);/.test(src)) && verdictOf(/track\('event', 'paint-gap',/.test(src)), 'WIRING: an unpainted compositor stall is a paint-gap metric + a ring line');
   const ci = src.indexOf("paintGapKind({ t: ended, gap: ended - Math.min(from || stallStart, stallStart) }");
   const compBlock = src.slice(ci, src.indexOf('stallStart = 0;', ci));
-  ok(compBlock.includes("notifyFreeze({ kind: 'compositor'") && compBlock.includes('} else {') && compBlock.includes("metric('paint-gap-s'") && compBlock.indexOf("notifyFreeze({ kind: 'compositor'") < compBlock.indexOf('} else {'), 'WIRING: notifyFreeze for a compositor stall is in the jank branch; the unpainted (else) branch files only a metric — no auto incident');
-  ok(/window\.addEventListener\('pointerdown', noteInput/.test(src) && /window\.addEventListener\('keydown', noteInput/.test(src), 'WIRING: the input-stamp ring listens to pointerdown + keydown');
-  ok(/document\.addEventListener\('freeze'/.test(src) && /document\.addEventListener\('resume'/.test(src) && /pushScreen\(\{ k: 'focus' \}\)/.test(src) && /pushScreen\(\{ k: 'idle'/.test(src), 'WIRING: installScreenWatch records freeze/resume, focus/blur and the idle verdict');
-  ok(/p\.state !== 'granted'\) return;/.test(src), 'WIRING: Idle Detection is read only if the permission is ALREADY granted (never a new prompt)');
+  ok(gateOf(compBlock.includes("notifyFreeze({ kind: 'compositor'")) && gateOf(compBlock.includes('} else {')) && gateOf(compBlock.includes("metric('paint-gap-s'")) && compBlock.indexOf("notifyFreeze({ kind: 'compositor'") < compBlock.indexOf('} else {'), 'WIRING: notifyFreeze for a compositor stall is in the jank branch; the unpainted (else) branch files only a metric — no auto incident');
+  ok(gateOf(/window\.addEventListener\('pointerdown', noteInput/.test(src)) && verdictOf(/window\.addEventListener\('keydown', noteInput/.test(src)), 'WIRING: the input-stamp ring listens to pointerdown + keydown');
+  ok(gateOf(/document\.addEventListener\('freeze'/.test(src)) && gateOf(/document\.addEventListener\('resume'/.test(src)) && gateOf(/pushScreen\(\{ k: 'focus' \}\)/.test(src)) && verdictOf(/pushScreen\(\{ k: 'idle'/.test(src)), 'WIRING: installScreenWatch records freeze/resume, focus/blur and the idle verdict');
+  ok(verdictOf(/p\.state !== 'granted'\) return;/.test(src)), 'WIRING: Idle Detection is read only if the permission is ALREADY granted (never a new prompt)');
   const client = fs.readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
-  ok(/installInputStamp\(\);/.test(client), 'WIRING: client.js installs the input-stamp ring at boot');
+  ok(verdictOf(/installInputStamp\(\);/.test(client)), 'WIRING: client.js installs the input-stamp ring at boot');
   const rec = fs.readFileSync(new URL('../src/lib/incident-recorder.js', import.meta.url), 'utf8');
-  ok(/out\.screenEvents = window\.__vsScreenEvents/.test(rec), 'WIRING: the incident snapshot carries screenEvents (the window\'s screen facts reach the bundle)');
-  ok(/window\.__vsInputs \|\|= recentInputs/.test(src), 'WIRING: the input ring is exposed as window.__vsInputs (like the sibling rings)');
+  ok(verdictOf(/out\.screenEvents = window\.__vsScreenEvents/.test(rec)), 'WIRING: the incident snapshot carries screenEvents (the window\'s screen facts reach the bundle)');
+  ok(verdictOf(/window\.__vsInputs \|\|= recentInputs/.test(src)), 'WIRING: the input ring is exposed as window.__vsInputs (like the sibling rings)');
   // lane window-close-stall: the lazy doc editor bundle carries a SECOND copy of telemetry-client.js — every ring accessor is set
   // only when unset, so that copy never re-points the recorder at its own empty rings (test-incident «rings» drives it in Chrome)
   ok(!/window\.__vs\w+ = /.test(src) && (src.match(/window\.__vs\w+ \|\|= /g) || []).length === 6, 'WIRING: every window.__vs* ring accessor in telemetry-client.js is set ONLY WHEN UNSET (||=) — six, none assigned bare', (src.match(/window\.__vs\w+ \|?\|?= /g) || []));
-  ok(/out\.inputs = window\.__vsInputs/.test(rec), 'WIRING: the snapshot carries the input ring (the paint-gap verdict\'s present-person evidence)');
+  ok(verdictOf(/out\.inputs = window\.__vsInputs/.test(rec)), 'WIRING: the snapshot carries the input ring (the paint-gap verdict\'s present-person evidence)');
 }
 // ── THE PAGE'S LAST REQUESTS (lane vault-slow-load): a resource-timing entry ⇒ { at, route, ms } for the page's own
 // /api/ requests — the route = the first three path segments (the server's slow-request rule: no query, no id, no path) ──
@@ -247,10 +247,10 @@ console.log(JSON.stringify(out));`;
   const src = fs.readFileSync(new URL('../src/lib/telemetry-client.js', import.meta.url), 'utf8');
   const client = fs.readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
   const rec = fs.readFileSync(new URL('../src/lib/incident-recorder.js', import.meta.url), 'utf8');
-  ok(/po\.observe\(\{ type: 'resource', buffered: true \}\)/.test(src) && /const rec = fetchTimingOf\(e, location\.origin, performance\.timeOrigin\);/.test(src) && /if \(_fetchTimings\.length > FETCH_TIMINGS_KEPT\) _fetchTimings\.shift\(\);/.test(src), 'WIRING: the ring observes the resource timings through fetchTimingOf and keeps the last FETCH_TIMINGS_KEPT');
-  ok(/window\.__vsFetchTimings \|\|= recentFetchTimings/.test(src) && /installFetchTimingWatch\(\);/.test(client), 'WIRING: exposed as window.__vsFetchTimings (like the sibling rings), installed by client.js at boot');
+  ok(gateOf(/po\.observe\(\{ type: 'resource', buffered: true \}\)/.test(src)) && gateOf(/const rec = fetchTimingOf\(e, location\.origin, performance\.timeOrigin\);/.test(src)) && verdictOf(/if \(_fetchTimings\.length > FETCH_TIMINGS_KEPT\) _fetchTimings\.shift\(\);/.test(src)), 'WIRING: the ring observes the resource timings through fetchTimingOf and keeps the last FETCH_TIMINGS_KEPT');
+  ok(gateOf(/window\.__vsFetchTimings \|\|= recentFetchTimings/.test(src)) && verdictOf(/installFetchTimingWatch\(\);/.test(client)), 'WIRING: exposed as window.__vsFetchTimings (like the sibling rings), installed by client.js at boot');
   const carries = (t) => /out\.fetchTimings = window\.__vsFetchTimings \? window\.__vsFetchTimings\(\)\.slice\(-20\) : null;/.test(t);
-  ok(carries(rec), 'WIRING: the incident snapshot carries the page\'s last 20 requests (route, ms)');
+  ok(verdictOf(carries(rec)), 'WIRING: the incident snapshot carries the page\'s last 20 requests (route, ms)');
   ok(!carries(rec.replace(/\n.*out\.fetchTimings = .*/, '')), 'RED CONTROL: the base recorder (no such line) carries no timing — inc-mvk5jyv3\'s bundle');
 }
 // ── B-402f: THE BROWSER'S RESIZEOBSERVER LOOP NOTE IS A NOTE, NEVER A CLIENT ERROR (the Diagnostics rail badge read 3 → 4 → 5
@@ -265,7 +265,7 @@ console.log(JSON.stringify(out));`;
   const REPO = path.resolve(new URL('..', import.meta.url).pathname);
   const BN = req('../src/browser-notes.js');
   const CHROME = 'ResizeObserver loop completed with undelivered notifications.', OLD = 'ResizeObserver loop limit exceeded';
-  ok(BN.isBrowserNote(CHROME) && BN.isBrowserNote(OLD) && BN.isBrowserNote('Uncaught ' + CHROME) && BN.isBrowserNote('Error: ' + OLD),
+  ok(gateOf(BN.isBrowserNote(CHROME)) && gateOf(BN.isBrowserNote(OLD)) && gateOf(BN.isBrowserNote('Uncaught ' + CHROME)) && verdictOf(BN.isBrowserNote('Error: ' + OLD)),
     'B-402f: both ResizeObserver loop notes (Chrome\'s / Firefox\'s, the older wording, an «Uncaught» / «Error:» head) are the browser\'s notes');
   ok(!BN.isBrowserNote('ResizeObserver is not defined') && !BN.isBrowserNote("Cannot read properties of undefined (reading 'x')") && !BN.isBrowserNote('my ' + CHROME) && !BN.isBrowserNote(null),
     'B-402f: a real error — even one naming ResizeObserver — is never a note');
@@ -276,9 +276,9 @@ console.log(JSON.stringify(out));`;
     'B-402f: windowErrorEntry — the note becomes kind «event» named browser-note; a real error stays kind «error» with its name, place and stack', [note, { ...real, stack: !!real.stack }]);
   const src = fs.readFileSync(new URL('../src/lib/telemetry-client.js', import.meta.url), 'utf8');
   const wired = (t) => /window\.addEventListener\('error', \(e\) => \{\s*const x = windowErrorEntry\(e\);\s*if \(x\.kind !== 'error'\) \{ if \(noted\) return; noted = true; \}\s*track\(x\.kind, x\.name, x\.detail, x\.stack\);/.test(t);
-  ok(wired(src), 'B-402f WIRING: the page\'s window error listener tracks what windowErrorEntry says, the note ONCE per page');
+  ok(verdictOf(wired(src)), 'B-402f WIRING: the page\'s window error listener tracks what windowErrorEntry says, the note ONCE per page');
   let base = ''; try { base = execFileSync('git', ['show', 'b06f36e90:src/lib/telemetry-client.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
-  if (base) ok(!wired(base) && /track\('error', \(e\.error && e\.error\.message\) \|\| e\.message \|\| 'window\.onerror'/.test(base), 'B-402f RED CONTROL: the release b06f36e90\'s listener tracked EVERY window error as an error (the note included)');
+  if (base) ok(!wired(base) && verdictOf(/track\('error', \(e\.error && e\.error\.message\) \|\| e\.message \|\| 'window\.onerror'/.test(base)), 'B-402f RED CONTROL: the release b06f36e90\'s listener tracked EVERY window error as an error (the note included)');
   else console.log('  · SKIP: the release b06f36e90 is not in this clone');
   // the hub's summary: a stored note (an older page sent it as kind «error») is no error group; a real one is
   // B-360d unit 2: the summary reads and sums in its worker (src/telemetry-summary-worker.js); this leg judges the AGGREGATE — the
@@ -303,13 +303,13 @@ console.log(JSON.stringify(out));`;
   ok(live === '1:x is not a function', 'B-402f: the summary the Diagnostics badge sums counts the real error only — two stored notes and a note event add nothing', live);
   const rel = 'src/telemetry.js', tsrc = fs.readFileSync(path.join(REPO, rel), 'utf8');
   const needle = "        if ((r.kind === 'error' || r.kind === 'server-error') && !(r.kind === 'error' && isBrowserNote(r.name))) {";
-  ok(tsrc.includes(needle), 'B-402f control needle exists');
+  ok(verdictOf(tsrc.includes(needle)), 'B-402f control needle exists');
   const MUT = mutantCopies('browser-note', REPO);
   const mut = MUT.write(rel, tsrc.split(needle).join("        if (r.kind === 'error' || r.kind === 'server-error') {"), 'no-note-filter');
-  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: 'B-402f ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: 'B-402f ' })) ok(verdictOf(row.pass), row.name, row.detail);
   const M = req(mut);
   const red = summarize(M);
-  ok(red === '3:' + [CHROME, 'x is not a function'].sort((a, b) => (a === CHROME ? -1 : 1)).join('|') || red.startsWith('3:'), 'B-402f RED CONTROL: the summary without the filter counts the two stored notes as errors (the red badge)', red);
+  ok(red === '3:' + [CHROME, 'x is not a function'].sort((a, b) => (a === CHROME ? -1 : 1)).join('|') || verdictOf(red.startsWith('3:')), 'B-402f RED CONTROL: the summary without the filter counts the two stored notes as errors (the red badge)', red);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

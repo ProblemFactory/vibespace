@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) console.log(`  ✓ ${name}`);
   else { failed++; console.error(`  ✗ ${name}${extra ? ' — ' + extra : ''}`); }
 };
@@ -68,7 +68,7 @@ for (const [label, raw] of [
   mm.processLive(raw);
   const m = ops.find((o) => o.op === 'create')?.message;
   check(`no-fallback record renders a notice [${label}]`,
-    m && m.noticeKind === 'model-refusal-no-fallback' && m.content[0].fallbackFrom === 'claude-fable-5'
+    gateOf(m) && m.noticeKind === 'model-refusal-no-fallback' && m.content[0].fallbackFrom === 'claude-fable-5'
       && m.content[0].refusalCategory === 'cyber');
 }
 
@@ -78,7 +78,7 @@ si = spec.args.indexOf('--settings');
 check('neutralizer adds --settings apiKeyHelper:""', si >= 0 && JSON.parse(spec.args[si + 1]).apiKeyHelper === '');
 spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', settings: { disableModelFallback: true }, neutralizeKeyHelper: true });
 check('ONE --settings with all three keys merged', spec.args.filter((a) => a === '--settings').length === 1
-  && (() => { const o = JSON.parse(spec.args[spec.args.indexOf('--settings') + 1]); return o.ultracode === true && o.switchModelsOnFlag === false && o.apiKeyHelper === ''; })());
+  && verdictOf((() => { const o = JSON.parse(spec.args[spec.args.indexOf('--settings') + 1]); return o.ultracode === true && o.switchModelsOnFlag === false && o.apiKeyHelper === ''; })()));
 spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat' });
 check('no neutralizer flag ⇒ no settings key', !('apiKeyHelper' in settingsOf(spec)));
 
@@ -100,7 +100,7 @@ check('auto-continue: row ON ⇒ nothing passed (the CLI\'s own setting governs)
   && !adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', settings: { autoContinueAtUsageLimit: true, allowAgentTools: false } }).args.includes('--settings'));
 spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', settings: { disableModelFallback: true }, neutralizeKeyHelper: true });
 check('auto-continue: MERGED into the ONE --settings flag with every other key', spec.args.filter((a) => a === '--settings').length === 1
-  && (() => { const o = settingsOf(spec); return o.ultracode === true && o.switchModelsOnFlag === false && o.apiKeyHelper === '' && o.autoContinueAtUsageLimit === false; })());
+  && verdictOf((() => { const o = settingsOf(spec); return o.ultracode === true && o.switchModelsOnFlag === false && o.apiKeyHelper === '' && o.autoContinueAtUsageLimit === false; })()));
 spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', extraArgs: ['--settings', '/home/u/my-settings.json'] });
 check('auto-continue: a user\'s own --settings FILE in extra args is never clobbered by this default', spec.args.filter((a) => a === '--settings').length === 1 && spec.args[spec.args.indexOf('--settings') + 1] === '/home/u/my-settings.json');
 spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', extraArgs: ['--settings', '{"autoContinueAtUsageLimit":true,"x":1}'] });
@@ -118,20 +118,20 @@ check('auto-continue: an explicit key in the user\'s own inline --settings JSON 
   const PIPED = /child = spawn\(cmd, spawnArgs, \{[^}]*stdio: \['pipe', 'pipe', 'pipe'\]/;
   const PTY = /child = pty\.spawn\(cmd, args,/;
   const CHAT_ONLY = /sendToSession: \(id, s, text, carried\) => \{ try \{ const ad = adapterRegistry\.get\(s\.backend\); if \(!ad \|\| !s\.pty \|\| s\.mode !== 'chat'\) return false;/;
-  check('premise: chat-wrapper spawns claude with a PIPED stdout (⇒ non-interactive ⇒ the CLI\'s continue cannot arm in chat)', PIPED.test(readRepo('data/bin/chat-wrapper.js')));
+  check('premise: chat-wrapper spawns claude with a PIPED stdout (⇒ non-interactive ⇒ the CLI\'s continue cannot arm in chat)', verdictOf(PIPED.test(readRepo('data/bin/chat-wrapper.js'))));
   check('premise NEGATIVE CONTROL: a wrapper that handed claude a TTY/inherited stdout fails the pin', !PIPED.test("child = spawn(cmd, spawnArgs, { cwd: process.cwd(), env: process.env, stdio: 'inherit' });"));
-  check('premise: pty-wrapper spawns claude on a real pty (⇒ interactive ⇒ the CLI\'s continue CAN arm in terminal sessions)', PTY.test(readRepo('data/bin/pty-wrapper.js')));
+  check('premise: pty-wrapper spawns claude on a real pty (⇒ interactive ⇒ the CLI\'s continue CAN arm in terminal sessions)', verdictOf(PTY.test(readRepo('data/bin/pty-wrapper.js'))));
   check('premise NEGATIVE CONTROL: a piped terminal spawn fails the pin', !PTY.test("child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });"));
-  check('premise: VibeSpace\'s auto-resume delivers to CHAT sessions only (server.js sendToSession) — so OFF leaves terminal sessions with no automatic continue', CHAT_ONLY.test(readRepo('server.js')));
+  check('premise: VibeSpace\'s auto-resume delivers to CHAT sessions only (server.js sendToSession) — so OFF leaves terminal sessions with no automatic continue', verdictOf(CHAT_ONLY.test(readRepo('server.js'))));
   check('premise NEGATIVE CONTROL: a sendToSession without the chat gate fails the pin', !CHAT_ONLY.test("sendToSession: (id, s, text, carried) => { try { const ad = adapterRegistry.get(s.backend); if (!ad || !s.pty) return false;"));
   const HS = require(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/harness-settings.js'));
   // B-82b8: the row's words live in src/harness-settings-words.js — read through the join, the shape Settings shows
   const HSW = require(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/harness-settings-words.js'));
   const row = HSW.withWords(HS.HARNESS_SETTINGS.claude).rows.find((r) => r.key === 'autoContinueAtUsageLimit');
   const TRUE_WORDS = (d) => /Chat sessions never run it/.test(d) && /nothing continues it by itself/.test(d) && !/two producers/.test(d) && !/pick up/.test(d);
-  check('the row\'s description says the per-mode truth (chat never runs it; terminal: nothing continues it when off) and not the refuted "two producers" premise', !!row && TRUE_WORDS(row.description));
+  check('the row\'s description says the per-mode truth (chat never runs it; terminal: nothing continues it when off) and not the refuted "two producers" premise', !!row && verdictOf(TRUE_WORDS(row.description)));
   check('description NEGATIVE CONTROL: the pre-fix wording ("…a limit then stops the turn for VibeSpace\'s auto-resume to pick up … two producers…") fails it', !TRUE_WORDS("VibeSpace runs its own auto-resume, so this stays off: a limit then stops the turn for VibeSpace's auto-resume to pick up. On lets two producers continue the same conversation at the same reset."));
 }
 
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

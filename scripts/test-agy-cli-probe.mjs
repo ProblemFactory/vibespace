@@ -16,7 +16,7 @@ import { scratchDir } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 const which = (c) => { const r = spawnSync('sh', ['-c', `command -v ${c}`], { encoding: 'utf8' }); return (r.stdout || '').trim() || null; };
 const agy = process.env.AGY_PROBE_CMD || which('agy');
 const sandboxed = !!which('bwrap') && spawnSync('bwrap', ['--unshare-net', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', 'true']).status === 0;
@@ -51,7 +51,7 @@ else {
   const flags = [...help.matchAll(/^\s{2}(-{1,2}[\w-]+)\s{2,}/gm)].map((m) => m[1]);
   const missing = Object.keys(FX.help.flags).filter((f) => !flags.includes(f));
   ok('--help still lists every flag the fixture (and the descriptor) relies on', !missing.length, missing);
-  for (const f of ['--input-format', '--output-format', '--conversation', '--model', '--effort', '--mode', '--dangerously-skip-permissions']) ok(`  …${f}`, flags.includes(f));
+  for (const f of ['--input-format', '--output-format', '--conversation', '--model', '--effort', '--mode', '--dangerously-skip-permissions']) ok(`  …${f}`, verdictOf(flags.includes(f)));
   // the unauthenticated start: wait for the OAuth line, then kill (never its 60 s wait)
   const r = await new Promise((resolve) => {
     const c = spawn('bwrap', boxed(['--input-format', 'stream-json', '--output-format', 'stream-json']), { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -63,9 +63,9 @@ else {
     c.on('exit', () => { clearTimeout(to); resolve({ err, out, ms: Date.now() - t0 }); });
   });
   const want = FX.unauthenticated.streamPipe;
-  ok('an unauthenticated stream start on a PIPE (how the wrapper runs it) refuses at once with the recorded words', r.err.split('\n')[0] === want.stderr[0] && /authentication required/i.test(r.err) && r.ms < 15000, { err: r.err.slice(0, 300), ms: r.ms });
+  ok('an unauthenticated stream start on a PIPE (how the wrapper runs it) refuses at once with the recorded words', r.err.split('\n')[0] === want.stderr[0] && gateOf(/authentication required/i.test(r.err)) && r.ms < 15000, { err: r.err.slice(0, 300), ms: r.ms });
   const evs = r.out.trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } });
-  ok('…its stdout is ONE result event, status ERROR, the recorded error (no init, no turn)', evs.length === 1 && evs[0] && evs[0].event === 'result' && evs[0].result.status === 'ERROR' && evs[0].result.error === want.stdout.result.error, r.out.slice(0, 300));
+  ok('…its stdout is ONE result event, status ERROR, the recorded error (no init, no turn)', evs.length === 1 && gateOf(evs[0]) && evs[0].event === 'result' && evs[0].result.status === 'ERROR' && evs[0].result.error === want.stdout.result.error, r.out.slice(0, 300));
   // THE WRAPPER ON THE REAL agy: the shipped data/bin/agy-wrapper.js runs the real binary (inside the same sandbox)
   // and turns its refusal into the auth-required notice by name, ending the session — never a silent hang
   const W = path.join(REPO, 'data/bin/agy-wrapper.js');
@@ -83,7 +83,7 @@ else {
   const auth = recs.find((x) => x.kind === 'notice' && x.noticeKind === 'auth-required');
   const v = recs.find((x) => x.kind === 'agent_version');
   ok('the wrapper on the REAL agy: the refusal becomes the auth-required notice by name, the session ends (exit 1)', !!auth && wr.code === 1 && wr.ms < 25000, { code: wr.code, ms: wr.ms, kinds: recs.map((x) => x.kind) });
-  ok('…and it recorded the version it ran (the version law, on the real binary)', v && v.version === FX.version, v);
+  ok('…and it recorded the version it ran (the version law, on the real binary)', gateOf(v) && v.version === FX.version, v);
 
   // COMMIT 2's MEASUREMENT AS A LEG: a named account's spawn env (HOME = a seeded root, the bus `disabled:`) on the real
   // agy reads THE ROOT's login file and dials NO bus — even with a listening `bus` under XDG_RUNTIME_DIR, which without
@@ -108,9 +108,9 @@ else {
     const tokenOpened = tr.includes(path.join(root, AG.TOKEN_REL));
     const busDials = tr.split('\n').filter((l) => /connect\(/.test(l) && /(run\/user|\/bus"|xdg\/bus)/.test(l));
     const launched = /execve\([^)]*dbus-launch/.test(tr);
-    ok('the ACCOUNT env on the real agy reads the ROOT\'s login file (antigravity-oauth-token under the root)', tokenOpened, tr.split('\n').filter((l) => /oauth-token/.test(l)).slice(0, 3));
+    ok('the ACCOUNT env on the real agy reads the ROOT\'s login file (antigravity-oauth-token under the root)', verdictOf(tokenOpened), tr.split('\n').filter((l) => /oauth-token/.test(l)).slice(0, 3));
     ok('…dials NO bus (no connect to a bus path, the planted XDG bus untouched) and autolaunches nothing (no dbus-launch)', busDials.length === 0 && dialed === 0 && !launched, { busDials: busDials.slice(0, 3), dialed, launched });
-    ok('…and answers the measured refusal (not signed in), exit 1', ar.status === 1 && /authentication required/i.test(ar.stderr || ''), { status: ar.status, err: (ar.stderr || '').slice(0, 200) });
+    ok('…and answers the measured refusal (not signed in), exit 1', ar.status === 1 && verdictOf(/authentication required/i.test(ar.stderr || '')), { status: ar.status, err: (ar.stderr || '').slice(0, 200) });
     // RED CONTROL: a fresh root with the bus ADDRESS pointing at a planted socket (no `disabled:`): agy dials it
     // (measured: the keyring lookup), so the detector can see a dial when there is one. Both legs run agy ASYNC — a
     // spawnSync blocks this process's event loop, a dial then waits in the listener's backlog uncounted (it did).
@@ -128,7 +128,7 @@ else {
   const capOut = path.join(H, 'usage-capture.json');
   const cr = spawnSync('bwrap', ['--unshare-net', '--die-with-parent', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--tmpfs', '/run/user', '--bind', H, H,
     'env', '-i', `HOME=${H}`, 'PATH=/usr/bin:/bin', `TMPDIR=${H}`, process.execPath, path.join(REPO, 'scripts/agy-usage-capture.mjs'), '--account', root, '--agy', agy, '--out', capOut], { encoding: 'utf8', timeout: 60000 });
-  ok('the /usage capture script on the real agy (an account root, offline, not signed in): auth-required, exit 2, nothing written', cr.status === 2 && /auth-required/.test(cr.stdout || '') && !fs.existsSync(capOut), { status: cr.status, out: (cr.stdout || '') + (cr.stderr || '') });
+  ok('the /usage capture script on the real agy (an account root, offline, not signed in): auth-required, exit 2, nothing written', cr.status === 2 && gateOf(/auth-required/.test(cr.stdout || '')) && !fs.existsSync(capOut), { status: cr.status, out: (cr.stdout || '') + (cr.stderr || '') });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass}${why ? ', the probe SKIPPED' : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -34,7 +34,7 @@ const BE = require('../src/browser-stderr.js');
 const F = require('../src/browser-facts.js');
 const DA = require('../src/desktop-apps.js');
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, m, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -96,14 +96,14 @@ setMode('ok');
 fs.writeFileSync(path.join(PD, 'DevToolsActivePort'), '9\n/devtools/browser/dead-0000\n'); // a killed Chrome's file — deleted BEFORE the spawn
 fs.writeFileSync(path.join(STATE, 'chrome-delay'), '120');   // this leg reads the spawn's WAIT (r.ms >= 100): the port comes 120 ms after the listen
 let r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: ['--remote-debugging-port=0', `--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log') });
-ok(r.ok && r.port > 9 && r.wsPath === '/devtools/browser/fake-0001' && alive(r.pid) && r.ms >= 100, 'new: the spawn deletes the stale file, waits for the NEW one and answers its port (never the dead 9)', { ...r, child: undefined });
+ok(gateOf(r.ok) && r.port > 9 && r.wsPath === '/devtools/browser/fake-0001' && gateOf(alive(r.pid)) && r.ms >= 100, 'new: the spawn deletes the stale file, waits for the NEW one and answers its port (never the dead 9)', { ...r, child: undefined });
 fs.rmSync(path.join(STATE, 'chrome-delay'), { force: true });
 try { process.kill(r.pid, 'SIGTERM'); } catch { }
 setMode('stale');
 let t = Date.now();
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 900 });
 const stalePid = chromeLog().pop().pid; await until(() => !alive(stalePid));
-ok(!r.ok && r.code === 'cdp_port_missing' && /stale one/.test(r.error) && Date.now() - t >= 900 && !alive(stalePid), 'stale: a port file older than the spawn is never taken — cdp_port_missing at the deadline, the Chrome it spawned ended', r);
+ok(!r.ok && r.code === 'cdp_port_missing' && gateOf(/stale one/.test(r.error)) && Date.now() - t >= 900 && !alive(stalePid), 'stale: a port file older than the spawn is never taken — cdp_port_missing at the deadline, the Chrome it spawned ended', r);
 // CONTROL (lane bl-windows — a race proven by a stall placed in its window, never by the clock): the fixture's OLD order, the
 // file written fresh and backdated only after a stall ⇒ the launcher takes the dead port 9 — the box-zone red's own values
 setMode('stale-torn');
@@ -116,7 +116,7 @@ const neverPid = chromeLog().pop().pid; await until(() => !alive(neverPid));
 ok(!r.ok && r.code === 'cdp_port_missing' && !/stale one/.test(r.error) && !alive(neverPid), 'missing: no file at all ⇒ cdp_port_missing, the Chrome ended', r);
 setMode('exit');
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 3000 });
-ok(!r.ok && r.code === 'launch_failed' && /exit code 21/.test(r.error) && /in use by another Google Chrome/.test(r.error), 'an early exit is said with its code and its last words (the log FILE, never a pipe) — launch_failed, never the deadline\'s cdp_port_missing: it was seen before the deadline', r);
+ok(!r.ok && r.code === 'launch_failed' && gateOf(/exit code 21/.test(r.error)) && verdictOf(/in use by another Google Chrome/.test(r.error)), 'an early exit is said with its code and its last words (the log FILE, never a pipe) — launch_failed, never the deadline\'s cdp_port_missing: it was seen before the deadline', r);
 
 const SOCKBASE = path.join(S, 's'); fs.mkdirSync(SOCKBASE, { recursive: true }); // production's base is /tmp (it exists)   // (③'s, the keeper's socket base)
 
@@ -171,22 +171,22 @@ setMode('ok'); fs.writeFileSync(path.join(STATE, 'chrome.log'), '');
 let vA = await k.start(pA.id, { why: 'test' });
 const recA = k._reg().browsers[pA.id];
 const cl = chromeLog().pop();
-ok(vA.state === 'ready' && recA.launch === 'attach' && /own display \(xpra\)/.test(recA.launchWhy) && recA.displaySession && recA.displaySession.id === 'da-fake-1' && recA.displaySession.display === ':91', 'start: the ATTACH road on a machine with xpra — the record says which road and why, and names its display session', { launch: recA.launch, why: recA.launchWhy, ds: recA.displaySession });
-ok(dcalls[0][0] === 'launch' && dcalls[0][1] === pA.id && dcalls[0][2] === 'Work' && recA.pid === cl.pid && alive(recA.pid) && Number.isInteger(recA.starttime), 'the display-only session asked for THIS profile; the record\'s process IS the spawned Chrome (pid + starttime)', { dcalls, pid: recA.pid, cl: cl.pid });
+ok(vA.state === 'ready' && recA.launch === 'attach' && gateOf(/own display \(xpra\)/.test(recA.launchWhy)) && gateOf(recA.displaySession) && recA.displaySession.id === 'da-fake-1' && recA.displaySession.display === ':91', 'start: the ATTACH road on a machine with xpra — the record says which road and why, and names its display session', { launch: recA.launch, why: recA.launchWhy, ds: recA.displaySession });
+ok(dcalls[0][0] === 'launch' && dcalls[0][1] === pA.id && dcalls[0][2] === 'Work' && recA.pid === cl.pid && gateOf(alive(recA.pid)) && verdictOf(Number.isInteger(recA.starttime)), 'the display-only session asked for THIS profile; the record\'s process IS the spawned Chrome (pid + starttime)', { dcalls, pid: recA.pid, cl: cl.pid });
 ok(JSON.stringify(cl.args) === JSON.stringify(AT.attachArgv({ profileDir: pA.dir, mark: B.keeperMarkArg(pA.id), quiet }).argv), 'Chrome ran with the argv table\'s argv for its profile (mark + quiet switches; no --disable-sync)', cl.args);
-ok(cl.DISPLAY === ':91' && cl.XAUTHORITY === path.join(S, 'xauth-da-fake-1') && cl.ab.length === 0 && cl.TMPDIR && cl.TMPDIR.startsWith(DATA), 'its env: the display session\'s DISPLAY + XAUTHORITY, the keeper\'s short TMPDIR, NO AGENT_BROWSER_* key (a leaked server one dropped)', cl);
-ok(B.isLoopbackCdpUrl(recA.cdpUrl) && recA.cdpUrl.endsWith('/devtools/browser/fake-0001') && recA.cdpPort === Number(new URL(recA.cdpUrl).port) && recA.browser.pid === recA.pid && recA.cdpBrowser === 'Chrome/154.0.8037.57', 'the cdpUrl = the NEW port file\'s ws url (the endpoint asked: its build recorded)', { cdpUrl: recA.cdpUrl, port: recA.cdpPort, b: recA.cdpBrowser });
-ok(recA.socketDir === path.join(SOCKBASE, `vs-ab-${process.getuid()}`, pA.id) && fs.statSync(recA.socketDir).isDirectory(), 'its socket dir is the config\'s own', recA.socketDir);
-ok(launches().length === 0 && abLog().every((c) => c.argv[0] !== 'open'), 'the driver never launched a browser for it');
+ok(cl.DISPLAY === ':91' && cl.XAUTHORITY === path.join(S, 'xauth-da-fake-1') && cl.ab.length === 0 && gateOf(cl.TMPDIR) && verdictOf(cl.TMPDIR.startsWith(DATA)), 'its env: the display session\'s DISPLAY + XAUTHORITY, the keeper\'s short TMPDIR, NO AGENT_BROWSER_* key (a leaked server one dropped)', cl);
+ok(gateOf(B.isLoopbackCdpUrl(recA.cdpUrl)) && gateOf(recA.cdpUrl.endsWith('/devtools/browser/fake-0001')) && recA.cdpPort === Number(new URL(recA.cdpUrl).port) && recA.browser.pid === recA.pid && recA.cdpBrowser === 'Chrome/154.0.8037.57', 'the cdpUrl = the NEW port file\'s ws url (the endpoint asked: its build recorded)', { cdpUrl: recA.cdpUrl, port: recA.cdpPort, b: recA.cdpBrowser });
+ok(recA.socketDir === path.join(SOCKBASE, `vs-ab-${process.getuid()}`, pA.id) && verdictOf(fs.statSync(recA.socketDir).isDirectory()), 'its socket dir is the config\'s own', recA.socketDir);
+ok(launches().length === 0 && verdictOf(abLog().every((c) => c.argv[0] !== 'open')), 'the driver never launched a browser for it');
 // every driver call on the attach record: --cdp first, the config's root, never a directory or the LAUNCH file
 const o = await k.leaseCliOpts(pA.id, 'bk-00000001');
-ok(o && o.extraEnv.AGENT_BROWSER_CDP === recA.cdpUrl, 'a lease\'s options carry the record\'s url (leaseCdpUrl unchanged)', o);
+ok(gateOf(o) && o.extraEnv.AGENT_BROWSER_CDP === recA.cdpUrl, 'a lease\'s options carry the record\'s url (leaseCdpUrl unchanged)', o);
 const rt0 = abLog().length;
 // the keeper's own (configured) runtime under the LEASE's session — the shape of every agentTabAct / tab / stream call
 await k._runtime.exec(k.nsOf(pA.id), ['tab', 'list', '--json'], o);
 await k._runtime.streamPort(k.nsOf(pA.id), { session: o.session, extraEnv: o.extraEnv });
 const viaRuntime = abLog().slice(rt0);
-ok(viaRuntime.length >= 2 && viaRuntime.every((c) => c.cdp === recA.cdpUrl && c.cdp === o.extraEnv.AGENT_BROWSER_CDP && c.root === recA.socketDir && c.profile === null && c.envCdp === null && c.headed === null && c.ns === 'vs-' + pA.id && c.sess === o.session && path.basename(c.config || '') === 'machine.json'), 'a lease-session call (tab list, the stream\'s status) runs `--cdp <the SAME ws url the agent\'s pairs carry>` FIRST in the config\'s own root — no profile dir, no env CDP, no launch key, the lease file', viaRuntime);
+ok(viaRuntime.length >= 2 && verdictOf(viaRuntime.every((c) => c.cdp === recA.cdpUrl && c.cdp === o.extraEnv.AGENT_BROWSER_CDP && c.root === recA.socketDir && c.profile === null && c.envCdp === null && c.headed === null && c.ns === 'vs-' + pA.id && c.sess === o.session && path.basename(c.config || '') === 'machine.json')), 'a lease-session call (tab list, the stream\'s status) runs `--cdp <the SAME ws url the agent\'s pairs carry>` FIRST in the config\'s own root — no profile dir, no env CDP, no launch key, the lease file', viaRuntime);
 fs.mkdirSync(path.join(SOCKBASE, `vs-ab-${process.getuid()}`, pB.id), { recursive: true });
 // B's session lives in ITS root (another config) — must survive A's stop
 fs.mkdirSync(path.join(SOCKBASE, `vs-ab-${process.getuid()}`, pB.id, 'fake-sessions', 'vs-' + pB.id), { recursive: true });
@@ -198,10 +198,10 @@ const before = abLog().length;
 vA = await k.stop(pA.id, { why: 'user' });
 const stopCalls = abLog().slice(before);
 const closeAll = stopCalls.find((c) => c.argv[0] === 'close' && c.argv[1] === '--all');
-ok(closeAll && closeAll.cdp === recA.cdpUrl && closeAll.root === recA.socketDir && closeAll.profile === null && closeAll.envCdp === null && closeAll.headed === null && closeAll.ns === 'vs-' + pA.id, 'stop: the driver\'s close --all ran `--cdp <its ws url>` in the config\'s own root, no profile dir, no launch key', closeAll);
-ok(closeAll && closeAll.config && path.basename(closeAll.config) === 'machine.json', '…naming the LEASE file (the one the agent\'s own commands name), never the launch file machine-<id>.json', closeAll && closeAll.config);
+ok(gateOf(closeAll) && closeAll.cdp === recA.cdpUrl && closeAll.root === recA.socketDir && closeAll.profile === null && closeAll.envCdp === null && closeAll.headed === null && closeAll.ns === 'vs-' + pA.id, 'stop: the driver\'s close --all ran `--cdp <its ws url>` in the config\'s own root, no profile dir, no launch key', closeAll);
+ok(gateOf(closeAll) && gateOf(closeAll.config) && path.basename(closeAll.config) === 'machine.json', '…naming the LEASE file (the one the agent\'s own commands name), never the launch file machine-<id>.json', closeAll && closeAll.config);
 await until(() => !alive(chromeA) && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-1'));
-ok(vA.state === 'stopped' && !alive(chromeA) && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-1') && !dlive.has('da-fake-1'), 'the Chrome was ended by its identity and its display session went with it', { state: vA.state, dcalls });
+ok(vA.state === 'stopped' && !alive(chromeA) && gateOf(dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-1')) && !dlive.has('da-fake-1'), 'the Chrome was ended by its identity and its display session went with it', { state: vA.state, dcalls });
 ok(sessionsUnder(recA.socketDir).length === 0 && sessionsUnder(path.join(SOCKBASE, `vs-ab-${process.getuid()}`, pB.id)).length === 1, 'close --all ended config A\'s sessions and NOT config B\'s (another root)', { a: sessionsUnder(recA.socketDir), b: sessionsUnder(path.join(SOCKBASE, `vs-ab-${process.getuid()}`, pB.id)) });
 // RED control: one shared root for both configs ⇒ the same close --all ends B's session too
 {
@@ -239,7 +239,7 @@ process.kill(recB.pid, 'SIGKILL'); await until(() => !alive(recB.pid));
 await k.tick();
 await until(() => k._reg().browsers[pB.id].state === 'stopped' && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-2'), 1000);
 const recB2 = k._reg().browsers[pB.id];
-ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-2'), 'its Chrome died ⇒ the tick records "the browser exited" and stops its display session', { state: recB2.state, err: recB2.lastError });
+ok(recB2.state === 'stopped' && gateOf(/the browser exited/.test(recB2.lastError)) && verdictOf(dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-2')), 'its Chrome died ⇒ the tick records "the browser exited" and stops its display session', { state: recB2.state, err: recB2.lastError });
 // THE HEAL: an attach Chrome that dies under a HOLDER is started again by the tick — bounded by the driver road's budget
 {
   const liveH = new Set(['bk-0000000e']);
@@ -248,20 +248,20 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   setMode('ok');
   let held = null; try { held = await kh.attach({ profileId: pH.id, browserKey: 'bk-0000000e', by: 'agent' }); } catch (e) { held = { error: e && e.message }; }
   const holders = () => kh.leasesOn(pH.id).length;
-  ok(kh._reg().browsers[pH.id] && kh._reg().browsers[pH.id].launch === 'attach' && holders() === 1, 'a conversation holds an attach browser (a lease)', held && held.error);
+  ok(gateOf(kh._reg().browsers[pH.id]) && kh._reg().browsers[pH.id].launch === 'attach' && holders() === 1, 'a conversation holds an attach browser (a lease)', held && held.error);
   const pids = [kh._reg().browsers[pH.id].pid];
   for (let i = 1; i <= 3; i++) {
     process.kill(pids[pids.length - 1], 'SIGKILL'); await until(() => !alive(pids[pids.length - 1]), 2000);   // B-7e49: the death landed (the tick reads it by its pid), not a fixed 250 ms
     await kh.tick();
     const back = await (async () => { for (let j = 0; j < 80; j++) { const r0 = kh._reg().browsers[pH.id]; if (r0 && r0.state === 'ready' && r0.pid !== pids[pids.length - 1] && alive(r0.pid)) return r0; await sleep(100); } return null; })();
-    ok(back && back.launch === 'attach', `heal ${i}: its Chrome killed under the lease ⇒ the tick starts it again on the attach road (a new Chrome pid ${back && back.pid}, a new display session ${back && back.displaySession && back.displaySession.id})`);
+    ok(gateOf(back) && back.launch === 'attach', `heal ${i}: its Chrome killed under the lease ⇒ the tick starts it again on the attach road (a new Chrome pid ${back && back.pid}, a new display session ${back && back.displaySession && back.displaySession.id})`);
     if (!back) break;
     pids.push(back.pid);
   }
   process.kill(pids[pids.length - 1], 'SIGKILL'); await until(() => !alive(pids[pids.length - 1]), 2000);
   await kh.tick(); await until(() => { const r0 = kh._reg().browsers[pH.id]; return r0 && r0.state === 'stopped' && /closed 3 times in 10 min/.test(r0.lastError || ''); }, 2000);   // B-7e49: the budget's own words, or the leg below is red
   const last = kh._reg().browsers[pH.id];
-  ok(last.state === 'stopped' && /closed 3 times in 10 min, so it is not started again by itself; the next command starts it/.test(last.lastError || ''), 'the 4th closure inside the window: NOT started again (the budget), said on the record', last.lastError);
+  ok(last.state === 'stopped' && verdictOf(/closed 3 times in 10 min, so it is not started again by itself; the next command starts it/.test(last.lastError || '')), 'the 4th closure inside the window: NOT started again (the budget), said on the record', last.lastError);
   const pU = kh.createProfile({ label: 'Unheld' }, { owner: { kind: 'instance', id: null } });
   await kh.start(pU.id, { why: 'test' });
   const pidU = kh._reg().browsers[pU.id].pid;
@@ -287,9 +287,9 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const recE = ke._reg().browsers[pE.id];
   const clE = chromeLog().slice(n0).pop();
   let ran = ''; try { ran = fs.readFileSync(path.join(STATE, 'kernel-ran.log'), 'utf8'); } catch { ran = ''; }
-  ok(vE.state === 'ready' && recE.launch === 'attach' && recE.executable === KERN && ran.includes(KERN), 'an engine profile on the attach road: the ENGINE\'s program is the one spawned (rec.executable = its path)', { launch: recE.launch, exe: recE.executable, ran });
-  ok(clE && JSON.stringify(clE.args) === JSON.stringify(AT.attachArgv({ profileDir: pE.dir, mark: B.keeperMarkArg(pE.id), quiet, extra: ['--vibespace-engine=attach-leg'] }).argv) && clE.ab.length === 0, 'its own arguments went in through the argv builder (mark + quiet switches kept, the same census), no AGENT_BROWSER_* in its env', clE && clE.args);
-  ok(recE.browserChoice && recE.browserChoice.kind === 'plugin' && recE.browserChoice.version === fact.version && asked.some((a) => a[0] === 'launchOptions' && a[2] === pE.id && a[3] === KERN && a[4] === pE.dir), 'the record says {kind:\'plugin\', id, version}; the engine was asked for THIS profile with the kernel VibeSpace resolved and the profile\'s directory', { bc: recE.browserChoice, asked });
+  ok(vE.state === 'ready' && recE.launch === 'attach' && recE.executable === KERN && verdictOf(ran.includes(KERN)), 'an engine profile on the attach road: the ENGINE\'s program is the one spawned (rec.executable = its path)', { launch: recE.launch, exe: recE.executable, ran });
+  ok(gateOf(clE) && JSON.stringify(clE.args) === JSON.stringify(AT.attachArgv({ profileDir: pE.dir, mark: B.keeperMarkArg(pE.id), quiet, extra: ['--vibespace-engine=attach-leg'] }).argv) && clE.ab.length === 0, 'its own arguments went in through the argv builder (mark + quiet switches kept, the same census), no AGENT_BROWSER_* in its env', clE && clE.args);
+  ok(gateOf(recE.browserChoice) && recE.browserChoice.kind === 'plugin' && recE.browserChoice.version === fact.version && verdictOf(asked.some((a) => a[0] === 'launchOptions' && a[2] === pE.id && a[3] === KERN && a[4] === pE.dir)), 'the record says {kind:\'plugin\', id, version}; the engine was asked for THIS profile with the kernel VibeSpace resolved and the profile\'s directory', { bc: recE.browserChoice, asked });
   const bad = AT.attachArgv({ profileDir: pE.dir, mark: B.keeperMarkArg(pE.id), quiet, extra: ['--user-data-dir=/elsewhere'] });
   ok(!bad.ok && bad.code === 'bad_argv', 'CONTROL: an engine argument naming another --user-data-dir fails the builder\'s census (bad_argv) — never spawned', bad);
   await ke.stop(pE.id, { why: 'user' });
@@ -309,7 +309,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     setMode('ok'); await kx.start(pX.id, { why: 'test' }); await kx.stop(pX.id, { why: 'user' });
     EXC.requestThrough = realRT;
     const e = seenX[1] && seenX[1].egress;
-    ok(seenX.length === 2 && !('egress' in seenX[0]) && kept.ok && e && JSON.stringify(Object.keys(e)) === '["publicIp","country","timezone","checkedAt","source"]' && e.publicIp === '203.0.113.7' && e.country === 'JP' && e.timezone === 'Asia/Tokyo' && e.source === 'measured' && e.checkedAt > 0 && rtCalls === 0,
+    ok(seenX.length === 2 && !('egress' in seenX[0]) && gateOf(kept.ok) && gateOf(e) && JSON.stringify(Object.keys(e)) === '["publicIp","country","timezone","checkedAt","source"]' && e.publicIp === '203.0.113.7' && e.country === 'JP' && e.timezone === 'Asia/Tokyo' && e.source === 'measured' && e.checkedAt > 0 && rtCalls === 0,
       'the exit check\'s hand-over: resolve-launch carries `egress` {publicIp, country, timezone, checkedAt, source} when the profile keeps one, nothing when it keeps none — and the launch makes NO request for it', { first: seenX[0] && Object.keys(seenX[0]), egress: e, rtCalls });
   }
   // ①b lane hotfix-attach-engine-args: THE INCIDENT through the keeper — the engine's launch options carry --disable-sync ⇒ started on the
@@ -324,7 +324,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     const vS = await kS.start(pS.id, { why: 'test' }).then((v) => v, (e) => ({ error: e && e.message, code: e && e.code }));
     const recS = kS._reg().browsers[pS.id] || {};
     const clS = chromeLog().slice(nS).pop();
-    ok(vS && vS.state === 'ready' && recS.launch === 'attach' && clS && JSON.stringify(clS.args) === JSON.stringify(AT.attachArgv({ profileDir: pS.dir, mark: B.keeperMarkArg(pS.id), quiet, extra: ['--vibespace-engine=attach-leg'] }).argv) && !clS.args.some((a) => a.startsWith('--disable-sync')), 'an engine passing --disable-sync STARTS on the attach road: its Chrome ran with the engine\'s other switch and without the forbidden one (never refused bad_argv)', { v: vS, args: clS && clS.args });
+    ok(gateOf(vS) && vS.state === 'ready' && recS.launch === 'attach' && gateOf(clS) && JSON.stringify(clS.args) === JSON.stringify(AT.attachArgv({ profileDir: pS.dir, mark: B.keeperMarkArg(pS.id), quiet, extra: ['--vibespace-engine=attach-leg'] }).argv) && !clS.args.some((a) => a.startsWith('--disable-sync')), 'an engine passing --disable-sync STARTS on the attach road: its Chrome ran with the engine\'s other switch and without the forbidden one (never refused bad_argv)', { v: vS, args: clS && clS.args });
     const said = journal.slice(jS).filter((l) => l === `[browser] ${pS.id}: engine ${EID}'s launch switch --disable-sync dropped on the attach road (driver-only; the attach road needs Chrome's sign-in entry)`);
     ok(said.length === 1 && JSON.stringify(recS.engineDropped) === JSON.stringify({ engine: EID, switches: ['--disable-sync'] }), 'SAID, never silent: ONE journal line names the engine and the switch, and the record carries {engine, switches} (the panel\'s fact)', { said, journal: journal.slice(jS), fact: recS.engineDropped });
     const PM = await import('../src/lib/browser-panel-model.js');
@@ -336,7 +336,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     const tw = (s, q) => String(s).replace(/\{(\w+)\}/g, (m, k) => (q && k in q ? String(q[k]) : m)); // the view's t (English: the key, interpolated)
     const lines = row ? PM.stateLines(row, { w: { t: tw, why: () => 'its browser is running' } }) : [];
     const line = lines.find((s) => s.key === 'engine-dropped');
-    ok(row && JSON.stringify(row.engineDropped) === JSON.stringify(recS.engineDropped) && line && line.text === 'Left out --disable-sync, which its engine asked for: it would stop this browser signing in to Google' && line.tone === 'info' && lines[0] !== line, 'the Agent browser panel: the profile\'s housekeeping row carries the fact and its state lines SAY it (after the state\'s own sentence — the row\'s second line keeps that)', { row: row && row.engineDropped, lines, hk: hk && hk.error });
+    ok(gateOf(row) && JSON.stringify(row.engineDropped) === JSON.stringify(recS.engineDropped) && gateOf(line) && line.text === 'Left out --disable-sync, which its engine asked for: it would stop this browser signing in to Google' && line.tone === 'info' && lines[0] !== line, 'the Agent browser panel: the profile\'s housekeeping row carries the fact and its state lines SAY it (after the state\'s own sentence — the row\'s second line keeps that)', { row: row && row.engineDropped, lines, hk: hk && hk.error });
     await kS.stop(pS.id, { why: 'user' }).catch(() => { });
   }
   // ①b: EVERY launch the road does not start is journaled BY NAME — the code and the argv item(s) — BEFORE its display session is stopped.
@@ -361,7 +361,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     const notStarted = (lines, own) => lines.filter((l) => (!own || mine(l)) && l.includes('NOT started on the attach road')).length;
     const planted = iSaid >= 0 ? [...jl.slice(0, iSaid), '[browser] bp-00000000 "Mute": NOT started on the attach road [cdp_port_missing] — planted', ...jl.slice(iSaid)] : jl;
     ok(notStarted(planted, false) === notStarted(jl, false) + 1 && notStarted(planted, true) === notStarted(jl, true), 'the planted control counts ITS OWN profile\'s refusals: another profile\'s line in its window (the unawaited «Mute» start\'s 5 s refusal) — the old every-profile count moves by one, the own-profile count does not', { all: notStarted(jl, false), own: notStarted(jl, true) });
-    ok(rP.e && rP.e.code === 'bad_argv' && chromeLog().length === nP && iSaid >= 0 && iStop > iSaid && notStarted(jl, true) === 1, 'PLANTED CONTROL through the keeper: a forbidden switch in the HUB\'s own argv is still refused bad_argv — and the refusal is journaled ONCE, with its code and the item, BEFORE its display session is stopped; nothing spawned', { code: rP.e && rP.e.code, jl });
+    ok(gateOf(rP.e) && rP.e.code === 'bad_argv' && chromeLog().length === nP && iSaid >= 0 && iStop > iSaid && notStarted(jl, true) === 1, 'PLANTED CONTROL through the keeper: a forbidden switch in the HUB\'s own argv is still refused bad_argv — and the refusal is journaled ONCE, with its code and the item, BEFORE its display session is stopped; nothing spawned', { code: rP.e && rP.e.code, jl });
     await kP.stop(pP.id, { why: 'user' }).catch(() => { });
   }
   // (2) a sibling on the road (the switch-only wall — the wrapper's wall stubbed away, as L1b r5 below): journaled by name too
@@ -380,7 +380,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     } finally { ENGK0.engineWrapperText = wrap0; }
     const iSaid = jl.findIndex((l) => l.startsWith(`[browser] ${pU2.id} "Engine said": NOT started on the attach road [browser_engine_protocol] (--) — `));
     const iStop = jl.findIndex((l) => l.startsWith(`[browser] ${pU2.id}: its display session `) && l.endsWith('stopped — its launch was refused'));
-    ok(rU.e && rU.e.code === 'browser_engine_protocol' && chromeLog().length === nU && iSaid >= 0 && iStop > iSaid, 'a sibling refusal on the road (an engine\'s bare --) is journaled with its code and the item BEFORE its display session is stopped; nothing spawned', { code: rU.e && rU.e.code, jl });
+    ok(gateOf(rU.e) && rU.e.code === 'browser_engine_protocol' && chromeLog().length === nU && iSaid >= 0 && iStop > iSaid, 'a sibling refusal on the road (an engine\'s bare --) is journaled with its code and the item BEFORE its display session is stopped; nothing spawned', { code: rU.e && rU.e.code, jl });
     await kU.stop(pU2.id, { why: 'user' }).catch(() => { });
   }
   // (3) B-0528 (2): the road's FOUR other «started nothing» branches — a profile lock held elsewhere, an unusable socket directory,
@@ -420,13 +420,13 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     };
     for (const b of BRANCHES) {
       const real = await runBranch(b, realCreate, 'real');
-      ok(real.refused && real.said === 1, `B-0528 ${b.label}: the start is refused ${b.code} AND journaled ONCE by name`, real);
+      ok(gateOf(real.refused) && real.said === 1, `B-0528 ${b.label}: the start is refused ${b.code} AND journaled ONCE by name`, real);
       ok(ksrc.split(b.drop[0]).length === 2, `B-0528 ${b.label} control setup: the branch's line is found once in src/server/browser-keeper.js`);
       const Km = MUTK.load('src/server/browser-keeper.js', editAnchor(ksrc, b.drop[0], b.drop[1], "src/server/browser-keeper.js"), `quiet-${b.label}`);
       const quiet = await runBranch(b, Km.create, 'quiet');
-      ok(quiet.refused && quiet.said === 0, `CONTROL (B-0528 ${b.label}): a keeper copy without the line still refuses ${b.code} — and says NOTHING (so the pin above is what holds it)`, quiet);
+      ok(gateOf(quiet.refused) && quiet.said === 0, `CONTROL (B-0528 ${b.label}): a keeper copy without the line still refuses ${b.code} — and says NOTHING (so the pin above is what holds it)`, quiet);
     }
-    for (const c of copiesCensus(MUTK.files, MUTK.dir, REPO, { label: 'B-0528 controls: ' })) ok(c.pass, c.name, c.detail);
+    for (const c of copiesCensus(MUTK.files, MUTK.dir, REPO, { label: 'B-0528 controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
   }
   // lane engine-spi-egress L1b r3: the ATTACH road's own census refuses a switch that starts ANOTHER program (the launch verdict refuses it
   // first; this registry hands it unjudged, as a stub can) — the start is refused by name and nothing is spawned
@@ -440,7 +440,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const recL = kl._reg().browsers[pL.id] || {};
   const wordsL = /names? another program through --browser-subprocess-path; a plugin never names the program it runs/; // the wrapper's wall (written first, on both roads) or the attach road's own
   const refusedL = (rL.e && /^(?:browser_engine_protocol|launch_failed)$/.test(String(rL.e.code)) && wordsL.test(rL.e.message)) || (rL.v && rL.v.state === 'failed' && wordsL.test(JSON.stringify(rL.v)));
-  ok(refusedL && chromeLog().length === nL && ranL === ranL0 && recL.state !== 'ready', 'lane engine-spi-egress L1b r3: the ATTACH road refuses an engine argument that starts another program (--browser-subprocess-path) before anything is spawned — by the wrapper\'s wall (written before the road is chosen) or its own, by name', { r: rL.e ? rL.e.message : rL.v, state: recL.state });
+  ok(gateOf(refusedL) && chromeLog().length === nL && ranL === ranL0 && recL.state !== 'ready', 'lane engine-spi-egress L1b r3: the ATTACH road refuses an engine argument that starts another program (--browser-subprocess-path) before anything is spawned — by the wrapper\'s wall (written before the road is chosen) or its own, by name', { r: rL.e ? rL.e.message : rL.v, state: recL.state });
   await kl.stop(pL.id, { why: 'user' }).catch(() => { }); // a red run (a tree without the walls) started it: never left behind
   // L1b r4: the same switch with a TAB in front (Chromium trims it, then reads the switch) ⇒ the same refusal, nothing spawned
   const REGT = { ...REG, launchOptions: async () => ({ ok: true, launch: { executablePath: KERN, args: ['\t--gpu-launcher=/usr/bin/true'], env: {} } }) };
@@ -450,7 +450,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const rT = await kt.start(pT.id, { why: 'test' }).then((v) => ({ v }), (e) => ({ e }));
   let ranT = ''; try { ranT = fs.readFileSync(path.join(STATE, 'kernel-ran.log'), 'utf8'); } catch { ranT = ''; }
   const wordsT = /names? another program through --gpu-launcher; a plugin never names the program it runs/;
-  ok(((rT.e && wordsT.test(rT.e.message)) || (rT.v && rT.v.state === 'failed' && wordsT.test(JSON.stringify(rT.v)))) && chromeLog().length === nT && ranT === ranL && (kt._reg().browsers[pT.id] || {}).state !== 'ready', 'lane engine-spi-egress L1b r4: a TAB in front of the switch (Chromium trims it) ⇒ the same refusal by name on the attach road, nothing spawned', { r: rT.e ? rT.e.message : rT.v });
+  ok(((gateOf(rT.e) && gateOf(wordsT.test(rT.e.message))) || (gateOf(rT.v) && rT.v.state === 'failed' && gateOf(wordsT.test(JSON.stringify(rT.v))))) && chromeLog().length === nT && ranT === ranL && (kt._reg().browsers[pT.id] || {}).state !== 'ready', 'lane engine-spi-egress L1b r4: a TAB in front of the switch (Chromium trims it) ⇒ the same refusal by name on the attach road, nothing spawned', { r: rT.e ? rT.e.message : rT.v });
   await kt.stop(pT.id, { why: 'user' }).catch(() => { });
   try { kt.shutdown(); } catch { /* none */ }
   // L1b r5: the ATTACH road's OWN wall, pinned directly — the wrapper writer is stubbed to write the program bare (so its wall cannot
@@ -472,7 +472,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
       try { kw.shutdown(); } catch { /* none */ }
     }
   } finally { ENGK.engineWrapperText = wrapOrig; }
-  ok(atWall.length === 2 && atWall.every((x) => x.ok), 'lane engine-spi-egress L1b r5: the attach road\'s OWN wall (the wrapper\'s stubbed away) refuses a padded argument and a bare -- by name before its argv is built — nothing spawned', atWall);
+  ok(atWall.length === 2 && verdictOf(atWall.every((x) => x.ok)), 'lane engine-spi-egress L1b r5: the attach road\'s OWN wall (the wrapper\'s stubbed away) refuses a padded argument and a bare -- by name before its argv is built — nothing spawned', atWall);
   try { kl.shutdown(); } catch { /* none */ }
   // lane engine-distribution: the kernel side's plugin has no childProcess — its probe says version null + declaredVersion; the
   // KEEPER has the version measured ONCE before the first launch (the engine record's), the record + the card say «measured»
@@ -486,7 +486,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const BMk = await import('../src/lib/browser-build-model.js');
   const rowN = (await kn.engineRowsView()).find((e) => e.id === EID);
   const tK = (x, q) => String(x).replace(/\{(\w+)\}/g, (m, k) => (q && k in q ? String(q[k]) : m));
-  ok(measured.n === 1 && kn._reg().browsers[pN.id].browserChoice.version === '150.0.7871.186-vs1' && rowN.measuredVersion === '150.0.7871.186-vs1' && /· measured 150\.0\.7871\.186-vs1$/.test(BMk.engineNote(rowN, tK)),
+  ok(measured.n === 1 && kn._reg().browsers[pN.id].browserChoice.version === '150.0.7871.186-vs1' && rowN.measuredVersion === '150.0.7871.186-vs1' && verdictOf(/· measured 150\.0\.7871\.186-vs1$/.test(BMk.engineNote(rowN, tK))),
     'lane engine-distribution: the kernel\'s --version measured ONCE before its first launch (a second launch asks nothing), the record says the measured version, the card «… · measured 150.0.7871.186-vs1»', { n: measured.n, rc: kn._reg().browsers[pN.id].browserChoice, note: BMk.engineNote(rowN, tK) });
   await kn.stop(pN.id, { why: 'user' });
   const EDF = { ...EDS, kernelFact: () => ({ state: 'installed', measuredVersion: null }), measure: async () => { measured.n++; return { ok: false, error: 'it printed no version' }; } };
@@ -494,7 +494,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const pF = kf.createProfile({ label: 'Declared', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: factN });
   await kf.start(pF.id, { why: 'test' });
   const rowF = (await kf.engineRowsView()).find((e) => e.id === EID);
-  ok(kf._reg().browsers[pF.id].browserChoice.version === '150.0.7871.186-vs1' && /declared 150\.0\.7871\.186-vs1 \(not measured\)/.test(BMk.engineNote(rowF, tK)), '…a kernel that says no version still starts: the record carries the DECLARED version, the card «declared 150.0.7871.186-vs1 (not measured)»', BMk.engineNote(rowF, tK));
+  ok(kf._reg().browsers[pF.id].browserChoice.version === '150.0.7871.186-vs1' && verdictOf(/declared 150\.0\.7871\.186-vs1 \(not measured\)/.test(BMk.engineNote(rowF, tK))), '…a kernel that says no version still starts: the record carries the DECLARED version, the card «declared 150.0.7871.186-vs1 (not measured)»', BMk.engineNote(rowF, tK));
   await kf.stop(pF.id, { why: 'user' });
 }
 
@@ -532,22 +532,22 @@ console.log('— ⑦ lane browser-display-holders: the display record carries it
   };
   const R = await replay(K, 'ustop', { settleMs: 300 });
   ok(R.hooks.stop.length === 1 && R.hooks.holders.length === 1 && R.hooks.holders[0] === R.ku.displayHoldersOf, 'a display keeper handed in at create is wired: its records read the holders (setBrowserHolders), its person\'s stop reaches the keeper (onBrowserDisplayStop)');
-  ok(R.r0 && R.r0.launch === 'attach' && R.before.holders.holders === 2 && !R.before.holders.userStopped && R.before.moved > 0, `two conversations attached ⇒ the display record reads holders 2 — the desktop keeper re-read them on every commit (${R.before.moved} calls)`, R.before);
-  ok(R.sv && R.stamped.rec && R.stamped.rec.by === 'user' && R.stamped.rec.displayId === R.ds0 && R.stamped.view.userStopped && R.stamped.view.holders === 2 && R.ku.displayHoldersOf(R.pP.id, 'da-another').userStopped === undefined, 'the person\'s stop stamps the record userStopped {at, by: user, displayId} — that display reads it, another display of the profile does not', R.stamped);
+  ok(gateOf(R.r0) && R.r0.launch === 'attach' && R.before.holders.holders === 2 && !R.before.holders.userStopped && R.before.moved > 0, `two conversations attached ⇒ the display record reads holders 2 — the desktop keeper re-read them on every commit (${R.before.moved} calls)`, R.before);
+  ok(gateOf(R.sv) && gateOf(R.stamped.rec) && R.stamped.rec.by === 'user' && R.stamped.rec.displayId === R.ds0 && gateOf(R.stamped.view.userStopped) && R.stamped.view.holders === 2 && R.ku.displayHoldersOf(R.pP.id, 'da-another').userStopped === undefined, 'the person\'s stop stamps the record userStopped {at, by: user, displayId} — that display reads it, another display of the profile does not', R.stamped);
   ok(R.evs.length === 1 && R.evs[0].holders.map((h) => h.sessionId).sort().join() === 'sess-a,sess-b' && R.evs[0].label === 'personal-life' && R.evs[0].profileId === R.pP.id, 'ONE browser-user-stopped event naming BOTH holding conversations (the wiring tells each once)', R.evs);
-  ok(R.after === R.r0 && R.after.state === 'stopped' && R.after.stoppedBy === 'user' && R.after.lastError === null && /you stopped its display window/.test(R.after.note || '') && R.launches === 1, `the tick saw Chrome gone under two holders and did NOT start it again: the record says the person stopped it (launches ${R.launches})`, { state: R.after.state, stoppedBy: R.after.stoppedBy, note: R.after.note, err: R.after.lastError });
-  ok(R.jr.some((l) => /NOT started again \(user-stopped, never a heal\)/.test(l)) && !R.jr.some((l) => /started again on the attach road/.test(l)), 'the journal names the gate (user-stopped) — never "started again on the attach road", never a heal-budget line');
+  ok(R.after === R.r0 && R.after.state === 'stopped' && R.after.stoppedBy === 'user' && R.after.lastError === null && gateOf(/you stopped its display window/.test(R.after.note || '')) && R.launches === 1, `the tick saw Chrome gone under two holders and did NOT start it again: the record says the person stopped it (launches ${R.launches})`, { state: R.after.state, stoppedBy: R.after.stoppedBy, note: R.after.note, err: R.after.lastError });
+  ok(gateOf(R.jr.some((l) => /NOT started again \(user-stopped, never a heal\)/.test(l))) && !R.jr.some((l) => /started again on the attach road/.test(l)), 'the journal names the gate (user-stopped) — never "started again on the attach road", never a heal-budget line');
   // the next command of a holding conversation starts it — the conversation's own act: a NEW record, its verb named, no stamp
   await R.ku.attach({ profileId: R.pP.id, browserKey: 'bk-00000021', sessionId: 'sess-a', by: 'agent' });
   const r2 = R.ku._reg().browsers[R.pP.id];
-  ok(r2 !== R.r0 && r2.state === 'ready' && alive(r2.pid) && !r2.userStopped && /^attach bk-00000021/.test(r2.startedBy || '') && r2.displaySession.id !== R.ds0 && R.ku.displayHoldersOf(R.pP.id, r2.displaySession.id).holders === 2 && !R.ku.displayHoldersOf(R.pP.id, R.ds0).userStopped, 'the next command starts it (startedBy "attach bk-00000021", a new display) and the stamp is gone with the old record', { startedBy: r2.startedBy, stamp: r2.userStopped });
+  ok(r2 !== R.r0 && r2.state === 'ready' && gateOf(alive(r2.pid)) && !r2.userStopped && gateOf(/^attach bk-00000021/.test(r2.startedBy || '')) && r2.displaySession.id !== R.ds0 && R.ku.displayHoldersOf(R.pP.id, r2.displaySession.id).holders === 2 && !R.ku.displayHoldersOf(R.pP.id, R.ds0).userStopped, 'the next command starts it (startedBy "attach bk-00000021", a new display) and the stamp is gone with the old record', { startedBy: r2.startedBy, stamp: r2.userStopped });
   // a stop that is not the person's (no hook call) or of another display: no stamp
   ok(R.ku.userStoppedDisplay({ profileId: R.pP.id, displayId: R.ds0 }) === null && !R.ku._reg().browsers[R.pP.id].userStopped, 'a stop naming an old display (not the record\'s) stamps nothing');
   await R.ku.stop(R.pP.id, { why: 'user' }).catch(() => { });
   // THE NOTICE each holder hears (session-status layer ②: a browser-profile notice naming the event)
   const { SessionStatusManager } = require('../src/session-status.js');
   const nt = SessionStatusManager.renderNotice(B.userStoppedNotice({ label: 'personal-life', profileId: R.pP.id, at: 1 }));
-  ok(B.userStoppedNotice({ label: 'x' }).kind === 'browser-profile' && /^<system-reminder>\nthe person stopped the browser "personal-life" \(its display window's Stop\) — every tab of it is gone; your next `vibespace-browser` command starts it again/.test(nt) && /browser profile changed/.test(SessionStatusManager.renderNotice(B.profileChangeNotice({ was: 'a', now: 'b' }))), 'the notice: «the person stopped the browser "personal-life" … your next vibespace-browser command starts it again» (a profile change renders as before)', nt);
+  ok(B.userStoppedNotice({ label: 'x' }).kind === 'browser-profile' && gateOf(/^<system-reminder>\nthe person stopped the browser "personal-life" \(its display window's Stop\) — every tab of it is gone; your next `vibespace-browser` command starts it again/.test(nt)) && verdictOf(/browser profile changed/.test(SessionStatusManager.renderNotice(B.profileChangeNotice({ was: 'a', now: 'b' })))), 'the notice: «the person stopped the browser "personal-life" … your next vibespace-browser command starts it again» (a profile change renders as before)', nt);
   ok(JSON.stringify(B.attachedHolders([{ browserKey: 'bk-1', sessionId: 's1' }, { browserKey: 'bk-2', sessionId: 's1' }, { browserKey: 'hu-00000001', human: true }, { browserKey: 'bk-3', sessionId: null }, null])) === JSON.stringify([{ sessionId: 's1', browserKey: 'bk-1' }, { sessionId: null, browserKey: 'bk-3' }]), 'attachedHolders: one row per conversation (two keys of one session = one), never the person\'s own browsing row');
   // RED CONTROL — today's behaviour: the keeper without the gate heals the person's stop on the next tick (the owner's journal)
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
@@ -555,11 +555,11 @@ console.log('— ⑦ lane browser-display-holders: the display record carries it
   ok(src.split(GATE).length === 2, 'CONTROL: the heal gate is spelled once in browser-keeper.js');
   const Kc = MK.load('src/server/browser-keeper.js', editAnchor(src, GATE, '    if (false) { log.log?.(`[browser] ${rec.profileId}: its Chrome exited after the person stopped its display window', "src/server/browser-keeper.js"), 'nogate');
   const C = await replay(Kc, 'ustop-ctl', { settleMs: 3000 });
-  ok(C.after !== C.r0 && C.after.state === 'ready' && C.launches === 2 && C.jr.some((l) => /started again on the attach road \(1 in the window\)/.test(l)), `CONTROL: without the gate the person's stop is healed — a new Chrome on a new display ${C.healMs} ms after the tick (the owner's «started again on the attach road»)`, { state: C.after.state, launches: C.launches });
+  ok(C.after !== C.r0 && C.after.state === 'ready' && C.launches === 2 && verdictOf(C.jr.some((l) => /started again on the attach road \(1 in the window\)/.test(l))), `CONTROL: without the gate the person's stop is healed — a new Chrome on a new display ${C.healMs} ms after the tick (the owner's «started again on the attach road»)`, { state: C.after.state, launches: C.launches });
   await C.ku.stop(C.pP.id, { why: 'user' }).catch(() => { });
   // the wiring: the person's stop is told to each LIVE holder once (a second stop before it reads the first replaces it)
   const mpw = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/if \(!ev \|\| ev\.kind !== 'browser-user-stopped' \|\| !Array\.isArray\(ev\.holders\)\) return null;/.test(mpw) && /st\.dropNotices\(key, \(x\) => x && x\.kind === 'browser-profile' && x\.event === 'user-stopped' && x\.profileId === ev\.profileId\); st\.pushNotice\(key, n\);/.test(mpw), 'WIRING PIN: the browser-user-stopped event pushes ONE browser-profile notice per live holding conversation (the earlier one of the same profile withdrawn)');
+  ok(gateOf(/if \(!ev \|\| ev\.kind !== 'browser-user-stopped' \|\| !Array\.isArray\(ev\.holders\)\) return null;/.test(mpw)) && verdictOf(/st\.dropNotices\(key, \(x\) => x && x\.kind === 'browser-profile' && x\.event === 'user-stopped' && x\.profileId === ev\.profileId\); st\.pushNotice\(key, n\);/.test(mpw)), 'WIRING PIN: the browser-user-stopped event pushes ONE browser-profile notice per live holding conversation (the earlier one of the same profile withdrawn)');
 }
 // THE DRIVER ROAD: no xpra on the machine ⇒ today's launch, said on the record
 fakeXpra = false;
@@ -567,7 +567,7 @@ const pC = k.createProfile({ label: 'Plain' }, { owner: { kind: 'instance', id: 
 const nD = dcalls.length;
 const vC = await k.start(pC.id, { why: 'test' });
 const recC = k._reg().browsers[pC.id];
-ok(vC.state === 'ready' && recC.launch === 'driver' && recC.launchWhy === AT.HIDDEN_WINDOW_WHY && /cannot sign in to Google/.test(recC.launchWhy) && launches().some((l) => l.ns === 'vs-' + pC.id) && dcalls.length === nD && !recC.displaySession, 'no xpra ⇒ the DRIVER road (the hidden window): its launch ran, no display session, the record says it cannot sign in', { launch: recC.launch, why: recC.launchWhy });
+ok(vC.state === 'ready' && recC.launch === 'driver' && recC.launchWhy === AT.HIDDEN_WINDOW_WHY && gateOf(/cannot sign in to Google/.test(recC.launchWhy)) && gateOf(launches().some((l) => l.ns === 'vs-' + pC.id)) && dcalls.length === nD && !recC.displaySession, 'no xpra ⇒ the DRIVER road (the hidden window): its launch ran, no display session, the record says it cannot sign in', { launch: recC.launch, why: recC.launchWhy });
 await k.stop(pC.id, { why: 'user' });
 fakeXpra = true;
 // the display session never came up ⇒ the driver road, said
@@ -575,7 +575,7 @@ fakeDisplayFail = true;
 const pD = k.createProfile({ label: 'NoDisplay' }, { owner: { kind: 'instance', id: null } });
 const vD = await k.start(pD.id, { why: 'test' });
 const recD = k._reg().browsers[pD.id];
-ok(vD.state === 'ready' && recD.launch === 'driver' && /its display session did not come up \(xpra exited \(code 1\)\)/.test(recD.launchWhy) && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fail'), 'a display session that failed ⇒ stopped, the driver road runs, the record says why', recD.launchWhy);
+ok(vD.state === 'ready' && recD.launch === 'driver' && gateOf(/its display session did not come up \(xpra exited \(code 1\)\)/.test(recD.launchWhy)) && verdictOf(dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fail')), 'a display session that failed ⇒ stopped, the driver road runs, the record says why', recD.launchWhy);
 await k.stop(pD.id, { why: 'user' });
 fakeDisplayFail = false;
 // cdp_port_missing AT THE KEEPER (started before Chrome's own exit, on its own keeper): a Chrome that never writes its port
@@ -583,7 +583,7 @@ fakeDisplayFail = false;
 const err = await muteRun;
 const muteChrome = chromeLog().find((l) => l.mode === 'never' && l.args.includes(`--user-data-dir=${pE.dir}`)) || {}; await until(() => !alive(muteChrome.pid));
 const recE = kM._reg().browsers[pE.id];
-ok(err && err.code === 'cdp_port_missing' && recE.state === 'failed' && Number.isInteger(muteChrome.pid) && !alive(muteChrome.pid) && Date.now() - tE >= AT.PORT_WAIT_MS && !DM.live.has(recE.displaySession && recE.displaySession.id), 'a Chrome that writes no port in 5 s ⇒ cdp_port_missing by name, the record failed, the Chrome ended, its display stopped', { code: err && err.code, state: recE.state });
+ok(gateOf(err) && err.code === 'cdp_port_missing' && recE.state === 'failed' && gateOf(Number.isInteger(muteChrome.pid)) && !alive(muteChrome.pid) && Date.now() - tE >= AT.PORT_WAIT_MS && !DM.live.has(recE.displaySession && recE.displaySession.id), 'a Chrome that writes no port in 5 s ⇒ cdp_port_missing by name, the record failed, the Chrome ended, its display stopped', { code: err && err.code, state: recE.state });
 // THE BOOT: a new keeper on the same data adopts a live attach record by Chrome's identity + its CDP answer
 setMode('ok');
 vA = await k.start(pA.id, { why: 'test' });
@@ -592,12 +592,12 @@ k.shutdown?.();
 const k2 = mk();
 await k2.adoptAll();
 const recA2 = k2._reg().browsers[pA.id];
-ok(recA2.state === 'ready' && recA2.adoptedAt && recA2.pid === pidA && recA2.launch === 'attach', 'boot: the attach record is ADOPTED (Chrome is ours by pid + starttime, its endpoint answers)', { state: recA2.state, pid: recA2.pid });
+ok(recA2.state === 'ready' && gateOf(recA2.adoptedAt) && recA2.pid === pidA && recA2.launch === 'attach', 'boot: the attach record is ADOPTED (Chrome is ours by pid + starttime, its endpoint answers)', { state: recA2.state, pid: recA2.pid });
 // THE RECONCILE: a display-only session no live record names is stopped by the next tick
 dlive.set('da-orphan', { id: 'da-orphan', kind: DA.DISPLAY_FOR_BROWSER, forBrowser: pB.id, state: 'ready', display: ':99' });
 await k2.tick();
 await sleep(50);
-ok(!dlive.has('da-orphan') && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-orphan') && dlive.has(recA2.displaySession.id), 'the tick stops a display session whose browser record is not live (and keeps the one a live record names)');
+ok(!dlive.has('da-orphan') && gateOf(dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-orphan')) && verdictOf(dlive.has(recA2.displaySession.id)), 'the tick stops a display session whose browser record is not live (and keeps the one a live record names)');
 await k2.stop(pA.id, { why: 'user' });
 
 console.log('— B-8b87: the attach road carries the WebRTC policy beside a profile\'s proxy');
@@ -611,7 +611,7 @@ setMode('ok');
   const kP2 = mk({ dataDir: DATA_P });
   const plain0 = await (async () => { const pp = kP2.createProfile({ label: 'No proxy attach' }, { owner: { kind: 'instance', id: null } }); const n = chromeLog().length; await kP2.start(pp.id, { why: 'test' }); const c = chromeLog().slice(n).pop() || { args: [] }; try { await kP2.stop(pp.id, { why: 'user' }); } catch { } return c.args || []; })();
   const aP = await attachProxied(kP2, 'Proxied attach');
-  ok(aP.launch === 'attach' && aP.args.some((a) => /^--proxy-server=http:\/\/127\.0\.0\.1:\d+$/.test(a)) && aP.args.includes(UDP) && aP.args.indexOf(UDP) === aP.args.findIndex((a) => /^--proxy-server=/.test(a)) + 1 && plain0.length > 0 && !plain0.some((a) => /^--proxy-server=/.test(a)) && !plain0.includes(UDP),
+  ok(aP.launch === 'attach' && gateOf(aP.args.some((a) => /^--proxy-server=http:\/\/127\.0\.0\.1:\d+$/.test(a))) && gateOf(aP.args.includes(UDP)) && aP.args.indexOf(UDP) === aP.args.findIndex((a) => /^--proxy-server=/.test(a)) + 1 && plain0.length > 0 && !plain0.some((a) => /^--proxy-server=/.test(a)) && !plain0.includes(UDP),
     'the attach road: a profile WITH a proxy runs Chrome with the forwarder\'s switch and, beside it, --force-webrtc-ip-handling-policy=disable_non_proxied_udp; the profile with none carries neither', aP.args.filter((a) => /proxy|webrtc/.test(a)));
   // compiled in memory under the keeper's own path (its relative requires resolve beside it; the suite's file mutant is for pure modules)
   const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), kFrom = 'engineArgs.push(rec.proxyRoad.arg, ENG.PROXY_UDP_ARG);';
@@ -622,7 +622,7 @@ setMode('ok');
   const DATA_U = path.join(S, 'data-udp-red'); fs.mkdirSync(DATA_U, { recursive: true });
   const kU = KU.create({ dataDir: DATA_U, homeDir: HOME, env: () => rtEnv, serverSetting: (x) => settings[x], serverNotice: () => 1, liveKeys: () => new Set(), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: jlog, install: false, tickMs: 3600e3, displaySessions: DK, attachSocketBase: SOCKBASE });
   const aU = await attachProxied(kU, 'Proxied attach red');
-  ok(aU.args.some((a) => /^--proxy-server=/.test(a)) && !aU.args.includes(UDP), 'RED: an attach road that pushes the switch alone — the policy is missing (the leg above goes red on it)', aU.args.filter((a) => /proxy|webrtc/.test(a)));
+  ok(gateOf(aU.args.some((a) => /^--proxy-server=/.test(a))) && !aU.args.includes(UDP), 'RED: an attach road that pushes the switch alone — the policy is missing (the leg above goes red on it)', aU.args.filter((a) => /proxy|webrtc/.test(a)));
   kU.shutdown?.(); kP2.shutdown?.();
 }
 
@@ -659,7 +659,7 @@ console.log('— B-9584 U2b: the attach road with a profile\'s own language and 
   ];
   const hs = [];
   for (const [i, h] of HOSTILE.entries()) hs.push(await startAttach(kE2, `Env attach hostile ${i}`, h));
-  ok(hs.every((h) => h.launch === 'attach' && JSON.stringify(h.args) === JSON.stringify(AT.attachArgv({ profileDir: h.dir, mark: h.mark, quiet }).argv) && h.TZ === null && !!h.env && h.env.unfollowed.length === 2),
+  ok(verdictOf(hs.every((h) => h.launch === 'attach' && JSON.stringify(h.args) === JSON.stringify(AT.attachArgv({ profileDir: h.dir, mark: h.mark, quiet }).argv) && h.TZ === null && !!h.env && h.env.unfollowed.length === 2)),
     'the attach road (round wyx4vuerd 6): a stored tag with a comma and a switch, or with a newline, and a zone that is a file path — judged again at USE: Chrome\'s argv is the table\'s untouched one, no TZ, both listed as not followed', hs.map((h) => ({ extra: h.args.filter((x) => !AT.attachArgv({ profileDir: h.dir, mark: h.mark, quiet }).argv.includes(x)), TZ: h.TZ })));
   // RED: ONE copy of the keeper without the push and without the zone (anchored) — each leg above goes red on it
   const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
@@ -700,9 +700,9 @@ console.log('— B-9584 U2b: the attach road with a profile\'s own language and 
   const noGeoA = anchored(anchored(ksrcE, "\n    { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation);", "\n    { const gs = { ok: true }; void geoStoreAt;", 'keeper RED attach store'), "\n    if (stockEnv && stockEnv.geolocation && stockEnv.geolocation.kind === 'place') await armGeo(p, rec, stockEnv.geolocation);", "\n    if (false) await armGeo(p, rec, stockEnv.geolocation);", 'keeper RED attach arm');
   const gAR = await geoAttach(MUTE.load('src/server/browser-keeper.js', noGeoA, 'geo-attach-off'), 'red');
   ok(!!gAR && gAR.launch === 'attach' && gAR.maps === 1 && gAR.arms.length === 0, 'RED — the attach road without its store and its arm: the site allowed before keeps «allow» and no place is armed (both legs go red on it)', gAR);
-  for (const c of copiesCensus(MUTE.files, MUTE.dir, REPO, { label: 'B-9584 attach controls: ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUTE.files, MUTE.dir, REPO, { label: 'B-9584 attach controls: ' })) ok(verdictOf(c.pass), c.name, c.detail);
 }
 
 fs.rmSync(S, { recursive: true, force: true });
 console.log(`\n${fail ? '✗' : '✓'} test-browser-keeper-launch: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

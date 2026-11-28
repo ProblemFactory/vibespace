@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1600) : '')); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1600) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -68,7 +68,7 @@ const libDir = path.join(repo, 'src/lib');
 const files = fs.readdirSync(libDir).filter((f) => f.endsWith('.js')).map((f) => `src/lib/${f}`);
 const all = files.map((rel) => ({ rel, ...rootCensus(rel, read(rel)) })).filter((r) => r.roots.length);
 const owners = all.map((r) => r.rel).sort();
-check(`the census finds both consumers of the root class (${owners.join(', ')})`, owners.includes('src/lib/task-detail.js') && owners.includes('src/lib/session-props.js'), owners);
+check(`the census finds both consumers of the root class (${owners.join(', ')})`, gateOf(owners.includes('src/lib/task-detail.js')) && verdictOf(owners.includes('src/lib/session-props.js')), owners);
 const offenders = all.flatMap((r) => r.bad);
 check('every root appends a .task-detail-body, keeps its sections in it and never rebuilds the root', offenders.length === 0, offenders);
 
@@ -78,15 +78,15 @@ const pre = SP
   .replace(/\n  const body = document\.createElement\('div'\);\n  body\.className = 'task-detail-body';\n  root\.appendChild\(body\);/, '')
   .replace('      body.appendChild(el);', '      root.appendChild(el);')
   .replace("    body.innerHTML = '';", "    root.innerHTML = '';");
-check('CONTROL (patched copy): the fix really came out of the copy (3 edits)', pre !== SP && !/className = 'task-detail-body'/.test(pre) && pre.includes('root.appendChild(el);') && pre.includes("root.innerHTML = '';"));
+check('CONTROL (patched copy): the fix really came out of the copy (3 edits)', pre !== SP && !/className = 'task-detail-body'/.test(pre) && gateOf(pre.includes('root.appendChild(el);')) && verdictOf(pre.includes("root.innerHTML = '';")));
 const preBad = rootCensus('session-props.js (pre-fix copy)', pre).bad;
-check(`CONTROL (patched copy): the pre-fix shape is RED — ${preBad.length} finding(s)`, preBad.length === 3 && preBad.some((b) => /appends no \.task-detail-body/.test(b)) && preBad.some((b) => /appended to the root/.test(b)) && preBad.some((b) => /rebuilds the root/.test(b)), preBad);
+check(`CONTROL (patched copy): the pre-fix shape is RED — ${preBad.length} finding(s)`, preBad.length === 3 && gateOf(preBad.some((b) => /appends no \.task-detail-body/.test(b))) && gateOf(preBad.some((b) => /appended to the root/.test(b))) && verdictOf(preBad.some((b) => /rebuilds the root/.test(b))), preBad);
 // CONTROL B: the base file itself, when this clone holds the object (a shallow CI checkout does not — control A stands)
 let base = null;
 try { base = execFileSync('git', ['-C', repo, 'show', 'c1dfc1af:src/lib/session-props.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { base = null; }
 if (base) {
   const baseBad = rootCensus('session-props.js @ c1dfc1af', base).bad;
-  check(`CONTROL (git show c1dfc1af, the shipped 2.369.348 file): RED — ${baseBad.length} finding(s)`, baseBad.some((b) => /appends no \.task-detail-body/.test(b)) && baseBad.some((b) => /appended to the root/.test(b)), baseBad);
+  check(`CONTROL (git show c1dfc1af, the shipped 2.369.348 file): RED — ${baseBad.length} finding(s)`, gateOf(baseBad.some((b) => /appends no \.task-detail-body/.test(b))) && verdictOf(baseBad.some((b) => /appended to the root/.test(b))), baseBad);
 } else console.log('  ⊘ SKIP control B (git show c1dfc1af): the base object is not in this clone (a shallow checkout) — the patched-copy control above stands for it');
 
 console.log('── ② the CSS contract (public/style.css) ──');
@@ -94,12 +94,12 @@ const CSS = read('public/style.css');
 const cssBad = cssCensus(CSS);
 check('.task-detail is only the flex column; .task-detail-body carries flex 1 · min-height 0 · overflow-y auto · padding · gap; no window forks them', cssBad.length === 0, cssBad);
 const plant = (extra) => cssCensus(CSS + '\n' + extra);
-check('CONTROL: a planted `.session-props { padding: 10px 12px; overflow-y: auto }` (the root taking the body\'s job) is RED', plant('.session-props { padding: 10px 12px; overflow-y: auto; }').some((b) => /re-adds padding/.test(b)));
-check('CONTROL: a planted `.session-props > .task-detail-body { … }` fork is RED', plant('.session-props > .task-detail-body { padding: 8px; }').some((b) => /forks the body/.test(b)));
+check('CONTROL: a planted `.session-props { padding: 10px 12px; overflow-y: auto }` (the root taking the body\'s job) is RED', verdictOf(plant('.session-props { padding: 10px 12px; overflow-y: auto; }').some((b) => /re-adds padding/.test(b))));
+check('CONTROL: a planted `.session-props > .task-detail-body { … }` fork is RED', verdictOf(plant('.session-props > .task-detail-body { padding: 8px; }').some((b) => /forks the body/.test(b))));
 check('CONTROL: the int346-before root (`.task-detail { … gap:10px; overflow-y:auto; padding:10px 12px … }`) is RED',
-  cssCensus(CSS.replace(/\.task-detail \{[^}]*\}/, '.task-detail { display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto; padding: 10px 12px; font-size: 12px; }')).some((b) => /carries padding/.test(b)));
+  verdictOf(cssCensus(CSS.replace(/\.task-detail \{[^}]*\}/, '.task-detail { display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto; padding: 10px 12px; font-size: 12px; }')).some((b) => /carries padding/.test(b))));
 check('CONTROL: a body without its scroll (`overflow-y` dropped) is RED',
-  cssCensus(CSS.replace(/(\.task-detail-body \{[^}]*?)overflow-y: auto;\s*/, '$1')).some((b) => /lost .*overflow-y/.test(b)));
+  verdictOf(cssCensus(CSS.replace(/(\.task-detail-body \{[^}]*?)overflow-y: auto;\s*/, '$1')).some((b) => /lost .*overflow-y/.test(b))));
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

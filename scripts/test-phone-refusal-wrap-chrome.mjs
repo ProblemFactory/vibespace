@@ -34,7 +34,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const VNC_ENV = await vncEnv();
@@ -115,7 +115,7 @@ const makeTree = (name, patches) => {
 };
 const head = makeTree('head', []);
 const ctl = makeTree('control', CONTROL);
-check('CONTROL setup: every patch that cuts a fix back out applies exactly once (the control tree = the base)', ctl.hits.every((n) => n === 1), ctl.hits);
+check('CONTROL setup: every patch that cuts a fix back out applies exactly once (the control tree = the base)', verdictOf(ctl.hits.every((n) => n === 1)), ctl.hits);
 
 const startServer = async (tree) => {
   const port = await freePort();
@@ -186,7 +186,7 @@ const toastFacts = (others) => evalJs(`(() => { ${RECT}
 const runTree = async (label, srv) => {
   const RED = label === 'control';
   const want = (name, headOk, facts) => {
-    check(RED ? `[${label}] RED: ${name}` : `[${label}] ${name}`, RED ? !headOk : headOk, facts);
+    check(RED ? `[${label}] RED: ${name}` : `[${label}] ${name}`, RED ? !headOk : verdictOf(headOk), facts);
     if (RED && !headOk && facts !== undefined) console.log(`      the base measured: ${JSON.stringify(facts).slice(0, 400)}`);
   };
   // the live conversation (the real spawn path: the stub CLI behind the real chat-wrapper)
@@ -208,7 +208,7 @@ const runTree = async (label, srv) => {
     await waitFor(`!!window.__wrapProbe && !!(app.sidebar?._allSessions || []).find((s) => s.webuiId === ${JSON.stringify(sid)} && s.status === 'live')`, 15000);
     await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'payments', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
     const opened = await waitFor(`(() => { const i = document.querySelector('.chat-view .chat-input'); return !!i && i.getClientRects().length > 0 && !!document.querySelector('.chat-view .chat-status-model'); })()`, 20000);
-    check(`${V} the running conversation's chat window shows (composer + the model chip)`, opened);
+    check(`${V} the running conversation's chat window shows (composer + the model chip)`, verdictOf(opened));
     await sleep(500);
 
     // ⑤ THE MODEL PICKER (P2-17)
@@ -277,7 +277,7 @@ const runTree = async (label, srv) => {
       return { text: el.textContent, out, sideways: box.scrollWidth > box.clientWidth + 1, lastHit: !!hit && el.contains(hit), box: [b.l, b.t, b.r, b.b].map(Math.round) }; })()`);
     await shot(`${tag}-refusal`);
     const refOk = !!ref && ref.text === '✕ Cannot create yet: Choose a folder first' && ref.out === 0 && !ref.sideways && ref.lastHit;
-    if (RED && w >= 594) check(`${V} the base already reads the refusal whole at 594 px (the walk's own finding — the layout that stays)`, refOk, ref);
+    if (RED && w >= 594) check(`${V} the base already reads the refusal whole at 594 px (the walk's own finding — the layout that stays)`, verdictOf(refOk), ref);
     else want('① the refusal reads whole — «✕ Cannot create yet: Choose a folder first», every character in the viewport and its box, nothing sideways, the last character the hit target', refOk, ref);
     await portNotice(); await sleep(450);
     const t2 = await toastFacts(['#dialog-new-session > .ns-head', '#dialog-new-session > .ns-body', '#dialog-new-session > .ns-foot']);
@@ -302,7 +302,7 @@ const runTree = async (label, srv) => {
     want('② with a tall modal open the toast meets none of its rows (header / body / footer) and is painted on top at its centre', !!t3 && t3.inView && t3.over.length === 0 && t3.hitSelf, t3);
     await evalJs(`[...document.querySelectorAll('.dialog-overlay:not(.hidden)')].pop()?.querySelector('.dialog-footer .btn-cancel')?.click(); true`); await sleep(400);
     const roomGone = await evalJs(`!document.querySelector('.gt-room')`);
-    if (!RED) check(`${V} ② the room goes with the modal`, roomGone);
+    if (!RED) check(`${V} ② the room goes with the modal`, verdictOf(roomGone));
     await clearToasts();
   }
   ws.close();
@@ -314,4 +314,4 @@ const ctlSrv = await startServer(ctl);
 await runTree('control', ctlSrv);
 check('no page errors in either tree', pageErrors.length === 0, pageErrors.slice(0, 4));
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed) — PNGs in ${SHOTS}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

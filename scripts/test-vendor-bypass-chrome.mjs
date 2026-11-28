@@ -14,7 +14,7 @@ import { CHROME_STORE, CHROME_QUIET } from './scratch.mjs';   // lane setting-do
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(extra).slice(0, 400) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(extra).slice(0, 400) : '')); } return !!c; };
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no Chrome on this machine\n\nALL PASS (0, 1 skipped)'); process.exit(0); }
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-vbh-'));
@@ -43,21 +43,21 @@ for (const lang of ['en', 'zh']) {
   console.log(`\n① ${lang}: the three Bash cards`);
   const f = path.join(tmp, `p-${lang}.html`); fs.writeFileSync(f, page(lang));
   const dom = chrome(['--dump-dom', pathToFileURL(f).href]);
-  ok(/<title>rendered<\/title>/.test(dom), 'the real renderer bundle ran in Chrome', dom.slice(0, 300));
+  ok(verdictOf(/<title>rendered<\/title>/.test(dom)), 'the real renderer bundle ran in Chrome', dom.slice(0, 300));
   const lark = cardOf(dom, 'lark'), door = cardOf(dom, 'door'), prose = cardOf(dom, 'prose');
   const want = lang === 'zh' ? /这次直接读了 Lark，没经过 VibeSpace 频道 — 没有频道卡片、已读标记和预算记录；用 vibespace-channels read 会有。/ : /This read Lark directly, not through VibeSpace channels — no channel card, read marker or budget record; vibespace-channels read would have them\./;
-  ok(/class="chat-vendor-bypass chat-status-dim"/.test(lark) && want.test(lark), 'the larkhelp heredoc card carries ONE muted hint line naming Lark and the vibespace-channels door', lark.slice(-500));
+  ok(gateOf(/class="chat-vendor-bypass chat-status-dim"/.test(lark)) && verdictOf(want.test(lark)), 'the larkhelp heredoc card carries ONE muted hint line naming Lark and the vibespace-channels door', lark.slice(-500));
   ok((lark.match(/chat-vendor-bypass/g) || []).length === 1 && !/chat-channel-touches/.test(lark), '…exactly one line, and no (empty) witness box — nothing was witnessed');
-  ok(/class="chat-channel-touches" hidden/.test(door) && !/chat-vendor-bypass/.test(door), 'CONTROL: a `vibespace-channels read` card keeps the witness box and has NO hint');
+  ok(gateOf(/class="chat-channel-touches" hidden/.test(door)) && !/chat-vendor-bypass/.test(door), 'CONTROL: a `vibespace-channels read` card keeps the witness box and has NO hint');
   ok(!/chat-vendor-bypass|chat-channel-touches/.test(prose), 'NEGATIVE: "lark" in prose draws nothing');
   if (process.env.PNG_DIR && lang === 'zh') {
     for (const [name, size] of [['desk', '900,430'], ['phone', '390,640']]) {
       const out = path.join(process.env.PNG_DIR, `${name}.png`);
       chrome([`--screenshot=${out}`, `--window-size=${size}`, '--hide-scrollbars', pathToFileURL(f).href]);
-      ok(fs.existsSync(out) && fs.statSync(out).size > 5000, `PNG ${name} written (${out})`);
+      ok(gateOf(fs.existsSync(out)) && fs.statSync(out).size > 5000, `PNG ${name} written (${out})`);
     }
   }
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -27,7 +27,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -127,13 +127,13 @@ console.log('§2 noteDeviceRepoint (the daemon\'s re-point, recorded after the f
   const at = Date.now();
   const row = am.noteDeviceRepoint({ link: am.sessionPoolLinkPath(pool, 'sess-1'), poolId: pool, from: am.subDir(A), to: B, at, why: 'sealed-orders' });
   await tick();
-  ok(row && row.sessionId === 'sess-1' && seen.links === 1 && seen.changes === 0, 'a per-session row ⇒ onSessionLinks (the payload\'s auth.poolTarget moved)', { row, seen });
+  ok(gateOf(row) && row.sessionId === 'sess-1' && seen.links === 1 && seen.changes === 0, 'a per-session row ⇒ onSessionLinks (the payload\'s auth.poolTarget moved)', { row, seen });
   const dup = am.noteDeviceRepoint({ link: am.sessionPoolLinkPath(pool, 'sess-1'), poolId: pool, from: am.subDir(A), to: B, at, why: 'sealed-orders' });
   await tick();
   ok(dup === null && seen.links === 1, 'a replayed duplicate (the daemon re-delivers until acked) records nothing and says nothing', seen);
   const drow = am.noteDeviceRepoint({ link: path.join(am.dataDir, 'subs', pool), poolId: pool, from: am.subDir(A), to: B, at: at + 1, why: 'sealed-orders' });
   await tick();
-  ok(drow && drow.sessionId === null && seen.changes === 1, 'a default row ⇒ onChange (the list\'s `current` moved as well as every linkless conversation)', { drow, seen });
+  ok(gateOf(drow) && drow.sessionId === null && seen.changes === 1, 'a default row ⇒ onChange (the list\'s `current` moved as well as every linkless conversation)', { drow, seen });
 }
 
 console.log('§3 CONTROL: the pre-fix writer');
@@ -141,7 +141,7 @@ const MUT = mutantCopies('badge-link', REPO);
 {
   const src = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
   const NOTIFY = /\n[ \t]*this\._notifyLinks\(\);[^\n]*(\n[ \t]*return link;)/;
-  ok(NOTIFY.test(src) && src.match(/this\._notifyLinks\(\);/g).length === 2, 'the notify is spelled once in ensureSessionPoolLink (+ once in noteDeviceRepoint) — the control patches exactly it');
+  ok(gateOf(NOTIFY.test(src)) && src.match(/this\._notifyLinks\(\);/g).length === 2, 'the notify is spelled once in ensureSessionPoolLink (+ once in noteDeviceRepoint) — the control patches exactly it');
   const { AccountManager: Pre } = MUT.load('src/accounts.js', editAnchor(src, NOTIFY, '$1', "src/accounts.js"), 'pre-fix');
   const { am, B, pool, seen } = mk(Pre);
   await settledOf(am, '§3');   // r4434: the set-up settled — never one tick
@@ -170,10 +170,10 @@ console.log('§4 the writer census');
     const callers = lines.map((l, i) => (new RegExp('this\\.' + s.method + '\\(').test(l) ? methodAt(i) : null)).filter(Boolean);
     return { ...s, ok: !!caller && callers.length > 0 && callers.every((c) => caller.includes(c)) && caller.every(notifies), by: caller && caller.join(' / '), callers };
   });
-  ok(sites.length >= 4 && judged.every((s) => s.ok), `every re-point of a pool link in accounts.js notifies (${judged.map((s) => `${s.method}:${s.line}${s.by !== s.method ? ' via ' + s.by : ''}`).join(', ')})`, judged.filter((s) => !s.ok));
-  ok(/this\._noteSlot\(\{ sessionId: sessKey, poolId, from, to: memberId, why \}\);\s*\n\s*this\._notifyLinks\(\);\s*\n\s*return link;/.test(bodyOf('ensureSessionPoolLink')), 'ensureSessionPoolLink: re-point → slot row → notify → return (the ONE per-session writer)');
-  ok(/if \(sessionId\) this\._notifyLinks\(\); else this\._notify\(\);/.test(bodyOf('noteDeviceRepoint')), 'noteDeviceRepoint: a per-session row → the links hook, a default row → onChange');
-  ok(/setImmediate\(/.test(bodyOf('_notifyLinks')) && /this\._linksNotifyArmed/.test(bodyOf('_notifyLinks')), '_notifyLinks coalesces a burst (one armed setImmediate)');
+  ok(sites.length >= 4 && verdictOf(judged.every((s) => s.ok)), `every re-point of a pool link in accounts.js notifies (${judged.map((s) => `${s.method}:${s.line}${s.by !== s.method ? ' via ' + s.by : ''}`).join(', ')})`, judged.filter((s) => !s.ok));
+  ok(verdictOf(/this\._noteSlot\(\{ sessionId: sessKey, poolId, from, to: memberId, why \}\);\s*\n\s*this\._notifyLinks\(\);\s*\n\s*return link;/.test(bodyOf('ensureSessionPoolLink'))), 'ensureSessionPoolLink: re-point → slot row → notify → return (the ONE per-session writer)');
+  ok(verdictOf(/if \(sessionId\) this\._notifyLinks\(\); else this\._notify\(\);/.test(bodyOf('noteDeviceRepoint'))), 'noteDeviceRepoint: a per-session row → the links hook, a default row → onChange');
+  ok(gateOf(/setImmediate\(/.test(bodyOf('_notifyLinks'))) && verdictOf(/this\._linksNotifyArmed/.test(bodyOf('_notifyLinks'))), '_notifyLinks coalesces a burst (one armed setImmediate)');
   // no other server file re-points a pool credential link (browser-env re-points BROWSER config links; the
   // daemon's reflex runs on the device and lands here through noteDeviceRepoint)
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
@@ -185,13 +185,13 @@ console.log('§4 the writer census');
   const callers = walk(path.join(REPO, 'src')).filter((f) => /repointPoolSymlink\(/.test(callerText(f, fs.readFileSync(f, 'utf8')))).map((f) => path.relative(REPO, f)).sort();
   const probeSrc = strip(fs.readFileSync(path.join(REPO, 'src/claude-oat-probe.js'), 'utf8'));
   ok((probeSrc.match(LABEL) || []).length === 4 && !/repointPoolSymlink\(/.test(callerText('src/claude-oat-probe.js', probeSrc)), 'the measurement names the primitive only in its FOUR change labels (strings) — no call', (probeSrc.match(LABEL) || []).length);
-  ok(/repointPoolSymlink\(/.test(callerText('src/claude-oat-probe.js', probeSrc + "\nrepointPoolSymlink(link, B);\n")), 'RED CONTROL: a real call planted in src/claude-oat-probe.js is a caller (the exemption is the label shape, never the file)');
+  ok(verdictOf(/repointPoolSymlink\(/.test(callerText('src/claude-oat-probe.js', probeSrc + "\nrepointPoolSymlink(link, B);\n"))), 'RED CONTROL: a real call planted in src/claude-oat-probe.js is a caller (the exemption is the label shape, never the file)');
   const KNOWN = { 'src/accounts.js': 'THE store (judged above)', 'src/account-material.js': 'the primitive itself', 'src/agentd/agentd.js': 'the device reflex — recorded via noteDeviceRepoint', 'src/server/browser-env.js': 'browser config links, not pool links' };
-  ok(callers.every((f) => KNOWN[f]) && callers.includes('src/accounts.js'), `the re-point census: ${callers.join(', ')} — a new caller must be judged here`, callers.filter((f) => !KNOWN[f]));
+  ok(gateOf(callers.every((f) => KNOWN[f])) && verdictOf(callers.includes('src/accounts.js')), `the re-point census: ${callers.join(', ')} — a new caller must be judged here`, callers.filter((f) => !KNOWN[f]));
   const srv = strip(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'));
   const ctor = /new AccountManager\(\{[\s\S]*?\n\}\);/.exec(srv);
-  ok(!!ctor && /onSessionLinks: \(\) => broadcastActiveSessions\(\),/.test(ctor[0]), 'WIRING PIN: server.js hands the store onSessionLinks → broadcastActiveSessions (the frame the page reads auth from)');
+  ok(!!ctor && verdictOf(/onSessionLinks: \(\) => broadcastActiveSessions\(\),/.test(ctor[0])), 'WIRING PIN: server.js hands the store onSessionLinks → broadcastActiveSessions (the frame the page reads auth from)');
 }
 console.warn = warn;
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

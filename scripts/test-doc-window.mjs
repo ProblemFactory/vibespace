@@ -97,7 +97,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { let v = null; try { v = await fn(); } catch { v = null; } if (v) return v; await sleep(step); } return null; };
 const S = JSON.stringify;
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : S(e)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : S(e)).slice(0, 900) : '')); } return !!c; };
 const section = (t) => console.log('\n' + t);
 if (!CHROME) { console.log('SKIP (no chrome): the Doc window\'s browser gate needs google-chrome / chromium'); process.exit(0); }
 
@@ -240,7 +240,7 @@ try {
   section('§0 the throwaway server + the stub agent + the real client');
   const up = await until(async () => { try { return (await fetch(base + '/api/version')).ok; } catch { return false; } }, 60000, 300);
   if (!ok(!!up, `the throwaway server answered on :${PORT}`, journal.join('').slice(-1500))) throw new Error('no server');
-  ok(MD.docFidelity(BRIEF).ok && MD.docFidelity(TABLE).ok && !MD.docFidelity(TABLE.replace(/\n/g, '\r\n')).ok, 'fixtures: the brief and the table file open rich (the wheel), a CRLF copy would not');
+  ok(gateOf(MD.docFidelity(BRIEF).ok) && gateOf(MD.docFidelity(TABLE).ok) && !MD.docFidelity(TABLE.replace(/\n/g, '\r\n')).ok, 'fixtures: the brief and the table file open rich (the wheel), a CRLF copy would not');
   ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = [];
   ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
@@ -252,7 +252,7 @@ try {
   CONV = inited && 'e2e00000-0000-4000-8000-' + String(inited.pid).padStart(12, '0');
   P = path.join(fs.realpathSync(PROJ), 'docs', 'BRIEF.md'); TP = path.join(fs.realpathSync(PROJ), 'docs', 'TABLE.md');
   const wrote = await stub({ kind: 'write', files: [[P, BRIEF], [TP, TABLE]] });
-  ok(wrote.ok && fs.readFileSync(P, 'utf8') === BRIEF, 'the agent (stub) wrote docs/BRIEF.md + docs/TABLE.md', wrote);
+  ok(gateOf(wrote.ok) && fs.readFileSync(P, 'utf8') === BRIEF, 'the agent (stub) wrote docs/BRIEF.md + docs/TABLE.md', wrote);
 
   chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: CHOME, XDG_RUNTIME_DIR: CXDG, DISPLAY: ':' + (7000 + (CDP % 1000)) } });
   const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { return null; } }, 30000, 250);
@@ -321,8 +321,8 @@ try {
   await ev(`app.openFile(${S(P)}, 'BRIEF.md', { from: ${S(chatWin)} }); return true;`);
   const opened = await until(() => ev(`const w = ${W}; if (!w) return null; const pm = w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.querySelector('h1') ? { spec: w._openSpec, h1: pm.querySelector('h1').textContent, lis: pm.querySelectorAll('li').length, pre: !!pm.querySelector('pre'), quote: !!pm.querySelector('blockquote'), raw: w.content.querySelector('.doc-raw').hidden, chip: w.content.querySelector('.doc-chip').hidden, chain: !!w._tabChain || !!(app.wm.windows.get(${S(chatWin)}) || {})._tabChain } : null;`), 20000, 200);
   if (!opened) console.log('    diag:', S(await ev(`return { wins: [...app.wm.windows.values()].map((w) => [w.type, w._filePath || '', w.content && w.content.querySelector('.doc-window') ? w.content.querySelector('.doc-window').textContent.slice(0, 200) : '']), errs: (window.__errs || []) };`)), pageErrors.slice(0, 3));
-  ok(!!opened && opened.spec.action === 'openDoc' && opened.spec.path === P && opened.spec.from === SIDW && opened.h1 === 'Launch brief' && opened.lis === 4 && opened.pre && opened.quote && opened.raw && opened.chip, 'type doc, openSpec {openDoc, path, from: the chat session}; headings / lists / code / quote rendered; no raw, no chip', opened);
-  ok(!!opened && opened.chain, 'it opened beside the chat (the link placement)', opened);
+  ok(!!opened && opened.spec.action === 'openDoc' && opened.spec.path === P && opened.spec.from === SIDW && opened.h1 === 'Launch brief' && opened.lis === 4 && gateOf(opened.pre) && gateOf(opened.quote) && gateOf(opened.raw) && verdictOf(opened.chip), 'type doc, openSpec {openDoc, path, from: the chat session}; headings / lists / code / quote rendered; no raw, no chip', opened);
+  ok(!!opened && verdictOf(opened.chain), 'it opened beside the chat (the link placement)', opened);
   const owner = await until(() => ev(`const w = ${W}; const o = w.content.querySelector('.doc-owner'); return o && o.hidden ? 'owned' : null;`), 5000);
   ok(owner === 'owned', 'the owner is known (the `from` chat) — the strip carries no "open from a chat" line');
 
@@ -331,7 +331,7 @@ try {
   await click({ x: p0.right - 4, y: p0.y }); await sleep(300); await click({ x: p0.right - 4, y: p0.y });
   const focus0 = await ev(`const a = document.activeElement; return { cls: a && a.className, tag: a && a.tagName, sel: (() => { const s = getSelection(); return s.anchorNode ? s.anchorNode.textContent.slice(0, 40) + '@' + s.anchorOffset : null; })(), at: (() => { const e = document.elementFromPoint(${p0.right - 4}, ${p0.y}); return e && (e.className || e.tagName); })() };`);
   await type(' EDITED-1'); await sleep(200);
-  ok((await pmText()).includes('Intro paragraph. EDITED-1'), 'the words landed in the rendered paragraph', { focus0, p0, widths: await ev(`const w = ${W}; const q = (s) => { const e = w.content.querySelector(s); return e ? Math.round(e.getBoundingClientRect().width) : null; }; return { content: Math.round(w.content.getBoundingClientRect().width), root: q('.doc-window'), main: q('.doc-main'), pane: q('.doc-pane'), page: q('.doc-page'), strip: q('.doc-strip') };`) });
+  ok(verdictOf((await pmText()).includes('Intro paragraph. EDITED-1')), 'the words landed in the rendered paragraph', { focus0, p0, widths: await ev(`const w = ${W}; const q = (s) => { const e = w.content.querySelector(s); return e ? Math.round(e.getBoundingClientRect().width) : null; }; return { content: Math.round(w.content.getBoundingClientRect().width), root: q('.doc-window'), main: q('.doc-main'), pane: q('.doc-pane'), page: q('.doc-page'), strip: q('.doc-strip') };`) });
   await ctrlS();
   const want1 = BRIEF.replace('Intro paragraph.', 'Intro paragraph. EDITED-1');
   const disk1 = await until(() => { const s = fs.readFileSync(P, 'utf8'); return s !== BRIEF ? s : null; }, 8000);
@@ -340,7 +340,7 @@ try {
   ok(!!st1, 'the stamp says the chat sees the edit on its next turn', st1);
   const pc = await stub({ kind: 'http', method: 'GET', path: '/api/agent/prompt-context' });
   const pcText = pc && pc.body && (pc.body.text || pc.body.context || (typeof pc.body === 'string' ? pc.body : S(pc.body)));
-  ok(pc.status === 200 && (pcText || '').includes(`[Doc edit] ${P}: +1 −1 lines; sections: Launch brief`) && /the user edited a document/.test(pcText || ''), 'the stub agent\'s next turn (its prompt-context) carries "[Doc edit] <path>: +1 −1 lines; sections: Launch brief" (the registry\'s note)', (pcText || '').slice(0, 500));
+  ok(pc.status === 200 && gateOf((pcText || '').includes(`[Doc edit] ${P}: +1 −1 lines; sections: Launch brief`)) && verdictOf(/the user edited a document/.test(pcText || '')), 'the stub agent\'s next turn (its prompt-context) carries "[Doc edit] <path>: +1 −1 lines; sections: Launch brief" (the registry\'s note)', (pcText || '').slice(0, 500));
   ok(!stdinTexts().some((t) => t.includes('[Doc edit]')), 'the edit note opened no turn (nothing typed into the agent)');
 
   section('§3 the agent rewrites the file ⇒ an in-place repaint, the scroll kept');
@@ -349,7 +349,7 @@ try {
   const agent2 = fs.readFileSync(P, 'utf8').replace('Paragraph P0.', 'Paragraph P0 rewritten by the agent.');
   await stub({ kind: 'write', files: [[P, agent2]] });
   const rep = await until(() => ev(`const w = ${W}; const pm = w.content.querySelector('.ProseMirror'); return pm.textContent.includes('rewritten by the agent') ? { keep: pm.__keep, ul: pm.querySelector('ul').__keep, top: w.content.querySelector('.doc-pane').scrollTop, bar: w.content.querySelector('.doc-conflict').hidden, dirty: w._editorDirty() } : null;`), 8000, 200);
-  ok(!!rep && rep.keep === 1 && rep.ul === 1 && rep.bar && rep.dirty === false, 'repainted IN PLACE within the 2 s watch: the same editor element, the unchanged list node kept, no bar, still clean', rep);
+  ok(!!rep && rep.keep === 1 && rep.ul === 1 && gateOf(rep.bar) && rep.dirty === false, 'repainted IN PLACE within the 2 s watch: the same editor element, the unchanged list node kept, no bar, still clean', rep);
   ok(!!rep && top0 > 0 && Math.abs(rep.top - top0) <= 2, `the scroll kept (${top0} → ${rep && rep.top})`);
 
   section('§4 unsaved edits + the agent writes ⇒ the bar; Keep editing ⇒ the save asks; Reload ⇒ the agent\'s version');
@@ -359,15 +359,15 @@ try {
   const agent3 = fs.readFileSync(P, 'utf8').replace('Filler line 1.', 'Filler line 1 (agent).');
   await stub({ kind: 'write', files: [[P, agent3]] });
   const bar = await until(() => ev(`const w = ${W}; const b = w.content.querySelector('.doc-conflict'); return b.hidden ? null : { text: b.title + ' | ' + b.textContent, pm: w.content.querySelector('.ProseMirror').textContent };`), 8000, 200);
-  ok(!!bar && /agent changed this file/.test(bar.text) && bar.pm.includes('USER-2') && !bar.pm.includes('(agent)'), 'the conflict chip shows (its title says the agent changed the file); the rendered view keeps the user\'s edit (no silent reload)', bar && bar.text);
+  ok(!!bar && gateOf(/agent changed this file/.test(bar.text)) && gateOf(bar.pm.includes('USER-2')) && !bar.pm.includes('(agent)'), 'the conflict chip shows (its title says the agent changed the file); the rendered view keeps the user\'s edit (no silent reload)', bar && bar.text);
   await click(await rectIn('.doc-keep'));
-  ok(await ev(`return ${W}.content.querySelector('.doc-conflict').hidden;`), 'Keep editing (from the chip) hides it');
+  ok(verdictOf(await ev(`return ${W}.content.querySelector('.doc-conflict').hidden;`)), 'Keep editing (from the chip) hides it');
   await click(await rectIn('.doc-save-btn'));
   const ask = await until(() => ev(`const o = [...document.querySelectorAll('.dialog-overlay')].find((x) => /newer version/.test(x.textContent)); if (!o) return null; const b = [...o.querySelectorAll('button')].find((x) => x.textContent === 'Overwrite'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`), 5000);
   ok(!!ask && fs.readFileSync(P, 'utf8') === agent3, 'the save ASKS "Overwrite the agent\'s newer version?" — the disk still holds the agent\'s version', ask);
   if (ask) await click(ask);
   const disk3 = await until(() => { const s = fs.readFileSync(P, 'utf8'); return s.includes('USER-2') ? s : null; }, 6000);
-  ok(!!disk3 && !disk3.includes('(agent)') && disk3.includes('rewritten by the agent. USER-2'), 'yes ⇒ the user\'s version on disk (the agent\'s newer one replaced only after the ask)');
+  ok(!!disk3 && !disk3.includes('(agent)') && verdictOf(disk3.includes('rewritten by the agent. USER-2')), 'yes ⇒ the user\'s version on disk (the agent\'s newer one replaced only after the ask)');
   await sleep(2500);
   await click(await ev(`const w = ${W}; const p = [...w.content.querySelectorAll('.ProseMirror > p')].find((x) => x.textContent.includes('USER-2')); const r = p.getBoundingClientRect(); return { x: r.right - 4, y: r.top + r.height / 2 };`));
   await type(' USER-3'); await sleep(150);
@@ -375,7 +375,7 @@ try {
   const bar2 = await until(() => ev(`const b = ${W}.content.querySelector('.doc-conflict'); return b.hidden ? null : true;`), 8000, 200);
   if (bar2) await click(await rectIn('.doc-reload'));
   const rl = await until(() => ev(`const w = ${W}; const t = w.content.querySelector('.ProseMirror').textContent; return t.includes('Filler line 2 (agent).') ? { u3: t.includes('USER-3'), dirty: w._editorDirty(), bar: w.content.querySelector('.doc-conflict').hidden } : null;`), 6000);
-  ok(!!bar2 && !!rl && !rl.u3 && rl.dirty === false && rl.bar, 'Reload ⇒ the agent\'s version, the unsaved edit gone, clean', rl);
+  ok(!!bar2 && !!rl && !rl.u3 && rl.dirty === false && verdictOf(rl.bar), 'Reload ⇒ the agent\'s version, the unsaved edit gone, clean', rl);
 
   section('§5 select → Comment → a note, twice → Send all ⇒ ONE message in the chat');
   const c1 = await comment('.ProseMirror h2', 12, 'make this punchier');
@@ -389,7 +389,7 @@ try {
   const sent = await until(() => stdinTexts().slice(before).filter((t) => t.startsWith('[Doc comments]')), 8000);
   const qOf = (x) => String(x.q).replace(/^L\d+ /, ''), lineOf = (x) => +(/^L(\d+) /.exec(x.q) || [])[1];
   const srcL = fs.readFileSync(P, 'utf8').split('\n');
-  ok(lineOf(strip[0]) === 5 && lineOf(strip[1]) === 7 && srcL[4].includes(qOf(strip[0])) && srcL[6].includes(qOf(strip[1])), 'each comment maps to its SOURCE line (PM state + the block map): the heading → L5, the first list item → L7', strip);
+  ok(lineOf(strip[0]) === 5 && lineOf(strip[1]) === 7 && gateOf(srcL[4].includes(qOf(strip[0]))) && verdictOf(srcL[6].includes(qOf(strip[1]))), 'each comment maps to its SOURCE line (PM state + the block map): the heading → L5, the first list item → L7', strip);
   const want = `[Doc comments] ${P}\n① L5 "${qOf(strip[0])}" — make this punchier\n② L7 "${qOf(strip[1])}" — add a date`;
   ok(!!sent && sent.length === 1 && sent[0] === want, 'Send all ⇒ exactly ONE message on the agent\'s stdin, in the contract\'s shape', sent || stdinTexts().slice(-2));
   await sleep(500);
@@ -412,21 +412,21 @@ try {
   ok(!!offered && dragSel.length > 0, 'a drag selection by mouse ⇒ the Add-comment popover', { dragSel, n: await cpopN() });
   await click({ x: far.left + 12, y: far.y });
   const afterClick = await samples(800), w1 = await where();
-  ok(afterClick.every((n) => n === 0) && w1.inPm && !w1.note && w1.sel === '', 'a click elsewhere in the document ⇒ the popover is gone (.doc-cpop = 0, and stays 0; the caret in the text, no note box)', { afterClick, w1 });
+  ok(gateOf(afterClick.every((n) => n === 0)) && gateOf(w1.inPm) && !w1.note && w1.sel === '', 'a click elsewhere in the document ⇒ the popover is gone (.doc-cpop = 0, and stays 0; the caret in the text, no note box)', { afterClick, w1 });
   await click({ x: h2r.left + 12, y: h2r.y }, 2);
   const again = await until(async () => (await cpopN()) === 1 || null, 3000), w2 = await where();
   await click({ x: far.left + 12, y: far.y }, 2);
   const swap = await samples(800), w3 = await where();
-  ok(!!again && w2.sel === 'Goals' && swap.every((n) => n <= 1) && swap[swap.length - 1] === 1 && w3.inPm && !w3.note && !!w3.sel && w3.sel !== 'Goals', 'a new selection elsewhere ⇒ never two, ONE again (the new one)', { again, w2, swap, w3 });
+  ok(!!again && w2.sel === 'Goals' && gateOf(swap.every((n) => n <= 1)) && swap[swap.length - 1] === 1 && gateOf(w3.inPm) && !w3.note && !!w3.sel && w3.sel !== 'Goals', 'a new selection elsewhere ⇒ never two, ONE again (the new one)', { again, w2, swap, w3 });
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   const afterEsc = await samples(800), keptSel = await ev('return String(getSelection());');
-  ok(afterEsc.every((n) => n === 0) && keptSel.length > 0, 'Esc ⇒ the popover is gone (the selection kept, not offered again)', { afterEsc, keptSel });
+  ok(gateOf(afterEsc.every((n) => n === 0)) && keptSel.length > 0, 'Esc ⇒ the popover is gone (the selection kept, not offered again)', { afterEsc, keptSel });
   await click({ x: far.left + 12, y: far.y }); await sleep(300);
 
   section('§6 Raw = the code editor in place, and back');
   await pressTool('.doc-raw-btn', 'Edit the markdown source');
   const raw = await until(() => ev(`const w = ${W}; const r = w.content.querySelector('.doc-raw'); const cm = r && r.querySelector('.cm-content'); return !r.hidden && cm && cm.textContent.includes('Filler line 2 (agent).') ? { pane: w.content.querySelector('.doc-pane').hidden, pressed: w.content.querySelector('.doc-raw-btn').getAttribute('aria-pressed') } : null;`), 8000);
-  ok(!!raw && raw.pane && raw.pressed === 'true', 'Raw shows the CodeEditor on the same file in this window (aria-pressed)', raw);
+  ok(!!raw && gateOf(raw.pane) && raw.pressed === 'true', 'Raw shows the CodeEditor on the same file in this window (aria-pressed)', raw);
   await pressTool('.doc-raw-btn', 'Edit the markdown source');
   const back = await until(() => ev(`const w = ${W}; return !w.content.querySelector('.doc-pane').hidden && w.content.querySelector('.doc-raw').hidden ? true : null;`), 5000);
   ok(!!back, 'pressed again ⇒ back to the rendered view');
@@ -435,7 +435,7 @@ try {
   await ev(`app.openFile(${S(TP)}, 'TABLE.md', { from: ${S(chatWin)} }); return true;`);
   const TW = DW(TP);
   const tw = await until(() => ev(`const w = ${TW}; if (!w) return null; const pm = w.content.querySelector('.ProseMirror'); return pm && pm.querySelector('table td') ? { chip: w.content.querySelector('.doc-chip').hidden, cells: pm.querySelectorAll('td').length, tbl: !w.content.querySelector('.doc-table-btn').hidden } : null;`), 20000, 200);
-  ok(!!tw && tw.chip && tw.cells === 4 && tw.tbl, 'the table file opens RICH (no chip): a real table, the Table button in the bar', tw);
+  ok(!!tw && gateOf(tw.chip) && tw.cells === 4 && verdictOf(tw.tbl), 'the table file opens RICH (no chip): a real table, the Table button in the bar', tw);
   const cell = await rectIn('.ProseMirror tr:nth-child(2) td', TP);
   await click({ x: cell.right - 4, y: cell.y }); await sleep(250);
   await call('Input.imeSetComposition', { text: 'q', selectionStart: 1, selectionEnd: 1 });
@@ -461,28 +461,28 @@ try {
   const tbls = await ev(`return ${TW}.content.querySelectorAll('.ProseMirror table').length;`);
   await click(await rectIn('.doc-save-btn', TP));
   const dt3 = await until(() => { const x = fs.readFileSync(TP, 'utf8'); return x !== dt2 ? x : null; }, 8000);
-  ok(tbls === 2 && !!dt3 && dt3.startsWith(dt2.replace(/\n$/, '')) && /\| 列一 \| {2}\|\n\| --- \| --- \|\n\| {2}\| {2}\|\n\| {2}\| {2}\|/.test(dt3), 'the toolbar inserts a 3×2 table (typed into its first cell) ⇒ saved as a new block after the untouched lines', { tbls, dt3 });
+  ok(tbls === 2 && !!dt3 && gateOf(dt3.startsWith(dt2.replace(/\n$/, ''))) && verdictOf(/\| 列一 \| {2}\|\n\| --- \| --- \|\n\| {2}\| {2}\|\n\| {2}\| {2}\|/.test(dt3)), 'the toolbar inserts a 3×2 table (typed into its first cell) ⇒ saved as a new block after the untouched lines', { tbls, dt3 });
   const c4 = await comment('.ProseMirror table tr:nth-child(3) td', 8, '香蕉要改', TP);
   const s4 = await ev(`return [...${TW}.content.querySelectorAll('.doc-cmt-q')].map((e) => e.textContent);`);
-  ok(s4.some((q) => /^L6 /.test(q)), 'a comment on the 香蕉 row maps to its source line L6', { c4, s4 });
+  ok(verdictOf(s4.some((q) => /^L6 /.test(q))), 'a comment on the 香蕉 row maps to its source line L6', { c4, s4 });
   await ev(`const w = ${TW}; for (const x of w.content.querySelectorAll('.doc-cmt-x')) x.click(); return true;`);
   ok(pageErrors.length === 0, 'no uncaught exception in the page (desktop legs)', pageErrors.slice(0, 4));
 
   section('§8 zh at 390 px (a phone): the bar fits, 36 px targets, the strip is a bottom sheet');
   await call('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}" });
   const chatWin2 = await boot(390, 844, true);
-  ok(!!chatWin2 && (await ev('return app.isMobile === true;')), 'the client booted as a phone in zh');
+  ok(!!chatWin2 && (verdictOf(await ev('return app.isMobile === true;'))), 'the client booted as a phone in zh');
   await ev(`for (const w of [...app.wm.windows.values()]) if (w.type === 'doc') app.wm.closeWindow(w.id); return true;`); await sleep(300); // the layout restore brought the desktop's Doc windows back as tabs
   await ev(`app.openFile(${S(P)}, 'BRIEF.md', { from: ${S(chatWin2)} }); return true;`);
   const ph = await until(() => ev(`const w = ${W}; if (!w || !w.content.offsetParent) return null; const pm = w.content.querySelector('.ProseMirror'); return pm && pm.querySelector('h1') ? w.content.querySelector('.doc-window').className : null;`), 20000, 200);
-  ok(!!ph && /doc-phone/.test(ph), 'the Doc window opened in its phone shape', ph);
+  ok(!!ph && verdictOf(/doc-phone/.test(ph)), 'the Doc window opened in its phone shape', ph);
   const p1 = await rectIn('.doc-page .ProseMirror > p');
   await click({ x: p1.right - 4, y: p1.y }); await type(' 已修改'); await sleep(150);
   await click(await rectIn('.doc-save-btn'));
   const savedZh = await until(() => ev(`const s = ${W}.content.querySelector('.doc-stamp').textContent; return /下一轮/.test(s) ? s : null;`), 6000);
-  ok(!!savedZh && fs.readFileSync(P, 'utf8').includes('Intro paragraph. EDITED-1 已修改'), 'saved on the phone; the stamp speaks zh', savedZh);
+  ok(!!savedZh && verdictOf(fs.readFileSync(P, 'utf8').includes('Intro paragraph. EDITED-1 已修改')), 'saved on the phone; the stamp speaks zh', savedZh);
   const bar390 = await ev(`const w = ${W}; return [...w.content.querySelectorAll('.doc-bar button')].filter((b) => b.offsetParent).map((b) => { const r = b.getBoundingClientRect(); return { t: b.textContent, l: r.left, r: r.right, h: r.height }; });`);
-  ok(bar390.length >= 4 && bar390.every((b) => b.l >= 0 && b.r <= 390 && b.h >= 36) && bar390.some((b) => b.t === '正文'), 'every bar button inside 390 px, a 36 px target, in zh (the block style reads 正文)', bar390);
+  ok(bar390.length >= 4 && gateOf(bar390.every((b) => b.l >= 0 && b.r <= 390 && b.h >= 36)) && verdictOf(bar390.some((b) => b.t === '正文')), 'every bar button inside 390 px, a 36 px target, in zh (the block style reads 正文)', bar390);
   const f1 = await shot('after-edit-zh.png');
   const c3 = await comment('.ProseMirror h2', 12, '标题再有力一些');
   const sheetNote = await ev(`return !!document.querySelector('.doc-note-sheet');`);
@@ -530,12 +530,12 @@ try {
   g.fit1872 = await inW(GEOM);
   ok(g.fit1872.width === 'fit' && g.fit1872.ls === null && g.fit1872.col >= 1700 && Math.abs(g.fit1872.left - 32) <= 2 && Math.abs(g.fit1872.right - 32) <= 2, '② the DEFAULT is Fit: the column = the pane minus 32 px each side (≥ 1700 px at 1872)', g.fit1872);
   ok(g.fit1872.lastRight <= g.fit1872.wrapRight + 1 && g.fit1872.scrollW <= g.fit1872.wrapW + 1, '③ the table\'s 4th column is inside the column at 1872 px — no clip, no scrollbar needed', g.fit1872);
-  ok(/Fit width/.test(g.fit1872.btn) && g.fit1872.btnShown, '④ the bar says the width (glyph + "Fit width") at the right of the comments button', g.fit1872.btn);
+  ok(gateOf(/Fit width/.test(g.fit1872.btn)) && verdictOf(g.fit1872.btnShown), '④ the bar says the width (glyph + "Fit width") at the right of the comments button', g.fit1872.btn);
   await wshot('after-fit.png');
   await click(await rectIn('.doc-width-btn', WP)); await sleep(400);
   g.comf1872 = await inW(GEOM);
   const measure = await inW(`const p = c.querySelector('.doc-page'); return Math.round(parseFloat(getComputedStyle(p).maxWidth) - 64);`);
-  ok(g.comf1872.width === 'comfortable' && g.comf1872.ls === 'comfortable' && Math.abs(g.comf1872.col - measure) <= 2 && Math.abs(g.comf1872.left - g.comf1872.right) <= 2 && /Comfortable/.test(g.comf1872.btn), '⑤ Comfortable = the 76ch measure CENTRED, remembered on the device (localStorage vs-doc-width)', { ...g.comf1872, measure });
+  ok(g.comf1872.width === 'comfortable' && g.comf1872.ls === 'comfortable' && Math.abs(g.comf1872.col - measure) <= 2 && Math.abs(g.comf1872.left - g.comf1872.right) <= 2 && verdictOf(/Comfortable/.test(g.comf1872.btn)), '⑤ Comfortable = the 76ch measure CENTRED, remembered on the device (localStorage vs-doc-width)', { ...g.comf1872, measure });
   await call('Runtime.evaluate', { expression: `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'doc'); const wr = w.content.querySelector('.tableWrapper'); wr.scrollLeft = wr.scrollWidth; return 1; })()` }); await sleep(200);
   const comfScrolled = await inW(GEOM);
   ok(comfScrolled.ox === 'auto' && comfScrolled.lastRight <= comfScrolled.wrapRight + 1, '⑥ in Comfortable the table SCROLLS in its own wrapper — scrolled to its end, the 4th column is inside (never clipped)', comfScrolled);
@@ -557,21 +557,21 @@ try {
   const rows = await ev(`return [...document.querySelectorAll('.context-menu .context-menu-item')].map((x) => [x.textContent.trim(), !!x.querySelector('svg')]);`);
   await wshot('after-menu.png');
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(200);
-  ok(S(rows.map((r) => r[0])) === S(['Download .md', 'Export HTML', 'Print / Save as PDF', 'Copy as Markdown', 'Copy as HTML']) && rows.every((r) => r[1]), '⑫ the ⋯ menu at the bar\'s right: Download .md · Export HTML · Print / Save as PDF · Copy as Markdown · Copy as HTML, each with its glyph; no .docx row', rows);
+  ok(S(rows.map((r) => r[0])) === S(['Download .md', 'Export HTML', 'Print / Save as PDF', 'Copy as Markdown', 'Copy as HTML']) && verdictOf(rows.every((r) => r[1])), '⑫ the ⋯ menu at the bar\'s right: Download .md · Export HTML · Print / Save as PDF · Copy as Markdown · Copy as HTML, each with its glyph; no .docx row', rows);
   await menuRow('Download .md'); await sleep(300);
   const dl = await ev(`const d = window.__dl.pop(); if (!d) return null; const r = await fetch(d.href); return { ...d, status: r.status, cd: r.headers.get('content-disposition'), body: await r.text() };`);
-  ok(!!dl && /\/api\/download\?/.test(dl.href) && dl.download === 'WIDE.md' && dl.status === 200 && /attachment/.test(dl.cd || '') && /WIDE\.md/.test(dl.cd || '') && dl.body === fs.readFileSync(WP, 'utf8'), '⑬ Download .md = the existing /api/download route: 200, attachment, named WIDE.md, the bytes on disk', dl && { ...dl, body: dl.body.length });
+  ok(!!dl && gateOf(/\/api\/download\?/.test(dl.href)) && dl.download === 'WIDE.md' && dl.status === 200 && gateOf(/attachment/.test(dl.cd || '')) && gateOf(/WIDE\.md/.test(dl.cd || '')) && dl.body === fs.readFileSync(WP, 'utf8'), '⑬ Download .md = the existing /api/download route: 200, attachment, named WIDE.md, the bytes on disk', dl && { ...dl, body: dl.body.length });
   await click(await rectIn('.ProseMirror p', WP)); await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35 }); await type(' EDITED'); await sleep(300);
   await menuRow('Download .md'); await sleep(400);
   const ask = await until(() => ev(`const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Save and download' && x.offsetParent); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`), 4000);
   const before = (await ev(`return window.__dl.length;`));
   if (ask) await click(ask);
   const dl2 = await until(() => ev(`return window.__dl.length > ${before} ? window.__dl[window.__dl.length - 1] : null;`), 6000);
-  ok(!!ask && !!dl2 && fs.readFileSync(WP, 'utf8').includes(' EDITED'), '⑭ an UNSAVED edit asks "Save and download?" — the save lands on disk first, then the download (never a stale file)', { ask: !!ask, dl2 });
+  ok(!!ask && !!dl2 && verdictOf(fs.readFileSync(WP, 'utf8').includes(' EDITED')), '⑭ an UNSAVED edit asks "Save and download?" — the save lands on disk first, then the download (never a stale file)', { ask: !!ask, dl2 });
   await menuRow('Export HTML');
   const ex = await until(() => ev(`const d = window.__dl[window.__dl.length - 1]; if (!d || !/^blob:/.test(d.href)) return null; return { ...d, html: await (await fetch(d.href)).text() };`), 8000);
   fs.mkdirSync(OUT, { recursive: true }); const exPath = path.join(OUT, 'WIDE.html'); if (ex) fs.writeFileSync(exPath, ex.html);
-  ok(!!ex && ex.download === 'WIDE.html' && !/<script\b/i.test(ex.html) && /<table/.test(ex.html) && /:root\{--/.test(ex.html) && /data:image\/png;base64,/.test(ex.html) && ex.html.includes('https://example.com/kept') && /@page\{margin:16mm\}/.test(ex.html) && ex.html.includes('RAWHITSEND'), '⑮ Export HTML = ONE self-contained WIDE.html: no script, theme tokens + styles inlined, the image beside the file inlined, links kept', ex && { download: ex.download, size: ex.html.length });
+  ok(!!ex && ex.download === 'WIDE.html' && !/<script\b/i.test(ex.html) && gateOf(/<table/.test(ex.html)) && gateOf(/:root\{--/.test(ex.html)) && gateOf(/data:image\/png;base64,/.test(ex.html)) && gateOf(ex.html.includes('https://example.com/kept')) && gateOf(/@page\{margin:16mm\}/.test(ex.html)) && verdictOf(ex.html.includes('RAWHITSEND')), '⑮ Export HTML = ONE self-contained WIDE.html: no script, theme tokens + styles inlined, the image beside the file inlined, links kept', ex && { download: ex.download, size: ex.html.length });
   if (ex) {
     const tgt = await call('Target.createTarget', { url: pathToFileURL(exPath).href });
     const tws = await until(async () => (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.id === tgt.targetId)?.webSocketDebuggerUrl, 8000);
@@ -583,11 +583,11 @@ try {
   }
   await menuRow('Print / Save as PDF');
   const pf = await until(() => ev(`const f = document.querySelectorAll('iframe.doc-print-frame'); if (f.length !== 1 || f[0].dataset.printed !== '1') return null; const d = f[0].contentDocument; return { n: f.length, sandbox: f[0].getAttribute('sandbox'), page: /@page\\{margin:16mm\\}/.test(d.documentElement.outerHTML), table: !!d.querySelector('table'), scripts: d.scripts.length };`), 10000);
-  ok(!!pf && pf.n === 1 && pf.page && pf.table && pf.scripts === 0 && !/allow-scripts/.test(pf.sandbox), '⑰ Print = ONE transient hidden frame holding the same document + the print sheet (16 mm pages); sandbox without allow-scripts; print() called', pf);
+  ok(!!pf && pf.n === 1 && gateOf(pf.page) && gateOf(pf.table) && pf.scripts === 0 && !/allow-scripts/.test(pf.sandbox), '⑰ Print = ONE transient hidden frame holding the same document + the print sheet (16 mm pages); sandbox without allow-scripts; print() called', pf);
   await menuRow('Copy as Markdown'); await sleep(300);
   await menuRow('Copy as HTML'); await sleep(500);
   const clip = await ev(`return window.__clip.slice();`);
-  ok(clip.length === 2 && clip[0] === fs.readFileSync(WP, 'utf8') && /<table/.test(clip[1]) && !/<script/i.test(clip[1]), '⑱ Copy as Markdown = the source; Copy as HTML = the sanitized rendered fragment', clip.map((x) => x.length));
+  ok(clip.length === 2 && clip[0] === fs.readFileSync(WP, 'utf8') && gateOf(/<table/.test(clip[1])) && !/<script/i.test(clip[1]), '⑱ Copy as Markdown = the source; Copy as HTML = the sanitized rendered fragment', clip.map((x) => x.length));
   // a hostile document: the export carries no script, no handler, no javascript: link
   const HP = path.join(DOCS, 'HOSTILE.md'); fs.writeFileSync(HP, '# Hostile\n\nA [bad link](javascript:alert(1)) and [ok](https://example.com/ok).\n\n<script>alert(1)</script>\n\n<img src="x" onerror="alert(2)">\n\n| a | b |\n|---|---|\n| 1 | 2 |\n');
   await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); app.openFile(${S(HP)}, 'HOSTILE.md', {}); return true;`);
@@ -595,7 +595,7 @@ try {
   let hx = null;
   if (hrich) { await click(await rectIn('.doc-more', HP)); await sleep(200); const r = await ev(`const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === 'Export HTML'); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`); if (r) await click(r);
     hx = await until(() => ev(`const d = window.__dl[window.__dl.length - 1]; if (!d || d.download !== 'HOSTILE.html') return null; return await (await fetch(d.href)).text();`), 8000); }
-  ok(!!hx && !/<script\b/i.test(hx) && !/javascript:/i.test(hx.replace(/&lt;[^]*?&gt;/g, '')) && !/<[^>]*\sonerror\s*=/i.test(hx) && hx.includes('https://example.com/ok'), '⑲ a hostile .md (script / javascript: link / onerror) exports with none of them (the one sanitizer)', hx && hx.length);
+  ok(!!hx && !/<script\b/i.test(hx) && !/javascript:/i.test(hx.replace(/&lt;[^]*?&gt;/g, '')) && !/<[^>]*\sonerror\s*=/i.test(hx) && verdictOf(hx.includes('https://example.com/ok')), '⑲ a hostile .md (script / javascript: link / onerror) exports with none of them (the one sanitizer)', hx && hx.length);
   ok(pageErrors.length === 0, '⑳ no page exception through §10', pageErrors.slice(0, 3));
   console.log('    widths:', S({ fit1872: g.fit1872.col, comf1872: g.comf1872.col, fit1000: g.fit1000.col, phone390: g.phone390.col, pane1872: g.fit1872.pane, pane1000: g.fit1000.pane, pane390: g.phone390.pane }));
   }
@@ -657,17 +657,17 @@ try {
   const b = await printOf(BP, 'lane-brief.md');
   const bl = b && b.lay;
   console.log('    the brief ON SCREEN:', S(b && b.screen), '— a bare `/p/<id>` is text in the editor since 2.369.267 (lane doc-table-native: a literal tag is text), so no raw block');
-  ok(!!bl && bl.first === 'H1' && /^Lane pages-chip-groups — the chat's Pages chip/.test(bl.h1) && bl.h1.includes('/p/<id>') && bl.ol === 4 && bl.liInline === 4 && bl.raw === 0, '① the brief PRINTS as a document: the first line an <h1> (its /p/<id> kept as text), the numbered list an <ol> of 4 items with inline code + bold, NO raw block', bl && { first: bl.first, h1: bl.h1.slice(0, 80), ol: bl.ol, liInline: bl.liInline, raw: bl.raw });
-  ok(!!bl && bl.nOver === 0 && bl.docW <= bl.W && bl.clip.length === 0 && bl.pre.every((x) => /^pre-wrap visible auto$/.test(x)) && bl.font === '14.6667px', '② nothing wider than the A4 page box (673 px) under print media, no clipping / scroll container, pre wraps and may break across pages, body 11 pt', bl && { W: bl.W, docW: bl.docW, over: bl.over, clip: bl.clip, pre: bl.pre, font: bl.font });
+  ok(!!bl && bl.first === 'H1' && gateOf(/^Lane pages-chip-groups — the chat's Pages chip/.test(bl.h1)) && gateOf(bl.h1.includes('/p/<id>')) && bl.ol === 4 && bl.liInline === 4 && bl.raw === 0, '① the brief PRINTS as a document: the first line an <h1> (its /p/<id> kept as text), the numbered list an <ol> of 4 items with inline code + bold, NO raw block', bl && { first: bl.first, h1: bl.h1.slice(0, 80), ol: bl.ol, liInline: bl.liInline, raw: bl.raw });
+  ok(!!bl && bl.nOver === 0 && bl.docW <= bl.W && bl.clip.length === 0 && gateOf(bl.pre.every((x) => /^pre-wrap visible auto$/.test(x))) && bl.font === '14.6667px', '② nothing wider than the A4 page box (673 px) under print media, no clipping / scroll container, pre wraps and may break across pages, body 11 pt', bl && { W: bl.W, docW: bl.docW, over: bl.over, clip: bl.clip, pre: bl.pre, font: bl.font });
   const ends = BRIEF.split('\n').filter((l) => l.trim()).map((l) => (l.match(/[\p{L}\p{N}]+/gu) || []).slice(-3).join(''));
   const missing = b && b.text != null ? ends.filter((e) => !squash(b.text).includes(e)) : null;
   ok(!!b && b.pages >= 1 && b.bytes > 10000 && (missing === null || missing.length === 0), `③ the brief's PDF: ${b && b.pages} page(s) — every line's END is in the PDF text (nothing cut at the right edge)${missing === null ? ' [pdftotext absent: text leg skipped]' : ''}`, { pages: b && b.pages, missing });
   if (PSHOTS && b && has('pdftoppm')) execFileSync('pdftoppm', ['-png', '-r', '90', '-f', '1', '-l', '1', '-singlefile', b.pdfPath, path.join(PSHOTS, 'after-print-p1')]);
   if (PSHOTS && b && has('pdftoppm')) execFileSync('pdftoppm', ['-png', '-r', '90', '-f', '2', '-l', '2', '-singlefile', b.pdfPath, path.join(PSHOTS, 'after-print-p2')]);
-  ok(!PSHOTS || (has('pdftoppm') && fs.existsSync(path.join(PSHOTS, 'after-print-p1.png')) && fs.statSync(path.join(PSHOTS, 'after-print-p1.png')).size > 10000), `④ the PDF's page 1 rendered for the owner (pdftoppm): ${PSHOTS ? path.join(PSHOTS, 'after-print-p1.png') : '(no shots dir)'}`);
+  ok(!PSHOTS || (gateOf(has('pdftoppm')) && gateOf(fs.existsSync(path.join(PSHOTS, 'after-print-p1.png'))) && fs.statSync(path.join(PSHOTS, 'after-print-p1.png')).size > 10000), `④ the PDF's page 1 rendered for the owner (pdftoppm): ${PSHOTS ? path.join(PSHOTS, 'after-print-p1.png') : '(no shots dir)'}`);
   const f = await printOf(FP, 'forty.md');
   const fl = f && f.lay;
-  ok(!!f && f.pages >= 2 && !!fl && fl.nOver === 0 && fl.clip.length === 0 && fl.raw === 0 && S(fl.cols) === S(['xl']) && (f.text == null || (f.text.includes('ENDOFFORTY') && /line 90 x/.test(f.text) && f.text.includes('Paragraph 40:'))), `⑤ 40 paragraphs + a 90-line code block + an 11-column table print on ${f && f.pages} pages (≥ 2): the code block breaks across pages, the table fits the page (type stepped: xl), the last line printed`, f && { pages: f.pages, over: fl && fl.over, clip: fl && fl.clip, cols: fl && fl.cols, height: fl && fl.height });
+  ok(!!f && f.pages >= 2 && !!fl && fl.nOver === 0 && fl.clip.length === 0 && fl.raw === 0 && S(fl.cols) === S(['xl']) && (f.text == null || (gateOf(f.text.includes('ENDOFFORTY')) && gateOf(/line 90 x/.test(f.text)) && verdictOf(f.text.includes('Paragraph 40:')))), `⑤ 40 paragraphs + a 90-line code block + an 11-column table print on ${f && f.pages} pages (≥ 2): the code block breaks across pages, the table fits the page (type stepped: xl), the last line printed`, f && { pages: f.pages, over: fl && fl.over, clip: fl && fl.clip, cols: fl && fl.cols, height: fl && fl.height });
   ok(pageErrors.length === 0, '⑥ no page exception through §11', pageErrors.slice(0, 3));
   }
   if (ONLY === '' || ONLY === 'raw') {
@@ -698,24 +698,24 @@ try {
       chip: step ? getComputedStyle(step).fontFamily + ' | ' + getComputedStyle(step).backgroundColor : null, mono: t && [...t.querySelectorAll('td')].some((td) => /mono/i.test(getComputedStyle(td).fontFamily)),
       bare: (() => { const td = [...pm.querySelectorAll('td')].find((x) => x.textContent.includes('names its step')), b = td && td.closest('table'); return td ? { native: !td.closest('.doc-rawblock') && b !== t && td.isContentEditable, table: !!b.closest('.tableWrapper'), code: td.querySelectorAll('code').length, mono: /mono/i.test(getComputedStyle(td).fontFamily), text: td.textContent.slice(0, 60) } : null; })() };`);
   const ownShot = await rshot(`${RTAG}.png`);
-  ok(own.raw === 0 && own.rows === 4 && ['STEP-nn', 'ledger.review.read', 'replaces = prior id'].every((c) => own.code.includes(c)) && own.kbd === 2 && own.sup === 1 && own.br === 1 && /mono/i.test(own.chip || '') && !own.mono,
+  ok(own.raw === 0 && own.rows === 4 && gateOf(['STEP-nn', 'ledger.review.read', 'replaces = prior id'].every((c) => own.code.includes(c))) && own.kbd === 2 && own.sup === 1 && own.br === 1 && gateOf(/mono/i.test(own.chip || '')) && !own.mono,
     '② it opens as a TABLE (4 rows) with inline code chips — <code>STEP-nn</code> beside the backticked `replaces = prior id`, <kbd> ×2, <sup>, a <br> in its cell — no grey source block, the cells in the prose font', own);
   await inR(OP, `const t2 = pm.querySelectorAll('table')[1]; if (t2) t2.scrollIntoView({ block: 'center' }); return true;`); await sleep(300);
   await rshot(`${RTAG}-bare.png`);
-  ok(!!own.bare && own.bare.native && own.bare.table && own.bare.code === 0 && !own.bare.mono && own.bare.text.includes('STEP-<code>-nn until export'), '②b the second table (a cell with a BARE <code> placeholder) is a NATIVE table too (lane doc-table-native: a literal tag is text): STEP-<code>-nn shown as written in an editable cell, no <code> element opened, the prose font', own.bare);
+  ok(!!own.bare && gateOf(own.bare.native) && gateOf(own.bare.table) && own.bare.code === 0 && !own.bare.mono && verdictOf(own.bare.text.includes('STEP-<code>-nn until export')), '②b the second table (a cell with a BARE <code> placeholder) is a NATIVE table too (lane doc-table-native: a literal tag is text): STEP-<code>-nn shown as written in an editable cell, no <code> element opened, the prose font', own.bare);
   // ③ a cell is a real cell: the caret at the end of the 'Catalog digest' rule, a typed mark, Ctrl+S ⇒ that row's line only
   const cellP = await inR(OP, `const c = pm.querySelector('table tr:nth-child(3) td:nth-child(2) p') || pm.querySelector('table tr:nth-child(3) td:nth-child(2)'); c.scrollIntoView({ block: 'center' }); const r = R(c); return { x: r.right - 3, y: r.bottom - 8 };`);
   await click(cellP); await type('Ⓧ'); await sleep(150); await ctrlS();
   const saved = await until(() => { const t = fs.readFileSync(OP, 'utf8'); return t.includes('Ⓧ') ? t : null; }, 8000);
   const oL = OWNER.split('\n'), nL = String(saved || '').split('\n'), diff = oL.map((l, i) => (l === nL[i] ? null : i)).filter((x) => x !== null);
-  ok(!!saved && oL.length === nL.length && diff.length === 1 && nL[diff[0]] === oL[diff[0]].replace(/ \|$/, 'Ⓧ |') && /^\| Catalog digest \|/.test(oL[diff[0]]), '③ typing at the end of a cell + Ctrl+S ⇒ exactly that row\'s line changed (the mark at its end), every other line — the <code> / <kbd> / <br> rows included — byte-identical', { diff, line: diff.length ? nL[diff[0]].slice(-60) : null });
+  ok(!!saved && oL.length === nL.length && diff.length === 1 && nL[diff[0]] === oL[diff[0]].replace(/ \|$/, 'Ⓧ |') && verdictOf(/^\| Catalog digest \|/.test(oL[diff[0]])), '③ typing at the end of a cell + Ctrl+S ⇒ exactly that row\'s line changed (the mark at its end), every other line — the <code> / <kbd> / <br> rows included — byte-identical', { diff, line: diff.length ? nL[diff[0]].slice(-60) : null });
   fs.writeFileSync(OP, OWNER);
   // ④ the blocks that stay raw READ rendered; a hostile <img onerror> never runs; a comment shows its source, the chip says why
   ok(!!(await openMax(RP, 'raw-blocks.md')), '④ a document with a <details> block, an HTML <div> (a hostile <img onerror>) and a comment opened');
   await sleep(600);
   const rb = await inR(RP, `return { blocks: [...pm.querySelectorAll('.doc-rawblock')].map((b) => ({ rendered: b.dataset.rendered, head: (b.querySelector('.doc-raw-head') || {}).textContent || '', details: !!b.querySelector('details > summary'), src: (b.querySelector('.doc-raw-src') || {}).textContent || '', ce: b.getAttribute('contenteditable'), onerror: !!b.querySelector('[onerror]'), bold: !!b.querySelector('b'), pre: !!b.querySelector('pre') })), xss: window.__rawXss === 1 };`);
   const B = rb.blocks;
-  ok(B.length === 4 && B[0].rendered === '1' && B[0].details && B[0].head === 'HTML 块 · 已按内容显示 · 点此编辑源码' && B[0].ce === 'false' && B[2].rendered === '1' && B[2].bold && !B[2].onerror && !rb.xss && !B.some((x) => x.pre),
+  ok(B.length === 4 && B[0].rendered === '1' && gateOf(B[0].details) && B[0].head === 'HTML 块 · 已按内容显示 · 点此编辑源码' && B[0].ce === 'false' && B[2].rendered === '1' && gateOf(B[2].bold) && !B[2].onerror && !rb.xss && !B.some((x) => x.pre),
     '⑤ the <details> block and the <div> READ rendered (a <details> with its summary, bold words), read-only, the chip "HTML 块 · 已按内容显示 · 点此编辑源码" (the words since lane doc-table-native); the <img onerror> carries no handler and never ran; no block drawn as a source <pre>', rb);
   ok(B[1].rendered === '0' && B[1].src === '</details>' && B[3].rendered === '0' && B[3].src === '<!-- reviewer: keep the bag -->' && B[3].head === 'HTML 块 · 无法显示，给出源码 · 点此编辑', '⑥ a block that reads as nothing (the lone </details>, the comment) shows its SOURCE and its chip says it cannot be rendered', [B[1], B[3]]);
   await rshot(`${RTAG}-raw.png`);
@@ -726,17 +726,17 @@ try {
   const sel1 = await inR(RP, `const s = pm.querySelector('.ProseMirror-selectednode'); return s ? s.className + ' ' + (s.querySelector('summary') || {}).textContent : null;`);
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 }); await sleep(150);
   const sel2 = await inR(RP, `const a = getSelection().anchorNode; const el = a && (a.nodeType === 1 ? a : a.parentElement); return { node: !!pm.querySelector('.ProseMirror-selectednode'), in: el ? (el.closest('p') || {}).textContent || el.tagName : null };`);
-  ok(/doc-rawblock/.test(sel1 || '') && /Why a bag/.test(sel1 || '') && !sel2.node && sel2.in === 'Two equal rows stay two.', '⑦ ArrowDown from the line above selects the raw block as ONE unit; the next ArrowDown leaves it for the paragraph below', { sel1, sel2 });
+  ok(gateOf(/doc-rawblock/.test(sel1 || '')) && gateOf(/Why a bag/.test(sel1 || '')) && !sel2.node && sel2.in === 'Two equal rows stay two.', '⑦ ArrowDown from the line above selects the raw block as ONE unit; the next ArrowDown leaves it for the paragraph below', { sel1, sel2 });
   // ⑧ the chip opens the source IN PLACE; Esc ⇒ re-rendered; Ctrl+S ⇒ only that block's lines change
   await click(await rectIn('.doc-rawblock .doc-raw-head', RP)); await sleep(300);
   const ed1 = await inR(RP, `const ta = pm.querySelector('.doc-rawblock textarea.doc-raw-edit'); return ta ? { value: ta.value, focused: document.activeElement === ta, h: Math.round(R(ta).height), mono: /mono/i.test(getComputedStyle(ta).fontFamily), done: (pm.querySelector('.doc-raw-done') || {}).textContent || '' } : null;`);
-  ok(!!ed1 && ed1.value === '<details>\n<summary>Why a bag</summary>' && ed1.focused && ed1.h >= 40 && ed1.mono && ed1.done === '完成', '⑧ a press on the chip opens THIS block\'s source in place (a focused monospace box the block\'s size, Finish (完成) beside it) — not the whole-document Raw', ed1);
+  ok(!!ed1 && ed1.value === '<details>\n<summary>Why a bag</summary>' && gateOf(ed1.focused) && ed1.h >= 40 && gateOf(ed1.mono) && ed1.done === '完成', '⑧ a press on the chip opens THIS block\'s source in place (a focused monospace box the block\'s size, Finish (完成) beside it) — not the whole-document Raw', ed1);
   await inR(RP, `const ta = pm.querySelector('textarea.doc-raw-edit'); ta.select(); return true;`);
   await type('<details open>\n<summary>Why a bag — edited</summary>'); await sleep(150);
   await rshot(`${RTAG}-raw-edit.png`);
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(300);
   const ed2 = await inR(RP, `const b = pm.querySelector('.doc-rawblock'); return { ta: !!pm.querySelector('textarea.doc-raw-edit'), open: !!b.querySelector('details[open]'), summary: (b.querySelector('summary') || {}).textContent || '', dirty: (w.content.querySelector('.doc-save-btn') || {}).dataset?.state || '' };`);
-  ok(!ed2.ta && ed2.open && ed2.summary === 'Why a bag — edited' && ed2.dirty === 'dirty', '⑨ Esc writes it back: the block re-renders from its new source (open, the new summary), the document is dirty', ed2);
+  ok(!ed2.ta && gateOf(ed2.open) && ed2.summary === 'Why a bag — edited' && ed2.dirty === 'dirty', '⑨ Esc writes it back: the block re-renders from its new source (open, the new summary), the document is dirty', ed2);
   await ctrlS();
   const want = RAWDOC.replace('<details>\n<summary>Why a bag</summary>', '<details open>\n<summary>Why a bag — edited</summary>');
   const disk = await until(() => { const t = fs.readFileSync(RP, 'utf8'); return t !== RAWDOC ? t : null; }, 8000);
@@ -746,7 +746,7 @@ try {
   const tog1 = await inR(RP, `return !!pm.querySelector('textarea.doc-raw-edit');`);
   await click(await rectIn('.doc-rawblock .doc-raw-head', RP)); await sleep(300);
   const tog2 = await inR(RP, `return { ta: !!pm.querySelector('textarea.doc-raw-edit'), rendered: (pm.querySelector('.doc-rawblock') || {}).dataset?.rendered, disk: null };`);
-  ok(tog1 && !tog2.ta && tog2.rendered === '1' && fs.readFileSync(RP, 'utf8') === want, '⑩b a second press on the chip closes the open box (no reopen), the block reads rendered again, nothing changed on disk', { tog1, tog2 });
+  ok(gateOf(tog1) && !tog2.ta && tog2.rendered === '1' && fs.readFileSync(RP, 'utf8') === want, '⑩b a second press on the chip closes the open box (no reopen), the block reads rendered again, nothing changed on disk', { tog1, tog2 });
   ok(!!(await until(() => (pageErrors.length === 0 ? true : null), 300)) || pageErrors.length === 0, '⑪ no page exception through §12', pageErrors.slice(0, 3));
   if (RSHOTS) ok(!!ownShot && fs.statSync(ownShot).size > 10000, `⑫ PNGs for the owner: ${path.join(RSHOTS, RTAG + '.png')} (+ -raw, -raw-edit)`);
   }
@@ -783,9 +783,9 @@ try {
     return { raw, chip, table: true, wrapped: !!t.closest('.tableWrapper'), rows: t.rows.length, cols: t.rows[0].cells.length, absent: abs.length, absentEditable: abs.every((x) => x.isContentEditable), absentEl: abs.some((x) => x.querySelector('absent')),
       codes: [...t.querySelectorAll('code')].map((c) => c.textContent), rowH: Math.round(R(tr).height), pad: pad(tr.cells[0]), inner, tallest, codeCell: Math.round(code.querySelector('code') ? R(code.querySelector('code')).height : 0),
       tableW: Math.round(R(t).width), pageW: Math.round(R(pm).width), colW: [...t.rows[0].cells].map((c) => Math.round(R(c).width)) };`);
-  ok(tv.table && tv.raw === 0 && !tv.chip && tv.wrapped && tv.rows === 5 && tv.cols === 10, '② a NATIVE table (5 rows × 10 columns in its scrolling wrapper) — no raw block, no chip', tv);
-  ok(tv.absent === 2 && tv.absentEditable && !tv.absentEl && ['terms.deposit_months.count', 'fees.late_tiers[all#2]', 'term.survival_years', 'pricing.unit_price.amount'].every((c) => (tv.codes || []).includes(c)), '③ both <absent> cells read "<absent>" as text in editable cells (no element), the code spans with underscores drawn as inline code', tv);
-  ok(tv.table && tv.tallest >= 8 && tv.inner[tv.tallest] + tv.pad >= tv.rowH - 2 && tv.inner[2] <= tv.inner[tv.tallest] / 2, '④ the TALL ROW measured: the row is as tall as its tallest cell — a long quoted column (reason / deciding quote) — while the code-span cell holds one short line (its "tall blank" is the row, not the cell)', { rowH: tv.rowH, inner: tv.inner, tallest: tv.tallest, colW: tv.colW, tableW: tv.tableW, pageW: tv.pageW });
+  ok(gateOf(tv.table) && tv.raw === 0 && !tv.chip && gateOf(tv.wrapped) && tv.rows === 5 && tv.cols === 10, '② a NATIVE table (5 rows × 10 columns in its scrolling wrapper) — no raw block, no chip', tv);
+  ok(tv.absent === 2 && gateOf(tv.absentEditable) && !tv.absentEl && verdictOf(['terms.deposit_months.count', 'fees.late_tiers[all#2]', 'term.survival_years', 'pricing.unit_price.amount'].every((c) => (tv.codes || []).includes(c))), '③ both <absent> cells read "<absent>" as text in editable cells (no element), the code spans with underscores drawn as inline code', tv);
+  ok(gateOf(tv.table) && tv.tallest >= 8 && tv.inner[tv.tallest] + tv.pad >= tv.rowH - 2 && tv.inner[2] <= tv.inner[tv.tallest] / 2, '④ the TALL ROW measured: the row is as tall as its tallest cell — a long quoted column (reason / deciding quote) — while the code-span cell holds one short line (its "tall blank" is the row, not the cell)', { rowH: tv.rowH, inner: tv.inner, tallest: tv.tallest, colW: tv.colW, tableW: tv.tableW, pageW: tv.pageW });
   console.log(`    the tall row: row ${tv.rowH} px · each cell's content ${S(tv.inner)} · columns ${S(tv.colW)} (table ${tv.tableW} px in a ${tv.pageW} px page)`);
   // ⑤ a letter typed after the first <absent> + Ctrl+S ⇒ that row's line only, the tag kept as written
   const cellA = await inT(TP, `const td = [...pm.querySelectorAll('td')].find((x) => x.textContent.trim() === '<absent>'); td.scrollIntoView({ block: 'center' }); const r = document.createRange(); r.selectNodeContents(td.querySelector('p') || td); const b = r.getBoundingClientRect(); return { x: b.right - 1, y: b.top + b.height / 2 };`);
@@ -793,14 +793,14 @@ try {
   await type('Ⓧ'); await sleep(150); await ctrlS();
   const savedT = await until(() => { const t = fs.readFileSync(TP, 'utf8'); return t.includes('Ⓧ') ? t : null; }, 8000);
   const tL = F32.split('\n'), sL = String(savedT || '').split('\n'), tdiff = tL.map((l, i) => (l === sL[i] ? null : i)).filter((x) => x !== null);
-  ok(!!savedT && tL.length === sL.length && tdiff.length === 1 && sL[tdiff[0]] === tL[tdiff[0]].replace('| <absent> |', '| <absent>Ⓧ |') && /^\| R007 \|/.test(tL[tdiff[0]]), '⑤ typing at the end of an <absent> cell + Ctrl+S ⇒ exactly that row\'s line changed (<absent>Ⓧ, the tag as written), every other line byte-identical', { tdiff, line: tdiff.length ? sL[tdiff[0]].slice(0, 120) : null });
+  ok(!!savedT && tL.length === sL.length && tdiff.length === 1 && sL[tdiff[0]] === tL[tdiff[0]].replace('| <absent> |', '| <absent>Ⓧ |') && verdictOf(/^\| R007 \|/.test(tL[tdiff[0]])), '⑤ typing at the end of an <absent> cell + Ctrl+S ⇒ exactly that row\'s line changed (<absent>Ⓧ, the tag as written), every other line byte-identical', { tdiff, line: tdiff.length ? sL[tdiff[0]].slice(0, 120) : null });
   fs.writeFileSync(TP, F32);
   // ⑥ what stays raw says what it is; a /p/<id> paragraph is a paragraph
   ok(!!(await openT(RP, 'notes.md')), '⑥ a document with a /p/<id> paragraph, a <details> block and an HTML comment opened');
   await sleep(500);
   const rawShot = await tshot(`${TTAG}-raw.png`);
   const rv = await inT(RP, `return { heads: [...pm.querySelectorAll('.doc-rawblock .doc-raw-head')].map((h) => h.textContent), p: [...pm.querySelectorAll(':scope > p')].map((x) => x.textContent) };`);
-  ok(rv.heads.length === 3 && rv.heads[0] === 'HTML 块 · 已按内容显示 · 点此编辑源码' && rv.heads[1] === 'HTML 块 · 无法显示，给出源码 · 点此编辑' && rv.heads[2] === rv.heads[1] && rv.p.includes('Open /p/<id> to read the published copy.'), '⑦ the chip says what the block is: 「HTML 块 · 已按内容显示 · 点此编辑源码」 (the <details>, read rendered) / 「HTML 块 · 无法显示，给出源码 · 点此编辑」 (the lone </details>, the comment); the /p/<id> line is a paragraph, not a raw block', rv);
+  ok(rv.heads.length === 3 && rv.heads[0] === 'HTML 块 · 已按内容显示 · 点此编辑源码' && rv.heads[1] === 'HTML 块 · 无法显示，给出源码 · 点此编辑' && rv.heads[2] === rv.heads[1] && verdictOf(rv.p.includes('Open /p/<id> to read the published copy.')), '⑦ the chip says what the block is: 「HTML 块 · 已按内容显示 · 点此编辑源码」 (the <details>, read rendered) / 「HTML 块 · 无法显示，给出源码 · 点此编辑」 (the lone </details>, the comment); the /p/<id> line is a paragraph, not a raw block', rv);
   ok(pageErrors.length === 0, '⑧ no page exception through §17', pageErrors.slice(0, 3));
   if (TSHOTS) ok(!!shot && fs.statSync(shot).size > 10000 && !!rawShot && fs.statSync(rawShot).size > 10000, `⑨ PNGs for the owner: ${path.join(TSHOTS, TTAG + '.png')} + ${TTAG}-raw.png`);
   }
@@ -836,7 +836,7 @@ try {
   if (!ok(!!(await boot(1100, 900, false)), '§13 the client re-booted at 1100×900 (en)')) throw new Error('no app for §13');
   ok(!!(await openDoc(true)), '① a blog draft with front matter, a paragraph and an HTML comment block opened, maximized at 1100 px');
   const kinds = await inC(`H.scrollIntoView({ block: 'center' }); return [...pm.querySelectorAll('.doc-rawblock')].map((b) => (b.querySelector('.doc-raw-head') || {}).textContent);`);
-  ok(kinds.length === 2 && /^Front matter · shown as its content/.test(kinds[0]) && /^HTML block · cannot be shown, source below/.test(kinds[1]), '② two raw blocks: the front matter and the HTML comment (its source shown, "cannot be shown, source below")', kinds);
+  ok(kinds.length === 2 && gateOf(/^Front matter · shown as its content/.test(kinds[0])) && verdictOf(/^HTML block · cannot be shown, source below/.test(kinds[1])), '② two raw blocks: the front matter and the HTML comment (its source shown, "cannot be shown, source below")', kinds);
   await sleep(300);
   // ③ a click on the block (its NodeSelection) ⇒ Add comment; the quote = the block's kind + source
   const hb = await inC(`const s = H.querySelector('.doc-raw-src'); const r = R(s); return { x: r.right - 40, y: r.top + r.height / 2 };`);
@@ -844,13 +844,13 @@ try {
   const b1 = await until(btnNow, 4000);
   const sel1 = await inC(`return { node: !!H.classList.contains('ProseMirror-selectednode'), focus: pm.contains(document.activeElement) || document.activeElement === pm };`);
   await cshot('desk-offer.png');
-  ok(!!b1 && sel1.node, '③ a click on the HTML block selects it (one unit) and offers Add comment', { b1, sel1 });
+  ok(!!b1 && verdictOf(sel1.node), '③ a click on the HTML block selects it (one unit) and offers Add comment', { b1, sel1 });
   if (b1) await addNote(b1, 'Confirm this block before publishing');
   const s1 = await storedN(1);
   const strip1 = await inC(`return [...w.content.querySelectorAll('.doc-cmt')].map((e) => ({ k: (e.querySelector('.doc-cmt-k') || {}).textContent || '', q: (e.querySelector('.doc-cmt-q') || {}).textContent || '', raw: e.classList.contains('doc-cmt-raw') }));`);
-  ok(s1 && s1.length === 1 && s1[0].quote === 'HTML block: <!-- [CONFIRM-BLOCK id=7] keep the bag -->' && s1[0].line === 9 && s1[0].raw && s1[0].raw.kind === 'html' && s1[0].raw.line === 9 && Number.isInteger(s1[0].raw.pos) && s1[0].note === 'Confirm this block before publishing',
+  ok(gateOf(s1) && s1.length === 1 && s1[0].quote === 'HTML block: <!-- [CONFIRM-BLOCK id=7] keep the bag -->' && s1[0].line === 9 && gateOf(s1[0].raw) && s1[0].raw.kind === 'html' && s1[0].raw.line === 9 && gateOf(Number.isInteger(s1[0].raw.pos)) && s1[0].note === 'Confirm this block before publishing',
     '④ the comment is saved with the block quote ("HTML block: <!-- [CONFIRM-BLOCK id=7] keep the bag -->"), the block\'s source line (L9) and ONE extra field raw {pos, line, kind}', s1);
-  ok(strip1.length === 1 && strip1[0].raw && strip1[0].k === 'L9 · HTML block' && strip1[0].q.startsWith('HTML block: <!-- [CONFIRM-BLOCK'), '⑤ the strip lists it with the block\'s kind as its context line', strip1);
+  ok(strip1.length === 1 && gateOf(strip1[0].raw) && strip1[0].k === 'L9 · HTML block' && verdictOf(strip1[0].q.startsWith('HTML block: <!-- [CONFIRM-BLOCK')), '⑤ the strip lists it with the block\'s kind as its context line', strip1);
   // ⑥ a real mouse drag across "keep the bag" inside the source box ⇒ Add comment, the quote = the selected text
   await click(await inC(`const p = [...pm.querySelectorAll('p')].find((x) => /Tail paragraph/.test(x.textContent)); const r = R(p); return { x: r.left + 20, y: r.top + r.height / 2 };`)); await sleep(300);
   const span = await inC(`const s = H.querySelector('.doc-raw-src'), tn = s.firstChild, i = tn.data.indexOf('keep the bag'); const g = document.createRange(); g.setStart(tn, i); g.setEnd(tn, i + 1); const a = g.getBoundingClientRect(); g.setStart(tn, i + 11); g.setEnd(tn, i + 12); const z = g.getBoundingClientRect(); return { a: { x: a.left + 1, y: a.top + a.height / 2 }, z: { x: z.right - 1, y: z.top + z.height / 2 } };`);
@@ -864,7 +864,7 @@ try {
   ok(!!b2 && dsel === 'keep the bag', '⑥ a mouse selection INSIDE the source box (a DOM selection the editor does not own) offers Add comment', { b2, dsel });
   if (b2) await addNote(b2, 'Say which bag');
   const s2 = await storedN(2);
-  ok(s2 && s2.length === 2 && s2[1].quote === 'keep the bag' && s2[1].line === 10 && s2[1].raw && s2[1].raw.kind === 'html' && s2[1].raw.offset === CDOC.split('<!--')[1].indexOf('keep') + 4, '⑦ that comment\'s quote = the selected text, its line = the text\'s own source line (L10), the offset in the block kept', s2 && s2[1]);
+  ok(gateOf(s2) && s2.length === 2 && s2[1].quote === 'keep the bag' && s2[1].line === 10 && gateOf(s2[1].raw) && s2[1].raw.kind === 'html' && s2[1].raw.offset === CDOC.split('<!--')[1].indexOf('keep') + 4, '⑦ that comment\'s quote = the selected text, its line = the text\'s own source line (L10), the offset in the block kept', s2 && s2[1]);
   // ⑨ reload ⇒ the strip shows both; a press on the block comment selects the block and scrolls it into view
   if (!ok(!!(await boot(1100, 900, false)), '⑧ reload (the client re-booted)')) throw new Error('no app after reload');
   ok(!!(await openDoc(true)), '⑧ the draft re-opened');
@@ -876,7 +876,7 @@ try {
   await inC(`pm.querySelector('h1') && pm.querySelector('h1').scrollIntoView({ block: 'start' }); return true;`);
   await click(await inC(`const e = w.content.querySelector('.doc-cmt .doc-cmt-n'); const r = R(e); return { x: r.left + 10, y: r.top + r.height / 2 };`)); await sleep(500);
   const back = await inC(`const r = R(H), pg = R(w.content.querySelector('.doc-page')); return { node: H.classList.contains('ProseMirror-selectednode'), inView: r.top >= pg.top - 1 && r.bottom <= pg.bottom + 1 };`);
-  ok(back.node && back.inView, '⑩ a press on the comment in the strip selects its block (one unit) and scrolls it into view', back);
+  ok(gateOf(back.node) && verdictOf(back.inView), '⑩ a press on the comment in the strip selects its block (one unit) and scrolls it into view', back);
   await cshot('desk.png');
   // ⑪ the block's source box open (editing) ⇒ a selection in it offers no Add comment; a toast says Finish first
   await click(await inC(`const r = R(H.querySelector('.doc-raw-head')); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`)); await sleep(300);
@@ -885,7 +885,7 @@ try {
   await sleep(700);
   const ed = await inC(`const t = H.querySelector('textarea.doc-raw-edit'); return { ta: !!t, sel: t ? t.selectionEnd - t.selectionStart : 0, btn: !!document.querySelector('.doc-cpop .doc-comment-btn'), toast: document.body.innerText.includes('Press Finish first — a block whose source is open cannot be commented') };`);
   await cshot('desk-editing.png');
-  ok(ed.ta && ed.sel > 0 && !ed.btn && ed.toast, '⑪ the block\'s source box open: a selection in it offers NO Add comment, and a toast says to press Finish first (not silence)', ed);
+  ok(gateOf(ed.ta) && ed.sel > 0 && !ed.btn && verdictOf(ed.toast), '⑪ the block\'s source box open: a selection in it offers NO Add comment, and a toast says to press Finish first (not silence)', ed);
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(300);
   ok(fs.readFileSync(CP, 'utf8') === CDOC, '⑪ nothing on disk changed (comments are not edits)');
   // ⑫ phone 390: a tap on the block ⇒ Add comment ⇒ the comment sheet as today
@@ -897,9 +897,9 @@ try {
   if (pb) { await click(pb); await sleep(500); }
   const sheet = await ev(`const d = document.querySelector('.doc-note-sheet'); return d ? { q: (d.querySelector('.doc-note-q') || {}).textContent || '', w: Math.round(d.getBoundingClientRect().width) } : null;`);
   await cshot('phone.png');
-  ok(!!pb && !!sheet && sheet.q.startsWith('“HTML block: <!-- [CONFIRM-BLOCK'), '⑫ phone: a tap on the HTML block offers Add comment, which opens the comment sheet quoting the block', { pb, sheet });
+  ok(!!pb && !!sheet && verdictOf(sheet.q.startsWith('“HTML block: <!-- [CONFIRM-BLOCK')), '⑫ phone: a tap on the HTML block offers Add comment, which opens the comment sheet quoting the block', { pb, sheet });
   ok(pageErrors.length === 0, '⑬ no page exception through §13', pageErrors.slice(0, 3));
-  if (CSHOTS) ok(['desk.png', 'phone.png'].every((f) => fs.existsSync(path.join(CSHOTS, f)) && fs.statSync(path.join(CSHOTS, f)).size > 10000), `⑭ PNGs for the owner: ${path.join(CSHOTS, 'desk.png')} + phone.png (+ desk-offer, desk-select, desk-editing)`);
+  if (CSHOTS) ok(verdictOf(['desk.png', 'phone.png'].every((f) => fs.existsSync(path.join(CSHOTS, f)) && fs.statSync(path.join(CSHOTS, f)).size > 10000)), `⑭ PNGs for the owner: ${path.join(CSHOTS, 'desk.png')} + phone.png (+ desk-offer, desk-select, desk-editing)`);
   }
   if (ONLY === '' || ONLY === 'link') {
   // ── §14 a link opens and edits (lane doc-link-bubble, 2.369.261 — owner 2026-10-12 "markdown富文本编辑器里url无法点击和编辑": a
@@ -911,7 +911,7 @@ try {
   const LD = path.join(fs.realpathSync(PROJ), 'links'); fs.mkdirSync(LD, { recursive: true });
   const LDOC = '# Links\n\nRead the [design notes](https://example.com/design) before you start.\n\nThe [tracker](https://tracker.example.org/board) has the rest.\n\nA plain line to paste over and to link.\n';
   const LP = path.join(LD, 'links.md'); fs.writeFileSync(LP, LDOC);
-  ok(MD.docFidelity(LDOC).ok, '§14 fixture: a document with two links opens rich (the wheel)');
+  ok(verdictOf(MD.docFidelity(LDOC).ok), '§14 fixture: a document with two links opens rich (the wheel)');
   const LW = DW(LP);
   async function openLinks(max) {
     await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return true;`); await sleep(300);
@@ -944,7 +944,7 @@ try {
   const d0 = await until(dialogNow, 3000);
   await esc(); await sleep(300);
   const l0 = await linksNow();
-  ok(!!d0 && d0.title === 'Edit link' && d0.href === 'https://example.com/design' && d0.text === 'design notes' && l0.some(([t, h]) => t === 'design notes' && h === 'https://example.com/design'),
+  ok(!!d0 && d0.title === 'Edit link' && d0.href === 'https://example.com/design' && d0.text === 'design notes' && verdictOf(l0.some(([t, h]) => t === 'design notes' && h === 'https://example.com/design')),
     '⓪ the toolbar\'s Link with the caret on a link ⇒ "Edit link" prefilled; Esc ⇒ the link still there (the pre-lane button REMOVED it)', { d0, l0 });
   // ① a real click on a link ⇒ its bar: the address + Open / Edit / Copy / Remove
   await click(await linkPt('design notes', 0.4));
@@ -986,37 +986,37 @@ try {
   await until(async () => { const d = await dialogNow(); return d && /doc-link-href/.test(d.focus) ? d : null; }, 3000);
   await type('javascript:alert(1)'); await enter(); await sleep(400);
   const r5 = await inL(`return { said: w.content.innerText.includes('Not a link this document can carry: javascript:alert(1)'), links: [...pm.querySelectorAll('a')].map((a) => a.getAttribute('href')) };`);
-  ok(r5.said && r5.links.includes('https://example.com/design-v2') && !r5.links.some((h) => /javascript/i.test(h || '')), '⑤ Edit to javascript:alert(1) ⇒ refused (safeHref), the strip says so, the link unchanged', r5);
+  ok(gateOf(r5.said) && gateOf(r5.links.includes('https://example.com/design-v2')) && !r5.links.some((h) => /javascript/i.test(h || '')), '⑤ Edit to javascript:alert(1) ⇒ refused (safeHref), the strip says so, the link unchanged', r5);
   // ⑦ Remove ⇒ the words stay, the mark goes
   await click(await linkPt('tracker', 0.5)); const b7 = await until(barNow, 3000);
   await click(await barBtn('remove')); await sleep(300);
   const l7 = await linksNow(), t7 = await inL(`return pm.textContent.includes('The tracker has the rest.');`);
   const want7 = want4b.replace('[tracker](https://tracker.example.org/board)', 'tracker');
-  ok(!!b7 && b7.href === 'https://tracker.example.org/board' && !l7.some(([, h]) => /tracker/.test(h || '')) && t7 && !!(await saved(want7)), '⑦ Remove on "tracker" ⇒ the words stay, the link goes; on disk "The tracker has the rest."', { b7, l7, disk: fs.readFileSync(LP, 'utf8') });
+  ok(!!b7 && b7.href === 'https://tracker.example.org/board' && !l7.some(([, h]) => /tracker/.test(h || '')) && gateOf(t7) && !!(await saved(want7)), '⑦ Remove on "tracker" ⇒ the words stay, the link goes; on disk "The tracker has the rest."', { b7, l7, disk: fs.readFileSync(LP, 'utf8') });
   // ⑧ Ctrl/Cmd+K on a selection ⇒ the Link dialog (never the session palette); the selection linked
   await click(await wordPt('plain'), 2); await sleep(300);
   await key('k', 'KeyK', 75, 2);
   const d8 = await until(async () => { const d = await dialogNow(); return d && /doc-link-href/.test(d.focus) ? d : null; }, 3000), pal8 = await ev(`return !!document.querySelector('.palette-overlay');`); // typed only once the dialog holds the focus
   ok(!!d8 && d8.title === 'Link' && d8.href === '' && d8.text === 'plain' && !pal8, '⑧ Ctrl+K on the selected word "plain" ⇒ the Link dialog (its text prefilled), NOT the session palette', { d8, pal8 });
   if (d8) { await type('https://example.com/plain'); await enter(); await sleep(400); }
-  ok((await linksNow()).some(([t, h]) => t === 'plain' && h === 'https://example.com/plain'), '⑧ Enter ⇒ "plain" links to https://example.com/plain', await linksNow());
+  ok(verdictOf((await linksNow()).some(([t, h]) => t === 'plain' && h === 'https://example.com/plain')), '⑧ Enter ⇒ "plain" links to https://example.com/plain', await linksNow());
   // ⑨ paste a URL over a selection ⇒ linked; a javascript: URL pasted ⇒ plain text (safeHref)
   await click(await wordPt('paste'), 2); await sleep(300);
   await pasteText('https://example.com/pasted'); await sleep(300);
   const l9 = await linksNow();
-  ok(l9.some(([t, h]) => t === 'paste' && h === 'https://example.com/pasted'), '⑨ a URL pasted over the selected word "paste" links it (its words kept)', l9);
+  ok(verdictOf(l9.some(([t, h]) => t === 'paste' && h === 'https://example.com/pasted')), '⑨ a URL pasted over the selected word "paste" links it (its words kept)', l9);
   await click(await wordPt('link.'), 2); await sleep(300);
   await pasteText('javascript:alert(1)'); await sleep(300);
   const r9 = await inL(`return { text: pm.textContent, bad: [...pm.querySelectorAll('a')].filter((a) => !a.hasAttribute('href') || /javascript/i.test(a.getAttribute('href'))).length };`);
-  ok(r9.text.includes('javascript:alert(1)') && r9.bad === 0, '⑨ javascript:alert(1) pasted over a selection ⇒ plain text, never a link', r9);
+  ok(gateOf(r9.text.includes('javascript:alert(1)')) && r9.bad === 0, '⑨ javascript:alert(1) pasted over a selection ⇒ plain text, never a link', r9);
   // ⑩ autolink: a typed URL + a space links itself; README.md stays a word
   const endP = await inL(`const p = [...pm.querySelectorAll('p')].pop(); const r = R(p); return { x: r.right - 2, y: r.top + r.height / 2 };`);
   await click(endP); await key('End', 'End', 35); await type(' see https://example.com/typed '); await sleep(200); await type('and README.md '); await sleep(300);
   const l10 = await linksNow();
-  ok(l10.some(([t, h]) => t === 'https://example.com/typed' && h === 'https://example.com/typed') && !l10.some(([t]) => /README/.test(t)), '⑩ typing "https://example.com/typed " links it (autolink); "README.md " stays a word', l10);
+  ok(gateOf(l10.some(([t, h]) => t === 'https://example.com/typed' && h === 'https://example.com/typed')) && !l10.some(([t]) => /README/.test(t)), '⑩ typing "https://example.com/typed " links it (autolink); "README.md " stays a word', l10);
   await ctrlS(); await sleep(1200);
   const disk10 = fs.readFileSync(LP, 'utf8'), json10 = S(MD.parseMd(disk10).toJSON());
-  ok(disk10.includes('[plain](https://example.com/plain)') && disk10.includes('[paste](https://example.com/pasted)') && !/\]\(javascript/i.test(disk10) && json10.includes('"href":"https://example.com/typed"') && !json10.includes('README.md"}]') && disk10.includes('README.md'),
+  ok(gateOf(disk10.includes('[plain](https://example.com/plain)')) && gateOf(disk10.includes('[paste](https://example.com/pasted)')) && !/\]\(javascript/i.test(disk10) && gateOf(json10.includes('"href":"https://example.com/typed"')) && !json10.includes('README.md"}]') && verdictOf(disk10.includes('README.md')),
     '⑩ on disk: [plain](…/plain), [paste](…/pasted), the typed URL a link, README.md text, no javascript: link', disk10);
   // ⑪ hover ≥ 300 ms over a link (the caret elsewhere) ⇒ its bar; the pointer leaving ⇒ gone
   await click(await inL(`const r = R(pm.querySelector('h1')); return { x: r.left + 10, y: r.top + r.height / 2 };`)); await sleep(300);
@@ -1042,10 +1042,10 @@ try {
   await click(await linkPt('design doc', 0.5));
   const b13 = await until(barNow, 4000);
   await lshot('phone.png');
-  ok(!!b13 && b13.phone && S(b13.acts) === S(['open', 'edit', 'copy', 'remove']) && Math.abs(b13.bottom - b13.vh) <= 2 && b13.left <= 1 && b13.w >= b13.vw - 2 && b13.btnH >= 36 && S(b13.words) === S(['Open', 'Edit', 'Copy', 'Remove']),
+  ok(!!b13 && gateOf(b13.phone) && S(b13.acts) === S(['open', 'edit', 'copy', 'remove']) && Math.abs(b13.bottom - b13.vh) <= 2 && b13.left <= 1 && b13.w >= b13.vw - 2 && b13.btnH >= 36 && S(b13.words) === S(['Open', 'Edit', 'Copy', 'Remove']),
     '⑬ phone: a tap on "design doc" ⇒ the bar as a bottom row (full width, at the bottom), Open / Edit / Copy / Remove with words, ≥ 36 px', b13);
   ok(pageErrors.length === 0, '⑭ no page exception through §14', pageErrors.slice(0, 3));
-  if (LSHOTS) ok(['bar.png', 'edit.png', 'phone.png'].every((f) => fs.existsSync(path.join(LSHOTS, f)) && fs.statSync(path.join(LSHOTS, f)).size > 10000), `⑭ PNGs for the owner: ${path.join(LSHOTS, 'bar.png')} + edit.png + phone.png`);
+  if (LSHOTS) ok(verdictOf(['bar.png', 'edit.png', 'phone.png'].every((f) => fs.existsSync(path.join(LSHOTS, f)) && fs.statSync(path.join(LSHOTS, f)).size > 10000)), `⑭ PNGs for the owner: ${path.join(LSHOTS, 'bar.png')} + edit.png + phone.png`);
   }
   if (ONLY === '' || ONLY === 'synced') {
   // ── §15 A DOCUMENT'S COMMENTS ARE VIBESPACE'S (lane doc-comments-synced — owner 2026-10-12: his eighteen comments
@@ -1138,7 +1138,7 @@ try {
   if (sendA) await click(sendA);
   const sent15 = await until15(() => { const t = stdinTexts().slice(before15).filter((x) => x.startsWith('[Doc comments] ' + SY)); return t.length ? t : null; });
   const emptyB = await until15(async () => { const n = await notesOn(evB, SY); return n && n.length === 0 ? true : null; });
-  ok(!!sendA && !!sent15 && sent15[0].includes('name the second step') && !!emptyB && !(await recOf(SY)), '⑦ Send all on A ⇒ the chat gets the message, the server\'s record is gone and B\'s strip empties (no reload)', { sendA, sent15, emptyB });
+  ok(!!sendA && !!sent15 && gateOf(sent15[0].includes('name the second step')) && !!emptyB && !(await recOf(SY)), '⑦ Send all on A ⇒ the chat gets the message, the server\'s record is gone and B\'s strip empties (no reload)', { sendA, sent15, emptyB });
   // ⑪–⑮ THE SEND SAYS WHAT IT WILL DO AND WHAT IT DID (lane doc-comments-ui, B-8199): 18 rows the packer makes 3 messages of
   const DSHOTS = process.env.VS_DOC_SEND_SHOTS || SSHOTS;
   const shotTo = async (c, name) => { if (!DSHOTS) return null; await c('Page.bringToFront'); await sleep(400); const r = await c('Page.captureScreenshot', { format: 'png' }); const f = path.join(DSHOTS, name); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
@@ -1152,7 +1152,7 @@ try {
   const label = (E) => E(`const w = ${DW(SD)}; const b = w && w.content.querySelector('.doc-send'); return b && !b.hidden ? b.textContent : null;`);
   const up18 = await until15(async () => { const r = await recOf(SD); return r && r.length === 18 ? r : null; });
   const lab18 = await until15(async () => { const l = await label(ev); return l && l.includes('18') ? l : null; });
-  ok(PLAN.ok && PLAN.batches.length === 3 && !!up18 && lab18 === 'Send all (18 → 3 messages)', '⑪ 18 rows (the packer makes 3 messages of them) ⇒ the button reads "Send all (18 → 3 messages)" before any press', { lab18, n: up18 && up18.length, plan: PLAN.batches && PLAN.batches.map((b) => b.count) });
+  ok(gateOf(PLAN.ok) && PLAN.batches.length === 3 && !!up18 && lab18 === 'Send all (18 → 3 messages)', '⑪ 18 rows (the packer makes 3 messages of them) ⇒ the button reads "Send all (18 → 3 messages)" before any press', { lab18, n: up18 && up18.length, plan: PLAN.batches && PLAN.batches.map((b) => b.count) });
   await openOn(evB, SD, 'SEND.md'); await stripOpen(evB, SD);
   const b18 = await until15(async () => { const n = await notesOn(evB, SD); return n && n.length === 18 ? n : null; });
   const deskSend = await shotTo(call, 'desk.png');
@@ -1166,7 +1166,7 @@ try {
   const left17 = await until15(async () => { const n = await notesOn(ev, SD); return n && n.length === 17 ? n : null; });
   const posts7 = await ev(`return window.__docPosts;`);
   const toast7 = await until15(() => ev(`return [...document.querySelectorAll('[class*="toast"]')].map((e) => e.textContent).find((x) => x.includes('Sent 1 comment')) || null;`));
-  ok(!!r7 && r7.note === 'note 7 ' && r7.tip === 'Send this one' && posts7.length === 1 && posts7[0].items.length === 1 && posts7[0].items[0].note.startsWith('note 7 ') && !!sent7 && sent7.length === 1 && sent7[0].includes('note 7 x') && !sent7[0].includes('note 6 x') && !sent7[0].includes('note 8 x') && !!left17 && !left17.some((n) => n.startsWith('note 7 ')), '⑫ the ➤ ("Send this one") on row 7 ⇒ ONE POST with ONE item, ONE message carrying row 7 alone; row 7 gone, 17 stay', { r7, posts: posts7.map((p) => p.items.length), sent7: sent7 && sent7.map((x) => x.slice(0, 160)), left: left17 && left17.length });
+  ok(!!r7 && r7.note === 'note 7 ' && r7.tip === 'Send this one' && posts7.length === 1 && posts7[0].items.length === 1 && gateOf(posts7[0].items[0].note.startsWith('note 7 ')) && !!sent7 && sent7.length === 1 && gateOf(sent7[0].includes('note 7 x')) && !sent7[0].includes('note 6 x') && !sent7[0].includes('note 8 x') && !!left17 && !left17.some((n) => n.startsWith('note 7 ')), '⑫ the ➤ ("Send this one") on row 7 ⇒ ONE POST with ONE item, ONE message carrying row 7 alone; row 7 gone, 17 stay', { r7, posts: posts7.map((p) => p.items.length), sent7: sent7 && sent7.map((x) => x.slice(0, 160)), left: left17 && left17.length });
   ok(!!toast7 && !!(await until15(async () => { const l = await label(ev); return l === 'Send all (17 → 3 messages)' ? l : null; })), '⑫ …the toast says "Sent 1 comment" and the button now reads "Send all (17 → 3 messages)"', { toast7, label: await label(ev) });
   const b17 = await until15(async () => { const n = await notesOn(evB, SD); return n && n.length === 17 ? n : null; });
   ok(!!b18 && !!b17 && !b17.some((n) => n.startsWith('note 7 ')), '⑬ page B showed the 18, then the 17 without a reload (row 7 gone there too)', { b18: b18 && b18.length, b17: b17 && b17.length });
@@ -1175,7 +1175,7 @@ try {
   await openOn(evB, SD, 'SEND.md'); await stripOpen(evB, SD);
   const ph = await until15(() => evB(`const w = ${DW(SD)}; const s = w.content.querySelector('.doc-strip'); const rows = [...s.querySelectorAll('.doc-cmt')]; if (s.hidden || rows.length !== 17) return null; const b = s.querySelector('.doc-send'); const geo = rows.slice(0, 4).map((row) => { const r = row.getBoundingClientRect(), n = row.querySelector('.doc-cmt-n').getBoundingClientRect(), g = [...row.querySelectorAll('.doc-cmt-acts button')].map((x) => x.getBoundingClientRect()); return { inRow: g.every((x) => x.left >= r.left && x.right <= r.right + 0.5 && x.top >= r.top - 0.5), big: g.every((x) => x.width >= 36 && x.height >= 36), clear: g.every((x) => x.left >= n.right - 0.5), n: g.length }; }); const br = b.getBoundingClientRect(); return { phone: !!w.content.querySelector('.doc-phone'), geo, label: b.textContent, fits: b.scrollWidth <= b.clientWidth + 1 && br.right <= innerWidth, ws: getComputedStyle(b).whiteSpace, sheetW: Math.round(s.getBoundingClientRect().width) };`));
   const phoneSend = await shotTo(callB, 'phone.png');
-  ok(!!ph && ph.geo.every((g) => g.n === 2 && g.inRow && g.big && g.clear) && ph.label === 'Send all (17 → 3 messages)' && ph.fits && ph.ws === 'normal' && ph.sheetW <= 390, '⑬b on a phone (390) each row\'s ➤ and ✕ are 36 px targets inside the row, clear of its note; the button label wraps (no overflow)', ph);
+  ok(!!ph && gateOf(ph.geo.every((g) => g.n === 2 && g.inRow && g.big && g.clear)) && ph.label === 'Send all (17 → 3 messages)' && gateOf(ph.fits) && ph.ws === 'normal' && ph.sheetW <= 390, '⑬b on a phone (390) each row\'s ➤ and ✕ are 36 px targets inside the row, clear of its note; the button label wraps (no overflow)', ph);
   // ⑭ the owning conversation is not running: the page gets THE ENGINE'S stash answer for its 17 rows (the rig's stub chat
   //    cannot be stopped and still own the file — a killed session leaves no owner: no_owner), held 1.5 s ⇒ the in-flight state
   await call('Page.bringToFront'); await sleep(1500); await openOn(ev, SD, 'SEND.md', chatA2); await stripOpen(ev, SD);
@@ -1184,23 +1184,23 @@ try {
   await ev(`window.__docStash = ${S(stashAns)}; window.__docPosts = []; return true;`);
   const sendAll = await rectIn('.doc-send', SD); if (sendAll) await click(sendAll);
   const flight = await until(() => ev(`const w = ${DW(SD)}; const b = w.content.querySelector('.doc-send'); const g = [...w.content.querySelectorAll('.doc-cmt-acts button')]; return b.disabled ? { label: b.textContent, held: g.length === 34 && g.every((x) => x.disabled) } : null;`), 3000, 50);
-  ok(!!flight && flight.label === 'Sending 17 comments…' && flight.held, '⑭ while the ONE POST is out the button is disabled and reads "Sending 17 comments…"; every row\'s ➤ / ✕ is held', flight);
+  ok(!!flight && flight.label === 'Sending 17 comments…' && verdictOf(flight.held), '⑭ while the ONE POST is out the button is disabled and reads "Sending 17 comments…"; every row\'s ➤ / ✕ is held', flight);
   const stashSaid = await until15(() => ev(`const w = ${DW(SD)}; const c = w.content.querySelector('.doc-chip'); return c && !c.hidden && /^Stashed/.test(c.textContent) ? c.textContent : null;`));
   const toastS = await ev(`return [...document.querySelectorAll('[class*="toast"]')].map((e) => e.textContent).find((x) => x.includes('Stashed 17')) || null;`);
   const gone = await until15(async () => ((await notesOn(ev, SD)) || [1]).length === 0 && !(await recOf(SD)) ? true : null);
   ok(stashAns.delivered === 'stashed' && (await ev(`return window.__docPosts.length;`)) === 1 && stashSaid === 'Stashed 17 comments — the conversation is not running; they are delivered when its next turn starts' && !!toastS && !/Sent/.test(stashSaid + toastS) && !!gone, '⑮ a stopped owner (the engine stashes) ⇒ the strip and the toast say "Stashed 17 comments — … delivered when its next turn starts", never "Sent"; the rows leave the record', { stashSaid, toastS, gone, delivered: stashAns.delivered });
   await ev(`window.__docStash = null; return true;`);
-  if (DSHOTS) ok([deskSend, phoneSend].every((f) => f && fs.statSync(f).size > 5000), `⑮ PNGs for the owner: ${deskSend}, ${phoneSend}`);
+  if (DSHOTS) ok(verdictOf([deskSend, phoneSend].every((f) => f && fs.statSync(f).size > 5000)), `⑮ PNGs for the owner: ${deskSend}, ${phoneSend}`);
   // ⑧ the phone: B at 390 shows the migrated document's four rows in its bottom sheet
   await bootB(390, 844, true);
   await openOn(evB, SY2, 'OLD.md');
   await stripOpen(evB, SY2);
   const sheetB = await until15(() => evB(`const w = ${DW(SY2)}; const s = w.content.querySelector('.doc-strip'); if (s.hidden || s.querySelectorAll('.doc-cmt').length !== 4) return null; const r = s.getBoundingClientRect(); return { w: Math.round(r.width), n: s.querySelectorAll('.doc-cmt').length, phone: /doc-phone/.test(w.content.querySelector('.doc-window').className) };`));
-  ok(!!sheetB && sheetB.phone && sheetB.n === 4 && sheetB.w <= 390, '⑧ on a phone (390) the same four rows, in the bottom sheet', sheetB);
+  ok(!!sheetB && gateOf(sheetB.phone) && sheetB.n === 4 && sheetB.w <= 390, '⑧ on a phone (390) the same four rows, in the bottom sheet', sheetB);
   const phone = await shotOn(callB, 'phone.png');
   await call('Page.bringToFront');
   ok(errsB.length === 0, '⑨ no page exception on page B', errsB.slice(0, 3));
-  if (SSHOTS) ok([deskA, deskB, phone].every((f) => f && fs.statSync(f).size > 5000), `⑩ PNGs for the owner: ${deskA}, ${deskB}, ${phone}`);
+  if (SSHOTS) ok(verdictOf([deskA, deskB, phone].every((f) => f && fs.statSync(f).size > 5000)), `⑩ PNGs for the owner: ${deskA}, ${deskB}, ${phone}`);
   try { cdpB.close(); } catch { }
   try { await fetch(`http://127.0.0.1:${CDP}/json/close/${tB.id}`); } catch { }
   }
@@ -1241,7 +1241,7 @@ try {
   if (send16) await click(send16);
   const toast16 = await until(() => ev(`const t = [...document.querySelectorAll('[class*=toast]')].map((e) => e.textContent).find((x) => /next turn/i.test(x)); return t || null;`), 8000, 150);
   const empty16 = await until(async () => ((await ev(`return ${DW(ST)}.content.querySelectorAll('.doc-cmt').length;`)) === 0 ? true : null), 8000, 150);
-  ok(!!send16 && !!toast16 && /Stashed 2 /.test(toast16) && !!empty16 && !/open (this document|it) from a chat/i.test(toast16) && stdinTexts().length === before16, '③ Send all on a stopped owner ⇒ "' + (toast16 || '') + '" (stashed, not refused), the strip empties, nothing typed', { send16, toast16, empty16, ownerLine });
+  ok(!!send16 && !!toast16 && gateOf(/Stashed 2 /.test(toast16)) && !!empty16 && !/open (this document|it) from a chat/i.test(toast16) && stdinTexts().length === before16, '③ Send all on a stopped owner ⇒ "' + (toast16 || '') + '" (stashed, not refused), the strip empties, nothing typed', { send16, toast16, empty16, ownerLine });
   // ④ resumed (same conversation, a new session id) ⇒ the chat's `stash` fact counts the message; the hand-over delivers it in order
   const pids1 = envPids();
   ws.send(S({ type: 'create', backend: 'claude', mode: 'chat', cwd: PROJ, cols: 80, rows: 24, reqId: 'dw16r', name: 'Stopped owner', resume: true, resumeId: CONV16 }));
@@ -1261,7 +1261,7 @@ try {
     if (turns.filter((x) => x.one > -1).length && t >= 1) break;
   }
   const carry = turns.filter((x) => x.one > -1);
-  ok(turns.every((x) => x.sid === CONV16) && carry.length === 1 && carry[0].doc && carry[0].one < carry[0].two && turns.indexOf(carry[0]) < turns.length - 1, '⑤ the resumed chat\'s next turn (its hook\'s REAL prompt-context) carries the [Doc comments] message, notes in order — once', turns);
+  ok(gateOf(turns.every((x) => x.sid === CONV16)) && carry.length === 1 && gateOf(carry[0].doc) && carry[0].one < carry[0].two && turns.indexOf(carry[0]) < turns.length - 1, '⑤ the resumed chat\'s next turn (its hook\'s REAL prompt-context) carries the [Doc comments] message, notes in order — once', turns);
   }
   if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'table' && ONLY !== 'rawcmt' && ONLY !== 'link' && ONLY !== 'synced' && ONLY !== 'stopped') {
 
@@ -1326,9 +1326,9 @@ try {
       // ① THE TASK-LIST BUG (design 020 T4): the parsed items wore no data-type, so the task rule never applied and every
       //    checkbox sat on its own line above its words
       const tasks = await inSW(`return [...pm.querySelectorAll('li')].filter((li) => li.querySelector(':scope > label input[type=checkbox]')).map((li) => { const cb = R(li.querySelector('input[type=checkbox]')); const box = li.querySelector(':scope > div'); const tx = (box && box.querySelector('p')) || box || li; const rg = document.createRange(); rg.selectNodeContents(tx); const line = rg.getClientRects()[0] || R(tx); return { type: li.getAttribute('data-type'), ul: li.parentElement.getAttribute('data-type'), kids: [...li.children].map((x) => x.tagName).join('+'), cbMid: Math.round(cb.top + cb.height / 2), cbW: Math.round(cb.width), lineTop: Math.round(line.top), lineBottom: Math.round(line.bottom), cbRight: Math.round(cb.right), textLeft: Math.round(line.left), checked: li.dataset.checked, deco: getComputedStyle(box || li).textDecorationLine, color: getComputedStyle(box || li).color, base: getComputedStyle(pm).color }; });`);
-      ok(tasks.length === 3 && tasks.every((x) => x.type === 'taskItem' && x.ul === 'taskList' && x.kids === 'LABEL+DIV'), '① every task item is ul[data-type=taskList] > li[data-type=taskItem] > label + div', tasks.map((x) => `${x.ul}>${x.type}>${x.kids}`));
-      ok(tasks.length === 3 && tasks.every((x) => x.cbMid >= x.lineTop && x.cbMid <= x.lineBottom && x.cbRight <= x.textLeft), '① each checkbox shares the row with its words (its middle inside the first text line, left of them)', tasks.map((x) => ({ cbMid: x.cbMid, line: [x.lineTop, x.lineBottom], cbRight: x.cbRight, textLeft: x.textLeft })));
-      ok(tasks.length === 3 && tasks[0].checked === 'true' && /line-through/.test(tasks[0].deco) && tasks[0].color !== tasks[0].base && tasks[1].checked === 'false' && !/line-through/.test(tasks[1].deco) && tasks[0].cbW === 15, '① the house checkbox (15 px); a done item reads secondary + struck, an open one plain', tasks.map((x) => [x.checked, x.deco, x.color, x.cbW]));
+      ok(tasks.length === 3 && verdictOf(tasks.every((x) => x.type === 'taskItem' && x.ul === 'taskList' && x.kids === 'LABEL+DIV')), '① every task item is ul[data-type=taskList] > li[data-type=taskItem] > label + div', tasks.map((x) => `${x.ul}>${x.type}>${x.kids}`));
+      ok(tasks.length === 3 && verdictOf(tasks.every((x) => x.cbMid >= x.lineTop && x.cbMid <= x.lineBottom && x.cbRight <= x.textLeft)), '① each checkbox shares the row with its words (its middle inside the first text line, left of them)', tasks.map((x) => ({ cbMid: x.cbMid, line: [x.lineTop, x.lineBottom], cbRight: x.cbRight, textLeft: x.textLeft })));
+      ok(tasks.length === 3 && tasks[0].checked === 'true' && gateOf(/line-through/.test(tasks[0].deco)) && tasks[0].color !== tasks[0].base && tasks[1].checked === 'false' && !/line-through/.test(tasks[1].deco) && tasks[0].cbW === 15, '① the house checkbox (15 px); a done item reads secondary + struck, an open one plain', tasks.map((x) => [x.checked, x.deco, x.color, x.cbW]));
       // ② THE BAR: never two rows, folds by priority (B before Table, Table before raw), the ⋯ (always shown since 2.369.239) holds the folded first
       const sweep = [];
       for (const px of [0, 760, 560, 470, 390, 300]) {
@@ -1339,13 +1339,13 @@ try {
         sweep.push({ px: px || 'max', bw: v && Math.round(v.bw), ok: barOk(v), shown: v && v.shown.filter((x) => x.k !== 'sep').map((x) => x.k).join(' '), folded: v && v.folded.map((x) => x.k).join(' '), rowsOk: !!v && rows.length === v.folded.length && v.folded.every((f, i) => rows[i] === f.title), rows });
         if (!px) { await inSW(`app.wm.toggleMaximize(w.id); return true;`); await sleep(300); }
       }
-      ok(sweep.every((x) => x.ok && x.rowsOk), '② the bar is ONE row at every width (maximized / 760 / 560 / 470 / 390 / 300), folds by priority, the ⋯ menu = the folded items in order', sweep);
-      ok(sweep[0].folded === '' && /\braw\b/.test(sweep[sweep.length - 1].folded) && sweep.some((x) => /table/.test(x.folded) && !/bold/.test(x.folded)), '② wide: nothing folded; narrowing folds raw first, then the inserts, B last', sweep.map((x) => x.px + ': ' + x.folded));
+      ok(verdictOf(sweep.every((x) => x.ok && x.rowsOk)), '② the bar is ONE row at every width (maximized / 760 / 560 / 470 / 390 / 300), folds by priority, the ⋯ menu = the folded items in order', sweep);
+      ok(sweep[0].folded === '' && gateOf(/\braw\b/.test(sweep[sweep.length - 1].folded)) && verdictOf(sweep.some((x) => /table/.test(x.folded) && !/bold/.test(x.folded))), '② wide: nothing folded; narrowing folds raw first, then the inserts, B last', sweep.map((x) => x.px + ': ' + x.folded));
       await inSW(`w.element.style.width = '900px'; return true;`); await sleep(400);
       // ③ THE STATUS STRIP: absent with nothing to say; the save dot while unsaved (Ctrl+S flips it); ONE chip for a
       //    conflict (both acts work from it); ONE chip for comments; the comments side strip closed until asked
       const s0 = await stripState();
-      ok(s0.absent && !s0.side, '③ a clean file: no status strip, the comments strip closed', s0);
+      ok(gateOf(s0.absent) && !s0.side, '③ a clean file: no status strip, the comments strip closed', s0);
       const lastP0 = await lastP();
       await click(lastP0); await type(' 改'); await sleep(200);
       const s1 = await stripState();
@@ -1369,7 +1369,7 @@ try {
       await into('.ProseMirror h2');
       const cm = await comment('.ProseMirror h2', 12, '加一个日期', SP);
       const s5 = await stripState();
-      ok(!s5.absent && s5.pills.length === 1 && s5.pills[0] === 'comments' && s5.side, '③ a comment ⇒ ONE chip (comments) and the comments strip open', { cm, s5 });
+      ok(!s5.absent && s5.pills.length === 1 && s5.pills[0] === 'comments' && verdictOf(s5.side), '③ a comment ⇒ ONE chip (comments) and the comments strip open', { cm, s5 });
       await click(await rectIn('.doc-cmts-chip', SP)); await sleep(150);
       const s6 = await stripState();
       ok(!s6.side && s6.pills[0] === 'comments', '③ the comments chip toggles the comments strip', s6);
@@ -1382,24 +1382,24 @@ try {
         const gaps = kids.slice(1).map((e, i) => ({ k: kids[i].tagName + '>' + e.tagName, g: Math.round(R(e).top - R(kids[i]).bottom) }));
         return { gaps, pGap: R(b).top - R(a).bottom, pEm: fz(a), h2Gap: R(h2).top - R(h2.previousElementSibling).bottom, h2Em: fz(h2), h1: fz(pm.querySelector('h1')), h2: fz(h2), h3: fz(pm.querySelector('h3')), lh: parseFloat(getComputedStyle(a).lineHeight) / fz(a), col: R(page).width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), page: R(page).width, ch76 };`);
       ok(Math.abs(ty.pGap - 0.75 * ty.pEm) <= 2 && Math.abs(ty.h2Gap - 1.4 * ty.h2Em) <= 2, `④ rhythm: paragraph → paragraph ${ty.pGap.toFixed(1)} px ≈ .75em; h2 top ${ty.h2Gap.toFixed(1)} px ≈ 1.4em`, ty);
-      ok(ty.gaps.every((x) => x.g >= 0.5 * 15 - 1), '④ every top-level block keeps a gap from the one before (≥ .5em)', ty.gaps.filter((x) => x.g < 0.5 * 15 - 1));
+      ok(verdictOf(ty.gaps.every((x) => x.g >= 0.5 * 15 - 1)), '④ every top-level block keeps a gap from the one before (≥ .5em)', ty.gaps.filter((x) => x.g < 0.5 * 15 - 1));
       ok(ty.h1 === 26 && ty.h2 === 20 && ty.h3 === 16 && Math.abs(ty.lh - 1.6) < 0.02 && Math.abs(ty.col - (ty.page - 64)) <= 1, `④ h1 26 / h2 20 / h3 16, body 15 / 1.6, the column ${Math.round(ty.col)} px = the page − 2×32 (Fit, the default since 2.369.239; Comfortable = 76ch ${Math.round(ty.ch76)} — §10)`, ty);
       // ⑤ TABLE: header on one line, alignment from the pipe row, the hover grips open the EXISTING menu (a real mouse move)
       const tb = await inSW(`const t = pm.querySelector('table'); const ths = [...t.querySelectorAll('th')]; const lh = parseFloat(getComputedStyle(ths[0]).lineHeight); const row = t.querySelectorAll('tr')[1]; return { thH: ths.map((x) => Math.round(R(x).height)), lh, pad: getComputedStyle(row.children[0]).padding, aligns: [...row.children].map((x) => getComputedStyle(x).textAlign), num: getComputedStyle(row.children[2]).fontVariantNumeric, thBg: getComputedStyle(ths[0]).backgroundColor };`);
-      ok(tb.thH.every((h) => h <= tb.lh + 12 + 3) && tb.pad === '6px 10px' && tb.aligns.slice(1, 3).join() === 'center,right' && /tabular-nums/.test(tb.num), '⑤ the header on one line, 6×10 cells, the pipe row\'s alignment (center / right, tabular numbers)', tb);
+      ok(gateOf(tb.thH.every((h) => h <= tb.lh + 12 + 3)) && tb.pad === '6px 10px' && tb.aligns.slice(1, 3).join() === 'center,right' && verdictOf(/tabular-nums/.test(tb.num)), '⑤ the header on one line, 6×10 cells, the pipe row\'s alignment (center / right, tabular numbers)', tb);
       await into('.ProseMirror table tr:nth-child(3) td:nth-child(2)'); const cell = await rectIn('.ProseMirror table tr:nth-child(3) td:nth-child(2)', SP);
       await mouse('mouseMoved', cell.x - 20, cell.y - 60, { button: 'none' }); await mouse('mouseMoved', cell.x, cell.y, { button: 'none' }); await sleep(250);
       const grips = await inSW(`const g = (s) => { const e = c.querySelector(s); if (!e || !e.getClientRects().length) return null; const r = R(e); return { x: r.left + r.width / 2, y: r.top + r.height / 2, l: r.left, r: r.right, t: r.top, b: r.bottom }; }; return { row: g('.doc-grip-row'), col: g('.doc-grip-col') };`);
       ok(!!grips.row && !!grips.col && grips.row.y > cell.top && grips.row.y < cell.bottom && grips.col.x > cell.left && grips.col.x < cell.right, '⑤ a real mouse move over a cell shows the row grip on its row and the column ⋯ on its column', { grips, cell });
       const menuAt = async (p) => { await mouse('mouseMoved', p.x, p.y, { button: 'none' }); await sleep(80); await click(p); await sleep(200); const m = await ev(`const p = document.querySelector('.context-menu'); return p ? p.textContent : null;`); await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(150); return { m, closed: await ev(`return !document.querySelector('.context-menu');`) }; };
       const gm1 = grips.row ? await menuAt(grips.row) : {}, gm2 = grips.col ? await menuAt(grips.col) : {};
-      ok(/在上方插入行/.test(gm1.m || '') && /删除表格/.test(gm1.m || '') && /在左侧插入列/.test(gm2.m || '') && gm1.closed && gm2.closed, '⑤ each grip opens the existing table menu; Esc closes it', { gm1, gm2 });
+      ok(gateOf(/在上方插入行/.test(gm1.m || '')) && gateOf(/删除表格/.test(gm1.m || '')) && gateOf(/在左侧插入列/.test(gm2.m || '')) && gateOf(gm1.closed) && verdictOf(gm2.closed), '⑤ each grip opens the existing table menu; Esc closes it', { gm1, gm2 });
       // ⑥ CODE: the fence's language on the block's chip; T7: quote, figure caption = the alt, the raw block's head
       const blk = await inSW(`const pre = pm.querySelector(':scope > pre'); const raw = pm.querySelector('.doc-rawblock'); const fig = pm.querySelector('figure'); return { lang: getComputedStyle(pre, '::after').content, font: getComputedStyle(pre).fontSize + '/' + (parseFloat(getComputedStyle(pre).lineHeight) / parseFloat(getComputedStyle(pre).fontSize)).toFixed(2), head: raw ? (raw.querySelector('.doc-raw-head') || {}).textContent || null : null, cap: fig && fig.querySelector('figcaption') ? fig.querySelector('figcaption').textContent : null, q: getComputedStyle(pm.querySelector('blockquote')).borderLeftWidth };`);
       ok(blk.lang === '"js"' && blk.font === '13px/1.55', '⑥ the code block wears its fence\'s language chip ("js"), 13 / 1.55 mono', blk);
       const sp = await inSW(`const pre = pm.querySelector(':scope > pre'); const code = pm.querySelector('p code'); const p = code && code.closest('p'); return { pre: pre.spellcheck, code: code ? code.spellcheck : null, prose: p ? p.spellcheck : null };`);
       ok(sp.pre === false && sp.code === false && sp.prose === true, '⑥ the browser spell-checks the prose, not the code: the code block and inline code carry spellcheck=false', sp);
-      ok(/HTML/.test(blk.head || '') && blk.cap === '示例图片 sample image' && blk.q === '3px', 'T7: the raw block\'s head says HTML, the image\'s caption is its alt, the quote\'s 3 px rule', blk);
+      ok(gateOf(/HTML/.test(blk.head || '')) && blk.cap === '示例图片 sample image' && blk.q === '3px', 'T7: the raw block\'s head says HTML, the image\'s caption is its alt, the quote\'s 3 px rule', blk);
       await inSW(`for (const x of c.querySelectorAll('.doc-cmt-x')) x.click(); return true;`);
       fs.writeFileSync(SP, SAMPLE); await sleep(2600);
     }
@@ -1408,15 +1408,15 @@ try {
       //    the strip scrolls sideways, the comments strip is the bottom sheet
       const v = await barCensus();
       const rows = v && v.folded.length ? (await moreRows()).slice(0, v.folded.length) : []; // the folded first, then the document's own rows (§10)
-      ok(barOk(v) && v.shown.filter((x) => x.k !== 'sep').every((x) => x.h >= 36 && x.w >= 36) && v.shown.some((x) => x.k === 'bold') && v.shown.some((x) => x.k === 'style') && /\btable\b/.test(v.folded.map((x) => x.k).join(' ')) && rows.length === v.folded.length, '⑧ 390: one row, every target ≥ 36 × 36, style + B shown, the inserts folded into ⋯', { v, rows });
+      ok(gateOf(barOk(v)) && gateOf(v.shown.filter((x) => x.k !== 'sep').every((x) => x.h >= 36 && x.w >= 36)) && gateOf(v.shown.some((x) => x.k === 'bold')) && gateOf(v.shown.some((x) => x.k === 'style')) && gateOf(/\btable\b/.test(v.folded.map((x) => x.k).join(' '))) && rows.length === v.folded.length, '⑧ 390: one row, every target ≥ 36 × 36, style + B shown, the inserts folded into ⋯', { v, rows });
       const clip = await inSW(`const wr = R(c); const out = [...c.querySelectorAll('.doc-bar > *, .doc-status > *, .doc-page')].filter((e) => e.getClientRects().length && !e.closest('.doc-status')).filter((e) => { const r = R(e); return r.left < wr.left - 0.5 || r.right > wr.right + 0.5; }).map((e) => e.className); const tw = pm.querySelector('.tableWrapper'); const pane = c.querySelector('.doc-pane'); return { out, tw: tw && { sw: tw.scrollWidth, cw: tw.clientWidth, ox: getComputedStyle(tw).overflowX }, pane: { sw: pane.scrollWidth, cw: pane.clientWidth }, h1: parseFloat(getComputedStyle(pm.querySelector('h1')).fontSize), h2: parseFloat(getComputedStyle(pm.querySelector('h2')).fontSize), pad: getComputedStyle(c.querySelector('.doc-page')).paddingLeft };`);
-      ok(!clip.out.length && clip.tw && clip.tw.sw > clip.tw.cw && clip.tw.ox === 'auto' && clip.pane.sw <= clip.pane.cw + 1 && clip.h1 === 23 && clip.h2 === 18 && clip.pad === '12px', '⑧ nothing clipped; the wide table scrolls INSIDE its wrapper (the page does not); h1 23 / h2 18; 12 px gutters (2.369.239)', clip);
+      ok(!clip.out.length && gateOf(clip.tw) && clip.tw.sw > clip.tw.cw && clip.tw.ox === 'auto' && clip.pane.sw <= clip.pane.cw + 1 && clip.h1 === 23 && clip.h2 === 18 && clip.pad === '12px', '⑧ nothing clipped; the wide table scrolls INSIDE its wrapper (the page does not); h1 23 / h2 18; 12 px gutters (2.369.239)', clip);
       const p1 = await lastP();
       await click(p1); await type(' 改'); await sleep(200);
       await into('.ProseMirror h2');
       const cm = await comment('.ProseMirror h2', 12, '手机上的批注', SP);
       const ph = await inSW(`const s = c.querySelector('.doc-status'); const sheet = c.querySelector('.doc-strip'); const wr = R(c.querySelector('.doc-window')), r = R(sheet); return { ox: getComputedStyle(s).overflowX, ws: getComputedStyle(s).whiteSpace, sh: !sheet.hidden && Math.round(r.left - wr.left) === 0 && Math.round(wr.right - r.right) === 0 && Math.round(wr.bottom - r.bottom) === 0, pills: [...s.querySelectorAll('.doc-pill, .doc-save-btn')].filter((e) => e.getClientRects().length).map((e) => Math.round(R(e).height)) };`);
-      ok(ph.ox === 'auto' && ph.ws === 'nowrap' && ph.sh && ph.pills.length >= 2 && ph.pills.every((h) => h >= 36), '⑧ the strip scrolls sideways (36 px chips); the comments strip is the bottom sheet', { cm, ph });
+      ok(ph.ox === 'auto' && ph.ws === 'nowrap' && gateOf(ph.sh) && ph.pills.length >= 2 && verdictOf(ph.pills.every((h) => h >= 36)), '⑧ the strip scrolls sideways (36 px chips); the comments strip is the bottom sheet', { cm, ph });
       await inSW(`for (const x of c.querySelectorAll('.doc-cmt-x')) x.click(); return true;`);
       await uiShot(`after-390-${theme}-${lang}-strip.png`);
       fs.writeFileSync(SP, SAMPLE);
@@ -1439,7 +1439,7 @@ try {
       fs.writeFileSync(SP, SAMPLE); await sleep(2600);
     }
   }
-  if (UI_SHOTS) ok(shotsMade.length === 8 && shotsMade.every((f) => fs.statSync(f).size > 5000), `⑦ eight PNGs for the owner (the audit's names, after-*): ${UI_SHOTS}`, shotsMade);
+  if (UI_SHOTS) ok(shotsMade.length === 8 && verdictOf(shotsMade.every((f) => fs.statSync(f).size > 5000)), `⑦ eight PNGs for the owner (the audit's names, after-*): ${UI_SHOTS}`, shotsMade);
   } // §9
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);
@@ -1448,4 +1448,4 @@ try {
   const ended = cleanup();
   console.log(`\n[doc-window] ${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'} · ended ${ended.length} rooted process(es)`);
   process.exit(fail ? 1 : 0);
-}
+};import { verdictOf, gateOf } from './lib/check.mjs';

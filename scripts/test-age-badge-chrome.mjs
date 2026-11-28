@@ -25,7 +25,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (!CHROME) { console.log('SKIP: no chrome binary on this machine'); process.exit(0); }
 const WS = require(path.join(REPO, 'node_modules/ws'));
@@ -41,7 +41,7 @@ let chromes = [], srv = null;
 try {
   // (the cure's source pin in public/style.css: MOVED to the fast scripts/test-age-badge-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   const UM_SRC = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');   // the mark's premise STAYS here too: the full-words mutant below replaces MARK
-  ok(UM_SRC.includes(MARK), 'the taskbar badge draws the compact mark (its words stay in the tooltip)');
+  ok(verdictOf(UM_SRC.includes(MARK)), 'the taskbar badge draws the compact mark (its words stay in the tooltip)');
   const stub = { name: 'stub', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'bv', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
   const fullWords = { name: 'full-words', setup(b) { b.onLoad({ filter: /usage-meter\.js$/ }, (a) => ({ contents: fs.readFileSync(a.path, 'utf8').replace(MARK, '${escHtml(c.staleAge)}'), loader: 'js' })); } };
   const entry = `import { installUsageMeter } from './usage-meter.js';
@@ -65,7 +65,7 @@ window.ready = true;`;
 <script>localStorage.setItem("vibespace.lang", ${JSON.stringify(lang)})</` + `script><script src="/${js}"></` + `script></body></html>`;
   fs.writeFileSync(path.join(dir, 'www/after.css'), CSS);
   fs.writeFileSync(path.join(dir, 'www/before.css'), CSS.replace(CURE, SHIPPED));
-  ok(fs.readFileSync(path.join(dir, 'www/before.css'), 'utf8').includes(SHIPPED) && !CURE.test(fs.readFileSync(path.join(dir, 'www/before.css'), 'utf8')), 'the control serves the shipped rule (top −5 px, no nowrap) in the cure\'s place');
+  ok(gateOf(fs.readFileSync(path.join(dir, 'www/before.css'), 'utf8').includes(SHIPPED)) && !CURE.test(fs.readFileSync(path.join(dir, 'www/before.css'), 'utf8')), 'the control serves the shipped rule (top −5 px, no nowrap) in the cure\'s place');
   srv = http.createServer((q, r) => { const u = new URL(q.url, 'http://x'); const m = /^\/page\/(after|before)\/(en|zh|ja)$/.exec(u.pathname);
     if (m) { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(html(m[1] + '.js', m[1] + '.css', m[2])); return; }
     const f = path.join(dir, 'www', path.basename(u.pathname)); if (fs.existsSync(f)) { r.writeHead(200, { 'content-type': f.endsWith('.css') ? 'text/css' : 'text/javascript' }); r.end(fs.readFileSync(f)); return; }
@@ -138,13 +138,13 @@ window.ready = true;`;
   const fine = (m) => m.length === 3 && ['taskbar', 'roster', 'roster@390'].every((w) => m.some((x) => x.where === w)) && m.every((x) => x.lines === 1 && x.overOwn === 0 && x.overOther === 0);
   for (const face of ['box', 'runner']) for (const lang of ['en', 'zh', 'ja']) {
     const m = looks[`${face}/after/${lang}`];
-    ok(fine(m), `${face} face, ${lang}: every badge ONE line, over neither its own ring's label nor a neighbouring ring — ${m.map((x) => `${x.where} «${x.text}» ${x.lines} line(s), own ${x.overOwn} px², other ${x.overOther} px²`).join(' · ')}`, m);
+    ok(verdictOf(fine(m)), `${face} face, ${lang}: every badge ONE line, over neither its own ring's label nor a neighbouring ring — ${m.map((x) => `${x.where} «${x.text}» ${x.lines} line(s), own ${x.overOwn} px², other ${x.overOther} px²`).join(' · ')}`, m);
   }
   // THE OWNER'S WORD (2026-11-13, «不如还是继续用 h/d»): a badge is a MARK — m / h / d in every language, like the counts under the
   // rings; the sentence stays in the interface's words in the tooltip (the taskbar badge's own, the roster ring's)
   for (const lang of ['zh', 'ja']) {
     const m = looks[`box/after/${lang}`], tb = m.find((x) => x.where === 'taskbar'), ro = m.find((x) => x.where === 'roster');
-    ok(tb && /^47h$/.test(tb.text) && /47 ?(小时|時間)/.test(tb.title) && ro && /^47h$/.test(ro.text) && /47 ?(小时|時間)/.test(ro.title), `${lang}: both badges carry the mark «${tb && tb.text}» / «${ro && ro.text}»; their tooltips the words «${tb && tb.title}» / «…${ro && ro.title.slice(-14)}»`, { tb, ro });
+    ok(gateOf(tb) && gateOf(/^47h$/.test(tb.text)) && gateOf(/47 ?(小时|時間)/.test(tb.title)) && gateOf(ro) && gateOf(/^47h$/.test(ro.text)) && verdictOf(/47 ?(小时|時間)/.test(ro.title)), `${lang}: both badges carry the mark «${tb && tb.text}» / «${ro && ro.text}»; their tooltips the words «${tb && tb.title}» / «…${ro && ro.title.slice(-14)}»`, { tb, ro });
   }
   const red = ['zh', 'ja'].filter((lang) => !fine(looks[`box/before/${lang}`]));
   ok(red.length === 2, `RED CONTROL: the shipped rule and full words (4d63ec1b4's drawing) fail the same measure in zh AND ja — ${['zh', 'ja'].map((l) => looks[`box/before/${l}`].map((x) => `${l} ${x.where} «${x.text}» ${x.lines} line(s), own ${x.overOwn} px²`).join(' · ')).join(' · ')}`, red);
@@ -157,4 +157,4 @@ finally {
   if (!process.env.K3_PNG_DIR) fs.rmSync(dir, { recursive: true, force: true }); else fs.rmSync(path.join(dir, 'www'), { recursive: true, force: true });
 }
 console.log(`\ntest-age-badge-chrome: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

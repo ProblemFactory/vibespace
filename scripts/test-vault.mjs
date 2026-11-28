@@ -18,7 +18,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const V = require(path.join(REPO, 'src/vault.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const CHEAP = { N: 1024, r: 8, p: 1 };
 const pw = (s) => Buffer.from(s, 'utf8');
 const isZero = (b) => Buffer.isBuffer(b) && b.length > 0 && b.every((x) => x === 0);
@@ -26,8 +26,8 @@ const isZero = (b) => Buffer.isBuffer(b) && b.length > 0 && b.every((x) => x ===
 console.log('① a new record');
 {
   const { record, dek } = await V.setup(pw('correct horse battery'), { kdf: CHEAP, now: 1000 });
-  ok(V.recordShapeOk(record) && record.v === 1 && record.kdf.name === 'scrypt' && Buffer.from(record.kdf.salt, 'base64').length === 16, 'the record is v1 scrypt with a 16-byte salt', JSON.stringify(record.kdf));
-  ok(Buffer.isBuffer(dek) && dek.length === 32 && !isZero(dek), 'the DEK is 32 random bytes, handed to the caller only');
+  ok(gateOf(V.recordShapeOk(record)) && record.v === 1 && record.kdf.name === 'scrypt' && Buffer.from(record.kdf.salt, 'base64').length === 16, 'the record is v1 scrypt with a 16-byte salt', JSON.stringify(record.kdf));
+  ok(gateOf(Buffer.isBuffer(dek)) && dek.length === 32 && !isZero(dek), 'the DEK is 32 random bytes, handed to the caller only');
   const text = JSON.stringify(record);
   ok(![dek.toString('hex'), dek.toString('base64'), 'correct horse battery'].some((x) => text.includes(x)), 'neither the DEK nor the password appears in the record\'s bytes');
   ok(record.createdAt === 1000 && record.rotatedAt === null && record.idleLockHours === 0 && Object.keys(record.entries).length === 0, 'createdAt / rotatedAt / idle lock (off) / no entries');
@@ -38,7 +38,7 @@ console.log('② unlock: right, wrong, corrupt, not set up');
 {
   const { record, dek } = await V.setup(pw('correct horse battery'), { kdf: CHEAP });
   const r1 = await V.unlock(record, pw('correct horse battery'));
-  ok(r1.ok && r1.dek.equals(dek), 'the right password opens THE DEK');
+  ok(gateOf(r1.ok) && verdictOf(r1.dek.equals(dek)), 'the right password opens THE DEK');
   const r2 = await V.unlock(record, pw('correct horse battery!'));
   ok(!r2.ok && r2.code === 'wrong_password' && !('dek' in r2), 'a wrong password is wrong_password (no DEK)', JSON.stringify(r2));
   const flip = (b64) => { const b = Buffer.from(b64, 'base64'); b[0] ^= 1; return b.toString('base64'); };
@@ -75,12 +75,12 @@ console.log('④ zeroing');
     const r = await V.unlock(record, pw('zero me please'));
     await V.unlock(record, pw('not the password'));
     await V.changePassword(record, pw('zero me please'), pw('a new password'), {});
-    ok(seen.length >= 5 && seen.every(isZero), `every KEK derived is zeros once the call returns (${seen.length} derives)`);
-    ok(r.ok && !isZero(r.dek), 'the DEK handed to the caller is NOT zeroed (it is the caller\'s to hold)');
+    ok(seen.length >= 5 && verdictOf(seen.every(isZero)), `every KEK derived is zeros once the call returns (${seen.length} derives)`);
+    ok(gateOf(r.ok) && !isZero(r.dek), 'the DEK handed to the caller is NOT zeroed (it is the caller\'s to hold)');
   } finally { crypto.scrypt = real; }
   const b = Buffer.from('secret');
   V.zero(b, null, 'x');
-  ok(isZero(b), 'V.zero zeros a Buffer (and ignores anything else)');
+  ok(verdictOf(isZero(b)), 'V.zero zeros a Buffer (and ignores anything else)');
 }
 
 console.log('⑤ change password keeps the entries');
@@ -89,11 +89,11 @@ console.log('⑤ change password keeps the entries');
   const k1 = crypto.randomBytes(32);
   record.entries['.accounts-key'] = V.wrapEntry(dek, '.accounts-key', k1);
   const c = await V.changePassword(record, pw('first password'), pw('second password'), { now: 5000 });
-  ok(c.ok && c.record.rotatedAt === 5000 && c.record.kdf.salt !== record.kdf.salt, 'a new salt, rotatedAt set');
+  ok(gateOf(c.ok) && c.record.rotatedAt === 5000 && c.record.kdf.salt !== record.kdf.salt, 'a new salt, rotatedAt set');
   ok(JSON.stringify(c.record.entries) === JSON.stringify(record.entries), 'the entries are byte-identical (only the DEK is re-wrapped)');
   ok((await V.unlock(c.record, pw('first password'))).code === 'wrong_password', 'the old password no longer opens it');
   const u = await V.unlock(c.record, pw('second password'));
-  ok(u.ok && u.dek.equals(dek) && V.unwrapEntry(u.dek, '.accounts-key', c.record.entries['.accounts-key']).equals(k1), 'the new password opens the SAME DEK and the entry');
+  ok(gateOf(u.ok) && gateOf(u.dek.equals(dek)) && verdictOf(V.unwrapEntry(u.dek, '.accounts-key', c.record.entries['.accounts-key']).equals(k1)), 'the new password opens the SAME DEK and the entry');
   ok((await V.changePassword(record, pw('wrong'), pw('second password'))).code === 'wrong_password', 'a wrong old password changes nothing');
 }
 
@@ -101,7 +101,7 @@ console.log('⑥ entries');
 {
   const { dek } = await V.setup(pw('entries password'), { kdf: CHEAP });
   const k = crypto.randomBytes(32), box = V.wrapEntry(dek, '.mounts-key', k);
-  ok(V.unwrapEntry(dek, '.mounts-key', box).equals(k), 'an entry opens under its own name');
+  ok(verdictOf(V.unwrapEntry(dek, '.mounts-key', box).equals(k)), 'an entry opens under its own name');
   ok(V.unwrapEntry(dek, '.channels-key', box) === null, 'the same box under another name never opens (AAD = the name)');
   ok(V.unwrapEntry(crypto.randomBytes(32), '.mounts-key', box) === null, 'another DEK never opens it');
   ok(V.unwrapEntry(dek, '.mounts-key', { ...box, tag: Buffer.alloc(16).toString('base64') }) === null && V.unwrapEntry(dek, 'x', null) === null, 'a damaged / missing box is null');
@@ -129,11 +129,11 @@ console.log('⑦ the state machine and the state table');
 console.log('⑧ the password door');
 {
   ok(V.passwordOf(12345678).code === 'password_not_text' && V.passwordOf(null).code === 'password_not_text', 'not text ⇒ password_not_text');
-  ok(V.passwordOf('1234567').code === 'password_too_short' && V.passwordOf('12345678').ok, '7 characters refused, 8 accepted');
-  ok(V.passwordOf('密码密码密码密码').ok && V.passwordOf('密码密码密码密').code === 'password_too_short', 'code points, not bytes');
+  ok(V.passwordOf('1234567').code === 'password_too_short' && verdictOf(V.passwordOf('12345678').ok), '7 characters refused, 8 accepted');
+  ok(gateOf(V.passwordOf('密码密码密码密码').ok) && V.passwordOf('密码密码密码密').code === 'password_too_short', 'code points, not bytes');
   ok(V.passwordOf('x'.repeat(1025)).code === 'password_too_long', 'over 1024 ⇒ password_too_long');
   const p = V.passwordOf('a fine password');
-  ok(Buffer.isBuffer(p.pw) && p.pw.toString() === 'a fine password', 'an accepted password becomes a Buffer (zeroable)');
+  ok(gateOf(Buffer.isBuffer(p.pw)) && p.pw.toString() === 'a fine password', 'an accepted password becomes a Buffer (zeroable)');
 }
 
 console.log('⑨ no secret in an answer');
@@ -144,4 +144,4 @@ console.log('⑨ no secret in an answer');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

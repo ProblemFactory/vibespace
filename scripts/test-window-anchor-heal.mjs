@@ -27,7 +27,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const tmp = [];
 const mkd = (p) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), p)); tmp.push(d); return d; };
 process.on('exit', () => { for (const d of tmp) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
@@ -41,7 +41,7 @@ console.log('§1 isolatedPanelAnchorVerdict');
   const LEGACY = { sevenDay: 1789920000, fiveHour: null, scoped: { fable: 1789920000 }, at: 1789692839577, source: 'on-demand' }; // the pre-fix stamp (another account's phase)
   const panel = { sevenDay: T, fiveHour: T - 14400, scoped: { fable: T } };
   const v = RL.isolatedPanelAnchorVerdict({ anchor: LEGACY, panelWindow: panel, apiWindow: null });
-  ok('THE INCIDENT: a legacy anchor (no verifiedBy) that contradicts the isolated panel, no API witness ⇒ reanchor, reason names both windows', v.action === 'reanchor' && /legacy anchor 7d:1789920000/.test(v.reason) && /1789930800/.test(v.reason), JSON.stringify(v));
+  ok('THE INCIDENT: a legacy anchor (no verifiedBy) that contradicts the isolated panel, no API witness ⇒ reanchor, reason names both windows', v.action === 'reanchor' && gateOf(/legacy anchor 7d:1789920000/.test(v.reason)) && verdictOf(/1789930800/.test(v.reason)), JSON.stringify(v));
   ok('no anchor at all ⇒ KEEP — an unverified panel never defines who an account is; the API witness establishes a fresh member (the c2 rule, test-readings-attribution §19 ⑦)', RL.isolatedPanelAnchorVerdict({ anchor: null, panelWindow: panel }).action === 'keep');
   ok('a legacy anchor that AGREES ⇒ upgrade (marked verified, nothing moves)', RL.isolatedPanelAnchorVerdict({ anchor: { ...LEGACY, sevenDay: T, scoped: { fable: T } }, panelWindow: panel }).action === 'upgrade');
   ok('NEGATIVE CONTROL: a VERIFIED anchor (an API run) that contradicts the panel is KEPT — only an API run may move it', RL.isolatedPanelAnchorVerdict({ anchor: { ...LEGACY, source: 'api', verifiedBy: 'rate-limit-events' }, panelWindow: panel }).action === 'keep');
@@ -90,10 +90,10 @@ const LEGACY_STAMP = (sec) => ({ sevenDay: sec, fiveHour: null, scoped: { fable:
   fs.writeFileSync(path.join(w.cacheDir, RL.windowSidecarName(w.id)), JSON.stringify(LEGACY_STAMP(foreign)));
   const okp = await w.u.refreshViaCliPanel(w.id);
   const sc = w.sidecar(), rec = w.log().pop(), arch = w.archive();
-  ok('the panel writes (unverified numbers were always written) …', okp === true && rec && rec.outcome === 'written' && rec.identityVerified === false, JSON.stringify(rec && { o: rec.outcome, idv: rec.identityVerified }));
-  ok('…and RE-ANCHORS the legacy sidecar from the isolated panel: verifiedBy isolated-panel, provisional, the panel\'s weekly reset', sc && sc.verifiedBy === 'isolated-panel' && sc.provisional === true && sc.sevenDay === rec.parsed.sevenDay.resetsAt && sc.scoped.fable === rec.parsed.sevenDay.resetsAt, JSON.stringify(sc));
-  ok('…the probe record says so', /^reanchor \(legacy anchor/.test(rec.sidecar || ''), rec.sidecar);
-  ok('…and the old anchor is ARCHIVED with a reason naming both windows (never destroyed)', arch.length === 1 && arch[0].migration === 'legacy-anchor-reanchored' && arch[0].key === w.id && arch[0].was.sevenDay === foreign && /contradicts the isolated panel/.test(arch[0].reason), JSON.stringify(arch));
+  ok('the panel writes (unverified numbers were always written) …', okp === true && gateOf(rec) && rec.outcome === 'written' && rec.identityVerified === false, JSON.stringify(rec && { o: rec.outcome, idv: rec.identityVerified }));
+  ok('…and RE-ANCHORS the legacy sidecar from the isolated panel: verifiedBy isolated-panel, provisional, the panel\'s weekly reset', gateOf(sc) && sc.verifiedBy === 'isolated-panel' && sc.provisional === true && sc.sevenDay === rec.parsed.sevenDay.resetsAt && sc.scoped.fable === rec.parsed.sevenDay.resetsAt, JSON.stringify(sc));
+  ok('…the probe record says so', verdictOf(/^reanchor \(legacy anchor/.test(rec.sidecar || '')), rec.sidecar);
+  ok('…and the old anchor is ARCHIVED with a reason naming both windows (never destroyed)', arch.length === 1 && arch[0].migration === 'legacy-anchor-reanchored' && arch[0].key === w.id && arch[0].was.sevenDay === foreign && verdictOf(/contradicts the isolated panel/.test(arch[0].reason)), JSON.stringify(arch));
   // the guard now accepts the member's TRUE window
   const d = RL.decideReadingTarget({ key: w.id, readingWindow: { sevenDay: rec.parsed.sevenDay.resetsAt, fiveHour: rec.parsed.fiveHour.resetsAt, scoped: { fable: rec.parsed.sevenDay.resetsAt } }, windows: { [w.id]: sc } });
   ok('the window guard now WRITES a live reading of the member\'s true window (the 5h reading refreshes again)', d.action === 'write', JSON.stringify(d));
@@ -102,7 +102,7 @@ const LEGACY_STAMP = (sec) => ({ sevenDay: sec, fiveHour: null, scoped: { fable:
   const w = mkWorld();
   const okp = await w.u.refreshViaCliPanel(w.id);
   const sc = w.sidecar(), rec = w.log().pop();
-  ok('no anchor at all: the isolated panel does NOT establish one (written, unverified, sidecar absent — the c2 rule kept)', okp && sc === null && /^not-stamped \(identity unverified/.test(rec.sidecar || ''), JSON.stringify({ sc, s: rec && rec.sidecar }));
+  ok('no anchor at all: the isolated panel does NOT establish one (written, unverified, sidecar absent — the c2 rule kept)', gateOf(okp) && sc === null && verdictOf(/^not-stamped \(identity unverified/.test(rec.sidecar || '')), JSON.stringify({ sc, s: rec && rec.sidecar }));
   ok('…and nothing is archived (there was nothing to replace)', w.archive().length === 0);
 }
 {
@@ -111,7 +111,7 @@ const LEGACY_STAMP = (sec) => ({ sevenDay: sec, fiveHour: null, scoped: { fable:
   const before = w.sidecar();
   await w.u.refreshViaCliPanel(w.id);
   const sc = w.sidecar(), rec = w.log().pop();
-  ok('NEGATIVE CONTROL: a VERIFIED (API-run) anchor is untouched by an unverified panel, even when it agrees', JSON.stringify(sc) === JSON.stringify(before) && /not-stamped \(identity unverified; the anchor is verified/.test(rec.sidecar || ''), rec && rec.sidecar);
+  ok('NEGATIVE CONTROL: a VERIFIED (API-run) anchor is untouched by an unverified panel, even when it agrees', JSON.stringify(sc) === JSON.stringify(before) && verdictOf(/not-stamped \(identity unverified; the anchor is verified/.test(rec.sidecar || '')), rec && rec.sidecar);
 }
 {
   const foreignApi = { sevenDay: Math.floor(Date.now() / 1000) + 2 * 86400 + 3600, scoped: {} };
@@ -131,16 +131,16 @@ const call = async (w, body) => new Promise((resolve) => {
 {
   const w = mkWorld({ probe: async () => ({ parsed: { fiveHour: { utilization: 0.25 } }, rung: 'control', sessionId: 'sess-1', target: null, identityVerified: false, why: 'the window is not this account\'s — archived, never filed under another row (B, 主开发 r5534)', skipped: [] }) });
   const r = await call(w, { account: w.id });
-  ok('THE TOAST\'S SHAPE: the session answered but the guard ARCHIVED it ⇒ the route does NOT say success-via-session', r.body && r.body.via !== 'session', JSON.stringify(r.body));
-  ok('…it falls to the isolated panel and answers via cli-panel', r.body && r.body.success === true && r.body.via === 'cli-panel' && r.body.rung === 'panel', JSON.stringify(r.body));
-  ok('…listing the refused session as SKIPPED with the guard\'s reason', Array.isArray(r.body.skipped) && r.body.skipped.length === 1 && r.body.skipped[0].sessionId === 'sess-1' && /window guard archived/.test(r.body.skipped[0].why), JSON.stringify(r.body.skipped));
-  ok('…and the panel probe actually ran (a written panel record)', w.log().some((x) => x.rung === 'panel' && x.outcome === 'written'));
+  ok('THE TOAST\'S SHAPE: the session answered but the guard ARCHIVED it ⇒ the route does NOT say success-via-session', gateOf(r.body) && r.body.via !== 'session', JSON.stringify(r.body));
+  ok('…it falls to the isolated panel and answers via cli-panel', gateOf(r.body) && r.body.success === true && r.body.via === 'cli-panel' && r.body.rung === 'panel', JSON.stringify(r.body));
+  ok('…listing the refused session as SKIPPED with the guard\'s reason', gateOf(Array.isArray(r.body.skipped)) && r.body.skipped.length === 1 && r.body.skipped[0].sessionId === 'sess-1' && verdictOf(/window guard archived/.test(r.body.skipped[0].why)), JSON.stringify(r.body.skipped));
+  ok('…and the panel probe actually ran (a written panel record)', verdictOf(w.log().some((x) => x.rung === 'panel' && x.outcome === 'written')));
 }
 {
   const w = mkWorld({ probe: async () => ({ parsed: { fiveHour: { utilization: 0.25 } }, rung: 'control', sessionId: 'sess-1', target: w0id(), identityVerified: true, why: 'answered by session sess-1; weekly window matches', skipped: [] }) });
   function w0id() { return w && w.id; }
   const r = await call(w, { account: w.id });
-  ok('CONTROL: a session answer the guard WROTE still answers via session (no panel spawn)', r.body && r.body.success === true && r.body.via === 'session' && r.body.rung === 'control' && !w.log().some((x) => x.rung === 'panel'), JSON.stringify(r.body));
+  ok('CONTROL: a session answer the guard WROTE still answers via session (no panel spawn)', gateOf(r.body) && r.body.success === true && r.body.via === 'session' && r.body.rung === 'control' && !w.log().some((x) => x.rung === 'panel'), JSON.stringify(r.body));
 }
 
 // ── §4 witness eligibility for a hot-switched session (REAL engine) ──────────
@@ -181,9 +181,9 @@ console.log('§4 apiWitnessEligibility: OTel disagreement vs a hot-switched sess
   ok('THE INCIDENT (inc-mu6djxxt-8166): a session hot-switched since spawn is a witness candidate too', e2.ok === true, JSON.stringify(e2));
   app.locals.slotTransitions.record({ sessionId: null, poolId: 'pool-1', from: 'sub-1', to: 'sub-2', at: now - 60e3, why: 'test' });
   const e4 = eng.apiWitnessEligibility({ ...switched, _webuiId: 'sess-recent', claudeSessionId: 'c-recent' }, slot, 'sub-1');
-  ok('NEGATIVE CONTROL: a re-point inside the lag shadow (1 min ago) still vetoes through the re-point leg', e4.ok === false && /re-pointed/.test(e4.why), JSON.stringify(e4));
+  ok('NEGATIVE CONTROL: a re-point inside the lag shadow (1 min ago) still vetoes through the re-point leg', e4.ok === false && verdictOf(/re-pointed/.test(e4.why)), JSON.stringify(e4));
   const e5 = eng.apiWitnessEligibility(switched, { key: 'sub-1', slotOk: false }, 'sub-1');
-  ok('the slot leg is untouched: an unvalidated slot is never a witness', e5.ok === false && /slot not validated/.test(e5.why));
+  ok('the slot leg is untouched: an unvalidated slot is never a witness', e5.ok === false && verdictOf(/slot not validated/.test(e5.why)));
 }
 
 // ── §5 wiring pins ───────────────────────────────────────────────────────────
@@ -191,10 +191,10 @@ console.log('§5 wiring pins');
 {
   const ur = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
   const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
-  ok('usage-routes: the ⟳ route treats an archived control reading as a skipped rung (falls through)', /const viaWritten = parsedVia && !\(viaSession && typeof viaSession === 'object' && 'target' in viaSession && !viaSession\.target\);/.test(ur) && /if \(parsedVia\) skipped\.push\(/.test(ur));
-  ok('usage-routes: the panel consults the PURE verdict before touching a sidecar, writes verifiedBy isolated-panel + provisional, archives a re-anchored legacy stamp', /isolatedPanelAnchorVerdict\(\{ anchor, panelWindow: w, apiWindow: idv\.apiWindow \|\| null \}\)/.test(ur) && /verifiedBy: 'isolated-panel', provisional: true/.test(ur) && /migration: 'legacy-anchor-reanchored'/.test(ur));
-  ok('engine: the witness eligibility asks no OTel label (the leg and its switchedSinceSpawn memo are retired — lane-hot-switch)', !/switchedSinceSpawn|corr\.agree/.test(eng.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')) && /function apiWitnessEligibility\(session, slot, key\) \{/.test(eng));
-  ok('ci.mjs runs this suite', /'test-window-anchor-heal'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')));
+  ok('usage-routes: the ⟳ route treats an archived control reading as a skipped rung (falls through)', gateOf(/const viaWritten = parsedVia && !\(viaSession && typeof viaSession === 'object' && 'target' in viaSession && !viaSession\.target\);/.test(ur)) && verdictOf(/if \(parsedVia\) skipped\.push\(/.test(ur)));
+  ok('usage-routes: the panel consults the PURE verdict before touching a sidecar, writes verifiedBy isolated-panel + provisional, archives a re-anchored legacy stamp', gateOf(/isolatedPanelAnchorVerdict\(\{ anchor, panelWindow: w, apiWindow: idv\.apiWindow \|\| null \}\)/.test(ur)) && gateOf(/verifiedBy: 'isolated-panel', provisional: true/.test(ur)) && verdictOf(/migration: 'legacy-anchor-reanchored'/.test(ur)));
+  ok('engine: the witness eligibility asks no OTel label (the leg and its switchedSinceSpawn memo are retired — lane-hot-switch)', !/switchedSinceSpawn|corr\.agree/.test(eng.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')) && verdictOf(/function apiWitnessEligibility\(session, slot, key\) \{/.test(eng)));
+  ok('ci.mjs runs this suite', verdictOf(/'test-window-anchor-heal'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8'))));
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

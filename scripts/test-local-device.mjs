@@ -18,7 +18,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 // throwaway root + dataDir (never the user's real ~/.vibespace or data/):
 // construct device #0 EXACTLY as server.js does — the DeviceManager's local
@@ -49,7 +49,7 @@ const viaBounded = await hosts.deviceBounded(null, 5000);
 ok(viaNull === dm && viaLocal === dm && viaBounded === dm, "device(null) / device('local') / deviceBounded(null) all resolve device #0");
 
 const r = await viaBounded.runCmd('sh', ['-c', 'echo dev0-$((6*7))'], { by: 'system:test', timeoutMs: 8000 });
-ok(String(r?.stdout || '').includes('dev0-42'), 'runCmd over the local unix socket executes for real');
+ok(verdictOf(String(r?.stdout || '').includes('dev0-42')), 'runCmd over the local unix socket executes for real');
 
 // fs ops — the same op surface every remote consumer uses
 const p = path.join(root, 'probe.txt');
@@ -59,20 +59,20 @@ ok(rd?.data?.toString() === 'one surface', 'fsWrite + fsReadRange round-trip on 
 
 // discovery-snapshot answers too (2.278.0 shared facts run HERE for dial devices)
 const snap = await viaBounded.discoverySnapshot();
-ok(snap && Array.isArray(snap.locks) && Array.isArray(snap.jsonls), 'discovery-snapshot serves from the same daemon');
+ok(gateOf(snap) && gateOf(Array.isArray(snap.locks)) && verdictOf(Array.isArray(snap.jsonls)), 'discovery-snapshot serves from the same daemon');
 
 // honesty when device #0 is absent: throw, never a silent pretend-machine
 hosts.setLocalDevice(null);
 let threw = null;
 try { await hosts.device(null); } catch (e) { threw = e; }
-ok(threw && /local device/.test(threw.message), 'no local daemon ⇒ device(null) throws (callers keep their legacy fallback)');
+ok(gateOf(threw) && verdictOf(/local device/.test(threw.message)), 'no local daemon ⇒ device(null) throws (callers keep their legacy fallback)');
 
 try { dm.stop?.(); } catch { }
 // device #0 must be GONE before its root goes: its SIGTERM handler's last log line re-creates agentd/state/agentd.log
 // under a racing rmSync (ENOTEMPTY, the 2.369.217 runner red)
 const end = endDaemonsAndWait(root);
-ok(end.pids.length >= 1 && end.gone && !end.killed, 'device #0 ends on SIGTERM and is gone before its root is removed');
+ok(end.pids.length >= 1 && gateOf(end.gone) && !end.killed, 'device #0 ends on SIGTERM and is gone before its root is removed');
 fs.rmSync(root, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

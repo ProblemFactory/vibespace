@@ -40,7 +40,7 @@ const require = createRequire(import.meta.url);
 const repo = path.resolve(new URL('..', import.meta.url).pathname);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let passed = 0, failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; console.log('  ✓ ' + name); }
   else { failed++; console.error('  ✗ ' + name + (extra ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); }
 };
@@ -175,7 +175,7 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
     return null;
   })();
   check('…and the ONE swap method re-derives the marks itself, BEFORE it places the element (B-8f7a: its mark precedes `oldEl.replaceWith(newEl)`) — the delegation the guard accepts is not a hole in it',
-    !!swapBody && MARKED.test(swapBody) && /oldEl\.replaceWith\(newEl\)/.test(swapBody) && swapBody.search(MARKED) < swapBody.indexOf('oldEl.replaceWith(newEl)'),
+    !!swapBody && gateOf(MARKED.test(swapBody)) && gateOf(/oldEl\.replaceWith\(newEl\)/.test(swapBody)) && swapBody.search(MARKED) < swapBody.indexOf('oldEl.replaceWith(newEl)'),
     swapBody ? swapBody.slice(0, 160) : 'no _swapMessageEl found');
   // NEGATIVE CONTROL for the guard itself — a matcher that can only ever say
   // "clean" is not a guard. The exact shape round 3 found (a builder switch
@@ -203,11 +203,11 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
   const wrapReturn = scan("_quick(m) {\n  if (m.quick) return this._renderers.renderAssistantMsg(m);\n  const el = this._renderers.renderAssistantMsg(m);\n  this._applyElementMarks(el, m);\n  return el;\n}\n");
   const wrapStore = scan("_store(m, id) {\n  this._elements.set(id, this._renderers.renderAssistantMsg(m));\n}\n");
   check('B-8f7a: by SCOPE and ORDER — a mark far from its builder (5 000+ chars) in the same method passes; the next method\'s mark, a store or ANY placement of the built element before the mark (replaceWith, append), an exit carrying it, and a builder whose own statement returns or stores it are each red; another element\'s append is not; braces in strings and comments are text',
-    far.unmarked.length === 0 && far.builders === 1 && nextMethod.unmarked.length === 1 && /no mark in its own method/.test(nextMethod.unmarked[0])
-    && storedFirst.unmarked.length === 1 && /stored/.test(storedFirst.unmarked[0]) && escapes.unmarked.length === 1 && /return el/.test(escapes.unmarked[0])
+    far.unmarked.length === 0 && far.builders === 1 && nextMethod.unmarked.length === 1 && gateOf(/no mark in its own method/.test(nextMethod.unmarked[0]))
+    && storedFirst.unmarked.length === 1 && gateOf(/stored/.test(storedFirst.unmarked[0])) && escapes.unmarked.length === 1 && gateOf(/return el/.test(escapes.unmarked[0]))
     && braces.unmarked.length === 0 && braces.builders === 1
     && replacedFirst.unmarked.length === 1 && appendedFirst.unmarked.length === 1 && otherAppend.unmarked.length === 0
-    && wrapReturn.unmarked.length === 1 && /own statement/.test(wrapReturn.unmarked[0]) && wrapStore.unmarked.length === 1,
+    && wrapReturn.unmarked.length === 1 && gateOf(/own statement/.test(wrapReturn.unmarked[0])) && wrapStore.unmarked.length === 1,
     JSON.stringify({ far: far.unmarked, nextMethod: nextMethod.unmarked, storedFirst: storedFirst.unmarked, escapes: escapes.unmarked, braces: braces.unmarked, replacedFirst: replacedFirst.unmarked, appendedFirst: appendedFirst.unmarked, otherAppend: otherAppend.unmarked, wrapReturn: wrapReturn.unmarked, wrapStore: wrapStore.unmarked }));
 }
 
@@ -238,7 +238,7 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
   const nextAt = rest.indexOf("} else if (msg.type ===", 10);
   const branch = exitedAt >= 0 ? (nextAt > 0 ? rest.slice(0, nextAt) : rest.slice(0, 2000)) : '';
   check('the client retirement is ONE named method (the twin of the server’s retireCompaction)',
-    /_retireCompactionStage\(\)\s*\{/.test(cv) && /compactInFlight\?\.\(\)/.test(cv), 'no _retireCompactionStage in chat-view.js');
+    gateOf(/_retireCompactionStage\(\)\s*\{/.test(cv)) && verdictOf(/compactInFlight\?\.\(\)/.test(cv)), 'no _retireCompactionStage in chat-view.js');
   // …and ONE OWNER for the whole set. Round 7 called the compaction retirement
   // straight from the branch, so "which claims does session death retire" had
   // no home and the answer stayed one line long. Now the branch calls one
@@ -246,7 +246,7 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
   const ownerAt = cv.indexOf('_retireLiveClaims() {');
   const owner = ownerAt >= 0 ? cv.slice(ownerAt, ownerAt + 700).split('\n  }')[0] : '';
   check("the 'exited' branch calls ONE named retirement (a retirement nobody calls is the 2.331.0 unstaged-wiring class)",
-    exitedAt >= 0 && /this\._retireLiveClaims\(\)/.test(branch), `exitedAt=${exitedAt} branch=${JSON.stringify(branch.slice(0, 300))}`);
+    exitedAt >= 0 && verdictOf(/this\._retireLiveClaims\(\)/.test(branch)), `exitedAt=${exitedAt} branch=${JSON.stringify(branch.slice(0, 300))}`);
   // ONE table, three rows — a fourth live claim added later gets a row here
   // and a leg in ⑦; the shape of the omission is identical every time.
   const CLAIMS = [
@@ -257,7 +257,7 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
   ];
   for (const [what, re] of CLAIMS) {
     check(`…and that retirement retires ${what} — a claim about RIGHT NOW dies with its producer`,
-      ownerAt >= 0 && re.test(owner), `ownerAt=${ownerAt} owner=${JSON.stringify(owner.slice(0, 400))}`);
+      ownerAt >= 0 && verdictOf(re.test(owner)), `ownerAt=${ownerAt} owner=${JSON.stringify(owner.slice(0, 400))}`);
   }
   // NEGATIVE CONTROLS for this guard: the round-6 shape AND the round-7 shape
   // (which retired the compaction stage and nothing else) must each be
@@ -358,7 +358,7 @@ await evaljs('window.app.ready.then(() => true)').catch(() => { });
 await sleep(1200);
 
 const vp = await evaljs('JSON.stringify({ w: innerWidth, h: innerHeight, mobile: !!(window.app && window.app.isMobile) })');
-check(`viewport is the 375×667 mobile shape (${vp})`, /"w":375/.test(vp) && /"h":667/.test(vp), vp);
+check(`viewport is the 375×667 mobile shape (${vp})`, gateOf(/"w":375/.test(vp)) && verdictOf(/"h":667/.test(vp)), vp);
 
 const opened = await evaljs(`(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -381,7 +381,7 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
     const bar = window.__v._statusBar?._element || document.querySelector('.chat-status-bar');
     return JSON.stringify({ hasBar: !!bar, chips: bar ? bar.querySelectorAll('.chat-status-turnstate').length : -1 });
   })()`);
-  check('nothing is drawn before the harness reports a state (null ≠ idle ≠ a claim)', /"chips":0/.test(before), before);
+  check('nothing is drawn before the harness reports a state (null ≠ idle ≠ a claim)', verdictOf(/"chips":0/.test(before)), before);
   const idle = await evaljs(`(() => { window.__v._statusBar.setTurnState('idle'); const bar = window.__v._statusBar._element; return bar.querySelectorAll('.chat-status-turnstate').length; })()`);
   check("'idle' and 'running' draw nothing either — the composer's spinner already says that, and one fact must not have two voices", idle === 0, String(idle));
   const m = await evaljs(`(async () => {
@@ -411,7 +411,7 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
     };
   })()`);
   check(`'requires_action' draws the third state at 375×667 (${JSON.stringify(m)})`, m?.chip === true && m.w > 0 && m.h > 0 && m.display !== 'none' && m.visibility !== 'hidden', m);
-  check('…it says what it means, and the tooltip names WHO reported it', /waiting for you|等你操作|あなた待ち/.test(m?.text || '') && /harness/.test(m?.title || ''), JSON.stringify([m?.text, m?.title]));
+  check('…it says what it means, and the tooltip names WHO reported it', gateOf(/waiting for you|等你操作|あなた待ち/.test(m?.text || '')) && verdictOf(/harness/.test(m?.title || '')), JSON.stringify([m?.text, m?.title]));
   check('…and at ≤768px it is the FIRST mark of row 1, fully inside the bar and the 375px viewport, never behind a fold (re-pointed by lane mask-value-shape: the strip\'s two rows replaced the swipe lane and its ⋯)', m?.insideBar === true && m?.insideViewport === true && m?.first === true && m?.fold === false, m);
   check('…the bar is at most the arrangement\'s TWO rows (the owner, 2026-11-14: the same two rows at 360 — never a third row eating the space above the input)', m?.barH > 0 && m.barH <= 84, String(m?.barH));
   const back = await evaljs(`(() => { window.__v._statusBar.setTurnState('idle'); return window.__v._statusBar._element.querySelectorAll('.chat-status-turnstate').length; })()`);
@@ -454,15 +454,15 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
              w: Math.round(r.width), inViewport: r.left >= -1 && r.right <= innerWidth + 1,
              wEnd: Math.round(rEnd.width), endInViewport: rEnd.left >= -1 && rEnd.right <= innerWidth + 1 };
   })()`);
-  check('before any stage record the card shows the hardcoded 1–2-minute apology (the FALLBACK, unchanged)', /1.2 minutes|1–2|1〜2|do not press Stop|不要按 Stop|Stop を押さないで/.test(m?.fallback || ''), m?.fallback);
-  check("the wire's own compaction START (system/status 'compacting') replaces the apology with a live sentence", m?.started && m.started !== m.fallback && /Compact|压缩|圧縮/.test(m.started), m?.started);
-  check('a hooks_start record names the hook phase (the one intermediate stage this lane has)', /SessionStart:compact/.test(m?.stage1 || '') && m.stage1 !== m.fallback, m?.stage1);
-  check("a compact_start carries the CLI's own hint text into the card", /summarizing 812 messages/.test(m?.stage2 || ''), m?.stage2);
+  check('before any stage record the card shows the hardcoded 1–2-minute apology (the FALLBACK, unchanged)', verdictOf(/1.2 minutes|1–2|1〜2|do not press Stop|不要按 Stop|Stop を押さないで/.test(m?.fallback || '')), m?.fallback);
+  check("the wire's own compaction START (system/status 'compacting') replaces the apology with a live sentence", gateOf(m?.started) && m.started !== m.fallback && verdictOf(/Compact|压缩|圧縮/.test(m.started)), m?.started);
+  check('a hooks_start record names the hook phase (the one intermediate stage this lane has)', gateOf(/SessionStart:compact/.test(m?.stage1 || '')) && m.stage1 !== m.fallback, m?.stage1);
+  check("a compact_start carries the CLI's own hint text into the card", verdictOf(/summarizing 812 messages/.test(m?.stage2 || '')), m?.stage2);
   // THE ROUND-4 BEHAVIOUR CHANGE, measured: the end of a compaction must not
   // silently revert to "this takes 1–2 minutes, do not press Stop" — the thing
   // it is describing already finished.
-  check('compact_end reports the real OUTCOME and never falls back to the apology', m?.ended && m.ended !== m.fallback && /finish|完成|完了/.test(m.ended), JSON.stringify([m?.ended, m?.fallback]));
-  check('…and a FAILED compaction says so, with the CLI’s own reason', /ran out of context/.test(m?.failedTxt || '') && m.failedTxt !== m.fallback, m?.failedTxt);
+  check('compact_end reports the real OUTCOME and never falls back to the apology', gateOf(m?.ended) && m.ended !== m.fallback && verdictOf(/finish|完成|完了/.test(m.ended)), JSON.stringify([m?.ended, m?.fallback]));
+  check('…and a FAILED compaction says so, with the CLI’s own reason', gateOf(/ran out of context/.test(m?.failedTxt || '')) && m.failedTxt !== m.fallback, m?.failedTxt);
   check(`the hint fits the 375px viewport (${m?.w}px, no horizontal overflow)`, m?.inViewport === true && m?.w > 0 && m.w <= 375, m);
   check(`…and so does the outcome sentence (${m?.wEnd}px)`, m?.endInViewport === true && m?.wEnd > 0 && m.wEnd <= 375, m);
 }
@@ -519,13 +519,13 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
              hasBtn: !!btn, w: Math.round(r.width), inViewport: r.left >= -1 && r.right <= innerWidth + 1 };
   })()`);
   const APOLOGY = /1.2 minutes|1–2|1〜2|do not press Stop|不要按 Stop|Stop を押さないで/;
-  check('the terminal stage is still HELD after the compaction (round 4: the last true thing we know)', /compact_end/.test(m?.held || ''), m?.held);
+  check('the terminal stage is still HELD after the compaction (round 4: the last true thing we know)', verdictOf(/compact_end/.test(m?.held || '')), m?.held);
   check('…but a card built AFTER it opens on the actionable guidance, not on "Compaction finished."',
-    APOLOGY.test(m?.later || '') && !/finish|完成|完了/.test(m?.later || ''), m?.later);
+    gateOf(APOLOGY.test(m?.later || '')) && !/finish|完成|完了/.test(m?.later || ''), m?.later);
   check('…with its Compact-now button still there (the card is unchanged apart from the sentence)', m?.hasBtn === true, m);
-  check('NEGATIVE CONTROL: a card built while a compaction is IN FLIGHT still opens on the live stage', /summarizing 812 messages/.test(m?.liveNew || ''), m?.liveNew);
-  check('NEGATIVE CONTROL: the card that WATCHED the compaction keeps its outcome (round 4 preserved)', /finish|完成|完了/.test(m?.watchedEnd || ''), m?.watchedEnd);
-  check('…and the next card after that end is actionable again (the stage never becomes the view’s permanent voice)', APOLOGY.test(m?.third || ''), m?.third);
+  check('NEGATIVE CONTROL: a card built while a compaction is IN FLIGHT still opens on the live stage', verdictOf(/summarizing 812 messages/.test(m?.liveNew || '')), m?.liveNew);
+  check('NEGATIVE CONTROL: the card that WATCHED the compaction keeps its outcome (round 4 preserved)', verdictOf(/finish|完成|完了/.test(m?.watchedEnd || '')), m?.watchedEnd);
+  check('…and the next card after that end is actionable again (the stage never becomes the view’s permanent voice)', verdictOf(APOLOGY.test(m?.third || '')), m?.third);
   check(`the late card's hint still fits the 375px viewport (${m?.w}px)`, m?.inViewport === true && m?.w > 0 && m.w <= 375, m);
 }
 
@@ -555,9 +555,9 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
     return { blocked, success };
   })()`);
   check('a compact_end with NO outcome says the compaction ENDED, never that it finished (a hook-blocked compaction compacted nothing)',
-    !!m?.blocked && !/finished|完成了|完了しました/.test(m.blocked) && /ended|结束|終了/i.test(m.blocked), m?.blocked);
+    !!m?.blocked && !/finished|完成了|完了しました/.test(m.blocked) && verdictOf(/ended|结束|終了/i.test(m.blocked)), m?.blocked);
   check('…while POSITIVE CONTROL compact_result:"success" does say it finished (the two are not collapsed)',
-    /finish|完成|完了/.test(m?.success || '') && m.success !== m.blocked, JSON.stringify([m?.success, m?.blocked]));
+    gateOf(/finish|完成|完了/.test(m?.success || '')) && m.success !== m.blocked, JSON.stringify([m?.success, m?.blocked]));
 }
 
 // ── ②d A COMPACTION THAT ENDS WITHOUT AN OUTCOME RECORD (round 6) ───────────
@@ -635,11 +635,11 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
   })()`);
   const APOLOGY = /1.2 minutes|1–2|1〜2|do not press Stop|不要按 Stop|Stop を押さないで/;
   check('CONTROL: while the hook stage is the last frame the compaction IS in flight — the card names the hook, and a card built then joins it',
-    m?.midInFlight === true && /PreCompact:guard/.test(m?.mid || '') && /PreCompact:guard/.test(m?.midLater || ''), JSON.stringify([m?.mid, m?.midLater]));
+    m?.midInFlight === true && gateOf(/PreCompact:guard/.test(m?.mid || '')) && verdictOf(/PreCompact:guard/.test(m?.midLater || '')), JSON.stringify([m?.mid, m?.midLater]));
   check('the producer’s terminal frame ends it: the watching card says the compaction ENDED (never still "running … hooks")',
-    !/hooks/i.test(m?.watched || '') && /ended|结束|終了/i.test(m?.watched || '') && !/finished|完成了|完了しました/.test(m?.watched || ''), m?.watched);
+    !/hooks/i.test(m?.watched || '') && gateOf(/ended|结束|終了/i.test(m?.watched || '')) && !/finished|完成了|完了しました/.test(m?.watched || ''), m?.watched);
   check('…compactInFlight() is false again, so a card built AFTERWARDS opens on the rewind-and-retry guidance the user actually needs',
-    m?.endInFlight === false && APOLOGY.test(m?.laterTxt || '') && !/hooks/i.test(m?.laterTxt || ''), JSON.stringify([m?.endInFlight, m?.laterTxt]));
+    m?.endInFlight === false && gateOf(APOLOGY.test(m?.laterTxt || '')) && !/hooks/i.test(m?.laterTxt || ''), JSON.stringify([m?.endInFlight, m?.laterTxt]));
   check(`…and that sentence still fits the 375px viewport (${m?.w}px)`, m?.inViewport === true && m?.w > 0 && m.w <= 375, m);
 }
 
@@ -684,15 +684,15 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
   })()`);
   const APOLOGY2 = /1.2 minutes|1–2|1〜2|do not press Stop|不要按 Stop|Stop を押さないで/;
   check('CONTROL: mid-compaction the card really is holding a LIVE stage (the failure needs something to get stuck on)',
-    m?.midInFlight === true && /PreCompact:guard/.test(m?.midTxt || ''), JSON.stringify([m?.midInFlight, m?.midTxt]));
+    m?.midInFlight === true && verdictOf(/PreCompact:guard/.test(m?.midTxt || '')), JSON.stringify([m?.midInFlight, m?.midTxt]));
   check('session death RETIRES the stage: the watching card stops claiming a compaction is running',
     m?.retired === true && m?.endInFlight === false && !/hooks/i.test(m?.watchedTxt || ''), JSON.stringify([m?.retired, m?.endInFlight, m?.watchedTxt]));
   check('…and it says ENDED, never FINISHED — nothing told us the compaction worked (round 5’s law at the third exit)',
-    /ended|结束|終了/i.test(m?.watchedTxt || '') && !/finished|完成了|完了しました/.test(m?.watchedTxt || ''), m?.watchedTxt);
+    gateOf(/ended|结束|終了/i.test(m?.watchedTxt || '')) && !/finished|完成了|完了しました/.test(m?.watchedTxt || ''), m?.watchedTxt);
   check('…so a card built after the session died opens on the rewind-and-retry guidance again',
-    APOLOGY2.test(m?.laterTxt || '') && !/hooks/i.test(m?.laterTxt || ''), m?.laterTxt);
+    gateOf(APOLOGY2.test(m?.laterTxt || '')) && !/hooks/i.test(m?.laterTxt || ''), m?.laterTxt);
   check('NEGATIVE CONTROL: a view that never compacted is NOT made to claim one ended (the retirement is guarded, not unconditional)',
-    m?.retiredAgain === false && APOLOGY2.test(m?.virginTxt || '') && !/ended|结束|終了/i.test(m?.virginTxt || ''), JSON.stringify([m?.retiredAgain, m?.virginTxt]));
+    m?.retiredAgain === false && gateOf(APOLOGY2.test(m?.virginTxt || '')) && !/ended|结束|終了/i.test(m?.virginTxt || ''), JSON.stringify([m?.retiredAgain, m?.virginTxt]));
   check(`…and the restored guidance still fits the 375px viewport (${m?.w}px)`, m?.inViewport === true && m?.w > 0 && m.w <= 375, m);
 }
 
@@ -748,7 +748,7 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
   {
     const { capsOf, BACKEND_CAPS } = require(path.join(repo, 'src/backend-caps.js'));
     check('this leg exercises DORMANT code: no harness declares inProgressTools, so no user sees a dot today',
-      Object.values(BACKEND_CAPS).every((r) => r.inProgressTools === false) && capsOf('claude').inProgressTools === false,
+      gateOf(Object.values(BACKEND_CAPS).every((r) => r.inProgressTools === false)) && capsOf('claude').inProgressTools === false,
       'a harness now claims a run set — re-read this leg: it is written as "the code is ready", not "the user sees this"');
   }
   const m = await evaljs(`(async () => {
@@ -832,16 +832,16 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
   const stages = m ? [m.s0, m.s1, m.s2, m.s3] : [];
   const names = ['before any rebuild', 'after the _onEditMessage status re-render', 'after _rerenderVisible', 'after a page-out/page-in (create path)'];
   const supHidden = stages.map((s) => s?.sup?.display);
-  check(`the tombstoned partial stays REMOVED through all three rebuilds (computed display: ${JSON.stringify(supHidden)}) — an edit op used to bring a retracted answer back on screen`, supHidden.length === 4 && supHidden.every((d) => d === 'none'), JSON.stringify(m?.s1?.sup));
+  check(`the tombstoned partial stays REMOVED through all three rebuilds (computed display: ${JSON.stringify(supHidden)}) — an edit op used to bring a retracted answer back on screen`, supHidden.length === 4 && verdictOf(supHidden.every((d) => d === 'none')), JSON.stringify(m?.s1?.sup));
   const rbOk = stages.map((s) => s?.rb).every((r) => r && r.display !== 'none' && r.opacity > 0 && r.opacity < 1 && r.tags === 1);
-  check(`…and the rollback stays struck: dimmed, exactly one tag, at every stage (${JSON.stringify(stages.map((s) => [s?.rb?.opacity, s?.rb?.tags]))})`, rbOk, JSON.stringify(stages.map((s) => s?.rb)));
+  check(`…and the rollback stays struck: dimmed, exactly one tag, at every stage (${JSON.stringify(stages.map((s) => [s?.rb?.opacity, s?.rb?.tags]))})`, verdictOf(rbOk), JSON.stringify(stages.map((s) => s?.rb)));
   const dotOk = stages.map((s) => s?.toolA).every((d) => d && d.cls === true && d.w === '6px');
-  check(`the EXECUTING tool keeps its dot through all three rebuilds (computed ::after width: ${JSON.stringify(stages.map((s) => s?.toolA?.w))}) — for a long-running tool no second delta ever comes`, dotOk, JSON.stringify(stages.map((s) => s?.toolA)));
+  check(`the EXECUTING tool keeps its dot through all three rebuilds (computed ::after width: ${JSON.stringify(stages.map((s) => s?.toolA?.w))}) — for a long-running tool no second delta ever comes`, verdictOf(dotOk), JSON.stringify(stages.map((s) => s?.toolA)));
   check('…and the view still holds the id, so the dot is re-derived from state, not remembered by an element', m?.inflightStillHeld === true, JSON.stringify(m?.inflightStillHeld));
   const ctrlOk = stages.map((s) => s?.ctrl).every((c) => c && c.display !== 'none' && c.opacity === 1 && c.tags === 0);
-  check(`NEGATIVE CONTROL: a message that was never retracted is untouched by every rebuild (${JSON.stringify(stages.map((s) => [s?.ctrl?.display, s?.ctrl?.opacity, s?.ctrl?.tags]))})`, ctrlOk, JSON.stringify(stages.map((s) => s?.ctrl)));
+  check(`NEGATIVE CONTROL: a message that was never retracted is untouched by every rebuild (${JSON.stringify(stages.map((s) => [s?.ctrl?.display, s?.ctrl?.opacity, s?.ctrl?.tags]))})`, verdictOf(ctrlOk), JSON.stringify(stages.map((s) => s?.ctrl)));
   const ctrlDotOk = stages.map((s) => s?.toolB).every((d) => d && d.cls === false && d.w !== '6px');
-  check(`NEGATIVE CONTROL: the PENDING-but-not-executing tool never gains a dot on a rebuild (${JSON.stringify(stages.map((s) => s?.toolB?.w))}) — re-deriving must not mark everything`, ctrlDotOk, JSON.stringify(stages.map((s) => s?.toolB)));
+  check(`NEGATIVE CONTROL: the PENDING-but-not-executing tool never gains a dot on a rebuild (${JSON.stringify(stages.map((s) => s?.toolB?.w))}) — re-deriving must not mark everything`, verdictOf(ctrlDotOk), JSON.stringify(stages.map((s) => s?.toolB)));
 }
 
 // ── ⑥ the FOURTH builder: the huge-session gap/seek renderer ───────────────
@@ -900,11 +900,11 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
   check(`a tombstoned partial reached through a GAP SLAB is REMOVED, like everywhere else (computed display: ${m?.sup?.display})`,
     m?.sup?.display === 'none', JSON.stringify(m?.sup));
   check(`…a codex ROLLBACK reached through a gap slab is struck in place: dimmed, exactly one tag (${JSON.stringify([m?.rb?.display, m?.rb?.opacity, m?.rb?.tags])})`,
-    m?.rb && m.rb.display !== 'none' && m.rb.opacity > 0 && m.rb.opacity < 1 && m.rb.tags === 1, JSON.stringify(m?.rb));
+    gateOf(m?.rb) && m.rb.display !== 'none' && m.rb.opacity > 0 && m.rb.opacity < 1 && m.rb.tags === 1, JSON.stringify(m?.rb));
   check(`…and the EXECUTING tool card keeps its dot on the gap path too (computed ::after width: ${m?.toolA?.w})`,
     m?.toolA?.cls === true && m?.toolA?.w === '6px', JSON.stringify(m?.toolA));
   check(`NEGATIVE CONTROL: a never-retracted message renders through the gap path untouched (${JSON.stringify([m?.ctrl?.display, m?.ctrl?.opacity, m?.ctrl?.tags])})`,
-    m?.ctrl && m.ctrl.display !== 'none' && m.ctrl.opacity === 1 && m.ctrl.tags === 0, JSON.stringify(m?.ctrl));
+    gateOf(m?.ctrl) && m.ctrl.display !== 'none' && m.ctrl.opacity === 1 && m.ctrl.tags === 0, JSON.stringify(m?.ctrl));
   check(`NEGATIVE CONTROL: the PENDING-but-not-executing tool gains no dot on the gap path (${m?.toolB?.w})`,
     m?.toolB?.cls === false && m?.toolB?.w !== '6px', JSON.stringify(m?.toolB));
   check(`the struck gap message still fits the 375px viewport (w=${m?.rbRect?.w})`, m?.rbRect?.inViewport === true, JSON.stringify(m?.rbRect));
@@ -982,7 +982,7 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
   check(`CONTROL: a LIVE ChatView was built (full dispatcher, not the read-only stub) with no chip on it yet (${JSON.stringify(m?.built)})`,
     m?.built?.handler === true && m?.built?.readOnly === false && m?.built?.chips === 0, JSON.stringify(m?.built));
   check(`CONTROL: the harness parked the turn, so the chip is UP before the session dies (${JSON.stringify(m?.parked)})`,
-    m?.parked?.chips === 1 && m?.parked?.state === 'requires_action' && /waiting for you|等你操作|あなた待ち/.test(m?.parked?.text || ''), JSON.stringify(m?.parked));
+    m?.parked?.chips === 1 && m?.parked?.state === 'requires_action' && verdictOf(/waiting for you|等你操作|あなた待ち/.test(m?.parked?.text || '')), JSON.stringify(m?.parked));
   check('CONTROL: …and the executing-tool dot is on the card too (the dormant twin of the same claim)', m?.parked?.dot === true, JSON.stringify(m?.parked));
   check('NEGATIVE CONTROL: ANOTHER session dying leaves this view untouched — the retirement is session-scoped, never unconditional',
     m?.other?.chips === 1 && m?.other?.state === 'requires_action' && m?.other?.dot === true && m?.other?.readOnly === false, JSON.stringify(m?.other));
@@ -995,4 +995,4 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
 }
 
 check('no uncaught page exceptions during the measurement', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
-done();
+done(); import { verdictOf, gateOf } from './lib/check.mjs';

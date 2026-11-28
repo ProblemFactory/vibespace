@@ -30,7 +30,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0, failed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e).slice(0, 600) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e).slice(0, 600) : ''}`); } };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-boot-phase-'));
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
@@ -38,7 +38,7 @@ process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }
 // ── ① the server phase ──
 async function phaseLegs(mod, tag = '') {
   const res = [];
-  const ok = (n, c, e) => res.push([tag + n, !!c, e]);
+  const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (res.push([tag + n, !!c, e])); };
   const { phaseOf } = mod;
   ok('phaseOf: a pending step = booting, naming it', JSON.stringify(phaseOf({ steps: [{ name: 'restore', done: true }, { name: 'sessions-index', done: false }], startedAt: 0, now: 5000, stuckMs: 90000 })) === JSON.stringify({ phase: 'booting', waitingOn: ['sessions-index'], stuck: [] }));
   ok('phaseOf: every step done = ready', phaseOf({ steps: [{ name: 'a', done: true }], startedAt: 0, now: 1, stuckMs: 90000 }).phase === 'ready');
@@ -50,7 +50,7 @@ async function phaseLegs(mod, tag = '') {
   const recs = [];
   const bp = mod.create({ now: () => clock, stuckMs: 90000, sessionsCount: () => 44, record: (ev) => recs.push(ev), log: { log() { }, warn() { } }, testHoldMs: 8000, setTimer });
   const restored = bp.step('restore'), indexed = bp.step('sessions-index');
-  ok('before arm(): booting, waiting on listen (nothing is ready before the listen callback registered the rest)', bp.snapshot().phase === 'booting' && bp.snapshot().waitingOn.includes('listen'), bp.snapshot());
+  ok('before arm(): booting, waiting on listen (nothing is ready before the listen callback registered the rest)', bp.snapshot().phase === 'booting' && verdictOf(bp.snapshot().waitingOn.includes('listen')), bp.snapshot());
   restored(); indexed();
   ok('steps done but not armed: still booting', bp.snapshot().phase === 'booting');
   bp.arm();
@@ -67,33 +67,33 @@ async function phaseLegs(mod, tag = '') {
   advance(30000);
   const s2 = bp2.snapshot(); bp2.snapshot();
   ok('…ready at the 90 s cap with stuck = [sessions-index] (the fleet is not held hostage)', s2.phase === 'ready' && JSON.stringify(s2.stuck) === '["sessions-index"]', s2);
-  ok('…and ONE boot-stuck telemetry event naming what it waited on', recs.length === 1 && recs[0].kind === 'event' && recs[0].name === 'boot-stuck' && /sessions-index/.test(recs[0].detail), recs);
+  ok('…and ONE boot-stuck telemetry event naming what it waited on', recs.length === 1 && recs[0].kind === 'event' && recs[0].name === 'boot-stuck' && verdictOf(/sessions-index/.test(recs[0].detail)), recs);
   return res;
 }
 
 // ── ② the client ladder ──
 async function ladderLegs(L, tag = '') {
   const res = [];
-  const ok = (n, c, e) => res.push([tag + n, !!c, e]);
+  const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); return (res.push([tag + n, !!c, e])); };
   ok('ladderWait: 1 → 2 → 5 → 10 s, then give up', JSON.stringify([1, 2, 3, 4, 5].map((n) => L.ladderWait(n))) === JSON.stringify([1000, 2000, 5000, 10000, null]));
   const waits = []; const sleep = async (ms) => { waits.push(ms); };
   const never = () => new Promise(() => { });
   // "not a hang" is the ladder's own count (lane wall-clock-ratchet-down: `< 2000 ms` judged the machine): every try
   // ended on the stall timer (why: stall), the waits are the ladder's, the fifth gives up — the await returned
   const g = await L.ladderJson('/api/layouts', { fetchImpl: never, sleep, stallMs: 30 });
-  ok('a request that never answers: stalls at the bound, climbs the whole ladder, gives up after 5 tries (not a hang)', g.gaveUp && g.gaveUp.tries === 5 && g.gaveUp.fail.why === 'stall' && JSON.stringify(waits) === '[1000,2000,5000,10000]', { g, waits });
+  ok('a request that never answers: stalls at the bound, climbs the whole ladder, gives up after 5 tries (not a hang)', gateOf(g.gaveUp) && g.gaveUp.tries === 5 && g.gaveUp.fail.why === 'stall' && JSON.stringify(waits) === '[1000,2000,5000,10000]', { g, waits });
   waits.length = 0; let n = 0;
   const flaky = async () => (++n < 3 ? { ok: false, status: 502 } : { ok: true, status: 200, json: async () => ({ saved: {} }) });
   const r = await L.ladderJson('/api/layouts', { fetchImpl: flaky, sleep, stallMs: 30 });
-  ok('two 502s then an answer: the JSON, after waits 1 s + 2 s', r.json && JSON.stringify(waits) === '[1000,2000]', { r, waits });
-  ok('reasonOf: the reason in words (stall / http / starting / network)', L.reasonOf({ why: 'stall' }, 10000).params.n === 10 && L.reasonOf({ why: 'http', status: 502 }).params.code === 502 && /waiting on/.test(L.reasonOf({ why: 'starting', waitingOn: ['restore'] }).key) && L.reasonOf({ why: 'network' }).key === 'network error');
+  ok('two 502s then an answer: the JSON, after waits 1 s + 2 s', gateOf(r.json) && JSON.stringify(waits) === '[1000,2000]', { r, waits });
+  ok('reasonOf: the reason in words (stall / http / starting / network)', L.reasonOf({ why: 'stall' }, 10000).params.n === 10 && L.reasonOf({ why: 'http', status: 502 }).params.code === 502 && gateOf(/waiting on/.test(L.reasonOf({ why: 'starting', waitingOn: ['restore'] }).key)) && L.reasonOf({ why: 'network' }).key === 'network error');
   // waitServerReady
   const seq = (answers) => { let i = 0; return async () => { const a = answers[Math.min(i++, answers.length - 1)]; if (a === 'down') throw new Error('ECONNREFUSED'); if (typeof a === 'number') return { ok: false, status: a }; return { ok: true, status: 200, json: async () => a }; }; };
   waits.length = 0; const st = [];
   const w1 = await L.waitServerReady({ fetchImpl: seq([{ phase: 'booting', sessions: 3 }, { phase: 'booting', sessions: 20 }, { phase: 'booting', sessions: 44 }, { phase: 'ready', sessions: 44 }]), sleep, onStatus: (b) => st.push(b.sessions) });
-  ok('waitServerReady: booting ×3 then ready → ok, the line counted 3 → 20 → 44 sessions, polled at 1 s', w1.ok && JSON.stringify(st) === '[3,20,44]' && JSON.stringify(waits) === '[1000,1000,1000]', { w1, st, waits });
+  ok('waitServerReady: booting ×3 then ready → ok, the line counted 3 → 20 → 44 sessions, polled at 1 s', gateOf(w1.ok) && JSON.stringify(st) === '[3,20,44]' && JSON.stringify(waits) === '[1000,1000,1000]', { w1, st, waits });
   const w2 = await L.waitServerReady({ fetchImpl: seq([404]), sleep });
-  ok('waitServerReady: 404 (an older server, no phase) = ready', w2.ok && w2.boot.legacy);
+  ok('waitServerReady: 404 (an older server, no phase) = ready', gateOf(w2.ok) && verdictOf(w2.boot.legacy));
   waits.length = 0;
   const w3 = await L.waitServerReady({ fetchImpl: seq(['down', 'down', { phase: 'booting', sessions: 1 }, 'down', 'down', 'down', 'down', 'down']), sleep });
   ok('waitServerReady: booting answers reset the ladder; 5 failures in a row give up', !w3.ok && w3.tries === 5 && JSON.stringify(waits) === '[1000,2000,1000,1000,2000,5000,10000]', { w3, waits });
@@ -103,7 +103,7 @@ async function ladderLegs(L, tag = '') {
   return res;
 }
 
-const report = (rows) => rows.forEach(([n, c, e]) => check(n, c, e));
+const report = (rows) => rows.forEach(([n, c, e]) => check(n, verdictOf(c), e));
 const phaseMod = require(path.join(repo, 'src/server/boot-phase.js'));
 report(await phaseLegs(phaseMod));
 // src/lib is ESM in a typeless package: import a .mjs copy (no reparse warning), like the mutants below
@@ -117,19 +117,19 @@ report(await ladderLegs(ladderMod));
 // ── ③ the wiring ──
 const server = read('server.js'), app = read('src/lib/app.js'), layout = read('src/lib/layout.js'), ops = read('src/server/ops-routes.js'), sessions = read('src/routes/sessions.js');
 const restoreAt = server.indexOf('restoreSessions(); hub.turn(() => { bootBrowserKeeper();'), armAt = server.indexOf('bootPhase.arm()');
-check('server.js: the phase is armed in the listen callback, AFTER restoreSessions (restore done, the first sweep warmed) — in the listen step\'s last turn (B-cd4b: the step in turns)', restoreAt > 0 && armAt > restoreAt && /bootRestored\(\); require\('\.\/src\/routes\/sessions'\)\.warmSessions\(\)[^\n]*\.finally\(bootSessionsIndexed\)/.test(server));
-check('ops-routes: GET /api/boot answers the snapshot (no-store); /api/version carries the phase', /app\.get\('\/api\/boot'/.test(ops) && /no-store/.test(ops) && /phase: bootPhase \? bootPhase\.snapshot\(\)\.phase : 'ready'/.test(ops));
-check('sessions route: warmSessions() shares the in-flight sweep (one sweep, never two)', /_warmSweep = \(\) => \{\s*if \(!_sweepInFlight\) _sweepInFlight = _runSessionsSweep\(\)/.test(sessions));
-check('app.ready: gates on awaitBootReady() BEFORE loadAutoSave (a page opened mid-boot waits, then loads by itself)', /if \(!await awaitBootReady\(\)\) return;\s*await this\.layoutManager\.loadAutoSave\(\);/.test(app));
+check('server.js: the phase is armed in the listen callback, AFTER restoreSessions (restore done, the first sweep warmed) — in the listen step\'s last turn (B-cd4b: the step in turns)', restoreAt > 0 && armAt > restoreAt && verdictOf(/bootRestored\(\); require\('\.\/src\/routes\/sessions'\)\.warmSessions\(\)[^\n]*\.finally\(bootSessionsIndexed\)/.test(server)));
+check('ops-routes: GET /api/boot answers the snapshot (no-store); /api/version carries the phase', gateOf(/app\.get\('\/api\/boot'/.test(ops)) && gateOf(/no-store/.test(ops)) && verdictOf(/phase: bootPhase \? bootPhase\.snapshot\(\)\.phase : 'ready'/.test(ops)));
+check('sessions route: warmSessions() shares the in-flight sweep (one sweep, never two)', verdictOf(/_warmSweep = \(\) => \{\s*if \(!_sweepInFlight\) _sweepInFlight = _runSessionsSweep\(\)/.test(sessions)));
+check('app.ready: gates on awaitBootReady() BEFORE loadAutoSave (a page opened mid-boot waits, then loads by itself)', verdictOf(/if \(!await awaitBootReady\(\)\) return;\s*await this\.layoutManager\.loadAutoSave\(\);/.test(app)));
 const las = layout.slice(layout.indexOf('async loadAutoSave()'), layout.indexOf('async _offerResumeAll('));
 check('loadAutoSave: no raw fetch left — /api/layouts, /api/active, /api/sessions ride _bootJson', !/\bfetch\(/.test(las) && (las.match(/this\._bootJson\('/g) || []).length === 3, (las.match(/fetch\([^)]*\)/g) || []));
 const rs = layout.slice(layout.indexOf('async restoreState(state)'), layout.indexOf('// Restore windows — use gridBounds'));
 check('restoreState: its /api/active + /api/sessions ride _bootJson', (rs.match(/this\._bootJson\('\/api\/(active|sessions)'\)/g) || []).length === 2 && !/await fetch\('\/api\/(active|sessions)'\)/.test(rs));
-check('the update dialog: its reload waits for the boot phase (waitServerReady) before location.reload', /const reload = async \(msg\) => \{\s*done = true;\s*const r = await waitServerReady\(/.test(app));
-check('the stale-tab reload: waits for ready, then burns its once-per-version key only as the reload fires (lane think-tools-phone: the look is stale-watch.js staleLook, its effects wired in app.js)', /waitReady: \(\) => waitServerReady\(\{ \.\.\.bootDeps\(\) \}\),/.test(app) && /reload: \(v\) => \{\s*this\._staleReloadAt = Date\.now\(\);[\s\S]{0,300}?const key = keyOf\(v\);\s*setTimeout\(\(\) => \{ sessionStorage\.setItem\(key, String\(Date\.now\(\)\)\); location\.reload\(\); \}, 800\);/.test(app) && /if \(d\.pending\(\) \|\| d\.store\.reloaded\(srv\)\) return 'none';/.test(read('src/lib/stale-watch.js')));
+check('the update dialog: its reload waits for the boot phase (waitServerReady) before location.reload', verdictOf(/const reload = async \(msg\) => \{\s*done = true;\s*const r = await waitServerReady\(/.test(app)));
+check('the stale-tab reload: waits for ready, then burns its once-per-version key only as the reload fires (lane think-tools-phone: the look is stale-watch.js staleLook, its effects wired in app.js)', gateOf(/waitReady: \(\) => waitServerReady\(\{ \.\.\.bootDeps\(\) \}\),/.test(app)) && gateOf(/reload: \(v\) => \{\s*this\._staleReloadAt = Date\.now\(\);[\s\S]{0,300}?const key = keyOf\(v\);\s*setTimeout\(\(\) => \{ sessionStorage\.setItem\(key, String\(Date\.now\(\)\)\); location\.reload\(\); \}, 800\);/.test(app)) && verdictOf(/if \(d\.pending\(\) \|\| d\.store\.reloaded\(srv\)\) return 'none';/.test(read('src/lib/stale-watch.js'))));
 const splash = read('src/lib/boot-splash.js');
-check('boot-splash: giving up records ONE boot-stuck telemetry event naming the request, then shows the reason + Reload', /track\('event', 'boot-stuck'/.test(splash) && /The server did not answer \{what\} \(\{reason\}\) after \{n\} tries\./.test(splash) && /location\.reload\(\)/.test(splash));
-check('boot-splash: a request that gave up NEVER resolves (restoring from nothing would let the first autosave overwrite the layout)', /if \(r\.gaveUp\) \{ splashGiveUp\(r\.gaveUp\); return new Promise\(\(\) => \{ \}\); \}/.test(splash));
+check('boot-splash: giving up records ONE boot-stuck telemetry event naming the request, then shows the reason + Reload', gateOf(/track\('event', 'boot-stuck'/.test(splash)) && gateOf(/The server did not answer \{what\} \(\{reason\}\) after \{n\} tries\./.test(splash)) && verdictOf(/location\.reload\(\)/.test(splash)));
+check('boot-splash: a request that gave up NEVER resolves (restoring from nothing would let the first autosave overwrite the layout)', verdictOf(/if \(r\.gaveUp\) \{ splashGiveUp\(r\.gaveUp\); return new Promise\(\(\) => \{ \}\); \}/.test(splash)));
 
 // ── ④ patched-copy controls: each mutant must turn its leg red ──
 const mutant = (rel, from, to, ext) => {
@@ -146,23 +146,23 @@ const redsOf = (rows) => rows.filter(([, c]) => !c).map(([n]) => n);
 {
   const f = mutant('src/server/boot-phase.js', "const waitingOn = steps.filter((s) => !s.done).map((s) => s.name);", 'const waitingOn = [];', '.js');
   const reds = f ? redsOf(await phaseLegs(require(f), 'mutant ')) : ['(anchor moved)'];
-  check(`control: phaseOf that ignores pending steps (ready = merely listening) turns ① red (${reds.length} red)`, f && reds.length >= 3, reds);
+  check(`control: phaseOf that ignores pending steps (ready = merely listening) turns ① red (${reds.length} red)`, gateOf(f) && reds.length >= 3, reds);
 }
 {
   const f = mutant('src/server/boot-phase.js', "        try { record({ kind: 'event', name: 'boot-stuck', detail }); } catch { }\n", '', '.js');
   const reds = f ? redsOf(await phaseLegs(require(f), 'mutant ')) : ['(anchor moved)'];
-  check(`control: a stuck cap that records nothing turns the boot-stuck leg red (${reds.length} red)`, f && reds.some((n) => /boot-stuck/.test(n)), reds);
+  check(`control: a stuck cap that records nothing turns the boot-stuck leg red (${reds.length} red)`, gateOf(f) && verdictOf(reds.some((n) => /boot-stuck/.test(n))), reds);
 }
 {
   const f = mutant('src/lib/boot-ladder.js', "  try { return await Promise.race([go, stall]); } finally { clearTimeout(timer); }", '  try { return await go; } finally { clearTimeout(timer); }', '.mjs');
   // a hang must not hang the control itself: race the mutant's legs against 3 s
   const reds = f ? await Promise.race([import(pathToFileURL(f).href).then((m) => ladderLegs(m, 'mutant ')).then(redsOf), new Promise((r) => setTimeout(() => r(["(hung — the stall bound is gone)"]), 1200))]) : ['(anchor moved)'];
-  check(`control: a ladder without the stall bound hangs on a request that never answers (${reds.join(' | ').slice(0, 80)})`, f && reds.length >= 1, reds);
+  check(`control: a ladder without the stall bound hangs on a request that never answers (${reds.join(' | ').slice(0, 80)})`, gateOf(f) && reds.length >= 1, reds);
 }
 {
   const f = mutant('src/lib/boot-ladder.js', "    if (r.ok && r.json && r.json.phase !== 'booting') return { ok: true, boot: r.json };", "    if (r.ok && r.json) return { ok: true, boot: r.json };", '.mjs');
   const reds = f ? redsOf(await import(pathToFileURL(f).href).then((m) => ladderLegs(m, 'mutant '))) : ['(anchor moved)'];
-  check(`control: the old reload rule (any answer = reload) turns the waitServerReady legs red (${reds.length} red)`, f && reds.some((n) => /booting ×3/.test(n)), reds);
+  check(`control: the old reload rule (any answer = reload) turns the waitServerReady legs red (${reds.length} red)`, gateOf(f) && verdictOf(reds.some((n) => /booting ×3/.test(n))), reds);
 }
 // ── ⑤ the stale-tab step (lane phone-back-reload) ──
 const STALE_ROWS = [ // [name, input, step]
@@ -184,12 +184,12 @@ report(staleLegs(ladderMod));
   check('stale-tab: the boot + the reload + two reconnects of a bundle that never matches ⇒ ONE reload, ONE notice, then quiet', reloads === 1 && notices === 1 && steps.join() === 'reload,notice,quiet,quiet', steps);
 }
 check('stale-tab wiring: the look reads staleTabStep with the per-tab stamps (app.js: reloaded-for / stale-said in sessionStorage), the notice is said once (its own stamp + a diary row), a reload writes its diary row first (lane think-tools-phone: stale-watch.js staleLook)',
-  /const step = staleTabStep\(\{ bundle: d\.bundle, server: srv, reloaded: d\.store\.reloaded\(srv\), noticed: d\.store\.noticed\(srv\), pending: d\.pending\(\) \}\);/.test(read('src/lib/stale-watch.js'))
-  && /if \(step === 'notice'\) \{ d\.say\(null\); d\.store\.markNoticed\(srv\); d\.note\('notice'\); d\.notice\(srv\); return 'notice'; \}/.test(read('src/lib/stale-watch.js'))
-  && /d\.note\('reload'\);\s*d\.reload\(srv\);/.test(read('src/lib/stale-watch.js'))
-  && /const keyOf = \(v\) => 'vibespace\.reloaded-for\.' \+ v, noticeKeyOf = \(v\) => 'vibespace\.stale-said\.' \+ v;/.test(app)
-  && /store: \{ reloaded: \(v\) => !!sessionStorage\.getItem\(keyOf\(v\)\), noticed: \(v\) => !!sessionStorage\.getItem\(noticeKeyOf\(v\)\), markNoticed: \(v\) => \{ const noticeKey = noticeKeyOf\(v\); sessionStorage\.setItem\(noticeKey, String\(Date\.now\(\)\)\); \} \},/.test(app)
-  && /notice: \(v\) => showToast\(t\('This tab still runs VibeSpace \{old\} after its one reload for \{new\}/.test(app));
+  gateOf(/const step = staleTabStep\(\{ bundle: d\.bundle, server: srv, reloaded: d\.store\.reloaded\(srv\), noticed: d\.store\.noticed\(srv\), pending: d\.pending\(\) \}\);/.test(read('src/lib/stale-watch.js')))
+  && gateOf(/if \(step === 'notice'\) \{ d\.say\(null\); d\.store\.markNoticed\(srv\); d\.note\('notice'\); d\.notice\(srv\); return 'notice'; \}/.test(read('src/lib/stale-watch.js')))
+  && gateOf(/d\.note\('reload'\);\s*d\.reload\(srv\);/.test(read('src/lib/stale-watch.js')))
+  && gateOf(/const keyOf = \(v\) => 'vibespace\.reloaded-for\.' \+ v, noticeKeyOf = \(v\) => 'vibespace\.stale-said\.' \+ v;/.test(app))
+  && gateOf(/store: \{ reloaded: \(v\) => !!sessionStorage\.getItem\(keyOf\(v\)\), noticed: \(v\) => !!sessionStorage\.getItem\(noticeKeyOf\(v\)\), markNoticed: \(v\) => \{ const noticeKey = noticeKeyOf\(v\); sessionStorage\.setItem\(noticeKey, String\(Date\.now\(\)\)\); \} \},/.test(app))
+  && verdictOf(/notice: \(v\) => showToast\(t\('This tab still runs VibeSpace \{old\} after its one reload for \{new\}/.test(app)));
 // round 2: the app's OWN method (its text from app.js) over fake timers — one tab, one document per reload
 const methodOf = (src) => { const a = src.indexOf('  async _checkBundleFreshness() {'), b = a >= 0 ? src.indexOf('\n  }\n', a) : -1; return b > a ? src.slice(a, b + 4) : null; };
 async function staleReplay(src, { afterBundle = '2.369.357' } = {}) {
@@ -223,7 +223,7 @@ async function staleReplay(src, { afterBundle = '2.369.357' } = {}) {
 {
   const f = mutant('src/lib/boot-ladder.js', "  return noticed ? 'quiet' : 'notice';", "  return 'quiet';", '.mjs');
   const reds = f ? redsOf(staleLegs(await import(pathToFileURL(f).href))) : ['(anchor moved)'];
-  check(`control: a step without the notice (the pre-fix silence) turns exactly the notice row red (${reds.length} red)`, f && reds.length === 1 && /STILL the old bundle/.test(reds[0]), reds);
+  check(`control: a step without the notice (the pre-fix silence) turns exactly the notice row red (${reds.length} red)`, gateOf(f) && reds.length === 1 && verdictOf(/STILL the old bundle/.test(reds[0])), reds);
 }
 console.log(failed ? `FAILED (${failed} of ${passed + failed})` : `ALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

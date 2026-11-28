@@ -52,7 +52,7 @@ const SRC = fs.readFileSync(path.join(REPO, MODEL), 'utf8');
 const J = JSON.stringify;
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
 
 /** The toy apply law (layout.js _applyRemoteState under guard 10): a desktop-class record sets the desktop's arrangement
  *  AND membership, a phone-class one its membership only. */
@@ -78,7 +78,7 @@ const rec = (seq, desktopId, viewport, arr, mem, extra = {}) => ({ type: 'layout
 
 function legs(Mod, { quiet = false } = {}) {
   const failed = [];
-  const leg = (c, n, extra) => { if (!c) failed.push(n); if (!quiet) ok(c, n, extra); };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`leg: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (!c) failed.push(n); if (!quiet) ok(verdictOf(c), n, extra); };
 
   // ① writerClass
   leg(Mod.writerClass(rec(1, 'd', 'phone')) === 'phone' && Mod.writerClass({ desktopId: 'd', state: { viewport: 'phone' } }) === 'phone', '① a phone stamp — on the layout-sync or in its record — is the phone class');
@@ -96,16 +96,16 @@ function legs(Mod, { quiet = false } = {}) {
   {
     const p = new Map([['phone:a', rec(7, 'a', 'phone')], ['b', rec(3, 'b')], ['a', rec(5, 'a', 'desktop')]]);
     const r = Mod.releaseNext(p, new Map());
-    leg(r.next && r.next[0] === 'b' && !r.drop.length, '③ the lowest seq goes first, across classes and desktops (not the map\'s order)', J(r));
+    leg(gateOf(r.next) && r.next[0] === 'b' && !r.drop.length, '③ the lowest seq goes first, across classes and desktops (not the map\'s order)', J(r));
     const q = new Map([['a', { desktopId: 'a', resync: true }], ['phone:a', rec(2, 'a', 'phone')]]);
     leg(Mod.releaseNext(q, new Map()).next[0] === 'a', '③ a re-read\'s record (no seq) goes first');
     const t = new Map([['x', rec(4, 'x')], ['y', rec(4, 'y')]]);
     leg(Mod.releaseNext(t).next[0] === 'x', '③ equal seqs keep the map\'s order (the stable sort it replaces)');
     const o = Mod.releaseNext({ a: rec(9, 'a'), b: rec(8, 'b') });
-    leg(o.next && o.next[0] === 'b', '③ a plain object of slots is read like the map');
+    leg(gateOf(o.next) && o.next[0] === 'b', '③ a plain object of slots is read like the map');
     const applied = new Map([['a', 6]]);
     const d = Mod.releaseNext(new Map([['a', rec(5, 'a', 'desktop')], ['phone:a', rec(6, 'a', 'phone')], ['b', rec(2, 'b')], ['phone:a2', rec(7, 'a', 'phone')]]), applied);
-    leg(J(d.drop) === J(['a', 'phone:a']) && d.next && d.next[0] === 'b', '③ a record NOT NEWER than the newest applied for its desktop is dropped (5 and 6 under 6), another desktop\'s older seq is not', J(d));
+    leg(J(d.drop) === J(['a', 'phone:a']) && gateOf(d.next) && d.next[0] === 'b', '③ a record NOT NEWER than the newest applied for its desktop is dropped (5 and 6 under 6), another desktop\'s older seq is not', J(d));
     leg(Mod.releaseNext(new Map([['a', { desktopId: 'a', resync: true }]]), applied).drop.length === 0, '③ a re-read\'s record (no seq) is never dropped by the seq rule');
     leg(Mod.releaseNext(new Map(), applied).next === null && Mod.releaseNext(null).next === null, '③ nothing waiting ⇒ nothing next');
     const m = new Map();
@@ -182,7 +182,7 @@ function legs(Mod, { quiet = false } = {}) {
     leg(recordStamp({ updatedAt: 7, state: { updatedAt: 3 } }) === 7 && recordStamp({ resync: true, state: { updatedAt: 3 } }) === 3 && recordStamp({ state: {} }) === 0 && recordStamp(null) === 0 && recordStamp({ updatedAt: 'x' }) === 0, '⑩ recordStamp: the layout-sync\'s server stamp, else its record\'s (a re-read); 0 when it names none (an older server) or garbage');
     const st = new Map([['desk-a', 5000]]);
     const rows = [[3000, 'desk-a', true], [5000, 'desk-a', false], [6000, 'desk-a', false], [0, 'desk-a', false], [1000, 'desk-b', false]];
-    leg(rows.every(([t, d, want]) => behindStamp(st, { desktopId: d, ...(t ? { updatedAt: t } : {}) }) === want) && behindStamp(null, { updatedAt: 1 }) === false, '⑩ behindStamp: a record OLDER than the newest applied for its desktop is behind; equal, newer, unstamped and another desktop\'s are not', J(rows.map(([t, d]) => behindStamp(st, { desktopId: d, updatedAt: t }))));
+    leg(gateOf(rows.every(([t, d, want]) => behindStamp(st, { desktopId: d, ...(t ? { updatedAt: t } : {}) }) === want)) && behindStamp(null, { updatedAt: 1 }) === false, '⑩ behindStamp: a record OLDER than the newest applied for its desktop is behind; equal, newer, unstamped and another desktop\'s are not', J(rows.map(([t, d]) => behindStamp(st, { desktopId: d, updatedAt: t }))));
     const n = new Map(); noteStamp(n, 'desk-a', 5000); noteStamp(n, 'desk-a', 3000); noteStamp(n, 'desk-a', 'x'); noteStamp(n, null, 9); noteStamp(null, 'desk-a', 1);
     leg(n.get('desk-a') === 5000 && n.get('') === 9 && n.size === 2, '⑩ noteStamp keeps the newest per desktop — never lowered; garbage ignored; \'\' is the legacy record', J([...n]));
     // the wake: a relayed record applied (5000), the re-read's (5000, the record on disk), then a broadcast from before the sleep
@@ -202,24 +202,24 @@ console.log('— ⑥ the wiring (src/lib/layout.js, src/lib/desktop-manager.js)'
 {
   const L = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
   const D = fs.readFileSync(path.join(REPO, 'src/lib/desktop-manager.js'), 'utf8');
-  ok(/import \{ writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp \} from '\.\/layout-model\.js';/.test(L) && /import \{ applyForViewport, arrangementFor \} from '\.\/desktop-record\.js';/.test(L) && /import \{ deferKeysOf \} from '\.\/layout-model\.js';/.test(D), '⑥ layout.js and desktop-manager.js import the model (the ONE rule, no copy)');
+  ok(gateOf(/import \{ writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp \} from '\.\/layout-model\.js';/.test(L)) && gateOf(/import \{ applyForViewport, arrangementFor \} from '\.\/desktop-record\.js';/.test(L)) && verdictOf(/import \{ deferKeysOf \} from '\.\/layout-model\.js';/.test(D)), '⑥ layout.js and desktop-manager.js import the model (the ONE rule, no copy)');
   const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js'));
   const writers = libFiles.flatMap((f) => (fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8').match(/_pendingRemote\??\.set\(/g) || []).map(() => f));
-  ok(J(writers) === J(['layout.js']) && L.includes('    this._pendingRemote.set(deferKey(msg), msg);\n'), '⑥ ONE writer of the deferred slot in src/lib (layout.js _deferRemote), keyed by deferKey — desktop AND writer class', J(writers));
-  ok(L.includes('      const { next, drop } = releaseNext(this._pendingRemote, this._appliedSeq);\n      for (const k of drop) this._pendingRemote.delete(k);\n      if (next) { this._pendingRemote.delete(next[0]); this._handleRemoteSync(next[1]); }\n'), '⑥ the drain asks releaseNext with the applied seqs, drops what it drops and applies ONE record per tick');
-  ok(/  _handleRemoteSync\(msg\) \{\n    noteApplied\(this\._appliedSeq, msg\);/.test(L), '⑥ every apply (live, drained, re-read, cached) notes its seq first');
-  ok(/app\.ws\.onStateChange\(\(connected\) => \{ if \(connected\) this\._appliedSeq\.clear\(\); \}\);/.test(L) && /this\._lastRemoteSeq = 0;/.test(L), '⑥ a reconnect clears the applied seqs with `_lastRemoteSeq` (the server\'s seq restarts with the socket — guard 1)');
-  ok(L.includes('      if (this._restoring || this._pointerDown || this._pendingRemote.size) { this._deferRemote(msg); return; }\n'), '⑥ a record that arrives while others still wait (the drain after a pointerup) joins them — never applied before an older one');
-  ok(L.includes("    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, writer: writerClass(msg), dupsLeft: msg.dupsLeft });") && !/\(msg\.viewport \?\? msg\.state\?\.viewport\) === 'phone'/.test(L), '⑥ the apply\'s layer law (guard 10) asks the SAME writerClass the slot keys by — no second spelling');
-  ok(/const phoneKey = deferKeysOf\(key\)\[1\], phonePend = this\._pendingRemote\.get\(phoneKey\);\n\s+if \(phonePend && \(phonePend\.receivedAt \|\| 0\) < startedAt\) this\._pendingRemote\.delete\(phoneKey\);/.test(L), '⑥ the re-read drops a phone record deferred BEFORE it was asked (the read holds it), keeps one received while it was in flight');
-  ok(D.includes('for (const k of deferKeysOf(id)) this.app.layoutManager?._pendingRemote?.delete(k);'), '⑥ a deleted desktop forgets BOTH its deferred slots (never a ghost phone record the drain fills)');
-  ok(/if \(msg\.seq <= this\._lastRemoteSeq\) return;/.test(L) && /const EPS = 0\.002;/.test(L), '⑥ guards 1 and 4 untouched (the seq drop of a stale echo; the 0.002 apply epsilon)');
+  ok(J(writers) === J(['layout.js']) && verdictOf(L.includes('    this._pendingRemote.set(deferKey(msg), msg);\n')), '⑥ ONE writer of the deferred slot in src/lib (layout.js _deferRemote), keyed by deferKey — desktop AND writer class', J(writers));
+  ok(verdictOf(L.includes('      const { next, drop } = releaseNext(this._pendingRemote, this._appliedSeq);\n      for (const k of drop) this._pendingRemote.delete(k);\n      if (next) { this._pendingRemote.delete(next[0]); this._handleRemoteSync(next[1]); }\n')), '⑥ the drain asks releaseNext with the applied seqs, drops what it drops and applies ONE record per tick');
+  ok(verdictOf(/  _handleRemoteSync\(msg\) \{\n    noteApplied\(this\._appliedSeq, msg\);/.test(L)), '⑥ every apply (live, drained, re-read, cached) notes its seq first');
+  ok(gateOf(/app\.ws\.onStateChange\(\(connected\) => \{ if \(connected\) this\._appliedSeq\.clear\(\); \}\);/.test(L)) && verdictOf(/this\._lastRemoteSeq = 0;/.test(L)), '⑥ a reconnect clears the applied seqs with `_lastRemoteSeq` (the server\'s seq restarts with the socket — guard 1)');
+  ok(verdictOf(L.includes('      if (this._restoring || this._pointerDown || this._pendingRemote.size) { this._deferRemote(msg); return; }\n')), '⑥ a record that arrives while others still wait (the drain after a pointerup) joins them — never applied before an older one');
+  ok(gateOf(L.includes("    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, writer: writerClass(msg), dupsLeft: msg.dupsLeft });")) && !/\(msg\.viewport \?\? msg\.state\?\.viewport\) === 'phone'/.test(L), '⑥ the apply\'s layer law (guard 10) asks the SAME writerClass the slot keys by — no second spelling');
+  ok(verdictOf(/const phoneKey = deferKeysOf\(key\)\[1\], phonePend = this\._pendingRemote\.get\(phoneKey\);\n\s+if \(phonePend && \(phonePend\.receivedAt \|\| 0\) < startedAt\) this\._pendingRemote\.delete\(phoneKey\);/.test(L)), '⑥ the re-read drops a phone record deferred BEFORE it was asked (the read holds it), keeps one received while it was in flight');
+  ok(verdictOf(D.includes('for (const k of deferKeysOf(id)) this.app.layoutManager?._pendingRemote?.delete(k);')), '⑥ a deleted desktop forgets BOTH its deferred slots (never a ghost phone record the drain fills)');
+  ok(gateOf(/if \(msg\.seq <= this\._lastRemoteSeq\) return;/.test(L)) && verdictOf(/const EPS = 0\.002;/.test(L)), '⑥ guards 1 and 4 untouched (the seq drop of a stale echo; the 0.002 apply epsilon)');
   const hrs = L.indexOf('  _handleRemoteSync(msg) {'), hrsBody = L.slice(hrs, L.indexOf('\n  }\n', hrs));
-  ok(hrs > 0 && /if \(behindStamp\(this\._appliedStamps, msg\)\) \{[^\n]*return; \}\n\s+noteStamp\(this\._appliedStamps, msg\.desktopId, recordStamp\(msg\)\); dm\?\.noteStamp\?\.\(msg\.desktopId, recordStamp\(msg\)\);/.test(hrsBody) && hrsBody.indexOf('behindStamp(') < hrsBody.indexOf('cacheRemoteState(') && hrsBody.indexOf('behindStamp(') < hrsBody.indexOf('_applyRemoteState('), '⑩ the apply (live, drained, re-read, cached) asks behindStamp BEFORE it caches or applies a record, then notes the stamp — the base of the next write (lane layout-stale-record-sync)');
-  ok(/app\.ws\.onGlobal\(\(msg\) => \{ if \(msg\.type === 'layout-sync-ack' && msg\.updatedAt\) this\.app\.desktopManager\?\.noteStamp\?\.\(msg\.desktopId, msg\.updatedAt\); \}\);/.test(L) && !/this\._appliedStamps\.clear\(\)/.test(L), '⑩ the ack notes the page\'s own write\'s stamp; the applied stamps survive a reconnect (the seq restarts, the stamp does not)');
+  ok(hrs > 0 && gateOf(/if \(behindStamp\(this\._appliedStamps, msg\)\) \{[^\n]*return; \}\n\s+noteStamp\(this\._appliedStamps, msg\.desktopId, recordStamp\(msg\)\); dm\?\.noteStamp\?\.\(msg\.desktopId, recordStamp\(msg\)\);/.test(hrsBody)) && hrsBody.indexOf('behindStamp(') < hrsBody.indexOf('cacheRemoteState(') && hrsBody.indexOf('behindStamp(') < hrsBody.indexOf('_applyRemoteState('), '⑩ the apply (live, drained, re-read, cached) asks behindStamp BEFORE it caches or applies a record, then notes the stamp — the base of the next write (lane layout-stale-record-sync)');
+  ok(gateOf(/app\.ws\.onGlobal\(\(msg\) => \{ if \(msg\.type === 'layout-sync-ack' && msg\.updatedAt\) this\.app\.desktopManager\?\.noteStamp\?\.\(msg\.desktopId, msg\.updatedAt\); \}\);/.test(L)) && !/this\._appliedStamps\.clear\(\)/.test(L), '⑩ the ack notes the page\'s own write\'s stamp; the applied stamps survive a reconnect (the seq restarts, the stamp does not)');
   const sends = [...L.matchAll(/this\.app\.ws\.send\(\{ type: 'layout-sync',[^\n]*\}\);/g), ...D.matchAll(/this\.app\.ws\.send\(\{ type: 'layout-sync',[^\n]*\}\);/g)].map((m) => m[0]);
-  ok(sends.length === 4 && sends.every((x) => /, base: [^,}]*stampOf/.test(x)), '⑩ every layout-sync a page sends names its `base` (desktop-manager stampOf) — 4 sends: the autosave\'s two, the owed recipe\'s own save (lane phone-resume-keeps-layout r4 N1), the switch\'s', J(sends));
-  ok(/import \{ noteStamp \} from '\.\/layout-model\.js';/.test(D) && /stampOf\(desktopId\) \{ return this\._stamps\.get\(desktopId \|\| ''\) \|\| undefined; \}/.test(D) && /this\.noteStamp\(id, dState\?\.autoSave\?\.updatedAt\);/.test(D) && /this\.noteStamp\(d, rec\.updatedAt\);/.test(D), '⑩ desktop-manager: the base is the boot read\'s stamp, a relayed record\'s, the ack\'s and a refusal\'s record kept (the stale refusal is adopted)');
+  ok(sends.length === 4 && verdictOf(sends.every((x) => /, base: [^,}]*stampOf/.test(x))), '⑩ every layout-sync a page sends names its `base` (desktop-manager stampOf) — 4 sends: the autosave\'s two, the owed recipe\'s own save (lane phone-resume-keeps-layout r4 N1), the switch\'s', J(sends));
+  ok(gateOf(/import \{ noteStamp \} from '\.\/layout-model\.js';/.test(D)) && gateOf(/stampOf\(desktopId\) \{ return this\._stamps\.get\(desktopId \|\| ''\) \|\| undefined; \}/.test(D)) && gateOf(/this\.noteStamp\(id, dState\?\.autoSave\?\.updatedAt\);/.test(D)) && verdictOf(/this\.noteStamp\(d, rec\.updatedAt\);/.test(D)), '⑩ desktop-manager: the base is the boot read\'s stamp, a relayed record\'s, the ack\'s and a refusal\'s record kept (the stale refusal is adopted)');
 }
 
 // ⑨ THE READ CENSUS — THE LAYER LAW's read half over src/lib/layout.js (acorn: comments / strings never count)
@@ -365,11 +365,11 @@ const readGreen = (c) => !c.strays.length && !c.unknownSites.length && !c.deadSi
   for (const p of PLANTS) {
     if (!ok(L.split(p.find).length === 2, `⑨ RED control ${p.tag}: the planted line exists once in layout.js (the control judges this source)`)) continue;
     const x = readCensus(L.replace(p.find, p.repl));
-    ok(!readGreen(x) && p.red(x), `⑨ RED control ${p.tag}: the census turns RED and names it`, J({ strays: x.strays, badAsks: x.badAsks, unknown: x.unknownSites, dead: x.deadSites, receivers: x.badReceivers, retired: x.retired }));
+    ok(!readGreen(x) && verdictOf(p.red(x)), `⑨ RED control ${p.tag}: the census turns RED and names it`, J({ strays: x.strays, badAsks: x.badAsks, unknown: x.unknownSites, dead: x.deadSites, receivers: x.badReceivers, retired: x.retired }));
   }
   // the blind-spot control: the same reads in a comment and in a string are no read (a regex census would count both)
   const blind = readCensus(L.replace('  _applyRemoteState(state, {', "  // if (state.sidebarOpen) this.app.sidebar.toggle(state.sidebarOpen); rw.gridBounds\n  _blind() { return 'state.sidebarOpen rw.gridBounds msg.state.theme'; }\n  _applyRemoteState(state, {"));
-  ok(readGreen(blind) && blind.tally.subset === c.tally.subset, '⑨ control: the reads inside a comment and a string count nothing (acorn reads code only)', J({ strays: blind.strays }));
+  ok(gateOf(readGreen(blind)) && blind.tally.subset === c.tally.subset, '⑨ control: the reads inside a comment and a string count nothing (acorn reads code only)', J({ strays: blind.strays }));
 }
 
 console.log('— ⑦ negative controls (patched copies, scripts/mutant-copy.mjs)');
@@ -384,13 +384,13 @@ const MUTANTS = [
 ];
 for (const m of MUTANTS) {
   const found = SRC.includes(m.find);
-  ok(found, `control ${m.tag}: the patched line exists in the model (the control judges the current source)`);
+  ok(verdictOf(found), `control ${m.tag}: the patched line exists in the model (the control judges the current source)`);
   if (!found) continue;
   const Mod = M.load(MODEL, SRC.replace(m.find, m.repl), m.tag);
   const f = legs(Mod, { quiet: true });
-  ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its leg RED (${f.length} legs failed: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
+  ok(verdictOf(f.some((n) => m.expect.test(n))), `control ${m.tag}: the patched copy turns its leg RED (${f.length} legs failed: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
 }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(verdictOf(r.pass), r.name, r.detail);
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail || realFailed.length ? 1 : 0);
+process.exit(fail || realFailed.length ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

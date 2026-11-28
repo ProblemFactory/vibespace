@@ -56,7 +56,7 @@ const quiet = (orig) => (...a) => { const s = String(a[0] || ''); if (/^\[(chann
 console.log = quiet(console.log); console.warn = quiet(console.warn); console.info = quiet(console.info);
 
 let passed = 0, failed = 0;
-function ok(cond, name, detail) {
+function ok(cond, name, detail) { if (typeof cond !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; say(`  ✓ ${name}`); }
   else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900)}`); }
   return !!cond;
@@ -596,7 +596,7 @@ const run = async (name, A) => { const t = performance.now(); let r; try { r = a
 
 say('① a pass builds the roster once — counted at the owner\'s shape (358 groups, 724 rows, 339 members, 561 ended, 36 live, 7 Task Groups)');
 const headCounts = {};
-for (const leg of ['count:list', 'count:listFor', 'count:announce', 'count:access', 'count:sweep', 'ratchet', 'memo:run']) { const r = await run(leg, HEAD); headCounts[leg] = r; ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of ['count:list', 'count:listFor', 'count:announce', 'count:access', 'count:sweep', 'ratchet', 'memo:run']) { const r = await run(leg, HEAD); headCounts[leg] = r; ok(verdictOf(r.ok), `${leg}: ${r.detail}`); }
 
 say(`  [${(performance.now() - t00).toFixed(0)} ms]`); say('② nothing seen changes — the corpus through master and this tree in lockstep');
 async function equality() {
@@ -617,7 +617,7 @@ async function equality() {
   {
     const view = readAll(xs[1]).list || [];
     const raw = view.filter((g) => g && g.lastRaw && typeof g.lastRaw === 'object');
-    ok(raw.length > 0 && raw.every((g) => typeof g.lastRaw.kind === 'string' && g.lastRaw.kind !== 'message') && view.every((g) => 'lastRaw' in g),
+    ok(raw.length > 0 && gateOf(raw.every((g) => typeof g.lastRaw.kind === 'string' && g.lastRaw.kind !== 'message')) && verdictOf(view.every((g) => 'lastRaw' in g)),
       'the group VIEW carries lastRaw after the sweep closed a group (a system line\'s structure — the Channels list words it in the reader\'s language)', view.slice(0, 2).map((g) => ({ id: g.id, lastText: g.lastText, lastRaw: g.lastRaw })));
   }
   await step('a rename BETWEEN passes (no broadcast)', async (x) => { await tick(); x.sessions.get('w-L3').name = 'gamma renamed'; await tick(); return readAll(x); });
@@ -678,17 +678,17 @@ async function writerLegs(A, { report = true, only = null } = {}) {
 await writerLegs(HEAD);
 
 say(`  [${(performance.now() - t00).toFixed(0)} ms]`); say('④ frozen entries · ⑤ the transcript trees · ⑥ the gap');
-for (const leg of ['frozen', 'rename:between-passes', 'tree:whole-vs-unreadable', 'tree:hung', 'tree:hung-late', 'tree:appears', 'gone:true-when-it-acts', 'gone:said-asks-nothing', 'gap:leading-edge', 'gap:burst']) { const r = await run(leg, HEAD); ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of ['frozen', 'rename:between-passes', 'tree:whole-vs-unreadable', 'tree:hung', 'tree:hung-late', 'tree:appears', 'gone:true-when-it-acts', 'gone:said-asks-nothing', 'gap:leading-edge', 'gap:burst']) { const r = await run(leg, HEAD); ok(verdictOf(r.ok), `${leg}: ${r.detail}`); }
 
 say('⑦ server.js hands the roster builder + its fingerprint (the suite cannot boot server.js: the line is pinned by name)');
 {
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  ok(/require\('\.\/src\/server\/roster-pass\.js'\)\.sessionRoster\(\{ sessions: \(\) => activeSessions, tasks: \(\) => tasks, addressableId, statusKey: sessionStatusKey \}\); return \{ liveSessions: R\.build, rosterFingerprint: R\.fingerprint, rosterRead: R\.readUnread \};/.test(srv), 'server.js: liveSessions = sessionRoster(...).build, rosterFingerprint = its fingerprint, rosterRead = its readUnread (B-43bc: the roster\'s deciding door) — the same session map, Task Groups, addressableId and sessionStatusKey');
-  ok(/function broadcastActiveSessions\(\) \{ try \{ channelsWiring\.rosterChanged\(\); \} catch \{\} try \{ channelsWiring\.groups\.noteRoster\(\); \}/.test(srv), 'server.js: the session list\'s ONE notify point drops the memo BEFORE noteRoster');
+  ok(verdictOf(/require\('\.\/src\/server\/roster-pass\.js'\)\.sessionRoster\(\{ sessions: \(\) => activeSessions, tasks: \(\) => tasks, addressableId, statusKey: sessionStatusKey \}\); return \{ liveSessions: R\.build, rosterFingerprint: R\.fingerprint, rosterRead: R\.readUnread \};/.test(srv)), 'server.js: liveSessions = sessionRoster(...).build, rosterFingerprint = its fingerprint, rosterRead = its readUnread (B-43bc: the roster\'s deciding door) — the same session map, Task Groups, addressableId and sessionStatusKey');
+  ok(verdictOf(/function broadcastActiveSessions\(\) \{ try \{ channelsWiring\.rosterChanged\(\); \} catch \{\} try \{ channelsWiring\.groups\.noteRoster\(\); \}/.test(srv)), 'server.js: the session list\'s ONE notify point drops the memo BEFORE noteRoster');
   const tgw = fs.readFileSync(path.join(REPO, 'src/server/task-groups-wiring.js'), 'utf8'); // the store's onChange, «make room» 2026-11-17: moved whole out of server.js
-  ok(/onChange: \(ch\) => \{\n(?:[^\n]*\n){0,3}?[^\n]*try \{ channelsWiring\(\)\.rosterChanged\(\); \} catch \{ \}/.test(tgw) && /task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bchannelsWiring: \(\) => channelsWiring\b/.test(srv), 'server.js: the Task Groups\' change drops the memo (the store\'s onChange in src/server/task-groups-wiring.js, server.js hands it the channelsWiring getter)');
+  ok(gateOf(/onChange: \(ch\) => \{\n(?:[^\n]*\n){0,3}?[^\n]*try \{ channelsWiring\(\)\.rosterChanged\(\); \} catch \{ \}/.test(tgw)) && verdictOf(/task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bchannelsWiring: \(\) => channelsWiring\b/.test(srv)), 'server.js: the Task Groups\' change drops the memo (the store\'s onChange in src/server/task-groups-wiring.js, server.js hands it the channelsWiring getter)');
   const wsrc = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf8');
-  ok(/const rosterPass = require\('\.\/roster-pass\.js'\)\.createRosterPass\(liveSessions, \{ fingerprint: rosterFingerprint \}\);\n\s*liveSessions = rosterPass\.read;/.test(wsrc) && (wsrc.match(/\bliveSessions\b/g) || []).length >= 4, 'channels-wiring: every reader below (channels engine, groups engine, liveness) is handed the ONE roster door');
+  ok(gateOf(/const rosterPass = require\('\.\/roster-pass\.js'\)\.createRosterPass\(liveSessions, \{ fingerprint: rosterFingerprint \}\);\n\s*liveSessions = rosterPass\.read;/.test(wsrc)) && (wsrc.match(/\bliveSessions\b/g) || []).length >= 4, 'channels-wiring: every reader below (channels engine, groups engine, liveness) is handed the ONE roster door');
 }
 
 say(`  [${(performance.now() - t00).toFixed(0)} ms]`); say(`RED CONTROLS — the counting legs on master itself (${FULL ? 'the owner\'s shape' : 'a small shape: 60 groups, 12 live, 3 Task Groups — ROSTER_FULL=1 runs the owner\'s'}; the ratchet at its stated 400 × 36 × 10)`);
@@ -730,10 +730,10 @@ for (const [name, file, edits, leg] of MUTANTS) {
   ]) {
     const A = rpMutant(tag, [edit]);   // the fingerprint lives in sessionRoster: this tree's wiring, the mutant's fingerprint
     const bad = await writerLegs(A, { report: false, only: writer });
-    ok(bad.some((b) => writer.test(b)), `mutant «the fingerprint misses ${what}» is RED at its writer (${bad.length} red: ${[...new Set(bad.map((b) => b.split(':')[0]))].join(' | ')})`);
+    ok(verdictOf(bad.some((b) => writer.test(b))), `mutant «the fingerprint misses ${what}» is RED at its writer (${bad.length} red: ${[...new Set(bad.map((b) => b.split(':')[0]))].join(' | ')})`);
   }
 }
 
 say(`\nbefore / after${FULL ? ' at the owner\'s shape' : ' (master at the small shape; ROSTER_FULL=1 for the owner\'s)'}: ${BASE_A ? `master list() ${before['count:list'].n} builds ${before['count:list'].ms.toFixed(0)} ms, sweep ${before['count:sweep'].n} builds + ${before['count:sweep'].syncN} readdirSync (${before['count:sweep'].ms.toFixed(0)} ms), ratchet ${before.ratchet.k.toFixed(0)} ×` : '(master not in this clone)'} · this tree list() ${headCounts['count:list'].n} build ${headCounts['count:list'].ms.toFixed(1)} ms, sweep ${headCounts['count:sweep'].n} build + ${headCounts['count:sweep'].syncN} readdirSync (${headCounts['count:sweep'].ms.toFixed(0)} ms), ratchet ${headCounts.ratchet.k.toFixed(1)} × (${(performance.now() - t00).toFixed(0)} ms)`);
 say(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -56,7 +56,7 @@ try { execSync('command -v dtach', { stdio: 'ignore' }); } catch { console.log('
 const VNC_ENV = await vncEnv();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -109,13 +109,13 @@ const PRE = M.write('src/accounts.js', preSrc, 'pre-fix');
 {
   const body = (src) => (/ensureSessionPoolLink\(poolId, sessKey, memberId[^]*?\n  \}\n/.exec(src) || [''])[0];
   check('the control is the pre-fix writer: ensureSessionPoolLink without its notify, nothing else changed (a patched copy outside the tree)',
-    NOTIFY_LINE.test(accSrc) && /_notifyLinks\(\)/.test(body(accSrc)) && !/_notifyLinks\(\)/.test(body(preSrc)) && preSrc.split('\n').length === accSrc.split('\n').length - 1 && !PRE.startsWith(repo), { pre: PRE });
+    gateOf(NOTIFY_LINE.test(accSrc)) && gateOf(/_notifyLinks\(\)/.test(body(accSrc))) && !/_notifyLinks\(\)/.test(body(preSrc)) && preSrc.split('\n').length === accSrc.split('\n').length - 1 && !PRE.startsWith(repo), { pre: PRE });
 }
 // the landing's handler holds EXACTLY two statements since 0c578dfdc (B-87fd identity unit 4, 主开发 r3680): the landing counter that
 // accounts.landedEpoch() reads, and the one call of the rows road — nothing else (a second broadcast beside it would not match); the
 // count of callers (exactly one) and the method's header stay as they were (hosted run 45584145109, 主开发 r4209)
 check('the rows road the control cuts is the landing of the kept sign-in facts alone: onLanded → (its landing counter) + _notifyRowsSoon, its one caller (B-360d)',
-  /onLanded: \(\) => \{ this\._landedN = \(this\._landedN \|\| 0\) \+ 1; this\._notifyRowsSoon\(\); \}/.test(accSrc) && (accSrc.match(/\._notifyRowsSoon\(/g) || []).length === 1 && /\n  _notifyRowsSoon\(\) \{/.test(accSrc));
+  gateOf(/onLanded: \(\) => \{ this\._landedN = \(this\._landedN \|\| 0\) \+ 1; this\._notifyRowsSoon\(\); \}/.test(accSrc)) && (accSrc.match(/\._notifyRowsSoon\(/g) || []).length === 1 && verdictOf(/\n  _notifyRowsSoon\(\) \{/.test(accSrc)));
 
 // ── the in-process hook: capture the server's AccountManager; a command file drives the ENGINE's writer ──
 const CMD = path.join(ROOT, 'cmd.json'), RES = path.join(ROOT, 'res.json');
@@ -283,10 +283,10 @@ const leg = async (label, sid, to, move) => {
   while (Date.now() - t0 < 10000) { after = await evalJs(chipExpr(sid)); if (after.words && after.words.includes(NAME[to])) break; await sleep(250); }
   const ms = Date.now() - t0;
   const frames = (await evalJs('__bb.frames')) - f0;
-  check(`${label}: the server moves the conversation ${from ? NAME[from] + ' → ' : ''}${NAME[to]} (${r && r.ok ? 'writer ok' : S(r)}; the link now resolves to ${NAME[serverSays] || serverSays})`, r && r.ok && serverSays === to && !!from, { r, serverSays, before });
+  check(`${label}: the server moves the conversation ${from ? NAME[from] + ' → ' : ''}${NAME[to]} (${r && r.ok ? 'writer ok' : S(r)}; the link now resolves to ${NAME[serverSays] || serverSays})`, gateOf(r) && gateOf(r.ok) && serverSays === to && !!from, { r, serverSays, before });
   check(`${label}: the title chip names ${NAME[to]} within 10 s (${ms} ms, ${frames} active-sessions frame(s)) — words "${after && after.words}", shown "${after && after.shown}"`,
-    !!after && after.words.includes(NAME[to]) && after.shown.includes(SHORT[to]) && after.tip.includes(NAME[to]) && ms < 10000, { before, after });
-  check(`${label}: …on the SAME chip node, visible (patched in place, never a new chip)`, !!after && after.mark === label && after.visible, after);
+    !!after && gateOf(after.words.includes(NAME[to])) && gateOf(after.shown.includes(SHORT[to])) && gateOf(after.tip.includes(NAME[to])) && ms < 10000, { before, after });
+  check(`${label}: …on the SAME chip node, visible (patched in place, never a new chip)`, !!after && after.mark === label && verdictOf(after.visible), after);
   return { before, after };
 };
 
@@ -301,7 +301,7 @@ try {
 
   const S1 = await createSession('chat');
   check('a pooled claude chat session is created through the real spawn path (stub CLI behind the real chat-wrapper), on its own per-session link to Alpha', !!S1 && (await cur(S1)) === A, { S1 });
-  check('its window opens with the pooled title chip naming Alpha', await attach(S1, 'badge one') && (await evalJs(chipExpr(S1))).words.includes('Alpha Max'), await evalJs(chipExpr(S1)));
+  check('its window opens with the pooled title chip naming Alpha', gateOf(await attach(S1, 'badge one')) && verdictOf((await evalJs(chipExpr(S1))).words.includes('Alpha Max')), await evalJs(chipExpr(S1)));
 
   console.log('① a standalone chat window, the engine\'s per-session switch');
   await leg('① standalone', S1, B, () => command({ op: 'link', pool: POOL, sid: S1, member: B }));
@@ -317,12 +317,12 @@ try {
 
   console.log('③ a terminal-mode window');
   const S3 = await createSession('terminal');
-  check('a pooled TERMINAL session is created (stub CLI behind the real pty-wrapper) and its window shows the chip', !!S3 && await attach(S3, 'badge term', 'terminal'), { S3, chip: S3 && await evalJs(chipExpr(S3)) });
+  check('a pooled TERMINAL session is created (stub CLI behind the real pty-wrapper) and its window shows the chip', !!S3 && verdictOf(await attach(S3, 'badge term', 'terminal')), { S3, chip: S3 && await evalJs(chipExpr(S3)) });
   await leg('③ terminal', S3, other(await cur(S3)), async () => command({ op: 'link', pool: POOL, sid: S3, member: other(await cur(S3)) }));
 
   console.log('④ a tab-group guest (its chip on its TAB, the host in front)');
   const S2 = await createSession('chat');
-  check('a second pooled chat window opens', !!S2 && await attach(S2, 'badge two'));
+  check('a second pooled chat window opens', !!S2 && verdictOf(await attach(S2, 'badge two')));
   const grouped = await evalJs(`(() => {
     const byS = (sid) => app.wm.windows.get([...app.sessions.entries()].find(([, s]) => s.sessionId === sid)[0]);
     const host = byS(${S(S2)}), guest = byS(${S(S1)});
@@ -333,14 +333,14 @@ try {
   })()`);
   await sleep(600);
   const g0 = await evalJs(chipExpr(S1));
-  check(`S1 is a GUEST of S2's chain, not the tab in front (its chip rides its tab: ${S(g0.words)})`, grouped.tabs.length === 2 && grouped.active === grouped.host && g0.tabbed && !!g0.words, { grouped, g0 });
+  check(`S1 is a GUEST of S2's chain, not the tab in front (its chip rides its tab: ${S(g0.words)})`, grouped.tabs.length === 2 && grouped.active === grouped.host && gateOf(g0.tabbed) && !!g0.words, { grouped, g0 });
   await leg('④ tab-group guest', S1, A, () => command({ op: 'link', pool: POOL, sid: S1, member: A }));
   await leg('④ …and the host tab in front', S2, other(await cur(S2)), async () => command({ op: 'link', pool: POOL, sid: S2, member: other(await cur(S2)) }));
 
   console.log('⑤ side by side (a split pane)');
   const split = await evalJs(`(() => { const byS = (sid) => app.wm.windows.get([...app.sessions.entries()].find(([, s]) => s.sessionId === sid)[0]); const host = byS(${S(S2)}); app.wm.splitActive(host._tabChain); const ch = host._tabChain; return { layout: ch.layout, pair: ch.split && ch.split.pair }; })()`);
   await sleep(700);
-  check(`the pair is side by side (${S(split)})`, split.layout === 'split' && (await evalJs(chipExpr(S1))).split, { split, c: await evalJs(chipExpr(S1)) });
+  check(`the pair is side by side (${S(split)})`, split.layout === 'split' && verdictOf((await evalJs(chipExpr(S1))).split), { split, c: await evalJs(chipExpr(S1)) });
   await leg('⑤ split pane', S1, B, () => command({ op: 'link', pool: POOL, sid: S1, member: B }));
 
   console.log('…and nothing moves: every chip survives two polls and a frame untouched');
@@ -361,7 +361,7 @@ try {
   await click('#toolbar .toolbar-title').catch(() => click('#taskbar'));
   await evalJs('app.layoutManager._doAutoSave(); true');
   const saved = await (async () => { for (let i = 0; i < 40; i++) { try { const j = JSON.stringify(await (await fetch(`http://127.0.0.1:${PORT}/api/layouts`)).json()); if (j.includes(S1) && j.includes(S2)) return true; } catch {} await sleep(250); } return false; })();
-  check('the layout (both chats, their pair) reached the server', saved);
+  check('the layout (both chats, their pair) reached the server', verdictOf(saved));
   await cdp('Page.reload', { ignoreCache: false });
   await sleep(500);
   await waitApp();
@@ -369,19 +369,19 @@ try {
   const restored = await waitFor(`(() => { const c = ${chipExpr(S1)}; return !!(c && c.words && c.words.includes('Beta Max')); })()`, 25000);
   const rc = await evalJs(chipExpr(S1));
   const rs = await evalJs(`(() => { const e = [...app.sessions.entries()].find(([, s]) => s.sessionId === ${S(S1)}); const w = e && app.wm.windows.get(e[0]); return w ? { spec: w._openSpec && { action: w._openSpec.action, serverId: w._openSpec.serverId || null, bsid: w._openSpec.backendSessionId || null }, sessionId: e[1].sessionId } : null; })()`);
-  check(`after the reload the layout replay restored S1's window with its chip (${S(rc.words)}; openSpec ${S(rs && rs.spec)})`, restored && !!rs, { rc, rs });
+  check(`after the reload the layout replay restored S1's window with its chip (${S(rc.words)}; openSpec ${S(rs && rs.spec)})`, gateOf(restored) && !!rs, { rc, rs });
   await leg('⑥ layout-restored', S1, A, () => command({ op: 'link', pool: POOL, sid: S1, member: A }));
 
   console.log('⑦ the Stage hero');
   await evalJs(`app.settings.set('desktop.dynamicEnabled', true); true`);
   await sleep(600);
-  check('the Stage is enabled', await evalJs('!!(app.stage && app.stage.enabled)'));
+  check('the Stage is enabled', verdictOf(await evalJs('!!(app.stage && app.stage.enabled)')));
   await evalJs(`(async () => { app.stage.saveSlot({ left: 0.3, top: 0, width: 0.7, height: 0.8 }); await app.stage.enter(); return true; })()`);
   await sleep(600);
   const S4 = await createSession('chat');
-  check('a pooled chat session opened while staged', !!S4 && await attach(S4, 'badge hero'));
+  check('a pooled chat session opened while staged', !!S4 && verdictOf(await attach(S4, 'badge hero')));
   const heroOk = await waitFor(`(() => { const h = app.stage._heroWinId && app.wm.windows.get(app.stage._heroWinId); return !!(h && (app.sessions.get(h.id) || {}).sessionId === ${S(S4)}); })()`, 12000);
-  check('…is the Stage hero', heroOk && (await evalJs(chipExpr(S4))).hero, await evalJs(chipExpr(S4)));
+  check('…is the Stage hero', gateOf(heroOk) && verdictOf((await evalJs(chipExpr(S4))).hero), await evalJs(chipExpr(S4)));
   await leg('⑦ Stage hero', S4, other(await cur(S4)), async () => command({ op: 'link', pool: POOL, sid: S4, member: other(await cur(S4)) }));
   await evalJs('(async () => { await app.stage.leave(); return true; })()');
   await sleep(800);
@@ -409,7 +409,7 @@ try {
     console.log(`  · the move at +0 ms; the rows road landed at ${landed.length ? landed.map((t) => '+' + t + ' ms').join(', ') : 'no time in the window'} (the server); ${seen.length} frame(s): ${seen.map(said).join(' · ') || 'none'}`);
     console.log(`  · THE GAP: the links frame ${links ? '+' + links.ms + ' ms' : 'none'}, the rows frame ${rows ? '+' + rows.ms + ' ms' : 'none in 12 s'}${links && rows ? ' ⇒ ' + (rows.ms - links.ms) + ' ms apart' : ''}`);
     check(`two roads: the fixed writer's move reaches the page by a frame carrying S1's link (${links ? '+' + links.ms + ' ms' : 'none'}), and at the window's end the chip still names ${NAME[to]} on the same node (no late flip): "${c1.words}"`,
-      !!(r && r.ok && w.ok && back && back.ok) && !!links && c1.mark === 'two-roads' && c1.words.includes(NAME[to]) && c1.visible, { w, back, seen: seen.slice(0, 6), c1 });
+      !!(r && r.ok && w.ok && back && back.ok) && !!links && c1.mark === 'two-roads' && gateOf(c1.words.includes(NAME[to])) && verdictOf(c1.visible), { w, back, seen: seen.slice(0, 6), c1 });
   }
   // r2168 (2): the pre-fix writer (no links frame) with the rows road LEFT as it is: the page still hears the move within
   // the window, by a frame whose one change is that link — an edit that silences the rows road is red HERE, by name.
@@ -431,7 +431,7 @@ try {
     const seen = await framesSince(p0);
     console.log(`  · ${seen.length} frame(s) after the move: ${seen.map(said).join(' · ') || 'none'}`);
     check(`the second road alone tells the page when what a row shows changed: no links frame (the pre-fix writer), and a frame whose one change is S1's link came ${hit ? 'at +' + hit.ms + ' ms' : 'at no time in 12 s'}; the chip names ${NAME[to]} on the same node: "${c1 && c1.words}"`,
-      !!(r && r.ok) && serverSays === to && !!hit && !!c1 && c1.mark === 'rows-alone' && !!c1.words && c1.words.includes(NAME[to]) && c1.visible, { r, serverSays, seen: seen.slice(0, 6), c1 });
+      !!(r && r.ok) && serverSays === to && !!hit && !!c1 && c1.mark === 'rows-alone' && !!c1.words && gateOf(c1.words.includes(NAME[to])) && verdictOf(c1.visible), { r, serverSays, seen: seen.slice(0, 6), c1 });
   }
 
   console.log('CONTROL: the pre-fix writer (no notify) on the same page');
@@ -465,9 +465,9 @@ try {
     check('the control ran over a window with no unrelated frame (≤ 3 attempts)', !!judged);
     if (judged) {
       const { from, to, r, serverSays, c0, c1, syncs, held } = judged;
-      check(`the pre-fix writer moves the link too (${NAME[from]} → ${NAME[serverSays]})`, r.ok && serverSays === to, r);
+      check(`the pre-fix writer moves the link too (${NAME[from]} → ${NAME[serverSays]})`, gateOf(r.ok) && serverSays === to, r);
       check(`…and the chip STAYS on ${NAME[from]} for 12 s (no frame; the rows road cut, ${held} landing(s) held; the page re-judged ${syncs} merge(s) of the stale one) — the owner's report, reproduced: "${c1.words}"`,
-        c0.words.includes(NAME[from]) && c1.words.includes(NAME[from]) && !c1.words.includes(NAME[to]) && syncs >= 2, { c0, c1, syncs });
+        gateOf(c0.words.includes(NAME[from])) && gateOf(c1.words.includes(NAME[from])) && !c1.words.includes(NAME[to]) && syncs >= 2, { c0, c1, syncs });
       await leg('CONTROL → the fixed writer re-points to the same member', S1, to, () => command({ op: 'link', pool: POOL, sid: S1, member: to }));
     }
   }
@@ -479,4 +479,4 @@ try {
   try { console.error(fs.readFileSync(path.join(ROOT, 'server.log'), 'utf8').split('\n').filter((l) => /error|Error|✗/.test(l)).slice(-15).join('\n')); } catch {}
 }
 console.log(`\n${failed ? 'FAIL' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

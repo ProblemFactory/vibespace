@@ -26,7 +26,7 @@ const M = require('../src/desktop-apps.js');
 const D = require('../src/desktop-display.js');
 
 let pass = 0, fail = 0;
-const ok = (c, msg) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}`); } };
+const ok = (c, msg) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 console.log('① PURE — the sink in the plan, the record, the verdict, the table');
@@ -34,22 +34,22 @@ const bins = { 'dbus-daemon': '/usr/bin/dbus-daemon', 'xdg-desktop-portal': '/us
 const sinkOn = M.notifySinkOf({ python: '/usr/bin/python3', sink: '/r/src/notify-sink.py' });
 const pl = M.portalPlan({ dir: '/d/da-1', display: ':7', bins, why: 'flatpak', notify: sinkOn });
 const svc = pl.files.find((f) => f.file === '/d/da-1/portal/services/org.freedesktop.Notifications.service');
-ok(pl.ok && pl.notify === 'on' && svc && svc.text === '[D-BUS Service]\nName=org.freedesktop.Notifications\nExec=/usr/bin/python3 /r/src/notify-sink.py\n', 'portalPlan + the sink: ONE activatable service file — the interpreter + the sink file, no shell, no argv secret');
+ok(gateOf(pl.ok) && pl.notify === 'on' && gateOf(svc) && svc.text === '[D-BUS Service]\nName=org.freedesktop.Notifications\nExec=/usr/bin/python3 /r/src/notify-sink.py\n', 'portalPlan + the sink: ONE activatable service file — the interpreter + the sink file, no shell, no argv secret');
 ok(pl.journal === '/d/da-1/portal/notify.jsonl' && pl.env.VS_NOTIFY_JOURNAL === pl.journal && !('VS_NOTIFY_JOURNAL' in pl.appEnv), 'the journal path rides the BUS env (every activated service inherits it), never the app\'s');
 const said = (n) => M.portalPlan({ dir: '/d', display: ':1', bins, notify: n });
 ok(said(null).notify === 'off' && said(M.notifySinkOf({ mode: 'off', python: '/p', sink: '/s' })).notify === 'off' && !said(null).files.some((f) => /Notifications/.test(f.file)), 'no sink facts / desktop.appNotifications = off ⇒ notify \'off\', no service file');
 ok(said(M.notifySinkOf({ python: null, sink: '/s' })).notify === 'unavailable: python3 not found on this machine' && said(M.notifySinkOf({ python: '/p', gi: false, sink: '/s' })).notify === 'unavailable: python3 has no GObject introspection (python3-gi) on this machine' && said(M.notifySinkOf({ python: '/p', sink: null })).notify === 'unavailable: the notifications sink is not installed on this machine', 'a machine without python3 / python3-gi / the sink file ⇒ `unavailable: <why>` (the app still launches)');
-ok(said({ python: '/p q/python3', sink: '/s' }).notify.startsWith('unavailable: the sink path has a space'), 'a path with a space ⇒ unavailable (an Exec= line splits on it)');
+ok(verdictOf(said({ python: '/p q/python3', sink: '/s' }).notify.startsWith('unavailable: the sink path has a space')), 'a path with a space ⇒ unavailable (an Exec= line splits on it)');
 ok(M.appNotificationsMode('bogus') === 'on' && M.APP_NOTIFICATIONS_DEFAULT === 'on' && M.appNotificationsMode('off') === 'off', 'desktop.appNotifications: on | off, default on (the owner\'s path-1 ruling)');
 const nr = M.notifyRecord(JSON.stringify({ nid: 3, app: 'JASP', summary: 'Export finished', body: 'x'.repeat(5000), urgency: 'critical', at: 9 }));
-ok(nr && nr.nid === 3 && nr.app === 'JASP' && nr.urgency === 'critical' && nr.body.length === M.NOTIFY_BODY_MAX && nr.at === 9, `notifyRecord: a sink line → the record, the body capped at ${M.NOTIFY_BODY_MAX}`);
+ok(gateOf(nr) && nr.nid === 3 && nr.app === 'JASP' && nr.urgency === 'critical' && nr.body.length === M.NOTIFY_BODY_MAX && nr.at === 9, `notifyRecord: a sink line → the record, the body capped at ${M.NOTIFY_BODY_MAX}`);
 ok(M.notifyRecord('{"nid":0,"summary":"a"}') === null && M.notifyRecord('not json') === null && M.notifyRecord('{"nid":2,"summary":"","body":" "}') === null && M.notifyRecord('{"nid":2,"summary":"a","urgency":"loud"}').urgency === 'normal' && M.notifyRecord('{"nid":2,"closed":true,"at":4}').closed === true, 'notifyRecord: a bad id / broken JSON / nothing to say ⇒ null; an unknown urgency ⇒ normal; a closed line kept');
 ok(M.notifyRecord(JSON.stringify({ nid: 1, summary: 'a\u0007b\u001bc', body: '' })).summary === 'abc', 'notifyRecord: control characters are dropped from the words');
 const vd = (u, visible) => M.notifyVerdict({ note: { urgency: u }, visible });
-ok(vd('normal', true).toast && !vd('normal', true).forYou && vd('normal', false).forYou && vd('critical', true).forYou && !M.notifyVerdict({ note: { closed: true }, visible: false }).toast, 'notifyVerdict: always a toast in the window; For you when critical OR no pane shows the window');
+ok(gateOf(vd('normal', true).toast) && !vd('normal', true).forYou && gateOf(vd('normal', false).forYou) && gateOf(vd('critical', true).forYou) && !M.notifyVerdict({ note: { closed: true }, visible: false }).toast, 'notifyVerdict: always a toast in the window; For you when critical OR no pane shows the window');
 const absentRows = M.SESSION_BUS_NAMES.filter((r) => r.absent);
-ok(M.SESSION_BUS_NAMES.every((r) => /^[a-zA-Z][\w.]+$/.test(r.name) && !!r.provided !== !!r.absent) && absentRows.every((r) => r.absent.sees.length > 20 && /piece|never|not planned/.test(r.absent.piece)), `SESSION_BUS_NAMES: ${M.SESSION_BUS_NAMES.length} rows, each provided XOR absent with what the app sees + the piece`);
-ok(['org.freedesktop.PolicyKit1.AuthenticationAgent'].map((n) => M.SESSION_BUS_NAMES.find((r) => r.name === n)).every((r, i) => r && r.absent && [/^never/][i].test(r.absent.piece)) && /piece 3/.test((M.SESSION_BUS_NAMES.find((r) => r.name === 'org.a11y.Bus') || {}).provided), 'the later pieces are named: a11y → provided (piece 3), secrets → piece 4, polkit → never');
+ok(gateOf(M.SESSION_BUS_NAMES.every((r) => /^[a-zA-Z][\w.]+$/.test(r.name) && !!r.provided !== !!r.absent)) && verdictOf(absentRows.every((r) => r.absent.sees.length > 20 && /piece|never|not planned/.test(r.absent.piece))), `SESSION_BUS_NAMES: ${M.SESSION_BUS_NAMES.length} rows, each provided XOR absent with what the app sees + the piece`);
+ok(gateOf(['org.freedesktop.PolicyKit1.AuthenticationAgent'].map((n) => M.SESSION_BUS_NAMES.find((r) => r.name === n)).every((r, i) => r && r.absent && [/^never/][i].test(r.absent.piece))) && verdictOf(/piece 3/.test((M.SESSION_BUS_NAMES.find((r) => r.name === 'org.a11y.Bus') || {}).provided)), 'the later pieces are named: a11y → provided (piece 3), secrets → piece 4, polkit → never');
 
 const facts = await D.notifySinkFacts({ env: process.env });
 const need = ['dbus-daemon', 'dbus-run-session', 'gdbus', 'notify-send'].filter((b) => !D.binOnPath(b, { env: process.env }));
@@ -100,17 +100,17 @@ print("closed-signal", got)'`,
   ].join('\n'));
   const j = journalOf(pOn.journal);
   const first = j[0] || {};
-  ok(/send-rc=0/.test(r.out) && first.app === 'JASP' && first.summary === 'Export finished' && first.body === 'results.omv saved' && first.urgency === 'critical' && Number.isInteger(first.nid), `notify-send -u critical ⇒ ONE forwarded record {app, summary, body, urgency: critical} (${r.ms} ms for the whole session)`);
-  ok(/\(\['body'\],\)/.test(r.out), 'GetCapabilities = [\'body\'] (P0: no actions, no icons)');
-  ok(/\('VibeSpace', 'VibeSpace', '[^']*', '1\.2'\)/.test(r.out), 'GetServerInformation = (VibeSpace, VibeSpace, <version>, 1.2)');
+  ok(gateOf(/send-rc=0/.test(r.out)) && first.app === 'JASP' && first.summary === 'Export finished' && first.body === 'results.omv saved' && first.urgency === 'critical' && verdictOf(Number.isInteger(first.nid)), `notify-send -u critical ⇒ ONE forwarded record {app, summary, body, urgency: critical} (${r.ms} ms for the whole session)`);
+  ok(verdictOf(/\(\['body'\],\)/.test(r.out)), 'GetCapabilities = [\'body\'] (P0: no actions, no icons)');
+  ok(verdictOf(/\('VibeSpace', 'VibeSpace', '[^']*', '1\.2'\)/.test(r.out)), 'GetServerInformation = (VibeSpace, VibeSpace, <version>, 1.2)');
   const closedLine = j.find((x) => x.closed === true);
-  ok(/closed-signal \[\(\d+, 3\)\]/.test(r.out) && closedLine && j.filter((x) => !x.closed).length === 2, 'CloseNotification ⇒ NotificationClosed(id, 3) on the bus + a closed line in the journal');
+  ok(gateOf(/closed-signal \[\(\d+, 3\)\]/.test(r.out)) && gateOf(closedLine) && j.filter((x) => !x.closed).length === 2, 'CloseNotification ⇒ NotificationClosed(id, 3) on the bus + a closed line in the journal');
   const pOff = writePlan(path.join(S, 'off'), null);
   const c = inSession(pOff, 'timeout 3 notify-send -u critical -a JASP "Export finished" body; echo "send-rc=$?"');
   // the failure is the BUS's answer, not the `timeout 3` cut (lane wall-clock-ratchet-down: `c.ms < 5000` judged the
   // machine): notify-send exits non-zero with ServiceUnknown — a cut would exit 124
   const cRc = Number((c.out.match(/send-rc=(\d+)/) || [])[1]);
-  ok(cRc > 0 && cRc !== 124 && /not provided by any \.service files|ServiceUnknown/.test(c.out), `RED CONTROL: the same bus WITHOUT the sink ⇒ notify-send fails, exit ${cRc} (${(c.out.match(/[^\n]*(?:ServiceUnknown|not provided)[^\n]*/) || [''])[0].slice(0, 110)}) in ${c.ms} ms`);
+  ok(cRc > 0 && cRc !== 124 && verdictOf(/not provided by any \.service files|ServiceUnknown/.test(c.out)), `RED CONTROL: the same bus WITHOUT the sink ⇒ notify-send fails, exit ${cRc} (${(c.out.match(/[^\n]*(?:ServiceUnknown|not provided)[^\n]*/) || [''])[0].slice(0, 110)}) in ${c.ms} ms`);
 
   console.log('③ the REAL plan bus (D.startPortalBus — its path socket in the app\'s 0700 dir)');
   const pr = writePlan(path.join(S, 'real'), facts);
@@ -120,7 +120,7 @@ print("closed-signal", got)'`,
     const g = (args) => spawnSync('gdbus', ['call', '--session', ...args], { env: { ...baseEnv, DBUS_SESSION_BUS_ADDRESS: pr.address }, encoding: 'utf8', timeout: 10000 });
     const ln = g(['-d', 'org.freedesktop.DBus', '-o', '/org/freedesktop/DBus', '-m', 'org.freedesktop.DBus.ListActivatableNames']);
     activatable = (ln.stdout.match(/'([^']+)'/g) || []).map((s) => s.slice(1, -1));
-    ok(activatable.includes('org.freedesktop.Notifications') && activatable.includes('org.freedesktop.portal.Desktop'), `ListActivatableNames on the plan's bus: ${activatable.filter((n) => n !== 'org.freedesktop.DBus').join(', ')}`);
+    ok(gateOf(activatable.includes('org.freedesktop.Notifications')) && verdictOf(activatable.includes('org.freedesktop.portal.Desktop')), `ListActivatableNames on the plan's bus: ${activatable.filter((n) => n !== 'org.freedesktop.DBus').join(', ')}`);
     const n = g(['-d', 'org.freedesktop.Notifications', '-o', '/org/freedesktop/Notifications', '-m', 'org.freedesktop.Notifications.Notify', 'JASP', '0', '', 'Export finished', 'on the real bus', '[]', '{"urgency": <byte 2>}', '5000']);
     await sleep(50);
     const rj = journalOf(pr.journal);
@@ -145,7 +145,7 @@ const act = skip ? M.SESSION_BUS_NAMES.filter((r) => r.provided).map((r) => r.na
 const rows = M.sessionBusCensus({ universe, activatable: act });
 for (const r of rows) console.log(`    ${r.verdict === 'RED' ? '✗' : '·'} ${r.name} — ${r.verdict}: ${r.why.slice(0, 150)}`);
 const optional = new Map(M.PORTAL_SERVICES.slice(2)); // "when installed" (PORTAL_SERVICES' optional rows: name → binary — the document portal, the permission store, the a11y launcher)
-ok(rows.every((r) => r.verdict !== 'RED' || (optional.has(r.name) && !D.portalBins({ env: process.env })[optional.get(r.name)])), `every name is provided or absent-and-said (${rows.filter((r) => r.verdict === 'provided').length} provided, ${rows.filter((r) => r.verdict === 'absent-said').length} said absent)${skip ? ' — provided judged from the table (no bus: ' + skip + ')' : ''}`);
+ok(verdictOf(rows.every((r) => r.verdict !== 'RED' || (optional.has(r.name) && !D.portalBins({ env: process.env })[optional.get(r.name)]))), `every name is provided or absent-and-said (${rows.filter((r) => r.verdict === 'provided').length} provided, ${rows.filter((r) => r.verdict === 'absent-said').length} said absent)${skip ? ' — provided judged from the table (no bus: ' + skip + ')' : ''}`);
 const red1 = M.sessionBusCensus({ universe, activatable: act, table: M.SESSION_BUS_NAMES.filter((r) => r.name !== 'org.freedesktop.Notifications') }).filter((r) => r.verdict === 'RED').map((r) => r.name);
 ok(red1.join() === 'org.freedesktop.Notifications', `RED CONTROL: a table that forgets org.freedesktop.Notifications ⇒ RED on exactly it (${red1.join(', ')})`);
 const red2 = M.sessionBusCensus({ universe, activatable: act.filter((n) => n !== 'org.freedesktop.Notifications') }).filter((r) => r.verdict === 'RED').map((r) => r.name);
@@ -160,4 +160,4 @@ ok(red3.join() === 'org.gnome.Mutter.IdleMonitor', 'RED CONTROL: a name apps ask
 try { fs.rmSync(S, { recursive: true, force: true }); } catch { /* a document-portal FUSE mount is not made here */ }
 console.log(`\ntest-app-display-session-census: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

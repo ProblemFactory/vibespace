@@ -50,7 +50,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const acorn = require(path.join(REPO, 'node_modules', 'acorn'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const LIB = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => 'src/lib/' + f);
 const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
@@ -83,21 +83,21 @@ const compShrunk = Object.entries(MENU_LEDGER).filter(([f, n]) => (compPer[f] ||
 ok(compGrown.length === 0, 'no NEW computed `disabled:` menu row (a new one is `off` with its why, or not drawn)', compGrown.join(' ; '));
 ok(compShrunk.length === 0, 'the computed ledger is exact (a site that moved onto caption / off lowers its row)', compShrunk.join(' ; '));
 { const DAW = read('src/lib/desktop-app-window.js'), DSM = read('src/lib/desktop-seamless.js');
-  ok(/const rows = m\.why \? scaleRunsCaption\(m, rec\) : m\.rows\.map\(\(r\) => \(\{ label: scaleRowLabel\(r\), action: \(\) => \{ if \(!r\.disabled\) relaunchAt\(r\.choice, r\.scale\); \} \}\)\);/.test(DAW)
-    && /\{ label: frameRowLabel\(r\), action: \(\) => \{ if \(!r\.current\) saveFrameChoice\(frameKey\(\), r\.choice\); \} \}/.test(DAW) && !/disabled: choice === cur/.test(DSM),
+  ok(gateOf(/const rows = m\.why \? scaleRunsCaption\(m, rec\) : m\.rows\.map\(\(r\) => \(\{ label: scaleRowLabel\(r\), action: \(\) => \{ if \(!r\.disabled\) relaunchAt\(r\.choice, r\.scale\); \} \}\)\);/.test(DAW))
+    && gateOf(/\{ label: frameRowLabel\(r\), action: \(\) => \{ if \(!r\.current\) saveFrameChoice\(frameKey\(\), r\.choice\); \} \}/.test(DAW)) && !/disabled: choice === cur/.test(DSM),
     'B-b659: the desktop app window\'s Scale ▸ and Show window frame ▸ draw the present choice as a live ✓ row — pressing it keeps it (no relaunch, no write); a window that cannot relaunch draws no choice row — its caption says why, the running scale stays said as a caption'); }
 const UT = read('src/lib/utils.js');
 const scm = UT.slice(UT.indexOf('export function showContextMenu('), UT.indexOf('/** What the DOM says about a press'));
 ok(!/off: item\.title/.test(scm)
-  && /cap\.className = className \+ '-caption';/.test(scm) && /const words = wordRow\(item\);/.test(scm) && /const words = wordRow\(child\);/.test(scm) && /row\.className = className \+ '-item ' \+ className \+ '-off disabled';/.test(scm) && /why\.className = 'door-why'; why\.textContent = String\(item\.off\);/.test(scm) && /item\.offDoor\.action\?\.\(\)/.test(scm),
+  && gateOf(/cap\.className = className \+ '-caption';/.test(scm)) && gateOf(/const words = wordRow\(item\);/.test(scm)) && gateOf(/const words = wordRow\(child\);/.test(scm)) && gateOf(/row\.className = className \+ '-item ' \+ className \+ '-off disabled';/.test(scm)) && gateOf(/why\.className = 'door-why'; why\.textContent = String\(item\.off\);/.test(scm)) && verdictOf(/item\.offDoor\.action\?\.\(\)/.test(scm)),
   'showContextMenu draws a CAPTION and an OFF row with its why in words (+ its door) — ONE drawer, at the top level AND in a submenu; a legacy title is never promoted to a why (it is often a description: «Open this URL in a web view»)');
-ok(/\.context-menu-caption \{/.test(read('public/viewers.css')) && /\.context-menu-off \.door-why \{/.test(read('public/viewers.css')), 'the caption and the off row have their styles (words at full contrast, never opacity .4)');
+ok(gateOf(/\.context-menu-caption \{/.test(read('public/viewers.css'))) && verdictOf(/\.context-menu-off \.door-why \{/.test(read('public/viewers.css'))), 'the caption and the off row have their styles (words at full contrast, never opacity .4)');
 const MA2 = read('src/lib/manage-agents.js'), SL = read('src/lib/session-lifecycle.js'), DL = read('src/lib/desktop-app-launcher.js'), DS = read('src/lib/desktop-app-scale.js');
-ok(/label: t\('\{cmd\} — not offered', \{ cmd: r\.label \}\), off: t\('it connects to the vendor’s servers \(measured\)'\), title: r\.verdict \}/.test(MA2) && /if \(live\.length === 1\) \{\s*chkBtn\.textContent = live\[0\]\.label;/.test(MA2), 'rules & checks: a check it cannot offer says why on its row IN THE PAGE\'S LANGUAGE (the English measurement is its hover detail); one live act ⇒ the button IS that act');
-ok(/items\.push\(\{ label: a\.name \+ suffix, off: block, offDoor: oatDead \? \{ label: t\('Long-lived token \(expired\)…'\), action: \(\) => this\._oatDialog\?\.\(a\.id, a\) \} : \{ label: t\('Manage agents…'\)/.test(SL) && (SL.match(/items\.unshift\(\{ caption: t\('This session’s billing account'\) \}\);/g) || []).length === 1,
+ok(gateOf(/label: t\('\{cmd\} — not offered', \{ cmd: r\.label \}\), off: t\('it connects to the vendor’s servers \(measured\)'\), title: r\.verdict \}/.test(MA2)) && verdictOf(/if \(live\.length === 1\) \{\s*chkBtn\.textContent = live\[0\]\.label;/.test(MA2)), 'rules & checks: a check it cannot offer says why on its row IN THE PAGE\'S LANGUAGE (the English measurement is its hover detail); one live act ⇒ the button IS that act');
+ok(gateOf(/items\.push\(\{ label: a\.name \+ suffix, off: block, offDoor: oatDead \? \{ label: t\('Long-lived token \(expired\)…'\), action: \(\) => this\._oatDialog\?\.\(a\.id, a\) \} : \{ label: t\('Manage agents…'\)/.test(SL)) && (SL.match(/items\.unshift\(\{ caption: t\('This session’s billing account'\) \}\);/g) || []).length === 1,
   'billing: the menu says what it is (a caption), a blocked account says why ON its row with the door where sign-in lives — B-8703: an expired long-lived token\'s door is its own «Long-lived token (expired)…» dialog');
-ok(/\{ caption: t\('Default scale for \{app\}', \{ app: catalogLabel\(row\) \}\) \}/.test(DL) && !/disabled: choice === cur/.test(DS)
-  && /\{ label: t\('Change the scale for every app in Settings…'\), action: \(\) => app\._settingsUI\?\.open\(\{ search: t\('Desktop app scale \(xpra\)'\) \}\) \}/.test(DL) && /\.\.\.rows, setting, \.\.\.own\.tail/.test(DL),
+ok(gateOf(/\{ caption: t\('Default scale for \{app\}', \{ app: catalogLabel\(row\) \}\) \}/.test(DL)) && !/disabled: choice === cur/.test(DS)
+  && gateOf(/\{ label: t\('Change the scale for every app in Settings…'\), action: \(\) => app\._settingsUI\?\.open\(\{ search: t\('Desktop app scale \(xpra\)'\) \}\) \}/.test(DL)) && verdictOf(/\.\.\.rows, setting, \.\.\.own\.tail/.test(DL)),
   'desktop-app zoom: the heading is a caption; the current choice is a live ✓ row, not a greyed tick; «Auto» has its door to Settings under the choices');
 
 // ── ② a button says why when pressed ──
@@ -138,41 +138,41 @@ let reason = 'Pick at least two agents';
 const b1 = fakeBtn(), l1 = fakeLine(), h1 = pressSaysFn(b1, () => reason, { line: l1 });
 const e1 = press(b1);
 reason = null; const e2 = press(b1); h1.refresh();
-ok(b1.ls.length === 1 && b1.ls[0].capture && e1.prevented && e1.stopped && l1.textContent === '' && !e2.prevented && !e2.stopped,
+ok(b1.ls.length === 1 && gateOf(b1.ls[0].capture) && gateOf(e1.prevented) && gateOf(e1.stopped) && l1.textContent === '' && !e2.prevented && !e2.stopped,
   'pressSays: a capture listener (before the button\'s own onclick); pressed while why() answers it stops the act and says the reason; once nothing is missing the press goes through and refresh() clears the line', JSON.stringify({ capture: b1.ls[0] && b1.ls[0].capture, e1, e2, line: l1.textContent }));
-{ const b2 = fakeBtn(), l2 = fakeLine(); pressSaysFn(b2, () => 'why', { line: l2 }); press(b2); ok(l2.textContent === 'why' && l2.classList.set.has('press-says-again'), 'pressSays: the reason is said on the line (and a second press is seen again)', l2.textContent); }
+{ const b2 = fakeBtn(), l2 = fakeLine(); pressSaysFn(b2, () => 'why', { line: l2 }); press(b2); ok(l2.textContent === 'why' && verdictOf(l2.classList.set.has('press-says-again')), 'pressSays: the reason is said on the line (and a second press is seen again)', l2.textContent); }
 const CG = read('src/lib/channel-group-dialogs.js'), CR = read('src/lib/chat-renderers.js'), BP = read('src/lib/browser-new-profile.js'), BM = read('src/lib/browser-new-profile-model.js'), IW = read('src/lib/integrations-window.js'), PU = read('src/lib/plugins-ui.js');
-ok(/pressSays\(go, whyNot, \{ line: status \}\);/.test(CG) && /body\.append\(status, actions\);/.test(CG) && !/go\.disabled = n < need/.test(CG) && /if \(!r\) \{ go\.disabled = false; refresh\(\); return; \}/.test(CG),
+ok(gateOf(/pressSays\(go, whyNot, \{ line: status \}\);/.test(CG)) && gateOf(/body\.append\(status, actions\);/.test(CG)) && !/go\.disabled = n < need/.test(CG) && verdictOf(/if \(!r\) \{ go\.disabled = false; refresh\(\); return; \}/.test(CG)),
   'the group\'s «创建» stays live: what is missing is said ABOVE the buttons, and a press says it (the in-flight guard ends with the answer)');
-ok(/const submitSays = pressSays\(submitBtn, \(\) => \{ const left = questions\.length - selections\.size;/.test(CR) && !/submitBtn\.disabled = /.test(CR) && /submitSays\.refresh\(\);/.test(CR),
+ok(gateOf(/const submitSays = pressSays\(submitBtn, \(\) => \{ const left = questions\.length - selections\.size;/.test(CR)) && !/submitBtn\.disabled = /.test(CR) && verdictOf(/submitSays\.refresh\(\);/.test(CR)),
   'the ask card\'s «提交» stays live and says «先选一个答案» / how many are left when pressed early');
 { const at = BM.indexOf('export function providerRowsShown(');
   const fnSrc = at < 0 ? '' : BM.slice(at, BM.indexOf('\n}\n', at) + 3).replace('export function', 'function');
   const shown = fnSrc ? new Function(`${fnSrc}; return providerRowsShown;`)() : () => ({ rows: [], windowLeftOut: false });
   const r = shown([{ id: 'win', state: 'not-a-profile' }, { id: 'cloud:x', state: 'unavailable' }, { id: 'local-window', state: 'unavailable' }, { id: 'chromium', state: 'ready' }, { id: 'remote-only', state: 'other-machine' }],
     [{ id: 'cloud:x', control: { ok: false, code: 'provider_unsupported' } }, { id: 'local-window', control: { ok: false, code: 'provider_needs_consent' } }]);
-  ok(JSON.stringify(r.rows.map((c) => c.id)) === '["local-window","chromium","remote-only"]' && r.windowLeftOut === true && /providerRowsShown\(providerChoices\(\{ providers: rows, host: st\.host, t \}\), rows, \{ host: st\.host \}\)/.test(BP) && /const \{ rows: choices, windowLeftOut \} = providerRowsNow\(\);/.test(BP),
+  ok(JSON.stringify(r.rows.map((c) => c.id)) === '["local-window","chromium","remote-only"]' && r.windowLeftOut === true && gateOf(/providerRowsShown\(providerChoices\(\{ providers: rows, host: st\.host, t \}\), rows, \{ host: st\.host \}\)/.test(BP)) && verdictOf(/const \{ rows: choices, windowLeftOut \} = providerRowsNow\(\);/.test(BP)),
     'new profile: a row nobody can pick here (a desktop window, a backend this version cannot use) is not drawn; a row that waits for the person (the consent, This computer) stays; the list says where a desktop window goes', JSON.stringify(r)); }
-ok(/\} else if \(v\.clusterWhyCode === 'no-preset' && v\.source !== 'cluster'\) \{/.test(IW) && /if \(choice\.childNodes\.length\) card\.appendChild\(choice\);/.test(IW),
+ok(gateOf(/\} else if \(v\.clusterWhyCode === 'no-preset' && v\.source !== 'cluster'\) \{/.test(IW)) && verdictOf(/if \(choice\.childNodes\.length\) card\.appendChild\(choice\);/.test(IW)),
   'integrations: no «用集群默认» radio pair where no cluster preset of the kind exists (the store\'s own code); a preset that went keeps its radio and its why');
-ok(/function makeSwitch\(on, \{ disabled = false, label, onChange \}\) \{\n  if \(disabled\) return null;/.test(PU) && (/if \(sw\) row\.appendChild\(sw\);/.test(PU) || (/controls: \[c, sw, install, gear\]/.test(PU) && /const list = \(controls \|\| \[\]\)\.filter\(Boolean\);/.test(read('src/lib/rail-row.js')))) &&   // the .407 move: ui-phone-and-fit's rail row draws the controls it is given and drops a null switch
-    /if \(!cat\) \{ const none = document\.createElement\('span'\); none\.className = 'mounts-btn plugin-gear plugin-gear-none';/.test(PU) && !/b\.disabled = !cat/.test(PU),
+ok(gateOf(/function makeSwitch\(on, \{ disabled = false, label, onChange \}\) \{\n  if \(disabled\) return null;/.test(PU)) && (gateOf(/if \(sw\) row\.appendChild\(sw\);/.test(PU)) || (gateOf(/controls: \[c, sw, install, gear\]/.test(PU)) && gateOf(/const list = \(controls \|\| \[\]\)\.filter\(Boolean\);/.test(read('src/lib/rail-row.js'))))) &&   // the .407 move: ui-phone-and-fit's rail row draws the controls it is given and drops a null switch
+    gateOf(/if \(!cat\) \{ const none = document\.createElement\('span'\); none\.className = 'mounts-btn plugin-gear plugin-gear-none';/.test(PU)) && !/b\.disabled = !cat/.test(PU),
   'plugins: a switch that cannot be used is not drawn (the chip says why and is the door), a plugin with nothing to configure has no ⚙');
 
 // ── ⑦ one menu placement ──
 console.log('⑦ A MENU IS BOUNDED BY THE SCREEN — every module that makes a .context-menu places it with placeMenu');
 const ownMenus = LIB.filter((f) => f !== 'src/lib/utils.js' && /\.className = 'context-menu'[;\s]/.test(read(f)));
 const unplaced = ownMenus.filter((f) => !/\bplaceMenu\(/.test(read(f)));
-ok(ownMenus.length >= 1 && unplaced.length === 0 && /\n  placeMenu\(pop, x, y, \{ up, placesItself \}\);\n  return pop;/.test(read('src/lib/utils.js')),
+ok(ownMenus.length >= 1 && unplaced.length === 0 && verdictOf(/\n  placeMenu\(pop, x, y, \{ up, placesItself \}\);\n  return pop;/.test(read('src/lib/utils.js'))),
   `showContextMenu and every module with its own .context-menu builder (${ownMenus.join(', ')}) are placed by placeMenu`, unplaced.join(', '));
 const PM = read('src/lib/utils.js');
-ok(/if \(follow && !placesItself\) followContent\(pop, /.test(PM) && /if \(at\.maxH != null\) \{ pop\.style\.maxHeight = \(at\.maxH \/ Z\) \+ 'px'; pop\.style\.overflowY = 'auto'; if \(!placesItself\) pinTail\(\); \}/.test(PM)
-  && /placeMenu\(menu, x, y, \{ follow: true \}\)/.test(read('src/lib/file-explorer-ops.js')),
+ok(gateOf(/if \(follow && !placesItself\) followContent\(pop, /.test(PM)) && gateOf(/if \(at\.maxH != null\) \{ pop\.style\.maxHeight = \(at\.maxH \/ Z\) \+ 'px'; pop\.style\.overflowY = 'auto'; if \(!placesItself\) pinTail\(\); \}/.test(PM))
+  && verdictOf(/placeMenu\(menu, x, y, \{ follow: true \}\)/.test(read('src/lib/file-explorer-ops.js'))),
   'placeMenu follows a menu\'s rows only when its builder asks (the file explorer\'s late office rows), and a capped menu keeps its closing rows in view (the boxes: test-menu-bounds-chrome)');
 // THE MUST-FIX OF THE ACCEPTANCE READER: a menu that places itself is never placed again behind its back — every showContextMenu
 // whose caller writes the menu's place afterwards (the desktop list keeps its TOP, the sheets) declares `placesItself`
 { const callers = LIB.map((f) => [f, read(f)]).flatMap(([f, src]) => [...src.matchAll(/(?:const|let) (\w+) = showContextMenu\(([^\n]*)/g)].filter((m) => new RegExp(`\\b(?:this\\._placeList\\(${m[1]}|placeOverColumn\\(${m[1]}|${m[1]}\\.classList\\.add\\('(?:mobile-sheet|mdesk-menu)')`).test(src)).map((m) => [f, m[1], /placesItself: true/.test(m[2])]));
-  ok(callers.length >= 3 && callers.every(([, , ok2]) => ok2), `every menu its caller places afterwards (the desktop list, the sheets) declares placesItself — never followed (${callers.map(([f, n, o]) => f.split('/').pop() + ':' + n + (o ? '' : ' ✗')).join(', ')})`); }
+  ok(callers.length >= 3 && verdictOf(callers.every(([, , ok2]) => ok2)), `every menu its caller places afterwards (the desktop list, the sheets) declares placesItself — never followed (${callers.map(([f, n, o]) => f.split('/').pop() + ':' + n + (o ? '' : ' ✗')).join(', ')})`); }
 
 // ── ⑦b a panel keeps its natural width and slides ──
 { const mp = read('src/lib/menu-place.js'); const at = mp.indexOf('export function panelPlace(');
@@ -181,17 +181,17 @@ ok(/if \(follow && !placesItself\) followContent\(pop, /.test(PM) && /if \(at\.m
   ok(!!pp && a.left === 12 && a.maxW >= 300 && b.left === 40 && c.left === 0 && c.maxW === 312,
     'panelPlace: a 300 px panel opened at x 250 of a 320 px window slides to x 12 at its width (never a 130 px strip); one that fits stays at its chip; one wider than the window takes the window', JSON.stringify({ a, b, c }));
   const CSB = read('src/lib/chat-status-bar.js'), sd = CSB.slice(CSB.indexOf('const showDropdown = (anchor,'), CSB.indexOf('\n    };', CSB.indexOf('const showDropdown = (anchor,')));
-  ok(/const at = panelPlace\(\{ wantLeft, containerW, natW: dropdown\.offsetWidth, minW, maxW: maxWidth, pad: DROPDOWN_EDGE_PAD \}\);/.test(sd) && /followContent\(dropdown, settle\);/.test(sd),
+  ok(gateOf(/const at = panelPlace\(\{ wantLeft, containerW, natW: dropdown\.offsetWidth, minW, maxW: maxWidth, pad: DROPDOWN_EDGE_PAD \}\);/.test(sd)) && verdictOf(/followContent\(dropdown, settle\);/.test(sd)),
     'the status bar\'s one showDropdown places a panel AFTER the caller filled it, and again when its content changes'); }
 
 // ── ⑨ the single defects of pick 5 ──
 console.log('⑨ THE SINGLE DEFECTS of pick 5 — each pinned where it lives');
 { const SR = read('src/lib/sidebar-rail.js');
-  ok(!/prc-more/.test(SR) && !/const CAP = /.test(SR) && /tr\('Showing \{shown\} of \{total\} processes', \{ shown: list\.length, total \}\)/.test(SR),
+  ok(!/prc-more/.test(SR) && !/const CAP = /.test(SR) && verdictOf(/tr\('Showing \{shown\} of \{total\} processes', \{ shown: list\.length, total \}\)/.test(SR)),
     'processes: every transported row is drawn and the head says «Showing 350 of 1131 processes» — no «+ show all 350» beside «350 / 1131»'); }
 { const VW = read('src/lib/vault-window.js'), SW = read('src/lib/search-window.js');
-  ok(/t\('\{label\}: \{value\}', \{ label: t\('Vault'\), value: word \}\)/.test(VW) && /\['unlocked', 'locked'\]\.includes\(f\.state\) \? t\('View contents…'\) : t\('Set up the vault…'\)/.test(VW)
-    && /t\('\{label\}: \{value\}', \{ label: t\('Search index'\)/.test(SW) && /'mounts-btn sys-search-rebuild'/.test(SW),
+  ok(gateOf(/t\('\{label\}: \{value\}', \{ label: t\('Vault'\), value: word \}\)/.test(VW)) && gateOf(/\['unlocked', 'locked'\]\.includes\(f\.state\) \? t\('View contents…'\) : t\('Set up the vault…'\)/.test(VW))
+    && gateOf(/t\('\{label\}: \{value\}', \{ label: t\('Search index'\)/.test(SW)) && verdictOf(/'mounts-btn sys-search-rebuild'/.test(SW)),
     'the System panel: «保险库：未设置» in the language\'s colon, its door «设置保险库…» (never «查看内容…» of nothing), the theme\'s secondary buttons'); }
 { const JP = read('src/lib/jobs-panel.js');
   // EVALUATED (the acceptance reader's rowVerbs-1 / -3 mutants stayed green on a text pin): rowVerbs, the row's buttons and the
@@ -204,47 +204,47 @@ console.log('⑨ THE SINGLE DEFECTS of pick 5 — each pinned where it lives');
     const items = m.rowMenuItems({}, j, () => {}, {}); const mm = items.filter((x) => !x.separator && x.label !== 'Clear content…').map((x) => { did.length = 0; x.action(); return did[0]; });
     return { buttons: b.join(','), menu: mm.join(','), last: items[items.length - 1].label, verbs: m.rowVerbs(j).map((v) => v.act).join(',') }; };
   let r = null; try { r = made ? [{ state: 'up' }, { state: 'failed' }, { state: 'done' }, { state: 'up', pendingPanel: true }].map(run) : null; } catch (e) { r = String(e.message); }
-  ok(Array.isArray(r) && r.every((x) => x.buttons === x.verbs && x.menu === x.verbs && x.last === 'Clear content…') && r[0].verbs === 'stop' && r[1].verbs === 'start,rm',
+  ok(gateOf(Array.isArray(r)) && gateOf(r.every((x) => x.buttons === x.verbs && x.menu === x.verbs && x.last === 'Clear content…')) && r[0].verbs === 'stop' && r[1].verbs === 'start,rm',
     'jobs (evaluated): the row\'s buttons and its menu draw the SAME acts — one table (rowVerbs), the menu ending in «Clear content…»', JSON.stringify(r)); }
 { // the start verb's WORD (the UI walk's jobs-5, L3 → L5)
   const JP = read('src/lib/jobs-panel.js'); const src = (name) => { const at = JP.search(new RegExp(`\\n(?:export )?function ${name}\\(`)); return at < 0 ? '' : JP.slice(at + 1, JP.indexOf('\n}\n', at + 1) + 3).replace('export function', 'function'); };
   const made = (() => { try { return new Function('t', 'jobAction', 'document', 'clearRecords', 'isCleared', 'clearedText', `${src('rowVerbs')}; return { rowVerbs };`); } catch { return null; } })();   // what it does to THIS row — the same act 'start'
   let w = null; try { const m = made((x) => x, () => {}, null, null, null, null); w = [{ kind: 'task', state: 'failed' }, { kind: 'task', state: 'missed' }, { kind: 'service', state: 'down' }, { kind: 'service', state: 'failed' }, { kind: 'cron', state: 'scheduled', desiredUp: false }, { kind: 'cron', state: 'missed', desiredUp: true }]
     .map((j) => m.rowVerbs(j).filter((v) => v.act === 'start').map((v) => v.label).join('')); } catch (e) { w = String(e.message); }
-  ok(Array.isArray(w) && w.join('|') === 'Run again|Run again|Start|Start|Resume|Start',
+  ok(gateOf(Array.isArray(w)) && w.join('|') === 'Run again|Run again|Start|Start|Resume|Start',
     'jobs (evaluated): the start verb says what it does to the row — a task that ran «Run again», a service «Start», a cron that is off «Resume» (never «Start» on all three)', JSON.stringify(w)); }
 { // …and a GLYPH face says its word (the rail's compact row drew a bare ▸; the window's ✕) — actionButtons EVALUATED
   const JP = read('src/lib/jobs-panel.js'); const src = (name) => { const at = JP.search(new RegExp(`\\n(?:export )?function ${name}\\(`)); return at < 0 ? '' : JP.slice(at + 1, JP.indexOf('\n}\n', at + 1) + 3).replace('export function', 'function'); };
   let g = null; try { const m = new Function('t', 'jobAction', 'document', `${src('rowVerbs')}\n${src('actionButtons')}; return { actionButtons };`)((x) => x, () => {}, { createElement: () => ({ className: '', textContent: '', onclick: null, title: '', setAttribute(k, v) { this['@' + k] = v; } }) });
     g = [true, false].flatMap((compact) => [{ kind: 'task', state: 'failed' }, { kind: 'service', state: 'up' }].flatMap((j) => m.actionButtons({}, j, () => {}, { compact })))
       .filter((b) => !/[\p{L}]{2,}/u.test(b.textContent)).map((b) => `${b.textContent}=${b['@aria-label'] || ''}/${b.title || ''}`); } catch (e) { g = String(e.message); }
-  ok(Array.isArray(g) && g.length >= 3 && g.every((x) => /=[^/]+\/[^/]+$/.test(x)),
+  ok(gateOf(Array.isArray(g)) && g.length >= 3 && verdictOf(g.every((x) => /=[^/]+\/[^/]+$/.test(x))),
     'jobs (evaluated): every glyph-faced row button (the rail\'s ▸ / ■, the window\'s ✕) carries its verb\'s word as its name and title', JSON.stringify(g)); }
 { const BB = read('src/lib/browser-build-dialog.js');
-  ok(/const btn = el\('button', 'mounts-btn bbuild-download-btn'\);/.test(BB) && !/bwho-answer bbuild-row bbuild-download/.test(BB), '«下载其他版本…» is a button (its source line a hint under it), never a radio row\'s head'); }
+  ok(gateOf(/const btn = el\('button', 'mounts-btn bbuild-download-btn'\);/.test(BB)) && !/bwho-answer bbuild-row bbuild-download/.test(BB), '«下载其他版本…» is a button (its source line a hint under it), never a radio row\'s head'); }
 { const MD = read('src/lib/mounts-dialog.js'), CA = read('src/lib/channel-account-dialogs.js');
-  ok(/head\.textContent = tr\('Before you start, check:'\);/.test(MD) && /ul\.className = 'integ-prereq';/.test(MD) && /const prereqs = spec\.setup \? \(spec\.setup\.prerequisites \|\| \[\]\)\.map\(\(p\) => tr\(p\)\) : \[\];/.test(CA),
+  ok(gateOf(/head\.textContent = tr\('Before you start, check:'\);/.test(MD)) && gateOf(/ul\.className = 'integ-prereq';/.test(MD)) && verdictOf(/const prereqs = spec\.setup \? \(spec\.setup\.prerequisites \|\| \[\]\)\.map\(\(p\) => tr\(p\)\) : \[\];/.test(CA)),
     'a console\'s prerequisites: «开始前请确认：» over a list — never three run-on hint sentences'); }
 { const SM = read('src/lib/sidebar-mounts.js');
-  ok(/<details class="bs-log-wrap" hidden>/.test(SM) && /const appendLog = \(line\) => \{ logWrap\.hidden = false;/.test(SM), 'the host set-up\'s Log fold appears with its first line — never a fold onto an empty box'); }
+  ok(gateOf(/<details class="bs-log-wrap" hidden>/.test(SM)) && verdictOf(/const appendLog = \(line\) => \{ logWrap\.hidden = false;/.test(SM)), 'the host set-up\'s Log fold appears with its first line — never a fold onto an empty box'); }
 
 // ── ⑩ a control says what it does ──
 console.log('⑩ A CONTROL SAYS WHAT IT DOES — filter / sort, For-you buttons, the phone ⋯, the explorer toolbar');
 { const SB2 = read('src/lib/sidebar.js');
-  ok(/btn\.innerHTML = UI_ICONS\.filter;/.test(SB2) && /n\.className = 'backend-filter-count'; n\.textContent = String\(this\._backendFilter\.size\);/.test(SB2) && !/backend-filter-icon-stack/.test(SB2)
-    && /<span class="sort-words">\$\{escHtml\(words\)\} ▾<\/span>/.test(SB2) && (SB2.match(/\[\{ caption: tr\('Sort by'\) \}, \.\.\./g) || []).length === 2 && !/this\._sortMode = this\._sortMode === 'recent' \? 'folder' : 'recent';/.test(SB2),
+  ok(gateOf(/btn\.innerHTML = UI_ICONS\.filter;/.test(SB2)) && gateOf(/n\.className = 'backend-filter-count'; n\.textContent = String\(this\._backendFilter\.size\);/.test(SB2)) && !/backend-filter-icon-stack/.test(SB2)
+    && gateOf(/<span class="sort-words">\$\{escHtml\(words\)\} ▾<\/span>/.test(SB2)) && (SB2.match(/\[\{ caption: tr\('Sort by'\) \}, \.\.\./g) || []).length === 2 && !/this\._sortMode = this\._sortMode === 'recent' \? 'folder' : 'recent';/.test(SB2),
     'sessions: the filter is a funnel with a count while it filters; sort says its order («最近 ▾») and opens a menu on both tabs — never a clock that silently toggles'); }
 { const SB3 = read('src/lib/sidebar.js');
-  ok(/sortBtn\.onclick = \(e, from = sortBtn\) => \{/.test(SB3) && (SB3.match(/const r = from\.getBoundingClientRect\(\);/g) || []).length === 2 && /\{ label: tr\('Sort by'\), action: \(\) => document\.getElementById\('sort-toggle'\)\?\.onclick\?\.\(null, listMenuBtn\) \}/.test(SB3) && !/getElementById\('sort-toggle'\)\?\.click\(\)/.test(SB3),
+  ok(gateOf(/sortBtn\.onclick = \(e, from = sortBtn\) => \{/.test(SB3)) && (SB3.match(/const r = from\.getBoundingClientRect\(\);/g) || []).length === 2 && gateOf(/\{ label: tr\('Sort by'\), action: \(\) => document\.getElementById\('sort-toggle'\)\?\.onclick\?\.\(null, listMenuBtn\) \}/.test(SB3)) && !/getElementById\('sort-toggle'\)\?\.click\(\)/.test(SB3),
     'the sort menu opens where it was asked from — in the regular class (the button hidden, sort a row of the list\'s ⋯) at that ⋯, never at a hidden button\'s corner'); }
 { const CSS = read('public/style.css');
-  ok(!/\.ut-actions \{[^}]*opacity: 0\.35/.test(CSS) && /\.ut-act\[data-label\]:is\(:hover, :focus-visible\)::after \{ content: attr\(data-label\);/.test(CSS) && /\.ut-detail-exp > summary \{ font-size: inherit;/.test(CSS),
+  ok(!/\.ut-actions \{[^}]*opacity: 0\.35/.test(CSS) && gateOf(/\.ut-act\[data-label\]:is\(:hover, :focus-visible\)::after \{ content: attr\(data-label\);/.test(CSS)) && verdictOf(/\.ut-detail-exp > summary \{ font-size: inherit;/.test(CSS)),
     'For-you: the row\'s buttons at the theme\'s contrast (no 35 % dimming), each says its word on hover / focus, «▸ 详情» at the body size'); }
 { const MN = read('src/lib/mobile-nav.js');
-  ok(/moreBtn\.onclick = \(e\) => \{ e\.stopPropagation\(\); const r = moreBtn\.getBoundingClientRect\(\); showWindowContextMenu\(this\.app, win\.id,/.test(MN) && /item\.append\((?:\.\.\.\[)?icon, label, (?:billChip, )?(?:splitBtn, )?moreBtn, closeBtn/.test(MN),   // the .407 move: phone-six's split door stands beside the ⋯ in one row list
+  ok(gateOf(/moreBtn\.onclick = \(e\) => \{ e\.stopPropagation\(\); const r = moreBtn\.getBoundingClientRect\(\); showWindowContextMenu\(this\.app, win\.id,/.test(MN)) && verdictOf(/item\.append\((?:\.\.\.\[)?icon, label, (?:billChip, )?(?:splitBtn, )?moreBtn, closeBtn/.test(MN)),   // the .407 move: phone-six's split door stands beside the ⋯ in one row list
     'the phone switcher: a visible ⋯ on each row opens the window\'s own menu (the long press stays)'); }
 { const FE = read('src/lib/file-explorer.js');
-  ok(/btnUpload\.innerHTML = UI_ICONS\.upload;/.test(FE) && !/'\\u2B06'/.test(FE) && /const fold = createBarFold\(toolbar, \{/.test(FE) && /compactClass: 'ftw-compact'/.test(FE) && /w\.className = 'ftw-word'; w\.textContent = word;/.test(FE),
+  ok(gateOf(/btnUpload\.innerHTML = UI_ICONS\.upload;/.test(FE)) && !/'\\u2B06'/.test(FE) && gateOf(/const fold = createBarFold\(toolbar, \{/.test(FE)) && gateOf(/compactClass: 'ftw-compact'/.test(FE)) && verdictOf(/w\.className = 'ftw-word'; w\.textContent = word;/.test(FE)),
     'the file explorer: every tool says its word, Upload has its own mark (no second up-arrow), the bar folds through createBarFold (words, then icons, then ⋯)'); }
 
 // ── ⑤b the auto-continue words say what a press does (the acceptance reader's minor: «点击取消» while a press opens a panel) ──
@@ -253,7 +253,7 @@ console.log('⑩ A CONTROL SAYS WHAT IT DOES — filter / sort, For-you buttons,
   const keys = [...CSB2.matchAll(/t\('([^']*Click to cancel\.)'/g)].map((x) => x[1]);
   const rowOf = (dict, k) => { const q = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); const r = dict.match(new RegExp(`^  ['"]${q}['"]: ['"]([^'"]*)['"]`, 'm')); return r ? r[1] : null; };
   const miss = TAIL ? keys.flatMap((k) => [['en', k], ['zh', rowOf(ZH2, k)], ['ja', rowOf(JA2, k)]].filter(([, v]) => !v || !TAIL.test(v)).map(([l]) => `${l}: ${k.slice(0, 40)}`)) : ['no CANCEL_TAIL'];
-  ok(keys.length >= 4 && miss.length === 0 && /title = title\.replace\(CANCEL_TAIL, ''\);/.test(CSB2),
+  ok(keys.length >= 4 && miss.length === 0 && verdictOf(/title = title\.replace\(CANCEL_TAIL, ''\);/.test(CSB2)),
     `the auto-continue tooltip and panel line drop the old «Click to cancel.» in every language (${keys.length} keys × en / zh / ja) — a press opens the panel, cancelling is its row`, miss.join(' ; ')); }
 
 // ── ⑩b no press goes around a pressSays button; every touched control has its words (the acceptance reader's pressSays-3 and
@@ -270,7 +270,7 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
     if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.object.type === 'Identifier' && n.callee.object.name === 'toolbar' && n.callee.property.name === 'append') appended.push(...n.arguments.filter((a) => a.type === 'Identifier').map((a) => a.name));
     if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === 'tools' && n.init && n.init.type === 'ObjectExpression') for (const p of n.init.properties) if (p.value && p.value.type === 'ObjectExpression') for (const q of p.value.properties) if (q.key && q.key.name === 'el' && q.value.type === 'Identifier') toolEls.push(q.value.name); });
   const wordless = appended.filter((x) => made.has(x) && !toolEls.includes(x) && x !== 'btnMore');
-  ok(/\n    if \(!app\.isMobile\) toolbar\.append\(btnMore\);/.test(FE) && !/btnMore\.style\.display = 'none'/.test(FE),
+  ok(gateOf(/\n    if \(!app\.isMobile\) toolbar\.append\(btnMore\);/.test(FE)) && !/btnMore\.style\.display = 'none'/.test(FE),
     'the explorer\'s ⋯ is in the toolbar only where it folds (the desk): the phone has none — never a hidden 0×0 button among its touch targets (test-mobile-gaps #8)');
   ok(appended.length >= 7 && toolEls.length >= 6 && wordless.length === 0, `the explorer toolbar: every tool button it appends carries its word (the tools table) — none icon-only (${wordless.join(', ') || 'none'})`); }
 { // the explorer's ⋯ (the acceptance reader's finding 4): a folded tool acts AGAINST THE ⋯ — foldedMenuItems EVALUATED from its source
@@ -279,7 +279,7 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
   const got = []; const hidden = { id: 'the hidden button' };
   const items = fm ? fm(['view', 'gone', 'upload'], { view: { el: hidden, word: 'View', act: (a) => got.push(['view', a]) }, upload: { el: hidden, word: 'Upload', act: (a) => got.push(['upload', a]) } }, 'THE-MORE') : [];
   items.forEach((x) => x.action());
-  ok(!!fm && items.map((x) => x.label).join(',') === 'View,Upload' && got.length === 2 && got.every(([, a]) => a === 'THE-MORE') && /showContextMenu\(r\.left, r\.bottom \+ 2, foldedMenuItems\(fold\.folded\(\), tools, btnMore\)\)/.test(read('src/lib/file-explorer.js')),
+  ok(!!fm && items.map((x) => x.label).join(',') === 'View,Upload' && got.length === 2 && gateOf(got.every(([, a]) => a === 'THE-MORE')) && verdictOf(/showContextMenu\(r\.left, r\.bottom \+ 2, foldedMenuItems\(fold\.folded\(\), tools, btnMore\)\)/.test(read('src/lib/file-explorer.js'))),
     'the explorer\'s ⋯ (evaluated): a folded tool\'s row acts against the ⋯ — View\'s and Upload\'s popovers open there, never at a hidden button\'s corner', JSON.stringify(got)); }
 { // THE SESSIONS FILTER ROW (the round's walk: the sort's words ran the row past a 200 / 260 px sidebar — ja at 260 cut the ⋯):
   // it is a chrome bar — THE fold (bar-fold.js) with the sort's icon as its short form, manage and sort foldable, the ⋯ as `more`;
@@ -290,7 +290,7 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
   const wired = /this\._filterFold = createBarFold\(row, \{\s*more: listMenuBtn,/.test(SB4) && /\.\.\.\(key === 'sort' \? \{ compactClass: 'sort-compact' \} : \{\}\)/.test(SB4) && /const FOLD = \{ search: 0, filter: 0, live: 0, manage: 20, sort: 10 \};/.test(SB4)
     && /listMenuKeys\(\{ regular: this\._regularMode, folded: this\._filterFold\?\.folded\(\) \}\)\.map\(\(k\) => ROWS\[k\]\)/.test(SB4);
   const css = /\.sfr-bar > \.bar-folded \{ display: none !important; \}/.test(CSS4) && /\.sort-btn\.sort-compact \.sort-ico \{ display: inline; \}/.test(CSS4) && !/#sort-toggle \{[^}]*(white-space: normal|max-width)/.test(CSS4);
-  ok(r.join('|') === 'refresh|refresh+sort|refresh+sort+manage|refresh+sort+manage' && wired && css,
+  ok(r.join('|') === 'refresh|refresh+sort|refresh+sort+manage|refresh+sort+manage' && gateOf(wired) && verdictOf(css),
     'the sessions filter row never runs past the sidebar (evaluated): the sort\'s words, else its icon, else it and manage are rows of the ⋯ — the chrome-bar fold', JSON.stringify({ r, wired, css })); }
 { // THE ONE ROW (the .402 rehearsal: test-artifacts-handover-ui red at 390 px — pick 1's «Auto-continue: off» words, 20 → 92 px,
   // took the Artifacts chip's place). lane mask-value-shape (the strip's step two, the owner's arrangement of 2026-11-14): no
@@ -300,10 +300,10 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
   const CSB3 = read('src/lib/chat-status-bar.js');
   const ST = await import(new URL('../src/lib/strip-table.js', import.meta.url).href);
   const off = ST.arrange({}, 390), armed = ST.arrange({ autoresume: true }, 390);
-  ok(off.rows[1][0] === 'artifacts' && armed.rows[1][0] === 'artifacts' && armed.rows[0].includes('autoresume') && !off.rows.flat().includes('autoresume'),
+  ok(off.rows[1][0] === 'artifacts' && armed.rows[1][0] === 'artifacts' && gateOf(armed.rows[0].includes('autoresume')) && !off.rows.flat().includes('autoresume'),
     'the strip at 390 px (evaluated arrange): 产出 keeps row 2\'s first place — auto-continue ARMED is row 1\'s, not armed it is not on the strip', JSON.stringify({ off: off.rows, armed: armed.rows }));
   const pin = (src) => /\(a\.armed \? chip : inDoor\)\('autoresume', /.test(src) && /const offWords = ' ' \+ escHtml\(t\('Auto-continue: off'\)\);/.test(src) && /: \(a\.enabled \? ' ' \+ escHtml\(t\('auto'\)\) : offWords\);/.test(src) && /' ' \+ escHtml\(t\('continues at \{t\}', \{ t: resetAt \}\)\)/.test(src);
-  ok(pin(CSB3) && !pin(CSB3.replace("(a.armed ? chip : inDoor)('autoresume', ", "chip('autoresume', ")),   // stale-pins: kept — a red control: the mutant PLANTS the old chip spelling
+  ok(gateOf(pin(CSB3)) && !pin(CSB3.replace("(a.armed ? chip : inDoor)('autoresume', ", "chip('autoresume', ")),   // stale-pins: kept — a red control: the mutant PLANTS the old chip spelling
     'the rule in one sentence: an auto-continue that is OFF (or on, not armed) is a row of «⚙ 对话设置» saying its words; armed, with its time, it keeps its words on row 1 — RED: the off state drawn on the strip again'); }
 { const UT2 = read('src/lib/user-todos-row.js');
   const btns = [...UT2.matchAll(/<button([^>]*class="ut-act[^"]*"[^>]*)>([\s\S]*?)<\/button>/g)];
@@ -366,8 +366,8 @@ const grown = Object.entries(per).filter(([f, n]) => n > (LEDGER[f] || 0)).map((
 const shrunk = Object.entries(LEDGER).filter(([f, n]) => (per[f] || 0) < n).map(([f, n]) => `${f}: ${per[f] || 0} < ledger ${n}`);
 ok(grown.length === 0, 'no NEW clear-await-append render (a new one goes through utils.js latestRender)', grown.join(' ; ') + ' — ' + allHits.join(', '));
 ok(shrunk.length === 0, 'the ledger is exact (a site that moved onto latestRender lowers its row)', shrunk.join(' ; '));
-ok(!per['src/lib/sidebar-rail.js'] && /const render = latestRender\(c, async \(out\) =>/.test(read('src/lib/sidebar-rail.js')), 'the Ports panel renders through latestRender (its forwards and its input box are drawn once)');
-ok(/const offPorts = this\.app\.ws\.onGlobal\(/.test(read('src/lib/sidebar-rail.js')) && /if \(!c\.isConnected\) \{ offPorts\(\); return; \}/.test(read('src/lib/sidebar-rail.js')), 'the Ports panel\'s broadcast listener goes with the panel (one per open was kept forever)');
+ok(!per['src/lib/sidebar-rail.js'] && verdictOf(/const render = latestRender\(c, async \(out\) =>/.test(read('src/lib/sidebar-rail.js'))), 'the Ports panel renders through latestRender (its forwards and its input box are drawn once)');
+ok(gateOf(/const offPorts = this\.app\.ws\.onGlobal\(/.test(read('src/lib/sidebar-rail.js'))) && verdictOf(/if \(!c\.isConnected\) \{ offPorts\(\); return; \}/.test(read('src/lib/sidebar-rail.js'))), 'the Ports panel\'s broadcast listener goes with the panel (one per open was kept forever)');
 // latestRender itself, evaluated from its own source against a fake container (two overlapping calls ⇒ ONE landing, the newest)
 const U = read('src/lib/utils.js');
 const fnSrc = (() => { let out = null; walk(parse(U), (n) => { if (n.type === 'FunctionDeclaration' && n.id && n.id.name === 'latestRender') out = U.slice(n.start, n.end); }); return out; })();
@@ -387,18 +387,18 @@ ok(!!fnSrc && JSON.stringify(two) === JSON.stringify([['build 2']]), 'latestRend
 // ── ⑤ the single defects of pick 1 ──
 console.log('⑤ THE SINGLE DEFECTS — each pinned where it lives');
 const MA = read('src/lib/manage-agents.js');
-ok(/picked: explicit \? explicit\.slice\(\) : null/.test(MA) && /if \(st\.all\) \{ st\.picked = st\.checked\.slice\(\); st\.checked = subs\.map\(\(x\) => x\.id\); \} else if \(st\.picked\) st\.checked = st\.picked\.slice\(\);/.test(MA),
+ok(gateOf(/picked: explicit \? explicit\.slice\(\) : null/.test(MA)) && verdictOf(/if \(st\.all\) \{ st\.picked = st\.checked\.slice\(\); st\.checked = subs\.map\(\(x\) => x\.id\); \} else if \(st\.picked\) st\.checked = st\.picked\.slice\(\);/.test(MA)),
   'pool members: ticking «All» keeps the person\'s own list aside; unticking brings THAT list back (never every subscription silently ticked)');
-ok(!/\$\{st\.all \? 'disabled' : ''\}/.test(MA) && /\$\{st\.all \? '' : `<input type="checkbox" class="pool-mem-cb"/.test(MA) && /t\('Every subscription is in the pool, including ones you add later'\)/.test(MA),
+ok(!/\$\{st\.all \? 'disabled' : ''\}/.test(MA) && gateOf(/\$\{st\.all \? '' : `<input type="checkbox" class="pool-mem-cb"/.test(MA)) && verdictOf(/t\('Every subscription is in the pool, including ones you add later'\)/.test(MA)),
   'pool members: while «All» is on the member boxes are NOT drawn (no greyed ticked box) and one line says every subscription is in');
 const SB = read('src/lib/chat-status-bar.js');
 const arAt = SB.indexOf("const arEl = e.target.closest('.chat-status-autoresume');");
 const arBlock = arAt >= 0 ? SB.slice(arAt, SB.indexOf('\n    }\n', arAt)) : '';
-ok(arBlock.length > 200 && arBlock.indexOf('showDropdown(arEl') >= 0 && arBlock.indexOf('showDropdown(arEl') < arBlock.indexOf("type: 'auto-resume'") && /act\.onclick = \(ev\) => \{[\s\S]*type: 'auto-resume'/.test(arBlock),
+ok(arBlock.length > 200 && arBlock.indexOf('showDropdown(arEl') >= 0 && arBlock.indexOf('showDropdown(arEl') < arBlock.indexOf("type: 'auto-resume'") && verdictOf(/act\.onclick = \(ev\) => \{[\s\S]*type: 'auto-resume'/.test(arBlock)),
   'auto-continue: a press OPENS the chip\'s panel; the on / off act sits behind a press inside it');
-ok(/t\('continues at \{t\}', \{ t: resetAt \}\)/.test(SB) && /t\('Auto-continue: off'\)/.test(SB), 'auto-continue: the chip says «… 自动继续» / «自动继续：关», never a bare time or a bare icon');
+ok(gateOf(/t\('continues at \{t\}', \{ t: resetAt \}\)/.test(SB)) && verdictOf(/t\('Auto-continue: off'\)/.test(SB)), 'auto-continue: the chip says «… 自动继续» / «自动继续：关», never a bare time or a bare icon');
 const HX = read('src/lib/hex-viewer.js');
-ok(!/t\('Load more'\)/.test(HX) && /upTo >= this\.fileSize \? '' :/.test(HX) && /new IntersectionObserver/.test(HX), 'hex viewer: no «Load more» (the scroll loads), and a whole file says nothing more');
+ok(!/t\('Load more'\)/.test(HX) && gateOf(/upTo >= this\.fileSize \? '' :/.test(HX)) && verdictOf(/new IntersectionObserver/.test(HX)), 'hex viewer: no «Load more» (the scroll loads), and a whole file says nothing more');
 
 // ── ⑥ controls ──
 console.log('⑥ CONTROLS — the same checkers on planted code');
@@ -413,4 +413,4 @@ const bad2 = noGen && noGen !== fnSrc ? await overlap(noGen) : null;
 ok(!!bad2 && bad2.length === 2, 'a latestRender without its generation check lands BOTH builds — the overlap leg would be red', JSON.stringify(bad2));
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -53,7 +53,7 @@ import { anchored } from './scratch.mjs';   // B-75ba's control: B-0d3e's one do
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -103,7 +103,7 @@ const H = harness(createFsCanary);
   const r = await H.c.tick();
   // (lane wall-clock-ratchet-down: the old `fsMs < 100 && loopMs < 100` judged the machine with the canary's own
   // slowMs — "healthy" is the canary's verdict: no strike, and the next line: nothing recorded)
-  ok(r0 && r && r.where === 'worker' && !r.timedOut && r.strike === 0, `timed in its own worker: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
+  ok(gateOf(r0) && gateOf(r) && r.where === 'worker' && !r.timedOut && r.strike === 0, `timed in its own worker: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
   ok(H.recs.length === 0 && H.lines.length === 0, 'a healthy probe records and says nothing (anomalies only)');
 }
 
@@ -114,15 +114,15 @@ console.log('§2 a blocked loop is not a slow mount');
   const r = await p;
   // the stat's time is a SMALL PART of the hold (lane wall-clock-ratchet-down: `fsMs < 300` judged the machine): the
   // worker's clock reads under a quarter of what the main loop held — §5's main-clock copy reads the stat ≥ the hold
-  ok(r && r.fsMs * 4 < r.loopMs && r.loopMs >= 1200 && r.strike === 0, `the stat ${r && r.fsMs} ms (worker clock), the loop held its answer ${r && r.loopMs} ms, no strike`);
+  ok(gateOf(r) && r.fsMs * 4 < r.loopMs && r.loopMs >= 1200 && r.strike === 0, `the stat ${r && r.fsMs} ms (worker clock), the loop held its answer ${r && r.loopMs} ms, no strike`);
   ok(JSON.stringify(H.names()) === '["srv-loop-canary-ms"]' && H.recs[0].value >= 1200 && H.c.counts.slowLoop === 1 && H.c.counts.slowFs === 0,
     `counted as the loop's fact only (${JSON.stringify(H.recs)})`);
-  ok(H.lines.length === 1 && /main loop held the probe's answer \d+ms .*not a slow mount/.test(H.lines[0]), `said by name: ${H.lines[0]}`);
+  ok(H.lines.length === 1 && verdictOf(/main loop held the probe's answer \d+ms .*not a slow mount/.test(H.lines[0])), `said by name: ${H.lines[0]}`);
   H.recs.length = 0; H.lines.length = 0;
   const p2 = H.c.tick(); // blocked LONGER than the deadline (1000 ms here): the old main-thread deadline struck
   spin(1800);
   const r2 = await p2;
-  ok(r2 && !r2.timedOut && r2.strike === 0 && !H.names().includes('srv-fs-canary-ms') && !H.names().includes('srv-threadpool-wedged') && H.c.counts.timedOut === 0,
+  ok(gateOf(r2) && !r2.timedOut && r2.strike === 0 && !H.names().includes('srv-fs-canary-ms') && !H.names().includes('srv-threadpool-wedged') && H.c.counts.timedOut === 0,
     `a block past the deadline is no strike and no srv-fs-canary-ms (${JSON.stringify(H.recs)})`);
 }
 
@@ -139,8 +139,8 @@ console.log('§3 a slow pool is still seen');
   const r = await probe;
   clearTimeout(held); wedge.release(); wedge.close();
   // the loop's part is SMALL against the stat's wait (the loop stayed free through the hold): a busy pool reads as fs
-  ok(r && r.fsMs >= 100 && r.loopMs * 4 < r.fsMs && !r.timedOut, `the stat waited for the shared pool: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
-  ok(P.names().join() === 'srv-fs-canary-ms' && P.c.counts.slowFs === 1 && /took \d+ms off the main thread/.test(P.lines[0] || ''), `counted as the fs fact (${JSON.stringify(P.recs)}; ${P.lines[0]})`);
+  ok(gateOf(r) && r.fsMs >= 100 && r.loopMs * 4 < r.fsMs && !r.timedOut, `the stat waited for the shared pool: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
+  ok(P.names().join() === 'srv-fs-canary-ms' && P.c.counts.slowFs === 1 && verdictOf(/took \d+ms off the main thread/.test(P.lines[0] || '')), `counted as the fs fact (${JSON.stringify(P.recs)}; ${P.lines[0]})`);
   P.c.close();
 
   const W = harness(createFsCanary, { deadlineMs: 60 });
@@ -149,10 +149,10 @@ console.log('§3 a slow pool is still seen');
   const strikes = [];
   for (let i = 0; i < 3; i++) strikes.push(await W.c.tick()); // the worker's own 60 ms timer fires while the stat is queued ⇒ a strike
   wedgeW.release(); wedgeW.close(); // the abandoned stats drain; the pool is free for the healthy tick below
-  ok(strikes.map((s) => s && s.strike).join() === '1,2,3' && W.wedged() === 1 && W.names().filter((n) => n === 'srv-fs-canary-ms').length === 3 && W.names().includes('srv-threadpool-wedged'),
+  ok(strikes.map((s) => s && s.strike).join() === '1,2,3' && W.wedged() === 1 && W.names().filter((n) => n === 'srv-fs-canary-ms').length === 3 && verdictOf(W.names().includes('srv-threadpool-wedged')),
     `three stats past the deadline in a row: strikes ${strikes.map((s) => s && s.strike).join()}, the wedged event, the health sweep kicked once (${W.names().join()})`);
   const after = await W.c.tick();
-  ok(after && after.strike === 0 && !after.timedOut, 'a healthy stat after the wedge resets the strikes');
+  ok(gateOf(after) && after.strike === 0 && !after.timedOut, 'a healthy stat after the wedge resets the strikes');
   W.c.close();
 }
 
@@ -164,7 +164,7 @@ console.log('§3 CONTROL: a pool that is NOT wedged answers fast (the quiet box 
   const Q = harness(createFsCanary, { deadlineMs: 60e3 });
   await Q.c.tick(); // spawns its worker
   const r = await Q.c.tick(); // a FREE pool: the stat sails through
-  ok(r && !r.timedOut && r.strike === 0 && Q.c.counts.slowFs === 0 && Q.names().length === 0,
+  ok(gateOf(r) && !r.timedOut && r.strike === 0 && Q.c.counts.slowFs === 0 && Q.names().length === 0,
     `CONTROL: a free pool records nothing (fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms) — §3's slow-pool reads need a real wedge, not one raced against the box`);
   Q.c.close();
 }
@@ -173,7 +173,7 @@ console.log('§4 a probe that gets no answer');
 {
   const L = harness(createFsCanary, { probe: { call: () => Promise.reject(Object.assign(new Error('Storage not responding (operation timed out).'), { status: 503 })) } });
   const r = await L.c.tick();
-  ok(r && r.lost && L.c.counts.lost === 1 && L.names().join() === 'srv-fs-canary-lost' && /not counted as a slow mount/.test(L.lines[0] || ''), `lost: said, counted, no strike (${L.lines[0]})`);
+  ok(gateOf(r) && gateOf(r.lost) && L.c.counts.lost === 1 && L.names().join() === 'srv-fs-canary-lost' && verdictOf(/not counted as a slow mount/.test(L.lines[0] || '')), `lost: said, counted, no strike (${L.lines[0]})`);
   let release;
   const S = harness(createFsCanary, { probe: { call: () => new Promise((res) => { release = res; }) } });
   const first = S.c.tick();
@@ -193,21 +193,21 @@ const M = mutantCopies('fs-canary', REPO);
   const p = C.c.tick();
   spin(1500);
   const r = await p;
-  ok(r && r.fsMs >= 1200 && C.names().includes('srv-fs-canary-ms'), `CONTROL: with the main thread's clock the same blocked loop reads as a ${r && r.fsMs} ms stat (${C.names().join()}) — §2 would be red`);
+  ok(gateOf(r) && r.fsMs >= 1200 && verdictOf(C.names().includes('srv-fs-canary-ms')), `CONTROL: with the main thread's clock the same blocked loop reads as a ${r && r.fsMs} ms stat (${C.names().join()}) — §2 would be red`);
   C.c.close();
-  for (const row of copiesCensus(M.files, M.dir, REPO)) ok(row.pass, row.name + (row.pass ? '' : ' — ' + row.detail));
+  for (const row of copiesCensus(M.files, M.dir, REPO)) ok(verdictOf(row.pass), row.name + (row.pass ? '' : ' — ' + row.detail));
 }
 H.c.close();
 
 console.log('§6 pins');
 {
   const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  ok(/require\('\.\/src\/server\/fs-canary\.js'\)\.createFsCanary\(\{\n    file: path\.join\(__dirname, 'package\.json'\),/.test(server) && /onWedged: \(\) => \{ try \{ mounts\._healthSweep\(\)/.test(server),
+  ok(gateOf(/require\('\.\/src\/server\/fs-canary\.js'\)\.createFsCanary\(\{\n    file: path\.join\(__dirname, 'package\.json'\),/.test(server)) && verdictOf(/onWedged: \(\) => \{ try \{ mounts\._healthSweep\(\)/.test(server)),
     'server.js runs the canary through createFsCanary over the checkout\'s package.json, the wedge kicks the mount health sweep');
   ok(!/CANARY_FILE|fs\.promises\.stat\(/.test(server), 'no stat of the canary is timed on the main thread any more');
   const worker = fs.readFileSync(path.join(REPO, 'src/server/fs-canary-worker.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  ok(/fs\.promises\.stat\(p\)/.test(worker) && !/statSync|readFileSync/.test(worker), 'the probe is an ASYNC stat — it goes through the shared pool, the thing the canary watches');
-  ok(/poolSize: 1,/.test(SRC) && /timeouts: \{ probe: deadlineMs \* 3 \}/.test(SRC), 'its own one-worker SafeFs (never queued behind a file route), a backstop past the probe\'s own deadline');
+  ok(gateOf(/fs\.promises\.stat\(p\)/.test(worker)) && !/statSync|readFileSync/.test(worker), 'the probe is an ASYNC stat — it goes through the shared pool, the thing the canary watches');
+  ok(gateOf(/poolSize: 1,/.test(SRC)) && verdictOf(/timeouts: \{ probe: deadlineMs \* 3 \}/.test(SRC)), 'its own one-worker SafeFs (never queued behind a file route), a backstop past the probe\'s own deadline');
 }
 
 console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads, path judgements and path encodes per wrapped call');
@@ -283,12 +283,12 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     MPCm.rootsOf = () => { throw new Error('a planted roots fault'); };
     let threw = false; try { w.refresh(); } catch { threw = true; } finally { MPCm.rootsOf = realRoots; }
     const after = count(0.001, () => times(2, () => F.statSync(IN)));
-    ok(threw && after.own === 1, `a refresh that throws (the planted fault) clears the kept verdicts first — the own-tree path is judged once more, then kept (${after.own} of 2)`, after);
+    ok(gateOf(threw) && after.own === 1, `a refresh that throws (the planted fault) clears the kept verdicts first — the own-tree path is judged once more, then kept (${after.own} of 2)`, after);
   }
   { // a call of AT_MS or longer is dated on the wall clock: its end less its length (the fake wall clock reads 5e12)
     const slow = count(60, () => times(5, () => F.statSync(OUT)));
     const e = w.ring().at(-1), b = LB.blame(0, Infinity, { k: Infinity }).find((x) => x.fn === 'statSync' && x.path === OUT);
-    ok(slow.date === 5 && slow.perf === 10 && slow.hrtime + slow.bigint === 0 && e && e.at === 5e12 - 60 && e.ms === 60 && b && b.at === 5e12 - 60 && b.ms === 60,
+    ok(slow.date === 5 && slow.perf === 10 && slow.hrtime + slow.bigint === 0 && gateOf(e) && e.at === 5e12 - 60 && e.ms === 60 && gateOf(b) && b.at === 5e12 - 60 && b.ms === 60,
       `a 60 ms call reads the wall clock ONCE, after it — its start is its end less its length, in the witness's ring and in loop-blame's (${slow.date} for 5 calls; at ${e && e.at})`, { slow, e, b });
   }
   { // the live slot's start is the wrapper's own start put on the monotonic clock (the watchdog's): read DURING a call
@@ -298,7 +298,7 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     F.lstatSync = (p) => { seen = { start: T[0], inside: mono(), inflight: w.inflight() }; return { p }; };
     LB.install({ fsMod: F, root: ROOT });
     F.lstatSync(OUT);
-    ok(seen && seen.start <= seen.inside && seen.inside - seen.start < SW.LIVE_MS && seen.inflight && seen.inflight.fn === 'lstatSync' && seen.inflight.path === OUT && seen.inflight.root === NFS && seen.inflight.store === null && w.inflight() === null,
+    ok(gateOf(seen) && seen.start <= seen.inside && seen.inside - seen.start < SW.LIVE_MS && gateOf(seen.inflight) && seen.inflight.fn === 'lstatSync' && seen.inflight.path === OUT && seen.inflight.root === NFS && seen.inflight.store === null && w.inflight() === null,
       `the live slot's start is on the monotonic clock, before the call's own first line (the wrapper's start + one offset read at load); inflight() names fn, path, root and store from the hook's fields`, seen);
   }
   // THE RED CONTROLS — each cut put back alone (scripts/mutant-copy.mjs, never src/): its own count is red
@@ -358,11 +358,11 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     const firstWins = eqMut("if (r && (!hit || (r.kind === 'storage' && hit.kind !== 'storage'))) { hit = r; hp = p; }", 'if (r && !hit) { hit = r; hp = p; }', 'first-hit-wins');
     const wsStorage = cut(WSRC, "Object.freeze({ kind: 'home',", "Object.freeze({ kind: 'storage',");
     const asStorage = wsStorage ? armedRun(M.load('src/server/sync-fs-witness.js', wsStorage, 'home-as-storage')) : null;
-    ok(firstWins && firstWins.fromHome === DATA2 && firstWins.fromNfs === NFS2 && asStorage && asStorage.data === DATA2 && asStorage.write === DATA2,
+    ok(gateOf(firstWins) && firstWins.fromHome === DATA2 && firstWins.fromNfs === NFS2 && gateOf(asStorage) && asStorage.data === DATA2 && asStorage.write === DATA2,
       `RED CONTROLS: the first hit kept (a later storage hit never wins) names the data dir and the network mount, never the storage row (${firstWins && firstWins.fromHome} · ${firstWins && firstWins.fromNfs}); the own-mount hit made a storage hit refuses the data dir's own stat and write (${asStorage && asStorage.data})`, { firstWins, asStorage });
-    ok(skipOwn && skipOwn.bad.length > 0 && twoAsOne && twoAsOne.rename !== STORE2 && noHome && noHome.data !== DATA2,
+    ok(gateOf(skipOwn) && skipOwn.bad.length > 0 && gateOf(twoAsOne) && twoAsOne.rename !== STORE2 && gateOf(noHome) && noHome.data !== DATA2,
       `RED CONTROLS: a fast road that skips the own-tree verdict disagrees with the loop (${skipOwn && skipOwn.bad.length} calls); renameSync taken as one path misses the storage row (${twoAsOne && twoAsOne.rename}); the own-mount hit dropped names nothing (${noHome && noHome.data})`, { skipOwn: skipOwn && skipOwn.bad.slice(0, 2), twoAsOne: twoAsOne && twoAsOne.rename, noHome: noHome && noHome.data });
-    ok(!!loopOld && loopOld.bad.length > 0 && loopOld.bad.every((x) => x.includes('(ownSelf)')),
+    ok(!!loopOld && loopOld.bad.length > 0 && verdictOf(loopOld.bad.every((x) => x.includes('(ownSelf)'))),
       `RED CONTROL: the loop given back its old compare — the parity table's data-folder row disagrees, and only it (${loopOld && loopOld.bad.length} of ${ONE.length} calls: ${loopOld && loopOld.bad.slice(0, 2).join(' · ')})`, loopOld && loopOld.bad.slice(0, 6));
   }
   // THE DATA FOLDER ITSELF IS A PATH OF THE DATA FOLDER. A folder's own sync opens it by path.dirname, no slash at its end
@@ -390,20 +390,20 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
   const HOME_WORDS = `under the nfs4 mount «${DATA2}» this instance lives on (witnessed, never refused)`;
   const named = (r) => !!r && !r.threw && r.calls.length > 0 && r.calls.every((c) => c.ms >= 50 && c.words.includes(HOME_WORDS));
   const SELF = selfRun(SW), UNRESOLVED = `${ROOT}/./data//`, SELFU = selfRun(SW, UNRESOLVED);
-  ok(named(SELF.one) && SELF.one.calls.length === 1 && SELF.one.calls[0].path === DATA2,
+  ok(gateOf(named(SELF.one)) && SELF.one.calls.length === 1 && SELF.one.calls[0].path === DATA2,
     `THE DATA FOLDER ITSELF (1): a held one-path call on the folder names its mount — ${SELF.one.calls.map((c) => c.words).join(' | ')}`, SELF.one);
-  ok(named(SELF.fdRoad) && SELF.fdRoad.calls.map((c) => c.fn).join() === 'openSync,fsyncSync,closeSync' && SELF.fdRoad.calls.every((c) => c.path === DATA2),
+  ok(gateOf(named(SELF.fdRoad)) && SELF.fdRoad.calls.map((c) => c.fn).join() === 'openSync,fsyncSync,closeSync' && verdictOf(SELF.fdRoad.calls.every((c) => c.path === DATA2)),
     `THE DATA FOLDER ITSELF (2): the folder opened and its descriptor synced, held — each of the three names its mount (the fd road): ${SELF.fdRoad.calls.map((c) => `${c.fn} ${c.words.includes(HOME_WORDS) ? 'names it' : 'NOT'}`).join(' · ')}`, SELF.fdRoad);
-  ok(!SELF.beside.threw && SELF.beside.calls.length === 2 && SELF.beside.calls.every((c) => c.words.includes('not under a mount')),
+  ok(!SELF.beside.threw && SELF.beside.calls.length === 2 && verdictOf(SELF.beside.calls.every((c) => c.words.includes('not under a mount'))),
     `THE DATA FOLDER ITSELF (3): a path of the checkout beside the folder keeps its words — ${SELF.beside.calls.map((c) => c.words).join(' | ')}`, SELF.beside);
-  ok(named(SELFU.one) && named(SELFU.fdRoad),
+  ok(gateOf(named(SELFU.one)) && verdictOf(named(SELFU.fdRoad)),
     `THE DATA FOLDER ITSELF (4): the data folder handed unresolved (${UNRESOLVED.slice(ROOT.length)}) — the folder itself still names its mount on both roads (${SELFU.one.calls.map((c) => c.words.includes(HOME_WORDS) ? 'named' : 'NOT').join()} · ${SELFU.fdRoad.calls.map((c) => c.words.includes(HOME_WORDS) ? 'named' : 'NOT').join()})`, SELFU);
   { // ITS RED CONTROLS: the old compare put back through the anchored helper (the data folder itself no longer its own) — red on (1) and
     // (2); the folder-itself compare built from the folder as handed (its trailing slashes cut, never resolved) — red on (4)
     const wsOld = cut(WSRC, '    if (DATA_SELF !== null && p === DATA_SELF) return ownHit;   // the data folder itself (its own sync opens it by path.dirname), by its own mount\n', '');
     const ROld = wsOld ? selfRun(M.load('src/server/sync-fs-witness.js', wsOld, 'data-self-old-compare')) : null;
     const said = (r) => (r ? r.calls.filter((c) => c.words.includes('not under a mount')).map((c) => c.fn) : []);
-    ok(!!ROld && said(ROld.one).join() === 'statSync' && said(ROld.fdRoad).includes('fsyncSync') && !named(ROld.one) && !named(ROld.fdRoad),
+    ok(!!ROld && said(ROld.one).join() === 'statSync' && gateOf(said(ROld.fdRoad).includes('fsyncSync')) && !named(ROld.one) && !named(ROld.fdRoad),
       `RED CONTROL: the old compare put back — the data folder itself is worded «not under a mount» on the one-path road (${said(ROld.one).join() || 'none'}) and on the fd road (${said(ROld.fdRoad).join(', ') || 'none'})`, ROld);
     const wsHanded = cut(WSRC, "  const DATA_SELF = typeof dataDir === 'string' && dataDir[0] === '/' && path.resolve(dataDir) !== '/' ? path.resolve(dataDir) : null;\n",
       "  const DATA_SELF = DATA_SLASH && DATA_SLASH[0] === '/' && DATA_SLASH.length > 1 ? DATA_SLASH.slice(0, -1) : null;\n");   // stale-pins: kept — the compare as first built, planted back as the RED
@@ -445,9 +445,9 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
       stale = count(0.001, () => times(2, () => r.F.statSync(IN))).own;
       r.w.stop();
     }
-    ok(clean === 1 && threw && stale === 0, `RED CONTROL: with the clear after the rebuild (as at a70fdfef0) — which does clear at a refresh that runs (${clean}) — a refresh that throws leaves the old own-tree verdict standing (${stale} own-tree tests after it)`, { clean, threw, stale });
+    ok(clean === 1 && gateOf(threw) && stale === 0, `RED CONTROL: with the clear after the rebuild (as at a70fdfef0) — which does clear at a refresh that runs (${clean}) — a refresh that throws leaves the old own-tree verdict standing (${stale} own-tree tests after it)`, { clean, threw, stale });
   }
-  ok(reds.every(([, v]) => v !== null), `RED CONTROLS: each cut put back alone reads its count per call again — ${reds.map(([t, v]) => `${t}: ${v === null ? 'NOT RED' : v + ' over ' + K}`).join('; ')}`, reds);
+  ok(verdictOf(reds.every(([, v]) => v !== null)), `RED CONTROLS: each cut put back alone reads its count per call again — ${reds.map(([t, v]) => `${t}: ${v === null ? 'NOT RED' : v + ' over ' + K}`).join('; ')}`, reds);
   LB.setHook(null);
   fs.rmSync(ROOT, { recursive: true, force: true });
 }
@@ -505,10 +505,10 @@ console.log('§11 a stop with the watchdog\'s session kept — one line, no wait
     const kept = await runKid('keep'), none = await runKid('closed'), port = await runKid('port');
     const before = (e, a, b) => e.indexOf(a) >= 0 && e.indexOf(b) > e.indexOf(a);
     console.log(`  · the worker's 10 ms ticks after the flush — kept ${kept.after}, no session ${none.after}, port ${port.after} (printed, never asserted)`);
-    ok(kept.waited && kept.err.includes(LINE) && none.waited && !none.err.includes(LINE), `PLANT: the child's exit found the watchdog's kind of session attached — Node printed «${LINE}…»; the no-session control printed none`);
-    ok(kept.code === 0 && !kept.killed && !kept.err.includes(CLOSER) && kept.flush === 'flushed' && before(kept.err, FLUSHED, LINE),
+    ok(gateOf(kept.waited) && gateOf(kept.err.includes(LINE)) && gateOf(none.waited) && !none.err.includes(LINE), `PLANT: the child's exit found the watchdog's kind of session attached — Node printed «${LINE}…»; the no-session control printed none`);
+    ok(kept.code === 0 && !kept.killed && !kept.err.includes(CLOSER) && kept.flush === 'flushed' && verdictOf(before(kept.err, FLUSHED, LINE)),
       `ONE line, NO WAIT: with a session that is NEVER closed the child exited by itself (code ${kept.code}, not the suite's kill) — Node did not wait for it; the store's flush whole («${kept.flush}») and its stamp before the line`);
-    ok(port.waited && port.err.includes('[kid] port open: yes') && port.err.includes(LINE) && port.code === 0 && !port.killed && before(port.err, FLUSHED, CLOSER),
+    ok(gateOf(port.waited) && gateOf(port.err.includes('[kid] port open: yes')) && gateOf(port.err.includes(LINE)) && port.code === 0 && !port.killed && verdictOf(before(port.err, FLUSHED, CLOSER)),
       `RED CONTROL (an inspector port open${port.err.includes('[kid] port open: no') ? ' — REFUSED: the box allowed no loopback port' : ''}): its plant took (the port open, the line printed) and the exit WAITED for the session — its closer spoke after the flush: a Node that waited would read here`);
   } finally { fs.rmSync(D, { recursive: true, force: true }); }
 }
@@ -524,10 +524,10 @@ console.log('§T the heavy twin holds §7, §8 and §9');
   const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
   const MOVED = ["console.log('§7 the blocked loop names its blocker", "console.log('§8 THE WITNESS NAMES THE HOLD", "spawn('sh', ['-c', `sleep 1.3; printf 'four' > '${fifo}'`], { stdio: 'ignore' });", "const kid = path.join(ROOT, 'kid.js');", "console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS"];
   const holds = (t) => MOVED.every((h) => t.includes(h));
-  ok(holds(twin) && MOVED.every((h) => here.split(h).length === 2), '§T the heavy twin holds §7, §8 and §9 — their headings, the FIFO a child fills after 1.3 s, the watchdog thread\'s child — and this file runs none of them');
-  ok(/\{ name: 'test-fs-canary-holds', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8')), '§T the twin is a HEAVY row of the tier');
+  ok(gateOf(holds(twin)) && verdictOf(MOVED.every((h) => here.split(h).length === 2)), '§T the heavy twin holds §7, §8 and §9 — their headings, the FIFO a child fills after 1.3 s, the watchdog thread\'s child — and this file runs none of them');
+  ok(verdictOf(/\{ name: 'test-fs-canary-holds', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8'))), '§T the twin is a HEAVY row of the tier');
   ok(!holds(twin.replace(MOVED[2], '')), 'RED CONTROL — a twin whose child-filled FIFO is gone is no longer the moved §7: §T goes red');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

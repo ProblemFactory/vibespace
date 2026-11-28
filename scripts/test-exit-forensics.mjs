@@ -55,7 +55,7 @@ const { scratch } = await import(path.join(REPO, 'scripts/scratch.mjs'));
 const { mutantCopies, copiesCensus } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? `\n      ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? `\n      ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -229,7 +229,7 @@ const { exitFacts, tombExpired, EXIT_TOMB_MAX_AGE_MS } = require(path.join(REPO,
   ok(d.code === null && d.signal === null && d.wrapperSignal === null && !/forged|rm|reason/.test(d.suffix), 'a torn/hostile meta can never inject text into the journal line', d);
   ok(a.eventSuffix === '/signal=SIGTERM/wrapper=finalized/socket=gone', 'the telemetry event carries the same three facts', a.eventSuffix);
   const { awaitsWrapper, WRAPPER_SETTLE_MS } = require(path.join(REPO, 'src/exit-facts.js'));
-  ok(awaitsWrapper({ pid: 77 }) && awaitsWrapper({ pid: 77, wrapperSignal: 'SIGHUP' }) && awaitsWrapper({ pid: 77, childExitCode: 5, wrapperSignal: 'SIGTERM' }),
+  ok(gateOf(awaitsWrapper({ pid: 77 })) && gateOf(awaitsWrapper({ pid: 77, wrapperSignal: 'SIGHUP' })) && verdictOf(awaitsWrapper({ pid: 77, childExitCode: 5, wrapperSignal: 'SIGTERM' })),
     'awaitsWrapper: no record, or a wrapper-signal record (its buffer may still be flushing) ⇒ the teardown waits for that wrapper');
   ok(!awaitsWrapper({ pid: 77, childExitCode: null, childExitSignal: 'SIGTERM' }) && !awaitsWrapper(null) && !awaitsWrapper({}) && !awaitsWrapper({ pid: 1 }) && !awaitsWrapper({ pid: '77' }),
     'awaitsWrapper: a FINALIZED record, no meta, or no usable pid ⇒ read at once');
@@ -237,7 +237,7 @@ const { exitFacts, tombExpired, EXIT_TOMB_MAX_AGE_MS } = require(path.join(REPO,
   ok(exitFacts({ meta: { pid: 9 }, wrapperRunning: true }).wrapperFate === 'running' && exitFacts({ meta: { wrapperSignal: 'SIGHUP' }, wrapperRunning: true }).wrapperFate === 'signal:SIGHUP',
     'wrapperFate "running" = no record AND the wrapper outlived the wait; a record always wins');
   const now = 1e12;
-  ok(tombExpired(now - EXIT_TOMB_MAX_AGE_MS - 1, now) && !tombExpired(now - 6 * 86400e3, now) && EXIT_TOMB_MAX_AGE_MS === 7 * 86400e3, 'the tomb sweep rule: older than 7 days goes, 6 days stays');
+  ok(gateOf(tombExpired(now - EXIT_TOMB_MAX_AGE_MS - 1, now)) && !tombExpired(now - 6 * 86400e3, now) && EXIT_TOMB_MAX_AGE_MS === 7 * 86400e3, 'the tomb sweep rule: older than 7 days goes, 6 days stays');
   // The kb essays quote line fragments an incident reader will grep the
   // journal for — in the line's OWN order (` signal=` before ` wrapper=`,
   // src/exit-facts.js); a reversed fragment matches nothing.
@@ -263,21 +263,21 @@ async function childSigterm(kind, wrapperPath) {
   const c = await childSigterm('chat', CHAT);
   ok(c.childPid > 0, 'chat: the fake CLI started under the real chat-wrapper');
   ok(c.meta?.childExitSignal === 'SIGTERM', 'chat: meta.childExitSignal === "SIGTERM"', c.meta);
-  ok(/Child exited with code null signal SIGTERM/.test(c.log), 'chat: log "Child exited with code null signal SIGTERM"', c.log.slice(-400));
+  ok(verdictOf(/Child exited with code null signal SIGTERM/.test(c.log)), 'chat: log "Child exited with code null signal SIGTERM"', c.log.slice(-400));
   ok(c.ex.code === 0 && c.ex.signal === null, 'chat: wrapper exit status 0 — the PRE-CHANGE status (finalize(null) → process.exit(null ?? 0))', c.ex);
   const line = teardown(realEng, c.id, { socketPath: path.join(ROOT, 'gone.sock') });
-  ok(/ signal=SIGTERM wrapper=finalized socket=gone$/.test(line), 'chat → server line: "… signal=SIGTERM wrapper=finalized socket=gone"', line);
-  ok(/^\[session\] exited sess-xf-chat-\d+ "xf" mode=terminal backend=shell signal=/.test(line), 'the existing fields keep their spelling and order (no code= for a null code, new fields AFTER)', line);
-  ok(events.some((e) => e.name === 'session-exited' && e.detail.endsWith('/signal=SIGTERM/wrapper=finalized/socket=gone')), 'the session-exited event carries the same facts', events.slice(-2));
-  ok(frames.some((f) => f.id === c.id && f.type === 'exited' && f.signal === 'SIGTERM'), 'the exited broadcast carries the signal', frames.filter((f) => f.id === c.id));
+  ok(verdictOf(/ signal=SIGTERM wrapper=finalized socket=gone$/.test(line)), 'chat → server line: "… signal=SIGTERM wrapper=finalized socket=gone"', line);
+  ok(verdictOf(/^\[session\] exited sess-xf-chat-\d+ "xf" mode=terminal backend=shell signal=/.test(line)), 'the existing fields keep their spelling and order (no code= for a null code, new fields AFTER)', line);
+  ok(verdictOf(events.some((e) => e.name === 'session-exited' && e.detail.endsWith('/signal=SIGTERM/wrapper=finalized/socket=gone'))), 'the session-exited event carries the same facts', events.slice(-2));
+  ok(verdictOf(frames.some((f) => f.id === c.id && f.type === 'exited' && f.signal === 'SIGTERM')), 'the exited broadcast carries the signal', frames.filter((f) => f.id === c.id));
 
   const p = await childSigterm('pty', PTYW);
   ok(p.childPid > 0, 'pty: the fake CLI started under the real pty-wrapper (node-pty)');
   ok(p.meta?.childExitSignal === 'SIGTERM', 'pty: meta.childExitSignal === "SIGTERM" (node-pty\'s numeric signal named)', p.meta);
-  ok(/Child exited with code 0 signal SIGTERM/.test(p.log), 'pty: log "Child exited with code 0 signal SIGTERM"', p.log.slice(-400));
+  ok(verdictOf(/Child exited with code 0 signal SIGTERM/.test(p.log)), 'pty: log "Child exited with code 0 signal SIGTERM"', p.log.slice(-400));
   ok(p.ex.code === 0 && p.ex.signal === null, 'pty: wrapper exit status 0 — the PRE-CHANGE status (process.exit(exitCode) with node-pty\'s exitCode 0)', p.ex);
   const pl = teardown(realEng, p.id);
-  ok(/ code=0 signal=SIGTERM wrapper=finalized socket=none$/.test(pl), 'pty → server line: "… code=0 signal=SIGTERM wrapper=finalized socket=none"', pl);
+  ok(verdictOf(/ code=0 signal=SIGTERM wrapper=finalized socket=none$/.test(pl)), 'pty → server line: "… code=0 signal=SIGTERM wrapper=finalized socket=none"', pl);
 
   // codex (r3): the third wrapper wrote NO exit record — `wrapper=unfinalized`
   // for every codex exit. PRE-CHANGE STATUS: finalizeExit(null) →
@@ -285,10 +285,10 @@ async function childSigterm(kind, wrapperPath) {
   const x = await childSigterm('codex', CODEX);
   ok(x.childPid > 0, 'codex: the fake app-server started under the real codex-chat-wrapper');
   ok(x.meta?.childExitCode === null && x.meta?.childExitSignal === 'SIGTERM', 'codex: meta {childExitCode: null, childExitSignal: "SIGTERM"}', x.meta);
-  ok(/Child exited with code null signal SIGTERM/.test(x.log) && /session ended code=null signal=SIGTERM/.test(x.log), 'codex: log "Child exited with code null signal SIGTERM" + "session ended code=null signal=SIGTERM"', x.log.slice(-400));
+  ok(gateOf(/Child exited with code null signal SIGTERM/.test(x.log)) && verdictOf(/session ended code=null signal=SIGTERM/.test(x.log)), 'codex: log "Child exited with code null signal SIGTERM" + "session ended code=null signal=SIGTERM"', x.log.slice(-400));
   ok(x.ex.code === 0 && x.ex.signal === null, 'codex: wrapper exit status 0 — the PRE-CHANGE status (finalizeExit(null) → process.exit(null ?? 0))', x.ex);
   const xl = teardown(realEng, x.id, { socketPath: path.join(ROOT, 'gone.sock') });
-  ok(/ signal=SIGTERM wrapper=finalized socket=gone$/.test(xl), 'codex → server line: "… signal=SIGTERM wrapper=finalized socket=gone" (was wrapper=unfinalized)', xl);
+  ok(verdictOf(/ signal=SIGTERM wrapper=finalized socket=gone$/.test(xl)), 'codex → server line: "… signal=SIGTERM wrapper=finalized socket=gone" (was wrapper=unfinalized)', xl);
 
   // NEGATIVE CONTROLS: the second exit argument dropped again.
   const chatNoSig = chatSrc.replace('child.on(\'exit\', (exitCode, signal) => {', 'child.on(\'exit\', (exitCode) => { const signal = null;');
@@ -306,7 +306,7 @@ async function childSigterm(kind, wrapperPath) {
   const codexNoRec = codexSrc.replace("  meta.childExitCode = code ?? null;\n  meta.childExitSignal = signal || null;", '');
   ok(codexNoRec !== codexSrc, 'control (codex record): the patch applies');
   const xr = await childSigterm('codex', M.write(REL.codex, codexNoRec, 'norecord'));
-  ok(teardown(realEng, xr.id).endsWith(' wrapper=unfinalized socket=none'), 'control (codex record): a copy without the finalizeExit record reads wrapper=unfinalized — the r2 state of every codex exit');
+  ok(verdictOf(teardown(realEng, xr.id).endsWith(' wrapper=unfinalized socket=none')), 'control (codex record): a copy without the finalizeExit record reads wrapper=unfinalized — the r2 state of every codex exit');
   for (const r of [cc, pc, xc]) teardown(realEng, r.id);
 }
 
@@ -347,7 +347,7 @@ const BASELINE = {}; // kind/sig → what the handler-less wrapper hands the chi
 for (const kind of KINDS) {
   for (const sig of ['SIGTERM', 'SIGHUP']) {
     const w = await wrapperSignal(kind, REAL[kind], sig);
-    ok(new RegExp(`wrapper received ${sig} \\(child pid ${w.childPid}, childDead=false\\)`).test(w.log), `${kind}/${sig}: log "wrapper received ${sig} (child pid <pid>, childDead=false)"`, w.log.slice(-400));
+    ok(verdictOf(new RegExp(`wrapper received ${sig} \\(child pid ${w.childPid}, childDead=false\\)`).test(w.log)), `${kind}/${sig}: log "wrapper received ${sig} (child pid <pid>, childDead=false)"`, w.log.slice(-400));
     ok(w.meta?.wrapperSignal === sig && typeof w.meta?.wrapperSignalAt === 'number', `${kind}/${sig}: meta.wrapperSignal === "${sig}" + wrapperSignalAt`, w.meta);
     ok(w.ex.code === STATUS[sig] && w.ex.signal === null, `${kind}/${sig}: the wrapper still dies, exit status ${STATUS[sig]} (128+signo — what a shell reports for the signal death)`, w.ex);
     const base = await wrapperSignal(kind, NOHANDLER[kind], sig);
@@ -356,7 +356,7 @@ for (const kind of KINDS) {
     ok(JSON.stringify(w.received) === JSON.stringify(base.received), `${kind}/${sig}: the child receives exactly what the default action hands it in this shape (${JSON.stringify(w.received)}) — no forwarding, no new kill`, { lane: w.received, baseline: base.received });
     ok(!('childExitCode' in (w.meta || {})), `${kind}/${sig}: a child still running is not given an exit record`, w.meta);
     const line = teardown(realEng, w.id);
-    ok(line.endsWith(` wrapper=signal:${sig} socket=none`), `${kind}/${sig} → server line: "… wrapper=signal:${sig} socket=none"`, line);
+    ok(verdictOf(line.endsWith(` wrapper=signal:${sig} socket=none`)), `${kind}/${sig} → server line: "… wrapper=signal:${sig} socket=none"`, line);
     teardown(realEng, base.id);
   }
 }
@@ -365,7 +365,7 @@ for (const kind of KINDS) {
   const w = await wrapperSignal(kind, NOHANDLER[kind], 'SIGTERM');
   ok(!(w.meta?.wrapperSignal === 'SIGTERM' && /wrapper received SIGTERM/.test(w.log) && w.ex.code === 143),
     `control (${kind}): a copy without the handler FAILS the record assertions (dies ${JSON.stringify(w.ex)}, no log, no meta)`, { meta: w.meta, ex: w.ex });
-  ok(teardown(realEng, w.id).endsWith(' wrapper=unfinalized socket=none'), `control (${kind}): …and the server line says wrapper=unfinalized — the pre-change blind spot`);
+  ok(verdictOf(teardown(realEng, w.id).endsWith(' wrapper=unfinalized socket=none')), `control (${kind}): …and the server line says wrapper=unfinalized — the pre-change blind spot`);
 }
 // NEGATIVE CONTROLS: a handler that FORWARDS the signal to the child is caught
 // by the received-signals leg — for EVERY signal row, pty/SIGHUP included
@@ -378,7 +378,7 @@ for (const kind of KINDS) {
   FORWARD[kind] = M.write(REL[kind], fwd, 'forward');
   for (const sig of ['SIGTERM', 'SIGHUP']) {
     const w = await wrapperSignal(kind, FORWARD[kind], sig);
-    ok(w.received.includes(sig) && JSON.stringify(w.received) !== JSON.stringify(BASELINE[`${kind}/${sig}`]),
+    ok(gateOf(w.received.includes(sig)) && JSON.stringify(w.received) !== JSON.stringify(BASELINE[`${kind}/${sig}`]),
       `control (${kind} forward ${sig}): a copy that forwards ${sig} FAILS the "child receives exactly the default action's signals" leg (${JSON.stringify(w.received)} vs ${JSON.stringify(BASELINE[`${kind}/${sig}`])})`, w.received);
     teardown(realEng, w.id);
   }
@@ -410,18 +410,18 @@ const CREATE = {};
 for (const kind of KINDS) {
   const wp = REAL[kind], src = SRC[kind];
   const u = await unlinkThenSignal(kind, wp);
-  ok(/wrapper received SIGHUP/.test(u.log) && u.ex.code === 129, `${kind}: the handler ran with a buffer write pending (log line, exit 129)`, { ex: u.ex, log: u.log.slice(-300) });
+  ok(gateOf(/wrapper received SIGHUP/.test(u.log)) && u.ex.code === 129, `${kind}: the handler ran with a buffer write pending (log line, exit 129)`, { ex: u.ex, log: u.log.slice(-300) });
   ok(!u.json && !u.buf, `${kind}: <id>.json and <id>.buf unlinked BEFORE the signal stay gone (no orphan pair)`, { json: u.json, buf: u.buf });
-  ok(/record skipped: .*\.json is gone/.test(u.log), `${kind}: the log says the record was skipped because the meta is gone`, u.log.slice(-300));
+  ok(verdictOf(/record skipped: .*\.json is gone/.test(u.log)), `${kind}: the log says the record was skipped because the meta is gone`, u.log.slice(-300));
   const k = await unlinkThenSignal(kind, wp, { unlink: false });
-  ok(k.buf && k.bufText.includes(BUF_MARK[kind]) && k.json, `${kind}: …while the meta exists the same pending write IS flushed (a first-2 s death keeps its tail)`, { buf: k.buf, json: k.json });
+  ok(gateOf(k.buf) && gateOf(k.bufText.includes(BUF_MARK[kind])) && verdictOf(k.json), `${kind}: …while the meta exists the same pending write IS flushed (a first-2 s death keeps its tail)`, { buf: k.buf, json: k.json });
   // the 'w' copy also LOGS whether the file existed when the handler opened it: the dtach control below is
   // meaningful only on a trial where the handler ran AFTER the kill path's unlink (mirror-193)
   const create = src.replace("fd = fs.openSync(file, 'r+');", "log(`ctl-open ${path.basename(file)} existed=${fs.existsSync(file)}`); fd = fs.openSync(file, 'w');");
   ok(create !== src, `control (${kind} create): the patch applies`);
   CREATE[kind] = M.write(REL[kind], create, 'create');
   const c = await unlinkThenSignal(kind, CREATE[kind]);
-  ok(c.json || c.buf, `control (${kind} create): a copy whose record opens with 'w' FAILS the no-orphan assertion (re-created json=${c.json} buf=${c.buf})`);
+  ok(verdictOf(c.json) || verdictOf(c.buf), `control (${kind} create): a copy whose record opens with 'w' FAILS the no-orphan assertion (re-created json=${c.json} buf=${c.buf})`);
 }
 
 // § 2c THE PRODUCTION SHAPE, under real dtach (the wrapper is dtach's session
@@ -513,8 +513,8 @@ if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
   for (const kind of KINDS) {
     const k = await killTrial(kind, REAL[kind]);
     ok(k.master > 0 && k.wrapperPid > 0, `${kind} under dtach: fixture — the dtach master and the wrapper were found`, k);
-    ok(/wrapper received SIGHUP/.test(k.log) && !k.wrapperAlive, `${kind} under dtach: the master's death SIGHUPs the wrapper AFTER the unlink and the handler runs`, k.log.slice(-300));
-    ok(k.afterUnlink && !k.json && !k.buf, `${kind} under dtach: the kill path leaves no <id>.json / <id>.buf behind — on a trial whose handler ran AFTER the unlink ("record skipped"; ${k.inconclusive} earlier trial(s) ran it before)`, { json: k.json, buf: k.buf, afterUnlink: k.afterUnlink, skipped: k.skipped });
+    ok(gateOf(/wrapper received SIGHUP/.test(k.log)) && !k.wrapperAlive, `${kind} under dtach: the master's death SIGHUPs the wrapper AFTER the unlink and the handler runs`, k.log.slice(-300));
+    ok(gateOf(k.afterUnlink) && !k.json && !k.buf, `${kind} under dtach: the kill path leaves no <id>.json / <id>.buf behind — on a trial whose handler ran AFTER the unlink ("record skipped"; ${k.inconclusive} earlier trial(s) ran it before)`, { json: k.json, buf: k.buf, afterUnlink: k.afterUnlink, skipped: k.skipped });
     const kb = await dtachReplay(kind, NOHANDLER[kind]);
     ok(JSON.stringify(kb.received) === '["SIGHUP"]' && !kb.childAlive, `${kind} under dtach, kill path, BASELINE (handler removed): the child receives exactly the kernel's SIGHUP and dies of it`, kb);
     ok(JSON.stringify(k.received) === JSON.stringify(kb.received) && !k.childAlive, `${kind} under dtach, kill path: the child receives exactly what the default action hands it (${JSON.stringify(k.received)})`, { lane: k.received, baseline: kb.received });
@@ -526,7 +526,7 @@ if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
     const pf = await dtachReplay(kind, FORWARD[kind], { mode: 'pkill' });
     ok(JSON.stringify(pf.received) !== JSON.stringify(pb.received), `control (${kind} forward, under dtach): a copy that forwards SIGTERM FAILS the dtach parity leg (${JSON.stringify(pf.received)})`, pf.received);
     const c = await killTrial(kind, CREATE[kind]);
-    ok(c.afterUnlink && c.settled && (c.json || c.buf), `control (${kind} create, under dtach): the 'w' copy re-creates the files the kill path removed (json=${c.json} buf=${c.buf}, read ${c.settledMs} ms after the kill once the wrapper and the child were gone, on a trial whose handler opened AFTER the unlink; ${c.inconclusive} earlier trial(s) opened before it)`, { settled: c.settled, afterUnlink: c.afterUnlink, wrapperAlive: c.wrapperAlive, childAlive: c.childAlive, log: c.log.slice(-300), skipped: c.skipped });
+    ok(gateOf(c.afterUnlink) && gateOf(c.settled) && (verdictOf(c.json) || verdictOf(c.buf)), `control (${kind} create, under dtach): the 'w' copy re-creates the files the kill path removed (json=${c.json} buf=${c.buf}, read ${c.settledMs} ms after the kill once the wrapper and the child were gone, on a trial whose handler opened AFTER the unlink; ${c.inconclusive} earlier trial(s) opened before it)`, { settled: c.settled, afterUnlink: c.afterUnlink, wrapperAlive: c.wrapperAlive, childAlive: c.childAlive, log: c.log.slice(-300), skipped: c.skipped });
   }
 }
 
@@ -609,9 +609,9 @@ if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
   for (const kind of KINDS) {
     for (const [tag, wp] of [['lane', REAL[kind]], ['slow', SLOW[kind]]]) {
       const r = await incidentOrder(kind, wp, realEng);
-      ok(r.master > 0 && r.wrapperPid > 0 && r.sockGone, `${kind}/${tag}: fixture — dtach master + wrapper found, the master's SIGTERM removed its socket (the teardown branch)`, r);
-      ok(r.line.endsWith(' wrapper=signal:SIGHUP socket=gone'), `${kind}/${tag}: teardown AT the socket EOF (+${r.eofMinusKill} ms after the kill) → "… wrapper=signal:SIGHUP socket=gone"`, r.line);
-      ok(r.tomb && !r.tomb.metaMissing && r.tomb.wrapperSignal === 'SIGHUP' && r.tomb.pid === r.wrapperPid && r.tomb.wrapperFate === 'signal:SIGHUP', `${kind}/${tag}: the tomb is the wrapper's whole meta WITH its record (never {metaMissing:true})`, r.tomb);
+      ok(r.master > 0 && r.wrapperPid > 0 && verdictOf(r.sockGone), `${kind}/${tag}: fixture — dtach master + wrapper found, the master's SIGTERM removed its socket (the teardown branch)`, r);
+      ok(verdictOf(r.line.endsWith(' wrapper=signal:SIGHUP socket=gone')), `${kind}/${tag}: teardown AT the socket EOF (+${r.eofMinusKill} ms after the kill) → "… wrapper=signal:SIGHUP socket=gone"`, r.line);
+      ok(gateOf(r.tomb) && !r.tomb.metaMissing && r.tomb.wrapperSignal === 'SIGHUP' && r.tomb.pid === r.wrapperPid && r.tomb.wrapperFate === 'signal:SIGHUP', `${kind}/${tag}: the tomb is the wrapper's whole meta WITH its record (never {metaMissing:true})`, r.tomb);
     }
     const c = await incidentOrder(kind, SLOW[kind], noWaitEng);
     ok(!c.line.endsWith(' wrapper=signal:SIGHUP socket=gone'), `control (${kind} no wait): a teardown that reads at once FAILS against the production-latency wrapper (${c.line.replace(/^.* wrapper=/, 'wrapper=')})`, c.line);
@@ -623,23 +623,23 @@ if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
     const line = await teardownAsync(realEng, live.id);
     const took = Date.now() - t0;
     let tomb = null; try { tomb = JSON.parse(fs.readFileSync(path.join(TOMBS, live.id + '.meta.json'), 'utf8')); } catch { }
-    ok(line.endsWith(' wrapper=running socket=none') && took >= 280 && took < 1200 && tomb?.settleMs >= 280,
+    ok(gateOf(line.endsWith(' wrapper=running socket=none')) && took >= 280 && took < 1200 && tomb?.settleMs >= 280,
       `a wrapper still alive and unrecorded when the bound runs out: the teardown gave up after ${took} ms and says wrapper=running (not the SIGKILL fate)`, { line, took, settleMs: tomb?.settleMs });
     try { process.kill(live.proc.pid, 'SIGKILL'); } catch { }
     await within(live.exited); await killChild(live.childPid);
     const idN = 'sess-xf-notwrapper';
     fs.writeFileSync(path.join(BUF, idN + '.json'), JSON.stringify({ pid: process.pid }));
-    ok(teardown(realEng, idN).endsWith(' wrapper=unfinalized socket=none'), 'a meta whose pid is alive but is NOT its wrapper (its /proc cmdline lacks the meta path — a recycled pid) is read at once: no wait');
+    ok(verdictOf(teardown(realEng, idN).endsWith(' wrapper=unfinalized socket=none')), 'a meta whose pid is alive but is NOT its wrapper (its /proc cmdline lacks the meta path — a recycled pid) is read at once: no wait');
     const idT = 'sess-xf-torn';
     fs.writeFileSync(path.join(BUF, idT + '.json'), '{"pid": 12, "childExitCo');
     const tl = await teardownAsync(realEng, idT);
     let tt = null; try { tt = JSON.parse(fs.readFileSync(path.join(TOMBS, idT + '.meta.json'), 'utf8')); } catch { }
-    ok(tl.endsWith(' wrapper=unfinalized socket=none') && tt?.metaUnreadable === true && !tt.metaMissing && tt.settleMs >= 280, 'a meta that never parses is re-read until the bound, then the tomb says metaUnreadable (not metaMissing)', { tl, tt });
+    ok(gateOf(tl.endsWith(' wrapper=unfinalized socket=none')) && tt?.metaUnreadable === true && !tt.metaMissing && tt.settleMs >= 280, 'a meta that never parses is re-read until the bound, then the tomb says metaUnreadable (not metaMissing)', { tl, tt });
     const k = await runWrapper('chat', CHAT);
     const kp = teardownAsync(realEng, k.id, { waitMs: 800 });
     await sleep(50);
     activeSessions.delete(k.id); // the kill path's own teardown took the session during the wait
-    ok((await kp) === '' && fs.existsSync(path.join(BUF, k.id + '.json')), 'a Terminate during the wait owns the teardown: no second line, no tomb, the files left to the kill path');
+    ok((await kp) === '' && verdictOf(fs.existsSync(path.join(BUF, k.id + '.json'))), 'a Terminate during the wait owns the teardown: no second line, no tomb, the files left to the kill path');
     try { process.kill(k.proc.pid, 'SIGKILL'); } catch { }
     await within(k.exited); await killChild(k.childPid);
     for (const f of ['.json', '.buf']) { try { fs.unlinkSync(path.join(BUF, k.id + f)); } catch { } }
@@ -648,7 +648,7 @@ if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
     ok(byPid !== stdoutSrc2, 'control (pid identity): the patch applies');
     fs.writeFileSync(path.join(BUF, idN + '-c.json'), JSON.stringify({ pid: process.pid }));
     const bl = await teardownAsync(makeEngine(M.write('src/server/session-stdout.js', byPid, 'bypid')), idN + '-c');
-    ok(bl.endsWith(' wrapper=running socket=none'), 'control (pid identity): a copy that trusts a bare live pid waits on a stranger and names it "running"', bl);
+    ok(verdictOf(bl.endsWith(' wrapper=running socket=none')), 'control (pid identity): a copy that trusts a bare live pid waits on a stranger and names it "running"', bl);
     const noOwn = editAnchor(stdoutSrc2, '    if (activeSessions.get(id) !== session) return;\n', '', "src/server/session-stdout.js");
     ok(noOwn !== stdoutSrc2, 'control (ownership): the patch applies');
     const k2 = await runWrapper('chat', CHAT);
@@ -732,9 +732,9 @@ const RECEIVED_LOG = /\n {4}log\(`wrapper received \$\{sig\} \(child pid \$\{chi
 for (const kind of KINDS) {
   const w = await spiedSignal(kind, REAL[kind]);
   const firstWrite = w.ops.findIndex((l) => l.startsWith('meta-write')), firstLog = w.ops.indexOf('log');
-  ok(w.inflated && w.ops[0]?.startsWith('signal SIGHUP') && firstWrite > 0 && w.ex.code === 129, `${kind}: fixture — the spy saw the signal and the record's write (exit 129)`, { ops: w.ops, ex: w.ex });
+  ok(gateOf(w.inflated) && gateOf(w.ops[0]?.startsWith('signal SIGHUP')) && firstWrite > 0 && w.ex.code === 129, `${kind}: fixture — the spy saw the signal and the record's write (exit 129)`, { ops: w.ops, ex: w.ex });
   ok(firstWrite > 0 && (firstLog < 0 || firstWrite < firstLog), `${kind}: the record is the handler's FIRST write — before the log append (${w.ops.slice(0, 4).join(' | ')})`, w.ops);
-  ok(w.ops.filter((l) => l.startsWith('meta-')).every((l) => l.endsWith(' ok')), `${kind}: after every syscall of the record the meta parses (no torn instant)`, w.ops);
+  ok(verdictOf(w.ops.filter((l) => l.startsWith('meta-')).every((l) => l.endsWith(' ok'))), `${kind}: after every syscall of the record the meta parses (no torn instant)`, w.ops);
   ok(w.openSize > 4096 && w.meta?.wrapperSignal === 'SIGHUP' && !('xfInflate' in w.meta) && w.raw.length > JSON.stringify(w.meta).length, `${kind}: the record is SHORTER than the inflated file and still parses (space-padded, never truncated) — the handler opened the ${w.openSize}-byte inflated file (${w.inconclusive} earlier trial(s) did not)`, { len: w.raw.length, openSize: w.openSize, tail: JSON.stringify(w.raw.slice(-40)) });
   // CONTROLS: the r3 overwrite (ftruncate, then write) / a write with neither
   // pad nor truncate / the r3 order (the log line before the record).
@@ -742,11 +742,11 @@ for (const kind of KINDS) {
   const r3Write = src.replace(/  try \{\n    let b = Buffer\.from\(data\);\n    if \(pad\) \{\n[\s\S]*?\n    fs\.writeSync\(fd, b, 0, b\.length, 0\);\n  \}/, '  try { const b = Buffer.from(data); fs.ftruncateSync(fd, 0); fs.writeSync(fd, b, 0, b.length, 0); }');
   ok(r3Write !== src, `control (${kind} r3 write): the patch applies`);
   const t = await spiedSignal(kind, M.write(REL[kind], r3Write, 'r3write'));
-  ok(t.ops.some((l) => l.startsWith('meta-') && !l.endsWith(' ok')), `control (${kind} r3 write): ftruncate-then-write FAILS the no-torn-instant leg (${t.ops.filter((l) => l.startsWith('meta-')).join(' | ')})`, t.ops);
+  ok(verdictOf(t.ops.some((l) => l.startsWith('meta-') && !l.endsWith(' ok'))), `control (${kind} r3 write): ftruncate-then-write FAILS the no-torn-instant leg (${t.ops.filter((l) => l.startsWith('meta-')).join(' | ')})`, t.ops);
   const noPad = src.replace('      if (b.length < old) b = Buffer.concat([b, Buffer.alloc(old - b.length, 0x20)]);\n', '');
   ok(noPad !== src, `control (${kind} no pad): the patch applies`);
   const n = await spiedSignal(kind, M.write(REL[kind], noPad, 'nopad'));
-  ok(n.inflated && n.openSize > 4096 && !n.meta, `control (${kind} no pad): a shorter record written over the longer file without padding leaves it unparseable (the handler opened the ${n.openSize}-byte file; ${n.inconclusive} earlier trial(s) did not)`, n.raw.slice(-60));
+  ok(gateOf(n.inflated) && n.openSize > 4096 && !n.meta, `control (${kind} no pad): a shorter record written over the longer file without padding leaves it unparseable (the handler opened the ${n.openSize}-byte file; ${n.inconclusive} earlier trial(s) did not)`, n.raw.slice(-60));
   const h = handlerOf(src);
   const logLine = h.match(RECEIVED_LOG)?.[0];
   const recAt = kind === 'pty' ? '\n    let m = meta;\n' : '\n    meta.wrapperSignal = sig;\n';
@@ -762,9 +762,9 @@ console.log('— §3 SIGKILL on the wrapper: nothing can be recorded; the server
 for (const kind of KINDS) {
   const w = await wrapperSignal(kind, REAL[kind], 'SIGKILL', { trap: false });
   ok(w.ex.signal === 'SIGKILL', `${kind}: the wrapper died by SIGKILL`, w.ex);
-  ok(!/wrapper received/.test(w.log) && w.meta && !('wrapperSignal' in w.meta) && !('childExitCode' in w.meta), `${kind}: no log line, no wrapperSignal, no exit record in the meta`, w.meta);
+  ok(!/wrapper received/.test(w.log) && gateOf(w.meta) && !('wrapperSignal' in w.meta) && !('childExitCode' in w.meta), `${kind}: no log line, no wrapperSignal, no exit record in the meta`, w.meta);
   const line = teardown(realEng, w.id, { socketPath: path.join(ROOT, 'never.sock') });
-  ok(line.endsWith(' wrapper=unfinalized socket=gone'), `${kind} → server line: "… wrapper=unfinalized socket=gone"`, line);
+  ok(verdictOf(line.endsWith(' wrapper=unfinalized socket=gone')), `${kind} → server line: "… wrapper=unfinalized socket=gone"`, line);
 }
 {
   // socket=present is reachable only where the teardown runs WITH the socket
@@ -774,8 +774,8 @@ for (const kind of KINDS) {
   const id = 'sess-xf-present';
   fs.writeFileSync(path.join(BUF, id + '.json'), JSON.stringify({ pid: 1, childExitCode: 1 }));
   const line = teardown(realEng, id, { socketPath: sock, cleanupOnExit: false });
-  ok(line.endsWith(' code=1 wrapper=finalized socket=present'), 'socket=present when the socket is still on disk at teardown (cleanupOnExit:false)', line);
-  ok(fs.existsSync(path.join(BUF, id + '.json')) && !fs.existsSync(path.join(TOMBS, id + '.meta.json')), '…and that path keeps the meta and writes no tomb (unchanged)');
+  ok(verdictOf(line.endsWith(' code=1 wrapper=finalized socket=present')), 'socket=present when the socket is still on disk at teardown (cleanupOnExit:false)', line);
+  ok(gateOf(fs.existsSync(path.join(BUF, id + '.json'))) && !fs.existsSync(path.join(TOMBS, id + '.meta.json')), '…and that path keeps the meta and writes no tomb (unchanged)');
 }
 
 // ── § 3b THE REMOTE RECONNECT WINDOW: the child is already dead when the wrapper is signalled
@@ -803,11 +803,11 @@ async function signalInReconnectWindow(kind, wrapperPath) {
 for (const kind of KINDS) {
   const wp = REAL[kind], src = SRC[kind];
   const w = await signalInReconnectWindow(kind, wp);
-  ok(w.inWindow && new RegExp(`wrapper received SIGTERM \\(child pid \\d+, childDead=true\\)`).test(w.log), `${kind}: the transport exited 5, the wrapper was signalled INSIDE the reconnect window (childDead=true)`, w.log.slice(-400));
+  ok(gateOf(w.inWindow) && verdictOf(new RegExp(`wrapper received SIGTERM \\(child pid \\d+, childDead=true\\)`).test(w.log)), `${kind}: the transport exited 5, the wrapper was signalled INSIDE the reconnect window (childDead=true)`, w.log.slice(-400));
   ok(w.meta?.wrapperSignal === 'SIGTERM' && w.meta?.childExitCode === 5 && w.meta?.childExitSignal === null && w.ex.code === 143,
     `${kind}: meta = {wrapperSignal: SIGTERM, childExitCode: 5, childExitSignal: null}, exit 143`, { meta: w.meta, ex: w.ex });
   const line = teardown(realEng, w.id);
-  ok(line.endsWith(' code=5 wrapper=signal:SIGTERM socket=none'), `${kind} → server line: "… code=5 wrapper=signal:SIGTERM socket=none"`, line);
+  ok(verdictOf(line.endsWith(' code=5 wrapper=signal:SIGTERM socket=none')), `${kind} → server line: "… code=5 wrapper=signal:SIGTERM socket=none"`, line);
   const noBlock = src.replace(/\n[ \t]*if \(childDead && childExit\) \{[\s\S]*?\n[ \t]*\}\n/, '\n');
   ok(noBlock !== src, `control (${kind} last-exit): the patch applies`);
   const c = await signalInReconnectWindow(kind, M.write(REL[kind], noBlock, 'nolastexit'));
@@ -849,7 +849,7 @@ global.setTimeout = function (fn, ms, ...a) {
   });
   const ATTACH_7 = ['/bin/sh', '-c', 'exit 7', 'vibespace-agentd-attach'];   // the attach's argv shape ($0 names the bundle); exits 7 at once = the 423
   const r = await ladder(PTYW, ATTACH_7, 'fix');
-  ok(r.code === 99 && r.v && r.v.alive && r.v.virtualMs >= 2 * 3600e3 && r.waits >= 230 && r.lost === 0,
+  ok(r.code === 99 && gateOf(r.v) && gateOf(r.v.alive) && r.v.virtualMs >= 2 * 3600e3 && r.waits >= 230 && r.lost === 0,
     `a driven 423 for 2 h of virtual time: the wrapper is ALIVE (${r.waits} respawns, each a WAIT on the 30 s rung, 0 counted toward the cap)`, r);
   const src = read(REL.pty);
   const counted = src.replace('const vaultWait = REMOTE_RETRY && ATTACH_CHILD && exitCode === VAULT_WAIT_EXIT;', 'const vaultWait = false;');
@@ -859,7 +859,7 @@ global.setTimeout = function (fn, ms, ...a) {
   const s = await ladder(PTYW, ['/bin/sh', '-c', 'exit 7'], 'ssh');
   ok(s.code === 7 && !s.v && s.lost === 120 && s.waits === 0, 'an ssh child\'s OWN exit 7 (not the attach) is still counted — the cap still ends real failures after 120', s);
   const chat = read(REL.chat);
-  ok(!/VAULT_WAIT|vaultWait/.test(chat) && /const delay = \[1000, 2000, 5000, 10000, 30000\]\[Math\.min\(4, reconnectAttempts - 1\)\];/.test(chat) && !/totalAttempts/.test(chat),
+  ok(!/VAULT_WAIT|vaultWait/.test(chat) && gateOf(/const delay = \[1000, 2000, 5000, 10000, 30000\]\[Math\.min\(4, reconnectAttempts - 1\)\];/.test(chat)) && !/totalAttempts/.test(chat),
     'the chat wrapper is unchanged: no cap, its ladder parks at 30 s for any transport exit (a vault wait included)');
 }
 
@@ -884,9 +884,9 @@ async function sentinelRun(wrapperPath, sentinel, kind = 'chat') {
 {
   const s1 = await sentinelRun(CHAT, { type: '_remote_exit', code: 0, signal: 'SIGTERM' });
   ok(s1.meta?.childExitCode === 0 && s1.meta?.childExitSignal === 'SIGTERM', 'a sentinel {code:0, signal:"SIGTERM"} ⇒ meta {childExitCode: 0, childExitSignal: "SIGTERM"}', s1.meta);
-  ok(s1.ex.code === 0 && /remote session exited on host with code 0 signal SIGTERM/.test(s1.log), '…the wrapper exits 0 as before, and its log names the signal', { ex: s1.ex, log: s1.log.slice(-300) });
+  ok(s1.ex.code === 0 && verdictOf(/remote session exited on host with code 0 signal SIGTERM/.test(s1.log)), '…the wrapper exits 0 as before, and its log names the signal', { ex: s1.ex, log: s1.log.slice(-300) });
   const l1 = teardown(realEng, s1.id);
-  ok(l1.endsWith(' code=0 signal=SIGTERM wrapper=finalized socket=none'), 'sentinel → server line: "… code=0 signal=SIGTERM wrapper=finalized socket=none"', l1);
+  ok(verdictOf(l1.endsWith(' code=0 signal=SIGTERM wrapper=finalized socket=none')), 'sentinel → server line: "… code=0 signal=SIGTERM wrapper=finalized socket=none"', l1);
   const s2 = await sentinelRun(CHAT, { type: '_remote_exit', code: 7 });
   ok(s2.meta?.childExitCode === 7 && s2.meta?.childExitSignal === null && s2.ex.code === 7, 'a sentinel without `signal` (an older writer) ⇒ code as sent, childExitSignal null — never invented', { meta: s2.meta, ex: s2.ex });
   teardown(realEng, s2.id);
@@ -899,9 +899,9 @@ async function sentinelRun(wrapperPath, sentinel, kind = 'chat') {
   // codex (r3): the SAME sentinel through the third wrapper (codex remote chat
   // rides the same keeper — src/ws-create.js).
   const x1 = await sentinelRun(CODEX, { type: '_remote_exit', code: 0, signal: 'SIGTERM' }, 'codex');
-  ok(x1.meta?.childExitCode === 0 && x1.meta?.childExitSignal === 'SIGTERM' && x1.ex.code === 0 && /remote session ended \(code 0 signal SIGTERM/.test(x1.log),
+  ok(x1.meta?.childExitCode === 0 && x1.meta?.childExitSignal === 'SIGTERM' && x1.ex.code === 0 && verdictOf(/remote session ended \(code 0 signal SIGTERM/.test(x1.log)),
     'codex: a sentinel {code:0, signal:"SIGTERM"} ⇒ meta {childExitCode: 0, childExitSignal: "SIGTERM"}, exit 0, the log names the signal', { meta: x1.meta, ex: x1.ex, log: x1.log.slice(-300) });
-  ok(teardown(realEng, x1.id).endsWith(' code=0 signal=SIGTERM wrapper=finalized socket=none'), 'codex sentinel → server line: "… code=0 signal=SIGTERM wrapper=finalized socket=none"');
+  ok(verdictOf(teardown(realEng, x1.id).endsWith(' code=0 signal=SIGTERM wrapper=finalized socket=none')), 'codex sentinel → server line: "… code=0 signal=SIGTERM wrapper=finalized socket=none"');
   const x2 = await sentinelRun(CODEX, { type: '_remote_exit', code: 7 }, 'codex');
   ok(x2.meta?.childExitCode === 7 && x2.meta?.childExitSignal === null && x2.ex.code === 7, 'codex: a sentinel without `signal` ⇒ code as sent, childExitSignal null', { meta: x2.meta, ex: x2.ex });
   teardown(realEng, x2.id);
@@ -964,7 +964,7 @@ async function sentinelRun(wrapperPath, sentinel, kind = 'chat') {
     ok(k.meta?.childExitCode === 0 && k.meta?.childExitSignal === 'SIGTERM' && k.ex.code === 0, `REAL keeper (${kind}): a CLI killed by SIGTERM on the host reaches the meta as {childExitCode: 0, childExitSignal: "SIGTERM"} (wrapper exit 0)`, { meta: k.meta, ex: k.ex, log: k.log.slice(-400) });
     ok(k.kmeta?.exited === 0 && k.kmeta?.exitSignal === 'SIGTERM', `REAL keeper (${kind}): the keeper's own meta says {exited: 0, exitSignal: "SIGTERM"}`, k.kmeta);
     const kl = teardown(realEng, k.id);
-    ok(kl.endsWith(' code=0 signal=SIGTERM wrapper=finalized socket=none'), `REAL keeper (${kind}) → server line names the signal`, kl);
+    ok(verdictOf(kl.endsWith(' code=0 signal=SIGTERM wrapper=finalized socket=none')), `REAL keeper (${kind}) → server line names the signal`, kl);
     const c = await keeperRun(kind, KEEPER_R1);
     ok(!c.ex?.timeout && c.kmeta?.exited === 0 && c.meta?.childExitSignal !== 'SIGTERM' && !('exitSignal' in c.kmeta), `control (keeper r1, ${kind}): the r1 keeper copy (its OWN daemon — selfPath) ran to its end and FAILS the childExitSignal assertion (a host-side kill reads as a clean exit)`, { ex: c.ex, meta: c.meta, kmeta: c.kmeta });
     ok(!k.stragglers.length && !c.stragglers.length, `REAL keeper + r1 control (${kind}): every keeper process the leg started is gone before the suite moves on (none killed past the bound)`, { real: k.stragglers, r1: c.stragglers });
@@ -983,15 +983,15 @@ function tombTeardown(eng, id, metaObj) {
   const id = 'sess-xf-tomb-1';
   tombTeardown(realEng, id, { pid: 42, mode: 'chat', childExitCode: null, childExitSignal: 'SIGHUP' });
   const tail = path.join(TOMBS, id + '.tail'), mt = path.join(TOMBS, id + '.meta.json');
-  ok(fs.existsSync(tail) && fs.readFileSync(tail, 'utf8').includes('stack trace'), 'the .tail is kept (2.206.1, unchanged)');
+  ok(gateOf(fs.existsSync(tail)) && verdictOf(fs.readFileSync(tail, 'utf8').includes('stack trace')), 'the .tail is kept (2.206.1, unchanged)');
   let t = null; try { t = JSON.parse(fs.readFileSync(mt, 'utf8')); } catch { }
-  ok(t && t.pid === 42 && t.childExitSignal === 'SIGHUP' && t.wrapperFate === 'finalized' && t.socketFate === 'gone' && typeof t.exitedAt === 'number',
+  ok(gateOf(t) && t.pid === 42 && t.childExitSignal === 'SIGHUP' && t.wrapperFate === 'finalized' && t.socketFate === 'gone' && typeof t.exitedAt === 'number',
     'the .meta.json tomb = the wrapper meta + {exitedAt, socketFate, wrapperFate}', t);
   ok(!fs.existsSync(path.join(BUF, id + '.json')) && !fs.existsSync(path.join(BUF, id + '.buf')), 'the live meta + buffer are still unlinked (as before)');
   const id0 = 'sess-xf-tomb-nometa';
   tombTeardown(realEng, id0, null);
   let t0 = null; try { t0 = JSON.parse(fs.readFileSync(path.join(TOMBS, id0 + '.meta.json'), 'utf8')); } catch { }
-  ok(t0 && t0.metaMissing === true && t0.wrapperFate === 'unfinalized', 'no wrapper meta at all ⇒ the tomb still says so (metaMissing, unfinalized)', t0);
+  ok(gateOf(t0) && t0.metaMissing === true && t0.wrapperFate === 'unfinalized', 'no wrapper meta at all ⇒ the tomb still says so (metaMissing, unfinalized)', t0);
 
   // backdate tomb-1 past 7 days, tomb-nometa to 6 days; the NEXT teardown sweeps.
   const old = (Date.now() - 8 * 86400e3) / 1000, six = (Date.now() - 6 * 86400e3) / 1000;
@@ -999,8 +999,8 @@ function tombTeardown(eng, id, metaObj) {
   for (const ext of ['.tail', '.meta.json']) fs.utimesSync(path.join(TOMBS, id0 + ext), six, six);
   tombTeardown(realEng, 'sess-xf-tomb-2', { pid: 43, childExitCode: 0 });
   ok(!fs.existsSync(tail) && !fs.existsSync(mt), 'the sweep removes BOTH files of a tomb older than 7 days');
-  ok(fs.existsSync(path.join(TOMBS, id0 + '.tail')) && fs.existsSync(path.join(TOMBS, id0 + '.meta.json')), '…and keeps a 6-day-old pair');
-  ok(fs.existsSync(path.join(TOMBS, 'sess-xf-tomb-2.meta.json')) && !fs.readdirSync(TOMBS).some((f) => f.includes('.tmp-')), 'the new tomb is written atomically (no .tmp- left behind)');
+  ok(gateOf(fs.existsSync(path.join(TOMBS, id0 + '.tail'))) && verdictOf(fs.existsSync(path.join(TOMBS, id0 + '.meta.json'))), '…and keeps a 6-day-old pair');
+  ok(gateOf(fs.existsSync(path.join(TOMBS, 'sess-xf-tomb-2.meta.json'))) && !fs.readdirSync(TOMBS).some((f) => f.includes('.tmp-')), 'the new tomb is written atomically (no .tmp- left behind)');
 
   // NO .buf AT ALL: the meta tomb and the sweep still run (they used to live
   // inside the .buf try — a session whose buffer was never written lost both).
@@ -1015,9 +1015,9 @@ function tombTeardown(eng, id, metaObj) {
     const id = 'sess-xf-tomb-nobuf', pair = oldPairOf('nobuf');
     const line = noBufTeardown(realEng, id, pair);
     let t = null; try { t = JSON.parse(fs.readFileSync(path.join(TOMBS, id + '.meta.json'), 'utf8')); } catch { }
-    ok(!fs.existsSync(path.join(TOMBS, id + '.tail')) && t && t.childExitSignal === 'SIGTERM' && t.wrapperFate === 'finalized' && t.socketFate === 'gone',
+    ok(!fs.existsSync(path.join(TOMBS, id + '.tail')) && gateOf(t) && t.childExitSignal === 'SIGTERM' && t.wrapperFate === 'finalized' && t.socketFate === 'gone',
       'no <id>.buf: no .tail, but the .meta.json tomb is still written (wrapperFate/socketFate)', { t, line });
-    ok(pair.every((f) => !fs.existsSync(f)), 'no <id>.buf: the same teardown still sweeps an 8-day-old pair');
+    ok(verdictOf(pair.every((f) => !fs.existsSync(f))), 'no <id>.buf: the same teardown still sweeps an 8-day-old pair');
   }
 
   // NEGATIVE CONTROLS on the server: patched copies of session-stdout.js.
@@ -1032,7 +1032,7 @@ function tombTeardown(eng, id, metaObj) {
     ok(inside !== stdoutSrc, 'control (no-buf): the patch applies (tomb write + sweep moved back inside the .buf try)');
     const id = 'sess-xf-tomb-nobuf-ctl', pair = oldPairOf('nobuf-ctl');
     noBufTeardown(makeEngine(M.write('src/server/session-stdout.js', inside, 'bufcatch')), id, pair);
-    ok(!fs.existsSync(path.join(TOMBS, id + '.meta.json')) && pair.every((f) => fs.existsSync(f)),
+    ok(!fs.existsSync(path.join(TOMBS, id + '.meta.json')) && verdictOf(pair.every((f) => fs.existsSync(f))),
       'control (no-buf): a copy with both back inside the .buf try FAILS both no-.buf assertions (no tomb, no sweep)');
     for (const f of pair) { try { fs.unlinkSync(f); } catch { } }
   }
@@ -1044,7 +1044,7 @@ function tombTeardown(eng, id, metaObj) {
   ok(noSweep !== stdoutSrc, 'control (sweep): the patch applies');
   for (const ext of ['.tail', '.meta.json']) fs.utimesSync(path.join(TOMBS, 'sess-xf-tomb-2' + ext), old, old);
   tombTeardown(makeEngine(M.write('src/server/session-stdout.js', noSweep, 'nosweep')), 'sess-xf-tomb-ctl2', { pid: 45 });
-  ok(fs.existsSync(path.join(TOMBS, 'sess-xf-tomb-2.meta.json')), 'control (sweep): a copy without the sweep rule FAILS the removal assertion');
+  ok(verdictOf(fs.existsSync(path.join(TOMBS, 'sess-xf-tomb-2.meta.json'))), 'control (sweep): a copy without the sweep rule FAILS the removal assertion');
   const noSuffix = editAnchor(stdoutSrc, "${exitReason ? ' reason=' + exitReason : ''}${facts.suffix}`", "${exitReason ? ' reason=' + exitReason : ''}`", "src/server/session-stdout.js");
   ok(noSuffix !== stdoutSrc, 'control (line): the patch applies');
   fs.writeFileSync(path.join(BUF, 'sess-xf-line-ctl.json'), JSON.stringify({ childExitSignal: 'SIGTERM' }));
@@ -1080,7 +1080,7 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
   const fa = XF.exitFacts({ meta: { childExitCode: 130 }, asked: { by: 'interrupt', at: now - 2000 }, now });
   const fs2 = XF.exitFacts({ meta: { childExitCode: 130 }, asked: { by: 'interrupt', at: now - XF.EXIT_ASK_FRESH_MS - 1 }, now });
   const fh = XF.exitFacts({ meta: { childExitCode: 1 }, asked: { by: 'x\n[session] forged', at: now }, now });
-  ok(fa.askedBy === 'interrupt' && fa.suffix === ' wrapper=finalized socket=none asked=interrupt' && fa.eventSuffix.endsWith('/asked=interrupt') && fs2.askedBy === null && !/asked/.test(fs2.suffix) && fh.askedBy === null && !/forged/.test(fh.suffix),
+  ok(fa.askedBy === 'interrupt' && fa.suffix === ' wrapper=finalized socket=none asked=interrupt' && gateOf(fa.eventSuffix.endsWith('/asked=interrupt')) && fs2.askedBy === null && !/asked/.test(fs2.suffix) && fh.askedBy === null && !/forged/.test(fh.suffix),
     'the exit line names the actor (asked=<by>) for 30 s; a stale or hostile mark says nothing', { fa: fa.suffix, fs2: fs2.suffix, fh: fh.suffix });
 
   // the REAL teardown + the REAL orchestrator, a fake store + clients
@@ -1155,17 +1155,17 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
   };
   const H = await runLegs(realEng, 'head');
   const { r1, r2, r3, r4, r5, r6, r7 } = H;
-  ok(r1.asked === 1 && r1.other === 0 && r1.keys === 'type,session' && r1.target && r1.target.backendSessionId && r1.target.serverId && r1.target.mode === 'chat' && r1.filedBefore === 0,
+  ok(r1.asked === 1 && r1.other === 0 && r1.keys === 'type,session' && gateOf(r1.target) && gateOf(r1.target.backendSessionId) && gateOf(r1.target.serverId) && r1.target.mode === 'chat' && r1.filedBefore === 0,
     '① working + code 1: exactly ONE client is asked — the one that had it open — with the resume target only (no text, nothing for its stdin); no item before the outcome', r1);
-  ok(!!r1.item && /^"ue \d+" exited unexpectedly at \d\d:\d\d and was restarted; say continue if you need it$/.test(r1.item.text) && r1.item.origin === 'agent' && r1.item.key === 'claude:' + r1.target.backendSessionId
-    && r1.item.i18n?.text?.key === UE.TEXTS.respawned && /no turn was billed/.test(r1.item.detail) && /code=1 wrapper=finalized/.test(r1.item.detail),
+  ok(!!r1.item && gateOf(/^"ue \d+" exited unexpectedly at \d\d:\d\d and was restarted; say continue if you need it$/.test(r1.item.text)) && r1.item.origin === 'agent' && r1.item.key === 'claude:' + r1.target.backendSessionId
+    && r1.item.i18n?.text?.key === UE.TEXTS.respawned && gateOf(/no turn was billed/.test(r1.item.detail)) && verdictOf(/code=1 wrapper=finalized/.test(r1.item.detail)),
     '…once a live session carries it again: ONE For-you item in the owner\'s words, under the conversation, worded per device, the exit record in its detail', r1.item);
-  ok(r2.asks === 0 && !!r2.item && /exited unexpectedly again at \d\d:\d\d and was not restarted/.test(r2.item.text) && r2.item.urgency === 'high', '② a second unexpected exit of it: nothing asked, one "again" item', r2);
-  ok(r3.asks === 0 && r3.filed === 0 && / signal=SIGINT wrapper=finalized socket=none asked=interrupt$/.test(r3.line), '③ the Stop\'s SIGINT (asked): the line says asked=interrupt, nothing asked, nothing filed', r3.line);
+  ok(r2.asks === 0 && !!r2.item && gateOf(/exited unexpectedly again at \d\d:\d\d and was not restarted/.test(r2.item.text)) && r2.item.urgency === 'high', '② a second unexpected exit of it: nothing asked, one "again" item', r2);
+  ok(r3.asks === 0 && r3.filed === 0 && verdictOf(/ signal=SIGINT wrapper=finalized socket=none asked=interrupt$/.test(r3.line)), '③ the Stop\'s SIGINT (asked): the line says asked=interrupt, nothing asked, nothing filed', r3.line);
   ok(r4.asks === 0 && r4.filed === 0, '④ an IDLE conversation that exits code 1: nothing', r4);
   ok(r5.asks === 1, '⑤ between turns but with background tasks live (the 09-24 shape): respawned', r5);
-  ok(r6.waited && r6.askedLate === 1, '⑥ no client open: the respawn waits and the first client to connect is asked', r6);
-  ok(!!r7.item && /restarting it did not work/.test(r7.item.text), '⑦ asked but nothing came up within landMs: ONE "did not work" item', r7.item);
+  ok(gateOf(r6.waited) && r6.askedLate === 1, '⑥ no client open: the respawn waits and the first client to connect is asked', r6);
+  ok(!!r7.item && verdictOf(/restarting it did not work/.test(r7.item.text)), '⑦ asked but nothing came up within landMs: ONE "did not work" item', r7.item);
 
   // ⑧ the Stop's REAL path: claude-code postInterrupt's SIGINT fallback marks the session before it signals
   const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
@@ -1182,12 +1182,12 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
     return { exitAsked: s._exitAsked || null, exit: ex };
   };
   const st = await stopLeg(ClaudeCodeAdapter);
-  ok(st.exitAsked?.by === 'interrupt' && Number.isFinite(st.exitAsked.at) && st.exit.code === 130, '⑧ the Stop\'s real SIGINT fallback marks _exitAsked {by:interrupt} before it signals the CLI', st);
+  ok(st.exitAsked?.by === 'interrupt' && gateOf(Number.isFinite(st.exitAsked.at)) && st.exit.code === 130, '⑧ the Stop\'s real SIGINT fallback marks _exitAsked {by:interrupt} before it signals the CLI', st);
 
   // NEGATIVE CONTROLS — each patched copy must fail the leg it guards
   const ss = read('src/server/session-stdout.js');
   const CALL = "try { require('./unexpected-exit').onExit(session, id, facts, { midTurn }); }";
-  ok(ss.includes(CALL) && ss.includes('let midTurn = !!session._isStreaming;'), 'controls setup: the call and the capture exist verbatim');
+  ok(gateOf(ss.includes(CALL)) && verdictOf(ss.includes('let midTurn = !!session._isStreaming;')), 'controls setup: the call and the capture exist verbatim');
   const noCall = makeEngine(M.write('src/server/session-stdout.js', editAnchor(ss, CALL, 'try { }', "src/server/session-stdout.js"), 'ue-nocall'));
   const C1 = await runLegs(noCall, 'nocall');
   ok(C1.r1.asked === 0 && !C1.r1.item, 'NEGATIVE CONTROL: the teardown without the call (the base) asks nobody and files nothing', C1.r1);
@@ -1196,7 +1196,7 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
   ok(C2.r1.asked === 0 && C2.r5.asks === 0, 'NEGATIVE CONTROL: "working" read AFTER the teardown cleared it never respawns (① and ⑤ red)', { r1: C2.r1.asked, r5: C2.r5.asks });
   const cc = read('src/adapters/claude-code.js');
   const MARK = "      session._exitAsked = { by: 'interrupt', at: Date.now() };\n";
-  ok(cc.includes(MARK), 'controls setup: the Stop\'s mark exists verbatim');
+  ok(verdictOf(cc.includes(MARK)), 'controls setup: the Stop\'s mark exists verbatim');
   const { ClaudeCodeAdapter: Unmarked } = require(M.write('src/adapters/claude-code.js', editAnchor(cc, MARK, '', "src/adapters/claude-code.js"), 'ue-nomark'));
   const st2 = await stopLeg(Unmarked);
   ok(!st2.exitAsked && st2.exit.code === 130, 'NEGATIVE CONTROL: without the mark the Stop\'s SIGINT exit carries no actor (it would read as unexpected)', st2);
@@ -1219,19 +1219,19 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
   chatExit(realEng, { cid: l1.cid, streaming: false, attached: mL });
   await waitFor(() => filed.length > 0, 1500); await pause(200);
   Object.assign(loop, { asks: mL.sent.filter((m) => m.type === 'unexpected-exit-respawn').length, items: filed.map((f) => f.text) });
-  ok(loop.first.length === 1 && loop.asks === 1 && loop.items.length === 1 && /exited unexpectedly again at \d\d:\d\d and was not restarted/.test(loop.items[0]), 'r1 ⑨ (real teardown) the crash loop: the respawned CLI dies while starting (idle, code 1) ⇒ ONE "again" item, no second ask', loop);
+  ok(loop.first.length === 1 && loop.asks === 1 && loop.items.length === 1 && verdictOf(/exited unexpectedly again at \d\d:\d\d and was not restarted/.test(loop.items[0])), 'r1 ⑨ (real teardown) the crash loop: the respawned CLI dies while starting (idle, code 1) ⇒ ONE "again" item, no second ask', loop);
   filed.length = 0; reinstall({ landMs: 300 }); const mP = mkClient(); others = [mP];
   const p1 = chatExit(realEng, { attached: mP }); await waitFor(() => mP.sent.length > 0, 1500);
   chatExit(realEng, { cid: p1.cid, streaming: false }); await pause(800);
   const pend = filed.map((f) => f.text);
-  ok(pend.length === 1 && /again/.test(pend[0]), 'r1 ⑨b it dies before it was ever seen live ⇒ the ONE item is "again" (the superseded respawn files no "did not work" on top)', pend);
+  ok(pend.length === 1 && verdictOf(/again/.test(pend[0])), 'r1 ⑨b it dies before it was ever seen live ⇒ the ONE item is "again" (the superseded respawn files no "did not work" on top)', pend);
   filed.length = 0; reinstall(); const mX = mkClient(); others = [mX];
   chatExit(realEng, { attached: mX, ask: (s) => { s.backend = 'codex'; } }); chatExit(realEng, { attached: mX, host: 'box-1' }); await pause(300);
   ok(mX.sent.length === 0 && filed.length === 0, 'r1 ⑩ (real teardown) a codex conversation and a remote one exiting code 1 mid-turn: no ask, no item', { sent: mX.sent.length, filed: filed.length });
   const xfSrc = read('src/exit-facts.js');
   const GUARDS = ["  if ((backend || 'claude') !== 'claude') return no('backend:' + backend);\n", "  if (remote) return no('remote');\n"];
   const LOOP = "  if (!midTurn && !restarting) return no('idle');\n";
-  ok(GUARDS.every((g) => xfSrc.includes(g)) && xfSrc.includes(LOOP), 'r1 controls setup: the two guards and the startup rule exist verbatim');
+  ok(gateOf(GUARDS.every((g) => xfSrc.includes(g))) && verdictOf(xfSrc.includes(LOOP)), 'r1 controls setup: the two guards and the startup rule exist verbatim');
   const cg = r1Table(require(M.write('src/exit-facts.js', GUARDS.reduce((s, g) => editAnchor(s, g, '', "src/exit-facts.js"), xfSrc), 'ue-r1-noguard')));
   ok(cg.codex === 'respawn/first' && cg.remote === 'respawn/first', 'r1 NEGATIVE CONTROL: without the two guards a codex and a remote conversation are respawned (the r1 finding)', cg);
   const cl = r1Table(require(M.write('src/exit-facts.js', editAnchor(xfSrc, LOOP, "  if (!midTurn) return no('idle');\n", "src/exit-facts.js"), 'ue-r1-noloop')));
@@ -1309,13 +1309,13 @@ console.log('— §6d lane exit-item-heal: a resume answers the "resume it" item
   };
   const { r, A, B, startA, startB } = healLegs(require(path.join(REPO, UER)), 'real');
   ok(r.filed === 6, 'setup: the REAL orchestrator filed six items into the REAL store (4 × no-window, 1 × again, 1 × no-conversation)', r);
-  ok(r.a && r.a.status === 'done' && r.a.by === 'resumed' && r.a.fact && r.a.fact.resumedAt === startA && r.first.length === 1 && r.first[0] === A.id && r.a.saves === 1 && r.heard === 'resumed',
+  ok(gateOf(r.a) && r.a.status === 'done' && r.a.by === 'resumed' && gateOf(r.a.fact) && r.a.fact.resumedAt === startA && r.first.length === 1 && r.first[0] === A.id && r.a.saves === 1 && r.heard === 'resumed',
     '① filed, then the conversation resumed by a client ⇒ the item is done, resolvedBy "resumed" (the system, never the user), its fact = the new session\'s start; ONE save; the status listeners hear it', r);
   ok(r.c === 'open', '① a conversation resumed BEFORE its item was filed ⇒ the item is untouched', r);
   ok(r.b === 'open', '① another conversation\'s item ⇒ untouched (conv-b is not running)', r);
   ok(r.nc === 'open' && r.ncAfter === 'open', '① a no-conversation item stays even under a running conversation\'s key (nothing to resume)', r);
   ok(r.second.length === 0 && r.secondSaves === 0, '② the next publish passes the same live sessions over — one pass per new live session, nothing written', r);
-  ok(r.restart.length === 3 && r.bDisk && r.bDisk.status === 'done' && r.bDisk.by === 'resumed' && r.bDisk.at === startB && r.d === 'done,done',
+  ok(r.restart.length === 3 && gateOf(r.bDisk) && r.bDisk.status === 'done' && r.bDisk.by === 'resumed' && r.bDisk.at === startB && r.d === 'done,done',
     '③ after a server restart (fresh install, store kept) the restored conversations\' items are resolved off the STORE — conv-b on disk, both of conv-d\'s (no-window + again)', r);
   ok(r.cAfter === 'open', '③ the item of a conversation resumed before it was filed is still untouched after the restart', r);
   // the words: the row renderer + the For-you window pane say it plainly, zh + ja carry the sentence
@@ -1327,7 +1327,7 @@ console.log('— §6d lane exit-item-heal: a resume answers the "resume it" item
   const item = { id: 'u1', status: 'done', resolvedBy: 'resumed', resolvedFact: { resumedAt: startA }, createdAt: startA - 1, resolvedAt: startA, text: 'x' };
   const pane = L.itemView(item, { t: tt, resolvedBy: (by, it) => R.resolvedByText(by, tt, it) });
   ok(R.resolvedByText('resumed', tt, item) === `running again (resumed ${hm(startA)})` && R.resolvedByText('resumed', tt) === 'running again'
-    && pane.meta.some((m) => m.kind === 'by' && m.text === `running again (resumed ${hm(startA)})`),
+    && verdictOf(pane.meta.some((m) => m.kind === 'by' && m.text === `running again (resumed ${hm(startA)})`)),
     'the resolution says it: "running again (resumed <its time in the page\'s one format>)" on the row and in the For-you window pane (no fact ⇒ "running again")', pane.meta);
   // (the resume words in zh / ja: MOVED to the fast scripts/test-exit-forensics-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   // ONE entry point: the active-sessions payload builder (every broadcast + a fresh client's first list) — no other caller
@@ -1342,10 +1342,10 @@ console.log('— §6d lane exit-item-heal: a resume answers the "resume it" item
   ok(noOrder !== ueSrc && ctl2.c === 'done', 'control: a copy without "filed BEFORE the session started" resolves the item of a conversation resumed before it was filed (the leg goes red)', ctl2);
   const readsWords = (src) => /\bit\.(?:text|detail)\b/.test(src.split('function healResumed')[1].split('\n}\n')[0]);
   const byWords = ueSrc.replace("HEAL_KEYS.has(it.i18n && it.i18n.text && it.i18n.text.key)", "/resume it|say continue/.test(it.text)");
-  ok(!readsWords(ueSrc) && byWords !== ueSrc && readsWords(byWords), 'census: the heal pass never reads an item\'s words — found by i18n.text.key + sessionKey (control: a words-matching copy is caught)');
+  ok(!readsWords(ueSrc) && byWords !== ueSrc && verdictOf(readsWords(byWords)), 'census: the heal pass never reads an item\'s words — found by i18n.text.key + sessionKey (control: a words-matching copy is caught)');
 }
 
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 28 })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 28 })) ok(verdictOf(r.pass), r.name, r.detail);
 
 console.log(`\n${fail ? '✗' : '✓'} test-exit-forensics: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

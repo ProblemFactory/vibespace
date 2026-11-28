@@ -31,7 +31,7 @@ const T0 = Date.now();
 let pass = 0, fail = 0;
 const A = require('../src/app-manifest.js');
 const P = { parse: A.parseDesktopFile };
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -54,13 +54,13 @@ console.log('§1 the readers');
   ok(f.length === 2 && f[0].appId === 'org.jaspstats.JASP' && f[0].name === 'JASP' && f[0].version === '0.98.1' && f[0].scope === 'user', 'flatpak list: JASP\'s row read; the header, a blank, garbage and a repeat skipped', f);
   ok(W.parseFlatpakList('', {}).length === 0 && W.parseFlatpakList(null).length === 0 && W.parseFlatpakList('org.a.B', { scope: 'system' })[0].scope === 'system', 'flatpak list: empty / null / a bare id (system scope)');
   const term = W.desktopWitness(de({ Name: 'Htop', Exec: 'htop', Terminal: 'true' }), { path: '/home/u/.local/share/applications/htop.desktop', validate: M.validateAppRow, ...P });
-  ok(term.ok && term.row.exec === 'xterm' && term.row.args.join(' ') === '-e htop' && term.row.id === 'seen.d.htop' && term.row.source === 'desktop-user' && term.row.witnessed === true, 'a Terminal=true entry runs in xterm -e; its id is seen.d.<file>', term);
+  ok(gateOf(term.ok) && term.row.exec === 'xterm' && term.row.args.join(' ') === '-e htop' && term.row.id === 'seen.d.htop' && term.row.source === 'desktop-user' && term.row.witnessed === true, 'a Terminal=true entry runs in xterm -e; its id is seen.d.<file>', term);
   ok(W.desktopWitness(de({ Name: 'Hidden', Exec: 'h', NoDisplay: 'true' }), { path: '/x/h.desktop', ...P }).skip === 'no-display' && W.desktopWitness(de({ Name: 'x', Exec: 'x' }), { path: '/x/x.desktop' }).error === 'no desktop-file reader', 'a NoDisplay entry is no row');
   let threw = null, results = [];
   try { for (const t of ['\u0000\u0001garbage', '[Desktop Entry]\nType=Application\nExec="unterminated\n', 'Exec=no section\n', '[Desktop Entry]\nType=Link\nURL=x\n', '', null, de({ Name: 'x'.repeat(5000), Exec: '/bin/true' })]) results.push(W.desktopWitness(t, { path: '/x/y.desktop', validate: M.validateAppRow, ...P })); } catch (e) { threw = e; }
-  ok(!threw && results.slice(0, 6).every((r) => !r.ok) && results[6].ok && results[6].row.label.length <= 80, 'a malformed .desktop never throws (garbage, broken quoting, no section, a Link, empty, null); a long name is cut', threw ? String(threw) : results.map((r) => r.skip || r.error || 'ok'));
+  ok(!threw && gateOf(results.slice(0, 6).every((r) => !r.ok)) && gateOf(results[6].ok) && results[6].row.label.length <= 80, 'a malformed .desktop never throws (garbage, broken quoting, no section, a Link, empty, null); a long name is cut', threw ? String(threw) : results.map((r) => r.skip || r.error || 'ok'));
   const fpd = W.desktopWitness(de({ Name: 'JASP', Exec: '/usr/bin/flatpak run --branch=stable --arch=x86_64 --command=JASP org.jaspstats.JASP %U' }), { path: '/x/org.jaspstats.JASP.desktop', ...P });
-  ok(fpd.ok && fpd.row.flatpak === 'org.jaspstats.JASP', 'an exported flatpak entry names its flatpak (flatpakOf)', fpd);
+  ok(gateOf(fpd.ok) && fpd.row.flatpak === 'org.jaspstats.JASP', 'an exported flatpak entry names its flatpak (flatpakOf)', fpd);
   const xdg = W.witnessRows({ desktops: [
     { path: '/usr/share/applications/foo.desktop', scope: 'system', text: de({ Name: 'Foo (system)', Exec: 'foo' }) },
     { path: '/h/.local/share/applications/foo.desktop', scope: 'user', text: de({ Name: 'Foo (mine)', Exec: 'foo --mine' }) },
@@ -87,14 +87,14 @@ const groupOk = (rows, catalog) => rows.every((r) => r.witnessed === true && r.i
 {
   const rows = W.witnessRows({ ...FIX, catalog: ENGINE, validate: M.validateAppRow, ...P });
   const ids = rows.map((r) => r.id);
-  ok(groupOk(rows, ENGINE), 'every witnessed row is in its own group (seen.*, witnessed, never an engine id, never an engine file or flatpak again)', ids);
+  ok(verdictOf(groupOk(rows, ENGINE)), 'every witnessed row is in its own group (seen.*, witnessed, never an engine id, never an engine file or flatpak again)', ids);
   const fake = rows.find((r) => r.desktop === '/h/.local/share/applications/fake-gimp.desktop');
-  ok(fake && fake.label === 'GIMP' && fake.id === 'seen.d.fake-gimp' && fake.exec === '/tmp/evil.sh', 'a user entry named like the engine\'s GIMP stays in the witnessed group — its own id, its Exec shown as written', fake);
-  ok(ids.includes('seen.f.org.jaspstats.jasp') && rows.filter((r) => r.flatpak === 'org.jaspstats.JASP').length === 1 && rows.find((r) => r.flatpak === 'org.jaspstats.JASP').source === 'flatpak-user', 'JASP is listed ONCE, as the user flatpak (its system copy and its exported entry fold into it)', ids);
+  ok(gateOf(fake) && fake.label === 'GIMP' && fake.id === 'seen.d.fake-gimp' && fake.exec === '/tmp/evil.sh', 'a user entry named like the engine\'s GIMP stays in the witnessed group — its own id, its Exec shown as written', fake);
+  ok(gateOf(ids.includes('seen.f.org.jaspstats.jasp')) && rows.filter((r) => r.flatpak === 'org.jaspstats.JASP').length === 1 && rows.find((r) => r.flatpak === 'org.jaspstats.JASP').source === 'flatpak-user', 'JASP is listed ONCE, as the user flatpak (its system copy and its exported entry fold into it)', ids);
   ok(!ids.some((i) => /kdenlive/.test(i)) && !rows.some((r) => r.desktop === '/usr/share/applications/gimp.desktop'), 'the engine\'s own Kdenlive flatpak and GIMP file are not listed again');
   // RED CONTROL: a MERGED list (the witnessed entries read as engine rows — the app-manifest reader's own ids) is caught
   const merged = FIX.desktops.map((d) => A.parseDesktopFile(d.text, { entry: 'gimp', path: d.path, primary: true })).filter((r) => r.ok).map((r) => r.row);
-  ok(!groupOk(merged, ENGINE) && merged.some((r) => r.id === 'app.gimp'), 'RED CONTROL: entries merged into the engine\'s namespace (app.gimp shadowing the engine\'s GIMP) fail the group rule', merged.map((r) => r.id));
+  ok(!groupOk(merged, ENGINE) && verdictOf(merged.some((r) => r.id === 'app.gimp')), 'RED CONTROL: entries merged into the engine\'s namespace (app.gimp shadowing the engine\'s GIMP) fail the group rule', merged.map((r) => r.id));
   const many = W.witnessRows({ flatpaks: Array.from({ length: 400 }, (_, i) => ({ appId: `org.x.App${i}`, name: `App ${i}`, scope: 'user' })) });
   ok(many.length === W.WITNESS_MAX, `the group is bounded (${W.WITNESS_MAX} rows)`, many.length);
 }
@@ -128,7 +128,7 @@ fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
   const ms = Date.now() - t0;
   const rows = apps.witnessRows();
   ok(v.count === 2 && v.hidden === 1 && v.flatpak === true && rows.map((r) => r.label).join('|') === 'JASP|Notes|Calculator', 'the first open lists JASP (the user flatpak) + the two desktop entries — the user\'s own first (NoDisplay, a broken file, a FIFO skipped)', { v, rows: rows.map((r) => r.id) });
-  ok(ms < W.WITNESS_BUDGET_MS && calls.filter((c) => c.startsWith('flatpak list --app')).length === 2 && calls.filter((c) => !c.startsWith('flatpak list --app')).length === 1 && calls.some((c) => /^dpkg -S .*\/calc\.desktop/.test(c)) && calls.every((c) => !/install|uninstall|update/.test(c)), `inside the budget (${ms} ms) — two read-only \`flatpak list\` children + ONE \`dpkg -S\` over the system entries, nothing else`, calls);
+  ok(ms < W.WITNESS_BUDGET_MS && calls.filter((c) => c.startsWith('flatpak list --app')).length === 2 && calls.filter((c) => !c.startsWith('flatpak list --app')).length === 1 && gateOf(calls.some((c) => /^dpkg -S .*\/calc\.desktop/.test(c))) && verdictOf(calls.every((c) => !/install|uninstall|update/.test(c))), `inside the budget (${ms} ms) — two read-only \`flatpak list\` children + ONE \`dpkg -S\` over the system entries, nothing else`, calls);
   const file = JSON.parse(fs.readFileSync(path.join(tmp, 'data', W.WITNESS_FILE), 'utf8'));
   ok(file.rows.length === 3 && file.listedAt === clock && typeof file.sig === 'string', `cached in data/${W.WITNESS_FILE} with listedAt + the directories' signature`);
   const n0 = calls.length;
@@ -145,7 +145,7 @@ fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
   ok(v2.count === 2 && v2.hidden === 1 && apps2.witnessRows().length === 3, 'a restarted machine half serves the file\'s list (fresh: no child)', v2);
   const r = await AS.runAppOp({ ...apps, plan: async () => ({}), recordUserKind: async () => ({ entry: { id: 'x' } }), refreshWitness: async (o) => { calls.push(`refresh:${o.reason}`); return apps.refreshWitness(o); } }, 'app-install', { kind: 'uv-tool', name: 'x', why: 'w', by: 'user' });
   await new Promise((r2) => setTimeout(r2, 5));
-  ok(r.ok && calls.includes('refresh:install'), 'an install through the door re-lists what is installed (runAppOp)', r);
+  ok(gateOf(r.ok) && verdictOf(calls.includes('refresh:install')), 'an install through the door re-lists what is installed (runAppOp)', r);
 }
 
 // lane race-sweep (B-0c04, the .278 mirror's test-app-register F1 → F4 cascade): a Forget re-listed by JOINING the listing the
@@ -180,7 +180,7 @@ console.log('§4b a FORCED re-list asked while a listing runs lists AGAIN — ne
     return { fresh: a.witnessRows().some((r) => r.label === 'Fresh'), lists: lists.length };
   };
   const fx = await judge(AS, 'fix');
-  ok(fx.fresh && fx.lists === 2, `the re-list asked while listing #1 ran waited for it, then listed AGAIN (${fx.lists} listings) — the change made after #1 read the entries is in the answer`, fx);
+  ok(gateOf(fx.fresh) && fx.lists === 2, `the re-list asked while listing #1 ran waited for it, then listed AGAIN (${fx.lists} listings) — the change made after #1 read the entries is in the answer`, fx);
   const SRC = fs.readFileSync(path.join(ROOT, 'src/app-serve.js'), 'utf8');
   const needle = "    if (o.refresh && witnessFlight && reason !== 'open') await within(witnessFlight);\n";
   ok(SRC.split(needle).length === 2, 'ANCHOR: the forced re-list waits for a running listing, once');
@@ -200,11 +200,11 @@ console.log('§5 the registry and the launch door');
     const reg = ds.registry({ bins: {} });
     const seen = reg.filter((r) => r.witnessed);
     const jasp = seen.find((r) => r.flatpak === 'org.jaspstats.JASP'), notes = seen.find((r) => r.label === 'Notes');
-    ok(seen.length === 3 && reg.slice(0, reg.length - 3).every((r) => !r.witnessed), 'the witnessed rows follow the engine\'s rows in the registry, flagged', reg.map((r) => r.id));
-    ok(jasp && jasp.available && jasp.path === path.join(bin, 'flatpak') && jasp.args.join(' ') === 'run org.jaspstats.JASP', 'JASP launches as `flatpak run org.jaspstats.JASP`', jasp);
-    ok(notes && !notes.available && notes.reasonCode === 'exec-gone' && /no longer resolves/.test(notes.reason), 'a row whose program is gone stays listed and says so (exec-gone)', notes);
+    ok(seen.length === 3 && verdictOf(reg.slice(0, reg.length - 3).every((r) => !r.witnessed)), 'the witnessed rows follow the engine\'s rows in the registry, flagged', reg.map((r) => r.id));
+    ok(gateOf(jasp) && gateOf(jasp.available) && jasp.path === path.join(bin, 'flatpak') && jasp.args.join(' ') === 'run org.jaspstats.JASP', 'JASP launches as `flatpak run org.jaspstats.JASP`', jasp);
+    ok(gateOf(notes) && !notes.available && notes.reasonCode === 'exec-gone' && verdictOf(/no longer resolves/.test(notes.reason)), 'a row whose program is gone stays listed and says so (exec-gone)', notes);
     const v = M.validateLaunchRequest({ appId: jasp.id }, reg);
-    ok(v.ok && v.launch.source === 'registry' && v.launch.row.id === 'seen.f.org.jaspstats.jasp', 'the launch door accepts a witnessed row by its id (the same door as the engine\'s rows)', v);
+    ok(gateOf(v.ok) && v.launch.source === 'registry' && v.launch.row.id === 'seen.f.org.jaspstats.jasp', 'the launch door accepts a witnessed row by its id (the same door as the engine\'s rows)', v);
   } finally { try { await ds.shutdown?.(); } catch { } }
 }
 
@@ -218,8 +218,8 @@ console.log('§6 the place words');
   const done = (host) => CM.progressWords({ state: 'done', kind: 'package', host, result: { rows: [{ id: 'app.x' }] } }, tFor(zh)).text;
   ok(done('local') === '已安装到本 VibeSpace 机器' && done('host-1') === '已安装到host-1', 'the install card says where it landed (zh)', [done('local'), done('host-1')]);
   const src = fs.readFileSync(new URL('../src/server/apps-engine.js', import.meta.url), 'utf8');
-  ok(/is done on \$\{placeOf\(p\.host\)\}/.test(src) && /It landed on \$\{placeOf\(p\.host\)\}/.test(src), 'the helper\'s outcome (the agent\'s sentence) names the place through the same words');
-  for (const k of ['Installed outside VibeSpace ({n})', 'Flatpak · yours', 'Desktop entry · yours', 'Its program is gone: {cmd}', 'Filter apps', 'Installed on {place}', 'this VibeSpace machine ({name})']) ok(zh[k] && ja[k], `zh + ja: ${k}`);
+  ok(gateOf(/is done on \$\{placeOf\(p\.host\)\}/.test(src)) && verdictOf(/It landed on \$\{placeOf\(p\.host\)\}/.test(src)), 'the helper\'s outcome (the agent\'s sentence) names the place through the same words');
+  for (const k of ['Installed outside VibeSpace ({n})', 'Flatpak · yours', 'Desktop entry · yours', 'Its program is gone: {cmd}', 'Filter apps', 'Installed on {place}', 'this VibeSpace machine ({name})']) ok(gateOf(zh[k]) && verdictOf(ja[k]), `zh + ja: ${k}`);
 }
 
 console.log('§7 lane apps-dialog-fast — the open never waits; "outside the door" = outside the base, never the distro');
@@ -235,7 +235,7 @@ console.log('§7 lane apps-dialog-fast — the open never waits; "outside the do
   const noBase = W.witnessRows({ ...fx, drift: null });
   ok(shown(noBase) === 'JASP|Notes|Inkscape|orphan' && hid(noBase) === 'gedit|mytool', 'no base on this machine: every OWNED system entry hidden (the count kept), the user\'s rows + the system flatpak + an unowned system entry listed (F6)', noBase.map((r) => [r.label, !!r.distro]));
   ok(hid(W.witnessRows({ ...fx, drift: null, owners: null })) === 'gedit|mytool|orphan', 'dpkg did not answer (owners null) ⇒ nothing is read as unowned — every system entry hidden');
-  ok(hid(W.witnessRows({ ...fx, drift: null, owners: { ...fx.owners, '/usr/share/applications/orphan.desktop': 'x' } })).includes('orphan'), 'F6 CONTROL: the same entry once dpkg owns it is the distro\'s (hidden) — the listing hangs on the owner alone');
+  ok(verdictOf(hid(W.witnessRows({ ...fx, drift: null, owners: { ...fx.owners, '/usr/share/applications/orphan.desktop': 'x' } })).includes('orphan')), 'F6 CONTROL: the same entry once dpkg owns it is the distro\'s (hidden) — the listing hangs on the owner alone');
   const RED = (o) => W.witnessRows({ ...o, drift: undefined, owners: undefined }); // the pre-lane rule: no scope
   ok(hid(RED(fx)) === 'gedit|mytool|orphan', 'RED CONTROL: without a base the distro\'s rows are caught as hidden (not silently listed)');
   ok(JSON.stringify(W.witnessScope(withBase)) === JSON.stringify({ distro: 1, 'flatpak-user': 1, 'flatpak-system': 1, 'desktop-user': 1, 'desktop-system': 2 }), 'witnessScope: the per-source counts + the distro\'s', W.witnessScope(withBase));
@@ -244,7 +244,7 @@ console.log('§7 lane apps-dialog-fast — the open never waits; "outside the do
   // THE OPEN'S VERDICT
   const all = [];
   for (const due of [false, true]) for (const inFlight of [false, true]) all.push({ due, inFlight, ...W.openAnswer({ cache: { rows: [1] }, due, inFlight }) });
-  ok(all.every((a) => a.wait === false && a.answer.rows[0] === 1 && a.refresh === (a.due && !a.inFlight)), 'openAnswer: the answer is the cache, refresh = due && !inFlight, NEVER a wait (all four cases)', all);
+  ok(verdictOf(all.every((a) => a.wait === false && a.answer.rows[0] === 1 && a.refresh === (a.due && !a.inFlight))), 'openAnswer: the answer is the cache, refresh = due && !inFlight, NEVER a wait (all four cases)', all);
   // the machine half: a SLOW walk (the stub answers after 600 ms) — the open answers at once, the listing lands later and is pushed
   const t7 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-witness7-'));
   const d7 = { user: path.join(t7, 'user'), system: path.join(t7, 'sys'), flatpakUser: path.join(t7, 'fu'), flatpakSystem: path.join(t7, 'fs') };
@@ -281,7 +281,7 @@ console.log('§7 lane apps-dialog-fast — the open never waits; "outside the do
   ok(pushed.length === 1 && pushed[0].listing === false && pushed[0].changed === true && pushed[0].count === 2 && pushed[0].hidden === 1, 'the walk LANDS and is pushed once — listing over, changed, 2 listed + 1 hidden', pushed);
   ok(r1.filter((r) => !r.distro).map((r) => r.label).join('|') === 'JASP|My Tool' && r1.find((r) => r.label === 'Text Editor')?.distro === true, 'with the base: My Tool (its package installed after the base) listed, the distro\'s Text Editor hidden', r1.map((r) => [r.label, !!r.distro]));
   const file7 = JSON.parse(fs.readFileSync(path.join(t7, 'data', W.WITNESS_FILE), 'utf8'));
-  ok(Number.isFinite(file7.tookMs) && file7.tookMs >= 500 && file7.scope && file7.scope.distro === 1 && file7.scope['flatpak-user'] === 1 && file7.scope['desktop-system'] === 1 && file7.scope.base === true && file7.changed === undefined, `the cache file keeps tookMs (${file7.tookMs} ms) + the scope counts (why a list is long)`, { tookMs: file7.tookMs, scope: file7.scope });
+  ok(gateOf(Number.isFinite(file7.tookMs)) && file7.tookMs >= 500 && gateOf(file7.scope) && file7.scope.distro === 1 && file7.scope['flatpak-user'] === 1 && file7.scope['desktop-system'] === 1 && file7.scope.base === true && file7.changed === undefined, `the cache file keeps tookMs (${file7.tookMs} ms) + the scope counts (why a list is long)`, { tookMs: file7.tookMs, scope: file7.scope });
   slow = 300; t0 = Date.now();
   const vr = await a7.refreshWitness({ reason: 'recheck' });
   const reMs = Date.now() - t0;
@@ -296,20 +296,20 @@ console.log('§7 lane apps-dialog-fast — the open never waits; "outside the do
     slow = 50; await a7.refreshWitness({ reason: 'recheck' });
     for (let i = 0; i < 200 && !hooked.length; i++) await new Promise((r) => setTimeout(r, 25)); // the machine's facts first (cached after)
     const h = hooked[hooked.length - 1];
-    ok(h && h.witness.changed === true && h.rows.some((r) => r.label === 'Notes' && r.witnessed && r.available === false && r.reasonCode === 'exec-gone') && h.rows.length === 4, 'desktop-serve pushes the landing through hooks.onWitness — the registry\'s witnessed rows, decorated (available / reasonCode)', h && h.rows.map((r) => [r.label, r.available]));
+    ok(gateOf(h) && h.witness.changed === true && gateOf(h.rows.some((r) => r.label === 'Notes' && r.witnessed && r.available === false && r.reasonCode === 'exec-gone')) && h.rows.length === 4, 'desktop-serve pushes the landing through hooks.onWitness — the registry\'s witnessed rows, decorated (available / reasonCode)', h && h.rows.map((r) => [r.label, r.available]));
     const ksrc = fs.readFileSync(new URL('../src/server/desktop-app-keeper.js', import.meta.url), 'utf8');
-    ok(/onWitness: notifyWitness/.test(ksrc) && /type: 'desktop-apps-witness', host: 'local', witness, rows/.test(ksrc), 'the keeper turns it into ONE desktop-apps-witness broadcast {host, witness, rows}');
+    ok(gateOf(/onWitness: notifyWitness/.test(ksrc)) && verdictOf(/type: 'desktop-apps-witness', host: 'local', witness, rows/.test(ksrc)), 'the keeper turns it into ONE desktop-apps-witness broadcast {host, witness, rows}');
   } finally { try { await ds7.shutdown?.(); } catch { } }
   // vibespace-app status follows the same rule (the machine's app-status op + the CLI line)
   let st = null;
   try { st = await AS.runAppOp({ plan: async () => ({}), status: async () => ({ drift: { drift: false } }), refreshWitness: a7.refreshWitness, witnessRows: a7.witnessRows }, 'app-status', {}); } catch (e) { st = { error: e.message }; }
-  ok(st && st.ok && JSON.stringify(st.status.outside) === JSON.stringify(['JASP (flatpak-user)', 'Notes (desktop-user)', 'My Tool (desktop-system)']), 'app-status carries the apps the group lists (the distro\'s Text Editor not)', st);
+  ok(gateOf(st) && gateOf(st.ok) && JSON.stringify(st.status.outside) === JSON.stringify(['JASP (flatpak-user)', 'Notes (desktop-user)', 'My Tool (desktop-system)']), 'app-status carries the apps the group lists (the distro\'s Text Editor not)', st);
   const cli = fs.readFileSync(new URL('../data/bin/vibespace-app', import.meta.url), 'utf8');
-  ok(/\(j\.outside \|\| \[\]\)\.length\) lines\.push\(`Apps installed OUTSIDE VibeSpace/.test(cli), 'vibespace-app status prints that list on its OUTSIDE line');
+  ok(verdictOf(/\(j\.outside \|\| \[\]\)\.length\) lines\.push\(`Apps installed OUTSIDE VibeSpace/.test(cli)), 'vibespace-app status prints that list on its OUTSIDE line');
   fs.rmSync(t7, { recursive: true, force: true });
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 1 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${fail ? '✗' : '✓'} test-apps-witness: ${pass} passed, ${fail} failed (${Date.now() - T0} ms)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -27,7 +27,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -111,7 +111,7 @@ console.log(`§2 byte-for-byte against the RETIRED desktop-window.js (git show $
   catch (e) { why = String(e.stderr || e.message).trim().slice(0, 160); }
   if (!retired) console.log(`  ⚠ SKIP: cannot read the retired file — ${why}`);
   else {
-    ok(/new RFB\(mount/.test(retired) && /container\.style\.zoom = 'calc\(1 \/ var\(--ui-scale, 1\)\)'/.test(retired), 'the control really is the pre-extraction window (inline RFB + the counter-zoom literal)');
+    ok(gateOf(/new RFB\(mount/.test(retired)) && verdictOf(/container\.style\.zoom = 'calc\(1 \/ var\(--ui-scale, 1\)\)'/.test(retired)), 'the control really is the pre-extraction window (inline RFB + the counter-zoom literal)');
     const lits = (s) => [...s.matchAll(/\bt\('((?:[^'\\]|\\.)*)'\)/g)].map((m) => m[1]);
     const retiredLits = [...new Set(lits(retired))];
     // P8-2 chunk x2 (2026-09-22): the bar, the status chip, Paste/Reconnect and the ladder moved to the SHARED picture shell
@@ -124,10 +124,10 @@ console.log(`§2 byte-for-byte against the RETIRED desktop-window.js (git show $
     // `navigator.clipboard?.writeText(text).catch(() => {})` did NOTHING on plain http and swallowed a refusal; a
     // desktop-side copy now goes through the shell (the API on a secure context, silently as before — else the
     // click-to-copy chip). §6 drives both branches.
-    ok(retired.includes("navigator.clipboard?.writeText(text).catch(() => {});") && !vv.includes("navigator.clipboard?.writeText(text).catch(() => {});") && /shell\.deliverCopy\(text, \{ secure: pageIsSecure\(\), clipboard: navigator\.clipboard, toast: false \}\)/.test(vv), 'the ONE deliberate change: the retired silent writeText is replaced by the shell\'s deliverCopy (API on a secure context, the chip on plain http — never a silent no-op)');
+    ok(gateOf(retired.includes("navigator.clipboard?.writeText(text).catch(() => {});")) && !vv.includes("navigator.clipboard?.writeText(text).catch(() => {});") && verdictOf(/shell\.deliverCopy\(text, \{ secure: pageIsSecure\(\), clipboard: navigator\.clipboard, toast: false \}\)/.test(vv)), 'the ONE deliberate change: the retired silent writeText is replaced by the shell\'s deliverCopy (API on a secure context, the chip on plain http — never a silent no-op)');
     for (const frag of ["rfb.scaleViewport = true;", "rfb.resizeSession = true;", "rfb.clipboardPasteFrom(text); showToast(t('Clipboard sent'));", "showToast(t('Clipboard unavailable (needs HTTPS + permission)'), { type: 'error' });", "e.detail?.clean ? t('Disconnected') : t('Connection lost')", "status.style.color = error ? 'var(--red, #e55)' : '';", "reBtn.style.display = reconnect ? '' : 'none';", "'display:flex;flex-direction:column;height:100%;background:#000'", "'flex:1;min-height:0;position:relative;overflow:hidden'"]) {
       const inRetired = retired.includes(frag) || retired.includes(frag.replace("e.detail?.clean ? t('Disconnected') : t('Connection lost')", "e.detail?.clean ? t('Disconnected') : t('Connection lost')"));
-      ok(inRetired && vv.includes(frag), `retired fragment carried verbatim: ${frag.slice(0, 60)}`);
+      ok(gateOf(inRetired) && verdictOf(vv.includes(frag)), `retired fragment carried verbatim: ${frag.slice(0, 60)}`);
     }
   }
 }
@@ -144,10 +144,10 @@ console.log('§3 the component under a fake DOM + fake RFB — the retired windo
   const [bar, mount] = container.children;
   ok(bar.className === 'desktop-bar' && mount.style.cssText === 'flex:1;min-height:0;position:relative;overflow:hidden', 'bar + mount are the retired elements');
   const [status, pasteBtn, reBtn] = bar.children;
-  ok(status.className === 'desktop-status' && status.textContent === 'Connecting…' && pasteBtn.textContent === 'Paste' && pasteBtn.title === 'Send your clipboard text into the desktop' && reBtn.textContent === 'Reconnect' && reBtn.style.cssText.includes('display:none'), 'initial chrome: "Connecting…", Paste (with its title), a hidden Reconnect');
+  ok(status.className === 'desktop-status' && status.textContent === 'Connecting…' && pasteBtn.textContent === 'Paste' && pasteBtn.title === 'Send your clipboard text into the desktop' && reBtn.textContent === 'Reconnect' && verdictOf(reBtn.style.cssText.includes('display:none')), 'initial chrome: "Connecting…", Paste (with its title), a hidden Reconnect');
   await view.connect();
   ok(status.textContent === 'no VNC server installed (Xtigervnc/Xvnc not on PATH)' && status.style.color === 'var(--red, #e55)' && reBtn.style.display === '', 'gate failure: the SERVER\'s own error text, red, Reconnect shown (the retired `st?.error || …` branch)');
-  ok(same(events.map((e) => e[0]), ['starting', 'error']), 'observer saw starting → error');
+  ok(verdictOf(same(events.map((e) => e[0]), ['starting', 'error'])), 'observer saw starting → error');
   gateAnswer = { ok: false };
   await view.connect();
   ok(status.textContent === 'Desktop unavailable on this server', 'gate failure without a message ⇒ the generic label');
@@ -162,9 +162,9 @@ console.log('§3 the component under a fake DOM + fake RFB — the retired windo
   ok(status.textContent === 'Connected' && view.state === 'connected', "'connect' ⇒ Connected");
   rfb.emit('clipboard', { text: 'copied-remotely' });
   await sleep(0);
-  ok(same(clipboard.written, ['copied-remotely']), 'a remote clipboard event lands in navigator.clipboard');
+  ok(verdictOf(same(clipboard.written, ['copied-remotely'])), 'a remote clipboard event lands in navigator.clipboard');
   await pasteBtn.onclick();
-  ok(same(rfb.pasted, ['from-clipboard']) && toasts.some((x) => (x.children || []).some((c) => /Clipboard sent/.test(String(c.textContent || '')))), 'Paste reads the browser clipboard into the session and toasts "Clipboard sent"');
+  ok(gateOf(same(rfb.pasted, ['from-clipboard'])) && verdictOf(toasts.some((x) => (x.children || []).some((c) => /Clipboard sent/.test(String(c.textContent || ''))))), 'Paste reads the browser clipboard into the session and toasts "Clipboard sent"');
   rfb.emit('disconnect', { clean: true });
   ok(status.textContent === 'Disconnected' && status.style.color === '' && reBtn.style.display === '', 'clean disconnect ⇒ "Disconnected", not red, Reconnect shown');
   rfb.emit('disconnect', { clean: false });
@@ -207,7 +207,7 @@ console.log('§4 the app window\'s options: autoReconnect ladder, labels, addCon
   await sleep(1200);
   ok(FakeRFB.instances.length === 3 && view.wanted === false, 'after OUR disconnect() nothing reconnects (wanted is false)');
   view.dispose();
-  ok(same(V.RECONNECT_LADDER, [1000, 2000, 4000, 8000, 15000]), 'the ladder is bounded and named');
+  ok(verdictOf(same(V.RECONNECT_LADDER, [1000, 2000, 4000, 8000, 15000])), 'the ladder is bounded and named');
   ok(V.streamUrl('/api/vnc') === 'wss://vibe.example/api/vnc', 'streamUrl follows the page scheme (https ⇒ wss)');
 }
 
@@ -220,39 +220,39 @@ console.log('§5 Paste: disconnected says so; a refused / empty / unavailable cl
   const [, pasteBtn] = view.bar.children;
   const toastText = () => toasts.map((x) => (x.children || []).map((c) => String(c.textContent || '')).join(' ')).join(' | ');
   await pasteBtn.onclick();
-  ok(FakeRFB.instances.length === 0 && /not connected/.test(toastText()) && !view.pasteOpen, 'Paste before any connection: a "not connected" toast, no paste box, nothing sent', toastText());
+  ok(FakeRFB.instances.length === 0 && gateOf(/not connected/.test(toastText())) && !view.pasteOpen, 'Paste before any connection: a "not connected" toast, no paste box, nothing sent', toastText());
   await view.connect();
   const rfb = FakeRFB.instances[0];
   rfb.emit('connect');
   const f0 = rfb.focused || 0;
   await pasteBtn.onclick();
-  ok(same(rfb.pasted, ['from-clipboard']) && (rfb.focused || 0) === f0 + 1 && !view.pasteOpen, 'a readable clipboard is sent AND the focus goes back to the desktop (the retired behaviour left it on the button)', { pasted: rfb.pasted, focused: rfb.focused });
+  ok(gateOf(same(rfb.pasted, ['from-clipboard'])) && (rfb.focused || 0) === f0 + 1 && !view.pasteOpen, 'a readable clipboard is sent AND the focus goes back to the desktop (the retired behaviour left it on the button)', { pasted: rfb.pasted, focused: rfb.focused });
   // the browser refuses (permission) ⇒ the paste box with the permission sentence
   const savedRead = clipboard.readText;
   clipboard.readText = async () => { const e = new Error('Read permission denied.'); e.name = 'NotAllowedError'; throw e; };
   await pasteBtn.onclick();
-  ok(view.pasteOpen && rfb.pasted.length === 1, 'a NotAllowedError opens the paste box instead of a dead-end toast', { open: view.pasteOpen });
+  ok(gateOf(view.pasteOpen) && rfb.pasted.length === 1, 'a NotAllowedError opens the paste box instead of a dead-end toast', { open: view.pasteOpen });
   const box = view.container.children.find((c) => c.className === 'vnc-paste-box');
   const note = box && box.children[0]; const ta = box && box.children[1]; const actions = box && box.children[2];
-  ok(box && /refused clipboard access/.test(note.textContent) && ta.tagName === 'textarea' && actions.children.length === 2, 'the box = the reason sentence + a textarea + Send / Cancel', box && note.textContent);
+  ok(gateOf(box) && gateOf(/refused clipboard access/.test(note.textContent)) && ta.tagName === 'textarea' && actions.children.length === 2, 'the box = the reason sentence + a textarea + Send / Cancel', box && note.textContent);
   actions.children[0].onclick();
-  ok(view.pasteOpen && rfb.pasted.length === 1, 'Send with an empty textarea sends nothing and keeps the box');
+  ok(gateOf(view.pasteOpen) && rfb.pasted.length === 1, 'Send with an empty textarea sends nothing and keeps the box');
   ta.value = 'typed-into-box';
   const f1 = rfb.focused || 0;
   actions.children[0].onclick();
-  ok(same(rfb.pasted, ['from-clipboard', 'typed-into-box']) && !view.pasteOpen && (rfb.focused || 0) === f1 + 1 && /Clipboard sent/.test(toastText()), 'Send routes the textarea text into the desktop, closes the box and focuses the desktop', { pasted: rfb.pasted });
+  ok(gateOf(same(rfb.pasted, ['from-clipboard', 'typed-into-box'])) && !view.pasteOpen && (rfb.focused || 0) === f1 + 1 && verdictOf(/Clipboard sent/.test(toastText())), 'Send routes the textarea text into the desktop, closes the box and focuses the desktop', { pasted: rfb.pasted });
   // an empty clipboard ⇒ the box with the empty sentence
   clipboard.readText = async () => '';
   await pasteBtn.onclick();
   const box2 = view.container.children.filter((c) => c.className === 'vnc-paste-box').pop();
-  ok(view.pasteOpen && /empty or holds no text/.test(box2.children[0].textContent), 'an empty clipboard opens the box with the empty sentence', box2 && box2.children[0].textContent);
+  ok(gateOf(view.pasteOpen) && verdictOf(/empty or holds no text/.test(box2.children[0].textContent)), 'an empty clipboard opens the box with the empty sentence', box2 && box2.children[0].textContent);
   box2.children[2].children[1].onclick();
   ok(!view.pasteOpen, 'Cancel closes the box');
   // no async Clipboard API at all (plain http by hostname) ⇒ the HTTPS sentence
   const savedClip = navigator.clipboard; Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', userAgent: 'node' }, configurable: true });
   await pasteBtn.onclick();
   const box3 = view.container.children.filter((c) => c.className === 'vnc-paste-box').pop();
-  ok(view.pasteOpen && /not served over HTTPS/.test(box3.children[0].textContent), 'without navigator.clipboard (an http page) the box names HTTPS as the reason', box3 && box3.children[0].textContent);
+  ok(gateOf(view.pasteOpen) && verdictOf(/not served over HTTPS/.test(box3.children[0].textContent)), 'without navigator.clipboard (an http page) the box names HTTPS as the reason', box3 && box3.children[0].textContent);
   box3.children[2].children[1].onclick();
   Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', clipboard: savedClip, userAgent: 'node' }, configurable: true });
   clipboard.readText = savedRead;
@@ -263,7 +263,7 @@ console.log('§5 Paste: disconnected says so; a refused / empty / unavailable cl
   toasts.length = 0;
   const nBefore = FakeRFB.instances.length;
   await pasteBtn.onclick();
-  ok(!view.pasteOpen && /reconnecting — your text is pasted when it is back/.test(toastText()) && FakeRFB.instances.length === nBefore + 1, 'a disconnected view SAYS the press, reconnects at once and queues (K2; .199 refused — userW pressed Paste into a dead view)', toastText());
+  ok(!view.pasteOpen && gateOf(/reconnecting — your text is pasted when it is back/.test(toastText())) && FakeRFB.instances.length === nBefore + 1, 'a disconnected view SAYS the press, reconnects at once and queues (K2; .199 refused — userW pressed Paste into a dead view)', toastText());
   view.dispose();
 }
 
@@ -289,7 +289,7 @@ console.log('§6 app → browser on plain http: the chip holds the copy, a click
   doc.execCommand = (c) => { execCalls.push([c, doc.body.children.map((e) => e.value)]); return true; };
   El.prototype.select = function () {}; El.prototype.setSelectionRange = function () {};
   chip.onclick();
-  ok(execCalls.length === 1 && execCalls[0][0] === 'copy' && execCalls[0][1].includes('copied-on-http') && chip.style.display === 'none' && view.copiedText === null && toasts.some((x) => (x.children || []).some((c) => /Copied to your clipboard/.test(String(c.textContent || '')))), 'the click copies through execCommand on a hidden textarea holding the text, toasts, and the chip goes away');
+  ok(execCalls.length === 1 && execCalls[0][0] === 'copy' && gateOf(execCalls[0][1].includes('copied-on-http')) && chip.style.display === 'none' && view.copiedText === null && verdictOf(toasts.some((x) => (x.children || []).some((c) => /Copied to your clipboard/.test(String(c.textContent || ''))))), 'the click copies through execCommand on a hidden textarea holding the text, toasts, and the chip goes away');
   doc.execCommand = savedExec; [El.prototype.select, El.prototype.setSelectionRange] = savedSel;
   globalThis.isSecureContext = true;
   const savedWrite = clipboard.writeText;
@@ -301,7 +301,7 @@ console.log('§6 app → browser on plain http: the chip holds the copy, a click
   toasts.length = 0;
   rfb.emit('clipboard', { text: 'api-again' });
   await sleep(0); await sleep(0);
-  ok(clipboard.written.includes('api-again') && chip.style.display === 'none' && !toasts.length, 'a secure page: the API takes the copy SILENTLY as before (no toast on the RFB rung) and a stale chip goes away');
+  ok(gateOf(clipboard.written.includes('api-again')) && chip.style.display === 'none' && !toasts.length, 'a secure page: the API takes the copy SILENTLY as before (no toast on the RFB rung) and a stale chip goes away');
   view.dispose();
 }
 
@@ -342,7 +342,7 @@ console.log('§8 (desktop A r1) a gesture copy hands the keyboard focus BACK to 
   ime.focus = (o) => { fdoc.activeElement = ime; focusOpts = o; };
   fdoc.activeElement = ime;
   const okCopy = S.copyViaSelection('1234', fdoc);
-  ok(okCopy === true && fdoc.activeElement === ime && focusOpts && focusOpts.preventScroll === true && body.children.length === 0, 'copyViaSelection writes, removes its textarea and RESTORES the focus to the element that held it ({preventScroll}) — the pane\'s IME, not <body>', { active: fdoc.activeElement === ime ? 'ime' : fdoc.activeElement?.tagName, focusOpts });
+  ok(okCopy === true && fdoc.activeElement === ime && gateOf(focusOpts) && focusOpts.preventScroll === true && body.children.length === 0, 'copyViaSelection writes, removes its textarea and RESTORES the focus to the element that held it ({preventScroll}) — the pane\'s IME, not <body>', { active: fdoc.activeElement === ime ? 'ime' : fdoc.activeElement?.tagName, focusOpts });
   // nothing held focus (body) ⇒ nothing to restore, and a refused write restores too
   fdoc.activeElement = body; fdoc.execCommand = () => false;
   const refused = S.copyViaSelection('x', fdoc);
@@ -374,26 +374,26 @@ console.log('\nthe singleton\'s server half: a shutdown stops only the Xvnc this
       const foreign = stand(); await sleep(50);
       fs.writeFileSync(path.join(dataDir, 'vnc.pid'), String(foreign.pid));
       const v = new VncManager({ dataDir, stopOnShutdown: true });
-      ok(v.stop() === false && v.shutdown() === false && alive(foreign.pid), 'nothing started here ⇒ stop()/shutdown() signal nothing, even with a pid file naming a live process (an adopted desktop is never stopped)');
+      ok(v.stop() === false && v.shutdown() === false && verdictOf(alive(foreign.pid)), 'nothing started here ⇒ stop()/shutdown() signal nothing, even with a pid file naming a live process (an adopted desktop is never stopped)');
       const pre = mutantCopies('vncstop', repo).load('src/vnc.js', read('src/vnc.js').replace(/  stop\(\) \{\n[\s\S]*?\n  \}\n\n  \/\*\* server\.js/, "  stop() {\n    try {\n      const pid = parseInt(fs.readFileSync(this._pidFile, 'utf-8'), 10);\n      if (pid > 1) process.kill(pid, 'SIGTERM');\n      fs.unlinkSync(this._pidFile);\n      return true;\n    } catch { return false; }\n  }\n\n  /** server.js"), 'pre-fix-stop');
       const pv = new pre.VncManager({ dataDir, stopOnShutdown: true });
-      ok(pv.stop() === true && await gone(foreign.pid), 'CONTROL: the pre-fix stop() (the pid file\'s pid, no identity) SIGTERMs that stranger');
+      ok(pv.stop() === true && verdictOf(await gone(foreign.pid)), 'CONTROL: the pre-fix stop() (the pid file\'s pid, no identity) SIGTERMs that stranger');
       // THIS process's own spawn, identity intact ⇒ stopped; the pid file cleared only when it names that pid
       const own = stand(); await sleep(50);
       fs.writeFileSync(path.join(dataDir, 'vnc.pid'), String(own.pid));
       const v2 = new VncManager({ dataDir, stopOnShutdown: true });
       v2._own = { pid: own.pid, start: startOf(own.pid) };
-      ok(v2.shutdown() === true && await gone(own.pid) && !fs.existsSync(path.join(dataDir, 'vnc.pid')) && v2._own === null, 'a throwaway server\'s shutdown() SIGTERMs the Xvnc it spawned (pid + start time match) and clears its pid file');
+      ok(v2.shutdown() === true && gateOf(await gone(own.pid)) && !fs.existsSync(path.join(dataDir, 'vnc.pid')) && v2._own === null, 'a throwaway server\'s shutdown() SIGTERMs the Xvnc it spawned (pid + start time match) and clears its pid file');
       // the same pid, another start time = a recycled pid ⇒ never signalled
       const rec = stand(); await sleep(50);
       const v3 = new VncManager({ dataDir, stopOnShutdown: true });
       v3._own = { pid: rec.pid, start: String(Number(startOf(rec.pid)) - 1) };
-      ok(v3.shutdown() === false && alive(rec.pid), 'a pid whose /proc start time differs from the recorded one (a recycled pid) is never signalled');
+      ok(v3.shutdown() === false && verdictOf(alive(rec.pid)), 'a pid whose /proc start time differs from the recorded one (a recycled pid) is never signalled');
       // an INSTALLED server (stopOnShutdown false) keeps its desktop for the next boot to adopt
       const inst = stand(); await sleep(50);
       const v4 = new VncManager({ dataDir });
       v4._own = { pid: inst.pid, start: startOf(inst.pid) };
-      ok(v4.shutdown() === false && alive(inst.pid) && v4._own !== null, 'an INSTALLED server\'s shutdown() stops nothing — its desktop outlives an app-only restart (adopted next boot)');
+      ok(v4.shutdown() === false && gateOf(alive(inst.pid)) && v4._own !== null, 'an INSTALLED server\'s shutdown() stops nothing — its desktop outlives an app-only restart (adopted next boot)');
       // (the server half's install pin — MOVED to the fast scripts/test-vnc-view-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     }
   } finally { for (const c of kids) { try { c.kill('SIGKILL'); } catch { } } try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { } }
@@ -414,7 +414,7 @@ console.log('§9 lane desktop-keepalive K2/K3 (userW inc-muoshmqn-dect: two Past
     toasts.length = 0;
     const o1 = OLD.createPictureShell(host(), {}); o1.emit('connected');
     await o1.pasteFromClipboard({ connected: () => true, notConnected: 'x', send: () => true, clipboard: null });
-    ok(o1.pasteOpen && toasts.length === 0, '.199 PROOF (a): on a page with no clipboard API the press opened the box and SAID NOTHING (no toast — no ring entry, the box under the bar easy to miss)', toastTexts());
+    ok(gateOf(o1.pasteOpen) && toasts.length === 0, '.199 PROOF (a): on a page with no clipboard API the press opened the box and SAID NOTHING (no toast — no ring entry, the box under the bar easy to miss)', toastTexts());
     // (b) a permission prompt nobody answers: readText never settles ⇒ nothing at all
     toasts.length = 0;
     const o2 = OLD.createPictureShell(host(), {}); o2.emit('connected');
@@ -427,15 +427,15 @@ console.log('§9 lane desktop-keepalive K2/K3 (userW inc-muoshmqn-dect: two Past
   toasts.length = 0;
   const n1 = S9.createPictureShell(host(), {}); n1.emit('connected');
   await n1.pasteFromClipboard({ connected: () => true, notConnected: 'x', send: () => true, clipboard: null });
-  ok(n1.pasteOpen && toastTexts().some((x) => /cannot read your clipboard — paste into the box under the bar/.test(x)), 'K2: the box opening is SAID (a toast the ring keeps), not only drawn', toastTexts());
+  ok(gateOf(n1.pasteOpen) && verdictOf(toastTexts().some((x) => /cannot read your clipboard — paste into the box under the bar/.test(x))), 'K2: the box opening is SAID (a toast the ring keeps), not only drawn', toastTexts());
   toasts.length = 0;
   const n2 = S9.createPictureShell(host(), {}); n2.emit('connected');
   const t0 = Date.now();
   const r2 = await n2.pasteFromClipboard({ connected: () => true, notConnected: 'x', send: () => true, clipboard: { readText: () => new Promise(() => { }) } });
-  ok(r2 === 'box' && n2.pasteOpen && Date.now() - t0 < S9.CLIPBOARD_READ_MS + 800 && toastTexts().some((x) => /still asking for clipboard permission/.test(x)), `K2: a read that never settles gives up after ${S9.CLIPBOARD_READ_MS} ms — the box opens and the press is said`, { r2, ms: Date.now() - t0, t: toastTexts() });
+  ok(r2 === 'box' && gateOf(n2.pasteOpen) && Date.now() - t0 < S9.CLIPBOARD_READ_MS + 800 && verdictOf(toastTexts().some((x) => /still asking for clipboard permission/.test(x))), `K2: a read that never settles gives up after ${S9.CLIPBOARD_READ_MS} ms — the box opens and the press is said`, { r2, ms: Date.now() - t0, t: toastTexts() });
   // ── the verdict table ──
   const PV = S9.pasteVerdict;
-  ok(PV('connected') === 'send' && PV('idle') === 'refuse' && PV('connected', { closed: true }) === 'refuse' && ['starting', 'connecting', 'disconnected', 'error'].every((st) => PV(st) === 'queue'), 'pasteVerdict: connected ⇒ send; never started / closed ⇒ refuse; starting / connecting / disconnected / error ⇒ queue');
+  ok(PV('connected') === 'send' && PV('idle') === 'refuse' && PV('connected', { closed: true }) === 'refuse' && verdictOf(['starting', 'connecting', 'disconnected', 'error'].every((st) => PV(st) === 'queue')), 'pasteVerdict: connected ⇒ send; never started / closed ⇒ refuse; starting / connecting / disconnected / error ⇒ queue');
   // ── a press while the stream is down: said, reconnect kicked, QUEUED, pasted when it is back ──
   toasts.length = 0; FakeRFB.instances.length = 0;
   const vq = V.createVncView(host(), { url: 'ws://x/api/vnc', loadRFB, autoReconnect: true });
@@ -445,14 +445,14 @@ console.log('§9 lane desktop-keepalive K2/K3 (userW inc-muoshmqn-dect: two Past
   const pq = vq.bar.children[1];
   await pq.onclick();
   const rq2 = FakeRFB.instances[FakeRFB.instances.length - 1];
-  ok(toastTexts().some((x) => /reconnecting — your text is pasted when it is back/.test(x)) && rq2 !== rq && vq.state !== 'connected', 'K2: the press is said and re-asks the stream at once (a press is intent)', toastTexts());
+  ok(gateOf(toastTexts().some((x) => /reconnecting — your text is pasted when it is back/.test(x))) && rq2 !== rq && vq.state !== 'connected', 'K2: the press is said and re-asks the stream at once (a press is intent)', toastTexts());
   ok(rq2.pasted.length === 0, '…nothing is sent into a stream that is not up');
   rq2.emit('connect');
-  ok(same(rq2.pasted, ['from-clipboard']) && toastTexts().some((x) => /Clipboard sent/.test(x)), 'K2: the QUEUED text lands the moment the stream is back', { pasted: rq2.pasted });
+  ok(gateOf(same(rq2.pasted, ['from-clipboard'])) && verdictOf(toastTexts().some((x) => /Clipboard sent/.test(x))), 'K2: the QUEUED text lands the moment the stream is back', { pasted: rq2.pasted });
   vq.dispose();
   // the 30 s bound: a stream that never comes back says the text was not pasted (a copy with a 150 ms bound)
   const shellSrc = read('src/lib/picture-shell.js');
-  ok(shellSrc.includes('export const PASTE_WAIT_MS = 30000;'), 'K2: the queue waits PASTE_WAIT_MS = 30 s');
+  ok(verdictOf(shellSrc.includes('export const PASTE_WAIT_MS = 30000;')), 'K2: the queue waits PASTE_WAIT_MS = 30 s');
   const FAST = await import(M9.write('src/lib/picture-shell.js', editAnchor(shellSrc, 'export const PASTE_WAIT_MS = 30000;', 'export const PASTE_WAIT_MS = 150;', "src/lib/picture-shell.js"), 'fastwait', { esm: true }));
   toasts.length = 0;
   const f1 = FAST.createPictureShell(host(), {}); f1.emit('disconnected');
@@ -460,17 +460,17 @@ console.log('§9 lane desktop-keepalive K2/K3 (userW inc-muoshmqn-dect: two Past
   await f1.pasteFromClipboard({ connected: () => false, notConnected: 'x', send: (x) => { sent.push(x); return true; }, clipboard: { readText: async () => 'late' } });
   ok(f1.pendingPaste === 'late', '…queued while down');
   await sleep(300);
-  ok(f1.pendingPaste === null && sent.length === 0 && toastTexts().some((x) => /Not pasted — the desktop did not come back within 30 s; press Reconnect/.test(x)), 'K2: after the bound the press is told it was NOT pasted (never a silent drop)', toastTexts());
+  ok(f1.pendingPaste === null && sent.length === 0 && verdictOf(toastTexts().some((x) => /Not pasted — the desktop did not come back within 30 s; press Reconnect/.test(x))), 'K2: after the bound the press is told it was NOT pasted (never a silent drop)', toastTexts());
   // a never-started view refuses by name
   toasts.length = 0;
   const idle = S9.createPictureShell(host(), {});
-  ok(await idle.pasteFromClipboard({ connected: () => false, notConnected: 'The desktop is not connected — reconnect first', send: () => true, clipboard }) === 'refused' && toastTexts().some((x) => /not connected/.test(x)), 'K2: a view that never started a stream refuses with "not connected"');
+  ok(await idle.pasteFromClipboard({ connected: () => false, notConnected: 'The desktop is not connected — reconnect first', send: () => true, clipboard }) === 'refused' && verdictOf(toastTexts().some((x) => /not connected/.test(x))), 'K2: a view that never started a stream refuses with "not connected"');
   // a WATCHING pane: noVNC drops the paste silently — the press says so
   toasts.length = 0; FakeRFB.instances.length = 0;
   const vw = V.createVncView(host(), { url: 'ws://x/api/vnc', loadRFB });
   await vw.connect(); const rw = FakeRFB.instances[0]; rw.emit('connect'); rw.viewOnly = true;
   await vw.bar.children[1].onclick();
-  ok(rw.pasted.length === 0 && toastTexts().some((x) => /This pane is watching — press Resume here/.test(x)) && !toastTexts().some((x) => /Clipboard sent/.test(x)), 'K2: a watching (view-only) pane says so instead of "Clipboard sent"', toastTexts());
+  ok(rw.pasted.length === 0 && gateOf(toastTexts().some((x) => /This pane is watching — press Resume here/.test(x))) && !toastTexts().some((x) => /Clipboard sent/.test(x)), 'K2: a watching (view-only) pane says so instead of "Clipboard sent"', toastTexts());
   vw.dispose();
   // ── K3: the bar counts the ladder and words the bridge's close ──
   FakeRFB.instances.length = 0;
@@ -478,11 +478,11 @@ console.log('§9 lane desktop-keepalive K2/K3 (userW inc-muoshmqn-dect: two Past
   await vl.connect(); const rl = FakeRFB.instances[0]; rl.emit('connect');
   rl.emit('disconnect', { clean: false });
   await sleep(10);
-  ok(/^Reconnecting 1\/5… — the browser stopped answering$/.test(vl.status.textContent) || /^Connection lost — the browser stopped answering$/.test(vl.status.textContent) || /^Reconnecting 1\/5…/.test(vl.status.textContent), `K3: the status names the ladder rung and the bridge's reason ("${vl.status.textContent}")`);
+  ok(verdictOf(/^Reconnecting 1\/5… — the browser stopped answering$/.test(vl.status.textContent)) || verdictOf(/^Connection lost — the browser stopped answering$/.test(vl.status.textContent)) || verdictOf(/^Reconnecting 1\/5…/.test(vl.status.textContent)), `K3: the status names the ladder rung and the bridge's reason ("${vl.status.textContent}")`);
   vl.dispose();
   ok(S9.closeWordsKey('unanswered') === 'the browser stopped answering' && S9.closeWordsKey('server-closed') === 'the desktop server closed the stream' && S9.closeWordsKey('other') === null, 'K3: closeWordsKey words the bridge\'s closed code set; an unknown code adds nothing');
   const DS9 = createRequire(import.meta.url)('../src/server/desktop-stream.js');
-  ok(DS9.CLOSE_CODES.filter((c) => c !== 'other').every((c) => S9.closeWordsKey(c)), 'K3: every code the bridge can name (but "other") has words');
+  ok(verdictOf(DS9.CLOSE_CODES.filter((c) => c !== 'other').every((c) => S9.closeWordsKey(c))), 'K3: every code the bridge can name (but "other") has words');
   // (§9 the last-close route + the new words' zh / ja — MOVED to the fast scripts/test-vnc-view-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 function spawnSyncGit(args) { const r = require('child_process').spawnSync('git', args, { cwd: repo, encoding: 'utf8', env: gitEnvFrom(process.env), maxBuffer: 16 * 1024 * 1024 }); return r.status === 0 ? r.stdout : null; }
@@ -525,7 +525,7 @@ process.on('SIGTERM', () => { try { fs.unlinkSync(lock(n)); } catch {} process.e
     const v0 = mk({ VncManager }, p0);
     const s0 = await v0.ensureRunning(); if (v0._own) started.push(v0._own.pid);
     try { require('../src/store-writer.js').storeWriter().flushSync([path.join(dataDir, 'vnc.json')]); } catch { }   // B-574d (r4935): vnc.json rides the store writer and the start waits on no landing — landed before the file is read
-    ok(s0.running && v0.display === ':7' && JSON.parse(fs.readFileSync(path.join(dataDir, 'vnc.json'), 'utf8')).display === ':7', 'the preferred display free ⇒ the Desktop takes it and records it (data/vnc.json)');
+    ok(gateOf(s0.running) && v0.display === ':7' && JSON.parse(fs.readFileSync(path.join(dataDir, 'vnc.json'), 'utf8')).display === ':7', 'the preferred display free ⇒ the Desktop takes it and records it (data/vnc.json)');
     try { process.kill(v0._own.pid, 'SIGTERM'); } catch {}
     for (let i = 0; i < 40 && locks().length; i++) await sleep(25);
     // an X server already holds the preferred display (a desktop app's -displayfd Xvfb took it first)
@@ -537,14 +537,14 @@ process.on('SIGTERM', () => { try { fs.unlinkSync(lock(n)); } catch {} process.e
     if (v._own) started.push(v._own.pid);
     try { require('../src/store-writer.js').storeWriter().flushSync([path.join(dataDir, 'vnc.json')]); } catch { }   // B-574d (r4935): vnc.json rides the store writer and the start waits on no landing — landed before the file is read
     const rec = (() => { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'vnc.json'), 'utf8')); } catch { return null; } })();
-    ok(!!st && st.running && v.display !== ':7' && /^:\d+$/.test(v.display) && v.singletonFacts().display === v.display, `the preferred :7 held ⇒ the Desktop starts on the display the X server picked (${v.display}), and the desktop-singleton rung reads it`, { st, err, display: v.display });
+    ok(!!st && gateOf(st.running) && v.display !== ':7' && gateOf(/^:\d+$/.test(v.display)) && v.singletonFacts().display === v.display, `the preferred :7 held ⇒ the Desktop starts on the display the X server picked (${v.display}), and the desktop-singleton rung reads it`, { st, err, display: v.display });
     ok(!!rec && rec.display === v.display && rec.port === port && rec.pid === (v._own && v._own.pid), 'that display is RECORDED in data/vnc.json (with its port and pid)', rec);
     // a restart (a new manager on the same data/): the recorded display is adopted, nothing new is started
     const before = locks();
     const v2 = mk({ VncManager }, port);
     const adoptedBefore = v2.singletonFacts().display;
     const st2 = await v2.ensureRunning();
-    ok(adoptedBefore === v.display && st2.running && v2.display === v.display && v2._own === null && JSON.stringify(locks()) === JSON.stringify(before), 'a restart ADOPTS the recorded display — the same one, no second X server started', { adoptedBefore, display: v2.display, locks: locks(), before });
+    ok(adoptedBefore === v.display && gateOf(st2.running) && v2.display === v.display && v2._own === null && JSON.stringify(locks()) === JSON.stringify(before), 'a restart ADOPTS the recorded display — the same one, no second X server started', { adoptedBefore, display: v2.display, locks: locks(), before });
     ok(new VncManager({ dataDir, display: ':7', port: port + 1, xvncBin: fake }).display === ':7', 'a record for ANOTHER port is not this Desktop\'s — the preferred display stands');
     // CONTROL: the same file without the fallback (the pre-fix fixed display) never starts while :7 is held
     const pre = mutantCopies('vncfd', repo).load('src/vnc.js', read('src/vnc.js').replace(/    if \(!r\.display\) \{\n      console\.warn[\s\S]*?\n    \}\n/, ''), 'no-displayfd-fallback');
@@ -553,7 +553,7 @@ process.on('SIGTERM', () => { try { fs.unlinkSync(lock(n)); } catch {} process.e
     let perr = null;
     try { await pv.ensureRunning(); } catch (e) { perr = e.message; }
     if (pv._own) started.push(pv._own.pid);
-    ok(!!perr && /VNC server failed to start/.test(perr) && !(await portListening(pport)), 'CONTROL: without the -displayfd fallback the Desktop cannot start while its display is held (the B-956d report)', perr);
+    ok(!!perr && gateOf(/VNC server failed to start/.test(perr)) && !(await portListening(pport)), 'CONTROL: without the -displayfd fallback the Desktop cannot start while its display is held (the B-956d report)', perr);
   } finally {
     for (const pid of started) { try { process.kill(pid, 'SIGTERM'); } catch { } }
     await sleep(100);
@@ -571,7 +571,7 @@ console.log('§D014 a machine\'s whole desktop: the sign-in is asked in the page
   const view = V.createVncView(new El('div'), { url: 'wss://vibe.example/api/desktop/machine-desktop.mac-a/stream', autoReconnect: true, resizeSession: false, loadRFB, credentials: async (types) => { asked.push(types); return answer; } });
   await view.connect();
   const rfb = FakeRFB.instances[0];
-  ok(rfb && rfb.resizeSession === false && rfb.scaleViewport === true, 'a whole desktop is SCALED into the window and the server is never asked to resize (resizeSession off)');
+  ok(gateOf(rfb) && rfb.resizeSession === false && rfb.scaleViewport === true, 'a whole desktop is SCALED into the window and the server is never asked to resize (resizeSession off)');
   view.setMode('watch'); view.setMode('active');
   ok(rfb.resizeSession === false, 'becoming active again keeps resizeSession off (setMode honours the option)');
   rfb.emit('credentialsrequired', { types: ['username', 'password'] });
@@ -580,7 +580,7 @@ console.log('§D014 a machine\'s whole desktop: the sign-in is asked in the page
   rfb.emit('securityfailure', { reason: 'Authentication failed' });
   rfb.emit('disconnect', { clean: false });
   await nap(1300);
-  ok(FakeRFB.instances.length === 1 && view.wanted === false && /refused the sign-in: Authentication failed/.test(view.status.textContent), 'a refused sign-in is NAMED and the reconnect ladder does not run (no password loop)', view.status.textContent);
+  ok(FakeRFB.instances.length === 1 && view.wanted === false && verdictOf(/refused the sign-in: Authentication failed/.test(view.status.textContent)), 'a refused sign-in is NAMED and the reconnect ladder does not run (no password loop)', view.status.textContent);
   answer = null;
   await view.connect();
   const rfb2 = FakeRFB.instances[1];
@@ -588,7 +588,7 @@ console.log('§D014 a machine\'s whole desktop: the sign-in is asked in the page
   await nap(5);
   rfb2.emit('disconnect', { clean: true });
   await nap(1300);
-  ok(rfb2 && rfb2.disconnected === 1 && !rfb2.sent && FakeRFB.instances.length === 2 && view.wanted === false && /Sign-in cancelled/.test(view.status.textContent), 'a cancelled sign-in disconnects, sends nothing, says so, and does not retry', { st: view.status.textContent, n: FakeRFB.instances.length });
+  ok(gateOf(rfb2) && rfb2.disconnected === 1 && !rfb2.sent && FakeRFB.instances.length === 2 && view.wanted === false && verdictOf(/Sign-in cancelled/.test(view.status.textContent)), 'a cancelled sign-in disconnects, sends nothing, says so, and does not retry', { st: view.status.textContent, n: FakeRFB.instances.length });
   view.dispose();
   const plain = V.createVncView(new El('div'), { url: 'wss://vibe.example/api/vnc', loadRFB });
   await plain.connect();
@@ -634,7 +634,7 @@ console.log('§ARD a sign-in handed to noVNC SAYS so: "Signing in…" at once; n
     reject(new Error('unrelated: a chat fetch failed'));
     ok(b.status.textContent === 'Signing in…' && live() === 1, 'CONTROL: a rejection from code that is not noVNC\'s leaves the sign-in waiting', b.status.textContent);
     reject(novncError("Cannot read properties of undefined (reading 'importKey')"));
-    ok(NAMED.test(b.status.textContent) && /reading 'importKey'/.test(b.status.textContent) && b.status.style.color && rb.disconnected === 1 && b.wanted === false && live() === 0 && armed() === 0, 'noVNC\'s auth rejecting ⇒ "The sign-in could not be completed: <its words>" in the error colour, the RFB disconnected, the ladder off, listener + bound gone', { st: b.status.textContent, d: rb.disconnected, wanted: b.wanted, live: live(), armed: armed() });
+    ok(gateOf(NAMED.test(b.status.textContent)) && gateOf(/reading 'importKey'/.test(b.status.textContent)) && gateOf(b.status.style.color) && rb.disconnected === 1 && b.wanted === false && live() === 0 && armed() === 0, 'noVNC\'s auth rejecting ⇒ "The sign-in could not be completed: <its words>" in the error colour, the RFB disconnected, the ladder off, listener + bound gone', { st: b.status.textContent, d: rb.disconnected, wanted: b.wanted, live: live(), armed: armed() });
     const nB = FakeRFB.instances.length, wordsB = b.status.textContent;
     rb.emit('disconnect', { clean: false });
     await nap(1300);
@@ -659,7 +659,7 @@ console.log('§ARD a sign-in handed to noVNC SAYS so: "Signing in…" at once; n
     const re = await signIn(e);
     re.emit('securityfailure', { reason: 'Authentication failed' });
     fireBound(); reject(novncError('late'));
-    ok(/refused the sign-in: Authentication failed/.test(e.status.textContent) && live() === 0 && armed() === 0, 'a refused sign-in keeps "The machine refused the sign-in: …" — the bound and the listener ended with it', e.status.textContent);
+    ok(gateOf(/refused the sign-in: Authentication failed/.test(e.status.textContent)) && live() === 0 && armed() === 0, 'a refused sign-in keeps "The machine refused the sign-in: …" — the bound and the listener ended with it', e.status.textContent);
     e.dispose();
     // F — a view disposed mid-sign-in leaves nothing behind
     const f = mk();
@@ -669,7 +669,7 @@ console.log('§ARD a sign-in handed to noVNC SAYS so: "Signing in…" at once; n
     // G — the AES fallback: only where crypto.subtle is absent, before noVNC exists
     const realCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
     const g0 = mk(); await g0.connect(); g0.dispose();
-    ok(globalThis.crypto?.subtle && !Object.prototype.hasOwnProperty.call(globalThis.crypto, 'subtle'), 'a secure context (node: crypto.subtle present) never gets the fallback');
+    ok(gateOf(globalThis.crypto?.subtle) && !Object.prototype.hasOwnProperty.call(globalThis.crypto, 'subtle'), 'a secure context (node: crypto.subtle present) never gets the fallback');
     const insecure = { getRandomValues: (x) => x };
     let seenAtNew = null;
     try {
@@ -680,7 +680,7 @@ console.log('§ARD a sign-in handed to noVNC SAYS so: "Signing in…" at once; n
       ok(seenAtNew === null && insecure.subtle === undefined, 'CONTROL: a view that asks no sign-in (an app window) leaves an http page\'s crypto alone');
       const g = mk({ loadRFB: async () => SpyRFB });
       await g.connect(); g.dispose();
-      ok(seenAtNew && typeof seenAtNew.importKey === 'function' && typeof seenAtNew.encrypt === 'function' && Object.getOwnPropertyDescriptor(insecure, 'subtle'), 'an http page (crypto without subtle) gets the PURE AES as an own crypto.subtle BEFORE new RFB — noVNC\'s ARD path finds it');
+      ok(gateOf(seenAtNew) && typeof seenAtNew.importKey === 'function' && typeof seenAtNew.encrypt === 'function' && verdictOf(Object.getOwnPropertyDescriptor(insecure, 'subtle')), 'an http page (crypto without subtle) gets the PURE AES as an own crypto.subtle BEFORE new RFB — noVNC\'s ARD path finds it');
     } finally { Object.defineProperty(globalThis, 'crypto', realCrypto); }
     // (§ARD the one subtle fallback — its source pins — MOVED to the fast scripts/test-vnc-view-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   } finally {
@@ -726,10 +726,10 @@ console.log('\nspawn-env-census: the Desktop\'s Xvnc and its session never see t
   };
   try {
     Object.assign(process.env, PLANT); process.env.PATH = bin + path.delimiter + before.PATH;
-    ok(Object.entries(PLANT).every(([k, v]) => process.env[k] === v), 'the planted names are in the hub\'s own env (the leg is not vacuous)', Object.keys(PLANT));
+    ok(verdictOf(Object.entries(PLANT).every(([k, v]) => process.env[k] === v)), 'the planted names are in the hub\'s own env (the leg is not vacuous)', Object.keys(PLANT));
     const now = await runOnce({ VncManager }, 'now');
-    ok(!!now.xvnc && leaked(now.xvnc).length === 0 && now.xvnc.keys.every((k) => SERVICE_ENV_KEEP.includes(k) || /^LC_[A-Z]+$/.test(k)), 'the Desktop\'s Xvnc holds a service\'s env (PATH HOME LANG TMPDIR XDG_RUNTIME_DIR TERM LC_*) — none of the planted names, none of their values', now.err || (now.xvnc && now.xvnc.keys));
-    ok(!!now.session && leaked(now.session).length === 0 && now.session.keys.every((k) => SERVICE_ENV_KEEP.includes(k) || ['USER', 'LOGNAME', 'SHELL', 'DISPLAY'].includes(k) || /^LC_[A-Z]+$/.test(k)) && now.session.display === now.display, 'its session (dbus-launch xfce4-session) holds that + USER LOGNAME SHELL and DISPLAY = the Desktop\'s display — none of the planted names or values', now.err || (now.session && { keys: now.session.keys, display: now.session.display }));
+    ok(!!now.xvnc && leaked(now.xvnc).length === 0 && verdictOf(now.xvnc.keys.every((k) => SERVICE_ENV_KEEP.includes(k) || /^LC_[A-Z]+$/.test(k))), 'the Desktop\'s Xvnc holds a service\'s env (PATH HOME LANG TMPDIR XDG_RUNTIME_DIR TERM LC_*) — none of the planted names, none of their values', now.err || (now.xvnc && now.xvnc.keys));
+    ok(!!now.session && leaked(now.session).length === 0 && gateOf(now.session.keys.every((k) => SERVICE_ENV_KEEP.includes(k) || ['USER', 'LOGNAME', 'SHELL', 'DISPLAY'].includes(k) || /^LC_[A-Z]+$/.test(k))) && now.session.display === now.display, 'its session (dbus-launch xfce4-session) holds that + USER LOGNAME SHELL and DISPLAY = the Desktop\'s display — none of the planted names or values', now.err || (now.session && { keys: now.session.keys, display: now.session.display }));
     const pre = mutantCopies('vncenv', repo).load('src/vnc.js', read('src/vnc.js')
       .replace(", env: serviceEnv(process.env) }); }", ' }); }')
       .replace("const env = serviceEnv(process.env, { keep: ['USER', 'LOGNAME', 'SHELL'], add: { DISPLAY: this.display } });", 'const env = { ...process.env, DISPLAY: this.display }; delete env.XAUTHORITY;'), 'pre-service-env');
@@ -741,4 +741,4 @@ console.log('\nspawn-env-census: the Desktop\'s Xvnc and its session never see t
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -9,7 +9,7 @@ import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 // the real module FIRST: prosemirror-view sniffs a real `document` at import, the mini-DOM below is not one
 const UI_FILE = path.join(ROOT, 'src/lib/doc-window-ui.js');
 const ui = fs.readFileSync(UI_FILE, 'utf8');
@@ -89,26 +89,26 @@ function walk(factory, create, house) {
 }
 
 console.log('the keeper over the real house popover (createPopover + its closer)');
-for (const [m, c] of Object.entries(walk(commentOffer, U.createPopover, true))) ok(c, m);
+for (const [m, c] of Object.entries(walk(commentOffer, U.createPopover, true))) ok(verdictOf(c), m);
 console.log('the keeper alone (no same-class sweep, no closer)');
-for (const [m, c] of Object.entries(walk(commentOffer, bare, false))) ok(c, m);
+for (const [m, c] of Object.entries(walk(commentOffer, bare, false))) ok(verdictOf(c), m);
 
 console.log('the wiring (src/lib/doc-window-ui.js, src/lib/app.js)');
 const app = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');
 const body = ui.slice(ui.indexOf('export function mountDocWindow('));
-ok(body.includes('offer.sync(selNow(view)); clearTimeout(selTimer); selTimer = setTimeout(() => offer.sync(selNow(view), true), 250);'), 'the selection plugin syncs on EVERY update and offers only once it settles (250 ms)');
-ok(body.includes("s.empty || !view.hasFocus() || S.mode !== 'rich' ? null"), 'no selection = empty, the editor unfocused, or Raw');
-ok(body.includes('blur: () => { clearTimeout(selTimer); offer.dismiss(); return false; }'), "the editor's blur dismisses it (and cancels a pending offer)");
-ok(body.includes("pane.addEventListener('scroll', () => offer.dismiss(), { signal, passive: true })"), "the pane's scroll dismisses it");
-ok(/signal\.addEventListener\('abort', \(\) => \{[^\n]*offer\.dismiss\(\)/.test(body), "the window's close dismisses it");
-ok(body.includes("const pop = createPopover(pane, 'doc-cpop'") && body.includes('offer.dismiss(); noteBox(quote, c, line, raw);'), 'the house popover; its button dismisses it before the note box');
+ok(verdictOf(body.includes('offer.sync(selNow(view)); clearTimeout(selTimer); selTimer = setTimeout(() => offer.sync(selNow(view), true), 250);')), 'the selection plugin syncs on EVERY update and offers only once it settles (250 ms)');
+ok(verdictOf(body.includes("s.empty || !view.hasFocus() || S.mode !== 'rich' ? null")), 'no selection = empty, the editor unfocused, or Raw');
+ok(verdictOf(body.includes('blur: () => { clearTimeout(selTimer); offer.dismiss(); return false; }')), "the editor's blur dismisses it (and cancels a pending offer)");
+ok(verdictOf(body.includes("pane.addEventListener('scroll', () => offer.dismiss(), { signal, passive: true })")), "the pane's scroll dismisses it");
+ok(verdictOf(/signal\.addEventListener\('abort', \(\) => \{[^\n]*offer\.dismiss\(\)/.test(body)), "the window's close dismisses it");
+ok(gateOf(body.includes("const pop = createPopover(pane, 'doc-cpop'")) && verdictOf(body.includes('offer.dismiss(); noteBox(quote, c, line, raw);')), 'the house popover; its button dismisses it before the note box');
 ok(!/\bpop\.remove\(\)/.test(body.slice(body.indexOf('function offerComment'), body.indexOf('function noteBox'))) && !body.includes('let pop = null'), 'no second owner of the popover (the keeper is the only one)');
-ok(app.includes("const floats = document.querySelectorAll('[data-popover]');") && app.includes('floats.forEach(el => el.remove())'), "app.js's Esc protocol removes every [data-popover] (the walk's escape())");
+ok(gateOf(app.includes("const floats = document.querySelectorAll('[data-popover]');")) && verdictOf(app.includes('floats.forEach(el => el.remove())')), "app.js's Esc protocol removes every [data-popover] (the walk's escape())");
 
 console.log('patched copies of the keeper go RED');
 const SRC = ui.slice(ui.indexOf('export function commentOffer('), ui.indexOf('\n}\n', ui.indexOf('export function commentOffer(')) + 3);
 const mutant = async (label, from, to, want) => {
-  ok(SRC.includes(from), `control "${label}": the needle is in the keeper`);
+  ok(verdictOf(SRC.includes(from)), `control "${label}": the needle is in the keeper`);
   const M = await import('data:text/javascript,' + encodeURIComponent(SRC.replace(from, to)));
   const a = walk(M.commentOffer, bare, false), b = walk(M.commentOffer, U.createPopover, true); // red in EITHER walk
   ok(a[want] === false || b[want] === false, `control "${label}": RED — "${want}" fails`);
@@ -119,4 +119,4 @@ await mutant('two popovers allowed', DROP, "if (k !== key) { if (!sel) dismiss()
 await mutant('the pane still excluded', 'if (pop?._closeExclude) pop._closeExclude.length = 0;', '', 'an outside press IN THE TEXT ⇒ none');
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

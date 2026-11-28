@@ -63,7 +63,7 @@ const RS = await import(new URL(`file://${path.join(REPO, 'src/lib/channel-rows.
 const V = await import(new URL(`file://${path.join(REPO, 'src/lib/channel-groups-view.js')}`).href);
 
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -114,7 +114,7 @@ async function letResum(what) { if (resumHold) { const h = resumHold; resumHold 
 globalThis.setInterval = realSetInterval;
 const ix = eng.store.index;
 const A = 'fake-poll';
-ok(eng.adapterRecords().adapters.some((r) => r.id === A), `fixture: the seeded ${A} account`);
+ok(verdictOf(eng.adapterRecords().adapters.some((r) => r.id === A)), `fixture: the seeded ${A} account`);
 
 // a target conversation: 40 messages in its log, all unread, polled now, its capabilities fresh (no vendor call)
 async function target(cid) {
@@ -162,7 +162,7 @@ async function bornSwept(from, to) {
   }
   const st = ix.landedStats();
   const road = st.sweeps > s0 ? `by the whole write's sliced sweep, sweeps ${s0} → ${st.sweeps}` : `with no sweep (sweeps ${s0} → ${st.sweeps}): the journal's sync dropped them`;
-  ok(ix.landed(last) && !st.sweeping && st.owed === 0, `fixture: the fill's ${to - from} births landed and no sweep of theirs runs before a measured open (${road}; ${st.owed} owed, ${st.entries} kept, ${polls} polls)`);
+  ok(gateOf(ix.landed(last)) && !st.sweeping && st.owed === 0, `fixture: the fill's ${to - from} births landed and no sweep of theirs runs before a measured open (${road}; ${st.owed} owed, ${st.entries} kept, ${polls} polls)`);
 }
 async function open(cid) {
   const w = await eng.watch(A, cid);
@@ -271,7 +271,7 @@ console.log(`① one window open over ${N} rows, then ${2 * N} (work, never the 
 for (const c of ['t-warm', 't-h1', 't-cwarm', 't-c1', 't-rwarm', 't-r1', 't-warm2', 't-h2', 't-cwarm2', 't-c2', 't-rwarm2', 't-r2', 't-rred']) await target(c);
 await fill(0, N);
 const rows1 = Object.keys(ix.live()).length;
-ok((await measureOpen('t-warm')).good, `fixture: a window opens on a ${rows1}-row index (watch ok, 40 messages, marked read) — measured once and discarded (the meter's first take of a function reads a constant more)`);
+ok(verdictOf((await measureOpen('t-warm')).good), `fixture: a window opens on a ${rows1}-row index (watch ok, 40 messages, marked read) — measured once and discarded (the meter's first take of a function reads a constant more)`);
 await resumLanded('the first index\'s warm open');   // B-dfa4 r5450 (ii): a re-sum the fill's touches started is landed before a measured open
 const h1 = await measureOpen('t-h1');
 baseKnown(true); await measureOpen('t-cwarm'); const c1 = await measureOpen('t-c1'); baseKnown(false);
@@ -283,7 +283,7 @@ console.log('② the index write after one row changed');
 const f1 = await oneRowWrite(false), ff1 = await oneRowWrite(true);
 await fill(N, 2 * N);
 const rows2 = Object.keys(ix.live()).length;
-ok((await measureOpen('t-warm2')).good, `fixture: a window opens on the ${rows2}-row index`);
+ok(verdictOf((await measureOpen('t-warm2')).good), `fixture: a window opens on the ${rows2}-row index`);
 await resumLanded('the second index\'s warm open');   // the second fill voided the first sums: its re-sum runs in slices, landed before h2
 const h2 = await measureOpen('t-h2');
 baseKnown(true); await measureOpen('t-cwarm2'); const c2 = await measureOpen('t-c2'); baseKnown(false);
@@ -293,12 +293,12 @@ const f2 = await oneRowWrite(false), ff2 = await oneRowWrite(true);
 const nb2 = notifyWork('t-h1'), nk2 = notifyWork(`${A}/t-h1`);
 const fr2 = await firstReadAt(rows2);
 const row = (m) => `${m.total} (blocks ${m.blocks} + natives ${m.native})`;
-ok(h1.good && h2.good && bounded(h1.total, h2.total), `① a window open: ${row(h1)} at ${rows1} rows, ${row(h2)} at ${rows2}: ×${(h2.total / h1.total).toFixed(3)} ≤ ${BOUNDED_RATIO} — the index's size is not in it`);
+ok(gateOf(h1.good) && gateOf(h2.good) && verdictOf(bounded(h1.total, h2.total)), `① a window open: ${row(h1)} at ${rows1} rows, ${row(h2)} at ${rows2}: ×${(h2.total / h1.total).toFixed(3)} ≤ ${BOUNDED_RATIO} — the index's size is not in it`);
 ok(h1.walks === 0 && h2.walks === 0, `① its two broadcasts read the account census inside its 5 s window: ${h1.walks + h2.walks} walks of the rows (the paced walk itself: test-channels-census-pace)`);
-ok(c1.good && c2.good && !bounded(c1.total, c2.total) && c1.total > 20 * h1.total, `① CONTROL: the base's known() (the whole index copied per lookup) reads ${row(c1)} → ${row(c2)}: ×${(c2.total / c1.total).toFixed(2)}, ${Math.round(c1.total / h1.total)}× the head — red`);
-ok(r1.good && r2.good && r1.readerRows === 0 && r2.readerRows === 0, `① AN UPDATE THAT REACHED THE WHOLE MAP just before (B-dfa4 r5450 hold (ii)): the open's OWN TURN read ${r1.readerRows} / ${r2.readerRows} row(s) of the row facts at ${rows1} / ${rows2} rows — its kept row facts answered AS THEY STOOD, their re-sum in slices of its own (its walk read ${r1.walked} / ${r2.walked} row(s) inside the window: its first slice, bounded by its own clock, held past the open by the walk's seam). SAID, NOT JUDGED (主开发 r5545: that slice's clock is in it): the open's work ${row(r1)} → ${row(r2)}, ×${(r2.total / r1.total).toFixed(3)}`, { r1: { readerRows: r1.readerRows, walked: r1.walked, rowsRead: r1.rowsRead, started: r1.started }, r2: { readerRows: r2.readerRows, walked: r2.walked, rowsRead: r2.rowsRead, started: r2.started } });
-ok(bounded(nk1, nk2) && !bounded(nb1, nb2), `① CONTROL: a broadcast naming the conversation by its key reads ${nk1} → ${nk2} (×${(nk2 / nk1).toFixed(3)}); by a bare id (the base's mark-read) ${nb1} → ${nb2} (×${(nb2 / nb1).toFixed(2)}) — red`);
-ok(bounded(f1.total, f2.total), `② the write after one row changed: ${row(f1)} at ${rows1} rows, ${row(f2)} at ${rows2}: ×${(f2.total / f1.total).toFixed(3)} (a ${S.INDEX_CHUNK}-row chunk re-serialized, the rest copied from cache)`);
+ok(gateOf(c1.good) && gateOf(c2.good) && !bounded(c1.total, c2.total) && c1.total > 20 * h1.total, `① CONTROL: the base's known() (the whole index copied per lookup) reads ${row(c1)} → ${row(c2)}: ×${(c2.total / c1.total).toFixed(2)}, ${Math.round(c1.total / h1.total)}× the head — red`);
+ok(gateOf(r1.good) && gateOf(r2.good) && r1.readerRows === 0 && r2.readerRows === 0, `① AN UPDATE THAT REACHED THE WHOLE MAP just before (B-dfa4 r5450 hold (ii)): the open's OWN TURN read ${r1.readerRows} / ${r2.readerRows} row(s) of the row facts at ${rows1} / ${rows2} rows — its kept row facts answered AS THEY STOOD, their re-sum in slices of its own (its walk read ${r1.walked} / ${r2.walked} row(s) inside the window: its first slice, bounded by its own clock, held past the open by the walk's seam). SAID, NOT JUDGED (主开发 r5545: that slice's clock is in it): the open's work ${row(r1)} → ${row(r2)}, ×${(r2.total / r1.total).toFixed(3)}`, { r1: { readerRows: r1.readerRows, walked: r1.walked, rowsRead: r1.rowsRead, started: r1.started }, r2: { readerRows: r2.readerRows, walked: r2.walked, rowsRead: r2.rowsRead, started: r2.started } });
+ok(gateOf(bounded(nk1, nk2)) && !bounded(nb1, nb2), `① CONTROL: a broadcast naming the conversation by its key reads ${nk1} → ${nk2} (×${(nk2 / nk1).toFixed(3)}); by a bare id (the base's mark-read) ${nb1} → ${nb2} (×${(nb2 / nb1).toFixed(2)}) — red`);
+ok(verdictOf(bounded(f1.total, f2.total)), `② the write after one row changed: ${row(f1)} at ${rows1} rows, ${row(f2)} at ${rows2}: ×${(f2.total / f1.total).toFixed(3)} (a ${S.INDEX_CHUNK}-row chunk re-serialized, the rest copied from cache)`);
 ok(!bounded(ff1.total, ff2.total) && ff1.total > 20 * f1.total, `② CONTROL: the whole-file write (the base's every 2 s) reads ${row(ff1)} → ${row(ff2)}: ×${(ff2.total / ff1.total).toFixed(2)}, ${Math.round(ff1.total / f1.total)}× the incremental one — red`);
 {
   const disk = fs.readFileSync(eng.store.indexFile, 'utf8');
@@ -322,7 +322,7 @@ ok(!bounded(ff1.total, ff2.total) && ff1.total > 20 * f1.total, `② CONTROL: th
   const pushRows = st1.rowsRead - stA.rowsRead - walkedRed;   // the told push's own turn
   const rRed = await measureOpenRows('t-rred');
   ix.flush();
-  ok(rRed.good && !resumThrow && st1.started > st0.started && st1.told - st0.told === 1 && pushRows >= rowsNowRed && rRed.readerRows === 1,
+  ok(gateOf(rRed.good) && !resumThrow && st1.started > st0.started && st1.told - st0.told === 1 && pushRows >= rowsNowRed && rRed.readerRows === 1,
     `① RED CONTROL (THE TOLD PUSH's TURN, by the holds follow's item four): the re-sum ended by a throw placed in its seam; its catch told the clients once (${st1.told - st0.told}) and that push's own turn took the release's road — it read ${pushRows} row(s) of the row facts at ${rowsNowRed} rows: the count above would go red; the open measured after it read its own ${rRed.readerRows} row`,
     { pushRows, walked: walkedRed, told: st1.told - st0.told, starterRows: stA.rowsRead - st0.rowsRead, openRows: rRed.readerRows, thrown: !resumThrow });
 }
@@ -336,7 +336,7 @@ const st = S.createChannelStore({ dir: sdir, log: wlog });
 const same = (s) => { s.index.flush(); return fs.readFileSync(s.indexFile, 'utf8') === JSON.stringify(s.index.snapshot(), RUNTIME_KEYS, 1); };
 const mk = (s, a, c, i) => Object.assign(s.index.entry(a, c), { title: `t${i}`, unread: i % 5, lastAt: T - i, participants: 'Ada, Brook', lane: { via: 'poll', lastPollAt: T - i } });
 await st.index.update(() => { for (let i = 0; i < 2000; i++) mk(st, 'gmail', `thr_${i}`, i); });
-ok(same(st) && st.index.flushStats().full === 1, `the first write is a whole one (${st.index.flushStats().chunks} chunks of ${S.INDEX_CHUNK})`);
+ok(gateOf(same(st)) && st.index.flushStats().full === 1, `the first write is a whole one (${st.index.flushStats().chunks} chunks of ${S.INDEX_CHUNK})`);
 const steps = [
   ['one row through entry() (a runtime _key, CJK, U+2028, a quote and a newline in its title)', () => st.index.update(() => { const e = st.index.entry('gmail', 'thr_77', { create: false }); e.unread = 0; e._runtime = { x: 1 }; e.title = 'ünï 中文   "q"\n end'; })],
   ['two rows born (they join the last chunk, in the map\'s own order)', () => st.index.update(() => { mk(st, 'lark', 'oc_new1', 1); mk(st, 'lark', 'oc_new2', 2); })],
@@ -344,7 +344,7 @@ const steps = [
   ['a whole-map delete (a whole write)', () => st.index.update((x) => { delete x.conversations['gmail/thr_5']; })],
   ['mixed: a row changed + a row born after the delete', () => st.index.update(() => { st.index.entry('gmail', 'thr_1999', { create: false }).lastAt = 1; mk(st, 'lark', 'oc_new3', 3); })],
 ];
-for (const [what, run] of steps) { const before = st.index.flushStats(); await run(); const okBytes = same(st); const after = st.index.flushStats(); ok(okBytes, `${what}: the same bytes (${after.full > before.full ? 'whole' : 'incremental'} write)`); }
+for (const [what, run] of steps) { const before = st.index.flushStats(); await run(); const okBytes = same(st); const after = st.index.flushStats(); ok(verdictOf(okBytes), `${what}: the same bytes (${after.full > before.full ? 'whole' : 'incremental'} write)`); }
 ok(st.index.flushStats().incremental >= 4, `four of the five writes were incremental (${JSON.stringify(st.index.flushStats())})`);
 
 console.log('④ the sweep: a row changed outside update()');
@@ -353,13 +353,13 @@ const chunks = st.index.flushStats().chunks;
 let found = 0, sweeps = 0;
 while (!found && sweeps < Math.ceil(chunks / S.SWEEP_CHUNKS) + 1) { found += st.index.sweep(); sweeps++; }
 ok(found === 1 && sweeps <= Math.ceil(chunks / S.SWEEP_CHUNKS), `found within ${sweeps} tick(s) (bound ${Math.ceil(chunks / S.SWEEP_CHUNKS)} = ${chunks} chunks / ${S.SWEEP_CHUNKS})`);
-ok(warns.some((w) => /changed outside update\(\) \(first: gmail\/thr_300;/.test(w)), 'said, with the row\'s key', warns.join(' | '));
-ok(st.index.isDirty() && same(st) && JSON.parse(fs.readFileSync(st.indexFile, 'utf8')).conversations['gmail/thr_300'].title === 'changed past the door', 'and written (the sweep marked the index dirty)');
+ok(verdictOf(warns.some((w) => /changed outside update\(\) \(first: gmail\/thr_300;/.test(w))), 'said, with the row\'s key', warns.join(' | '));
+ok(gateOf(st.index.isDirty()) && gateOf(same(st)) && JSON.parse(fs.readFileSync(st.indexFile, 'utf8')).conversations['gmail/thr_300'].title === 'changed past the door', 'and written (the sweep marked the index dirty)');
 st.close();
 ok(fs.readFileSync(st.indexFile, 'utf8') === JSON.stringify(st.index.snapshot(), RUNTIME_KEYS, 1), 'close() writes the whole serialization');
 {
   const re = S.createChannelStore({ dir: sdir, log: quiet });
-  ok(Object.keys(re.index.live()).length === 2002 && re.index.live()['lark/oc_new3'] && !re.index.live()['gmail/thr_5'], 'a restart reads every row back (2002: 2000 − 1 deleted + 3 born)');
+  ok(Object.keys(re.index.live()).length === 2002 && gateOf(re.index.live()['lark/oc_new3']) && !re.index.live()['gmail/thr_5'], 'a restart reads every row back (2002: 2000 − 1 deleted + 3 born)');
   re.close();
 }
 
@@ -378,7 +378,7 @@ console.log('⑤ the census\'s own control: VIBESPACE_CHANNELS_INDEX_VERIFY');
   await vs.index.update(() => { vs.index.entry('gmail', 'v_500', { create: false }).unread = 1; });   // …then a tracked write
   vs.index.flush();
   const line = fs.existsSync(vfile) ? fs.readFileSync(vfile, 'utf8') : '';
-  ok(/DRIFTED/.test(line) && vw.some((w) => /DRIFTED/.test(w)), 'the drifted incremental write is said and lands in the census file', line.slice(0, 300));
+  ok(gateOf(/DRIFTED/.test(line)) && verdictOf(vw.some((w) => /DRIFTED/.test(w))), 'the drifted incremental write is said and lands in the census file', line.slice(0, 300));
   ok(JSON.parse(fs.readFileSync(vs.indexFile, 'utf8')).conversations['gmail/v_10'].unread === 99, '…and the whole serialization is written instead');
   vs.close();
 }
@@ -447,9 +447,9 @@ console.log('⑧ the engine\'s own writers are incremental');
   // itself is written by the step's own flush at most — the law this leg holds is «never a whole one», and the changes on disk
   // (nothing owed after the step's flush). A refresh that brings nothing new changes no row's print (QUIET IS FREE): it is
   // judged by «nothing owed», its counts said; every other step changed rows: an index write or a journaled row
-  for (const r of rows) { const quiet = r.what === 'a refresh'; ok(r.full === 0 && !r.owed && (quiet || r.incremental + r.journaled >= 1), `${r.what}: never a whole write; ${quiet ? 'a refresh that brought nothing new' : 'its changes on disk'} — ${r.incremental} incremental index write(s), ${r.journaled} row(s) journaled (keepDisc's ordering write answers on its journal line), ${r.owed ? 'the index STILL OWED' : 'nothing owed'} after its flush`, JSON.stringify(r)); }
+  for (const r of rows) { const quiet = r.what === 'a refresh'; ok(r.full === 0 && !r.owed && (verdictOf(quiet) || r.incremental + r.journaled >= 1), `${r.what}: never a whole write; ${quiet ? 'a refresh that brought nothing new' : 'its changes on disk'} — ${r.incremental} incremental index write(s), ${r.journaled} row(s) journaled (keepDisc's ordering write answers on its journal line), ${r.owed ? 'the index STILL OWED' : 'nothing owed'} after its flush`, JSON.stringify(r)); }
   const ctl = await step('the pre-fix unlisting scan', () => x8.update((x) => { for (const en of Object.values(x.conversations)) if (en && en.adapterId === 'nobody') en.unlistedAt = 1; }));
-  ok(ctl.full === 1 && /ix\.conversations/.test(ctl.why), `CONTROL: an update reaching ix.conversations (the pre-fix unlisting scan) makes the write a whole one (${ctl.why})`);
+  ok(ctl.full === 1 && verdictOf(/ix\.conversations/.test(ctl.why)), `CONTROL: an update reaching ix.conversations (the pre-fix unlisting scan) makes the write a whole one (${ctl.why})`);
   try { e8.stop && e8.stop(); } catch {}
 }
 
@@ -461,13 +461,13 @@ console.log('⑨ the first read (design 008): bytes, rowViews, work — at both 
     ok(f.bytes < MB, `⑨ the first read at ${f.rows} rows: ${(f.bytes / 1024).toFixed(1)} KB (< 1 MB; the old list ${(f.oldBytes / MB).toFixed(1)} MB), ${f.n} rows (attention ${JSON.stringify(f.attention)})`);
     ok(f.views <= FO.ATTENTION_MAX + FO.HEAD_ROWS * f.accounts, `⑨ …${f.views} rowViews (≤ ${FO.ATTENTION_MAX} + ${FO.HEAD_ROWS}·${f.accounts} accounts)`);
     ok(f.work < 0.02 * f.oldWork, `⑨ …its work ${f.work} = ${pct(f.work, f.oldWork)} of the old whole list's ${f.oldWork} (< 2 %)`);
-    ok(Object.values(f.buried).every((x) => x.every(Boolean)), `⑨ V1: every tag kind buried at ≈ 49 000 by lastAt is on the first screen after a first read, a reconnect and a non-partial broadcast (${Object.keys(f.buried).join(', ')})`, f.buried);
+    ok(verdictOf(Object.values(f.buried).every((x) => x.every(Boolean))), `⑨ V1: every tag kind buried at ≈ 49 000 by lastAt is on the first screen after a first read, a reconnect and a non-partial broadcast (${Object.keys(f.buried).join(', ')})`, f.buried);
     ok(f.bcScope === 'first' && f.bcBytes < MB, `⑨ an account-level change broadcasts the first read's shape: ${(f.bcBytes / 1024).toFixed(1)} KB (< 1 MB)`);
     ok(!(f.oldBcBytes < MB), `⑨ CONTROL: a non-partial broadcast that still carries every row is ${(f.oldBcBytes / MB).toFixed(1)} MB — red against the same 1 MB bound`);
-    ok(f.pageOk && f.pageBytes < 100 * 1024 && f.searchHits >= 1, `⑨ a page of 60 from the middle: ${(f.pageBytes / 1024).toFixed(1)} KB; a search over every row finds ${f.searchHits}`);
+    ok(gateOf(f.pageOk) && f.pageBytes < 100 * 1024 && f.searchHits >= 1, `⑨ a page of 60 from the middle: ${(f.pageBytes / 1024).toFixed(1)} KB; a search over every row finds ${f.searchHits}`);
     ok(f.clientWall < 20, `⑨ the client half (JSON.parse + applyFirst + groupListRows + firstScreen) at ${f.rows} rows: ${f.clientWall.toFixed(2)} ms (< 20 ms; work ${f.clientWork})`);
   }
-  ok(bounded(fr1.clientWork, fr2.clientWork), `⑨ the client half's work does not grow with the index: ${fr1.clientWork} → ${fr2.clientWork} (×${(fr2.clientWork / fr1.clientWork).toFixed(3)})`);
+  ok(verdictOf(bounded(fr1.clientWork, fr2.clientWork)), `⑨ the client half's work does not grow with the index: ${fr1.clientWork} → ${fr2.clientWork} (×${(fr2.clientWork / fr1.clientWork).toFixed(3)})`);
   ok(fr2.pageWork <= 2.2 * fr1.pageWork + SLACK && fr2.searchWork <= 2.2 * fr1.searchWork + SLACK, `⑨ a page and a search are linear in the rows scanned: page ${fr1.pageWork} → ${fr2.pageWork} (×${(fr2.pageWork / fr1.pageWork).toFixed(2)}), search ${fr1.searchWork} → ${fr2.searchWork} (×${(fr2.searchWork / fr1.searchWork).toFixed(2)}) (≤ 2.2)`);
   ok(fr1.searchWork / fr1.rows < fr1.oldWork / fr1.rows / 3, `⑨ …a search reads ${(fr1.searchWork / fr1.rows).toFixed(1)} per row scanned — the shown strings' bytes, under a third of the old list's ${(fr1.oldWork / fr1.rows).toFixed(1)} per row (one search: ${fr1.searchMs.toFixed(1)} ms at ${fr1.rows} rows, ${fr2.searchMs.toFixed(1)} ms at ${fr2.rows}, printed)`);
   ok(!bounded(fr1.oldWork, fr2.oldWork) && fr2.oldBytes > 50 * MB, `⑨ CONTROL: the old whole list on the route reads ${fr1.oldWork} → ${fr2.oldWork} (×${(fr2.oldWork / fr1.oldWork).toFixed(2)}) — ${(fr1.oldBytes / MB).toFixed(1)} MB at ${fr1.rows} rows (these rows are lighter than userW's 1 542 bytes), ${(fr2.oldBytes / MB).toFixed(1)} MB at ${fr2.rows} — red`);
@@ -484,7 +484,7 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
   const HEAL = ['      healRow(k, conv[k]);\n', ''];
   const HEAL2 = ['      if (has) healRow(k, conv[k]);\n', ''];   // 主开发 r2081: the update's end heals too — the pre-lane row has neither heal
   const WRITER = ["      store.stamps.set(en.key, { [lane.via === 'scan' ? 'lastScanAt' : 'lastPollAt']: now(), ...(complete ? { walkStartedAt } : {}) });", "      Object.assign(en.lane, { [lane.via === 'scan' ? 'lastScanAt' : 'lastPollAt']: now(), ...(complete ? { walkStartedAt } : {}) });"];
-  ok([KEEP, HEAL, HEAL2].every(([f]) => ssrc.split(f).length === 2) && esrc.split(WRITER[0]).length === 2, '⑩ CONTROL setup: the omission, both heals and the engine\'s stamp writer are where the control cuts them');
+  ok(gateOf([KEEP, HEAL, HEAL2].every(([f]) => ssrc.split(f).length === 2)) && esrc.split(WRITER[0]).length === 2, '⑩ CONTROL setup: the omission, both heals and the engine\'s stamp writer are where the control cuts them');
   const minute = async (M, tag) => {
     const e = M.create({ dataDir: path.join(ROOT, `quiet-${tag}`), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now, log: quiet, censusTimer: () => ({ cancel() {} }) });
     const x = e.store.index;
@@ -523,7 +523,7 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
     return r;
   };
   const q = await minute(ENG, 'head');
-  ok(q.rows >= N && q.pollSteps > 0 && q.polled === q.own && q.writes === 0 && q.sameFile, `⑩ a quiet minute at ${q.rows} rows (${q.mb} MB on disk): the timer's 12 passes polled the account's ${q.polled} conversations in ${q.pollSteps} of them and brought nothing — ${q.writes} index writes, ${q.skipped} flushes skipped, the same file; the stamps wait in memory for the side file (owed ${q.stampsOwed}), each appended to its journal (${q.journalBytes} bytes in the minute)`, JSON.stringify(q));
+  ok(q.rows >= N && q.pollSteps > 0 && q.polled === q.own && q.writes === 0 && verdictOf(q.sameFile), `⑩ a quiet minute at ${q.rows} rows (${q.mb} MB on disk): the timer's 12 passes polled the account's ${q.polled} conversations in ${q.pollSteps} of them and brought nothing — ${q.writes} index writes, ${q.skipped} flushes skipped, the same file; the stamps wait in memory for the side file (owed ${q.stampsOwed}), each appended to its journal (${q.journalBytes} bytes in the minute)`, JSON.stringify(q));
   console.log(`  · printed, not judged: discovery's own cycle (every coldSec = 900 s) stamps listedAt on every listed row — ${q.discoveryWrites} index write(s) per cycle (outside this lane's three stamps)`);
   const sc = MC.write('src/channel-store.js', editAnchor(editAnchor(editAnchor(ssrc, KEEP[0], KEEP[1], "src/channel-store.js"), HEAL[0], HEAL[1], "src/channel-store.js"), HEAL2[0], HEAL2[1], "src/channel-store.js"), 'quiet-inrow');
   const ec = MC.write('src/server/channels-engine.js', esrc.replace(WRITER[0], WRITER[1]).replace("require('../channel-store.js')", `require(${JSON.stringify(sc)})`), 'quiet-inrow');
@@ -531,9 +531,9 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
   // lane mirror-green-channels (2.369.204): a rewrite is witnessed by the file's BYTES, never its inode number — an ext4
   // /tmp (the Actions runner's) hands the freed inode to the next tmp + rename, so an EVEN number of writes ends on the
   // first inode again (test-channel-store ⑭'s control went red there for exactly that; this one held only while odd)
-  ok(qc.pollSteps > 0 && qc.writes >= qc.pollSteps && qc.moved, `⑩ CONTROL: the stamp back in the row — the same quiet minute writes the ${qc.mb} MB index ${qc.writes} times (once per pass that polled: ${qc.pollSteps}) — red`, JSON.stringify(qc));
-  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2 })) ok(c.pass, '⑩ ' + c.name + (c.pass ? '' : ' — ' + c.detail));
+  ok(qc.pollSteps > 0 && qc.writes >= qc.pollSteps && verdictOf(qc.moved), `⑩ CONTROL: the stamp back in the row — the same quiet minute writes the ${qc.mb} MB index ${qc.writes} times (once per pass that polled: ${qc.pollSteps}) — red`, JSON.stringify(qc));
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2 })) ok(verdictOf(c.pass), '⑩ ' + c.name + (c.pass ? '' : ' — ' + c.detail));
 }
 console.log(`\ntest-channels-index-scale: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

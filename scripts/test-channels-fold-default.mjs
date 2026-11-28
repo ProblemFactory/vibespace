@@ -27,7 +27,7 @@ const SHOTS = process.env.FDF_SHOTS || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the bundle: the REAL panel of the tree (patch = {from, to} rewrites channels-panel.js for a control)
@@ -131,11 +131,11 @@ const SECS = `(() => {
 })()`;
 const firstPaint = (S, label) => {
   const { 'lark:a': L, 'gmail:a': G, 'slack:a': K } = S.secs;
-  ok(K && !K.folded && K.fold === 'open' && K.rows.length === 8 && L && L.folded && L.fold === 'folded' && L.rows.length === 0 && G && G.folded && G.rows.length === 0 && !S.accountsFolded,
+  ok(gateOf(K) && !K.folded && K.fold === 'open' && K.rows.length === 8 && gateOf(L) && gateOf(L.folded) && L.fold === 'folded' && L.rows.length === 0 && gateOf(G) && gateOf(G.folded) && G.rows.length === 0 && !S.accountsFolded,
     `${label} ① first paint: Slack (two rows handed to an agent) OPEN with its rows; Lark (40) and Gmail (12) — nothing needs the person — FOLDED, no row of theirs drawn; Accounts open`, JSON.stringify({ L: L && [L.folded, L.fold, L.rows.length], G: G && [G.folded, G.rows.length], K: K && [K.folded, K.rows.length], acc: S.accountsFolded }));
-  ok(L.count === '40' && /^· \d+ 条未读$/.test(L.bits) && G.count === '12' && /^· 12 条未读$/.test(G.bits) && !G.dot && !L.dot && K.bits === '',
+  ok(L.count === '40' && gateOf(/^· \d+ 条未读$/.test(L.bits)) && G.count === '12' && gateOf(/^· 12 条未读$/.test(G.bits)) && !G.dot && !L.dot && K.bits === '',
     `${label} ① each FOLDED head says what is inside — its count and unread ("40 · N 条未读", "12 · 12 条未读"); the open head draws no fold words`, JSON.stringify({ L: [L.count, L.bits], G: [G.count, G.bits], K: K.bits }));
-  ok(S.sw <= S.vw && Object.values(S.secs).every((s) => s.right <= S.vw), `${label} nothing wider than the screen`, JSON.stringify({ vw: S.vw, sw: S.sw }));
+  ok(S.sw <= S.vw && verdictOf(Object.values(S.secs).every((s) => s.right <= S.vw)), `${label} nothing wider than the screen`, JSON.stringify({ vw: S.vw, sw: S.sw }));
 };
 
 console.log('§1 desk (1100 px, zh, light): the first paint');
@@ -153,18 +153,18 @@ const ARRIVE = `(async () => {
 })()`;
 const A = await d.ev(ARRIVE);
 const S2 = (await d.ev(SECS)).secs['gmail:a'];
-ok(A.same && S2.folded && S2.rows.length === 0 && S2.need === 1 && /1 需关注/.test(S2.bits) && S2.dot && S2.needColor && S2.needColor !== 'rgb(0, 0, 0)',
+ok(gateOf(A.same) && gateOf(S2.folded) && S2.rows.length === 0 && S2.need === 1 && gateOf(/1 需关注/.test(S2.bits)) && gateOf(S2.dot) && gateOf(S2.needColor) && S2.needColor !== 'rgb(0, 0, 0)',
   '② Gmail stays FOLDED (the same section, the same rows box — no jumping list); its head now says "1 需关注" in the accent and wears the dot', JSON.stringify({ A, S2 }));
 
 console.log('§3 the person\'s open / close is kept — a reload reads it back both ways');
 const p0 = patches;
 await d.ev(`(() => { document.querySelector('.chan-account[data-adapter="lark:a"] > .chan-sec-head').click(); document.querySelector('.chan-account[data-adapter="slack:a"] > .chan-sec-head').click(); return 1; })()`);
 await sleep(300);
-ok(patches === p0 + 2 && US.channelsPanelFolds && US.channelsPanelFolds['acct:lark:a'] === false && US.channelsPanelFolds['acct:slack:a'] === true,
+ok(patches === p0 + 2 && gateOf(US.channelsPanelFolds) && US.channelsPanelFolds['acct:lark:a'] === false && US.channelsPanelFolds['acct:slack:a'] === true,
   '③ opening Lark and folding Slack write the person\'s choices to user state (`acct:lark:a: false`, `acct:slack:a: true`)', JSON.stringify({ patches: patches - p0, folds: US.channelsPanelFolds }));
 await d.load();
 const R = (await d.ev(SECS)).secs;
-ok(R['lark:a'] && !R['lark:a'].folded && R['lark:a'].rows.length === 30 && R['slack:a'].folded && R['slack:a'].rows.length === 0 && R['gmail:a'].folded,
+ok(gateOf(R['lark:a']) && !R['lark:a'].folded && R['lark:a'].rows.length === 30 && gateOf(R['slack:a'].folded) && R['slack:a'].rows.length === 0 && verdictOf(R['gmail:a'].folded),
   '③ after a RELOAD: Lark open (its first 30 rows) and Slack folded — the remembered fold wins over the default both ways', JSON.stringify(Object.fromEntries(Object.entries(R).map(([k, v]) => [k, [v.folded, v.rows.length]]))));
 
 console.log('§4 the filter finds a row inside a folded section');
@@ -174,12 +174,12 @@ const p1 = patches;
 const FIND = (q) => `(async () => { const i = document.querySelector('input[data-channel-filter]'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input', { bubbles: true })); await new Promise((r) => setTimeout(r, 700)); return 1; })()`;
 await d.ev(FIND('invoice zeta'));
 const Q = (await d.ev(SECS)).secs;
-ok(Q['gmail:a'].fold === 'filter' && !Q['gmail:a'].folded && Q['gmail:a'].rows.length === 1 && /Quarterly invoice zeta/.test(Q['gmail:a'].rows[0]) && Q['slack:a'].folded && Q['lark:a'].folded,
+ok(Q['gmail:a'].fold === 'filter' && !Q['gmail:a'].folded && Q['gmail:a'].rows.length === 1 && gateOf(/Quarterly invoice zeta/.test(Q['gmail:a'].rows[0])) && gateOf(Q['slack:a'].folded) && verdictOf(Q['lark:a'].folded),
   '④ typing "invoice zeta": folded Gmail opens VIRTUALLY with its one match; Slack and Lark (no match) keep their folds', JSON.stringify(Object.fromEntries(Object.entries(Q).map(([k, v]) => [k, [v.fold, v.rows]]))));
 await d.shot('desk-filter.png');
 await d.ev(FIND(''));
 const C = (await d.ev(SECS)).secs;
-ok(C['gmail:a'].folded && C['gmail:a'].fold === 'folded' && C['gmail:a'].rows.length === 0 && patches === p1 && !('acct:gmail:a' in US.channelsPanelFolds),
+ok(gateOf(C['gmail:a'].folded) && C['gmail:a'].fold === 'folded' && C['gmail:a'].rows.length === 0 && patches === p1 && !('acct:gmail:a' in US.channelsPanelFolds),
   '④ the filter cleared: Gmail is folded again — the virtual open was never written (no PATCH)', JSON.stringify({ g: C['gmail:a'], patches: patches - p1 }));
 d.close();
 
@@ -198,7 +198,7 @@ if (fs.existsSync(path.join(dir, 'nomemory.js'))) {
   await sleep(300);
   await c1.load();
   const X = (await c1.ev(SECS)).secs['lark:a'];
-  ok(US.channelsPanelFolds && US.channelsPanelFolds['acct:lark:a'] === false && X.folded, 'CONTROL: the person\'s choice ignored — the open was written yet Lark is folded again after the reload (leg ③ would be red)', JSON.stringify({ folds: US.channelsPanelFolds, X }));
+  ok(gateOf(US.channelsPanelFolds) && US.channelsPanelFolds['acct:lark:a'] === false && verdictOf(X.folded), 'CONTROL: the person\'s choice ignored — the open was written yet Lark is folded again after the reload (leg ③ would be red)', JSON.stringify({ folds: US.channelsPanelFolds, X }));
   c1.close();
 }
 if (fs.existsSync(path.join(dir, 'notheld.js'))) {
@@ -210,4 +210,4 @@ if (fs.existsSync(path.join(dir, 'notheld.js'))) {
   c2.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

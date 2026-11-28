@@ -45,7 +45,7 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sortKeys = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.keys(o).sort().map((k) => [k, sortKeys(o[k])])) : o);
@@ -417,7 +417,7 @@ const SECTIONS = [
 ];
 for (const [title, rules] of SECTIONS) {
   console.log(title);
-  for (const rule of rules) for (const [a, b, n] of TABLES[rule](M)) ok(eq(a, b), `${rule}: ${n}`, eq(a, b) ? undefined : { got: a, want: b });
+  for (const rule of rules) for (const [a, b, n] of TABLES[rule](M)) ok(verdictOf(eq(a, b)), `${rule}: ${n}`, eq(a, b) ? undefined : { got: a, want: b });
 }
 
 // ①b THE PERSON'S VIEW STANDS (B-1217 member 12) — the canvas core ITSELF (src/lib/design-canvas.js), run under a mini
@@ -565,7 +565,7 @@ console.log('①b THE PERSON\'S VIEW STANDS (B-1217) — the canvas core run und
   const z = (x) => (x ? `${x.x.toFixed(1)},${x.y.toFixed(1)}@${x.z.toFixed(4)}` : '?');
   if (r && !r.threw) console.log(`    facts: contained ${z(r.a)} · + ${z(r.zi)} · − ${z(r.b2)} · re-read ${z(r.afterRead)} · resize ${z(r.afterResize)} · wheel alone ${z(r.wheel.moved)} → ${z(r.wheel.after)} · still wheel → ${z(r.still.after)} · board moved: rect ${r.at0.x.toFixed(1)},${r.at0.y.toFixed(1)} → ${r.movedRect.x.toFixed(1)},${r.movedRect.y.toFixed(1)} · Fit ${z(r.fitted)} · pane 1300×640 ${z(r.followed)}`);
   else console.log(`    facts: the core threw — ${r && r.threw}`);
-  for (const [a, b, n] of viewRows(r)) ok(eq(a, b), `view stands: ${n}`, r);
+  for (const [a, b, n] of viewRows(r)) ok(verdictOf(eq(a, b)), `view stands: ${n}`, r);
 }
 
 console.log('④b THE PICKER, run under a mini DOM');
@@ -691,7 +691,7 @@ async function pickerTable(src) {
   return rows;
 }
 {
-  for (const [a, b, n] of await pickerTable(P.pickerSource())) ok(eq(a, b), `picker: ${n}`, eq(a, b) ? undefined : { got: a, want: b });
+  for (const [a, b, n] of await pickerTable(P.pickerSource())) ok(verdictOf(eq(a, b)), `picker: ${n}`, eq(a, b) ? undefined : { got: a, want: b });
   // the source text that SHIPS is the minified bundle's (esbuild --minify renames the picker's locals): it must run the
   // same — built here in-process exactly as the client bundle builds it, then the same table
   {
@@ -702,14 +702,14 @@ async function pickerTable(src) {
     new Function('globalThis', out.outputFiles[0].text)(box);
     const minified = box.__dwinPicker;
     const rows = typeof minified === 'string' ? await pickerTable(minified) : [];
-    ok(rows.length > 10 && rows.every(([x, y]) => eq(x, y)) && minified.length < P.pickerSource().length, `the MINIFIED picker (what the bundle injects, ${minified && minified.length} B) passes the same table`);
+    ok(rows.length > 10 && gateOf(rows.every(([x, y]) => eq(x, y))) && minified.length < P.pickerSource().length, `the MINIFIED picker (what the bundle injects, ${minified && minified.length} B) passes the same table`);
   }
   const code = codeOnly(read('src/lib/design-pick.js'));
   const sent = [...new Set([...code.matchAll(/\{ kind: '([a-z-]+)'/g)].map((x) => x[1]))].sort();
-  ok(eq(sent, [...M.PICK_KINDS].sort()), `census: every kind the picker sends is in the canvas's closed set, and the set is what it sends (${sent.join(', ')})`);
+  ok(verdictOf(eq(sent, [...M.PICK_KINDS].sort())), `census: every kind the picker sends is in the canvas's closed set, and the set is what it sends (${sent.join(', ')})`);
   const heard = [...new Set([...code.matchAll(/d\.kind [!=]== '([a-z-]+)'/g)].map((x) => x[1]))].sort();
-  ok(eq(heard, [...M.FRAME_KINDS].sort()) && (code.match(/addEventListener\('message'/g) || []).length === 1 && /if \(e\.source !== parent\) return;/.test(code), `census: the picker hears exactly the canvas's words (${heard.join(', ')}), from its parent only`);
-  ok((code.match(/postMessage\(/g) || []).length === 1 && /parent\.postMessage\(msg, '\*'\)/.test(code), 'census: ONE postMessage site, to the parent');
+  ok(gateOf(eq(heard, [...M.FRAME_KINDS].sort())) && (code.match(/addEventListener\('message'/g) || []).length === 1 && verdictOf(/if \(e\.source !== parent\) return;/.test(code)), `census: the picker hears exactly the canvas's words (${heard.join(', ')}), from its parent only`);
+  ok((code.match(/postMessage\(/g) || []).length === 1 && verdictOf(/parent\.postMessage\(msg, '\*'\)/.test(code)), 'census: ONE postMessage site, to the parent');
   ok(!/\b(fetch|XMLHttpRequest|localStorage|sessionStorage|document\.cookie|WebSocket|eval)\b/.test(code), 'the picker reads no storage, cookie or network and evals nothing');
   ok(P.PICK_KIND === 'design-pick' && P.KEY_KIND === 'design-key' && P.MODE_KIND === 'design-mode', 'the exported kind names are the model\'s');
 }
@@ -718,73 +718,73 @@ console.log('⑥ wiring pins — the canvas core');
 {
   const core = read('src/lib/design-canvas.js');
   const code = codeOnly(core);
-  ok(/setAttribute\('sandbox', 'allow-scripts'\)/.test(code), "every artboard frame is sandboxed 'allow-scripts' (design-canvas.js)");
+  ok(verdictOf(/setAttribute\('sandbox', 'allow-scripts'\)/.test(code)), "every artboard frame is sandboxed 'allow-scripts' (design-canvas.js)");
   const designSrc = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => /^design-/.test(f)).map((f) => `src/lib/${f}`).concat(fs.existsSync(path.join(REPO, 'src/design-viewer-entry.js')) ? ['src/design-viewer-entry.js'] : []);
   const sameOrigin = designSrc.filter((f) => /allow-same-origin/.test(codeOnly(read(f))));
   ok(designSrc.length >= 2 && sameOrigin.length === 0, `no design source grants allow-same-origin (${designSrc.length} files: ${designSrc.join(', ')})`, sameOrigin.join(', '));
   const sandboxes = [...code.matchAll(/sandbox[^\n]{0,80}/g)].map((x) => x[0]);
-  ok(sandboxes.every((s) => !/allow-(same-origin|top-navigation|popups|forms|modals)/.test(s)), 'the canvas core\'s frame sandbox carries no other allowance (scripts only)', sandboxes.join(' | '));
+  ok(verdictOf(sandboxes.every((s) => !/allow-(same-origin|top-navigation|popups|forms|modals)/.test(s))), 'the canvas core\'s frame sandbox carries no other allowance (scripts only)', sandboxes.join(' | '));
   const msgs = [...code.matchAll(/addEventListener\('message'/g)];
-  ok(msgs.length === 1 && /addEventListener\('message', \(ev\) => \{[\s\S]{0,600}?routeMessage\(ev, frames\)[\s\S]{0,1800}?\}, L\);/.test(code), 'ONE message listener, through routeMessage, bound to the canvas\'s signal');
-  ok(/frames\.push\(\{ win: rec\.iframe\.contentWindow, file/.test(code), 'routeMessage is handed exactly this canvas\'s frames (their contentWindow, at message time)');
-  ok(/if \(!rec \|\| !rec\.iframe \|\| doc\.activeElement !== rec\.iframe\) return;\n\s+const g = frameKeyGate\(keyGates\.get\(hit\.frame\.file\), Date\.now\(\)\);\n\s+keyGates\.set\(hit\.frame\.file, g\.gate\);\n\s+if \(g\.allow\) onKey\?\.\(hit\.msg, hit\.frame\);/.test(code), 'L4 B①: a frame\'s KEY is admitted only from the frame that HAS the keyboard (its iframe is the active element), through the frame-key gate — a script\'s flood from any frame is muted; a pick is never gated (the composer shows the fence\'s own text)');
+  ok(msgs.length === 1 && verdictOf(/addEventListener\('message', \(ev\) => \{[\s\S]{0,600}?routeMessage\(ev, frames\)[\s\S]{0,1800}?\}, L\);/.test(code)), 'ONE message listener, through routeMessage, bound to the canvas\'s signal');
+  ok(verdictOf(/frames\.push\(\{ win: rec\.iframe\.contentWindow, file/.test(code)), 'routeMessage is handed exactly this canvas\'s frames (their contentWindow, at message time)');
+  ok(verdictOf(/if \(!rec \|\| !rec\.iframe \|\| doc\.activeElement !== rec\.iframe\) return;\n\s+const g = frameKeyGate\(keyGates\.get\(hit\.frame\.file\), Date\.now\(\)\);\n\s+keyGates\.set\(hit\.frame\.file, g\.gate\);\n\s+if \(g\.allow\) onKey\?\.\(hit\.msg, hit\.frame\);/.test(code)), 'L4 B①: a frame\'s KEY is admitted only from the frame that HAS the keyboard (its iframe is the active element), through the frame-key gate — a script\'s flood from any frame is muted; a pick is never gated (the composer shows the fence\'s own text)');
   const winSrc = codeOnly(read('src/lib/design-window.js'));
-  ok(/onKey: \(msg, frame\) => frameEscape\(frame\),/.test(winSrc) && /function frameEscape\(frame\) \{\n\s+if \(composer\) return;\n\s+if \(canvas\.pick\(\)\) \{ canvas\.setPick\(false\); hideChip\(\); return; \}\n\s+if \(canvas\.focused\(\) && frame && frame\.file === canvas\.focused\(\)\) canvas\.focus\(null\);/.test(winSrc), 'the window: a frame\'s Escape never closes the composer (the typed words stay), ends Comment mode, and leaves the focused view only when it IS that frame');
-  ok(/onKey: \(m, frame\) => \{ if \(canvas\.focused\(\) && frame && frame\.file === canvas\.focused\(\)\) canvas\.focus\(null\); \}/.test(codeOnly(read('src/design-viewer-entry.js'))), 'the published page: a frame\'s Escape leaves the focused view only when it IS that frame (another artboard\'s script cannot kick the reader out)');
-  ok(/function say\(rec, msg\) \{\n\s+const m = frameSay\(msg\);[\s\S]{0,160}?if \(!m \|\| !w\) return false;\n\s+try \{ w\.postMessage\(m, '\*'\); return true; \}/.test(code) && (code.match(/postMessage\(/g) || []).length === 1 && /function sayMode\(rec\) \{ say\(rec, \{ kind: 'design-mode', pick: st\.pick, color: st\.pickColor \}\); \}/.test(code) && /tell\(file, msg\) \{ return say\(els\.get\(file\), msg\); \}/.test(code), 'the canvas says to its frames only what frameSay lets out — ONE postMessage site (design-mode, and the changes strip\'s design-style / design-undo through tell)');
-  ok(/if \(hit\.msg\.edit === 'text'\) \{\n\s+if \(\(!st\.pick && !\(Date\.now\(\) - pickOffAt < EDIT_GRACE_MS\)\) \|\| !typedIn\(hit\.frame\.file\)\) return;\n\s+const g = frameKeyGate\(editGates\.get\(hit\.frame\.file\), Date\.now\(\)\);/.test(code) && /return !!r && !!r\.iframe && \(cur === file \|\| Date\.now\(\) - \(r\.leftAt \|\| 0\) < EDIT_GRACE_MS\);/.test(code) && /win\.addEventListener\('blur', \(\) => \{ kbFile = frameOf\(doc\.activeElement\) \|\| kbFile; \}, L\);/.test(code), 'lane design-changes: a frame\'s TEXT edit reaches the subscribers only while picking, from the frame that has (or left < EDIT_GRACE_MS ago) the keyboard — tracked on this page\'s window blur / focus, Chrome fires no blur on the iframe element — through its own rate gate: a script in another frame cannot add a change');
-  ok(!/from '\.\/(utils|i18n|app|ws|window)\.js'/.test(core) && /from '\.\/design-canvas-model\.js'/.test(core), 'the core imports only the model — no App, utils, i18n or ws (the published page bundles it)');
-  ok(/el\.textContent = n\.text/.test(code) && /rec\.card\.textContent = /.test(code) && !/innerHTML/.test(code), 'notes and refusal cards are text; the core writes no innerHTML');
-  ok(/writeDoc\(rec\.iframe, srcdoc\)/.test(code) && /if \(rec\.srcdoc !== srcdoc\)/.test(code) && /const writeDoc = typeof writeFrame === 'function' \? writeFrame : \(ifr, html\) => \{ ifr\.srcdoc = html; \};/.test(code) && (code.match(/\b(ifr|iframe)\.srcdoc = /g) || []).length === 1, 'updateFrame swaps ONE document in place, only when it changed, through the CALLER\'s writer (lane design-frame-host: the window hands the frame host\'s) — srcdoc only without one (the published page)');
+  ok(gateOf(/onKey: \(msg, frame\) => frameEscape\(frame\),/.test(winSrc)) && verdictOf(/function frameEscape\(frame\) \{\n\s+if \(composer\) return;\n\s+if \(canvas\.pick\(\)\) \{ canvas\.setPick\(false\); hideChip\(\); return; \}\n\s+if \(canvas\.focused\(\) && frame && frame\.file === canvas\.focused\(\)\) canvas\.focus\(null\);/.test(winSrc)), 'the window: a frame\'s Escape never closes the composer (the typed words stay), ends Comment mode, and leaves the focused view only when it IS that frame');
+  ok(verdictOf(/onKey: \(m, frame\) => \{ if \(canvas\.focused\(\) && frame && frame\.file === canvas\.focused\(\)\) canvas\.focus\(null\); \}/.test(codeOnly(read('src/design-viewer-entry.js')))), 'the published page: a frame\'s Escape leaves the focused view only when it IS that frame (another artboard\'s script cannot kick the reader out)');
+  ok(gateOf(/function say\(rec, msg\) \{\n\s+const m = frameSay\(msg\);[\s\S]{0,160}?if \(!m \|\| !w\) return false;\n\s+try \{ w\.postMessage\(m, '\*'\); return true; \}/.test(code)) && (code.match(/postMessage\(/g) || []).length === 1 && gateOf(/function sayMode\(rec\) \{ say\(rec, \{ kind: 'design-mode', pick: st\.pick, color: st\.pickColor \}\); \}/.test(code)) && verdictOf(/tell\(file, msg\) \{ return say\(els\.get\(file\), msg\); \}/.test(code)), 'the canvas says to its frames only what frameSay lets out — ONE postMessage site (design-mode, and the changes strip\'s design-style / design-undo through tell)');
+  ok(gateOf(/if \(hit\.msg\.edit === 'text'\) \{\n\s+if \(\(!st\.pick && !\(Date\.now\(\) - pickOffAt < EDIT_GRACE_MS\)\) \|\| !typedIn\(hit\.frame\.file\)\) return;\n\s+const g = frameKeyGate\(editGates\.get\(hit\.frame\.file\), Date\.now\(\)\);/.test(code)) && gateOf(/return !!r && !!r\.iframe && \(cur === file \|\| Date\.now\(\) - \(r\.leftAt \|\| 0\) < EDIT_GRACE_MS\);/.test(code)) && verdictOf(/win\.addEventListener\('blur', \(\) => \{ kbFile = frameOf\(doc\.activeElement\) \|\| kbFile; \}, L\);/.test(code)), 'lane design-changes: a frame\'s TEXT edit reaches the subscribers only while picking, from the frame that has (or left < EDIT_GRACE_MS ago) the keyboard — tracked on this page\'s window blur / focus, Chrome fires no blur on the iframe element — through its own rate gate: a script in another frame cannot add a change');
+  ok(!/from '\.\/(utils|i18n|app|ws|window)\.js'/.test(core) && verdictOf(/from '\.\/design-canvas-model\.js'/.test(core)), 'the core imports only the model — no App, utils, i18n or ws (the published page bundles it)');
+  ok(gateOf(/el\.textContent = n\.text/.test(code)) && gateOf(/rec\.card\.textContent = /.test(code)) && !/innerHTML/.test(code), 'notes and refusal cards are text; the core writes no innerHTML');
+  ok(gateOf(/writeDoc\(rec\.iframe, srcdoc\)/.test(code)) && gateOf(/if \(rec\.srcdoc !== srcdoc\)/.test(code)) && gateOf(/const writeDoc = typeof writeFrame === 'function' \? writeFrame : \(ifr, html\) => \{ ifr\.srcdoc = html; \};/.test(code)) && (code.match(/\b(ifr|iframe)\.srcdoc = /g) || []).length === 1, 'updateFrame swaps ONE document in place, only when it changed, through the CALLER\'s writer (lane design-frame-host: the window hands the frame host\'s) — srcdoc only without one (the published page)');
   // lane design-frame-host (B-8679): on the APP page no design frame is a srcdoc — Chrome gives a srcdoc frame the app
   // page's policy; every one is handed to the frame host (src/lib/frame-host.js writeFrame at FRAME_HOST)
   {
     const win = codeOnly(read('src/lib/design-window.js')), pres = codeOnly(read('src/lib/design-present.js')), viewer = codeOnly(read('src/design-viewer-entry.js'));
     ok(M.FRAME_HOST === '/frame-host?kind=design', 'the design kind\'s address is the model\'s (design-canvas-model.js FRAME_HOST — the builder knows it, the callers import it)', M.FRAME_HOST);
-    ok(/writeFrame: \(f, html\) => writeFrame\(f, html, FRAME_HOST\)/.test(win) && /import \{ writeFrame \} from '\.\/frame-host\.js';/.test(win) && /import \{ writeFrame \} from '\.\/frame-host\.js';/.test(pres), 'the Design window hands the canvas the frame host\'s writer; Print and Print all import the same one');
+    ok(gateOf(/writeFrame: \(f, html\) => writeFrame\(f, html, FRAME_HOST\)/.test(win)) && gateOf(/import \{ writeFrame \} from '\.\/frame-host\.js';/.test(win)) && verdictOf(/import \{ writeFrame \} from '\.\/frame-host\.js';/.test(pres)), 'the Design window hands the canvas the frame host\'s writer; Print and Print all import the same one');
     const srcdocs = [['src/lib/design-window.js', win], ['src/lib/design-present.js', pres]].filter(([, c]) => /\.srcdoc\s*=|setAttribute\(\s*['"]srcdoc/.test(c)).map(([f]) => f);
     ok(srcdocs.length === 0, 'no srcdoc in the Design window or its present module — the app page\'s design frames all go through the host', srcdocs.join(', '));
     ok(!/writeFrame|frame-host/.test(viewer), 'the published page passes no writer: its artboards stay srcdoc frames under the published page\'s OWN sandbox policy (the hub\'s host needs the sign-in)');
   }
-  ok(/function refocus\(keep = false, from = null\) \{[\s\S]{0,160}?const fv = focusView\(f, paneSize\(\), \{ declared: declaredPrint\(st\.manifest, f\.file\) \}\);\n\s+rec\.focusH = fv\.frameH;/.test(code) && (code.match(/focusView\(/g) || []).length === 1, 'lane design-focus-whole: the focused view is ONE call of the rule, handed the manifest row\'s own print declaration (a frame\'s print is the hub\'s default) — its frameH is the frame\'s height');
+  ok(gateOf(/function refocus\(keep = false, from = null\) \{[\s\S]{0,160}?const fv = focusView\(f, paneSize\(\), \{ declared: declaredPrint\(st\.manifest, f\.file\) \}\);\n\s+rec\.focusH = fv\.frameH;/.test(code)) && (code.match(/focusView\(/g) || []).length === 1, 'lane design-focus-whole: the focused view is ONE call of the rule, handed the manifest row\'s own print declaration (a frame\'s print is the hub\'s default) — its frameH is the frame\'s height');
   {
     // B-1217 member 12: every person's verb marks the focused view theirs (moveView); the re-read and the observer ask reflowView
     const inputs = code.slice(code.indexOf("vp.addEventListener('wheel'"), code.indexOf("vp.addEventListener('pointerup'"));
     const moves = (code.match(/\bmoveView\(/g) || []).length;
-    ok(inputs.length > 0 && !/\bsetView\(/.test(inputs) && (inputs.match(/\bmoveView\(/g) || []).length === 5 && /function zoomBy\(dir, anchor = null\) \{\n\s+const p = paneSize\(\), nz = zoomStep\(st\.view\.z, dir\);\n\s+if \(nz === st\.view\.z\) return;[^\n]*\n\s+moveView\(/.test(code) && /function zoomTo\(z, anchor = null\) \{\n\s+const p = paneSize\(\);\n\s+if \(clampZoom\(z\) === st\.view\.z\) return;[^\n]*\n\s+moveView\(/.test(code) && /setView: moveView,/.test(code) && moves === 7 && /const moveView = \(v\) => \{\n\s+const n = normView\(v\);\n\s+if \(st\.focused && \(n\.x !== st\.view\.x \|\| n\.y !== st\.view\.y \|\| n\.z !== st\.view\.z\)\) st\.moved = true;\n\s+setView\(n\);\n\s+\};/.test(code), `B-1217: the person's verbs — wheel ×3, pinch, drag, zoomBy, zoomTo, the API's setView — go through moveView (${moves} calls), no bare setView in the input handlers; a + / − / 100 % that would not change the zoom returns first (no ulp drift marks the view)`);
-    ok((code.match(/\breflowView\(/g) || []).length === 2 && !/if \(st\.focused\) refocus\(\);/.test(code) && /if \(!keep\) \{ setView\(fv\.view\); return; \}/.test(code) && /refocus\(true, from\)/.test(code), 'B-1217: the re-read and the observer ask reflowView (2 calls) — no unconditional refocus is left; a kept view re-places the frame and keeps the view, moved with the board'); // stale-pins: kept (a deliberate absence check)
-    ok(/function fit\(\) \{\n\s+st\.moved = false;/.test(code) && /st\.focused = file;\n\s+st\.moved = false;/.test(code) && (code.match(/st\.moved = false;/g) || []).length === 2, 'B-1217: their Fit and a new focus clear the mark (2 places; out of the focused view nothing reads it — reflowView)');
+    ok(inputs.length > 0 && !/\bsetView\(/.test(inputs) && (inputs.match(/\bmoveView\(/g) || []).length === 5 && gateOf(/function zoomBy\(dir, anchor = null\) \{\n\s+const p = paneSize\(\), nz = zoomStep\(st\.view\.z, dir\);\n\s+if \(nz === st\.view\.z\) return;[^\n]*\n\s+moveView\(/.test(code)) && gateOf(/function zoomTo\(z, anchor = null\) \{\n\s+const p = paneSize\(\);\n\s+if \(clampZoom\(z\) === st\.view\.z\) return;[^\n]*\n\s+moveView\(/.test(code)) && gateOf(/setView: moveView,/.test(code)) && moves === 7 && verdictOf(/const moveView = \(v\) => \{\n\s+const n = normView\(v\);\n\s+if \(st\.focused && \(n\.x !== st\.view\.x \|\| n\.y !== st\.view\.y \|\| n\.z !== st\.view\.z\)\) st\.moved = true;\n\s+setView\(n\);\n\s+\};/.test(code)), `B-1217: the person's verbs — wheel ×3, pinch, drag, zoomBy, zoomTo, the API's setView — go through moveView (${moves} calls), no bare setView in the input handlers; a + / − / 100 % that would not change the zoom returns first (no ulp drift marks the view)`);
+    ok((code.match(/\breflowView\(/g) || []).length === 2 && !/if \(st\.focused\) refocus\(\);/.test(code) && gateOf(/if \(!keep\) \{ setView\(fv\.view\); return; \}/.test(code)) && verdictOf(/refocus\(true, from\)/.test(code)), 'B-1217: the re-read and the observer ask reflowView (2 calls) — no unconditional refocus is left; a kept view re-places the frame and keeps the view, moved with the board'); // stale-pins: kept (a deliberate absence check)
+    ok(gateOf(/function fit\(\) \{\n\s+st\.moved = false;/.test(code)) && gateOf(/st\.focused = file;\n\s+st\.moved = false;/.test(code)) && (code.match(/st\.moved = false;/g) || []).length === 2, 'B-1217: their Fit and a new focus clear the mark (2 places; out of the focused view nothing reads it — reflowView)');
   }
-  ok(read('docs/agent/design-manual.md').includes(`taller than ${M.PAGE_RATIO} × its width, which is taken for a page that scrolls`) && read('docs/kb-features.md').includes(`PAGE_RATIO ${M.PAGE_RATIO}`), `the agent manual and kb-features name the tall-page line by the model's own number (${M.PAGE_RATIO})`);
-  ok(/setPointerCapture\(e\.pointerId\)/.test(code) && /'pointercancel', end/.test(code) && /'lostpointercapture', end/.test(code), 'a drag captures its pointer at the door and ends on up / cancel / lost capture');
-  ok(/vp\.addEventListener\('dblclick', \(e\) => \{[\s\S]{0,200}?toWorld\(st\.view, local\(e\)\)[\s\S]{0,200}?onActivate\?\.\(hit\.file, 'dblclick'\)/.test(code) && !/shield\.addEventListener\('dblclick'/.test(code), 'a dblclick is read on the VIEWPORT by the world point under it (the drag\'s pointer capture retargets the click pair away from the shield — measured in Chrome: a shield listener never fired)');
+  ok(gateOf(read('docs/agent/design-manual.md').includes(`taller than ${M.PAGE_RATIO} × its width, which is taken for a page that scrolls`)) && verdictOf(read('docs/kb-features.md').includes(`PAGE_RATIO ${M.PAGE_RATIO}`)), `the agent manual and kb-features name the tall-page line by the model's own number (${M.PAGE_RATIO})`);
+  ok(gateOf(/setPointerCapture\(e\.pointerId\)/.test(code)) && gateOf(/'pointercancel', end/.test(code)) && verdictOf(/'lostpointercapture', end/.test(code)), 'a drag captures its pointer at the door and ends on up / cancel / lost capture');
+  ok(gateOf(/vp\.addEventListener\('dblclick', \(e\) => \{[\s\S]{0,200}?toWorld\(st\.view, local\(e\)\)[\s\S]{0,200}?onActivate\?\.\(hit\.file, 'dblclick'\)/.test(code)) && !/shield\.addEventListener\('dblclick'/.test(code), 'a dblclick is read on the VIEWPORT by the world point under it (the drag\'s pointer capture retargets the click pair away from the shield — measured in Chrome: a shield listener never fired)');
 }
 
 {
   // lane design-present — the core's present mode
   const code = codeOnly(read('src/lib/design-canvas.js'));
-  ok(/const live = !st\.present && \(st\.pick \|\| st\.focused === rec\.file\);/.test(code), 'lane design-present: while presenting every frame stays SHIELDED (nothing in an artboard takes the presenter\'s key or click)');
-  ok(/if \(fullscreen && doc\.fullscreenEnabled && !doc\.fullscreenElement && typeof vp\.requestFullscreen === 'function'\) \{/.test(code) && /Promise\.resolve\(vp\.requestFullscreen\(\)\)\.catch\(\(\) => \{ if \(st\.present\) st\.present\.fs = false; \}\)/.test(code), '…fullscreen is asked for only when asked, allowed and free — a refusal is swallowed and the viewport fills its pane');
-  ok(/doc\.addEventListener\('fullscreenchange', \(\) => \{[\s\S]{0,200}?if \(p\.fs\) endPresent\(\);\n\s+\}, L\);/.test(code), '…the browser\'s own way out of fullscreen ends the presentation with it (on the canvas\'s signal)');
-  ok(/const step = presentKey\(e\.key\);\n\s+if \(!step\) return;\n\s+e\.preventDefault\(\);\n\s+e\.stopPropagation\(\);\n\s+presentGo\(step\);/.test(code) && /presentGesture\(rec\.x - rec\.x0, rec\.y - rec\.y0, DRAG_SLOP_PX\)/.test(code) && /e\.preventDefault\(\);\n\s+if \(st\.present\) return;\s*\n\s+const unit = e\.deltaMode/.test(code), '…a key goes through presentKey (any other key stays the browser\'s), a release through presentGesture; the wheel never moves the presented view');
-  ok(/ptitle\.textContent = f \? f\.title : '';/.test(code) && /pcount\.textContent = `\$\{p\.i \+ 1\} \/ \$\{p\.order\.length\}`;/.test(code), '…the chrome is text (the counter, the artboard\'s title — agent-written)');
+  ok(verdictOf(/const live = !st\.present && \(st\.pick \|\| st\.focused === rec\.file\);/.test(code)), 'lane design-present: while presenting every frame stays SHIELDED (nothing in an artboard takes the presenter\'s key or click)');
+  ok(gateOf(/if \(fullscreen && doc\.fullscreenEnabled && !doc\.fullscreenElement && typeof vp\.requestFullscreen === 'function'\) \{/.test(code)) && verdictOf(/Promise\.resolve\(vp\.requestFullscreen\(\)\)\.catch\(\(\) => \{ if \(st\.present\) st\.present\.fs = false; \}\)/.test(code)), '…fullscreen is asked for only when asked, allowed and free — a refusal is swallowed and the viewport fills its pane');
+  ok(verdictOf(/doc\.addEventListener\('fullscreenchange', \(\) => \{[\s\S]{0,200}?if \(p\.fs\) endPresent\(\);\n\s+\}, L\);/.test(code)), '…the browser\'s own way out of fullscreen ends the presentation with it (on the canvas\'s signal)');
+  ok(gateOf(/const step = presentKey\(e\.key\);\n\s+if \(!step\) return;\n\s+e\.preventDefault\(\);\n\s+e\.stopPropagation\(\);\n\s+presentGo\(step\);/.test(code)) && gateOf(/presentGesture\(rec\.x - rec\.x0, rec\.y - rec\.y0, DRAG_SLOP_PX\)/.test(code)) && verdictOf(/e\.preventDefault\(\);\n\s+if \(st\.present\) return;\s*\n\s+const unit = e\.deltaMode/.test(code)), '…a key goes through presentKey (any other key stays the browser\'s), a release through presentGesture; the wheel never moves the presented view');
+  ok(gateOf(/ptitle\.textContent = f \? f\.title : '';/.test(code)) && verdictOf(/pcount\.textContent = `\$\{p\.i \+ 1\} \/ \$\{p\.order\.length\}`;/.test(code)), '…the chrome is text (the counter, the artboard\'s title — agent-written)');
 }
 
 console.log('⑥b wiring pins — the Design window');
 {
   const w = read('src/lib/design-window.js');
   const code = codeOnly(w);
-  ok(/registerWindowType\(\{\s*type: 'design', label: 'Design',[\s\S]{0,120}?action: 'openDesign', replay:/.test(code), "the window type `design` registers with the openSpec action `openDesign`");
-  ok(/const openSpec = \{ action: 'openDesign', host: h, dir: d, sessionId: sessionId \|\| '' \};/.test(code), 'the openSpec is {action, host, dir, sessionId} (the contract §3.5)');
-  ok(/app\.wm\.revealWindow\(existing\.id, \{ replay: !!syncId \}\)/.test(code), 'ONE window per (host, dir): an open one is revealed through the door (§62)');
+  ok(verdictOf(/registerWindowType\(\{\s*type: 'design', label: 'Design',[\s\S]{0,120}?action: 'openDesign', replay:/.test(code)), "the window type `design` registers with the openSpec action `openDesign`");
+  ok(verdictOf(/const openSpec = \{ action: 'openDesign', host: h, dir: d, sessionId: sessionId \|\| '' \};/.test(code)), 'the openSpec is {action, host, dir, sessionId} (the contract §3.5)');
+  ok(verdictOf(/app\.wm\.revealWindow\(existing\.id, \{ replay: !!syncId \}\)/.test(code)), 'ONE window per (host, dir): an open one is revealed through the door (§62)');
   ok(!/addEventListener\('message'/.test(code), 'the window adds NO message listener of its own — the canvas core\'s fenced one is the only door from a frame');
   {
     const ch = codeOnly(read('src/lib/design-changes.js'));
-    ok(!/addEventListener\('message'|postMessage\(/.test(ch) && /canvas\.listen\(/.test(ch) && (ch.match(/canvas\.tell\(/g) || []).length === 3, 'the changes strip (lane design-changes) hears frames ONLY through the canvas core (listen) and speaks only through its fenced tell — no message listener, no postMessage of its own');
-    ok(/if \(m\.edit === 'style' && pending\.get\(\[m\.file, m\.ref, m\.prop\]\.join\('\\u0001'\)\) !== m\.to\) return;/.test(ch), '…and a style report becomes a chip only when it is the nudge the strip itself asked for');
-    ok(/fetchJson\('\/api\/design\/changes', \{ method: 'POST'[\s\S]{0,140}?body: JSON\.stringify\(\{ sessionId: winInfo\._design\.sessionId, host, dir, items: itemsOf\(sent\) \}\) \}\)/.test(ch) && /mountDesignChanges\(\{ winInfo, canvas, stage, signal, phone, host: h, dir: d, sayChip, closeComposer, composer: \(\) => composer \}\)/.test(code) && /changes\.composer\(box, foot, ta\);/.test(code), 'Send all = ONE POST /api/design/changes {sessionId, host, dir, items}; the window mounts the strip in one line + one composer seam');
+    ok(!/addEventListener\('message'|postMessage\(/.test(ch) && gateOf(/canvas\.listen\(/.test(ch)) && (ch.match(/canvas\.tell\(/g) || []).length === 3, 'the changes strip (lane design-changes) hears frames ONLY through the canvas core (listen) and speaks only through its fenced tell — no message listener, no postMessage of its own');
+    ok(verdictOf(/if \(m\.edit === 'style' && pending\.get\(\[m\.file, m\.ref, m\.prop\]\.join\('\\u0001'\)\) !== m\.to\) return;/.test(ch)), '…and a style report becomes a chip only when it is the nudge the strip itself asked for');
+    ok(gateOf(/fetchJson\('\/api\/design\/changes', \{ method: 'POST'[\s\S]{0,140}?body: JSON\.stringify\(\{ sessionId: winInfo\._design\.sessionId, host, dir, items: itemsOf\(sent\) \}\) \}\)/.test(ch)) && gateOf(/mountDesignChanges\(\{ winInfo, canvas, stage, signal, phone, host: h, dir: d, sayChip, closeComposer, composer: \(\) => composer \}\)/.test(code)) && verdictOf(/changes\.composer\(box, foot, ta\);/.test(code)), 'Send all = ONE POST /api/design/changes {sessionId, host, dir, items}; the window mounts the strip in one line + one composer seam');
     const inner = [...ch.matchAll(/\.innerHTML = ([^\n;]+);/g)].map((x) => x[1].trim());
-    ok(inner.every((r) => /^UI_ICONS\.\w+$/.test(r)) && /words\.textContent = chipWords\(c\)/.test(ch), `the strip draws chips as text (every innerHTML write an icons.js constant: ${inner.join(' | ')})`);
+    ok(gateOf(inner.every((r) => /^UI_ICONS\.\w+$/.test(r))) && verdictOf(/words\.textContent = chipWords\(c\)/.test(ch)), `the strip draws chips as text (every innerHTML write an icons.js constant: ${inner.join(' | ')})`);
     const ck = [...ch.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((x) => x[1].replace(/\\'/g, "'"));
     const zz = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, jj = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
     const miss = [...new Set(ck)].filter((k) => !zz[k] || !jj[k]);
@@ -793,53 +793,53 @@ console.log('⑥b wiring pins — the Design window');
   {
     // lane design-present
     const pr = codeOnly(read('src/lib/design-present.js'));
-    ok(!/addEventListener\('message'|postMessage\(/.test(pr) && /mountDesignPresent\(\{ winInfo, canvas, button: presentBtn, signal, host: h, dir: d, sayChip, stopPick: \(\) => \{ if \(canvas\.pick\(\)\) togglePick\(\); \} \}\);/.test(code) && /ROW_ACTS\.present = \(\) => present\.start\(\);/.test(code), 'lane design-present: the window mounts ▶ Present / Print all / the downloads in ONE line (+ its bar button and ⋯ row); the module adds no message door');
-    ok(/ifr\.setAttribute\('sandbox', 'allow-scripts allow-modals'\);/.test(pr) && /writeFrame\(ifr, printAllSrcdoc\(list\), FRAME_HOST\);/.test(pr) && /const order = presentOrder\(all, canvas\.page\(\)\);/.test(pr) && /if \(!f && frames\.length > 1\) \{ present\.printAll\(\); return; \}/.test(code), '…Print all = the page\'s artboards in reading order in ONE transient frame sandboxed allow-scripts allow-modals (Print\'s twin); Print with nothing open on a page of several = all of them');
-    ok(/fetch\('\/api\/design\/bundle\?' \+ q\.toString\(\)\)/.test(pr) && /save\('\/api\/download-zip\?' \+ q\.toString\(\), ''\);/.test(pr) && /sayChip\(j && j\.error \? t\('Download failed: \{why\}'/.test(pr), '…Download HTML = GET /api/design/bundle (a refusal is the chip in the hub\'s words); Download folder = the File Explorer\'s /api/download-zip');
+    ok(!/addEventListener\('message'|postMessage\(/.test(pr) && gateOf(/mountDesignPresent\(\{ winInfo, canvas, button: presentBtn, signal, host: h, dir: d, sayChip, stopPick: \(\) => \{ if \(canvas\.pick\(\)\) togglePick\(\); \} \}\);/.test(code)) && verdictOf(/ROW_ACTS\.present = \(\) => present\.start\(\);/.test(code)), 'lane design-present: the window mounts ▶ Present / Print all / the downloads in ONE line (+ its bar button and ⋯ row); the module adds no message door');
+    ok(gateOf(/ifr\.setAttribute\('sandbox', 'allow-scripts allow-modals'\);/.test(pr)) && gateOf(/writeFrame\(ifr, printAllSrcdoc\(list\), FRAME_HOST\);/.test(pr)) && gateOf(/const order = presentOrder\(all, canvas\.page\(\)\);/.test(pr)) && verdictOf(/if \(!f && frames\.length > 1\) \{ present\.printAll\(\); return; \}/.test(code)), '…Print all = the page\'s artboards in reading order in ONE transient frame sandboxed allow-scripts allow-modals (Print\'s twin); Print with nothing open on a page of several = all of them');
+    ok(gateOf(/fetch\('\/api\/design\/bundle\?' \+ q\.toString\(\)\)/.test(pr)) && gateOf(/save\('\/api\/download-zip\?' \+ q\.toString\(\), ''\);/.test(pr)) && verdictOf(/sayChip\(j && j\.error \? t\('Download failed: \{why\}'/.test(pr)), '…Download HTML = GET /api/design/bundle (a refusal is the chip in the hub\'s words); Download folder = the File Explorer\'s /api/download-zip');
     const pk = [...pr.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((x) => x[1].replace(/\\'/g, "'"));
     const zp = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, jp = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
     const missP = [...new Set(pk)].filter((k) => !zp[k] || !jp[k]);
     ok(pk.length >= 10 && missP.length === 0, `every t() literal of the present module (${new Set(pk).size}) has a zh AND a ja entry`, missP.join(' | '));
   }
-  ok(/createDesignCanvas\(canvasHost, \{\s*signal, counterZoom: COUNTER_ZOOM, pickerSrc: pickerSource\(\)/.test(code), 'the canvas is made on the window\'s listener signal, at net zoom 1, with the picker');
-  ok(/fetchJson\('\/api\/design\?' \+ qs\(h, d\)\)/.test(code) && /normalizeRead\(await fetchJson\('\/api\/design\?/.test(code), 'the read is GET /api/design?host&dir through normalizeRead (a failure is loud)');
-  ok(/onFileChanged\(\(det\) => \{[\s\S]{0,300}?\}, \{ signal \}\);/.test(code), 'the file-changed relay is bound to the window\'s signal');
-  ok(/app\.ws\.send\(\{ type: 'design-watch', host: h, dir: d \}\)/.test(code) && /app\.ws\.send\(\{ type: 'design-unwatch', host: h, dir: d \}\)/.test(code) && /if \(connected && !signal\.aborted\) \{ watch\(\); load\(\); \}/.test(code), 'design-watch on open AND on every reconnect, design-unwatch on close');
-  ok(/fetchJson\('\/api\/design\/comment', \{ method: 'POST'[\s\S]{0,140}?body: JSON\.stringify\(\{ sessionId: winInfo\._design\.sessionId, host: h, dir: d, quote: \{ file: p\.file, path: p\.path, tag: p\.tag, text: p\.text \}, text \}\), signal: ctl\.signal \}\)/.test(code), 'a comment = POST /api/design/comment {sessionId, host, dir, quote: the fenced pick facts, text} under the composer\'s own deadline (accept-fixes F1) — the hub spells and belts the line; host + dir name the design whose conversation a STASHED comment waits for (L4 A③b: without them a killed conversation\'s comment was refused no_conversation)');
-  ok(/if \(!r \|\| r\.error \|\| r\.ok === false\) \{ sayChip\(commentRefusalText\(r\)\); return; \}/.test(code), 'a refused comment is a floating chip in words (the typed text stays)');
-  ok(/fetchJson\('\/api\/design\/publish', \{ method: 'POST'[\s\S]{0,140}?JSON\.stringify\(\{ host: hostKey\(host\), dir, title: name\.value\.trim\(\), \.\.\.\(wantPublic === undefined \? \{\} : \{ public: wantPublic \}\) \}\)/.test(code), 'Publish… = POST /api/design/publish {host, dir, title, public?} — `public` rides only when the user changed the box (an untouched box keeps the page as it is)');
-  ok(/fetchJson\('\/api\/designs'\)\.then\(/.test(code) && /pub\.checked = !!page\.public;/.test(code) && /const wantPublic = \(!page \|\| !known \|\| pub\.checked !== !!page\.public\) \? pub\.checked : undefined;/.test(code) && /await info;\n\s+const wantPublic/.test(code), 'L4 B⑤: the publish dialog pre-fills the box from the page\'s current visibility (GET /api/designs → its page) and waits for that answer before it publishes — a republish from the window never flips a public page private unsaid');
-  ok(/setAttribute\('sandbox', 'allow-scripts allow-modals'\)/.test(code) && /writeFrame\(ifr, printSrcdoc\(f\.html, f\), FRAME_HOST\);/.test(code), 'Print = the focused artboard in a transient frame sandboxed allow-scripts allow-modals (never allow-same-origin)');
+  ok(verdictOf(/createDesignCanvas\(canvasHost, \{\s*signal, counterZoom: COUNTER_ZOOM, pickerSrc: pickerSource\(\)/.test(code)), 'the canvas is made on the window\'s listener signal, at net zoom 1, with the picker');
+  ok(gateOf(/fetchJson\('\/api\/design\?' \+ qs\(h, d\)\)/.test(code)) && verdictOf(/normalizeRead\(await fetchJson\('\/api\/design\?/.test(code)), 'the read is GET /api/design?host&dir through normalizeRead (a failure is loud)');
+  ok(verdictOf(/onFileChanged\(\(det\) => \{[\s\S]{0,300}?\}, \{ signal \}\);/.test(code)), 'the file-changed relay is bound to the window\'s signal');
+  ok(gateOf(/app\.ws\.send\(\{ type: 'design-watch', host: h, dir: d \}\)/.test(code)) && gateOf(/app\.ws\.send\(\{ type: 'design-unwatch', host: h, dir: d \}\)/.test(code)) && verdictOf(/if \(connected && !signal\.aborted\) \{ watch\(\); load\(\); \}/.test(code)), 'design-watch on open AND on every reconnect, design-unwatch on close');
+  ok(verdictOf(/fetchJson\('\/api\/design\/comment', \{ method: 'POST'[\s\S]{0,140}?body: JSON\.stringify\(\{ sessionId: winInfo\._design\.sessionId, host: h, dir: d, quote: \{ file: p\.file, path: p\.path, tag: p\.tag, text: p\.text \}, text \}\), signal: ctl\.signal \}\)/.test(code)), 'a comment = POST /api/design/comment {sessionId, host, dir, quote: the fenced pick facts, text} under the composer\'s own deadline (accept-fixes F1) — the hub spells and belts the line; host + dir name the design whose conversation a STASHED comment waits for (L4 A③b: without them a killed conversation\'s comment was refused no_conversation)');
+  ok(verdictOf(/if \(!r \|\| r\.error \|\| r\.ok === false\) \{ sayChip\(commentRefusalText\(r\)\); return; \}/.test(code)), 'a refused comment is a floating chip in words (the typed text stays)');
+  ok(verdictOf(/fetchJson\('\/api\/design\/publish', \{ method: 'POST'[\s\S]{0,140}?JSON\.stringify\(\{ host: hostKey\(host\), dir, title: name\.value\.trim\(\), \.\.\.\(wantPublic === undefined \? \{\} : \{ public: wantPublic \}\) \}\)/.test(code)), 'Publish… = POST /api/design/publish {host, dir, title, public?} — `public` rides only when the user changed the box (an untouched box keeps the page as it is)');
+  ok(gateOf(/fetchJson\('\/api\/designs'\)\.then\(/.test(code)) && gateOf(/pub\.checked = !!page\.public;/.test(code)) && gateOf(/const wantPublic = \(!page \|\| !known \|\| pub\.checked !== !!page\.public\) \? pub\.checked : undefined;/.test(code)) && verdictOf(/await info;\n\s+const wantPublic/.test(code)), 'L4 B⑤: the publish dialog pre-fills the box from the page\'s current visibility (GET /api/designs → its page) and waits for that answer before it publishes — a republish from the window never flips a public page private unsaid');
+  ok(gateOf(/setAttribute\('sandbox', 'allow-scripts allow-modals'\)/.test(code)) && verdictOf(/writeFrame\(ifr, printSrcdoc\(f\.html, f\), FRAME_HOST\);/.test(code)), 'Print = the focused artboard in a transient frame sandboxed allow-scripts allow-modals (never allow-same-origin)');
   const inner = [...code.matchAll(/\.innerHTML = ([^\n;]+);/g)].map((x) => x[1].trim());
-  ok(inner.length >= 2 && inner.every((r) => /^UI_ICONS(\[icon\]|\.\w+)$/.test(r)), `every innerHTML write in the window is an icons.js constant (${inner.join(' | ')})`);
-  ok(/quote\.textContent = quoteLine\(pick\)/.test(code), 'the quote line is drawn as text');
+  ok(inner.length >= 2 && verdictOf(inner.every((r) => /^UI_ICONS(\[icon\]|\.\w+)$/.test(r))), `every innerHTML write in the window is an icons.js constant (${inner.join(' | ')})`);
+  ok(verdictOf(/quote\.textContent = quoteLine\(pick\)/.test(code)), 'the quote line is drawn as text');
   const keys = [...code.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((x) => x[1].replace(/\\'/g, "'"));
   const z = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, j = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
   const missing = [...new Set(keys)].filter((k) => !z[k] || !j[k]);
   ok(keys.length >= 40 && missing.length === 0, `every t() literal of the window (${new Set(keys).size}) has a zh AND a ja entry`, missing.join(' | '));
   const app = codeOnly(read('src/lib/app.js'));
-  ok(/openDesign\(opts\) \{ return openDesignFn\(this, opts \|\| \{\}\); \}/.test(app) && /installDesignWindow\(this\);/.test(app), 'app.js: app.openDesign (the replay\'s door) + the hub\'s design-open push installed');
+  ok(gateOf(/openDesign\(opts\) \{ return openDesignFn\(this, opts \|\| \{\}\); \}/.test(app)) && verdictOf(/installDesignWindow\(this\);/.test(app)), 'app.js: app.openDesign (the replay\'s door) + the hub\'s design-open push installed');
 }
 
 console.log('⑥c the published page\'s runtime (the second esbuild entry)');
 {
   const pkg = JSON.parse(read('package.json'));
-  ok(/ && esbuild src\/design-viewer-entry\.js --bundle --outfile=public\/design-viewer\.js --format=iife --platform=browser --target=es2020 --minify && /.test(pkg.scripts['build:bundles']), 'npm run build writes public/design-viewer.js (an IIFE: the hub inlines it into a <script>)');
-  ok(/^public\/design-viewer\.js$/m.test(read('.gitignore')) && /^public\/novnc\.js$/m.test(read('.gitignore')), 'the built runtime is gitignored like public/novnc.js (the precedent)');
+  ok(verdictOf(/ && esbuild src\/design-viewer-entry\.js --bundle --outfile=public\/design-viewer\.js --format=iife --platform=browser --target=es2020 --minify && /.test(pkg.scripts['build:bundles'])), 'npm run build writes public/design-viewer.js (an IIFE: the hub inlines it into a <script>)');
+  ok(gateOf(/^public\/design-viewer\.js$/m.test(read('.gitignore'))) && verdictOf(/^public\/novnc\.js$/m.test(read('.gitignore'))), 'the built runtime is gitignored like public/novnc.js (the precedent)');
   const e = read('src/design-viewer-entry.js');
   const ec = codeOnly(e);
   const imports = [...ec.matchAll(/from '([^']+)'/g)].map((x) => x[1]);
-  ok(eq(imports.sort(), ['./lib/design-canvas-model.js', './lib/design-canvas.js']), `the runtime imports only the canvas core + its rules — no i18n (1.5 MB), no utils, no picker (${imports.join(', ')})`);
-  ok(/doc\.getElementById\(DOC_ID\)/.test(ec) && /const DOC_ID = 'vibespace-design-doc';/.test(ec) && /const ROOT_ID = 'vibespace-design-root';/.test(ec) && /normalizeDoc\(raw\)/.test(ec), 'it reads the state block #vibespace-design-doc through normalizeDoc and mounts into #vibespace-design-root (the hub\'s bundleCanvas shell)');
-  ok(!/innerHTML/.test(ec) && /title\.textContent = read\.title/.test(ec), 'its chrome is textContent only (the title and every name are the agent\'s)');
+  ok(verdictOf(eq(imports.sort(), ['./lib/design-canvas-model.js', './lib/design-canvas.js'])), `the runtime imports only the canvas core + its rules — no i18n (1.5 MB), no utils, no picker (${imports.join(', ')})`);
+  ok(gateOf(/doc\.getElementById\(DOC_ID\)/.test(ec)) && gateOf(/const DOC_ID = 'vibespace-design-doc';/.test(ec)) && gateOf(/const ROOT_ID = 'vibespace-design-root';/.test(ec)) && verdictOf(/normalizeDoc\(raw\)/.test(ec)), 'it reads the state block #vibespace-design-doc through normalizeDoc and mounts into #vibespace-design-root (the hub\'s bundleCanvas shell)');
+  ok(!/innerHTML/.test(ec) && verdictOf(/title\.textContent = read\.title/.test(ec)), 'its chrome is textContent only (the title and every name are the agent\'s)');
   ok(!/pickerSrc:/.test(ec) && !/onPick:/.test(ec), 'a published page carries no picker and takes no comment');
   const V = await import(pathToFileURL(path.join(REPO, 'src/design-viewer-entry.js')).href);
   const k = (o) => Object.keys(o).sort().join(',');
-  ok(k(V.WORDS.en) === k(V.WORDS.zh) && k(V.WORDS.en) === k(V.WORDS.ja) && Object.values(V.WORDS).every((w) => Object.values(w).every((x) => typeof x === 'string' && x)), 'its words exist in en / zh / ja, the same keys, none empty');
+  ok(k(V.WORDS.en) === k(V.WORDS.zh) && k(V.WORDS.en) === k(V.WORDS.ja) && verdictOf(Object.values(V.WORDS).every((w) => Object.values(w).every((x) => typeof x === 'string' && x))), 'its words exist in en / zh / ja, the same keys, none empty');
   ok(V.wordsFor('zh-CN') === V.WORDS.zh && V.wordsFor('ja') === V.WORDS.ja && V.wordsFor('fr') === V.WORDS.en && V.wordsFor('') === V.WORDS.en, 'the reader\'s browser language picks the column (anything else: English)');
   const lits = V.VIEWER_CSS.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g) || [];
   const tokenDefs = V.VIEWER_CSS.split('\n').filter((l) => /^:root\{|^@media \(prefers-color-scheme/.test(l)).join('\n');
-  ok(lits.every((x) => tokenDefs.includes(x)), 'every colour literal in its stylesheet is a theme-token DEFINITION on :root (light / dark) — the rules read tokens');
+  ok(verdictOf(lits.every((x) => tokenDefs.includes(x))), 'every colour literal in its stylesheet is a theme-token DEFINITION on :root (light / dark) — the rules read tokens');
   const { createRequire } = await import('node:module');
   const esbuild = createRequire(import.meta.url)(path.join(REPO, 'node_modules/esbuild'));
   const out = esbuild.buildSync({ entryPoints: [path.join(REPO, 'src/design-viewer-entry.js')], bundle: true, minify: true, write: false, format: 'iife', platform: 'browser', target: 'es2020' });
@@ -849,9 +849,9 @@ console.log('⑥c the published page\'s runtime (the second esbuild entry)');
   ok(kb > 8 && kb < 80, `built in-process exactly as npm run build builds it: ${kb.toFixed(1)} KB (2.369.202: 44.6 KB; under 80)`);
   {
     const ec2 = codeOnly(read('src/design-viewer-entry.js'));
-    ok(/const play = button\('dv-present', W\.present, W\.present\);/.test(ec2) && /play\.onclick = \(\) => \{ hint\.remove\(\); canvas\.present\(true, \{ words: PW \}\); \};/.test(ec2), 'lane design-present: the published page\'s ▶ Present = the canvas core\'s present mode (fullscreen on the reader\'s press)');
-    ok(/return win\.location\.hash === '#present';/.test(ec2) && /canvas\.present\(true, \{ words: PW, fullscreen: false \}\)/.test(ec2) && /win\.addEventListener\('hashchange', presentFromHash\)/.test(ec2), '…and an address ending in #present presents from the first look, WITHOUT asking for fullscreen (no press of the reader\'s)');
-    ok(/root\.classList\.toggle\('dv-presenting', !!s\.present\);/.test(ec2) && /\.dv-presenting \.dv-bar,\.dv-presenting \.dv-hint\{display:none\}/.test(V.VIEWER_CSS) && /createElementNS\('http:\/\/www\.w3\.org\/2000\/svg', 'svg'\)/.test(ec2), 'its bar steps aside while presenting; the ▶ mark is an SVG drawn by createElementNS (never an emoji, never innerHTML)');
+    ok(gateOf(/const play = button\('dv-present', W\.present, W\.present\);/.test(ec2)) && verdictOf(/play\.onclick = \(\) => \{ hint\.remove\(\); canvas\.present\(true, \{ words: PW \}\); \};/.test(ec2)), 'lane design-present: the published page\'s ▶ Present = the canvas core\'s present mode (fullscreen on the reader\'s press)');
+    ok(gateOf(/return win\.location\.hash === '#present';/.test(ec2)) && gateOf(/canvas\.present\(true, \{ words: PW, fullscreen: false \}\)/.test(ec2)) && verdictOf(/win\.addEventListener\('hashchange', presentFromHash\)/.test(ec2)), '…and an address ending in #present presents from the first look, WITHOUT asking for fullscreen (no press of the reader\'s)');
+    ok(gateOf(/root\.classList\.toggle\('dv-presenting', !!s\.present\);/.test(ec2)) && gateOf(/\.dv-presenting \.dv-bar,\.dv-presenting \.dv-hint\{display:none\}/.test(V.VIEWER_CSS)) && verdictOf(/createElementNS\('http:\/\/www\.w3\.org\/2000\/svg', 'svg'\)/.test(ec2)), 'its bar steps aside while presenting; the ▶ mark is an SVG drawn by createElementNS (never an emoji, never innerHTML)');
   }
 }
 
@@ -859,7 +859,7 @@ console.log('⑦ the model is PURE');
 {
   const src = read(MODEL_REL);
   const imps = [...src.matchAll(/^\s*import\b[^;]*?from\s+'([^']+)'/gm)].map((x) => x[1]);
-  ok(eq(imps, ['../design-model.js']) && !/\brequire\(/.test(src), `design-canvas-model.js imports ONE module, the hub's PURE design-model.js (${imps.join(', ')})`);
+  ok(gateOf(eq(imps, ['../design-model.js'])) && !/\brequire\(/.test(src), `design-canvas-model.js imports ONE module, the hub's PURE design-model.js (${imps.join(', ')})`);
   const dms = read('src/design-model.js');
   ok(!/^\s*import\b/m.test(dms) && !/\brequire\(/.test(dms), '…and design-model.js imports nothing');
   ok(!/\b(document|window)\.|\blocalStorage\b|\bfetch\(/.test(codeOnly(src)), 'and touches no DOM, storage or network');
@@ -908,7 +908,7 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
     if (!src.includes(a)) { ok(false, `${rule} CONTROL: the patch anchor is still in the module`, a); continue; }
     const f = C.write(MODEL_REL, src.replace(a, b), rule);
     const mm = await import(pathToFileURL(f).href);
-    ok(runTable(M, rule) && !runTable(mm, rule), `${rule} CONTROL (${what}): the real module passes its table, the patched copy FAILS it`);
+    ok(gateOf(runTable(M, rule)) && !runTable(mm, rule), `${rule} CONTROL (${what}): the real module passes its table, the patched copy FAILS it`);
   }
   // the picker: its source check removed (a design-mode from ANY window turns picking on)
   {
@@ -921,7 +921,7 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
       const pm = await import(pathToFileURL(f).href);
       const real = (await pickerTable(P.pickerSource())).every(([x, y]) => eq(x, y));
       const mut = (await pickerTable(pm.pickerSource())).every(([x, y]) => eq(x, y));
-      ok(real && !mut, 'picker CONTROL (the parent check removed — any window may switch picking on): the real picker passes its table, the patched copy FAILS it');
+      ok(gateOf(real) && !mut, 'picker CONTROL (the parent check removed — any window may switch picking on): the real picker passes its table, the patched copy FAILS it');
     }
     // lane design-tweaks: a knob's value taken unjudged (a value that closes a rule restyles the page)
     const a3 = "    if (typeof v !== 'string' || !v || v.length > 80 || TW_BAD.test(v) || !root) return;\n";
@@ -960,11 +960,11 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
       if (!dsrc.includes(a)) { ok(false, `core CONTROL ${tag}: the patch anchor is still in the module`, a); continue; }
       const f = C.write(DC_REL, dsrc.replace(a, b), `core-${tag}`);
       const mr = viewRun(await import(pathToFileURL(f).href));
-      ok(!!real && viewRows(real).every(([x, y]) => eq(x, y)) && !!mr && !mr.threw && !viewRows(mr).every(([x, y]) => eq(x, y)) && saw(mr), `core CONTROL (${what}): the real core passes ①b, the patched copy FAILS it — ${said}`, mr && (mr.threw ? mr : { failed: viewRows(mr).filter(([x, y]) => !eq(x, y)).map((row) => row[2]) }));
+      ok(!!real && gateOf(viewRows(real).every(([x, y]) => eq(x, y))) && !!mr && !mr.threw && !viewRows(mr).every(([x, y]) => eq(x, y)) && verdictOf(saw(mr)), `core CONTROL (${what}): the real core passes ①b, the patched copy FAILS it — ${said}`, mr && (mr.threw ? mr : { failed: viewRows(mr).filter(([x, y]) => !eq(x, y)).map((row) => row[2]) }));
     }
   }
-  for (const r of copiesCensus(C.files, C.dir, REPO, { minCopies: MUTANTS.length + 1, label: '⑧ ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(C.files, C.dir, REPO, { minCopies: MUTANTS.length + 1, label: '⑧ ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'} · ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

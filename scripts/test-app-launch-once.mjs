@@ -57,7 +57,7 @@ const K = require(path.join(repo, 'src/server/desktop-app-keeper.js'));
 const M = require(path.join(repo, 'src/desktop-apps.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } return !!c; };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 8000, step = 25) => { const t = Date.now() + ms; while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
 const T0 = Date.now();
@@ -120,21 +120,21 @@ await leg('①②③', async () => {
   console.log('① a second start the singleton hands over ⇒ quickExit, the timed journal line, ONE notice, the window keeps its sentence');
   const first = await keeper.launch({ appId: 'single' }, { launchedBy: { kind: 'agent', sessionId: 'sess-a', name: 'Install app chrome' } });
   const r1 = await settle(first.id);
-  ok(r1 && r1.state === 'ready' && r1.display === FAKE_DISPLAY, 'the first instance is ready on its display', r1 && { state: r1.state, err: r1.lastError });
+  ok(gateOf(r1) && r1.state === 'ready' && r1.display === FAKE_DISPLAY, 'the first instance is ready on its display', r1 && { state: r1.state, err: r1.lastError });
   await until(() => fs.existsSync(path.join(home, '.single.lock')));
   ok(Number(fs.readFileSync(path.join(home, '.single.lock'), 'utf8')) === appPid(first.id), 'it holds the singleton lock with its own pid (the app part)');
-  ok(r1 && r1.launchedBy && r1.launchedBy.kind === 'agent' && r1.launchedBy.name === 'Install app chrome', '③ the record says who started it: the agent session, by name', r1 && r1.launchedBy);
+  ok(gateOf(r1) && gateOf(r1.launchedBy) && r1.launchedBy.kind === 'agent' && r1.launchedBy.name === 'Install app chrome', '③ the record says who started it: the agent session, by name', r1 && r1.launchedBy);
   const second = await keeper.launch({ appId: 'single' }); // the pre-fix card / an agent's open: no ifRunning
   const r2 = await ended(second.id);
-  ok(r2 && r2.state === 'exited' && r2.exitCode === 0, 'the second start ended at once with code 0 (handed over)', r2 && { state: r2.state, code: r2.exitCode });
+  ok(gateOf(r2) && r2.state === 'exited' && r2.exitCode === 0, 'the second start ended at once with code 0 (handed over)', r2 && { state: r2.state, code: r2.exitCode });
   const q = r2 && r2.quickExit;
-  ok(q && q.afterMs < M.QUICK_EXIT_MS && q.code === 0 && q.signal === null, `quickExit on the record: ${q && q.afterMs} ms < ${M.QUICK_EXIT_MS}, code 0`, q);
-  ok(q && q.running === first.id && q.runningDisplay === FAKE_DISPLAY, 'quickExit names the instance that still runs and where (the attach door)', q);
+  ok(gateOf(q) && q.afterMs < M.QUICK_EXIT_MS && q.code === 0 && q.signal === null, `quickExit on the record: ${q && q.afterMs} ms < ${M.QUICK_EXIT_MS}, code 0`, q);
+  ok(gateOf(q) && q.running === first.id && q.runningDisplay === FAKE_DISPLAY, 'quickExit names the instance that still runs and where (the attach door)', q);
   const jl = lines.find((l) => l.startsWith(`[desktop] ${second.id} exited: application exited (code 0) — `));
-  ok(jl && /— (?:(?:under 0\.1|\d+\.\d) s after ready|before ready, (?:under 0\.1|\d+\.\d) s after it started)$/.test(jl), 'the journal line carries WHEN it exited', jl || lines.filter((l) => l.includes(second.id)));
+  ok(gateOf(jl) && verdictOf(/— (?:(?:under 0\.1|\d+\.\d) s after ready|before ready, (?:under 0\.1|\d+\.\d) s after it started)$/.test(jl)), 'the journal line carries WHEN it exited', jl || lines.filter((l) => l.includes(second.id)));
   await until(() => notices.length);
-  ok(notices.length === 1 && notices[0].key === `desktop-app-quick-exit:${second.id}` && notices[0].opts && notices[0].opts.level === 'warn', 'ONE server notice under the record\'s own key', notices);
-  ok(notices[0] && /Single App exited right after it started \(code 0, (?:under 0\.1|\d+\.\d) s after it started\) — the same program is already running on :4093 \(started by agent session Install app chrome\): open it from Apps\./.test(notices[0].text), 'the notice says where it runs and who started it', notices[0] && notices[0].text);
+  ok(notices.length === 1 && notices[0].key === `desktop-app-quick-exit:${second.id}` && gateOf(notices[0].opts) && notices[0].opts.level === 'warn', 'ONE server notice under the record\'s own key', notices);
+  ok(gateOf(notices[0]) && verdictOf(/Single App exited right after it started \(code 0, (?:under 0\.1|\d+\.\d) s after it started\) — the same program is already running on :4093 \(started by agent session Install app chrome\): open it from Apps\./.test(notices[0].text)), 'the notice says where it runs and who started it', notices[0] && notices[0].text);
   const v2 = M.exitCloseVerdict(r2, { leased: false });
   ok(v2.close === false && v2.why === 'quick-exit', 'the window is NOT closed: it keeps the sentence (exitCloseVerdict quick-exit)', v2);
   ok(keeper.get(first.id).state === 'ready', 'the first instance is untouched');
@@ -142,11 +142,11 @@ await leg('①②③', async () => {
   console.log('② the card\'s press on a running app ATTACHES — no second record, no second process');
   const before = keeper.listApps().length;
   const at = await keeper.launch({ appId: 'single', ifRunning: 'attach' });
-  ok(at && at.attached === true && at.id === first.id && at.state === 'ready', 'ifRunning attach answers the RUNNING record (attached: true)', at && { id: at.id, attached: at.attached });
+  ok(gateOf(at) && at.attached === true && at.id === first.id && at.state === 'ready', 'ifRunning attach answers the RUNNING record (attached: true)', at && { id: at.id, attached: at.attached });
   ok(keeper.listApps().length === before, 'no new record was made', keeper.listApps().map((r) => r.id));
-  ok(lines.some((l) => l === `[desktop] launch of single attached to ${first.id} (running on ${FAKE_DISPLAY}) — no second instance started`), 'the attach is journalled');
+  ok(verdictOf(lines.some((l) => l === `[desktop] launch of single attached to ${first.id} (running on ${FAKE_DISPLAY}) — no second instance started`)), 'the attach is journalled');
   let bad = null; try { await keeper.launch({ appId: 'single', ifRunning: 'again' }); } catch (e) { bad = e; }
-  ok(bad && bad.code === 'bad-request' && /ifRunning must be "attach"/.test(bad.message), 'an unknown ifRunning is refused by name', bad && bad.message);
+  ok(gateOf(bad) && bad.code === 'bad-request' && verdictOf(/ifRunning must be "attach"/.test(bad.message)), 'an unknown ifRunning is refused by name', bad && bad.message);
   const lv = M.launchVerdict({ row: { id: 'single', runsTwice: false }, apps: keeper.listApps(), host: 'local' });
   ok(lv.act === 'attach' && lv.target.id === first.id && lv.again === false && lv.running.length === 1, 'the card\'s verdict over the live list: attach, no "Open another" for a single-instance app', { act: lv.act, again: lv.again, n: lv.running.length });
 
@@ -156,18 +156,18 @@ await leg('① CONTROL', async () => {
   const n0 = notices.length;
   const g = await keeper.launch({ appId: 'gate' }, { launchedBy: { kind: 'person' } });
   await settle(g.id);
-  ok(keeper.get(g.id).launchedBy && keeper.get(g.id).launchedBy.kind === 'person', '③ a person\'s launch says so (launchedBy person)', keeper.get(g.id).launchedBy);
+  ok(gateOf(keeper.get(g.id).launchedBy) && keeper.get(g.id).launchedBy.kind === 'person', '③ a person\'s launch says so (launchedBy person)', keeper.get(g.id).launchedBy);
   await until(() => appPid(g.id));
   skew += 3000 + 1000; // the keeper's clock: the app has run past the quick window (QUICK_EXIT_MS = 3 s, pinned in test-desktop-apps)
   fs.writeFileSync(path.join(root, 'gate-open'), '1');
   const rg = await ended(g.id);
-  ok(rg && rg.state === 'exited' && rg.exitCode === 0 && !rg.quickExit, 'it exited code 0 WITHOUT quickExit', rg && { state: rg.state, quickExit: rg.quickExit });
+  ok(gateOf(rg) && rg.state === 'exited' && rg.exitCode === 0 && !rg.quickExit, 'it exited code 0 WITHOUT quickExit', rg && { state: rg.state, quickExit: rg.quickExit });
   await sleep(150);
   ok(notices.length === n0, 'no notice for it', notices.map((n) => n.key));
   const vg = M.exitCloseVerdict(rg, { leased: false });
   ok(vg.close === true && vg.why === 'exited', 'its window closes as before (exited)', vg);
   const jg = lines.find((l) => l.startsWith(`[desktop] ${g.id} exited: application exited (code 0) — `));
-  ok(jg && /— (?:under 0\.1|\d+\.\d) s after ready$/.test(jg), 'its journal line carries the timing too', jg);
+  ok(gateOf(jg) && verdictOf(/— (?:under 0\.1|\d+\.\d) s after ready$/.test(jg)), 'its journal line carries the timing too', jg);
 
 });
 await leg('⑥', async () => {
@@ -177,11 +177,11 @@ await leg('⑥', async () => {
   await settle(a.id);
   await until(() => appPid(a.id));
   const st = await keeper.closeAsked(a.id); // the outer ✕'s door: stamped BEFORE close-window is sent
-  ok(st && Number.isFinite(st.closeAskedAt) && st.closeAskedBy === 'window' && st.state === 'ready', 'closeAsked stamps the live record (closeAskedAt, closeAskedBy window) and leaves it running', st && { state: st.state, at: st.closeAskedAt, by: st.closeAskedBy });
+  ok(gateOf(st) && gateOf(Number.isFinite(st.closeAskedAt)) && st.closeAskedBy === 'window' && st.state === 'ready', 'closeAsked stamps the live record (closeAskedAt, closeAskedBy window) and leaves it running', st && { state: st.state, at: st.closeAskedAt, by: st.closeAskedBy });
   fs.writeFileSync(path.join(root, 'gate-asked-open'), '1'); // the app answers the ask at once
   const ra = await ended(a.id);
-  ok(ra && ra.state === 'exited' && ra.exitCode === 0 && !ra.quickExit, 'its exit carries NO quickExit', ra && { state: ra.state, quickExit: ra.quickExit });
-  ok(ra && ra.endedAt - (ra.appAt || ra.startedAt) < M.QUICK_EXIT_MS, `…though it ended inside the quick window (${ra && ra.endedAt - (ra.appAt || ra.startedAt)} ms < ${M.QUICK_EXIT_MS})`);
+  ok(gateOf(ra) && ra.state === 'exited' && ra.exitCode === 0 && !ra.quickExit, 'its exit carries NO quickExit', ra && { state: ra.state, quickExit: ra.quickExit });
+  ok(gateOf(ra) && ra.endedAt - (ra.appAt || ra.startedAt) < M.QUICK_EXIT_MS, `…though it ended inside the quick window (${ra && ra.endedAt - (ra.appAt || ra.startedAt)} ms < ${M.QUICK_EXIT_MS})`);
   await sleep(150);
   ok(notices.length === n0, 'no notice for it', notices.slice(n0).map((n) => n.key));
   const va = M.exitCloseVerdict(ra, { leased: false });
@@ -193,7 +193,7 @@ await leg('⑥', async () => {
   await until(() => appPid(u.id));
   fs.writeFileSync(path.join(root, 'gate-unasked-open'), '1');
   const ru = await ended(u.id);
-  ok(ru && ru.quickExit && ru.quickExit.afterMs < M.QUICK_EXIT_MS && !ru.closeAskedAt, 'quickExit on the unasked record', ru && { quickExit: ru.quickExit, asked: ru.closeAskedAt });
+  ok(gateOf(ru) && gateOf(ru.quickExit) && ru.quickExit.afterMs < M.QUICK_EXIT_MS && !ru.closeAskedAt, 'quickExit on the unasked record', ru && { quickExit: ru.quickExit, asked: ru.closeAskedAt });
   await until(() => notices.length > n0);
   ok(notices.length === n0 + 1 && notices[n0].key === `desktop-app-quick-exit:${u.id}`, 'ONE notice, under its own key', notices.slice(n0).map((n) => n.key));
   const vu = M.exitCloseVerdict(ru, { leased: false });
@@ -205,7 +205,7 @@ await leg('⑥', async () => {
   const iStamp = door.indexOf('/close-asked`'), iRace = door.indexOf('Promise.race([stamped, '), iSend = door.indexOf('view.closeApp()');
   ok(iStamp > 0 && iRace > iStamp && iSend > iRace, 'the outer ✕ POSTs close-asked, waits (bounded) for it, THEN sends close-window', { iStamp, iRace, iSend });
   const R = fs.readFileSync(path.join(repo, 'src/routes/desktop-apps.js'), 'utf8');
-  ok(/router\.post\('\/api\/desktop\/apps\/:id\/close-asked',[\s\S]{0,400}?ctx\.keeper\.closeAsked\(req\.params\.id\)/.test(R) && DS.DESKTOP_SERVE_OPS.includes('close-asked'), 'POST /api/desktop/apps/:id/close-asked → keeper.closeAsked; a paired machine answers the close-asked op');
+  ok(gateOf(/router\.post\('\/api\/desktop\/apps\/:id\/close-asked',[\s\S]{0,400}?ctx\.keeper\.closeAsked\(req\.params\.id\)/.test(R)) && verdictOf(DS.DESKTOP_SERVE_OPS.includes('close-asked')), 'POST /api/desktop/apps/:id/close-asked → keeper.closeAsked; a paired machine answers the close-asked op');
 });
 await leg('④⑤', async () => {
   console.log('④ DEFECT #0 — an installed browser launches on its OWN profile');
@@ -218,13 +218,13 @@ await leg('④⑤', async () => {
   const ds = DS.install({ dataDir, env, display: fakeDisplay, backends: BACKENDS, registryRows: [], log, now, tickMs: 3600e3, apps });
   const L0 = await ds.list();
   const cr = L0.registry.find((r) => r.id === 'app.chrome'), fr = L0.registry.find((r) => r.id === 'app.chromefp');
-  ok(cr && cr.browser === 'chromium' && cr.browserBy === 'exec' && cr.runsTwice === true, 'the installed Chrome row is served as a chromium-family browser that runs twice', cr && { browser: cr.browser, by: cr.browserBy, twice: cr.runsTwice });
-  ok(fr && !fr.browser && fr.runsTwice === false, 'CONTROL: a browser through `flatpak run` stays as typed (no family, one instance)', fr && { browser: fr.browser, twice: fr.runsTwice });
+  ok(gateOf(cr) && cr.browser === 'chromium' && cr.browserBy === 'exec' && cr.runsTwice === true, 'the installed Chrome row is served as a chromium-family browser that runs twice', cr && { browser: cr.browser, by: cr.browserBy, twice: cr.runsTwice });
+  ok(gateOf(fr) && !fr.browser && fr.runsTwice === false, 'CONTROL: a browser through `flatpak run` stays as typed (no family, one instance)', fr && { browser: fr.browser, twice: fr.runsTwice });
   const c1 = await ds.launch({ appId: 'app.chrome' }, {});
   await until(() => fs.existsSync(path.join(root, 'chrome-argv')));
   const argv = fs.existsSync(path.join(root, 'chrome-argv')) ? fs.readFileSync(path.join(root, 'chrome-argv'), 'utf8').trim().split('\n') : [];
   const prof = ds.get(c1.id).profileDir;
-  ok(prof && prof.startsWith(path.join(dataDir, 'desktop-apps') + '/') && argv.includes(`--user-data-dir=${prof}`), 'its argv carries --user-data-dir=<the session\'s own profile under the keeper\'s data dir>', { prof, argv });
+  ok(gateOf(prof) && gateOf(prof.startsWith(path.join(dataDir, 'desktop-apps') + '/')) && verdictOf(argv.includes(`--user-data-dir=${prof}`)), 'its argv carries --user-data-dir=<the session\'s own profile under the keeper\'s data dir>', { prof, argv });
   ok(!argv.some((a) => a.includes(path.join(home, '.config/google-chrome'))) && ds.get(c1.id).browser === 'chromium', 'never the user\'s default ~/.config/google-chrome', argv);
 
   console.log('⑤ the lock fact — who holds a browser\'s default profile');
@@ -234,11 +234,11 @@ await leg('④⑤', async () => {
   const live = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' }); kids.push(live.pid);
   lockAt(`${os.hostname()}-${live.pid}`);
   const f1 = await D.profileLockFact({ home, dir: '.config/google-chrome' });
-  ok(f1 && f1.live === true && f1.pid === live.pid && f1.sid === live.pid, 'a lock to a live pid of THIS host ⇒ live, with its session id (a setsid leader names itself)', f1);
+  ok(gateOf(f1) && f1.live === true && f1.pid === live.pid && f1.sid === live.pid, 'a lock to a live pid of THIS host ⇒ live, with its session id (a setsid leader names itself)', f1);
   const dead = spawn('true'); await new Promise((r) => dead.once('exit', r));
   lockAt(`${os.hostname()}-${dead.pid}`);
   const f2 = await D.profileLockFact({ home, dir: '.config/google-chrome' });
-  ok(f2 && f2.live === false && f2.pid === dead.pid, 'a dead pid ⇒ live false', f2);
+  ok(gateOf(f2) && f2.live === false && f2.pid === dead.pid, 'a dead pid ⇒ live false', f2);
   lockAt(`another-host-${live.pid}`);
   ok((await D.profileLockFact({ home, dir: '.config/google-chrome' })) === null, 'another host\'s lock ⇒ null (its pid says nothing here)');
   lockAt(null);
@@ -247,12 +247,12 @@ await leg('④⑤', async () => {
   lockAt(`${os.hostname()}-${ds.get(c1.id).pids.app}`); // as an OLDER launch on the default profile would hold it
   const L1 = await ds.list();
   const cr1 = L1.registry.find((r) => r.id === 'app.chrome');
-  ok(cr1 && cr1.lock && cr1.lock.live === true && cr1.lock.recordId === c1.id, 'list() names the record whose app process holds the default profile', cr1 && cr1.lock);
+  ok(gateOf(cr1) && gateOf(cr1.lock) && cr1.lock.live === true && cr1.lock.recordId === c1.id, 'list() names the record whose app process holds the default profile', cr1 && cr1.lock);
   const lv2 = M.launchVerdict({ row: { ...cr1, id: 'seen.other' }, apps: L1.apps, host: 'local' });
   ok(lv2.act === 'attach' && lv2.target.id === c1.id && lv2.again === true, 'the card\'s verdict attaches to it — even from another row of the same browser (a typed command, an older launch)', { act: lv2.act, target: lv2.target && lv2.target.id });
   lockAt(`${os.hostname()}-${live.pid}`);
   const cr2 = (await ds.list()).registry.find((r) => r.id === 'app.chrome');
-  ok(cr2 && cr2.lock && cr2.lock.live && cr2.lock.recordId === null, 'a holder outside every record is named without a record', cr2 && cr2.lock);
+  ok(gateOf(cr2) && gateOf(cr2.lock) && gateOf(cr2.lock.live) && cr2.lock.recordId === null, 'a holder outside every record is named without a record', cr2 && cr2.lock);
   await ds.stop(c1.id, { why: 'user' });
   ds.shutdown?.();
 });
@@ -284,11 +284,11 @@ await leg('⑦', async () => {
   const a = await run(DS, 'fixed', async ({ casts, rec, member }) => {
     const first = await until(() => casts.find((c) => c.state === 'exited'), 3000);
     console.log(`  the exit at ${rec.endedAt}; the exited commit ${first ? first.at - rec.endedAt : '?'} ms later, member ${member} alive then: ${first && first.memberAlive}`);
-    ok(first && first.at - rec.endedAt <= DS.EXIT_CENSUS_MS, `the exited record is committed (broadcast) ${first && first.at - rec.endedAt} ms after the exit — within EXIT_CENSUS_MS (${DS.EXIT_CENSUS_MS}), the census its only wait`, first);
-    ok(first && first.memberAlive === true && first.windowsAtExit === 0, 'it carries windowsAtExit 0 and lands while the TERM-proof member still runs (the teardown has not ended)', first);
-    ok(first && M.exitCloseVerdict(first, { leased: false }).close === true, 'every client closes its window on it (exitCloseVerdict close)', first && M.exitCloseVerdict(first, { leased: false }));
+    ok(gateOf(first) && first.at - rec.endedAt <= DS.EXIT_CENSUS_MS, `the exited record is committed (broadcast) ${first && first.at - rec.endedAt} ms after the exit — within EXIT_CENSUS_MS (${DS.EXIT_CENSUS_MS}), the census its only wait`, first);
+    ok(gateOf(first) && first.memberAlive === true && first.windowsAtExit === 0, 'it carries windowsAtExit 0 and lands while the TERM-proof member still runs (the teardown has not ended)', first);
+    ok(gateOf(first) && M.exitCloseVerdict(first, { leased: false }).close === true, 'every client closes its window on it (exitCloseVerdict close)', first && M.exitCloseVerdict(first, { leased: false }));
   });
-  ok(a.gone && a.last && a.rec.state === 'exited' && !/survived/.test(a.rec.lastError || ''), 'the teardown still reaps the member (SIGKILL after STOP_GRACE_MS) and commits again — clean, still exited', { gone: !!a.gone, state: a.rec.state, lastError: a.rec.lastError, casts: a.casts.length });
+  ok(gateOf(a.gone) && gateOf(a.last) && a.rec.state === 'exited' && !/survived/.test(a.rec.lastError || ''), 'the teardown still reaps the member (SIGKILL after STOP_GRACE_MS) and commits again — clean, still exited', { gone: !!a.gone, state: a.rec.state, lastError: a.rec.lastError, casts: a.casts.length });
 
   console.log('⑦ RED CONTROL — the pre-lane order (commit only after the teardown) holds the verdict behind the member');
   const file = path.join(repo, 'src/desktop-serve.js');
@@ -298,10 +298,10 @@ await leg('⑦', async () => {
   m.filename = fn; m.paths = Mod._nodeModulePaths(path.dirname(file)); m._compile(src.replace(from, '        await teardown(rec, handles);\n        commit();'), fn);
   const b = await run(m.exports, 'pre', async ({ casts, member }) => {
     await sleep(400);
-    ok(!casts.some((c) => c.state === 'exited') && D.pidAlive(member), 'CONTROL: 400 ms after the exit no exited commit has been sent — the member still holds the teardown', casts);
+    ok(!casts.some((c) => c.state === 'exited') && verdictOf(D.pidAlive(member)), 'CONTROL: 400 ms after the exit no exited commit has been sent — the member still holds the teardown', casts);
   });
   const bFirst = b.casts.find((c) => c.state === 'exited');
-  ok(bFirst && bFirst.at - b.rec.endedAt >= DS.STOP_GRACE_MS && bFirst.memberAlive === false, `CONTROL: its exited commit came only after the grace ran out (${bFirst && bFirst.at - b.rec.endedAt} ms on the keeper's clock ≥ STOP_GRACE_MS) — the window closed that late`, bFirst);
+  ok(gateOf(bFirst) && bFirst.at - b.rec.endedAt >= DS.STOP_GRACE_MS && bFirst.memberAlive === false, `CONTROL: its exited commit came only after the grace ran out (${bFirst && bFirst.at - b.rec.endedAt} ms on the keeper's clock ≥ STOP_GRACE_MS) — the window closed that late`, bFirst);
 });
 await leg('⑨', async () => {
   console.log('⑨ lane lg-store-writes (主开发 2026-11-20 03:10Z) — on the hub the record file is the store writer\'s: a launch\'s record LANDS before its parts spawn');
@@ -335,7 +335,7 @@ await leg('⑨', async () => {
     return out;
   };
   const r = await run(DS, 'land-refused');
-  ok(r.err === 'desktop_apps_not_on_disk' && r.spawned === 0 && r.records === 0 && r.named.includes('desktop-apps.write'), '⑨ a launch whose record the writer has NOT landed is refused BY NAME — nothing spawned, the record removed (it went to the store writer, never written at the call)', r);
+  ok(r.err === 'desktop_apps_not_on_disk' && r.spawned === 0 && r.records === 0 && verdictOf(r.named.includes('desktop-apps.write')), '⑨ a launch whose record the writer has NOT landed is refused BY NAME — nothing spawned, the record removed (it went to the store writer, never written at the call)', r);
   const MX = mutantCopies('alo-land', repo).load('src/desktop-serve.js', anchored(DSRC, LAND_A, '    /* MUTANT: the parts spawn before the record lands */\n', 'alo-no-land'), 'alo-no-land');
   const x = await run(MX, 'land-cut');
   ok(!x.err && x.spawned >= 1, 'CONTROL (the wait cut, in a copy): the part SPAWNS for a record the disk does not hold — an orphan at a crash (red)', x);
@@ -358,7 +358,7 @@ await leg('⑨', async () => {
     const i = body.indexOf(line), b = body.indexOf('bringUp(rec, f)');
     return i > 0 && b > i && body.split(line).length === 2;
   };
-  ok(roadPinned(DSRC, 'launchRemoteApp', 'opening a RemoteApp') && roadPinned(DSRC, 'launchDisplay', "starting a browser\\'s display"), '⑨ the RemoteApp and the browser display roads each land their record, and test its state, BEFORE their bring-up (pinned)');
+  ok(gateOf(roadPinned(DSRC, 'launchRemoteApp', 'opening a RemoteApp')) && verdictOf(roadPinned(DSRC, 'launchDisplay', "starting a browser\\'s display")), '⑨ the RemoteApp and the browser display roads each land their record, and test its state, BEFORE their bring-up (pinned)');
   const RA_A = "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening a RemoteApp');\n", BD_A = "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'starting a browser\\'s display');\n";
   ok(!roadPinned(anchored(DSRC, RA_A, '', 'alo-ra-cut'), 'launchRemoteApp', 'opening a RemoteApp') && !roadPinned(anchored(DSRC, BD_A, '', 'alo-bd-cut'), 'launchDisplay', "starting a browser\\'s display"), 'CONTROL (each road\'s line cut, in a copy of the text): its pin goes red');
 });
@@ -398,10 +398,10 @@ await leg('⑩', async () => {
     return out;
   };
   const r = await run(DS, 'lift-launch');
-  ok(r.held0 && r.lifted && !r.err && r.spawned >= 1 && (r.state === 'launching' || r.state === 'ready'), '⑩ a launch made between the lift and the adoption\'s first look is THIS life\'s: neither torn down nor marked failed — it starts', r);
+  ok(gateOf(r.held0) && gateOf(r.lifted) && !r.err && r.spawned >= 1 && (r.state === 'launching' || r.state === 'ready'), '⑩ a launch made between the lift and the adoption\'s first look is THIS life\'s: neither torn down nor marked failed — it starts', r);
   const MX = mutantCopies('alo-prior', repo).load('src/desktop-serve.js', anchored(DSRC, PRIOR_A, '      /* MUTANT: the adoption judges every live record */\n', 'alo-no-prior'), 'alo-no-prior');
   const x = await run(MX, 'lift-launch-red');
-  ok(x.lifted && (x.state === 'failed' || x.state === 'exited'), 'CONTROL (the adoption\'s own list cut, in a copy): the person\'s new launch is judged a dead hub\'s leftover and ended (red)', x);
+  ok(gateOf(x.lifted) && (x.state === 'failed' || x.state === 'exited'), 'CONTROL (the adoption\'s own list cut, in a copy): the person\'s new launch is judged a dead hub\'s leftover and ended (red)', x);
 });
 await leg('⑪', async () => {
   console.log('⑪ lane lg-store-writes (主开发 2026-11-20 04:59Z, list line 117\'s must) — a launch is told READY only once its adoptable record is ON DISK');
@@ -431,7 +431,7 @@ await leg('⑪', async () => {
     return out;
   };
   const r = await run(DS, 'ready-landed');
-  ok(r.waitAsked && r.stateWhileInAir === 'launching' && r.partsRecorded && r.stateAtLanding === 'ready', '⑪ while its adoptable record is in the air the launch stays «launching» (its parts recorded); at the landing it is READY', r);
+  ok(gateOf(r.waitAsked) && r.stateWhileInAir === 'launching' && gateOf(r.partsRecorded) && r.stateAtLanding === 'ready', '⑪ while its adoptable record is in the air the launch stays «launching» (its parts recorded); at the landing it is READY', r);
   const MX = mutantCopies('alo-ready', repo).load('src/desktop-serve.js', anchored(DSRC, READY_A, '      /* MUTANT: ready before the record lands */\n', 'alo-ready-early'), 'alo-ready-early');
   const x = await run(MX, 'ready-early');
   ok(!x.waitAsked && x.stateWhileInAir === 'ready', 'CONTROL (the wait cut, in a copy): «ready» while the record the next life needs is still in the air — a hard end then loses the app (red)', x);
@@ -446,21 +446,21 @@ await leg('⑧', async () => {
   const withFit = (cell) => Object.freeze([Object.freeze({ ...BACKENDS[0], fit: Object.freeze({ fakex: cell }) })]);
   const ds = DS.install({ dataDir: path.join(root, 'ds-pin'), env, display: disp, backends: withFit('fixed'), registryRows: [ROW], log, now, tickMs: 3600e3, apps: noApps });
   const a = await ds.launch({ appId: 'pin-app', pin: '1280x720' }, {});
-  ok(a.pin && a.pin.w === 1280 && a.pin.h === 720, 'pin 1280x720 ⇒ the record is BORN pinned (the launch\'s own answer carries it)', a.pin);
+  ok(gateOf(a.pin) && a.pin.w === 1280 && a.pin.h === 720, 'pin 1280x720 ⇒ the record is BORN pinned (the launch\'s own answer carries it)', a.pin);
   const ra = await until(() => { const r = ds.get(a.id); return r && r.state === 'ready' ? r : null; });
-  ok(ra && ra.pin && ra.pin.w === 1280 && geoms[0] === '1280x720', 'a keeper-fixed rung (fit \'fixed\' — Xvfb+x11vnc) starts its X server AT the pin', { geoms, pin: ra && ra.pin, err: ra && ra.lastError });
+  ok(gateOf(ra) && gateOf(ra.pin) && ra.pin.w === 1280 && geoms[0] === '1280x720', 'a keeper-fixed rung (fit \'fixed\' — Xvfb+x11vnc) starts its X server AT the pin', { geoms, pin: ra && ra.pin, err: ra && ra.lastError });
   const b = await ds.launch({ appId: 'pin-app', pin: null }, {});
   await until(() => { const r = ds.get(b.id); return r && r.state === 'ready' ? r : null; });
   ok(!('pin' in ds.get(b.id)) && geoms[1] === '1280x800', 'no pin ⇒ unpinned, and the X server takes the keeper\'s own geometry', { geoms, rec: ds.get(b.id).pin });
   let e1 = null; try { await ds.launch({ appId: 'pin-app', pin: '100x100' }, {}); } catch (x) { e1 = x; }
-  ok(e1 && e1.code === 'size_out_of_bounds' && /width 100 is outside 320–7680 pixels/.test(e1.message) && geoms.length === 2, 'a bad size ⇒ refused in parsePin\'s own words before anything starts', e1 && e1.message);
+  ok(gateOf(e1) && e1.code === 'size_out_of_bounds' && gateOf(/width 100 is outside 320–7680 pixels/.test(e1.message)) && geoms.length === 2, 'a bad size ⇒ refused in parsePin\'s own words before anything starts', e1 && e1.message);
   for (const id of [a.id, b.id]) { try { await ds.stop(id, { why: 'user' }); } catch { } }
   ds.shutdown?.();
   for (const [cell, name] of [[null, 'no fit cell (this suite\'s rung)'], ['shared', 'the shared desktop\'s \'shared\''], ['follows', 'Xvnc\'s \'follows\'']]) {
     const d2 = DS.install({ dataDir: path.join(root, `ds-pin-${cell}`), env, display: disp, backends: cell ? withFit(cell) : BACKENDS, registryRows: [ROW], log, now, tickMs: 3600e3, apps: noApps });
     const n0 = d2.listApps().length, g0 = geoms.length;
     let e2 = null; try { await d2.launch({ appId: 'pin-app', pin: '1920x1080' }, {}); } catch (x) { e2 = x; }
-    ok(e2 && e2.code === 'pin_unsupported' && /vnc-display \(fakex\)/.test(e2.message) && /the picture follows the pane/.test(e2.message) && /Follow the pane/.test(e2.message) && d2.listApps().length === n0 && geoms.length === g0,
+    ok(gateOf(e2) && e2.code === 'pin_unsupported' && gateOf(/vnc-display \(fakex\)/.test(e2.message)) && gateOf(/the picture follows the pane/.test(e2.message)) && gateOf(/Follow the pane/.test(e2.message)) && d2.listApps().length === n0 && geoms.length === g0,
       `${name}: pin_unsupported BY NAME (the backend named, the picture follows the pane there, where to change it) — no record, no X server`, e2 && e2.message);
     d2.shutdown?.();
   }
@@ -501,7 +501,7 @@ await leg('⑫', async () => {
     } finally { ds.shutdown?.(); }
   };
   const bare = await run(DS, 'bare', env);   // this suite's hub env: PATH and HOME, no locale
-  ok(bare.state === 'ready' && !!bare.app && UTF8.test(bare.app.LC_CTYPE) && !bare.app.LC_ALL && !bare.app.LANG && !!bare.server && bare.server.LC_CTYPE === bare.app.LC_CTYPE && !!bare.helpers && bare.helpers.LC_CTYPE === bare.app.LC_CTYPE,
+  ok(bare.state === 'ready' && !!bare.app && gateOf(UTF8.test(bare.app.LC_CTYPE)) && !bare.app.LC_ALL && !bare.app.LANG && !!bare.server && bare.server.LC_CTYPE === bare.app.LC_CTYPE && !!bare.helpers && bare.helpers.LC_CTYPE === bare.app.LC_CTYPE,
     `⑫ a hub env that names no locale ⇒ the APPLICATION, its DISPLAY SERVER and a HELPER (a real child started from ctx.x11Env) all start with LC_CTYPE ${bare.app && bare.app.LC_CTYPE} (a UTF-8 character type), and no other locale name`, bare);
   const own = await run(DS, 'own', () => ({ ...env(), LANG: 'fr_FR.ISO-8859-1' }));
   ok(own.state === 'ready' && !!own.app && own.app.LANG === 'fr_FR.ISO-8859-1' && !own.app.LC_CTYPE && !own.app.LC_ALL && !!own.server && own.server.LANG === 'fr_FR.ISO-8859-1' && !own.server.LC_CTYPE && !!own.helpers && own.helpers.LANG === 'fr_FR.ISO-8859-1' && !own.helpers.LC_CTYPE,
@@ -520,4 +520,4 @@ await leg('⑫', async () => {
   fs.rmSync(root, { recursive: true, force: true });
 }
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

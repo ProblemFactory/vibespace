@@ -31,7 +31,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -331,7 +331,7 @@ const TEXTS = libTexts();
   ok(gated.length === 1 && other.length === 0, `(a) a close of every member of a chain exists ONLY in tab-group.js requestCloseGroup (${Object.keys(TEXTS).length} files, ${sites.length} close-all loop(s))`, other.map((s) => `${s.file} ${s.fn}: ${s.loop}`));
   const g = methodOf(strip(tgSrc), 'requestCloseGroup(id)');
   const iAsk = g.indexOf('this.confirmCloseGroup('), iGate = g.indexOf('if (go !== true) return false;'), iLoop = g.indexOf('for (const tid of doomed)');
-  ok(iAsk > 0 && iGate > iAsk && iLoop > iGate && /closeAsks\(\{ scope: 'group', members: list\.ids\.length, user: true \}\)/.test(g), '(a) …and there, after the question: closeAsks decides, confirmCloseGroup asks, a non-true answer returns before the loop', { iAsk, iGate, iLoop });
+  ok(iAsk > 0 && iGate > iAsk && iLoop > iGate && verdictOf(/closeAsks\(\{ scope: 'group', members: list\.ids\.length, user: true \}\)/.test(g)), '(a) …and there, after the question: closeAsks decides, confirmCloseGroup asks, a non-true answer returns before the loop', { iAsk, iGate, iLoop });
   const d = doorCensus(TEXTS);
   ok(d.unlisted.length === 0, `(b) every user-close / window-menu call in src/lib is a classified DOOR (${d.n} calls, ${DOORS.length} rows) — a new one is red until its row says whether it ends a whole group`, d.unlisted);
   ok(d.dead.length === 0 && d.twice.length === 0, '(b) …and every row still matches exactly one call (a stale row is a hole)', [...d.dead, ...d.twice]);
@@ -339,19 +339,19 @@ const TEXTS = libTexts();
   const groupDoors = DOORS.filter((x) => x.scope === 'group').map((x) => x.door.split(' (')[0]);
   ok(doorBad.length === 0 && groupDoors.length === 4, `(b) which close asks, per door: ${groupDoors.length} group doors ask for ≥ 2 tabs (${groupDoors.join(' · ')}); ${DOORS.filter((x) => x.scope === 'tab').length} tab / lone doors never; nothing asks a programmatic close`, doorBad.map((x) => x.door));
   const tb = strip(TEXTS['src/lib/taskbar.js']), wj = strip(TEXTS['src/lib/window.js']);
-  ok(/export function showWindowContextMenu\(app, id, x, y, \{ closeLabel = null, onAction, switchSubmenu = false, group = false(?:, rowYielded = null)? \} = \{\}\) \{/.test(tb) && /const ctx = \{ app, get id\(\) \{ return win\.id; \}, win, s: sess, switchSubmenu, closeLabel, group: !!group \};/.test(tb), '(c) showWindowContextMenu carries `group` into the menu ctx (window.close reads it)');
-  ok(/const grouped = !!\(winInfo\._tabChain && winInfo\._tabChain\.tabs\.length >= 2\);/.test(wj), '(c) the frame\'s menu is a group menu exactly when the window heads a chain of ≥ 2');
+  ok(gateOf(/export function showWindowContextMenu\(app, id, x, y, \{ closeLabel = null, onAction, switchSubmenu = false, group = false(?:, rowYielded = null)? \} = \{\}\) \{/.test(tb)) && verdictOf(/const ctx = \{ app, get id\(\) \{ return win\.id; \}, win, s: sess, switchSubmenu, closeLabel, group: !!group \};/.test(tb)), '(c) showWindowContextMenu carries `group` into the menu ctx (window.close reads it)');
+  ok(verdictOf(/const grouped = !!\(winInfo\._tabChain && winInfo\._tabChain\.tabs\.length >= 2\);/.test(wj)), '(c) the frame\'s menu is a group menu exactly when the window heads a chain of ≥ 2');
   const conf = methodOf(strip(tgSrc), 'confirmCloseGroup({ names, gone = [] })');
-  ok(/return showConfirmDialog\(\{ title: t\('Close \{n\} tabs\?', \{ n \}\), message, items: names, confirmText: t\('Close \{n\} tabs', \{ n \}\), danger: true \}\);/.test(conf) && /import \{[^}]*\bshowConfirmDialog\b[^}]*\} from '\.\/utils\.js';/.test(tgSrc), '(d) the question is the house dialog: "Close {n} tabs?", every name listed, "Close {n} tabs" / Cancel');
+  ok(gateOf(/return showConfirmDialog\(\{ title: t\('Close \{n\} tabs\?', \{ n \}\), message, items: names, confirmText: t\('Close \{n\} tabs', \{ n \}\), danger: true \}\);/.test(conf)) && verdictOf(/import \{[^}]*\bshowConfirmDialog\b[^}]*\} from '\.\/utils\.js';/.test(tgSrc)), '(d) the question is the house dialog: "Close {n} tabs?", every name listed, "Close {n} tabs" / Cancel');
   const ut = strip(TEXTS['src/lib/utils.js']);
   const sc = ut.slice(ut.indexOf('export function showConfirmDialog('), ut.indexOf('\n}\n', ut.indexOf('export function showConfirmDialog(')));
-  ok(/items = null \} = opts \|\| \{\};/.test(sc) && /ul\.className = 'dialog-list';/.test(sc) && /li\.textContent = x;/.test(sc) && /if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); done\(true\); \}/.test(sc) && /if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); done\(false\); \}/.test(sc), '(d) showConfirmDialog lists `items` as text rows (never HTML); Enter = the confirm, Esc = Cancel');
+  ok(gateOf(/items = null \} = opts \|\| \{\};/.test(sc)) && gateOf(/ul\.className = 'dialog-list';/.test(sc)) && gateOf(/li\.textContent = x;/.test(sc)) && gateOf(/if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); done\(true\); \}/.test(sc)) && verdictOf(/if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); done\(false\); \}/.test(sc)), '(d) showConfirmDialog lists `items` as text rows (never HTML); Enter = the confirm, Esc = Cancel');
   const native = ['src/lib/tab-group.js', 'src/lib/window.js', 'src/lib/taskbar.js'].filter((f) => /(^|[^.\w])(window\.)?confirm\(/.test(strip(TEXTS[f])));
   ok(native.length === 0, '(d) no native confirm() on the close path', native);
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  ok(/"Close \{n\} tabs\?": "关闭 \{n\} 个标签页？"/.test(zh) && /"Close \{n\} tabs": "关闭 \{n\} 个标签页"/.test(zh) && /"Close \{n\} tabs\?": "\{n\} 個のタブを閉じますか？"/.test(ja) && /"Close \{n\} tabs": "\{n\} 個のタブを閉じる"/.test(ja), '(d) zh + ja words for the question and its button');
+  ok(gateOf(/"Close \{n\} tabs\?": "关闭 \{n\} 个标签页？"/.test(zh)) && gateOf(/"Close \{n\} tabs": "关闭 \{n\} 个标签页"/.test(zh)) && gateOf(/"Close \{n\} tabs\?": "\{n\} 個のタブを閉じますか？"/.test(ja)) && verdictOf(/"Close \{n\} tabs": "\{n\} 個のタブを閉じる"/.test(ja)), '(d) zh + ja words for the question and its button');
   const css = read('public/style.css');
-  ok(/\.dialog-list \{[^}]*max-height: 40vh;[^}]*overflow-y: auto;/.test(css), '(d) a long group\'s list scrolls inside the dialog (max-height 40vh)');
+  ok(verdictOf(/\.dialog-list \{[^}]*max-height: 40vh;[^}]*overflow-y: auto;/.test(css)), '(d) a long group\'s list scrolls inside the dialog (max-height 40vh)');
 }
 
 // ── §4 NEGATIVE CONTROLS ──
@@ -362,31 +362,31 @@ const patch = (src, find, repl) => { if (!src.includes(find)) throw new Error('c
   const clSrc = read(CL_REL);
   const lone = M.load(CL_REL, patch(clSrc, 'scope === \'group\' && Number(members) >= 2;', 'scope === \'group\' && Number(members) >= 1;'), 'asks-lone');
   const vl = verdictRows(lone);
-  ok(vl.bad.length > 0 && vl.bad.every((b) => b.got === true && b.user === true && b.scope === 'group' && Number(b.members) === 1), `CONTROL verdict that asks a lone window ⇒ red exactly on the ${vl.bad.length} one-window group rows`, vl.bad.slice(0, 2));
+  ok(vl.bad.length > 0 && verdictOf(vl.bad.every((b) => b.got === true && b.user === true && b.scope === 'group' && Number(b.members) === 1)), `CONTROL verdict that asks a lone window ⇒ red exactly on the ${vl.bad.length} one-window group rows`, vl.bad.slice(0, 2));
   const prog = M.load(CL_REL, patch(clSrc, 'return user === true && scope', 'return scope'), 'asks-programmatic');
   const vp = verdictRows(prog);
-  ok(vp.bad.length > 0 && vp.bad.every((b) => b.user !== true && b.got === true), `CONTROL verdict that asks a programmatic close ⇒ red exactly on the ${vp.bad.length} non-user rows`, vp.bad.slice(0, 2));
+  ok(vp.bad.length > 0 && verdictOf(vp.bad.every((b) => b.user !== true && b.got === true)), `CONTROL verdict that asks a programmatic close ⇒ red exactly on the ${vp.bad.length} non-user rows`, vp.bad.slice(0, 2));
   const hl = await helperRows(helperFrom(tgSrc, lone));
-  ok(hl.bad.length === 1 && /^B2 /.test(hl.bad[0].row), 'CONTROL …the helper over that verdict asks a chain of one (exactly B2 red)', hl.bad.map((b) => b.row));
+  ok(hl.bad.length === 1 && verdictOf(/^B2 /.test(hl.bad[0].row)), 'CONTROL …the helper over that verdict asks a chain of one (exactly B2 red)', hl.bad.map((b) => b.row));
 }
 {
   const onCancel = await helperRows(helperFrom(patch(tgSrc, '      if (go !== true) return false;\n', '\n'), CL));
-  ok(onCancel.bad.some((b) => /^B3 /.test(b.row)) && onCancel.bad.some((b) => /^B9 /.test(b.row)), 'CONTROL a helper that closes whatever the answer ⇒ B3 (Cancel) and B9 (a failed question) red', onCancel.bad.map((b) => b.row));
+  ok(gateOf(onCancel.bad.some((b) => /^B3 /.test(b.row))) && verdictOf(onCancel.bad.some((b) => /^B9 /.test(b.row))), 'CONTROL a helper that closes whatever the answer ⇒ B3 (Cancel) and B9 (a failed question) red', onCancel.bad.map((b) => b.row));
   const live = await helperRows(helperFrom(patch(tgSrc, 'chain.tabs.filter((tid) => named.has(tid)).reverse()', '[...chain.tabs].reverse()'), CL));
-  ok(live.bad.length === 1 && /^B6 /.test(live.bad[0].row), 'CONTROL a helper that closes the LIVE group (an unnamed tab too) ⇒ exactly B6 red', live.bad.map((b) => b.row));
+  ok(live.bad.length === 1 && verdictOf(/^B6 /.test(live.bad[0].row)), 'CONTROL a helper that closes the LIVE group (an unnamed tab too) ⇒ exactly B6 red', live.bad.map((b) => b.row));
   const shared = await helperRows(helperFrom(patch(tgSrc, '    if (open) return open;\n', '\n'), CL));
-  ok(shared.bad.some((b) => /^B8 /.test(b.row)), 'CONTROL a helper that asks again while its question is open ⇒ B8 red', shared.bad.map((b) => b.row));
+  ok(verdictOf(shared.bad.some((b) => /^B8 /.test(b.row))), 'CONTROL a helper that asks again while its question is open ⇒ B8 red', shared.bad.map((b) => b.row));
   const tbSrc = TEXTS['src/lib/taskbar.js'];
   const planted = { ...TEXTS, 'src/lib/taskbar.js': tbSrc + '\nfunction _closeGroupNow(app, chain) {\n  for (const tid of [...chain.tabs]) app.wm.requestClose(tid);\n}\n', 'src/lib/layout.js': TEXTS['src/lib/layout.js'] + '\nfunction _dropAll(wm, win) { win._tabChain.tabs.forEach((id) => wm.closeWindow(id)); }\n' };
   const ps = closeAllSites(planted).filter((s) => !(s.file === TG_REL && s.fn === 'requestCloseGroup'));
-  ok(ps.length === 2 && ps.some((s) => s.fn === '_closeGroupNow') && ps.some((s) => s.fn === '_dropAll'), 'CONTROL a planted un-gated close-all (a for…of over chain.tabs; a tabs.forEach closeWindow) ⇒ (a) red at both', ps);
+  ok(ps.length === 2 && gateOf(ps.some((s) => s.fn === '_closeGroupNow')) && verdictOf(ps.some((s) => s.fn === '_dropAll')), 'CONTROL a planted un-gated close-all (a for…of over chain.tabs; a tabs.forEach closeWindow) ⇒ (a) red at both', ps);
   const pd = doorCensus(planted);
-  ok(pd.unlisted.length === 1 && /_closeGroupNow|requestClose\(tid\)/.test(pd.unlisted[0]), 'CONTROL …and the planted requestClose is an UNLISTED door ⇒ (b) red', pd.unlisted);
+  ok(pd.unlisted.length === 1 && verdictOf(/_closeGroupNow|requestClose\(tid\)/.test(pd.unlisted[0])), 'CONTROL …and the planted requestClose is an UNLISTED door ⇒ (b) red', pd.unlisted);
   const reverted = { ...TEXTS, 'src/lib/window.js': patch(TEXTS['src/lib/window.js'], 'this.requestCloseGroup(winInfo.id); };', 'this.requestClose(winInfo.id); };') };
   const rd = doorCensus(reverted);
-  ok(rd.unlisted.length === 1 && rd.dead.length === 1 && /FRAME's ✕/.test(rd.dead[0]), "CONTROL the frame's ✕ back on requestClose (the pre-fix door) ⇒ (b) red: an unlisted call + the group row dead", [...rd.unlisted, ...rd.dead]);
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
+  ok(rd.unlisted.length === 1 && rd.dead.length === 1 && verdictOf(/FRAME's ✕/.test(rd.dead[0])), "CONTROL the frame's ✕ back on requestClose (the pre-fix door) ⇒ (b) red: an unlisted call + the group row dead", [...rd.unlisted, ...rd.dead]);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

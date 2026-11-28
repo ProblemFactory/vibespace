@@ -29,7 +29,7 @@ const dataDir = path.join(tmp, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
-const check = (name, cond, extra) => {
+const check = (name, cond, extra) => { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
@@ -56,7 +56,7 @@ console.log('— M1: a pty session runs in the daemon, bytes relay both ways —
   await sleep(300);
   h.write('echo hello_from_daemon_$((6*7))\n');
   await sleep(600);
-  check('stdout relayed through the mux (command output)', out.includes('hello_from_daemon_42'), JSON.stringify(out.slice(-120)));
+  check('stdout relayed through the mux (command output)', verdictOf(out.includes('hello_from_daemon_42')), JSON.stringify(out.slice(-120)));
   let exitCode = null;
   h.onExit = (c) => { exitCode = c; };
   h.write('exit\n');
@@ -97,7 +97,7 @@ console.log('— M1: resize reaches the device pty (stty reports new size) —')
   out = '';
   h.write('stty size\n');
   await sleep(600);
-  check('device pty saw the resize (40 132)', /40\s+132/.test(out), JSON.stringify(out.slice(-120)));
+  check('device pty saw the resize (40 132)', verdictOf(/40\s+132/.test(out)), JSON.stringify(out.slice(-120)));
   h.kill();
   await sleep(300);
 }
@@ -116,11 +116,11 @@ console.log('— M1: dtach session SURVIVES a dropped connection (invariant #1) 
     h.onData = (buf) => { out += buf.toString('utf-8'); };
     await h.ready;
     await sleep(700);
-    check('dtach session created (marker seen)', out.includes('DTACH_UP'), JSON.stringify(out.slice(-80)));
+    check('dtach session created (marker seen)', verdictOf(out.includes('DTACH_UP')), JSON.stringify(out.slice(-80)));
     // drop the connection entirely — the daemon detaches the attach pty
     dm.stop();
     await sleep(600);
-    check('dtach socket still exists after drop (session survived)', fs.existsSync(sock), '');
+    check('dtach socket still exists after drop (session survived)', verdictOf(fs.existsSync(sock)), '');
     // reconnect + reattach proves the survival is usable
     const dm2 = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => {} });
     const h2 = await dm2.openSession({ cmd: 'dtach', args: ['-a', sock, '-r', 'winch'], cols: 80, rows: 24 });
@@ -148,7 +148,7 @@ console.log('— daemon death fires onExit on open session handles (attach self-
   process.kill(dpid, 'SIGKILL');
   const t0 = Date.now();
   while (!exited && Date.now() - t0 < 5000) await sleep(100);
-  check('mux death fired onExit on the pty handle (reattach path can heal)', exited, '');
+  check('mux death fired onExit on the pty handle (reattach path can heal)', verdictOf(exited), '');
   dm3.stop();
 }
 
@@ -196,7 +196,7 @@ if (!fs.existsSync('/proc/self/environ')) {
   process.env.VIBESPACE_INTEGRATION_FAKE_APIKEY = SECRET;
   process.env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', values: { apiKey: SECRET } }]);
   process.env.VS_CANARY_KEEP = 'canary-1';
-  check('CONTROL: the server env really carries the secret before the strip', process.env.VIBESPACE_INTEGRATION_FAKE_APIKEY === SECRET && JSON.stringify(process.env).includes(SECRET));
+  check('CONTROL: the server env really carries the secret before the strip', process.env.VIBESPACE_INTEGRATION_FAKE_APIKEY === SECRET && verdictOf(JSON.stringify(process.env).includes(SECRET)));
   check('agentEnv() drops both cluster forms and keeps the canary (the orchestrator half)', !('VIBESPACE_INTEGRATION_FAKE_APIKEY' in agentEnv(process.env)) && !('VIBESPACE_INTEGRATIONS' in agentEnv(process.env)) && agentEnv(process.env).VS_CANARY_KEEP === 'canary-1');
   const d = daemonEnv(process.env);
   check('daemonEnv() drops them too and keeps exactly the daemon tier\'s own names on top of the agent set', !('VIBESPACE_INTEGRATION_FAKE_APIKEY' in d) && !('VIBESPACE_INTEGRATIONS' in d) && d.VIBESPACE_NODE_MODULES === process.env.VIBESPACE_NODE_MODULES && d.VIBESPACE_AGENTD_ROOT === process.env.VIBESPACE_AGENTD_ROOT && d.VS_CANARY_KEEP === 'canary-1');
@@ -209,7 +209,7 @@ if (!fs.existsSync('/proc/self/environ')) {
   const planD = buildPlan(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).scripts);
   const metaD = await require('esbuild').build({ entryPoints: [path.join(repo, planD.entry)], absWorkingDir: repo, write: false, metafile: true, logLevel: 'error', plugins: [stampPlugin(version)], ...planD.options });
   const daemonFiles = Object.keys(metaD.metafile.inputs).map((k) => k.split(path.sep).join('/')).filter((k) => !/(^|\/)node_modules\//.test(k) && /\.[cm]?js$/.test(k) && fs.existsSync(path.join(repo, k)));
-  check(`the daemon tier's files are the bundle's own input list (${daemonFiles.length} source files): the entry, the fs worker's ops outside src/agentd, and none of the folder's files the agent does not require`, daemonFiles.includes('src/agentd/agentd.js') && daemonFiles.includes('src/dir-ops.js') && !daemonFiles.includes('src/agentd/attach-cli.js') && !daemonFiles.includes('src/agentd/client.js'), daemonFiles.filter((f) => !f.startsWith('src/agentd/')).slice(0, 12).join(', '));
+  check(`the daemon tier's files are the bundle's own input list (${daemonFiles.length} source files): the entry, the fs worker's ops outside src/agentd, and none of the folder's files the agent does not require`, gateOf(daemonFiles.includes('src/agentd/agentd.js')) && gateOf(daemonFiles.includes('src/dir-ops.js')) && !daemonFiles.includes('src/agentd/attach-cli.js') && !daemonFiles.includes('src/agentd/client.js'), daemonFiles.filter((f) => !f.startsWith('src/agentd/')).slice(0, 12).join(', '));
   const readByDaemonTier = new Set();
   for (const f of daemonFiles) {
     for (const m of fs.readFileSync(path.join(repo, f), 'utf8').matchAll(/process\.env\.(VIBESPACE_[A-Z_]+)/g)) readByDaemonTier.add(m[1]);
@@ -235,10 +235,10 @@ if (!fs.existsSync('/proc/self/environ')) {
     ['VIBESPACE_USAGE_CURSOR', "the usage cursor file's place (src/usage-walker.js): a suite's own seam for the walker run in the suite's process; an agent keeps its cursor in its own place"],
   ];
   for (const [n, why] of READ_NEVER_KEPT) {
-    check(`${n} is READ by the agent's closure and NEVER kept: DAEMON_ENV_KEEP lacks it and daemonEnv drops it — ${why}`, readByDaemonTier.has(n) && !DAEMON_ENV_KEEP.has(n) && !AGENT_ENV_KEEP.has(n) && !(n in daemonEnv({ ...process.env, [n]: '1' })), `read ${readByDaemonTier.has(n)} · kept ${DAEMON_ENV_KEEP.has(n)} · handed down ${n in daemonEnv({ ...process.env, [n]: '1' })}`);
+    check(`${n} is READ by the agent's closure and NEVER kept: DAEMON_ENV_KEEP lacks it and daemonEnv drops it — ${why}`, gateOf(readByDaemonTier.has(n)) && !DAEMON_ENV_KEEP.has(n) && !AGENT_ENV_KEEP.has(n) && !(n in daemonEnv({ ...process.env, [n]: '1' })), `read ${readByDaemonTier.has(n)} · kept ${DAEMON_ENV_KEEP.has(n)} · handed down ${n in daemonEnv({ ...process.env, [n]: '1' })}`);
     aside(n);
   }
-  check(`every name the set-aside table holds is READ by the agent's closure (${setAside.map(([n]) => n).join(', ')}) — a row for a name nothing reads is a row for nothing`, setAside.length === 5 && setAside.every(([, r]) => r), setAside.filter(([, r]) => !r).map(([n]) => n).join(',') || `${setAside.length} rows`);
+  check(`every name the set-aside table holds is READ by the agent's closure (${setAside.map(([n]) => n).join(', ')}) — a row for a name nothing reads is a row for nothing`, setAside.length === 5 && verdictOf(setAside.every(([, r]) => r)), setAside.filter(([, r]) => !r).map(([n]) => n).join(',') || `${setAside.length} rows`);
   const missing = [...readByDaemonTier].filter((n) => !DAEMON_ENV_KEEP.has(n));
   const extra = [...DAEMON_ENV_KEEP].filter((n) => !AGENT_ENV_KEEP.has(n) && !readByDaemonTier.has(n));
   check(`DAEMON_ENV_KEEP = AGENT_ENV_KEEP ∪ every VIBESPACE_* the daemon tier reads (${[...readByDaemonTier].sort().join(', ')})`, !missing.length && !extra.length, `missing: ${missing.join(',') || '-'} extra: ${extra.join(',') || '-'}`);
@@ -251,9 +251,9 @@ if (!fs.existsSync('/proc/self/environ')) {
   await dm4.connect();
   const pid1 = readPid(root1); extraDaemons.push(pid1);
   const denv1 = fs.readFileSync(`/proc/${pid1}/environ`, 'latin1');
-  check('POSITIVE CONTROL: the daemon environ is readable and carries the canary', denv1.includes('VS_CANARY_KEEP=canary-1'));
+  check('POSITIVE CONTROL: the daemon environ is readable and carries the canary', verdictOf(denv1.includes('VS_CANARY_KEEP=canary-1')));
   check('①  the daemon\'s OWN environ carries neither the name nor the secret (born sanitized)', !denv1.includes('VIBESPACE_INTEGRATION') && !denv1.includes(SECRET));
-  check('①  …and still carries what the daemon tier reads (root + node_modules)', denv1.includes('VIBESPACE_AGENTD_ROOT=') && denv1.includes('VIBESPACE_NODE_MODULES='));
+  check('①  …and still carries what the daemon tier reads (root + node_modules)', gateOf(denv1.includes('VIBESPACE_AGENTD_ROOT=')) && verdictOf(denv1.includes('VIBESPACE_NODE_MODULES=')));
   const c1 = await spawnProbe(dm4, '① pty child of the born-sanitized daemon');
   check('①  a pty session child sees 0 secret lines and the canary', c1.secret === 0 && c1.canary === 1, JSON.stringify(c1));
   let pout = '';
@@ -261,7 +261,7 @@ if (!fs.existsSync('/proc/self/environ')) {
   p1.onData = (b) => { pout += b.toString('utf-8'); };
   await p1.ready; await waitFor(() => /PROBE_DONE/.test(pout), 4000);
   const cp = countsOf(pout);
-  check('①  a PIPE-session child (the R6 final form) sees 0 secret lines and the canary', cp && cp.secret === 0 && cp.canary === 1, JSON.stringify(cp) + ' raw ' + JSON.stringify(pout.slice(0, 80)));
+  check('①  a PIPE-session child (the R6 final form) sees 0 secret lines and the canary', gateOf(cp) && cp.secret === 0 && cp.canary === 1, JSON.stringify(cp) + ' raw ' + JSON.stringify(pout.slice(0, 80)));
   dm4.stop();
 
   // ② a daemon from a PREVIOUS LIFE that HOLDS the secret: spawned by hand
@@ -275,11 +275,11 @@ if (!fs.existsSync('/proc/self/environ')) {
     const child = spawn(process.execPath, [bundlePath], { detached: true, stdio: 'ignore', env: { ...process.env, VIBESPACE_AGENTD_ROOT: root, VIBESPACE_INTEGRATION_FAKE_APIKEY: SECRET } });
     child.unref();
     const up = await waitFor(() => fs.existsSync(path.join(root, 'state', 'agentd.sock')) && fs.existsSync(path.join(root, 'state', 'agentd.pid')), 8000);
-    check(`${tag}: the hand-spawned daemon came up`, up);
+    check(`${tag}: the hand-spawned daemon came up`, verdictOf(up));
     await dmX.connect();
     const pid = readPid(root); extraDaemons.push(pid);
     const denv = fs.readFileSync(`/proc/${pid}/environ`, 'latin1');
-    check(`${tag}: FIXTURE CONTROL — this daemon really HOLDS the secret in its own environ`, denv.includes(`VIBESPACE_INTEGRATION_FAKE_APIKEY=${SECRET}`));
+    check(`${tag}: FIXTURE CONTROL — this daemon really HOLDS the secret in its own environ`, verdictOf(denv.includes(`VIBESPACE_INTEGRATION_FAKE_APIKEY=${SECRET}`)));
     return dmX;
   };
   const dm5 = await bootHeld('holder-2-held', bundle);
@@ -326,7 +326,7 @@ console.log('— lane device-node-version: the hello says the node the daemon ru
     const child = spawn(nodeBin, [bundlePath], { detached: true, stdio: 'ignore', env: { ...process.env, VIBESPACE_AGENTD_ROOT: root } });
     child.unref();
     const up = await waitFor(() => fs.existsSync(path.join(root, 'state', 'agentd.sock')) && fs.existsSync(path.join(root, 'state', 'agentd.pid')), 8000);
-    check(`${tag}: the daemon came up`, up);
+    check(`${tag}: the daemon came up`, verdictOf(up));
     await dmX.connect();
     try { extraDaemons.push(Number(fs.readFileSync(path.join(root, 'state', 'agentd.pid'), 'utf8'))); } catch {}
     await waitFor(() => seen.length > 0, 3000);
@@ -360,4 +360,4 @@ endDaemonsAndWait(path.join(tmp, 'agentd'));
 fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M1 session tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

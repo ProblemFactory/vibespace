@@ -59,7 +59,7 @@ const endRootsAndSay = (roots, ms = 5000) => {
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -88,7 +88,7 @@ console.log('— ① the capability row (backend-caps ⇄ client META)');
   const shape = (queue, verbs) => JSON.stringify({ queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs });
   for (const id of Object.keys(BACKEND_CAPS)) {
     const m = BACKEND_CAPS[id].inputModes;
-    ok(`${id}: declares a queueVerbs TABLE ⊆ the closed set (a typo'd verb is not a capability)`, Array.isArray(m?.queueVerbs) && m.queueVerbs.every((v) => QUEUE_VERBS.includes(v)), m);
+    ok(`${id}: declares a queueVerbs TABLE ⊆ the closed set (a typo'd verb is not a capability)`, gateOf(Array.isArray(m?.queueVerbs)) && verdictOf(m.queueVerbs.every((v) => QUEUE_VERBS.includes(v))), m);
     // THE DERIVATION LAW: the booleans are a VIEW of the table, never a second
     // place to edit — a row whose steer disagrees with its list is the exact
     // two-sources-of-truth bug the table replaced.
@@ -96,8 +96,8 @@ console.log('— ① the capability row (backend-caps ⇄ client META)');
     ok(`${id}: queueOps === (queueVerbs.length > 0)`, m.queueOps === (m.queueVerbs.length > 0), m);
     // A harness that can steer must also be able to queue and to enumerate:
     // steering means "take THIS queued item and inject it", which needs both.
-    ok(`${id}: steer ⇒ queue + queueOps (a steer names a queued item)`, !m.steer || (m.queue && m.queueOps), m);
-    ok(`${id}: queueOps ⇒ queue (nothing to operate on otherwise)`, !m.queueOps || m.queue, m);
+    ok(`${id}: steer ⇒ queue + queueOps (a steer names a queued item)`, !m.steer || (gateOf(m.queue) && verdictOf(m.queueOps)), m);
+    ok(`${id}: queueOps ⇒ queue (nothing to operate on otherwise)`, !m.queueOps || verdictOf(m.queue), m);
   }
   ok('deriveInputModes IS the law (the same function the client mirror uses), and it drops a verb outside the closed set', JSON.stringify(deriveInputModes({ queue: true, queueVerbs: ['steer', 'teleport'] })) === shape(true, ['steer']));
   ok('codex serves ALL SEVEN verbs (add/list/delete/update/reorder/start + turn/steer, every shape dumped from the 0.153.4 schema)', JSON.stringify(capsOf('codex').inputModes) === shape(true, ['remove', 'steer', 'steer-all', 'reorder', 'edit', 'run-now', 'run-all']), capsOf('codex').inputModes);
@@ -116,7 +116,7 @@ console.log('— ① the capability row (backend-caps ⇄ client META)');
     ok(`${id}: client META caps.inputModes deep-equals the server row (no drift)`, JSON.stringify(client) === JSON.stringify(server), { client, server });
   }
   ok('every CHAT harness answers queueState() on its normalizer (one question, one answer everywhere)',
-    chatHarnessIds().every((id) => typeof new HARNESSES[id].Normalizer('q').queueState === 'function'),
+    verdictOf(chatHarnessIds().every((id) => typeof new HARNESSES[id].Normalizer('q').queueState === 'function')),
     chatHarnessIds().filter((id) => typeof new HARNESSES[id].Normalizer('q').queueState !== 'function'));
   ok('claude\'s queueState() is empty until its wrapper publishes (a wrapper spawned before 2.369.354 never does)', new HARNESSES.claude.Normalizer('q').queueState().length === 0 && new HARNESSES.claude.Normalizer('q').queuePublished() === false);
 }
@@ -133,8 +133,8 @@ console.log('— ② the adapter verb (formatQueueOp)');
   ok('codex steer → the queue-op frame with the item id', JSON.parse(cx.formatQueueOp({ op: 'steer', id: 'q1' })).type === 'queue-op' && JSON.parse(cx.formatQueueOp({ op: 'steer', id: 'q1' })).op === 'steer' && JSON.parse(cx.formatQueueOp({ op: 'steer', id: 'q1' })).id === 'q1');
   ok('codex remove → the same frame shape', JSON.parse(cx.formatQueueOp({ op: 'remove', id: 'q2' })).op === 'remove');
   ok('codex steer-all needs no id', JSON.parse(cx.formatQueueOp({ op: 'steer-all' })).op === 'steer-all');
-  ok('codex: an id-requiring op without an id is REFUSED (never a frame the wrapper would answer with "gone")', /needs an item id/.test(threw(() => cx.formatQueueOp({ op: 'steer' })) || ''));
-  ok('codex: an unknown op is refused by name', /unknown queue op "teleport"/.test(threw(() => cx.formatQueueOp({ op: 'teleport', id: 'q' })) || ''));
+  ok('codex: an id-requiring op without an id is REFUSED (never a frame the wrapper would answer with "gone")', verdictOf(/needs an item id/.test(threw(() => cx.formatQueueOp({ op: 'steer' })) || '')));
+  ok('codex: an unknown op is refused by name', verdictOf(/unknown queue op "teleport"/.test(threw(() => cx.formatQueueOp({ op: 'teleport', id: 'q' })) || '')));
   // THE VERB TABLE IS A PROMISE: every verb a harness DECLARES must have a
   // construction branch here, and every verb it does NOT declare must be
   // refused. "Declared but unbuildable" is the 2.361.4 accept-and-ignore
@@ -154,23 +154,23 @@ console.log('— ② the adapter verb (formatQueueOp)');
   }
   // the relative vocabulary (§2.1 decision 1): the ws layer never speaks the
   // app-server's absolute shapes
-  ok('codex reorder carries the RELATIVE anchor', (() => { const f = JSON.parse(cx.formatQueueOp({ op: 'reorder', id: 'q1', afterId: 'q2' })); return f.op === 'reorder' && f.id === 'q1' && f.afterId === 'q2'; })());
+  ok('codex reorder carries the RELATIVE anchor', verdictOf((() => { const f = JSON.parse(cx.formatQueueOp({ op: 'reorder', id: 'q1', afterId: 'q2' })); return f.op === 'reorder' && f.id === 'q1' && f.afterId === 'q2'; })()));
   ok('…and afterId null MEANS the front of the queue (a position, carried as such)', JSON.parse(cx.formatQueueOp({ op: 'reorder', id: 'q1', afterId: null })).afterId === null);
-  ok('…while a MISSING anchor is refused (the wrapper cannot guess where it goes)', /needs an anchor/.test(threw(() => cx.formatQueueOp({ op: 'reorder', id: 'q1' })) || ''));
-  ok('…and an item cannot be anchored to itself', /anchor an item to itself/.test(threw(() => cx.formatQueueOp({ op: 'reorder', id: 'q1', afterId: 'q1' })) || ''));
-  ok('codex edit carries the new TEXT only (the wrapper rebuilds the whole input)', (() => { const f = JSON.parse(cx.formatQueueOp({ op: 'edit', id: 'q1', text: 'new words' })); return f.op === 'edit' && f.id === 'q1' && f.text === 'new words' && !('input' in f); })());
-  ok('…and an empty edit is refused here (never a frame that would blank a queued message)', /needs the new message text/.test(threw(() => cx.formatQueueOp({ op: 'edit', id: 'q1', text: '   ' })) || ''));
+  ok('…while a MISSING anchor is refused (the wrapper cannot guess where it goes)', verdictOf(/needs an anchor/.test(threw(() => cx.formatQueueOp({ op: 'reorder', id: 'q1' })) || '')));
+  ok('…and an item cannot be anchored to itself', verdictOf(/anchor an item to itself/.test(threw(() => cx.formatQueueOp({ op: 'reorder', id: 'q1', afterId: 'q1' })) || '')));
+  ok('codex edit carries the new TEXT only (the wrapper rebuilds the whole input)', verdictOf((() => { const f = JSON.parse(cx.formatQueueOp({ op: 'edit', id: 'q1', text: 'new words' })); return f.op === 'edit' && f.id === 'q1' && f.text === 'new words' && !('input' in f); })()));
+  ok('…and an empty edit is refused here (never a frame that would blank a queued message)', verdictOf(/needs the new message text/.test(threw(() => cx.formatQueueOp({ op: 'edit', id: 'q1', text: '   ' })) || '')));
   // THE ONE THAT MUST NOT DEGRADE: thread/queue/start with no id DRAINS the
   // whole queue, so a lost id has to be an error, never a silent run-all.
-  ok('RUN-NOW WITHOUT AN ID THROWS (a lost id must never become a drain)', /needs an item id/.test(threw(() => cx.formatQueueOp({ op: 'run-now' })) || ''), threw(() => cx.formatQueueOp({ op: 'run-now' })));
+  ok('RUN-NOW WITHOUT AN ID THROWS (a lost id must never become a drain)', verdictOf(/needs an item id/.test(threw(() => cx.formatQueueOp({ op: 'run-now' })) || '')), threw(() => cx.formatQueueOp({ op: 'run-now' })));
   ok('…and run-all is its OWN verb, a different frame (never run-now minus its id)', JSON.parse(cx.formatQueueOp({ op: 'run-all' })).op === 'run-all' && JSON.parse(cx.formatQueueOp({ op: 'run-all' })).id === null);
   ok('opencode reorder/edit build frames in the SAME relative vocabulary', JSON.parse(acpAdapter().formatQueueOp({ op: 'reorder', id: 'p1', afterId: null })).afterId === null && JSON.parse(acpAdapter().formatQueueOp({ op: 'edit', id: 'p1', text: 'x' })).text === 'x');
-  ok('opencode REFUSES run-now/run-all with the structural reason (its queue only exists while a prompt runs)', /one prompt at a time/.test(threw(() => acpAdapter().formatQueueOp({ op: 'run-now', id: 'p1' })) || ''), threw(() => acpAdapter().formatQueueOp({ op: 'run-now', id: 'p1' })));
+  ok('opencode REFUSES run-now/run-all with the structural reason (its queue only exists while a prompt runs)', verdictOf(/one prompt at a time/.test(threw(() => acpAdapter().formatQueueOp({ op: 'run-now', id: 'p1' })) || '')), threw(() => acpAdapter().formatQueueOp({ op: 'run-now', id: 'p1' })));
   const acp = reg.get('opencode');
   ok('opencode remove → a frame', JSON.parse(acp.formatQueueOp({ op: 'remove', id: 'q1' })).op === 'remove');
   {
     const msg = threw(() => acp.formatQueueOp({ op: 'steer', id: 'q1' })) || '';
-    ok('opencode STEER is refused WITH THE REASON and what happens instead', /no steer/i.test(msg) && /runs after this turn|after this turn|remove it/i.test(msg), msg);
+    ok('opencode STEER is refused WITH THE REASON and what happens instead', gateOf(/no steer/i.test(msg)) && verdictOf(/runs after this turn|after this turn|remove it/i.test(msg)), msg);
   }
   {
     // 2.369.354: the queue is the WRAPPER's — the acp frame vocabulary verbatim; run-now refused HERE, with the reason (steer too
@@ -180,10 +180,10 @@ console.log('— ② the adapter verb (formatQueueOp)');
       && JSON.parse(cl.formatQueueOp({ op: 'reorder', id: 'q1', afterId: null })).afterId === null && JSON.parse(cl.formatQueueOp({ op: 'edit', id: 'q1', text: 'x' })).text === 'x');
     const msg = threw(() => cl.formatQueueOp({ op: 'steer', id: 'q1' })) || '';
     ok('claude STEER (2.369.361 — was refused «takes no input into a running turn», MEASURED false on 2.1.308) → the frame that hands a held row to the running turn; steer-all → the codex shape (id null)', !msg && cl.formatQueueOp({ op: 'steer', id: 'q1' }) === JSON.stringify({ type: 'queue-op', op: 'steer', id: 'q1' }) && cl.formatQueueOp({ op: 'steer-all' }) === JSON.stringify({ type: 'queue-op', op: 'steer-all', id: null }), msg);
-    ok('claude run-now is refused with its reason (a held frame goes the moment the turn ends)', /as soon as the current turn ends/.test(threw(() => cl.formatQueueOp({ op: 'run-now', id: 'q1' })) || ''));
+    ok('claude run-now is refused with its reason (a held frame goes the moment the turn ends)', verdictOf(/as soon as the current turn ends/.test(threw(() => cl.formatQueueOp({ op: 'run-now', id: 'q1' })) || '')));
     ok('claude formats the resync ASK (its wrapper serves queue-resync)', cl.formatQueueResync() === JSON.stringify({ type: 'queue-resync' }));
   }
-  ok('shell inherits the base refusal (a terminal has no input queue)', /no input-queue operations/.test(threw(() => reg.get('shell').formatQueueOp({ op: 'remove', id: 'x' })) || ''));
+  ok('shell inherits the base refusal (a terminal has no input queue)', verdictOf(/no input-queue operations/.test(threw(() => reg.get('shell').formatQueueOp({ op: 'remove', id: 'x' })) || '')));
 }
 
 console.log('— ③ the ws case gates on the caps row AND the running wrapper');
@@ -194,7 +194,7 @@ console.log('— ③ the ws case gates on the caps row AND the running wrapper')
     const wrapperCap = Number(/const QUEUE_EDIT_MAX_CHARS = (\d+);/.exec(read('data/bin/codex-chat-wrapper.js'))?.[1]);
     ok(`…and the server's cap IS the wrapper's own (${QUEUE_EDIT_MAX_CHARS} = ${wrapperCap}) — refusing at a limit the wrapper does not share would refuse edits it would have accepted`,
       QUEUE_EDIT_MAX_CHARS === 20000 && wrapperCap === QUEUE_EDIT_MAX_CHARS, { QUEUE_EDIT_MAX_CHARS, wrapperCap });
-    ok('…and the transport ceiling is the SAME 64KiB the chat-input typing path (src/server/user-input.js) treats as the shredding threshold', QUEUE_OP_MAX_BYTES === 64 * 1024 && /stdinPayload\.length > 64 \* 1024/.test(read('src/server/user-input.js'))); // THE typing path moved out of the ws case (design-user-inbox-reply D1.1)
+    ok('…and the transport ceiling is the SAME 64KiB the chat-input typing path (src/server/user-input.js) treats as the shredding threshold', QUEUE_OP_MAX_BYTES === 64 * 1024 && verdictOf(/stdinPayload\.length > 64 \* 1024/.test(read('src/server/user-input.js')))); // THE typing path moved out of the ws case (design-user-inbox-reply D1.1)
   }
   // (③ finding 3 + gate ② — source-text legs — MOVED to the fast scripts/test-queue-steer-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   {
@@ -225,7 +225,7 @@ console.log('— ④ the normalizer: session state + chips + multi-queue semanti
   ok("queue_changed is a {op:'meta', subtype:'queue'} op carrying the WHOLE queue", metaOps.length === 1 && metaOps[0].items.length === 2, metaOps);
   ok('…and NOTHING enters the transcript (session state, not a message)', mm.messages.filter((m) => m.role === 'system').length === 0 && mm.messages.length === 2, mm.messages.map((m) => m.role));
   ok('queueState() is the attach payload', mm.queueState().length === 2);
-  ok("both bubbles wear a 'queued' chip, delivered as edit ops", mm.messages.every((m) => m.queueState === 'queued') && ops.filter((o) => o.op === 'edit' && o.fields?.queueState === 'queued').length === 2);
+  ok("both bubbles wear a 'queued' chip, delivered as edit ops", gateOf(mm.messages.every((m) => m.queueState === 'queued')) && ops.filter((o) => o.op === 'edit' && o.fields?.queueState === 'queued').length === 2);
   // MULTI-QUEUE SEMANTICS: steering #2 injects ONLY #2; #1 keeps its place.
   ev('queue_op_result', { op: 'steer', id: 'q2', msg_id: 'm2', ok: true });
   ev('queue_changed', { items: [{ id: 'q1', msgId: 'm1', preview: 'one', ts: 1, kind: 'user' }], turn_id: 't1' });
@@ -242,7 +242,7 @@ console.log('— ④ the normalizer: session state + chips + multi-queue semanti
   // a queued message with NO bubble of its own (a peer message) still SPEAKS
   const mm2 = new CodexMessageManager('q2');
   mm2.processLive({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'queued_input', msg_id: '', turn_id: 't1' } });
-  ok('queued_input with no bubble to stamp falls back to the visible system card (never silent)', mm2.messages.some((m) => m.role === 'system' && /Queued — runs after the current turn/.test(m.content[0].text)), mm2.messages);
+  ok('queued_input with no bubble to stamp falls back to the visible system card (never silent)', verdictOf(mm2.messages.some((m) => m.role === 'system' && /Queued — runs after the current turn/.test(m.content[0].text))), mm2.messages);
   // WRAPPER SKEW, normalizer side (round-1 review): a codex session spawned
   // BEFORE this release emits `queued_input` (it has since 2.369.20) and never
   // a `queue_changed`. Stamping a chip there paints a 'Queued' badge that can
@@ -252,28 +252,28 @@ console.log('— ④ the normalizer: session state + chips + multi-queue semanti
   ok('a wrapper that has published no queue is not treated as one that has', mm4.queuePublished() === false);
   mm4.processLive({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'message', role: 'user', webui_msg_id: 'z1', content: [{ type: 'input_text', text: 'later' }] } });
   mm4.processLive({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'queued_input', msg_id: 'z1', turn_id: 't9' } });
-  ok('PRE-RELEASE WRAPPER: queued_input keeps the old system card and stamps NO dead chip', mm4.messages.find((m) => m.role === 'user')?.queueState == null && mm4.messages.some((m) => m.role === 'system' && /Queued — runs after the current turn/.test(m.content[0].text)), mm4.messages.map((m) => [m.role, m.queueState]));
+  ok('PRE-RELEASE WRAPPER: queued_input keeps the old system card and stamps NO dead chip', mm4.messages.find((m) => m.role === 'user')?.queueState == null && verdictOf(mm4.messages.some((m) => m.role === 'system' && /Queued — runs after the current turn/.test(m.content[0].text))), mm4.messages.map((m) => [m.role, m.queueState]));
   mm4.processLive({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'queue_changed', items: [{ id: 'zq', msgId: 'z1', preview: 'later', kind: 'user' }] } });
   ok('…and the moment the wrapper DOES publish a queue, the chip appears and queuePublished() flips', mm4.queuePublished() === true && mm4.messages.find((m) => m.role === 'user')?.queueState === 'queued');
   // the failure sentences: every one says what happens to the message NOW
   const F = CodexMessageManager.queueOpFailureText;
-  ok('review/compact turn: refused, and the message still runs when the turn ends', /Cannot steer during a review turn/.test(F({ op: 'steer', reason: 'not-steerable', kind: 'review' })) && /runs when this turn ends/.test(F({ op: 'steer', reason: 'not-steerable', kind: 'review' })));
-  ok('compact turn is named as such', /compact turn/.test(F({ op: 'steer', reason: 'not-steerable', kind: 'compact' })));
-  ok('the turn ended between click and RPC: "it will simply run next"', /simply run next/.test(F({ op: 'steer', reason: 'turn-mismatch' })) && /simply run next/.test(F({ op: 'steer', reason: 'no-active-turn' })));
-  ok('gone: it already ran', /already ran/.test(F({ op: 'remove', reason: 'gone' })));
-  ok('an unclassified failure still carries the server\'s own words', /Could not steer the queued message: boom/.test(F({ op: 'steer', reason: 'error', detail: 'boom' })));
-  ok('a steer whose queued copy could NOT be deleted warns about the double run', (() => { const m3 = new CodexMessageManager('q3'); m3.processLive({ timestamp: '', type: 'event_msg', payload: { type: 'queue_op_result', op: 'steer', id: 'q', msg_id: '', ok: true, reason: 'steered-not-dequeued' } }); return m3.messages.some((x) => /may run a second time/.test(x.content?.[0]?.text || '')); })());
+  ok('review/compact turn: refused, and the message still runs when the turn ends', gateOf(/Cannot steer during a review turn/.test(F({ op: 'steer', reason: 'not-steerable', kind: 'review' }))) && verdictOf(/runs when this turn ends/.test(F({ op: 'steer', reason: 'not-steerable', kind: 'review' }))));
+  ok('compact turn is named as such', verdictOf(/compact turn/.test(F({ op: 'steer', reason: 'not-steerable', kind: 'compact' }))));
+  ok('the turn ended between click and RPC: "it will simply run next"', gateOf(/simply run next/.test(F({ op: 'steer', reason: 'turn-mismatch' }))) && verdictOf(/simply run next/.test(F({ op: 'steer', reason: 'no-active-turn' }))));
+  ok('gone: it already ran', verdictOf(/already ran/.test(F({ op: 'remove', reason: 'gone' }))));
+  ok('an unclassified failure still carries the server\'s own words', verdictOf(/Could not steer the queued message: boom/.test(F({ op: 'steer', reason: 'error', detail: 'boom' }))));
+  ok('a steer whose queued copy could NOT be deleted warns about the double run', verdictOf((() => { const m3 = new CodexMessageManager('q3'); m3.processLive({ timestamp: '', type: 'event_msg', payload: { type: 'queue_op_result', op: 'steer', id: 'q', msg_id: '', ok: true, reason: 'steered-not-dequeued' } }); return m3.messages.some((x) => /may run a second time/.test(x.content?.[0]?.text || '')); })()));
   // ACP normalizer: same ops, same chips
   const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
   const am = new AcpMessageManager('a'); const aops = []; am.onOp((o) => aops.push(o));
   am.processLive({ ts: new Date().toISOString(), type: 'acp', kind: 'user', msgId: 'a1', content: [{ type: 'text', text: 'hello' }] });
   am.processLive({ ts: new Date().toISOString(), type: 'acp', kind: 'queue_changed', items: [{ id: 'p1', msgId: 'a1', preview: 'hello', ts: 1, kind: 'user' }] });
-  ok('ACP: queue_changed → the SAME meta op + the SAME chip (one client path for both harnesses)', aops.some((o) => o.op === 'meta' && o.subtype === 'queue' && o.items.length === 1) && am.messages.find((m) => m.role === 'user')?.queueState === 'queued' && am.queueState().length === 1);
+  ok('ACP: queue_changed → the SAME meta op + the SAME chip (one client path for both harnesses)', gateOf(aops.some((o) => o.op === 'meta' && o.subtype === 'queue' && o.items.length === 1)) && am.messages.find((m) => m.role === 'user')?.queueState === 'queued' && am.queueState().length === 1);
   am.processLive({ ts: new Date().toISOString(), type: 'acp', kind: 'queue_op_result', op: 'remove', id: 'p1', msg_id: 'a1', ok: true });
   ok("ACP: a removed entry's bubble wears 'removed'", am.messages.find((m) => m.role === 'user')?.queueState === 'removed');
   ok('ACP: the user bubble carries its webui msgId too (one join, both harnesses)', am.messages.find((m) => m.role === 'user')?.webuiMsgId === 'a1');
-  ok("the meta op CARRIES the wrapper's advert, so a window created before the sidecar existed turns its controls on", aops.some((o) => o.op === 'meta' && o.subtype === 'queue' && o.supported === true) && ops.some((o) => o.op === 'meta' && o.subtype === 'queue' && o.supported === true));
-  ok('every CHAT normalizer answers queuePublished() (the same question everywhere; a fresh claude normalizer says not yet — its wrapper has not spoken)', [mm, am].every((n) => typeof n.queuePublished === 'function') && require(path.join(REPO, 'src/message-manager.js')).MessageManager.prototype.queuePublished() === false);
+  ok("the meta op CARRIES the wrapper's advert, so a window created before the sidecar existed turns its controls on", gateOf(aops.some((o) => o.op === 'meta' && o.subtype === 'queue' && o.supported === true)) && verdictOf(ops.some((o) => o.op === 'meta' && o.subtype === 'queue' && o.supported === true)));
+  ok('every CHAT normalizer answers queuePublished() (the same question everywhere; a fresh claude normalizer says not yet — its wrapper has not spoken)', gateOf([mm, am].every((n) => typeof n.queuePublished === 'function')) && require(path.join(REPO, 'src/message-manager.js')).MessageManager.prototype.queuePublished() === false);
 }
 
 // ⑨ THE Alt+Enter STEER CHORD (2026-09-07 owner ask: "顺便加入一个queue的快捷键,
@@ -293,13 +293,13 @@ console.log('— ⑨a the PURE send-mode predicate (caps → {showHint, allowSte
   ok('claude (2.369.361 — two doors, lane claude-steer-inject): Enter HANDS it to the running turn, Alt+Enter HOLDS it — both segments, the HOLD chord (never the steer one)', cl.showHint === true && cl.enterDoor === 'steer' && cl.altDoor === 'queue' && cl.queueSegment === true && cl.steerSegment === true && cl.allowSteerChord === false && cl.allowHoldChord === true && cl.steerOnEnter === true, cl);
   const sh = m('shell');
   ok('shell (no input queue at all): nothing', sh.showHint === false && sh.allowSteerChord === false, sh);
-  ok('an unknown backend / missing caps object is the all-false row (never codex\'s by accident)', [composerSendModes(undefined), composerSendModes(null), composerSendModes({}), m('gemini')].every((r) => r.showHint === false && r.allowSteerChord === false));
+  ok('an unknown backend / missing caps object is the all-false row (never codex\'s by accident)', verdictOf([composerSendModes(undefined), composerSendModes(null), composerSendModes({}), m('gemini')].every((r) => r.showHint === false && r.allowSteerChord === false)));
   // the chord is the SAME fact as the steer segment: a chord that silently
   // degraded to a plain send would be worse than no chord at all
   // lane claude-steer-inject: the chord is the SECOND key's door — steer (codex) or hold (claude, whose Enter steers) — and
   // each chord is the same fact as that door; the steer segment is the harness row's steer, on whichever key carries it
-  ok('each chord is the SAME fact as the second key\'s door on every declared harness (one fact, never two): allowSteerChord ⇔ altDoor steer, allowHoldChord ⇔ altDoor queue', Object.keys(require(path.join(REPO, 'src/backend-caps.js')).BACKEND_CAPS).every((id) => m(id).allowSteerChord === (m(id).altDoor === 'steer') && m(id).allowHoldChord === (m(id).altDoor === 'queue')));
-  ok('…and the steer door (segment or chord) is never offered without the harness row saying steer', Object.keys(require(path.join(REPO, 'src/backend-caps.js')).BACKEND_CAPS).every((id) => m(id).steerSegment === capsOf(id).inputModes.steer && (!m(id).allowSteerChord || capsOf(id).inputModes.steer)));
+  ok('each chord is the SAME fact as the second key\'s door on every declared harness (one fact, never two): allowSteerChord ⇔ altDoor steer, allowHoldChord ⇔ altDoor queue', verdictOf(Object.keys(require(path.join(REPO, 'src/backend-caps.js')).BACKEND_CAPS).every((id) => m(id).allowSteerChord === (m(id).altDoor === 'steer') && m(id).allowHoldChord === (m(id).altDoor === 'queue'))));
+  ok('…and the steer door (segment or chord) is never offered without the harness row saying steer', verdictOf(Object.keys(require(path.join(REPO, 'src/backend-caps.js')).BACKEND_CAPS).every((id) => m(id).steerSegment === capsOf(id).inputModes.steer && (!m(id).allowSteerChord || capsOf(id).inputModes.steer))));
   // it reads the LIVE intersection, so no wrapper advert ⇒ nothing offered
   ok('the all-false intersection chat-view returns without a wrapper advert yields no hint and no chord', composerSendModes({ queue: false, steer: false, queueOps: false }).showHint === false);
 }
@@ -333,19 +333,19 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
   ];
   const CODEX_CAPS = derive({ queue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit', 'run-now', 'run-all'] });
   const full = ChatInput.queueStripHtml(items, CODEX_CAPS);
-  ok('the strip heads with the count and what happens next', /2 queued — runs after this turn/.test(full), full.slice(0, 200));
-  ok('one row per item, each carrying its app-server id', (full.match(/class="chat-queue-item"/g) || []).length === 2 && /data-queue-id="q1"/.test(full) && /data-queue-id="q2"/.test(full));
+  ok('the strip heads with the count and what happens next', verdictOf(/2 queued — runs after this turn/.test(full)), full.slice(0, 200));
+  ok('one row per item, each carrying its app-server id', (full.match(/class="chat-queue-item"/g) || []).length === 2 && gateOf(/data-queue-id="q1"/.test(full)) && verdictOf(/data-queue-id="q2"/.test(full)));
   ok('steer + remove buttons per row when the harness can steer', (full.match(/data-queue-op="steer"/g) || []).length === 2 && (full.match(/data-queue-op="remove"/g) || []).length === 2);
-  ok('"Steer all" appears only when MORE THAN ONE is queued', /data-queue-op="steer-all"/.test(full) && !/data-queue-op="steer-all"/.test(ChatInput.queueStripHtml([items[0]], CODEX_CAPS)));
-  ok('a peer message is LISTED and LABELLED (hiding it would misstate what runs next)', /class="chat-queue-from">session B</.test(full));
+  ok('"Steer all" appears only when MORE THAN ONE is queued', gateOf(/data-queue-op="steer-all"/.test(full)) && !/data-queue-op="steer-all"/.test(ChatInput.queueStripHtml([items[0]], CODEX_CAPS)));
+  ok('a peer message is LISTED and LABELLED (hiding it would misstate what runs next)', verdictOf(/class="chat-queue-from">session B</.test(full)));
   const noSteer = ChatInput.queueStripHtml(items, derive({ queue: true, queueVerbs: ['remove'] }));
   ok('a harness that cannot steer offers ONLY remove — no steer button, no Steer all', !/data-queue-op="steer/.test(noSteer) && (noSteer.match(/data-queue-op="remove"/g) || []).length === 2);
-  ok('rows are keyboard-reachable (tabindex) so Enter can steer a focused one', /class="chat-queue-item" tabindex="0"/.test(full));
-  ok('icons are SVG, never a glyph (§17)', /<svg/.test(full) && !/[✕✖×⚡]/.test(full), full.slice(0, 120));
+  ok('rows are keyboard-reachable (tabindex) so Enter can steer a focused one', verdictOf(/class="chat-queue-item" tabindex="0"/.test(full)));
+  ok('icons are SVG, never a glyph (§17)', gateOf(/<svg/.test(full)) && !/[✕✖×⚡]/.test(full), full.slice(0, 120));
   // XSS: a preview is message text and syncs to EVERY client
   const evil = '<img src=x onerror=alert(1)>" onmouseover="y';
   const xss = ChatInput.queueStripHtml([{ id: evil, msgId: '', preview: evil, text: evil, kind: 'peer', from: evil }], CODEX_CAPS, { [evil]: { state: 'refused', title: evil } });
-  ok('XSS: preview, sender, id AND a refusal reason are escaped everywhere they land (text + attributes)', !xss.includes('<img src=x') && !/onmouseover="y/.test(xss) && xss.includes('&lt;img') && (xss.match(/&quot;/g) || []).length >= 2, xss.slice(0, 300));
+  ok('XSS: preview, sender, id AND a refusal reason are escaped everywhere they land (text + attributes)', !xss.includes('<img src=x') && !/onmouseover="y/.test(xss) && gateOf(xss.includes('&lt;img')) && (xss.match(/&quot;/g) || []).length >= 2, xss.slice(0, 300));
 
   // ── ⑨ THE VERB TABLE DRIVES THE CONTROLS (design-harness-features §2.1) ──
   // Every control is rendered from `caps.queueVerbs` — the harness table
@@ -357,7 +357,7 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
     const without = ChatInput.queueStripHtml(items, derive({ queue: true, queueVerbs: ['remove'].filter((v) => v !== verb) }));
     // 'steer-all' needs >1 item to show, which `items` has; every other verb
     // renders per row.
-    ok(`'${verb}' declared ⇒ its control is rendered`, withIt.includes(CTRL[verb]), withIt.slice(0, 260));
+    ok(`'${verb}' declared ⇒ its control is rendered`, verdictOf(withIt.includes(CTRL[verb])), withIt.slice(0, 260));
     ok(`'${verb}' NOT declared ⇒ NO such control anywhere (never a button whose frame the ws layer refuses)`, !without.includes(CTRL[verb]), without.slice(0, 260));
   }
   {
@@ -366,15 +366,15 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
     // wrapper refuses it too — the control is hidden because it MEANS it).
     const rows = codex.split('class="chat-queue-item"').slice(1);
     ok('the PEER row carries no edit control (its words are not yours to rewrite)', rows.length === 2 && !rows[1].includes('data-queue-op="edit"'), rows[1]?.slice(0, 300));
-    ok('…while your own row does', rows[0].includes('data-queue-op="edit"'));
+    ok('…while your own row does', verdictOf(rows[0].includes('data-queue-op="edit"')));
     // …and neither does an item the wrapper did NOT send the full text for:
     // the 120-char preview would silently truncate the message on save.
     const noText = ChatInput.queueStripHtml([{ id: 'q9', msgId: 'm9', preview: 'a very long message…', kind: 'user' }], CODEX_CAPS);
     ok('an item whose FULL text the wrapper did not publish offers no edit control (editing a truncated preview would cut the message down)', !noText.includes('data-queue-op="edit"'), noText.slice(0, 300));
-    ok('the peer row is still LISTED and labelled, and still removable/movable', rows[1].includes('session B') && rows[1].includes('data-queue-op="remove"') && rows[1].includes('data-queue-drag='));
-    ok('"Run all now" is a HEADER control, distinct from per-row "Run this one now"', /chat-queue-head[\s\S]*?data-queue-op="run-all"/.test(codex) && (codex.match(/data-queue-op="run-now"/g) || []).length === 2);
+    ok('the peer row is still LISTED and labelled, and still removable/movable', gateOf(rows[1].includes('session B')) && gateOf(rows[1].includes('data-queue-op="remove"')) && verdictOf(rows[1].includes('data-queue-drag=')));
+    ok('"Run all now" is a HEADER control, distinct from per-row "Run this one now"', gateOf(/chat-queue-head[\s\S]*?data-queue-op="run-all"/.test(codex)) && (codex.match(/data-queue-op="run-now"/g) || []).length === 2);
     ok('every new control is an SVG icon, never a ✎ / ▶ / ⠿ glyph (§17)', !/[✎▶⠿⇅↑↓]/.test(codex), (codex.match(/[✎▶⠿⇅↑↓]/g) || []).join(''));
-    ok('the drag handle names its KEYBOARD equivalent (a pointer-only control is half a control)', /title="[^"]*Alt\+Up[^"]*"/.test(codex), /title="[^"]*Alt[^"]*"/.exec(codex)?.[0]);
+    ok('the drag handle names its KEYBOARD equivalent (a pointer-only control is half a control)', verdictOf(/title="[^"]*Alt\+Up[^"]*"/.test(codex)), /title="[^"]*Alt[^"]*"/.exec(codex)?.[0]);
   }
   {
     // ROW STATE: pending while an op is in flight, refused WITH the reason on
@@ -382,19 +382,19 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
     // must speak for itself).
     const st = new Map([['q1', { state: 'pending', title: '' }], ['q2', { state: 'refused', title: 'A turn is already running.' }]]);
     const html = ChatInput.queueStripHtml(items, CODEX_CAPS, st);
-    ok('a row with an op in flight is marked pending', /data-queue-id="q1" data-queue-state="pending"/.test(html), html.slice(0, 400));
-    ok('a refused row is marked AND carries its reason', /data-queue-state="refused" title="A turn is already running\."/.test(html));
+    ok('a row with an op in flight is marked pending', verdictOf(/data-queue-id="q1" data-queue-state="pending"/.test(html)), html.slice(0, 400));
+    ok('a refused row is marked AND carries its reason', verdictOf(/data-queue-state="refused" title="A turn is already running\."/.test(html)));
     // ROUND-4 VERIFIER, finding 1: EDIT MODE IS ITS OWN ARGUMENT. It used to
     // be a third `rowState` value — the state every dispatch and every
     // refusal overwrites — so the ONE on-screen signal that an edit is open
     // was erased by any op touching that row (a batch verb marks EVERY row).
     const editingHtml = ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q1');
-    ok('an editing row says so, and its edit control becomes a cancel', /data-queue-editing="1"/.test(editingHtml) && /data-queue-op="edit-cancel"/.test(editingHtml), editingHtml.slice(0, 400));
-    ok('…and the hint under the strip comes from the SAME fact', /class="chat-queue-editing"/.test(editingHtml) && /send to save/.test(editingHtml));
+    ok('an editing row says so, and its edit control becomes a cancel', gateOf(/data-queue-editing="1"/.test(editingHtml)) && verdictOf(/data-queue-op="edit-cancel"/.test(editingHtml)), editingHtml.slice(0, 400));
+    ok('…and the hint under the strip comes from the SAME fact', gateOf(/class="chat-queue-editing"/.test(editingHtml)) && verdictOf(/send to save/.test(editingHtml)));
     const bothHtml = ChatInput.queueStripHtml(items, CODEX_CAPS, new Map([['q1', { state: 'pending', title: 'x' }]]), 'q1');
-    ok('finding 1: a row carries BOTH its op state and its edit mode — neither renders through the other', /data-queue-state="pending" data-queue-editing="1"/.test(bothHtml) && /data-queue-op="edit-cancel"/.test(bothHtml) && /class="chat-queue-editing"/.test(bothHtml), bothHtml.slice(0, 400));
+    ok('finding 1: a row carries BOTH its op state and its edit mode — neither renders through the other', gateOf(/data-queue-state="pending" data-queue-editing="1"/.test(bothHtml)) && gateOf(/data-queue-op="edit-cancel"/.test(bothHtml)) && verdictOf(/class="chat-queue-editing"/.test(bothHtml)), bothHtml.slice(0, 400));
     const refusedEditing = ChatInput.queueStripHtml(items, CODEX_CAPS, new Map([['q1', { state: 'refused', title: 'The agent could not be reached.' }]]), 'q1');
-    ok('…a REFUSED edit that is open again shows the reason AND the editing marker', /data-queue-state="refused" data-queue-editing="1" title="The agent could not be reached\."/.test(refusedEditing) && /data-queue-op="edit-cancel"/.test(refusedEditing), refusedEditing.slice(0, 400));
+    ok('…a REFUSED edit that is open again shows the reason AND the editing marker', gateOf(/data-queue-state="refused" data-queue-editing="1" title="The agent could not be reached\."/.test(refusedEditing)) && verdictOf(/data-queue-op="edit-cancel"/.test(refusedEditing)), refusedEditing.slice(0, 400));
     ok('negative control: no editingId ⇒ no editing marker, no cancel control, no hint, whatever the op state says', !/data-queue-editing/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, new Map([['q1', { state: 'editing', title: '' }]]))) && !/edit-cancel/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, new Map([['q1', { state: 'editing', title: '' }]]))) && !/class="chat-queue-editing"/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, new Map([['q1', { state: 'editing', title: '' }]]))));
     ok('negative control: an editingId naming a row that is NOT in the queue paints nothing (a stale id is not a hint)', !/data-queue-editing/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q404')) && !/class="chat-queue-editing"/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q404')));
     // MERGE DEFECT (r2 verifier, finding 2): master's collapse (2.369.60) omits
@@ -405,8 +405,8 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
     // below), and the collapse the user DID ask for keeps the mode finishable
     // by putting the cancel on the always-drawn hint line.
     const collapsedEditing = ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q1', { collapsed: true });
-    ok('a COLLAPSED strip with an open edit still says an edit is open', /class="chat-queue-editing"/.test(collapsedEditing) && /send to save/.test(collapsedEditing), collapsedEditing.slice(0, 400));
-    ok('…and the cancel control is still REACHABLE, naming the row being edited (the body — and every row control in it — is gone)', !/chat-queue-body/.test(collapsedEditing) && !/class="chat-queue-item"/.test(collapsedEditing) && /data-queue-op="edit-cancel" data-queue-id="q1"/.test(collapsedEditing), collapsedEditing.slice(0, 600));
+    ok('a COLLAPSED strip with an open edit still says an edit is open', gateOf(/class="chat-queue-editing"/.test(collapsedEditing)) && verdictOf(/send to save/.test(collapsedEditing)), collapsedEditing.slice(0, 400));
+    ok('…and the cancel control is still REACHABLE, naming the row being edited (the body — and every row control in it — is gone)', !/chat-queue-body/.test(collapsedEditing) && !/class="chat-queue-item"/.test(collapsedEditing) && verdictOf(/data-queue-op="edit-cancel" data-queue-id="q1"/.test(collapsedEditing)), collapsedEditing.slice(0, 600));
     ok('negative control: an EXPANDED strip puts the cancel on the row and does NOT duplicate it onto the hint line (one edit, one way out)', (ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q1').match(/data-queue-op="edit-cancel"/g) || []).length === 1);
     ok('negative control: a collapsed strip with NO edit open carries no cancel at all', !/edit-cancel/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, null, null, { collapsed: true })));
     // …and the fallback obeys the SAME editability predicate as the row it
@@ -414,14 +414,14 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
     // words misattributes them), so a stale editingId naming one must not
     // conjure a control the expanded strip would never have drawn.
     ok('negative control: a collapsed strip whose editingId names a PEER row draws the hint but NO cancel (the row would not have offered one either)',
-      /class="chat-queue-editing"/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q2', { collapsed: true }))
+      gateOf(/class="chat-queue-editing"/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q2', { collapsed: true })))
       && !/edit-cancel/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q2', { collapsed: true }))
       && !/edit-cancel/.test(ChatInput.queueStripHtml(items, CODEX_CAPS, null, 'q2')));
     ok('negative control: a harness without the `edit` verb gets no cancel in a collapsed strip either',
       !/edit-cancel/.test(ChatInput.queueStripHtml(items, derive({ queue: true, queueVerbs: ['remove', 'reorder'] }), null, 'q1', { collapsed: true })));
     // …and the collapsed markup that made the defect possible is otherwise
     // unchanged (master's own contract: header + chevron, no rows).
-    ok('the collapsed strip is header-only with a chevron that says it is collapsed', /class="chat-queue-toggle" aria-expanded="false"/.test(collapsedEditing));
+    ok('the collapsed strip is header-only with a chevron that says it is collapsed', verdictOf(/class="chat-queue-toggle" aria-expanded="false"/.test(collapsedEditing)));
   }
   // ── B-d963: THE OLD-WRAPPER SKEW, on the strip. A wrapper started before
   // the verb table queues every Background Work notification as a billed turn
@@ -439,11 +439,11 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
     ];
     const HINT = 'Restart this session to receive notifications without a billed turn';
     const html = ChatInput.queueStripHtml(skewItems, { ...LEGACY, notifSteerMissing: true });
-    ok('B-d963: an old wrapper + a queued notification ⇒ the strip carries the restart hint line', /class="chat-queue-skew"/.test(html) && html.includes(HINT), html.slice(0, 600));
+    ok('B-d963: an old wrapper + a queued notification ⇒ the strip carries the restart hint line', gateOf(/class="chat-queue-skew"/.test(html)) && verdictOf(html.includes(HINT)), html.slice(0, 600));
     const rowOf = (h, id) => (h.match(new RegExp(`<div class="chat-queue-item"[^>]*data-queue-id="${id}"[\\s\\S]*?</div>`)) || [''])[0];
-    ok('…the notification row is MARKED and its ✕ is the suggested action (removable by default)', /data-queue-notif="1"/.test(rowOf(html, 'q2')) && /chat-queue-btn-remove chat-queue-btn-suggest/.test(rowOf(html, 'q2')), rowOf(html, 'q2'));
+    ok('…the notification row is MARKED and its ✕ is the suggested action (removable by default)', gateOf(/data-queue-notif="1"/.test(rowOf(html, 'q2'))) && verdictOf(/chat-queue-btn-remove chat-queue-btn-suggest/.test(rowOf(html, 'q2'))), rowOf(html, 'q2'));
     ok("…while a person's message and your own are NOT marked", !/data-queue-notif/.test(rowOf(html, 'q1')) && !/data-queue-notif/.test(rowOf(html, 'q3')) && !/chat-queue-btn-suggest/.test(rowOf(html, 'q3')));
-    ok('…and the hint survives a COLLAPSED strip (it lives outside the scrolling body)', ChatInput.queueStripHtml(skewItems, { ...LEGACY, notifSteerMissing: true }, null, null, { collapsed: true }).includes(HINT));
+    ok('…and the hint survives a COLLAPSED strip (it lives outside the scrolling body)', verdictOf(ChatInput.queueStripHtml(skewItems, { ...LEGACY, notifSteerMissing: true }, null, null, { collapsed: true }).includes(HINT)));
     ok('NEGATIVE CONTROL: a wrapper that steers notifications gets no hint and no marks', !ChatInput.queueStripHtml(skewItems, LEGACY).includes(HINT) && !/data-queue-notif/.test(ChatInput.queueStripHtml(skewItems, LEGACY)));
     ok('NEGATIVE CONTROL: an old wrapper with NO notification queued gets no hint (nothing to act on)', !ChatInput.queueStripHtml([skewItems[0], skewItems[2]], { ...LEGACY, notifSteerMissing: true }).includes(HINT));
     // (the skew hint's i18n + CSS pins — MOVED to the fast scripts/test-queue-steer-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -458,14 +458,14 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
     const cm = new CMM('batch'); const cops = []; cm.onOp((o) => cops.push(o));
     cm.processLive({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'queue_op_result', op: 'run-all', id: '', ok: false, reason: 'busy', detail: 'a turn is running' } });
     const res = cops.filter((o) => o.op === 'meta' && o.subtype === 'queue-result');
-    ok("a BATCH result (no id) still reaches the client as a queue-result meta op", res.length === 1 && res[0].id === '' && res[0].ok === false && res[0].reason === 'busy' && /already running/.test(res[0].text || ''), res);
+    ok("a BATCH result (no id) still reaches the client as a queue-result meta op", res.length === 1 && res[0].id === '' && res[0].ok === false && res[0].reason === 'busy' && verdictOf(/already running/.test(res[0].text || '')), res);
     const cm2 = new CMM('batch2'); const cops2 = []; cm2.onOp((o) => cops2.push(o));
     cm2.processLive({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'queue_op_result', op: 'reorder', id: 'q1', msg_id: 'm1', ok: true } });
-    ok('…and a per-item success does too (the row must stop spinning even when nothing else changes)', cops2.some((o) => o.subtype === 'queue-result' && o.id === 'q1' && o.ok === true));
+    ok('…and a per-item success does too (the row must stop spinning even when nothing else changes)', verdictOf(cops2.some((o) => o.subtype === 'queue-result' && o.id === 'q1' && o.ok === true)));
     ok('…while a successful reorder/edit stamps NO chip (the bubble is still your queued message; the strip is the confirmation)', !cops2.some((o) => o.op === 'edit' && o.fields?.queueState));
     const am = new AMM('batch3'); const aops = []; am.onOp((o) => aops.push(o));
     am.processLive({ ts: new Date().toISOString(), type: 'acp', kind: 'queue_op_result', op: 'reorder', id: 'p1', msg_id: 'a1', ok: true });
-    ok('ACP emits the same queue-result meta op (one client path, both harnesses)', aops.some((o) => o.op === 'meta' && o.subtype === 'queue-result' && o.id === 'p1' && o.ok === true), aops);
+    ok('ACP emits the same queue-result meta op (one client path, both harnesses)', verdictOf(aops.some((o) => o.op === 'meta' && o.subtype === 'queue-result' && o.id === 'p1' && o.ok === true)), aops);
     ok('…and does NOT stamp a removed/steered chip for a reorder (only a removal changes what a bubble means)', !aops.some((o) => o.op === 'edit' && o.fields?.queueState));
   }
 
@@ -473,11 +473,11 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
   const { composerSendModes: modesOf } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
   const { capsOf: srvCaps } = require(path.join(REPO, 'src/backend-caps.js'));
   const hint = (id) => ChatInput.sendHintHtml(modesOf(srvCaps(id).inputModes));
-  ok('codex: BOTH segments, separated', /Enter queues/.test(hint('codex')) && /Alt\+Enter injects now/.test(hint('codex')) && /chat-send-hint-sep/.test(hint('codex')), hint('codex'));
-  ok('opencode: the queue segment only — the line never teaches a key that does nothing here', /Enter queues/.test(hint('opencode')) && !/Alt\+Enter/.test(hint('opencode')) && !/chat-send-hint-sep/.test(hint('opencode')), hint('opencode'));
+  ok('codex: BOTH segments, separated', gateOf(/Enter queues/.test(hint('codex'))) && gateOf(/Alt\+Enter injects now/.test(hint('codex'))) && verdictOf(/chat-send-hint-sep/.test(hint('codex'))), hint('codex'));
+  ok('opencode: the queue segment only — the line never teaches a key that does nothing here', gateOf(/Enter queues/.test(hint('opencode'))) && !/Alt\+Enter/.test(hint('opencode')) && !/chat-send-hint-sep/.test(hint('opencode')), hint('opencode'));
   // lane claude-steer-inject (2.369.361): claude's two doors — Enter's first, then the second key's (on a .354 wrapper the
   // live intersection leaves «Enter queues» alone: scripts/test-claude-steer.mjs §1/§2)
-  ok('claude: «Enter sends now · Alt+Enter queues until the turn ends» — Enter\'s door first, then the second key\'s; never a key that does nothing here', /^<span[^>]*>Enter sends now<\/span><span class="chat-send-hint-sep">·<\/span><span[^>]*>Alt\+Enter queues until the turn ends<\/span>$/.test(hint('claude')), hint('claude'));
+  ok('claude: «Enter sends now · Alt+Enter queues until the turn ends» — Enter\'s door first, then the second key\'s; never a key that does nothing here', verdictOf(/^<span[^>]*>Enter sends now<\/span><span class="chat-send-hint-sep">·<\/span><span[^>]*>Alt\+Enter queues until the turn ends<\/span>$/.test(hint('claude'))), hint('claude'));
   ok('shell: the hint is EMPTY markup (and _updateSendModes never unhides it)', hint('shell') === '');
   ok('the hint carries no raw glyph icon and every phrase is a t() key (zh+ja pinned below)', !/[⚡✕]/.test(hint('codex')));
 
@@ -590,7 +590,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
   sent = []; notices = [];
   const other = { id: 'x', role: 'user', webuiMsgId: 'm-gone' };
   ChatView.prototype._steerQueuedMessage.call(mkView(), other);
-  ok('a bubble that is NOT in the queue any more is told so, and nothing is sent', sent.length === 0 && notices.some((n) => /no longer queued/.test(n)), { sent, notices });
+  ok('a bubble that is NOT in the queue any more is told so, and nothing is sent', sent.length === 0 && verdictOf(notices.some((n) => /no longer queued/.test(n))), { sent, notices });
 
   sent = []; notices = [];
   ChatView.prototype._steerQueuedMessage.call(mkView({ _queueSupported: false }), bubble);
@@ -599,7 +599,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
   sent = []; notices = [];
   const before = toasts().length;
   ChatView.prototype._sendQueueOp.call(mkView({ _disconnected: true }), 'remove', 'q7');
-  ok('a strip button on a DISCONNECTED window sends nothing and TOASTS (it used to silently do nothing)', sent.length === 0 && toasts().length === before + 1 && /not live/.test(toasts().slice(-1)[0] || ''), toasts().slice(-1));
+  ok('a strip button on a DISCONNECTED window sends nothing and TOASTS (it used to silently do nothing)', sent.length === 0 && toasts().length === before + 1 && verdictOf(/not live/.test(toasts().slice(-1)[0] || '')), toasts().slice(-1));
   sent = []; notices = [];
   ChatView.prototype._steerQueuedMessage.call(mkView({ _readOnly: true }), bubble);
   ok('…and a read-only window blames the SOCKET, not the message', sent.length === 0 && !notices.some((n) => /no longer queued/.test(n)), notices);
@@ -609,7 +609,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
   // its session IS gone, so it must keep the view-only rescue + Resume bar.
   notices = []; rescued = 0; readOnlyed = 0;
   ChatView.prototype._onSessionError.call(mkView(), { type: 'error', sessionId: 'sess-9', code: 'queue-op-unsupported', scope: 'action', message: 'nope' });
-  ok('a scoped refusal renders in chat and leaves the window ALONE (inc-mt2arppw)', rescued === 0 && readOnlyed === 0 && notices.some((n) => /nope/.test(n)), { notices, rescued, readOnlyed });
+  ok('a scoped refusal renders in chat and leaves the window ALONE (inc-mt2arppw)', rescued === 0 && readOnlyed === 0 && verdictOf(notices.some((n) => /nope/.test(n))), { notices, rescued, readOnlyed });
   notices = []; rescued = 0; readOnlyed = 0;
   ChatView.prototype._onSessionError.call(mkView(), { type: 'error', sessionId: 'sess-9', code: 'ended-during-attach', message: 'Session sess-9 ended while its history was loading' });
   ok("THE REGRESSION GUARD: 'ended-during-attach' still takes the view-only rescue (never a live-looking empty window)", rescued === 1 && notices.length === 0, { notices, rescued });
@@ -618,7 +618,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
   ok('a code-LESS error is the attach failure it always was', rescued === 1);
   notices = []; rescued = 0; readOnlyed = 0;
   ChatView.prototype._onSessionError.call(mkView({ _tryViewOnlyRescue: () => false }), { type: 'error', sessionId: 'sess-9', code: 'ended-during-attach', message: 'gone' });
-  ok('…and when even the rescue cannot work, the window says so and goes read-only', readOnlyed === 1 && notices.some((n) => /gone/.test(n)));
+  ok('…and when even the rescue cannot work, the window says so and goes read-only', readOnlyed === 1 && verdictOf(notices.some((n) => /gone/.test(n))));
 
   // ── ROUND-2 VERIFIER, finding 3 (client half): a ws-layer refusal is the ONE
   // outcome that never arrives as a `queue-result` meta op, so the row the
@@ -628,7 +628,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
     const results = [];
     const view = mkView({ _chatInput: { setQueueOpResult: (...a) => results.push(a) } });
     ChatView.prototype._onSessionError.call(view, { type: 'error', sessionId: 'sess-9', code: 'queue-op-unsupported', scope: 'action', op: 'run-now', id: 'q7', message: 'This session\'s agent is an older build.' });
-    ok(`finding 3: a ws refusal ENDS the row's pending state, carrying its reason (${JSON.stringify(results)})`, results.length === 1 && results[0][0] === 'q7' && results[0][1] === false && /older build/.test(results[0][2] || ''), results);
+    ok(`finding 3: a ws refusal ENDS the row's pending state, carrying its reason (${JSON.stringify(results)})`, results.length === 1 && results[0][0] === 'q7' && results[0][1] === false && verdictOf(/older build/.test(results[0][2] || '')), results);
     results.length = 0;
     ChatView.prototype._onSessionError.call(view, { type: 'error', sessionId: 'sess-9', code: 'queue-op-unsupported', scope: 'action', op: 'run-all', id: null, message: 'A turn is running.' });
     ok('…and a BATCH verb (no id) ends every pending row, which is what an empty id already means to the strip', results.length === 1 && results[0][0] === '');
@@ -654,7 +654,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
     ok('the legacy verb list has ONE definition, in the PURE module both ends import (server mapping ⇄ client mapping)',
       legacy === JSON.stringify(['remove', 'steer', 'steer-all'])
       && require(path.join(REPO, 'src/server/wrapper-files.js')).LEGACY_QUEUE_VERBS === LEGACY_QUEUE_VERBS
-      && /import \{[^}]*\bLEGACY_QUEUE_VERBS\b[^}]*\} from '\.\.\/backend-caps\.js';/.test(read('src/lib/chat-view.js'))
+      && gateOf(/import \{[^}]*\bLEGACY_QUEUE_VERBS\b[^}]*\} from '\.\.\/backend-caps\.js';/.test(read('src/lib/chat-view.js')))
       && !/const LEGACY_QUEUE_VERBS\s*=/.test(read('src/lib/chat-view.js')));
     // THE REPRODUCTION: the create payload says "nothing known" and then a
     // pre-verb-table wrapper publishes a queue with no `verbs`.
@@ -800,7 +800,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
     {
       const { view, out } = mkSteerView();
       ChatView.prototype._steerAfterSend.call(view, 'm-99');
-      ok('the chord parks the msgId and sends NOTHING yet (the item has no id until the harness publishes it)', out.length === 0 && view._pendingSteers.has('m-99'));
+      ok('the chord parks the msgId and sends NOTHING yet (the item has no id until the harness publishes it)', out.length === 0 && verdictOf(view._pendingSteers.has('m-99')));
       ChatView.prototype._setQueue.call(view, [{ id: 'q99', msgId: 'm-99', preview: 'do it now', kind: 'user' }]);
       ok('THE CONVERSION: the queue_changed carrying that msgId fires the ORDINARY queue-op steer for its id (no second wire shape)', out.length === 1 && out[0].type === 'queue-op' && out[0].op === 'steer' && out[0].id === 'q99', out);
       ok('…and the pending entry is cleared, so a later queue update can never steer it twice', view._pendingSteers.size === 0);
@@ -856,7 +856,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
       ChatView.prototype._hideTyping.call(ranOwn.view);
       ChatView.prototype._showTyping.call(ranOwn.view, 'thinking...');
       await wait(150);
-      ok('THE HONEST TIMEOUT: the id never came and the turn is STILL running ⇒ the window SAYS the injection did not happen (never a user believing it did)', still.notes.length === 1 && /could not be injected into the running turn/.test(still.notes[0]), still.notes);
+      ok('THE HONEST TIMEOUT: the id never came and the turn is STILL running ⇒ the window SAYS the injection did not happen (never a user believing it did)', still.notes.length === 1 && verdictOf(/could not be injected into the running turn/.test(still.notes[0])), still.notes);
       ok('…and NOT when the turn ended meanwhile — the message then runs next, immediately, which is what "now" asked for (a false alarm is its own failure)', ended.notes.length === 0, ended.notes);
       ok('THE ROUND-2 MAJOR: the turn ended and THE MESSAGE ITSELF became the next turn (the only shape that lets this timer fire) ⇒ still silent — the window may not apologise for a message the agent is visibly running', ranOwn.notes.length === 0, ranOwn.notes);
       ok('NEGATIVE CONTROL: on that very view the OLD guard (`_typingSince` truthiness) HELD at fire time, so the shipped code would have posted the false notice — what saves it is that the TURN IDENTITY changed', !!ranOwn.view._typingSince === true && (ranOwn.view._turnEpoch || 0) !== epochAtSend, { typingSince: !!ranOwn.view._typingSince, epochAtSend, now: ranOwn.view._turnEpoch });
@@ -873,7 +873,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
         ChatView.prototype._showTyping.call(repaint.view, 'thinking...');
         ok('a LABEL REPAINT is not a new turn (the epoch never moves on a label)', (repaint.view._turnEpoch || 0) === e0, { e0, now: repaint.view._turnEpoch });
         await wait(150);
-        ok('…so the still-running apology survives a relabelled turn (the fix silences the NEXT turn, never this one)', repaint.notes.length === 1 && /could not be injected/.test(repaint.notes[0]), repaint.notes);
+        ok('…so the still-running apology survives a relabelled turn (the fix silences the NEXT turn, never this one)', repaint.notes.length === 1 && verdictOf(/could not be injected/.test(repaint.notes[0])), repaint.notes);
         ChatView.prototype._hideTyping.call(repaint.view);
         ChatView.prototype._showTyping.call(repaint.view, 'thinking...');
         ok('…and a hide→show INSIDE the turn (permission answer, reconnect) is NOT a new identity either (round 3)', (repaint.view._turnEpoch || 0) === e0, repaint.view._turnEpoch);
@@ -889,7 +889,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
         ChatView.prototype._hideTyping.call(mid.view);
         ChatView.prototype._showTyping.call(mid.view, 'thinking...');
         await wait(150);
-        ok('a hide/re-arm inside the same turn keeps the apology (no turn_complete ⇒ same turn ⇒ still un-injected)', mid.notes.length === 1 && /could not be injected/.test(mid.notes[0]), mid.notes);
+        ok('a hide/re-arm inside the same turn keeps the apology (no turn_complete ⇒ same turn ⇒ still un-injected)', mid.notes.length === 1 && verdictOf(/could not be injected/.test(mid.notes[0])), mid.notes);
       }
       // (the apology's i18n pin — MOVED to the fast scripts/test-queue-steer-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
       // …and a CONVERSION inside the window cancels the timer: no apology for
@@ -908,9 +908,9 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
     const C = await import(path.join(REPO, 'src/lib/contributions.js'));
     const { STEER_NOW_COMMAND } = await import(path.join(REPO, 'src/lib/chat-view.js'));
     const cv = read('src/lib/chat-view.js');
-    ok("the chord is a CONTRIBUTED command with a stable id ('chat.steerNow') — a plugin can see it, rebind it and run it", STEER_NOW_COMMAND === 'chat.steerNow' && C.hasCommand('chat.steerNow'));
+    ok("the chord is a CONTRIBUTED command with a stable id ('chat.steerNow') — a plugin can see it, rebind it and run it", STEER_NOW_COMMAND === 'chat.steerNow' && verdictOf(C.hasCommand('chat.steerNow')));
     // (the command's registered-once pin — MOVED to the fast scripts/test-queue-steer-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-    ok('it carries a title and an SVG icon (a menu or palette can render it)', !!C.commandTitle('chat.steerNow', {}) && /<svg/i.test(C.getCommand('chat.steerNow').icon || ''));
+    ok('it carries a title and an SVG icon (a menu or palette can render it)', !!C.commandTitle('chat.steerNow', {}) && verdictOf(/<svg/i.test(C.getCommand('chat.steerNow').icon || '')));
     ok("the command's `when` is false when nothing resolves (a chord pressed outside every chat window does nothing)", C.getCommand('chat.steerNow').when({}) === false && C.getCommand('chat.steerNow').when({ event: {} }) === false);
     const fakeView = { steerComposerText: () => 'RAN', _canSteerComposer: () => true };
     const deadView = { steerComposerText: () => false, _canSteerComposer: () => false };
@@ -937,7 +937,7 @@ console.log('— ⑦ FUNCTIONAL client: a normalizer-produced bubble → a real 
 console.log('— wiring + docs pins');
 {
   const ci = read('scripts/ci.mjs');
-  ok('this suite runs in the release gate', /'test-queue-steer'/.test(ci));
+  ok('this suite runs in the release gate', verdictOf(/'test-queue-steer'/.test(ci)));
   // (the wiring + docs pins (the release-gate row above stays: it names this heavy suite) — MOVED to the fast scripts/test-queue-steer-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
@@ -986,10 +986,10 @@ console.log('— ⑥ the REAL wrapper against the REAL `codex app-server` (evide
       console.log(`  SKIP: \`codex app-server\` (${ver}) never reached a thread — ${(werr || 'no stderr').trim().slice(0, 140)}`);
       try { w.kill('SIGKILL'); } catch {}
     } else {
-      ok(`${ver}: the wrapper publishes a BASELINE queue read from a real thread/queue/list (a wrong method or param name fails here)`, await waitFor(() => queues().length > 0, 20000), events().map((e) => e.type + ':' + (e.payload?.type || '')).slice(-10));
-      ok('…empty on a fresh thread, and mirrored into the sidecar with caps.inputQueue', queues().slice(-1)[0]?.items?.length === 0 && Array.isArray(sc()?.queue) && sc()?.caps?.inputQueue === true, { last: queues().slice(-1)[0], caps: sc()?.caps });
+      ok(`${ver}: the wrapper publishes a BASELINE queue read from a real thread/queue/list (a wrong method or param name fails here)`, verdictOf(await waitFor(() => queues().length > 0, 20000)), events().map((e) => e.type + ':' + (e.payload?.type || '')).slice(-10));
+      ok('…empty on a fresh thread, and mirrored into the sidecar with caps.inputQueue', queues().slice(-1)[0]?.items?.length === 0 && gateOf(Array.isArray(sc()?.queue)) && sc()?.caps?.inputQueue === true, { last: queues().slice(-1)[0], caps: sc()?.caps });
       w.stdin.write(JSON.stringify({ type: 'queue-op', op: 'remove', id: 'not-a-real-id' }) + '\n');
-      ok("a queue-op for an id the real server does not have answers reason:'gone' (never a hang, never a fake success)", await waitFor(() => results().some((r) => r.op === 'remove' && r.reason === 'gone'), 20000), results());
+      ok("a queue-op for an id the real server does not have answers reason:'gone' (never a hang, never a fake success)", verdictOf(await waitFor(() => results().some((r) => r.op === 'remove' && r.reason === 'gone'), 20000)), results());
       const log = (() => { try { return fs.readFileSync(path.join(dir, 'codex-chat-wrapper.log'), 'utf8'); } catch { return ''; } })();
       ok('the wrapper log carries NO RPC-shape complaint (a renamed method would land here verbatim)', !/thread\/queue\/list failed|Invalid request|unknown variant/.test(log), log.slice(-400));
       try { w.kill('SIGTERM'); } catch {}
@@ -1072,7 +1072,7 @@ console.log('— ⑩ the four new verbs against a REAL codex app-server (isolate
       } else {
         ok(`${ver}: the queue verbs are gated on the experimentalApi capability the wrapper asks for (a future gate change fails HERE)`, !!init?.result, init?.error);
         // The wrapper's own initialize must carry it, or every queue verb 404s
-        ok('…and the wrapper asks for exactly that capability', /await request\('initialize', \{ clientInfo, capabilities: \{ experimentalApi: true \} \}/.test(wsrc));
+        ok('…and the wrapper asks for exactly that capability', verdictOf(/await request\('initialize', \{ clientInfo, capabilities: \{ experimentalApi: true \} \}/.test(wsrc)));
         // FOUR adds: the first drains into the (doomed, unauthenticated) turn
         // the server starts by itself, leaving three queued to work with.
         const added = [];
@@ -1085,7 +1085,7 @@ console.log('— ⑩ the four new verbs against a REAL codex app-server (isolate
         // PAGING IS REAL: limit + the opaque nextCursor, followed to the end —
         // exactly what listQueueAll does (a wrong param name fails here).
         const page1 = await rpc('thread/queue/list', { threadId, limit: 1 });
-        ok('thread/queue/list takes `limit` and answers an opaque `nextCursor` (the wrapper pages on THIS)', Array.isArray(page1?.result?.data) && page1.result.data.length === 1 && typeof page1.result.nextCursor === 'string', page1?.result);
+        ok('thread/queue/list takes `limit` and answers an opaque `nextCursor` (the wrapper pages on THIS)', gateOf(Array.isArray(page1?.result?.data)) && page1.result.data.length === 1 && typeof page1.result.nextCursor === 'string', page1?.result);
         const walked = [...page1.result.data];
         let cursor = page1.result.nextCursor, guard = 0;
         while (cursor && guard++ < 10) {
@@ -1109,7 +1109,7 @@ console.log('— ⑩ the four new verbs against a REAL codex app-server (isolate
           // …and a PARTIAL order is REFUSED (measured: not a silent delete —
           // which is why listQueueAll pages to the end for the op to WORK).
           const partial = await rpc('thread/queue/reorder', { threadId, queuedSubmissionIds: order.slice(0, 2) });
-          ok('a full-order array that is NOT the whole queue is REFUSED (a truncated page would break the op, never silently drop items)', /every queued submission exactly once/i.test(partial?.error?.message || ''), partial);
+          ok('a full-order array that is NOT the whole queue is REFUSED (a truncated page would break the op, never silently drop items)', verdictOf(/every queued submission exactly once/i.test(partial?.error?.message || '')), partial);
           // EDIT: the wrapper's exclusion rebuild, with an attachment that must
           // survive the round trip.
           const target = (after?.result?.data || [])[0];
@@ -1123,7 +1123,7 @@ console.log('— ⑩ the four new verbs against a REAL codex app-server (isolate
           // …and an id the server has drained is NOT FOUND, which the wrapper
           // classifies as 'gone' rather than a bare error.
           const missing = await rpc('thread/queue/update', { threadId, queuedSubmissionId: added[0].id, input: [{ type: 'text', text: 'x' }] });
-          ok("an update on an already-drained id answers 'not found' (the wrapper reports that as reason 'gone', i.e. it ran)", /not found/i.test(missing?.error?.message || '') && /if \(\/not found\/i\.test\(m\)\) return \{ reason: 'gone' \}/.test(wsrc), missing?.error);
+          ok("an update on an already-drained id answers 'not found' (the wrapper reports that as reason 'gone', i.e. it ran)", gateOf(/not found/i.test(missing?.error?.message || '')) && verdictOf(/if \(\/not found\/i\.test\(m\)\) return \{ reason: 'gone' \}/.test(wsrc)), missing?.error);
           // CLEAN UP: delete everything we queued (never `start` it).
           for (const q of (after2?.result?.data || [])) await rpc('thread/queue/delete', { threadId, queuedSubmissionId: q.id });
           const end = await rpc('thread/queue/list', { threadId });
@@ -1139,7 +1139,7 @@ console.log('— ⑩ the four new verbs against a REAL codex app-server (isolate
         const sawDeath = () => notes.includes('error') || /401 Unauthorized|Unauthorized/i.test(stderr) || !!turnDone;
         for (let w = 0; notes.includes('turn/started') && !sawDeath() && w < 60; w++) await sleep(250);
         const turnStatus = turnDone?.status || turnDone?.turn?.status || null;
-        ok('…and any turn the server started by itself died unauthenticated (401 / an error notification / a non-completed turn): zero tokens, on a home with no account — the ONLY failing shape is a turn that COMPLETED', !notes.includes('turn/started') || ((notes.includes('error') || /401 Unauthorized|Unauthorized/i.test(stderr) || turnStatus !== 'completed') && turnStatus !== 'completed'), { notes: [...new Set(notes)], turnStatus, pending: notes.includes('turn/started') && !sawDeath(), stderr: stderr.slice(-200) });
+        ok('…and any turn the server started by itself died unauthenticated (401 / an error notification / a non-completed turn): zero tokens, on a home with no account — the ONLY failing shape is a turn that COMPLETED', !notes.includes('turn/started') || ((gateOf(notes.includes('error')) || gateOf(/401 Unauthorized|Unauthorized/i.test(stderr)) || turnStatus !== 'completed') && turnStatus !== 'completed'), { notes: [...new Set(notes)], turnStatus, pending: notes.includes('turn/started') && !sawDeath(), stderr: stderr.slice(-200) });
       }
     } catch (e) {
       ok('the real-app-server verb leg ran', false, String(e.message || e).slice(0, 300));
@@ -1231,23 +1231,23 @@ console.log('— ⑧ the Stop button is one-shot while an interrupt is in flight
       };
       await evaljs(`window.__ci.showTyping('thinking...'); true`);
       let s = await state();
-      ok('the live Stop button is enabled and says Stop', s.text.includes('Stop') && !s.disabled && !s.pending, s);
+      ok('the live Stop button is enabled and says Stop', gateOf(s.text.includes('Stop')) && !s.disabled && !s.pending, s);
       await clickStop();
       s = await state();
-      ok('clicking it sends ONE interrupt and the button goes pending: disabled + "Stopping…"', s.n === 1 && s.disabled === true && s.pending === true && /Stopping/.test(s.text), s);
+      ok('clicking it sends ONE interrupt and the button goes pending: disabled + "Stopping…"', s.n === 1 && s.disabled === true && s.pending === true && verdictOf(/Stopping/.test(s.text)), s);
       await clickStop();
       s = await state();
       ok('a SECOND click inside the window sends nothing — the ~6s wedged-server window cannot produce a duplicate interrupt frame', s.n === 1, s);
       // THE REGRESSION: the status line repaints on every label change
       await evaljs(`window.__ci.showTyping('still thinking…'); true`);
       s = await state();
-      ok('a label repaint does NOT hand the button back (showTyping re-applies the pending state)', s.disabled === true && /Stopping/.test(s.text) && s.n === 1, s);
+      ok('a label repaint does NOT hand the button back (showTyping re-applies the pending state)', s.disabled === true && gateOf(/Stopping/.test(s.text)) && s.n === 1, s);
       await clickStop();
       ok('…and the button under that repaint is still inert', (await state()).n === 1);
       // TURN END re-arms it
       await evaljs(`window.__ci.hideTyping(); window.__ci.showTyping('thinking...'); true`);
       s = await state();
-      ok('the turn ending gives the live button back (enabled, labelled Stop)', !s.disabled && !s.pending && s.text.includes('Stop'), s);
+      ok('the turn ending gives the live button back (enabled, labelled Stop)', !s.disabled && !s.pending && verdictOf(s.text.includes('Stop')), s);
       await clickStop();
       ok('…and it can stop the NEXT turn', (await state()).n === 2);
       // THE FALLBACK TIMER: shortened here, its real value is pinned above
@@ -1258,17 +1258,17 @@ console.log('— ⑧ the Stop button is one-shot while an interrupt is in flight
       ok('pending again', (await state()).disabled === true);
       await sleep(700);
       s = await state();
-      ok('the fallback timer re-arms a Stop whose turn never ended — the button can never stay dead', !s.disabled && !s.pending && s.text.includes('Stop'), s);
+      ok('the fallback timer re-arms a Stop whose turn never ended — the button can never stay dead', !s.disabled && !s.pending && verdictOf(s.text.includes('Stop')), s);
       await clickStop();
       ok('…and that re-armed button really works', (await state()).n === 4);
       // the two-step compaction Stop keeps its confirm AND gets the pending state
       await evaljs(`window.__ci.hideTyping(); window.__ci.showTyping('Compacting context…', 'compacting'); true`);
       await clickStop();
       s = await state();
-      ok('a compaction Stop still ARMS first (no interrupt on the first click)', s.n === 4 && /Cancel compaction/.test(s.text) && !s.disabled, s);
+      ok('a compaction Stop still ARMS first (no interrupt on the first click)', s.n === 4 && gateOf(/Cancel compaction/.test(s.text)) && !s.disabled, s);
       await clickStop();
       s = await state();
-      ok('…and the confirming click both interrupts and goes pending', s.n === 5 && s.disabled === true && /Stopping/.test(s.text), s);
+      ok('…and the confirming click both interrupts and goes pending', s.n === 5 && s.disabled === true && verdictOf(/Stopping/.test(s.text)), s);
     } catch (e) {
       ok('the browser leg ran', false, String(e.message || e).slice(0, 300));
     } finally {
@@ -1389,7 +1389,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       ok('IDLE: no hint (the chord only exists while a turn runs)', st.hintDisplay === 'none' && st.chord === 0, st);
       await evaljs(`window.__ci.showTyping('thinking...'); true`);
       st = await state();
-      ok('MID-TURN: the hint is VISIBLE and names both keys', st.hintDisplay !== 'none' && /Enter queues/.test(st.hintText) && /Alt\+Enter injects now/.test(st.hintText), st);
+      ok('MID-TURN: the hint is VISIBLE and names both keys', st.hintDisplay !== 'none' && gateOf(/Enter queues/.test(st.hintText)) && verdictOf(/Alt\+Enter injects now/.test(st.hintText)), st);
       ok('…and the ≤768px bolt button is NOT shown on a desktop viewport (CSS owns WHERE, JS owns WHETHER)', st.btnDisplay === 'none', st);
 
       await type('steer me');
@@ -1397,7 +1397,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       st = await state();
       ok('THE CHORD: a trusted Alt+Enter runs the steer verb and sends the composer text ONCE', st.chord === 1 && st.sent === 1 && st.steers.length === 1, st);
       const frames = await evaljs('JSON.stringify(window.__sent)');
-      ok('…as the ORDINARY chat-input frame (no invented "steer" wire shape) carrying the text', /"type":"chat-input"/.test(frames) && /steer me/.test(frames) && !/"type":"steer"/.test(frames), frames.slice(0, 200));
+      ok('…as the ORDINARY chat-input frame (no invented "steer" wire shape) carrying the text', gateOf(/"type":"chat-input"/.test(frames)) && gateOf(/steer me/.test(frames)) && !/"type":"steer"/.test(frames), frames.slice(0, 200));
       ok('…and the msgId handed to the host is the frame\'s own (the id that will name the queued item)', st.steers[0] === JSON.parse(frames)[0].msgId, { steers: st.steers, frames: frames.slice(0, 160) });
       ok('…and the composer is cleared, exactly like an ordinary send', st.text === '', st);
 
@@ -1418,7 +1418,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       ok('a real ChatInput mounts with claude caps', (await mount(claudeCaps)) === true);
       await evaljs(`window.__ci.showTyping('thinking...'); true`);
       st = await state();
-      ok('CLAUDE: the hint says «Enter sends now · Alt+Enter queues until the turn ends»; no steer bolt (its second key holds)', st.hintDisplay !== 'none' && /Enter sends now/.test(st.hintText) && /Alt\+Enter queues until the turn ends/.test(st.hintText) && st.btnDisplay === 'none', st);
+      ok('CLAUDE: the hint says «Enter sends now · Alt+Enter queues until the turn ends»; no steer bolt (its second key holds)', st.hintDisplay !== 'none' && gateOf(/Enter sends now/.test(st.hintText)) && gateOf(/Alt\+Enter queues until the turn ends/.test(st.hintText)) && st.btnDisplay === 'none', st);
       const lastSent = async () => { const j = await evaljs('JSON.stringify(window.__sent[window.__sent.length - 1] || null)'); return j ? JSON.parse(j) : null; };
       await type('alt on claude');
       await key(ALT);
@@ -1515,7 +1515,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
 
       let sp = await props('codex', {});
       ok('THE ROUND-2 MINOR: a codex session with NO saved override renders exactly ONE "Config overrides" header', sp.headers === 1, sp);
-      ok('…and BOTH lazy rows live inside that one section (a second header would have split them)', sp.headers === 1 && sp.rows[0].includes('Response style') && sp.rows[0].includes('Sending during a turn'), sp.rows);
+      ok('…and BOTH lazy rows live inside that one section (a second header would have split them)', sp.headers === 1 && gateOf(sp.rows[0].includes('Response style')) && verdictOf(sp.rows[0].includes('Sending during a turn')), sp.rows);
       // NEGATIVE CONTROL for the PROBE itself: it must be able to SEE two.
       const dup = await evaljs(`(() => {
         const host = window.__propsHost;
@@ -1527,13 +1527,13 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       ok('NEGATIVE CONTROL: the probe counts headers — inject a duplicate section and it reports 2 (the assert above is not vacuous)', dup.seen === 2 && dup.after === 1, dup);
 
       sp = await props('codex', { model: 'opus' });
-      ok('…and with a saved override the EAGER header is REUSED, never re-created: one section, all three rows', sp.headers === 1 && ['Saved', 'Response style', 'Sending during a turn'].every((r) => sp.rows[0].includes(r)), sp);
+      ok('…and with a saved override the EAGER header is REUSED, never re-created: one section, all three rows', sp.headers === 1 && verdictOf(['Saved', 'Response style', 'Sending during a turn'].every((r) => sp.rows[0].includes(r))), sp);
 
       sp = await props('opencode', {});
-      ok('opencode: only the send-modes row is lazy here, and it still gets exactly one header', sp.headers === 1 && sp.rows[0].includes('Sending during a turn') && !sp.rows[0].includes('Response style'), sp);
+      ok('opencode: only the send-modes row is lazy here, and it still gets exactly one header', sp.headers === 1 && gateOf(sp.rows[0].includes('Sending during a turn')) && !sp.rows[0].includes('Response style'), sp);
 
       sp = await props('claude', {});
-      ok('claude (2.369.354 — its wrapper holds a mid-turn message): one header for the response style AND the "Sending during a turn" row', sp.headers === 1 && sp.rows[0].includes('Response style') && sp.rows[0].includes('Sending during a turn'), sp);
+      ok('claude (2.369.354 — its wrapper holds a mid-turn message): one header for the response style AND the "Sending during a turn" row', sp.headers === 1 && gateOf(sp.rows[0].includes('Response style')) && verdictOf(sp.rows[0].includes('Sending during a turn')), sp);
 
       sp = await props('shell', {});
       ok('shell: no row wants it ⇒ the section is never created at all (the lazy header stays lazy)', sp.headers === 0 && !sp.allSections.includes('Config overrides'), sp);
@@ -1543,7 +1543,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       await setViewport(375, 667);
       await sleep(120);
       sp = await props('codex', {});
-      ok('375×667: still ONE header with both rows (the duplicate was a phone bug too — twice the vertical cost on the smallest screen)', sp.headers === 1 && sp.rows[0].includes('Response style') && sp.rows[0].includes('Sending during a turn'), sp);
+      ok('375×667: still ONE header with both rows (the duplicate was a phone bug too — twice the vertical cost on the smallest screen)', sp.headers === 1 && gateOf(sp.rows[0].includes('Response style')) && verdictOf(sp.rows[0].includes('Sending during a turn')), sp);
       const pm = await evaljs(`(() => {
         const root = window.__propsHost.querySelector('.session-props');
         const sec = [...root.querySelectorAll('.task-detail-section')].find((x) => (x.querySelector('.task-detail-label') || {}).textContent === 'Config overrides');
@@ -2017,7 +2017,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return { text: ta.value, state: row?.dataset.queueState, mark: row?.dataset.queueEditing || null, title: row?.getAttribute('title'), editing: window.__ci._editingQueueId };
         })()`);
         ok(`A REFUSED EDIT KEEPS THE REWRITE (${JSON.stringify(refusedLive)})`, refusedLive.text === 'first, rewritten');
-        ok('…and, the row still being queued, puts the user back in edit mode with the reason on it', refusedLive.mark === '1' && refusedLive.state === 'refused' && refusedLive.editing === 'q1' && /could not be reached/.test(refusedLive.title || ''));
+        ok('…and, the row still being queued, puts the user back in edit mode with the reason on it', refusedLive.mark === '1' && refusedLive.state === 'refused' && refusedLive.editing === 'q1' && verdictOf(/could not be reached/.test(refusedLive.title || '')));
         await evaljs(`(() => { document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',  { key: 'Escape',  bubbles: true })); })()`);
         // …and THE NORMAL RACE: the item ran while you were typing, so the row
         // is GONE. The republish is the answer, the text becomes the draft, and
@@ -2033,7 +2033,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         })()`);
         // lane stop-refills-composer: the pre-edit draft is no longer thrown away for the rewrite — it stays BELOW it
         ok(`…and a rewrite whose ROW LEFT THE QUEUE survives too — first, with the pre-edit draft kept below it (${JSON.stringify(refusedGone.text)})`, refusedGone.text === 'second, rewritten again\n\na draft I was typing' && refusedGone.pending === false);
-        ok(`…with a toast saying where the text went (${JSON.stringify(refusedGone.toast.slice(0, 90))})`, /kept in the input/.test(refusedGone.toast));
+        ok(`…with a toast saying where the text went (${JSON.stringify(refusedGone.toast.slice(0, 90))})`, verdictOf(/kept in the input/.test(refusedGone.toast)));
         await evaljs(`(() => { document.querySelector('textarea').value = 'a draft I was typing'; window.__ci.setQueue(window.__items, ${CODEX_VERBS}); })()`);
         // …and a refusal ends the pending state ON THE ROW, with the reason.
         // A BATCH verb marks EVERY row pending; its id-less result must end
@@ -2046,15 +2046,15 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           const after = [...document.querySelectorAll('.chat-queue-item')].map((r) => r.dataset.queueState || null);
           return { during, after, op: window.__ops.slice(-1)[0] };
         })()`);
-        ok(`"Run all now" marks every row pending and sends the id-less verb (${JSON.stringify(batch.op)})`,  batch.during.every((x) => x === 'pending') && batch.op.op === 'run-all' && batch.op.id === null, batch);
-        ok('…and its result — which names no item — ends the pending state of ALL of them',  batch.after.every((x) => x === null), batch.after);
+        ok(`"Run all now" marks every row pending and sends the id-less verb (${JSON.stringify(batch.op)})`,  gateOf(batch.during.every((x) => x === 'pending')) && batch.op.op === 'run-all' && batch.op.id === null, batch);
+        ok('…and its result — which names no item — ends the pending state of ALL of them',  verdictOf(batch.after.every((x) => x === null)), batch.after);
         const refused = await evaljs(`(() => {
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
           window.__ci.setQueueOpResult('q2',  false, 'That message was sent by another agent.');
           const row = document.querySelector('[data-queue-id="q2"]');
           return { state: row?.dataset.queueState, title: row?.getAttribute('title') };
         })()`);
-        ok(`a refusal marks the row and KEEPS the reason on it (${JSON.stringify(refused)})`, refused.state === 'refused' && /another agent/.test(refused.title || ''));
+        ok(`a refusal marks the row and KEEPS the reason on it (${JSON.stringify(refused)})`, refused.state === 'refused' && verdictOf(/another agent/.test(refused.title || '')));
         // Esc puts everything back.
         const escaped = await evaljs(`(() => {
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
@@ -2095,7 +2095,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           window.__ci._onQueueOp = prev;
           return states;
         })()`);
-        ok(`…including the batch verb, which marked EVERY row (${JSON.stringify(batchUndone)})`, batchUndone.every((x) => x === null));
+        ok(`…including the batch verb, which marked EVERY row (${JSON.stringify(batchUndone)})`, verdictOf(batchUndone.every((x) => x === null)));
         const editUndone = await evaljs(`(() => {
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
           document.querySelector('textarea').value = 'a draft I was typing';
@@ -2211,7 +2211,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
           return out;
         })()`);
-        ok(`finding 1(b): a refusal of a rewrite ending in a SPACE still hands it back into edit mode (${JSON.stringify(refusedWs)})`, refusedWs.box === 'rewrite trailing space ' && refusedWs.editing === 'q1' && /could not be reached/.test(refusedWs.title));
+        ok(`finding 1(b): a refusal of a rewrite ending in a SPACE still hands it back into edit mode (${JSON.stringify(refusedWs)})`, refusedWs.box === 'rewrite trailing space ' && refusedWs.editing === 'q1' && verdictOf(/could not be reached/.test(refusedWs.title)));
         ok(`…and the row shows BOTH facts — the refusal AND that the edit is open again (round-4) (${JSON.stringify({ state: refusedWs.state, mark: refusedWs.mark, hint: refusedWs.hint })})`, refusedWs.state === 'refused' && refusedWs.mark === true && refusedWs.hint === true);
 
         // (c) THE ROW IS GONE ⇒ draft + toast. Without the fix the rewrite
@@ -2227,7 +2227,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
           return out;
         })()`);
-        ok(`finding 1(c): a rewrite ending in a newline whose ROW LEFT THE QUEUE is persisted as the draft, not just left in a volatile box (${JSON.stringify(goneWs)})`, goneWs.box === 'gone-row rewrite\n\n\nmy real draft' && goneWs.draft === goneWs.box && /kept in the input/.test(goneWs.toast) && goneWs.pending === false); // lane stop-refills-composer: the rewrite (its newline intact) first, the pre-edit draft below it
+        ok(`finding 1(c): a rewrite ending in a newline whose ROW LEFT THE QUEUE is persisted as the draft, not just left in a volatile box (${JSON.stringify(goneWs)})`, goneWs.box === 'gone-row rewrite\n\n\nmy real draft' && goneWs.draft === goneWs.box && gateOf(/kept in the input/.test(goneWs.toast)) && goneWs.pending === false); // lane stop-refills-composer: the rewrite (its newline intact) first, the pre-edit draft below it
 
         // (d) THE SPINNER. The socket-death and 20s paths write no row state
         // at all, so a bail-out left the row 'pending' with no result ever
@@ -2284,7 +2284,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return out;
         })()`);
         ok(`finding 2: a republish that DRAINS the row being edited keeps the in-progress rewrite (${JSON.stringify(typingLost.box)})`, typingLost.box === 'ten seconds of typing that must not vanish\n\nmy real draft' && typingLost.editing === null); // lane stop-refills-composer: + the pre-edit draft below it
-        ok(`…persists it as the draft and says where it went (${JSON.stringify({ draft: typingLost.draft, toast: typingLost.toast.slice(0, 80) })})`, typingLost.draft === typingLost.box && /kept in the input/.test(typingLost.toast));
+        ok(`…persists it as the draft and says where it went (${JSON.stringify({ draft: typingLost.draft, toast: typingLost.toast.slice(0, 80) })})`, typingLost.draft === typingLost.box && verdictOf(/kept in the input/.test(typingLost.toast)));
 
         // NEGATIVE CONTROL 1: an UNTOUCHED editor is not a rewrite — the row
         // vanishing there restores the pre-edit draft silently, exactly as
@@ -2479,9 +2479,9 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return out;
         })()`);
         const shows = (m) => m && m.marker === true && m.cancel === true && m.pencil === false && m.hint === true;
-        ok(`finding 1: a refusal on ANOTHER row leaves the editing marker, the cancel control and the hint alone (${JSON.stringify(marks.otherRefused)})`, shows(marks.otherRefused) && marks.otherRefused.state === null && marks.otherMarked === 'refused');
-        ok(`…a BATCH verb marks every row pending WITHOUT erasing the edit — the row carries both (${JSON.stringify(marks.batch)})`, shows(marks.batch) && marks.batch.state === 'pending');
-        ok(`…and so does its result, and a refusal on the EDITED row itself (${JSON.stringify({ batchDone: marks.batchDone, ownRefused: marks.ownRefused })})`, shows(marks.batchDone) && marks.batchDone.state === null && shows(marks.ownRefused) && marks.ownRefused.state === 'refused');
+        ok(`finding 1: a refusal on ANOTHER row leaves the editing marker, the cancel control and the hint alone (${JSON.stringify(marks.otherRefused)})`, gateOf(shows(marks.otherRefused)) && marks.otherRefused.state === null && marks.otherMarked === 'refused');
+        ok(`…a BATCH verb marks every row pending WITHOUT erasing the edit — the row carries both (${JSON.stringify(marks.batch)})`, gateOf(shows(marks.batch)) && marks.batch.state === 'pending');
+        ok(`…and so does its result, and a refusal on the EDITED row itself (${JSON.stringify({ batchDone: marks.batchDone, ownRefused: marks.ownRefused })})`, gateOf(shows(marks.batchDone)) && marks.batchDone.state === null && gateOf(shows(marks.ownRefused)) && marks.ownRefused.state === 'refused');
         ok(`…with the rewrite untouched in the box the whole way through (${JSON.stringify({ box: marks.box, editing: marks.editing })})`, marks.box === 'a rewrite that must stay visible as an edit' && marks.editing === 'q1');
         ok(`…and the control the user CAN see still ends the edit (${JSON.stringify(marks.afterCancel)})`, marks.afterCancel.box === 'my real draft' && marks.afterCancel.editing === null && marks.afterCancel.marker === false && marks.afterCancel.hint === false);
 
@@ -2514,7 +2514,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
           return { opened, batch, damage };
         })()`);
-        ok(`negative control: the pre-fix derivation renders the same marker while nothing has touched the row (${JSON.stringify(neutered.opened)})`, shows(neutered.opened));
+        ok(`negative control: the pre-fix derivation renders the same marker while nothing has touched the row (${JSON.stringify(neutered.opened)})`, verdictOf(shows(neutered.opened)));
         ok(`…and LOSES it the moment a batch verb marks the row — the defect, reproduced (${JSON.stringify(neutered.batch)})`, neutered.batch.marker === false && neutered.batch.hint === false && neutered.batch.cancel === false && neutered.batch.pencil === true);
         ok(`…and the pencil it brings back replaces the live rewrite with the queued message (${JSON.stringify(neutered.damage)})`, neutered.damage === 'first');
 
@@ -2535,7 +2535,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return { after, afterEsc };
         })()`);
         ok(`finding 3: switching to another row's editor opens it (${JSON.stringify({ box: switched.after.box, editing: switched.after.editing, marker: switched.after.marker })})`, switched.after.box === 'second' && switched.after.editing === 'q2' && switched.after.marker === 'q2');
-        ok(`…and the abandoned rewrite is kept as the draft, out loud (${JSON.stringify({ draft: switched.after.draft, toast: switched.after.toast.slice(0, 80) })})`, switched.after.draft === 'the rewrite of the FIRST row' && /kept as this session/.test(switched.after.toast));
+        ok(`…and the abandoned rewrite is kept as the draft, out loud (${JSON.stringify({ draft: switched.after.draft, toast: switched.after.toast.slice(0, 80) })})`, switched.after.draft === 'the rewrite of the FIRST row' && verdictOf(/kept as this session/.test(switched.after.toast)));
         ok(`…so cancelling the new edit hands it straight back (${JSON.stringify(switched.afterEsc)})`, switched.afterEsc === 'the rewrite of the FIRST row');
 
         // NEGATIVE CONTROL 1: an UNTOUCHED editor is not a rewrite — switching
@@ -2585,7 +2585,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
           return out;
         })()`);
-        ok(`…and a second editor DURING a save is refused out loud, box untouched (${JSON.stringify(whilePending)})`, whilePending.box === 'a rewrite on the wire' && whilePending.editing === null && whilePending.pending === true && /still saving/.test(whilePending.toast));
+        ok(`…and a second editor DURING a save is refused out loud, box untouched (${JSON.stringify(whilePending)})`, whilePending.box === 'a rewrite on the wire' && whilePending.editing === null && whilePending.pending === true && verdictOf(/still saving/.test(whilePending.toast)));
 
         // ── ROUND-5 VERIFIER (MAJOR): A PROGRAMMATIC SEND FIRED WHILE AN
         // EDITOR IS OPEN. `sendText` is the path every in-chat action button
@@ -2610,7 +2610,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return out;
         })()`);
         ok(`round-5: an action fired during an open edit is REFUSED, and says so (${JSON.stringify({ answer: actionWhileEditing.answer, toast: actionWhileEditing.toast.slice(0, 90) })})`,
-          actionWhileEditing.answer === false && /Finish or cancel the queued-message edit/.test(actionWhileEditing.toast));
+          actionWhileEditing.answer === false && verdictOf(/Finish or cancel the queued-message edit/.test(actionWhileEditing.toast)));
         ok(`…NOTHING went on the wire — no queue-op frame, no chat message (${JSON.stringify({ ops: actionWhileEditing.ops, sent: actionWhileEditing.sent })})`,
           actionWhileEditing.ops.length === 0 && actionWhileEditing.sent.length === 0);
         ok(`…and the box is untouched: the rewrite is still there and the row is still being edited (${JSON.stringify({ box: actionWhileEditing.box, editing: actionWhileEditing.editing })})`,
@@ -2635,7 +2635,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return out;
         })()`);
         ok(`…an action fired while the SAVE is in flight is refused the same way (${JSON.stringify({ answer: actionWhilePending.answer, box: actionWhilePending.box, sent: actionWhilePending.sent })})`,
-          actionWhilePending.answer === false && actionWhilePending.box === 'a rewrite on the wire' && actionWhilePending.sent.length === 0 && /Finish or cancel the queued-message edit/.test(actionWhilePending.toast));
+          actionWhilePending.answer === false && actionWhilePending.box === 'a rewrite on the wire' && actionWhilePending.sent.length === 0 && verdictOf(/Finish or cancel the queued-message edit/.test(actionWhilePending.toast)));
         ok(`…and the ONLY frame out is the user's own edit, carrying the user's own words (${JSON.stringify(actionWhilePending.ops)})`,
           actionWhilePending.ops.length === 1 && actionWhilePending.ops[0] === 'edit:a rewrite on the wire');
 
@@ -2697,7 +2697,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return out;
         })()`);
         ok(`…a send REFUSED by a dead socket answers false as well, with the typed prompt back in the box (${JSON.stringify(actionOffline)})`,
-          actionOffline.answer === false && actionOffline.sent.length === 0 && actionOffline.box === 'a half-typed prompt' && /Disconnected/.test(actionOffline.toast));
+          actionOffline.answer === false && actionOffline.sent.length === 0 && actionOffline.box === 'a half-typed prompt' && verdictOf(/Disconnected/.test(actionOffline.toast)));
 
         // THE DRAFT SLOT GOES WITH THE TEXT THAT CAME BACK: `_send` arms
         // `_pendingSend` for the ACTION and `confirmDelivery()` clears the
@@ -2811,7 +2811,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           uploadDuringEdit.box === 'the rewrite I am still typing' && uploadDuringEdit.editing === 'q1');
         ok(`…the paths go to the stash AND the store, and the toast says so (${JSON.stringify({ stash: uploadDuringEdit.stash, draft: uploadDuringEdit.draft, toast: uploadDuringEdit.toast.slice(0, 60) })})`,
           uploadDuringEdit.stash === 'my real draft /home/u/proj/shot.png ' && uploadDuringEdit.draft === 'my real draft /home/u/proj/shot.png '
-          && /went to your draft/.test(uploadDuringEdit.toast));
+          && verdictOf(/went to your draft/.test(uploadDuringEdit.toast)));
         ok(`…so cancelling the edit hands the box back WITH them (${JSON.stringify(uploadDuringEdit.afterEsc)})`,
           uploadDuringEdit.afterEsc === 'my real draft /home/u/proj/shot.png ');
 
@@ -2942,7 +2942,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return out;
         })()`);
         ok(`…a dead socket restores the USER's unconfirmed message, not the action's (${JSON.stringify(olderSlotDead)})`,
-          olderSlotDead.box === 'a message the user just sent' && /restored to the input/.test(olderSlotDead.toast));
+          olderSlotDead.box === 'a message the user just sent' && verdictOf(/restored to the input/.test(olderSlotDead.toast)));
 
         // …and when the box is NOT free the notice has to change with it: a
         // sentence that says "the text was restored to the input" over an
@@ -2962,8 +2962,8 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return out;
         })()`);
         ok(`round-6: an occupied box is left alone AND the notice says so, instead of claiming a restore (${JSON.stringify(deadBoxBusy)})`,
-          deadBoxBusy.box === 'the next thing I am typing' && /may not have been sent/.test(deadBoxBusy.toast)
-          && /the input already had text/.test(deadBoxBusy.toast) && !/was restored to the input/.test(deadBoxBusy.toast));
+          deadBoxBusy.box === 'the next thing I am typing' && gateOf(/may not have been sent/.test(deadBoxBusy.toast))
+          && gateOf(/the input already had text/.test(deadBoxBusy.toast)) && !/was restored to the input/.test(deadBoxBusy.toast));
 
         // NEGATIVE CONTROL: the pre-fix release (null) — the same dead socket
         // now has nothing to hand back, and says nothing at all.
@@ -3003,7 +3003,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return out;
         })()`);
         ok(`round-6: a dead-socket bail-out from an EMPTY box leaves the box empty, not holding the action (${JSON.stringify(emptyBail)})`,
-          emptyBail.answer === false && emptyBail.box === '' && emptyBail.sent.length === 0 && /Disconnected/.test(emptyBail.toast));
+          emptyBail.answer === false && emptyBail.box === '' && emptyBail.sent.length === 0 && verdictOf(/Disconnected/.test(emptyBail.toast)));
 
         // NEGATIVE CONTROL: the pre-fix restore, gated on `keptText.trim()`.
         await evaljs(setup(''));
@@ -3087,7 +3087,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok(`…and puts the STORE back to the user's pinned message instead of leaving it pinned to '/compact' (${JSON.stringify(emptyBoxOlder.draft)})`,
           emptyBoxOlder.draft === 'a message the user just sent');
         ok(`…so the dead socket restores the USER's message, under the sentence that describes it (${JSON.stringify(emptyBoxOlder.afterDead)})`,
-          emptyBoxOlder.afterDead.box === 'a message the user just sent' && /restored to the input/.test(emptyBoxOlder.afterDead.toast));
+          emptyBoxOlder.afterDead.box === 'a message the user just sent' && verdictOf(/restored to the input/.test(emptyBoxOlder.afterDead.toast)));
 
         // NEGATIVE CONTROL: the round-6 body — the gate the fix sat inside.
         await evaljs(setup(''));
@@ -3095,7 +3095,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok(`negative control: with the release inside the trim gate the action KEEPS the slot and the pin — the user's own send loses both (${JSON.stringify({ slot: emptyBoxOlderNeutered.slot, draft: emptyBoxOlderNeutered.draft })})`,
           emptyBoxOlderNeutered.slot === '/compact' && emptyBoxOlderNeutered.draft === '/compact');
         ok(`…and the dead socket types the ACTION into the user's input, claiming their message was restored (${JSON.stringify(emptyBoxOlderNeutered.afterDead)})`,
-          emptyBoxOlderNeutered.afterDead.box === '/compact' && /restored to the input/.test(emptyBoxOlderNeutered.afterDead.toast));
+          emptyBoxOlderNeutered.afterDead.box === '/compact' && verdictOf(/restored to the input/.test(emptyBoxOlderNeutered.afterDead.toast)));
 
         // …and the OTHER half of the same defect, with NO older send at all:
         // the action armed the slot for ITSELF, so a later disconnect typed
@@ -3128,7 +3128,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok(`negative control: the round-6 body arms the slot for the ACTION ITSELF (${JSON.stringify({ slot: actionAloneNeutered.slot, draft: actionAloneNeutered.draft })})`,
           actionAloneNeutered.slot === '/compact' && actionAloneNeutered.draft === '/compact');
         ok(`…and the disconnect types '/compact' into the user's empty input under a toast saying their message was restored (${JSON.stringify(actionAloneNeutered.afterDead)})`,
-          actionAloneNeutered.afterDead.box === '/compact' && /restored to the input/.test(actionAloneNeutered.afterDead.toast));
+          actionAloneNeutered.afterDead.box === '/compact' && verdictOf(/restored to the input/.test(actionAloneNeutered.afterDead.toast)));
 
         // ── ROUND-7 (MINOR): "NOTHING TO RESTORE" IS ITS OWN STATE. The
         // discriminator was `!!text && !box.trim()`, so a send with no text of
@@ -3164,13 +3164,13 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok(`round-7: an attachments-only send really does carry text '' (${JSON.stringify({ slotText: attachOnlyDead.slotText, sent: attachOnlyDead.sent })})`,
           attachOnlyDead.slotText === '' && attachOnlyDead.sent === 1);
         ok(`…and the dead socket says "may not have been sent" WITHOUT claiming either a restore or an occupied input (${JSON.stringify(attachOnlyDead)})`,
-          attachOnlyDead.box === '' && /may not have been sent/.test(attachOnlyDead.toast)
+          attachOnlyDead.box === '' && gateOf(/may not have been sent/.test(attachOnlyDead.toast))
           && !/already had text/.test(attachOnlyDead.toast) && !/restored to the input/.test(attachOnlyDead.toast));
 
         await evaljs(setup(''));
         const attachOnlyNeutered = await evaljs(attachOnlyScenario(true));
         ok(`negative control: the two-way discriminator tells a user with an EMPTY input that it "already had text" (${JSON.stringify(attachOnlyNeutered)})`,
-          attachOnlyNeutered.box === '' && /already had text/.test(attachOnlyNeutered.toast));
+          attachOnlyNeutered.box === '' && verdictOf(/already had text/.test(attachOnlyNeutered.toast)));
 
         // POSITIVE CONTROL for the same helper: the two states it already had
         // are unchanged — a free box is still restored into, an occupied one
@@ -3196,7 +3196,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok(`round-7: the helper's three outcomes, each with the write it is allowed to make (${JSON.stringify(helperStates)})`,
           JSON.stringify(helperStates.seen) === JSON.stringify(['restored', 'kept', 'none'])
           && helperStates.restoredBox === 'rescued text' && helperStates.keptBox === 'the user is typing' && helperStates.noneBox === ''
-          && /R/.test(helperStates.toast) && /K/.test(helperStates.toast) && /N/.test(helperStates.toast));
+          && gateOf(/R/.test(helperStates.toast)) && gateOf(/K/.test(helperStates.toast)) && verdictOf(/N/.test(helperStates.toast)));
 
         // ── ROUND-7 (MINOR): THE TWO /goal TWINS SAID "RESTORED" REGARDLESS.
         // Both already guarded the restore on a free box; only the sentence
@@ -3221,16 +3221,16 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         await evaljs(setup(''));
         const goalDeadFree = await evaljs(goalDeadScenario(false, false));
         ok(`positive control: a dead socket with a FREE box still restores the /goal command and says so (${JSON.stringify(goalDeadFree)})`,
-          goalDeadFree.armed === true && goalDeadFree.box === '/goal ship the queue verbs' && /restored to the input/.test(goalDeadFree.toast) && goalDeadFree.pendingGoal === false);
+          goalDeadFree.armed === true && goalDeadFree.box === '/goal ship the queue verbs' && gateOf(/restored to the input/.test(goalDeadFree.toast)) && goalDeadFree.pendingGoal === false);
         await evaljs(setup(''));
         const goalDeadBusy = await evaljs(goalDeadScenario(true, false));
         ok(`round-7: with the box occupied the /goal notice stops claiming a restore (${JSON.stringify(goalDeadBusy)})`,
-          goalDeadBusy.box === 'the next thing I am typing' && /the input already had text, so your command was left alone/.test(goalDeadBusy.toast)
+          goalDeadBusy.box === 'the next thing I am typing' && gateOf(/the input already had text, so your command was left alone/.test(goalDeadBusy.toast))
           && !/restored to the input/.test(goalDeadBusy.toast));
         await evaljs(setup(''));
         const goalDeadNeutered = await evaljs(goalDeadScenario(true, true));
         ok(`negative control: the pre-fix twin announces a restore over the user's own words (${JSON.stringify(goalDeadNeutered)})`,
-          goalDeadNeutered.box === 'the next thing I am typing' && /restored to the input/.test(goalDeadNeutered.toast));
+          goalDeadNeutered.box === 'the next thing I am typing' && verdictOf(/restored to the input/.test(goalDeadNeutered.toast)));
 
         // …and the SECOND twin, the 10 s silence. The timer is captured and
         // fired by hand so the REAL callback body runs without a 10 s wait.
@@ -3255,12 +3255,12 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         const goalTimeoutFree = await evaljs(goalTimeoutScenario(false));
         ok(`positive control: the 10 s fallback still restores into a free box (${JSON.stringify(goalTimeoutFree)})`,
           goalTimeoutFree.captured === true && goalTimeoutFree.box === '/goal ship the queue verbs'
-          && /Your command was restored to the input/.test(goalTimeoutFree.toast) && goalTimeoutFree.pendingGoal === false);
+          && gateOf(/Your command was restored to the input/.test(goalTimeoutFree.toast)) && goalTimeoutFree.pendingGoal === false);
         await evaljs(setup(''));
         const goalTimeoutBusy = await evaljs(goalTimeoutScenario(true));
         ok(`round-7: …and with the box occupied it says THAT instead (${JSON.stringify(goalTimeoutBusy)})`,
           goalTimeoutBusy.box === 'the next thing I am typing'
-          && /The input already had text, so your command was left alone/.test(goalTimeoutBusy.toast)
+          && gateOf(/The input already had text, so your command was left alone/.test(goalTimeoutBusy.toast))
           && !/restored to the input/.test(goalTimeoutBusy.toast));
 
         // ── ROUND-7 (MINOR): A SEND WITH NO TEXT OF ITS OWN COULD NEVER CLEAR
@@ -3391,7 +3391,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok(`round-8: …while the design request KEEPS the slot its send armed, because the brief is the user's (${JSON.stringify({ answer: twoCallersFixed.answer, slot: twoCallersFixed.slot, sent: twoCallersFixed.sent })})`,
           twoCallersFixed.answer === true && twoCallersFixed.slot === DESIGN_MSG && twoCallersFixed.sent === 2 && twoCallersFixed.box === '');
         ok(`round-8: …so a half-open socket hands the brief back with a notice instead of losing it (${JSON.stringify({ box: twoCallersFixed.afterDead.box.slice(0, 46), toast: twoCallersFixed.afterDead.toast.slice(0, 60) })})`,
-          twoCallersFixed.afterDead.box === DESIGN_MSG && /restored to the input/.test(twoCallersFixed.afterDead.toast));
+          twoCallersFixed.afterDead.box === DESIGN_MSG && verdictOf(/restored to the input/.test(twoCallersFixed.afterDead.toast)));
 
         // NEGATIVE CONTROL: the round-7 body — one release for both callers.
         await evaljs(setup(''));
@@ -3422,7 +3422,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok(`round-8: with an older unconfirmed send in flight the OLDER one keeps the slot and the pin (${JSON.stringify({ slot: designOverOlder.slot, draft: designOverOlder.draft })})`,
           designOverOlder.answer === true && designOverOlder.slot === 'a message the user just sent' && designOverOlder.draft === 'a message the user just sent');
         ok(`…and it is the one the dead socket restores (${JSON.stringify(designOverOlder.afterDead)})`,
-          designOverOlder.afterDead.box === 'a message the user just sent' && /restored to the input/.test(designOverOlder.afterDead.toast));
+          designOverOlder.afterDead.box === 'a message the user just sent' && verdictOf(/restored to the input/.test(designOverOlder.afterDead.toast)));
 
         // ── ROUND-8 (MINOR): THE `storeBefore` ARM IS FOR A SEND WITH NO TEXT.
         // Round-7 let ANY send clear the store when the value it displaced is
@@ -3495,14 +3495,14 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
       // run-all, an ACP harness does not, and claude (2.369.354) gets the ACP answer.
       {
         const codexHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CODEX_VERBS}); return { runAll: !!document.querySelector('[data-queue-op="run-all"]'), steerAll: !!document.querySelector('[data-queue-op="steer-all"]'), runNow: document.querySelectorAll('[data-queue-op="run-now"]').length, grips: document.querySelectorAll('.chat-queue-grip').length }; })()`);
-        ok(`codex: the header carries "Run all now" AND "Steer all", every row a run-now and a grip (${JSON.stringify(codexHead)})`, codexHead.runAll && codexHead.steerAll && codexHead.runNow === 3 && codexHead.grips === 3);
+        ok(`codex: the header carries "Run all now" AND "Steer all", every row a run-now and a grip (${JSON.stringify(codexHead)})`, gateOf(codexHead.runAll) && gateOf(codexHead.steerAll) && codexHead.runNow === 3 && codexHead.grips === 3);
         const acpHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${OPENCODE_VERBS}); return { runAll: !!document.querySelector('[data-queue-op="run-all"]'), steerAll: !!document.querySelector('[data-queue-op="steer-all"]'), runNow: document.querySelectorAll('[data-queue-op="run-now"]').length, grips: document.querySelectorAll('.chat-queue-grip').length, edits: document.querySelectorAll('[data-queue-op="edit"]').length }; })()`);
         ok(`an ACP harness gets NO run-all / steer-all / run-now (${JSON.stringify(acpHead)})`, !acpHead.runAll && !acpHead.steerAll && acpHead.runNow === 0);
         ok('…but it does get the reorder grips and the edit controls it really serves (peer excluded)', acpHead.grips === 3 && acpHead.edits === 2, JSON.stringify(acpHead));
         const claudeHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CLAUDE_VERBS}); const s = document.querySelector('.chat-queue-strip'); return { hidden: s.classList.contains('hidden'), runAll: !!document.querySelector('[data-queue-op="run-all"]'), steerAll: !!document.querySelector('[data-queue-op="steer-all"]'), runNow: document.querySelectorAll('[data-queue-op="run-now"]').length, steers: document.querySelectorAll('[data-queue-op="steer"]').length, grips: document.querySelectorAll('.chat-queue-grip').length, edits: document.querySelectorAll('[data-queue-op="edit"]').length, removes: document.querySelectorAll('[data-queue-op="remove"]').length }; })()`);
         // lane claude-steer-inject (2.369.361): claude's wrapper serves steer / steer-all — the ⚡ per held row hands it to the
         // running turn, «inject all» in the header; still no run-all / run-now
-        ok(`claude (2.369.361): the strip shows grips, ✎ edit (peer excluded), ✕ remove, a ⚡ per row and «inject all» — and NO run-all / run-now (${JSON.stringify(claudeHead)})`, !claudeHead.hidden && !claudeHead.runAll && claudeHead.steerAll && claudeHead.runNow === 0 && claudeHead.steers === 3 && claudeHead.grips === 3 && claudeHead.edits === 2 && claudeHead.removes === 3);
+        ok(`claude (2.369.361): the strip shows grips, ✎ edit (peer excluded), ✕ remove, a ⚡ per row and «inject all» — and NO run-all / run-now (${JSON.stringify(claudeHead)})`, !claudeHead.hidden && !claudeHead.runAll && gateOf(claudeHead.steerAll) && claudeHead.runNow === 0 && claudeHead.steers === 3 && claudeHead.grips === 3 && claudeHead.edits === 2 && claudeHead.removes === 3);
       }
       // STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24): the server's draft op carries
       // `prepended`; the REAL ChatInput over the REAL StateSync lands only its prefix, in front of the LIVE box
@@ -3563,7 +3563,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           return after;
         })()`);
         const viaRemove = await opAware('remove');
-        ok(`⑪ a pending edit answered by Stop's remove ok:true keeps the rewrite (the gone outcome — merged with the stash when the row leaves) (${JSON.stringify(viaRemove)})`, viaRemove.pending === true && viaRemove.box === 'first, edited' && viaRemove.editing === 'q1' && viaRemove.final.startsWith('first, edited'));
+        ok(`⑪ a pending edit answered by Stop's remove ok:true keeps the rewrite (the gone outcome — merged with the stash when the row leaves) (${JSON.stringify(viaRemove)})`, viaRemove.pending === true && viaRemove.box === 'first, edited' && viaRemove.editing === 'q1' && verdictOf(viaRemove.final.startsWith('first, edited')));
         const viaEdit = await opAware('edit');
         ok(`⑪ CONTROL: the edit's OWN ok result still means saved — the box goes back to the pre-edit draft (${JSON.stringify(viaEdit)})`, viaEdit.pending === true && viaEdit.box === 'the draft before' && viaEdit.editing === null);
         await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CODEX_VERBS}); document.querySelector('textarea').value = ''; document.getElementById('global-toasts')?.replaceChildren(); })()`);
@@ -3593,7 +3593,7 @@ console.log('— ⑫ no commit on this branch carries conflict markers (a clean 
   // marker would pass this section vacuously on any history at all.
   const MARKER = /^(<<<<<<< |>>>>>>> )/m;   // `=======` alone is ordinary prose (CHANGELOG rules, setext headings)
   ok('the detector fires on a conflicted buffer (negative control — without this the whole section is vacuous)',
-    MARKER.test('a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> other\nb\n') && !MARKER.test('a\n=======\nb\n'));
+    gateOf(MARKER.test('a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> other\nb\n')) && !MARKER.test('a\n=======\nb\n'));
 
   let baseRef = null;
   for (const r of ['origin/master', 'master']) {
@@ -3632,7 +3632,7 @@ console.log('— ⑫ no commit on this branch carries conflict markers (a clean 
     try { hits = execFileSync('git', ['grep', '--no-index', '-I', '-l', '-E', '^(<<<<<<< |>>>>>>> )', '--', path.basename(f)], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch { hits = ''; }
     fs.rmSync(dir, { recursive: true, force: true });
     ok('positive control: the ORIGINAL pick commit 817550d4 does trip this scan (docs/kb-file-structure.md, its two marker lines frozen) — the check is the one that would have caught it',
-      /kb-file-structure\.md/.test(hits), hits.slice(0, 200));
+      verdictOf(/kb-file-structure\.md/.test(hits)), hits.slice(0, 200));
   }
 }
 
@@ -3660,7 +3660,7 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
   ok('the fixture is the rollout shape: 12 consecutive user records in ONE turn, each with its item_completed UserMessage twin', userRecs.length === 12 && twins.length === 12, `${userRecs.length}/${twins.length}`);
   ok('…and NOT ONE `user_message` event for them — the queued path emits one, the steered path does not, which is why that carrier could not be reused',
     !rollout.some((r) => r.type === 'event_msg' && r.payload.type === 'user_message'));
-  ok('every twin carries the submission\'s clientId (the ONLY identity the steered path publishes)', twins.every((r) => typeof r.payload.item.client_id === 'string' && r.payload.item.client_id));
+  ok('every twin carries the submission\'s clientId (the ONLY identity the steered path publishes)', verdictOf(twins.every((r) => typeof r.payload.item.client_id === 'string' && r.payload.item.client_id)));
 
   const bodies = (mm) => mm.messages.filter((m) => m.role === 'user').map((m) => (m.content || []).map((c) => c.text || '').join(''));
   const feed = (records) => { const mm = new CodexMessageManager('rb'); for (const r of records) mm.processLive(r); return mm; };
@@ -3670,12 +3670,12 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
     const mm = feed(mergeCodexRecords(rollout, []));
     const b = bodies(mm);
     ok(`ROLLOUT ALONE: 12 user records → 12 bubbles (${b.length})`, b.length === 12, JSON.stringify(b.map((x) => x.slice(0, 22))));
-    ok('in queue order, each exactly once', b.every((x, i) => x.includes(`steered message ${i + 1} `)), JSON.stringify(b.map((x) => x.slice(0, 26))));
+    ok('in queue order, each exactly once', verdictOf(b.every((x, i) => x.includes(`steered message ${i + 1} `))), JSON.stringify(b.map((x) => x.slice(0, 26))));
     ok('the developer hooks message after each one is never a bubble', !b.some((x) => /developer message/.test(x)));
     // THE ROUTING PIN: the twin is a DECIDED skip in the normalizer, not a
     // silent drop — a kind that is neither routed nor listed fires telemetry.
     ok('`item_completed:UserMessage` is an EXPLICIT skip in the normalizer (its response_item already rendered the bubble) — never an unknown record',
-      CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES.has('UserMessage') && ![...CodexMessageManager._seenUnknownRecords].some((k) => /UserMessage/i.test(k)),
+      gateOf(CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES.has('UserMessage')) && ![...CodexMessageManager._seenUnknownRecords].some((k) => /UserMessage/i.test(k)),
       JSON.stringify([...CodexMessageManager._seenUnknownRecords]));
   }
 
@@ -3691,9 +3691,9 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
     const mm = feed(merged);
     const b = bodies(mm);
     ok(`REBUILD: 24 records for 12 messages → 12 bubbles (${b.length})`, b.length === 12, JSON.stringify(b.map((x) => x.slice(0, 22))));
-    ok('still in queue order', b.every((x, i) => x.includes(`steered message ${i + 1} `)), JSON.stringify(b.map((x) => x.slice(0, 26))));
+    ok('still in queue order', verdictOf(b.every((x, i) => x.includes(`steered message ${i + 1} `))), JSON.stringify(b.map((x) => x.slice(0, 26))));
     const users = mm.messages.filter((m) => m.role === 'user');
-    ok('the surviving copy is OURS, so every bubble keeps the queue id its chip joins on', users.every((m, i) => m.webuiMsgId === `inh-${i + 1}`), JSON.stringify(users.map((m) => m.webuiMsgId)));
+    ok('the surviving copy is OURS, so every bubble keeps the queue id its chip joins on', verdictOf(users.every((m, i) => m.webuiMsgId === `inh-${i + 1}`)), JSON.stringify(users.map((m) => m.webuiMsgId)));
     // NEGATIVE CONTROL — the shipped-before algorithm: the fingerprint kept
     // `webui_queue_id` inside the payload, so ours and codex's copy of one
     // message were strangers.
@@ -3926,8 +3926,8 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
         // a peer card leads with its sender head, so the ORDER is read from the
         // body — the two agent-to-agent items sit in their queue positions too
         ok('and they are in queue order (peer cards included, read from the body under their sender head)',
-          out.bodies.every((t2, i) => t2.includes(`steered message ${i + 1} `)), JSON.stringify(out.texts));
-        ok(`every "You" bubble wears exactly one Steered chip (${out.chips}/${out.steeredChips}, "${out.chipText}")`, out.chips === 10 && out.steeredChips === 10 && /Steered/.test(out.chipText));
+          verdictOf(out.bodies.every((t2, i) => t2.includes(`steered message ${i + 1} `))), JSON.stringify(out.texts));
+        ok(`every "You" bubble wears exactly one Steered chip (${out.chips}/${out.steeredChips}, "${out.chipText}")`, out.chips === 10 && out.steeredChips === 10 && verdictOf(/Steered/.test(out.chipText)));
       } catch (e) {
         ok('the ⑨ browser leg ran', false, String(e.message || e).slice(0, 300));
       } finally {
@@ -4032,7 +4032,7 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
       ok('…and it never yields to an identical message from ANOTHER turn (the pair is always inside the turn that committed it)',
         bubbles(mergeCodexRecords([turn('turn-A', 0), theirs('msg_0', 'do it', 1000), turn('turn-B', 20000), theirs('msg_1', 'do it', 25000)], [drained('inh-1', 'do it', 25001)])).length === 2);
       ok('STEER keeps its 42s-early claim: ours survives with its chip, codex\'s commit copy is dropped',
-        (() => { const mm = new CodexMessageManager('r2'); for (const r of mergeCodexRecords([turn('turn-A', 0), theirs('msg_1', 'do it', 43000)], [steered('inh-1', 'do it', 1000)])) mm.processLive(r); const u = mm.messages.filter((m) => m.role === 'user'); return u.length === 1 && u[0].webuiMsgId === 'inh-1'; })());
+        verdictOf((() => { const mm = new CodexMessageManager('r2'); for (const r of mergeCodexRecords([turn('turn-A', 0), theirs('msg_1', 'do it', 43000)], [steered('inh-1', 'do it', 1000)])) mm.processLive(r); const u = mm.messages.filter((m) => m.role === 'user'); return u.length === 1 && u[0].webuiMsgId === 'inh-1'; })()));
     }
 
     // (j4) THE CLAIM LEDGER vs THE DUPLICATE CHECK. A claim that is never
@@ -4048,7 +4048,7 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
       const ourBare = { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'q' }], webui_msg_id: '' } };
       const theirBare = { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'q' }] } };
       ok('…and with NEITHER side carrying an id, the two producers still key apart (a duplicate is a fact only within one producer)',
-        recordFingerprint(ourBare, 't') !== recordFingerprint(theirBare, 't') && /user#ours:/.test(recordFingerprint(ourBare, 't')) && /user#codex:/.test(recordFingerprint(theirBare, 't')),
+        recordFingerprint(ourBare, 't') !== recordFingerprint(theirBare, 't') && gateOf(/user#ours:/.test(recordFingerprint(ourBare, 't'))) && verdictOf(/user#codex:/.test(recordFingerprint(theirBare, 't'))),
         [recordFingerprint(ourBare, 't'), recordFingerprint(theirBare, 't')]);
       ok('…yet that pair is still ONE bubble after a rebuild — the claim retires it, not a shared key',
         bubbles(mergeCodexRecords([turn('turn-A', 0), { ...theirBare, timestamp: new Date(T + 5000).toISOString() }], [{ ...ourBare, timestamp: new Date(T + 1000).toISOString() }])).length === 1);
@@ -4104,12 +4104,12 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
         return mm.messages.filter((m) => m.role === 'assistant');
       };
       ok('the steered bubble still does not fragment the reply it was injected into (2.368.16 class)', midStream(steered).length === 1 && (midStream(steered)[0].content || []).map((c) => c.text).join('') === 'first half second half');
-      ok('…and the flag rides only the inherited bubble, never a typed one', (() => {
+      ok('…and the flag rides only the inherited bubble, never a typed one', verdictOf((() => {
         const mm = new CodexMessageManager('flag');
         mm.processLive(steered('inh-1', 'a', 0)); mm.processLive(mine({ webui_msg_id: 'm1' }, 'b', 10));
         const u = mm.messages.filter((m) => m.role === 'user');
         return u[0].midTurn === true && !u[1].midTurn;
-      })());
+      })()));
     }
 
     // ((j6) the producer census — MOVED to the fast scripts/test-queue-steer-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -4266,7 +4266,7 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
       ok('the retracted message keeps its own bubble (the record is never dropped)',
         bubbles(mergeCodexRecords([turn('turn-A', 0)], [mine({ webui_msg_id: 'm-b1' }, 'never landed', 1000), retract('m-b1', 1500)])).join('') === 'never landed');
       ok('…and the retraction event itself renders NOTHING — a NAMED skip, never an unknown record',
-        CodexMessageManager.SKIPPED_EVENT_TYPES.has('webui_user_retracted')
+        gateOf(CodexMessageManager.SKIPPED_EVENT_TYPES.has('webui_user_retracted'))
         && ![...CodexMessageManager._seenUnknownRecords].some((k) => /webui_user_retracted/.test(k)),
         JSON.stringify([...CodexMessageManager._seenUnknownRecords]));
       // ⑤ THE PURE FUNCTIONS. Round 4: EVERY copy of ours claims, and only the
@@ -4346,7 +4346,7 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
       });
       const two = mergeCodexRecords([turn('turn-A', 0)], [peerRec('peer-1', 'done', 1000), peerRec('peer-2', 'done', 1100)]);
       ok('two peer messages with the SAME text inside one turn stay two labelled cards',
-        bubbles(two).length === 2 && (() => { const mm = new CodexMessageManager('pr'); for (const r of two) mm.processLive(r); return mm.messages.filter((m) => m.originKind === 'peer-message').length === 2; })(),
+        bubbles(two).length === 2 && verdictOf((() => { const mm = new CodexMessageManager('pr'); for (const r of two) mm.processLive(r); return mm.messages.filter((m) => m.originKind === 'peer-message').length === 2; })()),
         bubbles(two));
       ok('NEGATIVE CONTROL: the same two records with no submission id (the shipped peer shape) collapse to one — the round-1 major, still open for that producer',
         bubbles(mergeCodexRecords([turn('turn-A', 0)], [peerRec('', 'done', 1000), peerRec('', 'done', 1100)])).length === 1);
@@ -4360,7 +4360,7 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
     // (j7) THE ROUTING PIN stays: neither reader may go back to dropping the
     // app-server's own carrier in silence.
     ok('`item_completed:UserMessage` is still an EXPLICIT skip in the normalizer, and the wrapper still routes `userMessage`',
-      CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES.has('UserMessage') && /if \(type === 'userMessage'\)/.test(read('data/bin/codex-chat-wrapper.js')));
+      gateOf(CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES.has('UserMessage')) && verdictOf(/if \(type === 'userMessage'\)/.test(read('data/bin/codex-chat-wrapper.js'))));
     try { fs.rmSync(patchDir, { recursive: true, force: true }); } catch {}
   }
 }
@@ -4502,7 +4502,7 @@ console.log('— ⑬ the queue across a restart: a guess says so, and the wrappe
     {
       const { view, strip } = await drive(ChatView, attached());
       ok(`THE FIX: a re-attach whose queue the server does not know CLEARS the strip (${view._queue.length} rows) — a row nobody can act on is the one state that produces a wrong action`,
-        view._queue.length === 0 && Array.isArray(strip.items) && strip.items.length === 0,
+        view._queue.length === 0 && gateOf(Array.isArray(strip.items)) && strip.items.length === 0,
         JSON.stringify({ view: view._queue, strip: strip.items }));
       ok('…and the CONTROLS stay on (the wrapper still serves them; the rows come back one round trip later)',
         !!strip.caps && strip.caps.queueOps === true && strip.caps.steer === true, JSON.stringify(strip.caps));
@@ -4591,7 +4591,7 @@ console.log('— ⑬ the queue across a restart: a guess says so, and the wrappe
         const still = mkInput([ROW]);
         ChatInput.prototype.setQueueOpResult.call(still, 'qGhost', false, 'The turn ended before the message could be steered.');
         ok('POSITIVE TWIN: the same refusal on a row that IS still there marks it refused, with its sentence (the marker is not being disabled — it is being scoped)',
-          still._queueRowState.get('qGhost')?.state === 'refused' && /turn ended/.test(still._queueRowState.get('qGhost')?.title || ''), JSON.stringify([...still._queueRowState]));
+          still._queueRowState.get('qGhost')?.state === 'refused' && verdictOf(/turn ended/.test(still._queueRowState.get('qGhost')?.title || '')), JSON.stringify([...still._queueRowState]));
       }
       {
         // The bubble chip is the same claim on another surface: a queue the
@@ -4611,7 +4611,7 @@ console.log('— ⑬ the queue across a restart: a guess says so, and the wrappe
         ok('NEGATIVE CONTROL: an UNKNOWN queue retires no chip — we did not learn the item left, we learned we do not know',
           v._messages[0].queueState === 'queued', JSON.stringify(v._messages[0]));
         ok('…and the rows are applied all the same (the flag gates the INFERENCE, not the list — an unknown queue IS the empty list on the wire)',
-          Array.isArray(strip.items) && strip.items.length === 0, JSON.stringify(strip.items));
+          gateOf(Array.isArray(strip.items)) && strip.items.length === 0, JSON.stringify(strip.items));
       }
       {
         // …and the KNOWN twin of the very same call, so the gate is falsifiable
@@ -4677,7 +4677,7 @@ console.log('— ⑬d the deferred restart payload cannot overwrite the answer i
       fs.writeFileSync(alive, '// a CONCURRENT run is importing this\n');
       sweepLegacy(dir, ['.'], LEGACY_RE);
       ok('the legacy sweep removes a stranded copy whose PID is GONE', !fs.existsSync(dead));
-      ok('NEGATIVE CONTROL: it SPARES a LIVE run\'s copy — this suite can legitimately run twice in one worktree, and deleting a live import is worse than the litter', fs.existsSync(alive));
+      ok('NEGATIVE CONTROL: it SPARES a LIVE run\'s copy — this suite can legitimately run twice in one worktree, and deleting a live import is worse than the litter', verdictOf(fs.existsSync(alive)));
     } finally {
       try { live.kill('SIGKILL'); } catch { }
       fs.rmSync(dir, { recursive: true, force: true });
@@ -4703,11 +4703,11 @@ console.log('— ⑬d the deferred restart payload cannot overwrite the answer i
   // two links that stub replaces, so "the payload reaches _applyLiveMeta" is
   // read off the product rather than assumed — and ⑭ then runs the whole thing.
   ok('the deferred reset hands the WHOLE payload to loadHistory (never a key-by-key copy)',
-    /_fullViewReset\(msg\) \{[\s\S]*?this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);/.test(cvSrc));
+    verdictOf(/_fullViewReset\(msg\) \{[\s\S]*?this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);/.test(cvSrc)));
   ok('…and loadHistory hands that meta to `_applyLiveMeta` (the link the stub stands in for)',
-    /\n    this\._applyLiveMeta\(meta\);\n/.test(cvSrc));
+    verdictOf(/\n    this\._applyLiveMeta\(meta\);\n/.test(cvSrc)));
   ok('the re-attach STAMPS the payload with its arrival BEFORE the epoch branch defers it (a stamp taken inside the timer would be the bug)',
-    (() => {
+    verdictOf((() => {
       const stamp = cvSrc.indexOf("if (typeof msg.__rxTick !== 'number') msg.__rxTick = performance.now();");
       // 2.369.191 (lane S1, B-63f1 ②): the deferral moved into `_armViewReset` (which also holds the ops of
       // the window); the stamp must still precede the hand-off, and the armed timer still rebuilds from the
@@ -4716,11 +4716,11 @@ console.log('— ⑬d the deferred restart payload cannot overwrite the answer i
       const armed = /_armViewReset\(msg\) \{[\s\S]*?this\._resetTimer = setTimeout\(\(\) => \{[\s\S]*?if \(m\) this\._fullViewReset\(m\);\n\s*\}, this\._resetJitterMs\(\)\);/.test(cvSrc)
         && /_resetJitterMs\(\) \{ return Math\.random\(\) \* RESET_JITTER_MS; \}/.test(cvSrc);
       return stamp > 0 && defer > stamp && armed;
-    })());
+    })()));
   ok('…and `_applyLiveMeta` reads THAT stamp for the queue, with its own `in meta` test (absent ⇒ now, which is the truth for every synchronous caller — and what test-auto-resume\'s carries-the-key sweep demands of every key read there)',
-    /const rxTick = \('__rxTick' in meta\) \? Number\(meta\.__rxTick\) : NaN;/.test(cvSrc)
-    && /const rxAt = Number\.isFinite\(rxTick\) \? rxTick : performance\.now\(\);/.test(cvSrc)
-    && /at: rxAt,\n/.test(cvSrc));
+    gateOf(/const rxTick = \('__rxTick' in meta\) \? Number\(meta\.__rxTick\) : NaN;/.test(cvSrc))
+    && gateOf(/const rxAt = Number\.isFinite\(rxTick\) \? rxTick : performance\.now\(\);/.test(cvSrc))
+    && verdictOf(/at: rxAt,\n/.test(cvSrc)));
 
   const payload = (over = {}) => ({
     type: 'attached', sessionId: 'sess-open', normEpoch: 99,
@@ -4783,7 +4783,7 @@ console.log('— ⑬d the deferred restart payload cannot overwrite the answer i
   // (the stamp still flows, so what is being measured is "last executed wins"
   // — the behaviour every path had before this round).
   const GUARD = '    if ((this._queueStatedAt || 0) > at) return;\n';
-  ok('the pre-fix control patches a REAL line of the product source', cvSrc.includes(GUARD));
+  ok('the pre-fix control patches a REAL line of the product source', verdictOf(cvSrc.includes(GUARD)));
   const preRows = preModule([[GUARD, '']]);
   ok('CONTROL: exactly one line was removed', preRows.hits === 1 && preRows.src.length === cvSrc.length - GUARD.length, preRows.err || '');
   let Pre = null;
@@ -4897,7 +4897,7 @@ console.log('— ⑬d the deferred restart payload cannot overwrite the answer i
       const now = await drive(ChatView, { over: remoteAdvert, answer: [REAL], answerAt: 10, stagger: 0.99 });
       ok('THE FIX: the 500ms-old advert does NOT retract the running wrapper\'s — the row is on the strip AND the composer is given controls for it',
         now.ids.join(',') === 'qReal' && now.supported === true && now.queueOps === true
-        && now.stripOps.every((c) => c.ops === true), JSON.stringify(now));
+        && verdictOf(now.stripOps.every((c) => c.ops === true)), JSON.stringify(now));
       const preAdvert = preModule([['    if ((this._queueAdvertStatedAt || 0) > at) return;\n    this._queueAdvertStatedAt = at;\n', '']]);
       ok('the advert pre-fix control patches REAL lines of the product source', preAdvert.hits === 1, preAdvert.err || '');
       // Same rule as the rows control above: a control that was not built is
@@ -5219,10 +5219,10 @@ process.stdin.on('data', (d) => {
       {
         const { c, att, answer } = await attachAndWait(A);
         ok('A (steered away): the attach payload says the queue is a GUESS — `queue: []` with queueKnown FALSE, controls still on',
-          !!att && (att.queue || []).length === 0 && att.queueKnown === false && att.queueSupported === true && (att.queueVerbs || []).includes('steer'),
+          !!att && (att.queue || []).length === 0 && att.queueKnown === false && att.queueSupported === true && verdictOf((att.queueVerbs || []).includes('steer')),
           JSON.stringify({ queue: att?.queue, known: att?.queueKnown, supported: att?.queueSupported, verbs: att?.queueVerbs }));
         ok('…and the WRAPPER answers within the round trip with an authoritative EMPTY publication (the answer a rebuilt normalizer cannot produce for itself)',
-          !!answer && Array.isArray(answer.items) && answer.items.length === 0 && answer.supported === true, JSON.stringify(answer));
+          !!answer && gateOf(Array.isArray(answer.items)) && answer.items.length === 0 && answer.supported === true, JSON.stringify(answer));
         const c2 = await openWs();
         c2.send({ type: 'attach', sessionId: A.sid });
         const att2 = await until(() => c2.frames.find((f) => f.type === 'attached' && f.sessionId === A.sid), 60000);
@@ -5235,7 +5235,7 @@ process.stdin.on('data', (d) => {
         ok('B (still queued): the same guess on the wire — and here it is the OPPOSITE error, a real pending message the server cannot see',
           !!att && (att.queue || []).length === 0 && att.queueKnown === false, JSON.stringify({ queue: att?.queue, known: att?.queueKnown }));
         ok('…and the wrapper hands the REAL row back, so the strip comes back rather than staying empty for ever',
-          !!answer && (answer.items || []).length === 1 && /the b message/.test(JSON.stringify(answer.items)), JSON.stringify(answer));
+          !!answer && (answer.items || []).length === 1 && verdictOf(/the b message/.test(JSON.stringify(answer.items))), JSON.stringify(answer));
         c.close();
       }
     }
@@ -5296,7 +5296,7 @@ process.stdin.on('data', (d) => {
         // round trip, not a permanent loss.
         const bEnd = await until(async () => { const s = await strip(B.sid); return s && s.rows === 1 ? s : null; }, 40000, 250);
         ok('BROWSER B: the REAL queued row is back on the strip within the round trip (the server never knew it — the wrapper did)',
-          !!bEnd && bEnd.rows === 1 && /the b message/.test(bEnd.texts.join(' ')) && bEnd.red === 0, JSON.stringify(await strip(B.sid)));
+          !!bEnd && bEnd.rows === 1 && gateOf(/the b message/.test(bEnd.texts.join(' '))) && bEnd.red === 0, JSON.stringify(await strip(B.sid)));
 
         // ── 'gone': the row LEAVES, and is never painted red ────────────────
         // A queue the app-server drained WITHOUT telling the wrapper is how a
@@ -5324,7 +5324,7 @@ process.stdin.on('data', (d) => {
           const gone = await until(async () => { const s = await strip(C.sid); reds.push(s.red); return s.rows === 0 ? s : null; }, 30000, 150);
           ok('BROWSER C: the row DISAPPEARS — the wrapper is authoritative about absence, so `gone` removes it', !!gone, JSON.stringify(await strip(C.sid)));
           ok('…and it is never painted REFUSED on the way out (the red ghost is the state the report was about)',
-            reds.length > 0 && reds.every((n) => n === 0), JSON.stringify(reds));
+            reds.length > 0 && verdictOf(reds.every((n) => n === 0)), JSON.stringify(reds));
           const verdict = rec.frames.filter((f) => f.type === 'msg' && f.sessionId === C.sid && f.op === 'meta' && f.subtype === 'queue-result').slice(-1)[0];
           ok("THE WIRE: the wrapper's verdict really is `gone` (ok:false) — the client is not guessing",
             !!verdict && verdict.ok === false && verdict.reason === 'gone', JSON.stringify(verdict));
@@ -5335,7 +5335,7 @@ process.stdin.on('data', (d) => {
             const { ChatView } = await import(path.join(REPO, 'src/lib/chat-view.js'));
             const cvSrc = read('src/lib/chat-view.js');
             const LINE = "      if (op.ok === false && op.reason === 'gone') this._dropQueueRow(op.id);\n";
-            ok('PRE-FIX control: the drop is a real line of the product source', cvSrc.includes(LINE));
+            ok('PRE-FIX control: the drop is a real line of the product source', verdictOf(cvSrc.includes(LINE)));
             const copy = MUTQ.write('src/lib/chat-view.js', editAnchor(cvSrc, LINE, '', "src/lib/chat-view.js"), 'gone-prefix');
             try {
               const { ChatView: Pre } = await import(copy);
@@ -5483,7 +5483,7 @@ process.stdin.on('data', (d) => {
           const pre14 = await arm('PRE-FIX', false);
           const bCallsPre = pre14.calls[B.sid] || [];
           ok('⑭b PRE-FIX: the wrapper ANSWERED first (a known list with the real row) and the stale payload followed with its `queueKnown:false` placeholder — the order the incident produces',
-            bCallsPre.length >= 2 && bCallsPre[0].known === true && bCallsPre[0].n === 1 && bCallsPre.some((c) => c.known === false && c.n === 0),
+            bCallsPre.length >= 2 && bCallsPre[0].known === true && bCallsPre[0].n === 1 && verdictOf(bCallsPre.some((c) => c.known === false && c.n === 0)),
             JSON.stringify(bCallsPre));
           ok('⑭b PRE-FIX: …and the strip ends EMPTY — a message that will really run, held by the wrapper, stated on the wire, and NOWHERE on screen (no row to steer, remove or edit; the ask is self-limiting, so nothing asks again)',
             pre14.end.b.rows === 0, JSON.stringify(pre14.end));
@@ -5496,10 +5496,10 @@ process.stdin.on('data', (d) => {
           const fix14 = await arm('FIXED', true);
           const bCallsFix = fix14.calls[B.sid] || [];
           ok('⑭b FIXED: the SAME two calls arrive in the SAME order — the deferred payload really did run, it was not skipped',
-            bCallsFix.length >= 2 && bCallsFix[0].known === true && bCallsFix[0].n === 1 && bCallsFix.some((c) => c.known === false && c.n === 0),
+            bCallsFix.length >= 2 && bCallsFix[0].known === true && bCallsFix[0].n === 1 && verdictOf(bCallsFix.some((c) => c.known === false && c.n === 0)),
             JSON.stringify(bCallsFix));
           ok('⑭b FIXED: …and the row is STILL THERE in the steady state — a payload half a second old cannot overwrite the answer it asked for',
-            fix14.end.b.rows === 1 && /the b message/.test(fix14.end.b.texts.join(' ')) && fix14.end.b.red === 0, JSON.stringify(fix14.end));
+            fix14.end.b.rows === 1 && gateOf(/the b message/.test(fix14.end.b.texts.join(' '))) && fix14.end.b.red === 0, JSON.stringify(fix14.end));
 
           // ARM 3 — THE PRODUCT (both layers, the file restored): the hold
           // drains the answer AFTER the slab, so the stale payload runs first
@@ -5512,7 +5512,7 @@ process.stdin.on('data', (d) => {
             bCallsBoth.length >= 2 && bCallsBoth.findIndex((c) => c.known === false && c.n === 0) >= 0 && bCallsBoth.findIndex((c) => c.known === false && c.n === 0) < bCallsBoth.findIndex((c) => c.known === true && c.n === 1),
             JSON.stringify(bCallsBoth));
           ok('⑭b PRODUCT: …and the row is there in the steady state',
-            both14.end.b.rows === 1 && /the b message/.test(both14.end.b.texts.join(' ')) && both14.end.b.red === 0, JSON.stringify(both14.end));
+            both14.end.b.rows === 1 && gateOf(/the b message/.test(both14.end.b.texts.join(' '))) && both14.end.b.red === 0, JSON.stringify(both14.end));
           ok('⑭b EVERY ARM: session A — whose message really did leave the queue — ends EMPTY either way (the fix is about recency, not about keeping whatever was on screen)',
             pre14.end.a.rows === 0 && fix14.end.a.rows === 0 && both14.end.a.rows === 0, JSON.stringify({ pre: pre14.end.a, fix: fix14.end.a, both: both14.end.a }));
         }
@@ -5583,7 +5583,7 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
     await until16(() => (lastQueue()?.items || []).length === 3);
     const q0 = lastQueue();
     ok('⑯ three frames sent mid-turn are HELD — the CLI got only the running one', q0.items.length === 3 && gotTexts().length === 1, { items: q0.items, cli: gotTexts() });
-    ok('⑯ each row names its bubble (the frame\'s webui_msg_id), its preview ([image] for the picture), and only a PERSON\'s row offers the edit text', JSON.stringify(q0.items.map((i) => [i.msgId, i.kind, typeof i.text])) === JSON.stringify([['m-img', 'user', 'string'], ['m-2', 'user', 'string'], ['m-auto', 'system', 'undefined']]) && /^\[image\] what is in this picture$/.test(q0.items[0].preview), q0.items);
+    ok('⑯ each row names its bubble (the frame\'s webui_msg_id), its preview ([image] for the picture), and only a PERSON\'s row offers the edit text', JSON.stringify(q0.items.map((i) => [i.msgId, i.kind, typeof i.text])) === JSON.stringify([['m-img', 'user', 'string'], ['m-2', 'user', 'string'], ['m-auto', 'system', 'undefined']]) && verdictOf(/^\[image\] what is in this picture$/.test(q0.items[0].preview)), q0.items);
     ok('⑯ queued_input names each held bubble (the chip\'s join)', JSON.stringify(recs.filter((r) => r.type === 'queued_input').map((r) => r.msg_id)) === JSON.stringify(['m-img', 'm-2', 'm-auto']));
     const [rImg, r2, rAuto] = q0.items.map((i) => i.id);
     // reorder: the typed one to the FRONT (afterId null), then the picture after the auto row
@@ -5591,7 +5591,7 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
     await until16(() => results('reorder').length === 1);
     send(ad.formatQueueOp({ op: 'reorder', id: rImg, afterId: rAuto }));
     await until16(() => results('reorder').length === 2);
-    ok('⑯ reorder: afterId null = the front, an anchor = right after it', JSON.stringify(lastQueue().items.map((i) => i.msgId)) === JSON.stringify(['m-2', 'm-auto', 'm-img']) && results('reorder').every((r) => r.ok), lastQueue().items.map((i) => i.msgId));
+    ok('⑯ reorder: afterId null = the front, an anchor = right after it', JSON.stringify(lastQueue().items.map((i) => i.msgId)) === JSON.stringify(['m-2', 'm-auto', 'm-img']) && verdictOf(results('reorder').every((r) => r.ok)), lastQueue().items.map((i) => i.msgId));
     send(ad.formatQueueOp({ op: 'reorder', id: r2, afterId: 'q-gone' }));
     await until16(() => results('reorder').length === 3);
     ok('⑯ reorder onto an anchor that left the queue puts the row BACK and says anchor-gone', results('reorder')[2].ok === false && results('reorder')[2].reason === 'anchor-gone' && JSON.stringify(lastQueue().items.map((i) => i.msgId)) === JSON.stringify(['m-2', 'm-auto', 'm-img']));
@@ -5599,7 +5599,7 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
     send(ad.formatQueueOp({ op: 'edit', id: rImg, text: 'describe it in one line' }));
     send(ad.formatQueueOp({ op: 'edit', id: rAuto, text: 'something else' }));
     await until16(() => results('edit').length === 2);
-    ok('⑯ edit rewrites the first text block only (the image stays — BY EXCLUSION, the acp/codex rule)', results('edit')[0].ok === true && lastQueue().items.find((i) => i.id === rImg).text === 'describe it in one line' && /^\[image\] describe it in one line$/.test(lastQueue().items.find((i) => i.id === rImg).preview));
+    ok('⑯ edit rewrites the first text block only (the image stays — BY EXCLUSION, the acp/codex rule)', results('edit')[0].ok === true && lastQueue().items.find((i) => i.id === rImg).text === 'describe it in one line' && verdictOf(/^\[image\] describe it in one line$/.test(lastQueue().items.find((i) => i.id === rImg).preview)));
     ok('⑯ a frame VibeSpace typed (webui_origin) is not-editable', results('edit')[1].ok === false && results('edit')[1].reason === 'not-editable');
     // the verbs this harness does NOT serve are reported, never silent (the adapter refuses them first; this is the
     // arm for a frame that reaches the wrapper anyway). STEER IS SERVED since 2.369.361 (lane claude-steer-inject — it hands
@@ -5638,7 +5638,7 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
     const iRes = after.indexOf('queue_op_result:stopped'), iDrop = after.indexOf('queue_dropped'), iQ = after.indexOf('queue_changed'), iCtl = after.indexOf('control_response');
     ok('⑯ Stop: a stopped result PER held row → ONE queue_dropped → the emptied queue_changed — all before the CLI answers the interrupt', after.filter((t) => t === 'queue_op_result:stopped').length === 2 && iRes === 0 && iDrop > iRes && iQ > iDrop && iCtl > iQ, after);
     const drop = recs.find((r) => r.type === 'queue_dropped');
-    ok('⑯ …the put-back carries the PERSON\'s row only (a dispatch\'s /compact is dropped, never put into the composer)', drop && drop.items.length === 1 && drop.items[0].msgId === 'm-4' && drop.items[0].text === 'held, then Stop', drop);
+    ok('⑯ …the put-back carries the PERSON\'s row only (a dispatch\'s /compact is dropped, never put into the composer)', gateOf(drop) && drop.items.length === 1 && drop.items[0].msgId === 'm-4' && drop.items[0].text === 'held, then Stop', drop);
     ok('⑯ …and NOTHING ran after Stop: neither held frame ever reached the CLI', gotTexts().length === 4 && !gotTexts().includes('held, then Stop') && !gotTexts().includes('/compact'), gotTexts());
     // A BACKGROUND HELPER (measured on 2.1.308): the turn that launched it ends in `result`, but the session stays
     // 'running' — no idle — until the helper ends, and the CLI takes a new prompt at once. The gate ends the turn at its
@@ -5653,12 +5653,12 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
     const sentAt = Date.now();
     send(ad.formatChatInput('typed while the helper works', 'm-during').stdinPayload);
     const reached = await until16(() => gotTexts().includes('typed while the helper works'), 1500);
-    ok('⑯ a background helper keeps the session running past the turn\'s result (no idle) — and a message typed then reaches the CLI at once, never held behind the helper', stillRunning && reached && Date.now() - sentAt < 1500 && recs.filter((r) => r.type === 'queued_input').length === nQueued, { stillRunning, reached, ms: Date.now() - sentAt });
+    ok('⑯ a background helper keeps the session running past the turn\'s result (no idle) — and a message typed then reaches the CLI at once, never held behind the helper', gateOf(stillRunning) && gateOf(reached) && Date.now() - sentAt < 1500 && recs.filter((r) => r.type === 'queued_input').length === nQueued, { stillRunning, reached, ms: Date.now() - sentAt });
     // …and the turn the CLI starts by itself when the helper ends (its notification — an init, no state change) closes
     // the gate again: a message typed during it IS held, and goes when that turn ends
     await until16(() => gotTexts().length >= 6 && recs.slice(bgMark).filter((r) => r.type === 'system' && r.subtype === 'init').length >= 3, 8000);
     await until16(() => recs.slice(bgMark).some((r) => r.type === 'system' && r.state === 'idle'), 8000);
-    ok('⑯ …and once the helper ends, its notification turn runs and only THEN the session says idle (the stand-in\'s measured shape)', recs.slice(bgMark).some((r) => r.type === 'system' && r.state === 'idle'));
+    ok('⑯ …and once the helper ends, its notification turn runs and only THEN the session says idle (the stand-in\'s measured shape)', verdictOf(recs.slice(bgMark).some((r) => r.type === 'system' && r.state === 'idle')));
   } finally {
     try { w.kill('SIGKILL'); } catch { }
     fs.rmSync(dir16, { recursive: true, force: true });
@@ -5673,7 +5673,7 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('— ⑮ the patched copies never touch the tree');
-for (const r of copiesCensus(MUTQ.files, MUTQ.dir, REPO, { minCopies: 3 })) ok('⑮ ' + r.name, r.pass, r.detail);
+for (const r of copiesCensus(MUTQ.files, MUTQ.dir, REPO, { minCopies: 3 })) ok('⑮ ' + r.name, verdictOf(r.pass), r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -8,7 +8,7 @@ const repo = process.cwd(); const PORT = await freePort(); // per-process (scrip
 const wt = scratch('brk-smoke'), fakeHome = scratch('brk-home');
 const CWD = scratch('brk-work'); const SID = '88880000-1111-2222-3333-444455556666';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-let failed = 0; const check = (n,c,e)=>{ if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
+let failed = 0; const check = (n,c,e)=>{ if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
 try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src','public','server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -64,16 +64,16 @@ const r2 = await send({type:'create',backend:'claude',mode:'chat',resume:true,re
 check('breaker refuses with structured code', r2.type==='error' && r2.code==='no-convo-breaker', JSON.stringify(r2).slice(0,140));
 check('absent transcript → transcriptKnown false', r2.transcriptKnown === false);
 check('message never says "start a new session instead"', !/start a new session instead/i.test(r2.message||''), r2.message);
-check('message says nothing was deleted', /nothing has been deleted/i.test(r2.message||''), r2.message);
+check('message says nothing was deleted', verdictOf(/nothing has been deleted/i.test(r2.message||'')), r2.message);
 // KNOWN case: arm for the id whose transcript exists
 await send({type:'create',backend:'claude',mode:'chat',resume:true,resumeId:SID,cwd:scratch('brk-wrongdir'),recreateCwd:true,reqId:'k1',cols:80,rows:24});
 await sleep(6000);
 const r4 = await send({type:'create',backend:'claude',mode:'chat',resume:true,resumeId:SID,cwd:CWD,reqId:'k2',cols:80,rows:24});
 if (r4.type==='error' && r4.code==='no-convo-breaker') {
   check('known transcript → transcriptKnown true', r4.transcriptKnown===true, JSON.stringify(r4).slice(0,140));
-  check('known wording says NOT lost', /is NOT lost/i.test(r4.message||''), r4.message);
+  check('known wording says NOT lost', verdictOf(/is NOT lost/i.test(r4.message||'')), r4.message);
 } else { console.log('  (known-case breaker not armed — resume succeeded, acceptable)'); }
 // bypass flag must be honored
 const r5 = await send({type:'create',backend:'claude',mode:'chat',resume:true,resumeId:BOGUS,cwd:CWD,ignoreNoConvo:true,reqId:'b3',cols:80,rows:24});
 check('ignoreNoConvo bypasses the breaker', r5.type==='created', JSON.stringify(r5).slice(0,140));
-console.log(failed===0?'ALL PASS':`${failed} FAILED`); process.exit(failed?1:0);
+console.log(failed===0?'ALL PASS':`${failed} FAILED`); process.exit(failed?1:0); import { verdictOf } from './lib/check.mjs';

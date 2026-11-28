@@ -79,7 +79,7 @@ const CWD = path.join(fakeHome, 'project'); fs.mkdirSync(CWD, { recursive: true 
 fs.writeFileSync(path.join(CWD, 'transcribe.py'), 'import os, sys\nprint("transcribed", sys.argv[1:], "key set" if os.environ.get("T") else "no key")\n');
 fs.writeFileSync(path.join(CWD, 'upload.py'), 'import os\nprint("uploaded", "key set" if os.environ.get("T") else "no key")\n');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SIGN_IN = 'vsr-leg-sign-in-3';
 const SECOND = 'vsr leg second password';
@@ -150,7 +150,7 @@ try {
   if (!t0) throw new Error('no chrome page');
   const A = await pageOf(t0);
   startServer();
-  check('the hub boots (sign-in password on)', await ready());
+  check('the hub boots (sign-in password on)', verdictOf(await ready()));
   const URL = `http://127.0.0.1:${PORT}/`;
 
   console.log('① sign in, the second password, a stored API key, a live conversation');
@@ -165,7 +165,7 @@ try {
   check('the second password is set from the page (unlocked)', su.status === 200 && su.json.state === 'unlocked', su);
   const add = await A.api('POST', '/api/vault/secrets', { label: LABEL, kind: 'api-key', note: '', value: VALUE });
   const REF = add.json && add.json.ref;
-  check('a stored API key (a free entry)', add.status === 200 && /^vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret$/.test(String(REF)), add);
+  check('a stored API key (a free entry)', add.status === 200 && verdictOf(/^vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret$/.test(String(REF))), add);
   const lr = await fetch(`http://127.0.0.1:${PORT}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${PORT}` }, body: JSON.stringify({ password: SIGN_IN }) });
   const cookie = String(lr.headers.get('set-cookie') || '').split(';')[0];
   const ws0 = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Cookie: cookie, Origin: `http://127.0.0.1:${PORT}` } });
@@ -186,31 +186,31 @@ try {
   console.log('② THE STANDING REQUEST — one card, its two answers; Allow (验证是你) ⇒ the segments run with no card');
   let rq = null;
   for (let i = 0; i < 30; i++) { rq = await cli('vibespace-vault', ['request', REF, '--standing', '--command', 'python3 transcribe.py', '--for', 'transcribe the 40 interview segments'], TOKEN); if (rq.code === 0 || /unknown option/.test(rq.out)) break; await sleep(300); }
-  check('the agent: `vibespace-vault request <ref> --standing --command "python3 transcribe.py" --for …` ⇒ exit 0, «asked the user ONCE for a standing grant»', rq.code === 0 && /asked the user ONCE for a standing grant/.test(rq.out), rq.out);
+  check('the agent: `vibespace-vault request <ref> --standing --command "python3 transcribe.py" --for …` ⇒ exit 0, «asked the user ONCE for a standing grant»', rq.code === 0 && verdictOf(/asked the user ONCE for a standing grant/.test(rq.out)), rq.out);
   const sc = (await openOf('vault-grant-ask'))[0];
   check('ONE card in For you, marked standing', !!sc && sc.action.standing === true, sc && sc.action);
   await openTray();
   const view = await cardView('/常驻使用/');
   const rowOf = (v, k) => (v && v.rows.find((r) => r.k === k)) || null;
-  check('its words in 中文: who asks for a STANDING grant on WHICH secret (its name), the command python3 transcribe.py, «直到你收回»', !!view && /Transcriber 请求常驻使用「TTS API key」/.test(view.text) && /python3 transcribe\.py/.test((rowOf(view, 'command') || {}).v || '') && /直到你收回/.test((rowOf(view, 'until') || {}).v || ''), view && view.text.slice(0, 600));
-  check('r2 (visual): LABEL ROWS — 密钥 = the entry\'s NAME, 用途, 命令, 运行 = the program\'s real path, 期限, and (a closed entry) 另外: Allow turns «可供 agent 运行使用» on', !!view && view.rows.map((r) => r.k).join() === 'secret,purpose,command,program,until,switch' && rowOf(view, 'secret').l === '密钥' && rowOf(view, 'secret').v === LABEL && rowOf(view, 'purpose').l === '用途' && rowOf(view, 'command').l === '命令' && rowOf(view, 'program').l === '运行' && rowOf(view, 'program').v.includes(fs.realpathSync(PY)) && rowOf(view, 'switch').warn && /可供 agent 运行使用/.test(rowOf(view, 'switch').v), view && view.rows);
-  check('r2 (visual): the vault:// reference is NOT on the face — only under «技术细节», as code; nothing on the card is a link', !!view && !view.face.includes('vault://') && view.codes.includes(REF) && !view.links.length, view && { codes: view.codes, links: view.links });
-  check('its answers: «允许（常驻）» and «拒绝» — never 允许一次 / 8 小时', !!view && view.buttons.includes('允许（常驻）') && view.buttons.includes('拒绝') && !view.buttons.includes('允许一次') && !view.buttons.includes('8 小时'), view && view.buttons);
+  check('its words in 中文: who asks for a STANDING grant on WHICH secret (its name), the command python3 transcribe.py, «直到你收回»', !!view && gateOf(/Transcriber 请求常驻使用「TTS API key」/.test(view.text)) && gateOf(/python3 transcribe\.py/.test((rowOf(view, 'command') || {}).v || '')) && verdictOf(/直到你收回/.test((rowOf(view, 'until') || {}).v || '')), view && view.text.slice(0, 600));
+  check('r2 (visual): LABEL ROWS — 密钥 = the entry\'s NAME, 用途, 命令, 运行 = the program\'s real path, 期限, and (a closed entry) 另外: Allow turns «可供 agent 运行使用» on', !!view && view.rows.map((r) => r.k).join() === 'secret,purpose,command,program,until,switch' && rowOf(view, 'secret').l === '密钥' && rowOf(view, 'secret').v === LABEL && rowOf(view, 'purpose').l === '用途' && rowOf(view, 'command').l === '命令' && rowOf(view, 'program').l === '运行' && gateOf(rowOf(view, 'program').v.includes(fs.realpathSync(PY))) && gateOf(rowOf(view, 'switch').warn) && verdictOf(/可供 agent 运行使用/.test(rowOf(view, 'switch').v)), view && view.rows);
+  check('r2 (visual): the vault:// reference is NOT on the face — only under «技术细节», as code; nothing on the card is a link', !!view && !view.face.includes('vault://') && gateOf(view.codes.includes(REF)) && !view.links.length, view && { codes: view.codes, links: view.links });
+  check('its answers: «允许（常驻）» and «拒绝» — never 允许一次 / 8 小时', !!view && gateOf(view.buttons.includes('允许（常驻）')) && gateOf(view.buttons.includes('拒绝')) && !view.buttons.includes('允许一次') && !view.buttons.includes('8 小时'), view && view.buttons);
   await A.shot('vsr-1-standing-card-desktop.png');
   await closeTray();
   const page = await reveal();
   const yes = await A.api('POST', `/api/vault/request/asks/${sc.action.askId}`, { answer: 'standing', page }, { 'X-Vault-Page': page || '' });
-  check('the owner\'s Allow (验证是你) ⇒ granted · standing', yes.status === 200 && yes.json.ok && yes.json.grantedFor === 'standing', yes.json);
+  check('the owner\'s Allow (验证是你) ⇒ granted · standing', yes.status === 200 && gateOf(yes.json.ok) && yes.json.grantedFor === 'standing', yes.json);
   const r1 = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'python3', 'transcribe.py', 'part01.mp3'], TOKEN, { timeout: 70000 });
   const r2 = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'python3', 'transcribe.py', 'part02.mp3'], TOKEN, { timeout: 70000 });
-  check('two segments run with NO card (the real python3 had the key; no value in the output)', r1.code === 0 && r2.code === 0 && /transcribed \['part01\.mp3'\] key set/.test(r1.out) && /part02/.test(r2.out) && !r1.out.includes(VALUE) && (await openOf('vault-run-ask')).length === 0, { r1: r1.out.slice(0, 200), r2: r2.out.slice(0, 200) });
+  check('two segments run with NO card (the real python3 had the key; no value in the output)', r1.code === 0 && r2.code === 0 && gateOf(/transcribed \['part01\.mp3'\] key set/.test(r1.out)) && gateOf(/part02/.test(r2.out)) && !r1.out.includes(VALUE) && (await openOf('vault-run-ask')).length === 0, { r1: r1.out.slice(0, 200), r2: r2.out.slice(0, 200) });
   const uses = await cli('vibespace-vault', ['uses'], TOKEN);
-  check(`\`vibespace-vault uses\`: «standing · the command ${PYN} transcribe.py · since …» and «by grant · standing vg-…»`, new RegExp(`standing · the command ${reEsc(PYN)} transcribe\\.py · since `).test(uses.out) && /by grant · standing vg-[0-9a-f]{8}/.test(uses.out), uses.out.slice(0, 900));
+  check(`\`vibespace-vault uses\`: «standing · the command ${PYN} transcribe.py · since …» and «by grant · standing vg-…»`, gateOf(new RegExp(`standing · the command ${reEsc(PYN)} transcribe\\.py · since `).test(uses.out)) && verdictOf(/by grant · standing vg-[0-9a-f]{8}/.test(uses.out)), uses.out.slice(0, 900));
 
   console.log('③ THE VAULT ROW — the chip says the command and who asked; 「谁可以用…」 explains 主机 and «让 agent 自己申请»');
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); if (!c) return null; c.scrollIntoView({ block: 'center' }); return c.textContent; })()`, { timeout: 15000 });
-  check(`the chip: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 2 次 · agent 申请 · HH:MM ✕» (the real program and ITS OWN end — r4; the source and its time last)`, new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期 · 已用 2 次 · agent 申请 · \\d\\d:\\d\\d✕$`).test(String(chip)), chip);
+  check(`the chip: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 2 次 · agent 申请 · HH:MM ✕» (the real program and ITS OWN end — r4; the source and its time last)`, verdictOf(new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期 · 已用 2 次 · agent 申请 · \\d\\d:\\d\\d✕$`).test(String(chip))), chip);
   await sleep(300);
   await A.shot('vsr-2-vault-row-desktop.png');
   await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (b) b.click(); return !!b; })()`);
@@ -220,7 +220,7 @@ try {
   // The leg pins the sentence as drawn and the ABSENCE of a flag / a CLI name (it pinned «--standing» there before)
   const askPlain = (ask) => /不知道怎么填？让 agent 自己申请。/.test(ask) && /它会发给你一张卡片，正好是这条授权，你点允许即可——命令它自己知道。/.test(ask) && !/--[a-z]|vibespace-[a-z]/.test(ask);
   check('RED control (ckpt61): the same hint with a command back in its sentence (the shape before pick 4) is refused', !!dlg && !askPlain(anchored(dlg.ask, '它会发给你一张卡片', '它会用 vibespace-vault request --standing 申请，发给你一张卡片', 'ckpt61: a command back in the hint')), dlg && dlg.ask);
-  check('「谁可以用…」 says what a 主机 is (e.g. api.openai.com), and «不知道怎么填？让 agent 自己申请。» — in plain words, the agent asks for exactly this grant, NO command and no CLI name — sits right under the host field; the command member is kept', !!dlg && /主机就是命令带着它连去的地方/.test(dlg.what) && /api\.openai\.com/.test(dlg.what) && askPlain(dlg.ask) && new RegExp(`${reEsc(PYN)} transcribe\\.py（保留）`).test(dlg.cmds) && dlg.order === true, dlg);
+  check('「谁可以用…」 says what a 主机 is (e.g. api.openai.com), and «不知道怎么填？让 agent 自己申请。» — in plain words, the agent asks for exactly this grant, NO command and no CLI name — sits right under the host field; the command member is kept', !!dlg && gateOf(/主机就是命令带着它连去的地方/.test(dlg.what)) && gateOf(/api\.openai\.com/.test(dlg.what)) && gateOf(askPlain(dlg.ask)) && gateOf(new RegExp(`${reEsc(PYN)} transcribe\\.py（保留）`).test(dlg.cmds)) && dlg.order === true, dlg);
   await A.evalJs(`(() => { const a = document.querySelector('#vault-use-grant .vw-use-ask-agent'); if (a) a.scrollIntoView({ block: 'center' }); return true; })()`);
   await sleep(200);
   await A.shot('vsr-3-who-may-use-dialog-desktop.png');
@@ -234,17 +234,17 @@ try {
   check('a run of upload.py (not granted) draws its card, offering «Always (this command)»', !!rc && rc.action.always === true && rc.action.command === true, rc && rc.action);
   await openTray();
   const rv = await A.evalJs(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /upload\\.py/.test(e.textContent)); if (!it) return null; it.scrollIntoView({ block: 'center' }); return { text: it.textContent, buttons: [...it.querySelectorAll('button')].map((b) => b.textContent.trim()).filter(Boolean) }; })()`);
-  check('the card\'s button «总是（这条命令）» beside «允许一次» / «拒绝», with the plain words «VibeSpace 看不到这个程序把密钥发往哪里 … 换了程序或脚本会再问»', !!rv && rv.buttons.includes('总是（这条命令）') && rv.buttons.includes('允许一次') && /VibeSpace 看不到这个程序把密钥发往哪里/.test(rv.text) && /换了程序或脚本会再问/.test(rv.text), rv && { buttons: rv.buttons, text: rv.text.slice(0, 700) });
+  check('the card\'s button «总是（这条命令）» beside «允许一次» / «拒绝», with the plain words «VibeSpace 看不到这个程序把密钥发往哪里 … 换了程序或脚本会再问»', !!rv && gateOf(rv.buttons.includes('总是（这条命令）')) && gateOf(rv.buttons.includes('允许一次')) && gateOf(/VibeSpace 看不到这个程序把密钥发往哪里/.test(rv.text)) && verdictOf(/换了程序或脚本会再问/.test(rv.text)), rv && { buttons: rv.buttons, text: rv.text.slice(0, 700) });
   await A.shot('vsr-4-run-card-always-command-desktop.png');
   await closeTray();
   const page2 = await reveal();
   const al = await A.api('POST', `/api/vault/run/asks/${rc.action.askId}`, { answer: 'always' }, { 'X-Vault-Page': page2 || '' });
-  check('«Always (this command)» (验证是你) ⇒ ok, a command grant with no end', al.status === 200 && al.json.ok && al.json.outcome === 'always' && al.json.ttl === 'forever' && al.json.command === `${PYN} upload.py`, al.json);
+  check('«Always (this command)» (验证是你) ⇒ ok, a command grant with no end', al.status === 200 && gateOf(al.json.ok) && al.json.outcome === 'always' && al.json.ttl === 'forever' && al.json.command === `${PYN} upload.py`, al.json);
   const ra = await runP;
   const rb = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'python3', 'upload.py'], TOKEN, { timeout: 70000 });
-  check('that run went, and the next one of it runs with no card', ra.code === 0 && rb.code === 0 && /uploaded key set/.test(rb.out) && (await openOf('vault-run-ask')).length === 0, { ra: ra.out.slice(0, 200), rb: rb.out.slice(0, 200) });
+  check('that run went, and the next one of it runs with no card', ra.code === 0 && rb.code === 0 && gateOf(/uploaded key set/.test(rb.out)) && (await openOf('vault-run-ask')).length === 0, { ra: ra.out.slice(0, 200), rb: rb.out.slice(0, 200) });
   const chip2 = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /upload\\.py/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 8000 });
-  check('the chip now names both commands, EACH with its own end (r4), and the latest source «卡片上的总是»', new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期, 命令 ${reEsc(PYN)} upload\\.py · 无限期 · 已用 \\d+ 次 · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(String(chip2)), chip2);
+  check('the chip now names both commands, EACH with its own end (r4), and the latest source «卡片上的总是»', verdictOf(new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期, 命令 ${reEsc(PYN)} upload\\.py · 无限期 · 已用 \\d+ 次 · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(String(chip2))), chip2);
 
   console.log('⑤ THE PHONE (390 px) — a standing card and the Vault row');
   await A.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
@@ -256,9 +256,9 @@ try {
   check('a second standing request (a hosts scope) ⇒ filed', rq2.code === 0, rq2.out);
   await openTray();
   const pview = await cardView('/api\\.tts\\.example/');
-  check('r2 (visual, phone): the hosts card — 主机 row api.tts.example; the reference only under the fold as code; NO link anywhere on it (the phone linkified «://secrets/secret:…» before)', !!pview && /api\.tts\.example/.test((pview.rows.find((r) => r.k === 'hosts') || {}).v || '') && (pview.rows.find((r) => r.k === 'hosts') || {}).l === '主机' && !pview.face.includes('vault://') && pview.codes.includes(REF) && !pview.links.length, pview && { rows: pview.rows, links: pview.links, codes: pview.codes });
+  check('r2 (visual, phone): the hosts card — 主机 row api.tts.example; the reference only under the fold as code; NO link anywhere on it (the phone linkified «://secrets/secret:…» before)', !!pview && gateOf(/api\.tts\.example/.test((pview.rows.find((r) => r.k === 'hosts') || {}).v || '')) && (pview.rows.find((r) => r.k === 'hosts') || {}).l === '主机' && !pview.face.includes('vault://') && gateOf(pview.codes.includes(REF)) && !pview.links.length, pview && { rows: pview.rows, links: pview.links, codes: pview.codes });
   const pv = await A.evalJs(`(() => { const it = ${ITEM('/api\\.tts\\.example/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const r = it.getBoundingClientRect(); const btns = [...it.querySelectorAll('button')].filter((b) => /允许（常驻）|拒绝/.test(b.textContent)); return { w: r.width, overflow: it.scrollWidth > it.clientWidth + 1, buttons: btns.map((b) => { const q = b.getBoundingClientRect(); return { t: b.textContent.trim(), h: Math.round(q.height), inside: q.left >= r.left - 1 && q.right <= r.right + 1 }; }), hosts: /主机api\\.tts\\.example/.test(it.textContent) }; })()`);
-  check('at 390 px the card fits (no sideways overflow), its scope reads «主机 api.tts.example», both answers inside the card and ≥ 32 px tall', !!pv && !pv.overflow && pv.hosts && pv.buttons.length === 2 && pv.buttons.every((b) => b.inside && b.h >= 32), pv);
+  check('at 390 px the card fits (no sideways overflow), its scope reads «主机 api.tts.example», both answers inside the card and ≥ 32 px tall', !!pv && !pv.overflow && gateOf(pv.hosts) && pv.buttons.length === 2 && verdictOf(pv.buttons.every((b) => b.inside && b.h >= 32)), pv);
   await A.shot('vsr-5-standing-card-phone.png');
   await closeTray();
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
@@ -282,11 +282,11 @@ try {
   const page3 = await reveal();
   const oa = oc && await A.api('POST', `/api/vault/run/asks/${oc.action.askId}`, { answer: 'always' }, { 'X-Vault-Page': page3 || '' });
   const oRun = await ownP;
-  check('its card offers «总是（这条命令）»; Always (验证是你) ⇒ ok', !!oc && !!oa && oa.status === 200 && oa.json.ok && oRun.code === 0, { action: oc && oc.action, oa: oa && oa.json, out: oRun.out.slice(0, 200) });
+  check('its card offers «总是（这条命令）»; Always (验证是你) ⇒ ok', !!oc && !!oa && oa.status === 200 && gateOf(oa.json.ok) && oRun.code === 0, { action: oc && oc.action, oa: oa && oa.json, out: oRun.out.slice(0, 200) });
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const OWN_ROW = `[...document.querySelectorAll('.vw-list .vw-row')].find((r) => r.isConnected && String(r.dataset.id || '').startsWith('secrets:agent:') && String(r.dataset.id).includes('/tts-own#'))`;
   const own = await A.until(`(() => { const r = ${OWN_ROW}; const c = r && r.querySelector('.vw-use-chip'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const g = r.querySelector('.vw-use-grant'); return { chip: c.textContent, x: !!c.querySelector('.vw-use-x'), add: !!(g && !g.hidden && g.getBoundingClientRect().width > 0) }; })()`, { timeout: 15000 });
-  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and «谁可以用…» (B-bc3b: the owner shares it from here)`, !!own && new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip) && own.x && own.add, own);   // B-bc3b: the own row draws «谁可以用…» too (the owner shares it)
+  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and «谁可以用…» (B-bc3b: the owner shares it from here)`, !!own && gateOf(new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip)) && gateOf(own.x) && verdictOf(own.add), own);   // B-bc3b: the own row draws «谁可以用…» too (the owner shares it)
   await sleep(300);
   await A.shot('vsr-7-own-entry-row-desktop.png');
   await A.evalJs(`(() => { const r = ${OWN_ROW}; const x = r && r.querySelector('.vw-use-chip .vw-use-x'); if (x) x.click(); return !!x; })()`);
@@ -303,7 +303,7 @@ try {
   const sc3 = (await openOf('vault-grant-ask')).find((i) => /speech\.example/.test(JSON.stringify(i.facts || {})));
   const page5 = await reveal();
   const y3 = sc3 && await A.api('POST', `/api/vault/request/asks/${sc3.action.askId}`, { answer: 'standing', page: page5 }, { 'X-Vault-Page': page5 || '' });
-  check('(the setup) speech.example is held with NO end — an agent\'s standing request, Allowed', rq3.code === 0 && !!y3 && y3.status === 200 && y3.json.ok, { rq3: rq3.out.slice(0, 200), y3: y3 && y3.json });
+  check('(the setup) speech.example is held with NO end — an agent\'s standing request, Allowed', rq3.code === 0 && !!y3 && y3.status === 200 && verdictOf(y3.json.ok), { rq3: rq3.out.slice(0, 200), y3: y3 && y3.json });
   const run1 = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-m', '3', 'https://speech.example/v1/tts', 'https://upload.example/v1/put'], TOKEN, { timeout: 70000 });
   let c1 = null;
   for (let i = 0; i < 60 && !c1; i++) { c1 = (await openOf('vault-run-ask')).find((x) => /upload\.example/.test(String(x.detail))) || null; if (!c1) await sleep(200); }
@@ -313,13 +313,13 @@ try {
   const trayRow = () => A.evalJs(`(() => { const it = ${ITEM('/upload\\.example/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const ch = it.querySelector('.ut-run-changes'), ans = it.querySelector('.ut-run-answer'), rd = it.querySelector('.ut-run-redrawn'); const r = it.getBoundingClientRect(), q = ch && ch.getBoundingClientRect(); return { changes: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null, redrawn: rd ? rd.textContent : null, above: !!(ch && ans && (ch.compareDocumentPosition(ans) & Node.DOCUMENT_POSITION_FOLLOWING)), seen: !!(q && q.width > 0 && q.height > 0), inside: !!(q && q.left >= r.left - 1 && q.right <= r.right + 1), overflow: it.scrollWidth > it.clientWidth + 1, buttons: [...it.querySelectorAll('.ut-run-answer button')].map((b) => b.textContent.trim()), hint: !!it.querySelector('.ut-run-answer .ut-run-hint') }; })()`);
   await openTray();
   const t1 = await trayRow();
-  check(`the tray row: «${LINE_ZH}» on its OWN row ABOVE 允许一次 / 总是… / 拒绝 (never only in the hidden hint)`, !!t1 && t1.changes && t1.changes.length === 1 && t1.changes[0] === LINE_ZH && t1.above && t1.seen && t1.buttons.length === 3 && !t1.hint, t1);
+  check(`the tray row: «${LINE_ZH}» on its OWN row ABOVE 允许一次 / 总是… / 拒绝 (never only in the hidden hint)`, !!t1 && gateOf(t1.changes) && t1.changes.length === 1 && t1.changes[0] === LINE_ZH && gateOf(t1.above) && gateOf(t1.seen) && t1.buttons.length === 3 && !t1.hint, t1);
   await sleep(300);
   await A.shot('vsr-10-replace-line-desktop.png');
   await closeTray();
   await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(c1 && c1.id)} }); true`);
   const w1 = await A.until(`(() => { const ch = [...document.querySelectorAll('.iw-detail .ut-run-changes')].find((e) => e.getBoundingClientRect().width > 0); if (!ch) return null; const d = ch.closest('.iw-detail'), win = ch.closest('.window, .wm-window') || document.body, acts = [...win.querySelectorAll('.iw-actions')].find((a) => a.getBoundingClientRect().width > 0); return { line: [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent), above: !!(acts && (d.compareDocumentPosition(acts) & Node.DOCUMENT_POSITION_FOLLOWING)), acts: acts ? [...acts.querySelectorAll('button')].map((b) => (b.title || b.textContent).trim()).filter(Boolean).slice(0, 6) : [] }; })()`, { timeout: 10000 });
-  check('the For-you window (the other client): the same line in its pane, above its action row', !!w1 && w1.line.length === 1 && w1.line[0] === LINE_ZH && w1.above, w1);
+  check('the For-you window (the other client): the same line in its pane, above its action row', !!w1 && w1.line.length === 1 && w1.line[0] === LINE_ZH && verdictOf(w1.above), w1);
   await sleep(300);
   await A.shot('vsr-11-replace-line-foryou-window.png');
   await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
@@ -333,7 +333,7 @@ try {
   await narrow(true);
   await openTray();
   const p1 = await trayRow();
-  check('the phone (390 px): the line on its own row above the answers, inside the card (no sideways overflow)', !!p1 && p1.changes && p1.changes[0] === LINE_ZH && p1.above && p1.seen && p1.inside && !p1.overflow, p1);
+  check('the phone (390 px): the line on its own row above the answers, inside the card (no sideways overflow)', !!p1 && gateOf(p1.changes) && p1.changes[0] === LINE_ZH && gateOf(p1.above) && gateOf(p1.seen) && gateOf(p1.inside) && !p1.overflow, p1);
   await sleep(300);
   await A.shot('vsr-12-replace-line-phone.png');
   await closeTray();
@@ -345,18 +345,18 @@ try {
   const a2 = c2 && await A.api('POST', `/api/vault/run/asks/${c2.action.askId}`, { answer: 'always' }, { 'X-Vault-Page': page6 || '' });
   await run2;
   const a1 = c1 && await A.api('POST', `/api/vault/run/asks/${c1.action.askId}`, { answer: 'always' }, { 'X-Vault-Page': page6 || '' });
-  check('another card\'s «Always» wrote speech.example (30 days); THIS card\'s press then writes nothing — 409 ask_redrawn (inside its 60 s)', !!a2 && a2.status === 200 && a2.json.ok && !!a1 && a1.status === 409 && a1.json.code === 'ask_redrawn' && Date.now() - T_C1 < 55000, { a2: a2 && a2.json, a1: a1 && a1.json, ms: Date.now() - T_C1 });
+  check('another card\'s «Always» wrote speech.example (30 days); THIS card\'s press then writes nothing — 409 ask_redrawn (inside its 60 s)', !!a2 && a2.status === 200 && gateOf(a2.json.ok) && !!a1 && a1.status === 409 && a1.json.code === 'ask_redrawn' && Date.now() - T_C1 < 55000, { a2: a2 && a2.json, a1: a1 && a1.json, ms: Date.now() - T_C1 });
   await openTray();
   const p2 = await A.until(`(() => { const it = ${ITEM('/upload\\.example/')}; return it && it.querySelector('.ut-run-redrawn') ? true : null; })()`, { timeout: 8000 }) && await trayRow();
   const REDRAWN_RE = /^已于 \S+ 重新绘制：这个回答要写入的内容与卡片最初显示时不同 — 请重新阅读。$/, NOW_RE = /^这个对话持有 speech\.example，到 .+ — 这会替换那个授权：之后 speech\.example 为期 30 天。$/;
-  check('the card drawn again is MARKED (phone): «已于 HH:MM 重新绘制：…请重新阅读。» first on its row, then the line of NOW («…持有 speech.example，到 … — 这会替换那个授权…») — never the old face', !!p2 && REDRAWN_RE.test(String(p2.redrawn)) && p2.changes && p2.changes.length === 2 && NOW_RE.test(p2.changes[1]) && p2.inside && !p2.overflow, p2);
+  check('the card drawn again is MARKED (phone): «已于 HH:MM 重新绘制：…请重新阅读。» first on its row, then the line of NOW («…持有 speech.example，到 … — 这会替换那个授权…») — never the old face', !!p2 && gateOf(REDRAWN_RE.test(String(p2.redrawn))) && gateOf(p2.changes) && p2.changes.length === 2 && gateOf(NOW_RE.test(p2.changes[1])) && gateOf(p2.inside) && !p2.overflow, p2);
   await sleep(300);
   await A.shot('vsr-14-redrawn-card-phone.png');
   await closeTray();
   await narrow(false);
   await openTray();
   const d2 = await trayRow();
-  check('… and at a desk the same', !!d2 && REDRAWN_RE.test(String(d2.redrawn)) && d2.changes && NOW_RE.test(String(d2.changes[1])) && d2.above, d2);
+  check('… and at a desk the same', !!d2 && gateOf(REDRAWN_RE.test(String(d2.redrawn))) && gateOf(d2.changes) && gateOf(NOW_RE.test(String(d2.changes[1]))) && verdictOf(d2.above), d2);
   await sleep(300);
   await A.shot('vsr-13-redrawn-card-desktop.png');
   await closeTray();
@@ -366,7 +366,7 @@ try {
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (!b) return null; b.click(); return true; })()`, { timeout: 15000 });
   const pv1 = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); const h = d && d.querySelector('.vw-use-hosts'), e = d && d.querySelector('.vw-use-end'); if (!h || !e) return null; const was = h.value; h.value = (was ? was + ', ' : '') + 'new.example'; h.dispatchEvent(new Event('input', { bubbles: true })); const p = d.querySelector('.vw-use-preview'); const out = { was, end: e.value, preview: p && !p.hidden ? p.textContent : null, fresh: p ? [...p.querySelectorAll('.vw-use-scope-new')].map((s) => s.textContent) : [] }; p && p.scrollIntoView({ block: 'center' }); return out; })()`, { timeout: 10000 });
-  check('「谁可以用…」 under «各自保持现有设置» (the member holds commands with no end and hosts with 30 days): a host typed new is said BEFORE Save — «new.example · 30 天 （新）», the earliest live end, never 无限期', !!pv1 && pv1.end === 'keep' && pv1.fresh.length === 1 && /^new\.example · (29|30) 天 （新）$/.test(pv1.fresh[0]) && /保存后写入：/.test(String(pv1.preview)) && /speech\.example · (29|30) 天/.test(String(pv1.preview)) && /无限期/.test(String(pv1.preview)), pv1);
+  check('「谁可以用…」 under «各自保持现有设置» (the member holds commands with no end and hosts with 30 days): a host typed new is said BEFORE Save — «new.example · 30 天 （新）», the earliest live end, never 无限期', !!pv1 && pv1.end === 'keep' && pv1.fresh.length === 1 && gateOf(/^new\.example · (29|30) 天 （新）$/.test(pv1.fresh[0])) && gateOf(/保存后写入：/.test(String(pv1.preview))) && gateOf(/speech\.example · (29|30) 天/.test(String(pv1.preview))) && verdictOf(/无限期/.test(String(pv1.preview))), pv1);
   await sleep(200);
   await A.shot('vsr-15-save-preview-desktop.png');
   // put the field back as it was (the dialog's unsaved guard sees no change), then Cancel — nothing is saved
@@ -384,7 +384,7 @@ try {
   const gu = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'python3', 'upload.py'], TOKEN, { timeout: 70000 });
   await sleep(1500);
   const ch1 = await chatNow(), n1 = await countItems();
-  check(`(MEASURED) an ADMITTED standing-grant use shows NOTHING in the chat today — no row, no card (its chat: ${ch0.msgs} messages / ${ch0.cards} cards before, ${ch1.msgs} / ${ch1.cards} after) and For you +0; its trace is the use line («by grant · standing») and the row's «used N×»`, !!SID && !!chatOpen && gu.code === 0 && /uploaded key set/.test(gu.out) && ch1.msgs === ch0.msgs && ch1.cards === ch0.cards && n1 === n0, { SID, chatOpen, gu: gu.out.slice(0, 160), ch0, ch1, n0, n1 });
+  check(`(MEASURED) an ADMITTED standing-grant use shows NOTHING in the chat today — no row, no card (its chat: ${ch0.msgs} messages / ${ch0.cards} cards before, ${ch1.msgs} / ${ch1.cards} after) and For you +0; its trace is the use line («by grant · standing») and the row's «used N×»`, !!SID && !!chatOpen && gu.code === 0 && gateOf(/uploaded key set/.test(gu.out)) && ch1.msgs === ch0.msgs && ch1.cards === ch0.cards && n1 === n0, { SID, chatOpen, gu: gu.out.slice(0, 160), ch0, ch1, n0, n1 });
   console.log(`    measured: chat ${JSON.stringify(ch0)} → ${JSON.stringify(ch1)}, For-you items ${n0} → ${n1}`);
   // the SECOND client: another page of the same sign-in, its toasts recorded as they come (a toast lives 6 s)
   const tB = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
@@ -414,14 +414,14 @@ try {
   const thirdLines = (lines) => (Array.isArray(lines) ? lines.slice(2) : []);
   await openTray();
   const h1 = await HOUR_ROW();
-  check('the tray row (1280): 允许一次 · 允许 1 小时 · 拒绝 — its OWN row above them «「允许 1 小时」：到 HH:MM 为止，这个对话可以在任何运行中使用“TTS API key”。» then the B-d868 line «没有记录这一轮是谁发起的», and beside them «1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。»', !!h1 && h1.buttons.map((b) => b.t).join('|') === '允许一次|允许 1 小时|拒绝' && hourLines(h1.changes) && h1.above && h1.hints.includes(HOUR_HINT), h1);
+  check('the tray row (1280): 允许一次 · 允许 1 小时 · 拒绝 — its OWN row above them «「允许 1 小时」：到 HH:MM 为止，这个对话可以在任何运行中使用“TTS API key”。» then the B-d868 line «没有记录这一轮是谁发起的», and beside them «1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。»', !!h1 && h1.buttons.map((b) => b.t).join('|') === '允许一次|允许 1 小时|拒绝' && gateOf(hourLines(h1.changes)) && gateOf(h1.above) && verdictOf(h1.hints.includes(HOUR_HINT)), h1);
   check('the tray row (1280): NO third change line on the hour card (B-d868 adds one line, the turn\'s opener)', !!h1 && thirdLines(h1.changes).length === 0, h1 && thirdLines(h1.changes));
   await sleep(300);
   await A.shot('vsr-16-hour-card-desktop.png');
   await closeTray();
   await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wc && wc.id)} }); true`);
   const wv = await A.until(`(() => { const acts = [...document.querySelectorAll('.iw-actions')].find((a) => a.getBoundingClientRect().width > 0 && a.querySelector('[data-act="shape-window"]')); if (!acts) return null; const ch = [...document.querySelectorAll('.iw-detail .ut-run-changes')].find((e) => e.getBoundingClientRect().width > 0); return { acts: [...acts.querySelectorAll('[data-act]')].map((b) => b.dataset.act), label: (acts.querySelector('[data-act="shape-window"]').textContent || '').trim(), hints: [...acts.querySelectorAll('.ut-run-hint')].map((h) => h.textContent), line: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null }; })()`, { timeout: 10000 });
-  check('the For-you window (the other client): Allow once · 允许 1 小时 · Deny in its action row, the words beside them, the same two lines in its pane (the hour line, then the B-d868 line)', !!wv && wv.acts.slice(0, 3).join() === 'hub-once,shape-window,hub-deny' && /允许 1 小时/.test(wv.label) && wv.hints.includes(HOUR_HINT) && hourLines(wv.line), wv);
+  check('the For-you window (the other client): Allow once · 允许 1 小时 · Deny in its action row, the words beside them, the same two lines in its pane (the hour line, then the B-d868 line)', !!wv && wv.acts.slice(0, 3).join() === 'hub-once,shape-window,hub-deny' && gateOf(/允许 1 小时/.test(wv.label)) && gateOf(wv.hints.includes(HOUR_HINT)) && verdictOf(hourLines(wv.line)), wv);
   check('the For-you window: NO third change line in its pane', !!wv && thirdLines(wv.line).length === 0, wv && thirdLines(wv.line));
   // r8 (the r7 acceptance, the surfaces' minor 3): the shot shows the pane's row and the hint — no transient toast over it, the
   // window maximized so the hint is inside it
@@ -434,7 +434,7 @@ try {
   await narrow(true);
   await openTray();
   const h2 = await HOUR_ROW();
-  check('the phone (390 px): the three answers inside the card and ≥ 32 px tall, the two lines (the hour line, then the B-d868 line) on their own rows above them, no sideways overflow', !!h2 && h2.buttons.length === 3 && h2.buttons.every((b) => b.inside && b.h >= 32) && hourLines(h2.changes) && h2.above && !h2.overflow, h2);
+  check('the phone (390 px): the three answers inside the card and ≥ 32 px tall, the two lines (the hour line, then the B-d868 line) on their own rows above them, no sideways overflow', !!h2 && h2.buttons.length === 3 && gateOf(h2.buttons.every((b) => b.inside && b.h >= 32)) && gateOf(hourLines(h2.changes)) && gateOf(h2.above) && !h2.overflow, h2);
   check('the phone (390 px): NO third change line on the hour card', !!h2 && thirdLines(h2.changes).length === 0, h2 && thirdLines(h2.changes));
   await sleep(300);
   await A.shot('vsr-18-hour-card-phone.png');
@@ -448,7 +448,7 @@ try {
   const wa = wc && await A.api('POST', `/api/vault/run/asks/${wc.action.askId}`, { answer: 'window' }, { 'X-Vault-Page': pageW || '' });
   const wr = await winP;
   const T_P = Date.now();
-  check('«允许 1 小时» (验证是你) ⇒ ok · window (its end the press + 1 h), inside the card\'s 60 s; the run goes', !!wa && wa.status === 200 && wa.json.ok && wa.json.outcome === 'window' && Math.abs(Number(wa.json.until) - (T_P + 3600e3)) < 60e3 && T_P - T_W < 58000 && wr.code === 0, { wa: wa && wa.json, ms: T_P - T_W, wr: wr.out.slice(0, 200) });
+  check('«允许 1 小时» (验证是你) ⇒ ok · window (its end the press + 1 h), inside the card\'s 60 s; the run goes', !!wa && wa.status === 200 && gateOf(wa.json.ok) && wa.json.outcome === 'window' && Math.abs(Number(wa.json.until) - (T_P + 3600e3)) < 60e3 && T_P - T_W < 58000 && wr.code === 0, { wa: wa && wa.json, ms: T_P - T_W, wr: wr.out.slice(0, 200) });
   const hm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
   const TAIL = `已允许这个对话 1 小时 · 至 ${hm(Number(wa && wa.json && wa.json.until))} · 可在保险库窗口收回`, TAIL_RE = clockRe`已允许这个对话 1 小时 · 至 ${Number(wa && wa.json && wa.json.until)} · 可在保险库窗口收回`;
   // THE RECORD — the same words in the chat card, the tray and the For-you window
@@ -464,7 +464,7 @@ try {
   await A.shot('vsr-20-hour-record-foryou-window.png');
   await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
   const near = (x) => (typeof x === 'string' ? x.slice(Math.max(0, x.indexOf('已允许') - 30), x.indexOf('已允许') + 90) : x);
-  check(`the record says «${TAIL}» — in the chat card, the tray and the For-you window alike`, [chatRec, trayRec, winRec].every((x) => typeof x === 'string' && TAIL_RE.test(x)), { chatRec: near(chatRec), trayRec: near(trayRec), winRec: near(winRec) });
+  check(`the record says «${TAIL}» — in the chat card, the tray and the For-you window alike`, verdictOf([chatRec, trayRec, winRec].every((x) => typeof x === 'string' && TAIL_RE.test(x))), { chatRec: near(chatRec), trayRec: near(trayRec), winRec: near(winRec) });
   // THE NEXT USE — another command: no card, nothing filed, a notice on the SECOND client
   const ch2 = await chatNow(), n2 = await countItems();
   await B.evalJs(`window.__toasts.length = 0; true`);
@@ -474,7 +474,7 @@ try {
   await B.shot('vsr-21-hour-use-toast-second-client.png');
   await sleep(800);
   const ch3 = await chatNow(), n3 = await countItems();
-  check(`the NEXT use (\`sh -c …\`, another command) runs with NO card, files NOTHING (For you +0, the chat +0 rows / +0 cards — ${ch2.msgs} messages / ${ch2.cards} cards before and after) — and the SECOND client pops «Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 60 分钟）— ${SHN} → 去向未知»`, u1.code === 0 && /the key is set/.test(u1.out) && !!toastB && new RegExp(`^Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 (59|60) 分钟）— ${reEsc(SHN)} → 去向未知`).test(toastB.text) && n3 === n2 && n2 === nW + 0 && ch2.cards > 0 && ch3.msgs === ch2.msgs && ch3.cards === ch2.cards, { u1: u1.out.slice(0, 160), toastB, n: [nW, n2, n3], ch2, ch3 });
+  check(`the NEXT use (\`sh -c …\`, another command) runs with NO card, files NOTHING (For you +0, the chat +0 rows / +0 cards — ${ch2.msgs} messages / ${ch2.cards} cards before and after) — and the SECOND client pops «Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 60 分钟）— ${SHN} → 去向未知»`, u1.code === 0 && gateOf(/the key is set/.test(u1.out)) && !!toastB && gateOf(new RegExp(`^Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 (59|60) 分钟）— ${reEsc(SHN)} → 去向未知`).test(toastB.text)) && n3 === n2 && n2 === nW + 0 && ch2.cards > 0 && ch3.msgs === ch2.msgs && ch3.cards === ch2.cards, { u1: u1.out.slice(0, 160), toastB, n: [nW, n2, n3], ch2, ch3 });
   console.log(`    measured (a window use): chat ${JSON.stringify(ch2)} → ${JSON.stringify(ch3)}, For-you items ${n2} → ${n3}`);
   // r8 (MAJOR 1): THIS hub is a LOCAL instance — the APPROVED command itself, again inside the hour, is a window use: no card,
   // nothing filed, its notice (r7 let it through by `seen`, silently, until the vault locked)
@@ -484,27 +484,27 @@ try {
   const toastB2 = await B.until(`(window.__toasts || []).find((t) => /在你的 1 小时授权下用了/.test(t.text)) || null`, { timeout: 10000 });
   const BASHN = (() => { for (const d of String(process.env.PATH || '').split(':')) { try { return path.basename(fs.realpathSync(path.join(d, 'bash'))); } catch { } } return 'bash'; })();
   const n5 = await countItems();
-  check(`(r8, MAJOR 1 — this hub is a LOCAL instance) the APPROVED command itself, again inside the hour: NO card, nothing filed, and its notice «Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 N 分钟）— ${BASHN} → 去向未知»`, u2.code === 0 && !!toastB2 && new RegExp(`^Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 (5[0-9]|60) 分钟）— ${reEsc(BASHN)} → 去向未知`).test(toastB2.text) && n5 === n4, { u2: u2.out.slice(0, 160), toastB2, n: [n4, n5] });
+  check(`(r8, MAJOR 1 — this hub is a LOCAL instance) the APPROVED command itself, again inside the hour: NO card, nothing filed, and its notice «Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 N 分钟）— ${BASHN} → 去向未知»`, u2.code === 0 && !!toastB2 && gateOf(new RegExp(`^Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 (5[0-9]|60) 分钟）— ${reEsc(BASHN)} → 去向未知`).test(toastB2.text)) && n5 === n4, { u2: u2.out.slice(0, 160), toastB2, n: [n4, n5] });
   const uses2 = await cli('vibespace-vault', ['uses'], TOKEN);
-  check('`vibespace-vault uses`: the window said («any run (the 1-hour approval, until …)»), the use line «by grant · standing vg-…» saying «under the 1-hour approval · N min left»', /any run \(the 1-hour approval, until /.test(uses2.out) && /by grant · standing vg-[0-9a-f]{8}.*for: under the 1-hour approval · \d+ min left/.test(uses2.out), uses2.out.slice(0, 1200));
+  check('`vibespace-vault uses`: the window said («any run (the 1-hour approval, until …)»), the use line «by grant · standing vg-…» saying «under the 1-hour approval · N min left»', gateOf(/any run \(the 1-hour approval, until /.test(uses2.out)) && verdictOf(/by grant · standing vg-[0-9a-f]{8}.*for: under the 1-hour approval · \d+ min left/.test(uses2.out)), uses2.out.slice(0, 1200));
   // THE CHIP — the window with its end, the warning accent
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const wchip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); const s = c && c.querySelector('.vw-use-scope-window'); if (!s) return null; c.scrollIntoView({ block: 'center' }); const probe = document.createElement('span'); probe.style.color = 'var(--warn-text)'; document.body.append(probe); const warn = getComputedStyle(probe).color; probe.remove(); const wx = c.querySelector('.vw-use-window-x'); return { chip: c.textContent, scope: s.textContent, color: getComputedStyle(s).color, warn, title: s.title, wx: wx ? wx.title : null, principal: c.dataset.principal || '' }; })()`, { timeout: 15000 });
-  check('the Vault row\'s chip says the window beside its other scopes — «任何目的地 · 至 HH:MM · 60 分钟», in the warning accent; r8: its OWN ✕ beside it, the member\'s source «卡片上的「允许 1 小时」 · HH:MM»', !!wchip && /^任何目的地 · 至 \d\d:\d\d · (59|60) 分钟$/.test(wchip.scope) && wchip.color === wchip.warn && /^Transcriber · /.test(wchip.chip) && /命令 /.test(wchip.chip) && /卡片上的「允许 1 小时」 · \d\d:\d\d/.test(wchip.chip) && !/卡片上的总是/.test(wchip.chip) && /只收回 1 小时授权/.test(String(wchip.wx)), wchip);
+  check('the Vault row\'s chip says the window beside its other scopes — «任何目的地 · 至 HH:MM · 60 分钟», in the warning accent; r8: its OWN ✕ beside it, the member\'s source «卡片上的「允许 1 小时」 · HH:MM»', !!wchip && gateOf(/^任何目的地 · 至 \d\d:\d\d · (59|60) 分钟$/.test(wchip.scope)) && wchip.color === wchip.warn && gateOf(/^Transcriber · /.test(wchip.chip)) && gateOf(/命令 /.test(wchip.chip)) && gateOf(/卡片上的「允许 1 小时」 · \d\d:\d\d/.test(wchip.chip)) && !/卡片上的总是/.test(wchip.chip) && verdictOf(/只收回 1 小时授权/.test(String(wchip.wx))), wchip);
   await sleep(300);
   await A.shot('vsr-22-hour-chip-desktop.png');
   // r8 (MINOR 4): the WINDOW's own ✕ — only the window goes: the chip keeps its other scopes, the record says it, the next run asks
   await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); const x = c && c.querySelector('.vw-use-window-x'); if (x) x.click(); return !!x; })()`);
   const wgone = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); return c && !c.querySelector('.vw-use-scope-window') && !/任何目的地/.test(c.textContent) ? c.textContent : null; })()`, { timeout: 10000 });
   const T_X = Date.now();
-  check('(r8, MINOR 4) the window\'s OWN ✕ takes back ONLY the window — the chip stays with its other scopes («命令 …»)', !!wgone && /^Transcriber · /.test(wgone) && /命令 /.test(wgone), wgone);
+  check('(r8, MINOR 4) the window\'s OWN ✕ takes back ONLY the window — the chip stays with its other scopes («命令 …»)', !!wgone && gateOf(/^Transcriber · /.test(wgone)) && verdictOf(/命令 /.test(wgone)), wgone);
   await sleep(300);
   await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);   // r8: no transient toast over the shot (the acceptance's vsr-17 note)
   await A.shot('vsr-23-hour-taken-back-chip-desktop.png');
   await openTray();
   const trayX = await A.until(`(() => { const it = ${ITEM('/v1\\/asr/')}; return it && /撤销/.test(it.textContent) ? it.textContent : null; })()`, { timeout: 8000 });
   await closeTray();
-  check('the press\'s record is told — «已允许这个对话 1 小时 · 已于 HH:MM 撤销» (the tray)', typeof trayX === 'string' && new RegExp(`已允许这个对话 1 小时 · 已于 (?:${FA.clockWordsPattern(T_X)}|${FA.clockWordsPattern(T_X - 60e3)}) 撤销`).test(trayX), typeof trayX === 'string' ? trayX.slice(Math.max(0, trayX.indexOf('已允许') - 20), trayX.indexOf('已允许') + 60) : trayX);
+  check('the press\'s record is told — «已允许这个对话 1 小时 · 已于 HH:MM 撤销» (the tray)', typeof trayX === 'string' && verdictOf(new RegExp(`已允许这个对话 1 小时 · 已于 (?:${FA.clockWordsPattern(T_X)}|${FA.clockWordsPattern(T_X - 60e3)}) 撤销`).test(trayX)), typeof trayX === 'string' ? trayX.slice(Math.max(0, trayX.indexOf('已允许') - 20), trayX.indexOf('已允许') + 60) : trayX);
   const afterP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'sh', '-c', 'printf "%s\\n" "${T:+after the window}"'], TOKEN, { timeout: 70000 });
   let ac = null;
   for (let i = 0; i < 60 && !ac; i++) { ac = (await openOf('vault-run-ask')).find((x) => /after the window/.test(String(x.detail))) || null; if (!ac) await sleep(200); }
@@ -542,7 +542,7 @@ try {
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const allX = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => !x.classList.contains('vw-use-except') && /^所有 agent/.test(x.textContent)); const x = c && c.querySelector('.vw-use-x'); if (!x) return null; x.click(); return true; })()`, { timeout: 15000 });
   const exOnly = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; if (!r) return null; const live = [...r.querySelectorAll('.vw-use-chip')].filter((x) => !x.classList.contains('vw-use-except')); const ex = [...r.querySelectorAll('.vw-use-except')].map((x) => x.textContent); const to = r.querySelector('.vw-use-to'); if (live.length || !ex.length) return null; const c = r.querySelector('.vw-use-chips'); if (c) c.scrollIntoView({ block: 'center' }); return { to: to ? to.textContent : null, ex }; })()`, { timeout: 10000 });
-  check('(r9, MAJOR A) the owner ✕\'s the «All agents» member: the row KEEPS its 除了 — the Vault row says «无需卡片即可使用：没有人» and «除了 Transcriber»', !!allX && !!exOnly && exOnly.to === '无需卡片即可使用：没有人' && exOnly.ex.some((x) => /^除了 Transcriber/.test(x)), { allX, exOnly });
+  check('(r9, MAJOR A) the owner ✕\'s the «All agents» member: the row KEEPS its 除了 — the Vault row says «无需卡片即可使用：没有人» and «除了 Transcriber»', !!allX && !!exOnly && exOnly.to === '无需卡片即可使用：没有人' && verdictOf(exOnly.ex.some((x) => /^除了 Transcriber/.test(x))), { allX, exOnly });
   await sleep(300);
   await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
   await A.shot('vsr-25-except-only-row-desktop.png');
@@ -581,7 +581,7 @@ try {
   const pRows = await postsOf('/api/vault/use-grants'), pPol = await postsOf('/api/vault/use-policy');
   await sleep(600);
   const pRow = await A.until(`(() => { const f = ${rowFacts}; return f && f.ex.length ? f : null; })()`, { timeout: 6000 });
-  check('(r10, MAJOR — the probe\'s P3) the except-only row: the owner opens «谁可以用…» ONLY to set the judge policy and saves — the Save posts the policy ONLY, no row (f23ddb5ad posted {to: [], except: []} first, behind the policy\'s 验证是你) — and the row keeps «除了 Transcriber»', pOpen && pSave === 'closed' && Array.isArray(pRows) && pRows.length === 0 && Array.isArray(pPol) && pPol.length >= 1 && pPol.every((b) => b && b.text === 'only read-only status calls to x.example') && !!pRow && pRow.ex.some((x) => /^除了 Transcriber/.test(x)), { pOpen, pIn, pSave, pRows, pPol, pRow });
+  check('(r10, MAJOR — the probe\'s P3) the except-only row: the owner opens «谁可以用…» ONLY to set the judge policy and saves — the Save posts the policy ONLY, no row (f23ddb5ad posted {to: [], except: []} first, behind the policy\'s 验证是你) — and the row keeps «除了 Transcriber»', gateOf(pOpen) && pSave === 'closed' && gateOf(Array.isArray(pRows)) && pRows.length === 0 && gateOf(Array.isArray(pPol)) && pPol.length >= 1 && gateOf(pPol.every((b) => b && b.text === 'only read-only status calls to x.example')) && !!pRow && verdictOf(pRow.ex.some((x) => /^除了 Transcriber/.test(x))), { pOpen, pIn, pSave, pRows, pPol, pRow });
   await A.api('POST', '/api/vault/use-policy', { id: EID, text: '' });   // the policy cleared (a click)
   const pageD = await reveal();
   const addD = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [{ kind: 'conversation', key: 'cid-dee-offline', name: 'Dee', scopes: [{ host: 'd.example', until: Date.now() + 30 * 86400e3 }] }], except: [{ kind: 'conversation', key: PKEY }], page: pageD }, { 'X-Vault-Page': pageD || '' });
@@ -593,7 +593,7 @@ try {
   const dSave = await saveUse();
   const [dBody] = await postsOf('/api/vault/use-grants');
   const dRow = await rowRedrawn(dPre, 'the Vault window row redrawn after the 90-day Save (Dee)');   // r1260 (1): the next open (rOpen) reads the row with its new stamp
-  check('(r10, MAJOR — the probe\'s P2) the row {Dee (not running now) · d.example; 除了 Transcriber}: the owner changes only the end (→ 90 天) — no «除了» row is offered, the Save sends except [Transcriber] as stored (f23ddb5ad sent except [] — the 除了 gone) and the row keeps «除了 Transcriber»', !!(addD && addD.json && addD.json.ok) && dOpen && !!dIn && dIn.exceptOffered === false && dSave === 'closed' && !!dBody && (dBody.except || []).length === 1 && dBody.except[0].key === PKEY && !dBody.removeExcept && !!dRow && dRow.chips.some((c) => /Dee/.test(c)) && dRow.ex.some((x) => /^除了 Transcriber/.test(x)), { addD: addD && addD.json, dIn, dSave, dBody, dRow });
+  check('(r10, MAJOR — the probe\'s P2) the row {Dee (not running now) · d.example; 除了 Transcriber}: the owner changes only the end (→ 90 天) — no «除了» row is offered, the Save sends except [Transcriber] as stored (f23ddb5ad sent except [] — the 除了 gone) and the row keeps «除了 Transcriber»', !!(addD && addD.json && addD.json.ok) && gateOf(dOpen) && !!dIn && dIn.exceptOffered === false && dSave === 'closed' && !!dBody && (dBody.except || []).length === 1 && dBody.except[0].key === PKEY && !dBody.removeExcept && !!dRow && gateOf(dRow.chips.some((c) => /Dee/.test(c))) && verdictOf(dRow.ex.some((x) => /^除了 Transcriber/.test(x))), { addD: addD && addD.json, dIn, dSave, dBody, dRow });
   const rOpen = await openUse();
   await resetPosts();
   await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const box = d && d.querySelector('.pp-input'); if (box) { box.focus(); box.dispatchEvent(new Event('focus')); } return !!box; })()`);
@@ -608,7 +608,7 @@ try {
   const [rBody] = await postsOf('/api/vault/use-grants');
   await sleep(600);
   const rRow = await A.evalJs(rowFacts);
-  check('(r10, MAJOR) the owner picks Transcriber ITSELF (it cannot be both given and left out): the preview says «Transcriber 将不再被排除», the Save names it (removeExcept) behind 验证是你, and the row then has no 除了', rOpen && !!rPick && !!rPrev && rPrev.gone === 'Transcriber 将不再被排除' && rSave === 'closed' && !!rBody && JSON.stringify(rBody.removeExcept) === JSON.stringify([`conversation:${PKEY}`]) && !!rRow && rRow.ex.length === 0 && rRow.chips.some((c) => /Transcriber/.test(c)), { rPick, rPrev, rSave, rBody: rBody && { except: rBody.except, removeExcept: rBody.removeExcept }, rRow });
+  check('(r10, MAJOR) the owner picks Transcriber ITSELF (it cannot be both given and left out): the preview says «Transcriber 将不再被排除», the Save names it (removeExcept) behind 验证是你, and the row then has no 除了', gateOf(rOpen) && !!rPick && !!rPrev && rPrev.gone === 'Transcriber 将不再被排除' && rSave === 'closed' && !!rBody && JSON.stringify(rBody.removeExcept) === JSON.stringify([`conversation:${PKEY}`]) && !!rRow && rRow.ex.length === 0 && verdictOf(rRow.chips.some((c) => /Transcriber/.test(c))), { rPick, rPrev, rSave, rBody: rBody && { except: rBody.except, removeExcept: rBody.removeExcept }, rRow });
   const pageB = await reveal();
   const back = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [], except: [], removeExcept: [`conversation:${PKEY}`], page: pageB }, { 'X-Vault-Page': pageB || '' });   // the row as it was — an exception taken away is a WIDENING (验证是你), named (r10)
   check('(r8, 除了) a conversation the owner excepted from the entry\'s «All agents» grant: its card offers 允许一次 · 拒绝 only and says «不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“TTS API key”之外了。»', !!(ex && ex.status === 200 && ex.json.ok && PKEY && xc && xc.action.window === undefined && xr && xr.buttons.join('|') === '允许一次|拒绝' && xr.off.includes('不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“TTS API key”之外了。') && back.json && back.json.ok), { ex: ex && ex.json, action: xc && xc.action, xr, back: back && back.json });
@@ -626,7 +626,7 @@ try {
   const h2b = await cli('vibespace-vault', H2('v2'), TOKEN, { timeout: 70000 });
   const toastH = await B.until(`(window.__toasts || []).find((t) => /在你的 1 小时授权下用了/.test(t.text) && /h2\\.example/.test(t.text)) || null`, { timeout: 10000 });
   const nH2 = await countItems();
-  check('(r9, MAJOR B) the agent\'s OWN value sent by curl to h2.example (minted for api.tts.example): «允许 1 小时» on its card; the next h2.example run inside the hour is a WINDOW use — no card, nothing filed, its notice «Transcriber 在你的 1 小时授权下用了… → h2.example»', !!hc && hc.action.window === true && !!ha && ha.json && ha.json.ok && ha.json.outcome === 'window' && !!toastH && /^Transcriber 在你的 1 小时授权下用了/.test(toastH.text) && nH2 === nH, { action: hc && hc.action, ha: ha && ha.json, toastH, n: [nH, nH2], out: h2b.out.slice(0, 160) });
+  check('(r9, MAJOR B) the agent\'s OWN value sent by curl to h2.example (minted for api.tts.example): «允许 1 小时» on its card; the next h2.example run inside the hour is a WINDOW use — no card, nothing filed, its notice «Transcriber 在你的 1 小时授权下用了… → h2.example»', !!hc && hc.action.window === true && !!ha && gateOf(ha.json) && gateOf(ha.json.ok) && ha.json.outcome === 'window' && !!toastH && gateOf(/^Transcriber 在你的 1 小时授权下用了/.test(toastH.text)) && nH2 === nH, { action: hc && hc.action, ha: ha && ha.json, toastH, n: [nH, nH2], out: h2b.out.slice(0, 160) });
   // r9 (MINOR C): a member whose only scope is a 1-hour window that ENDED unswept — the dialog's Save is never refused for it.
   // The hub's clock cannot move here: the PAGE's clock is moved past the window's end (what a page sees of a window the hub
   // had not swept — a restart or a lock inside the hour); the hub, whose window is still live, keeps it
@@ -649,8 +649,8 @@ try {
   const cPosts = await postsOf('/api/vault/use-grants');
   await A.evalJs(`(() => { if (window.__realNow) Date.now = window.__realNow; const d = document.getElementById('vault-use-grant'); const b = d && d.querySelector('.btn-cancel'); if (b) b.click(); return true; })()`);
   const cT = ((cPosts && cPosts[0] && cPosts[0].to) || []).find((m) => m && m.key === PKEY);
-  check('(r11, MINOR 1) … and that untouched Save POSTS the row — Transcriber sent with no scope, so the hub prunes an ended window as the preview says (7e99ef689 posted nothing: the ended window stayed and was promised again; here the hub\'s clock cannot move — it holds the window live and keeps it)', !!cres && cres.closed === true && Array.isArray(cPosts) && cPosts.length === 1 && !!cT && Array.isArray(cT.scopes) && cT.scopes.length === 0, { posts: cPosts });
-  check('(r9, MINOR C) Transcriber\'s only scope is a 1-hour window the page sees ENDED (the hub had not swept it): the dialog, hosts left empty, says «Transcriber · 1 小时授权已结束 — 保存时移除» and its Save LANDS — never «请写明可用于哪些主机…»', !!ca && ca.json && ca.json.ok && !!cOpen && !!cdlg && cdlg.hosts === '' && /Transcriber · 1 小时授权已结束 — 保存时移除/.test(String(cdlg.preview)) && !!cres && cres.closed === true, { ca: ca && ca.json, cdlg, cres });
+  check('(r11, MINOR 1) … and that untouched Save POSTS the row — Transcriber sent with no scope, so the hub prunes an ended window as the preview says (7e99ef689 posted nothing: the ended window stayed and was promised again; here the hub\'s clock cannot move — it holds the window live and keeps it)', !!cres && cres.closed === true && gateOf(Array.isArray(cPosts)) && cPosts.length === 1 && !!cT && gateOf(Array.isArray(cT.scopes)) && cT.scopes.length === 0, { posts: cPosts });
+  check('(r9, MINOR C) Transcriber\'s only scope is a 1-hour window the page sees ENDED (the hub had not swept it): the dialog, hosts left empty, says «Transcriber · 1 小时授权已结束 — 保存时移除» and its Save LANDS — never «请写明可用于哪些主机…»', !!ca && gateOf(ca.json) && gateOf(ca.json.ok) && !!cOpen && !!cdlg && cdlg.hosts === '' && gateOf(/Transcriber · 1 小时授权已结束 — 保存时移除/.test(String(cdlg.preview))) && !!cres && cres.closed === true, { ca: ca && ca.json, cdlg, cres });
   // r10 (MINOR — the probe's P1): the hub drops a window-only member while a dialog drawn before is open (the hour-end sweep —
   // here the window's ✕ from another page: the hub no longer holds Transcriber); that dialog's Save (所有 agent → 90 天) LANDS
   const pageS = await reveal();
@@ -667,7 +667,7 @@ try {
   const sPre = await settled(`(() => { const f = ${rowFacts}; return f && !f.chips.some((c) => /Transcriber/.test(c)) ? f : null; })()`, 8000, 'the Vault window row redrawn after the window ✕');   // the window's own redraw of the ✕ first: the Save's redraw is the one waited next
   const sSave = await saveUse();
   const sRow = await rowRedrawn(sPre, 'the Vault window row redrawn after the 所有 agent Save');
-  check('(r10, MINOR — the probe\'s P1) a dialog drawn while Transcriber held its 1-hour window; the hub then dropped that member (the window\'s ✕ elsewhere — as the hour-end sweep does): the dialog — once its own re-read landed — Saves (所有 agent → 90 天) and it LANDS — never «请写明 Transcriber 可用于哪些主机…»; the row: 所有 agent, no Transcriber', !!(addAll && addAll.json && addAll.json.ok) && sOpen && !!sIn && sIn.chips.some((c) => /^所有 agent/.test(c)) && sIn.chips.some((c) => /Transcriber/.test(c)) && !!(sX && sX.json && sX.json.ok) && !!sHeard && sSave === 'closed' && !!sRow && sRow.chips.some((c) => /^所有 agent/.test(c)) && !sRow.chips.some((c) => /Transcriber/.test(c)), { addAll: addAll && addAll.json, sIn, sX: sX && sX.json, sHeard, sSave, sRow });
+  check('(r10, MINOR — the probe\'s P1) a dialog drawn while Transcriber held its 1-hour window; the hub then dropped that member (the window\'s ✕ elsewhere — as the hour-end sweep does): the dialog — once its own re-read landed — Saves (所有 agent → 90 天) and it LANDS — never «请写明 Transcriber 可用于哪些主机…»; the row: 所有 agent, no Transcriber', !!(addAll && addAll.json && addAll.json.ok) && gateOf(sOpen) && !!sIn && gateOf(sIn.chips.some((c) => /^所有 agent/.test(c))) && gateOf(sIn.chips.some((c) => /Transcriber/.test(c))) && !!(sX && sX.json && sX.json.ok) && !!sHeard && sSave === 'closed' && !!sRow && gateOf(sRow.chips.some((c) => /^所有 agent/.test(c))) && !sRow.chips.some((c) => /Transcriber/.test(c)), { addAll: addAll && addAll.json, sIn, sX: sX && sX.json, sHeard, sSave, sRow });
   await A.api('POST', '/api/vault/use-grants/revoke', { id: EID, principal: 'everyone' });
   // r11 (主开发's acceptance of r10, MAJOR): a row with a TASK GROUP member (Team, live in the roster) and 除了 Transcriber — the
   // member is known by its principal: a policy-only Save posts NO row, a members-edit Save keeps Team as `group:<its id>`
@@ -691,7 +691,7 @@ try {
   const tRows = await postsOf('/api/vault/use-grants'), tPol = await postsOf('/api/vault/use-policy');
   await sleep(600);
   const tIn1 = await A.until(teamChip, { timeout: 6000 });
-  check('(r11, MAJOR) a row {Team (a Task Group, live in the roster) · x.example; 除了 Transcriber}: the owner opens «谁可以用…» only to set the judge policy — the Save posts the POLICY only, NO row (7e99ef689 posted the row behind 验证是你), and the Vault row still names Team by its own id (`group:<id>`)', !!(seedT && seedT.json && seedT.json.ok) && tgLive && !!tIn0 && tIn0.principal === `group:${TG}` && tOpen && !!tPick && tPick.chips.some((c) => /Team/.test(c)) && tSave === 'closed' && Array.isArray(tRows) && tRows.length === 0 && Array.isArray(tPol) && tPol.length >= 1 && !!tIn1 && tIn1.principal === `group:${TG}`, { TG, tgLive, seed: seedT && seedT.json && (seedT.json.ok || seedT.json.code), tIn0, tPick, tSave, tRows, tPol: tPol && tPol.length, tIn1 });
+  check('(r11, MAJOR) a row {Team (a Task Group, live in the roster) · x.example; 除了 Transcriber}: the owner opens «谁可以用…» only to set the judge policy — the Save posts the POLICY only, NO row (7e99ef689 posted the row behind 验证是你), and the Vault row still names Team by its own id (`group:<id>`)', !!(seedT && seedT.json && seedT.json.ok) && gateOf(tgLive) && !!tIn0 && tIn0.principal === `group:${TG}` && gateOf(tOpen) && !!tPick && gateOf(tPick.chips.some((c) => /Team/.test(c))) && tSave === 'closed' && gateOf(Array.isArray(tRows)) && tRows.length === 0 && gateOf(Array.isArray(tPol)) && tPol.length >= 1 && !!tIn1 && tIn1.principal === `group:${TG}`, { TG, tgLive, seed: seedT && seedT.json && (seedT.json.ok || seedT.json.code), tIn0, tPick, tSave, tRows, tPol: tPol && tPol.length, tIn1 });
   await A.api('POST', '/api/vault/use-policy', { id: EID, text: '' });
   const eOpen = await openUse();
   await resetPosts();
@@ -702,7 +702,7 @@ try {
   const eRow = await rowRedrawn(ePre, 'the Vault window row redrawn after Team\'s 90-day Save');   // r1260 (1): the next open (hOpen) reads the row with its new stamp
   const tIn2 = await A.until(teamChip, { timeout: 6000 });
   const eTo = ((eBody && eBody.to) || []).map((m) => `${m.kind}:${m.id || m.key || ''}`);
-  check('(r11, MAJOR) … then a members-edit Save (Team\'s end → 90 天): the Save sends Team as `group:<its id>` — never the grant id — and the Vault row keeps it so, 除了 Transcriber kept', eOpen && eSave === 'closed' && !!eRow && eTo.length === 1 && eTo[0] === `group:${TG}` && !!tIn2 && tIn2.principal === `group:${TG}` && tIn2.ex.some((x) => /^除了 Transcriber/.test(x)), { eSave, eRow, eTo, except: eBody && eBody.except, tIn2 });
+  check('(r11, MAJOR) … then a members-edit Save (Team\'s end → 90 天): the Save sends Team as `group:<its id>` — never the grant id — and the Vault row keeps it so, 除了 Transcriber kept', gateOf(eOpen) && eSave === 'closed' && !!eRow && eTo.length === 1 && eTo[0] === `group:${TG}` && !!tIn2 && tIn2.principal === `group:${TG}` && verdictOf(tIn2.ex.some((x) => /^除了 Transcriber/.test(x))), { eSave, eRow, eTo, except: eBody && eBody.except, tIn2 });
   // MINOR 3: ✕ Team (a narrowing — no prompt) and a policy typed; the page's 验证是你 window gone (its clock past it), the
   // policy's prompt CANCELLED — the dialog stays open and says the members were saved; then Team picked again ⇒ posted
   await A.evalJs(`(() => { if (!window.__realNow) window.__realNow = Date.now.bind(Date); Date.now = () => window.__realNow() + 12 * 60e3; return true; })()`);
@@ -731,7 +731,7 @@ try {
   await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
   await A.shot('vsr-31-members-saved-policy-not-desktop.png');
   const hRow1 = await A.evalJs(rowFacts);
-  check('(r11, MINOR 3) Team ✕\'d and a policy typed, Save: the row lands (a narrowing), the policy\'s 验证是你 is CANCELLED — the dialog stays open and says «成员已保存；策略没有保存» (7e99ef689: no words), the Vault row has no Team', hForgot && hOpen && !!hX && hPw === 'pw' && !!hSaid && hSaid.closed === false && hSaid.words === '成员已保存；策略没有保存' && Array.isArray(hRows1) && hRows1.length === 1 && !!hRow1 && !hRow1.chips.some((c) => /^Team · /.test(c)), { hForgot, hX, hPw, hSaid, posts: hRows1 && hRows1.length, polPosts: hPol1 && hPol1.length, hRow1 });
+  check('(r11, MINOR 3) Team ✕\'d and a policy typed, Save: the row lands (a narrowing), the policy\'s 验证是你 is CANCELLED — the dialog stays open and says «成员已保存；策略没有保存» (7e99ef689: no words), the Vault row has no Team', gateOf(hForgot) && gateOf(hOpen) && !!hX && hPw === 'pw' && !!hSaid && hSaid.closed === false && hSaid.words === '成员已保存；策略没有保存' && gateOf(Array.isArray(hRows1)) && hRows1.length === 1 && !!hRow1 && !hRow1.chips.some((c) => /^Team · /.test(c)), { hForgot, hX, hPw, hSaid, posts: hRows1 && hRows1.length, polPosts: hPol1 && hPol1.length, hRow1 });
   await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const p = d && d.querySelector('.vw-use-policy-in'); if (p) { p.value = ''; p.dispatchEvent(new Event('input', { bubbles: true })); } const box = d && d.querySelector('.pp-input'); if (box) { box.focus(); box.dispatchEvent(new Event('focus')); } return true; })()`);
   await sleep(300);
   const hPick = await A.until(`(() => { const row = [...document.querySelectorAll('.pp-row')].find((x) => x.isConnected && !x.closest('.pp-except') && /Team/.test(x.textContent)); if (!row) return null; row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); row.click(); return true; })()`, { timeout: 8000 });
@@ -741,7 +741,7 @@ try {
   await sleep(600);
   const tIn3 = await A.until(teamChip, { timeout: 6000 });
   await A.evalJs(`(() => { if (window.__realNow) Date.now = window.__realNow; return true; })()`);
-  check('(r11, MINOR 3) … then Team picked again in the same dialog, Save: compared against the row as it LANDED, the Save posts Team back (验证是你) and the Vault row has it — as `group:<id>` (7e99ef689: compared against the row as it opened — nothing posted, the dialog closed, Team gone)', !!hPick && hSave === 'closed' && Array.isArray(hRows2) && hRows2.length >= 2 && !!tIn3 && tIn3.principal === `group:${TG}`, { hPick, hSave, posts: hRows2 && hRows2.map((b) => b && (b.to || []).length), tIn3 });
+  check('(r11, MINOR 3) … then Team picked again in the same dialog, Save: compared against the row as it LANDED, the Save posts Team back (验证是你) and the Vault row has it — as `group:<id>` (7e99ef689: compared against the row as it opened — nothing posted, the dialog closed, Team gone)', !!hPick && hSave === 'closed' && gateOf(Array.isArray(hRows2)) && hRows2.length >= 2 && !!tIn3 && tIn3.principal === `group:${TG}`, { hPick, hSave, posts: hRows2 && hRows2.map((b) => b && (b.to || []).length), tIn3 });
   // the row as it was for the legs below: no Team, no 除了 (a widening, named), the Task Group gone
   await A.api('POST', '/api/vault/use-policy', { id: EID, text: '' });
   if (TG) await A.api('POST', '/api/vault/use-grants/revoke', { id: EID, principal: `group:${TG}` });
@@ -777,7 +777,7 @@ try {
     hv.lock('test');
   }
   startServer();
-  check('the hub boots again', await ready());
+  check('the hub boots again', verdictOf(await ready()));
   await A.evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
   await A.cdp('Page.navigate', { url: URL });
   await A.until(`!!(window.app && app.replayOpenSpec)`, { timeout: 30000 });
@@ -785,7 +785,7 @@ try {
   const ul = await A.api('POST', '/api/vault/unlock', { password: SECOND });
   const page4 = await reveal();
   const on = await A.api('POST', '/api/vault/runnable', { id: globalThis.__LID, on: true }, { 'X-Vault-Page': page4 || '' });
-  check('unlocked; the entry switched on (its chips are live, not paused)', ul.status === 200 && on.status === 200 && on.json.ok, { ul: ul.json, on: on.json });
+  check('unlocked; the entry switched on (its chips are live, not paused)', ul.status === 200 && on.status === 200 && verdictOf(on.json.ok), { ul: ul.json, on: on.json });
   const LEG_ROW = LIST_ROW('Cloud deploy key');
   const legacyRow = async () => { await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`); return A.until(`(() => { const r = ${LEG_ROW}; const cs = r ? [...r.querySelectorAll('.vw-use-chip')] : []; if (cs.length < 3) return null; r.scrollIntoView({ block: 'center' }); const vw = document.documentElement.clientWidth; return cs.map((c) => ({ text: c.textContent, legacy: c.classList.contains('vw-use-legacy'), title: c.title, x: !!c.querySelector('.vw-use-x'), scopes: [...c.querySelectorAll('.vw-use-scope')].map((s) => s.textContent), right: c.getBoundingClientRect().right, vw })); })()`, { timeout: 15000 }); };
   const chips = await legacyRow();
@@ -794,7 +794,7 @@ try {
   const mix = chips && chips.find((c) => /^Mixer/.test(c.text));
   check('r4: EACH scope says its own end on the chip — «a.example · 30 天», «b.example · 无限期»; the legacy wildcard «…（旧版通配：任何工具） · 20 天»', !!(mix && mix.scopes.length === 2 && /^a\.example · (29|30) 天$/.test(mix.scopes[0]) && mix.scopes[1] === 'b.example · 无限期' && old && old.scopes.length === 1 && /（旧版通配：任何工具） · (19|20) 天$/.test(old.scopes[0])), { mix, old });
   const notes = ((await todo()).open || []).filter((i) => /An older «Always» lets any program reach a wildcard host/.test(i.text));
-  check('ONE For-you notice tells the owner — it names *.legacy.example and the entry', notes.length === 1 && /\*\.legacy\.example \(Cloud deploy key\)/.test(notes[0].detail), notes.map((i) => i.detail));
+  check('ONE For-you notice tells the owner — it names *.legacy.example and the entry', notes.length === 1 && verdictOf(/\*\.legacy\.example \(Cloud deploy key\)/.test(notes[0].detail)), notes.map((i) => i.detail));
   await sleep(300);
   await A.shot('vsr-8-legacy-chip-desktop.png');
   await A.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
@@ -814,4 +814,4 @@ try {
   await stopServer();
 }
 console.log(`\n${failed ? '✗' : '✓'} test-vault-standing-request-chrome: ${passed} passed, ${failed} failed`);
-if (failed) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${passed})`); process.exit(0); }
+if (failed) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${passed})`); process.exit(0); };import { verdictOf, gateOf } from './lib/check.mjs';

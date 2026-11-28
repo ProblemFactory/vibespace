@@ -43,7 +43,7 @@ import { scratchDir } from './scratch.mjs';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -137,7 +137,7 @@ try {
   console.log('— ① a new conversation on the named account: the stub agy runs as the wrapper\'s executable');
   const extra = ['--stub-extra', 'two words'];
   const c = await create(STUB, { accountId: acct.id, model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', extraArgs: extra });
-  ok(c.sent.some((m) => m.type === 'created') && !c.sent.some((m) => m.type === 'error') && !!c.session, 'the create answers `created`', c.sent.map((m) => m.type + (m.message ? ': ' + m.message : '')));
+  ok(gateOf(c.sent.some((m) => m.type === 'created')) && !c.sent.some((m) => m.type === 'error') && !!c.session, 'the create answers `created`', c.sent.map((m) => m.type + (m.message ? ': ' + m.message : '')));
   const start = await until(() => records().find((r) => r.argv.includes('--input-format')), 15000);
   const ran = (/spawned (\S+)/.exec(c.wlog()) || [])[1] || '(the wrapper spawned nothing)';
   ok(!!start && ran === STUB, `the wrapper's executable is the stub agy itself (agy-wrapper.log: spawned ${ran})`, c.wlog().split('\n').slice(-6).join(' | '));
@@ -146,17 +146,17 @@ try {
   const e = (start && start.env) || {};
   ok(e.HOME === acct.dir && e.DBUS_SESSION_BUS_ADDRESS === 'disabled:', 'its env: HOME = the account\'s root, the session bus disabled (the isolated-home account reaches agy)', { HOME: e.HOME, bus: e.DBUS_SESSION_BUS_ADDRESS, root: acct.dir });
   ok(!!c.session && e.CLAUDE_WEBUI_SESSION_ID === c.id && e.VIBESPACE_SESSION_TOKEN === c.session.agentToken && e.EDITOR === path.join(BIN, 'editor-code') && e.AGY_WEBUI_BACKEND === 'antigravity'
-    && e.AGY_WEBUI_MODEL === 'gemini-4-argon-high' && e.VIBESPACE_SESSION_CWD === CWD && String(e.PATH || '').startsWith(BIN + ':'),
+    && e.AGY_WEBUI_MODEL === 'gemini-4-argon-high' && e.VIBESPACE_SESSION_CWD === CWD && verdictOf(String(e.PATH || '').startsWith(BIN + ':')),
     'its env carries the session\'s names: the id, the token, EDITOR, the cwd, the tools PATH, AGY_WEBUI_*', Object.fromEntries(['CLAUDE_WEBUI_SESSION_ID', 'EDITOR', 'AGY_WEBUI_BACKEND', 'AGY_WEBUI_MODEL', 'VIBESPACE_SESSION_CWD'].map((k) => [k, e[k]])));
   const ses = await until(() => c.journal().find((r) => r.type === 'acp' && r.kind === 'session'), 10000);
-  ok(!!ses && /^[0-9a-f-]{36}$/.test(ses.sessionId), 'the conversation STARTED: agy\'s init is the journal\'s `session` record (the id a resume uses)', ses || c.journal().filter((r) => r.kind === 'notice').map((r) => r.text));
+  ok(!!ses && verdictOf(/^[0-9a-f-]{36}$/.test(ses.sessionId)), 'the conversation STARTED: agy\'s init is the journal\'s `session` record (the id a resume uses)', ses || c.journal().filter((r) => r.kind === 'notice').map((r) => r.text));
 
   console.log('— ② no NAME=value word on any command line of the tree, and the session token on none');
   const tok = c.session ? c.session.agentToken : '__no_token__';
   const lines = start ? { master: start.master || [], wrapper: start.wrapper || [], agy: start.self || [] } : {};
-  ok(!!start && Object.values(lines).every((l) => l.length > 0), 'the stub read its wrapper\'s and its dtach master\'s command lines', Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, v.length])));
-  ok(!!start && Object.values(lines).every((l) => !l.some((w) => ASSIGN.test(w))), 'not one NAME=value word: the names ride the env', Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, v.filter((w) => ASSIGN.test(w)).map((w) => w.split('=')[0])])));
-  ok(!!start && Object.values(lines).every((l) => !l.join(' ').includes(tok)) && !c.wlog().includes(tok), 'the session token is on no command line (/proc/<pid>/cmdline is world-readable) and in no wrapper log line');
+  ok(!!start && verdictOf(Object.values(lines).every((l) => l.length > 0)), 'the stub read its wrapper\'s and its dtach master\'s command lines', Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, v.length])));
+  ok(!!start && verdictOf(Object.values(lines).every((l) => !l.some((w) => ASSIGN.test(w)))), 'not one NAME=value word: the names ride the env', Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, v.filter((w) => ASSIGN.test(w)).map((w) => w.split('=')[0])])));
+  ok(!!start && gateOf(Object.values(lines).every((l) => !l.join(' ').includes(tok))) && !c.wlog().includes(tok), 'the session token is on no command line (/proc/<pid>/cmdline is world-readable) and in no wrapper log line');
   const wl = lines.wrapper || [];
   ok(wl[1] === path.join(REPO, 'data/bin/agy-wrapper.js') && wl[4] === STUB && JSON.stringify(wl.slice(5)) === JSON.stringify(extra),
     'the wrapper\'s argv = <agy-wrapper.js> <buffer> <meta> <ONE absolute executable> + the extra args', wl.slice(1));
@@ -184,17 +184,17 @@ try {
     const cardOf = (f) => (f.type === 'msg' && ((f.op === 'create' && f.message?.taskInfo?.subId === S && f.message) || (f.op === 'edit' && f.fields?.taskInfo?.subId === S && f.fields))) || null;
     session.pty.write(JSON.stringify({ type: 'chat-input', text: 'please start a subagent', msgId: 'm-sub' }) + '\n');
     const running = await until(() => frames.map(cardOf).find((x) => x && x.taskInfo.status === 'running'), 15000);
-    ok(!!running && running.toolName === 'Agent' && running.taskInfo.agentRole === '示例评审专家' && running.taskInfo.spawnStep === 6 && /按 100 分制打分/.test(running.content[0].input.prompt) && running.status === 'pending',
+    ok(!!running && running.toolName === 'Agent' && running.taskInfo.agentRole === '示例评审专家' && running.taskInfo.spawnStep === 6 && gateOf(/按 100 分制打分/.test(running.content[0].input.prompt)) && running.status === 'pending',
       'the invoke_subagent row → THE CARD FRAMES (msg ops whose taskInfo names the sub): Agent, the role, the spawn step, the task, running', running || frames.map((f) => f.type + ':' + (f.op || '')).slice(-12));
     const live = await until(() => frames.filter((f) => f.type === 'subagent-message' && f.subId === S).length >= 6 && frames.filter((f) => f.type === 'subagent-message'), 8000);
-    ok(!!live && live.every((f) => f.sessionId === c.id && f.parentToolUseId === `${cid}:6` && f.message && f.message.type === 'acp'), 'the sub\'s steps go out as `subagent-message` {parent, the card\'s row, subId, an ACP record} — the card\'s live count', live && live.slice(0, 2));
+    ok(!!live && verdictOf(live.every((f) => f.sessionId === c.id && f.parentToolUseId === `${cid}:6` && f.message && f.message.type === 'acp')), 'the sub\'s steps go out as `subagent-message` {parent, the card\'s row, subId, an ACP record} — the card\'s live count', live && live.slice(0, 2));
     ok(!frames.some((f) => f.type === 'msg' && f.op === 'create' && /wc -l|样例\.md/.test(JSON.stringify(f.message?.content || '')) && !f.message?.taskInfo), '…and NEVER as the parent\'s own cards (no parent card for a sub\'s read / command)');
-    ok(/subagent tail on \(every 2000 ms\)/.test(c.wlog()), 'the wrapper\'s tail is ON while the sub works (every 2 s)', c.wlog().split('\n').filter((l) => /subagent/.test(l)));
+    ok(verdictOf(/subagent tail on \(every 2000 ms\)/.test(c.wlog())), 'the wrapper\'s tail is ON while the sub works (every 2 s)', c.wlog().split('\n').filter((l) => /subagent/.test(l)));
     // the sub finishes in the store
     fs.appendFileSync(tfile, all.slice(5).join('\n') + '\n');
     fs.writeFileSync(path.join(store, 'brain', cid, SG, 'messages', 'c0000000-0000-4000-8000-0000000000c3.json'), fs.readFileSync(path.join(FIXS, 'answer.json'), 'utf8').split(FIXP).join(cid));
     const done = await until(() => frames.map(cardOf).find((x) => x && x.taskInfo.status === 'completed'), 10000);
-    ok(!!done && done.status === 'complete' && /88\/100/.test(done.content[0].output) && done.taskInfo.files.join() === '/home/u/workspace/示例项目/report.md' && done.taskInfo.steps === 10,
+    ok(!!done && done.status === 'complete' && gateOf(/88\/100/.test(done.content[0].output)) && done.taskInfo.files.join() === '/home/u/workspace/示例项目/report.md' && done.taskInfo.steps === 10,
       'the card frame ENDS with the sub: completed, its answer as the output, the file it wrote, ten steps', done && done.taskInfo);
     const off = await until(() => /subagent tail off/.test(c.wlog()), 6000);
     ok(!!off, '…and the tail is OFF (nothing reads the store after it)', c.wlog().split('\n').filter((l) => /subagent/.test(l)));
@@ -211,7 +211,7 @@ try {
     // the files the sub wrote: a FINISHED card brings them through the descriptor's helper door (B-299b: read off the loop — its rows land when the read has)
     const rep = await until(() => Object.values(session._artifacts || {}).find((r) => r.path === '/home/u/workspace/示例项目/report.md'), 5000);
     const rows = Object.values(session._artifacts || {});
-    ok(!!rep && rep.via && rep.via.kind === 'subagent' && rep.via.name === '示例评审专家', 'the file the sub wrote joins THIS conversation\'s Artifacts rows, via the sub (the helper door read its transcript in the account\'s store)', rows.map((r) => [r.path, r.via]));
+    ok(!!rep && gateOf(rep.via) && rep.via.kind === 'subagent' && rep.via.name === '示例评审专家', 'the file the sub wrote joins THIS conversation\'s Artifacts rows, via the sub (the helper door read its transcript in the account\'s store)', rows.map((r) => [r.path, r.via]));
     // an OLDER agy's row (no subagent_info): no card, no error — the row ends as a row
     const before = frames.map(cardOf).filter(Boolean).length;
     session.pty.write(JSON.stringify({ type: 'chat-input', text: 'start a subagent the old way', msgId: 'm-old' }) + '\n');
@@ -248,13 +248,13 @@ try {
   const c5 = await create(STUB, { accountId: acct.id });   // a FRESH session: the ④ subagent leg (lane agy-subagent-cards) shares the ① session's stdin
   await until(() => c5.journal().find((x) => x.type === 'acp' && x.kind === 'session'), 10000);
   const got = await sayAll(c5, [...CMDS.map(([l]) => l), ...TEXTS], CMDS.length);
-  ok(got.refused.length === CMDS.length && CMDS.every(([l, w]) => got.refused.some((r) => r.level === 'error' && r.text === SENTENCE(w)) && !got.read.includes(l)),
+  ok(got.refused.length === CMDS.length && verdictOf(CMDS.every(([l, w]) => got.refused.some((r) => r.level === 'error' && r.text === SENTENCE(w)) && !got.read.includes(l))),
     '/model, /usage opus, /help: each refused BY NAME in the product\'s sentence (the error card), and agy never read it', { refused: got.refused.map((r) => r.text.slice(0, 40)), read: got.read });
   const textBad = TEXTS.filter((l) => !got.read.includes(l));
   ok(textBad.length === 0 && got.ended === TEXTS.length && got.read.length === TEXTS.length,
     `${TEXTS.length} lines that only START with "/" or a path — the attachment's «<cwd>/brief.zip 这里是…» first — are SENT unchanged: agy read exactly each line, in order, and answered each`, { textBad, ended: got.ended, read: got.read });
   ok(JSON.stringify(got.read) === JSON.stringify(TEXTS), '…in the order they were typed (the commands left no gap and no reordering)', got.read);
-  ok(!c5.journal().some((x) => x.kind === 'notice' && x.noticeKind === 'agent-exited') && c5.journal().some((x) => x.kind === 'update' && JSON.stringify(x.update || {}).includes('brief.zip')),
+  ok(!c5.journal().some((x) => x.kind === 'notice' && x.noticeKind === 'agent-exited') && verdictOf(c5.journal().some((x) => x.kind === 'update' && JSON.stringify(x.update || {}).includes('brief.zip'))),
     '…the conversation lives on: no «Antigravity ended this session (exit 2)», agy\'s reply names the attachment\'s path', c5.journal().filter((x) => x.kind === 'notice').map((x) => x.text));
   // RED CONTROL = the 2.369.340 guard: a wrapper copy (beside a link to src/, where it reads the slash list) whose test is the
   // base's first character — the same attachment message, through the same create path
@@ -267,7 +267,7 @@ try {
   const b = await create(STUB, { accountId: acct.id }, path.join(RED, 'data/bin'));
   await until(() => b.journal().find((x) => x.type === 'acp' && x.kind === 'session'), 10000);
   const red = await sayAll(b, ['/home/u/x.zip 这里是…'], 1);
-  ok(W_SRC.includes(GUARD) && red.refused.length === 1 && red.refused[0].text === SENTENCE('/home') && red.read.length === 0,
+  ok(gateOf(W_SRC.includes(GUARD)) && red.refused.length === 1 && red.refused[0].text === SENTENCE('/home') && red.read.length === 0,
     'RED CONTROL (the base guard): the attachment message is refused as the command «/home» — the owner\'s words — and agy never reads it', red);
 
   console.log('— ⑥ each turn journals ONE `usage` record (lane agy-status-bar-facts): the running total, the turn, the last call');
@@ -293,7 +293,7 @@ try {
   ok(!!u1 && u1.model === 'gemini-4-argon-high' && u1.durationSeconds === 0.3, 'the record names the model and the turn\'s own time');
   const H = require(path.join(REPO, 'src/harnesses/index.js'));
   const rows = c.journal().filter((x) => x.type === 'acp' && x.kind === 'update').flatMap((x) => H.get('antigravity').artifactsOf(x));
-  ok(rows.length === 1 && rows[0].op === 'write' && rows[0].path === path.join(CWD, 'reports', 'summary.md') && fs.existsSync(rows[0].path),
+  ok(rows.length === 1 && rows[0].op === 'write' && rows[0].path === path.join(CWD, 'reports', 'summary.md') && verdictOf(fs.existsSync(rows[0].path)),
     'the turn\'s write_file call is ONE Artifacts row (its absolute Path, the file on disk) through the descriptor\'s reader', rows);
 } finally {
   for (const sock of masters) for (const pid of pidsOnSocket(sock)) { try { process.kill(pid, 'SIGTERM'); } catch { } }
@@ -302,4 +302,4 @@ try {
   try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

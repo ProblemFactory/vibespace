@@ -91,7 +91,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const T0 = Date.now();
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -125,31 +125,31 @@ const facts = (over = {}) => ({ platform: 'darwin', helper: { state: 'ready', bi
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§1 PURE — the Mac\'s plan, facts, spawn, build, window shape, input, verdicts');
 {
   const f = SP.parseMacFacts('noise\n' + JSON.stringify({ t: 'facts', version: 'vs-x', disclaimed: true, ...MAC_FACTS, tcc: { screen: 'granted', accessibility: 'bogus' } }) + '\n');
-  ok(f.ok && f.displays.length === 2 && f.displays[0].id === '3' && f.displays[0].pw === 3840 && f.displays[0].scale === 2 && f.displays[0].main && f.windows.length === 2 && f.windows[0].id === '4242' && f.windows[1].minimized === true && f.tcc.screen === 'granted' && f.tcc.accessibility === 'unknown' && f.disclaimed === true, 'parseMacFacts: displays (points + pixels + scale), windows (ids as strings, minimized), TCC (an unknown word ⇒ unknown)', f);
+  ok(gateOf(f.ok) && f.displays.length === 2 && f.displays[0].id === '3' && f.displays[0].pw === 3840 && f.displays[0].scale === 2 && gateOf(f.displays[0].main) && f.windows.length === 2 && f.windows[0].id === '4242' && f.windows[1].minimized === true && f.tcc.screen === 'granted' && f.tcc.accessibility === 'unknown' && f.disclaimed === true, 'parseMacFacts: displays (points + pixels + scale), windows (ids as strings, minimized), TCC (an unknown word ⇒ unknown)', f);
   ok(SP.parseMacFacts('nothing').code === 'bad_output', 'no facts line ⇒ bad_output');
   const m = SP.planScreen(facts());
-  ok(m.ok && m.mode === 'videotoolbox' && m.kind === 'display' && m.display.id === '3' && m.w === 2560 && m.h === 1440 && m.fps === 60 && m.rung === '1440p60' && m.white === null && m.encoder.label === 'VideoToolbox' && same(m.origin, { x: 0, y: 0 }) && same(m.args, ['capture', '--display', '3', '--fps', '60', '--size', '2560x1440', '--kbps', '8000']), 'planScreen\'s darwin branch: the main 4K display → 1440p60 (SCK scales it; 4K60 is out of reach), VideoToolbox, no mapping road, the helper\'s argv', m);
+  ok(gateOf(m.ok) && m.mode === 'videotoolbox' && m.kind === 'display' && m.display.id === '3' && m.w === 2560 && m.h === 1440 && m.fps === 60 && m.rung === '1440p60' && m.white === null && m.encoder.label === 'VideoToolbox' && gateOf(same(m.origin, { x: 0, y: 0 })) && verdictOf(same(m.args, ['capture', '--display', '3', '--fps', '60', '--size', '2560x1440', '--kbps', '8000'])), 'planScreen\'s darwin branch: the main 4K display → 1440p60 (SCK scales it; 4K60 is out of reach), VideoToolbox, no mapping road, the helper\'s argv', m);
   ok(SP.planScreen(facts(), { display: '2', kbps: 5000 }).args.join(' ') === 'capture --display 2 --fps 60 --size 2560x1440 --kbps 5000' && SP.planScreen(facts(), { quality: 'full' }).rung === '4k30' && SP.planScreen(facts(), { quality: 'full' }).fps === 30 && SP.planScreen(facts(), { quality: 'full' }).w === 3840, 'a display by id at its rate; quality full = native 4K at 30 fps (18.7 ms a frame, measured)');
   const small = SP.planScreen(facts({ displays: [{ id: '5', x: 0, y: 0, w: 1440, h: 900, pw: 2880, ph: 1800, scale: 2, main: true }] }));
   const mid = SP.planScreen(facts({ displays: [{ id: '5', x: 0, y: 0, w: 1280, h: 800, pw: 2560, ph: 1600, scale: 2, main: true }] }));
   ok(small.rung === '1440p60' && small.w === 2304 && small.h === 1440 && mid.rung === 'native60' && mid.w === 2560 && mid.h === 1600 && mid.fps === 60, 'the ladder keeps the aspect (2880×1800 → 2304×1440) and a display that fits 2560×1600 streams native at 60', { small, mid });
   const w = SP.planScreen(facts(), { window: '4242' });
-  ok(w.ok && w.kind === 'window' && w.display.id === '2' && w.w === 1312 && w.h === 844 && w.rung === 'native60' && same(w.args, ['capture', '--window', '4242', '--fps', '60', '--size', '1312x844', '--kbps', '8000']), 'a window: its own pixels (656×422 pt on the 2× display it sits on → 1312×844, title bar included) at 60', w);
-  ok(same(w.window, { kind: 'window', id: '4242', title: 'notes.txt', app: 'TextEdit', bounds: { x: -3356, y: 212, w: 1312, h: 844 }, display: '2', dpi: 192, minimized: false }), 'THE window source shape (the seam with lane stream-p2w-build): bounds in PHYSICAL pixels, dpi 192 on a 2× Mac, its display', w.window);
+  ok(gateOf(w.ok) && w.kind === 'window' && w.display.id === '2' && w.w === 1312 && w.h === 844 && w.rung === 'native60' && verdictOf(same(w.args, ['capture', '--window', '4242', '--fps', '60', '--size', '1312x844', '--kbps', '8000'])), 'a window: its own pixels (656×422 pt on the 2× display it sits on → 1312×844, title bar included) at 60', w);
+  ok(verdictOf(same(w.window, { kind: 'window', id: '4242', title: 'notes.txt', app: 'TextEdit', bounds: { x: -3356, y: 212, w: 1312, h: 844 }, display: '2', dpi: 192, minimized: false })), 'THE window source shape (the seam with lane stream-p2w-build): bounds in PHYSICAL pixels, dpi 192 on a 2× Mac, its display', w.window);
   const R = (fx, o) => SP.planScreen(fx, o);
   ok(R(facts(), { window: '4343' }).code === 'window_minimized' && R(facts(), { window: '9' }).code === 'window_gone' && R(facts(), { display: '9' }).code === 'display_gone' && R(facts({ displays: [] })).code === 'display_gone', 'refused by name: a minimized window (it sends no picture — restore it), a window or display that is gone');
   const deny = R(facts({ tcc: { screen: 'denied', accessibility: 'granted' } })), regrant = R(facts({ tcc: { screen: 'denied' }, helper: { state: 'ready', bin: '/x', regrant: true } })), none = R(facts({ helper: { state: 'missing', code: 'no_helper', error: 'no compiler' } }));
-  ok(deny.code === 'screen_permission' && deny.settings === SP.MAC_SETTINGS.screen && /Screen & System Audio Recording/.test(deny.error) && regrant.code === 'helper_changed_regrant' && /off and on/.test(regrant.error) && none.code === 'no_helper' && none.error === 'no compiler' && R({ platform: 'darwin' }).code === 'no_helper', 'Screen Recording off ⇒ screen_permission naming the pane + its link; a replaced helper ⇒ helper_changed_regrant; no helper ⇒ no_helper (its own sentence)', { deny, regrant, none });
+  ok(deny.code === 'screen_permission' && deny.settings === SP.MAC_SETTINGS.screen && gateOf(/Screen & System Audio Recording/.test(deny.error)) && regrant.code === 'helper_changed_regrant' && gateOf(/off and on/.test(regrant.error)) && none.code === 'no_helper' && none.error === 'no compiler' && R({ platform: 'darwin' }).code === 'no_helper', 'Screen Recording off ⇒ screen_permission naming the pane + its link; a replaced helper ⇒ helper_changed_regrant; no helper ⇒ no_helper (its own sentence)', { deny, regrant, none });
   ok(R({ platform: 'linux' }).code === 'not_windows' && SP.planScreen({ platform: 'win32', ffmpeg: null, displays: [] }).code === 'no_ffmpeg', 'every other platform keeps its road: Linux not_windows, Windows its ffmpeg verdicts');
   const P = SP.macHelperPaths('/Users/u/');
   ok(P.bin === '/Users/u/.vibespace/helpers/vibespace-screen' && P.version === P.bin + '.version' && P.state === P.bin + '.state.json' && P.incoming('vs-1') === P.bin + '-vs-1', 'THE FIXED PATH: ~/.vibespace/helpers/vibespace-screen, its version and state beside it, a pushed prebuilt named by its version', P);
   const sp = SP.macHelperSpawn(P.bin, 'capture', ['--display', 3]);
-  ok(sp.file === P.bin && sp.disclaim === true && same(sp.args, ['--disclaim', 'capture', '--display', '3']), 'THE DISCLAIMED SPAWN (PURE): the fixed path, `--disclaim` FIRST (the helper re-spawns itself with responsibility disclaimed — Node cannot set it), the flag on the plan', sp);
+  ok(sp.file === P.bin && sp.disclaim === true && verdictOf(same(sp.args, ['--disclaim', 'capture', '--display', '3'])), 'THE DISCLAIMED SPAWN (PURE): the fixed path, `--disclaim` FIRST (the helper re-spawns itself with responsibility disclaimed — Node cannot set it), the flag on the plan', sp);
   const b = SP.macBuildPlan({ swiftc: '/usr/bin/swiftc', src: '/d/s.swift', dir: '/d', out: '/d/o' });
-  ok(same(b.slices.map((s) => s.args), [['-O', '-target', 'arm64-apple-macos15.0', '-o', '/d/vibespace-screen-arm64', '/d/s.swift'], ['-O', '-target', 'x86_64-apple-macos15.0', '-o', '/d/vibespace-screen-x86_64', '/d/s.swift']]) && same(b.after.map((s) => [s.file, ...s.args]), [['/usr/bin/lipo', '-create', '-output', '/d/o', '/d/vibespace-screen-arm64', '/d/vibespace-screen-x86_64'], ['/usr/bin/codesign', '-s', '-', '-f', '/d/o']]), 'the on-box build: both slices at macOS 15 (the box\'s own default would be its OS), lipo, ONE ad-hoc signature', b);
+  ok(gateOf(same(b.slices.map((s) => s.args), [['-O', '-target', 'arm64-apple-macos15.0', '-o', '/d/vibespace-screen-arm64', '/d/s.swift'], ['-O', '-target', 'x86_64-apple-macos15.0', '-o', '/d/vibespace-screen-x86_64', '/d/s.swift']])) && verdictOf(same(b.after.map((s) => [s.file, ...s.args]), [['/usr/bin/lipo', '-create', '-output', '/d/o', '/d/vibespace-screen-arm64', '/d/vibespace-screen-x86_64'], ['/usr/bin/codesign', '-s', '-', '-f', '/d/o']])), 'the on-box build: both slices at macOS 15 (the box\'s own default would be its OS), lipo, ONE ad-hoc signature', b);
   ok(SP.macHelperSourceFile('vs-1', 'print(1)') === 'let HELPER_VERSION = "vs-1"\nprint(1)', 'the ONE file swiftc compiles = the version line + the source');
   const t = SP.macInputTarget({ w: 2560, h: 1440, frame: { x: -1920, y: 0, w: 1920, h: 1080 }, pid: 0 });
-  ok(same(t, { pid: 0, wid: 0, ox: -1920, oy: 0, sx: 0.75, sy: 0.75 }) && same(SP.macInputTarget({ w: 1312, h: 844, frame: { x: 1, y: 2, w: 656, h: 422 }, pid: 777, window: 4242 }), { pid: 777, wid: 4242, ox: 1, oy: 2, sx: 0.5, sy: 0.5 }) && same(SP.macPoint(t, 1280, 720), { x: -960, y: 540 }) && same(SP.macPoint(null, 10.123, 5), { x: 10.12, y: 5 }) && SP.macInputTarget({ w: 0 }) === null, 'the input target: a 2560-px picture of a 1920-pt display ⇒ 0.75 pt a pixel from its origin (a picture pixel → the Mac\'s global point)', t);
+  ok(gateOf(same(t, { pid: 0, wid: 0, ox: -1920, oy: 0, sx: 0.75, sy: 0.75 })) && gateOf(same(SP.macInputTarget({ w: 1312, h: 844, frame: { x: 1, y: 2, w: 656, h: 422 }, pid: 777, window: 4242 }), { pid: 777, wid: 4242, ox: 1, oy: 2, sx: 0.5, sy: 0.5 })) && gateOf(same(SP.macPoint(t, 1280, 720), { x: -960, y: 540 })) && gateOf(same(SP.macPoint(null, 10.123, 5), { x: 10.12, y: 5 })) && SP.macInputTarget({ w: 0 }) === null, 'the input target: a 2560-px picture of a 1920-pt display ⇒ 0.75 pt a pixel from its origin (a picture pixel → the Mac\'s global point)', t);
   // THE RATE (lane stream-mac-rate): the floor of the picture the helper sends (src/stream-plan.js kbpsFloor — the window road's table)
   ok(SP.planScreen(facts()).floor === 8000 && SP.planScreen(facts(), { kbps: 20000 }).floor === 8000 && SP.planScreen(facts(), { quality: 'full', kbps: 20000 }).floor === 8000 && SP.planScreen(facts(), { window: '4242' }).floor === 6000 && SP.planScreen(facts(), { kbps: 5000 }).floor === 5000, 'the floor: 2560×1440 @ 60 (the owner\'s display) 8000 kbps = the session\'s cap; 4K @ 30 8000; a 1312×844 window @ 60 6000; never over the cap');
   // the owner's sessions, measured on his Mac over the hub's UDP leg with a real Chrome (werift's estimates, ms after the start)
@@ -165,7 +165,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§1 PURE — the 
     fol.sent(5200, t);
     while (ix < LANE.length && LANE[ix][0] <= t) { const d = fol.estimate(LANE[ix][1], LANE[ix][0]); whys.add(d.why); ok(!d.change || d.kbps >= 8000, 'never under the floor', d); ix++; }
   }
-  ok(old === 300 && fol.kbps === 8000 && whys.has('shortfall'), `the owner's sessions replayed: the .309 rule (follow werift's estimate, ≥ 10 % once a second) went 8000 → ${old} kbps at its FIRST estimate (253, 2.2 s in — what his Mac did); THE rule held ${fol.kbps} through 17 estimates of ~300 against ~2.4 Mbps sent (a shortfall, at the floor)`, { old, now: fol.kbps, whys: [...whys] });
+  ok(old === 300 && fol.kbps === 8000 && verdictOf(whys.has('shortfall')), `the owner's sessions replayed: the .309 rule (follow werift's estimate, ≥ 10 % once a second) went 8000 → ${old} kbps at its FIRST estimate (253, 2.2 s in — what his Mac did); THE rule held ${fol.kbps} through 17 estimates of ~300 against ~2.4 Mbps sent (a shortfall, at the floor)`, { old, now: fol.kbps, whys: [...whys] });
   // the Mac's rule (MAC_RATE_RULE): a cap above the floor (the page's maxKbps 20000), estimates every 200 ms, the source sending what it decided
   const M = (rule) => { const f = SP.rateFollower({ kbps: 20000, cap: 20000, floor: 8000, rule }); f.begin(0); return f; };
   const drive = (f, t0, ms, est, out = []) => { for (let t = t0; t < t0 + ms; t += 100) { f.sent((f.kbps * 100) / 8, t); if (t % 200 === 0) { const d = f.estimate(est(f), t); if (d.change) out.push([t, d.why, d.kbps]); } } return out; };
@@ -181,17 +181,17 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§1 PURE — the 
   ok(w1.kbps === 8000 && wch.length === 0 && SP.MAC_RATE_RULE.recoverMs === 10000 && SP.RATE_RULE.recoverMs === 20000 && SP.MAC_RATE_RULE.step === SP.MAC_KBPS_RULE && SP.RATE_RULE.step === SP.KBPS_RULE, 'the same rule, two steps: the window road (each change restarts ffmpeg: a key frame) waits 20 s to climb and moves ≥ 25 % at most every 5 s; the Mac (live `bps`) climbs after 10 s, ≥ 10 % once a second', { w: w1.kbps, wch });
   const c = ['stream-offer', 'input-events', 'stream-facts', 'stream-screen'], V = (o) => SM.streamRungVerdict({ desktop: true, ...o });
   ok(V({ capabilities: c, platform: 'darwin' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin' }).source === 'screen' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin', want: 'window' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-mac', 'stream-window'], platform: 'darwin', want: 'window' }).source === 'window', 'the rung: an older Mac agent (it already says stream-screen) ⇒ agent_too_old; stream-mac ⇒ the screen; ONE window needs stream-window too');
-  ok(V({ capabilities: c, platform: 'win32' }).source === 'screen' && V({ capabilities: c, platform: 'win32', want: 'window' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-window'], platform: 'win32', want: 'window' }).source === 'window' && V({ capabilities: [...c, 'stream-window'], platform: 'linux', want: 'window' }).code === 'no_window_source' && V({ capabilities: c.slice(0, 2), platform: 'win32' }).code === 'no_screen_source' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin', fakeSource: '/f.h264' }).source === 'fake' && SM.STREAM_SOURCES.includes('window'), 'Windows: the screen, and ONE window with stream-window (int304: lane stream-p2w-build\'s source behind the same want — an older agent ⇒ agent_too_old; no window source ⇒ no_window_source); a fake source still wins for a screen; STREAM_SOURCES takes window');
+  ok(V({ capabilities: c, platform: 'win32' }).source === 'screen' && V({ capabilities: c, platform: 'win32', want: 'window' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-window'], platform: 'win32', want: 'window' }).source === 'window' && V({ capabilities: [...c, 'stream-window'], platform: 'linux', want: 'window' }).code === 'no_window_source' && V({ capabilities: c.slice(0, 2), platform: 'win32' }).code === 'no_screen_source' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin', fakeSource: '/f.h264' }).source === 'fake' && verdictOf(SM.STREAM_SOURCES.includes('window')), 'Windows: the screen, and ONE window with stream-window (int304: lane stream-p2w-build\'s source behind the same want — an older agent ⇒ agent_too_old; no window source ⇒ no_window_source); a fake source still wins for a screen; STREAM_SOURCES takes window');
   const rows = SP.macWindowRows(facts());
-  ok(rows.length === 2 && same(rows[0], { kind: 'window', id: '4242', title: 'notes.txt', app: 'TextEdit', bounds: { x: -3356, y: 212, w: 1312, h: 844 }, display: '2', dpi: 192, minimized: false, cls: null, pid: 777, elevated: false }) && rows[1].id === '4343' && rows[1].minimized === true && rows[1].display === '3' && same(SP.windowSourceOf(SP.parseMacFacts(JSON.stringify({ t: 'facts', ...MAC_FACTS })).windows[0], { id: '2', scale: 2 }), SW.windowSourceOf({ id: '4242', title: 'notes.txt', app: 'TextEdit', bounds: { x: -3356, y: 212, w: 1312, h: 844 }, display: '2', dpi: 192 })), 'int304: the Mac\'s picker rows = THE window shape (src/stream-window.js windowSourceOf + windowPickRows over the facts), each on the display under its centre (a minimized one kept, marked)', rows);
-  ok(same(SM.streamSourceOf({ kind: 'window', id: 4242 }), { kind: 'window', id: '4242' }) && same(SM.streamSourceOf({ kind: 'display', id: '\\\\.\\DISPLAY2' }), { kind: 'display', id: '\\\\.\\DISPLAY2' }) && SM.streamSourceOf({ kind: 'window', id: 'a b' }) === null && SM.streamSourceOf({ kind: 'tab', id: '1' }) === null && SM.streamSourceOf(null) === null, 'the page\'s choice of source: a window or a display by id; anything else is no choice');
+  ok(rows.length === 2 && gateOf(same(rows[0], { kind: 'window', id: '4242', title: 'notes.txt', app: 'TextEdit', bounds: { x: -3356, y: 212, w: 1312, h: 844 }, display: '2', dpi: 192, minimized: false, cls: null, pid: 777, elevated: false })) && rows[1].id === '4343' && rows[1].minimized === true && rows[1].display === '3' && verdictOf(same(SP.windowSourceOf(SP.parseMacFacts(JSON.stringify({ t: 'facts', ...MAC_FACTS })).windows[0], { id: '2', scale: 2 }), SW.windowSourceOf({ id: '4242', title: 'notes.txt', app: 'TextEdit', bounds: { x: -3356, y: 212, w: 1312, h: 844 }, display: '2', dpi: 192 }))), 'int304: the Mac\'s picker rows = THE window shape (src/stream-window.js windowSourceOf + windowPickRows over the facts), each on the display under its centre (a minimized one kept, marked)', rows);
+  ok(gateOf(same(SM.streamSourceOf({ kind: 'window', id: 4242 }), { kind: 'window', id: '4242' })) && gateOf(same(SM.streamSourceOf({ kind: 'display', id: '\\\\.\\DISPLAY2' }), { kind: 'display', id: '\\\\.\\DISPLAY2' })) && SM.streamSourceOf({ kind: 'window', id: 'a b' }) === null && SM.streamSourceOf({ kind: 'tab', id: '1' }) === null && SM.streamSourceOf(null) === null, 'the page\'s choice of source: a window or a display by id; anything else is no choice');
   const MM = require(path.join(REPO, 'src/lib/modifier-map.js'));
   ok(MM.primaryModifierMap({ viewer: 'windows', host: 'darwin' }).control === 'meta' && MM.primaryModifierMap({ viewer: 'linux', host: 'darwin' }).control === 'meta' && MM.primaryModifierMap({ viewer: 'mac', host: 'darwin' }).meta === 'meta' && MM.primaryModifierMap({ viewer: 'mac', host: 'darwin' }).control === 'control', 'a Mac host (the start answer\'s platform `darwin`): a Windows / Linux viewer\'s Ctrl reaches it as ⌘; a Mac viewer\'s keys as pressed (THE modifier table, src/lib/modifier-map.js)');
   const mc = (ev, tg) => I.macCommandsOf(ev, tg);
   const tg = { pid: 77, ox: 100, oy: 50, sx: 0.5, sy: 0.5 };
-  ok(same(mc({ t: 'kd', c: 'KeyA' }).lines, ['K 0 0']) && same(mc({ t: 'ku', c: 'MetaLeft' }).lines, ['K 55 1']) && same(mc({ t: 'kd', c: 'ArrowUp' }).lines, ['K 126 0']) && same(mc({ t: 'md', x: 20, y: 10, b: 2 }, tg).lines, ['M 110 55', 'D 2']) && same(mc({ t: 'wh', x: 0, y: 0, dx: 0, dy: -120 }, tg).lines, ['M 100 50', 'W 0 -120']) && same(mc({ t: 'clip', text: 'hé' }).lines, ['C aMOp']) && mc({ t: 'kd', c: 'Pause' }).refused === 'unmapped_key' && same(mc({ t: 'ack', f: 1 }).lines, []), 'the Mac\'s command lines: virtual key codes (A 0, ⌘ 55, ↑ 126), the pointer in global points through the target, UTF-8 clipboard, Pause has no Mac key');
+  ok(gateOf(same(mc({ t: 'kd', c: 'KeyA' }).lines, ['K 0 0'])) && gateOf(same(mc({ t: 'ku', c: 'MetaLeft' }).lines, ['K 55 1'])) && gateOf(same(mc({ t: 'kd', c: 'ArrowUp' }).lines, ['K 126 0'])) && gateOf(same(mc({ t: 'md', x: 20, y: 10, b: 2 }, tg).lines, ['M 110 55', 'D 2'])) && gateOf(same(mc({ t: 'wh', x: 0, y: 0, dx: 0, dy: -120 }, tg).lines, ['M 100 50', 'W 0 -120'])) && gateOf(same(mc({ t: 'clip', text: 'hé' }).lines, ['C aMOp'])) && mc({ t: 'kd', c: 'Pause' }).refused === 'unmapped_key' && verdictOf(same(mc({ t: 'ack', f: 1 }).lines, [])), 'the Mac\'s command lines: virtual key codes (A 0, ⌘ 55, ↑ 126), the pointer in global points through the target, UTF-8 clipboard, Pause has no Mac key');
   const noMac = Object.keys(I.SCAN_CODES).filter((k) => !(k in I.MAC_KEYCODES)).sort();
-  ok(new Set(Object.entries(I.MAC_KEYCODES).filter(([k]) => k !== 'Insert').map(([, v]) => v)).size === Object.keys(I.MAC_KEYCODES).length - 1 && same(noMac, ['Convert', 'F21', 'F22', 'F23', 'F24', 'KanaMode', 'NonConvert', 'PrintScreen', 'ScrollLock']), 'MAC_KEYCODES: every key the Windows table knows has its Mac key but the ones a Mac has none of (PrintScreen, ScrollLock, F21–F24, the PC JIS conversion keys — a Mac\'s かな / 英数 are Lang1 / Lang2); one code per key (Insert shares Help\'s)', noMac);
+  ok(new Set(Object.entries(I.MAC_KEYCODES).filter(([k]) => k !== 'Insert').map(([, v]) => v)).size === Object.keys(I.MAC_KEYCODES).length - 1 && verdictOf(same(noMac, ['Convert', 'F21', 'F22', 'F23', 'F24', 'KanaMode', 'NonConvert', 'PrintScreen', 'ScrollLock'])), 'MAC_KEYCODES: every key the Windows table knows has its Mac key but the ones a Mac has none of (PrintScreen, ScrollLock, F21–F24, the PC JIS conversion keys — a Mac\'s かな / 英数 are Lang1 / Lang2); one code per key (Insert shares Help\'s)', noMac);
 }
 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§2 the helper\'s source rides the bundle verbatim and carries the probe\'s laws');
@@ -200,13 +200,13 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§2 the helper\'s
   // lane stream-cursor: SCK composites the Mac's pointer (measured with the .304 helper: an arrow at the moved pointer) — only
   // with --cursor, which no plan passes (§1's argvs): the viewer's own pointer IS the pointer. A changed source = a new VERSION
   // (= a new TCC client: the owner turns Screen Recording on once more — helper_changed_regrant)
-  ok((swift.match(/c\.showsCursor = /g) || []).length === 1 && /c\.showsCursor = A\.contains\("--cursor"\)/.test(swift) && !SP.planScreen(facts()).args.includes('--cursor'), 'no pointer in the picture: showsCursor only with --cursor, never in the plan\'s argv');
+  ok((swift.match(/c\.showsCursor = /g) || []).length === 1 && gateOf(/c\.showsCursor = A\.contains\("--cursor"\)/.test(swift)) && !SP.planScreen(facts()).args.includes('--cursor'), 'no pointer in the picture: showsCursor only with --cursor, never in the plan\'s argv');
   const sha = crypto.createHash('sha256').update(swift).digest('hex');
   ok(SRC.SOURCE === swift && SRC.SHA256 === sha && SRC.VERSION === 'vs-' + sha.slice(0, 12), `src/agentd/mac-helper-source.js IS tools/vibespace-screen/vibespace-screen.swift (VERSION ${SRC.VERSION} = its sha — run node scripts/mac-helper-embed.mjs after editing the Swift)`);
   const bundle = path.join(REPO, 'data/bin/vibespace-agentd.js');
-  ok(fs.existsSync(bundle) && fs.readFileSync(bundle, 'utf8').includes(JSON.stringify(SRC.VERSION)), 'the built daemon carries that version (run `npm run build:agentd` after a change)');
+  ok(gateOf(fs.existsSync(bundle)) && verdictOf(fs.readFileSync(bundle, 'utf8').includes(JSON.stringify(SRC.VERSION))), 'the built daemon carries that version (run `npm run build:agentd` after a change)');
   const cb = (/outputHandler|frameProperties: props, infoFlagsOut: nil\) \{([\s\S]*?)\n {6}\}/.exec(swift) || [])[1] || '';
-  ok(/responsibility_spawnattrs_setdisclaim/.test(swift) && /A\.first == "--disclaim"/.test(swift) && /colorSpaceName = CGColorSpace\.sRGB/.test(swift) && /_ = NSApplication\.shared[^\n]*\n[\s\S]*?desktopIndependentWindow/.test(swift) && /kVTEncodeFrameOptionKey_ForceKeyFrame/.test(swift) && /EnableLowLatencyRateControl/.test(swift) && cb.length > 100 && !/VTSessionSetProperty/.test(cb) && /window_minimized/.test(swift) && /PRESS_GAP/.test(swift), 'the Swift keeps the laws: --disclaim → responsibility_spawnattrs_setdisclaim, sRGB, NSApplication before a window filter, a forced key + low-latency RC, NO VTSessionSetProperty inside the output callback (it deadlocks), minimized ⇒ window_minimized, the press gap', cb.length);
+  ok(gateOf(/responsibility_spawnattrs_setdisclaim/.test(swift)) && gateOf(/A\.first == "--disclaim"/.test(swift)) && gateOf(/colorSpaceName = CGColorSpace\.sRGB/.test(swift)) && gateOf(/_ = NSApplication\.shared[^\n]*\n[\s\S]*?desktopIndependentWindow/.test(swift)) && gateOf(/kVTEncodeFrameOptionKey_ForceKeyFrame/.test(swift)) && gateOf(/EnableLowLatencyRateControl/.test(swift)) && cb.length > 100 && !/VTSessionSetProperty/.test(cb) && gateOf(/window_minimized/.test(swift)) && verdictOf(/PRESS_GAP/.test(swift)), 'the Swift keeps the laws: --disclaim → responsibility_spawnattrs_setdisclaim, sRGB, NSApplication before a window filter, a forced key + low-latency RC, NO VTSessionSetProperty inside the output callback (it deadlocks), minimized ⇒ window_minimized, the press gap', cb.length);
 }
 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3 THE HELPER\'S PLACE — fixed path, version, prebuilt, build, regrant');
@@ -242,12 +242,12 @@ const fakeExec = (cfg) => {
   const h2 = home('smac-h2');
   const x2 = fakeExec({});
   const r2 = await MAC.createMacHelper({ execFile: x2.ef, fs, home: h2 }).ensure();
-  ok(r2.state === 'missing' && r2.code === 'no_helper' && r2.canBuild === false && /xcode-select --install/.test(r2.error) && /data\/bin\/helpers/.test(r2.error) && r2.version === SRC.VERSION && r2.dir === SP.macHelperPaths(h2).dir && same(x2.events.filter((e) => e[0] === 'start').map((e) => e[1]), ['xcode-select']), 'no helper and no compiler ⇒ no_helper naming both recipes (the dir + version a hub push needs); only `xcode-select -p` ran — never the swiftc trampoline (it opens an install dialog on the owner\'s screen)', { r2, ev: x2.events });
+  ok(r2.state === 'missing' && r2.code === 'no_helper' && r2.canBuild === false && gateOf(/xcode-select --install/.test(r2.error)) && gateOf(/data\/bin\/helpers/.test(r2.error)) && r2.version === SRC.VERSION && r2.dir === SP.macHelperPaths(h2).dir && verdictOf(same(x2.events.filter((e) => e[0] === 'start').map((e) => e[1]), ['xcode-select'])), 'no helper and no compiler ⇒ no_helper naming both recipes (the dir + version a hub push needs); only `xcode-select -p` ran — never the swiftc trampoline (it opens an install dialog on the owner\'s screen)', { r2, ev: x2.events });
 
   const h3 = home('smac-h3'), P3 = SP.macHelperPaths(h3);
   fs.mkdirSync(P3.dir, { recursive: true }); fs.writeFileSync(P3.incoming(SRC.VERSION), '#!/bin/sh\n');
   const r3 = await MAC.createMacHelper({ execFile: fakeExec({}).ef, fs, home: h3 }).ensure();
-  ok(r3.state === 'ready' && r3.how === 'prebuilt' && fs.readFileSync(P3.version, 'utf8') === SRC.VERSION && (fs.statSync(P3.bin).mode & 0o111) && !fs.existsSync(P3.incoming(SRC.VERSION)), 'the hub\'s pushed prebuilt (vibespace-screen-<version>) is put in place: executable, its version written', r3);
+  ok(r3.state === 'ready' && r3.how === 'prebuilt' && fs.readFileSync(P3.version, 'utf8') === SRC.VERSION && (gateOf(fs.statSync(P3.bin).mode & 0o111)) && !fs.existsSync(P3.incoming(SRC.VERSION)), 'the hub\'s pushed prebuilt (vibespace-screen-<version>) is put in place: executable, its version written', r3);
 
   const h4 = home('smac-h4'), P4 = SP.macHelperPaths(h4), dev = path.join(h4, 'CLT');
   fs.mkdirSync(path.join(dev, 'usr/bin'), { recursive: true }); fs.writeFileSync(path.join(dev, 'usr/bin/swiftc'), '');
@@ -256,8 +256,8 @@ const fakeExec = (cfg) => {
   const [r4, r4b] = await Promise.all([H4.ensure(), H4.ensure()]);
   const starts = x4.events.filter((e) => e[0] === 'start').map((e) => e[1]), order = x4.events.map((e) => e[0] + ':' + e[1]);
   const sw = x4.events.filter((e) => e[0] === 'start' && e[1] === 'swiftc').map((e) => e[2]);
-  ok(r4.state === 'ready' && r4.how === 'built' && r4 === r4b && same(starts, ['xcode-select', 'swiftc', 'swiftc', 'lipo', 'codesign']) && order.indexOf('start:swiftc') < order.indexOf('done:swiftc') && order.lastIndexOf('start:swiftc') < order.indexOf('done:swiftc') && order.indexOf('start:lipo') > order.lastIndexOf('done:swiftc'), 'a compiler ⇒ BUILT here: both slices at once (the second starts before the first ends), then lipo, then codesign; two asks share one build', order);
-  ok(sw.length === 2 && sw[0].join(' ').includes('arm64-apple-macos15.0') && sw[1].join(' ').includes('x86_64-apple-macos15.0') && fs.readFileSync(P4.version, 'utf8') === SRC.VERSION && !fs.readdirSync(P4.dir).some((f) => f.startsWith('.build-')), 'the slices are macOS 15 arm64 + x86_64; the version written; the build dir removed', sw);
+  ok(r4.state === 'ready' && r4.how === 'built' && r4 === r4b && gateOf(same(starts, ['xcode-select', 'swiftc', 'swiftc', 'lipo', 'codesign'])) && order.indexOf('start:swiftc') < order.indexOf('done:swiftc') && order.lastIndexOf('start:swiftc') < order.indexOf('done:swiftc') && order.indexOf('start:lipo') > order.lastIndexOf('done:swiftc'), 'a compiler ⇒ BUILT here: both slices at once (the second starts before the first ends), then lipo, then codesign; two asks share one build', order);
+  ok(sw.length === 2 && gateOf(sw[0].join(' ').includes('arm64-apple-macos15.0')) && gateOf(sw[1].join(' ').includes('x86_64-apple-macos15.0')) && fs.readFileSync(P4.version, 'utf8') === SRC.VERSION && !fs.readdirSync(P4.dir).some((f) => f.startsWith('.build-')), 'the slices are macOS 15 arm64 + x86_64; the version written; the build dir removed', sw);
 
   const h5 = home('smac-h5'), P5 = SP.macHelperPaths(h5);
   fs.mkdirSync(P5.dir, { recursive: true }); fs.writeFileSync(P5.bin, 'old'); fs.writeFileSync(P5.version, 'vs-old'); fs.writeFileSync(P5.state, JSON.stringify({ version: 'vs-old', granted: true }));
@@ -277,7 +277,7 @@ const fakeExec = (cfg) => {
   const h7 = home('smac-h7'), dev7 = path.join(h7, 'CLT');
   fs.mkdirSync(path.join(dev7, 'usr/bin'), { recursive: true }); fs.writeFileSync(path.join(dev7, 'usr/bin/swiftc'), '');
   const r7 = await MAC.createMacHelper({ execFile: fakeExec({ devDir: dev7, swiftFail: true }).ef, fs, home: h7 }).ensure();
-  ok(r7.state === 'missing' && r7.code === 'no_helper' && /error: boom/.test(r7.error) && r7.canBuild === true && !fs.existsSync(SP.macHelperPaths(h7).version), 'a build that fails ⇒ no_helper with the compiler\'s error line; no version written', r7);
+  ok(r7.state === 'missing' && r7.code === 'no_helper' && gateOf(/error: boom/.test(r7.error)) && r7.canBuild === true && !fs.existsSync(SP.macHelperPaths(h7).version), 'a build that fails ⇒ no_helper with the compiler\'s error line; no version written', r7);
 }
 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-signing — THE IDENTITY of a pushed helper, judged before it is put in place');
@@ -299,26 +299,26 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   const xa = fakeExec({ identity: 'developer-id' });
   const ra = await MAC.createMacHelper({ execFile: xa.ef, fs, home: a.h, teamIds: PIN }).ensure();
   const runs = xa.events.filter((e) => e[0] === 'start');
-  ok(ra.state === 'ready' && ra.how === 'prebuilt' && ra.identity && ra.identity.kind === 'developer-id' && ra.identity.teamId === CS.TEAM && ra.identity.identifier === MI.HELPER_IDENTIFIER && ra.wantSigned === false && ra.regrant === false && stateOf(a.P).identity.kind === 'developer-id', 'pinned: a Developer ID prebuilt by the pinned team is put in place; its identity is recorded; wantSigned false; a first install is no re-grant', ra);
-  ok(same(runs.map((e) => [e[1], e[2][0], e[2][e[2].length - 1]]), [['codesign', '--verify', a.P.incoming(SRC.VERSION)], ['codesign', '-dv', a.P.incoming(SRC.VERSION)], ['codesign', '-dr', a.P.incoming(SRC.VERSION)]]) && !fs.existsSync(a.P.incoming(SRC.VERSION)), 'exactly three runs: `codesign --verify --strict`, `codesign -dv --verbose=4`, then `codesign -dr -` (round 2), all on the INCOMING file (judged before the rename; no compiler asked)', runs);
-  ok(ra.identity.requirement === MI.designatedRequirement({ teamId: CS.TEAM }) && stateOf(a.P).identity.requirement === ra.identity.requirement && /certificate leaf\[subject\.OU\] = VSTEAM0001$/.test(ra.identity.requirement), 'round 2: the requirement in the state is the one READ from the file by `codesign -dr -` (THE Developer ID one: identifier + anchor apple generic + the two OIDs + the Team ID as the leaf\'s OU) — what tccd will key the grant on', ra.identity.requirement);
+  ok(ra.state === 'ready' && ra.how === 'prebuilt' && gateOf(ra.identity) && ra.identity.kind === 'developer-id' && ra.identity.teamId === CS.TEAM && ra.identity.identifier === MI.HELPER_IDENTIFIER && ra.wantSigned === false && ra.regrant === false && stateOf(a.P).identity.kind === 'developer-id', 'pinned: a Developer ID prebuilt by the pinned team is put in place; its identity is recorded; wantSigned false; a first install is no re-grant', ra);
+  ok(gateOf(same(runs.map((e) => [e[1], e[2][0], e[2][e[2].length - 1]]), [['codesign', '--verify', a.P.incoming(SRC.VERSION)], ['codesign', '-dv', a.P.incoming(SRC.VERSION)], ['codesign', '-dr', a.P.incoming(SRC.VERSION)]])) && !fs.existsSync(a.P.incoming(SRC.VERSION)), 'exactly three runs: `codesign --verify --strict`, `codesign -dv --verbose=4`, then `codesign -dr -` (round 2), all on the INCOMING file (judged before the rename; no compiler asked)', runs);
+  ok(ra.identity.requirement === MI.designatedRequirement({ teamId: CS.TEAM }) && stateOf(a.P).identity.requirement === ra.identity.requirement && verdictOf(/certificate leaf\[subject\.OU\] = VSTEAM0001$/.test(ra.identity.requirement)), 'round 2: the requirement in the state is the one READ from the file by `codesign -dr -` (THE Developer ID one: identifier + anchor apple generic + the two OIDs + the Team ID as the leaf\'s OU) — what tccd will key the grant on', ra.identity.requirement);
   // (b) pinned + an ad-hoc prebuilt ⇒ refused helper_unsigned, the file removed; a compiler ⇒ built here (the fallback), the state says what was refused
   const b = mk('smac-idb', { pushed: true, compiler: true });
   const xb = fakeExec({ identity: 'adhoc', devDir: b.devDir });
   const rb = await MAC.createMacHelper({ execFile: xb.ef, fs, home: b.h, teamIds: PIN }).ensure();
-  ok(rb.state === 'ready' && rb.how === 'built' && rb.refused && rb.refused.code === 'helper_unsigned' && /ad-hoc signed/.test(rb.refused.why) && rb.identity.kind === 'adhoc' && rb.wantSigned === true && !fs.existsSync(b.P.incoming(SRC.VERSION)) && same(xb.events.filter((e) => e[0] === 'start').map((e) => e[1]), ['codesign', 'codesign', 'xcode-select', 'swiftc', 'swiftc', 'lipo', 'codesign']), 'pinned: an ad-hoc push is REFUSED (helper_unsigned, the file removed, the refusal in the state) and the local build is the fallback — ad-hoc, so wantSigned stays true', { rb, ev: xb.events.map((e) => e[1]) });
+  ok(rb.state === 'ready' && rb.how === 'built' && gateOf(rb.refused) && rb.refused.code === 'helper_unsigned' && gateOf(/ad-hoc signed/.test(rb.refused.why)) && rb.identity.kind === 'adhoc' && rb.wantSigned === true && !fs.existsSync(b.P.incoming(SRC.VERSION)) && verdictOf(same(xb.events.filter((e) => e[0] === 'start').map((e) => e[1]), ['codesign', 'codesign', 'xcode-select', 'swiftc', 'swiftc', 'lipo', 'codesign'])), 'pinned: an ad-hoc push is REFUSED (helper_unsigned, the file removed, the refusal in the state) and the local build is the fallback — ad-hoc, so wantSigned stays true', { rb, ev: xb.events.map((e) => e[1]) });
   // (c) the same, no compiler ⇒ missing with code helper_unsigned (never no_helper — the hub would push the same file again)
   const c = mk('smac-idc', { pushed: true });
   const rc = await MAC.createMacHelper({ execFile: fakeExec({ identity: 'adhoc' }).ef, fs, home: c.h, teamIds: PIN }).ensure();
   const xc2 = fakeExec({ identity: 'adhoc' });
   const rc2 = await MAC.createMacHelper({ execFile: xc2.ef, fs, home: c.h, teamIds: PIN }).ensure();
-  ok(rc.state === 'missing' && rc.code === 'helper_unsigned' && /not signed by the VibeSpace release team/.test(rc.error) && /ad-hoc signed/.test(rc.error) && rc.canBuild === false && !fs.existsSync(c.P.version) && rc2.code === 'helper_unsigned' && !xc2.events.some((e) => e[1] === 'codesign'), 'pinned, no compiler: the refusal is the verdict by name — helper_unsigned, not no_helper — and it STANDS at the next ensure() (nothing pushed, nothing judged: the hub never re-pushes the same bad file)', { rc, rc2: rc2.code });
+  ok(rc.state === 'missing' && rc.code === 'helper_unsigned' && gateOf(/not signed by the VibeSpace release team/.test(rc.error)) && gateOf(/ad-hoc signed/.test(rc.error)) && rc.canBuild === false && !fs.existsSync(c.P.version) && rc2.code === 'helper_unsigned' && !xc2.events.some((e) => e[1] === 'codesign'), 'pinned, no compiler: the refusal is the verdict by name — helper_unsigned, not no_helper — and it STANDS at the next ensure() (nothing pushed, nothing judged: the hub never re-pushes the same bad file)', { rc, rc2: rc2.code });
   // (d) THE LAST RE-GRANT: an installed ad-hoc build of the SAME version that held the grant; a Developer ID push ⇒ swapped, regrant, the plan names helper_signed_regrant
   const d = mk('smac-idd', { pushed: true, installed: SRC.VERSION, state: { version: SRC.VERSION, how: 'built', granted: true, identity: { kind: 'adhoc' } } });
   const Hd = MAC.createMacHelper({ execFile: fakeExec({ identity: 'developer-id' }).ef, fs, home: d.h, teamIds: PIN });
   const rd = await Hd.ensure();
   const pd = SP.planScreen(facts({ tcc: { screen: 'denied' }, helper: rd }));
-  ok(rd.state === 'ready' && rd.how === 'prebuilt' && rd.have === SRC.VERSION && rd.regrant === true && rd.identity.kind === 'developer-id' && fs.readFileSync(d.P.bin, 'utf8') === '#!/bin/sh\n' && pd.code === 'helper_signed_regrant' && /ONE LAST time/.test(pd.error), 'the LAST re-grant: the signed build replaces the installed ad-hoc build of the SAME version (the fast path yields to the pushed file); the plan refuses helper_signed_regrant — «the last time»', { rd, pd: pd.code });
+  ok(rd.state === 'ready' && rd.how === 'prebuilt' && rd.have === SRC.VERSION && rd.regrant === true && rd.identity.kind === 'developer-id' && fs.readFileSync(d.P.bin, 'utf8') === '#!/bin/sh\n' && pd.code === 'helper_signed_regrant' && verdictOf(/ONE LAST time/.test(pd.error)), 'the LAST re-grant: the signed build replaces the installed ad-hoc build of the SAME version (the fast path yields to the pushed file); the plan refuses helper_signed_regrant — «the last time»', { rd, pd: pd.code });
   Hd.sawTcc('granted');
   const rd2 = await Hd.ensure();
   ok(rd2.regrant === false && rd2.granted === true && rd2.wantSigned === false, 'the grant seen once ⇒ regrant clears; the signed helper wants nothing more');
@@ -329,36 +329,36 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   // (f) no pin (today): a Developer ID build of ANY team is refused — the agent trusts nobody yet; pinned: another team, unsigned, a tampered file
   const f1 = mk('smac-idf1', { pushed: true });
   const rf1 = await MAC.createMacHelper({ execFile: fakeExec({ identity: 'developer-id' }).ef, fs, home: f1.h, teamIds: [] }).ensure();
-  ok(rf1.state === 'missing' && rf1.code === 'helper_unsigned' && /pins no Team ID yet/.test(rf1.error), 'no pin (today): a Developer ID push is refused — no Team ID is trusted yet', rf1);
+  ok(rf1.state === 'missing' && rf1.code === 'helper_unsigned' && verdictOf(/pins no Team ID yet/.test(rf1.error)), 'no pin (today): a Developer ID push is refused — no Team ID is trusted yet', rf1);
   const f2 = mk('smac-idf2', { pushed: true });
   const rf2 = await MAC.createMacHelper({ execFile: fakeExec({ identity: 'other' }).ef, fs, home: f2.h, teamIds: PIN }).ensure();
-  ok(rf2.code === 'helper_unsigned' && /signed by team ZZOTHER002, not the pinned VSTEAM0001/.test(rf2.error), 'pinned: another team\'s Developer ID signature is refused, naming both teams', rf2);
+  ok(rf2.code === 'helper_unsigned' && verdictOf(/signed by team ZZOTHER002, not the pinned VSTEAM0001/.test(rf2.error)), 'pinned: another team\'s Developer ID signature is refused, naming both teams', rf2);
   const f3 = mk('smac-idf3', { pushed: true });
   const rf3 = await MAC.createMacHelper({ execFile: fakeExec({ identity: 'unsigned' }).ef, fs, home: f3.h, teamIds: PIN }).ensure();
-  ok(rf3.code === 'helper_unsigned' && /codesign --verify refused it/.test(rf3.error) && !fs.existsSync(f3.P.incoming(SRC.VERSION)), 'an unsigned (or tampered) file fails `codesign --verify --strict` ⇒ refused before `-dv` is even asked, the file removed', rf3);
+  ok(rf3.code === 'helper_unsigned' && gateOf(/codesign --verify refused it/.test(rf3.error)) && !fs.existsSync(f3.P.incoming(SRC.VERSION)), 'an unsigned (or tampered) file fails `codesign --verify --strict` ⇒ refused before `-dv` is even asked, the file removed', rf3);
   // (g) the installed one stays when a push is refused at the same version; the fast path judges nothing without a pushed file
   const g = mk('smac-idg', { pushed: true, installed: SRC.VERSION, state: { version: SRC.VERSION, granted: true, identity: { kind: 'adhoc' } } });
   const xg = fakeExec({ identity: 'other' });
   const rg = await MAC.createMacHelper({ execFile: xg.ef, fs, home: g.h, teamIds: PIN }).ensure();
   const xg2 = fakeExec({ identity: 'other' });
   const rg2 = await MAC.createMacHelper({ execFile: xg2.ef, fs, home: g.h, teamIds: PIN }).ensure();
-  ok(rg.state === 'ready' && rg.how === null && rg.have === SRC.VERSION && rg.refused && rg.refused.code === 'helper_unsigned' && fs.readFileSync(g.P.bin, 'utf8') === 'installed' && !fs.existsSync(g.P.incoming(SRC.VERSION)) && xg2.events.length === 0 && rg2.state === 'ready', 'a refused push at the installed version leaves the installed helper in place (the refusal recorded); the next ensure() with nothing pushed runs NOTHING', { rg, ev2: xg2.events.length });
+  ok(rg.state === 'ready' && rg.how === null && rg.have === SRC.VERSION && gateOf(rg.refused) && rg.refused.code === 'helper_unsigned' && fs.readFileSync(g.P.bin, 'utf8') === 'installed' && !fs.existsSync(g.P.incoming(SRC.VERSION)) && xg2.events.length === 0 && rg2.state === 'ready', 'a refused push at the installed version leaves the installed helper in place (the refusal recorded); the next ensure() with nothing pushed runs NOTHING', { rg, ev2: xg2.events.length });
   // (i) round 2: a Developer ID signature by the pinned team whose designated requirement is NOT the Developer ID one (a custom `-r`:
   //     a cdhash requirement — tccd would key the grant on the hash and the next build would lose it) ⇒ refused by name; the ad-hoc
   //     path of (b) above never asked -dr (two codesign runs there)
   const i1 = mk('smac-idi', { pushed: true });
   const xi = fakeExec({ identity: 'developer-id', dr: 'cdhash' });
   const ri = await MAC.createMacHelper({ execFile: xi.ef, fs, home: i1.h, teamIds: PIN }).ensure();
-  ok(ri.state === 'missing' && ri.code === 'helper_unsigned' && /designated requirement is not the Developer ID one/.test(ri.error) && /a cdhash requirement/.test(ri.error) && !fs.existsSync(i1.P.incoming(SRC.VERSION)) && xi.events.filter((e) => e[0] === 'start' && e[1] === 'codesign').length === 3, 'round 2: a Developer ID build by the pinned team that carries a cdhash requirement (a custom -r) is REFUSED by name after the third run — the grant would not survive the next build', ri);
+  ok(ri.state === 'missing' && ri.code === 'helper_unsigned' && gateOf(/designated requirement is not the Developer ID one/.test(ri.error)) && gateOf(/a cdhash requirement/.test(ri.error)) && !fs.existsSync(i1.P.incoming(SRC.VERSION)) && xi.events.filter((e) => e[0] === 'start' && e[1] === 'codesign').length === 3, 'round 2: a Developer ID build by the pinned team that carries a cdhash requirement (a custom -r) is REFUSED by name after the third run — the grant would not survive the next build', ri);
   // (j) ROUND 3 (acceptance r1 M1): a codesign TIMEOUT is no verdict — the file stays, judged again at the next ensure(); the third
   //     unanswered run on the SAME bytes is the refusal (of those bytes, by this agent)
   const j = mk('smac-idj', { pushed: true });
   const shaJ = crypto.createHash('sha256').update('#!/bin/sh\n').digest('hex');
   const Hj = MAC.createMacHelper({ execFile: fakeExec({ identity: 'adhoc', timeout: true }).ef, fs, home: j.h, teamIds: [], agentVersion: '9.9.1' });
   const rj1 = await Hj.ensure(), rj2 = await Hj.ensure();
-  ok(rj1.state === 'missing' && rj1.code === 'no_helper' && rj1.pending && rj1.pending.tries === 1 && rj1.pending.sha256 === shaJ && /could not be judged yet/.test(rj1.error) && /try 1 of 3/.test(rj1.error) && !rj1.refused && fs.existsSync(j.P.incoming(SRC.VERSION)) && rj2.pending.tries === 2 && stateOf(j.P).pending.tries === 2 && !stateOf(j.P).refused, 'a codesign run killed by its timeout is NO verdict: no_helper naming the try, the pushed file KEPT, the pending count in the state; the next ensure() judges it again', { rj1: rj1.error, rj2: rj2.pending });
+  ok(rj1.state === 'missing' && rj1.code === 'no_helper' && gateOf(rj1.pending) && rj1.pending.tries === 1 && rj1.pending.sha256 === shaJ && gateOf(/could not be judged yet/.test(rj1.error)) && gateOf(/try 1 of 3/.test(rj1.error)) && !rj1.refused && gateOf(fs.existsSync(j.P.incoming(SRC.VERSION))) && rj2.pending.tries === 2 && stateOf(j.P).pending.tries === 2 && !stateOf(j.P).refused, 'a codesign run killed by its timeout is NO verdict: no_helper naming the try, the pushed file KEPT, the pending count in the state; the next ensure() judges it again', { rj1: rj1.error, rj2: rj2.pending });
   const rj3 = await Hj.ensure();
-  ok(rj3.state === 'missing' && rj3.code === 'helper_unsigned' && rj3.refused && /did not answer 3 times/.test(rj3.refused.why) && /tried again at/.test(rj3.refused.why) && rj3.refused.until > Date.now() && rj3.refused.sha256 === shaJ && rj3.refused.agent === '9.9.1' && rj3.refused.version === SRC.VERSION && !fs.existsSync(j.P.incoming(SRC.VERSION)) && !stateOf(j.P).pending && stateOf(j.P).refused.sha256 === shaJ, 'the third unanswered run on the SAME bytes is the refusal — of those bytes, by this agent (sha256, helper version, agent version recorded), the file removed', rj3.refused);
+  ok(rj3.state === 'missing' && rj3.code === 'helper_unsigned' && gateOf(rj3.refused) && gateOf(/did not answer 3 times/.test(rj3.refused.why)) && gateOf(/tried again at/.test(rj3.refused.why)) && rj3.refused.until > Date.now() && rj3.refused.sha256 === shaJ && rj3.refused.agent === '9.9.1' && rj3.refused.version === SRC.VERSION && !fs.existsSync(j.P.incoming(SRC.VERSION)) && !stateOf(j.P).pending && stateOf(j.P).refused.sha256 === shaJ, 'the third unanswered run on the SAME bytes is the refusal — of those bytes, by this agent (sha256, helper version, agent version recorded), the file removed', rj3.refused);
   fs.writeFileSync(j.P.incoming(SRC.VERSION), '#!/bin/sh\n');
   const xj4 = fakeExec({ identity: 'adhoc' });
   const rj4 = await MAC.createMacHelper({ execFile: xj4.ef, fs, home: j.h, teamIds: [], agentVersion: '9.9.1' }).ensure();
@@ -372,7 +372,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   const rk2 = await MAC.createMacHelper({ execFile: fakeExec({ identity: 'adhoc' }).ef, fs, home: k.h, teamIds: [], agentVersion: '9.9.1' }).ensure();
   const rk3 = await MAC.createMacHelper({ execFile: fakeExec({ identity: 'adhoc' }).ef, fs, home: k.h, teamIds: [], agentVersion: '9.9.2' }).ensure();
   const rk4 = await MAC.createMacHelper({ execFile: fakeExec({ identity: 'adhoc' }).ef, fs, home: k.h, teamIds: [], agentVersion: '9.9.1', version: 'vs-cccccccccccc' }).ensure();
-  ok(rk1.code === 'helper_unsigned' && /pins no Team ID yet/.test(rk1.error) && rk2.code === 'helper_unsigned' && rk2.refused && rk2.refused.sha256 === rk1.refused.sha256 && rk3.code === 'no_helper' && !rk3.refused && rk4.code === 'no_helper' && !rk4.refused && stateOf(k.P).refused == null, 'the pre-pin refusal of a Developer ID build stands for THIS helper version under THIS agent (nothing pushed: it is answered again); an upgraded agent or a new helper version answers no_helper — the hub pushes, the stale refusal is dropped from the state', { rk1: rk1.refused, rk3: rk3.code, rk4: rk4.code });
+  ok(rk1.code === 'helper_unsigned' && gateOf(/pins no Team ID yet/.test(rk1.error)) && rk2.code === 'helper_unsigned' && gateOf(rk2.refused) && rk2.refused.sha256 === rk1.refused.sha256 && rk3.code === 'no_helper' && !rk3.refused && rk4.code === 'no_helper' && !rk4.refused && stateOf(k.P).refused == null, 'the pre-pin refusal of a Developer ID build stands for THIS helper version under THIS agent (nothing pushed: it is answered again); an upgraded agent or a new helper version answers no_helper — the hub pushes, the stale refusal is dropped from the state', { rk1: rk1.refused, rk3: rk3.code, rk4: rk4.code });
   const g2 = mk('smac-idg2', { pushed: true, installed: SRC.VERSION, state: { version: SRC.VERSION, granted: true, identity: { kind: 'adhoc' }, refused: { version: SRC.VERSION, sha256: 'f'.repeat(64), code: 'helper_unsigned', why: 'old', at: 1, agent: MAC.AGENT_VERSION } } });
   const rg3 = await MAC.createMacHelper({ execFile: fakeExec({ identity: 'adhoc' }).ef, fs, home: g2.h, teamIds: [] }).ensure();
   ok(rg3.state === 'ready' && rg3.how === null && rg3.refused === null && stateOf(g2.P).refused === null && !fs.existsSync(g2.P.incoming(SRC.VERSION)), 'a later push that is a NO-OP (the same version installed already) clears the old refusal from the state (acceptance r1 minor at :152)', rg3);
@@ -380,10 +380,10 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   const l1 = home('smac-idl'); const Pl = SP.macHelperPaths(l1); fs.mkdirSync(Pl.dir, { recursive: true });
   fs.writeFileSync(Pl.state, JSON.stringify({ refused: { version: SRC.VERSION, sha256: 'e'.repeat(64), code: 'helper_unsigned', why: 'signed by team ZZOTHER002; this agent pins no Team ID yet', at: 1, agent: MAC.AGENT_VERSION } }));
   const nl = await MAC.createMacScreen({ spawn, execFile: fakeExec({}).ef, env: { HOME: l1, PATH: process.env.PATH }, fs }).source({ sourceKind: 'screen' });
-  ok(nl.ok === false && nl.code === 'helper_unsigned' && nl.helper && nl.helper.version === SRC.VERSION && nl.helper.dir === Pl.dir && nl.helper.refused && nl.helper.refused.sha256 === 'e'.repeat(64) && /pins no Team ID yet/.test(nl.helper.refused.why) && nl.helper.refused.agent === MAC.AGENT_VERSION && !nl.helper.pending, 'helper_unsigned through source() carries the refused bytes (version, sha256, code, why, agent) — the hub sends a DIFFERENT prebuilt or says why the same one is not re-sent', nl);
+  ok(nl.ok === false && nl.code === 'helper_unsigned' && gateOf(nl.helper) && nl.helper.version === SRC.VERSION && nl.helper.dir === Pl.dir && gateOf(nl.helper.refused) && nl.helper.refused.sha256 === 'e'.repeat(64) && gateOf(/pins no Team ID yet/.test(nl.helper.refused.why)) && nl.helper.refused.agent === MAC.AGENT_VERSION && !nl.helper.pending, 'helper_unsigned through source() carries the refused bytes (version, sha256, code, why, agent) — the hub sends a DIFFERENT prebuilt or says why the same one is not re-sent', nl);
   fs.writeFileSync(Pl.state, JSON.stringify({ refused: { version: SRC.VERSION, sha256: 'e'.repeat(64), code: 'helper_unsigned', why: 'x', at: 1, agent: 'an-older-agent' } }));
   const nl2 = await MAC.createMacScreen({ spawn, execFile: fakeExec({}).ef, env: { HOME: l1, PATH: process.env.PATH }, fs }).source({ sourceKind: 'screen' });
-  ok(nl2.ok === false && nl2.code === 'no_helper' && nl2.helper && !nl2.helper.refused, 'a refusal recorded by ANOTHER agent version is stale: no_helper again (the hub pushes; this agent judges afresh)', nl2);
+  ok(nl2.ok === false && nl2.code === 'no_helper' && gateOf(nl2.helper) && !nl2.helper.refused, 'a refusal recorded by ANOTHER agent version is stale: no_helper again (the hub pushes; this agent judges afresh)', nl2);
   // (m) ROUND 4 (acceptance r3 minor, pending-outlives-file): a pending judgment is about a FILE — the kept file gone (a cleanup, a disk
   //     tool, a restore) ⇒ pending dropped, no_helper WITHOUT it (the hub re-sends), the same bytes pushed again judged afresh (try 1)
   const m = mk('smac-idm', { pushed: true });
@@ -394,7 +394,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   const runsM = xm.events.filter((e) => e[0] === 'start' && e[1] === 'codesign').length, pendM2 = stateOf(m.P).pending; // read before the re-push
   fs.writeFileSync(m.P.incoming(SRC.VERSION), '#!/bin/sh\n'); // the same bytes pushed again
   const rm3 = await MAC.createMacHelper({ execFile: xm.ef, fs, home: m.h, teamIds: [], agentVersion: '9.9.1' }).ensure();
-  ok(rm1.code === 'no_helper' && rm1.pending && rm1.pending.tries === 1 && rm2.code === 'no_helper' && !rm2.pending && !rm2.refused && pendM2 === null && runsM === 1 && rm3.code === 'no_helper' && rm3.pending && rm3.pending.tries === 1 && /try 1 of 3/.test(rm3.error), 'a pending judgment whose FILE is gone is dropped: no_helper without `pending` (the hub re-sends — acceptance r3: 808126df3 answered «holds this prebuilt already» for ever), no codesign run on nothing, the same bytes pushed again start at try 1', { rm2: rm2.error, rm3: rm3.pending });
+  ok(rm1.code === 'no_helper' && gateOf(rm1.pending) && rm1.pending.tries === 1 && rm2.code === 'no_helper' && !rm2.pending && !rm2.refused && pendM2 === null && runsM === 1 && rm3.code === 'no_helper' && gateOf(rm3.pending) && rm3.pending.tries === 1 && verdictOf(/try 1 of 3/.test(rm3.error)), 'a pending judgment whose FILE is gone is dropped: no_helper without `pending` (the hub re-sends — acceptance r3: 808126df3 answered «holds this prebuilt already» for ever), no codesign run on nothing, the same bytes pushed again start at try 1', { rm2: rm2.error, rm3: rm3.pending });
   const m2 = mk('smac-idm2', { installed: SRC.VERSION, state: { version: SRC.VERSION, granted: true, identity: { kind: 'adhoc' }, pending: { version: SRC.VERSION, sha256: 'd'.repeat(64), tries: 2, why: 'old', at: 1, agent: MAC.AGENT_VERSION } } });
   const xm2 = fakeExec({});
   const rm4 = await MAC.createMacHelper({ execFile: xm2.ef, fs, home: m2.h, teamIds: [] }).ensure();
@@ -407,22 +407,22 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   const Hn = () => MAC.createMacHelper({ execFile: xn.ef, fs, home: n.h, teamIds: [], now: () => clock });
   await Hn().ensure(); await Hn().ensure(); const rn3 = await Hn().ensure();
   const untilN = clock + MAC.UNANSWERED_RETRY_MS, atN = new Date(untilN).toISOString();
-  ok(rn3.code === 'helper_unsigned' && rn3.refused && rn3.refused.until === untilN && typeof rn3.refused.boot === 'string' && rn3.refused.agent === MAC.AGENT_VERSION && rn3.refused.why === `codesign did not answer 3 times (codesign --verify --strict answered nothing in 30 s (SIGTERM)); it will be tried again at ${atN}, or at the agent's next start` && rn3.error.includes(`tried again at ${atN}`) && stateOf(n.P).refused.until === untilN && !fs.existsSync(n.P.incoming(SRC.VERSION)), `the third unanswered run refuses WITH A DOOR: the why names the time (${MAC.UNANSWERED_RETRY_MS / 60000} min) and the next start — it rides the helper_unsigned answer (the stream verdict's detail), the state keeps until + boot`, rn3.refused);
+  ok(rn3.code === 'helper_unsigned' && gateOf(rn3.refused) && rn3.refused.until === untilN && typeof rn3.refused.boot === 'string' && rn3.refused.agent === MAC.AGENT_VERSION && rn3.refused.why === `codesign did not answer 3 times (codesign --verify --strict answered nothing in 30 s (SIGTERM)); it will be tried again at ${atN}, or at the agent's next start` && gateOf(rn3.error.includes(`tried again at ${atN}`)) && stateOf(n.P).refused.until === untilN && !fs.existsSync(n.P.incoming(SRC.VERSION)), `the third unanswered run refuses WITH A DOOR: the why names the time (${MAC.UNANSWERED_RETRY_MS / 60000} min) and the next start — it rides the helper_unsigned answer (the stream verdict's detail), the state keeps until + boot`, rn3.refused);
   fs.writeFileSync(n.P.incoming(SRC.VERSION), '#!/bin/sh\n'); clock += 60 * 1000;
   const xn2 = fakeExec({ identity: 'adhoc' });
   const rn4 = await MAC.createMacHelper({ execFile: xn2.ef, fs, home: n.h, teamIds: [], now: () => clock }).ensure();
   const nlN = await MAC.createMacScreen({ spawn, execFile: xn2.ef, env: { HOME: n.h, PATH: process.env.PATH }, fs, now: () => clock }).source({ sourceKind: 'screen' });
-  ok(rn4.code === 'helper_unsigned' && !xn2.events.some((e) => e[1] === 'codesign') && !fs.existsSync(n.P.incoming(SRC.VERSION)) && nlN.ok === false && nlN.code === 'helper_unsigned' && nlN.helper && nlN.helper.refused && nlN.helper.refused.until === untilN && !nlN.helper.pending, 'a minute later in the same process the refusal stands (no run, the file removed) and the answer carries `until` — the hub says when it re-sends', { rn4: rn4.code, helper: nlN.helper });
+  ok(rn4.code === 'helper_unsigned' && !xn2.events.some((e) => e[1] === 'codesign') && !fs.existsSync(n.P.incoming(SRC.VERSION)) && nlN.ok === false && nlN.code === 'helper_unsigned' && gateOf(nlN.helper) && gateOf(nlN.helper.refused) && nlN.helper.refused.until === untilN && !nlN.helper.pending, 'a minute later in the same process the refusal stands (no run, the file removed) and the answer carries `until` — the hub says when it re-sends', { rn4: rn4.code, helper: nlN.helper });
   fs.writeFileSync(n.P.incoming(SRC.VERSION), '#!/bin/sh\n'); clock = untilN + 1;
   const rn5 = await MAC.createMacHelper({ execFile: xn2.ef, fs, home: n.h, teamIds: [], now: () => clock }).ensure();
-  ok(rn5.state === 'ready' && rn5.how === 'prebuilt' && rn5.refused === null && stateOf(n.P).refused == null && xn2.events.some((e) => e[1] === 'codesign'), `past the time (${MAC.UNANSWERED_RETRY_MS / 60000} min) the SAME bytes are judged afresh — codesign ran, the ad-hoc build taken, the refusal gone from the state (acceptance r3: 808126df3 refused them for the agent's life)`, rn5);
+  ok(rn5.state === 'ready' && rn5.how === 'prebuilt' && rn5.refused === null && stateOf(n.P).refused == null && verdictOf(xn2.events.some((e) => e[1] === 'codesign')), `past the time (${MAC.UNANSWERED_RETRY_MS / 60000} min) the SAME bytes are judged afresh — codesign ran, the ad-hoc build taken, the refusal gone from the state (acceptance r3: 808126df3 refused them for the agent's life)`, rn5);
   const n2 = mk('smac-idn2', { pushed: true });
   const xn3 = fakeExec({ identity: 'adhoc', timeout: true }); clock = 1800000000000;
   for (let i = 0; i < 3; i++) await MAC.createMacHelper({ execFile: xn3.ef, fs, home: n2.h, teamIds: [], now: () => clock, boot: 'boot-a' }).ensure();
   fs.writeFileSync(n2.P.incoming(SRC.VERSION), '#!/bin/sh\n');
   const xn4 = fakeExec({ identity: 'adhoc' });
   const rn6 = await MAC.createMacHelper({ execFile: xn4.ef, fs, home: n2.h, teamIds: [], now: () => clock, boot: 'boot-b' }).ensure();
-  ok(stateOf(n2.P).refused == null && rn6.state === 'ready' && rn6.how === 'prebuilt' && xn4.events.some((e) => e[1] === 'codesign'), 'at the agent\'s next start (another process) the same bytes are judged afresh before the time — a refusal born of unanswered runs does not outlive the process that recorded it', rn6);
+  ok(stateOf(n2.P).refused == null && rn6.state === 'ready' && rn6.how === 'prebuilt' && verdictOf(xn4.events.some((e) => e[1] === 'codesign')), 'at the agent\'s next start (another process) the same bytes are judged afresh before the time — a refusal born of unanswered runs does not outlive the process that recorded it', rn6);
   // (h) RED control: a copy of stream-mac.js that skips the verdict puts the unsigned push in place
   const srcText = fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8');
   const mutantText = editAnchor(srcText, "const sv = MI.swapVerdict(", "const sv = { take: true, code: null, why: 'MUTANT' }; void MI.swapVerdict(", "src/agentd/stream-mac.js").replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`).replace(/require\('\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src/agentd', f))})`);
@@ -430,7 +430,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   const MUT = require(mutantFile);
   const hm = mk('smac-idh', { pushed: true });
   const rh = await MUT.createMacHelper({ execFile: fakeExec({ identity: 'unsigned' }).ef, fs, home: hm.h, teamIds: PIN }).ensure();
-  ok(mutantText !== srcText && rh.state === 'ready' && rh.how === 'prebuilt' && fs.existsSync(hm.P.bin), 'RED CONTROL: a copy of stream-mac.js whose swapVerdict is skipped puts an UNSIGNED push in place — the verdict is what bites', rh);
+  ok(mutantText !== srcText && rh.state === 'ready' && rh.how === 'prebuilt' && verdictOf(fs.existsSync(hm.P.bin)), 'RED CONTROL: a copy of stream-mac.js whose swapVerdict is skipped puts an UNSIGNED push in place — the verdict is what bites', rh);
 }
 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4 THE SOURCE end to end over the fake helper');
@@ -453,7 +453,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4 THE SOURCE en
   // RED CONTROL: the .305 line back in place (the setter inside the locked block)
   const was = swift.replace(/let rate = wantBps;[\s\S]*?\n {6}lock\.lock\(\)\n/, 'if let b = wantBps, let s = session { wantBps = nil; bps = b; VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: b as CFNumber); VTSessionSetProperty(s, key: kVTCompressionPropertyKey_DataRateLimits, value: [b / 8 * 2, 1] as CFArray) }\n');
   const red = heldSetters(was);
-  ok(now && now.all === 2 && now.bad === 0 && was !== swift && red && red.bad === 2, 'the bitrate is set OUTSIDE the encode loop\'s lock (the .305 deadlock: one picture, then none) — RED CONTROL: the .305 shape is caught', { now, red });
+  ok(gateOf(now) && now.all === 2 && now.bad === 0 && was !== swift && gateOf(red) && red.bad === 2, 'the bitrate is set OUTSIDE the encode loop\'s lock (the .305 deadlock: one picture, then none) — RED CONTROL: the .305 shape is caught', { now, red });
 }
 
 const hS = home('smac-src'), logS = path.join(hS, 'helper.log');
@@ -477,7 +477,7 @@ const scr = MAC.createMacScreen({ spawn, execFile, env: envS, fs, log: () => { }
   openErr = Object.assign(new Error('spawn /usr/bin/open ENOENT'), { code: 'ENOENT' });
   const gone = await so.openSettings('screen');
   const opens = calls.filter((c) => c[0] === '/usr/bin/open'), reads = calls.filter((c) => c[0] !== '/usr/bin/open');
-  ok(a.ok && a.pane === 'accessibility' && s.ok && same(opens.slice(0, 2), [['/usr/bin/open', [SP.MAC_SETTINGS.accessibility]], ['/usr/bin/open', [SP.MAC_SETTINGS.screen]]]) && bad.code === 'bad_pane' && opens.length === 3 && gone.code === 'open_failed' && /ENOENT/.test(gone.error) && reads.length === 1 && same(reads[0][1], ['--disclaim', 'facts']), 'lane stream-mac-stall: 「打开系统设置」 on the Mac = /usr/bin/open on THE pane\'s deep link (SP.MAC_SETTINGS, by name — anything else bad_pane, nothing run); a failed open by name; lane stream-mac-ax-respawn: the Accessibility door re-reads the facts ONCE (a disclaimed `facts` — the injector\'s respawn rule hears it), the Screen Recording pane none', { calls, bad, gone });
+  ok(gateOf(a.ok) && a.pane === 'accessibility' && gateOf(s.ok) && gateOf(same(opens.slice(0, 2), [['/usr/bin/open', [SP.MAC_SETTINGS.accessibility]], ['/usr/bin/open', [SP.MAC_SETTINGS.screen]]])) && bad.code === 'bad_pane' && opens.length === 3 && gone.code === 'open_failed' && gateOf(/ENOENT/.test(gone.error)) && reads.length === 1 && verdictOf(same(reads[0][1], ['--disclaim', 'facts'])), 'lane stream-mac-stall: 「打开系统设置」 on the Mac = /usr/bin/open on THE pane\'s deep link (SP.MAC_SETTINGS, by name — anything else bad_pane, nothing run); a failed open by name; lane stream-mac-ax-respawn: the Accessibility door re-reads the facts ONCE (a disclaimed `facts` — the injector\'s respawn rule hears it), the Screen Recording pane none', { calls, bad, gone });
 }
 const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   const src = await scr.source(msg, { maxKbps: kbps });
@@ -489,20 +489,20 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
 };
 {
   const f = await scr.facts();
-  ok(f.ok && f.platform === 'darwin' && f.helper.state === 'ready' && f.helper.bin === FK.bin && f.helper.reports === SRC.VERSION && f.helper.disclaimed === true && f.displays.length === 2 && f.windows.length === 2 && f.tcc.screen === 'granted' && f.primary.mode === 'videotoolbox' && f.primary.rung === '1440p60' && f.primary.w === 2560, 'stream-facts on a Mac: the helper\'s own facts (run disclaimed), its state, the main display\'s plan', f.primary);
-  ok(same(logs()[0].argv, ['--disclaim', 'facts']), 'the facts ran DISCLAIMED at the fixed path', logs()[0]);
+  ok(gateOf(f.ok) && f.platform === 'darwin' && f.helper.state === 'ready' && f.helper.bin === FK.bin && f.helper.reports === SRC.VERSION && f.helper.disclaimed === true && f.displays.length === 2 && f.windows.length === 2 && f.tcc.screen === 'granted' && f.primary.mode === 'videotoolbox' && f.primary.rung === '1440p60' && f.primary.w === 2560, 'stream-facts on a Mac: the helper\'s own facts (run disclaimed), its state, the main display\'s plan', f.primary);
+  ok(verdictOf(same(logs()[0].argv, ['--disclaim', 'facts'])), 'the facts ran DISCLAIMED at the fixed path', logs()[0]);
   const r = await run({ sourceKind: 'screen' });
   const matches = r.aus.slice(0, 40).filter((au, i) => { const a = AUS[K0 + i]; return au.nalus.length === a.nalus.length && au.nalus.every((n, k) => Buffer.compare(n, a.nalus[k]) === 0); }).length;
-  ok(r.src.ok && r.src.kind === 'screen' && r.src.encoder === 'VideoToolbox' && r.src.fps === 60 && matches === 40 && r.aus[0].key && r.aus.every((a, i) => !i || a.ts90k > r.aus[i - 1].ts90k), 'the display\'s pictures = THE fixture\'s access units byte for byte (FLV → SP.flvReader — no new parser), the first a key frame, the clock rising', { n: r.aus.length, matches, ended: r.ended });
+  ok(gateOf(r.src.ok) && r.src.kind === 'screen' && r.src.encoder === 'VideoToolbox' && r.src.fps === 60 && matches === 40 && gateOf(r.aus[0].key) && verdictOf(r.aus.every((a, i) => !i || a.ts90k > r.aus[i - 1].ts90k)), 'the display\'s pictures = THE fixture\'s access units byte for byte (FLV → SP.flvReader — no new parser), the first a key frame, the clock rising', { n: r.aus.length, matches, ended: r.ended });
   const cap = logs().find((l) => l.argv && l.argv[1] === 'capture');
-  ok(cap && same(cap.argv, ['--disclaim', ...SP.planScreen(f).args]), 'the helper ran EXACTLY the plan\'s argv, disclaimed', cap);
+  ok(gateOf(cap) && verdictOf(same(cap.argv, ['--disclaim', ...SP.planScreen(f).args])), 'the helper ran EXACTLY the plan\'s argv, disclaimed', cap);
   await until(() => r.src.inputTarget(), 2000);
-  ok(same(r.src.inputTarget(), { pid: 0, wid: 0, ox: 0, oy: 0, sx: 0.75, sy: 0.75 }), 'the input target from the helper\'s `started` line: the frontmost app (pid 0), 0.75 pt a picture pixel', r.src.inputTarget());
+  ok(verdictOf(same(r.src.inputTarget(), { pid: 0, wid: 0, ox: 0, oy: 0, sx: 0.75, sy: 0.75 })), 'the input target from the helper\'s `started` line: the frontmost app (pid 0), 0.75 pt a picture pixel', r.src.inputTarget());
   const st0 = r.src.stats();
   r.src.requestKeyframe();
   await until(() => r.src.stats().keysAnswered > st0.keysAnswered, 2000);
   const st1 = r.src.stats();
-  ok(logs().some((l) => l.ctl === 'key') && st1.keysAnswered === st0.keysAnswered + 1 && st1.keyWaitMs <= 500, `a key frame on request: \`key\` on the helper's stdin, answered ${st1.keyWaitMs} ms later (the SAME frame on a Mac — no GOP to wait out)`, st1);
+  ok(gateOf(logs().some((l) => l.ctl === 'key')) && st1.keysAnswered === st0.keysAnswered + 1 && st1.keyWaitMs <= 500, `a key frame on request: \`key\` on the helper's stdin, answered ${st1.keyWaitMs} ms later (the SAME frame on a Mac — no GOP to wait out)`, st1);
   // THE RATE over the helper's own output (lane stream-mac-rate): the session's cap 8000 = the floor of 2560×1440 @ 60 ⇒ nothing moves it
   skew += 2100; await fresh(r);
   for (let i = 0; i < 6; i++) r.src.setTargetKbps(1);
@@ -516,7 +516,7 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   ok(st2.ecoqos === 'n/a', 'lane stream-sdr-ecoqos: a Mac\'s numbers say ecoqos n/a — Windows\' power throttling is not a Mac\'s (nothing opted out, no details row)', st2.ecoqos);
   r.src.stop();
   await sleep(150);
-  ok(logs().some((l) => l.ctl === 'quit') && r.ended === null, 'stop: `quit` on stdin, and no ending reported (asked)');
+  ok(gateOf(logs().some((l) => l.ctl === 'quit')) && r.ended === null, 'stop: `quit` on stdin, and no ending reported (asked)');
 }
 {
   const r = await run({ sourceKind: 'screen' }, { kbps: 20000, want: 10 });
@@ -529,27 +529,27 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   const held = r.src.stats().rate.why;
   skew += 2100; await fresh(r); await est(1);
   const after = r.src.stats();
-  ok(same(ctl().slice(n0), ['bps 8000000']) && after.kbps === 8000 && after.rateChanges === 1 && after.rate.why === 'shortfall' && held === 'hold', 'a shortfall held 2 s ⇒ ONE `bps` line — LIVE (no restart), at the FLOOR (8000 kbps), not the estimate\'s 1', { ctl: ctl().slice(n0), after });
+  ok(gateOf(same(ctl().slice(n0), ['bps 8000000'])) && after.kbps === 8000 && after.rateChanges === 1 && after.rate.why === 'shortfall' && held === 'hold', 'a shortfall held 2 s ⇒ ONE `bps` line — LIVE (no restart), at the FLOOR (8000 kbps), not the estimate\'s 1', { ctl: ctl().slice(n0), after });
   const atBps = r.aus.length;
-  ok(await until(() => r.aus.length >= atBps + 5, 3000), 'lane stream-mac-stall: the pictures keep coming after the `bps` (the agent\'s half; the helper\'s: §2\'s lock law + the report\'s real Mac leg)', { atBps, now: r.aus.length });
+  ok(verdictOf(await until(() => r.aus.length >= atBps + 5, 3000)), 'lane stream-mac-stall: the pictures keep coming after the `bps` (the agent\'s half; the helper\'s: §2\'s lock law + the report\'s real Mac leg)', { atBps, now: r.aus.length });
   skew += 2100; await fresh(r); await est(1);
   ok(ctl().length === n0 + 1 && r.src.stats().kbps === 8000, 'more shortfall: nothing under the floor', ctl().slice(n0));
   skew += 10100; await fresh(r); await est(99999);
-  ok(same(ctl().slice(n0), ['bps 8000000', 'bps 10000000']) && r.src.stats().kbps === 10000 && r.src.stats().rate.why === 'recover', '10 s without a shortfall ⇒ +25 % toward the cap, live (8000 → 10000)', ctl().slice(n0));
+  ok(gateOf(same(ctl().slice(n0), ['bps 8000000', 'bps 10000000'])) && r.src.stats().kbps === 10000 && r.src.stats().rate.why === 'recover', '10 s without a shortfall ⇒ +25 % toward the cap, live (8000 → 10000)', ctl().slice(n0));
   r.src.stop();
   await sleep(150);
 }
 {
   const r = await run({ sourceKind: 'window', sourceId: '4242' }, { want: 25 });
   const cap = logs().filter((l) => l.argv && l.argv[1] === 'capture').pop();
-  ok(r.src.ok && same(cap.argv.slice(1, 4), ['capture', '--window', '4242']) && cap.argv.includes('1312x844') && same(r.src.window, SP.windowSourceOf(SP.parseMacFacts(JSON.stringify({ t: 'facts', ...MAC_FACTS })).windows[0], { id: '2', scale: 2 })), 'a window: --window <its id> at its own pixels; the source carries the window shape', { argv: cap && cap.argv, w: r.src.window });
+  ok(gateOf(r.src.ok) && gateOf(same(cap.argv.slice(1, 4), ['capture', '--window', '4242'])) && gateOf(cap.argv.includes('1312x844')) && verdictOf(same(r.src.window, SP.windowSourceOf(SP.parseMacFacts(JSON.stringify({ t: 'facts', ...MAC_FACTS })).windows[0], { id: '2', scale: 2 }))), 'a window: --window <its id> at its own pixels; the source carries the window shape', { argv: cap && cap.argv, w: r.src.window });
   await until(() => r.src.inputTarget(), 2000);
-  ok(same(r.src.inputTarget(), { pid: 777, wid: 4242, ox: -1678, oy: 106, sx: 0.5, sy: 0.5 }), 'its input target: the window\'s app (pid 777 — CGEventPostToPid when it is not in front), the window its keys must reach, its frame', r.src.inputTarget());
+  ok(verdictOf(same(r.src.inputTarget(), { pid: 777, wid: 4242, ox: -1678, oy: 106, sx: 0.5, sy: 0.5 })), 'its input target: the window\'s app (pid 777 — CGEventPostToPid when it is not in front), the window its keys must reach, its frame', r.src.inputTarget());
   FK.set({ moveAfter: 1 });
   r.src.stop();
   const r2 = await run({ sourceKind: 'window', sourceId: '4242' }, { want: 5 });
   await until(() => r2.src.inputTarget() && r2.src.inputTarget().ox === -1600, 2000);
-  ok(same(r2.src.inputTarget(), { pid: 777, wid: 4242, ox: -1600, oy: 120, sx: 0.5, sy: 0.5 }), 'the window moved (a `frame` line): the target follows — the page keeps sending picture pixels', r2.src.inputTarget());
+  ok(verdictOf(same(r2.src.inputTarget(), { pid: 777, wid: 4242, ox: -1600, oy: 120, sx: 0.5, sy: 0.5 })), 'the window moved (a `frame` line): the target follows — the page keeps sending picture pixels', r2.src.inputTarget());
   r2.src.stop();
   FK.set({ moveAfter: 0, endAfter: 6, endCode: 'window_minimized' });
   const r3 = await run({ sourceKind: 'window', sourceId: '4242' }, { want: 99 });
@@ -581,12 +581,12 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4a GONE MEANS G
   const c0 = capsOf(), f0 = factsOf();
   const a = await play(scr);
   const sa = a.src.stats();
-  ok(a.src.ok && !a.ended && a.aus.length >= 30 && capsOf() - c0 === 2 && factsOf() - f0 >= 1 && sa.captureRestarts === 1 && a.aus[8] && a.aus[8].key && a.aus.every((x, i) => !i || x.ts90k > a.aus[i - 1].ts90k), 'THE INCIDENT: the helper says display_gone once while the facts still list display 3 ⇒ the SAME source captures it again in place (a second helper, one session): the pictures go on — the next one a key frame, the clock unbroken — and nothing ends', { ended: a.ended, aus: a.aus.length, caps: capsOf() - c0, restarts: sa.captureRestarts, key8: a.aus[8] && a.aus[8].key });
+  ok(gateOf(a.src.ok) && !a.ended && a.aus.length >= 30 && capsOf() - c0 === 2 && factsOf() - f0 >= 1 && sa.captureRestarts === 1 && gateOf(a.aus[8]) && gateOf(a.aus[8].key) && verdictOf(a.aus.every((x, i) => !i || x.ts90k > a.aus[i - 1].ts90k)), 'THE INCIDENT: the helper says display_gone once while the facts still list display 3 ⇒ the SAME source captures it again in place (a second helper, one session): the pictures go on — the next one a key frame, the clock unbroken — and nothing ends', { ended: a.ended, aus: a.aus.length, caps: capsOf() - c0, restarts: sa.captureRestarts, key8: a.aus[8] && a.aus[8].key });
   a.src.stop(); await sleep(150);
   // a facts read that FAILED is no proof
   fs.writeFileSync(tok, '1');
   const b = await play(scr, { before: () => { fs.writeFileSync(failF, '1'); FK.set({ factsFail: failF }); } });
-  ok(b.src.ok && !b.ended && b.aus.length >= 30 && fs.readFileSync(failF, 'utf8') === '0' && b.src.stats().captureRestarts === 1, 'a facts read that FAILED is no proof: display_gone said, the forced read fails (the shareable content could not be read) ⇒ never display_gone — captured again in place, the pictures go on', { ended: b.ended, aus: b.aus.length, left: fs.readFileSync(failF, 'utf8'), restarts: b.src.stats().captureRestarts });
+  ok(gateOf(b.src.ok) && !b.ended && b.aus.length >= 30 && fs.readFileSync(failF, 'utf8') === '0' && b.src.stats().captureRestarts === 1, 'a facts read that FAILED is no proof: display_gone said, the forced read fails (the shareable content could not be read) ⇒ never display_gone — captured again in place, the pictures go on', { ended: b.ended, aus: b.aus.length, left: fs.readFileSync(failF, 'utf8'), restarts: b.src.stats().captureRestarts });
   b.src.stop(); await sleep(150);
   FK.set({ factsFail: 0 });
   // REALLY gone: display 3 unplugged under the capture ⇒ two reads 1 s apart lack it ⇒ display_gone
@@ -605,7 +605,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4a GONE MEANS G
   const scrOld = mut.exports.createMacScreen({ spawn, execFile, env: envS, fs, log: () => { } });
   fs.writeFileSync(tok, '1');
   const m = await play(scrOld);
-  ok(macText.includes(BELIEVE) && m.ended === 'display_gone' && m.aus.length < 30, 'RED CONTROL: the pre-lane rule (the helper\'s word believed) ends the incident\'s session display_gone — the page then showed the VNC picture', { ended: m.ended, aus: m.aus.length });
+  ok(gateOf(macText.includes(BELIEVE)) && m.ended === 'display_gone' && m.aus.length < 30, 'RED CONTROL: the pre-lane rule (the helper\'s word believed) ends the incident\'s session display_gone — the page then showed the VNC picture', { ended: m.ended, aus: m.aus.length });
   FK.set({ endAfter: 0, endOnce: null });
   try { fs.rmSync(tok, { force: true }); } catch { /* gone */ }
 }
@@ -618,7 +618,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4a GONE MEANS G
   const b = await scr.source({ sourceKind: 'screen' });
   await sleep(300);
   const rows = logs().slice(n0).filter((l) => l.argv && l.argv.includes('--register-row'));
-  ok(a.ok === false && a.code === 'screen_permission' && a.settings === SP.MAC_SETTINGS.screen && b.code === 'screen_permission' && rows.length === 1 && same(rows[0].argv, ['--disclaim', 'capture', '--display', '3', '--register-row']), 'Screen Recording off ⇒ screen_permission with the pane\'s link — and ONE disclaimed run that adds the helper\'s (off) row in Settings, never again for this version', { a, rows });
+  ok(a.ok === false && a.code === 'screen_permission' && a.settings === SP.MAC_SETTINGS.screen && b.code === 'screen_permission' && rows.length === 1 && verdictOf(same(rows[0].argv, ['--disclaim', 'capture', '--display', '3', '--register-row'])), 'Screen Recording off ⇒ screen_permission with the pane\'s link — and ONE disclaimed run that adds the helper\'s (off) row in Settings, never again for this version', { a, rows });
   FK.set({ tcc: { screen: 'granted', accessibility: 'granted' } });
 }
 {
@@ -632,11 +632,11 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4a GONE MEANS G
   const f2 = await sR.facts({ force: true });
   const b = await sR.source({ sourceKind: 'screen' });
   if (b.ok) b.stop();
-  ok(a.code === 'helper_changed_regrant' && /off and on/.test(a.error) && f2.helper.regrant === false && b.ok, 'the agent replaced a GRANTED helper ⇒ helper_changed_regrant (turn it off and on); once the facts see the grant, the stream plays', { a, regrant: f2.helper && f2.helper.regrant });
+  ok(a.code === 'helper_changed_regrant' && gateOf(/off and on/.test(a.error)) && f2.helper.regrant === false && verdictOf(b.ok), 'the agent replaced a GRANTED helper ⇒ helper_changed_regrant (turn it off and on); once the facts see the grant, the stream plays', { a, regrant: f2.helper && f2.helper.regrant });
   const hN = home('smac-none');
   const sN = MAC.createMacScreen({ spawn, execFile: fakeExec({}).ef, env: { HOME: hN, PATH: process.env.PATH }, fs });
   const n = await sN.source({ sourceKind: 'screen' });
-  ok(n.ok === false && n.code === 'no_helper' && n.helper && n.helper.version === SRC.VERSION && n.helper.dir === SP.macHelperPaths(hN).dir, 'no helper and no compiler ⇒ no_helper carrying the dir + version a hub needs to push its prebuilt', n);
+  ok(n.ok === false && n.code === 'no_helper' && gateOf(n.helper) && n.helper.version === SRC.VERSION && n.helper.dir === SP.macHelperPaths(hN).dir, 'no helper and no compiler ⇒ no_helper carrying the dir + version a hub needs to push its prebuilt', n);
 }
 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4b THE WINDOW LOOK + THE SCREEN TABLE through the helper (lane mac-window-list-helper)');
@@ -646,18 +646,18 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4b THE WINDOW L
   const sL = MAC.createMacScreen({ spawn, execFile, env: { HOME: hL, PATH: process.env.PATH }, fs });
   const off = await sL.look();
   const table = await sL.look({ force: false, windows: false });
-  ok(off.ok === false && off.code === 'screen_permission' && /vibespace-screen/.test(off.error) && off.settings === SP.MAC_SETTINGS.screen && table.ok && table.displays.length === 2, 'the window look without Screen Recording ⇒ screen_permission BY NAME (vibespace-screen + the pane); the screen table needs no grant', { off, n: table.displays && table.displays.length });
+  ok(off.ok === false && off.code === 'screen_permission' && gateOf(/vibespace-screen/.test(off.error)) && off.settings === SP.MAC_SETTINGS.screen && gateOf(table.ok) && table.displays.length === 2, 'the window look without Screen Recording ⇒ screen_permission BY NAME (vibespace-screen + the pane); the screen table needs no grant', { off, n: table.displays && table.displays.length });
   FL.set({ tcc: { screen: 'granted', accessibility: 'denied' } });
   const on = await sL.look();
   const argvs = () => helperLog(logL).map((l) => l.argv).filter(Boolean);
-  ok(on.ok && on.windows.length === 2 && on.windows[0].bundle === 'com.apple.TextEdit' && argvs().length >= 2 && argvs().every((a) => a[0] === '--disclaim' && a[1] === 'facts'), 'granted ⇒ the helper\'s fresh facts; every run DISCLAIMED `facts` (a look never adds the Settings row)', argvs());
+  ok(gateOf(on.ok) && on.windows.length === 2 && on.windows[0].bundle === 'com.apple.TextEdit' && argvs().length >= 2 && verdictOf(argvs().every((a) => a[0] === '--disclaim' && a[1] === 'facts')), 'granted ⇒ the helper\'s fresh facts; every run DISCLAIMED `facts` (a look never adds the Settings row)', argvs());
   const runs0 = argvs().length; await sL.look({ force: false, windows: false });
   ok(argvs().length === runs0, 'the screen table reuses the kept facts (30 s): no extra run');
   const before = Date.now();
   const kid = spawn('sleep', ['30']); cleanups.push(() => { try { kid.kill(); } catch { } });
   const dead = spawn('true'); await new Promise((r) => dead.on('exit', r));
   const st = await sL.starts([kid.pid, dead.pid, process.pid, kid.pid]);
-  ok(st.size === 2 && st.has(process.pid) && !st.has(dead.pid) && st.get(kid.pid) >= before - 2000 && st.get(kid.pid) <= before + 1000, 'starts(): REAL `ps -o pid= -o lstart=` (C locale) — a running pid\'s start (second precision), an ended one absent', { st: [...st], before });
+  ok(st.size === 2 && gateOf(st.has(process.pid)) && !st.has(dead.pid) && st.get(kid.pid) >= before - 2000 && st.get(kid.pid) <= before + 1000, 'starts(): REAL `ps -o pid= -o lstart=` (C locale) — a running pid\'s start (second precision), an ended one absent', { st: [...st], before });
   try { kid.kill(); } catch { }
   {
     // THE ZONE (主开发 2026-11-17): ps prints a start in ITS env's zone, psStarts reads it in this process's — the suite's zone set
@@ -701,7 +701,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5 THE INJECTOR 
   const r4 = await inj.inject([{ t: 'kd', c: 'Pause' }], null);
   const lines = helperLog(logI).filter((l) => l.input).map((l) => l.input);
   const argv = helperLog(logI).find((l) => l.argv).argv;
-  ok(inj.kind === 'cgevent' && r1.ok && r1.n === 3 && r2.ok && r3.ok && same(argv, ['--disclaim', 'input']) && same(lines, ['P 77 4242', 'K 0 0', 'M 110 55', 'D 0', 'M 110 55', 'U 0', 'K 0 1', 'P 0', 'M 102 52']) && r4.refused[0].code === 'unmapped_key', 'THE injector on a Mac = the helper\'s `input`, disclaimed: `P <pid> <window>` once per target (the window its keys must reach), virtual key codes, the pointer in global points; a key with no Mac twin refused', { lines, argv, r4 });
+  ok(inj.kind === 'cgevent' && gateOf(r1.ok) && r1.n === 3 && gateOf(r2.ok) && gateOf(r3.ok) && gateOf(same(argv, ['--disclaim', 'input'])) && gateOf(same(lines, ['P 77 4242', 'K 0 0', 'M 110 55', 'D 0', 'M 110 55', 'U 0', 'K 0 1', 'P 0', 'M 102 52'])) && r4.refused[0].code === 'unmapped_key', 'THE injector on a Mac = the helper\'s `input`, disclaimed: `P <pid> <window>` once per target (the window its keys must reach), virtual key codes, the pointer in global points; a key with no Mac twin refused', { lines, argv, r4 });
   inj.close();
   const hA = home('smac-ax');
   writeFakeMacHelper(hA, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted', accessibility: 'denied' }, inputAnswer: 'ax_denied' });
@@ -728,13 +728,13 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN 
   const t7 = run([{ t: 'door' }, Fx('granted'), SPAWN, Fx('granted')]);
   const t8 = run([SPAWN, A('ok'), Fx('unknown'), Fx('granted'), A('ax_denied'), { t: 'gone' }, Fx('granted')]);
   const t9 = run([Fx('denied'), SPAWN, A('ax_denied'), A('ok'), Fx('denied'), SPAWN]); // a flip, then the facts say denied before the next child: it is born denied
-  ok(same(t1.out, [{ from: 'denied', to: 'granted', why: 'facts' }]) && t1.st.child === null && same(t1.st.next, { born: 'granted' })
-    && same(t2.out, [{ from: 'granted', to: 'denied', why: 'facts' }])
-    && same(t3.out, [])
-    && same(t4.out, [{ from: 'denied', to: 'granted', why: 'answer' }])
-    && same(t5.out, [{ from: 'denied', to: 'granted', why: 'facts' }])
-    && same(t6.out, [{ from: 'granted', to: 'granted', why: 'door' }]) && same(t7.out, [])
-    && same(t8.out, []) && t9.st.child.born === 'denied' && t9.st.child.origin === 'replace',
+  ok(gateOf(same(t1.out, [{ from: 'denied', to: 'granted', why: 'facts' }])) && t1.st.child === null && gateOf(same(t1.st.next, { born: 'granted' }))
+    && gateOf(same(t2.out, [{ from: 'granted', to: 'denied', why: 'facts' }]))
+    && gateOf(same(t3.out, []))
+    && gateOf(same(t4.out, [{ from: 'denied', to: 'granted', why: 'answer' }]))
+    && gateOf(same(t5.out, [{ from: 'denied', to: 'granted', why: 'facts' }]))
+    && gateOf(same(t6.out, [{ from: 'granted', to: 'granted', why: 'door' }])) && gateOf(same(t7.out, []))
+    && gateOf(same(t8.out, [])) && t9.st.child.born === 'denied' && t9.st.child.origin === 'replace',
   'THE RESPAWN RULE (PURE): ax_denied then facts granted ⇒ replaced (denied → granted); granted → denied ⇒ replaced; 50 ax_denied + the same facts ⇒ never; the child\'s own ax_denied → ok ⇒ replaced ONCE (the facts that follow find it born granted); a child born BY a replacement still saying ax_denied under granted facts ⇒ not again (no loop); the door\'s re-read ⇒ replaced once, a door with no child ⇒ nothing; an ok with no denial, an unknown value, a child gone ⇒ nothing', { t1, t2, t3: t3.out, t4: t4.out, t5: t5.out, t6: t6.out, t7: t7.out, t8: t8.out, t9: t9.st });
 
   // THE REAL injector + THE REAL facts (createMacScreen's helper — the daemon's wiring: mac: () => macHelperOf()) over the fake
@@ -767,8 +767,8 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN 
   await X.sc.facts({ force: true }); // the facts: granted ⇒ THE child is replaced
   const a3 = await key(X.inj);
   const p3 = X.pids();
-  ok(rc(a1) === 'accessibility_permission' && rc(a2) === 'accessibility_permission' && before === 1 && a3.ok && a3.n === 2 && X.births() === 2 && p3.length === 2 && p3[0] !== p3[1]
-    && same(X.replaced(), ['[input] replaced the Mac input child: accessibility denied → granted']),
+  ok(rc(a1) === 'accessibility_permission' && rc(a2) === 'accessibility_permission' && before === 1 && gateOf(a3.ok) && a3.n === 2 && X.births() === 2 && p3.length === 2 && p3[0] !== p3[1]
+    && verdictOf(same(X.replaced(), ['[input] replaced the Mac input child: accessibility denied → granted'])),
   '① a child that answered ax_denied + the facts now granted ⇒ REPLACED: the next inject spawns a NEW child (pid differs) and lands ok; the log line once', { a1, a2, a3, births: X.births(), pids: p3, said: X.said });
   X.fk.set({ tcc: DENIED, inputAnswer: 'ax_denied' });
   await X.sc.facts({ force: true }); // revoked: the child born granted would post "ok" into a void
@@ -777,7 +777,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN 
     '② granted → denied ⇒ replaced too (a revoked grant never keeps a child WindowServer now ignores): the new child says ax_denied — the strip\'s banner', { b1, said: X.said });
   const no = [];
   for (let i = 0; i < 50; i++) { no.push(await X.inj.inject([{ t: 'mv', x: i, y: i }], { ...tg, pid: 77 + (i % 2) })); if (i % 10 === 9) await X.sc.facts({ force: true }); } // two apps in turn: a `P` line (answered ok unasked) before every move
-  ok(no.every((r) => rc(r) === 'accessibility_permission') && X.births() === 3 && X.replaced().length === 2,
+  ok(gateOf(no.every((r) => rc(r) === 'accessibility_permission')) && X.births() === 3 && X.replaced().length === 2,
     'no flip ⇒ NO replacement across 50 injects (ax_denied every time, five more facts reads still denied, a `P` answered ok between — never a flip): ONE child — at most one replacement per change', { births: X.births(), said: X.said });
 
   // the child's OWN answer flips ax_denied → ok (its AXIsProcessTrusted re-read — every 2 s on a Mac)
@@ -789,7 +789,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN 
   const f3 = await key(F.inj);
   await F.sc.facts({ force: true }); // denied → granted: the child born after the flip is NOT replaced again
   const f4 = await key(F.inj);
-  ok(rc(f1) === 'accessibility_permission' && f2.ok && f3.ok && f4.ok && F.births() === 2 && F.pids().length === 2 && same(F.replaced(), ['[input] replaced the Mac input child: accessibility denied → granted']),
+  ok(rc(f1) === 'accessibility_permission' && gateOf(f2.ok) && gateOf(f3.ok) && gateOf(f4.ok) && F.births() === 2 && F.pids().length === 2 && verdictOf(same(F.replaced(), ['[input] replaced the Mac input child: accessibility denied → granted'])),
     'its own answer flips ax_denied → ok ⇒ replaced ONCE — the key after it reaches a NEW child; the facts that then say granted replace nothing more', { f1, f2, f3, f4, births: F.births(), said: F.said });
 
   // the old child's lines IN FLIGHT answer `err replaced` (the stream host's refusal by name: injector_replaced)
@@ -800,7 +800,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN 
   D.fk.set({ tcc: DENIED });
   await D.sc.facts({ force: true });
   const d1 = await pending; // without the replacement that line would answer `ok` (8 s later)
-  ok(reached && d1.ok === false && d1.n === 0 && rc(d1) === 'injector_replaced' && (d1.refused[0] || {}).detail === 'err replaced 0' && D.replaced().length === 1,
+  ok(gateOf(reached) && d1.ok === false && d1.n === 0 && rc(d1) === 'injector_replaced' && (d1.refused[0] || {}).detail === 'err replaced 0' && D.replaced().length === 1,
     'a replacement answers the old child\'s lines in flight `err replaced` (refused BY NAME: injector_replaced) — never the old child\'s late `ok`, never the next child\'s answer', { d1, said: D.said });
 
   // THE DOOR: 「打开系统设置」 → Accessibility; its re-read replaces a child born before it — the value never moved
@@ -815,7 +815,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN 
   const o2 = await key(O.inj);
   await O.sc.facts({ force: true });
   const o3 = await key(O.inj);
-  ok(o1.ok && scr1.ok && afterScreen === 0 && od.ok && swapped && o2.ok && o3.ok && O.births() === 2 && O.pids().length === 2 && same(O.replaced(), ['[input] replaced the Mac input child: accessibility granted → granted']),
+  ok(gateOf(o1.ok) && gateOf(scr1.ok) && afterScreen === 0 && gateOf(od.ok) && gateOf(swapped) && gateOf(o2.ok) && gateOf(o3.ok) && O.births() === 2 && O.pids().length === 2 && verdictOf(same(O.replaced(), ['[input] replaced the Mac input child: accessibility granted → granted'])),
     '③ the Accessibility door (settings-open) re-reads the facts and THAT read replaces the child born before it (the owner deleted + re-added the row: the value never moved); the Screen Recording door replaces nothing; a later read nothing more', { o1, o2, o3, births: O.births(), said: O.said });
   for (const z of [X, F, D, O]) z.inj.close();
 }
@@ -827,9 +827,9 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§T the daemon legs (§6, §7) run in the HEAVY TWIN scripts/test-stream-mac-daemon.mjs (B-7e49, r4363)');
 {
   const twin = (() => { try { return fs.readFileSync(path.join(REPO, 'scripts/test-stream-mac-daemon.mjs'), 'utf8'); } catch { return ''; } })(), mine = fs.readFileSync(path.join(REPO, 'scripts/test-stream-mac.mjs'), 'utf8');
-  ok(/^async function daemonLegs\(\) \{$/m.test(twin) && twin.includes("'§6 a REAL Mac-shaped daemon'") && twin.includes("'§7 a REAL Mac-shaped daemon: window-track") && /^await daemonLegs\(\);$/m.test(twin), '§T the twin holds the daemon legs (§6, §7) and runs them');
+  ok(gateOf(/^async function daemonLegs\(\) \{$/m.test(twin)) && gateOf(twin.includes("'§6 a REAL Mac-shaped daemon'")) && gateOf(twin.includes("'§7 a REAL Mac-shaped daemon: window-track")) && verdictOf(/^await daemonLegs\(\);$/m.test(twin)), '§T the twin holds the daemon legs (§6, §7) and runs them');
   ok(!/^async function daemonLegs\(\)/m.test(mine) && !/^const daemonRun = /m.test(mine), '§T this file runs none of them');
-  ok(/\{ name: 'test-stream-mac-daemon', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')), '§T the twin is a HEAVY row of the tier');
+  ok(verdictOf(/\{ name: 'test-stream-mac-daemon', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8'))), '§T the twin is a HEAVY row of the tier');
 }
 console.log(`\n${fail ? '✗' : '✓'} test-stream-mac: ${pass} passed, ${fail} failed`);
-setTimeout(() => process.exit(fail ? 1 : 0), 50);
+setTimeout(() => process.exit(fail ? 1 : 0), 50); import { verdictOf, gateOf } from './lib/check.mjs';

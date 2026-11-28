@@ -16,7 +16,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const J = JSON.stringify;
 
@@ -112,7 +112,7 @@ console.log('LAW 2 — «NOT YET HANDED» IS ASKED OF THE HUB\'S OWN RECORD AT T
   const ge = read('src/server/groups-engine.js');
   ok('nothing is kept for it: no ledger file, no seq, no wait record, no told mark — the reading reads the log off the loop (readFoldedAsync over the store\'s async tail) through the report\'s own reach (reachFor)',
     !fs.existsSync(path.join(W.dir, 'channels', 'group-waits')) && !/waitsAt|waitTold|"waits":/.test(fs.readFileSync(path.join(W.dir, 'channels', 'groups.json'), 'utf8'))
-      && /async function readWaiting\(cid[\s\S]*?await readFoldedAsync\(g0\.id[\s\S]*?const take = unreceivedFor\(g, cid\);/.test(ge) && /function unreceivedFor\(g, who\) \{\n    const mode = modeOf\(g, who\);\n    const reach = mode === 'mention' \? reachFor\(g, who\) : null;/.test(ge));
+      && gateOf(/async function readWaiting\(cid[\s\S]*?await readFoldedAsync\(g0\.id[\s\S]*?const take = unreceivedFor\(g, cid\);/.test(ge)) && verdictOf(/function unreceivedFor\(g, who\) \{\n    const mode = modeOf\(g, who\);\n    const reach = mode === 'mention' \? reachFor\(g, who\) : null;/.test(ge)));
 }
 {
   const W = world('antigravity');
@@ -165,10 +165,10 @@ console.log('LAW 1 — ONLY A CONVERSATION IN A RUNNING TURN; THE SENDER AT ONE 
   ok('NEVER THE SAME SET TWICE: more messages to the same member ⇒ the entry is not filed again (one entry, its first words)', W.slot().length === 1 && W.slot()[0].text === want, J(W.slot().map((x) => x.text)));
   const took = W.deliver.drainStash(A);
   await W.at(76); await W.at(81);
-  ok('…and once HANDED (drained into the sender\'s turn) the same set is not filed again — the slot remembers the set it handed, in the stash file', took.some((x) => x.slot === WATCH.SLOT) && W.slot().length === 0 && /"__slots"/.test(fs.readFileSync(path.join(W.dir, 'msg-stash.json'), 'utf8')), J(W.slot()));
+  ok('…and once HANDED (drained into the sender\'s turn) the same set is not filed again — the slot remembers the set it handed, in the stash file', gateOf(took.some((x) => x.slot === WATCH.SLOT)) && W.slot().length === 0 && verdictOf(/"__slots"/.test(fs.readFileSync(path.join(W.dir, 'msg-stash.json'), 'utf8'))), J(W.slot()));
   const gy = await pair(W, 'to yank', Y);
   await W.at(142);
-  ok('a member JOINS the set (alpha\'s message to yank has waited an hour too) ⇒ filed again, naming both', W.slot().length === 1 && /to «xray» \(/.test(W.slot()[0].text) && /to «yank» \(1, sent at /.test(W.slot()[0].text), J(W.slot().map((x) => x.text)));
+  ok('a member JOINS the set (alpha\'s message to yank has waited an hour too) ⇒ filed again, naming both', W.slot().length === 1 && gateOf(/to «xray» \(/.test(W.slot()[0].text)) && verdictOf(/to «yank» \(1, sent at /.test(W.slot()[0].text)), J(W.slot().map((x) => x.text)));
   await W.drain(['q2', 'q3']); await W.drain(['q3']); await W.drain([]); await W.report(); await W.report(Y);
   await W.at(143);
   ok('the set EMPTIES (xray\'s frames carried and both reported) ⇒ the standing entry leaves', W.slot().length === 0, J(W.slot()));
@@ -178,7 +178,7 @@ console.log('LAW 1 — ONLY A CONVERSATION IN A RUNNING TURN; THE SENDER AT ONE 
   const W = world('claude');
   const gid = await pair(W);
   await W.at(61);
-  ok('claude: a quiet message behind its turn waits for its next report and IS said — «in a turn», never «since» (no record states its opening)', W.slot().length === 1 && / in a turn\)\.$/.test(W.slot()[0].text) && !/since \d/.test(W.slot()[0].text.split('; ').pop()), J(W.slot().map((x) => x.text)));
+  ok('claude: a quiet message behind its turn waits for its next report and IS said — «in a turn», never «since» (no record states its opening)', W.slot().length === 1 && gateOf(/ in a turn\)\.$/.test(W.slot()[0].text)) && !/since \d/.test(W.slot()[0].text.split('; ').pop()), J(W.slot().map((x) => x.text)));
   void gid;
 }
 {
@@ -192,7 +192,7 @@ console.log('LAW 1 — ONLY A CONVERSATION IN A RUNNING TURN; THE SENDER AT ONE 
   const q2 = W.deliver.stashEntries(A);
   ok('…a 31st real entry drops the oldest REAL one (the cap as before), the waiting entry stays', q2.filter((e) => !e.slot).length === 30 && !q2.some((e) => e.text === 'real entry 0') && W.slot().length === 1);
   const pm = renderMsgStash(W.slot(), { maxBytes: 6144 });
-  ok('…and its text reaches the sender\'s turn UNBROKEN (rendered whole, never cut to a 400-character line)', pm.text.includes(W.slot()[0].text), pm.text.slice(0, 300));
+  ok('…and its text reaches the sender\'s turn UNBROKEN (rendered whole, never cut to a 400-character line)', verdictOf(pm.text.includes(W.slot()[0].text)), pm.text.slice(0, 300));
 }
 
 console.log('THE OWNER — ONE ITEM PER CONVERSATION AND TURN AT FOUR HOURS; TWO END WORDS');
@@ -210,7 +210,7 @@ console.log('THE OWNER — ONE ITEM PER CONVERSATION AND TURN AT FOUR HOURS; TWO
   ok('its ONLY door opens the conversation (one jump button); its two end words', !!ROW && ROW.buttons.length === 1 && ROW.buttons[0].door === 'jump' && J(Object.keys(ROW.endWords)) === J(['handed', 'turn-ended']) && J(WATCH.OWN_ENDS) === J(['handed', 'turn-ended']));
   await W.eng.post({ group: gid, from: A, text: 'five', wake: false });
   await W.at(246);
-  ok('a fifth message ⇒ the SAME item, drawn again: «5 group messages …»', W.mine().length === 1 && W.open()[0].id === it.id && W.open()[0].text.startsWith('5 group messages'), J(W.open().map((i) => i.text)));
+  ok('a fifth message ⇒ the SAME item, drawn again: «5 group messages …»', W.mine().length === 1 && W.open()[0].id === it.id && verdictOf(W.open()[0].text.startsWith('5 group messages')), J(W.open().map((i) => i.text)));
   await W.drain(['q2', 'q3']); await W.drain(['q3']); await W.drain([]); await W.report();
   await W.at(251);
   const done = W.mine().find((i) => i.id === it.id);
@@ -281,7 +281,7 @@ console.log('THE READER\'S SCENES, PINNED (主开发 15:30Z item 7 — int359/ac
   await W.at(66);
   await W.eng.post({ group: gid, from: A, text: 'a new question', wake: false });
   await W.at(200);
-  ok('S1d the set went {X} → {} → {X} (X left, X joined) ⇒ the sender is told of the NEW wait — an emptied set forgets the set it handed', W.slot().length === 1 && /to «xray» \(1, sent at /.test(W.slot()[0].text), J(W.slot().map((x) => x.text)));
+  ok('S1d the set went {X} → {} → {X} (X left, X joined) ⇒ the sender is told of the NEW wait — an emptied set forgets the set it handed', W.slot().length === 1 && verdictOf(/to «xray» \(1, sent at /.test(W.slot()[0].text)), J(W.slot().map((x) => x.text)));
 }
 {
   const W = world('antigravity');
@@ -304,7 +304,7 @@ console.log('THE READER\'S SCENES, PINNED (主开发 15:30Z item 7 — int359/ac
   W.watch = W.mkWatch(WATCH, () => ({ ...real, readWaiting: async (cid, o) => { if (cid === X) throw new Error('fail'); return real.readWaiting(cid, o); } }));
   await W.at(66);
   const t1 = W.slot()[0] && W.slot()[0].text;
-  ok('S2x one member\'s failed reading does not change what the sender is shown (no slot is touched in that sweep)', !!t0 && t1 === t0 && /«xray»/.test(t0) && /«yank»/.test(t0), J({ t0, t1 }));
+  ok('S2x one member\'s failed reading does not change what the sender is shown (no slot is touched in that sweep)', !!t0 && t1 === t0 && gateOf(/«xray»/.test(t0)) && verdictOf(/«yank»/.test(t0)), J({ t0, t1 }));
 }
 for (const be of ['antigravity', 'claude']) {
   const W = world(be);
@@ -331,16 +331,16 @@ console.log('THE READING\'S OWN BOUND (主开发 15:30Z item 5 — the newest 20
   for (let i = 0; i < 260; i++) W.st.appendRecords(G.GROUP_ADAPTER_ID, gid, [{ ...proto, vendorId: 'gm-b-' + i, at: Date.now() + i + 10, text: 'm' + i }]);
   await W.st.groups.update((gr) => { gr.groups[gid].lastAt = Date.now() + 300; });
   const narrow = await W.r(), wide = await W.eng.readWaiting(X, { now: Date.now(), olderThan: 0, limit: 1e6, maxBytes: Infinity });
-  ok('261 messages behind its mark: the reading\'s own 200-record bound says NO count and «since at least» the oldest it saw; widened, the whole count (261)', narrow.groups[0].n === null && narrow.groups[0].atLeast && wide.groups[0].n === 261 && narrow.groups[0].oldest > wide.groups[0].oldest, J({ narrow: narrow.groups[0] && [narrow.groups[0].n, narrow.groups[0].atLeast], wide: wide.groups[0] && wide.groups[0].n }));
+  ok('261 messages behind its mark: the reading\'s own 200-record bound says NO count and «since at least» the oldest it saw; widened, the whole count (261)', narrow.groups[0].n === null && gateOf(narrow.groups[0].atLeast) && wide.groups[0].n === 261 && narrow.groups[0].oldest > wide.groups[0].oldest, J({ narrow: narrow.groups[0] && [narrow.groups[0].n, narrow.groups[0].atLeast], wide: wide.groups[0] && wide.groups[0].n }));
   const W2 = world('antigravity');
   const g2 = await pair(W2);
   const p2 = W2.st.readTail(G.GROUP_ADAPTER_ID, g2, { limit: 1 })[0];
   for (let i = 0; i < 150; i++) W2.st.appendRecords(G.GROUP_ADAPTER_ID, g2, [{ ...p2, vendorId: 'gm-k-' + i, at: Date.now() + i + 10, text: 'x'.repeat(2048) }]);
   await W2.st.groups.update((gr) => { gr.groups[g2].lastAt = Date.now() + 200; });
   const r2 = await W2.r();
-  ok('151 messages of 2 KB (over 256 KB): the byte bound says no count either, though fewer than 200 records', r2.groups[0].n === null && r2.groups[0].atLeast, J(r2.groups[0] && [r2.groups[0].n, r2.groups[0].atLeast]));
+  ok('151 messages of 2 KB (over 256 KB): the byte bound says no count either, though fewer than 200 records', r2.groups[0].n === null && verdictOf(r2.groups[0].atLeast), J(r2.groups[0] && [r2.groups[0].n, r2.groups[0].atLeast]));
   const ge = read('src/server/groups-engine.js');
-  ok('…read in 64 KB windows and the sweep yields to the loop between reads (each parse a small slice: no hold over 20 ms — the cost driver\'s numbers in the line)', /const WAIT_READ = 200, WAIT_READ_BYTES = 256 \* 1024, WAIT_READ_WINDOW = 64 \* 1024;/.test(ge) && /await readFoldedAsync\(g0\.id, \{ limit, maxBytes, windowBytes: WAIT_READ_WINDOW \}\);\n\s+await new Promise\(\(r\) => setImmediate\(r\)\);/.test(ge));
+  ok('…read in 64 KB windows and the sweep yields to the loop between reads (each parse a small slice: no hold over 20 ms — the cost driver\'s numbers in the line)', gateOf(/const WAIT_READ = 200, WAIT_READ_BYTES = 256 \* 1024, WAIT_READ_WINDOW = 64 \* 1024;/.test(ge)) && verdictOf(/await readFoldedAsync\(g0\.id, \{ limit, maxBytes, windowBytes: WAIT_READ_WINDOW \}\);\n\s+await new Promise\(\(r\) => setImmediate\(r\)\);/.test(ge)));
 }
 {
   const W = world('antigravity');
@@ -349,7 +349,7 @@ console.log('THE READING\'S OWN BOUND (主开发 15:30Z item 5 — the newest 20
   await W.at(241);
   const it = W.open()[0], e = W.slot()[0];
   const nm = it && it.i18n.text.params.name;
-  ok('A NAME IS A PEER\'S TEXT: the owner\'s item stores it as ONE clipped line (no newline, at most 80) and the sender\'s entry quotes it «…», the same clip', !!it && !/\n/.test(nm) && nm.length <= 80 && !/\n/.test(it.text) && !!e && e.text.includes(`to «${nm}» (`), J({ nm, len: nm && nm.length, e: e && e.text.slice(0, 160) }));
+  ok('A NAME IS A PEER\'S TEXT: the owner\'s item stores it as ONE clipped line (no newline, at most 80) and the sender\'s entry quotes it «…», the same clip', !!it && !/\n/.test(nm) && nm.length <= 80 && !/\n/.test(it.text) && !!e && verdictOf(e.text.includes(`to «${nm}» (`)), J({ nm, len: nm && nm.length, e: e && e.text.slice(0, 160) }));
 }
 
 console.log('THE BOUND — NO COUNT, «SINCE AT LEAST»');
@@ -363,7 +363,7 @@ console.log('THE BOUND — NO COUNT, «SINCE AT LEAST»');
   const r = await W.r();
   await W.at(241);
   ok('a member far behind (its mark under 2 010 messages, the read\'s bound 2 000): NO count, its oldest the oldest the read SAW — «since at least» to the owner and the sender', r.groups[0].n === null && r.groups[0].atLeast === true && r.groups[0].senders[A].n === null
-    && W.open()[0] && W.open()[0].text.startsWith('Group messages have not been handed to xray yet — since at least ') && /to «xray» \(since at least /.test((W.slot()[0] || {}).text || ''), J({ r: r.groups[0] && { n: r.groups[0].n, atLeast: r.groups[0].atLeast }, item: W.open()[0] && W.open()[0].text, slot: W.slot().map((x) => x.text) }));
+    && gateOf(W.open()[0]) && gateOf(W.open()[0].text.startsWith('Group messages have not been handed to xray yet — since at least ')) && verdictOf(/to «xray» \(since at least /.test((W.slot()[0] || {}).text || '')), J({ r: r.groups[0] && { n: r.groups[0].n, atLeast: r.groups[0].atLeast }, item: W.open()[0] && W.open()[0].text, slot: W.slot().map((x) => x.text) }));
   await W.queueWakes(gid, ['framed']);
   const r2 = await W.r();
   ok('…and a held frame reaching back past the bound says no count either', r2.groups[0].n === null && r2.groups[0].atLeast === true, J(r2.groups[0] && { n: r2.groups[0].n }));
@@ -381,7 +381,7 @@ console.log('THE CARD · NO BILLED TURN · NOTHING REACHES A CLIENT · THE WORDS
     await pair(Wc); await Wc.at(241);
     rows.push({ be, chip: chipAsksOf(Wc.S).length, slot: (Wc.slot()[0] || {}).text || '', item: (Wc.open()[0] || {}).detail || '' });
   }
-  ok('the card, on every harness speaking codex-events or acp-events, through its REAL normalizer: «a waiting-for-you card is open in it» to the sender and the owner', rows.length >= 3 && rows.every((r) => r.chip > 0 && /a waiting-for-you card is open in it\)\.$/.test(r.slot) && /A waiting-for-you card is open in it\./.test(r.item)), J(rows));
+  ok('the card, on every harness speaking codex-events or acp-events, through its REAL normalizer: «a waiting-for-you card is open in it» to the sender and the owner', rows.length >= 3 && verdictOf(rows.every((r) => r.chip > 0 && /a waiting-for-you card is open in it\)\.$/.test(r.slot) && /A waiting-for-you card is open in it\./.test(r.item))), J(rows));
 }
 {
   const W = world('antigravity');
@@ -391,7 +391,7 @@ console.log('THE CARD · NO BILLED TURN · NOTHING REACHES A CLIENT · THE WORDS
   await W.at(61); await W.at(241); await W.at(246);
   ok('no billed turn: the sweeps that told the sender and filed the item asked the spend gate for nothing and wrote no frame', J(W.money) === m0 && W.frames.length === f0 && W.slot().length === 1 && W.open().length === 1);
   const views = [J(W.eng.get(gid)), J(W.eng.read({ by: X, group: gid, limit: 50 }).group), J(W.eng.list ? W.eng.list() : null), ...W.sent.map((m) => J(m))];
-  ok('nothing of the reading reaches a client: no view, read answer or broadcast carries it (the item and the sender\'s entry are its only surfaces)', views.every((v) => !/"senders"|"atLeast"|"waitsAt"|"waitTold"/.test(String(v))) && W.sent.length > 0, J(views.filter((v) => /"senders"|"atLeast"/.test(String(v))).map((v) => v.slice(0, 120))));
+  ok('nothing of the reading reaches a client: no view, read answer or broadcast carries it (the item and the sender\'s entry are its only surfaces)', gateOf(views.every((v) => !/"senders"|"atLeast"|"waitsAt"|"waitTold"/.test(String(v)))) && W.sent.length > 0, J(views.filter((v) => /"senders"|"atLeast"/.test(String(v))).map((v) => v.slice(0, 120))));
   const src = read('src/server/wait-watch.js') + read('src/wait-words.js');
   ok('…the watch and its words name no spend door and no wake', !/authorize|noteSpend|releaseSpend|spendGuard|wake:\s*true|\.post\(/.test(src));
 }
@@ -401,9 +401,9 @@ console.log('THE CARD · NO BILLED TURN · NOTHING REACHES A CLIENT · THE WORDS
   const dict = (rel) => { const s = read(rel); return keys.map((k) => { const m = new RegExp(J(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':\\s*("(?:[^"\\\\]|\\\\.)*")').exec(s); return m ? JSON.parse(m[1]) : null; }); };
   const zh = dict('src/lib/i18n-zh.js'), ja = dict('src/lib/i18n-ja.js');
   const said = [...keys, WW.senderEntry([{ name: 'x', n: 2, oldestText: 'T', openedText: 'T2', card: true }, { name: 'y', n: null, oldestText: 'T3', openedText: null }]), ...zh, ...ja];
-  ok('THE WORDS say what the hub did (handed or not) — no verdict word in en / zh / ja; every key translated; zh says «hub» as the product does, never «中枢»', said.every((x) => x && !BANNED.test(x)) && zh.every(Boolean) && ja.every(Boolean) && !zh.some((x) => /中枢/.test(x)), J({ hits: said.filter((x) => x && BANNED.test(x)), missing: keys.filter((k, i) => !zh[i] || !ja[i]) }));
+  ok('THE WORDS say what the hub did (handed or not) — no verdict word in en / zh / ja; every key translated; zh says «hub» as the product does, never «中枢»', gateOf(said.every((x) => x && !BANNED.test(x))) && gateOf(zh.every(Boolean)) && gateOf(ja.every(Boolean)) && !zh.some((x) => /中枢/.test(x)), J({ hits: said.filter((x) => x && BANNED.test(x)), missing: keys.filter((k, i) => !zh[i] || !ja[i]) }));
   const name = 'a {since} $& name';
-  ok('…a name holding «{since}» or a «$» pattern cannot corrupt the stored English text', WW.ownerWords({ name, n: 2, since: 1_800_000_000_000 }).text.startsWith(`2 group messages have not been handed to ${name} yet`));
+  ok('…a name holding «{since}» or a «$» pattern cannot corrupt the stored English text', verdictOf(WW.ownerWords({ name, n: 2, since: 1_800_000_000_000 }).text.startsWith(`2 group messages have not been handed to ${name} yet`)));
   // every tracked file under src, server.js, data/bin, searched by git grep for the gone names as FIXED strings (one process; a JS
   // alternation over the whole tree was 0.3 s of this suite — 主开发 17:45Z item 4); no match = exit 1. A gone name that is an
   // ordinary word is named by its SHAPE, the way the removed thing was spelled: the cut's `function keptFrom(g, tail)` and its
@@ -421,7 +421,7 @@ console.log('THE CARD · NO BILLED TURN · NOTHING REACHES A CLIENT · THE WORDS
     const hit = (l) => GONE.some((w) => l.includes(w));
     const CUT = ['  function keptFrom(g, tail) {', '      const k = keptFrom(g, tail);', '    _kept: (gid) => GW.get(gid), _keptFrom: (gid, tail) => keptFrom(getGroup(gid), tail),'];
     const OTHER = ['  let keptFrom = null;   // the temporary folder the files were kept away from', '        if (home) { keptFrom = destDir; destDir = x; }', "    return (data.files || []).map((f) => (data.keptWithConversation ? { ...f, keptFrom: data.keptFrom || '' } : f));", '    if (keptFrom) {', "{ dir: kept.keptDir, from: kept.keptFrom }"];
-    ok('…THE REMOVAL names each gone thing by its shape: the cut\'s keptFrom definition, call and hook are caught; an unrelated `keptFrom` field or variable (chat-attachments, 2.369.402) is not', CUT.every(hit) && !OTHER.some(hit), J({ cut: CUT.map(hit), other: OTHER.map(hit) }));
+    ok('…THE REMOVAL names each gone thing by its shape: the cut\'s keptFrom definition, call and hook are caught; an unrelated `keptFrom` field or variable (chat-attachments, 2.369.402) is not', gateOf(CUT.every(hit)) && !OTHER.some(hit), J({ cut: CUT.map(hit), other: OTHER.map(hit) }));
   }
 }
 
@@ -453,11 +453,11 @@ console.log('RED CONTROLS — patched copies, each rule taken out');
     const D3 = md.mod && md.mod.create({ dataDir: fs.mkdtempSync(path.join(ROOT, 'dm-')), activeSessions: new Map(), serverSetting: () => undefined, getHosts: () => null, getConvIndex: () => null, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: true }), postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: () => true, log: () => { } });
     let again = null;
     if (D3) { D3.stashSlot(A, 'waiting', { text: 'w' }, { set: [X] }); D3.drainStash(A); again = D3.stashSlot(A, 'waiting', { text: 'w' }, { set: [X] }); }
-    ok('CONTROL: a slot that forgets the set it handed ⇒ the same set is filed again after the drain (rule a red)', !!D3 && again && again.filed === true, md.err || J(again)); }
+    ok('CONTROL: a slot that forgets the set it handed ⇒ the same set is filed again after the drain (rule a red)', !!D3 && gateOf(again) && again.filed === true, md.err || J(again)); }
   const me = copy('src/server/wait-watch.js', [["        if (cid && !running.has(cid)) end(it, 'turn-ended');", '        void cid;']]);
   { const W = world('antigravity', { mods: { WATCH: me.mod } }); await pair(W); await W.at(241); W.S._isStreaming = false; await W.at(246);
     ok('CONTROL: a watch without the turn\'s end ⇒ the item stays open after the turn ended (the end leg red)', !!me.mod && W.open().length === 1, me.err || J(W.open().length)); }
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

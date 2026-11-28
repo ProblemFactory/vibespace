@@ -47,7 +47,7 @@ const PN = require(path.join(REPO, 'src/plan-names.js'));
 const CC = require(path.join(REPO, 'src/cli-caps.js'));
 const LE = require(path.join(REPO, 'src/login-expiry.js'));
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -66,13 +66,13 @@ const NOW = Date.UTC(2026, 10, 13, 2);
 console.log('§1 the CLI\'s own subscription values');
 {
   const c = CPC.planCatalogOf(MAP.slice('new Map(['.length, -2), ['default_claude_max_20x', 'default_claude_zero', 'default_claude_max_5x', 'default_claude_max_20x']);
-  ok(c.anchor && JSON.stringify(c.types) === '["max","pro","enterprise","team"]' && c.orgTypes.max === 'claude_max' && JSON.stringify(c.tiers) === '["default_claude_max_20x","default_claude_max_5x"]' && JSON.stringify(c.withheld) === '["default_claude_zero"]', 'the measured map ⇒ types max / pro / enterprise / team in the CLI\'s order; the tiers sorted, `default_claude_zero` withheld (never offered)', c);
+  ok(gateOf(c.anchor) && JSON.stringify(c.types) === '["max","pro","enterprise","team"]' && c.orgTypes.max === 'claude_max' && JSON.stringify(c.tiers) === '["default_claude_max_20x","default_claude_max_5x"]' && JSON.stringify(c.withheld) === '["default_claude_zero"]', 'the measured map ⇒ types max / pro / enterprise / team in the CLI\'s order; the tiers sorted, `default_claude_zero` withheld (never offered)', c);
   const sc = CPC.createPlanScanner();
   const text = 'x'.repeat(5000) + ',"default_claude_max_5x",' + 'y'.repeat(300) + MAP + 'z'.repeat(50); // quoted, as the bytes hold it
   const cut = text.indexOf('"claude_pro"');
   sc.feed(text.slice(0, cut)); ok(!sc.found(), 'the scanner before the map\'s end: not found yet');
   sc.feed(text.slice(cut)); const r = sc.result();
-  ok(sc.found() && r.types.length === 4 && JSON.stringify(r.tiers) === '["default_claude_max_5x"]', 'a map CUT by a chunk boundary is read whole (the scanner carries the tail)', r);
+  ok(gateOf(sc.found()) && r.types.length === 4 && JSON.stringify(r.tiers) === '["default_claude_max_5x"]', 'a map CUT by a chunk boundary is read whole (the scanner carries the tail)', r);
   const none = CPC.createPlanScanner(); none.feed('nothing here default_claude_max_20x'); const n = none.result();
   ok(!n.anchor && n.types.length === 0 && n.tiers.length === 1, 'no map in the bytes ⇒ anchor false, no type (way ② is then not offered)', n);
   const hostile = CPC.planCatalogOf('["claude_max","MAX"],["claude_x","' + 'a'.repeat(41) + '"]', ['default_claude_<b>', 'default_claude_ok']);
@@ -94,7 +94,7 @@ console.log('§2 the dated table → the choices');
   ok(JSON.stringify(PN.choiceShape('ultra', CAT, { scopes: sc, now: NOW })) === '{"scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}' && JSON.stringify(PN.choiceShape('pro', CAT, { scopes: sc })) === '{"scopes":["user:inference"],"subscriptionType":"pro"}' && JSON.stringify(PN.choiceShape('type:team', CAT, { scopes: sc })) === '{"scopes":["user:inference"],"subscriptionType":"team"}', 'each choice writes the mint\'s scopes + exactly the chosen values');
   ok(JSON.stringify(PN.choiceShape('unsure', CAT, { scopes: sc })) === '{"scopes":["user:inference"],"typeless":true}', '«先不选» writes the scopes and NO type (nothing false written for a person who does not know the plan)');
   ok(PN.choiceShape('free', CAT, { scopes: sc }) === null && PN.choiceShape('type:max2', CAT, { scopes: sc }) === null && PN.choiceShape('ultra', { types: ['pro'], tiers: [] }, { scopes: sc }) === null && PN.choiceShape('ultra', CAT, { scopes: ['Bad Scope'] }) === null, 'a choice this CLI does not offer, or scopes the grammar refuses ⇒ null (the route answers not_offered)');
-  ok(PN.choiceIdOk('ultra') && PN.choiceIdOk('unsure') && PN.choiceIdOk('type:team') && !PN.choiceIdOk('type:') && !PN.choiceIdOk('__proto__') && !PN.choiceIdOk(''), 'the choice id grammar (the route\'s first check)');
+  ok(gateOf(PN.choiceIdOk('ultra')) && gateOf(PN.choiceIdOk('unsure')) && gateOf(PN.choiceIdOk('type:team')) && !PN.choiceIdOk('type:') && !PN.choiceIdOk('__proto__') && !PN.choiceIdOk(''), 'the choice id grammar (the route\'s first check)');
   ok(PN.PLAN_NAMES_AT === '2026-11-13' && PN.FORMER_NAMES_UNTIL === Date.UTC(2027, 10, 13), 'the table is dated (2026-11-13) and its former names end on 2027-11-13');
 }
 
@@ -144,10 +144,10 @@ console.log('§5 the plan values ride the streamed read');
   fs.writeSync(fd, Buffer.from('\0default_claude_max_5x\0'), 0, undefined, CH + 200);
   fs.ftruncateSync(fd, CH + 4096); fs.closeSync(fd);
   const e = await CMC.readBinary(big, { version: '9.9.9' });
-  ok(e.state === 'unreadable' && e.reason?.code === 'no-anchor' && e.plans && e.plans.anchor && e.plans.types.join() === 'max,pro,enterprise,team' && e.plans.tiers.join() === 'default_claude_max_20x,default_claude_max_5x' && e.plans.withheld.join() === 'default_claude_zero', 'a map across the chunk boundary is read; a binary with no model catalog keeps its own verdict (no-anchor) — the plans never decide it', { state: e.state, reason: e.reason, plans: e.plans });
+  ok(e.state === 'unreadable' && e.reason?.code === 'no-anchor' && gateOf(e.plans) && gateOf(e.plans.anchor) && e.plans.types.join() === 'max,pro,enterprise,team' && e.plans.tiers.join() === 'default_claude_max_20x,default_claude_max_5x' && e.plans.withheld.join() === 'default_claude_zero', 'a map across the chunk boundary is read; a binary with no model catalog keeps its own verdict (no-anchor) — the plans never decide it', { state: e.state, reason: e.reason, plans: e.plans });
   const none = path.join(tmp, 'claude-fake-none'); fs.writeFileSync(none, Buffer.alloc(4096));
   const n = await CMC.readBinary(none, { version: '9.9.8' });
-  ok(n.plans && n.plans.anchor === false && n.plans.types.length === 0, 'a binary without the map ⇒ plans.anchor false (way ② not offered)', n.plans);
+  ok(gateOf(n.plans) && n.plans.anchor === false && n.plans.types.length === 0, 'a binary without the map ⇒ plans.anchor false (way ② not offered)', n.plans);
   // the ledger: what the load accepts is what the reader writes
   const dd = path.join(tmp, 'ledger'); fs.mkdirSync(dd);
   const entry = (plans) => ({ cli: '9.9.9', state: 'unreadable', models: [], aliases: {}, latestPerFamily: {}, refused: [], reason: { code: 'no-anchor', at: 0 }, reader: 2, plans });
@@ -163,7 +163,7 @@ console.log('§5 the plan values ride the streamed read');
   ok(red !== src, 'RED CONTROL: the feed line is where the read hands the bytes over');
   const rf = path.join(tmp, 'cmc-red.js'); fs.writeFileSync(rf, red.replace(/require\('\.\.\//g, `require('${REPO}/src/`).replace(/require\('\.\//g, `require('${REPO}/src/server/`));
   const RR = require(rf); const er = await RR.readBinary(big, { version: '9.9.9' });
-  ok(er.plans && er.plans.anchor === false, 'RED CONTROL: without it the same binary yields no plan values (the suite sees the difference)', er.plans);
+  ok(gateOf(er.plans) && er.plans.anchor === false, 'RED CONTROL: without it the same binary yields no plan values (the suite sees the difference)', er.plans);
 }
 
 console.log('§6 the store');
@@ -177,12 +177,12 @@ console.log('§6 the store');
   const row = () => am.list().accounts.find((a) => a.id === id);
   ok(f0?.verdict === 'no-scopes' && cred() === null && row().oatFile?.state === 'refused' && row().oatFile?.reason === 'no-scopes' && am.placeWallOf(id)?.code === 'oat-not-in-folder' && am.placeWallOf(id)?.reason === 'no-scopes', 'a token pasted on a row no sign-in ever shaped ⇒ no-scopes: nothing written, the pool\'s wall names it (oat-not-in-folder · no-scopes)', { f0, wall: am.placeWallOf(id) });
   const mc = am.oatMintCaps();
-  ok(mc.ok && mc.cli === '2.1.321' && JSON.stringify(mc.scopes) === '["user:inference"]' && mc.from === 'fixture', 'oatMintCaps: the hub\'s 2.1.321 ⇒ the mint\'s scopes from the release road\'s fixture', mc);
+  ok(gateOf(mc.ok) && mc.cli === '2.1.321' && JSON.stringify(mc.scopes) === '["user:inference"]' && mc.from === 'fixture', 'oatMintCaps: the hub\'s 2.1.321 ⇒ the mint\'s scopes from the release road\'s fixture', mc);
   am.noteCliVersion('2.1.999 (Claude Code)'); await am.oatFileSettled();
   ok(!am.oatMintCaps().ok && am.oatMintCaps().scopes === null, 'a version neither road measured ⇒ no scopes (way ② not offered)');
   am.noteCliMeasured({ cli: '2.1.999', sha256: 'sha-x', state: 'pass', mintScopes: ['user:inference'] });
   am._oatCliBin = { sha256: 'sha-x' };
-  ok(am.oatMintCaps().ok && am.oatMintCaps().from === 'hub', 'the hub\'s own check of exactly these bytes carries the scopes ⇒ from hub');
+  ok(gateOf(am.oatMintCaps().ok) && am.oatMintCaps().from === 'hub', 'the hub\'s own check of exactly these bytes carries the scopes ⇒ from hub');
   am._oatCliBin = { sha256: 'sha-other' };
   ok(!am.oatMintCaps().ok, '…other bytes of the same version ⇒ not (law 2: never another build)');
   am.noteCliMeasured(null); am._oatCliBin = null;
@@ -229,8 +229,8 @@ console.log('§7 the doors');
   const R = fs.readFileSync(path.join(REPO, 'src/server/oat-shape-routes.js'), 'utf8');
   const get = R.slice(R.indexOf("app.get('/api/accounts/:id/oat-shape'"), R.indexOf("app.post('/api/accounts/:id/oat-shape'"));
   const post = R.slice(R.indexOf("app.post('/api/accounts/:id/oat-shape'"));
-  ok(/^app\.get\('\/api\/accounts\/:id\/oat-shape', \(req, res\) => \{\n    if \(refuseBearer\(req, res\)\) return;/.test(get) && /^app\.post\('\/api\/accounts\/:id\/oat-shape', async \(req, res\) => \{\n    if \(refuseBearer\(req, res\)\) return;/.test(post), 'both routes refuse EVERY bearer FIRST (a person\'s door — §10 drives it)');
-  ok(/require\('\.\/oat-shape-routes\.js'\)\.registerOatShapeRoutes\(app, \{ accounts, isAgentBearer \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8')), 'the hub mounts them (account-usage-routes, behind the auth gate like every account route)');
+  ok(gateOf(/^app\.get\('\/api\/accounts\/:id\/oat-shape', \(req, res\) => \{\n    if \(refuseBearer\(req, res\)\) return;/.test(get)) && verdictOf(/^app\.post\('\/api\/accounts\/:id\/oat-shape', async \(req, res\) => \{\n    if \(refuseBearer\(req, res\)\) return;/.test(post)), 'both routes refuse EVERY bearer FIRST (a person\'s door — §10 drives it)');
+  ok(verdictOf(/require\('\.\/oat-shape-routes\.js'\)\.registerOatShapeRoutes\(app, \{ accounts, isAgentBearer \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8'))), 'the hub mounts them (account-usage-routes, behind the auth gate like every account route)');
   const express = require(path.join(REPO, 'node_modules/express'));
   const http = require('node:http');
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
@@ -253,7 +253,7 @@ console.log('§7 the doors');
     const bad = await call('POST', { choice: '__proto__' });
     ok(bad.status === 400 && bad.j.code === 'bad_choice', 'POST a choice outside the grammar ⇒ 400 bad_choice', bad);
     const p1 = await call('POST', { choice: 'unsure' });
-    ok(p1.status === 200 && p1.j.success && p1.j.shape?.typeless === true && p1.j.shape?.source === 'person' && p1.j.oatFile === 'materialize', 'POST «先不选» ⇒ the shape stored as the person\'s, the file written (oatFile: materialize)', p1);
+    ok(p1.status === 200 && gateOf(p1.j.success) && p1.j.shape?.typeless === true && p1.j.shape?.source === 'person' && p1.j.oatFile === 'materialize', 'POST «先不选» ⇒ the shape stored as the person\'s, the file written (oatFile: materialize)', p1);
     PL = { cli: '2.1.321', anchor: false, types: [], tiers: [], withheld: [], orgTypes: {} };
     const g2 = await call('GET'); const p2 = await call('POST', { choice: 'pro' });
     ok(g2.j.choices.length === 0 && g2.j.why === 'plans-unread' && p2.status === 409 && p2.j.code === 'not_offered' && p2.j.why === 'plans-unread', 'a binary whose map was never found (anchor false) ⇒ no choice, `why` plans-unread («could not read the types»), POST 409 not_offered', { g2: g2.j, p2 });
@@ -265,9 +265,9 @@ console.log('§7 the doors');
     ok(g3.j.choices.length === 0 && g3.j.why === 'version-mismatch', 'plan values of another version than the mint\'s ⇒ no choice (version-mismatch)', g3.j);
   } finally { srv.close(); }
   const MA = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
-  ok(/if \(reason === 'no-scopes'\) return choose \? t\('the subscription type is missing — sign in once, or choose it'\) : t\('the subscription type is missing — sign in once'\);/.test(MA) && !/mint again to record the subscription type/.test(MA), 'the row\'s refusal words: «sign in once, or choose it» (or «sign in once» where way ② is not offered) — never «mint again» / «re-login» alone');
-  ok(/if \(r\.oatFile === 'no-scopes'\) \{ shut\(\); refresh\?\.\(\); openOatShapeDialog\(\{ id, name, fresh: true/.test(MA), 'a pasted token that states no type opens the guide — never «now usable on any machine»');
-  ok(/if \(chip\.dataset\.oatShape\) \{ openOatShapeDialog\(/.test(MA) && /label: t\('Subscription type…'\)/.test(MA), 'the row\'s chip and its ⋯ menu open the guide (the choice stays changeable at the row)');
+  ok(gateOf(/if \(reason === 'no-scopes'\) return choose \? t\('the subscription type is missing — sign in once, or choose it'\) : t\('the subscription type is missing — sign in once'\);/.test(MA)) && !/mint again to record the subscription type/.test(MA), 'the row\'s refusal words: «sign in once, or choose it» (or «sign in once» where way ② is not offered) — never «mint again» / «re-login» alone');
+  ok(verdictOf(/if \(r\.oatFile === 'no-scopes'\) \{ shut\(\); refresh\?\.\(\); openOatShapeDialog\(\{ id, name, fresh: true/.test(MA)), 'a pasted token that states no type opens the guide — never «now usable on any machine»');
+  ok(gateOf(/if \(chip\.dataset\.oatShape\) \{ openOatShapeDialog\(/.test(MA)) && verdictOf(/label: t\('Subscription type…'\)/.test(MA)), 'the row\'s chip and its ⋯ menu open the guide (the choice stays changeable at the row)');
   const D = fs.readFileSync(path.join(REPO, 'src/lib/oat-shape-dialog.js'), 'utf8');
   const signAt = D.indexOf("t('Sign in once (recommended)')"), pickAt = D.indexOf("t('Choose it myself')");
   ok(signAt > 0 && pickAt > signAt, 'way ① «Sign in once (recommended)» comes FIRST, way ② «Choose it myself» second');
@@ -297,20 +297,20 @@ const PLANS = { cli: '2.1.321', anchor: true, ...CAT, withheld: ['default_claude
   am.noteCliVersion('2.1.321 (Claude Code)'); await am.oatFileSettled();
   am.setOat(id, OAT.replace('ADDfake_', 'ADDm1fk_')); await am.oatFileSettled(id);
   const w = am.placeWallOf(id);
-  ok(w && w.code === 'oat-not-in-folder' && w.reason === 'no-scopes' && w.choose === true, 'the wall: oat-not-in-folder · no-scopes · choose (way ② offered here)', w);
+  ok(gateOf(w) && w.code === 'oat-not-in-folder' && w.reason === 'no-scopes' && w.choose === true, 'the wall: oat-not-in-folder · no-scopes · choose (way ② offered here)', w);
   const pool = APA.unplaceableText(w), door = APA.wallDoor(w);
-  ok(/sign in once, or choose the type/.test(pool) && !RELOGIN.test(pool) && door === 'oat-shape', `the pool's sentence names the guided door — «${pool}» — and its door is the guided one (oat-shape), never a re-login's`);
+  ok(gateOf(/sign in once, or choose the type/.test(pool)) && !RELOGIN.test(pool) && door === 'oat-shape', `the pool's sentence names the guided door — «${pool}» — and its door is the guided one (oat-shape), never a re-login's`);
   const words = Object.entries({ en: tOf(null), zh: tOf(ZH), ja: tOf(JA) }).map(([L, t]) => [L, WW.wallWords(w, { t, name: 'NoShape' }), WW.wallWords(w, { t, n: 3 })]);
-  ok(words.every(([, one, many]) => one.door === 'oat-shape' && many.door === 'oat-shape' && !RELOGIN.test(one.text) && !RELOGIN.test(many.text)) && /sign in once, or choose the type/.test(words[0][1].text) && /登录一次，或自己选/.test(words[1][1].text) && /一度サインインするか、種類を選んで/.test(words[2][1].text), 'the toasts (⟳, Refresh all, the gather, a reset claim) in en / zh / ja name the guided door — one account and many — never «re-login»', words.map(([L, o]) => `${L}: ${o.text}`));
+  ok(gateOf(words.every(([, one, many]) => one.door === 'oat-shape' && many.door === 'oat-shape' && !RELOGIN.test(one.text) && !RELOGIN.test(many.text))) && gateOf(/sign in once, or choose the type/.test(words[0][1].text)) && gateOf(/登录一次，或自己选/.test(words[1][1].text)) && verdictOf(/一度サインインするか、種類を選んで/.test(words[2][1].text)), 'the toasts (⟳, Refresh all, the gather, a reset claim) in en / zh / ja name the guided door — one account and many — never «re-login»', words.map(([L, o]) => `${L}: ${o.text}`));
   const g = WW.groupWalls([{ wall: w, name: 'A' }, { wall: w, name: 'B' }], { t: tOf(ZH) });
   ok(g.length === 1 && g[0].door === 'oat-shape' && !RELOGIN.test(g[0].text), 'many such rows: one sentence with its count, the guided door', g);
   const notOffered = { ...w, choose: false };
-  ok(/— sign in once$/.test(APA.unplaceableText(notOffered)) && !/choose/.test(APA.unplaceableText(notOffered)) && !/选/.test(WW.wallWords(notOffered, { t: tOf(ZH), name: 'X' }).text), 'where way ② is not offered here: «sign in once» alone — never «or choose it» where the door cannot');
+  ok(gateOf(/— sign in once$/.test(APA.unplaceableText(notOffered))) && !/choose/.test(APA.unplaceableText(notOffered)) && !/选/.test(WW.wallWords(notOffered, { t: tOf(ZH), name: 'X' }).text), 'where way ② is not offered here: «sign in once» alone — never «or choose it» where the door cannot');
   const row = am.list().accounts.find((a) => a.id === id);
   const ms = Object.entries({ en: tOf(null), zh: tOf(ZH), ja: tOf(JA) }).map(([L, t]) => { const m = PPM.memberState({ loggedIn: !!row.loggedIn, loginState: row.loginState }); return [L, m.code, t(m.key, m.params)]; });
-  ok(row.loginState.oatNoType === true && ms.every(([, c, txt]) => c === 'oat-no-type' && !RELOGIN.test(txt) && !/expired|过期|期限切れ/.test(txt)), 'the Members roster: «no subscription type yet — sign in once, or choose the type», never «login expired»', ms);
+  ok(row.loginState.oatNoType === true && verdictOf(ms.every(([, c, txt]) => c === 'oat-no-type' && !RELOGIN.test(txt) && !/expired|过期|期限切れ/.test(txt))), 'the Members roster: «no subscription type yet — sign in once, or choose the type», never «login expired»', ms);
   const R = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
-  ok(/const refusalAnswer = \(r\) => \(r\.code === 'sign-in-unknown' \? [^\n]*\n\s*: \(r\.wallWhy \? wallDoor\(r\.wallWhy\) !== 'relogin'/.test(R),   /* B-360d: a sign-in not read is answered first, never «re-login» */ '⟳: a wall whose door is not a re-login answers «not refreshed» with NO loginNeeded (usage-routes refusalAnswer reads wallDoor)');
+  ok(verdictOf(/const refusalAnswer = \(r\) => \(r\.code === 'sign-in-unknown' \? [^\n]*\n\s*: \(r\.wallWhy \? wallDoor\(r\.wallWhy\) !== 'relogin'/.test(R)),   /* B-360d: a sign-in not read is answered first, never «re-login» */ '⟳: a wall whose door is not a re-login answers «not refreshed» with NO loginNeeded (usage-routes refusalAnswer reads wallDoor)');
   const ofPool = am.poolLoginState ? null : null; void ofPool;
 }
 
@@ -338,10 +338,10 @@ console.log('§9 MUST 2 — a LOCKED vault answers as the vault does; nothing is
       const after = am.list().accounts.find((a) => a.id === id);
       ok(r.status === 423 && j.code === 'vault_locked' && j.door === 'unlock' && !j.success && !after.oatShape && !am.get(id).oatShape, 'LOCKED: 423 vault_locked with its door (unlock) — and NOTHING recorded (no shape on the row, none in the store)', { status: r.status, j, shape: after.oatShape });
       const D = fs.readFileSync(path.join(REPO, 'src/lib/oat-shape-dialog.js'), 'utf8');
-      ok(/r && r\.code === 'vault_locked' \? \{ action: \{ label: t\('Unlock…'\), run: \(\) => \{ try \{ showUnlock\(\);/.test(D) && /vault_locked: \(\) => t\('The vault is locked — unlock it first/.test(D), 'the guide says the vault\'s own words with its door (Unlock…) — never «Saved»');
+      ok(gateOf(/r && r\.code === 'vault_locked' \? \{ action: \{ label: t\('Unlock…'\), run: \(\) => \{ try \{ showUnlock\(\);/.test(D)) && verdictOf(/vault_locked: \(\) => t\('The vault is locked — unlock it first/.test(D)), 'the guide says the vault\'s own words with its door (Unlock…) — never «Saved»');
       LOCKED = false;
       const r2 = await fetch(U, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ choice: 'pro' }) }); const j2 = await r2.json();
-      ok(r2.status === 200 && j2.success && j2.shape && j2.shape.type === 'pro', 'unlocked again: the same press records it', j2);
+      ok(r2.status === 200 && gateOf(j2.success) && gateOf(j2.shape) && j2.shape.type === 'pro', 'unlocked again: the same press records it', j2);
     } finally { srv.close(); }
   } finally { unreg(); }
 }
@@ -349,7 +349,7 @@ console.log('§9 MUST 2 — a LOCKED vault answers as the vault does; nothing is
 console.log('§10 MUST 3 — every bearer is refused on the person\'s door, by name');
 {
   const R = fs.readFileSync(path.join(REPO, 'src/server/oat-shape-routes.js'), 'utf8');
-  ok(/const \{ pressBearer \} = require\('\.\.\/write-origin\.js'\);/.test(R) && /const agent = isAgentBearer\(req\), other = !agent && pressBearer\(req\.headers \|\| \{\}\);/.test(R), 'the routes test EVERY bearer (write-origin pressBearer: vsst_, jbt_, an automation key\'s vsak_)');
+  ok(gateOf(/const \{ pressBearer \} = require\('\.\.\/write-origin\.js'\);/.test(R)) && verdictOf(/const agent = isAgentBearer\(req\), other = !agent && pressBearer\(req\.headers \|\| \{\}\);/.test(R)), 'the routes test EVERY bearer (write-origin pressBearer: vsst_, jbt_, an automation key\'s vsak_)');
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
   const { registerOatShapeRoutes } = require(path.join(REPO, 'src/server/oat-shape-routes.js'));
   const express = require(path.join(REPO, 'node_modules/express')), http = require('node:http');
@@ -366,7 +366,7 @@ console.log('§10 MUST 3 — every bearer is refused on the person\'s door, by n
       const r = await fetch(U, { method: m, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + pre + 'x' + crypto.randomBytes(6).toString('hex') }, ...(m === 'POST' ? { body: JSON.stringify({ choice: 'unsure' }) } : {}) });
       out.push([k, m, r.status, (await r.json()).code]);
     }
-    ok(out.every(([k, , st, c]) => st === 403 && (k === 'automation key' ? c === 'human_only' : c === 'agent_forbidden')) && !am.get(id).oatShape, 'an agent\'s session, a job and an AUTOMATION KEY: 403 by name on both routes — nothing recorded', out);
+    ok(gateOf(out.every(([k, , st, c]) => st === 403 && (k === 'automation key' ? c === 'human_only' : c === 'agent_forbidden'))) && !am.get(id).oatShape, 'an agent\'s session, a job and an AUTOMATION KEY: 403 by name on both routes — nothing recorded', out);
   } finally { srv.close(); }
 }
 
@@ -403,13 +403,13 @@ let MA = null;
     const ultra = MA.subIdentHtml(tokenRow({ source: 'person', type: 'max', tier: 'default_claude_max_20x' }), { email: 'a@example.invalid' });
     const unsure = MA.subIdentHtml(tokenRow({ source: 'person', typeless: true }), { email: '' });
     const signed = MA.subIdentHtml({ loggedIn: true, subscriptionType: 'max', rateLimitTier: 'default_claude_max_5x', loginState: { state: 'ok' } }, { email: 'b@example.invalid' });
-    ok(/Ultra \(formerly Max 20x\)/.test(ultra) && !/· max\b/.test(ultra) && !/logged in/.test(ultra), `a chosen Ultra reads «${ultra}» — the table's name, never «max» (now the other plan's name)`);
+    ok(gateOf(/Ultra \(formerly Max 20x\)/.test(ultra)) && !/· max\b/.test(ultra) && !/logged in/.test(ultra), `a chosen Ultra reads «${ultra}» — the table's name, never «max» (now the other plan's name)`);
     ok(!/logged in/.test(unsure), `a typeless token row never reads «logged in» («${unsure}»)`);
-    ok(/Max \(formerly Max 5x\)/.test(signed), `a SIGNED-IN row with its tier reads the table's name too («${signed}»)`);
+    ok(verdictOf(/Max \(formerly Max 5x\)/.test(signed)), `a SIGNED-IN row with its tier reads the table's name too («${signed}»)`);
     const rep = MA.subIdentHtml({ ...tokenRow({ source: 'login', type: 'pro', tier: null }), oatShapeReplaced: { at: now, type: 'max', tier: 'default_claude_max_20x' } }, { email: '' });
-    ok(/a sign-in replaced your choice \(Ultra \(formerly Max 20x\)\)/.test(rep), `a choice a sign-in replaced is said on the row itself («${rep}»), not only inside the guide`);
+    ok(verdictOf(/a sign-in replaced your choice \(Ultra \(formerly Max 20x\)\)/.test(rep)), `a choice a sign-in replaced is said on the row itself («${rep}»), not only inside the guide`);
     const chip = MA.loginExpiryChipHtml({ id: 's', oat: true, oatChoose: false, oatFile: { state: 'refused', reason: 'no-scopes' }, loginState: { state: 'oat-only', msLeft: 300 * 86400e3, oatValidUntil: Date.now() + 300 * 86400e3, refreshExpiresAt: Date.now() - 1 } });
-    ok(/the subscription type is missing — sign in once</.test(chip.replace(/<\/span>.*$/, '<')) || (/sign in once/.test(chip) && !/choose it/.test(chip)), 'the row\'s chip where way ② is not offered: «sign in once» alone', chip.slice(0, 300));
+    ok(verdictOf(/the subscription type is missing — sign in once</.test(chip.replace(/<\/span>.*$/, '<'))) || (gateOf(/sign in once/.test(chip)) && !/choose it/.test(chip)), 'the row\'s chip where way ② is not offered: «sign in once» alone', chip.slice(0, 300));
   }
 }
 
@@ -419,7 +419,7 @@ console.log('§13 a tier the table has no row for — by its own id; never Free'
   ok(ch.map((c) => c.choice).join(' ') === 'ultra max pro type:team tier:default_claude_ultra_40x unsure' && ch.find((c) => c.choice === 'tier:default_claude_ultra_40x').own === true, 'an unknown tier is offered by its own id (own) — never dropped; Free (type or tier) never offered', ch.map((c) => c.choice));
   ok(JSON.stringify(PN.choiceShape('tier:default_claude_ultra_40x', { types: ['max'], tiers: ['default_claude_ultra_40x'] }, { scopes: ['user:inference'] })) === '{"scopes":["user:inference"],"typeless":true,"rateLimitTier":"default_claude_ultra_40x"}', 'it writes the tier ALONE — never paired with a type by a guess');
   const renamed = PN.planChoices({ types: ['max'], tiers: ['default_claude_max_5x', 'default_claude_ultra'] }, { scopes: ['user:inference'], now: NOW }).map((c) => c.choice);
-  ok(renamed.includes('tier:default_claude_ultra') && renamed.includes('max') && !renamed.includes('ultra'), 'a vendor rename inside the bytes: the renamed tier stays pickable by its id (Ultra is not silently gone)', renamed);
+  ok(gateOf(renamed.includes('tier:default_claude_ultra')) && gateOf(renamed.includes('max')) && !renamed.includes('ultra'), 'a vendor rename inside the bytes: the renamed tier stays pickable by its id (Ultra is not silently gone)', renamed);
   const body = LE.oatFileBody(OAT, { expiresAt: NOW + 1e9, shape: LE.storedShapeOf({ scopes: ['user:inference'], typeless: true, rateLimitTier: 'default_claude_ultra_40x' }), mintedAt: NOW });
   ok(body.claudeAiOauth.rateLimitTier === 'default_claude_ultra_40x' && !('subscriptionType' in body.claudeAiOauth), 'the file carries that tier and no type');
 }
@@ -455,7 +455,7 @@ console.log('§14 THE TOKEN MARKER — every door it passes, under recorders');
   const bundle = am.exportBundle();
   const files = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else files.push(p); } }; walk(dd);
   const withMark = files.filter((f) => hasMark(fs.readFileSync(f, 'latin1'))).map((f) => path.relative(dd, f));
-  ok(sealed.some(Boolean) && withMark.length === 1 && /\.credentials\.json$/.test(withMark[0]) && hasMark(bundle), 'the marker reaches the SEALED call, the one designed file (the member\'s credential file) and the designed export (the passphrase blob) — no other file in the data dir', withMark);
+  ok(gateOf(sealed.some(Boolean)) && withMark.length === 1 && gateOf(/\.credentials\.json$/.test(withMark[0])) && verdictOf(hasMark(bundle)), 'the marker reaches the SEALED call, the one designed file (the member\'s credential file) and the designed export (the passphrase blob) — no other file in the data dir', withMark);
   ok(changes.length > 0 && seen.length === 0, `under recorders on every console line, stdio write, child-process call, route answer (success and refusal), store error and broadcast (${changes.length}): the marker appears in NONE`, seen);
 }
 
@@ -472,12 +472,12 @@ console.log('§15 the probe\'s new fences, pinned');
   const q = qSrc ? new Function('return ' + qSrc)() : null;
   const hostile = ["/tmp/a b", "/tmp/it's", '/tmp/$(touch x)', '/tmp/`id`', '/tmp/a;b', '/tmp/"q"', "/tmp/'; rm -rf ~; '", '/tmp/\\back', '/tmp/new\nline'];
   const echoed = q ? hostile.map((x) => require('node:child_process').spawnSync('/bin/sh', ['-c', 'printf %s ' + q(x)], { encoding: 'utf8' }).stdout) : [];
-  ok(!!q && echoed.every((o, i) => o === hostile[i]), `the trampoline's --pty quote: ${hostile.length} hostile paths through /bin/sh -c come back byte for byte (no injection)`, echoed);
-  ok(/const bin = pty \? 'script' : cli;/.test(T) && /const c = spawn\(bin, args, \{ stdio: \[0, 1, err\] \}\);/.test(T), 'the trampoline stays ONE spawn with the same stdio — script(1) only behind --pty');
+  ok(!!q && verdictOf(echoed.every((o, i) => o === hostile[i])), `the trampoline's --pty quote: ${hostile.length} hostile paths through /bin/sh -c come back byte for byte (no injection)`, echoed);
+  ok(gateOf(/const bin = pty \? 'script' : cli;/.test(T)) && verdictOf(/const c = spawn\(bin, args, \{ stdio: \[0, 1, err\] \}\);/.test(T)), 'the trampoline stays ONE spawn with the same stdio — script(1) only behind --pty');
   const SM = fs.readFileSync(path.join(REPO, 'src/server/cli-self-measure.js'), 'utf8');
-  ok(/const mintOf = \(r\) => \{ const m = r && r\.state === 'pass' && r\.variants && r\.variants\[MINT_VARIANT\];/.test(SM), 'the hub trusts the mint\'s scopes only from a check that HELD (state pass) — an aborted / failed run\'s scopes are not offered');
+  ok(verdictOf(/const mintOf = \(r\) => \{ const m = r && r\.state === 'pass' && r\.variants && r\.variants\[MINT_VARIANT\];/.test(SM)), 'the hub trusts the mint\'s scopes only from a check that HELD (state pass) — an aborted / failed run\'s scopes are not offered');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

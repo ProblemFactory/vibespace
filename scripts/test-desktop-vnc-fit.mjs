@@ -47,7 +47,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('deskfit-smoke');
 const home = scratchHome('deskfit-home', fs);
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
 
@@ -91,7 +91,7 @@ process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 
 const waitServer = async () => { for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-check('worktree server boots', await waitServer());
+check('worktree server boots', verdictOf(await waitServer()));
 const WebSocket = require('ws');
 const cdpTargets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json());
 const target = await until(async () => (await cdpTargets()).find((t) => t.type === 'page'), 20000, 250);
@@ -143,7 +143,7 @@ try {
   // ── §1 FOLLOWS ──
   console.log('§1 the app fills the pane and FOLLOWS two resizes of the VibeSpace window (real Xvnc + xterm)');
   const launched = await p1.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exec: ${JSON.stringify(XTERM)}, args: ['-geometry', '80x24', '-bg', 'white', '-fg', 'black', '-T', ${JSON.stringify(APP_TITLE)}, '-xrm', 'XTerm*allowTitleOps: false'], label: 'xterm' }) }).then((r) => r.json())`);
-  check('launch answers a launching record on vnc-display via Xvnc with fitMode follows', launched && !launched.error && launched.via === 'Xvnc' && launched.fitMode === 'follows', launched);
+  check('launch answers a launching record on vnc-display via Xvnc with fitMode follows', gateOf(launched) && !launched.error && launched.via === 'Xvnc' && launched.fitMode === 'follows', launched);
   const appId = launched.id;
   await p1.evalJs(`app.openDesktopApp(${JSON.stringify(appId)}); true`);
   const rec1 = await until(async () => { const r = await record(appId); return r.state === 'ready' && r.fit && r.fit.ok ? r : null; }, 25000);
@@ -170,8 +170,8 @@ try {
     return { ok: true, ...r };
   };
   const s0 = await settle('after connect');
-  check('after connect: framebuffer = pane = canvas, the app window = the framebuffer at 0,0, ZERO pixels outside the app, the canvas is not a black root', s0.ok && s0.m.outsideSampled === 0 && s0.m.blackFrac < 0.2, s0.ok ? { blackFrac: s0.m.blackFrac } : s0.evidence);
-  check('the backend chip reads the plain rung, NO fit chip on a display that follows', s0.ok && s0.m.chip === 'vnc-display' && !s0.m.fitChipShown, s0.ok && { chip: s0.m.chip, fitChip: s0.m.fitChip });
+  check('after connect: framebuffer = pane = canvas, the app window = the framebuffer at 0,0, ZERO pixels outside the app, the canvas is not a black root', gateOf(s0.ok) && s0.m.outsideSampled === 0 && s0.m.blackFrac < 0.2, s0.ok ? { blackFrac: s0.m.blackFrac } : s0.evidence);
+  check('the backend chip reads the plain rung, NO fit chip on a display that follows', gateOf(s0.ok) && s0.m.chip === 'vnc-display' && !s0.m.fitChipShown, s0.ok && { chip: s0.m.chip, fitChip: s0.m.fitChip });
   {
     // "窗口是第一位的感觉": the VibeSpace title bar names the APP WINDOW (X's own title, read by the keeper's fit enumeration), not the launch label — as TEXT
     const xTop = await topLevel(appId);
@@ -189,9 +189,9 @@ try {
     const fbMs = Date.now() - t0;
     check(`resize to ${W}x${H}: the framebuffer CHANGED within 2 s (${followed && `${followed.fb.w}x${followed.fb.h}`} in ${fbMs} ms)`, !!followed && fbMs <= 2000, followed && followed.fb);
     const s = await settle(`after resize to ${W}x${H}`);
-    check(`resize to ${W}x${H}: framebuffer = pane = canvas, the app window = the framebuffer, ZERO pixels outside the app (settled ${s.ok && s.ms} ms after the change was seen)`, s.ok && s.m.outsideSampled === 0 && s.m.blackFrac < 0.2 && s.m.win.w === W && s.m.win.h === H, s.ok ? undefined : s.evidence);
-    if (s.ok && s.top.framed) check(`resize to ${W}x${H}: under a window manager the WM keeps the app's window maximised as the framebuffer follows — the keeper's plan is settled, no act of its own (its fit: "${s.rec.fit.why}", via ${s.rec.fit.via}; the frame ${s.top.w}x${s.top.h} holds the app's ${s.top.client.w}x${s.top.client.h} under its title)`, s.rec.fit.via === 'wm' && /^(client asked|ready)/.test(s.rec.fit.why));
-    else check(`resize to ${W}x${H}: the fit's cause is the client's ask (why "${s.ok && s.rec.fit.why}")`, s.ok && /^client asked/.test(s.rec.fit.why));
+    check(`resize to ${W}x${H}: framebuffer = pane = canvas, the app window = the framebuffer, ZERO pixels outside the app (settled ${s.ok && s.ms} ms after the change was seen)`, gateOf(s.ok) && s.m.outsideSampled === 0 && s.m.blackFrac < 0.2 && s.m.win.w === W && s.m.win.h === H, s.ok ? undefined : s.evidence);
+    if (s.ok && s.top.framed) check(`resize to ${W}x${H}: under a window manager the WM keeps the app's window maximised as the framebuffer follows — the keeper's plan is settled, no act of its own (its fit: "${s.rec.fit.why}", via ${s.rec.fit.via}; the frame ${s.top.w}x${s.top.h} holds the app's ${s.top.client.w}x${s.top.client.h} under its title)`, s.rec.fit.via === 'wm' && verdictOf(/^(client asked|ready)/.test(s.rec.fit.why)));
+    else check(`resize to ${W}x${H}: the fit's cause is the client's ask (why "${s.ok && s.rec.fit.why}")`, gateOf(s.ok) && verdictOf(/^client asked/.test(s.rec.fit.why)));
   }
   // a second window of the same app (xterm's own child xterm) is nudged inside — driven at the X level: the keeper's plan on the next tick keeps it in the pane
   {
@@ -202,7 +202,7 @@ try {
     let seen = null;
     const nudged = await until(async () => { const r = await windowsOf(appId); const tops = topLevelsOf(r.windows); const d = tops.find((w) => w.cls === 'VsFitDialog'); const fb = (await record(appId)).fb; seen = { windows: tops.map((w) => ({ id: w.id, cls: w.cls, framed: w.framed, rect: `${w.w}x${w.h}+${w.x}+${w.y}` })), fb, why: r.why }; return d && fb && d.x + d.w <= fb.w && d.y + d.h <= fb.h && d.x >= 0 && d.y >= 0 ? { d, fb } : null; }, 12000, 250);
     check(`a second top-level of the app placed off-screen by X (+2000+1500) is NUDGED inside the framebuffer by the belt, its size kept (${nudged && `${nudged.d.w}x${nudged.d.h}+${nudged.d.x}+${nudged.d.y} in ${nudged.fb.w}x${nudged.fb.h}`})`, !!nudged, nudged || { seen, dialogExit: dlg.exitCode, server: serverLines(/\[desktop\]/) });
-    check('…and the main window was NOT touched by that nudge (still the whole framebuffer)', !!nudged && seen.windows.some((w) => w.rect === `${nudged.fb.w}x${nudged.fb.h}+0+0`), seen);
+    check('…and the main window was NOT touched by that nudge (still the whole framebuffer)', !!nudged && verdictOf(seen.windows.some((w) => w.rect === `${nudged.fb.w}x${nudged.fb.h}+0+0`)), seen);
     try { dlg.kill('SIGKILL'); } catch {}
   }
   // ── §1b UNDER THE UI SCALE (owner acceptance 1: the window follows AT NET ZOOM 1 under the UI scale) ──
@@ -213,7 +213,7 @@ try {
   {
     await p1.evalJs(`localStorage.setItem('vibespace.uiScale', '125'); true`);
     await openPage(p1);
-    check(`the page boots under the UI scale (body zoom ${await p1.evalJs('document.body.style.zoom')})`, await p1.evalJs(`document.body.style.zoom === '1.25'`));
+    check(`the page boots under the UI scale (body zoom ${await p1.evalJs('document.body.style.zoom')})`, verdictOf(await p1.evalJs(`document.body.style.zoom === '1.25'`)));
     const hasWin = await p1.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(appId)})`);
     if (!hasWin) await p1.evalJs(`app.openDesktopApp(${JSON.stringify(appId)}); true`);
     const conn = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(appId)}); const s = w?.content.querySelector('.desktop-status'); return s && s.textContent === 'Connected' ? true : null; })()`), 20000);
@@ -226,7 +226,7 @@ try {
     const fbMs = Date.now() - t0;
     check(`UI scale: resize to ${W}x${H} layout px — the framebuffer CHANGED within 2 s (${followed && `${followed.fb.w}x${followed.fb.h}`} in ${fbMs} ms)`, !!followed && fbMs <= 2000, followed && followed.fb);
     const s = await settle(`under the UI scale, window ${W}x${H} layout px`);
-    check(`UI scale: framebuffer = the ON-SCREEN pane (> 1.1 × the layout width) = canvas, the app window = the framebuffer, ZERO pixels outside the app`, s.ok && s.m.outsideSampled === 0 && s.m.blackFrac < 0.2 && s.m.win.w === W && s.m.win.h === H && s.rec.fb.w > W * 1.1, s.ok ? { fb: s.rec.fb, mount: s.m.mount } : s.evidence);
+    check(`UI scale: framebuffer = the ON-SCREEN pane (> 1.1 × the layout width) = canvas, the app window = the framebuffer, ZERO pixels outside the app`, gateOf(s.ok) && s.m.outsideSampled === 0 && s.m.blackFrac < 0.2 && s.m.win.w === W && s.m.win.h === H && s.rec.fb.w > W * 1.1, s.ok ? { fb: s.rec.fb, mount: s.m.mount } : s.evidence);
     const z = await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(appId)}); const mount = w.content.querySelector('.desktop-app-mount'); const c = mount.querySelector('canvas'); const r = c.getBoundingClientRect(); const mr = mount.getBoundingClientRect(); return { canvas: { w: c.width, h: c.height }, onScreen: { x: r.left, y: r.top, w: r.width, h: r.height }, mount: { w: mr.width, h: mr.height, cw: mount.clientWidth, ch: mount.clientHeight }, uiScale: getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim() }; })()`);
     console.log(`    UI scale ${z.uiScale}: pane ${z.mount.w.toFixed(1)}x${z.mount.h.toFixed(1)} on screen (clientWidth ${z.mount.cw}x${z.mount.ch}), canvas ${z.canvas.w}x${z.canvas.h} drawn on ${z.onScreen.w.toFixed(1)}x${z.onScreen.h.toFixed(1)} screen px`);
     check(`UI scale: the pane's own px ARE screen px (clientWidth ${z.mount.cw} == rect ${z.mount.w.toFixed(1)}) — the shell's counter-zoom`, z.uiScale === '1.25' && Math.abs(z.mount.cw - z.mount.w) <= 1 && Math.abs(z.mount.ch - z.mount.h) <= 1, z);
@@ -252,12 +252,12 @@ try {
   else {
     srv.kill('SIGKILL'); await sleep(500);
     bootServer({ PATH: noVncBin });
-    check('the server reboots on a PATH without Xvnc', await waitServer());
+    check('the server reboots on a PATH without Xvnc', verdictOf(await waitServer()));
     await openPage(p1);
     const av2 = await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json())`);
     check('the ladder now names vnc-display via Xvfb+x11vnc (Xvnc hidden from PATH — the test-only knob)', av2.availability?.backend === 'vnc-display' && av2.availability?.via === 'Xvfb+x11vnc', av2.availability);
     const l2 = await p1.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exec: ${JSON.stringify(XTERM)}, args: ['-geometry', '80x24', '-bg', 'white', '-fg', 'black', '-T', 'vs-fixed'], label: 'xterm' }) }).then((r) => r.json())`);
-    check('launch: fitMode FIXED', l2 && !l2.error && l2.fitMode === 'fixed', l2);
+    check('launch: fitMode FIXED', gateOf(l2) && !l2.error && l2.fitMode === 'fixed', l2);
     const id2 = l2.id;
     await p1.evalJs(`app.openDesktopApp(${JSON.stringify(id2)}); true`);
     const r2 = await until(async () => { const r = await record(id2); return r.state === 'ready' && r.fit && r.fit.ok ? r : null; }, 25000);
@@ -278,7 +278,7 @@ try {
     await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id2)}); w.element.style.width = '700px'; w.element.style.height = '500px'; return true; })()`);
     await sleep(2500);
     const r2b = await record(id2); const top2b = await topLevel(id2);
-    check('after a window resize the fixed framebuffer is still 1280x800 and the app still fills it (the browser scales)', r2b.fb.w === 1280 && r2b.fb.h === 800 && top2b && top2b.w === 1280 && top2b.h === 800, { fb: r2b.fb, top: top2b });
+    check('after a window resize the fixed framebuffer is still 1280x800 and the app still fills it (the browser scales)', r2b.fb.w === 1280 && r2b.fb.h === 800 && gateOf(top2b) && top2b.w === 1280 && top2b.h === 800, { fb: r2b.fb, top: top2b });
     await p1.evalJs(`fetch('/api/desktop/apps/${id2}/stop', { method: 'POST' }).then((r) => r.json())`);
     await until(async () => { const r = await record(id2); return r.state === 'exited' || r.state === 'failed' ? r : null; }, 15000);
   }
@@ -288,4 +288,4 @@ try {
   try { p1?.close(); } catch {}
 }
 console.log(`${failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`}`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

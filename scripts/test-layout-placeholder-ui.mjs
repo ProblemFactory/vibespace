@@ -32,7 +32,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -109,7 +109,7 @@ else await (async () => {
   let journal = '';
   const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VS_NO_REAL_CLI: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 100), 'the worktree server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 100)), 'the worktree server booted', journal.slice(-800))) return;
   const api = async (p) => (await fetch(`http://127.0.0.1:${PORT}${p}`)).json();
 
   // ── headless chrome over raw CDP ──
@@ -155,19 +155,19 @@ else await (async () => {
   try {
     // ① the desktop page
     const want = (X, n) => until(async () => (await X.tiles()).length === n, 20000, 200);
-    ok(await P1.boot() && await want(P1, 12), '① the desktop page (zh) booted on 个人 and built TWELVE placeholder tiles (2.369.363: none — the record\'s windows were unbuildable)', await P1.tiles().catch((e) => e.message));
+    ok(gateOf(await P1.boot()) && verdictOf(await want(P1, 12)), '① the desktop page (zh) booted on 个人 and built TWELVE placeholder tiles (2.369.363: none — the record\'s windows were unbuildable)', await P1.tiles().catch((e) => e.message));
     const t1 = await P1.tiles();
     const stopped = t1.filter((t) => t.kind === 'stopped'), gone = t1.filter((t) => t.kind === 'unavailable');
-    ok(stopped.length === 4 && gone.length === 8 && stopped.every((t) => t.say === '会话已停止 — 点击恢复' && t.tag === 'BUTTON') && gone.every((t) => t.say === '会话不可用' && t.tag === 'DIV'), `① four «会话已停止 — 点击恢复» (buttons) + eight «会话不可用» (the seven nameless + the remote one) (${stopped.length} + ${gone.length})`, t1.map((t) => [t.kind, t.say]));
-    ok(t1.every((t) => [...NAMES, LONG].includes(t.name) && t.inside && t.shown && t.w >= 120 && t.h >= 60), '① each tile says its window\'s NAME (the title\'s, not the first message) and sits inside its window, drawn (≥ 120×60)', t1.map((t) => [t.name, t.w, t.h, t.inside, t.shown]));
+    ok(stopped.length === 4 && gone.length === 8 && gateOf(stopped.every((t) => t.say === '会话已停止 — 点击恢复' && t.tag === 'BUTTON')) && verdictOf(gone.every((t) => t.say === '会话不可用' && t.tag === 'DIV')), `① four «会话已停止 — 点击恢复» (buttons) + eight «会话不可用» (the seven nameless + the remote one) (${stopped.length} + ${gone.length})`, t1.map((t) => [t.kind, t.say]));
+    ok(verdictOf(t1.every((t) => [...NAMES, LONG].includes(t.name) && t.inside && t.shown && t.w >= 120 && t.h >= 60)), '① each tile says its window\'s NAME (the title\'s, not the first message) and sits inside its window, drawn (≥ 120×60)', t1.map((t) => [t.name, t.w, t.h, t.inside, t.shown]));
     // ⑤ r3: why, and the three doors — every «会话不可用» tile
     const WHY = ['这个窗口保存时没有记下它的会话和文件夹，所以无法从这里重新打开。', '它的会话记录已经不在这台 hub 上了。', '它所在的机器「host-gpu」没有与这台 hub 配对。'];
-    ok(gone.every((t) => WHY.includes(t.why) && t.doors.length === 3 && t.doors.map((d) => d.text).join('|') === '恢复之前的布局…|打开会话列表|移除' && t.doors.every((d) => d.h >= 44 && d.w >= 44)), '⑤ every «会话不可用» tile SAYS WHY in one line and offers three doors — 恢复之前的布局… · 打开会话列表 · 移除 — each ≥ 44 px (2.369.365 r2: none)', gone.map((t) => [t.name, t.why, t.doors.map((d) => [d.text, d.w, d.h])]));
-    ok(t1.every((t) => t.fits && t.nameShown), '⑤ at 1440 every tile FITS its window and shows its name (r3 run 1: the remote tile overflowed and its name line had shrunk away — the name now never shrinks, the tile scrolls from its top)', t1.filter((t) => !t.fits || !t.nameShown).map((t) => [t.id, t.fits, t.nameShown]));
+    ok(verdictOf(gone.every((t) => WHY.includes(t.why) && t.doors.length === 3 && t.doors.map((d) => d.text).join('|') === '恢复之前的布局…|打开会话列表|移除' && t.doors.every((d) => d.h >= 44 && d.w >= 44))), '⑤ every «会话不可用» tile SAYS WHY in one line and offers three doors — 恢复之前的布局… · 打开会话列表 · 移除 — each ≥ 44 px (2.369.365 r2: none)', gone.map((t) => [t.name, t.why, t.doors.map((d) => [d.text, d.w, d.h])]));
+    ok(verdictOf(t1.every((t) => t.fits && t.nameShown)), '⑤ at 1440 every tile FITS its window and shows its name (r3 run 1: the remote tile overflowed and its name line had shrunk away — the name now never shrinks, the tile scrolls from its top)', t1.filter((t) => !t.fits || !t.nameShown).map((t) => [t.id, t.fits, t.nameShown]));
     const rt = t1.find((t) => t.id === 'win-p-r');
-    ok(rt && rt.name === LONG && rt.nameCut && rt.host === '在 host-gpu' && rt.hostWhole && rt.where === '/srv/remote/build' && ['它的会话记录已经不在这台 hub 上了。', '它所在的机器「host-gpu」没有与这台 hub 配对。'].includes(rt.why), '⑤ the REMOTE tile: its 60-char title is cut by the ellipsis, its machine «在 host-gpu» is its OWN line, seen whole (r2: « · host-gpu» was cut off with the title), its folder shown, its reason the record\'s (gone) or the hub\'s (not paired)', rt);
+    ok(gateOf(rt) && rt.name === LONG && gateOf(rt.nameCut) && rt.host === '在 host-gpu' && gateOf(rt.hostWhole) && rt.where === '/srv/remote/build' && verdictOf(['它的会话记录已经不在这台 hub 上了。', '它所在的机器「host-gpu」没有与这台 hub 配对。'].includes(rt.why)), '⑤ the REMOTE tile: its 60-char title is cut by the ellipsis, its machine «在 host-gpu» is its OWN line, seen whole (r2: « · host-gpu» was cut off with the title), its folder shown, its reason the record\'s (gone) or the hub\'s (not paired)', rt);
     const st0 = t1.find((t) => t.id === 'win-p-0');
-    ok(st0 && st0.where === '/srv/u/proj-0' && gone.find((t) => t.id === 'win-p-4')?.where === '', '⑤ the folder the record holds is on the tile (the stopped one\'s); a nameless record holds none and its reason says so', { st: st0 && st0.where, un: gone.find((t) => t.id === 'win-p-4') });
+    ok(gateOf(st0) && st0.where === '/srv/u/proj-0' && gone.find((t) => t.id === 'win-p-4')?.where === '', '⑤ the folder the record holds is on the tile (the stopped one\'s); a nameless record holds none and its reason says so', { st: st0 && st0.where, un: gone.find((t) => t.id === 'win-p-4') });
     await P1.shot('desktop-zh-1440');
     // ⑤ r4 «打开会话列表»: the list opens on ALL, searched by the window's name — a RUNNING conversation of that name (the
     // incident's: the resume-all's late answer started it in a session no window shows) is SHOWN and marked
@@ -182,12 +182,12 @@ else await (async () => {
     const vanId = vmsgs.find((m) => m.type === 'created' && m.reqId === 'lsw-van')?.sessionId || null;
     // the creating socket stays open through ⑤ (test-agent-window-chrome's shape: a birth whose only client left at once is not the case under test)
     const liveRow = `(app.sidebar._allSessions || []).filter((s) => s.status === 'live' && (s.name === ${J(NAMES[5])} || s.webuiName === ${J(NAMES[5])})).map((s) => s.sessionId)`;
-    ok(!!vanId && await until(async () => (await P1.ev(liveRow)).length === 1, 20000, 250), '⑤ a RUNNING session «Van build» is on the hub (a raw create: no window shows it) — the sidebar\'s rows hold it live', { vanId, rows: await P1.ev(liveRow).catch((e) => e.message), webui: await P1.ev('(app.sidebar._webuiSessions || []).map((w) => [w.id, w.name, w.mode, w.backend])').catch((e) => e.message), frames: vmsgs.map((m) => m.type).slice(-12), exits: vmsgs.filter((m) => /exit|error|refus/i.test(m.type)).slice(0, 3), journal: journal.split('\n').filter((l) => /sess-1-|\[session\]|Van build/.test(l)).slice(-8) });
+    ok(!!vanId && verdictOf(await until(async () => (await P1.ev(liveRow)).length === 1, 20000, 250)), '⑤ a RUNNING session «Van build» is on the hub (a raw create: no window shows it) — the sidebar\'s rows hold it live', { vanId, rows: await P1.ev(liveRow).catch((e) => e.message), webui: await P1.ev('(app.sidebar._webuiSessions || []).map((w) => [w.id, w.name, w.mode, w.backend])').catch((e) => e.message), frames: vmsgs.map((m) => m.type).slice(-12), exits: vmsgs.filter((m) => /exit|error|refus/i.test(m.type)).slice(0, 3), journal: journal.split('\n').filter((l) => /sess-1-|\[session\]|Van build/.test(l)).slice(-8) });
     const sbOpen0 = await P1.ev('!!app.sidebar.isOpen');
     const found = `(() => { const c = [...document.querySelectorAll('.session-item-card.door-found')]; return c.map((x) => ({ text: x.textContent.slice(0, 80), seen: (() => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight; })() })); })()`;
-    ok(await P1.click(`app.wm.windows.get('win-p-5')?.element.querySelector('[data-door="sessions"]')`) && await until(async () => (await P1.ev(`app.sidebar.isOpen !== false && app.sidebar._activeView === null && document.getElementById('session-filter').value === ${J(NAMES[5])}`)) && (await P1.ev(found)).length === 1, 8000), '⑤ «打开会话列表» opens the session list on ALL, searched by the window\'s name («Van build») — and the RUNNING row is SHOWN, marked, on screen (23eaffef5: the 停止 view — the live row filtered away, «没有正在运行的会话»)', await P1.ev(`({ open: app.sidebar.isOpen, view: app.sidebar._activeView, q: document.getElementById('session-filter').value, found: ${found}, quick: [...document.querySelectorAll('#status-quick-tabs .status-quick-tab')].map((b) => b.textContent + (b.classList.contains('active') ? '*' : '')) })`).catch((e) => e.message));
+    ok(gateOf(await P1.click(`app.wm.windows.get('win-p-5')?.element.querySelector('[data-door="sessions"]')`)) && verdictOf(await until(async () => (await P1.ev(`app.sidebar.isOpen !== false && app.sidebar._activeView === null && document.getElementById('session-filter').value === ${J(NAMES[5])}`)) && (await P1.ev(found)).length === 1, 8000)), '⑤ «打开会话列表» opens the session list on ALL, searched by the window\'s name («Van build») — and the RUNNING row is SHOWN, marked, on screen (23eaffef5: the 停止 view — the live row filtered away, «没有正在运行的会话»)', await P1.ev(`({ open: app.sidebar.isOpen, view: app.sidebar._activeView, q: document.getElementById('session-filter').value, found: ${found}, quick: [...document.querySelectorAll('#status-quick-tabs .status-quick-tab')].map((b) => b.textContent + (b.classList.contains('active') ? '*' : '')) })`).catch((e) => e.message));
     const fd = (await P1.ev(found))[0];
-    ok(fd && /Van build/.test(fd.text) && fd.seen && J(await P1.ev('[...app.sidebar._statusFilter].sort()')) === J(['external', 'live', 'stopped', 'tmux']), '⑤ …the marked row is «Van build», seen; the status filter is as it was (the door sets the search only)', fd);
+    ok(gateOf(fd) && gateOf(/Van build/.test(fd.text)) && gateOf(fd.seen) && J(await P1.ev('[...app.sidebar._statusFilter].sort()')) === J(['external', 'live', 'stopped', 'tmux']), '⑤ …the marked row is «Van build», seen; the status filter is as it was (the door sets the search only)', fd);
     await P1.shot('sessions-zh-1440');
     await P1.ev(`(() => { app.sidebar._doorFound = null; document.getElementById('session-filter').value = ''; app.sidebar._render(); app.sidebar.toggle(${sbOpen0}); return true; })()`); // the list as it was (open, it narrows the grid)
     try { vws.close(); } catch { }
@@ -200,62 +200,62 @@ else await (async () => {
     ok(rec1.length === 12 && rec1.filter((w) => w.backendSessionId).length === 4, `① past the 20 s grace (and a save) the server's 个人 still holds TWELVE — none dropped as 'unbuilt' (${rec1.length})`, rec1.map((w) => w.winId));
     // ② a second desktop page; a close on the first reaches it live
     P2 = await newPage({ lang: 'zh' });
-    ok(!!P2 && await P2.boot() && await want(P2, 12), '② a second desktop page shows the same twelve placeholders');
+    ok(!!P2 && gateOf(await P2.boot()) && verdictOf(await want(P2, 12)), '② a second desktop page shows the same twelve placeholders');
     const target = gone.find((t) => t.id !== 'win-p-r' && t.id !== 'win-p-4' && t.id !== 'win-p-5').id;
     const confirmUp = () => P1.ev(`(() => { const d = [...document.querySelectorAll('.dialog')].find((x) => x.querySelector('h3')?.textContent === '移除这个窗口？'); return d ? { msg: d.querySelector('.dialog-hint')?.textContent || d.textContent, ok: d.querySelector('.btn-create')?.textContent, cancel: d.querySelector('.btn-cancel')?.textContent } : null; })()`);
     await P1.ev(`(() => { app.wm.focusWindow(${J(target)}); return true; })()`); // its frame on top: the ✕ a person sees
-    ok(await P1.click(`app.wm.windows.get(${J(target)})?.element.querySelector('.win-close')`) && await until(async () => !!(await confirmUp()), 5000), '② ✕ on an unavailable tile ASKS first: «移除这个窗口？» (r2: closed at once — the entry gone from the record)', await confirmUp());
+    ok(gateOf(await P1.click(`app.wm.windows.get(${J(target)})?.element.querySelector('.win-close')`)) && verdictOf(await until(async () => !!(await confirmUp()), 5000)), '② ✕ on an unavailable tile ASKS first: «移除这个窗口？» (r2: closed at once — the entry gone from the record)', await confirmUp());
     const cu = await confirmUp();
-    ok(cu && /永久删除/.test(cu.msg) && cu.ok === '移除' && cu.cancel === '取消', '② …the confirm says the entry is deleted FOR GOOD (only an older rollback point still holds it); 移除 / 取消', cu);
+    ok(gateOf(cu) && gateOf(/永久删除/.test(cu.msg)) && cu.ok === '移除' && cu.cancel === '取消', '② …the confirm says the entry is deleted FOR GOOD (only an older rollback point still holds it); 移除 / 取消', cu);
     await P1.shot('confirm-remove-zh');
-    ok(await P1.click(`[...document.querySelectorAll('.dialog')].find((x) => x.querySelector('h3')?.textContent === '移除这个窗口？')?.querySelector('.btn-cancel')`) && await until(async () => !(await confirmUp()), 3000), '② cancel closes the confirm');
+    ok(gateOf(await P1.click(`[...document.querySelectorAll('.dialog')].find((x) => x.querySelector('h3')?.textContent === '移除这个窗口？')?.querySelector('.btn-cancel')`)) && verdictOf(await until(async () => !(await confirmUp()), 3000)), '② cancel closes the confirm');
     await sleep(2500);
-    ok((await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 12 && (await P1.tiles()).some((t) => t.id === target), '② …and KEEPS the entry: the tile stays, the server\'s 个人 still holds twelve');
-    ok(await P1.click(`app.wm.windows.get(${J(target)})?.element.querySelector('[data-door="remove"]')`) && await until(async () => !!(await confirmUp()), 5000) && await P1.click(`[...document.querySelectorAll('.dialog')].find((x) => x.querySelector('h3')?.textContent === '移除这个窗口？')?.querySelector('.btn-create')`), '② «移除» asks the same confirm, and 移除 is pressed');
-    ok(await until(async () => (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 11, 8000), '② the server\'s record holds ELEVEN (the person\'s confirmed close is the one way a nameless placeholder leaves)');
-    ok(await until(async () => (await P2.tiles()).length === 11 && !(await P2.tiles()).some((t) => t.id === target), 8000), '② …and the second page\'s tile closed LIVE (the record without it ⇒ it closes there) — its four «stopped» tiles stay tiles (the record\'s same dead attach is no new recipe)', await P2.tiles());
+    ok((await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 12 && verdictOf((await P1.tiles()).some((t) => t.id === target)), '② …and KEEPS the entry: the tile stays, the server\'s 个人 still holds twelve');
+    ok(gateOf(await P1.click(`app.wm.windows.get(${J(target)})?.element.querySelector('[data-door="remove"]')`)) && gateOf(await until(async () => !!(await confirmUp()), 5000)) && verdictOf(await P1.click(`[...document.querySelectorAll('.dialog')].find((x) => x.querySelector('h3')?.textContent === '移除这个窗口？')?.querySelector('.btn-create')`)), '② «移除» asks the same confirm, and 移除 is pressed');
+    ok(verdictOf(await until(async () => (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 11, 8000)), '② the server\'s record holds ELEVEN (the person\'s confirmed close is the one way a nameless placeholder leaves)');
+    ok(verdictOf(await until(async () => (await P2.tiles()).length === 11 && !(await P2.tiles()).some((t) => t.id === target), 8000)), '② …and the second page\'s tile closed LIVE (the record without it ⇒ it closes there) — its four «stopped» tiles stay tiles (the record\'s same dead attach is no new recipe)', await P2.tiles());
     await P2.shot('desktop2-zh-after-close');
     // ③ the phone
     PH = await newPage({ lang: 'zh', phone: true });
-    ok(!!PH && await PH.boot() && await until(async () => (await PH.ev('app.isMobile')) && (await PH.tiles()).some((t) => t.shown), 20000, 200), '③ a phone (390×844, touch, zh) booted as a phone and shows its window on show as a placeholder tile');
+    ok(!!PH && gateOf(await PH.boot()) && verdictOf(await until(async () => (await PH.ev('app.isMobile')) && (await PH.tiles()).some((t) => t.shown), 20000, 200)), '③ a phone (390×844, touch, zh) booted as a phone and shows its window on show as a placeholder tile');
     await PH.ev(`(() => { app.wm.focusWindow('win-p-r'); return true; })()`);
     await until(async () => (await PH.tiles()).some((t) => t.shown && t.id === 'win-p-r'), 5000, 200);
     const ph = (await PH.tiles()).filter((t) => t.shown);
-    ok(ph.length >= 1 && ph[0].w >= 300 && ph[0].h >= 300 && ph[0].inside && ['会话已停止 — 点击恢复', '会话不可用'].includes(ph[0].say), '③ the phone\'s tile fills its window (≥ 300×300), words in zh', ph);
+    ok(ph.length >= 1 && ph[0].w >= 300 && ph[0].h >= 300 && gateOf(ph[0].inside) && verdictOf(['会话已停止 — 点击恢复', '会话不可用'].includes(ph[0].say)), '③ the phone\'s tile fills its window (≥ 300×300), words in zh', ph);
     const pr = ph.find((t) => t.id === 'win-p-r');
-    ok(pr && pr.minPx >= 16 && pr.doors.length === 3 && pr.doors.every((d) => d.h >= 44 && d.w >= 44 && d.px >= 16) && pr.hostWhole && pr.host === '在 host-gpu' && pr.nameShown, '③ on the phone the «会话不可用» tile\'s every word is ≥ 16 px and its three doors ≥ 44 px; its machine is seen whole', pr && { minPx: pr.minPx, doors: pr.doors, host: pr.host, hostWhole: pr.hostWhole });
+    ok(gateOf(pr) && pr.minPx >= 16 && pr.doors.length === 3 && gateOf(pr.doors.every((d) => d.h >= 44 && d.w >= 44 && d.px >= 16)) && gateOf(pr.hostWhole) && pr.host === '在 host-gpu' && verdictOf(pr.nameShown), '③ on the phone the «会话不可用» tile\'s every word is ≥ 16 px and its three doors ≥ 44 px; its machine is seen whole', pr && { minPx: pr.minPx, doors: pr.doors, host: pr.host, hostWhole: pr.hostWhole });
     await PH.shot('phone-zh-390');
     PJ = await newPage({ lang: 'ja', phone: true });
-    ok(!!PJ && await PJ.boot() && await until(async () => (await PJ.tiles()).some((t) => t.shown && ['セッションは停止しています — クリックで再開', 'セッションを利用できません'].includes(t.say)), 20000, 200), '③ …and in ja (セッションは停止しています — クリックで再開 / セッションを利用できません)', await PJ.tiles().catch(() => []));
+    ok(!!PJ && gateOf(await PJ.boot()) && verdictOf(await until(async () => (await PJ.tiles()).some((t) => t.shown && ['セッションは停止しています — クリックで再開', 'セッションを利用できません'].includes(t.say)), 20000, 200)), '③ …and in ja (セッションは停止しています — クリックで再開 / セッションを利用できません)', await PJ.tiles().catch(() => []));
     await PJ.ev(`(() => { app.wm.focusWindow('win-p-r'); return true; })()`);
-    ok(await until(async () => (await PJ.tiles()).some((t) => t.shown && t.id === 'win-p-r' && t.doors.map((d) => d.text).join('|') === '以前のレイアウトを復元…|セッション一覧を開く|削除'), 5000, 200), '③ …its doors in ja (以前のレイアウトを復元… · セッション一覧を開く · 削除)', (await PJ.tiles().catch(() => [])).filter((t) => t.shown));
+    ok(verdictOf(await until(async () => (await PJ.tiles()).some((t) => t.shown && t.id === 'win-p-r' && t.doors.map((d) => d.text).join('|') === '以前のレイアウトを復元…|セッション一覧を開く|削除'), 5000, 200)), '③ …its doors in ja (以前のレイアウトを復元… · セッション一覧を開く · 削除)', (await PJ.tiles().catch(() => [])).filter((t) => t.shown));
     await PJ.shot('phone-ja-390');
     PH.close(); PJ.close();
     // ④ the door — from a «会话不可用» tile (r3): the dialog opens ON the newest point that still names its conversation
-    ok(await P1.click(`app.wm.windows.get('win-p-4')?.element.querySelector('[data-door="rollback"]')`), '④ the «Trip planner» tile\'s «恢复之前的布局…» is pressed');
+    ok(verdictOf(await P1.click(`app.wm.windows.get('win-p-4')?.element.querySelector('[data-door="rollback"]')`)), '④ the «Trip planner» tile\'s «恢复之前的布局…» is pressed');
     const deskBtn = `.lh-desk[data-id="${POINT}"][data-desk="个人"]`; // THE 06:50 row's 个人 (the close above wrote a newer point — its row comes first)
-    ok(await until(() => P1.ev(`!!document.querySelector('${deskBtn}')`), 8000), '④ the dialog (⚙ → System → 恢复之前的布局…\'s) lists the 06:50 point with each desktop its own button (个人 / 工作 / 研究)', await P1.ev(`[...document.querySelectorAll('.lh-desk')].map((b) => b.textContent)`).catch(() => null));
+    ok(verdictOf(await until(() => P1.ev(`!!document.querySelector('${deskBtn}')`), 8000)), '④ the dialog (⚙ → System → 恢复之前的布局…\'s) lists the 06:50 point with each desktop its own button (个人 / 工作 / 研究)', await P1.ev(`[...document.querySelectorAll('.lh-desk')].map((b) => b.textContent)`).catch(() => null));
     const picked = await P1.ev(`[...document.querySelectorAll('.lh-desk.is-picked')].map((b) => ({ id: b.dataset.id, desk: b.dataset.desk, current: b.getAttribute('aria-current'), focused: document.activeElement === b }))`);
     const note = await P1.ev(`document.querySelector('.lh-slot')?.textContent || ''`);
-    ok(picked.length === 1 && picked[0].id === POINT && picked[0].desk === '个人' && picked[0].current === 'true' && /Trip planner/.test(note), '④ …with the 06:50 point\'s 个人 SELECTED (the newest point whose 个人 still names «Trip planner»\'s conversation — the newer ones hold it nameless) and a line that says so', { picked, note, rows: await P1.ev(`[...document.querySelectorAll('.lh-row')].length`) });
+    ok(picked.length === 1 && picked[0].id === POINT && picked[0].desk === '个人' && picked[0].current === 'true' && verdictOf(/Trip planner/.test(note)), '④ …with the 06:50 point\'s 个人 SELECTED (the newest point whose 个人 still names «Trip planner»\'s conversation — the newer ones hold it nameless) and a line that says so', { picked, note, rows: await P1.ev(`[...document.querySelectorAll('.lh-row')].length`) });
     await P1.shot('dialog-zh'); // tile A's OWN dialog, before the second tile's press (B-54d9 N1: taken after it, the two shots were one picture)
     // r4: a SECOND tile's door while the dialog is open ⇒ the dialog is redrawn for ITS slot (23eaffef5: raised with A's line)
-    ok(await P1.ev(`(() => { const b = app.wm.windows.get('win-p-9')?.element.querySelector('[data-door="rollback"]'); if (!b) return false; b.click(); return true; })()`) && await until(() => P1.ev(`/Cluster admin/.test(document.querySelector('.lh-slot')?.textContent || '') && document.querySelectorAll('.lh-slot').length === 1 && !!document.querySelector('${deskBtn}.is-picked')`), 8000), '④ …tile «Cluster admin»\'s «恢复之前的布局…» pressed while it is open: ONE dialog, redrawn for «Cluster admin» (its line, its point selected)', await P1.ev(`({ notes: [...document.querySelectorAll('.lh-slot')].map((x) => x.textContent), picked: [...document.querySelectorAll('.lh-desk.is-picked')].map((b) => b.dataset.id + '/' + b.dataset.desk) })`).catch((e) => e.message));
+    ok(gateOf(await P1.ev(`(() => { const b = app.wm.windows.get('win-p-9')?.element.querySelector('[data-door="rollback"]'); if (!b) return false; b.click(); return true; })()`)) && verdictOf(await until(() => P1.ev(`/Cluster admin/.test(document.querySelector('.lh-slot')?.textContent || '') && document.querySelectorAll('.lh-slot').length === 1 && !!document.querySelector('${deskBtn}.is-picked')`), 8000)), '④ …tile «Cluster admin»\'s «恢复之前的布局…» pressed while it is open: ONE dialog, redrawn for «Cluster admin» (its line, its point selected)', await P1.ev(`({ notes: [...document.querySelectorAll('.lh-slot')].map((x) => x.textContent), picked: [...document.querySelectorAll('.lh-desk.is-picked')].map((b) => b.dataset.id + '/' + b.dataset.desk) })`).catch((e) => e.message));
     await P1.shot('dialog-second-tile-zh');
     const deskWords = await P1.ev(`[...document.querySelectorAll('.lh-desk')].map((b) => [b.textContent, b.title])`);
     const w0650 = await P1.ev(`(() => { const b = document.querySelector('${deskBtn}'); return b ? [b.textContent, b.title] : null; })()`);
-    ok(w0650 && /^个人 12/.test(w0650[0]) && w0650[1] === '只恢复「个人」', '④ the 06:50 row\'s button says the desktop and its count («个人 12 …»), its title «只恢复「个人」»', { w0650, all: deskWords });
-    ok(await P1.click(`document.querySelector('${deskBtn}')`) && await until(() => P1.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '只恢复「个人」')`), 5000), '④ the press asks first: «只恢复「个人」…？» (the other desktops stay as they are now)');
+    ok(gateOf(w0650) && gateOf(/^个人 12/.test(w0650[0])) && w0650[1] === '只恢复「个人」', '④ the 06:50 row\'s button says the desktop and its count («个人 12 …»), its title «只恢复「个人」»', { w0650, all: deskWords });
+    ok(gateOf(await P1.click(`document.querySelector('${deskBtn}')`)) && verdictOf(await until(() => P1.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '只恢复「个人」')`), 5000)), '④ the press asks first: «只恢复「个人」…？» (the other desktops stay as they are now)');
     await P1.shot('confirm-zh');
     const reloads = (X) => X.ev('window.__lswMark = 1; true');
     await reloads(P1); await reloads(P2);
     const jAt = journal.length; // the hub's own lines from the press on (④'s facts below)
-    ok(await P1.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '只恢复「个人」')`), '④ the confirm is pressed');
-    ok(await until(async () => (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 12, 8000), '④ the server\'s 个人 is the point\'s TWELVE', (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.map((w) => w.winId));
+    ok(verdictOf(await P1.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '只恢复「个人」')`)), '④ the confirm is pressed');
+    ok(verdictOf(await until(async () => (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 12, 8000)), '④ the server\'s 个人 is the point\'s TWELVE', (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.map((w) => w.winId));
     const after = await api('/api/layouts');
     ok(after.desktops['desk-w'].autoSave.windows.length === 2 && after.desktops['desk-r'].autoSave.windows.length === 1, '④ …工作 and 研究 as they are NOW (2 / 1 — the point held 工作 three)', { w: after.desktops['desk-w'].autoSave.windows.length, r: after.desktops['desk-r'].autoSave.windows.length });
     const reloaded = (X) => until(async () => { try { return (await X.ev('window.__lswMark === undefined && !!(window.app && app.desktopManager && app.desktopManager.activeDesktopId)')); } catch { return false; } }, 20000, 250);
-    ok(await reloaded(P1) && await reloaded(P2), '④ both pages reloaded (layout-restored is broadcast to every client)');
+    ok(gateOf(await reloaded(P1)) && verdictOf(await reloaded(P2)), '④ both pages reloaded (layout-restored is broadcast to every client)');
     const built = (X) => until(async () => (await X.ev(`${J(point.desktops['desk-p'].autoSave.windows.map((w) => w.winId))}.filter((id) => app.wm.windows.has(id)).length`)) === 12 && (await X.tiles()).length === 11, 20000, 250);
     // the facts that name the half (lane bl-windows, the 2.369.410 hosted red — this leg said nothing): each page's point ids it
     // lacks and its window and tile counts; the server's 个人 after the reload against the point (what it lacks, what it adds);
@@ -264,7 +264,7 @@ else await (async () => {
     const facts = async (X) => { try { const r = await X.ev(`(() => { const ids = ${J(PIDS)}; return { lacks: ids.filter((id) => !app.wm.windows.has(id)), windows: app.wm.windows.size }; })()`); return { ...r, tiles: (await X.tiles()).length }; } catch (e) { return String(e && e.message || e).slice(0, 60); } };
     const b1 = await built(P1), b2 = await built(P2);
     const srvFacts = async () => { try { const ids = (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.map((w) => w.winId); return { n: ids.length, lacks: PIDS.filter((x) => !ids.includes(x)), adds: ids.filter((x) => !PIDS.includes(x)) }; } catch { return null; } };
-    ok(b1 && b2, '④ on a hub whose sessions are stopped the restored 个人 shows TWELVE windows on both pages — eleven placeholders + the file window, not 0', b1 && b2 ? undefined : { P1: await facts(P1), P2: await facts(P2), server: await srvFacts(), hub: journal.slice(jAt).split('\n').filter((l) => /\[layout/.test(l)).slice(-3).map((l) => l.slice(0, 100)) });
+    ok(gateOf(b1) && verdictOf(b2), '④ on a hub whose sessions are stopped the restored 个人 shows TWELVE windows on both pages — eleven placeholders + the file window, not 0', b1 && b2 ? undefined : { P1: await facts(P1), P2: await facts(P2), server: await srvFacts(), hub: journal.slice(jAt).split('\n').filter((l) => /\[layout/.test(l)).slice(-3).map((l) => l.slice(0, 100)) });
     await P1.shot('restored-zh-1440');
 
     // ⑥ lane phone-dock-restore (the owner 2026-11-02 on the iPhone: «恢复之前布局的那个按钮加载速度有点慢，然后也没有任何提示让人那边
@@ -318,10 +318,10 @@ else await (async () => {
     const busy6 = (o) => !!o && !!o.busy && o.busy.open && o.busy.words === '正在恢复…' && o.busy.held;
     const toast6 = (o) => !!o && Array.isArray(o.toasts) && o.toasts.some((t) => /布局已恢复 — 正在刷新/.test(t)) && !o.toasts.some((t) => /另一台设备/.test(t));
     const g6 = await probe6(P1);
-    ok(good6(g6), `⑥ the GET held: the dialog's shell stands ${g6.shell && g6.shell.ms} ms after the press (< 300) saying «${g6.shell && g6.shell.says}», no list yet; the answer released ⇒ ${g6.rows} rows`, g6);
-    ok(fail6(g6), `⑥ a read that fails is SAID in the dialog: «${g6.failSays}» (never «暂无回滚点»)`, g6.failSays);
-    ok(busy6(g6), `⑥ the restore's press while the hub works: the button says «${g6.busy && g6.busy.words}», the list held`, g6.busy);
-    ok(toast6(g6) && g6.reloads === 1, `⑥ the page that asked shows ITS toast alone: ${J(g6.toasts)} — and reloads once (${g6.reloads}; r2: the broadcast that names its rid)`, g6);
+    ok(verdictOf(good6(g6)), `⑥ the GET held: the dialog's shell stands ${g6.shell && g6.shell.ms} ms after the press (< 300) saying «${g6.shell && g6.shell.says}», no list yet; the answer released ⇒ ${g6.rows} rows`, g6);
+    ok(verdictOf(fail6(g6)), `⑥ a read that fails is SAID in the dialog: «${g6.failSays}» (never «暂无回滚点»)`, g6.failSays);
+    ok(verdictOf(busy6(g6)), `⑥ the restore's press while the hub works: the button says «${g6.busy && g6.busy.words}», the list held`, g6.busy);
+    ok(gateOf(toast6(g6)) && g6.reloads === 1, `⑥ the page that asked shows ITS toast alone: ${J(g6.toasts)} — and reloads once (${g6.reloads}; r2: the broadcast that names its rid)`, g6);
     await P1.shot('history-busy-zh');
     // ⑦ round 2 (P4 — the broadcast had no identity: ANY `layout-restored` during this page's press counted as its own, so a press
     //    the hub refused said «restored» and reloaded, and another device's restore was swallowed): the POST names its rid, the hub
@@ -356,7 +356,7 @@ else await (async () => {
     const own7 = (o) => !!o && /^r[0-9a-z]{6,}$/.test(o.rid || '') && !!o.after && o.after.mark && o.reloads === 0 && o.after.toasts.some((t) => /not found|失败/.test(t)) && !o.after.toasts.some((t) => /布局已恢复 — 正在刷新/.test(t))
       && (o.during || []).some((t) => t.replace(/✕$/, '') === '布局已在另一台设备上恢复') && o.after.open && o.after.words === '恢复' && !o.after.busy && !o.after.held;
     const g7 = await probe7(P1);
-    ok(own7(g7), `⑦ the press names its restore (rid «${g7.rid}»); another device's broadcast during it says «${(g7.during || []).join(' | ')}»; the hub then refuses the press ⇒ the error said (${J(g7.after && g7.after.toasts)}), the button «${g7.after && g7.after.words}» again, ${g7.reloads} reloads`, g7);
+    ok(verdictOf(own7(g7)), `⑦ the press names its restore (rid «${g7.rid}»); another device's broadcast during it says «${(g7.during || []).join(' | ')}»; the hub then refuses the press ⇒ the error said (${J(g7.after && g7.after.toasts)}), the button «${g7.after && g7.after.words}» again, ${g7.reloads} reloads`, g7);
     // ⑥ r3 (Q1 — a LOST ANSWER: the hub wrote the restore and broadcast it, the POST's answer never came back; round 1 reloaded
     //    at 900 ms, round 2 waited on that POST for ever under «正在恢复…»): the POST HELD, never answered; the broadcast naming
     //    the press's rid injected ⇒ the press's own toast, once, and ONE reload within 1.5 s. RED CONTROL: app.js's r2 line.
@@ -387,7 +387,7 @@ else await (async () => {
     };
     const lost8 = (o) => !!o && /^r[0-9a-z]{6,}$/.test(o.rid || '') && o.reloads === 1 && o.ms != null && o.ms <= 1500 && Array.isArray(o.toasts) && o.toasts.length === 1 && o.toasts[0].replace(/✕$/, '') === '布局已恢复 — 正在刷新…';
     const g8 = await probe8(P1);
-    ok(lost8(g8), `⑥ r3 the POST's answer LOST (held, never answered), the broadcast naming its rid «${g8.rid}» heard ⇒ the press's own toast ${J(g8.toasts)} and ${g8.reloads} reload ${g8.ms} ms after it (≤ 1500)`, g8);
+    ok(verdictOf(lost8(g8)), `⑥ r3 the POST's answer LOST (held, never answered), the broadcast naming its rid «${g8.rid}» heard ⇒ the press's own toast ${J(g8.toasts)} and ${g8.reloads} reload ${g8.ms} ms after it (≤ 1500)`, g8);
     // the mutants (a copy of this tree's src/ with lines swapped — this tree's bundle otherwise), served for bundle.js
     const SF = fs.readFileSync(path.join(wt, 'src/lib/setup-flows.js'), 'utf8'), AP = fs.readFileSync(path.join(wt, 'src/lib/app.js'), 'utf8');
     const mutBoot = async (tag, back) => {
@@ -405,20 +405,20 @@ else await (async () => {
     // RED CONTROL (⑦): app.js takes ANY broadcast during the press as its own (round 1's line) — the refused press says «restored»
     const a7 = await mutBoot('mut7', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(msg.unsaved); } else own.landed(); return; }', 'if (own) { own.landed(); return; }']]);
     const r7 = await probe7(P1);
-    ok(a7 && !own7(r7), `RED CONTROL (⑦): app.js matching any broadcast during the press${a7 ? '' : ' — AN ANCHOR MOVED'} ⇒ the refused press reads as restored (${J(r7.after && r7.after.toasts)}, ${r7.reloads} reloads) — ⑦ red`, r7);
+    ok(gateOf(a7) && !own7(r7), `RED CONTROL (⑦): app.js matching any broadcast during the press${a7 ? '' : ' — AN ANCHOR MOVED'} ⇒ the refused press reads as restored (${J(r7.after && r7.after.toasts)}, ${r7.reloads} reloads) — ⑦ red`, r7);
     // RED CONTROL (⑥ r3): app.js's r2 line — its own broadcast only marked, the reload left to the POST's answer ⇒ none, for ever
     const a8 = await mutBoot('mut8', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(msg.unsaved); } else own.landed(); return; }', 'if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }']]);
     const r8 = await probe8(P1);
-    ok(a8 && !lost8(r8) && r8.reloads === 0, `RED CONTROL (⑥ r3): app.js's r2 line${a8 ? '' : ' — AN ANCHOR MOVED'} ⇒ the lost answer leaves ${J(r8.toasts)}, ${r8.reloads} reloads, the button «${r8.stuck}» — ⑥ r3 red`, r8);
+    ok(gateOf(a8) && !lost8(r8) && r8.reloads === 0, `RED CONTROL (⑥ r3): app.js's r2 line${a8 ? '' : ' — AN ANCHOR MOVED'} ⇒ the lost answer leaves ${J(r8.toasts)}, ${r8.reloads} reloads, the button «${r8.stuck}» — ⑥ r3 red`, r8);
     // RED CONTROL: the same probe over the base's dialog (the lane's lines put back) — each leg goes red by name
     const back = [[SF, "t('Reading the layout history…')", "t('Loading…')"], [SF, 'if (!r || r.error || !Array.isArray(r.entries)) {', 'if (false) {'], [SF, 'const entries = r.entries;', 'const entries = r?.entries || [];'],
       [SF, "b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = own;", ''],
       [AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(msg.unsaved); } else own.landed(); return; }', ''], [AP, "if (own) { showToast(t('Layout restored on another device')); return; }", '']];
     const anchored = await mutBoot('mut6', back);
     const r6 = await probe6(P1);
-    ok(anchored && !good6(r6) && !fail6(r6) && !busy6(r6) && !toast6(r6), `RED CONTROL (⑥): the base's dialog (the lane's ${back.length} lines put back${anchored ? '' : ' — AN ANCHOR MOVED'}) — the shell says «${r6.shell && r6.shell.says}», a failed read «${r6.failSays}», the pressed button «${r6.busy && r6.busy.words}», the toasts ${J(r6.toasts)} — each ⑥ leg red`, r6);
+    ok(gateOf(anchored) && !good6(r6) && !fail6(r6) && !busy6(r6) && !toast6(r6), `RED CONTROL (⑥): the base's dialog (the lane's ${back.length} lines put back${anchored ? '' : ' — AN ANCHOR MOVED'}) — the shell says «${r6.shell && r6.shell.says}», a failed read «${r6.failSays}», the pressed button «${r6.busy && r6.busy.words}», the toasts ${J(r6.toasts)} — each ⑥ leg red`, r6);
   } finally { P1.close(); if (P2) P2.close(); }
 })();
 
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`}${skipped ? ` (${skipped} skipped)` : ''}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

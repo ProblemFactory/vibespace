@@ -23,7 +23,7 @@ const LANE_WT = REPO;
 const { scratch, scratchHome, freePort, vncEnv, endRootedProcesses } = await import(path.join(LANE_WT, 'scripts/scratch.mjs'));
 const WebSocket = (await import(path.join(LANE_WT, 'node_modules/ws/index.js'))).default;
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra ? '\n      ' + extra : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra ? '\n      ' + extra : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
 const ROOT = scratch('uexv'); fs.mkdirSync(ROOT, { recursive: true });
@@ -97,7 +97,7 @@ const finish = async () => {
   console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} (${pass} passed, ${fail} failed) — tree ${TREE}; journal ${path.join(ROOT, 'journal.txt')}`);
   process.exit(fail ? 1 : 0);
 };
-if (!ok(await until(() => journal.includes('Ready.'), 60000), 'setup: the server is Ready', journal.slice(-800))) await finish();
+if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000)), 'setup: the server is Ready', journal.slice(-800))) await finish();
 async function connect() {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const st = { ws, frames: [] };
@@ -124,12 +124,12 @@ if (LEGS.includes('R')) {
   console.log('\nLeg R — a mid-turn crash → the respawn ask; client A runs it while client B clicks Resume in the same tick');
   leg: {
     const s = await newChat('r');
-    if (!ok(s && s.stub, 'setup R: a chat conversation with a stub CLI', JSON.stringify(A.frames.slice(-6)))) break leg;
+    if (!ok(gateOf(s) && verdictOf(s.stub), 'setup R: a chat conversation with a stub CLI', JSON.stringify(A.frames.slice(-6)))) break leg;
     const cid = s.stub.sid;
     A.ws.send(JSON.stringify({ type: 'chat-input', sessionId: s.sid, text: 'please CRASH now' }));
     const asked = await until(() => A.frames.find((f) => f.type === 'unexpected-exit-respawn'), 20000);
     const ask = A.frames.find((f) => f.type === 'unexpected-exit-respawn');
-    if (!ok(asked && ask.session && ask.session.backendSessionId === cid, `setup R: the crash was judged unexpected and client A was asked to resume ${cid}`, journal.split('\n').filter((l) => /exited|unexpected/.test(l)).join(' | '))) break leg;
+    if (!ok(gateOf(asked) && gateOf(ask.session) && ask.session.backendSessionId === cid, `setup R: the crash was judged unexpected and client A was asked to resume ${cid}`, journal.split('\n').filter((l) => /exited|unexpected/.test(l)).join(' | '))) break leg;
     A.ws.send(resumeCreate(cid, 'respawn')); B.ws.send(resumeCreate(cid, 'user-click'));
     await sleep(9000);
     const live = stubs().filter((x) => x.alive && x.sid === cid);
@@ -144,18 +144,18 @@ if (LEGS.includes('K')) {
   console.log('\nLeg K — the System panel\'s kill (POST /api/sysinfo/signal) of a WORKING conversation\'s CLI');
   leg: {
     const s = await newChat('k');
-    if (!ok(s && s.stub, 'setup K: a chat conversation with a stub CLI', JSON.stringify(A.frames.slice(-6)))) break leg;
+    if (!ok(gateOf(s) && verdictOf(s.stub), 'setup K: a chat conversation with a stub CLI', JSON.stringify(A.frames.slice(-6)))) break leg;
     A.ws.send(JSON.stringify({ type: 'chat-input', sessionId: s.sid, text: 'WORK on it' }));
     await sleep(1500);
     const r = await fetch(`http://127.0.0.1:${PORT}/api/sysinfo/signal`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: s.stub.pid, sig: 'TERM' }) });
     const body = await r.json().catch(() => ({}));
-    ok(r.ok && body.ok, `setup K: the panel's kill landed (${JSON.stringify(body)})`);
+    ok(gateOf(r.ok) && verdictOf(body.ok), `setup K: the panel's kill landed (${JSON.stringify(body)})`);
     await until(() => A.frames.find((f) => f.type === 'exited' && f.sessionId === s.sid), 20000);
     await sleep(2500);
     const line = journal.split('\n').find((l) => l.includes('[session] exited ' + s.sid)) || '(no exit line)';
     console.log('    exit line: ' + line.trim().slice(0, 240));
     ok(!A.frames.find((f) => f.type === 'unexpected-exit-respawn' && f.session && f.session.backendSessionId === s.stub.sid), 'a USER kill from the System panel is never respawned');
-    ok(/ asked=/.test(line), 'the exit line names the actor (asked=…)');
+    ok(verdictOf(/ asked=/.test(line)), 'the exit line names the actor (asked=…)');
   }
 }
 const asksFor = (cid) => [A, B].flatMap((st) => st.frames.filter((f) => f.type === 'unexpected-exit-respawn' && f.session && f.session.backendSessionId === cid)).length;
@@ -169,12 +169,12 @@ if (LEGS.includes('W')) {
   leg: {
     fs.writeFileSync(path.join(ROOT, 'hup-immune'), '1');
     const s = await newChat('w');
-    if (!ok(s && s.stub, 'setup W: a chat conversation with a stub CLI', JSON.stringify(A.frames.slice(-6)))) break leg;
+    if (!ok(gateOf(s) && verdictOf(s.stub), 'setup W: a chat conversation with a stub CLI', JSON.stringify(A.frames.slice(-6)))) break leg;
     const cid = s.stub.sid;
     A.ws.send(JSON.stringify({ type: 'chat-input', sessionId: s.sid, text: 'WORK on it' }));
     await sleep(1500);
     const wrapper = ppidOf(s.stub.pid);
-    if (!ok(/wrapper/.test(cmdOf(wrapper)), `setup W: the stub's parent is the chat wrapper (pid ${wrapper}: ${cmdOf(wrapper).slice(0, 90)})`)) break leg;
+    if (!ok(verdictOf(/wrapper/.test(cmdOf(wrapper))), `setup W: the stub's parent is the chat wrapper (pid ${wrapper}: ${cmdOf(wrapper).slice(0, 90)})`)) break leg;
     try { process.kill(wrapper, 'SIGKILL'); } catch { }
     const asked = await until(() => asksFor(cid) > 0, 25000);
     const line = journal.split('\n').find((l) => l.includes('[session] exited ' + s.sid)) || '(no exit line)';
@@ -196,10 +196,10 @@ if (LEGS.includes('L')) {
   console.log('\nLeg L — the crash loop: the respawned CLI dies again while it is starting');
   leg: {
     const s = await newChat('l');
-    if (!ok(s && s.stub, 'setup L: a chat conversation with a stub CLI', JSON.stringify(A.frames.slice(-6)))) break leg;
+    if (!ok(gateOf(s) && verdictOf(s.stub), 'setup L: a chat conversation with a stub CLI', JSON.stringify(A.frames.slice(-6)))) break leg;
     const cid = s.stub.sid;
     A.ws.send(JSON.stringify({ type: 'chat-input', sessionId: s.sid, text: 'please CRASH now' }));
-    if (!ok(await until(() => asksFor(cid) > 0, 20000), 'setup L: the first crash asked for the respawn')) break leg;
+    if (!ok(verdictOf(await until(() => asksFor(cid) > 0, 20000)), 'setup L: the first crash asked for the respawn')) break leg;
     fs.writeFileSync(path.join(ROOT, 'crash-next'), '1');
     const before = new Set(await todoTexts()), agains = () => (journal.match(/notify only \(again\)/g) || []).length, a0 = agains();
     A.ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: PROJ, cols: 120, rows: 30, name: 'uexv-l2', resume: true, resumeId: cid, backendSessionId: cid, reqId: 'respawn-l' }));
@@ -214,4 +214,4 @@ if (LEGS.includes('L')) {
     ok(writers(cid).length === 0, 'no process holds the transcript after the crash loop');
   }
 }
-await finish();
+await finish(); import { verdictOf, gateOf } from './lib/check.mjs';

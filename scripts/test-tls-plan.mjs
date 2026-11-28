@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TP = require(path.join(REPO, 'src/tls-plan.js'));
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -40,12 +40,12 @@ console.log('§1 tailscale');
   ok(p.mode === 'tailscale' && p.domain === DNS && p.url === `https://${DNS}:3456`, `the trailing dot is stripped: ${p.url}`);
   ok(p.renew === true && p.serving === false && p.why === 'fetching' && p.certPath === `data/tls/${DNS}.crt` && p.keyPath === `data/tls/${DNS}.key`, 'no certificate yet ⇒ renew (fetch), not serving, data/tls/<domain>.crt|.key');
   const l = plan({ tailscale: { status: status() }, files: live(60) });
-  ok(l.serving && !l.renew && l.why === 'tailscale' && l.words === `Secure address: https://${DNS}:3456 — microphone, a Mac's sign-in and other secure-only features need it`, 'a live certificate ⇒ serving, the Secure-address words');
-  ok(l.line.startsWith(`https on :3456 — https://${DNS}:3456 (tailscale certificate, until 2026-12-11`), `the boot-log line: ${l.line}`);
+  ok(gateOf(l.serving) && !l.renew && l.why === 'tailscale' && l.words === `Secure address: https://${DNS}:3456 — microphone, a Mac's sign-in and other secure-only features need it`, 'a live certificate ⇒ serving, the Secure-address words');
+  ok(verdictOf(l.line.startsWith(`https on :3456 — https://${DNS}:3456 (tailscale certificate, until 2026-12-11`)), `the boot-log line: ${l.line}`);
   ok(plan({ tailscale: { status: status() }, files: live(13) }).renew === true, 'renew window: 13 days left ⇒ renew');
   ok(plan({ tailscale: { status: status() }, files: live(15) }).renew === false, 'renew window: 15 days left ⇒ no renew');
   const ex = plan({ tailscale: { status: status() }, files: live(-1) });
-  ok(!ex.serving && ex.renew && ex.why === 'fetching', 'an expired certificate is never served — fetched again');
+  ok(!ex.serving && gateOf(ex.renew) && ex.why === 'fetching', 'an expired certificate is never served — fetched again');
   ok(plan({ tailscale: { status: status({ Self: { DNSName: 'BOX-A.tail1a2b3c.ts.net.' } }) } }).domain === DNS, 'the domain is lower-cased (CertDomains match)');
 }
 console.log('§2 the owner\'s steps');
@@ -57,9 +57,9 @@ console.log('§2 the owner\'s steps');
   ok(a.why === 'https-not-enabled', 'the CLI\'s exact "' + NOT_ENABLED + '" ⇒ https-not-enabled');
   const d = plan({ tailscale: { status: status(), certAnswer: DENIED } });
   ok(d.renew === true && a.renew === true, 'a refused cert run is retried every pass (renew) — the owner\'s fix needs no restart');
-  ok(d.why === 'operator-needed' && d.notice && d.words.includes('sudo tailscale set --operator=ada') && d.i18n.params.user === 'ada', 'the CLI\'s "cert access denied" ⇒ operator-needed, the sudo tailscale set --operator=<user> words');
-  ok(plan({ tailscale: { status: status(), certAnswer: DENIED }, files: live(30) }).serving, 'a renewal refused while the certificate is still live keeps serving it');
-  ok(plan({ tailscale: { status: status({ CertDomains: null }) }, files: live(30) }).serving, 'HTTPS turned off on the tailnet: the live certificate is served until it ends');
+  ok(d.why === 'operator-needed' && gateOf(d.notice) && gateOf(d.words.includes('sudo tailscale set --operator=ada')) && d.i18n.params.user === 'ada', 'the CLI\'s "cert access denied" ⇒ operator-needed, the sudo tailscale set --operator=<user> words');
+  ok(verdictOf(plan({ tailscale: { status: status(), certAnswer: DENIED }, files: live(30) }).serving), 'a renewal refused while the certificate is still live keeps serving it');
+  ok(verdictOf(plan({ tailscale: { status: status({ CertDomains: null }) }, files: live(30) }).serving), 'HTTPS turned off on the tailnet: the live certificate is served until it ends');
   ok(plan({ tailscale: { status: status({ CertDomains: null }) }, files: live(30) }).renew === false, '… and never renewed');
 }
 console.log('§3 off');
@@ -77,7 +77,7 @@ console.log('§3 off');
 console.log('§4 files');
 {
   const f = plan({ env: { VIBESPACE_TLS_CERT: '/c.pem', VIBESPACE_TLS_KEY: '/k.pem' }, files: { envReadable: true, envNames: ['192.168.1.20'], envNotAfter: NOW + 9 * DAY }, tailscale: { status: status() } });
-  ok(f.mode === 'files' && f.serving && f.url === 'https://192.168.1.20:3456' && f.certPath === '/c.pem' && !f.renew, 'VIBESPACE_TLS_CERT + _KEY readable ⇒ files, over Tailscale, never renewed by us');
+  ok(f.mode === 'files' && gateOf(f.serving) && f.url === 'https://192.168.1.20:3456' && f.certPath === '/c.pem' && !f.renew, 'VIBESPACE_TLS_CERT + _KEY readable ⇒ files, over Tailscale, never renewed by us');
   ok(plan({ env: { VIBESPACE_TLS_CERT: '/c.pem', VIBESPACE_TLS_KEY: '/k.pem' }, files: { envReadable: false } }).why === 'files-missing', 'unreadable files ⇒ off files-missing (never a silent fall to Tailscale)');
   ok(plan({ env: { VIBESPACE_TLS_CERT: '/c.pem' }, files: { envReadable: true } }).why === 'files-missing', 'a cert without a key ⇒ files-missing');
   ok(plan({ setting: 'files', tailscale: { status: status() } }).why === 'files-missing', 'server.https = files without the env ⇒ files-missing');
@@ -90,8 +90,8 @@ console.log('§5 the words in zh + ja');
     ok(miss.length === 0, `every plan word has a ${lang} line${miss.length ? ' — missing: ' + miss.join(' | ') : ''}`);
   }
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
-  ok(zh.includes('"Tailscale 的 HTTPS 证书功能没开：在 Tailscale 管理台 → DNS → HTTPS Certificates 打开后，VibeSpace 会在一小时内自动取证书"'), 'the owner\'s zh admin-step sentence, verbatim');
-  ok(zh.includes('sudo tailscale set --operator={user}（{user} = 运行 VibeSpace 的用户）'), 'the owner\'s zh operator sentence');
+  ok(verdictOf(zh.includes('"Tailscale 的 HTTPS 证书功能没开：在 Tailscale 管理台 → DNS → HTTPS Certificates 打开后，VibeSpace 会在一小时内自动取证书"')), 'the owner\'s zh admin-step sentence, verbatim');
+  ok(verdictOf(zh.includes('sudo tailscale set --operator={user}（{user} = 运行 VibeSpace 的用户）')), 'the owner\'s zh operator sentence');
 }
 console.log('§7 lane tls-pass-retry — status-unreadable, the cadence, the probe line');
 {
@@ -116,7 +116,7 @@ console.log('§7 lane tls-pass-retry — status-unreadable, the cadence, the pro
   ok(TP.probeLine('status', { code: 0, out: '', err: '', ms: 801 }).line === 'tailscale status: exit 0 but no readable JSON (801 ms, 0 bytes out)', 'an empty "ok" answer says so');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   for (const k of [TP.WORDS.statusUnreadable, 'Check again', 'Last check: {what}', 'tailscale {cmd} timed out after {s} s', 'tailscale {cmd} answered {bytes} bytes that are not a status', 'tailscale {cmd} failed ({code}): {err}'])
-    ok(zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'), `zh + ja: ${k.slice(0, 50)}`);
+    ok(gateOf(zh.includes(JSON.stringify(k) + ':')) && verdictOf(ja.includes(JSON.stringify(k) + ':')), `zh + ja: ${k.slice(0, 50)}`);
 }
 console.log('§7b CONTROL — a cadence that forgets "served since boot"');
 {
@@ -124,7 +124,7 @@ console.log('§7b CONTROL — a cadence that forgets "served since boot"');
   try {
     const src = fs.readFileSync(path.join(REPO, 'src/tls-plan.js'), 'utf8');
     const from = 'if (!isMiss(plan) || liveOnce) return PASS_MS;';
-    ok(src.includes(from), 'the control\'s anchor is in the module');
+    ok(verdictOf(src.includes(from)), 'the control\'s anchor is in the module');
     fs.writeFileSync(path.join(dir, 'tls-plan.js'), editAnchor(src, from, 'if (!isMiss(plan)) return PASS_MS;', "src/tls-plan.js"));
     const M = require(path.join(dir, 'tls-plan.js'));
     const got = M.nextPassMs({ plan: { mode: 'off', why: 'no-tailscale' }, misses: 1, liveOnce: true });
@@ -137,7 +137,7 @@ console.log('§6 CONTROL');
   try {
     const src = fs.readFileSync(path.join(REPO, 'src/tls-plan.js'), 'utf8');
     const from = ".trim() : '';\n  return n.replace(/\\.+$/, '').toLowerCase();";
-    ok(src.includes(from), 'the control\'s anchor is in the module');
+    ok(verdictOf(src.includes(from)), 'the control\'s anchor is in the module');
     fs.writeFileSync(path.join(dir, 'tls-plan.js'), editAnchor(src, from, ".trim() : '';\n  return n.toLowerCase();", "src/tls-plan.js"));
     const M = require(path.join(dir, 'tls-plan.js'));
     const p = M.tlsPlan({ now: NOW, tailscale: { status: status() } });
@@ -145,4 +145,4 @@ console.log('§6 CONTROL');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

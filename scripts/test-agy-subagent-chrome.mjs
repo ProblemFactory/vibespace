@@ -43,7 +43,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } return !!c; };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the fixture store in the server's HOME (the machine's own Antigravity login = HOME) ──
@@ -166,14 +166,14 @@ try {
   console.log('K1 THE CARD in the parent chat');
   const sid = await create('agy-sub-1');
   check('an Antigravity chat is created (the stub agy behind the real agy-wrapper)', !!sid);
-  check('the chat window attaches', await attach(sid, 'agy subagents'));
+  check('the chat window attaches', verdictOf(await attach(sid, 'agy subagents')));
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: TURN }));
-  check('the invoke_subagent row becomes a SUBAGENT CARD (read from the agy store by the wrapper)', await waitFor(`!!(${CARD(sid)})`, 25000), await evalJs(`(${LIST(sid)})?.innerText?.slice(-600) || ''`));
+  check('the invoke_subagent row becomes a SUBAGENT CARD (read from the agy store by the wrapper)', verdictOf(await waitFor(`!!(${CARD(sid)})`, 25000)), await evalJs(`(${LIST(sid)})?.innerText?.slice(-600) || ''`));
   await waitFor(`!(${CARD(sid)})?.querySelector('.chat-tool-output-pending')`, 15000);
   const k1 = await evalJs(`(() => { const c = ${CARD(sid)}; const lbl = c.querySelector('.chat-tool-label'); return { label: lbl.textContent, html: lbl.innerHTML, type: c.querySelector('.chat-agent-model')?.textContent, elapsed: c.querySelector('.chat-sub-elapsed')?.textContent, since: c.querySelector('.chat-sub-elapsed')?.dataset.subSince || null, btn: c.querySelector('.chat-agent-view-btn')?.textContent, sums: [...c.querySelectorAll('summary')].map((s) => s.textContent), files: c.querySelector('.chat-sub-files')?.textContent || '', task: c.querySelector('details pre')?.textContent || '', answerHtml: c.querySelector('.chat-text')?.innerHTML || '', bTags: c.querySelectorAll('b').length }; })()`);
-  check('its head: «Subagent: <role>», the type chip, how long it ran (0:54), «Open timeline» — finished (no spinner)', /Subagent: 示例评审专家 <b>bold<\/b>/.test(k1.label) && k1.type === 'self' && k1.elapsed === '0:54' && !k1.since && k1.btn === 'Open timeline', k1);
-  check('a store string is TEXT: the role\'s <b> is escaped (no <b> element in the card)', k1.bTags === 0 && /&lt;b&gt;bold&lt;\/b&gt;/.test(k1.html), k1.html.slice(0, 200));
-  check('the task the parent gave (folded, its title), its answer (folded, the first line as its summary), the file it wrote', k1.sums[0].startsWith('Task') && /Message from Parent Agent/.test(k1.sums[0]) && /按 100 分制打分/.test(k1.task) && k1.sums.some((s) => /✓ 评审完成：88\/100/.test(s)) && /88\/100/.test(k1.answerHtml) && /Files it wrote: \/home\/u\/workspace\/示例项目\/report\.md/.test(k1.files), k1);
+  check('its head: «Subagent: <role>», the type chip, how long it ran (0:54), «Open timeline» — finished (no spinner)', gateOf(/Subagent: 示例评审专家 <b>bold<\/b>/.test(k1.label)) && k1.type === 'self' && k1.elapsed === '0:54' && !k1.since && k1.btn === 'Open timeline', k1);
+  check('a store string is TEXT: the role\'s <b> is escaped (no <b> element in the card)', k1.bTags === 0 && verdictOf(/&lt;b&gt;bold&lt;\/b&gt;/.test(k1.html)), k1.html.slice(0, 200));
+  check('the task the parent gave (folded, its title), its answer (folded, the first line as its summary), the file it wrote', gateOf(k1.sums[0].startsWith('Task')) && gateOf(/Message from Parent Agent/.test(k1.sums[0])) && gateOf(/按 100 分制打分/.test(k1.task)) && gateOf(k1.sums.some((s) => /✓ 评审完成：88\/100/.test(s))) && gateOf(/88\/100/.test(k1.answerHtml)) && verdictOf(/Files it wrote: \/home\/u\/workspace\/示例项目\/report\.md/.test(k1.files)), k1);
 
   // the sub's report.md is a deliverable: the Artifacts auto-open tiles it beside the chat (artifacts.autoOpenDocs) — let it land
   await waitFor(`[...app.wm.windows.values()].some((w) => w._openSpec && w._openSpec.action === 'openDoc')`, 8000); await sleep(600);
@@ -185,14 +185,14 @@ try {
   if (await evalJs(`(${MSG}).classList.contains('chat-run-collapsed')`)) {
     let opened = false;
     for (let i = 0; i < 4 && !opened; i++) { await realClickEl(HEAD); opened = await waitFor(`!(${MSG}).classList.contains('chat-run-collapsed') && (${CARD(sid)}).getBoundingClientRect().height > 0`, 2500); } // a fold pass may rebuild the header under the pointer
-    check('the card folds with its run like claude\'s Agent card; a REAL click on the run\'s header opens it', opened);
+    check('the card folds with its run like claude\'s Agent card; a REAL click on the run\'s header opens it', verdictOf(opened));
   }
-  check('a REAL click on «Open timeline» lands on the button', await realClickEl(`(${CARD(sid)}).querySelector('.chat-agent-view-btn')`));
-  check('a window opens for sub-<id>', await waitFor(`!!(${SUBWIN})`, 10000), await evalJs(`[...app.wm.windows.values()].map((w) => w.title)`));
-  check('…and draws the sub\'s timeline', await waitFor(`(${SUBWIN})?.content?.querySelectorAll('.chat-msg').length >= 6`, 15000), await evalJs(`(${SUBWIN})?.content?.innerText?.slice(0, 400) || ''`));
+  check('a REAL click on «Open timeline» lands on the button', verdictOf(await realClickEl(`(${CARD(sid)}).querySelector('.chat-agent-view-btn')`)));
+  check('a window opens for sub-<id>', verdictOf(await waitFor(`!!(${SUBWIN})`, 10000)), await evalJs(`[...app.wm.windows.values()].map((w) => w.title)`));
+  check('…and draws the sub\'s timeline', verdictOf(await waitFor(`(${SUBWIN})?.content?.querySelectorAll('.chat-msg').length >= 6`, 15000)), await evalJs(`(${SUBWIN})?.content?.innerText?.slice(0, 400) || ''`));
   const k2 = await evalJs(`(() => { const w = ${SUBWIN}; const msgs = [...w.content.querySelectorAll('.chat-msg')]; return { title: w.title, n: msgs.length, seen: w.content.innerText, all: w.content.textContent, titles: msgs.map((m) => m._rawMsg && m._rawMsg.backendMeta && m._rawMsg.backendMeta.title).filter(Boolean) }; })()`);
   check('the task as a bubble from «Parent Agent», its tool rows in the order it ran them (read_file, run_command, write_file, send_message — folded into runs like any chat), its last words',
-    /Message from “Parent Agent”/.test(k2.seen) && /按 100 分制打分/.test(k2.seen) && k2.titles.join() === 'read_file,run_command,write_file,send_message' && /wc -l/.test(k2.all) && /Created file \/home\/u\/workspace\/示例项目\/report\.md/.test(k2.seen) && /I sent my evaluation to the Parent Agent/.test(k2.seen),
+    gateOf(/Message from “Parent Agent”/.test(k2.seen)) && gateOf(/按 100 分制打分/.test(k2.seen)) && k2.titles.join() === 'read_file,run_command,write_file,send_message' && gateOf(/wc -l/.test(k2.all)) && gateOf(/Created file \/home\/u\/workspace\/示例项目\/report\.md/.test(k2.seen)) && verdictOf(/I sent my evaluation to the Parent Agent/.test(k2.seen)),
     { title: k2.title, n: k2.n, titles: k2.titles, seen: k2.seen.slice(0, 500) });
   await evalJs(`(() => { const w = ${SUBWIN}; app.wm.closeWindow ? app.wm.closeWindow(w.id) : w.onClose?.(); return true; })()`);
   await waitFor(`!(${SUBWIN})`, 5000);
@@ -200,11 +200,11 @@ try {
   console.log('K3 the conversation:// links in the agent\'s text');
   // the AGENT's text (its reply echoes the turn — the user's own bubble renders the same links, clipped when long)
   const LINK = `[...((${LIST(sid)})?.querySelectorAll('.chat-msg-assistant .chat-sub-link[data-sub="${S}"]') || [])].pop()`, ULINK = `[...((${LIST(sid)})?.querySelectorAll('.chat-msg-assistant .chat-sub-link[data-sub="${UNKNOWN}"]') || [])].pop()`;
-  check('the agent\'s [`<id>`](conversation://<id>) is OUR link (.chat-link, data-sub) — not inert text', await waitFor(`!!(${LINK}) && (${LINK}).classList.contains('chat-link')`, 10000), await evalJs(`(${LIST(sid)})?.querySelector('.chat-msg-assistant:last-of-type')?.innerHTML?.slice(0, 600) || ''`));
+  check('the agent\'s [`<id>`](conversation://<id>) is OUR link (.chat-link, data-sub) — not inert text', verdictOf(await waitFor(`!!(${LINK}) && (${LINK}).classList.contains('chat-link')`, 10000)), await evalJs(`(${LIST(sid)})?.querySelector('.chat-msg-assistant:last-of-type')?.innerHTML?.slice(0, 600) || ''`));
   const u = await evalJs(`(() => { const l = ${ULINK}; return l ? { unknown: l.classList.contains('chat-sub-unknown'), chip: l.querySelector('.chat-sub-chip')?.textContent || '' } : null; })()`);
-  check('a link to a sub this conversation does not know carries the chip that says so', !!u && u.unknown && u.chip === 'unknown subagent', u);
-  check('a REAL click on the known link…', await realClickEl(LINK));
-  check('…opens THAT sub\'s timeline (the same window the card opens)', await waitFor(`!!(${SUBWIN}) && (${SUBWIN}).content.querySelectorAll('.chat-msg').length >= 6`, 15000));
+  check('a link to a sub this conversation does not know carries the chip that says so', !!u && gateOf(u.unknown) && u.chip === 'unknown subagent', u);
+  check('a REAL click on the known link…', verdictOf(await realClickEl(LINK)));
+  check('…opens THAT sub\'s timeline (the same window the card opens)', verdictOf(await waitFor(`!!(${SUBWIN}) && (${SUBWIN}).content.querySelectorAll('.chat-msg').length >= 6`, 15000)));
   // THE RUNNER'S WRAP on every box (ci-341-reds): the runner's DejaVu broke the id at a hyphen across two lines, so the
   // centre of the link's union box was the paragraph between its pieces and the old aim never pressed. Narrow the
   // agent's paragraph until the link breaks the same way — the premise asserted (two line boxes, the union centre OFF
@@ -224,23 +224,23 @@ try {
     await waitFor('window.__vsWrapClicks.length > 0', 5000); // the click's own record: the sub's window opens inside the handler, synchronously
     const ctl = await evalJs(`({ clicks: window.__vsWrapClicks, opened: !!(${SUBWIN}) })`);
     check('CONTROL (the pre-fix aim): a press at the wrapped link\'s union-box centre lands on the paragraph and opens nothing — the runner\'s red', pre.boxes >= 2 && ctl.clicks.length === 1 && !ctl.clicks[0].onLink && !ctl.opened, { pre, ...ctl });
-    check('a REAL click on the WRAPPED link (inside one of its own line boxes)…', await realClickEl(LINK));
-    check('…opens THAT sub\'s timeline', await waitFor(`!!(${SUBWIN}) && (${SUBWIN}).content.querySelectorAll('.chat-msg').length >= 6`, 15000), await evalJs(`[...app.wm.windows.values()].map((w) => w._openSpec?.virtualId || w._openSpec?.action)`));
+    check('a REAL click on the WRAPPED link (inside one of its own line boxes)…', verdictOf(await realClickEl(LINK)));
+    check('…opens THAT sub\'s timeline', verdictOf(await waitFor(`!!(${SUBWIN}) && (${SUBWIN}).content.querySelectorAll('.chat-msg').length >= 6`, 15000)), await evalJs(`[...app.wm.windows.values()].map((w) => w._openSpec?.virtualId || w._openSpec?.action)`));
     await evalJs(`(() => { const p = (${LINK}).closest('p') || (${LINK}).parentElement; p.style.width = ''; return true; })()`);
   }
 
   console.log('K4 the Artifacts chip counts the file the SUB wrote');
   // (lane mask-value-shape) 产出 is drawn in EVERY chat view now, even at zero — read THIS conversation's own bar
   const AFCHIP = `(${VIEW(sid)})?._statusBar?.element?.querySelector('.chat-status-artifacts')`;
-  check('the chip reads «Artifacts · 1»', await waitFor(`/Artifacts · 1/.test((${AFCHIP})?.textContent || '')`, 10000), await evalJs(`(${AFCHIP})?.textContent || '(no chip)'`));
+  check('the chip reads «Artifacts · 1»', verdictOf(await waitFor(`/Artifacts · 1/.test((${AFCHIP})?.textContent || '')`, 10000)), await evalJs(`(${AFCHIP})?.textContent || '(no chip)'`));
   const card = await evalJs(`(() => { const c = (${LIST(sid)})?.querySelector('.chat-artifact-card'); return c ? { name: c.querySelector('.chat-artifact-name')?.textContent || '', text: c.textContent } : null; })()`);
-  check('…and its card names report.md', !!card && /report\.md/.test(card.name), card);
+  check('…and its card names report.md', !!card && verdictOf(/report\.md/.test(card.name)), card);
   check('no page error on the way', pageErrors.length === 0, pageErrors);
 
   console.log('K5 CONTROL: the pre-lane normalizer (no `subagent` case) — the owner\'s state');
   const NORM = path.join(wt, 'src/acp-message-manager.js');
   const ns = fs.readFileSync(NORM, 'utf8'), CASE = "      case 'subagent': return this._processSubagent(record, emit);\n";
-  check('CONTROL needle present', ns.includes(CASE));
+  check('CONTROL needle present', verdictOf(ns.includes(CASE)));
   fs.writeFileSync(NORM, ns.replace(CASE, ''));
   try { srv.kill('SIGKILL'); } catch {}
   await sleep(500);
@@ -248,10 +248,10 @@ try {
   await cdp('Page.reload', { ignoreCache: true }); await waitApp(); await sleep(500);
   try { liveWs.close(); } catch {}
   await openWs();
-  check('the chat re-attaches on the restarted server', await attach(sid, 'agy subagents'));
+  check('the chat re-attaches on the restarted server', verdictOf(await attach(sid, 'agy subagents')));
   await waitFor(`(${LIST(sid)})?.querySelectorAll('.chat-msg').length >= 3`, 15000);
   const ctl = await evalJs(`(() => { const l = ${LIST(sid)}; return { cards: l.querySelectorAll('.chat-sub-card').length, btns: l.querySelectorAll('.chat-agent-view-btn').length, row: [...l.querySelectorAll('.chat-msg-tool-result')].some((el) => el._rawMsg && el._rawMsg.backendMeta && el._rawMsg.backendMeta.title === 'invoke_subagent' && el._rawMsg.toolName === 'Tool') }; })()`);
-  check('CONTROL: no card and no timeline button — the row is a plain tool row (the legs above can go red)', ctl.cards === 0 && ctl.btns === 0 && ctl.row, ctl);
+  check('CONTROL: no card and no timeline button — the row is a plain tool row (the legs above can go red)', ctl.cards === 0 && ctl.btns === 0 && verdictOf(ctl.row), ctl);
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); liveWs.close(); } catch {}
 } catch (e) {
   failed++;
@@ -259,4 +259,4 @@ try {
 }
 console.log(`\n${failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`}`);
 cleanup();
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

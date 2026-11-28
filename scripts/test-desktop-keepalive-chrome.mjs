@@ -29,7 +29,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('dkp-wt');
 const home = scratchHome('dkp-home', fs);
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 
@@ -120,7 +120,7 @@ check('the press is SAID while the stream reconnects', !!said, await A.evalJs('w
 // waited for (the product awaits readText first, up to its bound) and matched to the EMPTY road's own words — a denied or timed-out
 // read opens the box too, with other words (src/lib/picture-shell.js pasteBoxToastKey)
 const boxSaid = !!(await until(() => A.evalJs(`window.__toasts.some((t) => /Your clipboard holds no text/.test(t)) || null`), 8000, 100));
-check('with no clipboard text the press opened the paste box and said so', boxSaid, await A.evalJs('window.__toasts'));
+check('with no clipboard text the press opened the paste box and said so', verdictOf(boxSaid), await A.evalJs('window.__toasts'));
 const sentWhileDown = await A.evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._isDesktop); const ta = w.content.querySelector('.vnc-paste-input'); if (!ta) return 'no box'; ta.value = ${JSON.stringify(TEXT)}; w.content.querySelector('.vnc-paste-send').click(); const st = w.content.querySelector('.desktop-status'); return st ? st.textContent : '?'; })()`);
 check(`the box's Send went in while the stream was still down (status "${sentWhileDown}")`, typeof sentWhileDown === 'string' && sentWhileDown !== 'Connected' && sentWhileDown !== 'no box');
 const back = await until(async () => { const s = await state(); return s && s.status === 'Connected' ? s : null; }, 60000, 500);
@@ -168,4 +168,4 @@ const consoleNoise = await A.evalJs('true');
 void consoleNoise;
 A.close();
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

@@ -27,7 +27,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e === undefined ? '' : ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600))); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e === undefined ? '' : ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600))); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -141,39 +141,39 @@ try {
   console.log('— a REAL clone of a private repository over https on loopback (git http-backend behind Basic auth)');
   // ① no credential ⇒ the server asks, git may not prompt ⇒ plugin_git_auth by name
   const a = await swept(ins.install({ source: 'git', value: URL_H, ref: 'v2' }));
-  ok(a.err && a.err.code === 'plugin_git_auth' && /anonymous clone/.test(a.err.message) && seen.some((x) => !x.ok), 'no credential ⇒ the host answers 401, git never prompts ⇒ plugin_git_auth (a private repository needs the Plugin Git credential)', a.err && a.err.message);
+  ok(gateOf(a.err) && a.err.code === 'plugin_git_auth' && gateOf(/anonymous clone/.test(a.err.message)) && verdictOf(seen.some((x) => !x.ok)), 'no credential ⇒ the host answers 401, git never prompts ⇒ plugin_git_auth (a private repository needs the Plugin Git credential)', a.err && a.err.message);
   // ② the right token ⇒ installed at the pinned sha; the token on no command line and in no environment while it ran
   cred = { host: HOSTP, token: PAT };
   const n0 = seen.length;
   const b = await swept(ins.install({ source: 'git', value: URL_H, ref: 'v2', credential: 'plugin-git' }));
-  ok(!b.err && b.out && b.out.id === 'acme.private' && b.out.sha === SHA && b.out.ref === 'v2' && fs.existsSync(path.join(IR, 'data', 'plugins', 'acme.private', 'vibespace-plugin.json')), 'the token ⇒ a REAL clone of the private repository at the pinned tag, its sha recorded', b.err ? b.err.message : b.out && b.out.sha);
-  ok(seen.slice(n0).some((x) => x.ok && x.user === 'x-access-token'), 'git authenticated with the askpass\'s answers (user x-access-token + the token) — the server admitted them');
+  ok(!b.err && gateOf(b.out) && b.out.id === 'acme.private' && b.out.sha === SHA && b.out.ref === 'v2' && verdictOf(fs.existsSync(path.join(IR, 'data', 'plugins', 'acme.private', 'vibespace-plugin.json'))), 'the token ⇒ a REAL clone of the private repository at the pinned tag, its sha recorded', b.err ? b.err.message : b.out && b.out.sha);
+  ok(verdictOf(seen.slice(n0).some((x) => x.ok && x.user === 'x-access-token')), 'git authenticated with the askpass\'s answers (user x-access-token + the token) — the server admitted them');
   ok(b.hits.length === 0 && b.sweeps > 3, `while git ran, no /proc/<pid>/cmdline or environ of any process held the token (${b.sweeps} sweeps)`, b.hits);
   ok(!credLeft() && !fs.existsSync(path.join(HOME, '.git-credentials')), 'after the clone: no credential file in the stage, and the HOME config\'s `credential.helper = store` wrote NOTHING (the installer resets the helpers)');
   // ③ a wrong token ⇒ plugin_git_auth; files gone too
   cred = { host: HOSTP, token: PAT.slice(0, -2) + 'xx' };
   const c = await swept(ins.install({ source: 'git', value: URL_H, ref: 'v2', credential: 'plugin-git' }));
-  ok(c.err && c.err.code === 'plugin_git_auth' && /token of the Plugin Git credential/.test(c.err.message) && !credLeft() && c.hits.length === 0, 'a wrong token ⇒ plugin_git_auth by name, its files shredded', c.err && c.err.message);
+  ok(gateOf(c.err) && c.err.code === 'plugin_git_auth' && gateOf(/token of the Plugin Git credential/.test(c.err.message)) && !credLeft() && c.hits.length === 0, 'a wrong token ⇒ plugin_git_auth by name, its files shredded', c.err && c.err.message);
   // ④ the row's Test: git ls-remote with the credential
   cred = { host: HOSTP, token: PAT };
   const t = await ins.testCredential(URL_H);
-  ok(t.ok && t.head === SHA, 'the plugin-git Test = a REAL git ls-remote with the credential (HEAD answered)', t);
+  ok(gateOf(t.ok) && t.head === SHA, 'the plugin-git Test = a REAL git ls-remote with the credential (HEAD answered)', t);
   // ⑤ a missing ref on the real server
   const d = await swept(ins.install({ source: 'git', value: URL_H, ref: 'v9', credential: 'plugin-git' }));
-  ok(d.err && d.err.code === 'plugin_git_ref_missing', 'a ref the repository has not ⇒ plugin_git_ref_missing (git\'s own words, by name)', d.err && d.err.message);
+  ok(gateOf(d.err) && d.err.code === 'plugin_git_ref_missing', 'a ref the repository has not ⇒ plugin_git_ref_missing (git\'s own words, by name)', d.err && d.err.message);
   // ⑥ ROUND 2: a HOME url.insteadOf rewriting the repository's host to the second server — never followed; the token reaches
   // only the host the credential is bound to
   homeConfig(`[url "https://127.0.0.1:${EVIL_PORT}/"]\n\tinsteadOf = https://127.0.0.1:${PORT}/\n`);
   cred = { host: HOSTP, token: PAT };
   const n6 = seen.length;
   const e = await swept(ins.install({ source: 'git', value: URL_H, ref: 'v2', credential: 'plugin-git' }));
-  ok(!e.err && e.out && e.out.sha === SHA && evilSeen.length === 0 && seen.slice(n6).some((x) => x.ok) && e.hits.length === 0, 'round 2: a HOME url.insteadOf rewriting the host ⇒ NOT followed (GIT_CONFIG_GLOBAL=/dev/null) — the clone and the askpass\'s token go to the host the credential is bound to only; the rewrite target saw NO request', { err: e.err && e.err.message, evil: evilSeen.length });
+  ok(!e.err && gateOf(e.out) && e.out.sha === SHA && evilSeen.length === 0 && gateOf(seen.slice(n6).some((x) => x.ok)) && e.hits.length === 0, 'round 2: a HOME url.insteadOf rewriting the host ⇒ NOT followed (GIT_CONFIG_GLOBAL=/dev/null) — the clone and the askpass\'s token go to the host the credential is bound to only; the rewrite target saw NO request', { err: e.err && e.err.message, evil: evilSeen.length });
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/plugin-install.js'), 'utf8');
   const anchor = "GIT_CONFIG_GLOBAL: '/dev/null', ";
   const MC = mutantCopies('plugin-git-clone', REPO);
   const insR = MC.load('src/server/plugin-install.js', editAnchor(SRC, anchor, '', "src/server/plugin-install.js"), 'home-config').create({ rootDir: IR, log: { log() {}, warn() {} }, integrations: () => store, gitBin: GIT, gitTimeoutMs: 30000 });
   const r = await swept(insR.install({ source: 'git', value: URL_H, ref: 'v2', credential: 'plugin-git' }));
-  ok(SRC.includes(anchor) && r.err && r.err.code === 'plugin_git_auth' && evilSeen.some((x) => x.token), 'control: a copy WITHOUT GIT_CONFIG_GLOBAL follows the HOME rewrite and its askpass HANDS THE TOKEN to the other host (it answered 401, git asked, the token went) — RED', { err: r.err && r.err.code, evil: evilSeen.map((x) => ({ user: x.user, token: x.token })) });
+  ok(gateOf(SRC.includes(anchor)) && gateOf(r.err) && r.err.code === 'plugin_git_auth' && verdictOf(evilSeen.some((x) => x.token)), 'control: a copy WITHOUT GIT_CONFIG_GLOBAL follows the HOME rewrite and its askpass HANDS THE TOKEN to the other host (it answered 401, git asked, the token went) — RED', { err: r.err && r.err.code, evil: evilSeen.map((x) => ({ user: x.user, token: x.token })) });
   homeConfig();
   // ⑦ ROUND 3: the CA named ONLY in the HOME config (`http.sslCAInfo`) is not read — the clone fails on the certificate; through
   // the egress door (the hub's GIT_SSL_CAINFO, ②–⑥ above) it is trusted; a copy whose door lacks the name fails the same way: RED
@@ -181,7 +181,7 @@ try {
   delete process.env.GIT_SSL_CAINFO;
   const n7 = seen.length;
   const g = await swept(ins.install({ source: 'git', value: URL_H, ref: 'v2', credential: 'plugin-git' }));
-  ok(g.err && g.err.code === 'plugin_git_failed' && /certificate|SSL|TLS/i.test(g.err.message) && seen.length === n7 && g.hits.length === 0, 'round 3: the CA named only in the HOME config\'s http.sslCAInfo is NOT read (GIT_CONFIG_GLOBAL=/dev/null) — git refuses the server\'s certificate before any request: plugin_git_failed by name', g.err && g.err.message);
+  ok(gateOf(g.err) && g.err.code === 'plugin_git_failed' && gateOf(/certificate|SSL|TLS/i.test(g.err.message)) && seen.length === n7 && g.hits.length === 0, 'round 3: the CA named only in the HOME config\'s http.sslCAInfo is NOT read (GIT_CONFIG_GLOBAL=/dev/null) — git refuses the server\'s certificate before any request: plugin_git_failed by name', g.err && g.err.message);
   process.env.GIT_SSL_CAINFO = CAFILE;
   homeConfig();
   const AES = fs.readFileSync(path.join(REPO, 'src/agent-env.js'), 'utf8');
@@ -190,7 +190,7 @@ try {
   const insC = MC.load('src/server/plugin-install.js', editAnchor(SRC, reqAnchor, `const { serviceEnv } = require(${JSON.stringify(aeNoCa)});`, "src/server/plugin-install.js"), 'no-git-ca').create({ rootDir: IR, log: { log() {}, warn() {} }, integrations: () => store, gitBin: GIT, gitTimeoutMs: 30000 });
   const n7b = seen.length;
   const gc = await swept(insC.install({ source: 'git', value: URL_H, ref: 'v2', credential: 'plugin-git' }));
-  ok(AES.includes(caAnchor) && SRC.includes(reqAnchor) && gc.err && gc.err.code === 'plugin_git_failed' && /certificate|SSL|TLS/i.test(gc.err.message) && seen.length === n7b, 'control: a copy whose egress door lacks GIT_SSL_CAINFO / GIT_SSL_CAPATH fails the very clone ②–⑥ make (the hub names the CA, git never sees it) — RED', gc.err && gc.err.message);
+  ok(gateOf(AES.includes(caAnchor)) && gateOf(SRC.includes(reqAnchor)) && gateOf(gc.err) && gc.err.code === 'plugin_git_failed' && gateOf(/certificate|SSL|TLS/i.test(gc.err.message)) && seen.length === n7b, 'control: a copy whose egress door lacks GIT_SSL_CAINFO / GIT_SSL_CAPATH fails the very clone ②–⑥ make (the hub names the CA, git never sees it) — RED', gc.err && gc.err.message);
 } finally {
   srv.close(); evil.close();
   fs.rmSync(ROOT, { recursive: true, force: true });
@@ -240,17 +240,17 @@ console.log('— ⑨ the ssh host-key pin over real ssh (lane lg-remote-hardenin
           const eA = await install(PI);
           values = { host: 'repo.test', deployKey, knownHosts: `repo.test ${pub('hostA')}\n` };
           const eB = await install(PI);
-          ok(eA && eA.code === 'plugin_git_hostkey' && eA.message.includes(`it showed ${fpA}`) && eB && eB.code === 'plugin_git_auth',
+          ok(gateOf(eA) && eA.code === 'plugin_git_hostkey' && gateOf(eA.message.includes(`it showed ${fpA}`)) && gateOf(eB) && eB.code === 'plugin_git_auth',
             '⑨ REAL ssh: the pin names another key ⇒ plugin_git_hostkey with the fingerprint the stand-in really showed; the pin names its key ⇒ past the host-key check (the stand-in then refuses every login: plugin_git_auth) — the quoted file under a root with a space was read', [eA, eB].map((e) => e && `${e.code}: ${String(e.message).slice(0, 160)}`));
           // RED CONTROL: the copy that still trusts the first key (the road before the pin) meets the same wrong pin and goes on
           const SRC9 = fs.readFileSync(path.join(REPO, 'src/server/plugin-install.js'), 'utf8');
           const from = "StrictHostKeyChecking=yes -o ${shq(`HostKeyAlias=${cred.alias}`)} -o ${shq(`UserKnownHostsFile=\"${kh}\"`)} -o GlobalKnownHostsFile=/dev/null";
-          ok(SRC9.includes(from), '⑨ control: the pinned GIT_SSH_COMMAND is in plugin-install.js', from);
+          ok(verdictOf(SRC9.includes(from)), '⑨ control: the pinned GIT_SSH_COMMAND is in plugin-install.js', from);
           const M9 = mutantCopies('plugin-git-clone-hostkey', REPO);
           values = { host: 'repo.test', deployKey, knownHosts: `repo.test ${pub('hostB')}\n` };
           const eM = await install(M9.load('src/server/plugin-install.js', editAnchor(SRC9, from, 'StrictHostKeyChecking=accept-new', "src/server/plugin-install.js"), 'accept-new'));
           const learned = (() => { try { return fs.readFileSync(homeKh, 'utf8'); } catch { return ''; } })();
-          ok(eM && eM.code === 'plugin_git_auth' && learned.includes(pub('hostA').split(' ')[1]), '⑨ RED CONTROL: a copy with accept-new (no pin file) meets the same wrong pin, TRUSTS the stand-in\'s key (it lands in the scratch file standing in for the hub user\'s known_hosts) and goes on to the login — the leg above refuses that', eM && `${eM.code}: ${String(eM.message).slice(0, 120)}`);
+          ok(gateOf(eM) && eM.code === 'plugin_git_auth' && verdictOf(learned.includes(pub('hostA').split(' ')[1])), '⑨ RED CONTROL: a copy with accept-new (no pin file) meets the same wrong pin, TRUSTS the stand-in\'s key (it lands in the scratch file standing in for the hub user\'s known_hosts) and goes on to the login — the leg above refuses that', eM && `${eM.code}: ${String(eM.message).slice(0, 120)}`);
           ok(!/Accepted /.test(fs.readFileSync(path.join(R, 'sshd.log'), 'utf8')), '⑨ the stand-in sshd accepted no login at all (AuthorizedKeysFile /dev/null)');
         } finally { Object.assign(process.env, saved); }
       }
@@ -258,4 +258,4 @@ console.log('— ⑨ the ssh host-key pin over real ssh (lane lg-remote-hardenin
   }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

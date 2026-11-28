@@ -31,7 +31,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const D = require(path.join(REPO, 'src/day-one.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const ROOT = scratch('day-one');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -40,7 +40,7 @@ console.log('① the tour’s steps');
 ok(D.tourSteps({}).join() === 'welcome,connect,protect,start', 'an unprotected workspace: welcome → connect → protect → start', D.tourSteps({}));
 ok(D.tourSteps({ authEnabled: true }).join() === 'welcome,connect,start', 'a sign-in password already set (a provisioned pod): no protect step', D.tourSteps({ authEnabled: true }));
 ok(D.tourSteps({ ssoEnabled: true }).join() === 'welcome,connect,start', 'SSO on: no protect step — its SSO sentence never shows', D.tourSteps({ ssoEnabled: true }));
-ok(D.tourSteps({ ssoEnabled: true, authEnabled: true }).includes('connect'), 'the sign-in step stays (the owner: the Claude sign-in is per person — never skipped)');
+ok(verdictOf(D.tourSteps({ ssoEnabled: true, authEnabled: true }).includes('connect')), 'the sign-in step stays (the owner: the Claude sign-in is per person — never skipped)');
 
 console.log('② the folder chips (the testers’ pod home)');
 const H = '/home/pod1';
@@ -52,10 +52,10 @@ const FOLDERS = [
 ];
 const RECENT = [`${H}/work/investor-relations`, `${H}/work/compute-deal`, `${H}/work/investor-relations/`];
 const chips = D.folderChips({ folders: FOLDERS, recent: RECENT });
-ok(chips[0] && chips[0].kind === 'files' && chips[0].path === `${H}/work` && chips[0].files === 23, 'THE FINDING: the folder holding the files is the FIRST chip («work (23 files)»)', chips[0]);
-ok(chips[1] && chips[1].kind === 'last' && chips[1].path === `${H}/work/investor-relations`, '«the last one you used» comes next', chips[1]);
-ok(chips.slice(2, 5).every((c) => c.kind === 'folder') && chips.slice(2, 5).map((c) => c.path.split('/').pop()).join() === 'Desktop,Downloads,my-storage', 'then the home’s other folders (a mount named, its count unknown)', chips.slice(2, 5));
-ok(chips[5] && chips[5].kind === 'recent' && chips[5].path === `${H}/work/compute-deal`, 'then the other recent folders', chips[5]);
+ok(gateOf(chips[0]) && chips[0].kind === 'files' && chips[0].path === `${H}/work` && chips[0].files === 23, 'THE FINDING: the folder holding the files is the FIRST chip («work (23 files)»)', chips[0]);
+ok(gateOf(chips[1]) && chips[1].kind === 'last' && chips[1].path === `${H}/work/investor-relations`, '«the last one you used» comes next', chips[1]);
+ok(gateOf(chips.slice(2, 5).every((c) => c.kind === 'folder')) && chips.slice(2, 5).map((c) => c.path.split('/').pop()).join() === 'Desktop,Downloads,my-storage', 'then the home’s other folders (a mount named, its count unknown)', chips.slice(2, 5));
+ok(gateOf(chips[5]) && chips[5].kind === 'recent' && chips[5].path === `${H}/work/compute-deal`, 'then the other recent folders', chips[5]);
 ok(new Set(chips.map((c) => c.path)).size === chips.length, 'a path once (a trailing slash is the same folder)', chips.map((c) => c.path));
 {
   const two = D.folderChips({ folders: [...FOLDERS, { name: 'papers', path: `${H}/papers`, files: 40 }], recent: [] });
@@ -121,7 +121,7 @@ ok(JSON.stringify(D.gitIdentityPlan({ configured: { email: 'PERSON@example.com' 
 ok(D.gitIdentityPlan({ configured: {}, account: { email: 'person@example.com' } }).name === 'person', 'no display name ⇒ the email’s local part');
 ok(D.gitIdentityPlan({ configured: {}, account: null }) === null && D.gitIdentityPlan({ configured: {}, account: { email: 'not an email' } }) === null, 'no sign-in / a malformed email ⇒ nothing');
 ok(D.gitIdentityPlan({ configured: {}, account: { email: 'a@b.co', name: 'X\n[core]' } }).name === 'X[core]', 'a name cannot break a line');
-ok(D.isSignInRow({ purpose: 'sign-in' }) && !D.isSignInRow({}) && !D.isSignInRow(null), 'isSignInRow: purpose sign-in only');
+ok(gateOf(D.isSignInRow({ purpose: 'sign-in' })) && !D.isSignInRow({}) && !D.isSignInRow(null), 'isSignInRow: purpose sign-in only');
 
 console.log('⑦ the vault engine: «a secret is waiting»');
 {
@@ -134,9 +134,9 @@ console.log('⑦ the vault engine: «a secret is waiting»');
   const e = VE.create({ dataDir: dir, kdf: CHEAP, log: quiet, idleTimer: false, bcast: (m) => said.push(m) });
   ok(e.facts().state === 'not_set_up' && e.facts().secretWaiting === false, 'a fresh hub: not set up, NOTHING waiting (day one — no ask)', e.facts());
   const r = SB.lawfulKey(path.join(dir, '.integrations-key'), { hasCiphertext: () => false });
-  ok(r.ok && r.minted, 'a store’s first secret mints its key file (the migration window)', r.code);
+  ok(gateOf(r.ok) && verdictOf(r.minted), 'a store’s first secret mints its key file (the migration window)', r.code);
   ok(e.facts().secretWaiting === true, 'THE MOMENT: the first secret stored ⇒ secretWaiting', e.facts());
-  ok(said.some((m) => m.type === 'vault-state' && m.secretWaiting === true), '… announced at once (the page asks without a reload)', said.map((m) => m.secretWaiting));
+  ok(verdictOf(said.some((m) => m.type === 'vault-state' && m.secretWaiting === true)), '… announced at once (the page asks without a reload)', said.map((m) => m.secretWaiting));
   const n0 = said.length;
   SB.lawfulKey(path.join(dir, '.integrations-key'), { hasCiphertext: () => true });
   SB.lawfulKey(path.join(dir, '.channels-key'), { hasCiphertext: () => false });
@@ -153,7 +153,7 @@ console.log('⑦ the vault engine: «a secret is waiting»');
   const said4 = [];
   const e4 = VE.create({ dataDir: dir4, kdf: CHEAP, log: quiet, idleTimer: false, register: false, bcast: (m) => said4.push(m) });
   const put = e4.secretPut('frp:token', 'x');
-  ok(!put.ok && put.code === 'vault_not_set_up' && e4.facts().secretWaiting === true && said4.some((m) => m.secretWaiting), 'a store the vault REFUSED for want of one ⇒ waiting + announced', { put, f: e4.facts().secretWaiting });
+  ok(!put.ok && put.code === 'vault_not_set_up' && e4.facts().secretWaiting === true && verdictOf(said4.some((m) => m.secretWaiting)), 'a store the vault REFUSED for want of one ⇒ waiting + announced', { put, f: e4.facts().secretWaiting });
   const dir5 = path.join(ROOT, 'vault-5'); fs.mkdirSync(path.join(dir5, 'agentd'), { recursive: true });
   let T = 1e12;
   const e5 = VE.create({ dataDir: dir5, kdf: CHEAP, log: quiet, idleTimer: false, register: false, now: () => T });
@@ -161,9 +161,9 @@ console.log('⑦ the vault engine: «a secret is waiting»');
   fs.writeFileSync(path.join(dir5, 'agentd', 'host-dev1.token'), 'x');   // a device paired with no vault (host-tokens' file road)
   T += 6000;
   ok(e5.facts().secretWaiting === true, 'a device\u2019s link token written since ⇒ waiting at the next facts read (re-read ≤ every 5 s)');
-  ok(Object.keys(e5).every((k) => k !== 'noteSecret'), 'the engine exports NO new key (test-vault-law classifies every key — untouched)');
+  ok(verdictOf(Object.keys(e5).every((k) => k !== 'noteSecret')), 'the engine exports NO new key (test-vault-law classifies every key — untouched)');
   const su = await e5.setup('a second password for the leg');
-  ok(su.ok && e5.facts().state === 'unlocked' && e5.facts().secretWaiting === false, 'set up ⇒ the fact is gone (this ask never again)', { ok: su.ok, f: e5.facts() });
+  ok(gateOf(su.ok) && e5.facts().state === 'unlocked' && e5.facts().secretWaiting === false, 'set up ⇒ the fact is gone (this ask never again)', { ok: su.ok, f: e5.facts() });
   e4.close(); e5.close();
 }
 
@@ -178,10 +178,10 @@ console.log('⑧ the home’s folders (the SafeFs op)');
   try { fs.symlinkSync('/proc/self', path.join(home, 'procdir')); } catch { }
   const { folders } = runOp('folderCensus', { path: home, cap: 500 }).result;
   const by = Object.fromEntries(folders.map((f) => [f.name, f]));
-  ok(by.work && by.work.files === 23 && by.work.more === false, '«work (23 files)»: nested files counted, the .git inside skipped', by.work);
-  ok(by.Desktop && by.Desktop.files === 0, 'an empty folder: 0', by.Desktop);
+  ok(gateOf(by.work) && by.work.files === 23 && by.work.more === false, '«work (23 files)»: nested files counted, the .git inside skipped', by.work);
+  ok(gateOf(by.Desktop) && by.Desktop.files === 0, 'an empty folder: 0', by.Desktop);
   ok(!by['.cache'] && !by.node_modules && !by['notes.txt'], 'hidden folders, dependency folders and plain files are not folders here', Object.keys(by));
-  ok(by.big && by.big.more === true && by.big.files <= 500, 'the walk is bounded (cap) and says `more`', by.big);
+  ok(gateOf(by.big) && by.big.more === true && by.big.files <= 500, 'the walk is bounded (cap) and says `more`', by.big);
   ok(!by.procdir || (by.procdir.mount === true && by.procdir.files === null), 'a folder on another device (here: /proc) is named, never walked', by.procdir);
   const chips8 = D.folderChips({ folders, recent: [] });
   ok(chips8[0].path === path.join(home, 'big') || chips8[0].path === path.join(home, 'work'), 'the op’s answer feeds folderChips', chips8.slice(0, 2));
@@ -203,11 +203,11 @@ console.log('⑨ git identity over a temp HOME (real git)');
       fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'person@example.com', displayName: 'Pat Example', organizationName: 'Org' } }));
       G._reset();
       const r = await G.ensureGitIdentity({ home, now: 2e9, log: { log() {} } });
-      if (sys) ok(r.already || r.skipped, 'SKIP-ish: this machine’s SYSTEM git config has an identity (kept)', r);
+      if (sys) ok(verdictOf(r.already) || verdictOf(r.skipped), 'SKIP-ish: this machine’s SYSTEM git config has an identity (kept)', r);
       else {
-        ok(r.set && r.set.email === 'person@example.com' && r.set.name === 'Pat Example', 'THE FIX: git’s name + email set from the sign-in’s account', r);
+        ok(gateOf(r.set) && r.set.email === 'person@example.com' && r.set.name === 'Pat Example', 'THE FIX: git’s name + email set from the sign-in’s account', r);
         const cfg = fs.readFileSync(path.join(home, '.gitconfig'), 'utf8');
-        ok(/email = person@example\.com/.test(cfg) && /name = Pat Example/.test(cfg), '… written to the person’s global git config', cfg);
+        ok(gateOf(/email = person@example\.com/.test(cfg)) && verdictOf(/name = Pat Example/.test(cfg)), '… written to the person’s global git config', cfg);
         G._reset();
         const again = await G.ensureGitIdentity({ home, now: 3e9 });
         ok(again.already === true, 'asked again ⇒ git has it ⇒ nothing changes', again);
@@ -227,34 +227,34 @@ console.log('⑩ wiring');
   const sf = read('src/lib/setup-flows.js');
   ok(!/ob-theme|ob-lang\b|setLang\(|BUILTIN_THEMES/.test(sf), 'THE FINDING (D5): no theme or language chips on day one (⚙ keeps both)');
   ok(!/t\('(?:Your workspace for coding agents|Sessions that never die|A real window manager|Every session can run as a structured chat or a raw terminal TUI\.)'\)/.test(sf), '… nor the coding-agent pitch');
-  ok(/An assistant that works on your files — ask it in plain words\./.test(sf) && (sf.match(/class="ob-ask"/g) || []).length === 3, 'one plain sentence + three example asks');
-  ok(/<p data-i18n>An assistant that works on your files — ask it in plain words\.<\/p>/.test(read('public/index.html')) && !/Multi-session terminal manager/.test(read('public/index.html')), 'the empty desktop\u2019s welcome says the same sentence (no terminal-manager pitch)');
-  ok(/tourSteps\(\{ ssoEnabled: !!this\._ssoEnabled, authEnabled: !!this\._authEnabled \}\)/.test(sf) && /if \(step === 2 && !plan\.includes\('protect'\)\) step = 3;/.test(sf), 'the tour asks tourSteps (a protected workspace skips step 2)');
+  ok(gateOf(/An assistant that works on your files — ask it in plain words\./.test(sf)) && (sf.match(/class="ob-ask"/g) || []).length === 3, 'one plain sentence + three example asks');
+  ok(gateOf(/<p data-i18n>An assistant that works on your files — ask it in plain words\.<\/p>/.test(read('public/index.html'))) && !/Multi-session terminal manager/.test(read('public/index.html')), 'the empty desktop\u2019s welcome says the same sentence (no terminal-manager pitch)');
+  ok(gateOf(/tourSteps\(\{ ssoEnabled: !!this\._ssoEnabled, authEnabled: !!this\._authEnabled \}\)/.test(sf)) && verdictOf(/if \(step === 2 && !plan\.includes\('protect'\)\) step = 3;/.test(sf)), 'the tour asks tourSteps (a protected workspace skips step 2)');
   ok(!/Single sign-on \(SSO\) is already configured/.test(sf), 'THE FINDING (D6): the SSO sentence is gone');
-  ok(/firstFilesFolder\(chips\)/.test(sf) && /paintFolderChips\(chipsEl, chips, \{ selected: first/.test(sf), 'the start step: the home’s folders as chips, the one with files chosen');
-  ok(/purpose: SIGN_IN \}\);/.test(sf), 'the tour’s guided login is a sign-in terminal');
+  ok(gateOf(/firstFilesFolder\(chips\)/.test(sf)) && verdictOf(/paintFolderChips\(chipsEl, chips, \{ selected: first/.test(sf)), 'the start step: the home’s folders as chips, the one with files chosen');
+  ok(verdictOf(/purpose: SIGN_IN \}\);/.test(sf)), 'the tour’s guided login is a sign-in terminal');
   const app = read('src/lib/app.js');
   // lane new-session-group-folder-link: every open goes through PURE folderOnOpen (the caller's folder, a picked group's — derived —
   // or EMPTY), and the chips row is THE path field's own (chips: true — src/lib/path-field.js paints it through folderChips)
   const form = read('src/lib/new-session-form.js'), pf = read('src/lib/path-field.js');
-  ok(/this\._nsFolderOpen\(cwd \|\| ''\);/.test(app) && /folderOnOpen\(\{ cwd, groups: this\._nsGroupFolders\(\)/.test(form) && !/if \(cwd\) document\.getElementById\('input-cwd'\)\.value = cwd;/.test(app), 'THE FINDING (D8): the dialog’s folder is the caller’s, the picked group’s or EMPTY — never the last dialog’s');
-  ok(/kind: 'folder', chips: true, id: 'new-session-cwd'/.test(app) && /paintFolderChips\(chipsEl, folderChips\(\{ folders, recent, task \}\)/.test(pf) && /loadHomeFolders\(\)\.then/.test(pf), 'the dialog’s chips: folderChips over the home’s folders (the path field’s own row)');
-  ok(/sessionGivenName\(match, this\.sidebar\.getCustomName\?\.\(match\)\) \|\| match\.name \|\| match\.webuiName/.test(app), 'THE FINDING (D10): the window title takes the first message before the generated «Session N»');
+  ok(gateOf(/this\._nsFolderOpen\(cwd \|\| ''\);/.test(app)) && gateOf(/folderOnOpen\(\{ cwd, groups: this\._nsGroupFolders\(\)/.test(form)) && !/if \(cwd\) document\.getElementById\('input-cwd'\)\.value = cwd;/.test(app), 'THE FINDING (D8): the dialog’s folder is the caller’s, the picked group’s or EMPTY — never the last dialog’s');
+  ok(gateOf(/kind: 'folder', chips: true, id: 'new-session-cwd'/.test(app)) && gateOf(/paintFolderChips\(chipsEl, folderChips\(\{ folders, recent, task \}\)/.test(pf)) && verdictOf(/loadHomeFolders\(\)\.then/.test(pf)), 'the dialog’s chips: folderChips over the home’s folders (the path field’s own row)');
+  ok(verdictOf(/sessionGivenName\(match, this\.sidebar\.getCustomName\?\.\(match\)\) \|\| match\.name \|\| match\.webuiName/.test(app)), 'THE FINDING (D10): the window title takes the first message before the generated «Session N»');
   const vu = read('src/lib/vault-unlock.js');
-  ok(/vaultSetupAsk\(\{ facts, snoozedUntil, now: Date\.now\(\) \}\)/.test(vu) && !/sessionStorage\.(?:get|set)Item\('vs-vault-later'/.test(vu), 'THE FINDING (D7): the setup ask asks vaultSetupAsk; «Later» is per device (no per-tab snooze)');
-  ok(/if \(on === 'broadcast' && !wasWaiting && f && f\.state === 'not_set_up' && f\.secretWaiting\) maybeNagVault\(\);/.test(vu), 'the broadcast of the first stored secret asks at once');
+  ok(gateOf(/vaultSetupAsk\(\{ facts, snoozedUntil, now: Date\.now\(\) \}\)/.test(vu)) && !/sessionStorage\.(?:get|set)Item\('vs-vault-later'/.test(vu), 'THE FINDING (D7): the setup ask asks vaultSetupAsk; «Later» is per device (no per-tab snooze)');
+  ok(verdictOf(/if \(on === 'broadcast' && !wasWaiting && f && f\.state === 'not_set_up' && f\.secretWaiting\) maybeNagVault\(\);/.test(vu)), 'the broadcast of the first stored secret asks at once');
   const rail = read('src/lib/sidebar-rail.js');
-  ok(/railLabels\(\{ record: readRailRecord\(\), now: Date\.now\(\), doors \}\)/.test(rail) && /cap\.className = 'rail-label';/.test(rail) && /this\._railDoorUsed\(id\)/.test(rail), 'THE FINDING (D11): the rail carries its words (railLabels), a press counts the door');
-  ok(/'vs-rail-labels': 'done'/.test(read('scripts/scratch.mjs')), 'the chrome suites’ pages start with the rail’s words done (their 44 px pins)');
-  ok(/if \(isSignInRow\(ws\)\) continue;/.test(read('src/lib/sidebar.js')), 'the sidebar lists no row for a sign-in terminal');
-  ok(/_purpose: data\.purpose === DAY_ONE\.SIGN_IN \? DAY_ONE\.SIGN_IN : null/.test(read('src/ws-create.js')) && /purpose: session\._purpose \|\| undefined/.test(read('src/ws-create.js')), 'the server marks + persists a sign-in terminal');
-  ok(/purpose: s\._purpose \|\| undefined/.test(read('server.js')), 'the live list carries it');
-  ok(/if \(entry && entry\.pid && signIn\.has\(entry\.pid\)\) continue;/.test(read('src/sessions-assemble.js')) && /signInPids: \[\.\.\.signInPids\]/.test(read('src/routes/sessions.js')), 'the claude a sign-in terminal runs is no discovered row (B-891e: the route hands the sign-in pids to the sweep\'s merge, src/sessions-assemble.js)');
+  ok(gateOf(/railLabels\(\{ record: readRailRecord\(\), now: Date\.now\(\), doors \}\)/.test(rail)) && gateOf(/cap\.className = 'rail-label';/.test(rail)) && verdictOf(/this\._railDoorUsed\(id\)/.test(rail)), 'THE FINDING (D11): the rail carries its words (railLabels), a press counts the door');
+  ok(verdictOf(/'vs-rail-labels': 'done'/.test(read('scripts/scratch.mjs'))), 'the chrome suites’ pages start with the rail’s words done (their 44 px pins)');
+  ok(verdictOf(/if \(isSignInRow\(ws\)\) continue;/.test(read('src/lib/sidebar.js'))), 'the sidebar lists no row for a sign-in terminal');
+  ok(gateOf(/_purpose: data\.purpose === DAY_ONE\.SIGN_IN \? DAY_ONE\.SIGN_IN : null/.test(read('src/ws-create.js'))) && verdictOf(/purpose: session\._purpose \|\| undefined/.test(read('src/ws-create.js'))), 'the server marks + persists a sign-in terminal');
+  ok(verdictOf(/purpose: s\._purpose \|\| undefined/.test(read('server.js'))), 'the live list carries it');
+  ok(gateOf(/if \(entry && entry\.pid && signIn\.has\(entry\.pid\)\) continue;/.test(read('src/sessions-assemble.js'))) && verdictOf(/signInPids: \[\.\.\.signInPids\]/.test(read('src/routes/sessions.js'))), 'the claude a sign-in terminal runs is no discovered row (B-891e: the route hands the sign-in pids to the sweep\'s merge, src/sessions-assemble.js)');
   const ma = read('src/lib/manage-agents.js');
-  ok((ma.match(/this\.openSignInTerminal\(/g) || []).length === 9 && /run\(selectedHost && b\.remoteLoginCmd \? b\.remoteLoginCmd : absCmd\(b\.loginCmd\), \{ signIn: true \}\)/.test(ma), 'every Manage Agents login terminal is a sign-in terminal (8 + the machine-wide Log in)');
-  ok(/if \(!session\.host\) ensureGitIdentity\(\)\.catch\(\(\) => \{\}\);/.test(read('src/ws-create.js')), 'a local spawn asks for git’s identity (once)');
-  ok(/router\.get\('\/api\/home-folders'/.test(read('src/routes/files.js')) && /folderCensus: 15000/.test(read('src/safe-fs.js')), 'the route + its SafeFs deadline');
-  ok(/'src\/day-one\.js'/.test(read('scripts/test-architecture.mjs')), 'src/day-one.js is in test-architecture’s PURE set');
+  ok((ma.match(/this\.openSignInTerminal\(/g) || []).length === 9 && verdictOf(/run\(selectedHost && b\.remoteLoginCmd \? b\.remoteLoginCmd : absCmd\(b\.loginCmd\), \{ signIn: true \}\)/.test(ma)), 'every Manage Agents login terminal is a sign-in terminal (8 + the machine-wide Log in)');
+  ok(verdictOf(/if \(!session\.host\) ensureGitIdentity\(\)\.catch\(\(\) => \{\}\);/.test(read('src/ws-create.js'))), 'a local spawn asks for git’s identity (once)');
+  ok(gateOf(/router\.get\('\/api\/home-folders'/.test(read('src/routes/files.js'))) && verdictOf(/folderCensus: 15000/.test(read('src/safe-fs.js'))), 'the route + its SafeFs deadline');
+  ok(verdictOf(/'src\/day-one\.js'/.test(read('scripts/test-architecture.mjs'))), 'src/day-one.js is in test-architecture’s PURE set');
 }
 {
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
@@ -265,10 +265,10 @@ console.log('⑩ wiring');
   const has = (tbl, k) => tbl.includes('\n  ' + JSON.stringify(k) + ':');
   const miss = KEYS.filter((k) => !has(zh, k) || !has(ja, k));
   ok(miss.length === 0, `i18n: the ${KEYS.length} new words in zh + ja`, miss);
-  ok(/"\{name\} \(\{n\} files\)": "\{name\}（\{n\} 个文件）"/.test(zh), 'zh: «work（23 个文件）»');
+  ok(verdictOf(/"\{name\} \(\{n\} files\)": "\{name\}（\{n\} 个文件）"/.test(zh)), 'zh: «work（23 个文件）»');
   ok(!/"Sessions that never die"|"Start Chat Session"|"Single sign-on \(SSO\) is already configured/.test(zh + ja), 'the old pitch’s and the SSO sentence’s words left both tables (§78)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 fs.rmSync(ROOT, { recursive: true, force: true });
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

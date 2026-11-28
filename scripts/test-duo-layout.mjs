@@ -99,7 +99,7 @@ const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[proce
 for (const d of [stubDir, CWD, SHOTS]) fs.mkdirSync(d, { recursive: true });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the stub CLI: one assistant turn per user line, a reply long enough to wrap at every width ──
@@ -338,9 +338,9 @@ try {
     await shot(`fresh-${mouse ? 'mouse' : 'touch'}-${w}x${h}.png`);
   }
   const phoneSig = (x) => x.isMobile && x.vc === 'compact' && x['#mobile-nav'] === 'shown' && x['#toolbar'] === 'none' && x['#taskbar'] === 'none' && x['#sidebar-rail'] === 'none' && x['#sidebar'] === 'offscreen';
-  check('a fresh touch 382×580 and a mouse 382 / 669 are the phone page (nav on, toolbar / taskbar / rail off, sidebar off screen)', phoneSig(fresh.t382) && phoneSig(fresh.m382) && phoneSig(fresh.m669), [fresh.t382, fresh.m669]);
-  check('slice 5 (SPEC-v3 §6): Split View\'s half 385×571 and the cover in landscape 594×368 stay the phone page, unchanged', phoneSig(fresh.t385) && phoneSig(fresh.t594) && fresh.t385['#sidebar-new'] === 'none' && fresh.t594['#sidebar-new'] === 'none', [fresh.t385, fresh.t594]);
-  check('a fresh touch 669×867 / 951×585 is the REGULAR class (the list a column on screen, the nav, no toolbar / taskbar / rail)', ['t669', 't951'].every((k) => fresh[k].isMobile && fresh[k].vc === 'regular' && fresh[k]['#sidebar'] === 'shown' && fresh[k]['#mobile-nav'] === 'shown' && fresh[k]['#toolbar'] === 'none' && fresh[k]['#taskbar'] === 'none' && fresh[k]['#sidebar-rail'] === 'none' && fresh[k]['#sidebar-new'] === 'shown'), [fresh.t669, fresh.t951]);
+  check('a fresh touch 382×580 and a mouse 382 / 669 are the phone page (nav on, toolbar / taskbar / rail off, sidebar off screen)', gateOf(phoneSig(fresh.t382)) && gateOf(phoneSig(fresh.m382)) && verdictOf(phoneSig(fresh.m669)), [fresh.t382, fresh.m669]);
+  check('slice 5 (SPEC-v3 §6): Split View\'s half 385×571 and the cover in landscape 594×368 stay the phone page, unchanged', gateOf(phoneSig(fresh.t385)) && gateOf(phoneSig(fresh.t594)) && fresh.t385['#sidebar-new'] === 'none' && fresh.t594['#sidebar-new'] === 'none', [fresh.t385, fresh.t594]);
+  check('a fresh touch 669×867 / 951×585 is the REGULAR class (the list a column on screen, the nav, no toolbar / taskbar / rail)', verdictOf(['t669', 't951'].every((k) => fresh[k].isMobile && fresh[k].vc === 'regular' && fresh[k]['#sidebar'] === 'shown' && fresh[k]['#mobile-nav'] === 'shown' && fresh[k]['#toolbar'] === 'none' && fresh[k]['#taskbar'] === 'none' && fresh[k]['#sidebar-rail'] === 'none' && fresh[k]['#sidebar-new'] === 'shown')), [fresh.t669, fresh.t951]);
   check('a fresh mouse 951×585 is the window manager (toolbar, taskbar, the rail strip; no nav)', !fresh.m951.isMobile && fresh.m951.vc === 'desktop' && fresh.m951['#toolbar'] === 'shown' && fresh.m951['#taskbar'] === 'shown' && fresh.m951['#sidebar-rail'] === 'shown' && fresh.m951['#mobile-nav'] === 'none', fresh.m951);
 
   console.log('② the desktop fold ladder (a mouse): boot 951×585 with two chat windows, fold / unfold without a reload');
@@ -362,7 +362,7 @@ try {
   // 92f4d48fd (the short view's one row is 35 px). The 400-px window is under SHORT_VIEW_PX (450): its strip folds (cad-short)
   { const dock = await evalJs(`(() => { const d = document.querySelector('.window.window-active .chat-attn-dock'); if (!d) return null; const b = d.getBoundingClientRect(); return { short: d.classList.contains('cad-short'), h: Math.round(b.height), viewH: d._viewH ? Math.round(d._viewH) : null }; })()`);
     console.log(`    the boot's strip (B-16a9): ${JSON.stringify(dock)} · folded within the wait: ${folded16} · rows ${boot.rows}, whole ${boot.whole}, list ${JSON.stringify(boot.list)}`);
-    check('the boot (B-16a9): the active window\'s attention strip is the short view\'s ONE row (cad-short) and its transcript keeps TWO messages on show, nothing over them', !!dock && dock.short && boot.rows >= 2 && !boot.bad.length, { dock, folded16, boot }); }
+    check('the boot (B-16a9): the active window\'s attention strip is the short view\'s ONE row (cad-short) and its transcript keeps TWO messages on show, nothing over them', !!dock && gateOf(dock.short) && boot.rows >= 2 && !boot.bad.length, { dock, folded16, boot }); }
   let step = 0;
   for (const [w, h, pose] of LADDER) {
     step++;
@@ -372,10 +372,10 @@ try {
     const draft = await evalJs(DRAFT_JS);
     check(`${step}. ${pose} ${w}×${h} (a) the transcript lies inside the viewport, nothing over its left edge (B-1d40)`, rows.rows >= 1 && !rows.bad.length && rows.scrollX === 0, rows);
     if (classOf(w, true) === 'compact') check(`${step}. ${pose} ${w}×${h} (b) no desktop rail drawn, the sidebar off screen (B-f5ec)`, !rail.rail && !rail.sidebarOnScreen, rail);
-    else check(`${step}. ${pose} ${w}×${h} (b) the window manager's rail is back`, rail.rail, rail);
+    else check(`${step}. ${pose} ${w}×${h} (b) the window manager's rail is back`, verdictOf(rail.rail), rail);
     const d = diff({ ...fresh['m' + w], homeOverWindow: false }, sig);
     check(`${step}. ${pose} ${w}×${h} (c) the chrome equals a fresh load's at this size`, d.length === 0, d);
-    check(`${step}. ${pose} ${w}×${h} (d) the draft is the same box with the same words (a fold is no reload)`, draft.same && draft.value === DRAFT, draft);
+    check(`${step}. ${pose} ${w}×${h} (d) the draft is the same box with the same words (a fold is no reload)`, gateOf(draft.same) && draft.value === DRAFT, draft);
   }
 
   console.log('③ no keyboard on load: a touch screen never focuses the composer by itself');
@@ -389,10 +389,10 @@ try {
     const r = await evalJs(`(() => { const t = document.querySelector('.window.window-active .chat-input'); const b = t.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
     await tapAt(r.x, r.y);
     const f3 = await evalJs(FOCUS);
-    check('③ the person\'s own tap in the box focuses it (the keyboard comes from the tap)', f3.composer, f3);
+    check('③ the person\'s own tap in the box focuses it (the keyboard comes from the tap)', verdictOf(f3.composer), f3);
     await device(1280, 800, { mouse: true }); await load(); await attachOne();
     const f4 = await evalJs(FOCUS);
-    check('③ CONTROL: a 1280×800 desktop with a mouse still takes the composer on attach (desktop unchanged)', f4.composer, f4);
+    check('③ CONTROL: a 1280×800 desktop with a mouse still takes the composer on attach (desktop unchanged)', verdictOf(f4.composer), f4);
   }
 
   console.log('④ the regular class: the Duo\'s inner display = list | conversation | trailing bar');
@@ -404,23 +404,23 @@ try {
     check('④ …no toolbar, no taskbar, no rail', !a.toolbar && !a.taskbar && !a.rail, a);
     const ids = a.btns.map((x) => x.id), y = Object.fromEntries(a.btns.map((x) => [x.id, x.t]));
     const order = ['mobile-nav-artifacts', 'mobile-nav-more', 'mobile-nav-todos', 'mobile-nav-dest-tasks', 'mobile-nav-files', 'mobile-nav-dest-channels', 'mobile-nav-dest-browser', 'mobile-nav-dest-jobs', 'mobile-nav-gear'];
-    check('④ the bar: Artifacts · ⋯ on top, a visible gap, For you · Task Groups · Files · Channels · Agent browser · Background Work · ⚙ at the bottom (no ☰, no title, no +)', order.every((k) => k in y) && order.every((k, i) => i === 0 || y[order[i - 1]] < y[k]) && !!a.gap && a.gap.h >= 8 && a.gap.t > y['mobile-nav-more'] && a.gap.t < y['mobile-nav-todos'] && !ids.includes('mobile-nav-menu') && !ids.includes('mobile-nav-new'), { ids, y, gap: a.gap });
-    check('④ …every button 44 × 44 inside the 56 px bar', a.btns.every((x) => x.w === 44 && x.h === 44 && x.l >= 895 && x.l + 44 <= 951), a.btns);
-    check('④ the conversation\'s head = its name + its state word (never its folder)', !!a.head && a.head.shown && !!a.head.name && !/—/.test(a.head.name) && !!a.head.state, a.head);
+    check('④ the bar: Artifacts · ⋯ on top, a visible gap, For you · Task Groups · Files · Channels · Agent browser · Background Work · ⚙ at the bottom (no ☰, no title, no +)', gateOf(order.every((k) => k in y)) && gateOf(order.every((k, i) => i === 0 || y[order[i - 1]] < y[k])) && !!a.gap && a.gap.h >= 8 && a.gap.t > y['mobile-nav-more'] && a.gap.t < y['mobile-nav-todos'] && !ids.includes('mobile-nav-menu') && !ids.includes('mobile-nav-new'), { ids, y, gap: a.gap });
+    check('④ …every button 44 × 44 inside the 56 px bar', verdictOf(a.btns.every((x) => x.w === 44 && x.h === 44 && x.l >= 895 && x.l + 44 <= 951)), a.btns);
+    check('④ the conversation\'s head = its name + its state word (never its folder)', !!a.head && gateOf(a.head.shown) && !!a.head.name && !/—/.test(a.head.name) && !!a.head.state, a.head);
     // §2.3 AS BUILT (lane foryou-honest — the stress evaluation and the owner's B, 2026-10-25): the row MARKS its open question
     // on one line, the For-you window answers it (slice 2c's inline question + chips are withdrawn)
     const mk = await evalJs(`(() => { const cards = [...document.querySelectorAll('#all-sessions-list .col-card')]; const i = cards.findIndex((c) => { const m = c.querySelector(':scope > .ut-sess-mark'); return !!m && !m.hidden; }); const m = i >= 0 ? cards[i].querySelector(':scope > .ut-sess-mark') : null; const r = m ? m.getBoundingClientRect() : null; return { first: i, text: m ? m.innerText.replace(/\\s+/g, ' ').trim() : '', h: r ? Math.round(r.height) : 0, right: r ? Math.round(r.right) : 0, chips: document.querySelectorAll('#sidebar .ut-opt, #sidebar .ut-item, #sidebar .col-asks').length }; })()`);
-    check('④ §2.3 as built: the conversation with an open question is the FIRST row; it MARKS it on one line «needs you · 1 · <the question>» (44 px, inside the column) — no question, no chips in the list (the owner\'s B)', mk.first === 0 && /^needs you · 1 · Which deck goes to the Q3 review\?/.test(mk.text) && mk.h >= 44 && mk.right <= 320 && mk.chips === 0, mk);
+    check('④ §2.3 as built: the conversation with an open question is the FIRST row; it MARKS it on one line «needs you · 1 · <the question>» (44 px, inside the column) — no question, no chips in the list (the owner\'s B)', mk.first === 0 && gateOf(/^needs you · 1 · Which deck goes to the Q3 review\?/.test(mk.text)) && mk.h >= 44 && mk.right <= 320 && mk.chips === 0, mk);
     await tap('#all-sessions-list .col-card > .ut-sess-mark:not([hidden])');
     const inPane = await waitFor(`(app.wm.windows.get(app.wm.activeWindowId) || {}).type === 'inbox' && document.querySelectorAll('.iw-item .iw-opt').length === 2`, 8000);
-    check('④ …its tap opens the For-you window in the conversation column on that question, its options as chips', inPane, await evalJs(`({ type: (app.wm.windows.get(app.wm.activeWindowId) || {}).type, opts: [...document.querySelectorAll('.iw-item .iw-opt')].map((b) => b.getAttribute('aria-label') || b.textContent) })`));
+    check('④ …its tap opens the For-you window in the conversation column on that question, its options as chips', verdictOf(inPane), await evalJs(`({ type: (app.wm.windows.get(app.wm.activeWindowId) || {}).type, opts: [...document.querySelectorAll('.iw-item .iw-opt')].map((b) => b.getAttribute('aria-label') || b.textContent) })`));
     await tap('.iw-item .iw-opts > .iw-opt:last-child');
     const answered = await waitFor(`!document.querySelector('#all-sessions-list .ut-sess-mark:not([hidden])')`, 8000);
     await tap('#mobile-nav-viewer-close');
     const conv = await evalJs(`(app.wm.windows.get(app.wm.activeWindowId) || {}).type || null`);
-    check('④ …a chip answers it there (the row\'s marker leaves); the bar\'s ✕ brings the conversation back', answered && conv === 'chat', { answered, conv });
+    check('④ …a chip answers it there (the row\'s marker leaves); the bar\'s ✕ brings the conversation back', gateOf(answered) && conv === 'chat', { answered, conv });
     const paths = await evalJs(`[...document.querySelectorAll('.col-card .col-card-path')].map((p) => { const t = p.querySelector('.wb-card-path-text'); const cs = t && getComputedStyle(t); const r = p.getBoundingClientRect(), L = document.getElementById('sidebar').getBoundingClientRect(); return { text: !!t, ellipsis: cs?.textOverflow === 'ellipsis', rtl: cs?.direction === 'rtl', inside: r.right <= L.right + 0.5 }; })`);
-    check('④ each row\'s folder line keeps its TAIL (the head ellipsizes, rtl) inside the column — the real Duo\'s slice-2 shots cut «…/cwd/contra» with no ellipsis', paths.length >= 2 && paths.every((p) => p.text && p.ellipsis && p.rtl && p.inside), paths);
+    check('④ each row\'s folder line keeps its TAIL (the head ellipsizes, rtl) inside the column — the real Duo\'s slice-2 shots cut «…/cwd/contra» with no ellipsis', paths.length >= 2 && verdictOf(paths.every((p) => p.text && p.ellipsis && p.rtl && p.inside)), paths);
     await putDraft();
     // a window opened from the conversation never closes the list column (the phone's «yield the drawer» is not the column's)
     await evalJs(`(() => { app.openFileExplorer(); return 1; })()`); await sleep(1200);
@@ -428,7 +428,7 @@ try {
     check('④ a window opened (Files) fills the conversation column; the list column stays on screen', a2.list.l === 0 && a2.list.w === 320 && a2.win.l === 321 && !a2.sbOpen, a2);
     await tap('#mobile-nav-viewer-close');
     const a3 = await evalJs(ARRANGE), d3 = await evalJs(DRAFT_JS);
-    check('④ the ✕ on top of the bar closes it — the conversation is back with its draft', d3.same && d3.value === DRAFT, d3);
+    check('④ the ✕ on top of the bar closes it — the conversation is back with its draft', gateOf(d3.same) && d3.value === DRAFT, d3);
     await device(669, 867); await settle(669);
     const p = await evalJs(ARRANGE);
     await shot('regular-portrait-669x867.png');
@@ -436,10 +436,10 @@ try {
     // lane phone-six r2 (the acceptance: the name keeps ≥ 8 em or its whole width — «Ses…» was drawn here): when the name and
     // every button do not fit, the window's own extras yield first (#mobile-nav[data-yield]; the chat's status bar keeps Artifacts)
     const hy = await evalJs(`(() => { const e = document.getElementById('mobile-nav-title'), nav = document.getElementById('mobile-nav'), pr = document.createElement('span'); pr.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:' + getComputedStyle(e).font; pr.textContent = e.textContent; document.body.appendChild(pr); const whole = pr.getBoundingClientRect().width; pr.remove(); return { yield: nav.dataset.yield || '', w: Math.round(e.getBoundingClientRect().width), whole: Math.round(whole), em: parseFloat(getComputedStyle(e).fontSize) }; })()`);
-    check('④ …its head: ☰ · the name · its state word · Artifacts · ⋯ · ⚙ — Artifacts yields to the name when both do not fit (the name drawn whole or ≥ 8 em)', ['mobile-nav-menu', 'mobile-nav-more', 'mobile-nav-gear'].every((k) => p.btns.some((x) => x.id === k)) && (p.btns.some((x) => x.id === 'mobile-nav-artifacts') || hy.yield === 'win') && hy.w + 1 >= Math.min(hy.whole, 8 * hy.em) && !!p.navTitle && !/—/.test(p.navTitle) && !!p.navState, { btns: p.btns.map((x) => x.id), title: p.navTitle, state: p.navState, hy });
+    check('④ …its head: ☰ · the name · its state word · Artifacts · ⋯ · ⚙ — Artifacts yields to the name when both do not fit (the name drawn whole or ≥ 8 em)', gateOf(['mobile-nav-menu', 'mobile-nav-more', 'mobile-nav-gear'].every((k) => p.btns.some((x) => x.id === k))) && (gateOf(p.btns.some((x) => x.id === 'mobile-nav-artifacts')) || hy.yield === 'win') && hy.w + 1 >= Math.min(hy.whole, 8 * hy.em) && !!p.navTitle && !/—/.test(p.navTitle) && !!p.navState, { btns: p.btns.map((x) => x.id), title: p.navTitle, state: p.navState, hy });
     await tap('#mobile-nav-menu');
     const ph = await evalJs(ARRANGE);
-    check('④ ☰ hides the list (no overlay, no scrim): the conversation takes 0–669', ph.listHidden && ph.win.l === 0 && ph.win.w === 669, ph);
+    check('④ ☰ hides the list (no overlay, no scrim): the conversation takes 0–669', gateOf(ph.listHidden) && ph.win.l === 0 && ph.win.w === 669, ph);
     await device(951, 585); await settle(951);
     const pl = await evalJs(ARRANGE);
     check('④ a rotation shows the list again (a hidden list is a view of one orientation, never a memory)', !pl.listHidden && pl.list.w === 320, pl);
@@ -454,7 +454,7 @@ try {
       check(`④ Duo ${st}. ${pose} ${w}×${h} (a) the transcript inside the viewport, uncovered`, rows.rows >= 1 && !rows.bad.length && rows.scrollX === 0, rows);
       const d = diff({ ...fresh['t' + w], homeOverWindow: false }, sig);
       check(`④ Duo ${st}. ${pose} ${w}×${h} (c) the chrome equals a fresh load's`, d.length === 0, d);
-      check(`④ Duo ${st}. ${pose} ${w}×${h} (d) the draft is the same box with the same words`, draft.same && draft.value === DRAFT, draft);
+      check(`④ Duo ${st}. ${pose} ${w}×${h} (d) the draft is the same box with the same words`, gateOf(draft.same) && draft.value === DRAFT, draft);
     }
   }
 
@@ -464,21 +464,21 @@ try {
     const selected = (id) => evalJs(`(() => { const b = document.getElementById(${JSON.stringify(id)}); return !!b && b.classList.contains('selected'); })()`);
     const activeType = () => evalJs(`(app.wm.windows.get(app.wm.activeWindowId) || {}).type || null`);
     await tap('#mobile-nav-files');
-    check('⑤ Files: the explorer is on show in the conversation column, the button selected, the ✕ on top', (await activeType()) === 'files' && (await selected('mobile-nav-files')) && (await evalJs(`getComputedStyle(document.getElementById('mobile-nav-viewer-close')).display !== 'none'`)));
+    check('⑤ Files: the explorer is on show in the conversation column, the button selected, the ✕ on top', (await activeType()) === 'files' && (gateOf(await selected('mobile-nav-files'))) && (verdictOf(await evalJs(`getComputedStyle(document.getElementById('mobile-nav-viewer-close')).display !== 'none'`))));
     await tap('#mobile-nav-viewer-close');
     check('⑤ ✕: the conversation is back (a chat on show), Files no longer selected', (await activeType()) === 'chat' && !(await selected('mobile-nav-files')));
     await tap('#mobile-nav-dest-channels');
-    check('⑤ Channels: its window on show, the button selected', (await activeType()) === 'channels' && (await selected('mobile-nav-dest-channels')));
+    check('⑤ Channels: its window on show, the button selected', (await activeType()) === 'channels' && (verdictOf(await selected('mobile-nav-dest-channels'))));
     await tap('#mobile-nav-dest-jobs');
-    check('⑤ Background Work: its window on show, the button selected (Channels no longer)', (await activeType()) === 'jobs' && (await selected('mobile-nav-dest-jobs')) && !(await selected('mobile-nav-dest-channels')));
+    check('⑤ Background Work: its window on show, the button selected (Channels no longer)', (await activeType()) === 'jobs' && (gateOf(await selected('mobile-nav-dest-jobs'))) && !(await selected('mobile-nav-dest-channels')));
     await tap('#mobile-nav-dest-tasks');
-    check('⑤ Task Groups: the list column turns to its board, the button selected', (await evalJs(`app.sidebar._activeTab`)) === 'tasks' && (await selected('mobile-nav-dest-tasks')));
+    check('⑤ Task Groups: the list column turns to its board, the button selected', (await evalJs(`app.sidebar._activeTab`)) === 'tasks' && (verdictOf(await selected('mobile-nav-dest-tasks'))));
     await evalJs(`document.querySelector('.sidebar-tab[data-tab="folders"]')?.click(); 1`);
     await tap('#mobile-nav-viewer-close'); await tap('#mobile-nav-viewer-close'); await sleep(300);
     await tap('#mobile-nav-more');
     const menu = await evalJs(`(() => { const m = document.querySelector('.taskbar-context-menu'); if (!m) return null; const b = m.getBoundingClientRect(); const bar = document.getElementById('mobile-nav').getBoundingClientRect(); return { right: Math.round(b.right), barLeft: Math.round(bar.left), rows: [...m.querySelectorAll('.taskbar-context-menu-item')].map((r) => r.textContent.trim()) }; })()`);
     check('⑤ ⋯: the window\'s menu opens INTO the conversation column (left of the bar)', !!menu && menu.right <= menu.barLeft, menu);
-    check('⑤ …with no window-manager verb and no Close (leave = another row; end = Terminate)', !!menu && !menu.rows.some((x) => /Close|Minimize|Move to Desktop|Find window|Show side by side|✥/.test(x)) && menu.rows.some((x) => /Rename/.test(x)), menu && menu.rows);
+    check('⑤ …with no window-manager verb and no Close (leave = another row; end = Terminate)', !!menu && !menu.rows.some((x) => /Close|Minimize|Move to Desktop|Find window|Show side by side|✥/.test(x)) && verdictOf(menu.rows.some((x) => /Rename/.test(x))), menu && menu.rows);
     await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
     // int355 — the ONE Close row two picks share (duo-build-1 `when: wmVerbs` ∪ phone-refusal-wrap `style: closeStyle`): the
     // regular class shows no Close and its end, Terminate, stays red; the same live conversation at 951 with a MOUSE (the
@@ -523,7 +523,7 @@ try {
     await device(951, 648); await place({ right: 84, rightMax: 84, bottom: 34, bottomMax: 34 }); await load(); await attachBoth();
     await waitFor(`document.documentElement.dataset.sidecol === 'right' && document.documentElement.dataset.onshow === 'chat'`, 5000); await sleep(300);
     const inner = await evalJs(COL);
-    check('④b inner 951×648: the bar stands IN the column (84 wide at its edge), global things only — For you · Task Groups · Files · Channels · Desktops · ⚙ — under the clock\'s room (112) and above the bottom inset; nothing of the conversation in it', want(inner, INNER, 112), inner);
+    check('④b inner 951×648: the bar stands IN the column (84 wide at its edge), global things only — For you · Task Groups · Files · Channels · Desktops · ⚙ — under the clock\'s room (112) and above the bottom inset; nothing of the conversation in it', verdictOf(want(inner, INNER, 112)), inner);
     // AT THE BOTTOM: the strip's «Conversation settings» door ends with the search and the window's menu; the menu opens above the door
     await tap('.window.window-active .chat-status-settings');
     const rows = await evalJs(`[...document.querySelectorAll('.chat-status-settings-row')].map((r) => r.className.match(/chat-status-col-[a-z]+/)?.[0] || '')`);
@@ -531,7 +531,7 @@ try {
     const menu = await evalJs(`(() => { const m = document.querySelector('.taskbar-context-menu'), d = document.querySelector('.window.window-active .chat-status-settings'); if (!m || !d) return null; const b = m.getBoundingClientRect(); return { bottom: Math.round(b.bottom), doorTop: Math.round(d.getBoundingClientRect().top), right: Math.round(b.right), rows: [...m.querySelectorAll('.taskbar-context-menu-item')].map((r) => r.textContent.trim()) }; })()`);
     await evalJs(`document.querySelectorAll('.context-menu, .taskbar-context-menu, .chat-status-dropdown').forEach((m) => m.remove()); 1`);   // r4115 (f): the window menu it opened closes too
     check('④b inner: the conversation\'s search and its window\'s menu are the «Conversation settings» door\'s last rows; the menu (Rename…) opens ABOVE the door, left of the column',
-      rows.slice(-2).join() === 'chat-status-col-search,chat-status-col-window' && !!menu && menu.bottom <= menu.doorTop && menu.right <= 951 - 84 && menu.rows.some((x) => /Rename/.test(x)), { rows, menu });
+      rows.slice(-2).join() === 'chat-status-col-search,chat-status-col-window' && !!menu && menu.bottom <= menu.doorTop && menu.right <= 951 - 84 && verdictOf(menu.rows.some((x) => /Rename/.test(x))), { rows, menu });
     // a viewer: its ✕ at its own head's end (left of the column), never in the column
     await tap('#mobile-nav-files'); await sleep(300);
     const x = await evalJs(`(() => { const b = document.getElementById('mobile-nav-viewer-close').getBoundingClientRect(); return { onshow: document.documentElement.dataset.onshow, top: Math.round(b.top), right: Math.round(b.right), w: Math.round(b.width) }; })()`);
@@ -565,7 +565,7 @@ try {
     const outer = await evalJs(COL);
     const head = await evalJs(`(() => { const t = document.querySelector('.window.window-active > .window-titlebar'); if (!t) return null; const b = t.getBoundingClientRect(); return { display: getComputedStyle(t).display, top: Math.round(b.top), right: Math.round(b.right), h: Math.round(b.height), name: t.querySelector('.window-title')?.dataset.name || '' }; })()`);
     check('④b outer 466×657: the bar is the column (☰ · For you · + · Task Groups · Files · Channels · Desktops · ⚙) under the clock\'s room (166), above the bottom inset; the window\'s own head is the name\'s row, clear of the column',
-      want(outer, OUTER, 166) && !!head && head.display === 'flex' && head.top === 0 && head.h === 44 && head.right <= 466 - 84 && !!head.name, { outer, head });
+      gateOf(want(outer, OUTER, 166)) && !!head && head.display === 'flex' && head.top === 0 && head.h === 44 && head.right <= 466 - 84 && !!head.name, { outer, head });
     // r4115 (b): the window on show closes from its own row of «Conversation settings» on the outer display (two presses)
     await tap('.window.window-active .chat-status-settings'); await waitFor(`!!document.querySelector('.chat-status-dropdown')`, 4000);
     const outRows = await evalJs(`[...document.querySelectorAll('.chat-status-settings-row')].map((r) => r.className.match(/chat-status-col-[a-z]+/)?.[0] || '')`);
@@ -582,7 +582,7 @@ try {
     await evalJs(`(app.sidebar.toggle(true), 1)`); await waitFor(listSettled, 5000);
     const lo = await evalJs(HITS);
     check(`④b outer, THE LIST OPEN: it stops where the column begins (0–${lo.right} of ${lo.w}); every one of the column's ${lo.hits.length} buttons is the hit at its centre`,
-      lo.open && lo.left === 0 && lo.right === lo.w - 84 && lo.hits.length >= 6 && lo.hits.every((h) => h.hit), lo);
+      gateOf(lo.open) && lo.left === 0 && lo.right === lo.w - 84 && lo.hits.length >= 6 && verdictOf(lo.hits.every((h) => h.hit)), lo);
     // r4817 MUST (the cure round of 40d3cded3): ON BOTH ANCHORS — «Sidebar on right» (sidebar.position, stored on the hub for every device;
     // app.js writes it as body.sidebar-right) anchors the list at the right edge: closed it lies past the screen, open it ends where the
     // column begins — every column button the hit at its centre, no band of the conversation at the left
@@ -592,13 +592,13 @@ try {
     await evalJs(`(app.sidebar.toggle(true), 1)`); await waitFor(listSettled, 5000);
     const ro = await evalJs(HITS);
     check(`④b outer, «Sidebar on right»: closed, the list lies past the screen (${rc.left}–${rc.right}) and no button of the column is under it; open, it ends where the column begins (${ro.left}–${ro.right} of ${ro.w}) — every button the hit, no band at the left`,
-      !rc.open && rc.left >= rc.w && rc.hits.length >= 6 && rc.hits.every((h) => h.hit) && ro.open && ro.left === 0 && ro.right === ro.w - 84 && ro.hits.every((h) => h.hit), { rc, ro });
+      !rc.open && rc.left >= rc.w && rc.hits.length >= 6 && gateOf(rc.hits.every((h) => h.hit)) && gateOf(ro.open) && ro.left === 0 && ro.right === ro.w - 84 && verdictOf(ro.hits.every((h) => h.hit)), { rc, ro });
     // RED CONTROL: 40d3cded3's sheet (the two rules of the right anchor cut by CSSOM) — the open list at the right edge, over the column
     await evalJs(`(() => { let n = 0; for (const sh of document.styleSheets) { let rs; try { rs = sh.cssRules; } catch { continue; } for (let i = rs.length - 1; i >= 0; i--) if (['html[data-vc="compact"][data-sidecol] body.sidebar-right .sidebar', 'html[data-vc="compact"][data-sidecol] body.sidebar-right .sidebar.open'].includes(rs[i].selectorText)) { sh.deleteRule(i); n++; } } window.__cutRight = n; return n; })()`);
     await waitFor(`(() => { const s = document.querySelector('.sidebar'); return !!s && Math.round(s.getBoundingClientRect().right) === innerWidth && !s.getAnimations().length; })()`, 5000);
     const rr = await evalJs(HITS), cutR = await evalJs('window.__cutRight');
     check(`④b RED CONTROL «Sidebar on right»: 40d3cded3's sheet (its ${cutR} right-anchor rule(s) cut) — the open list lies over the column (${rr.left}–${rr.right}), ${rr.hits.filter((h) => !h.hit).length} of ${rr.hits.length} buttons under it, a ${rr.left} px band at the left`,
-      cutR === 2 && rr.right === rr.w && rr.left === 84 && rr.hits.some((h) => !h.hit), { cutR, rr });
+      cutR === 2 && rr.right === rr.w && rr.left === 84 && verdictOf(rr.hits.some((h) => !h.hit)), { cutR, rr });
     await evalJs(`(app.sidebar.toggle(false), document.body.classList.remove('sidebar-right'), 1)`); await waitFor(listClosed, 5000);
     await evalJs(`(app.sidebar.toggle(true), 1)`); await waitFor(listSettled, 5000);   // the left anchor again, open, for its own RED below
     // RED CONTROL: the stylesheet before this cure — its one rule taken out of the page's sheets (CSSOM), the list open
@@ -606,7 +606,7 @@ try {
     await waitFor(`(() => { const s = document.querySelector('.sidebar'); return !!s && Math.round(s.getBoundingClientRect().right) === innerWidth && !s.getAnimations().length; })()`, 5000);
     const lr = await evalJs(HITS), cutN = await evalJs('window.__cutRules');
     check(`④b RED CONTROL: without the cure (its rule cut from ${cutN} sheet(s)) the open list covers the column — ${lr.hits.filter((h) => !h.hit).length} of ${lr.hits.length} buttons under it (the hit: ${(lr.hits.find((h) => !h.hit) || {}).on})`,
-      cutN >= 1 && lr.right === lr.w && lr.hits.length >= 6 && lr.hits.some((h) => !h.hit), { cutN, lr });
+      cutN >= 1 && lr.right === lr.w && lr.hits.length >= 6 && verdictOf(lr.hits.some((h) => !h.hit)), { cutN, lr });
     await evalJs(`(app.sidebar.toggle(false), 1)`);
     // RED CONTROL: the release's stylesheet (everything from «THE SYSTEM's EDGES (B-78db» cut) — the bar at right 0, the conversation's buttons in it
     await device(951, 648); await load(); await attachBoth(); await sleep(300);
@@ -645,7 +645,7 @@ try {
     await waitFor(`document.documentElement.dataset.vc === 'compact'`, 5000); await sleep(300);
     const por = await evalJs(PHONE), porPanel = await panelRoom();
     check('④c a notched iPhone held portrait 390×844 (top 59, bottom 34): the top bar\'s buttons inside its own box and wholly below the status bar, the message box and the strip above the home indicator, no side column; a strip panel stands under the bar\'s TRUE bottom',
-      portraitOk(por) && !!porPanel && !porPanel.vertical && porPanel.top >= porPanel.navBottom, { why: portraitWhy(por), porPanel, nav: por.nav, chips: por.chips, input: por.input, btns: por.btns.map((b) => `${b.id}:${b.top}-${b.bottom}`) });
+      gateOf(portraitOk(por)) && !!porPanel && !porPanel.vertical && porPanel.top >= porPanel.navBottom, { why: portraitWhy(por), porPanel, nav: por.nav, chips: por.chips, input: por.input, btns: por.btns.map((b) => `${b.id}:${b.top}-${b.bottom}`) });
     await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-b78db-red'; s.textContent = 'html[data-vc="compact"] #mobile-nav { height: 44px !important; }'; document.body.appendChild(s); return 1; })()`); await sleep(300);
     const porRed = await evalJs(PHONE);
     await evalJs(`document.getElementById('zz-b78db-red')?.remove(); 1`);
@@ -656,12 +656,12 @@ try {
     const cut = land.btns.filter((b) => b.bottom > land.h - 21).map((b) => b.id);
     console.log(`  · ④c landscape 844×390: today's trailing bar (no column) holds ${land.btns.length} drawn buttons; past its room: ${cut.length ? cut.join(', ') : 'none'} (the bar's own yield is ④f's to judge)`);
     check('④c a notched iPhone held landscape 844×390 (both sides 59, bottom 21): the trailing bar\'s buttons clear of the right inset and above the bottom one, the list\'s rows after the left inset, the message box and the strip above the bottom inset, NO side column (the leading inset is not 0); a strip panel keeps its room (more than the 120 px floor) under a vertical bar',
-      landscapeOk(land) && !!landPanel && landPanel.vertical && landPanel.room > 120, { why: landscapeWhy(land), landPanel, chips: land.chips, input: land.input, tab: land.tab, drawn: drawn(land).map((b) => `${b.id}:${b.right}`) });
+      gateOf(landscapeOk(land)) && !!landPanel && gateOf(landPanel.vertical) && landPanel.room > 120, { why: landscapeWhy(land), landPanel, chips: land.chips, input: land.input, tab: land.tab, drawn: drawn(land).map((b) => `${b.id}:${b.right}`) });
     // the list column hidden (☰): the conversation column starts after the left inset, never under the sensor housing
     await tap('#list-column-toggle'); await waitFor(`document.documentElement.classList.contains('vs-list-hidden')`, 4000); await sleep(300);
     const hid = await evalJs(PHONE);
     await tap('#list-column-toggle'); await waitFor(`!document.documentElement.classList.contains('vs-list-hidden')`, 4000);
-    check('④c …the list column hidden: the message box and the strip\'s chips start after the left inset (59)', !!hid.input && hid.input.left >= 59 && !!hid.chips && landscapeWhy(hid).chips, { input: hid.input, chips: hid.chips });
+    check('④c …the list column hidden: the message box and the strip\'s chips start after the left inset (59)', !!hid.input && hid.input.left >= 59 && !!hid.chips && verdictOf(landscapeWhy(hid).chips), { input: hid.input, chips: hid.chips });
     // ④d THE STYLESHEETS' ORDER (主开发 r4115 MUST 1 — every device, the desktop included): a person's custom theme, injected into the head
     // at runtime, wins its ties against the sheets as at the release. RED CONTROL: 17c6dd081's order (the sheets after the head).
     await place({}); await device(1280, 800, { mouse: true }); await load();
@@ -687,7 +687,7 @@ try {
     const bookRed = await evalJs(BOOK);
     await evalJs(`(document.getElementById('zz-b78db-book-red')?.remove(), app.sidebar.setListHidden(false), 1)`);
     await cdp('Emulation.clearDevicePostureOverride');
-    check('④e the book pose with the list hidden keeps the seam\'s margin (the conversation right of the seam, in a home-screen copy at inset 0)', book.fold === 'book' && book.hidden && book.standalone === '1' && book.left >= book.edge, book);
+    check('④e the book pose with the list hidden keeps the seam\'s margin (the conversation right of the seam, in a home-screen copy at inset 0)', book.fold === 'book' && gateOf(book.hidden) && book.standalone === '1' && book.left >= book.edge, book);
     check('④e RED CONTROL: f4499e926\'s unscoped list-hidden rule draws the conversation over the list half (its margin 0)', bookRed.left < bookRed.edge, bookRed);
     // ④f THE BAR's OWN YIELD (主开发 r4185, for «.420»): the regular class's trailing bar held landscape with NO side column (an
     // ordinary iPhone at 844×390, insets placed; and 667×375, none) — every global door either drawn inside the bar's box or
@@ -711,7 +711,7 @@ try {
       await waitFor(`document.documentElement.dataset.vc === 'regular' && !!document.getElementById('mobile-nav').dataset.colYield`, 6000);
       const b = await evalJs(barState(false)), rows = await gearRows();
       check(`④f the bar held landscape at ${w}×${h}: every global door drawn inside the bar or a row of Global settings by its id (yielded: ${b.yieldAttr || 'none'}), the conversation's doors drawn, ⚙ in the bar`,
-        barOk(b, rows), { yieldAttr: b.yieldAttr, rows, global: b.global.map((d) => `${d.id}:${d.inside ? 'in' : d.yielded ? 'yield' : 'OUT'}`), conv: b.conv.map((d) => `${d.id}:${d.shown ? (d.inside ? 'in' : 'OUT') : 'off'}`), gear: b.gear.inside });
+        verdictOf(barOk(b, rows)), { yieldAttr: b.yieldAttr, rows, global: b.global.map((d) => `${d.id}:${d.inside ? 'in' : d.yielded ? 'yield' : 'OUT'}`), conv: b.conv.map((d) => `${d.id}:${d.shown ? (d.inside ? 'in' : 'OUT') : 'off'}`), gear: b.gear.inside });
       const red = await evalJs(barState(true));
       await evalJs(`(window.dispatchEvent(new Event('resize')), 1)`); await waitFor(`!!document.getElementById('mobile-nav').dataset.colYield`, 4000);
       check(`④f RED CONTROL at ${w}×${h}: the release's bar (no yield) leaves global doors past its room — neither drawn inside nor a row`, !barOk(red, rows), { global: red.global.map((d) => `${d.id}:${d.inside ? 'in' : 'OUT'}`), gear: red.gear.inside });
@@ -734,7 +734,7 @@ try {
     await waitFor(`document.documentElement.dataset.vc === 'regular'`, 6000); await sleep(400);
     const tall = await evalJs(barState(false)), tallMarks = await evalJs(marksJs), tallRows = await gearRows();
     check('④f a tall regular landscape (1000×900, every door fits): NOTHING yields — every global door and ⚙ drawn inside the bar, no mark, no row',
-      tall.global.every((d) => !d.absent && d.inside) && tall.gear.inside && tallMarks.marks.length === 0 && !tallMarks.attr && tallRows.length === 0, { global: tall.global.map((d) => `${d.id}:${d.inside ? 'in' : 'OUT'}`), tallMarks, tallRows });
+      gateOf(tall.global.every((d) => !d.absent && d.inside)) && gateOf(tall.gear.inside) && tallMarks.marks.length === 0 && !tallMarks.attr && tallRows.length === 0, { global: tall.global.map((d) => `${d.id}:${d.inside ? 'in' : 'OUT'}`), tallMarks, tallRows });
     // ④g THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coordinator): (1) the TOP BAND — in the home-screen copy the
     // page's chrome stands in ONE fixed container, #main-wrapper at the very rectangle the release's flow gives it (both classes); the blur
     // itself is the simulator's to show; (2) the LAUNCH's GROUND — a theme that applies remembers its ground, and the page the server sends
@@ -754,7 +754,7 @@ try {
       tm.apply('dark'); const gd = gOf(), hd = await page();
       const wears = (html, g) => html.includes('<html lang="en" style="background:' + g + '">') && html.includes('background:' + g + ';color:');
       return { gl, gd, cookie: /vs_ground=/.test(cl), light: wears(hl, gl), dark: wears(hd, gd) }; })()`);
-    check(`④g a theme that applies remembers its ground, and the page the server sends wears it in <html> and the loading screen (light ${ground.gl}, then dark ${ground.gd})`, ground.cookie && ground.light && ground.dark && ground.gl !== ground.gd, ground);
+    check(`④g a theme that applies remembers its ground, and the page the server sends wears it in <html> and the loading screen (light ${ground.gl}, then dark ${ground.gd})`, gateOf(ground.cookie) && gateOf(ground.light) && gateOf(ground.dark) && ground.gl !== ground.gd, ground);
     // THE LAUNCH IMAGE (B-78db (B), 主开发 r4481): the page a real server sends holds the startup links in the ground it wears; one of them
     // answers a PNG through the sign-in; a size off the list is a 404 (the simulator alone can say whether the system takes it)
     const shot = await evalJs(`(async () => { const html = await (await fetch('/', { credentials: 'same-origin', cache: 'no-store' })).text(), g = getComputedStyle(document.documentElement).getPropertyValue('--bg-root').trim();
@@ -763,7 +763,7 @@ try {
       const bad = await fetch('/launch-image/1399x2034.png', { credentials: 'same-origin' });
       return { n: hrefs.length, g, inG: hrefs.every((h) => h.endsWith('?g=' + encodeURIComponent(g))), duo, status: r ? r.status : 0, type: r ? r.headers.get('content-type') : '', sig: [...b.slice(0, 8)].join(','), bytes: b.length, off: bad.status }; })()`);
     check(`④g the page a real server sends holds ${shot.n} launch links in the ground it wears (${shot.g}); the Duo's answers a PNG (${shot.bytes} bytes, ${shot.type}) through the sign-in; a size off the list is a ${shot.off}`,
-      shot.n === 26 && shot.inG && shot.status === 200 && /^image\/png/.test(shot.type) && shot.sig === '137,80,78,71,13,10,26,10' && shot.off === 404, shot);
+      shot.n === 26 && gateOf(shot.inG) && shot.status === 200 && gateOf(/^image\/png/.test(shot.type)) && shot.sig === '137,80,78,71,13,10,26,10' && shot.off === 404, shot);
     // ④h THE SYSTEM's COLUMN ON THE LEFT (主开发 r4481 — the owner's simulator: the outer display held landscape reads 678×445, the insets
     // left 84 · bottom 34, the regular class; the column stood EMPTY beside our bar on the right, the conversation 538 of 678). THE LAW:
     // wherever the system reserves a side column our global doors live INSIDE it. Insets PLACED; the list hidden, then shown.
@@ -778,15 +778,15 @@ try {
     await evalJs(`(app.sidebar.setListHidden(true), 1)`); await sleep(300);
     const lh = await evalJs(LEFT);
     check(`④h 678×445, the column on the LEFT, the list hidden: the bar IN the column (x ${lh.left}, ${lh.width} wide) — global things only, in order, from the top, above the bottom inset; the conversation ${lh.main[0]}–${lh.main[1]} with ☰ at its head (${lh.toggle}); nothing of ours on the right`,
-      inLeft(lh) && lh.hidden && !lh.list && lh.main[0] === 84 && lh.toggle === 84, lh);
+      gateOf(inLeft(lh)) && gateOf(lh.hidden) && !lh.list && lh.main[0] === 84 && lh.toggle === 84, lh);
     await evalJs(`(app.sidebar.setListHidden(false), 1)`); await sleep(300);
     const ls = await evalJs(LEFT);
     check(`④h the list shown: the list column after the column (${ls.list ? ls.list.join('–') : 'none'}), the conversation from ${ls.main[0]}, ☰ at ${ls.toggle}`,
-      inLeft(ls) && !ls.hidden && !!ls.list && ls.list[0] === 84 && ls.main[0] === 84 + 321 && ls.toggle === 84 + 321, ls);
+      gateOf(inLeft(ls)) && !ls.hidden && !!ls.list && ls.list[0] === 84 && ls.main[0] === 84 + 321 && ls.toggle === 84 + 321, ls);
     // a long press says the door's name beside it — on the conversation's side, inside the screen
     const tipAt = await evalJs(`(() => { const g = document.getElementById('mobile-nav-gear'), r = g.getBoundingClientRect(); g.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
       const t = document.querySelector('.mnav-tip'); if (!t) return null; const b = t.getBoundingClientRect(), out = { shown: getComputedStyle(t).display !== 'none', left: Math.round(b.left), right: Math.round(b.right), btn: Math.round(r.right), w: innerWidth, was: Math.round(r.left - t.offsetWidth - 8) }; t.style.display = 'none'; return out; })()`);
-    check('④h a long press on ⚙ in the left column: its tip stands right of the button (the conversation\'s side, as the column on the right mirrors), inside the screen', !!tipAt && tipAt.shown && tipAt.left >= tipAt.btn && tipAt.right <= tipAt.w, tipAt);
+    check('④h a long press on ⚙ in the left column: its tip stands right of the button (the conversation\'s side, as the column on the right mirrors), inside the screen', !!tipAt && gateOf(tipAt.shown) && tipAt.left >= tipAt.btn && tipAt.right <= tipAt.w, tipAt);
     check('④h RED CONTROL: effa5382a\'s tip (left of every vertical bar) would stand off the screen there', !!tipAt && tipAt.was < 0, tipAt);
     // RED CONTROL: the release's verdict — no column on the left (sideColumnOf said null for left 84) — in the same frame
     await evalJs(`(app.sidebar.setListHidden(true), delete document.documentElement.dataset.sidecol, 1)`); await sleep(300);
@@ -832,26 +832,26 @@ try {
     const SHOWN = `(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const el = w && w.element; const r = el && el.getBoundingClientRect(); const sb = document.getElementById('sidebar'); const sr = sb.getBoundingClientRect();
       return { desk: app.desktopManager.activeDesktopId, type: w ? w.type : null, onDesk: w ? w._desktopId : null, visible: !!el && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none', l: r ? Math.round(r.left) : null, w: r ? Math.round(r.width) : null, list: getComputedStyle(sb).display !== 'none' ? { l: Math.round(sr.left), w: Math.round(sr.width) } : null, badge: document.querySelector('#mobile-nav-desktops .mnav-badge')?.textContent || '' }; })()`;
     const d0 = await evalJs(DOOR);
-    check('⑧ 951: the trailing bar\'s bottom section starts with Desktops (after the gap, before Task Groups), 44 × 44, badge «1», «(1/2)» in its label', !!d0 && d0.shown && d0.w === 44 && d0.h === 44 && d0.l >= d0.barL && d0.t > d0.gapT && d0.t < d0.tasksT && d0.badge === '1' && /\(1\/2\)/.test(d0.label || ''), d0);
+    check('⑧ 951: the trailing bar\'s bottom section starts with Desktops (after the gap, before Task Groups), 44 × 44, badge «1», «(1/2)» in its label', !!d0 && gateOf(d0.shown) && d0.w === 44 && d0.h === 44 && d0.l >= d0.barL && d0.t > d0.gapT && d0.t < d0.tasksT && d0.badge === '1' && verdictOf(/\(1\/2\)/.test(d0.label || '')), d0);
     await pressDesktops();
     const m0 = await evalJs(MENU);
     check('⑧ …a tap: a menu INTO the conversation column (left of the bar) — every desktop by name with its window count, the active one marked, then «New desktop»; 44 px rows',
-      !!m0 && m0.right <= d0.barL && m0.rows.length === 3 && m0.rows[0].active && /\b2 windows/.test(m0.rows[0].count) && m0.rows[1].name === 'Desk B' && !m0.rows[1].active && /^1 window$/.test(m0.rows[1].count) && /New desktop/.test(m0.rows[2].name) && !m0.rows[2].id && m0.rows.every((r) => r.h >= 44), m0);
+      !!m0 && m0.right <= d0.barL && m0.rows.length === 3 && gateOf(m0.rows[0].active) && gateOf(/\b2 windows/.test(m0.rows[0].count)) && m0.rows[1].name === 'Desk B' && !m0.rows[1].active && gateOf(/^1 window$/.test(m0.rows[1].count)) && gateOf(/New desktop/.test(m0.rows[2].name)) && !m0.rows[2].id && verdictOf(m0.rows.every((r) => r.h >= 44)), m0);
     const g0 = await evalJs(GEOM);
-    check('⑧ …and WHERE it stands: inside the viewport AND over the conversation column (≤ 480 px, right of the list, left of the bar); every row\'s name visible on screen', inside(g0, { col: true }), g0);
+    check('⑧ …and WHERE it stands: inside the viewport AND over the conversation column (≤ 480 px, right of the list, left of the bar); every row\'s name visible on screen', verdictOf(inside(g0, { col: true })), g0);
     // The explorer opens at the hub's HOME and titles its window with that folder, cut from the front past 40 characters
     // (src/lib/file-explorer.js: wm.setTitle(…, frontTruncate(data.path))). Since the boot helper (aa4b7c7d9) this suite's HOME
     // lives in its minted root (<root>/home), so the row reads THAT folder — the hosted run read «/tmp/vs-duo-layout-wt-h…/home»;
     // the leg compares with the suite's own HOME (or the tilde form), never with an old scratch home's spelling.
     const homeTitled = (s) => { const x = String(s || ''); return x === '~' || x === fakeHome || (x.startsWith('…') && x.length > 1 && fakeHome.endsWith(x.slice(1))); };
     check('⑧ …the title rule reads THIS suite\'s HOME: the HOME and its front-cut form pass; the old scratch home\'s spelling, another folder of the root and the window\'s first title do not',
-      homeTitled(fakeHome) && homeTitled('…' + fakeHome.slice(-39)) && !homeTitled('/tmp/vs-duo-layout-home-abc123') && !homeTitled(path.join(root, 'stub')) && !homeTitled('File Explorer'));
-    check('⑧ …each row\'s window titles under its name, greyed (the two conversations; the explorer, at the suite\'s HOME)', /^Session \d.* · Session \d/.test(m0.rows[0].titles) && homeTitled(m0.rows[1].titles), { titles: m0.rows.map((r) => r.titles), home: fakeHome });
+      gateOf(homeTitled(fakeHome)) && gateOf(homeTitled('…' + fakeHome.slice(-39))) && !homeTitled('/tmp/vs-duo-layout-home-abc123') && !homeTitled(path.join(root, 'stub')) && !homeTitled('File Explorer'));
+    check('⑧ …each row\'s window titles under its name, greyed (the two conversations; the explorer, at the suite\'s HOME)', gateOf(/^Session \d.* · Session \d/.test(m0.rows[0].titles)) && verdictOf(homeTitled(m0.rows[1].titles)), { titles: m0.rows.map((r) => r.titles), home: fakeHome });
     { // a long press on a row = the desktop's doors — THE table's (lane desktop-doors-table; was Rename · Delete, no order)
       await holdRow(deskB);
       const dd = await evalJs(DESK_DOORS);
       check(`⑧ …a long press on a row: the desktop's doors, the sheet gives way — Desk B is the last: Move down greyed WITH its why (${dd && dd.items.map((x) => x.label + (x.off ? ' [' + x.why + ']' : '')).join(' · ')})`,
-        !!dd && !dd.sheet && JSON.stringify(dd.items.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && dd.items[3].off && dd.items[3].why === 'Already the last desktop' && dd.items[3].whyIn && dd.items.slice(0, 3).every((x) => !x.off) && dd.inside, dd);
+        !!dd && !dd.sheet && JSON.stringify(dd.items.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && gateOf(dd.items[3].off) && dd.items[3].why === 'Already the last desktop' && gateOf(dd.items[3].whyIn) && gateOf(dd.items.slice(0, 3).every((x) => !x.off)) && verdictOf(dd.inside), dd);
       await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
       await pressDesktops();
     }
@@ -859,7 +859,7 @@ try {
     await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(deskB)}`, 6000); await sleep(500);
     const s1 = await evalJs(SHOWN);
     await shot('desktops-door-951.png');
-    check('⑧ …a tap on «Desk B»: that desktop is on show — its window (the explorer) fills the conversation column, the list column stays, the badge says 2', s1.desk === deskB && s1.type === 'files' && s1.onDesk === deskB && s1.visible && s1.l === 321 && !!s1.list && s1.list.l === 0 && s1.list.w === 320 && s1.badge === '2', s1);
+    check('⑧ …a tap on «Desk B»: that desktop is on show — its window (the explorer) fills the conversation column, the list column stays, the badge says 2', s1.desk === deskB && s1.type === 'files' && s1.onDesk === deskB && gateOf(s1.visible) && s1.l === 321 && !!s1.list && s1.list.l === 0 && s1.list.w === 320 && s1.badge === '2', s1);
     // the conversation's head (in landscape the window's own title bar) = the window switcher with its desktop tabs (主开发: the regular class gets the compact class's door too)
     await sleep(1100); // the manager's switch guard
     const head = await evalJs(`(() => { const t = document.querySelector('.window.window-active > .window-titlebar'); const b = t.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
@@ -869,38 +869,38 @@ try {
     await tap('.mobile-win-switcher .mobile-desk-tab');
     await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(desk1)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(desk1)}`, 6000);
     const s2 = await evalJs(SHOWN);
-    check('⑧ …its first tab: back on the first desktop, a conversation of it on show', s2.desk === desk1 && s2.type === 'chat' && s2.visible && s2.l === 321, s2);
+    check('⑧ …its first tab: back on the first desktop, a conversation of it on show', s2.desk === desk1 && s2.type === 'chat' && gateOf(s2.visible) && s2.l === 321, s2);
     await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); 1`); await sleep(1100);
     // the list column's ☰ in landscape (the owner 2026-10-25, 与原文不同 — SPEC-v3 §4 had it static there)
     const LT = `(() => { const b = document.getElementById('list-column-toggle'); const r = b && b.getBoundingClientRect(); const sb = document.getElementById('sidebar'); const w = document.querySelector('.window.window-active'); const wr = w && w.getBoundingClientRect();
       return { btn: b && getComputedStyle(b).display !== 'none' ? { l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width) } : null, hidden: document.documentElement.classList.contains('vs-list-hidden'), list: getComputedStyle(sb).display !== 'none' && sb.getBoundingClientRect().width > 0, win: wr ? { l: Math.round(wr.left), w: Math.round(wr.width) } : null }; })()`;
     const l0 = await evalJs(LT);
-    check('⑧ landscape: the list column\'s ☰ at the conversation\'s head (its left edge), the list shown by default', !!l0.btn && l0.btn.l === 321 && l0.btn.t === 0 && l0.btn.w === 44 && !l0.hidden && l0.list, l0);
+    check('⑧ landscape: the list column\'s ☰ at the conversation\'s head (its left edge), the list shown by default', !!l0.btn && l0.btn.l === 321 && l0.btn.t === 0 && l0.btn.w === 44 && !l0.hidden && verdictOf(l0.list), l0);
     await tap('#list-column-toggle'); await sleep(300);
     const l1 = await evalJs(LT);
-    check('⑧ ☰: the list column is gone, the conversation takes 0–895 (951 − the 56 px bar), the ☰ at its new left', l1.hidden && !l1.list && !!l1.win && l1.win.l === 0 && l1.win.w === 895 && !!l1.btn && l1.btn.l === 0, l1);
+    check('⑧ ☰: the list column is gone, the conversation takes 0–895 (951 − the 56 px bar), the ☰ at its new left', gateOf(l1.hidden) && !l1.list && !!l1.win && l1.win.l === 0 && l1.win.w === 895 && !!l1.btn && l1.btn.l === 0, l1);
     await load(); await waitFor(`!!document.querySelector('.window.window-active')`, 10000); await sleep(400);
     const l2 = await evalJs(LT);
-    check('⑧ …a reload keeps this tab\'s choice (the list stays hidden, the conversation wide)', l2.hidden && !l2.list && (!l2.win || l2.win.l === 0), l2);
+    check('⑧ …a reload keeps this tab\'s choice (the list stays hidden, the conversation wide)', gateOf(l2.hidden) && !l2.list && (!l2.win || l2.win.l === 0), l2);
     await tap('#list-column-toggle'); await sleep(300);
     const l3 = await evalJs(LT);
-    check('⑧ ☰ again: the list column is back (0–320), the conversation 321–895', !l3.hidden && l3.list && (!l3.win || (l3.win.l === 321 && l3.win.w === 574)), l3);
+    check('⑧ ☰ again: the list column is back (0–320), the conversation 321–895', !l3.hidden && gateOf(l3.list) && (!l3.win || (l3.win.l === 321 && l3.win.w === 574)), l3);
     // the cover (compact): the same door on the top bar, the phone's sheet
     await device(382, 580); await settle(382);
     const c0 = await evalJs(`(() => { const b = document.getElementById('mobile-nav-desktops'); const r = b.getBoundingClientRect(); const nav = document.getElementById('mobile-nav').getBoundingClientRect(); const m = document.getElementById('mobile-nav-overflow'), mr = m && m.getBoundingClientRect(); return { shown: getComputedStyle(b).display !== 'none' && r.width >= 36 && r.height >= 36, inNav: r.top >= nav.top - 0.5 && r.bottom <= nav.bottom + 0.5 && r.right <= 382, folded: b.classList.contains('bar-folded'), more: !!mr && mr.width >= 44 && mr.top >= nav.top - 0.5 && mr.right <= 382, badge: b.querySelector('.mnav-badge')?.textContent || '', toggle: getComputedStyle(document.getElementById('list-column-toggle')).display }; })()`);
-    check('⑧ 382 (the cover, compact): the Desktops door on the top bar (≥ 36 px) — or, while the title needs the room, in its «⋯» (lane phone-titlebar-title) — badge «1»; the regular class\'s list ☰ not there', ((c0.shown && c0.inNav) || (c0.folded && c0.more)) && c0.badge === '1' && c0.toggle === 'none', c0);
+    check('⑧ 382 (the cover, compact): the Desktops door on the top bar (≥ 36 px) — or, while the title needs the room, in its «⋯» (lane phone-titlebar-title) — badge «1»; the regular class\'s list ☰ not there', ((gateOf(c0.shown) && gateOf(c0.inNav)) || (gateOf(c0.folded) && gateOf(c0.more))) && c0.badge === '1' && c0.toggle === 'none', c0);
     await pressDesktops();
     const m1 = await evalJs(MENU), g1 = await evalJs(GEOM);
-    check('⑧ 382: the sheet inside the viewport, every row\'s name visible', inside(g1), g1);
-    check('⑧ …a tap: the phone\'s sheet under the bar lists both desktops with their counts + «New desktop»', !!m1 && m1.rows.length === 3 && m1.rows[0].active && m1.rows[1].name === 'Desk B' && /^1 window$/.test(m1.rows[1].count) && m1.left <= 10 && m1.right >= 372, m1);
-    check('⑧ …Desk B\'s explorer is in its held record only (this page booted on the first desktop): its row says so', /1 not opened on this screen yet/.test(m1.rows[1].titles), m1.rows[1]);
+    check('⑧ 382: the sheet inside the viewport, every row\'s name visible', verdictOf(inside(g1)), g1);
+    check('⑧ …a tap: the phone\'s sheet under the bar lists both desktops with their counts + «New desktop»', !!m1 && m1.rows.length === 3 && gateOf(m1.rows[0].active) && m1.rows[1].name === 'Desk B' && gateOf(/^1 window$/.test(m1.rows[1].count)) && m1.left <= 10 && m1.right >= 372, m1);
+    check('⑧ …Desk B\'s explorer is in its held record only (this page booted on the first desktop): its row says so', verdictOf(/1 not opened on this screen yet/.test(m1.rows[1].titles)), m1.rows[1]);
     await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]`);
     await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(deskB)}`, 8000); await sleep(500);
     const s3 = await evalJs(SHOWN);
     await shot('desktops-door-382.png');
-    check('⑧ …a tap on «Desk B»: the phone shows that desktop\'s window (the explorer — never built on this page before: the lazy replay), filling the screen, badge 2', s3.desk === deskB && s3.type === 'files' && s3.visible && s3.l === 0 && s3.w >= 380 && s3.badge === '2', s3);
+    check('⑧ …a tap on «Desk B»: the phone shows that desktop\'s window (the explorer — never built on this page before: the lazy replay), filling the screen, badge 2', s3.desk === deskB && s3.type === 'files' && gateOf(s3.visible) && s3.l === 0 && s3.w >= 380 && s3.badge === '2', s3);
     const noted = await evalJs(`(() => { const m = JSON.parse(sessionStorage.getItem('vibespace.phoneShown') || '{}'); return Object.entries(m).map(([d, w]) => ({ d, w, wd: (app.wm.windows.get(w) || {})._desktopId || null })); })()`);
-    check('⑧ …§6b guard 10: every desktop\'s noted window on show is a window OF that desktop (the switch\'s in-between noted none)', noted.length >= 1 && noted.every((x) => !x.wd || x.wd === x.d) && noted.some((x) => x.d === deskB), noted);
+    check('⑧ …§6b guard 10: every desktop\'s noted window on show is a window OF that desktop (the switch\'s in-between noted none)', noted.length >= 1 && gateOf(noted.every((x) => !x.wd || x.wd === x.d)) && verdictOf(noted.some((x) => x.d === deskB)), noted);
     await sleep(1100);
     await evalJs(`(async () => { await app.desktopManager.switchTo(${JSON.stringify(desk1)}); return 1; })()`); await sleep(1300);
     await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
@@ -908,7 +908,7 @@ try {
     await pressDesktops();
     const g2 = await evalJs(GEOM), nav2 = await evalJs(`Math.round(document.getElementById('mobile-nav').getBoundingClientRect().bottom)`);
     await shot('desktops-door-669.png');
-    check('⑧ 669 (the inner portrait): the menu under the bar lying over the conversation, inside the conversation column, every row\'s name visible', inside(g2, { col: true }) && g2.t >= nav2, { g2, nav2 });
+    check('⑧ 669 (the inner portrait): the menu under the bar lying over the conversation, inside the conversation column, every row\'s name visible', gateOf(inside(g2, { col: true })) && g2.t >= nav2, { g2, nav2 });
     await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
     // 375×812, a phone (lane desktop-doors-table): the desktop's doors from the sheet — THE table's, and a phone reorders
     await device(375, 812); await settle(375);
@@ -918,11 +918,11 @@ try {
     const said = (dd) => (dd ? dd.items.map((x) => x.label + (x.off ? ' [' + x.why + ']' : '')).join(' · ') : 'no menu');
     const four = (dd) => !!dd && JSON.stringify(dd.items.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && dd.inside && dd.items.every((x) => x.h >= 44);
     const mid = await doorsOf(deskB, 'desktop-doors-375-middle.png');
-    check(`⑧ 375 (a phone): a middle desktop's long press — the four doors, every one open, 44 px rows inside the viewport (${said(mid)})`, four(mid) && mid.items.every((x) => !x.off), mid);
+    check(`⑧ 375 (a phone): a middle desktop's long press — the four doors, every one open, 44 px rows inside the viewport (${said(mid)})`, gateOf(four(mid)) && verdictOf(mid.items.every((x) => !x.off)), mid);
     const fst = await doorsOf(desk1, 'desktop-doors-375-first.png');
-    check(`⑧ 375: the first desktop — Move up greyed WITH its why on the row (never greyed with no words) (${said(fst)})`, four(fst) && fst.items[2].off && fst.items[2].why === 'Already the first desktop' && fst.items[2].whyIn && [0, 1, 3].every((k) => !fst.items[k].off), fst);
+    check(`⑧ 375: the first desktop — Move up greyed WITH its why on the row (never greyed with no words) (${said(fst)})`, gateOf(four(fst)) && gateOf(fst.items[2].off) && fst.items[2].why === 'Already the first desktop' && gateOf(fst.items[2].whyIn) && verdictOf([0, 1, 3].every((k) => !fst.items[k].off)), fst);
     const lst = await doorsOf(deskC, 'desktop-doors-375-last.png');
-    check(`⑧ 375: the last desktop — Move down greyed WITH its why (${said(lst)})`, four(lst) && lst.items[3].off && lst.items[3].why === 'Already the last desktop' && lst.items[3].whyIn && [0, 1, 2].every((k) => !lst.items[k].off), lst);
+    check(`⑧ 375: the last desktop — Move down greyed WITH its why (${said(lst)})`, gateOf(four(lst)) && gateOf(lst.items[3].off) && lst.items[3].why === 'Already the last desktop' && gateOf(lst.items[3].whyIn) && verdictOf([0, 1, 2].every((k) => !lst.items[k].off)), lst);
     const up = lst && lst.items[2];
     if (up) await tapAt(up.x, up.y);
     await waitFor(`JSON.stringify(${ORDER}) === ${JSON.stringify(JSON.stringify([desk1, deskC, deskB]))} && !!document.querySelector('.mdesk-menu')`, 4000); await sleep(400);
@@ -944,11 +944,11 @@ try {
     const fl = await evalJs(`[...document.querySelectorAll('.mdesk-menu .context-menu-item[data-desktop-id]')].map((r) => ({ id: r.dataset.desktopId, gone: r.classList.contains('mdesk-gone'), sub: (r.querySelector('.mdesk-titles') || {}).textContent || '', title: r.title, op: +getComputedStyle(r).opacity }))`);
     await shot('desktop-doors-375-gone.png');
     const gC = (fl || []).find((x) => x.id === deskC);
-    check(`⑧ 375 (r2 ①): the sheet OPEN, Desk C deleted on ANOTHER client — the sheet redraws: Desk C kept at its place, greyed WITH «“Desk C” is no longer there» (${JSON.stringify(fl)})`, goneIn && !!gC && gC.gone && gC.sub === '“Desk C” is no longer there' && gC.title === gC.sub && gC.op < 1 && JSON.stringify(fl.map((x) => x.id)) === JSON.stringify([desk1, deskB, deskC]) && fl.filter((x) => x.id !== deskC).every((x) => !x.gone), fl);
+    check(`⑧ 375 (r2 ①): the sheet OPEN, Desk C deleted on ANOTHER client — the sheet redraws: Desk C kept at its place, greyed WITH «“Desk C” is no longer there» (${JSON.stringify(fl)})`, gateOf(goneIn) && !!gC && gateOf(gC.gone) && gC.sub === '“Desk C” is no longer there' && gC.title === gC.sub && gC.op < 1 && JSON.stringify(fl.map((x) => x.id)) === JSON.stringify([desk1, deskB, deskC]) && verdictOf(fl.filter((x) => x.id !== deskC).every((x) => !x.gone)), fl);
     await holdRow(deskC);
     const gd = await evalJs(DESK_DOORS);
     await shot('desktop-doors-375-gone-doors.png');
-    check(`⑧ 375 (r2 ①): …its long press opens ITS DOORS, every one greyed with the why that names it (${said(gd)})`, four(gd) && gd.items.every((x) => x.off && x.why === '“Desk C” is no longer there' && x.whyIn), gd);
+    check(`⑧ 375 (r2 ①): …its long press opens ITS DOORS, every one greyed with the why that names it (${said(gd)})`, gateOf(four(gd)) && verdictOf(gd.items.every((x) => x.off && x.why === '“Desk C” is no longer there' && x.whyIn)), gd);
     await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await sleep(300);
     // r3 ① THE LISTENER LIFECYCLE (主开发's major on 25151f0b): the window switcher opened and closed five times — by each of
     // its closers — and the sheet five times — by each of its dismissals — with NO remote change; then the page's own
@@ -978,8 +978,8 @@ try {
     const v2 = await vsCount();
     const leak = { before: v0, switcher: v1 - v0, sheet: v2 - v1, swRuns, shRuns };
     if ((await evalJs('app.wm.activeWindowId')) !== winBefore) { await evalJs(`(app.wm.revealWindow(${JSON.stringify(winBefore)}), 1)`); await sleep(800); }
-    check(`⑧ 375 (r3 ①): the window switcher opened and closed 5× — its title again, an outside tap, a window's row — each open holding ONE vs-desktops listener; after the closes the page holds ${leak.switcher} more (25151f0b: one per closed switcher, each with its detached list)`, swRuns.every((x) => x.opened && x.closed && x.live === 1) && leak.switcher === 0, leak);
-    check(`⑧ 375 (r3 ①): …the sheet opened and dismissed 5× — an outside tap, Esc, a row's tap, its button again — each open holding ONE; after them ${leak.sheet} more (25151f0b: the last dismissed sheet's)`, shRuns.every((x) => x.opened && x.closed && x.live === 1) && leak.sheet === 0, leak);
+    check(`⑧ 375 (r3 ①): the window switcher opened and closed 5× — its title again, an outside tap, a window's row — each open holding ONE vs-desktops listener; after the closes the page holds ${leak.switcher} more (25151f0b: one per closed switcher, each with its detached list)`, gateOf(swRuns.every((x) => x.opened && x.closed && x.live === 1)) && leak.switcher === 0, leak);
+    check(`⑧ 375 (r3 ①): …the sheet opened and dismissed 5× — an outside tap, Esc, a row's tap, its button again — each open holding ONE; after them ${leak.sheet} more (25151f0b: the last dismissed sheet's)`, gateOf(shRuns.every((x) => x.opened && x.closed && x.live === 1)) && leak.sheet === 0, leak);
   }
   console.log('⑨ the ⧉ window list\'s «Other desktops» group (1280×800, a mouse) + THE DOOR CENSUS (every phone-chrome control that opens desktop rows)');
   {
@@ -988,13 +988,13 @@ try {
     await evalJs(`document.getElementById('taskbar-status').click(), 1`); await sleep(400);
     const LIST = `(() => { const p = document.querySelector('.overlap-switcher'); if (!p) return null; return { mine: [...p.querySelectorAll('.overlap-switcher-item:not(.overlap-switcher-group):not(.overlap-switcher-other)')].length, head: p.querySelector('.overlap-switcher-group')?.textContent || null, others: [...p.querySelectorAll('.overlap-switcher-other')].map((r) => ({ win: r.dataset.winId, desk: r.dataset.desktopId, text: r.textContent })) }; })()`;
     const w0 = await evalJs(LIST);
-    check('⑨ the ⧉ list: the active desktop\'s windows (its filter stays the view), then a FOLDED «Other desktops (1)»', !!w0 && w0.mine === 2 && /Other desktops \(1\)/.test(w0.head || '') && w0.others.length === 0, w0);
+    check('⑨ the ⧉ list: the active desktop\'s windows (its filter stays the view), then a FOLDED «Other desktops (1)»', !!w0 && w0.mine === 2 && gateOf(/Other desktops \(1\)/.test(w0.head || '')) && w0.others.length === 0, w0);
     await evalJs(`document.querySelector('.overlap-switcher-group').click(); 1`); await sleep(200);
     const w1 = await evalJs(LIST);
-    check('⑨ …unfolded: «<title> · Desk B» (the explorer the record holds — this page never built it)', !!w1 && w1.others.length === 1 && w1.others[0].desk === deskB && / · Desk B$/.test(w1.others[0].text), w1);
+    check('⑨ …unfolded: «<title> · Desk B» (the explorer the record holds — this page never built it)', !!w1 && w1.others.length === 1 && w1.others[0].desk === deskB && verdictOf(/ · Desk B$/.test(w1.others[0].text)), w1);
     await evalJs(`document.querySelector('.overlap-switcher-other').click(); 1`);
     const went = await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {}).type === 'files'`, 8000);
-    check('⑨ …a press: Desk B on show AND its explorer raised (built by the switch\'s replay, then revealed)', went, await evalJs(`({ desk: app.desktopManager.activeDesktopId, type: (app.wm.windows.get(app.wm.activeWindowId) || {}).type || null })`));
+    check('⑨ …a press: Desk B on show AND its explorer raised (built by the switch\'s replay, then revealed)', verdictOf(went), await evalJs(`({ desk: app.desktopManager.activeDesktopId, type: (app.wm.windows.get(app.wm.activeWindowId) || {}).type || null })`));
     await sleep(1100);
     await evalJs(`(async () => { await app.desktopManager.switchTo(app.desktopManager.desktops[0].id); return 1; })()`); await sleep(1300);
   }
@@ -1024,10 +1024,10 @@ try {
   {
     await device(951, 585); await load(); await attachBoth();
     const c951 = await doorCensus();
-    check('⑨ THE DOOR CENSUS at 951 (touch, the regular class): no taskbar — and the doors are the bar\'s Desktops + the conversation\'s head', !c951.taskbar && c951.doors.includes('mobile-nav-desktops') && c951.doors.includes('window-titlebar'), c951);
+    check('⑨ THE DOOR CENSUS at 951 (touch, the regular class): no taskbar — and the doors are the bar\'s Desktops + the conversation\'s head', !c951.taskbar && gateOf(c951.doors.includes('mobile-nav-desktops')) && verdictOf(c951.doors.includes('window-titlebar')), c951);
     await device(382, 580); await settle(382);
     const c382 = await doorCensus();
-    check('⑨ …at 382 (the compact class): the top bar\'s Desktops (standing, or its «⋯» while the title needs the room — lane phone-titlebar-title) + its title', !c382.taskbar && (c382.doors.includes('mobile-nav-desktops') || c382.doors.includes('mobile-nav-overflow')) && c382.doors.includes('mobile-nav-title'), c382);
+    check('⑨ …at 382 (the compact class): the top bar\'s Desktops (standing, or its «⋯» while the title needs the room — lane phone-titlebar-title) + its title', !c382.taskbar && (gateOf(c382.doors.includes('mobile-nav-desktops')) || gateOf(c382.doors.includes('mobile-nav-overflow'))) && verdictOf(c382.doors.includes('mobile-nav-title')), c382);
     mutantOn = 'door';
     await device(951, 585); await load(); await attachBoth();
     const red = await doorCensus();
@@ -1061,7 +1061,7 @@ try {
     const seam = await evalJs(`(() => { const bad = []; const TAP = 'button, a, input, textarea, select, [role="button"], .session-item-card, .chat-msg, .window-titlebar, .sidebar-tab'; for (let x = 442; x <= 508; x += 6) for (let y = 4; y < innerHeight; y += 18) { const e = document.elementFromPoint(x, y); const t = e && e.closest(TAP); if (t) bad.push(x + ',' + y + ' ' + (t.id || t.className || t.tagName)); } return bad.slice(0, 6); })()`);
     check('⑦ book: nothing tappable in 441–509 (the seam + 24 px on each side)', seam.length === 0, seam);
     const dbk = await evalJs(DRAFT_JS);
-    check('⑦ book: the draft is the same box with the same words', dbk.same && dbk.value === DRAFT, dbk);
+    check('⑦ book: the draft is the same box with the same words', gateOf(dbk.same) && dbk.value === DRAFT, dbk);
     await metrics(951, 585, null); await sleep(100);
     const stillBook = await fold();
     await sleep(500);
@@ -1092,7 +1092,7 @@ try {
     await device(382, 580, { mouse: true }); await settle(382, { frozen: true });
     const sig = await evalJs(SIGNATURE), rail = await evalJs(RAIL);
     await shot('red-cover-382x580.png');
-    check('RED CONTROL: the cover after a fold keeps the desktop rail on screen (B-f5ec reproduced)', rail.rail, rail);
+    check('RED CONTROL: the cover after a fold keeps the desktop rail on screen (B-f5ec reproduced)', verdictOf(rail.rail), rail);
     check('RED CONTROL: …and its chrome is not a fresh load\'s', diff(fresh.m382, sig).length > 0, sig);
     await device(951, 585, { mouse: true }); await sleep(900);
     await device(669, 867, { mouse: true }); await settle(669, { frozen: true });
@@ -1101,7 +1101,7 @@ try {
     check('RED CONTROL: the inner portrait after a fold covers the transcript\'s left edge (B-1d40 reproduced)', rows.bad.length > 0, rows);
     await device(951, 585); await load(); await attachOne();
     const f = await evalJs(FOCUS);
-    check('RED CONTROL: the base\'s rule focuses the composer on the touch Duo (the keyboard on load reproduced)', f.composer, f);
+    check('RED CONTROL: the base\'s rule focuses the composer on the touch Duo (the keyboard on load reproduced)', verdictOf(f.composer), f);
     const a = await evalJs(ARRANGE);
     check('RED CONTROL: the base\'s 951 Duo is the window manager — no list column, no trailing bar', !(a.list.l === 0 && a.list.w === 320 && a.dir === 'column'), a);
     await cdp('Emulation.setDevicePostureOverride', { posture: { type: 'folded' } });
@@ -1115,4 +1115,4 @@ try {
 }
 console.log(`  (shots: ${SHOTS})`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

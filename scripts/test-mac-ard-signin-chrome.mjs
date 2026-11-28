@@ -47,7 +47,7 @@ const NOVNC = path.join(REPO, 'public/novnc.js');
 const BASE_SHA = 'e2a303c61'; // 2.369.257: the vnc-view.js the owner's page ran (no AES fallback, no sign-in status)
 const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 for (const f of [BUNDLE, NOVNC]) if (!fs.existsSync(f)) { ok(false, `${path.relative(REPO, f)} exists (npm run build first)`); process.exit(1); }
 // the zh words the page shows (the dictionary is the truth — the suite never retypes a translation)
@@ -75,7 +75,7 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { clean
 
 const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
-ok(HELLO.test(bundleText), 'the bundle carries the hello-ack platform read (the Mac-shaped copy patches exactly that)');
+ok(verdictOf(HELLO.test(bundleText)), 'the bundle carries the hello-ack platform read (the Mac-shaped copy patches exactly that)');
 fs.mkdirSync(path.join(root, 'bundle-mac'), { recursive: true });
 fs.writeFileSync(path.join(root, 'bundle-mac', 'vibespace-agentd.js'), bundleText.replace(HELLO, (all, pre) => `${pre}platform: "darwin",`));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
@@ -193,7 +193,7 @@ const VIEW = path.join(REPO, 'src/lib/vnc-view.js');
 let baseView = null, baseWhy = null; // a shallow checkout lacks the object: the two base-page controls say so and skip
 try { baseView = execFileSync('git', ['-C', REPO, 'show', `${BASE_SHA}:src/lib/vnc-view.js`], { encoding: 'utf8', env: gitEnvFrom(process.env), stdio: ['ignore', 'pipe', 'pipe'] }); }
 catch (e) { baseWhy = String(e.stderr || e.message).trim().slice(0, 160); }
-if (baseView) ok(!/installSubtleFallback/.test(baseView) && /setStatus\(t\('Connecting…'\)\)/.test(baseView), `the control's vnc-view.js is ${BASE_SHA}'s (no AES fallback, "Connecting…" the last word before noVNC)`);
+if (baseView) ok(!/installSubtleFallback/.test(baseView) && verdictOf(/setStatus\(t\('Connecting…'\)\)/.test(baseView)), `the control's vnc-view.js is ${BASE_SHA}'s (no AES fallback, "Connecting…" the last word before noVNC)`);
 else console.log(`  ⚠ SKIP (§5 + §6 controls): cannot read ${BASE_SHA}:src/lib/vnc-view.js — ${baseWhy}`);
 const swapView = { name: 'base-view', setup(b) { b.onLoad({ filter: /vnc-view\.js$/ }, (a) => (a.path === VIEW ? { contents: baseView, loader: 'js', resolveDir: path.dirname(VIEW) } : undefined)); } };
 for (const [file, plugins] of [['page.js', []], ...(baseView ? [['page-base.js', [swapView]]] : [])]) await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, file), loader: { '.css': 'empty' }, logLevel: 'error', plugins });
@@ -286,15 +286,15 @@ const closeWins = (p) => p.ev(`(() => { for (const id of [...window.__wm.windows
 console.log(`§0 the page is on an INSECURE origin (http://${IP}:${PORT})`);
 const desk = await page(1100, 800, `http://${IP}:${PORT}/`);
 const ctx = await desk.ev('({ secure: window.isSecureContext, subtle: !!(window.crypto && window.crypto.subtle), origin: location.origin })');
-ok(ctx && ctx.secure === false && ctx.subtle === false, `window.isSecureContext === false and crypto.subtle is absent at ${ctx && ctx.origin} — the owner's http://<hostname>:3456 condition`, ctx);
+ok(gateOf(ctx) && ctx.secure === false && ctx.subtle === false, `window.isSecureContext === false and crypto.subtle is absent at ${ctx && ctx.origin} — the owner's http://<hostname>:3456 condition`, ctx);
 if (!ctx || ctx.secure !== false) { console.log('\n  (the legs below would prove nothing on a secure context — stopping)'); console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
 
 console.log('§1 Open its desktop closes the dialog it was pressed in AND the Apps dialog beneath; the sign-in is asked');
 {
   const r = await openAndAsk(desk);
-  ok(r.before[0] === 2 && r.before[1] && r.before[2], 'before: two dialogs — the Apps dialog and the machine\'s dialog over it', r.before);
-  ok(r.pressed && r.after[0] === 0 && !r.after[1] && !r.after[2] && r.after[3] === 1, `pressing ${Z('Open its desktop → Desktop')} closes BOTH dialogs and opens the machine's window`, r.after);
-  ok(r.asked && await desk.ev(`document.querySelectorAll('.dialog-overlay').length === 1 && !!document.querySelector('#machine-desktop-signin input[type=text]')`), 'the Mac asks its user name + password — the only dialog left on the page');
+  ok(r.before[0] === 2 && gateOf(r.before[1]) && verdictOf(r.before[2]), 'before: two dialogs — the Apps dialog and the machine\'s dialog over it', r.before);
+  ok(gateOf(r.pressed) && r.after[0] === 0 && !r.after[1] && !r.after[2] && r.after[3] === 1, `pressing ${Z('Open its desktop → Desktop')} closes BOTH dialogs and opens the machine's window`, r.after);
+  ok(gateOf(r.asked) && verdictOf(await desk.ev(`document.querySelectorAll('.dialog-overlay').length === 1 && !!document.querySelector('#machine-desktop-signin input[type=text]')`)), 'the Mac asks its user name + password — the only dialog left on the page');
   await desk.shot('signin.png');
 }
 
@@ -302,16 +302,16 @@ console.log('§2 name + password ⇒ 正在登录… ⇒ 已连接, the fixture\
 {
   const n0 = ard.seen.creds.length;
   ard.st.mode = 'accept';
-  ok(await desk.ev(typeSignIn(USER, PASS)), 'the sign-in form submitted');
+  ok(verdictOf(await desk.ev(typeSignIn(USER, PASS))), 'the sign-in form submitted');
   const connected = await desk.until(`${JSON.stringify(Z('Connected'))} === (${statusText})`, 15000);
   const words = await desk.ev('window.__st');
   const iSign = words.indexOf(Z('Signing in…')), iConn = words.lastIndexOf(Z('Connected'));
-  ok(connected && iSign >= 0 && iConn > iSign && !words.slice(iSign).includes(Z('Connecting…')), `the status said ${Z('Signing in…')} once the sign-in was handed over, then ${Z('Connected')} — never ${Z('Connecting…')} past the sign-in`, words);
+  ok(gateOf(connected) && iSign >= 0 && iConn > iSign && !words.slice(iSign).includes(Z('Connecting…')), `the status said ${Z('Signing in…')} once the sign-in was handed over, then ${Z('Connected')} — never ${Z('Connecting…')} past the sign-in`, words);
   const got = ard.seen.creds.slice(n0);
   ok(got.length === 1 && got[0].user === USER && got[0].pass === PASS, 'the Mac decrypted the AES block with the DH secret and read exactly the typed name + password', got);
-  ok(await desk.until(`(() => { const p = ${deskPixel}; return !!p && p[0] === ${FW} && p[2] === ${DESK[0]} && p[3] === ${DESK[1]} && p[4] === ${DESK[2]}; })()`, 10000), 'the Mac\'s frame is drawn (1280 px framebuffer, the desktop colour at 20,20)', await desk.ev(deskPixel));
+  ok(verdictOf(await desk.until(`(() => { const p = ${deskPixel}; return !!p && p[0] === ${FW} && p[2] === ${DESK[0]} && p[3] === ${DESK[1]} && p[4] === ${DESK[2]}; })()`, 10000)), 'the Mac\'s frame is drawn (1280 px framebuffer, the desktop colour at 20,20)', await desk.ev(deskPixel));
   const sub = await desk.ev(`(() => { const d = Object.getOwnPropertyDescriptor(window.crypto, 'subtle'); return { own: !!d, fns: d ? Object.keys(d.value).sort() : null, rejections: window.__rejections }; })()`);
-  ok(sub.own && JSON.stringify(sub.fns) === '["encrypt","importKey"]' && sub.rejections.length === 0, 'the page\'s crypto.subtle is the PURE AES (an own property: importKey + encrypt) and nothing rejected', sub);
+  ok(gateOf(sub.own) && JSON.stringify(sub.fns) === '["encrypt","importKey"]' && sub.rejections.length === 0, 'the page\'s crypto.subtle is the PURE AES (an own property: importKey + encrypt) and nothing rejected', sub);
   await desk.shot('connected.png', '.vs-win');
   await closeWins(desk);
 }
@@ -320,20 +320,20 @@ console.log('§3 a Mac that never answers the sign-in ⇒ the named status with 
 {
   ard.st.mode = 'silent';
   const r = await openAndAsk(desk, { holdGate: true });
-  ok(r.asked, 'the sign-in is asked again for the second window');
+  ok(verdictOf(r.asked), 'the sign-in is asked again for the second window');
   ok(r.held === 1 && r.armed === Z('Starting desktop…'), `its connect gate was held until the status record was ARMED — its first word in, ${Z('Starting desktop…')} (the loaded runner's order, every run)`, { held: r.held, armed: r.armed });
   const t0 = Date.now();
   await desk.ev(typeSignIn(USER, PASS));
-  ok(await desk.until(`${JSON.stringify(Z('Signing in…'))} === (${statusText})`, 5000), `${Z('Signing in…')} while the Mac is silent`, await desk.ev(statusText));
+  ok(verdictOf(await desk.until(`${JSON.stringify(Z('Signing in…'))} === (${statusText})`, 5000)), `${Z('Signing in…')} while the Mac is silent`, await desk.ev(statusText));
   const want = Z('The sign-in could not be completed: {why}', { why: Z('the machine did not answer in {n} s', { n: 20 }) });
   const named = await desk.until(`${JSON.stringify(want)} === (${statusText})`, 26000);
   const took = (Date.now() - t0) / 1000;
   const re = await desk.ev(`(() => { const b = [...document.querySelectorAll('.vs-win[data-type="machine-desktop"] .desktop-bar button')].find((x) => x.textContent === ${JSON.stringify(Z('Reconnect'))}); return !!b && getComputedStyle(b).display !== 'none'; })()`);
-  ok(named && took >= 19 && took < 24 && re, `"${want}" at ${took.toFixed(1)} s (bound 20 s), with ${Z('Reconnect')} shown`, { st: await desk.ev(statusText), took, re });
+  ok(gateOf(named) && took >= 19 && took < 24 && verdictOf(re), `"${want}" at ${took.toFixed(1)} s (bound 20 s), with ${Z('Reconnect')} shown`, { st: await desk.ev(statusText), took, re });
   await sleep(1500);
   const st3 = await desk.ev('window.__st'), iS3 = st3.indexOf(Z('Signing in…'));
-  ok(await desk.ev(`${JSON.stringify(want)} === (${statusText})`) && iS3 >= 0 && !st3.slice(iS3).includes(Z('Connecting…')), 'the words stay after the socket closes (no ladder re-asks the sign-in, never 连接中… again)', st3);
-  ok(st3[0] === Z('Starting desktop…') && st3.slice(1).includes(Z('Connecting…')), 'RED CONTROL (the old predicate): a record armed while the gate was out starts at 正在启动桌面…, and "everything after its first word" counts the gate\'s own 连接中… as a re-ask', st3);
+  ok(gateOf(await desk.ev(`${JSON.stringify(want)} === (${statusText})`)) && iS3 >= 0 && !st3.slice(iS3).includes(Z('Connecting…')), 'the words stay after the socket closes (no ladder re-asks the sign-in, never 连接中… again)', st3);
+  ok(st3[0] === Z('Starting desktop…') && verdictOf(st3.slice(1).includes(Z('Connecting…'))), 'RED CONTROL (the old predicate): a record armed while the gate was out starts at 正在启动桌面…, and "everything after its first word" counts the gate\'s own 连接中… as a re-ask', st3);
   await desk.shot('failed.png', '.vs-win');
   await closeWins(desk);
 }
@@ -351,7 +351,7 @@ console.log('§3b the armed moment, proven: the record\'s first look starved 400
   const bounded = await openAndAsk(desk, { holdGate: true, firstLookMs: 400 });
   if (!(await desk.until(`window.__st.includes(${JSON.stringify(Z('Connecting…'))})`, 10000))) ok(false, `harness: §3b: the record never said ${Z('Connecting…')} within 10 s of the gate's answer`);
   const stB = await desk.ev('window.__st'); await closeWins(desk);
-  ok(bounded.held === 1 && bounded.armed === Z('Starting desktop…') && stB[0] === Z('Starting desktop…') && stB.includes(Z('Connecting…')), `…the gate held until the record is armed: the same starved record begins at ${Z('Starting desktop…')}, then ${Z('Connecting…')}`, stB);
+  ok(bounded.held === 1 && bounded.armed === Z('Starting desktop…') && stB[0] === Z('Starting desktop…') && verdictOf(stB.includes(Z('Connecting…'))), `…the gate held until the record is armed: the same starved record begins at ${Z('Starting desktop…')}, then ${Z('Connecting…')}`, stB);
 }
 await desk.close();
 
@@ -362,10 +362,10 @@ console.log('§4 the phone (390 px): the same sign-in, connected');
   ok((await phone.ev('window.isSecureContext')) === false, 'the phone page is on the insecure origin too');
   const r = await openAndAsk(phone);
   const fit = await phone.ev(`(() => { const d = document.querySelector('#machine-desktop-signin .dialog').getBoundingClientRect(); return [Math.round(d.left), Math.round(d.right), innerWidth]; })()`);
-  ok(r.asked && fit[0] >= 0 && fit[1] <= fit[2], 'the sign-in dialog fits 390 px', fit);
+  ok(gateOf(r.asked) && fit[0] >= 0 && fit[1] <= fit[2], 'the sign-in dialog fits 390 px', fit);
   await phone.shot('phone.png');
   await phone.ev(typeSignIn(USER, PASS));
-  ok(await phone.until(`${JSON.stringify(Z('Connected'))} === (${statusText})`, 15000), `the phone signs in: ${Z('Connected')}`, await phone.ev(statusText));
+  ok(verdictOf(await phone.until(`${JSON.stringify(Z('Connected'))} === (${statusText})`, 15000)), `the phone signs in: ${Z('Connected')}`, await phone.ev(statusText));
   await closeWins(phone);
   await phone.close();
 }
@@ -387,12 +387,12 @@ if (baseView) {
   if (!asked) ok(false, 'harness: the base page never chose the Mac\'s security type within 15 s (no challenge to hold)');
   await sleep(6000);   // the old wait, read under the hold
   const rejOld = await base.ev('window.__rejections');
-  ok(asked && !rejOld.some((x) => /subtle|importKey|undefined/.test(x)), `PLACED: with the Mac's challenge held, the OLD 6 s wait reads no rejection (${rejOld.length}) — the red control on a clock would say the bug is gone`, rejOld);
+  ok(gateOf(asked) && !rejOld.some((x) => /subtle|importKey|undefined/.test(x)), `PLACED: with the Mac's challenge held, the OLD 6 s wait reads no rejection (${rejOld.length}) — the red control on a clock would say the bug is gone`, rejOld);
   ard.st.hold = null; letGo();
   const rejected = await base.until(REJ, 30000);
   if (!rejected) ok(false, 'harness: noVNC\'s auth never rejected within 30 s of the challenge\'s release');
   const st = await base.ev(statusText), rej = await base.ev('window.__rejections');
-  ok(st === Z('Connecting…') && ard.seen.creds.length === n0 && rej.some((x) => /subtle|importKey|undefined/.test(x)), `RED: the base page still says ${Z('Connecting…')} once noVNC's auth has rejected, the Mac received nothing, the rejection unseen by the page (${rej[0] || '—'})`, { st, sent: ard.seen.creds.length - n0, rej, asked: r.asked });
+  ok(st === Z('Connecting…') && ard.seen.creds.length === n0 && verdictOf(rej.some((x) => /subtle|importKey|undefined/.test(x))), `RED: the base page still says ${Z('Connecting…')} once noVNC's auth has rejected, the Mac received nothing, the rejection unseen by the page (${rej[0] || '—'})`, { st, sent: ard.seen.creds.length - n0, rej, asked: r.asked });
   await closeWins(base);
   await base.close();
 }
@@ -403,7 +403,7 @@ if (baseView) {
   ok((await loop.ev('window.isSecureContext')) === true && (await loop.ev('!!window.crypto.subtle')) === true, 'http://127.0.0.1 IS a secure context (WebCrypto present)');
   await openAndAsk(loop);
   await loop.ev(typeSignIn(USER, PASS));
-  ok(await loop.until(`${JSON.stringify(Z('Connected'))} === (${statusText})`, 15000), `the base page connects on loopback (${Z('Connected')})`, await loop.ev(statusText));
+  ok(verdictOf(await loop.until(`${JSON.stringify(Z('Connected'))} === (${statusText})`, 15000)), `the base page connects on loopback (${Z('Connected')})`, await loop.ev(statusText));
   await closeWins(loop);
   await loop.close();
 }
@@ -411,4 +411,4 @@ if (baseView) {
 // (§7 the launcher's close pin — MOVED to the fast scripts/test-mac-ard-signin-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

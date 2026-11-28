@@ -25,7 +25,7 @@ const stubGone = async (pids) => { const live = (p) => { try { return !/^\d+ \([
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -95,18 +95,18 @@ const texts = (sm) => sm.raw().filter((r) => r.type === 'response_item' && r.pay
 const viewG = texts(new ST.CodexSessionMessages({ backend: 'codex', backendSessionId: G, buffer: '' }, 'g'));
 ok(JSON.stringify(viewG) === JSON.stringify(['root prompt', 'root answer', 'child prompt', 'child answer', 'grandchild prompt', 'grandchild answer']), 'the grandchild\'s read-only view = P prefix (<5) + C prefix (<4) + its own, in order; the parents\' later turns are absent', viewG);
 const viewC = texts(new ST.CodexSessionMessages({ backend: 'codex', backendSessionId: C, buffer: '' }, 'c'));
-ok(viewC[0] === 'root prompt' && viewC.includes('child later — not in grandchild') && !viewC.includes('after fork — parent only'), 'the child\'s view keeps its own later turns and still excludes the parent\'s post-fork turns', viewC);
+ok(viewC[0] === 'root prompt' && gateOf(viewC.includes('child later — not in grandchild')) && !viewC.includes('after fork — parent only'), 'the child\'s view keeps its own later turns and still excludes the parent\'s post-fork turns', viewC);
 const viewS = texts(new ST.CodexSessionMessages({ backend: 'codex', backendSessionId: S, buffer: '' }, 's'));
 ok(JSON.stringify(viewS) === JSON.stringify(['root prompt', 'root answer', 'sub-agent task', 'sub-agent answer']), 'a sub-agent view reads its own file only (inherited context is already inside it — no double prefix)', viewS);
 const viewW = texts(new ST.CodexSessionMessages({ backend: 'codex', backendSessionId: G, forkedFrom: [S], buffer: '' }, 'w'));
-ok(viewW.includes('sub-agent task') && viewW.includes('sub-agent answer') && viewW.includes('grandchild answer'), 'a wrapper-chain id (superseded conversation, no boundary of its own) still merges WHOLE — unchanged behaviour (fingerprint dedup stays turn-scoped as before)', viewW);
+ok(gateOf(viewW.includes('sub-agent task')) && gateOf(viewW.includes('sub-agent answer')) && verdictOf(viewW.includes('grandchild answer')), 'a wrapper-chain id (superseded conversation, no boundary of its own) still merges WHOLE — unchanged behaviour (fingerprint dedup stays turn-scoped as before)', viewW);
 const viewWP = texts(new ST.CodexSessionMessages({ backend: 'codex', backendSessionId: G, forkedFrom: [P], buffer: '' }, 'wp'));
 ok(!viewWP.includes('after fork — parent only') && viewWP[0] === 'root prompt', 'a wrapper-chain id that codex ALSO names as a bounded fork parent takes the boundary (the more precise truth wins)', viewWP);
 const listing = ST.assembleCodexThreads(ST.collectCodexThreadMetas(), { activeSessions: new Map(), openThreadIds: new Set() });
 const ids = listing.map((e) => e.backendSessionId);
-ok([P, C, G, S].every((t) => ids.filter((x) => x === t).length === 1), 'every thread lists exactly once — a native fork parent is NOT hidden (it is its own live conversation)', ids);
+ok(verdictOf([P, C, G, S].every((t) => ids.filter((x) => x === t).length === 1)), 'every thread lists exactly once — a native fork parent is NOT hidden (it is its own live conversation)', ids);
 const eC = listing.find((e) => e.backendSessionId === C);
-ok(eC && eC.forkedFromId === P && eC.forkedFromOrdinal === 5 && eC.historyMode === 'paginated', 'listing entries carry forkedFromId/forkedFromOrdinal/historyMode (additive)', eC && { forkedFromId: eC.forkedFromId, forkedFromOrdinal: eC.forkedFromOrdinal, historyMode: eC.historyMode });
+ok(gateOf(eC) && eC.forkedFromId === P && eC.forkedFromOrdinal === 5 && eC.historyMode === 'paginated', 'listing entries carry forkedFromId/forkedFromOrdinal/historyMode (additive)', eC && { forkedFromId: eC.forkedFromId, forkedFromOrdinal: eC.forkedFromOrdinal, historyMode: eC.historyMode });
 {
   // the wrapper chain still hides its superseded ids (zero behaviour change)
   const W = '01a07000-0000-7000-8000-000000000009';
@@ -114,7 +114,7 @@ ok(eC && eC.forkedFromId === P && eC.forkedFromOrdinal === 5 && eC.historyMode =
   // B-a60e remainder: the rollout(s) just written seen by the index (a hub's walk) before this thread's finder is asked
   await CX.refreshCodexRolloutIndex();
   const l2 = ST.assembleCodexThreads(ST.collectCodexThreadMetas(), { activeSessions: new Map(), openThreadIds: new Set() }).map((e) => e.backendSessionId);
-  ok(l2.includes(W) && !l2.includes(S), 'a wrapper forked_from chain still hides the superseded id (unchanged)', l2);
+  ok(gateOf(l2.includes(W)) && !l2.includes(S), 'a wrapper forked_from chain still hides the superseded id (unchanged)', l2);
   fs.unlinkSync(fp(W));
 }
 {
@@ -131,11 +131,11 @@ ok(eC && eC.forkedFromId === P && eC.forkedFromOrdinal === 5 && eC.historyMode =
   const recs = () => out.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   let t0 = Date.now(); while (Date.now() - t0 < 8000 && !recs().some((r) => r.type === 'session_meta')) await sleep(100);
   const sm = recs().find((r) => r.type === 'session_meta');
-  ok(sm && sm.payload.id === 'th-forked' && sm.payload.forked_from_id === 'th-old', 'wrapper session_meta echoes codex\'s forked_from_id from the thread/fork response', sm?.payload);
-  ok(sm && JSON.stringify(sm.payload.forked_from) === JSON.stringify(['th-older', 'th-old']), 'CODEX_WEBUI_FORKED_FROM is deduped (each superseded id once, own id dropped)', sm?.payload?.forked_from);
+  ok(gateOf(sm) && sm.payload.id === 'th-forked' && sm.payload.forked_from_id === 'th-old', 'wrapper session_meta echoes codex\'s forked_from_id from the thread/fork response', sm?.payload);
+  ok(gateOf(sm) && JSON.stringify(sm.payload.forked_from) === JSON.stringify(['th-older', 'th-old']), 'CODEX_WEBUI_FORKED_FROM is deduped (each superseded id once, own id dropped)', sm?.payload?.forked_from);
   const stubs = stubOf(w.pid);
   await stopWrapper(w, { dir });
-  ok(await stubGone(stubs), `B-b403: the stub app-server ends with its wrapper (${stubs.length} child)`);
+  ok(verdictOf(await stubGone(stubs)), `B-b403: the stub app-server ends with its wrapper (${stubs.length} child)`);
 }
 
 console.log('— ② 0.153 record tolerance: known skips, agent chatter, sub-agent cards, unknowns → telemetry once');
@@ -178,7 +178,7 @@ console.log('— ② 0.153 record tolerance: known skips, agent chatter, sub-age
   // unknowns above (brand_new_item ×2, brand_new_event, brand_new_record) each render one; the KNOWN skips still render nothing.
   const sys = mm.messages.filter((m) => m.role === 'system');
   ok(sys.length === 5 && sys.filter((m) => m.noticeKind === 'unknown-record').length === 4, 'known skips (world_state / token_usage_record / inter_agent_communication_metadata / item_completed) render NOTHING; the four truly unknown records render as Unknown event cards (init + 4)', roles);
-  ok(sys.filter((m) => m.noticeKind === 'unknown-record').every((m) => m.content[0].harness === 'Codex' && typeof m.content[0].record === 'string' && m.content[0].record.length > 2), 'each Unknown event card names the harness and carries the whole record');
+  ok(verdictOf(sys.filter((m) => m.noticeKind === 'unknown-record').every((m) => m.content[0].harness === 'Codex' && typeof m.content[0].record === 'string' && m.content[0].record.length > 2)), 'each Unknown event card names the harness and carries the whole record');
   // B-7473: the sub-agent traffic is COLLAB ROWS now (an ENCRYPTED inbound
   // message has no body to show), and consecutive rows coalesce into one
   // message — 'started' + 'interacted' + the encrypted FINAL_ANSWER +
@@ -187,20 +187,20 @@ console.log('— ② 0.153 record tolerance: known skips, agent chatter, sub-age
   const rows = collab.flatMap((m) => m.collab.rows);
   ok(collab.length === 1 && collab[0].role === 'tool' && collab[0].collapseKind === 'agent' && collab[0].status === 'complete', 'sub-agent traffic coalesces into ONE agent-kind message', collab.map((m) => m.content[0].output));
   const inbound = rows.find((r) => r.dir === 'in');
-  ok(inbound && inbound.agentPath === '/root/water_waste' && inbound.agentName === 'water_waste' && inbound.msgType === 'FINAL_ANSWER' && inbound.encrypted === true, 'the encrypted agent_message is an inbound row with its msgType, marked encrypted', inbound);
+  ok(gateOf(inbound) && inbound.agentPath === '/root/water_waste' && inbound.agentName === 'water_waste' && inbound.msgType === 'FINAL_ANSWER' && inbound.encrypted === true, 'the encrypted agent_message is an inbound row with its msgType, marked encrypted', inbound);
   ok(!/gAAAAAB/.test(JSON.stringify(mm.messages)), 'no encrypted blob reaches any rendered string');
   const kinds = rows.filter((r) => r.dir === 'activity').map((r) => r.kind);
-  ok(JSON.stringify(kinds) === JSON.stringify(['started', 'interacted', 'completed']) && rows.every((r) => r.threadId === '01a072b1-186b-7711-8176-817d3f6d0fee'), 'started/interacted/completed each render once and carry the child thread id (click-through needs no lookup)', kinds);
+  ok(JSON.stringify(kinds) === JSON.stringify(['started', 'interacted', 'completed']) && verdictOf(rows.every((r) => r.threadId === '01a072b1-186b-7711-8176-817d3f6d0fee')), 'started/interacted/completed each render once and carry the child thread id (click-through needs no lookup)', kinds);
   ok(mm.status().subagents['/root/water_waste'] === '01a072b1-186b-7711-8176-817d3f6d0fee', 'status().subagents maps agentPath → agentThreadId', mm.status().subagents);
   const st = mm.status();
   ok(st.model === 'gpt-5.6-sol' && st.effort === 'ultra', 'thread_settings_applied + turn_context.effort feed status().model/effort (typed source, no card)', st);
   const asst = mm.messages.find((m) => m.role === 'assistant');
   const userMsg = mm.messages.find((m) => m.role === 'user');
-  ok(asst && userMsg && asst.turnIndex === userMsg.turnIndex && asst.content[0].text === 'here is the van' && asst.status === 'complete', 'the assistant reply after a run of unknown records lands in the SAME turn and completes (nothing dropped the turn)', { a: asst?.turnIndex, u: userMsg?.turnIndex });
+  ok(gateOf(asst) && gateOf(userMsg) && asst.turnIndex === userMsg.turnIndex && asst.content[0].text === 'here is the van' && asst.status === 'complete', 'the assistant reply after a run of unknown records lands in the SAME turn and completes (nothing dropped the turn)', { a: asst?.turnIndex, u: userMsg?.turnIndex });
   const ws = mm.messages.find((m) => m.collapseKind === 'search');
-  ok(ws && ws.role === 'tool' && ws.status === 'complete', "an old-style web_search_call (no action) renders as a complete 'search'-kind card instead of vanishing", ws);
+  ok(gateOf(ws) && ws.role === 'tool' && ws.status === 'complete', "an old-style web_search_call (no action) renders as a complete 'search'-kind card instead of vanishing", ws);
   const names = events.map((e) => e.name);
-  ok(names.filter((n) => n === 'codex-unknown-record:brand_new_item').length === 1 && names.includes('codex-unknown-record:brand_new_event') && names.includes('codex-unknown-record:brand_new_record'), 'unknown response_item / event_msg / record types fire telemetry codex-unknown-record:<type> ONCE per type', names);
+  ok(names.filter((n) => n === 'codex-unknown-record:brand_new_item').length === 1 && gateOf(names.includes('codex-unknown-record:brand_new_event')) && verdictOf(names.includes('codex-unknown-record:brand_new_record')), 'unknown response_item / event_msg / record types fire telemetry codex-unknown-record:<type> ONCE per type', names);
   ok(!names.some((n) => /world_state|token_usage_record|inter_agent|item_completed|thread_settings|sub_agent|agent_message/.test(n)), 'known types never fire the unknown-record telemetry', names);
   const S = CodexMessageManager;
   // item_completed STAYS in the exported generic set and is DISPATCHED before
@@ -208,20 +208,20 @@ console.log('— ② 0.153 record tolerance: known skips, agent chatter, sub-age
   // does not name falls through to the same skip it always had. The pin that
   // matters is the ORDER, not the membership (test-codex-history mirrors it).
   const cmSrc = fs.readFileSync(path.join(REPO, 'src/codex-message-manager.js'), 'utf8');
-  ok(S.SKIPPED_RECORD_TYPES.has('world_state') && S.SKIPPED_EVENT_TYPES.has('item_started') && S.SKIPPED_EVENT_TYPES.has('item_completed') && /if \(type === 'item_completed'\) return this\._processItemCompleted\(event, emit\);[\s\S]*if \(SKIPPED_EVENT_TYPES\.has\(type\)\) return;/.test(cmSrc) && S.SKIPPED_RESPONSE_ITEM_TYPES.has('additional_tools'), 'the skip sets are explicit and exported; item_completed is ROUTED FIRST (B-7473: the only 0.153.4 carrier of SubAgentActivity) and only then falls through the generic skip, its response_item twins named in the router');
+  ok(gateOf(S.SKIPPED_RECORD_TYPES.has('world_state')) && gateOf(S.SKIPPED_EVENT_TYPES.has('item_started')) && gateOf(S.SKIPPED_EVENT_TYPES.has('item_completed')) && gateOf(/if \(type === 'item_completed'\) return this\._processItemCompleted\(event, emit\);[\s\S]*if \(SKIPPED_EVENT_TYPES\.has\(type\)\) return;/.test(cmSrc)) && verdictOf(S.SKIPPED_RESPONSE_ITEM_TYPES.has('additional_tools')), 'the skip sets are explicit and exported; item_completed is ROUTED FIRST (B-7473: the only 0.153.4 carrier of SubAgentActivity) and only then falls through the generic skip, its response_item twins named in the router');
 }
 
 console.log('— ③ effort enum: ultra offered when the served model reports it, with its delegation hint (zh/ja)');
 {
   const am = await import(path.join(REPO, 'src/lib/agent-meta.js'));
-  ok(am.BACKEND_META.codex.effortHints?.ultra && !am.BACKEND_META.claude.effortHints, "META.codex.effortHints names 'ultra' (claude has no such level)");
-  ok(am.effortLabel('codex', 'ultra', { capitalize: true }).startsWith('Ultra — ') && am.effortLabel('codex', 'ultra').startsWith('ultra — ') && am.effortLabel('codex', 'high', { capitalize: true }) === 'High' && am.effortLabel('claude', 'ultra') === 'ultra', 'effortLabel appends the hint for codex ultra only (plain names otherwise, no id comparison)', am.effortLabel('codex', 'ultra'));
+  ok(gateOf(am.BACKEND_META.codex.effortHints?.ultra) && !am.BACKEND_META.claude.effortHints, "META.codex.effortHints names 'ultra' (claude has no such level)");
+  ok(gateOf(am.effortLabel('codex', 'ultra', { capitalize: true }).startsWith('Ultra — ')) && gateOf(am.effortLabel('codex', 'ultra').startsWith('ultra — ')) && am.effortLabel('codex', 'high', { capitalize: true }) === 'High' && am.effortLabel('claude', 'ultra') === 'ultra', 'effortLabel appends the hint for codex ultra only (plain names otherwise, no id comparison)', am.effortLabel('codex', 'ultra'));
   const app = read('src/lib/app.js'), sb = read('src/lib/chat-status-bar.js');
-  ok(/const rank = \['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'\];/.test(app) && /label: effortLabel\('codex', e, \{ capitalize: true \}\)/.test(app) && /SETTINGS_SCHEMA\['codex\.defaultEffort'\]\.options = efforts\.map/.test(app), 'New-Session + settings pickers build the codex ladder from the served models\' union (ultra last) with the hinted label');
-  ok(/label: effortLabel\(this\._backend, v\)/.test(sb) && /cur\?\.efforts\?\.length \? cur\.efforts/.test(sb), 'status-bar dropdown prefers the CURRENT model\'s reported levels and labels them through effortLabel');
-  ok(/efforts: \(m\.supported_reasoning_levels \|\| \[\]\)\.map\(l => l && l\.effort\)/.test(read('src/harnesses/codex-models.js')), '/api/available-models carries each model\'s supported_reasoning_levels (the ultra source)');
+  ok(gateOf(/const rank = \['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'\];/.test(app)) && gateOf(/label: effortLabel\('codex', e, \{ capitalize: true \}\)/.test(app)) && verdictOf(/SETTINGS_SCHEMA\['codex\.defaultEffort'\]\.options = efforts\.map/.test(app)), 'New-Session + settings pickers build the codex ladder from the served models\' union (ultra last) with the hinted label');
+  ok(gateOf(/label: effortLabel\(this\._backend, v\)/.test(sb)) && verdictOf(/cur\?\.efforts\?\.length \? cur\.efforts/.test(sb)), 'status-bar dropdown prefers the CURRENT model\'s reported levels and labels them through effortLabel');
+  ok(verdictOf(/efforts: \(m\.supported_reasoning_levels \|\| \[\]\)\.map\(l => l && l\.effort\)/.test(read('src/harnesses/codex-models.js'))), '/api/available-models carries each model\'s supported_reasoning_levels (the ultra source)');
   const key = 'delegates to sub-agents (multi-agent), extra usage';
-  ok(read('src/lib/i18n-zh.js').includes(`"${key}":`) && read('src/lib/i18n-ja.js').includes(`"${key}":`), 'zh + ja carry the hint');
+  ok(gateOf(read('src/lib/i18n-zh.js').includes(`"${key}":`)) && verdictOf(read('src/lib/i18n-ja.js').includes(`"${key}":`)), 'zh + ja carry the hint');
 }
 
 console.log('— ④ explicit model + effort on EVERY turn/start (resume continuity for effort)');
@@ -233,7 +233,7 @@ console.log('— ④ explicit model + effort on EVERY turn/start (resume continu
   const hx = require(path.join(REPO, 'src/harnesses/codex.js'));
   ok((await hx.store.lastTurnEffort(P)) === 'high' && (await hx.store.lastTurnModel(P)) === 'gpt-6-astra',   // async since lane resume-all-paced (read off the loop)
     'the codex harness descriptor is where the resume ladder reads the thread\'s own last model/effort (B-6b6d)');
-  ok(/await pickKnob\(data\.effort, hstore\.lastTurnEffort, 'defaultEffort'\)/.test(wc) && /require\('\.\/resume-continuity'\)/.test(wc),
+  ok(gateOf(/await pickKnob\(data\.effort, hstore\.lastTurnEffort, 'defaultEffort'\)/.test(wc)) && verdictOf(/require\('\.\/resume-continuity'\)/.test(wc)),
     'ws-create: a codex resume without an explicit effort carries the last-run effort (client choice still wins)');
   // the REAL wrapper against a stub app-server: resume reply names model + effort → every turn/start carries both
   const run = async (env, label) => {
@@ -260,7 +260,7 @@ console.log('— ④ explicit model + effort on EVERY turn/start (resume continu
     const t2 = rpc().filter((m) => m.method === 'turn/start')[1];
     const stubs = stubOf(w.pid);
     await stopWrapper(w, { dir });
-    ok(await stubGone(stubs), `B-b403: the stub app-server ends with its wrapper — ${label} (${stubs.length} child)`);
+    ok(verdictOf(await stubGone(stubs)), `B-b403: the stub app-server ends with its wrapper — ${label} (${stubs.length} child)`);
     return { t1: t1?.params, t2: t2?.params, meta: readMeta() };
   };
   const a = await run({}, 'no commanded effort');
@@ -269,7 +269,7 @@ console.log('— ④ explicit model + effort on EVERY turn/start (resume continu
   const b = await run({ CODEX_WEBUI_EFFORT: 'low' }, 'commanded effort');
   ok(b.t1?.effort === 'low' && b.t1?.model === 'gpt-6-astra', 'a COMMANDED effort (spawn env, e.g. the last-run effort ws-create carries) wins over the resume reply', b.t1 && { effort: b.t1.effort });
   const w = read('data/bin/codex-chat-wrapper.js');
-  ok(/model: meta\.model \|\| undefined,\s*\n\s*effort: effort \|\| undefined,/.test(w) && /if \(!effort && typeof resp\?\.reasoningEffort === 'string' && resp\.reasoningEffort\) \{ effort = resp\.reasoningEffort;/.test(w), 'wrapper pin: turn/start passes model + effort; an uncommanded effort is adopted from the thread reply');
+  ok(gateOf(/model: meta\.model \|\| undefined,\s*\n\s*effort: effort \|\| undefined,/.test(w)) && verdictOf(/if \(!effort && typeof resp\?\.reasoningEffort === 'string' && resp\.reasoningEffort\) \{ effort = resp\.reasoningEffort;/.test(w)), 'wrapper pin: turn/start passes model + effort; an uncommanded effort is adopted from the thread reply');
 }
 
 console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 paginated history; local only)');
@@ -309,7 +309,7 @@ console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 pa
   mm.convertHistory(recs);
   const users = mm.messages.filter((m) => m.role === 'user').map((m) => m.content[0].text);
   ok(JSON.stringify(users) === JSON.stringify(['hello from thread/read', 'second', 'third']) && new Set(mm.messages.filter((m) => m.role === 'user').map((m) => m.turnIndex)).size === 3, 'three turns → three user bubbles on three turn indexes', users);
-  ok(mm.messages.some((m) => m.role === 'assistant' && m.content[0].type === 'text' && m.content[0].text === 'done: here is the plan') && mm.messages.some((m) => m.content[0].type === 'thinking' && /thinking about it/.test(m.content[0].text)), 'agentMessage → assistant text; reasoning summary → thinking block');
+  ok(gateOf(mm.messages.some((m) => m.role === 'assistant' && m.content[0].type === 'text' && m.content[0].text === 'done: here is the plan')) && verdictOf(mm.messages.some((m) => m.content[0].type === 'thinking' && /thinking about it/.test(m.content[0].text))), 'agentMessage → assistant text; reasoning summary → thinking block');
   const tools = Object.fromEntries(mm.messages.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, { k: m.collapseKind, s: m.status, out: m.content[0].output, files: m.content[0].input?.files }]));
   ok(tools.c1?.k === 'bash' && tools.c1.s === 'complete' && tools.c1.out === 'total 0', 'commandExecution → Bash card with its aggregated output', tools.c1);
   ok(tools.m1?.k === 'mcp' && tools.m1.s === 'complete' && tools.m1.out === '3 issues', 'mcpToolCall → mcp fold card with the result text', tools.m1);
@@ -317,7 +317,7 @@ console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 pa
   const saMsg = mm.messages.find((m) => m.collab?.rows?.some((r) => r.dir === 'activity'));
   ok(tools.w1?.k === 'search' && tools.i1?.k === 'image' && saMsg?.collapseKind === 'agent' && saMsg.collab.rows[0].threadId === '01a07000-0000-7000-8000-0000000000dd', 'webSearch / imageView / subAgentActivity land in their fold kinds (the sub-agent row carries the child thread)', { w: tools.w1?.k, i: tools.i1?.k, sa: saMsg?.collab?.rows?.[0] });
   ok(tools.c3?.s === 'pending', 'an inProgress command stays a pending card (the turn is still open)', tools.c3);
-  ok(mm.messages.some((m) => m.isCompact) && mm.messages.some((m) => m.role === 'system' && m.status === 'error' && /usage limit/.test(m.content[0].text)), 'contextCompaction → compaction marker; a failed turn → its error card');
+  ok(gateOf(mm.messages.some((m) => m.isCompact)) && verdictOf(mm.messages.some((m) => m.role === 'system' && m.status === 'error' && /usage limit/.test(m.content[0].text))), 'contextCompaction → compaction marker; a failed turn → its error card');
   ok(TR.threadToRecords(null).length === 0 && TR.itemToRecords({ type: 'someFutureItem', id: 'z' }, '2026-09-05T00:00:00.000Z').length === 0, 'null thread / unknown item kinds map to nothing (never throw)');
   // (b) the REAL fetch path against a stub app-server (a shell shim standing in for `codex`)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cx0153-tr-'));
@@ -334,10 +334,10 @@ console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 pa
   const warm = HARNESSES.codex.store.warmTranscript;
   ok(typeof warm === 'function', 'the codex descriptor declares store.warmTranscript (the S3 pre-read hook claude already had)');
   ok(await warm(MISSING, '/w', { remote: false }) === true && reads() === 1, 'a thread with NO rollout is read through ONE bounded app-server thread/read {includeTurns:true}', rpc().map((m) => m.method));
-  ok(rpc().some((m) => m.method === 'initialize' && m.params?.capabilities?.experimentalApi === true) && rpc().some((m) => m.method === 'initialized'), 'the read handshakes like the wrapper (initialize + initialized)');
+  ok(gateOf(rpc().some((m) => m.method === 'initialize' && m.params?.capabilities?.experimentalApi === true)) && verdictOf(rpc().some((m) => m.method === 'initialized')), 'the read handshakes like the wrapper (initialize + initialized)');
   ok((CX.parseCodexSessionJsonl(MISSING) || []).length === recs.length, 'parseCodexSessionJsonl serves the cached thread/read records when the rollout is missing');
   const view = new ST.CodexSessionMessages({ backend: 'codex', backendSessionId: MISSING, buffer: '' }, 'tr');
-  ok(texts(view).includes('hello from thread/read') && view.chatStatus()?.model === 'gpt-6-astra', 'the read-only reader (CodexSessionMessages) renders the thread and its chatStatus names the model', { model: view.chatStatus()?.model });
+  ok(gateOf(texts(view).includes('hello from thread/read')) && view.chatStatus()?.model === 'gpt-6-astra', 'the read-only reader (CodexSessionMessages) renders the thread and its chatStatus names the model', { model: view.chatStatus()?.model });
   ok(await warm(MISSING, '/w', {}) === true && reads() === 1, 'a second warm is a cache hit — no second app-server spawn');
   ok(await warm(P, '/w', {}) === false && reads() === 1, 'a thread whose rollout EXISTS never triggers thread/read (the file is authoritative)');
   ok(await warm(UNKNOWN, '/w', {}) === false && reads() === 2 && await warm(UNKNOWN, '/w', {}) === false && reads() === 2, 'an unknown thread (JSON-RPC error) → false, negative-cached (one spawn for two asks)');
@@ -359,15 +359,15 @@ console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 pa
   const err = await TR.readThreadViaAppServer(OTHER, { codexCmd: dead, timeoutMs: 800 }).then(() => null, (e) => e.message);
   // the bound's own word (lane wall-clock-ratchet-down: `< 5000 ms` judged the machine): the 800 ms timer handed is
   // the one that fired; the ms are information
-  ok(/thread\/read timed out after 800ms/.test(err || ''), `a silent app-server is killed on the timeout bound (${err}, ${Date.now() - t0} ms)`);
+  ok(verdictOf(/thread\/read timed out after 800ms/.test(err || '')), `a silent app-server is killed on the timeout bound (${err}, ${Date.now() - t0} ms)`);
   fs.rmSync(dir, { recursive: true, force: true });
   TR._resetForTests();
   // (c) wiring pins — consumers reach the hook through the DESCRIPTOR (no claude ternary left)
   const wsh = read('src/ws-handler.js'), tsv = read('src/transcript-service.js');
   ok((wsh.match(/harnessOf\((?:session|data|live)\.backend \|\| 'claude'\)\.store\?\.warmTranscript/g) || []).length === 4 && !/if \(\(session\.backend \|\| 'claude'\) === 'claude'\) \{\s*\n\s*try \{ await warmSessionJsonlAsync/.test(wsh), 'ws-handler attach, view-only and history-ask (row B-422c: its live and view asks) paths warm through the descriptor (the claude-only ternary is gone)');
-  ok(/harnessOf\(r\.backend \|\| 'claude'\)\.store\?\.warmTranscript/.test(tsv) && !/if \(r\.backend === 'claude'\) \{\s*\n\s*try \{ await warmSessionJsonlAsync/.test(tsv), 'transcript-service.view warms through the descriptor');
-  ok(/require\('\.\.\/codex-thread-read'\)\.configure\(\{ codexCmd: CODEX_CMD \|\| null, enabled: !!CODEX_CMD \}\)/.test(read('src/server/cli-env.js')) && !/codex-thread-read/.test(read('server.js')), 'cli-env configures the fallback where CODEX_CMD is resolved (disabled when codex is absent; server.js untouched — the size ratchet)');
-  ok(/'src\/codex-thread-read\.js'[,\]]/.test(read('scripts/test-architecture.mjs')), 'the module is registered in the SHARED tier');
+  ok(gateOf(/harnessOf\(r\.backend \|\| 'claude'\)\.store\?\.warmTranscript/.test(tsv)) && !/if \(r\.backend === 'claude'\) \{\s*\n\s*try \{ await warmSessionJsonlAsync/.test(tsv), 'transcript-service.view warms through the descriptor');
+  ok(gateOf(/require\('\.\.\/codex-thread-read'\)\.configure\(\{ codexCmd: CODEX_CMD \|\| null, enabled: !!CODEX_CMD \}\)/.test(read('src/server/cli-env.js'))) && !/codex-thread-read/.test(read('server.js')), 'cli-env configures the fallback where CODEX_CMD is resolved (disabled when codex is absent; server.js untouched — the size ratchet)');
+  ok(verdictOf(/'src\/codex-thread-read\.js'[,\]]/.test(read('scripts/test-architecture.mjs'))), 'the module is registered in the SHARED tier');
   ok(HARNESSES.claude.store.warmTranscript === require(path.join(REPO, 'src/session-store.js')).warmSessionJsonlAsync, 'claude\'s hook is still the worker parse-cache warm (unchanged)');
 }
 
@@ -426,7 +426,7 @@ console.log("— ⑥ multi-agent v2: sub-agent chatter is ATTRIBUTED, never a ro
   ok(assistants.length === 1 && assistants[0].content[0].text === '我会把它做成一个可推敲的完整房车方案。', 'the ROOT\'s own reply is the ONLY assistant bubble — a sub-agent report never becomes one', assistants.map((m) => m.content[0].text));
   ok(!/水系统研究/.test(JSON.stringify(assistants)), "the sub-agent's FINAL_ANSWER text is NOT in any assistant message (the owner's report)");
   const report = mm.messages.find((m) => m.collab?.report);
-  ok(report && report.role === 'tool' && report.collapseKind === 'report' && report.collab.dir === 'in' && report.collab.agentName === 'water_research' && report.collab.msgType === 'FINAL_ANSWER' && report.content[0].output === PLAIN_BODY, 'the plaintext FINAL_ANSWER is an ATTRIBUTED sub-agent report in its OWN fold kind (author + msgType + markdown body, envelope stripped)', report && { c: report.collab, o: report.content[0].output.slice(0, 30) });
+  ok(gateOf(report) && report.role === 'tool' && report.collapseKind === 'report' && report.collab.dir === 'in' && report.collab.agentName === 'water_research' && report.collab.msgType === 'FINAL_ANSWER' && report.content[0].output === PLAIN_BODY, 'the plaintext FINAL_ANSWER is an ATTRIBUTED sub-agent report in its OWN fold kind (author + msgType + markdown body, envelope stripped)', report && { c: report.collab, o: report.content[0].output.slice(0, 30) });
   ok(report.collab.threadId === CHILD, 'the report carries the child thread id from SubAgentActivity (click-through needs no server lookup)', report.collab.threadId);
   ok(!dump.includes(BLOB) && !/gAAAAAB/.test(dump), 'no encrypted blob reaches ANY rendered string (spawn/send/followup arguments + the encrypted inbound message)');
   const rows = mm.messages.flatMap((m) => m.collab?.rows || []);
@@ -459,20 +459,20 @@ console.log("— ⑥ multi-agent v2: sub-agent chatter is ATTRIBUTED, never a ro
     ]);
     const encRows = enc.messages.flatMap((m) => m.collab?.rows || []);
     const encMsgs = enc.messages.filter((m) => m.collab);
-    ok(encRows.length === 3 && encRows.every((r) => r.dir === 'in' && r.encrypted && r.agentName === 'water_research'), 'THREE distinct encrypted messages from one agent in one turn stay THREE rows (the content leg cannot fire without content)', JSON.stringify(encRows));
-    ok(encMsgs.length === 1 && /3 messages/.test(encMsgs[0].content[0].output) && /water_research/.test(encMsgs[0].content[0].output), '…coalesced into ONE item that says "3 messages · water_research"', encMsgs.map((m) => m.content[0].output));
+    ok(encRows.length === 3 && verdictOf(encRows.every((r) => r.dir === 'in' && r.encrypted && r.agentName === 'water_research')), 'THREE distinct encrypted messages from one agent in one turn stay THREE rows (the content leg cannot fire without content)', JSON.stringify(encRows));
+    ok(encMsgs.length === 1 && gateOf(/3 messages/.test(encMsgs[0].content[0].output)) && verdictOf(/water_research/.test(encMsgs[0].content[0].output)), '…coalesced into ONE item that says "3 messages · water_research"', encMsgs.map((m) => m.content[0].output));
     // the id leg still collapses a genuine re-read of the SAME record
     enc.convertHistory([encMsg('amsg_01a07340-c696-7080-a3f3-c55a42e62d04', 'gAAAAABqnHsPfu_QPd2BKoPUgU269iLFrmymKTAu…')]);
     ok(enc.messages.flatMap((m) => m.collab?.rows || []).length === 3, '…and re-feeding one of them (same id) adds NO fourth row (the id leg is intact)');
   }
   const spawnRow = rows.find((r) => r.dir === 'spawn' && r.agentPath === '/root/water_research');
-  ok(spawnRow && spawnRow.threadId === CHILD, "…and the suppressed 'started' record still taught the map: the spawn row carries the child thread id (click-through never depends on drawing a row)", spawnRow);
-  ok(rows.filter((r) => r.dir === 'spawn').every((r) => r.agentPath.startsWith('/root/')), 'the spawn OUTPUT ({"task_name":"/root/x"}) upgrades the row to the full agent path', rows.filter((r) => r.dir === 'spawn').map((r) => r.agentPath));
+  ok(gateOf(spawnRow) && spawnRow.threadId === CHILD, "…and the suppressed 'started' record still taught the map: the spawn row carries the child thread id (click-through never depends on drawing a row)", spawnRow);
+  ok(verdictOf(rows.filter((r) => r.dir === 'spawn').every((r) => r.agentPath.startsWith('/root/'))), 'the spawn OUTPUT ({"task_name":"/root/x"}) upgrades the row to the full agent path', rows.filter((r) => r.dir === 'spawn').map((r) => r.agentPath));
   const encRow = rows.find((r) => r.dir === 'in' && r.encrypted);
-  ok(encRow && encRow.msgType === 'MESSAGE' && encRow.agentName === 'water_research', 'the ENCRYPTED inbound message is a one-line row with its msgType (no body to show)', encRow);
-  ok(rows.find((r) => r.dir === 'wait')?.cellId === '3' && rows.find((r) => r.dir === 'out')?.msgType === 'message' && rows.some((r) => r.dir === 'out' && r.msgType === 'followup'), 'wait carries its cell, send_message/followup_task carry their kinds', rows.filter((r) => r.dir === 'out' || r.dir === 'wait'));
+  ok(gateOf(encRow) && encRow.msgType === 'MESSAGE' && encRow.agentName === 'water_research', 'the ENCRYPTED inbound message is a one-line row with its msgType (no body to show)', encRow);
+  ok(rows.find((r) => r.dir === 'wait')?.cellId === '3' && rows.find((r) => r.dir === 'out')?.msgType === 'message' && verdictOf(rows.some((r) => r.dir === 'out' && r.msgType === 'followup')), 'wait carries its cell, send_message/followup_task carry their kinds', rows.filter((r) => r.dir === 'out' || r.dir === 'wait'));
   const collabMsgs = mm.messages.filter((m) => m.collab && !m.collab.report);
-  ok(collabMsgs.length < rows.length && collabMsgs.every((m) => m.collapseKind === 'agent' && m.role === 'tool'), `consecutive one-line rows COALESCE (${rows.length - 1} rows in ${collabMsgs.length} messages), all 'agent'-kind`, collabMsgs.map((m) => m.content[0].output));
+  ok(collabMsgs.length < rows.length && verdictOf(collabMsgs.every((m) => m.collapseKind === 'agent' && m.role === 'tool')), `consecutive one-line rows COALESCE (${rows.length - 1} rows in ${collabMsgs.length} messages), all 'agent'-kind`, collabMsgs.map((m) => m.content[0].output));
   ok(mm.status().subagents['/root/water_research'] === CHILD, 'status().subagents exposes the agentPath → threadId map the client clicks through', mm.status().subagents);
   const tools = mm.messages.filter((m) => m.role === 'tool' && !m.collab);
   ok(tools.length === 0, 'the item_completed TWINS (AgentMessage/Reasoning/CommandExecution/UserMessage) render NOTHING extra', tools.map((m) => m.toolName));
@@ -508,11 +508,11 @@ console.log("— ⑥ multi-agent v2: sub-agent chatter is ATTRIBUTED, never a ro
     live.processLive(SA('completed', 'call_B'));
     const edits = ops.filter((o) => o.op === 'edit');
     ok(ops.filter((o) => o.op === 'create').length === 1 && edits.length === 1, 'a second consecutive row EDITS the first message instead of creating another', ops.map((o) => o.op).join(','));
-    ok(edits[0].fields.status === 'complete' && Array.isArray(edits[0].fields.collab?.rows) && edits[0].fields.collab.rows.length === 2, 'the coalescing edit carries status + the grown rows (or the DOM keeps the stale row)', JSON.stringify(edits[0].fields.collab?.rows?.length));
+    ok(edits[0].fields.status === 'complete' && gateOf(Array.isArray(edits[0].fields.collab?.rows)) && edits[0].fields.collab.rows.length === 2, 'the coalescing edit carries status + the grown rows (or the DOM keeps the stale row)', JSON.stringify(edits[0].fields.collab?.rows?.length));
     const cvSrc = read('src/lib/chat-view.js');
-    ok(/if \(fields\.status === 'complete' \|\| fields\.status === 'error' \|\| fields\.status === 'interrupted'\) \{/.test(cvSrc), 'WIRING PIN: the client re-render really is gated on a terminal status in fields');
+    ok(verdictOf(/if \(fields\.status === 'complete' \|\| fields\.status === 'error' \|\| fields\.status === 'interrupted'\) \{/.test(cvSrc)), 'WIRING PIN: the client re-render really is gated on a terminal status in fields');
   }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -71,7 +71,7 @@ const CWD = path.join(fakeHome, 'proj');
 const SID = 'f01d0000-0000-4000-8000-0000000ab11e'; // view-only fixture (the fold-ux precedent: a non-guarded id under a scratch HOME)
 const VW = 390, VH = 844;
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 // screenshots for the mandatory human look (test-gear-menu's habit): their own
 // scratch dir, NOT removed by cleanup. B-3f5d ② (2026-09-24 verifier: ~76 left in /tmp): the gate's reaper judges
 // PROCESSES, never a directory, so nothing swept them. The dir is now STAMPED with this run's record (scratchDir) and
@@ -102,7 +102,7 @@ function sweepDeadShots() {
   if (livePlanted) { fs.mkdirSync(live, { recursive: true }); fs.writeFileSync(path.join(live, 'keep.png'), ''); }
   const gone = sweepDeadShots();
   check('B-3f5d ②: a gone run\'s shots dir (stamped, and an unstamped one of a dead pid) is removed at the next run; this run\'s own dir is stamped', !fs.existsSync(dead) && !fs.existsSync(legacy) && !!readRunRecord(SHOTS), { gone });
-  check('B-3f5d ② CONTROL: a dir whose pid is ALIVE (another run in flight) is never touched', fs.existsSync(path.join(live, 'keep.png')));
+  check('B-3f5d ② CONTROL: a dir whose pid is ALIVE (another run in flight) is never touched', verdictOf(fs.existsSync(path.join(live, 'keep.png'))));
   if (livePlanted) fs.rmSync(live, { recursive: true, force: true });
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -227,7 +227,7 @@ const restartWith = async (items) => {
   const was = srv; was.kill('SIGTERM');
   const clean = await new Promise((r) => { if (was.exitCode !== null || was.signalCode) r(true); else { const t = setTimeout(() => r(false), 10000); was.once('exit', () => { clearTimeout(t); r(true); }); } });
   if (!clean) { try { was.kill('SIGKILL'); } catch {} await new Promise((r) => { if (was.exitCode !== null || was.signalCode) r(); else { was.once('exit', r); setTimeout(r, 3000); } }); }
-  check('the throwaway hub stopped CLEANLY before its restart (SIGTERM answered inside 10 s — a hard stop would leave «may not have saved» on the next start: B-225b)', clean);
+  check('the throwaway hub stopped CLEANLY before its restart (SIGTERM answered inside 10 s — a hard stop would leave «may not have saved» on the next start: B-225b)', verdictOf(clean));
   fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ items }, null, 2));
   srv = startServer();
   for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
@@ -399,21 +399,21 @@ try {
 
   console.log('phone emulation');
   const env = await evalJs(`({ mobile: app.isMobile, touch: app.isTouch, nav: !!app._mobileNav, toolbar: getComputedStyle(document.getElementById('toolbar')).display, taskbar: getComputedStyle(document.getElementById('taskbar')).display, iw: innerWidth, ih: innerHeight })`);
-  check(`app.isMobile + app.isTouch + MobileNav present, #toolbar/#taskbar display:none at ${env.iw}×${env.ih}`, env.mobile && env.touch && env.nav && env.toolbar === 'none' && env.taskbar === 'none', env);
+  check(`app.isMobile + app.isTouch + MobileNav present, #toolbar/#taskbar display:none at ${env.iw}×${env.ih}`, gateOf(env.mobile) && gateOf(env.touch) && gateOf(env.nav) && env.toolbar === 'none' && env.taskbar === 'none', env);
 
   // ── THE FIRST SCREEN (lane phone-first-screen, design q-044 decision 5): the phone opens on the attention list ──
   console.log('first screen: the attention page (lane phone-first-screen)');
   await waitFor(`!document.getElementById('phone-home').classList.contains('hidden')`, 8000);
   const fs0 = await evalJs(`(() => { const h = document.getElementById('phone-home'); const r = h.getBoundingClientRect(); const nb = document.getElementById('mobile-nav').getBoundingClientRect(); const hit = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
     return { shown: !h.classList.contains('hidden') && getComputedStyle(h).display !== 'none', top: Math.round(r.top), navBottom: Math.round(nb.bottom), bottom: Math.round(r.bottom), w: Math.round(r.width), rows: [...h.querySelectorAll('.ut-bands .ut-item')].map((x) => x.dataset.id), onPage: !!hit && h.contains(hit), sb: app.sidebar.isOpen, title: document.getElementById('mobile-nav-title').textContent, close: getComputedStyle(document.getElementById('mobile-nav-close')).display }; })()`);
-  check(`the phone opens on the attention page: under the nav (top ${fs0.top} = the nav's bottom ${fs0.navBottom}), the whole window area (${fs0.w}×${fs0.bottom - fs0.top}), the seeded ask its row, the sidebar shut`, fs0.shown && fs0.top === fs0.navBottom && fs0.bottom === VH && fs0.w === VW && fs0.rows.join() === 'ut-mobilegap01' && fs0.onPage && !fs0.sb, fs0);
+  check(`the phone opens on the attention page: under the nav (top ${fs0.top} = the nav's bottom ${fs0.navBottom}), the whole window area (${fs0.w}×${fs0.bottom - fs0.top}), the seeded ask its row, the sidebar shut`, gateOf(fs0.shown) && fs0.top === fs0.navBottom && fs0.bottom === VH && fs0.w === VW && fs0.rows.join() === 'ut-mobilegap01' && gateOf(fs0.onPage) && !fs0.sb, fs0);
   check(`the nav names the page ("${fs0.title}") and hides the ✕ that would close a window under it (display ${fs0.close})`, fs0.title === 'For you' && fs0.close === 'none', fs0);
   await shot('first-screen-boot.png');
   await tap('#mobile-nav-menu'); await sleep(250);
   const fs1 = await evalJs(`(() => { const hit = document.elementFromPoint(innerWidth / 2, innerHeight / 2); return { sb: app.sidebar.isOpen, inSidebar: !!hit && !!hit.closest('#sidebar'), page: !document.getElementById('phone-home').classList.contains('hidden') }; })()`);
-  check('☰ reaches the conversation list in one tap: the sidebar opens over the page (the page stays beneath)', fs1.sb && fs1.inSidebar && fs1.page, fs1);
+  check('☰ reaches the conversation list in one tap: the sidebar opens over the page (the page stays beneath)', gateOf(fs1.sb) && gateOf(fs1.inSidebar) && verdictOf(fs1.page), fs1);
   await tap('#sidebar-close'); await sleep(250);
-  check('…its ✕ closes it — back on the page', await evalJs(`!app.sidebar.isOpen && !document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('phone-home').contains(document.elementFromPoint(innerWidth / 2, innerHeight / 2))`));
+  check('…its ✕ closes it — back on the page', verdictOf(await evalJs(`!app.sidebar.isOpen && !document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('phone-home').contains(document.elementFromPoint(innerWidth / 2, innerHeight / 2))`)));
 
   // ── THE FILES DOOR (lane phone-files-door): taps from a cold open to a listing of ~/ ──
   console.log('the files door (lane phone-files-door): taps from a cold open to a listing of ~/');
@@ -436,12 +436,12 @@ try {
   })()`);
   await waitFor(`!!document.querySelector('#phone-home .ph-files-chip[data-kind="home"]')`, 8000);
   const doorsNow = await filesDoors([]), cardNow = await cardDoors([]), doorsBase = (await filesDoors(['#mobile-nav-files', '.ph-files'])).concat(await cardDoors(['.ph-files']));
-  check(`the compact bar draws no folder icon (LAW 3 — no «Files» button on the bar: ${doorsNow.join(', ') || 'none'})`, !doorsNow.includes('#mobile-nav-files') && await evalJs(`document.getElementById('mobile-nav-files').getClientRects().length === 0`), doorsNow);
-  check(`the cold first screen holds a door that says Files — the page's 文件 card, its first chip on top (${cardNow.join(', ')}) — CONTROL (the base's screen, without the lane's two doors): none (${doorsBase.length})`, cardNow.length > 0 && /\bhome\b/.test(cardNow[0]) && doorsBase.length === 0, { cardNow, doorsBase });
+  check(`the compact bar draws no folder icon (LAW 3 — no «Files» button on the bar: ${doorsNow.join(', ') || 'none'})`, !doorsNow.includes('#mobile-nav-files') && verdictOf(await evalJs(`document.getElementById('mobile-nav-files').getClientRects().length === 0`)), doorsNow);
+  check(`the cold first screen holds a door that says Files — the page's 文件 card, its first chip on top (${cardNow.join(', ')}) — CONTROL (the base's screen, without the lane's two doors): none (${doorsBase.length})`, cardNow.length > 0 && gateOf(/\bhome\b/.test(cardNow[0])) && doorsBase.length === 0, { cardNow, doorsBase });
   const homeDir = await evalJs('app._localHome');
   await tap('#phone-home .ph-files-chip[data-kind="home"]');
   const oneTap = await waitFor(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w?.type === 'files' && w._explorer?.currentPath === ${JSON.stringify(homeDir)} && w.element.querySelectorAll('.file-item').length >= 3 && document.getElementById('phone-home').classList.contains('hidden'); })()`, 8000);
-  check('ONE tap on its Home chip lists the home (taps from a cold open: 1 ≤ 2 — the base: a long-press on «+» and a tap, behind no word)', oneTap, await evalJs(`({ active: app.wm.windows.get(app.wm.activeWindowId)?.type, path: app.wm.windows.get(app.wm.activeWindowId)?._explorer?.currentPath, rows: document.querySelectorAll('.file-explorer .file-item').length })`));
+  check('ONE tap on its Home chip lists the home (taps from a cold open: 1 ≤ 2 — the base: a long-press on «+» and a tap, behind no word)', verdictOf(oneTap), await evalJs(`({ active: app.wm.windows.get(app.wm.activeWindowId)?.type, path: app.wm.windows.get(app.wm.activeWindowId)?._explorer?.currentPath, rows: document.querySelectorAll('.file-explorer .file-item').length })`));
   // the «+» sheet's Files row by a real tap (its row marked for the finger — the sheet's rows carry no id); found by its word — with
   // an explorer open a hint line under it names the folder it brings back (lane phone-titlebar-title r3; r4: the folder's name), returned here
   const plusFiles = async () => {
@@ -454,19 +454,19 @@ try {
   check(`the explorer IS the screen: under the nav (top ${sheetGeo.t} = ${sheetGeo.nav}), the whole width (${sheetGeo.w}) and height (bottom ${sheetGeo.b}), no title bar`, sheetGeo.l === 0 && sheetGeo.t === sheetGeo.nav && sheetGeo.w === VW && sheetGeo.b === VH && sheetGeo.titlebar === 'none', sheetGeo);
   const plusHint = await plusFiles();
   check(`the «+» sheet's Files row says what it does with the home's explorer open — «${plusHint}» (r3: ONE act per row, said; r4: the FOLDER's name — the home is «~», as the explorer's breadcrumbs say it — never its path)`, plusHint === 'Back to ~', plusHint);
-  check('the «+» sheet\'s Files row (the nav door\'s press, moved) reveals the same explorer at the home — never a second one', await waitFor(`[...app.wm.windows.values()].filter((w) => w.type === 'files').length === 1 && app.wm.windows.get(app.wm.activeWindowId)?._explorer?.currentPath === ${JSON.stringify(homeDir)}`, 5000),
+  check('the «+» sheet\'s Files row (the nav door\'s press, moved) reveals the same explorer at the home — never a second one', verdictOf(await waitFor(`[...app.wm.windows.values()].filter((w) => w.type === 'files').length === 1 && app.wm.windows.get(app.wm.activeWindowId)?._explorer?.currentPath === ${JSON.stringify(homeDir)}`, 5000)),
     await evalJs(`[...app.wm.windows.values()].map((w) => w.type + ':' + (w._explorer?.currentPath || '')).join(', ')`));
   await tap('.window.window-active .file-phone-back');
   const backHome = await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('mobile-nav-title').textContent === 'For you'`, 5000);
-  check('‹ in the explorer returns to the phone\'s home (the For-you page while it has rows — the back gesture\'s rule)', backHome);
+  check('‹ in the explorer returns to the phone\'s home (the For-you page while it has rows — the back gesture\'s rule)', verdictOf(backHome));
   await waitFor(`document.querySelectorAll('#phone-home .ph-files-chip').length >= 3`, 8000);
   const card = await evalJs(`(() => { const p = document.getElementById('phone-home'); const c = p.querySelector(':scope > .ph-files'); if (!c) return null; const list = p.querySelector(':scope > .ut-inbox').getBoundingClientRect(); const r = c.getBoundingClientRect();
     return { top: Math.round(r.top), listBottom: Math.round(list.bottom), after: c.previousElementSibling?.classList.contains('ut-inbox'), head: c.querySelector('.ph-files-head').textContent.trim(), chips: [...c.querySelectorAll('.ph-files-chip')].map((b) => { const q = b.getBoundingClientRect(); return { kind: b.dataset.kind, path: b.dataset.path, text: b.textContent, h: Math.round(q.height), r: Math.round(q.right) }; }) }; })()`);
   check(`the For-you page carries a 文件 card AFTER its list (card top ${card?.top} ≥ list bottom ${card?.listBottom}) headed «${card?.head}», home first, every chip ≥ 36 px and inside the screen (${card?.chips.map((x) => x.kind + ':' + x.text).join(' · ')})`,
-    card && card.after && card.top >= card.listBottom && card.head === 'Files' && card.chips[0].kind === 'home' && card.chips[0].path === homeDir && card.chips.some((x) => x.kind === 'files' && /\/work$/.test(x.path)) && card.chips.every((x) => x.h >= 36 && x.r <= VW), card);
+    gateOf(card) && gateOf(card.after) && card.top >= card.listBottom && card.head === 'Files' && card.chips[0].kind === 'home' && card.chips[0].path === homeDir && gateOf(card.chips.some((x) => x.kind === 'files' && /\/work$/.test(x.path))) && verdictOf(card.chips.every((x) => x.h >= 36 && x.r <= VW)), card);
   await tap('#phone-home .ph-files-chip[data-kind="files"]');
   const chipPath = card?.chips.find((x) => x.kind === 'files')?.path;
-  check(`one tap on a chip opens the explorer THERE (${chipPath})`, await waitFor(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w?.type === 'files' && w._explorer?.currentPath === ${JSON.stringify(chipPath)} && document.getElementById('phone-home').classList.contains('hidden'); })()`, 8000));
+  check(`one tap on a chip opens the explorer THERE (${chipPath})`, verdictOf(await waitFor(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w?.type === 'files' && w._explorer?.currentPath === ${JSON.stringify(chipPath)} && document.getElementById('phone-home').classList.contains('hidden'); })()`, 8000)));
   for (const id of await evalJs(`[...app.wm.windows.keys()]`)) await evalJs(`app.wm.requestClose(${JSON.stringify(id)}); true`);
   await waitFor('app.wm.windows.size === 0', 5000);
   await evalJs('app.phoneHome.show(); true'); await sleep(200); // where the legs below start (the page, no window)
@@ -474,21 +474,21 @@ try {
   // ── #8 touch targets: the nav bar ──
   console.log('#8 touch targets');
   const navRects = await evalJs(rectsOf('#mobile-nav-menu, #mobile-nav-new, #mobile-nav-gear, #mobile-nav-todos'));
-  check(`nav buttons (menu / new / gear / inbox) are ≥ 36×36 px (${navRects.map((r) => r.w + '×' + r.h).join(', ')})`, navRects.length === 4 && allAtLeast(navRects), navRects);
+  check(`nav buttons (menu / new / gear / inbox) are ≥ 36×36 px (${navRects.map((r) => r.w + '×' + r.h).join(', ')})`, navRects.length === 4 && verdictOf(allAtLeast(navRects)), navRects);
   // sidebar header + search row + tabs
   await evalJs(`app.sidebar.toggle(true); true`); await sleep(400);
   const sbRects = await evalJs(rectsOf('#sidebar-close, #backend-filter, #manage-toggle, #sort-toggle'));
-  check(`sidebar header buttons (close / filter / manage / sort) are ≥ 36×36 px (${sbRects.map((r) => r.w + '×' + r.h).join(', ')})`, sbRects.length === 4 && allAtLeast(sbRects), sbRects);
+  check(`sidebar header buttons (close / filter / manage / sort) are ≥ 36×36 px (${sbRects.map((r) => r.w + '×' + r.h).join(', ')})`, sbRects.length === 4 && verdictOf(allAtLeast(sbRects)), sbRects);
   const search = await evalJs(rectsOf('#session-filter'));
   check(`sidebar search input is ≥ 36 px tall (${search[0]?.h})`, search.length === 1 && search[0].h >= 36, search);
   const tabRects = await evalJs(rectsOf('.sidebar-tab'));
-  check(`sidebar tabs are ≥ 36 px tall (${tabRects.map((r) => r.h).join('/')})`, allAtLeast(tabRects, 36, 'h'), tabRects);
+  check(`sidebar tabs are ≥ 36 px tall (${tabRects.map((r) => r.h).join('/')})`, verdictOf(allAtLeast(tabRects, 36, 'h')), tabRects);
   await evalJs(`app.sidebar.toggle(false); true`); await sleep(300);
 
   // ── #1 For-you inbox on the nav bar ──
   console.log('#1 For-you inbox');
   const badge = await evalJs(`(() => { const b = document.getElementById('mobile-nav-todos'); return { has: b.classList.contains('ut-has-items'), urg: b.dataset.urgency, pills: [...b.querySelectorAll('.ut-count')].map((p) => p.className.replace('ut-count ', '') + ':' + p.textContent) }; })()`);
-  check('the nav inbox button carries the seeded item as a high-urgency badge pill', badge.has && badge.urg === 'high' && badge.pills.length === 1 && badge.pills[0] === 'ut-seg-high:1', badge);
+  check('the nav inbox button carries the seeded item as a high-urgency badge pill', gateOf(badge.has) && badge.urg === 'high' && badge.pills.length === 1 && badge.pills[0] === 'ut-seg-high:1', badge);
   // lane foryou-honest: on the phone the badge is the door to its first-screen PAGE (one surface) — it toggles the page, never
   // the sheet beside it; the sheet is reached through its own door (the page with no row to show falls back to it)
   const pg = () => evalJs(`({ page: !document.getElementById('phone-home').classList.contains('hidden'), sheet: !document.getElementById('user-todos-popup').classList.contains('hidden'), item: document.getElementById('phone-home').textContent.includes(${JSON.stringify(TODO_TEXT)}), sb: app.sidebar.isOpen, win: !!app.wm.activeWindowId })`);
@@ -496,24 +496,24 @@ try {
   const pg1 = await pg();
   await tap(pg1.sb ? '#drawer-foryou' : '#mobile-nav-todos'); await sleep(300); // nothing under the page ⇒ the conversation list — its first row «For you · N» is the way back
   const pg2 = await pg();
-  check('tapping it toggles the first-screen page listing the item — never the sheet (lane foryou-honest; nothing under the page ⇒ the conversation list, its first row brings the page back)', pg1.page !== pg0.page && pg2.page === pg0.page && !pg1.sheet && !pg2.sheet && (pg0.page ? pg0.item : pg1.item) && (pg0.page && !pg1.win ? pg1.sb : true) && !pg2.sb, { pg0, pg1, pg2 });
+  check('tapping it toggles the first-screen page listing the item — never the sheet (lane foryou-honest; nothing under the page ⇒ the conversation list, its first row brings the page back)', pg1.page !== pg0.page && pg2.page === pg0.page && !pg1.sheet && !pg2.sheet && (pg0.page ? gateOf(pg0.item) : gateOf(pg1.item)) && (pg0.page && !pg1.win ? gateOf(pg1.sb) : true) && !pg2.sb, { pg0, pg1, pg2 });
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   const sheet = await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); const r = p.getBoundingClientRect(); return { hidden: p.classList.contains('hidden'), l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), t: Math.round(r.top), text: p.textContent.includes(${JSON.stringify(TODO_TEXT)}) }; })()`);
   await evalJs(`document.querySelector('#user-todos-popup .ut-bands .ut-item > .ut-body > .ut-text')?.click(); true`); await sleep(200); // a touch screen's row is FOLDED — the tap opens it (its ✓ ✕ ⤢)
-  check(`the sheet's own door opens #user-todos-popup as a full-width sheet under the nav (left ${sheet.l}, right ${sheet.r}, top ${sheet.t}) listing the item`, !sheet.hidden && sheet.l >= 0 && sheet.r <= VW && sheet.w >= VW - 40 && sheet.t >= 40 && sheet.text, sheet);
+  check(`the sheet's own door opens #user-todos-popup as a full-width sheet under the nav (left ${sheet.l}, right ${sheet.r}, top ${sheet.t}) listing the item`, !sheet.hidden && sheet.l >= 0 && sheet.r <= VW && sheet.w >= VW - 40 && sheet.t >= 40 && verdictOf(sheet.text), sheet);
   // r2: the sheet's OWN controls (tabs 17 px, ✓/✕/⤢ 20 px, the session header 18 px before)
   const sheetCtl = await evalJs(rectsOf('#user-todos-popup .ut-tab, #user-todos-popup .ut-act, #user-todos-popup .ut-band-bar'));
-  check(`the sheet's tabs / ✓ ✕ ⤢ / band head (lane foryou-folds: the band bar replaced the session header) are ≥ 36 px tall, the buttons ≥ 36 wide (${sheetCtl.map((r) => r.w + '×' + r.h).join(', ')})`, sheetCtl.length >= 6 && sheetCtl.every((r) => r.h >= 36) && sheetCtl.filter((r) => r.txt.length <= 1).every((r) => r.w >= 36), sheetCtl);
+  check(`the sheet's tabs / ✓ ✕ ⤢ / band head (lane foryou-folds: the band bar replaced the session header) are ≥ 36 px tall, the buttons ≥ 36 wide (${sheetCtl.map((r) => r.w + '×' + r.h).join(', ')})`, sheetCtl.length >= 6 && gateOf(sheetCtl.every((r) => r.h >= 36)) && verdictOf(sheetCtl.filter((r) => r.txt.length <= 1).every((r) => r.w >= 36)), sheetCtl);
   // r2: Escape closes it (a persistent element cannot carry [data-popover] — its own keydown handler)
   await escape();
-  check('Escape closes the sheet (its own handler; the popup cannot carry the [data-popover] protocol)', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  check('Escape closes the sheet (its own handler; the popup cannot carry the [data-popover] protocol)', verdictOf(await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)));
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   // layering: a [data-popover] node above the sheet takes the Escape first (the global handler removes it), the sheet stays
   await evalJs(`(() => { const m = document.createElement('div'); m.className = 'context-menu'; m.setAttribute('data-popover', ''); m.id = 'r2-pop'; document.body.appendChild(m); return true; })()`);
   await escape();
-  check('…and a popover above it takes the Escape first: the popover closes, the sheet stays open', await evalJs(`!document.getElementById('r2-pop') && !document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  check('…and a popover above it takes the Escape first: the popover closes, the sheet stays open', verdictOf(await evalJs(`!document.getElementById('r2-pop') && !document.getElementById('user-todos-popup').classList.contains('hidden')`)));
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
-  check('its door again closes the sheet', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  check('its door again closes the sheet', verdictOf(await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)));
 
   // ── #3 "+" long-press sheet ──
   console.log('#3 "+" long-press sheet');
@@ -521,11 +521,11 @@ try {
   const createSheet = await evalJs(`(() => { const m = document.querySelector('.context-menu.mobile-sheet'); if (!m) return null; const r = m.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), rows: [...m.querySelectorAll('.context-menu-item')].map((el) => ({ txt: el.textContent.trim(), h: Math.round(el.getBoundingClientRect().height), svg: !!el.querySelector('svg') })), vnc: !!app._vncAvailable, apps: !!app._desktopAppsAvailable, prof: !!app._browserProfiles }; })()`);
   // the three browser faces (design-browser-faces direction B, D5): Web view always; Apps… (design 009 §B6: one word) when /api/desktop/apps has a backend; Agent browser when the profile digest is held
   const wantRows = ['Agent session', 'Terminal', 'Files', 'Web view', ...(createSheet?.vnc ? ['Desktop'] : []), ...(createSheet?.apps ? ['Apps…'] : []), ...(createSheet?.prof ? ['Agent browser'] : [])];
-  check(`a real 700 ms press on "+" opens the create sheet with ${wantRows.join(' / ')} (Desktop only when /api/vnc/status says available; Apps… / Agent browser gated like their ⚙ rows)`, createSheet && JSON.stringify(createSheet.rows.map((r) => r.txt)) === JSON.stringify(wantRows), createSheet);
-  check('the sheet is full-width under the nav and every row is ≥ 44 px with an SVG icon', createSheet && createSheet.l <= 12 && createSheet.r >= VW - 12 && createSheet.t >= 40 && createSheet.rows.length >= 4 && createSheet.rows.every((r) => r.h >= 44 && r.svg), createSheet);
+  check(`a real 700 ms press on "+" opens the create sheet with ${wantRows.join(' / ')} (Desktop only when /api/vnc/status says available; Apps… / Agent browser gated like their ⚙ rows)`, gateOf(createSheet) && JSON.stringify(createSheet.rows.map((r) => r.txt)) === JSON.stringify(wantRows), createSheet);
+  check('the sheet is full-width under the nav and every row is ≥ 44 px with an SVG icon', gateOf(createSheet) && createSheet.l <= 12 && createSheet.r >= VW - 12 && createSheet.t >= 40 && createSheet.rows.length >= 4 && verdictOf(createSheet.rows.every((r) => r.h >= 44 && r.svg)), createSheet);
   check('no window opened yet (the press did not also fire the tap)', await evalJs('app.wm.windows.size') === 0);
   await evalJs(`[...document.querySelectorAll('.mobile-sheet .context-menu-item')].find((el) => [...el.querySelectorAll('span')].some((x) => !x.children.length && x.textContent.trim() === 'Files')).click(); true`); // by its word (r3: a hint line may ride under it)
-  check('its Files row opens the file explorer', await waitFor(`!!document.querySelector('.file-explorer') && app.wm.windows.size === 1`));
+  check('its Files row opens the file explorer', verdictOf(await waitFor(`!!document.querySelector('.file-explorer') && app.wm.windows.size === 1`)));
 
   // ── #6 explorer phone layout ──
   console.log('#6 explorer phone layout');
@@ -540,12 +540,12 @@ try {
     return { cols, exScroll: ex.scrollWidth, exClient: ex.clientWidth, listScroll: list.scrollWidth, listClient: list.clientWidth, tools, pathH: Math.round(pathIn.height), pathW: Math.round(pathIn.width),
       bkBottom: Math.round(bk.getBoundingClientRect().bottom), listTop: Math.round(list.getBoundingClientRect().top), bkCollapsed: bk.classList.contains('bk-collapsed'), toggleShown: toggle && getComputedStyle(toggle).display !== 'none', rowsRight: rows, cwd: ex.querySelector('.file-path-input').value };
   })()`);
-  check(`ONE column (Name) on the phone; header cell ends inside the viewport (${fe.cols.map((c) => c.txt + '@' + c.r).join(', ')})`, fe.cols.length === 1 && /^Name/.test(fe.cols[0].txt) && fe.cols[0].r <= VW, fe.cols);
-  check(`no horizontal overflow: explorer ${fe.exScroll}/${fe.exClient}, list ${fe.listScroll}/${fe.listClient}, every row's right edge ≤ ${VW}`, fe.exScroll <= fe.exClient + 1 && fe.listScroll <= fe.listClient + 1 && fe.rowsRight.every((r) => r <= VW + 1), fe);
-  check(`toolbar buttons are ≥ 36×36 (${fe.tools.map((t) => t.join('×')).join(', ')}) and the path input has its own ≥ 36 px line`, fe.tools.length >= 6 && fe.tools.every(([w, h]) => w >= 36 && h >= 36) && fe.pathH >= 36 && fe.pathW >= VW - 60, fe);
-  check('bookmarks are a folded STRIP above the list (chevron shown, panel collapsed, its bottom ≤ the list top)', fe.toggleShown && fe.bkCollapsed && fe.bkBottom <= fe.listTop + 1, fe);
+  check(`ONE column (Name) on the phone; header cell ends inside the viewport (${fe.cols.map((c) => c.txt + '@' + c.r).join(', ')})`, fe.cols.length === 1 && gateOf(/^Name/.test(fe.cols[0].txt)) && fe.cols[0].r <= VW, fe.cols);
+  check(`no horizontal overflow: explorer ${fe.exScroll}/${fe.exClient}, list ${fe.listScroll}/${fe.listClient}, every row's right edge ≤ ${VW}`, fe.exScroll <= fe.exClient + 1 && fe.listScroll <= fe.listClient + 1 && verdictOf(fe.rowsRight.every((r) => r <= VW + 1)), fe);
+  check(`toolbar buttons are ≥ 36×36 (${fe.tools.map((t) => t.join('×')).join(', ')}) and the path input has its own ≥ 36 px line`, fe.tools.length >= 6 && gateOf(fe.tools.every(([w, h]) => w >= 36 && h >= 36)) && fe.pathH >= 36 && fe.pathW >= VW - 60, fe);
+  check('bookmarks are a folded STRIP above the list (chevron shown, panel collapsed, its bottom ≤ the list top)', gateOf(fe.toggleShown) && gateOf(fe.bkCollapsed) && fe.bkBottom <= fe.listTop + 1, fe);
   await evalJs(`document.querySelector('.file-bookmark-toggle').click(); true`); await sleep(150);
-  check('the chevron unfolds the strip', await evalJs(`!document.querySelector('.file-bookmark-panel').classList.contains('bk-collapsed') && getComputedStyle(document.querySelector('.file-bookmark-list')).display !== 'none'`));
+  check('the chevron unfolds the strip', verdictOf(await evalJs(`!document.querySelector('.file-bookmark-panel').classList.contains('bk-collapsed') && getComputedStyle(document.querySelector('.file-bookmark-list')).display !== 'none'`)));
   await evalJs(`document.querySelector('.file-bookmark-toggle').click(); true`);
   // long-press → Select… mode
   await longPress('.file-explorer .file-item');
@@ -553,7 +553,7 @@ try {
   check(`a long-press on a row opens its menu with a Select… row first (${feMenu.slice(0, 3).join(' / ')}…)`, feMenu[0] === 'Select…', feMenu);
   await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].find((el) => el.textContent.trim() === 'Select…').click(); true`); await sleep(150);
   const sel1 = await evalJs(`(() => { const b = document.querySelector('.file-select-bar'); return { shown: getComputedStyle(b).display !== 'none', count: b.querySelector('.file-select-count')?.textContent, n: document.querySelectorAll('.file-item.selected').length, btns: [...b.querySelectorAll('.file-select-btn')].map((x) => Math.round(x.getBoundingClientRect().height)) }; })()`);
-  check('Select… enters the mode: the bar shows "1 selected", the pressed row is selected, its buttons are ≥ 36 px', sel1.shown && sel1.count === '1 selected' && sel1.n === 1 && sel1.btns.length === 6 && sel1.btns.every((h) => h >= 36), sel1);
+  check('Select… enters the mode: the bar shows "1 selected", the pressed row is selected, its buttons are ≥ 36 px', gateOf(sel1.shown) && sel1.count === '1 selected' && sel1.n === 1 && sel1.btns.length === 6 && verdictOf(sel1.btns.every((h) => h >= 36)), sel1);
   await tap('.file-explorer .file-item:nth-of-type(2)');
   const sel2 = await evalJs(`({ count: document.querySelector('.file-select-count')?.textContent, n: document.querySelectorAll('.file-item.selected').length })`);
   check('a tap on a second row TOGGLES it into the selection (2 selected)', sel2.count === '2 selected' && sel2.n === 2, sel2);
@@ -563,13 +563,13 @@ try {
   const dbl0 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(dirSel)}); return { path: document.querySelector('.file-path-input').value, sel: r?.classList.contains('selected'), name: r?.dataset.name, count: document.querySelector('.file-select-count')?.textContent }; })()`);
   await tapTwice(dirSel, 150);
   const dbl1 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(dirSel)}); return { path: document.querySelector('.file-path-input').value, sel: r?.classList.contains('selected'), bar: getComputedStyle(document.querySelector('.file-select-bar')).display !== 'none', count: document.querySelector('.file-select-count')?.textContent, editors: [...app.wm.windows.values()].filter((w) => w.type === 'editor' || w.type === 'viewer').length }; })()`);
-  check(`a double-tap on the "${dbl0.name}" folder row in Select mode keeps the path (${dbl1.path}), keeps the mode (${dbl1.count}) and toggles it twice (selected ${dbl0.sel} → ${dbl1.sel})`, dbl0.name && dbl1.path === dbl0.path && dbl1.bar && dbl1.sel === dbl0.sel && dbl1.count === dbl0.count && dbl1.editors === 0, { dbl0, dbl1 });
+  check(`a double-tap on the "${dbl0.name}" folder row in Select mode keeps the path (${dbl1.path}), keeps the mode (${dbl1.count}) and toggles it twice (selected ${dbl0.sel} → ${dbl1.sel})`, gateOf(dbl0.name) && dbl1.path === dbl0.path && gateOf(dbl1.bar) && dbl1.sel === dbl0.sel && dbl1.count === dbl0.count && dbl1.editors === 0, { dbl0, dbl1 });
   await evalJs(`document.querySelector('.file-select-btn.file-select-done').click(); true`); await sleep(100);
-  check('Done leaves the mode and clears the selection', await evalJs(`getComputedStyle(document.querySelector('.file-select-bar')).display === 'none' && document.querySelectorAll('.file-item.selected').length === 0`));
+  check('Done leaves the mode and clears the selection', verdictOf(await evalJs(`getComputedStyle(document.querySelector('.file-select-bar')).display === 'none' && document.querySelectorAll('.file-item.selected').length === 0`)));
   // negative control: OUTSIDE Select mode the same double-tap still navigates into the folder
   await tapTwice(dirSel, 150);
   const dbl2 = await waitFor(`document.querySelector('.file-path-input').value === ${JSON.stringify(dbl0.path.replace(/\/$/, '') + '/' + dbl0.name)}`, 8000);
-  check(`negative control: outside Select mode a double-tap on the folder row navigates into it (${dbl0.path}/${dbl0.name})`, dbl2, await evalJs(`document.querySelector('.file-path-input').value`));
+  check(`negative control: outside Select mode a double-tap on the folder row navigates into it (${dbl0.path}/${dbl0.name})`, verdictOf(dbl2), await evalJs(`document.querySelector('.file-path-input').value`));
 
   // ── THE EXPLORER ON A PHONE (lane phone-files-door) ──
   console.log('the explorer on a phone (lane phone-files-door)');
@@ -579,21 +579,21 @@ try {
   await waitFor(`document.querySelectorAll('.file-explorer .file-item').length >= 1`);
   const fp = await evalJs(`(() => { const ex = document.querySelector('.file-explorer'); const rows = [...ex.querySelectorAll('.file-item')].map((r) => Math.round(r.getBoundingClientRect().height)); const inp = ex.querySelector('.file-path-input'); const back = ex.querySelector('.file-toolbar > .file-phone-back'); const b = back.getBoundingClientRect();
     return { rows, font: getComputedStyle(inp).fontSize, backFirst: ex.querySelector('.file-toolbar').firstElementChild === back, back: [Math.round(b.width), Math.round(b.height)] }; })()`);
-  check(`the file rows are ≥ 44 px (${fp.rows.join('/')}), the path bar is 16 px (no focus zoom on iOS), ‹ is the toolbar's first button (${fp.back.join('×')})`, fp.rows.length >= 1 && fp.rows.every((h) => h >= 44) && fp.font === '16px' && fp.backFirst && fp.back[0] >= 36 && fp.back[1] >= 36, fp);
+  check(`the file rows are ≥ 44 px (${fp.rows.join('/')}), the path bar is 16 px (no focus zoom on iOS), ‹ is the toolbar's first button (${fp.back.join('×')})`, fp.rows.length >= 1 && gateOf(fp.rows.every((h) => h >= 44)) && fp.font === '16px' && gateOf(fp.backFirst) && fp.back[0] >= 36 && fp.back[1] >= 36, fp);
   // B-d027: `payments` typed in the bar at ~/work goes to ~/work/payments (the field's base 1 = the folder on show)
   await evalJs(`(() => { const i = document.querySelector('.file-explorer .file-path-input'); i.focus(); i.select(); return true; })()`);
   await cdp('Input.insertText', { text: 'payments' }); await sleep(900);
   await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
   const rel = await waitFor(`${EXP}.currentPath === ${JSON.stringify(home2 + '/work/payments')}`, 6000);
-  check('B-d027: a RELATIVE name typed in the path bar resolves against the folder on show (`payments` at ~/work ⇒ ~/work/payments)', rel, await evalJs(`({ path: ${EXP}.currentPath, line: document.querySelector('.file-explorer .pf-under')?.textContent })`));
+  check('B-d027: a RELATIVE name typed in the path bar resolves against the folder on show (`payments` at ~/work ⇒ ~/work/payments)', verdictOf(rel), await evalJs(`({ path: ${EXP}.currentPath, line: document.querySelector('.file-explorer .pf-under')?.textContent })`));
   // the breadcrumbs: a deep folder scrolls them sideways — the folder itself in view, a crumb navigates
   await evalJs(`(async () => { await ${EXP}.navigate(${JSON.stringify(DEEP)}); return true; })()`); await sleep(400);
   const cb = await evalJs(`(() => { const c = document.querySelector('.file-explorer .file-crumbs'); const items = [...c.querySelectorAll('.file-crumb')]; const last = items[items.length - 1].getBoundingClientRect(); const cr = c.getBoundingClientRect();
     return { items: items.map((b) => b.textContent), ox: getComputedStyle(c).overflowX, sw: c.scrollWidth, cw: c.clientWidth, sl: Math.round(c.scrollLeft), lastIn: last.right <= cr.right + 1 && last.left >= cr.left - 1, here: items[items.length - 1].classList.contains('here'), h: Math.min(...items.map((b) => Math.round(b.getBoundingClientRect().height))), exScroll: document.querySelector('.file-explorer').scrollWidth }; })()`);
   check(`the breadcrumbs (${cb.items.join(' › ')}) scroll sideways (${cb.sw} > ${cb.cw}, overflow-x ${cb.ox}) with the folder itself in view (scrollLeft ${cb.sl}), crumbs ≥ 36 px, the explorer itself never wider than the screen`,
-    cb.items[0] === '~' && cb.items[cb.items.length - 1] === 'and-one-more-level' && cb.ox === 'auto' && cb.sw > cb.cw && cb.lastIn && cb.here && cb.sl > 0 && cb.h >= 36 && cb.exScroll <= VW + 1, cb);
+    cb.items[0] === '~' && cb.items[cb.items.length - 1] === 'and-one-more-level' && cb.ox === 'auto' && cb.sw > cb.cw && gateOf(cb.lastIn) && gateOf(cb.here) && cb.sl > 0 && cb.h >= 36 && cb.exScroll <= VW + 1, cb);
   await tap('.file-explorer .file-crumb[data-path="' + home2 + '/work"]');
-  check('a tap on the «work» crumb (scrolled into view) opens ~/work', await waitFor(`${EXP}.currentPath === ${JSON.stringify(home2 + '/work')}`, 6000), await evalJs(`${EXP}.currentPath`));
+  check('a tap on the «work» crumb (scrolled into view) opens ~/work', verdictOf(await waitFor(`${EXP}.currentPath === ${JSON.stringify(home2 + '/work')}`, 6000)), await evalJs(`${EXP}.currentPath`));
   // a long-press on a row's NAME is the row's menu — never a text selection
   await evalJs(`getSelection().removeAllRanges(); true`);
   await longPress('.file-explorer .file-item .file-name');
@@ -602,33 +602,33 @@ try {
   await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
   // «New session here» at the top of the listing → the New Session dialog with this folder
   const nh = await evalJs(`(() => { const b = document.querySelector('.file-explorer .file-new-here'); const r = b.getBoundingClientRect(); const first = document.querySelector('.file-explorer .file-item').getBoundingClientRect(); return { text: b.textContent.trim(), h: Math.round(r.height), above: r.bottom <= first.top + 1 }; })()`);
-  check(`«${nh.text}» heads the listing (above the first row, ${nh.h} px)`, nh.text === 'New session here' && nh.above && nh.h >= 44, nh);
+  check(`«${nh.text}» heads the listing (above the first row, ${nh.h} px)`, nh.text === 'New session here' && gateOf(nh.above) && nh.h >= 44, nh);
   await tap('.file-explorer .file-new-here');
   const ns = await waitFor(`!!document.getElementById('input-cwd')?.offsetParent && document.getElementById('input-cwd').value === ${JSON.stringify(home2 + '/work')}`, 5000);
-  check('…a tap opens New Session with the folder filled in', ns, await evalJs(`({ cwd: document.getElementById('input-cwd')?.value, shown: !!document.getElementById('input-cwd')?.offsetParent })`));
+  check('…a tap opens New Session with the folder filled in', verdictOf(ns), await evalJs(`({ cwd: document.getElementById('input-cwd')?.value, shown: !!document.getElementById('input-cwd')?.offsetParent })`));
   await evalJs('app.hideDialogs(); true'); await sleep(200);
 
   // ── #4 / #5 chat: search chip, chips ≥ 36, hover buttons gone, message long-press ──
   console.log('#4/#5 chat');
   await evalJs(`app.viewSession(${JSON.stringify(SID)}, ${JSON.stringify(CWD)}, 'mobile gaps'); true`);
-  check('the view-only fixture chat renders', await waitFor(`document.querySelectorAll('.chat-view .chat-msg').length >= 6`, 20000));
+  check('the view-only fixture chat renders', verdictOf(await waitFor(`document.querySelectorAll('.chat-view .chat-msg').length >= 6`, 20000)));
   await sleep(600);
   const chips = await evalJs(`(() => { const bar = document.querySelector('.window-active .chat-view .chat-status-bar');
     return { barH: Math.round(bar.getBoundingClientRect().height), search: !!document.querySelector('#mobile-nav-search.on'), onStrip: !!bar.querySelector('.chat-status-search'), searchBar: !!document.querySelector('.window-active .chat-search-bar'),
       chips: [...bar.querySelectorAll('.chat-status-clickable')].filter((c) => c.offsetWidth > 0).map((c) => ({ cls: c.className.split(' ')[0], h: Math.round(c.getBoundingClientRect().height) })) }; })()`);
-  check(`every status-bar chip is ≥ 36 px tall (${chips.chips.map((c) => c.h).join('/')})`, chips.chips.length >= 3 && chips.chips.every((c) => c.h >= 36), chips);
+  check(`every status-bar chip is ≥ 36 px tall (${chips.chips.map((c) => c.h).join('/')})`, chips.chips.length >= 3 && verdictOf(chips.chips.every((c) => c.h >= 36)), chips);
   // 2.369.221 (lane global-search-chrome): every chat view mounts ChatSearch — Search everything lands a hit on a read-only viewer
   // too — so the chip, which follows Ctrl+F's own gate, shows on a VIEW-ONLY window as well (before: neither)
   // (lane mask-value-shape, the strip's step two) search lives where the conversation's NAME lives — the top bar's magnifier
   // (#mobile-nav-search), never the strip — for a view-only window too
-  check('a VIEW-ONLY window builds ChatSearch (Search everything lands there), so the TOP BAR shows its magnifier too — and the strip none (it follows Ctrl+F\'s own gate)', chips.search && chips.searchBar && !chips.onStrip, chips);
+  check('a VIEW-ONLY window builds ChatSearch (Search everything lands there), so the TOP BAR shows its magnifier too — and the strip none (it follows Ctrl+F\'s own gate)', gateOf(chips.search) && gateOf(chips.searchBar) && !chips.onStrip, chips);
   await evalJs(`document.querySelector('#mobile-nav-search')?.click(); true`);
   const vsOpen = await waitFor(`(() => { const b = document.querySelector('.window-active .chat-view .chat-search-bar'); return !!b && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none'; })()`, 4000);
-  check('…and tapping it opens the view-only window\'s search bar', vsOpen, { open: vsOpen });
+  check('…and tapping it opens the view-only window\'s search bar', verdictOf(vsOpen), { open: vsOpen });
   await evalJs(`document.querySelector('.window-active .chat-view .chat-search-close')?.click(); true`); await sleep(150);
   await evalJs(`document.querySelector('.window-active .chat-view .chat-status-model').click(); true`); await sleep(250);
   const ddRows = await evalJs(`[...document.querySelectorAll('.chat-view .chat-status-dropdown-item')].map((el) => Math.round(el.getBoundingClientRect().height))`);
-  check(`the model dropdown rows are ≥ 36 px (${ddRows.join('/')})`, ddRows.length > 0 && ddRows.every((h) => h >= 36), ddRows);
+  check(`the model dropdown rows are ≥ 36 px (${ddRows.join('/')})`, ddRows.length > 0 && verdictOf(ddRows.every((h) => h >= 36)), ddRows);
   await escape();
   const hover = await evalJs(`(() => { const btns = [...document.querySelectorAll('.chat-view .chat-msg > .chat-open-editor-btn')]; return { n: btns.length, shown: btns.filter((b) => getComputedStyle(b).display !== 'none').length }; })()`);
   check(`the ${hover.n} per-message hover buttons are display:none ≤768px (the overlap defect)`, hover.n > 0 && hover.shown === 0, hover);
@@ -637,10 +637,10 @@ try {
   await evalJs(`document.querySelector('.chat-message-list').scrollTop = document.querySelector('.chat-message-list').scrollHeight; true`); await sleep(200);
   await tap('.chat-view .chat-msg.chat-msg-assistant .chat-msg-more');
   const msgMenu = await evalJs(`[...document.querySelectorAll('.context-menu.chat-msg-menu .context-menu-item')].map((el) => el.textContent.trim())`);
-  check(`a tap on a message's … button opens the message menu: ${msgMenu.join(' / ')}`, msgMenu.includes('Copy text') && msgMenu.includes('Open in editor') && msgMenu.includes('Message details'), msgMenu);
+  check(`a tap on a message's … button opens the message menu: ${msgMenu.join(' / ')}`, gateOf(msgMenu.includes('Copy text')) && gateOf(msgMenu.includes('Open in editor')) && verdictOf(msgMenu.includes('Message details')), msgMenu);
   check('…without a Fork row in a VIEW-ONLY window (the fork gate holds)', !msgMenu.includes('Fork from here'), msgMenu);
   await evalJs(`[...document.querySelectorAll('.chat-msg-menu .context-menu-item')].find((el) => el.textContent.trim() === 'Message details').click(); true`); await sleep(200);
-  check('Message details opens the per-message metadata popup', await evalJs(`!!document.querySelector('.msg-meta-pop')`));
+  check('Message details opens the per-message metadata popup', verdictOf(await evalJs(`!!document.querySelector('.msg-meta-pop')`)));
   await escape(); await evalJs(`document.querySelectorAll('.msg-meta-pop').forEach((p) => p.remove()); true`);
 
   // a LIVE chat window (stub CLI behind the real wrapper) carries the magnifier
@@ -658,14 +658,14 @@ try {
       await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'live stub', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
       // lane mask-value-shape (the strip's step two, page §4): the magnifier lives on the phone's TOP bar now, where the
       // conversation's name lives — never on the strip
-      check('the live window attaches on the phone (composer present)', await waitFor(`!!document.querySelector('.window-active .chat-view .chat-input') && !!document.querySelector('#mobile-nav-search.on')`, 20000));
+      check('the live window attaches on the phone (composer present)', verdictOf(await waitFor(`!!document.querySelector('.window-active .chat-view .chat-input') && !!document.querySelector('#mobile-nav-search.on')`, 20000)));
       const mag = await evalJs(`(() => { const s = document.querySelector('#mobile-nav-search'); if (!s) return null; const r = s.getBoundingClientRect(); return { display: getComputedStyle(s).display, w: Math.round(r.width), h: Math.round(r.height), svg: !!s.querySelector('svg') }; })()`);
-      check(`the phone's top bar carries the search magnifier as a ≥ 36×36 SVG button, and the strip none (${mag?.display}, ${mag?.w}×${mag?.h})`, mag && mag.display !== 'none' && mag.w >= 36 && mag.h >= 36 && mag.svg && !(await evalJs(`!!document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-search')`)), mag);
+      check(`the phone's top bar carries the search magnifier as a ≥ 36×36 SVG button, and the strip none (${mag?.display}, ${mag?.w}×${mag?.h})`, gateOf(mag) && mag.display !== 'none' && mag.w >= 36 && mag.h >= 36 && gateOf(mag.svg) && !(await evalJs(`!!document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-search')`)), mag);
       await evalJs(`document.querySelector('#mobile-nav-search').click(); true`); await sleep(250);
-      check('tapping the magnifier opens the search bar (Ctrl+F\'s touch face, the same open())', await evalJs(`(() => { const b = document.querySelector('.window-active .chat-view .chat-search-bar'); return !!b && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none'; })()`));
+      check('tapping the magnifier opens the search bar (Ctrl+F\'s touch face, the same open())', verdictOf(await evalJs(`(() => { const b = document.querySelector('.window-active .chat-view .chat-search-bar'); return !!b && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none'; })()`)));
       // r2: the bar's own prev / next / close were 24×17 / 24×17 / 20×20
       const sbBtns = await evalJs(rectsOf('.window-active .chat-view .chat-search-bar button'));
-      check(`the search bar's prev / next / close buttons are ≥ 36×36 (${sbBtns.map((r) => r.w + '×' + r.h).join(', ')})`, sbBtns.length === 3 && allAtLeast(sbBtns), sbBtns);
+      check(`the search bar's prev / next / close buttons are ≥ 36×36 (${sbBtns.map((r) => r.w + '×' + r.h).join(', ')})`, sbBtns.length === 3 && verdictOf(allAtLeast(sbBtns)), sbBtns);
 
       // ── the billing chip follows the member (lane billing-chip, 2026-09-30) ──
       // The owner's phone kept the member a conversation STARTED on after the pool moved it to another one: the
@@ -689,17 +689,17 @@ try {
         const b = ${chipNow};
         return { fed: fed0 && fed1, a, b, onStrip: !!document.querySelector('.window-active .chat-view .chat-status-bar > .chat-status-billing') };
       })()`);
-      check(`a stub active-sessions frame through the page's own socket puts the pooled identity on the phone's account row (${JSON.stringify(walk.a?.text)})`, walk.fed && walk.a && walk.a.pooled && walk.a.text === '⣿ 全部 → Alpha Max' && !walk.onStrip, walk);
-      check(`after a per-session switch (the SAME pool, member B) the row names B (${JSON.stringify(walk.b?.text)}) — the owner's phone kept A`, walk.b && walk.b.text === '⣿ 全部 → Beta Max' && /currently billing Beta Max/.test(walk.b.title), walk);
+      check(`a stub active-sessions frame through the page's own socket puts the pooled identity on the phone's account row (${JSON.stringify(walk.a?.text)})`, gateOf(walk.fed) && gateOf(walk.a) && gateOf(walk.a.pooled) && walk.a.text === '⣿ 全部 → Alpha Max' && !walk.onStrip, walk);
+      check(`after a per-session switch (the SAME pool, member B) the row names B (${JSON.stringify(walk.b?.text)}) — the owner's phone kept A`, gateOf(walk.b) && walk.b.text === '⣿ 全部 → Beta Max' && verdictOf(/currently billing Beta Max/.test(walk.b.title)), walk);
       // the person's road: a tap on «⚙ 对话设置», its «Who pays» row says B, inside the phone's viewport
       await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
       await tap('.window-active .chat-view .chat-status-settings'); await sleep(400);
       await shot('billing-chip-member-b.png');
       const after = await evalJs(`(() => { const row = document.querySelector('.chat-status-dropdown .chat-status-settings-row[data-row="billing"]'); if (!row) return null; const r = row.getBoundingClientRect(); return { text: (row.querySelector('.chat-status-settings-value') || row).textContent.replace(/\\s*›$/, '').trim(), l: Math.round(r.left), r: Math.round(r.right) }; })()`);
-      check(`the screenshot's «Who pays» row reads B, inside the ${VW} px viewport (${JSON.stringify(after?.text)} at ${after?.l}–${after?.r}; ${SHOTS}/billing-chip-member-b.png)`, after && after.text === '⣿ 全部 → Beta Max' && after.l >= 0 && after.r <= VW, after);
+      check(`the screenshot's «Who pays» row reads B, inside the ${VW} px viewport (${JSON.stringify(after?.text)} at ${after?.l}–${after?.r}; ${SHOTS}/billing-chip-member-b.png)`, gateOf(after) && after.text === '⣿ 全部 → Beta Max' && after.l >= 0 && after.r <= VW, after);
       await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
       await evalJs(`(() => { const sessions = JSON.parse(${JSON.stringify(realRows)}); app.ws.ws.onmessage({ data: JSON.stringify({ type: 'active-sessions', sessions }) }); return true; })()`);
-      check('the real list put back: the row no longer claims a pool', await waitFor(`!(${chipNow})?.pooled`, 3000));
+      check('the real list put back: the row no longer claims a pool', verdictOf(await waitFor(`!(${chipNow})?.pooled`, 3000)));
     }
     try { liveWs.close(); } catch {}
   }
@@ -728,20 +728,20 @@ try {
       await say('after the lock', 2500);
       await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'scene 5-1', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
       const VIEW = `[...(app.sessions?.values?.() || [])].find((v) => v && v._statusBar && v._statusBar._sessionId === ${JSON.stringify(sid)})`;
-      check('the scene window attaches on the phone', await waitFor(`!!(${VIEW}) && !!(${VIEW})._statusBar.element.querySelector('[data-chip="model"]') && /served by claude-fable-5-2/.test((${VIEW})._messageList.textContent)`, 20000));
+      check('the scene window attaches on the phone', verdictOf(await waitFor(`!!(${VIEW}) && !!(${VIEW})._statusBar.element.querySelector('[data-chip="model"]') && /served by claude-fable-5-2/.test((${VIEW})._messageList.textContent)`, 20000)));
       const look = `(() => { const v = ${VIEW}; const el = v._statusBar.element.querySelector('[data-chip="model"]'); const txt = v._messageList.textContent;
         const lab = el.querySelector('.chat-status-model-label') || el;   // (the strip's MUST 4) the chip's FACE is a label; its value is data-raw
         return { text: (lab.dataset.raw ?? lab.textContent).trim(), face: lab.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: !!v._statusBar._modelLocked,
           old: (txt.match(/old turn \\d+ served by claude-fable-5-1/g) || []).length, neu: (txt.match(/new turn \\d+ served by claude-fable-5-2/g) || []).length }; })()`;
       const tail = await evalJs(look);
       // (round 14: WHILE A LOCK STANDS the chip is master's code — a page that attached after the served change names the lock's target)
-      check(`at the tail (the newest records drawn first): the locked chip is master's — the lock's target for a page that never saw a served change, «${tail.text}» — plain, never an older record's 5-1`, tail.locked && !tail.amber && (tail.text.includes('fable[1m]') || /claude-fable-5-2/.test(tail.text)) && !/5-1/.test(tail.text), tail);
+      check(`at the tail (the newest records drawn first): the locked chip is master's — the lock's target for a page that never saw a served change, «${tail.text}» — plain, never an older record's 5-1`, gateOf(tail.locked) && !tail.amber && (gateOf(tail.text.includes('fable[1m]')) || gateOf(/claude-fable-5-2/.test(tail.text))) && !/5-1/.test(tail.text), tail);
       await evalJs(`(async () => { await (${VIEW}).jumpToIndex(0); return true; })()`);
       const drewOld = await waitFor(`/old turn 1 served by claude-fable-5-1/.test((${VIEW})._messageList.textContent)`, 15000);
       await sleep(600);
       const older = await evalJs(look);
       await shot('model-chip-older-history.png');
-      check(`…the older history loaded AFTER the newest (the pre-update turns drawn: ${older.old} served by claude-fable-5-1, their inits with them)`, drewOld && older.old > 0, older);
+      check(`…the older history loaded AFTER the newest (the pre-update turns drawn: ${older.old} served by claude-fable-5-1, their inits with them)`, gateOf(drewOld) && older.old > 0, older);
       check(`…and the chip still names what the server says, «${older.text}» — never an older record's model (the base read «🔒 claude-fable-5-1»)`, older.text === tail.text && !older.amber && !/5-1/.test(older.text), { tail, older });
       await evalJs(`(async () => { await (${VIEW}).jumpToBottom({ user: true }); return true; })()`); await sleep(800);
       const down = await evalJs(look);
@@ -768,12 +768,12 @@ try {
       check(`MUST 2 (between turns — round 15: the server writes nothing): /model opus typed, then a turn served by opus ⇒ the chip names what the CLI reported (its next init), plain «${t1.text}»`, !u0.locked && t1.ask === 'claude-opus-5-5' && !t1.amber && t1.text === 'claude-opus-5-5', { u0, t1 });
       await tapLock(); const l1 = await facts(); const f1 = (await lockFrames()).slice(-1)[0];
       await typeIn('a turn after the lock'); const l1t = await facts();
-      check(`MUST 1 (round 13, master's Lock): the Lock tapped on the phone sends master's frame — no model to switch to, its lockModel what the chip shows (${JSON.stringify(f1)}) — and the hub locks THAT: claude-opus-5-5, the model the CLI reported; the next turn stays plain «${l1t.text}»`, !!f1 && f1.lock === true && !('model' in f1) && f1.lockModel === 'claude-opus-5-5' && l1.locked && l1.lockedModel === 'claude-opus-5-5' && l1t.lockedModel === 'claude-opus-5-5' && !l1t.amber && l1t.text.includes('claude-opus-5-5'), { f1, l1, l1t });
+      check(`MUST 1 (round 13, master's Lock): the Lock tapped on the phone sends master's frame — no model to switch to, its lockModel what the chip shows (${JSON.stringify(f1)}) — and the hub locks THAT: claude-opus-5-5, the model the CLI reported; the next turn stays plain «${l1t.text}»`, !!f1 && f1.lock === true && !('model' in f1) && f1.lockModel === 'claude-opus-5-5' && gateOf(l1.locked) && l1.lockedModel === 'claude-opus-5-5' && l1t.lockedModel === 'claude-opus-5-5' && !l1t.amber && verdictOf(l1t.text.includes('claude-opus-5-5')), { f1, l1, l1t });
       await tapLock();                                                     // unlock
       sWs.send(JSON.stringify({ type: 'set-model', sessionId: sid, model: 'sonnet' })); await sleep(1200);   // a pick on client A
       await tapLock(); const l2 = await facts(); const f2 = (await lockFrames()).slice(-1)[0];               // the Lock on client B
       await typeIn('a turn after the pick and the lock'); const l2t = await facts();
-      check(`MUST 1 across two clients: a pick of sonnet on A, its LIVE echo, then Lock tapped on B (master's frame: what B's chip shows — the CLI's report of A's pick, as master's echo road showed it) ⇒ locked claude-sonnet-5-5, the chip plain «${l2t.text}»`, !!f2 && !('model' in f2) && f2.lockModel === 'claude-sonnet-5-5' && l2.lockedModel === 'claude-sonnet-5-5' && l2t.lockedModel === 'claude-sonnet-5-5' && !l2t.amber && l2t.text.includes('claude-sonnet-5-5'), { f2, l2, l2t });
+      check(`MUST 1 across two clients: a pick of sonnet on A, its LIVE echo, then Lock tapped on B (master's frame: what B's chip shows — the CLI's report of A's pick, as master's echo road showed it) ⇒ locked claude-sonnet-5-5, the chip plain «${l2t.text}»`, !!f2 && !('model' in f2) && f2.lockModel === 'claude-sonnet-5-5' && l2.lockedModel === 'claude-sonnet-5-5' && l2t.lockedModel === 'claude-sonnet-5-5' && !l2t.amber && verdictOf(l2t.text.includes('claude-sonnet-5-5')), { f2, l2, l2t });
       // MUST 2 mid-turn: /model typed while a turn runs is held by the REAL wrapper until the turn ends; the running turn's own
       // old-model record does not drop it
       await tapLock();                                                     // unlock
@@ -783,10 +783,10 @@ try {
       await tapLock();                                                     // lock (on opus)
       await typeIn('SLOW', 600); await typeIn('/model sonnet', 4500); await typeIn('a turn after the mid-turn /model sonnet');
       const m2 = await facts();
-      check(`MUST 2 (mid-turn, locked — round 14, master's way): /model sonnet is taken but the LOCK STANDS on claude-opus-5-5 (r5's «the lock follows the person» retracted: master's repin re-asks it) — «${m2.text}»`, m2.locked && m2.lockedModel === 'claude-opus-5-5', m2);
+      check(`MUST 2 (mid-turn, locked — round 14, master's way): /model sonnet is taken but the LOCK STANDS on claude-opus-5-5 (r5's «the lock follows the person» retracted: master's repin re-asks it) — «${m2.text}»`, gateOf(m2.locked) && m2.lockedModel === 'claude-opus-5-5', m2);
       await typeIn('SLOW', 600); await typeIn('/model nope-model', 4500); await typeIn('a turn after the refused /model');
       const m3 = await facts();
-      check(`MUST 2 (mid-turn, a model the CLI refuses): dropped — the lock still claude-opus-5-5, the refused id never named «${m3.text}»`, m3.locked && m3.lockedModel === 'claude-opus-5-5' && !/nope/.test(m3.text + m3.ask), m3);
+      check(`MUST 2 (mid-turn, a model the CLI refuses): dropped — the lock still claude-opus-5-5, the refused id never named «${m3.text}»`, gateOf(m3.locked) && m3.lockedModel === 'claude-opus-5-5' && !/nope/.test(m3.text + m3.ask), m3);
       await shot('model-chip-lock-and-typed.png');
     }
     try { sWs.close(); } catch {}
@@ -796,25 +796,25 @@ try {
   console.log('#7 desktop management in the switcher');
   await evalJs(`document.getElementById('mobile-nav-title').click(); true`); await sleep(300);
   const sw0 = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); return { open: !!p, add: !!p?.querySelector('.mobile-desk-add'), tabs: [...(p?.querySelectorAll('.mobile-desk-tab:not(.mobile-desk-add)') || [])].map((t) => t.textContent.trim()), desks: app.desktopManager.desktops.length, rows: p?.querySelectorAll('.mobile-win-row').length, wins: [...app.wm.windows.values()].filter((w) => !w.isMinimized && !w._hiddenByDesktop).length, tabH: Math.round(p?.querySelector('.mobile-desk-add')?.getBoundingClientRect().height || 0), closeBtns: [...(p?.querySelectorAll('.mobile-win-row button:not(.mobile-win-more):not(.mobile-win-split)') || [])].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }) }; })()`);
-  check(`the switcher lists ${sw0.desks} desktop tab(s) + a "+" tab (≥ 36 px) and one row per window on this desktop (${sw0.rows} of ${sw0.wins})`, sw0.open && sw0.add && sw0.tabs.length === sw0.desks && sw0.tabH >= 36 && sw0.rows === sw0.wins && sw0.rows >= 3, sw0);
-  check(`every window row's ✕ is ≥ 36×36 (r2; was 32×32: ${sw0.closeBtns.map((b) => b.join('×')).join(', ')})`, sw0.closeBtns.length === sw0.rows && sw0.closeBtns.every(([w, h]) => w >= 36 && h >= 36), sw0.closeBtns);
+  check(`the switcher lists ${sw0.desks} desktop tab(s) + a "+" tab (≥ 36 px) and one row per window on this desktop (${sw0.rows} of ${sw0.wins})`, gateOf(sw0.open) && gateOf(sw0.add) && sw0.tabs.length === sw0.desks && sw0.tabH >= 36 && sw0.rows === sw0.wins && sw0.rows >= 3, sw0);
+  check(`every window row's ✕ is ≥ 36×36 (r2; was 32×32: ${sw0.closeBtns.map((b) => b.join('×')).join(', ')})`, sw0.closeBtns.length === sw0.rows && verdictOf(sw0.closeBtns.every(([w, h]) => w >= 36 && h >= 36)), sw0.closeBtns);
   await evalJs(`document.querySelector('.mobile-win-switcher .mobile-desk-add').click(); true`); await sleep(1200);
   const sw1 = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); return { open: !!p, tabs: [...(p?.querySelectorAll('.mobile-desk-tab:not(.mobile-desk-add)') || [])].map((t) => t.textContent.trim()), desks: app.desktopManager.desktops.length, active: app.desktopManager.activeDesktopId, lastId: app.desktopManager.desktops[app.desktopManager.desktops.length - 1].id }; })()`);
-  check(`"+" creates a desktop and switches to it (${sw1.desks} desktops, tabs: ${sw1.tabs.join(' | ')})`, sw1.open && sw1.desks === sw0.desks + 1 && sw1.tabs.length === sw1.desks && sw1.active === sw1.lastId, sw1);
+  check(`"+" creates a desktop and switches to it (${sw1.desks} desktops, tabs: ${sw1.tabs.join(' | ')})`, gateOf(sw1.open) && sw1.desks === sw0.desks + 1 && sw1.tabs.length === sw1.desks && sw1.active === sw1.lastId, sw1);
   await longPress('.mobile-win-switcher .mobile-desk-tab:not(.mobile-desk-add)');
   const deskMenu = await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((el) => ({ label: (el.querySelector('.door-label') || el).textContent.trim(), why: el.querySelector('.door-why')?.textContent.trim() || '', off: el.classList.contains('disabled') }))`);
   // lane desktop-doors-table: the desktop's doors are THE table's (src/desktop-switch.js) — the first desktop's Move up greyed WITH its why
   check(`a long-press on a desktop tab offers the desktop's doors — Rename… / Delete / Move up / Move down, the first one's Move up greyed with its why (${deskMenu.map((x) => x.label + (x.off ? ' [' + x.why + ']' : '')).join(' / ')})`,
-    JSON.stringify(deskMenu.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && deskMenu[2].off && deskMenu[2].why === 'Already the first desktop' && !deskMenu[0].off && !deskMenu[1].off && !deskMenu[3].off, deskMenu);
-  check('…and the switcher stays open underneath (a child popover is not a dismissal)', await evalJs(`!!document.querySelector('.mobile-win-switcher')`));
+    JSON.stringify(deskMenu.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && gateOf(deskMenu[2].off) && deskMenu[2].why === 'Already the first desktop' && !deskMenu[0].off && !deskMenu[1].off && !deskMenu[3].off, deskMenu);
+  check('…and the switcher stays open underneath (a child popover is not a dismissal)', verdictOf(await evalJs(`!!document.querySelector('.mobile-win-switcher')`)));
   await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].find((el) => el.textContent.trim() === 'Delete').click(); true`); await sleep(1200);
-  check('Delete removes the new desktop and the tabs re-render', await evalJs(`app.desktopManager.desktops.length === ${sw0.desks} && document.querySelectorAll('.mobile-win-switcher .mobile-desk-tab:not(.mobile-desk-add)').length === ${sw0.desks}`));
+  check('Delete removes the new desktop and the tabs re-render', verdictOf(await evalJs(`app.desktopManager.desktops.length === ${sw0.desks} && document.querySelectorAll('.mobile-win-switcher .mobile-desk-tab:not(.mobile-desk-add)').length === ${sw0.desks}`)));
   // a second desktop so Move to Desktop has a target, then the window-row menu
   await evalJs(`app.desktopManager.createDesktop('Second'); true`); await sleep(300);
   await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); document.getElementById('mobile-nav-title').click(); true`); await sleep(300);
   await longPress('.mobile-win-switcher .mobile-win-row');
   const winMenu = await evalJs(`[...document.querySelectorAll('.taskbar-context-menu > .taskbar-context-menu-item')].map((el) => el.textContent.trim())`);
-  check(`a long-press on a window row opens the 'window' menu incl. Move to Desktop and Close (${winMenu.join(' / ')})`, winMenu.some((x) => /Move to Desktop/.test(x)) && winMenu.some((x) => /Close/.test(x)), winMenu);
+  check(`a long-press on a window row opens the 'window' menu incl. Move to Desktop and Close (${winMenu.join(' / ')})`, gateOf(winMenu.some((x) => /Move to Desktop/.test(x))) && verdictOf(winMenu.some((x) => /Close/.test(x))), winMenu);
   await escape(); await evalJs(`document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); document.querySelector('.mobile-win-switcher')?.remove(); true`);
 
   // ── #W THE WAITING DOORS (lane phone-take-photo; the owner 2026-11-10 17:10Z, phone: «在手机上那个闪烁功能不能 reflect 到 desktop 跟对话的
@@ -856,24 +856,24 @@ try {
     await waitOn(S.a); await waitOn(S.b); await sleep(400);
     const DOOR = `(() => { const b = document.getElementById('mobile-nav-desktops'), d = b && b.querySelector(':scope > .mnav-wait-dot'), r = d && d.getBoundingClientRect(); return { on: !!b && b.classList.contains('mnav-waiting'), dot: !!(r && r.width > 0), label: b ? b.getAttribute('aria-label') || '' : '' }; })()`;
     const d0 = await evalJs(DOOR);
-    check(`THE CLOSED DOOR: the Desktops button wears the yellow dot and says it («${d0.label}»)`, d0.on && d0.dot && WAITW.test(d0.label), d0);
+    check(`THE CLOSED DOOR: the Desktops button wears the yellow dot and says it («${d0.label}»)`, gateOf(d0.on) && gateOf(d0.dot) && verdictOf(WAITW.test(d0.label)), d0);
     await snap('waiting-door');
     // the title switcher: the tabs roll it up, the waiting row says it (a blink + a standing dot); the row on show does not
     await evalJs(`document.getElementById('mobile-nav-title').click(); true`); await sleep(400);
     const SW = `(() => { const p = document.querySelector('.mobile-win-switcher'); if (!p) return null; const tab = (id) => p.querySelector('.mobile-desk-tab[data-desktop-id="' + id + '"]'), row = (id) => p.querySelector('.mobile-win-row[data-win-id="' + id + '"]'), dot = (e) => !!e && !!e.querySelector(':scope > .mnav-wait-dot');
       return { tabOther: !!tab(${JSON.stringify(S.other)})?.classList.contains('waiting'), tabHere: !!tab(${JSON.stringify(S.here)})?.classList.contains('waiting'), rowB: !!row(${JSON.stringify(S.b)})?.classList.contains('waiting'), rowShown: !!row(${JSON.stringify(S.shown)})?.classList.contains('waiting'), dots: [dot(tab(${JSON.stringify(S.other)})), dot(row(${JSON.stringify(S.b)}))] }; })()`;
     const sw0 = await evalJs(SW);
-    check('THE TITLE SWITCHER: both tabs roll it up; the waiting conversation\'s row says it (blink + standing dot); the row on show does not', sw0 && sw0.tabOther && sw0.tabHere && sw0.rowB && !sw0.rowShown && sw0.dots.every(Boolean), sw0);
+    check('THE TITLE SWITCHER: both tabs roll it up; the waiting conversation\'s row says it (blink + standing dot); the row on show does not', gateOf(sw0) && gateOf(sw0.tabOther) && gateOf(sw0.tabHere) && gateOf(sw0.rowB) && !sw0.rowShown && verdictOf(sw0.dots.every(Boolean)), sw0);
     await snap('waiting-switcher');
     // r2 smaller: REDUCED MOTION — the overlay's one cycle ends at opacity 0; the standing dot stays
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }, { name: 'prefers-reduced-motion', value: 'reduce' }] }); await sleep(500);
     const rm = await evalJs(`(() => { const r = document.querySelector('.mobile-win-row[data-win-id="${S.b}"]'), d = r && r.querySelector(':scope > .mnav-wait-dot'), t = document.querySelector('.mobile-desk-tab[data-desktop-id="${S.other}"] > .mnav-wait-dot'); const op = (e) => e ? Number(getComputedStyle(e).opacity) : -1, w = (e) => e ? Math.round(e.getBoundingClientRect().width) : 0; return { row: op(d), tab: op(t), rw: w(d), tw: w(t), rm: matchMedia('(prefers-reduced-motion: reduce)').matches }; })()`);
-    check(`REDUCED MOTION keeps a standing mark on the waiting row and tab (dot opacity ${rm.row} / ${rm.tab})`, rm.rm && rm.row >= 0.99 && rm.tab >= 0.99 && rm.rw > 0 && rm.tw > 0, rm);
+    check(`REDUCED MOTION keeps a standing mark on the waiting row and tab (dot opacity ${rm.row} / ${rm.tab})`, gateOf(rm.rm) && rm.row >= 0.99 && rm.tab >= 0.99 && rm.rw > 0 && rm.tw > 0, rm);
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] }); await sleep(200);
     // LIVE in place: B's waiting ends while the list is open
     await evalJs(`window.__wdRow = document.querySelector('.mobile-win-row[data-win-id="${S.b}"]'); true`); await waitOff(S.b); await sleep(400);
     const sw1 = await evalJs(`(() => { const r = document.querySelector('.mobile-win-row[data-win-id="${S.b}"]'); return { same: r === window.__wdRow, waiting: !!r?.classList.contains('waiting'), dot: !!r?.querySelector(':scope > .mnav-wait-dot'), tabHere: !!document.querySelector('.mobile-desk-tab[data-desktop-id="${S.here}"]')?.classList.contains('waiting') }; })()`);
-    check('…LIVE: its waiting ends while the list is open ⇒ the SAME row node drops the mark and its dot; this desktop\'s tab too', sw1.same && !sw1.waiting && !sw1.dot && !sw1.tabHere, sw1);
+    check('…LIVE: its waiting ends while the list is open ⇒ the SAME row node drops the mark and its dot; this desktop\'s tab too', gateOf(sw1.same) && !sw1.waiting && !sw1.dot && !sw1.tabHere, sw1);
     // r2 ②: a tap on a waiting ROW is seeing it — B waits again, its row is tapped: B on show, its waiting gone on this device
     await waitOn(S.b); await sleep(400);
     await tap(`.mobile-win-switcher .mobile-win-row[data-win-id="${S.b}"]`); await sleep(700);
@@ -881,22 +881,22 @@ try {
     check('…a tap on the waiting row lands on it and IS seeing it: on show, its waiting gone on this device (no press inside needed)', rowTap.shown === S.b && !rowTap.waits, rowTap);
     await evalJs(`app.wm.revealWindow(${JSON.stringify(S.shown)}); true`); await sleep(500);
     const away = await evalJs(`({ shown: app.wm.activeWindowId, waits: app.wm.windows.get(${JSON.stringify(S.b)}).element.classList.contains('window-waiting'), label: document.getElementById('mobile-nav-desktops').getAttribute('aria-label') || '' })`);
-    check(`…and switching away brings no dot back for it (it was seen): it waits no more; the door counts only the other desktop's («${away.label}»)`, away.shown === S.shown && !away.waits && WAIT1.test(away.label), away);
+    check(`…and switching away brings no dot back for it (it was seen): it waits no more; the door counts only the other desktop's («${away.label}»)`, away.shown === S.shown && !away.waits && verdictOf(WAIT1.test(away.label)), away);
     await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); true`);
     // the Desktops sheet: A waits on the other desktop — the row rolls it up, names it first; live in place
     const SH = `(() => { const m = document.querySelector('.mdesk-menu'); if (!m) return null; const row = (id) => m.querySelector(':scope > .context-menu-item[data-desktop-id="' + id + '"]'), o = row(${JSON.stringify(S.other)}), h = row(${JSON.stringify(S.here)});
       return { other: !!o?.classList.contains('mdesk-waiting'), words: o?.querySelector('.mdesk-wait')?.textContent || '', titles: o?.querySelector('.mdesk-titles')?.textContent || '', here: !!h?.classList.contains('mdesk-waiting'), h: o ? Math.round(o.getBoundingClientRect().height) : 0 }; })()`;
     await openDesks(); await sleep(400);
     const sh0 = await evalJs(SH);
-    check(`THE DESKTOPS SHEET: the other desktop's row rolls it up — the mark, «${sh0 && sh0.words}», the waiting conversation named first; this desktop's row (nothing waits there now) says nothing`, !!sh0 && sh0.other && WAIT1.test(sh0.words) && sh0.titles.startsWith(S.aTitle || '\u0000') && !sh0.here && sh0.h >= 44, sh0);
+    check(`THE DESKTOPS SHEET: the other desktop's row rolls it up — the mark, «${sh0 && sh0.words}», the waiting conversation named first; this desktop's row (nothing waits there now) says nothing`, !!sh0 && gateOf(sh0.other) && gateOf(WAIT1.test(sh0.words)) && gateOf(sh0.titles.startsWith(S.aTitle || '\u0000')) && !sh0.here && sh0.h >= 44, sh0);
     await snap('waiting-sheet');
     await evalJs(`window.__wdMenu = document.querySelector('.mdesk-menu'); window.__wdSheetRow = window.__wdMenu.querySelector(':scope > .context-menu-item[data-desktop-id="${S.other}"]'); true`); await waitOff(S.a); await sleep(400);
     const sh1 = await evalJs(`(() => { const m = document.querySelector('.mdesk-menu'), r = m && m.querySelector(':scope > .context-menu-item[data-desktop-id="${S.other}"]'); return { sameMenu: m === window.__wdMenu, sameRow: r === window.__wdSheetRow, waiting: !!r?.classList.contains('mdesk-waiting'), words: !!r?.querySelector('.mdesk-wait'), door: document.getElementById('mobile-nav-desktops').classList.contains('mnav-waiting') }; })()`);
-    check('…LIVE: its waiting ends while the sheet is open ⇒ the SAME sheet and row drop the mark and the words; the closed door drops its dot', sh1.sameMenu && sh1.sameRow && !sh1.waiting && !sh1.words && !sh1.door, sh1);
+    check('…LIVE: its waiting ends while the sheet is open ⇒ the SAME sheet and row drop the mark and the words; the closed door drops its dot', gateOf(sh1.sameMenu) && gateOf(sh1.sameRow) && !sh1.waiting && !sh1.words && !sh1.door, sh1);
     // r2 ③a: it STARTS waiting while the sheet is open ⇒ patched to say so, and its tap lands on IT (the live facts, not the open's)
     await waitOn(S.a); await sleep(400);
     const sh2 = await evalJs(SH);
-    check('…and it starts again while the sheet is open ⇒ the mark and the words come back in place', !!sh2 && sh2.other && WAIT1.test(sh2.words), sh2);
+    check('…and it starts again while the sheet is open ⇒ the mark and the words come back in place', !!sh2 && gateOf(sh2.other) && verdictOf(WAIT1.test(sh2.words)), sh2);
     await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${S.other}"]`); await sleep(1200);
     const land = await evalJs(`({ desk: app.desktopManager.activeDesktopId, shown: app.wm.activeWindowId, door: document.getElementById('mobile-nav-desktops').classList.contains('mnav-waiting'), title: document.getElementById('mobile-nav-title').textContent, waits: app.wm.windows.get(${JSON.stringify(S.a)}).element.classList.contains('window-waiting') })`);
     check(`a tap on the row that STARTED waiting after the open LANDS on that conversation («${land.title}») — read from the live facts`, land.desk === S.other && land.shown === S.a, land);
@@ -911,7 +911,7 @@ try {
     const g1 = await onA(`v._onServerStreamLabel('thinking...', null)`);
     const g2 = await onA(`v._onServerStreamLabel('Running a background agent…', null)`);
     const g3 = await onA(`v._onServerStreamLabel('', null)`);
-    check('THE GAP: the turn completes, a re-attach restates «streaming» + «thinking...», a background tail, the idle ⇒ it STILL waits here and the closed door still says it', g0.waits && g1.waits && g2.waits && g3.waits && g3.door, { g0, g1, g2, g3 });
+    check('THE GAP: the turn completes, a re-attach restates «streaming» + «thinking...», a background tail, the idle ⇒ it STILL waits here and the closed door still says it', gateOf(g0.waits) && gateOf(g1.waits) && gateOf(g2.waits) && gateOf(g3.waits) && verdictOf(g3.door), { g0, g1, g2, g3 });
     const g4 = await onA(`v._onOp({ op: 'create', message: { id: 'wd-next-' + Date.now(), role: 'user', status: 'complete', turnIndex: Math.max(v._turnSeqState?.max || 0, ...v._messages.map((m) => m.turnIndex || 0)) + 1, content: [{ type: 'text', text: 'the answer' }], ts: Date.now() } })`);
     check('THE NEXT TURN STARTS (the person answered elsewhere: its record — a turn past the completed one — reaches this client) ⇒ the finished-turn mark ends HERE with no focus, and the door goes quiet', !g4.waits && g4.shown !== S.a && !g4.door, g4);
     // r3 ②: THE SWITCHER'S DESKTOP TAB said it waits — its landing on the waiting conversation IS seeing it
@@ -920,7 +920,7 @@ try {
     const tb0 = await evalJs(`(() => { const t = document.querySelector('.mobile-win-switcher .mobile-desk-tab[data-desktop-id="${S.other}"]'); return { waiting: !!t?.classList.contains('waiting'), dot: !!t?.querySelector(':scope > .mnav-wait-dot'), remembered: app._mobileNav._shown?.[${JSON.stringify(S.other)}] || null }; })()`);
     await tap(`.mobile-win-switcher .mobile-desk-tab[data-desktop-id="${S.other}"]`); await sleep(1200);
     const tb1 = await evalJs(`({ desk: app.desktopManager.activeDesktopId, shown: app.wm.activeWindowId, waits: app.wm.windows.get(${JSON.stringify(S.a)}).element.classList.contains('window-waiting') })`);
-    check('THE SWITCHER\'S TAB that wears the dot lands on its desktop\'s remembered window — the waiting conversation — and that landing IS seeing it', tb0.waiting && tb0.dot && tb0.remembered === S.a && tb1.desk === S.other && tb1.shown === S.a && !tb1.waits, { tb0, tb1 });
+    check('THE SWITCHER\'S TAB that wears the dot lands on its desktop\'s remembered window — the waiting conversation — and that landing IS seeing it', gateOf(tb0.waiting) && gateOf(tb0.dot) && tb0.remembered === S.a && tb1.desk === S.other && tb1.shown === S.a && !tb1.waits, { tb0, tb1 });
     await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); app._mobileNav.switchDesktop(${JSON.stringify(S.here)}); true`); await sleep(1200);
     check('…and switching away from it brings no dot back (it was seen)', !(await evalJs(DOOR)).on);
     // ⋯ standing in for a folded Desktops door: the dot AND the words (its name; its menu's Desktops row)
@@ -928,10 +928,10 @@ try {
     const shownNow = await evalJs('app.wm.activeWindowId'), tTitle = await evalJs(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w ? w.title : ''; })()`);
     await evalJs(`app.wm.setTitle(app.wm.activeWindowId, 'A title long enough to fold every chip of this phone bar into the overflow — the waiting doors'); true`); await sleep(800);
     const more = await evalJs(`(() => { const m = document.getElementById('mobile-nav-overflow'), d = m && m.querySelector(':scope > .mnav-wait-dot'), r = d && d.getBoundingClientRect(); return { folded: [...(app._mobileNav._folded || [])], on: !!m?.classList.contains('mnav-waiting'), dot: !!(r && r.width > 0), label: m ? m.getAttribute('aria-label') || '' : '' }; })()`);
-    check(`⋯ standing in for a FOLDED Desktops door wears the dot and SAYS it in its name («${more.label}»)`, more.folded.includes('desktops') && more.on && more.dot && WAIT1.test(more.label), more);
+    check(`⋯ standing in for a FOLDED Desktops door wears the dot and SAYS it in its name («${more.label}»)`, gateOf(more.folded.includes('desktops')) && gateOf(more.on) && gateOf(more.dot) && verdictOf(WAIT1.test(more.label)), more);
     await tap('#mobile-nav-overflow'); await sleep(500);
     const mrow = await evalJs(`(() => { const r = document.querySelector('.mnav-more-menu .context-menu-item[data-key="desktops"]'); return r ? { cls: r.className, text: r.textContent.replace(/\\s+/g, ' ').trim(), dot: !!r.querySelector(':scope > .mnav-wait-dot') } : null; })()`);
-    check(`…and inside ⋯ the Desktops row says what its door says («${mrow && mrow.text}»), marked`, !!mrow && /mnav-more-waiting/.test(mrow.cls) && WAIT1.test(mrow.text) && mrow.dot, mrow);
+    check(`…and inside ⋯ the Desktops row says what its door says («${mrow && mrow.text}»), marked`, !!mrow && gateOf(/mnav-more-waiting/.test(mrow.cls)) && gateOf(WAIT1.test(mrow.text)) && verdictOf(mrow.dot), mrow);
     await snap('waiting-more');
     await escape(); await evalJs(`document.querySelectorAll('.mnav-more-menu').forEach((m) => m.remove()); true`);
     await evalJs(`app.wm.setTitle(${JSON.stringify(shownNow)}, ${JSON.stringify(tTitle)}); true`); await sleep(500);
@@ -945,13 +945,13 @@ try {
   console.log('#10 terminal key row');
   await evalJs(`app.openShellTerminal(); true`);
   const termUp = await waitFor(`document.querySelectorAll('.window-active .mobile-term-keys .mobile-term-key').length >= 16`, 25000);
-  check('a plain shell terminal opens on the phone (real dtach session)', termUp);
+  check('a plain shell terminal opens on the phone (real dtach session)', verdictOf(termUp));
   if (termUp) {
     const keys = await evalJs(`(() => { const ks = [...document.querySelectorAll('.window-active .mobile-term-keys .mobile-term-key')]; const row = document.querySelector('.window-active .mobile-term-keys');
       return { n: ks.length, rects: ks.map((k) => { const r = k.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), h: Math.round(r.height), w: Math.round(r.width) }; }), copy: !!row.querySelector('.mobile-term-copy'), emoji: /[\\u{1F300}-\\u{1FAFF}]/u.test(row.textContent), rowScroll: row.scrollWidth, rowClient: row.clientWidth }; })()`);
-    check(`all ${keys.n} keys sit inside the viewport (max right ${Math.max(...keys.rects.map((r) => r.r))} ≤ ${VW}; row ${keys.rowScroll}/${keys.rowClient})`, keys.rects.every((r) => r.l >= 0 && r.r <= VW + 1) && keys.rowScroll <= keys.rowClient + 1, keys);
-    check(`every key is ≥ 36×36 px (min ${Math.min(...keys.rects.map((r) => r.h))} tall / ${Math.min(...keys.rects.map((r) => r.w))} wide)`, keys.rects.every((r) => r.h >= 36 && r.w >= 36), keys.rects);
-    check('the row carries a Copy-screen key and no emoji glyph (SVG icons only)', keys.copy && !keys.emoji, keys);
+    check(`all ${keys.n} keys sit inside the viewport (max right ${Math.max(...keys.rects.map((r) => r.r))} ≤ ${VW}; row ${keys.rowScroll}/${keys.rowClient})`, gateOf(keys.rects.every((r) => r.l >= 0 && r.r <= VW + 1)) && keys.rowScroll <= keys.rowClient + 1, keys);
+    check(`every key is ≥ 36×36 px (min ${Math.min(...keys.rects.map((r) => r.h))} tall / ${Math.min(...keys.rects.map((r) => r.w))} wide)`, verdictOf(keys.rects.every((r) => r.h >= 36 && r.w >= 36)), keys.rects);
+    check('the row carries a Copy-screen key and no emoji glyph (SVG icons only)', gateOf(keys.copy) && !keys.emoji, keys);
     // Copy screen reads the buffer: with nothing rendered yet it must SAY so rather than copy '' silently
     await sleep(1200); // let the shell paint its first lines
     await evalJs(`navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); }; document.querySelector('.window-active .mobile-term-copy').click(); true`);
@@ -959,7 +959,7 @@ try {
     const copied = await evalJs(`({ toasts: [...document.querySelectorAll('.global-toast')].map((t) => t.textContent.trim()), text: window.__copied == null ? null : String(window.__copied) })`);
     const m = copied.toasts.map((t) => t.match(/Copied (\d+) lines/)).find(Boolean);
     const lines = copied.text == null ? null : copied.text.split('\n');
-    check(`tapping Copy screen copies the visible rows and SAYS so (toast "${m ? m[0] : copied.toasts.join('|')}", ${lines ? lines.length : 'no'} lines reached the clipboard, trailing blank lines dropped)`, !!m && lines && lines.length === Number(m[1]) && lines[lines.length - 1].trim() !== '' && copied.text.trim().length > 0, { toasts: copied.toasts, head: (copied.text || '').slice(0, 80) });
+    check(`tapping Copy screen copies the visible rows and SAYS so (toast "${m ? m[0] : copied.toasts.join('|')}", ${lines ? lines.length : 'no'} lines reached the clipboard, trailing blank lines dropped)`, !!m && gateOf(lines) && lines.length === Number(m[1]) && lines[lines.length - 1].trim() !== '' && copied.text.trim().length > 0, { toasts: copied.toasts, head: (copied.text || '').slice(0, 80) });
   }
 
   // ── a SECOND client: a 1280×800 desktop page on the same server (r2, the
@@ -979,8 +979,8 @@ try {
   await desk.waitFor('!app.layoutManager._restoring && !(app.desktopManager && app.desktopManager._restoring)', 15000);
   await sleep(300);
   const denv = await desk.evalJs(`({ mobile: app.isMobile, rail: !!app.sidebar._railEl, tab: app.sidebar._activeTab, iw: innerWidth, wins: app.wm.windows.size, seq: app.layoutManager._lastRemoteSeq })`);
-  check(`a desktop client (${denv.iw} px, activity rail ${denv.rail ? 'on' : 'OFF'}, tab '${denv.tab}') joins the same instance (${denv.wins} windows restored from the shared record)`, !denv.mobile && denv.rail && denv.iw === 1280, denv);
-  check('lane phone-first-screen: the 1280×800 desktop draws no attention page (its first screen is the desktop\'s own; the seeded ask stays in its tray)', await desk.evalJs(`!app.phoneHome?.shown?.() && !app.phoneHome?.show?.() && getComputedStyle(document.getElementById('phone-home')).display === 'none' && document.getElementById('phone-home').childElementCount === 0`)); // lane duo-build-1: the page is wired on every page (a fold to the phone reaches it) — a desktop never shows it, even asked
+  check(`a desktop client (${denv.iw} px, activity rail ${denv.rail ? 'on' : 'OFF'}, tab '${denv.tab}') joins the same instance (${denv.wins} windows restored from the shared record)`, !denv.mobile && gateOf(denv.rail) && denv.iw === 1280, denv);
+  check('lane phone-first-screen: the 1280×800 desktop draws no attention page (its first screen is the desktop\'s own; the seeded ask stays in its tray)', verdictOf(await desk.evalJs(`!app.phoneHome?.shown?.() && !app.phoneHome?.show?.() && getComputedStyle(document.getElementById('phone-home')).display === 'none' && document.getElementById('phone-home').childElementCount === 0`))); // lane duo-build-1: the page is wired on every page (a fold to the phone reaches it) — a desktop never shows it, even asked
 
   // ── #9 ⚙ System… / Ports… / Channels… land in windows (no rail on a phone) ──
   console.log('#9 gear rows → windows on the phone, WINDOWS on the desktop');
@@ -992,26 +992,26 @@ try {
   };
   const gearRows = async () => { await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`); await pressGear(); await sleep(300); return evalJs(`[...document.querySelectorAll('.global-settings-popover .gs-menu-item')].map((el) => el.textContent.trim())`); };
   const rows = await gearRows();
-  check(`the ⚙ menu lists System monitor… / Ports… / Channels… on the phone (${rows.filter((r) => /System monitor…|Ports…|Channels…/.test(r)).join(' / ')})`, ['System monitor…', 'Ports…', 'Channels…'].every((l) => rows.some((r) => r.startsWith(l))), rows);
+  check(`the ⚙ menu lists System monitor… / Ports… / Channels… on the phone (${rows.filter((r) => /System monitor…|Ports…|Channels…/.test(r)).join(' / ')})`, verdictOf(['System monitor…', 'Ports…', 'Channels…'].every((l) => rows.some((r) => r.startsWith(l)))), rows);
   const openGear = async (label, sel, type) => {
     const dBefore = await desk.evalJs(`({ tab: app.sidebar._activeTab, open: app.sidebar.isOpen })`);
     // 2.369.129: System monitor… / Ports… are CHILDREN of the System head (accordion: a collapsed .gs-sub) — expand the head first when the row sits in one; a missing row is a named failure, never a page exception
     const found = await evalJs(`(async () => { const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); for (let i = 0; i < 20 && !document.querySelector('.global-settings-popover'); i++) await sleep(100); const rows = () => [...document.querySelectorAll('.global-settings-popover .gs-menu-item')]; let el = rows().find((e) => e.textContent.trim().startsWith(${JSON.stringify(label)})); if (!el) return { found: false, rows: rows().map((e) => e.textContent.trim().slice(0, 24)) }; const sub = el.closest('.gs-sub'); if (sub && !sub.classList.contains('open')) { const head = sub.previousElementSibling; if (head && head.classList.contains('gs-menu-item')) { head.click(); await sleep(150); } } el = rows().find((e) => e.textContent.trim().startsWith(${JSON.stringify(label)})); if (!el) return { found: false, rows: rows().map((e) => e.textContent.trim().slice(0, 24)) }; el.click(); return { found: true }; })()`);
     check(`⚙ row ${label} is present on the phone menu (expanded under its head when nested)`, !!found?.found, JSON.stringify(found));
     const ok = await waitFor(`!!document.querySelector('.window-active ${sel}') && [...app.wm.windows.values()].some((w) => w.type === ${JSON.stringify(type)})`, 15000);
-    check(`⚙ ${label} opens a '${type}' window hosting the rail panel renderer (${sel})`, ok);
+    check(`⚙ ${label} opens a '${type}' window hosting the rail panel renderer (${sel})`, verdictOf(ok));
     // r2: the phone's layout save replays it on the rail-bearing desktop as a WINDOW with the same id
     const id = await evalJs(`[...app.wm.windows.values()].find((w) => w.type === ${JSON.stringify(type)})?.id`);
     const mirrored = await desk.waitFor(`[...app.wm.windows.values()].some((w) => w.type === ${JSON.stringify(type)} && w.id === ${JSON.stringify(id)})`, 15000);
     const dAfter = await desk.evalJs(`({ tab: app.sidebar._activeTab, open: app.sidebar.isOpen, railPanel: !!app.sidebar.listEl?.querySelector('.rail-panel-' + ${JSON.stringify(type)}), wins: [...app.wm.windows.values()].filter((w) => w.type === ${JSON.stringify(type)}).map((w) => w.id) })`);
-    check(`…and the desktop client (rail on) replays it as a '${type}' WINDOW ${id} — its rail tab stays '${dBefore.tab}', no rail panel, its sidebar does not open by itself`, mirrored && dAfter.tab === dBefore.tab && !dAfter.railPanel && !(dAfter.open && !dBefore.open) && dAfter.wins.length === 1, { dBefore, dAfter, mirrored, id });
+    check(`…and the desktop client (rail on) replays it as a '${type}' WINDOW ${id} — its rail tab stays '${dBefore.tab}', no rail panel, its sidebar does not open by itself`, gateOf(mirrored) && dAfter.tab === dBefore.tab && !dAfter.railPanel && !(dAfter.open && !dBefore.open) && dAfter.wins.length === 1, { dBefore, dAfter, mirrored, id });
     await gearRows();
   };
   await openGear('System monitor…', '.rail-panel-system', 'system');
   await openGear('Ports…', '.rail-panel-ports', 'ports');
   await openGear('Channels…', '.rail-panel-channels .chan-bar', 'channels');   // a4: the panel's bar (chan-head retired)
   await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`);
-  check('opening System monitor… again focuses the existing window (singleton)', await evalJs(`(async () => { const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const before = app.wm.windows.size; app._showGlobalSettings(document.getElementById('mobile-nav-gear')); for (let i = 0; i < 20 && !document.querySelector('.global-settings-popover'); i++) await sleep(100); const rows = () => [...document.querySelectorAll('.global-settings-popover .gs-menu-item')]; let el = rows().find((e) => e.textContent.trim().startsWith('System monitor…')); const sub = el && el.closest('.gs-sub'); if (sub && !sub.classList.contains('open')) { const head = sub.previousElementSibling; if (head && head.classList.contains('gs-menu-item')) { head.click(); await sleep(150); } el = rows().find((e) => e.textContent.trim().startsWith('System monitor…')); } if (!el) return false; el.click(); await sleep(200); document.querySelector('.global-settings-popover')?.remove(); return app.wm.windows.size === before && app.wm.windows.get(app.wm.activeWindowId)?.type === 'system'; })()`));
+  check('opening System monitor… again focuses the existing window (singleton)', verdictOf(await evalJs(`(async () => { const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const before = app.wm.windows.size; app._showGlobalSettings(document.getElementById('mobile-nav-gear')); for (let i = 0; i < 20 && !document.querySelector('.global-settings-popover'); i++) await sleep(100); const rows = () => [...document.querySelectorAll('.global-settings-popover .gs-menu-item')]; let el = rows().find((e) => e.textContent.trim().startsWith('System monitor…')); const sub = el && el.closest('.gs-sub'); if (sub && !sub.classList.contains('open')) { const head = sub.previousElementSibling; if (head && head.classList.contains('gs-menu-item')) { head.click(); await sleep(150); } el = rows().find((e) => e.textContent.trim().startsWith('System monitor…')); } if (!el) return false; el.click(); await sleep(200); document.querySelector('.global-settings-popover')?.remove(); return app.wm.windows.size === before && app.wm.windows.get(app.wm.activeWindowId)?.type === 'system'; })()`)));
   // the desktop's OWN next save must leave the phone's three windows alone
   {
     const phoneBefore = await evalJs(`[...app.wm.windows.values()].filter((w) => ['system', 'ports', 'channels'].includes(w.type)).map((w) => w.type + ':' + w.id).sort()`);
@@ -1022,14 +1022,14 @@ try {
     const arrived = await waitFor(`app.layoutManager._lastRemoteSeq > ${pseq}`, 15000);
     await sleep(800);
     const phoneAfter = await evalJs(`({ three: [...app.wm.windows.values()].filter((w) => ['system', 'ports', 'channels'].includes(w.type)).map((w) => w.type + ':' + w.id).sort(), files: [...app.wm.windows.values()].filter((w) => w.type === 'files').length })`);
-    check(`the desktop's next layout save (it opened an explorer; seq ${pseq} → later) reaches the phone and leaves the phone's System / Ports / Channels windows in place (${phoneAfter.three.length} of ${phoneBefore.length}; explorers now ${phoneAfter.files})`, arrived && JSON.stringify(phoneAfter.three) === JSON.stringify(phoneBefore) && phoneAfter.files === 2, { phoneBefore, phoneAfter, arrived });
+    check(`the desktop's next layout save (it opened an explorer; seq ${pseq} → later) reaches the phone and leaves the phone's System / Ports / Channels windows in place (${phoneAfter.three.length} of ${phoneBefore.length}; explorers now ${phoneAfter.files})`, gateOf(arrived) && JSON.stringify(phoneAfter.three) === JSON.stringify(phoneBefore) && phoneAfter.files === 2, { phoneBefore, phoneAfter, arrived });
   }
 
   // ── #10 minimize: the TRUTH is shared, only the display is local (r2) ──
   console.log('#10 minimize across two clients');
   {
     const filesId = await evalJs(`[...app.wm.windows.values()].find((w) => w.type === 'files')?.id`);
-    check('the desktop client mirrors the phone\'s explorer', await desk.waitFor(`app.wm.windows.has(${JSON.stringify(filesId)})`, 15000));
+    check('the desktop client mirrors the phone\'s explorer', verdictOf(await desk.waitFor(`app.wm.windows.has(${JSON.stringify(filesId)})`, 15000)));
     // the phone shows ANOTHER window (§6b guard 10: a record never takes the phone's window on show off its screen —
     // scripts/test-phone-desktop-sync ④ is that leg); the explorer is minimized by the desktop behind it
     const otherId = await evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type !== 'files' && !w.isMinimized && !(w._tabChain && w._tabChain.tabs[0] !== w.id)); if (w) app.wm.focusWindow(w.id); return w?.id || null; })()`); await sleep(300);
@@ -1040,55 +1040,55 @@ try {
     const pm = await waitFor(`app.wm.windows.get(${JSON.stringify(filesId)})?.isMinimized === true`, 15000);
     const ps = await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); const a = app.wm.windows.get(app.wm.activeWindowId); return { min: w?.isMinimized, display: w ? getComputedStyle(w.element).display : null, activeIsIt: app.wm.activeWindowId === ${JSON.stringify(filesId)}, activeType: a?.type, activeShown: a ? getComputedStyle(a.element).display : 'none' }; })()`);
     const activeNow = await evalJs('app.wm.activeWindowId');
-    check(`the phone applies the synced minimize as TRUTH (isMinimized true), hides it locally (computed ${ps.display}) and keeps ITS window on show (${ps.activeType}: ${ps.activeShown})`, pm && ps.min === true && ps.display === 'none' && !ps.activeIsIt && ps.activeShown !== 'none' && !!otherId && activeNow === otherId, { ps, otherId, activeNow });
+    check(`the phone applies the synced minimize as TRUTH (isMinimized true), hides it locally (computed ${ps.display}) and keeps ITS window on show (${ps.activeType}: ${ps.activeShown})`, gateOf(pm) && ps.min === true && ps.display === 'none' && !ps.activeIsIt && ps.activeShown !== 'none' && !!otherId && activeNow === otherId, { ps, otherId, activeNow });
     await tap('#mobile-nav-title'); await sleep(300);
     const swm = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); return { head: !!p?.querySelector('.mobile-win-minimized-head'), minRows: [...(p?.querySelectorAll('.mobile-win-row.mobile-win-minimized') || [])].map((r) => r.textContent.trim().slice(0, 30)), plain: p?.querySelectorAll('.mobile-win-row:not(.mobile-win-minimized)').length }; })()`);
-    check(`the switcher lists it under Minimized (${swm.minRows.join(' | ')}) beside ${swm.plain} plain rows`, swm.head && swm.minRows.length === 1 && swm.plain >= 1, swm);
+    check(`the switcher lists it under Minimized (${swm.minRows.join(' | ')}) beside ${swm.plain} plain rows`, gateOf(swm.head) && swm.minRows.length === 1 && swm.plain >= 1, swm);
     // the phone's next save (a real tap focuses another row → z changes → a send) must NOT restore it on the desktop
     const dseq = await desk.evalJs(`app.layoutManager._lastRemoteSeq`);
     await tap('.mobile-win-switcher .mobile-win-row:not(.mobile-win-minimized)');
     const arrived = await desk.waitFor(`app.layoutManager._lastRemoteSeq > ${dseq}`, 15000);
     await sleep(800);
     const dAfter = await desk.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); return { min: w?.isMinimized, display: w?.element.style.display }; })()`);
-    check(`the phone's save arrives on the desktop (seq ${dseq} → later) and the desktop's window STAYS minimized (r1 restored it: min:false rode the phone's save)`, arrived && dAfter.min === true && dAfter.display === 'none', { arrived, dAfter });
+    check(`the phone's save arrives on the desktop (seq ${dseq} → later) and the desktop's window STAYS minimized (r1 restored it: min:false rode the phone's save)`, gateOf(arrived) && dAfter.min === true && dAfter.display === 'none', { arrived, dAfter });
     // the phone's restore is ITS view (§6b guard 10, lane phone-arrangement-local): shown here, never written into the desktop's record
     await tap('#mobile-nav-title'); await sleep(300);
     const rowGeo = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); const r = p?.querySelector('.mobile-win-row.mobile-win-minimized'); if (!p || !r) return null; const pr = p.getBoundingClientRect(), rr = r.getBoundingClientRect(); return { popBottom: Math.round(pr.bottom), rowTop: Math.round(rr.top), rowBottom: Math.round(rr.bottom), ih: innerHeight }; })()`);
     await tap('.mobile-win-switcher .mobile-win-row.mobile-win-minimized');
     const pr = await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); return { min: w.isMinimized, display: getComputedStyle(w.element).display, active: app.wm.activeWindowId === ${JSON.stringify(filesId)} }; })()`);
-    check(`a tap on the Minimized row (scrolled into the sheet's view first: row ${rowGeo?.rowTop}–${rowGeo?.rowBottom}, sheet bottom ${rowGeo?.popBottom}) restores it on the phone (shown, active)`, pr.min === false && pr.display !== 'none' && pr.active, { pr, rowGeo });
+    check(`a tap on the Minimized row (scrolled into the sheet's view first: row ${rowGeo?.rowTop}–${rowGeo?.rowBottom}, sheet bottom ${rowGeo?.popBottom}) restores it on the phone (shown, active)`, pr.min === false && pr.display !== 'none' && verdictOf(pr.active), { pr, rowGeo });
     await sleep(2500); // the restore tap's save (if its record differs at all) has landed by now
-    check('…and the desktop keeps it MINIMIZED (guard 10: a phone writes membership, never arrangement — 2.369.125 r2 sent the phone\'s restore to every desktop)', await desk.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); return !!w && w.isMinimized === true && w.element.style.display === 'none'; })()`));
+    check('…and the desktop keeps it MINIMIZED (guard 10: a phone writes membership, never arrangement — 2.369.125 r2 sent the phone\'s restore to every desktop)', verdictOf(await desk.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); return !!w && w.isMinimized === true && w.element.style.display === 'none'; })()`)));
   }
 
   // ── measured defect: the settings nav strip wraps ──
   console.log('settings nav strip');
   await evalJs(`app._settingsUI?.open(); true`);
-  check('the Settings window opens', await waitFor(`!!document.querySelector('.settings-window .settings-nav')`));
+  check('the Settings window opens', verdictOf(await waitFor(`!!document.querySelector('.settings-window .settings-nav')`)));
   const nav = await evalJs(`(() => { const n = document.querySelector('.settings-window .settings-nav'); const items = [...n.querySelectorAll('.settings-nav-item')]; return { scroll: n.scrollWidth, client: n.clientWidth, wrap: getComputedStyle(n).flexWrap, n: items.length, inside: items.every((i) => i.getBoundingClientRect().right <= innerWidth + 1), minH: Math.min(...items.map((i) => Math.round(i.getBoundingClientRect().height))) }; })()`);
-  check(`the settings nav wraps (${nav.n} categories, scrollWidth ${nav.scroll} ≤ ${nav.client}, every item inside the viewport, rows ≥ 36 px)`, nav.wrap === 'wrap' && nav.scroll <= nav.client + 1 && nav.inside && nav.minH >= 36, nav);
+  check(`the settings nav wraps (${nav.n} categories, scrollWidth ${nav.scroll} ≤ ${nav.client}, every item inside the viewport, rows ≥ 36 px)`, nav.wrap === 'wrap' && nav.scroll <= nav.client + 1 && gateOf(nav.inside) && nav.minH >= 36, nav);
   await shot('settings-nav-phone.png');
   // B-df40 part 2: the header's ONE "Show advanced settings" switch at phone width — inside the window, clear of
   // Reset All; off, categories end with "N advanced settings hidden · Show"; on, advanced rows draw with their chip
   const advQ = `(() => { const w = document.querySelector('.settings-window'); const sw = w && w.querySelector('.settings-adv-switch'); const rb = w && w.querySelector('.settings-header-btn'); if (!sw || !rb) return null; const a = sw.getBoundingClientRect(), b = rb.getBoundingClientRect(), win = w.getBoundingClientRect(); return { inside: a.width > 0 && a.left >= win.left - 1 && a.right <= win.right + 1, overlap: !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top), on: sw.querySelector('input').checked, lines: w.querySelectorAll('.settings-adv-hidden').length, chips: w.querySelectorAll('.settings-chip-advanced').length, vw: innerWidth }; })()`;
   const adv0 = await evalJs(advQ);
-  check(`the "Show advanced settings" switch sits inside the ${adv0 && adv0.vw} px window, clear of Reset All; off, categories end with a hidden-count line (${adv0 && adv0.lines})`, !!adv0 && adv0.inside && !adv0.overlap && !adv0.on && adv0.lines >= 5 && adv0.chips === 0, adv0);
+  check(`the "Show advanced settings" switch sits inside the ${adv0 && adv0.vw} px window, clear of Reset All; off, categories end with a hidden-count line (${adv0 && adv0.lines})`, !!adv0 && gateOf(adv0.inside) && !adv0.overlap && !adv0.on && adv0.lines >= 5 && adv0.chips === 0, adv0);
   await evalJs(`(() => { document.querySelector('.settings-window .settings-adv-switch input').click(); return true; })()`);
   const adv1 = await evalJs(advQ);
-  check(`…switched on: no hidden-count line, the advanced rows draw with their chip (${adv1 && adv1.chips})`, !!adv1 && adv1.on && adv1.lines === 0 && adv1.chips >= 40, adv1);
+  check(`…switched on: no hidden-count line, the advanced rows draw with their chip (${adv1 && adv1.chips})`, !!adv1 && gateOf(adv1.on) && adv1.lines === 0 && adv1.chips >= 40, adv1);
   await evalJs(`(() => { document.querySelector('.settings-window .settings-adv-switch input').click(); return localStorage.getItem('vibespace.settingsAdvanced'); })()`);
   // 2.369.133 (owner "手机上这个配置层级渲染有点问题"): .132 flattened the groups with
   // display:contents, so the heads sat INLINE among the categories and folded on a tap.
   // The phone strip is SECTIONED: every group head is a full-width label on a line of its
   // own (no chevron, no pointer), and its categories start BELOW it.
   const sections = await evalJs(`(() => { const n = document.querySelector('.settings-window .settings-nav'); const navW = n.clientWidth; return [...n.querySelectorAll('.settings-nav-group')].map((g) => { const h = g.querySelector('.settings-nav-group-head'); const hr = h.getBoundingClientRect(); const items = [...g.querySelectorAll('.settings-nav-item')].map((i) => i.getBoundingClientRect()); const svg = h.querySelector('svg'); return { id: g.dataset.group, label: h.textContent.trim(), headW: Math.round(hr.width), navW, ownRow: items.every((r) => r.top >= hr.bottom - 1), sameRowAsHead: items.filter((r) => r.top < hr.bottom - 1 && r.left > hr.left).length, chevron: svg ? getComputedStyle(svg).display : 'none', pointer: getComputedStyle(h).pointerEvents, display: getComputedStyle(g).display, itemsVisible: items.filter((r) => r.width > 0).length, items: items.length }; }); })()`);
-  check(`every group head is a full-width label on its own row (${sections.map((s) => s.label + ':' + s.headW + '/' + s.navW).join(', ')})`, sections.length >= 4 && sections.every((s) => s.headW >= s.navW - 24 && s.ownRow && s.sameRowAsHead === 0), sections);
-  check('the phone head shows no chevron and takes no pointer (a tap folds nothing, nothing sticks in :hover)', sections.every((s) => s.chevron === 'none' && s.pointer === 'none' && s.display !== 'contents'), sections);
+  check(`every group head is a full-width label on its own row (${sections.map((s) => s.label + ':' + s.headW + '/' + s.navW).join(', ')})`, sections.length >= 4 && verdictOf(sections.every((s) => s.headW >= s.navW - 24 && s.ownRow && s.sameRowAsHead === 0)), sections);
+  check('the phone head shows no chevron and takes no pointer (a tap folds nothing, nothing sticks in :hover)', verdictOf(sections.every((s) => s.chevron === 'none' && s.pointer === 'none' && s.display !== 'contents')), sections);
   // negative control: a fold saved on this device (the desktop's persisted key) is IGNORED on the phone
   await evalJs(`localStorage.setItem('vibespace.settingsNavFolds', JSON.stringify(['services', 'harness'])); app._settingsUI._navFolds = null; const sw = [...app.wm.windows.values()].find((w) => w.type === 'settings'); if (sw) app.wm.closeWindow(sw.id); true`);
   await sleep(200);
   await evalJs(`app._settingsUI.open(); true`);
-  check('the Settings window reopens', await waitFor(`!!document.querySelector('.settings-window .settings-nav-group[data-group="services"]')`));
+  check('the Settings window reopens', verdictOf(await waitFor(`!!document.querySelector('.settings-window .settings-nav-group[data-group="services"]')`)));
   const foldedPhone = await evalJs(`(() => { const g = document.querySelector('.settings-window .settings-nav-group[data-group="services"]'); const items = [...g.querySelectorAll('.settings-nav-item')]; return { folded: g.classList.contains('is-folded'), visible: items.filter((i) => i.getBoundingClientRect().width > 0).length, items: items.length }; })()`);
   check(`a fold saved for this device still shows every category on the phone (services folded=${foldedPhone.folded}, ${foldedPhone.visible}/${foldedPhone.items} visible)`, foldedPhone.folded === true && foldedPhone.items > 0 && foldedPhone.visible === foldedPhone.items, foldedPhone);
   await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); true`);
@@ -1113,19 +1113,19 @@ try {
     const rows = await evalJs(READ), by = Object.fromEntries(rows.map((r) => [r.t.slice('Mark · '.length), r]));
     for (const [b, type, name] of HARNESS) {
       const r = by[name] || {};
-      check(`phone list: the ${b} ${type === 'chat' ? 'conversation' : 'terminal'} wears the ${b} mark (backend-icon-${b}, the ${type} mode mark)`, /\bbackend-icon\b/.test(r.cls || '') && new RegExp('\\bbackend-icon-' + b + '\\b').test(r.cls || '') && /\bmode-backend-icon\b/.test(r.cls || ''), r);
+      check(`phone list: the ${b} ${type === 'chat' ? 'conversation' : 'terminal'} wears the ${b} mark (backend-icon-${b}, the ${type} mode mark)`, gateOf(/\bbackend-icon\b/.test(r.cls || '')) && gateOf(new RegExp('\\bbackend-icon-' + b + '\\b').test(r.cls || '')) && verdictOf(/\bmode-backend-icon\b/.test(r.cls || '')), r);
     }
-    check('phone list: an unknown harness wears the generic mark — never an empty box', /\bbackend-icon-generic\b/.test(by['an unknown harness']?.cls || '') && !!by['an unknown harness']?.text, by['an unknown harness']);
-    check('phone list: a plain shell terminal wears the shell mark', /\bbackend-icon-shell\b/.test(by['a plain shell']?.cls || ''), by['a plain shell']);
+    check('phone list: an unknown harness wears the generic mark — never an empty box', gateOf(/\bbackend-icon-generic\b/.test(by['an unknown harness']?.cls || '')) && !!by['an unknown harness']?.text, by['an unknown harness']);
+    check('phone list: a plain shell terminal wears the shell mark', verdictOf(/\bbackend-icon-shell\b/.test(by['a plain shell']?.cls || '')), by['a plain shell']);
     check(`phone list: a Design window keeps its type glyph at its size (${by['Design']?.gw} px)`, !/backend-icon/.test(by['Design']?.cls || '') && !!by['Design']?.svg && by['Design']?.gw >= 15, by['Design']);
     check('phone list: a conversation whose harness is not known yet shows the chat glyph', !/backend-icon/.test(by['late']?.cls || '') && !!by['late']?.svg, by['late']);
     const dz = by['Design'] || {};
-    check(`phone list: every row keeps its press target and words (${rows.map((r) => r.h + 'px/' + r.fs).join(' ')})`, rows.length === ROWS.length && rows.every((r) => r.h >= 44 && Math.abs(r.h - dz.h) <= 1 && r.fs === '13px'), rows);
+    check(`phone list: every row keeps its press target and words (${rows.map((r) => r.h + 'px/' + r.fs).join(' ')})`, rows.length === ROWS.length && verdictOf(rows.every((r) => r.h >= 44 && Math.abs(r.h - dz.h) <= 1 && r.fs === '13px')), rows);
     await snap(phone, 'phone-list-dark');
     // a harness known LATE (a restored row): the open list follows, no re-open
     await evalJs(`app.wm.setTitleMeta(${JSON.stringify(ids['late'])}, { backend: 'codex' }); true`); await sleep(400);
     const late = (await evalJs(READ)).find((r) => r.t === 'Mark · late') || {};
-    check('phone list: the harness known late — the OPEN list\'s row now wears the codex mark', /\bbackend-icon-codex\b/.test(late.cls || ''), late);
+    check('phone list: the harness known late — the OPEN list\'s row now wears the codex mark', verdictOf(/\bbackend-icon-codex\b/.test(late.cls || '')), late);
     // a theme flip keeps the marks legible (the contrast helper, theme-colors-changed)
     const LEGIBLE = `(() => { const lum = (c) => { const v = (c.match(/[\\d.]+/g) || ['0', '0', '0']).slice(0, 3).map(Number).map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; }; const bgOf = (el) => { for (let e = el; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor, a = c.match(/[\\d.]+/g); if (a && (a.length < 4 || Number(a[3]) > 0.5)) return c; } return 'rgb(0, 0, 0)'; }; return [...document.querySelectorAll('.mobile-win-switcher .mobile-win-row')].filter((r) => /^Mark · (claude|codex|opencode|antigravity|late)$/.test(r.children[1]?.textContent || '')).map((r) => { const m = r.querySelector('.backend-icon'); if (!m) return { t: r.children[1].textContent, ratio: 0 }; const a = lum(getComputedStyle(m).color), b = lum(bgOf(r)); return { t: r.children[1].textContent, ratio: +((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2), color: getComputedStyle(m).color, bg: bgOf(r) }; }); })()`;
     const theme0 = await evalJs(`app.themeManager.current || 'dark'`);
@@ -1137,9 +1137,9 @@ try {
     const legBack = await evalJs(LEGIBLE);
     await evalJs(`app.themeManager.apply(${JSON.stringify(theme0)}); true`); await sleep(300);
     const fmt = (l) => l.map((x) => x.t.slice(7) + ' ' + x.ratio).join(', ');
-    check(`phone list: the brand marks stay legible on the dark theme (≥ 3:1 — ${fmt(legDark)})`, legDark.length === 5 && legDark.every((x) => x.ratio >= 3), legDark);
-    check(`phone list: …and after a flip to the light theme (${fmt(legLight)})`, legLight.length === 5 && legLight.every((x) => x.ratio >= 3), legLight);
-    check(`phone list: …and back to dark (${fmt(legBack)})`, legBack.length === 5 && legBack.every((x) => x.ratio >= 3), legBack);
+    check(`phone list: the brand marks stay legible on the dark theme (≥ 3:1 — ${fmt(legDark)})`, legDark.length === 5 && verdictOf(legDark.every((x) => x.ratio >= 3)), legDark);
+    check(`phone list: …and after a flip to the light theme (${fmt(legLight)})`, legLight.length === 5 && verdictOf(legLight.every((x) => x.ratio >= 3)), legLight);
+    check(`phone list: …and back to dark (${fmt(legBack)})`, legBack.length === 5 && verdictOf(legBack.every((x) => x.ratio >= 3)), legBack);
     await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); for (const id of ${JSON.stringify(Object.values(ids))}) { try { app.wm.closeWindow(id); } catch {} } true`); await sleep(300);
     // the desk's ⧉ list (the taskbar's window-count chip): the same call, the title bar's 14-px size — the rows keep their height
     const dIds = await desk.evalJs(make('Desk mark · '));
@@ -1148,11 +1148,11 @@ try {
     const dRows = await desk.evalJs(`[...document.querySelectorAll('.overlap-switcher .overlap-switcher-item')].map((r) => { const icon = r.children[0], m = icon && icon.firstElementChild, lab = r.children[1]; return { t: (lab && lab.textContent) || '', cls: m ? String(m.getAttribute('class') || '') : '', svg: !!(icon && icon.querySelector('svg')), h: Math.round(r.getBoundingClientRect().height), mw: m ? Math.round(m.getBoundingClientRect().width) : 0, gw: icon && icon.querySelector('svg') ? Math.round(icon.querySelector('svg').getBoundingClientRect().width) : 0 }; }).filter((x) => x.t.startsWith('Desk mark · '))`);
     const dBy = Object.fromEntries(dRows.map((r) => [r.t.slice('Desk mark · '.length), r]));
     check(`desk ⧉ list: every harness wears its mark (${HARNESS.map(([b, , name]) => b + ':' + (dBy[name]?.cls || '-')).join(' | ')})`,
-      HARNESS.every(([b, , name]) => new RegExp('\\bbackend-icon-' + b + '\\b').test(dBy[name]?.cls || '') && /\bwindow-backend-icon\b/.test(dBy[name]?.cls || '')), dRows);
+      verdictOf(HARNESS.every(([b, , name]) => new RegExp('\\bbackend-icon-' + b + '\\b').test(dBy[name]?.cls || '') && /\bwindow-backend-icon\b/.test(dBy[name]?.cls || ''))), dRows);
     check(`desk ⧉ list: an unknown harness = the generic mark; a plain shell = the shell mark; Design keeps its glyph at the list's 11 px (${dBy['Design']?.gw} px)`,
-      /\bbackend-icon-generic\b/.test(dBy['an unknown harness']?.cls || '') && /\bbackend-icon-shell\b/.test(dBy['a plain shell']?.cls || '') && !/backend-icon/.test(dBy['Design']?.cls || '') && !!dBy['Design']?.svg && dBy['Design']?.gw >= 10, dRows);
+      gateOf(/\bbackend-icon-generic\b/.test(dBy['an unknown harness']?.cls || '')) && gateOf(/\bbackend-icon-shell\b/.test(dBy['a plain shell']?.cls || '')) && !/backend-icon/.test(dBy['Design']?.cls || '') && !!dBy['Design']?.svg && dBy['Design']?.gw >= 10, dRows);
     check(`desk ⧉ list: the rows keep their height — a mark row is the Design row's (${dRows.map((r) => r.h).join('/')} px), the mark the title bar's 14 px`,
-      dRows.length === ROWS.length && dRows.every((r) => Math.abs(r.h - (dBy['Design']?.h || 0)) <= 1) && dRows.filter((r) => /backend-icon/.test(r.cls)).every((r) => r.mw === 14), dRows);
+      dRows.length === ROWS.length && gateOf(dRows.every((r) => Math.abs(r.h - (dBy['Design']?.h || 0)) <= 1)) && verdictOf(dRows.filter((r) => /backend-icon/.test(r.cls)).every((r) => r.mw === 14)), dRows);
     await snap(desk, 'desk-list');
     await desk.evalJs(`document.querySelectorAll('.overlap-switcher').forEach((p) => p.remove()); for (const id of ${JSON.stringify(Object.values(dIds))}) { try { app.wm.closeWindow(id); } catch {} } true`); await sleep(300);
     await phone.front();
@@ -1175,7 +1175,7 @@ try {
     await sleep(500);
     const m = await evalJs(MEASURE_PAGE);
     check(`${w}×${h}: the first screen = ${m.rows.length} rows [${m.rows.map((r) => r.band + ':' + r.h).join(' ')} px] + every band / fold head (${m.heads.map((x) => (x.fold ? 'fold ' : '') + x.band + '@' + x.top).join(' ')}) + the notices' line, all inside the viewport at scrollTop 0 (last bottom ${m.last} ≤ ${h})`,
-      m.rows.length === 6 && m.folds === 3 && !!m.notices && m.allInside && m.scrollTop === 0, m);
+      m.rows.length === 6 && m.folds === 3 && !!m.notices && gateOf(m.allInside) && m.scrollTop === 0, m);
     await shot(`first-screen-${w}x${h}.png`);
     if (w === 375) { // CONTROL: whole words (the page's two-line preview switched off) — measured 1161 px: the same screen does NOT fit
       await evalJs(`(() => { const st = document.createElement('style'); st.id = 'fs-control'; st.textContent = '#phone-home .ut-bands .ut-item > .ut-body > .ut-text { display: block !important; -webkit-line-clamp: none !important; line-clamp: none !important; overflow: visible !important; }'; document.head.append(st); return true; })()`);
@@ -1196,29 +1196,29 @@ try {
     for (let i = 0; i < 80 && !created; i++) { if (frames.some((m) => m?.type === 'created')) created = true; else await sleep(500); }
     try { liveWs.close(); } catch {}
     const listed = await waitFor(`(app.sidebar._allSessions || []).some((s) => app.sidebar._getSessionStateKey(s) === ${JSON.stringify('claude:' + LIVE_SID)} && s.webuiId)`, 20000);
-    check('the asks\' conversation is live and listed on the phone (created through the real spawn path after the restart)', created && listed, frames.slice(-2).map((f) => JSON.stringify(f).slice(0, 160)));
+    check('the asks\' conversation is live and listed on the phone (created through the real spawn path after the restart)', gateOf(created) && verdictOf(listed), frames.slice(-2).map((f) => JSON.stringify(f).slice(0, 160)));
   }
   const firstRow = await evalJs(`document.querySelector('#phone-home .ut-bands .ut-item')?.dataset.id || null`);
   // lane foryou-honest (ONE row shape on a phone): a tap on the words opens the row IN PLACE; its trailing door is the jump
   await tap(`#phone-home .ut-item[data-id="${firstRow}"] .ut-text`);
-  check('a tap on a row\'s words opens it in place (the page stays, one row open)', await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-item.ut-open').length === 1 && !!document.querySelector('#phone-home .ut-item.ut-open[data-id="${firstRow}"]')`, 3000));
+  check('a tap on a row\'s words opens it in place (the page stays, one row open)', verdictOf(await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-item.ut-open').length === 1 && !!document.querySelector('#phone-home .ut-item.ut-open[data-id="${firstRow}"]')`, 3000)));
   await tap(`#phone-home .ut-item[data-id="${firstRow}"] .ut-go`);
   check('a row\'s trailing door opens its conversation: a chat window on show, the page stepped aside, the nav names the window and its ✕ is back',
-    await waitFor(`document.getElementById('phone-home').classList.contains('hidden') && app.wm.windows.get(app.wm.activeWindowId)?.type === 'chat' && document.getElementById('mobile-nav-title').textContent !== 'For you' && getComputedStyle(document.getElementById('mobile-nav-close')).display !== 'none'`, 15000),
+    verdictOf(await waitFor(`document.getElementById('phone-home').classList.contains('hidden') && app.wm.windows.get(app.wm.activeWindowId)?.type === 'chat' && document.getElementById('mobile-nav-title').textContent !== 'For you' && getComputedStyle(document.getElementById('mobile-nav-close')).display !== 'none'`, 15000)),
     await evalJs(`({ hidden: document.getElementById('phone-home').classList.contains('hidden'), active: app.wm.activeWindowId, type: app.wm.windows.get(app.wm.activeWindowId)?.type, title: document.getElementById('mobile-nav-title').textContent, row: ${JSON.stringify(firstRow)}, toasts: [...document.querySelectorAll('#global-toasts .global-toast-body')].map((e) => e.textContent) })`));
   const wins = await evalJs('app.wm.windows.size');
   await evalJs('history.back(); true'); await sleep(900);
-  check('the back gesture returns to the attention list (a fresh first screen of 6 rows; the conversation\'s window kept)', await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-bands .ut-item').length === 6 && app.wm.windows.size === ${wins} && !app.sidebar.isOpen`, 6000));
+  check('the back gesture returns to the attention list (a fresh first screen of 6 rows; the conversation\'s window kept)', verdictOf(await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-bands .ut-item').length === 6 && app.wm.windows.size === ${wins} && !app.sidebar.isOpen`, 6000)));
   // every ask answered elsewhere: the rows keep their slots while the page is read (the slot law), then the list is empty
   const openIds = ((await (await fetch(`http://127.0.0.1:${PORT}/api/user-todos`)).json()).todos.open || []).map((i) => i.id);
   await fetch(`http://127.0.0.1:${PORT}/api/user-todos/resolve-many`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: openIds, status: 'dismissed' }) });
-  check(`${openIds.length} asks answered elsewhere: the page keeps its 6 rows in their slots, struck — nothing jumps while it is read`, await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-bands .ut-item').length === 6 && !app.phoneHome.hasRows()`, 6000));
+  check(`${openIds.length} asks answered elsewhere: the page keeps its 6 rows in their slots, struck — nothing jumps while it is read`, verdictOf(await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-bands .ut-item').length === 6 && !app.phoneHome.hasRows()`, 6000)));
   await evalJs('app.wm.focusWindow(app.wm.activeWindowId); true'); await sleep(300);
-  check('…a window navigation hides it (the central yield)', await evalJs(`document.getElementById('phone-home').classList.contains('hidden')`));
+  check('…a window navigation hides it (the central yield)', verdictOf(await evalJs(`document.getElementById('phone-home').classList.contains('hidden')`)));
   await evalJs('history.back(); true'); await sleep(900);
-  check('empty list ⇒ the conversation list: the next back lands on the sidebar (home), no empty page', await waitFor(`app.sidebar.isOpen && document.getElementById('phone-home').classList.contains('hidden')`, 5000));
+  check('empty list ⇒ the conversation list: the next back lands on the sidebar (home), no empty page', verdictOf(await waitFor(`app.sidebar.isOpen && document.getElementById('phone-home').classList.contains('hidden')`, 5000)));
   await reloadPhone(); await sleep(1500);
-  check('a boot with nothing on the first screen draws no page — the phone opens where its restore put it', await evalJs(`document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('phone-home').childElementCount === 0`));
+  check('a boot with nothing on the first screen draws no page — the phone opens where its restore put it', verdictOf(await evalJs(`document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('phone-home').childElementCount === 0`)));
   check('no uncaught page exceptions in the first-screen legs', pageErrors.length === fsErrors0, pageErrors.slice(fsErrors0, fsErrors0 + 3));
 } catch (e) {
   failed++;
@@ -1227,4 +1227,4 @@ try {
 
 console.log(`screenshots: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

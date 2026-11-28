@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const { claimJsonls } = require('../src/session-store.js');
 
 let passed = 0, failed = 0;
-function check(name, cond, detail = '') {
+function check(name, cond, detail = '') { if (typeof cond !== 'boolean') throw new TypeError(`check: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   if (cond) { passed++; console.log(`  ok   ${name}`); }
   else { failed++; console.log(`  FAIL ${name}${detail ? ' — ' + detail : ''}`); }
 }
@@ -47,7 +47,7 @@ console.log('1. four parallel sessions + freshly killed fifth (shuffled mtimes)'
   let reads = 0;
   for (let seed = 1; seed <= 5; seed++) {
     const claims = claimJsonls(shuffle(locks, seed), shuffle(jsonls, seed * 7), (j) => { reads++; return tails[j.id]; });
-    check(`seed ${seed}: every lock claims its OWN file`, locks.every((l) => claimedIdOf(claims, l) === l.sessionId));
+    check(`seed ${seed}: every lock claims its OWN file`, verdictOf(locks.every((l) => claimedIdOf(claims, l) === l.sessionId)));
     check(`seed ${seed}: killed file stays unclaimed (stopped w/ RIGHT id)`, !claims.has('kkkk-killed'));
   }
   check('exact pass needed ZERO tail reads', reads === 0, `${reads} reads`);
@@ -174,4 +174,4 @@ console.log('10. lock overflow leaves extras unmatched');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf } from './lib/check.mjs';

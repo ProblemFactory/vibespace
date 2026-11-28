@@ -21,7 +21,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -70,24 +70,24 @@ const DECODE = (M) => {
   ];
   return rows.map(([name, got, judge]) => ({ name, good: !!judge(got), got }));
 };
-for (const r of DECODE(EC)) ok(r.good, r.name, r.got);
+for (const r of DECODE(EC)) ok(verdictOf(r.good), r.name, r.got);
 {
   const big = `powershell -enc ${'A'.repeat(1024 * 1024)}`;
   // in WORK (lane work-meter-judges, .209 — was < 50 ms by hrtime, a FAST_SERIAL clock judge): 1 MiB and 2 MiB cost the same
   const r = EC.encodedCommandOf(big), w = judgeInChild({ module: path.join(REPO, 'src/encoded-command.js'), run: '(M, x) => M.encodedCommandOf(x)', mk: "(n) => 'powershell -enc ' + 'A'.repeat(n)", n: 1024 * 1024, kind: 'bounded' });
-  ok(r && r.code === 'too_big' && w.ok, `a 1 MiB line is refused too_big without a decode (WORK at 1 / 2 MiB: ${w.w1} / ${w.w2})`, JSON.stringify({ r, w }));
+  ok(gateOf(r) && r.code === 'too_big' && verdictOf(w.ok), `a 1 MiB line is refused too_big without a decode (WORK at 1 / 2 MiB: ${w.w1} / ${w.w2})`, JSON.stringify({ r, w }));
   ok(EC.commandHeadOf(ENC) === 'PowerShell: Write-Output "hi"' && EC.commandHeadOf('ls -la') === 'ls -la', 'commandHeadOf: "PowerShell: <first line>", a plain command as itself');
 }
 
 // ── ② the words and the door ──
 console.log('② exit-reach words + the ExitProxyManager.run door');
-ok(/^ran `PowerShell: Write-Output "hi"` on WIN-DESK1 — exit 0 · 1\.4 s$/.test(E.cardText({ outcome: 'ran', cmd: ENC, code: 0, ms: 1400 }, { machine: 'WIN-DESK1' })), 'the card\'s head reads "ran `PowerShell: <first line>` on <machine>"', E.cardText({ outcome: 'ran', cmd: ENC, code: 0, ms: 1400 }, { machine: 'WIN-DESK1' }));
+ok(verdictOf(/^ran `PowerShell: Write-Output "hi"` on WIN-DESK1 — exit 0 · 1\.4 s$/.test(E.cardText({ outcome: 'ran', cmd: ENC, code: 0, ms: 1400 }, { machine: 'WIN-DESK1' }))), 'the card\'s head reads "ran `PowerShell: <first line>` on <machine>"', E.cardText({ outcome: 'ran', cmd: ENC, code: 0, ms: 1400 }, { machine: 'WIN-DESK1' }));
 {
   const d = E.askDetailOf(ENC);
-  ok(d.startsWith('PowerShell script (decoded from -EncodedCommand):\nWrite-Output "hi"\nGet-ChildItem') && d.endsWith(`The line that runs:\n${ENC}`) && E.askDetailOf('  ls -la ') === 'ls -la', 'the ask\'s detail: the decoded script first, then the line that runs; a plain command = itself trimmed (unchanged)', d.slice(0, 200));
+  ok(gateOf(d.startsWith('PowerShell script (decoded from -EncodedCommand):\nWrite-Output "hi"\nGet-ChildItem')) && gateOf(d.endsWith(`The line that runs:\n${ENC}`)) && E.askDetailOf('  ls -la ') === 'ls -la', 'the ask\'s detail: the decoded script first, then the line that runs; a plain command = itself trimmed (unchanged)', d.slice(0, 200));
   const line = { verb: 'run', cmd: ENC, code: 0, ms: 5, at: 1 };
-  ok(E.runRow(line, { agent: true }).cmd.startsWith('PowerShell: Write-Output "hi" Get-ChildItem') && E.runRow(line).cmd === ENC, '`vibespace-exit runs` (the agent row) shows the decoded script; the owner row keeps the line (the list decodes it)');
-  ok(/not base64/.test(E.refusalText('bad_command', { encoded: EC.encodedCommandOf(`powershell -enc ${B}A`) })) && /^the decoded -EncodedCommand script carries/.test(E.refusalText('bad_command', { hidden: ['U+202E'], encoded: { ok: true } })), 'the refusal names what is wrong (cannot be shown / the decoded script carries hidden characters)');
+  ok(gateOf(E.runRow(line, { agent: true }).cmd.startsWith('PowerShell: Write-Output "hi" Get-ChildItem')) && E.runRow(line).cmd === ENC, '`vibespace-exit runs` (the agent row) shows the decoded script; the owner row keeps the line (the list decodes it)');
+  ok(gateOf(/not base64/.test(E.refusalText('bad_command', { encoded: EC.encodedCommandOf(`powershell -enc ${B}A`) }))) && verdictOf(/^the decoded -EncodedCommand script carries/.test(E.refusalText('bad_command', { hidden: ['U+202E'], encoded: { ok: true } }))), 'the refusal names what is wrong (cannot be shown / the decoded script carries hidden characters)');
 }
 const door = async (file) => {
   const { ExitProxyManager } = require(file);
@@ -97,7 +97,7 @@ const door = async (file) => {
 };
 const D0 = await door(path.join(REPO, 'src/exit-proxy.js'));
 ok(D0.hid === 'bad_command:hidden:U+202E', 'the door: an encoded script carrying U+202E is refused bad_command exactly like a plain command', D0);
-ok(D0.plainHid.startsWith('bad_command::U+202E'), 'the door: the plain command is refused as before', D0);
+ok(verdictOf(D0.plainHid.startsWith('bad_command::U+202E')), 'the door: the plain command is refused as before', D0);
 ok(D0.odd === 'bad_command:odd_length:', 'the door: an encoded command whose script cannot be shown never runs unread', D0);
 ok(!D0.good.startsWith('bad_command'), 'the door: a clean encoded command passes the belt (then the grant judges it)', D0);
 
@@ -133,7 +133,7 @@ const FOLD = (R) => {
     ['the time span CLOSES the label (after the kinds and the files)', R.runSummaryLabel({ byKind: R.countKinds(['bash', 'machine']), machinePart: 'M · 1 commands', machineTime: '11:39–11:42', files: ['a.txt'] }, (k, p) => k.replace('{n}', p?.n)) === 'M · 1 commands · 1 Bash — a.txt · 11:39–11:42'],
   ];
 };
-for (const [n, good] of FOLD(RS)) ok(good, n);
+for (const [n, good] of FOLD(RS)) ok(verdictOf(good), n);
 
 // ── ③b the compact line (lane machine-card-compact — the owner: "如果整体已经显示了是win-desk1 每个指令没必要都展示吧") ──
 console.log('③b chat-run-summary machineLineOf / machineCompact — ONE line per call inside its machine\'s group');
@@ -173,7 +173,7 @@ const LINE = (R) => {
     ['THE compact rule: ≥ 2 Machines cards in the run ⇒ one line each; a lone card (Bash beside it) stays whole', R.machineCompact(pair) === true && R.machineCompact(lone) === false && R.machineCompact([]) === false, [R.machineCompact(pair), R.machineCompact(lone)]],
   ];
 };
-for (const [n, good, d] of LINE(RS)) ok(good, n, good ? undefined : d);
+for (const [n, good, d] of LINE(RS)) ok(verdictOf(good), n, good ? undefined : d);
 
 // ── ④ the wiring census ──
 console.log('④ the wiring (chat-view fold pass, renderer, Commands list, ask, words)');
@@ -187,7 +187,7 @@ const W = {
   list: DLG.includes("const flat = (enc && enc.ok ? `PowerShell: ${enc.head}` : cmd).replace(/\\n/g, ' ');"),
   ask: XP.includes('text, detail: E.askDetailOf(cmd),') && XP.includes("String(it.detail || '') === E.askDetailOf(k.cmd)"),
 };
-ok(Object.values(W).every(Boolean), 'the fold pass splits by machine via splitRuns, keeps failures on screen, alerts the head; the card, the list and the ask decode', W);
+ok(verdictOf(Object.values(W).every(Boolean)), 'the fold pass splits by machine via splitRuns, keeps failures on screen, alerts the head; the card, the list and the ask decode', W);
 { // lane machine-card-compact: the pass decides compact per run (THE rule) and re-decides every pass; the head's time is its own span;
   // the card's line is the toggle of its detail, through the per-message fold state, and never carries a hover title
   const CSS = read('public/chat.css');
@@ -200,7 +200,7 @@ ok(Object.values(W).every(Boolean), 'the fold pass splits by machine via splitRu
     css: CSS.includes('.chat-machine-compact:not(.chat-mline-open) > :not(.chat-mline):not(.chat-mline-err) { display: none; }') && CSS.includes('.chat-run-header .chat-run-time { flex: none; white-space: nowrap; }'),
     list: CSS.includes('.chat-msg.chat-vs-notice.chat-machine-compact.chat-run-member + .chat-machine-compact.chat-run-member { margin-top: calc(-1 * var(--chat-list-gap, 12px));') && CSS.includes(':has(+ .chat-machine-compact.chat-run-member) { border-bottom-width: 0;'), // r2: ONE framed list
   };
-  ok(Object.values(C).every(Boolean), 'compact: THE rule in the pass (reset every pass, carried on a replaced node), the head\'s time span, the line toggles via the fold state, no hover title, an open group = ONE framed list', C);
+  ok(verdictOf(Object.values(C).every(Boolean)), 'compact: THE rule in the pass (reset every pass, carried on a replaced node), the head\'s time span, the line toggles via the fold state, no hover title, an open group = ONE framed list', C);
 }
 const words = Object.values(RS.MACHINE_WORDS).concat(['PowerShell script (decoded from {flag})', 'PowerShell -EncodedCommand, not decoded: {why}', 'Show full command', 'Hide full command', 'The script carries characters that change the order it reads in or are not drawn at all: {codes}']);
 for (const lang of ['zh', 'ja']) { const dict = read(`src/lib/i18n-${lang}.js`); const miss = words.filter((w) => !dict.includes(JSON.stringify(w) + ':') && !dict.includes(`'${w}':`)); ok(!miss.length, `every new word has its ${lang} entry`, miss); }
@@ -212,7 +212,7 @@ const ecControl = (tag, from, to, why, want) => {
   if (!ECSRC.includes(from)) { ok(false, `CONTROL ${tag}: the anchor is gone`, from); return; }
   const f = MUT.write('src/encoded-command.js', editAnchor(ECSRC, from, to, "src/encoded-command.js"), tag);
   const bad = DECODE(require(f)).filter((r) => !r.good).map((r) => r.name);
-  ok(bad.some((n) => n.startsWith(want)), `CONTROL ${tag}: ${why} — ① goes red`, bad);
+  ok(verdictOf(bad.some((n) => n.startsWith(want))), `CONTROL ${tag}: ${why} — ① goes red`, bad);
 };
 ecControl('no-hidden', "const hidden = HC.hiddenCharsOf(shown, { max: 64 });", 'const hidden = [];', 'the decoded script never passes the belt', 'a direction control');
 ecControl('no-odd', "  if (nBytes % 2) return refuse('odd_length');\n", '', 'odd length decoded anyway', 'odd length');
@@ -227,7 +227,7 @@ const rsControl = async (tag, from, to, why, want) => {
   const f = MUT.write('src/lib/chat-run-summary.js', editAnchor(RSSRC, from, to, "src/lib/chat-run-summary.js"), tag, { esm: true });
   const mod = await import(pathToFileURL(f).href);
   const bad = [...FOLD(mod), ...LINE(mod)].filter(([, g]) => !g).map(([n]) => n);
-  ok(bad.some((n) => n.startsWith(want)), `CONTROL ${tag}: ${why} — ③ goes red`, bad);
+  ok(verdictOf(bad.some((n) => n.startsWith(want))), `CONTROL ${tag}: ${why} — ③ goes red`, bad);
 };
 await rsControl('no-machine-split', 'if (k && k === runKind && !(m && runMachine && m !== runMachine))', 'if (k && k === runKind)', 'another machine joins the run', 'another machine breaks the run');
 await rsControl('failure-hidden', "failed: outcome !== 'ok'", 'failed: false', 'a failed card counts as fine', 'outcomes');
@@ -240,8 +240,8 @@ const XPSRC = read('src/exit-proxy.js');
   const from = "    if (encoded && encoded.hidden.length) throw";
   const f = MUT.write('src/exit-proxy.js', editAnchor(XPSRC, from, '    if (false) throw', "src/exit-proxy.js"), 'door-no-hidden');
   const D1 = await door(f);
-  ok(XPSRC.includes(from) && !D1.hid.startsWith('bad_command'), 'CONTROL door-no-hidden: without the encoded belt the U+202E script passes the door — ② goes red', D1);
+  ok(gateOf(XPSRC.includes(from)) && !D1.hid.startsWith('bad_command'), 'CONTROL door-no-hidden: without the encoded belt the U+202E script passes the door — ② goes red', D1);
 }
 
 console.log(`\n${fail ? `✗ ${fail} FAILED` : `ALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

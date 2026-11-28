@@ -14,7 +14,7 @@ import path from 'node:path';
 import { judgeGesture, PAGE_UP_BAND_PX, DELIVERY_MIN_FRACTION, KEEP_ZONE_VIEWPORTS, SNAP_SOURCE } from './paging-gesture-rules.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -49,21 +49,21 @@ const rulesSrc = fs.readFileSync(path.join(REPO, 'scripts/paging-gesture-rules.m
 const pagingSrc = fs.readFileSync(path.join(REPO, 'scripts/test-chat-paging.mjs'), 'utf8');
 const dbgSrc = fs.readFileSync(path.join(REPO, 'scripts/dbg-huge-paging.mjs'), 'utf8');
 const hugeSrc = fs.readFileSync(path.join(REPO, 'scripts/huge-transcript-fixture.mjs'), 'utf8'); // the §1c generator's home since it is shared with test-ax-budget
-ok('ONE trim implementation for both edges (_trimEdge) — _trimBottom / _trimTop are its two spellings', /_trimEdge\(side\) \{/.test(cv) && /_trimBottom\(\) \{ return this\._trimEdge\('bottom'\); \}/.test(cv) && /_trimTop\(\) \{ return this\._trimEdge\('top'\); \}/.test(cv));
-ok('the keep zone is ONE named number of viewports on each side of the viewport, read through _keepZone — and the seek trim (chat-view-seek _trimGapDom) reads the same one', /const TRIM_KEEP_VIEWPORTS = 1;/.test(cv) && /_keepZone\(\) \{/.test(cv) && /top: st - ch \* TRIM_KEEP_VIEWPORTS, bottom: st \+ ch \* \(1 \+ TRIM_KEEP_VIEWPORTS\)/.test(cv) && /const zone = this\._keepZone\(\);\s*const pos = this\._cardPositions\(els\);/.test(sk));
-ok('the card target is SOFT (TRIM_SOFT_CARDS) and the zone wins: the bottom loop stops at the first card whose top is inside the zone, the top loop at the first card whose bottom is', /const TRIM_SOFT_CARDS = 150;/.test(cv) && /if \(n >= must && pos\[i\]\.top < zone\.bottom\) break;/.test(cv) && /if \(n >= must && pos\[i\]\.bottom > zone\.top\) break;/.test(cv));
-ok('the ceiling is ONE named number ≥ 2000 (fold members are display:none — cheap) and the only thing that removes INSIDE the zone (`must`)', /const FOLD_DOM_CEILING = (\d+);/.test(cv) && Number(cv.match(/const FOLD_DOM_CEILING = (\d+);/)[1]) >= 2000 && /const must = Math\.max\(0, els\.length - FOLD_DOM_CEILING\);/.test(cv));
-ok('the pre-fix COUNT trim is gone: no `maxRendered` parameter, no three-viewport gate, no bare `.chat-msg` selector (a nested card could match)', !/_trimBottom\(maxRendered/.test(cv) && !/_trimTop\(maxRendered/.test(cv) && !/scrollHeight < list\.clientHeight \* 3/.test(cv) && /querySelectorAll\(':scope > \.chat-msg:not\(\.chat-gap-msg\)'\)/.test(cv));
-ok('folded cards take the span of the nearest VISIBLE thing above them — _cardPositions, one layout pass, reads only', /_cardPositions\(els\) \{/.test(cv) && /if \(h > 0 && c\.offsetParent !== null\) \{ lastTop = c\.offsetTop; lastBottom = lastTop \+ h; \}/.test(cv));
-ok('_extendTop grows by the history ABOVE THE VIEWPORT (the restored scrollTop), not the whole window\'s height: a bounded loop (never while pinned, never past the top), doubling the slab, naming the landing once', /let slab = count, passes = 0;\s*for \(;;\) \{/.test(cv) && /const short = above < this\._messageList\.clientHeight;/.test(cv) && /if \(!short \|\| this\._pinned \|\| this\._windowStart <= 0 \|\| passes >= FOLD_GROW_PASSES \|\| !msgs\.length\)/.test(cv) && /slab = Math\.min\(200, slab \* 2\);/.test(cv) && /_trace\('extendTop:grown'/.test(cv));
-ok('_extendBottom grows by the content BELOW THE VIEWPORT — the mirror loop under the same bound', /const short = below < list\.clientHeight;/.test(cv) && /if \(!short \|\| this\._windowEnd >= this\._total \|\| passes >= FOLD_GROW_PASSES \|\| !msgs\.length\)/.test(cv) && /_trace\('extendBottom:grown'/.test(cv));
-ok('all three incidents are named at the trim (future readers find the bundles)', /inc-mtajy6wr/.test(cv) && /inc-mub8xwrb-z57x/.test(cv) && /inc-mubvu3a4-x8sb/.test(cv));
-ok('_extendTop measures the fresh slab and folds INSIDE the anchored landing, and trims AFTER it (a trim that reads the restored scrollTop cannot take the anchor with it), re-folding after a trim', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,400}this\._updateRuns\(\);\s*\}\);[\s\S]{0,1600}if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}this\._trimBottom\(\); if \(this\._windowEnd !== before\) this\._updateRuns\(\);/.test(cv));
-ok('_extendBottom folds BEFORE its trim and re-folds after one (the downward mirror of the 2.369.129 order defect — the owner\'s `trimTop removed:351 anchored:false`)', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,500}this\._updateRuns\(\);\s*\{ const before = this\._windowStart; this\._trimTop\(\); if \(this\._windowStart !== before\) this\._updateRuns\(\); \}/.test(cv));
-ok('the trim trace tags survive with their decision inputs (the capture channel that caught all three)', cv.includes("'trimBottom' : 'trimTop'") && /zone: \[Math\.round\(zone\.top\), Math\.round\(zone\.bottom\)\]/.test(cv) && cv.includes("_trace('extendTop:done'") && cv.includes("_trace('trimSkipZone'"));
-ok('a fresh slab is rendered ONCE at insert so the landing and the zone read MEASURED heights (content-visibility placeholders are estimates) — the override comes off two frames later, after the remembered size is recorded', /_reserveFreshHeights\(els(, \{ live = false \} = \{\})?\) \{/.test(cv) && /el\.style\.contentVisibility = 'visible';/.test(cv) && /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{/.test(cv));
-ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*const repin = this\._repinVerdict\(atTail\);/.test(cv) && /_repinVerdict\(atTail\) \{\s*if \(!atTail \|\| this\._pinned\) return null;/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /if \(!\(this\._windowEnd < this\._total && this\._canPaginate\)\) \{\s*(?:\/\/[^\n]*\n\s*)*this\._noteTailPress\('scrollBtn'\);\s*this\._resumeSettleUntil = 0;\s*this\._setPinned\(true, 'scrollBtn'\);/.test(cv)); // inc-mvl02dkn-gop0: ANY view at the tail pins and scrolls (a live one no longer refetches); lane needs-card-tail r8: a press that keeps the tail
-ok('the viewport anchor never picks the seek sentinel (a huge session\'s first child) — at the top edge it is the first VISIBLE card, delta included', /const skip = \(c\) => runChrome\(c\) \|\| c\._isSeekSentinel;/.test(cv) && !/\} else if \(list\.children\.length\) \{/.test(cv) && /if \(!el && list\.children\.length\) \{ el = list\.children\[0\]; delta = 0; \}/.test(cv));
+ok('ONE trim implementation for both edges (_trimEdge) — _trimBottom / _trimTop are its two spellings', gateOf(/_trimEdge\(side\) \{/.test(cv)) && gateOf(/_trimBottom\(\) \{ return this\._trimEdge\('bottom'\); \}/.test(cv)) && verdictOf(/_trimTop\(\) \{ return this\._trimEdge\('top'\); \}/.test(cv)));
+ok('the keep zone is ONE named number of viewports on each side of the viewport, read through _keepZone — and the seek trim (chat-view-seek _trimGapDom) reads the same one', gateOf(/const TRIM_KEEP_VIEWPORTS = 1;/.test(cv)) && gateOf(/_keepZone\(\) \{/.test(cv)) && gateOf(/top: st - ch \* TRIM_KEEP_VIEWPORTS, bottom: st \+ ch \* \(1 \+ TRIM_KEEP_VIEWPORTS\)/.test(cv)) && verdictOf(/const zone = this\._keepZone\(\);\s*const pos = this\._cardPositions\(els\);/.test(sk)));
+ok('the card target is SOFT (TRIM_SOFT_CARDS) and the zone wins: the bottom loop stops at the first card whose top is inside the zone, the top loop at the first card whose bottom is', gateOf(/const TRIM_SOFT_CARDS = 150;/.test(cv)) && gateOf(/if \(n >= must && pos\[i\]\.top < zone\.bottom\) break;/.test(cv)) && verdictOf(/if \(n >= must && pos\[i\]\.bottom > zone\.top\) break;/.test(cv)));
+ok('the ceiling is ONE named number ≥ 2000 (fold members are display:none — cheap) and the only thing that removes INSIDE the zone (`must`)', gateOf(/const FOLD_DOM_CEILING = (\d+);/.test(cv)) && Number(cv.match(/const FOLD_DOM_CEILING = (\d+);/)[1]) >= 2000 && verdictOf(/const must = Math\.max\(0, els\.length - FOLD_DOM_CEILING\);/.test(cv)));
+ok('the pre-fix COUNT trim is gone: no `maxRendered` parameter, no three-viewport gate, no bare `.chat-msg` selector (a nested card could match)', !/_trimBottom\(maxRendered/.test(cv) && !/_trimTop\(maxRendered/.test(cv) && !/scrollHeight < list\.clientHeight \* 3/.test(cv) && verdictOf(/querySelectorAll\(':scope > \.chat-msg:not\(\.chat-gap-msg\)'\)/.test(cv)));
+ok('folded cards take the span of the nearest VISIBLE thing above them — _cardPositions, one layout pass, reads only', gateOf(/_cardPositions\(els\) \{/.test(cv)) && verdictOf(/if \(h > 0 && c\.offsetParent !== null\) \{ lastTop = c\.offsetTop; lastBottom = lastTop \+ h; \}/.test(cv)));
+ok('_extendTop grows by the history ABOVE THE VIEWPORT (the restored scrollTop), not the whole window\'s height: a bounded loop (never while pinned, never past the top), doubling the slab, naming the landing once', gateOf(/let slab = count, passes = 0;\s*for \(;;\) \{/.test(cv)) && gateOf(/const short = above < this\._messageList\.clientHeight;/.test(cv)) && gateOf(/if \(!short \|\| this\._pinned \|\| this\._windowStart <= 0 \|\| passes >= FOLD_GROW_PASSES \|\| !msgs\.length\)/.test(cv)) && gateOf(/slab = Math\.min\(200, slab \* 2\);/.test(cv)) && verdictOf(/_trace\('extendTop:grown'/.test(cv)));
+ok('_extendBottom grows by the content BELOW THE VIEWPORT — the mirror loop under the same bound', gateOf(/const short = below < list\.clientHeight;/.test(cv)) && gateOf(/if \(!short \|\| this\._windowEnd >= this\._total \|\| passes >= FOLD_GROW_PASSES \|\| !msgs\.length\)/.test(cv)) && verdictOf(/_trace\('extendBottom:grown'/.test(cv)));
+ok('all three incidents are named at the trim (future readers find the bundles)', gateOf(/inc-mtajy6wr/.test(cv)) && gateOf(/inc-mub8xwrb-z57x/.test(cv)) && verdictOf(/inc-mubvu3a4-x8sb/.test(cv)));
+ok('_extendTop measures the fresh slab and folds INSIDE the anchored landing, and trims AFTER it (a trim that reads the restored scrollTop cannot take the anchor with it), re-folding after a trim', verdictOf(/this\._reserveFreshHeights\(fresh\);[\s\S]{0,400}this\._updateRuns\(\);\s*\}\);[\s\S]{0,1600}if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}this\._trimBottom\(\); if \(this\._windowEnd !== before\) this\._updateRuns\(\);/.test(cv)));
+ok('_extendBottom folds BEFORE its trim and re-folds after one (the downward mirror of the 2.369.129 order defect — the owner\'s `trimTop removed:351 anchored:false`)', verdictOf(/this\._reserveFreshHeights\(fresh\);[\s\S]{0,500}this\._updateRuns\(\);\s*\{ const before = this\._windowStart; this\._trimTop\(\); if \(this\._windowStart !== before\) this\._updateRuns\(\); \}/.test(cv)));
+ok('the trim trace tags survive with their decision inputs (the capture channel that caught all three)', gateOf(cv.includes("'trimBottom' : 'trimTop'")) && gateOf(/zone: \[Math\.round\(zone\.top\), Math\.round\(zone\.bottom\)\]/.test(cv)) && gateOf(cv.includes("_trace('extendTop:done'")) && verdictOf(cv.includes("_trace('trimSkipZone'")));
+ok('a fresh slab is rendered ONCE at insert so the landing and the zone read MEASURED heights (content-visibility placeholders are estimates) — the override comes off two frames later, after the remembered size is recorded', gateOf(/_reserveFreshHeights\(els(, \{ live = false \} = \{\})?\) \{/.test(cv)) && gateOf(/el\.style\.contentVisibility = 'visible';/.test(cv)) && verdictOf(/requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{/.test(cv)));
+ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', gateOf(/_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv)) && gateOf(/const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*const repin = this\._repinVerdict\(atTail\);/.test(cv)) && gateOf(/_repinVerdict\(atTail\) \{\s*if \(!atTail \|\| this\._pinned\) return null;/.test(cv)) && gateOf(/const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv)) && verdictOf(/if \(!\(this\._windowEnd < this\._total && this\._canPaginate\)\) \{\s*(?:\/\/[^\n]*\n\s*)*this\._noteTailPress\('scrollBtn'\);\s*this\._resumeSettleUntil = 0;\s*this\._setPinned\(true, 'scrollBtn'\);/.test(cv))); // inc-mvl02dkn-gop0: ANY view at the tail pins and scrolls (a live one no longer refetches); lane needs-card-tail r8: a press that keeps the tail
+ok('the viewport anchor never picks the seek sentinel (a huge session\'s first child) — at the top edge it is the first VISIBLE card, delta included', gateOf(/const skip = \(c\) => runChrome\(c\) \|\| c\._isSeekSentinel;/.test(cv)) && !/\} else if \(list\.children\.length\) \{/.test(cv) && verdictOf(/if \(!el && list\.children\.length\) \{ el = list\.children\[0\]; delta = 0; \}/.test(cv)));
 // ── SHORT-VIEW RESCUE after attach (2.369.43) ───────────────────────────────
 // The 2.369.36 gate `_windowStart > 0 && rendered < 30 && sh <= ch` was
 // UNSATISFIABLE: every attach path ships tail(50) (ws-handler `_normalizer
@@ -78,9 +78,9 @@ ok('the viewport anchor never picks the seek sentinel (a huge session\'s first c
 // window (the transient collapsed-geometry artifact resolves inside ~1.5s,
 // the same premise collapsedGeomSkip runs on) and keep only the harm bound.
 ok('the unsatisfiable `rendered < 30` gate is gone from the code (it made the rescue dead code)', !/rendered < 30 &&/.test(cv) && !/this\._windowStart > 0 && rendered/.test(cv));
-ok('the rescue is a named predicate + a two-reading schedule', /_shortViewNeedsFill\(list\) \{/.test(cv) && /_scheduleAttachFill\(\) \{/.test(cv) && /this\._scheduleAttachFill\(\);/.test(cv));
+ok('the rescue is a named predicate + a two-reading schedule', gateOf(/_shortViewNeedsFill\(list\) \{/.test(cv)) && gateOf(/_scheduleAttachFill\(\) \{/.test(cv)) && verdictOf(/this\._scheduleAttachFill\(\);/.test(cv)));
 const disposeBody = cv.slice(cv.indexOf('\n  dispose() {'));
-ok('…both timers are cleared on dispose (no rescue against a torn-down view)', /clearTimeout\(this\._autoFillT1\)/.test(disposeBody) && /clearTimeout\(this\._autoFillT2\)/.test(disposeBody));
+ok('…both timers are cleared on dispose (no rescue against a torn-down view)', gateOf(/clearTimeout\(this\._autoFillT1\)/.test(disposeBody)) && verdictOf(/clearTimeout\(this\._autoFillT2\)/.test(disposeBody)));
 
 // FUNCTIONAL: chat-view.js is DOM-free at import, so the decision runs here
 // against fake geometry (the whole point — the pre-fix gate looked plausible
@@ -89,7 +89,7 @@ const { ChatView } = await import(path.join(REPO, 'src/lib/chat-view.js'));
 const mkList = (rendered, sh, ch) => ({ scrollHeight: sh, clientHeight: ch, querySelectorAll: () => ({ length: rendered }) });
 const decide = (state, list) => ChatView.prototype._shortViewNeedsFill.call(state, list);
 const attached = { _windowStart: 4550, _suspended: false, _disposed: false, _teleported: false };
-ok('THE CASE: a fold-dominated attach slab (50 cards collapsed into run headers, 240px in a 700px viewport) asks for one page', decide(attached, mkList(50, 240, 700)));
+ok('THE CASE: a fold-dominated attach slab (50 cards collapsed into run headers, 240px in a 700px viewport) asks for one page', verdictOf(decide(attached, mkList(50, 240, 700))));
 ok('…and the OLD gate refused exactly that (rendered 50 ≥ 30) — the regression this pins', !(attached._windowStart > 0 && 50 < 30 && 240 <= 700));
 ok('a normal attach that already fills the viewport asks for nothing', !decide(attached, mkList(50, 6000, 700)));
 ok('a window with no history above it asks for nothing', !decide({ ...attached, _windowStart: 0 }, mkList(50, 240, 700)));
@@ -107,8 +107,8 @@ ok('teleport mode is left to its own seek paths (window indices are stale there)
 {
   const { TEXT_WINDOW } = await import(path.join(REPO, 'src/text-window.js'));
   const cap = TEXT_WINDOW.maxRecords;
-  ok('the bound is ONE named number read from the text window (SHORT_FILL_MAX_CARDS = TEXT_WINDOW.maxRecords), not a literal', /const SHORT_FILL_MAX_CARDS = TEXT_WINDOW\.maxRecords;/.test(cv) && /if \(rendered > SHORT_FILL_MAX_CARDS\) return false;/.test(cv) && !/rendered \+ 50 > 150/.test(cv));
-  ok(`THE CAPPED SHORT SLAB: ${cap} cards folded into 240 px of a 700 px viewport still asks for one page (satisfiable, never constant-false)`, decide(attached, mkList(cap, 240, 700)));
+  ok('the bound is ONE named number read from the text window (SHORT_FILL_MAX_CARDS = TEXT_WINDOW.maxRecords), not a literal', gateOf(/const SHORT_FILL_MAX_CARDS = TEXT_WINDOW\.maxRecords;/.test(cv)) && gateOf(/if \(rendered > SHORT_FILL_MAX_CARDS\) return false;/.test(cv)) && !/rendered \+ 50 > 150/.test(cv));
+  ok(`THE CAPPED SHORT SLAB: ${cap} cards folded into 240 px of a 700 px viewport still asks for one page (satisfiable, never constant-false)`, verdictOf(decide(attached, mkList(cap, 240, 700))));
   ok('…the pre-fix bound refused exactly that slab (the regression this pins: 400 + 50 > 150)', cap + 50 > 150);
   ok('a 300-card slab that FILLS its viewport asks for nothing (the geometry clause, not the count, decides)', !decide(attached, mkList(300, 4200, 700)));
   ok('a window grown PAST any attach slab by paging is the paging machinery\'s, never the rescue\'s', !decide(attached, mkList(cap + 1, 240, 700)));
@@ -118,7 +118,7 @@ ok('teleport mode is left to its own seek paths (window indices are stale there)
   const passes = Number(cv.match(/const FOLD_GROW_PASSES = (\d+);/)[1]);
   let burst = 0; for (let i = 0, slab = 50; i < passes; i++) { burst += slab; slab = Math.min(200, slab * 2); }
   ok(`the only in-zone trim (FOLD_DOM_CEILING ${ceiling}) is out of reach: ${cap} + one grow burst (${burst}) = ${cap + burst} < ${ceiling}`, cap + burst < ceiling);
-  ok('…and a PINNED view (every fresh attach) never trims inside _extendTop, nor grows past one page there', /if \(this\._pinned\) this\._trace\('trimSkipPinned'/.test(cv) && /if \(!short \|\| this\._pinned \|\| this\._windowStart <= 0 \|\| passes >= FOLD_GROW_PASSES/.test(cv));
+  ok('…and a PINNED view (every fresh attach) never trims inside _extendTop, nor grows past one page there', gateOf(/if \(this\._pinned\) this\._trace\('trimSkipPinned'/.test(cv)) && verdictOf(/if \(!short \|\| this\._pinned \|\| this\._windowStart <= 0 \|\| passes >= FOLD_GROW_PASSES/.test(cv)));
 }
 
 // FUNCTIONAL: the two-reading corroboration (the artifact the 2.369.36 fix saw
@@ -150,9 +150,9 @@ ok('a structural change between the readings hands the decision back to the pagi
 // ── suspend gate (inc-mtd1d0ft "桌面切换卡死30-60s"): a desktop-hidden chat
 // window's geometry is meaningless — the paging machinery must make no
 // decisions off it, and a switch re-measures 4-6 windows at once.
-ok('ChatView.setSuspended exists and arms the structural settle window on resume', /setSuspended\(on\) \{/.test(cv) && /this\._lastStructuralAt = Date\.now\(\);/.test(cv.slice(cv.indexOf('setSuspended'))));
+ok('ChatView.setSuspended exists and arms the structural settle window on resume', gateOf(/setSuspended\(on\) \{/.test(cv)) && verdictOf(/this\._lastStructuralAt = Date\.now\(\);/.test(cv.slice(cv.indexOf('setSuspended')))));
 ok('resume returns a pinned view to the LIVE tail — behind-the-tail windows take the full jumpToBottom (inc-mtfi6034 mobile old-position), and it does NOT stamp a user navigation over its own series',
-  /this\._windowEnd < this\._total\) this\.jumpToBottom\(\{ user: false, stale: \(\) => this\._positionedSince\(resumeAt\) \}\);/.test(cv.slice(cv.indexOf('setSuspended')))); // (lane needs-card-tail r4: its page dropped once the reader — or a landing — went somewhere while it was out; r6: _positionedSince — an act OR a landing)
+  verdictOf(/this\._windowEnd < this\._total\) this\.jumpToBottom\(\{ user: false, stale: \(\) => this\._positionedSince\(resumeAt\) \}\);/.test(cv.slice(cv.indexOf('setSuspended'))))); // (lane needs-card-tail r4: its page dropped once the reader — or a landing — went somewhere while it was out; r6: _positionedSince — an act OR a landing)
 // four paging entries: extendTop / extendBottom / the scroll handler's
 // decisions / the short-view rescue (which answers `false`, not `return`)
 ok('all four paging entries gate on _suspended (extendTop/extendBottom/scroll decisions/short-view rescue)',
@@ -162,16 +162,16 @@ const dm = fs.readFileSync(path.join(REPO, 'src/lib/desktop-manager.js'), 'utf8'
 // door (WindowManager.setWindowHidden) and the ONE derivation (WindowManager._deriveHiders) drives the view's per-reason
 // setHidden ('desktop' / 'stage' included) and the marks (PURE view-visibility windowMarks); test-stage-visibility holds it
 const wjs = fs.readFileSync(path.join(REPO, 'src/lib/window.js'), 'utf8'), vvs = fs.readFileSync(path.join(REPO, 'src/lib/view-visibility.js'), 'utf8');
-ok('desktop hide/show wires the suspend flag (through the one door: the derivation sets the desktop reason on the view)', /_hideWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: true \}\);/.test(dm) && /_showWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: false \}\);/.test(dm) && /desktop: !!top\._hiddenByDesktop,/.test(wjs) && /for \(const r of HIDE_REASONS\) \{ try \{ sess\.setHidden\(r, reasons\[r\]\); \} catch \{ \} \}/.test(wjs));
-ok("hidden chat windows get content-visibility:hidden (state-preserving render skip — the switch-jank render leg, inc-mtd54h45) — DERIVED (PURE windowMarks), applied by the one derivation", /contentVisibility: box && type === 'chat' \? 'hidden' : ''/.test(vvs) && /el\.style\.contentVisibility = m\.contentVisibility;/.test(wjs));
-ok('stage un-hide paths resume too (the borrow clears every reason of the frame through the door — the view resumes from the derivation)', /for \(const m of this\._frameOf\(win\)\) this\.app\.wm\.setWindowHidden\(m, \{ desktop: false, stage: false \}\);/.test(fs.readFileSync(path.join(REPO, 'src/lib/stage-manager.js'), 'utf8')));
+ok('desktop hide/show wires the suspend flag (through the one door: the derivation sets the desktop reason on the view)', gateOf(/_hideWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: true \}\);/.test(dm)) && gateOf(/_showWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: false \}\);/.test(dm)) && gateOf(/desktop: !!top\._hiddenByDesktop,/.test(wjs)) && verdictOf(/for \(const r of HIDE_REASONS\) \{ try \{ sess\.setHidden\(r, reasons\[r\]\); \} catch \{ \} \}/.test(wjs)));
+ok("hidden chat windows get content-visibility:hidden (state-preserving render skip — the switch-jank render leg, inc-mtd54h45) — DERIVED (PURE windowMarks), applied by the one derivation", gateOf(/contentVisibility: box && type === 'chat' \? 'hidden' : ''/.test(vvs)) && verdictOf(/el\.style\.contentVisibility = m\.contentVisibility;/.test(wjs)));
+ok('stage un-hide paths resume too (the borrow clears every reason of the frame through the door — the view resumes from the derivation)', verdictOf(/for \(const m of this\._frameOf\(win\)\) this\.app\.wm\.setWindowHidden\(m, \{ desktop: false, stage: false \}\);/.test(fs.readFileSync(path.join(REPO, 'src/lib/stage-manager.js'), 'utf8'))));
 const ap = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
-ok('the legacy dialog overlay closes only when the interaction STARTED on it (inc-mtd1c2sd select-drag)', /_downOnOverlay = e\.target === overlay/.test(ap) && /e\.target === overlay && _downOnOverlay/.test(ap));
+ok('the legacy dialog overlay closes only when the interaction STARTED on it (inc-mtd1c2sd select-drag)', gateOf(/_downOnOverlay = e\.target === overlay/.test(ap)) && verdictOf(/e\.target === overlay && _downOnOverlay/.test(ap)));
 
 // ── reconnect no-op (inc-mtd2pg6x "刚刚又卡死了": ws reconnect re-attaches
 // every session; identical slabs must not rebuild N windows' DOM)
-ok('loadHistory skips the rebuild for an IDENTICAL slab (same epoch/total/tail ids, tail-anchored)', /loadHistory:identical-skip/.test(cv) && /lastCur\.id === lastNew\.id/.test(cv) && /this\._windowEnd === this\._total/.test(cv));
-ok('…the skip still applies meta/status/live state and the typing indicator', /identical-skip[\s\S]{0,900}applyStatus\(meta\.chatStatus\)[\s\S]{0,600}_applyLiveMeta\?\.\(meta\)/.test(cv));
+ok('loadHistory skips the rebuild for an IDENTICAL slab (same epoch/total/tail ids, tail-anchored)', gateOf(/loadHistory:identical-skip/.test(cv)) && gateOf(/lastCur\.id === lastNew\.id/.test(cv)) && verdictOf(/this\._windowEnd === this\._total/.test(cv)));
+ok('…the skip still applies meta/status/live state and the typing indicator', verdictOf(/identical-skip[\s\S]{0,900}applyStatus\(meta\.chatStatus\)[\s\S]{0,600}_applyLiveMeta\?\.\(meta\)/.test(cv)));
 // FUNCTIONAL (perf lane A): the identical-skip stays REACHABLE with the text-window slab. The window is a
 // pure function of the message list, so two independent conversions of one transcript (content-derived ids,
 // R0) ship the SAME ~300-card slab and a same-epoch re-attach skips the rebuild — run through the REAL
@@ -202,7 +202,7 @@ ok('…the skip still applies meta/status/live state and the typing indicator', 
     return traces.includes('loadHistory:identical-skip');
   };
   ok(`the attach slab is ~300 cards here (${first.length} records, total ${total}) — well past tail(50)`, first.length >= 290 && first.length <= 400);
-  ok('a same-epoch re-attach of the SAME transcript ships the same slab and SKIPS the rebuild (2.369.2 stays reachable)', again.length === first.length && reattach(again, total, 'e1'));
+  ok('a same-epoch re-attach of the SAME transcript ships the same slab and SKIPS the rebuild (2.369.2 stays reachable)', again.length === first.length && verdictOf(reattach(again, total, 'e1')));
   ok('…control: a new epoch rebuilds', !reattach(again, total, 'e2'));
   b.processLive({ type: 'user', uuid: 'tu-new', message: { role: 'user', content: [{ type: 'text', text: 'one more' }] } });
   ok('…control: one more message (a different list ⇒ a different slab) rebuilds', !reattach(b.tailWindow(), b.total, 'e1'));
@@ -216,31 +216,31 @@ ok('…the skip still applies meta/status/live state and the typing indicator', 
 // reproduction (with the negative control that proves the path is exercised)
 // lives in scripts/test-desktop-resume-paging.mjs; these pin the mechanism.
 ok('the gap path has ONE gate predicate, _autoPagingBlocked (never re-invented per entry point)',
-  /_autoPagingBlocked\(\) \{/.test(cv));
+  verdictOf(/_autoPagingBlocked\(\) \{/.test(cv)));
 ok('…and it names every law the scroll handler obeys (suspend / resume-settle / pin / settle / no-input)',
-  ["'suspended'", "'resume-settle'", "'pinned'", "'settling'", "'no-input'"].every((r) => cv.includes(r)));
+  verdictOf(["'suspended'", "'resume-settle'", "'pinned'", "'settling'", "'no-input'"].every((r) => cv.includes(r))));
 ok('_loadEarlierGap applies the gate BEFORE its tail-mode _extendTop branch (the guard sits on the path that is alive in the failure state)',
-  /if \(auto\) \{[\s\S]{0,220}_autoPagingBlocked\(\)[\s\S]{0,220}\}[\s\S]{0,400}this\._windowStart > 0\) \{ await this\._extendTop\(\); return; \}/.test(sk));
-ok('…and traces WHY it refused (gapSkip + reason, so the tracer shows the refusal)', /_trace\?\.\('gapSkip', \{ why, via \}\)/.test(sk));
+  verdictOf(/if \(auto\) \{[\s\S]{0,220}_autoPagingBlocked\(\)[\s\S]{0,220}\}[\s\S]{0,400}this\._windowStart > 0\) \{ await this\._extendTop\(\); return; \}/.test(sk)));
+ok('…and traces WHY it refused (gapSkip + reason, so the tracer shows the refusal)', verdictOf(/_trace\?\.\('gapSkip', \{ why, via \}\)/.test(sk)));
 ok('the sentinel IntersectionObserver goes through _loadEarlierGap as an AUTOMATIC caller (never a bare _extendTop)',
-  /isIntersecting\) continue;[\s\S]{0,900}this\._loadEarlierGap\(entry\.target, null, \{ via: 'io' \}\)/.test(cv));
-ok('an explicit RETRY click bypasses the gate (auto: false — a click is intent)', /_loadEarlierGap\(markerEl, btn, \{ auto: false \}\)/.test(sk));
-ok('the scroll/wheel-driven _maybeSeekEarlier is an automatic caller too', /_maybeSeekEarlier\(\) \{[\s\S]{0,700}_loadEarlierGap\(s, null\);\s*\/\/ AUTOMATIC/.test(sk));
+  verdictOf(/isIntersecting\) continue;[\s\S]{0,900}this\._loadEarlierGap\(entry\.target, null, \{ via: 'io' \}\)/.test(cv)));
+ok('an explicit RETRY click bypasses the gate (auto: false — a click is intent)', verdictOf(/_loadEarlierGap\(markerEl, btn, \{ auto: false \}\)/.test(sk)));
+ok('the scroll/wheel-driven _maybeSeekEarlier is an automatic caller too', verdictOf(/_maybeSeekEarlier\(\) \{[\s\S]{0,700}_loadEarlierGap\(s, null\);\s*\/\/ AUTOMATIC/.test(sk)));
 ok('setSuspended(false) arms the resume settle window — WITH the re-tail timer\'s slack, so nothing can decide in the gap between the window expiring and the re-tail running',
-  /_applySuspend\(on\) \{[\s\S]{0,900}this\._resumeAt = Date\.now\(\);\s*this\._resumeSettleUntil = this\._resumeAt \+ RESUME_SETTLE_MS \+ RESUME_RETAIL_SLACK_MS;/.test(cv) // 2.369.112: the body lives in _applySuspend (setSuspended = the desktop reason of the hidden set, test-hidden-view-suspend)
-  && /const RESUME_RETAIL_SLACK_MS = 40;/.test(cv));
+  gateOf(/_applySuspend\(on\) \{[\s\S]{0,900}this\._resumeAt = Date\.now\(\);\s*this\._resumeSettleUntil = this\._resumeAt \+ RESUME_SETTLE_MS \+ RESUME_RETAIL_SLACK_MS;/.test(cv)) // 2.369.112: the body lives in _applySuspend (setSuspended = the desktop reason of the hidden set, test-hidden-view-suspend)
+  && verdictOf(/const RESUME_RETAIL_SLACK_MS = 40;/.test(cv)));
 ok('…and the pinned re-tail is a BOUNDED SERIES, not a one-shot cliff (round-2: an input-less displacement at resume+1400ms still stranded the window 3/3 — +1240/+1280 only survived on _forceScrollToBottom\'s 10-frame chain)',
-  /const RESUME_RETAIL_AT_MS = \[RESUME_SETTLE_MS \+ RESUME_RETAIL_SLACK_MS, 2000\];/.test(cv)
-  && /this\._resumeRetailTimers = RESUME_RETAIL_AT_MS\.map\(\(ms\) => setTimeout\(reTail, ms\)\);/.test(cv)
-  && /_clearResumeRetail\(\) \{[\s\S]{0,160}clearTimeout\(tm\)/.test(cv)
-  && /this\._clearResumeRetail\(\);/.test(cv.slice(cv.indexOf('\n  dispose() {'))));
+  gateOf(/const RESUME_RETAIL_AT_MS = \[RESUME_SETTLE_MS \+ RESUME_RETAIL_SLACK_MS, 2000\];/.test(cv))
+  && gateOf(/this\._resumeRetailTimers = RESUME_RETAIL_AT_MS\.map\(\(ms\) => setTimeout\(reTail, ms\)\);/.test(cv))
+  && gateOf(/_clearResumeRetail\(\) \{[\s\S]{0,160}clearTimeout\(tm\)/.test(cv))
+  && verdictOf(/this\._clearResumeRetail\(\);/.test(cv.slice(cv.indexOf('\n  dispose() {')))));
 ok('…and the pin SNAPSHOT outlives the last re-tail, so the unpin gate keeps its evidence for the whole displacement horizon',
-  /const RESUME_DISPLACEMENT_MS = 2800;/.test(cv)
-  && /setTimeout\(\(\) => \{ this\._pinnedAtSuspend = false; \}, RESUME_DISPLACEMENT_MS\)/.test(cv));
+  gateOf(/const RESUME_DISPLACEMENT_MS = 2800;/.test(cv))
+  && verdictOf(/setTimeout\(\(\) => \{ this\._pinnedAtSuspend = false; \}, RESUME_DISPLACEMENT_MS\)/.test(cv)));
 ok('…and it asserts off the pin SNAPSHOT taken when the window was HIDDEN (a transitional unpin during the resume must not strand the window in history)',
-  /this\._pinnedAtSuspend = this\._pinned;/.test(cv)
-  && /if \(!this\._pinned && !this\._pinnedAtSuspend\) return;/.test(cv)
-  && /if \(this\._pinned \|\| this\._pinnedAtSuspend\) \{/.test(cv));
+  gateOf(/this\._pinnedAtSuspend = this\._pinned;/.test(cv))
+  && gateOf(/if \(!this\._pinned && !this\._pinnedAtSuspend\) return;/.test(cv))
+  && verdictOf(/if \(this\._pinned \|\| this\._pinnedAtSuspend\) \{/.test(cv)));
 // ORDER pin. The settle return moved BELOW the run-bar readout (round-2
 // minor: returning above it froze the 2.369.45 floating bar for the whole
 // 1.24s settle) and stays ABOVE every pin/paging decision; round 3 puts the
@@ -253,15 +253,15 @@ ok('…and it asserts off the pin SNAPSHOT taken when the window was HIDDEN (a t
 // not prose — raise one when a comment legitimately grows; what is pinned is
 // the ORDER.
 ok('the scroll handler updates the run-bar READOUT first, stamps a scrollbar DRAG, then no-ops for the settle BEFORE it touches the pin (transitional geometry must not unpin)',
-  /this\._suspended\) return;[\s\S]{0,400}this\._updateRunBar\(scrollTop\);[\s\S]{0,200}this\._programmaticScroll\) return;[\s\S]{0,700}this\._pointerDragScroll\(scrollTop\)\)[\s\S]{0,1400}Date\.now\(\) < \(this\._resumeSettleUntil \|\| 0\)\) return;[\s\S]{0,2400}const atBottom =/.test(cv));
+  verdictOf(/this\._suspended\) return;[\s\S]{0,400}this\._updateRunBar\(scrollTop\);[\s\S]{0,200}this\._programmaticScroll\) return;[\s\S]{0,700}this\._pointerDragScroll\(scrollTop\)\)[\s\S]{0,1400}Date\.now\(\) < \(this\._resumeSettleUntil \|\| 0\)\) return;[\s\S]{0,2400}const atBottom =/.test(cv)));
 ok('…and the UNPIN itself is gated on positive evidence for the rest of the horizon (the settle alone was a one-shot cliff)',
-  /if \(this\._pinned && this\._resumeDisplacement\(\)\) \{[\s\S]{0,260}_scrollToBottom\(\);\s*return;\s*\}[\s\S]{0,200}this\._setPinned\(false, 'scrolledAway'/.test(cv)
-  && /_resumeDisplacement\(\) \{/.test(cv));
+  gateOf(/if \(this\._pinned && this\._resumeDisplacement\(\)\) \{[\s\S]{0,260}_scrollToBottom\(\);\s*return;\s*\}[\s\S]{0,200}this\._setPinned\(false, 'scrolledAway'/.test(cv))
+  && verdictOf(/_resumeDisplacement\(\) \{/.test(cv)));
 ok('the loadHistory auto-fill DEFERS through the settle instead of deciding on transitional geometry',
-  /const tryAutoFill = \(retries\) => \{[\s\S]{0,400}this\._resumeSettleUntil \|\| 0\) - Date\.now\(\)[\s\S]{0,200}tryAutoFill\(retries - 1\)/.test(cv));
+  verdictOf(/const tryAutoFill = \(retries\) => \{[\s\S]{0,400}this\._resumeSettleUntil \|\| 0\) - Date\.now\(\)[\s\S]{0,200}tryAutoFill\(retries - 1\)/.test(cv)));
 ok('a POSITIONING act clears the settle AND the pin snapshot (the settle only suppresses input-LESS displacement, it never fights a reader who MOVED the view)',
-  /_notePositioning\(via\) \{[\s\S]{0,320}this\._lastPositionAt = now;[\s\S]{0,600}this\._endResumeSettle\(\);/.test(cv)
-  && /_endResumeSettle\(\) \{ this\._resumeSettleUntil = 0; this\._pinnedAtSuspend = false; this\._clearResumeRetail\(\); \}/.test(cv));
+  gateOf(/_notePositioning\(via\) \{[\s\S]{0,320}this\._lastPositionAt = now;[\s\S]{0,600}this\._endResumeSettle\(\);/.test(cv))
+  && verdictOf(/_endResumeSettle\(\) \{ this\._resumeSettleUntil = 0; this\._pinnedAtSuspend = false; this\._clearResumeRetail\(\); \}/.test(cv)));
 
 // ── ROUND 3, THE MAJOR (reproduced with TRUSTED CDP input): a plain
 // left-click/tap in the message list during the 1.24s settle ran the FULL
@@ -270,14 +270,14 @@ ok('a POSITIONING act clears the settle AND the pin snapshot (the settle only su
 // click, reproduced the incident. A click is not a positioning act: it says
 // where the reader IS, not that the view moved.
 ok('a bare CLICK / non-navigation key only stamps input and ends the settle WINDOW — the pin snapshot and the re-tail series survive it',
-  /_noteUserInput\(\) \{\s*this\._lastUserScrollAt = Date\.now\(\);\s*this\._resumeSettleUntil = 0;/.test(cv)
+  gateOf(/_noteUserInput\(\) \{\s*this\._lastUserScrollAt = Date\.now\(\);\s*this\._resumeSettleUntil = 0;/.test(cv))
   && !/_noteUserInput\(\) \{[\s\S]{0,200}_pinnedAtSuspend|_noteUserInput\(\) \{[\s\S]{0,200}_clearResumeRetail/.test(cv));
 ok('…and the message-list listeners route by GRADE: wheel/touchmove/navigation keys position, pointerdown and other keys merely input',
-  /addEventListener\('wheel', \(e\) => \{[\s\S]{0,400}this\._notePositioning\('wheel'\);/.test(cv)
-  && /addEventListener\('touchmove', \(\) => this\._notePositioning\('touch'\)/.test(cv)
-  && /addEventListener\('pointerdown', \(e\) => \{\s*this\._noteUserInput\(\);\s*this\._pointerDownOnScrollbar = this\._pointerOnScrollbar\(e\);\s*this\._pointerDownScrollTop = this\._messageList\.scrollTop;/.test(cv)
-  && /if \(NAV_KEYS\.includes\(e\.key\)\) this\._notePositioning\('key'\);\s*else this\._noteUserInput\(\);/.test(cv)
-  && /const NAV_KEYS = \['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'PageDown', 'PageUp', 'Home', 'End', ' '\];/.test(cv));
+  gateOf(/addEventListener\('wheel', \(e\) => \{[\s\S]{0,400}this\._notePositioning\('wheel'\);/.test(cv))
+  && gateOf(/addEventListener\('touchmove', \(\) => this\._notePositioning\('touch'\)/.test(cv))
+  && gateOf(/addEventListener\('pointerdown', \(e\) => \{\s*this\._noteUserInput\(\);\s*this\._pointerDownOnScrollbar = this\._pointerOnScrollbar\(e\);\s*this\._pointerDownScrollTop = this\._messageList\.scrollTop;/.test(cv))
+  && gateOf(/if \(NAV_KEYS\.includes\(e\.key\)\) this\._notePositioning\('key'\);\s*else this\._noteUserInput\(\);/.test(cv))
+  && verdictOf(/const NAV_KEYS = \['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'PageDown', 'PageUp', 'Home', 'End', ' '\];/.test(cv)));
 // ── ROUND 4: the drag signature is WHERE the press landed, never WHEN a
 // scroll follows it. The 400ms window had two MAJORs: the resume's OWN
 // input-less displacement (the incident's re-measure bounces at +366…+602ms)
@@ -287,22 +287,22 @@ ok('…and the message-list listeners route by GRADE: wheel/touchmove/navigation
 // positioning at all, so the re-tail series yanked that reader back (a NEW harm
 // vs master). The press now carries a gutter FLAG for its whole lifetime.
 ok('…and a SCROLLBAR DRAG is keyed on the GUTTER the press landed in (position), not on a time window after any pointerdown',
-  /_pointerDragScroll\(scrollTop\) \{\s*if \(!this\._pointerDownOnScrollbar\) return false;\s*return Math\.abs\(scrollTop - \(this\._pointerDownScrollTop \|\| 0\)\) > POINTER_DRAG_PX;/.test(cv)
-  && /_pointerOnScrollbar\(e\) \{/.test(cv)
-  && /this\._pointerDragScroll\(scrollTop\)\) this\._notePositioning\('scrollbar-drag'\);/.test(cv));
+  gateOf(/_pointerDragScroll\(scrollTop\) \{\s*if \(!this\._pointerDownOnScrollbar\) return false;\s*return Math\.abs\(scrollTop - \(this\._pointerDownScrollTop \|\| 0\)\) > POINTER_DRAG_PX;/.test(cv))
+  && gateOf(/_pointerOnScrollbar\(e\) \{/.test(cv))
+  && verdictOf(/this\._pointerDragScroll\(scrollTop\)\) this\._notePositioning\('scrollbar-drag'\);/.test(cv)));
 ok('…the time-window signature is GONE (POINTER_DRAG_MS / _pointerDownAt cannot come back by accident)',
   !/POINTER_DRAG_MS/.test(cv) && !/_pointerDownAt/.test(cv));
 ok('…the gutter hit-test measures the strip the CONTENT box does not reach, in LAYOUT px (uiScale zoom scales the rect, not clientWidth — the 2.369.5 VNC-pointer class), and handles RTL + a horizontal gutter',
-  /const scale = list\.offsetWidth \? \(r\.width \/ list\.offsetWidth\) : 1;/.test(cv)
-  && /const vGutter = list\.offsetWidth - list\.clientWidth - bl - br;/.test(cv)
-  && /const hGutter = list\.offsetHeight - list\.clientHeight - bt - bb;/.test(cv)
-  && /rtl = cs\.direction === 'rtl';/.test(cv));
+  gateOf(/const scale = list\.offsetWidth \? \(r\.width \/ list\.offsetWidth\) : 1;/.test(cv))
+  && gateOf(/const vGutter = list\.offsetWidth - list\.clientWidth - bl - br;/.test(cv))
+  && gateOf(/const hGutter = list\.offsetHeight - list\.clientHeight - bt - bb;/.test(cv))
+  && verdictOf(/rtl = cs\.direction === 'rtl';/.test(cv)));
 ok('…and the press is CLEARED on pointerup/pointercancel, window-scoped on the winInfo AbortController (a drag routinely releases outside the list) and removed on dispose',
-  /window\.addEventListener\('pointerup', this\._endPointerPress, \{ passive: true, signal: pressSignal \}\);/.test(cv)
-  && /window\.addEventListener\('pointercancel', this\._endPointerPress, \{ passive: true, signal: pressSignal \}\);/.test(cv)
-  && /const pressSignal = winInfo\?\._listenerCtl\?\.signal;/.test(cv)
-  && /this\._endPointerPress = \(\) => \{ this\._pointerDownOnScrollbar = false; \};/.test(cv)
-  && /window\.removeEventListener\('pointerup', this\._endPointerPress\);/.test(cv.slice(cv.indexOf('\n  dispose() {'))));
+  gateOf(/window\.addEventListener\('pointerup', this\._endPointerPress, \{ passive: true, signal: pressSignal \}\);/.test(cv))
+  && gateOf(/window\.addEventListener\('pointercancel', this\._endPointerPress, \{ passive: true, signal: pressSignal \}\);/.test(cv))
+  && gateOf(/const pressSignal = winInfo\?\._listenerCtl\?\.signal;/.test(cv))
+  && gateOf(/this\._endPointerPress = \(\) => \{ this\._pointerDownOnScrollbar = false; \};/.test(cv))
+  && verdictOf(/window\.removeEventListener\('pointerup', this\._endPointerPress\);/.test(cv.slice(cv.indexOf('\n  dispose() {')))));
 
 // ── ROUND 2, THE MAJOR: only the four message-list listeners ended the settle,
 // so a reader who navigated through a surface that is NOT the list — the
@@ -312,33 +312,33 @@ ok('…and the press is CLEARED on pointerup/pointercancel, window-scoped on the
 // tail at +2600ms). Every such entry point stamps and ends the settle, and the
 // re-tail compares nav-vs-resume: the chat-view-seek `userScrolled` idiom.
 ok('there is ONE navigation stamp (_noteUserNav) and it ends the settle like a wheel does',
-  /_noteUserNav\(via\) \{[\s\S]{0,220}this\._lastNavAt = Date\.now\(\);[\s\S]{0,220}this\._endResumeSettle\(\);/.test(cv));
+  verdictOf(/_noteUserNav\(via\) \{[\s\S]{0,220}this\._lastNavAt = Date\.now\(\);[\s\S]{0,220}this\._endResumeSettle\(\);/.test(cv)));
 ok('…and the reader-position test generalises the seek idiom over every POSITIONING stamp (positioning act, nav, jump landing, search reveal) — and reads _lastUserScrollAt NOWHERE, because a click is not one (round 3; lane needs-card-tail r5: the stamps are THE one list, _readerActs — jumpToBottom\'s default reads it too; r6: a reader act is stamped when it STARTS — the jump LANDING is not in the list, only the resume\'s _positionedSince reads it; r8: a press that KEEPS the tail is one of them, and the resume\'s question leaves it out — `tail: false`)',
-  /_navigatedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\)\) > since;\s*\}/.test(cv)
-  && /_readerActs\(\{ scroll = true, tail = true \} = \{\}\) \{\s*return \[this\._lastNavAt \|\| 0, scroll \? this\._lastPositionAt \|\| 0 : 0, this\._search\?\._lastRevealAt \|\| 0, tail \? this\._lastTailPressAt \|\| 0 : 0\];\s*\}/.test(cv)
-  && /_positionedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\{ tail: false \}\)\) > since \|\| \(this\._lastJumpAt \|\| 0\) > since;\s*\}/.test(cv)
+  gateOf(/_navigatedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\)\) > since;\s*\}/.test(cv))
+  && gateOf(/_readerActs\(\{ scroll = true, tail = true \} = \{\}\) \{\s*return \[this\._lastNavAt \|\| 0, scroll \? this\._lastPositionAt \|\| 0 : 0, this\._search\?\._lastRevealAt \|\| 0, tail \? this\._lastTailPressAt \|\| 0 : 0\];\s*\}/.test(cv))
+  && gateOf(/_positionedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\{ tail: false \}\)\) > since \|\| \(this\._lastJumpAt \|\| 0\) > since;\s*\}/.test(cv))
   && !/_navigatedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_readerActs\(\{ scroll = true, tail = true \} = \{\}\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_positionedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv));
 ok('A PRESS THAT KEEPS THE TAIL STAMPS ONLY (lane needs-card-tail r8; r9: every door judged where it lands — the run bar\'s landing and a needs card\'s open at the live tail, a needs card landing until its road leaves; five callers, each named — r7 stamped the send at the live tail through the whole _noteUserNav and switched the resume repair off): _noteTailPress writes _lastTailPressAt and nothing the repair keeps (no _endResumeSettle, no _lastNavAt, no snapshot, no series); the send at the live tail and the ↓ on a window that ends there are its only callers, and the ↓ — a click on its own button — ends the settle WINDOW only',
-  /  _noteTailPress\(via\) \{\n\s+this\._lastTailPressAt = Date\.now\(\);\n\s+this\._trace\?\.\('userNav', \{ via, keepsTail: true \}\);\n\s+this\._clearWheelCarry\?\.\(via\);[^\n]*\n  \}/.test(cv)
-  && /this\._noteTailPress\('scrollBtn'\);\n\s+this\._resumeSettleUntil = 0;\n\s+this\._setPinned\(true, 'scrollBtn'\);/.test(cv)
+  gateOf(/  _noteTailPress\(via\) \{\n\s+this\._lastTailPressAt = Date\.now\(\);\n\s+this\._trace\?\.\('userNav', \{ via, keepsTail: true \}\);\n\s+this\._clearWheelCarry\?\.\(via\);[^\n]*\n  \}/.test(cv))
+  && gateOf(/this\._noteTailPress\('scrollBtn'\);\n\s+this\._resumeSettleUntil = 0;\n\s+this\._setPinned\(true, 'scrollBtn'\);/.test(cv))
   // r9: …and the doors judged where they land — the run bar's landing at the live tail (chat-view.js), a needs card opened
   // and a needs card landing (chat-needs-card.js: the open's own landing decides the rest; the landing's roads stamp theirs)
-  && /if \(atBottom\) \{ this\._noteTailPress\('runBar'\); this\._resumeSettleUntil = 0; \} else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv)
+  && gateOf(/if \(atBottom\) \{ this\._noteTailPress\('runBar'\); this\._resumeSettleUntil = 0; \} else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv))
   && (cv.match(/this\._noteTailPress\(/g) || []).length === 3
-  && (() => { const nc = fs.readFileSync(path.join(REPO, 'src/lib/chat-needs-card.js'), 'utf8');
+  && verdictOf((() => { const nc = fs.readFileSync(path.join(REPO, 'src/lib/chat-needs-card.js'), 'utf8');
     return /view\._noteTailPress\?\.\('needsOpen'\);\n\s+view\._cancelForcedScroll\?\.\('needsOpen'\);/.test(nc) && /if \(!atTail\) \{ view\._noteUserNav\?\.\('needsOpen'\); if \(view\._pinned\) view\._setPinned\?\.\(false, 'needsOpen'\); \}/.test(nc)
       && /const filing = this\._flying = filingOf\(item\);\n(?:\s+\/\/[^\n]*\n)*\s+view\._noteTailPress\?\.\('needsLand'\);/.test(nc) && !/_noteUserNav\?\.\('needs(?:Open|Land)'\);\n\s+(?:this\._slot|let mark)/.test(nc)
-      && (nc.match(/_noteTailPress\?\.\(/g) || []).length === 2; })());
+      && (nc.match(/_noteTailPress\?\.\(/g) || []).length === 2; })()));
 ok('the resume re-tail BAILS when the reader navigated after the resume (never yank a reader back to the tail)',
-  /const resumeAt = this\._resumeAt;[\s\S]{0,400}if \(this\._positionedSince\(resumeAt\)\) return;/.test(cv) && /return !this\._positionedSince\(at\);/.test(cv)); // (r6: an act of the reader's OR the landing of one)
+  gateOf(/const resumeAt = this\._resumeAt;[\s\S]{0,400}if \(this\._positionedSince\(resumeAt\)\) return;/.test(cv)) && verdictOf(/return !this\._positionedSince\(at\);/.test(cv))); // (r6: an act of the reader's OR the landing of one)
 ok('every off-list navigation surface stamps: minimap (index + time), search reveal, run-bar landing, jumpToIndex, user jumpToBottom; a send at the live tail too (lane needs-card-tail r7 — r8: as a press that KEEPS the tail)',
-  /_noteUserNav\('minimap'\); return this\.jumpToIndex/.test(cv)
-  && /_noteUserNav\('minimap-time'\); return this\._jumpToFileTime/.test(cv)
-  && /onNav: \(via = 'search-reveal'\) => this\._noteUserNav\(via\)/.test(cv) // (r7: the search's press names itself — 'search')
-  && /this\._noteTailPress\('send'\);\n\s+this\._setPinned\(true, 'send'\);/.test(cv)
-  && /_landOnHeader\(run\) \{[\s\S]{0,2000}if \(atBottom\) \{ this\._noteTailPress\('runBar'\); this\._resumeSettleUntil = 0; \} else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv) // (r9: judged where it lands; r10: a keeps-door outside the list ends the settle WINDOW)
-  && /async jumpToIndex\(targetIdx(?:, \{ land = null(?:, stale = null)? \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv) // (lane needs-card-tail: its optional `land` — the needs cards' landing — and r2's `stale` never move the stamp off the first line)
-  && /async jumpToBottom\(\{ user = true(?:, land = null, stale = null(?:, send = false)?)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv)); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line; r5: nor the send's `send`)
+  gateOf(/_noteUserNav\('minimap'\); return this\.jumpToIndex/.test(cv))
+  && gateOf(/_noteUserNav\('minimap-time'\); return this\._jumpToFileTime/.test(cv))
+  && gateOf(/onNav: \(via = 'search-reveal'\) => this\._noteUserNav\(via\)/.test(cv)) // (r7: the search's press names itself — 'search')
+  && gateOf(/this\._noteTailPress\('send'\);\n\s+this\._setPinned\(true, 'send'\);/.test(cv))
+  && gateOf(/_landOnHeader\(run\) \{[\s\S]{0,2000}if \(atBottom\) \{ this\._noteTailPress\('runBar'\); this\._resumeSettleUntil = 0; \} else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv)) // (r9: judged where it lands; r10: a keeps-door outside the list ends the settle WINDOW)
+  && gateOf(/async jumpToIndex\(targetIdx(?:, \{ land = null(?:, stale = null)? \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv)) // (lane needs-card-tail: its optional `land` — the needs cards' landing — and r2's `stale` never move the stamp off the first line)
+  && verdictOf(/async jumpToBottom\(\{ user = true(?:, land = null, stale = null(?:, send = false)?)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv))); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line; r5: nor the send's `send`)
 // r10 (the r9 acceptance, minor): the run bar's chain cancel runs BEFORE the landing's programmatic mute — a running chain's
 // cancel resets _programmaticScroll, so a cancel deleted or moved after the mute leaves the landing's own scrollTop write to
 // be decided as a reader's scroll (B-9702's class). The source's order, and the REAL _landOnHeader pressed off the tail while
@@ -356,23 +356,23 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
     held = { mute: v._programmaticScroll, chain: v._fsbActive, pinned: v._pinned }; clearTimeout(v._jumpGuardTimer);
   } catch (e) { held = { threw: String(e && e.message || e) }; } finally { if (typeof raf0 !== 'function') delete globalThis.requestAnimationFrame; }
   ok('r10: THE RUN BAR\'S CHAIN CANCEL PRECEDES ITS MUTE — _landOnHeader cancels our bottom-follow chain (_cancelForcedScroll(\'runBar\'), once) on the line before `_programmaticScroll = true`; pressed off the tail while a chain runs, the mute HOLDS after the press (a mutant that deletes the cancel or moves it after the mute: LOST)',
-    order && held && held.mute === true && held.chain === false && held.pinned === false, JSON.stringify({ order, held }));
+    gateOf(order) && gateOf(held) && held.mute === true && held.chain === false && held.pinned === false, JSON.stringify({ order, held }));
 }
 {
   const sch = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8');
   ok('…and ChatSearch actually calls it on a REVEAL (the reveal scrolls the list from outside its own listeners)',
-    /this\._onNav = onNav \|\| null;/.test(sch) && /this\._lastRevealAt = Date\.now\(\);\s*this\._onNav\?\.\(\);/.test(sch));
+    gateOf(/this\._onNav = onNav \|\| null;/.test(sch)) && verdictOf(/this\._lastRevealAt = Date\.now\(\);\s*this\._onNav\?\.\(\);/.test(sch)));
   ok('…and on its PRESS, as the search\'s jump starts — both roads, before any await (lane needs-card-tail r7: a full-file hit with no rendered range stamped nothing)',
-    /async _jumpToSearchResult\(idx\) \{\n\s+const results = this\._serverSearchResults;\n\s+if \(!results \|\| idx < 0 \|\| idx >= results\.length\) return;\n(?:\s+\/\/[^\n]*\n)*\s+this\._onNav\?\.\('search'\);/.test(sch));
-  ok('…and the minimap time landing stamps in the seek module too', /_jumpToFileTime\(ts, line\) \{\s*this\._noteUserNav\('jumpToFileTime'\);/.test(sk));
+    verdictOf(/async _jumpToSearchResult\(idx\) \{\n\s+const results = this\._serverSearchResults;\n\s+if \(!results \|\| idx < 0 \|\| idx >= results\.length\) return;\n(?:\s+\/\/[^\n]*\n)*\s+this\._onNav\?\.\('search'\);/.test(sch)));
+  ok('…and the minimap time landing stamps in the seek module too', verdictOf(/_jumpToFileTime\(ts, line\) \{\s*this\._noteUserNav\('jumpToFileTime'\);/.test(sk)));
   ok('…and so does the Retry on «Couldn\'t jump there», as it starts (lane needs-card-tail r8: it called _seekTeleport bare — no stamp at all)',
-    /retry: \(\) => \{ this\._noteUserNav\('teleportRetry'\); return this\._seekTeleport\(line\); \}/.test(sk));
+    verdictOf(/retry: \(\) => \{ this\._noteUserNav\('teleportRetry'\); return this\._seekTeleport\(line\); \}/.test(sk)));
 }
 ok('INVARIANT a pinned view never loses its tail: _extendTop skips trimBottom while pinned',
-  /if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}else \{ const before = this\._windowEnd; this\._trimBottom\(\);/.test(cv));
+  verdictOf(/if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}else \{ const before = this\._windowEnd; this\._trimBottom\(\);/.test(cv)));
 ok('…and re-asserts the tail after the prepend (the anchor restore fails under transitional geometry: anchored:false, scrollTop 0)',
-  /if \(this\._pinned\) \{ this\._trace\('pinnedRetail'[\s\S]{0,80}this\._scrollToBottom\(\); \}/.test(cv));
-ok('the incident is named at the fix (future readers find the bundle)', /inc-mtq5bpjt-0o0n/.test(cv) && /inc-mtq5bpjt-0o0n/.test(sk));
+  verdictOf(/if \(this\._pinned\) \{ this\._trace\('pinnedRetail'[\s\S]{0,80}this\._scrollToBottom\(\); \}/.test(cv)));
+ok('the incident is named at the fix (future readers find the bundle)', gateOf(/inc-mtq5bpjt-0o0n/.test(cv)) && verdictOf(/inc-mtq5bpjt-0o0n/.test(sk)));
 
 // ── B-9702 (round 5): OUR OWN SCROLL CHAIN IS AUTOMATIC REPOSITIONING ───────
 // `_forceScrollToBottom` writes `scrollTop = scrollHeight` for up to 10 frames
@@ -389,8 +389,8 @@ ok('the incident is named at the fix (future readers find the bundle)', /inc-mtq
 // for good, a mute that lifts before its own last write is delivered) are
 // cheap to pin.
 ok('a POSITIONING act and an off-list NAVIGATION both cancel the chain — a bare CLICK does not (it moved nothing)',
-  /_notePositioning\(via\) \{[\s\S]{0,600}this\._cancelForcedScroll\(via\);/.test(cv)
-  && /_noteUserNav\(via\) \{[\s\S]{0,300}this\._cancelForcedScroll\(via\);/.test(cv)
+  gateOf(/_notePositioning\(via\) \{[\s\S]{0,600}this\._cancelForcedScroll\(via\);/.test(cv))
+  && gateOf(/_noteUserNav\(via\) \{[\s\S]{0,300}this\._cancelForcedScroll\(via\);/.test(cv))
   && !/_noteUserInput\(\) \{[\s\S]{0,200}_cancelForcedScroll/.test(cv));
 {
   const realRaf = globalThis.requestAnimationFrame;
@@ -507,7 +507,7 @@ ok('a POSITIONING act and an off-list NAVIGATION both cancel the chain — a bar
     ok('unit: no recent user input blocks — displacement is not intent', call({ _lastUserScrollAt: NOW - 5000 }) === 'no-input');
     ok('unit: …and a view that NEVER saw user input blocks too (undefined, not just stale)', call({ _lastUserScrollAt: undefined }) === 'no-input');
     ok('unit: input-box / viewport resize blocks (the 2.338/2.339 displacement doors)',
-      (() => { win.__vsInputResizeAt = NOW - 50; win.__vsViewportResizeAt = 0; return decide.call(clear()) === 'input-resize'; })());
+      verdictOf((() => { win.__vsInputResizeAt = NOW - 50; win.__vsViewportResizeAt = 0; return decide.call(clear()) === 'input-resize'; })()));
     ok('unit: suspend outranks pin outranks no-input (reason ORDER is the diagnostic)',
       call({ _suspended: true, _pinned: true, _lastUserScrollAt: 0 }) === 'suspended'
       && call({ _pinned: true, _lastUserScrollAt: 0 }) === 'pinned');
@@ -667,7 +667,7 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
     resumeThen((v) => { v._pinned = false; v._endResumeSettle(); }),  // a real reader scrolled away
     resumeThen(null, { _pinned: false }),                             // was never pinned to begin with
   ]);
-  ok('a transitional (input-LESS) unpin during the resume still ends at the LIVE tail — the re-tail asserts off the snapshot', gap.retailed && gap.v._pinned === true);
+  ok('a transitional (input-LESS) unpin during the resume still ends at the LIVE tail — the re-tail asserts off the snapshot', gateOf(gap.retailed) && gap.v._pinned === true);
   ok('…and a REAL reader who scrolled away during the settle is left alone (input drops the snapshot)', !reader.retailed && reader.v._pinned === false);
   ok('a window that was NOT pinned when it was hidden is never dragged to the tail', !never.retailed && retails(never.v) === 0);
 
@@ -695,7 +695,7 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
     resumeThen((v) => { v._notePositioning('wheel'); v._pinned = false; }), // a reader who actually moved the view
   ]);
   ok('a CLICK during the settle leaves the repair armed — the input-LESS displacement behind it is still repaired (round-3 MAJOR)',
-    clicked.retailed && clicked.v._pinned === true);
+    gateOf(clicked.retailed) && clicked.v._pinned === true);
   ok('…while a real POSITIONING act during the settle still hands the position to the reader (nothing yanks them back)',
     !positioned.retailed && positioned.v._pinned === false);
   ok('…and the click did end the settle WINDOW (a reader who touched the view is never left with a frozen one)',
@@ -713,7 +713,7 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
     return { v, repaired: retails(v) > baseline };
   })();
   ok('an input-LESS unpin AFTER the settle expires is still repaired by the bounded series (the +1400ms strand, 3/3 sessions)',
-    late.repaired && late.v._pinned === true);
+    gateOf(late.repaired) && late.v._pinned === true);
 
   // ROUND 2 (c): the UNPIN gate itself — positive evidence, DOM-free, run
   // against the SHIPPED predicate.
@@ -806,27 +806,27 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
     const clock = `the clock read from chat-view.js: settle ${K.settle} ms, rungs ${r1} / ${r2} ms, horizon ${K.horizon} ms`;
     const seen = R8.filter((r) => r.traces.includes('unpinSkipResume')).length;
     console.log(`    r8/r9 legs — ${clock}; unpinSkipResume traced in ${seen} of ${R8.length} (evidence: a rung that re-asserted the bottom first leaves none)`);
-    ok(`r8 control: no press — the resume's own displacement at +${ctl.at} ms keeps the pin (the state: pinned at the bottom, no unpin; ${clock})`, held(ctl), JSON.stringify(ctl));
+    ok(`r8 control: no press — the resume's own displacement at +${ctl.at} ms keeps the pin (the state: pinned at the bottom, no unpin; ${clock})`, verdictOf(held(ctl)), JSON.stringify(ctl));
     ok(`RED-able (r8 — fdf241de: scrolledAway, 3637 px up in history; 15475151 kept the pin and stamped nothing): A SEND AT THE LIVE TAIL ${sA.pressAt} ms after the window is shown again is stamped and leaves the resume repair armed — the snapshot, the series, the settle; the resume's question false — so the displacement at +${sA.at} / +${sB.at} ms (between the rungs, after the last) keeps the pin`,
-      [sA, sB].every((r) => armed(r) && r.afterPress.settle === true && held(r)), JSON.stringify([sA, sB]));
+      verdictOf([sA, sB].every((r) => armed(r) && r.afterPress.settle === true && held(r))), JSON.stringify([sA, sB]));
     ok(`RED-able (r8 — fdf241de: scrolledAway; 15475151: unstamped): …and a send ${sG1.pressAt} / ${sG2.pressAt} ms after it (past the settle window, between the rungs / past the last, inside the horizon — r9: the clock from the product's constants, never a literal ON a rung) — the displacement at +${sG1.at} / +${sG2.at} ms keeps the pin`,
-      [sG1, sG2].every((r) => armed(r) && held(r)), JSON.stringify([sG1, sG2]));
-    ok(`r9: …and a displacement ON the second rung (+${sRung.at} ms = RESUME_RETAIL_AT_MS[1], by name — r8's leg that flaked on its trace) keeps the pin in EITHER order: the oracle is the state`, armed(sRung) && held(sRung), JSON.stringify(sRung));
+      verdictOf([sG1, sG2].every((r) => armed(r) && held(r))), JSON.stringify([sG1, sG2]));
+    ok(`r9: …and a displacement ON the second rung (+${sRung.at} ms = RESUME_RETAIL_AT_MS[1], by name — r8's leg that flaked on its trace) keeps the pin in EITHER order: the oracle is the state`, gateOf(armed(sRung)) && verdictOf(held(sRung)), JSON.stringify(sRung));
     ok(`RED-able (r8 — 15475151 and fdf241de alike: the ↓ ran the whole _noteUserNav): THE ↓ AT THE TAIL keeps the tail too — on a window the re-measure unpinned (the live flag the re-tail never trusts) it is stamped, leaves the repair armed and the displacement at +${downA.at} ms keeps the pin; a click on its own button, it ends the settle WINDOW`,
-      armed(downA) && downA.afterPress.settle === false && held(downA), JSON.stringify(downA));
+      gateOf(armed(downA)) && downA.afterPress.settle === false && verdictOf(held(downA)), JSON.stringify(downA));
     ok('…while behind a ↓ in a window that had NO repair (unpinned when it was hidden) the re-measure\'s displacement unpins honestly (scrolledAway, the ↓ back) — as on every tree: no pinned window left displaced with the ↓ hidden',
-      !!downB.afterPress && downB.afterPress.stamped && downB.pinned === false && downB.traces.includes('unpin/scrolledAway'), JSON.stringify(downB));
+      !!downB.afterPress && gateOf(downB.afterPress.stamped) && downB.pinned === false && verdictOf(downB.traces.includes('unpin/scrolledAway')), JSON.stringify(downB));
     ok(`RED-able (r9 — 215604e74 and every tree before: scrolledAway, 3637 px up): A NEEDS CARD OPENED and A RUN-BAR LANDING at the live tail ${open.pressAt} ms after the window is shown again keep the tail — stamped, the repair left armed (the REAL openCard and _landOnHeader judge it where they land) — so the displacement at +${open.at} ms keeps the pin`,
-      [open, bar].every((r) => armed(r) && held(r)), JSON.stringify([open, bar]));
+      verdictOf([open, bar].every((r) => armed(r) && held(r))), JSON.stringify([open, bar]));
     ok(`RED-able (r10 — the r9 acceptance's MAJOR: bd5c5fd98 left the settle WINDOW open at the bar, pinned 3637 px up with the ↓ hidden): THE RUN BAR AT THE TAIL ends the settle WINDOW as the ↓ does (a keeps-door outside the list — a click on the list ends it through _noteUserInput) — the repair kept (pinned window: the displacement at +${bar.at} ms holds), and behind a bar landing in a window that had NO repair the re-measure's displacement at +${barB.at} ms unpins honestly (scrolledAway, the ↓ back)`,
-      bar.afterPress.settle === false && !!barB.afterPress && barB.afterPress.stamped && barB.afterPress.settle === false && barB.pinned === false && barB.traces.includes('unpin/scrolledAway'), JSON.stringify([bar.afterPress, barB]));
+      bar.afterPress.settle === false && !!barB.afterPress && gateOf(barB.afterPress.stamped) && barB.afterPress.settle === false && barB.pinned === false && verdictOf(barB.traces.includes('unpin/scrolledAway')), JSON.stringify([bar.afterPress, barB]));
   }
 }
 
 // ── WIRING PIN: the desktop show/hide path must keep flowing the flag (a new
 // hide/show writer that forgets it re-opens the whole class)
 ok('desktop _showWin resumes the ChatView (the resume settle is armed from there — the door re-derives, the view\'s desktop reason clears)',
-  /_showWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: false \}\);/.test(dm) && /setWindowHidden\(win, reasons = \{\}\) \{[\s\S]{0,400}this\.syncFrameHiders\(win\);/.test(fs.readFileSync(path.join(REPO, 'src/lib/window.js'), 'utf8')));
+  gateOf(/_showWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: false \}\);/.test(dm)) && verdictOf(/setWindowHidden\(win, reasons = \{\}\) \{[\s\S]{0,400}this\.syncFrameHiders\(win\);/.test(fs.readFileSync(path.join(REPO, 'src/lib/window.js'), 'utf8'))));
 
 // ── THE KEEP ZONE, EXECUTED (inc-mubvu3a4-x8sb). _trimEdge reads only the list's
 // geometry (children, offsetTop/offsetHeight/offsetParent, scrollTop/Height,
@@ -875,7 +875,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     const before = ids(list);
     const removed = v._trimBottom();
     ok(`THE OWNER'S SHAPE: 400 compact cards, viewport at 1400 of 2800 px — the zone (1400…${1400 + 2 * CH}) reaches past the window's end, so the trim removes NOTHING (pre-fix: ${preFixCount(400)} by count, the anchor among them)`,
-      removed === 0 && ids(list).length === before.length && v._windowEnd === 1400 && list.scrollTop === 1400 && v._traces.some((t) => t.tag === 'trimSkipZone'), JSON.stringify({ removed, traces: v._traces }));
+      removed === 0 && ids(list).length === before.length && v._windowEnd === 1400 && list.scrollTop === 1400 && verdictOf(v._traces.some((t) => t.tag === 'trimSkipZone')), JSON.stringify({ removed, traces: v._traces }));
     ok('…and the pre-fix count trim would have differed exactly there (the control computes what 2.369.129 removed: 250)', preFixCount(400) === 250);
   }
   // ② A TALL WINDOW (unfolded 100 px cards, reader mid-window): the trim removes
@@ -922,7 +922,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     const v = mkView(list);
     const removed = v._trimBottom();
     ok(`the ceiling: ${CEIL + 200} cards all inside the zone → exactly the excess over FOLD_DOM_CEILING is removed (${removed}) and the foldCeiling trace names it`,
-      removed === 200 && ids(list).length === CEIL && v._traces.some((t) => t.tag === 'foldCeiling' && t.forced === 200), JSON.stringify({ removed, traces: v._traces.slice(0, 2) }));
+      removed === 200 && ids(list).length === CEIL && verdictOf(v._traces.some((t) => t.tag === 'foldCeiling' && t.forced === 200)), JSON.stringify({ removed, traces: v._traces.slice(0, 2) }));
   }
   // ⑤ A WINDOW UNDER THE SOFT TARGET is never touched, whatever its height.
   {
@@ -1005,9 +1005,9 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     } finally { globalThis.document = doc0; }
     const trims = v._traces.filter((x) => /^trim(Top|Bottom)$/.test(x.tag)).length;
     ok(`RED-able (r4 #1 — b3fef024: c558, c559 never fetched again by the third round; ed660f19 from the first): three scroll round trips over a window mid-history (the REAL _extendTop/_extendBottom and their ${trims} trims, the REAL _onCreateMessage), a notice drawn as nothing inside it — every round, every drawn record between the bounds is drawn and the window's records are exactly the server's between its bounds`,
-      trims >= 4 && rounds.length === 6 && rounds.every((x) => !x.holes.length && x.same), JSON.stringify(rounds));
+      trims >= 4 && rounds.length === 6 && verdictOf(rounds.every((x) => !x.holes.length && x.same)), JSON.stringify(rounds));
     ok('…and the cut releases every mark of a record it cuts as drop(el) does — ONE release for both roads (_elements, _renderedMsgIds, the removed set)',
-      /const release = \(id\) => \{ if \(!id\) return; this\._elements\.delete\(id\); this\._renderedMsgIds\.delete\(id\); removedIds\.add\(id\); \};\n\s+const drop = \(el\) => \{ release\(el\.dataset\.msgId\); el\.remove\(\); \};/.test(cv) && /for \(const m of ms\) if \(m && !stays\.has\(m\)\) release\(m\.id\);/.test(cv));
+      gateOf(/const release = \(id\) => \{ if \(!id\) return; this\._elements\.delete\(id\); this\._renderedMsgIds\.delete\(id\); removedIds\.add\(id\); \};\n\s+const drop = \(el\) => \{ release\(el\.dataset\.msgId\); el\.remove\(\); \};/.test(cv)) && verdictOf(/for \(const m of ms\) if \(m && !stays\.has\(m\)\) release\(m\.id\);/.test(cv)));
   }
   // ⑥ THE PIN PREDICATE: the DOM edge is not the tail.
   {
@@ -1048,8 +1048,8 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     ok('unit: …with an upward page in flight → skip (the wheel-up\'s own scroll never re-pins the view it just unpinned)', V({ _extendingTop: true })._repinVerdict(true) === 'skip');
     ok('unit: already pinned, or not at the tail → no decision', V({ _pinned: true })._repinVerdict(true) === null && V({})._repinVerdict(false) === null && V({ _extendingTop: true })._repinVerdict(false) === null);
     ok('the scroll handler routes its re-pin through _repinVerdict (skip traced as repinSkipPageUp) and _extendTop raises the flag with _loading and drops it in its finally',
-      /const repin = this\._repinVerdict\(atTail\);\n\s*if \(repin === 'skip'\) this\._trace\('repinSkipPageUp'/.test(cv) && /else if \(repin === 'repin'\) \{\n\s*this\._trace\('repin'/.test(cv)
-      && /this\._loading = true;\n\s*this\._extendingTop = true;/.test(cv) && /\} finally \{\n\s*this\._extendingTop = false;\n\s*endLoad\(\);/.test(cv));
+      gateOf(/const repin = this\._repinVerdict\(atTail\);\n\s*if \(repin === 'skip'\) this\._trace\('repinSkipPageUp'/.test(cv)) && gateOf(/else if \(repin === 'repin'\) \{\n\s*this\._trace\('repin'/.test(cv))
+      && gateOf(/this\._loading = true;\n\s*this\._extendingTop = true;/.test(cv)) && verdictOf(/\} finally \{\n\s*this\._extendingTop = false;\n\s*endLoad\(\);/.test(cv)));
     const runLoop = async ({ neuter }) => {
       const CHB = 428, PX_PER_RECORD = 48 / 50;
       let contentPx = CHB + 25; // the band: the rendered window 25 px taller than its list
@@ -1080,10 +1080,10 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     };
     const fix = await runLoop({ neuter: false });
     ok(`THE LOOP in the pin band: the wheel's own scroll is skipped (${fix.verdicts.join(',')}), the view stays unpinned and the loop GROWS by height until a viewport of history is above the reader (${fix.passes} passes, slabs ${fix.slabs.join('+')}, ${fix.above} px ≥ ${fix.ch}); the flag is down afterwards`,
-      fix.verdicts[0] === 'skip' && !fix.pinned && fix.retailed === 0 && fix.passes > 1 && fix.grown && fix.above >= fix.ch && fix.flagAfter === false && !fix.errors.length, JSON.stringify(fix));
+      fix.verdicts[0] === 'skip' && !fix.pinned && fix.retailed === 0 && fix.passes > 1 && gateOf(fix.grown) && fix.above >= fix.ch && fix.flagAfter === false && !fix.errors.length, JSON.stringify(fix));
     const ctl = await runLoop({ neuter: true });
     ok(`NEGATIVE CONTROL ⑧: the same loop with the gate neutered re-pins on the wheel's own scroll (${ctl.verdicts.join(',')}), stops after ONE slab and re-tails (${ctl.passes} pass, ${ctl.above} px above, retailed ${ctl.retailed}) — the runner's shape, and the unit can go red`,
-      ctl.verdicts[0] === 'repin' && ctl.pinned && ctl.passes === 1 && !ctl.grown && ctl.retailed >= 1 && ctl.above < ctl.ch, JSON.stringify(ctl));
+      ctl.verdicts[0] === 'repin' && gateOf(ctl.pinned) && ctl.passes === 1 && !ctl.grown && ctl.retailed >= 1 && ctl.above < ctl.ch, JSON.stringify(ctl));
   }
   // ⑨ THE BAND-0 NOTCH (2.369.167 r1b, the verifier's reproduction on r1 — identical on 3207e03b): a list
   //    TALLER than its rendered window has no scroll range, so the grow loop's first passes add history with NO
@@ -1149,38 +1149,38 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
 // pageUp BAND with history above (window OR gap) and the dead-wheel rule.
 {
   ok('the wheel handler carries the OVERSHOOT of a notch that CROSSES an edge (px − room), not only a notch that starts there — both directions',
-    /const roomUp = list\.scrollTop;/.test(cv) && /if \(e\.deltaY < 0 && \(roomUp < 10 \|\| px > roomUp\)\) \{/.test(cv) && /this\._addWheelCarry\('up', px - roomUp\);/.test(cv)
-    && /\(roomDown < 10 \|\| px > roomDown\)\s*&& \(this\._teleported \|\| this\._windowEnd < this\._total\)\) \{/.test(cv) && /this\._addWheelCarry\('down', px - roomDown\);/.test(cv));
+    gateOf(/const roomUp = list\.scrollTop;/.test(cv)) && gateOf(/if \(e\.deltaY < 0 && \(roomUp < 10 \|\| px > roomUp\)\) \{/.test(cv)) && gateOf(/this\._addWheelCarry\('up', px - roomUp\);/.test(cv))
+    && gateOf(/\(roomDown < 10 \|\| px > roomDown\)\s*&& \(this\._teleported \|\| this\._windowEnd < this\._total\)\) \{/.test(cv)) && verdictOf(/this\._addWheelCarry\('down', px - roomDown\);/.test(cv)));
   ok('a notch eaten by the load lock leaves its trace BEFORE the early return (wheelTop / wheelBottom {eaten:1})',
-    /this\._wheelPending = 'up'; this\._trace\('wheelTop', \{ st: Math\.round\(roomUp\), eaten: 1/.test(cv) && /this\._wheelPending = 'down'; this\._trace\('wheelBottom', \{[^}]*eaten: 1/.test(cv));
+    gateOf(/this\._wheelPending = 'up'; this\._trace\('wheelTop', \{ st: Math\.round\(roomUp\), eaten: 1/.test(cv)) && verdictOf(/this\._wheelPending = 'down'; this\._trace\('wheelBottom', \{[^}]*eaten: 1/.test(cv)));
   ok('ONE carry accounting (_addWheelCarry / _applyWheelCarry / _clearWheelCarry / _dropWheelCarry): both extends AND both gap slabs consume it; nothing else assigns _wheelCarry',
-    /_applyWheelCarry\('up', 'extendTop:carry'[,)]/.test(cv) && /_applyWheelCarry\('down', 'extendBottom:carry'[,)]/.test(cv)
-    && /_applyWheelCarry\?\.\('up', 'gapUp:carry'[,)]/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\)/.test(sk)
+    gateOf(/_applyWheelCarry\('up', 'extendTop:carry'[,)]/.test(cv)) && gateOf(/_applyWheelCarry\('down', 'extendBottom:carry'[,)]/.test(cv))
+    && gateOf(/_applyWheelCarry\?\.\('up', 'gapUp:carry'[,)]/.test(sk)) && gateOf(/_applyWheelCarry\?\.\('down', 'gapDown:carry'\)/.test(sk))
     && (cv.match(/this\._wheelCarry = /g) || []).length === 4 && !/_wheelCarry = /.test(sk), `assignments in chat-view.js: ${(cv.match(/this\._wheelCarry = /g) || []).length} (want 4: add / apply / clear / drop)`);
   ok('r1b: both GROW LOOPS keep the rest a pass had no room for (keepRest) and drop what no pass applied in their finally; the single-landing gap slabs consume the carry either way',
-    /this\._applyWheelCarry\('up', 'extendTop:carry', \{ keepRest: true \}\);/.test(cv) && /this\._applyWheelCarry\('down', 'extendBottom:carry', \{ keepRest: true \}\);/.test(cv)
-    && /this\._extendingTop = false;\n\s*endLoad\(\);\n\s*this\._dropWheelCarry\('up', 'extendTop:end'\);/.test(cv) && /endLoad\(\);\n\s*this\._dropWheelCarry\('down', 'extendBottom:end'\);/.test(cv)
-    && /this\._wheelCarry = keepRest \? held - carry : 0;/.test(cv) && /_applyWheelCarry\?\.\('up', 'gapUp:carry'(, \{ less: rest \})?\);/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\);/.test(sk));
+    gateOf(/this\._applyWheelCarry\('up', 'extendTop:carry', \{ keepRest: true \}\);/.test(cv)) && gateOf(/this\._applyWheelCarry\('down', 'extendBottom:carry', \{ keepRest: true \}\);/.test(cv))
+    && gateOf(/this\._extendingTop = false;\n\s*endLoad\(\);\n\s*this\._dropWheelCarry\('up', 'extendTop:end'\);/.test(cv)) && gateOf(/endLoad\(\);\n\s*this\._dropWheelCarry\('down', 'extendBottom:end'\);/.test(cv))
+    && gateOf(/this\._wheelCarry = keepRest \? held - carry : 0;/.test(cv)) && gateOf(/_applyWheelCarry\?\.\('up', 'gapUp:carry'(, \{ less: rest \})?\);/.test(sk)) && verdictOf(/_applyWheelCarry\?\.\('down', 'gapDown:carry'\);/.test(sk)));
   ok('a chosen destination clears a carried notch: _noteUserNav (jumps, minimap, search reveal, run bar), _resetGapAfterJump (both jumps), _seekTeleport',
-    /_noteUserNav\(via\) \{[\s\S]{0,400}this\._clearWheelCarry\?\.\(via\);/.test(cv) && /_resetGapAfterJump\(\) \{[\s\S]{0,300}this\._clearWheelCarry\?\.\('gapReset'\);/.test(sk) && /this\._clearWheelCarry\?\.\('teleport'\);[^\n]*\n\s*this\._teleported = true;/.test(sk));
+    gateOf(/_noteUserNav\(via\) \{[\s\S]{0,400}this\._clearWheelCarry\?\.\(via\);/.test(cv)) && gateOf(/_resetGapAfterJump\(\) \{[\s\S]{0,300}this\._clearWheelCarry\?\.\('gapReset'\);/.test(sk)) && verdictOf(/this\._clearWheelCarry\?\.\('teleport'\);[^\n]*\n\s*this\._teleported = true;/.test(sk)));
   ok('_extendTop prepends before the first NON-GAP card, and the top trim drops the gap slab when the window leaves message 0 — inside the same anchored removal',
-    cv.includes("querySelector(':scope > .chat-msg:not(.chat-gap-msg)');\n        this._loadingHistory = true;") && /const leavesZero = !this\._teleported && this\._windowStart === 0;/.test(cv) && /if \(leavesZero\) this\._dropGapSlab\('trimTop', zone\); \}\);/.test(cv));
+    gateOf(cv.includes("querySelector(':scope > .chat-msg:not(.chat-gap-msg)');\n        this._loadingHistory = true;")) && gateOf(/const leavesZero = !this\._teleported && this\._windowStart === 0;/.test(cv)) && verdictOf(/if \(leavesZero\) this\._dropGapSlab\('trimTop', zone\); \}\);/.test(cv)));
   ok('a TAIL-MODE gap slab runs with STABLE HEIGHTS from its anchored insert (content-visibility on made its cards flip size on alternate frames and the wheel was absorbed; the reserve alone did not stop it) — teleport keeps its own regime',
-    /if \(!this\._teleported\) this\._setStableHeights\(true, \{ why: 'gapSlab' \}\);/.test(sk) && /_setStableHeights\(stable, \{ recenter = true, why = '' \} = \{\}\) \{/.test(sk) && /if \(!recenter\) \{ this\._trace\?\.\('stableHeights'/.test(sk));
+    gateOf(/if \(!this\._teleported\) this\._setStableHeights\(true, \{ why: 'gapSlab' \}\);/.test(sk)) && gateOf(/_setStableHeights\(stable, \{ recenter = true, why = '' \} = \{\}\) \{/.test(sk)) && verdictOf(/if \(!recenter\) \{ this\._trace\?\.\('stableHeights'/.test(sk)));
   ok('a gap slab is rendered once at insert like a window slab (both gap loaders reserve measured heights), and a slab landing on a bumped sentinel epoch is discarded',
-    /this\._reserveFreshHeights\?\.\(inserted\);/.test(sk) && /this\._reserveFreshHeights\?\.\(appended\);/.test(sk) && /const epoch = markerEl\._gapEpoch \|\| 0;/.test(sk) && /if \(\(markerEl\._gapEpoch \|\| 0\) !== epoch\) \{ this\._trace\?\.\('gapUp:stale'/.test(sk) && /s\._gapEpoch = \(s\._gapEpoch \|\| 0\) \+ 1;/.test(cv));
+    gateOf(/this\._reserveFreshHeights\?\.\(inserted\);/.test(sk)) && gateOf(/this\._reserveFreshHeights\?\.\(appended\);/.test(sk)) && gateOf(/const epoch = markerEl\._gapEpoch \|\| 0;/.test(sk)) && gateOf(/if \(\(markerEl\._gapEpoch \|\| 0\) !== epoch\) \{ this\._trace\?\.\('gapUp:stale'/.test(sk)) && verdictOf(/s\._gapEpoch = \(s\._gapEpoch \|\| 0\) \+ 1;/.test(cv)));
   ok('every ring entry carries a monotonic seq (the ring splices 600→400; an index mark goes blind) and the shared reader slices by it',
-    /const seq = this\._traceSeq = \(this\._traceSeq \|\| 0\) \+ 1;/.test(cv) && /r\.push\(data \? \{ t: Date\.now\(\), seq, tag, \.\.\.data \}/.test(cv)
-    && /ringSeq: v\._traceSeq \|\| 0/.test(rulesSrc) && /\(e\.seq \|\| 0\) > \$\{Number\(mark\) \|\| 0\}/.test(rulesSrc)
-    && /const ringSince = \(mark\) => evaljs\(RING_SINCE_SOURCE\(mark\)\);/.test(pagingSrc) && /const ringSince = \(mark\) => evaljs\(RING_SINCE_SOURCE\(mark\)\);/.test(dbgSrc) && !/before\.ring\b/.test(pagingSrc) && !/before\.ring\b/.test(dbgSrc));
+    gateOf(/const seq = this\._traceSeq = \(this\._traceSeq \|\| 0\) \+ 1;/.test(cv)) && gateOf(/r\.push\(data \? \{ t: Date\.now\(\), seq, tag, \.\.\.data \}/.test(cv))
+    && gateOf(/ringSeq: v\._traceSeq \|\| 0/.test(rulesSrc)) && gateOf(/\(e\.seq \|\| 0\) > \$\{Number\(mark\) \|\| 0\}/.test(rulesSrc))
+    && gateOf(/const ringSince = \(mark\) => evaljs\(RING_SINCE_SOURCE\(mark\)\);/.test(pagingSrc)) && gateOf(/const ringSince = \(mark\) => evaljs\(RING_SINCE_SOURCE\(mark\)\);/.test(dbgSrc)) && !/before\.ring\b/.test(pagingSrc) && !/before\.ring\b/.test(dbgSrc));
   ok('the §1c fixture MINTS every record id through fixtureSid (test-fixture-isolation refuses a hand-spelled member of the family) — in its shared home, scripts/huge-transcript-fixture.mjs, which test-chat-paging is WIRED to (imports + calls it with SID3)',
-    /const uuid = \(\) => fixtureSid\(\(n\+\+\)\.toString\(16\)\);/.test(hugeSrc) && /import \{ fixtureSid \} from '\.\/scratch\.mjs';/.test(hugeSrc) && !/['"`]e2e00000-0000-4000-8000-/i.test(hugeSrc)
-    && /import \{ writeHugeTranscript \} from '\.\/huge-transcript-fixture\.mjs';/.test(pagingSrc) && /await writeHugeTranscript\(\{ file: path\.join\(PROJ, `\$\{SID3\}\.jsonl`\), sid: SID3, cwd: CWD, targetBytes: HUGE_TARGET_BYTES \}\)/.test(pagingSrc) && !/['"`]e2e00000-0000-4000-8000-/i.test(pagingSrc));
+    gateOf(/const uuid = \(\) => fixtureSid\(\(n\+\+\)\.toString\(16\)\);/.test(hugeSrc)) && gateOf(/import \{ fixtureSid \} from '\.\/scratch\.mjs';/.test(hugeSrc)) && !/['"`]e2e00000-0000-4000-8000-/i.test(hugeSrc)
+    && gateOf(/import \{ writeHugeTranscript \} from '\.\/huge-transcript-fixture\.mjs';/.test(pagingSrc)) && gateOf(/await writeHugeTranscript\(\{ file: path\.join\(PROJ, `\$\{SID3\}\.jsonl`\), sid: SID3, cwd: CWD, targetBytes: HUGE_TARGET_BYTES \}\)/.test(pagingSrc)) && !/['"`]e2e00000-0000-4000-8000-/i.test(pagingSrc));
   ok('the by-hand driver re-tails after emulating content-visibility (a live window opens pinned at the tail, never at scrollTop 0 unpinned) and walks the gap legs',
-    /v\._pinned = true; v\._forceScrollToBottom\(\); await sleep\(600\);/.test(dbgSrc) && /gesture\(`gap-up-hold-\$\{i \+ 1\}`, 'up', 'hold'\)/.test(dbgSrc));
+    gateOf(/v\._pinned = true; v\._forceScrollToBottom\(\); await sleep\(600\);/.test(dbgSrc)) && verdictOf(/gesture\(`gap-up-hold-\$\{i \+ 1\}`, 'up', 'hold'\)/.test(dbgSrc)));
   ok('both drivers wheel over a PLAIN point of the viewport (WHEEL_POINT_SOURCE — a card\'s own scroll box under the pointer takes the notches), never a fixed centre',
-    /export const WHEEL_POINT_SOURCE = \(dir, px\) => `/.test(rulesSrc) && /if \(!\/\(auto\|scroll\)\/\.test\(cs\.overflowY\)\) continue;/.test(rulesSrc) && /if \(!paged && after\.topDev != null && !row\.wheelFallback\) \{/.test(rulesSrc)
-    && /const pt = \(await evaljs\(WHEEL_POINT_SOURCE\(dir, /.test(pagingSrc) && /x: pt\.x, y: pt\.y/.test(pagingSrc) && /const pt = \(await evaljs\(WHEEL_POINT_SOURCE\(deltaY < 0 \? 'up' : 'down', /.test(dbgSrc) && /x: pt\.x, y: pt\.y/.test(dbgSrc));
+    gateOf(/export const WHEEL_POINT_SOURCE = \(dir, px\) => `/.test(rulesSrc)) && gateOf(/if \(!\/\(auto\|scroll\)\/\.test\(cs\.overflowY\)\) continue;/.test(rulesSrc)) && gateOf(/if \(!paged && after\.topDev != null && !row\.wheelFallback\) \{/.test(rulesSrc))
+    && gateOf(/const pt = \(await evaljs\(WHEEL_POINT_SOURCE\(dir, /.test(pagingSrc)) && gateOf(/x: pt\.x, y: pt\.y/.test(pagingSrc)) && gateOf(/const pt = \(await evaljs\(WHEEL_POINT_SOURCE\(deltaY < 0 \? 'up' : 'down', /.test(dbgSrc)) && verdictOf(/x: pt\.x, y: pt\.y/.test(dbgSrc)));
 
   // (b) THE WHEEL HANDLER, EXECUTED: the listener body lifted out of the shipped source
   const wStart = cv.indexOf("this._messageList.addEventListener('wheel', (e) => {\n      if (!this._canPaginate) return;"); // the PAGING wheel listener (the first one is the positioning stamp)
@@ -1197,17 +1197,17 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     const wheel = (v, deltaY) => handler.call(v, { deltaY, deltaMode: 0 });
     let v = mk({}); wheel(v, -700);
     ok(`unit: the verifier's notch — 700 px beginning 232 px from the top — carries the OVERSHOOT (${v._wheelCarry}, want 468), unpins, fires _extendTop (${v.calls})`,
-      v._wheelCarry === 468 && v._wheelCarryDir === 'up' && v._pinned === false && v.calls.join() === 'extendTop' && v._traces.some((t) => t.tag === 'wheelTop' && t.carry === 468));
+      v._wheelCarry === 468 && v._wheelCarryDir === 'up' && v._pinned === false && v.calls.join() === 'extendTop' && verdictOf(v._traces.some((t) => t.tag === 'wheelTop' && t.carry === 468)));
     v = mk({ _messageList: { scrollTop: 5, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, -120);
     ok('unit: at the edge (st 5) a 120 px notch carries 115 (px − room)', v._wheelCarry === 115 && v.calls.join() === 'extendTop');
     v = mk({ _messageList: { scrollTop: 900, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, -120);
     ok('unit: a notch the browser delivers whole (st 900, 120 px) carries nothing, pages nothing, keeps the pin', !v._wheelCarry && !v._wheelCarryDir && v.calls.length === 0 && v._pinned === true);
     v = mk({ _loading: true }); wheel(v, -700);
-    ok('unit: a crossing notch during the load lock is carried, marked pending, traced {eaten:1} — and fires nothing', v._wheelCarry === 468 && v._wheelPending === 'up' && v.calls.length === 0 && v._traces.some((t) => t.tag === 'wheelTop' && t.eaten === 1 && t.carry === 468));
+    ok('unit: a crossing notch during the load lock is carried, marked pending, traced {eaten:1} — and fires nothing', v._wheelCarry === 468 && v._wheelPending === 'up' && v.calls.length === 0 && verdictOf(v._traces.some((t) => t.tag === 'wheelTop' && t.eaten === 1 && t.carry === 468)));
     v = mk({}); wheel(v, -700); wheel(v, -700); wheel(v, -700);
     ok('unit: the carry is bounded to ONE VIEWPORT per landing (three 700 px notches from st 232 → 700, not 1404)', v._wheelCarry === 700);
     v = mk({}); wheel(v, -700); wheel(v, 120);
-    ok('unit: a reversal clears the carry and says so', !v._wheelCarry && v._wheelCarryDir === null && v._traces.some((t) => t.tag === 'wheelCarry:clear' && t.why === 'reversal'));
+    ok('unit: a reversal clears the carry and says so', !v._wheelCarry && v._wheelCarryDir === null && verdictOf(v._traces.some((t) => t.tag === 'wheelCarry:clear' && t.why === 'reversal')));
     v = mk({ _pinned: false, _messageList: { scrollTop: 4200, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, 700);
     ok('unit: the down mirror — a 700 px wheel-down with 100 px of room below carries 600 and fires _extendBottom', v._wheelCarry === 600 && v._wheelCarryDir === 'down' && v.calls.join() === 'extendBottom');
     v = mk({ _pinned: false, _windowEnd: 3201, _messageList: { scrollTop: 4200, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, 700);
@@ -1224,7 +1224,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     v = atStart({ _gapMinimapActive: true, _seekSentinel: { isConnected: true, _gapCursor: 0 } }); wheel(v, -100);
     ok('unit: a huge session whose seek reached line 0 has nothing earlier either', v.calls.length === 0 && v._pinned === true);
     v = atStart({ _windowStart: 4 }); wheel(v, -100);
-    ok('unit: CONTROL — with four messages above the window the same notch unpins (traced `unpin` {why: wheelUp}) and pages', v.calls.join() === 'extendTop' && v._pinned === false && v._traces.some((t) => t.tag === 'unpin' && t.why === 'wheelUp'));
+    ok('unit: CONTROL — with four messages above the window the same notch unpins (traced `unpin` {why: wheelUp}) and pages', v.calls.join() === 'extendTop' && v._pinned === false && verdictOf(v._traces.some((t) => t.tag === 'unpin' && t.why === 'wheelUp')));
     v = atStart({ _messageList: { scrollTop: 1200, scrollHeight: 2018, clientHeight: 818 } }); wheel(v, 100);
     ok('unit: at the live tail a wheel-down carries nothing and pages nothing (the capture\'s 46 wheelBottom carry:818 traces)', v.calls.length === 0 && !v._wheelCarry && !v._traces.some((t) => t.tag === 'wheelBottom'));
   }
@@ -1233,7 +1233,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     const mk = (over) => Object.assign(Object.create(ChatView.prototype), { _messageList: { scrollTop: 720, scrollHeight: 5000, clientHeight: 700 }, _pinned: false, _wheelCarry: 468, _wheelCarryDir: 'up', _traces: [], _trace(tag, d) { this._traces.push({ tag, ...d }); }, _by: null, _traceExpect(by) { this._by = by; }, ...over });
     let v = mk({}); let r = v._applyWheelCarry('up', 'extendTop:carry');
     ok(`unit: the landing applies the carried 468 px upward (st 720 → ${v._messageList.scrollTop}), stamps the author, traces wheelCarry, consumes the carry`,
-      r === 468 && v._messageList.scrollTop === 252 && v._by === 'extendTop:carry' && v._wheelCarry === 0 && v._traces.some((t) => t.tag === 'wheelCarry' && t.dir === 'up' && t.px === 468 && t.by === 'extendTop:carry'));
+      r === 468 && v._messageList.scrollTop === 252 && v._by === 'extendTop:carry' && v._wheelCarry === 0 && verdictOf(v._traces.some((t) => t.tag === 'wheelCarry' && t.dir === 'up' && t.px === 468 && t.by === 'extendTop:carry')));
     v = mk({ _messageList: { scrollTop: 100, scrollHeight: 5000, clientHeight: 700 } }); r = v._applyWheelCarry('up', 'x');
     ok('unit: bounded by the room the landing produced (100 px above → 100 applied)', r === 100 && v._messageList.scrollTop === 0);
     v = mk({ _pinned: true }); r = v._applyWheelCarry('up', 'x');
@@ -1249,7 +1249,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     v = mk({ _pinned: true }); r = v._applyWheelCarry('up', 'x', { keepRest: true });
     ok('unit (r1b): …never while pinned, keepRest or not — the carry goes', r === 0 && v._wheelCarry === 0);
     v = mk({ _wheelCarry: 368 }); v._dropWheelCarry('up', 'extendTop:end');
-    ok('unit (r1b): the loop\'s end drops what no pass applied and says so (wheelCarry:drop, the px, the author)', v._wheelCarry === 0 && v._traces.some((t) => t.tag === 'wheelCarry:drop' && t.px === 368 && t.by === 'extendTop:end'));
+    ok('unit (r1b): the loop\'s end drops what no pass applied and says so (wheelCarry:drop, the px, the author)', v._wheelCarry === 0 && verdictOf(v._traces.some((t) => t.tag === 'wheelCarry:drop' && t.px === 368 && t.by === 'extendTop:end')));
     v = mk({ _wheelCarryDir: 'down', _wheelCarry: 300 }); v._dropWheelCarry('up', 'extendTop:end');
     ok('unit (r1b): …and never a carry of the other direction', v._wheelCarry === 300 && !v._traces.length);
   }
@@ -1258,7 +1258,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     const v = Object.assign(Object.create(ChatView.prototype), { _wheelCarry: 300, _wheelCarryDir: 'up', _wheelPending: 'up', _traces: [], _trace(tag, d) { this._traces.push({ tag, ...d }); }, _cancelForcedScroll() {}, _endResumeSettle() {} });
     v._noteUserNav('jumpToBottom');
     ok('unit: _noteUserNav clears the carry, its direction and the pending arm (the stale probe {c:0, d:"up"} survived the scroll-to-bottom button before)',
-      v._wheelCarry === 0 && v._wheelCarryDir === null && v._wheelPending === null && v._traces.some((t) => t.tag === 'wheelCarry:clear' && t.why === 'jumpToBottom' && t.px === 300));
+      v._wheelCarry === 0 && v._wheelCarryDir === null && v._wheelPending === null && verdictOf(v._traces.some((t) => t.tag === 'wheelCarry:clear' && t.why === 'jumpToBottom' && t.px === 300)));
     v._noteUserNav('minimap');
     ok('unit: …and clearing nothing traces nothing', v._traces.filter((t) => t.tag === 'wheelCarry:clear').length === 1);
   }
@@ -1304,8 +1304,8 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
       // anchor c269 (top 29901, delta −99) lands at 1 + 19·100 + 99 = 2000
       ok(`the top trim leaving message 0 removes ${removed} tail cards AND the 30 gap cards, rewinds the sentinel (cursor null, epoch 1), traces gapDrop, keeps the viewport on its card (st 30000 → ${list.scrollTop})`,
         removed === 250 && gaps(list) === 0 && v._windowStart === 250 && v._seekSentinel._gapCursor === null && v._seekSentinel._gapAnchor === null && v._seekSentinel._gapEpoch === 1
-        && list.scrollTop === 2000 && v._traces.some((t) => t.tag === 'gapDrop' && t.why === 'trimTop' && t.n === 30), JSON.stringify({ removed, gaps: gaps(list), ws: v._windowStart, st: list.scrollTop, traces: v._traces.map((t) => t.tag) }));
-      ok('…and the slab\'s stable-heights regime ends with it: _setStableHeights(false, {recenter:false}) — no jump-target replay from inside the trim', Array.isArray(v._stable) && v._stable[0] === false && v._stable[1]?.recenter === false && v._stable[1]?.why === 'gapDrop', JSON.stringify(v._stable));
+        && list.scrollTop === 2000 && verdictOf(v._traces.some((t) => t.tag === 'gapDrop' && t.why === 'trimTop' && t.n === 30)), JSON.stringify({ removed, gaps: gaps(list), ws: v._windowStart, st: list.scrollTop, traces: v._traces.map((t) => t.tag) }));
+      ok('…and the slab\'s stable-heights regime ends with it: _setStableHeights(false, {recenter:false}) — no jump-target replay from inside the trim', gateOf(Array.isArray(v._stable)) && v._stable[0] === false && v._stable[1]?.recenter === false && v._stable[1]?.why === 'gapDrop', JSON.stringify(v._stable));
     }
     {
       const list = fakeList({ st: 30000, cards: build() }), v = mkView(list, { _windowStart: 1000, _windowEnd: 1400 });
@@ -1320,7 +1320,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     {
       const list = fakeList({ st: 500, cards: build() }), v = mkView(list);
       const n = v._dropGapSlab('probe', { top: 1000, bottom: 3000 });
-      ok('_dropGapSlab refuses when a gap card still touches the keep zone, and says so (gapDrop:skip)', n === 0 && gaps(list) === 30 && v._traces.some((t) => t.tag === 'gapDrop:skip'));
+      ok('_dropGapSlab refuses when a gap card still touches the keep zone, and says so (gapDrop:skip)', n === 0 && gaps(list) === 30 && verdictOf(v._traces.some((t) => t.tag === 'gapDrop:skip')));
     }
   }
   // (g) THE JUDGE's new rules (scripts/paging-gesture-rules.mjs is PURE — the heavy gate feeds it real rows)
@@ -1328,19 +1328,19 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     const base = { st: 1500, sh: 6000, ch: 700, ws: 2000, we: 2200, total: 3785, pin: 0, tp: 0, topId: 'a', topOff: 0, blankPct: 0, emptyBelow: 0, gapCursor: null, gapAbove: 0, gapCards: 0, gapBelowTail: 0, loading: 0 };
     const row = (dir, wheelPx, before, after, ring = [{ tag: 'x' }]) => judgeGesture({ name: 't', dir, wheelPx, before: { ...base, ...before }, after: { ...base, ...after }, ring });
     let j = row('up', -2800, { st: 876, ws: 2328 }, { st: 43, ws: 2178, topDev: 1765 });
-    ok('judge: the verifier\'s landing — st 43 with 2,178 messages above — is inside the pageUp band → violation (was one pixel from red at `<= 0`)', !j.ok && j.reasons.some((x) => /pageUp band/.test(x)), j.reasons.join('; '));
+    ok('judge: the verifier\'s landing — st 43 with 2,178 messages above — is inside the pageUp band → violation (was one pixel from red at `<= 0`)', !j.ok && verdictOf(j.reasons.some((x) => /pageUp band/.test(x))), j.reasons.join('; '));
     j = row('up', -2800, { st: 876, ws: 0, gapAbove: 1, gapCursor: 5000 }, { st: 43, ws: 0, gapAbove: 1, gapCursor: 5000, topDev: 1765 });
-    ok('judge: ws 0 with the GAP still above counts as history above', !j.ok && j.reasons.some((x) => /pageUp band/.test(x) && /and the gap/.test(x)), j.reasons.join('; '));
+    ok('judge: ws 0 with the GAP still above counts as history above', !j.ok && verdictOf(j.reasons.some((x) => /pageUp band/.test(x) && /and the gap/.test(x))), j.reasons.join('; '));
     j = row('up', -2800, { st: 876, ws: 0, gapAbove: 0, gapCursor: 0 }, { st: 43, ws: 0, gapAbove: 0, gapCursor: 0, topDev: 833 });
-    ok('judge: ws 0 and no gap above → the top is the top, no violation', j.ok, j.reasons.join('; '));
+    ok('judge: ws 0 and no gap above → the top is the top, no violation', verdictOf(j.ok), j.reasons.join('; '));
     j = row('up', -2800, { st: 876, ws: 2328 }, { st: 43, ws: 2178, topDev: 1765, loading: 1 });
-    ok('judge: a slab still in flight at the sample is not judged on its scrollTop', j.ok, j.reasons.join('; '));
+    ok('judge: a slab still in flight at the sample is not judged on its scrollTop', verdictOf(j.ok), j.reasons.join('; '));
     j = row('down', 720, { st: 1554, sh: 4284, gapCards: 540, gapCursor: 3000 }, { st: 1671, sh: 4447, gapCards: 540, gapCursor: 3000, topDev: -80 });
-    ok('judge: a mid-list 720 px wheel-down that moved the card 80 px is a DEAD WHEEL → violation (the gap-slab absorption was "OK" before)', !j.ok && j.reasons.some((x) => /moved the reader's card only 80 px/.test(x)), j.reasons.join('; '));
+    ok('judge: a mid-list 720 px wheel-down that moved the card 80 px is a DEAD WHEEL → violation (the gap-slab absorption was "OK" before)', !j.ok && verdictOf(j.reasons.some((x) => /moved the reader's card only 80 px/.test(x))), j.reasons.join('; '));
     j = row('up', -720, { st: 3000, sh: 4284, gapCards: 540, gapCursor: 3000 }, { st: 2900, sh: 4300, gapCards: 540, gapCursor: 3000, topDev: 60 });
-    ok('judge: …and the same dead wheel upward', !j.ok && j.reasons.some((x) => /mid-list up wheel of 720 px moved the reader's card only 60 px/.test(x)), j.reasons.join('; '));
+    ok('judge: …and the same dead wheel upward', !j.ok && verdictOf(j.reasons.some((x) => /mid-list up wheel of 720 px moved the reader's card only 60 px/.test(x))), j.reasons.join('; '));
     j = row('down', 720, { st: 1554, sh: 4284 }, { st: 2274, sh: 4284, topDev: -717 });
-    ok('judge: a wheel delivered whole is fine', j.ok, j.reasons.join('; '));
+    ok('judge: a wheel delivered whole is fine', verdictOf(j.ok), j.reasons.join('; '));
     j = row('up', -2800, { st: 1000 }, { st: 0, ws: 2000, topDev: 900, loading: 1 });
     ok('judge: a wheel that reaches an edge is not held to the delivery rule (a page is expected there instead)', !j.reasons.some((x) => /moved the reader's card only/.test(x)), j.reasons.join('; '));
     j = row('down', 720, { st: 1554, sh: 4284, gapCursor: 3000 }, { st: 1600, sh: 8284, gapCursor: 1000, topDev: -80 });
@@ -1354,21 +1354,21 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     j = row('down', 720, b1192, { st: 725, ch: 714, ws: 2074, topDev: null }, [{ tag: 'pageDown' }, { tag: 'trimTop' }, { tag: 'extendBottom' }]);
     ok('judge (B-1192): a 720 px wheel-down that carried the reader\'s card (bottom 4 px below the top) past the 714 px keep zone — its trim is the rule, not a jump', !j.reasons.some((x) => /gone from the DOM/.test(x)), j.reasons.join('; '));
     j = row('down', 720, { ...b1192, topOff: 0 }, { st: 725, ch: 714, ws: 2074, topDev: null }, [{ tag: 'pageDown' }, { tag: 'trimTop' }, { tag: 'extendBottom' }]);
-    ok('judge (B-1192) CONTROL: the same wheel with the card\'s bottom 18 px below the top leaves it INSIDE the zone — gone is a violation, and the reason names the geometry', !j.ok && j.reasons.some((x) => /gone from the DOM \(its bottom was 18 px below the viewport top: the 720 px wheel left it 12 px inside the 1-viewport keep zone\)/.test(x)), j.reasons.join('; '));
+    ok('judge (B-1192) CONTROL: the same wheel with the card\'s bottom 18 px below the top leaves it INSIDE the zone — gone is a violation, and the reason names the geometry', !j.ok && verdictOf(j.reasons.some((x) => /gone from the DOM \(its bottom was 18 px below the viewport top: the 720 px wheel left it 12 px inside the 1-viewport keep zone\)/.test(x))), j.reasons.join('; '));
     j = row('up', -720, b1192, { st: 725, ch: 714, ws: 2074, topDev: null });
-    ok('judge (B-1192): upward the bound stays two viewports (the card must cross the viewport and the zone below it)', !j.ok && j.reasons.some((x) => /gone from the DOM$/.test(x)), j.reasons.join('; '));
+    ok('judge (B-1192): upward the bound stays two viewports (the card must cross the viewport and the zone below it)', !j.ok && verdictOf(j.reasons.some((x) => /gone from the DOM$/.test(x))), j.reasons.join('; '));
     j = row('down', 720, { st: 666, ch: 714, topOff: -14 }, { st: 725, ch: 714, ws: 2074, topDev: null });
-    ok('judge (B-1192): a snapshot without the card\'s height keeps the two-viewport bound (never a silent pass)', !j.ok && j.reasons.some((x) => /gone from the DOM$/.test(x)), j.reasons.join('; '));
-    ok('judge (B-1192): the rules\' keep zone is the product\'s (TRIM_KEEP_VIEWPORTS), and the snapshot carries the card\'s height', KEEP_ZONE_VIEWPORTS === Number((cv.match(/const TRIM_KEEP_VIEWPORTS = (\d+(?:\.\d+)?);/) || [])[1]) && /topOff: Math\.round\(topOff\), topH,/.test(SNAP_SOURCE));
+    ok('judge (B-1192): a snapshot without the card\'s height keeps the two-viewport bound (never a silent pass)', !j.ok && verdictOf(j.reasons.some((x) => /gone from the DOM$/.test(x))), j.reasons.join('; '));
+    ok('judge (B-1192): the rules\' keep zone is the product\'s (TRIM_KEEP_VIEWPORTS), and the snapshot carries the card\'s height', KEEP_ZONE_VIEWPORTS === Number((cv.match(/const TRIM_KEEP_VIEWPORTS = (\d+(?:\.\d+)?);/) || [])[1]) && verdictOf(/topOff: Math\.round\(topOff\), topH,/.test(SNAP_SOURCE)));
     // ② DURING the gesture (2.369.155, the Actions runner's control rows): the pre-fix copy re-pinned mid-history on
     // every mirror run and a later scroll event unpinned it before the settle sample — the rule reads the ring's own
     // repin record, so the verdict no longer depends on when the sample landed
     j = row('down', 120, { st: 1208, sh: 2002 }, { st: 0, sh: 1828, ws: 2150, we: 2300, pin: 0, topDev: -500 }, [{ tag: 'wheelBottom' }, { tag: 'repin', we: 2200, total: 3785 }, { tag: 'extendBottom' }, { tag: 'unpin' }]);
-    ok('judge: a repin with a PARTIAL window in the gesture\'s ring is a ② violation even when the settle sample is unpinned', !j.ok && j.reasons.some((x) => /re-pinned mid-history during the gesture \(repin at window end 2200 of 3785\)/.test(x)), j.reasons.join('; '));
+    ok('judge: a repin with a PARTIAL window in the gesture\'s ring is a ② violation even when the settle sample is unpinned', !j.ok && verdictOf(j.reasons.some((x) => /re-pinned mid-history during the gesture \(repin at window end 2200 of 3785\)/.test(x))), j.reasons.join('; '));
     j = row('down', 120, { st: 1208, sh: 2002, we: 3700 }, { st: 1300, sh: 2102, we: 3785, ws: 3600, pin: 1, topDev: -120 }, [{ tag: 'wheelBottom' }, { tag: 'extendBottom' }, { tag: 'repin', we: 3785, total: 3785 }]);
     ok('judge: …a repin AT the live tail (we = total) is the designed pin — no violation (control)', !j.reasons.some((x) => /re-pinned mid-history|pinned with the window/.test(x)), j.reasons.join('; '));
     j = row('down', 120, { st: 1208, sh: 2002 }, { st: 1300, sh: 2102, ws: 2150, we: 2300, pin: 1, topDev: -120 }, [{ tag: 'repin', we: 2300, total: 3785 }]);
-    ok('judge: …a pin that is still there at the settle is reported ONCE, by the sample (the ring clause is its else)', j.reasons.filter((x) => /pinned/.test(x)).length === 1 && j.reasons.some((x) => /^pinned with the window ending at 2300 of 3785/.test(x)), j.reasons.join('; '));
+    ok('judge: …a pin that is still there at the settle is reported ONCE, by the sample (the ring clause is its else)', j.reasons.filter((x) => /pinned/.test(x)).length === 1 && verdictOf(j.reasons.some((x) => /^pinned with the window ending at 2300 of 3785/.test(x))), j.reasons.join('; '));
   }
 }
 
@@ -1395,7 +1395,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
   };
   const on = await catchUp(ChatView, true), off = await catchUp(ChatView, false);
   ok(`B-4735: the catch-up hands the full-extent minimap each missed USER turn once, with the live append's facts (${on.full.length} turns)`,
-    on.status === 0 && on.full.length === 2 && on.full[0].t.ts === 5000 && on.full[0].t.preview === 'missed while offline' && !on.full[0].t.other && on.full[1].t.other === 'peer' && on.full.every((c) => c.o && c.o.once === true));
+    on.status === 0 && on.full.length === 2 && on.full[0].t.ts === 5000 && on.full[0].t.preview === 'missed while offline' && !on.full[0].t.other && on.full[1].t.other === 'peer' && verdictOf(on.full.every((c) => c.o && c.o.once === true)));
   ok('…a view with no full-extent minimap takes the turns through addTurn only, as before', off.full.length === 0 && off.add === 2);
   // the reader's F1: a window TRIMMED at its bottom (paged up) re-fetches its own tail — those turns are on the map
   const trimmed = await catchUp(ChatView, true, { windowEnd: 8, total: 10 }); // fetched from 8: indices 8, 9 known, 10 new
@@ -1507,14 +1507,14 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     return { mouse, key, other, words: said[0] || null }; };
   const pr = pressOf(true), pr0 = pressOf(false);
   ok(`B-ef04: the capture handler refuses a mouse press the rule refuses and says why («${pr && pr.words}»); a key's press and a press elsewhere pass (${J(pr)}); the rule answering ⇒ nothing refused (${J(pr0)})`,
-    !!pr && J(pr.mouse) === '[1,1]' && J(pr.key) === '[1,1]' && J(pr.other) === '[1,1]' && /moved under the pointer/.test(pr.words || '') && !!pr0 && J(pr0.other) === '[0,0]');
+    !!pr && J(pr.mouse) === '[1,1]' && J(pr.key) === '[1,1]' && J(pr.other) === '[1,1]' && gateOf(/moved under the pointer/.test(pr.words || '')) && !!pr0 && J(pr0.other) === '[0,0]');
   const wire = { pin: /        list\.scrollTop = sh;\n        this\._listMovedAt = performance\.now\(\);/.test(CVS),
     pass: CVS.includes('const anchor = this._runsAnchor(list), sig0 = this._runsSig(list);') && CVS.includes('      if (this._runsSig(list) !== sig0 || this._runsMovedUnder(list, anchor)) this._listMovedAt = performance.now();'),
     restore: CVS.includes('if (Math.abs(list.scrollTop - stBefore) > 1) { this._listMovedAt = performance.now();'),
     aim: CVS.includes("this._messageList.addEventListener('pointermove', aim, { passive: true });") && CVS.includes("this._messageList.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') aim(e); }, { passive: true });") && CVS.includes('this._aimKey = pressKeyOf(e.target?.closest?.(MOVED_PRESS_ROWS));'),
     chose: CVS.includes("    this._endResumeSettle();\n    this._chooseAim();") && CVS.includes("this._messageList.addEventListener('scrollend', () => { if (!this._reaimT) return;") && CVS.includes('if (row && this._reaimT) { clearTimeout(this._reaimT); this._reaimT = 0; this._reaim(); }') && !CVS.includes(", chose, { passive: true });"), // stale-pins: kept (a deliberate absence check: the three separate re-aim listeners must stay gone)
     rows: /^const MOVED_PRESS_ROWS = '\.chat-channel-touch, \.chat-peer-name';$/m.test(CVS), row: /rowEl\.className = 'chat-channel-touch';/.test(fs.readFileSync(path.join(REPO, 'src/lib/channel-touch-view.js'), 'utf8')) && /<span class="chat-peer-name" role="link"/.test(fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8')) };
-  ok(`B-ef04: the list's own moves are stamped (the tail pin; a runs pass only when it moved what the view shows; its restore); the aim is the pointer's last move, a finger's / a pen's landing, or the end of the person's own positioning (ONE road: _notePositioning arms it — the wheel, a touch, a paging key from the list or the message box, a scrollbar drag; a press flushes it); the rule's rows are the ones the transcript draws (${J(wire)})`, Object.values(wire).every(Boolean), J(wire));
+  ok(`B-ef04: the list's own moves are stamped (the tail pin; a runs pass only when it moved what the view shows; its restore); the aim is the pointer's last move, a finger's / a pen's landing, or the end of the person's own positioning (ONE road: _notePositioning arms it — the wheel, a touch, a paging key from the list or the message box, a scrollbar drag; a press flushes it); the rule's rows are the ones the transcript draws (${J(wire)})`, verdictOf(Object.values(wire).every(Boolean)), J(wire));
   // CURE 2 (主开发's verdict on 3b196bfae — PageUp typed in the MESSAGE BOX scrolled the chat but never re-aimed): THE ONE ROAD — the
   // REAL _notePositioning arms the re-aim (as the box's onPageKey calls it: 'key'); the REAL capture handler flushes a pending one
   const notedOf = (CV) => { const v = Object.assign(Object.create(CV.prototype), { _cancelForcedScroll() {}, _endResumeSettle() {}, _trace() {} });
@@ -1536,4 +1536,4 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

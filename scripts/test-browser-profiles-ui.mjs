@@ -48,7 +48,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 80) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = await pred(); if (v) return v; } catch { } await sleep(every); } try { return await pred(); } catch { return null; } };
@@ -263,7 +263,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   const srv = spawn(process.execPath, ['server.js'], { cwd: WT, env: { ...baseEnv, ...VNC_ENV, PATH: `${FAKE_BIN}:${baseEnv.PATH || '/usr/bin:/bin'}`, PORT: String(PORT), HOME: HOME_DIR, CLAUDE_CMD: STUB, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_TEST_EGRESS_MAP: 'cft.test=127.0.0.1,storage.test=127.0.0.1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal = (journal + d).slice(-60000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-60000); });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 200), 'the scratch server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 200)), 'the scratch server booted', journal.slice(-800))) return;
   const api = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? J(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   // ── one LIVE conversation through the real create path ──
   const ctl = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
@@ -276,7 +276,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   if (!ok(!!SID, 'a live chat session created through the real path (stub claude behind the real wrapper)', frames.filter((m) => m.type === 'error').slice(-2))) return;
   // an existing profile (the row whose node must survive the create)
   const ex = await api('POST', '/api/browser/profiles', { label: 'Existing' });
-  if (!ok(ex.status === 200 && ex.json.profile, 'an existing profile "Existing" (through the route)', ex.json)) return;
+  if (!ok(ex.status === 200 && verdictOf(ex.json.profile), 'an existing profile "Existing" (through the route)', ex.json)) return;
   // its directory written two days ago — the row's words ("last used 48 h ago") stay the same through the legs (a fresh
   // one says "written N min ago", which moves every 30 s and rebuilds the row by its own right)
   { const t2 = (Date.now() - 2 * 86400000) / 1000; fs.utimesSync(ex.json.profile.dir, t2, t2); }
@@ -331,7 +331,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   // ═══ ① New profile… → the row ═══
   console.log('— ① en 1280×800: New profile… → THE dialog → ONE POST → the row in place');
   await load('en', 1280, 800);
-  ok(await openPanel(), 'the Agent browser panel opens with its New profile… button');
+  ok(verdictOf(await openPanel()), 'the Agent browser panel opens with its New profile… button');
   await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(ex.json.profile.id)}]'); if (r) r.__badmKept = 1; })()`);
   // THE BUILD LIST IS ASKED AFTER THE PROVIDER ROWS DRAW (lane mirror-green-ui, 2.369.205): this leg used to judge the
   // builds the moment the rows existed — on the Actions runner (and once in a while here) the answer had not landed and
@@ -339,32 +339,32 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   // list it had not asked for yet. The race is made deterministic: the page's first builds answer is HELD until the
   // suite releases it — the waiting section is judged, then the answered one.
   await ev(`(() => { const f = window.fetch; window.__bprofFetch = f; let held = false; window.fetch = function (u, o) { if (!held && /\\/api\\/browser\\/builds(\\?|$)/.test(String(u))) { held = true; return new Promise((r) => { window.__bprofRelease = r; }).then(() => f.call(this, u, o)); } return f.call(this, u, o); }; })()`);
-  ok(await click('.bprof-new'), 'New profile… is clicked (a real mouse)');
+  ok(verdictOf(await click('.bprof-new')), 'New profile… is clicked (a real mouse)');
   // lane ui-controls-and-bugs (the walk's browser-profiles-3): a row nobody can pick here — a desktop window (shared from the window
   // itself), a backend this version cannot use — is not drawn; a row that waits for the person (consent, This computer) is
   const nProv = (await api('GET', '/api/browser/providers')).json.providers.filter((r) => !(r.leaseKind === 'window-target' || (r.control && r.control.ok === false && !['provider_needs_local_key', 'provider_local_only', 'provider_needs_consent'].includes(r.control.code)))).length;
   const dlg = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); if (!d) return null; const rows = [...d.querySelectorAll('.bnew-provider')]; return rows.length ? { rows: rows.map((r) => ({ id: r.dataset.provider, state: r.dataset.state, off: r.classList.contains('is-off'), install: !!(r.querySelector('.bnew-install') && getComputedStyle(r.querySelector('.bnew-install')).display !== 'none') })), builds: [...d.querySelectorAll('.bnew-build')].map((x) => x.dataset.key), who: !!d.querySelector('.pp-chip[data-key="everyone:*"]') && !d.querySelector('input[name=bnew-who]'), title: d.querySelector('.dialog-header h3').textContent, busy: d.querySelector('.bnew-builds-wrap')?.getAttribute('aria-busy') || null, notes: [...d.querySelectorAll('.bnew-builds .bbuild-note')].map((x) => x.textContent) } : null; })()`), 15000, 100);
-  ok(dlg && dlg.title === 'New profile' && dlg.rows.length === nProv && dlg.rows.find((r) => r.id === 'chromium').state === 'ready', `the dialog draws every provider that can be picked or waits for the person (${dlg && dlg.rows.length} of ${nProv}); one nobody can pick here is not drawn`, dlg);
-  ok(dlg && !dlg.rows.some((r) => r.install), 'no provider row offers an install (lane engine-spi-egress L3: the one that did left the core — a browser of another build is a plugin)', dlg && dlg.rows);
+  ok(gateOf(dlg) && dlg.title === 'New profile' && dlg.rows.length === nProv && dlg.rows.find((r) => r.id === 'chromium').state === 'ready', `the dialog draws every provider that can be picked or waits for the person (${dlg && dlg.rows.length} of ${nProv}); one nobody can pick here is not drawn`, dlg);
+  ok(gateOf(dlg) && !dlg.rows.some((r) => r.install), 'no provider row offers an install (lane engine-spi-egress L3: the one that did left the core — a browser of another build is a plugin)', dlg && dlg.rows);
   const asked = await ev(`typeof window.__bprofRelease === 'function'`);
-  ok(dlg && asked && dlg.busy === 'true' && dlg.notes.length === 1 && dlg.notes[0] === 'Reading the list of Chrome builds…' && !dlg.builds.some((k) => k.startsWith('v:')), 'while the build list is ASKED and not answered (held): the section is aria-busy and says "Reading the list of Chrome builds…" — never "could not be read"', dlg && { asked, busy: dlg.busy, notes: dlg.notes, builds: dlg.builds });
+  ok(gateOf(dlg) && gateOf(asked) && dlg.busy === 'true' && dlg.notes.length === 1 && dlg.notes[0] === 'Reading the list of Chrome builds…' && !dlg.builds.some((k) => k.startsWith('v:')), 'while the build list is ASKED and not answered (held): the section is aria-busy and says "Reading the list of Chrome builds…" — never "could not be read"', dlg && { asked, busy: dlg.busy, notes: dlg.notes, builds: dlg.builds });
   await ev(`(() => { if (window.__bprofRelease) window.__bprofRelease(); window.fetch = window.__bprofFetch; return true; })()`);
   const dlgB = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); const w = d && d.querySelector('.bnew-builds-wrap'); if (!w || w.getAttribute('aria-busy') !== 'false') return null; return { builds: [...d.querySelectorAll('.bnew-build')].map((x) => x.dataset.key), notes: [...d.querySelectorAll('.bnew-builds .bbuild-note')].map((x) => x.textContent), who: !!d.querySelector('.pp-chip[data-key="everyone:*"]') && !d.querySelector('input[name=bnew-who]') }; })()`), 15000, 100);
-  ok(dlgB && dlgB.builds[0] === 'default' && dlgB.builds.includes('v:151.0.7922.34') && dlgB.builds.includes('v:152.0.1.2') && !dlgB.notes.length && dlgB.who === true, 'the build section lists this computer\'s builds (default first) once the list answered; ALL AGENTS (the picker\'s All chip — no radios since the 2.369.202 integration) is the default', dlgB || dlg);
+  ok(gateOf(dlgB) && dlgB.builds[0] === 'default' && gateOf(dlgB.builds.includes('v:151.0.7922.34')) && gateOf(dlgB.builds.includes('v:152.0.1.2')) && !dlgB.notes.length && dlgB.who === true, 'the build section lists this computer\'s builds (default first) once the list answered; ALL AGENTS (the picker\'s All chip — no radios since the 2.369.202 integration) is the default', dlgB || dlg);
   await ev(`(() => { const i = document.querySelector('#browser-new-profile-dialog .bnew-label'); i.focus(); i.value = ''; })()`);
   await send('Input.insertText', { text: 'Vendor portal' });
-  ok(await click('#browser-new-profile-dialog .bnew-build[data-key="v:151.0.7922.34"] input'), 'the build "Chrome 151.0.7922.34" is picked');
+  ok(verdictOf(await click('#browser-new-profile-dialog .bnew-build[data-key="v:151.0.7922.34"] input')), 'the build "Chrome 151.0.7922.34" is picked');
   await shot('1-new-profile-en');
   const exRow = () => ev(`fetch('/api/browser/housekeeping').then((r) => r.json()).then((h) => { const r = (h.profiles || []).find((x) => x.id === ${J(ex.json.profile.id)}); if (!r) return null; const { use, ...rest } = r; return JSON.stringify([rest, window.app.browserChipFor ? window.app.browserChipFor(r.id) : null]); })`);
   const exBefore = await exRow();
   const before = await ev('window.__badm.calls.length');
-  ok(await click('#browser-new-profile-dialog .bnew-create'), 'Create');
+  ok(verdictOf(await click('#browser-new-profile-dialog .bnew-create')), 'Create');
   const row = await until(() => ev(`(() => { const r = [...document.querySelectorAll('.bprof-profile')].find((x) => /Vendor portal/.test(x.textContent)); return r ? { id: r.dataset.profileId, build: (r.querySelector('.bprof-build') || {}).textContent || null } : null; })()`), 15000, 100);
   const posts = await ev(`window.__badm.calls.slice(${before}).filter((c) => c.method === 'POST' && /\\/api\\/browser\\/(profiles|adopt)$/.test(c.url))`);
-  ok(posts.length === 1 && posts[0].body.label === 'Vendor portal' && posts[0].body.provider === 'chromium' && posts[0].body.browser && posts[0].body.browser.version === '151.0.7922.34' && !('use' in posts[0].body), 'ONE POST to the profiles route with the build (no list for "All my conversations")', posts);
-  ok(row && row.build === 'Chrome 151.0.7922.34 (pinned)', 'the panel gains the row and it says "Chrome 151.0.7922.34 (pinned)"', row);
+  ok(posts.length === 1 && posts[0].body.label === 'Vendor portal' && posts[0].body.provider === 'chromium' && gateOf(posts[0].body.browser) && posts[0].body.browser.version === '151.0.7922.34' && !('use' in posts[0].body), 'ONE POST to the profiles route with the build (no list for "All my conversations")', posts);
+  ok(gateOf(row) && row.build === 'Chrome 151.0.7922.34 (pinned)', 'the panel gains the row and it says "Chrome 151.0.7922.34 (pinned)"', row);
   const exAfter = await exRow();
-  ok(await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(ex.json.profile.id)}]'); return !!(r && r.__badmKept === 1); })()`), 'the row that was there is the SAME node after the create (keyed, in place)', exBefore === exAfter ? 'its facts did not change' : { exBefore, exAfter });
+  ok(verdictOf(await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(ex.json.profile.id)}]'); return !!(r && r.__badmKept === 1); })()`)), 'the row that was there is the SAME node after the create (keyed, in place)', exBefore === exAfter ? 'its facts did not change' : { exBefore, exAfter });
   ok(!(await ev('!!document.querySelector("#browser-new-profile-dialog")')), 'the dialog closed');
   const VP = row && row.id;
 
@@ -372,31 +372,31 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   console.log('— ② Change build… under a holder: the restart is said, the conversation told, the browser on the new build');
   if (VP) {
     const at = await api('POST', '/api/browser/attach', { sessionId: SID, profile: VP });
-    ok(at.status === 200 && at.json.lease, 'the live conversation leases "Vendor portal" (its browser starts on build 151)', at.json);
-    ok(await until(() => readLog(launchesLog).some((l) => l.ns === 'vs-' + VP && l.exe === B151), 8000), 'the launch ran the pinned build\'s executable');
+    ok(at.status === 200 && verdictOf(at.json.lease), 'the live conversation leases "Vendor portal" (its browser starts on build 151)', at.json);
+    ok(verdictOf(await until(() => readLog(launchesLog).some((l) => l.ns === 'vs-' + VP && l.exe === B151), 8000)), 'the launch ran the pinned build\'s executable');
     // its chat window open (where the card lands)
     await ev(`window.app.attachSession(${J(SID)}, 'Vendor work', ${J(WORK)}, { mode: 'chat', backend: 'claude' })`);
     await until(() => ev(`[...window.app.wm.windows.values()].some((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${J(SID)})`), 15000, 150);
     await ev('window.app.openBrowserProfiles()');
     await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-more')`), 15000, 100);
-    ok(await menuAct(VP, 'bprof-build-btn'), 'Change build… from the row\'s ⋯ menu');
+    ok(verdictOf(await menuAct(VP, 'bprof-build-btn')), 'Change build… from the row\'s ⋯ menu');
     const bd = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); if (!d) return null; return { title: d.querySelector('.dialog-header h3').textContent, rows: [...d.querySelectorAll('.bbuild-row')].map((r) => [r.dataset.key, !r.classList.contains('is-off')]), change: [...d.querySelectorAll('.bbuild-change')].map((x) => x.textContent), btn: d.querySelector('.bbuild-change-btn').textContent, now: (d.querySelector('.bbuild-now') || {}).textContent || null }; })()`), 15000, 100);
-    ok(bd && bd.title === 'Chrome build for Vendor portal' && bd.btn === 'Change and restart' && /1 conversation\(s\) using it are told/.test(bd.change.join(' ')) && /running Chrome 151\.0\.7922\.34/.test(bd.now || ''), 'the dialog says the build it runs now, that the browser restarts and that 1 conversation is told — before the button', bd);
-    ok(await click('#browser-build-dialog .bbuild-row[data-key="v:152.0.1.2"] input'), 'Chrome 152.0.1.2 picked');
+    ok(gateOf(bd) && bd.title === 'Chrome build for Vendor portal' && bd.btn === 'Change and restart' && gateOf(/1 conversation\(s\) using it are told/.test(bd.change.join(' '))) && verdictOf(/running Chrome 151\.0\.7922\.34/.test(bd.now || '')), 'the dialog says the build it runs now, that the browser restarts and that 1 conversation is told — before the button', bd);
+    ok(verdictOf(await click('#browser-build-dialog .bbuild-row[data-key="v:152.0.1.2"] input')), 'Chrome 152.0.1.2 picked');
     await shot('2-change-build-en');
     const b2 = await ev('window.__badm.calls.length');
-    ok(await click('#browser-build-dialog .bbuild-change-btn'), 'Change and restart');
+    ok(verdictOf(await click('#browser-build-dialog .bbuild-change-btn')), 'Change and restart');
     const posted = await until(() => ev(`window.__badm.calls.slice(${b2}).filter((c) => c.method === 'POST' && /\\/build$/.test(c.url))`).then((x) => (x && x.length ? x : null)), 10000);
-    ok(posted && posted.length === 1 && posted[0].body.choice.version === '152.0.1.2', 'ONE POST of the choice', posted);
+    ok(gateOf(posted) && posted.length === 1 && posted[0].body.choice.version === '152.0.1.2', 'ONE POST of the choice', posted);
     const chatCards = () => ev(`(() => { const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${J(SID)}); return cw ? [...cw.element.querySelectorAll('.chat-peer-message, .chat-vs-notice')].map((e) => e.textContent.replace(/\\s+/g, ' ')) : null; })()`);
     const card = await until(async () => { const c = await chatCards(); return c && c.find((t) => /changed the Chrome build/.test(t)); }, 15000, 200);
-    ok(card && /from Chrome 151\.0\.7922\.34 to Chrome 152\.0\.1\.2/.test(card) && /Vendor portal/.test(card), 'the conversation\'s chat shows the relaunch card — which browser, from / to, what to do (never a silent restart under a holder)', card || await chatCards());
-    ok(await until(() => readLog(launchesLog).filter((l) => l.ns === 'vs-' + VP).at(-1)?.exe === B152, 8000), 'the browser relaunched on build 152');
+    ok(gateOf(card) && gateOf(/from Chrome 151\.0\.7922\.34 to Chrome 152\.0\.1\.2/.test(card)) && verdictOf(/Vendor portal/.test(card)), 'the conversation\'s chat shows the relaunch card — which browser, from / to, what to do (never a silent restart under a holder)', card || await chatCards());
+    ok(verdictOf(await until(() => readLog(launchesLog).filter((l) => l.ns === 'vs-' + VP).at(-1)?.exe === B152, 8000)), 'the browser relaunched on build 152');
     const callsVP = readLog(callsLog).filter((c) => c.ns === 'vs-' + VP && c.sess === 'vs-' + VP && !(c.argv[0] === 'session' && c.argv[1] === 'info'));
     const after = callsVP.slice(callsVP.findIndex((c) => c.exe === B152));
-    ok(after.length >= 2 && after.every((c) => c.exe === B152), `after the change, EVERY launching call of the browser's own session carried build 152 (${after.map((c) => c.argv.slice(0, 2).join(' ')).join(' · ')})`, after);
+    ok(after.length >= 2 && verdictOf(after.every((c) => c.exe === B152)), `after the change, EVERY launching call of the browser's own session carried build 152 (${after.map((c) => c.argv.slice(0, 2).join(' ')).join(' · ')})`, after);
     const rowNow = await until(() => ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-build'); return r && /152\\.0\\.1\\.2/.test(r.textContent) ? r.textContent : null; })()`), 10000, 150);
-    ok(rowNow && /Chrome 152\.0\.1\.2 \(pinned\) · running Chrome 152\.0\.1\.2/.test(rowNow), 'the row says the new build AND that the browser runs it (its own /json/version)', rowNow);
+    ok(gateOf(rowNow) && verdictOf(/Chrome 152\.0\.1\.2 \(pinned\) · running Chrome 152\.0\.1\.2/.test(rowNow)), 'the row says the new build AND that the browser runs it (its own /json/version)', rowNow);
     await shot('2-after-en');
   }
 
@@ -407,7 +407,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await openPanel();
     await click('.bprof-new');
     const d = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); if (!d || !d.querySelector('.bnew-provider')) return null; return { title: d.querySelector('.dialog-header h3').textContent, heads: [...d.querySelectorAll('.bnew-section-head')].map((x) => x.textContent), create: d.querySelector('.bnew-create').textContent }; })()`), 15000, 100);
-    ok(d && d.title === tr(lang, 'New profile') && d.heads.includes(tr(lang, 'Browser')) && d.heads.includes(tr(lang, 'Chrome build')) && d.heads.includes(tr(lang, 'Who can use it')) && d.create === tr(lang, 'Create'),
+    ok(gateOf(d) && d.title === tr(lang, 'New profile') && gateOf(d.heads.includes(tr(lang, 'Browser'))) && gateOf(d.heads.includes(tr(lang, 'Chrome build'))) && gateOf(d.heads.includes(tr(lang, 'Who can use it'))) && d.create === tr(lang, 'Create'),
       `${lang}: the New profile… dialog speaks the dictionary's words`, d);
     await shot(`3-new-profile-${lang}`);
     await ev("document.querySelector('#browser-new-profile-dialog .bnew-cancel').click()");
@@ -415,7 +415,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-more')`), 10000, 100);
       await menuAct(VP, 'bprof-build-btn');
       const b = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); return d ? { title: d.querySelector('.dialog-header h3').textContent, def: (d.querySelector('.bbuild-row[data-key=default] .bwho-answer-head') || {}).textContent || '' } : null; })()`), 15000, 100);
-      ok(b && b.title === tr(lang, 'Chrome build for {label}', { label: 'Vendor portal' }) && b.def === tr(lang, "Automatic — usually the newest Chrome the browser driver installed"), `${lang}: Change build… speaks it too`, b);
+      ok(gateOf(b) && b.title === tr(lang, 'Chrome build for {label}', { label: 'Vendor portal' }) && b.def === tr(lang, "Automatic — usually the newest Chrome the browser driver installed"), `${lang}: Change build… speaks it too`, b);
       await shot(`3-change-build-${lang}`);
       await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
     }
@@ -429,25 +429,25 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await click('.bprof-new');
     const cs = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); const rows = d ? [...d.querySelectorAll('.bnew-clone')] : []; if (rows.length < 2) return null; return { head: [...d.querySelectorAll('.bnew-section-head')].map((x) => x.textContent).find((x) => x === ${J(tr('zh', 'Copy logins from'))}) || null, rows: rows.map((r) => ({ key: r.dataset.key, state: r.dataset.state, head: r.querySelector('.bwho-answer-head').textContent, note: r.querySelector('.bnew-note').textContent, off: r.classList.contains('is-off') })) }; })()`), 15000, 100);
     const pick = cs && (cs.rows.find((r) => r.state === 'stopped') || cs.rows.find((r) => r.state === 'running'));
-    ok(cs && cs.head && cs.rows[0].key === 'none' && cs.rows[0].head === tr('zh', "Don't copy — start signed out") && pick && cs.rows.every((r) => r.key === 'none' || r.note) && (!cs.rows.some((r) => r.state === 'stopped') || cs.rows.find((r) => r.state === 'stopped').note === tr('zh', 'Stopped — its logins are copied as they are now.')),
+    ok(gateOf(cs) && gateOf(cs.head) && cs.rows[0].key === 'none' && cs.rows[0].head === tr('zh', "Don't copy — start signed out") && gateOf(pick) && gateOf(cs.rows.every((r) => r.key === 'none' || r.note)) && (!cs.rows.some((r) => r.state === 'stopped') || cs.rows.find((r) => r.state === 'stopped').note === tr('zh', 'Stopped — its logins are copied as they are now.')),
       'zh: the dialog has 复制登录自 — 不复制 first, every named profile a row with its state in words', cs);
     if (pick) {
       await ev(`(() => { const i = document.querySelector('#browser-new-profile-dialog .bnew-label'); i.value = '银行副本'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
       await click(`#browser-new-profile-dialog .bnew-clone[data-key=${J(pick.key)}] input`); await frame();
       const hint = await text('#browser-new-profile-dialog .bnew-clone-hint');
       const hidden = await ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); const vis = (sel) => { const e = d.querySelector(sel); return !!e && e.getClientRects().length > 0; }; return { prov: vis('.bnew-providers'), build: vis('.bnew-builds-wrap') }; })()`);
-      ok(hint === tr('zh', 'A one-time copy of {source}: the same browser and build; signing in or out later in either one does not change the other.', { source: pick.head }) && hidden && !hidden.prov && !hidden.build, 'zh: picking a source says the one-time copy and steps the browser + build sections aside', { hint, hidden });
+      ok(hint === tr('zh', 'A one-time copy of {source}: the same browser and build; signing in or out later in either one does not change the other.', { source: pick.head }) && gateOf(hidden) && !hidden.prov && !hidden.build, 'zh: picking a source says the one-time copy and steps the browser + build sections aside', { hint, hidden });
       await shot('3c-dialog-zh');
       if (process.env.VS_BPCLONE_SHOTS) { try { const r = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.VS_BPCLONE_SHOTS, 'dialog-zh.png'), Buffer.from(r.result.data, 'base64')); } catch { /* best effort */ } }
       await click('#browser-new-profile-dialog .bnew-create');
       const gone = await until(() => ev("!document.querySelector('#browser-new-profile-dialog')"), 20000, 100);
       const nid = await until(() => ev(`(() => { const p = (window.app._browserProfiles.profiles || []).find((x) => x.label === '银行副本'); return p ? p.id : null; })()`), 15000, 100);
-      ok(gone && nid, 'zh: Create ⇒ the dialog closes and the copy is a profile', { gone, nid });
+      ok(gateOf(gone) && verdictOf(nid), 'zh: Create ⇒ the dialog closes and the copy is a profile', { gone, nid });
       if (nid) {
         await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(nid)}] .bprof-chev')`), 10000, 100);
         await click(`.bprof-profile[data-profile-id=${J(nid)}] .bprof-chev`); await frame();
         const fold = await until(() => text(`.bprof-profile[data-profile-id=${J(nid)}] .bprof-fold`), 5000, 100);
-        ok(fold && fold.includes(tr('zh', 'Logins')) && fold.includes(`从 ${pick.head} 复制`), 'zh: the copy\'s row fold says 登录 … 从 <source> 复制 (dated in the device\'s locale)', fold);
+        ok(gateOf(fold) && gateOf(fold.includes(tr('zh', 'Logins'))) && verdictOf(fold.includes(`从 ${pick.head} 复制`)), 'zh: the copy\'s row fold says 登录 … 从 <source> 复制 (dated in the device\'s locale)', fold);
         await ev(`document.querySelector('.bprof-profile[data-profile-id=${J(nid)}]').scrollIntoView({ block: 'center' })`); await frame();
         await shotEl('3c-row-zh', `.bprof-profile[data-profile-id=${J(nid)}]`);
         if (process.env.VS_BPCLONE_SHOTS) { try { const q = await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(nid)}]').getBoundingClientRect(); return { x: Math.max(0, r.left - 8), y: Math.max(0, r.top - 8), width: r.width + 16, height: r.height + 16 }; })()`); const r = await send('Page.captureScreenshot', { format: 'png', clip: { ...q, scale: 1 } }); fs.writeFileSync(path.join(process.env.VS_BPCLONE_SHOTS, 'row-zh.png'), Buffer.from(r.result.data, 'base64')); } catch { /* best effort */ } }
@@ -463,24 +463,24 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-more')`), 10000, 100);
     await menuAct(VP, 'bprof-build-btn');
     const row = await until(() => ev(`(() => { const r = document.querySelector('#browser-build-dialog .bbuild-download'); return r ? { head: r.querySelector('.bwho-answer-head').textContent, last: r === [...r.parentElement.children].at(-1) } : null; })()`), 15000, 100);
-    ok(row && row.head === tr(lang, 'Download another build…') && row.last, `${lang}: Change build… ends with the row "Download another build…"`, row);
+    ok(gateOf(row) && row.head === tr(lang, 'Download another build…') && verdictOf(row.last), `${lang}: Change build… ends with the row "Download another build…"`, row);
     const lists0 = cftHits.filter((h) => h.includes('last-known-good')).length;
     await click('#browser-build-dialog .bbuild-download');
     const pk = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); const rows = [...d.querySelectorAll('.bdl-row')]; if (!rows.length) return null; const st = rows.find((x) => x.dataset.version === ${J(STABLE)}); return { intro: d.querySelector('.bdl-intro').textContent, n: rows.length, head: st && st.querySelector('.bwho-answer-head').textContent, chips: st ? [...st.querySelectorAll('.bdl-chip')].map((x) => x.textContent) : [], rowsHidden: getComputedStyle(d.querySelector('.bbuild-rows')).display === 'none', free: (d.querySelector('.bdl-free') || {}).textContent || '' }; })()`), 20000, 150);
-    ok(pk && pk.n === 4 && pk.rowsHidden && pk.intro === tr(lang, "Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser driver's own install picks.") /* lane ui-plain-words closure 2: one word for the browser driver */ && pk.head === `Stable · ${STABLE}` && cftHits.filter((h) => h.includes('last-known-good')).length === lists0 + 1
-      && pk.chips.includes(((r) => (r === 'newer' ? tr(lang, 'Newer than the census ({census}): what it adds is refused by name while you drive the browser; everything else works', { census: CC.CENSUS_CHROME }) : tr(lang, 'Older than the census: a few methods it lacks are listed harmlessly')))(CC.chromeRelation(STABLE))) && !pk.chips.some((c) => /CloakBrowser/.test(c)),
+    ok(gateOf(pk) && pk.n === 4 && gateOf(pk.rowsHidden) && pk.intro === tr(lang, "Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser driver's own install picks.") /* lane ui-plain-words closure 2: one word for the browser driver */ && pk.head === `Stable · ${STABLE}` && cftHits.filter((h) => h.includes('last-known-good')).length === lists0 + 1
+      && gateOf(pk.chips.includes(((r) => (r === 'newer' ? tr(lang, 'Newer than the census ({census}): what it adds is refused by name while you drive the browser; everything else works', { census: CC.CENSUS_CHROME }) : tr(lang, 'Older than the census: a few methods it lacks are listed harmlessly')))(CC.chromeRelation(STABLE)))) && !pk.chips.some((c) => /CloakBrowser/.test(c)),
       `${lang}: the picker opens IN the dialog (the rows step aside), reads the channel list once, four rows; Stable's chips say the census in the device's words (no anti-bot backend chip: it left the core)`, pk);
     await shot(`3b-picker-${lang}`);
     await click(`#browser-build-dialog .bdl-row[data-version="${STABLE}"]`);
     const cf = await until(() => ev(`(() => { const p = [...document.querySelectorAll('p.dialog-hint')].find((x) => x.textContent.includes('storage.test')); if (!p) return null; let ov = p; while (ov.parentElement && ov.parentElement !== document.body) ov = ov.parentElement; const bs = [...ov.querySelectorAll('button')]; return { title: (ov.querySelector('h3') || {}).textContent || '', msg: p.textContent, buttons: bs.map((b) => b.textContent) }; })()`), 15000, 100);
-    ok(cf && cf.title === tr(lang, 'Download Chrome {version}?', { version: STABLE }) && cf.msg.includes(tr(lang, "It is checked against the server's own length and checksum — Google publishes no separate one. Nothing restarts; it becomes a build you can pick. Chrome for Testing never auto-updates.")) && cf.buttons.includes(tr(lang, 'Download')),
+    ok(gateOf(cf) && cf.title === tr(lang, 'Download Chrome {version}?', { version: STABLE }) && gateOf(cf.msg.includes(tr(lang, "It is checked against the server's own length and checksum — Google publishes no separate one. Nothing restarts; it becomes a build you can pick. Chrome for Testing never auto-updates."))) && verdictOf(cf.buttons.includes(tr(lang, 'Download'))),
       `${lang}: THE confirm — the version, the host, how it is checked, one Download button`, cf);
     await shot(`3b-confirm-${lang}`);
     if (lang !== 'en') {
       await ev(`(() => { const p = [...document.querySelectorAll('p.dialog-hint')].find((x) => x.textContent.includes('storage.test')); let ov = p; while (ov.parentElement && ov.parentElement !== document.body) ov = ov.parentElement; [...ov.querySelectorAll('button')].find((b) => b.textContent !== ${J(tr(lang, 'Download'))} && b.textContent.trim()).click(); })()`);
       await ev("document.querySelector('#browser-build-dialog .bdl-back').click()");
       const back = await until(() => ev("(() => { const d = document.querySelector('#browser-build-dialog'); return d && getComputedStyle(d.querySelector('.bbuild-rows')).display !== 'none' && !d.querySelector('.bdl-row'); })()"), 5000, 100);
-      ok(back, `${lang}: Back puts the build rows back`);
+      ok(verdictOf(back), `${lang}: Back puts the build rows back`);
       await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
       continue;
     }
@@ -488,7 +488,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const prog = await until(() => ev("(() => { const p = document.querySelector('#browser-build-dialog .bdl-progress'); return p && p.style.display !== 'none' && /Downloading Chrome .* MB of .* MB|Unpacking|Checking|Verifying/.test(p.textContent) ? p.textContent : null; })()"), 15000, 50);
     ok(!!prog, 'en: the progress line while it downloads ("Downloading Chrome … N MB of M MB" → checking → unpacking → verifying)', prog);
     const picked = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); const r = d && d.querySelector('.bbuild-row[data-key="v:${STABLE}"] input'); return r && r.checked && !d.querySelector('.bdl-row') ? true : null; })()`), 30000, 150);
-    ok(picked && fs.existsSync(path.join(HOME_DIR, '.agent-browser', 'browsers', `chrome-${STABLE}`, 'vibespace-download.json')), `en: it landed in the CLI's builds folder (witnessed) and Change build… came back with Chrome ${STABLE} picked`, journal.slice(-1500));
+    ok(gateOf(picked) && verdictOf(fs.existsSync(path.join(HOME_DIR, '.agent-browser', 'browsers', `chrome-${STABLE}`, 'vibespace-download.json'))), `en: it landed in the CLI's builds folder (witnessed) and Change build… came back with Chrome ${STABLE} picked`, journal.slice(-1500));
     await shot('3b-picked-en');
     await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
   }
@@ -504,7 +504,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const HP = await mk(LONG), OD = await mk('office-devices'), DOOM = await mk('Doomed');
     const u0 = HP ? (await api('GET', `/api/browser/profiles/${HP}/use`)).json : null;
     const w12 = HP && u0 ? await api('PATCH', `/api/browser/profiles/${HP}`, { use: { mode: 'only', who: TGS.filter(Boolean).map((id) => ({ kind: 'task', id })) }, base: u0.base }) : null;
-    ok(TGS.every(Boolean) && HP && OD && DOOM && w12 && w12.status === 200 && LONG.length >= 40, 'fixtures: twelve Task Groups; a 41-character name listing all twelve; "office-devices" (a paired machine\'s row, unmeasured — the page-side doctor); "Doomed"', w12 && w12.json);
+    ok(gateOf(TGS.every(Boolean)) && gateOf(HP) && gateOf(OD) && gateOf(DOOM) && gateOf(w12) && w12.status === 200 && LONG.length >= 40, 'fixtures: twelve Task Groups; a 41-character name listing all twelve; "office-devices" (a paired machine\'s row, unmeasured — the page-side doctor); "Doomed"', w12 && w12.json);
     const EXID = ex.json.profile.id;
     const DOC = `window.__badm.doctor = (j) => { for (const p of j.profiles || []) if (p.id === ${J(OD)}) { p.host = 'Mac-one'; p.canBrowse = false; p.bytes = null; } }; true`;
     const panelAt = async (lang, w) => {
@@ -513,7 +513,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       await openPanel();
       await ev(`[...window.app.wm.windows.values()].find((w) => w.type === 'browser-profiles')._browserProfiles.load().then(() => true)`); // a panel the layout replay reopened fetched before the doctor
       if (w !== 860) await ev(`(() => { const win = document.querySelector('.bprof').closest('.window'); win.style.left = '10px'; win.style.width = '${w}px'; return true; })()`);
-      ok(await until(() => ev(`document.querySelectorAll('.bprof-profile').length >= 5 && !!document.querySelector('.bprof-profile[data-profile-id=${J(OD)}]:not(:has(.bprof-browse))')`), 10000, 100), `${lang} ${w}: the panel drew the fixtures (the paired machine's row without a primary)`);
+      ok(verdictOf(await until(() => ev(`document.querySelectorAll('.bprof-profile').length >= 5 && !!document.querySelector('.bprof-profile[data-profile-id=${J(OD)}]:not(:has(.bprof-browse))')`), 10000, 100)), `${lang} ${w}: the panel drew the fixtures (the paired machine's row without a primary)`);
       await frame(); await frame();
     };
     const census = () => ev(`(${PANEL_CENSUS.toString()})()`);
@@ -524,7 +524,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       ok(Math.abs(winW - w) <= 12 && c.rows >= 5 && !c.stacked && !c.problems.length, `${lang} ${w} px (the window ${winW} px): ${c.rows} rows — every cell's left edge = its column title's, every right edge inside the list, each l1 one line, the who line never wraps, nothing clipped or sideways`, c);
       const nm = await ev(`(() => { const e = document.querySelector('.bprof-profile[data-profile-id=${J(HP)}] .bprof-label'); return e ? { cut: e.scrollWidth > e.clientWidth + 1, title: e.title } : null; })()`);
       const wf = await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(HP)}]'); const shown = [...r.querySelectorAll('.bprof-who-chip')].filter((e) => getComputedStyle(e).display !== 'none').length; const m = r.querySelector('.bprof-who-more'); const n = m && getComputedStyle(m).display !== 'none' ? Number((m.textContent.match(/\\d+/) || [0])[0]) : 0; return { shown, n, tip: m ? m.title.split('\\n').length : 0, pill: m ? m.textContent : '' }; })()`);
-      ok(nm && nm.cut && nm.title === LONG && wf.shown >= 1 && wf.shown + wf.n === 12 && wf.tip === wf.n && wf.pill === '+' + wf.n, `${lang} ${w}: the 41-character name is cut with its whole in the title; twelve chips = ${wf.shown} shown + "+${wf.n}" (its title names the ${wf.n})`, { nm, wf });
+      ok(gateOf(nm) && gateOf(nm.cut) && nm.title === LONG && wf.shown >= 1 && wf.shown + wf.n === 12 && wf.tip === wf.n && wf.pill === '+' + wf.n, `${lang} ${w}: the 41-character name is cut with its whole in the title; twelve chips = ${wf.shown} shown + "+${wf.n}" (its title names the ${wf.n})`, { nm, wf });
       if (w === 860) {
         // the WIDEST primary the panel can draw ("Open your browsing window" while you browse it) + the ⋯, measured in this
         // language, still fits the 860 px window's list with the grid's minimums (GRID + gaps — src/lib/browser-panel-model.js)
@@ -542,55 +542,55 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await panelAt('zh', 860);
     const ctl = async (css) => { await ev(`(() => { let s = document.getElementById('bp-control'); if (!s) { s = document.createElement('style'); s.id = 'bp-control'; document.head.appendChild(s); } s.textContent = ${J(css)}; return true; })()`); await frame(); await frame(); return census(); };
     const c1 = await ctl('.bprof-table { grid-template-columns: minmax(200px, 1.5fr) minmax(150px, 1fr) minmax(190px, 1.3fr) 140px 150px !important; }');
-    ok(c1.problems.some((p) => /right edge/.test(p)), 'CONTROL: the mockup\'s minimums (200 · 150 · 190 · 140 · 150 + gaps) at 860 px put a cell past the list — the census goes red', c1.problems.slice(0, 3));
+    ok(verdictOf(c1.problems.some((p) => /right edge/.test(p))), 'CONTROL: the mockup\'s minimums (200 · 150 · 190 · 140 · 150 + gaps) at 860 px put a cell past the list — the census goes red', c1.problems.slice(0, 3));
     const c2 = await ctl('.bprof-head, .bprof-table > .bprof-row.bprof-profile { grid-template-columns: minmax(150px, 1.5fr) minmax(110px, 1fr) minmax(150px, 1.3fr) 120px auto !important; }');
-    ok(c2.problems.some((p) => /≠ the title/.test(p)), 'CONTROL: per-row grids with an `auto` acts column shift the columns row by row — the census goes red', c2.problems.slice(0, 3));
+    ok(verdictOf(c2.problems.some((p) => /≠ the title/.test(p))), 'CONTROL: per-row grids with an `auto` acts column shift the columns row by row — the census goes red', c2.problems.slice(0, 3));
     await ev(`document.getElementById('bp-control').remove()`); await frame();
     ok(!(await census()).problems.length, 'the control style removed, the census is green again');
     // the walk ── a fold open survives a load (the same row node, still open)
-    ok(await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-chev`), 'the chevron of the running row (a real mouse)');
+    ok(verdictOf(await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-chev`)), 'the chevron of the running row (a real mouse)');
     const fo = await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(VP)}]'); r.__kept = 1; const f = r.querySelector('.bprof-fold'); return { open: !f.hidden, keys: [...f.querySelectorAll('.bprof-fold-item')].map((i) => i.dataset.key), h: Math.round(r.getBoundingClientRect().height) }; })()`);
     await ev(`[...window.app.wm.windows.values()].find((w) => w.type === 'browser-profiles')._browserProfiles.load().then(() => true)`); await frame();
     const fo2 = await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(VP)}]'); return { same: r.__kept === 1, open: !r.querySelector('.bprof-fold').hidden }; })()`);
-    ok(fo.open && fo.keys.includes('build') && fo.keys.includes('records') && fo2.same && fo2.open, `the fold opens under the row (${fo.keys.join(' · ')}; the row ${fo.h} px) and a load keeps the SAME row with its fold open`, { fo, fo2 });
+    ok(gateOf(fo.open) && gateOf(fo.keys.includes('build')) && gateOf(fo.keys.includes('records')) && gateOf(fo2.same) && verdictOf(fo2.open), `the fold opens under the row (${fo.keys.join(' · ')}; the row ${fo.h} px) and a load keeps the SAME row with its fold open`, { fo, fo2 });
     await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-chev`);
     // a who-change patches the cell in place
     await ev(`(() => { document.querySelector('.bprof-profile[data-profile-id=${J(HP)}] .bprof-who').__kept = 1; return true; })()`);
     const u1 = (await api('GET', `/api/browser/profiles/${HP}/use`)).json;
     const w11 = await api('PATCH', `/api/browser/profiles/${HP}`, { use: { mode: 'only', who: TGS.slice(1).map((id) => ({ kind: 'task', id })) }, base: u1.base });
     const wsame = await until(() => ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(HP)}]'); const c = r.querySelector('.bprof-who'); const shown = [...r.querySelectorAll('.bprof-who-chip')].filter((e) => getComputedStyle(e).display !== 'none').length; const m = r.querySelector('.bprof-who-more'); const n = m && getComputedStyle(m).display !== 'none' ? Number((m.textContent.match(/\\d+/) || [0])[0]) : 0; return shown + n === 11 ? { same: c.__kept === 1, shown, n } : null; })()`), 10000, 150);
-    ok(w11.status === 200 && wsame && wsame.same, 'a who-change (12 → 11 rows) PATCHES the who cell in place (the same element)', wsame);
+    ok(w11.status === 200 && gateOf(wsame) && verdictOf(wsame.same), 'a who-change (12 → 11 rows) PATCHES the who cell in place (the same element)', wsame);
     // the ⋯ menu's record check row PATCHes and re-reads
     const nCalls = await ev('window.__badm.calls.length');
-    ok(await menuAct(EXID, 'bprof-record'), '⋯ → 录制屏幕 on the stopped row');
+    ok(verdictOf(await menuAct(EXID, 'bprof-record')), '⋯ → 录制屏幕 on the stopped row');
     const patch = await until(() => ev(`window.__badm.calls.slice(${nCalls}).find((c) => c.method === 'PATCH' && c.body && 'record' in c.body) || null`), 8000, 100);
     await until(() => ev(`(window.app._browserProfiles && true)`), 1000);
     await sleep(600);
-    ok(await click(`.bprof-profile[data-profile-id=${J(EXID)}] .bprof-more`), 'the ⋯ again');
+    ok(verdictOf(await click(`.bprof-profile[data-profile-id=${J(EXID)}] .bprof-more`)), 'the ⋯ again');
     const on = await until(() => ev(`(() => { const it = document.querySelector('.context-menu .bprof-record'); return it ? { on: !!it.parentElement.querySelector('.chan-menu-check-on'), items: [...document.querySelectorAll('.context-menu .bprof-mi')].map((x) => x.dataset.act), disabled: document.querySelectorAll('.context-menu .context-menu-item.disabled').length } : null; })()`), 5000, 80);
-    ok(patch && patch.body.record === true && on && on.on && on.disabled === 0, `the record check row PATCHed {record: true} and the re-read row shows it checked; the menu (${on && on.items.join(' · ')}) has no disabled item`, { patch, on });
+    ok(gateOf(patch) && patch.body.record === true && gateOf(on) && gateOf(on.on) && on.disabled === 0, `the record check row PATCHed {record: true} and the re-read row shows it checked; the menu (${on && on.items.join(' · ')}) has no disabled item`, { patch, on });
     await ev(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
     // a paired machine's row: no primary; its menu has no Stop and no record switch
-    ok(await click(`.bprof-profile[data-profile-id=${J(OD)}] .bprof-more`), 'the paired machine\'s ⋯');
+    ok(verdictOf(await click(`.bprof-profile[data-profile-id=${J(OD)}] .bprof-more`)), 'the paired machine\'s ⋯');
     const pm = await until(() => ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(OD)}]'); const items = [...document.querySelectorAll('.context-menu .bprof-mi')].map((x) => x.dataset.act); return items.length ? { primary: !!r.querySelector('.bprof-browse'), items, size: r.querySelector('.bprof-size').textContent, chips: [...r.querySelectorAll('.bprof-chips > [data-key]')].map((c) => c.dataset.key) } : null; })()`), 5000, 80);
-    ok(pm && !pm.primary && !pm.items.includes('stop') && !pm.items.includes('record') && pm.items.includes('delete') && pm.size === tr('zh', 'not measured') && pm.chips.includes('host'), 'a paired machine\'s row: no primary (absent, never greyed), no Stop / record in its menu, its machine chip, "未测量"', pm);
+    ok(gateOf(pm) && !pm.primary && !pm.items.includes('stop') && !pm.items.includes('record') && gateOf(pm.items.includes('delete')) && pm.size === tr('zh', 'not measured') && verdictOf(pm.chips.includes('host')), 'a paired machine\'s row: no primary (absent, never greyed), no Stop / record in its menu, its machine chip, "未测量"', pm);
     await ev(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
     // Delete… from the ⋯ menu runs the two-step dialog — on a row whose fold is open
     await click(`.bprof-profile[data-profile-id=${J(DOOM)}] .bprof-chev`);
-    ok(await menuAct(DOOM, 'bprof-forget'), '⋯ → 删除… (its fold open)');
+    ok(verdictOf(await menuAct(DOOM, 'bprof-forget')), '⋯ → 删除… (its fold open)');
     const dlg = await until(() => ev(`(() => { const b = [...document.querySelectorAll('.dialog button')].find((x) => x.textContent === ${J(tr('zh', 'Delete'))}); const h = [...document.querySelectorAll('.dialog h3, .dialog .dialog-header')].map((x) => x.textContent).join(' '); return b ? { h } : null; })()`), 8000, 80);
-    ok(dlg && dlg.h.includes(tr('zh', 'Delete {label}?', { label: 'Doomed' })), 'the same confirm as before ("删除 Doomed？") — step one of two', dlg);
+    ok(gateOf(dlg) && verdictOf(dlg.h.includes(tr('zh', 'Delete {label}?', { label: 'Doomed' }))), 'the same confirm as before ("删除 Doomed？") — step one of two', dlg);
     await ev(`[...document.querySelectorAll('.dialog button')].find((x) => x.textContent === ${J(tr('zh', 'Delete'))}).click()`);
     const gone = await until(() => ev(`(() => !document.querySelector('.bprof-profile[data-profile-id=${J(DOOM)}]') && [...document.querySelectorAll('.bprof-forgotten')].some((r) => r.textContent.includes('Doomed')))()`), 12000, 150);
-    ok(gone, 'the row left the list and waits under 已删除（搁置） — the second step stays the user\'s click', gone);
+    ok(verdictOf(gone), 'the row left the list and waits under 已删除（搁置） — the second step stays the user\'s click', gone);
     // the ⓘ: the retention sentence on press, gone on an outside press
-    ok(await click('.bprof-info'), 'the ⓘ');
+    ok(verdictOf(await click('.bprof-info')), 'the ⓘ');
     const pop = await until(() => ev(`(() => { const p = document.querySelector('.bprof-info-pop'); return p ? { text: p.textContent, inside: p.getBoundingClientRect().right <= document.querySelector('.bprof').getBoundingClientRect().right + 1 } : null; })()`), 4000, 60);
     await click('.bprof-summary');
     const popGone = await until(() => ev(`!document.querySelector('.bprof-info-pop')`), 4000, 60);
-    ok(pop && pop.inside && pop.text === (await text('.bprof-hint')) && popGone, 'the ⓘ shows the retention sentence (the Maintenance text, word for word) inside the panel and an outside press closes it', pop);
+    ok(gateOf(pop) && gateOf(pop.inside) && pop.text === (await text('.bprof-hint')) && verdictOf(popGone), 'the ⓘ shows the retention sentence (the Maintenance text, word for word) inside the panel and an outside press closes it', pop);
     const mt = await ev(`(() => { const s = [...document.querySelectorAll('.bprof-section')].at(-1); return { title: s.querySelector('.bprof-section-title').textContent, sweep: !!s.querySelector('.bprof-sweep button'), hint: !!s.querySelector('.bprof-hint'), cli: !!s.querySelector('.bprof-cli') }; })()`);
-    ok(mt.title === tr('zh', 'Maintenance') && mt.sweep && mt.hint && mt.cli, '维护 is the last section: the Browser CLI row, the last sweep + 立即清扫, the retention text', mt);
+    ok(mt.title === tr('zh', 'Maintenance') && gateOf(mt.sweep) && gateOf(mt.hint) && verdictOf(mt.cli), '维护 is the last section: the Browser CLI row, the last sweep + 立即清扫, the retention text', mt);
     // 390 px: the re-flow
     await load('zh', 390, 844, true);
     await ev(DOC);
@@ -599,7 +599,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await until(() => ev(`document.querySelectorAll('.bprof-profile').length >= 4`), 10000, 100);
     await frame(); await frame();
     const ph = await ev(`(${PHONE_ROWS.toString()})()`);
-    ok(ph.rows >= 4 && !ph.problems.length && (await ev(`!!document.querySelector('.bprof.bprof-stacked')`)), `390 px: ${ph.rows} rows re-flowed — the titles hidden, each row's five lines in order, the acts on the name's line, nothing sideways`, ph);
+    ok(ph.rows >= 4 && !ph.problems.length && (verdictOf(await ev(`!!document.querySelector('.bprof.bprof-stacked')`))), `390 px: ${ph.rows} rows re-flowed — the titles hidden, each row's five lines in order, the acts on the name's line, nothing sideways`, ph);
     await shotEl('after-390-zh', '.bprof');
   }
 
@@ -612,7 +612,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   await until(() => ev("!!document.querySelector('#browser-new-profile-dialog .bnew-provider')"), 15000, 100);
   await frame();
   const r1 = await ev(`(${RECTS.toString()})('#browser-new-profile-dialog .dialog')`);
-  ok(r1 && r1.n > 10 && !r1.problems.length, `390 px: the New profile… dialog — ${r1 && r1.n} parts inside it and the screen, nothing sideways, no clipped button`, r1);
+  ok(gateOf(r1) && r1.n > 10 && !r1.problems.length, `390 px: the New profile… dialog — ${r1 && r1.n} parts inside it and the screen, nothing sideways, no clipped button`, r1);
   await shot('4-new-profile-390');
   await ev("document.querySelector('#browser-new-profile-dialog .bnew-cancel').click()");
   if (VP) {
@@ -621,7 +621,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await until(() => ev("!!document.querySelector('#browser-build-dialog .bbuild-row')"), 15000, 100);
     await frame();
     const r2 = await ev(`(${RECTS.toString()})('#browser-build-dialog .dialog')`);
-    ok(r2 && r2.n > 5 && !r2.problems.length, `390 px: Change build… — ${r2 && r2.n} parts inside it and the screen`, r2);
+    ok(gateOf(r2) && r2.n > 5 && !r2.problems.length, `390 px: Change build… — ${r2 && r2.n} parts inside it and the screen`, r2);
     await shot('4-change-build-390');
   }
   ok(!errors.length, 'no uncaught page error in any leg', errors.slice(0, 3));
@@ -659,13 +659,13 @@ await (async () => {
   const p = k.createProfile({ label: 'Real pinned', browser: { kind: 'build', version: older.version } });
   let started = null, err = null;
   try { started = await k.start(p.id, { why: 'real-binary leg' }); } catch (e) { err = e; }
-  { const sd = started && started.socketDir ? String(started.socketDir) : ''; ok(!started || sd.startsWith(XDG_R + '/'), `the real CLI's sockets live under the scratch runtime dir (${sd || 'none'}), never the account's`); }
+  { const sd = started && started.socketDir ? String(started.socketDir) : ''; ok(!started || verdictOf(sd.startsWith(XDG_R + '/')), `the real CLI's sockets live under the scratch runtime dir (${sd || 'none'}), never the account's`); }
   if (!ok(!!started && started.state === 'ready', `the real CLI launched the profile pinned to Chrome ${older.version}`, err && (err.code + ': ' + err.message))) { try { await k.stop(p.id, { why: 'user' }); } catch { } return; }
   const rec = k._reg().browsers[p.id];
   const rb = k.list().browsers[p.id].runningBuild;
   ok(rb === older.version, `the RUNNING browser's own /json/version says ${rb} — the pinned ${older.version}, not the CLI's default ${usable[0].version} (the env reached the real CLI on the launch AND on its own get cdp-url after it — a call without it would have relaunched the default)`, { rb, cdpBrowser: rec.cdpBrowser });
   let cmd = ''; try { cmd = rec.browser && rec.browser.pid ? fs.readFileSync(`/proc/${rec.browser.pid}/cmdline`, 'utf8').split('\0')[0] : ''; } catch { cmd = ''; }
-  ok(!cmd || cmd.includes('chrome-' + older.version), `…and the browser process the keeper captured runs that build's program (${cmd || 'not readable'})`);
+  ok(!cmd || verdictOf(cmd.includes('chrome-' + older.version)), `…and the browser process the keeper captured runs that build's program (${cmd || 'not readable'})`);
   try { await k.stop(p.id, { why: 'user' }); } catch { /* the cleanup ends it */ }
 })();
 
@@ -729,24 +729,24 @@ await (async () => {
     a = await agent(TOK, ['tab', 'new', `http://127.0.0.1:${PP}/two`]);
     const r0 = recOf(KEY);
     const daemon0 = r0.pid, chrome0 = r0.browser && r0.browser.pid;
-    ok(a.code === 0 && r0.cli && r0.cli.version === pv && exeOf(daemon0) === NAT && chrome0, `…its daemon runs ${pv} (its own program, /proc), its Chrome pid ${chrome0}; tab two is the current tab`, { cli: r0.cli, exe: exeOf(daemon0), a });
+    ok(a.code === 0 && gateOf(r0.cli) && r0.cli.version === pv && exeOf(daemon0) === NAT && verdictOf(chrome0), `…its daemon runs ${pv} (its own program, /proc), its Chrome pid ${chrome0}; tab two is the current tab`, { cli: r0.cli, exe: exeOf(daemon0), a });
     st['browser.cli'] = 'path'; // THE SWITCH — the panel's "Use the one on PATH"
     const row = (await k.cliFacts()).running;
     ok(row.previous === 1 && row.versions.join() === pv, `the row: 1 browser still on the previous CLI (${pv})`, row);
     a = await agent(TOK, ['get', 'title']);
     const r1 = recOf(KEY);
     ok(a.code === 0 && a.so.split('\n').pop() === 'two' && !/version mismatch/i.test(a.se), `the conversation's NEXT command after the switch answers "two" with no "Daemon version mismatch, restarting…"`, a);
-    ok(r1.pid === daemon0 && exeOf(daemon0) === NAT && r1.browser && r1.browser.pid === chrome0 && fs.existsSync(`/proc/${chrome0}`), `…its daemon (pid ${daemon0}, ${pv}) and its Chrome (pid ${chrome0}) are the ones it launched`, { daemon: [daemon0, r1.pid, exeOf(daemon0)], chrome: [chrome0, r1.browser && r1.browser.pid] });
+    ok(r1.pid === daemon0 && exeOf(daemon0) === NAT && gateOf(r1.browser) && r1.browser.pid === chrome0 && verdictOf(fs.existsSync(`/proc/${chrome0}`)), `…its daemon (pid ${daemon0}, ${pv}) and its Chrome (pid ${chrome0}) are the ones it launched`, { daemon: [daemon0, r1.pid, exeOf(daemon0)], chrome: [chrome0, r1.browser && r1.browser.pid] });
     a = await agent(TOK, ['tab', 'list']);
-    ok(a.code === 0 && /→ \[t2\][^\n]*two/.test(a.so), '…and the active tab is still tab 2', a.so);
+    ok(a.code === 0 && verdictOf(/→ \[t2\][^\n]*two/.test(a.so)), '…and the active tab is still tab 2', a.so);
     a = await agent(TOK2, ['open', `http://127.0.0.1:${PP}/three`]);
     const rN = recOf(KEY2);
-    ok(a.code === 0 && rN && rN.cli && rN.cli.version === cur && exeOf(rN.pid) && exeOf(rN.pid) !== NAT, `a NEW launch (conversation 2) runs the current CLI ${cur}`, { cli: rN && rN.cli, exe: rN && exeOf(rN.pid) });
+    ok(a.code === 0 && gateOf(rN) && gateOf(rN.cli) && rN.cli.version === cur && gateOf(exeOf(rN.pid)) && exeOf(rN.pid) !== NAT, `a NEW launch (conversation 2) runs the current CLI ${cur}`, { cli: rN && rN.cli, exe: rN && exeOf(rN.pid) });
     fs.rmSync(PRE, { recursive: true, force: true }); // the previous install REMOVED while conversation 1's browser runs on it
     a = await agent(TOK, ['get', 'title']);
     const r2 = recOf(KEY);
-    ok(a.code === 1 && /\[browser_cli_gone\]/.test(a.se) && /restart it to use the current CLI/.test(a.se) && !/version mismatch/i.test(a.se), '…removed: the next command is refused BY NAME (browser_cli_gone, "restart it to use the current CLI") — never a silent fall to PATH', a.se);
-    ok(r2.pid === daemon0 && fs.existsSync(`/proc/${daemon0}`) && fs.existsSync(`/proc/${chrome0}`), '…and its daemon and Chrome are untouched (they keep their pages until they stop)', { daemon0, chrome0 });
+    ok(a.code === 1 && gateOf(/\[browser_cli_gone\]/.test(a.se)) && gateOf(/restart it to use the current CLI/.test(a.se)) && !/version mismatch/i.test(a.se), '…removed: the next command is refused BY NAME (browser_cli_gone, "restart it to use the current CLI") — never a silent fall to PATH', a.se);
+    ok(r2.pid === daemon0 && gateOf(fs.existsSync(`/proc/${daemon0}`)) && verdictOf(fs.existsSync(`/proc/${chrome0}`)), '…and its daemon and Chrome are untouched (they keep their pages until they stop)', { daemon0, chrome0 });
     ok((await k.cliFacts()).running.gone === 1, '…the row: 1 browser runs on a CLI that is no longer installed');
   } finally {
     for (const bk of [KEY, KEY2]) { const e = k.ephemeralFor(bk); if (e) { try { await k.stop(e.profileId, { why: 'user' }); } catch { } } }
@@ -796,15 +796,15 @@ await (async () => {
     // the build closes NOW — its launch and the change's reopen have answered (the 3 s timer raced them under load)
     const pidBad = (k.browserOf(p.id) || {}).browser?.pid;
     let killed = false; try { process.kill(pidBad, 'SIGKILL'); killed = true; } catch { }
-    ok(r.ok && r.restarted && told.join() === 'changed' && killed, `Change build… to ${BAD} (it starts, then its Chrome pid ${pidBad} is KILLed once the change answered): restarted, the conversation told "changed"`, { r: r.restarted, told, pidBad, reopened: r.reopened });
+    ok(gateOf(r.ok) && gateOf(r.restarted) && told.join() === 'changed' && verdictOf(killed), `Change build… to ${BAD} (it starts, then its Chrome pid ${pidBad} is KILLed once the change answered): restarted, the conversation told "changed"`, { r: r.restarted, told, pidBad, reopened: r.reopened });
     const done = await until(() => told.length >= 2, 30000, 200);
     ok(!!done && told.join() === 'changed,fell-back' && !(k.profile(p.id).browser) && k.list().browsers[p.id].state === 'ready', '…its loss inside the settle window FALLS BACK: "fell-back" told, the choice back on the default build, the browser running again', { told, choice: k.profile(p.id).browser || 'default', state: k.list().browsers[p.id].state });
     const reopenLines = lines.filter((l) => /tab\(s\) reopened/.test(l));
-    ok(reopenLines.length === 2 && reopenLines.every((l) => /1\/1 tab\(s\) reopened/.test(l)), '…the conversation\'s tab reopened ONCE per launch (the change\'s, the fall-back\'s)', { reopenLines, change: r.reopened });
-    ok(todos.length === 1 && new RegExp(`Chrome ${BAD.replace(/\./g, '\\.')} closed within seconds of starting — it is back on the default build`).test(todos[0]) && !lines.some((l) => /browser_unstable|keeps closing/.test(l)), '…ONE For-you notice names the build that closed; never healed on it until browser_unstable', { todos, unstable: lines.filter((l) => /unstable/.test(l)) });
+    ok(reopenLines.length === 2 && verdictOf(reopenLines.every((l) => /1\/1 tab\(s\) reopened/.test(l))), '…the conversation\'s tab reopened ONCE per launch (the change\'s, the fall-back\'s)', { reopenLines, change: r.reopened });
+    ok(todos.length === 1 && gateOf(new RegExp(`Chrome ${BAD.replace(/\./g, '\\.')} closed within seconds of starting — it is back on the default build`).test(todos[0])) && !lines.some((l) => /browser_unstable|keeps closing/.test(l)), '…ONE For-you notice names the build that closed; never healed on it until browser_unstable', { todos, unstable: lines.filter((l) => /unstable/.test(l)) });
   } catch (e) { ok(false, 'the real B5 leg ran', String(e && e.stack || e).slice(0, 400)); }
   finally { try { if (p) await k.stop(p.id, { why: 'user' }); } catch { } try { k.shutdown?.(); } catch { } }
 })();
 
 console.log(fail ? `FAIL (${fail})${skipped ? ` · ${skipped} skipped` : ''}` : `ALL PASS (${pass})${skipped ? ` · ${skipped} skipped` : ''}`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

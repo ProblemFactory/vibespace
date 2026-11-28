@@ -50,7 +50,7 @@ const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : ''}`); } };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -89,11 +89,11 @@ check('owner run label = "9 Bash · 1 tool lookups · 1 ✗" (no MCP claimed)', 
 check('the MCP line + "(server)" suffix cover ONLY real MCP calls', S.runSummaryParts(S.countKinds(['mcp', 'mcp']), new Set(['chrome-devtools']), t).join(' · ') === '2 MCP (chrome-devtools)'
   && S.runSummaryParts(S.countKinds(['mcp', 'mcp']), new Set(['a', 'b']), t).join(' · ') === '2 MCP'
   && S.runSummaryParts(S.countKinds(['mcp', 'lookup']), new Set(['x']), t).join(' · ') === '1 MCP (x) · 1 tool lookups');
-check('every kind the classifier can return has a summary line entry (the 2.369.34 NaN class, structural)', S.RUN_KINDS.every((k) => S.SUMMARY_ORDER.some(([kk]) => kk === k)));
-check('countKinds zero-fills every kind and still counts an unlisted one (never NaN)', (() => {
+check('every kind the classifier can return has a summary line entry (the 2.369.34 NaN class, structural)', verdictOf(S.RUN_KINDS.every((k) => S.SUMMARY_ORDER.some(([kk]) => kk === k))));
+check('countKinds zero-fills every kind and still counts an unlisted one (never NaN)', verdictOf((() => {
   const c = S.countKinds(['lookup', 'bash', 'bash', null, 'brandnew']);
   return S.RUN_KINDS.every((k) => Number.isFinite(c[k])) && c.lookup === 1 && c.bash === 2 && c.brandnew === 1 && c.mcp === 0;
-})());
+})()));
 check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKinds(['read', 'read']), files: ['a.js', 'b.js', 'c.js', 'd.js', 'e.js'], running: true }, t) === '2 file reads — a.js, b.js, c.js, d.js, +1 · running…');
 // lane run-fold-channel-compact: the members a closed fold keeps on screen are SAID ("· N with a conversation link"),
 // and a compact card's one-line head names the first words of its command
@@ -112,11 +112,11 @@ check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKin
   check('proposals part: «5 Bash · 1 ✗ · 4 with a conversation link · 1 proposal awaiting approval» / 「… · 4 条带会话入口 · 1 条提案待批准」 / ja; decided ⇒ «1 proposal» / 「1 条提案」; several waiting ⇒ «2 proposals awaiting approval»',
     JSON.stringify(waits) === JSON.stringify(['5 Bash · 1 ✗ · 4 with a conversation link · 1 proposal awaiting approval', '5 条 Bash · 1 ✗ · 4 条带会话入口 · 1 条提案待批准', 'Bash 5 件 · 1 ✗ · 会話リンク付き 4 件 · 承認待ちの提案 1 件'])
     && JSON.stringify(done) === JSON.stringify(['5 Bash · 1 ✗ · 4 with a conversation link · 1 proposal', '5 条 Bash · 1 ✗ · 4 条带会话入口 · 1 条提案', 'Bash 5 件 · 1 ✗ · 会話リンク付き 4 件 · 提案 1 件'])
-    && two[0] === '5 Bash · 1 ✗ · 4 with a conversation link · 2 proposals awaiting approval' && two[1].endsWith('· 2 条提案待批准'), { waits, done, two });
+    && two[0] === '5 Bash · 1 ✗ · 4 with a conversation link · 2 proposals awaiting approval' && verdictOf(two[1].endsWith('· 2 条提案待批准')), { waits, done, two });
   check('…no proposal ⇒ no part (every other run\'s label byte-identical)', S.runSummaryLabel({ ...owner, proposals: { n: 0, awaiting: 0 } }, t) === '5 Bash · 1 ✗ · 4 with a conversation link' && S.runSummaryLabel({ ...owner, proposals: null }, t) === '5 Bash · 1 ✗ · 4 with a conversation link');
   check('commandHeadWords: the first non-blank line, whitespace folded, capped at HEAD_WORDS_MAX code points with "…"; "" for no command',
     S.commandHeadWords('\n  vibespace-channels   search "季度"\t--all\nsecond line') === 'vibespace-channels search "季度" --all'
-    && [...S.commandHeadWords('词'.repeat(300))].length === S.HEAD_WORDS_MAX && S.commandHeadWords('词'.repeat(300)).endsWith('…')
+    && [...S.commandHeadWords('词'.repeat(300))].length === S.HEAD_WORDS_MAX && gateOf(S.commandHeadWords('词'.repeat(300)).endsWith('…'))
     && S.commandHeadWords('ls -la') === 'ls -la' && S.commandHeadWords('') === '' && S.commandHeadWords(undefined) === '' && S.commandHeadWords('\n \n') === '');
   check('lane touch-chip-cause: a CHAINED command opens at its vibespace-channels segment after "… " (its rows are what that segment touched — the head that read `vibespace-status working…` named an act that touched nothing); a path to the CLI belongs to the segment; a lone CLI call and a word that merely contains the name keep their words',
     S.commandHeadWords('vibespace-status working --reason "pairing review" && vibespace-channels search "pairing review" --full') === '… vibespace-channels search "pairing review" --full'
@@ -135,7 +135,7 @@ check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKin
     && S.commandHeadWords('bash -lc vibespace-channels search "pairing review" --full') === '… vibespace-channels search "pairing review" --full'
     && S.commandHeadWords("vibespace-status working --reason $'don\\'t; vibespace-channels read x'") === "vibespace-status working --reason $'don\\'t; vibespace-channels read x'"
     && S.commandHeadWords('vibespace-status working # later; vibespace-channels read x') === 'vibespace-status working # later; vibespace-channels read x'
-    && /commandHeadWords\(agentCommandText\(el\._rawMsg\?\.content\?\.\[0\]\?\.input\)\)/.test(read('src/lib/chat-view.js')));
+    && verdictOf(/commandHeadWords\(agentCommandText\(el\._rawMsg\?\.content\?\.\[0\]\?\.input\)\)/.test(read('src/lib/chat-view.js'))));
 }
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
 // (the pure module's import pin: MOVED to the fast scripts/test-fold-ux-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -407,7 +407,7 @@ const opened = await evaljs(`(async () => {
   return { ok: true, n: list.querySelectorAll(':scope > .chat-msg').length, headers: list.querySelectorAll(':scope > .chat-run-header').length,
     label: header.textContent.trim(), ch: list.clientHeight, sh: list.scrollHeight, cv: !!view };
 })()`);
-check('view-only chat rendered with TWO fold headers (the long tool run + the short mcp run)', opened?.ok && opened.headers === 2, JSON.stringify(opened));
+check('view-only chat rendered with TWO fold headers (the long tool run + the short mcp run)', gateOf(opened?.ok) && opened.headers === 2, JSON.stringify(opened));
 check(`header label = "${NBASH} Bash · 1 tool lookups · 1 ✗" — the ToolSearch is a tool lookup, never MCP (got: ${opened?.label})`, (opened?.label || '').replace(/^▸\s*/, '') === `${NBASH} Bash · 1 tool lookups · 1 ✗`);
 
 const state = () => evaljs(`(() => {
@@ -456,26 +456,26 @@ check('the list stays FLAT (members are direct .chat-msg children; footer/bar ar
 // expand via the header
 await click('.chat-run-header', 400);
 const s1 = await state();
-check(`expanded: every member carries .chat-run-member (${s1.members}/${NBASH + 1}), first/last marked`, s1.open && s1.members === NBASH + 1 && s1.first && s1.last && s1.firstIsCard && s1.collapsed === NMCP, JSON.stringify(s1));
-check('expanded: the footer exists (non-.chat-msg) and reads "Collapse · <label>"', s1.footers === 1 && !s1.footerIsMsg && /^Collapse · /.test(s1.footerText) && s1.footerText.includes('tool lookups'), s1.footerText);
+check(`expanded: every member carries .chat-run-member (${s1.members}/${NBASH + 1}), first/last marked`, gateOf(s1.open) && s1.members === NBASH + 1 && gateOf(s1.first) && gateOf(s1.last) && gateOf(s1.firstIsCard) && s1.collapsed === NMCP, JSON.stringify(s1));
+check('expanded: the footer exists (non-.chat-msg) and reads "Collapse · <label>"', s1.footers === 1 && !s1.footerIsMsg && gateOf(/^Collapse · /.test(s1.footerText)) && verdictOf(s1.footerText.includes('tool lookups')), s1.footerText);
 check('expanded run is taller than the viewport (the reported situation)', s1.sh > s1.ch * 1.5, `sh=${s1.sh} ch=${s1.ch}`);
-check('header on screen ⇒ no floating bar (negative control)', (() => { const headerVisible = s1.headerTop >= s1.st && s1.headerTop < s1.st + s1.ch; return !headerVisible || !s1.barShown; })(), JSON.stringify(s1));
+check('header on screen ⇒ no floating bar (negative control)', verdictOf((() => { const headerVisible = s1.headerTop >= s1.st && s1.headerTop < s1.st + s1.ch; return !headerVisible || !s1.barShown; })()), JSON.stringify(s1));
 
 // scroll past the header → the bar shows with the run's label, pinned to the list's top edge
 await scrollTo('header.offsetTop + Math.round(list.clientHeight * 0.8)', 150);
 const s2 = await state();
-check('header scrolled above the viewport ⇒ floating bar shown with the run label', s2.barShown && s2.barLabel === s2.label.replace(/^▸\s*/, '') && s2.headerTop < s2.st, JSON.stringify({ shown: s2.barShown, barLabel: s2.barLabel, label: s2.label, headerTop: s2.headerTop, st: s2.st }));
+check('header scrolled above the viewport ⇒ floating bar shown with the run label', gateOf(s2.barShown) && s2.barLabel === s2.label.replace(/^▸\s*/, '') && s2.headerTop < s2.st, JSON.stringify({ shown: s2.barShown, barLabel: s2.barLabel, label: s2.label, headerTop: s2.headerTop, st: s2.st }));
 check('the bar sits on the container at the message list\'s top edge', !s2.barInList && Math.abs(s2.barTop - s2.listTop) <= 1, `barTop=${s2.barTop} listTop=${s2.listTop}`);
 
 // "jump to top of run" keeps the run open and lands the header at the top
 await click('.chat-run-bar-top', 150);
 const s3 = await state();
-check('jump-to-top: run stays expanded, header lands within ±8px of the viewport top, bar hides', s3.open && s3.members === NBASH + 1 && Math.abs(s3.headerTop - s3.st) <= 8 && !s3.barShown, JSON.stringify({ open: s3.open, d: s3.headerTop - s3.st, bar: s3.barShown }));
+check('jump-to-top: run stays expanded, header lands within ±8px of the viewport top, bar hides', gateOf(s3.open) && s3.members === NBASH + 1 && Math.abs(s3.headerTop - s3.st) <= 8 && !s3.barShown, JSON.stringify({ open: s3.open, d: s3.headerTop - s3.st, bar: s3.barShown }));
 
 // scroll past again, then collapse FROM THE BAR — no scroll jump beyond ±8px of the header
 await scrollTo('header.offsetTop + Math.round(list.clientHeight * 1.2)', 150);
 const s4 = await state();
-check('bar shown again after scrolling past the header', s4.barShown, JSON.stringify(s4));
+check('bar shown again after scrolling past the header', verdictOf(s4.barShown), JSON.stringify(s4));
 await click('.chat-run-bar', 80);
 const s5 = await state();
 check('bar click collapses the run: rail classes gone, footer gone, header closed', !s5.open && s5.members === 0 && s5.footers === 0 && s5.collapsed === NBASH + 1 + NMCP, JSON.stringify(s5));
@@ -488,7 +488,7 @@ check('after the observer pass: still collapsed, header still within ±8px (no l
 // expand again → scroll to the footer → collapse from the footer line
 await click('.chat-run-header', 400);
 const s7 = await state();
-check('re-expanded: footer back, rail back', s7.open && s7.footers === 1 && s7.members === NBASH + 1, JSON.stringify(s7));
+check('re-expanded: footer back, rail back', gateOf(s7.open) && s7.footers === 1 && s7.members === NBASH + 1, JSON.stringify(s7));
 await scrollTo('list.scrollHeight', 150);
 await click('.chat-run-footer', 80);
 const s8 = await state();
@@ -520,26 +520,26 @@ const runsState = () => chatView(`
 await chatView(`list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event('scroll'));
   await new Promise((r) => setTimeout(r, 300)); return 1;`);
 const p0 = await runsState();
-check('fixture: TWO runs built and the view is PINNED at the tail (the auto-refold branch is now reachable)', p0.runs === 2 && p0.heads === 2 && p0.pinned && !p0.open[0] && !p0.open[1], JSON.stringify(p0));
+check('fixture: TWO runs built and the view is PINNED at the tail (the auto-refold branch is now reachable)', p0.runs === 2 && p0.heads === 2 && gateOf(p0.pinned) && !p0.open[0] && !p0.open[1], JSON.stringify(p0));
 
 // expand the FIRST (non-last) run — the case the auto-refold used to eat
 await click('.chat-run-header', 600);
 const p1 = await runsState();
-check('PINNED: expanding the FIRST run is still open 600ms later (past the 180ms observer debounce) with its footer', p1.open[0] && p1.footers === 1 && p1.members === NBASH + 1, JSON.stringify(p1));
+check('PINNED: expanding the FIRST run is still open 600ms later (past the 180ms observer debounce) with its footer', gateOf(p1.open[0]) && p1.footers === 1 && p1.members === NBASH + 1, JSON.stringify(p1));
 // …and through an explicit pass (what a live append/trim would trigger)
 const p2 = await chatView(`cv._updateRuns(); await new Promise((r) => setTimeout(r, 250));
   const heads = [...list.querySelectorAll(':scope > .chat-run-header')];
   return { pinned: !!cv._pinned, open: heads.map((h) => h.classList.contains('open')), footers: list.querySelectorAll(':scope > .chat-run-footer').length, runs: cv._runs.length };`);
-check('PINNED: a full runs pass does NOT re-collapse the run the user opened (the deliberate toggle beats the heuristic)', p2.pinned && p2.open[0] && p2.footers === 1 && p2.runs === 2, JSON.stringify(p2));
+check('PINNED: a full runs pass does NOT re-collapse the run the user opened (the deliberate toggle beats the heuristic)', gateOf(p2.pinned) && gateOf(p2.open[0]) && p2.footers === 1 && p2.runs === 2, JSON.stringify(p2));
 
 // the LAST run's behaviour is unchanged (it was always excluded by slice(0,-1))
 await chatView(`list.querySelectorAll(':scope > .chat-run-header')[1].click(); await new Promise((r) => setTimeout(r, 600)); return 1;`);
 const p3 = await runsState();
-check('PINNED: the LAST run still expands and stays open (unchanged), both runs open at once', p3.open[0] && p3.open[1] && p3.footers === 2 && p3.members === NBASH + 1 + NMCP, JSON.stringify(p3));
+check('PINNED: the LAST run still expands and stays open (unchanged), both runs open at once', gateOf(p3.open[0]) && gateOf(p3.open[1]) && p3.footers === 2 && p3.members === NBASH + 1 + NMCP, JSON.stringify(p3));
 const p4 = await chatView(`cv._updateRuns(); await new Promise((r) => setTimeout(r, 250));
   const heads = [...list.querySelectorAll(':scope > .chat-run-header')];
   return { open: heads.map((h) => h.classList.contains('open')), footers: list.querySelectorAll(':scope > .chat-run-footer').length };`);
-check('PINNED: both survive the next pass', p4.open[0] && p4.open[1] && p4.footers === 2, JSON.stringify(p4));
+check('PINNED: both survive the next pass', gateOf(p4.open[0]) && gateOf(p4.open[1]) && p4.footers === 2, JSON.stringify(p4));
 
 // NEGATIVE CONTROL — the 2.227.x invariant the auto-refold exists for: an
 // INHERITED open flag (a run that was the live tail when it was opened and
@@ -554,7 +554,7 @@ const p5 = await chatView(`
   await new Promise((r) => setTimeout(r, 250));
   const heads = [...list.querySelectorAll(':scope > .chat-run-header')];
   return { pinnedBefore, open: heads.map((h) => h.classList.contains('open')), footers: list.querySelectorAll(':scope > .chat-run-footer').length };`);
-check('negative control: without the user-intent mark the pinned auto-refold still folds every non-last run (2.227.x "一部分没折叠" holds)', p5.pinnedBefore && !p5.open[0] && p5.open[1] && p5.footers === 1, JSON.stringify(p5));
+check('negative control: without the user-intent mark the pinned auto-refold still folds every non-last run (2.227.x "一部分没折叠" holds)', gateOf(p5.pinnedBefore) && !p5.open[0] && gateOf(p5.open[1]) && p5.footers === 1, JSON.stringify(p5));
 
 // the history-load pill must not land ON the floating bar (both are absolutely
 // positioned .chat-view children; the pill used to carry an inline top:6px that
@@ -574,7 +574,7 @@ const p6 = await chatView(`
     pillTop: pill ? pill.offsetTop : -1, pillInline: pill ? (pill.style.top || '') : 'none' };
   cv._hideHistoryStatus();
   return r;`);
-check('the history-load pill sits BELOW the floating run bar (no inline top left to beat the stylesheet)', p6.barShown && p6.pillTop >= p6.barBottom && p6.pillInline === '', JSON.stringify(p6));
+check('the history-load pill sits BELOW the floating run bar (no inline top left to beat the stylesheet)', gateOf(p6.barShown) && p6.pillTop >= p6.barBottom && p6.pillInline === '', JSON.stringify(p6));
 
 // ── THE MIXED RUN (image-card review round 2, 2026-09-06): Bash → Read(png) → Bash ────────────────
 // The owner's ask was "展开直接看到图像内容". The first cut exempted only runs
@@ -620,10 +620,10 @@ const img0 = await evaljs(`(async () => {
     members: cv._runs?.[0]?.members?.length ?? -1,
   };
 })()`);
-check('mixed run: the header exists and still counts every member ("2 Bash · 1 image reads")', img0?.header && /2 Bash/.test(img0.label) && /1 image reads/.test(img0.label), JSON.stringify(img0));
-check('mixed run COLLAPSED: the two Bash cards are display:none…', !img0?.open && img0?.bashCollapsed === 2 && img0.bashDisplays.every((d) => d === 'none'), JSON.stringify({ open: img0?.open, bashCollapsed: img0?.bashCollapsed, d: img0?.bashDisplays }));
-check('…while the IMAGE card is NOT hidden (the owner\'s ask: 展开直接看到图像内容)', img0?.mediaFound && !img0.mediaCollapsed && img0.mediaDisplay !== 'none', JSON.stringify({ found: img0?.mediaFound, collapsed: img0?.mediaCollapsed, display: img0?.mediaDisplay }));
-check('…and its lazy thumbnail really FETCHED and decoded from /api/file/raw (naturalWidth > 0)', img0?.naturalWidth > 0 && /\/api\/file\/raw\?path=/.test(img0.imgSrc) && !img0.broken, JSON.stringify({ nw: img0?.naturalWidth, src: img0?.imgSrc, broken: img0?.broken }));
+check('mixed run: the header exists and still counts every member ("2 Bash · 1 image reads")', gateOf(img0?.header) && gateOf(/2 Bash/.test(img0.label)) && verdictOf(/1 image reads/.test(img0.label)), JSON.stringify(img0));
+check('mixed run COLLAPSED: the two Bash cards are display:none…', !img0?.open && img0?.bashCollapsed === 2 && verdictOf(img0.bashDisplays.every((d) => d === 'none')), JSON.stringify({ open: img0?.open, bashCollapsed: img0?.bashCollapsed, d: img0?.bashDisplays }));
+check('…while the IMAGE card is NOT hidden (the owner\'s ask: 展开直接看到图像内容)', gateOf(img0?.mediaFound) && !img0.mediaCollapsed && img0.mediaDisplay !== 'none', JSON.stringify({ found: img0?.mediaFound, collapsed: img0?.mediaCollapsed, display: img0?.mediaDisplay }));
+check('…and its lazy thumbnail really FETCHED and decoded from /api/file/raw (naturalWidth > 0)', img0?.naturalWidth > 0 && gateOf(/\/api\/file\/raw\?path=/.test(img0.imgSrc)) && !img0.broken, JSON.stringify({ nw: img0?.naturalWidth, src: img0?.imgSrc, broken: img0?.broken }));
 check('…bookkeeping: the image is a MEMBER of the run, only listed as inline (not a separate run)', img0?.members === 3 && img0?.inlineSize === 1, JSON.stringify({ members: img0?.members, inline: img0?.inlineSize }));
 const img1 = img0?.err ? { err: img0.err } : await evaljs(`(async () => {
   const cv = window.__imgCv, list = cv._messageList;
@@ -638,7 +638,7 @@ const img1 = img0?.err ? { err: img0.err } : await evaljs(`(async () => {
     footers: list.querySelectorAll(':scope > .chat-run-footer').length,
     displays: cards.map((el) => getComputedStyle(el).display) };
 })()`);
-check('mixed run EXPANDED: everything visible, the image carries the grouping rail like any member', img1?.open && img1.collapsed === 0 && img1.members === 3 && img1.mediaIsMember && img1.footers === 1 && img1.displays.every((d) => d !== 'none'), JSON.stringify(img1));
+check('mixed run EXPANDED: everything visible, the image carries the grouping rail like any member', gateOf(img1?.open) && img1.collapsed === 0 && img1.members === 3 && gateOf(img1.mediaIsMember) && img1.footers === 1 && verdictOf(img1.displays.every((d) => d !== 'none')), JSON.stringify(img1));
 
 // ── inc-mudv05ja-n5rv: THE FLICKER — a swap is geometry- and fold-neutral, the
 // live Workflow card is patched in place, the pin never re-follows a transient.
@@ -656,7 +656,7 @@ const liveShape = await chatView(`
   for (const r of cv._runs || []) cv._setRunOpen(r, false);
   for (let i = 0; i < 4 && !cv._pinned; i++) { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event('scroll')); await new Promise((r) => setTimeout(r, 300)); }
   return { cv: getComputedStyle(list.querySelector(':scope > .chat-msg')).contentVisibility, pinned: !!cv._pinned, runs: cv._runs.length };`);
-check('inc-mudv05ja fixture: the view is live-shaped (content-visibility:auto on its cards, pinned, runs built)', liveShape?.cv === 'auto' && liveShape.pinned && liveShape.runs === 2, JSON.stringify(liveShape));
+check('inc-mudv05ja fixture: the view is live-shaped (content-visibility:auto on its cards, pinned, runs built)', liveShape?.cv === 'auto' && gateOf(liveShape.pinned) && liveShape.runs === 2, JSON.stringify(liveShape));
 // the per-frame sampler (the repro's probe-osc idiom): a card's height every rAF,
 // scrollHeight/scrollTop A-B-A frames, scrollTop writes (setter interceptor)
 const SAMPLER = `
@@ -719,8 +719,8 @@ const foldLeg = (control) => chatView(`${SAMPLER}
   }`);
 const fl = await foldLeg(false);
 check('inc-mudv05ja F1: a FOLDED member\'s completion edit swaps the card and the replacement is display:none synchronously AND in every sampled frame (the run classes ride the swap)',
-  fl?.swapped && fl.syncDisplay === 'none' && fl.frameDisplays.every((d) => d === 'none') && fl.displayAfter === 'none', JSON.stringify(fl));
-check('…and the run record names the NEW element, never the detached one (no pass needed)', fl?.inRun && !fl.staleInRun, JSON.stringify({ inRun: fl?.inRun, stale: fl?.staleInRun }));
+  gateOf(fl?.swapped) && fl.syncDisplay === 'none' && gateOf(fl.frameDisplays.every((d) => d === 'none')) && fl.displayAfter === 'none', JSON.stringify(fl));
+check('…and the run record names the NEW element, never the detached one (no pass needed)', gateOf(fl?.inRun) && !fl.staleInRun, JSON.stringify({ inRun: fl?.inRun, stale: fl?.staleInRun }));
 const flc = await foldLeg(true);
 check(`CONTROL (swap without the run classes + the pre-fix every(tailAppend) observer): the replacement is UNFOLDED for ≥ 1 frame (${(flc?.frameDisplays || []).filter((d) => d !== 'none').length} frame(s) not display:none) — the leg sees the defect`,
   flc?.syncDisplay !== 'none' && (flc?.frameDisplays || []).filter((d) => d !== 'none').length >= 1, JSON.stringify(flc));
@@ -740,10 +740,10 @@ const popLeg = (control) => chatView(`${SAMPLER}
   } finally { if (${control}) delete cv._reserveFreshHeights; }`);
 const pl = await popLeg(false);
 check(`inc-mudv05ja F1: a visible card\'s completion swap never paints at the content-visibility placeholder — ZERO frames off its settled height (${pl?.settled}px), zero A-B-A frames`,
-  pl?.swapped && pl.pops === 0 && pl.aba === 0 && pl.hs.length >= 6, JSON.stringify(pl));
+  gateOf(pl?.swapped) && pl.pops === 0 && pl.aba === 0 && pl.hs.length >= 6, JSON.stringify(pl));
 const plc = await popLeg(true);
 check(`CONTROL (no fresh-height reservation): the same swap paints at the placeholder for ≥ 1 frame (${plc?.pops} pop frame(s), heights ${JSON.stringify(plc?.hs)}) — the leg sees the defect`,
-  plc?.swapped && plc.pops >= 1, JSON.stringify(plc));
+  gateOf(plc?.swapped) && plc.pops >= 1, JSON.stringify(plc));
 // F3 (+F1 on appends): a pinned compact window under steady live appends — the
 // pin never writes at the bottom and never re-follows an A-B-A height
 const PRE_FIX_FSB = `function () {
@@ -777,7 +777,7 @@ const appendLeg = (control, n0) => chatView(`${SAMPLER}
   } finally { if (${control}) { delete cv._forceScrollToBottom; delete cv._reserveFreshHeights; } }`);
 const al = await appendLeg(false, 0);
 check(`inc-mudv05ja F3: ~6 s of live appends at 1.4 msg/s into a pinned compact window — zero A-B-A frames and ZERO scrollTop writes while already at the bottom (${al?.appended} appends, ${al?.writes} writes)`,
-  al?.appended >= 7 && al.aba === 0 && al.atBottomWrites === 0 && al.pinned, JSON.stringify(al));
+  al?.appended >= 7 && al.aba === 0 && al.atBottomWrites === 0 && verdictOf(al.pinned), JSON.stringify(al));
 const alc = await appendLeg(true, 1000);
 check(`CONTROL (the pre-fix ten-frame chain + no fresh-height reservation): the same stream rewrites scrollTop while already at the bottom (${alc?.atBottomWrites} such writes) — the per-frame re-follow the fix removes`,
   alc?.atBottomWrites >= 10, JSON.stringify(alc));
@@ -818,14 +818,14 @@ const wfLeg = (control) => chatView(`${SAMPLER}
   return out;`);
 const wl = await wfLeg(false);
 check('inc-mudv05ja F2: five task_progress edits patch the Workflow card IN PLACE — the same element, every agent chip the same node (its pulsing dot never re-created), the View Workflow button kept',
-  wl?.sameEl && wl.chipsKept && wl.dotsKept && wl.btnKept, JSON.stringify(wl));
+  gateOf(wl?.sameEl) && gateOf(wl.chipsKept) && gateOf(wl.dotsKept) && verdictOf(wl.btnKept), JSON.stringify(wl));
 check('…the patch really applied the last tree (states + tally) and the card never left its settled height in any sampled frame; the dot is aria-hidden paint',
-  wl?.states === 'done,done,done,running' && /^3\/4/.test(wl.tally) && wl.off === 0 && wl.dotAria === 'true', JSON.stringify(wl));
+  wl?.states === 'done,done,done,running' && gateOf(/^3\/4/.test(wl.tally)) && wl.off === 0 && wl.dotAria === 'true', JSON.stringify(wl));
 check("…fed the CLI's REAL words (start / progress, never 'running'): the working chip draws `running`, its dot carries the chat-wf-pulse animation and the tally counts it (the pulse and the count never showed in production before)",
-  wl?.pulse === 'chat-wf-pulse' && /· 1 running$/.test(wl.tally), JSON.stringify({ pulse: wl?.pulse, tally: wl?.tally }));
+  wl?.pulse === 'chat-wf-pulse' && verdictOf(/· 1 running$/.test(wl.tally)), JSON.stringify({ pulse: wl?.pulse, tally: wl?.tally }));
 const wlc = await wfLeg(true);
 check('CONTROL (the pre-fix swap per heartbeat): the card element and its chips are re-created — the leg sees the swap',
-  wlc && !wlc.sameEl && !wlc.chipsKept, JSON.stringify(wlc));
+  gateOf(wlc) && !wlc.sameEl && !wlc.chipsKept, JSON.stringify(wlc));
 // F4: the View Workflow window renders only what changed (fetch stubbed with a synthetic run)
 const wd = await evaljs(`(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -855,9 +855,9 @@ const wd = await evaljs(`(async () => {
   } finally { window.fetch = realFetch; }
 })()`);
 check('inc-mudv05ja F4: two+ live polls with an unchanged run → ZERO childList mutations under the detail root; the status chip is the same node (its pulse never restarts); state dots are aria-hidden',
-  wd?.polls >= 2 && wd.mutsEqual === 0 && wd.chipKept && wd.live && wd.stateAria === 'true', JSON.stringify(wd));
+  wd?.polls >= 2 && wd.mutsEqual === 0 && gateOf(wd.chipKept) && gateOf(wd.live) && wd.stateAria === 'true', JSON.stringify(wd));
 check('CONTROL: a CHANGED run does mutate the window (the observer sees renders) while the chip and the keyed row\'s View Log button stay the same nodes',
-  wd?.mutsChanged > 0 && wd.chipKept && wd.btnKept, JSON.stringify(wd));
+  wd?.mutsChanged > 0 && gateOf(wd.chipKept) && verdictOf(wd.btnKept), JSON.stringify(wd));
 
 // F5 (2026-09-26, owner: "这个workflow怎么没有细节" — a window reading 运行中 with eleven "(agent)"
 // rows for a run stalled two days): the REAL server reads the run DIR (src/workflow-disk.js) —
@@ -903,10 +903,10 @@ const judgeWf = (r) => !!r && !r.err && r.chip === '已中断' && !r.pulse && r.
   && r.states.filter((x) => x === '未完成——运行在它返回之前就停了').length === 1 && !/在运行结束后显示/.test(r.note) && /超过 10 分钟没有任何变化/.test(r.note);
 const f5 = await readWfWindow('wf_e2e0foldstall', null);
 check('F5: the View Workflow window over a REAL stalled run dir (zh): chip 已中断 (no pulse), the five phases and eleven labels from the run\'s files, "最后活动 2 天前；1 个 agent 未完成" in the meta line and the chip\'s tooltip, the one resultless agent 未完成, an honest note',
-  judgeWf(f5), JSON.stringify(f5));
+  verdictOf(judgeWf(f5)), JSON.stringify(f5));
 const f5c = await readWfWindow('wf_e2e0foldold', OLD_SKELETON);
 check(`CONTROL: the PRE-FIX server answer (the old skeleton) in the same window fails the same judge — chip "${f5c?.chip}", labels ${JSON.stringify((f5c?.labels || []).slice(0, 2))}…, one phase "${(f5c?.phases || [])[0] || ''}"`,
-  !judgeWf(f5c) && f5c?.chip === '运行中' && (f5c?.labels || []).every((l) => l === '(agent)'), JSON.stringify(f5c));
+  !judgeWf(f5c) && f5c?.chip === '运行中' && verdictOf((f5c?.labels || []).every((l) => l === '(agent)')), JSON.stringify(f5c));
 // lane Q verify (2026-09-26): a STALLED view that still carries a merged stream tree (the stream
 // closed the task, or its tree is too old to prove anything) — the route answers `stalled` with
 // `liveTree:true` and the tree's tokens. The note must agree with the chip: the stalled sentence and
@@ -916,14 +916,14 @@ const realStalled = await (await fetch(`http://127.0.0.1:${PORT}/api/workflow?ru
 const STALLED_TREE = { ...realStalled, runId: 'wf_e2e0foldtree', liveTree: true, totalTokens: 4321 };
 const f5t = await readWfWindow('wf_e2e0foldtree', STALLED_TREE);
 check('F5 (lane Q verify): a stalled view WITH a merged tree — chip 已中断, the STALLED note and its rail, never the live-tree sentence; the tree\'s tokens still in the meta line',
-  realStalled.status === 'stalled' && f5t?.chip === '已中断' && f5t.noteStalled === true && /超过 10 分钟没有任何变化/.test(f5t.note) && !/来自运行自身的进度记录|progress records/.test(f5t.note) && /4\.3k/.test(f5t.meta), JSON.stringify({ chip: f5t?.chip, noteStalled: f5t?.noteStalled, note: f5t?.note, meta: f5t?.meta }));
+  realStalled.status === 'stalled' && f5t?.chip === '已中断' && f5t.noteStalled === true && gateOf(/超过 10 分钟没有任何变化/.test(f5t.note)) && !/来自运行自身的进度记录|progress records/.test(f5t.note) && verdictOf(/4\.3k/.test(f5t.meta)), JSON.stringify({ chip: f5t?.chip, noteStalled: f5t?.noteStalled, note: f5t?.note, meta: f5t?.meta }));
 // lane Q verify: a 500-char label is clipped to an ellipsis — its full text rides the row's title; a
 // label / phase that spells markup renders as TEXT (no element, no handler run)
 const LONG = 'L'.repeat(500), XSS = '<img src=x onerror="window.__vsXss=1">lane';
 const LONG_VIEW = { ...realStalled, runId: 'wf_e2e0foldlong', phases: realStalled.phases.map((p, pi) => ({ ...p, title: pi === 0 ? 'P<b>1</b>' : p.title, agents: p.agents.map((a, ai) => (pi === 0 && ai === 0 ? { ...a, label: LONG } : pi === 1 && ai === 0 ? { ...a, label: XSS } : a)) })) };
 const f5l = await readWfWindow('wf_e2e0foldlong', LONG_VIEW);
 check('F5 (lane Q verify): a 500-char label is clipped AND its title is the whole label; a markup label and phase render as text (no img, no handler), zero page errors so far',
-  f5l?.firstClipped === true && f5l.labelTitles[0] === LONG && f5l.labels.includes(XSS) && f5l.labelTitles.includes(XSS) && f5l.phases[0] === 'P<b>1</b>' && f5l.imgs === 0 && f5l.xss === false && pageErrors.length === 0, JSON.stringify({ firstClipped: f5l?.firstClipped, titles: (f5l?.labelTitles || []).slice(0, 2).map((x) => x.slice(0, 40)), phase0: f5l?.phases?.[0], imgs: f5l?.imgs, xss: f5l?.xss, pageErrors: pageErrors.length }));
+  f5l?.firstClipped === true && f5l.labelTitles[0] === LONG && gateOf(f5l.labels.includes(XSS)) && gateOf(f5l.labelTitles.includes(XSS)) && f5l.phases[0] === 'P<b>1</b>' && f5l.imgs === 0 && f5l.xss === false && pageErrors.length === 0, JSON.stringify({ firstClipped: f5l?.firstClipped, titles: (f5l?.labelTitles || []).slice(0, 2).map((x) => x.slice(0, 40)), phase0: f5l?.phases?.[0], imgs: f5l?.imgs, xss: f5l?.xss, pageErrors: pageErrors.length }));
 // the CARD: a Workflow card whose taskInfo still says running (the stream never saw the run end)
 for (const f of fs.readdirSync(wfRunDir('wf_e2e0foldlive'))) fs.utimesSync(path.join(wfRunDir('wf_e2e0foldlive'), f), new Date(), new Date());
 const f5card = await evaljs(`(async () => {
@@ -952,8 +952,8 @@ const f5card = await evaljs(`(async () => {
     chipRun: (() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); sb.element.querySelector('.chat-status-tasks')?.click(); const r = [...document.querySelectorAll('.chat-status-dropdown .chat-status-wf-row')].map((e) => e.dataset.wfRun); document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return r; })() };
 })()`);
 check('F5 card: the SAME verdict reaches the chat card — the stalled run\'s chip reads 已中断 (warn) with the last-activity sentence as its tooltip; the status bar keeps the stalled run TRACKED (re-asked every 15 s) but its «后台» door names only the live run',
-  f5card?.stalled?.text === '已中断' && /\bwarn\b/.test(f5card.stalled.cls) && /最后活动 2 天前；1 个 agent 未完成/.test(f5card.stalled.tip) && f5card.stalledTracked === true
-  && JSON.stringify(f5card.running) === '["wf_e2e0foldlive"]' && f5card.chipRun.includes('wf_e2e0foldlive') && !f5card.chipRun.includes('wf_e2e0foldstall'), JSON.stringify(f5card));
+  f5card?.stalled?.text === '已中断' && gateOf(/\bwarn\b/.test(f5card.stalled.cls)) && gateOf(/最后活动 2 天前；1 个 agent 未完成/.test(f5card.stalled.tip)) && f5card.stalledTracked === true
+  && JSON.stringify(f5card.running) === '["wf_e2e0foldlive"]' && gateOf(f5card.chipRun.includes('wf_e2e0foldlive')) && !f5card.chipRun.includes('wf_e2e0foldstall'), JSON.stringify(f5card));
 check('CONTROL (a run written just now): its card keeps ⟳ 运行中 and stays in the status bar\'s running chip — the verdict is the files\', not a blanket rule',
   f5card?.live?.text === '⟳ 运行中' && !/\bwarn\b/.test(f5card.live.cls) && f5card.wfChip === true, JSON.stringify(f5card));
 // lane Q verify (2026-09-26): THE CARD COMES BACK. A stalled run writes again (a quiet stretch ended, a
@@ -975,7 +975,7 @@ const f5back = await evaljs(`(async () => {
 check(`F5 (lane Q verify): the stalled run WRITES AGAIN ⇒ its card is back to ⟳ 运行中 in ${f5back?.backMs} ms (≤ 22 s — one 15 s re-check), the run tracked, no longer stalled, back in the running ⛭ chip`,
   f5back?.back?.text === '⟳ 运行中' && !/\bwarn\b/.test(f5back.back.cls) && f5back.backMs <= 22000 && f5back.tracked === true && f5back.stalledFlag === false && f5back.inRunning === true, JSON.stringify(f5back));
 check('CONTROL (the pre-fix drop, done by hand on the twin run): its files were written at the same instant, but untracked it still reads 已中断 after the same wait — the leg sees the defect',
-  f5back?.twin?.text === '已中断' && /\bwarn\b/.test(f5back.twin.cls) && f5back.twinTracked === false, JSON.stringify(f5back));
+  f5back?.twin?.text === '已中断' && gateOf(/\bwarn\b/.test(f5back.twin.cls)) && f5back.twinTracked === false, JSON.stringify(f5back));
 // ── lane run-fold-channel-compact (the owner, 2026-10-20 01:4xZ, two screenshots of one run 「▸ 5 条 Bash · 1 ✕」 closed
 // and 「▾」 open — identical: 「这个地方展开和收起是完全一样的，这是对的吗」). The run's channel-search cards carry
 // conversation rows, the §26 exemption kept them WHOLE inside the fold, and the fold hid one small card. The witness's
@@ -1049,33 +1049,33 @@ const chShot = async (call, ev, name) => {
 };
 await evaljs(CH_KIT);
 const ch0 = await evaljs(`window.__ch.open()`);
-check('channel run fixture: the witness bound conversation rows to the 4 searches + the 2 of the second run (through the view\'s own onTouch door), never to the plain grep', ch0?.ok && ch0.plainTouched === false, JSON.stringify(ch0));
+check('channel run fixture: the witness bound conversation rows to the 4 searches + the 2 of the second run (through the view\'s own onTouch door), never to the plain grep', gateOf(ch0?.ok) && ch0.plainTouched === false, JSON.stringify(ch0));
 const chC = await evaljs(`window.__ch.state()`);
 await chShot(cdp, evaljs, 'channel-run-closed.png');
 const cardsOf = (st, ks) => ks.map((k) => st?.cards?.[k]).filter(Boolean);
 check(`CLOSED (the default): ONE header over the owner's run, and it says what stays — 「${chC?.label}」 names 「4 条带会话入口」 beside 「5 条 Bash · 1 ✗」`,
-  chC?.header && !chC.open && chC.label === '5 条 Bash · 1 ✗ · 4 条带会话入口', JSON.stringify({ label: chC?.label, header: chC?.header, open: chC?.open }));
+  gateOf(chC?.header) && !chC.open && chC.label === '5 条 Bash · 1 ✗ · 4 条带会话入口', JSON.stringify({ label: chC?.label, header: chC?.header, open: chC?.open }));
 check('CLOSED: the 4 touched cards are COMPACT and on screen — the head drawn with the first words of the command, every row visible and inside its card (lane touch-chip-cause: or folded into "+N more" by the readable-minimum fit), the input/output bodies hidden',
-  cardsOf(chC, TOUCHED).length === 4 && cardsOf(chC, TOUCHED).every((c) => c.compact && !c.collapsed && c.display !== 'none' && c.headVis && /^vibespace-channels search "季度汇报 \d" --adapter lark/.test(c.cmd)
-    && c.rows > 0 && c.rowsVis >= 1 && (c.rowsVis === c.rows || c.more) && c.rowsClipped === 0 && c.bodies === 2 && c.bodiesVis === 0),
+  cardsOf(chC, TOUCHED).length === 4 && verdictOf(cardsOf(chC, TOUCHED).every((c) => c.compact && !c.collapsed && c.display !== 'none' && c.headVis && /^vibespace-channels search "季度汇报 \d" --adapter lark/.test(c.cmd)
+    && c.rows > 0 && c.rowsVis >= 1 && (c.rowsVis === c.rows || c.more) && c.rowsClipped === 0 && c.bodies === 2 && c.bodiesVis === 0)),
   JSON.stringify(cardsOf(chC, TOUCHED).map((c) => ({ k: c.k, compact: c.compact, collapsed: c.collapsed, head: c.headVis, rows: c.rows, vis: c.rowsVis, clip: c.rowsClipped, more: c.more, bodies: `${c.bodiesVis}/${c.bodies}`, cmd: c.cmd.slice(0, 24) }))));
 check('CLOSED: each compact card is ONE line (its rows ride the head\'s line; the card with four conversations keeps its "+1 more"), never wider than its card',
-  cardsOf(chC, TOUCHED).every((c) => c.oneLine && c.overflowX <= 1) && chC.cards[3].rows === 3 && chC.cards[3].more, JSON.stringify(cardsOf(chC, TOUCHED).map((c) => ({ k: c.k, oneLine: c.oneLine, ox: c.overflowX, rows: c.rows, more: c.more }))));
-check('CLOSED: the plain card (no conversation rows) is folded away (display:none)', chC?.cards?.[CH_PLAIN]?.collapsed && chC.cards[CH_PLAIN].display === 'none', JSON.stringify(chC?.cards?.[CH_PLAIN]));
+  gateOf(cardsOf(chC, TOUCHED).every((c) => c.oneLine && c.overflowX <= 1)) && chC.cards[3].rows === 3 && verdictOf(chC.cards[3].more), JSON.stringify(cardsOf(chC, TOUCHED).map((c) => ({ k: c.k, oneLine: c.oneLine, ox: c.overflowX, rows: c.rows, more: c.more }))));
+check('CLOSED: the plain card (no conversation rows) is folded away (display:none)', gateOf(chC?.cards?.[CH_PLAIN]?.collapsed) && chC.cards[CH_PLAIN].display === 'none', JSON.stringify(chC?.cards?.[CH_PLAIN]));
 check('a run of ONLY touched cards gets NO header — the dead-control law, pinned (its two cards whole: not compact, bodies drawn)',
-  chC?.heads === 1 && !chC.run2 && cardsOf(chC, [5, 6]).every((c) => !c.compact && !c.collapsed && c.display !== 'none' && c.bodiesVis === 2 && c.cmd === ''), JSON.stringify({ heads: chC?.heads, run2: chC?.run2, c: cardsOf(chC, [5, 6]) }));
+  chC?.heads === 1 && !chC.run2 && verdictOf(cardsOf(chC, [5, 6]).every((c) => !c.compact && !c.collapsed && c.display !== 'none' && c.bodiesVis === 2 && c.cmd === '')), JSON.stringify({ heads: chC?.heads, run2: chC?.run2, c: cardsOf(chC, [5, 6]) }));
 const chO = await evaljs(`(async () => { window.__chRows = [...window.__ch.list.querySelectorAll(':scope > .chat-msg .chat-channel-touch')]; return window.__ch.toggle(); })()`);
 check('OPEN: all five whole — no card compact or folded, every body drawn, the command words gone from the head',
-  chO?.open && cardsOf(chO, [0, 1, 2, 3, 4]).every((c) => !c.compact && !c.collapsed && c.display !== 'none' && c.bodiesVis === 2 && c.cmd === ''), JSON.stringify(cardsOf(chO, [0, 1, 2, 3, 4])));
+  gateOf(chO?.open) && verdictOf(cardsOf(chO, [0, 1, 2, 3, 4]).every((c) => !c.compact && !c.collapsed && c.display !== 'none' && c.bodiesVis === 2 && c.cmd === '')), JSON.stringify(cardsOf(chO, [0, 1, 2, 3, 4])));
 await chShot(cdp, evaljs, 'channel-run-open.png');
 const ratio = TOUCHED.map((k) => (chO?.cards?.[k]?.h ? chC.cards[k].h / chO.cards[k].h : 1));
 check(`the fold changes the height it governs: each touched card closed < 1/3 of its open height (${TOUCHED.map((k, i) => `${chC?.cards?.[k]?.h}/${chO?.cards?.[k]?.h}=${ratio[i].toFixed(2)}`).join(', ')})`,
-  ratio.every((r) => r < 1 / 3), JSON.stringify(ratio));
+  verdictOf(ratio.every((r) => r < 1 / 3)), JSON.stringify(ratio));
 console.log(`    the owner's run (5 Bash · 4 touched): ${chC?.runH} px closed vs ${chO?.runH} px open (header → last member / footer)`);
 const chC2 = await evaljs(`(async () => { const st = await window.__ch.toggle(); const now = [...window.__ch.list.querySelectorAll(':scope > .chat-msg .chat-channel-touch')];
   return { ...st, same: now.length === window.__chRows.length && now.every((e, i) => e === window.__chRows[i]) }; })()`);
 check('CLOSED AGAIN: compact again with the SAME row elements (CSS only — nothing re-rendered, the rows keep their listeners)',
-  !chC2?.open && chC2.same && cardsOf(chC2, TOUCHED).every((c) => c.compact && c.rowsVis === chC.cards[c.k].rowsVis) && TOUCHED.every((k) => Math.abs(chC2.cards[k].h - chC.cards[k].h) <= 1), JSON.stringify({ same: chC2?.same, open: chC2?.open }));
+  !chC2?.open && gateOf(chC2.same) && gateOf(cardsOf(chC2, TOUCHED).every((c) => c.compact && c.rowsVis === chC.cards[c.k].rowsVis)) && verdictOf(TOUCHED.every((k) => Math.abs(chC2.cards[k].h - chC.cards[k].h) <= 1)), JSON.stringify({ same: chC2?.same, open: chC2?.open }));
 // THE JUMP from a compact row: a REAL press at the row's centre (what is under the pointer is that row) reaches the
 // row's own door — a read row opens the conversation, a search row the search; the run stays closed
 const jumpAt = async (k) => {
@@ -1099,7 +1099,7 @@ const hit1 = await jumpAt(1), hit0 = await jumpAt(0);
 const jumped = await evaljs(`(() => { const app = window.__ch.cv.app || window.app; [app.openChannel, app.openChannelSearch] = window.__chDoors; delete window.__chDoors;
   return { jumps: window.__jumps, st: window.__ch.state() }; })()`);
 check('a REAL press on a compact row still jumps — the read row opens its conversation (lark · oc_B), the search row the search (lark · oc_A · 「季度汇报 0」); the run stays closed and the cards compact',
-  hit1.hit && hit0.hit && JSON.stringify(jumped?.jumps) === JSON.stringify([['channel', 'lark', 'oc_B'], ['search', 'lark', 'oc_A', '季度汇报 0']]) && !jumped.st.open && cardsOf(jumped.st, TOUCHED).every((c) => c.compact),
+  gateOf(hit1.hit) && gateOf(hit0.hit) && JSON.stringify(jumped?.jumps) === JSON.stringify([['channel', 'lark', 'oc_B'], ['search', 'lark', 'oc_A', '季度汇报 0']]) && !jumped.st.open && verdictOf(cardsOf(jumped.st, TOUCHED).every((c) => c.compact)),
   JSON.stringify({ hit1, hit0, jumps: jumped?.jumps, open: jumped?.st?.open }));
 
 // RED CONTROL: the pre-lane rule — the same chat-view.js WITHOUT the compact toggle (exempt cards stay whole inside a
@@ -1115,7 +1115,7 @@ check('a REAL press on a compact row still jumps — the read row opens its conv
   check('control: the lane\'s toggle is in chat-view.js exactly once (the patched copy drops it — the pre-lane rule)', CVSRC.split(LANE).length === 2);
   const MUT = mutantCopies('fold-ux-channel-compact', repo);
   const bundleText = await buildPatchedBundle(MUT, 'src/lib/chat-view.js', CVSRC.split(LANE).join(''), 'pre-lane');
-  for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: 'channel-compact ' })) check(row.name, row.pass, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: 'channel-compact ' })) check(row.name, verdictOf(row.pass), row.detail);
   const t2 = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const s2 = new WebSocket(t2.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => s2.on('open', r));
@@ -1144,9 +1144,9 @@ check('a REAL press on a compact row still jumps — the read row opens its conv
   const kO = await eval2(`window.__ch.toggle()`);
   const same = TOUCHED.map((k) => (kC?.cards?.[k] && kO?.cards?.[k] ? Math.round(kC.cards[k].h - kO.cards[k].h) : null));
   check(`RED CONTROL: the page served the PATCHED bundle (${served}×) — the same closed run keeps the 4 touched cards WHOLE: closed height == open height on every one (${TOUCHED.map((k) => `${kC?.cards?.[k]?.h}/${kO?.cards?.[k]?.h}`).join(', ')}), so the < 1/3 predicate reads RED there`,
-    served > 0 && k0?.ok && same.every((d) => d !== null && Math.abs(d) <= 1) && !TOUCHED.every((k) => kC.cards[k].h < kO.cards[k].h / 3), JSON.stringify({ served, k0, same }));
+    served > 0 && gateOf(k0?.ok) && gateOf(same.every((d) => d !== null && Math.abs(d) <= 1)) && !TOUCHED.every((k) => kC.cards[k].h < kO.cards[k].h / 3), JSON.stringify({ served, k0, same }));
   check('…and the probe is not vacuous there: the closed run has its header, the plain card is folded, every touched card shows its rows (the pre-lane form)',
-    kC?.header && !kC.open && kC.cards[CH_PLAIN].display === 'none' && cardsOf(kC, TOUCHED).every((c) => c.rowsVis === c.rows && c.rows > 0 && c.bodiesVis === 2 && !c.compact), JSON.stringify({ header: kC?.header, plain: kC?.cards?.[CH_PLAIN]?.display }));
+    gateOf(kC?.header) && !kC.open && kC.cards[CH_PLAIN].display === 'none' && verdictOf(cardsOf(kC, TOUCHED).every((c) => c.rowsVis === c.rows && c.rows > 0 && c.bodiesVis === 2 && !c.compact)), JSON.stringify({ header: kC?.header, plain: kC?.cards?.[CH_PLAIN]?.display }));
   console.log(`    pre-lane (patched bundle): the owner's run ${kC?.runH} px closed vs ${kO?.runH} px open`);
   try { s2.close(); } catch {}
   try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t2.id}`); } catch {}
@@ -1290,25 +1290,25 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
   const r = await tcSize(cdp, evaljs, '', size, metrics, true);
   const st = r.st;
   if (size === 1280) {
-    check('touch-chip-cause fixture: the owner\'s turn, the chained command and the parallel batch are drawn; the witness\'s touches bound', r.o?.ok, JSON.stringify(r.o));
+    check('touch-chip-cause fixture: the owner\'s turn, the chained command and the parallel batch are drawn; the witness\'s touches bound', verdictOf(r.o?.ok), JSON.stringify(r.o));
     check(`THE OWNER'S SHAPE: the 17 conversations touched while \`vibespace-status\` ran hang on the turn's VibeSpace NOTE row (「VibeSpace 把任务背景交给了助手」) — vibespace-status carries NONE; the read stays on its read call (1)`,
       st?.notes?.[0] === 17 && st.cards[0] === 0 && st.cards[1] === 1 && st.cards[2] === 0 && st.cards[3] === 0, JSON.stringify({ notes: st?.notes, cards: st?.cards }));
     check(`…the note row is a member of the closed run and COMPACT, and the run's head counts it among its linked rows: 「${st?.label}」`,
-      st?.noteIn && !st.open && st.holderCompact && /把任务背景交给了助手/.test(st.label) && /4 条 Bash/.test(st.label) && /2 条带会话入口/.test(st.label), JSON.stringify(st));
+      gateOf(st?.noteIn) && !st.open && gateOf(st.holderCompact) && gateOf(/把任务背景交给了助手/.test(st.label)) && gateOf(/4 条 Bash/.test(st.label)) && verdictOf(/2 条带会话入口/.test(st.label)), JSON.stringify(st));
     check(`H1 the CHAINED command keeps its 17 search rows, and its compact head opens at the channels segment: 「${st?.head4}」`, st?.cards?.[4] === 17 && st.head4 === '… vibespace-channels search "pairing review" --full', JSON.stringify({ c4: st?.cards?.[4], head4: st?.head4 }));
     check('H2 the PARALLEL batch: the read loop (it runs the CLI) owns its three unnamed reads — not vibespace-status, which started 40 ms later', st?.cards?.[6] === 3 && st.cards[7] === 0, JSON.stringify({ c6: st?.cards?.[6], c7: st?.cards?.[7] }));
   }
   const c = r.closed;
   check(`${size}: the closed strip of the 17 — every visible chip READABLE (the account + 12 characters of its title drawn: ${c?.facts?.map((f) => `${f.have}≥${f.need}`).join(', ')}), inside its box, on one line; the rest fold into 「${c?.more}」`,
-    c && c.compact && !c.expanded && c.total === 17 && c.n >= 1 && c.n <= 3 && c.readable === c.n && c.inside && c.oneLine && c.more === `另有 ${17 - c.n} 个` && c.moreInside, tcStrip(c));
+    gateOf(c) && gateOf(c.compact) && !c.expanded && c.total === 17 && c.n >= 1 && c.n <= 3 && c.readable === c.n && gateOf(c.inside) && gateOf(c.oneLine) && c.more === `另有 ${17 - c.n} 个` && verdictOf(c.moreInside), tcStrip(c));
   const h = r.h1;
   check(`${size}: the chained command's strip of 17 search rows keeps the same law (${h?.n} readable chip(s) + 「${h?.more}」)`,
-    h && h.total === 17 && h.n >= 1 && h.readable === h.n && h.inside && h.oneLine && h.more === `另有 ${17 - h.n} 个`, tcStrip(h));
+    gateOf(h) && h.total === 17 && h.n >= 1 && h.readable === h.n && gateOf(h.inside) && gateOf(h.oneLine) && h.more === `另有 ${17 - h.n} 个`, tcStrip(h));
   const e = r.open;
   check(`${size}: a REAL press on 「${r.p1?.text}」 expands into ROWS — all 17, one per line (stacked), each the box's full width with its time; 「${e?.more}」 folds them back`,
-    r.p1?.hit && e && e.expanded && e.n === 17 && e.stacked && e.fullWidth && e.times === 17 && e.more === '收起', JSON.stringify({ p1: r.p1, n: e?.n, stacked: e?.stacked, fullWidth: e?.fullWidth, times: e?.times, more: e?.more, boxW: e?.boxW }));
+    gateOf(r.p1?.hit) && gateOf(e) && gateOf(e.expanded) && e.n === 17 && gateOf(e.stacked) && gateOf(e.fullWidth) && e.times === 17 && e.more === '收起', JSON.stringify({ p1: r.p1, n: e?.n, stacked: e?.stacked, fullWidth: e?.fullWidth, times: e?.times, more: e?.more, boxW: e?.boxW }));
   const a = r.again;
-  check(`${size}: 「收起」 (a real press) gives the strip back — the same readable chips and fold`, r.p2?.hit && a && !a.expanded && a.n === c?.n && a.readable === a.n && a.more === c?.more, tcStrip(a));
+  check(`${size}: 「收起」 (a real press) gives the strip back — the same readable chips and fold`, gateOf(r.p2?.hit) && gateOf(a) && !a.expanded && a.n === c?.n && a.readable === a.n && a.more === c?.more, tcStrip(a));
 }
 // ── touch-chip-cause round 2 (the r1 verdict, confirmed 0.93 / 0.88): THE MINIMUM IN ONE UNIT — the readable minimum was
 // on-screen px written as a CSS min-width: at UI scale 80 % 129 px for a 156 px minimum, names cut below it; at 125 %
@@ -1323,7 +1323,7 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
   const sameUnit = (min, min100, zoom) => { const tol = Math.max(1, Math.round(0.02 * min100)); return { tol, ok: Math.abs(min - min100) <= tol && Math.abs(min100 * zoom - min100) > tol }; };
   const oldRule = (min, min100) => Math.abs(min - min100) <= 1;
   check('UI SCALE — the same-unit rule (int365 seam B), PURE: the runner\'s 2026-10-30 numbers (201 vs 199 at 60 %) were RED under ±1 and pass now; the unit mix stays RED (199 × 0.6 = 119 and 199 / 0.6 = 332 at 60 %, 199 × 0.8 = 159 at 80 %, 199 × 1.25 = 249 at 125 %)',
-    !oldRule(201, 199) && sameUnit(201, 199, 0.6).ok && sameUnit(200, 199, 0.8).ok && sameUnit(199, 199, 1.25).ok
+    !oldRule(201, 199) && gateOf(sameUnit(201, 199, 0.6).ok) && gateOf(sameUnit(200, 199, 0.8).ok) && gateOf(sameUnit(199, 199, 1.25).ok)
       && !sameUnit(119, 199, 0.6).ok && !sameUnit(332, 199, 0.6).ok && !sameUnit(159, 199, 0.8).ok && !sameUnit(249, 199, 1.25).ok,
     JSON.stringify({ runner: sameUnit(201, 199, 0.6), r1at60: sameUnit(119, 199, 0.6), r1at80: sameUnit(159, 199, 0.8) }));
   const z100 = (await (async () => { await tcLoad(cdp, evaljs, D1280); await evaljs('window.__tc.open({ maximize: true })'); return evaljs('window.__tc.strip(window.__tc.holder())'); })());
@@ -1335,7 +1335,7 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
     if (pct === 80) await tcShot(cdp, evaljs, `touch-chip-cause-1280-ui${pct}.png`);
     const su = sameUnit(z?.mins?.[0] || 0, z100?.mins?.[0] || -9, z?.zoom || 1);
     check(`UI SCALE ${pct} % (body zoom ${z?.zoom}): every visible chip of the 17 READABLE (${z?.facts?.map((f) => `${f.have}≥${f.need}`).join(', ')}), its minimum the SAME CSS px as at 100 % — one unit (${z?.mins?.[0]} vs ${z100?.mins?.[0]}, ±${su.tol}), inside, one line, the fold whole; no chip folded that would fit`,
-      o?.ok && z && z.compact && z.n >= 1 && z.readable === z.n && z.inside && z.oneLine && z.moreWhole && !z.underFilled && z.more === `另有 ${17 - z.n} 个` && su.ok, tcStrip(z) + ' ' + JSON.stringify({ zoom: z?.zoom, mins: z?.mins, min100: z100?.mins?.[0], tol: su.tol, under: z?.underFilled, boxCss: z?.boxCss }));
+      gateOf(o?.ok) && gateOf(z) && gateOf(z.compact) && z.n >= 1 && z.readable === z.n && gateOf(z.inside) && gateOf(z.oneLine) && gateOf(z.moreWhole) && !z.underFilled && z.more === `另有 ${17 - z.n} 个` && verdictOf(su.ok), tcStrip(z) + ' ' + JSON.stringify({ zoom: z?.zoom, mins: z?.mins, min100: z100?.mins?.[0], tol: su.tol, under: z?.underFilled, boxCss: z?.boxCss }));
   }
   await evaljs(`localStorage.removeItem('vibespace.uiScale'); true`);
   // THE FOLD CONTROL IS NEVER CLIPPED (unverified r1 finding, reproduced with this suite: an email-shaped account label at
@@ -1345,10 +1345,10 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
   const lg = await evaljs('window.__tc.strip(window.__tc.holder())');
   await tcShot(cdp, evaljs, 'touch-chip-cause-390-long-label.png');
   check(`390 LONG ACCOUNT LABEL: the fold control 「${lg?.more}」 is WHOLE inside the box (${lg?.boxW} px); chip 0 inside it, its name cut to no less than its first 6 characters + «…» (${lg?.facts?.map((f) => f.have).join(', ')} px drawn)`,
-    ol?.ok && lg && lg.n >= 1 && lg.inside && lg.oneLine && lg.moreWhole && lg.more === `另有 ${17 - lg.n} 个` && lg.facts.every((f) => f.tight), tcStrip(lg) + ' ' + JSON.stringify({ moreWhole: lg?.moreWhole, tight: lg?.facts?.map((f) => f.tight) }));
+    gateOf(ol?.ok) && gateOf(lg) && lg.n >= 1 && gateOf(lg.inside) && gateOf(lg.oneLine) && gateOf(lg.moreWhole) && lg.more === `另有 ${17 - lg.n} 个` && verdictOf(lg.facts.every((f) => f.tight)), tcStrip(lg) + ' ' + JSON.stringify({ moreWhole: lg?.moreWhole, tight: lg?.facts?.map((f) => f.tight) }));
   const lp = await tcPress(cdp, evaljs, 'window.__tc.holder()');
   const le = await evaljs('window.__tc.strip(window.__tc.holder())');
-  check(`390 LONG ACCOUNT LABEL: a REAL press on the whole control expands into 17 stacked rows`, lp?.hit && le && le.expanded && le.n === 17 && le.stacked, JSON.stringify({ lp, n: le?.n, stacked: le?.stacked }));
+  check(`390 LONG ACCOUNT LABEL: a REAL press on the whole control expands into 17 stacked rows`, gateOf(lp?.hit) && gateOf(le) && gateOf(le.expanded) && le.n === 17 && verdictOf(le.stacked), JSON.stringify({ lp, n: le?.n, stacked: le?.stacked }));
 }
 
 // RED CONTROL: the pre-lane view — a patched channel-touch-view.js whose calls carry no kind and whose binder sees no note
@@ -1361,10 +1361,10 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
     ["const { byCall, byNote } = T.bindToCall(st.touches, calls, { tail, notes, turns: turnsOf(list) });", "const { byCall, byNote } = T.bindToCall(st.touches, calls, { tail });"],
     ["const strip = !!card && card.classList.contains('chat-channel-compact') && box.dataset.expanded !== '1';", "const strip = false;"],
   ];
-  check('control: each pre-lane cut finds its line exactly once in channel-touch-view.js', CUTS.every(([from]) => TVSRC.split(from).length === 2));
+  check('control: each pre-lane cut finds its line exactly once in channel-touch-view.js', verdictOf(CUTS.every(([from]) => TVSRC.split(from).length === 2)));
   const MUT = mutantCopies('fold-ux-touch-cause', repo);
   const bundleText = await buildPatchedBundle(MUT, 'src/lib/channel-touch-view.js', CUTS.reduce((s, [from, to]) => s.split(from).join(to), TVSRC), 'pre-cause');
-  for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: 'touch-cause ' })) check(row.name, row.pass, row.detail);
+  for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: 'touch-cause ' })) check(row.name, verdictOf(row.pass), row.detail);
   const t3 = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const s3 = new WebSocket(t3.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => s3.on('open', r));
@@ -1385,9 +1385,9 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
   await cdp3('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp3('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   const k = await tcSize(cdp3, eval3, '-pre-lane-control', 390, P390, true);
   check(`RED CONTROL: the page served the PATCHED view (${served3}×) — the owner's 17 land on \`vibespace-status\` (${k.st?.cards?.[0]}) and its note row carries none (${k.st?.notes?.[0]}); H2's reads land on vibespace-status (${k.st?.cards?.[7]}) — the binding legs above read RED there`,
-    served3 > 0 && k.o?.ok && k.st?.cards?.[0] === 17 && k.st.notes[0] === 0 && k.st.cards[7] === 3 && k.st.cards[6] === 0, JSON.stringify({ served3, o: k.o, cards: k.st?.cards, notes: k.st?.notes }));
+    served3 > 0 && gateOf(k.o?.ok) && k.st?.cards?.[0] === 17 && k.st.notes[0] === 0 && k.st.cards[7] === 3 && k.st.cards[6] === 0, JSON.stringify({ served3, o: k.o, cards: k.st?.cards, notes: k.st?.notes }));
   check(`RED CONTROL: …and its strip is never fitted — ${k.closed?.n} chips, ${k.closed ? k.closed.n - k.closed.readable : '?'} below the readable minimum (${k.closed?.facts?.map((f) => `${f.have}<${f.need}`).join(', ')}) — the strip leg reads RED there`,
-    k.closed && k.closed.n === 3 && k.closed.readable < k.closed.n, tcStrip(k.closed));
+    gateOf(k.closed) && k.closed.n === 3 && k.closed.readable < k.closed.n, tcStrip(k.closed));
   try { s3.close(); } catch {}
   try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t3.id}`); } catch {}
   try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/activate/${target.id}`); } catch {}
@@ -1400,4 +1400,4 @@ check('zero uncaught page exceptions during the whole flow', pageErrors.length =
 
 ws.close();
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

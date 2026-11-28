@@ -27,7 +27,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -155,9 +155,9 @@ for (const explicit of [true, false]) {
   const rec = w.am.get(w.P); rec.backend = 'gone-plugin';
   w.am._state.accounts.find((x) => x.id === w.ids[0]).backend = 'gone-plugin';
   const a = settle(() => w.am.isPoolMember(w.P, w.ids[1])), b = settle(() => (w.am.poolMembers(w.P) || []).some((m) => m.id === w.ids[1]));
-  ok('§1 a pool on an unregistered harness: isPoolMember throws exactly where poolMembers throws (a miss too)', !!a.threw && isDeepStrictEqual(a, b), JSON.stringify([a, b]));
+  ok('§1 a pool on an unregistered harness: isPoolMember throws exactly where poolMembers throws (a miss too)', !!a.threw && verdictOf(isDeepStrictEqual(a, b)), JSON.stringify([a, b]));
   const c = settle(() => w.am.isPoolMember(w.P, w.ids[0])), d = settle(() => (w.am.poolMembers(w.P) || []).some((m) => m.id === w.ids[0]));
-  ok('§1 …and on a hit', !!c.threw && isDeepStrictEqual(c, d), JSON.stringify([c, d]));
+  ok('§1 …and on a hit', !!c.threw && verdictOf(isDeepStrictEqual(c, d)), JSON.stringify([c, d]));
 }
 
 {
@@ -173,7 +173,7 @@ for (const explicit of [true, false]) {
   }
   ok(`§1 poolsWithMember ≡ list()'s pooled rows whose poolMembers hold the id (id, name, backend, auto, hot) — ${n} probes, 3 pools (explicit, hot/non-hot, members:null)`, !bad.length, bad.slice(0, 2).join(' | '));
   const acc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
-  ok("§1 PIN: list()'s pooled row still says auto: true and hot: !!a.hot — the two literals poolsWithMember mirrors (change one ⇒ change both)", /return \{ \.\.\.base, pooled: true,[^\n]*auto: true,[^\n]*hot: !!a\.hot,/.test(acc));
+  ok("§1 PIN: list()'s pooled row still says auto: true and hot: !!a.hot — the two literals poolsWithMember mirrors (change one ⇒ change both)", verdictOf(/return \{ \.\.\.base, pooled: true,[^\n]*auto: true,[^\n]*hot: !!a\.hot,/.test(acc)));
 }
 
 // ── §2 the engine's answers, fixed vs reverted, on ONE world (both engines read the same files and sessions) ──
@@ -224,7 +224,7 @@ for (const hot of [true, false]) {
   };
   const a = moves(PRE_ENGINE), b = moves(engMod);
   ok('§2 maybePoolAutoSwitchForPool (a member walled at 99 %, another signed out): the same target, the same 29 links, the same notices as the reverted engine', a === b, `${a.slice(0, 200)} ≠ ${b.slice(0, 200)}`);
-  ok('§2 …and it MOVED something (the comparison is not of two idle pools)', !/"target":"M0"/.test(b) || /"links":\[(?!("M0",?)+\])/.test(b), b.slice(0, 160));
+  ok('§2 …and it MOVED something (the comparison is not of two idle pools)', !/"target":"M0"/.test(b) || verdictOf(/"links":\[(?!("M0",?)+\])/.test(b)), b.slice(0, 160));
 }
 
 // ── §3 one tick, fixed vs reverted: the same projections asked, the same refreshes spent ──
@@ -258,7 +258,7 @@ async function runTick(w, eng, loopMod, { midTick = null } = {}) {
     for (const [id, txt] of Object.entries(before)) { if (txt == null) continue; fs.writeFileSync(w.credsOf(id), txt); } // the same files for the second run
     const B = await runTick(w, w.eng, { createAutoCliLoop }, { midTick: mid && (() => mid(w)) });
     const projected = B.asked.filter(([, r]) => r).length; // a member signed out when the tick began is not asked (12)
-    ok(`§3 ${label}: ${B.asked.length} projections asked, ${projected} crossing, ${B.spent.length} refreshes — equal to the reverted tick`, isDeepStrictEqual(A, B) && B.asked.length === (/signs back in/.test(label) ? 12 : 13) && projected >= 5, JSON.stringify([A.asked.length, B.asked.length, projected, A.spent, B.spent]));
+    ok(`§3 ${label}: ${B.asked.length} projections asked, ${projected} crossing, ${B.spent.length} refreshes — equal to the reverted tick`, gateOf(isDeepStrictEqual(A, B)) && B.asked.length === (/signs back in/.test(label) ? 12 : 13) && projected >= 5, JSON.stringify([A.asked.length, B.asked.length, projected, A.spent, B.spent]));
   }
 }
 
@@ -364,7 +364,7 @@ console.log('§5 resolveAccount reads the record, not list()');
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   // the resolver's FIRST line may carry its «held» answer (r3060 Q1: the one existing line changed, none added) — kept in the body
   const m0 = srv.match(/  resolveAccount: \(id\) => \{([^\n]*)\n([\s\S]*?)\n  \},\n\}\);/), m = m0 && [m0[0], (m0[1].trim() ? m0[1] + '\n' : '') + m0[2]];
-  ok('§5 WIRING: server.js hands UsageHistory a resolveAccount that never calls accounts.list()', !!m && !/accounts\.list\(/.test(m[1]) && /accounts\.get\(id\)/.test(m[1]), m && m[1]);
+  ok('§5 WIRING: server.js hands UsageHistory a resolveAccount that never calls accounts.list()', !!m && !/accounts\.list\(/.test(m[1]) && verdictOf(/accounts\.get\(id\)/.test(m[1])), m && m[1]);
   const resolveNew = m && new Function('accounts', 'require', `return (id) => {\n${m[1]}\n};`); // dc-ws-create: the ledger type is the descriptor's creds.ledgerType (require'd like server.js does)
   const w = mkWorld({ members: 3, pooled: 0 });
   w.am._state.accounts.push({ id: 'acct-k', name: 'key', type: 'api', tail: 'abcd1234', createdAt: 1 }, { id: 'acct-legacy', name: 'legacy', tail: 'zz' }, { id: 'cxs-1', name: 'codex', type: 'subscription', backend: 'codex', createdAt: 1 }, { id: 'oat-1', name: 'oat', type: 'oat', tail: 'q', createdAt: 1 });
@@ -418,10 +418,10 @@ console.log('§6 r3136: no probe for an account whose usage file cannot be read;
   await refreshFolder();
   const never = await tickOnce('never');
   ok('§6 r3136: a stale reading is probed; the SAME account whose usage file\'s read fails is NOT probed (its answer could not be written); a file not there («never read») is probed as before',
-    stale.includes(X) && !!refused && !refused.includes(X) && never.includes(X), JSON.stringify({ stale: stale.length, staleX: stale.includes(X), refusedX: refused && refused.includes(X), neverX: never.includes(X) }));
+    gateOf(stale.includes(X)) && !!refused && !refused.includes(X) && verdictOf(never.includes(X)), JSON.stringify({ stale: stale.length, staleX: stale.includes(X), refusedX: refused && refused.includes(X), neverX: never.includes(X) }));
   ok('§6 r3285: TORN BYTES are probed as a first read (the probe\'s write keeps them aside and starts the file again) — never left unread for good',
-    torn.includes(X), JSON.stringify({ tornX: torn.includes(X) }));
+    verdictOf(torn.includes(X)), JSON.stringify({ tornX: torn.includes(X) }));
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -34,7 +34,7 @@ waitEverySave(AccountManager);
 const FAKE = path.join(REPO, 'scripts/fixtures/oat-mint/fake-claude');
 const ORCH = path.join(REPO, 'src/server/oat-mint.js');
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 300) : '')); } };
+const ok = (c, msg, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 300) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(25); } return fn(); };
 const feedAll = (text, size) => { let s = null; const steps = []; for (let i = 0; i < text.length; i += size) { const r = M.mintStep(s, text.slice(i, i + size)); s = r.state; steps.push(...r.steps); } return { s, steps }; };
@@ -56,7 +56,7 @@ console.log('§1 the PURE screen reader');
       urls.push(steps[0] && steps[0].url);
     }
   }
-  ok(urls.every((u) => /^https:\/\/claude\.com\/cai\/oauth\/authorize\?code=true&client_id=[\w-]+&response_type=code&redirect_uri=https%3A%2F%2Fplatform\.claude\.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=[\w-]+&code_challenge_method=S256&state=[\w-]+$/.test(u)),
+  ok(verdictOf(urls.every((u) => /^https:\/\/claude\.com\/cai\/oauth\/authorize\?code=true&client_id=[\w-]+&response_type=code&redirect_uri=https%3A%2F%2Fplatform\.claude\.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=[\w-]+&code_challenge_method=S256&state=[\w-]+$/.test(u))),
     'the 80-column capture (URL wrapped over 5 lines) and the 400-column one read the same whole URL shape', urls[0]);
   ok(urls[0] === urls[2] && urls[3] === urls[5], 'chunking never changes the URL');
   const succ = '\x1b[32m✓\x1b[1CLong-lived authentication token created successfully!\r\r\n\r\r\nYour\x1b[1COAuth\x1b[1Ctoken\x1b[1C(valid\x1b[1Cfor\x1b[1C1\x1b[1Cyear):\r\r\n\r\r\n'
@@ -68,12 +68,12 @@ console.log('§1 the PURE screen reader');
   }
   const partial = succ.slice(0, succ.indexOf('Store'));
   ok(!M.mintStep(null, partial).steps.some((x) => x.kind === 'token'), 'no token step before the closing line arrives (a half-printed token is never saved)');
-  ok(M.mintStep(null, partial, { final: true }).steps.some((x) => x.kind === 'token' && x.token === TOKEN), '… but the process end (final) reads what is there');
-  ok(M.mintStep(null, 'blah\n' + TOKEN + '\n').steps.some((x) => x.token === TOKEN), "another CLI's wording: a line holding the token on its own");
+  ok(verdictOf(M.mintStep(null, partial, { final: true }).steps.some((x) => x.kind === 'token' && x.token === TOKEN)), '… but the process end (final) reads what is there');
+  ok(verdictOf(M.mintStep(null, 'blah\n' + TOKEN + '\n').steps.some((x) => x.token === TOKEN)), "another CLI's wording: a line holding the token on its own");
   const r1 = M.mintStep(null, succ);
   ok(r1.state.raw === '' && !JSON.stringify(r1.state).includes('sk-ant'), 'after the token step the parser keeps no copy of the screen');
   const err = M.mintStep(null, 'x\r\r\nOAuth\x1b[1Cerror:\x1b[1CInvalid code ' + TOKEN + ' (rejected)\r\r\n').steps;
-  ok(err.length === 1 && err[0].kind === 'error' && err[0].line.startsWith('OAuth error: Invalid code') && !err[0].line.includes(TOKEN.slice(14)), 'an OAuth error line → error, any Anthropic key in it masked', err);
+  ok(err.length === 1 && err[0].kind === 'error' && gateOf(err[0].line.startsWith('OAuth error: Invalid code')) && !err[0].line.includes(TOKEN.slice(14)), 'an OAuth error line → error, any Anthropic key in it masked', err);
   let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   let g = ''; for (let i = 0; i < 20000; i++) g += String.fromCharCode(Math.floor(rnd() * 0x2ff));
   ok(feedAll(g.replace(/https|sk-ant|paste|oauth|error/gi, ''), 333).steps.length === 0, 'garbage (20k random chars) → no step');
@@ -87,9 +87,9 @@ console.log('§1 the PURE screen reader');
     const V = M.mintShowVerdict, a = { id: 'om-a', phase: 'saved', rev: 4, startedAt: 10 };
     const rows = [[V(null, a), 'show'], [V(a, null), 'show'], [V(a, { ...a, phase: 'minting', rev: 3 }), 'stale'], [V(a, { ...a }), 'show'], [V({ ...a, phase: 'minting', rev: 3 }, a), 'show'],
       [V({ id: 'om-b', phase: 'waiting-code', rev: 2, startedAt: 20 }, a), 'older-run'], [V({ id: 'om-b', phase: 'saved', rev: 9, startedAt: 20 }, a), 'show'], [V(a, { id: 'om-c', phase: 'starting', rev: 1, startedAt: 30 }), 'show']];
-    ok(rows.every(([got, want]) => got === want), 'mintShowVerdict: the same run\'s older revision ⇒ stale (never repaints), equal / newer ⇒ show, another run\'s echo before the live one ⇒ older-run', rows);
+    ok(verdictOf(rows.every(([got, want]) => got === want)), 'mintShowVerdict: the same run\'s older revision ⇒ stale (never repaints), equal / newer ⇒ show, another run\'s echo before the live one ⇒ older-run', rows);
   }
-  ok(M.codeVerdict(' a#b ').ok && M.codeVerdict(' a#b ').code === 'a#b' && !M.codeVerdict('').ok && !M.codeVerdict('a\nb').ok && !M.codeVerdict('x'.repeat(2001)).ok, 'codeVerdict: one printable line ≤ 2000');
+  ok(gateOf(M.codeVerdict(' a#b ').ok) && M.codeVerdict(' a#b ').code === 'a#b' && !M.codeVerdict('').ok && !M.codeVerdict('a\nb').ok && !M.codeVerdict('x'.repeat(2001)).ok, 'codeVerdict: one printable line ≤ 2000');
   ok(!/require\(|^import /m.test(fs.readFileSync(path.join(REPO, 'src/oat-mint-model.js'), 'utf8')), 'the model imports nothing (PURE)');
   // lane signin-card-real-screen: THE ONE READER serves both roads — the REAL `claude auth login --claudeai` screen
   // (2.1.308, byte-exact: the prompt on the VERY NEXT line, no blank line) reads here exactly as on the sign-in card
@@ -101,11 +101,11 @@ console.log('§1 the PURE screen reader');
   }
   const atPrompt = auth.slice(0, auth.indexOf('Session terminated'));
   const unk = (t, size) => { let s = null, any = false; for (let i = 0; i < t.length; i += size) { const r = M.mintStep(s, t.slice(i, i + size)); s = r.state; any = any || r.unknown; } return any; };
-  ok(['cli-2.1.296-url-80col.raw', 'cli-2.1.296-url-400col.raw'].every((f) => [1, 3, 7, 64, 4096].every((n) => !unk(fx(f), n))) && [1, 7, 4096].every((n) => !unk(atPrompt, n)),
+  ok(gateOf(['cli-2.1.296-url-80col.raw', 'cli-2.1.296-url-400col.raw'].every((f) => [1, 3, 7, 64, 4096].every((n) => !unk(fx(f), n)))) && verdictOf([1, 7, 4096].every((n) => !unk(atPrompt, n))),
     'the raw-screen flip never fires on a REAL screen (2.1.296 setup-token at 80 / 400 columns, 2.1.308 auth-login), in any chunking — every line is a known row');
   ok(M.mintStep(null, 'Opening browser to sign in…\r\nSomething new arriv').unknown === false && M.mintStep(null, 'Opening browser to sign in…\r\nA screen never seen\r\n').unknown === true && M.mintStep(null, 'A screen never seen\r\n' + fx('cli-2.1.296-url-400col.raw')).unknown === false,
     'screenUnknown: a complete line it cannot place, standing LAST, flips; a line still arriving is no verdict; a recognised screen after it flips back');
-  ok([1, 13, 61, 9999].every((n) => !unk(fx('cli-2.1.296-url-400col.raw') + 'Paste code here if prompted > code#s\r\r\n' + succ, n)),
+  ok(verdictOf([1, 13, 61, 9999].every((n) => !unk(fx('cli-2.1.296-url-400col.raw') + 'Paste code here if prompted > code#s\r\r\n' + succ, n))),
     'the token\'s success screen never flips to the raw screen — its wrapped pieces read as unknown lines until «Store this token» lands (test-oat-mint-ui: the dialog flashed its raw view mid-mint)');
   const echo = 'Paste code here if prompted >\r\r\nlatecode#S0\r\r\n';
   ok(M.mintStep(null, echo).unknown === true && M.mintStep(null, echo, { typed: 'latecode#S0' }).unknown === false,
@@ -114,13 +114,13 @@ console.log('§1 the PURE screen reader');
   let scr = M.initialRawScreen();
   scr = M.rawAppend(scr, 'abc'); scr = M.rawAppend(scr, 'def');
   const all = M.rawSince(scr, 0), tail = M.rawSince(scr, 4), bad = M.rawSince(scr, 99);
-  ok(all.data === 'abcdef' && all.to === 6 && !all.reset && tail.data === 'ef' && tail.from === 4 && bad.reset && bad.data === 'abcdef', 'rawSince: what a reader at `from` lacks; a stale offset resets to the whole ring', { all, tail, bad });
+  ok(all.data === 'abcdef' && all.to === 6 && !all.reset && tail.data === 'ef' && tail.from === 4 && gateOf(bad.reset) && bad.data === 'abcdef', 'rawSince: what a reader at `from` lacks; a stale offset resets to the whole ring', { all, tail, bad });
   let big = M.initialRawScreen(); for (let i = 0; i < 70; i++) big = M.rawAppend(big, 'x'.repeat(1024));
-  ok(big.data.length === M.RAW_MAX && big.start === 70 * 1024 - M.RAW_MAX && M.rawSince(big, 0).reset, 'the ring keeps the last 64 KB (an older offset reads from its start)');
+  ok(big.data.length === M.RAW_MAX && big.start === 70 * 1024 - M.RAW_MAX && verdictOf(M.rawSince(big, 0).reset), 'the ring keeps the last 64 KB (an older offset reads from its start)');
   const STOP = /token created successfully|your\s+oauth\s+token|sk-ant-/i;
   let fr = M.rawAppend(M.initialRawScreen(), 'Paste code here > ', { stopRe: STOP });
   fr = M.rawAppend(fr, succ.slice(0, 30), { stopRe: STOP }); fr = M.rawAppend(fr, succ.slice(30), { stopRe: STOP }); fr = M.rawAppend(fr, 'more', { stopRe: STOP });
-  ok(fr.frozen && !fr.data.includes(TOKEN.slice(13, 40)) && !/sk-ant/.test(fr.data) && fr.data.startsWith('Paste code here'), 'a stop line FREEZES the raw screen before its chunk lands — the token\'s success screen never enters it, whatever the chunking', fr.data);
+  ok(gateOf(fr.frozen) && !fr.data.includes(TOKEN.slice(13, 40)) && !/sk-ant/.test(fr.data) && verdictOf(fr.data.startsWith('Paste code here')), 'a stop line FREEZES the raw screen before its chunk lands — the token\'s success screen never enters it, whatever the chunking', fr.data);
 }
 
 // ── the spy: every outbound path of one ORCH instance ────────────────────
@@ -243,25 +243,25 @@ console.log('§2 the ORCH over the fake claude, through the REAL AccountManager'
   ok(m.phase === 'saved' && m.mintedAt > 0, 'start → url → waiting-code → code → saved', m);
   ok(am.getOat(sub) === TOKEN, 'the token landed in the REAL store (accounts.setOat — the POST /oat save path, its checks run)');
   const phases = r.out.casts.map((c) => JSON.parse(c).mint.phase);
-  ok(['starting', 'waiting-code', 'minting', 'saved'].every((p) => phases.includes(p)) && r.out.casts.every((c) => JSON.parse(c).type === 'oat-mint'), 'every phase is broadcast as a WS `oat-mint` message', phases);
+  ok(gateOf(['starting', 'waiting-code', 'minting', 'saved'].every((p) => phases.includes(p))) && verdictOf(r.out.casts.every((c) => JSON.parse(c).type === 'oat-mint')), 'every phase is broadcast as a WS `oat-mint` message', phases);
   const cast = JSON.parse(r.out.casts.find((c) => JSON.parse(c).mint.phase === 'waiting-code')).mint;
   const revs = r.out.casts.map((c) => JSON.parse(c).mint.rev);
-  ok(revs.length >= 4 && revs.every((v, i) => v === i + 1) && r.mint.get(r.id).rev === revs[revs.length - 1], 'every publication is a new revision (1, 2, …) and the GET answer carries the last — a page drops an older snapshot (lane heavy3-flake-races)', revs);
-  ok(/^https:\/\/claude\.example\/cai\/oauth\/authorize\?/.test(cast.url) && /redirect_uri=http%3A%2F%2Flocalhost/.test(cast.localUrl || ''), 'the screen URL (code page) AND the $BROWSER URL (localhost callback, the zero-copy door) are both carried', cast);
+  ok(revs.length >= 4 && gateOf(revs.every((v, i) => v === i + 1)) && r.mint.get(r.id).rev === revs[revs.length - 1], 'every publication is a new revision (1, 2, …) and the GET answer carries the last — a page drops an older snapshot (lane heavy3-flake-races)', revs);
+  ok(gateOf(/^https:\/\/claude\.example\/cai\/oauth\/authorize\?/.test(cast.url)) && verdictOf(/redirect_uri=http%3A%2F%2Flocalhost/.test(cast.localUrl || '')), 'the screen URL (code page) AND the $BROWSER URL (localhost callback, the zero-copy door) are both carried', cast);
   ok(r.leaks.length === 0, 'THE SPY: neither the token nor the sign-in code on any outbound path (log, console, stdout/stderr, broadcasts, GET answers, file writes)', r.leaks);
   ok(r.out.echoSeen === true, 'the flow read the raw screen with the code\'s echo in it (as •) BEFORE the token\'s screen could land — the fake CLI\'s gate, so §4\'s unmasked mutant always has an echo to leak (int403)');
   const facts = readRec();
   const f = facts.find((x) => x.code === CODE);
-  ok(f && f.home.startsWith(scratchRoot) && f.config.startsWith(f.home) && f.home !== os.homedir(), 'the CLI ran with a scratch HOME + CLAUDE_CONFIG_DIR (never the hub\'s ~/.claude)', f);
-  ok(f && !f.apiKey && !f.oauthEnv && f.vibespaceVars.length === 0 && f.browser, 'spawn hygiene: agentEnv() + every credential name dropped; $BROWSER is ours', f);
-  ok(f && f.code === CODE, 'the pasted code reached the CLI as one line');
+  ok(gateOf(f) && gateOf(f.home.startsWith(scratchRoot)) && gateOf(f.config.startsWith(f.home)) && f.home !== os.homedir(), 'the CLI ran with a scratch HOME + CLAUDE_CONFIG_DIR (never the hub\'s ~/.claude)', f);
+  ok(gateOf(f) && !f.apiKey && !f.oauthEnv && f.vibespaceVars.length === 0 && verdictOf(f.browser), 'spawn hygiene: agentEnv() + every credential name dropped; $BROWSER is ours', f);
+  ok(gateOf(f) && f.code === CODE, 'the pasted code reached the CLI as one line');
   ok(fs.readdirSync(scratchRoot).length === 0, 'the scratch dir is gone after the mint');
   const again = r.mint.start({ accountId: sub });
-  ok(again.ok, 'a finished mint never blocks the next one');
+  ok(verdictOf(again.ok), 'a finished mint never blocks the next one');
   const twice = r.mint.start({ accountId: sub });
   ok(!twice.ok && twice.status === 409 && twice.code === 'mint_running', 'ONE mint per account at a time (409 mint_running)', twice);
   const other = r.mint.start({ accountId: sub2 });
-  ok(other.ok, '… another account may mint beside it');
+  ok(verdictOf(other.ok), '… another account may mint beside it');
   await until(() => r.mint.get(other.mint.id)?.phase === 'waiting-code');
   const pid = readRec().filter((x) => !x.code).pop().pid;
   r.mint.cancel(again.mint.id); r.mint.cancel(other.mint.id);
@@ -278,21 +278,21 @@ console.log('§2 the ORCH over the fake claude, through the REAL AccountManager'
   const st = mint.start({ accountId: sub2 });
   await until(() => mint.get(st.mint.id)?.phase === 'url');
   await until(() => mint.get(st.mint.id)?.phase === 'failed', 3000);
-  ok(mint.get(st.mint.id).phase === 'failed' && /10 minutes/.test(mint.get(st.mint.id).error), 'TTL: an unfinished sign-in fails by itself (10 min in the product, 400 ms here)', mint.get(st.mint.id));
+  ok(mint.get(st.mint.id).phase === 'failed' && verdictOf(/10 minutes/.test(mint.get(st.mint.id).error)), 'TTL: an unfinished sign-in fails by itself (10 min in the product, 400 ms here)', mint.get(st.mint.id));
   ok(fs.readdirSync(scratchRoot).length === 0, '… its process killed and its dir wiped');
   const e1 = spyOn(mk(O, 'error')).mint; const s1 = e1.start({ accountId: sub2 });
   await until(() => e1.get(s1.mint.id)?.phase === 'waiting-code'); e1.sendCode(s1.mint.id, 'bad#code');
   await until(() => e1.get(s1.mint.id)?.phase === 'failed');
-  ok(/^OAuth error: Invalid code/.test(e1.get(s1.mint.id).error || ''), 'a refused code → failed with the CLI\'s words', e1.get(s1.mint.id));
+  ok(verdictOf(/^OAuth error: Invalid code/.test(e1.get(s1.mint.id).error || '')), 'a refused code → failed with the CLI\'s words', e1.get(s1.mint.id));
   const e2 = spyOn(mk(O, 'exit')).mint; const s2 = e2.start({ accountId: sub2 });
   await until(() => e2.get(s2.mint.id)?.phase === 'failed');
-  ok(/sign-in server went away/.test(e2.get(s2.mint.id).error || ''), 'the CLI dying without a token → failed with its last line', e2.get(s2.mint.id));
+  ok(verdictOf(/sign-in server went away/.test(e2.get(s2.mint.id).error || '')), 'the CLI dying without a token → failed with its last line', e2.get(s2.mint.id));
   const key = am.add({ name: 'An API key', key: ['sk', '-ant-api03-'].join('') + 'k'.repeat(40) });
   am.setEmail(key.id || key, 'work@example.com'); // its identity PROVEN (F1), so the store's own check is what answers
   const e3 = spyOn(mk(O, 'code')).mint; const s3 = e3.start({ accountId: key.id || key });
   if (s3.ok) { await until(() => e3.get(s3.mint.id)?.phase === 'waiting-code'); e3.sendCode(s3.mint.id, CODE); await until(() => ['saved', 'failed'].includes(e3.get(s3.mint.id)?.phase)); }
   const k3 = s3.ok ? e3.get(s3.mint.id) : s3;
-  ok(k3.phase === 'failed' && /subscription accounts only/.test(k3.error) && !am.getOat(key.id || key), 'the store\'s own refusal is kept (an API-key account never gets an oat) — said in its words', k3);
+  ok(k3.phase === 'failed' && gateOf(/subscription accounts only/.test(k3.error)) && !am.getOat(key.id || key), 'the store\'s own refusal is kept (an API-key account never gets an oat) — said in its words', k3);
   const e4 = spyOn(mk(O, 'code', { claudeCmd: path.join(tmpBase, 'no-such-claude') })).mint; const s4 = e4.start({ accountId: sub2 });
   await until(() => e4.get(s4.mint.id)?.phase === 'failed');
   ok(e4.get(s4.mint.id).phase === 'failed', 'a missing claude binary → failed, said', e4.get(s4.mint.id));
@@ -313,12 +313,12 @@ console.log('§2b the raw screen — the owner\'s fallback (lane signin-card-rea
   const g = mint.get(id), took = Date.now() - t0;
   ok(g.phase === 'starting' && g.rawHint === 'stalled' && !g.url && took >= 300, `no link read 300 ms (N) after the CLI's first output → rawHint 'stalled' (said after ${took} ms — never before N)`, g);
   const scr = mint.screen(id, 0);
-  ok(scr && scr.id === id && /never\x1b\[1Cseen/.test(scr.data) && /Your\x1b\[1Canswer:/.test(scr.data) && !scr.reset, 'GET …/screen answers the bytes the CLI wrote (the person reads them)', scr && scr.data.slice(0, 80));
-  ok(out.casts.every((c) => !c.includes('never') && !c.includes('answer:')) && out.logs.every((l) => !l.includes('never')), 'the raw screen is never broadcast or logged — only its cue (rawHint) rides the snapshot');
+  ok(gateOf(scr) && scr.id === id && gateOf(/never\x1b\[1Cseen/.test(scr.data)) && gateOf(/Your\x1b\[1Canswer:/.test(scr.data)) && !scr.reset, 'GET …/screen answers the bytes the CLI wrote (the person reads them)', scr && scr.data.slice(0, 80));
+  ok(gateOf(out.casts.every((c) => !c.includes('never') && !c.includes('answer:'))) && verdictOf(out.logs.every((l) => !l.includes('never'))), 'the raw screen is never broadcast or logged — only its cue (rawHint) rides the snapshot');
   const sc = mint.sendCode(id, CODE);
-  ok(sc.ok && mint.get(id).phase === 'minting', 'the code box on the raw screen: a code is taken while the reader placed nothing (starting + the cue)', sc);
+  ok(gateOf(sc.ok) && mint.get(id).phase === 'minting', 'the code box on the raw screen: a code is taken while the reader placed nothing (starting + the cue)', sc);
   await until(() => ['saved', 'failed', 'confirm'].includes(mint.get(id)?.phase), 8000);
-  ok(['saved', 'confirm'].includes(mint.get(id).phase), 'the pasted code still completes the mint (the token reached the save path)', mint.get(id));
+  ok(verdictOf(['saved', 'confirm'].includes(mint.get(id).phase)), 'the pasted code still completes the mint (the token reached the save path)', mint.get(id));
   const after = mint.screen(id, 0);
   ok(!after.data.includes(TOKEN.slice(13, 40)) && !after.data.includes(CODE), 'the raw screen after: the token\'s screen never entered it, the echoed code reads as •', after.data.slice(-120));
   if (mint.get(id).phase === 'confirm') mint.confirm(id, { save: false });
@@ -328,7 +328,7 @@ console.log('§2b the raw screen — the owner\'s fallback (lane signin-card-rea
   const s2 = r2.mint.start({ accountId: sub2 });
   await until(() => r2.mint.get(s2.mint.id)?.phase === 'waiting-code');
   await sleep(450);
-  ok(r2.mint.get(s2.mint.id).rawHint === null && r2.out.casts.every((c) => JSON.parse(c).mint.rawHint === null), 'a screen the reader knows never raises the cue (the 2.1.296-shaped fake, past N)', r2.out.casts.map((c) => JSON.parse(c).mint.rawHint));
+  ok(r2.mint.get(s2.mint.id).rawHint === null && verdictOf(r2.out.casts.every((c) => JSON.parse(c).mint.rawHint === null)), 'a screen the reader knows never raises the cue (the 2.1.296-shaped fake, past N)', r2.out.casts.map((c) => JSON.parse(c).mint.rawHint));
   r2.mint.cancel(s2.mint.id);
 }
 
@@ -345,7 +345,7 @@ console.log('§3 the routes');
   const call = async (method, p, body, auth) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, j: await r.json().catch(() => null) }; };
   const A = `/api/accounts/${sub2}/oat/mint`;
   const agent = await Promise.all([['POST', A], ['GET', A], ['GET', A + '/om-x'], ['POST', A + '/om-x/code', { code: 'a' }], ['DELETE', A + '/om-x'], ['POST', A + '/om-x/confirm', { save: true }]].map(([m, p, b]) => call(m, p, b, 'Bearer vsst_abc')));
-  ok(agent.every((r) => r.status === 403 && r.j.code === 'agent_forbidden'), 'all six mint routes (+ confirm) refuse an agent session token by name', agent.map((r) => r.status));
+  ok(verdictOf(agent.every((r) => r.status === 403 && r.j.code === 'agent_forbidden')), 'all six mint routes (+ confirm) refuse an agent session token by name', agent.map((r) => r.status));
   ok((await call('POST', A, null, 'Bearer jbt_x')).status === 403, '… and a job token');
   const s = await call('POST', A);
   ok(s.status === 200 && s.j.mint.phase === 'starting', 'POST …/oat/mint → {mint: starting}', s.j);
@@ -378,14 +378,14 @@ console.log('§3 the routes');
   const p1 = await call2('POST', A); await until(() => m2.get(p1.j.mint.id)?.phase === 'waiting-code');
   await call2('POST', A + '/' + p1.j.mint.id + '/code', { code: CODE }); await until(() => m2.get(p1.j.mint.id)?.phase === 'confirm');
   const g1 = await call2('GET', A + '/' + p1.j.mint.id);
-  ok(g1.j.mint.phase === 'confirm' && g1.j.mint.reason === 'unproven' && g1.j.mint.choices.some((c) => c.id === sub2) && !JSON.stringify(g1.j).includes(TOKEN.slice(13, 40)) && !am.getOat(sub2), 'no proof → GET says confirm (the rows to pick from), nothing saved yet, no token in the answer', g1.j);
+  ok(g1.j.mint.phase === 'confirm' && g1.j.mint.reason === 'unproven' && gateOf(g1.j.mint.choices.some((c) => c.id === sub2)) && !JSON.stringify(g1.j).includes(TOKEN.slice(13, 40)) && !am.getOat(sub2), 'no proof → GET says confirm (the rows to pick from), nothing saved yet, no token in the answer', g1.j);
   const y1 = await call2('POST', A + '/' + p1.j.mint.id + '/confirm', { save: true, accountId: sub2 });
   ok(y1.status === 200 && y1.j.mint.phase === 'saved' && am.getOat(sub2) === TOKEN, 'POST …/confirm {save:true} → saved (owner-confirmed)', y1.j);
   which = m3; am.clearOat(sub2);
   const p2 = await call2('POST', A); await until(() => m3.get(p2.j.mint.id)?.phase === 'waiting-code');
   await call2('POST', A + '/' + p2.j.mint.id + '/code', { code: CODE }); await until(() => m3.get(p2.j.mint.id)?.phase === 'failed');
   const y2 = await call2('POST', A + '/' + p2.j.mint.id + '/confirm', { save: true });
-  ok(y2.status === 409 && y2.j.code === 'identity_mismatch' && /work@example\.com/.test(y2.j.error) && !/org-work-uuid/.test(JSON.stringify(y2.j)) && !am.getOat(sub2), "another account's sign-in → 409 identity_mismatch naming its email (never a uuid), nothing saved", y2.j);
+  ok(y2.status === 409 && y2.j.code === 'identity_mismatch' && gateOf(/work@example\.com/.test(y2.j.error)) && !/org-work-uuid/.test(JSON.stringify(y2.j)) && !am.getOat(sub2), "another account's sign-in → 409 identity_mismatch naming its email (never a uuid), nothing saved", y2.j);
   m2.stopAll(); m3.stopAll(); srv2.close();
 }
 
@@ -393,7 +393,7 @@ console.log('§4 RED mutants — the spy catches each leak');
 {
   const src = fs.readFileSync(ORCH, 'utf8');
   const anchor = '      const r = accounts.setOat(m.accountId, token);\n';
-  ok(src.includes(anchor) && src.includes('  function get(mid) { const m = mints.get(mid); return m ? publicMint(m) : null; }'), 'mutant anchors present (the save line, get())');
+  ok(gateOf(src.includes(anchor)) && verdictOf(src.includes('  function get(mid) { const m = mints.get(mid); return m ? publicMint(m) : null; }')), 'mutant anchors present (the save line, get())');
   const mutants = [
     ['the token logged', src.replace(anchor, anchor + "      log('[oat-mint] saved ' + token);\n"), 'log'],
     ['the token in the GET state', src.replace(anchor, anchor + '      m.lastToken = token;\n').replace('return m ? publicMint(m) : null; }', 'return m ? { ...publicMint(m), lastToken: m.lastToken } : null; }'), 'GET/answer'],
@@ -406,7 +406,7 @@ console.log('§4 RED mutants — the spy catches each leak');
     ok(msrc !== src, `mutant applies: ${what}`);
     am.clearOat(sub);
     const r = await saveFlow(loadOrch(msrc), sub);
-    ok(r.mint.get(r.id).phase === 'saved' && r.leaks.includes(where.includes(':') ? where : where + ':token'), `RED: ${what} ⇒ the spy names it (${where})`, r.leaks);
+    ok(r.mint.get(r.id).phase === 'saved' && verdictOf(r.leaks.includes(where.includes(':') ? where : where + ':token')), `RED: ${what} ⇒ the spy names it (${where})`, r.leaks);
     fs.rmSync(path.join(os.tmpdir(), 'oatv-leak-' + process.pid + '.txt'), { force: true });
   }
   am.clearOat(sub);
@@ -422,7 +422,7 @@ console.log('§4 RED mutants — the spy catches each leak');
   fs.rmSync(path.join(os.tmpdir(), 'oatv-leak-' + process.pid + '.txt'), { force: true });
   const sharedListed = listed.filter((d) => path.resolve(d) === path.resolve(SHARED_TMP));
   const diskHit = ((rf && rf.files) || []).filter((x) => x.startsWith('on-disk:' + OWN_TMP + path.sep));
-  ok(os.tmpdir() === OWN_TMP && OWN_TMP.startsWith(tmpBase + path.sep) && sharedListed.length === 0 && diskHit.length === 1 && rf.leaks.includes('file:token'),
+  ok(os.tmpdir() === OWN_TMP && gateOf(OWN_TMP.startsWith(tmpBase + path.sep)) && sharedListed.length === 0 && diskHit.length === 1 && verdictOf(rf.leaks.includes('file:token')),
     `B-fe02: the spy's disk scan reads the suite's OWN folder (os.tmpdir() = ${path.relative(tmpBase, OWN_TMP)} inside ${path.basename(tmpBase)}) and NEVER the shared root — ${listed.length} folder(s) listed in one run, ${sharedListed.length} of them ${SHARED_TMP}; the F4 leak file is found on disk inside it (${diskHit.map((x) => path.basename(x)).join(', ') || 'NOT FOUND'})`);
   am.clearOat(sub);
 }
@@ -450,12 +450,12 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
   const calls = []; const realSet = am.setOat.bind(am); am.setOat = (id, t) => { calls.push(id); return realSet(id, t); };
   am.clearOat(sub); calls.length = 0;
   let r = await runMint(O, sub, { ident: IDENT.work });
-  ok(r.m.phase === 'saved' && am.getOat(sub) === TOKEN && calls.join() === sub && r.js.some((j) => j.outcome === 'identity-proven'), "the sign-in identity matches the row ⇒ saved ONCE, journaled identity-proven", { phase: r.m.phase, calls, js: r.js });
+  ok(r.m.phase === 'saved' && am.getOat(sub) === TOKEN && calls.join() === sub && verdictOf(r.js.some((j) => j.outcome === 'identity-proven')), "the sign-in identity matches the row ⇒ saved ONCE, journaled identity-proven", { phase: r.m.phase, calls, js: r.js });
   am.clearOat(sub); calls.length = 0;
   r = await runMint(O, sub, { ident: IDENT.second });
-  ok(r.m.phase === 'failed' && r.m.reason === 'identity_mismatch' && r.m.signedInAs === 'second@example.com' && /second@example\.com/.test(r.m.error) && /Work Max/.test(r.m.error) && !/uuid/.test(JSON.stringify(r.m)),
+  ok(r.m.phase === 'failed' && r.m.reason === 'identity_mismatch' && r.m.signedInAs === 'second@example.com' && gateOf(/second@example\.com/.test(r.m.error)) && gateOf(/Work Max/.test(r.m.error)) && !/uuid/.test(JSON.stringify(r.m)),
     "THE VERIFY'S PROBE: B's sign-in during C's mint ⇒ failed identity_mismatch, said with B's email and C's name (never a uuid)", r.m);
-  ok(!am.getOat(sub) && calls.length === 0 && fs.readdirSync(scratchRoot).length === 0 && r.mint._held.size === 0 && noTokenOut(r), '… nothing saved, no setOat call, the scratch dir wiped, nothing held, no token out');
+  ok(!am.getOat(sub) && calls.length === 0 && fs.readdirSync(scratchRoot).length === 0 && r.mint._held.size === 0 && verdictOf(noTokenOut(r)), '… nothing saved, no setOat call, the scratch dir wiped, nothing held, no token out');
   ok(r.mint.confirm(r.id, { save: true }).code === 'identity_mismatch', '… and a confirm after it is refused 409 identity_mismatch');
   // RED control = the base: the mint saved whatever the CLI printed
   const unchecked = fs.readFileSync(ORCH, 'utf8').replace("    const iv = identityVerdict(rowIdentity(m.accountId), who);\n", "    return save(m, token, 'unchecked');\n    const iv = identityVerdict(rowIdentity(m.accountId), who);\n");
@@ -468,21 +468,21 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
   // a row with no identity yet: the pick names the sign-in; the row learns it on the yes only
   const sub3 = am.createSubscription({ name: 'Fresh' }).id;
   r = await runMint(O, sub3, { ident: IDENT.fresh });
-  ok(r.m.phase === 'confirm' && r.m.reason === 'unproven' && r.m.signedInAs === 'fresh@example.com' && [sub, sub2, sub3].every((id) => r.m.choices.some((c) => c.id === id)) && !am.getOat(sub3), 'a row with no identity ⇒ confirm, showing the sign-in (fresh@…) and the rows to pick from — nothing saved', r.m);
-  ok(r.mint._held.size === 1 && fs.readdirSync(scratchRoot).length === 0 && noTokenOut(r), '… the token waits in hub memory only (scratch dir already wiped, never in a broadcast / GET / log)');
+  ok(r.m.phase === 'confirm' && r.m.reason === 'unproven' && r.m.signedInAs === 'fresh@example.com' && gateOf([sub, sub2, sub3].every((id) => r.m.choices.some((c) => c.id === id))) && !am.getOat(sub3), 'a row with no identity ⇒ confirm, showing the sign-in (fresh@…) and the rows to pick from — nothing saved', r.m);
+  ok(r.mint._held.size === 1 && fs.readdirSync(scratchRoot).length === 0 && verdictOf(noTokenOut(r)), '… the token waits in hub memory only (scratch dir already wiped, never in a broadcast / GET / log)');
   const y = r.mint.confirm(r.id, { save: true });
-  ok(y.ok && y.mint.phase === 'saved' && am.getOat(sub3) === TOKEN && r.js.some((j) => j.outcome === 'owner-confirmed') && (am.list().accounts.find((a) => a.id === sub3) || {}).email === 'fresh@example.com' && r.mint._held.size === 0,
+  ok(gateOf(y.ok) && y.mint.phase === 'saved' && am.getOat(sub3) === TOKEN && gateOf(r.js.some((j) => j.outcome === 'owner-confirmed')) && (am.list().accounts.find((a) => a.id === sub3) || {}).email === 'fresh@example.com' && r.mint._held.size === 0,
     '… the yes saves it (journaled owner-confirmed) and the row learns the email it was shown', y);
   // CLI 2.1.296 shape: no identity at all, no probe
   r = await runMint(O, sub, { ident: null });
-  ok(r.m.phase === 'confirm' && !r.m.signedInAs && r.m.choices.some((c) => c.id === sub), 'no identity in the scratch config (CLI 2.1.296) and no probe ⇒ confirm, never a silent save', r.m);
+  ok(r.m.phase === 'confirm' && !r.m.signedInAs && verdictOf(r.m.choices.some((c) => c.id === sub)), 'no identity in the scratch config (CLI 2.1.296) and no probe ⇒ confirm, never a silent save', r.m);
   ok(r.mint.confirm(r.id, { save: true, accountId: 'sub-nope' }).code === 'bad_choice' && !am.getOat(sub), 'a pick outside the listed rows is refused (400 bad_choice)');
   const y2 = r.mint.confirm(r.id, { save: true, accountId: sub2 });
-  ok(y2.ok && am.getOat(sub2) === TOKEN && !am.getOat(sub) && y2.mint.accountId === sub2, 'the person picked ANOTHER row ⇒ saved under the picked row', y2.mint);
+  ok(gateOf(y2.ok) && am.getOat(sub2) === TOKEN && !am.getOat(sub) && y2.mint.accountId === sub2, 'the person picked ANOTHER row ⇒ saved under the picked row', y2.mint);
   am.clearOat(sub2);
   r = await runMint(O, sub, { ident: null });
   const n1 = r.mint.confirm(r.id, { save: false });
-  ok(n1.mint.phase === 'cancelled' && r.mint._held.size === 0 && !am.getOat(sub) && r.js.some((j) => j.outcome === 'owner-declined'), '不保存 ⇒ cancelled, the held token dropped, nothing saved');
+  ok(n1.mint.phase === 'cancelled' && r.mint._held.size === 0 && !am.getOat(sub) && verdictOf(r.js.some((j) => j.outcome === 'owner-declined')), '不保存 ⇒ cancelled, the held token dropped, nothing saved');
   // the TTL's one timer, fired by the suite (B-fe02: this leg waited a REAL 2.5 s TTL out, then up to 5 s for «failed» — 3.8 s of the run).
   // The recorder hands back a handle and the leg watches every clearTimeout: the TTL must still be ARMED while the pick waits (the
   // real wait proved that by the phase staying «confirm»; a mint that cleared its TTL on reaching the pick would hold the token forever)
@@ -497,7 +497,7 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
     } finally { globalThis.clearTimeout = clr0; }
   };
   const tp = await ttlPick(O); r = tp.rr;
-  ok(tp.armed && tp.ttl[0].ms === O.MINT_TTL_MS, '(a pick left unanswered… its TTL armed ONCE, at the product\'s 10 minutes, and STILL ARMED while the pick waits)', { phase: tp.rr.m.phase, ttl: tp.ttl.map((t) => t.ms), cleared: tp.cleared.length });
+  ok(gateOf(tp.armed) && tp.ttl[0].ms === O.MINT_TTL_MS, '(a pick left unanswered… its TTL armed ONCE, at the product\'s 10 minutes, and STILL ARMED while the pick waits)', { phase: tp.rr.m.phase, ttl: tp.ttl.map((t) => t.ms), cleared: tp.cleared.length });
   // RED control: a mint that clears its TTL when it reaches the pick (the token would wait in hub memory with no end)
   const PICK = "    m.phase = 'confirm'; m.verdict = 'unproven';\n";
   const srcO = fs.readFileSync(ORCH, 'utf8');
@@ -509,23 +509,23 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
   ok(r.mint._held.size === 0 && r.mint.get(r.id).phase === 'cancelled', 'cancel during the pick drops the held token');
   // THE SECOND LOOK (owner ruling): ONE /usage panel read with the NEW token, its window vs every row's anchor
   const anchors = { [sub]: { ...winOf(PANEL_A), producer: 'login' }, [sub2]: { ...winOf(PANEL_B), producer: 'login' } }; // the ⟳ panel's stamps name their producer (lane oat-identity-fix-r2)
-  ok(anchors[sub].sevenDay && anchors[sub2].sevenDay && anchors[sub].sevenDay !== anchors[sub2].sevenDay, 'fixture: two rows with distinct weekly anchors');
+  ok(gateOf(anchors[sub].sevenDay) && gateOf(anchors[sub2].sevenDay) && anchors[sub].sevenDay !== anchors[sub2].sevenDay, 'fixture: two rows with distinct weekly anchors');
   const probeFacts0 = readRec().filter((x) => x.probe).length;
   r = await runMint(O, sub, { ident: null, probe: true, panel: PANEL_A, windows: () => anchors });
   const pf = readRec().filter((x) => x.probe).slice(probeFacts0);
-  ok(r.m.phase === 'saved' && am.getOat(sub) === TOKEN && r.js.some((j) => j.outcome === 'fingerprint-proven'), "the panel's window = the row's own anchor (no one else's) ⇒ saved, journaled fingerprint-proven", { m: r.m, js: r.js });
-  ok(pf.length === 1 && pf[0].argv.join(' ') === '-p /usage --strict-mcp-config' && pf[0].tokenIsTheMinted && !pf[0].tokenInArgv && pf[0].config.startsWith(scratchRoot) && !pf[0].apiKey,
+  ok(r.m.phase === 'saved' && am.getOat(sub) === TOKEN && verdictOf(r.js.some((j) => j.outcome === 'fingerprint-proven')), "the panel's window = the row's own anchor (no one else's) ⇒ saved, journaled fingerprint-proven", { m: r.m, js: r.js });
+  ok(pf.length === 1 && pf[0].argv.join(' ') === '-p /usage --strict-mcp-config' && gateOf(pf[0].tokenIsTheMinted) && !pf[0].tokenInArgv && gateOf(pf[0].config.startsWith(scratchRoot)) && !pf[0].apiKey,
     'ONE probe: argv = PANEL_PROBE_ARGS (never a prompt), the NEW token in its env (never argv), the mint\'s scratch config, no hub key', pf);
   ok(pf[0].config === path.join(pf[0].home, 'config') && pf[0].cwd === path.join(pf[0].config, 'cwd') && pf[0].cwd !== pf[0].home && pf[0].cwd !== fs.realpathSync(os.tmpdir()),
     '… with the panel probe\'s own isolation (spawnPanelProbe from the root): cwd = the empty dir inside the scratch config — never the PTY cwd, never os.tmpdir() (mirror-263 §19)', pf[0] && { home: pf[0].home, config: pf[0].config, cwd: pf[0].cwd });
   ok(!pf[0].envKeys.some((k) => k in PLANTED && k !== 'CLAUDE_CODE_OAUTH_TOKEN' && k !== 'CLAUDE_CONFIG_DIR'), '… and the probe child carries none of the 28 planted names either', pf[0].envKeys);
   am.clearOat(sub);
   r = await runMint(O, sub, { ident: null, probe: true, panel: PANEL_B, windows: () => anchors });
-  ok(r.m.phase === 'failed' && r.m.reason === 'identity_mismatch' && r.m.other === 'Second' && /Second/.test(r.m.error) && !am.getOat(sub) && !am.getOat(sub2), "the panel's window = ANOTHER row's anchor ⇒ failed identity_mismatch naming that row, nothing saved anywhere", r.m);
+  ok(r.m.phase === 'failed' && r.m.reason === 'identity_mismatch' && r.m.other === 'Second' && gateOf(/Second/.test(r.m.error)) && !am.getOat(sub) && !am.getOat(sub2), "the panel's window = ANOTHER row's anchor ⇒ failed identity_mismatch naming that row, nothing saved anywhere", r.m);
   for (const [what, over] of [['the row has no anchor yet', { panel: PANEL_A, windows: () => ({}) }], ['the window is shared with another row', { panel: PANEL_A, windows: () => ({ [sub]: anchors[sub], [sub2]: anchors[sub] }) }],
     ['the /usage read failed (the scope refusal an oat may get)', { panel: null, windows: () => anchors }], ['the panel is not a usage panel', { panel: 'Error: something else\n', windows: () => anchors }]]) {
     r = await runMint(O, sub, { ident: null, probe: true, ...over });
-    ok(r.m.phase === 'confirm' && !am.getOat(sub) && r.js.some((j) => j.outcome === 'awaiting-owner'), `${what} ⇒ the pick, never a silent save`, { m: r.m, js: r.js });
+    ok(r.m.phase === 'confirm' && !am.getOat(sub) && verdictOf(r.js.some((j) => j.outcome === 'awaiting-owner')), `${what} ⇒ the pick, never a silent save`, { m: r.m, js: r.js });
     r.mint.cancel(r.id);
   }
   // B-5279 (主开发 r4896): «Off (never contact Anthropic)» refuses the mint's identity proof too, a person's act included — the
@@ -533,7 +533,7 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
   { const before = readRec().filter((x) => x.probe).length;
     r = await runMint(O, sub, { ident: null, probe: true, panel: PANEL_A, windows: () => anchors, readsOff: true });
     const after = readRec().filter((x) => x.probe).length;
-    ok(r.m.phase === 'confirm' && !am.getOat(sub) && after === before && r.js.some((j) => j.outcome === 'awaiting-owner' && /usage refresh is off/i.test(String(j.why || ''))),
+    ok(r.m.phase === 'confirm' && !am.getOat(sub) && after === before && verdictOf(r.js.some((j) => j.outcome === 'awaiting-owner' && /usage refresh is off/i.test(String(j.why || '')))),
       'B-5279: with the usage-refresh row Off the mint starts NO /usage read (no probe recorded) and asks the person — the pick, its journal naming the row', { m: r.m, js: r.js, probes: after - before });
     r.mint.cancel(r.id); }
   am.clearOat(sub);
@@ -543,8 +543,8 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
   am.clearOat(sub); am.setOat = realSet;
   ok(fs.readdirSync(scratchRoot).length === 0, 'every F1 ending wiped its scratch dir');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-  ok(zh.includes('"CLI 的 setup-token 不记录登录的是哪个账号，无法自动核对。你刚在浏览器里登录的是哪个账号？"') && zh.includes('"这把 token 属于 {email}，不是 {name}；没有保存"') && zh.includes('"这把 token 的用量窗口和 {other} 的一致，不是 {name}；没有保存"')
-    && ['"This sign-in is {email}."', '"Don’t save"', '"This token belongs to {email}, not {name} — not saved."', '"This token’s usage window matches {other}, not {name} — not saved."'].every((k) => zh.includes(k) && ja.includes(k)), 'the dialog\'s pick / refusal words in zh (the ruling\'s sentences) and ja');
+  ok(gateOf(zh.includes('"CLI 的 setup-token 不记录登录的是哪个账号，无法自动核对。你刚在浏览器里登录的是哪个账号？"')) && gateOf(zh.includes('"这把 token 属于 {email}，不是 {name}；没有保存"')) && gateOf(zh.includes('"这把 token 的用量窗口和 {other} 的一致，不是 {name}；没有保存"'))
+    && verdictOf(['"This sign-in is {email}."', '"Don’t save"', '"This token belongs to {email}, not {name} — not saved."', '"This token’s usage window matches {other}, not {name} — not saved."'].every((k) => zh.includes(k) && ja.includes(k))), 'the dialog\'s pick / refusal words in zh (the ruling\'s sentences) and ja');
 }
 
 console.log('§6 F2 — the mint child gets an ALLOWLIST env');
@@ -562,7 +562,7 @@ console.log('§6 F2 — the mint child gets an ALLOWLIST env');
   const kids = readRec().filter((x) => x.envKeys && !x.probe);
   const shell = ['PWD', 'OLDPWD', 'SHLVL', '_'];
   const beyond = new Set(kids.flatMap((x) => x.envKeys).filter((k) => !M.MINT_ENV_ALLOW.includes(k) && !/^LC_[A-Z]+$/.test(k) && !['HOME', 'CLAUDE_CONFIG_DIR', 'BROWSER', 'TERM', 'DISABLE_AUTOUPDATER'].includes(k) && !k.startsWith('FAKE_OAT_') && !shell.includes(k)));
-  ok(kids.length >= 10 && kids.every((x) => !x.envKeys.some((k) => names.includes(k) && k !== 'CLAUDE_CONFIG_DIR')) && kids.every((x) => x.config && x.config.startsWith(x.home)), `LIVE: all ${kids.length} mint children of this run carried 0 of the 28 (env names the fake CLI recorded)`);
+  ok(kids.length >= 10 && gateOf(kids.every((x) => !x.envKeys.some((k) => names.includes(k) && k !== 'CLAUDE_CONFIG_DIR'))) && verdictOf(kids.every((x) => x.config && x.config.startsWith(x.home))), `LIVE: all ${kids.length} mint children of this run carried 0 of the 28 (env names the fake CLI recorded)`);
   ok(beyond.size === 0, '… and nothing beyond the allowlist (+ the wrapper\'s own FAKE_OAT_* knobs, the shell\'s PWD/SHLVL)', [...beyond]);
 }
 
@@ -594,11 +594,11 @@ console.log('§7 F3 — orphaned scratch dirs are swept at boot; an orderly exit
     const left = (d) => ({ old: fs.existsSync(d.old), fresh: fs.existsSync(path.join(d.fresh, OMk.OWNER_FILE)), live: fs.existsSync(path.join(d.live, OMk.OWNER_FILE)), unmarked: fs.existsSync(path.join(d.unmarked, 'browser-url')), other: fs.existsSync(d.other), legacyOld: fs.existsSync(d.legacyOld), legacyYoung: fs.existsSync(path.join(d.legacyYoung, 'open-url')), torn: fs.existsSync(path.join(d.torn, 'open-url')) });
     const dN = plant(path.join(tmpBase, 'sweep-none'));
     loadOrch(SRC7.replace('  sweep();\n', '')).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-none'), log: () => { } });
-    ok(fs.existsSync(dN.old), 'RED control: without the boot sweep the gone hub\'s marked folder stays');
+    ok(verdictOf(fs.existsSync(dN.old)), 'RED control: without the boot sweep the gone hub\'s marked folder stays');
     const d = plant(path.join(tmpBase, 'sweep')), logs = [];
     loadOrch().create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep'), log: (l) => logs.push(l) });
     const L = left(d);
-    ok(!!liveId && !L.old && L.fresh && L.live && L.unmarked && L.other && !L.legacyOld && L.legacyYoung && L.torn && logs.some((l) => /boot sweep: removed 2 /.test(l)),
+    ok(!!liveId && !L.old && gateOf(L.fresh) && gateOf(L.live) && gateOf(L.unmarked) && gateOf(L.other) && !L.legacyOld && gateOf(L.legacyYoung) && gateOf(L.torn) && verdictOf(logs.some((l) => /boot sweep: removed 2 /.test(l))),
       'r1213 + r1275 (1): the boot sweep removes the folder a GONE hub marked and an OLDER release\'s unmarked folder its opener proves the product\'s, each older than the TTL + 5 min (their whole trees); a gone hub\'s FRESH marked folder, a LIVE hub\'s, an UNMARKED folder of the name, an older release\'s YOUNG one and one with a TORN mark stay; a non-mint dir stays', { L, logs });
     // RED (a) — the release's sweep by AGE alone (the mark test cut; its anchor found once): the hour-old UNMARKED folder is removed
     const A7 = "        if (!OM.sweepable(p, { name: 'open-url', bytes: OPENER })) continue;   // r1275 (1): an older release's unmarked folder, proven by its opener\n        OM.removeMarked(p, { last: 'open-url' }); n++;\n", B7 = "        fs.rmSync(p, { recursive: true, force: true }); n++;\n";   // stale-pins: kept (a RED's replacement text — the release's line, gone from the product on purpose)
@@ -610,12 +610,12 @@ console.log('§7 F3 — orphaned scratch dirs are swept at boot; an orderly exit
     // RED (b) — the mark test ALONE (the age bar cut): the gone hub's FRESH folder is removed — the leg above goes red there
     const dB = plant(path.join(tmpBase, 'sweep-red-mark')); if (fG === 1) loadOrch(SRC7.split(AGE7).join(NOAGE7)).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-red-mark'), log: () => { } });
     const LB = left(dB);
-    ok(fG === 1 && !LB.fresh && LB.unmarked, 'RED (b) — the mark test alone without the age bar (its anchor found once): the gone hub\'s FRESH marked folder is removed (a live mint in another pid space would be) — the leg above goes red there', { fG, LB });
+    ok(fG === 1 && !LB.fresh && verdictOf(LB.unmarked), 'RED (b) — the mark test alone without the age bar (its anchor found once): the gone hub\'s FRESH marked folder is removed (a live mint in another pid space would be) — the leg above goes red there', { fG, LB });
     // RED (c) — r1213's rule (no proof by the opener): the older release's old folder is KEPT for ever — the leg above goes red there
     const LEG7 = "OM.sweepable(p, { name: 'open-url', bytes: OPENER })", fL = SRC7.split(LEG7).length - 1;
     const dC = plant(path.join(tmpBase, 'sweep-red-legacy')); if (fL === 1) loadOrch(SRC7.split(LEG7).join('OM.sweepable(p, null)')).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-red-legacy'), log: () => { } });
     const LC = left(dC);
-    ok(fL === 1 && LC.legacyOld && !LC.old, 'RED (c) — without the opener\'s proof (its anchor found once; the plant proves itself: the dead-marked one went): the older release\'s hour-old folder is KEPT for ever — the leg above goes red there', { fL, LC });
+    ok(fL === 1 && gateOf(LC.legacyOld) && !LC.old, 'RED (c) — without the opener\'s proof (its anchor found once; the plant proves itself: the dead-marked one went): the older release\'s hour-old folder is KEPT for ever — the leg above goes red there', { fL, LC });
     // r1275 (3): A MARK THAT FAILS FAILS THE MINT'S START — written one byte short, or a write that throws: start throws (its route
     // answers 500, as a failed mkdtemp) and NO folder is left; RED — an owner-mark copy with the write unchecked, under a mint copy
     const Module = require('node:module'), OMP = path.join(REPO, 'src/owner-mark.js'), OMSRC = fs.readFileSync(OMP, 'utf8');
@@ -639,7 +639,7 @@ console.log('§7 F3 — orphaned scratch dirs are swept at boot; an orderly exit
       'r1275 (3): a mint\'s mark written one byte short (ESHORTMARK) or a write that throws fails the start, and NO folder is left', { short: f1, throw: f2 });
     const UNCHK = "    if (n !== b.length) throw Object.assign(new Error(`the owner mark was written short (${n} of ${b.length} bytes)`), { code: 'ESHORTMARK' });\n", fU = OMSRC.split(UNCHK).length - 1;
     const fR = fU === 1 ? withOwnerMark(OMSRC.split(UNCHK).join(''), () => failOf(loadOrch(SRC7), 'short')) : null;
-    ok(!!fR && fR.hit === 1 && fR.started, 'RED — the mark\'s write unchecked (an owner-mark copy under a mint copy; its anchor found once; the plant proves itself: the write was made short): the mint STARTS over a torn mark — the leg above goes red there', fR);
+    ok(!!fR && fR.hit === 1 && verdictOf(fR.started), 'RED — the mark\'s write unchecked (an owner-mark copy under a mint copy; its anchor found once; the plant proves itself: the write was made short): the mint STARTS over a torn mark — the leg above goes red there', fR);
     // r1213: THE MARK IS THE FOLDER'S FIRST FILE — a mint's scratch carries this hub's identity before anything else is made in it
     const orderOf = (O, rootO) => {
       fs.mkdirSync(rootO);
@@ -657,13 +657,13 @@ console.log('§7 F3 — orphaned scratch dirs are swept at boot; an orderly exit
       return { ok: !!(st && st.ok), made, mark, gone: !!dir && !fs.existsSync(dir) };
     };
     const me = PIm.identityOf(process.pid), od = orderOf(loadOrch(), path.join(tmpBase, 'mark-order'));
-    ok(od.ok && od.made[0] === OMk.OWNER_FILE && od.made.length >= 2 && od.mark && od.mark.pid === process.pid && me && String(od.mark.starttime) === String(me.starttime) && od.gone,
+    ok(gateOf(od.ok) && od.made[0] === OMk.OWNER_FILE && od.made.length >= 2 && gateOf(od.mark) && od.mark.pid === process.pid && gateOf(me) && String(od.mark.starttime) === String(me.starttime) && verdictOf(od.gone),
       'r1213: a mint\'s scratch folder\'s FIRST file is this hub\'s owner mark (its pid and start), then the rest; the mint\'s end removes the folder, the mark with it', od);
     // RED — the mark written AFTER the opener (an in-place copy; its anchors found once): the order leg goes red there
     const MK7 = "    try { fs.chmodSync(dir, 0o700); OM.writeMark(dir, ownerId); } catch (e) { OM.removeMarked(dir); throw e; }", ENV7 = "    const e = childEnv(dir);\n";
     const fM = SRC7.split(MK7).length - 1, fE = SRC7.split(ENV7).length - 1;
     const odR = fM === 1 && fE === 1 ? orderOf(loadOrch(SRC7.split(MK7).join('    fs.chmodSync(dir, 0o700);').split(ENV7).join('    OM.writeMark(dir, ownerId);\n' + ENV7)), path.join(tmpBase, 'mark-order-red')) : null;   // stale-pins: kept (a RED's replacement text — the release's line, gone from the product on purpose)
-    ok(!!odR && odR.ok && odR.made[0] !== OMk.OWNER_FILE && odR.made.includes(OMk.OWNER_FILE), 'RED — the mark written after the opener (its anchors found once; the copy\'s mint still starts): the folder\'s first file is not the mark — the order leg goes red there', { fM, fE, made: odR && odR.made });
+    ok(!!odR && gateOf(odR.ok) && odR.made[0] !== OMk.OWNER_FILE && verdictOf(odR.made.includes(OMk.OWNER_FILE)), 'RED — the mark written after the opener (its anchors found once; the copy\'s mint still starts): the folder\'s first file is not the mark — the order leg goes red there', { fM, fE, made: odR && odR.made });
   } finally { try { liveKid.kill('SIGKILL'); } catch { } }
   const child = path.join(tmpBase, 'hub-child.cjs');
   fs.writeFileSync(child, `const O = require(${JSON.stringify(ORCH)}); const { AccountManager } = require(${JSON.stringify(path.join(REPO, 'src/accounts.js'))}); require(${JSON.stringify(path.join(REPO, 'scripts/lib/accounts-landed.cjs'))}).waitEverySave(AccountManager);
@@ -688,11 +688,11 @@ setInterval(() => { }, 1000);
   });
   const without = await runChild(false);
   console.log(`    RED control (no exit hook, the .262 wiring): SIGTERM mid-mint ⇒ scratch dir left: ${without && without.dirLeft}, CLI alive: ${without && without.alive}`);
-  ok(without && without.dirLeft, 'RED control: a hub stopped by SIGTERM mid-mint without the hook orphans its scratch dir');
+  ok(gateOf(without) && verdictOf(without.dirLeft), 'RED control: a hub stopped by SIGTERM mid-mint without the hook orphans its scratch dir');
   const withHook = await runChild(true);
-  ok(withHook && !withHook.dirLeft && !withHook.alive, 'exitHook: SIGTERM mid-mint ⇒ stopAll ran — the CLI is gone and its scratch dir removed', withHook);
+  ok(gateOf(withHook) && !withHook.dirLeft && !withHook.alive, 'exitHook: SIGTERM mid-mint ⇒ stopAll ran — the CLI is gone and its scratch dir removed', withHook);
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
-  ok(/require\('\.\/oat-mint\.js'\)\.create\(\{[^\n]*exitHook: true/.test(wiring) && /probePanel: require\('\.\/oat-mint\.js'\)\.panelProbeVia\(\(o, done\) => usageRoutesMod\.spawnPanelProbe\(claudeBin\(\), \{ \.\.\.o, setting: serverSetting \}, done\)/.test(wiring), // claudeBin = THE accessor (lane cli-shell-truth r2: the binary the sessions spawn)
+  ok(gateOf(/require\('\.\/oat-mint\.js'\)\.create\(\{[^\n]*exitHook: true/.test(wiring)) && verdictOf(/probePanel: require\('\.\/oat-mint\.js'\)\.panelProbeVia\(\(o, done\) => usageRoutesMod\.spawnPanelProbe\(claudeBin\(\), \{ \.\.\.o, setting: serverSetting \}, done\)/.test(wiring)), // claudeBin = THE accessor (lane cli-shell-truth r2: the binary the sessions spawn)
     'the server wires exitHook: true and the probe through usage-routes spawnPanelProbe (the one allowlisted /usage spawn) WITH the usage-refresh row\'s reader (B-5279: the fence)');
 }
 // §8 (lane pool-oat-materialize, q-035 invariants 1 + 2): THE MATERIALIZED FILE IS THE TOKEN'S ONE
@@ -771,7 +771,7 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   const accSrc = fs.readFileSync(ACC, 'utf8');
   const A1 = "        await material.writeCredentialFile(dir, oatFileMerge(seen.fileState === 'present' ? seen.file : null, body), { expect: v.archive ? null : seen.stat, ...(!v.archive && ours ? { asideAs } : {}) });\n";
   const mLog = accSrc.includes(A1) ? await matRun('log', accSrc.replace(A1, A1 + "        console.log('[oat-file] wrote', body.claudeAiOauth.accessToken);\n"), { direct: true }) : null;
-  ok(!!mLog && mLog.leaks.includes('console/stdout'), 'RED control (invariant 1): a planted console.log(token) beside the write is caught', mLog && mLog.leaks);
+  ok(!!mLog && verdictOf(mLog.leaks.includes('console/stdout')), 'RED control (invariant 1): a planted console.log(token) beside the write is caught', mLog && mLog.leaks);
   const mBak = accSrc.includes(A1) ? await matRun('bak', accSrc.replace(A1, A1 + "        fs.writeFileSync(path.join(dir, '.credentials.json.bak'), JSON.stringify(body), { mode: 0o600 });\n"), { direct: true }) : null;
   ok(!!mBak && mBak.writes.leaked.length >= 1 && mBak.disk.length === 2, 'RED control (invariant 1): a planted second copy (.credentials.json.bak) is caught by the spy AND the disk scan', mBak && { leaked: mBak.writes.leaked, disk: mBak.disk.length });
   for (const m of [mLog, mBak]) if (m) fs.rmSync(m.root, { recursive: true, force: true }); // a RED control's planted copy is its own: the whole-disk scans below judge the suite's tmp root
@@ -952,7 +952,7 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   const ACT_EXT = ['crypto', 'fs', 'path'];
   const actOk = (cx) => JSON.stringify(cx.act.mods) === JSON.stringify(Object.keys(ACT_MODULES).sort()) && JSON.stringify(cx.act.ext) === JSON.stringify(ACT_EXT) && !cx.act.dyn.length && Object.entries(ACT_MODULES).every(([rel, rows]) => JSON.stringify(cx.act.doors[rel] || []) === JSON.stringify(rows.slice().sort()));
   ok(c.actFnsMissing.length === 0, `⑦ the ${OAT_ACT_FNS.length} oat functions the closure starts from all exist in accounts.js (a rename would empty the seed silently)`, c.actFnsMissing);
-  ok(actOk(c), `⑦ the oat acts reach exactly ${Object.keys(ACT_MODULES).length} modules (account-material's named doors, secret-box's key mint, four PURE modules with none) and only ${ACT_EXT.join(' / ')} — no dynamic require`, { mods: c.act.mods, ext: c.act.ext, dyn: c.act.dyn, doors: Object.fromEntries(Object.entries(c.act.doors).filter(([rel, d]) => JSON.stringify(d) !== JSON.stringify((ACT_MODULES[rel] || ['(unnamed)']).slice().sort()))) });
+  ok(verdictOf(actOk(c)), `⑦ the oat acts reach exactly ${Object.keys(ACT_MODULES).length} modules (account-material's named doors, secret-box's key mint, four PURE modules with none) and only ${ACT_EXT.join(' / ')} — no dynamic require`, { mods: c.act.mods, ext: c.act.ext, dyn: c.act.dyn, doors: Object.fromEntries(Object.entries(c.act.doors).filter(([rel, d]) => JSON.stringify(d) !== JSON.stringify((ACT_MODULES[rel] || ['(unnamed)']).slice().sort()))) });
   // ⑧ every module edge accounts.js has, by function — a NEW one (a module a function reaches) is judged here first
   // (lane auto-cli-oat-unprobeable: + ./auto-cli-model.js at the top — PURE, imports only secret-shapes; list() reads its
   // probeEligibility / probeRecordOf for the row, noteProbe bounds the record with it; no write door, no credential)
@@ -971,11 +971,11 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   ok(JSON.stringify(c.accEdges) === JSON.stringify(ACC_EDGES), `⑧ accounts.js requires exactly its ${ACC_EDGES.length} named module edges, by function (verify r2 F1: an inline require in an act was a door nobody counted)`, c.accEdges.filter((x) => !ACC_EDGES.includes(x)).concat(ACC_EDGES.filter((x) => !c.accEdges.includes(x)).map((x) => '-' + x)));
   const planted = accSrc.replace("    a.oatEnc = this._enc(token);\n", "    a.oatEnc = this._enc(token);\n    fs.writeFileSync(this.subCredsPath(id), JSON.stringify({ claudeAiOauth: { accessToken: token } }), { mode: 0o600 });\n");
   const cp = planted !== accSrc ? census({ 'src/accounts.js': planted }) : null;
-  ok(!!cp && cp.extra.includes('setOat writeFileSync') && cp.credWrites.some((x) => /^src\/accounts\.js setOat/.test(x)), 'RED control (invariant 2): a planted writer in setOat is a new accounts.js row AND a second credentials-file write', cp && { extra: cp.extra, credWrites: cp.credWrites });
+  ok(!!cp && gateOf(cp.extra.includes('setOat writeFileSync')) && verdictOf(cp.credWrites.some((x) => /^src\/accounts\.js setOat/.test(x))), 'RED control (invariant 2): a planted writer in setOat is a new accounts.js row AND a second credentials-file write', cp && { extra: cp.extra, credWrites: cp.credWrites });
   const matSrc = fs.readFileSync(path.join(REPO, 'src/account-material.js'), 'utf8');
   const plantedM = matSrc.replace("  await writePrivateFileAsync(path.join(dir, '.credentials.json'), JSON.stringify(body), { expect, asideAs });", "  await fsp.writeFile(path.join(dir, '.credentials.json'), JSON.stringify(body), { mode: 0o600 });");
   const cm = plantedM !== matSrc ? census({ 'src/account-material.js': plantedM }) : null;
-  ok(!!cm && cm.matContent.includes('writeCredentialFile'), 'RED control (invariant 2): writeCredentialFile writing around its private writer (non-atomic) is caught', cm && cm.matContent);
+  ok(!!cm && verdictOf(cm.matContent.includes('writeCredentialFile')), 'RED control (invariant 2): writeCredentialFile writing around its private writer (non-atomic) is caught', cm && cm.matContent);
   // the verifier's GUARDED plants (pool-oat-verify p/mutants.py g1–g6: `if (process.env.POV_NEVER)` — never run in a
   // suite, so only the STRUCTURE can see them), planted in the oat's clock
   const syncSrc = fs.readFileSync(path.join(REPO, 'src/server/oat-file-sync.js'), 'utf8');
@@ -1018,8 +1018,8 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
     const cr = census(ov);
     r2Red[name] = [cr.clock.length ? '⑥' : '', !actOk(cr) ? '⑦' : '', JSON.stringify(cr.accEdges) !== JSON.stringify(c.accEdges) ? '⑧' : '', cr.extra.length || cr.missing.length ? '①' : ''].filter(Boolean).join('') || 'GREEN';
   }
-  ok(Object.values(r2Red).every((x) => /^[①⑥⑦⑧]+$/.test(x)), 'RED controls (verify r2 F1): the verifier\'s four GREEN guarded plants and this lane\'s four — a new module (two hops too), an aliased / Reflect.apply rename, a PURE module growing a computed-key write, a dynamic require — are each RED by structure: ' + JSON.stringify(r2Red), r2Red);
-  ok(Object.values(gRed).every((x) => /⑥/.test(x)) && /④/.test(gRed.g4) && /④/.test(gRed.g5) && /⑤/.test(gRed.g3), 'RED controls (verify r1 F6): the verifier\'s six GUARDED plants in the oat\'s clock — a literal path, a path variable, writePrivateFile(var), a remover without "ours?", a foreign archive, a second plaintext copy — are each RED by structure (⑥ every one; ④ the remove + archive; ⑤ the private writer): ' + JSON.stringify(gRed), gRed);
+  ok(verdictOf(Object.values(r2Red).every((x) => /^[①⑥⑦⑧]+$/.test(x))), 'RED controls (verify r2 F1): the verifier\'s four GREEN guarded plants and this lane\'s four — a new module (two hops too), an aliased / Reflect.apply rename, a PURE module growing a computed-key write, a dynamic require — are each RED by structure: ' + JSON.stringify(r2Red), r2Red);
+  ok(gateOf(Object.values(gRed).every((x) => /⑥/.test(x))) && gateOf(/④/.test(gRed.g4)) && gateOf(/④/.test(gRed.g5)) && verdictOf(/⑤/.test(gRed.g3)), 'RED controls (verify r1 F6): the verifier\'s six GUARDED plants in the oat\'s clock — a literal path, a path variable, writePrivateFile(var), a remover without "ours?", a foreign archive, a second plaintext copy — are each RED by structure (⑥ every one; ④ the remove + archive; ⑤ the private writer): ' + JSON.stringify(gRed), gRed);
 
   // THE BEHAVIOUR CENSUS (verify r1 F6): every oat flow, a stack-aware spy on every mutation door
   const SYNC_DOORS = ['writeFileSync', 'appendFileSync', 'renameSync', 'unlinkSync', 'rmSync', 'chmodSync', 'symlinkSync', 'linkSync', 'copyFileSync', 'truncateSync', 'utimesSync', 'mkdirSync', 'openSync', 'cpSync'];
@@ -1092,7 +1092,7 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   };
   const b = await behaviour(AccountManager);
   ok(b.rows.length >= 10 && b.bad.length === 0 && JSON.stringify(b.acts) === JSON.stringify(['archive', 'remove', 'write']), `THE BEHAVIOUR CENSUS: every flow (mint ×5 gate shut, the CLI measured, a re-mint, a sweep, an oat-file-sync tick, a link + an unmeasured CLI + the link's end, clearOat ×5) — ${b.rows.length} mutations inside member dirs, each by write / archive / remove reached from the store's one actor; every removal through the remover`, { n: b.rows.length, bad: b.bad.slice(0, 4), acts: b.acts });
-  ok(b.live && b.mcpKept, '…and through all of it the LIVE login is byte-intact and the CLI\'s mcpOAuth stays in service', { live: b.live, mcp: b.mcpKept });
+  ok(gateOf(b.live) && verdictOf(b.mcpKept), '…and through all of it the LIVE login is byte-intact and the CLI\'s mcpOAuth stays in service', { live: b.live, mcp: b.mcpKept });
   ok(b.disk.length === 0, 'THE WHOLE DISK (verify r2 F1): after each of the 9 steps, no regular file under the suite\'s tmp root holds a flow token\'s bytes but a member\'s .credentials.json', b.disk.slice(0, 6));
   // RED controls: plants that RUN (the guarded ones are the structure's), in the clock and in the store
   const bRed = {};
@@ -1107,7 +1107,7 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
     const bb = syncSrc.includes(SA) ? await behaviour(AccountManager, { plantTick: syncSrc.replace(SA, SA + '      ' + code + '\n'), drop: true }) : null;
     bRed[name] = bb ? { bad: bb.bad.length, disk: bb.disk.length } : 'anchor missing';
   }
-  ok(Object.values(bRed).every((n) => n && typeof n === 'object' && n.bad + n.disk > 0) && bRed['a token copy in the data dir (r2a3)'].disk > 0, 'RED controls (verify r1 F6 + r2 F1): plants that RUN in the clock — a path-variable write, a rename, a plaintext copy, a remover handed a yes-man "ours?" (stacks not the store\'s actor), a token copy outside every member dir (the whole-disk scan) — are each caught by the behaviour census: ' + JSON.stringify(bRed), bRed);
+  ok(gateOf(Object.values(bRed).every((n) => n && typeof n === 'object' && n.bad + n.disk > 0)) && bRed['a token copy in the data dir (r2a3)'].disk > 0, 'RED controls (verify r1 F6 + r2 F1): plants that RUN in the clock — a path-variable write, a rename, a plaintext copy, a remover handed a yes-man "ours?" (stacks not the store\'s actor), a token copy outside every member dir (the whole-disk scan) — are each caught by the behaviour census: ' + JSON.stringify(bRed), bRed);
 }
 console.log('§ r3763 MUST 2 (b) / r3782 — a mint the HUB proved by itself says «saved» only when accounts.json holds the token');
 {
@@ -1137,7 +1137,7 @@ console.log('§ r3763 MUST 2 (b) / r3782 — a mint the HUB proved by itself say
   };
   const AMc = MUTL.load('src/accounts.js', ASRCm, 'unpatched', { same: true });
   const r = await landingRun(AMc);
-  ok(r.proven && r.phase === 'saved' && r.atSaved === true, 'MUST 2 (b): a mint proved by identity, the list\'s write HELD on the writer\'s thread: when it says «saved», accounts.json already holds the token (the sign-in save waited for its landing)', r);
+  ok(gateOf(r.proven) && r.phase === 'saved' && r.atSaved === true, 'MUST 2 (b): a mint proved by identity, the list\'s write HELD on the writer\'s thread: when it says «saved», accounts.json already holds the token (the sign-in save waited for its landing)', r);
   const cutM = "try { this._save({ now: true, why: 'the long-lived token' }); }";
   const { anchored: anchoredM } = await import('./scratch.mjs');
   const AMx = MUTL.load('src/accounts.js', anchoredM(ASRCm, cutM, 'try { this._save(); }', 'off-loop-oat'), 'off-loop-oat');
@@ -1148,4 +1148,4 @@ console.log('§ r3763 MUST 2 (b) / r3782 — a mint the HUB proved by itself say
 
 fs.rmSync(tmpBase, { recursive: true, force: true });
 console.log(`\ntest-oat-mint: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

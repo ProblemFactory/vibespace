@@ -27,7 +27,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const T = require(path.join(REPO, 'src/totp.js'));
 const acorn = require('acorn');
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const hmac = (a, k, m) => crypto.createHmac(String(a).toLowerCase(), k).update(m).digest();
 // THE CLASSIC SEED (base32 of "Hello!" + DEADBEEF) — a secret-shaped fixture is BUILT AT RUNTIME, never a literal (the repo's push rule)
 const HELLO = ['JBSWY3DP', 'EHPK3PXP'].join('');
@@ -57,16 +57,16 @@ console.log('② RFC 4226 appendix D');
 console.log('③ base32');
 {
   const V = [['', ''], ['f', 'MY'], ['fo', 'MZXQ'], ['foo', 'MZXW6'], ['foob', 'MZXW6YQ'], ['fooba', 'MZXW6YTB'], ['foobar', 'MZXW6YTBOI']];
-  ok(V.every(([p, e]) => T.base32Encode(Buffer.from(p)) === e) && V.slice(1).every(([p, e]) => Buffer.from(T.base32Decode(e).bytes).toString() === p), 'RFC 4648 §10: every vector both ways');
+  ok(gateOf(V.every(([p, e]) => T.base32Encode(Buffer.from(p)) === e)) && verdictOf(V.slice(1).every(([p, e]) => Buffer.from(T.base32Decode(e).bytes).toString() === p)), 'RFC 4648 §10: every vector both ways');
   const h = T.base32Decode(HELLO);
-  ok(h.ok && Buffer.from(h.bytes).toString('hex') === '48656c6c6f21deadbeef' && h.text === HELLO, 'the classic seed → "Hello!" + DEADBEEF');
+  ok(gateOf(h.ok) && Buffer.from(h.bytes).toString('hex') === '48656c6c6f21deadbeef' && h.text === HELLO, 'the classic seed → "Hello!" + DEADBEEF');
   const pasted = T.base32Decode(' jbsw y3dp-ehpk 3pxp== ');
-  ok(pasted.ok && pasted.text === HELLO && Buffer.from(pasted.bytes).equals(Buffer.from(h.bytes)), 'as people paste it (lower case, spaces, dashes, padding) ⇒ the same bytes and the canonical text');
-  ok([HELLO.slice(0, 15) + '1', HELLO.slice(0, 15) + '0', HELLO.slice(0, 15) + '8', 'JBSW+3DP'].every((s) => T.base32Decode(s).code === 'bad_seed'), 'a character outside A–Z 2–7 ⇒ bad_seed');
-  ok(['A', 'ABC', 'ABCDEF', HELLO.slice(0, 9)].every((s) => T.base32Decode(s).code === 'bad_seed') && T.base32Decode('').code === 'bad_seed', 'a length no encoder makes (1, 3, 6 past a multiple of 8) or nothing ⇒ bad_seed');
+  ok(gateOf(pasted.ok) && pasted.text === HELLO && verdictOf(Buffer.from(pasted.bytes).equals(Buffer.from(h.bytes))), 'as people paste it (lower case, spaces, dashes, padding) ⇒ the same bytes and the canonical text');
+  ok(verdictOf([HELLO.slice(0, 15) + '1', HELLO.slice(0, 15) + '0', HELLO.slice(0, 15) + '8', 'JBSW+3DP'].every((s) => T.base32Decode(s).code === 'bad_seed')), 'a character outside A–Z 2–7 ⇒ bad_seed');
+  ok(gateOf(['A', 'ABC', 'ABCDEF', HELLO.slice(0, 9)].every((s) => T.base32Decode(s).code === 'bad_seed')) && T.base32Decode('').code === 'bad_seed', 'a length no encoder makes (1, 3, 6 past a multiple of 8) or nothing ⇒ bad_seed');
   let rt = true;
   for (let n = 1; n <= 40; n++) { const b = crypto.randomBytes(n); const d = T.base32Decode(T.base32Encode(b)); if (!d.ok || !Buffer.from(d.bytes).equals(b)) rt = false; }
-  ok(rt, 'random bytes 1…40 round-trip encode → decode');
+  ok(verdictOf(rt), 'random bytes 1…40 round-trip encode → decode');
 }
 
 console.log('④ the otpauth link');
@@ -76,20 +76,20 @@ console.log('④ the otpauth link');
   ok(P('otpauth://totp/GitHub:owner?issuer=GitHub').code === 'bad_seed', 'no secret ⇒ bad_seed');
   ok(P(`otpauth://hotp/GitHub:owner?secret=${S}&counter=1`).code === 'hotp_unsupported', 'a hotp link ⇒ hotp_unsupported');
   const d8 = P(`otpauth://totp/GitHub:owner?secret=${S}&digits=8`);
-  ok(d8.ok && d8.value.digits === 8 && d8.value.period === 30 && d8.value.algorithm === 'SHA1', 'digits=8 ⇒ 8 (period and algorithm default 30 / SHA1)', d8);
+  ok(gateOf(d8.ok) && d8.value.digits === 8 && d8.value.period === 30 && d8.value.algorithm === 'SHA1', 'digits=8 ⇒ 8 (period and algorithm default 30 / SHA1)', d8);
   const low = P(`otpauth://totp/x?secret=${S}&algorithm=sha256&period=60`);
-  ok(low.ok && low.value.algorithm === 'SHA256' && low.value.period === 60, 'algorithm=sha256 (lower case) ⇒ SHA256; period=60', low);
+  ok(gateOf(low.ok) && low.value.algorithm === 'SHA256' && low.value.period === 60, 'algorithm=sha256 (lower case) ⇒ SHA256; period=60', low);
   const lab = P(`otpauth://totp/Cloudflare:dash?secret=${S}`);
-  ok(lab.ok && lab.value.issuer === 'Cloudflare' && lab.value.account === 'dash', 'the issuer in the label only ⇒ the issuer', lab);
+  ok(gateOf(lab.ok) && lab.value.issuer === 'Cloudflare' && lab.value.account === 'dash', 'the issuer in the label only ⇒ the issuer', lab);
   const pct = P(`otpauth://totp/ACME%20Co:jane%40example.com?secret=${S.toLowerCase()}&issuer=ACME+Co`);
-  ok(pct.ok && pct.value.issuer === 'ACME Co' && pct.value.account === 'jane@example.com' && pct.value.seed === S, 'percent-encoding in the label, `+` in a parameter, a lower-case secret', pct);
+  ok(gateOf(pct.ok) && pct.value.issuer === 'ACME Co' && pct.value.account === 'jane@example.com' && pct.value.seed === S, 'percent-encoding in the label, `+` in a parameter, a lower-case secret', pct);
   const both = P(`otpauth://totp/Old%20Name:me?secret=${S}&issuer=New%20Name`);
-  ok(both.ok && both.value.issuer === 'New Name', 'the issuer parameter wins over the label\'s', both);
+  ok(gateOf(both.ok) && both.value.issuer === 'New Name', 'the issuer parameter wins over the label\'s', both);
   ok(P('https://example.com/totp?secret=' + S).code === 'bad_uri' && P(`otpauth://steam/x?secret=${S}`).code === 'bad_uri' && P(`otpauth://totp/%E0%A4%A?secret=${S}`).code === 'bad_uri', 'not an otpauth link · another type · a broken escape ⇒ bad_uri');
   ok(P(`otpauth://totp/x?secret=${S}&digits=5`).code === 'bad_digits' && P(`otpauth://totp/x?secret=${S}&period=10`).code === 'bad_period' && P(`otpauth://totp/x?secret=${S}&algorithm=MD5`).code === 'bad_algorithm' && P('otpauth://totp/x?secret=JBSWY3DP').code === 'seed_too_short',
     '5 digits · a 10 s period · MD5 · a 40-bit seed ⇒ each refused by name (never trimmed)');
   const proto = P(`otpauth://totp/x?secret=${S}&__proto__=polluted&constructor=x`);
-  ok(proto.ok && ({}).polluted === undefined && Object.keys(proto.value).join() === 'v,seed,digits,period,algorithm,issuer,account,addedAt,source', 'a __proto__ parameter pollutes nothing; the value is its named fields', proto);
+  ok(gateOf(proto.ok) && ({}).polluted === undefined && Object.keys(proto.value).join() === 'v,seed,digits,period,algorithm,issuer,account,addedAt,source', 'a __proto__ parameter pollutes nothing; the value is its named fields', proto);
   ok(P('otpauth://totp/x?secret=' + 'A'.repeat(3000)).code === 'bad_uri', 'a link over 2048 characters ⇒ bad_uri');
 }
 
@@ -102,30 +102,30 @@ console.log('⑤ the clock and the skew');
   ok(at(59000, { period: 60 }).step === 0 && at(59000, { period: 60 }).secondsLeft === 1 && at(60000, { period: 60 }).secondsLeft === 60, 'a 60 s period: its own boundaries');
   let range = true;
   for (let s = 0; s < 200; s++) { const r = at(s * 1000 + 999); if (!(r.secondsLeft >= 1 && r.secondsLeft <= 30)) range = false; }
-  ok(range, 'the seconds left are always 1 … period');
+  ok(verdictOf(range), 'the seconds left are always 1 … period');
   const now = 1_700_000_015_000;
   const cur = at(now).code, prev = at(now - 30000).code, next = at(now + 30000).code, far = at(now - 60000).code;
   const V = (c, w = 1) => T.verify(K, c, { now, window: w, hmac });
-  ok(V(cur).ok && V(cur).delta === 0 && V(prev).delta === -1 && V(next).delta === 1, 'verify ±1: the current code (0), a clock 30 s behind (−1), 30 s ahead (+1)');
-  ok(T.verify(K, at(now - 29000).code, { now, window: 1, hmac }).ok && T.verify(K, at(now + 29000).code, { now, window: 1, hmac }).ok, 'a clock 29 s behind or ahead ⇒ taken');
-  ok(V(far).code === 'wrong_code' && V(prev, 0).code === 'wrong_code' && V(cur, 0).ok, 'two steps away ⇒ wrong_code; window 0 ⇒ the current step only');
-  ok(V('12345').code === 'bad_code' && V('12a456').code === 'bad_code' && V(` ${cur.slice(0, 3)} ${cur.slice(3)} `).ok, 'a code of the wrong shape ⇒ bad_code; spaces inside are forgiven');
+  ok(gateOf(V(cur).ok) && V(cur).delta === 0 && V(prev).delta === -1 && V(next).delta === 1, 'verify ±1: the current code (0), a clock 30 s behind (−1), 30 s ahead (+1)');
+  ok(gateOf(T.verify(K, at(now - 29000).code, { now, window: 1, hmac }).ok) && verdictOf(T.verify(K, at(now + 29000).code, { now, window: 1, hmac }).ok), 'a clock 29 s behind or ahead ⇒ taken');
+  ok(V(far).code === 'wrong_code' && V(prev, 0).code === 'wrong_code' && verdictOf(V(cur, 0).ok), 'two steps away ⇒ wrong_code; window 0 ⇒ the current step only');
+  ok(V('12345').code === 'bad_code' && V('12a456').code === 'bad_code' && verdictOf(V(` ${cur.slice(0, 3)} ${cur.slice(3)} `).ok), 'a code of the wrong shape ⇒ bad_code; spaces inside are forgiven');
 }
 
 console.log('⑥ the record');
 {
   const v = T.valueOf({ seed: 'jbsw y3dp ehpk 3pxp', issuer: 'GitHub', account: 'owner@example.com' }, { now: 1_760_000_000_000, source: 'manual' });
-  ok(v.ok && JSON.stringify(v.value) === JSON.stringify({ v: 1, seed: HELLO, digits: 6, period: 30, algorithm: 'SHA1', issuer: 'GitHub', account: 'owner@example.com', addedAt: 1_760_000_000_000, source: 'manual' }), 'valueOf: the named fields, the canonical seed, the defaults', v);
+  ok(gateOf(v.ok) && JSON.stringify(v.value) === JSON.stringify({ v: 1, seed: HELLO, digits: 6, period: 30, algorithm: 'SHA1', issuer: 'GitHub', account: 'owner@example.com', addedAt: 1_760_000_000_000, source: 'manual' }), 'valueOf: the named fields, the canonical seed, the defaults', v);
   ok(T.valueOf({ seed: HELLO, issuer: 'x'.repeat(121) }).code === 'bad_text' && T.valueOf({ seed: HELLO, account: 'a\nb' }).code === 'bad_text' && T.valueOf({ seed: HELLO, digits: '6x' }).code === 'bad_digits' && T.valueOf({ seed: 'A'.repeat(208) }).code === 'bad_seed',
     'an issuer over 120 · a control character · "6x" digits · a seed over 128 bytes ⇒ refused by name');
   ok(T.valueOf({ seed: HELLO, source: 'qr' }, { source: 'nonsense' }).value.source === 'manual', 'an unknown source ⇒ manual');
   const rec = T.recordOf(JSON.stringify(v.value));
-  ok(rec && JSON.stringify(rec) === JSON.stringify(v.value), 'recordOf(the sealed text) ⇒ the same record');
+  ok(gateOf(rec) && JSON.stringify(rec) === JSON.stringify(v.value), 'recordOf(the sealed text) ⇒ the same record');
   ok(T.recordOf('not json') === null && T.recordOf(JSON.stringify({ ...v.value, v: 2 })) === null && T.recordOf(JSON.stringify({ ...v.value, seed: 'jbsw y3dp ehpk 3pxp' })) === null && T.recordOf(JSON.stringify({ ...v.value, digits: 9 })) === null && T.recordOf('null') === null,
     'recordOf refuses: not JSON · another version · a seed not in its canonical form · 9 digits · null');
   const u = T.uriOf(v.value);
   const back = T.parseOtpauth(u);
-  ok(u === `otpauth://totp/GitHub:owner%40example.com?secret=${v.value.seed}&issuer=GitHub&algorithm=SHA1&digits=6&period=30` && back.ok && ['seed', 'digits', 'period', 'algorithm', 'issuer', 'account'].every((k) => back.value[k] === v.value[k]), 'uriOf ⇄ parseOtpauth: the link carries the seed and every setting', u);
+  ok(u === `otpauth://totp/GitHub:owner%40example.com?secret=${v.value.seed}&issuer=GitHub&algorithm=SHA1&digits=6&period=30` && gateOf(back.ok) && verdictOf(['seed', 'digits', 'period', 'algorithm', 'issuer', 'account'].every((k) => back.value[k] === v.value[k])), 'uriOf ⇄ parseOtpauth: the link carries the seed and every setting', u);
   const bare = T.valueOf({ seed: HELLO, algorithm: 'sha512', digits: 8, period: 60 }).value;
   ok(T.uriOf(bare, 'my-code') === `otpauth://totp/my-code?secret=${bare.seed}&algorithm=SHA512&digits=8&period=60` && bare.seed === v.value.seed, 'no issuer, no account ⇒ the entry\'s name is the label');
 }
@@ -143,21 +143,21 @@ console.log('⑧ the grants');
   const RUN = 'a'.repeat(24), RUN2 = 'b'.repeat(24);
   const gS = T.grantOf({ id: 'tg-0123456789ab', entry: 'totp:gh', subject: 'session:c-1', at: 5, by: 'user:o', run: RUN });
   const gG = T.grantOf({ id: 'tg-0123456789ac', entry: 'totp:gh', subject: 'group:T-1', at: 5, by: 'user:o', run: null, extra: 'dropped' });
-  ok(gS && gS.run === RUN && gG && gG.run === null && !('extra' in gG), 'grantOf: a conversation\'s grant holds its run; a Task Group\'s none; named fields only');
-  ok([{ id: 'x', entry: 'totp:gh', subject: 'session:c', run: RUN }, { id: 'tg-0123456789ab', entry: 'host:h', subject: 'session:c', run: RUN }, { id: 'tg-0123456789ab', entry: 'totp:gh', subject: 'session:c' }, { id: 'tg-0123456789ab', entry: 'totp:gh', subject: 'group:g', run: RUN }, { id: 'tg-0123456789ab', entry: 'totp:gh', subject: 'external' }].every((r) => T.grantOf(r) === null),
+  ok(gateOf(gS) && gS.run === RUN && gateOf(gG) && gG.run === null && !('extra' in gG), 'grantOf: a conversation\'s grant holds its run; a Task Group\'s none; named fields only');
+  ok(verdictOf([{ id: 'x', entry: 'totp:gh', subject: 'session:c', run: RUN }, { id: 'tg-0123456789ab', entry: 'host:h', subject: 'session:c', run: RUN }, { id: 'tg-0123456789ab', entry: 'totp:gh', subject: 'session:c' }, { id: 'tg-0123456789ab', entry: 'totp:gh', subject: 'group:g', run: RUN }, { id: 'tg-0123456789ab', entry: 'totp:gh', subject: 'external' }].every((r) => T.grantOf(r) === null)),
     'grantOf refuses: a bad id · another entry kind · a conversation without its run · a group with one · `external`');
   const U = (o) => T.useVerdict({ grants: [gS, gG], entry: 'totp:gh', vaultState: 'unlocked', ...o });
   const me = { conversationId: 'c-1', groups: [], run: RUN };
   ok(U({ caller: me, vaultState: 'locked' }).code === 'vault_locked' && U({ caller: me, vaultState: 'not_set_up' }).code === 'vault_not_set_up', 'LOCKED first: a granted caller on a locked vault ⇒ vault_locked (not set up ⇒ vault_not_set_up)');
-  ok(U({ caller: me }).ok && U({ caller: me }).grant.subject === 'session:c-1', 'the conversation in THIS run ⇒ ok');
+  ok(gateOf(U({ caller: me }).ok) && U({ caller: me }).grant.subject === 'session:c-1', 'the conversation in THIS run ⇒ ok');
   ok(U({ caller: { ...me, run: RUN2 } }).code === 'not_granted', 'the same conversation in ANOTHER run (it ended and came back) ⇒ not_granted');
-  ok(U({ caller: { conversationId: 'c-2', groups: [], run: RUN } }).code === 'not_granted' && U({ caller: { conversationId: 'c-2', groups: ['T-1'], run: RUN2 } }).ok, 'another conversation ⇒ not_granted; one in the granted Task Group ⇒ ok');
+  ok(U({ caller: { conversationId: 'c-2', groups: [], run: RUN } }).code === 'not_granted' && verdictOf(U({ caller: { conversationId: 'c-2', groups: ['T-1'], run: RUN2 } }).ok), 'another conversation ⇒ not_granted; one in the granted Task Group ⇒ ok');
   ok(U({ caller: { conversationId: 'c-3', groups: ['T-2'], run: RUN } }).code === 'not_granted' && U({ caller: me, entry: 'totp:other' }).code === 'not_granted', 'another group · another entry ⇒ not_granted');
   ok(U({ caller: { groups: ['T-1'] } }).code === 'unauthorized' && U({ caller: { ...me, live: false } }).code === 'not_running' && U({ caller: null }).code === 'unauthorized', 'no conversation id ⇒ unauthorized; a view (not running) ⇒ not_running');
   // lane vault-agent-own: an entry the caller ADDED ITSELF (its `owner`) is its own — no grant, in this run or a later one
   const own = (caller, o = {}) => T.useVerdict({ grants: [], entry: 'totp:mine', vaultState: 'unlocked', owner: 'conv-own', caller, ...o });
-  ok(own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-1-1', run: RUN }).ok && own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-1-1', run: RUN }).grant.subject === 'own', 'OWN: its owner (by its durable id) gets the code with NO grant (via own)');
-  ok(own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-9-9', run: RUN2 }).ok && own({ conversationId: 'x', scope: 'conv-own', run: RUN }).ok, 'OWN: a later run of it (it ended and came back — a new run, a new registered id) still does; an owner recorded by the registered id matches that one');
+  ok(gateOf(own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-1-1', run: RUN }).ok) && own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-1-1', run: RUN }).grant.subject === 'own', 'OWN: its owner (by its durable id) gets the code with NO grant (via own)');
+  ok(gateOf(own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-9-9', run: RUN2 }).ok) && verdictOf(own({ conversationId: 'x', scope: 'conv-own', run: RUN }).ok), 'OWN: a later run of it (it ended and came back — a new run, a new registered id) still does; an owner recorded by the registered id matches that one');
   ok(own({ conversationId: 'conv-own', conv: null, scope: 'sess-5-5', run: RUN }).code === 'not_granted' && own({ conversationId: 'conv-2', conv: 'conv-2', scope: 'sess-2-2', run: RUN }).code === 'not_granted', 'OWN: a pending fork (durable id null, its parent\'s conversation id) and another conversation ⇒ not_granted');
   ok(own({ conversationId: 'conv-own', conv: 'conv-own', run: RUN }, { vaultState: 'locked' }).code === 'vault_locked' && own({ conversationId: 'conv-own', conv: 'conv-own', run: RUN, live: false }).code === 'not_running' && own({ conversationId: 'conv-own', run: RUN }, { owner: '' }).code === 'not_granted', 'OWN: still LOCKED first and a view refused; an empty owner owns nothing');
 }
@@ -177,23 +177,23 @@ console.log('⑩ THE ADD DIALOG\'S MODEL (lane vault-totp-add — addPlanOf)');
   const P = T.addPlanOf;
   const link = `otpauth://totp/GitHub:owner%40example.com?secret=${HELLO}&issuer=GitHub`;
   const a = P({ way: 'link', uri: `  ${link}  ` });
-  ok(a.ok && a.way === 'link' && a.name === 'github-owner' && JSON.stringify(a.facts) === JSON.stringify({ issuer: 'GitHub', account: 'owner@example.com', digits: 6, period: 30, algorithm: 'SHA1' }) && JSON.stringify(a.body) === JSON.stringify({ uri: link, name: 'github-owner' }),
+  ok(gateOf(a.ok) && a.way === 'link' && a.name === 'github-owner' && JSON.stringify(a.facts) === JSON.stringify({ issuer: 'GitHub', account: 'owner@example.com', digits: 6, period: 30, algorithm: 'SHA1' }) && JSON.stringify(a.body) === JSON.stringify({ uri: link, name: 'github-owner' }),
     'a pasted link ⇒ its facts (issuer · account · 6 digits · 30 s · SHA1), the name from them (github-owner), the body = the link trimmed + the name', a);
   ok(!JSON.stringify(a.facts).includes(HELLO) && !('seed' in a.body), 'the facts carry no seed; the link way sends the link, never a seed field');
   const a2 = P({ way: 'link', uri: link, name: '  work-github ' });
-  ok(a2.ok && a2.name === 'work-github' && a2.body.name === 'work-github', 'a name a person typed wins over the link\'s');
+  ok(gateOf(a2.ok) && a2.name === 'work-github' && a2.body.name === 'work-github', 'a name a person typed wins over the link\'s');
   const a8 = P({ way: 'link', uri: `otpauth://totp/ACME:dev?secret=${HELLO}&digits=8&period=60&algorithm=sha256` });
-  ok(a8.ok && a8.facts.digits === 8 && a8.facts.period === 60 && a8.facts.algorithm === 'SHA256' && a8.facts.issuer === 'ACME' && a8.name === 'acme-dev', 'the link\'s own settings are the facts (8 digits · 60 s · SHA256), the issuer from the label', a8);
+  ok(gateOf(a8.ok) && a8.facts.digits === 8 && a8.facts.period === 60 && a8.facts.algorithm === 'SHA256' && a8.facts.issuer === 'ACME' && a8.name === 'acme-dev', 'the link\'s own settings are the facts (8 digits · 60 s · SHA256), the issuer from the label', a8);
   const noWho = P({ way: 'link', uri: `otpauth://totp/?secret=${HELLO}` });
-  ok(noWho.ok && noWho.name === 'code' && noWho.facts.issuer === '' && noWho.facts.account === '', 'a link with no issuer or account ⇒ the name «code» (the person renames it)', noWho);
+  ok(gateOf(noWho.ok) && noWho.name === 'code' && noWho.facts.issuer === '' && noWho.facts.account === '', 'a link with no issuer or account ⇒ the name «code» (the person renames it)', noWho);
   const pasted = HELLO.toLowerCase().replace(/(.{4})/g, '$1 ').trim() + '==';
   const b = P({ way: 'seed', seed: pasted, name: 'bank' });
-  ok(b.ok && b.way === 'seed' && b.name === 'bank' && b.body.seed === HELLO && b.body.digits === 6 && b.body.period === 30 && b.body.algorithm === 'SHA1' && !('uri' in b.body),
+  ok(gateOf(b.ok) && b.way === 'seed' && b.name === 'bank' && b.body.seed === HELLO && b.body.digits === 6 && b.body.period === 30 && b.body.algorithm === 'SHA1' && !('uri' in b.body),
     'the seed as people paste it (lower case, spaces, padding) ⇒ the canonical seed; empty settings ⇒ the standard (6 · 30 s · SHA1); never a uri field', b);
   ok(JSON.stringify(T.ADD_DEFAULTS) === JSON.stringify({ digits: 6, period: 30, algorithm: 'SHA1' }) && T.ADD_CHOICES.digits.join() === '6,8' && T.ADD_CHOICES.period.join() === '30,60' && T.ADD_CHOICES.algorithm.join() === 'SHA1,SHA256,SHA512' && T.ADD_WAYS.join() === 'link,seed',
     '高级\'s defaults = the standard; its choices: 6 / 8 digits, 30 / 60 s, SHA1 / SHA256 / SHA512; the two ways');
   const b2 = P({ way: 'seed', seed: HELLO, name: 'bank', digits: '8', period: '60', algorithm: 'SHA512' });
-  ok(b2.ok && b2.body.digits === 8 && b2.body.period === 60 && b2.body.algorithm === 'SHA512', '高级\'s picks (as the selects give them: strings) ⇒ numbers in the body', b2.body);
+  ok(gateOf(b2.ok) && b2.body.digits === 8 && b2.body.period === 60 && b2.body.algorithm === 'SHA512', '高级\'s picks (as the selects give them: strings) ⇒ numbers in the body', b2.body);
   const R = (x) => [x.ok, x.code, x.field].join();
   const refusals = [
     [P({ way: 'link', uri: '' }), 'false,bad_uri,uri', 'no link'],
@@ -213,7 +213,7 @@ console.log('⑩ THE ADD DIALOG\'S MODEL (lane vault-totp-add — addPlanOf)');
   const off = refusals.filter(([x, want]) => R(x) !== want).map(([x, want, what]) => `${what}: ${R(x)} ≠ ${want}`);
   ok(!off.length, `every refusal by name with its field (${refusals.length}: ${refusals.map((r) => r[2]).join(' · ')})`, off);
   ok(P({ way: 'seed', seed: HELLO, name: '' }).facts.digits === 6 && P({ way: 'link', uri: link, name: 'a b' }).facts.issuer === 'GitHub', 'a refusal of the NAME keeps the facts (the dialog still shows what the link says)');
-  ok(refusals.every(([x]) => !JSON.stringify(x).includes(HELLO)), 'no refusal carries the seed');
+  ok(verdictOf(refusals.every(([x]) => !JSON.stringify(x).includes(HELLO))), 'no refusal carries the seed');
   // the model computes NO code: it has no hmac to call (the PREVIEW is the hub's)
   const src = fs.readFileSync(path.join(REPO, 'src/totp.js'), 'utf8');
   const body = src.slice(src.indexOf('function addPlanOf('), src.indexOf('\nmodule.exports'));
@@ -221,4 +221,4 @@ console.log('⑩ THE ADD DIALOG\'S MODEL (lane vault-totp-add — addPlanOf)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass}) — ${Date.now() - t0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

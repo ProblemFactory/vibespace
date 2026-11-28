@@ -28,7 +28,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const holdAbs = (t) => anchored(anchored(t, "require('../store-read.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/store-read.js')) + ')', 'tls-store-read-path'), "require('../store-read-hold.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/store-read-hold.js')) + ')', 'tls-store-read-hold-path');
 const { WebSocketServer, WebSocket } = require(path.join(REPO, 'node_modules/ws'));
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -100,7 +100,7 @@ try {
   const env = { VIBESPACE_TLS_CERT: A.c, VIBESPACE_TLS_KEY: A.k };
   const r1 = rig(TLS, { env, dataDir: path.join(DIR, 'd1') });
   const port = await listen(r1.hub); closers.push(r1.hub.front);
-  ok(r1.hub.url() === `https://localhost:0` || /^https:\/\/localhost:/.test(r1.hub.url() || ''), `the certificate on disk is served from boot, before any pass: ${r1.hub.url()}`);
+  ok(r1.hub.url() === `https://localhost:0` || verdictOf(/^https:\/\/localhost:/.test(r1.hub.url() || '')), `the certificate on disk is served from boot, before any pass: ${r1.hub.url()}`);
   const g1 = await get(`http://127.0.0.1:${port}/a?x=1`);
   ok(g1.body === 'http GET /a?x=1 0', `plain GET → the http server (${g1.body || g1.error})`);
   const g2 = await get(`https://127.0.0.1:${port}/b`);
@@ -112,7 +112,7 @@ try {
   ok(await wsEcho(`ws://127.0.0.1:${port}/ws`) === 'ws:ping', 'a WebSocket upgrade on the http server');
   ok(await wsEcho(`wss://127.0.0.1:${port}/ws`) === 'wss:ping', 'a WebSocket upgrade on the https server');
   const slow = await raw(port, [[400, 'G'], [300, 'ET /slow HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n']]);
-  ok(/^HTTP\/1\.1 200[\s\S]*http GET \/slow 0$/.test(slow), 'a slow first byte, then the rest split ⇒ still the http server');
+  ok(verdictOf(/^HTTP\/1\.1 200[\s\S]*http GET \/slow 0$/.test(slow)), 'a slow first byte, then the rest split ⇒ still the http server');
   await raw(port, [[0, null]]);
   await new Promise((r) => { const s = net.connect(port, '127.0.0.1', () => { s.resetAndDestroy ? s.resetAndDestroy() : s.destroy(); r(); }); s.on('error', r); });
   await sleep(100);
@@ -146,7 +146,7 @@ try {
   ok(r3.hub._https() === null && r3.hub.url() === null, 'before the pass: no https server yet');
   await Promise.all([r3.hub.pass(), r3.hub.pass(), r3.hub.pass()]);
   ok(s3.calls.filter((c) => c === 'cert').length === 1, `three passes at once ⇒ ONE tailscale cert run (${s3.calls.join(',')})`);
-  ok(r3.hub.url() === `https://${DNS}:0` && fs.existsSync(path.join(DIR, 'd3/tls', DNS + '.crt')), `acquired into data/tls/<domain>.crt: ${r3.hub.url()}`);
+  ok(r3.hub.url() === `https://${DNS}:0` && verdictOf(fs.existsSync(path.join(DIR, 'd3/tls', DNS + '.crt'))), `acquired into data/tls/<domain>.crt: ${r3.hub.url()}`);
   ok(await wsEcho(`wss://127.0.0.1:${p3}/ws`) === 'wss:ping', 'the https server born AFTER attachToServers replays the upgrade listener');
   ok(T3.items.length === 0, 'a live certificate files no For-you item');
 
@@ -157,10 +157,10 @@ try {
     await r4.hub.pass();
     ok(r4.hub.status().why === 'https-not-enabled', `boot ${boot}: CertDomains null ⇒ https-not-enabled`);
   }
-  ok(T4.items.length === 1 && T4.items[0].i18n.text.key.startsWith('Tailscale HTTPS certificates are off'), `the "not enabled" For-you item ONCE across two boots (${T4.items.length})`);
+  ok(T4.items.length === 1 && verdictOf(T4.items[0].i18n.text.key.startsWith('Tailscale HTTPS certificates are off')), `the "not enabled" For-you item ONCE across two boots (${T4.items.length})`);
   const r4b = rig(TLS, { env: {}, dataDir: d4, run: mkRun({ listed: true, denied: true }).run, getUserTodos: () => T4 });
   await r4b.hub.pass(); await r4b.hub.pass();
-  ok(r4b.hub.status().why === 'operator-needed' && T4.items.length === 2 && T4.items[1].text.includes('sudo tailscale set --operator=') && T4.items[0].status === 'done', 'the state moves (cert access denied) ⇒ ONE operator-needed item, the not-enabled one resolved');
+  ok(r4b.hub.status().why === 'operator-needed' && T4.items.length === 2 && gateOf(T4.items[1].text.includes('sudo tailscale set --operator=')) && T4.items[0].status === 'done', 'the state moves (cert access denied) ⇒ ONE operator-needed item, the not-enabled one resolved');
   const r4c = rig(TLS, { env: {}, dataDir: d4, run: mkRun({ listed: true }).run, getUserTodos: () => T4 });
   await r4c.hub.pass();
   ok(r4c.hub.url() === `https://${DNS}:0` && T4.items[1].status === 'done' && T4.items.length === 2, 'the operator right granted ⇒ the next pass acquires and resolves the item, nothing new filed');
@@ -169,7 +169,7 @@ try {
   {
     const src = holdAbs(fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8'));
     const from = '      for (const [e, f] of listeners) httpsServer.on(e, f);\n';
-    ok(src.includes(from), 'the control\'s anchor is in the module');
+    ok(verdictOf(src.includes(from)), 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control.js');
     fs.writeFileSync(cp, editAnchor(editAnchor(src, from, '', "src/server/tls.js"), "require('../tls-plan.js')", JSON.stringify(path.join(REPO, 'src/tls-plan.js')).replace(/^/, 'require(') + ')', "src/server/tls.js"));
     const M = require(cp);
@@ -229,14 +229,14 @@ try {
       c.on('data', (d) => { b += d.toString('latin1'); if (b.includes('ws:hi')) { clearTimeout(t); c.destroy(); resolve(b); } });
       c.on('error', () => resolve(b));
     });
-    ok(/^HTTP\/1\.1 101/.test(up) && up.includes('ws:hi') && lastHead === frame.length, `an upgrade whose first write carries a frame: the head buffer (${lastHead} B) reaches ws, the echo answers`);
+    ok(gateOf(/^HTTP\/1\.1 101/.test(up)) && gateOf(up.includes('ws:hi')) && lastHead === frame.length, `an upgrade whose first write carries a frame: the head buffer (${lastHead} B) reaches ws, the echo answers`);
     const src = holdAbs(fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8'));
     const from = 'function acceptAs(server, socket) {\n';
-    ok(src.includes(from), 'the control\'s anchor is in the module');
+    ok(verdictOf(src.includes(from)), 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control-bare.js');
     fs.writeFileSync(cp, editAnchor(editAnchor(src, from, from + '  return; // CONTROL: the bare front\n', "src/server/tls.js"), "require('../tls-plan.js')", JSON.stringify(path.join(REPO, 'src/tls-plan.js')).replace(/^/, 'require(') + ')', "src/server/tls.js"));
     const bare = await order(require(cp));
-    ok(bare.seen !== plain.seen && bare.seen.startsWith('push,answer') && Math.min(...bare.ms) >= 30, `CONTROL the bare front (Nagle on): the body waits for the delayed ACK, the push overtakes the answer — RED (${bare.seen}; ${bare.ms.join('/')} ms)`);
+    ok(bare.seen !== plain.seen && gateOf(bare.seen.startsWith('push,answer')) && Math.min(...bare.ms) >= 30, `CONTROL the bare front (Nagle on): the body waits for the delayed ACK, the push overtakes the answer — RED (${bare.seen}; ${bare.ms.join('/')} ms)`);
   }
   console.log('§6 THE BOOT\'S LISTEN STEP IN TURNS (B-cd4b, the round\'s follow): a connection while the step\'s turns run is handed over after its last turn');
   {
@@ -275,15 +275,15 @@ try {
     const cp2 = path.join(DIR, 'tls-control-inturn.js');
     fs.writeFileSync(cp2, anchored(anchored(anchored(src, '      if (held) held.then(() => setImmediate(hand));', '      if (held) held.then(hand);', 'b-cd4b-tls-in-turn'), "require('../tls-plan.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/tls-plan.js')) + ')', 'b-cd4b-tls-plan-path2'), "require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')', 'b-cd4b-tls-turns-path2'));
     const i6 = await scene(require(cp2), { tag: 'i' });
-    ok(g6.ok && g6.holding && !g6.after && g6.ev.indexOf('answer') > g6.ev.indexOf('end') && g6.ev.indexOf('end') > 0 && g6.names[0] === 'restore' && g6.names.length > 2 && g6.names.slice(1).every((n) => n === 'listen'),
+    ok(gateOf(g6.ok) && gateOf(g6.holding) && !g6.after && g6.ev.indexOf('answer') > g6.ev.indexOf('end') && g6.ev.indexOf('end') > 0 && g6.names[0] === 'restore' && g6.names.length > 2 && verdictOf(g6.names.slice(1).every((n) => n === 'listen')),
       `held: a request written while the step's turns run is answered AFTER its last turn (${g6.ev.join(' → ')}; the step ${g6.ended} ms, the answer at ${g6.answered} ms), each turn named (${g6.names[0]}, then ${g6.names.length - 1} × ${g6.names[1]}); holding while it runs, not after`, g6);
-    ok(r6.ok && r6.ev.indexOf('answer') >= 0 && r6.ev.indexOf('answer') < r6.ev.indexOf('end'), `RED the hold taken away: the request answered while the step's turns still run (${r6.ev.join(' → ')})`, r6);
-    ok(g6.ev.indexOf('imm') >= 0 && g6.ev.indexOf('imm') < g6.ev.indexOf('handler') && i6.ok && i6.ev.indexOf('handler') < i6.ev.indexOf('imm'),
+    ok(gateOf(r6.ok) && r6.ev.indexOf('answer') >= 0 && r6.ev.indexOf('answer') < r6.ev.indexOf('end'), `RED the hold taken away: the request answered while the step's turns still run (${r6.ev.join(' → ')})`, r6);
+    ok(g6.ev.indexOf('imm') >= 0 && g6.ev.indexOf('imm') < g6.ev.indexOf('handler') && gateOf(i6.ok) && i6.ev.indexOf('handler') < i6.ev.indexOf('imm'),
       `the hand-over is a turn after the step's last, never inside its hold: an immediate the last turn asks runs before the held request's handler (${g6.ev.join(' → ')}); RED handed in the last turn's own drain ⇒ the handler first (${i6.ev.join(' → ')})`, { g: g6.ev, i: i6.ev });
     const b6 = await scene(TLS, { tag: 'b', holdMaxMs: 120, endAt: (t) => t + 400 }), c6 = await scene(TLS, { tag: 'c', holdMaxMs: 60000, endAt: (t) => t + 400 });
-    ok(b6.ok && b6.answered >= 110 && b6.answered < b6.ended && b6.warns.some((l) => /the boot's listen step held new connections 120 ms — handed over now/.test(l)),
+    ok(gateOf(b6.ok) && b6.answered >= 110 && b6.answered < b6.ended && verdictOf(b6.warns.some((l) => /the boot's listen step held new connections 120 ms — handed over now/.test(l))),
       `THE BOUND: a step that does not end lets go at 120 ms, said (answered at ${b6.answered} ms, the step ended at ${b6.ended} ms: «${b6.warns[0] || 'nothing said'}»)`, b6);
-    ok(c6.ok && c6.answered >= c6.ended, `its control: a bound past the step ⇒ answered only once the step ended (answered at ${c6.answered} ms, the step at ${c6.ended} ms)`, c6);
+    ok(gateOf(c6.ok) && c6.answered >= c6.ended, `its control: a bound past the step ⇒ answered only once the step ended (answered at ${c6.answered} ms, the step at ${c6.ended} ms)`, c6);
     // a THROW inside a step turn (planted; the process's uncaught handler hears it — the hub's ends the hub): the hold is lifted at once,
     // in the turn's finally. RED: the count moved out of the finally ⇒ the port stays held after the throw
     const withCopy = (text, tag) => { const f = path.join(DIR, `tls-control-${tag}.js`); fs.writeFileSync(f, anchored(anchored(text, "require('../tls-plan.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/tls-plan.js')) + ')', `${tag}-plan`), "require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')', `${tag}-turns`)); return require(f); };
@@ -302,7 +302,7 @@ try {
     };
     const t8 = await throwScene(TLS, 'g');
     const t8r = await throwScene(withCopy(anchored(src, "    require('./loop-turns.js').turn(() => { try { step(name, fn); } finally { if (!--stepTurns) letGo(); } });", "    require('./loop-turns.js').turn(() => { step(name, fn); if (!--stepTurns) letGo(); });", 'b-cd4b-tls-count-out'), 'b-cd4b-tls-count-out'), 'r');
-    ok(t8.before && t8.heard === 1 && !t8.after, `a throw inside a step turn: it reaches the process and the hold is lifted at once (held before ${t8.before}, after ${t8.after})`, t8);
+    ok(gateOf(t8.before) && t8.heard === 1 && !t8.after, `a throw inside a step turn: it reaches the process and the hold is lifted at once (held before ${t8.before}, after ${t8.after})`, t8);
     ok(t8r.heard === 1 && t8r.after === true, 'RED: the count moved out of the finally ⇒ the port stays held after the throw', t8r);
     // a socket that ERRORS while held (the client resets after its first byte): dropped as before the first byte, no unhandled error.
     // RED: the drop listener removed at the first byte (as at the base) ⇒ the reset is an unhandled error
@@ -329,8 +329,8 @@ try {
     };
     const e9 = await resetScene(TLS, 'g');
     const e9r = await resetScene(withCopy(anchored(src, "      socket.removeListener('timeout', drop); socket.setTimeout(0);\n", "      socket.removeListener('error', drop); socket.removeListener('timeout', drop); socket.setTimeout(0);\n", 'b-cd4b-tls-drop-gone'), 'b-cd4b-tls-drop-gone'), 'r');   // stale-pins: kept (the red plants the base's first-byte handler)
-    ok(e9.heldThen && e9.read && e9.closed && e9.unheard.length === 0, `a held socket reset by its client: dropped (closed ${e9.closed}), no unhandled error (${JSON.stringify(e9.unheard)})`, e9);
-    ok(e9r.read && e9r.unheard.some((x) => /ECONNRESET/.test(x)), `RED: the drop listener removed at the first byte ⇒ the reset is an unhandled error (${JSON.stringify(e9r.unheard)})`, e9r);
+    ok(gateOf(e9.heldThen) && gateOf(e9.read) && gateOf(e9.closed) && e9.unheard.length === 0, `a held socket reset by its client: dropped (closed ${e9.closed}), no unhandled error (${JSON.stringify(e9.unheard)})`, e9);
+    ok(gateOf(e9r.read) && verdictOf(e9r.unheard.some((x) => /ECONNRESET/.test(x))), `RED: the drop listener removed at the first byte ⇒ the reset is an unhandled error (${JSON.stringify(e9r.unheard)})`, e9r);
   }
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e && e.stack)); }
 finally {
@@ -338,4 +338,4 @@ finally {
   fs.rmSync(DIR, { recursive: true, force: true });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

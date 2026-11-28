@@ -61,7 +61,7 @@ const RACE = path.join(REPO, 'scripts/fixtures/claude-race-cli.cjs');
 const CLOCK = path.join(REPO, 'scripts/fixtures/clock-scale.cjs'); // r5: the wrapper's clock ×$CLOCK_SCALE (its bounds END in a leg)
 const BASE = '6428c67e';
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
+const ok = (c, name, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
 const skip = (name, why) => { skipped++; console.log(`  ○ SKIP ${name} — ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 10000, step = 40) => { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch { } await sleep(step); } try { return !!(await fn()); } catch { return false; } };
@@ -628,59 +628,59 @@ const [enter, enterBase, steer1, steer1Base, steerAll, cmd, own, stop, stopCtl, 
   leg(legAdvert(LANE_WRAPPER)),
 
 ]);
-ok(enter.aPlain, '⑦ a stamped frame with NO turn running is a plain send (no hand-over record — it opens the turn)', enter);
+ok(verdictOf(enter.aPlain), '⑦ a stamped frame with NO turn running is a plain send (no hand-over record — it opens the turn)', enter);
 ok(enter.iHanded >= 0 && enter.iHanded < enter.iTool && !enter.held, '① Enter mid-tool: the wrapper writes the frame to the CLI AT ONCE (input_handover handed, before the tool result) — never held', enter);
-ok(enter.tookAtToolResult && enter.answered && enter.results === 1 && S(enter.ownTurns) === S(['TOOL-A run the slow command']), '① …the CLI took it INTO THE RUNNING TURN at the tool result and answered it there — one turn, never a turn of its own', enter);
+ok(gateOf(enter.tookAtToolResult) && gateOf(enter.answered) && enter.results === 1 && S(enter.ownTurns) === S(['TOOL-A run the slow command']), '① …the CLI took it INTO THE RUNNING TURN at the tool result and answered it there — one turn, never a turn of its own', enter);
 ok(enter.iLanded > enter.iTool && enter.iLanded < enter.iResult, '① …and the wrapper says it LANDED (after the tool result that carried it, before the turn\'s result)', enter);
-if (enterBase) ok(enterBase.held && !enterBase.tookAtToolResult && S(enterBase.ownTurns) === S(['TOOL-A run the slow command', 'B handed while the tool runs']) && enterBase.iHanded < 0, `① RED on ${BASE}: the same Enter is HELD (queued) and runs as its own turn after the turn ends — the owner's «我没法插入»`, enterBase);
+if (enterBase) ok(gateOf(enterBase.held) && !enterBase.tookAtToolResult && S(enterBase.ownTurns) === S(['TOOL-A run the slow command', 'B handed while the tool runs']) && enterBase.iHanded < 0, `① RED on ${BASE}: the same Enter is HELD (queued) and runs as its own turn after the turn ends — the owner's «我没法插入»`, enterBase);
 else console.log(`  ○ SKIP ①/② RED legs — ${BASE} is not in this checkout (a depth-1 clone: git show ${BASE}:data/bin/chat-wrapper.js failed); the lane legs above still ran`);
-ok(S(steer1.heldFirst) === S(['m-b']) && S(steer1.opResults) === S(['steer:true']) && S(steer1.handedVia) === S(['m-b@steer']) && S(steer1.landed) === S(['m-b']) && S(steer1.tookAtToolResult) === S(['B held behind the turn']) && steer1.emptied, '② the ⚡ on a HELD row: steer ok → handed (via steer) → it leaves the strip → it lands at the tool result', steer1);
+ok(S(steer1.heldFirst) === S(['m-b']) && S(steer1.opResults) === S(['steer:true']) && S(steer1.handedVia) === S(['m-b@steer']) && S(steer1.landed) === S(['m-b']) && S(steer1.tookAtToolResult) === S(['B held behind the turn']) && verdictOf(steer1.emptied), '② the ⚡ on a HELD row: steer ok → handed (via steer) → it leaves the strip → it lands at the tool result', steer1);
 if (steer1Base) ok(S(steer1Base.opResults) === S(['steer:false:not-steerable']) && !steer1Base.tookAtToolResult.length, `② RED on ${BASE}: the wrapper refused the ⚡ («Claude Code takes no input into a running turn»)`, steer1Base);
-ok(S(steerAll.heldFirst) === S(['m-b', 'm-c']) && S(steerAll.opResults) === S(['steer-all:true', 'steer-all:true']) && S(steerAll.tookAtToolResult) === S(['B held behind the turn', 'C held behind it']) && steerAll.emptied, '③ «inject all»: every held row, in queue order, each its own frame — both land at the tool result', steerAll);
-ok(cmd.held && cmd.handed === 0 && /^false:not-steerable:a command runs between turns/.test(cmd.refusal[0] || '') && cmd.stillHeld, '④ a slash command is HELD even on Enter (the CLI runs a command between turns), and the ⚡ on it says so — it stays held', cmd);
+ok(S(steerAll.heldFirst) === S(['m-b', 'm-c']) && S(steerAll.opResults) === S(['steer-all:true', 'steer-all:true']) && S(steerAll.tookAtToolResult) === S(['B held behind the turn', 'C held behind it']) && verdictOf(steerAll.emptied), '③ «inject all»: every held row, in queue order, each its own frame — both land at the tool result', steerAll);
+ok(gateOf(cmd.held) && cmd.handed === 0 && gateOf(/^false:not-steerable:a command runs between turns/.test(cmd.refusal[0] || '')) && verdictOf(cmd.stillHeld), '④ a slash command is HELD even on Enter (the CLI runs a command between turns), and the ⚡ on it says so — it stays held', cmd);
 ok(S(own.handed) === S(['m-b']) && S(own.own) === S(['m-b']) && !own.landed.length, '⑤ no tool result left: the turn ended first — the wrapper says own-turn (never «landed»)', own);
-ok(S(own.turns) === S(['LONG-A a long text answer, no tool', 'B handed with no tool result left', 'C held behind the turn']) && own.cAfterB && own.cRanOwn, '⑤ …the CLI ran it as a turn of its own right after, and the HELD frame waited for THAT turn to end (never cut in)', own);
+ok(S(own.turns) === S(['LONG-A a long text answer, no tool', 'B handed with no tool result left', 'C held behind the turn']) && gateOf(own.cAfterB) && verdictOf(own.cRanOwn), '⑤ …the CLI ran it as a turn of its own right after, and the HELD frame waited for THAT turn to end (never cut in)', own);
 ok(S(stop.drop) === S([{ items: [], kept: 1 }]), '⑥ Stop with a handed frame: ONE queue_dropped that puts nothing back and counts it — «1 message you sent into the turn stays with it»', stop);
 ok(stop.followInterrupt === 1 && S(stop.kept) === S(['m-b']) && !stop.answeredB, '⑥ the CLI started a turn for the frame it still held — the wrapper interrupted it on its init: NOTHING answers after Stop (the 2026-09-07 law), the frame stays in the conversation', stop);
-ok(stopCtl.followInterrupt === 0 && stopCtl.answeredB, '⑥ CONTROL: a wrapper copy without that second interrupt — the CLI ANSWERS the frame after Stop (the measured 2.1.308 behaviour; the leg above can say no)', stopCtl);
+ok(stopCtl.followInterrupt === 0 && verdictOf(stopCtl.answeredB), '⑥ CONTROL: a wrapper copy without that second interrupt — the CLI ANSWERS the frame after Stop (the measured 2.1.308 behaviour; the leg above can say no)', stopCtl);
 ok(S(stopHeld.drop) === S([{ items: ['m-c'], kept: 1 }]) && !stopHeld.cReached && !stopHeld.answeredB, '⑥ Stop with BOTH: the held one comes back into the box (the .354 rule), the handed one stays with the turn — one record says both', stopHeld);
 const HOLD3 = ['remove', 'reorder', 'edit'];
 ok(S(advert.atBoot?.sidecar) === S(HOLD3) && S(advert.atBoot?.inBand) === S(HOLD3), '⑧ at boot the hello names NO steer — the sidecar caps and the first queue_changed say the .354 three (nothing has proven the CLI says its turn state yet)', advert);
 ok(S(advert.proven?.sidecar) === S(NEW) && S(advert.proven?.inBand) === S(NEW), '⑧ …from the CLI\'s first state word on, both say [remove, steer, steer-all, reorder, edit] — the door the composer draws', advert);
 // ── ACCEPTANCE r2 ──
-ok(S(noState.verbs?.sidecar) === S(HOLD3) && S(noState.verbs?.inBand) === S(HOLD3) && noState.bHeld && !noState.handed?.length, '⑨ a CLI with NO state words: the door is never advertised and a STAMPED frame mid-turn is HELD (never written to a turn whose end nothing can prove)', noState);
-ok(noState.ranH, '⑨ …a frame VibeSpace types at idle still RUNS (eeece327: held for the life of the wrapper)', noState);
-ok(!noState.answeredD && !noState.dReached && noState.drops?.some((d) => d.items.includes('m-d')), '⑨ …and Stop there answers nothing after it: the held frame comes back into the box', noState);
+ok(S(noState.verbs?.sidecar) === S(HOLD3) && S(noState.verbs?.inBand) === S(HOLD3) && gateOf(noState.bHeld) && !noState.handed?.length, '⑨ a CLI with NO state words: the door is never advertised and a STAMPED frame mid-turn is HELD (never written to a turn whose end nothing can prove)', noState);
+ok(verdictOf(noState.ranH), '⑨ …a frame VibeSpace types at idle still RUNS (eeece327: held for the life of the wrapper)', noState);
+ok(!noState.answeredD && !noState.dReached && verdictOf(noState.drops?.some((d) => d.items.includes('m-d'))), '⑨ …and Stop there answers nothing after it: the held frame comes back into the box', noState);
 // (the stand-in settles a Stop in a few ms — the real CLI's 40–80 ms window, δ = 0 / 20 / 45, is §A ③)
-ok(late0.cHeld && !late0.cHanded && late0.cOwnTurn, '⑩ the Stop window: C stamped right after Stop is HELD as a plain queued send, never handed — it ran as a turn of its own once the stop settled (eeece327: handed into the stopping turn)', late0);
+ok(gateOf(late0.cHeld) && !late0.cHanded && verdictOf(late0.cOwnTurn), '⑩ the Stop window: C stamped right after Stop is HELD as a plain queued send, never handed — it ran as a turn of its own once the stop settled (eeece327: handed into the stopping turn)', late0);
 ok(late0.follows === 1 && !late0.answeredB && S(late0.drops?.map((x) => x.keptIds)) === S([['m-b']]), '⑩ …the frame the CLI held at Stop is never answered (its follow-up interrupted), and the ONE record keeps it', late0);
-ok(!lateAfter.cHeld && !lateAfter.cHanded && lateAfter.cOwnTurn && lateAfter.follows === 1 && !lateAfter.answeredB, '⑩ CONTROL: C typed once the stop has SETTLED is a plain send at idle (the window closed — it holds nothing for ever)', lateAfter);
-ok(split.follows === 2 && !split.answered && S(split.drops?.map((x) => x.keptIds)) === S([['m-b1', 'm-b2']]) && split.settled, '⑩ the split shape: the CLI started a follow-up turn PER held frame — EVERY one interrupted on its init (eeece327: the second was answered); one record, kept 2', split);
-ok(!!ride.premise && ride.premise.toolResult && ride.premise.results === 0 && ride.premise.postHeld, '⑪ PREMISE: at the Stop B\'s tool result had come and the model had NOT spoken (its answer HELD by the leg\'s file, 0 results) — a fact, not a clock (a broken premise is said here)', ride.premise || ride);
+ok(!lateAfter.cHeld && !lateAfter.cHanded && gateOf(lateAfter.cOwnTurn) && lateAfter.follows === 1 && !lateAfter.answeredB, '⑩ CONTROL: C typed once the stop has SETTLED is a plain send at idle (the window closed — it holds nothing for ever)', lateAfter);
+ok(split.follows === 2 && !split.answered && S(split.drops?.map((x) => x.keptIds)) === S([['m-b1', 'm-b2']]) && verdictOf(split.settled), '⑩ the split shape: the CLI started a follow-up turn PER held frame — EVERY one interrupted on its init (eeece327: the second was answered); one record, kept 2', split);
+ok(!!ride.premise && gateOf(ride.premise.toolResult) && ride.premise.results === 0 && verdictOf(ride.premise.postHeld), '⑪ PREMISE: at the Stop B\'s tool result had come and the model had NOT spoken (its answer HELD by the leg\'s file, 0 results) — a fact, not a clock (a broken premise is said here)', ride.premise || ride);
 ok(S(ride.tookIn) === S(['B handed mid tool']) && S(ride.drops) === S([{ items: [], kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && ride.follows === 0 && S(ride.landedAfter) === S(['m-b']), '⑪ (r4) Stop after B RODE the tool result, before the model spoke: not proven read, so the record KEEPS it (its follow-up would be interrupted) — no follow-up came, so the settle says `landed` afterwards (chip «Steered»)', ride);
 ok(S(ownStop.own) === S(['m-b']) && !ownStop.drops?.length && ownStop.follows === 0, '⑪ Stop while B\'s OWN turn runs a tool: a stopped turn — no record counts B as kept (eeece327: kept 1)', ownStop);
 ok(origin.steerable === false && S(origin.res) === S(['false:not-steerable:origin']), '⑫ a row VibeSpace typed: `steerable: false` on the row (no ⚡) and the wrapper refuses «VibeSpace\'s own message runs between turns» (eeece327: handed it)', origin);
-ok(!!bound.premise && bound.premise.toolResult && bound.premise.results === 0 && bound.premise.postHeld && bound.premise.helperHeld, '⑬ PREMISE: at the Stop the A turn was in its post-tool window (its tool result came, no result yet: the answer HELD by the leg\'s file) and its helper still worked (HELD by the leg\'s file) — facts, not clocks (a broken premise is said here)', bound.premise || bound);
-ok(bound.cHeld && bound.reachedMs >= 1500 && bound.reachedMs < 4000 && bound.boundLines === 1, '⑬ the Stop window is BOUNDED where the CLI owes nothing: no idle came (a helper kept the CLI running) — 2 s after the last result ONE log line says why it closed, and the frame held in it runs', bound);
+ok(!!bound.premise && gateOf(bound.premise.toolResult) && bound.premise.results === 0 && gateOf(bound.premise.postHeld) && verdictOf(bound.premise.helperHeld), '⑬ PREMISE: at the Stop the A turn was in its post-tool window (its tool result came, no result yet: the answer HELD by the leg\'s file) and its helper still worked (HELD by the leg\'s file) — facts, not clocks (a broken premise is said here)', bound.premise || bound);
+ok(gateOf(bound.cHeld) && bound.reachedMs >= 1500 && bound.reachedMs < 4000 && bound.boundLines === 1, '⑬ the Stop window is BOUNDED where the CLI owes nothing: no idle came (a helper kept the CLI running) — 2 s after the last result ONE log line says why it closed, and the frame held in it runs', bound);
 // ── ACCEPTANCE r4 ──
-ok(S(race.drops) === S([{ items: [], kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && race.race?.some((x) => x.followInit && x.interruptedSameTick === true) && !race.race?.some((x) => x.answeredAfterStop) && !race.landedAfter?.length, '⑮ RIDING IS NOT LANDED: B reached the CLI just before its tool_result line but missed that request — Stop counts it HELD (kept 1), the follow-up is interrupted in the same tick, nothing is answered (7df30f96: landed 1 and the follow-up answered)', race);
-ok(!hookStop.answeredB && hookStop.follows === 1 && hookStop.settled && hookStop.waited && hookStop.hookWordsTeed === 0 && !hookStop.clockLines?.length, '⑯ a 2.5 s prompt hook before the follow-up\'s init: the window WAITS through it (the CLI said the hook\'s phase) and the init is interrupted — nothing answered; the hook words never reach the chat; no clock closed anything', hookStop);
-ok(!hookStopNoEmit.answeredB && hookStopNoEmit.follows === 1 && hookStopNoEmit.settled && !hookStopNoEmit.clockLines?.length, '⑯ …and where the CLI says no hook phase, the 30 s backstop (above the product\'s 10 s hook timeout) still outlasts it: the init is interrupted, nothing answered', hookStopNoEmit);
-if (hookStopCtl) ok(hookStopCtl.answeredB && hookStopCtl.follows === 0 && hookStopCtl.clockLines?.length === 1, '⑯ RED CONTROL: the r2 rule (a 2 s clock from the result, deaf to the hook) — the clock closed the window inside the hook and the follow-up was ANSWERED after Stop', hookStopCtl);
-ok(!hookOwed.rodeB?.length && S(hookOwed.turns) === S(['LONG-A a text turn', 'TOOL-B handed, owed its own turn', 'C held until the turn ends']) && hookOwed.cHeld, '⑰ an OWED turn under a 2.5 s prompt hook: C (Alt+Enter) stays held until B\'s own turn ENDS — it never rides B\'s tool result, it runs as a turn of its own', hookOwed);
+ok(S(race.drops) === S([{ items: [], kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && gateOf(race.race?.some((x) => x.followInit && x.interruptedSameTick === true)) && !race.race?.some((x) => x.answeredAfterStop) && !race.landedAfter?.length, '⑮ RIDING IS NOT LANDED: B reached the CLI just before its tool_result line but missed that request — Stop counts it HELD (kept 1), the follow-up is interrupted in the same tick, nothing is answered (7df30f96: landed 1 and the follow-up answered)', race);
+ok(!hookStop.answeredB && hookStop.follows === 1 && gateOf(hookStop.settled) && gateOf(hookStop.waited) && hookStop.hookWordsTeed === 0 && !hookStop.clockLines?.length, '⑯ a 2.5 s prompt hook before the follow-up\'s init: the window WAITS through it (the CLI said the hook\'s phase) and the init is interrupted — nothing answered; the hook words never reach the chat; no clock closed anything', hookStop);
+ok(!hookStopNoEmit.answeredB && hookStopNoEmit.follows === 1 && gateOf(hookStopNoEmit.settled) && !hookStopNoEmit.clockLines?.length, '⑯ …and where the CLI says no hook phase, the 30 s backstop (above the product\'s 10 s hook timeout) still outlasts it: the init is interrupted, nothing answered', hookStopNoEmit);
+if (hookStopCtl) ok(gateOf(hookStopCtl.answeredB) && hookStopCtl.follows === 0 && hookStopCtl.clockLines?.length === 1, '⑯ RED CONTROL: the r2 rule (a 2 s clock from the result, deaf to the hook) — the clock closed the window inside the hook and the follow-up was ANSWERED after Stop', hookStopCtl);
+ok(!hookOwed.rodeB?.length && S(hookOwed.turns) === S(['LONG-A a text turn', 'TOOL-B handed, owed its own turn', 'C held until the turn ends']) && verdictOf(hookOwed.cHeld), '⑰ an OWED turn under a 2.5 s prompt hook: C (Alt+Enter) stays held until B\'s own turn ENDS — it never rides B\'s tool result, it runs as a turn of its own', hookOwed);
 if (hookOwedCtl) ok(S(hookOwedCtl.rodeB) === S(['C held until the turn ends']), '⑰ RED CONTROL: the r2 rule drained C inside B\'s hook — it rode B\'s tool result (the hold became a hand-over)', hookOwedCtl);
 ok(editCopy.copies?.length === 1 && editCopy.copies[0].text === 'E please run the tests locally, NOT on staging' && !!editCopy.sentUuid && editCopy.copies[0].cliUuid === editCopy.sentUuid, '⑱ an EDITED held frame: its ONE buffer copy says the latest words (7df30f96 kept the never-sent original) and names the uuid the wrapper stamped on the frame the CLI got — its witness', editCopy);
 // ── ACCEPTANCE r5 ──
-ok(/the prompt hook never answered: 1 UserPromptSubmit hook\(s\) said started and no hook_response in 15 s \(the product's hook — every UserPromptSubmit hook the CLI loads is data\/bin\/vibespace-hook\.mjs: its registered 10 s timeout \+ 5 s\)/.test(wedged.neverAnswered || '') && /^backstop: /.test(wedged.backstop || '') && wedged.dHeld && wedged.dReached, '⑲ (r5) a prompt hook that never answers: the pause ENDS at its bound and SAYS so («the prompt hook never answered» — the product\'s 10 s timeout + 5 s), the window falls to its 30 s backstop and D, held inside it, goes', wedged);
+ok(gateOf(/the prompt hook never answered: 1 UserPromptSubmit hook\(s\) said started and no hook_response in 15 s \(the product's hook — every UserPromptSubmit hook the CLI loads is data\/bin\/vibespace-hook\.mjs: its registered 10 s timeout \+ 5 s\)/.test(wedged.neverAnswered || '')) && gateOf(/^backstop: /.test(wedged.backstop || '')) && gateOf(wedged.dHeld) && verdictOf(wedged.dReached), '⑲ (r5) a prompt hook that never answers: the pause ENDS at its bound and SAYS so («the prompt hook never answered» — the product\'s 10 s timeout + 5 s), the window falls to its 30 s backstop and D, held inside it, goes', wedged);
 ok(S(wedged.settle) === S([{ state: 'settling', until: null, hook: true, ids: undefined }, { state: 'settling', until: 'number', hook: false, ids: undefined }, { state: 'backstop', until: null, hook: false, ids: ['m-d'] }])
   && S(wedged.chips) === S([{ after: 'settling', chip: 'queued', settling: 'paused' }, { after: 'settling', chip: 'queued', settling: 'until' }, { after: 'backstop', chip: 'queued', settling: null }]) && S(wedged.notice) === S(['The turn did not answer in 30 s — the held messages are delivered now']), '⑲ …THE BACKSTOP SPEAKS: D\'s chip says «held — the turn is settling» (paused while the hook runs, then counting down to the backstop), and at the backstop ONE notice says «the turn did not answer in 30 s — the held messages are delivered now»', wedged);
 ok(!lone.answeredB && lone.follows === 1 && S(lone.kept) === S(['m-b']) && !lone.closedEarly, '⑲b (r6) a LONE hook of the person\'s own (the product\'s absent; 600 s by its settings) running ~75 s: the window waits on its words — B kept, the follow-up interrupted on its init, nothing answered after Stop', lone);
 ok(!remoteHook.answeredB && remoteHook.follows === 1 && S(remoteHook.kept) === S(['m-b']) && !remoteHook.closedEarly, '⑲c (r7) a REMOTE-shaped session (VIBESPACE_REMOTE_SID; the hub\'s settings name only the product\'s hook, the hook that runs is the device\'s ~75 s): the census cannot read where the CLI runs ⇒ fail closed — B kept, nothing answered after Stop', remoteHook);
-if (remoteHookCtl) ok(remoteHookCtl.answeredB && remoteHookCtl.closedEarly, '⑲c RED CONTROL: r6\'s census of the hub\'s files alone — the product\'s 15 s, the window closed inside the device\'s hook and B was ANSWERED after Stop', remoteHookCtl);
-ok(riding.before === 1 && riding.after === 0 && riding.riding && riding.said, '⑮b (r7) a frame RIDING at Stop whose follow-up the window interrupted SETTLES by name: its kept file goes', riding);
+if (remoteHookCtl) ok(gateOf(remoteHookCtl.answeredB) && verdictOf(remoteHookCtl.closedEarly), '⑲c RED CONTROL: r6\'s census of the hub\'s files alone — the product\'s 15 s, the window closed inside the device\'s hook and B was ANSWERED after Stop', remoteHookCtl);
+ok(riding.before === 1 && riding.after === 0 && gateOf(riding.riding) && verdictOf(riding.said), '⑮b (r7) a frame RIDING at Stop whose follow-up the window interrupted SETTLES by name: its kept file goes', riding);
 if (ridingCtl) ok(ridingCtl.before === 1 && ridingCtl.after === 1, '⑮b RED CONTROL: r6\'s settle of `kept` alone — the riding frame\'s kept file LEAKS', ridingCtl);
-if (loneCtl) ok(loneCtl.answeredB && loneCtl.closedEarly, '⑲b RED CONTROL: r5\'s bound by COUNT (a lone hook = the product\'s 15 s) — the window closed inside the hook and B was ANSWERED after Stop', loneCtl);
-if (wedgedCtl) ok(wedgedCtl.dHeld && !wedgedCtl.dReached && !wedgedCtl.neverAnswered && !wedgedCtl.backstop, '⑲ RED CONTROL: the pause with no bound (6334e9a8) — D is still held when the leg gives up, nothing said', wedgedCtl);
+if (loneCtl) ok(gateOf(loneCtl.answeredB) && verdictOf(loneCtl.closedEarly), '⑲b RED CONTROL: r5\'s bound by COUNT (a lone hook = the product\'s 15 s) — the window closed inside the hook and B was ANSWERED after Stop', loneCtl);
+if (wedgedCtl) ok(gateOf(wedgedCtl.dHeld) && !wedgedCtl.dReached && !wedgedCtl.neverAnswered && !wedgedCtl.backstop, '⑲ RED CONTROL: the pause with no bound (6334e9a8) — D is still held when the leg gives up, nothing said', wedgedCtl);
 ok(S(secondStop.kept) === S(['B handed mid tool']) && !secondStop.dropped?.length && secondStop.interrupts?.[secondStop.interrupts.length - 1] === 'person-stop-2' && !secondStop.interrupts.some((x) => /^vs-stop-follow/.test(x)) && S(secondStop.drops?.map((d) => d.keptIds)) === S([['m-b']]), '⑳ (r5) a second Stop inside the follow-up\'s prompt hook is HELD and becomes THE one interrupt on its init: B stays in the conversation, as the record says («kept»)', secondStop);
 if (secondStopCtl) ok(S(secondStopCtl.dropped) === S(['B handed mid tool']) && S(secondStopCtl.drops?.map((d) => d.keptIds)) === S([['m-b']]), '⑳ RED CONTROL: written raw (6334e9a8) it cancels the hook and the CLI DROPS B — while the record still says «kept»', secondStopCtl);
 ok(sameTick.inproc?.length === 1 && sameTick.inproc[0].sameTick === true && !sameTick.answered, '⑭ the follow-up interrupt is written IN THE SAME TICK as the init line\'s parse (the in-process CLI saw it before init() returned)', sameTick);
@@ -936,7 +936,7 @@ const leakedOf = (l) => (l.reqsAfterStop || []).filter((q) => !q.carries.include
   const unwitnessed = { carries: B, hungUp: false, closedEarly: false, served: true, cli: EMPTY };       // the whole reply written, the CLI's record empty
   const consumed = { carries: B, hungUp: false, closedEarly: false, served: true, cli: READ };           // written whole AND the CLI's own result carries its tokens
   const answered = { carries: B, hungUp: false, closedEarly: false, served: true, cli: { tokens: 0, answered: true } };
-  ok(stopLaw([], 0, 0) && stopLaw([told], 1, 1) && stopLaw([hung], 0, 0) && stopLaw([cutShort], 0, 0) && stopLaw([unwitnessed], 0, 0)
+  ok(gateOf(stopLaw([], 0, 0)) && gateOf(stopLaw([told], 1, 1)) && gateOf(stopLaw([hung], 0, 0)) && gateOf(stopLaw([cutShort], 0, 0)) && gateOf(stopLaw([unwitnessed], 0, 0))
       && !stopLaw([told], 0, 0) && !stopLaw([hung], 1, 1) && !stopLaw([unwitnessed], 1, 1) && !stopLaw([consumed], 0, 0) && !stopLaw([answered], 0, 0)
       && !stopLaw([told, told], 1, 1) && !stopLaw([hung, told], 1, 1) && !stopLaw([], 1, 1)
       && !stopLaw([{ carries: ['MARK-B', 'MARK-C'], hungUp: false, closedEarly: false, served: true, cli: READ }], 1, 1)
@@ -1037,29 +1037,29 @@ else {
       await r.end(); return out;
     })(),
   ]);
-  ok(!!lands.consumed && lands.consumed.order.includes('end') && lands.consumed.cli && lands.consumed.cli.tokens > 0 && kindOf([lands.consumed]) === 'b' && !stopLaw([lands.consumed], 0, 0),
+  ok(!!lands.consumed && gateOf(lands.consumed.order.includes('end')) && gateOf(lands.consumed.cli) && lands.consumed.cli.tokens > 0 && kindOf([lands.consumed]) === 'b' && !stopLaw([lands.consumed], 0, 0),
     '§A ① THE SKEPTIC\'S CONTROL (a must): a reply the client really CONSUMED (the mock wrote it whole; the CLI\'s own result carries its tokens), judged as if it had leaked after a Stop with nothing told, is RED — kind (b), owed; widening (c) never passes a reply that was read', lands.consumed);
-  ok(lands.afterTool.length === 1 && /The user sent a new message while you were working:\s*MARK-B handed while the Bash runs/.test(lands.afterTool[0]) && lands.results === 1, '§A ① the REAL CLI took the stamped frame INTO THE RUNNING TURN: the request after the tool result carries «The user sent a new message while you were working: …» — one turn', lands);
+  ok(lands.afterTool.length === 1 && gateOf(/The user sent a new message while you were working:\s*MARK-B handed while the Bash runs/.test(lands.afterTool[0])) && lands.results === 1, '§A ① the REAL CLI took the stamped frame INTO THE RUNNING TURN: the request after the tool result carries «The user sent a new message while you were working: …» — one turn', lands);
   ok(S(lands.handed) === S(['m-b']) && S(lands.landed) === S(['m-b']), '§A ① …and the wrapper said handed → landed', lands);
   console.log(`    §A leaked follow-ups (B-28b1: the CLI read the second interrupt after its request left) — ② ${stops.leaked.length} · ③ stop ${leakedOf(rl0).length} · result ${leakedOf(rlRes).length} · settled ${leakedOf(rlSet).length} · δ20 ${leakedOf(rl20).length} · δ45 ${leakedOf(rl45).length}; told ${[stops, rl0, rlRes, rlSet, rl20, rl45].map((l) => l.late).join('/')}, shown ${[stops, rl0, rlRes, rlSet, rl20, rl45].map((l) => l.shown).join('/')}`);
   { const K = [['②', stops.leaked], ['③ stop', leakedOf(rl0)], ['result', leakedOf(rlRes)], ['settled', leakedOf(rlSet)], ['δ20', leakedOf(rl20)], ['δ45', leakedOf(rl45)]];
     const facts = (l) => (l.length ? ` [cli ${l[0].cli ? `${l[0].cli.tokens} tokens${l[0].cli.answered ? ', answered' : ''}` : '?'} · mock ${l[0].order.join('>') || '—'}${l[0].hungUp ? ' · hung up before the first write' : ''}]` : '');
     console.log(`    §A the kind of each (a none · b told · c ${KIND_C} · c-unwitnessed ${KIND_C_UNWITNESSED}): ${K.map(([n, l]) => `${n} ${kindOf(l)}${facts(l)}`).join(' · ')}`);
     console.log(`    §A counts — (c) witnessed: ${K.filter(([, l]) => kindOf(l) === 'c').length} · (c) UNWITNESSED, the tripwire (0 expected on an idle machine): ${K.filter(([, l]) => kindOf(l) === 'c-unwitnessed').length}`); }
-  ok(stops.follow === 1 && S(stops.kept) === S(['m-b']) && stopLaw(stops.leaked, stops.late, stops.shown), '§A ② Stop while the CLI held it: the CLI started a turn for it, the wrapper interrupted it on its init — THE LAW (B-28b1): no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact was recorded and shown', stops);
+  ok(stops.follow === 1 && S(stops.kept) === S(['m-b']) && verdictOf(stopLaw(stops.leaked, stops.late, stops.shown)), '§A ② Stop while the CLI held it: the CLI started a turn for it, the wrapper interrupted it on its init — THE LAW (B-28b1): no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact was recorded and shown', stops);
   ok(S(stops.drop) === S([{ items: 0, kept: 1 }]), '§A ② …ONE queue_dropped that puts nothing back and counts the handed frame (the toast\'s «stays with the turn»)', stops);
-  ok(Array.isArray(stops.nextCarries) && stops.nextCarries.includes('MARK-B') && stops.nextCarries.includes('MARK-D'), '§A ② …and it stayed in the conversation: the next message\'s request carries it too', stops);
+  ok(gateOf(Array.isArray(stops.nextCarries)) && gateOf(stops.nextCarries.includes('MARK-B')) && verdictOf(stops.nextCarries.includes('MARK-D')), '§A ② …and it stayed in the conversation: the next message\'s request carries it too', stops);
   for (const l of [rl0, rlRes]) {
-    ok(l.cHeld && !l.cHanded && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]), `§A ③ the REAL CLI, C stamped at «${l.at}» (inside the Stop window by its signal, +${l.tC} ms): HELD as a plain queued send, never handed — ONE record keeps B`, l);
-    ok(cReqsOf(l).length === 1 && !cReqsOf(l)[0].beforeDrain && stopLaw(leakedOf(l), l.late, l.shown) && l.answeredC, `§A ③ …«${l.at}»: THE LAW (B-28b1) — before the stop settled no request reached the model, or the held frame's ONE follow-up did and it was told; C's own turn came after the drain (eeece327 at δ=20: a billed follow-up answered B and C)`, l);
+    ok(gateOf(l.cHeld) && !l.cHanded && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]), `§A ③ the REAL CLI, C stamped at «${l.at}» (inside the Stop window by its signal, +${l.tC} ms): HELD as a plain queued send, never handed — ONE record keeps B`, l);
+    ok(cReqsOf(l).length === 1 && !cReqsOf(l)[0].beforeDrain && gateOf(stopLaw(leakedOf(l), l.late, l.shown)) && verdictOf(l.answeredC), `§A ③ …«${l.at}»: THE LAW (B-28b1) — before the stop settled no request reached the model, or the held frame's ONE follow-up did and it was told; C's own turn came after the drain (eeece327 at δ=20: a billed follow-up answered B and C)`, l);
   }
-  ok(!rlSet.cHeld && !rlSet.cHanded && rlSet.answeredC && cReqsOf(rlSet).length === 1 && stopLaw(leakedOf(rlSet), rlSet.late, rlSet.shown) && rlSet.follows === 1, `§A ③ C stamped once the stop SETTLED (+${rlSet.tC} ms, the wrapper's own settle line): a plain send — it runs as its own turn, and B's follow-up was still interrupted`, rlSet);
+  ok(!rlSet.cHeld && !rlSet.cHanded && gateOf(rlSet.answeredC) && cReqsOf(rlSet).length === 1 && gateOf(stopLaw(leakedOf(rlSet), rlSet.late, rlSet.shown)) && rlSet.follows === 1, `§A ③ C stamped once the stop SETTLED (+${rlSet.tC} ms, the wrapper's own settle line): a plain send — it runs as its own turn, and B's follow-up was still interrupted`, rlSet);
   for (const l of [rl20, rl45]) {
     const inside = l.cHeld;
     console.log(`    §A ③ δ=${l.at} ms: C came ${inside ? 'INSIDE the window (held)' : 'AFTER the settle (a plain send)'} — the settle ${l.settledBeforeC ? 'preceded' : 'followed'} it`);
-    ok(!l.cHanded && l.answeredC && cReqsOf(l).length === 1 && (!inside || !cReqsOf(l)[0].beforeDrain) && stopLaw(leakedOf(l), l.late, l.shown) && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]) && (inside || l.settledBeforeC), `§A ③ δ=${l.at} ms, judged by its signal: never handed, nothing answered B, C ran as its own turn — ${inside ? 'held until the settle' : 'a plain send after it'}`, l);
+    ok(!l.cHanded && gateOf(l.answeredC) && cReqsOf(l).length === 1 && (!inside || !cReqsOf(l)[0].beforeDrain) && gateOf(stopLaw(leakedOf(l), l.late, l.shown)) && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]) && (verdictOf(inside) || verdictOf(l.settledBeforeC)), `§A ③ δ=${l.at} ms, judged by its signal: never handed, nothing answered B, C ran as its own turn — ${inside ? 'held until the settle' : 'a plain send after it'}`, l);
   }
-  ok(rride.rodeWith && S(rride.drops) === S([{ items: 0, kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && rride.follows === 0 && S(rride.landedAfter) === S(['m-b']), '§A ④ (r4) the REAL CLI, Stop after B rode the tool result but before the model spoke: not proven read, so the record KEEPS it — the CLI started no follow-up (it had taken it in), so the settle says `landed` afterwards', rride);
+  ok(gateOf(rride.rodeWith) && S(rride.drops) === S([{ items: 0, kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && rride.follows === 0 && S(rride.landedAfter) === S(['m-b']), '§A ④ (r4) the REAL CLI, Stop after B rode the tool result but before the model spoke: not proven read, so the record KEEPS it — the CLI started no follow-up (it had taken it in), so the settle says `landed` afterwards', rride);
   // ── §A, ACCEPTANCE r4: the product's own prompt hook, and the restart ──
   const [hookStopReal, copyReal, editReal] = await Promise.all([
     (async () => {
@@ -1114,12 +1114,12 @@ else {
     })(),
   ]);
   console.log(`    §A ⑤ leaked follow-ups (B-28b1): ${hookStopReal.leaked.length} · kind ${kindOf(hookStopReal.leaked)}${kindOf(hookStopReal.leaked) === 'c' ? ` (${KIND_C})` : ''} · told ${hookStopReal.late} · shown ${hookStopReal.shown} · the follow-up's result ${S(hookStopReal.followResult)}`);
-  ok(hookStopReal.follows === 1 && hookStopReal.waited && hookStopReal.clockLines === 0 && hookStopReal.hookAfterStop >= 1, '§A ⑤ the REAL CLI with the product\'s OWN prompt hook (~2.9 s before the follow-up\'s init): the window waited through it (no bound / backstop line), the hook ran after Stop, the follow-up\'s init was interrupted (7df30f96: its 2 s clock closed the window inside the hook and the follow-up was answered)', hookStopReal);
-  ok(stopLaw(hookStopReal.leaked, hookStopReal.late, hookStopReal.shown), '§A ⑤ …THE LAW (B-28b1), as ② and ③: no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact rides its result and is shown once, or it reached the server and its client hung up before the first event (MEASURED by the mock) and nothing is told', hookStopReal);
+  ok(hookStopReal.follows === 1 && gateOf(hookStopReal.waited) && hookStopReal.clockLines === 0 && hookStopReal.hookAfterStop >= 1, '§A ⑤ the REAL CLI with the product\'s OWN prompt hook (~2.9 s before the follow-up\'s init): the window waited through it (no bound / backstop line), the hook ran after Stop, the follow-up\'s init was interrupted (7df30f96: its 2 s clock closed the window inside the hook and the follow-up was answered)', hookStopReal);
+  ok(verdictOf(stopLaw(hookStopReal.leaked, hookStopReal.late, hookStopReal.shown)), '§A ⑤ …THE LAW (B-28b1), as ② and ③: no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact rides its result and is shown once, or it reached the server and its client hung up before the first event (MEASURED by the mock) and nothing is told', hookStopReal);
   const img = Array.isArray(copyReal.bubbles) ? copyReal.bubbles.filter((b) => /IMG-1/.test(b.text)) : [];
   ok(img.length === 1 && img[0].images === 1 && img[0].msgId === 'm-i', '§A ⑥ a 400 KB screenshot held mid-turn, after THE RESTART (the buffer merged with the CLI\'s JSONL, rebuilt): ONE bubble, WITH the image (7df30f96: one bubble, 0 images — its text-only copy hid the record)', copyReal);
   const ed = Array.isArray(editReal.bubbles) ? editReal.bubbles.filter((b) => /MARK-E/.test(b.text)) : [];
-  ok(ed.length === 1 && /locally, NOT on staging/.test(ed[0].text), '§A ⑦ a held frame EDITED then run, after THE RESTART: ONE bubble with the latest words (7df30f96: the never-sent original beside it)', editReal);
+  ok(ed.length === 1 && verdictOf(/locally, NOT on staging/.test(ed[0].text)), '§A ⑦ a held frame EDITED then run, after THE RESTART: ONE bubble with the latest words (7df30f96: the never-sent original beside it)', editReal);
 }
 
 // ── §B THE CHAT WINDOW IN A REAL BROWSER ──
@@ -1183,7 +1183,7 @@ else {
   const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,950', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...envNoBus, ...fontEnv } });
   procs.add(chrome);
   const up = await until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 250);
-  ok(up, '§B the scratch server answered', journal.slice(-1200));
+  ok(verdictOf(up), '§B the scratch server answered', journal.slice(-1200));
   const ctl = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const frames = []; ctl.on('message', (d) => { if (d.length > 65536) return; try { frames.push(JSON.parse(String(d))); } catch { } });
   await new Promise((r, e) => { ctl.on('open', r); ctl.on('error', e); });
@@ -1317,7 +1317,7 @@ else {
   };
 
   const o1 = await open(s1, 'v1', 'steer new');
-  ok(o1 && o1.ok && !o1.ro, '§B the new-wrapper chat window opened live with a composer', o1);
+  ok(gateOf(o1) && gateOf(o1.ok) && !o1.ro, '§B the new-wrapper chat window opened live with a composer', o1);
   if (o1 && o1.ok) {
     // ① ENTER mid-turn — hands it to the running turn
     await typeSend('v1', 'TOOL-1 run a slow command');
@@ -1335,10 +1335,10 @@ else {
     await sleep(500);
     const landedChip = await bubble('v1', 'ENTER-B');
     await shot('3-injected-row');
-    if (!ok(/Enter sends now/.test(hint1.hint) && /Alt\+Enter queues until the turn ends/.test(hint1.hint) && !hint1.hold && !hint1.bolt, '§B ① the hint under the box while the turn runs: «Enter sends now · Alt+Enter queues until the turn ends» (desktop: no buttons)', hint1)) console.log(dump());
-    ok(gotFast && !toolDoneAtGot && !strip1.visible, '① mid-turn ENTER ⇒ the CLI got it AT ONCE (before the tool result), never a strip row', { gotFast, toolDoneAtGot, strip1 });
-    ok(handedChip.chip === 'handed' && /Handed to the turn/.test(handedChip.label || ''), '① …the bubble reads «Handed to the turn» while the tool runs', handedChip);
-    ok(delivered().some((d) => d.how === 'tool_result' && d.text === 'ENTER-B sent with Enter while the tool runs') && landedChip.chip === 'steered' && /Steered/.test(landedChip.label || ''), '① …it LANDED at the tool result (the stand-in took it into the turn) and the bubble now reads «Steered» where it sits — never a turn of its own', { landedChip, delivered: delivered() });
+    if (!ok(gateOf(/Enter sends now/.test(hint1.hint)) && gateOf(/Alt\+Enter queues until the turn ends/.test(hint1.hint)) && !hint1.hold && !hint1.bolt, '§B ① the hint under the box while the turn runs: «Enter sends now · Alt+Enter queues until the turn ends» (desktop: no buttons)', hint1)) console.log(dump());
+    ok(gateOf(gotFast) && !toolDoneAtGot && !strip1.visible, '① mid-turn ENTER ⇒ the CLI got it AT ONCE (before the tool result), never a strip row', { gotFast, toolDoneAtGot, strip1 });
+    ok(handedChip.chip === 'handed' && verdictOf(/Handed to the turn/.test(handedChip.label || '')), '① …the bubble reads «Handed to the turn» while the tool runs', handedChip);
+    ok(gateOf(delivered().some((d) => d.how === 'tool_result' && d.text === 'ENTER-B sent with Enter while the tool runs')) && landedChip.chip === 'steered' && verdictOf(/Steered/.test(landedChip.label || '')), '① …it LANDED at the tool result (the stand-in took it into the turn) and the bubble now reads «Steered» where it sits — never a turn of its own', { landedChip, delivered: delivered() });
 
     // ③ CONTROL: Alt+Enter still holds — then ② the ⚡ on that held row
     await typeSend('v1', 'TOOL-2 run another slow command');
@@ -1349,7 +1349,7 @@ else {
     const strip3 = await ev(STRIP('v1'));
     const heldChip = await bubble('v1', 'ALT-C');
     await shot('4-held-row-bolt');
-    ok(strip3.visible && /ALT-C held with Alt\+Enter/.test(strip3.text) && strip3.edits === 1 && strip3.removes === 1 && strip3.steers === 1 && heldChip.chip === 'queued' && !cliGot('ALT-C held'), '③ CONTROL: Alt+Enter HOLDS it — the strip row with ✎ ✕ ⚡, the bubble «Queued», the CLI never got it', { strip3, heldChip });
+    ok(gateOf(strip3.visible) && gateOf(/ALT-C held with Alt\+Enter/.test(strip3.text)) && strip3.edits === 1 && strip3.removes === 1 && strip3.steers === 1 && heldChip.chip === 'queued' && !cliGot('ALT-C held'), '③ CONTROL: Alt+Enter HOLDS it — the strip row with ✎ ✕ ⚡, the bubble «Queued», the CLI never got it', { strip3, heldChip });
     const clicked = await realClick('[data-steer-leg="v1"] .chat-queue-strip [data-queue-op="steer"]');
     const gotC = await until(() => cliGot('ALT-C held'), 4000, 50);
     await until(async () => !(await ev(STRIP('v1'))).visible, 4000, 100);
@@ -1357,8 +1357,8 @@ else {
     await waitTurnEnd('v1');
     await sleep(500);
     const cChip = await bubble('v1', 'ALT-C');
-    ok(clicked && gotC && !strip2.visible, '② a trusted click on the ⚡ of the held row ⇒ the CLI got it at once and the row left the strip', { clicked, miss: realClick.lastMiss, gotC, strip2 });
-    ok(delivered().some((d) => d.how === 'tool_result' && d.text === 'ALT-C held with Alt+Enter') && cChip.chip === 'steered', '② …it landed at the tool result, «Steered»', { cChip });
+    ok(gateOf(clicked) && gateOf(gotC) && !strip2.visible, '② a trusted click on the ⚡ of the held row ⇒ the CLI got it at once and the row left the strip', { clicked, miss: realClick.lastMiss, gotC, strip2 });
+    ok(gateOf(delivered().some((d) => d.how === 'tool_result' && d.text === 'ALT-C held with Alt+Enter')) && cChip.chip === 'steered', '② …it landed at the tool result, «Steered»', { cChip });
 
     // ⑤ Stop with a handed message
     await typeSend('v1', 'TOOL-3 a third slow command');
@@ -1375,12 +1375,12 @@ else {
     const box = await ev('window.__v1._chatInput._textarea.value');
     const answeredD = await ev(`(window.__v1._messages || []).some((m) => m.role === 'assistant' && /reply: STOP-D/.test(JSON.stringify(m.content || [])))`);
     await shot('5-stop-kept');
-    ok(stopped && toasts.filter((t) => /1 message\(s\) unread when stopped — they go with your next message/.test(t)).length === 1, '⑤ Stop with a handed message ⇒ ONE toast «1 message(s) unread when stopped — they go with your next message»', { stopped, toasts });
-    ok(dChip.chip === 'kept' && /^Unread when stopped — goes with your next message$/.test(dChip.label || '') && !answeredD && box === '', '⑤ …the bubble reads «Unread when stopped — goes with your next message» (lane midturn-order), NOTHING answered it after Stop, and the box stays empty (it is the turn\'s, never put back)', { dChip, answeredD, box });
+    ok(gateOf(stopped) && toasts.filter((t) => /1 message\(s\) unread when stopped — they go with your next message/.test(t)).length === 1, '⑤ Stop with a handed message ⇒ ONE toast «1 message(s) unread when stopped — they go with your next message»', { stopped, toasts });
+    ok(dChip.chip === 'kept' && gateOf(/^Unread when stopped — goes with your next message$/.test(dChip.label || '')) && !answeredD && box === '', '⑤ …the bubble reads «Unread when stopped — goes with your next message» (lane midturn-order), NOTHING answered it after Stop, and the box stays empty (it is the turn\'s, never put back)', { dChip, answeredD, box });
 
     // ⑦ (r2) A SECOND TAB whose streaming flag LAGS: its Alt+Enter mid-tool is still the person's HOLD
     const tab2 = await openTab(s1, 'steer new');
-    ok(tab2.o && tab2.o.ok, '§B ⑦ a second tab opened the same conversation live', tab2.o);
+    ok(gateOf(tab2.o) && verdictOf(tab2.o.ok), '§B ⑦ a second tab opened the same conversation live', tab2.o);
     await typeSend('v1', 'TOOL-5 a turn two tabs watch');
     await until(() => streaming('v1'), 10000, 100);
     await until(async () => (await toolCards('v1')) >= 4, 10000, 100);
@@ -1399,7 +1399,7 @@ else {
     const gOwn = delivered().some((d) => d.how === 'turn' && d.text === 'LAG-G held from the lagging tab');
     await tab2.close();
     ok(lagged === false && S(sent7) === S([{ steer: false, text: 'LAG-G held from the lagging tab' }]) && !reachedMidTurn, '⑦ the lagging tab\'s Alt+Enter went out UNSTAMPED and the CLI never got it mid-turn (eeece327: stamped — the hold became a hand-over)', { lagged, sent7, reachedMidTurn });
-    ok(strip7.visible && /LAG-G held from the lagging tab/.test(strip7.text) && gChip.chip === 'queued' && gOwn, '⑦ …a strip row and «Queued» on the bubble, and it ran as its own turn after this one', { strip7, gChip, gOwn });
+    ok(gateOf(strip7.visible) && gateOf(/LAG-G held from the lagging tab/.test(strip7.text)) && gChip.chip === 'queued' && verdictOf(gOwn), '⑦ …a strip row and «Queued» on the bubble, and it ran as its own turn after this one', { strip7, gChip, gOwn });
     await waitTurnEnd('v1');
 
     // ⑥ ≤ 768 px: the hold button beside Send (Send itself hands the message over). ⑤'s toast sits over the composer's
@@ -1421,9 +1421,9 @@ else {
     await until(async () => (await ev(STRIP('v1'))).visible, 6000, 100);
     const strip6 = await ev(STRIP('v1'));
     await shot('6-phone-hold-button');
-    ok(phone.hold && !phone.bolt && phone.hint === '', '⑥ ≤ 768 px mid-turn: the hold button shows beside Send (no bolt — Send itself hands it over), the hint line is hidden', phone);
-    ok(phoneIdle.hold && !phoneIdle.bolt, '⑥ …and at IDLE too: the hold door is the capability\'s, never the streaming flag\'s (r2 — a lagging client still has it; at idle it is a plain send)', phoneIdle);
-    ok(held6 && strip6.visible && /PHONE-E held with the button/.test(strip6.text) && !cliGot('PHONE-E held'), '⑥ …a tap on it HOLDS the message (a strip row; the CLI never got it)', { held6, miss: realClick.lastMiss, strip6 });
+    ok(gateOf(phone.hold) && !phone.bolt && phone.hint === '', '⑥ ≤ 768 px mid-turn: the hold button shows beside Send (no bolt — Send itself hands it over), the hint line is hidden', phone);
+    ok(gateOf(phoneIdle.hold) && !phoneIdle.bolt, '⑥ …and at IDLE too: the hold door is the capability\'s, never the streaming flag\'s (r2 — a lagging client still has it; at idle it is a plain send)', phoneIdle);
+    ok(gateOf(held6) && gateOf(strip6.visible) && gateOf(/PHONE-E held with the button/.test(strip6.text)) && !cliGot('PHONE-E held'), '⑥ …a tap on it HOLDS the message (a strip row; the CLI never got it)', { held6, miss: realClick.lastMiss, strip6 });
     await cdp('Emulation.clearDeviceMetricsOverride');
 
     // ⑧ (r2) THE SERVER RESTARTS while PHONE-E is still held, and the page reloads: every message the person sent mid-turn
@@ -1443,20 +1443,20 @@ else {
     // THE PREMISE, asserted (never assumed from a clock): the LONGER turn still runs now — the page says it streams, the leg has not
     // released it, the stand-in has not read PHONE-E. A broken premise is THIS line, never a misread of the bubble lines below
     const premise8 = { streaming: await streaming('v1'), released: fs.existsSync(release8), phoneEread: delivered().some(isE) };
-    ok(premise8.streaming && !premise8.released && !premise8.phoneEread, '§B ⑧ PREMISE: the LONGER turn still runs with the page back — held by the leg\'s release, not a clock (a broken premise is said here)', { premise8, ...ev8() });
+    ok(gateOf(premise8.streaming) && !premise8.released && !premise8.phoneEread, '§B ⑧ PREMISE: the LONGER turn still runs with the page back — held by the leg\'s release, not a clock (a broken premise is said here)', { premise8, ...ev8() });
     const after8 = {};
     for (const t of ['ENTER-B', 'ALT-C', 'STOP-D', 'LAG-G', 'PHONE-E']) after8[t] = await bubbles('v1', t);
     const strip8 = await ev(STRIP('v1'));
     await shot('8-after-restart');
-    ok(restarted && o1r && o1r.ok, '§B ⑧ the server restarted mid-turn and the reloaded page reopened the conversation live', { restarted, o1r, journal: journal.slice(-600) });
+    ok(gateOf(restarted) && gateOf(o1r) && verdictOf(o1r.ok), '§B ⑧ the server restarted mid-turn and the reloaded page reopened the conversation live', { restarted, o1r, journal: journal.slice(-600) });
     ok(S(after8['ENTER-B'].map((b) => b.chip)) === S(['steered']) && S(after8['ALT-C'].map((b) => b.chip)) === S(['steered']) && S(after8['STOP-D'].map((b) => b.chip)) === S(['kept']) && S(after8['LAG-G'].map((b) => b.chip)) === S([null]), '⑧ after the restart each handed message is back ONCE with its last chip — «Steered», «Steered», «Unread when stopped — goes with your next message» — and the one that was held and ran, once with none (eeece327: gone)', after8);
-    ok(S(after8['PHONE-E'].map((b) => b.chip)) === S(['queued']) && strip8.visible && /PHONE-E held with the button/.test(strip8.text), '⑧ …the message STILL HELD across it: its bubble «Queued» and its strip row (the base lost a held bubble the same way)', { phoneE: after8['PHONE-E'], strip8, ...ev8() });
+    ok(S(after8['PHONE-E'].map((b) => b.chip)) === S(['queued']) && gateOf(strip8.visible) && verdictOf(/PHONE-E held with the button/.test(strip8.text)), '⑧ …the message STILL HELD across it: its bubble «Queued» and its strip row (the base lost a held bubble the same way)', { phoneE: after8['PHONE-E'], strip8, ...ev8() });
     fs.writeFileSync(release8, 'released after the reopen\n');   // the LONGER turn's tool may end now
     await waitTurnEnd('v1', 40000);
     await until(() => delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), 8000, 100);
     await sleep(600);
     const eAfter = await bubbles('v1', 'PHONE-E');
-    ok(S(eAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), '⑧ …and when the turn ended it ran — still one bubble', { eAfter, ...ev8() });
+    ok(S(eAfter.map((b) => b.chip)) === S([null]) && verdictOf(delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button')), '⑧ …and when the turn ended it ran — still one bubble', { eAfter, ...ev8() });
     // ⑧c (B-5a4d — the coordinator's law 2026-11-20, THE MADE RESTART): a hub that restarts 50 ms after a hold is SAID (its strip row
     // shows) reads the wrapper's file once — the held copy and its queue record must already be in it. The page then draws the held
     // message «Queued» with its strip row, and once the turn ends it ran: ONE bubble, no chip, the page idle. Placed by the leg's own
@@ -1486,16 +1486,16 @@ else {
     const isH = (d) => d.text === 'PHONE-H held, then the hub restarts at +50 ms';
     const hHeld = await bubbles('v1', 'PHONE-H'), stripH = await ev(STRIP('v1'));
     const evH = () => ({ delivered: delivered().filter(isH), queue: queueRecs('PHONE-H') });
-    ok(heldH && saidH && backH && oH && oH.ok && !delivered().some(isH), '§B ⑧c PREMISE: PHONE-H was HELD and its hold said (the strip row), the hub stopped 50 ms later and came back, the page reopened — the LONGER turn still runs (PHONE-H unread)', { heldH, saidH, backH, oH, ...evH() });
-    ok(atStopH.copy && atStopH.queueRecord, '§B ⑧c THE CURE\'S FACT at the made instant (+50 ms, the moment the hub was stopped): the wrapper\'s file ALREADY holds the held copy and its queue record (the base\'s 2 s timer had written neither — B-5a4d\'s placement)', atStopH);
-    ok(S(hHeld.map((b) => b.chip)) === S(['queued']) && stripH.visible && /PHONE-H held, then the hub restarts/.test(stripH.text), '§B ⑧c THE MADE RESTART (+50 ms after the hold was said): the held message is back ONCE, «Queued», with its strip row — drawn from the wrapper\'s file (B-5a4d: none of it was there before the cure)', { hHeld, stripH, ...evH() });
+    ok(gateOf(heldH) && gateOf(saidH) && gateOf(backH) && gateOf(oH) && gateOf(oH.ok) && !delivered().some(isH), '§B ⑧c PREMISE: PHONE-H was HELD and its hold said (the strip row), the hub stopped 50 ms later and came back, the page reopened — the LONGER turn still runs (PHONE-H unread)', { heldH, saidH, backH, oH, ...evH() });
+    ok(gateOf(atStopH.copy) && verdictOf(atStopH.queueRecord), '§B ⑧c THE CURE\'S FACT at the made instant (+50 ms, the moment the hub was stopped): the wrapper\'s file ALREADY holds the held copy and its queue record (the base\'s 2 s timer had written neither — B-5a4d\'s placement)', atStopH);
+    ok(S(hHeld.map((b) => b.chip)) === S(['queued']) && gateOf(stripH.visible) && verdictOf(/PHONE-H held, then the hub restarts/.test(stripH.text)), '§B ⑧c THE MADE RESTART (+50 ms after the hold was said): the held message is back ONCE, «Queued», with its strip row — drawn from the wrapper\'s file (B-5a4d: none of it was there before the cure)', { hHeld, stripH, ...evH() });
     fs.writeFileSync(release8, 'released after the made restart\n');
     await waitTurnEnd('v1', 40000);
     await until(() => delivered().some((d) => d.how === 'turn' && isH(d)), 8000, 100);
     // a wait for WHAT HAPPENED (lesson c): the page says the held message ran — its bubble's chip gone — then the reads; red at the bound
     await until(async () => (await bubbles('v1', 'PHONE-H')).some((b) => b.chip === null), 8000, 100);
     const hAfter = await bubbles('v1', 'PHONE-H'), idleH = !(await streaming('v1'));
-    ok(S(hAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && isH(d)) && idleH, '§B ⑧c …and when the turn ended it ran: ONE bubble, no chip, and the page IDLE (never left «streaming»)', { hAfter, idleH, ...evH() });
+    ok(S(hAfter.map((b) => b.chip)) === S([null]) && gateOf(delivered().some((d) => d.how === 'turn' && isH(d))) && verdictOf(idleH), '§B ⑧c …and when the turn ended it ran: ONE bubble, no chip, and the page IDLE (never left «streaming»)', { hAfter, idleH, ...evH() });
     // ⑧d (the coordinator's law 08:14Z — A TURN THAT ENDED): a hub restarted 50 ms after a turn's END was said comes back IDLE: the
     // turn has its end and nothing is drawn twice (the wrapper's file held the result before it was said)
     const madeRestart = async (tag, atInstant = () => null) => {
@@ -1520,11 +1520,11 @@ else {
     // idle read below is of that same rebuild (a turn with no end would show its Stop beside the answer); red by name at the bound
     const drawnI = await until(async () => (await replies('ENDS-I')) >= 1, 15000, 100);
     const iBubbles = await bubbles('v1', 'ENDS-I'), iReplies = await replies('ENDS-I'), idleI = !(await streaming('v1'));
-    ok(drawnI, '§B ⑧d the reopened page DREW the ended turn\'s answer (its rebuild is done) before the idle read below', { iReplies });
-    ok(!!rI.atStop && rI.atStop.reply && rI.atStop.endAfter && rI.atStop.idleAfter, '§B ⑧d THE CURE\'S FACT at the made instant: the wrapper\'s file already holds the turn\'s answer, its result and its «idle» after it (the base\'s timer had not written them)', rI.atStop);
+    ok(verdictOf(drawnI), '§B ⑧d the reopened page DREW the ended turn\'s answer (its rebuild is done) before the idle read below', { iReplies });
+    ok(!!rI.atStop && gateOf(rI.atStop.reply) && gateOf(rI.atStop.endAfter) && verdictOf(rI.atStop.idleAfter), '§B ⑧d THE CURE\'S FACT at the made instant: the wrapper\'s file already holds the turn\'s answer, its result and its «idle» after it (the base\'s timer had not written them)', rI.atStop);
     // the prompt was sent at IDLE: the wrapper records it nowhere (the hub's record is in its memory, the stand-in writes no
     // transcript — a real CLI's transcript holds it), so after the restart it is drawn at most once: never twice
-    ok(endedI && rI.back && rI.ok && idleI && iBubbles.length <= 1 && iReplies === 1, '§B ⑧d A TURN THAT ENDED: a hub restarted 50 ms after its end was said comes back IDLE — the turn has its end, its answer ONCE, nothing drawn twice (B-5a4d: the page stayed «still working»)', { endedI, rI, idleI, iBubbles, iReplies });
+    ok(gateOf(endedI) && gateOf(rI.back) && gateOf(rI.ok) && gateOf(idleI) && iBubbles.length <= 1 && iReplies === 1, '§B ⑧d A TURN THAT ENDED: a hub restarted 50 ms after its end was said comes back IDLE — the turn has its end, its answer ONCE, nothing drawn twice (B-5a4d: the page stayed «still working»)', { endedI, rI, idleI, iBubbles, iReplies });
     // ⑧e (the coordinator's question — A TURN'S START in the same window): a hub restarted 50 ms after a turn's START was said (the
     // page showed it running) comes back showing it RUNNING while the CLI works — a text-free tool wait sends nothing that says it
     // runs until its end, so the file must hold the start — then idle once it ends
@@ -1538,8 +1538,8 @@ else {
     const runningJ = await until(() => streaming('v1'), 5000, 100);
     fs.writeFileSync(release8, 'released after the start restart\n');
     const endJ = await waitTurnEnd('v1', 40000);
-    ok(!!rJ.atStop && rJ.atStop.lastState === 'running' && rJ.atStop.init, '§B ⑧e THE CURE\'S FACT at the made instant: the wrapper\'s file already holds the turn\'s init and its last state word is «running»', rJ.atStop);
-    ok(startedJ && rJ.back && rJ.ok && runningJ && endJ, '§B ⑧e A TURN\'S START: a hub restarted 50 ms after it was said comes back showing the turn RUNNING while the CLI works (its tool still held), and idle once it ends', { startedJ, rJ, runningJ, endJ });
+    ok(!!rJ.atStop && rJ.atStop.lastState === 'running' && verdictOf(rJ.atStop.init), '§B ⑧e THE CURE\'S FACT at the made instant: the wrapper\'s file already holds the turn\'s init and its last state word is «running»', rJ.atStop);
+    ok(gateOf(startedJ) && gateOf(rJ.back) && gateOf(rJ.ok) && gateOf(runningJ) && verdictOf(endJ), '§B ⑧e A TURN\'S START: a hub restarted 50 ms after it was said comes back showing the turn RUNNING while the CLI works (its tool still held), and idle once it ends', { startedJ, rJ, runningJ, endJ });
     // ⑨ (r5) THE IDLE CHORD ON THE PRODUCT'S COMPOSER — at idle, where Enter is a newline (the expanded editor; chat.enterSends
     // off), Alt+Enter TYPES one at the caret, nothing is sent. Chrome inserts nothing for the chord itself: 6334e9a8 left it to
     // the textarea's default, and the key was dead (the reviewers' bare textarea, here on the real composer)
@@ -1560,14 +1560,14 @@ else {
       return { mode, prep, value: after.value, sent: cliGot('IDLE-' + mode) };
     };
     const ix = await idleChord('expanded'), io = await idleChord('enterSends-off');
-    ok(ix.prep.expanded && !ix.prep.streaming && ix.value === 'IDLE-expanded-a\nb' && !ix.sent
+    ok(gateOf(ix.prep.expanded) && !ix.prep.streaming && ix.value === 'IDLE-expanded-a\nb' && !ix.sent
       && !io.prep.enterSends && !io.prep.streaming && io.value === 'IDLE-enterSends-off-a\nb' && !io.sent, '⑨ (r5) at IDLE on the product\'s composer — the expanded editor and chat.enterSends off: Alt+Enter TYPES a newline at the caret (replacing the selection), nothing reaches the CLI — never a dead key', { ix, io });
   }
 
   // ④ the OLD wrapper's session: its hello names no steer
   if (s2) {
     const o2 = await open(s2, 'v2', 'steer old wrapper');
-    ok(o2 && o2.ok, '§B the old-wrapper chat window opened live', o2);
+    ok(gateOf(o2) && verdictOf(o2.ok), '§B the old-wrapper chat window opened live', o2);
     if (o2 && o2.ok) {
       await typeSend('v2', 'TOOL-9 a turn on the old wrapper');
       await until(() => streaming('v2'), 10000, 100);
@@ -1577,8 +1577,8 @@ else {
       await until(async () => (await ev(STRIP('v2'))).visible, 6000, 100);
       const strip4 = await ev(STRIP('v2'));
       await shot('7-old-wrapper');
-      ok(/Enter queues/.test(hint2.hint) && !/Alt\+Enter/.test(hint2.hint) && !/sends now/.test(hint2.hint) && !hint2.hold, '④ CONTROL — the 6428c67e wrapper (hello without steer): «Enter queues» alone, no Alt+Enter segment, no hold button', hint2);
-      ok(strip4.visible && strip4.steers === 0 && !cliGot('OLD-F typed'), '④ …Enter there HOLDS (it is what that wrapper does) and its row has no ⚡', strip4);
+      ok(gateOf(/Enter queues/.test(hint2.hint)) && !/Alt\+Enter/.test(hint2.hint) && !/sends now/.test(hint2.hint) && !hint2.hold, '④ CONTROL — the 6428c67e wrapper (hello without steer): «Enter queues» alone, no Alt+Enter segment, no hold button', hint2);
+      ok(gateOf(strip4.visible) && strip4.steers === 0 && !cliGot('OLD-F typed'), '④ …Enter there HOLDS (it is what that wrapper does) and its row has no ⚡', strip4);
     }
   } else skip('§B ④', `git show ${BASE}:data/bin/chat-wrapper.js failed — the base is not reachable from this checkout`);
   ok(pageErrors.length === 0, '§B no page exceptions', pageErrors.slice(0, 3));
@@ -1590,4 +1590,4 @@ else {
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skipped} skipped${skips.length ? ` — ${skips.join('; ')}` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped${skips.length ? ` — ${skips.join('; ')}` : ''}` : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

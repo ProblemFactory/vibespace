@@ -66,7 +66,7 @@ const sayRedPress = (leg) => {
     console.log(lines.map((l) => '    ' + l).join('\n'));
   } catch (x) { console.log(`    [a red press on page P: ${leg}] — its words could not be printed: ${(x && x.message) || x}`); }
 };
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); if (!firstRedSaid && PAGE) firstRedSaid = sayFirstRed(n); else if (PAGE && /(^|: )a real click/i.test(n)) sayRedPress(n); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); if (!firstRedSaid && PAGE) firstRedSaid = sayFirstRed(n); else if (PAGE && /(^|: )a real click/i.test(n)) sayRedPress(n); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -126,13 +126,13 @@ function withoutVerbatimKind(src, kind) {
   for (const [form, text] of Object.entries(FORMS)) {
     const pre = withoutVerbatimKind(text, KIND);
     const others = verbatimListOf(text).literals.map((l) => l.value).filter((v) => v !== KIND);
-    ok(pre.hits === 1 && isCmdOf(text, KIND) === true && isCmdOf(pre.text, KIND) === false && others.length >= 1 && others.every((k) => isCmdOf(pre.text, k) === true),
+    ok(pre.hits === 1 && isCmdOf(text, KIND) === true && isCmdOf(pre.text, KIND) === false && others.length >= 1 && verdictOf(others.every((k) => isCmdOf(pre.text, k) === true)),
       `CONTROL (F4, derived): ${form} — the pre-fix form drops ${KIND} only (verbatim before, markdown after; ${others.join(' / ')} stay verbatim)`, { hits: pre.hits, text: pre.text });
   }
   const winSrc = fs.readFileSync(path.join(REPO, 'src/lib/inbox-window.js'), 'utf8');
   const live = verbatimListOf(winSrc), pre = withoutVerbatimKind(winSrc, KIND), after = verbatimListOf(pre.text);
   const kept = live.literals.map((l) => l.value).filter((v) => v !== KIND);
-  ok(live.inits.length === 1 && pre.hits === 1 && !after.literals.some((l) => l.value === KIND) && kept.every((k) => after.literals.some((l) => l.value === k)),
+  ok(live.inits.length === 1 && pre.hits === 1 && !after.literals.some((l) => l.value === KIND) && verdictOf(kept.every((k) => after.literals.some((l) => l.value === k))),
     `CONTROL (F4, derived): the window's own list today — ${KIND} found once in isCmd and taken out; ${kept.join(' / ') || '(no other kind)'} kept`, { inits: live.inits, hits: pre.hits });
 }
 
@@ -150,36 +150,36 @@ try {
   const pair = await W.pairDevice('exmac');
   let online = false;
   for (let i = 0; i < 80 && !online; i++) { online = !!(await W.hostRow('exmac'))?.online; if (!online) await sleep(250); }
-  ok(online, 'a REAL device daemon is paired through the route and dialed in');
+  ok(verdictOf(online), 'a REAL device daemon is paired through the route and dialed in');
   const groups = [];
   for (const title of ['运维', '前端', '后端']) groups.push((await W.api('POST', '/api/tasks', { title })).j.task);
-  ok(groups.every((g) => g && g.id), 'three Task Groups');
+  ok(verdictOf(groups.every((g) => g && g.id)), 'three Task Groups');
   const S = [];
   for (let k = 1; k <= 3; k++) S.push(await W.createStubSession(path.join(W.home, 'proj' + k)));
-  ok(S.every((s) => s.sid && s.token && s.token.startsWith('vsst_') && s.cid), 'three live stub conversations with their vsst_ tokens', S);
+  ok(verdictOf(S.every((s) => s.sid && s.token && s.token.startsWith('vsst_') && s.cid)), 'three live stub conversations with their vsst_ tokens', S);
   const bind = await W.api('POST', `/api/tasks/${groups[0].id}/bind`, { sessionKey: 'claude:' + S[0].cid });
   ok(bind.status === 200, 'conversation 1 is bound to 运维');
 
   const P = await W.openPage({ width: 1280, height: 820, lang: 'zh', first: true });
   PAGE = P; NAMES = Object.fromEntries(S.map((s, i) => [s.sid, 'conversation ' + (i + 1)]));   // the first red leg's scene names them
-  ok(await openRemote(P), 'the Remote tab');
-  ok(await P.waitFor(`!!${exitIcon}`, 15000), 'the machine row\'s summary line IS the door "谁能把 … 当出口使用…" (B-cb72: a button, no strip icon)');
-  ok(await P.evalJs(`/^出口：网络 — 没有人 · 命令 — 没有人$/.test(${rowOf}.querySelector('.mounts-exit-line')?.textContent || '')`), 'the row says 出口：网络 — 没有人 · 命令 — 没有人 (the migration default: nobody)');
-  ok(await P.evalJs(`!${exitIcon}.classList.contains('mounts-exit-door-open') && !${rowOf}.querySelector('.mounts-row-actions button[title*="出口"], .mounts-row-actions button[title*="as an exit"]')`), 'B-cb72: nobody ⇒ the door at rest (no accent), and no strip icon carries the exit title any more');
-  ok(await P.evalJs(`${exitIcon}.getAttribute('aria-label') === '谁能把 "exmac" 当出口使用：出口：网络 — 没有人 · 命令 — 没有人'`), 'B-cb72 cure: the NAME a screen reader hears says what the door opens AND its status (谁能把 "exmac" 当出口使用：出口：网络 — 没有人 · 命令 — 没有人)', await P.evalJs(`${exitIcon}.getAttribute('aria-label')`));
+  ok(verdictOf(await openRemote(P)), 'the Remote tab');
+  ok(verdictOf(await P.waitFor(`!!${exitIcon}`, 15000)), 'the machine row\'s summary line IS the door "谁能把 … 当出口使用…" (B-cb72: a button, no strip icon)');
+  ok(verdictOf(await P.evalJs(`/^出口：网络 — 没有人 · 命令 — 没有人$/.test(${rowOf}.querySelector('.mounts-exit-line')?.textContent || '')`)), 'the row says 出口：网络 — 没有人 · 命令 — 没有人 (the migration default: nobody)');
+  ok(verdictOf(await P.evalJs(`!${exitIcon}.classList.contains('mounts-exit-door-open') && !${rowOf}.querySelector('.mounts-row-actions button[title*="出口"], .mounts-row-actions button[title*="as an exit"]')`)), 'B-cb72: nobody ⇒ the door at rest (no accent), and no strip icon carries the exit title any more');
+  ok(verdictOf(await P.evalJs(`${exitIcon}.getAttribute('aria-label') === '谁能把 "exmac" 当出口使用：出口：网络 — 没有人 · 命令 — 没有人'`)), 'B-cb72 cure: the NAME a screen reader hears says what the door opens AND its status (谁能把 "exmac" 当出口使用：出口：网络 — 没有人 · 命令 — 没有人)', await P.evalJs(`${exitIcon}.getAttribute('aria-label')`));
   // ① the row's copy HELD stale: the page stops repainting the panel, the server's list moves on
   await P.evalJs(`(() => { const s = app.sidebar; s.__realRender = s._renderMounts; s._renderMounts = async () => {}; return true; })()`);
   const w1 = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { use: { mode: 'everyone' } });
   ok(w1.status === 200 && w1.j.access.use.mode === 'everyone', 'another writer: network → everyone (the page is not repainted — its row is a frame behind)');
-  ok(await P.evalJs(`((app.sidebar._hostsData.hosts.find((h) => h.id === ${JSON.stringify(HOST)}).exit || {}).use || { mode: 'nobody' }).mode === 'nobody'`), '(the page\'s own copy still says nobody)');
+  ok(verdictOf(await P.evalJs(`((app.sidebar._hostsData.hosts.find((h) => h.id === ${JSON.stringify(HOST)}).exit || {}).use || { mode: 'nobody' }).mode === 'nobody'`)), '(the page\'s own copy still says nobody)');
   console.log('① the exit door opens the dialog on a FRESH GET');
-  ok(await P.realClick(exitIcon), 'a real click on the row\'s exit door');
-  ok(await P.waitFor(`!!document.querySelector('${sec('run')}')`, 8000), 'the dialog 谁能使用 exmac？ opens');
-  ok(await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-header h3').textContent === '谁能使用 exmac？'`), 'its title');
+  ok(verdictOf(await P.realClick(exitIcon)), 'a real click on the row\'s exit door');
+  ok(verdictOf(await P.waitFor(`!!document.querySelector('${sec('run')}')`, 8000)), 'the dialog 谁能使用 exmac？ opens');
+  ok(verdictOf(await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-header h3').textContent === '谁能使用 exmac？'`)), 'its title');
   // lane hub-act-ask: THE THIRD LIST — this world is a LOCAL instance: not set ⇒ 一直允许, and the dialog says why
   const hubView = await P.evalJs(`(() => { const s = document.querySelector('${sec('hub')}'); if (!s) return null; return { title: s.querySelector('h4')?.textContent, radios: [...s.querySelectorAll('input[name="exit-hub-mode"]')].map((r) => r.value + ':' + r.checked + ':' + r.closest('label').textContent.trim()), note: s.querySelector('.exit-access-hub-default')?.textContent }; })()`);
-  ok(hubView && hubView.title === 'Hub 自动化' && hubView.radios.join('|') === 'nobody:false:从不|ask:false:每次都问我|everyone:true:一直允许' && hubView.note === '未设置——本地实例默认允许。', 'lane hub-act-ask: the THIRD list Hub 自动化 — 从不 / 每次都问我 / 一直允许; not set on a local instance ⇒ 一直允许, said under the radios', hubView);
-  ok(await P.evalJs(`document.querySelector('${sec('use')} input[value="only"]').checked && [...document.querySelectorAll('${sec('use')} .pp-chip')].map((c) => c.dataset.key).join() === 'everyone:*' && !document.querySelector('${sec('use')} input[value="everyone"]')`), 'the dialog shows the SERVER\'s list (network: 你选的 agent with the 所有 agent chip — the stored everyone mode, no radio of its own), not the row\'s stale copy (mirror-193)');
+  ok(gateOf(hubView) && hubView.title === 'Hub 自动化' && hubView.radios.join('|') === 'nobody:false:从不|ask:false:每次都问我|everyone:true:一直允许' && hubView.note === '未设置——本地实例默认允许。', 'lane hub-act-ask: the THIRD list Hub 自动化 — 从不 / 每次都问我 / 一直允许; not set on a local instance ⇒ 一直允许, said under the radios', hubView);
+  ok(verdictOf(await P.evalJs(`document.querySelector('${sec('use')} input[value="only"]').checked && [...document.querySelectorAll('${sec('use')} .pp-chip')].map((c) => c.dataset.key).join() === 'everyone:*' && !document.querySelector('${sec('use')} input[value="everyone"]')`)), 'the dialog shows the SERVER\'s list (network: 你选的 agent with the 所有 agent chip — the stored everyone mode, no radio of its own), not the row\'s stale copy (mirror-193)');
   // naive-user N-radio: `.dialog-body label` (0,1,1) is a COLUMN flex — the six mode radios and "每次都问我" sat above
   // their words (the checkbox centred on its own line). THE LABEL CENSUS + a patched copy of style.css as the control.
   // naive-user N-greyed: commands = 没有人 here — "每次都问我" sat greyed out (disabled) and did nothing when clicked (the
@@ -188,7 +188,7 @@ try {
   const g0 = await P.evalJs(greyedJs);
   ok(g0.length === 0 && !(await P.evalJs(`!!document.querySelector('${sec('run')} .exit-access-ask')?.offsetParent`)), 'N-greyed: with commands = 没有人 the dialog shows NO greyed control — "每次都问我" is not shown under Nobody', g0);
   const lcx = await P.evalJs(labelRowCensusJs('#exit-access-dialog'));
-  ok(lcx.ok && lcx.n === 7, `N-radio: every mode radio sits BESIDE its words (${lcx.n} labels — two answers per list since lane everyone-principal, three in Hub 自动化 since lane hub-act-ask)`, lcx);
+  ok(gateOf(lcx.ok) && lcx.n === 7, `N-radio: every mode radio sits BESIDE its words (${lcx.n} labels — two answers per list since lane everyone-principal, three in Hub 自动化 since lane hub-act-ask)`, lcx);
   {
     const real = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
     const MUT = mutantCopies('exitui', REPO);
@@ -224,44 +224,44 @@ try {
   await P.evalJs(`(() => { const s = app.sidebar; s._renderMounts = s.__realRender; return true; })()`);
   // ② pick with the keyboard and the mouse, ask me, Save ⇒ ONE PATCH
   console.log('② Only these + a Task Group by keyboard + a conversation by mouse + 每次都问我 ⇒ ONE PATCH');
-  ok(await P.realClick(`${sec('run')} input[value="only"]`), 'a real click on 你选的 agent (commands)');
-  ok(await P.waitFor(`!!document.querySelector('${sec('run')} .pp-input')?.offsetParent`, 4000), 'the principal picker shows');
+  ok(verdictOf(await P.realClick(`${sec('run')} input[value="only"]`)), 'a real click on 你选的 agent (commands)');
+  ok(verdictOf(await P.waitFor(`!!document.querySelector('${sec('run')} .pp-input')?.offsetParent`, 4000)), 'the principal picker shows');
   await P.realClick(`${sec('run')} .pp-input`);
   await P.type('运维');
   await P.key('Enter', { vk: 13, text: '\r' });
-  ok(await P.waitFor(`[...document.querySelectorAll('${sec('run')} .pp-chip')].some((c) => c.dataset.key === ${JSON.stringify('group:' + groups[0].id)})`, 4000), 'the KEYBOARD picked the Task Group 运维 (a chip)');
+  ok(verdictOf(await P.waitFor(`[...document.querySelectorAll('${sec('run')} .pp-chip')].some((c) => c.dataset.key === ${JSON.stringify('group:' + groups[0].id)})`, 4000)), 'the KEYBOARD picked the Task Group 运维 (a chip)');
   await P.evalJs(`(() => { const i = document.querySelector('${sec('run')} .pp-input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await sleep(200);
-  ok(await P.realClick(`${sec('run')} .pp-row[data-key=${JSON.stringify('agent:' + S[1].cid)}]`), 'the MOUSE picks conversation 2 in the list');
-  ok(await P.waitFor(`[...document.querySelectorAll('${sec('run')} .pp-chip')].some((c) => c.dataset.key === ${JSON.stringify('agent:' + S[1].cid)})`, 4000), '…its chip');
-  ok(await P.evalJs(`(() => { const a = document.querySelector('${sec('run')} .exit-access-ask input'); return !!a && !!a.offsetParent && !a.disabled; })()`) && (await P.evalJs(greyedJs)).length === 0, 'N-greyed: "Only these" SHOWS "每次都问我", live — and still no greyed control');
-  ok(await P.realClick(`${sec('run')} .exit-access-ask input`), 'tick 每次都问我');
+  ok(verdictOf(await P.realClick(`${sec('run')} .pp-row[data-key=${JSON.stringify('agent:' + S[1].cid)}]`)), 'the MOUSE picks conversation 2 in the list');
+  ok(verdictOf(await P.waitFor(`[...document.querySelectorAll('${sec('run')} .pp-chip')].some((c) => c.dataset.key === ${JSON.stringify('agent:' + S[1].cid)})`, 4000)), '…its chip');
+  ok(gateOf(await P.evalJs(`(() => { const a = document.querySelector('${sec('run')} .exit-access-ask input'); return !!a && !!a.offsetParent && !a.disabled; })()`)) && (await P.evalJs(greyedJs)).length === 0, 'N-greyed: "Only these" SHOWS "每次都问我", live — and still no greyed control');
+  ok(verdictOf(await P.realClick(`${sec('run')} .exit-access-ask input`)), 'tick 每次都问我');
   const pBefore = patches(P).length;
-  ok(await P.realClick('#exit-access-dialog .exit-access-save'), 'a real click on 保存');
-  ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), 'the dialog closes on success');
+  ok(verdictOf(await P.realClick('#exit-access-dialog .exit-access-save')), 'a real click on 保存');
+  ok(verdictOf(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000)), 'the dialog closes on success');
   const pd = patches(P).slice(pBefore);
   const body = pd[0] && JSON.parse(pd[0].body);
-  ok(pd.length === 1 && body && typeof body.base === 'string' && body.run.mode === 'only' && body.run.ask === true && body.run.who.some((r) => r.kind === 'session' && r.session === S[1].sid) && body.run.who.some((r) => r.kind === 'group' && r.id === groups[0].id), 'ONE PATCH: `session:<webui id>` rows + the group + ask + the base it read', pd.map((x) => x.body));
-  ok(await P.waitFor(`[...document.querySelectorAll('.global-toast')].some((t) => /^谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）✕?$/.test(t.textContent.trim()))`, 4000), 'the toast: 谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）', await P.evalJs(`[...document.querySelectorAll('.global-toast')].map((t) => t.textContent).join(' | ')`));
-  ok(body && !('hub' in body), 'lane hub-act-ask: Hub 自动化 untouched ⇒ not in the PATCH (not set stays the instance\'s default)', body);
+  ok(pd.length === 1 && gateOf(body) && typeof body.base === 'string' && body.run.mode === 'only' && body.run.ask === true && gateOf(body.run.who.some((r) => r.kind === 'session' && r.session === S[1].sid)) && verdictOf(body.run.who.some((r) => r.kind === 'group' && r.id === groups[0].id)), 'ONE PATCH: `session:<webui id>` rows + the group + ask + the base it read', pd.map((x) => x.body));
+  ok(verdictOf(await P.waitFor(`[...document.querySelectorAll('.global-toast')].some((t) => /^谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）✕?$/.test(t.textContent.trim()))`, 4000)), 'the toast: 谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）', await P.evalJs(`[...document.querySelectorAll('.global-toast')].map((t) => t.textContent).join(' | ')`));
+  ok(gateOf(body) && !('hub' in body), 'lane hub-act-ask: Hub 自动化 untouched ⇒ not in the PATCH (not set stays the instance\'s default)', body);
   const stored = (await W.hostRow('exmac')).exit;
   // lane grants-unify: the grants store names a conversation by its conversation id (the ONE spelling)
-  ok(stored.run.mode === 'only' && stored.run.ask === true && stored.run.who.some((w) => w.kind === 'conversation' && w.key === S[1].cid), 'the server resolved the live pick to its durable key (the conversation id)', stored.run);
+  ok(stored.run.mode === 'only' && stored.run.ask === true && verdictOf(stored.run.who.some((w) => w.kind === 'conversation' && w.key === S[1].cid)), 'the server resolved the live pick to its durable key (the conversation id)', stored.run);
   const P2 = await W.openPage({ width: 1280, height: 820, lang: 'zh' });
   await openRemote(P2);
-  ok(await P2.waitFor(`/^出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）$/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), 'a SECOND page\'s row shows the summary 出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）');
-  ok(await P.waitFor(`/已选 2 个（每次问我）/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), '…and the first page\'s row repainted from the broadcast');
-  ok(await P2.evalJs(`${exitIcon}.classList.contains('mounts-exit-door-open')`), 'B-cb72: a grant that is not nobody ⇒ the door wears the accent');
+  ok(verdictOf(await P2.waitFor(`/^出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）$/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000)), 'a SECOND page\'s row shows the summary 出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）');
+  ok(verdictOf(await P.waitFor(`/已选 2 个（每次问我）/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000)), '…and the first page\'s row repainted from the broadcast');
+  ok(verdictOf(await P2.evalJs(`${exitIcon}.classList.contains('mounts-exit-door-open')`)), 'B-cb72: a grant that is not nobody ⇒ the door wears the accent');
   // B-cb72: the KEYBOARD reaches the door and Enter presses it (a button; no row handler swallows the key)
   // reached by TAB (real key presses from the page's start), never by a script's focus
   await P.evalJs(`(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); return true; })()`);
   let tabbed = false;
   for (let i = 0; i < 160 && !tabbed; i++) { await P.key('Tab', { vk: 9 }); tabbed = await P.evalJs(`document.activeElement === ${exitIcon}`); }
-  ok(tabbed, 'B-cb72: Tab presses from the page\'s start reach the door (keyboard focus, no script)');
+  ok(verdictOf(tabbed), 'B-cb72: Tab presses from the page\'s start reach the door (keyboard focus, no script)');
   await P.key('Enter', { vk: 13, text: '\r' });
-  ok(await P.waitFor(`!!document.querySelector('${sec('use')}')`, 8000), 'B-cb72: Enter on the focused door opens 谁能使用 exmac？');
+  ok(verdictOf(await P.waitFor(`!!document.querySelector('${sec('use')}')`, 8000)), 'B-cb72: Enter on the focused door opens 谁能使用 exmac？');
   await P.key('Escape', { vk: 27 });
-  ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), '…and Escape closes it (nothing changed)');
+  ok(verdictOf(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000)), '…and Escape closes it (nothing changed)');
   // ③ the 409 leg + the empty-list refusal
   console.log('③ another writer while the dialog is open ⇒ 409, re-drawn; the empty list refused in place');
   await P.realClick(exitIcon);
@@ -271,8 +271,8 @@ try {
   const p409 = patches(P).length;
   await P.realClick(`${sec('run')} .exit-access-ask input`); // any change, then Save with the OLD base
   await P.realClick('#exit-access-dialog .exit-access-save');
-  ok(await P.waitFor(`(document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent || '') === '对话框打开期间列表被改动了（另一个窗口）— 这是现在的列表，什么都没保存'`, 6000), 'the 409 sentence, in place (attack 4)', await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent`));
-  ok(await P.evalJs(`document.querySelector('${sec('use')} input[value="nobody"]').checked`), '…the dialog RE-DRAWN from the list as it is now (network: 没有人)');
+  ok(verdictOf(await P.waitFor(`(document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent || '') === '对话框打开期间列表被改动了（另一个窗口）— 这是现在的列表，什么都没保存'`, 6000)), 'the 409 sentence, in place (attack 4)', await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent`));
+  ok(verdictOf(await P.evalJs(`document.querySelector('${sec('use')} input[value="nobody"]').checked`)), '…the dialog RE-DRAWN from the list as it is now (network: 没有人)');
   ok(patches(P).length === p409 + 1 && (await W.hostRow('exmac')).exit.run.ask === true, '…one refused PATCH, nothing written');
   await P.realClick(`${sec('use')} input[value="only"]`);
   const pEmpty = patches(P).length;
@@ -289,45 +289,45 @@ try {
   // P2 goes back in front: the legs after it run in the suite's world as before
   await P.cdp('Page.bringToFront');
   await sleep(500);
-  ok((await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 20))).ok, 'RECT CENSUS 860 px: the dialog inside the viewport, no horizontal overflow', await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 20)));
+  ok(verdictOf((await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 20))).ok), 'RECT CENSUS 860 px: the dialog inside the viewport, no horizontal overflow', await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 20)));
   await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); true`);
   // lane dialog-yield r2: ③ left the dialog CHANGED (the refused «only» with nobody) — its guard asks, and the person's answer is
   // Discard (before r2 the next open silently REPLACED the changed form; a form is never replaced now — it would be raised)
   await P.evalJs(`(() => { document.querySelector('#exit-access-dialog .dialog-unsaved-discard')?.click(); return true; })()`);
-  ok(await P.waitFor(`!document.getElementById('exit-access-dialog')`, 4000), 'the 860 px dialog closes — its guard asked about the refused change, Discard');
+  ok(verdictOf(await P.waitFor(`!document.getElementById('exit-access-dialog')`, 4000)), 'the 860 px dialog closes — its guard asked about the refused change, Discard');
   await P2.cdp('Page.bringToFront'); // lane dialog-yield: P back behind P2, as the suite ran before the census
   await sleep(300);
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 1, mobile: true });
   await sleep(300);
   // open it on the phone the way the Machines card's button does (the same component)
   await P.evalJs(`(() => { localStorage.setItem('vibespace.agentsTab', 'machines'); app._showAgentsDialog({ forceModal: true }); return true; })()`);
-  ok(await P.waitFor(`!!document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-who')`, 10000), 'the Machines card has 谁能使用它…');
+  ok(verdictOf(await P.waitFor(`!!document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-who')`, 10000)), 'the Machines card has 谁能使用它…');
   await P.evalJs(`document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-who').click(); true`);
   await P.waitFor(`!!document.querySelector('${sec('run')}')`, 8000);
   const r360 = await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 44));
   const pick360 = await P.evalJs(`[...document.querySelectorAll('${sec('run')} .pp-row')].filter((e) => e.offsetParent).map((e) => Math.round(e.getBoundingClientRect().height))`);
   const tier360 = await P.evalJs(`({ isMobile: !!app.isMobile, mobileLayout: !!app.wm._mobileLayout(), vw: innerWidth, exit: document.getElementById('exit-access-dialog')?.className || null, agents: document.getElementById('agents-dialog-overlay')?.className || null, forms: [...app.wm.windows.values()].filter((w) => w.type === 'form').length })`); // (the tier the forms were drawn on)
-  ok(r360.ok && pick360.length > 0 && pick360.every((h) => h >= 40), 'RECT CENSUS 360 px: radios ≥ 44 px, picker rows ≥ 40 px, no horizontal overflow', { r360, pick360, tier360 });
-  ok((await P.evalJs(labelRowCensusJs('#exit-access-dialog'))).ok, 'N-radio: on the phone every radio sits beside its words (not centred above them)', await P.evalJs(labelRowCensusJs('#exit-access-dialog')));
+  ok(gateOf(r360.ok) && pick360.length > 0 && verdictOf(pick360.every((h) => h >= 40)), 'RECT CENSUS 360 px: radios ≥ 44 px, picker rows ≥ 40 px, no horizontal overflow', { r360, pick360, tier360 });
+  ok(verdictOf((await P.evalJs(labelRowCensusJs('#exit-access-dialog'))).ok), 'N-radio: on the phone every radio sits beside its words (not centred above them)', await P.evalJs(labelRowCensusJs('#exit-access-dialog')));
   await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); document.querySelector('#agents-dialog-overlay .dialog-close')?.click(); true`);
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
   await sleep(300);
   // lane hub-act-ask: the third list written from the dialog, drawn back from the server — then cleared (the legs below run
   // vibespace-exit, which never asks the Hub automation list, but the device's own upkeep would)
   console.log('⑤ (lane hub-act-ask) Hub 自动化: 每次都问我 ⇒ the PATCH carries it; the dialog draws it back');
-  ok(await P.realClick(exitIcon), 'the dialog again');
+  ok(verdictOf(await P.realClick(exitIcon)), 'the dialog again');
   await P.waitFor(`!!document.querySelector('${sec('hub')}')`, 8000);
-  ok(await P.realClick(`${sec('hub')} input[value="ask"]`), 'a real click on Hub 自动化 → 每次都问我');
-  ok(await P.evalJs(`(document.querySelector('${sec('hub')} .exit-access-hub-default')?.textContent || '') === ''`), 'the default line goes once a choice is made');
+  ok(verdictOf(await P.realClick(`${sec('hub')} input[value="ask"]`)), 'a real click on Hub 自动化 → 每次都问我');
+  ok(verdictOf(await P.evalJs(`(document.querySelector('${sec('hub')} .exit-access-hub-default')?.textContent || '') === ''`)), 'the default line goes once a choice is made');
   const pHub = patches(P).length;
   await P.realClick('#exit-access-dialog .exit-access-save');
-  ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), 'saved — the dialog closes');
+  ok(verdictOf(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000)), 'saved — the dialog closes');
   const hb = patches(P).slice(pHub).map((r) => JSON.parse(r.body));
   const hubStored = (await W.hostRow('exmac')).exit;
-  ok(hb.length === 1 && hb[0].hub && hb[0].hub.mode === 'ask' && hubStored.hub && hubStored.hub.mode === 'ask', 'ONE PATCH with hub {mode: ask}; the server stored it', { hb, hubStored });
+  ok(hb.length === 1 && gateOf(hb[0].hub) && hb[0].hub.mode === 'ask' && gateOf(hubStored.hub) && hubStored.hub.mode === 'ask', 'ONE PATCH with hub {mode: ask}; the server stored it', { hb, hubStored });
   await P.realClick(exitIcon);
   await P.waitFor(`!!document.querySelector('${sec('hub')}')`, 8000);
-  ok(await P.evalJs(`document.querySelector('${sec('hub')} input[value="ask"]').checked && (document.querySelector('${sec('hub')} .exit-access-hub-default')?.textContent || '') === ''`), 'drawn again from the server: 每次都问我, no default line');
+  ok(verdictOf(await P.evalJs(`document.querySelector('${sec('hub')} input[value="ask"]').checked && (document.querySelector('${sec('hub')} .exit-access-hub-default')?.textContent || '') === ''`)), 'drawn again from the server: 每次都问我, no default line');
   await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); true`);
   const hubClear = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { hub: { mode: 'default' } });
   ok(hubClear.status === 200 && !(await W.hostRow('exmac')).exit.hub, '`default` clears it (the instance\'s default applies again)');
@@ -344,30 +344,30 @@ try {
     fs.writeFileSync(path.join(heldDir, 'go'), '');   // its first turn: the conversation has its OWN id now
     let own = false;
     for (let i = 0; i < 60 && !own; i++) { own = await P.evalJs(`(app.sidebar._webuiSessions || []).some((s) => s.id === ${J(S5.sid)} && (s.backendSessionId || s.claudeSessionId) === ${J(S5.cid)})`); if (!own) await sleep(250); }
-    ok(own, '…then it has its own id (the page\'s roster names it by it)');
-    ok(await P.realClick(exitIcon), 'the dialog again');
+    ok(verdictOf(own), '…then it has its own id (the page\'s roster names it by it)');
+    ok(verdictOf(await P.realClick(exitIcon)), 'the dialog again');
     await P.waitFor(`!!document.querySelector('${sec('use')} .pp-except-picker')`, 8000);
     const chips5 = await P.evalJs(`[...document.querySelectorAll('${sec('use')} .pp-except-picker .pp-chip')].map((c) => c.dataset.key)`);
     ok(J(chips5) === J(['agent:' + S5.cid]), 'the dialog draws the stored webui:<id> exception as the conversation\'s live row (its 除了 chip)', chips5);
     const pF = patches(P).length;
     await P.realClick('#exit-access-dialog .exit-access-save');
-    ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), 'MINOR 1: an UNTOUCHED 保存 lands — the dialog closes (3f8134f16: refused except_unnamed, the dialog stuck while the conversation runs)', await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent || null`));
+    ok(verdictOf(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000)), 'MINOR 1: an UNTOUCHED 保存 lands — the dialog closes (3f8134f16: refused except_unnamed, the dialog stuck while the conversation runs)', await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent || null`));
     const fb = JSON.parse((patches(P).slice(pF)[0] || {}).body || '{}');
-    ok(((fb.use || {}).except || []).some((x) => x.kind === 'conversation' && x.key === 'webui:' + S5.sid) && J(await exKeysNow()) === J([S5.cid]), '…its PATCH sent the exception AS STORED (webui:<id>) and the route RENAMED it to the conversation\'s own id, by name', { sent: fb.use, use: await useNow() });
+    ok(gateOf(((fb.use || {}).except || []).some((x) => x.kind === 'conversation' && x.key === 'webui:' + S5.sid)) && J(await exKeysNow()) === J([S5.cid]), '…its PATCH sent the exception AS STORED (webui:<id>) and the route RENAMED it to the conversation\'s own id, by name', { sent: fb.use, use: await useNow() });
     // MINOR 2: under 没有人, a kept exception whose conversation ENDS while the dialog is open
     const S6 = await W.createStubSession(path.join(W.home, 'proj6'));
     const seed6 = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { use: { mode: 'only', who: [{ kind: 'group', id: groups[0].id }], except: [{ kind: 'session', session: S6.sid, name: 'conv6' }], removeExcept: ['conversation:' + S5.cid] } });
     ok(seed6.status === 200 && J(await exKeysNow()) === J([S6.cid]), 'MINOR 2: a running conversation left out of 运维\'s network', { seed6: seed6.j, use: await useNow() });
-    ok(await P.realClick(exitIcon), 'the dialog again');
+    ok(verdictOf(await P.realClick(exitIcon)), 'the dialog again');
     await P.waitFor(`!!document.querySelector('${sec('use')} input[value="nobody"]')`, 8000);
-    ok(await P.realClick(`${sec('use')} input[value="nobody"]`), 'a real click on 没有人 (network) — the picker and its 除了 hidden');
+    ok(verdictOf(await P.realClick(`${sec('use')} input[value="nobody"]`)), 'a real click on 没有人 (network) — the picker and its 除了 hidden');
     await new Promise((res) => { const ws = new WebSocket(`ws://127.0.0.1:${W.PORT}/ws`); ws.onopen = () => { ws.send(J({ type: 'kill', sessionId: S6.sid })); setTimeout(() => { try { ws.close(); } catch { } res(); }, 300); }; ws.onerror = () => res(); });
     let gone = false;
     for (let i = 0; i < 60 && !gone; i++) { gone = await P.evalJs(`!(app.sidebar._webuiSessions || []).some((s) => s.id === ${J(S6.sid)})`); if (!gone) await sleep(250); }
-    ok(gone, '…and that conversation ENDS while the dialog is open');
+    ok(verdictOf(gone), '…and that conversation ENDS while the dialog is open');
     const pN = patches(P).length;
     await P.realClick('#exit-access-dialog .exit-access-save');
-    ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), 'MINOR 2: 保存 under 没有人 LANDS — never a 410 naming a conversation the owner cannot see (3f8134f16: «"conv6" is not running any more»)', await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent || null`));
+    ok(verdictOf(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000)), 'MINOR 2: 保存 under 没有人 LANDS — never a 410 naming a conversation the owner cannot see (3f8134f16: «"conv6" is not running any more»)', await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent || null`));
     const nb = JSON.parse((patches(P).slice(pN)[0] || {}).body || '{}');
     const u6 = await useNow();
     ok((nb.use || {}).mode === 'nobody' && J((nb.use || {}).except) === J([{ kind: 'conversation', key: S6.cid }]) && u6.mode === 'nobody' && J((u6.except || []).map((x) => x.key)) === J([S6.cid]), '…the kept exception rode AS STORED ({kind: conversation, key}) and is kept under 没有人', { sent: nb.use, use: u6 });
@@ -386,15 +386,15 @@ try {
   const pRun = runApi(S[1].token, 'echo pong');
   const seen = await P.waitFor(`!!document.querySelector('#user-todos-popup .ut-item .ut-exit-allow')`, 3000);
   const dtAsk = Date.now() - tAsk;
-  ok(seen && dtAsk <= 1500, `the For-you row appears with 允许 / 拒绝 (${dtAsk} ms after the agent asked)`);
-  ok(await P.evalJs(`(() => { const r = document.querySelector('#user-todos-popup .ut-item .ut-exit-allow').closest('.ut-item'); return r.querySelector('.ut-exit-allow').textContent === '允许' && r.querySelector('.ut-exit-deny').textContent === '拒绝' && r.querySelector('.ut-exit-cmd').textContent === 'echo pong' && /^允许 ".*" 在 exmac 上运行命令？$/.test(r.querySelector('.ut-text').textContent); })()`), 'the row: 允许 "<conversation>" 在 exmac 上运行命令？ · the command in mono · 允许 / 拒绝');
+  ok(gateOf(seen) && dtAsk <= 1500, `the For-you row appears with 允许 / 拒绝 (${dtAsk} ms after the agent asked)`);
+  ok(verdictOf(await P.evalJs(`(() => { const r = document.querySelector('#user-todos-popup .ut-item .ut-exit-allow').closest('.ut-item'); return r.querySelector('.ut-exit-allow').textContent === '允许' && r.querySelector('.ut-exit-deny').textContent === '拒绝' && r.querySelector('.ut-exit-cmd').textContent === 'echo pong' && /^允许 ".*" 在 exmac 上运行命令？$/.test(r.querySelector('.ut-text').textContent); })()`)), 'the row: 允许 "<conversation>" 在 exmac 上运行命令？ · the command in mono · 允许 / 拒绝');
   // naive-user N-ask: Allow / Deny rode the floated .ut-actions bar — 35 % opacity until the row is hovered (the
   // 60-second decision's Allow read as disabled). With the pointer AWAY from the row: full strength, their own line.
   await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 400 });
   await sleep(150);
   const effA = await P.evalJs(`(() => { const a = document.querySelector('#user-todos-popup .ut-item .ut-exit-allow'); let e = a, o = 1; while (e) { o *= Number(getComputedStyle(e).opacity); e = e.parentElement; } const it = a.closest('.ut-item'); return { o, inBar: !!a.closest('.ut-actions'), h: Math.round(a.getBoundingClientRect().height), hovered: it.matches(':hover'), afterCmd: !!a.closest('.ut-exit-answer') && it.querySelector('.ut-exit-cmd').compareDocumentPosition(a) === Node.DOCUMENT_POSITION_FOLLOWING }; })()`);
-  ok(effA.o === 1 && !effA.inBar && !effA.hovered && effA.h >= 24 && effA.afterCmd, 'N-ask: with the pointer away from the row, 允许 is at full strength (effective opacity 1, 24 px, its own line under the command — not in the hover-dimmed bar)', effA);
-  ok(await P.realClick(`#user-todos-popup .ut-item .ut-exit-allow`), 'a real click on 允许');
+  ok(effA.o === 1 && !effA.inBar && !effA.hovered && effA.h >= 24 && verdictOf(effA.afterCmd), 'N-ask: with the pointer away from the row, 允许 is at full strength (effective opacity 1, 24 px, its own line under the command — not in the hover-dimmed bar)', effA);
+  ok(verdictOf(await P.realClick(`#user-todos-popup .ut-item .ut-exit-allow`)), 'a real click on 允许');
   // THE PRESS COUNTED (the 2.369.413 checkpoint's hosted red: a press inside the product's press arm counted for nothing and the ask
   // expired 60 s later as fifteen red legs): the row answers at once — said HERE, by name, before the run's answer is awaited
   // the refusal's words are the product's own (src/lib/i18n-zh.js — never typed here)
@@ -403,12 +403,12 @@ try {
   const counted = await P.waitFor(`(() => { const r = ${THIS_ROW}; return !r || !r.querySelector('.ut-exit-allow') || /已允许/.test(r.textContent); })()`, 3000);
   const toasts = await P.evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent).join(' | ')`);
   const rowText = await P.evalJs(`(${THIS_ROW})?.textContent || null`);   // a slow answer on the runner reads as slow, not as a refusal
-  ok(!!REFUSED && counted && !toasts.includes(REFUSED), 'the press on 允许 COUNTED: THIS row (echo pong) answered at once, and no «moved under the pointer» toast (the door waited out the product\'s press arm)', { counted, rowText, toasts: toasts || 'none', refusalWords: REFUSED });
+  ok(!!REFUSED && gateOf(counted) && !toasts.includes(REFUSED), 'the press on 允许 COUNTED: THIS row (echo pong) answered at once, and no «moved under the pointer» toast (the door waited out the product\'s press arm)', { counted, rowText, toasts: toasts || 'none', refusalWords: REFUSED });
   const ran = await pRun;
-  ok(ran.status === 200 && ran.j.code === 0 && /pong/.test(ran.j.stdout) && ran.j.asked === true, 'Allow ⇒ the DEVICE ran it (exit 0, stdout pong)', ran);
-  ok(await P.waitFor(`[...document.querySelectorAll('.chat-vs-notice')].some((c) => /Machines · exmac/.test(c.textContent) && /^在 exmac 上运行了一条命令 — 退出码 0 · /.test(c.querySelector(':scope > .chat-text')?.textContent || '') && c.querySelector('details.chat-exit-tech .chat-exit-cmd')?.textContent === 'echo pong')`, 8000), 'the chat window shows the "VibeSpace · Machines · exmac" card: 在 exmac 上运行了一条命令 — 退出码 0 · … (lane exit-card-margin), `echo pong` under its 技术细节', await P.evalJs(`[...document.querySelectorAll('.chat-vs-notice')].map((c) => c.textContent).join(' | ')`));
-  ok(/已允许/.test(await P.evalJs(`document.getElementById('user-todos-popup').textContent`)) || (await W.api('GET', '/api/user-todos')).j.todos.resolved?.some?.((i) => i.resolvedBy === 'allowed'), 'the item is resolved allowed');
-  ok(await P.waitFor(`/^最近一次运行：echo pong — .*，退出码 0$/.test(${rowOf}?.querySelector('.mounts-exit-last')?.textContent || '')`, 8000), 'the machine row shows the last run (最近一次运行：echo pong — <who>, <when>, 退出码 0)', await P.evalJs(`${rowOf}?.querySelector('.mounts-exit-last')?.textContent`));
+  ok(ran.status === 200 && ran.j.code === 0 && gateOf(/pong/.test(ran.j.stdout)) && ran.j.asked === true, 'Allow ⇒ the DEVICE ran it (exit 0, stdout pong)', ran);
+  ok(verdictOf(await P.waitFor(`[...document.querySelectorAll('.chat-vs-notice')].some((c) => /Machines · exmac/.test(c.textContent) && /^在 exmac 上运行了一条命令 — 退出码 0 · /.test(c.querySelector(':scope > .chat-text')?.textContent || '') && c.querySelector('details.chat-exit-tech .chat-exit-cmd')?.textContent === 'echo pong')`, 8000)), 'the chat window shows the "VibeSpace · Machines · exmac" card: 在 exmac 上运行了一条命令 — 退出码 0 · … (lane exit-card-margin), `echo pong` under its 技术细节', await P.evalJs(`[...document.querySelectorAll('.chat-vs-notice')].map((c) => c.textContent).join(' | ')`));
+  ok(verdictOf(/已允许/.test(await P.evalJs(`document.getElementById('user-todos-popup').textContent`))) || verdictOf((await W.api('GET', '/api/user-todos')).j.todos.resolved?.some?.((i) => i.resolvedBy === 'allowed')), 'the item is resolved allowed');
+  ok(verdictOf(await P.waitFor(`/^最近一次运行：echo pong — .*，退出码 0$/.test(${rowOf}?.querySelector('.mounts-exit-last')?.textContent || '')`, 8000)), 'the machine row shows the last run (最近一次运行：echo pong — <who>, <when>, 退出码 0)', await P.evalJs(`${rowOf}?.querySelector('.mounts-exit-last')?.textContent`));
   // naive-user N-row: at the DEFAULT sidebar width (this page: 1280 px) the machine row showed no name (0 px — eight
   // icons at flex-shrink 0 took the row), four icons (the exit icon among them, then) sat past the panel's edge, and the exit
   // summary + the last run were cut "命令 …". THE ROW CENSUS + a patched copy of style.css as the control.
@@ -437,9 +437,9 @@ try {
       named('Unpair (the device can no longer dial in)'),
     ];
     const missing = ROW_ICONS.filter((ws) => !(rc.icons || []).some((ic) => ws.includes(ic.name) && ic.inside)).map((ws) => ws[0]);
-    ok(rc.ok && rc.name === 'exmac' && missing.length === 0 && rc.lines.length === 2, `N-row: the row shows its name (${rc.nameW} px), its ${ROW_ICONS.length} icons BY NAME each inside it («Host key…» among them), both exit lines whole, no sideways scroll (row ${rc.rowW} px)`, { ...rc, missing });
+    ok(gateOf(rc.ok) && rc.name === 'exmac' && missing.length === 0 && rc.lines.length === 2, `N-row: the row shows its name (${rc.nameW} px), its ${ROW_ICONS.length} icons BY NAME each inside it («Host key…» among them), both exit lines whole, no sideways scroll (row ${rc.rowW} px)`, { ...rc, missing });
     const real = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
-    ok(ROW_FIX_REVERT.every(([fixed]) => real.split(fixed).length === 2), 'N-row: the fix\'s rules are in public/style.css once each (the control\'s anchors)');
+    ok(verdictOf(ROW_FIX_REVERT.every(([fixed]) => real.split(fixed).length === 2)), 'N-row: the fix\'s rules are in public/style.css once each (the control\'s anchors)');
     const MUTR = mutantCopies('exitrow', REPO);
     const fPre = path.join(MUTR.dir, `style-rowprefix-${process.pid}.css`); fs.writeFileSync(fPre, ROW_FIX_REVERT.reduce((x, [fixed, old]) => editAnchor(x, fixed, old, "the text a fold hands its step"), real)); MUTR.files.push(fPre);
     await P.evalJs(swapStyleJs(fs.readFileSync(fPre, 'utf8')));
@@ -448,7 +448,7 @@ try {
     ok(!pre.ok && pre.nameW < 30 && !pre.btnsInside, `CONTROL (N-row): the pre-fix style.css — name ${pre.nameW} px, icons past the edge, an exit line cut, the panel ${pre.panelX} px wider than itself`, pre);
     await P.evalJs(swapStyleJs(real));
     await sleep(250);
-    ok((await P.evalJs(machineRowCensusJs(HOST))).ok, '…and the real style.css shows it all again');
+    ok(verdictOf((await P.evalJs(machineRowCensusJs(HOST))).ok), '…and the real style.css shows it all again');
   }
   // verify-r4 F4: THE WHOLE COMMAND, AS IT RUNS, where the user decides. Pre-fix the row showed a 120-char head with
   // every line break turned into a space, clipped to three lines with no mark (a `curl … | sh` last line invisible above
@@ -458,11 +458,11 @@ try {
     const CMD4 = `echo "*important*" > /tmp/vs-exitui-f4-${process.pid}\n# clean up the old ones\necho ${'x'.repeat(150)} | wc -c`;
     const p4 = runApi(S[1].token, CMD4);
     if (!(await P.evalJs(`(document.getElementById('user-todos-popup')?.getClientRects().length || 0) > 0`))) /* position:fixed — offsetParent is always null */ { await P.evalJs(`document.getElementById('taskbar-user-todos').click(); true`); await sleep(300); }
-    ok(await P.waitFor(`!!document.querySelector('#user-todos-popup .ut-item .ut-exit-allow')`, 5000), 'F4: a three-line command waits in For you');
+    ok(verdictOf(await P.waitFor(`!!document.querySelector('#user-todos-popup .ut-item .ut-exit-allow')`, 5000)), 'F4: a three-line command waits in For you');
     const r4 = await P.evalJs(`(() => { const it = document.querySelector('#user-todos-popup .ut-item .ut-exit-allow').closest('.ut-item'); const c = it.querySelector('.ut-exit-cmd'); const cs = getComputedStyle(c); c.scrollTop = c.scrollHeight; return { id: it.dataset.id, text: c.textContent, tag: c.tagName, ws: cs.whiteSpace, oy: cs.overflowY, fold: !!it.querySelector('.ut-detail-exp'), clip: Math.max(0, c.scrollHeight - c.clientHeight - 1), above: !!(c.compareDocumentPosition(it.querySelector('.ut-exit-allow')) & Node.DOCUMENT_POSITION_FOLLOWING) }; })()`);
-    ok(r4.text === CMD4 && r4.tag === 'PRE' && r4.ws === 'pre-wrap' && r4.oy === 'visible' && r4.clip === 0 && r4.above && !r4.fold, 'F4: the row shows the WHOLE command byte for byte, its lines kept, ALL of it (no inner scroll, nothing clipped) — above 允许, with no folded copy below', { ...r4, text: r4.text.slice(0, 60) });
+    ok(r4.text === CMD4 && r4.tag === 'PRE' && r4.ws === 'pre-wrap' && r4.oy === 'visible' && r4.clip === 0 && gateOf(r4.above) && !r4.fold, 'F4: the row shows the WHOLE command byte for byte, its lines kept, ALL of it (no inner scroll, nothing clipped) — above 允许, with no folded copy below', { ...r4, text: r4.text.slice(0, 60) });
     await P.evalJs(`app.openInbox({ itemId: ${JSON.stringify(r4.id)} }); true`);
-    ok(await P.waitFor(`!!document.querySelector('.iw-exit-cmd')?.offsetParent`, 6000), 'F4: the For-you window shows the command');
+    ok(verdictOf(await P.waitFor(`!!document.querySelector('.iw-exit-cmd')?.offsetParent`, 6000)), 'F4: the For-you window shows the command');
     const w4 = await P.evalJs(`(() => { const d = document.querySelector('.iw-exit-cmd').closest('.iw-detail'); return { text: document.querySelector('.iw-exit-cmd').textContent, md: !!d.querySelector('em, strong, h1, h2, h3, p') }; })()`);
     ok(w4.text === CMD4 && !w4.md, 'F4: …VERBATIM (a <pre>, no markdown: the asterisks and the # line are the command\'s own)', { md: w4.md, text: w4.text.slice(0, 50) });
     // CONTROL (F4, the window): a page whose bundle renders the detail as markdown again ⇒ the asterisks go, # is a heading
@@ -478,7 +478,7 @@ try {
     await Q.evalJs(`app.openInbox({ itemId: ${JSON.stringify(r4.id)} }); true`);
     await Q.waitFor(`!!document.querySelector('.iw-detail')?.offsetParent`, 8000);
     const q4 = await Q.evalJs(`(() => { const d = document.querySelector('.iw-detail'); return { text: d.innerText, h1: !!d.querySelector('h1'), em: !!d.querySelector('em') }; })()`);
-    ok(q4.h1 && q4.em && !q4.text.includes('*important*'), 'CONTROL (F4 window): the pre-fix pane renders `# clean up…` as a heading and drops the asterisks — the leg goes red', q4);
+    ok(gateOf(q4.h1) && gateOf(q4.em) && !q4.text.includes('*important*'), 'CONTROL (F4 window): the pre-fix pane renders `# clean up…` as a heading and drops the asterisks — the leg goes red', q4);
     await Q.cdp('Page.close').catch(() => {});
     await P.evalJs(`(() => { const w = [...document.querySelectorAll('.window')].find((x) => x.querySelector('.iw-detail')); w?.querySelector('.win-close')?.click(); return true; })()`);
     await sleep(300);
@@ -493,7 +493,7 @@ try {
   const cli = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-exit'), 'run', 'exmac', '--', 'echo', 'nope'], { env: { ...process.env, VIBESPACE_API: api2 || W.BASE, VIBESPACE_SESSION_TOKEN: S[1].token } });
   const cliOut = []; cli.stdout.on('data', (d) => cliOut.push(d)); cli.stderr.on('data', (d) => cliOut.push(d));
   const cliDone = new Promise((r) => cli.on('exit', (code) => r(code)));
-  ok(await P.waitFor(`!!document.querySelector('#user-todos-popup .ut-item .ut-exit-deny')`, 5000), 'the CLI\'s run is waiting in For you');
+  ok(verdictOf(await P.waitFor(`!!document.querySelector('#user-todos-popup .ut-item .ut-exit-deny')`, 5000)), 'the CLI\'s run is waiting in For you');
   await sleep(1300); // the CLI's "waiting for the user's approval" line fires after 1 s
   // verify-r4 F5: a TYPED REPLY is not an answer. Pre-fix the row offered Reply, and a reply resolved the item — which
   // settles the ask NOT allowed: "可以，允许" typed as a reply DENIED the command (reproduced: 403 ask_denied, audit
@@ -506,29 +506,29 @@ try {
     const asks5 = (await W.api('GET', '/api/exits/asks')).j.asks || [];
     ok(rep5.status === 409 && rep5.j.code === 'exit_ask' && asks5.length === 1, 'F5: a typed reply ⇒ 409 exit_ask and the ask is STILL waiting (pre-fix: 200 — the item resolved, the command denied)', { status: rep5.status, code: rep5.j.code, asks: asks5.length });
     await P.evalJs(`app.openInbox({ itemId: ${JSON.stringify(f5.id)} }); true`);
-    ok(await P.waitFor(`!!document.querySelector('.iw-act-exit')?.offsetParent && !!document.querySelector('.iw-reply-why')?.offsetParent`, 6000), 'F5: the For-you window shows the item with 允许 / 拒绝');
+    ok(verdictOf(await P.waitFor(`!!document.querySelector('.iw-act-exit')?.offsetParent && !!document.querySelector('.iw-reply-why')?.offsetParent`, 6000)), 'F5: the For-you window shows the item with 允许 / 拒绝');
     const w5 = await P.evalJs(`({ why: document.querySelector('.iw-reply-why')?.textContent || '', box: !!document.querySelector('.iw-reply')?.offsetParent })`);
     ok(w5.why === '请用“允许”或“拒绝”回答 — 输入的回复不算回答' && !w5.box, 'F5: …and no reply box — it says 请用“允许”或“拒绝”回答 — 输入的回复不算回答', w5);
     await P.evalJs(`(() => { const w = [...document.querySelectorAll('.window')].find((x) => x.querySelector('.iw-reply-why')); w?.querySelector('.win-close, .window-close, [data-action="close"]')?.click(); return true; })()`);
     await sleep(300);
     if (!(await P.evalJs(`(document.querySelector('#user-todos-popup .ut-item .ut-exit-deny')?.getClientRects().length || 0) > 0`))) { await P.evalJs(`document.getElementById('taskbar-user-todos').click(); true`); await sleep(300); }
   }
-  ok(await P.realClick(`#user-todos-popup .ut-item .ut-exit-deny`), 'a real click on 拒绝');
+  ok(verdictOf(await P.realClick(`#user-todos-popup .ut-item .ut-exit-deny`)), 'a real click on 拒绝');
   const cliCode = await cliDone;
   const cliText = Buffer.concat(cliOut).toString();
-  ok(cliCode === 1 && /the user did not allow `echo nope` on "exmac"/.test(cliText), 'the REAL vibespace-exit CLI exits 1 naming the refusal', cliText);
-  ok(/# waiting for the user's approval \(up to 60 s\)(?: if the machine asks)?…/.test(cliText), '…after saying it waits for the user\'s approval', cliText);
+  ok(cliCode === 1 && verdictOf(/the user did not allow `echo nope` on "exmac"/.test(cliText)), 'the REAL vibespace-exit CLI exits 1 naming the refusal', cliText);
+  ok(verdictOf(/# waiting for the user's approval \(up to 60 s\)(?: if the machine asks)?…/.test(cliText)), '…after saying it waits for the user\'s approval', cliText);
   // an ungranted conversation (3) and a job token
   await P.evalJs(`app.attachSession(${JSON.stringify(S[2].sid)}, 'conv3', ${JSON.stringify(path.join(W.home, 'proj3'))}, { mode: 'chat', backend: 'claude' }); true`);
   await sleep(1500);
   const r3 = await runApi(S[2].token, 'id');
-  ok(r3.status === 403 && r3.j.code === 'not_granted' && r3.j.grant === 'run' && /the user can allow it under "Who can use it"/.test(r3.j.error) && !/conv[23]|proj|claude:|f01d0000/.test(r3.j.error), 'an ungranted conversation ⇒ 403 not_granted naming the grant and the user, never another conversation', r3.j);
-  ok(await P.waitFor(`[...document.querySelectorAll('.chat-vs-notice')].some((c) => /did not run \`?id\`? on exmac — this conversation may not run commands there/.test(c.textContent))`, 8000), '…and its chat shows the card "did not run `id` on exmac — this conversation may not run commands there"');
+  ok(r3.status === 403 && r3.j.code === 'not_granted' && r3.j.grant === 'run' && gateOf(/the user can allow it under "Who can use it"/.test(r3.j.error)) && !/conv[23]|proj|claude:|f01d0000/.test(r3.j.error), 'an ungranted conversation ⇒ 403 not_granted naming the grant and the user, never another conversation', r3.j);
+  ok(verdictOf(await P.waitFor(`[...document.querySelectorAll('.chat-vs-notice')].some((c) => /did not run \`?id\`? on exmac — this conversation may not run commands there/.test(c.textContent))`, 8000)), '…and its chat shows the card "did not run `id` on exmac — this conversation may not run commands there"');
   const rj = await fetch(`${W.BASE}/api/agent/exit/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer jbt_fakejob' }, body: JSON.stringify({ machine: 'exmac', cmd: 'id' }) });
   const rjj = await rj.json();
   ok(rj.status === 401 && rjj.code === 'session_token_required' && rjj.error === 'Background Work jobs cannot use exits — run it from a live conversation', 'a jbt_ token ⇒ 401 session_token_required (attack 3)', rjj);
   const audit = (await W.api('GET', `/api/exits/audit?host=${HOST}&limit=50`)).j.lines;
-  ok(audit.some((l) => l.verb === 'run' && l.ok && l.asked) && audit.some((l) => l.verb === 'ask-answered' && l.answer === 'denied') && audit.some((l) => l.refusal === 'not_granted'), 'the audit has the run, the denied ask and the refusal');
+  ok(gateOf(audit.some((l) => l.verb === 'run' && l.ok && l.asked)) && gateOf(audit.some((l) => l.verb === 'ask-answered' && l.answer === 'denied')) && verdictOf(audit.some((l) => l.refusal === 'not_granted')), 'the audit has the run, the denied ask and the refusal');
   // ── ⑤ lane-exit-run-output E3 / E4 (2026-10-01, the owner: "执行了指令怎么看不到回复。侧边栏也看不到指令和结果历史"): the card
   //    carries the run's output (the first lines of stderr in mono + 显示输出 holding both stored heads, toggled IN PLACE),
   //    the machine's 最近的命令… list draws from a fresh GET and patches KEYED rows live off the exit-audit broadcast, the
@@ -547,88 +547,88 @@ try {
     // door brings a hidden page forward (its line says so), the fold runs. Here P is brought to the front ON PURPOSE, said, and each card
     // is opened the way a person opens it: a real click on its line, the leg saying the line opened — then the legs as they were.
     await P.cdp('Page.bringToFront');
-    ok(await P.waitFor(`document.visibilityState === 'visible'`, 3000), 'page P is IN FRONT for ⑤ — brought forward on purpose by the suite (a person looks at it)');
+    ok(verdictOf(await P.waitFor(`document.visibilityState === 'visible'`, 3000)), 'page P is IN FRONT for ⑤ — brought forward on purpose by the suite (a person looks at it)');
     // A card can be hidden TWICE: a Machines card that exited 0 is a member of its chat RUN, and a closed run draws none of its members
     // (src/lib/chat-view.js _setRunOpen: chat-run-collapsed, display: none) — a person opens the run first, by its header. Each state is
     // read and said; nothing rests on the order of the cards (opening one card's line happens to open its run: _setPeerOpen)
     const openLine = async (card, what) => {
       const cls = async () => P.evalJs(`(() => { const c = ${card}; return c ? { cls: c.className, rects: c.getClientRects().length } : null; })()`);
-      ok(await P.waitFor(`(() => { const c = ${card}; return !!c && c.classList.contains('chat-machine-compact') && !c.classList.contains('chat-mline-open'); })()`, 5000), `${what}: the card is ONE line in its machine's group (lane machine-card-compact), its detail closed`, await cls());
+      ok(verdictOf(await P.waitFor(`(() => { const c = ${card}; return !!c && c.classList.contains('chat-machine-compact') && !c.classList.contains('chat-mline-open'); })()`, 5000)), `${what}: the card is ONE line in its machine's group (lane machine-card-compact), its detail closed`, await cls());
       if (await P.evalJs(`(() => { const c = ${card}; return !!c && c.classList.contains('chat-run-collapsed'); })()`)) {
         const header = `(() => { const c = ${card}; let h = c && c.previousElementSibling; while (h && !(h.classList && h.classList.contains('chat-run-header'))) h = h.previousElementSibling; return h || null; })()`;
-        ok(await P.realClick(header), `${what}: its chat run is CLOSED (the card not drawn) — a real click on the run's header`);
-        ok(await P.waitFor(`(() => { const c = ${card}; return !!c && !c.classList.contains('chat-run-collapsed'); })()`, 3000), `${what}: …the run OPENED`, await cls());
+        ok(verdictOf(await P.realClick(header)), `${what}: its chat run is CLOSED (the card not drawn) — a real click on the run's header`);
+        ok(verdictOf(await P.waitFor(`(() => { const c = ${card}; return !!c && !c.classList.contains('chat-run-collapsed'); })()`, 3000)), `${what}: …the run OPENED`, await cls());
       }
-      ok(await P.waitFor(`(() => { const c = ${card}; return !!c && c.getClientRects().length > 0; })()`, 3000), `${what}: the card's line is DRAWN (its run open, or none)`, await cls());
-      ok(await P.realClick(`(() => { const c = ${card}; return c ? c.querySelector(':scope > .chat-mline') : null; })()`), `${what}: a real click on the card's line`);
-      ok(await P.waitFor(`(() => { const c = ${card}; const r = c && c.querySelector(':scope > .chat-exit-run'); return !!c && c.classList.contains('chat-mline-open') && !!r && r.getClientRects().length > 0; })()`, 3000), `${what}: …the line OPENED — this call's detail is drawn under it`);
+      ok(verdictOf(await P.waitFor(`(() => { const c = ${card}; return !!c && c.getClientRects().length > 0; })()`, 3000)), `${what}: the card's line is DRAWN (its run open, or none)`, await cls());
+      ok(verdictOf(await P.realClick(`(() => { const c = ${card}; return c ? c.querySelector(':scope > .chat-mline') : null; })()`)), `${what}: a real click on the card's line`);
+      ok(verdictOf(await P.waitFor(`(() => { const c = ${card}; const r = c && c.querySelector(':scope > .chat-exit-run'); return !!c && c.classList.contains('chat-mline-open') && !!r && r.getClientRects().length > 0; })()`, 3000)), `${what}: …the line OPENED — this call's detail is drawn under it`);
     };
     const r5 = await runApi(S[1].token, 'echo out-line; echo ERR-LINE-1 1>&2; echo ERR-LINE-2 1>&2; exit 3');
-    ok(r5.status === 200 && r5.j.code === 3 && /ERR-LINE-1/.test(r5.j.stderr) && r5.j.interpreter === 'sh' && r5.j.platform === process.platform, 'the REAL daemon ran it as {shell} through sh -lc: exit 3, both streams, interpreter sh, the platform stated', r5.j);
+    ok(r5.status === 200 && r5.j.code === 3 && gateOf(/ERR-LINE-1/.test(r5.j.stderr)) && r5.j.interpreter === 'sh' && r5.j.platform === process.platform, 'the REAL daemon ran it as {shell} through sh -lc: exit 3, both streams, interpreter sh, the platform stated', r5.j);
     const cardSel = `[...document.querySelectorAll('.chat-vs-notice')].find((c) => /exit 3/.test(c.textContent) && c.querySelector('.chat-exit-out'))`;
-    ok(await P.waitFor(`!!${cardSel}`, 8000), 'the chat card carries the output block');
+    ok(verdictOf(await P.waitFor(`!!${cardSel}`, 8000)), 'the chat card carries the output block');
     const nCards = await P.evalJs(`document.querySelectorAll('.chat-vs-notice').length`);
     const c5 = await P.evalJs(`(() => { const c = ${cardSel}; const pre = c.querySelector('.chat-exit-out'); const det = c.querySelector('.chat-exit-out-full'); return { head: c.querySelector('.chat-text')?.textContent || '', preview: pre.textContent, stream: pre.dataset.stream, mono: getComputedStyle(pre).fontFamily, summary: det && det.querySelector('summary').textContent, open: det && det.open, full: det ? [...det.querySelectorAll('.chat-exit-out-all')].map((p) => p.textContent) : [] }; })()`);
-    ok(/^在 exmac 上运行了一条命令 — 退出码 3 · \d+\.\d s$/.test(c5.head) && c5.preview === 'ERR-LINE-1\nERR-LINE-2' && c5.stream === 'stderr' && /mono/i.test(c5.mono) && c5.summary === '显示输出' && c5.open === false && c5.full.join('|') === 'out-line\n|ERR-LINE-1\nERR-LINE-2\n', 'E3: the exit line, stderr\'s lines in mono under it, 显示输出 (closed) holding both stored heads whole', c5);
+    ok(gateOf(/^在 exmac 上运行了一条命令 — 退出码 3 · \d+\.\d s$/.test(c5.head)) && c5.preview === 'ERR-LINE-1\nERR-LINE-2' && c5.stream === 'stderr' && gateOf(/mono/i.test(c5.mono)) && c5.summary === '显示输出' && c5.open === false && c5.full.join('|') === 'out-line\n|ERR-LINE-1\nERR-LINE-2\n', 'E3: the exit line, stderr\'s lines in mono under it, 显示输出 (closed) holding both stored heads whole', c5);
     await openLine(cardSel, 'the exit-3 card');
-    ok(await P.realClick(`(() => { const c = ${cardSel}; return c.querySelector('.chat-exit-out-full > summary'); })()`), 'a real click on 显示输出');
+    ok(verdictOf(await P.realClick(`(() => { const c = ${cardSel}; return c.querySelector('.chat-exit-out-full > summary'); })()`)), 'a real click on 显示输出');
     const t5 = await P.evalJs(`(() => { const c = ${cardSel}; return { open: c.querySelector('.chat-exit-out-full').open, n: document.querySelectorAll('.chat-vs-notice').length, stdoutShown: !!c.querySelector('.chat-exit-out-all')?.getClientRects().length }; })()`);
-    ok(t5.open === true && t5.n === nCards && t5.stdoutShown, 'the expander opens IN PLACE: the same card (no second card, none re-created), the stored stdout visible', t5);
+    ok(t5.open === true && t5.n === nCards && verdictOf(t5.stdoutShown), 'the expander opens IN PLACE: the same card (no second card, none re-created), the stored stdout visible', t5);
     // the row states the device's platform (the dial headers' statement, kept on the record)
     await openRemote(P);
     const plat5 = await P.evalJs(`${rowOf}?.querySelector('.mounts-dial-state')?.textContent || ''`);
-    ok(/Linux/.test(plat5), 'E1: the machine row names the device\'s platform (Linux — the daemon runs on this box)', plat5);
+    ok(verdictOf(/Linux/.test(plat5)), 'E1: the machine row names the device\'s platform (Linux — the daemon runs on this box)', plat5);
     // 最近的命令… from the "Who can use it" dialog: a fresh GET, keyed rows, the stderr head behind a row
     await P.realClick(exitIcon);
-    ok(await P.waitFor(`!!document.querySelector('#exit-access-dialog .exit-access-runs')`, 8000), 'the dialog offers 最近的命令…');
+    ok(verdictOf(await P.waitFor(`!!document.querySelector('#exit-access-dialog .exit-access-runs')`, 8000)), 'the dialog offers 最近的命令…');
     await P.realClick('#exit-access-dialog .exit-access-runs');
-    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 2`, 8000), 'E4: 最近的命令… opens the machine\'s command list with its rows');
+    ok(verdictOf(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 2`, 8000)), 'E4: 最近的命令… opens the machine\'s command list with its rows');
     const rows5 = await P.evalJs(`[...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')].map((r) => ({ outcome: r.dataset.outcome, cmd: r.querySelector('.exit-runs-cmd').textContent, verdict: r.querySelector('.exit-runs-verdict').textContent, who: r.querySelector('.exit-runs-who').textContent, stderr: (r.querySelector('.exit-runs-out .exit-runs-pre') || {}).textContent || '' }))`);
-    ok(rows5[0] && rows5[0].cmd.startsWith('echo out-line') && rows5[0].verdict === '退出码 3' && rows5[0].who.length > 0 && /ERR-LINE-1/.test(rows5[0].stderr) && rows5.some((r) => r.cmd === 'echo pong' && r.verdict === '退出码 0') && rows5.some((r) => r.outcome === 'refused'), 'the rows: newest first — the conversation, the command, 退出码 3, the stderr head behind the row; the earlier run and a refused attempt listed too', rows5);
-    ok(await P.evalJs(`/命令在 sh 下运行（Linux）/.test(document.querySelector('#exit-runs-dialog .exit-runs-platform')?.textContent || '')`), 'the list says what the machine runs commands under (sh, Linux)');
+    ok(gateOf(rows5[0]) && gateOf(rows5[0].cmd.startsWith('echo out-line')) && rows5[0].verdict === '退出码 3' && rows5[0].who.length > 0 && gateOf(/ERR-LINE-1/.test(rows5[0].stderr)) && gateOf(rows5.some((r) => r.cmd === 'echo pong' && r.verdict === '退出码 0')) && verdictOf(rows5.some((r) => r.outcome === 'refused')), 'the rows: newest first — the conversation, the command, 退出码 3, the stderr head behind the row; the earlier run and a refused attempt listed too', rows5);
+    ok(verdictOf(await P.evalJs(`/命令在 sh 下运行（Linux）/.test(document.querySelector('#exit-runs-dialog .exit-runs-platform')?.textContent || '')`)), 'the list says what the machine runs commands under (sh, Linux)');
     // a row opened, then a NEW run lands on top LIVE (the exit-audit broadcast): the opened row is the SAME node, still open
     await P.evalJs(`(() => { const r = document.querySelector('#exit-runs-dialog .exit-runs-row'); r.open = true; r._mark = 'kept'; return true; })()`);
     const r6 = await runApi(S[1].token, 'echo second-run');
     ok(r6.status === 200 && r6.j.code === 0, 'a second run while the list is open');
-    ok(await P.waitFor(`(document.querySelector('#exit-runs-dialog .exit-runs-row .exit-runs-cmd')?.textContent || '') === 'echo second-run'`, 6000), 'its row lands on top LIVE (the exit-audit broadcast, no re-read)');
+    ok(verdictOf(await P.waitFor(`(document.querySelector('#exit-runs-dialog .exit-runs-row .exit-runs-cmd')?.textContent || '') === 'echo second-run'`, 6000)), 'its row lands on top LIVE (the exit-audit broadcast, no re-read)');
     const kept = await P.evalJs(`(() => { const rows = [...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')]; const k = rows.find((r) => r._mark === 'kept'); return { kept: !!k, open: k && k.open, second: rows[0].querySelector('.exit-runs-verdict').textContent, stdout: (rows[0].querySelector('.exit-runs-pre') || {}).textContent || '', n: rows.length }; })()`);
-    ok(kept.kept && kept.open === true && kept.second === '退出码 0' && /second-run/.test(kept.stdout), 'the opened row is the SAME node and still open; the new row carries its stdout head', kept);
+    ok(gateOf(kept.kept) && kept.open === true && kept.second === '退出码 0' && verdictOf(/second-run/.test(kept.stdout)), 'the opened row is the SAME node and still open; the new row carries its stdout head', kept);
     await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); document.querySelector('#exit-access-dialog .dialog-close')?.click(); true`);
     // the Machines card's 命令… opens the same list
     await P.evalJs(`(() => { localStorage.setItem('vibespace.agentsTab', 'machines'); app._showAgentsDialog({ forceModal: true }); return true; })()`);
-    ok(await P.waitFor(`!!document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-runs')`, 10000), 'the Machines card has 命令…');
-    ok(await P.evalJs(`/Linux/.test(document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-line2')?.textContent || '')`), '…and its second line names the platform');
+    ok(verdictOf(await P.waitFor(`!!document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-runs')`, 10000)), 'the Machines card has 命令…');
+    ok(verdictOf(await P.evalJs(`/Linux/.test(document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-line2')?.textContent || '')`)), '…and its second line names the platform');
     await P.evalJs(`document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-runs').click(); true`);
-    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), '命令… opens the list from the Machines card too');
+    ok(verdictOf(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000)), '命令… opens the list from the Machines card too');
     await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); document.querySelector('#agents-dialog-overlay .dialog-close')?.click(); true`);
     // the CLI's `runs`: the conversation's OWN runs, the same heads
     const cliR = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-exit'), 'runs', 'exmac'], { env: { ...process.env, VIBESPACE_API: api2 || W.BASE, VIBESPACE_SESSION_TOKEN: S[1].token } });
     const cliROut = []; cliR.stdout.on('data', (d) => cliROut.push(d)); cliR.stderr.on('data', (d) => cliROut.push(d));
     const cliRCode = await new Promise((r) => cliR.on('exit', (code) => r(code)));
     const cliRText = Buffer.concat(cliROut).toString();
-    ok(cliRCode === 0 && /exit 0 · [\d.]+ s · sh  echo second-run/.test(cliRText) && /exit 3 · [\d.]+ s · sh  echo out-line/.test(cliRText) && /stderr: ERR-LINE-1/.test(cliRText) && !/conv3|id\b.*refused/.test(cliRText), 'the REAL vibespace-exit `runs exmac` lists this conversation\'s runs with their verdicts and the first line of output — never another conversation\'s', cliRText);
+    ok(cliRCode === 0 && gateOf(/exit 0 · [\d.]+ s · sh  echo second-run/.test(cliRText)) && gateOf(/exit 3 · [\d.]+ s · sh  echo out-line/.test(cliRText)) && gateOf(/stderr: ERR-LINE-1/.test(cliRText)) && !/conv3|id\b.*refused/.test(cliRText), 'the REAL vibespace-exit `runs exmac` lists this conversation\'s runs with their verdicts and the first line of output — never another conversation\'s', cliRText);
     const au5 = (await W.api('GET', `/api/hosts/${HOST}/exit-runs?limit=10`)).j;
-    ok(au5.runs && au5.runs[0].cmd === 'echo second-run' && au5.runs[1].stderr === 'ERR-LINE-1\nERR-LINE-2\n' && au5.machine.interpreter === 'sh', 'the owner\'s GET /api/hosts/:id/exit-runs carries the heads the daemon produced', au5.runs && au5.runs.slice(0, 2));
+    ok(gateOf(au5.runs) && au5.runs[0].cmd === 'echo second-run' && au5.runs[1].stderr === 'ERR-LINE-1\nERR-LINE-2\n' && au5.machine.interpreter === 'sh', 'the owner\'s GET /api/hosts/:id/exit-runs carries the heads the daemon produced', au5.runs && au5.runs.slice(0, 2));
     // verify r1 F4: the preview never grows the card past its bound (three lines of 1 365 bytes wrapped to ~100 rows), and
     // a head that is only blank lines is said as such with its cut (pre-fix "no output", the cut unsaid)
     const r7 = await runApi(S[1].token, 'head -c 3000 /dev/zero | tr "\\0" x; echo; echo second; echo third; echo fourth');
     ok(r7.status === 200 && r7.j.code === 0, 'a run whose first line is 3 000 characters');
     const longSel = `[...document.querySelectorAll('.chat-vs-notice .chat-exit-out')].find((p) => p.textContent.startsWith('xxxxxxxx'))`;
-    ok(await P.waitFor(`!!${longSel}`, 8000), 'its card carries the preview');
+    ok(verdictOf(await P.waitFor(`!!${longSel}`, 8000)), 'its card carries the preview');
     await openLine(`(${longSel})?.closest('.chat-vs-notice')`, 'the 3 000-character run\'s card');
     const g7 = await P.evalJs(`(() => { const p = ${longSel}; const cs = getComputedStyle(p); return { h: p.offsetHeight, sh: p.scrollHeight, maxH: cs.maxHeight, ov: cs.overflowY }; })()`);
     ok(g7.h <= 170 && g7.sh > g7.h && g7.maxH === '160px' && g7.ov === 'auto', 'the preview is bounded at 160 px and scrolls (pre-fix: the card grew by the wrapped line)', g7);
     const r8 = await runApi(S[1].token, 'yes "" | head -c 5000');
     ok(r8.status === 200 && r8.j.code === 0, 'a run printing 5 000 newlines');
     const blankSel = `[...document.querySelectorAll('.chat-vs-notice .chat-exit-none')].find((d) => /没有可见输出/.test(d.textContent))`;
-    ok(await P.waitFor(`!!${blankSel}`, 8000) && await P.evalJs(`/^没有可见输出 · 在 4 KiB 处截断$/.test(${blankSel}.textContent)`), 'its card says the output is blank AND cut (pre-fix "没有输出", the cut unsaid)');
+    ok(gateOf(await P.waitFor(`!!${blankSel}`, 8000)) && verdictOf(await P.evalJs(`/^没有可见输出 · 在 4 KiB 处截断$/.test(${blankSel}.textContent)`)), 'its card says the output is blank AND cut (pre-fix "没有输出", the cut unsaid)');
     // verify r1 V5: the command list's output block is bounded too (style.css's one pin — a row's <pre> scrolls at 320 px)
     await P.realClick(exitIcon);
-    ok(await P.waitFor(`!!document.querySelector('#exit-access-dialog .exit-access-runs')`, 8000), 'the dialog again');
+    ok(verdictOf(await P.waitFor(`!!document.querySelector('#exit-access-dialog .exit-access-runs')`, 8000)), 'the dialog again');
     await P.realClick('#exit-access-dialog .exit-access-runs');
-    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), 'the list again');
+    ok(verdictOf(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000)), 'the list again');
     const pre9 = await P.evalJs(`(() => { const rows = [...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')]; const r = rows.find((x) => (x.querySelector('.exit-runs-cmd-all')?.textContent || '').startsWith('head -c 3000')); if (!r) return null; r.open = true; const p = r.querySelector('.exit-runs-pre'); const cs = getComputedStyle(p); return { maxH: cs.maxHeight, ov: cs.overflowY, h: p.offsetHeight, sh: p.scrollHeight }; })()`);
-    ok(pre9 && pre9.maxH === '320px' && pre9.ov === 'auto' && pre9.h <= 330 && pre9.sh > pre9.h, 'a row\'s output block is bounded at 320 px and scrolls', pre9);
+    ok(gateOf(pre9) && pre9.maxH === '320px' && pre9.ov === 'auto' && pre9.h <= 330 && pre9.sh > pre9.h, 'a row\'s output block is bounded at 320 px and scrolls', pre9);
     await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); document.querySelector('#exit-access-dialog .dialog-close')?.click(); true`);
     // ── lane exit-see-whole (design 013 piece 1, the owner: 「这些指令输入展示不全，也没地方看到完整版。remote界面也没法audit…」):
     //    at 390 px the card shows the command AS ITSELF (wrapped) — lane exit-card-margin (2026-10-18, 「No raw strings in cards」):
@@ -638,20 +638,20 @@ try {
     await P.evalJs(`app.sidebar.toggle?.(false); true`);   // the sidebar out of the way of the real click (the harness's chat column measures ~100 px here: a stricter wrap than a phone's)
     const tok = 'Q'.repeat(1365), multi = Array.from({ length: 12 }, (_, i) => `echo line-${i}`).join('\n');
     const r10 = await runApi(S[1].token, `echo ${tok}`), r11 = await runApi(S[1].token, multi);
-    ok(r10.status === 200 && r11.status === 200 && /line-11/.test(r11.j.stdout), 'two runs: a 1 370-character one-token command and a 12-line script', [r10.status, r11.status]);
+    ok(r10.status === 200 && r11.status === 200 && verdictOf(/line-11/.test(r11.j.stdout)), 'two runs: a 1 370-character one-token command and a 12-line script', [r10.status, r11.status]);
     const cmdOf = (start) => `([...document.querySelectorAll('.chat-vs-notice .chat-exit-cmd')].find((x) => x.textContent.startsWith(${JSON.stringify(start)})) || null)`;
     const geo = (start) => P.evalJs(`(() => { const p = ${cmdOf(start)}; if (!p) return null; const det = p.closest('details.chat-exit-tech'), sum = det && det.querySelector(':scope > summary'), out = p.closest('.chat-exit-run').querySelector('.chat-exit-out'); (det && det.open ? p : sum || p).scrollIntoView({ block: 'nearest' });
       return { vw: innerWidth, text: p.textContent, shown: p.checkVisibility(), w: p.clientWidth, sw: p.scrollWidth, summary: sum ? sum.textContent : null, len: det?.querySelector('.chat-exit-cmd-len')?.textContent || '', open: !!(det && det.open), last: !!det && det.parentElement.lastElementChild === det,
         titled: !!(p.title || (det && det.title) || (sum && sum.title)), outW: out ? out.clientWidth : -1, outSW: out ? out.scrollWidth : -1, words: p.closest('.chat-vs-notice')?.querySelector(':scope > .chat-text')?.textContent || '' }; })()`);
-    ok(await P.waitFor(`!!${cmdOf('echo QQQ')} && !!${cmdOf('echo line-0')}`, 8000), 'both cards carry the command block');
+    ok(verdictOf(await P.waitFor(`!!${cmdOf('echo QQQ')} && !!${cmdOf('echo line-0')}`, 8000)), 'both cards carry the command block');
     await openLine(`${cmdOf('echo QQQ')}?.closest('.chat-vs-notice')`, 'the 1 370-character command\'s card');
     const a10 = await geo('echo QQQ');
-    ok(a10 && a10.vw === 390 && /^在 \S+ 上运行了一条命令 — 退出码 0 · \d+\.\d s$/.test(a10.words) && !a10.shown && !a10.open && a10.summary === '技术细节' && a10.last && a10.outSW <= a10.outW + 1 && !a10.titled, 'at 390 px the card says 在 <machine> 上运行了一条命令 — 退出码 0 · …; the 1 370-character command is folded away under ONE closed 技术细节 after the output; its 1 365-byte output line wraps; no hover title', a10);
-    ok(await P.realClick(`(${cmdOf('echo QQQ')}?.closest('details.chat-exit-tech')?.querySelector(':scope > summary') || null)`), 'a real click on 技术细节');
+    ok(gateOf(a10) && a10.vw === 390 && gateOf(/^在 \S+ 上运行了一条命令 — 退出码 0 · \d+\.\d s$/.test(a10.words)) && !a10.shown && !a10.open && a10.summary === '技术细节' && gateOf(a10.last) && a10.outSW <= a10.outW + 1 && !a10.titled, 'at 390 px the card says 在 <machine> 上运行了一条命令 — 退出码 0 · …; the 1 370-character command is folded away under ONE closed 技术细节 after the output; its 1 365-byte output line wraps; no hover title', a10);
+    ok(verdictOf(await P.realClick(`(${cmdOf('echo QQQ')}?.closest('details.chat-exit-tech')?.querySelector(':scope > summary') || null)`)), 'a real click on 技术细节');
     const b10 = await geo('echo QQQ');
-    ok(b10 && b10.open && b10.shown && b10.text === 'echo ' + tok && b10.w > 50 && b10.sw <= b10.w + 1 && b10.len === '命令 · 1370 个字符', 'open: the whole command shows, wrapped (no sideways overflow), its length named 命令 · 1370 个字符', b10);
+    ok(gateOf(b10) && gateOf(b10.open) && gateOf(b10.shown) && b10.text === 'echo ' + tok && b10.w > 50 && b10.sw <= b10.w + 1 && b10.len === '命令 · 1370 个字符', 'open: the whole command shows, wrapped (no sideways overflow), its length named 命令 · 1370 个字符', b10);
     const a11 = await geo('echo line-0');
-    ok(a11 && a11.text === multi && !a11.open && a11.len === '命令 · 12 行', 'the 12-line script keeps its lines, folded away under 技术细节 (命令 · 12 行 inside)', a11);
+    ok(gateOf(a11) && a11.text === multi && !a11.open && a11.len === '命令 · 12 行', 'the 12-line script keeps its lines, folded away under 技术细节 (命令 · 12 行 inside)', a11);
     await P.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
     // THE PAGE GROWS BACK TO DESKTOP WIDTH, AND THE PERSON'S ROAD TO THE REMOTE PANEL (lane bl-tests-e — the run of 4a255af35 placed the
     // machine row's two presses: «NOT LAID OUT — hidden by div.sidebar-main (display: none) — in no window», page visible at 1280 px,
@@ -664,20 +664,20 @@ try {
     // only on a hidden page: the switch is kicked by events a background tab never hears (viewport-switch.js says so), so the switch back
     // at 1280 never closed the suite's open there (inferred from the red: proven only that it ran on the visible page). Now: the class is
     // WAITED for (the product's own app._vc), the closed sidebar STATED, and the panel opened the person's way — the leg saying it is drawn
-    ok(await P.waitFor(`app._vc === 'desktop'`, 5000), 'the page is back at the DESKTOP class (the viewport switch has run after the resize)', await P.evalJs('app._vc || null'));
+    ok(verdictOf(await P.waitFor(`app._vc === 'desktop'`, 5000)), 'the page is back at the DESKTOP class (the viewport switch has run after the resize)', await P.evalJs('app._vc || null'));
     const railRemote = '#sidebar-rail .rail-item[data-rail="mounts"]';
-    ok(await P.waitFor(`document.getElementById('sidebar').classList.contains('rail-collapsed') && !!document.querySelector(${JSON.stringify(railRemote)})?.getClientRects().length`, 3000),
+    ok(verdictOf(await P.waitFor(`document.getElementById('sidebar').classList.contains('rail-collapsed') && !!document.querySelector(${JSON.stringify(railRemote)})?.getClientRects().length`, 3000)),
       'the desktop builds the rail beside a CLOSED sidebar: its main pane not drawn, the rail\'s Remote item drawn (what a person sees after widening the page)', await P.evalJs(`({ cls: document.getElementById('sidebar').className, rail: !!document.querySelector(${JSON.stringify(railRemote)}) })`));
-    ok(await P.realClick(railRemote), 'a real click on the rail\'s Remote item');
-    ok(await P.waitFor(`!!document.querySelector('.mounts-panel')?.offsetParent && !!${rowOf}?.getClientRects().length`, 5000), '…the Remote panel is DRAWN, the machine row in it');
+    ok(verdictOf(await P.realClick(railRemote)), 'a real click on the rail\'s Remote item');
+    ok(verdictOf(await P.waitFor(`!!document.querySelector('.mounts-panel')?.offsetParent && !!${rowOf}?.getClientRects().length`, 5000)), '…the Remote panel is DRAWN, the machine row in it');
     const listIcon = `(${rowOf}?.querySelector('.mounts-row-actions button[title^="在 exmac 上运行过的命令"]') || null)`;
-    ok(await P.realClick(listIcon), 'a real click on the machine row\'s Commands icon (在 exmac 上运行过的命令…)');
-    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), '…opens the machine\'s command list in ONE click');
+    ok(verdictOf(await P.realClick(listIcon)), 'a real click on the machine row\'s Commands icon (在 exmac 上运行过的命令…)');
+    ok(verdictOf(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000)), '…opens the machine\'s command list in ONE click');
     const c12 = await P.evalJs(`(() => { const r = [...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')].find((x) => (x.querySelector('.exit-runs-cmd-all')?.textContent || '').startsWith('echo line-0')); if (!r) return null; r.open = true; return { whole: r.querySelector('.exit-runs-cmd-all').textContent, titles: r.querySelectorAll('[title]').length, copy: r.querySelector('.exit-runs-copy')?.textContent }; })()`);
-    ok(c12 && c12.whole === multi && c12.titles === 0 && c12.copy === '复制命令', 'its row holds the WHOLE script with its lines and a 复制命令 button — no hover title', c12);
+    ok(gateOf(c12) && c12.whole === multi && c12.titles === 0 && c12.copy === '复制命令', 'its row holds the WHOLE script with its lines and a 复制命令 button — no hover title', c12);
     await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); true`);
-    ok(await P.realClick(`(${rowOf}?.querySelector('button.mounts-exit-last') || null)`), 'a real click on the machine row\'s last-run line');
-    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), '…opens the same list');
+    ok(verdictOf(await P.realClick(`(${rowOf}?.querySelector('button.mounts-exit-last') || null)`)), 'a real click on the machine row\'s last-run line');
+    ok(verdictOf(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000)), '…opens the same list');
     await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); true`);
   }
   ok(P.errors.length === 0 && P2.errors.length === 0, 'no page exception', [...P.errors, ...P2.errors].slice(0, 3));
@@ -688,4 +688,4 @@ try {
 }
 if (firstRedSaid) await Promise.race([firstRedSaid, sleep(15000).then(() => console.log('    [the first red leg on page P] — the page did not answer in 15 s'))]);
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

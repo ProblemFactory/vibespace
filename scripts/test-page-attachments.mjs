@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 const { MessageManager } = require('../src/message-manager.js');
 
 let failed = 0;
-const assert = (cond, name) => {
+const assert = (cond, name) => { if (typeof cond !== 'boolean') throw new TypeError(`assert: its condition is a ${typeof cond}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`);
   console.log(`${cond ? '  ✓' : '  ✗ FAIL'} ${name}`);
   if (!cond) failed++;
 };
@@ -44,7 +44,7 @@ const pageEvent = (n) => ({ type: 'user', isSynthetic: true, message: { role: 'u
   assert(atts[0]?.synthetic === true, 'flagged synthetic');
   assert(ops.filter((o) => o.op === 'create').length === 1, 'one create op');
   const edits = ops.filter((o) => o.op === 'edit');
-  assert(edits.length === 2 && edits.every((o) => o.fields.status === 'complete'), 'two complete-status edit ops (re-render gate)');
+  assert(edits.length === 2 && verdictOf(edits.every((o) => o.fields.status === 'complete')), 'two complete-status edit ops (re-render gate)');
   assert(edits[1]?.fields.content.length === 3, 'last edit carries full content');
   assert(mm.turnIndex === turnBefore, 'no turnIndex bump (not a conversation turn)');
 
@@ -53,7 +53,7 @@ const pageEvent = (n) => ({ type: 'user', isSynthetic: true, message: { role: 'u
   mm.processLive(pageEvent(1));
   assert(mm.messages.filter((m) => m.imageAttachment).length === 2, 'new burst after a real message starts a NEW card');
   const real = mm.messages.find((m) => m.typed);
-  assert(real && real.content[0].text === 'hello', 'real user message untouched');
+  assert(gateOf(real) && real.content[0].text === 'hello', 'real user message untouched');
 }
 
 // ── JSONL rebuild: one isMeta record with N blocks ──
@@ -65,7 +65,7 @@ const pageEvent = (n) => ({ type: 'user', isSynthetic: true, message: { role: 'u
   ]);
   const atts = msgs.filter((m) => m.imageAttachment);
   assert(atts.length === 1, 'history isMeta record → one attachment message');
-  assert(atts[0]?.content.length === 4 && atts[0].content.every((b) => b.type === 'image'), 'all 4 pages present');
+  assert(atts[0]?.content.length === 4 && verdictOf(atts[0].content.every((b) => b.type === 'image')), 'all 4 pages present');
 }
 
 // ── real user image paste stays a user bubble ──
@@ -75,9 +75,9 @@ const pageEvent = (n) => ({ type: 'user', isSynthetic: true, message: { role: 'u
   mm.processLive({ type: 'user', _fromWebui: true, message: { role: 'user', content: [img(2)] } });
   // external CLI paste: no synthetic/meta flags at all
   mm.processLive({ type: 'user', message: { role: 'user', content: [img(2), { type: 'text', text: 'look at this' }] } });
-  assert(mm.messages.every((m) => !m.imageAttachment), 'user image pastes never flagged');
+  assert(verdictOf(mm.messages.every((m) => !m.imageAttachment)), 'user image pastes never flagged');
   assert(mm.messages.length === 2, 'both render as separate user messages');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nall passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

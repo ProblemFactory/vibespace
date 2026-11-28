@@ -46,7 +46,7 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
@@ -228,56 +228,56 @@ const endWrapper = async (label) => {
   ok(left.length === 0, `${label}: it and its stub app-server ended within 5 s of its stop (${kids.length} process(es) held by identity)`, left.map((k) => `${k.name} pid ${k.p} still alive — ended by SIGKILL`).join('; '));
 };
 
-ok(await waitFor(() => readMeta()?.threadId === 'th-h'), 'wrapper handshake against the stub app-server');
+ok(verdictOf(await waitFor(() => readMeta()?.threadId === 'th-h')), 'wrapper handshake against the stub app-server');
 
 // ① NO personality key by default
 {
   const ts = rpc().find((m) => m.method === 'thread/start');
-  ok(ts && !('personality' in ts.params), 'thread/start carries NO personality key when the user chose nothing (the config.toml choice stands)', JSON.stringify(ts?.params));
+  ok(gateOf(ts) && !('personality' in ts.params), 'thread/start carries NO personality key when the user chose nothing (the config.toml choice stands)', JSON.stringify(ts?.params));
 }
 sendLine({ type: 'chat-input', text: 'go', msgId: 'm1' });
-ok(await waitFor(() => rpc().some((m) => m.method === 'turn/start')), 'a turn starts');
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'turn/start'))), 'a turn starts');
 {
   const t = rpc().find((m) => m.method === 'turn/start');
-  ok(t && !('personality' in t.params), 'turn/start carries NO personality key either', JSON.stringify(Object.keys(t?.params || {})));
+  ok(gateOf(t) && !('personality' in t.params), 'turn/start carries NO personality key either', JSON.stringify(Object.keys(t?.params || {})));
 }
 ok(readMeta()?.caps?.responseStyle === true, 'the wrapper adverts caps.responseStyle in the sidecar IT writes (the 2.361.1/2.364.1 skew rule)');
 ok(readMeta()?.personality === '', 'the sidecar reports the EFFECTIVE style — empty = the agent decides', JSON.stringify(readMeta()?.personality));
 
 // ① a LIVE change → thread/settings/update
 sendLine({ type: 'set-response-style', style: 'friendly' });
-ok(await waitFor(() => rpc().some((m) => m.method === 'thread/settings/update')), 'a live style change sends thread/settings/update');
+ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'thread/settings/update'))), 'a live style change sends thread/settings/update');
 {
   const u = rpc().find((m) => m.method === 'thread/settings/update');
   ok(u.params.threadId === 'th-h' && u.params.personality === 'friendly', '…with {threadId, personality} exactly as the 0.153.4 schema names them', JSON.stringify(u.params));
-  ok(await waitFor(() => readMeta()?.personality === 'friendly'), 'the sidecar now reports the new effective style');
-  ok(events().some((e) => e.payload?.type === 'command_applied' && e.payload.command === 'style' && e.payload.value === 'friendly'), 'the change is VISIBLE in the transcript (command_applied)');
+  ok(verdictOf(await waitFor(() => readMeta()?.personality === 'friendly')), 'the sidecar now reports the new effective style');
+  ok(verdictOf(events().some((e) => e.payload?.type === 'command_applied' && e.payload.command === 'style' && e.payload.value === 'friendly')), 'the change is VISIBLE in the transcript (command_applied)');
 }
 // an out-of-enum value is refused LOUDLY and never sent
 {
   const before = rpc().filter((m) => m.method === 'thread/settings/update').length;
   sendLine({ type: 'set-response-style', style: 'sassy' });
-  ok(await waitFor(() => events().some((e) => e.payload?.type === 'task_failed' && /Unknown response style "sassy"/.test(e.payload.error || ''))), 'an out-of-enum style is refused with the accepted list, never sent');
+  ok(verdictOf(await waitFor(() => events().some((e) => e.payload?.type === 'task_failed' && /Unknown response style "sassy"/.test(e.payload.error || '')))), 'an out-of-enum style is refused with the accepted list, never sent');
   ok(rpc().filter((m) => m.method === 'thread/settings/update').length === before, '…and no RPC left the wrapper');
   ok(readMeta()?.personality === 'friendly', '…and the effective style is unchanged');
 }
 
 // ② every ServerRequest method's reply shape
 const replyFor = (id) => replies().find((r) => r.id === id);
-ok(await waitFor(() => replyFor(907) && replyFor(908) && replyFor(909) && replyFor(910) && replyFor(911)), 'the auto/unsupported requests are answered WITHOUT a human');
+ok(verdictOf(await waitFor(() => replyFor(907) && replyFor(908) && replyFor(909) && replyFor(910) && replyFor(911))), 'the auto/unsupported requests are answered WITHOUT a human');
 ok(typeof replyFor(907)?.result?.currentTimeAt === 'number' && Math.abs(replyFor(907).result.currentTimeAt - Math.floor(Date.now() / 1000)) < 120,
   'currentTime/read is answered automatically with {currentTimeAt} in SECONDS (a card here would hang the turn)', JSON.stringify(replyFor(907)));
 for (const [id, name] of [[908, 'attestation/generate'], [909, 'item/tool/call'], [910, 'account/chatgptAuthTokens/refresh'], [911, 'totally/unknown/method']]) {
   const r = replyFor(id);
-  ok(r && r.error && r.error.code === -32601 && !('result' in r), `${name} is refused with a JSON-RPC ERROR — never a wrong-shaped result, never a hang`, JSON.stringify(r));
+  ok(gateOf(r) && gateOf(r.error) && r.error.code === -32601 && !('result' in r), `${name} is refused with a JSON-RPC ERROR — never a wrong-shaped result, never a hang`, JSON.stringify(r));
 }
-ok(await waitFor(() => events().filter((e) => e.payload?.type === 'client_request_unsupported').length >= 4), 'each refusal also leaves a VISIBLE record (client_request_unsupported)');
+ok(verdictOf(await waitFor(() => events().filter((e) => e.payload?.type === 'client_request_unsupported').length >= 4)), 'each refusal also leaves a VISIBLE record (client_request_unsupported)');
 ok(!Object.keys(readMeta()?.pendingRequests || {}).some((k) => ['907', '908', '909', '910', '911'].includes(k)), 'none of them ever became a pending card', JSON.stringify(Object.keys(readMeta()?.pendingRequests || {})));
-ok(await waitFor(() => ['900', '901', '902', '903', '904', '905', '906', '912', '913', '914'].every((k) => readMeta()?.pendingRequests?.[k])), 'the ten human-answerable requests ARE pending cards', JSON.stringify(Object.keys(readMeta()?.pendingRequests || {})));
+ok(verdictOf(await waitFor(() => ['900', '901', '902', '903', '904', '905', '906', '912', '913', '914'].every((k) => readMeta()?.pendingRequests?.[k]))), 'the ten human-answerable requests ARE pending cards', JSON.stringify(Object.keys(readMeta()?.pendingRequests || {})));
 
 // each one answered through the SAME client frame the UI sends
 sendLine({ type: 'permission-response', requestId: 900, approved: true, permissionUpdates: [{ kind: 'allow' }], toolInput: {} });
-ok(await waitFor(() => replyFor(900)), 'commandExecution approval answered');
+ok(verdictOf(await waitFor(() => replyFor(900))), 'commandExecution approval answered');
 // r2 REGRESSION — the one branch that did not validate was the one the first
 // cut of this gate certified: `execpolicy_amendment` is `string[]` in the
 // dumped schema (execpolicy RULE LINES) while the client's `permissionUpdates`
@@ -286,44 +286,44 @@ ok(await waitFor(() => replyFor(900)), 'commandExecution approval answered');
 ok(JSON.stringify(replyFor(900).result) === JSON.stringify({ decision: 'accept' }),
   'commandExecution: the client’s option objects NEVER become an execpolicy amendment (the schema says string[]) — a plain accept', JSON.stringify(replyFor(900).result));
 sendLine({ type: 'permission-response', requestId: 901, approved: true, alwaysAllow: true, permissionUpdates: [{ kind: 'allow' }] });
-ok(await waitFor(() => replyFor(901)), 'fileChange approval answered');
+ok(verdictOf(await waitFor(() => replyFor(901))), 'fileChange approval answered');
 ok(JSON.stringify(replyFor(901).result) === JSON.stringify({ decision: 'acceptForSession' }),
   'fileChange has NO amendment variant — "always" is acceptForSession, nothing invented', JSON.stringify(replyFor(901).result));
 sendLine({ type: 'permission-response', requestId: 902, approved: true });
-ok(await waitFor(() => replyFor(902)), 'permissions approval answered');
+ok(verdictOf(await waitFor(() => replyFor(902))), 'permissions approval answered');
 ok(JSON.stringify(replyFor(902).result) === JSON.stringify({ permissions: { fileSystem: { read: ['/tmp'] }, network: { enabled: true } }, scope: 'turn' }),
   'permissions wants a GRANT, not a decision: approving hands back the requested profile', JSON.stringify(replyFor(902).result));
 // the round-trip the AskUserQuestion UI actually produces: answers keyed by the
 // question TEXT, each a PLAIN STRING (both of which the old code dropped)
 sendLine({ type: 'permission-response', requestId: 903, approved: true, toolInput: { answers: { 'Which layout?': 'grid' } }, responseData: { decision: 'accept', answers: { 'Which layout?': 'grid' } } });
-ok(await waitFor(() => replyFor(903)), 'requestUserInput answered');
+ok(verdictOf(await waitFor(() => replyFor(903))), 'requestUserInput answered');
 ok(JSON.stringify(replyFor(903).result) === JSON.stringify({ answers: { q1: { answers: ['grid'] } } }),
   'requestUserInput → bare {answers} keyed by QUESTION ID, plain-string answer accepted (the UI keys by text)', JSON.stringify(replyFor(903).result));
 sendLine({ type: 'permission-response', requestId: 904, approved: true, toolInput: { answers: { 'Where are you? — City': 'Tokyo', 'Where are you? — Use metric': 'true' } }, responseData: { decision: 'accept', answers: { 'Where are you? — City': 'Tokyo', 'Where are you? — Use metric': 'true' } } });
-ok(await waitFor(() => replyFor(904)), 'MCP elicitation answered');
+ok(verdictOf(await waitFor(() => replyFor(904))), 'MCP elicitation answered');
 ok(JSON.stringify(replyFor(904).result) === JSON.stringify({ action: 'accept', content: { city: 'Tokyo', metric: true } }),
   'elicitation → {action:"accept", content} with each property TYPED per the requestedSchema (metric is a boolean, not "true")', JSON.stringify(replyFor(904).result));
 sendLine({ type: 'permission-response', requestId: 905, approved: false });
-ok(await waitFor(() => replyFor(905)), 'v1 applyPatchApproval answered');
+ok(verdictOf(await waitFor(() => replyFor(905))), 'v1 applyPatchApproval answered');
 ok(JSON.stringify(replyFor(905).result) === JSON.stringify({ decision: { denied: { rejection: 'Denied by the user in VibeSpace.' } } }),
   'the v1 pair speaks ReviewDecision: a denial is {denied:{rejection}} — NOT "decline"', JSON.stringify(replyFor(905).result));
 sendLine({ type: 'permission-response', requestId: 906, approved: true, alwaysAllow: true });
-ok(await waitFor(() => replyFor(906)), 'v1 execCommandApproval answered');
+ok(verdictOf(await waitFor(() => replyFor(906))), 'v1 execCommandApproval answered');
 ok(JSON.stringify(replyFor(906).result) === JSON.stringify({ decision: 'approved_for_session' }),
   '…and its "always" is approved_for_session, not acceptForSession', JSON.stringify(replyFor(906).result));
 
 // a URL-mode elicitation carries no schema: accepting it sends the ACTION only
 // (`content` is nullable — an empty object is a different statement)
 sendLine({ type: 'permission-response', requestId: 912, approved: true, toolInput: {} });
-ok(await waitFor(() => replyFor(912)), 'url-mode elicitation answered');
+ok(verdictOf(await waitFor(() => replyFor(912))), 'url-mode elicitation answered');
 ok(JSON.stringify(replyFor(912).result) === JSON.stringify({ action: 'accept' }), 'a url-mode accept omits `content` entirely', JSON.stringify(replyFor(912).result));
 // a DENIED permissions request grants NOTHING and is labelled Denied — the
 // label is decided by the shape we build, not by "does the profile look empty"
 sendLine({ type: 'permission-response', requestId: 913, approved: false });
-ok(await waitFor(() => replyFor(913)), 'permissions denial answered');
+ok(verdictOf(await waitFor(() => replyFor(913))), 'permissions denial answered');
 ok(JSON.stringify(replyFor(913).result) === JSON.stringify({ permissions: { fileSystem: null, network: null }, scope: 'turn' }), 'denying a permissions request grants nothing', JSON.stringify(replyFor(913).result));
-ok(events().some((e) => e.type === 'server_request_resolved' && e.payload.id === 913 && e.payload.decision === 'decline')
-  && events().some((e) => e.type === 'server_request_resolved' && e.payload.id === 902 && e.payload.decision === 'granted'),
+ok(gateOf(events().some((e) => e.type === 'server_request_resolved' && e.payload.id === 913 && e.payload.decision === 'decline'))
+  && verdictOf(events().some((e) => e.type === 'server_request_resolved' && e.payload.id === 902 && e.payload.decision === 'granted')),
   'the resolved record labels a GRANT and a DENY apart (both are `{permissions}` on the wire)',
   JSON.stringify(events().filter((e) => e.type === 'server_request_resolved').map((e) => [e.payload.id, e.payload.decision])));
 
@@ -337,7 +337,7 @@ ok(events().some((e) => e.type === 'server_request_resolved' && e.payload.id ===
   const frame = ad.formatPermissionResponse({ requestId: 914, approved: true, toolInput: {}, permissionUpdates: [{ kind: 'allow_always' }] });
   ok(!/permissionUpdates/.test(frame), 'the adapter does NOT forward the client\u2019s permissionUpdates \u2014 it carries only the alwaysAllow BOOLEAN', frame.slice(0, 200));
   w.stdin.write(frame + '\n');
-  ok(await waitFor(() => replyFor(914)), 'an ADAPTER-built "Always Allow" is answered');
+  ok(verdictOf(await waitFor(() => replyFor(914))), 'an ADAPTER-built "Always Allow" is answered');
   ok(JSON.stringify(replyFor(914).result) === JSON.stringify({ decision: 'acceptForSession' }),
     '\u2026with acceptForSession \u2014 a SESSION-scoped promise, never a persistent execpolicy amendment the user never asked for', JSON.stringify(replyFor(914).result));
 }
@@ -361,7 +361,7 @@ ok(events().some((e) => e.type === 'server_request_resolved' && e.payload.id ===
   // suite used to certify is rejected, naming the field.
   const bad = schemaErrors(RESP_SCHEMAS.byMethod['item/commandExecution/requestApproval'],
     { decision: { acceptWithExecpolicyAmendment: { execpolicy_amendment: [{ kind: 'allow' }] } } });
-  ok(bad.length > 0 && /execpolicy_amendment/.test(bad.join(' ')), 'negative control: the OLD amendment payload (option objects) FAILS the real schema', bad.join(' | '));
+  ok(bad.length > 0 && verdictOf(/execpolicy_amendment/.test(bad.join(' '))), 'negative control: the OLD amendment payload (option objects) FAILS the real schema', bad.join(' | '));
   const bad2 = schemaErrors(RESP_SCHEMAS.byMethod['item/tool/requestUserInput'], { decision: 'accept' });
   ok(bad2.length > 0, 'negative control: `{decision}` is not a requestUserInput answer (the pre-2.369.58 one-shape-fits-all)', bad2.join(' | '));
   const good = schemaErrors(RESP_SCHEMAS.byMethod['item/commandExecution/requestApproval'],
@@ -401,16 +401,16 @@ ok(events().some((e) => e.type === 'server_request_resolved' && e.payload.id ===
 const wrapperRecords = () => events();
 {
   const rec = wrapperRecords().find((r) => r.type === 'server_request' && r.payload?.method === 'mcpServer/elicitation/request');
-  ok(rec && Array.isArray(rec.payload.questions) && rec.payload.questions.length === 2 && rec.payload.questions[0].id === 'city',
+  ok(gateOf(rec) && gateOf(Array.isArray(rec.payload.questions)) && rec.payload.questions.length === 2 && rec.payload.questions[0].id === 'city',
     'the elicitation record carries its derived question rows (ONE derivation feeds the card AND the reply mapping)', JSON.stringify(rec?.payload?.questions));
   const mm = new CodexMessageManager('honesty');
   mm.convertHistory(wrapperRecords());
   const card = mm.messages.find((m) => m.permission?.method === 'mcpServer/elicitation/request');
-  ok(card && card.permission.kind === 'user_input' && card.permission.questions.length === 2 && /^MCP: weather$/.test(card.toolName),
+  ok(gateOf(card) && card.permission.kind === 'user_input' && card.permission.questions.length === 2 && verdictOf(/^MCP: weather$/.test(card.toolName)),
     'it renders as the SAME question-card family (kind user_input), named for the MCP server', JSON.stringify({ kind: card?.permission?.kind, tool: card?.toolName }));
-  ok(card && card.permission.resolved === 'allowed', 'and the accepted reply resolves the card (action "accept" counts as allowed)', String(card?.permission?.resolved));
+  ok(gateOf(card) && card.permission.resolved === 'allowed', 'and the accepted reply resolves the card (action "accept" counts as allowed)', String(card?.permission?.resolved));
   const sys = mm.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text || '');
-  ok(sys.some((tx) => /attestation\/generate.*cannot answer/s.test(tx)), 'an unanswerable request prints a system line naming the method', sys.filter((x) => /cannot answer/.test(x)).slice(0, 1).join(' | '));
+  ok(verdictOf(sys.some((tx) => /attestation\/generate.*cannot answer/s.test(tx))), 'an unanswerable request prints a system line naming the method', sys.filter((x) => /cannot answer/.test(x)).slice(0, 1).join(' | '));
   // ④ the LIVE half of the three-producer parity
   const liveCards = mm.messages.filter((m) => m.role === 'tool' && ['image_gen', 'sleep'].includes(m.toolName));
   ok(liveCards.length === 2, 'the live stream produced BOTH media cards (image_gen + sleep)', liveCards.map((m) => m.toolName).join(','));
@@ -423,9 +423,9 @@ const wrapperRecords = () => events();
 // queue/add by design, which is exactly what the first cut of this test tripped
 // over.
 sendLine({ type: 'interrupt' });
-ok(await waitFor(() => readMeta()?.activeTurnId == null), 'the first turn ends');
+ok(verdictOf(await waitFor(() => readMeta()?.activeTurnId == null)), 'the first turn ends');
 sendLine({ type: 'chat-input', text: 'again', msgId: 'm2' });
-ok(await waitFor(() => rpc().filter((m) => m.method === 'turn/start').length === 2), 'a second turn starts');
+ok(verdictOf(await waitFor(() => rpc().filter((m) => m.method === 'turn/start').length === 2)), 'a second turn starts');
 ok(rpc().filter((m) => m.method === 'turn/start')[1].params.personality === 'friendly', '…and NOW turn/start carries personality (only because the user picked one)', JSON.stringify(rpc().filter((m) => m.method === 'turn/start')[1]?.params));
 
 await endWrapper('the main wrapper');
@@ -436,13 +436,13 @@ console.log('— personality at spawn (chosen)');
   fs.rmSync(rpcLog, { force: true }); fs.rmSync(repliesLog, { force: true }); fs.rmSync(metaFile, { force: true });
   w = spawnWrapper({ CODEX_WEBUI_PERSONALITY: 'none' });
   out = ''; w.stdout.on('data', (d) => { out += d; }); w.stderr.on('data', () => {});
-  ok(await waitFor(() => rpc().some((m) => m.method === 'thread/start')), 'wrapper restarted with a chosen style');
+  ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'thread/start'))), 'wrapper restarted with a chosen style');
   ok(rpc().find((m) => m.method === 'thread/start').params.personality === 'none', "a CHOSEN style is sent — including 'none', which is a real codex value meaning \"no persona\"");
   await endWrapper("the 'none' wrapper");
   fs.rmSync(rpcLog, { force: true }); fs.rmSync(metaFile, { force: true });
   w = spawnWrapper({ CODEX_WEBUI_PERSONALITY: 'sassy' });
   out = ''; w.stdout.on('data', (d) => { out += d; }); w.stderr.on('data', () => {});
-  ok(await waitFor(() => rpc().some((m) => m.method === 'thread/start')), 'wrapper restarted with a bogus style');
+  ok(verdictOf(await waitFor(() => rpc().some((m) => m.method === 'thread/start'))), 'wrapper restarted with a bogus style');
   ok(!('personality' in rpc().find((m) => m.method === 'thread/start').params), 'an out-of-enum spawn value is dropped, never forwarded');
   await endWrapper("the 'sassy' wrapper");
 }
@@ -457,7 +457,7 @@ console.log('— personality at spawn (chosen)');
   const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
   let threw = false;
   try { new ClaudeCodeAdapter({ buffersDir: '/tmp' }).formatSetResponseStyle('Concise'); } catch { threw = true; }
-  ok(threw, 'a spawn-only harness REFUSES the live verb (base.js throws) instead of writing a frame its wrapper would drop');
+  ok(verdictOf(threw), 'a spawn-only harness REFUSES the live verb (base.js throws) instead of writing a frame its wrapper would drop');
 }
 
 // ═════════ Part 3 — ACP unknown-update breadcrumb ═════════
@@ -527,7 +527,7 @@ console.log('— image_gen + sleep: three producers, one card');
   ok(A[0].collapseKind === null && A[1].collapseKind === null, 'both are VISIBLE work — a 20-minute wait folded into "N tool calls" is how a pause reads as a hang');
   // a FAILED generation is an error card, not a silent success
   const failed = shapeOf([{ timestamp: 't', type: 'event_msg', payload: { type: 'item_completed', item: { type: 'Extension', kind: 'image_gen.generation', id: 'x', status: 'failed', result: '', failure: { type: 'usageLimitExceeded', limitId: 'img' } } } }]);
-  ok(failed[0].toolStatus === 'error' && /usageLimitExceeded/.test(failed[0].content[0].output), 'a failed generation renders as an ERROR card carrying the failure', JSON.stringify(failed[0].content[0].output));
+  ok(failed[0].toolStatus === 'error' && verdictOf(/usageLimitExceeded/.test(failed[0].content[0].output)), 'a failed generation renders as an ERROR card carrying the failure', JSON.stringify(failed[0].content[0].output));
   // (Part 4's source pins — the wrapper's pending stub and completion spelling (data/bin/codex-chat-wrapper.js), thread-read's sleep (src/codex-thread-read.js), the renderer's image / sleep cards (src/lib/chat-renderers.js), ChatView's one ticker (src/lib/chat-view.js): MOVED to the fast scripts/test-harness-honesty-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const { formatSleepRemaining } = await import(path.join(REPO, 'src/lib/chat-renderers.js'));
   ok(formatSleepRemaining(760000) === '12:40' && formatSleepRemaining(-5) === '0:00' && formatSleepRemaining(3665000) === '1:01:05',
@@ -631,14 +631,14 @@ if (!CHROME) {
         srcIsAttr: img ? !/<img/.test(img.parentElement.getAttribute('data-raw') || '') : false,
       };
     })()`).catch((e) => ({ err: String(e).slice(0, 300) }));
-    ok(got && got.natural > 0, 'the generated image DRAWS in a real browser (naturalWidth > 0 — a /api/file/raw fetch that really resolved)', JSON.stringify(got));
-    ok(got && /\/api\/file\/raw\?path=/.test(got.imgSrc || ''), '…from /api/file/raw, the same lane the file viewer uses', String(got?.imgSrc).slice(0, 120));
-    ok(got && (got.labels || []).some((l) => /Generated image|生成的图片|生成した画像/.test(l)), 'the card is labelled as a GENERATED image, not a bare "status: completed" line', JSON.stringify(got?.labels));
-    ok(got && (got.labels || []).some((l) => /slept 30s/.test(l)), 'and the completed sleep is a frozen one-line card', JSON.stringify(got?.labels));
+    ok(gateOf(got) && got.natural > 0, 'the generated image DRAWS in a real browser (naturalWidth > 0 — a /api/file/raw fetch that really resolved)', JSON.stringify(got));
+    ok(gateOf(got) && verdictOf(/\/api\/file\/raw\?path=/.test(got.imgSrc || '')), '…from /api/file/raw, the same lane the file viewer uses', String(got?.imgSrc).slice(0, 120));
+    ok(gateOf(got) && verdictOf((got.labels || []).some((l) => /Generated image|生成的图片|生成した画像/.test(l))), 'the card is labelled as a GENERATED image, not a bare "status: completed" line', JSON.stringify(got?.labels));
+    ok(gateOf(got) && verdictOf((got.labels || []).some((l) => /slept 30s/.test(l))), 'and the completed sleep is a frozen one-line card', JSON.stringify(got?.labels));
   }
   cleanup();
   process.removeAllListeners('exit');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

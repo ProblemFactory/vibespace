@@ -70,7 +70,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -317,17 +317,17 @@ const SET = {};
 let { eng, events } = mkEngine('main', { kinds: [kindMany], settings: SET, now, deliver, sessions: SESS, dataDir: dirMain });
 {
   const t0 = Date.now();
-  ok(await ingestAll(eng, 'many'), 'forced passes anchor EVERY conversation of the account');
+  ok(verdictOf(await ingestAll(eng, 'many')), 'forced passes anchor EVERY conversation of the account');
   const mine = Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'many');
   ok(mine.length === 873, `all 873 conversations are DISCOVERED (the cursor walked past 500 — ${W.calls.list} list pages)`, String(mine.length));
   ok(W.calls.list >= 9, 'discovery paged through the whole cursor (9 pages of ≤100)', String(W.calls.list));
-  ok(mine.every((e) => !('tracked' in e)), 'no conversation carries a `tracked` flag — nothing is gated on one');
-  ok(mine.every((e) => e.anchor && eng.store.readTail('many', e.id, { limit: 5 }).length > 0), 'every conversation has records in its log (ingest-all)');
+  ok(verdictOf(mine.every((e) => !('tracked' in e))), 'no conversation carries a `tracked` flag — nothing is gated on one');
+  ok(verdictOf(mine.every((e) => e.anchor && eng.store.readTail('many', e.id, { limit: 5 }).length > 0)), 'every conversation has records in its log (ingest-all)');
   const deep = eng.store.readTail('many', 'c0005', { limit: 500 });
   ok(deep.length === 50, 'a FIRST ingest takes one page (50 of 120) — older history comes on demand', String(deep.length));
   const rec0 = eng.adapterRecords().adapters.find((r) => r.id === 'many');
   ok(Number(rec0.linkedAt) === clock, 'the account is stamped `linkedAt` at its first discovery (unread counts start there)');
-  ok(mine.every((e) => (e.unread || 0) === 0), 'the pre-link BACKLOG counts as read (no 40 000-unread first screen)', JSON.stringify(mine.filter((e) => e.unread).slice(0, 3).map((e) => [e.id, e.unread])));
+  ok(verdictOf(mine.every((e) => (e.unread || 0) === 0)), 'the pre-link BACKLOG counts as read (no 40 000-unread first screen)', JSON.stringify(mine.filter((e) => e.unread).slice(0, 3).map((e) => [e.id, e.unread])));
   ok(delivered.length === 0, 'a first ingest wakes nobody (backlog is not news)');
   const other = Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'many:0000abcd');
   ok(other.length === 0, 'the SECOND account is untouched until its own pass (accounts never mix)');
@@ -338,9 +338,9 @@ let { eng, events } = mkEngine('main', { kinds: [kindMany], settings: SET, now, 
   const d = eng.digest();
   const per = Buffer.byteLength(JSON.stringify(d.conversations)) / d.conversations.length;
   ok(per < 800, `a digest row is slim (${Math.round(per)} bytes per conversation; the old row was ~1.2 KB)`);
-  ok(d.conversations.every((c) => !('tracked' in c) && !('reach' in c) && c.freshness && c.cadence), 'a row carries freshness + cadence and NO tracked flag / reach rows');
+  ok(verdictOf(d.conversations.every((c) => !('tracked' in c) && !('reach' in c) && c.freshness && c.cadence)), 'a row carries freshness + cadence and NO tracked flag / reach rows');
   const lastEv = events[events.length - 1];
-  ok(lastEv && lastEv.type === 'channels-updated', 'passes broadcast channels-updated');
+  ok(gateOf(lastEv) && lastEv.type === 'channels-updated', 'passes broadcast channels-updated');
 }
 
 console.log('② the scheduler is per conversation: the arithmetic IS the call count');
@@ -356,12 +356,12 @@ console.log('② the scheduler is per conversation: the arithmetic IS the call c
   clock += 31e3;
   await eng.pass('many');
   let d1 = diff(before);
-  ok(d1.size === hot && [...d1.keys()].every((k) => tier(k) === 'hot'), `at +31 s a timer pass polls EXACTLY the ${hot} hot conversations (${d1.size})`, JSON.stringify([...d1.keys()].slice(0, 5)));
+  ok(d1.size === hot && verdictOf([...d1.keys()].every((k) => tier(k) === 'hot')), `at +31 s a timer pass polls EXACTLY the ${hot} hot conversations (${d1.size})`, JSON.stringify([...d1.keys()].slice(0, 5)));
   before = snapCalls();
   clock += 270e3;   // +301 s since the first ingest
   await eng.pass('many');
   d1 = diff(before);
-  ok(d1.size === hot + warm && [...d1.keys()].every((k) => tier(k) !== 'cold'), `at +301 s: hot + warm (${hot + warm}), no cold one (${d1.size})`);
+  ok(d1.size === hot + warm && verdictOf([...d1.keys()].every((k) => tier(k) !== 'cold')), `at +301 s: hot + warm (${hot + warm}), no cold one (${d1.size})`);
   before = snapCalls();
   clock += 600e3;   // +901 s
   await eng.pass('many');
@@ -389,9 +389,9 @@ console.log('③ the budget is the account\'s, in the vendor\'s unit; exhaustion
   // window is under its limit, so one list page + 20 history calls (101 units) and then it stops
   ok(first === 20, `a METERED adapter spends its own units: 100 units a minute at 5 per history call (after a 1-unit list page) = 20 conversations (${first})`);
   const b = eb.budgetOf('budgeted');
-  ok(b.exhausted && b.limit === 100 && b.unit === 'quota-unit' && b.waiting > 0 && b.resetInSeconds > 0, 'the account row says the budget is spent, its unit, how many wait and when it resets', JSON.stringify(b));
+  ok(gateOf(b.exhausted) && b.limit === 100 && b.unit === 'quota-unit' && b.waiting > 0 && b.resetInSeconds > 0, 'the account row says the budget is spent, its unit, how many wait and when it resets', JSON.stringify(b));
   const sentence = caps.budgetText(b);
-  ok(/100 quota units\/min/.test(sentence) && /conversations waiting/.test(sentence), 'the card\'s sentence names the number', sentence);
+  ok(gateOf(/100 quota units\/min/.test(sentence)) && verdictOf(/conversations waiting/.test(sentence)), 'the card\'s sentence names the number', sentence);
   const stalled = await eb.pass('budgeted', { force: true });
   ok(stalled.ok === false && stalled.why === 'budget' && historyCalls(Wb) === first, 'inside the same minute nothing more is sent (a refusal, not a silent skip)');
   const polledFirst = new Set(Wb.calls.history.keys());
@@ -421,9 +421,9 @@ console.log('③b a failed pass is said at once: the retry instant, no "last syn
   const p1 = await er.pass('ratey', { force: true });
   const v1 = er.adapterView(recOf());
   ok(p1.ok === false && p1.why === 'transport' && v1.consecutiveFailures === 1, 'FIXTURE: one scripted 503 fails the pass with transport', JSON.stringify(p1));
-  ok(Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1] && !v1.lastOkAt && v1.backoff && v1.backoff.kind === 'failure', 'after ONE failed pass the view carries the retry instant (backoffUntil), the back-off\'s kind (failure) and no last GOOD sync', JSON.stringify({ backoffUntil: v1.backoffUntil, backoff: v1.backoff, lastOkAt: v1.lastOkAt }));
+  ok(Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1] && !v1.lastOkAt && gateOf(v1.backoff) && v1.backoff.kind === 'failure', 'after ONE failed pass the view carries the retry instant (backoffUntil), the back-off\'s kind (failure) and no last GOOD sync', JSON.stringify({ backoffUntil: v1.backoffUntil, backoff: v1.backoff, lastOkAt: v1.lastOkAt }));
   const ps1 = typeof caps.passStateText === 'function' ? caps.passStateText(v1, { now: clock }) : { note: '', lastOkAt: 'n/a' };
-  ok(/transport failure/.test(ps1.note) && /retrying in 30 s/.test(ps1.note) && ps1.lastOkAt === null, 'the card\'s line builder says "transport failure — retrying in 30 s" from the FIRST failure, and there is no "last sync" to print', JSON.stringify(ps1));
+  ok(gateOf(/transport failure/.test(ps1.note)) && gateOf(/retrying in 30 s/.test(ps1.note)) && ps1.lastOkAt === null, 'the card\'s line builder says "transport failure — retrying in 30 s" from the FIRST failure, and there is no "last sync" to print', JSON.stringify(ps1));
   // (③b the card's line builder wiring pin — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const waited = await er.pass('ratey');
   ok(waited.ok === false && waited.why === 'backoff', 'FIXTURE: inside the back-off a timer pass waits');
@@ -431,7 +431,7 @@ console.log('③b a failed pass is said at once: the retry instant, no "last syn
   const p2 = await er.pass('ratey', { force: true });
   const v2 = er.adapterView(recOf());
   const ps2 = typeof caps.passStateText === 'function' ? caps.passStateText(v2, { now: clock }) : { note: 'n/a', lastOkAt: null };
-  ok(p2.ok && Number(v2.lastOkAt) === clock && !v2.backoffUntil && !v2.backoff && ps2.note === '' && ps2.lastOkAt === clock, 'the next GOOD pass stamps lastOkAt, clears the retry instant and the note', JSON.stringify({ lastOkAt: v2.lastOkAt, backoffUntil: v2.backoffUntil, ps2 }));
+  ok(gateOf(p2.ok) && Number(v2.lastOkAt) === clock && !v2.backoffUntil && !v2.backoff && ps2.note === '' && ps2.lastOkAt === clock, 'the next GOOD pass stamps lastOkAt, clears the retry instant and the note', JSON.stringify({ lastOkAt: v2.lastOkAt, backoffUntil: v2.backoffUntil, ps2 }));
   er.stop();
 }
 
@@ -494,28 +494,28 @@ async function rateLadder(ENGmod, label) {
 {
   const r = await rateLadder(ENG, 'real');
   const waits = r.strikes.map((x) => x.waitSec);
-  ok(r.strikes.every((x) => x.why === 'rate-limited' && x.kind === 'rate' && x.failures === 0), `eleven scripted "Units per minute per user" refusals in a row: every one a RATE back-off and consecutiveFailures stays 0 — the failure ladder never moves (${JSON.stringify(r.strikes.map((x) => x.failures))})`, JSON.stringify(r.strikes.slice(0, 3)));
+  ok(verdictOf(r.strikes.every((x) => x.why === 'rate-limited' && x.kind === 'rate' && x.failures === 0)), `eleven scripted "Units per minute per user" refusals in a row: every one a RATE back-off and consecutiveFailures stays 0 — the failure ladder never moves (${JSON.stringify(r.strikes.map((x) => x.failures))})`, JSON.stringify(r.strikes.slice(0, 3)));
   ok(JSON.stringify(waits) === JSON.stringify([5, 10, 20, 40, 60, 60, 60, 60, 60, 60, 60]), `the waits are 5 s doubling to 60 s and never past it (${JSON.stringify(waits)}) — the old ladder went 30 s → 2 min → 5 min → 15 min`, JSON.stringify(waits));
-  ok(r.todosAt.slice(0, 9).every((n) => n === 0) && r.todosAt[9] === 1 && r.todosAt[10] === 1, `no "For you" item for a short wait: nothing through strike 9, ONE item at strike 10 (a refusal that persists ≈ 7 min despite the pace) — ${JSON.stringify(r.todosAt)}`);
+  ok(gateOf(r.todosAt.slice(0, 9).every((n) => n === 0)) && r.todosAt[9] === 1 && r.todosAt[10] === 1, `no "For you" item for a short wait: nothing through strike 9, ONE item at strike 10 (a refusal that persists ≈ 7 min despite the pace) — ${JSON.stringify(r.todosAt)}`);
   ok(r.firstNote.rate === true && r.firstNote.note === 'Google is limiting the rate · resuming in 5 s' && r.first.vendor === 'Google', `the card says it by the VENDOR's declared name from the FIRST strike: "${r.firstNote.note}"`, JSON.stringify(r.firstNote));
   const zh = await import(path.join(REPO, 'src/lib/i18n-zh.js'));
   const Z = zh.default || zh.zh || zh.ZH || Object.values(zh).find((x) => x && typeof x === 'object');
   const tz = (k, p) => { const v = (Z && Z[k]) || k; return p ? v.replace(/\{(\w+)\}/g, (m, q) => (q in p ? String(p[q]) : m)) : v; };
   const zNote = caps.passStateText(r.first, { now: r.first.backoffUntil - 5000, t: tz }).note;
   ok(zNote === 'Google 限速中 · 5 秒后继续', `…and in Chinese: "${zNote}"`);
-  ok(r.freshness.length === 3 && r.freshness.every((f) => f !== 'paused'), `no conversation pill reads "paused" during a rate back-off (${JSON.stringify(r.freshness)}) — "refresh paused" is the owner's own override, never a vendor's wait`);
+  ok(r.freshness.length === 3 && verdictOf(r.freshness.every((f) => f !== 'paused')), `no conversation pill reads "paused" during a rate back-off (${JSON.stringify(r.freshness)}) — "refresh paused" is the owner's own override, never a vendor's wait`);
   ok(r.hintWaitSec === 7, `the vendor's own Retry-After (7 s) is the wait, exactly (${r.hintWaitSec} s)`);
-  ok(r.recovered.ok && !r.recovered.backoff && r.recovered.note === '' && r.recovered.retracted === 'done', 'the first good pass clears the strikes and the note and RETRACTS the item it filed', JSON.stringify(r.recovered));
+  ok(gateOf(r.recovered.ok) && !r.recovered.backoff && r.recovered.note === '' && r.recovered.retracted === 'done', 'the first good pass clears the strikes and the note and RETRACTS the item it filed', JSON.stringify(r.recovered));
   const aw = r.auth.map((x) => x.waitSec);
-  ok(JSON.stringify(aw) === JSON.stringify([30, 120, 300, 900]) && r.auth.map((x) => x.failures).join() === '1,2,3,4' && r.auth.every((x) => x.kind === 'failure') && r.authTodos === 1, `an AUTH refusal still climbs the failure ladder (${JSON.stringify(aw)} s, consecutiveFailures ${r.auth.map((x) => x.failures).join('→')}) and speaks once at the third (${r.authTodos} item)`, JSON.stringify(r.auth));
+  ok(JSON.stringify(aw) === JSON.stringify([30, 120, 300, 900]) && r.auth.map((x) => x.failures).join() === '1,2,3,4' && gateOf(r.auth.every((x) => x.kind === 'failure')) && r.authTodos === 1, `an AUTH refusal still climbs the failure ladder (${JSON.stringify(aw)} s, consecutiveFailures ${r.auth.map((x) => x.failures).join('→')}) and speaks once at the third (${r.authTodos} item)`, JSON.stringify(r.auth));
   // CONTROL: the pre-R5 failPass (a rate refusal on the failure ladder) — the owner's 15-minute park
   const Mr = mutantCopies('chan-agg-rate', REPO);
   const cwr = closedWorld(Mr, 'rate-on-ladder', { engine: [['        const rate = code === \'rate-limited\';', '        const rate = false;']] });
-  ok(cwr.setup, 'CONTROL setup: the engine with a rate refusal on the failure ladder (before lane R5) is reconstructed', cwr.missing);
+  ok(verdictOf(cwr.setup), 'CONTROL setup: the engine with a rate refusal on the failure ladder (before lane R5) is reconstructed', cwr.missing);
   const rc = await rateLadder(cwr.mod, 'ctl');
   const cw = rc.strikes.map((x) => x.waitSec);
   ok(cw[0] === 30 && cw[3] === 900 && rc.strikes[2].failures === 3 && rc.todosAt[2] === 1, `CONTROL: on the failure ladder the same refusals park the account ${JSON.stringify(cw.slice(0, 5))} s and file "For you" at the third — the legs above would go red`, JSON.stringify(cw));
-  for (const r2 of copiesCensus(Mr.files, Mr.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(Mr.files, Mr.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // TWO LADDERS, ONE OPEN ITEM (lane R5 verify r2): the rate ladder (loud at 10)
@@ -550,15 +550,15 @@ async function twoLadders(ENGmod, label) {
 }
 {
   const r = await twoLadders(ENG, 'real');
-  ok(r.afterRate.length === 1 && /rate-limited/.test(r.afterRate[0]), `10 rate strikes ⇒ one open item (${r.afterRate[0]})`);
-  ok(r.afterTransport.length === 1 && /transport/.test(r.afterTransport[0]) && r.filed === 2, `3 transport failures behind it ⇒ still ONE open item, the transport one — the rate item was retracted as superseded (${r.afterTransport[0]})`, JSON.stringify(r));
-  ok(r.good && r.afterGood.length === 0, 'the first good pass leaves no open item');
+  ok(r.afterRate.length === 1 && verdictOf(/rate-limited/.test(r.afterRate[0])), `10 rate strikes ⇒ one open item (${r.afterRate[0]})`);
+  ok(r.afterTransport.length === 1 && gateOf(/transport/.test(r.afterTransport[0])) && r.filed === 2, `3 transport failures behind it ⇒ still ONE open item, the transport one — the rate item was retracted as superseded (${r.afterTransport[0]})`, JSON.stringify(r));
+  ok(gateOf(r.good) && r.afterGood.length === 0, 'the first good pass leaves no open item');
   const Mt = mutantCopies('chan-agg-twoladders', REPO);
   const cwt = closedWorld(Mt, 'no-supersede', { engine: [["    if (rec.failureItem) await retractFailure(rec, 'superseded');", '']] });
-  ok(cwt.setup, 'CONTROL setup: speakFailure without the superseded retraction is reconstructed', cwt.missing);
+  ok(verdictOf(cwt.setup), 'CONTROL setup: speakFailure without the superseded retraction is reconstructed', cwt.missing);
   const c = await twoLadders(cwt.mod, 'ctl');
-  ok(c.afterTransport.length === 2 && c.afterGood.length === 1 && /rate-limited/.test(c.afterGood[0]), `CONTROL: without it two items stay open and the rate one outlives the recovery (${c.afterGood.join(' | ')}) — the legs above would go red`, JSON.stringify(c));
-  for (const r2 of copiesCensus(Mt.files, Mt.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  ok(c.afterTransport.length === 2 && c.afterGood.length === 1 && verdictOf(/rate-limited/.test(c.afterGood[0])), `CONTROL: without it two items stay open and the rate one outlives the recovery (${c.afterGood.join(' | ')}) — the legs above would go red`, JSON.stringify(c));
+  for (const r2 of copiesCensus(Mt.files, Mt.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // THE BUCKET UNDER CONCURRENT CALLERS OUTSIDE THE PASS (lane R5 verify r2):
@@ -631,8 +631,8 @@ async function outsideThePass(ENGmod, label) {
 }
 {
   const r = await outsideThePass(ENG, 'real');
-  ok(r.burst.ok && r.burst.n === 6 && r.burst.wall >= 1900 && r.burst.max1s <= 80, `6 concurrent attachment fetches of 20 units: all served by the vendor in ${(r.burst.wall / 1000).toFixed(1)} s (≥ 2 s at 40/s), ≤ ${r.burst.max1s} units in any second`, JSON.stringify(r.burst));
-  ok(r.pageBack.ok && r.pageBack.pos >= 2 && r.pageBack.pos <= 4 && r.pageBack.olderMs < 2200 && r.pageBack.minGap >= 940 && r.pageBack.max1s <= 80, `a page-back filed mid-ingest takes the next slot (position ${r.pageBack.pos} of ${r.pageBack.n}, answered in ${r.pageBack.olderMs.toFixed(0)} ms) and the ingest keeps its cadence (min gap ${r.pageBack.minGap.toFixed(0)} ms, ≤ ${r.pageBack.max1s} units/s)`, JSON.stringify(r.pageBack));
+  ok(gateOf(r.burst.ok) && r.burst.n === 6 && r.burst.wall >= 1900 && r.burst.max1s <= 80, `6 concurrent attachment fetches of 20 units: all served by the vendor in ${(r.burst.wall / 1000).toFixed(1)} s (≥ 2 s at 40/s), ≤ ${r.burst.max1s} units in any second`, JSON.stringify(r.burst));
+  ok(gateOf(r.pageBack.ok) && r.pageBack.pos >= 2 && r.pageBack.pos <= 4 && r.pageBack.olderMs < 2200 && r.pageBack.minGap >= 940 && r.pageBack.max1s <= 80, `a page-back filed mid-ingest takes the next slot (position ${r.pageBack.pos} of ${r.pageBack.n}, answered in ${r.pageBack.olderMs.toFixed(0)} ms) and the ingest keeps its cadence (min gap ${r.pageBack.minGap.toFixed(0)} ms, ≤ ${r.pageBack.max1s} units/s)`, JSON.stringify(r.pageBack));
   // verify r3 (iii): the bucket judged after the account sat IDLE (a window opened on an account read a while ago) —
   // the judged level is capped at burst BEFORE the reservation comes off, so 8 fetches of 20 units after 3 s idle still
   // leave two at once and one every 0.5 s (≥ 3 s, ≤ 80 in any second)
@@ -648,7 +648,7 @@ async function outsideThePass(ENGmod, label) {
     const bi = Wi.sends.length; const ti = performance.now();
     const ri = await Promise.all(Array.from({ length: 8 }, (_, k) => ei.attachment('pi', 'c0000', `att${k}`, { msg: ci.recs[ci.recs.length - 1].vendorId })));
     const wi = performance.now() - ti; const mi = maxUnitsIn(Wi.sends.slice(bi), 1000);
-    ok(ri.every((x) => x.ok) && wi >= 2900 && mi <= 80, `8 concurrent 20-unit fetches after 3 s idle: ${(wi / 1000).toFixed(1)} s (≥ 3 s), ≤ ${mi} units in any second — an idle bucket is judged at burst, never as its projection`, JSON.stringify({ wi, mi }));
+    ok(gateOf(ri.every((x) => x.ok)) && wi >= 2900 && mi <= 80, `8 concurrent 20-unit fetches after 3 s idle: ${(wi / 1000).toFixed(1)} s (≥ 3 s), ≤ ${mi} units in any second — an idle bucket is judged at burst, never as its projection`, JSON.stringify({ wi, mi }));
     ei.stop();
   }
   // verify r3 (iv): a remove() under a FULL queue — the callers queued behind the removed account are ABORTED by name,
@@ -688,10 +688,10 @@ async function outsideThePass(ENGmod, label) {
       ['    if (!e0) throw gone();', '    if (!e0) return;'],
       ['        if (e !== e0) throw gone();   // THE ENTRY THIS CALL QUEUED AGAINST IS GONE OR REPLACED\n        const d = e.record ? paceDecl(e.record) : null;', '        const d = e && e.record ? paceDecl(e.record) : null;'],
     ] });
-    ok(cwr.setup, 'CONTROL setup: the r2 build\'s paceWait (a gone entry = "nothing to pace against" = return) is reconstructed', cwr.missing);
+    ok(verdictOf(cwr.setup), 'CONTROL setup: the r2 build\'s paceWait (a gone entry = "nothing to pace against" = return) is reconstructed', cwr.missing);
     const c3 = await removeUnderQueue(cwr.mod, 'ctl');
     ok(c3.waitingAtRemove >= 8 && c3.after >= 8 && c3.unitsAfter >= 160, `CONTROL (${c3.waitingAtRemove} callers waiting in the pace at the remove): ${c3.after} calls = ${c3.unitsAfter} units leave AFTER the remove, counted (the queued callers let through; ${c3.within50ms} of them within 50 ms, printed, never judged: B-fbd6, a control is judged on its fault, never a window) — the leg above would go red`, JSON.stringify(c3));
-    for (const r2 of copiesCensus(Mr.files, Mr.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+    for (const r2 of copiesCensus(Mr.files, Mr.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
   }
   // CONTROL: the R5 build's paceWait — no arrival order, no reservation (the two are one fix: with the FIFO alone the
   // race is only MASKED by microtask ordering, with the reservation alone the fairness hangs on timer granularity)
@@ -700,7 +700,7 @@ async function outsideThePass(ENGmod, label) {
     ['        if (!(ms > 0)) { e.paceInflight = (Number(e.paceInflight) || 0) + need; e.paceInflightAt = t; return; }   // THE RESERVATION — the same synchronous step as the judgement', '        if (!(ms > 0)) return;'],
     ['    await prev;\n    try {', '    try {'],
   ] });
-  ok(cwo.setup, 'CONTROL setup: the R5 build\'s paceWait (no arrival order, no reservation) is reconstructed', cwo.missing);
+  ok(verdictOf(cwo.setup), 'CONTROL setup: the R5 build\'s paceWait (no arrival order, no reservation) is reconstructed', cwo.missing);
   const c = await outsideThePass(cwo.mod, 'ctl');
   ok(c.burst.max1s >= 120 && c.burst.wall < 1000, `CONTROL: the 6 fetches leave in ${c.burst.wall.toFixed(0)} ms — ${c.burst.max1s} units in one second — the burst leg above would go red`, JSON.stringify(c.burst));
   // the pre-fix page-back loses a round only when its own timer fires a hair EARLY (Node arms a timer at the loop
@@ -708,7 +708,7 @@ async function outsideThePass(ENGmod, label) {
   // 8-row ingest in verify r2's attack log, a clean slot in other runs), so it is PRINTED here, not asserted; the
   // FIFO is what makes the fixed leg's position exact, and the burst control above is this mutant's red
   console.log(`    (pre-fix page-back: position ${c.pageBack.pos} of ${c.pageBack.n}, ${c.pageBack.olderMs.toFixed(0)} ms — timer-phase dependent, see the comment)`);
-  for (const r2 of copiesCensus(Mo.files, Mo.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(Mo.files, Mo.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // ── lane R5 verify r4: THE EXIT CENSUS + the lifecycle ends that let queued calls through + the in-flight write ──
@@ -738,18 +738,18 @@ function exitCensus(src) {
   ok(c0.length === 0, 'THE EXIT CENSUS on the shipped engine: one live.delete (dropLive), one live.set (adapterFor), removeRecord / setEnabled / disconnect / setOptions / applyRebind / inlineLegacyClient / connect / stop take it, every dropLive call inside a listed verb, the four vendor-then-write paths guarded', c0.join(' ; '));
   // the census must SEE each miss (text-level copies; the two verbs below are also driven for real)
   const noDisable = ENGINE_SRC.replace("    if (!enabled) dropLive(rec.id, 'disabled');", "    if (!enabled) { const e = live.get(rec.id); if (e) disarmPush(e, 'adapter disabled'); }");
-  ok(noDisable !== ENGINE_SRC && exitCensus(noDisable).some((x) => /setEnabled\(\) does not take the exit/.test(x)), 'CONTROL (text): the r3 setEnabled (disarm only) is RED by name');
+  ok(noDisable !== ENGINE_SRC && verdictOf(exitCensus(noDisable).some((x) => /setEnabled\(\) does not take the exit/.test(x))), 'CONTROL (text): the r3 setEnabled (disarm only) is RED by name');
   const selfDelete = ENGINE_SRC.replace("    dropLive(rec.id, 'removed');\n    paceCarry.delete(rec.id);", "    { const e = live.get(rec.id); if (e) { disarmPush(e, 'removed'); live.delete(rec.id); } }");
   const cs = exitCensus(selfDelete);
-  ok(selfDelete !== ENGINE_SRC && cs.some((x) => /live\.delete\( has 2 sites/.test(x)) && cs.some((x) => /removeRecord\(\) does not take the exit/.test(x)), 'CONTROL (text): a removeRecord that deletes the entry itself is RED twice (a second live.delete site, the verb without its exit)');
+  ok(selfDelete !== ENGINE_SRC && gateOf(cs.some((x) => /live\.delete\( has 2 sites/.test(x))) && verdictOf(cs.some((x) => /removeRecord\(\) does not take the exit/.test(x))), 'CONTROL (text): a removeRecord that deletes the entry itself is RED twice (a second live.delete site, the verb without its exit)');
   const noGuard = ENGINE_SRC.replace("      if (outlived(rec, e)) return { appended, duplicates, anchorMoved: false, complete: false, why: 'account-changed' };\n", '');
-  ok(noGuard !== ENGINE_SRC && exitCensus(noGuard).some((x) => /ingest\(\) has no outlived/.test(x)), 'CONTROL (text): an ingest that writes whatever came back is RED');
+  ok(noGuard !== ENGINE_SRC && verdictOf(exitCensus(noGuard).some((x) => /ingest\(\) has no outlived/.test(x))), 'CONTROL (text): an ingest that writes whatever came back is RED');
   const strayDrop = ENGINE_SRC.replace("  async function setLabel(adapterId, label) {\n", "  async function setLabel(adapterId, label) {\n    dropLive(adapterId, 'renamed');\n");
-  ok(strayDrop !== ENGINE_SRC && exitCensus(strayDrop).some((x) => /dropLive\( call outside every listed verb/.test(x)), 'CONTROL (text): a new verb that drops without being listed is RED (the list is the census)');
+  ok(strayDrop !== ENGINE_SRC && verdictOf(exitCensus(strayDrop).some((x) => /dropLive\( call outside every listed verb/.test(x))), 'CONTROL (text): a new verb that drops without being listed is RED (the list is the census)');
   ok(!exitCensus(ENGINE_SRC + "\n// live.delete(id) live.set(x) dropLive(rec.id, 'in a comment')\n").length, 'a comment spelling live.delete / live.set / dropLive is not counted (a census that counts its documentation is silenced by rewording it)');
   // the pending-flow adapter (beginPending) is constructed WITHOUT pace/meter — its only calls may be the consent's
   const pend = ENGINE_SRC.split('\n').filter((l) => /\bp\.adapter\.\w+/.test(l.replace(/\/\/.*$/, '')));
-  ok(pend.length >= 2 && pend.every((l) => /p\.adapter\.auth\./.test(l)), `the transient consent adapter (no pace, no meter) is only ever asked for auth.begin / auth.finish (${pend.length} uses), never a read`, pend.join(' | '));
+  ok(pend.length >= 2 && verdictOf(pend.every((l) => /p\.adapter\.auth\./.test(l))), `the transient consent adapter (no pace, no meter) is only ever asked for auth.begin / auth.finish (${pend.length} uses), never a read`, pend.join(' | '));
 }
 // (vi) THE TWO LIFECYCLE ENDS r3 RECORDED: disable / disconnect under a full queue ⇒ 0 vendor calls after, every queued caller
 //      aborted by name, a fresh call after a disable refused `disabled`; the pass in flight ends at its next step
@@ -785,16 +785,16 @@ async function underQueue(ENGmod, label, event, { n = 12, atMs = 150, delay = nu
   d.eng.stop();
   const x = await underQueue(ENG, 'disconnect', (e) => e.disconnect('pq'));
   ok(!x.out.hung && x.out.after === 0 && x.out.aborted === 12 - x.out.sentBefore, `disconnect() under a full queue: ${x.out.sentBefore} had left, 0 vendor calls after, the ${x.out.aborted} queued callers aborted by name (r3 recorded them finishing with the Bearer captured before the wait)`, JSON.stringify(x.out));
-  ok(x.out.budget && x.out.budget.spent >= 40 * x.out.sentBefore, `the minute's spend survives the disconnect (${x.out.budget && x.out.budget.spent} units on the rebuilt entry — an exit never refills)`, JSON.stringify(x.out.budget));
+  ok(gateOf(x.out.budget) && x.out.budget.spent >= 40 * x.out.sentBefore, `the minute's spend survives the disconnect (${x.out.budget && x.out.budget.spent} units on the rebuilt entry — an exit never refills)`, JSON.stringify(x.out.budget));
   x.eng.stop();
   // CONTROL (driven): the r3 setEnabled (disarm only) lets the queue finish, paced — calls AFTER the disable
   const Mx = mutantCopies('chan-agg-exit', REPO);
   const cwx = closedWorld(Mx, 'pre-r4-disable', { engine: [["    if (!enabled) dropLive(rec.id, 'disabled');", "    if (!enabled) { const e = live.get(rec.id); if (e) disarmPush(e, 'adapter disabled'); }"]] });
-  ok(cwx.setup, 'CONTROL setup: the r3 build\'s setEnabled (disarm only, no exit) is reconstructed', cwx.missing);
+  ok(verdictOf(cwx.setup), 'CONTROL setup: the r3 build\'s setEnabled (disarm only, no exit) is reconstructed', cwx.missing);
   const c = await underQueue(cwx.mod, 'disable-ctl', (e) => e.setEnabled('pq', false), { n: 6 });
   ok(c.out.after >= 3 && c.out.aborted === 0, `CONTROL: ${c.out.after} calls = ${c.out.unitsAfter} units leave AFTER the disable, none aborted — the leg above would go red`, JSON.stringify(c.out));
   c.eng.stop();
-  for (const r2 of copiesCensus(Mx.files, Mx.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(Mx.files, Mx.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 // (vii) A FETCH THAT OUTLIVED ITS ENTRY WRITES NOTHING: remove() while a pass's history() is in flight ⇒ no index row, no
 //       log file of the removed account; remove() while an attachment fetch is in flight ⇒ no cache file
@@ -829,7 +829,7 @@ async function underQueue(ENGmod, label, event, { n = 12, atMs = 150, delay = nu
   // CONTROL (driven): the r3 ingest writes the page that came back after the remove
   const Mw = mutantCopies('chan-agg-outlive', REPO);
   const cww = closedWorld(Mw, 'pre-r4-write', { engine: [["      if (outlived(rec, e)) return { appended, duplicates, anchorMoved: false, complete: false, why: 'account-changed' };\n", '']] });
-  ok(cww.setup, 'CONTROL setup: the r3 build\'s ingest (no outlived guard) is reconstructed', cww.missing);
+  ok(verdictOf(cww.setup), 'CONTROL setup: the r3 build\'s ingest (no outlived guard) is reconstructed', cww.missing);
   const Wc = makeWorld(Date.now(), { n: 3, hot: 0, warm: 0 }); Wc.sends = []; Wc.delay = { history: 600 };
   const kc = pacedOutsideModule('px', Wc);
   const dirC = path.join(ROOT, 'outlive-ctl'); seedAccounts(dirC, [['px', 'px']]);
@@ -838,7 +838,7 @@ async function underQueue(ENGmod, label, event, { n = 12, atMs = 150, delay = nu
   const rowsC = Object.keys(ec.store.index.snapshot().conversations).filter((k) => k.startsWith('px/'));
   ok(rowsC.length >= 1, `CONTROL: ${rowsC.length} index row(s) of the removed account resurrected by the in-flight page — the leg above would go red`, JSON.stringify(rowsC));
   ec.stop();
-  for (const r2 of copiesCensus(Mw.files, Mw.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(Mw.files, Mw.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 // (viii) AN EXIT NEVER REFILLS THE BUCKET: a burst that empties it, then disable + enable ⇒ the next two fetches WAIT;
 //        the control (no carry) has a full bucket after the toggle and they leave at once
@@ -866,10 +866,10 @@ async function toggleBurst(ENGmod, label) {
   ok(r.spentAfterToggle >= 41, `verify r5: the budget read right after the toggle (before any call rebuilt the entry) is the ghost's ${r.spentAfterToggle}, not zero`);
   const Mt = mutantCopies('chan-agg-carry', REPO);
   const cwt = closedWorld(Mt, 'no-carry', { engine: [['      if (ghost) { e.win = ghost.win; e.exhaustedAt = ghost.exhaustedAt; e.paceTok = ghost.paceTok; e.paceRecent = ghost.paceRecent; e.paceLeakWarnAt = ghost.paceLeakWarnAt; paceCarry.delete(rec.id); }', '      if (ghost) paceCarry.delete(rec.id);']] });
-  ok(cwt.setup, 'CONTROL setup: an exit that forgets the buckets is reconstructed', cwt.missing);
+  ok(verdictOf(cwt.setup), 'CONTROL setup: an exit that forgets the buckets is reconstructed', cwt.missing);
   const c = await toggleBurst(cwt.mod, 'ctl');
   ok(c.wall < 300, `CONTROL: after the toggle the two fetches leave in ${c.wall.toFixed(0)} ms (a full bucket per toggle — a fresh 80-unit burst on every disable/enable, ${c.max1s} units in one second) — the leg above would go red`, JSON.stringify(c));
-  for (const r2 of copiesCensus(Mt.files, Mt.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(Mt.files, Mt.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // THE PER-SECOND PACE IN THE REAL ENGINE (lane R5, drain rule 18): the
@@ -907,14 +907,14 @@ async function pacedIngest(label, { pace = true } = {}) {
 }
 {
   const r = await pacedIngest('on');
-  ok(r.first.ok && r.reads === 873 && r.walked === 873 && r.doneFirstIngest === null, `ONE forced pass reads all 873 conversations once (${r.reads} reads, ${r.walked} walked) — never cut by the minute's budget`, JSON.stringify({ first: r.first.ok, why: r.first.why, reads: r.reads }));
+  ok(gateOf(r.first.ok) && r.reads === 873 && r.walked === 873 && r.doneFirstIngest === null, `ONE forced pass reads all 873 conversations once (${r.reads} reads, ${r.walked} walked) — never cut by the minute's budget`, JSON.stringify({ first: r.first.ok, why: r.first.why, reads: r.reads }));
   ok(r.max1s <= 80 && r.max60s <= 2440, `no second of the pace clock holds more than 80 units (${r.max1s}) and no minute more than 2440 (${r.max60s}) — Google's cap is 6000/min per user`);
   ok(r.wallSec >= 870 && r.wallSec <= 875 && r.maxSleep <= 1000, `one thread read a second: the first read takes ${r.wallSec.toFixed(0)} s of pace clock, in sleeps of ≤ 1 s (${r.sleeps} sleeps, the longest ${r.maxSleep} ms)`);
   const m = r.mid || {};
-  ok(m.firstIngest && m.firstIngest.done === 100 && m.firstIngest.total === 873 && Math.abs(m.firstIngest.etaSec - 773) <= 1 && m.text === 'reading for the first time · 100/873 conversations · about 13 min left', `mid-way the account row says how far and how long: "${m.text}"`, JSON.stringify(m.firstIngest));
-  ok(m.pace && m.pace.unitsPerSec === 40 && m.pace.spentLastSec <= 80 && m.budgetPerSec === 40, 'the account row carries the pace (40 units/s, the last second\'s spend) and the budget carries the per-second figure its sentence names', JSON.stringify({ pace: m.pace, budgetPerSec: m.budgetPerSec }));
+  ok(gateOf(m.firstIngest) && m.firstIngest.done === 100 && m.firstIngest.total === 873 && Math.abs(m.firstIngest.etaSec - 773) <= 1 && m.text === 'reading for the first time · 100/873 conversations · about 13 min left', `mid-way the account row says how far and how long: "${m.text}"`, JSON.stringify(m.firstIngest));
+  ok(gateOf(m.pace) && m.pace.unitsPerSec === 40 && m.pace.spentLastSec <= 80 && m.budgetPerSec === 40, 'the account row carries the pace (40 units/s, the last second\'s spend) and the budget carries the per-second figure its sentence names', JSON.stringify({ pace: m.pace, budgetPerSec: m.budgetPerSec }));
   const rising = r.progress.every((x, i) => i === 0 || x >= r.progress[i - 1]);
-  ok(r.broadcasts >= 150 && r.broadcasts <= Math.ceil(r.wallSec / 5) + 3 && r.progress.length >= 150 && rising && r.progress[r.progress.length - 1] >= 860, `a long paced pass says its progress at most every 5 s (${r.broadcasts} broadcasts over ${r.wallSec.toFixed(0)} s — never one per fetch), each carrying the first-read count, rising (${r.progress.slice(0, 3).join(', ')} … ${r.progress.slice(-2).join(', ')})`, JSON.stringify({ n: r.broadcasts, head: r.progress.slice(0, 5) }));
+  ok(r.broadcasts >= 150 && r.broadcasts <= Math.ceil(r.wallSec / 5) + 3 && r.progress.length >= 150 && gateOf(rising) && r.progress[r.progress.length - 1] >= 860, `a long paced pass says its progress at most every 5 s (${r.broadcasts} broadcasts over ${r.wallSec.toFixed(0)} s — never one per fetch), each carrying the first-read count, rising (${r.progress.slice(0, 3).join(', ')} … ${r.progress.slice(-2).join(', ')})`, JSON.stringify({ n: r.broadcasts, head: r.progress.slice(0, 5) }));
   const b = caps.budgetText({ exhausted: true, unit: 'quota-unit', limit: 3000, perSec: 40, waiting: 12, resetInSeconds: 30 });
   ok(b === 'Vendor budget reached — 3000 quota units/min (at most 40/s) for this account; 12 conversations waiting, next refresh in 30 s', `the budget sentence names units/min AND units/s: "${b}"`);
   // CONTROL: the same pass with no pace declared is the burst the vendor refused
@@ -953,10 +953,10 @@ async function judgedAtSight(ENGmod, label) {
   ok(r.reads === 4, `…and the pass still reads every row exactly once (${r.reads})`);
   const Ms = mutantCopies('chan-agg-sight', REPO);
   const cws = closedWorld(Ms, 'no-wake', { engine: [['    if (e.passing) { e.drainAfter = true; wakeSleepers(e); return; }', '    if (e.passing) { e.drainAfter = true; return; }']] });
-  ok(cws.setup, 'CONTROL setup: pokeDrain without the wake (the R5 build) is reconstructed', cws.missing);
+  ok(verdictOf(cws.setup), 'CONTROL setup: pokeDrain without the wake (the R5 build) is reconstructed', cws.missing);
   const c = await judgedAtSight(cws.mod, 'ctl');
   ok(c.code === 'refresh-floor' && c.ms >= 400, `CONTROL: without the wake the same refusal waits out the sleep (${c.ms.toFixed(0)} ms) — the leg above would go red`, JSON.stringify(c));
-  for (const r2 of copiesCensus(Ms.files, Ms.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(Ms.files, Ms.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // A SETTING OUT OF ITS RANGE IS NEVER CLAMPED SILENTLY (lane R2 verify): the
@@ -968,9 +968,9 @@ console.log('③c channel settings: the input clamps to the schema and says so; 
   const schemaMod = await import(path.join(REPO, 'src/lib/settings-schema.js'));
   const S = schemaMod.SETTINGS_SCHEMA;
   const cl = typeof schemaMod.clampToSchema === 'function' ? schemaMod.clampToSchema(S['channels.pollColdSec'], 1800) : null;
-  ok(cl && cl.value === 900 && cl.bound === 'max', 'clampToSchema(pollColdSec, 1800) ⇒ 900 at the maximum', JSON.stringify(cl));
+  ok(gateOf(cl) && cl.value === 900 && cl.bound === 'max', 'clampToSchema(pollColdSec, 1800) ⇒ 900 at the maximum', JSON.stringify(cl));
   const lo = typeof schemaMod.clampToSchema === 'function' ? schemaMod.clampToSchema(S['channels.pollHotSec'], 5) : null;
-  ok(lo && lo.value === 10 && lo.bound === 'min' && schemaMod.clampToSchema(S['channels.pollHotSec'], 45).bound === null, '…5 s for the busy tier ⇒ 10 at the minimum; an in-range value passes untouched', JSON.stringify(lo));
+  ok(gateOf(lo) && lo.value === 10 && lo.bound === 'min' && schemaMod.clampToSchema(S['channels.pollHotSec'], 45).bound === null, '…5 s for the busy tier ⇒ 10 at the minimum; an in-range value passes untouched', JSON.stringify(lo));
   // (③c the Settings number branch pin — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const B = ENG.SETTING_BOUNDS || {};
   const rows = Object.entries(S).filter(([k, v]) => /^channels\./.test(k) && v.type === 'number' && k !== 'channels.pushCoalesceSeconds');
@@ -987,7 +987,7 @@ console.log('③c channel settings: the input clamps to the schema and says so; 
   const c1 = ek.cadenceOf('clampy', 'c0000');
   ek.cadenceOf('clampy', 'c0001');
   const lines = logged.filter((m) => /channels\.pollColdSec/.test(m));
-  ok(c1.seconds === 900 && lines.length === 1 && /1800/.test(lines[0]) && /900/.test(lines[0]) && /maximum/.test(lines[0]), 'the engine runs 900 for a stored 1800 and SAYS it once (the key, the stored value, the maximum it used)', JSON.stringify({ c1, lines }));
+  ok(c1.seconds === 900 && lines.length === 1 && gateOf(/1800/.test(lines[0])) && gateOf(/900/.test(lines[0])) && verdictOf(/maximum/.test(lines[0])), 'the engine runs 900 for a stored 1800 and SAYS it once (the key, the stored value, the maximum it used)', JSON.stringify({ c1, lines }));
   ek.stop();
 }
 
@@ -1014,7 +1014,7 @@ console.log('③h the vendor rows declared once: schema row ⇄ adapter caps ⇄
     ...(!S[k] || S[k].default !== d || S[k].min !== mn || S[k].max !== mx || S[k].step !== st ? [`${k} schema ${S[k] ? [S[k].default, S[k].min, S[k].max, S[k].step].join('/') : 'none'}`] : []),
   ]);
   ok(!diff.length, 'V1: the derived defaults are today\'s 60 / 3000 / 5 / 40 and the bounds today\'s (5–1000 · 100–6000 · 5–100 · 1–50) — in the engine\'s SETTING_BOUNDS and in the schema rows, the step too', diff.join('; '));
-  ok(Object.values(B).every((b) => typeof b.dflt === 'number'), 'no SETTING_BOUNDS entry says `dflt: null` any more — every default is the number the schema row shows');
+  ok(verdictOf(Object.values(B).every((b) => typeof b.dflt === 'number')), 'no SETTING_BOUNDS entry says `dflt: null` any more — every default is the number the schema row shows');
   const run = (ENGmod, label, settings) => {
     const logged = [];
     const dirV = path.join(ROOT, `declared-${label}`);
@@ -1035,30 +1035,30 @@ console.log('③h the vendor rows declared once: schema row ⇄ adapter caps ⇄
   const SAID = ['channels.budgetLarkPerMin = 5000 is above its maximum 1000 — using 1000', 'channels.gmailUnitsPerSec = 1 is below its minimum 5 — using 5', 'channels.budgetGmailPerMin = 50 is below its minimum 100 — using 100', 'channels.larkRequestsPerSec = 80 is above its maximum 50 — using 50'];
   const clamped = (r) => r.lk.budget.limit === 1000 && r.gm.pace.perSec === 5 && r.gm.budget.limit === 100 && r.lk.pace.perSec === 50 && r.said.length === 4 && SAID.every((w) => r.said.some((m) => m.includes(w) && m.includes('(change it in Settings → Channels)')));
   const c = run(ENG, 'clamped', OUT);
-  ok(clamped(c), 'V2: a stored out-of-range vendor value is still CLAMPED through the derived bound and SAID once per key / value (the lane R2 sentence) — Lark 5000/min runs 1000, 80/s runs 50; Gmail 50/min runs 100, 1/s runs 5; the second read says nothing', JSON.stringify({ ...nums(c), said: c.said }));
+  ok(verdictOf(clamped(c)), 'V2: a stored out-of-range vendor value is still CLAMPED through the derived bound and SAID once per key / value (the lane R2 sentence) — Lark 5000/min runs 1000, 80/s runs 50; Gmail 50/min runs 100, 1/s runs 5; the second read says nothing', JSON.stringify({ ...nums(c), said: c.said }));
   const DERIVE = 'const SETTING_BOUNDS = Object.freeze({ ...ENGINE_BOUNDS, ...ChannelSettings.boundsOf(ChannelSettings.CHANNEL_SETTINGS) });';
-  ok(ENGINE_SRC.includes(DERIVE), 'the patch site of the derived-bounds control is in channels-engine.js (a moved line would make the control vacuous)');
+  ok(verdictOf(ENGINE_SRC.includes(DERIVE)), 'the patch site of the derived-bounds control is in channels-engine.js (a moved line would make the control vacuous)');
   const Md = mutantCopies('chan-agg-declared', REPO);
   const ENGnb = Md.load('src/server/channels-engine.js', ENGINE_SRC.replace(DERIVE, 'const SETTING_BOUNDS = Object.freeze({ ...ENGINE_BOUNDS });'), 'no-vendor-bounds');
   const cm = run(ENGnb, 'clamped-mut', OUT);
   ok(!clamped(cm) && cm.lk.budget.limit === 5000 && !cm.said.length, `NEGATIVE CONTROL — an engine copy whose SETTING_BOUNDS does not derive the vendor rows runs the stored 5000/min UNCLAMPED (${cm.lk.budget.limit}) and says nothing: the clamp rides on the derivation`, JSON.stringify({ ...nums(cm), said: cm.said }));
-  for (const r of copiesCensus(Md.files, Md.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(Md.files, Md.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 // ═══ ④ the owner's override ═════════════════════════════════════════════════
 console.log('④ the refresh override wins, is refused outside its set, persists');
 {
   const r1 = await eng.setRefresh('many', 'c0500', 60);
-  ok(r1.ok && r1.cadence.seconds === 60 && r1.cadence.source === 'override', 'a cold conversation set to 60 s reads 60 s (override)');
+  ok(gateOf(r1.ok) && r1.cadence.seconds === 60 && r1.cadence.source === 'override', 'a cold conversation set to 60 s reads 60 s (override)');
   const bad = await eng.setRefresh('many', 'c0500', 45);
-  ok(!bad.ok && bad.code === 'bad-request' && /30, 60, 300, 900, paused/.test(bad.error), 'a period outside the choices is refused by name', JSON.stringify(bad));
+  ok(!bad.ok && bad.code === 'bad-request' && verdictOf(/30, 60, 300, 900, paused/.test(bad.error)), 'a period outside the choices is refused by name', JSON.stringify(bad));
   const r2 = await eng.setRefresh('many', 'c0001', 'paused');
-  ok(r2.ok && r2.cadence.paused, 'a hot conversation can be PAUSED');
+  ok(gateOf(r2.ok) && verdictOf(r2.cadence.paused), 'a hot conversation can be PAUSED');
   const before = new Map(W.calls.history);
   clock += 61e3;
   await eng.pass('many');
   const got = [...W.calls.history].filter(([k, v]) => v !== (before.get(k) || 0)).map(([k]) => k);
-  ok(got.includes('c0500') && !got.includes('c0001'), 'at +61 s the 60 s override is polled and the paused one is NOT (the other hot rows are)', JSON.stringify(got.slice(0, 8)));
+  ok(gateOf(got.includes('c0500')) && !got.includes('c0001'), 'at +61 s the 60 s override is polled and the paused one is NOT (the other hot rows are)', JSON.stringify(got.slice(0, 8)));
   const row = eng.digest({ keys: ['many/c0001', 'many/c0500'] }).conversations;
   ok(row.find((c) => c.id === 'c0001').freshness.state === 'paused' && row.find((c) => c.id === 'c0500').freshness.seconds === 60, 'the rows\' chips say "paused" and "within 60s"');
   const evs = events.filter((m) => m.type === 'channels-updated' && m.partial && (m.changedKeys || []).includes('many/c0500'));
@@ -1086,8 +1086,8 @@ console.log('⑤ push first: the safety net, pushed records of unknown conversat
   await ep.pass('pushy');
   ok(historyCalls(Wp) === before, 'at +31 s nothing is polled while push carries content');
   const r = await onEvent({ kind: 'record', eventId: 'e-1', convId: 'dm-new', record: makeRecord({ adapterId: 'pushy', convId: 'dm-new', vendorId: 'p1', at: clock, author: { id: 'u9', name: 'Stranger' }, text: 'hello from a chat nobody listed', mentions: [], attachments: [], raw: {} }) });
-  ok(r && r.ok && r.persisted === true, 'a pushed record for a conversation discovery never listed is PERSISTED (no `untracked` drop)', JSON.stringify(r));
-  ok(ep.store.readTail('pushy', 'dm-new', { limit: 5 }).length === 1 && ep.store.index.live()['pushy/dm-new'], '…its log and its row exist');
+  ok(gateOf(r) && gateOf(r.ok) && r.persisted === true, 'a pushed record for a conversation discovery never listed is PERSISTED (no `untracked` drop)', JSON.stringify(r));
+  ok(ep.store.readTail('pushy', 'dm-new', { limit: 5 }).length === 1 && verdictOf(ep.store.index.live()['pushy/dm-new']), '…its log and its row exist');
   // kick mode: shared ⇒ a kick naming a conversation makes exactly it due
   await ep.setPush('pushy', { claimedExclusive: 'shared' });
   onState({ state: 'live', at: clock, heard: true });
@@ -1095,7 +1095,7 @@ console.log('⑤ push first: the safety net, pushed records of unknown conversat
   await onEvent({ kind: 'record', eventId: 'e-2', convId: 'c0004', record: makeRecord({ adapterId: 'pushy', convId: 'c0004', vendorId: 'k1', at: clock, author: { id: 'u1', name: 'A' }, text: 'kick', mentions: [], attachments: [], raw: {} }) });
   for (let i = 0; i < 60 && (Wp.calls.history.get('c0004') || 0) === (b2.get('c0004') || 0); i++) await sleep(100);
   ok((Wp.calls.history.get('c0004') || 0) > (b2.get('c0004') || 0), 'in kick mode an event NAMING a cold conversation makes it due now (one kick pass)');
-  ok(ep.store.readTail('pushy', 'c0004', { limit: 50 }).every((x) => x.vendorId !== 'k1'), '…and the kick carried no content (the poll carries it)');
+  ok(verdictOf(ep.store.readTail('pushy', 'c0004', { limit: 50 }).every((x) => x.vendorId !== 'k1')), '…and the kick carried no content (the poll carries it)');
   ep.stop();
   // the Lark lane with no SDK parks unavailable with its CODE, and the card says the remedy
   const { createLarkLive } = require(path.join(REPO, 'src/channels/live/lark.js'));
@@ -1105,7 +1105,7 @@ console.log('⑤ push first: the safety net, pushed records of unknown conversat
   for (let i = 0; i < 30 && !states.some((s) => s.state === 'unavailable'); i++) await sleep(20);
   h.stop();
   const un = states.find((s) => s.state === 'unavailable');
-  ok(un && un.code === 'sdk-not-installed', 'without @larksuiteoapi/node-sdk the Lark lane parks unavailable with code sdk-not-installed', JSON.stringify(un));
+  ok(gateOf(un) && un.code === 'sdk-not-installed', 'without @larksuiteoapi/node-sdk the Lark lane parks unavailable with code sdk-not-installed', JSON.stringify(un));
   // lane lark-search-poll: a live EXCLUSIVE push lane still wins over a carrying change feed (reconcile); in kick mode
   // the carrying feed is the lane (the relaxed net) — the precedence of design §2.8, on the real engine
   {
@@ -1133,7 +1133,7 @@ console.log('⑤ push first: the safety net, pushed records of unknown conversat
   // dc-channels-blocks (2.369.214): the remedy is the adapter's DECLARED unavailableWords — what the engine's pushView carries while parked
   const declared = require(path.join(REPO, 'src/channels/lark.js')).unavailableWords;
   const words = caps.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: un && un.code, lastStateWhy: un && un.why, unavailableWords: declared }, { via: 'poll' });
-  ok(/npm install @larksuiteoapi\/node-sdk/.test(words) && /restart/.test(words) && /polled/.test(words), 'the card\'s sentence is the exact remedy + "polled meanwhile"', words);
+  ok(gateOf(/npm install @larksuiteoapi\/node-sdk/.test(words)) && gateOf(/restart/.test(words)) && verdictOf(/polled/.test(words)), 'the card\'s sentence is the exact remedy + "polled meanwhile"', words);
 }
 
 // ═══ ⑥ the agent's refresh ════════════════════════════════════════════════
@@ -1145,15 +1145,15 @@ console.log('⑥ the agent refresh: reach first, the floor, the budget');
   await eng.setScopeAssignment('many', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'wake' });
   await eng.refresh('many', 'c0002');
   const floor = await eng.agentRefresh(A, 'many', 'c0002');
-  ok(floor.ok === false && floor.code === 'refresh-floor' && /floor 20 s/.test(floor.error) && floor.retryAfterSec > 0, 'right after a fetch the floor refuses BY NAME with the wait', JSON.stringify(floor));
+  ok(floor.ok === false && floor.code === 'refresh-floor' && gateOf(/floor 20 s/.test(floor.error)) && floor.retryAfterSec > 0, 'right after a fetch the floor refuses BY NAME with the wait', JSON.stringify(floor));
   W.convs.get('c0002').recs.push({ vendorId: 'c0002-new', at: clock + 1000, author: { id: 'u-0', name: 'Ada' }, text: 'fresh news', attachments: [] });
   clock += 21e3;
   const good = await eng.agentRefresh(A, 'many', 'c0002');
-  ok(good.ok && good.appended === 1, 'past the floor the refresh fetches and says how many arrived', JSON.stringify(good));
+  ok(gateOf(good.ok) && good.appended === 1, 'past the floor the refresh fetches and says how many arrived', JSON.stringify(good));
   SET['channels.agentRefreshFloorSec'] = 60;
   clock += 21e3;
   const floor60 = await eng.agentRefresh(A, 'many', 'c0002');
-  ok(floor60.ok === false && /floor 60 s/.test(floor60.error), 'the floor is a SETTING, read live', floor60.error);
+  ok(floor60.ok === false && verdictOf(/floor 60 s/.test(floor60.error)), 'the floor is a SETTING, read live', floor60.error);
   delete SET['channels.agentRefreshFloorSec'];
 }
 
@@ -1172,8 +1172,8 @@ console.log('⑥b twenty concurrent agent refreshes: every "ok" is a real fetch 
   const answers = await Promise.all(ids.map((id) => eng.agentRefresh(A, 'many', id)));
   const called = (id) => (W.calls.history.get(id) || 0) - (before.get(id) || 0);
   const liars = ids.filter((id, i) => answers[i].ok && !answers[i].pending && (called(id) !== 1 || answers[i].appended !== 1));
-  ok(answers.every((a) => a.ok && !a.pending) && liars.length === 0, `each of 20 concurrent refreshes fetched ITS conversation once and counted its one new message (liars: ${liars.length})`, JSON.stringify(liars.slice(0, 4).map((id) => ({ id, calls: called(id), answer: answers[ids.indexOf(id)] }))));
-  ok(ids.every((id) => (eng.readFor(A, 'many', id).records || []).some((r) => r.vendorId === `${id}-burst`)), '…and a read right after shows every one of them');
+  ok(gateOf(answers.every((a) => a.ok && !a.pending)) && liars.length === 0, `each of 20 concurrent refreshes fetched ITS conversation once and counted its one new message (liars: ${liars.length})`, JSON.stringify(liars.slice(0, 4).map((id) => ({ id, calls: called(id), answer: answers[ids.indexOf(id)] }))));
+  ok(verdictOf(ids.every((id) => (eng.readFor(A, 'many', id).records || []).some((r) => r.vendorId === `${id}-burst`))), '…and a read right after shows every one of them');
   await eng.settleWakes();
   // CONTROL: the shipped refresh (take whatever the single-flight pass answered) lies again
   const burst = async (ENGmod, label) => {
@@ -1194,14 +1194,14 @@ console.log('⑥b twenty concurrent agent refreshes: every "ok" is a real fetch 
     return { lied, allOk: ans.every((a) => a.ok && !a.pending) };
   };
   const good = await burst(ENG, 'real');
-  ok(good.lied === 0 && good.allOk, `FIXTURE: the same burst on a fresh engine answers every refresh truthfully (${good.lied} liars)`);
+  ok(good.lied === 0 && verdictOf(good.allOk), `FIXTURE: the same burst on a fresh engine answers every refresh truthfully (${good.lied} liars)`);
   // CONTROL (re-pointed at the drain, r5; at the PURE drain's round, r9): a fetch that answers EVERY waiter of the account — r2's class, an answer from a fetch that was not of YOUR key — lies again
   const M6 = mutantCopies('chan-agg-refresh', REPO);
   const cw6 = closedWorld(M6, 'foreign-pass', { drain: [[DRAIN_LINES.round, '    waiters: ids(s.requests),']] });
-  ok(cw6.setup, 'CONTROL setup: a drain whose fetch answers every waiter of the account (r2\'s foreign-pass answer) is reconstructed', cw6.missing);
+  ok(verdictOf(cw6.setup), 'CONTROL setup: a drain whose fetch answers every waiter of the account (r2\'s foreign-pass answer) is reconstructed', cw6.missing);
   const bad = await burst(cw6.mod, 'ctl');
   ok(bad.lied >= 10, `CONTROL: that drain says "ok" without a fetch of its own conversation for ${bad.lied} of 20 — the legs above would go red`);
-  for (const r of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 // AN AGENT CANNOT SPEND THE ACCOUNT'S MINUTE (lane R2 verify, low): the floor
@@ -1246,13 +1246,13 @@ console.log('⑥c agent refreshes are a share of the vendor budget; the owner\'s
   ok(base.hot === 40, `FIXTURE: with no agent the 20 hot rows get 40 timer polls in the minute (${base.hot})`);
   ok(shared.hot >= 0.75 * base.hot, `with an agent looping refreshes over cold rows the hot rows still get ${shared.hot} of ${base.hot} polls (≥ 75 %)`);
   const named = shared.refusals.find((r) => r.code === 'vendor-budget' && r.share);
-  ok(named && /agents' refreshes and fetches/.test(named.error) && /25 %/.test(named.error) && named.share.pct === 25 && named.share.limit === 15, 'the refusal names the AGENT share (25 % = 15 of 60 requests a minute) and the wait', JSON.stringify(named || shared.refusals[0]));
-  ok(shared.budgetAt30 && shared.budgetAt30.spentBy && shared.budgetAt30.spentBy.agent === 15 && shared.budgetAt30.spentBy.timer >= 20, 'the budget view says who spent this minute (agent 15, the timer the rest)', JSON.stringify(shared.budgetAt30 && shared.budgetAt30.spentBy));
+  ok(gateOf(named) && gateOf(/agents' refreshes and fetches/.test(named.error)) && gateOf(/25 %/.test(named.error)) && named.share.pct === 25 && named.share.limit === 15, 'the refusal names the AGENT share (25 % = 15 of 60 requests a minute) and the wait', JSON.stringify(named || shared.refusals[0]));
+  ok(gateOf(shared.budgetAt30) && gateOf(shared.budgetAt30.spentBy) && shared.budgetAt30.spentBy.agent === 15 && shared.budgetAt30.spentBy.timer >= 20, 'the budget view says who spent this minute (agent 15, the timer the rest)', JSON.stringify(shared.budgetAt30 && shared.budgetAt30.spentBy));
   // CONTROL (a runtime neuter): the share at 100 % is the pre-fix engine — the agent takes the minute
   const open = await scenario('open', { agent: true, sharePct: 100 });
   ok(open.hot < 0.75 * base.hot, `CONTROL: with the share at 100 % the same loop starves the hot rows (${open.hot} of ${base.hot}) — the leg above would go red`);
   const bt = open.budgetAt30 ? caps.budgetText(open.budgetAt30) : '';
-  ok(/by agent refreshes/.test(bt), 'CONTROL: …and the spent-budget sentence names the agents as the spender', bt);
+  ok(verdictOf(/by agent refreshes/.test(bt)), 'CONTROL: …and the spent-budget sentence names the agents as the spender', bt);
 }
 
 // A VENDOR BACK-OFF IS HONOURED BY EVERY REFRESH BUT THE OWNER'S OWN PRESS
@@ -1301,27 +1301,27 @@ async function backoffBurst(ENGmod, label) {
 }
 {
   const r = await backoffBurst(ENG, 'real');
-  ok(r.fixture, 'FIXTURE: one scripted 503 fails the pass with transport, consecutiveFailures 1, backoffUntil = +30 s');
+  ok(verdictOf(r.fixture), 'FIXTURE: one scripted 503 fails the pass with transport, consecutiveFailures 1, backoffUntil = +30 s');
   const codes = r.answers.reduce((m, a) => { m[a.code || 'ok'] = (m[a.code || 'ok'] || 0) + 1; return m; }, {});
   ok(r.agentCalls === 0 && codes.backoff === 40, `40 agent refreshes over 40 conversations inside the back-off make ZERO vendor calls (${r.agentCalls}) — every one answers code backoff (${JSON.stringify(codes)})`);
   const a0 = r.answers[0];
-  ok(a0.retryAfterSec > 0 && a0.retryAfterSec <= 30 && Number(a0.backoffUntil) === r.backoffAfterAgents && /transport/.test(a0.error) && /retried in \d+ s/.test(a0.error), 'the refusal names the vendor\'s code, the wait and the retry instant', JSON.stringify(a0));
+  ok(a0.retryAfterSec > 0 && a0.retryAfterSec <= 30 && Number(a0.backoffUntil) === r.backoffAfterAgents && gateOf(/transport/.test(a0.error)) && verdictOf(/retried in \d+ s/.test(a0.error)), 'the refusal names the vendor\'s code, the wait and the retry instant', JSON.stringify(a0));
   ok(r.failuresAfterAgents === 1, `…and consecutiveFailures stays 1 (${r.failuresAfterAgents}) — the back-off is not escalated by the agent`);
-  ok(r.watch.ok && r.watch.fetched === false && r.watchCalls === 0, `a window opened during the back-off is hot but pokes nothing (fetched:false, ${r.watchCalls} calls)`, JSON.stringify(r.watch));
+  ok(gateOf(r.watch.ok) && r.watch.fetched === false && r.watchCalls === 0, `a window opened during the back-off is hot but pokes nothing (fetched:false, ${r.watchCalls} calls)`, JSON.stringify(r.watch));
   ok(r.ownerCalls === 1 && r.owner.ok === false && r.owner.code === 'transport' && r.failuresAfterOwner === 2, `the owner's OWN Refresh press still runs (human-gated: ${r.ownerCalls} call), fails by name and counts as one more failure (${r.failuresAfterOwner})`, JSON.stringify(r.owner));
   // r4: the failed press answers the wait it just escalated into (Retry-After rides readerAnswer; the toast words it) — a bare "failed" invited the next press
   ok(r.owner.retryAfterSec > 0 && r.owner.retryAfterSec <= ENG.BACKOFF_MS[2] / 1000 && Number(r.owner.backoffUntil) === Number(r.backoffAfterOwner), `…and its answer carries the retry instant of the back-off it escalated into (retry in ${r.owner.retryAfterSec} s)`, JSON.stringify({ owner: r.owner, backoffAfterOwner: r.backoffAfterOwner }));
   // (⑥d the owner's back-off words pin — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
-  ok(r.after.ok && r.after.appended === 1, 'once the back-off has passed the agent\'s refresh fetches again', JSON.stringify(r.after));
+  ok(gateOf(r.after.ok) && r.after.appended === 1, 'once the back-off has passed the agent\'s refresh fetches again', JSON.stringify(r.after));
   // (⑥d the route maps, the CLI and the panel/window contracts — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // CONTROL: the shipped refresh (no back-off gate on the agent's verb or the loop) hammers the vendor and escalates the back-off
   const M6d = mutantCopies('chan-agg-backoff', REPO);
   // (re-pointed at the drain, r5; r9: the PURE drain's two back-off lines — the judgement gate AND the fetch-time owner check, both stripped: a new guard layer is removed from the old control too)
   const cw6d = closedWorld(M6d, 'ungated', { drain: [[DRAIN_LINES.backoffGate, ''], [DRAIN_LINES.backoffAtFetch, '']] });
-  ok(cw6d.setup, 'CONTROL setup: the drain without its back-off gate (r3\'s open door) is reconstructed', cw6d.missing);
+  ok(verdictOf(cw6d.setup), 'CONTROL setup: the drain without its back-off gate (r3\'s open door) is reconstructed', cw6d.missing);
   const rc = await backoffBurst(cw6d.mod, 'ctl');
   ok(rc.agentCalls >= 10 && rc.failuresAfterAgents >= 11 && rc.backoffAfterAgents - clock > 0, `CONTROL: without the gate the same 40 refreshes call the vendor ${rc.agentCalls} times and escalate consecutiveFailures to ${rc.failuresAfterAgents} — the legs above would go red`);
-  for (const r2 of copiesCensus(M6d.files, M6d.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(M6d.files, M6d.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // A PASS THAT FETCHED THIS CONVERSATION WHILE WE WAITED ANSWERS (lane R2
@@ -1368,18 +1368,18 @@ async function sameConvBurst(ENGmod, label) {
 }
 {
   const r = await sameConvBurst(ENG, 'real');
-  ok(r.agentCalls === 1 && r.agents.every((a) => a.ok && !a.pending && a.appended === 1), `20 concurrent agent refreshes of ONE conversation = ONE vendor call (${r.agentCalls}), every answer ok with the one new message`, JSON.stringify({ calls: r.agentCalls, sample: r.agents.slice(0, 2) }));
+  ok(r.agentCalls === 1 && verdictOf(r.agents.every((a) => a.ok && !a.pending && a.appended === 1)), `20 concurrent agent refreshes of ONE conversation = ONE vendor call (${r.agentCalls}), every answer ok with the one new message`, JSON.stringify({ calls: r.agentCalls, sample: r.agents.slice(0, 2) }));
   ok(r.spentByAgent === 1, `…and the agent share is charged exactly once (${r.spentByAgent})`);
-  ok(r.watchCalls === 1 && r.watches.every((w) => w.ok && w.fetched), `5 windows opened at once on a stale conversation = ONE vendor call (${r.watchCalls})`, JSON.stringify(r.watches[0]));
-  ok(r.queuedCalls === 1 && r.queued.every((a) => a.ok && !a.pending), `3 agent refreshes queued behind a timer pass that fetched their conversation add NO call (${r.queuedCalls} on the key in all)`, JSON.stringify(r.queued));
+  ok(r.watchCalls === 1 && verdictOf(r.watches.every((w) => w.ok && w.fetched)), `5 windows opened at once on a stale conversation = ONE vendor call (${r.watchCalls})`, JSON.stringify(r.watches[0]));
+  ok(r.queuedCalls === 1 && verdictOf(r.queued.every((a) => a.ok && !a.pending)), `3 agent refreshes queued behind a timer pass that fetched their conversation add NO call (${r.queuedCalls} on the key in all)`, JSON.stringify(r.queued));
   // CONTROL: a copy without the r4 rule (every caller runs its own pass after the wait) calls 20× for one conversation
   const M6e = mutantCopies('chan-agg-sameconv', REPO);
   // (re-pointed at the drain, r5; r9: the PURE drain's slot — one item per WAITER, so no rider rule and no one-fetch-per-key — r4's pass per caller)
   const cw6e = closedWorld(M6e, 'own-pass', { drain: [[DRAIN_LINES.slot, 'function slotOf(r) { return r.id; }']] });
-  ok(cw6e.setup, 'CONTROL setup: a drain with one item per WAITER — no rider rule, no one fetch per key (r4\'s pass per caller) — is reconstructed', cw6e.missing);
+  ok(verdictOf(cw6e.setup), 'CONTROL setup: a drain with one item per WAITER — no rider rule, no one fetch per key (r4\'s pass per caller) — is reconstructed', cw6e.missing);
   const rc = await sameConvBurst(cw6e.mod, 'ctl');
   ok(rc.agentCalls >= 10 && rc.watchCalls >= 2 && rc.queuedCalls >= 2, `CONTROL: without the rule the same bursts call the vendor ${rc.agentCalls} / ${rc.watchCalls} / ${rc.queuedCalls} times — the legs above would go red`);
-  for (const r2 of copiesCensus(M6e.files, M6e.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(M6e.files, M6e.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // THE CONCURRENCY TABLE (lane R2 verify r5 — the structural closure). Three
@@ -1550,7 +1550,7 @@ async function table6f(ENGmod, tag, cells) {
   const M6f = mutantCopies('chan-agg-table', REPO);
   // (r9: the owner-once rule is the PURE drain's press line — every owner group pressed, every window)
   const cwEvery = closedWorld(M6f, 'every-press', { drain: [[DRAIN_LINES.pressFree, '  const pressFree = p.backoff;'], [DRAIN_LINES.pressOne, '    const v = verdict(s, g, pressFree);']] });
-  ok(cwEvery.setup, 'CONTROL setup: a drain honouring EVERY owner press inside a back-off window is reconstructed', cwEvery.missing);
+  ok(verdictOf(cwEvery.setup), 'CONTROL setup: a drain honouring EVERY owner press inside a back-off window is reconstructed', cwEvery.missing);
   const ctl = await table6f(cwEvery.mod, 'ctl', [{ N: 5, distinct: true, state: 'backoff', origin: 'refresh' }]);
   const cp = judge6f(ctl[0]);
   const ctlCalls = ctl[0].keys.reduce((a, k) => a + ctl[0].calls(k), 0);
@@ -1560,21 +1560,21 @@ async function table6f(ENGmod, tag, cells) {
   const STEP_LINE = '          e.dq = Drain.apply(e.dq, act);   // the step is taken (an async action BEGINS)\n';
   const RESOLVE_LINE = '      w.resolve = (outcome) => {\n';
   const cwEarly = closedWorld(M6f, 'early-answer', { engine: [[RESOLVE_LINE, '      w.raw = resolve;\n' + RESOLVE_LINE], [STEP_LINE, STEP_LINE + '          for (const id of act.accept || []) { const w = e.waiters.get(id); if (w && w.raw) w.raw({ ok: true, appended: 1, polledAt: null }); }\n']] });
-  ok(cwEarly.setup, 'CONTROL setup: a drain answering `ok` at judgement (the fetch still made after) is reconstructed', cwEarly.missing);
+  ok(verdictOf(cwEarly.setup), 'CONTROL setup: a drain answering `ok` at judgement (the fetch still made after) is reconstructed', cwEarly.missing);
   const ctlE = await table6f(cwEarly.mod, 'ctl-early', [{ N: 1, distinct: false, state: 'idle', origin: 'refresh' }, { N: 5, distinct: true, state: 'floor', origin: 'refresh' }, { N: 1, distinct: false, state: 'timer-not-fetching-key', origin: 'agent' }]);
   const ctlEp = ctlE.map((r) => judge6f(r));
   const logOnly = ctlE.map((r) => ctlEp[ctlE.indexOf(r)].filter((p) => !/delivered at \+/.test(p)).length);
-  ok(ctlEp.every((p) => p.some((x) => /delivered at \+\d+ ms, before any fetch/.test(x))) && logOnly.some((n) => n === 0), `CONTROL: the early answer is caught in ${ctlEp.length}/${ctlEp.length} cells by the answer's instant — and in ${logOnly.filter((n) => n === 0).length} of them by NOTHING ELSE (the vendor-log clause alone was green there)`, JSON.stringify(ctlEp.map((p) => p.slice(0, 2))));
+  ok(gateOf(ctlEp.every((p) => p.some((x) => /delivered at \+\d+ ms, before any fetch/.test(x)))) && verdictOf(logOnly.some((n) => n === 0)), `CONTROL: the early answer is caught in ${ctlEp.length}/${ctlEp.length} cells by the answer's instant — and in ${logOnly.filter((n) => n === 0).length} of them by NOTHING ELSE (the vendor-log clause alone was green there)`, JSON.stringify(ctlEp.map((p) => p.slice(0, 2))));
   // CONTROL (B4, r7): the RIGHT fetch answered at its START — the waiter resolved with its key's fetch in flight, the fetch ending after — is a lie about time the clause catches (the vendor-log clause sees a fetch of its key that ended after the call began)
   // (r9: the ENGINE seam — the driver's delivery at the START of the right fetch)
   const INGEST_LINE = '        let got;\n        try { got = await ingest(e, rec, idOf(key), origin); }\n';
   const cwStart = closedWorld(M6f, 'at-start', { engine: [[INGEST_LINE, '        deliver(act.waiters, { ok: true, appended: 1, polledAt: lastPollOf(key) });\n' + INGEST_LINE]] });
-  ok(cwStart.setup, 'CONTROL setup: a loop answering ok at the START of the right fetch is reconstructed', cwStart.missing);
+  ok(verdictOf(cwStart.setup), 'CONTROL setup: a loop answering ok at the START of the right fetch is reconstructed', cwStart.missing);
   const ctlS = await table6f(cwStart.mod, 'ctl-start', [{ N: 1, distinct: false, state: 'idle', origin: 'refresh' }, { N: 5, distinct: true, state: 'timer-not-fetching-key', origin: 'agent' }, { N: 20, distinct: true, state: 'idle', origin: 'agent' }]);
   const ctlSp = ctlS.map((r) => judge6f(r));
   const onlyTime = ctlSp.filter((p) => p.length && p.every((x) => /delivered at \+\d+ ms, before any fetch/.test(x))).length;
-  ok(ctlSp.every((p) => p.some((x) => /delivered at \+\d+ ms, before any fetch/.test(x))), `CONTROL: the ok at the right fetch's START is caught in ${ctlSp.length}/${ctlSp.length} cells by the answer's instant — in ${onlyTime} of them by NOTHING ELSE (the fetch of its key did end after the call began)`, JSON.stringify(ctlSp.map((p) => p.slice(0, 2))));
-  for (const r2 of copiesCensus(M6f.files, M6f.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  ok(verdictOf(ctlSp.every((p) => p.some((x) => /delivered at \+\d+ ms, before any fetch/.test(x)))), `CONTROL: the ok at the right fetch's START is caught in ${ctlSp.length}/${ctlSp.length} cells by the answer's instant — in ${onlyTime} of them by NOTHING ELSE (the fetch of its key did end after the call began)`, JSON.stringify(ctlSp.map((p) => p.slice(0, 2))));
+  for (const r2 of copiesCensus(M6f.files, M6f.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // THE SHAPE UNDER ATTACK (r5 verify — the closing round on the request set):
@@ -1645,7 +1645,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     const pos = calls.indexOf('c0040'), posLate = calls.indexOf('c0039');
     eg.stop();
     // the FETCH is at the next boundary (positions 1 and 2: right after the row the pass was inside); a REFUSAL lands when it is judged (r6, leg (7)) and an `ok` at ITS fetch (r7, leg (8)) — never at the pass's end
-    ok(r.ok && !r.pending && r.appended === 1 && rl.ok && !rl.pending && pos >= 1 && pos <= 2 && posLate >= 1 && posLate <= 2 && calls.length === 41 && calls.filter((k) => k === 'c0039').length === 1, `requests filed behind a 40-row timer pass are fetched at the NEXT boundary — a not-due row at position ${pos}, the last DUE row promoted to position ${posLate} (one fetch, not two) of the pass's ${calls.length} calls — never after the whole pass`, JSON.stringify({ r, rl, pos, posLate, head: calls.slice(0, 4) }));
+    ok(gateOf(r.ok) && !r.pending && r.appended === 1 && gateOf(rl.ok) && !rl.pending && pos >= 1 && pos <= 2 && posLate >= 1 && posLate <= 2 && calls.length === 41 && calls.filter((k) => k === 'c0039').length === 1, `requests filed behind a 40-row timer pass are fetched at the NEXT boundary — a not-due row at position ${pos}, the last DUE row promoted to position ${posLate} (one fetch, not two) of the pass's ${calls.length} calls — never after the whole pass`, JSON.stringify({ r, rl, pos, posLate, head: calls.slice(0, 4) }));
   }
   // (3) the cap
   {
@@ -1658,7 +1658,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     const full = answers.filter((a) => a.code === 'refresh-queue-full');
     const q = eg.refreshQueueOf('atk');
     eg.stop();
-    ok(okN === ENG.REFRESH_QUEUE_CAP && full.length === 60 && full.every((a) => a.retryAfterSec === 1 && a.queued === 200 && /already waiting/.test(a.error)) && (Wg.calls.history.get('c0001') || 0) - a0 === 1 && q.waiters === 0, `260 refreshes of one conversation at once: ${okN} accepted and answered by ONE fetch, ${full.length} refused refresh-queue-full by name with the wait; the set is empty after`, JSON.stringify({ okN, full: full.length, sample: full[0], calls: (Wg.calls.history.get('c0001') || 0) - a0, q }));
+    ok(okN === ENG.REFRESH_QUEUE_CAP && full.length === 60 && gateOf(full.every((a) => a.retryAfterSec === 1 && a.queued === 200 && /already waiting/.test(a.error))) && (Wg.calls.history.get('c0001') || 0) - a0 === 1 && q.waiters === 0, `260 refreshes of one conversation at once: ${okN} accepted and answered by ONE fetch, ${full.length} refused refresh-queue-full by name with the wait; the set is empty after`, JSON.stringify({ okN, full: full.length, sample: full[0], calls: (Wg.calls.history.get('c0001') || 0) - a0, q }));
   }
   // (3b) THE OWNER'S RESERVE (r6 verify, major): one agent's storm fills the set only to CAP − RESERVE — the owner's press and a window's open filed on top are still accepted (and answered by the fetch), the agent past its cap is refused by name
   {
@@ -1683,8 +1683,8 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     eg.stop();
     const agentCap = ENG.REFRESH_QUEUE_CAP - ENG.REFRESH_OWNER_RESERVE;
     const refused = ra.filter((a) => a.code === 'refresh-queue-full');
-    ok(q1.waiters === agentCap && q1.agents === agentCap && refused.length === ENG.REFRESH_OWNER_RESERVE && refused.every((a) => a.cap === agentCap && a.queued === agentCap && a.retryAfterSec === 1) && ra.filter((a) => a.ok && !a.pending).length === agentCap, `one agent's ${ENG.REFRESH_QUEUE_CAP} refreshes fill the set to ${q1.waiters} (its cap ${agentCap}): ${refused.length} refused refresh-queue-full naming the cap, ${ra.filter((a) => a.ok).length} answered`, JSON.stringify({ q1, refused: refused[0] }));
-    ok(h.ok && owner.ok && !owner.pending && open.ok && !open.pending && q2.waiters === agentCap + 2, `the OWNER's press and a window's open filed on top of the full agent set are ACCEPTED (${q2.waiters} waiting) and answered by their fetch — never refused by an agent's storm`, JSON.stringify({ owner, open, q2 }));
+    ok(q1.waiters === agentCap && q1.agents === agentCap && refused.length === ENG.REFRESH_OWNER_RESERVE && gateOf(refused.every((a) => a.cap === agentCap && a.queued === agentCap && a.retryAfterSec === 1)) && ra.filter((a) => a.ok && !a.pending).length === agentCap, `one agent's ${ENG.REFRESH_QUEUE_CAP} refreshes fill the set to ${q1.waiters} (its cap ${agentCap}): ${refused.length} refused refresh-queue-full naming the cap, ${ra.filter((a) => a.ok).length} answered`, JSON.stringify({ q1, refused: refused[0] }));
+    ok(gateOf(h.ok) && gateOf(owner.ok) && !owner.pending && gateOf(open.ok) && !open.pending && q2.waiters === agentCap + 2, `the OWNER's press and a window's open filed on top of the full agent set are ACCEPTED (${q2.waiters} waiting) and answered by their fetch — never refused by an agent's storm`, JSON.stringify({ owner, open, q2 }));
   }
   // (4) stop with requests pending — every waiter hears `stopped`, typed, at once: the ones in the set, one filed after, AND the one a pass in flight holds (a hung adapter never answers it)
   {
@@ -1699,7 +1699,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     eg.stop();
     const late = await eg.refresh('atk', 'c0004');
     const rs = await Promise.all([held, ...ps]);
-    ok(rs.every((r) => r.ok === false && r.code === 'stopped' && /restart/.test(r.error)) && late.code === 'stopped' && Date.now() - t0 < 1000, 'at stop() the waiter a HUNG fetch holds, the two in the set and one filed after all hear `stopped` at once (never a hung promise, never the 30 s bound)', JSON.stringify([...rs, late]));
+    ok(gateOf(rs.every((r) => r.ok === false && r.code === 'stopped' && /restart/.test(r.error))) && late.code === 'stopped' && Date.now() - t0 < 1000, 'at stop() the waiter a HUNG fetch holds, the two in the set and one filed after all hear `stopped` at once (never a hung promise, never the 30 s bound)', JSON.stringify([...rs, late]));
   }
   // (5) an account removed while a request waits behind a held fetch
   {
@@ -1718,7 +1718,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     const q = eg.refreshQueueOf('atk');
     eg.stop();
     // the held fetch's own waiter hears it too: its account is gone, an `ok` for a removed account would be a lie
-    ok(removed.ok && r2.ok === false && r2.code === 'account-changed' && /removed/.test(r2.error) && r1.ok === false && r1.code === 'account-changed' && q.waiters === 0, 'an account removed while a request waited: the waiter in the set AND the one the held fetch holds hear `account-changed` (removed) by name, nothing is left', JSON.stringify({ removed, r1, r2, q }));
+    ok(gateOf(removed.ok) && r2.ok === false && r2.code === 'account-changed' && gateOf(/removed/.test(r2.error)) && r1.ok === false && r1.code === 'account-changed' && q.waiters === 0, 'an account removed while a request waited: the waiter in the set AND the one the held fetch holds hear `account-changed` (removed) by name, nothing is left', JSON.stringify({ removed, r1, r2, q }));
   }
   // (6) THE BUDGET CUT MID-PASS (r6 verify — ⑥f's `budget` state trips the TOP gate, so two of the loop's budget lines never ran under it): fifteen owner requests behind a held first fetch on a 10/min budget — nine fetched, the rest refused vendor-budget BY NAME by the cut sweep (never `0 new`); three more filed while the 10th fetch (the minute's last) is held — refused by the drain's own budget line, no call
   const budgetCut = async (ENGx, label) => {
@@ -1757,8 +1757,8 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
   {
     const { a, l, calls, q } = await budgetCut(ENG, 'real');
     const okN = a.filter((x) => x.ok && !x.pending).length, cut = a.filter((x) => x.code === 'vendor-budget');
-    ok(calls === 10 && okN === 10 && cut.length === 5 && cut.every((x) => x.retryAfterSec > 0 && /is spent/.test(x.error)), `fifteen requests on a 10/min budget: exactly 10 calls, 10 ok, 5 refused vendor-budget by the cut sweep with the wait (${calls} calls, ${okN} ok, ${cut.length} refused)`, JSON.stringify({ calls, codes: a.map((x) => x.code || 'ok') }));
-    ok(l.every((x) => x.code === 'vendor-budget' && x.retryAfterSec > 0) && q.waiters === 0, `three requests filed once the minute was spent, mid-pass: refused by the drain's own budget line, no call (${l.map((x) => x.code).join(', ')})`, JSON.stringify(l));
+    ok(calls === 10 && okN === 10 && cut.length === 5 && verdictOf(cut.every((x) => x.retryAfterSec > 0 && /is spent/.test(x.error))), `fifteen requests on a 10/min budget: exactly 10 calls, 10 ok, 5 refused vendor-budget by the cut sweep with the wait (${calls} calls, ${okN} ok, ${cut.length} refused)`, JSON.stringify({ calls, codes: a.map((x) => x.code || 'ok') }));
+    ok(gateOf(l.every((x) => x.code === 'vendor-budget' && x.retryAfterSec > 0)) && q.waiters === 0, `three requests filed once the minute was spent, mid-pass: refused by the drain's own budget line, no call (${l.map((x) => x.code).join(', ')})`, JSON.stringify(l));
   }
   // (7) A REFUSAL IS HEARD WHEN IT IS JUDGED (r6 verify, major): behind a 45-row timer pass (60 ms a fetch ≈ 2.7 s) an agent's floor-refused request is answered at the FIRST boundary — within one fetch — never at the pass's end (where the agent's 15 s race had turned it into `pending`: "refresh started — still running" for a request that was refused and never fetched)
   const lateRefusal = async (ENGx, label) => {
@@ -1823,13 +1823,13 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
   };
   {
     const { a, heardMs, passMs, pos, calls } = await lateOk(ENG, 'real');
-    ok(a.ok && !a.pending && a.appended === 1 && heardMs < 400 && passMs >= 1500 && pos >= 1 && pos <= 2, `the owner's request behind a ${passMs} ms timer pass is answered ok (1 new) at ITS fetch — heard after ${heardMs} ms (the in-flight fetch + its own; fetched at position ${pos} of ${calls}), never at the pass's end`, JSON.stringify({ a: { ok: a.ok, pending: a.pending, appended: a.appended }, heardMs, passMs, pos }));
+    ok(gateOf(a.ok) && !a.pending && a.appended === 1 && heardMs < 400 && passMs >= 1500 && pos >= 1 && pos <= 2, `the owner's request behind a ${passMs} ms timer pass is answered ok (1 new) at ITS fetch — heard after ${heardMs} ms (the in-flight fetch + its own; fetched at position ${pos} of ${calls}), never at the pass's end`, JSON.stringify({ a: { ok: a.ok, pending: a.pending, appended: a.appended }, heardMs, passMs, pos }));
   }
   // (8b) THE BROADCAST RIDES THE ANSWER (r8 verify, medium — fixed r9): the `ok` landed at its fetch while the digest broadcast naming the key waited for the pass's end, so the panel's Refresh toast said "1 new" and the window repainted a whole pass later. The driver now broadcasts a requested key with news AT its fetch, before the answer
   {
     const events = [];
     const r = await lateOk(ENG, 'bcast', events);
-    ok(r.a.ok && r.a.appended === 1 && r.bcastBeforeAnswerMs !== null && r.bcastBeforeAnswerMs >= 0 && r.bcastBeforeEndMs >= 1000, `(8b) the broadcast naming the requested key goes out at its fetch — ${r.bcastBeforeAnswerMs} ms BEFORE the answer is heard and ${r.bcastBeforeEndMs} ms before the ${r.passMs} ms pass ends (the window repaints with the toast)`, JSON.stringify(r));
+    ok(gateOf(r.a.ok) && r.a.appended === 1 && r.bcastBeforeAnswerMs !== null && r.bcastBeforeAnswerMs >= 0 && r.bcastBeforeEndMs >= 1000, `(8b) the broadcast naming the requested key goes out at its fetch — ${r.bcastBeforeAnswerMs} ms BEFORE the answer is heard and ${r.bcastBeforeEndMs} ms before the ${r.passMs} ms pass ends (the window repaints with the toast)`, JSON.stringify(r));
   }
   // (9) THE DUE LIST UNDER A REQUEST STREAM (r7 verify — the reason r6 held the ok): with an ok delivered at its fetch a lane that loops `await refresh()` re-files INSIDE the pass it rides; the timer's turn is now taken at every boundary and requests INTERLEAVE with due rows, so (a) a saturating 10-lane storm for 2.5 s serves every due row DURING the storm (leg (1) above reads it), and (b) a 25 ms trickle for 3 s — heavier than the vendor can carry beside the due list — still serves the due rows at their cadence (re-due half-way) with every request answered, none `pending`, its median wait a fetch or two (the tail waits, honestly: the stream is oversubscribed)
   const trickle = async (ENGx, label, { ms = 3000, every = 25, redueAt = 1500 } = {}) => {
@@ -1884,7 +1884,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
   };
   {
     const r = await queuedPasses(ENG, 'real');
-    ok(r.forced === 1 && r.fetches === 40 && r.allOk, `three forced asks and a timer ask behind one held pass run ONE forced pass after it (${r.forced} discovery, ${r.fetches} fetches = the held pass's 20 + one forced pass's 20), every asker answered ok by it`, JSON.stringify(r));
+    ok(r.forced === 1 && r.fetches === 40 && verdictOf(r.allOk), `three forced asks and a timer ask behind one held pass run ONE forced pass after it (${r.forced} discovery, ${r.fetches} fetches = the held pass's 20 + one forced pass's 20), every asker answered ok by it`, JSON.stringify(r));
   }
   // (11) THE FRONT RUN — FIFO ACROSS BOUNDARIES, HUMANS FIRST, A RE-REQUEST RIDES (r8 verify, major): r7's drain spliced every boundary's new head at `at` (ahead of the requests drained at EARLIER boundaries) and promoted riders there too, its rider lookup skipped a key this pass had already fetched (`!done.has`), and r7's pass never ends under a stream (takeTimerTurn) — so the earliest waiter of every key was pushed back by each later boundary until the stream stopped (measured: a 5-key 25 ms trickle for 10 s ⇒ 85 of 398 waiters past 2 s, max 11.8 s, 395 vendor calls for 398 requests; the owner's ONE press under a 4-lane stream heard `pending` at 30 s; the owner's rider behind 180 agent riders fetched at position 181). Now the run of requested items at the front is FIFO across boundaries, a re-request of any key rides its pending item, and the run is ordered humans (the owner's press, a window's open) before agents
   const frontRun = async (ENGx, label, only = 'abc') => {
@@ -1961,9 +1961,9 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
   };
   {
     const r = await frontRun(ENG, 'real');
-    ok(r.a.allOk && r.a.requests >= 60 && r.a.maxWait < 500 && r.a.calls <= r.a.requests * 0.6, `(a) ${r.a.requests} requests on ONE key in 1.5 s, every one heard within a round (max ${r.a.maxWait} ms), ${r.a.calls} vendor calls (a re-request rides the pending item — coalesced)`, JSON.stringify(r.a));
-    ok(r.b.ok && r.b.filed >= 20 && r.b.wait < 500, `(b) the owner's one press on its own key under a 4-lane stream of other keys (${r.b.filed} requests) is heard after ${r.b.wait} ms — within a round, never when the stream stops`, JSON.stringify(r.b));
-    ok(r.c.ok && r.c.agentsOk && r.c.pos === 1 && r.c.calls === 60, `(c) the owner's press on a due row behind 40 agent riders is fetched at position ${r.c.pos} (humans first; every agent still answered ok, ${r.c.calls} calls = the pass's 60 rows once)`, JSON.stringify(r.c));
+    ok(gateOf(r.a.allOk) && r.a.requests >= 60 && r.a.maxWait < 500 && r.a.calls <= r.a.requests * 0.6, `(a) ${r.a.requests} requests on ONE key in 1.5 s, every one heard within a round (max ${r.a.maxWait} ms), ${r.a.calls} vendor calls (a re-request rides the pending item — coalesced)`, JSON.stringify(r.a));
+    ok(gateOf(r.b.ok) && r.b.filed >= 20 && r.b.wait < 500, `(b) the owner's one press on its own key under a 4-lane stream of other keys (${r.b.filed} requests) is heard after ${r.b.wait} ms — within a round, never when the stream stops`, JSON.stringify(r.b));
+    ok(gateOf(r.c.ok) && gateOf(r.c.agentsOk) && r.c.pos === 1 && r.c.calls === 60, `(c) the owner's press on a due row behind 40 agent riders is fetched at position ${r.c.pos} (humans first; every agent still answered ok, ${r.c.calls} calls = the pass's 60 rows once)`, JSON.stringify(r.c));
   }
   // CONTROLS for (3b) / (6) / (7) / (8) / (9) / (10): the cap without the reserve; the two budget lines answering `ok, 0 new`; the r5 drain that RECORDS a refusal for the pass's end; r6's answer that holds the ok for the pass's end; a loop fetching one over the budget; the loop without the interleave
   {
@@ -2019,7 +2019,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
       const { a, l } = await budgetCut(W.sweepOk.mod, 'ctl-sweep');
       ok(a.filter((x) => x.code === 'vendor-budget').length === 0 && a.filter((x) => x.ok).length === 15, `CONTROL: with the cut sweep answering ok the five cut requests hear "0 new" for a fetch never made (${a.filter((x) => x.ok).length} ok) — the leg above would go red`);
       const r2 = await budgetCut(W.drainOk.mod, 'ctl-drain');
-      ok(r2.l.every((x) => x.ok) && r2.calls === 10, `CONTROL: with the drain's budget line answering ok the three late requests hear "0 new" with no call (${r2.l.filter((x) => x.ok).length} ok, ${r2.calls} calls) — the leg above would go red`);
+      ok(gateOf(r2.l.every((x) => x.ok)) && r2.calls === 10, `CONTROL: with the drain's budget line answering ok the three late requests hear "0 new" with no call (${r2.l.filter((x) => x.ok).length} ok, ${r2.calls} calls) — the leg above would go red`);
       const r3 = await budgetCut(W.oneOver.mod, 'ctl-over');
       ok(r3.calls > 10, `CONTROL (B4, r7): a loop that fetches one over the budget before cutting makes ${r3.calls} calls on the 10/min minute — the leg above's "exactly 10" would go red`);
     }
@@ -2031,13 +2031,13 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     // (8) control: r6's answer (a refusal at once, the ok held for the pass's end) — the true answer is heard only when the pass is over
     {
       const { a, heardMs, passMs } = await lateOk(W.okForEnd.mod, 'ctl');
-      ok(a.ok && a.appended === 1 && heardMs >= 1500 && heardMs >= passMs - 200, `CONTROL: on r6's ok-for-the-end answer the same true answer is heard only at the pass's end (${heardMs} ms of a ${passMs} ms pass) — the leg above would go red`, JSON.stringify({ a: a.code, heardMs, passMs }));
+      ok(gateOf(a.ok) && a.appended === 1 && heardMs >= 1500 && heardMs >= passMs - 200, `CONTROL: on r6's ok-for-the-end answer the same true answer is heard only at the pass's end (${heardMs} ms of a ${passMs} ms pass) — the leg above would go red`, JSON.stringify({ a: a.code, heardMs, passMs }));
     }
     // (8b) control: the driver without the at-fetch broadcast — the key is named only by the pass's end broadcast
     {
       const EARLY = "          if (act.waiters.length) sayEarly(key);   // the broadcast naming the key goes out BEFORE the answer: the window repaints with the toast, not a pass later (paced: VIEW_PACE_MS)\n";
       const cwLate = closedWorld(M6h, 'bcast-at-end', { engine: [[EARLY, '']] });
-      ok(cwLate.setup, 'CONTROL setup: the driver without the at-fetch broadcast (r8\'s pass-end-only notify) is reconstructed', cwLate.missing);
+      ok(verdictOf(cwLate.setup), 'CONTROL setup: the driver without the at-fetch broadcast (r8\'s pass-end-only notify) is reconstructed', cwLate.missing);
       const events = [];
       const r = await lateOk(cwLate.mod, 'ctl-bcast', events);
       ok(r.bcastBeforeAnswerMs !== null && r.bcastBeforeAnswerMs < 0 && r.bcastBeforeEndMs < 200, `CONTROL: without it the broadcast naming the key lands ${-r.bcastBeforeAnswerMs} ms AFTER the answer, at the pass's end — leg (8b) would go red`, JSON.stringify(r));
@@ -2082,7 +2082,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
       const rcc = await frontRun(W.ownerLast.mod, 'ctl-owner-last', 'c');
       ok(rcc.c.pos >= 30, `CONTROL (owner last): the owner's rider is fetched at position ${rcc.c.pos} behind 40 agent riders — leg (c) would go red`, JSON.stringify(rcc.c));
     }
-    for (const r2 of copiesCensus(M6h.files, M6h.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+    for (const r2 of copiesCensus(M6h.files, M6h.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
   }
   // CONTROL: the Part-1 drain (drained ONCE before the loop; the tick skipping a busy account) — both starvations return
   {
@@ -2090,7 +2090,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     // r9: the drain-once half is the PURE drain judging requests only at a pass's first step (`seen`); the tick's half is still the engine's TURN line
     const TURN = "      if (e.passing) { e.timerDue = true; continue; }   // r5 verify: busy while due — the pass in flight (or the next drain) does the timer's work, a request storm cannot starve the due list\n";
     const cwOnce = closedWorld(M6g, 'drain-once', { drain: [[DRAIN_LINES.seen, '  const seen = p.calls === 0 ? s.requests : s.requests.filter((r) => r.taken);   // every waiter present']], engine: [[TURN, '      if (e.passing) continue;\n']] });
-    ok(cwOnce.setup, 'CONTROL setup: the drain-once loop with a tick that skips a busy account (the r5 Part-1 shape) is reconstructed', cwOnce.missing);
+    ok(verdictOf(cwOnce.setup), 'CONTROL setup: the drain-once loop with a tick that skips a busy account (the r5 Part-1 shape) is reconstructed', cwOnce.missing);
     const ENGc = cwOnce.mod;
     // (1) the storm on the control: the timer's due rows are never fetched
     {
@@ -2138,9 +2138,9 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
       const calls = Wc.log.slice(logAt).map((l) => l.id);
       const pos = calls.indexOf('c0040');
       ec.stop();
-      ok(r.ok && pos === 40, `CONTROL: on the drain-once loop the request behind the 40-row pass is fetched only after every due row (position ${pos}) — the leg above would go red`, JSON.stringify({ r, pos }));
+      ok(gateOf(r.ok) && pos === 40, `CONTROL: on the drain-once loop the request behind the 40-row pass is fetched only after every due row (position ${pos}) — the leg above would go red`, JSON.stringify({ r, pos }));
     }
-    for (const r2 of copiesCensus(M6g.files, M6g.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+    for (const r2 of copiesCensus(M6g.files, M6g.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
   }
 }
 
@@ -2150,7 +2150,7 @@ console.log('⑦ history on demand');
   const wBefore = delivered.length;
   clock += 40e3;
   const w1 = await eng.watch('many', 'c0006');
-  ok(w1.ok && w1.fetched, 'opening a window on a stale conversation fetches it at once');
+  ok(gateOf(w1.ok) && verdictOf(w1.fetched), 'opening a window on a stale conversation fetches it at once');
   ok(eng.cadenceOf('many', 'c0006').tier === 'hot', 'an OPEN window makes its conversation hot (30 s)');
   let page = eng.store.readTail('many', 'c0006', { limit: 50 });
   let total = page.length, rounds = 0, last = null;
@@ -2162,22 +2162,22 @@ console.log('⑦ history on demand');
     if (!last.ok || last.exhausted) break;
   }
   const all = eng.store.readTail('many', 'c0006', { limit: 1000 });
-  ok(all.length === 120 && last && last.exhausted, `scrolling up fetches OLDER pages until the vendor has none (${all.length}/120, exhausted=${last && last.exhausted})`);
+  ok(all.length === 120 && gateOf(last) && verdictOf(last.exhausted), `scrolling up fetches OLDER pages until the vendor has none (${all.length}/120, exhausted=${last && last.exhausted})`);
   const sorted = all.every((r, i) => i === 0 || (all[i - 1].at < r.at || (all[i - 1].at === r.at && all[i - 1].vendorId < r.vendorId)));
   const raw = fs.readFileSync(eng.store.logPath('many', 'c0006'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  ok(sorted && raw.every((r, i) => i === 0 || raw[i - 1].at <= r.at), 'the backfill was PREPENDED in order (the log file itself is sorted)');
+  ok(gateOf(sorted) && verdictOf(raw.every((r, i) => i === 0 || raw[i - 1].at <= r.at)), 'the backfill was PREPENDED in order (the log file itself is sorted)');
   ok(new Set(raw.map((r) => r.vendorId)).size === raw.length, '…with no duplicate');
   ok(delivered.length === wBefore, 'backfill never enters the wake funnel (the account is assigned, nobody was woken)');
   clock += 2000;
   const noOlder = await eng.loadOlder('many', 'c0003', { before: 1, beforeId: '0', limit: 50 });
-  ok(noOlder.ok && noOlder.records.length === 0 && noOlder.exhausted, 'asking before the dawn of time answers exhausted, honestly');
+  ok(gateOf(noOlder.ok) && noOlder.records.length === 0 && verdictOf(noOlder.exhausted), 'asking before the dawn of time answers exhausted, honestly');
   // verify r6 (rule 19 on the aggregated IM): the end is REMEMBERED — a second ask, inside or past the floor, costs no vendor call and no unit
   { const calls0 = W.calls.older; const spent0 = eng.digest().adapters.find((a) => a.id === 'many').budget.spent;
     const again = await eng.loadOlder('many', 'c0003', { before: 1, beforeId: '0', limit: 50 });
     clock += 5000;
     const again2 = await eng.loadOlder('many', 'c0003', { before: 1, beforeId: '0', limit: 50 });
     const spent1 = eng.digest().adapters.find((a) => a.id === 'many').budget.spent;
-    ok(again.ok && again.exhausted && again.source === 'memory' && again2.source === 'memory' && W.calls.older === calls0 && spent1 === spent0, `the remembered end answers twice more with ZERO vendor calls (${W.calls.older - calls0}) and the minute's units untouched (${spent0} → ${spent1}) — rule 9 is judged after rule 19`, JSON.stringify([again.source, again2.source, W.calls.older - calls0, spent0, spent1])); }
+    ok(gateOf(again.ok) && gateOf(again.exhausted) && again.source === 'memory' && again2.source === 'memory' && W.calls.older === calls0 && spent1 === spent0, `the remembered end answers twice more with ZERO vendor calls (${W.calls.older - calls0}) and the minute's units untouched (${spent0} → ${spent1}) — rule 9 is judged after rule 19`, JSON.stringify([again.source, again2.source, W.calls.older - calls0, spent0, spent1])); }
 }
 
 // ═══ ⑧ attachments through the ROUTE ═══════════════════════════════════════
@@ -2191,22 +2191,22 @@ console.log('⑧ attachments: nosniff, sandbox, attachment unless a raster image
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
   const rec = eng.store.readTail('many', 'c0001', { limit: 50 }).find((r) => r.attachments && r.attachments.length);
-  ok(rec && rec.attachments.length === 3, 'the fixture record carries three attachments');
+  ok(gateOf(rec) && rec.attachments.length === 3, 'the fixture record carries three attachments');
   const get = (id, q = '') => fetch(`${base}/api/channels/many/c0001/attachment/${encodeURIComponent(id)}?msg=${encodeURIComponent(rec.vendorId)}${q}`);
   const img = await get('c0001-img', '&inline=1');
   const imgBytes = Buffer.from(await img.arrayBuffer());
-  ok(img.status === 200 && img.headers.get('content-type') === 'image/png' && /^inline/.test(img.headers.get('content-disposition')) && imgBytes.slice(1, 4).toString() === 'PNG', 'a PNG asked inline is served inline as image/png (the thumbnail)');
-  ok(img.headers.get('x-content-type-options') === 'nosniff' && /default-src 'none'; sandbox/.test(img.headers.get('content-security-policy') || ''), 'nosniff + a sandbox CSP on every attachment');
+  ok(img.status === 200 && img.headers.get('content-type') === 'image/png' && gateOf(/^inline/.test(img.headers.get('content-disposition'))) && imgBytes.slice(1, 4).toString() === 'PNG', 'a PNG asked inline is served inline as image/png (the thumbnail)');
+  ok(img.headers.get('x-content-type-options') === 'nosniff' && verdictOf(/default-src 'none'; sandbox/.test(img.headers.get('content-security-policy') || '')), 'nosniff + a sandbox CSP on every attachment');
   const txt = await get('c0001-doc', '&inline=1');
-  ok(txt.status === 200 && txt.headers.get('content-type') === 'application/octet-stream' && /^attachment/.test(txt.headers.get('content-disposition')) && /notes\.txt/.test(txt.headers.get('content-disposition')), 'a text file is ALWAYS a download (octet-stream, attachment) even when asked inline');
+  ok(txt.status === 200 && txt.headers.get('content-type') === 'application/octet-stream' && gateOf(/^attachment/.test(txt.headers.get('content-disposition'))) && verdictOf(/notes\.txt/.test(txt.headers.get('content-disposition'))), 'a text file is ALWAYS a download (octet-stream, attachment) even when asked inline');
   const svg = await get('c0001-svg', '&inline=1');
-  ok(svg.status === 200 && svg.headers.get('content-type') === 'application/octet-stream' && /^attachment/.test(svg.headers.get('content-disposition')), 'an SVG is never inline (it is script) — a download');
+  ok(svg.status === 200 && svg.headers.get('content-type') === 'application/octet-stream' && verdictOf(/^attachment/.test(svg.headers.get('content-disposition'))), 'an SVG is never inline (it is script) — a download');
   const calls0 = W.calls.attach;
   await get('c0001-img', '&inline=1');
   ok(W.calls.attach === calls0, 'a second request is served from the cache (no vendor call)');
   const dir = path.join(dirMain, 'channels', 'attachments', 'many', 'c0001');
   const files = fs.readdirSync(dir);
-  ok(files.length === 6 && files.every((f) => (fs.statSync(path.join(dir, f)).mode & 0o777) === 0o600), 'every cached file and its meta are mode 0600', files.map((f) => (fs.statSync(path.join(dir, f)).mode & 0o777).toString(8)).join());
+  ok(files.length === 6 && verdictOf(files.every((f) => (fs.statSync(path.join(dir, f)).mode & 0o777) === 0o600)), 'every cached file and its meta are mode 0600', files.map((f) => (fs.statSync(path.join(dir, f)).mode & 0o777).toString(8)).join());
   // CONCURRENT first fetches of ONE attachment (the blob is written async): each write has its own temp
   // file, every answer is whole, nothing half-written is left behind
   {
@@ -2214,7 +2214,7 @@ console.log('⑧ attachments: nosniff, sandbox, attachment unless a raster image
     for (const f of [h, h + '.json']) fs.unlinkSync(path.join(dir, f));
     const rs = await Promise.all([1, 2, 3].map(() => get('c0001-svg').then(async (r) => ({ status: r.status, body: Buffer.from(await r.arrayBuffer()).toString('hex') }))));
     const left0 = fs.readdirSync(dir);
-    ok(rs.every((r) => r.status === 200 && r.body === rs[0].body && r.body.length > 0) && !left0.some((f) => /\.tmp-/.test(f)) && left0.includes(h) && (fs.statSync(path.join(dir, h)).mode & 0o777) === 0o600,
+    ok(gateOf(rs.every((r) => r.status === 200 && r.body === rs[0].body && r.body.length > 0)) && !left0.some((f) => /\.tmp-/.test(f)) && gateOf(left0.includes(h)) && (fs.statSync(path.join(dir, h)).mode & 0o777) === 0o600,
       'three CONCURRENT first fetches of one attachment all answer the same whole bytes, and no temp file is left (0600 kept)', JSON.stringify({ statuses: rs.map((r) => r.status), left: left0.length }));
   }
   const forged = await fetch(`${base}/api/channels/many/c0001/attachment/img_not_ours?msg=${encodeURIComponent(rec.vendorId)}`);
@@ -2240,14 +2240,14 @@ console.log('⑧ attachments: nosniff, sandbox, attachment unless a raster image
   W.bigAttachments = 0;
   // the search route: async, over the account's logs
   const sr = await (await fetch(`${base}/api/channels/search?adapter=many&q=${encodeURIComponent('fresh news')}`)).json();
-  ok(sr.ok && sr.results.length === 1 && sr.results[0].convId === 'c0002' && sr.results[0].title === 'Room 2', 'search finds a message across the account\'s logs, named by its conversation', JSON.stringify(sr.results && sr.results[0] && { convId: sr.results[0].convId, title: sr.results[0].title }));
+  ok(gateOf(sr.ok) && sr.results.length === 1 && sr.results[0].convId === 'c0002' && sr.results[0].title === 'Room 2', 'search finds a message across the account\'s logs, named by its conversation', JSON.stringify(sr.results && sr.results[0] && { convId: sr.results[0].convId, title: sr.results[0].title }));
   const sr2 = await (await fetch(`${base}/api/channels/search?adapter=many%3A0000abcd&q=${encodeURIComponent('fresh news')}`)).json();
-  ok(sr2.ok && sr2.results.length === 0, '…and never in another account');
+  ok(gateOf(sr2.ok) && sr2.results.length === 0, '…and never in another account');
   // the reader routes
   const ov = await (await fetch(`${base}/api/channels/many/c0300/refresh`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ every: 300 }) })).json();
-  ok(ov.ok && ov.refresh.every === 300, 'PUT …/refresh sets the override');
+  ok(gateOf(ov.ok) && ov.refresh.every === 300, 'PUT …/refresh sets the override');
   const full = await (await fetch(`${base}/api/channels/many/c0300`)).json();
-  ok(full.conversation && full.conversation.refresh.every === 300 && full.conversation.reach && full.conversation.inherits && full.conversation.inherits.account && full.conversation.attachments === 'fetch', 'GET one conversation = the FULL view (reach, inherited grains, capabilities)');
+  ok(gateOf(full.conversation) && full.conversation.refresh.every === 300 && gateOf(full.conversation.reach) && gateOf(full.conversation.inherits) && gateOf(full.conversation.inherits.account) && full.conversation.attachments === 'fetch', 'GET one conversation = the FULL view (reach, inherited grains, capabilities)');
   server.close();
 }
 
@@ -2256,16 +2256,16 @@ console.log('⑨ assignment grains reach exactly their sets; ledgers per assignm
 {
   const A = { kind: 'agent', id: 'agent-A', groups: [] }, B = { kind: 'agent', id: 'agent-B', groups: [] }, C = { kind: 'agent', id: 'agent-C', groups: [] };
   const pat = await eng.setScopeAssignment('many', { kind: 'pattern' }, { principal: { kind: 'agent', id: 'agent-B', name: 'Beta' }, mode: 'all', notify: 'digest', digestMinutes: 30, pattern: { match: 'any', rules: [{ kind: 'title', value: 'gpu on-call' }] } });
-  ok(pat.ok && pat.assignment.scope.kind === 'pattern' && pat.assignment.patternLabel, 'a PATTERN assignment (title contains "gpu on-call") is saved', JSON.stringify(pat.error || ''));
+  ok(gateOf(pat.ok) && pat.assignment.scope.kind === 'pattern' && verdictOf(pat.assignment.patternLabel), 'a PATTERN assignment (title contains "gpu on-call") is saved', JSON.stringify(pat.error || ''));
   const conv = await eng.setAssignment('many', 'c0001', { principal: { kind: 'agent', id: 'agent-C', name: 'Gamma' }, mode: 'all' });
-  ok(conv.ok, 'a CONVERSATION assignment on c0001 is saved');
+  ok(verdictOf(conv.ok), 'a CONVERSATION assignment on c0001 is saved');
   const gpu = Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'many' && /GPU on-call/.test(e.title)).map((e) => e.key).sort();
   const listA = eng.listFor(A).conversations.filter((c) => c.adapterId === 'many');
   const listB = eng.listFor(B).conversations.map((c) => c.key).sort();
   const listC = eng.listFor(C).conversations.map((c) => c.key);
   const moreA = eng.listFor(A).more;   // design 008 S6 (lane channels-followups): the agent's list is the newest 200 + a count of the rest
   ok(listA.length === 200 && moreA === 673, 'the ACCOUNT grant makes all 873 visible to Alpha (the newest 200 listed, the other 673 counted)', JSON.stringify({ listed: listA.length, more: moreA }));
-  ok(eng.listFor(A).conversations.every((c) => c.adapterId === 'many'), '…and nothing of the other account of the same kind');
+  ok(verdictOf(eng.listFor(A).conversations.every((c) => c.adapterId === 'many')), '…and nothing of the other account of the same kind');
   ok(JSON.stringify(listB) === JSON.stringify(gpu) && gpu.length === 18, `the PATTERN reaches EXACTLY its ${gpu.length} matching conversations for Beta`, JSON.stringify(listB.slice(0, 3)));
   ok(listC.length === 1 && listC[0] === 'many/c0001', 'the CONVERSATION grant reaches exactly c0001 for Gamma');
   ok(eng.effectiveFor('many', 'c0001').source === 'conversation' && eng.effectiveFor('many', 'c0007').source === 'pattern' && eng.effectiveFor('many', 'c0100').source === 'account', 'effective: conversation > pattern > account');
@@ -2275,7 +2275,7 @@ console.log('⑨ assignment grains reach exactly their sets; ledgers per assignm
   W.add('c9999', { title: 'GPU on-call — new', lastAgo: 0, count: 1 });
   clock += 1000;
   await eng.pass('many', { force: true });
-  ok(eng.effectiveFor('many', 'c9999') && eng.effectiveFor('many', 'c9999').source === 'pattern' && eng.listFor(B).conversations.some((c) => c.id === 'c9999'), 'a conversation that appears later inherits the pattern in the SAME pass it is discovered');
+  ok(gateOf(eng.effectiveFor('many', 'c9999')) && eng.effectiveFor('many', 'c9999').source === 'pattern' && verdictOf(eng.listFor(B).conversations.some((c) => c.id === 'c9999')), 'a conversation that appears later inherits the pattern in the SAME pass it is discovered');
   // WAKES COUNT AGAINST ONE LEDGER PER ASSIGNMENT (account, cap 3)
   const already = eng.adapterView(eng.adapterRecords().adapters.find((r) => r.id === 'many')).assignment.stats.wakes24h;
   await eng.setScopeAssignment('many', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'wake', dailyWakeCap: already + 3 });
@@ -2287,11 +2287,11 @@ console.log('⑨ assignment grains reach exactly their sets; ledgers per assignm
   await eng.settleWakes();
   const woke = delivered.slice(d0).filter((d) => d.cid === 'agent-A');
   ok(woke.length === 3, `an account assignment with ${already} wakes already spent and a daily cap of ${already + 3} wakes 3 more times across 5 conversations (${woke.length}) — ONE ledger for the whole account, not one per conversation`);
-  ok(woke.every((d) => /\(you are watching the whole account\)/.test(d.text) && d.opts.spendReason === 'channel-message'), 'each inherited wake says why it is here and rides the spend authorizer\'s reason');
+  ok(verdictOf(woke.every((d) => /\(you are watching the whole account\)/.test(d.text) && d.opts.spendReason === 'channel-message')), 'each inherited wake says why it is here and rides the spend authorizer\'s reason');
   const acct = eng.adapterView(eng.adapterRecords().adapters.find((r) => r.id === 'many')).assignment;
-  ok(acct && acct.stats.wakes24h === already + 3, 'the account assignment\'s own ledger holds them', JSON.stringify(acct && acct.stats));
+  ok(gateOf(acct) && acct.stats.wakes24h === already + 3, 'the account assignment\'s own ledger holds them', JSON.stringify(acct && acct.stats));
   const heldRow = eng.conversationView('many', targets[4]);
-  ok(heldRow.stats.pending >= 1 && new RegExp(`daily wake cap reached \\(${already + 3} of ${already + 3} in 24 h\\)`).test((heldRow.stats.lastRefusal || {}).why || ''), 'the capped hits are HELD on their conversation, with the named refusal', JSON.stringify(heldRow.stats.lastRefusal));
+  ok(heldRow.stats.pending >= 1 && verdictOf(new RegExp(`daily wake cap reached \\(${already + 3} of ${already + 3} in 24 h\\)`).test((heldRow.stats.lastRefusal || {}).why || '')), 'the capped hits are HELD on their conversation, with the named refusal', JSON.stringify(heldRow.stats.lastRefusal));
   // THE SCOPE DIGEST: the pattern (notify digest) delivers ONE block for all its conversations
   const d1 = delivered.length;
   for (const id of ['c0007', 'c0057', 'c0107']) W.convs.get(id).recs.push({ vendorId: `${id}-gpu`, at: clock + 700, author: { id: 'u-2', name: 'Cass' }, text: `GPU alert in ${id}`, attachments: [] });
@@ -2302,11 +2302,11 @@ console.log('⑨ assignment grains reach exactly their sets; ledgers per assignm
   const fl = await eng.flushScope('many', 'pattern', pat.assignment.id);
   await eng.settleWakes();
   const dg = delivered.slice(d1);
-  ok(fl.ok && dg.length === 1 && dg[0].cid === 'agent-B' && /### Channel digest — many · 3 conversations, 3 messages/.test(dg[0].text), 'the window delivers ONE block listing the 3 conversations', dg[0] && dg[0].text.split('\n')[0]);
+  ok(gateOf(fl.ok) && dg.length === 1 && dg[0].cid === 'agent-B' && verdictOf(/### Channel digest — many · 3 conversations, 3 messages/.test(dg[0].text)), 'the window delivers ONE block listing the 3 conversations', dg[0] && dg[0].text.split('\n')[0]);
   // R4: the account watcher (Alpha, capped out) still watches these three too — per principal, a rule's watcher never silences another's — so
   // Alpha's held hits stay; Beta's (the rule's digest) are exactly the ones cleared
-  ok(['c0007', 'c0057', 'c0107'].every((id) => !(eng.store.index.live()[`many/${id}`].pending || []).some((p) => p.for === 'agent:agent-B')), '…and clears exactly THOSE pending hits (Beta\'s)');
-  ok(['c0007', 'c0057', 'c0107'].every((id) => (eng.store.index.live()[`many/${id}`].pending || []).some((p) => p.for === 'agent:agent-A')), '…while Alpha\'s — held by ITS OWN cap — stay pending for Alpha (another principal\'s rule never masks its notification)');
+  ok(verdictOf(['c0007', 'c0057', 'c0107'].every((id) => !(eng.store.index.live()[`many/${id}`].pending || []).some((p) => p.for === 'agent:agent-B'))), '…and clears exactly THOSE pending hits (Beta\'s)');
+  ok(verdictOf(['c0007', 'c0057', 'c0107'].every((id) => (eng.store.index.live()[`many/${id}`].pending || []).some((p) => p.for === 'agent:agent-A'))), '…while Alpha\'s — held by ITS OWN cap — stay pending for Alpha (another principal\'s rule never masks its notification)');
   // un-assigning the account removes ONLY its grant: Alpha keeps nothing, Beta keeps its pattern set
   await eng.setScopeAssignment('many', { kind: 'account' }, null);
   ok(eng.listFor(A).conversations.length === 0 && eng.listFor(B).conversations.length === gpu.length + 1, 'un-assigning the account removes exactly its reach; the pattern\'s stands');
@@ -2348,7 +2348,7 @@ async function capRace(ENGmod, label, grain) {
 {
   for (const grain of ['account', 'pattern']) {
     const r = await capRace(ENG, grain, grain);
-    ok(r.ok && r.n >= 98, `FIXTURE: the ${grain} grain covers ${r.n} conversations, cap 5, a 20 ms ladder`);
+    ok(gateOf(r.ok) && r.n >= 98, `FIXTURE: the ${grain} grain covers ${r.n} conversations, cap 5, a 20 ms ladder`);
     ok(r.woke === 5 && r.wakes24h === 5, `the ${grain} grain woke EXACTLY its cap (${r.woke} deliveries, ledger ${r.wakes24h}) — not one per conversation of the burst`);
     ok(r.held === r.n - 5, `…and the other ${r.n - 5} conversations are HELD with the named refusal "daily wake cap reached (5 of 5 in 24 h)" (${r.held})`);
   }
@@ -2362,7 +2362,7 @@ async function capRace(ENGmod, label, grain) {
   const E9 = M9.load('src/server/channels-engine.js', unscoped, 'unscoped');
   const rc = await capRace(E9, 'ctl', 'account');
   ok(rc.woke > 5, `CONTROL: without the scope queue the same burst wakes ${rc.woke} times past a cap of 5 — the legs above would go red`);
-  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 // R4 (2026-09-27, access and notification are two operations): TWO WATCHERS
@@ -2404,7 +2404,7 @@ async function capRace2(ENGmod, label) {
 }
 {
   const r = await capRace2(ENG, 'real');
-  ok(r.ok && r.n >= 98, `FIXTURE: access for Xi, Ypsilon and group 工作; watchers Xi (cap 5) and Ypsilon (cap 5); ${r.n} conversations; a 20 ms ladder`);
+  ok(gateOf(r.ok) && r.n >= 98, `FIXTURE: access for Xi, Ypsilon and group 工作; watchers Xi (cap 5) and Ypsilon (cap 5); ${r.n} conversations; a 20 ms ladder`);
   ok(r.x === 5 && r.y === 5 && r.ledX === 5 && r.ledY === 5, `each watcher woke EXACTLY its own cap — Xi ${r.x} (ledger ${r.ledX}), Ypsilon ${r.y} (ledger ${r.ledY}) — per (principal, scope), neither eating the other's`);
   ok(r.w === 0 && !r.workWatcher && r.pendingWork === 0, `group 工作 has ACCESS ONLY: across the burst and a 2.5 s storm of ${r.storm} further refreshes it was woken ${r.w} times, holds no watcher, no ledger, no pending hit`);
   ok(r.listW === r.n, `…and yet its member SEES every conversation of the account (${r.listW}) — access is reach, nothing else`);
@@ -2418,7 +2418,7 @@ async function capRace2(ENGmod, label) {
   const E9c = M9c.load('src/server/channels-engine.js', unscoped, 'unscoped2');
   const rc = await capRace2(E9c, 'ctl');
   ok(rc.x > 5 && rc.y > 5, `CONTROL: without the per-(scope, principal) queue the same burst wakes Xi ${rc.x} and Ypsilon ${rc.y} times past their caps of 5 — the leg above would go red`);
-  for (const r2 of copiesCensus(M9c.files, M9c.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  for (const r2 of copiesCensus(M9c.files, M9c.dir, REPO, { minCopies: 1 })) ok(verdictOf(r2.pass), r2.name, r2.detail);
 }
 
 // R4 UI WIRING (source pins; the heavy test-channels-aggregate-ui drives the same in chrome):
@@ -2454,7 +2454,7 @@ console.log('⑩ a restart keeps everything; the migration turns tracked into ho
   await rep.write;
   const live = em.store.index.live();
   ok(rep.hot.sort().join() === 'many/t1,many/t3' && live['many/t1'].refresh.every === 30 && live['many/t1'].refresh.by === 'migration', 'tracked ⇒ hot: every tracked conversation gets refresh.every = 30 (by migration)', JSON.stringify(rep));
-  ok(Object.values(live).every((e) => !('tracked' in e)), 'the `tracked` field is gone everywhere');
+  ok(verdictOf(Object.values(live).every((e) => !('tracked' in e))), 'the `tracked` field is gone everywhere');
   ok(live['many/t2'].readAt === clock && live['many/t1'].readAt === 5, 'a never-ingested conversation\'s backlog is read (readAt stamped); an ingested one keeps its mark');
   ok(!!live['many/t3'].assignment && live['many/t3'].assignment.principal.id === 'agent-A', 'assignments are kept');
   ok(em.adapterRecords().adapters[0].linkedAt === clock, 'the account is stamped linkedAt');
@@ -2476,10 +2476,10 @@ console.log('⑫ the change feed at the owner\'s scale: measuring = ② + the fe
   let { eng: ef } = mkEngine('feed', { kinds: [kf], now, dataDir: dirF });
   const diffOf = (b) => { const m = new Map(); for (const [k, v] of Wf.calls.history) { const d0 = v - (b.get(k) || 0); if (d0) m.set(k, d0); } return m; };
   const tierOf = (id) => { const i = Number(id.slice(1)); return i < 50 ? 'hot' : i < 250 ? 'warm' : 'cold'; };
-  ok(await ingestAll(ef, 'feedy', 8), 'the owner\'s 873 conversations are discovered and read with the feed declared');
+  ok(verdictOf(await ingestAll(ef, 'feedy', 8)), 'the owner\'s 873 conversations are discovered and read with the feed declared');
   for (let i = 0; i < 6; i++) { clock += 31e3; await ef.pass('feedy'); }   // the single-chat catch-up pages out (the world's 97 single chats, 3 days old — known, no births needed)
   const recF = () => ef.adapterRecords().adapters.find((r) => r.id === 'feedy');
-  ok(recF().feed && recF().feed.catchUp && recF().feed.catchUp.done && recF().feed.mode === 'measuring', 'the first run\'s catch-up is done; the feed is MEASURING', JSON.stringify(recF().feed && { cu: recF().feed.catchUp, mode: recF().feed.mode }));
+  ok(gateOf(recF().feed) && gateOf(recF().feed.catchUp) && gateOf(recF().feed.catchUp.done) && recF().feed.mode === 'measuring', 'the first run\'s catch-up is done; the feed is MEASURING', JSON.stringify(recF().feed && { cu: recF().feed.catchUp, mode: recF().feed.mode }));
   // MEASURING: the call count is ②'s arithmetic + the feed's own pages — nothing relaxed
   {
     clock += 900e3; await ef.pass('feedy');   // every row polled once: a clean slate
@@ -2488,7 +2488,7 @@ console.log('⑫ the change feed at the owner\'s scale: measuring = ② + the fe
     clock += 31e3; await ef.pass('feedy');
     const d = diffOf(b);
     const bud1 = ef.budgetOf('feedy');
-    ok(d.size === 50 && [...d.keys()].every((k) => tierOf(k) === 'hot') && Wf.calls.changes - c0 === 1, `measuring at +31 s: EXACTLY the 50 hot rows (②) + ONE feed page (${d.size} + ${Wf.calls.changes - c0})`, JSON.stringify({ d: d.size, pages: Wf.calls.changes - c0 }));
+    ok(d.size === 50 && gateOf([...d.keys()].every((k) => tierOf(k) === 'hot')) && Wf.calls.changes - c0 === 1, `measuring at +31 s: EXACTLY the 50 hot rows (②) + ONE feed page (${d.size} + ${Wf.calls.changes - c0})`, JSON.stringify({ d: d.size, pages: Wf.calls.changes - c0 }));
     ok(bud1.spent - bud0.spent === 51 && bud1.spentBy.timer - bud0.spentBy.timer === 51 && bud1.spentBy.owner === bud0.spentBy.owner, 'the feed page is counted in the minute\'s budget and charged to the TIMER (50 fetches + 1 page)', JSON.stringify([bud0, bud1]));
   }
   // lane lark-search-miss: a promotion needs THREE clean full polling cycles of measurement (each ≈ 1 020 s here)
@@ -2506,16 +2506,16 @@ console.log('⑫ the change feed at the owner\'s scale: measuring = ② + the fe
     const b = new Map(Wf.calls.history);
     clock += 31e3; await ef.watch('feedy', 'c0003'); await ef.pass('feedy');
     let d = diffOf(b);
-    ok(d.size <= 1 && [...d.keys()].every((k) => k === 'c0003'), `carrying at +31 s: the 50 hot rows are NOT polled — only the open window (${[...d.keys()].join(',') || 'none'})`, JSON.stringify([...d.keys()]));
+    ok(d.size <= 1 && verdictOf([...d.keys()].every((k) => k === 'c0003')), `carrying at +31 s: the 50 hot rows are NOT polled — only the open window (${[...d.keys()].join(',') || 'none'})`, JSON.stringify([...d.keys()]));
     const traffic2 = () => { const x = Wf.convs.get('c0120'); x.recs.push({ vendorId: `c0120-owed${++mid}`, at: clock - 25e3, author: { id: 'u-2', name: 'Cass' }, text: 'owed', attachments: [] }); };
     const b2 = new Map(Wf.calls.history);
     clock += 31e3; traffic2(); await ef.watch('feedy', 'c0003'); await ef.pass('feedy');
     d = diffOf(b2);
-    ok(d.has('c0120') && [...d.keys()].every((k) => k === 'c0120' || k === 'c0003'), 'a WARM row the search named is fetched at once (its owed mark) — nothing else but the open window', JSON.stringify([...d.keys()]));
+    ok(gateOf(d.has('c0120')) && verdictOf([...d.keys()].every((k) => k === 'c0120' || k === 'c0003')), 'a WARM row the search named is fetched at once (its owed mark) — nothing else but the open window', JSON.stringify([...d.keys()]));
     const b3 = new Map(Wf.calls.history);
     clock += 240e3; await ef.pass('feedy');
     d = diffOf(b3);
-    ok(d.size >= 245 && [...d.keys()].every((k) => tierOf(k) !== 'cold'), `the 5-minute net: ${d.size} hot + warm rows polled together, no cold one`, JSON.stringify(d.size));
+    ok(d.size >= 245 && verdictOf([...d.keys()].every((k) => tierOf(k) !== 'cold')), `the 5-minute net: ${d.size} hot + warm rows polled together, no cold one`, JSON.stringify(d.size));
     ok(ef.cadenceOf('feedy', 'c0500').seconds === 900 && ef.cadenceOf('feedy', 'c0001').seconds === 300 && ef.cadenceOf('feedy', 'c0001').source === 'feed-safety', 'carrying: a hot row relaxes to 300 s, a cold row stays at 900 (never polled MORE)');
     const perMin = 2 + 250 / 5 + 623 / 15;
     ok(Math.round(perMin) === 94, `the carrying arithmetic: 2 feed pages + 250 rows ÷ 5 min + 623 ÷ 15 min ≈ ${perMin.toFixed(1)} requests/min (② was ≈ 182) — plus the owed fetches real traffic causes`);
@@ -2533,12 +2533,12 @@ console.log('⑫ the change feed at the owner\'s scale: measuring = ② + the fe
     await ef.pass('feedy');
     const win1 = recF().feed.window;
     const owed1 = Object.values(ef.store.index.live()).filter((e) => e.adapterId === 'feedy' && e.feedOwedAt).length;
-    ok(win1 && (Wf.calls.feedAt || []).length - p0 === 5 && owed1 > 0, `one pass reads ${(Wf.calls.feedAt || []).length - p0} pages (the per-pass bound), leaves the window IN FLIGHT and ${owed1} owed marks — then the process dies at its first fetch`, JSON.stringify(win1));
+    ok(gateOf(win1) && (Wf.calls.feedAt || []).length - p0 === 5 && owed1 > 0, `one pass reads ${(Wf.calls.feedAt || []).length - p0} pages (the per-pass bound), leaves the window IN FLIGHT and ${owed1} owed marks — then the process dies at its first fetch`, JSON.stringify(win1));
     // restart mid-window: the window and the owed marks are on disk
     ({ eng: ef } = mkEngine('feed', { kinds: [kf], now, dataDir: dirF }));
     const win2 = recF().feed.window;
     const owed2 = Object.values(ef.store.index.live()).filter((e) => e.adapterId === 'feedy' && e.feedOwedAt).length;
-    ok(win2 && win2.from === win1.from && win2.to === win1.to && owed2 === owed1, `a RESTART keeps the feed's window (${win2 && win2.from}…${win2 && win2.to}) and every owed mark (${owed2} of ${owed1})`);
+    ok(gateOf(win2) && win2.from === win1.from && win2.to === win1.to && owed2 === owed1, `a RESTART keeps the feed's window (${win2 && win2.from}…${win2 && win2.to}) and every owed mark (${owed2} of ${owed1})`);
     for (let i = 0; i < 6 && recF().feed.window; i++) { clock += 31e3; await ef.pass('feedy'); }
     const at = (Wf.calls.feedAt || []).slice(p0).sort((a, b) => a - b);
     let worst = 0; for (let i = 0, j = 0; j < at.length; j++) { while (at[j] - at[i] >= 60e3) i++; worst = Math.max(worst, j - i + 1); }
@@ -2551,7 +2551,7 @@ console.log('⑫ the change feed at the owner\'s scale: measuring = ② + the fe
     Wf.feed.dropRate = 0.05;
     for (let round = 0; round < 24; round++) { clock += 31e3; traffic(40); await ef.pass('feedy'); }
     const v2 = ef.adapterView(recF()).feed;
-    ok(v2.state === 'demoted' && v2.measured.rate > 0.02 && recF().feed.lastFlip && recF().feed.lastFlip.to === 'demoted', `the search hid 5 % of new messages; the 5-minute net found them ⇒ DEMOTED (${v2.measured.missed} of ${v2.measured.total})`, JSON.stringify(v2.measured));
+    ok(v2.state === 'demoted' && v2.measured.rate > 0.02 && gateOf(recF().feed.lastFlip) && recF().feed.lastFlip.to === 'demoted', `the search hid 5 % of new messages; the 5-minute net found them ⇒ DEMOTED (${v2.measured.missed} of ${v2.measured.total})`, JSON.stringify(v2.measured));
     ok(ef.cadenceOf('feedy', 'c0001').seconds === 30 && ef.cadenceOf('feedy', 'c0001').source === 'tier', 'demoted: a hot row is back at 30 s (② returns — the fallback needs no code of its own)');
   }
   ef.stop();
@@ -2564,7 +2564,7 @@ console.log('⑪ controls: the old discovery bound, a scheduler that polls every
   const esrc = engineSource(REPO);
   // (a) the pre-fix discovery: every pass restarts the cursor, 5 pages at most
   const discOld = esrc.replace('const DISCOVERY_MAX_PAGES = 200;', 'const DISCOVERY_MAX_PAGES = 5;').replace('    if (!d.cursor) d.startedAt = now();', '    d.cursor = null; d.startedAt = now();');
-  ok(discOld !== esrc && discOld.includes('DISCOVERY_MAX_PAGES = 5'), 'CONTROL setup: the pre-fix discovery is reconstructed from the shipped bytes');
+  ok(discOld !== esrc && verdictOf(discOld.includes('DISCOVERY_MAX_PAGES = 5')), 'CONTROL setup: the pre-fix discovery is reconstructed from the shipped bytes');
   const E1 = M.load('src/server/channels-engine.js', discOld, 'disc5');
   const Wc = makeWorld(clock, { n: 873 });
   const dirC = path.join(ROOT, 'ctl-disc');
@@ -2646,9 +2646,9 @@ console.log('⑪ controls: the old discovery bound, a scheduler that polls every
     };
     const realOwed = await runOwed(ENG, 'real');
     const memOwed = await runOwed(M.load('src/server/channels-engine.js', esrc.replace(OWED, '          if (en) e.dueNow.add(en.key);'), 'owed-in-memory'), 'mem');
-    ok(realOwed && !memOwed, `CONTROL: owed marks kept in memory only — the restart loses the hit (real ${realOwed}, in-memory copy ${memOwed}); the durable mark is what finds it`);
+    ok(gateOf(realOwed) && !memOwed, `CONTROL: owed marks kept in memory only — the restart loses the hit (real ${realOwed}, in-memory copy ${memOwed}); the durable mark is what finds it`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the updates, never ask each conversation): an AUTHORITATIVE feed replaces every per-row timer; the due list is an index");
@@ -2698,20 +2698,20 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
   const legs = [];
   for (const n of [1000, 10000, 90000]) legs.push([n, await runHist(ENG, n, { settle: true })]);
   for (const [n, r] of legs) console.log(`    ${n} rows: a pass = ${r.calls} vendor calls (feed ${r.feed} + named reads ${r.hist} + listing ${r.list}) · ${r.ms.toFixed(1)} ms · discovery read ${r.setupHist} rows`);
-  ok(legs.every(([n, r]) => r.rows === n), 'every world is discovered whole (1 000 / 10 000 / 90 000 rows)', legs.map(([n, r]) => `${n}:${r.rows}`).join(' '));
-  ok(legs.every(([, r]) => r.setupHist === 0), 'discovery names rows and reads NONE of them (no per-row read rides the walk under the authoritative feed)', legs.map(([, r]) => r.setupHist).join(' '));
-  ok(legs.every(([, r]) => r.calls === 21 && r.feed === 1 && r.hist === 20 && r.list === 0), "OWNER'S LAW: a pass = 1 feed call + the 20 named rows = 21 vendor calls at 1 000, 10 000 AND 90 000 rows", legs.map(([n, r]) => `${n}:${r.calls}`).join(' '));
-  ok(legs.every(([, r]) => r.fetched.length === 20 && r.fetched.every((id) => r.named.includes(id))), 'the reads are EXACTLY the rows the feed named — no other row is asked whether it changed');
+  ok(verdictOf(legs.every(([n, r]) => r.rows === n)), 'every world is discovered whole (1 000 / 10 000 / 90 000 rows)', legs.map(([n, r]) => `${n}:${r.rows}`).join(' '));
+  ok(verdictOf(legs.every(([, r]) => r.setupHist === 0)), 'discovery names rows and reads NONE of them (no per-row read rides the walk under the authoritative feed)', legs.map(([, r]) => r.setupHist).join(' '));
+  ok(verdictOf(legs.every(([, r]) => r.calls === 21 && r.feed === 1 && r.hist === 20 && r.list === 0)), "OWNER'S LAW: a pass = 1 feed call + the 20 named rows = 21 vendor calls at 1 000, 10 000 AND 90 000 rows", legs.map(([n, r]) => `${n}:${r.calls}`).join(' '));
+  ok(verdictOf(legs.every(([, r]) => r.fetched.length === 20 && r.fetched.every((id) => r.named.includes(id)))), 'the reads are EXACTLY the rows the feed named — no other row is asked whether it changed');
   const big = legs[2][1];
   // the pass's remaining O(rows) cost is the scheduler VIEW (`schedulerScan`, the card's census — lane channel-drain-scale paces it), not the due path
   console.log(`    the 90 000-row pass: ${big.ms.toFixed(1)} ms wall (the scheduler card's census included; it read ${big.censusRows} rows, ${big.built} index builds); due rows by the clock before it: ${big.dueBefore}; the settle pass after discovery (the index's one build): ${big.settleMs.toFixed(1)} ms`);
   // lane scheduler-census-index (B-7978): the census is an index — a pass is O(due + touched) (≈ 290 ms before: the walk)
   ok(big.ms < 100 && big.built === 0 && big.censusRows < 1000, `a 90 000-row pass < 100 ms wall, the scheduler card's census included (${big.ms.toFixed(1)} ms; the census read ${big.censusRows} rows, no build)`);
-  ok(legs.every(([, r]) => r.dueBefore === 0), 'under the carrying authoritative feed the clock makes NO row due (feed-only), at every size', legs.map(([n, r]) => `${n}:${r.dueBefore}`).join(' '));
+  ok(verdictOf(legs.every(([, r]) => r.dueBefore === 0)), 'under the carrying authoritative feed the clock makes NO row due (feed-only), at every size', legs.map(([n, r]) => `${n}:${r.dueBefore}`).join(' '));
   // the open window: a watched row keeps its hot refresh (the owner looking) — the feed names nothing, it is read
   const watched = 'c0007';
   const rw = await runHist(ENG, 1000, { changed: 0, watchId: watched, label: 'watch' });
-  ok(rw.fetched.includes(watched) && rw.fetched.length === 1 && rw.feed === 1, `an OPEN window's row is refreshed though the feed named nothing (reads: ${rw.fetched.join(',') || 'none'})`);
+  ok(gateOf(rw.fetched.includes(watched)) && rw.fetched.length === 1 && rw.feed === 1, `an OPEN window's row is refreshed though the feed named nothing (reads: ${rw.fetched.join(',') || 'none'})`);
   // CONTROL ① the per-row timer restored (feed-only answers the tiers again) ⇒ thousands due
   const timerSrc = swap(CAPS_SRC, FEED_ONLY_NEEDLE, "  if (false) {\n", 'feed-only branch');
   const rt = await runHist(engOverCaps(timerSrc, 'row-timer'), 10000, { label: 'timer' });
@@ -2721,7 +2721,7 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
   // CONTROL ④ the watched row's refresh removed ⇒ the open window never refreshes
   const noWatchSrc = swap(CAPS_SRC, FEED_ONLY_NEEDLE, "  if (l.pollCadence === 'feed-only') {\n", 'watched hot refresh');
   const rnw = await runHist(engOverCaps(noWatchSrc, 'no-watch'), 1000, { changed: 0, watchId: watched, label: 'nowatch' });
-  ok(!rnw.fetched.includes(watched) && rw.fetched.includes(watched), "CONTROL: the watched row's hot refresh removed ⇒ the open window is never refreshed (real: read; copy: not)");
+  ok(!rnw.fetched.includes(watched) && verdictOf(rw.fetched.includes(watched)), "CONTROL: the watched row's hot refresh removed ⇒ the open window is never refreshed (real: read; copy: not)");
   // CONTROL ③ a MEASURED feed treated as authoritative ⇒ Lark's relaxed net is gone (PURE: channel-caps)
   const measured = { ...fake.fakePoll.caps, changeFeed: { via: 'search', scope: null, pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, describes: false, timeUnit: 'ms' } };
   const feedRec = { feed: { mode: 'carrying', lastOkAt: clock - 1000 } };
@@ -2762,7 +2762,7 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
   const scanEng = Mf.load('src/server/channels-engine.js', swap(ENGINE_SRC, '    if (all) {\n      const live = store.index.live();   // B-dfa4 U2: this account\'s rows only (the store keeps each account\'s keys)\n      for (const k of store.index.keysOf(rec.id)) { const en = live[k]; if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true); }', '    if (true) {\n      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, all);', 'indexed dueList'), 'due-scan');
   const s10 = await meter(scanEng, 10000, 20, 'scan'), s90 = await meter(scanEng, 90000, 20, 'scan');
   ok(s90.got === 20 && s10.reads >= 10000 && s90.reads >= 90000, `CONTROL: the scan restored ⇒ the walk reads EVERY row (counted rows read a call: 10 000 rows ${s10.reads}, 90 000 rows ${s90.reads}; ${s90.ms.toFixed(2)} ms, printed)`, { s10, s90 });
-  for (const r of copiesCensus(Mf.files, Mf.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(Mf.files, Mf.dir, REPO, { minCopies: 2 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE history walk from the saved cursor — never a whole-index pass");
@@ -2813,10 +2813,10 @@ console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE h
   ok(real.st.state === 'catching-up' && real.st.carrying === true && real.st.gapSince > 0, `after 20 min of silence the cursor feed is CATCHING UP and still carrying (state ${real.st.state})`, JSON.stringify(real.st));
   ok(real.dueBefore === 0, `the clock makes NO row due across the gap (the tiers stay parked): ${real.dueBefore} due`);
   ok(real.c.feed === 1 && real.c.pages <= Math.ceil(NAMED / PAGE) && real.c.hist === NAMED && real.c.list === 0, `exactly ONE history walk (${real.c.feed} call, ${real.c.pages} pages ≤ ceil(${NAMED}/${PAGE})) + the ${NAMED} named reads, 0 listing pages`, JSON.stringify(real.c));
-  ok(real.c.reads.every((id) => real.named.includes(id)) && real.c.reads.length === NAMED, '0 per-row reads: every read is a conversation the walk named');
-  ok(real.after.state === 'carrying' && real.after.carrying && real.since1 === real.since0 && real.since0 > 0, `the feed is carrying after the walk — the persisted fact's since unchanged (${real.since0})`, JSON.stringify(real.after));
+  ok(gateOf(real.c.reads.every((id) => real.named.includes(id))) && real.c.reads.length === NAMED, '0 per-row reads: every read is a conversation the walk named');
+  ok(real.after.state === 'carrying' && gateOf(real.after.carrying) && real.since1 === real.since0 && real.since0 > 0, `the feed is carrying after the walk — the persisted fact's since unchanged (${real.since0})`, JSON.stringify(real.after));
   const jl = real.lines.filter((l) => /the change feed resumed after/.test(l));
-  ok(jl.length === 1 && jl[0].includes(`resumed after 20 min — ${real.c.pages} history pages, ${NAMED} conversations touched, 0 per-row reads`), `ONE journal line per gap: ${jl[0] || '(none)'}`, JSON.stringify(jl));
+  ok(jl.length === 1 && verdictOf(jl[0].includes(`resumed after 20 min — ${real.c.pages} history pages, ${NAMED} conversations touched, 0 per-row reads`)), `ONE journal line per gap: ${jl[0] || '(none)'}`, JSON.stringify(jl));
   ok(before.dueBefore >= 9000 && before.c.hist > 1000, `CONTROL the base rule (silence = not carrying): ${before.dueBefore} rows due, ${before.c.hist} reads in the pass — the whole-index pass`, JSON.stringify({ due: before.dueBefore, c: { ...before.c, reads: before.c.reads.length } }));
   // ── THE SERVER-RESTART LEG: stopped, +30 min, started on the same store ⇒ the same ONE walk, carrying persisted ──
   const rs = await runGap(ENG, 'restart', async (G) => {
@@ -2829,7 +2829,7 @@ console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE h
     return { named, st, dueBefore, c: G.count(), lines: G.lines.slice(), since0: G.since0, since1: G.rec().feed.carrying && G.rec().feed.carrying.since };
   });
   ok(rs.st.carrying === true && rs.st.state === 'catching-up' && rs.since1 === rs.since0 && rs.since0 > 0, `a restart 30 min later boots CARRYING from the persisted fact (since ${rs.since0}), catching up — never re-derived from an empty measurement`, JSON.stringify(rs.st));
-  ok(rs.dueBefore === 0 && rs.c.feed === 1 && rs.c.hist === NAMED && rs.c.reads.every((id) => rs.named.includes(id)) && rs.c.list === 0, `the boot pass is the same ONE walk + ${NAMED} named reads, 0 due by the clock, 0 listing pages (lane discovery-cursor-persist: ${rs.c.list})`, JSON.stringify({ due: rs.dueBefore, c: { ...rs.c, reads: rs.c.reads.length } }));
+  ok(rs.dueBefore === 0 && rs.c.feed === 1 && rs.c.hist === NAMED && gateOf(rs.c.reads.every((id) => rs.named.includes(id))) && rs.c.list === 0, `the boot pass is the same ONE walk + ${NAMED} named reads, 0 due by the clock, 0 listing pages (lane discovery-cursor-persist: ${rs.c.list})`, JSON.stringify({ due: rs.dueBefore, c: { ...rs.c, reads: rs.c.reads.length } }));
   ok(rs.lines.filter((l) => /the change feed resumed after 30 min/.test(l)).length === 1, 'ONE journal line for the restart gap (30 min)', JSON.stringify(rs.lines.filter((l) => /resumed/.test(l))));
   // ── THE 404 LEG: an expired cursor ⇒ the listing re-walk, as built (no per-row read) ──
   const ex = await runGap(ENG, 'expired', async (G) => {
@@ -2838,7 +2838,7 @@ console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE h
     for (let i = 0; i < 3; i++) { await G.eng.pass('gap'); clock += 1000; }
     return { c: G.count(), st: G.state(), lines: G.lines.slice() };
   });
-  ok(ex.c.list >= Math.ceil(N / 100) && ex.c.hist === 0 && ex.st.carrying, `an expired cursor (404) ⇒ the listing re-walk (${ex.c.list} listing pages), 0 per-row reads, no catch-up line`, JSON.stringify({ c: { ...ex.c, reads: ex.c.reads.length }, st: ex.st.state }));
+  ok(ex.c.list >= Math.ceil(N / 100) && ex.c.hist === 0 && verdictOf(ex.st.carrying), `an expired cursor (404) ⇒ the listing re-walk (${ex.c.list} listing pages), 0 per-row reads, no catch-up line`, JSON.stringify({ c: { ...ex.c, reads: ex.c.reads.length }, st: ex.st.state }));
   ok(!ex.lines.some((l) => /resumed after/.test(l)), 'the rewalk is not said as a catch-up');
   // ── THE RATE-LIMIT-MID-WALK LEG: parked by name, resumed from the cursor, never a whole-index pass ──
   const rl = await runGap(ENG, 'rate', async (G) => {
@@ -2854,12 +2854,12 @@ console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE h
   });
   ok(rl.parked.st.state === 'backoff' && rl.parked.st.why === 'rate-limited' && rl.parked.st.carrying === true && rl.parked.f.why === 'rate-limited' && rl.parked.due === 0 && rl.parked.c.hist === 0, `a rate refusal mid-walk PARKS by name (backoff · rate-limited), still carrying: 0 rows due, 0 reads while parked`, JSON.stringify(rl.parked));
   ok(rl.lines.filter((l) => /catch-up was limited by the vendor — parked by name/.test(l)).length === 1, 'the park is said once in the journal, by name', JSON.stringify(rl.lines.filter((l) => /parked/.test(l))));
-  ok(rl.due2 === 0 && rl.c.feed === 2 && rl.c.hist === NAMED && rl.c.reads.every((id) => rl.named.includes(id)) && rl.after.state === 'carrying', `resumed past the park: the walk again from the cursor + the ${NAMED} named reads — never a whole-index pass (reads ${rl.c.hist}, due ${rl.due2})`, JSON.stringify({ c: { ...rl.c, reads: rl.c.reads.length }, after: rl.after.state }));
+  ok(rl.due2 === 0 && rl.c.feed === 2 && rl.c.hist === NAMED && gateOf(rl.c.reads.every((id) => rl.named.includes(id))) && rl.after.state === 'carrying', `resumed past the park: the walk again from the cursor + the ${NAMED} named reads — never a whole-index pass (reads ${rl.c.hist}, due ${rl.due2})`, JSON.stringify({ c: { ...rl.c, reads: rl.c.reads.length }, after: rl.after.state }));
   // the card's words for the two gap states (feedText — "catching up since <t>")
   const words = caps.feedText({ state: 'catching-up', gapSince: real.st.gapSince }, { clock: () => 'HH:MM' });
   const wordsPark = caps.feedText({ state: 'backoff', why: 'rate-limited', carrying: true, gapSince: 1, until: 2 }, { vendor: 'Gmail', clock: () => 'HH:MM' });
-  ok(words === 'Catching up since HH:MM — the change feed resumes from where it stopped' && /^Catching up since HH:MM — Gmail asked the change feed to wait/.test(wordsPark), `the card says it: "${words}" · "${wordsPark}"`);
-  for (const r of copiesCensus(Mg.files, Mg.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+  ok(words === 'Catching up since HH:MM — the change feed resumes from where it stopped' && verdictOf(/^Catching up since HH:MM — Gmail asked the change feed to wait/.test(wordsPark)), `the card says it: "${words}" · "${wordsPark}"`);
+  for (const r of copiesCensus(Mg.files, Mg.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log("㉓ lane discovery-cursor-persist (B-6638): a server restart never re-walks an account's whole listing — the cursor is the record's");
@@ -2898,23 +2898,23 @@ console.log("㉓ lane discovery-cursor-persist (B-6638): a server restart never 
   const real = await run(ENG, 'whole', {}, leg);
   const base = await run(BASE, 'whole-base', {}, leg);
   console.log(`    restart listing pages for one ${N}-row account · BEFORE (cursor in memory): ${base.list} · AFTER: ${real.list} (boot walk ${real.boot.list} pages)`);
-  ok(real.boot.disc && real.boot.disc.complete === true && real.boot.disc.cursor === null && real.boot.list === N / 100, `a complete walk is the record's: discovery {complete, completeAt} after ${real.boot.list} pages`, JSON.stringify(real.boot));
+  ok(gateOf(real.boot.disc) && real.boot.disc.complete === true && real.boot.disc.cursor === null && real.boot.list === N / 100, `a complete walk is the record's: discovery {complete, completeAt} after ${real.boot.list} pages`, JSON.stringify(real.boot));
   ok(real.list === 0 && real.rows === N && real.unlisted === 0, `a restart 30 min later lists 0 pages (the feed's catch-up only), ${real.rows} rows kept, 0 unlisted`, JSON.stringify(real));
   ok(base.list === N / 100, `CONTROL the base (discovery's cursor in memory): the restart re-walks the whole listing — ${base.list} pages`, JSON.stringify({ list: base.list }));
   // (b) a walk the restart cut at page 40 resumes from page 40, not page 1
   const cut = (D) => { D.W.listFailFrom = null; D.restart(); return D.passes(3).then(() => after(D)); };
   const rc = await run(ENG, 'cut', { failFrom: 4000 }, cut);
   const rcBase = await run(BASE, 'cut-base', { failFrom: 4000 }, cut);
-  ok(rc.boot.disc && rc.boot.disc.cursor === '4000' && rc.boot.disc.complete === false && rc.boot.rows === 4000, `a walk cut at page 40 keeps its cursor on the record (${JSON.stringify(rc.boot.disc && rc.boot.disc.cursor)}, never complete)`, JSON.stringify(rc.boot));
+  ok(gateOf(rc.boot.disc) && rc.boot.disc.cursor === '4000' && rc.boot.disc.complete === false && rc.boot.rows === 4000, `a walk cut at page 40 keeps its cursor on the record (${JSON.stringify(rc.boot.disc && rc.boot.disc.cursor)}, never complete)`, JSON.stringify(rc.boot));
   ok(rc.list === 60 && rc.rows === N && rc.unlisted === 0 && rc.disc.complete === true, `a never-completed account RESUMES from its page: ${rc.list} pages after the restart (not 100), all ${rc.rows} rows, 0 unlisted (the walk's start is kept too)`, JSON.stringify(rc));
   ok(rcBase.list === N / 100, `CONTROL the base: the cut walk starts over from page 1 — ${rcBase.list} pages`, JSON.stringify({ list: rcBase.list }));
   // (c) the vendor refuses the kept cursor (404) ⇒ ONE re-walk from page 1, said once
   const stale = (D) => { D.W.listFailFrom = null; D.W.staleCursors = new Set(['4000']); D.restart(); return D.passes(3).then(() => after(D)); };
   const rx = await run(ENG, 'stale', { failFrom: 4000 }, stale);
   ok(rx.list === 1 + N / 100 && rx.rows === N && rx.disc.complete === true && rx.disc.cursor === null, `a refused cursor ⇒ ONE re-walk from the first page: ${rx.list} calls (1 refused + ${N / 100}), complete`, JSON.stringify(rx));
-  ok(rx.lines.length === 1 && /the vendor refused the kept listing cursor \(not-found: HTTP 404 page token unknown\) — the listing is walked again from its first page/.test(rx.lines[0]), `said once: ${rx.lines[0] || '(none)'}`, JSON.stringify(rx.lines));
-  for (const r of copiesCensus(Md.files, Md.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+  ok(rx.lines.length === 1 && verdictOf(/the vendor refused the kept listing cursor \(not-found: HTTP 404 page token unknown\) — the listing is walked again from its first page/.test(rx.lines[0])), `said once: ${rx.lines[0] || '(none)'}`, JSON.stringify(rx.lines));
+  for (const r of copiesCensus(Md.files, Md.dir, REPO, { minCopies: 1 })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

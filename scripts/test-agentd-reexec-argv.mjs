@@ -28,7 +28,7 @@ import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the dae
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -46,8 +46,8 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
   const out = reExecArgv('/new/2.1.0/agentd.js', argv);
   check('NEW script path is first', out[0] === '/new/2.1.0/agentd.js');
   check('--dial + url preserved', out[1] === '--dial' && out[2] === 'wss://x/agentd-dial');
-  check('--dial-token + value preserved', out.includes('--dial-token') && out.includes('TK'));
-  check('--host-token preserved', out.includes('--host-token') && out.includes('HT'));
+  check('--dial-token + value preserved', gateOf(out.includes('--dial-token')) && verdictOf(out.includes('TK')));
+  check('--host-token preserved', gateOf(out.includes('--host-token')) && verdictOf(out.includes('HT')));
   check('OLD script path dropped', !out.includes('/old/2.0.0/agentd.js'));
   check('a no-flags daemon re-execs cleanly (listen mode unchanged)',
     JSON.stringify(reExecArgv('/new/a.js', ['/usr/bin/node', '/old/a.js'])) === JSON.stringify(['/new/a.js']));
@@ -62,8 +62,8 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
   const version = require('../package.json').version;
   await agentdBundle({ version, outfile: out });   // build:agentd's own bundle, the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
   const bundle = fs.readFileSync(out, 'utf-8');
-  check('bundle builds and contains the reExecArgv helper', bundle.includes('reExecArgv') && bundle.includes('argv.slice(2)'));
-  check('bundle inlines the hand-over + the busy-address retry (lane win-upgrade-pipe)', /function handOver\d*\(/.test(bundle) && /function listenWithRetry\d*\(/.test(bundle));
+  check('bundle builds and contains the reExecArgv helper', gateOf(bundle.includes('reExecArgv')) && verdictOf(bundle.includes('argv.slice(2)')));
+  check('bundle inlines the hand-over + the busy-address retry (lane win-upgrade-pipe)', gateOf(/function handOver\d*\(/.test(bundle)) && verdictOf(/function listenWithRetry\d*\(/.test(bundle)));
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
 
@@ -94,7 +94,7 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
     const f = installed({ devMode });
     const c = codeOf(() => repointCurrent(f, { root, dir, platform: 'win32' }, pw));
     const cur = f.ents.get(pw.join(root, 'current'));
-    check(`FIX (devMode ${devMode}): current is a JUNCTION to the new version, no .current.tmp left, the old version dir untouched`, c === null && cur && cur.kind === 'junction' && cur.target === dir && !f.ents.has(pw.join(root, '.current.tmp')) && f.ents.get(pw.join(root, 'standalone')).kind === 'dir', c);
+    check(`FIX (devMode ${devMode}): current is a JUNCTION to the new version, no .current.tmp left, the old version dir untouched`, c === null && gateOf(cur) && cur.kind === 'junction' && cur.target === dir && !f.ents.has(pw.join(root, '.current.tmp')) && f.ents.get(pw.join(root, 'standalone')).kind === 'dir', c);
   }
   { const f = winFs(); f.ents.set(dir, { kind: 'dir' }); const c = codeOf(() => repointCurrent(f, { root, dir, platform: 'win32' }, pw)); check('FIX: no `current` at all ⇒ one is made', c === null && f.ents.get(pw.join(root, 'current')).target === dir, c); }
   { const f = installed(); f.ents.set(pw.join(root, '.current.tmp'), { kind: 'junction', target: 'x' }); const c = codeOf(() => repointCurrent(f, { root, dir, platform: 'win32' }, pw)); check('FIX: a .current.tmp left by an earlier failed attempt is cleared first', c === null && f.ents.get(pw.join(root, 'current')).target === dir, c); }
@@ -155,23 +155,23 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
   const c0 = hop(R, { oldCode: 'pre-fix', newCode: 'pre-fix' });
   check('CAUSE (modelled): the pre-fix re-exec — successor spawned while the old process holds the pipe, its listen dies EADDRINUSE (the machine is left with no agent)', c0.boundAtSpawn === true && c0.died === 'EADDRINUSE' && !c0.listening);
   const f1 = hop(R, { oldCode: 'fix', newCode: 'pre-fix' });
-  check('FIX ①: the old daemon CLOSES its listener before it starts the successor — the pipe is free at the spawn, even a pre-retry successor listens', f1.boundAtSpawn === false && f1.listening && !f1.died && f1.lines.includes('upgrade hand-over: listener closed — starting the successor'), JSON.stringify(f1.lines));
+  check('FIX ①: the old daemon CLOSES its listener before it starts the successor — the pipe is free at the spawn, even a pre-retry successor listens', f1.boundAtSpawn === false && gateOf(f1.listening) && !f1.died && verdictOf(f1.lines.includes('upgrade hand-over: listener closed — starting the successor')), JSON.stringify(f1.lines));
   const f2 = hop(R, { oldCode: 'pre-fix', newCode: 'fix' });
   const busy = f2.lines.filter((l) => /is still held \(EADDRINUSE\)/.test(l)).length;
-  check('FIX ② (the .205 → .206 hop: the OLD code spawns first): the new daemon retries the busy pipe and LISTENS once the old process let go', f2.boundAtSpawn === true && f2.listening && !f2.died && busy === 1 && f2.lines.some((l) => /free after \d+ retr/.test(l)), JSON.stringify(f2.lines));
+  check('FIX ② (the .205 → .206 hop: the OLD code spawns first): the new daemon retries the busy pipe and LISTENS once the old process let go', f2.boundAtSpawn === true && gateOf(f2.listening) && !f2.died && busy === 1 && verdictOf(f2.lines.some((l) => /free after \d+ retr/.test(l))), JSON.stringify(f2.lines));
   const f3 = hop(R, { oldCode: 'fix', newCode: 'fix', conns: 1 });
-  check('FIX ①+②: a lingering local connection keeps the pipe bound — the hand-over waits ≤ 1.5 s, starts the successor anyway, and its retry covers the tail', f3.listening && !f3.died && f3.spawnAt === 1510 && f3.lines.some((l) => /did not close within 1500 ms/.test(l)), JSON.stringify([f3.spawnAt, f3.lines]));
+  check('FIX ①+②: a lingering local connection keeps the pipe bound — the hand-over waits ≤ 1.5 s, starts the successor anyway, and its retry covers the tail', gateOf(f3.listening) && !f3.died && f3.spawnAt === 1510 && verdictOf(f3.lines.some((l) => /did not close within 1500 ms/.test(l))), JSON.stringify([f3.spawnAt, f3.lines]));
   // a GENUINE second instance: the lock names another live pid ⇒ no retry (agentd.js refuses it at the lock before it listens)
   const g = world(); const holder = new g.PipeServer(); holder.listen(PIPE); g.run(10);
   const s2 = new g.PipeServer(); const g2 = { died: null, listening: false };
   R.listenWithRetry(s2, PIPE, { log: g.log, lockIsOurs: () => false, now: g.now, timers: g.timers, onListening: () => { g2.listening = true; }, onFatal: (e) => { g2.died = { code: e.code, at: g.now() }; } });
   g.run(30000);
-  check('a genuine second instance (the lock is not ours) is refused at once — no retry', g2.died && g2.died.code === 'EADDRINUSE' && g2.died.at < 50 && !g2.listening && g.lines.some((l) => /singleton lock is not ours — not retrying/.test(l)), JSON.stringify([g2, g.lines]));
+  check('a genuine second instance (the lock is not ours) is refused at once — no retry', gateOf(g2.died) && g2.died.code === 'EADDRINUSE' && g2.died.at < 50 && !g2.listening && verdictOf(g.lines.some((l) => /singleton lock is not ours — not retrying/.test(l))), JSON.stringify([g2, g.lines]));
   const h = world(); const keeper = new h.PipeServer(); keeper.listen(PIPE); h.run(10);
   const s3 = new h.PipeServer(); const h3 = { died: null };
   R.listenWithRetry(s3, PIPE, { log: h.log, now: h.now, timers: h.timers, onListening: () => { }, onFatal: (e) => { h3.died = { code: e.code, at: h.now() }; } });
   h.run(60000);
-  check('the retry is BOUNDED: a pipe held for good ⇒ one "giving up" line after 15 s, then the fatal path (never a spin)', h3.died && h3.died.at >= 15000 && h3.died.at < 15600 && h.lines.filter((l) => /giving up/.test(l)).length === 1, JSON.stringify([h3, h.lines.slice(-1)]));
+  check('the retry is BOUNDED: a pipe held for good ⇒ one "giving up" line after 15 s, then the fatal path (never a spin)', gateOf(h3.died) && h3.died.at >= 15000 && h3.died.at < 15600 && h.lines.filter((l) => /giving up/.test(l)).length === 1, JSON.stringify([h3, h.lines.slice(-1)]));
   // the retry over a REAL net.Server (a POSIX unix socket stands in for the busy address: listen → EADDRINUSE → re-listen)
   {
     const net = await import('node:net');
@@ -206,4 +206,4 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nre-exec argv test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

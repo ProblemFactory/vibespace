@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r2w-'));
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir);
@@ -59,7 +59,7 @@ ok(fs.readFileSync(p2, 'utf8') === 'during-hang', 'OTHER fs ops complete mid-han
 
 await hungOp;
 const took = Date.now() - t0;
-ok(!!hangErr && /deadline/.test(hangErr.message), `the wedged op surfaces as a DEADLINE error (${hangErr && hangErr.message})`);
+ok(!!hangErr && verdictOf(/deadline/.test(hangErr.message)), `the wedged op surfaces as a DEADLINE error (${hangErr && hangErr.message})`);
 ok(took < 25000, `deadline fired in bounded time (${(took / 1000).toFixed(1)}s), not a 30s+ transport timeout`);
 
 // ── self-heal: the terminated worker respawns; fs ops keep working ──
@@ -73,4 +73,4 @@ srv.close();
 endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT);
 fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); // a worker may still be flushing agentd/state when the suite tears down: ENOTEMPTY once on the Actions mirror (2.369.125 r8), node retries it
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf } from './lib/check.mjs';

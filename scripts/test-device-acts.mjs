@@ -31,7 +31,7 @@ const { DeviceManager } = require('../src/agentd/client.js');
 const { censusActCalls } = await import('./device-acts-census.mjs');
 
 let pass = 0, fail = 0;
-const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, m, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -62,12 +62,12 @@ console.log('— ① the layer table');
   const dsv = require('../src/desktop-serve.js').DESKTOP_SERVE_OPS, bsv = require('../src/browser-serve.js').BROWSER_SERVE_OPS;
   const miss = [...fsActs.map((a) => 'fs-op:' + a), ...dfs.map((a) => 'design-fs:' + a), ...dsv.map((a) => 'desktop-serve:' + a), ...bsv.map((a) => 'browser-serve:' + a), ...MIC_ACTS.map((a) => 'stream-mic:' + a)].filter((k) => !Object.prototype.hasOwnProperty.call(DA.TABLE, k));
   ok(fsActs.length >= 12 && dfs.length >= 4 && dsv.length >= 15 && bsv.length >= 6 && miss.length === 0 && DA.layerOf({ op: 'stream-mic', action: 'facts' }) === 'read' && DA.layerOf({ op: 'stream-mic', action: 'default' }) === 'act' && DA.layerOf({ op: 'stream-mic' }) === 'act', `every action of fs-op (${fsActs.length}), design-fs (${dfs.length}), desktop-serve (${dsv.length}), browser-serve (${bsv.length}), stream-mic (${MIC_ACTS.length}: facts a read, default an act, none named = act) is a row`, miss);
-  ok(Object.values(DA.TABLE).every((l) => DA.LAYERS.includes(l)), `every row's layer is one of ${DA.LAYERS.join(' / ')}`);
+  ok(verdictOf(Object.values(DA.TABLE).every((l) => DA.LAYERS.includes(l))), `every row's layer is one of ${DA.LAYERS.join(' / ')}`);
   const tableSrc = read('src/device-acts.js').split('const TABLE = Object.freeze({')[1].split('\n});')[0];
   const keys = [...tableSrc.matchAll(/'([a-z][a-z:-]*)': '(read|session|act|code)'/g)].map((m) => m[1]);
   const dup = keys.filter((k, i) => keys.indexOf(k) !== i);
   ok(keys.length === Object.keys(DA.TABLE).length && dup.length === 0, `${keys.length} rows, each key once (a duplicate key would silently re-layer an op)`, dup);
-  ok(DA.layerOf({ op: 'brand-new-op' }) === 'act' && DA.needsBy({ op: 'brand-new-op' }) && DA.layerOf({ op: 'fs-op', action: 'shred' }) === 'act', 'an op (or an action) without a row is an act — fail closed: it needs a by and is audited');
+  ok(DA.layerOf({ op: 'brand-new-op' }) === 'act' && gateOf(DA.needsBy({ op: 'brand-new-op' })) && DA.layerOf({ op: 'fs-op', action: 'shred' }) === 'act', 'an op (or an action) without a row is an act — fail closed: it needs a by and is audited');
   const mutant = client.replace("op: 'serve-socks', by", "op: 'serve-socks-again', by");
   const mOps = [...new Set([...mutant.matchAll(/\bop: '([a-z][a-z-]*)'/g)].map((m) => m[1]))];
   ok(mutant !== client && unlayered(mOps.filter((o) => !DA.ACTION_OPS.includes(o))).join() === 'serve-socks-again', 'MUTANT: a client op with no row ⇒ RED (named)');
@@ -108,11 +108,11 @@ console.log('— ② the summary redaction (sizes, never bytes)');
   ];
   const all = JSON.stringify(lines);
   ok(!all.includes(TOK) && !all.includes(SK) && !all.includes('hunter2') && !all.includes(Buffer.from('vsst_' + TOK).toString('base64')), 'a planted token in argv / a shell line / output / a placed secret / a written file / typed keys / a posted text / a URL never reaches a line', all.slice(0, 600));
-  ok(lines[2].summary.includes('B') && /\d+ B/.test(lines[3].summary) && /3 input event/.test(lines[4].summary) && /\d+ chars/.test(lines[5].summary), 'their SIZES are said (bytes, events, characters)', lines.map((l) => l.summary));
-  ok(lines[0].summary.length <= DA.SUMMARY_MAX && Buffer.byteLength(lines[0].outHead) <= DA.OUT_HEAD_BYTES + 3 && lines[0].outHead.includes('«redacted»'), `bounded: summary ≤ ${DA.SUMMARY_MAX} chars, output head ≤ ${DA.OUT_HEAD_BYTES} B, redacted`, lines[0]);
+  ok(gateOf(lines[2].summary.includes('B')) && gateOf(/\d+ B/.test(lines[3].summary)) && gateOf(/3 input event/.test(lines[4].summary)) && verdictOf(/\d+ chars/.test(lines[5].summary)), 'their SIZES are said (bytes, events, characters)', lines.map((l) => l.summary));
+  ok(lines[0].summary.length <= DA.SUMMARY_MAX && Buffer.byteLength(lines[0].outHead) <= DA.OUT_HEAD_BYTES + 3 && verdictOf(lines[0].outHead.includes('«redacted»')), `bounded: summary ≤ ${DA.SUMMARY_MAX} chars, output head ≤ ${DA.OUT_HEAD_BYTES} B, redacted`, lines[0]);
   const big = DA.lineOf({ at: 1, payload: { op: 'run-cmd', cmd: 'sh', args: ['-c', 'x'.repeat(10000) + '\u202e\u0000'] }, by: 'system:x', outHead: DA.outHeadOf({ stdout: 'é'.repeat(500) }) });
   ok(big.summary.length <= DA.SUMMARY_MAX && !/[\u202e\u0000]/.test(big.summary) && Buffer.byteLength(big.outHead) <= DA.OUT_HEAD_BYTES + 3 && !big.outHead.includes('�'), 'a huge argv is cut, hidden characters folded, a multi-byte head never cut mid-character');
-  ok(DA.validBy('human:abc123def456') && DA.validBy('agent:claude:6f1e-22') && DA.validBy('system:usage-harvest') && !DA.validBy('root') && !DA.validBy('agent:') && !DA.validBy('human:x y') && !DA.validBy(null), 'by: human / agent / job / system + an id (nothing else)');
+  ok(gateOf(DA.validBy('human:abc123def456')) && gateOf(DA.validBy('agent:claude:6f1e-22')) && gateOf(DA.validBy('system:usage-harvest')) && !DA.validBy('root') && !DA.validBy('agent:') && !DA.validBy('human:x y') && !DA.validBy(null), 'by: human / agent / job / system + an id (nothing else)');
 }
 
 console.log('— ③ THE ONE SEND POINT (a fake daemon link)');
@@ -182,7 +182,7 @@ function fakeDm() {
   {
     const { dm, lines } = fakeDm();
     await dm.runStream('sh', ['-c', 'x'], { by: BY });
-    ok(lines.length === 1 && lines[0].code === 3 && lines[0].ok === false && /streamed GITHUB_TOKEN=«redacted»/.test(lines[0].outHead), 'a stream is ONE line at its END: the exit code, the first bytes (redacted)', lines);
+    ok(lines.length === 1 && lines[0].code === 3 && lines[0].ok === false && verdictOf(/streamed GITHUB_TOKEN=«redacted»/.test(lines[0].outHead)), 'a stream is ONE line at its END: the exit code, the first bytes (redacted)', lines);
   }
   const reads = [
     ['fsStat', (dm) => dm.fsStat('/')], ['sysinfo', (dm) => dm.sysinfo()], ['tcpForward (its loopback)', (dm) => dm.tcpForward(5900)],
@@ -208,7 +208,7 @@ function fakeDm() {
     dm._bundlePath = bundle;
     const mux = { onControl: () => { }, control: (m) => { sent.push(m); if (m.op === 'upgrade') setImmediate(() => mux.onControl({ op: 'upgrade-done' })); }, data: () => true };
     await dm._upgrade(mux, { from: '2.369.311' });
-    ok(sent.length === 1 && sent[0].by === 'system:device-upgrade' && lines.length === 1 && lines[0].layer === 'code' && lines[0].op === 'upgrade' && /2\.369\.311 →/.test(lines[0].summary) && lines[0].ok === true, 'an agent upgrade carries its by (the version-drift rule) and is ONE code line (from → to, the size)', { sent, lines });
+    ok(sent.length === 1 && sent[0].by === 'system:device-upgrade' && lines.length === 1 && lines[0].layer === 'code' && lines[0].op === 'upgrade' && gateOf(/2\.369\.311 →/.test(lines[0].summary)) && lines[0].ok === true, 'an agent upgrade carries its by (the version-drift rule) and is ONE code line (from → to, the size)', { sent, lines });
   }
 }
 
@@ -232,11 +232,11 @@ console.log('— ④ the device\'s own state/acts.log (a REAL local daemon)');
     let text = '';
     for (let i = 0; i < 100 && !text.includes('run-cmd'); i++) { await sleep(20); try { text = fs.readFileSync(log, 'utf8'); } catch { } }
     const got = text.split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    ok(String(r.stdout).includes('device-acts-ok') && refused === 'act_without_by', 'the act ran on the daemon; the one without a by never left the hub');
-    ok(got.length === 1 && got[0].op === 'run-cmd' && got[0].by === 'system:test-device-acts' && got[0].layer === 'act' && /echo device-acts-ok/.test(got[0].summary) && !('outHead' in got[0]), 'the DEVICE wrote ONE line in its own state/acts.log: op, layer, by as the hub said it, the summary (the read wrote none)', text);
+    ok(gateOf(String(r.stdout).includes('device-acts-ok')) && refused === 'act_without_by', 'the act ran on the daemon; the one without a by never left the hub');
+    ok(got.length === 1 && got[0].op === 'run-cmd' && got[0].by === 'system:test-device-acts' && got[0].layer === 'act' && gateOf(/echo device-acts-ok/.test(got[0].summary)) && !('outHead' in got[0]), 'the DEVICE wrote ONE line in its own state/acts.log: op, layer, by as the hub said it, the summary (the read wrote none)', text);
     ok((fs.statSync(log).mode & 0o777) === 0o600, 'acts.log is 0600');
     ok(lines.length === 2 && lines[0].ok === true && lines[0].code === 0 && lines[1].code === 'act_without_by' && lines[1].by === null, 'and the hub\'s lines: the act (exit 0) + the refusal (named, by nobody)', lines);
-    ok(/ACTS_LOG_MAX = 2 \* 1024 \* 1024/.test(read('src/agentd/agentd.js')) && /rename\(ACTS_LOG, ACTS_LOG \+ '\.1'\)/.test(read('src/agentd/agentd.js')), 'the device\'s log is a ring of two files at 2 MiB (acts.log → acts.log.1)');
+    ok(gateOf(/ACTS_LOG_MAX = 2 \* 1024 \* 1024/.test(read('src/agentd/agentd.js'))) && verdictOf(/rename\(ACTS_LOG, ACTS_LOG \+ '\.1'\)/.test(read('src/agentd/agentd.js'))), 'the device\'s log is a ring of two files at 2 MiB (acts.log → acts.log.1)');
   } catch (e) { ok(false, 'the local daemon leg ran', e && e.stack); }
   finally { try { dm.stop(); } catch { } endDaemonsAndWait(root); }
 }
@@ -247,21 +247,21 @@ console.log('— ⑤ the hub\'s store (data/device-audit.jsonl)');
   let bc = [];
   const st = DAU.create({ dataDir: dir, maxBytes: 64 * 1024, onLine: (r) => bc.push(r) });
   for (let i = 0; i < 400; i++) st.append(DA.lineOf({ at: 1000 + i, hostId: i % 2 ? 'h1' : 'h2', payload: { op: 'run-cmd', cmd: 'echo', args: ['x'.repeat(200), String(i)] }, by: i % 3 ? 'system:x' : 'agent:claude:c1', ok: true, ms: 1 }));
-  ok(await st.whenWritten(), 'B-48a4: the 400 lines are on disk once the one appender says so (queued for the store writer\'s thread, never written on the main loop)');
+  ok(verdictOf(await st.whenWritten()), 'B-48a4: the 400 lines are on disk once the one appender says so (queued for the store writer\'s thread, never written on the main loop)');
   const size = fs.statSync(path.join(dir, DAU.AUDIT_FILE)).size, size1 = fs.statSync(path.join(dir, DAU.AUDIT_FILE + '.1')).size;
-  ok(size <= 64 * 1024 && size1 <= 64 * 1024 && bc.length === 400 && bc.every((r) => /^[0-9a-f]{12}$/.test(r.id)), `a ring of two files at the bound (${size} + ${size1} B), every line broadcast with its own id`);
+  ok(size <= 64 * 1024 && size1 <= 64 * 1024 && bc.length === 400 && verdictOf(bc.every((r) => /^[0-9a-f]{12}$/.test(r.id))), `a ring of two files at the bound (${size} + ${size1} B), every line broadcast with its own id`);
   const t1 = st.tail({ hostId: 'h1', limit: 10 });
-  ok(t1.length === 10 && t1.every((r) => r.hostId === 'h1') && t1[0].at > t1[9].at, 'tail: one machine, newest first');
+  ok(t1.length === 10 && gateOf(t1.every((r) => r.hostId === 'h1')) && t1[0].at > t1[9].at, 'tail: one machine, newest first');
   const t2 = st.tail({ bys: ['agent:claude:c1'], limit: 500 });
-  ok(t2.length > 0 && t2.every((r) => r.by === 'agent:claude:c1'), 'tail: by a list of subjects (an agent\'s own)');
-  ok(st.tail({ kind: 'system', limit: 5 }).every((r) => r.by.startsWith('system:')) && st.tail({ since: 1395, limit: 50 }).length === 5, 'tail: by kind, since');
+  ok(t2.length > 0 && verdictOf(t2.every((r) => r.by === 'agent:claude:c1')), 'tail: by a list of subjects (an agent\'s own)');
+  ok(gateOf(st.tail({ kind: 'system', limit: 5 }).every((r) => r.by.startsWith('system:'))) && st.tail({ since: 1395, limit: 50 }).length === 5, 'tail: by kind, since');
   ok(st.tail({ bys: [] }).length === 0 && st.tail({ bys: ['root'] }).length === 0, 'an empty / invalid subject list reads nothing (never everything)');
   fs.appendFileSync(path.join(dir, DAU.AUDIT_FILE), JSON.stringify({ at: 99999, hostId: 'h9', op: 'run-cmd', layer: 'act', by: 'system:x', summary: `cat ${'TOK' + 'EN'}=${GH}`, outHead: `${'PASS' + 'WORD'}=hunter2\u202e` }) + '\n');
   const h9 = st.tail({ hostId: 'h9' });
   ok(h9.length === 1 && !JSON.stringify(h9).includes('ghp_A1b2') && !JSON.stringify(h9).includes('hunter2') && !h9[0].outHead.includes('\u202e'), 'a hand-planted line on disk is judged on the way out (re-redacted, folded)', h9);
   ok(DAU.durationMs('15m') === 900000 && DAU.durationMs('2h') === 7200000 && DAU.durationMs('3d') === 259200000 && DAU.durationMs('90s') === 90000 && DAU.durationMs('soon') === null, 'durations: 90s / 15m / 2h / 3d');
   const a = DAU.byOfReq({ headers: { cookie: ['vs_', 'tok', 'en='].join('') + 'abcdef0123456789' } }), b = DAU.byOfReq({ headers: {} });
-  ok(/^human:[0-9a-f]{12}$/.test(a) && !a.includes('abcdef0123') && b === 'human:local' && DA.validBy(a), 'a cookie request\'s subject = a 12-hex handle of its sign-in (never the cookie); no cookie = human:local');
+  ok(gateOf(/^human:[0-9a-f]{12}$/.test(a)) && !a.includes('abcdef0123') && b === 'human:local' && verdictOf(DA.validBy(a)), 'a cookie request\'s subject = a 12-hex handle of its sign-in (never the cookie); no cookie = human:local');
 }
 
 console.log('— ⑥ the routes + vibespace-remote audit');
@@ -285,28 +285,28 @@ console.log('— ⑥ the routes + vibespace-remote audit');
   hosts.noteAct(hid, DA.lineOf({ at: now - 7 * 86400000, payload: { op: 'run-cmd', cmd: 'old' }, by: 'agent:claude:c1', ok: true }));
   ok(bc.filter((m) => m.type === 'device-audit').length === 4 && bc[0].line.machine === 'mac1', 'every stored line is broadcast (the card patches in place), named by the machine');
   const own = await (await fetch(`${base}/api/hosts/${hid}/device-acts`)).json();
-  ok(Array.isArray(own.acts) && own.acts.length === 4 && own.machine.id === hid, 'the owner (cookie) reads every line of the machine', own);
+  ok(gateOf(Array.isArray(own.acts)) && own.acts.length === 4 && own.machine.id === hid, 'the owner (cookie) reads every line of the machine', own);
   const kindH = await (await fetch(`${base}/api/hosts/${hid}/device-acts?kind=human`)).json();
   ok(kindH.acts.length === 1 && kindH.acts[0].by === 'human:abcabcabcabc', 'filtered by who asked (people)');
   const agentHit = await fetch(`${base}/api/hosts/${hid}/device-acts`, { headers: { Authorization: 'Bearer vsst_testtoken1' } });
   ok(agentHit.status === 403 && (await agentHit.json()).code === 'human_only', 'an agent token on the owner\'s list ⇒ 403 human_only');
   const cli = (args, token = 'vsst_testtoken1') => new Promise((r) => execFile(process.execPath, [path.join(REPO, 'data/bin/vibespace-remote'), ...args], { env: { PATH: process.env.PATH, VIBESPACE_API: base, VIBESPACE_SESSION_TOKEN: token } }, (e, so, se) => r({ code: e ? e.code : 0, out: String(so), err: String(se) })));
   const c1 = await cli(['audit']);
-  ok(c1.code === 0 && /uname/.test(c1.out) && /old/.test(c1.out) && !/\.tok/.test(c1.out) && !/\/x\/f/.test(c1.out) && /by agent:claude:c1/.test(c1.out), 'vibespace-remote audit: THIS conversation\'s own acts only', c1);
+  ok(c1.code === 0 && gateOf(/uname/.test(c1.out)) && gateOf(/old/.test(c1.out)) && !/\.tok/.test(c1.out) && !/\/x\/f/.test(c1.out) && verdictOf(/by agent:claude:c1/.test(c1.out)), 'vibespace-remote audit: THIS conversation\'s own acts only', c1);
   const c2 = await cli(['audit', '--since', '1h', '--machine', 'mac1']);
-  ok(c2.code === 0 && /uname/.test(c2.out) && !/old/.test(c2.out), '--since 1h --machine mac1', c2);
+  ok(c2.code === 0 && gateOf(/uname/.test(c2.out)) && !/old/.test(c2.out), '--since 1h --machine mac1', c2);
   const c3 = await cli(['audit', '--by', 'agent:claude:c2']);
-  ok(c3.code === 3 && /only the user reads/.test(c3.err), 'another conversation\'s acts ⇒ human_only (exit 3), nothing listed', c3);
+  ok(c3.code === 3 && verdictOf(/only the user reads/.test(c3.err)), 'another conversation\'s acts ⇒ human_only (exit 3), nothing listed', c3);
   const c4 = await cli(['audit', '--by', 'human:abcabcabcabc']);
   ok(c4.code === 3, 'a person\'s acts ⇒ human_only (exit 3)', c4);
   const c5 = await cli(['audit'], 'vsst_testtoken2');
-  ok(c5.code === 0 && /\.tok/.test(c5.out) && !/uname/.test(c5.out), 'the other conversation reads ITS own (the placed secret: path + size, never the bytes)', c5);
+  ok(c5.code === 0 && gateOf(/\.tok/.test(c5.out)) && !/uname/.test(c5.out), 'the other conversation reads ITS own (the placed secret: path + size, never the bytes)', c5);
   const c6 = await cli(['audit', '--machine', 'nope']);
-  ok(c6.code === 1 && /no machine/.test(c6.err), 'an unknown machine is said', c6);
+  ok(c6.code === 1 && verdictOf(/no machine/.test(c6.err)), 'an unknown machine is said', c6);
   const c7 = await cli(['audit', '--since', 'soon']);
-  ok(c7.code === 1 && /duration/.test(c7.err), 'a bad --since is said', c7);
+  ok(c7.code === 1 && verdictOf(/duration/.test(c7.err)), 'a bad --since is said', c7);
   const c8 = await cli([]);
-  ok(c8.code === 2 && /vibespace-remote audit/.test(c8.out), 'no verb ⇒ the usage (exit 2)', c8);
+  ok(c8.code === 2 && verdictOf(/vibespace-remote audit/.test(c8.out)), 'no verb ⇒ the usage (exit 2)', c8);
   server.close();
 }
 
@@ -319,7 +319,7 @@ console.log('— ⑦ the three URGENT For-you items');
   const p1 = al.file('pairing-minted', { hostKey: 'host-dial-mac', machine: 'Mac', deviceId: 'mac', by: 'human:abcabcabcabc', from: '192.168.1.5', generation: 4 });
   const p2 = al.file('pairing-minted', { hostKey: 'host-dial-mac', machine: 'Mac', deviceId: 'mac', by: 'human:abcabcabcabc', from: '192.168.1.5', generation: 4 });
   const p3 = al.file('pairing-minted', { hostKey: 'host-dial-mac', machine: 'Mac', deviceId: 'mac', by: 'system:graduate', generation: 5 });
-  ok(p1.filed && !p2.filed && p3.filed && filed.length === 2 && filed.every((f) => f.urgency === 'urgent' && f.origin === 'machines' && f.k === 'machines') && /made by human:abcabcabcabc from 192\.168\.1\.5/.test(filed[0].text), 'a pairing minted: ONE urgent item per mint (who, from which address); the same mint again files nothing', filed.map((f) => f.text));
+  ok(gateOf(p1.filed) && !p2.filed && gateOf(p3.filed) && filed.length === 2 && gateOf(filed.every((f) => f.urgency === 'urgent' && f.origin === 'machines' && f.k === 'machines')) && verdictOf(/made by human:abcabcabcabc from 192\.168\.1\.5/.test(filed[0].text)), 'a pairing minted: ONE urgent item per mint (who, from which address); the same mint again files nothing', filed.map((f) => f.text));
   const al2 = ALERTS.create({ userTodos, dataDir: dir });
   ok(!al2.file('pairing-minted', { hostKey: 'host-dial-mac', machine: 'Mac', deviceId: 'mac', generation: 4 }).filed && filed.length === 2, 'the dedup outlives a hub restart (data/device-alerts.json)');
   const W = await import(path.join(REPO, 'src/server/device-upgrade-watch.js'));
@@ -327,15 +327,15 @@ console.log('— ⑦ the three URGENT For-you items');
   uw.begun({ hostKey: 'h1', machine: 'Box', from: '2.369.311', to: '2.369.312' }); uw.begun({ hostKey: 'h1', machine: 'Box', from: '2.369.311', to: '2.369.312' });
   uw.begun({ hostKey: 'local', machine: 'hub', from: '2.369.311', to: '2.369.312' });
   const ups = filed.filter((f) => /update/.test(f.text));
-  ok(ups.length === 1 && /Agent update pushed to Box: 2\.369\.311 → 2\.369\.312/.test(ups[0].text) && /system:device-upgrade/.test(ups[0].detail), 'an update pushed: ONE item per (device, from → to) — three attempts are one; the hub\'s own daemon never', ups.map((u) => u.text));
+  ok(ups.length === 1 && gateOf(/Agent update pushed to Box: 2\.369\.311 → 2\.369\.312/.test(ups[0].text)) && verdictOf(/system:device-upgrade/.test(ups[0].detail)), 'an update pushed: ONE item per (device, from → to) — three attempts are one; the hub\'s own daemon never', ups.map((u) => u.text));
   // DECISION 8 (design q-044, lane foryou-folds): the signature passed and the version goes FORWARD ⇒ a NOTICE (the grey
   // count — a fleet roll of 18 machines filed 18 urgent rows); a bad signature, a downgrade or an unreadable version stays urgent
   ok(ups[0].kind === 'notice' && ups[0].urgency === 'normal', 'decision 8: a SIGNED forward update is a notice (kind notice, normal) — not urgent', { kind: ups[0].kind, urgency: ups[0].urgency });
   const bad = al.file('upgrade-pushed', { hostKey: 'h1', machine: 'Box', from: '2.369.311', to: '2.369.312', code: 'bad-signature' });
-  ok(bad.filed && /refused an agent update with a bad signature/.test(filed[filed.length - 1].text) && filed[filed.length - 1].urgency === 'urgent' && !filed[filed.length - 1].kind, 'a bad-signature refusal = the same kind, its own words and key (lane device-bundle-signing only sets the code) — and it stays URGENT');
+  ok(gateOf(bad.filed) && gateOf(/refused an agent update with a bad signature/.test(filed[filed.length - 1].text)) && filed[filed.length - 1].urgency === 'urgent' && !filed[filed.length - 1].kind, 'a bad-signature refusal = the same kind, its own words and key (lane device-bundle-signing only sets the code) — and it stays URGENT');
   const down = al.file('upgrade-pushed', { hostKey: 'h1', machine: 'Box', from: '2.369.312', to: '2.369.300' });
   const unk = al.file('upgrade-pushed', { hostKey: 'h1', machine: 'Box', from: 'unknown build', to: '2.369.312' });
-  ok(down.filed && unk.filed && filed.slice(-2).every((f) => f.urgency === 'urgent' && !f.kind), 'decision 8: a DOWNGRADE (2.369.312 → 2.369.300) and an unreadable version stay urgent');
+  ok(gateOf(down.filed) && gateOf(unk.filed) && verdictOf(filed.slice(-2).every((f) => f.urgency === 'urgent' && !f.kind)), 'decision 8: a DOWNGRADE (2.369.312 → 2.369.300) and an unreadable version stay urgent');
   const NOTICE = [[{}, false], [{ from: '2.369.316', to: '2.369.317' }, true], [{ from: '2.9', to: '2.10' }, true], [{ from: '2.369', to: '2.369.1' }, true], [{ from: '2.369.317', to: '2.369.317' }, false], [{ from: '2.369.317', to: '2.369.316' }, false], [{ from: '2.369.316', to: '2.369.317', code: 'bad-signature' }, false], [{ from: '?', to: '2.369.317' }, false]];
   const badN = NOTICE.filter(([f, want]) => ALERTS.upgradeIsNotice(f) !== want);
   ok(!badN.length, `upgradeIsNotice (${NOTICE.length} rows): signed AND forward, by every dotted number — equal, older, unreadable or coded ⇒ urgent`, badN);
@@ -349,7 +349,7 @@ console.log('— ⑦ the three URGENT For-you items');
     ok(NoCode.upgradeIsNotice({ from: '2.369.316', to: '2.369.317', code: 'bad-signature' }) === true && NoFwd.upgradeIsNotice({ from: '2.369.317', to: '2.369.316' }) === true,
       'MUTANTS RED: without the signature check a bad signature files as a notice; without the forward check a downgrade does — the table above fails on each');
   }
-  ok(filed.every((f) => f.i18n && f.i18n.text && f.i18n.text.key && Array.isArray(f.i18n.detail)), 'the words ride as structure (the tray words them in the device\'s language)');
+  ok(verdictOf(filed.every((f) => f.i18n && f.i18n.text && f.i18n.text.key && Array.isArray(f.i18n.detail))), 'the words ride as structure (the tray words them in the device\'s language)');
   // the first dial from a new address (hosts.noteDial's known set)
   const { HostManager } = require('../src/hosts.js');
   const hd = path.join(tmp, 'hdial'); fs.mkdirSync(hd, { recursive: true });
@@ -366,8 +366,8 @@ console.log('— ⑦ the three URGENT For-you items');
   hosts2.noteDial('old', 'accepted', { from: '192.0.2.44' });
   ok(seen2.length === 0, 'a device paired before this lane: its last accepted address is known (no item at the first restart)');
   const w1 = ALERTS.itemOf('new-address', { hostKey: 'h', machine: 'Mac', address: '198.51.100.7', addressKey: '198.51.100.7' });
-  ok(/Mac connected from a new address: 198\.51\.100\.7/.test(w1.text), 'the new-address words name the machine and the address');
-  ok(/hosts\.onDeviceAlert\?\.\('pairing-minted'/.test(read('src/server/dial-pairing.js')) && /function agentdMintDialPair\(deviceId, \{[^}]*by = 'system:dial-pairing', from = ''/.test(read('src/server/dial-pairing.js')), 'the ONE minter files the pairing item (by + from)');
+  ok(verdictOf(/Mac connected from a new address: 198\.51\.100\.7/.test(w1.text)), 'the new-address words name the machine and the address');
+  ok(gateOf(/hosts\.onDeviceAlert\?\.\('pairing-minted'/.test(read('src/server/dial-pairing.js'))) && verdictOf(/function agentdMintDialPair\(deviceId, \{[^}]*by = 'system:dial-pairing', from = ''/.test(read('src/server/dial-pairing.js'))), 'the ONE minter files the pairing item (by + from)');
 }
 
 console.log('— ⑧ the census: every hub act call names who asked');
@@ -382,4 +382,4 @@ console.log('— ⑧ the census: every hub act call names who asked');
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

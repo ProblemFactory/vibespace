@@ -22,7 +22,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TLS = require(path.join(REPO, 'src/server/tls.js'));
 const express = require(path.join(REPO, 'node_modules/express'));
 let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const ok = (c, m) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 const DNS = 'box-a.tail1a2b3c.ts.net';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tlspass-'));
 const stub = path.join(dir, 'tailscale'), modeFile = path.join(dir, 'mode'), callsFile = path.join(dir, 'calls');
@@ -92,16 +92,16 @@ try {
   {
     const A = hub('a'); mode('sleep'); A.h.start(); await A.h.pass();
     let s = A.h.status();
-    ok(s.why === 'status-unreadable' && s.probe && s.probe.code === 'TIMEOUT' && s.probe.bound === 300, `sleeps past the bound ⇒ ${s.why}, probe ${JSON.stringify(s.probe)}`);
-    ok(A.lines.some((l) => /^\[tls\] tailscale status: timed out after 300 ms \(\d+ ms, 0 bytes out\)/.test(l)), `the raw line is logged: ${A.lines.find((l) => /timed out/.test(l))}`);
-    ok(A.next() && A.next().ms === 60000 && s.nextPassMs === 60000, `a boot miss ⇒ the next pass in ${A.next() && A.next().ms / 1000} s`);
+    ok(s.why === 'status-unreadable' && gateOf(s.probe) && s.probe.code === 'TIMEOUT' && s.probe.bound === 300, `sleeps past the bound ⇒ ${s.why}, probe ${JSON.stringify(s.probe)}`);
+    ok(verdictOf(A.lines.some((l) => /^\[tls\] tailscale status: timed out after 300 ms \(\d+ ms, 0 bytes out\)/.test(l))), `the raw line is logged: ${A.lines.find((l) => /timed out/.test(l))}`);
+    ok(gateOf(A.next()) && A.next().ms === 60000 && s.nextPassMs === 60000, `a boot miss ⇒ the next pass in ${A.next() && A.next().ms / 1000} s`);
     mode('half'); await A.fire(); s = A.h.status();
     ok(s.why === 'status-unreadable' && s.probe.code === 0 && s.probe.bytes === 20, `half a JSON ⇒ ${s.why} (${s.probe.bytes} bytes), never no-tailscale`);
-    ok(A.lines.some((l) => l.startsWith('[tls] tailscale status: exit 0 but no readable JSON (')), 'its raw line is logged');
+    ok(verdictOf(A.lines.some((l) => l.startsWith('[tls] tailscale status: exit 0 but no readable JSON ('))), 'its raw line is logged');
     ok(A.next().ms === 300000, `the 2nd boot miss ⇒ ${A.next().ms / 1000} s`);
     await A.fire(); ok(A.next().ms === 3600000, `the 3rd ⇒ ${A.next().ms / 1000} s (hourly)`);
     mode('run'); await A.fire(); s = A.h.status();
-    ok(s.serving && s.url === `https://${DNS}:3456` && s.probe === null && calls().includes('cert'), `Running ⇒ the certificate is fetched and served: ${s.url}`);
+    ok(gateOf(s.serving) && s.url === `https://${DNS}:3456` && s.probe === null && verdictOf(calls().includes('cert')), `Running ⇒ the certificate is fetched and served: ${s.url}`);
     ok(A.next().ms === 3600000, 'serving ⇒ hourly');
     mode('half'); await A.fire(); s = A.h.status();
     ok(s.why === 'status-unreadable' && A.next().ms === 3600000, `a miss after a served pass keeps the hourly cadence (${A.next().ms / 1000} s)`);
@@ -110,7 +110,7 @@ try {
     // (it prints after 1 s) answers TIMEOUT with 0 bytes and logs no «exit 0» line: the gate's two red rows, by construction
     const C = hub('c', { run: null }); mode('slowhalf'); C.h.start(); await C.h.pass(); const sc = C.h.status(); C.h.stop();
     const D = hub('d'); D.h.start(); await D.h.pass(); const sd = D.h.status(); D.h.stop();
-    ok(sc.why === 'status-unreadable' && sc.probe.code === 'TIMEOUT' && sc.probe.bytes === 0 && !C.lines.some((l) => l.startsWith('[tls] tailscale status: exit 0 but no readable JSON (')) && sd.probe && sd.probe.code === 0 && sd.probe.bytes === 20 && D.lines.some((l) => l.startsWith('[tls] tailscale status: exit 0 but no readable JSON (')), `RED CONTROL: the same half a JSON from a stub that needs 1 s — the hub's 300 ms bound reads ${sc.probe.code} (${sc.probe.bytes} bytes, no «exit 0» line: the .341 red); the answering bound reads exit ${sd.probe && sd.probe.code} (${sd.probe && sd.probe.bytes} bytes)`);
+    ok(sc.why === 'status-unreadable' && sc.probe.code === 'TIMEOUT' && sc.probe.bytes === 0 && !C.lines.some((l) => l.startsWith('[tls] tailscale status: exit 0 but no readable JSON (')) && gateOf(sd.probe) && sd.probe.code === 0 && sd.probe.bytes === 20 && verdictOf(D.lines.some((l) => l.startsWith('[tls] tailscale status: exit 0 but no readable JSON ('))), `RED CONTROL: the same half a JSON from a stub that needs 1 s — the hub's 300 ms bound reads ${sc.probe.code} (${sc.probe.bytes} bytes, no «exit 0» line: the .341 red); the answering bound reads exit ${sd.probe && sd.probe.code} (${sd.probe && sd.probe.bytes} bytes)`);
   }
   console.log('§3 POST /api/tls/recheck — people only, a pass now');
   {
@@ -126,10 +126,10 @@ try {
         ok(r.status === 403 && j.code === 'agent-forbidden' && calls().length === before, `an agent token (${tok.slice(0, 5)}) is refused by name and runs no pass`);
       }
       const r = await fetch(url, { method: 'POST' }); const j = await r.json();
-      ok(r.status === 200 && j.serving && j.url === `https://${DNS}:3456` && j.probe === null, `the person's press re-plans now: unreadable → ${j.url}`);
+      ok(r.status === 200 && gateOf(j.serving) && j.url === `https://${DNS}:3456` && j.probe === null, `the person's press re-plans now: unreadable → ${j.url}`);
       ok(B.next().ms === 3600000, 'and the cadence follows the new plan (hourly)');
     } finally { srv.close(); B.h.stop(); }
   }
 } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

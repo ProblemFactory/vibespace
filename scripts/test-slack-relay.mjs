@@ -33,7 +33,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const M = require(path.join(repo, 'src/channels/slack-manifest.js'));
 const DIR = path.join(repo, 'docs/slack-relay');
@@ -59,10 +59,10 @@ const TABLE = [
   const v = (o) => M.relayTargetVerdict(o, { allow: [] });
   const ts = ['http://100.64.0.1:3456', 'http://100.101.102.103:3456', 'http://100.127.255.254', 'https://hub.tail1234.ts.net', 'http://hub.tail1234.ts.net:3456'];
   const ctl = ['http://100.63.255.255', 'http://100.128.0.1', 'http://100.1.2.3', 'https://ts.net', 'https://hub.evilts.net', 'https://hub.ts.net.evil.com'];
-  ok(ts.every((o) => v(o) === 'redirect') && ctl.every((o) => v(o) === 'show-code'), `① a hub reached over Tailscale is private — 100.64.0.0/10 (both edges) and *.ts.net redirect; CONTROLS: a public 100.x outside the /10 (100.63.255.255, 100.128.0.1, 100.1.2.3), a bare ts.net and look-alikes stay show-code`, JSON.stringify([...ts, ...ctl].map((o) => [o, v(o)])));
+  ok(gateOf(ts.every((o) => v(o) === 'redirect')) && verdictOf(ctl.every((o) => v(o) === 'show-code')), `① a hub reached over Tailscale is private — 100.64.0.0/10 (both edges) and *.ts.net redirect; CONTROLS: a public 100.x outside the /10 (100.63.255.255, 100.128.0.1, 100.1.2.3), a bare ts.net and look-alikes stay show-code`, JSON.stringify([...ts, ...ctl].map((o) => [o, v(o)])));
 }
 const diff = TABLE.filter(([o, allow]) => RV.relayTargetVerdict(o, { allow }) !== M.relayTargetVerdict(o, { allow }));
-ok(!diff.length && TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) === 'redirect') && TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) === 'show-code') && RV.CALLBACK_PATH === M.CALLBACK_PATH && RV.PRIVATE_SUFFIXES.join() === M.PRIVATE_SUFFIXES.join(), `① relay.js and slack-manifest.js answer one table alike (${TABLE.length} rows), with the same callback path and private suffixes`, JSON.stringify(diff));
+ok(!diff.length && gateOf(TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) === 'redirect')) && gateOf(TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) === 'show-code')) && RV.CALLBACK_PATH === M.CALLBACK_PATH && RV.PRIVATE_SUFFIXES.join() === M.PRIVATE_SUFFIXES.join(), `① relay.js and slack-manifest.js answer one table alike (${TABLE.length} rows), with the same callback path and private suffixes`, JSON.stringify(diff));
 // lane voice-p1-oauth-teach: the state's `k` (account kind) — absent = slack; dropline lands on its own door; a malformed
 // kind never builds a path (the code is shown instead)
 {
@@ -74,11 +74,11 @@ ok(!diff.length && TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) 
   const d1 = RV.decide(`?code=abcd.efgh.1234&state=${encodeURIComponent(sd)}`, []);
   const d2 = RV.decide(`?code=abcd.efgh.1234&state=${encodeURIComponent(ss)}`, []);
   const d3 = RV.decide(`?code=abcd.efgh.1234&state=${encodeURIComponent(clear({ u: 'http://192.168.1.20:3456', f: '0123456789abcdef', t: 1, k: '../../api/x' }))}`, []);
-  ok(d1.act === 'redirect' && d1.to.startsWith('http://192.168.1.20:3456/api/channels/oauth/cb/dropline?code=') && d2.to.startsWith('http://192.168.1.20:3456/api/channels/oauth/cb/slack?') && d3.act === 'show-code' && RV.stateKind(ss) === 'slack' && RV.stateKind(sd) === 'dropline', 'k: a dropline state goes back to /cb/dropline, a Slack state (no k) to /cb/slack, a malformed k shows the code (never a built path)', JSON.stringify({ d1, d2, d3 }));
+  ok(d1.act === 'redirect' && gateOf(d1.to.startsWith('http://192.168.1.20:3456/api/channels/oauth/cb/dropline?code=')) && gateOf(d2.to.startsWith('http://192.168.1.20:3456/api/channels/oauth/cb/slack?')) && d3.act === 'show-code' && RV.stateKind(ss) === 'slack' && RV.stateKind(sd) === 'dropline', 'k: a dropline state goes back to /cb/dropline, a Slack state (no k) to /cb/slack, a malformed k shows the code (never a built path)', JSON.stringify({ d1, d2, d3 }));
 }
 const mut = fs.readFileSync(path.join(DIR, 'relay.js'), 'utf-8').replace("(o[0] === 192 && o[1] === 168)", "(o[0] === 192)");
 const mctx = { URL, URLSearchParams, atob }; mctx.globalThis = mctx; vm.createContext(mctx); vm.runInContext(mut, mctx);
-ok(TABLE.some(([o, allow]) => mctx.VibeSpaceRelay.relayTargetVerdict(o, { allow }) !== M.relayTargetVerdict(o, { allow })) || mctx.VibeSpaceRelay.relayTargetVerdict('http://192.169.1.1', {}) !== M.relayTargetVerdict('http://192.169.1.1', {}), '① CONTROL: a relay copy whose 192.168/16 rule widened to 192/8 disagrees with the server');
+ok(verdictOf(TABLE.some(([o, allow]) => mctx.VibeSpaceRelay.relayTargetVerdict(o, { allow }) !== M.relayTargetVerdict(o, { allow }))) || mctx.VibeSpaceRelay.relayTargetVerdict('http://192.169.1.1', {}) !== M.relayTargetVerdict('http://192.169.1.1', {}), '① CONTROL: a relay copy whose 192.168/16 rule widened to 192/8 disagrees with the server');
 
 // the static host (serves the page as it ships; `/allow/` = the same page with data-allow="pods.example.test")
 const served = [];
@@ -148,7 +148,7 @@ ok(at1 === `${INST}/api/channels/oauth/cb/slack${q1}` && landed.length === 1 && 
 // ③ the code shown — public host, forged, missing, look-alike under data-allow; declined
 const shown = async (url) => { const at = await open(url); return { at, code: await ev("(document.getElementById('code')||{}).textContent || ''"), vis: await ev("['paste','denied','nothing'].filter(function(i){var e=document.getElementById(i);return e&&!e.hidden}).join()") }; };
 const r3 = [await shown(PAGE + `?code=3333.4444.abcdef&state=${encodeURIComponent(state('https://example.com'))}`), await shown(PAGE + '?code=5555.6666.abcdef&state=v1.bm90LWpzb24.xxxxxxxxxxxxxxxxxxxxxx'), await shown(PAGE + '?code=7777.8888.abcdef'), await shown(`http://127.0.0.1:${PAGE_PORT}/allow/?code=9999.0000.abcdef&state=${encodeURIComponent(state('https://pods.example.test.evil.net'))}`)];
-ok(r3.every((r) => r.at.startsWith(`http://127.0.0.1:${PAGE_PORT}/`) && r.vis === 'paste') && r3.map((r) => r.code).join() === '3333.4444.abcdef,5555.6666.abcdef,7777.8888.abcdef,9999.0000.abcdef' && landed.length === 1, '③ a public host, a forged state, no state, a look-alike of the allow suffix: the page stays, shows the code to paste back, the instance is not visited', JSON.stringify(r3));
+ok(gateOf(r3.every((r) => r.at.startsWith(`http://127.0.0.1:${PAGE_PORT}/`) && r.vis === 'paste')) && r3.map((r) => r.code).join() === '3333.4444.abcdef,5555.6666.abcdef,7777.8888.abcdef,9999.0000.abcdef' && landed.length === 1, '③ a public host, a forged state, no state, a look-alike of the allow suffix: the page stays, shows the code to paste back, the instance is not visited', JSON.stringify(r3));
 const dn = await shown(PAGE + `?error=access_denied&state=${encodeURIComponent(state('https://example.com'))}`);
 ok(dn.vis === 'denied' && !dn.code, '③ access_denied with no way back: the page says it was declined');
 // ④ the census: only the page's own two files; no storage
@@ -188,12 +188,12 @@ ok(!foreign.length && own === '/,/relay.js' && stor === '[0,0,""]', `④ CDP cen
     const want = M.relayTargetVerdict(o, { allow }) === 'redirect';
     if (want !== (d.act === 'redirect') || (want && !d.to.startsWith(`${M.originOf(o)}/api/channels/oauth/cb/${k}?code=`))) wrong.push({ k, o, allow, d });
   }
-  ok(!wrong.length && LANDED_KINDS.every((k) => /^[a-z][a-z0-9-]{1,19}$/.test(k) && RV.stateKind(stateFor(k, INST)) === k), `⑥ the ONE table × every landed kind (${LANDED_KINDS.join(', ')}): the page redirects exactly when the server's verdict does, to /api/channels/oauth/cb/<kind>`, JSON.stringify(wrong).slice(0, 600));
+  ok(!wrong.length && verdictOf(LANDED_KINDS.every((k) => /^[a-z][a-z0-9-]{1,19}$/.test(k) && RV.stateKind(stateFor(k, INST)) === k)), `⑥ the ONE table × every landed kind (${LANDED_KINDS.join(', ')}): the page redirects exactly when the server's verdict does, to /api/channels/oauth/cb/<kind>`, JSON.stringify(wrong).slice(0, 600));
   const ql = `?code=lark-relay-code-01&state=${encodeURIComponent(stateFor('lark', INST))}`;
   const atl = await open(PAGE + ql);
   const qg = `?code=4%2F0Ab-relay-google-01&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify+openid&authuser=0&prompt=consent&state=${encodeURIComponent(stateFor('gmail', INST))}`;
   const atg = await open(PAGE + qg);
-  ok(atl === `${INST}/api/channels/oauth/cb/lark${ql}` && atg === `${INST}/api/channels/oauth/cb/gmail${qg}` && landed.includes(`/api/channels/oauth/cb/gmail${qg}`),
+  ok(atl === `${INST}/api/channels/oauth/cb/lark${ql}` && atg === `${INST}/api/channels/oauth/cb/gmail${qg}` && verdictOf(landed.includes(`/api/channels/oauth/cb/gmail${qg}`)),
     '⑥ in Chrome, the public copy: a Lark state lands on <instance>/cb/lark, a Gmail state on /cb/gmail — Google\'s code, scope, authuser and prompt VERBATIM', JSON.stringify({ atl, atg }));
   const pod = 'https://alice.pods.example.test';
   const qp = `?code=lark-relay-code-02&state=${encodeURIComponent(stateFor('lark', pod))}`;
@@ -204,4 +204,4 @@ ok(!foreign.length && own === '/,/relay.js' && stor === '[0,0,""]', `④ CDP cen
 }
 pageSrv.close(); instSrv.close(); ws.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

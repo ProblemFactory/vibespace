@@ -39,7 +39,7 @@ const PREFIX = process.env.UWP_PREFIX || 'after';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let pass = 0, fail = 0;
-const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
+const ok = (c, msg, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail ? '\n      ' + String(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the bundle: the REAL window of the tree on a stub app (one window host, settings in memory)
@@ -182,10 +182,10 @@ const T = {}; // the request table for the report
 console.log(`§1 first paint (the default dashboard, 30 days) — ledger ${rows} rows`);
 const P = await page('after.js');
 const F = await firstPaint(P, 'after');
-ok(F.painted && F.v.found && F.v.last, 'the window painted the default dashboard (tiles, 10 panels, charts); the session × origin panel is its LAST panel', JSON.stringify(F.v));
+ok(gateOf(F.painted) && gateOf(F.v.found) && verdictOf(F.v.last), 'the window painted the default dashboard (tiles, 10 panels, charts); the session × origin panel is its LAST panel', JSON.stringify(F.v));
 ok(F.reqs.length === 1 && F.reqs[0].pivot === null && F.reqs[0].only === null && F.reqs[0].range === '30d',
   `① the first paint is ONE request and it asks for NO pivot (${F.reqs[0]?.bytes} B)`, JSON.stringify(F.reqs));
-ok(F.v.offScreen && F.v.wait && !F.v.canvas, '① the session × origin panel is below the fold, says Loading… and has asked for nothing', JSON.stringify(F.v));
+ok(gateOf(F.v.offScreen) && gateOf(F.v.wait) && !F.v.canvas, '① the session × origin panel is below the fold, says Loading… and has asked for nothing', JSON.stringify(F.v));
 T.firstPaint30d = F.reqs[0]?.bytes;
 await P.shot(`${PREFIX}-first-paint.png`);
 
@@ -195,17 +195,17 @@ await P.ev(`(() => { const b = document.querySelector('.usage-body'); b.scrollTo
 const waitNote = await P.until(`(() => { const v = ${PANEL}; return v.onScreen && v.wait; })()`);
 for (let i = 0; i < 200 && LOG.length < 2; i++) await sleep(50); // the ask is logged, its answer held
 const waiting = waitNote && LOG.length === 2 && !LOG[1].code;
-ok(waiting, '② on screen, while its ask is out, the panel shows its Loading… note (the rest of the dashboard stays drawn)', JSON.stringify({ v: await P.ev(PANEL), LOG }));
+ok(verdictOf(waiting), '② on screen, while its ask is out, the panel shows its Loading… note (the rest of the dashboard stays drawn)', JSON.stringify({ v: await P.ev(PANEL), LOG }));
 await P.shot(`${PREFIX}-panel-asking.png`);
 hold.release(); hold = null;
 const asked = await P.logUntil(2);
 const drew = await P.until(`(() => { const v = ${PANEL}; return v.canvas && !v.wait; })()`);
 await sleep(800);
-ok(asked && LOG.length === 2 && LOG[1].pivot === 'session:origin' && LOG[1].only === 'pivots' && LOG[1].range === '30d',
+ok(gateOf(asked) && LOG.length === 2 && LOG[1].pivot === 'session:origin' && LOG[1].only === 'pivots' && LOG[1].range === '30d',
   `② on screen ⇒ exactly ONE more request: pivot=session:origin&only=pivots, same 30 days (${LOG[1]?.bytes} B)`, JSON.stringify(LOG));
 const V2 = await P.ev(PANEL);
-ok(drew && V2.canvas, '② the panel draws its chart from that answer (no Loading… left)', JSON.stringify(V2));
-ok(V2.onScreen && V2.scrollTop > 0, `② …where the reader is: the repaint kept the window scrolled to the panel (scrollTop ${V2.scrollTop}), never back to the top`, JSON.stringify(V2));
+ok(gateOf(drew) && verdictOf(V2.canvas), '② the panel draws its chart from that answer (no Loading… left)', JSON.stringify(V2));
+ok(gateOf(V2.onScreen) && V2.scrollTop > 0, `② …where the reader is: the repaint kept the window scrolled to the panel (scrollTop ${V2.scrollTop}), never back to the top`, JSON.stringify(V2));
 T.panel30d = LOG[1]?.bytes;
 await P.shot(`${PREFIX}-panel-open.png`);
 
@@ -231,7 +231,7 @@ const CLASSIC = `(() => {
 })()`;
 await P.until(`(() => { const v = ${CLASSIC}; return v.sections >= 8; })()`); await sleep(1000);
 const C0 = await P.ev(CLASSIC);
-ok(C0.table && !C0.sessWait && LOG.length === 4, '⑤ the session table draws from the HELD pivot at once — no request', JSON.stringify({ C0, n: LOG.length }));
+ok(gateOf(C0.table) && !C0.sessWait && LOG.length === 4, '⑤ the session table draws from the HELD pivot at once — no request', JSON.stringify({ C0, n: LOG.length }));
 ok(C0.projRows > 0 && C0.split === 0 && (C0.projOff ? LOG.length === 4 : true), `⑤ "By project" rows draw without the split${C0.projOff ? ' and, off screen, ask for nothing' : ''}`, JSON.stringify(C0));
 await P.ev(`(() => { const s = [...document.querySelectorAll('.usage-section')].find((x) => x.querySelector('.usage-section-title')?.textContent === 'By project'); s.scrollIntoView(); return true; })()`);
 await P.logUntil(5); await P.until(`(() => { const v = ${CLASSIC}; return v.split > 0; })()`); await sleep(800);
@@ -266,7 +266,7 @@ if (controlBuilt) {
   LOG.length = 0;
   const R = await page('control.js');
   const F3 = await firstPaint(R, 'control');
-  ok(F3.painted && F3.reqs.length === 1 && /session:origin/.test(F3.reqs[0].pivot || '') && /project:origin/.test(F3.reqs[0].pivot || ''),
+  ok(gateOf(F3.painted) && F3.reqs.length === 1 && gateOf(/session:origin/.test(F3.reqs[0].pivot || '')) && verdictOf(/project:origin/.test(F3.reqs[0].pivot || '')),
     `CONTROL: the first paint asks for BOTH crosses (${F3.reqs[0]?.bytes} B vs ${T.firstPaint30d} B) — leg ① would be red`, JSON.stringify(F3.reqs));
   R.close();
 }
@@ -277,7 +277,7 @@ if (scrollBuilt) {
   await S.ev(`(() => { const b = document.querySelector('.usage-body'); b.scrollTop = b.scrollHeight; return true; })()`);
   await S.logUntil(2); await S.until(`(() => { const v = ${PANEL}; return v.canvas; })()`); await sleep(500);
   const V = await S.ev(PANEL);
-  ok(V.canvas && !V.onScreen && V.scrollTop === 0, 'CONTROL: without the kept scroll the pivot\'s repaint throws the window back to the top (the panel off screen again) — leg ② would be red', JSON.stringify(V));
+  ok(gateOf(V.canvas) && !V.onScreen && V.scrollTop === 0, 'CONTROL: without the kept scroll the pivot\'s repaint throws the window back to the top (the panel off screen again) — leg ② would be red', JSON.stringify(V));
   S.close();
 }
 console.log('§7 the ledger still LOADING (ledger-boot-load follow-up): a closed window asks nothing; one loop per open window');
@@ -324,13 +324,13 @@ async function loadingLeg(b) {
   const LD = await loadingLeg('after.js'); FACTS7.LD = LD;
   ok(REASK_MS >= 1 && QUIET7 === REASK_MS * QUIET_FACTOR && LD.told >= 2 && LD.maxTold <= REASK_MS,
     `§7 the quiet is tied to the re-ask the fixture hands the page: ${REASK_MS} ms (bootReaderWaitMs ${uhL.bootReaderWaitMs}, floor ${NOTE && NOTE.LOADING_REASK_MIN_MS}) × ${QUIET_FACTOR} = QUIET ${QUIET7} ms; the page was told at most ${LD.maxTold} ms over ${LD.told} answers`, JSON.stringify({ REASK_MS, QUIET7, told: LD.told, maxTold: LD.maxTold }));
-  ok(LD.shown && /The usage ledger is still loading — (next try at|its first load is running; asked again at) \d\d:\d\d:\d\d/.test(LD.words) && !LD.toast && LD.asksAgain,
+  ok(gateOf(LD.shown) && gateOf(/The usage ledger is still loading — (next try at|its first load is running; asked again at) \d\d:\d\d:\d\d/.test(LD.words)) && !LD.toast && verdictOf(LD.asksAgain),
     `§7 the ledger still LOADING is a state: «${LD.words}», no error toast, the window asks again by itself`, JSON.stringify(LD));
-  ok(LD.held && LD.afterClose === 0, `§7 a LOADING answer in flight at the close lands after it ⇒ ${LD.afterClose} asks in the 4 s after the close (nothing a closed window awaited arms, asks or draws)`, JSON.stringify(LD));
-  ok(LD.settled && LD.closedLoops === 0 && LD.openLoops === 1, `§7 reopened ⇒ ONE loop: with every answer held, ${LD.closedLoops} asks wait from the closed window and ${LD.openLoops} once reopened (each live loop holds one)`, JSON.stringify(LD));
+  ok(gateOf(LD.held) && LD.afterClose === 0, `§7 a LOADING answer in flight at the close lands after it ⇒ ${LD.afterClose} asks in the 4 s after the close (nothing a closed window awaited arms, asks or draws)`, JSON.stringify(LD));
+  ok(gateOf(LD.settled) && LD.closedLoops === 0 && LD.openLoops === 1, `§7 reopened ⇒ ONE loop: with every answer held, ${LD.closedLoops} asks wait from the closed window and ${LD.openLoops} once reopened (each live loop holds one)`, JSON.stringify(LD));
   if (closeBuilt) {
     const LX = await loadingLeg('noclose.js'); FACTS7.LX = LX;
-    ok(LX.held && LX.afterClose > 0 && LX.settled && LX.closedLoops >= 1 && LX.openLoops >= 2 && LX.told >= 1 && LX.maxTold <= REASK_MS, `CONTROL (the window's life not checked — alive() always true): ${LX.afterClose} asks after the close; with every answer held, ${LX.closedLoops} wait from the closed window and ${LX.openLoops} once reopened (the closed window's loop beside the new one) — leg §7 would be red`, JSON.stringify(LX));
+    ok(gateOf(LX.held) && LX.afterClose > 0 && gateOf(LX.settled) && LX.closedLoops >= 1 && LX.openLoops >= 2 && LX.told >= 1 && LX.maxTold <= REASK_MS, `CONTROL (the window's life not checked — alive() always true): ${LX.afterClose} asks after the close; with every answer held, ${LX.closedLoops} wait from the closed window and ${LX.openLoops} once reopened (the closed window's loop beside the new one) — leg §7 would be red`, JSON.stringify(LX));
   }
 }
 // UWP_FACTS=<file>: §7's facts (both legs, the quiet and the throttle) as JSON — ci.mjs keeps no output of a passing suite
@@ -338,4 +338,4 @@ if (process.env.UWP_FACTS) { try { fs.writeFileSync(process.env.UWP_FACTS, JSON.
 console.log('  TABLE ' + JSON.stringify(T));
 console.log('  REQUESTS ' + JSON.stringify(SEQ));
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
-await finish(fail ? 1 : 0);
+await finish(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -32,7 +32,7 @@ const require = createRequire(path.join(REPO, 'package.json'));
 const acorn = require('acorn');
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 1500) : '')); } };
 
 const AGENTD = 'src/agentd', ENTRY = 'src/agentd/agentd.js';
 const CALLS = new Set(['execFile', 'execFileSync', 'spawn', 'spawnSync', 'exec', 'execSync', 'fork']);
@@ -175,7 +175,7 @@ const byKind = (k) => C.rows.filter((r) => r.kind === k);
 console.log(`    scope: ${C.files.length} files (src/agentd/*.js + the entry's require closure) · ${C.rows.length} call sites — hidden ${byKind('hidden').length} · posix-tool ${byKind('posix-tool').length} · exempt ${byKind('exempt').length} · file-exempt ${byKind('file-exempt').length}`);
 for (const r of C.rows) console.log(`      ${r.kind.padEnd(11)} ${r.file}:${r.line}  ${r.text.slice(0, 96)}${r.why ? '  — ' + r.why.slice(0, 80) : ''}`);
 ok(C.errors.length === 0, 'every file of the scope tokenizes', C.errors);
-ok(C.files.includes(ENTRY) && C.files.includes('src/exit-shell.js') && C.files.includes('src/machine-probes.js') && C.files.includes('src/opencode-serve.js') && C.files.length > 40, `the scope is the daemon's whole closure (${C.files.length} files: the entry, exit-shell, machine-probes, opencode-serve …)`);
+ok(gateOf(C.files.includes(ENTRY)) && gateOf(C.files.includes('src/exit-shell.js')) && gateOf(C.files.includes('src/machine-probes.js')) && gateOf(C.files.includes('src/opencode-serve.js')) && C.files.length > 40, `the scope is the daemon's whole closure (${C.files.length} files: the entry, exit-shell, machine-probes, opencode-serve …)`);
 ok(C.red.length === 0, `no call site starts a child unhidden (${C.red.length} RED)`, C.red);
 ok(C.dead.length === 0, 'every exception row names a live site / a file with sites (no dead row)', C.dead);
 ok(byKind('hidden').length >= 20, `${byKind('hidden').length} hidden sites (a census that found nothing proves nothing)`);
@@ -199,11 +199,11 @@ const NAMED = [
   ['the OpenCode serve cwd\'s git init', 'src/opencode-serve.js', "execImpl('git', ['init'", 1],
   ['codex app-server', 'src/codex-thread-read.js', '_cfg.extraArgs)], { stdio:', 1],   // (never the quoted subcommand here: §50b reads a suite's spawn lines)
 ];
-for (const [name, file, needle, n] of NAMED) { const s = site(file, needle); ok(s.length === n && s.every((r) => r.kind === 'hidden'), `${name}: ${n} site(s), windowsHide: true`, s.map((r) => `${r.file}:${r.line} ${r.kind}`)); }
+for (const [name, file, needle, n] of NAMED) { const s = site(file, needle); ok(s.length === n && verdictOf(s.every((r) => r.kind === 'hidden')), `${name}: ${n} site(s), windowsHide: true`, s.map((r) => `${r.file}:${r.line} ${r.kind}`)); }
 const AD = realRead(ENTRY);
 const reexec = site(ENTRY, 'spawn(process.execPath, argv, {')[0];
-ok(!!reexec && /detached: true, stdio: 'ignore', windowsHide: true/.test(reexec.text), 'the re-exec keeps `detached: true, stdio: \'ignore\', windowsHide: true` (the daemon itself is console-less)', reexec && reexec.text);
-ok(/XS\.codePageAsker\(\{ execFile: require\('child_process'\)\.execFile/.test(AD) && !/CODEPAGE_PROBES/.test(AD), 'agentd asks the code page through the PURE asker only (no probe of its own)');
+ok(!!reexec && verdictOf(/detached: true, stdio: 'ignore', windowsHide: true/.test(reexec.text)), 'the re-exec keeps `detached: true, stdio: \'ignore\', windowsHide: true` (the daemon itself is console-less)', reexec && reexec.text);
+ok(gateOf(/XS\.codePageAsker\(\{ execFile: require\('child_process'\)\.execFile/.test(AD)) && !/CODEPAGE_PROBES/.test(AD), 'agentd asks the code page through the PURE asker only (no probe of its own)');
 ok(site(ENTRY, 'pty().spawn(').length === 1 && site(ENTRY, 'pty().spawn(')[0].kind === 'exempt', 'node-pty\'s ConPTY spawn is the one named exception in agentd.js');
 
 // ── §3 controls ──
@@ -212,27 +212,27 @@ const redOf = (patch, opts = {}) => census({ read: overlay(patch), list: realLis
 const swap = (rel, from, to) => { const s = realRead(rel); const t = s.replace(from, to); return { applies: t !== s, text: t }; };
 const ca = swap(ENTRY, 'windowsHide: true, timeout: Math.min(Number(msg.timeoutMs)', 'timeout: Math.min(Number(msg.timeoutMs)');
 const ra = redOf({ [ENTRY]: ca.text });
-ok(ca.applies && ra.red.length === 1 && /execFile\(plan\.file, plan\.args/.test(ra.red[0]), 'CONTROL (a): run-cmd without windowsHide ⇒ RED at its line', ra.red);
+ok(gateOf(ca.applies) && ra.red.length === 1 && verdictOf(/execFile\(plan\.file, plan\.args/.test(ra.red[0])), 'CONTROL (a): run-cmd without windowsHide ⇒ RED at its line', ra.red);
 const cb = swap(ENTRY, "so must the re-exec\n      detached: true, stdio: 'ignore', windowsHide: true,", "so must the re-exec\n      detached: true, stdio: 'ignore',");   // B-147f: the successor's start inside its try (one indent deeper)
 const rb = redOf({ [ENTRY]: cb.text });
-ok(cb.applies && rb.red.length === 1 && /spawn\(process\.execPath, argv/.test(rb.red[0]), 'CONTROL (b): the re-exec without windowsHide ⇒ RED', rb.red);
+ok(gateOf(cb.applies) && rb.red.length === 1 && verdictOf(/spawn\(process\.execPath, argv/.test(rb.red[0])), 'CONTROL (b): the re-exec without windowsHide ⇒ RED', rb.red);
 const cc = swap('src/exit-shell.js', "env: envOf(), windowsHide: true, windowsVerbatimArguments: true", "env: envOf(), windowsVerbatimArguments: true");
 const rc = redOf({ 'src/exit-shell.js': cc.text });
-ok(cc.applies && rc.red.length === 1 && /p\.file, p\.args/.test(rc.red[0]), 'CONTROL (c): the code-page probe without windowsHide ⇒ RED', rc.red);
+ok(gateOf(cc.applies) && rc.red.length === 1 && verdictOf(/p\.file, p\.args/.test(rc.red[0])), 'CONTROL (c): the code-page probe without windowsHide ⇒ RED', rc.red);
 const rd = redOf({ [ENTRY]: AD + "\nfunction plantedRun() { require('child_process').execFile('cmd.exe', ['/d', '/c', 'ver'], { timeout: 1000 }, () => { }); }\n" });
-ok(rd.red.length === 1 && /require\('child_process'\)\.execFile\('cmd\.exe'/.test(rd.red[0]), 'CONTROL (d): a planted `require(\'child_process\').execFile(` without windowsHide ⇒ RED', rd.red);
+ok(rd.red.length === 1 && verdictOf(/require\('child_process'\)\.execFile\('cmd\.exe'/.test(rd.red[0])), 'CONTROL (d): a planted `require(\'child_process\').execFile(` without windowsHide ⇒ RED', rd.red);
 const ML = "\nfunction plantedStream() {\n  const { spawn: sp2 } = require('child_process');\n  return sp2('node.exe', ['-e', '1'], {\n    env: process.env,\n    stdio: ['ignore', 'pipe', 'pipe'],%HIDE%\n  });\n}\n";
 const re1 = redOf({ [ENTRY]: AD + ML.replace('%HIDE%', '') }), re2 = redOf({ [ENTRY]: AD + ML.replace('%HIDE%', '\n    windowsHide: true,') });
-ok(re1.red.length === 1 && /sp2\('node\.exe'/.test(re1.red[0]) && re2.red.length === 0, 'CONTROL (e): a planted multi-line `{ spawn: sp2 }` call ⇒ RED; with `windowsHide: true` on a line of its own ⇒ green (the options object is read whole)', { re1: re1.red, re2: re2.red });
+ok(re1.red.length === 1 && gateOf(/sp2\('node\.exe'/.test(re1.red[0])) && re2.red.length === 0, 'CONTROL (e): a planted multi-line `{ spawn: sp2 }` call ⇒ RED; with `windowsHide: true` on a line of its own ⇒ green (the options object is read whole)', { re1: re1.red, re2: re2.red });
 const rf = redOf({ [ENTRY]: AD + "\nconst plantedMod = require('./../zz-planted-spawn.js');\n", 'src/zz-planted-spawn.js': "'use strict';\nconst { spawn } = require('child_process');\nmodule.exports = () => spawn('powershell.exe', ['-NoProfile'], { stdio: 'ignore' });\n" });
-ok(rf.files.includes('src/zz-planted-spawn.js') && rf.red.length === 1 && /powershell\.exe/.test(rf.red[0]), 'CONTROL (f): a module the entry newly requires, with an unhidden spawn ⇒ RED (the closure is derived, not listed)', rf.red);
+ok(gateOf(rf.files.includes('src/zz-planted-spawn.js')) && rf.red.length === 1 && verdictOf(/powershell\.exe/.test(rf.red[0])), 'CONTROL (f): a module the entry newly requires, with an unhidden spawn ⇒ RED (the closure is derived, not listed)', rf.red);
 const rg = redOf({}, { siteExempt: [...SITE_EXEMPT, { file: ENTRY, needle: 'execFile(\'no-such-site\'', why: 'dead' }] });
-ok(rg.dead.length === 1 && /no-such-site/.test(rg.dead[0]), 'CONTROL (g): an exception row that names no site ⇒ RED (dead row)', rg.dead);
+ok(rg.dead.length === 1 && verdictOf(/no-such-site/.test(rg.dead[0])), 'CONTROL (g): an exception row that names no site ⇒ RED (dead row)', rg.dead);
 const rh = redOf({ [ENTRY]: AD + "\nfunction plantedPs(pid) { return require('child_process').execFileSync('ps', ['-p', String(pid)]); }\nfunction plantedRe(s) { return /x/.exec(s); }\n" });
-ok(rh.red.length === 0 && rh.rows.some((r) => r.kind === 'posix-tool' && /plantedPs|execFileSync\('ps'/.test(r.text)), 'CONTROL (h): a literal POSIX tool (`ps`) needs no windowsHide; a regex\'s `.exec(` is not a site', rh.red);   // stale-pins: kept — a planted module's own text, not a pin of the product
+ok(rh.red.length === 0 && verdictOf(rh.rows.some((r) => r.kind === 'posix-tool' && /plantedPs|execFileSync\('ps'/.test(r.text))), 'CONTROL (h): a literal POSIX tool (`ps`) needs no windowsHide; a regex\'s `.exec(` is not a site', rh.red);   // stale-pins: kept — a planted module's own text, not a pin of the product
 
 const ri = redOf({ [ENTRY]: AD + "\nfunction plantedShadow() { const execFile = 'a string, not a function'; return execFile.length; }\n" });
 ok(ri.red.length === 0 && ri.rows.filter((r) => r.file === ENTRY && r.kind === 'hidden').length === C.rows.filter((r) => r.file === ENTRY && r.kind === 'hidden').length, 'CONTROL (i): a local `const execFile = \'…\'` (a value, not a function) hides none of the file\'s sites (the shape that once hid the re-exec)', ri.rows.filter((r) => r.file === ENTRY).length);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${Date.now() - T0} ms` : `\nALL PASS (${pass}) · ${Date.now() - T0} ms`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

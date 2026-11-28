@@ -48,7 +48,7 @@ const RT = require(path.join(REPO, 'src/relay-token.js'));
 const ROOT = scratch('frps-plugin');
 fs.mkdirSync(ROOT, { recursive: true });
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const tok = () => RT.mint({ randomBytes: crypto.randomBytes, now: Date.now(), label: 'x' }).token;
 let seq = 0;
@@ -114,17 +114,17 @@ console.log('① Login');
   const w = world();
   const s = await serve(w);
   try {
-    ok(isAccept(await s.op('Login', login(w.A.id, w.A.token))), 'a registered instance\'s own token ⇒ accept');
+    ok(verdictOf(isAccept(await s.op('Login', login(w.A.id, w.A.token)))), 'a registered instance\'s own token ⇒ accept');
     ok(reason(await s.op('Login', login(w.A.id, w.B.token))) === 'bad_token' && reason(await s.op('Login', login(w.A.id, 'vsrt_' + 'x'.repeat(43)))) === 'bad_token', 'another instance\'s token / a made-up one under this id ⇒ bad_token');
     T.update(w.file, (t) => { t.instances[w.B.id].revokedAt = new Date().toISOString(); });
     ok(reason(await s.op('Login', login(w.B.id, w.B.token))) === 'revoked', 'a revoked id ⇒ revoked (the table re-read: relay-admin\'s edit took effect without a restart)');
     const before = auditOf(w).filter((x) => x.verdict === 'legacy').length;
-    ok(isAccept(await s.op('Login', login('', '', '198.51.100.9:4000'))) && isAccept(await s.op('Login', login('', '', '198.51.100.9:4001'))), 'no metas.token during the grace ⇒ accept (an older build: the shared token is its knock — frps checks that one)');
+    ok(gateOf(isAccept(await s.op('Login', login('', '', '198.51.100.9:4000')))) && verdictOf(isAccept(await s.op('Login', login('', '', '198.51.100.9:4001')))), 'no metas.token during the grace ⇒ accept (an older build: the shared token is its knock — frps checks that one)');
     const leg = auditOf(w).filter((x) => x.verdict === 'legacy');
     ok(leg.length === before + 2 && leg[leg.length - 1].addr === '198.51.100.9:4001' && leg[leg.length - 1].reason === 'shared-token', 'every legacy use writes ONE audit line, with its client address', leg.slice(-2));
-    ok(isAccept(await s.op('Login', login('vi-cccccccccccc', tok()))) && auditOf(w).slice(-1)[0].reason === 'unregistered', 'an id the table does not know yet ⇒ the knock during the grace (an instance upgraded before its registration keeps its relay), audited `unregistered`');
-    ok(isAccept(await s.op('Login', login('alice', w.C.token))), 'the cluster row: a pod by its own name with the cluster\'s token ⇒ accept');
-    ok(reason(await s.op('Login', login('Not A Pod!', w.C.token))) === 'unknown_instance' && isAccept(await s.op('Login', login('vi-dddddddddddd', w.C.token))) && auditOf(w).slice(-1)[0].verdict === 'legacy',
+    ok(gateOf(isAccept(await s.op('Login', login('vi-cccccccccccc', tok())))) && auditOf(w).slice(-1)[0].reason === 'unregistered', 'an id the table does not know yet ⇒ the knock during the grace (an instance upgraded before its registration keeps its relay), audited `unregistered`');
+    ok(verdictOf(isAccept(await s.op('Login', login('alice', w.C.token)))), 'the cluster row: a pod by its own name with the cluster\'s token ⇒ accept');
+    ok(reason(await s.op('Login', login('Not A Pod!', w.C.token))) === 'unknown_instance' && gateOf(isAccept(await s.op('Login', login('vi-dddddddddddd', w.C.token)))) && auditOf(w).slice(-1)[0].verdict === 'legacy',
       'a user outside the row\'s userRe ⇒ unknown_instance; an instance-id-shaped user never matches a cluster row (it is an unregistered instance)');
   } finally { await s.close(); }
   const w2 = world({ graceOpen: false });
@@ -132,7 +132,7 @@ console.log('① Login');
   try {
     ok(reason(await s2.op('Login', login('', ''))) === 'legacy_token_retired', 'after the grace: no metas.token ⇒ legacy_token_retired');
     ok(reason(await s2.op('Login', login('vi-cccccccccccc', tok()))) === 'unknown_instance', 'after the grace: an unregistered id ⇒ unknown_instance (fail closed)');
-    ok(isAccept(await s2.op('Login', login(w2.A.id, w2.A.token))), 'after the grace: a registered instance still logs in');
+    ok(verdictOf(isAccept(await s2.op('Login', login(w2.A.id, w2.A.token)))), 'after the grace: a registered instance still logs in');
     T.update(w2.file, (t) => { t.grace.legacyUntil = null; });
     ok(reason(await s2.op('Login', login('', ''))) === 'legacy_token_retired', 'no grace at all (legacyUntil null) ⇒ closed');
   } finally { await s2.close(); }
@@ -143,27 +143,27 @@ console.log('② NewProxy');
   const w = world();
   const s = await serve(w);
   try {
-    ok(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.pf-local-3000`, { remote_port: 21000 }))) && isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, 'pf-local-3001'))), 'a name with one of the prefixes ⇒ accept (with and without frps\'s `<user>.` prefix)');
+    ok(gateOf(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.pf-local-3000`, { remote_port: 21000 })))) && verdictOf(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, 'pf-local-3001')))), 'a name with one of the prefixes ⇒ accept (with and without frps\'s `<user>.` prefix)');
     ok(reason(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.ssh-anything`))) === 'name_not_yours' && reason(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.B.id}.pf-x`))) === 'name_not_yours', 'a name outside the prefixes — or another user\'s prefixed name — ⇒ name_not_yours');
     ok(reason(await s.op('NewProxy', proxy(w.A.id, w.B.token, 'pf-x'))) === 'bad_token', 'NewProxy re-checks the identity (frps hands user + metas with every proxy)');
-    ok(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.vibespace-instance`, { subdomain: 'vsa1b2c3d4e5' }))), 'a free subdomain ⇒ accept');
+    ok(verdictOf(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.vibespace-instance`, { subdomain: 'vsa1b2c3d4e5' })))), 'a free subdomain ⇒ accept');
     ok(T.load(w.file).table.names.vsa1b2c3d4e5.owner === w.A.id && auditOf(w).slice(-1)[0].claimed[0] === 'vsa1b2c3d4e5', 'the first claim is this instance\'s from now on (persisted in the table, audited `claimed`)');
     const r = await s.op('NewProxy', proxy(w.B.id, w.B.token, `${w.B.id}.vibespace-instance`, { subdomain: 'vsa1b2c3d4e5' }));
     const conf = auditOf(w).slice(-1)[0];
     ok(reason(r) === 'name_in_use:my-hub' && conf.verdict === 'conflict' && conf.reason === 'name_in_use:my-hub' && conf.user === w.B.id, 'ANOTHER instance claiming it ⇒ name_in_use:<the holder\'s label> + a `conflict` audit line', { r, conf });
     ok(JSON.stringify(RT.refusalOf('new proxy [x] error: ' + reason(r))) === JSON.stringify({ code: 'name_in_use', owner: 'my-hub' }), 'the hub reads that reason back (RT.refusalOf) — the For-you item names the holder');
-    ok(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.vibespace-instance`, { subdomain: 'vsa1b2c3d4e5' }, 'run2'))), 'the same instance after a restart (a new run id) still holds it');
+    ok(verdictOf(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.vibespace-instance`, { subdomain: 'vsa1b2c3d4e5' }, 'run2')))), 'the same instance after a restart (a new run id) still holds it');
     ok(reason(await s.op('NewProxy', proxy('', '', 'vibespace-instance', { subdomain: 'vsa1b2c3d4e5' }))) === 'name_in_use:my-hub', 'a legacy login (the shared token) never takes a held name — the blast radius shrinks during the grace already');
-    ok(isAccept(await s.op('NewProxy', proxy('', '', 'canary-anything', { subdomain: 'vsfree0000001' }))) && !T.load(w.file).table.names.vsfree0000001, 'a legacy login may use a FREE name (no prefix rule — the old world), never owning it');
-    ok(isAccept(await s.op('NewProxy', proxy('alice', w.C.token, 'alice.pf-alice-8080', { subdomain: 'vspod0000001' }))) && T.load(w.file).table.names.vspod0000001.owner === 'fleet/alice'
+    ok(gateOf(isAccept(await s.op('NewProxy', proxy('', '', 'canary-anything', { subdomain: 'vsfree0000001' })))) && !T.load(w.file).table.names.vsfree0000001, 'a legacy login may use a FREE name (no prefix rule — the old world), never owning it');
+    ok(gateOf(isAccept(await s.op('NewProxy', proxy('alice', w.C.token, 'alice.pf-alice-8080', { subdomain: 'vspod0000001' })))) && T.load(w.file).table.names.vspod0000001.owner === 'fleet/alice'
       && reason(await s.op('NewProxy', proxy('bob', w.C.token, 'bob.pf-bob-8080', { subdomain: 'vspod0000001' }))) === 'name_in_use:alice', 'cluster pods own names by pod name (fleet/<pod>): another pod ⇒ name_in_use:alice');
-    ok(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, 'pf-dom', { custom_domains: ['app.example.com'] }))) && reason(await s.op('NewProxy', proxy(w.B.id, w.B.token, 'pf-dom', { custom_domains: ['app.example.com'] }))) === 'name_in_use:my-hub', 'custom domains are held alike');
+    ok(gateOf(isAccept(await s.op('NewProxy', proxy(w.A.id, w.A.token, 'pf-dom', { custom_domains: ['app.example.com'] })))) && reason(await s.op('NewProxy', proxy(w.B.id, w.B.token, 'pf-dom', { custom_domains: ['app.example.com'] }))) === 'name_in_use:my-hub', 'custom domains are held alike');
     ok(reason(await s.op('NewProxy', proxy(w.A.id, w.A.token, 'pf-x', { subdomain: 'Bad_Name' }))) === 'name_not_yours', 'a name outside the relay\'s shape ⇒ name_not_yours');
     T.update(w.file, (t) => { t.instances[w.A.id].revokedAt = new Date().toISOString(); });
     ok(reason(await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.pf-local-3002`))) === 'revoked', 'a revoke refuses the next proxy of a login that is already LIVE');
     T.update(w.file, (t) => { t.instances[w.A.id].revokedAt = null; });
     execFileSync(process.execPath, [ADMIN, 'release', 'vsa1b2c3d4e5', '--table', w.file]);
-    ok(isAccept(await s.op('NewProxy', proxy(w.B.id, w.B.token, `${w.B.id}.vibespace-instance`, { subdomain: 'vsa1b2c3d4e5' }))) && T.load(w.file).table.names.vsa1b2c3d4e5.owner === w.B.id, 'relay-admin release frees a name — the next claim owns it');
+    ok(gateOf(isAccept(await s.op('NewProxy', proxy(w.B.id, w.B.token, `${w.B.id}.vibespace-instance`, { subdomain: 'vsa1b2c3d4e5' })))) && T.load(w.file).table.names.vsa1b2c3d4e5.owner === w.B.id, 'relay-admin release frees a name — the next claim owns it');
   } finally { await s.close(); }
 }
 
@@ -175,14 +175,14 @@ console.log('③ CloseProxy · /healthz · the table re-read');
     await s.op('NewProxy', proxy(w.A.id, w.A.token, `${w.A.id}.pf-a`));
     await s.op('NewProxy', proxy('', '', 'legacy-proxy'));
     let h = await s.health();
-    ok(h.ok && h.instances === 2 && h.clusters === 1 && h.live === 2 && h.legacyLive === 1 && h.grace.open === true && typeof h.lastLegacyAt === 'string', '/healthz: instances, clusters, live, legacyLive, grace, lastLegacyAt', h);
-    ok(isAccept(await s.op('CloseProxy', { user: { user: '', metas: {}, run_id: 'r' }, proxy_name: 'legacy-proxy' })), 'CloseProxy ⇒ accept');
+    ok(gateOf(h.ok) && h.instances === 2 && h.clusters === 1 && h.live === 2 && h.legacyLive === 1 && h.grace.open === true && typeof h.lastLegacyAt === 'string', '/healthz: instances, clusters, live, legacyLive, grace, lastLegacyAt', h);
+    ok(verdictOf(isAccept(await s.op('CloseProxy', { user: { user: '', metas: {}, run_id: 'r' }, proxy_name: 'legacy-proxy' }))), 'CloseProxy ⇒ accept');
     h = await s.health();
     ok(h.live === 1 && h.legacyLive === 0, 'CloseProxy: the live list forgets it (legacyLive 0 — the grace\'s end check)', h);
     const E = { id: 'vi-eeeeeeeeeeee', token: tok() };
     ok(reason(await s.op('Login', login(E.id, E.token))) === null, 'before its registration a new id is the knock (grace)');
     execFileSync(process.execPath, [ADMIN, 'add', E.id, sha(E.token), 'late-hub', '--table', w.file]);
-    ok(isAccept(await s.op('Login', login(E.id, E.token))) && auditOf(w).slice(-1)[0].kind === 'instance', 'relay-admin add ⇒ the next Login is that instance\'s (the table re-read on change, no plugin restart)');
+    ok(gateOf(isAccept(await s.op('Login', login(E.id, E.token)))) && auditOf(w).slice(-1)[0].kind === 'instance', 'relay-admin add ⇒ the next Login is that instance\'s (the table re-read on change, no plugin restart)');
   } finally { await s.close(); }
 }
 
@@ -213,8 +213,8 @@ console.log('⑤ the audit');
     const rows = auditOf(w);
     const text = fs.readFileSync(w.audit, 'utf8');
     const secrets = [w.A.token, w.B.token, w.C.token, sha(w.A.token), sha(w.B.token), sha(w.C.token), sha(w.A.token).slice(0, 16)];
-    ok(rows.length === 3 && rows.every((x) => typeof x.at === 'string' && x.op && x.verdict && 'user' in x), 'one JSON line per call: at · op · user · verdict (+ label, proxy, subdomain, reason, addr)', rows);
-    ok(secrets.every((x) => !text.includes(x)), 'the audit never holds a token nor a hash (not even 16 hex of one)');
+    ok(rows.length === 3 && verdictOf(rows.every((x) => typeof x.at === 'string' && x.op && x.verdict && 'user' in x)), 'one JSON line per call: at · op · user · verdict (+ label, proxy, subdomain, reason, addr)', rows);
+    ok(verdictOf(secrets.every((x) => !text.includes(x))), 'the audit never holds a token nor a hash (not even 16 hex of one)');
     ok((fs.statSync(w.audit).mode & 0o777) === 0o600, 'the audit file is 0600');
     await s.op('Login', login('u'.repeat(5000), ''));
     const last = auditOf(w).slice(-1)[0];
@@ -238,16 +238,16 @@ console.log('⑥ relay-admin (a real child) + the spawned plugin');
   for (const [args, what] of [[['add', 'vi-0123456789ac', sha(tk), 'x;reboot'], 'a label a shell would run'], [['add', 'vi-0123456789ac', 'nothex', 'x'], 'a non-hex hash'], [['add', 'host-1', sha(tk), 'x'], 'an id that is not vi-<12 hex>'], [['rotate', 'vi-0123456789ab', 'zz'], 'a rotate without a hash']]) {
     ok(run(args).code === 2, `refused (usage): ${what}`);
   }
-  ok(run(['revoke', 'vi-0123456789ab']).code === 0 && T.load(file).table.instances['vi-0123456789ab'].revokedAt, 'revoke');
+  ok(run(['revoke', 'vi-0123456789ab']).code === 0 && verdictOf(T.load(file).table.instances['vi-0123456789ab'].revokedAt), 'revoke');
   const tk2 = tok();
   ok(run(['rotate', 'vi-0123456789ab', sha(tk2)]).code === 0 && T.load(file).table.instances['vi-0123456789ab'].revokedAt === null && T.load(file).table.instances['vi-0123456789ab'].tokenHash === sha(tk2), 'rotate: a new hash for the same id — a revoked id comes back this way (owner Q3)');
   const nt = run(['new-token']);
   const [ntTok, ntHash] = nt.out.trim().split('\n');
-  ok(nt.code === 0 && RT.TOKEN_RE.test(ntTok) && ntHash === sha(ntTok), 'new-token: a vsrt_ token + its sha256 (the cluster\'s — into the chart\'s secret)');
+  ok(nt.code === 0 && gateOf(RT.TOKEN_RE.test(ntTok)) && ntHash === sha(ntTok), 'new-token: a vsrt_ token + its sha256 (the cluster\'s — into the chart\'s secret)');
   ok(run(['add-cluster', 'fleet', ntHash, '^[a-z0-9][a-z0-9-]{0,39}$']).code === 0 && run(['add-cluster', 'fleet2', ntHash, 'unanchored']).code === 1, 'add-cluster (an unanchored userRe is refused — the table\'s shape check)');
   ok(run(['grace', 'off']).code === 0 && Date.parse(T.load(file).table.grace.legacyUntil) <= Date.now(), 'grace off: the shared token ends now');
   const ls = run(['list']).out;
-  ok(ls.includes('vi-0123456789ab') && ls.includes(sha(tk2).slice(0, 8) + '…') && !ls.includes(sha(tk2)), 'list shows 8 hex of a hash, never the whole');
+  ok(gateOf(ls.includes('vi-0123456789ab')) && gateOf(ls.includes(sha(tk2).slice(0, 8) + '…')) && !ls.includes(sha(tk2)), 'list shows 8 hex of a hash, never the whole');
   ok(run(['frobnicate']).code === 2, 'an unknown command prints the usage (exit 2)');
   // the plugin as its own process (the systemd unit's ExecStart shape)
   const audit = path.join(d, 'audit.jsonl');
@@ -256,7 +256,7 @@ console.log('⑥ relay-admin (a real child) + the spawned plugin');
   ok(port > 0, 'the spawned plugin says where it listens', port);
   const r = await (await fetch(`http://127.0.0.1:${port}/handler`, { method: 'POST', body: JSON.stringify({ version: '0.1.0', op: 'Login', content: login('vi-0123456789ab', tk2) }) })).json();
   const r2 = await (await fetch(`http://127.0.0.1:${port}/handler`, { method: 'POST', body: JSON.stringify({ version: '0.1.0', op: 'Login', content: login('', '') }) })).json();
-  ok(isAccept(r) && reason(r2) === 'legacy_token_retired', 'over HTTP: the rotated token logs in; after `grace off` the shared token is refused', { r, r2 });
+  ok(gateOf(isAccept(r)) && reason(r2) === 'legacy_token_retired', 'over HTTP: the rotated token logs in; after `grace off` the shared token is refused', { r, r2 });
   child.kill('SIGTERM');
   const code = await new Promise((res) => { child.on('exit', (c) => res(c)); setTimeout(() => res('hung'), 3000); });
   ok(code === 0, 'SIGTERM ⇒ exits 0', code);
@@ -296,14 +296,14 @@ console.log('⑦b VOUCH (opt-in --knock-file)');
     ok(JSON.stringify(restIn) === JSON.stringify(restOut), 'every other field as frps sent it (frps decodes the whole login from the answer)');
     ok(r.content.privilege_key === want && !JSON.stringify(r).includes(KNOCK), 'the answer carries the key, never the shared token');
     const rc = await s.op('Login', { ...login('alice', w.C.token), timestamp: 5 });
-    ok(rc.content && rc.content.privilege_key === crypto.createHash('md5').update(KNOCK + '5').digest('hex'), 'a cluster pod is vouched alike');
-    ok(isAccept(await s.op('Login', login('', ''))) && isAccept(await s.op('Login', login('vi-cccccccccccc', tok()))), 'a legacy / unregistered login is handed back UNCHANGED (frps judges its own knock)');
+    ok(gateOf(rc.content) && rc.content.privilege_key === crypto.createHash('md5').update(KNOCK + '5').digest('hex'), 'a cluster pod is vouched alike');
+    ok(gateOf(isAccept(await s.op('Login', login('', '')))) && verdictOf(isAccept(await s.op('Login', login('vi-cccccccccccc', tok())))), 'a legacy / unregistered login is handed back UNCHANGED (frps judges its own knock)');
     ok(reason(await s.op('Login', login(w.A.id, w.B.token))) === 'bad_token', 'a bad token is still refused (never vouched)');
     ok(auditOf(w).filter((x) => x.vouched).length === 2 && !fs.readFileSync(w.audit, 'utf8').includes(KNOCK), 'the audit marks a vouched login, never the token');
   } finally { await s.close(); }
   const w2 = world();
   const s2 = await serve(w2);
-  try { ok(isAccept(await s2.op('Login', login(w2.A.id, w2.A.token))), 'no --knock-file ⇒ an instance login is `unchange` (frps keeps asking the shared token until the grace ends)'); } finally { await s2.close(); }
+  try { ok(verdictOf(isAccept(await s2.op('Login', login(w2.A.id, w2.A.token)))), 'no --knock-file ⇒ an instance login is `unchange` (frps keeps asking the shared token until the grace ends)'); } finally { await s2.close(); }
   // q-052 (verify r1, medium): THE GRACE'S END WITH THE PLUGIN RUNNING. A fake frps verifies the answer the way frp's token
   // auth does (md5(its auth.token + timestamp) === privilege_key) — before (the shared token) and after `auth.token = ""`.
   const frpsTakes = (token, c, r) => { const m = r.reject ? null : (r.unchange ? c : r.content); return !!m && crypto.createHash('md5').update(token + String(m.timestamp)).digest('hex') === m.privilege_key; };
@@ -325,13 +325,13 @@ console.log('⑦b VOUCH (opt-in --knock-file)');
     } finally { await s3.close(); }
   }
   const ge = await graceEnd(require(PLUGIN));
-  ok(ge.before && ge.after, 'THE GRACE\'S END with the plugin running: a registered login frps takes against the shared token, then — the knock file emptied, frps on auth.token = "" — against the empty token (no plugin restart)', ge);
-  ok(ge.legacy === 'legacy_token_retired' && ge.goneUnchanged, '…the shared token is refused after the grace; a removed knock file = no vouch (unchange)', ge);
+  ok(gateOf(ge.before) && verdictOf(ge.after), 'THE GRACE\'S END with the plugin running: a registered login frps takes against the shared token, then — the knock file emptied, frps on auth.token = "" — against the empty token (no plugin restart)', ge);
+  ok(ge.legacy === 'legacy_token_retired' && verdictOf(ge.goneUnchanged), '…the shared token is refused after the grace; a removed knock file = no vouch (unchange)', ge);
   const readOnce = pluginModule((src) => src.replace('if (key !== knockCache.key) {', 'if (knockCache.key === null) {'));
   const geM = await graceEnd(readOnce);
-  ok(geM.before && !geM.after, 'RED control: the pre-fix read-once knock still vouches md5(<old token> + ts) — frps on auth.token = "" refuses the registered instance', geM);
+  ok(gateOf(geM.before) && !geM.after, 'RED control: the pre-fix read-once knock still vouches md5(<old token> + ts) — frps on auth.token = "" refuses the registered instance', geM);
   const bad = spawnSync(process.execPath, [PLUGIN, '--table', w2.file, '--listen', '127.0.0.1:0', '--knock-file', path.join(w2.d, 'no-such-knock')], { encoding: 'utf8', timeout: 5000 });
-  ok(bad.status === 1 && /--knock-file .*ENOENT/.test(bad.stderr), 'a --knock-file that cannot be read at start fails the start by name (exit 1)', { status: bad.status, err: bad.stderr });
+  ok(bad.status === 1 && verdictOf(/--knock-file .*ENOENT/.test(bad.stderr)), 'a --knock-file that cannot be read at start fails the start by name (exit 1)', { status: bad.status, err: bad.stderr });
 }
 
 console.log('⑦c THE CONTROL AFTER THE LOGIN — a stub frps 0.70.0 (the vouch REFUTED)');
@@ -362,15 +362,15 @@ console.log('⑦c THE CONTROL AFTER THE LOGIN — a stub frps 0.70.0 (the vouch 
     const locked = await frps070(sv, { frpsToken: KNOCK, user: w.A.id, token: w.A.token, knock: '', ts: 1793300000, sub: 'vsowned00002' });
     const tr = auditOf(w).slice(t0);
     ok(locked.login === 'ok' && locked.control === 'dropped', 'a frpc WITHOUT the shared token, vouched, frps still on the shared token: the login passes frps\'s check — then the keyed control is dropped (the incident: 2459 logins, 0 proxies)', locked);
-    ok(tr.some((x) => x.op === 'Login' && x.verdict === 'accept' && x.vouched === true) && !tr.some((x) => x.op === 'NewProxy'), '…the audit: `Login accept "vouched":true` and NO NewProxy — the plugin never hears one', tr.map((x) => `${x.op}:${x.verdict}${x.vouched ? ':vouched' : ''}`));
+    ok(gateOf(tr.some((x) => x.op === 'Login' && x.verdict === 'accept' && x.vouched === true)) && !tr.some((x) => x.op === 'NewProxy'), '…the audit: `Login accept "vouched":true` and NO NewProxy — the plugin never hears one', tr.map((x) => `${x.op}:${x.verdict}${x.vouched ? ':vouched' : ''}`));
     const oldCheck = (rows, id) => rows.some((x) => x.op === 'Login' && x.user === id && x.vouched === true);   // the README's old canary («"vouched":true»)
     const newCheck = (rows, id) => rows.some((x) => x.op === 'NewProxy' && x.user === id && x.verdict === 'accept');   // THE CHECK: a NewProxy accept after the locked restart
     ok(oldCheck(tr, w.A.id) === true && newCheck(tr, w.A.id) === false, 'THE CANARY: the old criterion («"vouched":true») PASSES on this transcript while nothing published — the new one (a NewProxy accept after the locked restart) fails it', { old: oldCheck(tr, w.A.id), new: newCheck(tr, w.A.id) });
     const t1 = auditOf(w).length;
     const knocked = await frps070(sv, { frpsToken: KNOCK, user: w.A.id, token: w.A.token, knock: KNOCK, ts: 1793300100, sub: 'vsowned00002' });
-    ok(knocked.control === 'held' && knocked.proxy === 'accept' && newCheck(auditOf(w).slice(t1), w.A.id), 'the same frpc WITH the shared token: the control holds, its NewProxy is accepted (the check passes)', knocked);
+    ok(knocked.control === 'held' && knocked.proxy === 'accept' && verdictOf(newCheck(auditOf(w).slice(t1), w.A.id)), 'the same frpc WITH the shared token: the control holds, its NewProxy is accepted (the check passes)', knocked);
     const plain = await frps070(sn, { frpsToken: KNOCK, user: w2.A.id, token: w2.A.token, knock: '', ts: 1793300200, sub: 'vsowned00003' });
-    ok(plain.login === 'refused' && /token in login doesn't match/.test(plain.reason), 'WITHOUT --knock-file the token-less frpc is REFUSED at the login, by name (frpc logs it; the hub reads it) — the vouch turned that refusal into a silent drop', plain);
+    ok(plain.login === 'refused' && verdictOf(/token in login doesn't match/.test(plain.reason)), 'WITHOUT --knock-file the token-less frpc is REFUSED at the login, by name (frpc logs it; the hub reads it) — the vouch turned that refusal into a silent drop', plain);
     fs.writeFileSync(kf, '');
     const ended = await frps070(sv, { frpsToken: '', user: w.A.id, token: w.A.token, knock: '', ts: 1793300300, sub: 'vsowned00002' });
     const endedPlain = await frps070(sn, { frpsToken: '', user: w2.A.id, token: w2.A.token, knock: '', ts: 1793300400, sub: 'vsowned00003' });
@@ -380,9 +380,9 @@ console.log('⑦c THE CONTROL AFTER THE LOGIN — a stub frps 0.70.0 (the vouch 
   // such literals (test-ci-gate-push) — a bare 'README.md' is the ROOT README to it, which this suite never reads
   const RD = fs.readFileSync(path.join(REPO, 'tools/frps-login-plugin/README.md'), 'utf8');
   const sec = (RD.split(/^## /m).find((x) => /^Vouching/.test(x)) || '');
-  ok(/REFUTED against frps 0\.70\.0/.test(sec.split('\n')[0]) && /keys the control connection AFTER the login/.test(sec), 'the README: the vouch section is headed REFUTED against frps 0.70.0 and says why (the control keyed with auth.token)', sec.split('\n')[0]);
-  ok(/a `NewProxy` `accept` line for that instance in the audit AFTER the restart/.test(sec) && /`"vouched":true`[^.]*proves\s+nothing/.test(sec) && !/UNCONFIRMED/.test(RD), 'the README\'s check is a NewProxy accept after a restart with the vault locked — «vouched»:true proves nothing; no «UNCONFIRMED» left', sec.slice(0, 200));
-  ok(/REFUTED against frps 0\.70\.0/.test(fs.readFileSync(PLUGIN, 'utf8').split('\nconst http')[0]), 'the plugin\'s header says REFUTED too');
+  ok(gateOf(/REFUTED against frps 0\.70\.0/.test(sec.split('\n')[0])) && verdictOf(/keys the control connection AFTER the login/.test(sec)), 'the README: the vouch section is headed REFUTED against frps 0.70.0 and says why (the control keyed with auth.token)', sec.split('\n')[0]);
+  ok(gateOf(/a `NewProxy` `accept` line for that instance in the audit AFTER the restart/.test(sec)) && gateOf(/`"vouched":true`[^.]*proves\s+nothing/.test(sec)) && !/UNCONFIRMED/.test(RD), 'the README\'s check is a NewProxy accept after a restart with the vault locked — «vouched»:true proves nothing; no «UNCONFIRMED» left', sec.slice(0, 200));
+  ok(verdictOf(/REFUTED against frps 0\.70\.0/.test(fs.readFileSync(PLUGIN, 'utf8').split('\nconst http')[0])), 'the plugin\'s header says REFUTED too');
 }
 
 console.log('⑧ MUTANTS ⇒ RED');
@@ -397,10 +397,10 @@ console.log('⑧ MUTANTS ⇒ RED');
     const src = fs.readFileSync(PLUGIN, 'utf8');
     const applied = mutate(src) !== src;
     const held = applied ? await coreLegs(pluginModule(mutate)) : ['(the mutant did not apply)'];
-    ok(applied && !held.includes(leg), `MUTANT ${what} ⇒ the ${leg} leg goes RED`, { applied, held });
+    ok(gateOf(applied) && !held.includes(leg), `MUTANT ${what} ⇒ the ${leg} leg goes RED`, { applied, held });
   }
 }
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

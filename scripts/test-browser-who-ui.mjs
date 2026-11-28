@@ -44,7 +44,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1800) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1800) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 80) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = await pred(); if (v) return v; } catch { } await sleep(every); } try { return await pred(); } catch { return null; } };
@@ -240,7 +240,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   const srv = spawn(process.execPath, ['server.js'], { cwd: WT, env: { ...baseEnv, ...VNC_ENV, PATH: `${FAKE_BIN}:${baseEnv.PATH || '/usr/bin:/bin'}`, PORT: String(PORT), HOME: HOME_DIR, CLAUDE_CMD: STUB, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal = (journal + d).slice(-40000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-40000); });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 200), 'the scratch server booted', journal.slice(-800))) return;
+  if (!ok(verdictOf(await until(() => journal.includes('Ready.'), 60000, 200)), 'the scratch server booted', journal.slice(-800))) return;
   const api = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? J(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
 
   // ── the Task Groups (the real route) ──
@@ -249,7 +249,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const r = await api('POST', '/api/tasks', { title, folders: [{ path: dir, recursive: true }] });
     TG[k] = r.json && r.json.task ? r.json.task.id : null;
   }
-  if (!ok(TG.ops && TG.studio && TG.comp, 'three Task Groups made through the real route (运维管理 / Studio大开发 / 合规助手)', TG)) return;
+  if (!ok(gateOf(TG.ops) && gateOf(TG.studio) && verdictOf(TG.comp), 'three Task Groups made through the real route (运维管理 / Studio大开发 / 合规助手)', TG)) return;
   // ── four LIVE sessions through the real create path ──
   const ctl = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const frames = []; ctl.on('message', (d) => { if (d.length > 262144) return; try { frames.push(JSON.parse(String(d))); } catch { } });
@@ -262,7 +262,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const c = frames.find((m) => m.type === 'created' && m.reqId === 'c-' + k);
     SID[k] = c ? c.sessionId : null;
   }
-  if (!ok(Object.values(SID).every(Boolean), 'four live chat sessions created through the real path (stub claude behind the real wrapper)', { SID, err: frames.filter((m) => m.type === 'error').slice(-2) })) return;
+  if (!ok(verdictOf(Object.values(SID).every(Boolean)), 'four live chat sessions created through the real path (stub claude behind the real wrapper)', { SID, err: frames.filter((m) => m.type === 'error').slice(-2) })) return;
   const liveRows = await until(async () => { const a = frames.filter((m) => m.type === 'active-sessions').pop(); const rows = a ? a.sessions.filter((s) => Object.values(SID).includes(s.id) && /^bk-[0-9a-f]{8}$/.test(String(s.browserKey || ''))) : []; return rows.length === 4 ? rows : null; }, 20000, 200);
   if (!ok(!!liveRows, 'each live session carries its conversation\'s browser key', frames.filter((m) => m.type === 'active-sessions').pop())) return;
   const KEY = Object.fromEntries(REAL.map(([k]) => [k, liveRows.find((s) => s.id === SID[k]).browserKey]));
@@ -270,7 +270,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   const made = await api('POST', '/api/browser/profiles', { label: 'work' });
   const WORK = made.json && made.json.profile && made.json.profile.id;
   const at = await api('POST', '/api/browser/attach', { sessionId: SID.west, profile: 'work' });
-  if (!ok(WORK && at.status === 200 && at.json.lease && at.json.lease.browserKey === KEY.west, 'the profile "work" + Westcliff\'s tab in it (a real lease through the UI\'s attach, the fake 0.38.1 as the browser)', { made: made.json, at: at.json })) return;
+  if (!ok(gateOf(WORK) && at.status === 200 && gateOf(at.json.lease) && at.json.lease.browserKey === KEY.west, 'the profile "work" + Westcliff\'s tab in it (a real lease through the UI\'s attach, the fake 0.38.1 as the browser)', { made: made.json, at: at.json })) return;
 
   // ── the 36 display-only rows (40 sessions in the roster) ──
   const STUBS = [];
@@ -365,11 +365,11 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     // ═══ ① zh at 1280×800: the row reads 所有 agent, NO <select>, 更改… the house text button ═══
     console.log('— ① zh: the panel row');
     await p1.load('zh', 1280, 800);
-    ok(await p1.openPanel(), '① the Agent browser panel shows the row "work" with its who cell');
+    ok(verdictOf(await p1.openPanel()), '① the Agent browser panel shows the row "work" with its who cell');
     const who0 = await p1.text(`${ROW} .bprof-who-all`);
     const sel0 = await p1.ev(`document.querySelectorAll('.bprof select').length`);
     const chg = await p1.ev(`(() => { const b = document.querySelector('${ROW} .bprof-who-change'); return b ? { text: b.textContent, cls: b.className } : null; })()`);
-    ok(who0 === tr('zh', 'All agents') && sel0 === 0 && chg && chg.text === '更改…' && /\bmounts-btn\b/.test(chg.cls) && !/file-tool-btn/.test(chg.cls), `① the row reads "${who0}", the panel has NO <select> (${sel0}), and "${chg && chg.text}" is the house text button (${chg && chg.cls})`);
+    ok(who0 === tr('zh', 'All agents') && sel0 === 0 && gateOf(chg) && chg.text === '更改…' && gateOf(/\bmounts-btn\b/.test(chg.cls)) && !/file-tool-btn/.test(chg.cls), `① the row reads "${who0}", the panel has NO <select> (${sel0}), and "${chg && chg.text}" is the house text button (${chg && chg.cls})`);
     await p1.shot('01-zh-row-all', `${ROW}`);
 
     // ═══ ② the panel's copy HELD stale while a write lands — the dialog draws the SERVER's list ═══
@@ -381,13 +381,13 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const stale = await p1.text(`${ROW} .bprof-who-all`);
     ok(w1.status === 200 && stale === tr('zh', 'All agents'), `② a write lands (only 运维管理 + Westcliff) while the panel's copy is held: the row still says "${stale}" (stale on purpose)`, w1.json);
     const g0 = await gets(p1);
-    ok(await p1.click(`${ROW} .bprof-who-change`), '② 更改… clicked (a real mouse)');
+    ok(verdictOf(await p1.click(`${ROW} .bprof-who-change`)), '② 更改… clicked (a real mouse)');
     const opened = await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
     const title = await p1.text(`${DLG} .dialog-header h3`);
     const chips1 = await chipsOf(p1, `${DLG} .pp-chip`);
     // lane everyone-principal: no radios — the list's own chips (no All chip) ARE "only these"
     const radios = await p1.ev(`document.querySelectorAll('${DLG} input[type="radio"]').length`);
-    ok(opened && title === '谁能使用 work？' && radios === 0 && chips1.map((c) => c.name).join('|') === '运维管理|Westcliff' && (await gets(p1)) === g0 + 1, `② the dialog opens on a FRESH GET: "${title}", no radios (${radios}), chips ${chips1.map((c) => c.name).join(' · ')} — the server's list, not the panel's (no All chip)`, { chips1, title, radios });
+    ok(gateOf(opened) && title === '谁能使用 work？' && radios === 0 && chips1.map((c) => c.name).join('|') === '运维管理|Westcliff' && (await gets(p1)) === g0 + 1, `② the dialog opens on a FRESH GET: "${title}", no radios (${radios}), chips ${chips1.map((c) => c.name).join(' · ')} — the server's list, not the panel's (no All chip)`, { chips1, title, radios });
     await p1.ev('window.__who.holdHK = false');
     await p1.shot('02-zh-dialog-fresh', DLG);
 
@@ -398,8 +398,8 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.frames();
     const firstRow = await p1.ev(`(() => { const r = [...document.querySelectorAll('${DLG} .pp-list .pp-row:not(.pp-row-everyone)')].find((e) => e.offsetParent); const head = r ? r.previousElementSibling : null; return r ? { key: r.dataset.key, name: r.querySelector('.pp-name').textContent, head: head && head.classList.contains('pp-sec') ? head.textContent : null } : null; })()`);
     const allTop = await p1.ev(`(() => { const r = [...document.querySelectorAll('${DLG} .pp-list .pp-row')].find((e) => e.offsetParent); return r ? { key: r.dataset.key, name: r.querySelector('.pp-name').textContent } : null; })()`);
-    ok(firstRow && firstRow.key === 'task:' + TG.studio && firstRow.name === 'Studio大开发' && firstRow.head === '任务组', `③ type "Studio" ⇒ the first NAMED row is the Task Group "${firstRow && firstRow.name}" under "${firstRow && firstRow.head}"`, firstRow);
-    ok(allTop && allTop.key === 'everyone:*' && allTop.name === tr('zh', 'All agents'), `③ …and the search never hides ALL AGENTS: the list's first row is still "${allTop && allTop.name}" (↓ lands past it on the first match)`, allTop);
+    ok(gateOf(firstRow) && firstRow.key === 'task:' + TG.studio && firstRow.name === 'Studio大开发' && firstRow.head === '任务组', `③ type "Studio" ⇒ the first NAMED row is the Task Group "${firstRow && firstRow.name}" under "${firstRow && firstRow.head}"`, firstRow);
+    ok(gateOf(allTop) && allTop.key === 'everyone:*' && allTop.name === tr('zh', 'All agents'), `③ …and the search never hides ALL AGENTS: the list's first row is still "${allTop && allTop.name}" (↓ lands past it on the first match)`, allTop);
     await p1.key('ArrowDown', 'ArrowDown', 40); await p1.key('Enter', 'Enter', 13);
     await p1.frames();
     await p1.type('合规');
@@ -409,10 +409,10 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const chips2 = await chipsOf(p1, `${DLG} .pp-chip`);
     ok(chips2.map((c) => c.name).join('|') === '运维管理|Westcliff|Studio大开发|合规助手', `③ two Task Groups picked with the keyboard (↓ Enter): ${chips2.map((c) => c.name).join(' · ')}`, chips2);
     const kaixuRow = `${DLG} .pp-row[data-key="session:${SID.kaixu}"]`;
-    ok(await p1.click(kaixuRow), '③ the live session "Kaixu 学习" clicked in the list (a real mouse)');
+    ok(verdictOf(await p1.click(kaixuRow)), '③ the live session "Kaixu 学习" clicked in the list (a real mouse)');
     await p1.frames();
     const loseBefore = await p1.ev(`(() => { const l = document.querySelector('${DLG} .bwho-lose'); return l && getComputedStyle(l).display !== 'none' ? l.textContent.trim() : ''; })()`);
-    ok(await p1.click(`${DLG} .pp-chip[data-key="session:${SID.west}"] .pp-chip-x`), '③ Westcliff\'s chip removed with its × (a real mouse)');
+    ok(verdictOf(await p1.click(`${DLG} .pp-chip[data-key="session:${SID.west}"] .pp-chip-x`)), '③ Westcliff\'s chip removed with its × (a real mouse)');
     await p1.frames();
     const chips3 = await chipsOf(p1, `${DLG} .pp-chip`);
     const lose = await p1.ev(`(() => { const l = document.querySelector('${DLG} .bwho-lose'); return l && getComputedStyle(l).display !== 'none' ? l.textContent.trim() : ''; })()`);
@@ -426,26 +426,26 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const t2 = await (await fetch(`http://127.0.0.1:${CDP}/json/new?about:blank`, { method: 'PUT' })).json();
     const p2 = await pageOf(t2);
     await p2.load('zh', 700, 900);
-    ok(await p2.openPanel(), '⑤ page 2 (700 px wide) shows the row');
+    ok(verdictOf(await p2.openPanel()), '⑤ page 2 (700 px wide) shows the row');
     const p2chips0 = await chipsOf(p2, `${ROW} .bprof-who-chip`);
     const marked = await p2.ev(`(() => { const c = document.querySelector('${ROW} .bprof-who-chip[data-key="task:${TG.ops}"]'); if (!c) return false; c.__who_mark = 'kept'; document.querySelector('${ROW} .bprof-who').__who_mark = 'kept'; return true; })()`);
     const p2more0 = await p2.ev(`(() => { const m = document.querySelector('${ROW} .bprof-who-more'); return m && getComputedStyle(m).display !== 'none' ? Number((m.textContent.match(/\\d+/) || [0])[0]) : 0; })()`);
-    ok(marked && p2chips0.length >= 1 && p2chips0[0].name === '运维管理' && p2chips0.length + p2more0 === 2 && (p2chips0.length === 2 ? p2chips0[1].name === 'Westcliff' : true), `⑤ page 2 draws the list as chips (${p2chips0.map((c) => c.name).join(' · ')}${p2more0 ? ' + "+' + p2more0 + '"' : ''} — folded by the cell's width); its 运维管理 chip is marked`, { p2chips0, cell: await p2.ev(`(() => { const r = document.querySelector('${ROW}'); const l = r && r.querySelector('.bprof-who-line'); return l ? { stacked: !!document.querySelector('.bprof-stacked'), lineW: l.clientWidth, rowW: r.clientWidth, kids: [...l.querySelectorAll('.bprof-who-chip, .bprof-who-more, .bprof-who-change')].map((e) => [e.className, getComputedStyle(e).display, Math.round(e.getBoundingClientRect().width)]) } : null; })()`) });
+    ok(gateOf(marked) && p2chips0.length >= 1 && p2chips0[0].name === '运维管理' && p2chips0.length + p2more0 === 2 && (p2chips0.length === 2 ? p2chips0[1].name === 'Westcliff' : true), `⑤ page 2 draws the list as chips (${p2chips0.map((c) => c.name).join(' · ')}${p2more0 ? ' + "+' + p2more0 + '"' : ''} — folded by the cell's width); its 运维管理 chip is marked`, { p2chips0, cell: await p2.ev(`(() => { const r = document.querySelector('${ROW}'); const l = r && r.querySelector('.bprof-who-line'); return l ? { stacked: !!document.querySelector('.bprof-stacked'), lineW: l.clientWidth, rowW: r.clientWidth, kids: [...l.querySelectorAll('.bprof-who-chip, .bprof-who-more, .bprof-who-change')].map((e) => [e.className, getComputedStyle(e).display, Math.round(e.getBoundingClientRect().width)]) } : null; })()`) });
 
     // ═══ ④ Save ⇒ ONE PATCH (session:<webui id> rows + base), the toast, the lease gone ═══
     console.log('— ④ Save');
     await p1.front();
     const baseRead = (await useNow()).base;
     await p1.ev(`document.querySelectorAll('.global-toast').forEach((t) => t.remove())`);
-    ok(await p1.click(`${DLG} .bwho-footer .mounts-btn-primary`), '④ 保存 clicked');
+    ok(verdictOf(await p1.click(`${DLG} .bwho-footer .mounts-btn-primary`)), '④ 保存 clicked');
     const toast = await until(() => p1.ev(`(() => { const t = [...document.querySelectorAll('.global-toast .global-toast-body')].pop(); return t ? t.textContent : null; })()`), 8000, 60);
     const sent = await patches(p1);
     const body = sent[sent.length - 1] || {};
     const whoSent = (body.use && body.use.who) || [];
-    ok(sent.length === 1 && body.base === baseRead && body.use.mode === 'only' && whoSent.some((w) => w.kind === 'session' && w.session === SID.kaixu) && [TG.ops, TG.studio, TG.comp].every((id) => whoSent.some((w) => w.kind === 'task' && w.id === id)) && !whoSent.some((w) => w.key === KEY.west || w.session === SID.west), `④ ONE PATCH with the picked session as session:<webui id>, the three Task Groups and the base it read (${sent.length} sent)`, body);
-    ok(toast && toast.startsWith('谁能使用 work：') && /运维管理/.test(toast) && /Kaixu 学习/.test(toast) && /不再使用 work|1/.test(toast), `④ the toast: "${toast}"`);
+    ok(sent.length === 1 && body.base === baseRead && body.use.mode === 'only' && gateOf(whoSent.some((w) => w.kind === 'session' && w.session === SID.kaixu)) && gateOf([TG.ops, TG.studio, TG.comp].every((id) => whoSent.some((w) => w.kind === 'task' && w.id === id))) && !whoSent.some((w) => w.key === KEY.west || w.session === SID.west), `④ ONE PATCH with the picked session as session:<webui id>, the three Task Groups and the base it read (${sent.length} sent)`, body);
+    ok(gateOf(toast) && gateOf(toast.startsWith('谁能使用 work：')) && gateOf(/运维管理/.test(toast)) && gateOf(/Kaixu 学习/.test(toast)) && verdictOf(/不再使用 work|1/.test(toast)), `④ the toast: "${toast}"`);
     const u1 = await useNow();
-    ok(u1.use.mode === 'only' && u1.use.who.some((w) => w.kind === 'session' && w.key === KEY.kaixu) && !u1.usedBy.some((x) => x.key === KEY.west && x.leased), '④ the server holds the list (Kaixu 学习 by its KEY) and Westcliff\'s tab is gone', u1);
+    ok(u1.use.mode === 'only' && gateOf(u1.use.who.some((w) => w.kind === 'session' && w.key === KEY.kaixu)) && !u1.usedBy.some((x) => x.key === KEY.west && x.leased), '④ the server holds the list (Kaixu 学习 by its KEY) and Westcliff\'s tab is gone', u1);
     await until(() => p1.ev(`!document.getElementById('browser-who-dialog')`), 4000);
 
     // ═══ ⑤ page 2: the unchanged chip is the SAME node; the rest fold into the dictionary's "+N more" ═══
@@ -454,13 +454,13 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const p2done = await until(async () => { const c = await chipsOf(p2, `${ROW} .bprof-who-chip`); return c.length >= 1 && c[0].key === 'task:' + TG.ops && (c.length < 2 || c[1].key === 'task:' + TG.studio) && c.length + (await moreN(p2, `${ROW} .bprof-who-more`)) === 4 ? c : null; }, 10000, 150);
     const same = await p2.ev(`(() => { const c = document.querySelector('${ROW} .bprof-who-chip[data-key="task:${TG.ops}"]'); const cell = document.querySelector('${ROW} .bprof-who'); return { chip: !!c && c.__who_mark === 'kept', cell: !!cell && cell.__who_mark === 'kept' }; })()`);
     const more = await p2.text(`${ROW} .bprof-who-more`);
-    ok(p2done && same.chip && same.cell && (p2done.length === 4 ? !more || (await moreN(p2, `${ROW} .bprof-who-more`)) === 0 : more === '+' + (4 - p2done.length)), `⑤ page 2 after the broadcast: ${p2done && p2done.map((c) => c.name).join(' · ')}${more ? ' + "' + more + '"' : ''} (the four rows, folded by the cell's width); the 运维管理 chip and the cell are the SAME nodes (keyed in place)`, { p2done, same, more });
+    ok(gateOf(p2done) && gateOf(same.chip) && gateOf(same.cell) && (p2done.length === 4 ? !more || (await moreN(p2, `${ROW} .bprof-who-more`)) === 0 : more === '+' + (4 - p2done.length)), `⑤ page 2 after the broadcast: ${p2done && p2done.map((c) => c.name).join(' · ')}${more ? ' + "' + more + '"' : ''} (the four rows, folded by the cell's width); the 运维管理 chip and the cell are the SAME nodes (keyed in place)`, { p2done, same, more });
     await p2.shot('05-zh-page2-700', ROW);
 
     // ═══ ⑥ the 409 leg: a write between open and Save ⇒ the sentence, re-opened on the list as it is now ═══
     console.log('— ⑥ a write between open and Save');
     await p1.front();
-    ok(await p1.click(`${ROW} .bprof-who-change`), '⑥ 更改… again');
+    ok(verdictOf(await p1.click(`${ROW} .bprof-who-change`)), '⑥ 更改… again');
     await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
     const u2 = await useNow();
     const w2 = await api('PATCH', `/api/browser/profiles/${WORK}`, { use: { mode: 'only', who: [{ kind: 'task', id: TG.ops }] }, base: u2.base });
@@ -477,16 +477,16 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     console.log('— ⑦ the empty list; the remote sessions');
     const listNames = await p1.ev(`[...document.querySelectorAll('${DLG} .pp-list .pp-row .pp-name')].map((e) => e.textContent)`);
     const remoteLine = await p1.ev(`(() => { const l = document.querySelector('${DLG} .bwho-remote'); return l && getComputedStyle(l).display !== 'none' ? l.textContent : ''; })()`);
-    ok(!listNames.includes('Remote box one') && !listNames.includes('Remote box two') && !listNames.includes('A shell') && listNames.includes('Westcliff') && remoteLine === tr('zh', 'Conversations on other machines are not listed — the Agent browser runs on this machine only.'), `⑦ the list has no session on another machine and no shell (${listNames.length} rows); the sentence: "${remoteLine}"`);
+    ok(!listNames.includes('Remote box one') && !listNames.includes('Remote box two') && !listNames.includes('A shell') && gateOf(listNames.includes('Westcliff')) && remoteLine === tr('zh', 'Conversations on other machines are not listed — the Agent browser runs on this machine only.'), `⑦ the list has no session on another machine and no shell (${listNames.length} rows); the sentence: "${remoteLine}"`);
     await p1.click(`${DLG} .pp-chip[data-key="task:${TG.ops}"] .pp-chip-x`);
     await p1.frames();
     const n1 = (await patches(p1)).length;
     await p1.click(`${DLG} .bwho-footer .mounts-btn-primary`);
     await p1.frames();
     const refusal = await p1.ev(`(() => { const l = document.querySelector('${DLG} .bwho-refusal'); return l && getComputedStyle(l).display !== 'none' ? l.textContent.trim() : ''; })()`);
-    ok(refusal === tr('zh', 'Pick All agents, or at least one conversation or Task Group.') && (await patches(p1)).length === n1 && (await p1.ev(`!!document.getElementById('browser-who-dialog')`)), `⑦ Save with no chip (not even All agents) is refused IN PLACE: "${refusal}" — no request, the dialog stays`);
+    ok(refusal === tr('zh', 'Pick All agents, or at least one conversation or Task Group.') && (await patches(p1)).length === n1 && (verdictOf(await p1.ev(`!!document.getElementById('browser-who-dialog')`))), `⑦ Save with no chip (not even All agents) is refused IN PLACE: "${refusal}" — no request, the dialog stays`);
     const n7 = await p1.notes(DLG);
-    ok(n7.shown.some((x) => x.cls === 'bwho-refusal') && !n7.problems.length, `⑦ the refusal is a real line (${n7.shown.map((x) => x.cls + ' ' + x.h + ' px').join(', ')}), never over the remote line or the footer`, n7.problems);
+    ok(gateOf(n7.shown.some((x) => x.cls === 'bwho-refusal')) && !n7.problems.length, `⑦ the refusal is a real line (${n7.shown.map((x) => x.cls + ' ' + x.h + ' px').join(', ')}), never over the remote line or the footer`, n7.problems);
     await p1.shot('07-zh-dialog-empty', DLG);
 
     // ═══ ⑩ ALL AGENTS picked (zh): beside a list, kept, restored ═══
@@ -496,12 +496,12 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const w10 = await api('PATCH', `/api/browser/profiles/${WORK}`, { use: { mode: 'only', who: [{ kind: 'task', id: TG.ops }] }, base: u10.base });
     ok(w10.status === 200, '⑩ the list is 运维管理 alone (written through the route)', w10.json);
     await p1.front();
-    ok(await p1.click(`${ROW} .bprof-who-change`), '⑩ 更改…');
+    ok(verdictOf(await p1.click(`${ROW} .bprof-who-change`)), '⑩ 更改…');
     await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
     const allRow = `${DLG} .pp-list .pp-row.pp-row-everyone`;
     const allFacts = await p1.ev(`(() => { const r = document.querySelector('${allRow}'); const first = [...document.querySelectorAll('${DLG} .pp-list > *')][0]; return r ? { first: first === r, name: r.querySelector('.pp-name').textContent, hint: (r.querySelector('.pp-hint') || {}).textContent || '', on: r.getAttribute('aria-selected'), disabled: r.getAttribute('aria-disabled') } : null; })()`);
-    ok(allFacts && allFacts.first && allFacts.name === tr('zh', 'All agents') && allFacts.hint === tr('zh', 'every conversation, now and later') && allFacts.on === 'false' && allFacts.disabled === null, `⑩ the dialog's FIRST row: "${allFacts && allFacts.name}" · "${allFacts && allFacts.hint}", not picked, never greyed`, allFacts);
-    ok(await p1.click(allRow), '⑩ ALL AGENTS clicked (a real mouse)');
+    ok(gateOf(allFacts) && gateOf(allFacts.first) && allFacts.name === tr('zh', 'All agents') && allFacts.hint === tr('zh', 'every conversation, now and later') && allFacts.on === 'false' && allFacts.disabled === null, `⑩ the dialog's FIRST row: "${allFacts && allFacts.name}" · "${allFacts && allFacts.hint}", not picked, never greyed`, allFacts);
+    ok(verdictOf(await p1.click(allRow)), '⑩ ALL AGENTS clicked (a real mouse)');
     await p1.frames();
     const chips10 = await chipsOf(p1, `${DLG} .pp-chip`);
     const meaning10 = await p1.text(`${DLG} .bwho-meaning:not(.bwho-kept)`);
@@ -514,23 +514,23 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const toast10 = await until(() => p1.ev(`(() => { const t = [...document.querySelectorAll('.global-toast .global-toast-body')].pop(); return t ? t.textContent : null; })()`), 8000, 60);
     const sent10 = (await patches(p1)).slice(n10);
     const b10 = sent10[0] || {};
-    ok(sent10.length === 1 && b10.use && b10.use.mode === 'all' && J(b10.use.who) === J([{ kind: 'task', id: TG.ops }]) && toast10 === tr('zh', 'Who can use {label}: All agents', { label: 'work' }), `⑩ ONE PATCH {mode:'all', who:[运维管理]} — the list rides along, kept; the toast "${toast10}"`, { b10, toast10 });
+    ok(sent10.length === 1 && gateOf(b10.use) && b10.use.mode === 'all' && J(b10.use.who) === J([{ kind: 'task', id: TG.ops }]) && toast10 === tr('zh', 'Who can use {label}: All agents', { label: 'work' }), `⑩ ONE PATCH {mode:'all', who:[运维管理]} — the list rides along, kept; the toast "${toast10}"`, { b10, toast10 });
     const u10b = await useNow();
     ok(u10b.use.mode === 'all' && u10b.use.who.length === 1 && u10b.use.who[0].id === TG.ops, '⑩ the server: every conversation may (all), 运维管理 KEPT beside it', u10b.use);
     const row10 = await until(async () => { const v = await p1.text(`${ROW} .bprof-who-all`); return v === tr('zh', 'All agents ({n} more rows)', { n: 1 }) ? v : null; }, 8000, 120);
     ok(!!row10, `⑩ the panel row reads "${row10}" — All first, the kept row counted`);
-    ok(await p1.click(`${ROW} .bprof-who-change`), '⑩ 更改… again');
+    ok(verdictOf(await p1.click(`${ROW} .bprof-who-change`)), '⑩ 更改… again');
     await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
     const chips10b = await chipsOf(p1, `${DLG} .pp-chip`);
     ok(chips10b.map((c) => c.name).join('|') === `${tr('zh', 'All agents')}|运维管理`, `⑩ re-opened: ${chips10b.map((c) => c.name).join(' · ')} — All and the kept row picked`, chips10b);
-    ok(await p1.click(`${DLG} .pp-chip[data-key="everyone:*"] .pp-chip-x`), '⑩ All\'s chip removed with its × (a real mouse)');
+    ok(verdictOf(await p1.click(`${DLG} .pp-chip[data-key="everyone:*"] .pp-chip-x`)), '⑩ All\'s chip removed with its × (a real mouse)');
     await p1.frames();
     const n10b = (await patches(p1)).length;
     await p1.click(`${DLG} .bwho-footer .mounts-btn-primary`);
     await until(() => p1.ev(`!document.getElementById('browser-who-dialog')`), 8000, 60);
     const b10b = (await patches(p1)).slice(n10b)[0] || {};
     const u10c = await useNow();
-    ok(b10b.use && b10b.use.mode === 'only' && u10c.use.mode === 'only' && J(u10c.use.who.map((w) => w.id)) === J([TG.ops]), '⑩ taking All away restores EXACTLY the kept list (only 运维管理) — never a silent loss of the rows', { b10b, use: u10c.use });
+    ok(gateOf(b10b.use) && b10b.use.mode === 'only' && u10c.use.mode === 'only' && J(u10c.use.who.map((w) => w.id)) === J([TG.ops]), '⑩ taking All away restores EXACTLY the kept list (only 运维管理) — never a silent loss of the rows', { b10b, use: u10c.use });
 
     // ═══ ⑧ the RECT CENSUS at 860 px (the panel) + the dialog at 1280 ═══
     console.log('— ⑧ the rect census');
@@ -547,7 +547,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const shown860 = await shownOf(), n860 = await moreN(p1, `${ROW} .bprof-who-more`);
     ok(winW >= 850 && winW <= 870 && r860.n >= 3 && !r860.problems.length && shown860 >= 1 && shown860 + n860 === 6 && n860 >= 2 && more860 === '+' + n860, `⑧ 860 px (the panel window ${winW} px): ${r860.n} parts inside their cells and the viewport, no sideways overflow; ${shown860} chips + "${more860}" (six rows folded by the who column's WIDTH — design 015 §2b)`, r860.problems);
     await p1.shot('08-zh-row-860', ROW);
-    ok(await p1.click(`${ROW} .bprof-who-change`), '⑧ the dialog at 1280');
+    ok(verdictOf(await p1.click(`${ROW} .bprof-who-change`)), '⑧ the dialog at 1280');
     await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
     const rDlg = await p1.rects({ pairs: [[DLG, '.pp-chip, button, .bwho-answer, .pp-input'], [`${DLG} .pp-list`, '.pp-row', { h: true }]], viewport: true });
     ok(!rDlg.problems.length && rDlg.n >= 20, `⑧ the dialog at 1280: ${rDlg.n} parts inside the dialog / the list and the viewport`, rDlg.problems);
@@ -559,7 +559,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p2.ev(`(() => { window.app.openBrowserProfiles(); return true; })()`);
     await until(() => p2.ev(`!!document.querySelector('${ROW} .bprof-who-change')`), 10000, 100);
     await p2.ev(`(() => { const b = document.querySelector('${ROW} .bprof-who-change'); b.scrollIntoView({ block: 'center' }); return true; })()`);
-    ok(await p2.click(`${ROW} .bprof-who-change`), '⑧ 更改… on the phone');
+    ok(verdictOf(await p2.click(`${ROW} .bprof-who-change`)), '⑧ 更改… on the phone');
     await until(() => p2.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
     const r360 = await p2.rects({ pairs: [[DLG, '.pp-chip, button, .bwho-answer, .pp-input'], [`${DLG} .pp-list`, '.pp-row', { h: true }]], viewport: false, minHeights: [[`${DLG} .pp-row`, 40], [`${DLG} .pp-chip`, 36]] });
     const dW = await p2.ev(`Math.round(document.querySelector('${DLG}').getBoundingClientRect().width)`);
@@ -585,7 +585,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     // other and the remote line, the sentence cut at the screen's edge (zh "会关闭）", en "(th", ja "（その中") ═══
     console.log('— ⑨ the two notes on the phone, zh / ja / en');
     const at9 = await api('POST', '/api/browser/attach', { sessionId: SID.west, profile: 'work' });
-    ok(at9.status === 200 && at9.json.lease, '⑨ Westcliff holds a tab in work again (the list admits it) — the lease the empty list would take away', at9.json);
+    ok(at9.status === 200 && verdictOf(at9.json.lease), '⑨ Westcliff holds a tab in work again (the list admits it) — the lease the empty list would take away', at9.json);
     for (const lang of ['zh', 'ja', 'en']) {
       await p2.load(lang, 360, 740, true);
       await p2.ev(`(() => { window.app.openBrowserProfiles(); return true; })()`);
@@ -604,7 +604,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       if (lang === 'zh') {
         // CONTROL (in the page): the pre-fix write — the sentence put into the glyph's span — is caught by the same judge
         const ctl9 = await p2.ev(`(() => { const n = document.querySelector('${DLG} .bwho-lose'); const ic = n.querySelector('.chan-ic'), tx = n.querySelector('.chan-note-text'); const keep = { ic: ic.innerHTML, tx: tx.textContent }; ic.textContent = tx.textContent; tx.textContent = ''; const r = (${NOTES.toString()})(${J(DLG)}); ic.innerHTML = keep.ic; tx.textContent = keep.tx; return r.problems; })()`);
-        ok(ctl9.some((x) => /bwho-lose/.test(x)), `CONTROL: the pre-fix note (the sentence inside the glyph's span) fails the judge (${ctl9.slice(0, 3).join('; ')})`);
+        ok(verdictOf(ctl9.some((x) => /bwho-lose/.test(x))), `CONTROL: the pre-fix note (the sentence inside the glyph's span) fails the judge (${ctl9.slice(0, 3).join('; ')})`);
       }
       await p2.ev(`document.getElementById('browser-who-dialog')?.remove()`);
     }
@@ -620,4 +620,4 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
 
 cleanup();
 console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

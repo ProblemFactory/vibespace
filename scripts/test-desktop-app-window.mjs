@@ -91,7 +91,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('deskapp-smoke');
 const home = scratchHome('deskapp-home', fs);
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -180,7 +180,7 @@ process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 
 const waitServer = async () => { for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-check('worktree server boots', await waitServer());
+check('worktree server boots', verdictOf(await waitServer()));
 const WebSocket = require('ws');
 const cdpTargets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json());
 let target = await until(async () => (await cdpTargets()).find((t) => t.type === 'page'), 20000, 250);
@@ -272,7 +272,7 @@ try {
   await openPage(p1);
   const av = await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json())`);
   check('server: vnc-display via Xvfb+x11vnc with the fallback reason', av.availability?.backend === 'vnc-display' && av.availability?.fallbackWhy === XPRA_WHY, av.availability);
-  check('the toolbar Apps button is visible (probe found a backend)', await until(() => p1.evalJs(`getComputedStyle(document.getElementById('btn-desktop-apps')).display !== 'none'`), 8000));
+  check('the toolbar Apps button is visible (probe found a backend)', verdictOf(await until(() => p1.evalJs(`getComputedStyle(document.getElementById('btn-desktop-apps')).display !== 'none'`), 8000)));
   // 2.369.97 (userW, inc-mu1qa5gj-9qe9): the Apps probe re-applies the chrome
   // settings AFTER the VNC probe has answered, and `toolbar.showDesktopButton`
   // was never declared in the schema — so a machine WITH a VNC server lost its
@@ -280,9 +280,9 @@ try {
   // against 2.369.95). This box has no Xvnc, so the probe outcome is stated
   // directly: with vnc available, re-applying chrome settings must keep the
   // button; and the setting must be a declared, default-true schema row.
-  check('the Desktop button survives a chrome-settings re-apply once VNC is available (the .96 regression shape)', await p1.evalJs(`(() => { app._vncAvailable = true; app._applyChromeSettings(); return getComputedStyle(document.getElementById('btn-desktop')).display !== 'none' && app.settings.get('toolbar.showDesktopButton') === true; })()`));
-  check('…and NOT when the user turned it off (the setting is the switch, not the probe)', await p1.evalJs(`(() => { const prev = app.settings.get('toolbar.showDesktopButton'); app.settings.set('toolbar.showDesktopButton', false); app._applyChromeSettings(); const hidden = getComputedStyle(document.getElementById('btn-desktop')).display === 'none'; app.settings.set('toolbar.showDesktopButton', prev); app._applyChromeSettings(); return hidden && getComputedStyle(document.getElementById('btn-desktop')).display !== 'none'; })()`));
-  check('⚙ menu carries the "Desktop apps…" row (a contribution, when the backend exists)', await p1.evalJs(`(async () => { const m = await import('/src/lib/contributions.js').catch(() => null); return true; })()`) && await p1.evalJs(`app._desktopAppsAvailable === true`));
+  check('the Desktop button survives a chrome-settings re-apply once VNC is available (the .96 regression shape)', verdictOf(await p1.evalJs(`(() => { app._vncAvailable = true; app._applyChromeSettings(); return getComputedStyle(document.getElementById('btn-desktop')).display !== 'none' && app.settings.get('toolbar.showDesktopButton') === true; })()`)));
+  check('…and NOT when the user turned it off (the setting is the switch, not the probe)', verdictOf(await p1.evalJs(`(() => { const prev = app.settings.get('toolbar.showDesktopButton'); app.settings.set('toolbar.showDesktopButton', false); app._applyChromeSettings(); const hidden = getComputedStyle(document.getElementById('btn-desktop')).display === 'none'; app.settings.set('toolbar.showDesktopButton', prev); app._applyChromeSettings(); return hidden && getComputedStyle(document.getElementById('btn-desktop')).display !== 'none'; })()`)));
+  check('⚙ menu carries the "Desktop apps…" row (a contribution, when the backend exists)', gateOf(await p1.evalJs(`(async () => { const m = await import('/src/lib/contributions.js').catch(() => null); return true; })()`)) && verdictOf(await p1.evalJs(`app._desktopAppsAvailable === true`)));
 
   // ── §G THE LAUNCH DIALOG'S GEOMETRY, measured on a fresh open at three viewports ──
   console.log('§G the launch dialog does not clip, scroll or squeeze at 1000×800 / 777×800 / 480×640 (fresh open, computed rects)');
@@ -292,36 +292,36 @@ try {
     check(`${tag}: the dialog fits the viewport (${g.dlg.w.toFixed(0)}px wide in ${g.vw})`, g.dlg.w <= g.vw && g.dlg.x >= -0.5 && g.dlg.r <= g.vw + 0.5, g.dlg);
     check(`${tag}: .dialog is not scrolled sideways and has nothing to scroll (scrollLeft ${g.scrollLeft}, scrollWidth ${g.scrollWidth} ≤ clientWidth ${g.clientWidth})`, g.scrollLeft === 0 && g.scrollWidth <= g.clientWidth);
     check(`${tag}: the body has no sideways overflow either (${g.bodyScrollW} ≤ ${g.bodyClientW})`, g.bodyScrollW <= g.bodyClientW + 1);
-    check(`${tag}: the title is hit-testable at its centre (elementFromPoint lands on the h3)`, g.h3Hit, { h3: g.h3, hit: g.h3Hit });
+    check(`${tag}: the title is hit-testable at its centre (elementFromPoint lands on the h3)`, verdictOf(g.h3Hit), { h3: g.h3, hit: g.h3Hit });
     { const edge = (g.frame || g.dlg).r; check(`${tag}: ✕ sits inside the ${g.frame ? 'form window' : 'dialog'}'s right 48px (x ${g.close.x.toFixed(0)}..${g.close.r.toFixed(0)} vs right ${edge.toFixed(0)})`, g.close.r <= edge + 0.5 && g.close.x >= edge - 48); }
-    check(`${tag}: the intro line renders`, g.introVisible && g.introText.length > 40);
+    check(`${tag}: the intro line renders`, gateOf(g.introVisible) && g.introText.length > 40);
     check(`${tag}: the first app card's label lies inside its card`, !!g.card && !!g.label && g.label.x >= g.card.x - 0.5 && g.label.r <= g.card.r + 0.5 && g.label.w > 0, { card: g.card, label: g.label });
     check(`${tag}: the catalog grid spans the body's content box (${g.grid && g.grid.w.toFixed(0)} of ${g.bodyContentW.toFixed(0)})`, !!g.grid && g.grid.w >= 0.98 * g.bodyContentW);
-    if (twoColumns) check(`${tag}: both Advanced columns keep ≥ 38 % of the dialog (${g.cols.map((c) => (100 * c.w / g.dlg.w).toFixed(0) + '%').join('/')})`, g.cols.length === 2 && g.cols.every((c) => c.w >= 0.38 * g.dlg.w), g.cols);
-    else check(`${tag}: ≤768px — the Advanced form is ONE column, each spanning the body`, g.cols.length === 2 && g.cols.every((c) => c.w >= 0.98 * g.bodyContentW) && Math.abs(g.cols[0].x - g.cols[1].x) < 1, g.cols);
+    if (twoColumns) check(`${tag}: both Advanced columns keep ≥ 38 % of the dialog (${g.cols.map((c) => (100 * c.w / g.dlg.w).toFixed(0) + '%').join('/')})`, g.cols.length === 2 && verdictOf(g.cols.every((c) => c.w >= 0.38 * g.dlg.w)), g.cols);
+    else check(`${tag}: ≤768px — the Advanced form is ONE column, each spanning the body`, g.cols.length === 2 && gateOf(g.cols.every((c) => c.w >= 0.98 * g.bodyContentW)) && Math.abs(g.cols[0].x - g.cols[1].x) < 1, g.cols);
   };
   for (const [w, h] of VIEWPORTS) {
     await p1.cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: w <= 768 });
     await sleep(200);
-    check(`${w}×${h}: a fresh open renders the catalog`, await openDialog(p1));
+    check(`${w}×${h}: a fresh open renders the catalog`, verdictOf(await openDialog(p1)));
     let g = await p1.evalJs(GEOM);
     check(`${w}×${h}: the Advanced disclosure is CLOSED on a fresh open (aria-expanded=false, form hidden)`, g.adv === 'false' && !g.advBodyVisible, { adv: g.adv, advBodyVisible: g.advBodyVisible });
     check(`${w}×${h}: nothing is running yet ⇒ the Running section is not shown`, !g.runningVisible);
-    check(`${w}×${h}: every registry row is a visible card with an SVG icon — an absent binary is DIMMED with its reason, never hidden`, g.cards.length >= 3 && g.cards.every((c) => c.visible && c.svg) && g.cards.filter((c) => c.unavailable).every((c) => c.disabled && (/not on PATH|parked/i.test(c.sub) || c.sub === SNAP_SHORT_KEY || (!!OFFICE_SHORT_KEY && c.sub === OFFICE_SHORT_KEY))), g.cards); // B-bfe6 r1: a browser row a snap cannot serve here is dimmed with the SHORT reason (the verdict's sentence is its tooltip)
+    check(`${w}×${h}: every registry row is a visible card with an SVG icon — an absent binary is DIMMED with its reason, never hidden`, g.cards.length >= 3 && gateOf(g.cards.every((c) => c.visible && c.svg)) && verdictOf(g.cards.filter((c) => c.unavailable).every((c) => c.disabled && (/not on PATH|parked/i.test(c.sub) || c.sub === SNAP_SHORT_KEY || (!!OFFICE_SHORT_KEY && c.sub === OFFICE_SHORT_KEY)))), g.cards); // B-bfe6 r1: a browser row a snap cannot serve here is dimmed with the SHORT reason (the verdict's sentence is its tooltip)
     // lane D (b): the default-scale control rides a card ONLY on a rung that scales apps (xpra) — this suite's vnc-display
     // rung draws a whole display at the browser's pixels, so there is nothing to choose (the xpra leg: test-desktop-xpra-window §14)
     // §7.9: a LibreOffice row that is not installed carries its "Install…" segment beside the card (never a scale control)
-    check(`${w}×${h}: on the vnc-display rung no card carries a default-scale control — a card's wrapper holds the card, plus only a not-installed LibreOffice row's "Install…"`, await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); const cards = [...d.querySelectorAll('.desktop-launch-card')]; return d.querySelectorAll('.desktop-launch-card-scale').length === 0 && cards.length > 0 && cards.every((c) => c.parentElement.classList.contains('desktop-launch-card-wrap') && c.parentElement.firstElementChild === c && [...c.parentElement.children].slice(1).every((x) => x.classList.contains('desktop-launch-card-install') && c.classList.contains('is-unavailable'))); })()`));
+    check(`${w}×${h}: on the vnc-display rung no card carries a default-scale control — a card's wrapper holds the card, plus only a not-installed LibreOffice row's "Install…"`, verdictOf(await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); const cards = [...d.querySelectorAll('.desktop-launch-card')]; return d.querySelectorAll('.desktop-launch-card-scale').length === 0 && cards.length > 0 && cards.every((c) => c.parentElement.classList.contains('desktop-launch-card-wrap') && c.parentElement.firstElementChild === c && [...c.parentElement.children].slice(1).every((x) => x.classList.contains('desktop-launch-card-install') && c.classList.contains('is-unavailable'))); })()`)));
     await shot(p1, `after-fresh-open-${w}x${h}@2x.png`);
     // the closed state has no columns to measure; open the disclosure (a real click) and measure the form
     await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-adv-toggle');
     await sleep(250);
     g = await p1.evalJs(GEOM);
-    check(`${w}×${h}: the disclosure opens on click (aria-expanded=true) and the Command input has focus without scrolling the dialog`, g.adv === 'true' && g.advBodyVisible && /desktop-launch-exec/.test(g.focused || '') && g.scrollLeft === 0, { adv: g.adv, focused: g.focused, scrollLeft: g.scrollLeft });
+    check(`${w}×${h}: the disclosure opens on click (aria-expanded=true) and the Command input has focus without scrolling the dialog`, g.adv === 'true' && gateOf(g.advBodyVisible) && gateOf(/desktop-launch-exec/.test(g.focused || '')) && g.scrollLeft === 0, { adv: g.adv, focused: g.focused, scrollLeft: g.scrollLeft });
     assertGeom(`${w}×${h} (Advanced open)`, g, { twoColumns: w > 768 });
     await shot(p1, `after-advanced-open-${w}x${h}@2x.png`);
     // …and the disclosure click PERSISTED `true`; put it back so the next fresh open is a control
-    check(`${w}×${h}: the disclosure state reached user state (merge-only PATCH)`, await until(() => p1.evalJs(`fetch('/api/user-state').then((r) => r.json()).then((s) => s.desktopAppAdvancedOpen === true)`), 4000, 100));
+    check(`${w}×${h}: the disclosure state reached user state (merge-only PATCH)`, verdictOf(await until(() => p1.evalJs(`fetch('/api/user-state').then((r) => r.json()).then((s) => s.desktopAppAdvancedOpen === true)`), 4000, 100)));
     await patchState({ desktopAppAdvancedOpen: false });
   }
   // the LATENT squeeze: three long nowrap Recent entries used to turn 1fr/1fr
@@ -329,12 +329,12 @@ try {
   await patchState({ desktopAppRecents: [1, 2, 3].map((i) => ({ exec: `/usr/local/lib/some-very-long-vendor-directory-${i}/bin/an-application-with-a-long-name`, args: ['--profile-directory=/home/someone/.config/an-application/profiles/default-profile', '--no-sandbox', '--flag-number-' + i], cwd: '/home/someone/workspace/a-project-with-a-descriptive-name/subdir', label: `Recent ${i}` })), desktopAppAdvancedOpen: true });
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1000, height: 800, deviceScaleFactor: 2, mobile: false });
   await sleep(200);
-  check('latent case: a fresh open with three long Recent entries (persisted) and the disclosure persisted open', await openDialog(p1));
+  check('latent case: a fresh open with three long Recent entries (persisted) and the disclosure persisted open', verdictOf(await openDialog(p1)));
   {
     const g = await p1.evalJs(GEOM);
-    check('latent case: the persisted disclosure preference opens the form on a fresh open', g.adv === 'true' && g.advBodyVisible);
-    check(`latent case: three Recent rows rendered`, await p1.evalJs(`document.querySelectorAll('#desktop-launch-dialog .desktop-launch-recents .desktop-launch-app').length === 3`));
-    check(`latent case: both columns keep ≥ 38 % beside three nowrap Recent entries (${g.cols.map((c) => (100 * c.w / g.dlg.w).toFixed(0) + '%').join('/')})`, g.cols.length === 2 && g.cols.every((c) => c.w >= 0.38 * g.dlg.w), g.cols);
+    check('latent case: the persisted disclosure preference opens the form on a fresh open', g.adv === 'true' && verdictOf(g.advBodyVisible));
+    check(`latent case: three Recent rows rendered`, verdictOf(await p1.evalJs(`document.querySelectorAll('#desktop-launch-dialog .desktop-launch-recents .desktop-launch-app').length === 3`)));
+    check(`latent case: both columns keep ≥ 38 % beside three nowrap Recent entries (${g.cols.map((c) => (100 * c.w / g.dlg.w).toFixed(0) + '%').join('/')})`, g.cols.length === 2 && verdictOf(g.cols.every((c) => c.w >= 0.38 * g.dlg.w)), g.cols);
     check('latent case: the catalog grid still spans the body', !!g.grid && g.grid.w >= 0.98 * g.bodyContentW);
     check('latent case: no sideways scroll', g.scrollLeft === 0 && g.scrollWidth <= g.clientWidth && g.bodyScrollW <= g.bodyClientW + 1);
     await shot(p1, 'after-latent-three-recents-1000x800@2x.png');
@@ -360,13 +360,13 @@ try {
     await p1.cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: w <= 768 });
     await sleep(200);
     await injectSnapRow(p1);
-    check(`${w}×${h}: a fresh open renders the catalog (with the synthetic snap row)`, await openDialog(p1) && await until(() => p1.evalJs(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="vs-snap-probe"]')`), 4000, 100));
+    check(`${w}×${h}: a fresh open renders the catalog (with the synthetic snap row)`, gateOf(await openDialog(p1)) && verdictOf(await until(() => p1.evalJs(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="vs-snap-probe"]')`), 4000, 100)));
     await p1.evalJs(`document.querySelector('#desktop-launch-dialog label.desktop-launch-check')?.scrollIntoView({ block: 'nearest' }); true`);
     const g = await p1.evalJs(BGEOM);
     check(`${w}×${h}: the keep-profile checkbox is LEFT of its text, on the same row (flex-direction ${g && g.flexDir})`, !!g && !!g.box && !!g.txt && g.box.r <= g.txt.x + 0.5 && g.box.y < g.txt.b && g.box.b > g.txt.y && g.box.w > 0, g && { box: g.box, txt: g.txt });
     const snapCard = g && g.cards.find((c) => c.id === 'vs-snap-probe');
-    check(`${w}×${h}: the dimmed snap card says the SHORT reason ("${snapCard && snapCard.sub}") and keeps the full sentence in its tooltip`, !!snapCard && snapCard.sub === SNAP_SHORT_KEY && snapCard.title.includes(SNAP_LONG), snapCard);
-    check(`${w}×${h}: no dimmed browser card's reason is clipped (${g && g.cards.map((c) => `${c.id} ${c.sw}/${c.cw}×${c.sh}/${c.ch}`).join(', ')})`, !!g && g.cards.length >= 1 && g.cards.every((c) => c.sw <= c.cw + 1 && c.sh <= c.ch + 1), g && g.cards);
+    check(`${w}×${h}: the dimmed snap card says the SHORT reason ("${snapCard && snapCard.sub}") and keeps the full sentence in its tooltip`, !!snapCard && snapCard.sub === SNAP_SHORT_KEY && verdictOf(snapCard.title.includes(SNAP_LONG)), snapCard);
+    check(`${w}×${h}: no dimmed browser card's reason is clipped (${g && g.cards.map((c) => `${c.id} ${c.sw}/${c.cw}×${c.sh}/${c.ch}`).join(', ')})`, !!g && g.cards.length >= 1 && verdictOf(g.cards.every((c) => c.sw <= c.cw + 1 && c.sh <= c.ch + 1)), g && g.cards);
     await shot(p1, `browsers-section-${w}x${h}@2x.png`);
   }
   await p1.evalJs(`(() => { if (window.__vsSnapFetch) { window.fetch = window.__vsSnapFetch; delete window.__vsSnapFetch; } document.getElementById('desktop-launch-dialog')?.remove(); return true; })()`);
@@ -380,8 +380,8 @@ try {
   await openDialog(p1);
   {
     const g = await p1.evalJs(GEOM);
-    check('in zh the intro line renders the zh translation (not the English key)', g.introVisible && g.introText === zhDict[INTRO_KEY], { got: g.introText.slice(0, 80) });
-    check('in zh the disclosure label is translated too', await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').textContent === ${JSON.stringify(zhDict['Advanced: run any command'])}`));
+    check('in zh the intro line renders the zh translation (not the English key)', gateOf(g.introVisible) && g.introText === zhDict[INTRO_KEY], { got: g.introText.slice(0, 80) });
+    check('in zh the disclosure label is translated too', verdictOf(await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').textContent === ${JSON.stringify(zhDict['Advanced: run any command'])}`)));
     check('control: the zh dictionary carries the short snap reason', typeof zhDict[SNAP_SHORT_KEY] === 'string' && zhDict[SNAP_SHORT_KEY].length > 3);
     await shot(p1, 'after-intro-zh-1000x800@2x.png');
   }
@@ -403,11 +403,11 @@ try {
     await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-card[data-app-id="${cardApp.id}"]`);
     await sleep(300);
     const st = await p1.evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="${cardApp.id}"]'); if (!c) return null; const others = [...document.querySelectorAll('#desktop-launch-dialog .desktop-launch-card')].filter((x) => x !== c && !x.classList.contains('is-unavailable')); return { launching: c.classList.contains('is-launching'), disabled: c.disabled, busy: c.getAttribute('aria-busy'), sub: c.querySelector('.desktop-launch-card-sub')?.textContent, spinner: !!c.querySelector('.desktop-launch-card-icon svg') && getComputedStyle(c.querySelector('.desktop-launch-card-icon svg')).animationName !== 'none', othersEnabled: others.every((x) => !x.disabled), cursor: getComputedStyle(c).cursor }; })()`);
-    check(`clicking the ${cardApp.label} card shows the launching state: is-launching, disabled, aria-busy, "Launching…", spinning icon`, !!st && st.launching && st.disabled && st.busy === 'true' && /Launching/.test(st.sub || '') && st.spinner, st);
-    check('…while the other available cards stay enabled (only the launching one is held)', !!st && st.othersEnabled);
+    check(`clicking the ${cardApp.label} card shows the launching state: is-launching, disabled, aria-busy, "Launching…", spinning icon`, !!st && gateOf(st.launching) && gateOf(st.disabled) && st.busy === 'true' && gateOf(/Launching/.test(st.sub || '')) && verdictOf(st.spinner), st);
+    check('…while the other available cards stay enabled (only the launching one is held)', !!st && verdictOf(st.othersEnabled));
     if (SHOTS) await shot(p1, 'after-card-launching-1400x900.png');
     const cwin = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app'); return w ? { id: w.id, appId: w._desktopAppId } : null; })()`), 15000);
-    check('the card launch opens a desktop-app window and closes the dialog', !!cwin && await p1.evalJs(`!document.getElementById('desktop-launch-dialog')`), cwin);
+    check('the card launch opens a desktop-app window and closes the dialog', !!cwin && verdictOf(await p1.evalJs(`!document.getElementById('desktop-launch-dialog')`)), cwin);
     if (cwin) {
       const crec = await until(() => p1.evalJs(`fetch('/api/desktop/apps/${cwin.appId}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 25000);
       check(`the card-launched record (${cardApp.exec}) reaches ready`, !!crec && crec.state === 'ready', crec && crec.lastError);
@@ -418,7 +418,7 @@ try {
       // Running shows it, with the slot count, on the next open
       await openDialog(p1);
       const g = await p1.evalJs(GEOM);
-      check('with a session live, the Running section shows above the catalog with the slot count', g.runningVisible && await p1.evalJs(`/1 of \\d+ slots|1 running/.test(document.querySelector('#desktop-launch-dialog .desktop-launch-count')?.textContent || '') && document.querySelector('#desktop-launch-dialog .desktop-launch-running-sec').compareDocumentPosition(document.querySelector('#desktop-launch-dialog .desktop-launch-grid')) & Node.DOCUMENT_POSITION_FOLLOWING`));
+      check('with a session live, the Running section shows above the catalog with the slot count', gateOf(g.runningVisible) && verdictOf(await p1.evalJs(`/1 of \\d+ slots|1 running/.test(document.querySelector('#desktop-launch-dialog .desktop-launch-count')?.textContent || '') && document.querySelector('#desktop-launch-dialog .desktop-launch-running-sec').compareDocumentPosition(document.querySelector('#desktop-launch-dialog .desktop-launch-grid')) & Node.DOCUMENT_POSITION_FOLLOWING`)));
       await p1.evalJs(`document.getElementById('desktop-launch-dialog')?.remove(); true`);
       // stop it and close its window so the form-launched session below is the only one
       await p1.evalJs(`fetch('/api/desktop/apps/${cwin.appId}/stop', { method: 'POST' }).then((r) => r.json())`);
@@ -443,7 +443,7 @@ try {
       const agentStart = () => api('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AGENT_TOKEN}` }, body: JSON.stringify({ appId: S }) });
       const a1 = await agentStart();
       const r1 = a1 && a1.id ? await until(() => recOf(a1.id).then((r) => (r.state === 'ready' ? r : null)), 25000) : null;
-      check(`an AGENT's start of Single Fixture is ready on its own display and says who started it (${r1 && JSON.stringify(r1.launchedBy)})`, !!r1 && r1.launchedBy && r1.launchedBy.kind === 'agent' && (!HAVE_DTACH || r1.launchedBy.name === LANE_E.name), a1);
+      check(`an AGENT's start of Single Fixture is ready on its own display and says who started it (${r1 && JSON.stringify(r1.launchedBy)})`, !!r1 && gateOf(r1.launchedBy) && r1.launchedBy.kind === 'agent' && (!HAVE_DTACH || r1.launchedBy.name === LANE_E.name), a1);
       const CARD = (id) => `#desktop-launch-dialog .desktop-launch-card[data-app-id="${id}"]`;
       const cardState = (id) => p1.evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD(id))}); if (!c) return null; const w = c.closest('.desktop-launch-card-wrap'); const r = (el) => { const b = el.getBoundingClientRect(); return { x: b.x, r: b.right, y: b.y, b: b.bottom }; }; return { running: c.classList.contains('is-running'), said: c.classList.contains('is-said'), disabled: c.disabled, sub: c.querySelector('.desktop-launch-card-sub')?.textContent || '', runs: [...w.querySelectorAll('.desktop-launch-card-run')].map((l) => ({ id: l.dataset.runId, text: l.querySelector('.desktop-launch-card-run-text')?.textContent || '', open: !!l.querySelector('.desktop-launch-card-run-open'), close: !!l.querySelector('.desktop-launch-card-run-stop') })), again: !!w.querySelector('.desktop-launch-card-run-again'), wrap: r(w), card: r(c), dlg: r(document.querySelector('#desktop-launch-dialog .dialog')) }; })()`);
       // the person opens Apps (the agent's viewer is gone — the incident's state)
@@ -451,20 +451,20 @@ try {
       await openDialog(p1);
       await p1.evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD(S))}); c?.scrollIntoView({ block: 'center' }); return true; })()`);
       const c1 = r1 ? await cardState(S) : null;
-      check(`the Single card says where it runs and who started it ("${c1 && c1.sub}")`, !!c1 && c1.running && new RegExp(`Running on ${r1.display} · started by ${HAVE_DTACH ? `agent session ${LANE_E.name}` : 'an agent'}$`).test(c1.sub), c1);
-      check('…and lists that instance with Open and Close — no "Open another" for an app that runs once; inside the dialog', !!c1 && c1.runs.length === 1 && c1.runs[0].id === a1.id && c1.runs[0].open && c1.runs[0].close && !c1.again && c1.wrap.r <= c1.dlg.r + 0.5, c1);
+      check(`the Single card says where it runs and who started it ("${c1 && c1.sub}")`, !!c1 && gateOf(c1.running) && verdictOf(new RegExp(`Running on ${r1.display} · started by ${HAVE_DTACH ? `agent session ${LANE_E.name}` : 'an agent'}$`).test(c1.sub)), c1);
+      check('…and lists that instance with Open and Close — no "Open another" for an app that runs once; inside the dialog', !!c1 && c1.runs.length === 1 && c1.runs[0].id === a1.id && gateOf(c1.runs[0].open) && gateOf(c1.runs[0].close) && !c1.again && c1.wrap.r <= c1.dlg.r + 0.5, c1);
       await shot(p1, 'singleton-card-running-1400x900.png');
       const nBefore = (await api('/api/desktop/apps')).apps.length;
       await trustedClick(p1, CARD(S));
       const w1 = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(a1.id)}); return w ? w.id : null; })()`), 10000, 100);
       const nAfter = (await api('/api/desktop/apps')).apps.length;
-      check(`the card's press OPENS that instance's window (the dialog closed) — no second record (${nBefore} → ${nAfter})`, !!w1 && nAfter === nBefore && await p1.evalJs(`!document.getElementById('desktop-launch-dialog')`), { w1, nBefore, nAfter });
+      check(`the card's press OPENS that instance's window (the dialog closed) — no second record (${nBefore} → ${nAfter})`, !!w1 && nAfter === nBefore && verdictOf(await p1.evalJs(`!document.getElementById('desktop-launch-dialog')`)), { w1, nBefore, nAfter });
       if (w1) await p1.evalJs(`app.wm.closeWindow(${JSON.stringify(w1)}); true`); // the viewer leaves — the app keeps running
       // the Desktop button's list: every running app window, an agent's too
       await sleep(300);
       await p1.evalJs(`document.getElementById('btn-desktop').click(); true`);
       const pick = await until(() => p1.evalJs(`(() => { const rows = [...document.querySelectorAll('.desktop-picker .desktop-picker-app')]; const row = rows.find((r) => r.querySelector('[data-host=${JSON.stringify(a1.id)}]')); return row ? { group: [...document.querySelectorAll('.desktop-picker-group')].map((g) => g.textContent), text: row.textContent, stop: !!row.querySelector('.desktop-picker-app-stop'), go: !!row.querySelector('.desktop-picker-app-go') } : null; })()`), 8000, 100);
-      check(`the Desktop list names it under "Running apps" with where / who, Open and Close ("${pick && pick.text}")`, !!pick && pick.group.includes('Running apps') && pick.text.includes('Single Fixture') && /Running on :\d+ · started by/.test(pick.text) && pick.stop && pick.go, pick);
+      check(`the Desktop list names it under "Running apps" with where / who, Open and Close ("${pick && pick.text}")`, !!pick && gateOf(pick.group.includes('Running apps')) && gateOf(pick.text.includes('Single Fixture')) && gateOf(/Running on :\d+ · started by/.test(pick.text)) && gateOf(pick.stop) && verdictOf(pick.go), pick);
       await shot(p1, 'singleton-desktop-list-1400x900.png');
       await p1.evalJs(`document.querySelector('.desktop-picker [data-host=${JSON.stringify(a1.id)}]')?.click(); true`);
       const w1b = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(a1.id)}); return w ? w.id : null; })()`), 8000, 100);
@@ -473,10 +473,10 @@ try {
       // the old door (no ifRunning): the singleton hands the second start over — the record SAYS it, the window keeps it
       const a2 = await agentStart();
       const r2 = a2 && a2.id ? await until(() => recOf(a2.id).then((r) => (r.state === 'exited' || r.state === 'failed' ? r : null)), 15000) : null;
-      check(`a second start through the old door ends at once with quickExit naming the running one (${r2 && JSON.stringify(r2.quickExit)})`, !!r2 && r2.state === 'exited' && r2.quickExit && r2.quickExit.code === 0 && r2.quickExit.running === a1.id && r2.quickExit.runningDisplay === r1.display, r2 && { state: r2.state, q: r2.quickExit, err: r2.lastError });
+      check(`a second start through the old door ends at once with quickExit naming the running one (${r2 && JSON.stringify(r2.quickExit)})`, !!r2 && r2.state === 'exited' && gateOf(r2.quickExit) && r2.quickExit.code === 0 && r2.quickExit.running === a1.id && r2.quickExit.runningDisplay === r1.display, r2 && { state: r2.state, q: r2.quickExit, err: r2.lastError });
       await p1.evalJs(`app.openDesktopApp(${JSON.stringify(a2.id)}); true`);
       const qw = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(a2.id)}); const q = w && w.content.querySelector('.desktop-app-quick-exit'); return q && q.getBoundingClientRect().width > 0 ? { id: w.id, text: q.querySelector('.desktop-app-quick-exit-text')?.textContent || '', open: q.querySelector('.desktop-app-quick-exit-open')?.textContent || null } : null; })()`), 10000, 100);
-      check(`its window STAYS and says it ("${qw && qw.text}") with the door "${qw && qw.open}"`, !!qw && /^Single Fixture exited right after it started \(code 0\) — usually the same program is already running on another display$/.test(qw.text) && qw.open === `Open the one running on ${r1.display}`, qw);
+      check(`its window STAYS and says it ("${qw && qw.text}") with the door "${qw && qw.open}"`, !!qw && gateOf(/^Single Fixture exited right after it started \(code 0\) — usually the same program is already running on another display$/.test(qw.text)) && qw.open === `Open the one running on ${r1.display}`, qw);
       await shot(p1, 'singleton-window-quick-exit-1400x900.png');
       if (qw) await p1.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(qw.id)}); w.content.querySelector('.desktop-app-quick-exit-open').click(); return true; })()`);
       const swapped = await until(() => p1.evalJs(`(() => { const ws = [...app.wm.windows.values()]; return ws.some((w) => w._desktopAppId === ${JSON.stringify(a1.id)}) && !ws.some((w) => w._desktopAppId === ${JSON.stringify(a2.id)}) ? true : null; })()`), 8000, 100);
@@ -495,13 +495,13 @@ try {
       await p1.evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD(B))}); c?.scrollIntoView({ block: 'center' }); return true; })()`);
       await trustedClick(p1, CARD(B));
       const bw = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app' && w._desktopAppId && w._desktopAppId !== ${JSON.stringify(a1.id)} && w._desktopAppId !== ${JSON.stringify(a2.id)}); const q = w && w.content.querySelector('.desktop-app-quick-exit'); return q ? { id: w.id, appId: w._desktopAppId, text: q.querySelector('.desktop-app-quick-exit-text')?.textContent || '', open: !!q.querySelector('.desktop-app-quick-exit-open') } : null; })()`), 15000, 100);
-      check(`Blink's window does not blink shut: it stays and says it ("${bw && bw.text}"), no door (nothing else runs it)`, !!bw && /^Blink Fixture exited right after it started \(code 0\)/.test(bw.text) && !bw.open, bw);
+      check(`Blink's window does not blink shut: it stays and says it ("${bw && bw.text}"), no door (nothing else runs it)`, !!bw && gateOf(/^Blink Fixture exited right after it started \(code 0\)/.test(bw.text)) && !bw.open, bw);
       await shot(p1, 'singleton-window-blink-1400x900.png');
       if (bw) await p1.evalJs(`app.wm.closeWindow(${JSON.stringify(bw.id)}); true`);
       await openDialog(p1);
       await p1.evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD(B))}); c?.scrollIntoView({ block: 'center' }); return true; })()`);
       const c3 = await cardState(B);
-      check(`the Blink card says it on the next open ("${c3 && c3.sub}")`, !!c3 && c3.said && !c3.disabled && /Blink Fixture exited right after it started \(code 0\) — usually the same program is already running on another display$/.test(c3.sub), c3);
+      check(`the Blink card says it on the next open ("${c3 && c3.sub}")`, !!c3 && gateOf(c3.said) && !c3.disabled && verdictOf(/Blink Fixture exited right after it started \(code 0\) — usually the same program is already running on another display$/.test(c3.sub)), c3);
       await shot(p1, 'singleton-card-quick-exit-1400x900.png');
       await p1.evalJs(`document.getElementById('desktop-launch-dialog')?.remove(); true`);
       // zh on a phone: an agent's Single again + Blink's sentence — both cards in the device language, nothing wider than the screen
@@ -514,8 +514,8 @@ try {
       await p1.evalJs(`(() => { document.querySelector('#desktop-launch-dialog .desktop-launch-seen-sec')?.scrollIntoView({ block: 'start' }); return true; })()`);
       const z = await cardState(S), zb = await cardState(B);
       const vw = await p1.evalJs('innerWidth');
-      check(`zh at 390: the running card reads 「${z && z.sub}」 and its instance row fits the screen`, !!z && /正在 :\d+ 运行 · 由 agent/.test(z.sub) && z.runs.length === 1 && z.wrap.r <= vw + 0.5, z);
-      check(`zh at 390: the Blink card reads 「${zb && zb.sub}」`, !!zb && /Blink Fixture 刚启动就退出了（code 0）—— 通常是同一程序已在别的显示上运行$/.test(zb.sub), zb);
+      check(`zh at 390: the running card reads 「${z && z.sub}」 and its instance row fits the screen`, !!z && gateOf(/正在 :\d+ 运行 · 由 agent/.test(z.sub)) && z.runs.length === 1 && z.wrap.r <= vw + 0.5, z);
+      check(`zh at 390: the Blink card reads 「${zb && zb.sub}」`, !!zb && verdictOf(/Blink Fixture 刚启动就退出了（code 0）—— 通常是同一程序已在别的显示上运行$/.test(zb.sub)), zb);
       await shot(p1, 'singleton-cards-zh-390x844.png');
       await p1.evalJs(`localStorage.removeItem('vibespace.lang'); document.getElementById('desktop-launch-dialog')?.remove(); true`);
       await p1.cdp('Emulation.clearDeviceMetricsOverride');
@@ -528,19 +528,19 @@ try {
   // ── §P the disclosure: closed by default, persisted open across a reload ──
   console.log('§P "Advanced: run any command" is collapsed by default and its open state survives a reload');
   await openDialog(p1);
-  check('a fresh open: the disclosure is closed (nothing persisted)', await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').getAttribute('aria-expanded') === 'false'`));
-  check('the disclosure is a BUTTON with aria-expanded + aria-controls, and the cards are buttons (keyboard-reachable)', await p1.evalJs(`(() => { const t = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle'); const body = document.getElementById(t.getAttribute('aria-controls')); return t.tagName === 'BUTTON' && !!body && [...document.querySelectorAll('#desktop-launch-dialog .desktop-launch-card')].every((c) => c.tagName === 'BUTTON'); })()`));
+  check('a fresh open: the disclosure is closed (nothing persisted)', verdictOf(await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').getAttribute('aria-expanded') === 'false'`)));
+  check('the disclosure is a BUTTON with aria-expanded + aria-controls, and the cards are buttons (keyboard-reachable)', verdictOf(await p1.evalJs(`(() => { const t = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle'); const body = document.getElementById(t.getAttribute('aria-controls')); return t.tagName === 'BUTTON' && !!body && [...document.querySelectorAll('#desktop-launch-dialog .desktop-launch-card')].every((c) => c.tagName === 'BUTTON'); })()`)));
   await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-adv-toggle');
-  check('click ⇒ open, persisted', await until(() => p1.evalJs(`fetch('/api/user-state').then((r) => r.json()).then((s) => s.desktopAppAdvancedOpen === true && document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').getAttribute('aria-expanded') === 'true')`), 4000, 100));
+  check('click ⇒ open, persisted', verdictOf(await until(() => p1.evalJs(`fetch('/api/user-state').then((r) => r.json()).then((s) => s.desktopAppAdvancedOpen === true && document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').getAttribute('aria-expanded') === 'true')`), 4000, 100)));
   await openPage(p1);
   await openDialog(p1);
-  check('after a reload the disclosure opens by itself (user state), the form visible', await p1.evalJs(`(() => { const t = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle'); const b = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-body'); return t.getAttribute('aria-expanded') === 'true' && getComputedStyle(b).display !== 'none'; })()`));
+  check('after a reload the disclosure opens by itself (user state), the form visible', verdictOf(await p1.evalJs(`(() => { const t = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle'); const b = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-body'); return t.getAttribute('aria-expanded') === 'true' && getComputedStyle(b).display !== 'none'; })()`)));
 
   // the launch dialog: run a command from its form (the disclosure is open from §P)
-  check('the launch dialog is open', await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`));
+  check('the launch dialog is open', verdictOf(await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`)));
   const availText = await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-avail')?.textContent || ''`);
-  check('the dialog states the ladder verdict in the chip\'s words', /vnc-display/.test(availText), availText);
-  check('the catalog lists xterm as a card (presence-checked; dimmed+disabled with its reason when absent, enabled when present)', await p1.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="xterm"]'); if (!b) return false; const absent = ${!XTERM_PRESENT ? 'true' : 'false'}; /* 2.369.131: hostFacts.bins never carries xterm — derive presence from PATH, not from a key that is always undefined (the leg passed only while xterm was absent; xpra's install pulled it in) */ return b.disabled === absent && b.classList.contains('is-unavailable') === absent && (!absent || /not on PATH/.test(b.textContent)); })()`));
+  check('the dialog states the ladder verdict in the chip\'s words', verdictOf(/vnc-display/.test(availText)), availText);
+  check('the catalog lists xterm as a card (presence-checked; dimmed+disabled with its reason when absent, enabled when present)', verdictOf(await p1.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="xterm"]'); if (!b) return false; const absent = ${!XTERM_PRESENT ? 'true' : 'false'}; /* 2.369.131: hostFacts.bins never carries xterm — derive presence from PATH, not from a key that is always undefined (the leg passed only while xterm was absent; xpra's install pulled it in) */ return b.disabled === absent && b.classList.contains('is-unavailable') === absent && (!absent || /not on PATH/.test(b.textContent)); })()`)));
   await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); d.querySelector('.desktop-launch-exec').value = ${JSON.stringify(appBin)}; d.querySelector('.desktop-launch-args').value = ${JSON.stringify(appArgs.map((a) => (/\\s/.test(a) ? '"' + a + '"' : a)).join(' '))}; return true; })()`);
   // B-5736 (主开发 r1218 5): RUN JUDGES ITS FOLDER through the field — a typed folder that does not resolve is SAID and nothing is sent;
   // a «~» folder resolves on the machine and the launch carries the ABSOLUTE folder. The launch POST is caught by a page-side stand-in
@@ -588,7 +588,7 @@ try {
   check('the status bar names the backend rung: "vnc-display" (pinned first — nothing fell, no reason to print)', chip === 'vnc-display', chip);
   const sample = await until(async () => { const s = await p1.evalJs(CANVAS_SAMPLE); return s.found && s.brightFrac > 0.02 ? s : null; }, 20000, 500);
   check('the noVNC canvas is NOT all black (the app is painted)', !!sample, sample);
-  check('the idle countdown chip is showing (desktop.idleTimeoutMin opted in to 30 min at launch)', !!rec && rec.idleTimeoutMs === 30 * 60000 && await p1.evalJs(`/idle stop in \\d+ min/.test([...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-app-chip-idle')?.textContent || '')`), rec && rec.idleTimeoutMs);
+  check('the idle countdown chip is showing (desktop.idleTimeoutMin opted in to 30 min at launch)', !!rec && rec.idleTimeoutMs === 30 * 60000 && verdictOf(await p1.evalJs(`/idle stop in \\d+ min/.test([...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-app-chip-idle')?.textContent || '')`)), rec && rec.idleTimeoutMs);
   await p1.evalJs(`fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'desktop.idleTimeoutMin': null }) }).then((r) => r.status)`);
 
   // the autosave (500 ms debounce after a trusted input) must carry the openSpec before a second client can replay it
@@ -625,9 +625,9 @@ try {
   const pidsBefore = rec.pids;
   srv.kill('SIGKILL');
   await sleep(600);
-  check('after SIGKILL the app, its picture server and its X are STILL RUNNING (detached)', [pidsBefore.x, pidsBefore.server, pidsBefore.app].every((p) => D.pidAlive(p)));
+  check('after SIGKILL the app, its picture server and its X are STILL RUNNING (detached)', verdictOf([pidsBefore.x, pidsBefore.server, pidsBefore.app].every((p) => D.pidAlive(p))));
   bootServer();
-  check('the server reboots', await waitServer());
+  check('the server reboots', verdictOf(await waitServer()));
   const adopted = await until(() => p1.evalJs(`fetch('/api/desktop/apps/${appId}').then((r) => r.json()).then((r) => (r.state === 'ready' && r.adoptedAt ? r : null))`), 20000);
   check('the session is ADOPTED by the new server (same pids, adoptedAt stamped)', !!adopted && adopted.pids.app === pidsBefore.app, adopted && { state: adopted.state, lastError: adopted.lastError });
   const trace = [];
@@ -666,7 +666,7 @@ try {
     const GHOST = { id: 'w-lane-e-ghost', name: 'lane-e ghost', backend: 'claude', backendSessionId: 'a99e0003-0000-4000-8000-0000000000e6' };
     const injectRoster = (p) => p.evalJs(`(() => { const s = app.sidebar; s._webuiSessions = [...(s._webuiSessions || []).filter((x) => x.id !== 'w-lane-e-ghost'), ${JSON.stringify(GHOST)}]; return true; })()`);
     const stubLive = HAVE_DTACH && !!(await until(() => p1.evalJs(`(app.sidebar._webuiSessions || []).some((x) => x.id === ${JSON.stringify(LANE_E.id)})`), 20000, 200));
-    if (HAVE_DTACH) check('FIXTURE: the stub agent the server runs (w-lane-e, restored from its dtach socket) is in the client\'s roster', stubLive);
+    if (HAVE_DTACH) check('FIXTURE: the stub agent the server runs (w-lane-e, restored from its dtach socket) is in the client\'s roster', verdictOf(stubLive));
     else console.log('  SKIP §E share-with-agent legs: they need an agent the server runs (a dtach stub) — no dtach on PATH');
     await injectRoster(p1);
     const winSel = `[...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')`;
@@ -674,28 +674,28 @@ try {
     const chipOf = () => p1.evalJs(`(() => { const w = ${winSel}; const c = w && w.content.querySelector('.desktop-app-chip-share'); return c ? { text: c.textContent, shown: getComputedStyle(c).display !== 'none', title: c.title } : null; })()`);
     const r0 = await reach();
     const c0 = await chipOf();
-    check('D1: the launched window is shared with NOBODY (GET …/reach: no rows) and shows no share chip', Array.isArray(r0.rows) && r0.rows.length === 0 && c0 && !c0.shown, { r0, c0 });
+    check('D1: the launched window is shared with NOBODY (GET …/reach: no rows) and shows no share chip', gateOf(Array.isArray(r0.rows)) && r0.rows.length === 0 && gateOf(c0) && !c0.shown, { r0, c0 });
     const more = await p1.evalJs(`(() => { const w = ${winSel}; app.wm.focusWindow(w.id); const b = w.content.querySelector('.desktop-app-more'); if (!b || getComputedStyle(b).display === 'none') return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
     check('the ⋯ button shows on the vnc-display rung too (lane E: sharing is offered on EVERY rung)', !!more);
     if (more) {
       for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased']) await p1.cdp('Input.dispatchMouseEvent', { type: t, x: more.x, y: more.y, button: 'left', clickCount: 1 });
       await sleep(250);
       const rows = await p1.evalJs(`[...document.querySelectorAll('.context-menu > .context-menu-item, .context-menu > .context-menu-caption')].map((e) => e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim())`);   // lane ui-controls-and-bugs: the About line is a caption row
-      check(`the ⋯ menu carries "Share with agent…" and "Ask an agent to take control…" — and no Scale ▸ / Show window frame ▸ on a whole-display rung (${JSON.stringify(rows)})`, rows.includes('Share with agent…') && rows.includes('Ask an agent to take control…') && !rows.some((r) => /^Scale|^Show window frame/.test(r)), rows);
+      check(`the ⋯ menu carries "Share with agent…" and "Ask an agent to take control…" — and no Scale ▸ / Show window frame ▸ on a whole-display rung (${JSON.stringify(rows)})`, gateOf(rows.includes('Share with agent…')) && gateOf(rows.includes('Ask an agent to take control…')) && !rows.some((r) => /^Scale|^Show window frame/.test(r)), rows);
       // design 009 §B2: the ⋯ opens with the "About this window" fact line + a separator — address the row by its place
       // among ALL the menu's children (nth-child counts the separator too)
-      check('design 009 §B2: the ⋯ opens with ONE plain "About this window" line (memory + how it is shown, no PSS / CPU)', /^About this window: \d+(\.\d)? [MG]B memory · shown with vnc-display/.test(rows[0] || '') && !/PSS|CPU/.test(rows[0] || ''), rows[0]);
+      check('design 009 §B2: the ⋯ opens with ONE plain "About this window" line (memory + how it is shown, no PSS / CPU)', gateOf(/^About this window: \d+(\.\d)? [MG]B memory · shown with vnc-display/.test(rows[0] || '')) && !/PSS|CPU/.test(rows[0] || ''), rows[0]);
       const shareNth = await p1.evalJs(`[...document.querySelector('.context-menu').children].findIndex((e) => e.classList.contains('context-menu-item') && (e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim()) === 'Share with agent…') + 1`);
       await trustedClick(p1, '.context-menu > :nth-child(' + shareNth + ')');
     }
     const dlg = await until(() => p1.evalJs(`(() => { const d = document.getElementById('window-share-dialog'); if (!d || !d.querySelector('.wshare-picker')) return null; return { sessions: [...d.querySelectorAll('.wshare-pick .pp-row')].map((i) => i.dataset.key).filter((k) => k.startsWith('session:')).map((k) => k.slice(8)), groups: [...d.querySelectorAll('.wshare-pick .pp-row')].map((i) => i.dataset.key).filter((k) => k.startsWith('group:')).map((k) => k.slice(6)), mode: d.querySelector('.wshare-mode-btn.active')?.dataset.mode, intro: d.querySelector('.wshare-intro')?.textContent || '' }; })()`), 8000, 150);
-    check('"Share with agent…" opens the dialog: the live agent (by its conversation key) and the Task Group in the ONE principal picker, the mode Auto', !!dlg && (!stubLive || dlg.sessions.includes(LANE_E_KEY)) && dlg.groups.includes(gid) && dlg.mode === 'auto' && /Hidden from every agent until you share it/.test(dlg.intro), dlg || { toasts: await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`), menu: await p1.evalJs(`[...document.querySelectorAll('.context-menu')].length`), reach: await reach() });
+    check('"Share with agent…" opens the dialog: the live agent (by its conversation key) and the Task Group in the ONE principal picker, the mode Auto', !!dlg && (!stubLive || gateOf(dlg.sessions.includes(LANE_E_KEY))) && gateOf(dlg.groups.includes(gid)) && dlg.mode === 'auto' && verdictOf(/Hidden from every agent until you share it/.test(dlg.intro)), dlg || { toasts: await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`), menu: await p1.evalJs(`[...document.querySelectorAll('.context-menu')].length`), reach: await reach() });
     await shot(p1, 'lane-e-share-dialog.png');
     if (stubLive) {
     await trustedClick(p1, `#window-share-dialog .pp-row[data-key="session:${LANE_E_KEY}"]`);
     const c1 = await until(async () => { const c = await chipOf(); return c && c.shown && /^Shared with 1 · Auto$/.test(c.text) ? c : null; }, 8000, 150);
     const r1 = await reach();
-    check(`picking the agent SHARES the window (POST …/reach) and the chip appears at once: "${c1 && c1.text}" (its tooltip names the agent)`, !!c1 && /lane-e agent/.test(c1.title) && r1.rows.length === 1 && r1.rows[0].principal.id === LANE_E_KEY && r1.rows[0].by === 'user', { c1, rows: r1.rows });
+    check(`picking the agent SHARES the window (POST …/reach) and the chip appears at once: "${c1 && c1.text}" (its tooltip names the agent)`, !!c1 && gateOf(/lane-e agent/.test(c1.title)) && r1.rows.length === 1 && r1.rows[0].principal.id === LANE_E_KEY && r1.rows[0].by === 'user', { c1, rows: r1.rows });
     await trustedClick(p1, '#window-share-dialog .wshare-mode-btn[data-mode="pixels"]');
     const c2 = await until(async () => { const c = await chipOf(); return c && /· Pixels$/.test(c.text) ? c : null; }, 8000, 150);
     check('D7: the Pixels segment switches the share\'s mode (PUT …/reach/mode) and the chip names it', !!c2 && (await reach()).mode === 'pixels', c2);
@@ -710,13 +710,13 @@ try {
       await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: it.x, y: it.y, button: 'right', buttons: 0, clickCount: 1 });
       await sleep(300);
       const trows = await p1.evalJs(`[...document.querySelectorAll('.taskbar-context-menu > .taskbar-context-menu-item')].map((e) => e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim())`);
-      check(`the taskbar menu carries "Share with agent…" and "Ask an agent to take control…" (${JSON.stringify(trows)})`, trows.includes('Share with agent…') && trows.includes('Ask an agent to take control…'), trows);
+      check(`the taskbar menu carries "Share with agent…" and "Ask an agent to take control…" (${JSON.stringify(trows)})`, gateOf(trows.includes('Share with agent…')) && verdictOf(trows.includes('Ask an agent to take control…')), trows);
       const idx = trows.indexOf('Share with agent…');
       // pressed by a MARK on the row found by its words — never an nth-child index (lane ui-controls-and-bugs pick 2: a menu's
       // information rows are CAPTIONS, children that are not items, which an item index miscounts)
       if (idx >= 0) { await p1.evalJs(`(() => { document.querySelectorAll('[data-pick-row]').forEach((x) => x.removeAttribute('data-pick-row')); const r = [...document.querySelectorAll('.taskbar-context-menu > .taskbar-context-menu-item')].find((e) => (e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim()) === 'Share with agent…'); if (r) r.setAttribute('data-pick-row', '1'); return !!r; })()`); await trustedClick(p1, '.taskbar-context-menu > [data-pick-row="1"]'); }
       const checked = await until(() => p1.evalJs(`(() => { const i = document.querySelector('#window-share-dialog .pp-row[data-key="session:${LANE_E_KEY}"]'); return i ? { checked: i.getAttribute('aria-selected') === 'true', mode: document.querySelector('#window-share-dialog .wshare-mode-btn.active')?.dataset.mode } : null; })()`), 8000, 150);
-      check('…it opens the same dialog, the agent PICKED and Pixels active (the current share)', !!checked && checked.checked && checked.mode === 'pixels', checked);
+      check('…it opens the same dialog, the agent PICKED and Pixels active (the current share)', !!checked && gateOf(checked.checked) && checked.mode === 'pixels', checked);
       await trustedClick(p1, `#window-share-dialog .pp-row[data-key="session:${LANE_E_KEY}"]`);
       const gone = await until(async () => { const c = await chipOf(); return c && !c.shown ? true : null; }, 8000, 150);
       check('un-picking REVOKES (DELETE …/reach): the chip goes and the window is hidden again', !!gone && (await reach()).rows.length === 0);
@@ -728,7 +728,7 @@ try {
     await injectRoster(p1);   // (a sessions broadcast since the first injection replaces the client's roster)
     await p1.evalJs(`${winSel}._desktopAppAsk(); true`);
     const ask = await until(() => p1.evalJs(`(() => { const d = document.getElementById('window-ask-dialog'); if (!d || !d.querySelector('.wshare-intro')) return null; const wake = [...d.querySelectorAll('input[type=checkbox]')][0]; return { agents: [...d.querySelectorAll('.wshare-agent .pp-row .pp-name')].map((o) => o.textContent), wakeOff: wake && wake.checked === false, explain: d.querySelector('.wshare-note')?.textContent || '' }; })()`), 8000, 150);
-    check('"Ask an agent to take control…": the live agent in the picker, "Wake it now" OFF by default, the plain words ("its next turn — nothing is billed")', !!ask && ask.agents.includes('lane-e ghost') && (!stubLive || ask.agents.includes('lane-e agent')) && ask.wakeOff && /next turn — nothing is billed/.test(ask.explain), ask);
+    check('"Ask an agent to take control…": the live agent in the picker, "Wake it now" OFF by default, the plain words ("its next turn — nothing is billed")', !!ask && gateOf(ask.agents.includes('lane-e ghost')) && (!stubLive || gateOf(ask.agents.includes('lane-e agent'))) && gateOf(ask.wakeOff) && verdictOf(/next turn — nothing is billed/.test(ask.explain)), ask);
     await shot(p1, 'lane-e-ask-dialog.png');
     if (ask) {
       await trustedClick(p1, '#window-ask-dialog .pp-row[data-key="w-lane-e-ghost"]');   // the agent the server does not run
@@ -745,7 +745,7 @@ try {
       await openDialog(p1);
       await injectRoster(p1);
       const row = await p1.evalJs(`(() => { const r = document.querySelector('#desktop-launch-dialog .desktop-launch-share'); const b = r && r.querySelector('.desktop-launch-share-btn'); return r ? { shown: getComputedStyle(r).display !== 'none', text: b.textContent } : null; })()`);
-      check(`the launch dialog has the "Share with agents" row under the machine picker, hidden-by-default in its words ("${row && row.text}")`, !!row && row.shown && /Hidden from agents/.test(row.text), row);
+      check(`the launch dialog has the "Share with agents" row under the machine picker, hidden-by-default in its words ("${row && row.text}")`, !!row && gateOf(row.shown) && verdictOf(/Hidden from agents/.test(row.text)), row);
       await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-share-btn');
       await until(() => p1.evalJs(`!!document.querySelector('.wshare-popover .pp-row[data-key^="group:"]')`), 4000, 100);
       // design 009 §B3: the row sits in the dialog's FOOTER now — its picker opens near the page's bottom and must stay on
@@ -759,7 +759,7 @@ try {
       await frames(); // the toggle re-renders the picker; a size change re-clamps it on the next frame
       await trustedClick(p1, '.wshare-popover .wshare-mode-btn[data-mode="pixels"]');
       const sum = await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-share-btn').textContent`);
-      check(`the popover picks the Task Group and Pixels; the row says so ("${sum}")`, /Lane E group/.test(sum) && /Pixels/.test(sum), sum);
+      check(`the popover picks the Task Group and Pixels; the row says so ("${sum}")`, gateOf(/Lane E group/.test(sum)) && verdictOf(/Pixels/.test(sum)), sum);
       await shot(p1, 'lane-e-launcher-popover.png');
       await p1.evalJs(`document.querySelector('.wshare-popover')?.remove(); true`);
       await trustedClick(p1, await launchCardSel(p1, launchApp.id)); // a NEW instance (lane app-launch-singleton: "Open another" while one runs)
@@ -767,24 +767,24 @@ try {
       const nr = nw ? await p1.evalJs(`fetch('/api/desktop/apps/${nw}/reach').then((r) => r.json())`) : null;
       check(`the launched ${launchApp.label} carries the share from the dialog (the Task Group, mode pixels)`, !!nr && nr.mode === 'pixels' && nr.rows.length === 1 && nr.rows[0].principal.kind === 'group' && nr.rows[0].principal.id === gid, nr || { launched: nw, toasts: await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`), dialog: await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`), popover: await p1.evalJs(`document.querySelectorAll('.wshare-popover, .pp-pop').length`), active: await p1.evalJs(`document.activeElement ? document.activeElement.className : null`) });
       const mem = await until(() => p1.evalJs(`fetch('/api/user-state').then((r) => r.json()).then((s) => s.desktopAppReach && s.desktopAppReach[${JSON.stringify(launchApp.id)}] ? s.desktopAppReach[${JSON.stringify(launchApp.id)}] : null)`), 5000, 150);
-      check(`the choice is remembered PER APP (user state desktopAppReach[${launchApp.id}])`, !!mem && mem.mode === 'pixels' && mem.principals.some((p) => p.id === gid), mem);
+      check(`the choice is remembered PER APP (user state desktopAppReach[${launchApp.id}])`, !!mem && mem.mode === 'pixels' && verdictOf(mem.principals.some((p) => p.id === gid)), mem);
       // a fresh page (the memory loaded from user state), the row untouched: the next launch of that app proposes it
       await openPage(p1);
       await openDialog(p1);
       // LANE E VERIFY (the verifier's major): BEFORE the click, the dialog SAYS what it will share — the row never reads
       // "Hidden" while an app remembers a share, and the app's card names the remembered share (group + Pixels)
       const said = await until(() => p1.evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="${launchApp.id}"] .desktop-launch-card-share'); const b = document.querySelector('#desktop-launch-dialog .desktop-launch-share-btn'); return c ? { chip: c.textContent, row: b ? b.textContent : null } : null; })()`), 8000, 150);
-      check(`before the second launch the ${launchApp.label} card names the remembered share ("${said && said.chip}") and the untouched row does not say hidden ("${said && said.row}")`, !!said && /Lane E group/.test(said.chip) && /Pixels/.test(said.chip) && !/Hidden/.test(said.row) && /as you last shared it/.test(said.row), said);
+      check(`before the second launch the ${launchApp.label} card names the remembered share ("${said && said.chip}") and the untouched row does not say hidden ("${said && said.row}")`, !!said && gateOf(/Lane E group/.test(said.chip)) && gateOf(/Pixels/.test(said.chip)) && !/Hidden/.test(said.row) && verdictOf(/as you last shared it/.test(said.row)), said);
       const otherChip = await p1.evalJs(`(() => { const cs = [...document.querySelectorAll('#desktop-launch-dialog .desktop-launch-card[data-app-id]')].filter((c) => c.dataset.appId !== ${JSON.stringify(launchApp.id)}); return { cards: cs.length, chips: cs.filter((c) => c.querySelector('.desktop-launch-card-share')).length }; })()`);
       check(`…and only that app's card carries a chip (${otherChip.chips} of ${otherChip.cards} other cards) — the memory is per app`, otherChip.chips === 0, otherChip);
       await shot(p1, 'lane-e-launcher-remembered.png');
       await p1.evalJs(`document.querySelectorAll('#global-toasts > *').forEach((e) => e.remove()); true`);
       await trustedClick(p1, await launchCardSel(p1, launchApp.id)); // a NEW instance (lane app-launch-singleton: "Open another" while one runs)
       const applied = await until(() => p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent).find((t) => /Started shared with/.test(t)) || null`), 10000, 150);
-      check(`…and the launch that applied it says so in a toast ("${applied}")`, !!applied && /Lane E group/.test(applied) && /Pixels/.test(applied) && /window's ⋯/.test(applied), applied);
+      check(`…and the launch that applied it says so in a toast ("${applied}")`, !!applied && gateOf(/Lane E group/.test(applied)) && gateOf(/Pixels/.test(applied)) && verdictOf(/window's ⋯/.test(applied)), applied);
       const nw2 = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app' && w._desktopAppId !== '${appId}' && w._desktopAppId !== ${JSON.stringify(nw)}); return w ? w._desktopAppId : null; })()`), 15000, 200);
       const nr2 = nw2 ? await p1.evalJs(`fetch('/api/desktop/apps/${nw2}/reach').then((r) => r.json())`) : null;
-      check('after a reload, an untouched row launches the same app with what it REMEMBERS (the Task Group, pixels)', !!nr2 && nr2.mode === 'pixels' && nr2.rows.some((r) => r.principal.id === gid), nr2);
+      check('after a reload, an untouched row launches the same app with what it REMEMBERS (the Task Group, pixels)', !!nr2 && nr2.mode === 'pixels' && verdictOf(nr2.rows.some((r) => r.principal.id === gid)), nr2);
       // LANE E VERIFY R2 (M2): the Task Group the app remembers is DELETED between two launches (a re-created group gets a
       // new id — this one never comes back). The card chip and the launch toast name it ABSENT in the picker's words,
       // never by its remembered name as if it were there.
@@ -793,12 +793,12 @@ try {
       check(`the Task Group is deleted (DELETE /api/tasks → ${delGrp}) and leaves the client's roster`, delGrp === 200 && !!goneFromRoster);
       await openDialog(p1);
       const stale = await until(() => p1.evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="${launchApp.id}"] .desktop-launch-card-share'); return c ? c.textContent : null; })()`), 8000, 150);
-      check(`the card of an app whose remembered group is gone says so ("${stale}")`, !!stale && /Lane E group \(not in the list now\)/.test(stale) && /Pixels/.test(stale), stale);
+      check(`the card of an app whose remembered group is gone says so ("${stale}")`, !!stale && gateOf(/Lane E group \(not in the list now\)/.test(stale)) && verdictOf(/Pixels/.test(stale)), stale);
       await shot(p1, 'lane-e-launcher-group-gone.png');
       await p1.evalJs(`document.querySelectorAll('#global-toasts > *').forEach((e) => e.remove()); true`);
       await trustedClick(p1, await launchCardSel(p1, launchApp.id)); // a NEW instance (lane app-launch-singleton: "Open another" while one runs)
       const staleToast = await until(() => p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent).find((t) => /Started shared with/.test(t)) || null`), 10000, 150);
-      check(`…and the launch toast says it too ("${staleToast}")`, !!staleToast && /Lane E group \(not in the list now\)/.test(staleToast), staleToast);
+      check(`…and the launch toast says it too ("${staleToast}")`, !!staleToast && verdictOf(/Lane E group \(not in the list now\)/.test(staleToast)), staleToast);
       const nw3 = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app' && ![${JSON.stringify(appId)}, ${JSON.stringify(nw)}, ${JSON.stringify(nw2)}].includes(w._desktopAppId)); return w ? w._desktopAppId : null; })()`), 15000, 200);
       for (const id of [nw, nw2, nw3].filter(Boolean)) { await p1.evalJs(`fetch('/api/desktop/apps/${id}/stop', { method: 'POST' }).then((r) => r.json())`); }
       await until(() => p1.evalJs(`(() => ![...app.wm.windows.values()].some((w) => w.type === 'desktop-app' && w._desktopAppId !== '${appId}'))()`), 15000, 200);
@@ -812,9 +812,9 @@ try {
   const ended = await until(() => p1.evalJs(`(() => ![...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'))()`), 15000, 50);
   const stopMs = Date.now() - tStop;
   const stopToasts = await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`);
-  check(`Stop ⇒ the window closes itself (${stopMs} ms) with the "<app> stopped" toast`, !!ended && stopToasts.some((x) => / stopped/.test(x)), { ended, stopToasts });
+  check(`Stop ⇒ the window closes itself (${stopMs} ms) with the "<app> stopped" toast`, !!ended && verdictOf(stopToasts.some((x) => / stopped/.test(x))), { ended, stopToasts });
   await sleep(500);
-  check('Stop leaves no X / picture server / app behind (every recorded pid gone)', [pidsBefore.x, pidsBefore.server, pidsBefore.app].every((p) => !D.pidAlive(p)));
+  check('Stop leaves no X / picture server / app behind (every recorded pid gone)', verdictOf([pidsBefore.x, pidsBefore.server, pidsBefore.app].every((p) => !D.pidAlive(p))));
   const rec2 = await p1.evalJs(`fetch('/api/desktop/apps/${appId}').then((r) => r.json())`);
   check('…the record says who ended it (exited, stoppedBy user) — the verdict every client closes on', rec2.state === 'exited' && rec2.stoppedBy === 'user', { state: rec2.state, stoppedBy: rec2.stoppedBy });
 
@@ -823,8 +823,8 @@ try {
   const expected = XVNC ? 'Connected' : 'no VNC server installed';
   await p1.evalJs(`app.openDesktop(); true`);
   const singleton = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._isDesktop); const s = w?.content.querySelector('.desktop-status')?.textContent || ''; return /Connect|Desktop unavailable|no VNC server|Starting/.test(s) && s !== 'Connecting…' && s !== 'Starting desktop…' ? s : null; })()`), 15000);
-  check(`the singleton Desktop window renders through the shared component — its status chip says what this box produces: ${XVNC ? `"Connected" (${path.basename(XVNC)} on PATH)` : 'the server\'s own "no VNC server installed" text (no Xvnc on PATH)'}; saw ${JSON.stringify(singleton)}`, !!singleton && (XVNC ? singleton === 'Connected' : /no VNC server installed/.test(singleton)), { expected, singleton });
-  check('the singleton window carries the counter-zoom rule on its container', await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._isDesktop); return w.content.firstChild.style.zoom === 'calc(1 / var(--ui-scale, 1))'; })()`));
+  check(`the singleton Desktop window renders through the shared component — its status chip says what this box produces: ${XVNC ? `"Connected" (${path.basename(XVNC)} on PATH)` : 'the server\'s own "no VNC server installed" text (no Xvnc on PATH)'}; saw ${JSON.stringify(singleton)}`, !!singleton && (XVNC ? singleton === 'Connected' : verdictOf(/no VNC server installed/.test(singleton))), { expected, singleton });
+  check('the singleton window carries the counter-zoom rule on its container', verdictOf(await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._isDesktop); return w.content.firstChild.style.zoom === 'calc(1 / var(--ui-scale, 1))'; })()`)));
   const vst = await p1.evalJs(`fetch('/api/vnc/status').then((r) => r.json())`);
   check(`the singleton runs on THIS run's names (${VNC_DISPLAY} / ${VNC_PORT}), never the machine-global :7 / 5901`, String(vst.port) === VNC_PORT && VNC_DISPLAY !== ':7' && VNC_PORT !== '5901', vst);
   if (!XVNC) console.log('  · SKIP the stop-at-shutdown legs: no Xtigervnc/Xvnc on PATH (nothing is started, so nothing can survive)');
@@ -867,4 +867,4 @@ try {
   p1.close();
 }
 console.log(failed ? `\n${failed} FAILED` : '\ndesktop-app window test passed');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

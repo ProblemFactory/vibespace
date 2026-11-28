@@ -52,7 +52,7 @@ const express = require('express');
 const { WebSocket } = require('ws');
 const MUT = mutantCopies('dsi', repo);
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -173,7 +173,7 @@ function viewer(host, { password = null, ms = 8000 } = {}) {
 const rowsSince = (m, n) => m.seen.slice(n);
 const recordOf = () => { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf8')).integrations || {}; } catch { return {}; } };
 
-ok(su && su.ok === true && eng.state && eng.state() === 'unlocked', 'the vault is set up and unlocked (the store\'s key is the vault\'s)', su);
+ok(gateOfGuard(su) && su.ok === true && gateOfGuard(eng.state) && eng.state() === 'unlocked', 'the vault is set up and unlocked (the store\'s key is the vault\'s)', su);
 
 await section('§1 the crypto — the hub\'s answers against code it does not share', async () => {
   const pws = ['', 'a', 'pass', '12345678', '123456789abc', 'pässwörd', '密码12', PW];
@@ -189,7 +189,7 @@ await section('§1 the crypto — the hub\'s answers against code it does not sh
   const pt = Buffer.concat([dc.update(out.subarray(0, 128)), dc.final()]);
   const cut = (b) => { const z = b.indexOf(0); return b.subarray(0, z < 0 ? b.length : z).toString('utf8'); };
   ok(out.length === 256 && cut(pt.subarray(0, 64)) === '名前 user' && cut(pt.subarray(64)) === 'L'.repeat(63), 'ARD: the 128-byte block opens with the machine\'s own DH + MD5 + AES — the UTF-8 name, the password cut at 63 bytes, NUL-terminated; then the 128-byte public key', { len: out.length, user: cut(pt.subarray(0, 64)) });
-  ok(RS.rowAuthOf(30) === 'ard' && RS.rowAuthOf(2) === 'vnc' && RS.rowAuthOf(16) === 'vnc' && [1, 6, 19, 22, 113].every((t) => RS.rowAuthOf(t) === null), 'the kinds the hub speaks: 30 ard · 2 / 16 vnc — MSLogonII / VeNCrypt / RA2ne / XVP / None: nothing offered');
+  ok(RS.rowAuthOf(30) === 'ard' && RS.rowAuthOf(2) === 'vnc' && RS.rowAuthOf(16) === 'vnc' && verdictOf([1, 6, 19, 22, 113].every((t) => RS.rowAuthOf(t) === null)), 'the kinds the hub speaks: 30 ard · 2 / 16 vnc — MSLogonII / VeNCrypt / RA2ne / XVP / None: nothing offered');
   ok(RS.pickType('vnc', [16, 2]) === 2 && RS.pickType('vnc', [16]) === 16 && RS.pickType('ard', [30, 2]) === 30 && RS.pickType('ard', [2]) === null && RS.pickType('user', [113]) === null && RS.pickType('nope', [2]) === null, 'the type it answers with: 2 before 16 for a VNC password; none the row speaks ⇒ null');
   ok(RS.namesUser('ard') === true && RS.namesUser('vnc') === false && RS.namesUser('toString') === false, 'a name rides an ARD row only');
   { // verify r1: the ARD key length is capped at 256 bytes BEFORE any arithmetic (a 1024-byte prime cost the hub 0.8 s of BigInt per connection)
@@ -197,20 +197,20 @@ await section('§1 the crypto — the hub\'s answers against code it does not sh
     const h = Buffer.alloc(4); h.writeUInt16BE(2, 0);
     const g1 = gateOf(); g1.fromServer(Buffer.from('RFB 003.008\n')); g1.fromServer(Buffer.from([1, 30])); h.writeUInt16BE(257, 2); g1.fromServer(h);
     const g2 = gateOf(); g2.fromServer(Buffer.from('RFB 003.008\n')); g2.fromServer(Buffer.from([1, 30])); h.writeUInt16BE(256, 2); g2.fromServer(h); const waiting = !g2.ended; g2.abort('test over');
-    ok(ends.length === 2 && ends[0].code === 'unusable' && /key length 257/.test(ends[0].why) && waiting && /test over/.test(ends[1].why), 'ARD: a key length past 256 bytes is refused by name before any arithmetic; 256 is read on', ends);
+    ok(ends.length === 2 && ends[0].code === 'unusable' && gateOfGuard(/key length 257/.test(ends[0].why)) && gateOfGuard(waiting) && verdictOf(/test over/.test(ends[1].why)), 'ARD: a key length past 256 bytes is refused by name before any arithmetic; 256 is read on', ends);
   }
 });
 
 await section('§2 nothing kept — the machine asks, people only', async () => {
   const c = await connect(HOST);
-  ok(c.status === 200 && c.json.signin && c.json.signin.kept === false && c.json.signin.can === true && c.json.signin.auto === false && c.json.signin.locked === false, 'connect: kept false · can true (a VNC password the hub can speak) · auto false', c.json && c.json.signin);
+  ok(c.status === 200 && gateOfGuard(c.json.signin) && c.json.signin.kept === false && c.json.signin.can === true && c.json.signin.auto === false && c.json.signin.locked === false, 'connect: kept false · can true (a VNC password the hub can speak) · auto false', c.json && c.json.signin);
   const n0 = mWin.seen.length;
   const v = await viewer(HOST);
   ok(v.how === 'asked' && JSON.stringify(v.types) === '[2]', 'the viewer meets the machine\'s own sign-in (types [2]) — the hub did not sign in', v.how);
   ok(rowsSince(mWin, n0).length === 1 && rowsSince(mWin, n0)[0].verdict === 'none', 'ONE connection reached the machine (plain)', rowsSince(mWin, n0));
   const tok = { Authorization: 'Bearer vsst_agent' };
   const doors = [await api('GET', `/api/desktop/machine-desktop/signins?host=${HOST}`, null, tok), await api('GET', '/api/desktop/machine-desktop/signins', null, tok), await api('POST', '/api/desktop/machine-desktop/signin', { host: HOST, password: PW }, tok), await api('POST', '/api/desktop/machine-desktop/signin/forget', { host: HOST }, tok)];
-  ok(doors.every((d) => d.status === 403 && d.json && d.json.code === 'human_only'), 'people only: an agent token on every door ⇒ 403 human_only', doors.map((d) => d.status));
+  ok(verdictOf(doors.every((d) => d.status === 403 && d.json && d.json.code === 'human_only')), 'people only: an agent token on every door ⇒ 403 human_only', doors.map((d) => d.status));
   const np = await api('POST', '/api/desktop/machine-desktop/signin', { host: HOST });
   const unk = await api('POST', '/api/desktop/machine-desktop/signin', { host: 'nobody-x', password: PW });
   ok(np.status === 400 && np.json.code === 'bad-request' && unk.status === 404 && unk.json.code === 'unsupported-host', 'refused by name: no password ⇒ 400 · an unknown machine ⇒ 404', [np.status, np.json && np.json.code, unk.status, unk.json && unk.json.code]);
@@ -220,17 +220,17 @@ await section('§2 nothing kept — the machine asks, people only', async () => 
 let fileAfterRemember = null;
 await section('§3 REMEMBER — sealed; the hub signs in; the viewer is never handed it', async () => {
   const r = await api('POST', '/api/desktop/machine-desktop/signin', { host: HOST, password: PW });
-  ok(r.status === 200 && r.json.signin && r.json.signin.kept === true && r.json.signin.auth === 'vnc' && r.json.signin.auto === true && !r.text.includes(PW), 'POST signin ⇒ the state (kept · vnc · auto) — no password in the answer', r.json);
+  ok(r.status === 200 && gateOfGuard(r.json.signin) && r.json.signin.kept === true && r.json.signin.auth === 'vnc' && r.json.signin.auto === true && !r.text.includes(PW), 'POST signin ⇒ the state (kept · vnc · auto) — no password in the answer', r.json);
   const rec = recordOf()[`desktop-signin/${HOST}`];
   fileAfterRemember = fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf8');
-  ok(rec && rec.values && BOX_CIPHERTEXT_RE.test(rec.values.password) && rec.values.auth === 'vnc' && !('username' in rec.values) && !fileAfterRemember.includes(PW), 'integrations.json: the password is the box\'s ciphertext, the kind plain, no name for a VNC password — the password\'s bytes nowhere in the file', rec);
+  ok(gateOfGuard(rec) && gateOfGuard(rec.values) && gateOfGuard(BOX_CIPHERTEXT_RE.test(rec.values.password)) && rec.values.auth === 'vnc' && !('username' in rec.values) && !fileAfterRemember.includes(PW), 'integrations.json: the password is the box\'s ciphertext, the kind plain, no name for a VNC password — the password\'s bytes nowhere in the file', rec);
   const n0 = mWin.seen.length;
   const v = await viewer(HOST); // NO password given — it would be asked if the hub did not sign in
   const rows = rowsSince(mWin, n0);
   ok(v.how === 'hub' && JSON.stringify(v.types) === '[1]' && v.name === 'WIN-A', 'the viewer meets a server that asks nothing (types [1]) and reaches the desktop (ServerInit WIN-A)', { how: v.how, types: v.types, name: v.name });
   ok(rows.length === 1 && rows[0].type === 2 && rows[0].verdict === 'ok' && rows[0].session === true, 'the machine saw ONE connection: type 2, the hub\'s answer checked by noVNC\'s DES — taken; the session followed', rows);
-  ok(logs.some((l) => l.includes(`machine-desktop.${HOST}: signed in with the remembered sign-in (vnc)`)), 'the bridge says it in one line (the kind, never the password)');
-  ok(audits.some((a) => a.includes('"verb":"desktop-signin-remember"') && a.includes('"auth":"vnc"')), 'one audit line: desktop-signin-remember (the kind)');
+  ok(verdictOf(logs.some((l) => l.includes(`machine-desktop.${HOST}: signed in with the remembered sign-in (vnc)`))), 'the bridge says it in one line (the kind, never the password)');
+  ok(verdictOf(audits.some((a) => a.includes('"verb":"desktop-signin-remember"') && a.includes('"auth":"vnc"'))), 'one audit line: desktop-signin-remember (the kind)');
   const c = await connect(HOST);
   ok(c.json.signin.auto === true && c.json.signin.kept === true, 'connect now says auto');
 });
@@ -274,8 +274,8 @@ await section('§6 WRONG — the password changed on the machine', async () => {
   ok(rows.length === 2 && rows[0].verdict === 'refused' && rows[0].type === 2 && rows[1].verdict === 'none', 'the hub\'s try was refused, then ONE fresh connection the person signs in on', rows);
   ok(v.how === 'asked' && JSON.stringify(v.types) === '[2]' && !v.bytes.includes(Buffer.from('Authentication failed')), 'the viewer meets the machine\'s own sign-in — nothing of the refused connection reached it', { how: v.how, types: v.types });
   const s = await stateOf(HOST);
-  ok(s && s.kept === true && s.refused === true && s.auto === false && JSON.stringify(recordOf()[`desktop-signin/${HOST}`]) === JSON.stringify(before), 'GET says refused · kept — the row is untouched (a failure clears nothing)', s);
-  ok(logs.some((l) => l.includes('the remembered sign-in was refused (Authentication failed)')), 'the bridge names the refusal (the machine\'s own reason)');
+  ok(gateOfGuard(s) && s.kept === true && s.refused === true && s.auto === false && JSON.stringify(recordOf()[`desktop-signin/${HOST}`]) === JSON.stringify(before), 'GET says refused · kept — the row is untouched (a failure clears nothing)', s);
+  ok(verdictOf(logs.some((l) => l.includes('the remembered sign-in was refused (Authentication failed)'))), 'the bridge names the refusal (the machine\'s own reason)');
   n0 = mWin.seen.length;
   const v2 = await viewer(HOST);
   ok(v2.how === 'asked' && rowsSince(mWin, n0).length === 1 && rowsSince(mWin, n0)[0].verdict === 'none', 'the next window is NOT tried again (a machine\'s lockout counts failures): ONE plain connection', rowsSince(mWin, n0));
@@ -292,7 +292,7 @@ await section('§6 WRONG — the password changed on the machine', async () => {
 await section('§7 LOCKED vault', async () => {
   const lk = eng.lock('test');
   const s = await stateOf(HOST);
-  ok(lk.ok && s.locked === true && s.kept === true && s.auto === false, 'locked: the state says locked · kept · not auto', s);
+  ok(gateOfGuard(lk.ok) && s.locked === true && s.kept === true && s.auto === false, 'locked: the state says locked · kept · not auto', s);
   const n0 = mWin.seen.length;
   const v = await viewer(HOST);
   ok(v.how === 'asked' && rowsSince(mWin, n0).length === 1 && rowsSince(mWin, n0)[0].verdict === 'none', 'the viewer meets the machine\'s own sign-in (the hub opened nothing)', rowsSince(mWin, n0));
@@ -303,7 +303,7 @@ await section('§7 LOCKED vault', async () => {
   ok(f.status === 200 && f.json.signin.kept === false && !recordOf()[`desktop-signin/${MAC}`], 'forget works while the vault is locked (nothing is opened)', f.json);
   const ul = await eng.unlock(VAULT_PW);
   const r2 = await api('POST', '/api/desktop/machine-desktop/signin', { host: MAC, username: 'xw ü', password: PWA });
-  ok(ul.ok && r2.status === 200 && r2.json.signin.auto === true, 'unlock ⇒ remember works again', r2.json);
+  ok(gateOfGuard(ul.ok) && r2.status === 200 && r2.json.signin.auto === true, 'unlock ⇒ remember works again', r2.json);
 });
 
 await section('§8 forget + UNPAIR', async () => {
@@ -311,12 +311,12 @@ await section('§8 forget + UNPAIR', async () => {
   const n0 = mWin.seen.length;
   const v = await viewer(HOST);
   ok(f.json.signin.kept === false && !recordOf()[`desktop-signin/${HOST}`] && v.how === 'asked' && rowsSince(mWin, n0).length === 1, 'forget ⇒ the row gone; the next viewer is asked', f.json.signin);
-  ok(audits.some((a) => a.includes('"verb":"desktop-signin-forget"')), 'one audit line: desktop-signin-forget');
+  ok(verdictOf(audits.some((a) => a.includes('"verb":"desktop-signin-forget"'))), 'one audit line: desktop-signin-forget');
   store.setMachineValues('remoteapp', MAC, { user: 'xw', password: PWA });
   ok(!!recordOf()[`desktop-signin/${MAC}`] && !!recordOf()[`remoteapp/${MAC}`] && removedFns.length === 1, 'before the unpair: the Mac has a desktop sign-in and a RemoteApp sign-in; the access layer listens for removals');
   removedFns[0](MAC);
   ok(!recordOf()[`desktop-signin/${MAC}`] && !recordOf()[`remoteapp/${MAC}`], 'UNPAIR: both of the machine\'s sealed sign-ins are forgotten', Object.keys(recordOf()));
-  ok(audits.some((a) => a.includes('"verb":"desktop-signin-forget"') && a.includes('"why":"unpaired"')) && audits.some((a) => a.includes('"verb":"remoteapp-forget"') && a.includes('"why":"unpaired"')), 'each said in the audit (why: unpaired)');
+  ok(gateOfGuard(audits.some((a) => a.includes('"verb":"desktop-signin-forget"') && a.includes('"why":"unpaired"'))) && verdictOf(audits.some((a) => a.includes('"verb":"remoteapp-forget"') && a.includes('"why":"unpaired"'))), 'each said in the audit (why: unpaired)');
   fs.mkdirSync(path.join(root, 'hm'), { recursive: true });
   const hm = new HostManager({ dataDir: path.join(root, 'hm') });
   const got = [];
@@ -338,15 +338,15 @@ await section('§9 THE SINKS — every password used, nowhere but the sealed row
   look(`every audit row (${audits.length})`, audits.join('\n'));
   for (const f of files) look(`file ${path.relative(dataDir, f)}`, fs.readFileSync(f).toString('latin1') + fs.readFileSync(f).toString('utf8'));
   const sent = Buffer.concat(received);
-  ok(SECRETS.every((s) => !sent.includes(Buffer.from(s, 'utf8'))), `every byte the viewers were sent (${sent.length} B over ${received.length} connections): no password — the hub never hands it to a browser`);
-  ok(answers.length >= 20 && frames.some((f) => f.includes('integration-machine-updated')) && audits.length >= 4 && files.some((f) => f.endsWith('integrations.json')) && logs.some((l) => l.includes('remembered sign-in')), 'the sinks were live: route answers, store broadcasts, audit rows, the sealed file, the bridge\'s lines');
+  ok(verdictOf(SECRETS.every((s) => !sent.includes(Buffer.from(s, 'utf8')))), `every byte the viewers were sent (${sent.length} B over ${received.length} connections): no password — the hub never hands it to a browser`);
+  ok(answers.length >= 20 && gateOfGuard(frames.some((f) => f.includes('integration-machine-updated'))) && audits.length >= 4 && gateOfGuard(files.some((f) => f.endsWith('integrations.json'))) && verdictOf(logs.some((l) => l.includes('remembered sign-in'))), 'the sinks were live: route answers, store broadcasts, audit rows, the sealed file, the bridge\'s lines');
 });
 
 await section('CONTROLS — the census can see', async () => {
   // (a) a planted log line in rememberSignin ⇒ the log sink sees the password
   const accSrc = fs.readFileSync(path.join(repo, 'src/server/desktop-access.js'), 'utf8');
   const anchor = "    signinRefused.delete(hostId);\n    auditSignin(hostId, 'desktop-signin-remember', { ok: true, auth });\n";
-  ok(accSrc.includes(anchor), 'the planted-log anchor is in desktop-access.js');
+  ok(verdictOf(accSrc.includes(anchor)), 'the planted-log anchor is in desktop-access.js');
   const leakAcc = MUT.load('src/server/desktop-access.js', editAnchor(accSrc, anchor, "    log.log?.('remembered ' + password);\n" + anchor, "src/server/desktop-access.js"), 'leaklog');
   const lLogs = [];
   const dir2 = path.join(root, 'data-c1'); fs.mkdirSync(dir2, { recursive: true });
@@ -355,11 +355,11 @@ await section('CONTROLS — the census can see', async () => {
   await acc2.openMachineDesktop(HOST);
   mWin.st.password = PW;
   acc2.rememberSignin(HOST, { password: PW });
-  ok(lLogs.some((l) => l.includes(PW)), 'CONTROL: a planted log of the password ⇒ the log sink sees it (§9\'s log leg would be red)');
+  ok(verdictOf(lLogs.some((l) => l.includes(PW))), 'CONTROL: a planted log of the password ⇒ the log sink sees it (§9\'s log leg would be red)');
   // (b) the registry row's password not secret ⇒ the plaintext lands in integrations.json
   const regSrc = fs.readFileSync(path.join(repo, 'src/integration-registry.js'), 'utf8');
   const pwField = "      { key: 'password', label: i18nKey('Password'), secret: true, required: true, placeholder: '',\n        help: i18nKey('Sealed on this VibeSpace server; the hub signs in with it while the vault is unlocked.')";
-  ok(regSrc.includes(pwField), 'the row\'s password field is `secret: true` (the seal\'s one switch)');
+  ok(verdictOf(regSrc.includes(pwField)), 'the row\'s password field is `secret: true` (the seal\'s one switch)');
   const regCopy = MUT.write('src/integration-registry.js', editAnchor(regSrc, pwField, pwField.replace('secret: true', 'secret: false'), "src/integration-registry.js"), 'plain');
   const isSrc = fs.readFileSync(path.join(repo, 'src/server/integration-store.js'), 'utf8');
   const plainStore = MUT.load('src/server/integration-store.js', editAnchor(isSrc, "require('../integration-registry.js')", `require(${JSON.stringify(regCopy)})`, "src/server/integration-store.js"), 'plain');
@@ -373,7 +373,7 @@ await section('CONTROLS — the census can see', async () => {
   // (c) a relay that ignores the remembered sign-in ⇒ §3's viewer is asked
   const relaySrc = fs.readFileSync(path.join(repo, 'src/server/stream-relay-rfb.js'), 'utf8');
   const pass1 = '  return (a) => bridgeRfb(a.ws, a.id, a.port, a.viewerId, a.req, a.signIn || null);\n';
-  ok(relaySrc.includes(pass1), 'the relay\'s signIn hand-over line');
+  ok(verdictOf(relaySrc.includes(pass1)), 'the relay\'s signIn hand-over line');
   const blindRelay = MUT.write('src/server/stream-relay-rfb.js', editAnchor(relaySrc, pass1, pass1.replace('a.signIn || null', 'null'), "src/server/stream-relay-rfb.js"), 'blind');
   const regsSrc = fs.readFileSync(path.join(repo, 'src/server/stream-relays.js'), 'utf8');
   const regs = MUT.write('src/server/stream-relays.js', editAnchor(regsSrc, "require('./stream-relay-rfb.js')", `require(${JSON.stringify(blindRelay)})`, "src/server/stream-relays.js"), 'blind');
@@ -398,11 +398,11 @@ await section('§10 the words', async () => {
   ok(zh['Remember this machine’s sign-in'] === '记住这台机器的登录' && zh['The remembered password did not work — type it again'] === '上次记住的密码不对，请重输' && zh['The vault is locked — unlock it to sign in automatically'] === '保险库已锁定——先解锁后可自动登录' && zh['Forget sign-in'] === '忘掉登录' && zh['Sign-in remembered'] === '登录已记住', 'the brief\'s zh words verbatim: 记住这台机器的登录 · 上次记住的密码不对，请重输 · 保险库已锁定——先解锁后可自动登录 · 忘掉登录 · 登录已记住');
 });
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 5 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 5 })) ok(verdictOf(r.pass), 'tree: ' + r.name, r.pass ? undefined : r.detail);
 try { srv.close(); } catch { }
 for (const { m } of Object.values(MACHINES)) m.close();
 try { access.shutdown(); } catch { }
 try { eng.close(); } catch { }
 try { fs.rmSync(root, { recursive: true, force: true }); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf as gateOfGuard } from './lib/check.mjs';

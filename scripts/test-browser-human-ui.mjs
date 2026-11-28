@@ -59,7 +59,7 @@ const AB_ROW = require('../src/browser-verbs.js').AGENT_BROWSER_CLI, { driverAtL
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 50) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await pred(); if (v) return v; await sleep(every); } return pred(); };
@@ -195,7 +195,7 @@ const srv = spawn(process.execPath, ['server.js'], { cwd: INST, env: { ...env, .
 procs.add(srv);
 srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
 const booted = await until(() => journal.includes('Ready.'), 60000, 100);
-if (!ok(booted, 'the scratch server booted (its own data/, HOME, XDG root; the real agent-browser on its PATH)', journal.slice(-800))) await done();
+if (!ok(verdictOf(booted), 'the scratch server booted (its own data/, HOME, XDG root; the real agent-browser on its PATH)', journal.slice(-800))) await done();
 const api = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
 const wsMain = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
@@ -278,44 +278,44 @@ const S1 = await createSession('agent-chat');
 const newRes = await S1.vb(['new', 'work']); await S1.vb(['use', 'work']);
 const PID = (/\((bp-[0-9a-f]{8})\)/.exec(newRes.stdout + newRes.stderr) || [])[1] || null;
 await S1.vb(['open', innerUrl('agent')]);
-if (!ok(PID && !!(await innerUntil('agent', () => true, 45000)), `the conversation "agent-chat" browses on profile "work" (${PID}) — the browser an AGENT launched`, (newRes.stdout + newRes.stderr).slice(-300))) await done();
+if (!ok(gateOf(PID) && !!(await innerUntil('agent', () => true, 45000)), `the conversation "agent-chat" browses on profile "work" (${PID}) — the browser an AGENT launched`, (newRes.stdout + newRes.stderr).slice(-300))) await done();
 const HK = HM.humanKeyFor(PID);
 const hk = await api('GET', '/api/browser/housekeeping');
 const DIR = ((hk.json && hk.json.profiles) || []).find((r) => r.id === PID)?.dir || null;
 const chrome0 = DIR ? await chromeOf(DIR) : { port: null, pid: null };
-ok(DIR && chrome0.port && chrome0.pid, `the profile's Chrome is found by its own files (pid ${chrome0.pid}, DevTools port ${chrome0.port})`, JSON.stringify({ DIR, chrome0 }));
+ok(gateOf(DIR) && gateOf(chrome0.port) && verdictOf(chrome0.pid), `the profile's Chrome is found by its own files (pid ${chrome0.pid}, DevTools port ${chrome0.port})`, JSON.stringify({ DIR, chrome0 }));
 const E = await page({ lang: 'en' });
-if (!ok(E.ready, 'the viewer page is up')) await done();
+if (!ok(verdictOf(E.ready), 'the viewer page is up')) await done();
 await E.ev('window.app.openBrowserProfiles(); true');
 const rowBtn = `.bprof-profile[data-profile-id="${PID}"] .bprof-browse`;
 const btnText = await until(() => E.ev(`(() => { const b = document.querySelector(${JSON.stringify(rowBtn)}); return b ? b.textContent : null; })()`), 15000, 200);
 ok(btnText === 'Browse yourself', `the row's first act reads "${btnText}"`);
 await E.ev(`(() => { document.querySelector(${JSON.stringify(`.bprof-profile[data-profile-id="${PID}"] .bprof-more`)}).click(); return true; })()`); // design 015: the switch is the ⋯ menu's check row
 const mineBox = await until(() => E.ev(`(() => { const it = document.querySelector('.context-menu .bprof-record-mine'); if (!it) return null; const r = { checked: !!it.parentElement.querySelector('.chan-menu-check-on') }; document.querySelectorAll('.context-menu').forEach((m) => m.remove()); return r; })()`), 5000, 100);
-ok(mineBox && mineBox.checked === true, '"Also record my own actions" is on by default (the owner, 4: an opt-out)', JSON.stringify(mineBox));
-ok(await E.clickSel(rowBtn), 'a real click on Browse yourself');
+ok(gateOf(mineBox) && mineBox.checked === true, '"Also record my own actions" is on by default (the owner, 4: an opt-out)', JSON.stringify(mineBox));
+ok(verdictOf(await E.clickSel(rowBtn)), 'a real click on Browse yourself');
 const w1 = await until(() => E.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? { badge: s.badge, addrShown: s.addrShown, focus: document.activeElement && document.activeElement.className, close: s.closeText, quit: s.quitText, key: s.humanKey } : null;').catch(() => null), 40000, 200);
-ok(w1 && w1.badge === 'You are browsing' && w1.key === HK && w1.addrShown, `his window drives at once — the badge "${w1 && w1.badge}", his key, the address row shown`, JSON.stringify(w1));
-ok(w1 && /browser-live-address-input/.test(String(w1.focus)), 'the caret is in the ADDRESS field (a blank page: nothing to click yet)', JSON.stringify(w1));
-ok(w1 && w1.close === 'Close' && w1.quit === 'Quit the whole browser', `the two end buttons: "${w1 && w1.close}" (his tab) and "${w1 && w1.quit}" (everyone's)`);
+ok(gateOf(w1) && w1.badge === 'You are browsing' && w1.key === HK && verdictOf(w1.addrShown), `his window drives at once — the badge "${w1 && w1.badge}", his key, the address row shown`, JSON.stringify(w1));
+ok(gateOf(w1) && verdictOf(/browser-live-address-input/.test(String(w1.focus))), 'the caret is in the ADDRESS field (a blank page: nothing to click yet)', JSON.stringify(w1));
+ok(gateOf(w1) && w1.close === 'Close' && w1.quit === 'Quit the whole browser', `the two end buttons: "${w1 && w1.close}" (his tab) and "${w1 && w1.quit}" (everyone's)`);
 // verify r2 — the owner's option A ("有提醒就行"): "work" shares its tabs with its conversations (not "separate tabs"), so his
 // window says so in ONE line at its top — under the address row, above the page — a keyed chip (the same node) that follows
 // the digest's `mediated` fact in place: hidden for a "separate tabs" profile, back for a shared one
 const SHARE_EN = 'Agents on this profile can also see and drive this tab';
 const shareGeom = 'const n = L.el().querySelector(".browser-live-share-line"), a = L.el().querySelector(".browser-live-address"), c = L.el().querySelector(".browser-live-canvas"); if (!n) return null; const r = n.getBoundingClientRect(), ra = a.getBoundingClientRect(), rc = c.getBoundingClientRect(); return { text: L.state().shareLine, shown: getComputedStyle(n).display !== "none", top: r.top, bottom: r.bottom, h: r.height, addrBottom: ra.bottom, canvasTop: rc.top, same: n.__r2 === 1, display: getComputedStyle(n).display, bg: getComputedStyle(n).backgroundColor, iconW: (n.querySelector(".browser-live-share-icon svg") || { getBoundingClientRect: () => ({ width: -1 }) }).getBoundingClientRect().width };';
 const share = await until(() => E.h(`if (!L) return null; ${shareGeom}`).then((x) => (x && x.text ? x : null)).catch(() => null), 10000, 150);
-ok(share && share.text === SHARE_EN && share.shown && share.top >= share.addrBottom - 0.5 && share.bottom <= share.canvasTop + 0.5 && share.h > 0 && share.h <= 24 && share.display === 'flex' && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(share.bg) && share.iconW > 0 && share.iconW <= 13, /* verify r3 (revert table): its OWN rule styles it — a tinted flex line, a 12 px icon (the rule removed stayed green before) */
+ok(gateOf(share) && share.text === SHARE_EN && gateOf(share.shown) && share.top >= share.addrBottom - 0.5 && share.bottom <= share.canvasTop + 0.5 && share.h > 0 && share.h <= 24 && share.display === 'flex' && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(share.bg) && share.iconW > 0 && share.iconW <= 13, /* verify r3 (revert table): its OWN rule styles it — a tinted flex line, a 12 px icon (the rule removed stayed green before) */
   `option A: on a shared-tabs profile his window shows ONE line at its top, under the address row, above the page — "${share && share.text}"`, JSON.stringify(share));
 const digestWith = (mediated) => `(() => { const d = window.app._browserProfiles; const msg = { ...d, type: 'browser-profiles-updated', profiles: d.profiles.map((p) => (p.id === ${JSON.stringify(PID)} ? { ...p, mediated: ${mediated} } : p)) }; window.app._onBrowserProfilesUpdated(msg); ${relayBroadcastJs(`msg`, "window.app.ws.globalHandlers")} return true; })()`;
 await E.h('L.el().querySelector(".browser-live-share-line").__r2 = 1; return true;');
 await E.ev(digestWith(true));
 const hidden = await until(() => E.h(`if (!L) return null; ${shareGeom}`).then((x) => (x && !x.shown ? x : null)).catch(() => null), 5000, 100);
-ok(hidden && hidden.same && hidden.text === null, 'option A: a digest naming the profile "separate tabs" hides the line — the SAME node, patched in place (never rebuilt, never a toast)', JSON.stringify(hidden));
+ok(gateOf(hidden) && gateOf(hidden.same) && hidden.text === null, 'option A: a digest naming the profile "separate tabs" hides the line — the SAME node, patched in place (never rebuilt, never a toast)', JSON.stringify(hidden));
 await E.ev(digestWith(false));
 const back = await until(() => E.h(`if (!L) return null; ${shareGeom}`).then((x) => (x && x.shown ? x : null)).catch(() => null), 5000, 100);
-ok(back && back.same && back.text === SHARE_EN, 'option A: shared again ⇒ the same node shows the line again', JSON.stringify(back));
+ok(gateOf(back) && gateOf(back.same) && back.text === SHARE_EN, 'option A: shared again ⇒ the same node shows the line again', JSON.stringify(back));
 const busy = await S1.vb(['get', 'url']);
-ok(busy.ok && busy.stdout.includes('n=agent') && !/browser_paused|browser_interrupted/.test(busy.stdout + busy.stderr), 'NOTHING PAUSED (the owner, 2): the conversation\'s next command answers at once, on ITS OWN page', (busy.stdout + busy.stderr).slice(-300));
+ok(gateOf(busy.ok) && gateOf(busy.stdout.includes('n=agent')) && !/browser_paused|browser_interrupted/.test(busy.stdout + busy.stderr), 'NOTHING PAUSED (the owner, 2): the conversation\'s next command answers at once, on ITS OWN page', (busy.stdout + busy.stderr).slice(-300));
 // the address row: his typed URL loads in HIS tab
 await E.call('Input.insertText', { text: innerUrl('mine') });
 await E.key('Enter', { code: 'Enter', vk: 13, text: '\r' });
@@ -323,7 +323,7 @@ ok(!!(await innerUntil('mine', () => true, 20000)), 'the address typed + Enter: 
 const addr = await until(() => E.h('const s = L.state(); return s.url && s.url.includes("n=mine") && s.address.includes("n=mine") ? s.address : null;'), 10000, 150);
 ok(!!addr, `the address row follows his page ("${addr}")`);
 const agentUrl = await S1.vb(['get', 'url']);
-ok(agentUrl.ok && agentUrl.stdout.includes('n=agent') && !agentUrl.stdout.includes('n=mine'), 'U3 on the real product: his address row navigated HIS tab — the conversation\'s tab keeps its page', agentUrl.stdout.slice(-200));
+ok(gateOf(agentUrl.ok) && gateOf(agentUrl.stdout.includes('n=agent')) && !agentUrl.stdout.includes('n=mine'), 'U3 on the real product: his address row navigated HIS tab — the conversation\'s tab keeps its page', agentUrl.stdout.slice(-200));
 // a real click into his page's textarea, keys + an IME commit
 await sleep(400);
 await E.clickPage(200, 140);
@@ -336,7 +336,7 @@ ok(!!typed, `his keys + a 6-character IME commit land EXACTLY ("${(reports.get('
 // ═══ (b) THE CONVERSATION KEEPS WORKING ══════════════════════════════════════════
 console.log('— (b) the conversation on the same browser kept working the whole time');
 const other = await S1.vb(['open', innerUrl('agent2')]);
-ok(other.ok && !!(await innerUntil('agent2', () => true, 20000)) && (reports.get('mine') || {}).b === 'abc你好世界再见', 'the conversation opens another page while he browses — on its own tab; his page keeps what he typed', (other.stdout + other.stderr).slice(-200));
+ok(gateOf(other.ok) && !!(await innerUntil('agent2', () => true, 20000)) && (reports.get('mine') || {}).b === 'abc你好世界再见', 'the conversation opens another page while he browses — on its own tab; his page keeps what he typed', (other.stdout + other.stderr).slice(-200));
 const jl = journal.split('\n').filter((l) => /the user took over|taken over WITH|refused with browser_paused|paused from birth/.test(l));
 ok(jl.length === 0, 'the journal names no takeover, pause or interruption anywhere while he browsed', jl.slice(-4).join(' | '));
 
@@ -346,27 +346,27 @@ console.log('— (b2) tabs on the real 0.38.1: the agent lists / opens / closes 
   const pagesNow = async () => { try { return (await (await fetch(`http://127.0.0.1:${chrome0.port}/json/list`)).json()).filter((t) => t.type === 'page'); } catch { return []; } };
   const hisId = ((await pagesNow()).find((t) => t.url.includes('n=mine')) || {}).id || null;
   const tl = await S1.vb(['tab', 'list']);
-  ok(tl.ok && /n=agent2.*\[current\]/.test(tl.stdout) && /other tabs? in this browser (is|are) not yours/.test(tl.stdout) && !tl.stdout.includes('n=mine') && !tl.stdout.includes(String(hisId)), 'the agent\'s `tab list` (the shipped CLI → the server, the REAL daemon): ITS tab, current — the rest only COUNTED, his page never named', (tl.stdout + tl.stderr).slice(-500));
+  ok(gateOf(tl.ok) && gateOf(/n=agent2.*\[current\]/.test(tl.stdout)) && gateOf(/other tabs? in this browser (is|are) not yours/.test(tl.stdout)) && !tl.stdout.includes('n=mine') && !tl.stdout.includes(String(hisId)), 'the agent\'s `tab list` (the shipped CLI → the server, the REAL daemon): ITS tab, current — the rest only COUNTED, his page never named', (tl.stdout + tl.stderr).slice(-500));
   const c1 = await S1.vb(['tab', 'close', String(hisId)]); const c2 = await S1.vb(['tab', String(hisId)]);
-  ok(hisId && !c1.ok && /\[not_your_tab\]/.test(c1.stderr) && !c2.ok && /\[not_your_tab\]/.test(c2.stderr) && (await pagesNow()).some((t) => t.id === hisId) && (reports.get('mine') || {}).b === 'abc你好世界再见', 'the agent\'s `tab close <his tab>` and `tab <his tab>` are refused [not_your_tab] — his tab is still in Chrome\'s own list, his typed page untouched', (c1.stderr + ' | ' + c2.stderr).slice(-500));
+  ok(gateOf(hisId) && !c1.ok && gateOf(/\[not_your_tab\]/.test(c1.stderr)) && !c2.ok && gateOf(/\[not_your_tab\]/.test(c2.stderr)) && gateOf((await pagesNow()).some((t) => t.id === hisId)) && (reports.get('mine') || {}).b === 'abc你好世界再见', 'the agent\'s `tab close <his tab>` and `tab <his tab>` are refused [not_your_tab] — his tab is still in Chrome\'s own list, his typed page untouched', (c1.stderr + ' | ' + c2.stderr).slice(-500));
   const tn = await S1.vb(['tab', 'new', innerUrl('agent3')]);
   const own2 = await S1.vb(['tab', 'list', '--json']);
   let j2 = null; try { j2 = JSON.parse(own2.stdout); } catch { j2 = null; }
-  ok(tn.ok && !!(await innerUntil('agent3', () => true, 20000)) && j2 && j2.data.tabs.length === 2 && j2.data.tabs.some((t) => t.current && t.url.includes('n=agent3')), '`tab new <url>` opens a tab of its OWN (now its current) — its list names two', (tn.stdout + tn.stderr + own2.stdout).slice(-500));
+  ok(gateOf(tn.ok) && !!(await innerUntil('agent3', () => true, 20000)) && gateOf(j2) && j2.data.tabs.length === 2 && verdictOf(j2.data.tabs.some((t) => t.current && t.url.includes('n=agent3'))), '`tab new <url>` opens a tab of its OWN (now its current) — its list names two', (tn.stdout + tn.stderr + own2.stdout).slice(-500));
   const cc = await S1.vb(['tab', 'close']);
   const goneA3 = await until(async () => !(await pagesNow()).some((t) => t.url.includes('n=agent3')), 8000, 150);
-  ok(cc.ok && /\[tab_closed_current\]/.test(cc.stderr) && goneA3, '`tab close` closes ITS current tab (gone from Chrome\'s list) and says what its next verb meets', (cc.stdout + cc.stderr).slice(-400));
+  ok(gateOf(cc.ok) && gateOf(/\[tab_closed_current\]/.test(cc.stderr)) && verdictOf(goneA3), '`tab close` closes ITS current tab (gone from Chrome\'s list) and says what its next verb meets', (cc.stdout + cc.stderr).slice(-400));
   const tg = await S1.vb(['get', 'url']);
-  ok(!tg.ok && /\[tab_gone\]/.test(tg.stderr) && /vibespace-browser tab list/.test(tg.stderr), 'its next page verb: the REAL binary\'s tab_gone, and this tool\'s way out by name [tab_gone]', (tg.stdout + tg.stderr).slice(-400));
+  ok(!tg.ok && gateOf(/\[tab_gone\]/.test(tg.stderr)) && verdictOf(/vibespace-browser tab list/.test(tg.stderr)), 'its next page verb: the REAL binary\'s tab_gone, and this tool\'s way out by name [tab_gone]', (tg.stdout + tg.stderr).slice(-400));
   const own3 = await S1.vb(['tab', 'list', '--json']);
   let j3 = null; try { j3 = JSON.parse(own3.stdout); } catch { j3 = null; }
   const back2 = j3 && j3.data.tabs.find((t) => t.url.includes('n=agent2'));
   const sw = back2 ? await S1.vb(['tab', back2.id || back2.targetId]) : { ok: false, stderr: 'no own tab' };
   const u2 = await S1.vb(['get', 'url']);
-  ok(back2 && sw.ok && u2.ok && u2.stdout.includes('n=agent2'), '`tab <id>` back to its own tab: its verbs run there again', (sw.stderr + u2.stdout + u2.stderr).slice(-400));
+  ok(gateOf(back2) && gateOf(sw.ok) && gateOf(u2.ok) && verdictOf(u2.stdout.includes('n=agent2')), '`tab <id>` back to its own tab: its verbs run there again', (sw.stderr + u2.stdout + u2.stderr).slice(-400));
   const hr = await until(() => E.h('if (!L) return null; const r = L.state().tabRow; return r && r.rows.length >= 2 && r.rows.some((x) => x.owner === "you") && r.rows.some((x) => x.owner === "other") ? r : null;').catch(() => null), 10000, 200);
   const hisRow = hr && hr.rows.find((x) => x.owner === 'you'), agentRows = hr ? hr.rows.filter((x) => x.owner === 'other') : [];
-  ok(hisRow && !hisRow.canClose && agentRows.length >= 1 && agentRows.every((x) => !x.canClose && !x.canSwitch), 'HIS window\'s tab row: his tab "Yours" (his only one — no ✕: Close ends his browsing), the conversation\'s "Another conversation’s" with NO control on it', JSON.stringify(hr));
+  ok(gateOf(hisRow) && !hisRow.canClose && agentRows.length >= 1 && verdictOf(agentRows.every((x) => !x.canClose && !x.canSwitch)), 'HIS window\'s tab row: his tab "Yours" (his only one — no ✕: Close ends his browsing), the conversation\'s "Another conversation’s" with NO control on it', JSON.stringify(hr));
 }
 
 // ═══ (a2) lane passkey-browse-yourself: HIS PAGE WAITS FOR A PASSKEY ⇒ HIS WINDOW SAYS SO ═══════════════════════
@@ -377,8 +377,8 @@ console.log('— (a2) his page waits for a passkey: his window shows the banner,
   await typeAddress(`http://localhost:${CP}/pk`);
   const started = await innerUntil('pk', (r) => r.a === 'pending', 20000);
   const bar = await until(() => E.h(barText), 20000, 200);
-  ok(!!started && /This page is waiting for a passkey \(localhost\)/.test(String(bar)) && /Cancel passkey request/.test(String(bar)), `his page (his address row) waits for a passkey ⇒ HIS window shows the banner ("${String(bar || '').slice(0, 80)}…")`, JSON.stringify({ started, bar }));
-  ok(await E.clickSel('.browser-live-passkey-cancel'), 'a real click on the banner\'s Cancel');
+  ok(!!started && gateOf(/This page is waiting for a passkey \(localhost\)/.test(String(bar))) && verdictOf(/Cancel passkey request/.test(String(bar))), `his page (his address row) waits for a passkey ⇒ HIS window shows the banner ("${String(bar || '').slice(0, 80)}…")`, JSON.stringify({ started, bar }));
+  ok(verdictOf(await E.clickSel('.browser-live-passkey-cancel')), 'a real click on the banner\'s Cancel');
   const ended = await innerUntil('pk', (r) => r.a === 'AbortError', 10000);
   const gone = await until(() => E.h('const b = L.el().querySelector(".browser-live-dialog"); return !b || b.style.display === "none" || !/waiting for a passkey/.test(b.textContent);'), 10000, 200);
   ok(!!ended && !!gone, `…its Cancel ends HIS page's request (the page saw ${ended && ended.a}) and the banner goes`, JSON.stringify({ ended, gone }));
@@ -389,30 +389,30 @@ console.log('— (a2) his page waits for a passkey: his window shows the banner,
 // ═══ (c) CLOSE ⇒ HIS TAB ONLY; BROWSE YOURSELF AGAIN ⇒ JOIN ═══════════════════════
 console.log('— (c) Close: his tab closes, the browser stays for the agent; Browse yourself again joins it');
 const tBefore = await targetsOf(chrome0.port);
-ok(Array.isArray(tBefore) && tBefore.some((u) => u.includes('n=mine')) && tBefore.some((u) => u.includes('n=agent2')), 'Chrome\'s own target list: his tab and the conversation\'s', JSON.stringify(tBefore));
-ok(await E.clickSel('.browser-live.human .browser-live-close'), 'a real click on Close');
+ok(gateOf(Array.isArray(tBefore)) && gateOf(tBefore.some((u) => u.includes('n=mine'))) && verdictOf(tBefore.some((u) => u.includes('n=agent2'))), 'Chrome\'s own target list: his tab and the conversation\'s', JSON.stringify(tBefore));
+ok(verdictOf(await E.clickSel('.browser-live.human .browser-live-close')), 'a real click on Close');
 const gone = await until(() => E.h('return L ? null : true;'), 10000, 150);
 ok(!!gone, 'his window closes');
 const tAfter = await until(async () => { const t = await targetsOf(chrome0.port); return t && !t.some((u) => u.includes('n=mine')) ? t : null; }, 10000, 200);
-ok(tAfter && tAfter.some((u) => u.includes('n=agent2')), 'HIS tab is gone from Chrome\'s own list; the conversation\'s tab is still there', JSON.stringify(tAfter));
+ok(gateOf(tAfter) && verdictOf(tAfter.some((u) => u.includes('n=agent2'))), 'HIS tab is gone from Chrome\'s own list; the conversation\'s tab is still there', JSON.stringify(tAfter));
 const chrome1 = await chromeOf(DIR);
-ok(chrome0.pid && chrome1.pid === chrome0.pid && chrome1.state === 'ready', `the browser stays for the agent (the SAME Chrome pid ${chrome1.pid}, state ${chrome1.state})`);
+ok(gateOf(chrome0.pid) && chrome1.pid === chrome0.pid && chrome1.state === 'ready', `the browser stays for the agent (the SAME Chrome pid ${chrome1.pid}, state ${chrome1.state})`);
 const after = await S1.vb(['get', 'url']);
-ok(after.ok && after.stdout.includes('n=agent2'), 'the conversation\'s next command answers on its page', after.stdout.slice(-200));
+ok(gateOf(after.ok) && verdictOf(after.stdout.includes('n=agent2')), 'the conversation\'s next command answers on its page', after.stdout.slice(-200));
 await E.ev('window.app.openBrowserProfiles(); true');
-ok(await E.clickSel(rowBtn), 'Browse yourself again (the row)');
+ok(verdictOf(await E.clickSel(rowBtn)), 'Browse yourself again (the row)');
 const w2 = await until(() => E.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? { badge: s.badge } : null;').catch(() => null), 40000, 200);
 const chrome2 = await chromeOf(DIR);
-ok(!!w2 && chrome0.pid && chrome2.pid === chrome0.pid, `JOIN: his window drives again on the SAME Chrome (pid ${chrome2.pid})`, JSON.stringify(w2));
+ok(!!w2 && gateOf(chrome0.pid) && chrome2.pid === chrome0.pid, `JOIN: his window drives again on the SAME Chrome (pid ${chrome2.pid})`, JSON.stringify(w2));
 
 // ═══ (d) HIS SESSION, RECORDED, WITH ITS REPLAY ════════════════════════════════
 console.log('— (d) his session in the Sessions list, recorded like an agent\'s, and its replay');
 const ss = await api('GET', `/api/browser/sessions?browserKey=${HK}`);
 const first = ((ss.json && ss.json.sessions) || []).find((x) => !x.open);
-ok(first && first.holder === 'user' && first.recorded === true && first.reason === 'released' && first.count >= 2, `his first session: holder user, recorded, ended "released" (Close), ${first && first.count} acts`, JSON.stringify(ss.json && ss.json.sessions));
+ok(gateOf(first) && first.holder === 'user' && first.recorded === true && first.reason === 'released' && first.count >= 2, `his first session: holder user, recorded, ended "released" (Close), ${first && first.count} acts`, JSON.stringify(ss.json && ss.json.sessions));
 const one = first ? await api('GET', `/api/browser/sessions?browserKey=${HK}&session=${first.id}`) : null;
 const entries = (one && one.json && one.json.entries) || [];
-ok(entries.length >= 2 && entries.every((e) => e.holder === 'user') && entries.some((e) => e.action === 'mouseclick') && entries.some((e) => e.action === 'type'), `his acts: ${entries.map((e) => e.action).join(', ')}`, JSON.stringify(entries).slice(0, 400));
+ok(entries.length >= 2 && gateOf(entries.every((e) => e.holder === 'user')) && gateOf(entries.some((e) => e.action === 'mouseclick')) && verdictOf(entries.some((e) => e.action === 'type')), `his acts: ${entries.map((e) => e.action).join(', ')}`, JSON.stringify(entries).slice(0, 400));
 ok(!JSON.stringify(entries).includes('abc你好') && !JSON.stringify(entries).includes('你好世界'), 'the typed words are never stored — a length only («N chars»)');
 await E.ev(`window.app.openBrowserReplay({ browserKey: ${JSON.stringify(HK)}, session: ${JSON.stringify(first ? first.id : '')} }); true`);
 const rp = await until(() => E.ev('(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === "browser-replay" && x._browserReplay); if (!w) return null; const s = w._browserReplay.state(); return s.n >= 2 ? s : null; })()'), 15000, 200);
@@ -422,17 +422,17 @@ await E.ev('(() => { const w = [...window.app.wm.windows.values()].find((x) => x
 // ═══ (e) QUIT THE WHOLE BROWSER ═══════════════════════════════════════════════
 console.log('— (e) Quit the whole browser: the confirm names the conversation; the browser stops; Browse again');
 await E.h('window.app.wm.revealWindow?.(w.id); return true;');
-ok(await E.clickSel('.browser-live.human .browser-live-quit'), 'a real click on Quit the whole browser');
+ok(verdictOf(await E.clickSel('.browser-live.human .browser-live-quit')), 'a real click on Quit the whole browser');
 const dlg = await until(() => E.ev('(() => { const p = [...document.querySelectorAll(".dialog-hint")].filter((e) => e.offsetParent !== null && /browser/i.test(e.textContent)).at(-1); return p ? p.textContent : null; })()'), 8000, 100);
 const shown = await E.ev(`(() => { const sb = window.app.sidebar; const s = (sb._allSessions || []).find((x) => x.webuiId === ${JSON.stringify(S1.sessionId)}); return s ? ((sb.getCustomName && sb.getCustomName(s)) || s.webuiName || s.name || '') : ''; })()`);
-ok(dlg && shown && dlg.startsWith(shown + ' also uses this browser.') && /their next browser command opens it again/.test(dlg), `the confirm NAMES the conversation that loses its tab — as the sidebar shows it ("${shown}"): "${dlg}"`);
-ok(await E.ev('(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent === "Quit the browser"); if (!b) return false; b.click(); return true; })()'), 'confirmed ("Quit the browser")');
+ok(gateOf(dlg) && gateOf(shown) && gateOf(dlg.startsWith(shown + ' also uses this browser.')) && verdictOf(/their next browser command opens it again/.test(dlg)), `the confirm NAMES the conversation that loses its tab — as the sidebar shows it ("${shown}"): "${dlg}"`);
+ok(verdictOf(await E.ev('(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent === "Quit the browser"); if (!b) return false; b.click(); return true; })()')), 'confirmed ("Quit the browser")');
 const stopped = await until(async () => { const d = await api('GET', '/api/browser/profiles'); const b = d.json && d.json.browsers && d.json.browsers[PID]; return !b || b.state !== 'ready' ? (b ? b.state : 'none') : null; }, 20000, 200);
 ok(!!stopped, `the browser stopped for everyone (${stopped})`);
 const ended = await until(() => E.h('if (!L) return null; const s = L.state(); return s.humanEnded || s.stopped ? { ended: s.humanEnded, stopped: s.stopped, badge: s.badge, again: [...L.el().querySelectorAll("button")].some((b) => b.textContent === "Browse again" && b.style.display !== "none") } : null;').catch(() => null), 15000, 200);
-ok(ended && ended.again && ended.badge === 'You are not browsing it now', `his window says it and offers Browse again (${JSON.stringify(ended)})`);
+ok(gateOf(ended) && gateOf(ended.again) && ended.badge === 'You are not browsing it now', `his window says it and offers Browse again (${JSON.stringify(ended)})`);
 const reopen = await S1.vb(['open', innerUrl('agent3')]);
-ok(reopen.ok && !!(await innerUntil('agent3', () => true, 45000)), 'the conversation\'s next command opens the browser again', (reopen.stdout + reopen.stderr).slice(-300));
+ok(gateOf(reopen.ok) && !!(await innerUntil('agent3', () => true, 45000)), 'the conversation\'s next command opens the browser again', (reopen.stdout + reopen.stderr).slice(-300));
 await E.h('window.app.wm.closeWindow(w.id); return true;');
 
 // ═══ (e2) verify r2 — HIS CHROME DIES UNDER HIS PAGE; THE TICK HEALS THE BROWSER ═══════════════════════════════
@@ -440,7 +440,7 @@ await E.h('window.app.wm.closeWindow(w.id); return true;');
 // row and Continue, Browse yourself only focused his window on the dead tab, the conversation's next command
 console.log('— (e2) his Chrome dies (a crash) while he browses: the heal ends his browsing honestly, Browse again works');
 await E.ev('window.app.openBrowserProfiles(); true');
-ok(await E.clickSel(rowBtn), 'Browse yourself on the re-opened browser (the row)');
+ok(verdictOf(await E.clickSel(rowBtn)), 'Browse yourself on the re-opened browser (the row)');
 const w3 = await until(() => E.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 40000, 200);
 ok(!!w3, 'his window drives');
 const cr0 = await chromeOf(DIR);
@@ -448,13 +448,13 @@ if (cr0.pid) { try { process.kill(cr0.pid, 'SIGKILL'); } catch { } }
 const healed = await until(async () => { const c = await chromeOf(DIR); return c.pid && c.pid !== cr0.pid && c.state === 'ready' ? c : null; }, 30000, 250);
 ok(!!(cr0.pid && healed), `his Chrome (pid ${cr0.pid}) killed — the tick healed the browser (a new Chrome pid ${healed && healed.pid})`);
 const e2 = await until(() => E.h('if (!L) return null; const s = L.state(); return s.humanEnded ? { ended: s.humanEnded, again: [...L.el().querySelectorAll("button")].some((b) => b.textContent === "Browse again" && b.style.display !== "none"), share: s.shareLine } : null;').catch(() => null), 15000, 200);
-ok(e2 && e2.ended === 'stopped' && e2.again && e2.share === null, `his window says his browsing ended with the old Chrome and offers Browse again (${JSON.stringify(e2)}) — never a window driving a dead tab`);
+ok(gateOf(e2) && e2.ended === 'stopped' && gateOf(e2.again) && e2.share === null, `his window says his browsing ended with the old Chrome and offers Browse again (${JSON.stringify(e2)}) — never a window driving a dead tab`);
 const conv = await S1.vb(['get', 'url']);
 // 2.369.200 integration: lane profile-lock-roll L2 superseded lane H r4's `tab_gone` here — the first command after a replaced
 // Chrome REBINDS to the new Chrome's tab and says so ([tab_rebound], "…previous run is gone…open your page again"), never tab_gone
-ok(/\[tab_rebound\]/.test(conv.stdout + conv.stderr) && /previous run is gone/.test(conv.stdout + conv.stderr) && !/tab_gone/.test(conv.stdout + conv.stderr), 'the conversation\'s next command is told its page went with the old Chrome — profile-lock-roll\'s rebind ([tab_rebound]: a new tab bound for it, open the page again), never tab_gone', (conv.stdout + conv.stderr).slice(-240));
+ok(gateOf(/\[tab_rebound\]/.test(conv.stdout + conv.stderr)) && gateOf(/previous run is gone/.test(conv.stdout + conv.stderr)) && !/tab_gone/.test(conv.stdout + conv.stderr), 'the conversation\'s next command is told its page went with the old Chrome — profile-lock-roll\'s rebind ([tab_rebound]: a new tab bound for it, open the page again), never tab_gone', (conv.stdout + conv.stderr).slice(-240));
 await S1.vb(['tab', 'new', 'about:blank']); // (the agent follows the remedy — the next legs use its browser)
-ok(await E.h('const b = [...L.el().querySelectorAll("button")].find((x) => x.textContent === "Browse again" && x.style.display !== "none"); if (!b) return false; b.click(); return true;'), 'a real press of Browse again');
+ok(verdictOf(await E.h('const b = [...L.el().querySelectorAll("button")].find((x) => x.textContent === "Browse again" && x.style.display !== "none"); if (!b) return false; b.click(); return true;')), 'a real press of Browse again');
 const w4 = await until(() => E.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && !s.humanEnded ? true : null;').catch(() => null), 40000, 200);
 await E.call('Input.insertText', { text: innerUrl('after-heal') });
 await E.key('Enter', { code: 'Enter', vk: 13, text: '\r' });
@@ -465,7 +465,7 @@ await E.h('window.app.wm.closeWindow(w.id); return true;');
 console.log('— (f) the bar at 360 px on a touch device in en / zh / ja: one line each, inside the bar; the Keyboard button');
 for (const lang of ['en', 'zh', 'ja']) {
   const P = await page({ lang, size: [360, 780], touch: true });
-  if (!ok(P.ready, `${lang}: the phone page is up`)) continue;
+  if (!ok(verdictOf(P.ready), `${lang}: the phone page is up`)) continue;
   await P.ev(`window.app.browseYourself(${JSON.stringify(PID)}, { label: 'work' }); true`);
   const live = await until(() => P.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 40000, 200);
   if (!ok(!!live, `${lang}: his window drives on the phone`)) { P.close(); continue; }
@@ -484,7 +484,7 @@ for (const lang of ['en', 'zh', 'ja']) {
   ok(m.kbd === true, `${lang}: the Keyboard button is shown while he drives on a touch device`);
   const sl = await P.h('const n = L.el().querySelector(".browser-live-share-line"); if (!n) return null; const r = n.getBoundingClientRect(); return { text: L.state().shareLine, shown: getComputedStyle(n).display !== "none", sw: n.scrollWidth, cw: n.clientWidth, h: r.height };');
   const wantShare = { en: SHARE_EN, zh: '这个配置的 agent 也能看到并操作这个标签页', ja: 'このプロファイルのエージェントもこのタブを見て操作できます' }[lang];
-  ok(sl && sl.shown && sl.text === wantShare && sl.sw <= sl.cw + 1, `${lang}: option A's line in ${lang}, inside the 360 px window ("${sl && sl.text}")`, JSON.stringify(sl));
+  ok(gateOf(sl) && gateOf(sl.shown) && sl.text === wantShare && sl.sw <= sl.cw + 1, `${lang}: option A's line in ${lang}, inside the 360 px window ("${sl && sl.text}")`, JSON.stringify(sl));
   if (lang === 'ja') ok(!/[“”]/.test(m.words + m.end), 'ja: no “ ” in the bar or the end line', m.words + ' || ' + m.end);
   if (lang !== 'en') ok(!/Close|Quit the whole browser|You are browsing/.test(m.words), `${lang}: the bar speaks ${lang} (no English left)`, m.words);
   await P.h('window.app.wm.closeWindow(w.id); return true;');
@@ -506,7 +506,7 @@ else {
   const mkX = await api('POST', '/api/browser/profiles', { label: 'alone-x' });
   const PIDX = mkX.json && mkX.json.profile ? mkX.json.profile.id : null;
   const AX = PIDX ? await page({ lang: 'en' }) : null;
-  if (ok(!!PIDX && AX && AX.ready, `a second profile no conversation uses ("alone-x", ${PIDX}) and its viewer page`, JSON.stringify(mkX.json))) {
+  if (ok(!!PIDX && gateOf(AX) && verdictOf(AX.ready), `a second profile no conversation uses ("alone-x", ${PIDX}) and its viewer page`, JSON.stringify(mkX.json))) {
     await AX.ev(`window.app.browseYourself(${JSON.stringify(PIDX)}, { label: 'alone-x' }); true`);
     const liveX = await until(() => AX.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 60000, 200);
     const onAttach = journal.split('\n').some((l) => l.includes(`${PIDX} "alone-x" started on the ATTACH road`));
@@ -519,7 +519,7 @@ else {
       const toastsNow = () => AX.ev('[...document.querySelectorAll(".global-toast")].map((n) => n.textContent).join(" | ")').catch(() => '');
       await typeX(`${SITE0}/auth?n=x1`);
       const barX = await until(() => AX.h('const b = L.el().querySelector(".browser-live-dialog"); return b && b.style.display !== "none" && /in its own window/.test(b.textContent) ? b.textContent : null;').catch(() => null), 30000, 200);
-      ok(!!barX && /Chrome asks you to sign in — in its own window, which this view does not show/.test(barX) && /VibeSpace never sees them/.test(barX) && !/Take over/.test(barX) && barX.includes(`127.0.0.1:${CP}`),
+      ok(!!barX && gateOf(/Chrome asks you to sign in — in its own window, which this view does not show/.test(barX)) && gateOf(/VibeSpace never sees them/.test(barX)) && !/Take over/.test(barX) && verdictOf(barX.includes(`127.0.0.1:${CP}`)),
         `(g2) the site asks ⇒ the person's window SAYS the browser's own sheet in its window, who asks named, the person's own hint ("${String(barX || '').slice(0, 140)}")`, String(barX));
       const said = await until(() => journal.split('\n').some((l) => l.includes(`${PIDX}: the user's open asks for a sign-in — the browser shows its own sheet in its window`)), 15000, 200);
       const toasts = await toastsNow();
@@ -540,7 +540,7 @@ else {
   const mk = await api('POST', '/api/browser/profiles', { label: 'alone' });
   const PID2 = mk.json && mk.json.profile ? mk.json.profile.id : null;
   const A = await page({ lang: 'en' });
-  if (ok(!!PID2 && A.ready, `a profile no conversation uses ("alone", ${PID2}) and a viewer page`, JSON.stringify(mk.json))) {
+  if (ok(!!PID2 && verdictOf(A.ready), `a profile no conversation uses ("alone", ${PID2}) and a viewer page`, JSON.stringify(mk.json))) {
     await A.ev(`window.app.browseYourself(${JSON.stringify(PID2)}, { label: 'alone' }); true`);
     const liveA = await until(() => A.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 60000, 200);
     const recA = liveA ? await until(() => A.ev(recOf(PID2)).then((r) => (r && r.launch ? r : null)).catch(() => null), 10000, 200) : null;
@@ -577,7 +577,7 @@ else {
       await typeA(`${SITE}/auth?n=sign1`);
       const bar1 = await until(() => A.h(formNow).catch(() => null), 30000, 200);
       if (!bar1) await placeAlone('no sign-in form came');
-      ok(bar1 && /The page asks you to sign in/.test(bar1.text) && bar1.text.includes(`127.0.0.1:${CP}`) && bar1.text.includes('Lane <b>Realm</b>') && !bar1.bold && bar1.dialog,
+      ok(gateOf(bar1) && gateOf(/The page asks you to sign in/.test(bar1.text)) && gateOf(bar1.text.includes(`127.0.0.1:${CP}`)) && gateOf(bar1.text.includes('Lane <b>Realm</b>')) && !bar1.bold && verdictOf(bar1.dialog),
         `the site asks ⇒ VibeSpace's sign-in form in THE PERSON'S window, naming who asks — the host and the realm, the realm drawn as TEXT ("${String(bar1 && bar1.text).slice(0, 120)}")`, JSON.stringify(bar1));
       // a REAL click on each box and real keys (Input.dispatchKeyEvent into the app page), one by one
       const clickedU = await pressSel('.browser-live-prompt-user'); for (const ch of 'ann') await A.key(ch);
@@ -587,21 +587,21 @@ else {
       for (const ch of PWG.slice(half)) await A.key(ch);
       const boxes = await A.h('const u = L.el().querySelector(".browser-live-prompt-user"), p = L.el().querySelector(".browser-live-prompt-pass"); return u && p ? { user: u.value, passLen: p.value.length, focus: document.activeElement === p } : null;').catch(() => null);
       ok(modeIn === true, '主开发 (1): a mode record arrived while the caret was in the secret\'s box — the caret STAYED there', String(modeIn));
-      ok(!!k1 && clickedU && clickedP && boxes && boxes.user === 'ann' && boxes.passLen === PWG.length && boxes.focus && (reports.get('k1') || {}).keys === 0,
+      ok(!!k1 && gateOf(clickedU) && gateOf(clickedP) && gateOf(boxes) && boxes.user === 'ann' && boxes.passLen === PWG.length && gateOf(boxes.focus) && (reports.get('k1') || {}).keys === 0,
         'its read (M1): a real click on each box and real keys land IN THE FORM (the user name, every character of the password) — the page under it was sent NO key', JSON.stringify({ boxes, k1: reports.get('k1') }));
-      ok(await pressSel('.browser-live-prompt-signin'), 'a real click on Sign in');
+      ok(verdictOf(await pressSel('.browser-live-prompt-signin')), 'a real click on Sign in');
       const signed = await innerUntil('sign1', (r) => r.ok === true, 20000);
       const gone1 = await until(() => A.h('const b = L.el().querySelector(".browser-live-dialog"); return !b || b.style.display === "none" || !b.querySelector(".browser-live-prompt-user");').catch(() => null), 10000, 200);
       ok(!!signed && signed.user === 'ann' && !!gone1 && (reports.get('k1') || {}).keys === 0, 'their Sign in reaches the site — the page commits (the site saw the user name and password), the form goes, and the page under it never got a key', JSON.stringify({ signed, gone1, k1: reports.get('k1') }));
       // law 6, AFTER the form proved the hook armed on this tab (its read, S4): a page with no challenge loses no request
       await typeA(`${SITE}/plain?n=plain1`);
       const plain = await innerUntil('plain1', (r) => r.loaded === true, 30000);
-      ok(plain && plain.imgs === 12 && hits.get('plain1') === 13, `law 6: a page with no challenge, the sign-in hook armed on this tab (the form just came through it) — the page and its 12 images each reach the site ONCE and the page loads (${hits.get('plain1')} requests)`, JSON.stringify({ plain, hits: hits.get('plain1') }));
+      ok(gateOf(plain) && plain.imgs === 12 && hits.get('plain1') === 13, `law 6: a page with no challenge, the sign-in hook armed on this tab (the form just came through it) — the page and its 12 images each reach the site ONCE and the page loads (${hits.get('plain1')} requests)`, JSON.stringify({ plain, hits: hits.get('plain1') }));
       // Cancel on ANOTHER ORIGIN (its read, M2: Chrome sends the answer it just used to the same origin by itself — no challenge there): the second loopback port
       await typeA(`${CANCEL}/auth?n=sign2`);
       const bar2 = await until(() => A.h(formNow).catch(() => null), 30000, 200);
-      ok(!!bar2 && await pressSel('.browser-live-prompt-cancel'), 'the next sign-in: the form again, and a real click on its Cancel');
-      ok(pressedAt.length === 4 && pressedAt.every((x) => x.ok), `the close's rule (c): each of the ${pressedAt.length} raw presses found its own element on top at its point first (${pressedAt.map((x) => x.at).join(' · ')})`, JSON.stringify(pressedAt));
+      ok(!!bar2 && verdictOf(await pressSel('.browser-live-prompt-cancel')), 'the next sign-in: the form again, and a real click on its Cancel');
+      ok(pressedAt.length === 4 && verdictOf(pressedAt.every((x) => x.ok)), `the close's rule (c): each of the ${pressedAt.length} raw presses found its own element on top at its point first (${pressedAt.map((x) => x.at).join(' · ')})`, JSON.stringify(pressedAt));
       const refused = await innerUntil('sign2', (r) => r.refused === true, 20000);
       ok(!!refused, 'their Cancel ⇒ the page commits the site\'s own 401 body — the page is never left hanging', JSON.stringify(refused));
       const dataHits = []; const walk = (d, depth = 0) => { if (depth > 8) return; let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, depth + 1); else if (e.isFile()) { try { const st = fs.statSync(p); if (st.size < 32 * 1024 * 1024 && fs.readFileSync(p).includes(PWG)) dataHits.push(p); } catch { } } } };
@@ -656,4 +656,4 @@ else {
 }
 try { await api('POST', `/api/browser/browse/${HK}/close`); } catch { }
 try { wsMain.close(); } catch { } try { bws.close(); } catch { } outer.close(); col.close(); col2.close();
-await done();
+await done(); import { verdictOf, gateOf } from './lib/check.mjs';

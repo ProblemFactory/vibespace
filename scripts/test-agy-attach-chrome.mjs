@@ -39,7 +39,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -131,7 +131,7 @@ try {
 
   console.log('① an Antigravity chat: the composer attaches a file and the message — its path first — is SENT');
   const sid = await openChat('agy-attach');
-  check('an Antigravity chat is created through the page\'s own createSession and the fake agy started behind the real wrapper', !!sid && agyStarted(sid), { sid, log: sid && stubLog(sid).slice(0, 2) });
+  check('an Antigravity chat is created through the page\'s own createSession and the fake agy started behind the real wrapper', !!sid && verdictOf(agyStarted(sid)), { sid, log: sid && stubLog(sid).slice(0, 2) });
   const WORDS = '这里是标书，请看看';
   // where the upload lands (lane chat-attachments-persist): the cwd, or — a TEMPORARY cwd — the conversation's kept folder
   const TEMP = [...new Set([require('os').tmpdir(), '/tmp', '/var/tmp'].map((d) => path.resolve(d)))];
@@ -139,14 +139,14 @@ try {
   const UP = upPath(sid);
   const MSG = `${UP} ${WORDS}`;
   const a = await attachAndSend(sid, WORDS);
-  check('the composer\'s REAL upload wrote the file\'s absolute path FIRST in the box (where it landed: the cwd, or the conversation\'s kept folder for a temporary cwd), the file is there', a.box === `${UP} ` && fs.existsSync(UP), { a, UP });
-  check('…the owner\'s words typed after it, Enter sent it (the box emptied, no slash dropdown in the way)', a.typed === MSG && a.cleared && !a.dropdown, a);
+  check('the composer\'s REAL upload wrote the file\'s absolute path FIRST in the box (where it landed: the cwd, or the conversation\'s kept folder for a temporary cwd), the file is there', a.box === `${UP} ` && verdictOf(fs.existsSync(UP)), { a, UP });
+  check('…the owner\'s words typed after it, Enter sent it (the box emptied, no slash dropdown in the way)', a.typed === MSG && gateOf(a.cleared) && !a.dropdown, a);
   const read = await until(() => agyRead(sid).includes(MSG), 15000);
   check('agy READ the message with the attachment\'s path first — exactly the line the box held', !!read, { want: MSG, read: agyRead(sid) });
   const replies = (sid) => evalJs(`((${V(sid)})?._messageList?.textContent || '').split('Antigravity (').length - 1`);   // the fake's reply = "Antigravity (<model>, <mode>): <what it read>"
   const replied = await waitFor(`(() => { const t = (${V(sid)})?._messageList?.textContent || ''; return t.includes('Antigravity (') && t.indexOf(${JSON.stringify(MSG)}) !== t.lastIndexOf(${JSON.stringify(MSG)}); })()`, 15000);
   const t1 = await chatText(sid);
-  check('agy\'s reply (it names the line it read) is drawn under the user\'s bubble, and there is NO error card («… was not sent: Antigravity answers its slash commands itself»)', replied && !t1.includes(SENT_NOT), t1.slice(-400));
+  check('agy\'s reply (it names the line it read) is drawn under the user\'s bubble, and there is NO error card («… was not sent: Antigravity answers its slash commands itself»)', gateOf(replied) && !t1.includes(SENT_NOT), t1.slice(-400));
 
   console.log('② a REAL agy command in the same chat is still held back, by name');
   await evalJs(`(${V(sid)})._chatInput._textarea.focus(); true`);
@@ -154,11 +154,11 @@ try {
   if (await dropdownOpen(sid)) for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
   await enter();
   const card = await waitFor(`((${V(sid)})?._messageList?.textContent || '').includes('/model ${SENT_NOT}')`, 15000);
-  check('/model ⇒ the error card names it in the product\'s sentence, and agy never read it', card && !agyRead(sid).includes('/model'), { read: agyRead(sid), tail: (await chatText(sid)).slice(-300) });
+  check('/model ⇒ the error card names it in the product\'s sentence, and agy never read it', gateOf(card) && !agyRead(sid).includes('/model'), { read: agyRead(sid), tail: (await chatText(sid)).slice(-300) });
   await cdp('Input.insertText', { text: 'still here' });
   await enter();
   check('…the conversation lives on: the next line is read and answered (no «Antigravity ended this session»)',
-    !!(await until(() => agyRead(sid).includes('still here'), 15000)) && await waitFor(`((${V(sid)})?._messageList?.textContent || '').split('Antigravity (').length - 1 >= 2`, 15000) && !(await chatText(sid)).includes('Antigravity ended this session'), { replies: await replies(sid), read: agyRead(sid) });
+    !!(await until(() => agyRead(sid).includes('still here'), 15000)) && gateOf(await waitFor(`((${V(sid)})?._messageList?.textContent || '').split('Antigravity (').length - 1 >= 2`, 15000)) && !(await chatText(sid)).includes('Antigravity ended this session'), { replies: await replies(sid), read: agyRead(sid) });
 
   console.log('RED CONTROL — the 2.369.340 guard (its first-character rule) in the scratch tree\'s wrapper: the same attachment is refused');
   const WRAP = path.join(wt, 'data/bin/agy-wrapper.js');
@@ -172,10 +172,10 @@ try {
   const refused = await waitFor(`((${V(sid2)})?._messageList?.textContent || '').includes(${JSON.stringify(first + ' ' + SENT_NOT)})`, 15000);
   await sleep(1200);
   check(`RED CONTROL: the base guard refuses the attachment's message as the command «${first}» (the owner's «/home was not sent»), and agy never reads it`,
-    W_SRC.includes(GUARD) && !!sid2 && sid2 !== sid && b.box === `${upPath(sid2)} ` && refused && !agyRead(sid2).includes(`${upPath(sid2)} ${WORDS}`), { b, read: agyRead(sid2), tail: (await chatText(sid2)).slice(-300) });
+    gateOf(W_SRC.includes(GUARD)) && !!sid2 && sid2 !== sid && b.box === `${upPath(sid2)} ` && gateOf(refused) && !agyRead(sid2).includes(`${upPath(sid2)} ${WORDS}`), { b, read: agyRead(sid2), tail: (await chatText(sid2)).slice(-300) });
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));
 }
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

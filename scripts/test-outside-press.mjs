@@ -55,7 +55,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+const ok = (c, name, extra) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -99,7 +99,7 @@ console.log('§1 the verdicts (src/lib/outside-press.js)');
   ok(bad.length === 0, `pressCloses: ${T.length} rows — inside / anchor / THE PICTURE / nested popover (both rules) / ignore / removed root / the opening press / the voice UI / precedence gone > opening > inside > excluded > ignored > voice > nested > outside`, bad.map(([f]) => [f, OP.pressCloses(f)]));
   ok(OP.pressCloses().close === true && OP.pressCloses(null).close === true, 'pressCloses: no facts = a press outside (closes)');
   const P = [['mouse', 'down'], ['touch', 'tap'], ['pen', 'tap'], ['', 'down'], [undefined, 'down'], ['MOUSE', 'down']];
-  ok(P.every(([t, w]) => OP.pressPhase(t) === w), `pressPhase: mouse / '' / undefined judged at pointerdown (as mousedown was); touch and pen only as a tap (${P.map(([t]) => OP.pressPhase(t)).join(' ')})`);
+  ok(verdictOf(P.every(([t, w]) => OP.pressPhase(t) === w)), `pressPhase: mouse / '' / undefined judged at pointerdown (as mousedown was); touch and pen only as a tap (${P.map(([t]) => OP.pressPhase(t)).join(' ')})`);
   const S = OP.TAP_SLOP_PX, L = OP.LONG_PRESS_MS;
   ok(S === 10 && L === 500, `the tap thresholds are the long-press synthesizer's own (slop ${S} px, long-press ${L} ms)`);
   const TAPS = [
@@ -113,7 +113,7 @@ console.log('§1 the verdicts (src/lib/outside-press.js)');
     [{ dx: NaN, dy: 0, heldMs: 80 }, false],
     [{}, true],
   ];
-  ok(TAPS.every(([a, w]) => OP.tapVerdict(a) === w), `tapVerdict: ${TAPS.length} rows — still + quick = tap; > ${S} px, ≥ ${L} ms, cancelled, non-finite = not a tap (a scroll, a drag, a long-press never close)`, TAPS.map(([a]) => OP.tapVerdict(a)));
+  ok(verdictOf(TAPS.every(([a, w]) => OP.tapVerdict(a) === w)), `tapVerdict: ${TAPS.length} rows — still + quick = tap; > ${S} px, ≥ ${L} ms, cancelled, non-finite = not a tap (a scroll, a drag, a long-press never close)`, TAPS.map(([a]) => OP.tapVerdict(a)));
   // THE BLUR TABLE (lane menu-close-residue): a press INTO a frame reaches the parent only as `window` blur
   {
     const F = { tagName: 'IFRAME' }, pop = { contains: () => false }, holds = (x) => ({ contains: (t) => t === x });
@@ -145,7 +145,7 @@ console.log('§1 the verdicts (src/lib/outside-press.js)');
     ok(bad.length === 0, `shouldCloseOnBlur: ${B.length} rows — a frame outside closes; the body / a row / no focus / the page unfocused / a frame inside the surface or its anchor / ignore / a removed root do not; precedence gone > no-active > not-a-frame > page-unfocused > inside > excluded > ignored > frame`, bad.map(([f]) => [f, OP.shouldCloseOnBlur(f)]));
     ok(OP.shouldCloseOnBlur().why === 'no-active' && OP.shouldCloseOnBlur({ active: F }).close === true, 'shouldCloseOnBlur: no facts = nothing focused (never closes); a frame with no surface given = closes');
     const ky = fs.readFileSync(path.join(repo, 'src/lib/keyboard-yield.js'), 'utf8');
-    ok(JSON.stringify([...OP.FRAME_TAGS]) === JSON.stringify(['IFRAME', 'FRAME', 'OBJECT', 'EMBED']) && ky.includes("['IFRAME', 'FRAME', 'OBJECT', 'EMBED'].includes(el.tagName)"), 'FRAME_TAGS is the family keyboard-yield.js isFrame calls a frame (spelled the same there)');
+    ok(JSON.stringify([...OP.FRAME_TAGS]) === JSON.stringify(['IFRAME', 'FRAME', 'OBJECT', 'EMBED']) && verdictOf(ky.includes("['IFRAME', 'FRAME', 'OBJECT', 'EMBED'].includes(el.tagName)")), 'FRAME_TAGS is the family keyboard-yield.js isFrame calls a frame (spelled the same there)');
   }
   ok(!/\bimport\b|\brequire\s*\(/.test(fs.readFileSync(path.join(repo, 'src/lib/outside-press.js'), 'utf8').replace(/\/\/.*$/gm, '')), 'outside-press.js is PURE (imports nothing)');
 }
@@ -263,7 +263,7 @@ const U = await import('../src/lib/utils.js');
 // utils.js's own import-time listeners (the instant tooltip) are not the closer's: only listeners added AFTER this point
 // are counted as "ours"
 const importTime = [...doc.l];
-ok(importTime.some((r) => r.type === 'pointerdown' && r.capture && r.passive) && !importTime.some((r) => r.type === 'mousedown'), 'the instant tooltip hides on a capture-phase passive pointerdown (no document mousedown left in utils.js)');
+ok(gateOf(importTime.some((r) => r.type === 'pointerdown' && r.capture && r.passive)) && !importTime.some((r) => r.type === 'mousedown'), 'the instant tooltip hides on a capture-phase passive pointerdown (no document mousedown left in utils.js)');
 
 // ── §2 THE REAL HELPER ──────────────────────────────────────────────────────
 console.log('§2 onOutsidePress under the dispatch model');
@@ -277,7 +277,7 @@ console.log('§2 onOutsidePress under the dispatch model');
   const openedAt = performance.now() - 5; // the opening press began before the surface existed
   const dispose = U.onOutsidePress(pop, () => { closed++; pop.remove(); });
   const mine = since(before);
-  ok(mine.length === 3 && ['pointerdown', 'pointerup', 'pointercancel'].every((t) => mine.some((r) => r.type === t)) && mine.every((r) => r.capture && r.passive), `(a) armed at once: ${mine.map((r) => `${r.type}${r.capture ? ' capture' : ''}${r.passive ? ' passive' : ''}`).join(', ')}`);
+  ok(mine.length === 3 && gateOf(['pointerdown', 'pointerup', 'pointercancel'].every((t) => mine.some((r) => r.type === t))) && verdictOf(mine.every((r) => r.capture && r.passive)), `(a) armed at once: ${mine.map((r) => `${r.type}${r.capture ? ' capture' : ''}${r.passive ? ' passive' : ''}`).join(', ')}`);
   mouseClick(paneCanvas, openedAt);
   touch(paneCanvas, { at: openedAt });
   ok(closed === 0 && pop.removed === 0, '(a) the OPENING press (mouse or a touch tap stamped before the arming) never closes it');
@@ -294,7 +294,7 @@ console.log('§2 onOutsidePress under the dispatch model');
   const { pop } = fresh(); let closed = 0; const before = [...doc.l];
   U.onOutsidePress(pop, () => { closed++; });
   const e = mouseClick(vncCanvas);
-  ok(closed === 1 && e.md && e.md.calls.stopPropagation === 1 && since(before).length === 0, '(c) a press on a noVNC-like canvas (mousedown stopped + cancelled) closes too');
+  ok(closed === 1 && gateOf(e.md) && e.md.calls.stopPropagation === 1 && since(before).length === 0, '(c) a press on a noVNC-like canvas (mousedown stopped + cancelled) closes too');
 }
 {
   // (d) the rows that keep it open: inside, the anchor (and its icon), a nested flyout; an unrelated popover closes it
@@ -433,7 +433,7 @@ console.log('§2 onOutsidePress under the dispatch model');
   // button: the toggle is keyed on the anchor, not on a press) and it CLOSES; the element handed back is DETACHED
   const gear = new El('button', toolbar, { id: 'btn-global-settings' }); const bd = [...doc.l], bw = [...win.l];
   const p1 = U.createPopover(gear, 'global-settings-popover');
-  ok(p1.isConnected && p1.parent === body && p1.dataset.popover === '1' && p1._anchor === gear && doc.querySelectorAll('.global-settings-popover').length === 1, '(m) the first call opens the popover under the anchor (attached, [data-popover], its anchor stamped)');
+  ok(gateOf(p1.isConnected) && p1.parent === body && p1.dataset.popover === '1' && p1._anchor === gear && doc.querySelectorAll('.global-settings-popover').length === 1, '(m) the first call opens the popover under the anchor (attached, [data-popover], its anchor stamped)');
   ok(since(bd).length === 3 && winSince(bw).length === 1, '(m) …with its closer armed (three document listeners + the window blur)');
   const p2 = U.createPopover(gear, 'global-settings-popover');
   ok(p1.removed === 1 && !p1.isConnected && doc.querySelectorAll('.global-settings-popover').length === 0, '(m) THE RESIDUE: the same anchor again CLOSES the open popover — nothing of that class in the document');
@@ -441,21 +441,21 @@ console.log('§2 onOutsidePress under the dispatch model');
   mouseClick(other);
   ok(since(bd).length === 0 && winSince(bw).length === 0, '(m) the closed popover\'s closer retires on the next press (root-gone), as any dedup removal did');
   const p3 = U.createPopover(gear, 'global-settings-popover');
-  ok(p3.isConnected && !p3._closedByAnchor, '(m) the anchor pressed once more OPENS again (a toggle, not a lock)');
+  ok(gateOf(p3.isConnected) && !p3._closedByAnchor, '(m) the anchor pressed once more OPENS again (a toggle, not a lock)');
   const other2 = new El('button', toolbar); const p4 = U.createPopover(other2, 'global-settings-popover');
-  ok(p3.removed === 1 && p4.isConnected && p4._anchor === other2, '(m) ANOTHER anchor of the same class replaces it (the dedup as before — not a toggle)');
+  ok(p3.removed === 1 && gateOf(p4.isConnected) && p4._anchor === other2, '(m) ANOTHER anchor of the same class replaces it (the dedup as before — not a toggle)');
   p4.remove(); // Escape's sweep
   const p5 = U.createPopover(other2, 'global-settings-popover');
-  ok(p5.isConnected && !p5._closedByAnchor, '(m) a popover closed by Escape: its anchor opens it again (a closed one never toggles)');
+  ok(gateOf(p5.isConnected) && !p5._closedByAnchor, '(m) a popover closed by Escape: its anchor opens it again (a closed one never toggles)');
   p5.remove();
   const pane = new El('pane', win_); const c1 = U.createPopover(pane, 'doc-lbar', { position: 'cursor', x: 10, y: 10 }); const c2 = U.createPopover(pane, 'doc-lbar', { position: 'cursor', x: 40, y: 10 });
-  ok(c1.removed === 1 && c2.isConnected && !c2._closedByAnchor, '(m) a CURSOR-placed popover (the doc link bar: its "anchor" is the whole pane) is rebuilt at the new place, never toggled');
+  ok(c1.removed === 1 && gateOf(c2.isConnected) && !c2._closedByAnchor, '(m) a CURSOR-placed popover (the doc link bar: its "anchor" is the whole pane) is rebuilt at the new place, never toggled');
   c2.remove();
   const r1 = U.createPopover(gear, 'file-view-menu'); const r2 = U.createPopover(gear, 'file-view-menu', { toggle: false });
-  ok(r1.removed === 1 && r2.isConnected && !r2._closedByAnchor, '(m) toggle:false — a programmatic rebuild (the explorer view menu re-rendering itself) replaces as before');
+  ok(r1.removed === 1 && gateOf(r2.isConnected) && !r2._closedByAnchor, '(m) toggle:false — a programmatic rebuild (the explorer view menu re-rendering itself) replaces as before');
   r2.remove();
   const s1 = U.createPopover(gear, 'session-config-popover'); const s2 = U.createPopover(gear, 'status-filter-menu');
-  ok(s1.isConnected && s2.isConnected, '(m) two popovers of different classes off one anchor are two popovers (the key is the class + the anchor)');
+  ok(gateOf(s1.isConnected) && verdictOf(s2.isConnected), '(m) two popovers of different classes off one anchor are two popovers (the key is the class + the anchor)');
   s1.remove(); s2.remove(); mouseClick(other);
 }
 
@@ -525,7 +525,7 @@ const M = mutantCopies('outside-press', repo);
   mouseClick(paneCanvas);
   const openOverPane = closedB === 0;
   mouseClick(other);
-  ok(openOverPane && closedB === 1, `CONTROL (the helper on 'mousedown'): a press into the pane leaves it OPEN, a press elsewhere closes it (${closedB}×) — the event the helper listens for is the fix`);
+  ok(gateOf(openOverPane) && closedB === 1, `CONTROL (the helper on 'mousedown'): a press into the pane leaves it OPEN, a press elsewhere closes it (${closedB}×) — the event the helper listens for is the fix`);
   dB();
   // (c) the helper in the BUBBLE phase: a pane that stops the press (stopPropagation on pointerdown) hides it
   const bubF = M.write('src/lib/utils.js', editAnchor(src, OPTS, 'const o = { capture: false, passive: true, signal: ctl.signal };', "src/lib/utils.js"), 'bubble');
@@ -539,7 +539,7 @@ const M = mutantCopies('outside-press', repo);
   const dD = U.onOutsidePress(D.pop, () => { closedD++; }, { once: false });
   mouseClick(stopPane);
   dD();
-  ok(bubbleBlind && closedD === 1, `CONTROL (the helper in the bubble phase): a pane that stops its press keeps the menu OPEN; the real capture-phase helper closes it (${closedD}×) — the phase is the fix`);
+  ok(gateOf(bubbleBlind) && closedD === 1, `CONTROL (the helper in the bubble phase): a pane that stops its press keeps the menu OPEN; the real capture-phase helper closes it (${closedD}×) — the phase is the fix`);
   // (d) lane menu-close-residue: the helper WITHOUT its window blur listener — a press into a frame (the parent sees
   // only the blur) leaves the menu OPEN; the real helper closes
   const BLUR_GATE = "if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {\n    window.addEventListener('blur', (e) => {";
@@ -555,7 +555,7 @@ const M = mutantCopies('outside-press', repo);
   dE();
   const F = fresh(); let closedF = 0; const dF = U.onOutsidePress(F.pop, () => { closedF++; }, { once: false });
   blurAll({ active: frameE, hasFocus: true }); dF();
-  ok(blindToFrame && closedE === 1 && closedF === 1, `CONTROL (the helper without its blur listener): a press into a frame leaves the menu OPEN (a press elsewhere still closes, ${closedE}×); the real helper closes on the frame (${closedF}×) — the blur listener is the fix`);
+  ok(gateOf(blindToFrame) && closedE === 1 && closedF === 1, `CONTROL (the helper without its blur listener): a press into a frame leaves the menu OPEN (a press elsewhere still closes, ${closedE}×); the real helper closes on the frame (${closedF}×) — the blur listener is the fix`);
   // (e) createPopover WITHOUT the toggle — the residue itself: the second press on ⚙ REBUILDS the popover
   const ntF = M.write('src/lib/utils.js', editAnchor(src, TOGGLE, 'if (false) {', "src/lib/utils.js"), 'no-toggle');
   const UT = await import(pathToFileURL(ntF).href);
@@ -564,7 +564,7 @@ const M = mutantCopies('outside-press', repo);
   const rebuilt = q1.removed === 1 && q2.isConnected && q2 !== q1 && doc.querySelectorAll('.global-settings-popover').length === 1;
   q2.remove(); mouseClick(other);
   const g1 = U.createPopover(gearT, 'global-settings-popover'); const g2 = U.createPopover(gearT, 'global-settings-popover');
-  ok(rebuilt && g1.removed === 1 && !g2.isConnected && doc.querySelectorAll('.global-settings-popover').length === 0, 'CONTROL (createPopover without the toggle — the pre-lane shape): ⚙ pressed while its menu is open REBUILDS the menu (a new attached popover); the real one closes it — the toggle in the dedup is the fix');
+  ok(gateOf(rebuilt) && g1.removed === 1 && !g2.isConnected && doc.querySelectorAll('.global-settings-popover').length === 0, 'CONTROL (createPopover without the toggle — the pre-lane shape): ⚙ pressed while its menu is open REBUILDS the menu (a new attached popover); the real one closes it — the toggle in the dedup is the fix');
   mouseClick(other);
   // (f) lane phone-tray-voice-done: THE BASE CLOSER — the down TARGET kept and measured at the LIFT, no voice fact (three
   // edits of a patched copy) — closes on the capsule redrawn under the finger and on the floating chip; the real one does not
@@ -573,7 +573,7 @@ const M = mutantCopies('outside-press', repo);
     ['seen: where(e.target, e) };', 'target: e.target };'],
     ['judge(p.seen, e);', 'judge(where(p.target, e), e);'],
   ];
-  ok(BASE.every(([a]) => src.split(a).length === 2), 'the three edits the base-closer control makes are each spelled exactly once in utils.js');
+  ok(verdictOf(BASE.every(([a]) => src.split(a).length === 2)), 'the three edits the base-closer control makes are each spelled exactly once in utils.js');
   const baseF = M.write('src/lib/utils.js', BASE.reduce((x, [a, b]) => editAnchor(x, a, b, "src/lib/utils.js"), src), 'base-closer');
   const UBase = await import(pathToFileURL(baseF).href);
   const run = (Mod) => {
@@ -590,8 +590,8 @@ const M = mutantCopies('outside-press', repo);
   };
   const b = run(UBase), real = run(U);
   ok(b.redrawClosed === 1 && b.chipClosed === 1 && real.redrawClosed === 0 && real.chipClosed === 0, `CONTROL (the base closer — the target measured at the lift, no voice fact): the capsule redrawn under the finger CLOSES the surface and so does a tap on the floating chip (the owner's tray, twice); the real helper keeps it open on both — the down-time facts and the voice fact are the fix (${JSON.stringify({ base: b, real })})`);
-  for (const row of copiesCensus(M.files, M.dir, repo, { label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);
+  for (const row of copiesCensus(M.files, M.dir, repo, { label: 'mutant copies: ' })) ok(verdictOf(row.pass), row.name, row.detail);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

@@ -39,7 +39,7 @@ import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ok = (c, n, e) => { if (typeof c !== 'boolean') throw new TypeError(`ok: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -123,28 +123,28 @@ console.log('① the placement table per vendor (PURE policy)');
   const bad = runTable(P);
   ok(bad.length === 0, `all ${ROWS.length} rows hold: the vendor's norm for --to alone (a message in a thread ⇒ thread; outside one ⇒ Lark / Telegram / Gmail quote, Slack thread), an undeclared placement refused with what IS offered, a quote of a threaded message refused, the shapes`, bad.join(' | '));
   const nd = P.placementVerdict({ requested: 'thread+chat', replyTo: 'm-1', caps: lark.caps });
-  ok(nd.code === 'placement-not-offered' && J(nd.offered) === J(['chat', 'quote', 'thread']) && nd.placement === 'thread+chat' && /offered here: chat, quote, thread/.test(nd.error), 'a refusal NAMES the placement asked and what the channel offers (the agent reads it verbatim)', J(nd));
+  ok(nd.code === 'placement-not-offered' && J(nd.offered) === J(['chat', 'quote', 'thread']) && nd.placement === 'thread+chat' && verdictOf(/offered here: chat, quote, thread/.test(nd.error)), 'a refusal NAMES the placement asked and what the channel offers (the agent reads it verbatim)', J(nd));
   const pit = P.placementVerdict({ requested: 'quote', replyTo: 'm-1', caps: SLACK });
-  ok(pit.why === 'not-declared' && /thread\+chat \(in the thread and also in the chat\)/.test(pit.error), 'Slack offers no quote — refused not-declared, the offered list says what thread+chat means', pit.error);
+  ok(pit.why === 'not-declared' && verdictOf(/thread\+chat \(in the thread and also in the chat\)/.test(pit.error)), 'Slack offers no quote — refused not-declared, the offered list says what thread+chat means', pit.error);
   // B-09d2 (fb-69c60c1b65: a Slack reply with files and --in-thread --also-in-chat was accepted, approved and sent nothing):
   // files ride only the placements the row's `filePlacements` takes — refused HERE, before a proposal exists
   const fv = (requested, files, caps = SLACK) => P.placementVerdict({ requested, replyTo: requested === 'chat' ? null : 'm-1', caps, files });
   const F9 = { both: fv('thread+chat', 2), thread: fv('thread', 2), chat: fv('chat', 1), norm: fv(null, 1), noFiles: fv('thread+chat', 0), lark: fv('thread', 3, lark.caps), larkQuote: fv('quote', 1, lark.caps) };
-  ok(F9.both.code === 'placement-not-offered' && F9.both.why === 'with-files' && F9.both.placement === 'thread+chat' && J(F9.both.offered) === J(['chat', 'thread']) && /\(--to <id> --also-in-chat with --attach\)/.test(F9.both.error) && /nothing was created/.test(F9.both.error) && /a reply in a thread \(--to <id> --in-thread\)/.test(F9.both.error)
-    && F9.thread.ok && F9.thread.placement === 'thread' && F9.chat.ok && F9.norm.ok && F9.norm.placement === 'thread' && F9.noFiles.ok && F9.noFiles.placement === 'thread+chat' && F9.lark.ok && F9.larkQuote.ok
+  ok(F9.both.code === 'placement-not-offered' && F9.both.why === 'with-files' && F9.both.placement === 'thread+chat' && J(F9.both.offered) === J(['chat', 'thread']) && gateOf(/\(--to <id> --also-in-chat with --attach\)/.test(F9.both.error)) && gateOf(/nothing was created/.test(F9.both.error)) && gateOf(/a reply in a thread \(--to <id> --in-thread\)/.test(F9.both.error))
+    && gateOf(F9.thread.ok) && F9.thread.placement === 'thread' && gateOf(F9.chat.ok) && gateOf(F9.norm.ok) && F9.norm.placement === 'thread' && gateOf(F9.noFiles.ok) && F9.noFiles.placement === 'thread+chat' && gateOf(F9.lark.ok) && gateOf(F9.larkQuote.ok)
     && J(P.filePlacementsOf(SLACK)) === J(['chat', 'thread']) && J(P.filePlacementsOf(lark.caps)) === J(P.placementsOf(lark.caps)),
     'B-09d2 THE VERDICT WITH ITS FILES: on Slack a reply with files in the thread AND the chat is refused (placement-not-offered, why with-files, offered chat / thread, the flags named, nothing created); files into the thread, the chat, or by the root norm pass; no files ⇒ thread+chat as before; a row with no filePlacements (Lark) takes files in every placement it offers', F9);
   const SLACK_REAL = require(path.join(REPO, 'src/channels/slack.js')).caps;
   const capsBad = (over) => { try { CH.validateCaps('slack', { ...SLACK_REAL, ...over }); return null; } catch (e) { return String(e.message || e); } };   // the kind keys its budget row
   const C9 = { real: capsBad({}), notDeclared: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: ['quote'] } }), notList: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: 'chat' } }), empty: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: [] } }), noRoot: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: ['chat'] } }), noFiles: capsBad({ sendAttachments: null }) };
-  ok(C9.real === null && /filePlacements must be a non-empty list of the declared placements/.test(C9.notDeclared || '') && /must be a non-empty list/.test(C9.notList || '') && /must be a non-empty list/.test(C9.empty || '') && /must include the rootReply \(thread\)/.test(C9.noRoot || '') && /sends no attachments/.test(C9.noFiles || '') && J(SLACK_REAL.threads.filePlacements) === J(['chat', 'thread']),
+  ok(C9.real === null && gateOf(/filePlacements must be a non-empty list of the declared placements/.test(C9.notDeclared || '')) && gateOf(/must be a non-empty list/.test(C9.notList || '')) && gateOf(/must be a non-empty list/.test(C9.empty || '')) && gateOf(/must include the rootReply \(thread\)/.test(C9.noRoot || '')) && gateOf(/sends no attachments/.test(C9.noFiles || '')) && J(SLACK_REAL.threads.filePlacements) === J(['chat', 'thread']),
     'B-09d2 THE CONTRACT: Slack\'s shipped row declares filePlacements chat / thread and passes validateCaps; a placement it does not offer, a non-list, an EMPTY list, a list without the rootReply (r1: a reply with files and no flags lands there) and filePlacements on an adapter that sends no attachments are each refused by name', C9);
   // the pre-enum reading (a suite's scripted module) and the CLAMP (a declaration can never widen a control)
   const LEGACY = { sendAs: ['user'], threads: { read: 'vendor', replyInto: true, listing: 'inline' } };
   ok(P.rootReplyOf(LEGACY) === 'quote' && P.rootReplyOf({ sendAs: ['user'] }) === 'quote' && P.rootReplyOf({ sendAs: [] }) === null, 'a row with no `placements` reads as the pre-enum contract: a reply in the list (quote) is its norm');
   const bc = runClamp(P);
   ok(bc.length === 0, `THE CLAMP (${CLAMP_ROWS.length} rows): a read-only adapter places nothing; a thread placement needs replyInto; thread+chat needs thread — whatever the declaration says; a row with none reads as chat, quote (+ thread where it replies into one)`, bc.join(' | '));
-  ok(J(P.PLACEMENTS) === J(['chat', 'quote', 'thread', 'thread+chat']) && J(P.THREAD_PLACEMENTS) === J(['thread', 'thread+chat']) && P.isThreadPlacement('thread+chat') && !P.isThreadPlacement('quote'), 'the closed set, the two that land inside a thread');
+  ok(J(P.PLACEMENTS) === J(['chat', 'quote', 'thread', 'thread+chat']) && J(P.THREAD_PLACEMENTS) === J(['thread', 'thread+chat']) && gateOf(P.isThreadPlacement('thread+chat')) && !P.isThreadPlacement('quote'), 'the closed set, the two that land inside a thread');
 }
 
 // ── ② THE SHAPE + THE READ ALIAS ─────────────────────────────────────────
@@ -170,7 +170,7 @@ console.log('② the shape (validateProposal), the stored alias (placementOf), t
   const base = { id: 'p-1', adapterId: 'a', convId: 'c', state: 'sent', sendAs: 'user', identity: { marking: 'none' } };
   const block = (x) => P.renderReceiptBlock(P.receiptFor({ ...base, ...x }), { adapterLabel: 'Lark', title: 'Ops' });
   const bQ = block({ placement: 'quote', replyTo: 'm' }), bT = block({ placement: 'thread', inThread: true, replyTo: 'm', threadKey: 'omt_1' }), bB = block({ placement: 'thread+chat', inThread: true, replyTo: 'm', threadKey: 'omt_1' }), bC = block({ placement: 'chat' }), bL = block({ inThread: true, replyTo: 'm', threadKey: 'omt_old' });
-  ok(/\nplaced as a quoted reply, in the chat\n/.test(bQ) && /\nplaced in a thread \(thread omt_1\)\n/.test(bT) && /\nplaced in a thread, and also shown in the chat \(thread omt_1\)\n/.test(bB) && !/placed/.test(bC) && /\nplaced in a thread \(thread omt_old\)\n/.test(bL), 'the RECEIPT says where the reply landed (a quote / a thread / a thread + the chat, the thread named); a plain message says nothing; a proposal stored before the enum still reads "in a thread"', J([bQ, bT, bB, bL].map((b) => b.split('\n')[2])));
+  ok(gateOf(/\nplaced as a quoted reply, in the chat\n/.test(bQ)) && gateOf(/\nplaced in a thread \(thread omt_1\)\n/.test(bT)) && gateOf(/\nplaced in a thread, and also shown in the chat \(thread omt_1\)\n/.test(bB)) && !/placed/.test(bC) && verdictOf(/\nplaced in a thread \(thread omt_old\)\n/.test(bL)), 'the RECEIPT says where the reply landed (a quote / a thread / a thread + the chat, the thread named); a plain message says nothing; a proposal stored before the enum still reads "in a thread"', J([bQ, bT, bB, bL].map((b) => b.split('\n')[2])));
   const rQ = P.receiptFor({ ...base, placement: 'quote', replyTo: 'm' }), rT = P.receiptFor({ ...base, placement: 'thread', inThread: true, replyTo: 'm', threadKey: 'omt_1' });
   ok(rQ.placement === 'quote' && !('inThread' in rQ) && rT.placement === 'thread' && rT.inThread === true && rT.threadKey === 'omt_1', 'the receipt STRUCTURE: `placement`, and `inThread` + `threadKey` beside a thread one (the alias older readers know)');
   const wh = P.renderReceiptBlock(P.receiptFor({ ...base, placement: 'thread', inThread: true, replyTo: 'm', threadKey: 'omt_secret' }), { withheld: true });
@@ -199,13 +199,13 @@ const censusFindings = (mods) => [...mods].filter(([, x]) => !(x.mod.caps.thread
   const esrc = engineSource(REPO);
   const builtin = /for \(const mod of \[([^\]]+)\]\)/.exec(esrc);
   const real = /^const MANIFESTS = Object\.freeze\(\[([^\]]+)\]/m.exec(read('src/channels/registry-list.js'));   // lane dc-channels-manifest: REAL_ADAPTERS derives from the vendor list
-  ok(kinds.length >= 6 && ['agents', 'fake-poll', 'fake-push', 'fake-scan', 'gmail', 'lark'].every((k) => kinds.includes(k)), `the census reads ${kinds.length} adapter modules under src/channels/: ${kinds.join(', ')}`);
-  ok(!!builtin && /fake\.fakePoll/.test(builtin[1]) && /agents/.test(builtin[1]) && /REAL_ADAPTERS/.test(builtin[1]) && !!real && /lark/.test(real[1]) && /gmail/.test(real[1]), 'the engine registers exactly these (its built-in loop + REAL_ADAPTERS name the fakes, agents, lark, gmail — all in the census)', builtin && builtin[1]);
+  ok(kinds.length >= 6 && verdictOf(['agents', 'fake-poll', 'fake-push', 'fake-scan', 'gmail', 'lark'].every((k) => kinds.includes(k))), `the census reads ${kinds.length} adapter modules under src/channels/: ${kinds.join(', ')}`);
+  ok(!!builtin && gateOf(/fake\.fakePoll/.test(builtin[1])) && gateOf(/agents/.test(builtin[1])) && gateOf(/REAL_ADAPTERS/.test(builtin[1])) && !!real && gateOf(/lark/.test(real[1])) && verdictOf(/gmail/.test(real[1])), 'the engine registers exactly these (its built-in loop + REAL_ADAPTERS name the fakes, agents, lark, gmail — all in the census)', builtin && builtin[1]);
   const missing = censusFindings(mods);
   ok(missing.length === 0, 'EVERY adapter declares `threads.placements` explicitly (no module rides the pre-enum reading)', missing.join(', '));
   const table = kinds.map((k) => { const c = mods.get(k).mod.caps; let e = null; try { CH.validateCaps(k, c); } catch (x) { e = x.message; } return { k, placements: P.placementsOf(c), declared: c.threads.placements, rootReply: c.threads.rootReply === undefined ? null : c.threads.rootReply, e }; });
   for (const r of table) console.log(`    ${r.k.padEnd(10)} placements ${J(r.placements).padEnd(40)} rootReply ${r.rootReply}`);
-  ok(table.every((r) => !r.e && J(r.placements) === J(r.declared.filter((x) => P.PLACEMENTS.includes(x)).sort((a, b) => P.PLACEMENTS.indexOf(a) - P.PLACEMENTS.indexOf(b)))), 'every declaration is legal (validateCaps) and COHERENT — the clamp removes nothing from any shipped row', J(table.filter((r) => r.e)));
+  ok(verdictOf(table.every((r) => !r.e && J(r.placements) === J(r.declared.filter((x) => P.PLACEMENTS.includes(x)).sort((a, b) => P.PLACEMENTS.indexOf(a) - P.PLACEMENTS.indexOf(b))))), 'every declaration is legal (validateCaps) and COHERENT — the clamp removes nothing from any shipped row', J(table.filter((r) => r.e)));
   ok(J(P.placementsOf(fake.fakePoll.caps)) === J(P.PLACEMENTS) && fake.fakePoll.caps.threads.rootReply === 'quote' && J(P.placementsOf(fake.fakePush.caps)) === '[]' && J(P.placementsOf(fake.fakeScan.caps)) === J(['chat', 'quote']), 'the FAKE declares all four (fake-poll — the vendor-free leg of every placement); the read-only push fake none; the scan fake a chat + a quote (a reply chain)');
   ok(J(P.placementsOf(lark.caps)) === J(['chat', 'quote', 'thread']) && P.rootReplyOf(lark.caps) === 'quote' && J(P.placementsOf(gmail.caps)) === J(['chat', 'quote']) && J(P.placementsOf(agents.caps)) === J(['chat']) && P.rootReplyOf(agents.caps) === null, 'Lark: chat / quote / thread, the norm a quote (threads are opt-in); Gmail: chat / quote; Agents: chat only (the ladder answers no message)');
   // THE CENSUS'S OWN CONTROL: a planted module with a threads row and no placements is FOUND
@@ -214,7 +214,7 @@ const censusFindings = (mods) => [...mods].filter(([, x]) => !(x.mod.caps.thread
   // validateCaps: every refusal, by name
   const good = { receive: 'poll', history: 'page', sendAs: ['user'], identityMarking: 'none' };
   const TH = { read: 'vendor', replyInto: true, listing: 'separate', placements: ['chat', 'quote', 'thread'], rootReply: 'quote' };
-  const refuse = (threads, sendAs, re, name) => { let e = null; try { CH.validateCaps('x', { ...good, sendAs: sendAs || good.sendAs, threads }); } catch (x) { e = x.message; } ok(!!e && re.test(e), name, e); };
+  const refuse = (threads, sendAs, re, name) => { let e = null; try { CH.validateCaps('x', { ...good, sendAs: sendAs || good.sendAs, threads }); } catch (x) { e = x.message; } ok(!!e && verdictOf(re.test(e)), name, e); };
   refuse({ ...TH, placements: 'chat' }, null, /placements must be an array/, 'validateCaps: placements that are not a list are refused');
   refuse({ ...TH, placements: ['chat', 'broadcast', 'thread'] }, null, /holds "broadcast"/, 'validateCaps: a placement outside the closed set is refused by name');
   refuse({ ...TH, placements: ['chat', 'chat', 'thread'] }, null, /twice/, 'validateCaps: a placement named twice is refused');
@@ -250,17 +250,17 @@ const contractHolds = (L) => !!(L.thread.o && L.thread.o.placement === 'thread' 
   && ['both', 'chatMsg', 'quoteNoMsg', 'bogus'].every((k) => L[k].e && L[k].e.code === 'not-supported' && !L[k].o));
 {
   const L = await sendLegs(CH);
-  ok(L.thread.o && L.thread.o.placement === 'thread' && L.thread.o.inThread === true && L.thread.o.replyTo === 'm', 'a declared `thread` reaches the module with `inThread: true` beside it (the alias an older module reads)', J(L.thread.o));
-  ok(L.quoteDefault.o && L.quoteDefault.o.placement === 'quote' && !('inThread' in L.quoteDefault.o) && L.alias.o && L.alias.o.placement === 'thread' && L.alias.o.inThread === true && L.chat.o && L.chat.o.placement === 'chat', 'a caller that names no placement is read the pre-enum way: a replyTo ⇒ quote, inThread ⇒ thread, nothing ⇒ chat — the module always receives one', J([L.quoteDefault.o, L.alias.o, L.chat.o]));
-  ok(['both', 'chatMsg', 'quoteNoMsg', 'bogus'].every((k) => L[k].e && L[k].e.code === 'not-supported' && !L[k].o) && /not declared by caps\.threads\.placements \(chat\|quote\|thread\)/.test(L.both.e.message), 'an undeclared placement, chat WITH a message, a reply placement WITHOUT one, an unknown word ⇒ `not-supported` BEFORE the module runs (it received nothing)', J(['both', 'chatMsg', 'quoteNoMsg', 'bogus'].map((k) => L[k].e && L[k].e.message)));
-  ok(contractHolds(L), 'the contract as ONE predicate (the control below judges the unguarded copy with it)');
+  ok(gateOf(L.thread.o) && L.thread.o.placement === 'thread' && L.thread.o.inThread === true && L.thread.o.replyTo === 'm', 'a declared `thread` reaches the module with `inThread: true` beside it (the alias an older module reads)', J(L.thread.o));
+  ok(gateOf(L.quoteDefault.o) && L.quoteDefault.o.placement === 'quote' && !('inThread' in L.quoteDefault.o) && gateOf(L.alias.o) && L.alias.o.placement === 'thread' && L.alias.o.inThread === true && gateOf(L.chat.o) && L.chat.o.placement === 'chat', 'a caller that names no placement is read the pre-enum way: a replyTo ⇒ quote, inThread ⇒ thread, nothing ⇒ chat — the module always receives one', J([L.quoteDefault.o, L.alias.o, L.chat.o]));
+  ok(gateOf(['both', 'chatMsg', 'quoteNoMsg', 'bogus'].every((k) => L[k].e && L[k].e.code === 'not-supported' && !L[k].o)) && verdictOf(/not declared by caps\.threads\.placements \(chat\|quote\|thread\)/.test(L.both.e.message)), 'an undeclared placement, chat WITH a message, a reply placement WITHOUT one, an unknown word ⇒ `not-supported` BEFORE the module runs (it received nothing)', J(['both', 'chatMsg', 'quoteNoMsg', 'bogus'].map((k) => L[k].e && L[k].e.message)));
+  ok(verdictOf(contractHolds(L)), 'the contract as ONE predicate (the control below judges the unguarded copy with it)');
   const ro = scriptedSend(CH, { kind: 'pl-readonly', sendAs: [], threads: { read: 'vendor', replyInto: false, listing: 'inline', placements: [] } });
   let roE = null; try { await ro.a.send('c', { text: 't', replyTo: 'm', placement: 'thread' }); } catch (x) { roE = x; }
-  ok(roE && roE.code === 'send-not-available', 'a READ-ONLY adapter still answers `send-not-available` first (the gate\'s word — never a placement refusal)', roE && roE.code);
+  ok(gateOf(roE) && roE.code === 'send-not-available', 'a READ-ONLY adapter still answers `send-not-available` first (the gate\'s word — never a placement refusal)', roE && roE.code);
   const fr = CH.createChannelRegistry(); fr.register(fake.fakePoll);
   const fa = fr.create('fake-poll', { id: 'fake-poll' }, {});
   const fs1 = await fa.send('fake-poll-ops', { text: 'broadcast me', idemKey: 'k-b', as: 'user', replyTo: 'x-1', placement: 'thread+chat' });
-  ok(fs1.ok && fs1.observed.placement === 'thread+chat' && fs1.observed.alsoInChat === true && !!fs1.observed.threadKey, 'the FAKE sends `thread+chat` (lands in the thread, echoed to the chat — Slack\'s reply_broadcast) and says so', J(fs1.observed));
+  ok(gateOf(fs1.ok) && fs1.observed.placement === 'thread+chat' && fs1.observed.alsoInChat === true && !!fs1.observed.threadKey, 'the FAKE sends `thread+chat` (lands in the thread, echoed to the chat — Slack\'s reply_broadcast) and says so', J(fs1.observed));
 }
 
 // ── ⑤ THE ENGINE ─────────────────────────────────────────────────────────
@@ -354,29 +354,29 @@ async function engineLeg(ENGm = ENG, tag = 'engine') {   // follow-up: an engine
 }
 {
   const R = await engineLeg();
-  ok(R.logged, 'setup: the three messages are in the log (a plain one, a vendor thread\'s root, a reply inside it)');
+  ok(verdictOf(R.logged), 'setup: the three messages are in the log (a plain one, a vendor thread\'s root, a reply inside it)');
   ok(R.sFilesBoth.ok === false && R.sFilesBoth.code === 'placement-not-offered' && R.sFilesBoth.why === 'with-files' && R.filesCreatedOnRefusal === 0 && R.sFilesThread.ok === true && R.sFilesThread.proposal.placement === 'thread',
     'B-09d2 THE ENGINE: a Slack-shaped reply with a file and thread+chat is refused at submit by name — NOTHING is created (no card offers an Approve that cannot send); the same file into the thread is filed', { both: R.sFilesBoth && { ok: R.sFilesBoth.ok, code: R.sFilesBoth.code, why: R.sFilesBoth.why, error: R.sFilesBoth.error }, created: R.filesCreatedOnRefusal, thread: R.sFilesThread && { ok: R.sFilesThread.ok, code: R.sFilesThread.code, error: R.sFilesThread.error } });
-  ok(R.apOld && R.apOld.ok === false && R.apOld.code === 'placement-not-offered' && R.apOld.why === 'with-files' && R.oldState === 'awaiting-approval' && R.oldSent === 0,
+  ok(gateOf(R.apOld) && R.apOld.ok === false && R.apOld.code === 'placement-not-offered' && R.apOld.why === 'with-files' && R.oldState === 'awaiting-approval' && R.oldSent === 0,
     'B-09d2 r1 THE APPROVAL: a proposal stored before the submit check (files + thread+chat) is refused at Approve by the same rule — nothing sent, it still waits', { ap: R.apOld && { ok: R.apOld.ok, code: R.apOld.code, why: R.apOld.why }, state: R.oldState, sent: R.oldSent });
-  ok(R.oldDoor === 'with-files' && R.apWithout && R.apWithout.ok !== false && R.withoutSent === 1 && R.withoutPlacement === 'thread+chat',
+  ok(R.oldDoor === 'with-files' && gateOf(R.apWithout) && R.apWithout.ok !== false && R.withoutSent === 1 && R.withoutPlacement === 'thread+chat',
     'B-09d2 follow-up THE OLD CARD\'S DOOR: such a proposal\'s view wears «Send without the file» (filesBlocked, why with-files) and that press sends the text alone, in its placement', { door: R.oldDoor, ap: R.apWithout && { ok: R.apWithout.ok, code: R.apWithout.code, error: R.apWithout.error }, sent: R.withoutSent, placement: R.withoutPlacement });
   // RED control (the follow-up): an engine copy without the Approve recheck SENDS the old proposal with its files
   { const esrc9 = engineSource(REPO), CHECK = "    if (stored0.length && !withoutFiles && plNow && c && !P.filePlacementsOf(c).includes(plNow)) return {";
     const MC9 = mutantCopies('placement-approve', REPO);
     const Rc = esrc9.split(CHECK).length === 2 ? await engineLeg(require(MC9.write('src/server/channels-engine.js', esrc9.replace(CHECK, '    if (false) return {'), 'approve-recheck')), 'engine-norecheck') : null;
-    ok(!!Rc && Rc.apOld && Rc.apOld.ok !== false && Rc.oldSent === 1, 'CONTROL B-09d2 the Approve recheck removed: the stored proposal is approved and SENT with its files in the thread and the chat (what Slack refuses after the Approve — the row\'s report)', Rc && { ap: Rc.apOld && { ok: Rc.apOld.ok, code: Rc.apOld.code }, sent: Rc.oldSent }); }
+    ok(!!Rc && gateOf(Rc.apOld) && Rc.apOld.ok !== false && Rc.oldSent === 1, 'CONTROL B-09d2 the Approve recheck removed: the stored proposal is approved and SENT with its files in the thread and the chat (what Slack refuses after the Approve — the row\'s report)', Rc && { ap: Rc.apOld && { ok: Rc.apOld.ok, code: Rc.apOld.code }, sent: Rc.oldSent }); }
   const q = R.quote.proposal, t = R.thread.proposal, pl = R.plain.proposal;
-  ok(R.quote.ok && q.placement === 'quote' && q.placementDefaulted === 'root' && !q.inThread && q.replyQuote && q.replyQuote.text === 'a plain question' && q.placementText === 'as a quoted reply, in the chat', 'Lark-shaped, --to alone on a message OUTSIDE a thread ⇒ stored `quote` (the vendor\'s norm, said as the default), the answered message quoted for the card', J(q && { placement: q.placement, d: q.placementDefaulted, rq: q.replyQuote }));
-  ok(R.thread.ok && t.placement === 'thread' && t.placementDefaulted === 'parent-in-thread' && t.inThread === true && t.threadKey === 'omt_t' && t.threadQuote && t.threadQuote.text === 'a reply inside' && t.replyQuote.text === 'a reply inside', '…on a message INSIDE a vendor thread ⇒ stored `thread` (it cannot be quoted from the main list), with inThread + threadKey + threadQuote as the alias', J(t && { placement: t.placement, d: t.placementDefaulted, key: t.threadKey }));
-  ok(R.plain.ok && pl.placement === 'chat' && !pl.replyQuote && !pl.inThread, 'no message ⇒ `chat`, nothing quoted');
-  ok(!R.both.ok && R.both.code === 'placement-not-offered' && R.both.why === 'not-declared' && J(R.both.offered) === J(['chat', 'quote', 'thread']) && /offered here: chat, quote, thread/.test(R.both.error) && !R.quoteT.ok && R.quoteT.code === 'placement-not-offered' && R.quoteT.why === 'parent-in-thread' && R.createdOnRefusal === 0, 'thread+chat on a Lark-shaped row / a quote of a threaded message ⇒ `placement-not-offered`, worded, and NOTHING is created (0 proposals)', J([R.both, R.quoteT, R.createdOnRefusal]));
-  ok(R.sRoot.ok && R.sRoot.proposal.placement === 'thread' && R.sRoot.proposal.placementDefaulted === 'root' && !R.sQuote.ok && R.sQuote.why === 'not-declared' && R.sBoth.ok && R.sBoth.proposal.placement === 'thread+chat' && R.sBoth.proposal.inThread === true, 'Slack-shaped: --to alone on a root ⇒ `thread` (the norm), a quote is not offered, thread+chat is stored (inThread beside it)', J([R.sRoot.proposal && R.sRoot.proposal.placement, R.sQuote.code, R.sBoth.proposal && R.sBoth.proposal.placement]));
-  ok(R.legacyView && R.legacyView.placement === 'thread' && R.legacyView.placementText === 'in a thread' && !('placement' in R.stored('p-legacy-1')), 'a proposal stored BEFORE the enum (only inThread) is READ as `thread` — the alias, in the outbox view', J(R.legacyView && { placement: R.legacyView.placement, text: R.legacyView.placementText }));
+  ok(gateOf(R.quote.ok) && q.placement === 'quote' && q.placementDefaulted === 'root' && !q.inThread && gateOf(q.replyQuote) && q.replyQuote.text === 'a plain question' && q.placementText === 'as a quoted reply, in the chat', 'Lark-shaped, --to alone on a message OUTSIDE a thread ⇒ stored `quote` (the vendor\'s norm, said as the default), the answered message quoted for the card', J(q && { placement: q.placement, d: q.placementDefaulted, rq: q.replyQuote }));
+  ok(gateOf(R.thread.ok) && t.placement === 'thread' && t.placementDefaulted === 'parent-in-thread' && t.inThread === true && t.threadKey === 'omt_t' && gateOf(t.threadQuote) && t.threadQuote.text === 'a reply inside' && t.replyQuote.text === 'a reply inside', '…on a message INSIDE a vendor thread ⇒ stored `thread` (it cannot be quoted from the main list), with inThread + threadKey + threadQuote as the alias', J(t && { placement: t.placement, d: t.placementDefaulted, key: t.threadKey }));
+  ok(gateOf(R.plain.ok) && pl.placement === 'chat' && !pl.replyQuote && !pl.inThread, 'no message ⇒ `chat`, nothing quoted');
+  ok(!R.both.ok && R.both.code === 'placement-not-offered' && R.both.why === 'not-declared' && J(R.both.offered) === J(['chat', 'quote', 'thread']) && gateOf(/offered here: chat, quote, thread/.test(R.both.error)) && !R.quoteT.ok && R.quoteT.code === 'placement-not-offered' && R.quoteT.why === 'parent-in-thread' && R.createdOnRefusal === 0, 'thread+chat on a Lark-shaped row / a quote of a threaded message ⇒ `placement-not-offered`, worded, and NOTHING is created (0 proposals)', J([R.both, R.quoteT, R.createdOnRefusal]));
+  ok(gateOf(R.sRoot.ok) && R.sRoot.proposal.placement === 'thread' && R.sRoot.proposal.placementDefaulted === 'root' && !R.sQuote.ok && R.sQuote.why === 'not-declared' && gateOf(R.sBoth.ok) && R.sBoth.proposal.placement === 'thread+chat' && R.sBoth.proposal.inThread === true, 'Slack-shaped: --to alone on a root ⇒ `thread` (the norm), a quote is not offered, thread+chat is stored (inThread beside it)', J([R.sRoot.proposal && R.sRoot.proposal.placement, R.sQuote.code, R.sBoth.proposal && R.sBoth.proposal.placement]));
+  ok(gateOf(R.legacyView) && R.legacyView.placement === 'thread' && R.legacyView.placementText === 'in a thread' && !('placement' in R.stored('p-legacy-1')), 'a proposal stored BEFORE the enum (only inThread) is READ as `thread` — the alias, in the outbox view', J(R.legacyView && { placement: R.legacyView.placement, text: R.legacyView.placementText }));
   const L = R.sent['pl-lark'] || [], S = R.sent['pl-slack'] || [];
   ok(J(L) === J([{ placement: 'quote', inThread: false, replyTo: 'm-1' }, { placement: 'thread', inThread: true, replyTo: 'm-r1' }, { placement: 'chat', inThread: false, replyTo: null }, { placement: 'thread', inThread: true, replyTo: 'm-r1' }]), 'the APPROVE hands the adapter the stored placement (quote / thread / chat) — and the legacy proposal goes out as `thread`', J(L));
   ok(J(S) === J([{ placement: 'thread+chat', inThread: true, replyTo: 'm-1' }, { placement: 'thread', inThread: true, replyTo: 'm-1' }, { placement: 'thread+chat', inThread: true, replyTo: 'm-1' }]), '…and the Slack-shaped adapter receives the old card\'s text alone in its own placement (`thread+chat`, «Send without the file» — the follow-up), then `thread` and `thread+chat`', J(S));
-  ok(/placed as a quoted reply, in the chat/.test(R.receipts) && /placed in a thread \(thread omt_t\)/.test(R.receipts) && /placed in a thread, and also shown in the chat \(thread omt_t\)/.test(R.receipts), 'the RECEIPT the drafter is handed says where each reply landed', R.receipts.slice(0, 600));
+  ok(gateOf(/placed as a quoted reply, in the chat/.test(R.receipts)) && gateOf(/placed in a thread \(thread omt_t\)/.test(R.receipts)) && verdictOf(/placed in a thread, and also shown in the chat \(thread omt_t\)/.test(R.receipts)), 'the RECEIPT the drafter is handed says where each reply landed', R.receipts.slice(0, 600));
   for (const e of engines) try { e.stop(); } catch { }
 }
 
@@ -401,14 +401,14 @@ console.log('⑥ the words: the card, the refusal, the touch row — zh / ja / e
   const WF = { why: 'with-files', placement: 'thread+chat' };
   const wf = [P.placementRefusalText(WF, { t: tFor(null, keys) }), P.placementRefusalText(WF, { t: tFor(zh, keys) }), P.placementRefusalText(WF, { t: tFor(ja, keys) })];
   ok(wf[0] === 'Files cannot go with this kind of reply here — send it without the file, or reject it' && wf[1] !== wf[0] && wf[2] !== wf[0] && P.placementRefusalText({ why: 'with-files', placement: 'quote' }, { t: tFor(null, keys) }) === wf[0]
-    && read('src/lib/channel-outbox.js').includes("p.filesBlocked.why === 'with-files' ? t('Files cannot go with this kind of reply here — send it without the file, or reject it') :"),
+    && verdictOf(read('src/lib/channel-outbox.js').includes("p.filesBlocked.why === 'with-files' ? t('Files cannot go with this kind of reply here — send it without the file, or reject it') :")),
     'B-09d2 the cure THE WORDS: the with-files toast and the old card\'s note say the same true words for ANY placement, naming only the doors the card draws («send it without the file, or reject it») — translated in zh and ja', wf);
   const missing = [...keys].filter((k) => !zh.has(k) || !ja.has(k));
   ok(missing.length === 0 && keys.size >= 16, `every word the placement surfaces draw is in BOTH dictionaries (${keys.size} keys: the card line with and without a quote, the refusal toast per why, the touch row per placement)`, missing.join(' | '));
-  ok(en.card[0][1] === null && en.card[0][2] === null && /^Quoted reply — to Ada: "周会改到几点？"$/.test(en.card[1][1]) && /^Reply in thread — under Ada/.test(en.card[2][1]) && /^Reply in thread, also shown in the chat — under Ada/.test(en.card[3][1]) && en.card[1][2] === 'Quoted reply, shown in the chat', 'the CARD line (en): a quote / a thread / a thread + the chat, each with the answered message; a plain message draws NO line', J(en.card));
-  ok(zhW.card[1][1].startsWith('引用回复') && zhW.card[3][1].includes('同时显示在聊天中') && jaW.card[1][1].startsWith('引用返信') && jaW.card[2][1].startsWith('スレッドで返信') && zhW.card.every(([, a], i) => !a || a !== en.card[i][1]), 'the card line in zh and ja is TRANSLATED (never the English)', J([zhW.card[1][1], jaW.card[1][1]]));
-  ok(en.refusals[4] === 'That message is inside a thread — a reply to it goes in the thread' && new Set(en.refusals.slice(0, 7)).size === 7 && en.refusals[7] === en.refusals[8] && !en.refusals.slice(0, 7).includes(en.refusals[7]) && zhW.refusals.every((x, i) => x !== en.refusals[i]) && jaW.refusals.every((x, i) => x !== en.refusals[i]), 'the REFUSAL toast has its own sentence per why / placement (with-files: ONE sentence for any placement — the cure), translated in zh and ja', J(zhW.refusals));
-  ok(J(en.touch) === J(['drafted a message', 'drafted a quoted reply', 'drafted a reply in a thread', 'drafted a reply in a thread, also shown in the chat']) && zhW.touch.every((x, i) => x !== en.touch[i]) && jaW.touch.every((x, i) => x !== en.touch[i]), 'the TOOL-CARD TOUCH row says where the drafted reply lands, per placement, in three languages', J(zhW.touch));
+  ok(en.card[0][1] === null && en.card[0][2] === null && gateOf(/^Quoted reply — to Ada: "周会改到几点？"$/.test(en.card[1][1])) && gateOf(/^Reply in thread — under Ada/.test(en.card[2][1])) && gateOf(/^Reply in thread, also shown in the chat — under Ada/.test(en.card[3][1])) && en.card[1][2] === 'Quoted reply, shown in the chat', 'the CARD line (en): a quote / a thread / a thread + the chat, each with the answered message; a plain message draws NO line', J(en.card));
+  ok(gateOf(zhW.card[1][1].startsWith('引用回复')) && gateOf(zhW.card[3][1].includes('同时显示在聊天中')) && gateOf(jaW.card[1][1].startsWith('引用返信')) && gateOf(jaW.card[2][1].startsWith('スレッドで返信')) && verdictOf(zhW.card.every(([, a], i) => !a || a !== en.card[i][1])), 'the card line in zh and ja is TRANSLATED (never the English)', J([zhW.card[1][1], jaW.card[1][1]]));
+  ok(en.refusals[4] === 'That message is inside a thread — a reply to it goes in the thread' && new Set(en.refusals.slice(0, 7)).size === 7 && en.refusals[7] === en.refusals[8] && !en.refusals.slice(0, 7).includes(en.refusals[7]) && gateOf(zhW.refusals.every((x, i) => x !== en.refusals[i])) && verdictOf(jaW.refusals.every((x, i) => x !== en.refusals[i])), 'the REFUSAL toast has its own sentence per why / placement (with-files: ONE sentence for any placement — the cure), translated in zh and ja', J(zhW.refusals));
+  ok(J(en.touch) === J(['drafted a message', 'drafted a quoted reply', 'drafted a reply in a thread', 'drafted a reply in a thread, also shown in the chat']) && gateOf(zhW.touch.every((x, i) => x !== en.touch[i])) && verdictOf(jaW.touch.every((x, i) => x !== en.touch[i])), 'the TOOL-CARD TOUCH row says where the drafted reply lands, per placement, in three languages', J(zhW.touch));
   ok(J(T.TOUCH_PLACEMENTS) === J(P.PLACEMENTS) && !('placement' in T.normalizeTouch({ op: 'reply', adapterId: 'a', convId: 'c', at: 1, placement: 'broadcast' })) && !('placement' in T.normalizeTouch({ op: 'read', adapterId: 'a', convId: 'c', at: 1, placement: 'thread' })) && T.rowWords(T.foldTouches([T.normalizeTouch({ op: 'reply', adapterId: 'a', convId: 'c', at: 1 })])[0], (s) => s) === 'drafted a reply', 'the touch record\'s closed set IS the policy\'s (a word outside it is dropped, a read carries none); a touch from before the placement still says "drafted a reply"');
   // WIRING PINS (the UNSTAGED-WIRING lesson): every surface CALLS the placement
   const PINS = [
@@ -439,7 +439,7 @@ const M = mutantCopies('placement', REPO);
   const PL3 = "    if (inThread && offered.includes('thread')) { placement = 'thread'; rule = 'parent-in-thread'; }";
   const c1 = M.load(POLICY, cut(SRC, PL3, '    if (false) { }', 'PL3'), 'pl3-blind');
   const b1 = runTable(c1);
-  ok(b1.length >= 3 && b1.some((x) => x.startsWith('lark/thread/null')) && b1.some((x) => x.startsWith('slack/thread/null')), `CONTROL PL3 blind to the parent (always the root norm): ${b1.length} rows red — a reply to a threaded Lark message would be "quoted"`, b1.join(' | '));
+  ok(b1.length >= 3 && gateOf(b1.some((x) => x.startsWith('lark/thread/null'))) && verdictOf(b1.some((x) => x.startsWith('slack/thread/null'))), `CONTROL PL3 blind to the parent (always the root norm): ${b1.length} rows red — a reply to a threaded Lark message would be "quoted"`, b1.join(' | '));
   // B-09d2: the files check removed ⇒ a Slack reply with files in the thread AND the chat passes the verdict (the base's bug)
   const F9C = "  if (!v.ok || !files) return v;";
   const c9 = M.load(POLICY, cut(SRC, F9C, '  return v;', 'with-files'), 'with-files');
@@ -448,11 +448,11 @@ const M = mutantCopies('placement', REPO);
   const PL5 = "  if (placement === 'quote' && inThread) return refuse(";
   const c2 = M.load(POLICY, cut(SRC, PL5, '  if (false) return refuse(', 'PL5'), 'pl5-gone');
   const b2 = runTable(c2);
-  ok(b2.some((x) => x.startsWith('lark/thread/quote')) && b2.some((x) => x.startsWith('fake/thread/quote')), `CONTROL PL5 removed (a quote of a threaded message allowed): ${b2.length} rows red`, b2.join(' | '));
+  ok(gateOf(b2.some((x) => x.startsWith('lark/thread/quote'))) && verdictOf(b2.some((x) => x.startsWith('fake/thread/quote'))), `CONTROL PL5 removed (a quote of a threaded message allowed): ${b2.length} rows red`, b2.join(' | '));
   const PL4 = "  if (!offered.includes(placement)) return refuse(placement, 'not-declared',";
   const c3 = M.load(POLICY, cut(SRC, PL4, "  if (false) return refuse(placement, 'not-declared',", 'PL4'), 'pl4-gone');
   const b3 = runTable(c3);
-  ok(b3.some((x) => x.startsWith('lark/root/thread+chat')) && b3.some((x) => x.startsWith('slack/root/quote')), `CONTROL PL4 removed (an undeclared placement accepted): ${b3.length} rows red`, b3.join(' | '));
+  ok(gateOf(b3.some((x) => x.startsWith('lark/root/thread+chat'))) && verdictOf(b3.some((x) => x.startsWith('slack/root/quote'))), `CONTROL PL4 removed (an undeclared placement accepted): ${b3.length} rows red`, b3.join(' | '));
   const CLAMP = "  return PLACEMENTS.filter((x) => declared.includes(x) && (!isThreadPlacement(x) || replyInto) && (x !== 'thread+chat' || declared.includes('thread')));";
   const RO = '  if (!(Array.isArray(c.sendAs) && c.sendAs.length)) return [];';
   const c4 = M.load(POLICY, cut(cut(SRC, CLAMP, '  return PLACEMENTS.filter((x) => declared.includes(x));', 'clamp'), RO, '', 'ro'), 'unclamped');
@@ -465,8 +465,8 @@ const M = mutantCopies('placement', REPO);
   if (G0 < 0 || G1 < 0) throw new Error('control send-guard: the guarded send is gone');
   const c5 = M.load('src/channels/index.js', ISRC.slice(0, G0) + "      send: gated('send', impl.send && impl.send.bind(impl)),\n" + ISRC.slice(G1 + '      })(),'.length + 1), 'unguarded-send');
   const L5 = await sendLegs(c5);
-  ok(!contractHolds(L5) && L5.both.o && L5.both.o.placement === 'thread+chat', 'CONTROL the registry\'s send without its guard: the module RECEIVES an undeclared thread+chat (the contract predicate goes red)', J(L5.both));
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'placement: ' })) ok(r.pass, r.name, r.detail);
+  ok(!contractHolds(L5) && gateOf(L5.both.o) && L5.both.o.placement === 'thread+chat', 'CONTROL the registry\'s send without its guard: the module RECEIVES an undeclared thread+chat (the contract predicate goes red)', J(L5.both));
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'placement: ' })) ok(verdictOf(r.pass), r.name, r.detail);
 }
 
 // ── design 012 (Slack S1): THE FIXTURE IS THE DECLARATION — the Slack row this table judges equals the shipped adapter's
@@ -478,4 +478,4 @@ const M = mutantCopies('placement', REPO);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+process.exit(fail ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';

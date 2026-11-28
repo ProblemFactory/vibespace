@@ -24,7 +24,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-wired-'));
 const AGENTD_ROOT = path.join(tmp, 'agentd');
 
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // build bundles
@@ -84,8 +84,8 @@ w.outText = '';
 w.stdout.on('data', (d) => { w.outText += d.toString(); });
 w.stderr.on('data', () => {});
 await sleep(3500);
-check('ticks flow through the whole chain', w.outText.includes('"type":"tick"') && w.outText.includes('"n":5'), JSON.stringify(w.outText.slice(-150)));
-check('wrapper reports remote connected', w.outText.includes('"_remote_state"') && w.outText.includes('"connected"'), '');
+check('ticks flow through the whole chain', gateOf(w.outText.includes('"type":"tick"')) && verdictOf(w.outText.includes('"n":5')), JSON.stringify(w.outText.slice(-150)));
+check('wrapper reports remote connected', gateOf(w.outText.includes('"_remote_state"')) && verdictOf(w.outText.includes('"connected"')), '');
 
 console.log('— kill the attach bridge (ssh drop): wrapper auto-reconnects by offset —');
 const meta0 = JSON.parse(fs.readFileSync(metaF, 'utf8'));
@@ -93,12 +93,12 @@ process.kill(meta0.childPid, 'SIGKILL'); // the attach bridge = the "ssh"
 await sleep(3500); // wrapper backoff #1 = 1s, respawn, reattach
 const daemonSessMeta = JSON.parse(fs.readFileSync(path.join(stateDir, 'sessions', 'wired-1.json'), 'utf8'));
 let stubAlive = true; try { process.kill(daemonSessMeta.childPid, 0); } catch { stubAlive = false; }
-check('stub claude SURVIVED the bridge kill (daemon-owned)', stubAlive, '');
+check('stub claude SURVIVED the bridge kill (daemon-owned)', verdictOf(stubAlive), '');
 // send input through the reconnected chain (wrapper stdin → attach → fifo)
 w.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'hello-after-drop' }] } }) + '\n');
 await sleep(1200);
 check('the respawned attach asked the hub for the link token again (memory only — 2 asks, the config holds none)', linkAsks >= 2 && !fs.readFileSync(cfgFile, 'utf8').includes(TOKEN), `asks: ${linkAsks}`);
-check('input flows post-reconnect (echo arrives)', w.outText.includes('hello-after-drop') && w.outText.includes('"type":"echo"'), JSON.stringify(w.outText.slice(-200)));
+check('input flows post-reconnect (echo arrives)', gateOf(w.outText.includes('hello-after-drop')) && verdictOf(w.outText.includes('"type":"echo"')), JSON.stringify(w.outText.slice(-200)));
 // tick continuity: all tick numbers seen exactly once across the drop
 const ticks = [...w.outText.matchAll(/"type":"tick","n":(\d+)/g)].map((m) => Number(m[1]));
 const uniq = new Set(ticks);
@@ -114,4 +114,4 @@ endDaemonsAndWait(path.dirname(stateDir));
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd WIRED-CHAIN tests passed');
-process.exit(0);
+process.exit(0); import { verdictOf, gateOf } from './lib/check.mjs';

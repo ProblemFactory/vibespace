@@ -25,7 +25,7 @@ let failed = 0;
 // r4266 (the hosted run of 2.369.419: this row ran out its budget twice with no line to place it): its STAGES' times, seconds since the
 // process started — the worktree built, the server answering, each page ready — so that a slow run is placed by one read
 const stage = (what) => console.log(`  · ${process.uptime().toFixed(1)} s — ${what}`);
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
+const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check: its condition is a ${typeof c}, not a boolean — the arguments are swapped, or a value stands where a comparison belongs`); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 250) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const PNG_DIR = process.env.VIBESPACE_AWNS_PNG_DIR || null;
@@ -138,29 +138,29 @@ try {
     window.__ed = ed.id; window.__ta = ta; window.__a = a.id;
     return { d1: window.__d1, d2: window.__d2, aDesk: a._desktopId, bDesk: b._desktopId, bHidden: !!b._hiddenByDesktop, active: app.wm.activeWindowId === ed.id, caret: document.activeElement === ta };
   })()`);
-  check('desk 1: chat A behind the editor, which is active and holds the caret; chat B on desk 2', setup && setup.active && setup.caret && setup.aDesk === setup.d1 && setup.bDesk === setup.d2 && setup.bHidden, setup);
+  check('desk 1: chat A behind the editor, which is active and holds the caret; chat B on desk 2', gateOf(setup) && gateOf(setup.active) && gateOf(setup.caret) && setup.aDesk === setup.d1 && setup.bDesk === setup.d2 && verdictOf(setup.bHidden), setup);
   const aBox = () => D.ev(`(() => { const r = app.wm.windows.get(window.__a).content.getBoundingClientRect(); /* the chat's PANE: a split keeps the frame, halves the pane */ return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(','); })()`);
   const box0 = await aBox();
   await D.ev(fire(SA, 'da-awns1'));
   await sleep(3600); // past the pane's 3 s pending (unseen) grace — a pane, if any, would be painted by now
   const f1 = await D.ev(facts('da-awns1'));
   const a1 = await D.ev(`(() => { const a = app.wm.windows.get(window.__a); const item = document.querySelector('.taskbar-item[data-win-id="' + a.id + '"]'); return { arrived: a.element.classList.contains('window-arrived'), itemArrived: !!(item && item.classList.contains('arrived')) }; })()`);
-  check('an agent browser for chat A — SHOWING on desk 1, the person in the editor ⇒ NO pane opens (the base placed one beside chat A)', f1 && !f1.exists, f1);
-  check('… chat A\'s pane keeps its exact box (nothing re-arranged under the person\'s hand; the base split it) and the editor still holds the active window and the caret', f1 && f1.active === f1.ed && f1.caret && (await aBox()) === box0, { f1, box0 });
-  check('… chat A\'s taskbar entry carries the badge (window-arrived ⇒ .taskbar-item.arrived) — its window chip opens the browser', a1 && a1.arrived && a1.itemArrived, a1);
+  check('an agent browser for chat A — SHOWING on desk 1, the person in the editor ⇒ NO pane opens (the base placed one beside chat A)', gateOf(f1) && !f1.exists, f1);
+  check('… chat A\'s pane keeps its exact box (nothing re-arranged under the person\'s hand; the base split it) and the editor still holds the active window and the caret', gateOf(f1) && f1.active === f1.ed && gateOf(f1.caret) && (await aBox()) === box0, { f1, box0 });
+  check('… chat A\'s taskbar entry carries the badge (window-arrived ⇒ .taskbar-item.arrived) — its window chip opens the browser', gateOf(a1) && gateOf(a1.arrived) && verdictOf(a1.itemArrived), a1);
   await D.ev(fire(SB, 'da-awns2'));
   await sleep(800);
   const f2 = await D.ev(facts('da-awns2'));
   const d2 = await D.ev('window.__d2'), d1 = await D.ev('window.__d1');
-  check('an agent browser for chat B (desk 2) ⇒ NO desktop switch (desk 1 still shown), the pane lives on desk 2, hidden', f2 && f2.exists && f2.desk === d1 && f2.winDesk === d2 && f2.hiddenByDesk, f2);
-  check('… the editor still active with the caret', f2 && f2.active === f2.ed && f2.caret, f2);
+  check('an agent browser for chat B (desk 2) ⇒ NO desktop switch (desk 1 still shown), the pane lives on desk 2, hidden', gateOf(f2) && gateOf(f2.exists) && f2.desk === d1 && f2.winDesk === d2 && verdictOf(f2.hiddenByDesk), f2);
+  check('… the editor still active with the caret', gateOf(f2) && f2.active === f2.ed && verdictOf(f2.caret), f2);
   // the person IN chat A (its window the active one) ⇒ the agent's browser is born beside it, never focused
   await D.ev('(app.wm.focusWindow(window.__a), true)');
   await D.ev(fire(SA, 'da-awns5'));
   await sleep(3600);
   const f5 = await D.ev(facts('da-awns5'));
-  check('the person IN chat A ⇒ the agent browser\'s pane is born BESIDE chat A (in its chain), chat A stays the active window', f5 && f5.exists && f5.inChain && f5.chainHost === (await D.ev('window.__a')) && f5.active === f5.chainHost, f5);
-  check('… its taskbar entry pulses (window-arrived ⇒ .taskbar-item.arrived)', f5 && f5.arrived && f5.itemArrived, f5);
+  check('the person IN chat A ⇒ the agent browser\'s pane is born BESIDE chat A (in its chain), chat A stays the active window', gateOf(f5) && gateOf(f5.exists) && gateOf(f5.inChain) && f5.chainHost === (await D.ev('window.__a')) && f5.active === f5.chainHost, f5);
+  check('… its taskbar entry pulses (window-arrived ⇒ .taskbar-item.arrived)', gateOf(f5) && gateOf(f5.arrived) && verdictOf(f5.itemArrived), f5);
   const deskPng = await shot(D.S, 'desk.png');
   if (deskPng) console.log(`  · ${deskPng}`);
   // the person goes back to the editor, then presses chat A's taskbar entry ⇒ front + focus, as any window
@@ -169,7 +169,7 @@ try {
   if (box) { for (const type of ['mousePressed', 'mouseReleased']) await D.S('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 }); }
   await sleep(500);
   const f3 = await D.ev(facts('da-awns5'));
-  check('the person presses the taskbar entry ⇒ that group comes to the front and takes the focus; the pulse is spent', !!box && f3 && f3.active !== f3.ed && f3.zFrame > f3.zEd && !f3.arrived && !f3.itemArrived, { box, f3 });
+  check('the person presses the taskbar entry ⇒ that group comes to the front and takes the focus; the pulse is spent', !!box && gateOf(f3) && f3.active !== f3.ed && f3.zFrame > f3.zEd && !f3.arrived && !f3.itemArrived, { box, f3 });
 
   console.log('phone 390 — the shown window stays');
   const P = await newPage(390, 844, true, [[SA, 'chat-a']]);
@@ -177,9 +177,9 @@ try {
   await P.ev(fire(SA, 'da-awns4'));
   await sleep(3600);
   const p1 = await P.ev(`(() => { const w = [...app.wm.windows.values()].find((x) => x._desktopAppId === 'da-awns4'); const r = w && w.element.getBoundingClientRect(); const cs = w && getComputedStyle(w.element); return { exists: !!w, active: app.wm.activeWindowId, shown: !!(w && cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0), titleArrived: document.getElementById('mobile-nav-title')?.classList.contains('arrived') }; })()`);
-  check('phone: the chat was the shown window', !!P.ready && p0 && p0.active === p0.chat, p0);
-  check('phone: an agent browser ⇒ the window exists, the shown window is UNCHANGED, the new one is not shown', p1 && p1.exists && p1.active === p0.active && !p1.shown, p1);
-  check('phone: the title carries the badge (it is there)', p1 && p1.titleArrived, p1);
+  check('phone: the chat was the shown window', !!P.ready && gateOf(p0) && p0.active === p0.chat, p0);
+  check('phone: an agent browser ⇒ the window exists, the shown window is UNCHANGED, the new one is not shown', gateOf(p1) && gateOf(p1.exists) && p1.active === p0.active && !p1.shown, p1);
+  check('phone: the title carries the badge (it is there)', gateOf(p1) && verdictOf(p1.titleArrived), p1);
   const phonePng = await shot(P.S, 'phone.png');
   if (phonePng) console.log(`  · ${phonePng}`);
 
@@ -189,7 +189,7 @@ try {
   await D.ev(fire(SA, 'da-awns3'));
   await sleep(800);
   const f4 = await D.ev(facts('da-awns3'));
-  check('setting ON: the editor had the focus, then the agent\'s browser came to the front and took it (D3\'s old answer)', pre && pre.active && pre.caret && pre.on === true && f4 && f4.exists && f4.active !== f4.ed && f4.zFrame > f4.zEd, { pre, f4 });
+  check('setting ON: the editor had the focus, then the agent\'s browser came to the front and took it (D3\'s old answer)', gateOf(pre) && gateOf(pre.active) && gateOf(pre.caret) && pre.on === true && gateOf(f4) && gateOf(f4.exists) && f4.active !== f4.ed && f4.zFrame > f4.zEd, { pre, f4 });
   await D.ev(`(app.settings.set('desktop.agentWindowsFront', false), true)`);
   ws.close(); cdp.close();
 } catch (e) { failed++; console.error(`  ✗ the suite threw: ${e && e.stack}`); console.error(srvLog.join('').slice(-1500)); }
@@ -200,4 +200,4 @@ try {
   check(`the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`, lit.offenders.length === 0, JSON.stringify(lit.offenders.slice(0, 3)));
 }
 console.log(failed ? `\nFAIL (${failed} failed)` : '\nALL PASS');
-process.exit(failed ? 1 : 0);
+process.exit(failed ? 1 : 0); import { verdictOf, gateOf } from './lib/check.mjs';
